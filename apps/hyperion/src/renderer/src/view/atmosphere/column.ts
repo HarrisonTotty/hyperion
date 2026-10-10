@@ -175,6 +175,14 @@ const LINEAR_TRIATOMIC_CP_OVER_R = 13 / 3;
  * confidence: NIST-JANAF's 38.617 J mol⁻¹ K⁻¹ at 298.15 K (Chase 1998, table N-026) gives 0.215,
  * 7% below.
  *
+ * CO takes 2 ÷ 7 (N = 5; NIST-JANAF's 29.149 J mol⁻¹ K⁻¹ at 298.15 K, Chase 1998's Shomate fit
+ * as the NIST Chemistry WebBook gives it, makes 0.285) and H₂S 1 ÷ 4 (N = 6; 34.197, 0.243).
+ * C₂H₆ takes 1 ÷ 4 too,
+ * three rotational degrees, at low confidence: that is its c_p near 100 K (35.70 J mol⁻¹ K⁻¹,
+ * Gurvich, Veyts et al. 1989, through the WebBook, 0.233), where ethane-bearing atmospheres such as
+ * Titan's lie, while by 298 K its torsion and bends lift c_p to 52.49, R ÷ c_p 0.158, which no fixed
+ * N follows.
+ *
  * A temperature-dependent c_p is not used: it breaks the constant-β form, and Robinson and Catling
  * calibrated α against their constant γ. H₂'s rotation, in part frozen below about 150 K, is a
  * recorded caveat (Design note 3).
@@ -199,6 +207,12 @@ export const GAS_HEAT_CAPACITY: Readonly<Record<Gas, HeatCapacity>> = {
     overR: LINEAR_TRIATOMIC_CP_OVER_R,
     source: "CO₂'s γ = 1.3, the same linear triatomic, medium confidence (NIST-JANAF: 7% higher)",
   },
+  CO: ofDegrees(5, "a diatomic molecule"),
+  H2S: ofDegrees(6, "a bent molecule"),
+  C2H6: ofDegrees(
+    6,
+    "a non-linear molecule, its c_p near 100 K, low confidence (by 298 K its torsion and bends raise c_p 47% above that)",
+  ),
 };
 
 /**

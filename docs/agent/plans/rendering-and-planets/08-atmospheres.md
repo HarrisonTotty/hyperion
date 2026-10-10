@@ -235,7 +235,7 @@ export const ONE_BAND_BELOW = 0.02; // ln(s_max ÷ s_min) under which one band s
 // Keys are plan 14's substance keys (P14.T49.a; decision-composition): a definite species by its
 // formula in chemical case, a material by a lowercase name. No wire-facing type is narrower than
 // `string`, and no code switches exhaustively on a key.
-export const GASES: readonly [...]; // the species with measured dispersions (R08.T3.b's 13)
+export const GASES: readonly [...]; // the species with measured dispersions (R08.T3.b's 13; 16 since its follow-up)
 export type Gas = (typeof GASES)[number];
 export interface GasFraction { readonly species: string; readonly moleFraction: number }
 export type GasFractions = ReadonlyArray<GasFraction>; // largest first, Σ = 1 within 10⁻⁹
@@ -781,29 +781,36 @@ Names are those the owning plans give; the owning plan is authoritative.
    gas takes the same route:
    - a measured n − 1 at the formula's own stated temperature and pressure;
    - Lorentz–Lorenz to that state's number density, the real gas's N_ref = p ÷ (Z k_B T), with Z
-     from the NIST Chemistry WebBook's densities at the state;
+     from the NIST Chemistry WebBook's densities at the state, or, where the paper reduced its
+     readings itself (as an ideal gas, or to a stated density), the Z of that reduction (T3.b's
+     follow-up);
    - σ = 24π³/(λ⁴N²)·((n² − 1)/(n² + 2))²·F_K.
 
    The table is R08.T3.b's as built (updated 2026-10-09; Risks, "Deviations in T3.b, as built",
-   holds each correction's reason and the items still open):
+   holds each correction's reason and the items still open), with T3.b's follow-up (updated
+   2026-10-10: NH₃'s theoretic density and King factor, and CO, H₂S and C₂H₆ promoted from T3.c's
+   estimates; Risks, "Deviations in T3.b's follow-up, as built"):
 
-   | Gas        | n − 1                                                                                                                                                               | King factor                                                                                                                                                     | Reference state      |
-   | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
-   | Dry air    | Peck and Reeder 1972, JOSA 62, 958 (the Earth check only)                                                                                                           | Bates 1984 per gas, mixed after Bodhaine et al. 1999                                                                                                            | 288.15 K             |
-   | N₂         | Peck and Khanna 1966, JOSA 56, 1059, their own 15 °C form, from 468 nm; below it, Bates 1984's ultraviolet branch, as Sneep and Ubachs 2005 (eq. 11) print it       | Bates 1984                                                                                                                                                      | 288.15 K             |
-   | O₂         | Křen 2011, Appl. Opt. 50, 6484, refitting Zhang, Lu and Wang 2008, Appl. Opt. 47, 3143; Zhang's own eq. 20, which holds only over 740–860 nm, the cross-check there | Bates 1984                                                                                                                                                      | 293.15 K             |
-   | Ar         | Peck and Fisher 1964, JOSA 54, 1362                                                                                                                                 | 1                                                                                                                                                               | 288.15 K             |
-   | CO₂        | Bideau-Mehu et al. 1973, Opt. Commun. 9, 432, at 0 °C, as Sneep and Ubachs 2005 (JQSRT 92, 293, eq. 13) correct it                                                  | Sneep and Ubachs 2005, eq. 14 (Alms, Burnham and Flygare 1975)                                                                                                  | 273.15 K             |
-   | CH₄        | He, Fang, Shoshanim, Brown and Rudich 2021, Atmos. Chem. Phys. 21, 14927, eq. 10 (ideal N, so Z = 1)                                                                | 1, a spherical top                                                                                                                                              | 288.15 K             |
-   | H₂O        | Ciddor 1996, Appl. Opt. 35, 1566, Eq. 3                                                                                                                             | 1.001, from Murphy 1977, J. Chem. Phys. 67, 5877 (ρₚ = (3.0 ± 1.4) × 10⁻⁴)                                                                                      | 293.15 K, 1,333 Pa   |
-   | NH₃        | C. and M. Cuthbertson 1914, Phil. Trans. R. Soc. A 213, 1                                                                                                           | 1, provisional, probably about 1% low until Hohm 1994's anisotropy is read                                                                                      | 273.15 K             |
-   | H₂         | Peck and Huang 1977, JOSA 67, 1550                                                                                                                                  | Raj, Hamaguchi and Witek 2018, J. Chem. Phys. 148, 104308, ab initio (1.0322 at 550 nm); Dalgarno and Williams 1962, which runs 6.5% low, is only a cross-check | 273.15 K             |
-   | He         | Mansfield and Peck 1969, JOSA 59, 199; Kurucz 1970's form "from Dalgarno (1962)" (SAO Spec. Rep. 309, §5.8) agrees to 0.5%                                          | 1                                                                                                                                                               | 273.15 K             |
-   | Ne, Kr, Xe | Börzsönyi, Heiner, Kalashnikov, Kovács and Osvay 2008, Appl. Opt. 47, 4856, Sellmeier forms (their Table 2, as refractiveindex.info carries them)                   | 1                                                                                                                                                               | 273.15 K, 1,000 mbar |
-   | N₂O        | He et al. 2021, eq. 9 (ideal N, so Z = 1)                                                                                                                           | Sneep and Ubachs 2005, eq. 19 (Alms et al. 1975)                                                                                                                | 288.15 K             |
+   | Gas        | n − 1                                                                                                                                                               | King factor                                                                                                                                                      | Reference state      |
+   | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+   | Dry air    | Peck and Reeder 1972, JOSA 62, 958 (the Earth check only)                                                                                                           | Bates 1984 per gas, mixed after Bodhaine et al. 1999                                                                                                             | 288.15 K             |
+   | N₂         | Peck and Khanna 1966, JOSA 56, 1059, their own 15 °C form, from 468 nm; below it, Bates 1984's ultraviolet branch, as Sneep and Ubachs 2005 (eq. 11) print it       | Bates 1984                                                                                                                                                       | 288.15 K             |
+   | O₂         | Křen 2011, Appl. Opt. 50, 6484, refitting Zhang, Lu and Wang 2008, Appl. Opt. 47, 3143; Zhang's own eq. 20, which holds only over 740–860 nm, the cross-check there | Bates 1984                                                                                                                                                       | 293.15 K             |
+   | Ar         | Peck and Fisher 1964, JOSA 54, 1362                                                                                                                                 | 1                                                                                                                                                                | 288.15 K             |
+   | CO₂        | Bideau-Mehu et al. 1973, Opt. Commun. 9, 432, at 0 °C, as Sneep and Ubachs 2005 (JQSRT 92, 293, eq. 13) correct it                                                  | Sneep and Ubachs 2005, eq. 14 (Alms, Burnham and Flygare 1975)                                                                                                   | 273.15 K             |
+   | CH₄        | He, Fang, Shoshanim, Brown and Rudich 2021, Atmos. Chem. Phys. 21, 14927, eq. 10 (ideal N, so Z = 1)                                                                | 1, a spherical top                                                                                                                                               | 288.15 K             |
+   | H₂O        | Ciddor 1996, Appl. Opt. 35, 1566, Eq. 3                                                                                                                             | 1.001, from Murphy 1977, J. Chem. Phys. 67, 5877 (ρₚ = (3.0 ± 1.4) × 10⁻⁴)                                                                                       | 293.15 K, 1,333 Pa   |
+   | NH₃        | C. and M. Cuthbertson 1914, Phil. Trans. R. Soc. A 213, 1, reduced to their "theoretic density" (Z = 0.984 798 × 0.7708 ÷ 0.7605 = 0.998 14)                        | 1.0030, Keir 1995 (PhD thesis, New England), ρₚ = 0.091% at 632.8 nm without the vibrational Raman lines                                                         | 273.15 K             |
+   | H₂         | Peck and Huang 1977, JOSA 67, 1550                                                                                                                                  | Raj, Hamaguchi and Witek 2018, J. Chem. Phys. 148, 104308, ab initio (1.0322 at 550 nm); Dalgarno and Williams 1962, which runs 6.5% low, is only a cross-check  | 273.15 K             |
+   | He         | Mansfield and Peck 1969, JOSA 59, 199; Kurucz 1970's form "from Dalgarno (1962)" (SAO Spec. Rep. 309, §5.8) agrees to 0.5%                                          | 1                                                                                                                                                                | 273.15 K             |
+   | Ne, Kr, Xe | Börzsönyi, Heiner, Kalashnikov, Kovács and Osvay 2008, Appl. Opt. 47, 4856, Sellmeier forms (their Table 2, as refractiveindex.info carries them)                   | 1                                                                                                                                                                | 273.15 K, 1,000 mbar |
+   | N₂O        | He et al. 2021, eq. 9 (ideal N, so Z = 1)                                                                                                                           | Sneep and Ubachs 2005, eq. 19 (Alms et al. 1975)                                                                                                                 | 288.15 K             |
+   | CO         | C. and M. Cuthbertson 1920, Proc. R. Soc. A 97, 152, Table II, reduced as an ideal gas from 30–50 cm at 17.5 °C (Z = 0.999 54)                                      | 1.017: Bogaard et al. 1978 (1.0161–1.0175 over 632.8–488 nm) and Couling and Graham 1994, Mol. Phys. 82, 235 (1.0176 at 514.5 nm)                                | 273.15 K             |
+   | H₂S        | C. and M. Cuthbertson 1910, Proc. R. Soc. A 83, 171, at hydrogen's number density (Z = 1.000 66)                                                                    | 1.000 16, the anisotropy without the vibrational Raman lines (Monan et al. 1982; Bogaard, Buckingham and Ritchie 1982), bounded at 1.005 by Ananthakrishnan 1935 | 273.15 K             |
+   | C₂H₆       | Loria 1909, Ann. Phys. 334, 605, Table IX, refitted by refractiveindex.info, reduced as an ideal gas from 88–118 mm at about 18 °C (Z = 0.998 97)                   | 1.0053, Keir 1995, ρₚ = 0.159% at 632.8 nm without the vibrational Raman lines                                                                                   | 273.15 K             |
 
    Every state without a pressure is at 101,325 Pa. The formulas' machine-readable copies are
-   refractiveindex.info's (CC0), cited beside each paper; H₂O, CH₄ and N₂O have none. The
+   refractiveindex.info's (CC0), cited beside each paper; H₂O, CH₄, N₂O, CO and H₂S have none. The
    reference state is read from each primary paper and pinned by a test. Reading Bideau-Mehu's
    CO₂ at 288.15 K instead of 273.15 K raises σ by 11%, a trap three public codes split on.
 
@@ -2096,13 +2103,16 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
       - Its stand-in is non-absorbing, with a Lorentz–Lorenz index (ruled 2026-10-10,
         science-r08-nonspherical.md §3.1).
         - The molar refraction is NH₃'s plus H₂S's from their measured dispersions (`rayleigh.ts`'s
-          Cuthbertson rows), times 1.045, ammonium chloride's ionic increment.
+          Cuthbertson rows), times 1.035, ammonium chloride's ionic increment (re-derived
+          2026-10-10 from NH₃ and HCl in the same Cuthbertson paper, once NH₃'s formula was read at
+          its theoretic density: Risks, "Deviations in T3.b's follow-up, as built").
         - The density is 1.1717 g cm⁻³, from West 1934's cell (COD 1010249). The ruling's 1.1715
           is the entry's rounded cell volume; n differs by about 3 × 10⁻⁴.
-        - The result is 1.685 at 380 nm, 1.648 at 550 nm and 1.632 at 780 nm, within +0.06 and
-          −0.04 (+0.065 at 380 nm).
+        - The result is 1.681 at 380 nm, 1.644 at 550 nm and 1.629 at 780 nm, within +0.074 and
+          −0.029 for an increment from 0 to +12%. The ruling's 1.685, 1.648 and 1.632 took NH₃ at
+          the real gas's Z.
         - It replaces the earlier 1.80, which Sromovsky et al. 2017 state without a source and
-          which would need a 23% larger molar refraction.
+          which would need a 22% larger molar refraction.
         - It is named `standIn` in its file.
       - A body whose medium shows an NH₄SH mode carries `ATMOSPHERE: APPROXIMATE` (Design note 12).
       - No NH₄SH case is committed or gated.
@@ -2164,7 +2174,9 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
     three figures), presumably Wolff et al. 2010's MARCI values (Icarus 208, 143), unconfirmed.
   - Tests:
     - NH₄SH's n is 1.648 ± 0.001 at 550 nm and falls monotonically from 380 to 780 nm, with
-      k = 0 (replacing the 1.80 test);
+      k = 0 (replacing the 1.80 test). _Superseded 2026-10-10:_ 1.644 ± 0.001, with NH₃ at its
+      theoretic density and the increment re-derived (Risks, "Deviations in T3.b's follow-up, as
+      built");
     - Mars dust's k at 380 nm lies above its 440 nm value (0.00767) and at or below the
       log-linear extrapolation of its 440–500 nm rows (0.0107).
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/materials`.
@@ -3339,7 +3351,8 @@ generator, and the reference's sampling needs no domain tag.
     `GAS_HEAT_CAPACITY` covers T3.b's thirteen: Ne, Kr and Xe at 5/2, exact for atoms, and N₂O at
     CO₂'s 13/3 as the same linear triatomic, medium confidence (NIST-JANAF's c_p at 298 K is 7%
     higher). _Closed set, for the composition audit:_ the table is keyed by `Gas`, so a gas joins
-    it with its c_p ÷ R when T3.b's list grows.
+    it with its c_p ÷ R when T3.b's list grows. _Sixteen since T3.b's follow-up:_ CO at 7/2, and
+    H₂S and C₂H₆ at 4 (C₂H₆'s c_p near 100 K).
   - _The integral in closed form._ Design note 3 integrates "from p_s upward … the local kT ÷ (μ m_u
     g) at each step". The column takes the same equation's exact solution instead, with no step
     error: the geopotential height Φ(p) = k ÷ (μ m_u g_ref) × ∫ T d ln p in closed form for both
@@ -3390,7 +3403,8 @@ generator, and the reference's sampling needs no domain tag.
     - The Titan-class radius and gravity are 2,574.76 km (Archinal et al. 2018, as JPL SSD quotes
       it) and GM ÷ R² with JPL's SAT441 GM, 1.3543 m s⁻².
     - An added test holds every gas's R ÷ c_p within 7.5% of its NIST-JANAF value at 298.15 K
-      (Design note 3's "about 7%"; CH₄, NH₃ and N₂O are furthest, at 7.2–7.3%).
+      (Design note 3's "about 7%"; CH₄, NH₃ and N₂O are furthest, at 7.2–7.3%). _Since T3.b's
+      follow-up_ C₂H₆ is compared at 100 K.
   - _Design note 3's NIST list, corrected_ (the science check): NH₃'s R ÷ c_p at 298 K is 0.233
     (NIST-JANAF's c_p of 35.652 J mol⁻¹ K⁻¹), not 0.237, which is 8.314 ÷ 35.06; N₂'s is 0.2855,
     0.285 to three places. Its 1/4 stays, 7.2% from the measured value.
@@ -4391,7 +4405,7 @@ generator, and the reference's sampling needs no domain tag.
   - _NH₄SH_ keeps the ruled 1.80. The science check finds it high-side (a Lorentz–Lorenz estimate
     from memory puts NH₄SH's visible n near 1.5–1.65) and NH₃ ice's 1.43 no better; reported to
     "main". Ruled 2026-10-10 (science-r08-nonspherical.md §3.1): a Lorentz–Lorenz estimate of
-    1.648 at 550 nm replaces 1.80 (R08.T5.b's follow-up).
+    1.648 at 550 nm replaces 1.80 (R08.T5.b's follow-up); 1.644 since T3.b's follow-up.
   - _Not built:_ the non-spherical materials' literature phase functions ("sit beside their
     indices"). Wolff et al. 2009's dust phase function and ω are in a closed AGU paper with no open
     copy, and no roughened-ice or silicate phase function was chosen. Provisionally ("main",
@@ -4433,20 +4447,22 @@ generator, and the reference's sampling needs no domain tag.
     1.6477; both round to the ruled 1.648. The entry was fetched on 2026-10-10 (COD revision 301772,
     SHA-256 `e721ed9f…ae3a746bb71`). The cell is as published: at room temperature, and possibly in
     kX units, as cells before 1947 often are (1 kX = 1.002 02 Å, which would lower n by about
-    0.005); the file says so.
+    0.005); the file says so. _Superseded 2026-10-10_ (T3.b's follow-up): 1.64442 at 550 nm.
   - _The molar refraction_ takes each gas's exact (n² − 1) ÷ (n² + 2) × Z V₀, where the ruling
     writes its dilute limit, (2 ÷ 3)(n − 1) Z V₀. They differ by under 10⁻⁴ in the solid's n.
   - _A second copy of the dispersions._ The tool is Node code and does not import the renderer (as
     `solarFactors.ts` keeps its own channel wavelengths), so it holds the two Cuthbertson rows
     itself. `materials.test.ts` checks the file's dispersion against `rayleigh.ts`'s rows to
-    2 × 10⁻⁵, and those rows' reference state, 0 °C and 760 mm.
+    2 × 10⁻⁵, and those rows' reference state, 0 °C and 760 mm. _Three since T3.b's follow-up_
+    (HCl, for the increment, has no `rayleigh.ts` row).
   - _General._ `lorentzLorenzIndex(gases, λ, V_m, δ)` and `cellMolarVolumeCm3PerMol` serve any
     additive estimate from gas dispersions and a crystal cell. `NH4SH_STAND_IN_N` is gone, and
     `nh4shIndex(λ, δ?)` takes its place.
   - _The tool's tests_ add the ruling's three figures to 5 × 10⁻⁴, the band (within +0.065 and
     −0.04 for δ from 0 to +12% at every grid point; +0.065 at 380 nm, where the ruling rounds to
     +0.06), the 23% increment that 1.80 would need, and the method's check on NH₃ ice (1.458
-    against Martonchik et al.'s 1.436 at 550 nm).
+    against Martonchik et al.'s 1.436 at 550 nm). _Superseded 2026-10-10_ (T3.b's follow-up):
+    1.6812, 1.6444 and 1.6289; +0.075 and −0.03; 22%; 1.4648.
   - _The other 13 files_ regenerate byte for byte from the T5.b lane's inputs.
   - _Citations added by the review's science check:_ the three inputs' DOIs and pages; k = 0 from
     PubChem CID 25515 (ICSC's "white to yellow hygroscopic solid"), with Jupiter's colours from
@@ -4463,6 +4479,9 @@ generator, and the reference's sampling needs no domain tag.
     the ruling's δ was derived from NH₄Cl with the same NH₃ row, so the two errors largely cancel.
     With Z = 1 and δ re-derived (+3.5% to +4.0%), n at 550 nm is 1.6446–1.6485, against the ruled
     1.648. The NH₃-ice check would read 1.466, 0.030 above the measured 1.436. A fix touches `rayleigh.ts`'s row, the tool's copy, δ and these tests together.
+    _Settled 2026-10-10_ by T3.b's follow-up (below, "Deviations in T3.b's follow-up, as built"):
+    Z = 0.998 14, δ = +3.5% from NH₃ and HCl in the same paper, n(550) = 1.644, and the NH₃-ice
+    check 1.465.
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the
@@ -4767,13 +4786,16 @@ generator, and the reference's sampling needs no domain tag.
     - H₂O's 1.001 is now cited: Murphy 1977, ρ = (3.0 ± 1.4) × 10⁻⁴ for linear polarisation,
       which gives F_K = 1.0010 ± 0.0005.
     - _Open:_ NH₃ takes F_K = 1, provisional and probably about 1% low. Reading Hohm 1994 or
-      Bridge and Buckingham 1966 would settle it.
+      Bridge and Buckingham 1966 would settle it. _Settled 2026-10-10_ (T3.b's follow-up): 1.0030,
+      Keir 1995's measurement.
   - **The real gas.** N_ref = p ÷ (Z k_B T), with Z = p ÷ (ρRT) from the NIST Chemistry
     WebBook's densities at each state. The literature's ideal N leaves σ high by 1 ÷ Z²: 3.1% for
-    NH₃, 1.36% for CO₂ and Xe, 0.55% for Kr and at most 0.15% for the rest. Air takes CIPM-2007's
+    NH₃, 1.36% for CO₂ and Xe, 0.55% for Kr and at most 0.15% for the rest (_superseded
+    2026-10-10_ by T3.b's follow-up: NH₃ 0.37%, and the rest within 0.21%). Air takes CIPM-2007's
     0.999 592. He et al.'s CH₄ and N₂O take Z = 1, because their n is defined through the ideal N.
     _Open_, each settled by reading the paper:
-    - whether Cuthbertson 1914 reduced NH₃ as a real gas or an ideal one (±3% in σ);
+    - whether Cuthbertson 1914 reduced NH₃ as a real gas or an ideal one (±3% in σ). _Settled
+      2026-10-10_ (T3.b's follow-up): to a near-ideal "theoretic density", Z = 0.998 14;
     - whether the literature indices behind Börzsönyi et al.'s Sellmeier forms were reduced as a
       real gas (±1.4% in Xe's σ, ±0.6% in Kr's);
     - whether He et al.'s N was the ideal one at their measuring state, about 295 K and 1020 hPa
@@ -4872,6 +4894,8 @@ generator, and the reference's sampling needs no domain tag.
       refractiveindex.info, whose comment says the paper's formula and data disagree), but no
       King factor is sourced.
 
+    _Superseded 2026-10-10:_ CO, H₂S and C₂H₆ are `GASES` (T3.b's follow-up).
+
     Plan 14's wire carries only its nine gases, and R08.T10.a maps them onto `Gas`.
 
   - **For T3.c.** The mixture's F_mix is the plan's σ-weighted rule. Bodhaine's eq. 23, in
@@ -4928,7 +4952,8 @@ generator, and the reference's sampling needs no domain tag.
     `rayleighOf` gives them `none`. P14.T49.b is to flag both `rayleigh: false`, and T10.a not to
     count them once T4.c draws them. `rayleigh.test.ts` reads the fixture once it lands, beside
     R08.T19.
-  - _The estimated rows_ (23, CO to FeH, in the registry's order). The plan's rule is a static α
+  - _The estimated rows_ (23, CO to FeH, in the registry's order; 20, SO₂ to FeH, since T3.b's
+    follow-up). The plan's rule is a static α
     with F_K = 1. The brainstorm, signed off at 78a8c520 after the plan text ("Atmosphere": the
     optics registry holds measured dispersions and King factors, and an estimate only where no
     measurement exists), wins where they differ, and T3.c's science check found measured visible
@@ -4939,6 +4964,8 @@ generator, and the reference's sampling needs no domain tag.
       for his ideal-gas reduction and Bridge and Buckingham's anisotropy) and CH₃OH (Ramaswamy
       1936). They stay `estimated`: each King factor is unmeasured or secondary, and none is
       vetted to `GAS_DISPERSION`'s standard. Promoting CO, H₂S and C₂H₆ to `GASES` is for a ruling.
+      _Done 2026-10-10_ by T3.b's follow-up, which also corrects C₂H₆'s Z (below, "Deviations in
+      T3.b's follow-up, as built").
     - _`polarisability` rows_: the static electronic α for HCN (Landolt–Börnstein 1951, through
       CCCBDB), C₂H₂, C₂H₄ and PH₃ (Olney et al. 1997), O, Na, K, Si, Ca and Ti (Schwerdtfeger and
       Nagle 2019's recommended values), and SiO, TiO, VO and FeH (CCCBDB's own calculations, FeH by
@@ -4966,7 +4993,7 @@ generator, and the reference's sampling needs no domain tag.
   - _Tests beyond the task:_ each provenance's optics and their unit refusal; ρ against eq. 7's
     inverse; the ρ phase's law and its normalisation (`medium.test.ts`); H's 9/2 a₀³ and its
     exact σ to 0.1%; CO against Sneep and Ubachs's measured (6.19 ± 0.40) × 10⁻²⁷ cm² at 532.2 nm
-    (0.99σ, the data's margin); the α route equal to the dispersion route to 10⁻¹²; each dispersion
+    (0.99σ, the data's margin; moved to the measured block by T3.b's follow-up); the α route equal to the dispersion route to 10⁻¹²; each dispersion
     row normal over 300–1,000 nm; each oscillator below 300 nm; Earth's coefficients through the
     term; NaN, negative, empty and duplicated lists refused.
   - _T3.b's follow-up._ The `GASES` doc lines and the closed-set mark (decision-composition §4)
@@ -4975,10 +5002,178 @@ generator, and the reference's sampling needs no domain tag.
     by `pnpm test` (`medium.test.ts`, `tables.test.ts`, `tablesCpu.test.ts`) and `pnpm typecheck`.
   - _Closed set, for the composition audit:_ none added. A key outside `GASES` and
     `ESTIMATED_RAYLEIGH` is `none`, adds nothing and is reported.
+- **Deviations in T3.b's follow-up, as built** (2026-10-10, lane r08-gases; `rayleigh.ts`,
+  `column.ts`, `src/tools/materials.ts`, `materials/ammonium-hydrosulphide.json` and their tests).
+  It answers two science reviews: NH₃'s compressibility ("Deviations in T5.b's follow-up, as
+  built") and T3.c's lean to promote CO, H₂S and C₂H₆.
+  - _Sources read._ The papers are the Internet Archive's scans, since the publishers' sites
+    refused. The scans are C. and M. Cuthbertson 1914 (`philtrans08506476`, SHA-256
+    `1afc946f…74c9d9f`), 1920 (`philtrans05774431`, `7a4e78aa…a458267a`) and 1910
+    (`philtrans04293273`, `69686b7f…fdfad9f`), and Loria 1909 in its Annalen issue
+    (`sim_annalen-der-physik_1909_29_8`, pp. 605–622, `f12e1277…dda19a64`). Three open theses
+    give the depolarisations, their authors' own measurements and their tables of the closed
+    papers':
+    - R. I. Keir, New England 1995 (hdl 1959.11/6831);
+    - V. W. Couling, Natal 1995 (hdl 10413/11278);
+    - A. J. Russell, New England 1998 (hdl 1959.11/10830), a theorist's tables.
+
+    The cross-checks are Sneep and Ubachs 2005 (the authors' copy) and Liu et al. 2023 (Appl.
+    Phys. B 129, 82; CC BY 4.0). Ananthakrishnan 1935 is read too.
+
+  - _The King factors' sources, by gas._
+    - NH₃ and C₂H₆: Keir's own measurements (primary, read in his thesis).
+    - CO: Couling and Graham 1994's own (primary: the abstract and Couling's thesis), with Bogaard
+      et al. 1978's three lines from Couling's table (secondary).
+    - H₂S: both anisotropies are read only in Russell's table (secondary). The one primary read,
+      Ananthakrishnan 1935, measured ρₙ = 0.30% in natural light (visual, Raman lines included),
+      two to three times the totals with vibrational Raman, so it is taken as an upper bound,
+      F_K ≤ 1.005. The paper states a measurement, not a limit.
+  - _Z from the papers' own reductions._ Design note 4's rule takes Z from the WebBook at each
+    formula's stated state. Where a paper reduced its readings itself, Z is that reduction's: the
+    theoretic density for NH₃, hydrogen's number density for H₂S, and the WebBook's Z where the
+    readings were taken for CO and C₂H₆, each reduced as an ideal gas.
+  - _NH₃: the theoretic density._ The 1914 paper reduces every refractivity to the density "of
+    hydrogen at 0 °C and 76 cm … multiplied by the ratio of the theoretical molecular weight"
+    (p. 5). For ammonia (pp. 21–22) it scales the real gas's value at 0 °C and 760 mm, reduced
+    with Guye's compressibility (the WebBook's Z to 10⁻⁵), by 0.7605 ÷ 0.7708, the theoretic over
+    the measured weight of a litre.
+    - So Z = 0.984 798 × 0.7708 ÷ 0.7605 = 0.998 14. Reading 0.7605 g L⁻¹ itself as the density
+      gives 0.999 13, since Guye's 0.7708 is 0.1% below the WebBook's 0.771 55.
+    - Guye's expansion coefficient runs 0.05–0.07% above the WebBook's at 15–20 °C, where seven of
+      the nine runs were made, and his compressibility at room temperature may add up to about
+      0.1%, depending on the unstated pressures: within 10⁻³ in all.
+    - The paper's text names hydrogen, which would give 1.000 62, but its 0.7605, like its
+      hydriodic acid's 5.7151, is oxygen's litre weight scaled by the molecular weights.
+    - Keir's ᾱ(632.8 nm), 15.10 a.u., and the 14.92 and 14.98 he cites support the reading. The
+      row now gives 14.96 a.u., where the real gas's Z gave 14.76. That cannot tell 0.998 14 from
+      0.999 13.
+    - The formula's conversion takes the paper's c = 3 × 10¹⁰ cm s⁻¹, which its Table XII's
+      calculated column requires.
+    - The King factor is now Keir's measured 1.0030 (ρₚ = 0.091 ± 0.009% at 632.8 nm without the
+      vibrational Raman lines; Bridge and Buckingham's 0.108%, as Keir quotes it, gives 1.0036).
+      This replaces T3.b's provisional 1, beyond the instruction, since the same vetting found it.
+    - σ(550) rises from 6.952 to 7.163 × 10⁻²⁷ cm², +3.0%: +2.7% from Z and +0.3% from F_K.
+  - _Against main's instruction and §3.1's ruling._
+    - The instruction read the theoretic density as Z ≈ 1, and the paper's reduction gives
+      0.998 14.
+    - `science-r08-nonspherical.md` §3.1 ruled δ = +4.5%, n(550) 1.648 and a +0.06/−0.04 band. Its
+      method is kept, with corrected inputs: δ +3.5%, n(550) 1.644, band +0.074/−0.029.
+    - The ruling's file is not edited (lanes do not edit rulings), for main to note against §3.1.
+  - _NH₄SH._
+    - NH₄Cl's increment is re-derived from NH₃ and HCl in the same 1914 paper (HCl's p. 12,
+      4.6425 × 10²⁷ ÷ (10,664 × 10²⁷ − n²), reduced to hydrogen's number density through Gray and
+      Burt's 1.0079, so Z = 1.000 624), with the ruling's n_D 1.642 and 1.519 g cm⁻³: +3.51%.
+      Reading Gray and Burt's ratio against the WebBook's H₂ at 16 °C instead gives +3.58%.
+    - The ruling's own inputs (HCl's 4.456 × 10⁻⁴ from a secondary source, Z 0.9924 to 1) with
+      only NH₃'s Z changed give +3.62% to +4.05%.
+    - δ = 0.035 is stated (`NH4SH_IONIC_INCREMENT`). `NH4CL_IONIC_INCREMENT` computes the
+      derivation, and a test holds the two within 0.1%.
+    - n is 1.681, 1.644 and 1.629 at 380, 550 and 780 nm (was 1.685, 1.648 and 1.632). The band
+      is +0.074 and −0.029 for δ from 0 to +12%, and 1.80 needs +22% (was 23%).
+    - The NH₃-ice check reads 1.465 (was 1.458), 0.029 above Martonchik's 1.436.
+    - _The expected band._ The materials-fix lane expected 1.6446–1.6485 with Z = 1 and the
+      secondary HCl (δ +3.5% to +4.0%). HCl's primary puts δ at that range's foot, +3.51%.
+      1.6444 lies 2 × 10⁻⁴ below 1.6446 at the same δ because NH₃'s Z is 0.998 14, not 1
+      (−5.6 × 10⁻⁴), of which H₂S's corrected Z and coefficients make up 3.7 × 10⁻⁴. Stating
+      δ as 0.0351 would give 1.6445.
+    - The other 14 files regenerate byte for byte from the T5.b lane's inputs.
+    - _Finding, for main (unchanged here):_ the calibration's inputs are the ruling's, read
+      through Wikipedia: the density from the CRC Handbook (92nd ed.), the index from
+      Chemister.ru. The Handbook of Mineralogy's sal ammoniac gives n = 1.639(1), a measured 1.532
+      g cm⁻³ and a = 3.8756 Å (Z = 1, an X-ray density of 1.5258). NH₄SH's molar volume is its X-ray
+      cell's. On NH₄Cl's X-ray cell δ is +3.05% and n(550) 1.641; with n = 1.639 as well, +2.67%
+      and 1.638. All lie inside the band, but up to 7 × 10⁻³ from the stated 1.644.
+  - _H₂S._
+    - The 1910 paper reduces to "the same number of molecules per unit volume as hydrogen at 0°
+      and 760 mm" (p. 173): the room's 16 °C reading, reduced as an ideal gas, times 0.990 92.
+      So Z = 0.991 571 ÷ 0.990 92 = 1.000 66, which matches H₂'s own 1.000 62.
+    - The paper's n₀² column fixes its frequencies' c at 3 × 10¹⁰ (7,797 at 6563 Å; 2.998 × 10¹⁰
+      gives 7,786). So the row is 0.053 711 ÷ (86.756 − λ⁻²), where T3.c's 0.053 785 ÷ (86.876 −
+      λ⁻²) took c = 2.997 92 × 10¹⁰, 5 × 10⁻⁵ of n − 1 away.
+    - F_K = 1.000 16 from the anisotropy without the vibrational Raman lines, read in Russell's
+      Table 4.4: Δα = 0.669 ± 0.073 a.u. at 632.8 nm (Bogaard, Buckingham and Ritchie 1982) and
+      0.678 ± 0.074 a.u. at 488.0 nm (Monan, Bribes and Gaufrès 1982), over the row's ᾱ = 25.5 a.u.
+    - H₂S's ν₁ and ν₃ Raman bands rival its depolarised Rayleigh line, so totals with them
+      (Bogaard et al. 1978) give 1.0015–1.002.
+    - _Pending main's ruling:_ the King factor's values are read only through the thesis, where
+      the instruction asked for primary sources. Their effect on σ is under 0.2%, and the read
+      bound's under 0.5%, so the row is promoted.
+  - _CO._
+    - Reduced as an ideal gas (1920, p. 155). Z = 0.999 54 is the WebBook's at 17.5 °C between 30
+      and 50 cm, the range the paper gives for its CO₂. CO's own range is not stated, ±2 × 10⁻⁴.
+    - The conversion keeps T3.c's c = 2.997 92 × 10¹⁰. It fits Table II's calculated column to
+      ±0.7 in the fifth figure; 3 × 10¹⁰ leaves a +1 bias, within the rounding of 11,124.
+    - F_K = 1.017, between Bogaard et al. 1978's 1.0161–1.0175 over 632.8–488 nm (Couling's Table
+      1.3) and Couling and Graham 1994's 1.0176 ± 0.0001 at 514.5 nm (Mol. Phys. 82, 235;
+      Couling's Table 1.10). T3.c's 1.016 was Sneep and Ubachs's ρₚ = 0.0048 at 632.8 nm, the same
+      as Bogaard's value there.
+    - The checks are Sneep and Ubachs's 6.19 ± 0.40 × 10⁻²⁷ cm² at 532.2 nm (the row gives
+      6.585, 0.99σ) and Liu et al.'s 1.938 ± 0.011 × 10⁻²⁶ cm² at 408.4 nm (2.1% above). Liu
+      et al.'s own n-based 2.027 is 4.6% above it (their abstract: 4.1%), and their N₂ lies 3.2%
+      below this module's (1.521 against 1.571 × 10⁻²⁶ cm²).
+  - _C₂H₆._
+    - Loria let the gas into a tube "ganz ausgepumpt" (p. 609) and read 88–118 mm at about 18 °C
+      (Table VII). He reduced as an ideal gas, α = 1 ÷ 273 (p. 610).
+    - So Z = 0.998 97, the WebBook's at 291.3 K and his mean 95 mm. T3.c's 1 ÷ 1.0148 read the
+      manometer's 610–755 mm as the gas's pressure, and σ rises 2.7% from the correction.
+    - With it, Loria's α(632.8 nm) is 29.95 a.u., 0.8% below Bridge and Buckingham's 30.2 (as van
+      Gisbergen et al. 1995 quote it). T3.c's row gave 29.54, 2.2% below.
+    - F_K = 1.0053 is Keir's ρₚ = 0.159 ± 0.002% at 632.8 nm without the vibrational Raman lines.
+      The other measurements without them in Keir's Table 6.3 (1982–1995, 488–632.8 nm) give
+      1.0038–1.0059. T3.c's 1.0066 was Bridge and Buckingham's total, with those lines.
+    - `dataFile` is the refit's copy, `organic/C2H6 - ethane/nk/Loria.yml` (formula 5,
+      n = 1.000 733 + 6.822 764 × 10⁻⁶ λ⁻²).
+  - _Vibrational Raman._ Where a source separates the vibrational Raman lines (NH₃, H₂S, C₂H₆),
+    the King factor leaves them out, since that light is shifted 30–100 nm out of the Rayleigh
+    line. The earlier rows' factors (Bates's, Alms et al.'s) are as their sources give them, and
+    no source separates CO's weak band. The choice moves σ by at most 0.2% (C₂H₆'s 1.0066 against
+    1.0053).
+  - _Extrapolations_, beside T3.b's list, inside 300–1,000 nm:
+    - CO outside 480–670.8 nm, H₂S outside 486.1–656.3 nm and C₂H₆ outside 523–667.7 nm;
+    - NH₃'s and C₂H₆'s King factors come from 632.8 nm alone, and CO's and H₂S's from
+      488.0–632.8 nm, each held constant.
+  - _Heat capacities_ (`column.ts`, keyed by `Gas`).
+    - CO takes N = 5 (JANAF's 29.149 J mol⁻¹ K⁻¹, R ÷ c_p 0.285) and H₂S N = 6 (34.197, 0.243).
+    - C₂H₆ takes N = 6 at low confidence: its c_p near 100 K (35.70, Gurvich et al. 1989), where
+      ethane-bearing atmospheres lie. R ÷ c_p is 7% high there, 27% at 200 K and 58% at 298 K,
+      where its torsion and bends lift c_p to 52.49, so the value is out of range above about
+      120 K. `column.test.ts` compares ethane at 100 K. _Pending main:_ keep N = 6, or take N
+      from a representative temperature (N ≈ 8.2 at 200 K).
+  - _Names beyond the sketch._
+    - In `src/tools/materials.ts`: `HCL_REFRACTIVITY` (Cuthbertson 1914's HCl, for the
+      increment only; HCl is no registry gas row, so it has no `rayleigh.ts` row),
+      `gasMolarRefractionCm3PerMol(gases, λ)`, `ionicIncrement(gases, λ, V_m, n)`,
+      `IonicCalibration` and `NH4CL_CALIBRATION`, `NH4CL_IONIC_INCREMENT`,
+      `NH3_ICE_MOLAR_VOLUME_CM3_PER_MOL` and `nh4shBandSpan()`. `lorentzLorenzIndex` now calls
+      `gasMolarRefractionCm3PerMol`, and the NH₄SH file's text is built from these constants.
+    - In `rayleigh.ts`: `oneTermNMinusOne` and `CUTHBERTSON_1910` move above `GAS_DISPERSION`,
+      and `kingFactorOfLinearDepolarisation(ρₚ)` (eq. 7) is private.
+  - _Tests added:_
+    - the three gases' states and Z, with NH₃'s and H₂S's readings;
+    - the printed calculated values (NH₃'s Table XII, CO's Table II);
+    - H₂S's printed formula with c = 3 × 10¹⁰, and its observed values;
+    - Loria's Table IX to 0.2%;
+    - the four King factors, and H₂S's bound;
+    - CO against Sneep and Ubachs, and CO and N₂ against Liu et al.;
+    - the molar masses;
+    - the registry's rows, as a set and in each table's order;
+    - in the tool: Z, the increment's derivation and the ruling's +4.7%, HCl's row against the
+      paper, the new indices, the band in the file's text, and the ice check.
+  - _Left estimated:_ SO₂, O₃ and CH₃OH, since no King factor has been read for them. SO₂'s
+    depolarisation is measured (Bogaard et al. 1978; Baas and van den Hout 1979, both closed),
+    and the three theses were not searched for it. None was found for O₃ or CH₃OH.
+  - _Closed set, for the composition audit:_ none added. `GASES` is 16 and `ESTIMATED_RAYLEIGH`
+    20 (SO₂ to FeH), and every registry gas row keeps measured or estimated optics.
+  - _Not read_ (closed; their numbers come through the theses): Bridge and Buckingham 1966,
+    Bogaard et al. 1978, Bogaard, Buckingham and Ritchie 1982, Monan et al. 1982, Baas and van den
+    Hout 1979 and Haverkort et al. 1983.
+  - _Drafted for the owner:_ a row of the roadmap's "Brainstorm corrections" table (NH₃'s "3%"
+    in the brainstorm's "Atmosphere"; `README.md`).
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client
   to the sim's fixture.
-  - `Gas` (13) remains the set with measured dispersions, never a wire type.
+  - `Gas` (13; 16 since T3.b's follow-up) remains the set with measured dispersions, never a wire
+    type.
   - The 15 bake bins' inadequacy for M dwarfs' TiO bands stays a recorded limitation, since TiO
     in the star overlaps TiO in the planet.

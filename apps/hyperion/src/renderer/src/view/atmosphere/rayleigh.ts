@@ -17,8 +17,9 @@
  *
  * N_ref is the real gas's, p_ref ÷ (Z k_B T_ref), with Z the compressibility factor at the state
  * ({@link Dispersion.compressibility}). The literature's tables (Bodhaine et al. 1999, Sneep and
- * Ubachs 2005) take the ideal p ÷ (k_B T), which leaves σ high by 1 ÷ Z²: 3.1% for NH₃, 1.4% for
- * CO₂ and Xe, 0.5% for Kr and at most 0.15% for the other gases. The dense gas's own fluctuation
+ * Ubachs 2005) take the ideal p ÷ (k_B T), which leaves σ high by 1 ÷ Z²: 1.4% for CO₂ and Xe,
+ * 0.5% for Kr, 0.4% for NH₃ (whose formula is reduced to a near-ideal density) and within 0.21%
+ * for the other gases. The dense gas's own fluctuation
  * factor at a body's surface is a recorded omission (Design note 4). Design note 4 gives about
  * 1.06 at Venus's surface; NIST's CO₂ there gives ρk_BTκ_T = 0.985, about 1.025 with the local
  * field (R08's Risks).
@@ -45,7 +46,8 @@ import { CHANNEL_WAVELENGTHS_NM, type MediumTerm } from "./medium";
  *
  * @remarks
  * Plan 14's nine come first, in `Gas::ALL`'s order (`planetary::derive::atmosphere::Gas`,
- * `Hydrogen` … `Argon`), then Ne, Kr, Xe and N₂O.
+ * `Hydrogen` … `Argon`), then Ne, Kr, Xe and N₂O, then CO, H₂S and C₂H₆ (R08.T3.b's follow-up,
+ * promoted from R08.T3.c's estimated rows once their sources were read).
  *
  * Its keys are plan 14's substance keys (P14.T49.a; a definite species by its formula in chemical
  * case), so these tables are keyed as the wire is. A wire key outside this list is not a `Gas`:
@@ -55,8 +57,8 @@ import { CHANNEL_WAVELENGTHS_NM, type MediumTerm } from "./medium";
  * A measured species is added as data, by its formula here and an entry in each of
  * {@link GAS_DISPERSION}, {@link GAS_KING_FACTOR} and {@link GAS_MOLAR_MASS_G_PER_MOL}, each with
  * its sources; the compiler names any record that lacks it. The gases a generator could plausibly
- * produce whose dispersion has no source checked here (CO, SO₂, H₂S, HCN, O₃, C₂H₆, C₂H₄ and
- * C₂H₂ among them) are R08.T3.c's estimated rows, {@link ESTIMATED_RAYLEIGH}.
+ * produce whose dispersion or King factor has no source checked here (SO₂, HCN, O₃, C₂H₄ and C₂H₂
+ * among them) are R08.T3.c's estimated rows, {@link ESTIMATED_RAYLEIGH}.
  */
 export const GASES = [
   "H2",
@@ -72,6 +74,9 @@ export const GASES = [
   "Kr",
   "Xe",
   "N2O",
+  "CO",
+  "H2S",
+  "C2H6",
 ] as const;
 
 /** A gas with Rayleigh optics here: one of {@link GASES}. */
@@ -161,6 +166,17 @@ const N2_BRANCH_NM = 468;
 const BORZSONYI_2008 =
   "Börzsönyi, Heiner, Kalashnikov, Kovács and Osvay, Appl. Opt. 47 (2008) 4856";
 
+/** The Cuthbertsons' 1910 paper on SO₂ and H₂S. */
+const CUTHBERTSON_1910 = "C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171";
+
+/**
+ * n − 1 = A ÷ (B − λ⁻²), λ in µm and A and B in µm⁻²: the Cuthbertsons' and Ramaswamy's one-term
+ * form.
+ */
+function oneTermNMinusOne(aPerUm2: number, bPerUm2: number): (wavelengthNm: number) => number {
+  return (wavelengthNm) => aPerUm2 / (bPerUm2 - wavenumberSquaredPerUm2(wavelengthNm));
+}
+
 /** λ⁻², the squared vacuum wavenumber, µm⁻². */
 function wavenumberSquaredPerUm2(wavelengthNm: number): number {
   const perUm = 1_000 / wavelengthNm;
@@ -210,10 +226,22 @@ function sellmeierNMinusOne(
  *   Hohm 1993's polarisabilities, runs 13% high in n − 1, against Loria 1909 and Wilmouth and
  *   Sayres 2019 (R08's Risks). He et al. derive n from measured cross-sections through the ideal
  *   N = 2.546 899 × 10¹⁹ cm⁻³, so Z = 1 returns those cross-sections.
- * - NH₃: C. and M. Cuthbertson 1914, n − 1 = 0.032 953 ÷ (90.392 − λ⁻²), at 0 °C and 760 mm,
- *   over the cadmium-to-lithium lines (air wavelengths; the difference from vacuum is 2 × 10⁻⁵
- *   of n − 1). Z = 0.984 798; whether the paper reduced its readings with the real or the ideal
- *   gas is unread, ±3% in the cross-section.
+ * - NH₃: C. and M. Cuthbertson 1914, p. 22, (μ − 1) D ÷ (d₀76) = 2.9658 × 10²⁷ ÷ (8,135.3 ×
+ *   10²⁷ − n²), with the paper's frequencies n = 3 × 10¹⁰ ÷ λ cm s⁻¹ (its Table XII's calculated
+ *   column requires that c): n − 1 = 0.032 953 ÷ (90.392 − λ⁻²), over the cadmium-to-lithium lines
+ *   (air wavelengths; the difference from vacuum is 2 × 10⁻⁵ of n − 1), stated at 0 °C and 760 mm.
+ *   - The paper reduces every refractivity to its "theoretic density" (p. 5). For ammonia (p. 21)
+ *     it takes the real gas's at 0 °C and 760 mm, reduced with Guye's compressibility (which gives
+ *     the WebBook's Z there to 10⁻⁵), times 0.7605 ÷ 0.7708, the theoretic over the measured weight
+ *     of a litre, g. So Z = 0.984 798 × 0.7708 ÷ 0.7605 = 0.998 14, within 10⁻³.
+ *   - Reading 0.7605 g L⁻¹ as the density itself gives 0.999 13, since Guye's 0.7708 is 0.1% below
+ *     the WebBook's 0.771 55. Guye's expansion coefficient, by which seven of the nine runs were
+ *     reduced from room temperature, runs 0.05–0.07% above the WebBook's.
+ *   - The paper's text names hydrogen's density times the molecular weights' ratio as the standard,
+ *     which would give 1.000 62, but its 0.7605, like its hydriodic acid's 5.7151 g, is oxygen's
+ *     1.429 g L⁻¹ scaled so. refractiveindex.info's copy labels the formula "0 °C, 760 mm Hg".
+ *   - Keir 1995 (below) gives ᾱ(632.8 nm) = 15.10 a.u. and cites 14.92 and 14.98 from other
+ *     refractivities; this row gives 14.96, where the real gas's Z gave 14.76.
  * - N₂: Peck and Khanna 1966's own 15 °C form from 468 nm, 10⁸(n − 1) = 6,497.378 +
  *   3,073,864.9 ÷ (144 − λ⁻²). Sneep and Ubachs's eq. 10 (6,498.2 + …) is the 0 °C form scaled by
  *   the ideal gas, 1.5 × 10⁻⁴ higher. Below 468 nm, Bates 1984's ultraviolet branch,
@@ -247,6 +275,28 @@ function sellmeierNMinusOne(
  *   so Z = 1. Whether that N was the ideal one at their measuring state (about 295 K and
  *   1020 hPa) is unstated; if it was, both gases' cross-sections run high by 1 ÷ Z there, 0.57%
  *   for N₂O and 0.18% for CH₄.
+ * - CO: C. and M. Cuthbertson, Proc. R. Soc. Lond. A 97 (1920) 152, p. 155, μ − 1 = 3.640 67 × 10²⁷
+ *   ÷ (11,124 × 10²⁷ − n²): n − 1 = 0.040 508 ÷ (123.77 − λ⁻²) with n = c ÷ λ and c = 2.997 92 ×
+ *   10¹⁰ cm s⁻¹, which reproduces Table II's calculated column to ±0.7 in its fifth figure
+ *   (c = 3 × 10¹⁰ leaves a +1 bias, within the rounding of 11,124; under 3 × 10⁻⁵ of n − 1 apart),
+ *   measured over 480–670.8 nm (air wavelengths). The paper reduced the readings as an ideal gas,
+ *   ν − 1 = (μ − 1)(76 ÷ P)(T ÷ 273), so Z is the real gas's where they were taken. Read between
+ *   p₁ = 30 and p₂ = 50 cm at 17.5 °C, as the paper states for its CO₂ (CO's own pressures are not
+ *   given), that is Z = 1 + B′(p₁ + p₂) = 0.999 54 from the WebBook's Z = 1 + B′p, within 2 × 10⁻⁴.
+ * - H₂S: C. and M. Cuthbertson 1910, p. 174, μ − 1 = 4.834 × 10²⁷ ÷ (7,808 × 10²⁷ − n²), with n =
+ *   3 × 10¹⁰ ÷ λ cm s⁻¹, which the paper's own n₀² column requires: n − 1 = 0.053 711 ÷ (86.756 −
+ *   λ⁻²), over 486.1–656.3 nm (air wavelengths). The paper reduces the gas to hydrogen's number
+ *   density at 0 °C and 760 mm (p. 173): the readings at the room's temperature and pressure, 16 °C,
+ *   reduced as an ideal gas, times 0.990 92 from Leduc's densities. So Z is the WebBook's at 16 °C
+ *   and 101,325 Pa over that factor, 0.991 571 ÷ 0.990 92 = 1.000 66, which matches hydrogen's own
+ *   1.000 62 at 0 °C.
+ * - C₂H₆: Loria, Ann. Phys. 334 (1909) 605, Table IX, n − 1 = a(1 + b ÷ λ²) at 0 °C and 760 mm
+ *   with refractiveindex.info's refit a = 7.330 × 10⁻⁴ and Loria's b = 9.308 × 10⁻³ µm², which fits
+ *   his table as well as a free fit of both (an rms of 7 × 10⁻⁷; his printed a, 7.365 × 10⁻⁴, is
+ *   0.5% above his own table), over 523–667.7 nm. Loria let the gas into an evacuated tube, to 88–118
+ *   mm at about 18 °C (Table VII), and reduced as an ideal gas with α = 1 ÷ 273 (p. 610), so Z is
+ *   the WebBook's at 291.3 K and his mean 95 mm, 0.998 97, within 2 × 10⁻⁴. R08.T3.c's 1 ÷ 1.0148
+ *   read his manometer's 610–755 mm as the gas's pressure.
  */
 export const GAS_DISPERSION: Readonly<Record<Gas, Dispersion>> = {
   H2: {
@@ -297,7 +347,7 @@ export const GAS_DISPERSION: Readonly<Record<Gas, Dispersion>> = {
     nMinusOne: (wavelengthNm) => 0.032_953 / (90.392 - wavenumberSquaredPerUm2(wavelengthNm)),
     referenceK: ZERO_CELSIUS_K,
     referencePa: STANDARD_ATMOSPHERE_PA,
-    compressibility: 0.984_798,
+    compressibility: (0.984_798 * 0.770_8) / 0.760_5,
     source: "C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1",
     dataFile: "main/NH3/nk/Cuthbertson.yml",
     measuredNm: [480, 670.8],
@@ -397,6 +447,34 @@ export const GAS_DISPERSION: Readonly<Record<Gas, Dispersion>> = {
     dataFile: undefined,
     measuredNm: [307, 725],
   },
+  CO: {
+    nMinusOne: oneTermNMinusOne(0.040_508, 123.77),
+    referenceK: ZERO_CELSIUS_K,
+    referencePa: STANDARD_ATMOSPHERE_PA,
+    compressibility: 0.999_54,
+    source: "C. and M. Cuthbertson, Proc. R. Soc. Lond. A 97 (1920) 152, Table II",
+    dataFile: undefined,
+    measuredNm: [480, 670.8],
+  },
+  H2S: {
+    nMinusOne: oneTermNMinusOne(0.053_711, 86.756),
+    referenceK: ZERO_CELSIUS_K,
+    referencePa: STANDARD_ATMOSPHERE_PA,
+    compressibility: 0.991_571 / 0.990_92,
+    source: CUTHBERTSON_1910,
+    dataFile: undefined,
+    measuredNm: [486.1, 656.3],
+  },
+  C2H6: {
+    nMinusOne: (wavelengthNm) => 7.33e-4 * (1 + 9.308e-3 * wavenumberSquaredPerUm2(wavelengthNm)),
+    referenceK: ZERO_CELSIUS_K,
+    referencePa: STANDARD_ATMOSPHERE_PA,
+    compressibility: 0.998_97,
+    source:
+      "Loria, Ann. Phys. 334 (1909) 605, Table IX, with refractiveindex.info's refit of a (the printed 7.365 × 10⁻⁴ is 0.5% above his table)",
+    dataFile: "organic/C2H6 - ethane/nk/Loria.yml",
+    measuredNm: [523, 667.7],
+  },
 };
 
 /**
@@ -438,6 +516,11 @@ function isotropic(source: string): KingFactor {
   return { factor: () => 1, source };
 }
 
+/** F_K = (3 + 6ρₚ) ÷ (3 − 4ρₚ) for ρₚ, the depolarisation in linearly polarised light (eq. 7). */
+function kingFactorOfLinearDepolarisation(rhoP: number): number {
+  return (3 + 6 * rhoP) / (3 - 4 * rhoP);
+}
+
 /**
  * Each gas's King factor F_K, the anisotropy correction to its cross-section, with its source.
  *
@@ -459,8 +542,34 @@ function isotropic(source: string): KingFactor {
  *   fitted here over 380–800 nm to 2 × 10⁻⁵ (1.0322 at 550 nm). Design note 4's "Hohm 1993" (Mol.
  *   Phys. 78, 929) is a hydrocarbon mean-polarisability paper; Hohm 1994 (Chem. Phys. 179, 533)
  *   holds the anisotropies and was not read.
- * - NH₃: 1, provisional, until Hohm 1994's anisotropy is read (R08's Risks); NH₃'s small
- *   anisotropy leaves it about 1% low.
+ *
+ * The depolarisations below are measured with a He–Ne or argon-ion laser, Rayleigh light and its
+ * rotational Raman wings together. Where a source separates the vibrational Raman lines, which are
+ * shifted out of the Rayleigh line and so are not part of the cross-section, the value without them
+ * is taken. Each holds one value over the range, though measured at 488.0–632.8 nm.
+ * - NH₃: ρₚ = (0.091 ± 0.009) × 10⁻² at 632.8 nm, vibrational Raman excluded (R. I. Keir, PhD
+ *   thesis, University of New England 1995, hdl 1959.11/6831, pp. 152–153, his own measurement),
+ *   1.0030 ± 0.0003; Bridge and Buckingham 1966's 0.108 × 10⁻², as Keir quotes it, gives 1.0036.
+ * - CO: 1.017 over the visible, between Bogaard, Buckingham, Pierens and White 1978's 1.0161 at
+ *   632.8 nm, 1.0174 at 514.5 and 1.0175 at 488.0 (J. Chem. Soc. Faraday Trans. 1 74, 3008, as
+ *   V. W. Couling's PhD thesis, University of Natal 1995, hdl 10413/11278, Table 1.3, gives them;
+ *   Sneep and Ubachs 2005, §5.1, take the 632.8 nm value) and Couling and Graham's own 1.0176 ±
+ *   0.0001 at 514.5 nm (Mol. Phys. 82 (1994) 235, ρₚ = (0.5251 ± 0.0014) × 10⁻², the thesis's
+ *   Table 1.10). No source separates CO's weak vibrational Raman band.
+ * - H₂S: 1.000 16, within 10⁻⁴: 1 + (2/9)(Δα ÷ ᾱ)² with the anisotropy without the vibrational
+ *   Raman lines, Δα = 0.669 ± 0.073 a.u. at 632.8 nm (Bogaard, Buckingham and Ritchie, Chem. Phys.
+ *   Lett. 90 (1982) 183) and 0.678 ± 0.074 a.u. at 488.0 nm (Monan, Bribes and Gaufrès, J. Mol.
+ *   Struct. 79 (1982) 83), as A. J. Russell's PhD thesis (University of New England 1998, hdl
+ *   1959.11/10830, Table 4.4) tabulates them, over ᾱ = 25.5 a.u. from the dispersion here. Neither
+ *   paper was read. H₂S's ν₁ and ν₃ Raman bands rival its tiny depolarised Rayleigh line, so the
+ *   totals with them (Bogaard, Buckingham, Pierens and White 1978, ρₚ ≈ 0.044–0.06 × 10⁻²,
+ *   Russell's Fig. 4.3) give 1.0015–1.002. Ananthakrishnan measured ρₙ = 0.30% in natural light
+ *   (Proc. Indian Acad. Sci. A 2 (1935) 153, read; visual, Raman lines included), two to three times
+ *   those totals, so it is taken as an upper bound: F_K ≤ 1.005.
+ * - C₂H₆: ρₚ = (0.159 ± 0.002) × 10⁻² at 632.8 nm, vibrational Raman excluded (Keir 1995, Table
+ *   6.3, his own measurement), 1.0053; the other measurements without those lines in Keir's table
+ *   (1982–1995, 488.0–632.8 nm) give 1.0038–1.0059, and Bridge and Buckingham's total, 0.198 ×
+ *   10⁻², 1.0066.
  */
 export const GAS_KING_FACTOR: Readonly<Record<Gas, KingFactor>> = {
   H2: {
@@ -474,7 +583,11 @@ export const GAS_KING_FACTOR: Readonly<Record<Gas, KingFactor>> = {
     source: "Murphy, J. Chem. Phys. 67 (1977) 5877: ρₚ = (3.0 ± 1.4) × 10⁻⁴",
   },
   CH4: isotropic("a spherical top (Sneep and Ubachs 2005, §5.2)"),
-  NH3: isotropic("provisional: Hohm, Chem. Phys. 179 (1994) 533 not read"),
+  NH3: {
+    factor: () => kingFactorOfLinearDepolarisation(0.000_91),
+    source:
+      "ρₚ = 0.000 91 at 632.8 nm, vibrational Raman excluded (R. I. Keir, PhD thesis, University of New England 1995)",
+  },
   N2: {
     factor: (wavelengthNm) => 1.034 + 3.17e-4 / wavelengthSquaredUm2(wavelengthNm),
     source: "Bates, Planet. Space Sci. 32 (1984) 785 (Bodhaine et al. 1999, eq. 5)",
@@ -497,9 +610,25 @@ export const GAS_KING_FACTOR: Readonly<Record<Gas, KingFactor>> = {
   N2O: {
     factor: (wavelengthNm) => {
       const rho = 0.057_7 + 11.8e-12 * wavenumberSquaredPerCm2(wavelengthNm);
-      return (3 + 6 * rho) / (3 - 4 * rho);
+      return kingFactorOfLinearDepolarisation(rho);
     },
     source: "Sneep and Ubachs 2005, eq. 19 (Alms et al. 1975)",
+  },
+  CO: {
+    factor: () => 1.017,
+    source:
+      "Bogaard, Buckingham, Pierens and White, J. Chem. Soc. Faraday Trans. 1 74 (1978) 3008, 1.0161–1.0175 over 632.8–488.0 nm, and Couling and Graham, Mol. Phys. 82 (1994) 235, 1.0176 at 514.5 nm (as V. W. Couling's PhD thesis, Natal 1995, tabulates them)",
+  },
+  H2S: {
+    // The two measurements' mean, 0.6735 a.u., over ᾱ at 632.8 nm: 1.000 155.
+    factor: () => 1 + (2 / 9) * (0.673_5 / 25.5) ** 2,
+    source:
+      "1 + (2/9)(Δα ÷ ᾱ)² with Δα = 0.669–0.678 a.u. without the vibrational Raman lines (Bogaard, Buckingham and Ritchie, Chem. Phys. Lett. 90 (1982) 183; Monan, Bribes and Gaufrès, J. Mol. Struct. 79 (1982) 83; as A. J. Russell's PhD thesis, New England 1998, tabulates them) over ᾱ = 25.5 a.u., below the 1.005 of Ananthakrishnan's ρₙ = 0.30%, Proc. Indian Acad. Sci. A 2 (1935) 153, taken as an upper bound",
+  },
+  C2H6: {
+    factor: () => kingFactorOfLinearDepolarisation(0.001_59),
+    source:
+      "ρₚ = 0.001 59 at 632.8 nm, vibrational Raman excluded (R. I. Keir, PhD thesis, University of New England 1995, Table 6.3)",
   },
 };
 
@@ -509,8 +638,9 @@ export const GAS_KING_FACTOR: Readonly<Record<Gas, KingFactor>> = {
  * @remarks
  * Plan 14's nine are the sim's `Gas::molar_mass_g_per_mol` (IUPAC 2021 standard atomic weights,
  * abridged; the sim rounds He's 4.0026 to 4.003), copied so that the client's column and the sim's
- * agree. Ne (20.180), Kr (83.798) and
- * Xe (131.29) are IUPAC 2021's abridged atomic weights, and N₂O is 2 × 14.007 + 15.999 from them.
+ * agree. Ne (20.180), Kr (83.798) and Xe (131.29) are IUPAC 2021's abridged atomic weights, and
+ * N₂O (2 × 14.007 + 15.999), CO (12.011 + 15.999), H₂S (2 × 1.008 + 32.06) and C₂H₆ (2 × 12.011 +
+ * 6 × 1.008) are built from them.
  */
 export const GAS_MOLAR_MASS_G_PER_MOL: Readonly<Record<Gas, number>> = {
   H2: 2.016,
@@ -526,6 +656,9 @@ export const GAS_MOLAR_MASS_G_PER_MOL: Readonly<Record<Gas, number>> = {
   Kr: 83.798,
   Xe: 131.29,
   N2O: 44.013,
+  CO: 28.01,
+  H2S: 34.076,
+  C2H6: 30.07,
 };
 
 /**
@@ -677,8 +810,8 @@ export interface SpeciesRayleigh {
  * sources and its uncertainty (decision-composition §1.9).
  *
  * - `dispersion`: a measured visible dispersion, read as {@link GAS_DISPERSION}'s are, with a King
- *   factor where a measured one was found in a secondary source and F_K = 1 where none was:
- *   {@link crossSectionFromDispersionM2}.
+ *   factor not yet vetted, or F_K = 1 where none has been read (SO₂, O₃ and CH₃OH since CO, H₂S and
+ *   C₂H₆ were promoted): {@link crossSectionFromDispersionM2}.
  * - `polarisability`: a mean dipole polarisability α with F_K = 1, σ = (128π⁵ ÷ 3) α² ÷ λ⁴
  *   ({@link polarisabilityCrossSectionM2}), α static or dispersed by one oscillator.
  */
@@ -747,17 +880,6 @@ const OLNEY_1997 =
 const CCCBDB_COMPUTED =
   "NIST CCCBDB, Release 22 (Johnson, ed., NIST SRD 101, 2022), its own calculations";
 
-/** The Cuthbertsons' 1910 paper on SO₂ and H₂S. */
-const CUTHBERTSON_1910 = "C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171";
-
-/**
- * n − 1 = A ÷ (B − λ⁻²), λ in µm and A and B in µm⁻²: the Cuthbertsons' and Ramaswamy's one-term
- * form.
- */
-function oneTermNMinusOne(aPerUm2: number, bPerUm2: number): (wavelengthNm: number) => number {
-  return (wavelengthNm) => aPerUm2 / (bPerUm2 - wavenumberSquaredPerUm2(wavelengthNm));
-}
-
 /** F_K = 1, no King factor found. */
 function noKingFactor(why: string): KingFactor {
   return { factor: () => 1, source: `1, taken: ${why}` };
@@ -770,11 +892,11 @@ function noKingFactor(why: string): KingFactor {
  * @remarks
  * Where a measured visible dispersion exists, the row takes it (the brainstorm's "Atmosphere": the
  * optics registry holds measured dispersions, and an estimate only where no measurement exists):
- * CO, SO₂, H₂S and O₃ from C. and M. Cuthbertson, C₂H₆ from Loria and CH₃OH from Ramaswamy. Each
- * stays `estimated` because its King factor is not measured, or was found only in a secondary
- * source, and none has been vetted to {@link GAS_DISPERSION}'s standard (its reference state read in
- * the paper, its Z from NIST's equation of state). Promoting one to {@link GASES} is a ruling's
- * (R08's Risks, "Deviations in T3.c, as built").
+ * SO₂ and O₃ from C. and M. Cuthbertson and CH₃OH from Ramaswamy. Each stays `estimated` because no
+ * measured King factor has been read for it, and none has been vetted to {@link GAS_DISPERSION}'s
+ * standard (its reference state read in the paper, its Z from NIST's equation of state). CO, H₂S
+ * and C₂H₆, once rows here, passed that vetting and are {@link GASES} (R08's Risks, "Deviations in
+ * T3.b's follow-up, as built").
  *
  * The rest take a polarisability: the static electronic α, never a dielectric value, which holds
  * vibrational polarisability; for the atoms, Schwerdtfeger and Nagle's recommended values. H, Mg
@@ -797,28 +919,6 @@ function noKingFactor(why: string): KingFactor {
 export const ESTIMATED_RAYLEIGH: ReadonlyArray<EstimatedRayleigh> = [
   {
     kind: "dispersion",
-    species: "CO",
-    dispersion: {
-      nMinusOne: oneTermNMinusOne(0.040_508, 123.77),
-      referenceK: ZERO_CELSIUS_K,
-      referencePa: STANDARD_ATMOSPHERE_PA,
-      compressibility: 1,
-      source:
-        "C. and M. Cuthbertson, Proc. R. Soc. Lond. A 97 (1920) 152, Table II: n − 1 = 0.040 508 ÷ (123.77 − λ⁻²), at 0 °C and 760 mm, reduced as an ideal gas",
-      dataFile: undefined,
-      measuredNm: [480, 670.8],
-    },
-    kingFactor: {
-      factor: () => (3 + 6 * 0.004_8) / (3 - 4 * 0.004_8),
-      source:
-        "ρₚ = 0.0048 at 632.8 nm (Bridge and Buckingham, Proc. R. Soc. Lond. A 295 (1966) 334, as Sneep and Ubachs 2005, §5.1, quote it)",
-    },
-    uncertaintyFactor: 1.07,
-    basis:
-      "the King factor from a secondary source; Sneep and Ubachs 2005's measured (6.19 ± 0.40) × 10⁻²⁷ cm² at 532.2 nm (Table 2) is the 1σ check",
-  },
-  {
-    kind: "dispersion",
     species: "SO2",
     dispersion: {
       nMinusOne: oneTermNMinusOne(0.063_733, 99.349),
@@ -834,24 +934,6 @@ export const ESTIMATED_RAYLEIGH: ReadonlyArray<EstimatedRayleigh> = [
     ),
     uncertaintyFactor: 1.08,
     basis: "no King factor",
-  },
-  {
-    kind: "dispersion",
-    species: "H2S",
-    dispersion: {
-      nMinusOne: oneTermNMinusOne(0.053_785, 86.876),
-      referenceK: ZERO_CELSIUS_K,
-      referencePa: STANDARD_ATMOSPHERE_PA,
-      compressibility: 1,
-      source: `${CUTHBERTSON_1910}: n − 1 = 0.053 785 ÷ (86.876 − λ⁻²) per molecule at 0 °C and 760 mm`,
-      dataFile: undefined,
-      measuredNm: [486.1, 656.3],
-    },
-    kingFactor: noKingFactor(
-      "ρ ≤ 0.003 in natural light (Ananthakrishnan, Proc. Indian Acad. Sci. A 2 (1935) 153), so F_K ≤ 1.005",
-    ),
-    uncertaintyFactor: 1.03,
-    basis: "an upper bound on the King factor",
   },
   {
     kind: "dispersion",
@@ -895,28 +977,6 @@ export const ESTIMATED_RAYLEIGH: ReadonlyArray<EstimatedRayleigh> = [
     resonanceNm: undefined,
     uncertaintyFactor: 1.34,
     basis: `${OLNEY_1997}, 4.188 Å³ (±6%); Loria 1909's dispersion sits 12% lower, so it is not used; F_K about 1.035, not read`,
-  },
-  {
-    kind: "dispersion",
-    species: "C2H6",
-    dispersion: {
-      nMinusOne: (wavelengthNm) => 7.33e-4 * (1 + 9.308e-3 * wavenumberSquaredPerUm2(wavelengthNm)),
-      referenceK: ZERO_CELSIUS_K,
-      referencePa: STANDARD_ATMOSPHERE_PA,
-      compressibility: 1 / 1.014_8,
-      source:
-        "Loria, Ann. Phys. 334 (1909) 605, Table IX: n − 1 = a(1 + b ÷ λ²) at 0 °C and 760 mm with refractiveindex.info's refit a = 7.330 × 10⁻⁴ (the printed 7.365 × 10⁻⁴ is 0.5% above his own table) and b = 9.308 × 10⁻³ µm²; he reduced his readings at 610–755 mm as an ideal gas, and NIST's ethane has dρ ÷ dp 1.0148 times the ideal near 291 K, so Z is taken as 1 ÷ 1.0148",
-      dataFile: undefined,
-      measuredNm: [523, 667.7],
-    },
-    kingFactor: {
-      factor: () => 1.006_6,
-      source:
-        "1 + (2/9)(Δα ÷ ᾱ)² with Δα ÷ ᾱ = 5.2 ÷ 30.2 a.u. at 632.8 nm (Bridge and Buckingham 1966, as van Gisbergen, Snijders and Baerends, J. Chem. Phys. 103 (1995) 9347, Table II, quote it)",
-    },
-    uncertaintyFactor: 1.06,
-    basis:
-      "the King factor from a secondary source, and Loria's α 2.2% below Hohm, Chem. Phys. 179 (1994) 533's static 29.54 a.u.",
   },
   {
     kind: "polarisability",

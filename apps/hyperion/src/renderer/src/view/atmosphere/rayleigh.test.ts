@@ -123,19 +123,31 @@ describe("the gases", () => {
     const oxygen = 15.999;
     expect(GAS_MOLAR_MASS_G_PER_MOL.N2O).toBeCloseTo(2 * nitrogen + oxygen, 9);
   });
+
+  // IUPAC 2021's abridged atomic weights: H 1.008, C 12.011, O 15.999 and S 32.06.
+  it.each([
+    ["CO", 12.011 + 15.999],
+    ["H2S", 2 * 1.008 + 32.06],
+    ["C2H6", 2 * 12.011 + 6 * 1.008],
+  ] as const)("build %s's molar mass from IUPAC 2021's abridged atomic weights", (gas, grams) => {
+    expect(GAS_MOLAR_MASS_G_PER_MOL[gas]).toBeCloseTo(grams, 9);
+  });
 });
 
 describe("each formula's reference state", () => {
   /**
    * The state each source states, and Z there: the NIST Chemistry WebBook's density (SRD 69) as
-   * p ÷ (ρRT); 1 for He et al. 2021's CH₄ and N₂O, whose n is defined through the ideal N.
+   * p ÷ (ρRT); 1 for He et al. 2021's CH₄ and N₂O, whose n is defined through the ideal N; and for
+   * a formula its paper reduced to a stated density or as an ideal gas, the Z of that reduction.
    */
   const STATES: ReadonlyArray<readonly [Gas, number, number, number]> = [
     ["H2", 273.15, 101_325, 1.000_624], // Peck and Huang 1977: 0 °C, 760 torr
     ["He", 273.15, 101_325, 1.000_532], // Mansfield and Peck 1969: 0 °C, 760 torr
     ["H2O", 293.15, 1_333, 0.999_237], // Ciddor 1996, eq. 3: 20 °C, 1,333 Pa
     ["CH4", 288.15, 101_325, 1], // He et al. 2021: 288.15 K, 1013.25 hPa
-    ["NH3", 273.15, 101_325, 0.984_798], // Cuthbertson and Cuthbertson 1914: 0 °C, 760 mm
+    // Cuthbertson and Cuthbertson 1914: 0 °C and 760 mm at the theoretic density, the real gas's
+    // refractivity times 0.7605 ÷ 0.7708 g L⁻¹ (p. 21).
+    ["NH3", 273.15, 101_325, (0.984_798 * 0.770_8) / 0.760_5],
     ["N2", 288.15, 101_325, 0.999_715], // Peck and Khanna 1966: 15 °C, 760 torr
     ["O2", 293.15, 101_325, 0.999_282], // Zhang et al. 2008 and Křen 2011: 20 °C, 101,325 Pa
     ["CO2", 273.15, 101_325, 0.993_265], // Bideau-Mehu et al. 1973: 0 °C, 760 torr
@@ -144,7 +156,24 @@ describe("each formula's reference state", () => {
     ["Kr", 273.15, 100_000, 0.997_282], // Börzsönyi et al. 2008: 0 °C, 1,000 mbar
     ["Xe", 273.15, 100_000, 0.993_245], // Börzsönyi et al. 2008: 0 °C, 1,000 mbar
     ["N2O", 288.15, 101_325, 1], // He et al. 2021: 288.15 K, 1013.25 hPa
+    // Cuthbertson and Cuthbertson 1920: reduced as an ideal gas from 30–50 cm at 17.5 °C.
+    ["CO", 273.15, 101_325, 0.999_54],
+    // Cuthbertson and Cuthbertson 1910: hydrogen's number density, the WebBook's Z at 16 °C over
+    // the paper's 0.990 92.
+    ["H2S", 273.15, 101_325, 0.991_571 / 0.990_92],
+    // Loria 1909: reduced as an ideal gas from 88–118 mm at about 18 °C.
+    ["C2H6", 273.15, 101_325, 0.998_97],
   ];
+
+  it("reads NH₃'s formula at a near-ideal density, within 0.2% of the ideal gas", () => {
+    expect(Math.abs(GAS_DISPERSION.NH3.compressibility - 1)).toBeLessThan(2e-3);
+  });
+
+  it("reads H₂S's formula at hydrogen's number density, the WebBook's H₂ Z to 10⁻⁴", () => {
+    expect(
+      Math.abs(GAS_DISPERSION.H2S.compressibility - GAS_DISPERSION.H2.compressibility),
+    ).toBeLessThan(1e-4);
+  });
 
   it("lists every gas", () => {
     expect(STATES.map(([gas]) => gas)).toEqual(GASES);
@@ -256,6 +285,58 @@ describe("each dispersion formula, against its source", () => {
       expect(relative(GAS_DISPERSION.N2O.nMinusOne(nm), sneep)).toBeLessThan(0.01);
     }
   });
+
+  // The papers' calculated values at their lines, Å in air, as printed: NH₃'s Table XII (1914,
+  // p. 22) and CO's Table II (1920, p. 155).
+  it.each([
+    ["NH3", 6_707.85, 37_374e-8],
+    ["NH3", 5_460.7, 37_861e-8],
+    ["NH3", 4_799.9, 38_295e-8],
+    ["CO", 6_708, 33_326e-8],
+    ["CO", 5_461, 33_640e-8],
+    ["CO", 4_800, 33_918e-8],
+  ] as const)("reproduces the Cuthbertsons' %s at %f Å to 5 × 10⁻⁵", (gas, angstrom, printed) => {
+    expect(relative(GAS_DISPERSION[gas].nMinusOne(angstrom / 10), printed)).toBeLessThan(5e-5);
+  });
+
+  it("is the Cuthbertsons' H₂S formula with their frequencies, n = 3 × 10¹⁰ ÷ λ, to 2 × 10⁻⁵", () => {
+    // 1910, p. 174: μ − 1 = 4.834 × 10²⁷ ÷ (7,808 × 10²⁷ − n²), its n₀² column computed with
+    // c = 3 × 10¹⁰ cm s⁻¹ (7,797 at 6563 Å; c = 2.998 × 10¹⁰ gives 7,786).
+    for (const nm of wavelengthsNm(480, 660, 5)) {
+      const frequencyPerS = 3e10 / (nm * 1e-7);
+      const printed = 4.834e27 / (7_808e27 - frequencyPerS * frequencyPerS);
+      expect(relative(GAS_DISPERSION.H2S.nMinusOne(nm), printed)).toBeLessThan(2e-5);
+    }
+  });
+
+  it("matches the Cuthbertsons' observed H₂S over 486.1–656.3 nm to 2 × 10⁻⁴", () => {
+    // 1910, p. 174: (n − 1) × 10⁶ = 636.22, 641.17, 644.03 and 650.98 at 6563, 5790, 5461 and
+    // 4861 Å.
+    const observed = [
+      [656.3, 636.22e-6],
+      [579, 641.17e-6],
+      [546.1, 644.03e-6],
+      [486.1, 650.98e-6],
+    ] as const;
+    for (const [nm, value] of observed) {
+      expect(relative(GAS_DISPERSION.H2S.nMinusOne(nm), value)).toBeLessThan(2e-4);
+    }
+  });
+
+  it("matches Loria's ethane, Table IX, over 523–667.7 nm to 0.2%", () => {
+    // Loria 1909, Table IX: n₀,₇₆₀ at 6.677, 6.185, 5.896, 5.790, 5.461 and 5.230 × 10⁻⁵ cm.
+    const table = [
+      [667.7, 7_478e-7],
+      [618.5, 7_509e-7],
+      [589.6, 7_528e-7],
+      [579, 7_542e-7],
+      [546.1, 7_566e-7],
+      [523, 7_568e-7],
+    ] as const;
+    for (const [nm, value] of table) {
+      expect(relative(GAS_DISPERSION.C2H6.nMinusOne(nm), value)).toBeLessThan(2e-3);
+    }
+  });
 });
 
 describe("the King factors", () => {
@@ -277,6 +358,37 @@ describe("the King factors", () => {
   it("gives H₂O's 1.001 from Murphy 1977's depolarisation, (3 + 6ρ) ÷ (3 − 4ρ)", () => {
     const rho = 3e-4;
     expect(Math.abs(kingFactor("H2O", 550) - (3 + 6 * rho) / (3 - 4 * rho))).toBeLessThan(1e-5);
+  });
+
+  // Measured ρₚ at 632.8 nm without the vibrational Raman lines (Keir 1995: NH₃'s 0.091 ± 0.009
+  // and C₂H₆'s 0.159 ± 0.002, × 10⁻²), within those errors.
+  it.each([
+    ["NH3", 0.000_91, 3e-4],
+    ["C2H6", 0.001_59, 1e-4],
+  ] as const)("gives %s Keir's measured King factor, from ρₚ = %f", (gas, rhoP, tolerance) => {
+    const measured = (3 + 6 * rhoP) / (3 - 4 * rhoP);
+    expect(Math.abs(kingFactor(gas, 632.8) - measured)).toBeLessThan(tolerance);
+  });
+
+  it.each([380, 550, 760])(
+    "gives CO's within the measurements' 1.0161–1.0176 at %i nm",
+    // Bogaard et al. 1978's 1.0161 at 632.8 nm and Couling and Graham 1994's 1.0176 at 514.5 nm.
+    (nm) => {
+      const king = kingFactor("CO", nm);
+      expect(king >= 1.016_1 && king <= 1.017_6).toBe(true);
+    },
+  );
+
+  it("gives H₂S's within (1, 1 + 2 × 10⁻⁴]", () => {
+    // Without its vibrational Raman lines, Δα = 0.669–0.678 a.u. over ᾱ ≈ 25.5 a.u. (Russell
+    // 1998, Table 4.4) gives 1.000 15–1.000 16.
+    const excess = kingFactor("H2S", 550) - 1;
+    expect(excess > 0 && excess <= 2e-4).toBe(true);
+  });
+
+  it("keeps H₂S's below Ananthakrishnan's bound, ρₙ ≤ 0.003", () => {
+    // Ananthakrishnan 1935, natural light: (6 + 3ρ) ÷ (6 − 7ρ) ≤ 1.0050.
+    expect(kingFactor("H2S", 550)).toBeLessThan((6 + 3 * 0.003) / (6 - 7 * 0.003));
   });
 });
 
@@ -373,6 +485,13 @@ describe("Sneep and Ubachs 2005's measurements at 532.2 nm (their Table 2)", () 
     expect(Math.abs(sneepCrossSectionCm2("O2") - 4.5e-27)).toBeLessThan(0.15e-27);
   });
 
+  it("agrees with their CO measurement, (6.19 ± 0.40) × 10⁻²⁷ cm², within its error", () => {
+    // A cavity ring-down extinction, CO having no visible absorption. The dispersion gives 6.585,
+    // 0.99σ above: their measurements run 2–6% below the n-based values for every gas (R08's
+    // Risks, T3.b's table), so the margin is the data's, not a tolerance.
+    expect(Math.abs(sneepCrossSectionCm2("CO") - 6.19e-27)).toBeLessThan(0.4e-27);
+  });
+
   it("puts CH₄'s scattering below their measured extinction, which carries CH₄'s absorption", () => {
     // 12.47 ± 0.23 is a cavity ring-down extinction; He et al. 2021 (§3.4) find it agrees with
     // their extinction, which absorption dominates over parts of 400–725 nm. Sneep and Ubachs's
@@ -382,6 +501,30 @@ describe("Sneep and Ubachs 2005's measurements at 532.2 nm (their Table 2)", () 
 
   it("puts CH₄'s scattering within 15% of that extinction", () => {
     expect(sneepCrossSectionCm2("CH4")).toBeGreaterThan(0.85 * 12.47e-27);
+  });
+});
+
+describe("Liu, Andrés Hernández, George and Burrows 2023's measurements at 408.4 nm", () => {
+  // Appl. Phys. B 129, 82, Table 1, setup 3 (continuous): cavity ring-down extinctions, × 10⁻²⁶ cm²,
+  // with their 2σ. Their abstract puts their own n-based values (Table 2: CO 2.027, N₂ 1.572)
+  // 0.6–2.4% from their measurements for six gases and 4.1% for CO.
+  const LIU_NM = 408.4;
+
+  /** σ at their line over their measurement, less 1. */
+  function excessOver(gas: Gas, measuredCm2: number): number {
+    return (rayleighCrossSectionM2(gas, LIU_NM) * CM2_PER_M2) / measuredCm2 - 1;
+  }
+
+  it("puts CO 2–3% above their (1.938 ± 0.011) × 10⁻²⁶ cm², where their n-based 2.027 is 4.6% above", () => {
+    const excess = excessOver("CO", 1.938e-26);
+    expect(excess).toBeGreaterThan(0.02);
+    expect(excess).toBeLessThan(0.03);
+  });
+
+  it("puts N₂ 2–4% above their (1.521 ± 0.016) × 10⁻²⁶ cm², as far as CO", () => {
+    const excess = excessOver("N2", 1.521e-26);
+    expect(excess).toBeGreaterThan(0.02);
+    expect(excess).toBeLessThan(0.04);
   });
 });
 
@@ -586,14 +729,14 @@ describe("rayleighOf", () => {
   });
 
   // A measured gas, a dispersion row, a static row, an oscillator row and an unknown key.
-  it.each(["N2", "CO", "HCN", "H", UNKNOWN])(
+  it.each(["N2", "SO2", "HCN", "H", UNKNOWN])(
     "refuses a cross-section at a wavelength in µm for %s",
     (species) => {
       expect(() => rayleighOf(species).crossSectionM2(0.55)).toThrow(RangeError);
     },
   );
 
-  it.each(["N2", "CO", "HCN", "H", UNKNOWN])(
+  it.each(["N2", "SO2", "HCN", "H", UNKNOWN])(
     "refuses a ρ at a wavelength in µm for %s",
     (species) => {
       expect(() => rayleighOf(species).depolarisation(0.55)).toThrow(RangeError);
@@ -681,15 +824,6 @@ describe("the estimated rows", () => {
     [440, 1.766_8e-27],
   ] as const)("put H within 0.1% of its exact σ at %i nm", (nm, exactCm2) => {
     expect(relative(rayleighOf("H").crossSectionM2(nm) * CM2_PER_M2, exactCm2)).toBeLessThan(1e-3);
-  });
-
-  it("put CO within Sneep and Ubachs's measured (6.19 ± 0.40) × 10⁻²⁷ cm² at 532.2 nm", () => {
-    // Sneep and Ubachs 2005, Table 2: a cavity ring-down extinction, CO having no visible absorption.
-    // The dispersion gives 6.59, 0.99σ above: their measurements run 2–6% below the n-based values
-    // for every gas (R08's Risks, T3.b's table), so the margin is the data's, not a tolerance.
-    expect(
-      Math.abs(rayleighOf("CO").crossSectionM2(SNEEP_NM) * CM2_PER_M2 - 6.19e-27),
-    ).toBeLessThan(0.4e-27);
   });
 
   it("put (128π⁵ ÷ 3) α² ÷ λ⁴ equal to the dispersion route for a dilute gas", () => {
@@ -906,7 +1040,19 @@ describe("the molecular term", () => {
  * absorption are R08.T4.c's continua (Thomson; bound–free and free–free), not a Rayleigh row.
  */
 const REGISTRY_GAS_ROWS = [
-  ...GASES,
+  "H2",
+  "He",
+  "H2O",
+  "CH4",
+  "NH3",
+  "N2",
+  "O2",
+  "CO2",
+  "Ar",
+  "Ne",
+  "Kr",
+  "Xe",
+  "N2O",
   "CO",
   "SO2",
   "H2S",
@@ -937,8 +1083,16 @@ describe("the registry's gas rows", () => {
     expect(rayleighOf(species).provenance).not.toBe("none");
   });
 
-  it("are the measured gases and the estimated rows, in the registry's order", () => {
-    expect(REGISTRY_GAS_ROWS).toEqual([...GASES, ...ESTIMATED_RAYLEIGH.map((row) => row.species)]);
+  it("are the measured gases and the estimated rows, each once", () => {
+    const tables = [...GASES, ...ESTIMATED_RAYLEIGH.map((row) => row.species)];
+    expect(REGISTRY_GAS_ROWS.toSorted()).toEqual(tables.toSorted());
+  });
+
+  it.each<readonly [string, ReadonlyArray<string>]>([
+    ["GASES", GASES],
+    ["ESTIMATED_RAYLEIGH", ESTIMATED_RAYLEIGH.map((row) => row.species)],
+  ])("keep the registry's order in %s", (_table, species) => {
+    expect(species).toEqual(REGISTRY_GAS_ROWS.filter((row) => species.includes(row)));
   });
 
   /** Every row in equal parts. */

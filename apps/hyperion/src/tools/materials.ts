@@ -772,7 +772,7 @@ export function cauchyIndex(
 
 /**
  * A gas's measured refractivity in the one-term form n − 1 = A ÷ (B − λ⁻²), λ the vacuum wavelength
- * in µm, at 0 °C and 760 mm.
+ * in µm, stated at 0 °C and 760 mm.
  */
 export interface OneTermRefractivity {
   /** A, µm⁻². */
@@ -788,37 +788,56 @@ export interface OneTermRefractivity {
 }
 
 /**
- * NH₃'s refractivity: C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1,
- * n − 1 = 0.032 953 ÷ (90.392 − λ⁻²), measured over 480–670.8 nm, with Z = 0.984 798. The same row
- * as `view/atmosphere/rayleigh.ts`'s `GAS_DISPERSION.NH3`, which
+ * NH₃'s refractivity: C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1, p. 22,
+ * n − 1 = 0.032 953 ÷ (90.392 − λ⁻²), measured over 480–670.8 nm, with Z = 0.984 798 × 0.7708 ÷
+ * 0.7605 = 0.998 14. The same row as `view/atmosphere/rayleigh.ts`'s `GAS_DISPERSION.NH3`, which
  * `view/atmosphere/materials/materials.test.ts` checks.
  *
  * @remarks
- * The review's science check read the paper (an OCR copy): it reduces every refractivity to the
- * "theoretic density", H₂'s at 0 °C and 76 cm times the molecular-weight ratio, which makes Z about
- * 1 rather than the real gas's 0.984 798 that `rayleigh.ts` and the ruling take. That question is
- * with "main" (R08's Risks). NH₄SH's estimate is nearly unmoved by it, since the ionic increment
- * was derived from NH₄Cl with the same NH₃ row: with Z = 1 and the increment re-derived, n at
- * 550 nm is 1.6446–1.6485.
+ * The paper reduces every refractivity to its "theoretic density" (p. 5): for ammonia (p. 21) it
+ * multiplies the real gas's refractivity at 0 °C and 760 mm by 0.7605 ÷ 0.7708, the theoretic over
+ * the measured weight of a litre, g. So the formula's gas is all but ideal, and Z is the real gas's,
+ * NIST's 0.984 798, over that factor (`rayleigh.ts` holds the reading).
  */
 export const NH3_REFRACTIVITY: OneTermRefractivity = {
   aPerUm2: 0.032_953,
   bPerUm2: 90.392,
-  compressibility: 0.984_798,
+  compressibility: (0.984_798 * 0.770_8) / 0.760_5,
   source: "C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1",
 };
 
 /**
- * H₂S's refractivity: C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171,
- * n − 1 = 0.053 785 ÷ (86.876 − λ⁻²) per molecule (Z = 1), measured over 486.1–656.3 nm. The same
- * row as `view/atmosphere/rayleigh.ts`'s H₂S estimate, which
+ * H₂S's refractivity: C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171, p. 174,
+ * n − 1 = 0.053 711 ÷ (86.756 − λ⁻²), measured over 486.1–656.3 nm, at the number density of
+ * hydrogen at 0 °C and 760 mm, with Z = 0.991 571 ÷ 0.990 92 = 1.000 66. The same row as
+ * `view/atmosphere/rayleigh.ts`'s `GAS_DISPERSION.H2S`, which
  * `view/atmosphere/materials/materials.test.ts` checks.
  */
 export const H2S_REFRACTIVITY: OneTermRefractivity = {
-  aPerUm2: 0.053_785,
-  bPerUm2: 86.876,
-  compressibility: 1,
+  aPerUm2: 0.053_711,
+  bPerUm2: 86.756,
+  compressibility: 0.991_571 / 0.990_92,
   source: "C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171",
+};
+
+/**
+ * HCl's refractivity, for NH₄Cl's increment ({@link NH4CL_IONIC_INCREMENT}): C. and M. Cuthbertson,
+ * Phil. Trans. R. Soc. Lond. A 213 (1914) 1, p. 12, (μ − 1) D ÷ (d₀76) = 4.6425 × 10²⁷ ÷ (10,664 ×
+ * 10²⁷ − n²), n = 3 × 10¹⁰ ÷ λ cm s⁻¹ as the paper's frequencies take it: n − 1 = 0.051 583 ÷
+ * (118.49 − λ⁻²), measured over 480–670.8 nm.
+ *
+ * @remarks
+ * The same paper as NH₃'s row, so the two gases' reductions match. The paper reduces HCl to the
+ * number density of hydrogen at 0 °C and 76 cm through Gray and Burt's volume ratio, 1.0079, and
+ * Leduc's expansion coefficient (p. 11), so Z is NIST's for H₂ there, 1.000 624. Reading Gray and
+ * Burt's ratio against NIST's H₂ at 16 °C instead gives 0.999 46, and the increment +3.58%, 6.5 ×
+ * 10⁻⁴ more.
+ */
+export const HCL_REFRACTIVITY: OneTermRefractivity = {
+  aPerUm2: 0.051_583,
+  bPerUm2: 118.49,
+  compressibility: 1.000_624,
+  source: "C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1",
 };
 
 /** The Avogadro constant, mol⁻¹, exact in the 2019 SI. */
@@ -863,22 +882,127 @@ export const NH4SH_MOLAR_VOLUME_CM3_PER_MOL = cellMolarVolumeCm3PerMol(6.011 ** 
  */
 export const NH4SH_MOLAR_MASS_G_PER_MOL = 14.007 + 5 * 1.008 + 32.06;
 
+/** The Lorentz–Lorenz factor (n² − 1) ÷ (n² + 2) of an index. */
+function lorentzLorenzFactor(index: number): number {
+  return (index * index - 1) / (index * index + 2);
+}
+
 /**
- * NH₄SH's ionic increment of molar refraction over NH₃'s plus H₂S's, +4.5%: ammonium chloride's,
- * from NH₄Cl's n_D 1.642 and density 1.519 g cm⁻³ against NH₃'s plus HCl's gas refractivities,
- * +4.3% to +4.7% (science-r08-nonspherical.md §3.1). SH⁻ is more polarisable than Cl⁻, and NH₄Br's
- * increment is about +11% (the ruling's estimate, from memory), so the stated band runs from 0 to
- * +12%.
+ * The additive molar refraction of gases, cm³ mol⁻¹: R = Σ (n² − 1) ÷ (n² + 2) × Z V₀ over their
+ * refractivities at 0 °C and 760 mm.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, where every formula's pole lies outside it.
+ * @throws RangeError if the wavelength lies at or past a formula's pole.
  */
-export const NH4SH_IONIC_INCREMENT = 0.045;
+export function gasMolarRefractionCm3PerMol(
+  gases: ReadonlyArray<OneTermRefractivity>,
+  wavelengthNm: number,
+): number {
+  const inverseUm2 = (1000 / wavelengthNm) ** 2;
+  let molarRefraction = 0;
+  for (const gas of gases) {
+    if (!(gas.bPerUm2 > inverseUm2)) {
+      throw new RangeError(`${wavelengthNm} nm lies at or past a pole of ${gas.source}`);
+    }
+    const n = 1 + gas.aPerUm2 / (gas.bPerUm2 - inverseUm2);
+    molarRefraction +=
+      lorentzLorenzFactor(n) * gas.compressibility * IDEAL_MOLAR_VOLUME_STP_CM3_PER_MOL;
+  }
+  return molarRefraction;
+}
+
+/**
+ * A solid's ionic increment δ, its excess molar refraction over its constituent gases':
+ * (n² − 1) ÷ (n² + 2) × V_m ÷ R − 1, with R their {@link gasMolarRefractionCm3PerMol}.
+ *
+ * @param wavelengthNm - The vacuum wavelength the solid's index is measured at, nm.
+ * @param molarVolumeCm3PerMol - The solid's molar volume V_m.
+ * @param index - The solid's real index at the wavelength.
+ * @throws RangeError as {@link gasMolarRefractionCm3PerMol} does.
+ */
+export function ionicIncrement(
+  gases: ReadonlyArray<OneTermRefractivity>,
+  wavelengthNm: number,
+  molarVolumeCm3PerMol: number,
+  index: number,
+): number {
+  return (
+    (lorentzLorenzFactor(index) * molarVolumeCm3PerMol) /
+      gasMolarRefractionCm3PerMol(gases, wavelengthNm) -
+    1
+  );
+}
+
+/** NH₄Cl's measured index and density, the ionic increment's calibration. */
+export interface IonicCalibration {
+  /** n_D, the real index at the sodium D lines. */
+  readonly indexD: number;
+  /** ρ, g cm⁻³. */
+  readonly densityGPerCm3: number;
+  /** M, g mol⁻¹. */
+  readonly molarMassGPerMol: number;
+  /** V_m = M ÷ ρ, cm³ mol⁻¹. */
+  readonly molarVolumeCm3PerMol: number;
+}
+
+/** NH₄Cl's density, g cm⁻³ (the CRC Handbook, 92nd ed., through Wikipedia, as the ruling takes it). */
+const NH4CL_DENSITY_G_PER_CM3 = 1.519;
+
+/** NH₄Cl's molar mass, g mol⁻¹, from CIAAW's conventional atomic weights (Cl 35.45). */
+const NH4CL_MOLAR_MASS_G_PER_MOL = 14.007 + 4 * 1.008 + 35.45;
+
+/**
+ * NH₄Cl's measured index and density, the ionic increment's calibration
+ * (science-r08-nonspherical.md §3.1): n_D = 1.642 and 1.519 g cm⁻³, at M = 53.489 g mol⁻¹.
+ *
+ * @remarks
+ * Both are the ruling's, read through Wikipedia: the index from Chemister.ru, the density from the
+ * CRC Handbook. The Handbook of Mineralogy's sal ammoniac gives n = 1.639(1), a measured 1.532 g
+ * cm⁻³ and a = 3.8756 Å with one formula unit (an X-ray 1.5258 g cm⁻³), which would lower the
+ * increment to +2.7–3.1% and NH₄SH's n(550) by up to 0.007, inside its band (R08's Risks, for
+ * "main").
+ */
+export const NH4CL_CALIBRATION: IonicCalibration = {
+  indexD: 1.642,
+  densityGPerCm3: NH4CL_DENSITY_G_PER_CM3,
+  molarMassGPerMol: NH4CL_MOLAR_MASS_G_PER_MOL,
+  molarVolumeCm3PerMol: NH4CL_MOLAR_MASS_G_PER_MOL / NH4CL_DENSITY_G_PER_CM3,
+};
+
+/** The sodium D lines' mean, 589.3 nm, as the Cuthbertsons' air wavelengths are read. */
+const SODIUM_D_NM = 589.3;
+
+/**
+ * NH₄Cl's ionic increment over NH₃ plus HCl, re-derived from {@link NH3_REFRACTIVITY} and
+ * {@link HCL_REFRACTIVITY} (the same paper) at the D line: +3.51%.
+ */
+export const NH4CL_IONIC_INCREMENT = ionicIncrement(
+  [NH3_REFRACTIVITY, HCL_REFRACTIVITY],
+  SODIUM_D_NM,
+  NH4CL_CALIBRATION.molarVolumeCm3PerMol,
+  NH4CL_CALIBRATION.indexD,
+);
+
+/**
+ * NH₄SH's ionic increment of molar refraction over NH₃'s plus H₂S's, +3.5%: ammonium chloride's,
+ * {@link NH4CL_IONIC_INCREMENT} (+3.51%), as science-r08-nonspherical.md §3.1 rules.
+ *
+ * @remarks
+ * The ruling's +4.5% (+4.3% to +4.7%) took NH₃ at the real gas's Z, 0.984 798, and HCl's index
+ * from a secondary source with Z from 0.9924 to 1; with NH₃'s formula read at its theoretic density
+ * and HCl from the same paper, the increment is +3.51% (R08's Risks, "Deviations in T3.b's
+ * follow-up, as built"). SH⁻ is more polarisable than Cl⁻, and NH₄Br's increment is about +11% (the ruling's
+ * estimate, from memory), so the stated band runs from 0 to +12%.
+ */
+export const NH4SH_IONIC_INCREMENT = 0.035;
 
 /** The stated uncertainty band of {@link NH4SH_IONIC_INCREMENT}, 0 to +12%, as fractions. */
 export const NH4SH_IONIC_INCREMENT_BAND: readonly [number, number] = [0, 0.12];
 
 /**
  * A solid's real index by Lorentz–Lorenz from its constituents' gas refractivities: the additive
- * molar refraction R = Σ (n² − 1) ÷ (n² + 2) × Z V₀ over the gases at 0 °C and 760 mm, raised by an
- * ionic increment δ, then x = (1 + δ) R ÷ V_m and n = √((1 + 2x) ÷ (1 − x)).
+ * molar refraction R ({@link gasMolarRefractionCm3PerMol}) raised by an ionic increment δ, then
+ * x = (1 + δ) R ÷ V_m and n = √((1 + 2x) ÷ (1 − x)).
  *
  * @param wavelengthNm - The vacuum wavelength, nm, where every formula's pole lies outside it.
  * @param molarVolumeCm3PerMol - The solid's molar volume V_m.
@@ -891,17 +1015,8 @@ export function lorentzLorenzIndex(
   molarVolumeCm3PerMol: number,
   increment: number,
 ): number {
-  const inverseUm2 = (1000 / wavelengthNm) ** 2;
-  let molarRefraction = 0;
-  for (const gas of gases) {
-    if (!(gas.bPerUm2 > inverseUm2)) {
-      throw new RangeError(`${wavelengthNm} nm lies at or past a pole of ${gas.source}`);
-    }
-    const n = 1 + gas.aPerUm2 / (gas.bPerUm2 - inverseUm2);
-    molarRefraction +=
-      ((n * n - 1) / (n * n + 2)) * gas.compressibility * IDEAL_MOLAR_VOLUME_STP_CM3_PER_MOL;
-  }
-  const x = ((1 + increment) * molarRefraction) / molarVolumeCm3PerMol;
+  const x =
+    ((1 + increment) * gasMolarRefractionCm3PerMol(gases, wavelengthNm)) / molarVolumeCm3PerMol;
   if (!(x > 0 && x < 1)) {
     throw new RangeError(`Lorentz–Lorenz: x = ${x} is not in (0, 1)`);
   }
@@ -923,6 +1038,29 @@ export function nh4shIndex(wavelengthNm: number, increment = NH4SH_IONIC_INCREME
     NH4SH_MOLAR_VOLUME_CM3_PER_MOL,
     increment,
   );
+}
+
+/**
+ * NH₃ ice's molar volume, cm³ mol⁻¹, the method's check on a measured molecular solid: the cubic
+ * cell of I. Olovsson and D. H. Templeton, Acta Cryst. 12 (1959) 832 (COD 2310927), a = 5.138 Å with
+ * four molecules.
+ */
+export const NH3_ICE_MOLAR_VOLUME_CM3_PER_MOL = cellMolarVolumeCm3PerMol(5.138 ** 3, 4);
+
+/**
+ * How far NH₄SH's estimate moves over {@link NH4SH_IONIC_INCREMENT_BAND} on the file's grid: the
+ * largest rise to the band's top and the largest fall to its foot.
+ */
+export function nh4shBandSpan(): { readonly above: number; readonly below: number } {
+  const [low, high] = NH4SH_IONIC_INCREMENT_BAND;
+  let above = 0;
+  let below = 0;
+  for (const nm of MATERIAL_GRID_NM) {
+    const n = nh4shIndex(nm);
+    above = Math.max(above, nh4shIndex(nm, high) - n);
+    below = Math.max(below, n - nh4shIndex(nm, low));
+  }
+  return { above, below };
 }
 
 /** The files made from no fetched table. */
@@ -958,13 +1096,13 @@ export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
     shape: "crystal",
     provenance: "standIn",
     paper:
-      "the estimate's inputs: C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1–26, DOI 10.1098/rsta.1914.0001, for NH3's dispersion; C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171–176, DOI 10.1098/rspa.1910.0003, for H2S's; C. D. West, \"The crystal structures of some alkali hydrosulfides and monosulfides\", Z. Kristallogr. 88 (1934) 97–115, DOI 10.1524/zkri.1934.88.1.97, for NH4SH's cell",
-    source: `a Lorentz–Lorenz estimate, not a measurement (science-r08-nonspherical.md §3.1, ruled 2026-10-10): the molar refraction of NH3 plus H2S from their gas dispersions at 0 °C and 760 mm (view/atmosphere/rayleigh.ts's Cuthbertson rows, Z = ${NH3_REFRACTIVITY.compressibility} for NH3 and ${H2S_REFRACTIVITY.compressibility} for H2S), raised by NH4Cl's ionic increment of ${(NH4SH_IONIC_INCREMENT * 100).toFixed(1)}%, over the molar volume of West 1934's cell as the Crystallography Open Database gives it, entry 1010249, https://www.crystallography.net/cod/1010249.cif, SHA-256 e721ed9fed41cab1c267ecadd4de31692340d3bfcefd6d9183312ae3a746bb71, fetched 2026-10-10 (P4/nmm, a = 6.011 Å, c = 4.009 Å, two formula units: ${NH4SH_MOLAR_VOLUME_CM3_PER_MOL.toFixed(2)} cm³ mol⁻¹, ${(NH4SH_MOLAR_MASS_G_PER_MOL / NH4SH_MOLAR_VOLUME_CM3_PER_MOL).toFixed(4)} g cm⁻³). The cell is as published, at room temperature and possibly in kX units, about ±0.005 in n. The gas dispersions are measured over 480–670.8 nm (NH3) and 486.1–656.3 nm (H2S) and extrapolated beyond. No visible optical constants of NH4SH are published: Howett et al. 2007 (JOSA B 24, 126) measured it only over 1,300–12,000 cm⁻¹ (0.83–7.7 µm)`,
+      "the estimate's inputs: C. and M. Cuthbertson, Phil. Trans. R. Soc. Lond. A 213 (1914) 1–26, DOI 10.1098/rsta.1914.0001, for NH3's and HCl's dispersions; C. and M. Cuthbertson, Proc. R. Soc. Lond. A 83 (1910) 171–176, DOI 10.1098/rspa.1910.0003, for H2S's; C. D. West, \"The crystal structures of some alkali hydrosulfides and monosulfides\", Z. Kristallogr. 88 (1934) 97–115, DOI 10.1524/zkri.1934.88.1.97, for NH4SH's cell",
+    source: `a Lorentz–Lorenz estimate, not a measurement (science-r08-nonspherical.md §3.1, ruled 2026-10-10): the molar refraction of NH3 plus H2S from their gas dispersions as stated at 0 °C and 760 mm (view/atmosphere/rayleigh.ts's Cuthbertson rows, each at the density its paper reduces to: Z = ${NH3_REFRACTIVITY.compressibility.toFixed(6)} for NH3 and ${H2S_REFRACTIVITY.compressibility.toFixed(6)} for H2S), raised by NH4Cl's ionic increment of ${(NH4SH_IONIC_INCREMENT * 100).toFixed(1)}% (its n_D ${NH4CL_CALIBRATION.indexD} and ${NH4CL_CALIBRATION.densityGPerCm3} g cm⁻³ against NH3 and HCl from Cuthbertson 1914 at ${SODIUM_D_NM} nm, ${(NH4CL_IONIC_INCREMENT * 100).toFixed(2)}%), over the molar volume of West 1934's cell as the Crystallography Open Database gives it, entry 1010249, https://www.crystallography.net/cod/1010249.cif, SHA-256 e721ed9fed41cab1c267ecadd4de31692340d3bfcefd6d9183312ae3a746bb71, fetched 2026-10-10 (P4/nmm, a = 6.011 Å, c = 4.009 Å, two formula units: ${NH4SH_MOLAR_VOLUME_CM3_PER_MOL.toFixed(2)} cm³ mol⁻¹, ${(NH4SH_MOLAR_MASS_G_PER_MOL / NH4SH_MOLAR_VOLUME_CM3_PER_MOL).toFixed(4)} g cm⁻³). The cell is as published, at room temperature and possibly in kX units, about ±0.005 in n. The gas dispersions are measured over 480–670.8 nm (NH3) and 486.1–656.3 nm (H2S) and extrapolated beyond. No visible optical constants of NH4SH are published: Howett et al. 2007 (JOSA B 24, 126) measured it only over 1,300–12,000 cm⁻¹ (0.83–7.7 µm)`,
     licence:
       "estimated values from cited constants and CC0 crystal data (the Crystallography Open Database's entry 1010249); no data set is copied (decision-r08-licences.md row 5)",
     reduction:
       "n = √((1 + 2x) ÷ (1 − x)), with x the raised molar refraction over the molar volume, evaluated on 380–780 nm every 5 nm to six significant figures; k = 0",
-    standIn: `a non-absorbing particle whose real index is a Lorentz–Lorenz estimate: ${nh4shIndex(380).toFixed(3)} at 380 nm, ${nh4shIndex(550).toFixed(3)} at 550 nm and ${nh4shIndex(780).toFixed(3)} at 780 nm, within about +0.06 and −0.04 (+0.065 at 380 nm) for an ionic increment from 0 to +12%. The same estimate for NH3 ice, at the cell of I. Olovsson and D. H. Templeton (Acta Cryst. 12 (1959) 832; COD 2310927; a = 5.138 Å, four molecules), gives 1.458 against the 1.436 at 550 nm that Martonchik et al. 1984 measure (Appl. Opt. 23, 541). k = 0, since pure NH4SH is a white solid (PubChem CID 25515, from ICSC); the colours it takes on Jupiter come from radiolysis products (Loeffler and Hudson 2018, Icarus 302, 418). It replaces the earlier stand-in of 1.80, which Sromovsky et al. 2017 (Icarus 291, 232, §4.3) state without a source, after the best-fit effective index of 1.85 that Sato et al. 2013 (Icarus 222, 100) find for Jupiter's clouds, a fit that particle shape and size trade against. 1.80 would need a molar refraction 23% above the additive one. A body whose medium shows this mode with less than CLOUD_DECK_SPLIT_OPTICAL_DEPTH above it at 550 nm reads ATMOSPHERE: APPROXIMATE, until measured visible constants replace it`,
+    standIn: `a non-absorbing particle whose real index is a Lorentz–Lorenz estimate: ${nh4shIndex(380).toFixed(3)} at 380 nm, ${nh4shIndex(550).toFixed(3)} at 550 nm and ${nh4shIndex(780).toFixed(3)} at 780 nm, within +${nh4shBandSpan().above.toFixed(3)} and −${nh4shBandSpan().below.toFixed(3)} for an ionic increment from ${(NH4SH_IONIC_INCREMENT_BAND[0] * 100).toFixed(0)} to +${(NH4SH_IONIC_INCREMENT_BAND[1] * 100).toFixed(0)}%. The same estimate for NH3 ice, at the cell of I. Olovsson and D. H. Templeton (Acta Cryst. 12 (1959) 832; COD 2310927; a = 5.138 Å, four molecules), gives ${lorentzLorenzIndex([NH3_REFRACTIVITY], 550, NH3_ICE_MOLAR_VOLUME_CM3_PER_MOL, 0).toFixed(3)} against the 1.436 at 550 nm that Martonchik et al. 1984 measure (Appl. Opt. 23, 541). k = 0, since pure NH4SH is a white solid (PubChem CID 25515, from ICSC); the colours it takes on Jupiter come from radiolysis products (Loeffler and Hudson 2018, Icarus 302, 418). It replaces the earlier stand-in of 1.80, which Sromovsky et al. 2017 (Icarus 291, 232, §4.3) state without a source, after the best-fit effective index of 1.85 that Sato et al. 2013 (Icarus 222, 100) find for Jupiter's clouds, a fit that particle shape and size trade against. 1.80 would need a molar refraction ${(ionicIncrement([NH3_REFRACTIVITY, H2S_REFRACTIVITY], 550, NH4SH_MOLAR_VOLUME_CM3_PER_MOL, 1.8) * 100).toFixed(0)}% above the additive one. A body whose medium shows this mode with less than CLOUD_DECK_SPLIT_OPTICAL_DEPTH above it at 550 nm reads ATMOSPHERE: APPROXIMATE, until measured visible constants replace it`,
     fit: null,
     wavelengthsNm: MATERIAL_GRID_NM,
     n: MATERIAL_GRID_NM.map((nm) => rounded(nh4shIndex(nm))),

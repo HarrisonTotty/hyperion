@@ -2,14 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   cauchyIndex,
-  cellMolarVolumeCm3PerMol,
   CO2_ICE_FIT,
   DERIVED_MATERIALS,
   FETCHED_MATERIALS,
+  HCL_REFRACTIVITY,
   IDEAL_MOLAR_VOLUME_STP_CM3_PER_MOL,
+  ionicIncrement,
   lorentzLorenzIndex,
   MATERIAL_GRID_NM,
+  NH3_ICE_MOLAR_VOLUME_CM3_PER_MOL,
   NH3_REFRACTIVITY,
+  NH4CL_CALIBRATION,
+  NH4CL_IONIC_INCREMENT,
+  NH4SH_IONIC_INCREMENT,
   NH4SH_IONIC_INCREMENT_BAND,
   nh4shIndex,
   parseAria,
@@ -143,37 +148,85 @@ describe("the derived files", () => {
     expect(IDEAL_MOLAR_VOLUME_STP_CM3_PER_MOL).toBeCloseTo(22_413.969_54, 4);
   });
 
-  it("estimate NH₄SH's index as science-r08-nonspherical.md §3.1 gives it", () => {
-    // The ruling: 1.685 at 380 nm, 1.648 at 550 nm and 1.632 at 780 nm at δ = +4.5%.
-    expect(Math.abs(nh4shIndex(380) - 1.685)).toBeLessThan(5e-4);
-    expect(Math.abs(nh4shIndex(550) - 1.648)).toBeLessThan(5e-4);
-    expect(Math.abs(nh4shIndex(780) - 1.632)).toBeLessThan(5e-4);
+  it("read NH₃'s formula at the paper's theoretic density, Z = 0.984 798 × 0.7708 ÷ 0.7605", () => {
+    // Cuthbertson and Cuthbertson 1914, p. 21: the real gas's refractivity at 0 °C and 760 mm times
+    // 0.7605 ÷ 0.7708 g L⁻¹; 0.984 798 is the NIST Chemistry WebBook's NH₃ there.
+    expect(NH3_REFRACTIVITY.compressibility).toBeCloseTo(0.998_136, 6);
   });
 
-  it("keep NH₄SH's estimate within +0.065 and −0.04 over the increment's band", () => {
+  it("re-derive NH₄Cl's increment, +3.51%, from NH₃ and HCl in the same paper", () => {
+    expect(NH4CL_IONIC_INCREMENT).toBeCloseTo(0.035_1, 4);
+  });
+
+  it("take NH₄SH's increment as NH₄Cl's to 0.1%", () => {
+    expect(Math.abs(NH4SH_IONIC_INCREMENT - NH4CL_IONIC_INCREMENT)).toBeLessThan(1e-3);
+  });
+
+  it("would give +4.7%, the top of the ruling's +4.3% to +4.7%, with its own inputs", () => {
+    // The ruling's derivation (science-r08-nonspherical.md §3.1): HCl's n − 1 = 4.456 × 10⁻⁴ at the
+    // D line, from a secondary source, with its Z read between 0.9924 and 1 (+4.7% to +4.3%).
+    const realNh3 = { ...NH3_REFRACTIVITY, compressibility: 0.984_798 };
+    const secondaryHcl = { aPerUm2: 4.456e-4 * (118.49 - 1 / 0.5893 ** 2), bPerUm2: 118.49 };
+    const increment = ionicIncrement(
+      [realNh3, { ...secondaryHcl, compressibility: 0.992_4, source: "HCl" }],
+      589.3,
+      NH4CL_CALIBRATION.molarVolumeCm3PerMol,
+      NH4CL_CALIBRATION.indexD,
+    );
+    expect(increment).toBeCloseTo(0.047, 3);
+  });
+
+  // science-r08-nonspherical.md §3.1's method; its 1.685, 1.648 and 1.632 at δ = +4.5% took NH₃'s
+  // real-gas Z (R08's Risks, "Deviations in T3.b's follow-up, as built").
+  it.each([
+    [380, 1.681_2],
+    [550, 1.644_4],
+    [780, 1.628_9],
+  ] as const)("estimate NH₄SH's index at %i nm as %f, with the +3.5% increment", (nm, index) => {
+    expect(Math.abs(nh4shIndex(nm) - index)).toBeLessThan(5e-4);
+  });
+
+  it("keep NH₄SH's estimate within +0.075 and −0.03 over the increment's band", () => {
     const [low, high] = NH4SH_IONIC_INCREMENT_BAND;
     for (const nm of MATERIAL_GRID_NM) {
       const n = nh4shIndex(nm);
-      expect(nh4shIndex(nm, high) - n).toBeLessThan(0.065);
-      expect(n - nh4shIndex(nm, low)).toBeLessThan(0.04);
+      expect(nh4shIndex(nm, high) - n).toBeLessThan(0.075);
+      expect(n - nh4shIndex(nm, low)).toBeLessThan(0.03);
     }
   });
 
-  it("would need a 23% increment to reach the withdrawn 1.80 at 550 nm", () => {
-    expect(nh4shIndex(550, 0.22)).toBeLessThan(1.8);
-    expect(nh4shIndex(550, 0.24)).toBeGreaterThan(1.8);
+  it("state NH₄SH's band over the grid, +0.074 and −0.029, in its file", () => {
+    const nh4sh = DERIVED_MATERIALS.find((file) => file.key === "NH4SH");
+    expect(nh4sh?.standIn).toContain("within +0.074 and −0.029");
   });
 
-  it("give NH₃ ice the ruling's 1.458, the method's check on a measured molecular solid", () => {
+  it("read HCl's row as the paper prints it, with n = 3 × 10¹⁰ ÷ λ, to 2 × 10⁻⁵", () => {
+    // Cuthbertson and Cuthbertson 1914, p. 12: (μ − 1) D ÷ (d₀76) = 4.6425 × 10²⁷ ÷ (10,664 × 10²⁷ −
+    // n²); its Table V gives 44,803 × 10⁻⁸ at 5460.7 Å, calculated.
+    const nm = 546.07;
+    const frequencyPerS = 3e10 / (nm * 1e-7);
+    const printed = 4.6425e27 / (10_664e27 - frequencyPerS * frequencyPerS);
+    const row = HCL_REFRACTIVITY.aPerUm2 / (HCL_REFRACTIVITY.bPerUm2 - (1000 / nm) ** 2);
+    expect(Math.abs(row / printed - 1)).toBeLessThan(2e-5);
+  });
+
+  it("reproduce Table V's calculated 44,803 × 10⁻⁸ for HCl at 5460.7 Å", () => {
+    const nm = 546.07;
+    const row = HCL_REFRACTIVITY.aPerUm2 / (HCL_REFRACTIVITY.bPerUm2 - (1000 / nm) ** 2);
+    expect(Math.abs(row / 44_803e-8 - 1)).toBeLessThan(5e-5);
+  });
+
+  it("would need a 22% increment to reach the withdrawn 1.80 at 550 nm", () => {
+    expect(nh4shIndex(550, 0.22)).toBeLessThan(1.8);
+    expect(nh4shIndex(550, 0.23)).toBeGreaterThan(1.8);
+  });
+
+  it("give NH₃ ice 1.465, the method's check on a measured molecular solid", () => {
     // Olovsson and Templeton's cubic cell (Acta Cryst. 12 (1959) 832; COD 2310927), a = 5.138 Å with
-    // four molecules; Martonchik et al. 1984 (Appl. Opt. 23, 541) measure 1.436 at 550 nm.
-    const n = lorentzLorenzIndex(
-      [NH3_REFRACTIVITY],
-      550,
-      cellMolarVolumeCm3PerMol(5.138 ** 3, 4),
-      0,
-    );
-    expect(Math.abs(n - 1.458)).toBeLessThan(5e-4);
+    // four molecules; Martonchik et al. 1984 (Appl. Opt. 23, 541) measure 1.436 at 550 nm, 0.029
+    // below. The ruling's 1.458 took NH₃'s real-gas Z.
+    const n = lorentzLorenzIndex([NH3_REFRACTIVITY], 550, NH3_ICE_MOLAR_VOLUME_CM3_PER_MOL, 0);
+    expect(Math.abs(n - 1.464_8)).toBeLessThan(5e-4);
   });
 
   it("refuse a wavelength at or past a dispersion's pole", () => {

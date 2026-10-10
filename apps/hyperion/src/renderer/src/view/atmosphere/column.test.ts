@@ -539,7 +539,10 @@ describe("the gases' properties", () => {
 
   /**
    * R ÷ c_p at 298.15 K from NIST-JANAF's c_p (Chase 1998): Design note 3's nine with NH₃ at
-   * 8.314 ÷ 35.652 and N₂ at 8.314 ÷ 29.124, the atoms' exact 2/5, and N₂O's 8.314 ÷ 38.617.
+   * 8.314 ÷ 35.652 and N₂ at 8.314 ÷ 29.124, the atoms' exact 2/5, N₂O's 8.314 ÷ 38.617, CO's
+   * 8.314 ÷ 29.149 and H₂S's 8.314 ÷ 34.197 (the WebBook's Shomate fits). C₂H₆'s is at 100 K,
+   * 8.314 ÷ 35.70 (Gurvich, Veyts et al. 1989), the cold atmospheres it is taken for; at 298.15 K
+   * it is 0.158 (52.49), which no fixed N follows.
    */
   const MEASURED: Readonly<Record<Gas, number>> = {
     H2: 0.288,
@@ -555,9 +558,12 @@ describe("the gases' properties", () => {
     Kr: 0.4,
     Xe: 0.4,
     N2O: 0.215,
+    CO: 0.285,
+    H2S: 0.243,
+    C2H6: 0.233,
   };
 
-  it.each(GASES)("holds %s's R/c_p within Design note 3's 7% of its value at 298 K", (gas) => {
+  it.each(GASES)("holds %s's R/c_p within Design note 3's 7% of its measured value", (gas) => {
     expect(relative(1 / GAS_HEAT_CAPACITY[gas].overR, MEASURED[gas])).toBeLessThan(0.075);
   });
 
