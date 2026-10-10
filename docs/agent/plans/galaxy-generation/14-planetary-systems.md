@@ -4253,6 +4253,10 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   - Until T35.e, which follows this subtask directly, `convert/planetary.rs` sends an `Ok` surface
     as `not_modelled`, since the wire has no form for it yet. It is one line, which T35.e replaces.
   - If T24.d is built first, T24.d builds the split, and this subtask finds it done.
+  - _P14.T14.d's hold._ The batch's bump commit, this subtask's, removes it:
+    `ENVELOPED_TIDES_VERSION`, `rotation::tides_in_force` and the tripwire test
+    `the_envelope_s_tides_are_held_only_until_the_batch_s_bump` go, and every reader calls `tides`,
+    as Risks, "A sub-Neptune's tides, as built", lists step by step.
   - _Tests:_ a 90°-obliquity world's equator–pole contrast is negative; a locked airless body's
     day–night contrast exceeds 300 K and Venus's is under 10 K (T24.a's, kept); every present rocky
     body's surface section is `Ok` from `DetailLevel::Surface`, and a gas-envelope body's, a
@@ -4896,20 +4900,20 @@ feeding back into p_s, T_s, the albedo or the bulk.
 
 Each is labelled "not yet modelled" where a console could show it:
 
-- **T55.a** outgassing and redox speciation, with the heavy-secondary equilibrium: one bracketed
+- **P14.T55.a** outgassing and redox speciation, with the heavy-secondary equilibrium: one bracketed
   root in the oxygen potential, reproducing Woitke et al. 2021's types A–C, as a fitted table on
   the snapshot path (`outgassing_speciation`; Guimond et al. 2021; Tian and Heng 2024; Gaillard and
   Scaillet 2014 and Ortenzi et al. 2020, from memory);
-- **T55.b** silicate-vapour atmospheres (`silicate_vapour`; Schaefer and Fegley 2009; Ito et al.
+- **P14.T55.b** silicate-vapour atmospheres (`silicate_vapour`; Schaefer and Fegley 2009; Ito et al.
   2015; Kite et al. 2016; Zilinskas et al. 2022);
-- **T55.c** exospheres, recorded, not drawn;
-- **T55.d** carbon-rich surfaces and refractory carbon from the soot line (Bond, O'Brien and
+- **P14.T55.c** exospheres, recorded, not drawn;
+- **P14.T55.d** carbon-rich surfaces and refractory carbon from the soot line (Bond, O'Brien and
   Lauretta 2010; Bergin et al. 2023);
-- **T55.e** seasonal volatile transport and frost by month;
-- **T55.f** clathrate reservoirs and their outgassing;
-- **T55.g** isotopes, D/H first;
-- **T55.h** three-dimensional day–night chemistry and nightside clouds;
-- **T55.i** brown dwarfs' atmospheres: plan 13's bodies, on T52's envelope chemistry.
+- **P14.T55.e** seasonal volatile transport and frost by month;
+- **P14.T55.f** clathrate reservoirs and their outgassing;
+- **P14.T55.g** isotopes, D/H first;
+- **P14.T55.h** three-dimensional day–night chemistry and nightside clouds;
+- **P14.T55.i** brown dwarfs' atmospheres: plan 13's bodies, on T52's envelope chemistry.
 
 ## Verification
 
@@ -4981,7 +4985,8 @@ it:
   fill sections the goldens hold as `NotModelled`, and T48.e's gas-envelope split turns a
   sub-Neptune's surface to `NotApplicable` and adds each planet's `envelope` section (its renaming
   of `has_surface` moves nothing). T24.f, T24.a–b and T48.a–e take one bump, T24's; T24.e, T24.c
-  (with T24.g) and T24.d take one each, or one between them if built together; each is
+  (with T24.g) and T24.d take one each, or one between them if built together (_superseded by
+  the Phase L bullet below:_ they join the 22 → 23 batch, whose one bump is P14.T54.a's); each is
   coordinated through "main". None adds a draw or a domain tag as drafted. P14.T35.e changes the
   wire, not the output, and leaves `PROTOCOL_VERSION` at 2 (decision-p14-t35e-wire). T24.g adds no
   draw or domain tag. P14.T14.d (decision-backlog-1) rides the same bump. It moves the locking

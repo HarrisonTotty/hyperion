@@ -2575,4 +2575,6 @@ re-blessing this plan's payload and coarse goldens in that commit.
     interpolated coarse elevation" reads as an interpolant through the cells. Design note 13's
     spline is approximating, and the surface does not pass through the server's cells, so this
     goes with Design note 13's other departures in the roadmap's brainstorm corrections (asked of
-    "main").
+    "main"). _Applied 2026-10-09:_ lane docs-consistency amended the brainstorm's per-query step 2
+    to "from the coarse elevation through an approximating C² spline", with σ_h matched on the
+    surface it reconstructs (`signoff-brainstorm.md`, "Later amendments").
