@@ -5,8 +5,15 @@
  * @remarks
  * A hydrostatic atmosphere under one T(p) stands at heights proportional to 1 ÷ g(φ), so the medium
  * is built once at g_ref = √(g_e g_p) ({@link referenceGravity}) and read at the gravity-scaled
- * height h\* = s h, s = g(φ) ÷ g_ref, optical depth from a table being divided by s: the U.S.
- * Standard Atmosphere 1976's geopotential height. The transmittance table is a family of slices
+ * height h\* = s h, s = g(φ) ÷ g_ref, optical depth from a table being divided by s. h\* is the
+ * level spheroid's geopotential height (W₀ − W) ÷ g_ref to first order in h ÷ R, g being held at
+ * g(φ) along the normal. The column (`column.ts`) adds the second order in the U.S. Standard
+ * Atmosphere 1976's form, Φ = R_ref h\* ÷ (R_ref + h\*), with R_ref and g_ref in place of its fixed
+ * r₀ = 6,356.766 km and g₀ = 9.80665 m s⁻². That stands the monopole's free-air gradient,
+ * 2 s g(φ) ÷ R_ref, for the level spheroid's, g(φ)(1 ÷ M + 1 ÷ N) + 2ω² (Bruns's formula), and
+ * leaves a pressure level within s h² |s ÷ R_ref − (1 ÷ M + 1 ÷ N) ÷ 2 − ω² ÷ g(φ)| of its
+ * geopotential height: at h\* = 10 H, 0.036 H at Saturn's equator and 0.011 H at its pole, and
+ * 0.001 H on Earth (computed, decision-r08-spheroid). The transmittance table is a family of slices
  * over κ = s R_α ÷ R_ref, R_α the radius of curvature along the looked-up ray's azimuth
  * ({@link directionalCurvatureRadiusM}) and R_ref the per-planet tables' ground, R05's
  * `tableRadiusM`; the multiple-scattering and baked tables are a family of bands over s

@@ -1109,9 +1109,29 @@ Names are those the owning plans give; the owning plan is authoritative.
         360 comparisons each.
       - **Named constants in `gate.ts`:** the 0.05, F, the 4 and the 8, so that a later ruling
         changes one line.
-      - Only diffuse radiance is compared. The direct beam is checked against Beer–Lambert to
-        10⁻⁶ in optical depth, no geometry lies within 3° of a sun, and both pipelines average over
-        the tracer's stated detector cone of 0.5°–1°.
+      - Only diffuse radiance is compared in the images. No geometry lies within 3° of a sun, and
+        both pipelines average over the tracer's stated detector cone of 0.5°–1°. The direct beam
+        has two checks of its own, on a sphere and a spheroid alike (decision-r08-spheroid,
+        2026-10-10):
+        - _The reference's beam._ At every geometry and sun, the reference's `sunOpticalDepth`
+          equals the client's own `f64` quadrature of the case along the same chord, converged
+          below 10⁻⁷, to 10⁻⁶·max(1, τ): R05's `opticalDepth` on a sphere, and R08.T6.e's
+          brute-force march on the true spheroid, density at h\*, on a spheroid. So the two
+          pipelines read one medium on one figure, and the diffuse radiance compared leaves out
+          the same beam. No client table is held to this.
+        - _The client's beam_, as the client reads it (the transmittance table at the observer
+          towards each sun, sliced on a spheroid), is held to the metric as a radiance. At every
+          geometry whose observer is inside the atmosphere and whose sun the ground does not hide,
+          L_beam(g,c) = E_c·e^(−τ(g,c)) ÷ π, E_c the sun's irradiance at the top in channel c,
+          the radiance of a white Lambertian surface facing the sun:
+          |L_beam,client − L_beam,ref| ≤ max(0.05·L_beam,ref, F·L_max(I(g),c)), with the image's
+          L_max of the diffuse comparison and no σ term, the reference's beam being a quadrature.
+        - _Why a radiance._ The sun's disc is far above AgX's shoulder at any exposure that shows
+          the sky until it has nearly set, so the beam is seen chiefly by what it lights. An error
+          Δτ moves that light by e^(−Δτ) − 1, whatever τ is. A bound relative to τ is therefore
+          one in radiance only where τ ≲ 1: 0.5% of τ is 5% of the beam at τ = 10, a
+          Saturn-class sun on the horizon of its 1-bar datum (τ ≈ 9.7 at 550 nm and 24 at
+          440 nm). R08.T6.e's bound is in absolute optical depth for that reason.
       - The geometry set:
         - ground: view zenith {0, 30, 60, 75, 85}° × relative azimuth {0, 45, 90, 135, 180}° ×
           sun zenith {0, 30, 60, 80, 90, 95}°, less its duplicates and its in-cone points
@@ -1334,9 +1354,21 @@ Names are those the owning plans give; the owning plan is authoritative.
         which plan 14's figure is level ("Figures not flattened by the spin alone", below), and
         g_ref = √(g_e g_p) is the gravity the column (R08.T3.a) is built at. Optical depth read
         from a table is divided by s.
-        This is geopotential height, the U.S. Standard Atmosphere 1976's vertical coordinate. The
-        scaling is exact for optical depth: shrinking lengths by s maps the local sphere of
-        radius R_α onto one of radius s·R_α carrying the reference medium, with τ multiplied by s.
+        h\* is the level spheroid's geopotential height, (W₀ − W) ÷ g_ref, to first order in
+        h ÷ R, g being held at g(φ) along the normal. The column (R08.T3.a) adds the second order
+        in the U.S. Standard Atmosphere 1976's form, Φ = R_ref h\* ÷ (R_ref + h\*), with R_ref
+        and g_ref in place of its fixed r₀ = 6,356.766 km and g₀ = 9.80665 m s⁻². Its monopole's
+        free-air gradient, 2s·g(φ) ÷ R_ref, stands for the level spheroid's,
+        g(φ)(1 ÷ M + 1 ÷ N) + 2ω² (Bruns's formula). So a pressure level lies within
+        s·h²·|s ÷ R_ref − (1 ÷ M + 1 ÷ N) ÷ 2 − ω² ÷ g(φ)| of its geopotential height: at
+        h\* = 10 H, 0.036 H at Saturn's equator and 0.011 H at its pole (the medium 3.5% thin and
+        1.1% dense there; 0.3% and 0.1% at 3 H), and 0.001 H on Earth (computed,
+        decision-r08-spheroid). Client and tracer share it, so no gate sees it. It is a stated
+        limit, a quarter of the zonal winds' (below) at 10 H, and nothing computed changes for
+        it. The scaling is exact for optical depth where s and R_α are uniform along the ray:
+        shrinking lengths by s maps the local sphere of radius R_α onto one of radius s·R_α
+        carrying the reference medium, with τ multiplied by s. Where s varies along the ray, the
+        lookup takes it up (_The ray's own gradient_, below).
       - _Curvature slices._ The transmittance table becomes a small family over κ = s·R_α ÷
         R_ref. Slice k is the reference medium on a sphere of radius κ_k·R_ref, spaced Δln κ ≤
         0.15 (interpolation error under 0.1% in grazing τ) and read at (κ, r = κ_k·R_ref + h\*,
@@ -1344,6 +1376,26 @@ Names are those the owning plans give; the owning plan is authoritative.
         transmittance). The count is 1 + ⌈ln(κ_max ÷ κ_min) ÷ 0.15⌉ once the range exceeds 0.02,
         and 1 below that: 1 for Earth, 2 for the ice giants, 4 for Jupiter and 5 for Saturn. That
         is 128 KB a slice at the high size, rebuilt only when the medium changes.
+      - _The ray's own gradient_ (computed 2026-10-10, decision-r08-spheroid). A lookup at the
+        sample's s and R_α alone misses the change of s along a ray that crosses latitudes.
+        - On a Saturn-class figure at 30–60°, along the meridian, it errs in optical depth by
+          0.3–0.4% grazing from the datum, 0.8–1.1% from 1 H and 1.8–2.4% from 3 H, and by
+          0.16–0.55% at μ = 0.2. At the equator, at the pole and along a parallel it errs by
+          0.14% at most.
+        - At a 45° limb at the terminator, the sun along the meridian, that is up to 2.1% in
+          single-scattered radiance. With the sun 1.5° below the tangent point's horizon it is
+          up to 3.5%.
+        - So R08.T6.e reads each lookup on the sphere that fits the ray's own h\*(x), its κ\* and
+          μ\* in place of the sample's, to its bound. Any rule that meets the bound serves.
+        - Measured: the sphere through the start, with the ray's slope of h\*,
+          s μ + h (∂s ÷ ∂φ) √(1 − μ²) cos α ÷ (M + h), and through h\* where the ray has risen
+          one local scale height H ÷ s. It leaves 0.06% at most on rays that rise or run level,
+          and 0.05% at that limb.
+        - A ray that dips below its start's horizon is interpolated between slices at a fixed
+          lowest height, not a fixed μ. One that dips by more than about H ÷ 2s is fitted at its
+          lowest point.
+        - κ\* beyond the slices' range takes the nearest slice, and how far it leaves the range
+          is recorded.
       - _Latitude bands._ Multiple scattering depends non-linearly on the column. So the
         multiple-scattering and irradiance tables, Design note 9's thick bakes, R08.T15's deck
         tables and `DiscReflectanceTable` are built per band of s.
@@ -1370,9 +1422,10 @@ Names are those the owning plans give; the owning plan is authoritative.
         - a full spheroidal march of the sun's path per sample is a nested march over the UHD 620's
           budget (Design note 11).
     - **Gas giants.** Nothing is new in kind, only in size. Their datum is the 1-bar level
-      spheroid, so gravity-scaled height above it is exactly their hydrostatic structure (under
-      one T(p)). That makes the gravity term mandatory there, being 30–60 times Earth's. Three
-      effects are not modelled, and each is stated:
+      spheroid, so gravity-scaled height above it is their hydrostatic structure (under one
+      T(p)), to the second-order residual stated under the rule. That makes the gravity term
+      mandatory there, being 30–60 times Earth's. Three effects are not modelled, and each is
+      stated:
       - zonal winds change the effective gravity by 2ωu + u²/a, about 1.4% of g under Saturn's
         400 m s⁻¹ equatorial jet;
       - the real 1-bar surface departs from the best-fit spheroid through differential rotation
@@ -1432,8 +1485,9 @@ Names are those the owning plans give; the owning plan is authoritative.
       delta tracking against a majorant, the spheroid shells, and density at h\*. R08.T12.b adds
       a thin Saturn-class case (f = 0.098, H₂–He Rayleigh over a Lambertian 1-bar boundary, so that
       R08.T13 gates it with the thin cases) with ground views at the equator (ray azimuths north and
-      east), at 60° and at the pole, and the limb at 0.3, 1 and 3 H over the equator and the pole.
-      These run under the same 5% metric.
+      east), at 60° (the sun along the meridian, poleward) and at the pole, and the limb at 0.3, 1
+      and 3 H over the equator, 45° and the pole (the sun on the tangent point's horizon, along the
+      meridian at 45°; decision-r08-spheroid). These run under the same 5% metric.
     - Until R08.T6.f lands, a body with ln(κ_max ÷ κ_min) > 0.02 is drawn under Design note 9's
       `ATMOSPHERE: APPROXIMATE`. The tasks are R08.T3.a and T3.d (the column at g_ref, normal
       gravity and the slicing), T6.e and T6.f (the twin and the kernels), T9.b (irradiance by
@@ -1901,9 +1955,14 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     1,500–3,000 K;
   - H⁻ bound–free and free–free in closed form (John 1988, from memory);
   - Fe lines;
+  - Ca I 422.7 nm, Mg I 285.2 nm and Ti's visible lines, which no other task lists (R08.T3.c's
+    finding: at solar abundances Ca's far-wing scattering reaches about a third of a hot giant's
+    Rayleigh depth at 440 nm, against under 1.2% from T3.c's polarisability estimate);
   - SO₂'s near-ultraviolet tail;
   - H₂O's and NH₃'s visible bands, and CH₄ above 296 K;
-  - Thomson scattering by e⁻ (σ_T).
+  - Thomson scattering by e⁻, which is a scattering term, not an absorber (R08.T3.c): a
+    `MediumTerm` on the electrons' number density with the constant σ_T = 6.652 × 10⁻²⁹ m²
+    (CODATA 2018) in every channel, no absorption, and Rayleigh's phase at ρ = 0.
 
   Each source's licence is checked at its fetch under `decision-r08-licences.md`'s rule.
   ExoMol's data are CC BY-SA 4.0, so their reduced cross-sections go in a file of their own,
@@ -1915,6 +1974,7 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       2000's Bond albedo for class IV is 0.03, Table 1a);
     - Na D's depth monotone in column;
     - H⁻'s continuum equal to John 1988's tabulated values at three wavelengths;
+    - e⁻'s term scattering n_e σ_T in every channel, absorbing nothing, with ρ = 0;
     - every T_c in (0, 1] for a 2,500 K and a 30,000 K sun.
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers`.
 
@@ -2154,20 +2214,29 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
 
 - **R08.T6.e Slices and bands, the twin.** It needs R08.T3.d. In `tablesCpu.ts`: density and
   every lookup at the gravity-scaled height h\* = s·h; transmittance over the κ slices of
-  `medium.slicing`, read at (κ, r = κ_k·R_ref + h\*, μ) with κ from the looked-up ray's own
-  azimuth and optical depth divided by s; multiple scattering and irradiance per band, each an
-  ordinary build at the band's g(φ) and √(MN). The sky-view and aerial-perspective marches march
-  each ray in its own osculating sphere R_α, and the orbit march keeps R05's spheroid shells with
-  density at h\*. R05's `geodeticOf` (`hillaire.ts`), a fixed-point iteration that does not
-  converge above a flattening of about 0.04, is replaced here, keeping its signature, by a closed
-  form (Vermeille 2002, as R08.T12.d's Rust takes, or Bowring 1976), since Saturn's f = 0.098 needs
-  it; R05.T12.c's tests keep passing. Tests (no GPU):
+  `medium.slicing`, read on the sphere that fits the looked-up ray's own h\*(x) (Design note 17,
+  _The ray's own gradient_), its κ\* and μ\* in place of the sample's κ and μ, at
+  r = κ_k·R_ref + h\*, and optical depth divided by s; multiple scattering and irradiance per
+  band, each an ordinary build at the band's g(φ) and √(MN). The sky-view and aerial-perspective
+  marches march each ray in its own osculating sphere R_α, each sample's s at its own latitude,
+  not the camera's, and the orbit march keeps R05's spheroid shells with density at h\*. R05's
+  `geodeticOf` (`hillaire.ts`), a fixed-point iteration that does not converge above a flattening
+  of about 0.04, is replaced here, keeping its signature, by a closed form (Vermeille 2002, as
+  R08.T12.d's Rust takes, or Bowring 1976), since Saturn's f = 0.098 needs it; R05.T12.c's tests
+  keep passing. Tests (no GPU):
   - a sphere with ω = 0 reproduces T6.d's tables to 10⁻¹²;
   - the geodetic conversion round-trips on a Saturn-class figure to 10⁻⁶ m from the datum to 10
     scale heights;
   - on a Saturn-class figure, an `f64` brute-force march of the sun's path on the true spheroid,
-    density at h\*, gives the sliced lookup's optical depth within 0.5% at grazing and 0.1% at μ
-    ≥ 0.2: at the equator looking north and east, at 45° and at the pole;
+    density at h\*, gives the sliced lookup's optical depth within max(0.01, 2 × 10⁻³ τ) in every
+    channel (decision-r08-spheroid). That is 1% in the beam wherever τ ≤ 5, Design note 17's
+    share of Design note 10's 5%, and 2% at τ = 10, a beam under 4.5 × 10⁻⁵ of the sun's.
+    - The rays start at the datum and at h\* = 0.3, 1 and 3 H.
+    - Their μ is −0.035, −0.02 and −0.01 (where they clear the ground), 0, 0.05, 0.2 and 0.5.
+    - They are at the equator, at 15°, 30°, 45°, 60° and 75° looking north, north-east, south
+      and east, and at the pole.
+    - The same rays read at the sample's s and R_α alone are recorded beside them. The march,
+      converged below 10⁻⁷, is also Design note 10's reference-beam quadrature;
   - interpolating between slices in ln κ costs under 0.1% in grazing optical depth, and between
     bands under 0.5% in multiple-scattering radiance, against a table built at the exact value;
   - Earth's slicing is one slice and one band, and Earth's differences from T6.d (s within ±0.26%)
@@ -2187,7 +2256,10 @@ fifth and sixth widen R05 Design note 16's spheroid lookup to every flattening (
   passing with s ≡ 1 at a = c. `setMedium` allocates the layers under `atmosphere-tables`; Earth's
   one slice and one band are one-layer arrays, bound through R08.T0's seam. When this lands,
   `ATMOSPHERE: APPROXIMATE` clears for oblate thin bodies. Smoke (`just test-render`): the
-  readbacks agree with the twin to 10⁻³ on a Saturn-class figure and on Earth. Acceptance:
+  readbacks agree with the twin to 10⁻³ on a Saturn-class figure and on Earth. `oblate.wgsl`
+  fits each lookup's sphere as T6.e's twin does (Design note 17, _The ray's own gradient_), with
+  analytic slopes, and its cost per transmittance read is recorded here and in R08.T11's
+  benchmarks; a body of one band may skip the fit, its s varying by under 2%. Acceptance:
   `pnpm test` and `just test-render` pass; by hand, the Saturn-class limb from orbit over the
   equator and the pole is recorded here.
 
@@ -2580,8 +2652,10 @@ here, and `pnpm test` passes.
   builds the case format, and a bless-style vitest (R08.T4.a's `bless.ts`) that writes the cases
   of Design note 16 from the client's optics, and `saturn-oblate`, Design note 17's thin
   Saturn-class case under `Shells::Spheroid` (H₂–He Rayleigh over a Lambertian 1-bar boundary;
-  ground views at the equator looking north and east, at 60° and at the pole; the limb at 0.3, 1
-  and 3 H over the equator and the pole). R08.T13's gate covers it with the thin cases. The
+  ground views at the equator looking north and east, at 60° with the sun along the meridian,
+  poleward, and at the pole; the limb at 0.3, 1 and 3 H over the equator, 45° and the pole, the
+  sun on the tangent point's horizon, along the meridian at 45°; decision-r08-spheroid). R08.T13's
+  gate covers it with the thin cases. The
   command `hyperion-fit atmosphere-reference --stokes` traces them, so that each reference holds
   the vector I and the scalar I of the same paths (Design note 10, Polarisation). The references
   are committed with sample counts, times and load average. The case writer gives every term its
@@ -2596,6 +2670,9 @@ here, and `pnpm test` passes.
       own brightest, not to the noon image's;
     - the 4σ allowance, and the refusal of a reference whose σ exceeds T ÷ 8;
     - the cone average;
+    - the direct beam (Design note 10): E_c·e^(−τ) ÷ π under the same T with no σ term, a beam
+      under the image's floor passing, and the reference's `sunOpticalDepth` against the
+      client's quadrature to 10⁻⁶·max(1, τ);
     - the recorded ΔE*ab, relative RMS difference and max ÷ mean.
 
     The references are traced until σ_ref ≤ T ÷ 8 at every geometry (decision-backlog-1), and
@@ -2631,6 +2708,11 @@ cloud fraction 1). Tests:
 - `saturn-oblate` classifies `thin` and passes the gate with R08.T6.e's slicing, and fails it with
   one slice and one band at the limb above 1 H (the check that the gate sees oblateness); both are
   recorded;
+- every case's direct beam passes Design note 10's two checks, and each case's worst ratio for
+  each is recorded: the reference's `sunOpticalDepth` against the client's own quadrature
+  (R08.T6.e's spheroid march on `saturn-oblate`), and the client's beam (the sliced lookup on
+  `saturn-oblate`) in radiance under the metric. A sphere's beam that fails at the horizon, R05's
+  256 × 64 table being short there, is recorded and raised for a ruling, not excused;
 - two-layer media (Rayleigh over a g ≈ 0.7 aerosol) that straddle the boundary classify on each
   side of it as the sweep predicts;
 - whether τ* collapses onto constant τ(1 − ωg) within one grid step is tested and recorded. Only if
@@ -2867,14 +2949,16 @@ records are here.
   - Mie against Wiscombe's cases;
   - the aggregates against optool;
   - every table's CPU twin against the reference on Design note 10's metric (T13–T16;
-    decision-backlog-1), in `just ci`, with u′v′, ΔE*ab and the relative RMS difference recorded;
+    decision-backlog-1), the direct beam's two checks included (decision-r08-spheroid), in
+    `just ci`, with u′v′, ΔE*ab and the relative RMS difference recorded;
   - the polarisation correction against a 16-stream vector solve (T14.e), and every gate against
     the vector reference from T14.f on;
   - the surface irradiance against the reference's downwelling flux, and the summed sky-view against
     per-sun tables (T7, T13);
   - oblate bodies (Design note 17): normal gravity against WGS 84's γ_e and γ_p to 10⁻⁹ in both
-    languages (T3.d, T12.d); the sliced twin against an `f64` brute-force spheroid march (T6.e);
-    and `saturn-oblate` passing the gate with the slicing and failing it without (T13).
+    languages (T3.d, T12.d); the sliced twin against an `f64` brute-force spheroid march to
+    max(0.01, 2 × 10⁻³ τ), along the meridian at 15–75° included (T6.e); and `saturn-oblate`
+    passing the gate with the slicing and failing it without (T13).
 - **Reference, slow:** the tracer against Garcia and Siewert (scalar), Natraj, Kokhanovsky and
   IPRT A (Stokes, with tabulated matrices) and Loughman, under `just test-slow`; its spheroid mode
   against its sphere mode at a = c (T12.d).
@@ -4071,18 +4155,24 @@ generator, and the reference's sampling needs no domain tag.
     conversion has no closed form in radicals (a sextic: Diaz-Toca, Marín and Necula 2020,
     arXiv:1909.06452), and Somigliana's is a level ellipsoid of revolution's. `oblate.ts`'s caveats
     (winds, the 1-bar surface, T(p) by latitude, the sectoral tide) hold here unchanged.
-  - _Open, raised with "main", each with its lean:_
-    - _Design note 10's 10⁻⁶ direct beam on spheroid cases._ The client's sliced transmittance
-      promises 0.5% at grazing and 0.1% at μ ≥ 0.2 (R08.T6.e), so on `saturn-oblate` a 10⁻⁶ check
-      of the client's direct beam cannot pass. Lean: on spheroid cases hold the reference's
-      `sunOpticalDepth` to 10⁻⁶ against an `f64` quadrature (as T12.d's test does) and the
-      client's by T6.e's bounds, R08.T13 recording which.
-    - _"Geopotential height" (a wording finding, from the science check)._ Design note 17 and
-      `oblate.ts` call h\* the U.S. Standard Atmosphere 1976's geopotential height. It is that to
-      first order in h ÷ R only (NASA TR R-459, eq. 15): g is held at γ(φ) along the normal and
-      `g_ref` stands for g₀′, which leaves out h² ÷ R, about 0.08 H at 10 H on Saturn. Client and
-      tracer share it, so nothing gated moves. Lean: reword the note and `oblate.ts` (the tracer's
-      doc says so already).
+  - _Decided 2026-10-10 (`decision-r08-spheroid.md`)._
+    - _The direct beam on spheroid cases._ Both of Design note 10's beam checks apply to every
+      case, sphere or spheroid:
+      - the reference's `sunOpticalDepth` against the client's own `f64` quadrature, to
+        10⁻⁶·max(1, τ) (R08.T6.e's brute-force spheroid march on `saturn-oblate`; T12.d's test
+        holds the tracer to 10⁻⁶ of an independent one);
+      - the client's beam in radiance, under the metric.
+
+      R08.T6.e's 0.5% at grazing was not consistent with the 5%: an error Δτ moves the beam by
+      e^(−Δτ) − 1 whatever τ is. Its bound becomes max(0.01, 2 × 10⁻³ τ). A lookup at the
+      sample's s and R_α alone misses that by up to 5.3× at 30–75° along the meridian, which
+      Design note 17's _The ray's own gradient_ takes up.
+
+    - _"Geopotential height"._ Reworded in Design note 17 and `oblate.ts`; nothing computed
+      changes. h\* is the level spheroid's geopotential height to first order. The column's
+      R_ref Φ ÷ (R_ref − Φ) already restores the h² ÷ R term, the science check's 0.08 H at 10 H
+      on Saturn. What is left is the monopole's free-air gradient against the level spheroid's:
+      0.036 H at Saturn's equator and 0.011 H at its pole at 10 H, and 0.001 H on Earth.
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:
@@ -4131,7 +4221,8 @@ generator, and the reference's sampling needs no domain tag.
   and `dryAirKingFactor`. Two science-checker agents checked Design note 4's table against the
   primary sources, and their key figures were recomputed; a third reviewed the result. Main
   adopted every lean below on 2026-10-09. Design note 4 stands as written; these corrections
-  supersede it:
+  supersede it. _Superseded 2026-10-09:_ Design note 4's table is now T3.b's as built, with these
+  corrections (lane docs-consistency, bringing the plans in line with the signed-off brainstorm):
   - **CH₄** takes He, Fang, Shoshanim, Brown and Rudich, Atmos. Chem. Phys. 21 (2021) 14927,
     eq. 10: 10⁸(n − 1) = 3,603.09 + 4.403 62 × 10¹⁴ ÷ (1.1741 × 10¹⁰ − ν²), at 288.15 K, fitted
     over 264–671 nm, with F_K = 1. Sneep and Ubachs 2005's eq. 18 is a fit to Hohm 1993's
@@ -4195,7 +4286,10 @@ generator, and the reference's sampling needs no domain tag.
     formula's own state, holds; only the source names change. _Drafted for the owner:_ the
     roadmap's table gains the CH₄ row and the King factors' correction (R08.T3.b), for the owner
     to apply to the brainstorm. This corrects the re-validation's "nothing here contradicts the
-    brainstorm".
+    brainstorm". _Superseded 2026-10-09:_ the roadmap's "Brainstorm corrections" table carries
+    both, in its "CO₂ and CH₄" and "H₂ and He" rows, applied to the brainstorm by its sign-off
+    (`signoff-brainstorm.md`), whose "Atmosphere" now takes CH₄ from He et al. 2021 and H₂'s King
+    factor from Raj, Hamaguchi and Witek 2018.
   - **Design note 4's dense-gas factor** (a finding for the owner; nothing computed uses it). The
     note gives "about 1.06 at Venus's surface". A science check of NIST's CO₂ (Span–Wagner) at
     737 K and 9.2 MPa gives Z = 1.0057 and ρk_BTκ_T = 0.985, about 1.025 with the Lorentz–Lorenz

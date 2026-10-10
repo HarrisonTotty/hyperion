@@ -4,12 +4,13 @@
 //! A hydrostatic atmosphere under one T(p) stands at heights proportional to 1 ÷ g(φ), so the
 //! client builds its medium once at `g_ref` = √(γₑ γₚ) and reads it at the **gravity-scaled
 //! height** h\* = s h, s = γ(φ) ÷ `g_ref`, with h the geodetic height above the datum and γ(φ) the
-//! normal gravity at the geodetic latitude φ (Design note 17): a geopotential height to first
-//! order in h ÷ R (the U.S. Standard Atmosphere 1976's, NASA TR R-459, eq. 15), with g held at its
-//! datum value γ(φ) along the normal and `g_ref` in place of the standard g₀′. The tracer reads every
-//! density profile at h\* in the same way, so that a case's profiles, its shell heights and its
-//! `topHeightM` are all gravity-scaled heights. Where the client and the tracer meet, they agree by
-//! construction:
+//! normal gravity at the geodetic latitude φ (Design note 17): the level spheroid's geopotential
+//! height (W₀ − W) ÷ `g_ref` to first order in h ÷ R, with g held at its datum value γ(φ) along the
+//! normal; the client's column adds the second order in the U.S. Standard Atmosphere 1976's form at
+//! `R_ref` and `g_ref` (`column.ts`), which the case's profiles carry (decision-r08-spheroid). The
+//! tracer reads every density profile at h\* in the same way, so that a case's profiles, its shell
+//! heights and its `topHeightM` are all gravity-scaled heights. Where the client and the tracer
+//! meet, they agree by construction:
 //!
 //! - the figure is the client's `LevelSpheroid` (`view/atmosphere/oblate.ts`), field for field, its
 //!   ω being Design note 17's `ω_fig`, the spin under which plan 14's figure is level (the client's
