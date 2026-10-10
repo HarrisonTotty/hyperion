@@ -12,7 +12,11 @@ export type SkyLayerCensusDto = {
 layer: MassLayer, 
 /**
  * The radius the census searches to, ly (Design note 9): since rendering plan R06.T7.b, its
- * farthest ray's, the cap being one radius a ray of the caps' lattice.
+ * farthest ray's, the cap being one radius a ray of the caps' lattice. Where the reply states
+ * a [`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v), layers C, D and E's cap is
+ * their real boundary (rendering plan R13, Design note 3), at most
+ * [`real_limit_ly`](SkyResponse::real_limit_ly), and the final reply's
+ * [`complete_to_rays_ly`](Self::complete_to_rays_ly) is that boundary ray by ray.
  */
 cap_ly: number, 
 /**
@@ -21,8 +25,20 @@ cap_ly: number,
 rule_bound_ly: number, 
 /**
  * The stars expected brighter than the cut beyond the cap: the cap's approximation, stated.
+ * Beyond a real boundary that is the count the band holds the light of, near the Sun some
+ * thousands in each of layers C, D and E at the eye's cut (rendering plan R13, R13.T1.b).
  */
 expected_beyond: number, 
+/**
+ * The stars expected brighter than the synthetic ceiling beyond the cap, stated for every
+ * layer where the reply states a ceiling ([`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v);
+ * rendering plan R13, Design note 3): for layers C, D and E beyond their real boundary, under
+ * one where that boundary is the radius at the ceiling and more where
+ * [`real_limit_ly`](SkyResponse::real_limit_ly) holds it, near the Sun some 172 C to E at the
+ * ceiling V 5.0 (R13.T1.b); for A, B and the brown dwarfs beyond the cut's own cap, which
+ * they keep. Absent without a ceiling, and for a cap a test forces.
+ */
+bright_beyond?: number, 
 /**
  * The cells searched.
  */
@@ -55,7 +71,9 @@ feature_members_absent: boolean,
  * each ray of the caps' lattice it is complete to that ray's radius in
  * [`complete_to_rays_ly`](Self::complete_to_rays_ly), the edge held within the cap. It lists
  * a star, until it is final, only where the star lies nearer than that radius towards the
- * centre of its band texel, whose ray the band holds all of the layer's light beyond.
+ * centre of its band texel, whose ray the band holds all of the layer's light beyond; where
+ * the reply states a [`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v), layers C, D
+ * and E list so in the final reply too (rendering plan R13, Design note 3).
  */
 complete_to_ly: number, 
 /**
@@ -64,11 +82,21 @@ complete_to_ly: number,
  * (1,536), each ray's cap radius held within the shell edge reached. Empty where the layer is
  * complete to one radius in every direction, `complete_to_ly`. Towards a direction it is
  * complete to the largest of these over the rays within the lattice's spacing of it.
+ *
+ * Where the reply states a [`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v), layers
+ * C, D and E's radii are their real boundary held within the edge reached. In the final reply
+ * that is the real boundary itself, ray by ray. In a reply not yet final, each ray below
+ * [`complete_to_ly`](Self::complete_to_ly) is at its real boundary, while a ray at that edge,
+ * or an empty table, leaves the real boundary between the edge and [`cap_ly`](Self::cap_ly).
+ * No table states it sooner: each reply's band holds the light beyond that reply's own radii,
+ * so a client draws by those alone (rendering plan R13, R13.T2.b).
  */
 complete_to_rays_ly: Array<number>, 
 /**
- * Whether the layer's last shell is censused: it lists every star of the cells it opens, as a
- * one-shot census does, and is complete to its cap. Layers A and B and the brown dwarfs, one
- * shell each, are final from the first answer.
+ * Whether the layer's last shell is censused: it is complete to its cap, and lists every star
+ * of the cells it opens, as a one-shot census does, but for layers C, D and E where the reply
+ * states a [`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v), which list only the
+ * stars within their real boundary towards each star's band texel. Layers A and B and the
+ * brown dwarfs, one shell each, are final from the first answer.
  */
 final: boolean, };

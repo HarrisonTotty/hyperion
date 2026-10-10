@@ -3,8 +3,8 @@
 //! (R06.T8), the census's bound star by star, step by step (R06.T8.g), the illumination of the
 //! diffuse galactic light (R06.T9.g), the band near the Sun, marched with and without that light
 //! and summed (R06.T9.b, T9.f, T9.g) and under a camera's cut (R06.T9.j), and the limit map
-//! (R06.T9.i); and the hybrid sky's real tier near the Sun, at the ceiling's caps and held within
-//! the real limit (rendering plan R13, R13.T1 and T1.b).
+//! (R06.T9.i); and the hybrid sky's real tier near the Sun, at the ceiling's caps, held within
+//! the real limit, and as the server serves it (rendering plan R13, R13.T1, T1.b and T2.b).
 //!
 //! They run on `GalaxyParams::milky_way_like()` with a fixed seed. A miss is a finding to record,
 //! not a CI failure: CI compiles these and never runs them. Every figure below is provisional
@@ -59,6 +59,7 @@
 //! | `sky/caps_by_ray_near_sun` | none: a record (R06.T7.b) | 1,475 CPU-s, sampled 1 in 1,000 |
 //! | `sky/census_near_sun_ceiling/*` | under twice the feasibility study's estimate, or to the owner (R13.T1) | R13's Risks |
 //! | `sky/census_near_sun_limit/*` | under twice `decision-r13-guard-trip.md` §2.3's estimate, or to the owner (R13.T1.b) | R13's Risks |
+//! | `sky/census_near_sun_served/*` | none: recorded beside R13.T1.b's capped tier, for R06.T17's full-cold figure (R13.T2.b) | R13's Risks |
 //! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 0.947 CPU-s, provisional |
 //! | `sky/band_near_sun/march` | within the first sky's (T17) | 16.11 CPU-s with the diffuse light, provisional |
 //! | `sky/band_near_sun/march_no_dgl` | none (the lit march's reference, R06.T9.g) | 15.73 CPU-s, provisional |
@@ -112,6 +113,15 @@
 //! CPU time by R13.T1's fix (i) factors near the Sun, which overstate them within the limit. It
 //! prints the same tallies, and the whole against that record's estimate (§2.3): more than twice
 //! it goes back to the owner before R13.T2 builds.
+//!
+//! `sky/census_near_sun_served` (R13.T2.b) censuses the real tier as the server serves it, for the
+//! eye alone at V<sub>P</sub> 5.0, RM3's ceiling, on the fixture and, as `served_*`, on the
+//! server's galaxy: its query states the ceiling, and the sim's `census_plan` derives C to E's
+//! real boundary from both counts over one measure of the rays (`real_boundary`, held within
+//! 2,000 ly) and widens their cones by the band texel's radius (fix (i)), so no factor scales it.
+//! Its census is merged as the server merges one at a ceiling. It prints each layer's count
+//! brighter than the ceiling beyond its boundary, the reply's `bright_beyond`, and records the
+//! whole beside T1.b's measured capped tier, recorded, not gated.
 //!
 //! The brainstorm's 400–800 CPU-s and 5 × 10⁹ candidates are the inner bulge's under the near-Sun
 //! caps held fixed; the nuclear disc's bench takes its own caps, which are far smaller.
@@ -265,13 +275,13 @@ use hyperion_sim::sky::band::{
 };
 use hyperion_sim::sky::caps::{
     CAPPED_LAYERS, CapCount, CapResolution, LayerCap, RADIAL_STEPS_PER_DECADE, REAL_LIMIT_LY,
-    layer_caps, layer_caps_by_visibility,
+    SYNTHETIC_CEILING_V, layer_caps, layer_caps_by_visibility,
 };
 use hyperion_sim::sky::census::{
     BlockKey, BlockParams, CellOffsets, CellSlab, CensusCost, CensusPlan, CensusTallies,
     HeldRecord, LayerCost, LayerTally, MAX_N_MAX, NoSkyCellCache, Rebuild, SkyBlock, SkyCellCache,
     SkyCensus, SkyContext, SkyQuery, SkyStar, StarBounds, census_cell, census_cell_with_cost,
-    census_plan, census_plan_of, merge_census,
+    census_plan, census_plan_of, merge_census, merge_shells,
 };
 use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination, IlluminationRows};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
@@ -772,7 +782,14 @@ fn census_of_plan(
             sums
         });
     }
-    let census = merge_census(parts.into_iter().map(|(_, (p, _, _))| p), query.n_max());
+    // A census at a synthetic ceiling lists C, D and E within their real boundary towards each
+    // star's texel, the final reply included (R13.T2.a), as the server merges it.
+    let parts = parts.into_iter().map(|(_, (p, _, _))| p);
+    let census = if query.synthetic_ceiling().is_some() {
+        merge_shells(parts, query.n_max(), plan.complete())
+    } else {
+        merge_census(parts, query.n_max())
+    };
     Run {
         census,
         cost,
@@ -1477,6 +1494,9 @@ struct Judged {
     estimate_cpu_s: (f64, f64),
     limit_ly: Option<f64>,
     fix_i: Option<[f64; BOUNDED_LAYERS.len()]>,
+    /// Whether more than twice the estimate goes back to the owner (R13.T1, T1.b), or the run is
+    /// recorded only (R13.T2.b).
+    guards: bool,
 }
 
 /// The census of C, D and E of a real tier's bench, summed over the three layers, CPU-s scaled by
@@ -1654,7 +1674,9 @@ fn report_tier(run: &Run, judged: &Judged, bounded: &BoundedCensus) {
         judged.against,
         whole / hi,
         whole / lo,
-        if whole > 2.0 * hi {
+        if !judged.guards {
+            "recorded, not gated"
+        } else if whole > 2.0 * hi {
             "YES, to the owner before R13.T2 builds"
         } else if whole > 2.0 * lo {
             "twice its low end only"
@@ -1693,6 +1715,7 @@ fn census_near_sun_ceiling(c: &mut Criterion) {
                         estimate_cpu_s: ceiling_estimate(ceiling_v, request),
                         limit_ly: None,
                         fix_i: None,
+                        guards: true,
                     };
                     b.iter_custom(|iters| {
                         let mut cpu = Duration::ZERO;
@@ -1785,6 +1808,7 @@ fn census_near_sun_limit(c: &mut Criterion) {
                 estimate_cpu_s: limit_estimate(ceiling_v, galaxy),
                 limit_ly: Some(REAL_LIMIT_LY),
                 fix_i: Some(fix_i_factors(ceiling_v)),
+                guards: true,
             };
             group.bench_function(&name, |b| {
                 let sky = sky_of();
@@ -1805,6 +1829,130 @@ fn census_near_sun_limit(c: &mut Criterion) {
                 });
             });
         }
+    }
+    group.finish();
+}
+
+/// R13.T1.b's measured capped tier near the Sun at V<sub>P</sub> 5.0 at the eye's cut, CPU-s,
+/// without and with T1's fix (i) factors (R13's Risks, "Deviations in T1.b, as built"): 12,612 and
+/// 13,141 on the fixture, 27,012 and 28,238 on the server's galaxy. R13.T2.b's served tier, which
+/// widens its cones itself, records itself beside them.
+#[must_use]
+const fn capped_tier_measured(galaxy: BenchGalaxy) -> (f64, f64) {
+    match galaxy {
+        BenchGalaxy::Fixture => (12_612.0, 13_141.0),
+        BenchGalaxy::Served => (27_012.0, 28_238.0),
+    }
+}
+
+/// Prints each layer's expected count brighter than the ceiling beyond its boundary in `caps`, a
+/// real boundary's (`LayerCap::bright_beyond`), and C to E's sum: the reply's `bright_beyond`.
+fn report_bright_beyond(name: &str, caps: &[LayerCap]) {
+    let each: Vec<String> = caps
+        .iter()
+        .map(|cap| {
+            let bright = cap.bright_beyond().unwrap_or(f64::NAN);
+            format!("{:?} {bright:.4}", cap.layer())
+        })
+        .collect();
+    let c_to_e: f64 = caps
+        .iter()
+        .filter(|cap| BOUNDED_LAYERS.contains(&cap.layer()))
+        .filter_map(LayerCap::bright_beyond)
+        .sum();
+    eprintln!(
+        "{name}: brighter than V {SYNTHETIC_CEILING_V:.1} beyond each layer's boundary: {}; C to E {c_to_e:.1}",
+        each.join(", ")
+    );
+}
+
+/// R13.T2.b's sampled cold bench of the served sky's real tier near the Sun (rendering plan R13,
+/// Design notes 3, 4 and 16; for R06.T17's full-cold figure): the eye alone at its own cut, its
+/// query at RM3's ceiling ([`SYNTHETIC_CEILING_V`]) as the server states it, planned by the sim's
+/// `census_plan` at the ceiling, as the server's jobs plan it bit for bit (`real_boundary` of the
+/// two counts over one measure of the rays, C to E held within [`REAL_LIMIT_LY`], their cones
+/// widened by the band texel's largest radius), then censused, every layer, and merged as the
+/// server merges a census at a ceiling (`merge_shells` to the plan's completeness); on the fixture
+/// (`census_near_sun_served/eye_5.0`) and on the server's galaxy
+/// (`census_near_sun_served/served_eye_5.0`; [`SERVED_SEED`]). Its CPU time, plan included, is
+/// recorded beside R13.T1.b's measured capped tier ([`capped_tier_measured`]), not gated. The
+/// count at the ceiling the report reads for its systems within each boundary is taken once,
+/// outside the timing.
+fn census_near_sun_served(c: &mut Criterion) {
+    let workers = workers();
+    let sample = sample();
+    let mut group = c.benchmark_group("sky");
+    group.sample_size(10);
+    for galaxy in BenchGalaxy::ALL {
+        let (which, sky_of) = (galaxy.prefix(), galaxy.sky_of());
+        let request = CeilingRequest::Eye;
+        let name = format!(
+            "census_near_sun_served/{which}{}_{SYNTHETIC_CEILING_V:.1}",
+            request.name()
+        );
+        let printed = AtomicBool::new(false);
+        let judged = Judged {
+            against: "R13.T1.b's capped tier, without and with fix (i),",
+            estimate_cpu_s: capped_tier_measured(galaxy),
+            limit_ly: Some(REAL_LIMIT_LY),
+            fix_i: None,
+            guards: false,
+        };
+        let query: OnceCell<SkyQuery> = OnceCell::new();
+        let count: OnceCell<CapCount> = OnceCell::new();
+        group.bench_function(&name, |b| {
+            let sky = sky_of();
+            let query = query.get_or_init(|| {
+                ceiling_query(sky, request)
+                    .with_synthetic_ceiling(Magnitudes::new(SYNTHETIC_CEILING_V))
+                    .expect("the eye's cut near the Sun is deeper than the ceiling")
+            });
+            let count = count.get_or_init(|| {
+                CapCount::measure(
+                    &sky.galaxy,
+                    &sky.tables,
+                    &sky.envelope,
+                    query.observer(),
+                    Magnitudes::new(SYNTHETIC_CEILING_V),
+                    CapResolution::STANDARD,
+                    &mut NoiseCache::with_capacity(NOISE_SLOTS),
+                )
+            });
+            b.iter_custom(|iters| {
+                let mut cpu = Duration::ZERO;
+                for _ in 0..iters {
+                    let began = Instant::now();
+                    let mut noise = NoiseCache::with_capacity(NOISE_SLOTS);
+                    let query = black_box(query);
+                    let plan =
+                        census_plan(&sky.galaxy, &sky.tables, &sky.envelope, query, &mut noise);
+                    let planned = began.elapsed();
+                    let run = census_of_plan(
+                        sky,
+                        query,
+                        &plan,
+                        &NoSkyCellCache,
+                        (workers, sample),
+                        (began, planned),
+                        CpuTime::Measured,
+                    );
+                    if !printed.load(Ordering::Relaxed) {
+                        report_bright_beyond(&name, plan.caps());
+                    }
+                    let what = (request, SYNTHETIC_CEILING_V);
+                    report_ceiling_once(
+                        &printed,
+                        &name,
+                        what,
+                        (query, &judged),
+                        (plan.caps(), count),
+                        &run,
+                    );
+                    cpu += run.cpu();
+                }
+                cpu
+            });
+        });
     }
     group.finish();
 }
@@ -2607,6 +2755,7 @@ criterion_group!(
     census_nuclear_disc,
     census_near_sun_ceiling,
     census_near_sun_limit,
+    census_near_sun_served,
     star_bound,
     illumination,
     caps_by_ray_near_sun,

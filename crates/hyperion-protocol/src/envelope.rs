@@ -438,6 +438,8 @@ mod tests {
             observer: GalacticPosition::default(),
             valid_until: UniverseTime::default(),
             cut_v: 9.5,
+            synthetic_ceiling_v: None,
+            real_limit_ly: None,
             census: Vec::new(),
             listed: 0,
             overflow: 0,

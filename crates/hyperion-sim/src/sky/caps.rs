@@ -167,6 +167,22 @@ const ANGLE_MARGIN_RAD: f64 = 1e-9;
 /// limit is lifted").
 pub const REAL_LIMIT_LY: f64 = 2_000.0;
 
+/// The synthetic ceiling V<sub>P</sub> a server serves the sky at, apparent V (rendering plan R13,
+/// Design notes 3, 4 and 15): V 5.0, RM3's interim, until R13.T7 sets the owner's 4.5 (decided
+/// 2026-10-08, `feasibility-hybrid-sky.md` §11). R13.T5.a's `sky::synthetic` takes it over.
+///
+/// A server's constant, not a client setting: a bridge shares one sky, and every ship takes the
+/// same rule. The sim reads only the ceiling a query states
+/// ([`SkyQuery::synthetic_ceiling`](super::census::SkyQuery::synthetic_ceiling)); a server states
+/// this one, or the request's cut where the cut is brighter, or none where a ceiling would hold no
+/// ray ([`served_ceiling`]; decided 2026-10-09, `decision-r13-t2b-ceiling.md`). Layers C, D and E
+/// are then censused only to their real boundary ([`real_boundary`]), at most [`REAL_LIMIT_LY`],
+/// so that no served sky reaches past the limit at any cut. Near the Sun at the eye's cut that
+/// leaves some 172 stars brighter than V 5.0 beyond their real boundary, C to E, on the test
+/// fixture, and costs about 1.3 × 10⁴ CPU-s there and 2.8 × 10⁴ on the server's galaxy, against
+/// 1.4 × 10⁵ at the caps at V 5.0 alone (R13.T1, T1.b).
+pub const SYNTHETIC_CEILING_V: f64 = 5.0;
+
 /// The layers whose census a synthetic ceiling holds within the real boundary: C, D and E
 /// (rendering plan R13, Design note 2).
 ///
@@ -2748,6 +2764,58 @@ pub fn real_boundary(
         .collect()
 }
 
+/// The synthetic ceiling a server states for a request at `cut`, its constant being `ceiling`
+/// (rendering plan R13, R13.T2.b; decided 2026-10-09, `decision-r13-t2b-ceiling.md`): the lesser
+/// of the two, or none where a ceiling would hold nothing.
+///
+/// That is `ceiling` where the cut is deeper, and otherwise the cut itself, so that no served
+/// sky's census of C, D and E reaches past [`REAL_LIMIT_LY`] at any cut: at a ceiling at the cut
+/// a uniform cut's two counts are one, and the real boundary is the cut's caps held within the
+/// limit, each layer's [`bright_beyond`](LayerCap::bright_beyond) its
+/// [`expected_beyond`](LayerCap::expected_beyond). Where the cut is at or brighter than `ceiling`
+/// and C's, D's and E's caps at the cut, `caps_at_cut` (one a layer of [`CAPPED_LAYERS`], as
+/// [`real_boundary`] takes them), already lie within the limit on every ray, a ceiling would hold
+/// no ray, and the request is served without one: its plan and its reply are R06's, exact, with
+/// under one star a layer expected beyond its caps. A forced cap counts as its one radius.
+///
+/// # Panics
+///
+/// If the cut is at or brighter than `ceiling` and `caps_at_cut` lacks a cap of C, D or E.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::sky::caps::{CAPPED_LAYERS, LayerCap, served_ceiling};
+/// use hyperion_sim::units::{LightYears, Magnitudes};
+///
+/// let caps = |ly| CAPPED_LAYERS.map(|layer| LayerCap::forced(layer, LightYears::new(ly)));
+/// let v = Magnitudes::new;
+/// // The eye near the Sun, at V 7.95: RM3's ceiling of V 5.0.
+/// assert_eq!(served_ceiling(v(7.95), v(5.0), &caps(9_000.0)), Some(v(5.0)));
+/// // A shallow cut whose caps reach past 2,000 ly: the cut itself, so that the limit holds.
+/// assert_eq!(served_ceiling(v(4.6), v(5.0), &caps(3_000.0)), Some(v(4.6)));
+/// // One whose caps lie within the limit: no ceiling, R06's sky.
+/// assert_eq!(served_ceiling(v(4.6), v(5.0), &caps(150.0)), None);
+/// ```
+#[must_use]
+pub fn served_ceiling(
+    cut: Magnitudes,
+    ceiling: Magnitudes,
+    caps_at_cut: &[LayerCap],
+) -> Option<Magnitudes> {
+    if cut.value() > ceiling.value() {
+        return Some(ceiling);
+    }
+    let within = REAL_BOUNDARY_LAYERS.iter().all(|&layer| {
+        let cap = caps_at_cut
+            .iter()
+            .find(|cap| cap.layer() == layer)
+            .unwrap_or_else(|| panic!("a cap at the cut for {layer:?}"));
+        cap.radius().value() <= REAL_LIMIT_LY
+    });
+    (!within).then_some(cut)
+}
+
 /// The caps of `query`'s census at the synthetic ceiling `ceiling`, as
 /// [`census_plan`](super::census::census_plan) derives them (rendering plan R13, R13.T2.a): the
 /// standard lattice's rays measured once, counted at the request's cut (by the eye's visibility
@@ -4124,6 +4192,135 @@ mod tests {
                     &mut NoiseCache::with_capacity(1 << 16),
                 );
                 assert_eq!(caps, own, "the counts over one lattice are layer_caps'");
+            }
+        }
+    }
+
+    /// The ceiling a server states, RM3's V 5.0 or the cut where the cut is brighter, holds every
+    /// served sky's C, D and E within the real limit at every cut, and none is stated where it
+    /// would hold nothing (rendering plan R13, R13.T2.b; `decision-r13-t2b-ceiling.md` §8), near
+    /// the Sun and in the nuclear disc at uniform cuts, each point's rays measured once:
+    ///
+    /// - `served_ceiling` is 4.6, 5.0, 5.0 and 5.0 near the Sun at the cuts 4.6, 5.0, 5.4 and 7.95,
+    ///   the cut's D and E caps reaching past 2,000 ly, and none, none, 5.0 and 5.0 in the nuclear
+    ///   disc, whose cut's caps lie within it at 4.6 and 5.0; never fainter than the cut;
+    /// - where stated, every C, D and E ray of the real boundary lies within the limit; at a
+    ///   ceiling at the cut, each of their `bright_beyond` is its `expected_beyond`, bit for bit;
+    ///   in the nuclear disc at 5.4 the limit holds no ray, the ceiling holds some, and under one
+    ///   star brighter than it is expected beyond R(u) a layer;
+    /// - where none is stated, the cut's C, D and E caps lie within the limit, a real boundary at
+    ///   the cut would be those caps on every ray, and `census_plan` without a ceiling takes them,
+    ///   bit for bit.
+    #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one table of points and cuts, each row's assertions as the ruling lists them"
+    )]
+    fn the_served_ceiling_holds_the_limit_at_every_cut() {
+        use crate::sky::census::{SkyQuery, census_plan};
+        const CEILING: f64 = 5.0;
+        let cuts = [4.6, CEILING, 5.4, 7.95];
+        let points = [
+            (
+                "near the Sun",
+                [0.0, 26_000.0, 68.0],
+                [Some(4.6), Some(CEILING), Some(CEILING), Some(CEILING)],
+            ),
+            (
+                "in the nuclear disc",
+                [0.0, 150.0, 0.0],
+                [None, None, Some(CEILING), Some(CEILING)],
+            ),
+        ];
+        let ray_bits = |cap: &LayerCap| -> Vec<u64> {
+            cap.rays()
+                .expect("by ray")
+                .radii_ly()
+                .iter()
+                .map(|&r| bits(r))
+                .collect()
+        };
+        for (name, at, expected) in points {
+            let observer = observer_at(at);
+            let counts = counts_over_one_lattice(&observer, &cuts);
+            let at_ceiling = &counts[1];
+            for ((&cut, at_cut), expected) in cuts.iter().zip(&counts).zip(expected) {
+                let caps = at_cut.caps();
+                let stated = served_ceiling(Magnitudes::new(cut), Magnitudes::new(CEILING), &caps)
+                    .map(Magnitudes::value);
+                assert_eq!(stated, expected, "{name} at the cut {cut}");
+                let Some(v) = stated else {
+                    // R06's sky, which reaches no farther than a real boundary would.
+                    let real = real_boundary(at_cut, at_cut, &caps);
+                    for (r, c) in real.iter().zip(&caps) {
+                        if !REAL_BOUNDARY_LAYERS.contains(&c.layer()) {
+                            continue;
+                        }
+                        assert!(
+                            c.radius().value() <= REAL_LIMIT_LY,
+                            "{name} at {cut}: {:?}",
+                            c.layer()
+                        );
+                        assert_eq!(ray_bits(r), ray_bits(c), "{name} at {cut}: {:?}", c.layer());
+                    }
+                    let query = SkyQuery::builder(observer, Magnitudes::new(cut))
+                        .build()
+                        .expect("a query");
+                    let plan = census_plan(
+                        milky_way_galaxy(),
+                        milky_way_tables(),
+                        milky_way_envelope(),
+                        &query,
+                        &mut NoiseCache::with_capacity(1 << 16),
+                    );
+                    assert_eq!(plan.caps(), caps.as_slice(), "{name} at {cut}");
+                    eprintln!("{name} at the cut {cut}: no ceiling; R06's caps within the limit");
+                    continue;
+                };
+                assert!(v <= cut, "{name}: a ceiling of {v} at the cut {cut}");
+                let at_v = if bits(v) == bits(cut) {
+                    at_cut
+                } else {
+                    at_ceiling
+                };
+                let real = real_boundary(at_v, at_cut, &caps);
+                for r in &real {
+                    let layer = r.layer();
+                    if !REAL_BOUNDARY_LAYERS.contains(&layer) {
+                        continue;
+                    }
+                    let radii = r.rays().expect("by ray").radii_ly();
+                    assert!(
+                        radii.iter().all(|&ly| ly <= REAL_LIMIT_LY),
+                        "{name} at {cut}: {layer:?} within the limit"
+                    );
+                    let held = radii
+                        .iter()
+                        .filter(|&&ly| bits(ly) == bits(REAL_LIMIT_LY))
+                        .count();
+                    let bright = r.bright_beyond().expect("a real boundary states it");
+                    eprintln!(
+                        "{name} at the cut {cut}, ceiling {v}, {layer:?}: {held} rays at the \
+                         limit; beyond R(u) {bright:.3} brighter than the ceiling, {:.3} than \
+                         the cut",
+                        r.expected_beyond()
+                    );
+                    if bits(v) == bits(cut) {
+                        assert_eq!(bits(bright), bits(r.expected_beyond()), "{name} at {cut}");
+                    }
+                    if name == "in the nuclear disc" && bits(cut) == bits(5.4) {
+                        assert_eq!(held, 0, "{name}: {layer:?}");
+                        assert!(bright < 1.0, "{name}: {layer:?} {bright}");
+                    }
+                }
+                if name == "in the nuclear disc" && bits(cut) == bits(5.4) {
+                    assert!(
+                        real.iter().zip(&caps).any(|(r, c)| {
+                            REAL_BOUNDARY_LAYERS.contains(&r.layer()) && ray_bits(r) != ray_bits(c)
+                        }),
+                        "{name}: the ceiling holds some C–E ray within the cut's cap"
+                    );
+                }
             }
         }
     }

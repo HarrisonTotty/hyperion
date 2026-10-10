@@ -16,6 +16,7 @@ import type { BakeInput } from "../../view/sky/bake";
 import { cullSky } from "../../view/sky/cull";
 import { starIlluminanceRgbLx } from "../../view/sky/photometry";
 import {
+  detailLimited,
   SKY_EDGE_FIELD_CH,
   SKY_PENDING,
   skyEdgeReading,
@@ -152,8 +153,9 @@ export function cullViewSky(
 /**
  * A view's label block's `STARS` reading of a sky it holds: its role's limit, a camera's at the
  * exposure shown (R07.T13.e), then the notes its place holds: while the reply held is not final,
- * the stars-arriving note, its edge in its field and stale with the sky (R06.T11.f); and what the
- * sky leaves out.
+ * the stars-arriving note, its edge in its field and stale with the sky (R06.T11.f); while it holds
+ * the sky at a synthetic ceiling, the interim note (R13.T2.b), which names no figure and so takes
+ * no field; and what the sky leaves out.
  *
  * @param exposure - The control as the readout shows it (4 Hz, EV100 to 0.1).
  */
@@ -165,7 +167,11 @@ export function viewSkyLabel(
   place: SkyLinePlace,
 ): SkyLineReading {
   const gaps = model.response.not_modelled;
-  const standing = { place, streamingEdgeLy: streamingEdgeLy(model.response) };
+  const standing = {
+    place,
+    streamingEdgeLy: streamingEdgeLy(model.response),
+    detailLimited: detailLimited(model.response),
+  };
   const value = skyLabelValue(viewSkyLabelV(model, role, exposure, fovDeg), role, gaps, standing);
   // The edge's field only where its note stands: a line holding one note may have given it up.
   const streaming = skyLineNotes(gaps, standing).find((note) => note.kind === "streaming");

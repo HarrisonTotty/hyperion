@@ -43,6 +43,14 @@ filter = "package(hyperion-server) & binary(=sky) & test(=a_sky_near_the_sun_ret
 test-group = "sky-tables"
 threads-required = 4
 
+# R13.T2.b's real boundary in jobs builds the server's galaxy's luminosity tables in the test and
+# counts the caps' rays twice on a pool of three workers beside its runtime's threads, so it joins
+# the tables' group and takes four slots.
+[[profile.default.overrides]]
+filter = "package(hyperion-server) & test(=compute::sky::tests::at_the_ceiling_the_caps_counts_in_jobs_are_the_sims_real_boundary)"
+test-group = "sky-tables"
+threads-required = 4
+
 # The hierarchy bound's tests (P11.T16) check their records on four threads of their own, so each
 # takes four slots rather than a nominal one.
 [[profile.default.overrides]]

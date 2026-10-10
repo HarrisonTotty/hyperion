@@ -18,6 +18,16 @@
 //! the same order, only at its own pace. A consumer of the sky's list reads `final` and
 //! `complete_to_ly`: a star missing from an answer that is not final may lie beyond its radii.
 //!
+//! # The real tier
+//!
+//! Where an answer states a synthetic ceiling ([`SkyResponse::synthetic_ceiling_v`]; rendering plan
+//! R13), layers C, D and E are censused only to their real boundary, at most
+//! [`SkyResponse::real_limit_ly`], 2,000 ly, and the band holds the light of their stars beyond it,
+//! in every answer, the final one included. Each layer states what lies beyond it: the stars
+//! brighter than the cut ([`SkyLayerCensusDto::expected_beyond`]) and those brighter than the
+//! ceiling ([`SkyLayerCensusDto::bright_beyond`]). RM3 draws none of them as points; rendering plan
+//! R13.T7 will send them as synthetic stars.
+//!
 //! # The payload
 //!
 //! Every value is little-endian. A star is [`SKY_STAR_BYTES`], 24 (Design note 17):
@@ -159,6 +169,28 @@ pub struct SkyResponse {
     pub valid_until: UniverseTime,
     /// The cut every listed star is brighter than, V: the deeper of the eye's and the camera's.
     pub cut_v: f64,
+    /// The synthetic ceiling, V, at which the sky's real tier is held (rendering plan R13, Design
+    /// notes 3 and 4): the server's constant V<sub>P</sub>, V 5.0 in RM3's interim, or the
+    /// request's cut where the cut is brighter (decided 2026-10-09, `decision-r13-t2b-ceiling.md`).
+    ///
+    /// Layers C, D and E are then censused only to their real boundary, ray by ray the least of the
+    /// radius beyond which under one star brighter than the ceiling is expected, the cut's own cap
+    /// and [`real_limit_ly`](Self::real_limit_ly); beyond it their stars brighter than the cut are
+    /// not listed, and their light is in the band. Each such layer's `cap_ly` is its real boundary at
+    /// its farthest ray, the final reply's `complete_to_rays_ly` that boundary ray by ray, and its
+    /// `expected_beyond` and `bright_beyond` count what lies beyond it. Absent where the reply has
+    /// no real boundary: a request whose cut is at or brighter than V<sub>P</sub> and whose C, D and
+    /// E caps at the cut lie within the real limit on every ray, where a ceiling would hold no ray,
+    /// so that its census is R06's to the cut's own caps (rendering plan R13, R13.T2.b).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub synthetic_ceiling_v: Option<f64>,
+    /// The real limit, ly: the farthest any ray of layers C, D and E is censused where the reply
+    /// states a [`synthetic_ceiling_v`](Self::synthetic_ceiling_v), 2,000 ly (the sim's
+    /// `sky::caps::REAL_LIMIT_LY`; decided by the owner on 2026-10-09). Absent with the ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub real_limit_ly: Option<f64>,
     /// Each layer's census, in the layers' order.
     pub census: Vec<SkyLayerCensusDto>,
     /// The stars in the payload.
@@ -193,12 +225,28 @@ pub struct SkyLayerCensusDto {
     /// The mass layer.
     pub layer: MassLayer,
     /// The radius the census searches to, ly (Design note 9): since rendering plan R06.T7.b, its
-    /// farthest ray's, the cap being one radius a ray of the caps' lattice.
+    /// farthest ray's, the cap being one radius a ray of the caps' lattice. Where the reply states
+    /// a [`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v), layers C, D and E's cap is
+    /// their real boundary (rendering plan R13, Design note 3), at most
+    /// [`real_limit_ly`](SkyResponse::real_limit_ly), and the final reply's
+    /// [`complete_to_rays_ly`](Self::complete_to_rays_ly) is that boundary ray by ray.
     pub cap_ly: f64,
     /// The rule's bound on that radius, ly: no star of the layer beyond it can pass the cut.
     pub rule_bound_ly: f64,
     /// The stars expected brighter than the cut beyond the cap: the cap's approximation, stated.
+    /// Beyond a real boundary that is the count the band holds the light of, near the Sun some
+    /// thousands in each of layers C, D and E at the eye's cut (rendering plan R13, R13.T1.b).
     pub expected_beyond: f64,
+    /// The stars expected brighter than the synthetic ceiling beyond the cap, stated for every
+    /// layer where the reply states a ceiling ([`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v);
+    /// rendering plan R13, Design note 3): for layers C, D and E beyond their real boundary, under
+    /// one where that boundary is the radius at the ceiling and more where
+    /// [`real_limit_ly`](SkyResponse::real_limit_ly) holds it, near the Sun some 172 C to E at the
+    /// ceiling V 5.0 (R13.T1.b); for A, B and the brown dwarfs beyond the cut's own cap, which
+    /// they keep. Absent without a ceiling, and for a cap a test forces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub bright_beyond: Option<f64>,
     /// The cells searched.
     pub cells: u32,
     /// The candidates whose systems were generated.
@@ -220,17 +268,29 @@ pub struct SkyLayerCensusDto {
     /// each ray of the caps' lattice it is complete to that ray's radius in
     /// [`complete_to_rays_ly`](Self::complete_to_rays_ly), the edge held within the cap. It lists
     /// a star, until it is final, only where the star lies nearer than that radius towards the
-    /// centre of its band texel, whose ray the band holds all of the layer's light beyond.
+    /// centre of its band texel, whose ray the band holds all of the layer's light beyond; where
+    /// the reply states a [`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v), layers C, D
+    /// and E list so in the final reply too (rendering plan R13, Design note 3).
     pub complete_to_ly: f64,
     /// The radius to which the layer is complete along each ray of the caps' lattice, ly, in the
     /// lattice's order: the sim's `sky::caps::CapLattice` of as many rays as the table holds
     /// (1,536), each ray's cap radius held within the shell edge reached. Empty where the layer is
     /// complete to one radius in every direction, `complete_to_ly`. Towards a direction it is
     /// complete to the largest of these over the rays within the lattice's spacing of it.
+    ///
+    /// Where the reply states a [`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v), layers
+    /// C, D and E's radii are their real boundary held within the edge reached. In the final reply
+    /// that is the real boundary itself, ray by ray. In a reply not yet final, each ray below
+    /// [`complete_to_ly`](Self::complete_to_ly) is at its real boundary, while a ray at that edge,
+    /// or an empty table, leaves the real boundary between the edge and [`cap_ly`](Self::cap_ly).
+    /// No table states it sooner: each reply's band holds the light beyond that reply's own radii,
+    /// so a client draws by those alone (rendering plan R13, R13.T2.b).
     pub complete_to_rays_ly: Vec<f64>,
-    /// Whether the layer's last shell is censused: it lists every star of the cells it opens, as a
-    /// one-shot census does, and is complete to its cap. Layers A and B and the brown dwarfs, one
-    /// shell each, are final from the first answer.
+    /// Whether the layer's last shell is censused: it is complete to its cap, and lists every star
+    /// of the cells it opens, as a one-shot census does, but for layers C, D and E where the reply
+    /// states a [`synthetic_ceiling_v`](SkyResponse::synthetic_ceiling_v), which list only the
+    /// stars within their real boundary towards each star's band texel. Layers A and B and the
+    /// brown dwarfs, one shell each, are final from the first answer.
     #[serde(rename = "final")]
     pub is_final: bool,
 }
@@ -366,9 +426,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn sky_response_wire_form() {
-        let response = SkyResponse {
+    /// A response near the Sun with no ceiling, its one layer E not yet final.
+    fn response() -> SkyResponse {
+        SkyResponse {
             universe: UniverseIdHex::from_u64(42),
             time: UniverseTime::default(),
             observer: GalacticPosition::default(),
@@ -377,11 +437,14 @@ mod tests {
                 nanos: 0,
             },
             cut_v: 7.96,
+            synthetic_ceiling_v: None,
+            real_limit_ly: None,
             census: vec![SkyLayerCensusDto {
                 layer: MassLayer::E,
                 cap_ly: 10_000.0,
                 rule_bound_ly: 12_000.0,
                 expected_beyond: 0.4,
+                bright_beyond: None,
                 cells: 9,
                 candidates_opened: 120,
                 accepted: 80,
@@ -404,15 +467,12 @@ mod tests {
             stars_bytes: 48,
             band_bytes: 294_912,
             is_final: false,
-        };
-        assert_eq!(
-            response.stars_bytes + response.band_bytes,
-            response.bulk.bytes
-        );
-        assert_eq!(
-            response.band_bytes,
-            6 * 64 * 64 * u64::try_from(SKY_TEXEL_BYTES).unwrap()
-        );
+        }
+    }
+
+    /// [`response`]'s wire form, with no ceiling: no key for the ceiling, the limit or a layer's
+    /// count beyond it.
+    fn response_wire() -> serde_json::Value {
         let host = json!({
             "star": 0,
             "radius_m": 6.957e8,
@@ -429,40 +489,83 @@ mod tests {
             "lux_per_v0": 1.0,
             "bake_spectrum": vec![0.25; SKY_BAKE_BINS],
         });
-        assert_wire_form(
-            &response,
-            json!({
-                "universe": "000000000000002a",
-                "time": { "seconds": 0, "nanos": 0 },
-                "observer": { "cell_ly": [0, 0, 0], "offset_m": [0.0, 0.0, 0.0] },
-                "valid_until": { "seconds": 31_557_600, "nanos": 0 },
-                "cut_v": 7.96,
-                "census": [{
-                    "layer": "e",
-                    "cap_ly": 10_000.0,
-                    "rule_bound_ly": 12_000.0,
-                    "expected_beyond": 0.4,
-                    "cells": 9,
-                    "candidates_opened": 120,
-                    "accepted": 80,
-                    "listed": 79,
-                    "without_photometry": 0,
-                    "feature_members_absent": true,
-                    "complete_to_ly": 4_000.0,
-                    "complete_to_rays_ly": [3_500.0, 4_000.0],
-                    "final": false,
-                }],
-                "listed": 2,
-                "overflow": 1,
-                "band": { "face_texels": 64 },
-                "hosts": [host],
-                "not_modelled": ["feature_members", "white_dwarfs"],
-                "bulk": { "chunks": 2, "bytes": 294_960 },
-                "stars_bytes": 48,
-                "band_bytes": 294_912,
+        json!({
+            "universe": "000000000000002a",
+            "time": { "seconds": 0, "nanos": 0 },
+            "observer": { "cell_ly": [0, 0, 0], "offset_m": [0.0, 0.0, 0.0] },
+            "valid_until": { "seconds": 31_557_600, "nanos": 0 },
+            "cut_v": 7.96,
+            "census": [{
+                "layer": "e",
+                "cap_ly": 10_000.0,
+                "rule_bound_ly": 12_000.0,
+                "expected_beyond": 0.4,
+                "cells": 9,
+                "candidates_opened": 120,
+                "accepted": 80,
+                "listed": 79,
+                "without_photometry": 0,
+                "feature_members_absent": true,
+                "complete_to_ly": 4_000.0,
+                "complete_to_rays_ly": [3_500.0, 4_000.0],
                 "final": false,
-            }),
+            }],
+            "listed": 2,
+            "overflow": 1,
+            "band": { "face_texels": 64 },
+            "hosts": [host],
+            "not_modelled": ["feature_members", "white_dwarfs"],
+            "bulk": { "chunks": 2, "bytes": 294_960 },
+            "stars_bytes": 48,
+            "band_bytes": 294_912,
+            "final": false,
+        })
+    }
+
+    #[test]
+    fn sky_response_wire_form() {
+        let response = response();
+        assert_eq!(
+            response.stars_bytes + response.band_bytes,
+            response.bulk.bytes
         );
+        assert_eq!(
+            response.band_bytes,
+            6 * 64 * 64 * u64::try_from(SKY_TEXEL_BYTES).unwrap()
+        );
+        assert_wire_form(&response, response_wire());
+    }
+
+    /// A reply at a synthetic ceiling states it, the real limit and each layer's count beyond its
+    /// boundary brighter than the ceiling (rendering plan R13, R13.T2.b); one without states none
+    /// of them, with no key, as a server before R13.T2.b wrote it, so that both readers keep their
+    /// meaning and `PROTOCOL_VERSION` stays (R03 Design note 12; `decision-p14-t35e-wire.md`).
+    #[test]
+    fn a_ceiling_and_its_counts_are_optional_keys() {
+        let mut at_ceiling = response();
+        at_ceiling.synthetic_ceiling_v = Some(5.0);
+        at_ceiling.real_limit_ly = Some(2_000.0);
+        at_ceiling.census[0].bright_beyond = Some(162.4);
+        let mut wire = response_wire();
+        wire["synthetic_ceiling_v"] = json!(5.0);
+        wire["real_limit_ly"] = json!(2_000.0);
+        wire["census"][0]["bright_beyond"] = json!(162.4);
+        assert_wire_form(&at_ceiling, wire);
+        // Absent keys read as no ceiling, and no ceiling writes none.
+        let without: SkyResponse = serde_json::from_value(response_wire()).unwrap();
+        assert_eq!(
+            (
+                without.synthetic_ceiling_v,
+                without.real_limit_ly,
+                without.census[0].bright_beyond
+            ),
+            (None, None, None)
+        );
+        let written = serde_json::to_value(&without).unwrap();
+        for key in ["synthetic_ceiling_v", "real_limit_ly"] {
+            assert!(written.get(key).is_none(), "{key}");
+        }
+        assert!(written["census"][0].get("bright_beyond").is_none());
     }
 
     #[test]

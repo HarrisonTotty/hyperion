@@ -5,7 +5,13 @@
 //! served again from the server's cache, the galaxy's tables built once for every sky of it and
 //! started when its universe is opened, the fields a request it cannot serve names, the landing
 //! switch, off by default, under which `sky` is `unsupported`, and a sky arriving nearest first,
-//! each reply the census to its stated radii and the last the one-shot census.
+//! each reply the census to its stated radii and the last the census of its whole plan.
+//!
+//! Every sky's query states RM3's synthetic ceiling, V 5.0 (rendering plan R13, R13.T2.b), its cut
+//! being deep enough here, so layers C, D and E list only within their caps towards each star's
+//! band texel in every reply, the final one included, and the sim's census each test holds a reply
+//! to is that query's, merged to its plan's completeness (`merge_shells`) as the server merges
+//! every reply. A forced cap stands in for the real boundary, stating no count beyond it.
 //!
 //! Every server here turns the sky on ([`SkyService::Served`]) but the switch's own test, and
 //! forces its sky's caps to a small radius ([`SkyCaps::forced`]), so that a census near the Sun
@@ -44,10 +50,11 @@ use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::band::{
     BandMarch, BandSpec, BandTexel, CompleteTo, CubeFace, march_rows, sum_rows,
 };
+use hyperion_sim::sky::caps::{REAL_LIMIT_LY, SYNTHETIC_CEILING_V};
 use hyperion_sim::sky::census::{
     CellOffsets, CensusPlan, CensusTallies, Completeness, NoSkyCellCache, Shell, SkyCensus,
-    SkyContext, SkyQuery, SkyStar, census_cell, census_plan, census_plan_with_edges, merge_census,
-    merge_shells,
+    SkyContext, SkyQuery, SkyQueryBuilder, SkyStar, census_cell, census_plan,
+    census_plan_with_edges, merge_census, merge_shells,
 };
 use hyperion_sim::sky::dgl::Illumination;
 use hyperion_sim::sky::disc::{HostDisc, host_discs};
@@ -286,13 +293,25 @@ fn illumination_over(tables: &Tables) -> Arc<Illumination> {
     ))
 }
 
-/// The sim's own census of `query` in one pass over its plan's cells, merged as one part.
+/// `builder`'s query at the synthetic ceiling the server states on every sky whose cut allows it
+/// (rendering plan R13, R13.T2.b): every cut here does.
+fn at_ceiling(builder: SkyQueryBuilder) -> SkyQuery {
+    builder
+        .synthetic_ceiling(Magnitudes::new(SYNTHETIC_CEILING_V))
+        .build()
+        .expect("a query at the ceiling")
+}
+
+/// The sim's own census of `query` in one pass over its plan's cells, merged to the plan's whole
+/// completeness as the server's last reply is.
 fn sim_census(query: &SkyQuery) -> SkyCensus {
     sim_census_over(dark_tables(), query).1
 }
 
 /// The sim's own plan and census of `query` over `tables`, the census in one pass over the plan's
-/// cells, merged as one part.
+/// cells, merged as one part to the plan's whole completeness (`merge_shells`): the one-shot census,
+/// but at a synthetic ceiling, where C, D and E list only within their caps towards each star's
+/// texel (rendering plan R13, R13.T2.b), as the server's last reply does.
 fn sim_census_over(tables: &Tables, query: &SkyQuery) -> (CensusPlan, SkyCensus) {
     let galaxy = galaxy();
     let mut ctx = context_over(tables);
@@ -308,7 +327,11 @@ fn sim_census_over(tables: &Tables, query: &SkyQuery) -> (CensusPlan, SkyCensus)
             None => tallies = Some(cell),
         }
     }
-    let census = merge_census(tallies.map(|tallies| (stars, tallies)), query.n_max());
+    let census = merge_shells(
+        tallies.map(|tallies| (stars, tallies)),
+        query.n_max(),
+        plan.complete(),
+    );
     (plan, census)
 }
 
@@ -348,13 +371,26 @@ async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
         response.not_modelled
     );
 
-    // The census the jobs merged is the sim's one pass, layer by layer.
-    let query = SkyQuery::builder(observer(), Magnitudes::new(CAMERA_LIMIT_V))
-        .build()
-        .expect("a query")
-        .with_caps_forced(LightYears::new(SMALL_CAP_LY))
-        .expect("a forced cap");
+    // The census the jobs merged is the sim's one pass at the ceiling, layer by layer.
+    let query = at_ceiling(SkyQuery::builder(
+        observer(),
+        Magnitudes::new(CAMERA_LIMIT_V),
+    ))
+    .with_caps_forced(LightYears::new(SMALL_CAP_LY))
+    .expect("a forced cap");
     let sim = sim_census(&query);
+    // The reply states the ceiling and the real limit (R13.T2.b); a forced cap, standing in for
+    // the real boundary, states no count beyond it brighter than the ceiling.
+    assert_eq!(
+        (response.synthetic_ceiling_v, response.real_limit_ly),
+        (Some(SYNTHETIC_CEILING_V), Some(REAL_LIMIT_LY))
+    );
+    assert!(
+        response
+            .census
+            .iter()
+            .all(|layer| layer.bright_beyond.is_none())
+    );
     assert!(!sim.listed().is_empty(), "the Sun's neighbours are listed");
     assert_eq!(response.cut_v.to_bits(), CAMERA_LIMIT_V.to_bits());
     assert_eq!(
@@ -417,6 +453,80 @@ async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
 
     client.close().await;
     server.stop().await;
+}
+
+/// A sky whose cut is at or brighter than RM3's ceiling and whose caps lie within the real limit
+/// is served without a ceiling (rendering plan R13, R13.T2.b; `decision-r13-t2b-ceiling.md`): its
+/// reply states no ceiling, no real limit and no count beyond brighter than one, and lists the
+/// sim's census of R06, the one-shot census to its caps.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_shallow_sky_within_the_limit_is_served_as_r06s() {
+    let (server, _data_dir) = sky_server(SMALL_CAP_LY, 2).await;
+    let (mut client, universe) = opened(&server).await;
+    // The ruling's cut of 4.6, and the edge of its rule, a cut at the ceiling.
+    for shallow in [4.6, SYNTHETIC_CEILING_V] {
+        let sent = served(
+            &mut client,
+            SkyRequest {
+                camera_limit_v: Some(shallow),
+                ..sky(&universe)
+            },
+        )
+        .await;
+        let response = &sent.response;
+        assert_eq!(response.cut_v.to_bits(), shallow.to_bits());
+        assert_eq!(
+            (response.synthetic_ceiling_v, response.real_limit_ly),
+            (None, None),
+            "at {shallow}"
+        );
+        assert!(
+            response
+                .census
+                .iter()
+                .all(|layer| layer.bright_beyond.is_none())
+        );
+        let query = SkyQuery::builder(observer(), Magnitudes::new(shallow))
+            .build()
+            .expect("a query")
+            .with_caps_forced(LightYears::new(SMALL_CAP_LY))
+            .expect("a forced cap");
+        let r06 = sim_census(&query);
+        let one_shot = sim_census_one_shot(&query);
+        assert_eq!(listed_on_the_wire(&r06), listed_on_the_wire(&one_shot));
+        assert_stars_are_the_sims(&sent, &query, &format!("a shallow sky at {shallow}"));
+        if shallow.total_cmp(&SYNTHETIC_CEILING_V).is_eq() {
+            assert!(
+                !r06.listed().is_empty(),
+                "the Sun's bright neighbours are listed"
+            );
+        }
+    }
+    client.close().await;
+    server.stop().await;
+}
+
+/// The sim's census of `query` in one pass over its plan's cells, merged by R06's one-shot rule
+/// (`merge_census`), which lists every star of the cells it opens: a query that states no
+/// synthetic ceiling, whose census `merge_shells` merges to the same.
+fn sim_census_one_shot(query: &SkyQuery) -> SkyCensus {
+    assert_eq!(query.synthetic_ceiling(), None);
+    let galaxy = galaxy();
+    let mut ctx = context();
+    let mut noise = NoiseCache::with_capacity(1 << 16);
+    let (tables, envelope, _) = dark_tables();
+    let plan = census_plan(galaxy, tables, envelope, query, &mut noise);
+    let cells: Vec<_> = plan.cells().collect();
+    let mut stars = Vec::new();
+    let mut tallies: Option<CensusTallies> = None;
+    for key in cells {
+        let cell = census_cell(galaxy, &mut ctx, key, query, &mut stars);
+        match &mut tallies {
+            Some(sum) => sum.add(&cell),
+            None => tallies = Some(cell),
+        }
+    }
+    merge_census(tallies.map(|tallies| (stars, tallies)), query.n_max())
 }
 
 /// The request's cut is the deeper of the eye's and the camera's: under a shallower camera, the
@@ -536,11 +646,12 @@ async fn a_skys_manifest_matches_what_was_sent() {
     );
 
     // The stars are the sim's census's listed stars, in its order.
-    let query = SkyQuery::builder(observer(), Magnitudes::new(CAMERA_LIMIT_V))
-        .build()
-        .expect("a query")
-        .with_caps_forced(LightYears::new(SMALL_CAP_LY))
-        .expect("a forced cap");
+    let query = at_ceiling(SkyQuery::builder(
+        observer(),
+        Magnitudes::new(CAMERA_LIMIT_V),
+    ))
+    .with_caps_forced(LightYears::new(SMALL_CAP_LY))
+    .expect("a forced cap");
     assert_stars_are_the_sims(&sent, &query, "near the Sun");
 
     // Asked again, every cell the census looked up is served from the cache, with the same bytes.
@@ -582,12 +693,10 @@ async fn a_skys_manifest_matches_what_was_sent() {
         "shared cells served and new ones built: {warm:?}, then {after:?}"
     );
     let at = SimPosition::from_light_years(moved_ly.map(f64::from)).expect("in the cube");
-    let query = SkyQuery::builder(
+    let query = at_ceiling(SkyQuery::builder(
         Observer::new(at, hyperion_sim::time::UniverseTime::EPOCH).expect("an observer"),
         Magnitudes::new(CAMERA_LIMIT_V),
-    )
-    .build()
-    .expect("a query")
+    ))
     .with_caps_forced(LightYears::new(SMALL_CAP_LY))
     .expect("a forced cap");
     assert!(moved.response.listed > 0, "the moved sky lists stars");
@@ -1031,7 +1140,9 @@ fn sim_host(disc: &HostDisc) -> HostDiscDto {
 }
 
 /// A sky near the Sun returns the stars, texels and host discs the sim returns for the same query,
-/// byte for byte as the wire carries them (R06.T11.c).
+/// byte for byte as the wire carries them (R06.T11.c), at RM3's synthetic ceiling (R13.T2.b): the
+/// sim's census at the ceiling, its C, D and E listed within their caps towards each star's texel
+/// in the final reply too, and the band holding the light beyond.
 ///
 /// The server builds the galaxy's own tables on its pool, staged from `LuminosityTables::plan`,
 /// while the test builds them serially, so the band's light is the tables' and the caps are forced.
@@ -1077,16 +1188,16 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
     );
     let cut = eye_cut.value().max(CAMERA_LIMIT_V);
     assert_eq!(response.cut_v.to_bits(), cut.to_bits());
-    let query = SkyQuery::builder(observer, Magnitudes::new(cut))
-        .eye(eye_observer)
-        .eye_cut(eye_cut)
-        .n_max(std::num::NonZeroU32::new(n_max).expect("not zero"))
-        .exclude(host.id())
-        .illumination(light)
-        .build()
-        .expect("a query")
-        .with_caps_forced(LightYears::new(SMALL_CAP_LY))
-        .expect("a forced cap");
+    let query = at_ceiling(
+        SkyQuery::builder(observer, Magnitudes::new(cut))
+            .eye(eye_observer)
+            .eye_cut(eye_cut)
+            .n_max(std::num::NonZeroU32::new(n_max).expect("not zero"))
+            .exclude(host.id())
+            .illumination(light),
+    )
+    .with_caps_forced(LightYears::new(SMALL_CAP_LY))
+    .expect("a forced cap");
     let (plan, census) = sim_census_over(&tables, &query);
     assert_eq!(census.listed().len(), usize::try_from(n_max).unwrap());
     assert!(
@@ -1379,8 +1490,10 @@ fn stated_radii(
         .collect()
 }
 
-/// The census near the Sun at [`CAMERA_LIMIT_V`] with each layer's cap forced to its radius in
-/// `radii`, less its stars at or beyond the radius in a layer not final, cut at `n_max`.
+/// The census near the Sun at [`CAMERA_LIMIT_V`] with no ceiling and each layer's cap forced to
+/// its radius in `radii`, in one pass, less its stars at or beyond the radius in a layer not final,
+/// and in C, D and E, which list so at the synthetic ceiling once final too (R13.T2.b), cut at
+/// `n_max`.
 fn census_to(radii: &[(Layer, LightYears, bool)], n_max: std::num::NonZeroU32) -> SkyCensus {
     let to_radii: Vec<(Layer, LightYears)> = radii.iter().map(|&(l, r, _)| (l, r)).collect();
     let query = SkyQuery::builder(observer(), Magnitudes::new(CAMERA_LIMIT_V))
@@ -1390,13 +1503,15 @@ fn census_to(radii: &[(Layer, LightYears, bool)], n_max: std::num::NonZeroU32) -
         .with_caps_forced_per_layer(&to_radii)
         .expect("forced caps");
     let forced = sim_census(&query);
+    let by_texel = |layer: Layer| matches!(layer, Layer::C | Layer::D | Layer::E);
     let within: Vec<SkyStar> = forced
         .listed()
         .iter()
         .chain(forced.overflow())
         .filter(|star| {
             radii.iter().any(|&(layer, radius, is_final)| {
-                layer == star.layer() && (is_final || star.distance() < radius)
+                layer == star.layer()
+                    && ((is_final && !by_texel(layer)) || star.distance() < radius)
             })
         })
         .copied()
@@ -1416,7 +1531,9 @@ fn stars_sent(response: &SkyResponse, payload: &[u8]) -> Vec<Vec<u8>> {
 /// with its chunks numbered from 0, the last alone final. Each reply's stars are the census to the
 /// radii it states, layer by layer, and the census with every cap forced to those radii, less its
 /// stars at or beyond them, lists the same; its band is the one march's sum at those radii; and the
-/// last reply is the one-shot census, star for star.
+/// last reply is the census of the whole plan in one pass, star for star. At RM3's synthetic
+/// ceiling (R13.T2.b), C, D and E list within their radii in the last reply too, so it is not the
+/// one-shot census of R06, which lists every star of the cells it opens.
 ///
 /// The caps are forced to 30 ly with nearer shell edges than the fixed ones (the server's test
 /// seam), so that the census takes seconds: a census of the fixed edges' first shell, C, D and E
@@ -1438,14 +1555,14 @@ async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii()
         .await;
     let replies = replies_to(&mut client, id).await;
 
-    // The same sky in the sim.
-    let query = SkyQuery::builder(observer(), Magnitudes::new(CAMERA_LIMIT_V))
-        .n_max(n_max)
-        .illumination(illumination_over(dark_tables()))
-        .build()
-        .expect("a query")
-        .with_caps_forced(LightYears::new(SMALL_CAP_LY))
-        .expect("a forced cap");
+    // The same sky in the sim, at the ceiling.
+    let query = at_ceiling(
+        SkyQuery::builder(observer(), Magnitudes::new(CAMERA_LIMIT_V))
+            .n_max(n_max)
+            .illumination(illumination_over(dark_tables())),
+    )
+    .with_caps_forced(LightYears::new(SMALL_CAP_LY))
+    .expect("a forced cap");
     let forced = query.forced_caps().expect("forced caps").to_vec();
     let plan = census_plan_with_edges(&query, forced, &TEST_SHELL_EDGES_LY);
     let steps = delivery(&plan);
@@ -1501,7 +1618,7 @@ async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii()
         ]
     );
 
-    // The last reply is the one-shot census, star for star and tally for tally.
+    // The last reply is the whole plan's census in one pass, star for star and tally for tally.
     let one_shot = sim_census(&query);
     let last = replies.last().expect("a reply");
     assert_eq!(

@@ -187,11 +187,15 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
     vi.useRealTimers();
   });
 
-  /** Plays a reply to the latest sky request whose census has reached `edgesLy`. */
+  /**
+   * Plays a reply to the latest sky request whose census has reached `edgesLy`, held at the
+   * synthetic ceiling `ceilingV` where one is given (R13.T2.b).
+   */
   async function replyAt(
     socket: FakeWebSocket,
     edgesLy: readonly [number | null, number | null, number | null],
     final: boolean,
+    ceilingV?: number,
   ): Promise<void> {
     const sent = socket.requestsOfKind("sky").at(-1);
     if (sent === undefined) {
@@ -203,6 +207,7 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
       ...skyResponse(sent.body, payload, ONE_STAR.length, 2),
       census: nearestFirstCensus(edgesLy),
       final,
+      ...(ceilingV === undefined ? {} : { synthetic_ceiling_v: ceilingV, real_limit_ly: 2_000 }),
     };
     await act(async () => {
       socket.serverSendsBinary(binaryFrame(sent.id, 0, 1, [...payload]));
@@ -261,6 +266,36 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
       value: "V 10.1 mag CAM · BEYOND 2000 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
       field: { text: "2000 ly", widthCh: 12, stale: true },
     });
+  });
+
+  it("holds the interim note at a ceiling, the edge's field alone stale while the link is down", async () => {
+    const { result, socket } = renderViewSky(DEFAULT_EXPOSURE);
+    await replyAt(socket, [1_000, 1_000, 1_000], false, 5.0);
+    const live = result.current.label("alone");
+    act(() => {
+      socket.close();
+    });
+    const value =
+      "V 10.1 mag CAM · BEYOND 1000 ly: STREAMING · DISTANT STARS: DETAIL LIMITED · CLUSTERS: NOT YET MODELLED";
+    expect([live, result.current.label("alone"), result.current.label("instrument")]).toEqual([
+      { value, field: { text: "1000 ly", widthCh: 12, stale: false } },
+      { value, field: { text: "1000 ly", widthCh: 12, stale: true } },
+      { value: "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED" },
+    ]);
+  });
+
+  it("gives the primary's one note to STREAMING beside an instrument, then to the interim note", async () => {
+    const { result, socket } = renderViewSky(DEFAULT_EXPOSURE);
+    await replyAt(socket, [1_000, 1_000, 1_000], false, 5.0);
+    const streaming = result.current.label("beside");
+    await replyAt(socket, [null, null, null], true, 5.0);
+    expect([streaming, result.current.label("beside")]).toEqual([
+      {
+        value: "V 10.1 mag CAM · BEYOND 1000 ly: STREAMING",
+        field: { text: "1000 ly", widthCh: 12, stale: false },
+      },
+      { value: "V 10.1 mag CAM · DISTANT STARS: DETAIL LIMITED" },
+    ]);
   });
 });
 

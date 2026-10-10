@@ -8,7 +8,10 @@
 //! first (R06.T9.g), then the eye's cut, the eye cut's pre-pass with it, and the request's cut is
 //! the deeper of it and the camera's limit, which is taken as asked, neither deepened nor padded;
 //! an eye-only request also takes the eye's visibility, by which its caps count each ray (R06.T7.b;
-//! `decision-r06-t7b-brackets.md`). Everything the sky computes runs as bulk jobs on the CPU pool,
+//! `decision-r06-t7b-brackets.md`). The plan states the synthetic ceiling the sky is served at,
+//! RM3's V 5.0 or the cut where that is brighter, and none where the cut's own caps already lie
+//! within the real limit (rendering plan R13, R13.T2.b; `compute::sky::plan`): its census, band and
+//! every reply read the query at it. Everything the sky computes runs as bulk jobs on the CPU pool,
 //! never in the interactive queue ([`compute::sky`](crate::compute::sky)): the galaxy's tables,
 //! built once and kept; the illumination; the eye's cut and visibility; the caps' rays, a few to a
 //! job, and the census's plan; the host discs of `exclude_system` at the request's time; the census
@@ -17,12 +20,13 @@
 //! each step of shells its merge, the band's sums and the eye's limits a job a march, the eye
 //! offsets, and the payload (R06.T11.d).
 //!
-//! Each step's answer is the census's JSON (the cut, each layer's cap, tallies and the radius it is
-//! complete to, the listed and overflow counts, `valid_until`, the band's shape, the host discs,
-//! what is not modelled, and whether it is final) and its bulk payload, in R03's binary frames
-//! before it (R06.T11.b): each listed star in the census's order in its wire form
-//! ([`wire_star`]), then the band's texels in the cube's face order ([`wire_texel`]), the
-//! response's `stars_bytes` and `band_bytes` splitting it and its manifest stating the whole. Every
+//! Each step's answer is the census's JSON (the cut, the ceiling and the real limit where it states
+//! them, each layer's cap, its counts beyond, tallies and the radius it is complete to, the listed
+//! and overflow counts, `valid_until`, the band's shape, the host discs, what is not modelled, and
+//! whether it is final) and its bulk payload, in R03's binary frames before it (R06.T11.b): each
+//! listed star in the census's order in its wire form ([`wire_star`]), then the band's texels in
+//! the cube's face order ([`wire_texel`]), the response's `stars_bytes` and `band_bytes` splitting
+//! it and its manifest stating the whole. Every
 //! answer but the last is a `partial_response`, sent through the request's [`Replies`] as soon as
 //! it is made; the last, final, is the terminal `response`. The band's shape is the query's, 64² a
 //! face.
@@ -51,7 +55,7 @@ use hyperion_sim::id::{Layer, SystemId};
 use hyperion_sim::observe::Observer;
 use hyperion_sim::sky::EyeObserver;
 use hyperion_sim::sky::band::{BandMarch, BandTexel};
-use hyperion_sim::sky::caps::LayerCap;
+use hyperion_sim::sky::caps::{LayerCap, REAL_LIMIT_LY};
 use hyperion_sim::sky::census::{
     BuildSkyQueryError, CensusPlan, CensusTallies, Completeness, Cone, LayerTally, SkyCensus,
     SkyQuery, SkyStar,
@@ -157,9 +161,13 @@ pub(crate) async fn answer(
         None => None,
     };
     phase("eye", started);
-    let query = Arc::new(asked.query(seen, light, state.sky_caps));
+    let asked_query = Arc::new(asked.query(seen, light, state.sky_caps));
     let edges = state.sky_caps.shell_edges_ly();
-    let plan = Arc::new(compute::sky::plan(pool, &galaxy, &tables, &query, edges, &token).await?);
+    // The query at the ceiling the sky is served at (rendering plan R13, R13.T2.b), which the census,
+    // the band and every reply read.
+    let (query, plan) =
+        compute::sky::plan(pool, &galaxy, &tables, asked_query, edges, &token).await?;
+    let plan = Arc::new(plan);
     phase("plan", started);
     let inputs = CensusInputs {
         galaxy,
@@ -577,7 +585,9 @@ impl SkyAsk {
     /// camera's limit, as asked, with the eye at its own cut if a camera's is deeper (R06.T9.j),
     /// its caps counted by the eye's visibility where `seen` has it, the request's `illumination`
     /// (R06.T9.g), and every cap forced where `caps` forces them. `seen` is the request's eye with
-    /// its cut, or `None` where the request does not ask the eye.
+    /// its cut, or `None` where the request does not ask the eye. It states no synthetic ceiling:
+    /// the plan states the one the sky is served at (`compute::sky::plan`; rendering plan R13,
+    /// R13.T2.b).
     ///
     /// # Panics
     ///
@@ -718,7 +728,9 @@ async fn check_exclude(
 /// The census's answer (R06.T11.a–d) for the universe and observer `asked`: the cut, each layer's
 /// cap, tallies and the radii it is complete to, the counts, the time it holds to, the band's
 /// shape, the host discs `hosts`, what is not modelled and whether it is final, with the manifest
-/// of `bulk` and where `encoded` splits.
+/// of `bulk` and where `encoded` splits; and where the query states a synthetic ceiling, the
+/// ceiling and the real limit (rendering plan R13, R13.T2.b), each layer's cap then its real
+/// boundary, with its counts beyond it brighter than the cut and than the ceiling.
 ///
 /// # Panics
 ///
@@ -744,6 +756,8 @@ fn response(
         observer,
         valid_until: wire_time(valid_until(query.observer().time(), census.listed())),
         cut_v: query.cut().value(),
+        synthetic_ceiling_v: query.synthetic_ceiling().map(Magnitudes::value),
+        real_limit_ly: query.synthetic_ceiling().map(|_| REAL_LIMIT_LY),
         census: caps
             .iter()
             .map(|cap| layer_census(cap, tallies, completeness))
@@ -762,10 +776,13 @@ fn response(
     }
 }
 
-/// One layer's census as the wire states it (R06's Risks, T8.c's mapping): its cap, its tallies,
-/// each count narrowed to the wire's width, and how far `completeness` says it is complete
-/// (R06.T11.d): its farthest radius, its radius per ray of the caps' lattice where it has one a
-/// ray, and whether its last shell is done.
+/// One layer's census as the wire states it (R06's Risks, T8.c's mapping): its cap, with the
+/// stars expected beyond it brighter than the cut and, at a synthetic ceiling, brighter than the
+/// ceiling, which every derived cap then states (rendering plan R13, R13.T2.b), its tallies, each
+/// count narrowed to
+/// the wire's width, and how far `completeness` says it is complete (R06.T11.d): its farthest
+/// radius, its radius per ray of the caps' lattice where it has one a ray, and whether its last
+/// shell is done.
 #[must_use]
 fn layer_census(
     cap: &LayerCap,
@@ -779,6 +796,7 @@ fn layer_census(
         cap_ly: cap.radius().value(),
         rule_bound_ly: cap.rule_bound().value(),
         expected_beyond: cap.expected_beyond(),
+        bright_beyond: cap.bright_beyond(),
         cells: narrow(tally.cells()),
         candidates_opened: tally.generated(),
         accepted: tally.accepted(),
@@ -1181,6 +1199,111 @@ mod tests {
         let forced = SkyCaps::forced(LightYears::new(30.0)).unwrap();
         assert_eq!(cuts(&ask.query(None, light(), forced)), (9.0, None));
         assert_eq!(ask.query(None, light(), caps).n_max().get(), MAX_SKY_STARS);
+    }
+
+    /// The reply at a synthetic ceiling states it, the real limit, and each layer's real boundary
+    /// with its counts beyond, brighter than the cut and than the ceiling, bit for bit as the caps
+    /// hold them, the final reply's per-ray radii C's, D's and E's boundary ray by ray; with no
+    /// ceiling it states none of them (rendering plan R13, R13.T2.b). The caps are a coarse count's
+    /// over tables of no star, whose every count is nought.
+    #[test]
+    fn the_reply_states_the_ceiling_the_limit_and_each_layers_boundary() {
+        use hyperion_sim::galaxy::gas::noise::NoiseCache;
+        use hyperion_sim::sky::caps::{CapCount, CapResolution, real_boundary};
+        use hyperion_sim::sky::census::{census_plan_of, merge_shells};
+
+        use crate::compute::sky::SYNTHETIC_CEILING;
+
+        let galaxy = Galaxy::new(Seed::new(SEED));
+        let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
+        let ctx = tables.march_context();
+        let observer = SkyAsk::try_from(&request()).unwrap().observer;
+        let mut noise = NoiseCache::with_capacity(1 << 14);
+        let resolution = CapResolution::new(96, 8).unwrap();
+        let mut count = |v: f64| {
+            CapCount::measure(
+                &galaxy,
+                ctx.tables,
+                ctx.envelope,
+                &observer,
+                Magnitudes::new(v),
+                resolution,
+                &mut noise,
+            )
+        };
+        let (at_cut, at_ceiling) = (count(9.0), count(SYNTHETIC_CEILING.value()));
+        let real = real_boundary(&at_ceiling, &at_cut, &at_cut.caps());
+        let ask = SkyAsk::try_from(&request()).unwrap();
+        let answer = |query: &SkyQuery, caps: Vec<LayerCap>| {
+            let plan = census_plan_of(query, caps);
+            let census = merge_shells(None, query.n_max(), plan.complete());
+            let encoded = payload(
+                query.observer(),
+                &census,
+                &SkyBand::of_parts(Vec::new(), None),
+            );
+            let bulk = BulkPayload::new(encoded.bytes.clone()).unwrap();
+            let asked = (request().universe, request().observer);
+            let body = response(
+                asked,
+                query,
+                plan.caps(),
+                &census,
+                Vec::new(),
+                &bulk,
+                &encoded,
+            );
+            (plan, body)
+        };
+
+        let query = ask
+            .query(None, light(), SkyCaps::DERIVED)
+            .with_synthetic_ceiling(SYNTHETIC_CEILING)
+            .unwrap();
+        let (plan, body) = answer(&query, real.clone());
+        assert_eq!(
+            (body.synthetic_ceiling_v, body.real_limit_ly),
+            (Some(5.0), Some(REAL_LIMIT_LY))
+        );
+        assert!(body.is_final);
+        assert_eq!(body.census.len(), real.len());
+        for (dto, cap) in body.census.iter().zip(plan.caps()) {
+            assert_eq!(dto.layer, mass_layer(cap.layer()));
+            let bright = cap.bright_beyond().expect("a real boundary states it");
+            assert_eq!(
+                (
+                    dto.cap_ly.to_bits(),
+                    dto.expected_beyond.to_bits(),
+                    dto.bright_beyond.map(f64::to_bits)
+                ),
+                (
+                    cap.radius().value().to_bits(),
+                    cap.expected_beyond().to_bits(),
+                    Some(bright.to_bits())
+                ),
+                "{:?}",
+                cap.layer()
+            );
+            let rays = cap.rays().expect("a count's cap is one radius a ray");
+            assert_eq!(
+                dto.complete_to_rays_ly,
+                rays.radii_ly(),
+                "{:?}",
+                cap.layer()
+            );
+            assert!(
+                dto.cap_ly <= REAL_LIMIT_LY
+                    || !matches!(cap.layer(), Layer::C | Layer::D | Layer::E)
+            );
+        }
+
+        // A query that states no ceiling, at the cut's own caps: no ceiling, limit or count.
+        let mut builder = SkyQuery::builder(observer, Magnitudes::new(9.0));
+        builder = builder.illumination(light());
+        let without = builder.build().unwrap();
+        let (_, body) = answer(&without, at_cut.caps());
+        assert_eq!((body.synthetic_ceiling_v, body.real_limit_ly), (None, None));
+        assert!(body.census.iter().all(|dto| dto.bright_beyond.is_none()));
     }
 
     /// Only an eye-only request counts its caps by the eye's visibility, whatever the camera's

@@ -42,13 +42,14 @@ pub const MAX_N_MAX: u32 = 300_000;
 /// The largest forced cap, ly: the root cube's diagonal, 2¹⁷ × √3, beyond which nothing lies.
 pub const MAX_FORCED_CAP_LY: f64 = 227_023.0;
 
-/// How much brighter than the cut a synthetic ceiling must be at least, mag: 0.5 (rendering plan
-/// R13, R13.T2.a).
-///
-/// The server's ceilings, V 5.0 in RM3's interim and V 4.5 from R13.T7, lie 2.7 mag and more
-/// brighter than the eye's cut near the Sun (V 7.77–8.18, R13.T1) and 0.8 mag and more in the
-/// nuclear disc (V 5.81).
-const MIN_CEILING_DEPTH_MAG: f64 = 0.5;
+/// Whether `ceiling` may be a query's synthetic ceiling at `cut`: finite and no fainter than the
+/// cut (rendering plan R13, R13.T2.b). T2.a refused one within 0.5 mag of the cut, a margin with no
+/// source, which would have served a cut under V<sub>P</sub> + 0.5 at R06's caps, past the real
+/// limit; ruled away on 2026-10-09 (`decision-r13-t2b-ceiling.md`).
+#[must_use]
+fn ceiling_fits(ceiling: Magnitudes, cut: Magnitudes) -> bool {
+    ceiling.value().is_finite() && ceiling.value() <= cut.value()
+}
 
 /// [`MAX_N_MAX`] as a [`NonZeroU32`], the default.
 const DEFAULT_N_MAX: NonZeroU32 = NonZeroU32::new(MAX_N_MAX).expect("300,000 is not zero");
@@ -310,8 +311,9 @@ pub enum BuildSkyQueryError {
     /// own, or was taken for another observer, eye or cut than the request's (R06.T7.b): it caps
     /// an eye-only request.
     EyeVisibility,
-    /// The synthetic ceiling is not finite, or is not brighter than the cut by at least 0.5 mag
-    /// (rendering plan R13, R13.T2.a).
+    /// The synthetic ceiling is not finite, or is fainter than the cut (rendering plan R13,
+    /// R13.T2.b; decided 2026-10-09, `decision-r13-t2b-ceiling.md`): a ceiling fainter than the cut
+    /// would count stars beyond the real boundary that the sky does not hold.
     SyntheticCeiling,
 }
 
@@ -331,7 +333,7 @@ impl fmt::Display for BuildSkyQueryError {
                 "the eye's visibility caps an eye-only request of its observer, eye and cut"
             }
             Self::SyntheticCeiling => {
-                "the synthetic ceiling is not finite or not brighter than the cut by 0.5 mag"
+                "the synthetic ceiling is not finite or is fainter than the cut"
             }
         })
     }
@@ -612,8 +614,8 @@ pub struct SkyQuery {
     illumination: Option<Arc<Illumination>>,
     /// The eye's visibility, if an eye-only request asks its caps by it (R06.T7.b).
     eye_visibility: Option<Arc<EyeVisibility>>,
-    /// The synthetic ceiling V<sub>P</sub>, if the request states one (rendering plan R13): at
-    /// least [`MIN_CEILING_DEPTH_MAG`] brighter than the cut once built.
+    /// The synthetic ceiling V<sub>P</sub>, if the request states one (rendering plan R13): finite
+    /// and no fainter than the cut once built.
     synthetic_ceiling: Option<Magnitudes>,
 }
 
@@ -782,6 +784,23 @@ impl SkyQuery {
     #[must_use]
     pub const fn synthetic_ceiling(&self) -> Option<Magnitudes> {
         self.synthetic_ceiling
+    }
+
+    /// The same query at the synthetic ceiling `v` ([`SkyQueryBuilder::synthetic_ceiling`]): the
+    /// server's, which states the ceiling a request is served at once it knows the cut's caps
+    /// (rendering plan R13, R13.T2.b; [`served_ceiling`](super::super::caps::served_ceiling)).
+    ///
+    /// # Errors
+    ///
+    /// [`BuildSkyQueryError::SyntheticCeiling`] if `v` is not finite or is fainter than the cut, as
+    /// the builder refuses it.
+    pub fn with_synthetic_ceiling(mut self, v: Magnitudes) -> Result<Self, BuildSkyQueryError> {
+        if ceiling_fits(v, self.cut) {
+            self.synthetic_ceiling = Some(v);
+            Ok(self)
+        } else {
+            Err(BuildSkyQueryError::SyntheticCeiling)
+        }
     }
 
     /// The same query with every layer's cap forced to `radius`: the census the brute force is
@@ -962,8 +981,10 @@ impl SkyQueryBuilder {
     /// texel at every reply, the final one included ([`Completeness`]), so that the listing, the
     /// band and the synthetic tier beyond R(u) share one boundary with no gap. A, B and the brown
     /// dwarfs are censused as without it. With no ceiling every bit is R06's. A ceiling not
-    /// finite, or not brighter than the cut by at least 0.5 mag, is refused
-    /// ([`BuildSkyQueryError::SyntheticCeiling`]).
+    /// finite, or fainter than the cut, is refused ([`BuildSkyQueryError::SyntheticCeiling`]); one
+    /// at the cut is the server's where the cut is brighter than its constant (decided 2026-10-09,
+    /// `decision-r13-t2b-ceiling.md`): its two counts are then one count at a uniform cut, R(u) the
+    /// cut's caps held within the real limit.
     ///
     /// # Examples
     ///
@@ -983,8 +1004,9 @@ impl SkyQueryBuilder {
     /// };
     /// // RM3's interim states V 5.0, R13's synthetic tier V 4.5.
     /// assert_eq!(query(5.0)?.synthetic_ceiling(), Some(Magnitudes::new(5.0)));
-    /// // A ceiling within half a magnitude of the cut is refused.
-    /// assert_eq!(query(7.6), Err(BuildSkyQueryError::SyntheticCeiling));
+    /// // A ceiling near the cut, or at it, builds; one fainter than the cut is refused.
+    /// assert_eq!(query(7.6)?.synthetic_ceiling(), Some(Magnitudes::new(7.6)));
+    /// assert_eq!(query(8.0), Err(BuildSkyQueryError::SyntheticCeiling));
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
@@ -1005,7 +1027,7 @@ impl SkyQueryBuilder {
     /// observer or at another time, and [`BuildSkyQueryError::EyeVisibility`] if the eye's
     /// visibility is asked without the eye, with an eye's cut shallower than the cut, or was taken
     /// for another observer, eye or cut, and [`BuildSkyQueryError::SyntheticCeiling`] if the
-    /// synthetic ceiling is not finite or not brighter than the cut by at least 0.5 mag.
+    /// synthetic ceiling is not finite or is fainter than the cut.
     pub fn build(mut self) -> Result<SkyQuery, BuildSkyQueryError> {
         let cut = self.query.cut.value();
         if !(cut.is_finite() && cut <= MAX_CUT_V) {
@@ -1014,7 +1036,7 @@ impl SkyQueryBuilder {
         if self
             .query
             .synthetic_ceiling
-            .is_some_and(|v| !(v.value().is_finite() && cut - v.value() >= MIN_CEILING_DEPTH_MAG))
+            .is_some_and(|v| !ceiling_fits(v, self.query.cut))
         {
             return Err(BuildSkyQueryError::SyntheticCeiling);
         }
@@ -1872,11 +1894,12 @@ mod tests {
         }
     }
 
-    /// A synthetic ceiling is finite and brighter than the cut by half a magnitude at least
-    /// (rendering plan R13, R13.T2.a), with the eye or without it; a forced cap keeps it, and a
+    /// A synthetic ceiling is finite and no fainter than the cut (rendering plan R13, R13.T2.b;
+    /// decided 2026-10-09, `decision-r13-t2b-ceiling.md`, which dropped T2.a's 0.5 mag margin),
+    /// with the eye or without it, built or stated on a query built; a forced cap keeps it, and a
     /// query states none unless asked.
     #[test]
-    fn a_synthetic_ceiling_is_half_a_magnitude_brighter_than_the_cut_at_least() {
+    fn a_synthetic_ceiling_is_finite_and_no_fainter_than_the_cut() {
         let ceiling = |cut: f64, ceiling: f64, eye: bool| {
             let builder = SkyQuery::builder(observer(), Magnitudes::new(cut));
             let builder = if eye {
@@ -1884,27 +1907,31 @@ mod tests {
             } else {
                 builder
             };
-            builder
+            let built = builder
+                .clone()
                 .synthetic_ceiling(Magnitudes::new(ceiling))
+                .build();
+            let stated = builder
                 .build()
-                .map(|query| query.synthetic_ceiling().map(Magnitudes::value))
+                .expect("a query")
+                .with_synthetic_ceiling(Magnitudes::new(ceiling));
+            // The query stated on a query built is the builder's, whole.
+            assert_eq!(
+                built, stated,
+                "cut {cut}, ceiling {ceiling}, the eye asked: {eye}"
+            );
+            built.map(|query| query.synthetic_ceiling().map(Magnitudes::value))
         };
         for eye in [false, true] {
             assert_eq!(ceiling(7.95, 5.0, eye), Ok(Some(5.0)));
-            assert_eq!(ceiling(7.0, 6.5, eye), Ok(Some(6.5)), "half a magnitude");
-            assert_eq!(ceiling(7.0, -30.0, eye), Ok(Some(-30.0)));
-            for (cut, v) in [
-                (7.0, 6.6),
-                (7.0, 7.0),
-                (7.0, 9.0),
-                (7.0, f64::NAN),
-                (7.0, f64::NEG_INFINITY),
-                (7.0, f64::INFINITY),
-            ] {
+            assert_eq!(ceiling(7.95, 7.95, eye), Ok(Some(7.95)), "at the cut");
+            assert_eq!(ceiling(7.95, 7.6, eye), Ok(Some(7.6)), "refused by T2.a");
+            assert_eq!(ceiling(7.95, -30.0, eye), Ok(Some(-30.0)));
+            for v in [7.95 + 1e-9, 9.0, f64::NAN, f64::NEG_INFINITY, f64::INFINITY] {
                 assert_eq!(
-                    ceiling(cut, v, eye),
+                    ceiling(7.95, v, eye),
                     Err(BuildSkyQueryError::SyntheticCeiling),
-                    "cut {cut}, ceiling {v}, the eye asked: {eye}"
+                    "ceiling {v}, the eye asked: {eye}"
                 );
             }
         }

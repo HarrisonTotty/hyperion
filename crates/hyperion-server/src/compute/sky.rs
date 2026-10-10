@@ -20,7 +20,10 @@
 //! - the caps' 1,536 rays, each through its three sub-rays (R06.T7.b), are measured
 //!   [`CAP_JOB_RAYS`] to a job, each with its own noise cache, then counted [`CAP_COUNT_JOB_RAYS`]
 //!   to a job, every layer at once, and each layer's cap drawn from the count in a job of its own;
-//!   one more job makes the census's plan (decided 2026-10-03, `decision-r06-tables.md`, item B.4);
+//!   where the query states a synthetic ceiling ([`SYNTHETIC_CEILING_V`]; rendering plan R13), the
+//!   same rays are counted a second time at the ceiling, split as the first, and one job takes
+//!   C's, D's and E's real boundary from the two (`real_boundary`); one more job makes the
+//!   census's plan (decided 2026-10-03, `decision-r06-tables.md`, item B.4);
 //! - the census runs its plan's shells nearest first, step by step ([`delivery_steps`]; R06.T11.d),
 //!   each shell's slabs as jobs of about [`CENSUS_JOB_SLICE`] ([`census_in_steps`]);
 //! - while it runs, the band's rays are marched [`BAND_JOB_ROWS`] rows of a face to a job (R06.T9.f's
@@ -71,7 +74,8 @@ use hyperion_sim::sky::band::{
     BandMarch, BandSpec, BandTexel, CompleteTo, CubeFace, march_rows, sum_rows,
 };
 use hyperion_sim::sky::caps::{
-    CAP_RAYS, CAPPED_LAYERS, CapCount, CapLattice, LayerCap, RayExtinctions, SUB_RAYS,
+    CAP_RAYS, CAPPED_LAYERS, CapCount, CapCountPart, CapCountPlan, CapLattice, LayerCap,
+    RayExtinctions, SUB_RAYS, SYNTHETIC_CEILING_V, real_boundary, served_ceiling,
 };
 use hyperion_sim::sky::census::{
     CellOffsets, CellSlab, CensusCost, CensusPlan, CensusTallies, MAX_FORCED_CAP_LY,
@@ -138,6 +142,13 @@ pub(crate) const CAP_COUNT_JOB_RAYS: usize = 32;
 /// The listed stars one job gives their eye offsets (R06.T11.g): 20,000, some tens of
 /// milliseconds, so `N_max`'s 3 × 10⁵ take 15 jobs.
 pub(crate) const EYE_OFFSET_JOB_STARS: usize = 20_000;
+
+/// The synthetic ceiling a sky is served at, the sim's [`SYNTHETIC_CEILING_V`] as a magnitude
+/// (rendering plan R13, R13.T2.b): every sky's query states it, or the request's cut where the cut
+/// is brighter, and none only where the cut is at or brighter than it and the cut's own C, D and E
+/// caps already lie within the real limit (decided 2026-10-09, `decision-r13-t2b-ceiling.md`;
+/// `sky::caps::served_ceiling`).
+pub(crate) const SYNTHETIC_CEILING: Magnitudes = Magnitudes::new(SYNTHETIC_CEILING_V);
 
 /// Noise-cache slots of a census job: 256 KiB, a cache's worth for the sightlines of a few hundred
 /// cells' stars. The cache changes no value, only how often a normal is drawn again.
@@ -597,19 +608,34 @@ async fn pre_pass(
     BulkJobs::submit(pool, token, jobs).await?.results().await
 }
 
-/// The census's plan for `query` (Design notes 9 and 10): each layer's cap and the cells they open,
-/// in shells to `edges_ly` ([`SkyCaps::shell_edges_ly`]: [`SHELL_EDGES_LY`] for every sky a client
-/// asks, R06.T8.i).
+/// The census's plan for `query` (Design notes 9 and 10), at the synthetic ceiling the server
+/// states for it, and the query at that ceiling, which its census, band and replies read: each
+/// layer's cap and the cells they open, in shells to `edges_ly` ([`SkyCaps::shell_edges_ly`]:
+/// [`SHELL_EDGES_LY`] for every sky a client asks, R06.T8.i).
 ///
-/// The query's forced caps are the plan's at once, in one bulk job. Derived caps count the galaxy's
-/// stars along [`CAP_RAYS`] rays, each through the clearest of its [`SUB_RAYS`] sub-rays, whose
-/// extinction profiles are measured [`CAP_JOB_RAYS`] to a bulk job after one job sets the rays'
-/// lattice, each with its own noise cache, and joined in ray order (decided 2026-10-03,
-/// `decision-r06-tables.md`, item B.4; R06.T7.b). One job then plans the count over them, by the
-/// eye's visibility where the query asks it; the count's rays are counted [`CAP_COUNT_JOB_RAYS`] to
-/// a job and joined in ray order; each layer's cap is drawn from the count in a job of its own; and
-/// one more job makes the plan (R06.T11.g). The caps are so `layer_caps`' (or
-/// `layer_caps_by_visibility`'s) bit for bit.
+/// The ceiling (rendering plan R13, R13.T2.b; decided 2026-10-09, `decision-r13-t2b-ceiling.md`)
+/// is [`SYNTHETIC_CEILING_V`] where the cut is deeper, and otherwise the cut itself, unless the
+/// cut's own C, D and E caps lie within the real limit on every ray, where a ceiling would hold
+/// nothing and the query states none (`served_ceiling`): that plan is R06's, bit for bit. A query
+/// that states a ceiling already, a test's, keeps it.
+///
+/// The query's forced caps are the plan's at once, in one bulk job, at the ceiling `served_ceiling`
+/// gives for them. Derived caps count the galaxy's stars along [`CAP_RAYS`] rays, each through the
+/// clearest of its [`SUB_RAYS`] sub-rays, whose extinction profiles are measured [`CAP_JOB_RAYS`]
+/// to a bulk job after one job sets the rays' lattice, each with its own noise cache, and joined in
+/// ray order (decided 2026-10-03, `decision-r06-tables.md`, item B.4; R06.T7.b). One job then plans
+/// the count over them, by the eye's visibility where the query asks it; the count's rays are
+/// counted [`CAP_COUNT_JOB_RAYS`] to a job and joined in ray order; each layer's cap is drawn from
+/// the count in a job of its own; and one more job makes the plan (R06.T11.g). The caps are so
+/// `layer_caps`' (or `layer_caps_by_visibility`'s) bit for bit.
+///
+/// At a ceiling a second count runs over the same rays, split as the first. Where the cut is deeper
+/// than [`SYNTHETIC_CEILING_V`], the same job plans it and its rays are queued behind the first's;
+/// otherwise it is planned once the cut's caps show that a ceiling at the cut holds some ray. One
+/// job then takes C's, D's and E's real boundary from the two counts and the cut's caps
+/// (`real_boundary`), and the plan is the query's at the ceiling: their cones widened by the band
+/// texel's largest radius and every reply listed by each star's texel. Plan and caps are so the
+/// sim's `census_plan` of the query at the ceiling, bit for bit.
 ///
 /// # Errors
 ///
@@ -618,29 +644,52 @@ pub(crate) async fn plan(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
     tables: &Arc<SkyTables>,
-    query: &Arc<SkyQuery>,
+    query: Arc<SkyQuery>,
     edges_ly: &'static [u32],
     token: &CancelToken,
-) -> Result<CensusPlan, ComputeError> {
-    if let Some(forced) = query.forced_caps() {
+) -> Result<(Arc<SkyQuery>, CensusPlan), ComputeError> {
+    let (ceiling, caps) = match query.forced_caps() {
         // A forced query's plan reads no table and marches no ray: `census_plan`'s for it.
-        let (caps, query) = (forced.to_vec(), Arc::clone(query));
-        return bulk(pool, token, move |_: &CancelToken| {
-            census_plan_with_edges(&query, caps, edges_ly)
-        })
-        .await;
-    }
-    let caps = derived_caps(pool, galaxy, tables, query, token).await?;
-    let query = Arc::clone(query);
-    bulk(pool, token, move |_: &CancelToken| {
-        census_plan_with_edges(&query, caps, edges_ly)
+        Some(forced) => {
+            let ceiling = query
+                .synthetic_ceiling()
+                .or_else(|| served_ceiling(query.cut(), SYNTHETIC_CEILING, forced));
+            (ceiling, forced.to_vec())
+        }
+        None => derived_caps(pool, galaxy, tables, &query, token).await?,
+    };
+    let query = at(query, ceiling);
+    let planned = Arc::clone(&query);
+    let plan = bulk(pool, token, move |_: &CancelToken| {
+        census_plan_with_edges(&planned, caps, edges_ly)
     })
-    .await
+    .await?;
+    Ok((query, plan))
 }
 
-/// Each layer's cap for `query`, derived from the galaxy's tables and dust as [`plan`] sets out:
-/// the rays measured, then counted, in jobs, and each layer's cap drawn in a job of its own, in
-/// [`CAPPED_LAYERS`]' order.
+/// `query` at the synthetic ceiling `ceiling`, or as it is where it states one already, the
+/// ceiling being then its own, or where `ceiling` is none. The query is copied only where another
+/// holder shares it.
+///
+/// # Panics
+///
+/// If `ceiling` is fainter than the cut or not finite, which no served ceiling is.
+#[must_use]
+fn at(query: Arc<SkyQuery>, ceiling: Option<Magnitudes>) -> Arc<SkyQuery> {
+    match ceiling {
+        Some(v) if query.synthetic_ceiling().is_none() => Arc::new(
+            Arc::unwrap_or_clone(query)
+                .with_synthetic_ceiling(v)
+                .expect("a served ceiling is finite and no fainter than the cut"),
+        ),
+        Some(_) | None => query,
+    }
+}
+
+/// The ceiling `query` is served at, and each layer's cap for it, derived from the galaxy's tables
+/// and dust as [`plan`] sets out: the rays measured, then counted, in jobs, and each layer's cap
+/// drawn in a job of its own, in [`CAPPED_LAYERS`]' order; at a ceiling, the rays counted again
+/// at it and the real boundary taken in one more job.
 ///
 /// # Errors
 ///
@@ -651,7 +700,7 @@ async fn derived_caps(
     tables: &Arc<SkyTables>,
     query: &Arc<SkyQuery>,
     token: &CancelToken,
-) -> Result<Vec<LayerCap>, ComputeError> {
+) -> Result<(Option<Magnitudes>, Vec<LayerCap>), ComputeError> {
     let origin = *query.observer().position();
     // The lattice's spacing, which sets each ray's sub-rays, is some 0.1 s: one job, shared.
     let lattice = bulk(pool, token, |_: &CancelToken| {
@@ -672,9 +721,14 @@ async fn derived_caps(
         .await?
         .results()
         .await?;
-    // The count's plan: the rays joined, each ray's cut, the rule bounds and the radial nodes, some
-    // milliseconds.
-    let (counting, rays) = {
+    // The ceiling known before any cap: the query's own, or the server's where the cut is deeper.
+    let early = query
+        .synthetic_ceiling()
+        .or_else(|| (query.cut().value() > SYNTHETIC_CEILING.value()).then_some(SYNTHETIC_CEILING));
+    // The counts' plans: the rays joined, each ray's cut, the rule bounds and the radial nodes, some
+    // milliseconds each. At a ceiling the second counts the same rays at it, one cut for every ray,
+    // as the sim's `census_plan` counts them (R13.T2.a).
+    let (counting, at_early, rays) = {
         let (galaxy, tables, query) = (Arc::clone(galaxy), Arc::clone(tables), Arc::clone(query));
         bulk(pool, token, move |_: &CancelToken| {
             let rays = RayExtinctions::join(shares);
@@ -688,33 +742,156 @@ async fn derived_caps(
                     CapCount::plan_over(&galaxy, luminosity, envelope, observer, query.cut(), &rays)
                 }
             };
-            (Arc::new(counting), Arc::new(rays))
+            let at_early = early.map(|ceiling| {
+                let plan =
+                    CapCount::plan_over(&galaxy, luminosity, envelope, observer, ceiling, &rays);
+                (ceiling, Arc::new(plan))
+            });
+            (Arc::new(counting), at_early, Arc::new(rays))
         })
         .await?
     };
-    let counts = (0..counting.rays())
+    // Both counts' rays are queued before either is joined, the ceiling's behind the cut's, so that
+    // the workers count the second while the first is joined and its caps drawn.
+    let at_cut_parts = count_jobs(pool, galaxy, tables, &counting, &rays, token).await?;
+    let early_parts = match at_early {
+        Some((ceiling, plan)) => {
+            let parts = count_jobs(pool, galaxy, tables, &plan, &rays, token).await?;
+            Some((ceiling, plan, parts))
+        }
+        None => None,
+    };
+    let count = joined(pool, &counting, at_cut_parts, token).await?;
+    let caps = CAPPED_LAYERS.map(|layer| {
+        let count = Arc::clone(&count);
+        move || count.cap(layer)
+    });
+    let caps = BulkJobs::submit(pool, token, caps).await?;
+    let early_count = match early_parts {
+        Some((ceiling, plan, parts)) => Some((ceiling, joined(pool, &plan, parts, token).await?)),
+        None => None,
+    };
+    let caps = caps.results().await?;
+    let (ceiling, at_ceiling) = match early_count {
+        Some((ceiling, count)) => {
+            debug_assert!(
+                query.synthetic_ceiling().is_some()
+                    || served_ceiling(query.cut(), SYNTHETIC_CEILING, &caps) == Some(ceiling),
+                "the ceiling known before the caps is the served one"
+            );
+            (Some(ceiling), Some(count))
+        }
+        // The cut is at or brighter than the server's ceiling: the cut itself, unless its caps
+        // already lie within the real limit, where a ceiling would hold no ray.
+        None => match served_ceiling(query.cut(), SYNTHETIC_CEILING, &caps) {
+            Some(ceiling) => {
+                let count = counted_at(pool, galaxy, tables, query, &rays, ceiling, token).await?;
+                (Some(ceiling), Some(count))
+            }
+            None => (None, None),
+        },
+    };
+    let caps = match at_ceiling {
+        // C's, D's and E's real boundary from the two counts and the cut's caps, in one job: three
+        // caps drawn at the ceiling and the counts beyond each layer's boundary.
+        Some(at_ceiling) => {
+            bulk(pool, token, move |_: &CancelToken| {
+                real_boundary(&at_ceiling, &count, &caps)
+            })
+            .await?
+        }
+        None => caps,
+    };
+    Ok((ceiling, caps))
+}
+
+/// The count over `rays` at the uniform cut `ceiling` for `query`'s observer: planned in one bulk
+/// job under `token`, its rays counted in jobs ([`count_jobs`]) and joined ([`joined`]).
+///
+/// # Errors
+///
+/// Those of [`bulk`] and [`BulkJobs`].
+async fn counted_at(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    tables: &Arc<SkyTables>,
+    query: &Arc<SkyQuery>,
+    rays: &Arc<RayExtinctions>,
+    ceiling: Magnitudes,
+    token: &CancelToken,
+) -> Result<Arc<CapCount>, ComputeError> {
+    let plan = {
+        let (galaxy, tables, query, rays) = (
+            Arc::clone(galaxy),
+            Arc::clone(tables),
+            Arc::clone(query),
+            Arc::clone(rays),
+        );
+        bulk(pool, token, move |_: &CancelToken| {
+            let (luminosity, envelope) = (&tables.tables, &tables.envelope);
+            CapCount::plan_over(
+                &galaxy,
+                luminosity,
+                envelope,
+                query.observer(),
+                ceiling,
+                &rays,
+            )
+        })
+        .await?
+    };
+    let plan = Arc::new(plan);
+    let parts = count_jobs(pool, galaxy, tables, &plan, rays, token).await?;
+    joined(pool, &plan, parts, token).await
+}
+
+/// The rays of `counting`, a count's plan over `rays`, counted [`CAP_COUNT_JOB_RAYS`] to a bulk job
+/// under `token`, every layer at once, queued in ray order (R06.T11.g).
+///
+/// # Errors
+///
+/// Those of [`BulkJobs::submit`].
+async fn count_jobs(
+    pool: &CpuPool,
+    galaxy: &Arc<Galaxy>,
+    tables: &Arc<SkyTables>,
+    counting: &Arc<CapCountPlan>,
+    rays: &Arc<RayExtinctions>,
+    token: &CancelToken,
+) -> Result<BulkJobs<CapCountPart>, ComputeError> {
+    let jobs = (0..counting.rays())
         .step_by(CAP_COUNT_JOB_RAYS)
         .map(|first| {
             let which = first..(first + CAP_COUNT_JOB_RAYS).min(counting.rays());
             let (galaxy, tables, counting, rays) = (
                 Arc::clone(galaxy),
                 Arc::clone(tables),
-                Arc::clone(&counting),
-                Arc::clone(&rays),
+                Arc::clone(counting),
+                Arc::clone(rays),
             );
             move || counting.count_rays(&galaxy, &tables.tables, &rays, which)
         })
         .collect::<Vec<_>>();
-    let counts = BulkJobs::submit(pool, token, counts)
-        .await?
-        .results()
-        .await?;
-    let count = Arc::new(bulk(pool, token, move |_: &CancelToken| counting.join(counts)).await?);
-    let caps = CAPPED_LAYERS.map(|layer| {
-        let count = Arc::clone(&count);
-        move || count.cap(layer)
-    });
-    BulkJobs::submit(pool, token, caps).await?.results().await
+    BulkJobs::submit(pool, token, jobs).await
+}
+
+/// The count `counting` plans, from its rays counted in `parts` ([`count_jobs`]'), joined in one
+/// bulk job under `token`.
+///
+/// # Errors
+///
+/// Those of [`bulk`] and [`BulkJobs::results`].
+async fn joined(
+    pool: &CpuPool,
+    counting: &Arc<CapCountPlan>,
+    parts: BulkJobs<CapCountPart>,
+    token: &CancelToken,
+) -> Result<Arc<CapCount>, ComputeError> {
+    let parts = parts.results().await?;
+    let counting = Arc::clone(counting);
+    Ok(Arc::new(
+        bulk(pool, token, move |_: &CancelToken| counting.join(parts)).await?,
+    ))
 }
 
 /// Adds `tallies` to `sum`, starting the sum from the first, as the census's merge starts from its
@@ -877,7 +1054,8 @@ pub(crate) struct CensusStep {
     pub(crate) done: Vec<Shell>,
     /// Each step's part, from the first.
     pub(crate) parts: Vec<Arc<StepPart>>,
-    /// Whether it is the last step: the census is then the one-shot census of its plan.
+    /// Whether it is the last step: the census is then its whole plan's, the one-shot census of
+    /// it, or at a synthetic ceiling that census under the texel rule.
     pub(crate) last: bool,
     /// The time its census jobs ran, summed over them, per layer of [`Layer::ALL`] by its value:
     /// the step's census work, for the server's log (T17 times each reply; R06.T11.g prints it a
@@ -1142,7 +1320,11 @@ fn census_job(
 
 /// The census of a sky after `step` (R06.T8.i's `merge_shells`), in one bulk job under `token`:
 /// every step's stars to it, merged at `n_max` and listed to the completeness of the shells done,
-/// as `plan` states it. The last step's is the one-shot census of `plan`, star for star.
+/// as `plan` states it. The last step's is the one-shot census of `plan`, star for star, but at a
+/// synthetic ceiling, where C, D and E list only within their real boundary towards each star's
+/// texel at every reply, the final one included (rendering plan R13, Design note 3): the last
+/// reply is merged by `merge_shells` too, to the plan's whole completeness, never by
+/// `merge_census`, which would list their stars beyond it.
 ///
 /// # Errors
 ///
@@ -1394,9 +1576,7 @@ mod tests {
 
     use hyperion_sim::coords::GalacticPosition;
     use hyperion_sim::sky::caps::{LayerCap, layer_caps};
-    use hyperion_sim::sky::census::{
-        Completeness, census_cell, census_plan, census_plan_of, merge_census,
-    };
+    use hyperion_sim::sky::census::{Completeness, census_cell, census_plan, census_plan_of};
     use hyperion_sim::time::UniverseTime;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
     use tokio::time::timeout;
@@ -1492,13 +1672,20 @@ mod tests {
 
     /// The census its jobs run step by step is, after each step, the sim's census of the shells
     /// done, serially, star for star and tally for tally, cold and warm, and its last step's is
-    /// the sim's one pass over the whole plan: the split into steps and jobs, the jobs' slices
-    /// and their order, the joined parts and the cache change nothing (R06.T11.d).
+    /// the sim's one pass over the whole plan, merged to its whole completeness: the split into
+    /// steps and jobs, the jobs' slices and their order, the joined parts and the cache change
+    /// nothing (R06.T11.d). The plan is served at RM3's synthetic ceiling (R13.T2.b), so C, D and
+    /// E list within their caps in the last step too, which `merge_shells` gives and
+    /// `merge_census`, the one-shot rule, would not.
     ///
     /// The census to 30 ly is one shell a layer, so the steps here split its one rank three ways;
     /// a slice of nought hands each job's cells back after one, so that every cell is a job of its
     /// own, queued again behind its step's other slabs.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one census in steps, cold and warm, against its serial and one-pass forms"
+    )]
     async fn each_step_of_the_jobs_census_is_the_sims_census_of_its_shells() {
         let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
         let caps = SkyCaps::forced(LightYears::new(30.0)).unwrap();
@@ -1506,16 +1693,23 @@ mod tests {
         let query = caps.on(SkyQuery::builder(sun(), Magnitudes::new(9.0))
             .build()
             .unwrap());
-        let query = Arc::new(query);
         let pool = pool(3);
         let token = CancelToken::new();
-        let plan = timeout(
+        let (query, plan) = timeout(
             WAIT,
-            plan(&pool, &galaxy, &tables, &query, &SHELL_EDGES_LY, &token),
+            plan(
+                &pool,
+                &galaxy,
+                &tables,
+                Arc::new(query),
+                &SHELL_EDGES_LY,
+                &token,
+            ),
         )
         .await
         .expect("timed out planning")
         .unwrap();
+        assert_eq!(query.synthetic_ceiling(), Some(SYNTHETIC_CEILING));
         let plan = Arc::new(plan);
         let inputs = CensusInputs {
             galaxy: Arc::clone(&galaxy),
@@ -1575,7 +1769,7 @@ mod tests {
                 assert_eq!(bits(census), bits(&serial), "step {k}");
             }
         }
-        // The last step's is the one-shot census.
+        // The last step's is the one pass over the plan's cells, merged to its whole completeness.
         let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &NoSkyCellCache);
         let mut stars = Vec::new();
         let mut tallies = None;
@@ -1585,7 +1779,11 @@ mod tests {
                 &census_cell(&galaxy, &mut ctx, key, &query, &mut stars),
             );
         }
-        let one_pass = merge_census(tallies.map(|tallies| (stars, tallies)), query.n_max());
+        let one_pass = merge_shells(
+            tallies.map(|tallies| (stars, tallies)),
+            query.n_max(),
+            plan.complete(),
+        );
         let (_, last) = cold.last().expect("a step");
         assert!(!one_pass.listed().is_empty());
         assert!(last.completeness().is_some_and(Completeness::is_final));
@@ -1740,41 +1938,87 @@ mod tests {
     /// both taken in jobs with the request's illumination (R06.T9.g). Over tables that hold no
     /// star every count is nought, so each cap is the count's nearest radius, but each rule bound
     /// reads every ray's extinction.
+    ///
+    /// The plan is served at the ceiling the server states (rendering plan R13, R13.T2.b;
+    /// `decision-r13-t2b-ceiling.md`): at a cut of 8.0, and at the eye's own, RM3's V 5.0, the
+    /// second count over the same rays and the real boundary in jobs being the sim's
+    /// `census_plan` of the query at it, bit for bit; at 4.6, whose caps lie within the real limit,
+    /// none, the plan R06's, bit for bit.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the caps at three cuts and by the eye's visibility, each against the sim's"
+    )]
     async fn the_caps_rays_measured_in_jobs_are_the_sims_caps() {
         let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
         let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
-        let query = Arc::new(
-            SkyQuery::builder(sun(), Magnitudes::new(8.0))
-                .build()
-                .unwrap(),
-        );
         let pool = pool(3);
         let token = CancelToken::new();
-        let planned = timeout(
-            WAIT,
-            plan(&pool, &galaxy, &tables, &query, &SHELL_EDGES_LY, &token),
-        )
-        .await
-        .expect("timed out planning")
-        .unwrap();
+        let served = async |query: SkyQuery| {
+            timeout(
+                WAIT,
+                plan(
+                    &pool,
+                    &galaxy,
+                    &tables,
+                    Arc::new(query),
+                    &SHELL_EDGES_LY,
+                    &token,
+                ),
+            )
+            .await
+            .expect("timed out planning")
+            .unwrap()
+        };
         let mut noise = NoiseCache::with_capacity(MARCH_NOISE_SLOTS);
+        let sims = |query: &SkyQuery, noise: &mut NoiseCache| {
+            census_plan(&galaxy, &tables.tables, &tables.envelope, query, noise)
+        };
+        let uniform = |cut: f64| {
+            SkyQuery::builder(sun(), Magnitudes::new(cut))
+                .build()
+                .unwrap()
+        };
+
+        // At 4.6 the caps lie within the limit: no ceiling, and R06's plan.
+        let shallow = uniform(4.6);
+        let (stated, planned) = served(shallow.clone()).await;
+        assert_eq!(stated.synthetic_ceiling(), None);
         let caps = layer_caps(
             &galaxy,
             &tables.tables,
             &tables.envelope,
-            query.observer(),
-            query.cut(),
+            shallow.observer(),
+            shallow.cut(),
             &mut noise,
         );
         assert_eq!(planned.caps(), caps.as_slice());
+        assert_eq!(cap_bits(planned.caps()), cap_bits(&caps));
         assert!(
             caps.iter().any(|cap| cap.rule_bound().value() > 1.0),
             "a rule bound reads the rays: {caps:?}"
         );
-        assert_eq!(planned, census_plan_of(&query, caps));
+        assert!(caps.iter().all(|cap| cap.bright_beyond().is_none()));
+        assert_eq!(planned, census_plan_of(&shallow, caps));
+
+        // At 8.0, RM3's ceiling.
+        let (stated, planned) = served(uniform(8.0)).await;
+        assert_eq!(stated.synthetic_ceiling(), Some(SYNTHETIC_CEILING));
+        let sim = sims(&stated, &mut noise);
+        assert_eq!(planned, sim);
+        assert_eq!(cap_bits(planned.caps()), cap_bits(sim.caps()));
+        assert!(
+            planned
+                .caps()
+                .iter()
+                .all(|cap| cap.bright_beyond().is_some()),
+            "a real boundary states every layer's count beyond it: {:?}",
+            planned.caps()
+        );
+
         // An eye-only request capped by the eye's visibility (R06.T7.b) takes the sim's caps by
-        // it, bit for bit, its cut and visibility from jobs, with the request's illumination.
+        // it, bit for bit, its cut and visibility from jobs, with the request's illumination, at
+        // RM3's ceiling.
         let eye = EyeObserver::default();
         let light = timeout(WAIT, illumination(&pool, &galaxy, &tables, sun(), &token))
             .await
@@ -1810,24 +2054,242 @@ mod tests {
             visibility,
             limits::eye_visibility(&galaxy, &mut ctx, &sun(), &eye, cut, Some(&light))
         );
-        let seen = Arc::new(
-            SkyQuery::builder(sun(), cut)
-                .eye(eye)
-                .illumination(Arc::clone(&light))
-                .eye_visibility(visibility)
-                .build()
-                .unwrap(),
-        );
-        let planned = timeout(
-            WAIT,
-            plan(&pool, &galaxy, &tables, &seen, &SHELL_EDGES_LY, &token),
-        )
-        .await
-        .expect("timed out planning")
-        .unwrap();
-        let sims = census_plan(&galaxy, &tables.tables, &tables.envelope, &seen, &mut noise);
-        assert_eq!(planned, sims);
+        let seen = SkyQuery::builder(sun(), cut)
+            .eye(eye)
+            .illumination(Arc::clone(&light))
+            .eye_visibility(visibility)
+            .build()
+            .unwrap();
+        let (stated, planned) = served(seen).await;
+        assert_eq!(stated.synthetic_ceiling(), Some(SYNTHETIC_CEILING));
+        assert!(stated.eye_visibility().is_some());
+        let sim = sims(&stated, &mut noise);
+        assert_eq!(planned, sim);
+        assert_eq!(cap_bits(planned.caps()), cap_bits(sim.caps()));
         pool.shutdown().await.unwrap();
+    }
+
+    /// The ceiling a plan is served at is the lesser of RM3's V 5.0 and the cut, and none where the
+    /// cut is at or brighter than 5.0 and its C, D and E caps lie within the real limit, here
+    /// forced caps standing for them; a query that states a ceiling keeps it; and the plan is the
+    /// sim's of the query at the ceiling stated (rendering plan R13, R13.T2.b;
+    /// `decision-r13-t2b-ceiling.md`).
+    #[tokio::test]
+    async fn the_served_ceiling_is_the_lesser_of_the_servers_and_the_cut() {
+        let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
+        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let pool = pool(2);
+        let token = CancelToken::new();
+        let cases = [
+            (9.0, 30.0, None, Some(5.0)),
+            (5.4, 30.0, None, Some(5.0)),
+            (5.0, 30.0, None, None),
+            (4.6, 30.0, None, None),
+            (5.4, 3_000.0, None, Some(5.0)),
+            (5.0, 3_000.0, None, Some(5.0)),
+            (4.6, 3_000.0, None, Some(4.6)),
+            (4.6, 2_000.0, None, None),
+            (9.0, 30.0, Some(7.0), Some(7.0)),
+            (4.6, 30.0, Some(4.6), Some(4.6)),
+        ];
+        for (cut, cap_ly, asked, expected) in cases {
+            let builder = SkyQuery::builder(sun(), Magnitudes::new(cut));
+            let builder = match asked {
+                Some(v) => builder.synthetic_ceiling(Magnitudes::new(v)),
+                None => builder,
+            };
+            let caps = SkyCaps::forced(LightYears::new(cap_ly)).unwrap();
+            let query = Arc::new(caps.on(builder.build().unwrap()));
+            let (stated, planned) = timeout(
+                WAIT,
+                plan(
+                    &pool,
+                    &galaxy,
+                    &tables,
+                    Arc::clone(&query),
+                    &SHELL_EDGES_LY,
+                    &token,
+                ),
+            )
+            .await
+            .expect("timed out planning")
+            .unwrap();
+            let what = format!("cut {cut}, caps {cap_ly} ly, asked {asked:?}");
+            assert_eq!(
+                stated.synthetic_ceiling().map(Magnitudes::value),
+                expected,
+                "{what}"
+            );
+            assert_eq!(stated.forced_caps(), query.forced_caps(), "{what}");
+            let forced = stated.forced_caps().unwrap().to_vec();
+            assert_eq!(
+                planned,
+                census_plan_with_edges(&stated, forced, &SHELL_EDGES_LY),
+                "{what}"
+            );
+        }
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// Each cap's radii, rule bound and counts beyond it, by their bits.
+    fn cap_bits(caps: &[LayerCap]) -> Vec<u64> {
+        caps.iter()
+            .flat_map(|cap| {
+                let rays = cap.rays().map_or(&[][..], |rays| rays.radii_ly());
+                [
+                    cap.radius().value(),
+                    cap.rule_bound().value(),
+                    cap.expected_beyond(),
+                    cap.bright_beyond().unwrap_or(f64::NAN),
+                ]
+                .into_iter()
+                .chain(rays.iter().copied())
+                .map(f64::to_bits)
+                .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// The median of `values`.
+    fn median(values: &[f64]) -> f64 {
+        let mut sorted = values.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        sorted[sorted.len() / 2]
+    }
+
+    /// Near the Sun on the server's galaxy, over its own tables, at RM3's synthetic ceiling of
+    /// V 5.0 and the eye's cut near the Sun, 7.95: the caps' two counts in jobs over one measure of
+    /// the rays, the real boundary in one more, and the plan are the sim's `census_plan` at the
+    /// ceiling, bit for bit (rendering plan R13, R13.T2.b). Each of C's, D's and E's rays lies
+    /// within its cut's cap and the real limit, and the limit holds E's rays here, so E states more
+    /// than one star brighter than V 5.0 beyond its boundary (R13.T1.b: 966 of E's 1,536 rays
+    /// held on this galaxy). It prints each layer's boundary and counts beyond it.
+    ///
+    /// At a cut of 4.6, brighter than the ceiling, whose D and E caps reach past the limit, the
+    /// ceiling is the cut, counted once the cut's caps are drawn (`decision-r13-t2b-ceiling.md`):
+    /// that plan is the sim's too, bit for bit, and C's, D's and E's counts beyond their boundary
+    /// brighter than the ceiling are their counts brighter than the cut, bit for bit.
+    ///
+    /// The tables are built serially here, as the server's sky tests build theirs, a minute or so.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "two cuts' plans against the sim's, then each layer's boundary checked and printed"
+    )]
+    async fn at_the_ceiling_the_caps_counts_in_jobs_are_the_sims_real_boundary() {
+        use hyperion_sim::sky::caps::REAL_LIMIT_LY;
+        let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)).with_full_potential());
+        let tables = Arc::new(SkyTables::new(LuminosityTables::build(&galaxy), &galaxy));
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let mut noise = NoiseCache::with_capacity(MARCH_NOISE_SLOTS);
+        let served = async |cut: f64| {
+            let asked = SkyQuery::builder(sun(), Magnitudes::new(cut))
+                .build()
+                .unwrap();
+            timeout(
+                WAIT,
+                plan(
+                    &pool,
+                    &galaxy,
+                    &tables,
+                    Arc::new(asked),
+                    &SHELL_EDGES_LY,
+                    &token,
+                ),
+            )
+            .await
+            .expect("timed out planning")
+            .unwrap()
+        };
+
+        // A shallow cut: the ceiling is the cut, decided once the cut's caps are drawn.
+        let (shallow, planned) = served(4.6).await;
+        assert_eq!(shallow.synthetic_ceiling(), Some(Magnitudes::new(4.6)));
+        let sims = census_plan(
+            &galaxy,
+            &tables.tables,
+            &tables.envelope,
+            &shallow,
+            &mut noise,
+        );
+        assert_eq!(planned, sims);
+        assert_eq!(cap_bits(planned.caps()), cap_bits(sims.caps()));
+        for cap in planned.caps() {
+            if matches!(cap.layer(), Layer::C | Layer::D | Layer::E) {
+                let bright = cap.bright_beyond().expect("a real boundary states it");
+                assert_eq!(
+                    bright.to_bits(),
+                    cap.expected_beyond().to_bits(),
+                    "{:?}",
+                    cap.layer()
+                );
+            }
+        }
+
+        let (query, planned) = served(7.95).await;
+        assert_eq!(query.synthetic_ceiling(), Some(SYNTHETIC_CEILING));
+        pool.shutdown().await.unwrap();
+        let sims = census_plan(
+            &galaxy,
+            &tables.tables,
+            &tables.envelope,
+            &query,
+            &mut noise,
+        );
+        assert_eq!(planned, sims);
+        assert_eq!(cap_bits(planned.caps()), cap_bits(sims.caps()));
+
+        let at_cut = layer_caps(
+            &galaxy,
+            &tables.tables,
+            &tables.envelope,
+            query.observer(),
+            query.cut(),
+            &mut noise,
+        );
+        for (real, cut) in planned.caps().iter().zip(&at_cut) {
+            let layer = real.layer();
+            assert_eq!(layer, cut.layer());
+            let bright = real
+                .bright_beyond()
+                .expect("a real boundary's count beyond");
+            if !matches!(layer, Layer::C | Layer::D | Layer::E) {
+                // The cut's cap, bit for bit, stating its count beyond brighter than V 5.0 too.
+                let mut real_bits = cap_bits(std::slice::from_ref(real));
+                real_bits[3] = f64::NAN.to_bits();
+                assert_eq!(real_bits, cap_bits(std::slice::from_ref(cut)), "{layer:?}");
+                continue;
+            }
+            let (rays, cut_rays) = (real.rays().unwrap(), cut.rays().unwrap());
+            assert!(
+                rays.radii_ly()
+                    .iter()
+                    .zip(cut_rays.radii_ly())
+                    .all(|(&r, &c)| r <= c && r <= REAL_LIMIT_LY),
+                "{layer:?}'s real boundary lies within its cut's cap and the limit"
+            );
+            let held = rays
+                .radii_ly()
+                .iter()
+                .filter(|&&r| r.total_cmp(&REAL_LIMIT_LY).is_eq())
+                .count();
+            eprintln!(
+                "{layer:?}: R(u) median {:.0} ly, largest {:.0} ly, {held} of {} rays at the \
+                 limit; beyond it {:.4} brighter than V 5.0 and {:.1} than the cut",
+                median(rays.radii_ly()),
+                rays.largest().value(),
+                rays.radii_ly().len(),
+                bright,
+                real.expected_beyond()
+            );
+            if layer == Layer::E {
+                assert!(
+                    held > 0 && bright > 1.0,
+                    "E's rays at the limit: {held}, {bright}"
+                );
+            }
+        }
     }
 
     /// The listed stars' eye offsets in jobs of a few stars each, joined in order, are

@@ -831,8 +831,10 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
    and an eye-only request may count each ray to the eye's own limit about it, the eye-cut
    pre-pass's, rather than the uniform cut (R06.T7.b's visibility-based caps). From R13.T2, RM3's
    interim, layers C to E take their caps by ray at the synthetic ceiling V_P rather than at the
-   cut, never beyond the cut's own nor beyond R13's real limit of 2,000 ly: V 5.0 in RM3, 4.5 from
-   R13.T7. Beyond them the band holds all of the light until R13's synthetic stars take every star
+   cut (V 5.0 in RM3, 4.5 from R13.T7), or at the cut where the cut is brighter, never beyond the
+   cut's own nor beyond R13's real limit of 2,000 ly, at every cut; a sky whose own caps lie within
+   the limit at a cut no deeper than V<sub>P</sub> keeps them (`decision-r13-t2b-ceiling.md`).
+   Beyond them the band holds all of the light until R13's synthetic stars take every star
    brighter than the cut (decided by the owner 2026-10-08, and the limit 2026-10-09; R13 Design
    notes 2–3, `feasibility-hybrid-sky.md`, `decision-r13-guard-trip.md`).
 10. **The census, per cell.** Cells are those of `cells_in_sphere` to each cap, padded by

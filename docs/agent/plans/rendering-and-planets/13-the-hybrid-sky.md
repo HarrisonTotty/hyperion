@@ -127,10 +127,19 @@ pub fn real_boundary(at_ceiling: &CapCount, at_cut: &CapCount, caps_at_cut: &[La
     // `expected_beyond` at the cut and its `bright_beyond`; A, B and the brown dwarfs: the cut's
     // caps, stating their `bright_beyond`. The plan at the query's ceiling widens C–E's cones by ρ
 impl LayerCap { pub fn bright_beyond(&self) -> Option<f64>; }   // a real boundary's, else None
+// sky::caps (R13.T2.b; decision-r13-t2b-ceiling)
+pub const SYNTHETIC_CEILING_V: f64 = 5.0;   // R13.T2.b, built here until T5.a's sky::synthetic takes it
+pub fn served_ceiling(cut: Magnitudes, ceiling: Magnitudes, caps_at_cut: &[LayerCap])
+    -> Option<Magnitudes>;
+    // `ceiling` where the cut is deeper; else the cut, unless C's, D's and E's caps at the cut
+    // lie within REAL_LIMIT_LY on every ray, where a ceiling would hold nothing: None
 // sky::census (R13.T2.a, built)
 impl SkyQueryBuilder { pub fn synthetic_ceiling(self, v: Magnitudes) -> Self; }
-    // refused (`BuildSkyQueryError::SyntheticCeiling`) unless finite and 0.5 mag brighter than the cut
+    // refused (`BuildSkyQueryError::SyntheticCeiling`) unless finite and no fainter than the
+    // cut (R13.T2.b; T2.a built it 0.5 mag brighter)
 impl SkyQuery { pub fn synthetic_ceiling(&self) -> Option<Magnitudes>; }
+impl SkyQuery { pub fn with_synthetic_ceiling(self, v: Magnitudes) -> Result<Self, BuildSkyQueryError>; }
+    // R13.T2.b: the builder's rule on a query built, for the server's served ceiling
 impl Completeness { pub fn lists_by_texel(&self) -> bool; }   // a layer not yet final, or C–E at a ceiling
 // sky::census (R13.T6)
 impl SkyCensus { pub fn synthetic(&self) -> &[SyntheticStar]; }   // by flux, then key, then index
@@ -157,9 +166,13 @@ impl LuminosityFunction {
 
 - `SkyResponse` gains `synthetic: u32` (the synthetic stars, which follow the `listed` ones in the
   bulk payload as 24-byte records of R06 Design note 17, so `stars_bytes` is 24 × (listed +
-  synthetic)) and `synthetic_ceiling_v: Option<f64>` (V_P, absent where the reply has no real
-  boundary at a ceiling). Each `SkyLayerCensusDto` gains its real boundary, in the per-ray form
-  R06.T11.d gives `complete_to_ly`, and its `expected_beyond` is stated at the cut beyond it.
+  synthetic)) and `synthetic_ceiling_v: Option<f64>` (the ceiling its real boundary is at: V_P,
+  or the cut where the cut is brighter; absent where the reply has no real boundary at a ceiling,
+  as where a ceiling would hold no ray, R13.T2.b). Each `SkyLayerCensusDto` gains its real
+  boundary, in the per-ray form R06.T11.d gives `complete_to_ly`, and its `expected_beyond` is
+  stated at the cut beyond it; at a ceiling `cap_ly` and the final reply's `complete_to_rays_ly`
+  are that boundary, a reply not final states it on each ray below its edge, and no second table
+  is sent (`decision-r13-t2b-note.md` §5).
 - `SkyResponse` also gains `real_limit_ly` (`REAL_LIMIT_LY`), and each `SkyLayerCensusDto`
   `bright_beyond`, the expected count brighter than V_P beyond its real boundary; both are absent
   where the reply states no ceiling (R13.T2).
@@ -170,8 +183,10 @@ impl LuminosityFunction {
 
 `SkyModel.synthetic` (the index range of the synthetic stars), drawn, baked, culled and spritten as
 listed stars; `skyLabelValue(limitV, kind, gaps, notes)` composing the `STARS` line's notes in the
-order `STREAMING`, then the synthetic or the interim note, then `NOT YET MODELLED`; the view list
-note `SYNTHETIC STARS` beside `INTEGRATED STARLIGHT`, in both styles.
+order `STREAMING`, then the synthetic or the interim note, then `NOT YET MODELLED`; while an
+instrument is open, the primary's line holds its limit and the first of them that holds, and an
+instrument's its limit and `NOT YET MODELLED` (decision-r06-t11f-stars-line); the view list note
+`SYNTHETIC STARS` beside `INTEGRATED STARLIGHT`, in both styles.
 
 ### Test helpers
 
@@ -291,7 +306,9 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
      beyond) nor cheaper by cost (1.02–1.70 times). On rays held at `REAL_LIMIT_LY` the radii are
      uniform, so the gap there is zero by T8.i's rule (`all_reach`); fix (i) still widens every
      cone, at no cost where the neighbours share the limit.
-4. **The ceiling V_P** is a server constant, `SYNTHETIC_CEILING_V`, stated in every reply. It is
+4. **The ceiling V_P** is a server constant, `SYNTHETIC_CEILING_V`, stated in every reply that
+   has a real boundary, as the request's cut where that is brighter (R13.T2.b,
+   `decision-r13-t2b-ceiling.md`). It is
    not a client setting: a bridge shares one sky and every ship takes the same rule. With the real
    limit (Design note 3) it sets the boundary wherever the cap at V_P lies within 2,000 ly, and the
    synthetic share. R13.T1 measured the cap at V_P near the Sun at the eye's cut, by ray on the
@@ -457,15 +474,20 @@ STARLIGHT` is R06 Design note 23's note and the guide's row; no client code comp
     - On the `STARS` line's composed-note slot, after `STREAMING` and before `NOT YET MODELLED`, in
       the annunciation form of `TERRAIN: STREAMING` (steady, `--text`, no status colour, neither a
       data state nor an alert). Draft wording, naming the limit's effect
-      (`decision-r13-guard-trip.md` §3 A): `STARS V 7.4 mag EYE · DISTANT STARS: SYNTHETIC`.
+      (`decision-r13-guard-trip.md` §3 A): `STARS V 7.4 mag EYE · DISTANT STARS: SYNTHETIC` (its
+      subject ruled with the interim note's, `decision-r13-t2b-note.md`; its state word stays a
+      draft).
     - In the view's list notes, `SYNTHETIC STARS` beside `INTEGRATED STARLIGHT`, in both styles,
       since the wireframe draws stars too: drawn singly from the galaxy's own statistics, not at any
       system's position, and never read as stars that can be selected or counted.
     - The guide's "Views" gains a third kind of star beside the two it names.
     - RM3's interim, with no synthetic stars, names what it leaves to the band in the
-      `DETAIL LIMITED` form the census-cost sign-off advised for a labelled rule (its question 4),
-      naming the limit: `STARS V 7.4 mag EYE · BEYOND 2000 ly: DETAIL LIMITED`, its figure
-      `REAL_LIMIT_LY` in the guide's digit grouping, as `BEYOND <edge> ly: STREAMING`'s is.
+      `DETAIL LIMITED` form the census-cost sign-off advised for a labelled rule (its question 4):
+      `STARS V 7.4 mag EYE · DISTANT STARS: DETAIL LIMITED` (ruled 2026-10-09,
+      `decision-r13-t2b-note.md`), while a reply states a ceiling. It names no figure, since R(u)
+      differs by layer and direction, lies at or within `REAL_LIMIT_LY`, and lies far within it in
+      the nuclear disc. Its guide row names the ceiling, R(u)'s rule and the limit. The synthetic
+      note keeps its subject and changes only its state word.
     - The guide rows add that in dusty directions, stars fainter than V_P already leave the real
       tier from nearer than the limit.
 14. **Determinism.** The synthetic tier follows the sim-determinism skill: one new tag, its word
@@ -626,23 +648,45 @@ keep it for the limit's lifting.
   `cargo test -p hyperion-sim sky::caps`, `cargo test -p hyperion-sim sky::census`,
   `just test-slow the_census_is_its_oracle_1000_ly_from_the_sun caps_converge_in_rays`, `just ci`.
 
-- **R13.T2.b The server, the reply and the interim label.** The server states the ceiling
-  (`SYNTHETIC_CEILING_V`, 5.0 until R13.T7) on every request and computes both caps counts over one
-  `RayExtinctions`, each count split as R06.T11.g splits the first; the response's
-  `synthetic_ceiling_v` and `real_limit_ly`, each layer's real boundary, its `expected_beyond` at
-  the cut and its `bright_beyond` (`just gen-protocol`); the client composes Design note 13's
-  interim note, which names the limit; its guide row is drafted for the UX decision agent and the
-  owner. The sampled cold bench of the served sky near the Sun, at the limit, on the fixture and on
-  the server's galaxy, is recorded for R06.T17's full-cold figure. Tests: a sky near the Sun
-  returns the sim's census at the ceiling bit for bit; the reply states the ceiling, the limit and
-  each layer's boundary, count beyond and `bright_beyond`; the label's composition with
-  `STREAMING` and `NOT YET MODELLED`.
-  Files: `crates/hyperion-protocol/src/sky.rs`, `crates/hyperion-server/src/{requests,compute}/sky.rs`,
-  `crates/hyperion-server/tests/sky.rs`, `packages/protocol/src/`, generated bindings,
-  `apps/hyperion/src/renderer/src/view/sky/label.ts`, `docs/frontend/ux-guidelines.md` (the draft
-  row). Acceptance: `cargo test -p hyperion-protocol sky`, `cargo test -p hyperion-server --test sky`,
-  `pnpm --filter @hyperion/protocol test`, `pnpm --filter hyperion exec vitest run
-src/renderer/src/view/sky`, `just ci`.
+- **R13.T2.b The server, the reply and the interim label.** The server states a ceiling on every
+  request (decided 2026-10-09, `decision-r13-t2b-ceiling.md`): `SYNTHETIC_CEILING_V` (5.0 until
+  R13.T7), or the request's cut where the cut is brighter, so that no served sky's C–E census
+  reaches past `REAL_LIMIT_LY` at any cut. Where the cut is at or brighter than V<sub>P</sub> and
+  its own C, D and E caps lie within `REAL_LIMIT_LY` on every ray, a ceiling would hold nothing,
+  and the query states none (`sky::caps::served_ceiling`): the plan and reply are R06's, with no
+  `synthetic_ceiling_v`, `real_limit_ly` or `bright_beyond`. Forced caps keep the ceiling the
+  query states. T2.a's refusal loses its 0.5 mag margin: a ceiling is refused only if it is not
+  finite or is fainter than the cut. The server computes both caps counts over one
+  `RayExtinctions`, the second at the stated ceiling, each count split as R06.T11.g splits the
+  first, then `real_boundary` in one job. The response states `synthetic_ceiling_v` (the ceiling
+  stated) and `real_limit_ly`, and for each layer its real boundary, its `expected_beyond` at the
+  cut and its `bright_beyond` (`just gen-protocol`). The client composes the interim note while a
+  reply states a ceiling and carries no synthetic stars (`DISTANT STARS: DETAIL LIMITED`;
+  `decision-r06-t11f-stars-line.md` §2 for its place, and `decision-r13-t2b-note.md` for its
+  wording, its guide row and the guide's other edits, drafted until a sign-off agent accepts
+  them). The sampled cold bench of the served sky near the Sun, at the limit, on the fixture and
+  on the server's galaxy, is recorded for R06.T17's full-cold figure. Tests:
+  - a sky near the Sun returns the sim's census at the ceiling bit for bit;
+  - the reply states the ceiling, the limit and each layer's boundary, count beyond and
+    `bright_beyond`;
+  - the query states the lesser of `SYNTHETIC_CEILING_V` and its cut;
+  - over tables of no star, a query at a cut of 8.0 states 5.0, and one at 4.6, whose caps lie
+    within the limit, states none and is planned and answered as R06's, bit for bit, with no
+    ceiling fields;
+  - `the_served_ceiling_holds_the_limit_at_every_cut` (`decision-r13-t2b-ceiling.md` §8);
+  - the label's composition with `STREAMING` and `NOT YET MODELLED` by
+    `decision-r13-t2b-note.md` §2's table, the note keyed on `synthetic_ceiling_v` alone; and,
+    hidden and recorded, the primary's `L · I` (3 lines) and `L · S` (4) within the 4 lines
+    measured at 1280 × 720.
+
+  Files: `crates/hyperion-sim/src/sky/caps.rs` (`served_ceiling` and its test),
+  `crates/hyperion-sim/src/sky/census/query.rs` (the refusal), `crates/hyperion-protocol/src/sky.rs`,
+  `crates/hyperion-server/src/{requests,compute}/sky.rs`, `crates/hyperion-server/tests/sky.rs`,
+  `packages/protocol/src/`, generated bindings, `apps/hyperion/src/renderer/src/view/sky/label.ts`,
+  `docs/frontend/ux-guidelines.md` (the draft row). Acceptance: `cargo test -p hyperion-sim sky::caps`,
+  `cargo test -p hyperion-sim sky::census`, `cargo test -p hyperion-protocol sky`,
+  `cargo test -p hyperion-server --test sky`, `pnpm --filter @hyperion/protocol test`,
+  `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky`, `just ci`.
 
 ### R13.T3 The band's kept profiles
 
@@ -944,8 +988,9 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   recommended). 75 stars brighter than V 4.5 lie beyond the limit near the Sun, not 10–60, and 88%
   of the naked-eye stars stay real, not 92–97%.
 
-  The brainstorm's subsection is signed off. Its label wording, and R13.T8's and T2.b's guide rows,
-  stay drafts for the UX decision agent and the owner. Its amendment for the real limit is signed
+  The brainstorm's subsection is signed off. Its label wording: T2.b's is ruled
+  (`decision-r13-t2b-note.md`); T8's state word stays a draft for the UX decision agent. Both guide
+  rows are drafted until a sign-off agent accepts them. Its amendment for the real limit is signed
   off (2026-10-09, the sign-off agent under the owner's delegation, `signoff-brainstorm.md`,
   source 2) and written into the subsection's text, the draft at its end removed: the boundary is
   the nearer of the ceiling's radius and 2,000 ly, the promise holds within 2,000 ly, 88% of the
@@ -1621,4 +1666,187 @@ caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, 
       than V<sub>P</sub> + 0.5 (5.5 in RM3, 5.0 from T7; the nuclear disc's eye's cut is 5.81), T2.b
       decides what the server states (asked of "main"; lean: no ceiling there, so the reply's
       `synthetic_ceiling_v` is absent and the cut's own caps, then some tens to hundreds of ly,
-      bound the census).
+      bound the census). _Ruled 2026-10-09 (`decision-r13-t2b-ceiling.md`): no margin. The server
+      states V<sub>P</sub>, or the cut where the cut is brighter, and none where the cut is at or
+      brighter than V<sub>P</sub> and its C–E caps lie within the limit (R13.T2.b)._
+- **The ceiling at a shallow cut** (ruled 2026-10-09, `decision-r13-t2b-ceiling.md`, for
+  R13.T2.b). T2.a's builder refused a ceiling within 0.5 mag of the cut. A sky whose cut is
+  shallower than V<sub>P</sub> + 0.5 (5.5 in RM3, 5.0 from T7) would then have been served at
+  R06's caps, past the real limit. The margin had no source or measurement: it came with the
+  plan's first draft, when a ceiling only opened a window between V<sub>P</sub> and the cut.
+  Nothing in R(u)'s rule degenerates as V<sub>P</sub> nears the cut. At V<sub>P</sub> = cut,
+  R(u) is the cut's caps held at the limit and C–E's `bright_beyond` is their `expected_beyond`;
+  the census reads only whether a ceiling is stated.
+  - **Near the Sun** such cuts come from requests the protocol allows and the client does not
+    send: an eye of field factor above about 11–17, or a camera's limit under 5.5. Without a
+    ceiling they would cost R06's census to the caps at V 5–5.5, whose E rays reach
+    11,939–19,416 ly. That is about 1–2 × 10⁵ CPU-s (_estimate_ from T1's 1.45 × 10⁵ at the caps
+    at V 5.0), against at most the interim's 1.31 × 10⁴ (2.82 × 10⁴ on the server's galaxy): 4–15
+    times, for a sky that sees less.
+  - **In the nuclear disc** the eye's own cut is shallow, nearer the centre than T1's point
+    (5.807 there). The stakes are small. At a cut 0.31 mag deeper than the ceiling (proxy: T1's
+    V<sub>P</sub> 5.5 row at 5.807) the ceiling keeps 82% of the cut's C–E systems. It leaves 3.2
+    stars brighter than the cut to the band, of the sky's 23,795. It costs about 1.2 × 10⁴ CPU-s
+    against R06's 1.4 × 10⁴ (_estimates_ at T1's near-Sun costs per system).
+  - **So T2.b** states V<sub>P</sub>, or the cut where the cut is brighter, and refuses only a
+    ceiling fainter than the cut. It states none where the cut is at or brighter than
+    V<sub>P</sub> and the cut's C–E caps lie within the limit on every ray; that reply is R06's,
+    exact, with no ceiling fields and no note. No served sky's C–E census reaches past
+    `REAL_LIMIT_LY`, and the eye and every camera keep one partition at every cut deeper than
+    V<sub>P</sub>.
+  - **Rejected:** a ceiling clamped to cut − 0.5, which would pull R(u) inside the cap at
+    V<sub>P</sub> and break "every star brighter than V<sub>P</sub> within 2,000 ly is real"; the
+    lean (no ceiling below V<sub>P</sub> + 0.5), except in the exact form above; and a smaller
+    margin above zero.
+  - **Ruled 2026-10-09** (`decision-r13-t2b-note.md`): `DISTANT STARS: DETAIL LIMITED`, true in
+    all three regimes, since it names no figure and no brightness. Its row names the ceiling,
+    R(u)'s rule and the limit. At a ceiling, with an instrument open, the primary's final `L · I`
+    is one line shorter than `L · S`. No reading exceeds the 4 lines measured.
+- **Deviations in T2.b, as built (2026-10-09).** Built on the lane with `rendering-and-planets`
+  merged at ce4e73e5 and 914400b0, whose changes touch no sky path. No generated output moves:
+  `GENERATOR_VERSION` stays 21, no golden moves, and `PROTOCOL_VERSION` stays 2.
+  - **The build.**
+    - The sim gains `sky::caps::{SYNTHETIC_CEILING_V, served_ceiling}` and
+      `SkyQuery::with_synthetic_ceiling`. The builder refuses a ceiling only if it is not finite
+      or is fainter than the cut (`ceiling_fits`), and `MIN_CEILING_DEPTH_MAG` is gone. Its test
+      is `a_synthetic_ceiling_is_finite_and_no_fainter_than_the_cut`, and the ruling's
+      `the_served_ceiling_holds_the_limit_at_every_cut` is beside T2.a's in `sky::caps`.
+    - The server's `compute::sky::plan` takes the request's query, which states no ceiling, and
+      returns it at the ceiling it is served at, with its plan. Where the cut is deeper than
+      V<sub>P</sub>, both counts are planned in one job, and the ceiling's rays are queued behind
+      the cut's. Otherwise the ceiling's count is planned once the cut's caps show that a ceiling
+      at the cut holds some ray (`counted_at`). `real_boundary` runs in one job, and every reply
+      merges by `merge_shells`, as T2.a left it.
+    - The reply states `synthetic_ceiling_v`, `real_limit_ly` and each layer's `bright_beyond`
+      (`LayerCap::bright_beyond`), all optional, read absent as no ceiling, and written with no
+      key without one. There is no second per-ray table (`decision-r13-t2b-note.md` §5).
+    - The client has `SKY_DETAIL_LIMITED_NOTE`, the note kind `detail-limited`,
+      `detailLimited(response)` (`synthetic_ceiling_v` present) and
+      `SkyLineStanding.detailLimited`.
+    - The guide gains the new row, the two "Views" edits and the `INTEGRATED STARLIGHT` clause,
+      each marked drafted. Prettier re-padded the whole table for the new row, which is wider than
+      any before it.
+  - **Deviations.**
+    - **`SYNTHETIC_CEILING_V` is the sim's `sky::caps` constant**, an `f64` as Provides has it,
+      not yet in T5.a's `sky::synthetic`, so that the server and the sim bench read one constant
+      (the plan-conformance review). The server serves it as `compute::sky::SYNTHETIC_CEILING`.
+      T5.a moves it into `sky::synthetic`, and T7 sets it to 4.5.
+    - **`SkyQuery::with_synthetic_ceiling` is new and public** (Provides). The server knows the
+      ceiling only once it holds the cut's caps, and by then the query is built. The builder and
+      this method share `ceiling_fits`.
+    - **Forced caps take the served ceiling too.** A query that states none gets `served_ceiling`
+      over its forced caps, each counted as its one radius, and a query that states one keeps it.
+      A forced cap stands in for R(u): it is not held at the limit and states no `bright_beyond`.
+      So a forced cap past 2,000 ly at a ceiling is censused past the `real_limit_ly` its reply
+      states. That is the test seam only.
+    - **The ceiling at the cut is counted again**, not taken from the cut's count, even at a
+      uniform cut where the two are one count. That rare path keeps the one code path that the
+      server galaxy's test holds bit for bit to the sim (the reviews' "consider"; about one caps
+      count, 10–20 CPU-s).
+    - **The server's tests run at the ceiling over forced caps.** Every sky in `tests/sky.rs`
+      states V 5.0, and the sim's census each test holds a reply to is merged to its plan's
+      completeness (`merge_shells`). So "a sky near the Sun returns the sim's census at the ceiling
+      bit for bit" holds over forced 30 ly caps, with the galaxy's own tables in R06.T11.c's test.
+      The derived caps at the ceiling are held to the sim's `census_plan` on the plan:
+      `at_the_ceiling_the_caps_counts_in_jobs_are_the_sims_real_boundary` builds the server galaxy's
+      tables, plans 7.95 (the early path) and 4.6 (`counted_at`, its ceiling 4.6, each C–E
+      `bright_beyond` its `expected_beyond` bit for bit), and joins the `sky-tables` nextest group
+      with 4 slots. A census to the derived caps is about 10⁴ CPU-s, beyond any test.
+    - **R06's reply is answered at 4.6 and at 5.0** over forced 30 ly caps
+      (`a_shallow_sky_within_the_limit_is_served_as_r06s`). Over tables of no star, 4.6 and 8.0 are
+      planned in `compute::sky`'s unit tests.
+    - **The reply's fields and the served rule are unit tests**, in `requests::sky`
+      (`the_reply_states_the_ceiling_the_limit_and_each_layers_boundary`) and `compute::sky`
+      (`the_served_ceiling_is_the_lesser_of_the_servers_and_the_cut`). `--test sky` does not run
+      them, so they ran by name (below).
+    - **Files touched though not in the task's list:** the server's `compute/mod.rs`; the
+      protocol's `envelope.rs` (a test literal); `displays/view/useViewSky.ts` and its test, since
+      the hook builds `SkyLineStanding`; `benches/sky.rs`; `.config/nextest.toml`; and R06's
+      Design note 9.
+    - **The bench is the eye's alone**, `sky/census_near_sun_served/{eye,served_eye}_5.0`. It is
+      planned by the sim's `census_plan` at the ceiling, which the server's jobs match bit for bit,
+      with fix (i) built in, so no factor scales it. Its census is merged as the server merges one
+      at a ceiling (`census_of_plan` now takes `merge_shells` wherever the query states one). It
+      is recorded, not gated (`Judged::guards`). T1 measured the camera's tier at 0.98–1.00 times
+      the eye's.
+  - **Measured.**
+    - **`the_served_ceiling_holds_the_limit_at_every_cut`** (the fixture, uniform cuts, counts
+      beyond R(u)).
+      - Near the Sun at 4.6 the ceiling is 4.6. The limit holds 787 of D's rays and 968 of E's,
+        and `bright_beyond` equals `expected_beyond`: C 0.904, D 3.775 and E 90.97.
+      - At 5.0 the ceiling is 5.0: C 0.854, D 8.601 and E 162.43, 171.9 C to E.
+      - At 5.4 (refused by T2.a) the ceiling is 5.0, with the same counts brighter than it, and
+        brighter than the cut C 3.56, D 19.3 and E 278.
+      - In the nuclear disc there is no ceiling at 4.6 or 5.0, since the cut's caps lie within
+        the limit. At 5.4 the ceiling is 5.0, the limit holds no ray, and brighter than it C 0.810,
+        D 0.637 and E 0.628 lie beyond (C 1.56, D 1.70 and E 1.34 brighter than the cut).
+    - **The server's galaxy** (seed 0x4d2, full potential) near the Sun at the uniform cut 7.95,
+      planned in jobs:
+      - R(u) by ray is C 1,720 median (largest 1,893 ly, no ray held), D 1,893 (2,000; 677 rays
+        held) and E 2,000 (966 held);
+      - `bright_beyond` is C 0.727, D 7.70 and E 123.8, **132.3 C to E** against the fixture's
+        171.9;
+      - `expected_beyond` at 7.95 is C 1,011, D 1,406 and E 2,055.
+    - **The served real tier's cold cost** (`sky/census_near_sun_served`, for R06.T17's full-cold
+      figure). It was run on 2026-10-09 under the heavy-test lock at `CPUQuota=400%`, so 3
+      workers, from release, at criterion's `--test`, by the job threads' CPU time, with the
+      census sampled 1 block in 10 on the fixture and 1 in 20 on the server's galaxy:
+
+      | Galaxy, the eye's cut | C (generated)      | D                  | E                  | Whole, plan 12.5–13.3 s in it | Cells in the plan | Wall for the sample |
+      | --------------------- | ------------------ | ------------------ | ------------------ | ----------------------------- | ----------------- | ------------------- |
+      | Fixture, 8.179        | 2,705 (1.13 × 10⁶) | 4,685 (7.50 × 10⁵) | 2,913 (3.20 × 10⁵) | **10,317 CPU-s**              | 994,423           | 360 s               |
+      | Server's, 7.766       | 4,712 (1.97 × 10⁶) | 9,092 (1.44 × 10⁶) | 8,505 (9.35 × 10⁵) | **22,325 CPU-s**              | 817,508           | 421 s               |
+      - The counts are T1.b's to the sample's precision. Accepted stars are C 27,370, D 14,940
+        and E 2,650 on the fixture, and 33,960, 25,460 and 12,920 on the server's galaxy. The
+        stars listed within R(u) towards their texel are 27,250, 14,790 and 2,550, and 33,940,
+        25,400 and 12,820. Fix (i)'s cones add about 0.5% of generated records at the limit.
+      - The whole is 0.79–0.83 times T1.b's 12,612–13,141 and 27,012–28,238 CPU-s. That is
+        the run's 3 workers against T1.b's 15 on the machine's 8 cores with SMT: R06.T8.g recorded
+        15 workers reading about 1.28 times what 3 at `CPUQuota=400%` read. At T1.b's 15 workers
+        the served tier is so about **1.3 × 10⁴ CPU-s on the fixture and 2.8–2.9 × 10⁴ on the
+        server's galaxy** (_estimate_), T1.b's own with fix (i): 15 and 32 minutes on 15
+        workers.
+      - The machine was shared (load 6–24 during the census runs), so the figures are
+        provisional.
+
+    - **The first sky** (the server's `sky_near_sun_cold`, under the heavy-test lock, release,
+      15 workers, one iteration; the 1-min load 39 at its start from other lanes' builds, so
+      provisional):
+      - the first reply to 125 ly took **7.16 s wall and 96.4 CPU-s** (3,192 listed), against
+        R06.T11.g's 6.96 s and 94.6 CPU-s and T17's 10 s and 150 CPU-s;
+      - the caps and plan were done at 1.96 s (T11.g 1.76 s), from the eye at 0.52 s, so the second
+        count adds about 0.2 s and 2 CPU-s;
+      - the tables were held 11.7 s and 47.2 CPU-s after the open's answer;
+      - 250 ly came at 16.9 s (242 CPU-s, 11,129 listed) and 500 ly at 70.1 s (1,026 CPU-s,
+        28,549 listed);
+      - the session's first reply came 19.3 s and 145 CPU-s after the open's answer (T11.g 17.95 s
+        and 138.8).
+    - **The hidden layout check** (`decision-r13-t2b-note.md` §4). It ran in the lane's harness on
+      this worktree's build, offscreen and never shown, capped, through the GPU lock, with
+      strings set into the kept scenes' `STARS` lines. Logs and shots are in
+      `.git/rm23-scratch/r13/t2b/page/`.
+      - At 1280 × 720, `L · I` takes 3 lines and `L · S` 4 on the primary beside two instruments,
+        in PRECISION TEST and PHASE TEST, both styles, and free. The worst spare is 6 px
+        (PRECISION TEST, photorealistic, while streaming), as T11.f measured, and 24 px once final.
+        Every block fits, with nothing past the stage and no horizontal scroll. With no instrument
+        open, `L · S · I · N` takes 2 lines.
+      - At the full layout's least box (98.5 × 45.75rem), `L · I` takes 3 lines for the eye and 4
+        for a camera. The camera's `V 10.0 mag CAM ·` leaves its dot on a line of its own, T11.f's
+        known lone `·`, a views-lane follow-up. `L · S` takes 5 lines. Everything fits, with 158 px
+        or more to spare.
+  - **Acceptance as run.**
+    - `cargo test -p hyperion-sim --lib` filtered to `sky::caps` and `sky::census` passed: 104
+      tests, 4 slow ones ignored, in 293 s at `CPUQuota=400%`. Its doctests for `served_ceiling`
+      and `synthetic_ceiling` passed.
+    - `cargo test -p hyperion-protocol sky` passed (14), and so did
+      `cargo test -p hyperion-server --test sky` (15, 228 s).
+    - `cargo test -p hyperion-server --lib` filtered to `sky` passed (43, 158 s). That covers
+      `compute::sky`'s and `requests::sky`'s new tests.
+    - `pnpm --filter @hyperion/protocol test` passed, and so did
+      `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky src/renderer/src/displays/view/useViewSky`.
+    - `just gen-protocol` was run. `just ci` runs at integration.
+  - **For the sky switch's task** (the default flips on after T2.b): the root README (the
+    `--serve-sky` row and the paragraph after it, lines 163–176) and the server's comments still
+    say the switch flips when R06.T8.g lands. They are in `config.rs` (the module docs,
+    `SkyService` and the builder's `sky_service`), `requests/mod.rs`, `requests/sky.rs`'s module
+    docs and `tests/sky.rs`'s two switch-off tests.

@@ -1,9 +1,11 @@
-import type { SkyGapDto } from "@hyperion/protocol";
+import type { SkyGapDto, SkyLayerCensusDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { STAR_SOURCE, STARS_WITHOUT_POSITION } from "../../displays/view/viewRun";
 import { nearestFirstCensus, skyPayload, skyRequest, skyResponse } from "../../test/skyFixtures";
 import {
+  detailLimited,
+  SKY_DETAIL_LIMITED_NOTE,
   SKY_EDGE_FIELD_CH,
   SKY_PENDING,
   skyEdgeReading,
@@ -16,9 +18,14 @@ import {
 /** The gaps every reply states until R06.T16.a, and those of a sky near the centre. */
 const GAPS: ReadonlyArray<SkyGapDto> = ["white_dwarfs", "feature_members", "centre_members"];
 
-/** A line's notes at a place, with the edge reached or none. */
-function at(place: SkyLinePlace, edgeLy: number | null = null): SkyLineStanding {
-  return { place, streamingEdgeLy: edgeLy };
+/** A line's notes at a place, with the edge reached or none, and the sky held at a ceiling or not. */
+function at(place: SkyLinePlace, edgeLy: number | null = null, atCeiling = false): SkyLineStanding {
+  return { place, streamingEdgeLy: edgeLy, detailLimited: atCeiling };
+}
+
+/** A `STARS` reading of `parts`, each after a middle dot. */
+function line(...parts: ReadonlyArray<string>): string {
+  return parts.join(" · ");
 }
 
 /** A reply whose census has reached `edgesLy` for C, D and E, final where `null`. */
@@ -122,6 +129,74 @@ describe("the stars-arriving note (R06.T11.f)", () => {
     expect(places.map((place) => skyLabelValue(7.4, "eye", GAPS, at(place)))).toEqual(
       places.map(() => "V 7.4 mag EYE · CLUSTERS AND WHITE DWARFS: NOT YET MODELLED"),
     );
+  });
+});
+
+describe("the interim note (R13.T2.b; decision-r13-t2b-note)", () => {
+  const L = "V 7.4 mag EYE";
+  const S = "BEYOND 1000 ly: STREAMING";
+  const I = "DISTANT STARS: DETAIL LIMITED";
+  const N = "CLUSTERS AND WHITE DWARFS: NOT YET MODELLED";
+
+  it("reads DISTANT STARS: DETAIL LIMITED, with no figure", () => {
+    expect(SKY_DETAIL_LIMITED_NOTE).toBe(I);
+  });
+
+  it.each<[string, SkyLinePlace, number | null, string]>([
+    ["not final, no instrument open", "alone", 1_000, line(L, S, I, N)],
+    ["final, no instrument open", "alone", null, line(L, I, N)],
+    ["not final, beside an instrument", "beside", 1_000, line(L, S)],
+    ["final, beside an instrument", "beside", null, line(L, I)],
+    ["not final, an instrument's", "instrument", 1_000, line(L, N)],
+    ["final, an instrument's", "instrument", null, line(L, N)],
+    ["not final, beside instruments not yet showing the sky", "beside-unshown", 1_000, line(L, N)],
+    ["final, beside instruments not yet showing the sky", "beside-unshown", null, line(L, N)],
+  ])("composes by the ruled table: %s", (_, place, edgeLy, expected) => {
+    expect(skyLabelValue(7.4, "eye", GAPS, at(place, edgeLy, true))).toBe(expected);
+  });
+
+  it("stands as the one annunciation where nothing is left out, but never on an instrument's line", () => {
+    expect([
+      skyLabelValue(7.4, "eye", [], at("alone", null, true)),
+      skyLabelValue(7.4, "eye", [], at("beside", null, true)),
+      skyLabelValue(7.4, "eye", [], at("beside-unshown", null, true)),
+      skyLabelValue(7.4, "eye", [], at("beside-unshown", 1_000, true)),
+      skyLabelValue(10.0, "camera", [], at("instrument", null, true)),
+    ]).toEqual([line(L, I), line(L, I), line(L, I), line(L, S), "V 10.0 mag CAM"]);
+  });
+
+  it("is absent from a sky held at no ceiling, wherever the line stands", () => {
+    const places: ReadonlyArray<SkyLinePlace> = ["alone", "beside", "beside-unshown", "instrument"];
+    expect(places.map((place) => skyLabelValue(7.4, "eye", GAPS, at(place, null, false)))).toEqual(
+      places.map(() => line(L, N)),
+    );
+  });
+
+  it("holds while a reply states a ceiling, at RM3's V 5.0 or at its own cut", () => {
+    const reply = replyAt([null, null, null], true);
+    expect([
+      detailLimited({ ...reply, synthetic_ceiling_v: 5.0, real_limit_ly: 2_000 }),
+      detailLimited({ ...reply, synthetic_ceiling_v: reply.cut_v, real_limit_ly: 2_000 }),
+      detailLimited({ ...reply, synthetic_ceiling_v: 5.0 }),
+    ]).toEqual([true, true, true]);
+  });
+
+  it("does not hold where the reply states no ceiling, the limit and counts beyond absent too", () => {
+    const reply = replyAt([null, null, null], true);
+    expect(reply.synthetic_ceiling_v).toBeUndefined();
+    expect([reply.real_limit_ly, reply.census.map((layer) => layer.bright_beyond)]).toEqual([
+      undefined,
+      reply.census.map(() => undefined),
+    ]);
+    const counted: SkyLayerCensusDto[] = [];
+    for (const layer of reply.census) {
+      counted.push({ ...layer, bright_beyond: 172 });
+    }
+    expect([
+      detailLimited(reply),
+      detailLimited({ ...reply, real_limit_ly: 2_000 }),
+      detailLimited({ ...reply, census: counted }),
+    ]).toEqual([false, false, false]);
   });
 });
 
