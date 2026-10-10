@@ -1144,8 +1144,8 @@ P11.T4, as built"._
   _As built (Phase J lane, 2026-10-06): see Risks, "P11.T4.k as built"._
 
 - **P11.T4.l A passed-over pair's collapses** (ruling p11-supernova-pins, 2026-10-06; finding
-  F3, P11.T10's first half brought forward; output moves; version 22, its own bump; after
-  P11.T4.k and the version-21 refit).
+  F3, P11.T10's first half brought forward; output moves; its own bump, in a later bump batch,
+  after plan 14's 23 → 24; after P11.T4.k and the version-21 refit).
   - **The rule.** A pair that `can_interact` passes over is two single stars on its drawn orbit
     (design note 7). If either star collapses (a sudden death) before the age asked, the drawn
     orbit stands to the collapse.
@@ -1253,8 +1253,9 @@ P11.T4, as built"._
     orbit, so S gains (2/3 − k′₂) ΔMᵢ R_max,i² Ω_c for each star (the T4.j probe's wind-spin
     variant: 0 misses, up to 2.9 × the passes). Re-run the zero-miss gate
     (`the_decay_bound_never_passes_over_an_interaction`) and record the passes.
-  - **Acceptance:** as T4.k's, plus `GENERATOR_VERSION` 21 → 22 with every golden re-blessed,
-    and P11.T10's agreement test, if it then exists, re-baselined.
+  - **Acceptance:** as T4.k's, plus the deferred batch's `GENERATOR_VERSION` bump (a later bump
+    batch, after plan 14's 23 → 24) with every golden re-blessed, and P11.T10's agreement test, if
+    it then exists, re-baselined.
 
 ### P11.T5 Classes from state
 
@@ -1557,8 +1558,8 @@ passes its four retention bands, change the default here with the bump. Acceptan
 Decided 2026-10-05 (`decision-r06-census-cost.md`, §7, "Ask A"), for rendering plan R06's
 R06.T8.g, the sky census's bound star by star. Its form and cost were ruled on 2026-10-07
 (`decision-p11-t16-hierarchy-bound.md`), after the lane's measurement (Risks, "P11.T16's cost,
-measured"). It is built at `GENERATOR_VERSION` 21, beside P11.T17 (ask B), while the 21 → 22
-batch (T4.l, T4.m) waits (owner, 2026-10-07: features first).
+measured"). It is built at `GENERATOR_VERSION` 21, beside P11.T17 (ask B), while the deferred
+bump batch (T4.l, T4.m) waits (owner, 2026-10-07: features first).
 
 `stellar::multiplicity::hierarchy_bound(galaxy, record, composition) -> HierarchyBound` is exact
 by construction. For every redraw attempt that `SystemStars::generate` can keep, it is the
@@ -1692,9 +1693,11 @@ Order: after P11.T4.k, at version 21. It is independent of P11.T16, and R06.T8.g
 `Detached` agrees with the generator as built at 21, including P11.T4.j's decay bound without
 P11.T4.l's wind-spin term.
 
-**The version-22 batch** (P11.T4.l, T4.m). T4.l adds the wind-spin term to the decay bound (its
-sample 2's passes rise from 2,761 to 5,047), changes `decay_reaches` to take a `TestedOrbit`, and
-lets a passed-over pair's collapse hand the pair to the engine, with its kick. Then:
+**The deferred bump batch** (P11.T4.l, T4.m: a later bump batch, after plan 14's 23 → 24, since
+plan 14's batches take versions 22, 23 and 24; the ruling's "21 → 22 batch" above). T4.l adds the
+wind-spin term to the decay bound (its sample 2's passes rise from 2,761 to 5,047), changes
+`decay_reaches` to take a `TestedOrbit`, and lets a passed-over pair's collapse hand the pair to the
+engine, with its kick. Then:
 
 - `Detached` must still bound the periastron after a kick, or return `None` for every pair a star
   of which can explode by the window's end. T17.a does the latter at 21 already.
@@ -1878,8 +1881,8 @@ lets a passed-over pair's collapse hand the pair to the engine, with its kick. T
       - realised near the Sun: C 155 (43), D 6 (2), E 0.
   - **T17.b's read-side widenings stand at version 21** (the orchestrator, 2026-10-08): the
     cooling floor below 0.1 M☉, E's 0.7 mag margin and E's ±0.3 dex age smear. They satisfy "a
-    violation widens the table", and are stored at the version-22 refit. A pair is read through
-    the floor-applying accessors `living_cmag_for` and `changed_cmag_for`, never the plain
+    violation widens the table", and are stored at the deferred bump batch's refit. A pair is read
+    through the floor-applying accessors `living_cmag_for` and `changed_cmag_for`, never the plain
     `living_cmag` and `changed_cmag`.
   - **The held floor** (P11.T17.c's follow-up, 2026-10-08, after R06.T8.g's slow test found a
     star shining where its pair's bound read `Remnants`).
@@ -1896,8 +1899,8 @@ lets a passed-over pair's collapse hand the pair to the engine, with its kick. T
     - A pair the closed form calls `Detached` at the window's end has not been stepped by then, so
       it reads the tables as they are. Inclusion monotonicity holds (the floor is per bin, and is
       read only past the age where the closed form first fails).
-    - It is a read-side widening at version 21, with no refit. It goes when the version-22 batch's
-      engine work removes the cap's causes.
+    - It is a read-side widening at version 21, with no refit. It goes when the deferred bump
+      batch's engine work removes the cap's causes.
   - **Inclusion monotonicity** (R06.T8.h's ruling, `decision-r06-t8h-warm.md` §5). T8.h's warm
     cache serves a window from an entry over a wider one, and its bit-identical reply rests on
     each verdict only loosening as the window widens: for windows A ⊆ A′, the verdict over A′ is
@@ -1965,11 +1968,12 @@ output:
 - R06's `sky_binary_light_c`, `_d` and `_e`, whose probes run pair evolution, refitted on the new
   fates (R06's Risks, "Generator version 21").
 
-T4.l moves output at version 22, with its own bump, and T4.m rides it (ruling p11-c2-swell). T1.d
-moves every star once, because the mean mass per system changes
-the system count (plan 02 lists it among its known future bumps). After that no primary moves: IDs,
-positions, primary masses, ages, primary draws, death times and kicks are untouched, except that T7
-redraws about 10⁻⁴ of grid systems (as built it removes none). It reserves: body indices 0–15 for the stellar level, which is
+T4.l moves output in a later bump batch, after plan 14's 23 → 24, with its own bump, and T4.m
+rides it (ruling p11-c2-swell). T1.d moves every star once, because the mean mass per system
+changes the system count (plan 02 lists it among its known future bumps). After that no primary
+moves: IDs, positions, primary masses, ages, primary draws, death times and kicks are untouched,
+except that T7 redraws about 10⁻⁴ of grid systems (as built it removes none). It reserves: body
+indices 0–15 for the stellar level, which is
 plan 14's slot `0x00`; the domain tags and the event tags 0x0300–0x0306 listed under Provides, with
 the rest of 0x0300–0x03FF free for later binary kinds; 64 draw numbers per redraw attempt; the five
 `ClassId` values plan 09's registry holds for this plan (2, 3, 5, 6 and 8); `system.substellar`, so
@@ -3956,8 +3960,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       the doc's statement. Built as ruled, with the doc saying so. The reservoir is also counted
       once, where a star whose I falls and rises (the flash, a blue loop) could draw it twice.
       _Ruled (orchestrator, 2026-10-06):_ T4.j's bound is kept as built in version 21, and the
-      missing wind-spin term goes into P11.T4.l, the 21 → 22 task, so that the bound becomes
-      provable (T4.l's block, "The wind-spin term").
+      missing wind-spin term goes into P11.T4.l, the deferred bump batch's task, so that the bound
+      becomes provable (T4.l's block, "The wind-spin term").
     - **The ruling's "F0–K" for +1.5 < M_V < +7.5** is A3–K5 (Pecaut and Mamajek 2013, ApJS 208,
       9, extended in Mamajek's online dwarf table, v2022.04.16: A3V M_V 1.70 to K5V 7.28; the
       paper's own table has no M_V).
@@ -4097,7 +4101,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     A3–K5's source (Mamajek's dwarf table), the progenitor-mass wording, F13's metallicity and
     island, F14's merging yield against Pol et al.'s intervals, and Tauris et al.'s 39 of 47 for A.
 - **Version 21 limit: a passed-over pair's collapses** (ruling p11-supernova-pins, 2026-10-06,
-  figures re-measured by ruling p11-t4k-faults; fixed by P11.T4.l at version 22).
+  figures re-measured by ruling p11-t4k-faults; fixed by P11.T4.l in the deferred bump batch).
   - A pair that the pre-test passes over keeps its drawn orbit through its stars' core collapses,
     with no record, mass loss or kick.
   - These are 42% of layer-E primaries' collapses (5,012 of 11,915 in the 12,000 prior pairs,
@@ -4137,7 +4141,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     (2023).
   - Routed to the binary-population calibration investigation with F9–F12.
 - **P11.T4.g's finding C2 (`swell`'s core) has a measured consequence** (ruling p11-t4k-faults;
-  ruled by ruling p11-c2-swell, 2026-10-06, and fixed by P11.T4.m at version 22).
+  ruled by ruling p11-c2-swell, 2026-10-06, and fixed by P11.T4.m in the deferred bump batch).
   - A helium main-sequence accretor fed hydrogen by a main-sequence donor:
     - is swelled at any positive rate, even while its wind outweighs what it is fed, into a
       core-helium-burning giant whose envelope is the placement's miss (−0.2 to −0.6% of its
@@ -4298,7 +4302,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   - (b) As (a), with the cover cut by a sharper exact exclusion built on P11.T17's pair bound. The
     exclusion is for no merger, no transfer and no compact accretor beside a living star in the
     source horizon. The cost then approaches attempt 0's.
-  - (c) A generator change in the deferred version-22 batch:
+  - (c) A generator change in the deferred bump batch:
     - the direct period law tabulated by mass node;
     - a closed-form windowed period quantile;
     - companions' masses kept across carve redraws, or a redraw of the carved pair alone.
@@ -4450,7 +4454,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - But a pair passed over only at the window's end, and run to +H (because it can interact by
       then, or holds a remnant), goes through the engine from zero age, kick and all. T4.j's
       zero-miss gate covers interactions before the first supernova only.
-    - So the rule is needed at 21 as well as at 22. The test
+    - So the rule is needed at 21 as well as after the deferred bump batch. The test
       `a_passed_over_pairs_collapse_keeps_its_drawn_orbit_at_version_21` pins the F3 behaviour and
       fails when T4.l lands, by design.
   - **The sampling, set by the dense test and the science check:**
@@ -4538,10 +4542,10 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - 404 µs for 1,024 census-like queries: 0.39 µs a call, 2.5 × 10⁶ a second, against the
       1 µs target;
     - 519 of the 1,024 queries are `Detached`.
-  - **At the version-22 batch:**
+  - **At the deferred bump batch:**
     - re-run both slow tests;
     - refit `binary_reach` if fit-check finds it stale;
-    - revisit the supernova rule when the pin fails (the task text's 22-batch note).
+    - revisit the supernova rule when the pin fails (the task text's note on the deferred batch).
 - **P11.T17.b as built** (2026-10-08, at version 21; `decision-p11-t16-hierarchy-bound.md` §§5, 6
   and 10). No generated output moves, and there is no bump: nothing generated reads the tables.
   - **Built:**
@@ -4565,7 +4569,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - Each of the three table modules carries one `#[allow(clippy::unreadable_literal)]`, for
       D's and E's six-digit counts in `DIMENSIONS`. An `expect` would go unfulfilled on C. Writing
       the counts with separators would change the committed bytes, so that waits for the
-      version-22 refit.
+      deferred bump batch's refit.
   - **The probe** (scratch, not committed: `.git/rm23-scratch/p11-bounds/t17b/probe_t17b.rs` and
     `probe_full.log`):
     - It took 10⁴ generated star–star pairs a layer near the Sun, each run through `evolve` to
@@ -4720,8 +4724,9 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       A refit at 21 was possible (the placeholder trick, 1.2–1.8 CPU-h a layer), but would have
       taken the CPU past the approved 7 h. The floor also needs the lighter star's exact mass,
       which no cell holds.
-    - The version-22 refit should store E's margin and smear. This is to be added to the 22
-      batch's entry in `deferred-corrections.md`, which today says only "refit the tables".
+    - The deferred bump batch's refit should store E's margin and smear. This is to be added to
+      that batch's entry in `deferred-corrections.md` (headed there "The 21 → 22 batch"), which
+      today says only "refit the tables".
   - **The slow test** (`the_pair_light_tables_bound_evolved_pairs`):
     - It takes 10⁴ pairs a layer sampled as the fit samples them, on a seed of the test's own,
       and about 9,300–9,650 generated pairs a layer near the Sun whose heavier star lies in the
@@ -4750,8 +4755,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
 
       The walk counts such a member's wind accretion as a departure, so the tables include it.
 
-  - **The engine finding** (deferred, not fixed; `deferred-corrections.md`, the 22 batch's engine
-    work):
+  - **The engine finding** (deferred, not fixed; `deferred-corrections.md`, the deferred bump
+    batch's engine work):
     - `rlof.rs`'s debug assertion, "a transfer step from a donor with nothing living", fires
       for 1 in 3.9 × 10⁴ of E's samples.
     - The pair: E's cell 3579, sample 49 under `FIT_SEED`, a 32.75 + 31.83 M☉ twin at
@@ -4779,7 +4784,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       table.
     - E's living column merges within 2 mag.
     - The cooling floor and E's margin and smear are applied in the reader, not in the fit.
-  - **What the sampling leaves out, to fix at the version-22 refit** (the science check):
+  - **What the sampling leaves out, to fix at the deferred bump batch's refit** (the science check):
     - **Eccentricities.** The law's are clamped at 0.95, and the high extreme is 0.9.
       - At a fixed periastron the generator's law reaches e → 1, held at 0.9999
         (`stability.rs`).
@@ -4835,7 +4840,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     - **science-checker.** No must-fix. Its should-fixes are the sampling gaps and the white-dwarf
       note above, and the periastron edge's comment, corrected.
   - **Not built:** the core-inertia column (the open option), and T17.c's verdicts.
-  - **At the version-22 batch:**
+  - **At the deferred bump batch:**
     - refit the three tables, storing E's read margin and smear and the cooling floor, and
       sampling the gaps above;
     - re-run the slow test.
@@ -4970,7 +4975,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     provisional): 561 µs for 1,024 queries, 0.55 µs a call, against the 1 µs target. The queries
     give 518 `Detached`, 17 `Unchanged`, 26 `Remnants`, 410 `Bright` and 53 `None`.
   - **`just fit-check`:** 26 fresh, 6 provisional warnings (as before), 0 failures.
-  - **Findings, for R06.T8.g and the version-22 refit** (reported to main, not fixed):
+  - **Findings, for R06.T8.g and the deferred bump batch's refit** (reported to main, not fixed):
     - **`Bright`'s M is loose.** Over the census's windows its median is M<sub>V</sub> −6.4 in C,
       −7.3 in D and −5.0 in E (old, near the Sun; 90% brighter than −3.6, −0.8 and −0.5). So nearly
       every `Bright` pair's record stays listable and is generated. Only 21%, 8% and 1% of C's, D's
@@ -4987,9 +4992,9 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
         0.1 M☉ depart before an interaction. A star of at least 0.1 M☉ stays on its own track,
         keeping plan 06's mass and accreting no wind, until Roche-lobe overflow or a common
         envelope. So the lever acts on the light-member cells alone, and is folded, narrowed, into
-        the version-22 refit after a probe. `Bright`'s looseness is the tables' aggregation: each
-        value is cumulative over every wider periastron, dilated, merged, and smeared in E. Its
-        levers are deferred (`deferred-corrections.md`, "Census cost")._
+        the deferred bump batch's refit after a probe. `Bright`'s looseness is the tables'
+        aggregation: each value is cumulative over every wider periastron, dilated, merged, and
+        smeared in E. Its levers are deferred (`deferred-corrections.md`, "Census cost")._
     - **The core-inertia column** (T17.b's open option), like for like. Over the census's old
       windows near the Sun, the pre-test passes over 81.7%, 29.0% and 7.0% of C's, D's and E's
       pairs, and `Detached` takes 75.2%, 21.8% and 0.7%. Of the pairs it misses, these go to
@@ -5039,7 +5044,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       2H + L wrongly (the value was right). Its should-fixes are the accretion figure and the
       white-dwarf note above; its considers, the C and D merger gaps and the cooling floor's DARK
       bins, are recorded here and in item 4's docs.
-  - **At the version-22 batch:** re-run the slow test and the monotonicity test after the tables'
+  - **At the deferred bump batch:** re-run the slow test and the monotonicity test after the tables'
     refit. Item 4 already checks for sudden deaths by +H, which T4.l's passed-over collapses will
     hand to the engine.
 - **P11.T17.c's follow-up: capped timelines, and the held floor** (2026-10-08, at version 21;
@@ -5101,7 +5106,7 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       the shrinking steps through its least step of 10⁻⁷ Myr, the aim's release after 1,000
       iterations, and having no cap on segments. The engine's shortfall shrinks each step by a
       factor of about τ Ṁ t_MS ÷ m, so its steps converge without end wherever that is below 1.
-    - The lever, for the version-22 batch: a least step, as BSE's, or a boundary step that falls
+    - The lever, for the deferred bump batch: a least step, as BSE's, or a boundary step that falls
       short only by the rejuvenation taking the boundary. With T4.m's C2 and F15 work, it should
       leave no capped timeline. Re-run this follow-up's probes then, and drop the held floor if
       none is capped.
@@ -5184,5 +5189,5 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     any carried main-sequence member. A pinned primary held (`Member::Frozen`) when its timeline
     is capped would be held for ever too, brighter than the floor; none of the 87 was.
   - **For `deferred-corrections.md`** (reported to main): the proposed F18 and the C2 caps in C and
-    D, with T4.m, in the version-22 batch's engine work; then the follow-up's probes again, and the
-    floor dropped if no timeline is capped, which restores D's and E's `Remnants` and the 18%.
+    D, with T4.m, in the deferred bump batch's engine work; then the follow-up's probes again, and
+    the floor dropped if no timeline is capped, which restores D's and E's `Remnants` and the 18%.
