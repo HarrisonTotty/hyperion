@@ -1561,8 +1561,13 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   orbit.
 - **R09.T13.b Longitude and locked coordinates.** The periodic longitude solve split after the
   latitude one in a fixed order, and the tidally locked coordinates about P14.T14's substellar
-  axis. Tests: with no land–sea contrast the zonal model's answer is reproduced to 0.01 K; a locked
-  world is warmest at the substellar point.
+  axis. The locked solver steps seasons as the zonal one does: a world locked 1:1 to its star has
+  twelve months wherever its orbit is eccentric or it has obliquity, and a moon locked to its
+  planet has its planet's orbit's seasons at its own obliquity to that orbit (Design note 8; a lock
+  adds nothing, signed off 2026-10-10, `signoff-2.md` item 4). Tests: with no land–sea contrast the
+  zonal model's answer is reproduced to 0.01 K; a locked world is warmest at the substellar point;
+  a world locked 1:1 to its star on an eccentric orbit, or with obliquity, has twelve months, and
+  its months differ.
 - **R09.T13.c The other regimes.** `steps/climate/{airless,isothermal}.rs`: radiative equilibrium
   with thermal inertia for airless and thin-atmosphere worlds, and the isothermal surface for a
   Venus. On a locked lava world, cells above the secondary crust's transition temperature are melt,
@@ -1589,7 +1594,8 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   - each month's quantised wind is the wind that month's orographic step used;
   - on a synthetic aquaplanet at 60° obliquity, an equatorial cell's meridional wind changes sign
     twice a year;
-  - a locked circular world has one wind.
+  - a world at e = 0 with no obliquity to its seasonal orbit has one wind (Design note 8's one
+    month; a lock adds nothing, `signoff-2.md` item 4).
 
 Offline check (recorded, not in CI): the reference Earth's monthly fields against an ExoPlaSim run
 of the same inputs, with the differences written into this plan. Acceptance:

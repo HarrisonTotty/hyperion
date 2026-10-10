@@ -1283,8 +1283,8 @@ Names are those the owning plans give; the owning plan is authoritative.
       high and 3 on low, against `MAX_SKY_SOURCES` = 6 in the kernels. It also adds the thick
       table's size, and keeps both settings built together from R08.T6 on.
     - The thick bakes cost CPU at arrival, not frame time, so they run on both settings.
-12. **What the view says.** The atmosphere is computed physics, not decoration. Six states are
-    labelled. The first three follow the guide's existing grammar for a withheld or unmodelled
+12. **What the view says.** The atmosphere is computed physics, not decoration. Seven states are
+    labelled. The first four follow the guide's existing grammar for a withheld or unmodelled
     section; the last three are new annunciations about the view's own drawing, as item 7 of "What
     the guide must gain" frames them:
     - `ATMOSPHERE: NOT RESOLVED` when the surface section is withheld, or a gas envelope's
@@ -1299,6 +1299,11 @@ Names are those the owning plans give; the owning plan is authoritative.
       atmosphere set shows it too (decision-r08-giant-label).
     - `AEROSOLS AND ABSORBERS: NOT YET MODELLED` while plan 14 publishes no aerosol or absorber
       inventory: ozone and methane, like the aerosols, are drawn only from the inventory.
+    - `EXOSPHERE: NOT YET MODELLED` while a generated body is airless and the generator computes
+      no exosphere (P14.T55.c): no medium, since its scattering is negligible, but its resonance
+      light (a Mercury's sodium) is not drawn (`signoff-2.md`, item 6). It stands on its own line,
+      never composed with another `NOT YET MODELLED` note, and a kept scene's body set airless
+      carries none (R08.T10.a).
     - `ATMOSPHERE: PENDING` from a body's `body_detail` request until its reply is drawn. No
       atmosphere is drawn meanwhile.
     - `ATMOSPHERE: COMPUTING` while a gated thick bake runs.
@@ -1313,7 +1318,8 @@ Names are those the owning plans give; the owning plan is authoritative.
       the same τ rule. Each clears when measured optics replace the estimate
       (decision-composition §1.9). It is also shown while an aerosol mode is drawn with a named
       analogue's phase function or the Henyey–Greenstein fallback (R08.T5.c), under the same τ
-      rule. It clears when a published model for that material replaces it.
+      rule, whatever its estimated bias (`signoff-2.md`, item 5). It clears when a published model
+      for that material replaces it.
 
     The provisional profile is recorded in the plan and the code, not on the display. The phrases
     are R08.T2's, signed off 2026-10-09 by the sign-off agent (owner's delegation).
@@ -1777,6 +1783,9 @@ with its meaning and when it clears:
 - `ATMOSPHERE: COMPUTING`;
 - `ATMOSPHERE: APPROXIMATE`, which clears when its regime's gate passes, or, for an NH₄SH
   stand-in, when measured constants replace it (`decision-r08-licences.md` row 5).
+
+Design note 12's seventh, `EXOSPHERE: NOT YET MODELLED`, came after T2, from the sign-off of
+2026-10-10 (`signoff-2.md` item 6), which wrote its guide row; R08.T10.a sets it.
 
 None uses a status colour or the word "degraded" (item 7 of
 [What the guide must gain](../../brainstorming/rendering-and-planets.md#what-the-guide-must-gain)).
@@ -3923,6 +3932,14 @@ generator, and the reference's sampling needs no domain tag.
   realism ruling wants them, they are later tasks. R10 asks this plan for the sun's refracted
   apparent elevation for its shadow test (R10 Design note 10). The ask stays open until refraction
   is drawn; until then R10 reads the geometric elevation.
+- **Io's sodium cloud and eclipse glows are not drawn** (`signoff-2.md`, "For main", 2026-10-10).
+  An Io is `Tenuous` under P14.T53.c, not airless, so it is drawn with its gases and is outside
+  the `EXOSPHERE: NOT YET MODELLED` note (Design note 12). Its sodium cloud and its eclipse glows,
+  which Galileo's broadband solid-state imager recorded above 300 kR (Geissler et al. 1999,
+  Science 285, 870), are another light the console does not draw: no medium term carries a line's
+  resonance or emission light. No note names them today; whether a `Tenuous` body's unmodelled
+  light takes one is open, for "main", and a resonance term is a later task's, with P14.T55.c's
+  exosphere by species.
 - **The metric's floor** (decided, decision-backlog-1, 2026-10-09).
   - The gate is |ΔL| ≤ max(0.05·L_ref, 3 × 10⁻⁴·L_max(image)) + 4σ_ref, with σ_ref ≤ T ÷ 8
     (Design note 10).
@@ -4939,7 +4956,7 @@ generator, and the reference's sampling needs no domain tag.
       150–170× low). With solar abundances their true far-wing scattering reaches about a third of
       a hot giant's Rayleigh depth at 440 nm (Ca) and a tenth at 550 nm (Na), against under 1.2%
       estimated; their lines are R08.T4.c's. Ca I 422.7 nm, Mg I 285.2 nm and Ti's visible lines
-      are in no task's list (for "main", with T4.c).
+      were in no task's list; T4.c lists them now (added 2026-10-10).
     - _Not read_ (access, decision-composition §5): Olney et al. 1997, Hohm 1994, Maroulis et al.
       2000, Bates 1984, Young 1981 and Bucholtz 1995; HCN's primary is not identified, and its,
       PH₃'s and the hydrocarbons' α rest on CCCBDB's listings. CCCBDB's own calculations stand

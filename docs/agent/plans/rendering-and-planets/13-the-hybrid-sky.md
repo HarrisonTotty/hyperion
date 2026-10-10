@@ -666,9 +666,10 @@ keep it for the limit's lifting.
   cut and its `bright_beyond` (`just gen-protocol`). The client composes the interim note while a
   reply states a ceiling and carries no synthetic stars (`DISTANT STARS: DETAIL LIMITED`;
   `decision-r06-t11f-stars-line.md` §2 for its place, and `decision-r13-t2b-note.md` for its
-  wording, its guide row and the guide's other edits, drafted until a sign-off agent accepts
-  them). The sampled cold bench of the served sky near the Sun, at the limit, on the fixture and
-  on the server's galaxy, is recorded for R06.T17's full-cold figure. Tests:
+  wording, its guide row and the guide's other edits, signed off 2026-10-10 with amendments by the
+  sign-off agent, owner's delegation, `signoff-2.md` item 1). The sampled cold bench of the
+  served sky near the Sun, at the limit, on the fixture and on the server's galaxy, is recorded
+  for R06.T17's full-cold figure. Tests:
   - a sky near the Sun returns the sim's census at the ceiling bit for bit;
   - the reply states the ceiling, the limit and each layer's boundary, count beyond and
     `bright_beyond`;
@@ -1003,12 +1004,14 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   of the naked-eye stars stay real, not 92–97%.
 
   The brainstorm's subsection is signed off. Its label wording: T2.b's is ruled
-  (`decision-r13-t2b-note.md`); T8's state word stays a draft for the UX decision agent. Both guide
-  rows are drafted until a sign-off agent accepts them. Its amendment for the real limit is signed
-  off (2026-10-09, the sign-off agent under the owner's delegation, `signoff-brainstorm.md`,
-  source 2) and written into the subsection's text, the draft at its end removed: the boundary is
-  the nearer of the ceiling's radius and 2,000 ly, the promise holds within 2,000 ly, 88% of the
-  naked-eye stars are real, and about half of a camera's stars to V 10 (48%) are synthetic.
+  (`decision-r13-t2b-note.md`); T8's state word stays a draft for the UX decision agent. T2.b's
+  guide row, `DISTANT STARS: DETAIL LIMITED`, was signed off 2026-10-10 with amendments by the
+  sign-off agent (owner's delegation, `signoff-2.md` item 1); T8's row stays drafted until a
+  sign-off agent accepts it. The subsection's amendment for the real limit is signed off
+  (2026-10-09, the sign-off agent under the owner's delegation, `signoff-brainstorm.md`, source 2)
+  and written into the subsection's text, the draft at its end removed: the boundary is the nearer
+  of the ceiling's radius and 2,000 ly, the promise holds within 2,000 ly, 88% of the naked-eye
+  stars are real, and about half of a camera's stars to V 10 (48%) are synthetic.
 
 - **Lazy realisation by record**, to be revisited after the deferred census levers land (the
   owner, 2026-10-08), so that every point could be a system:
