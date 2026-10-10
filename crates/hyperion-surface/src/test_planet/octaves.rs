@@ -27,7 +27,7 @@ use hyperion_base::Seed;
 use hyperion_base::math;
 use hyperion_base::rng::{ObjectKey, Stream};
 
-use crate::noise::Octave;
+use crate::noise::{self, NoiseKey, Octave};
 use crate::tags::TEST_PLANET;
 
 /// The finest octave's index: λ = 10,000 km ÷ 2²¹ = 4.77 m.
@@ -86,46 +86,18 @@ pub fn nominal_sigma_m(k: u8) -> f64 {
 
 /// The rotation of octave `k`: that of the integer quaternion
 /// (k + 2, 1 + k mod 3, 2 + k mod 5, 1 + k mod 7), each entry an integer over the quaternion's
-/// squared norm.
+/// squared norm (the noise basis's rotation, which R09's relief shares).
 ///
 /// # Panics
 ///
 /// If `k` is above [`FINEST_OCTAVE`].
 #[must_use]
-#[expect(
-    clippy::many_single_char_names,
-    reason = "a quaternion (a, b, c, d) and its squared norm n, as the rotation formula names them"
-)]
 pub fn rotation(k: u8) -> [[f64; 3]; 3] {
     assert!(
         k <= FINEST_OCTAVE,
         "octave {k} is beyond the finest, {FINEST_OCTAVE}"
     );
-    let index = i64::from(k);
-    let (a, b, c, d) = (index + 2, 1 + index % 3, 2 + index % 5, 1 + index % 7);
-    let n = a * a + b * b + c * c + d * d;
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "the quaternion's entries are below 30, so every product is exact in f64"
-    )]
-    let over = |m: i64| m as f64 / n as f64;
-    [
-        [
-            over(a * a + b * b - c * c - d * d),
-            over(2 * (b * c - a * d)),
-            over(2 * (b * d + a * c)),
-        ],
-        [
-            over(2 * (b * c + a * d)),
-            over(a * a - b * b + c * c - d * d),
-            over(2 * (c * d - a * b)),
-        ],
-        [
-            over(2 * (b * d - a * c)),
-            over(2 * (c * d + a * b)),
-            over(a * a - b * b - c * c + d * d),
-        ],
-    ]
+    noise::rotation(k)
 }
 
 /// The lattice offset of octave `k` of the planet of `seed`, each axis uniform in [0, 1): the top
@@ -163,7 +135,13 @@ pub fn octave(seed: Seed, k: u8) -> Octave {
         k <= FINEST_OCTAVE,
         "octave {k} is beyond the finest, {FINEST_OCTAVE}"
     );
-    Octave::new(k, spacing_m(k), rotation(k), offset(seed, k), seed)
+    Octave::new(
+        k,
+        spacing_m(k),
+        rotation(k),
+        offset(seed, k),
+        NoiseKey::TestPlanet(seed),
+    )
 }
 
 #[cfg(test)]

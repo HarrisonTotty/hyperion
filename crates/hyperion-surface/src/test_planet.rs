@@ -67,7 +67,7 @@ use hyperion_base::Seed;
 
 use crate::cube::PatchKey;
 use crate::geometry::vertex_spacing;
-use crate::noise::{NOISE_BOUND, NOISE_RMS, Octave, gradient_noise};
+use crate::noise::{NOISE_BOUND, NOISE_RMS, NoiseKey, Octave, gradient_noise};
 
 /// The height at a point and its gradient, which lives in [`crate::height`] (moved there by R09.T4,
 /// so that R10's retirement of the test planet leaves it in place); re-exported here, where R05's
@@ -143,14 +143,14 @@ pub const FIXED_POINTS: u32 = 10_000;
 /// The ridged octaves.
 const RIDGED: std::ops::RangeInclusive<u8> = 8..=12;
 
-/// The ridges' rounding of the crest, ε, in units of the noise.
-const RIDGE_EPSILON: f64 = 0.05;
+// The ridges' rounding of the crest, ε, in units of the noise: the noise basis's, which R09's
+// mountain belts share.
+use crate::noise::RIDGE_EPSILON;
 
-/// The mean of r = 1 − √(n² + ε²) over space, pinned and recomputed by a test.
-pub const RIDGE_MEAN: f64 = 0.7692;
-
-/// The RMS of r − [`RIDGE_MEAN`] over space, pinned and recomputed by a test.
-pub const RIDGE_RMS: f64 = 0.1488;
+/// The mean of r = 1 − √(n² + ε²) over space and the RMS of r − `RIDGE_MEAN`, pinned in the noise
+/// basis (moved there by R09.T5, so that R10's retirement of the test planet leaves them in place)
+/// and recomputed by a test here; re-exported where R05 placed them.
+pub use crate::noise::{RIDGE_MEAN, RIDGE_RMS};
 
 /// The RMS of the ridges' mask w over this planet, `√E[w²]`, measured over 10⁶ points and pinned
 /// (`the_ridge_mask_rms_is_pinned`): a ridged octave of RMS `σ_k` contributes `σ_k` times it, the
@@ -326,13 +326,14 @@ impl TestPlanet {
 
     /// The sum of octaves 0 to `count − 1` at `dir`, in index order, and its gradient.
     fn sum_octaves(&self, dir: [f64; 3], count: u8, cache: &mut LatticeCache) -> HeightSample {
-        let table = cache.take_octaves(self.seed, || {
+        let key = NoiseKey::TestPlanet(self.seed);
+        let table = cache.take_octaves(key, || {
             (0..=octaves::FINEST_OCTAVE)
                 .map(|k| self.octave(k))
                 .collect()
         });
         let sample = self.sum_octaves_of(&table, dir, count, cache);
-        cache.restore_octaves(self.seed, table);
+        cache.restore_octaves(key, table);
         sample
     }
 

@@ -21,20 +21,29 @@ use hyperion_surface::field::{
     boundary_diameter, cell_index, coarse_level, month_at, month_blend,
 };
 use hyperion_surface::geometry::{finest_level, vertex_spacing};
-use hyperion_surface::noise::{LatticeCache, Octave, gradient_noise};
+use hyperion_surface::noise::{LatticeCache, NoiseKey, Octave, gradient_noise};
 use hyperion_surface::num;
 use hyperion_surface::patch::vertex::{PatchTerms, face_difference_morph_f32};
 use hyperion_surface::patch::{BakeOptions, NormalScale, VertexPath, bake_patch};
 use hyperion_surface::spheroid::Spheroid;
-use hyperion_surface::synth::BandSpectrum;
 use hyperion_surface::synth::interp::{CellValues, interpolate};
+use hyperion_surface::synth::relief::{
+    Relief, finest_octave, nyquist_degree, octave_bound, octave_rms, octave_spacing,
+};
+use hyperion_surface::synth::{BandSpectrum, unresolved_variance};
 use hyperion_surface::test_planet::{TEST_PLANET, octaves};
 use hyperion_surface::wire::encode_payload;
 
 const IDENTITY: [[f64; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
 
 fn octave() -> Octave {
-    Octave::new(3, 100.0, IDENTITY, [0.0; 3], hyperion_base::Seed::new(1))
+    Octave::new(
+        3,
+        100.0,
+        IDENTITY,
+        [0.0; 3],
+        NoiseKey::TestPlanet(hyperion_base::Seed::new(1)),
+    )
 }
 
 #[test]
@@ -102,14 +111,26 @@ fn assert_finite_refuses_infinity() {
 #[test]
 #[should_panic(expected = "an octave index is 0 to 31")]
 fn an_octave_index_above_31_is_refused() {
-    let _ = Octave::new(32, 1.0, IDENTITY, [0.0; 3], hyperion_base::Seed::new(1));
+    let _ = Octave::new(
+        32,
+        1.0,
+        IDENTITY,
+        [0.0; 3],
+        NoiseKey::TestPlanet(hyperion_base::Seed::new(1)),
+    );
 }
 
 #[test]
 #[should_panic(expected = "an octave's rotation must be orthonormal")]
 fn a_rotation_that_is_not_orthonormal_is_refused() {
     let stretched = [[2.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
-    let _ = Octave::new(3, 1.0, stretched, [0.0; 3], hyperion_base::Seed::new(1));
+    let _ = Octave::new(
+        3,
+        1.0,
+        stretched,
+        [0.0; 3],
+        NoiseKey::TestPlanet(hyperion_base::Seed::new(1)),
+    );
 }
 
 #[test]
@@ -293,4 +314,89 @@ fn a_time_of_no_mean_anomaly_has_no_month_blend() {
 #[should_panic(expected = "a mean anomaly must be finite")]
 fn a_time_of_no_mean_anomaly_has_no_month() {
     let _ = month_at(level_five_field().header(), Radians::new(f64::INFINITY));
+}
+
+fn spectrum() -> BandSpectrum {
+    BandSpectrum::new(1.9, SquareMetres::new(1.0)).unwrap()
+}
+
+#[test]
+#[should_panic(expected = "a Nyquist degree is for levels 0 to 40")]
+fn a_nyquist_degree_past_level_40_is_refused() {
+    let _ = nyquist_degree(41);
+}
+
+#[test]
+#[should_panic(expected = "an octave index is 0 to 31")]
+fn an_octave_spacing_past_octave_31_is_refused() {
+    let _ = octave_spacing(Metres::new(6.371e6), 32);
+}
+
+#[test]
+#[should_panic(expected = "a body's radius must be finite and positive")]
+fn the_finest_octave_of_no_body_is_refused() {
+    let _ = finest_octave(Metres::ZERO);
+}
+
+#[test]
+#[should_panic(expected = "level 0 has no band below a coarser level")]
+fn octave_0_has_no_rms() {
+    let _ = octave_rms(&spectrum(), 0);
+}
+
+#[test]
+#[should_panic(expected = "level 0 has no band below a coarser level")]
+fn octave_0_has_no_bound() {
+    let _ = octave_bound(&spectrum(), 0);
+}
+
+#[test]
+#[should_panic(expected = "degrees start at 1")]
+fn the_variance_from_degree_0_is_refused() {
+    let _ = spectrum().variance_from_degree(0);
+}
+
+#[test]
+#[should_panic(expected = "runs backwards")]
+fn a_band_of_degrees_that_runs_backwards_is_refused() {
+    let _ = spectrum().band_variance(5, 3);
+}
+
+#[test]
+#[should_panic(expected = "level 0 has no band below a coarser level")]
+fn level_0_has_no_band() {
+    let _ = spectrum().level_variance(0);
+}
+
+#[test]
+#[should_panic(expected = "a wavelength must be finite and positive")]
+fn an_unresolved_variance_below_no_wavelength_is_refused() {
+    let field = level_five_field();
+    let cell = PatchKey::containing(5, [0.0, 0.0, 1.0]).unwrap();
+    let _ = unresolved_variance(&field, cell, Metres::ZERO);
+}
+
+#[test]
+#[should_panic(expected = "the cell is not of the field's level")]
+fn an_unresolved_variance_of_another_level_s_cell_is_refused() {
+    let field = level_five_field();
+    let cell = PatchKey::containing(6, [0.0, 0.0, 1.0]).unwrap();
+    let _ = unresolved_variance(&field, cell, Metres::new(1e3));
+}
+
+#[test]
+#[should_panic(expected = "a covered ball must be finite")]
+fn a_relief_cover_of_negative_radius_is_refused() {
+    let field = level_five_field();
+    let relief = Relief::new(field.header(), hyperion_base::rng::DetailSeed::new(1));
+    let mut cache = hyperion_surface::synth::SynthCache::new();
+    relief.cover(&field, [0.0, 0.0, 1.0], Metres::new(-1.0), 31, &mut cache);
+}
+
+#[test]
+#[should_panic(expected = "index out of bounds")]
+fn a_relief_octave_rms_past_octave_31_is_refused() {
+    let field = level_five_field();
+    let relief = Relief::new(field.header(), hyperion_base::rng::DetailSeed::new(1));
+    let _ = relief.octave_rms(32);
 }

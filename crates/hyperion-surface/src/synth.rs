@@ -4,21 +4,26 @@
 //! [`Synthesiser`] is the height function over a coarse field, on the server's whole field and a
 //! client's part of one alike, through [`FieldView`]. Today it returns the base elevation, the
 //! coarse cells interpolated over the sphere ([`interp`], R09.T4), at every level; the structural
-//! octaves (T5), the channels (T6) and the small craters (T7.b) add the bands below the coarse
-//! cell, and the assembly (T8) fixes each level's set. The module also holds the two types a coarse
-//! field's header carries: [`BandLevel`], the quadtree level a height is asked at, and
-//! [`BandSpectrum`], the law of the relief finer than the coarse cells, from which R09.T5 derives
-//! each level's structural amplitudes and the closed-form variance below a cell.
+//! octaves ([`relief`], R09.T5), the channels (T6) and the small craters (T7.b) add the bands below
+//! the coarse cell, and the assembly (T8) fixes each level's set. The module also holds the two
+//! types a coarse field's header carries: [`BandLevel`], the quadtree level a height is asked at,
+//! and [`BandSpectrum`], the law of the relief finer than the coarse cells, from which the relief
+//! derives each level's amplitude and the closed-form variance below a cell ([`local_variance`]);
+//! and the per-contribution variance below a wavelength that R10 reads
+//! ([`unresolved_variance`]).
 
 pub mod interp;
+pub mod relief;
 
 use hyperion_base::rng::DetailSeed;
-use hyperion_base::units::SquareMetres;
+use hyperion_base::units::{Metres, SquareMetres};
 
 use crate::cube::{MAX_LEVEL, PatchKey};
 use crate::field::{FieldView, SynthesisCell};
 use crate::height::HeightSample;
+use crate::noise::LatticeCache;
 use interp::ReadCellError;
+pub use relief::{Relief, local_variance};
 
 /// The height function over a coarse field: what the server's collision and the client's patches
 /// read (Design note 13).
@@ -110,19 +115,71 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 
 /// The caller's cache for a [`Synthesiser`]'s queries, one per worker or per bake.
 ///
-/// It holds nothing yet: the base elevation needs no cache. R09.T5 puts R05's lattice cache in it
-/// for the structural octaves, and T6.b the channel network's cells, keyed by `u64`.
+/// It holds R05's lattice cache, generalised to the body's detail seed (R09.T5), for the
+/// structural octaves ([`relief`]): their octave table, built once per seed, and the lattice
+/// corners a bake covers. T6.b adds the channel network's cells, keyed by `u64`. No height depends
+/// on what it holds, only the time a query takes.
 #[derive(Debug, Clone, Default)]
 pub struct SynthCache {
-    _reserved: (),
+    lattice: LatticeCache,
 }
 
 impl SynthCache {
     /// An empty cache.
     #[must_use]
     pub const fn new() -> Self {
-        Self { _reserved: () }
+        Self {
+            lattice: LatticeCache::new(),
+        }
     }
+
+    /// The structural octaves' lattice cache.
+    #[must_use]
+    pub(crate) fn lattice_mut(&mut self) -> &mut LatticeCache {
+        &mut self.lattice
+    }
+}
+
+/// The variance of a cell's ground in wavelengths shorter than a given one, per contribution:
+/// what R10's material weights and slope readouts read (Design note 18).
+///
+/// Each is a closed form of the cell's own fields. The structural octaves' is built (R09.T5); the
+/// channels (T6.b) and the small craters (T7.b) add theirs.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct UnresolvedVariance {
+    relief: SquareMetres,
+}
+
+impl UnresolvedVariance {
+    /// The structural octaves' share, square metres: their variance in the band asked for, the
+    /// cell's amplitude squared times the spectrum's ([`relief`]).
+    #[must_use]
+    pub const fn relief(&self) -> SquareMetres {
+        self.relief
+    }
+
+    /// The whole, square metres: the contributions are independent, so their variances add.
+    #[must_use]
+    pub const fn total(&self) -> SquareMetres {
+        self.relief
+    }
+}
+
+/// The variance of `cell`'s ground in wavelengths shorter than `finer_than`, per contribution, or
+/// `None` where `field` does not hold the cell (Design note 18).
+///
+/// # Panics
+///
+/// If `finer_than` is not finite and positive, or `cell` is not of the field's level.
+#[must_use]
+pub fn unresolved_variance(
+    field: &impl FieldView,
+    cell: PatchKey,
+    finer_than: Metres,
+) -> Option<UnresolvedVariance> {
+    Some(UnresolvedVariance {
+        relief: relief::unresolved_relief_variance(field, cell, finer_than)?,
+    })
 }
 
 /// Why a [`Synthesiser`] could not answer a query.
@@ -209,10 +266,15 @@ impl TryFrom<u8> for BandLevel {
 /// V(l) is the variance of height contributed by the 2l + 1 spherical harmonics of degree l, so
 /// that the height variance about the mean is the sum of V(l) over every degree from 1, and the
 /// synthesis's expected variance below a coarse cell is the sum from the cell's Nyquist degree up,
-/// in closed form (`local_variance`, R09.T5). Per-degree variance falls as l^−1.9 by default, within
-/// the −1.7 to −2.05 the plan's own research measured (Design note 7, researched 2026-09-29, on
-/// the shape models Design note 3 names, which R09.T5 re-checks). R09.T5 derives each level's
-/// per-contribution amplitudes from the law, so the header carries the law alone.
+/// in closed form ([`local_variance`]). Per-degree variance falls as l^−1.9 by default, within the
+/// −1.7 to −2.05 the plan's own research measured (Design note 7, researched 2026-09-29, on the
+/// shape models Design note 3 names). R09.T5's re-check found Earth2014's bedrock spectrum
+/// steepening through the coarse cells' degrees: the local slope of Hirt and Rexer 2015's fitted
+/// degree variance of BED2014 (Int. J. Appl. Earth Obs. Geoinf. 39, 103, §4.2, Eq. 6 and Table 3)
+/// is −2.06 at l = 300, −2.27 at 1,200 and −2.53 at 2,400; and measured relief lies far below the
+/// law's at metre scales (the plan's Risks, "Deviations in T5, as built"). The relief
+/// ([`relief`]) derives each level's amplitude from the law ([`BandSpectrum::level_variance`]),
+/// so the header carries the law alone.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BandSpectrum {
     exponent: f64,

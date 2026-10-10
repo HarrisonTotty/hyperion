@@ -35,7 +35,7 @@
 //! | `surface.coarse.relief`  | `SurfaceCoarse` | `surface_cell` | coarse landform noise, volcanic provinces                      |
 //! | `surface.coarse.crater`  | `SurfaceCoarse` | `surface_item` | craters of the boundary diameter and wider: count, place, age, morphology |
 //! | `surface.coarse.erosion` | `SurfaceCoarse` | `surface_cell` | random receivers and the multigrid's jitter                    |
-//! | `surface.relief`         | `SurfaceDetail` | `surface_item` | structural noise: a 3D lattice corner's word, as R05's [`noise`](crate::noise) keys it |
+//! | `surface.relief`         | `SurfaceDetail` | `surface_item` | structural noise: a 3D lattice corner's word, as R05's [`noise`](crate::noise) keys it, and the octaves' offsets, words 2⁴⁰ + 4m + axis of item 0 |
 //! | `surface.channel`        | `SurfaceDetail` | `surface_cell` | Dendry key points per cell and level                           |
 //! | `surface.crater`         | `SurfaceDetail` | `surface_cell` | craters below the boundary diameter, per octave cell           |
 
@@ -70,7 +70,8 @@ hyperion_base::domain_tags! {
 
     /// The synthesis's structural octaves (R09, Design note 13), keyed by `surface_item` of a 3D
     /// lattice corner's word, i << 32 | j of the corner's 32-bit two's complements, with the draw
-    /// number octave << 32 | k, as R05's [`noise`](crate::noise) keys its corners.
+    /// number octave << 32 | k, as R05's [`noise`](crate::noise) keys its corners; octave m's
+    /// lattice offset is words 2⁴⁰ + 4m + axis of item 0, above every corner's draw (R09.T5).
     SURFACE_RELIEF: SurfaceDetail = "surface.relief";
 
     /// The synthesis's channel network (R09, Design note 13), keyed by `surface_cell` of a

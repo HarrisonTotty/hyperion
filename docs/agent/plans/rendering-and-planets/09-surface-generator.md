@@ -2883,3 +2883,145 @@ re-blessing this plan's payload and coarse goldens in that commit.
     "main"). _Applied 2026-10-09:_ lane docs-consistency amended the brainstorm's per-query step 2
     to "from the coarse elevation through an approximating C² spline", with σ_h matched on the
     surface it reconstructs (`signoff-brainstorm.md`, "Later amendments").
+- **Deviations in T5, as built** (2026-10-09).
+  - _The noise key._ `noise::NoiseKey` (`TestPlanet(Seed)`, `Relief(DetailSeed)`) replaces the
+    `Seed` an `Octave` held: `Octave::new(index, spacing, rotation, offset, key)`, with the getters
+    `spacing` (was `spacing_m`) and `key`. The key fixes the unit of every length an octave is
+    given (metres for the test planet, the body's mean radius for the relief), which each variant's
+    documentation states; the generic lengths (`spacing`, `gradient_noise`'s `point`,
+    `LatticeCache::cover`'s `centre` and `radius`) therefore carry no unit in their names, the one
+    exception to the rule that a quantity names its unit (the Rust review's finding, kept so).
+    `LatticeCache::{take_octaves, restore_octaves}` take the key, its boxes compare keys, and
+    `LatticeCache::new` is `const`. The crate-private `NoiseKey::word` reads every corner word and
+    the relief's offsets, naming `SURFACE_RELIEF` and `surface_item` in the one `stream` call (T1.a's
+    key-form test); the test planet's offsets are still read by `test_planet::octaves::offset` on
+    its own stream. R05's rotation formula is `noise::rotation` (crate-private, k 0–31), which
+    `test_planet::octaves::rotation` calls. `RIDGE_MEAN` and `RIDGE_RMS` move to `noise`, which
+    `test_planet` re-exports; `RIDGE_EPSILON` moves too, a private import there that `bound.rs`
+    reads. Every R05 golden is unchanged and `TEST_PLANET_VERSION` stays 2. `test_planet` bench
+    (3700X, schedutil, other lanes running, load 9–25, provisional): cached 11.86 and 11.90 ms
+    before, 11.89 ms after (2.8 µs a point); uncached 19.02 and 19.28 ms before, 19.67 ms after (4.5
+    to 4.7 µs a point, +2–3%, the key's match on every hashed corner).
+  - _Files and public items._ `synth/relief.rs` (tests in `synth/relief/tests.rs`): `Relief`
+    (`new(header, seed)`, `at(field, dir, through, cache)`, `cover`, `seed`, `first_octave`,
+    `finest_octave`, `octave_rms`; `Clone`, not `Copy`, at 280 bytes, so T8's `Synthesiser`, which
+    is `Copy`, borrows one or computes it), `ReliefStyle` (`of(cell)`, `amplitude`, `belt`,
+    `shear`, `REFERENCE`), `nyquist_degree`, `first_octave`, `finest_octave`, `octave_spacing`,
+    `octave_rms`, `octave_bound`, `local_variance`, `WARP_SCALE`, `RIDGE_WEIGHT_RMS` and the
+    amplitude constants. `BandSpectrum` gains `variance_from_degree`, `band_variance` and
+    `level_variance` (an `impl` in `relief.rs`). `synth.rs` gains `UnresolvedVariance` (`relief`,
+    `total`) and `unresolved_variance`, re-exports `Relief` and `local_variance`, and its
+    `SynthCache` holds the `LatticeCache` (`lattice_mut`, crate-private). `height_at` is unchanged
+    (T8 joins the bands), so T4's order-independence test passes as it was.
+  - _The octaves._ One per level m, from L + 1 to the deepest whose lattice spacing is at least
+    the 2 m band limit (22 on an Earth, 21 a Mars, 20 the Moon, 18 Ceres). The spacing is 1.5 mean
+    cells, √(3π ÷ 2) R ÷ 2^m, at the spheroid point in radii, so the octave table is a function of
+    the seed alone. The 1.5 is measured: the noise's planar spectrum (4 planes of 256², Hann
+    window; run once, not committed) has its median at 1.92 λ, quartiles 2.9 λ and 1.5 λ, 98% above
+    λ, which puts the median at the geometric centre of the octave's band. Octave m carries the
+    integer degrees from `nyquist_degree(m − 1)` to `nyquist_degree(m)`, ⌈√(3π ÷ 2) 2^m⌉ (556 at
+    level 8, Design note 7's Nyquist degree), so the octaves partition the spectrum. The sets per
+    band level stay T8's; under R05's rule (λ at least four of the level's largest vertex
+    spacings) band level n reads octaves to n + 4.
+  - _The styles._ The plain-to-ridged mix is a rotation, t = cos θ n̂ + sin θ r̃ with θ = (π ÷ 2) b,
+    zero mean and unit variance in every mix (n̂ and the even ridged term are uncorrelated: reflecting
+    a point through its lattice cell's centre negates the noise with the corners' gradients
+    exchanged, which are drawn alike, so the noise is symmetric about zero). r̃ is the ridged multifractal (the brainstorm's,
+    built after the plan-conformance review): R05's ridged transform with its pinned mean removed,
+    weighted by the octave above, w = (max(r, 0) ÷ (1 − ε))² of its raw ridge (Musgrave's weight,
+    from the octave immediately above only, not his cascade), divided by the weight's pinned RMS
+    `RIDGE_WEIGHT_RMS` = 0.7199 (10⁷ points, `the_ridge_weight_rms_is_measured`, slow); the first
+    octave is unweighted. The lattices being independent, it keeps zero mean, unit variance and no
+    correlation with coarser octaves. The warp displaces octave m by the three octaves above it
+    along the body axes, times s and `WARP_SCALE` λ_m, from the fourth octave on. The amplitude is
+    a factor a. The three are interpolated with T4's spline from per-cell values, so the relief
+    reads exactly the base elevation's cells (tested) and adds nothing to the margin. The factors
+    carry their sources, the measurements of T5's science check (plane-detrended RMS in 35 km
+    windows of Earth2014's 1′ BED, GMRT multibeam at 61 m, MOLA at 32 ppd, LOLA at 16 ppd; its
+    scripts are not committed): belts 2.5, continental interiors 0.12, deformation zones 1, young
+    oceanic hills 1.5, abyssal plains 0.1, a stagnant lid 1, its provinces 0.25. Widths: collision
+    belts full to 100 km and gone by 250, arcs full to 200 km behind the boundary and gone by 350,
+    the continental deformation zone 150 to 500, hills to plain 500 to 1,500 (the plan's own),
+    shear 50 to 100 km on continental crust and 20 to 50 on oceanic (the plan's own). The hills'
+    distance is to the nearest boundary of any kind, which is all the cell carries, where Design
+    note 7 dates the floor from its own plate's divergent boundary: old floor within 1,500 km of a
+    trench or transform keeps hills (at Earth's mean ridge half-rate, 23 mm a year in Bird 2003's
+    Table 3, 1,500 km is 64 Myr). Carrying the ridge distance would be a wire field, for "main". The factors are a table over
+    T2's `Crust` and `BoundaryKind`, matched exhaustively, which decision-composition keeps closed.
+  - _`local_variance` is the reference style's._ The styles move variance about the body, so the
+    realised share is the mean a² times `local_variance`: 0.74 on the Earth-like world, 0.93
+    Mars-like, 0.95 Moon-like, 1 Ceres-like. The plan's 5% test is therefore against
+    `local_variance` times the sampled mean of the interpolated a² at the same points (within 0.9%
+    on all four), and Flat and OneCrater have no relief at all. Asked of "main" (lean, not ruled):
+    T12.e scales V₁ by the inverse of the area-weighted mean a² of its cells (`ReliefStyle::of`), so
+    that the body's share is the law it wants, rather than the header carrying a normaliser (a wire
+    change before T9). The octaves stop at the band limit, leaving out 2^−(finest − L)(β − 1) of
+    `local_variance`: under 10⁻³ at β = 1.9 on the synthetic worlds, 1.8 × 10⁻³ on a Ceres at 1.7.
+  - _Tests as built._ The mean: 2 × 10⁵ area-uniform points on an Earth-sized body (the plan's 10⁵
+    raised, so that the 1% is 4.5 standard errors and the 56 checks together stay under α =
+    10⁻³), octaves 9 to 22, plain and ridged, warped and not, each mean under 0.01 of unit RMS and
+    each RMS within 3%. The variance: 6 × 10⁴ points a world (raised from a first 2 × 10⁴), and the
+    test asserts that its 5% is at least 3.29 standard errors of the samples' difference (α =
+    10⁻³). The bound: `T_MAX` = √((B ÷ σ_noise)² + (r̂(B) ÷ W)²) = 8.770, reached at n = −B with the
+    weight 1; `octave_bound` is `MAX_AMPLITUDE` σ_m `T_MAX`, held on every synthetic world. The
+    warp: an instrumented lattice records that the relief through octave n reads octaves L + 1 to n
+    once each, in order, and the terms through n are those of a deeper query, bit for bit. Beyond
+    the list: `noise::tests`' `each_key_reads_its_own_stream`,
+    `a_cache_never_serves_one_key_s_lattice_or_table_for_the_other` and
+    `every_octave_s_rotation_is_proper`; the closed forms (Euler–Maclaurin to B₆ from degree 32)
+    against direct sums to 10⁻¹¹ for β of 1.1 to 4; the gradient against central differences on
+    the Earth- and Ceres-like worlds; order and cache independence, one cache shared by two seeds
+    and the test planet; the read set; the styles; the multifractal's weight; the stored octave
+    RMS against the direct one, bit for bit; `unresolved_variance` falling to zero at the band
+    limit, and zero on a body too small for any octave; twelve `should_panic` tests in
+    `tests/panics.rs` for the new public panics.
+  - _Acceptance._ `cargo test -p hyperion-surface synth::relief` selects the relief's 20 fast tests
+    (the plan's four among them) but nothing of the generalisation, so T5 also ran the crate's whole
+    suite, `cargo test -p hyperion-surface --features testing`, merged with `rendering-and-planets`
+    at `7523a618`: 178 library tests (11 slow ignored), R05's goldens unchanged, 40 panics, and
+    T1.a's call-site test; the noise's two slow tests and the weight's pass too, and `just _browser
+prepare` ran the surface crate's 233 tests on the browser target.
+  - _The gradient_ is that of H(P) = h(M⁻¹P ÷ |M⁻¹P|), T4's convention (M⁻¹ (I − d dᵀ) M applied
+    to the noise's gradient at P), so it adds to the base elevation's.
+  - _Science findings, for "main"_ (from the science check; not fixed, since each moves T2's or
+    T12's work or the wire):
+    - The single law V₁ l^−1.9 to the 2 m band limit is far outside its calibration: on the
+      Earth-like world (V₁ = 3.6 × 10⁶ m²) it gives about 1 m RMS in wavelengths of 2–4 m (the
+      finest octave, 4.4–8.8 m, carries 1.37 m) and an RMS slope of 62–71° at 1 m and 27° at 17 m (the Moon's median slopes at 17 m are 2.0° in the maria
+      and 7.5° in the highlands, Rosenburg et al. 2011). Landscape spectra steepen below about 2 km
+      (Hurst 0.7–0.9, Rosenburg et al. 2011 ¶20; Mars's exponent about 3.4 at 0.7–7 km, Aharonson,
+      Zuber and Rothman 2001; β 3.5–4.2 below 180–250 m on soil-mantled terrain, Perron, Kirchner
+      and Dietrich 2008), and the local slope of Hirt and Rexer 2015's fitted BED2014 degree variance
+      steepens from −2.06 at l = 300 to −2.53 at 2,400. Lean: a break in `BandSpectrum`, β₂ ≈ 2.7 below about 2 km on an Earth (5–7 km on a
+      Mars), a header field and so a wire change, made before T9's goldens with T2's follow-ups'
+      re-bless. The relief reads the law only through `level_variance`, so it takes the break
+      unchanged.
+    - T2's Earth-like V₁ (σ_h² ÷ ζ(1.9)) normalises the law from degree 1, and gives 116 m RMS
+      above l = 556 against Earth2014 BED's 183 m (Hirt and Rexer 2015, Table 3) and Design note
+      7's "0.6% … about 200 m". T10's and T12.e's V₁ is fitted at the coarse cell's degrees (about
+      9.6 × 10⁶ m² at β = 1.9), but only with the break, without which the 2–4 m wavelengths reach 1.6 m.
+    - Design note 7's arcs "100–200 km behind" trenches: Bird 2003 (G³ 4, 1027, ¶105, p. 39) has
+      "200–250 km is more typical" for the forearc (medium confidence), for T12.b.
+    - The spectrum may count relief twice: lunar highland relief at kilometre scales is mostly
+      craters, which T7.b adds, and channels add incision. Lean: the spectrum is the structural
+      share alone, and T12.e subtracts each contribution's closed form at the coarse cell
+      (`unresolved_variance`).
+    - An abyssal plain needs a turbidite supply (a passive margin or a fan), which the coarse field
+      does not carry, so every old floor is plain here, where the central Pacific's old floor is
+      sediment-draped hills, about 0.65 of young ones on GMRT (the check's estimate): an input for
+      T11–T12. The usual "slope under
+      1:1,000" (Heezen, Tharp and Ewing 1959) was not reached; the Hatteras plain's multibeam
+      median is 1:1,436.
+  - _For T8._ `Relief::at` with `through` from the level's set; `Relief::cover` for `bake_patch`;
+    `octave_bound` for `level_bound_m`. Not benchmarked: a query interpolates three style
+    components (about three base elevations' worth) and up to 14 octaves, against Design note 14's
+    1.5 µs; one interpolant over the three components is the lever. _For T9_ (the determinism
+    review): nothing pins the relief across targets yet, since `height_at` does not include it
+    until T8; T9's `height_golden.rs` pins `Relief::at` apart from `height_at` (heights and
+    gradients on the four worlds with relief, through L + 3, before the warp, and through the
+    finest), with the 32 octaves' offsets, `nyquist_degree` and each `octave_rms`, as T4's note asks
+    for the base elevation. _For T6.b and T7.b:_ `UnresolvedVariance` gains their fields and
+    `total` their sum. _For T12.e:_ `local_variance` and the mean a² above. _For R05's
+    re-validation:_ R05's Provides comment on `gradient_noise` ("`Octave` holds k, offset,
+    rotation, seed") and its T3 record ("the index, spacing, rotation, offset and seed") now read a
+    `NoiseKey` for the seed; `spacing_m` is `spacing`, and the rotation is `noise::rotation`.
