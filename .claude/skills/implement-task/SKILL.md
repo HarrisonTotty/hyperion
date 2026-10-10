@@ -111,13 +111,21 @@ matching files, and they override habits from other codebases. In addition:
 - Write the task's tests with the code. Iterate with the narrowest command:
   `cargo test -p <crate> <filter>`, or `pnpm --filter hyperion exec vitest run <path>`.
 - Stay inside the task. Work that belongs to a later task or plan waits for it, even when it is
-  convenient now. The roadmap wants each task to leave `just ci` green on its own.
+  convenient now. The roadmap wants each task to leave `just ci` green on its own: the task's gate
+  is `just smart-ci`, and integration runs the full `just ci`.
 
 ## 5. Validate
 
 Invoke the `validate` skill with the task ID. It runs in its own context, picks the checks for
-the changed files, runs the task's acceptance commands and the CI gate, and returns a verdict with
-excerpts of any failures:
+the changed files, runs the task's acceptance commands and the gate, and returns a verdict with
+excerpts of any failures. The gate is `just smart-ci`: the steps of `just ci` that the change
+reaches, chosen from its diff against the integration branch (`just smart-ci --plan` shows them
+and why), with `just test-render` where a shader, the engine or the smoke harness changed. A
+`just ci` in the acceptance criteria is met by it; the full `just ci` is integration's, run when
+the task is integrated. When the task changes what other crates use (a public item's name,
+signature or behaviour), run `just smart-ci --dependents`, so that their checks run too.
+
+The verdict:
 
 - **PASS** or **PASS WITH SKIPS**: go on, and name the skipped checks in the report.
 - **FAIL**: fix the cause and validate again.

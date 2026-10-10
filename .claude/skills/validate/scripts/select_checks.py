@@ -7,7 +7,9 @@ Usage:
 Changes are the working tree against REF (default HEAD) plus untracked files, or, for A..B, the
 commits in that range. A bare word that names a commit is taken as the base. The plan has three
 tiers: targeted checks for what changed (fast), the task's acceptance commands when a task ID is
-given, and the gate to finish with. `--feature` names the plan set when plan numbers are ambiguous.
+given, and the gate to finish with: `just smart-ci`, the part of `just ci` that the branch's change
+needs (integration runs the full `just ci`). `--feature` names the plan set when plan numbers are
+ambiguous.
 `--args-stdin` reads the arguments from standard input as one line of free text.
 
 Always exits 0. Problems are printed in the plan as `TOOLING ERROR:` lines, and ignored arguments
@@ -41,8 +43,8 @@ RENDER_PATHS = re.compile(
     r"^apps/hyperion/(src/renderer/src/view/(engine|shaders)/|src/renderer/src/smoke/|src/smoke/|"
     r"src/renderer/smoke\.html$|scripts/testRender\.sh$)|\.wgsl$"
 )
-# A test marked slow runs only under `just test-slow`, so a change that touches one is gated with
-# `just ci-slow` rather than `just ci`.
+# A test marked slow runs only under `just test-slow`, so a change that touches one runs those slow
+# tests by name beside the gate (never the whole slow suite, which is integration's `just ci-slow`).
 SLOW_MARK = re.compile(r'#\[ignore\s*=\s*"slow')
 DETERMINISM_CRATES = {"hyperion-sim", "hyperion-base", "hyperion-surface", "hyperion-testkit", "hyperion-fit"}
 # `cargo test` runs ts-rs's export tests, which rewrite the checked-in bindings through
@@ -285,7 +287,8 @@ def main() -> None:
             out = subprocess.run(cmd, capture_output=True, text=True, cwd=root)
             if out.returncode == 0:
                 print(out.stdout.strip())
-                print("\n(A command listed here and in tier 3, such as `just ci`, runs once, in tier 3.)")
+                print("\n(A command listed here and in tier 3 runs once, in tier 3. A `just ci` here is met by")
+                print("tier 3's `just smart-ci`: a lane's gate is smart-ci, and integration runs the full `just ci`.)")
             else:
                 print(f"TOOLING ERROR: plan_task.py exited {out.returncode}; report it, and read the task's")
                 print(f"acceptance criteria in its plan by hand. Its message: {(out.stderr or out.stdout).strip()}")
@@ -295,33 +298,28 @@ def main() -> None:
         print("(no task ID given)")
     print()
 
-    # `just ci` is the commit gate and leaves the slow tests out; `just ci-slow` adds them. Anything
-    # that owns slow tests is validated with the slow ones: a changed file that marks one, and the
-    # crates whose statistical tests and goldens are the point (a change to their code can break a
-    # slow test it does not itself mark).
-    slow_owned = slow_marked or determinism
-    if slow_owned:
-        why = "the fast gate plus the slow tests: "
-        why += f"{slow_marked[0]} marks one" if slow_marked else "a determinism crate changed"
-        gate: list[tuple[str, str]] = [(f"{NO_EXPORT}just ci-slow", why)]
-    else:
-        gate = [
-            (
-                f"{NO_EXPORT}just ci",
-                "the commit gate: fmt-check, check, lint, test, fit-check, gen-protocol-check, test-wasm-fast",
-            )
-        ]
+    # A lane's gate is `just smart-ci`: the steps of `just ci` that the branch's change reaches, against
+    # its merge-base with the integration branch, uncommitted and untracked files included, with
+    # `just test-render` when a shader, the engine or the smoke harness changed (R01.T9.e). The
+    # orchestrator's integration runs the full `just ci`, and `just ci-slow` stays the full gate. The
+    # slow tests run only under `just test-slow`, so a changed file that marks one runs those tests by
+    # name beside the gate.
+    gate: list[tuple[str, str]] = [
+        (
+            f"{NO_EXPORT}just smart-ci",
+            "the lane's gate: the steps of `just ci` the change reaches, test-render included where "
+            "needed (`just smart-ci --plan` lists them, each with its cause)",
+        )
+    ]
+    if slow_marked:
+        gate.append((f"just test-slow <the slow tests in {', '.join(slow_marked[:3])}>",
+                     "the slow tests the change marks, by name; never the whole slow suite"))
     skipped: list[str] = []
     if client or infra:
         gate.append(("pnpm build", "the client must still build"))
-    catalogued = catalogue_sources(root)
-    render = [f for f in changed if RENDER_PATHS.search(f) or f in catalogued]
-    if render:
-        # The headless SwiftShader harness stays outside `just ci` (R01.T9.e); these paths run it.
-        gate.append(("just test-render", f"{render[0]} touches the engine, the harness or a shader"))
-    # The WebAssembly checks are no separate step: `just ci` runs the fast suites on wasm32 and
-    # `just ci-slow` the slow ones, and each fails, naming `just wasm-tools`, when a tool is missing
-    # (plan R04, T7.c).
+    # The WebAssembly checks are no separate step: `just smart-ci` runs the fast suites on wasm32 of
+    # the crates that changed, as `just ci` does for all of them, and each fails, naming
+    # `just wasm-tools`, when a tool is missing (plan R04, T7.c).
     if determinism:
         skipped.append("AArch64 golden run: nowhere to run it (no remote, and the CI workflow was removed on "
                        "2026-09-22; plan 01's Risks says how to restore one)")
@@ -348,6 +346,14 @@ def main() -> None:
     if infra:
         notes.append("The justfile or a hook config changed: the gate above is the minimum, and a recipe it "
                      "calls may itself have moved, so read the diff before trusting a pass.")
+    catalogued = catalogue_sources(root)
+    render = [f for f in changed if RENDER_PATHS.search(f) or f in catalogued]
+    if render:
+        notes.append(f"{render[0]} touches the engine, the harness or a shader: `just smart-ci` runs "
+                     "`just test-render` after its other steps.")
+    if determinism:
+        notes.append("A determinism crate changed: its slow tests run at integration (`just ci-slow`). "
+                     "`just smart-ci --dependents` adds the crates that depend on it, for a change to what they use.")
     if notes:
         print("## Notes\n")
         for n in notes:

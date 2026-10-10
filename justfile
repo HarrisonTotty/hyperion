@@ -1,5 +1,6 @@
 # HYPERION task runner — `just` lists recipes, `just ci` is the gate before a commit and
-# `just ci-slow` adds the slow statistical tests.
+# `just ci-slow` adds the slow statistical tests. `just smart-ci` runs the part of `just ci` that a
+# change needs, chosen from its diff.
 #
 # The recipes and their scripts run on Linux and on stock macOS, and on Windows from WSL or Git
 # Bash. macOS's bash is 3.2 and its tools are BSD's, so they use neither bash 4 (`exec {fd}<`,
@@ -248,8 +249,15 @@ lint: gen-surface _clippy _oxlint
 
 # Clippy over every target of the workspace. It compiles each one as `cargo check` does, so a
 # compile error fails it too: `ci` runs it in place of `check`'s `cargo check`.
-_clippy:
-    cargo clippy --workspace --all-targets -- -D warnings
+_clippy: (_clippy-for "--workspace")
+
+# The recipes named `_<step>-for`, and `_rustfmt-check`, `_nextest-run`, `_doctest-run`,
+# `_vitest-run` and `_wasip1-nextest`, are the steps of `ci` with their scope as parameters: `ci`'s
+# own recipes give them the whole workspace, and `just smart-ci` the crates, packages or files that a
+# change reaches. `packages` is cargo's selection: `--workspace`, or `-p <crate>` for each crate with
+# the `--features` that `--workspace` would give it, so that its build is `ci`'s build.
+_clippy-for packages:
+    cargo clippy {{ packages }} --all-targets -- -D warnings
 
 # The platforms that `cross-clippy` checks, less the one it runs on: Linux, macOS on Apple silicon
 # and Windows, each on the architecture its developers use. `rust-toolchain.toml` lists them too,
@@ -265,7 +273,11 @@ cross_targets := "x86_64-unknown-linux-gnu aarch64-apple-darwin x86_64-pc-window
 # builds in `target/cross` and `target/tools-cross`, beside the other builds, so `ci` runs it with
 # the checks beside them: about a second when nothing changed, a minute or more from cold.
 # Clippy for the other platforms (macOS and Windows from Linux), with no SDK.
-cross-clippy:
+cross-clippy: (_cross-clippy-for "--workspace" "gpu-replay")
+
+# `cross-clippy` over the workspace's `packages` (none if empty) and, if `tools` is `gpu-replay`,
+# over tools/gpu-replay.
+_cross-clippy-for packages tools:
     #!/usr/bin/env bash
     set -euo pipefail
     root="{{ justfile_directory() }}"
@@ -317,9 +329,13 @@ cross-clippy:
         export "CC_${target//-/_}=$stub" "AR_${target//-/_}=$stub"
         flags+=(--target "$target")
     done
-    cargo clippy --workspace --all-targets "${flags[@]}" --target-dir "$root/target/cross" -- -D warnings
-    cargo clippy --locked --manifest-path "$root/tools/gpu-replay/Cargo.toml" --all-targets "${flags[@]}" \
-        --target-dir "$root/target/tools-cross" -- -D warnings
+    if [[ -n "{{ packages }}" ]]; then
+        cargo clippy {{ packages }} --all-targets "${flags[@]}" --target-dir "$root/target/cross" -- -D warnings
+    fi
+    if [[ "{{ tools }}" == gpu-replay ]]; then
+        cargo clippy --locked --manifest-path "$root/tools/gpu-replay/Cargo.toml" --all-targets "${flags[@]}" \
+            --target-dir "$root/target/tools-cross" -- -D warnings
+    fi
 
 # oxlint, type-aware; it reads the surface module's `.d.ts`, so `gen-surface` must have run.
 _oxlint:
@@ -331,9 +347,20 @@ fmt:
     pnpm format
 
 # Verify formatting without changing files.
-fmt-check:
-    cargo fmt --all -- --check
+fmt-check: (_rustfmt-check "--all") _prettier-check-all
+
+_rustfmt-check packages:
+    cargo fmt {{ packages }} -- --check
+
+_prettier-check-all:
     pnpm format:check
+
+# Prettier over the `files` named (paths without spaces): `format:check` over those files alone,
+# less its own exclusions, which `just smart-ci` filters out, since Prettier refuses a file named on
+# its command line that a negated pattern excludes. `--ignore-unknown` skips what Prettier does not
+# format, as a directory's walk does.
+_prettier-check files:
+    pnpm exec prettier --check --ignore-unknown {{ files }}
 
 # One lock, shared by every worktree of this clone (it lives in the common git directory), around
 # the test runs that use every core. Parallel lanes build freely, but only one runs its tests at a
@@ -387,14 +414,24 @@ test: gen-surface _test-build
 
 # Build the native test binaries, outside the heavy-test lock. Not after `gen-surface` itself: `ci`
 # builds while `tsc` and oxlint read the module that `gen-surface` would delete and rewrite.
-_test-build:
-    cargo nextest run --workspace --no-run
+_test-build: (_test-build-for "--workspace")
+
+_test-build-for packages:
+    cargo nextest run {{ packages }} --no-run
 
 # Run the native suites, the doctests and vitest; the caller holds the heavy-test lock.
-_test-run:
-    cargo nextest run --workspace
-    cargo test --workspace --doc
-    pnpm test
+_test-run: (_nextest-run "--workspace") (_doctest-run "--workspace") (_vitest-run "" "")
+
+_nextest-run packages:
+    cargo nextest run {{ packages }}
+
+_doctest-run packages:
+    cargo test {{ packages }} --doc
+
+# vitest: every package's suite (`pnpm test`) if `package` is empty, else that pnpm package's
+# `test` over the test files named (all of them if none), as paths from the package's directory.
+_vitest-run package files:
+    pnpm {{ if package == "" { "test" } else { "--filter " + package + " test " + files } }}
 
 # Run the slow tests (`#[ignore = "slow: ..."]`) under the slow-test profile, with cargo-nextest
 # (`cargo install cargo-nextest --locked`) so that every binary's tests share one pool of cores.
@@ -535,20 +572,27 @@ test-wasm-fast: _relaxed-simd-refused _browser-clippy _wasm-fast-build
 
 # The builds of `test-wasm-fast`, outside the heavy-test lock, and the browser target's test lists.
 _wasm-fast-build: (_wasm-preflight "wasip1" "browser")
-    just _wasip1 {{ wasip1_nextest }} --no-run
+    just _wasip1-nextest "{{ wasip1_crates }}" --no-run
     just _browser prepare
 
 # The fast WebAssembly suites, built already; the caller holds the heavy-test lock.
 _wasm-fast-run:
-    just _wasip1 {{ wasip1_nextest }}
+    just _wasip1-nextest "{{ wasip1_crates }}" ""
     just _browser run
+
+# The wasip1 suites of `packages` (cargo's selection, of `wasip1_crates`), with nextest's `flags`.
+_wasip1-nextest packages flags:
+    just _wasip1 nextest run --target wasm32-wasip1 {{ packages }} {{ flags }}
 
 # Clippy for the browser target over the crates that run there, so that code compiled only there
 # (the testkit's embedded golden arm, the surface crate's `src/wasm.rs`) is linted under the
 # crates' own `clippy.toml` files, which `just lint`, run on the host, never applies to it, and so
 # that the bans of the relaxed intrinsics bind (R04 Design notes 10 and 12).
-_browser-clippy: (_wasm-preflight "browser")
-    cargo clippy --target wasm32-unknown-unknown -p {{ replace(browser_crates, " ", " -p ") }} --all-targets -- -D warnings
+_browser-clippy: (_browser-clippy-for browser_crates)
+
+# `_browser-clippy` over `crates`, some of `browser_crates`.
+_browser-clippy-for crates: (_wasm-preflight "browser")
+    cargo clippy --target wasm32-unknown-unknown -p {{ replace(crates, " ", " -p ") }} --all-targets -- -D warnings
 
 # Built first, then run under the heavy-test lock: the slow tests at the slow-test profile with
 # `test-slow`'s nextest profile, then the doctests, which nextest does not run and `cargo test` runs
@@ -616,8 +660,9 @@ test-wasm-browser: (_browser "prepare")
 # holds the heavy-test lock. Both lists come from one `cargo test` over the three crates at once,
 # with each test attributed to its crate by the binary it is listed from: a `cargo test -p` of one
 # crate resolves features for that crate alone, and so built every crate a second time for its list
-# (47 s of a cold `ci`, 2026-10-03), and again after every edit.
-_browser mode: (_wasm-preflight "browser")
+# (47 s of a cold `ci`, 2026-10-03), and again after every edit. `crates`, some of
+# `browser_crates`, narrows both steps to those crates (`just smart-ci`).
+_browser mode crates=browser_crates: (_wasm-preflight "browser")
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{ justfile_directory() }}"
@@ -637,7 +682,7 @@ _browser mode: (_wasm-preflight "browser")
     echo "wasm-bindgen-test on Electron $version, V8 $(node -p process.versions.v8)"
     export CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="timeout {{ browser_timeout }} wasm-bindgen-test-runner"
     packages=()
-    for crate in {{ browser_crates }}; do packages+=(-p "$crate"); done
+    for crate in {{ crates }}; do packages+=(-p "$crate"); done
     browser=(--target wasm32-unknown-unknown --profile slow-test --lib --tests)
     case "{{ mode }}" in
         run)
@@ -682,7 +727,7 @@ _browser mode: (_wasm-preflight "browser")
     browser_lists="$(lists "${browser[@]}")"
     # The names of one crate's tests in those lines; `grep` finding none is not an error.
     tests() { { grep -E "^$1 " || true; } | cut -d ' ' -f 2-; }
-    for crate in {{ browser_crates }}; do
+    for crate in {{ crates }}; do
         native="$(tests "$crate" <<<"$native_lists" | { grep -v 'native_only::' || true; })"
         on_browser="$(tests "$crate" <<<"$browser_lists")"
         if [[ "$native" != "$on_browser" ]]; then
@@ -721,16 +766,19 @@ gen-protocol:
     cargo test -p hyperion-protocol export_bindings
 
 # Fail if the checked-in protocol bindings are stale.
-gen-protocol-check:
+gen-protocol-check: (_gen-protocol-check-for "--workspace")
+
+# Over the workspace's library tests rather than `-p hyperion-protocol`, so that features resolve as
+# for the workspace's test build and the build is that one, not a second build of the protocol and
+# its dependencies with features of their own (41 s of a cold `ci`, 2026-10-03). Only the protocol's
+# tests are named `export_bindings*`. `just smart-ci` gives its test build's selection for the same
+# reason: `-p` for each crate it tests, the protocol among them, with their `--workspace` features.
+_gen-protocol-check-for packages:
     #!/usr/bin/env bash
     set -euo pipefail
     fresh="$(mktemp -d)"
     trap 'rm -rf "$fresh"' EXIT
-    # Over the workspace's library tests rather than `-p hyperion-protocol`, so that features resolve
-    # as for the workspace's test build and the build is that one, not a second build of the protocol
-    # and its dependencies with features of their own (41 s of a cold `ci`, 2026-10-03). Only the
-    # protocol's tests are named `export_bindings*`.
-    TS_RS_EXPORT_DIR="$fresh" cargo test --quiet --workspace --lib export_bindings
+    TS_RS_EXPORT_DIR="$fresh" cargo test --quiet {{ packages }} --lib export_bindings
     diff -r "$fresh" packages/protocol/src/generated \
         || { echo "protocol bindings are stale: run 'just gen-protocol'" >&2; exit 1; }
 
@@ -740,14 +788,17 @@ build: gen-surface
     pnpm build
 
 # `ci` runs what `fmt-check check lint test fit-check gen-protocol-check test-wasm-fast` ran, and
-# `cross-clippy`, in three phases. First, beside the builds, the checks that need no cargo build
-# directory of the worktree (formatting, `tsc`, oxlint, and the relaxed-SIMD refusal,
-# `gpu-replay-check` and `cross-clippy`, which have target directories of their own), their output
-# held until they finish. Second, the cargo steps one after another, since they share the build
-# directory's lock: Clippy, which compiles every target as `cargo check` would, so `check`'s
-# `cargo check` is not repeated; the bindings' check, before any test can rewrite the bindings it
-# compares; the fitted tables' check; then every test build. Third, one hold of the heavy-test lock
-# for all the suites, rather than three turns in the queue behind other worktrees.
+# `cross-clippy` and smart-ci's own tests, in three phases. First, beside the builds, the checks
+# that need no cargo build directory of the worktree (formatting, `tsc`, oxlint, and the
+# relaxed-SIMD refusal, `gpu-replay-check` and `cross-clippy`, which have target directories of
+# their own, and `_smart-ci-test`), their output held until they finish. Second, the cargo steps
+# one after another, since they share the build directory's lock: Clippy, which compiles every
+# target as `cargo check` would, so `check`'s `cargo check` is not repeated; the bindings' check,
+# before any test can rewrite the bindings it compares; the fitted tables' check; then every test
+# build. Third, one hold of the heavy-test lock for all the suites, rather than three turns in the
+# queue behind other worktrees. `smart-ci` runs these same steps, fewer of them and narrower, and
+# `_smart-ci-test` fails if this recipe runs a step, or a step runs a command, that smart-ci does not
+# know (`CI_STEPS` in `tools/smart-ci/smart_ci.py`).
 # The gate before a commit: everything but the slow tests, with the fast suites on WebAssembly.
 ci: gen-surface (_wasm-preflight "wasip1" "browser")
     #!/usr/bin/env bash
@@ -755,7 +806,7 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     cd "{{ justfile_directory() }}"
     side_log="$(mktemp)"
     trap 'rm -f "$side_log"' EXIT
-    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused gpu-replay-check cross-clippy >"$side_log" 2>&1 &
+    just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused gpu-replay-check cross-clippy _smart-ci-test >"$side_log" 2>&1 &
     side=$!
     status=0
     just _clippy _browser-clippy gen-protocol-check fit-check _test-build _wasm-fast-build || status=$?
@@ -763,10 +814,37 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     wait "$side" || side_status=$?
     cat "$side_log"
     if [[ "$status" -ne 0 || "$side_status" -ne 0 ]]; then
-        echo "error: ci failed before the tests (builds and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay and cross-clippy: exit $side_status)" >&2
+        echo "error: ci failed before the tests (builds and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: exit $side_status)" >&2
         exit 1
     fi
     just _locked just _test-run _wasm-fast-run
+
+# `just smart-ci [BASE] [--plan] [--dependents]` (`tools/smart-ci/smart_ci.py`; `--help` for the
+# rules). The change is every path that differs between the merge-base of HEAD and BASE (by default
+# `rendering-and-planets`, the integration branch) and the working tree, untracked files included,
+# so it works before a commit as well as after; `A...B` plans the commits of B since its merge-base
+# with A, with `--plan`. Each path runs the checks that read it, through `ci`'s own steps above,
+# scoped and in `ci`'s order: a TypeScript-free change skips every TypeScript check, a change to a
+# crate runs rustfmt, Clippy (native, the other platforms', wasm32 where `ci` runs it) and the tests
+# (nextest, doctests, wasip1, browser) of that crate alone, with the features `ci` gives it; the
+# protocol crate adds the bindings' check and the TypeScript side, the surface module's sources
+# `gen-surface` and the vitest files that import it, Markdown Prettier alone, and shaders, the engine
+# and the smoke harness `just test-render`. A path no rule knows, and the inputs of the whole
+# workspace (this justfile, Cargo.toml, Cargo.lock, pnpm-lock.yaml, rust-toolchain.toml, `.cargo/`,
+# `tools/portable/`), run the full `ci`. `--plan` prints the plan, each step with the paths that
+# caused it, and runs nothing; a run prints it first. Dependents: only the changed crates are checked
+# by default (the owner's rule), since integration's full `ci` catches a break in a crate that
+# depends on them; `--dependents` adds the Clippy and tests of every crate that depends on a changed
+# one, for a change to what other crates use. A changed `Cargo.toml` always adds them. Run it as
+# `ci` is run (capped, through build-slot); its test phase takes the heavy-test lock as `ci`'s does.
+# The gate a change needs, chosen from its diff: `ci`'s steps, only those the change reaches.
+[positional-arguments]
+smart-ci *args:
+    @SMART_CI_JUST="{{ just_executable() }}" python3 "{{ justfile_directory() }}/tools/smart-ci/smart_ci.py" "$@"
+
+# smart-ci's tests: its rules, path by path, and its agreement with `ci`, which runs it.
+_smart-ci-test:
+    SMART_CI_JUST="{{ just_executable() }}" python3 -B "{{ justfile_directory() }}/tools/smart-ci/test_smart_ci.py"
 
 # TypeScript's type check; the client's needs the surface module's `.d.ts`, from `gen-surface`.
 _typecheck-ts:
