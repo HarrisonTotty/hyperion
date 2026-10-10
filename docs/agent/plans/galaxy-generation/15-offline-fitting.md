@@ -127,18 +127,28 @@ pub struct TableInfo {
 pub const MANIFEST: &[TableInfo];       // fitted tables only, in name order
 ```
 
-| Module                     | Shape owned by | Consumer    | Contents                                        |
-| -------------------------- | -------------- | ----------- | ----------------------------------------------- |
-| `tables::mge`              | plan 02        | 02, 08      | `MGE_EXP`, `MGE_BAR`; this plan adds `MGE_BOXY` |
-| `tables::chabrier`         | this plan      | 02, 11      | `HIGH_MASS_BRANCH_SCALE`                        |
-| `tables::kick_rank`        | plan 06        | 06 (08, 09) | `SCORE_QUANTILES: [f64; 257]`, four defaults    |
-| `tables::helium`           | plan 06        | 06, 09      | `LIFETIME_SLOPE`, `HB_TEMPERATURE_SHIFT`        |
-| `tables::displaced_forms`  | this plan      | 08          | see P15.T6                                      |
-| `tables::cluster_dynamics` | this plan      | 09          | `BH_LOSS_*`, equipartition, `PULSAR*`           |
-| `tables::type_ia_delay`    | this plan      | 09, 11      | delay-first samplers, `DELAY_EDGES`             |
-| `tables::lbv`              | this plan      | 09          | `LBV_SAMPLER`, the luminous blue variables'     |
-| `tables::binary`           | plan 11        | 11          | `IA_YIELD`, four samplers, `CLASS_SHARES`       |
-| `tables::streams`          | this plan      | 10          | `ORPHAN_STREAMS_PER_GLOBULAR`                   |
+| Module                          | Shape owned by | Consumer    | Contents                                                  |
+| ------------------------------- | -------------- | ----------- | --------------------------------------------------------- |
+| `tables::mge`                   | plan 02        | 02, 08      | `MGE_EXP`, `MGE_BAR`; this plan adds `MGE_BOXY`           |
+| `tables::chabrier`              | this plan      | 02, 11      | `HIGH_MASS_BRANCH_SCALE`                                  |
+| `tables::kick_rank`             | plan 06        | 06 (08, 09) | `SCORE_QUANTILES: [f64; 257]`, four defaults              |
+| `tables::helium`                | plan 06        | 06, 09      | `LIFETIME_SLOPE`, `HB_TEMPERATURE_SHIFT`                  |
+| `tables::displaced_forms`       | this plan      | 08          | see P15.T6                                                |
+| `tables::cluster_dynamics`      | this plan      | 09          | `BH_LOSS_*`, equipartition, `PULSAR*`                     |
+| `tables::type_ia_delay`         | this plan      | 09, 11      | delay-first samplers, `DELAY_EDGES`                       |
+| `tables::lbv`                   | this plan      | 09          | `LBV_SAMPLER`, the luminous blue variables'               |
+| `tables::binary`                | plan 11        | 11          | `IA_YIELD`, four samplers, `CLASS_SHARES`                 |
+| `tables::streams`               | this plan      | 10          | `ORPHAN_STREAMS_PER_GLOBULAR`                             |
+| `tables::saturation`            | plan 14        | 14          | P14.T49.b's saturation curves                             |
+| `tables::substance_albedo`      | plan 14        | 14, R09     | P14.T49.c's per-band albedos at grain classes             |
+| `tables::thermo`                | plan 14        | 14          | P14.T49.d's log K_f(T)                                    |
+| `tables::condensate_extinction` | plan 14        | 14          | P14.T49.e's κ_ext and ω at 550 nm, from R08's index files |
+
+Phase L of plan 14 (decision-composition, 2026-10-09) adds the four fit tasks above
+(`saturation_curves`, `substance_albedos`, `thermo_equilibrium`, `condensate_extinction`) as
+subtasks of its own, with this plan's emitter, manifest and staleness check. `condensate_extinction`
+reads committed datasets outside the crate (rendering plan R08's `materials/` files), whose hashes
+its manifest records, so a changed index file makes it stale.
 
 The owner of a shape states it in its own Provides, and this plan's task group restates what the fit
 must fill. P15.T2 checks each against the code as built, and the owner's code wins.
