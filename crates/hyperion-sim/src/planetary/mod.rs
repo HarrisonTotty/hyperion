@@ -44,6 +44,9 @@
 //! - [`rings`], [`belts`] and [`halo`]: a giant's rings (P14.T20), a host's asteroid and
 //!   Kuiper-like belts with their fading debris and largest members (P14.T21.a–c), and the
 //!   cometary halo (P14.T21.d), each from plain arguments until P14.T22.a and T30.a call them.
+//! - [`surface`]: rendering plan R09's coarse pass, a body's coarse field from its surface seed
+//!   and plan 14's global figures; so far its frame (R09.T10): the inputs, the cell graph, the
+//!   quantiser and the steps as no-ops.
 //!
 //! The vertical slice to the `SYSTEM` display (ruling 33) builds these pieces ahead of the stages
 //! that will feed them. Each takes what a later stage supplies as a plain argument: the disc takes
@@ -116,6 +119,7 @@ pub mod placement;
 pub mod record;
 pub mod rings;
 pub mod satellites;
+pub mod surface;
 pub mod system;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

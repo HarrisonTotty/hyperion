@@ -2434,6 +2434,145 @@ re-blessing this plan's payload and coarse goldens in that commit.
     with its margin; the bytes go to R03's `BulkPayload::new` as they are. T19.c's helpers decode with `decode_payload`, build a `PartialField::new` from
     block 0's header and `insert` every block, and compute the held set to check against with
     `cover.with_margin(level, SYNTHESIS_MARGIN_CELLS)`.
+- **Deviations in T10, as built** (2026-10-09; the inputs' shapes are builder arguments, revisable
+  until P14.T54.a puts them on the record).
+  - _Files._ `planetary/surface/{mod,inputs,grid,quantise,reference}.rs` and
+    `planetary/surface/steps/{mod,plates,relief,craters,climate,erosion,classes}.rs`. The pass's
+    working state (`steps::Working`, with `CellState`, `ClimateState` and `WindSample`, every value
+    in SI units) and what every step reads (`steps::Pass`: the seed, the inputs, the level and the
+    two grids) sit in `steps/mod.rs`; each step is `steps::<name>::run(&Pass, &mut Working)`, a
+    no-op that names the task that fills it, run in Design note 5's order by `coarse_pass`. They
+    are public for T14's and T16's benches, as Provides' "each pub for tests" says.
+    `Working::initial` is a smooth, dry sphere at the datum on `Crust::Lid`, with no plates, ice,
+    craters or fine relief (V₁ = 0), under a still climate at the mean surface temperature with no
+    lapse rate: realised `σ_h` and relief zero, sea level its lowest elevation (zero), as a flat
+    field realises them. The steps that change the elevation keep the realised figures and the sea
+    level true (T12.e, T14.d). `steps`' module documentation states two rules for T11–T15: assert a
+    value finite before it is sorted or compared, and find an extreme that reaches the header with
+    `hyperion_surface::num::{min, max}`. `planetary::surface` re-exports `SurfaceSeed`.
+  - _Public items beyond Provides._ `CoarseInputsBuilder` (a setter a value, two of them pairs:
+    `surface(state, material)` and `tectonics(regime, continental_fraction)`),
+    `BuildCoarseInputsError`; the inputs' vocabulary, each named for the plan-14 task that will
+    supply it: `SubstanceRef`, `AreaShare` (T24.b's `surface_liquids` and `surface_ices`),
+    `GasShare` (T24.a), `Spin` (obliquity, sidereal period, the solar day or `None` for a 1:1 lock
+    to the seasonal host, the equinox's true anomaly in [0, 2π)),
+    `SeasonalOrbit` (eccentricity and period, decision-r09-t2's), `TectonicRegime` (`MobileLid`,
+    `StagnantLid`, `HeatPipe`, `Episodic`, `IceShell`: decision-composition §1.10's five),
+    `WetEpoch` (start and end as Gyr ago), `ThermalRegime`, `Forcing` (`Seasonal`, `IceBelt`,
+    `SlowRotator`, `Locked`) and `ClimateRegime` (with its `ClimateModelKind`), `CrustInputs`,
+    `Condensate` with `CondensatePhase` and `Persistence` (T51.a's `seasonal`), and
+    `MAX_CONDENSATES` (8); the getters, with `radius` (the figure's volumetric radius),
+    `ocean_fraction`, `ice_fraction` and `months` (decision-r09-t2 item 1.4's rule: one month with
+    no seasonal orbit, or on a circular orbit locked 1:1 to its host or with no tilt; twelve
+    otherwise); `CellGraph` (`new`, `for_field`, `for_climate`, its slices, `edge_neighbours`,
+    `edge_neighbour`, `corner_neighbours`, `vertex_neighbours` and `arc`), `BuildCellGraphError`
+    and `grid::parent_index` (a cell's climate cell, n ÷ 4); `quantise(inputs, working)`, taking
+    the state by value, with `QuantiseFieldError`, which `coarse_pass` panics with whole; and
+    `reference::SEED`.
+  - _No body-fixed frame member._ The field's cells are in P14.T14's body-fixed frame: its pole is
+    the cube's +z and its prime meridian +x, which P14.T14 sets facing the primary at pericentre on
+    a locked body. So a world locked 1:1 to its seasonal host has its substellar axis on +x, and
+    `Spin` needs no pole or meridian; another resonance's substellar point follows from the periods.
+  - _The hosts' light._ `host_flux` is P14.T12's orbit average over all hosts; the flux over the
+    seasonal orbit is that mean times (a ÷ r)² √(1 − e²), exact for one host. A second star's own
+    cycle is lost, which the reading of the record adds.
+  - _`for_body`._ `SurfaceInputsError` gains `NotResolved(RecordSection)`, for a record degraded
+    below the surface section's level; the service reads full records, so R09.T17 and R09.T19.a
+    answer it `internal`. The type keeps Provides' name, which T17 and T19 consume (the
+    rust-reviewer's verb-object rename was declined for it). `for_body` reads the surface section's
+    tag alone
+    (`NotApplicable` is `NoSolidSurface`, `NotModelled` and `NotResolved` name `Surface`) and its
+    `Ok` arm is `match *surface {}`, since `record::Surface` is uninhabited: the reading of the
+    `bulk`, `figure`, `rotation` and `orbit` sections and the hosts is not written, because no
+    record gets past the tag and what it reads depends on the section's members, which P14.T48.e
+    and P14.T54.a define (decision-composition §3.4 puts `planetary/surface/inputs.rs` among
+    T54.a's files). Two findings for P14.T54.a, R09.T17 and R09.T19.a: the record carries no time,
+    while the hosts' light and the spin (the despin to a lock) change with it, so `for_body` and
+    `InputsSource::inputs` need the record's time `t`; and a moon's seasonal orbit is its planet's,
+    which its own record does not hold, so they need the planet's record or the system. The
+    generated sub-Neptune's test is
+    P14.T48.e's to add, since this task landed first (decision-p14-t35e-wire).
+  - _Composition, partly built._ `crust` (P14.T51.c's members without `redox`, which the pass does
+    not read) and `condensates` (P14.T51.a's) are builder arguments, as are the liquids, ices and
+    gases by substance, each keyed by `SubstanceRef`: the key's text, standing for P14.T49.a's
+    `SubstanceId` (the record's) and follow-up B's `SubstanceKey` (the palette's), neither built.
+    It checks only 1–16 printable ASCII bytes, the grammar being `SubstanceKey`'s, and gives way to
+    those types when they land. A condensate's `reservoir` and a wet epoch's `paleo_inventory` are
+    masses per square metre of the whole surface (`KilogramsPerSquareMetre`), not layers, so that
+    no density is assumed and condensates sort by mass as P14.T51.a sorts them; an area share is
+    the cover all year, the cells R09.T13.d makes icy by their warmest month, seasonal cover being
+    the climate's. `CrustInputs` leaves which entry a `Lid` and a `Province` cell take to T12 and
+    follow-up B. _The palette's sources are not built:_ the values each palette entry carries (A_N
+    in B, V and R, the phase row, density, transition and mechanics family, resolved by the server)
+    are follow-up B's `PaletteEntry` and `MechanicsFamily`, which do not exist yet, and the deposits
+    (`mars_dust`, `Na2CO3`) come with them. Whichever of follow-up B and this task lands second adds
+    B's header parts (`palette`, `crust_palette`, `main_liquid`) and the cells' `substances` to
+    `quantise` (an empty palette and none for the no-op pass); the palette's sources then follow as
+    a T10 follow-up (proposed R09.T10.b, after B and before T15; lean: a `MaterialPalette` of
+    resolved entries as a builder argument until P14.T49.b–c and T54.a), with the reference worlds'
+    palettes, which T15 and T16 need.
+  - _The months and winds_ (built on T2's follow-up A, `e37b16d6`, merged before commit). The
+    quantiser writes each month's wind from the working state's twelve, a one-month year's later
+    eleven calm, and the header's `season_eccentricity` from `inputs.seasonal_orbit()`'s
+    eccentricity, zero without one, which `CoarseInputs::months` keeps consistent with the header's
+    rule (one month only on a circular orbit or none). The builder refuses a −0 eccentricity, as
+    the header does, and the quantiser writes the header's raw `f64` parts (sea level, lapse rate,
+    realised figures) with −0 made +0, so that a zero has one form on the wire.
+  - _Validation._ `CoarseInputsBuilder::build` refuses a missing value (`Missing` names it), a value
+    outside its range, a figure not 0 < c ≤ a, a gas-envelope surface state (`NoSolidSurface`), a
+    malformed key, a substance twice in a list (a condensate twice in one phase), shares or mole
+    fractions summing above one (by more than 10⁻⁹), over eight condensates, a wet epoch ending
+    before it starts, and a crater contract whose gravity is not the body's (10⁻¹² relative). It
+    sorts liquids, ices and gases largest first and condensates by reservoir, ties by key (then
+    phase), which P14.T24.a's ties by `SubstanceId` replace.
+  - _Reference worlds._ Each function's documentation tables its figures and sources, checked by a
+    science review (2026-10-09), which corrected Earth's ocean (0.7095, Eakins and Sharman 2010),
+    heat flow (0.0916 W m⁻², Davies and Davies 2010) and mean surface pressure (98.55 kPa,
+    Trenberth and Smith 2005), Mars's mean temperature (214 K, NASA's fact sheet) and equinox (Ls
+    of perihelion 251.0°, Allison and McEwen 2000), and the Moon's obliquity (1.535°, the Cassini
+    state) and GM (DE440). Figures with no rule yet are marked placeholders: the contrasts
+    (P14.T24.a's), Earth's surface age and V, Mars's and Ceres's ages, Ceres's heat flow. `σ_h` is
+    measured for Earth and Mars and from Design note 3's fit at V = 0 for the Moon (2.239 km) and
+    Ceres (2.077 km). An airless world's mean temperature is the generator's own: its equilibrium
+    temperature at the airless Bond albedo, by `derive::irradiation` and `SurfaceState::albedo`.
+    Ceres takes rock for Dawn's dark surface, where `SurfaceMaterial::of` would call a body a
+    quarter water ice. Crater densities are the lunar chronology at each surface age, before plan
+    14's belt scaling; screening uses a 3,000 kg m⁻³ projectile, the density Design note 12's d\*
+    figures imply. Earth's air is the U.S. Standard Atmosphere 1976's (CO₂ 314 × 10⁻⁶, about
+    420 × 10⁻⁶ now), since published modern fractions, rounded, sum above one.
+  - _Science findings, for "main"_ (the review of 2026-10-09):
+    - plan 14 gives an airless body its equilibrium temperature as its mean surface temperature
+      (P14.T13.c), a radiative mean: the Moon's 270 K stands against an equator that swings between
+      about 95 and 395 K (Diviner, Williams et al. 2017), whose time mean is at most about 260 K, so
+      the mean and a contrast imposed arithmetically on the P₂ form are not one field; R09.T13.c–d
+      impose it as a radiative mean, ⟨T⁴⟩^¼, or plan 14 states an arithmetic one (lean: the former);
+    - Design note 8's "replacing the annual field's P₂(sin φ) coefficient" with the contrast reads
+      as T₂ = contrast, where the contrast T(0°) − T(90°) is −(3/2) T₂, so T₂ = −⅔ of it (`inputs`
+      documents this);
+    - Yang et al. 2014's Table 1 gives sidereal rotation periods at an orbital period of 225 d, not
+      solar days, and only brackets the onset (8–16 d at 1.40 S⊕, 32–48 d at 1.92 S⊕), where Design
+      note 3 and P14.T48.d say "a solar day of 16 d at 1.4 S⊕ to 48 d at 1.9 S⊕";
+    - Design note 12's d\* of 8.2 cm for Mars takes about 610 Pa; NASA's 636 Pa gives 8.5 cm.
+  - _Closed sets, for the composition audit._ `TectonicRegime` (five), `ThermalRegime` (three),
+    `Forcing` (four), `CondensatePhase` (three) and `Persistence` (two) are physics classes; plan
+    14's own types replace the first two when they exist. Heat-pipe, episodic and ice-shell worlds
+    have no rule of their own in T11–T12 yet (Composition, below): T11 decides what each gets.
+  - _Review, declined._ The rust-reviewer's lean of an enum for `Spin::solar_day`'s `None` (a 1:1
+    lock), a struct field its documentation explains; and making `steps`, `Working` and `quantise`
+    crate-private, which Provides and the benches need public.
+  - _Tests and acceptance._ `cargo test -p hyperion-sim planetary::surface` runs 25 unit tests; the
+    two doctests (`coarse_pass`'s Ceres-like builder and `quantise`'s) run with
+    `cargo test -p hyperion-sim --doc planetary::surface`, since the filter alone builds the
+    integration tests but does not run the doctests here. The tests: the no-op pass twice on every
+    reference world, compared as fields and as their whole payloads' bytes, and order-independent
+    over two seeds and two worlds; solid angles summing to 2π ÷ 3 a face to 10⁻¹² at levels 0 to 8;
+    edge neighbours four, distinct and symmetric; three vertex neighbours at each of the 24
+    cube-corner cells and four elsewhere; the quantiser's codes, each month's wind, the header's
+    eccentricity and +0 sea level, and its named refusals (`Cell`, `Climate`, `Step`, `Header`,
+    `Field`, `Counts`); the builder's refusals and messages; `for_body` on a generated rocky planet
+    (`NotModelled(Surface)`), a generated gas giant (`NoSolidSurface`) and a degraded record
+    (`NotResolved(Surface)`). The sim's whole suite passed on the merged tree (2,834 tests, before
+    the review's fixes). No stream is opened, no tag or golden added, and no output moved.
 - **Deviations in T18, as built** (2026-10-09).
   - _The shared log._ `knowledge/jsonl.rs` (private) holds what `persist.rs` held privately:
     `KnowledgeLog` (now carrying its header's format), `push_line`, `sync_directory`, `save_io`
