@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { EARTH_REFERENCE, HILLAIRE_REFERENCE } from "./earth";
-import { type AtmosphereMedium, tabulatedDensity } from "./medium";
+import { type AtmosphereMedium, phaseTable, tabulatedDensity } from "./medium";
 import {
   AtmosphereTables,
   MAX_TERMS,
@@ -132,6 +132,28 @@ describe("packMedium", () => {
       ],
     };
     expect(() => packMedium(tabulated, 1, 1)).toThrow(/tabulated/);
+  });
+
+  it("refuses a tabulated phase, which the uniform cannot carry", () => {
+    const [first, ...rest] = EARTH_REFERENCE.terms;
+    if (first === undefined) {
+      throw new Error("EARTH_REFERENCE has no terms");
+    }
+    const values = Float64Array.of(1 / (4 * Math.PI), 1 / (4 * Math.PI));
+    const tabulated: AtmosphereMedium = {
+      ...EARTH_REFERENCE,
+      terms: [
+        {
+          ...first,
+          phase: {
+            kind: "tabulated",
+            table: phaseTable(Float64Array.of(0, 1), [values, values, values]),
+          },
+        },
+        ...rest,
+      ],
+    };
+    expect(() => packMedium(tabulated, 1, 1)).toThrow(/tabulated phase/);
   });
 });
 

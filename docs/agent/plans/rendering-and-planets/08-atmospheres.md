@@ -3180,6 +3180,143 @@ generator, and the reference's sampling needs no domain tag.
     re-derived from Q = m[(3 ÷ 2)x² − ½z²]: its zonal part, its g ÷ g₀ = 1 − 2Q₀ + (k_f − 4)Q₂,
     its k_f from Darwin–Radau, f\* = η²f and the 15m ÷ 4.
 
+- **Deviations in T6.a, as built** (2026-10-09). `tablesCpu.ts` and `tablesCpu.test.ts`, the
+  `tabulated` phase in `medium.ts`, the multiple-scattering kernel's step factor, and R05.T12.e's
+  gate moved to a shared fixture.
+  - _Names._ The Provides names only the module. One twin a kernel:
+    - `transmittanceTwin(medium, bottomRadiusM, size?, samples?)`, with `kernelOpticalDepth`;
+    - `multiScatteringTwin(medium, bottomRadiusM, transmittance, options?, texels?)`, with
+      `MultiScatteringOptions` (`size`, `samples`, `placement` `"even"` or `"placed"`,
+      `stepFactor`) and `MULTI_SCATTERING_KERNEL_OPTIONS`;
+    - `planetTwin(medium, bottomRadiusM)`, both per-planet tables as `AtmosphereTables` builds
+      them (`PlanetTwin`);
+    - `skyViewTwin(planet, view, size, samples)` and `skyViewRayTwin`;
+    - `aerialPerspectiveTwin(planet, view, size, samplesPerSlice, reachM)`;
+    - `rayMarchTwin(planet, view, settings, depthAt)`, `rayMarchRayTwin` and `RayMarchRay`.
+
+    Beside them: `TwinView` and `twinView(camera, sun, figure, nearM)`, the view uniform as
+    `HillaireAtmosphere` fills it; the march `marchTwin(medium, sources, geometry, ray, steps)`
+    over `TwinSources` (the tables' reads, `tableSources(planet)`, or a test's stand-in),
+    `MarchGeometry` (`sphere` or `spheroid`), `TwinRay` and `placedSteps(ray, samples)`;
+    `TwinMarch` (`{ luminance, transmittance }`), `TwinRgb` (the twins' mutable triple),
+    `RayMarchSettings` (`TableSizes`' scale, steps and reach), `exactStepFactor`,
+    `MULTI_SCATTERING_DIRECTIONS` (64) and `MULTI_SCATTERING_GROUND_OFFSET_M` (10), the last two
+    pinned to the WGSL by a test. Tables are `TwinTable` and `TwinVolume`, RGBA `Float64Array`s in
+    a readback's layout, so that T6.b's smoke compares texel for texel.
+
+  - _What it twins._ Each kernel's WGSL step for step at R05's sizes and counts: the midpoints and
+    placed steps, the bilinear reads at (i + ½) ÷ size, sebh's mappings and the step factor. It
+    differs in arithmetic alone: `f64` throughout, g exact where `stepFactor` switches to its
+    series, and the tables in `f64` where the GPU stores `rgba16float`. It reads the transmittance
+    table as transmittance, as the kernels do until T6.c. Not twinned: the composite, a material
+    whose one read of the medium is `transmittanceToSpace` (a read site of T6.c's), and the GPU's
+    half-float rounding.
+  - _N terms._ The twin reads `medium.terms` whatever their number and names no species; the
+    kernels' uniform holds `MAX_TERMS` until T6.b. It refuses (`RangeError`) a tabulated term whose
+    last level lies below the medium's top with a density other than 0, so that a column's 10⁻⁷ is
+    never carried up to the top (T3.a, above); a layer that falls to 0 may end below the top. The
+    hold below the first level is not refused: it reaches only the ground, where every profile's
+    heights start and its builder sees it, while the hold above the last reaches the medium's top,
+    which is set apart from the levels. `packMedium` does not check this: T6.b or T10.a should.
+  - _The tabulated phase_ (added here, since T5.c had not). `PhaseTable { u, values, matrix }` as
+    the sketch has it since the vector ruling, checked by `phaseTable(u, values, matrix?)`: at
+    least two entries, u strictly ascending from exactly 0 to exactly 1, values (a₁) finite and not
+    negative, and a matrix's elements, if given, of u's length and finite. The matrix is
+    `PhaseMatrixTable { a2, a3, a4, b1, b2 }`, each a `PhaseMatrixElement` (one `Float64Array` a
+    channel), names the sketch does not give; `undefined` is a total depolariser. Only its shape is
+    checked; T5.b and T5.c fill it, and the twin and the kernels read a₁ alone. The normalisation
+    is the builder's (T5.c's test). `phaseAt(phase, cosTheta): Rgb`, beside `densityAt` in `medium.ts`,
+    reads it linear in u = √(θ ÷ π) and gives the closed forms as `source.wgsl`'s `phaseOf` does.
+    The u grid need not be even: if T5.c's is not, T6.b resamples it for its texture. `packMedium`
+    refuses a tabulated phase until T6.b, and `tables.test.ts` holds the refusal.
+  - _The gate fixture._ R05.T12.e's rays, metric, schemes, reference rule, single-scattering twin
+    and `f32` step-factor emulations moved, logic unchanged, from `marchSteps.test.ts` to
+    `renderer/src/test/atmosphereGate.ts` (`gateRays`, `runGate`, `errors`, `failures`,
+    `overLowBounds`, `singleScatteringPixel`, `stepFactorF32`, `oldFactorF32`), so that the twin is
+    held to the same 1,046 rays. Run through it, R05's gate gives its recorded figures (high 1.65%
+    and 4.58%, low's worst 49.48%, the same two rays at 8,192 steps): Earth is unchanged.
+  - _As measured_ (2026-10-09, load 7–11 on 16 threads; the file takes 25–35 s).
+    - R05's constants as a medium. At the oracle's 20,000 steps the twin's optical depth is
+      `opticalDepth`'s to 10⁻⁶ at R05.T12.b's 20 texels; at the kernel's 256 steps it is within
+      0.27% (blue, μ = 0.113, 6 m up), inside R05's 1%. With R05's 512 × 128 sun grid and no
+      multiple scattering, the twin gives R05's twin's pixels on all 1,046 rays, placed and even, at
+      high's and low's counts, to 10⁻⁶.
+    - The gate with the multiple-scattering term, on the twin's own 256 × 64 and 32² tables. Worst
+      e, %, ordinary / twilight; no ray needed the 8,192-step reference:
+
+      | Family     | High        | Low          |
+      | ---------- | ----------- | ------------ |
+      | Disc       | 0.57 / 0.11 | 2.55 / 2.70  |
+      | Limb       | 1.67 / 2.90 | 4.79 / 5.87  |
+      | Inside     | 0.29 / 0.04 | 1.18 / 0.16  |
+      | Near-level | 0.28 / 0.36 | 1.13 / 1.58  |
+      | Sky        | 0.20 / 0.26 | 4.18 / 5.37  |
+      | Band       | 0.21 / 0.38 | 8.20 / 14.44 |
+      | Past       | 0.04 / 0.22 | 0.80 / 15.24 |
+      | High limb  | 0.31 / 1.29 | 7.96 / 17.98 |
+      | High band  | 0.18 / 2.56 | 8.26 / 38.26 |
+
+      High passes every ray, and low stays inside `LOW_TWIN_WORST`. Most worst cases sit below
+      R05's single-scattering figures ("Deviations in T12.e, as built", in R05's plan).
+
+    - The multiple-scattering kernel's 32 even steps against 1,024 placed steps (confirmed against
+      2,048 to 10⁻⁵), over all 1,024 texels: worst 10.5%, at the ground (row 0) with the sun 84°
+      from the zenith; 6.2% at the top row; under 1% for rows 1–16 (row 17, 1.1%). 32 placed steps: 2.6%, on a
+      dim texel with the sun below the horizon. The test measures 81 texels against 512 placed
+      steps, confirmed against 1,024 to 0.05% (10.1% and 2.0%), so that it runs in seconds. It
+      reaches the drawn sky: the high sky view from 2 m moves by up to 9.5% with the sun on the
+      horizon, 6.0% at 10° up and 2.8% at 30°, and from 1 km by up to 7.6%.
+    - The step factor. In emulated `f32` the old (S − S e^(−x)) ÷ σ_t moves the multiple-scattering
+      table by up to 4.9% (a night-side texel, the sun 13° below the horizon at 35 km), the stable
+      `stepFactor` by 9.7 × 10⁻⁷. Both are lower estimates for a GPU: the emulation rounds only the
+      factor, with a correctly rounded exp, where WGSL allows exp 3 + 2|x| ULP (`common.wgsl`'s own
+      2.4 × 10⁻⁷ ÷ x for the old form). In `f64` the two forms are the same sum, so the twin does
+      not change; the kernel's change is the `f32` one. `just test-render` passes on both variants.
+    - Two identical half-density terms give every twin's tables to 10⁻¹²; a term split into ten,
+      past `MAX_TERMS`, to 10⁻¹⁰; optical depth adds across terms to 10⁻¹².
+    - The acceptance selects `tablesCpu.test.ts`. The new tests in `medium.test.ts` and
+      `tables.test.ts`, and the moved gate in `marchSteps.test.ts`, run under `pnpm test`.
+  - _For the next tasks._
+    - T6.b. The smoke's readbacks compare with `planetTwin`, `skyViewTwin`,
+      `aerialPerspectiveTwin` and `rayMarchTwin` on the frame's `twinView`, texel for texel. The
+      twin holds no `MAX_TERMS`, so more than 8 terms is the kernels' refusal alone. A tabulated
+      phase is per channel where `source.wgsl`'s `phaseOf` returns one value, so the phased sum in
+      `sampleMediumAt` becomes per channel. `phaseTable` checks only the shape, so a table resampled
+      for the texture must stay normalised. The refusal of a non-zero last level below the top
+      belongs in `packMedium` or `setMedium` as well.
+    - T6.c. The twin stores e^(−τ) and interpolates in transmittance, as the kernels do; optical
+      depth in the table changes the twin's reads with the kernels'. The twin has no
+      `transmittanceToSpace`, so T6.c adds one with the composite's read site, and
+      `TwinSources.sunTransmittance` gains the sun's curve slot.
+    - T6.d. `twinView`'s `sunOverSky` reads `solar.ts`'s factors, as `hillaire.ts` does, and moves
+      with them.
+    - T6.e and T7. The `TwinSources` reads gain the latitude and azimuth (s and κ), the `sphere`
+      geometry becomes R_α per ray, and `TwinRay` and the march gain several suns.
+    - T12.c. The tracer's tabulated phase reads a `PhaseTable` by `phaseAt`'s rule: linear in
+      u = √(θ ÷ π), u from exactly 0 to exactly 1, values per channel in sr⁻¹, each normalised to 1
+      over the sphere. For the density the client followed the tracer; for the phase the tracer
+      follows the client, unless T12.c rules otherwise and `phaseAt` follows it.
+  - _Findings for R05, for "main"'s deferred list_ (the science check, 2026-10-09; not fixed here):
+    - `opticalDepth.ts` and `medium.wgsl` credit the transmittance table's mapping to Bruneton and
+      Neyret 2008, §4. Its x_μ = (d − d_min) ÷ (d_max − d_min) is Bruneton 2017's
+      `GetTransmittanceTextureUvFromRMu` (`functions.glsl`), only x_r = ρ ÷ H the 2008 paper's, and
+      the kernel leaves out Bruneton's sub-texel remap, as sebh and Bevy do. `tablesCpu.ts` cites
+      it so.
+    - `common.wgsl` says the multiple-scattering table's mapping follows sebh's. sebh writes its
+      rows with `saturate(uv.y + PLANET_RADIUS_OFFSET)`, 0.01 km added to a unitless coordinate,
+      so his row 0 sits about 1 km up, and his read (`GetMultipleScattering`) applies no offset.
+      R05's 10 m offset, the same on write and read, is self-consistent and the better of the two,
+      and should be recorded as a deliberate change; the even steps' 10.5% sits on that row.
+    - `multiScattering.wgsl`'s 1 ÷ (1 − f_ms) is Hillaire 2020's eq. 9 and the stored L₂ F_ms his
+      eq. 10; its comment, "Equation 10", now reads "Equations 9 and 10".
+  - _A correction to R05, for "main"'s deferred list_ (raised with "main", with its lean). The
+    multiple-scattering kernel's even steps leave Earth's sky up to 9.5% off at sunset, beyond
+    Design note 10's 5% metric, where placed steps (`marchSplit` with `fromCamera`, R05.T12.e's
+    rule) leave its table within 2.6% at the same 32 steps. Lean: place them in R08.T6.d, which
+    changes Earth's picture by amounts it records, since T6.a–c change no picture. T6.d lists no
+    kernel today, so that is an amendment to its text, and a correction to R05.T12.e's ruling,
+    which placed the per-frame marches' steps alone.
+
 - **Plan 14 produces no CH₄, O₂ or giant composition** (Design note 16). Titan-class haze, ozone and
   giants are fixture-only until P14.T24.c, d and f land. Biotic O₂ has no owner.
 - **The stratosphere is provisional** (Design note 3). The skin is isothermal, with no ozone or

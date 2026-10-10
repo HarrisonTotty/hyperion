@@ -166,16 +166,182 @@ function tabulatedColumnM(profile: TabulatedDensity, upToM: number): number {
 }
 
 /**
+ * A phase function given entry by entry, per channel (plan R08, Design note 6): a Mie,
+ * literature or aggregate phase function, which no closed form carries.
+ *
+ * @remarks
+ * The entries stand at u = √(θ ÷ π), θ the scattering angle, so that a 256-entry table spaced
+ * evenly in u puts its entries densest near the forward peak, where a 1 ÷ x-wide diffraction peak
+ * would starve on a cos θ grid. The phase is linear in u between neighbouring entries
+ * ({@link phaseAt}). The values are per steradian, each channel normalised so that its integral
+ * over the sphere is 1, as the closed forms are; the table's builder (R08.T5.c) holds that, and
+ * {@link phaseTable} checks only the shape. The arrays are kept, not copied.
+ *
+ * The drawn image is scalar and reads `values`, the scattering matrix's a₁, alone. The rest of the
+ * matrix, where its source publishes one, is for the reference and the polarisation correction
+ * (Design note 10, as ruled on 2026-10-09).
+ */
+export interface PhaseTable {
+  /** u = √(θ ÷ π) at each entry, strictly ascending from 0 (forward) to 1 (backward). */
+  readonly u: Float64Array;
+  /** The phase per channel at each entry, sr⁻¹: the scattering matrix's a₁. */
+  readonly values: readonly [Float64Array, Float64Array, Float64Array];
+  /**
+   * The scattering matrix's other elements, or `undefined` where its source publishes none, which
+   * makes the term a total depolariser in the reference and the polarisation correction.
+   */
+  readonly matrix: PhaseMatrixTable | undefined;
+}
+
+/** One element of a scattering matrix per channel, on a {@link PhaseTable}'s u. */
+export type PhaseMatrixElement = readonly [Float64Array, Float64Array, Float64Array];
+
+/**
+ * A scattering matrix's elements beside a₁, block-diagonal for a macroscopically isotropic and
+ * mirror-symmetric medium (Hovenier, van der Mee and Domke 2004), each normalised as a₁ is.
+ *
+ * @remarks
+ * R08.T5.b and T5.c fill them (a sphere's from T5.a's amplitudes, with a₂ = a₁ and a₄ = a₃);
+ * {@link phaseTable} checks only their shape.
+ */
+export interface PhaseMatrixTable {
+  readonly a2: PhaseMatrixElement;
+  readonly a3: PhaseMatrixElement;
+  readonly a4: PhaseMatrixElement;
+  readonly b1: PhaseMatrixElement;
+  readonly b2: PhaseMatrixElement;
+}
+
+/**
  * A term's phase function.
  *
  * - `rayleigh`: 3 ÷ (16π) × (1 + cos²θ).
  * - `cornette-shanks`: Cornette and Shanks 1992's form of Henyey–Greenstein with asymmetry g.
  * - `none`: an absorbing-only term, which scatters nothing.
+ * - `tabulated`: given entry by entry, per channel ({@link PhaseTable}; R08.T6.a).
  */
 export type PhaseFunction =
   | { readonly kind: "rayleigh" }
   | { readonly kind: "cornette-shanks"; readonly asymmetry: number }
-  | { readonly kind: "none" };
+  | { readonly kind: "none" }
+  | { readonly kind: "tabulated"; readonly table: PhaseTable };
+
+/**
+ * A phase table from its entries, checked.
+ *
+ * @remarks
+ * The arrays are kept, not copied; the caller does not change them afterwards.
+ *
+ * @throws RangeError for fewer than two entries, channels of another length, a u that is not
+ *   finite and strictly ascending from exactly 0 to exactly 1, a value that is not finite and at
+ *   least 0, or a matrix element of another length or not finite.
+ */
+export function phaseTable(
+  u: Float64Array,
+  values: readonly [Float64Array, Float64Array, Float64Array],
+  matrix?: PhaseMatrixTable,
+): PhaseTable {
+  const last = u.length - 1;
+  if (u.length < 2 || values.some((channel) => channel.length !== u.length)) {
+    throw new RangeError(
+      `a phase table needs at least two entries and one value a channel each, got ${u.length} and ${values.map((channel) => channel.length).join(", ")}`,
+    );
+  }
+  if (u[0] !== 0 || u[last] !== 1) {
+    throw new RangeError(`a phase table spans u from 0 to 1, not ${u[0]} to ${u[last]}`);
+  }
+  for (let i = 1; i <= last; i += 1) {
+    const at = u[i] ?? Number.NaN;
+    if (!(Number.isFinite(at) && at > (u[i - 1] ?? Number.NaN))) {
+      throw new RangeError(`a phase table's u ascends strictly: ${at} at entry ${i}`);
+    }
+  }
+  for (const [c, channel] of values.entries()) {
+    for (const [i, value] of channel.entries()) {
+      if (!(Number.isFinite(value) && value >= 0)) {
+        throw new RangeError(
+          `a phase table's values are finite and not negative: ${value} at entry ${i}, channel ${c}`,
+        );
+      }
+    }
+  }
+  if (matrix !== undefined) {
+    const elements: ReadonlyArray<readonly [string, PhaseMatrixElement]> = [
+      ["a2", matrix.a2],
+      ["a3", matrix.a3],
+      ["a4", matrix.a4],
+      ["b1", matrix.b1],
+      ["b2", matrix.b2],
+    ];
+    for (const [name, element] of elements) {
+      for (const [c, channel] of element.entries()) {
+        if (channel.length !== u.length || !channel.every(Number.isFinite)) {
+          throw new RangeError(
+            `a phase table's matrix element ${name} needs ${u.length} finite entries in channel ${c}`,
+          );
+        }
+      }
+    }
+  }
+  return { u, values, matrix };
+}
+
+/** A phase table per channel at u, linear between the entries that bracket it. */
+function tabulatedPhase(table: PhaseTable, u: number): Rgb {
+  const entries = table.u;
+  let low = 0;
+  let high = entries.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >>> 1;
+    if ((entries[middle] ?? Number.NaN) <= u) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  const u0 = entries[low] ?? Number.NaN;
+  const f = Math.min(Math.max((u - u0) / ((entries[high] ?? Number.NaN) - u0), 0), 1);
+  const at = (channel: Float64Array): number => {
+    const v0 = channel[low] ?? Number.NaN;
+    return v0 + ((channel[high] ?? Number.NaN) - v0) * f;
+  };
+  return [at(table.values[0]), at(table.values[1]), at(table.values[2])];
+}
+
+/**
+ * A phase function's value per channel, sr⁻¹, for the cosine of the scattering angle.
+ *
+ * @remarks
+ * The closed forms are `source.wgsl`'s `phaseOf`, the same in every channel: Rayleigh's (Bruneton
+ * and Neyret 2008, eq. 2) and Cornette and Shanks's (Appl. Opt. 31 (1992) 3152, as Bruneton and
+ * Neyret 2008, eq. 4, g its shape parameter and not the mean cosine), its denominator floored at
+ * 10⁻⁶ as there. A `tabulated` phase is read at u = √(θ ÷ π),
+ * θ = acos(cos θ), linear between the entries that bracket it ({@link PhaseTable}).
+ *
+ * @param cosTheta - The cosine between the direction of travel before and after scattering,
+ *   clamped to [−1, 1].
+ */
+export function phaseAt(phase: PhaseFunction, cosTheta: number): Rgb {
+  const mu = Math.min(Math.max(cosTheta, -1), 1);
+  let value: number;
+  switch (phase.kind) {
+    case "none":
+      value = 0;
+      break;
+    case "rayleigh":
+      value = (3 / (16 * Math.PI)) * (1 + mu * mu);
+      break;
+    case "cornette-shanks": {
+      const g = phase.asymmetry;
+      const k = ((3 / (8 * Math.PI)) * (1 - g * g)) / (2 + g * g);
+      value = (k * (1 + mu * mu)) / Math.max(1 + g * g - 2 * g * mu, 1e-6) ** 1.5;
+      break;
+    }
+    case "tabulated":
+      return tabulatedPhase(phase.table, Math.sqrt(Math.acos(mu) / Math.PI));
+  }
+  return [value, value, value];
+}
 
 /** One constituent of an atmosphere: a gas, an aerosol or an absorbing layer. */
 export interface MediumTerm {

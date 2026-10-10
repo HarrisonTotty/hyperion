@@ -11,8 +11,9 @@
 // not at zenith cosine mu); the ground's bounce is Lambertian, albedo / pi, with the sun's
 // transmittance read at the ground's radius (Bevy reads it at radius 0 and omits the 1 / pi); the
 // 64 directions are sebh's 8 x 8 stratified sphere, with its reduction. Each step is sampled at its
-// midpoint. sebh's code is used under its licence (https://github.com/sebh/UnrealEngineSkyAtmosphere,
-// master, fetched 2026-10-02):
+// midpoint, and its in-scattering is taken without f32's cancellation (`stepFactor` in
+// common.wgsl, R05.T12.e's step factor, taken here in R08.T6.a). sebh's code is used under its
+// licence (https://github.com/sebh/UnrealEngineSkyAtmosphere, master, fetched 2026-10-02):
 //
 //   MIT License
 //
@@ -71,12 +72,12 @@ fn integrate(r : f32, dir : vec3f, sun : vec3f) -> Integrated {
     let rP = length(p);
     let muSun = dot(sun, p / rP);
     let local = mediumAt(rP);
-    let extinction = max(local.extinction, vec3f(1e-12));
-    let stepTransmittance = exp(-local.extinction * dt);
+    let stepDepth = local.extinction * dt;
+    let stepTransmittance = exp(-stepDepth);
     let lit = select(1.0, 0.0, intersectsGround(rP, muSun));
     let source = lit * transmittanceToSun(rP, muSun) * local.scattering / (4.0 * PI);
-    luminance += throughput * (source - source * stepTransmittance) / extinction;
-    transferSum += throughput * (local.scattering - local.scattering * stepTransmittance) / extinction;
+    luminance += throughput * source * dt * stepFactor(stepDepth);
+    transferSum += throughput * local.scattering * dt * stepFactor(stepDepth);
     throughput *= stepTransmittance;
   }
   if (hitsGround) {
@@ -125,6 +126,6 @@ fn main(
   // Each direction stands for 4 pi / 64 sr, and the isotropic phase is 1 / (4 pi): the mean.
   let secondOrderLuminance = secondOrder[0] / f32(DIRECTIONS);
   let fMs = transfer[0] / f32(DIRECTIONS);
-  // Equation 10: every further order as a geometric series.
+  // Equations 9 and 10: every further order as a geometric series.
   textureStore(multiScatteringOut, id.xy, vec4f(secondOrderLuminance / (1.0 - fMs), 1.0));
 }

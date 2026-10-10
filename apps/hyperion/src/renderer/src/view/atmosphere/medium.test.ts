@@ -7,6 +7,10 @@ import {
   densityAt,
   extinction,
   type MediumTerm,
+  phaseAt,
+  type PhaseMatrixElement,
+  type PhaseMatrixTable,
+  phaseTable,
   tabulatedDensity,
   termNamed,
 } from "./medium";
@@ -132,5 +136,116 @@ describe("terms", () => {
   it("finds a term by name and refuses a missing one", () => {
     expect(termNamed(EARTH_REFERENCE, "ozone").name).toBe("ozone");
     expect(() => termNamed(EARTH_REFERENCE, "dust")).toThrow(/no term dust/);
+  });
+});
+
+describe("phaseAt", () => {
+  it("gives Rayleigh's 3 ÷ (16π) × (1 + cos²θ) in every channel", () => {
+    expect(phaseAt({ kind: "rayleigh" }, 0.5)).toEqual(
+      Array.from({ length: 3 }, () => (3 / (16 * Math.PI)) * 1.25),
+    );
+  });
+
+  it("gives Cornette–Shanks's form, which is Rayleigh's at g = 0", () => {
+    const [atZero] = phaseAt({ kind: "cornette-shanks", asymmetry: 0 }, 0.3);
+    expect(atZero).toBeCloseTo((3 / (16 * Math.PI)) * 1.09, 15);
+    const g = 0.584;
+    const k = ((3 / (8 * Math.PI)) * (1 - g * g)) / (2 + g * g);
+    const [forward] = phaseAt({ kind: "cornette-shanks", asymmetry: g }, 1);
+    expect(forward).toBeCloseTo((2 * k) / (1 - g) ** 3, 12);
+  });
+
+  it("gives an absorbing-only term no phase", () => {
+    expect(phaseAt({ kind: "none" }, 0.2)).toEqual([0, 0, 0]);
+  });
+});
+
+/** A scattering-matrix element of `n` entries a channel, each `value`. */
+function element(n: number, value = 0.5): PhaseMatrixElement {
+  return [
+    new Float64Array(n).fill(value),
+    new Float64Array(n).fill(value),
+    new Float64Array(n).fill(value),
+  ];
+}
+
+/** A scattering matrix of `n` entries a channel, its b₁ given. */
+function matrixOf(n: number, b1 = element(n)): PhaseMatrixTable {
+  return { a2: element(n), a3: element(n), a4: element(n), b1, b2: element(n) };
+}
+
+/** A two-entry phase of 1 in every channel. */
+const ONES = [Float64Array.of(1, 1), Float64Array.of(1, 1), Float64Array.of(1, 1)] as const;
+
+describe("a tabulated phase", () => {
+  /** Three entries at θ = 0, π ÷ 4 and π: u = 0, ½ and 1. */
+  const ENTRIES = phaseTable(Float64Array.of(0, 0.5, 1), [
+    Float64Array.of(1, 0.5, 0.25),
+    Float64Array.of(2, 1, 0.5),
+    Float64Array.of(4, 2, 1),
+  ]);
+  const PHASE = { kind: "tabulated", table: ENTRIES } as const;
+
+  it("takes each entry's value per channel", () => {
+    expect(phaseAt(PHASE, 1)).toEqual([1, 2, 4]);
+    expect(phaseAt(PHASE, -1)).toEqual([0.25, 0.5, 1]);
+    const [r, g, b] = phaseAt(PHASE, Math.cos(Math.PI / 4));
+    expect(r).toBeCloseTo(0.5, 12);
+    expect(g).toBeCloseTo(1, 12);
+    expect(b).toBeCloseTo(2, 12);
+  });
+
+  it("is linear in u = √(θ ÷ π) between entries, not in θ or cos θ", () => {
+    // θ = π ÷ 16 is u = ¼, half way between the first two entries.
+    const [r] = phaseAt(PHASE, Math.cos(Math.PI / 16));
+    expect(r).toBeCloseTo(0.75, 12);
+  });
+
+  it.each<[string, Float64Array, readonly [Float64Array, Float64Array, Float64Array]]>([
+    ["one entry", Float64Array.of(0), [Float64Array.of(1), Float64Array.of(1), Float64Array.of(1)]],
+    [
+      "a channel of another length",
+      Float64Array.of(0, 1),
+      [Float64Array.of(1, 1), Float64Array.of(1), Float64Array.of(1, 1)],
+    ],
+    [
+      "a u that does not start at 0",
+      Float64Array.of(0.1, 1),
+      [Float64Array.of(1, 1), Float64Array.of(1, 1), Float64Array.of(1, 1)],
+    ],
+    [
+      "a u that does not end at 1",
+      Float64Array.of(0, 0.9),
+      [Float64Array.of(1, 1), Float64Array.of(1, 1), Float64Array.of(1, 1)],
+    ],
+    [
+      "a u that does not ascend",
+      Float64Array.of(0, 0.5, 0.5, 1),
+      [Float64Array.of(1, 1, 1, 1), Float64Array.of(1, 1, 1, 1), Float64Array.of(1, 1, 1, 1)],
+    ],
+    [
+      "a negative value",
+      Float64Array.of(0, 1),
+      [Float64Array.of(1, 1), Float64Array.of(1, -1), Float64Array.of(1, 1)],
+    ],
+    [
+      "a value that is not a number",
+      Float64Array.of(0, 1),
+      [Float64Array.of(1, 1), Float64Array.of(1, 1), Float64Array.of(Number.NaN, 1)],
+    ],
+  ])("refuses %s", (_, u, values) => {
+    expect(() => phaseTable(u, values)).toThrow(RangeError);
+  });
+
+  it("is a total depolariser with no matrix, and keeps a matrix given", () => {
+    expect(phaseTable(Float64Array.of(0, 1), ONES).matrix).toBeUndefined();
+    const matrix = matrixOf(2, element(2, -0.2));
+    expect(phaseTable(Float64Array.of(0, 1), ONES, matrix).matrix).toBe(matrix);
+  });
+
+  it("refuses a matrix element of another length or not finite", () => {
+    expect(() => phaseTable(Float64Array.of(0, 1), ONES, matrixOf(3))).toThrow(RangeError);
+    const notFinite = matrixOf(2, element(2, Number.POSITIVE_INFINITY));
+    expect(() => phaseTable(Float64Array.of(0, 1), ONES, notFinite)).toThrow(/b1/);
   });
 });

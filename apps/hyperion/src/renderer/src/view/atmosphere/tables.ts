@@ -73,6 +73,9 @@ const MEDIUM_FLOATS = 4 + 4 + MAX_TERMS * 12;
 /**
  * A phase function as `source.wgsl`'s `phaseOf` reads it, in `Term.scattering.w` and
  * `Term.absorption.w`: 0 none, 1 Rayleigh, 2 Cornette–Shanks with its g.
+ *
+ * @throws Error for a `tabulated` phase, which the uniform cannot carry; R08.T6.b gives it a table
+ *   and a code of its own.
  */
 function phaseOf(phase: PhaseFunction): readonly [number, number] {
   let packed: readonly [number, number];
@@ -86,6 +89,8 @@ function phaseOf(phase: PhaseFunction): readonly [number, number] {
     case "cornette-shanks":
       packed = [2, phase.asymmetry];
       break;
+    case "tabulated":
+      throw new Error("a tabulated phase has no Medium-uniform form until R08.T6.b");
   }
   return packed;
 }
@@ -118,7 +123,7 @@ function profileOf(profile: DensityProfile): readonly [number, number, number, n
  * @param bottomRadiusM - The ground's radius, m.
  * @param samples - The kernel's steps along each ray.
  * @throws Error when the medium has more than {@link MAX_TERMS} terms, or a term with a
- *   `tabulated` density, which the uniform cannot carry until R08.T6.b.
+ *   `tabulated` density or phase, which the uniform cannot carry until R08.T6.b.
  */
 export function packMedium(
   medium: AtmosphereMedium,
