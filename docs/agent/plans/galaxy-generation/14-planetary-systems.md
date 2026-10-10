@@ -695,12 +695,16 @@ Order and parallelism:
 
   **Phase L's batches** (decision-composition):
   - **22 → 23**: T49.b–e; T50.a–b; T51.a–c; T24.e; T52.a–c; T24.c with T24.g; T24.d with T52.d;
+    T56.a, T56.c and T56.d, held behind `MOONS_VERSION`; T57.a (decision-p14-moons);
     then T54.a, which wires them onto the record and bumps. Compute subtasks are pure modules,
     called by nothing on the record until T54.a, so each keeps `just ci` green and moves no golden.
     Lanes: T49.b → T49.c; T49.d; T49.e (after R08.T5.b and T5.d); T50.a → T51.a → T51.b (one lane:
     all three edit `derive/atmosphere.rs`); T51.c after T50.a; T24.e → T50.b → T52.a → T52.b →
-    T52.c → T24.c with T24.g → T24.d with T52.d; then T54.a.
-  - **23 → 24**: T53.a → T53.b → T53.c; T53.d; T51.d → T51.e; then T54.b. T33.c follows.
+    T52.c → T24.c with T24.g → T24.d with T52.d; T56.a → T56.c →
+    T56.d (lane `p14-moons`; T56.c after T50.a), with T56.b in the client after T56.a; T57.a after
+    T51.b in the T50.a lane; then T54.a.
+  - **23 → 24**: T53.a → T53.b → T53.c; T53.d; T51.d → T51.e; T51.f (after R09.T7.d's
+    `cold_trap::fraction`); then T54.b. T33.c follows.
   - **Later**: T55.
 
   _The bump plan_ (ruled by "main", 2026-10-09). Steps 0–6 (T14.d; T49.a, which moves no output;
@@ -1334,6 +1338,21 @@ Solar System values without a generator.
         with 42 Pa of CO₂, Mars 214 K at 0.11 bar (nitrogen: its real 6 mbar of CO₂ is non-thermal
         loss this model has not), Titan 94 K at 1.4 bar, and airless Mercury, Moon, Ganymede and
         Ceres.
+  - _Findings for this subtask's owner (science-p14-t24f, 2026-10-10; pinned at v21, not fixed
+    here):_
+    - _No maximum-greenhouse ceiling._ A rocky world formed inside the snow line that lies beyond
+      the maximum-greenhouse limit stores no carbon, since no ocean weathers it, so its median
+      70 bar of CO₂ runs the √p greenhouse away to 490–575 K, labelled `Snowball`: 574 K at 1.8 au
+      of 1 L☉, 545 K at 2.0 au and 487 K at 2.5 au. Kopparapu et al. 2013 and Kasting, Whitmire
+      and Reynolds 1993 put any CO₂ air there below 273 K. P14.T24.f's carrier rule removes the
+      half formed beyond the snow line; this half stays until P14.T51.a's cold-trap rule holds the
+      CO₂ at `p_sat`(T_cold), with P14.T48.e's contrasts. P14.T48.d, P14.T51.a and the census
+      should know these bodies exist meanwhile.
+    - _No methane greenhouse._ A methane-dominated air has no greenhouse of its own: methane enters
+      no τ term, and Titan's share rides in the nitrogen term. Real CH₄–N₂ and CH₄–CH₄
+      collision-induced absorption would warm such an air beyond the nitrogen term, so T_s is
+      understated on exactly those worlds. It is for the greenhouse's next refit (with R08's
+      absorbers).
 
 #### P14.T14 Rotation and tides
 
@@ -1342,6 +1361,11 @@ Solar System values without a generator.
 - **P14.T14.a Spin.** On `planet.spin`: primordial rotation period (log-normal about 10 h for
   giants, 15 h for rocky bodies), obliquity (isotropic for bodies that had giant impacts, Rayleigh
   about 10° otherwise), rotation phase at the epoch.
+  - _Giants' obliquities (decision-p14-moons, finding F4; a later ruling)._ The Rayleigh scale of
+    10° makes Saturn's 26.7° a 2.8% draw and Uranus's 98° unreachable. Spin–orbit resonance tilting
+    (Ward and Hamilton 2004; Saillenfest et al. 2021, from memory) and Uranus's impacts are
+    unmodelled. P14.T56.a builds the Laplace surface's eccentricity band anyway, so a wider law
+    needs no new code.
 - **P14.T14.b Locking.** τ_lock = ω a⁶ I Q ÷ (3 G M★² k₂ R⁵) with I = 0.33–0.4 M R² by class, Q =
   100 and k₂ = 0.3 for rocky bodies, Q = 10⁵ and k₂ = 0.4 for giants (the despinning time is
   Gladman et al. 1996's eq. 9, after Peale 1977; the pairs are this plan's: Earth's measured k₂,
@@ -1350,7 +1374,11 @@ Solar System values without a generator.
   τ_lock. A locked body with e over about 0.1 is in the 3:2 state. Moons use their planet as the
   primary. Rotation angle is a closed form of time in each regime, continuous where regimes meet.
   Amended by T14.d (decision-backlog-1): a sub-Neptune and an ice giant take neither pair. Their
-  k₂ is their envelope's Love number and their Q is 1.03 × 10⁴ (science-p14-tides).
+  k₂ is their envelope's Love number and their Q is 1.03 × 10⁴ (science-p14-tides). A moon's own
+  k₂ and Q are P14.T56.d's.
+  - _A planet locked to a massive moon (decision-p14-moons, finding F5; recorded)._ Pluto and
+    Charon, synchronous both ways, are not modelled: `derive_rotation` takes only the host as a
+    planet's primary.
 - **P14.T14.c Body-fixed frame.** `planetary/frames.rs`, per D23:
   `BodyFixedFrame { pole, w0, rate }` and `body_fixed_at(body, t)`, the rotation from the body's
   inertial frame (plan 01) to its fixed frame at a time.
@@ -1539,8 +1567,9 @@ which removes the moons of close-in planets. The planet's k₂ and Q are T14.d's
 ### Phase D: small bodies
 
 All satellite draws are on the parent's own streams (D4), so a planet's moons can be generated
-alone. Every satellite orbit is given in the parent's body frame, referred to the parent's equator
-for regular moons and rings and to its orbital plane for the rest.
+alone. Every satellite orbit and ring is given in the parent's body frame, referred to the parent's
+local Laplace plane at its distance (P14.T56.a): the equator well inside the Laplace radius, the
+orbital plane well beyond it.
 
 #### P14.T17 Regular moons
 
@@ -1555,17 +1584,22 @@ for regular moons and rings and to its orbital plane for the rest.
   probability 0.5, as the Galilean moons and those of TRAPPIST-1's analogues do. Everything must lie
   inside a twentieth of the Hill radius and inside `maximum_surviving_moon_mass`; what does not fit
   is dropped from the outside in. Eccentricity Rayleigh about 0.005, raised to a forced value of
-  0.004–0.04 in a resonance; inclination Rayleigh about 0.5° to the planet's equator. Small inner
-  moonlets are a count only.
+  0.004–0.04 in a resonance; inclination Rayleigh about 0.5° to the local Laplace plane
+  (P14.T56.a), the planet's equator inside its Laplace radius. Small inner moonlets are a count
+  only.
 - **P14.T17.b Derivation for moons.** T16's `derive_body` with the planet as the tidal primary and
   the star as the source of light. Composition from a circumplanetary ice line at T = 170 K in the
-  planet's own early luminosity. Tidal heating H = (21⁄2)(k₂ ÷ Q)(G M_p² R⁵ n e² ÷ a⁶) (Peale,
-  Cassen and Reynolds 1979) gives a surface heat flux, a volcanism level and the subsurface-ocean
-  flag for icy moons whose flux exceeds what keeps a water layer liquid under their ice.
+  planet's own early luminosity. Each moon draws its own volatile ranks, and its nitrogen is boosted
+  only below its carrier's 131 K (P14.T56.c). Tidal heating H = (21⁄2)(k₂ ÷ Q)(G M_p² R⁵ n e² ÷ a⁶)
+  (Peale, Cassen and Reynolds 1979), with the moon's own k₂ and Q by composition and state
+  (P14.T56.d), gives a surface heat flux, a volcanism level and the subsurface-ocean flag for icy
+  moons whose flux exceeds what keeps a water layer liquid under their ice.
   - _Tests:_ (a) Jupiter's and Saturn's masses give total satellite masses within a factor of 3 of
     the real ones in the median; every moon lies inside a twentieth of the Hill radius and outside
     the fluid Roche limit. (b) Io's elements give a heat flux of 1–4 W/m²; Europa's give the
-    subsurface-ocean flag; all regular moons lock.
+    subsurface-ocean flag; at measured elements, Jupiter's four, Titan and Rhea lock within 1 Gyr
+    and Iapetus within the Sun's age (P14.T56.d); the share of generated regular moons unlocked at
+    the epoch is recorded.
   - _Accept:_ `cargo test -p hyperion-sim planetary::moons::regular`.
   - _As built (`moons`, round 8)._ `planetary/moons/{mod, regular}.rs`. Every kind reads a
     `MoonParent` (`MoonParent::from_derived(id, ParentKind, &DerivedBody, orbit, host_mass)`, or
@@ -1650,6 +1684,13 @@ for regular moons and rings and to its orbital plane for the rest.
     against 1,804 km), a step in mass only. The test: Ganymede's 1.942, Callisto's 1.834 and
     Titan's 1.881 g cm⁻³ each lie between the model's densities at 0.35 and 0.50 ice for its own
     mass (Ganymede 2.07–1.74, Callisto 1.89–1.57, Titan 2.02–1.69).
+  - _Europa's water (decision-p14-moons, finding F2; recorded, for a later ruling)._ A Europa
+    analogue forms dry inside the circumplanetary ice line (item 3 of "for the orchestrator",
+    above), and the ice fraction stays ruling 83.7's. A graded ice fraction needs the nursery's ice
+    line to move through the last generation's accretion, with its accretion heating (Heller and
+    Pudritz 2015, from memory), which the nursery has not: a later ruling on this subtask's
+    nursery, since fitting a sweep window to Europa alone would be tuning. Until then no generated
+    Europa analogue has an ocean, and P14.T56.d's Europa check runs on Europa's own elements.
 
 #### P14.T18 Giant-impact moons
 
@@ -1659,7 +1700,8 @@ mass ratio log-uniform over 0.002–0.05, and 0.01–0.15 for dwarf planets (Cha
 outside the fluid Roche limit and recedes by tides: a(t)^(13⁄2) = a₀^(13⁄2) + (13⁄2) × 3(k₂ ÷ Q) √(G
 ÷ M_p) R_p⁵ m × (age + t), a closed form that is continuous in time. A moon whose orbit passes the
 prograde stability limit is lost at that age (`BodyState::Unbound`). The impact also sets the
-planet's obliquity to the isotropic branch of T14 and its surface age clock.
+planet's obliquity to the isotropic branch of T14 and its surface age clock. The moon forms on the
+parent's equator and follows its Laplace surface as it recedes (P14.T56.a).
 
 - _Tests:_ Earth–Moon values give 3–5 × 10⁸ m at 4.5 Gyr for an effective Q of 30–40; the orbit is
   monotone in time; a moon of a planet at 0.1 au is lost within 1 Gyr.
@@ -2209,7 +2251,9 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
       layer near 10–30 mbar;
     - methane haze at CH₄ ≳ 10⁻³ on N₂–CH₄ worlds, or CH₄/CO₂ ≳ 0.1–0.2 on CO₂ worlds (Trainer
       et al. 2006; Arney et al. 2016), as a fractal-aggregate mode with Titan's monomers (about
-      0.05 µm, some 3,000 of them, D_f 2; Tomasko et al. 2008, the case R08.T5.c tests);
+      0.05 µm, some 3,000 of them, D_f 2; Tomasko et al. 2008, the case R08.T5.c tests). The rule
+      states methane's carbon budget: photolysis to hydrocarbons, not escape, is the sink, and
+      T24.f takes the reservoir as resupplied (science-p14-t24f, finding 3);
     - dust on arid, windy, thin-aired worlds: arid with no surface liquid (T24.a's flag, T24.b's
       ocean fraction 0), thin-aired below a pressure the builder states, and windy by a rule on
       this plan's own figures (pressure, gravity and rotation), never on R09's coarse wind field,
@@ -2920,8 +2964,9 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
       velocity) and the optional wet epoch;
     - T24.e's vertical structure (β and T_skin; its T_s and p_s are the fields above, sent once)
       and T24.c's inventory (modes and absorbers, radii in metres, columns in molecules m⁻²; each
-      mode with its material key, its shape class, its deck's condensate key, its column mass in
-      kg m⁻² and its τ(550); each absorber by species key, O₃ and SO₂ first); and, declared
+      mode with its material key, its phase (T49.a's `Phase`, T24.c), its shape class, its deck's
+      condensate key, its column mass in kg m⁻² and its τ(550); each absorber by species key, O₃
+      and SO₂ first); and, declared
       `Modelled` and absent until their tasks land, T51.a's `condensates`
       (`{ substance, phase, reservoir_gel_m, area_fraction, seasonal }`), T51.c's `crust`
       (`{ primary, secondary, tertiary, provinces, redox, mantle_redox_iw, melt_area_fraction }`),
@@ -3561,6 +3606,12 @@ T46.f last, with T47.d inside T46.f, one bump (decision-p14-phase-j).
   16% (τ ∝ I), the output that moves. The criterion is open question 1. The regular moons' own
   `MOON_MOMENT_OF_INERTIA` (0.35, `moons/regular.rs`) is retired, and `moons::regular::locking_time`
   reads `moment_of_inertia_factor`, so a moon has one locking time (decision-p14-phase-j A1).
+  - _Small rocky bodies' moment of inertia (decision-p14-moons, finding F3, for this subtask's
+    owner; it needs its own ruling)._ `ROCKY_MOMENT_OF_INERTIA` is 0.33, Earth's compressed value,
+    for every rocky body. The Moon's is 0.393, Io's 0.377 and Mars's 0.364. Through the fluid
+    Love number k_f, P14.T56.d's rocky moons' k₂ comes out 35% low, and their figures are flattened
+    as for a body with a dense core. A law in core fraction and mass would mend both; it moves the
+    figure, so it needs its own ruling.
 - **P14.T46.b The rotation law is generated once and held, and is a `Bulk` section.** `generate`
   derives each planet's, dwarf planet's, member's and moon's `BodyRotation` after the satellites
   exist, by the as-built `rotation_of` path (the record at `parent_time`, the giant-impact test on
@@ -4473,7 +4524,13 @@ rows' values.
     - eutectics (MgSO₄–H₂O 269.29 K at 17.30 wt%, Zarriz, Journaux and Powell-Palm; NaClO₄ 236 K
       and Mg(ClO₄)₂ 206 K, Chevrier, Hanley and Altheide 2009; NH₃–H₂O 176.15 K, Kargel 1992, via
       Hammond et al. 2018, checked at build);
-    - the liquids' viscosity, surface tension, index and absorption (R11's).
+    - the liquids' viscosity, surface tension, index and absorption (R11's);
+    - heat capacities by temperature. T49.a's c_p ÷ R classes, fixed degrees of freedom after
+      Robinson and Catling 2012, hold only where a molecule's torsions and bends are frozen. C₂H₆'s
+      N = 6, which R08's gas column takes at its c_p near 100 K (35.70 J mol⁻¹ K⁻¹, Gurvich et al.
+      1989), holds only below about 120 K: its c_p reaches 52.49 J mol⁻¹ K⁻¹ at 298 K (R08's Risks,
+      "Deviations in T3.b's follow-up, as built"). So the heat capacities need a temperature
+      dependence, c_p(T) from a cited source, which the builder adds to the gas rows.
   - **The laws aloft** for the condensates above, `log₁₀ p = A − B/T − C[M/H] − D log₁₀ p`, with
     limiting element and vapour stoichiometry, are published coefficients with citation (Visscher,
     Lodders and Fegley 2006, and Visscher et al. 2010; Morley et al. 2012; Wakeford et al. 2017).
@@ -4617,6 +4674,14 @@ Snapshot path, `planetary/chem/`.
     draws' test and golden.
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem`;
     `cargo test -p hyperion-sim planetary::derive::atmosphere`; `cargo test -p hyperion-sim rng::tags`.
+  - _The planets' nitrogen (decision-p14-moons, finding F1; for "main", or this subtask's builder
+    under a line of its own)._ Planets have the defect P14.T56.c mends for moons:
+    `ICY_VOLATILE_BOOST` raises nitrogen wherever water condenses, but nitrogen's carrier, ammonia
+    hydrate, condenses only at 131 K (Lodders 2003, from memory). Under the disc's Hayashi
+    profile that ammonia line lies at 1.68 times the snow line, 4.6 au about the zero-age Sun, so
+    bodies formed between 2.7 and 4.6 √L au hold 100 times too much nitrogen. It is recommended in
+    this 22 → 23 batch, beside `ElementInventory`, at no extra bump. It moves planets, so it is
+    built only once it has its own line in this plan, which the ruling does not write.
 - **P14.T50.b A gas envelope's element abundances** (22 → 23; read by T52.d).
   - `chem/envelope_abundances.rs`: for a body in `SurfaceState::GasEnvelope`, its abundances by
     number relative to H, of He, C, N, O, S, P, Na, K, Ti, V, Fe, Mg, Si, Ca, Al and Cl:
@@ -4644,9 +4709,21 @@ Snapshot path, `planetary/chem/`.
   - For each registry condensable the exchangeable inventory carries, in registry order:
     - **The vapour pressure.** A condensable that dominates its air takes its saturation pressure
       at the coldest zone (a closed form of T24.a's mean and signed contrasts, where its reservoir
-      cold-traps, after Wordsworth 2015, as T48.d already cites). A minor one in a non-condensing
+      cold-traps, after Wordsworth 2015, as T48.d already cites) (methane included: a cold world
+      whose methane at T24.f's 0.5 would exceed its background, which T24.f holds at 0.5
+      meanwhile; science-p14-t24f §2). A minor one in a non-condensing
       background takes the mean temperature with T24.c's surface humidity. Either way it is capped
-      by the inventory: p_s = min(M_s g ÷ 4πR², p_sat,s(T)).
+      by the inventory: p_s = min(M_s g ÷ 4πR², p_sat,s(T)). The change from the minor branch to
+      the dominant one is continuous in the condensable's share of the air (a weight the builder
+      states and cites, not a switch), since the gases are continuous in time but at recorded state
+      changes. Titan, at 5.7% methane, stays on the minor branch within its test.
+    - **The CO₂ of dry worlds beyond the maximum-greenhouse limit** (science-p14-t24f, finding 1).
+      A rocky world formed inside the snow line that lies beyond the limit stores no carbon, since
+      no ocean weathers it, and its median 70 bar of CO₂ runs T13.c's √p greenhouse away to
+      490–575 K, labelled `Snowball` (T13.c's findings), where Kopparapu et al. 2013 and Kasting,
+      Whitmire and Reynolds 1993 put any CO₂ air below 273 K. This cold-trap rule is the planned
+      fix: such a world's CO₂ is the dominant condensable, held at `p_sat`(T_cold) with T48.e's
+      contrasts, as Mars's is after Wordsworth 2015.
     - **The condensed reservoir**, M_s − p_s 4πR² ÷ g, as a global equivalent layer.
     - **Its phase** where it lies: solid below the triple point (or the eutectic, for a
       solution); liquid inside its window at the surface pressure; supercritical above T_c and
@@ -4666,7 +4743,14 @@ Snapshot path, `planetary/chem/`.
       water ice (the generated Mars stores its carbon in rock until T53.a, a finding the test
       records);
     - Titan (after T24.f) holds liquid CH₄ over a water-ice crust;
-    - a Triton and a Pluto given their measured N₂, CH₄ and CO by hand hold N₂ ice with CH₄;
+    - a Triton and a Pluto given their measured N₂, CH₄ and CO by hand hold N₂ ice with CH₄, and
+      their CH₄ partial pressure within a factor of 3 of the measured (about 10⁻³ Pa on Triton,
+      (3–8) × 10⁻³ Pa on Pluto, from memory, to an order of magnitude; from methane-rich terrain
+      warmer than the N₂ ice; science-p14-t24f §1);
+    - a cold world of 0.2 bar of N₂ at 120 K holds its methane at `p_sat`(T_cold), within 10% (by
+      hand, with its contrasts);
+    - an Earth formed inside the snow line at 2 au of a Sun holds its CO₂ at the cold trap, its
+      surface below 273 K;
     - Venus holds none, and at 92 bar given by hand a supercritical CO₂ surface;
     - a 10-bar CO₂ world at 250 K holds a liquid-CO₂ sea;
     - for every species, airborne and condensed masses sum to the inventory to 10⁻⁹;
@@ -4777,14 +4861,17 @@ Snapshot path, `planetary/chem/`.
     - a Kuiper-like member beyond the volatile line red, inside it neutral.
   - _Files:_ `planetary/hooks/small_bodies.rs`, one call each in `belts.rs` and `moons/`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::small_bodies`.
-- **P14.T51.f Cold traps on airless bodies** (23 → 24; amends T51.a; science-r09-drainage.md §4).
+- **P14.T51.f Cold traps on airless bodies** (23 → 24; amends T51.a; science-r09-drainage.md §4;
+  after rendering plan R09's R09.T7.d).
   - **Where:** `hooks/cold_traps.rs`, for a body with no collisional atmosphere.
   - **Which condensables:** each one its exchangeable inventory carries (T50.a), and H₂O and CO₂,
     which impactors deliver to any body.
   - **The cold-trap fraction:** the area fraction from `hyperion_surface::cold_trap::fraction`,
-    integrated over latitude. It is Hayne et al. 2021's template (Nat. Astron. 5, 169, eqs. 1 and
-    26), with Ingersoll, Svitek and Murray 1992's shadow temperature (Icarus 100, 40) at the
-    highest sun elevation. Its inputs are:
+    integrated over latitude. This task calls it and does not build it: R09.T7.d builds it early,
+    pure and in `f64` in the surface crate (the galaxy audit's B4), and R09.T13.f calls the same
+    function to place the ice per cell. It is Hayne et al. 2021's template (Nat. Astron. 5, 169,
+    eqs. 1 and 26), with Ingersoll, Svitek and Murray 1992's shadow temperature (Icarus 100, 40)
+    at the highest sun elevation. Its inputs are:
     - the present obliquity, labelled, since cold traps record the obliquity's history;
     - the host flux at periapsis, the Bond albedo and the emissivity;
     - the crater fraction and d/D distribution from the crater state;
@@ -4813,7 +4900,8 @@ Snapshot path, `planetary/chem/`.
     - an airless body at 30° obliquity has none;
     - a smooth lunar pole lays no zonal cap, and a body whose zonal annual maximum is below the
       threshold everywhere lays one over its whole surface.
-  - _Files:_ `planetary/hooks/cold_traps.rs`, `planetary/chem/partition.rs`.
+  - _Files:_ `planetary/hooks/cold_traps.rs`, `planetary/chem/partition.rs`;
+    `crates/hyperion-surface/src/cold_trap.rs` (R09.T7.d's, read).
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::cold_traps`.
 
 #### P14.T52 Atmospheric chemistry
@@ -4925,17 +5013,29 @@ feeding back into p_s, T_s, the albedo or the bulk.
       keeps its N₂;
     - diffusion-limited hydrogen escape with fractionation (Hunten 1973; Zahnle and Kasting 1986;
       both from memory), leaving helium in envelopes (Hu, Seager and Yung 2015; Malsky et
-      al. 2023) and oxygen on water-losing worlds (Luger and Barnes 2015), which replaces T24.f's
-      single O₂ route;
+      al. 2023), oxygen on water-losing worlds (Luger and Barnes 2015), and methane as a minor gas
+      through nitrogen, at most at its diffusion limit, with carbon's outcome, escape against
+      photolysis to hydrocarbons, recorded (science-p14-t24f §4). It replaces T24.f's single O₂
+      route, including its young-melt uptake, which becomes Schaefer et al. 2016's FeO → FeO₁.₅
+      exchange integrated over the loss, with the greenhouse's melt timed; and it takes up the
+      oxygen of temperate worlds whose cold trap fails for want of a non-condensing background
+      (Wordsworth and Pierrehumbert 2014; science-p14-t24f §3);
     - a desiccated CO₂ world under an M dwarf turning about 40% of its CO₂ into CO and O₂ once its
       H falls below 1 ppm (Gao et al. 2015);
     - the H₂ and He below `THIN_ENVELOPE_FRACTION` kept as air, with an H₂ collision-induced
       greenhouse term calibrated on Pierrehumbert and Gaidos 2011 and Wordsworth and
       Pierrehumbert 2013 (the latter from memory);
-    - each element's outcome recorded.
+    - each element's outcome recorded;
+    - the CO₂ term's form: once Mars holds its 3–10 mbar of CO₂, the grey √p form puts it at about
+      241 K against its measured ~210 K (decision-p14-moons, item 4). This subtask chooses a form
+      that holds the measured Venus, Earth and Mars together, and refits every greenhouse constant
+      on a measured state (P14.T57.a's rule). Mars's surface temperature joins its tests, within
+      T13.c's 8%.
   - _Tests:_
     - Mars as above;
-    - Titan keeps N₂;
+    - Titan keeps N₂, and keeps its methane reservoir over 4.57 Gyr at its median carbon;
+    - a planet of a dimming M dwarf whose mantle freezes during its runaway keeps only the oxygen
+      freed after it froze;
     - TRAPPIST-1 b and c, LHS 3844 b and Mercury airless or under 1 mbar (Greene et al. 2023;
       Zieba et al. 2023; Kreidberg et al. 2019);
     - a 5 M⊕ core stripped at 0.05 au as today;
@@ -4995,6 +5095,9 @@ feeding back into p_s, T_s, the albedo or the bulk.
     `condensates` (T51.a) and `crust` (T51.c), and `surface_liquids` and `surface_ices` gain T51.a's
     entries.
   - `record::Envelope` is filled by T24.d with T52.d.
+  - `MOONS_VERSION` and its tripwire are deleted (T56.a, T56.c, T56.d), so that the moons' Laplace
+    planes, own ranks and tides, and the rings' normals, take effect with the batch. The bless note
+    accounts for them by subtask.
   - The server's conversion fills each member, and the envelope's `match envelope {}` is
     replaced.
   - R09's `for_body` reads `crust`, `condensates` and the palette's sources from the record.
@@ -5008,7 +5111,7 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - `golden_diff.py` accounts for every change.
   - _Files:_ `planetary/{record, hooks/mod}.rs`, `crates/hyperion-server/src/convert/planetary.rs`,
     `packages/protocol/fixtures/planetary.json`, `planetary/surface/inputs.rs`,
-    `crates/hyperion-base/src/version.rs`, and the goldens.
+    `planetary/moons/mod.rs`, `crates/hyperion-base/src/version.rs`, and the goldens.
   - _Accept:_ `cargo test -p hyperion-sim planetary::record`; `cargo test -p hyperion-server convert`;
     `just gen-protocol-check`; the golden tests.
 - **P14.T54.b The 23 → 24 batch on the record, and its bump.** As T54.a, for T51.d's
@@ -5023,17 +5126,243 @@ Each is labelled "not yet modelled" where a console could show it:
 - **P14.T55.a** outgassing and redox speciation, with the heavy-secondary equilibrium: one bracketed
   root in the oxygen potential, reproducing Woitke et al. 2021's types A–C, as a fitted table on
   the snapshot path (`outgassing_speciation`; Guimond et al. 2021; Tian and Heng 2024; Gaillard and
-  Scaillet 2014 and Ortenzi et al. 2020, from memory);
+  Scaillet 2014 and Ortenzi et al. 2020, from memory); it replaces T24.f's insolation rule for the
+  carbon carrier with ΔIW's outgassing speciation, keeping Titan's methane and the Solar System's
+  carriers (science-p14-t24f §5);
 - **P14.T55.b** silicate-vapour atmospheres (`silicate_vapour`; Schaefer and Fegley 2009; Ito et al.
   2015; Kite et al. 2016; Zilinskas et al. 2022);
 - **P14.T55.c** exospheres, recorded, not drawn;
 - **P14.T55.d** carbon-rich surfaces and refractory carbon from the soot line (Bond, O'Brien and
   Lauretta 2010; Bergin et al. 2023);
-- **P14.T55.e** seasonal volatile transport and frost by month;
+- **P14.T55.e** seasonal volatile transport and frost by month, with Triton's and Pluto's methane,
+  which lies over methane-rich terrain a few kelvin warmer than their N₂ ice, ten to eighty times
+  a humidity rule's (science-p14-t24f §1, finding 4);
 - **P14.T55.f** clathrate reservoirs and their outgassing;
 - **P14.T55.g** isotopes, D/H first;
 - **P14.T55.h** three-dimensional day–night chemistry and nightside clouds;
-- **P14.T55.i** brown dwarfs' atmospheres: plan 13's bodies, on T52's envelope chemistry.
+- **P14.T55.i** brown dwarfs' atmospheres: plan 13's bodies, on T52's envelope chemistry;
+- **P14.T55.j** moons' thermal-orbital equilibrium: a Maxwell or Andrade body whose viscosity
+  balances tidal heat against convective loss (Fischer and Spohn 1990; Moore 2003; both from
+  memory), giving Im k₂ continuously in place of T56.d's two branches, with the moons' eccentricity
+  damping (decision-p14-moons §5).
+
+#### P14.T56 Moons and their parents (decision-p14-moons, 2026-10-10)
+
+Four realism rulings on moons. Each subtask is held behind `MOONS_VERSION` = 23
+(`planetary/moons/mod.rs`), as T14.d was behind `ENVELOPED_TIDES_VERSION`. Below 23 every value
+is version 22's, bit for bit, and a tripwire test fails once the version reaches 23. P14.T54.a
+deletes the hold and its tripwire and blesses the moved goldens with its bump. They form one
+serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `satellites.rs`,
+`system.rs` and `moons/`. T56.b follows T56.a in the client.
+
+- **The batch:** 22 → 23, held by `MOONS_VERSION` and blessed by T54.a. No subtask bumps on its
+  own, and none waits for 23 → 24. T56.b is client-only: it bumps nothing and can land any time
+  after T56.a.
+- **The order** (decision-p14-moons §1.5, §2.4, §3.5): the lane starts after T48.e's 21 → 22
+  bump, which sets the parents' lock states under T14.d's tides that J₂'s synchronous factor
+  reads. T56.a needs T14.a–c, T46.c and T22.a, all built, and reads no Phase L task. T56.c follows
+  T50.a, whose `VolatileDraws` gains words 3–5, and T56.a, for the shared files; it touches
+  `derive/atmosphere.rs`'s `volatile_inventory`, which the `p14-snapshot` lane also edits, so it is
+  rebased on whichever of T51.a and T51.b has landed. T56.d follows the 21 → 22 batch's T24.b, whose
+  builder writes the tidal term it changes, and T56.c. It waits on neither R09 nor P14.T48.a: T48.a
+  reads heat flow and produces none, and R09 reads the surface section and feeds nothing back.
+- **Figures from memory.** Figures marked "from memory" here are decision-p14-moons's unverified
+  ones (its literature check was cut off by a restart). Each builder checks them in the source
+  before they become a constant or a test's bound: the Moon's GRAIL k₂ (Konopliv et al. 2013;
+  Williams et al. 2014), Io's Juno k₂ (Park et al. 2025), the Moon's Q at a month (Williams and
+  Boggs 2015), ice Ih's shear modulus (Gammon et al. 1983), ammonia hydrate's 131 K (Lodders 2003,
+  Table 8), the measured planes and fact-sheet J₂, radii, masses and orbits of T56.a's checks, and
+  the Tremaine et al. 2009 equations and the 68.875° onset (reproduced by the ruling's `band.py`:
+  68.8749°).
+
+- **P14.T56.a Moons and rings on the parent's Laplace surface** (22 → 23; amends T17.a, T18,
+  T19, T20 and T22.a; decision-p14-moons §1).
+  - `planetary/laplace.rs`, pure:
+    - `hydrostatic_j2(moment_factor, rate, equatorial_radius, mass, synchronous) -> f64`, k_f q ÷ 3,
+      with k_f by the Darwin–Radau relation inverted, × 2.5 when synchronous;
+    - `effective_j2r2(j2, radius, inner) -> f64` (m²), J₂R² + ½ Σ (m_i ÷ M_p) a_i²;
+    - `laplace_radius(j2r2, parent_orbit, parent_mass, host_mass) -> Metres`;
+    - `laplace_pole(spin_pole, orbit_normal, laplace_radius, a) -> [f64; 3]`, by
+      tan 2φ = sin 2ε′ ÷ (cos 2ε′ + 2 (r_L ÷ a)⁵), with ε′ the acute angle between the axes and
+      the spin's sense kept;
+    - `eccentricity_unstable(obliquity, a_over_rl) -> bool`, the band: unstable if and only if
+      0 < 4 + γ < 10 sin²θ, with γ = (2/3)(r_L ÷ a)⁵ (9 cos²φ − 3) − 2 cos²θ and θ = ε′ − φ.
+    - The sources: Tremaine, Touma and Namouni 2009 (AJ 137, 3706), the classical Laplace surface,
+      the Laplace radius r_L⁵ = J₂′R² a_p³ (1 − e_p²)^{3/2} M_p ÷ M_* and the band (from memory,
+      equation numbers at build); Goldreich 1965 (AJ 70, 5); Ward 1981 (Icarus 46, 97), Iapetus
+      (from memory).
+  - `satellites.rs`:
+    - `in_body_frame` refers a moon's local elements to the plane whose pole `laplace_pole`
+      gives, for every origin, through a new `SystemPlane::from_pole`.
+    - `Satellite::orbit_at` reads a `LaplaceFrame`: the parent's pole, orbit normal and J₂R², and
+      the inner moons. The frame is built once per planet, after its moons are kept, from the
+      parent's `BodyRotation` (pole, rate, lock) and moment-of-inertia factor at `parent_time`.
+    - The band's removal runs after the regular moons' longest inner run and before the rings.
+    - The module doc's "Until P14.T14 gives planets their poles" goes.
+  - `rings.rs`: a ring's plane is the local Laplace plane at √(r_in r_out), as `Ring::normal()`.
+    A ring reaching into the band is not made.
+  - `moons/impact.rs`: the doc's "inclination to the parent's orbital plane is the parent's new
+    obliquity" becomes "lies on the parent's Laplace surface at its present distance: the
+    equator while it is well inside the Laplace radius".
+  - The wire: `RingDto` gains the optional `normal: [f64; 3]`, a unit vector along the galactic
+    axes, `#[serde(default)]` and `#[ts(optional)]`. The server's conversion fills it.
+    - `PROTOCOL_VERSION` stays 2: an optional field (plan 04 Design note 15; decision-p14-t35e-wire
+      §1.3, the P14.T46.f precedent).
+    - Below `MOONS_VERSION` the normal is the parent's orbit normal, today's convention.
+  - _Tests:_
+    - with fact-sheet values (from memory): Titan's φ is 0.55–0.70°, Iapetus's 14–17° with Titan
+      counted, Callisto's 0.4–0.6°, the Moon's plane within 0.01° of the ecliptic, and Triton's
+      within 0.01° of Neptune's equator;
+    - φ tends to 0 as a ÷ r_L → 0 and to ε′ as a ÷ r_L → ∞, and is continuous and monotone in a;
+    - a parent of zero obliquity gives today's orientation within 10⁻¹² rad;
+    - the band's onset lies at 68.875 ± 0.001°, and its edges at 90° at 0.922 and 1.149 r_L,
+      ± 0.002;
+    - a parent at ε = 98° keeps its regular moons prograde about its spin;
+    - every ring's normal lies within 10⁻⁹ rad of its parent's pole where its radius is under
+      0.1 r_L;
+    - the largest step of a giant-impact moon's plane between drift cells is recorded;
+    - T22.b's properties are unchanged, since no a, e or mass moves;
+    - the hold: below 23, every golden is unchanged, bit for bit.
+  - _Files:_ `planetary/{laplace, satellites, system, rings}.rs`,
+    `planetary/moons/{mod, impact}.rs`, `placement/classes/orbits.rs` (`SystemPlane::from_pole`),
+    `crates/hyperion-protocol/src/planetary/population.rs`,
+    `crates/hyperion-server/src/convert/planetary.rs`, and the generated bindings.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::laplace`;
+    `cargo test -p hyperion-sim planetary::satellites`; `cargo test -p hyperion-protocol`;
+    `just gen-protocol-check`.
+  - _Moves at 23 (estimated):_ every moon whose parent has non-zero obliquity, in orientation,
+    position and velocity, rotation frame and seasons, and eclipses and transits as R08 sees them;
+    every ring's plane, a new wire value; every `planetary/systems` golden with moons or rings, and
+    the server's scene and body goldens. No moon's a, e, mass, count, lock state or bulk moves, and
+    `planetary/moons`'s golden of local elements is unchanged.
+- **P14.T56.b The client's ring and equatorial planes** (no bump; after T56.a; TypeScript, with
+  the console-ux skill).
+  - `lib/system/model.ts`'s `Ring` gains `normal?`.
+  - `view/scene/fromServer.ts` (R07's scene seam, by agreement) draws a ring in its normal's
+    plane, and in the orbital plane when the field is absent (an older server).
+  - `displays/system/bodyFrame.ts`'s `EQUATORIAL PLANE` is the plane normal to the rotation
+    section's pole, or to the orbit's normal without one (R07 Design note 14's rule).
+  - The three docs drop "which this generator version takes to be its orbital plane".
+  - _Tests:_ `bodyFrame.test.ts`'s ring case under a tilted pole; a ring without `normal` is
+    drawn as today.
+  - _Accept:_ the touched files' vitest suites, `pnpm typecheck` and the console-ux lint.
+- **P14.T56.c Moons' own volatile ranks, and the circumplanetary ammonia line** (22 → 23; after
+  T50.a and T56.a; amends T17.b, T18 and T19; decision-p14-moons §2).
+  - Every moon of every origin draws `VolatileDraws::for_body` on its candidate's key, the one
+    its radius rank uses (`satellites.rs`'s `candidate_key`; ruling 112.5). That is words 0–5 of
+    `planet.volatiles`, T50.a's layout. `derive_moon` takes the draws. `PlacedBody::new`'s
+    `MEDIAN` default stays for the Solar System table and for tools.
+  - `volatile_inventory` gains the formation temperature's carrier rule, read for moons only:
+    - `AMMONIA_HYDRATE_CONDENSATION` = 131 K (Lodders 2003, ApJ 591, 1220, from memory, checked at
+      build);
+    - nitrogen takes `ICY_VOLATILE_BOOST` where the circumplanetary disc's temperature at the
+      moon's a, 170 K × √(d_ice ÷ a), is at most that, and Earth's per unit mass otherwise;
+    - water and carbon keep the 170 K line, as built.
+  - Captured moons are derived with the inventory of a body formed at their parent's formation
+    distance in the star's disc, and giant-impact moons with their parent's. Their bulk is
+    unchanged.
+  - _Tests:_
+    - two moons of one planet draw different ranks;
+    - removing a moon in T22.a's pruning moves no other moon's ranks;
+    - the generated Jupiter's ammonia line lies at 1.68 times its ice line, so a Ganymede
+      analogue has Earth's nitrogen per unit mass and a Callisto analogue 100 times it;
+    - the table's Titan, at median ranks, keeps at least 1 bar of N₂. Its T_f must lie under
+      131 K; if the generated Saturn's nursery puts it above, that is a finding for "main", not a
+      refit;
+    - the table's Ganymede and Callisto stay airless;
+    - over 10⁴ generated moons, each rank is uniform (Kolmogorov–Smirnov);
+    - the hold: below 23, every golden is unchanged, bit for bit.
+  - _Files:_ `planetary/moons/regular.rs` (`derive_moon`), `planetary/satellites.rs` (the key),
+    `planetary/system.rs` (`moon_derived`), `planetary/derive/{mod, atmosphere}.rs`.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::moons`;
+    `cargo test -p hyperion-sim planetary::derive::atmosphere`.
+  - _Moves at 23 (estimated):_ every moon's inventory, by 10^(0.5 z) in water, carbon and
+    nitrogen; its sulphur, chlorine and ΔIW drawn rather than median, new at 23 and blessed with
+    T50.a's; Titan-like moons' pressures by ×/÷ 3.2 at one sigma, none expected to cross the 100 Pa
+    airless line; moons formed between 131 and 170 K lose 99% of their nitrogen; captured moons
+    take their parent's zone; every `planetary/systems` golden with moons, and the moons' rows of
+    the Solar System table's tests.
+- **P14.T56.d Moons' Love numbers and dissipation by state** (22 → 23; after the 21 → 22 batch's
+  P14.T24.b and T56.c; amends T17.b and T14.b's moons; decision-p14-moons §3).
+  - `planetary/moons/tides.rs`, pure:
+    - `fluid_love_number(moment_factor) -> f64` = (4 − ξ²) ÷ (1 + ξ²), with
+      ξ = (5/2)(1 − (3/2) C);
+    - `elastic_love_number(k_f, rigidity, density, gravity, radius) -> f64` =
+      k_f ÷ (1 + 19 μ ÷ 2ρgR);
+    - `ocean_love_number(density) -> f64` = 3ρ_w ÷ (5ρ̄ − 3ρ_w);
+    - `MoonTides { k2, q, branch: TidalBranch }`, with `TidalBranch` `Cold` or `Heated`, and
+      `MoonTides::of(...)`.
+  - Constants in `planetary/params.rs`, each doc citing its calibration body:
+    - `ROCK_RIGIDITY` = 5.8 × 10¹⁰ Pa, the Moon's GRAIL k₂ (0.0242, from memory) at its measured
+      C;
+    - `HEATED_ROCK_RIGIDITY` = 1.14 × 10¹⁰ Pa, Io's Juno k₂ (Park et al. 2025, from memory; volume
+      and pages at build) at its C;
+    - `ICE_RIGIDITY` = 3.5 × 10⁹ Pa (Gammon et al. 1983, from memory, checked at build);
+    - `COLD_ROCK_TIDAL_Q` = 38, the Moon's at a month (Williams and Boggs 2015, from memory,
+      checked at build);
+    - `COLD_ICE_TIDAL_Q` = 100 (Gladman et al. 1996);
+    - `MOON_TIDAL_RESPONSE` = 0.015 stays, as the heated branch's Im k₂.
+  - The branch: an icy moon is heated if `has_subsurface_ocean` holds at the tidal flux of
+    Im k₂ = 0.015, and a rocky moon if that flux reaches P14.T24.b's F_c. Then:
+    - a heated icy moon takes the ocean limit;
+    - a heated rocky moon takes `HEATED_ROCK_RIGIDITY`;
+    - a cold moon takes its material's rigidity and cold Q.
+  - `derive_moon`: `tidal_heating` reads the moon's Im k₂, and `locking_time` its (k₂, Q).
+    `SpinningBody` takes the pair for a moon, and `derive_rotation`'s moon arm passes it, so that
+    the stored rotation law and `DerivedMoon::locking_time` agree. Planets keep `tides`.
+  - _Tests:_
+    - at measured C and elements (from memory): the Moon 0.0242 ± 2%; Io 0.125 ± 0.005 and
+      1–4 W m⁻²; Europa with its ocean 0.23–0.27; Titan with its ocean 0.42–0.52; Enceladus heated,
+      10–30 GW;
+    - k_f is exactly 1.5 at C = 0.4, and k₂ tends to k_f as μ → 0;
+    - no generated moon's ocean flag moves against version 22;
+    - a cold rocky moon's heat flux is k₂ ÷ (38 × 0.015) of version 22's;
+    - T17.b's test (b) as amended;
+    - the hold: below 23, every golden is unchanged, bit for bit.
+  - _Files:_ `planetary/moons/{tides, regular}.rs`, `planetary/params.rs`,
+    `planetary/derive/rotation.rs` (`SpinningBody`), `planetary/system.rs`
+    (`derive_rotation`'s moon arm).
+  - _Accept:_ `cargo test -p hyperion-sim planetary::moons`;
+    `cargo test -p hyperion-sim planetary::derive::rotation`.
+  - _Moves at 23 (estimated):_ every moon's locking time (cold rocky 7 times slower, cold icy 2–56
+    times slower, heated 5 times faster), so small, distant icy moons may be unlocked at the age,
+    with their rotation sections, figures, day lengths and R09's diurnal cycles; cold moons' tidal
+    heat falls to 0.4–9% of version 22's, with T24.b's regime, surface age and crater density,
+    T48.a's constructional relief and R09's and R10's classes; heated moons' heat, every ocean flag
+    and every planet are unchanged; every `planetary/systems` golden with moons, and
+    `planetary/moons`'s derived values.
+
+#### P14.T57 The greenhouse's calibration (decision-p14-moons, 2026-10-10)
+
+- **P14.T57.a The CO₂ greenhouse constant at Venus's measured state** (22 → 23; lane
+  `p14-snapshot`, after T51.b; amends T13.c). It is held as that lane's other subtasks are, so
+  that the goldens move once, at T54.a. It follows T51.a, whose humidity moves Earth's water
+  column, which the water refit needs; T51.b, so that the fit reads the final Bond albedos and
+  T_eq; and the 21 → 22 batch's T24.f, which adds CH₄ and O₂ to T13.c's inventory
+  (decision-p14-moons §4).
+  - `GREENHOUSE_CARBON_DIOXIDE` is fitted at Venus's measured inventory: 4.69 × 10²⁰ kg of CO₂ and
+    1.08 × 10¹⁹ kg of N₂, from 4.8 × 10²⁰ kg at 96.5% and 3.5% by volume (from memory), checked at
+    build. It reaches 735 K (VIRA, Seiff et al. 1985, from memory) at the generator's T_eq for
+    Venus: 14.7.
+  - `GREENHOUSE_WATER` is then refitted on Earth at T51.a's partition. Its docs give the order of
+    the fits (N₂ on Titan, CO₂ on Venus, water on Earth), each at the measured inventory, and
+    state that the generated Venus is a median draw.
+  - _Tests:_
+    - Venus at its measured inventory, given by hand, is 735 K ± 2%;
+    - Earth is 288 ± 2 K and Titan 94 ± 3 K;
+    - the table's median Venus holds 55–60 bar and reaches 680–710 K;
+    - T13.c's "within eight per cent" test takes the measured Venus;
+    - T24.e's Venus test (300–370 K at 1 bar) is re-checked;
+    - every golden that moves is accounted for in T54.a's bless note.
+  - _Files:_ `planetary/derive/atmosphere.rs`, `planetary/derive/atmosphere/tests.rs`,
+    `planetary/derive/mod.rs` (the table's tests).
+  - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
+  - _Moves at 23 (estimated):_ every body whose greenhouse is mostly CO₂, a runaway world's T_s by
+    about 5.6% (Venus from 735 to about 695 K at 58 bar); temperate worlds by the water refit, a
+    few kelvin either way, Earth held; states only at thresholds that read T_s; no inventory or
+    partition; R08's 58-bar Venus fixture takes about 695 K, which R08.T18's thermal emission
+    reads; `planetary/derive_body`'s Venus and Earth rows, and every `planetary/systems` golden
+    with a CO₂- or water-bearing atmosphere.
 
 ## Verification
 
@@ -5118,6 +5447,12 @@ it:
   - The 22 → 23 batch (T49.b–e, T50, T51.a–c, T52, and T24.c–e and T24.g with it) moves every
     body's composition, its dominant condensable's pressure and the Bond albedo, and fills members
     the goldens hold absent. It takes one bump in P14.T54.a.
+  - decision-p14-moons's P14.T56.a, T56.c, T56.d and T57.a join the 22 → 23 batch, held until
+    T54.a (behind `MOONS_VERSION`, and T57.a in the `p14-snapshot` lane's hold). They move every
+    moon's plane, inventory and tides, every ring's plane, and the CO₂ and water greenhouses.
+    T56.c reads words 0–5 of `planet.volatiles` on each moon's candidate key, which the moons'
+    radius ranks already use, and adds no domain tag. T56.a adds the optional `RingDto.normal`, with
+    `PROTOCOL_VERSION` at 2.
   - The 23 → 24 batch (T51.d–f, T53) takes one bump in P14.T54.b.
   - Draws: words 3–5 of `planet.volatiles` (no existing value moves), and one new tag,
     `system.abundances` (System scope). No other domain tag.
@@ -7824,7 +8159,9 @@ Option<SystemId>` and `Candidate` (its `record()`, and its `context()` and `syst
     hosts (the template table is a constant).
   - _Not done._ T33.a (bench; (iii) rogue planets waits for T27 anyway); goldens for T14/T23;
     moons and rings are still referred to the planet's orbital plane, not T14's equator (moving
-    them is an output change for T22.a's owner).
+    them is an output change for T22.a's owner). **Ruled** (decision-p14-moons, item 1): every
+    moon and ring lies on the parent's classical Laplace surface; built by P14.T56.a in the
+    22 → 23 batch.
 - **Added by rendering plan R03's R03.T3, by agreement (R03 Design note 8).**
   `PlanetarySystem::state_at(ctx, index, t) -> Result<Option<(SystemPosition, SystemVelocity)>,
 ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bit (it calls it),
@@ -8509,7 +8846,10 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   built with `VolatileDraws::MEDIAN` (`PlacedBody::new`'s default; `moons/regular.rs`), so every
   moon has Earth's inventory per unit mass times the snow-line factor, and from T50.a median S, Cl
   and ΔIW. Drawing their own ranks on their own `BodyId` keys would move every moon, so it needs a
-  ruling and a bump of its own.
+  ruling and a bump of its own. **Ruled** (decision-p14-moons, item 2): every moon draws its own
+  ranks, keyed by its candidate; nitrogen's icy boost needs the circumplanetary disc below ammonia
+  hydrate's 131 K; captured moons take their parent's formation zone. Built by P14.T56.c in the
+  22 → 23 batch.
 - **The host's C/O and Mg/Si** are drawn here, on `system.abundances`, until plan 06 carries them
   on the star. Plan 06 may adopt the stream without moving a value.
 - **Phase L's open points** (decision-composition §9.2, not settled by the ruling; each is settled
@@ -8712,7 +9052,7 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       Q ≈ 100 for satellites with a k₂ from rigidity. They are the source of neither k₂ = 0.3 nor
       the giants' (0.4, 10⁵), which are this plan's (science-p14-tides, §4 (d)). The constants'
       docs now say so. Their text was not reached (open access; a by-hand check is pending).
-      The moons' k₂ = 0.3 against a rigidity k₂ of 0.03–0.05 goes to the deferred list.
+      The moons' k₂ is ruled by decision-p14-moons (item 3) and built by P14.T56.d.
   - _The refit, as built_ (P14.T14.d's follow-up, `p14-tides-fix`, 2026-10-10). Built to
     science-p14-tides's §5–§8; `GENERATOR_VERSION` stays 21, the hold stays, and no golden moves.
     - The pinned k₂ of `the_held_enveloped_love_numbers_are_pinned_bit_for_bit` were re-read from
@@ -9039,3 +9379,13 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   owner, not a correction R08 makes. T24.e's Venus test, 300–370 K at 1 bar, holds at either
   pressure. T24.g's deck on the 58-bar Venus lies at the right pressures (1.34–0.04 bar, as Venus's
   48–70 km), about 6 km lower than Venus's, at 42.6–62.7 km, because the column is lighter.
+  **Ruled** (decision-p14-moons, item 4). The 58 bar is the median inventory, all airborne: the
+  table is built at median ranks, and the real Venus holds 1.58 times Earth's carbon and 3.4 times
+  its atmospheric nitrogen per unit mass, the 65th and 86th percentiles of the generator's own
+  0.5 dex. It is not a defect of outgassing, which this plan does not model before P14.T55.a, nor
+  of the partition, which puts a runaway world's carbon all in the air. The defect was
+  `GREENHOUSE_CARBON_DIOXIDE`'s calibration at the median's 57 bar, under which the measured Venus
+  would be 778 K. P14.T57.a refits it at the measured inventory (14.7) and `GREENHOUSE_WATER` on
+  Earth after it. The generated Venus keeps 57.8 bar and reaches about 695 K. A stagnant-lid
+  world's exchangeable carbon above Earth's present surface reservoir is P14.T55.a's, with T50.a's
+  `Mantle` reservoir.
