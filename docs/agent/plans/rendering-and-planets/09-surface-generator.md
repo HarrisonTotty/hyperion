@@ -1192,8 +1192,10 @@ to the points where they read it: T12.d (coarse craters) needs T7.a's density; T
 reconstructed field) needs T4's interpolant and T5's `local_variance`; T14.b (the multigrid's
 upsample) needs T4; and T14.c (the Mars volume check) needs T6.b's closed-form incision. T17–T19 are
 the server: T17 needs T3 and T10, T18 needs T2 (P12.T7 is built), and T19 needs T8, T17 and T18.
-T20 closes. T0.b's research items gate T7.a, T12.c, T13.a and T14.b. Every task ends with `just ci`
-green, which the orchestrator runs on integration; a lane runs its targeted checks.
+T7.d (the cold-trap fraction, a pure closed form) needs nothing and is built early, since T13.f
+and galaxy plan 14's P14.T51.f both call it. T20 closes. T0.b's research items gate T7.a, T12.c,
+T13.a and T14.b. Every task ends with `just ci` green, which the orchestrator runs on
+integration; a lane runs its targeted checks.
 
 Paths are under `crates/hyperion-surface/src/` or `crates/hyperion-sim/src/` as the task says.
 Every figure a task turns into a constant is re-checked against the source its design note names
@@ -1541,8 +1543,26 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   so the level-of-detail rule holds. Tests: a coarse crater's profile is continuous across the
   coarse cell edges it spans; the added difference integrates to zero over every coarse cell it
   touches, to 10⁻⁶ of the crater's cavity volume; at the coarse level it adds nothing.
+- **R09.T7.d The cold-trap fraction** (a T7 follow-up, split out of T13.f and built early: the
+  galaxy audit's B4; science-r09-drainage.md §4). It needs nothing of T7.a–c and can be built at
+  once. T13.f and galaxy plan 14's P14.T51.f call it, so it lands before the 23 → 24 batch.
+  `cold_trap.rs` (declared in `lib.rs`): `hyperion_surface::cold_trap`, pure and in `f64`, beside
+  the crater density. `fraction`, of the latitude, the highest sun elevation, the flux, the albedo,
+  the emissivity, the crater fraction and d/D, the plains' RMS slope and the threshold, is the
+  share of ground below the threshold all year: permanent shadow in bowl craters by Hayne et al.
+  2021's eq. 26 (Nat. Astron. 5, 169), over a log-normal d/D; on rough plains by their template
+  (eq. 1); the share of it below the threshold at Ingersoll, Svitek and Murray 1992's temperature
+  (Icarus 100, 40); and none at scales under lateral conduction's cut-off. It opens no stream,
+  reads no field and moves no output: no golden, tag or version changes until a caller lands.
+  Tests:
+  - _Ingersoll's temperature._ At a lunar pole it is 97 K at d/D 0.2 (to 1 K).
+  - _Hayne's bands._ With Hayne et al.'s best-fit terrain (20% craters, σ_s 5.7°) the fraction
+    gives their Table 1 bands within a factor of two.
+  - _Bounds._ The fraction lies in [0, 1], does not rise with the highest sun elevation and does
+    not fall with the threshold.
 
-Acceptance: `cargo test -p hyperion-surface craters`.
+Acceptance: `cargo test -p hyperion-surface craters` (T7.a–c) and
+`cargo test -p hyperion-surface cold_trap` (T7.d).
 
 ### R09.T8 Assembly, the bound and the patch
 
@@ -1765,15 +1785,9 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     twice a year;
   - a world at e = 0 with no obliquity to its seasonal orbit has one wind (Design note 8's one
     month; a lock adds nothing, `signoff-2.md` item 4).
-- **R09.T13.f Cold traps.** After T13.c and T13.d (science-r09-drainage.md §4).
-  - **The shared closed form:** `hyperion_surface::cold_trap`, pure and in `f64`, beside the
-    crater density, so that P14.T51.f calls it too. `fraction`, of the latitude, the highest sun
-    elevation, the flux, the albedo, the emissivity, the crater fraction and d/D, the plains' RMS
-    slope and the threshold, is the share of ground below the threshold all year:
-    - permanent shadow in bowl craters by Hayne et al. 2021's eq. 26, over a log-normal d/D;
-    - on rough plains by their template;
-    - the share of it below the threshold at Ingersoll et al. 1992's temperature;
-    - none at scales under lateral conduction's cut-off.
+- **R09.T13.f Cold traps.** After T13.c, T13.d and T7.d (science-r09-drainage.md §4).
+  - **The shared closed form** is T7.d's `hyperion_surface::cold_trap::fraction`, built early in
+    the surface crate. This task calls it, as P14.T51.f does, and does not change it.
   - **In the airless model:** each cell's fraction for each cold-trapped condensate, at the cell's
     latitude, with its crater fraction from the body's crater state and its plains' slope from the
     synthesis's slope variance at the cold traps' scales.
@@ -1781,17 +1795,14 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     capped at it and scaled so that its area matches plan 14's. Its quantised shares are rounded
     coldest first, so the total matches to one cell. It is never placed coldest-first by whole
     cells.
-  - _Tests:_
-    - Ingersoll et al.'s temperature at a lunar pole is 97 K at d/D 0.2 (to 1 K);
-    - with Hayne et al.'s best-fit terrain (20% craters, σ_s 5.7°) the fraction gives their Table 1
-      bands within a factor of two;
+  - _Tests_ (the closed form's own, Ingersoll et al.'s 97 K and Hayne et al.'s Table 1 bands, are
+    T7.d's):
     - a Moon-like input given 1.7 × 10⁻⁵ of water ice by hand places it only poleward of 70°, more
       than 90% of it poleward of 80°, and no cell's share exceeds its fraction;
     - at 25° obliquity no cell has a fraction;
     - a water ice on a body whose zonal maximum is below its threshold is placed by T13.d's own
       rule.
-  - _Acceptance:_ `cargo test -p hyperion-surface cold_trap`;
-    `cargo test -p hyperion-sim planetary::surface::steps::climate`.
+  - _Acceptance:_ `cargo test -p hyperion-sim planetary::surface::steps::climate`.
 
 Offline check (recorded, not in CI): the reference Earth's monthly fields against an ExoPlaSim run
 of the same inputs, with the differences written into this plan. Acceptance:
@@ -2030,8 +2041,11 @@ for R11's shape draws; `SURFACE_PAYLOAD_FORMAT` 1; `surveys.v1.jsonl`; the level
 `surface_pressure` for R11; and T2's header `reference_temperature` and `temperature_step` (0.01 K
 × 2ⁿ, n 0–15) and `season_eccentricity`, with the months' eccentric-anomaly rule and twelve winds
 per climate record (`decision-r09-t2.md` item 1), and every code's scale (Risks, "Deviations in
-T2, as built"), the spectrum's break fields and the sea-floor byte's two scales
-(`decision-r09-t5.md`). R10.T10.a fills `FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`,
+T2, as built"), the spectrum's break fields, the sea-floor byte's two scales
+(`decision-r09-t5.md`) and `LogRunoff`'s scale for follow-up C's two runoff bytes,
+`LogPrecipitation`'s in volume: code 0 none, below 0.1 mm a⁻¹, and code c ≥ 1
+0.1 mm a⁻¹ × 2^((c − 1) ÷ 12) (science-r09-drainage.md §1). R10.T10.a fills
+`FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`,
 re-blessing this plan's payload and coarse goldens in that commit.
 
 ## Risks and open points
@@ -2931,7 +2945,10 @@ re-blessing this plan's payload and coarse goldens in that commit.
     grain densities, porosity apart, follow-up C and R09.T10.c, science-r09-drainage.md §3); and two
     questions on §1.7's lists, a water-ice entry for the Moon's cold traps
     (Li et al. 2018, PNAS 115, 8907) and whether Ceres's altered-ocean crust is better primary
-    than secondary (lean for both: keep §1.7's lists until plan 14 states them).
+    than secondary (lean for both: keep §1.7's lists until plan 14 states them). Both are ruled,
+    against the lean (science-r09-drainage.md §4 and §5): the Moon's palette carries `H2O` as
+    `Ice` now (follow-up C and R09.T10.c), its share stated by P14.T51.f and placed by R09.T13.f,
+    and Ceres's crust is primary (R09.T10.c).
 
   - _Other review changes._ The reference worlds' gases are `const` items, so that a
     malformed key fails to compile, and the order-independence test runs over all four worlds.
@@ -2965,7 +2982,8 @@ re-blessing this plan's payload and coarse goldens in that commit.
 - **Cold traps (ruled 2026-10-10, science-r09-drainage.md §4).** Exposed water ice lies in the
   Moon's cold traps (Li et al. 2018), but no zonal rule makes it: a smooth lunar pole reaches
   156 K. P14.T51.f states a body's cold-trapped area as the cold-trap fraction of one closed form,
-  which R09.T13.f builds in the surface crate, times a drawn exposed fraction.
+  which R09.T7.d builds early in the surface crate (split out of R09.T13.f, the galaxy audit's
+  B4), times a drawn exposed fraction.
   - R09.T13.f places it per cell.
   - The reference Moon carries `H2O` as `Ice` from R09.T10.c, with no share until P14.T51.f.
   - _For R10's re-validation:_ the classifier puts a cell's cold-trapped share on its shadowed

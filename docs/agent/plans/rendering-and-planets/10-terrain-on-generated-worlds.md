@@ -1351,7 +1351,8 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   - `MaterialClass` stays the form, and `Material` becomes `{ class, entry }`, the entry being
     R09's palette index. `FrostSpecies` goes.
   - `properties(material, &palette)` takes the class's table with the entry's resolved A_N in B,
-    V and R, phase row, density, transition and mechanics family.
+    V and R, phase row, grain density (the form's porosity by depth giving each layer's bulk),
+    transition and mechanics family (science-r09-drainage.md §3).
   - The classifier reads the cell's substance byte and the header: frost or glacier of the ice
     entry, `Seabed` under the liquid entry, `Melt` above the crust's transition by R09's cell
     temperature, and regolith, sand and dust of the crust, `Deposit` or `Cover` entry.

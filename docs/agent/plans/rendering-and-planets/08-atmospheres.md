@@ -1627,7 +1627,8 @@ The order:
 - T12.a (the tracer) needs nothing of this plan and can start at once. T12.c (its benchmarks) and
   T12.d (the spheroid mode) follow it; T12.c's cases whose matrices come from R08's Mie
   (Kokhanovsky's aerosol and cloud, IPRT's spheres) also wait on T5.b, and its other cases do not.
-  T12.b (the cases and references) needs T5, T10's fixtures, T12.c and T12.d.
+  Those cases are T12.e's (the Mie-matrix writer), which follows T12.c and T5.b.
+  T12.b (the cases and references) needs T5, T10's fixtures, T12.c, T12.d and T12.e.
 - T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14 follows T13: T14.a, T14.b and T14.c in
   turn; T14.e (the polarisation correction) after T14.a and T14.b; T14.f (its read path and the
   vector gates) after T13, T14.c and T14.e; and T14.d (the gates) after T14.f. T15 follows T14,
@@ -2948,8 +2949,36 @@ here, and `pnpm test` passes.
 
   Acceptance: `cargo test -p hyperion-fit atmosphere`.
 
-- **R08.T12.b Cases and references.** It needs R08.T5, R08.T10's fixtures, R08.T12.c and
-  R08.T12.d. It
+- **R08.T12.e The Mie-matrix writer and the sphere benchmarks** (R08.T12.c's follow-up; Risks,
+  "Deviations in T12.c, as built", _Pending, and why_; `decision-r08-t4b-t12c.md`). It needs
+  R08.T12.c and R08.T5.b, and precedes R08.T12.b. T12.c ran seven benchmark families (739 values)
+  and left the cases whose matrices come from R08's Mie, which R08.T5.b's
+  `sphereScatteringMatrix` and size distributions have since unblocked:
+  - **The writer.** A writer of the scattering matrices from the client's Mie, over each case's
+    stated size distribution (`decision-r08-licences.md` row 6c), onto the case format's
+    `tabulated` phase that the tracer reads: a₁ on its u grid, normalised under the linear-in-u
+    rule (T12.c's finding for T5.c and T12.b), with a₂, a₃, a₄, b₁ and b₂, and the source's mean
+    cosine from T5's Mie g, not from the table. Its output is a committed file with a test that it
+    is current, passing `prettier --check` or listed in `.prettierignore`, and under the 500 kB
+    added-file hook.
+  - **The cases.** Kokhanovsky et al. 2010's aerosol and cloud (lognormals at 412 nm, m 1.385 and
+    1.339) and IPRT Phase A's spheres, A3 and A5, in the Stokes mode, in `atmosphere::benchmarks`
+    beside T12.c's, each by Design note 10's agreement test with σ ≤ 0.3% of I at every value.
+  - **T5.b's b₂ sign.** Their V tables check it (R08's Risks, "Deviations in T5.b, as built"):
+    Kokhanovsky's V is taken as the tracer's negative meanwhile, IPRT's handedness, and each run
+    prints the χ² with the sign flipped, as T12.c's summaries do, so that the run decides it.
+  - **Still waiting, recorded with T12.c's.** Garcia and Siewert 1985's Haze L and Cloud C1 (no
+    lawful copy is held; pending for the owner, for access) and Loughman et al. 2004 (its free
+    copy is behind a check that refuses this machine; pending for access). IPRT A6 needs an ocean
+    surface, which the tracer's Lambertian ground is not (closed set), so it is not run.
+
+  Tests: the writer's file is current; every written table passes T12.c's load checks; T12.c's
+  unit tests and its seven benchmarks are unchanged. Acceptance:
+  `cargo test -p hyperion-fit atmosphere`, `just test-slow atmosphere::benchmarks` and the
+  writer's vitest.
+
+- **R08.T12.b Cases and references.** It needs R08.T5, R08.T10's fixtures, R08.T12.c,
+  R08.T12.d and R08.T12.e. It
   builds the case format, and a bless-style vitest (R08.T4.a's `bless.ts`) that writes the cases
   of Design note 16 from the client's optics, and `saturn-oblate`, Design note 17's thin
   Saturn-class case under `Shells::Spheroid` (H₂–He Rayleigh over a Lambertian 1-bar boundary;
@@ -3429,7 +3458,10 @@ generator, and the reference's sampling needs no domain tag.
     CO₂'s 13/3 as the same linear triatomic, medium confidence (NIST-JANAF's c_p at 298 K is 7%
     higher). _Closed set, for the composition audit:_ the table is keyed by `Gas`, so a gas joins
     it with its c_p ÷ R when T3.b's list grows. _Sixteen since T3.b's follow-up:_ CO at 7/2, and
-    H₂S and C₂H₆ at 4 (C₂H₆'s c_p near 100 K).
+    H₂S and C₂H₆ at 4 (C₂H₆'s c_p near 100 K). C₂H₆'s N = 6 holds only below about 120 K (its c_p
+    is 52.49 J mol⁻¹ K⁻¹ at 298 K; "Deviations in T3.b's follow-up, as built"), so the heat
+    capacities need a temperature dependence, which galaxy plan 14's P14.T49.b adds to the
+    registry's gas rows (main, 2026-10-10).
   - _The integral in closed form._ Design note 3 integrates "from p_s upward … the local kT ÷ (μ m_u
     g) at each step". The column takes the same equation's exact solution instead, with no step
     error: the geopotential height Φ(p) = k ÷ (μ m_u g_ref) × ∫ T d ln p in closed form for both
@@ -3907,7 +3939,7 @@ generator, and the reference's sampling needs no domain tag.
     10⁻³ of a texel cannot pass with sebh's pair; taking Bruneton's changes R05's sampling.
 
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
-  `decision-r08-t6b-floor.md` §6; open, with main).
+  `decision-r08-t6b-floor.md` §6; scheduled in T7).
   - _The finding._ R05's sky view, aerial volume and ray march store radiance per unit of the
     sun's illuminance in `rgba16float`, with no scale.
     - From typical clear-sky illuminances (estimated, not measured), Earth's mean twilight sky is
@@ -3920,7 +3952,7 @@ generator, and the reference's sampling needs no domain tag.
   - _Why no check sees it._ The twin bound's floor passes such a table by construction.
     Verification records it as format-limited, and R08.T7's twilights and moonlit night, by hand,
     would show it.
-  - _Lean._
+  - _Lean, adopted 2026-10-10 and written into R08.T7's task._
     - The per-view tables are written per unit of a per-frame scale formed in `f64` (the drawn
       sources' sky scale, or the pre-exposure, as the composite's output is). The composite
       divides it out where `skyScale` multiplies today.
