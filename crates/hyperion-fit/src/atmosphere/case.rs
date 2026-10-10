@@ -12,7 +12,7 @@
 //!   "name": "earth",
 //!   "seed": 0,                                   // optional, 0 by default
 //!   "wavelengthsNm": [680, 550, 440],
-//!   "shells": { "kind": "sphere", "radiusM": 6371000 },
+//!   "shells": { "kind": "sphere", "radiusM": 6371000 },  // or a level spheroid, below
 //!   "topHeightM": 100000,
 //!   "groundAlbedo": [0.3, 0.3, 0.3],             // Lambertian, per wavelength
 //!   "terms": [{
@@ -35,6 +35,15 @@
 //! }
 //! ```
 //!
+//! - **Shells.** `sphere`, concentric spheres about a ground of radius `radiusM`, or `spheroid`,
+//!   a body's level spheroid as the client's `bodyGravity` gives it (`view/atmosphere/oblate.ts`,
+//!   R08.T3.d), `{ "kind": "spheroid", "equatorialRadiusM": a, "polarRadiusM": c, "gmM3S2": GM,
+//!   "angularVelocityRadS": ω, "gravityOffsetMS2": 0 }`: its `LevelSpheroid`, ω being Design note
+//!   17's `ω_fig`, and its `gravityOffsetMS2`, optional and 0 by default; 0 < c ≤ a, ω below
+//!   breakup, and the gravity positive at the equator and the poles. On a spheroid every profile
+//!   is read at the gravity-scaled height h\* = h g(φ) ÷ `g_ref`, and `topHeightM` and the
+//!   profiles' heights are gravity-scaled heights (Design note 17; the `spheroid` module); an
+//!   observer's height is its geodetic height, and every latitude is geodetic.
 //! - **Density profiles** are the client's: `exponential` (e^(−h ÷ H)), `tent` (Bruneton 2017's
 //!   ozone layer), and `tabulated`, linear in relative density between nodes and constant beyond
 //!   the first and last, the rule a texture sampled with linear filtering and clamped edges
@@ -55,6 +64,8 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use super::spheroid::{BuildLevelSpheroidError, LevelSpheroid};
+
 /// The case format this tracer reads.
 pub const CASE_FORMAT: u32 = 1;
 
@@ -67,9 +78,7 @@ pub const MAX_DETECTOR_HALF_ANGLE_DEG: f64 = 10.0;
 /// The most wavelengths a case may trace: each sample's random stream is keyed by its wavelength
 /// in 16 bits.
 pub const MAX_WAVELENGTHS: usize = 1 << 16;
-/// The body's shells: the surfaces of constant height the medium is layered on (Design note 17).
-///
-/// Only the sphere is traced so far; R08.T12.d adds the level spheroid.
+/// The body's shells: the figure the medium is layered on (Design note 17).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(
     tag = "kind",
@@ -80,9 +89,43 @@ pub const MAX_WAVELENGTHS: usize = 1 << 16;
 pub enum Shells {
     /// Concentric spheres about a ground of radius `radius_m`, m.
     Sphere {
-        /// The ground's radius, m.
+        /// The ground's radius, m: for a body the client draws on its per-planet tables, R05's
+        /// `tableRadiusM`, (2a + c) ÷ 3.
         radius_m: f64,
     },
+    /// A body's level spheroid, the medium read at the gravity-scaled height h·g(φ) ÷ `g_ref`.
+    ///
+    /// The ellipsoid of revolution (a, a, c) about the z axis that carries GM and turns at ω, with
+    /// g(φ) = γ(φ) + the added gravity, γ Somigliana's normal gravity at geodetic latitude φ, and
+    /// `g_ref` = √(gₑ gₚ), free paths by delta tracking (R08.T12.d). The fields are the client's
+    /// `LevelSpheroid`'s and `BodyGravity.gravityOffsetMS2`.
+    Spheroid {
+        /// a, m, positive.
+        equatorial_radius_m: f64,
+        /// c, m, in (0, a].
+        polar_radius_m: f64,
+        /// GM, m³ s⁻², positive.
+        gm_m3_s2: f64,
+        /// ω, rad s⁻¹, below breakup (γₑ > 0); only ω² enters. Design note 17's `ω_fig`, the spin
+        /// under which the figure is level, which for a `rotational_and_tidal` or `capped` figure
+        /// is not the body's own. Written `angularVelocityRadS`, as the client's `LevelSpheroid`
+        /// has it.
+        #[serde(rename = "angularVelocityRadS")]
+        omega_rad_s: f64,
+        /// The gravity added to γ(φ) at every latitude, m s⁻²: ω²R on a `rotational_and_tidal`
+        /// figure (Design note 17), 0 by default.
+        #[serde(default)]
+        gravity_offset_m_s2: f64,
+    },
+}
+
+/// A case's figure, validated: what its shells are built over.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Figure {
+    /// A sphere about a ground of radius `radius_m`, m.
+    Sphere { radius_m: f64 },
+    /// A level spheroid.
+    Spheroid(LevelSpheroid),
 }
 
 /// A term's relative density as a function of height above the ground (the client's
@@ -167,9 +210,10 @@ pub(crate) struct LocalDirection {
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Observer {
-    /// Height above the ground, m: 0 on it, above the top of the atmosphere in orbit.
+    /// Height above the ground along its normal, m: 0 on it, above the top of the atmosphere in
+    /// orbit; on a spheroid the geodetic height, not the gravity-scaled one.
     pub(crate) height_m: f64,
-    /// Latitude, degrees; on a sphere it changes nothing but the frame.
+    /// Geodetic latitude, degrees; on a sphere it changes nothing but the frame.
     #[serde(default)]
     pub(crate) latitude_deg: f64,
 }
@@ -198,6 +242,7 @@ pub(crate) struct Geometry {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Aggregate {
     pub(crate) name: String,
+    /// Geodetic latitude, degrees.
     #[serde(default)]
     pub(crate) latitude_deg: f64,
     pub(crate) sun_directions: Vec<LocalDirection>,
@@ -229,7 +274,10 @@ struct CaseFile {
 /// It is made only by [`from_json`](Self::from_json) or [`read`](Self::read), which validate it,
 /// so the tracer can take its contents as given.
 #[derive(Debug, Clone, PartialEq)]
-pub struct AtmosphereCase(CaseFile);
+pub struct AtmosphereCase {
+    file: CaseFile,
+    figure: Figure,
+}
 
 /// An atmosphere case could not be read.
 #[derive(Debug, thiserror::Error)]
@@ -270,8 +318,8 @@ impl AtmosphereCase {
     /// the number of wavelengths or of suns.
     pub fn from_json(text: &str) -> Result<Self, ReadCaseError> {
         let file: CaseFile = serde_json::from_str(text).map_err(ReadCaseError::Json)?;
-        validate(&file)?;
-        Ok(Self(file))
+        let figure = validate(&file)?;
+        Ok(Self { file, figure })
     }
 
     /// Reads and validates the case in the file at `path`.
@@ -291,76 +339,74 @@ impl AtmosphereCase {
     /// The case's name.
     #[must_use]
     pub fn name(&self) -> &str {
-        &self.0.name
+        &self.file.name
     }
 
     /// The seed of the case's random draws.
     #[must_use]
     pub fn seed(&self) -> u64 {
-        self.0.seed
+        self.file.seed
     }
 
     /// The traced wavelengths, nm.
     #[must_use]
     pub fn wavelengths_nm(&self) -> &[f64] {
-        &self.0.wavelengths_nm
+        &self.file.wavelengths_nm
     }
 
     /// The body's shells.
     #[must_use]
     pub fn shells(&self) -> &Shells {
-        &self.0.shells
+        &self.file.shells
     }
 
-    /// The top of the atmosphere above the ground, m.
+    /// The figure the shells are built over, validated.
+    #[must_use]
+    pub(crate) fn figure(&self) -> &Figure {
+        &self.figure
+    }
+
+    /// The top of the atmosphere above the ground, m: on a spheroid a gravity-scaled height.
     #[must_use]
     pub fn top_height_m(&self) -> f64 {
-        self.0.top_height_m
+        self.file.top_height_m
     }
 
     /// How many geometries the case traces.
     #[must_use]
     pub fn geometry_count(&self) -> usize {
-        self.0.geometries.len()
+        self.file.geometries.len()
     }
 
     /// How many pairs of flux aggregates the case traces.
     #[must_use]
     pub fn aggregate_count(&self) -> usize {
-        self.0.aggregates.len()
-    }
-
-    /// The ground's radius, m.
-    #[must_use]
-    pub(crate) fn ground_radius_m(&self) -> f64 {
-        match self.0.shells {
-            Shells::Sphere { radius_m } => radius_m,
-        }
+        self.file.aggregates.len()
     }
 
     #[must_use]
     pub(crate) fn ground_albedo(&self) -> &[f64] {
-        &self.0.ground_albedo
+        &self.file.ground_albedo
     }
 
     #[must_use]
     pub(crate) fn terms(&self) -> &[Term] {
-        &self.0.terms
+        &self.file.terms
     }
 
     #[must_use]
     pub(crate) fn suns(&self) -> &[Sun] {
-        &self.0.suns
+        &self.file.suns
     }
 
     #[must_use]
     pub(crate) fn geometries(&self) -> &[Geometry] {
-        &self.0.geometries
+        &self.file.geometries
     }
 
     #[must_use]
     pub(crate) fn aggregates(&self) -> &[Aggregate] {
-        &self.0.aggregates
+        &self.file.aggregates
     }
 
     /// A geometry's detector cone, as a half-angle, degrees.
@@ -368,7 +414,7 @@ impl AtmosphereCase {
     pub(crate) fn detector_half_angle_deg(&self, geometry: &Geometry) -> f64 {
         geometry
             .detector_half_angle_deg
-            .unwrap_or(self.0.detector_half_angle_deg)
+            .unwrap_or(self.file.detector_half_angle_deg)
     }
 }
 
@@ -465,6 +511,60 @@ fn cone(half_angle_deg: f64, field: impl FnOnce() -> String) -> Result<(), ReadC
     )
 }
 
+/// The figure of `shells`, if it is one the tracer walks.
+fn shells(shells: &Shells) -> Result<Figure, ReadCaseError> {
+    use BuildLevelSpheroidError as E;
+    match *shells {
+        Shells::Sphere { radius_m } => {
+            require(
+                radius_m.is_finite() && radius_m > 0.0,
+                || "shells.radiusM".to_owned(),
+                "must be positive",
+            )?;
+            Ok(Figure::Sphere { radius_m })
+        }
+        Shells::Spheroid {
+            equatorial_radius_m,
+            polar_radius_m,
+            gm_m3_s2,
+            omega_rad_s,
+            gravity_offset_m_s2,
+        } => LevelSpheroid::new(
+            equatorial_radius_m,
+            polar_radius_m,
+            gm_m3_s2,
+            omega_rad_s,
+            gravity_offset_m_s2,
+        )
+        .map(Figure::Spheroid)
+        .map_err(|error| {
+            let (field, reason) = match error {
+                E::Radii { .. }
+                    if !(equatorial_radius_m.is_finite() && equatorial_radius_m > 0.0) =>
+                {
+                    ("equatorialRadiusM", "must be positive")
+                }
+                E::Radii { .. } => (
+                    "polarRadiusM",
+                    "must be positive and at most the equatorial radius",
+                ),
+                E::GravitationalParameter(_) => ("gmM3S2", "must be positive"),
+                E::Spin(_) => ("angularVelocityRadS", "must be finite"),
+                E::PastBreakup(_) => ("angularVelocityRadS", "spins the equator past breakup"),
+                E::GravityOffset(_) => (
+                    "gravityOffsetMS2",
+                    "must be finite and leave the gravity positive at the equator and the poles",
+                ),
+                E::Gravity => (
+                    "gmM3S2",
+                    "gives a normal gravity that is not finite and positive",
+                ),
+            };
+            invalid(format!("shells.{field}"), reason)
+        }),
+    }
+}
+
 /// Fails unless the profile is well formed.
 fn density(profile: &DensityProfile, field: &str) -> Result<(), ReadCaseError> {
     match profile {
@@ -553,8 +653,8 @@ fn term(term: &Term, count: usize, field: &str) -> Result<(), ReadCaseError> {
     }
 }
 
-/// Checks everything [`AtmosphereCase`] promises of its contents.
-fn validate(file: &CaseFile) -> Result<(), ReadCaseError> {
+/// Checks everything [`AtmosphereCase`] promises of its contents, and returns its figure.
+fn validate(file: &CaseFile) -> Result<Figure, ReadCaseError> {
     if file.format != CASE_FORMAT {
         return Err(ReadCaseError::UnsupportedFormat(file.format));
     }
@@ -581,13 +681,7 @@ fn validate(file: &CaseFile) -> Result<(), ReadCaseError> {
         |nm| nm > 0.0,
         "must be positive",
     )?;
-    match file.shells {
-        Shells::Sphere { radius_m } => require(
-            radius_m.is_finite() && radius_m > 0.0,
-            || "shells.radiusM".to_owned(),
-            "must be positive",
-        )?,
-    }
+    let figure = shells(&file.shells)?;
     require(
         file.top_height_m.is_finite() && file.top_height_m > 0.0,
         || "topHeightM".to_owned(),
@@ -631,7 +725,8 @@ fn validate(file: &CaseFile) -> Result<(), ReadCaseError> {
         || "geometries".to_owned(),
         "must not be empty when there are no aggregates",
     )?;
-    observations(file)
+    observations(file)?;
+    Ok(figure)
 }
 
 /// Checks the case's geometries and aggregates.
@@ -750,6 +845,84 @@ pub(crate) mod tests {
         })
     }
 
+    /// A small valid case over a Saturn-class level spheroid (the spheroid module's `SATURN`):
+    /// H₂–He Rayleigh of a 47 km scale height, a haze and a methane-like absorber over a
+    /// Lambertian 1-bar boundary, two wavelengths, one sun; ground views at the equator looking
+    /// north, at 60° looking east and at the pole, a view down from orbit at 30°, and one
+    /// aggregate at 45°. Illustrative figures, not Saturn's.
+    pub(crate) fn saturn_case() -> Value {
+        let (a, c, gm, omega) = super::super::spheroid::tests::SATURN;
+        json!({
+            "format": 1,
+            "name": "saturn-sample",
+            "wavelengthsNm": [550, 440],
+            "shells": {
+                "kind": "spheroid", "equatorialRadiusM": a, "polarRadiusM": c,
+                "gmM3S2": gm, "angularVelocityRadS": omega
+            },
+            "topHeightM": 40.0 * 47_000.0,
+            "groundAlbedo": [0.5, 0.45],
+            "terms": [
+                {
+                    "name": "h2-he",
+                    "density": { "kind": "exponential", "scaleHeightM": 47_000.0 },
+                    "scattering": [6.0e-6, 1.5e-5],
+                    "absorption": [0.0, 0.0],
+                    "phase": { "kind": "rayleigh", "depolarisation": [0.02, 0.02] }
+                },
+                {
+                    "name": "haze",
+                    "density": { "kind": "tent", "bottomM": 60_000.0, "peakM": 140_000.0, "topM": 240_000.0 },
+                    "scattering": [1.0e-6, 1.2e-6],
+                    "absorption": [1.0e-7, 2.0e-7],
+                    "phase": { "kind": "cornette-shanks", "asymmetry": 0.6 }
+                },
+                {
+                    "name": "absorber",
+                    "density": { "kind": "exponential", "scaleHeightM": 47_000.0 },
+                    "scattering": [0.0, 0.0],
+                    "absorption": [4.0e-7, 1.0e-8],
+                    "phase": { "kind": "none" }
+                }
+            ],
+            "suns": [{ "name": "sun", "irradiance": [1.86, 1.95] }],
+            "detectorHalfAngleDeg": 0.5,
+            "geometries": [
+                {
+                    "name": "equator-north",
+                    "observer": { "heightM": 0.0, "latitudeDeg": 0.0 },
+                    "view": { "zenithDeg": 80.0, "azimuthDeg": 0.0 },
+                    "sunDirections": [{ "zenithDeg": 40.0, "azimuthDeg": 150.0 }]
+                },
+                {
+                    "name": "sixty-east",
+                    "observer": { "heightM": 0.0, "latitudeDeg": 60.0 },
+                    "view": { "zenithDeg": 85.0, "azimuthDeg": 90.0 },
+                    "sunDirections": [{ "zenithDeg": 50.0, "azimuthDeg": 200.0 }]
+                },
+                {
+                    "name": "pole",
+                    "observer": { "heightM": 0.0, "latitudeDeg": 90.0 },
+                    "view": { "zenithDeg": 70.0, "azimuthDeg": 0.0 },
+                    "sunDirections": [{ "zenithDeg": 75.0, "azimuthDeg": 180.0 }]
+                },
+                {
+                    "name": "orbit-thirty",
+                    "observer": { "heightM": 5.0e6, "latitudeDeg": 30.0 },
+                    "view": { "zenithDeg": 180.0, "azimuthDeg": 0.0 },
+                    "sunDirections": [{ "zenithDeg": 30.0, "azimuthDeg": 0.0 }]
+                }
+            ],
+            "aggregates": [
+                {
+                    "name": "forty-five",
+                    "latitudeDeg": 45.0,
+                    "sunDirections": [{ "zenithDeg": 20.0, "azimuthDeg": 0.0 }]
+                }
+            ]
+        })
+    }
+
     fn read(value: &Value) -> Result<AtmosphereCase, ReadCaseError> {
         AtmosphereCase::from_json(&value.to_string())
     }
@@ -843,5 +1016,55 @@ pub(crate) mod tests {
             read(&case),
             Err(ReadCaseError::UnsupportedFormat(2))
         ));
+    }
+
+    #[test]
+    fn an_atmosphere_case_reads_a_level_spheroid_and_refuses_bad_ones() {
+        let case = read(&saturn_case()).unwrap();
+        assert!(matches!(
+            case.shells(),
+            Shells::Spheroid { polar_radius_m, omega_rad_s, .. }
+                if (*polar_radius_m - 54_364e3).abs() < 1e-6 && *omega_rad_s > 1.6e-4
+        ));
+        assert!(matches!(case.figure(), Figure::Spheroid(_)));
+        // The sphere is the spheroid with a = c; an added gravity is optional, 0 by default.
+        let mut round = saturn_case();
+        round["shells"]["polarRadiusM"] = round["shells"]["equatorialRadiusM"].clone();
+        round["shells"]["angularVelocityRadS"] = json!(0.0);
+        read(&round).unwrap();
+        let mut tidal = saturn_case();
+        tidal["shells"]["gravityOffsetMS2"] = json!(0.04);
+        assert!(matches!(
+            read(&tidal).unwrap().shells(),
+            Shells::Spheroid { gravity_offset_m_s2, .. } if (*gravity_offset_m_s2 - 0.04).abs() < 1e-15
+        ));
+        for (key, value, field) in [
+            ("polarRadiusM", json!(60_300e3), "shells.polarRadiusM"),
+            ("polarRadiusM", json!(0.0), "shells.polarRadiusM"),
+            ("equatorialRadiusM", json!(-1.0), "shells.equatorialRadiusM"),
+            ("gmM3S2", json!(0.0), "shells.gmM3S2"),
+            // Ten times Saturn's spin flings its equator off.
+            (
+                "angularVelocityRadS",
+                json!(1.64e-3),
+                "shells.angularVelocityRadS",
+            ),
+            // An added gravity that leaves the equator's below zero.
+            ("gravityOffsetMS2", json!(-9.1), "shells.gravityOffsetMS2"),
+        ] {
+            let mut case = saturn_case();
+            case["shells"][key] = value;
+            assert_eq!(invalid_field(&case), field, "{key}");
+        }
+        // The plan's Rust name is not the case's key, and a sphere's radius is not a spheroid's.
+        let mut case = saturn_case();
+        case["shells"]["omegaRadS"] = json!(1e-4);
+        assert!(matches!(read(&case), Err(ReadCaseError::Json(_))));
+        let mut case = saturn_case();
+        case["shells"]["radiusM"] = json!(6e7);
+        assert!(matches!(read(&case), Err(ReadCaseError::Json(_))));
+        let mut case = saturn_case();
+        case["shells"].as_object_mut().unwrap().remove("gmM3S2");
+        assert!(matches!(read(&case), Err(ReadCaseError::Json(_))));
     }
 }

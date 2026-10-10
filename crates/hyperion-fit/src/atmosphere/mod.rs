@@ -1,5 +1,6 @@
 //! The offline reference for the client's atmospheres: a backward Monte Carlo path tracer in
-//! `f64` over spherical shells, with no tables (plan R08, R08.T12.a; Design note 10).
+//! `f64` over spherical shells, or over a level spheroid's, with no tables (plan R08, R08.T12.a
+//! and R08.T12.d; Design notes 10 and 17).
 //!
 //! The client draws its atmospheres from Hillaire 2020's tables and, where his analytic multiple
 //! scattering drifts, from a bake by discrete ordinates (R08 Design notes 9 and 10). Every one of
@@ -18,6 +19,8 @@
 //!   Stokes mode);
 //! - [`optics`]: profiles, phase functions and the Rayleigh scattering matrix;
 //! - [`geometry`]: frames and the shells;
+//! - [`spheroid`]: the level spheroid of an oblate body, its normal gravity, geodetic coordinates
+//!   and quadric shells, over which the medium is read at the gravity-scaled height;
 //! - [`reference`]: the output and its moments.
 //!
 //! **Reproducible for any thread count**, by the crate's convention: the samples of each geometry,
@@ -35,6 +38,7 @@ pub mod case;
 mod geometry;
 mod optics;
 pub mod reference;
+mod spheroid;
 mod transport;
 
 use std::num::{NonZeroU64, NonZeroUsize};
@@ -107,7 +111,7 @@ fn shell_grid(case: &AtmosphereCase) -> ShellGrid {
         term.density
             .shell_heights(case.top_height_m(), &mut heights_m);
     }
-    ShellGrid::new(case.ground_radius_m(), case.top_height_m(), heights_m)
+    ShellGrid::new(case.figure(), case.top_height_m(), heights_m)
 }
 
 /// `n` as a `u64`.
@@ -158,16 +162,16 @@ pub fn trace_reference(
         .geometries()
         .iter()
         .enumerate()
-        .map(|(g, geometry)| (wide(g), Source::detector(case, geometry)))
+        .map(|(g, geometry)| (wide(g), Source::detector(case, &grid, geometry)))
         .collect();
     for (a, aggregate) in case.aggregates().iter().enumerate() {
         sources.push((
             (1 << 32) | wide(a),
-            Source::flux(case, aggregate, Level::Ground),
+            Source::flux(&grid, aggregate, Level::Ground),
         ));
         sources.push((
             (2 << 32) | wide(a),
-            Source::flux(case, aggregate, Level::Top),
+            Source::flux(&grid, aggregate, Level::Top),
         ));
     }
     let moments = trace_moments(
@@ -180,6 +184,7 @@ pub fn trace_reference(
     )?;
     let run = Run {
         case,
+        grid: &grid,
         media: &media,
         sources: &sources,
         moments,
@@ -266,6 +271,7 @@ fn trace_moments(
 /// aggregate's ground and top) and the moments of each task, wavelength-major.
 struct Run<'a> {
     case: &'a AtmosphereCase,
+    grid: &'a ShellGrid,
     media: &'a [Medium<'a>],
     sources: &'a [(u64, Source)],
     moments: Vec<[Moments; 3]>,
@@ -328,7 +334,7 @@ impl Run<'_> {
         let ground = self.case.geometry_count() + 2 * a;
         let top = ground + 1;
         let source = &self.sources[ground].1;
-        let up = source.origin_m.normalised();
+        let up = self.grid.vertical(source.origin_m);
         // Each sun above the horizon's μ₀F, with the transmittance of its beam to the ground.
         let beams = |w: usize| {
             source
@@ -367,7 +373,7 @@ mod tests {
 
     use super::*;
 
-    fn case_of(value: &Value) -> AtmosphereCase {
+    pub(crate) fn case_of(value: &Value) -> AtmosphereCase {
         AtmosphereCase::from_json(&value.to_string()).unwrap()
     }
 
@@ -500,6 +506,11 @@ mod tests {
         let four = trace(&rayleigh, Polarisation::Stokes, 1500, 4).to_json();
         assert_eq!(one, four);
         assert!(one.contains("\"stokes\""));
+        // And over a level spheroid.
+        let saturn = case::tests::saturn_case();
+        let one = trace(&saturn, Polarisation::Scalar, 300, 1).to_json();
+        let four = trace(&saturn, Polarisation::Scalar, 300, 4).to_json();
+        assert_eq!(one, four);
     }
 
     #[test]
@@ -869,5 +880,364 @@ mod tests {
                 incident[1]
             );
         }
+    }
+
+    /// The Earth-like sample case over the spheroid a = c = its sphere's radius with ω = 0, at
+    /// `seed`. R05's `tableRadiusM`, (2a + c) ÷ 3, is that radius too.
+    fn sample_case_as_a_spheroid(seed: u64) -> Value {
+        let mut case = case::tests::sample_case();
+        case["shells"] = json!({
+            "kind": "spheroid", "equatorialRadiusM": 6_371_000.0, "polarRadiusM": 6_371_000.0,
+            "gmM3S2": 3.986_004_418e14, "angularVelocityRadS": 0.0
+        });
+        case["seed"] = json!(seed);
+        case
+    }
+
+    /// Asserts that every radiance and flux of `a` and `b` agrees within `sigmas` of their
+    /// combined standard errors plus `relative` of the value, and that their direct beams agree.
+    fn assert_traces_agree(
+        a: &ReferenceRadiances,
+        b: &ReferenceRadiances,
+        sigmas: f64,
+        relative: f64,
+    ) {
+        let close = |x: f64, sx: f64, y: f64, sy: f64| {
+            (x - y).abs() <= sigmas * math::hypot(sx, sy) + relative * x.abs()
+        };
+        for (g, h) in a.geometries().iter().zip(b.geometries()) {
+            for w in 0..g.radiance().len() {
+                let (x, y) = (g.radiance()[w], h.radiance()[w]);
+                let (sx, sy) = (g.standard_error()[w], h.standard_error()[w]);
+                assert!(
+                    close(x, sx, y, sy),
+                    "{} at {w}: {x} ± {sx} against {y} ± {sy}",
+                    g.name()
+                );
+                let (dx, dy) = (
+                    g.sun_optical_depth()[0][w].unwrap(),
+                    h.sun_optical_depth()[0][w].unwrap(),
+                );
+                assert!(
+                    (dx - dy).abs() <= 1e-9 * dx.max(dy),
+                    "{} at {w}: the sun's depth {dx} against {dy}",
+                    g.name()
+                );
+            }
+        }
+        for (f, k) in a.aggregates().iter().zip(b.aggregates()) {
+            for w in 0..f.incident_top().len() {
+                let (x, y) = (f.incident_top()[w], k.incident_top()[w]);
+                assert!((x / y - 1.0).abs() < 1e-12, "{} at {w}: {x} {y}", f.name());
+                let (x, y) = (f.direct_ground()[w], k.direct_ground()[w]);
+                assert!((x / y - 1.0).abs() < 1e-9, "{} at {w}: {x} {y}", f.name());
+                let (x, sx) = (f.diffuse_ground()[w], f.diffuse_ground_standard_error()[w]);
+                let (y, sy) = (k.diffuse_ground()[w], k.diffuse_ground_standard_error()[w]);
+                assert!(
+                    close(x, sx, y, sy),
+                    "{} at {w}: {x} ± {sx} against {y} ± {sy}",
+                    f.name()
+                );
+                let (x, sx) = (f.upwelling_top()[w], f.upwelling_top_standard_error()[w]);
+                let (y, sy) = (k.upwelling_top()[w], k.upwelling_top_standard_error()[w]);
+                assert!(
+                    close(x, sx, y, sy),
+                    "{} at {w}: {x} ± {sx} against {y} ± {sy}",
+                    f.name()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_spheroid_with_a_equal_to_c_agrees_with_the_sphere() {
+        // R08.T12.d: a = c with ω = 0 on the Earth-like sample case, against `Shells::Sphere` of
+        // the same radius. On the same draws the paths are the sphere's to rounding (measured
+        // 4 × 10⁻¹³), so they agree to 10⁻⁹, far inside the task's 3σ. On independent draws (seed
+        // 1) each of the 8 stochastic values is held to 4σ, a family-wise α of 5 × 10⁻⁴ (the
+        // sim-determinism rule's α = 10⁻³; 3σ over 8 values would be 2%). The slow test below
+        // repeats the first at 10⁵ samples.
+        let sphere = trace(&case::tests::sample_case(), Polarisation::Scalar, 1500, 4);
+        let same = trace(&sample_case_as_a_spheroid(0), Polarisation::Scalar, 1500, 4);
+        assert_traces_agree(&sphere, &same, 0.0, 1e-9);
+        let independent = trace(&sample_case_as_a_spheroid(1), Polarisation::Scalar, 1500, 4);
+        assert_traces_agree(&sphere, &independent, 4.0, 0.0);
+    }
+
+    #[test]
+    #[ignore = "slow: 10⁵ samples of each source, over a sphere and a spheroid; about 2 minutes on 4 threads"]
+    fn atmosphere_spheroid_with_a_equal_to_c_follows_the_spheres_paths() {
+        // The fast test's first comparison over 10⁵ paths a source, so that rare paths (grazing,
+        // reflected many times, rouletted) are held to the sphere's too. Independent draws are not
+        // compared here: their difference is the two runs' noise alone, since the paths are the
+        // same, and 3σ over these 8 values fails by chance about 2% of the time (at 10⁵ samples
+        // one stood at 3.2σ; R08's Risks).
+        let sphere = trace(
+            &case::tests::sample_case(),
+            Polarisation::Scalar,
+            100_000,
+            4,
+        );
+        let spheroid = trace(
+            &sample_case_as_a_spheroid(0),
+            Polarisation::Scalar,
+            100_000,
+            4,
+        );
+        for g in sphere.geometries() {
+            let (radiance, error) = (g.radiance()[0], g.standard_error()[0]);
+            assert!(
+                error < 2e-3 * radiance,
+                "{}: {radiance} ± {error}",
+                g.name()
+            );
+        }
+        assert_traces_agree(&sphere, &spheroid, 0.0, 1e-9);
+    }
+
+    #[test]
+    fn atmosphere_spheroid_absorbing_only_medium_gives_beer_lambert() {
+        // An absorbing-only Saturn-class medium seen from orbit straight down at the equator, at
+        // 45° and at the pole: the ground's reflection through the vertical column and the sun's
+        // slant one, against e^(−τ) with the vertical τ = σH ÷ s(φ) (the column read at h* = s h)
+        // and the sun's τ by `f64` quadrature along its chord (transport's tests).
+        let (sigma, height, top) = ([3e-6, 1e-5], 47_000.0, 40.0 * 47_000.0);
+        let (albedo, irradiance) = ([0.3, 0.6], [1.7, 2.0]);
+        let (a, c, gm, omega) = spheroid::tests::SATURN;
+        let places = [
+            (0.0, (60.0, 90.0)),
+            (45.0, (30.0, 200.0)),
+            (90.0, (60.0, 0.0)),
+        ];
+        let geometries: Vec<Value> = places
+            .iter()
+            .map(|&(latitude, sun)| {
+                let mut g = geometry(&format!("orbit-{latitude}"), 5e6, (180.0, 0.0), sun);
+                g["observer"]["latitudeDeg"] = json!(latitude);
+                g
+            })
+            .collect();
+        let case = json!({
+            "format": 1, "name": "saturn-absorbing",
+            "wavelengthsNm": [550, 440],
+            "shells": {
+                "kind": "spheroid", "equatorialRadiusM": a, "polarRadiusM": c,
+                "gmM3S2": gm, "angularVelocityRadS": omega
+            },
+            "topHeightM": top,
+            "groundAlbedo": albedo,
+            "terms": [{
+                "name": "absorber",
+                "density": { "kind": "exponential", "scaleHeightM": height },
+                "scattering": [0.0, 0.0], "absorption": sigma, "phase": { "kind": "none" }
+            }],
+            "suns": [{ "name": "sun", "irradiance": irradiance }],
+            "detectorHalfAngleDeg": 0.0,
+            "geometries": geometries
+        });
+        let reference = trace(&case, Polarisation::Scalar, 64, 2);
+        let grid = shell_grid(&case_of(&case));
+        // s(φ) from the client's printed gravities (spheroid's tests).
+        let (gamma_e, gamma_p) = transport::tests::SATURN_GAMMA;
+        let g_ref = (gamma_e * gamma_p).sqrt();
+        let s_at = [
+            gamma_e / g_ref,
+            10.466_679_804_152_758 / g_ref,
+            gamma_p / g_ref,
+        ];
+        for ((traced, &(latitude, sun)), s) in reference.geometries().iter().zip(&places).zip(s_at)
+        {
+            let frame = geometry::LocalFrame::at_latitude(radians(latitude));
+            let ground = grid.point(&frame, 0.0);
+            let towards_sun = frame.direction(radians(sun.0), radians(sun.1));
+            for w in 0..2 {
+                let vertical = sigma[w] * height / s * -math::exp_m1(-top / height);
+                let slant = transport::tests::saturn_chord_depth(ground, towards_sun, top, |h| {
+                    sigma[w] * math::exp(-h.max(0.0) / height)
+                });
+                let expected = albedo[w] / PI
+                    * irradiance[w]
+                    * math::cos(radians(sun.0))
+                    * math::exp(-vertical - slant);
+                let radiance = traced.radiance()[w];
+                assert!(
+                    (radiance / expected - 1.0).abs() < 1e-6,
+                    "{} at {w}: {radiance} against {expected}",
+                    traced.name()
+                );
+                assert!(traced.standard_error()[w] < 1e-12 * radiance);
+            }
+        }
+    }
+
+    /// A plane-parallel layer over a level spheroid: 1 km (gravity-scaled) of uniform medium over
+    /// a figure of a = 10¹² m and c = 0.8a turning so that s runs from 0.93 at the equator to 1.08
+    /// at the poles, where its curvature moves nothing at the precision tested.
+    fn spheroid_slab(terms: &Value, albedo: &Value, geometries: &Value) -> (Value, [f64; 2]) {
+        let (a, c, gm, omega) = (1e12, 0.8e12, 1e30, 4e-4);
+        let figure = spheroid::LevelSpheroid::new(a, c, gm, omega, 0.0).unwrap();
+        let mut case = slab(terms, albedo, geometries);
+        case["shells"] = json!({
+            "kind": "spheroid", "equatorialRadiusM": a, "polarRadiusM": c,
+            "gmM3S2": gm, "angularVelocityRadS": omega
+        });
+        (
+            case,
+            [
+                figure.gravity_ratio(1.0, 0.0),
+                figure.gravity_ratio(0.0, 1.0),
+            ],
+        )
+    }
+
+    #[test]
+    fn atmosphere_spheroid_thin_layer_matches_single_scattering_at_its_scaled_depth() {
+        // The single-scattering test of the sphere at the equator and the pole of a flattened
+        // plane-parallel layer: the layer's depth there is τ ÷ s, read at h* = s h.
+        let (sigma_s, sigma_a, top) = (1e-8, 5e-9, 1000.0);
+        let rho = [0.0, 0.03];
+        let terms = json!([{
+            "name": "gas", "density": uniform(),
+            "scattering": [sigma_s, sigma_s], "absorption": [sigma_a, sigma_a],
+            "phase": { "kind": "rayleigh", "depolarisation": rho }
+        }]);
+        let (down_view, down_sun) = ((60.0, 90.0), (30.0, 0.0));
+        let (up_view, up_sun) = ((120.0, 45.0), (50.0, 200.0));
+        let (_, [s_equator, s_pole]) = spheroid_slab(&terms, &json!([0.0, 0.0]), &json!([]));
+        assert!(s_equator < 0.95 && s_pole > 1.05, "{s_equator} {s_pole}");
+        let mut geometries = Vec::new();
+        for (place, latitude, s) in [("equator", 0.0, s_equator), ("pole", 90.0, s_pole)] {
+            for (name, height, view, sun) in [
+                ("down", 0.0, down_view, down_sun),
+                ("up", top / s, up_view, up_sun),
+            ] {
+                let mut g = geometry(&format!("{place}-{name}"), height, view, sun);
+                g["observer"]["latitudeDeg"] = json!(latitude);
+                geometries.push(g);
+            }
+        }
+        let (case, _) = spheroid_slab(&terms, &json!([0.0, 0.0]), &json!(geometries));
+        let reference = trace(&case, Polarisation::Scalar, 2000, 4);
+        let omega = sigma_s / (sigma_s + sigma_a);
+        let irradiance = [PI, 2.0];
+        for (w, (&depolarisation, &irradiance)) in rho.iter().zip(&irradiance).enumerate() {
+            let f = irradiance * omega;
+            let phase = |view, sun| rayleigh(depolarisation, cos_between(view, sun));
+            let traced = reference.geometries();
+            for (pair, s) in traced.chunks(2).zip([s_equator, s_pole]) {
+                let tau = (sigma_s + sigma_a) * top / s;
+                let (mu, mu0) = (
+                    math::cos(radians(down_view.0)),
+                    math::cos(radians(down_sun.0)),
+                );
+                let down = f * phase(down_view, down_sun) * mu0 / (mu0 - mu)
+                    * (math::exp(-tau / mu0) - math::exp(-tau / mu));
+                let (mu, mu0) = (-math::cos(radians(up_view.0)), math::cos(radians(up_sun.0)));
+                let up = f * phase(up_view, up_sun) * mu0 / (mu0 + mu)
+                    * -math::exp_m1(-tau * (1.0 / mu0 + 1.0 / mu));
+                for (traced, expected) in pair.iter().zip([down, up]) {
+                    let radiance = traced.radiance()[w];
+                    assert!(
+                        (radiance / expected - 1.0).abs() < 1e-4,
+                        "{} at {w}: {radiance} against {expected}",
+                        traced.name()
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_spheroid_conservative_layer_conserves_energy() {
+        // τ ÷ s of Rayleigh scattering over a black ground (550 nm) and a white one (440 nm), at
+        // the equator and the pole of the flattened layer: the aggregates' sources stand on the
+        // spheroid's ground and its top, and face its vertical.
+        let terms = json!([{
+            "name": "gas", "density": uniform(),
+            "scattering": [1e-3, 1e-3], "absorption": [0.0, 0.0],
+            "phase": { "kind": "rayleigh", "depolarisation": [0.0, 0.0] }
+        }]);
+        let (mut case, _) = spheroid_slab(&terms, &json!([0.0, 1.0]), &json!([]));
+        case["aggregates"] = json!([
+            { "name": "equator", "latitudeDeg": 0.0,
+              "sunDirections": [{ "zenithDeg": 30.0, "azimuthDeg": 0.0 }] },
+            { "name": "pole", "latitudeDeg": 90.0,
+              "sunDirections": [{ "zenithDeg": 60.0, "azimuthDeg": 0.0 }] }
+        ]);
+        let reference = trace(&case, Polarisation::Scalar, 10_000, 4);
+        for aggregate in reference.aggregates() {
+            let incident = aggregate.incident_top();
+            let total = aggregate.upwelling_top()[0]
+                + aggregate.direct_ground()[0]
+                + aggregate.diffuse_ground()[0];
+            let sigma = math::hypot(
+                aggregate.upwelling_top_standard_error()[0],
+                aggregate.diffuse_ground_standard_error()[0],
+            );
+            assert!(
+                (total - incident[0]).abs() < 4.0 * sigma,
+                "{}: {total} against {} ± {sigma}",
+                aggregate.name(),
+                incident[0]
+            );
+            assert!(
+                sigma < 0.015 * incident[0],
+                "{}: {sigma} of {}",
+                aggregate.name(),
+                incident[0]
+            );
+            let up = aggregate.upwelling_top()[1];
+            let sigma = aggregate.upwelling_top_standard_error()[1];
+            assert!(
+                (up - incident[1]).abs() < 4.0 * sigma,
+                "{}: {up} against {} ± {sigma}",
+                aggregate.name(),
+                incident[1]
+            );
+        }
+        // The direct beam is e^(−τ ÷ s μ₀) of the incident flux: the layer is thinner where
+        // gravity is stronger.
+        let (_, [s_equator, s_pole]) = spheroid_slab(&terms, &json!([0.0, 0.0]), &json!([]));
+        for (aggregate, (s, zenith)) in reference
+            .aggregates()
+            .iter()
+            .zip([(s_equator, 30.0), (s_pole, 60.0)])
+        {
+            let expected = math::exp(-1.0 / (s * math::cos(radians(zenith))));
+            let direct = aggregate.direct_ground()[0] / aggregate.incident_top()[0];
+            assert!(
+                (direct / expected - 1.0).abs() < 1e-6,
+                "{}: {direct} against {expected}",
+                aggregate.name()
+            );
+        }
+    }
+
+    #[test]
+    fn atmosphere_spheroid_reference_bits_are_pinned() {
+        // The spheroid's counterpart of `atmosphere_reference_bits_are_pinned`, on the
+        // Saturn-class sample case: a change to the quadrics, the geodetic conversion, the
+        // normal gravity or the majorants shows here before it moves a committed reference. A
+        // ground view at 60°, the top flux at 45°, the view down from orbit (the entry through
+        // the top), and the pole's direct beam, which no draw touches.
+        let reference = trace(&case::tests::saturn_case(), Polarisation::Scalar, 64, 1);
+        let pinned = [
+            format!("{:?}", reference.geometries()[1].radiance()[0]),
+            format!("{:?}", reference.aggregates()[0].upwelling_top()[1]),
+            format!("{:?}", reference.geometries()[3].radiance()[0]),
+            format!(
+                "{:?}",
+                reference.geometries()[2].sun_optical_depth()[0][0].unwrap()
+            ),
+        ];
+        assert_eq!(
+            pinned,
+            [
+                "0.2276473839689261",
+                "0.8929036838129342",
+                "0.2583970654014467",
+                "1.3245982101763956"
+            ]
+        );
     }
 }

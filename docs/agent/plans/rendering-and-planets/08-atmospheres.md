@@ -2919,8 +2919,8 @@ generator, and the reference's sampling needs no domain tag.
   Design note 17 therefore has every body use gravity-scaled height h·g(φ)/g_ref, with transmittance
   in curvature slices over κ = s·R_α ÷ R_ref and the multiple-scattering and baked tables in
   latitude bands. Earth-like bodies get one of each. Four things are still open:
-  - the slice and band counts are computed, not measured, and wait on R08.T12.d's spheroid mode
-    and T12.b's Saturn-class case;
+  - the slice and band counts are computed, not measured, and wait on T12.b's Saturn-class case,
+    traced in R08.T12.d's spheroid mode (built);
   - the extra bakes may push a Saturn-class world, or a giant at plan 14's cap (6–7 bands), past
     `BAKE_CEILING_S`, and the capped giant past 2 MB (Design note 11);
   - zonal-wind gravity (about 1.4% on Saturn), the real 1-bar surface's departure from the
@@ -3780,7 +3780,9 @@ generator, and the reference's sampling needs no domain tag.
     the committed references for it or lists them in `.prettierignore`.
   - _The estimator._ Absorption is a weight (quadrature, so an absorbing-only medium gives
     Beer–Lambert exactly); free paths by delta tracking against per-shell majorants, so T12.d
-    changes only the shells and the majorant; the first collision on the view ray is forced;
+    changes only the shells and the majorant (and, as built, where the detector and the aggregates
+    stand and the ground's normal: "Deviations in T12.d, as built"); the first collision on the
+    view ray is forced;
     next-event estimation to every sun integrates the transmittance by 8-point Gauss–Legendre per
     shell; the ground is Lambertian; Russian roulette below 0.1 of each branch's starting weight
     (an absolute threshold left a 10 H limb's multiple scattering at 8% noise, against 0.3%
@@ -3845,9 +3847,112 @@ generator, and the reference's sampling needs no domain tag.
   function kinds (Rayleigh, Cornette–Shanks, isotropic, none: no tabulated phase until T12.c, so a
   Mie or aggregate aerosol cannot be referenced yet); the Stokes mode's kinds (Rayleigh, isotropic,
   none; R08.T12.c adds tabulated matrices and the `depolarising` mark, `decision-r08-vector.md`);
-  the ground (Lambertian only: no BRDF, ocean or glint, which are R11's); and the shells
-  (the sphere until T12.d). Ruled by decision-composition: these are physics classes and stay
-  closed.
+  the ground (Lambertian only: no BRDF, ocean or glint, which are R11's); and the shells: the
+  sphere, or an oblate level spheroid of revolution under every figure law (0 < c ≤ a, spinning
+  below breakup; R08.T12.d), with no prolate or triaxial figure, which the generator does not make.
+  Ruled by decision-composition: these are physics classes and stay closed.
+- **Deviations in T12.d, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/spheroid.rs`,
+  new, and `case.rs`, `geometry.rs`, `transport.rs`, `mod.rs`).
+  - _The case's spheroid._ `Shells::Spheroid` keeps the Provides' Rust fields and adds a fifth,
+    `gravity_offset_m_s2`. Its JSON is the client's `bodyGravity` result field for field
+    (`oblate.ts`, with R08.T3.d's figure-law follow-up, 533bbfbc): kind `spheroid` with
+    `equatorialRadiusM`, `polarRadiusM`, `gmM3S2`, `angularVelocityRadS` and `gravityOffsetMS2`, the
+    last optional and 0 by default. So ω's key is `angularVelocityRadS` (`omegaRadS` is refused,
+    tested), ω is Design note 17's ω_fig, and the offset is the client's `gravityOffsetMS2`. The
+    plan's "rotational figures; a tidal case would take ω_fig and ω²R" is built for every law:
+    g(φ) = γ(φ) + the offset, g_ref = √(g_e g_p) of that g, s = g ÷ g_ref, held to the client's
+    printed g_ref and s for one figure under `rotational_and_tidal`, `capped` and `rotational` to
+    10⁻¹², beside WGS 84's γ_e and γ_p to 10⁻⁹ and the client's γ for WGS 84, Saturn and Jupiter
+    to 10⁻¹². `LevelSpheroid::new` returns `BuildLevelSpheroidError` (radii, GM, spin, past
+    breakup, offset, a gravity that is not finite), which the case maps to its field, and the
+    validated figure is kept in `AtmosphereCase` for the grid (`case::Figure`). `CASE_FORMAT` stays
+    1: no case is committed.
+  - _Heights and latitudes._ On a spheroid `topHeightM` and every profile height are
+    gravity-scaled heights h\*; an observer's height is geodetic, and every latitude (an
+    observer's and an aggregate's) is geodetic, the frame's up the datum's normal. So T12.b's
+    writer places a limb at n H at the geodetic height n H ÷ s(φ). A body traced on one sphere
+    takes R05's `tableRadiusM`, (2a + c) ÷ 3, as `radiusM`.
+  - _Vermeille, in Karney's form._ Outside the evolute (8r³ + e⁴pq > 0) u = r + ½R + 2r² ÷ R,
+    R = ∛((√(e⁴pq) + √(8r³ + e⁴pq))²): Karney 2011's u = r + T + r² ÷ T (arXiv:1102.1215, App. B),
+    the same root as Vermeille's for either sign of r, with no division by r and none of his form's
+    cancellation where r < 0. Inside it (only above the poles of a body with c ÷ a < 1 ÷ √2, which
+    `FLATTENING_CAP` 0.2 never reaches) u is the cubic's largest root by Viète's trigonometric
+    form; any root gives the same k. Held to a brute-force foot point (10⁻¹² in latitude, 10⁻⁹ a in
+    height) and round-tripped for c ÷ a from 1 to 0.2 (10⁻¹³ a). h\* is computed with √(D² + z²)
+    cancelled from Somigliana's part of h·s (the same value to 10⁻¹³). R08.T6.e's closed form may
+    port this form.
+  - _The shells_ are quadrics (a + Hₖ ÷ sₑ, c + Hₖ ÷ sₚ) through h\* = Hₖ at the equator and the
+    poles, at T12.a's split heights, the datum the ground. Between, they depart from h\* = Hₖ by up
+    to 1.7% of Hₖ on Saturn (at 46.5°), 0.5% on Jupiter and 4 × 10⁻⁶ on Earth (computed), always
+    outward. The top is the quadric through h\* = `topHeightM`, so the medium reaches up to 1.7%
+    past it, each profile read there as past its top: T12.b puts the top where that is negligible
+    (an exponential at 40 H; T3.a's column, whose last level holds 10⁻⁷ of the ground's density,
+    adds about 2 × 10⁻⁵ of a limb's optical depth there).
+  - _The majorant is per shell_, as T12.a's estimator has it, not per path. Each shell's bounds of
+    h\* come from a 1,025-latitude scan of s hₖ(φ) along the datum's normals, widened by the
+    largest step between neighbouring latitudes (some 300 times the most the scan can miss on
+    Saturn, computed), and each profile's maximum over them gives the majorant, the density at the
+    lowest h\* a shell can hold for an exponential. A looser majorant costs null collisions, not
+    bias (tested on a grid of the meridian half-plane).
+  - _Beyond the shells and the majorant_, the figure sets the detector's origin, the aggregates'
+    ground and top points, the ground's normal at a reflection and the aggregates' vertical.
+    `ShellGrid` is an enum over `SphereShells` (T12.a's struct, its arithmetic unchanged, so
+    `atmosphere_reference_bits_are_pinned` stands as T12.a pinned it) and `SpheroidShells`; a
+    distance clamped at zero no longer goes through `max`, which may return either zero at −0 and
+    so differ between targets (the determinism audit), with the same bits wherever the distance is
+    not a signed zero. `atmosphere_spheroid_reference_bits_are_pinned` pins four values of a
+    Saturn-class sample case: a ground view, the top flux, a view from orbit (the entry through the
+    top) and a pole's direct beam, which no draw touches.
+  - _Beer–Lambert on a spheroid._ A profile's kink lies on a surface of constant h\*, which the
+    quadrics leave, so a piece's 8-point rule can straddle one. On Saturn's grazing chords
+    (horizontal from 100 m at the equator north and east and at the pole, and tangent at 1 H and
+    3 H), against an independent `f64` quadrature (bisection for the foot point, TR8350.2's form of
+    Somigliana from the client's printed γ_e and γ_p): an exponential agrees to 4 × 10⁻¹⁰ and
+    T3.a's column (1,024 levels even in ln p, each a slight kink) to 3 × 10⁻⁹, both held to the
+    task's 10⁻⁶; a tent, whose kinks are sharp, to 1.4 × 10⁻⁶, held to 10⁻⁵. So `saturn-oblate` on
+    T3.a's column meets Design note 10's 10⁻⁶ direct beam in the reference with room to spare; a
+    sharp-kinked profile on a strongly flattened body would want each piece split where the ray
+    crosses a kink's h\*, which is not built.
+  - _a = c against the sphere_, on the Earth-like sample case (`case::tests::sample_case`), since
+    T12.b's `earth` case comes later. The fast test (1,500 samples) holds the same draws to 10⁻⁹
+    (4 × 10⁻¹³ measured: the paths are the sphere's), far inside the task's 3σ, and independent
+    draws (seed 1) to 4σ on each of the 8 stochastic values, a family-wise α of 5 × 10⁻⁴ under the
+    sim-determinism rule's α = 10⁻³ (3σ would be 2%). The Testing section's slow comparison is
+    `atmosphere_spheroid_with_a_equal_to_c_follows_the_spheres_paths` (`#[ignore]`, 104 s on 4
+    threads in the slow-test profile, run by `just test-slow atmosphere_spheroid`), the same draws
+    to 10⁻⁹ at 10⁵ samples, rare paths included. At 10⁵ independent samples one of the 8 values stood at 3.2σ, the two
+    runs' noise alone, since the paths are the same.
+  - _Tests_ beyond the three named: the client's printed gravities, rotational and under every
+    figure law; a still sphere's GM ÷ R²; the series' join with the closed form; out-of-range
+    figures refused, by variant and by the case's field; the geodetic round trip and the
+    foot-point search; h\* = h·s; the shells' heights at the equator and the poles, their h\*
+    bounds, walks, grazing passes, entry from orbit and the ground's vertical; majorants bounding
+    the coefficient; views down from orbit at 0°, 45° and 90° through the vertical column and the
+    sun's slant one (10⁻⁶); a flattened plane-parallel slab's single scattering at τ ÷ s (10⁻⁴),
+    its energy conservation and its direct beam e^(−τ ÷ s μ₀) (10⁻⁶); one and four threads
+    identical on the spheroid.
+  - _Cost, provisional:_ 312 µs a path on the a = c Earth-like sample case against the sphere's
+    117 µs, and 354 µs on the Saturn-class sample case (three terms, 38 shells), one thread, load
+    average 7.7, the dev profile at `opt-level` 2; h\* costs 79 ns, where the sphere's height is a
+    square root. The quiet-machine run is pending.
+  - _Scope._ Oblate spheroids of revolution, 0 < c ≤ a, spinning below breakup, under every figure
+    law through ω_fig and the offset. Prolate and triaxial figures are refused: the generator makes
+    none (its synchronous 4 : 1 : 3 figure is drawn as its spheroid), a triaxial body's geodetic
+    conversion has no closed form in radicals (a sextic: Diaz-Toca, Marín and Necula 2020,
+    arXiv:1909.06452), and Somigliana's is a level ellipsoid of revolution's. `oblate.ts`'s caveats
+    (winds, the 1-bar surface, T(p) by latitude, the sectoral tide) hold here unchanged.
+  - _Open, raised with "main", each with its lean:_
+    - _Design note 10's 10⁻⁶ direct beam on spheroid cases._ The client's sliced transmittance
+      promises 0.5% at grazing and 0.1% at μ ≥ 0.2 (R08.T6.e), so on `saturn-oblate` a 10⁻⁶ check
+      of the client's direct beam cannot pass. Lean: on spheroid cases hold the reference's
+      `sunOpticalDepth` to 10⁻⁶ against an `f64` quadrature (as T12.d's test does) and the
+      client's by T6.e's bounds, R08.T13 recording which.
+    - _"Geopotential height" (a wording finding, from the science check)._ Design note 17 and
+      `oblate.ts` call h\* the U.S. Standard Atmosphere 1976's geopotential height. It is that to
+      first order in h ÷ R only (NASA TR R-459, eq. 15): g is held at γ(φ) along the normal and
+      `g_ref` stands for g₀′, which leaves out h² ÷ R, about 0.08 H at 10 H on Saturn. Client and
+      tracer share it, so nothing gated moves. Lean: reword the note and `oblate.ts` (the tracer's
+      doc says so already).
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:

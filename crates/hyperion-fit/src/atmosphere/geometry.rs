@@ -1,16 +1,20 @@
-//! Vectors, local frames and the spherical shells the tracer walks.
+//! Vectors, local frames and the shells the tracer walks: concentric spheres, or quadrics over a
+//! level spheroid ([`super::spheroid`]).
 //!
 //! The body's centre is the origin and its axis z; positions are in metres. A ray crosses the
-//! shells one at a time: from a point in shell k it leaves through the sphere below, if it reaches
-//! it, or else through the one above, and each crossing is solved in the form of the quadratic's
-//! roots that loses no digits to cancellation (Press et al. 2007, _Numerical Recipes_, 3rd ed.,
-//! §5.6).
+//! shells one at a time: from a point in shell k it leaves through the boundary below, if it
+//! reaches it, or else through the one above, and each crossing is solved in the form of the
+//! quadratic's roots that loses no digits to cancellation (Press et al. 2007, _Numerical Recipes_,
+//! 3rd ed., §5.6). [`ShellGrid`] dispatches to the figure's shells; the sphere's arithmetic is
+//! R08.T12.a's, unchanged.
 
 use core::f64::consts::PI;
 use core::ops::{Add, Mul, Neg, Sub};
 
 use hyperion_sim::math;
 
+use super::case::Figure;
+use super::spheroid::SpheroidShells;
 use crate::tasks::displaced_forms::births::Draws;
 
 /// A vector in the body's frame: a position in metres, or a dimensionless direction.
@@ -86,8 +90,11 @@ impl Mul<f64> for Vec3 {
     }
 }
 
-/// The local frame at a latitude on the meridian of longitude 0: up, north and east, a
+/// The local frame at a geodetic latitude on the meridian of longitude 0: up, north and east, a
 /// right-handed triple (east × north = up).
+///
+/// Up is (cos φ, 0, sin φ), the datum's normal at geodetic latitude φ on a spheroid, which on a
+/// sphere is the geocentric direction too.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LocalFrame {
     pub(crate) up: Vec3,
@@ -189,13 +196,160 @@ pub(crate) struct Exit {
     pub(crate) next: Next,
 }
 
-/// The atmosphere's concentric shells: `radii_m[0]` the ground, the last the top, ascending.
+/// The heights of the shells' boundaries: 0, every height of `heights_m` strictly between 0 and
+/// `top_height_m` in ascending order with near-duplicates merged, and `top_height_m`.
+#[must_use]
+pub(crate) fn boundary_heights(
+    top_height_m: f64,
+    heights_m: impl IntoIterator<Item = f64>,
+) -> Vec<f64> {
+    let mut inner: Vec<f64> = heights_m
+        .into_iter()
+        .filter(|&h| h > 0.0 && h < top_height_m)
+        .collect();
+    inner.sort_by(f64::total_cmp);
+    inner.dedup_by(|a, b| (*a - *b).abs() <= 1e-9 * top_height_m);
+    let mut boundaries = Vec::with_capacity(inner.len() + 2);
+    boundaries.push(0.0);
+    boundaries.extend(inner);
+    boundaries.push(top_height_m);
+    boundaries
+}
+
+/// The atmosphere's shells over the case's figure, from the ground to the top: concentric
+/// spheres, or quadrics over a level spheroid.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ShellGrid {
-    radii_m: Vec<f64>,
+pub(crate) enum ShellGrid {
+    Sphere(SphereShells),
+    Spheroid(SpheroidShells),
 }
 
 impl ShellGrid {
+    /// The shells over `figure` from the ground to the (gravity-scaled) height `top_height_m`,
+    /// split at every height of `heights_m` strictly between the two.
+    #[must_use]
+    pub(crate) fn new(
+        figure: &Figure,
+        top_height_m: f64,
+        heights_m: impl IntoIterator<Item = f64>,
+    ) -> Self {
+        match *figure {
+            Figure::Sphere { radius_m } => {
+                Self::Sphere(SphereShells::new(radius_m, top_height_m, heights_m))
+            }
+            Figure::Spheroid(spheroid) => {
+                Self::Spheroid(SpheroidShells::new(spheroid, top_height_m, heights_m))
+            }
+        }
+    }
+
+    /// How many shells there are.
+    #[must_use]
+    pub(crate) fn len(&self) -> usize {
+        match self {
+            Self::Sphere(s) => s.len(),
+            Self::Spheroid(s) => s.len(),
+        }
+    }
+
+    /// Bounds of the gravity-scaled height in shell `shell`, m: on a sphere its floor's and
+    /// ceiling's heights.
+    #[must_use]
+    pub(crate) fn scaled_height_bounds_m(&self, shell: usize) -> (f64, f64) {
+        match self {
+            Self::Sphere(s) => s.heights_m(shell),
+            Self::Spheroid(s) => s.scaled_height_bounds_m(shell),
+        }
+    }
+
+    /// The height the medium is read at, at `x`: above the ground on a sphere, the gravity-scaled
+    /// height on a spheroid, m.
+    #[must_use]
+    pub(crate) fn scaled_height_m(&self, x: Vec3) -> f64 {
+        match self {
+            Self::Sphere(s) => x.length() - s.ground_radius_m(),
+            Self::Spheroid(s) => s.scaled_height_m(x),
+        }
+    }
+
+    /// The local vertical at `x`, the ground's outward normal below it.
+    #[must_use]
+    pub(crate) fn vertical(&self, x: Vec3) -> Vec3 {
+        match self {
+            Self::Sphere(_) => x.normalised(),
+            Self::Spheroid(s) => s.vertical(x),
+        }
+    }
+
+    /// The point at height `height_m` above the ground under `frame`, m.
+    #[must_use]
+    pub(crate) fn point(&self, frame: &LocalFrame, height_m: f64) -> Vec3 {
+        match self {
+            Self::Sphere(s) => frame.up * (s.ground_radius_m() + height_m),
+            Self::Spheroid(s) => s.point(frame, height_m),
+        }
+    }
+
+    /// The point on the top above the ground under `frame`, m.
+    #[must_use]
+    pub(crate) fn top_point(&self, frame: &LocalFrame) -> Vec3 {
+        match self {
+            Self::Sphere(s) => frame.up * s.top_radius_m(),
+            Self::Spheroid(s) => s.top_point(frame),
+        }
+    }
+
+    /// The shell a ray at `point` moving along `dir` is in ([`SphereShells::locate`]).
+    #[must_use]
+    pub(crate) fn locate(&self, point: Vec3, dir: Vec3) -> Option<usize> {
+        match self {
+            Self::Sphere(s) => s.locate(point, dir),
+            Self::Spheroid(s) => s.locate(point, dir),
+        }
+    }
+
+    /// Where a ray from outside enters the top ([`SphereShells::entry_distance_m`]).
+    #[must_use]
+    pub(crate) fn entry_distance_m(&self, point: Vec3, dir: Vec3) -> Option<f64> {
+        match self {
+            Self::Sphere(s) => s.entry_distance_m(point, dir),
+            Self::Spheroid(s) => s.entry_distance_m(point, dir),
+        }
+    }
+
+    /// Where a ray leaves its shell ([`SphereShells::exit`]).
+    #[must_use]
+    pub(crate) fn exit(&self, point: Vec3, dir: Vec3, shell: usize) -> Exit {
+        match self {
+            Self::Sphere(s) => s.exit(point, dir, shell),
+            Self::Spheroid(s) => s.exit(point, dir, shell),
+        }
+    }
+
+    /// The point a ray crosses into `next` at ([`SphereShells::cross`]).
+    #[must_use]
+    pub(crate) fn cross(
+        &self,
+        point: Vec3,
+        dir: Vec3,
+        distance_m: f64,
+        shell: usize,
+        next: Next,
+    ) -> Vec3 {
+        match self {
+            Self::Sphere(s) => s.cross(point, dir, distance_m, shell, next),
+            Self::Spheroid(s) => s.cross(point, dir, distance_m, shell, next),
+        }
+    }
+}
+
+/// The atmosphere's concentric shells: `radii_m[0]` the ground, the last the top, ascending.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SphereShells {
+    radii_m: Vec<f64>,
+}
+
+impl SphereShells {
     /// Shells about a ground of radius `ground_radius_m`, from 0 to `top_height_m`, split at
     /// every height of `heights_m` strictly between the two.
     #[must_use]
@@ -204,16 +358,10 @@ impl ShellGrid {
         top_height_m: f64,
         heights_m: impl IntoIterator<Item = f64>,
     ) -> Self {
-        let mut inner: Vec<f64> = heights_m
+        let radii_m = boundary_heights(top_height_m, heights_m)
             .into_iter()
-            .filter(|&h| h > 0.0 && h < top_height_m)
+            .map(|h| ground_radius_m + h)
             .collect();
-        inner.sort_by(f64::total_cmp);
-        inner.dedup_by(|a, b| (*a - *b).abs() <= 1e-9 * top_height_m);
-        let mut radii_m = Vec::with_capacity(inner.len() + 2);
-        radii_m.push(ground_radius_m);
-        radii_m.extend(inner.iter().map(|h| ground_radius_m + h));
-        radii_m.push(ground_radius_m + top_height_m);
         Self { radii_m }
     }
 
@@ -311,7 +459,9 @@ impl ShellGrid {
             -along + disc.sqrt()
         };
         Exit {
-            distance_m: distance_m.max(0.0),
+            // Not `max`, which may return either zero where the quotient is −0 (a point on the
+            // ceiling moving out), and so differ between targets; the same value otherwise.
+            distance_m: if distance_m > 0.0 { distance_m } else { 0.0 },
             next: if shell + 1 == self.len() {
                 Next::Space
             } else {
@@ -354,7 +504,12 @@ mod tests {
 
     /// Walks a ray from `point` in `shell` to the ground or space, returning the distance, how it
     /// ended and the crossings it took.
-    fn walk(grid: &ShellGrid, mut point: Vec3, dir: Vec3, mut shell: usize) -> (f64, Next, usize) {
+    fn walk(
+        grid: &SphereShells,
+        mut point: Vec3,
+        dir: Vec3,
+        mut shell: usize,
+    ) -> (f64, Next, usize) {
         let mut total = 0.0;
         let mut crossings = 0;
         loop {
@@ -375,7 +530,7 @@ mod tests {
     #[test]
     fn atmosphere_shell_walks_cover_the_chord() {
         let ground = 6_371_000.0;
-        let grid = ShellGrid::new(ground, 100_000.0, (1..20).map(|i| f64::from(i) * 5_000.0));
+        let grid = SphereShells::new(ground, 100_000.0, (1..20).map(|i| f64::from(i) * 5_000.0));
         assert_eq!(grid.len(), 20);
         let frame = LocalFrame::at_latitude(0.3);
         let start = frame.up * (ground + 1_234.0);
@@ -399,7 +554,7 @@ mod tests {
     #[test]
     fn atmosphere_rays_grazing_a_boundary_pass_it() {
         let ground = 6_371_000.0;
-        let grid = ShellGrid::new(ground, 100_000.0, [30_000.0, 60_000.0]);
+        let grid = SphereShells::new(ground, 100_000.0, [30_000.0, 60_000.0]);
         let frame = LocalFrame::at_latitude(0.0);
         // From a point on the 30 km sphere, exactly horizontal, and a hair below and above it.
         let start = frame.up * (ground + 30_000.0);
@@ -420,7 +575,7 @@ mod tests {
     #[test]
     fn atmosphere_rays_enter_from_orbit_and_locate_on_boundaries() {
         let ground = 6_371_000.0;
-        let grid = ShellGrid::new(ground, 100_000.0, [50_000.0]);
+        let grid = SphereShells::new(ground, 100_000.0, [50_000.0]);
         let frame = LocalFrame::at_latitude(0.0);
         let orbit = frame.up * (ground + 400_000.0);
         let down = -frame.up;

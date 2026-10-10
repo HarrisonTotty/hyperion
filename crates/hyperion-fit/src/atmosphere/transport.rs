@@ -35,6 +35,16 @@
 //! smooth: the profiles' kinks are shell boundaries, and an exponential profile changes by at most
 //! e across a shell.
 //!
+//! **Over a level spheroid** ([`spheroid`](super::spheroid), R08.T12.d) nothing here changes but
+//! the grid's: every profile is read at the gravity-scaled height h\* = s h, the shells are quadrics
+//! through h\* = H at the equator and the poles, each shell's majorant bounds its profiles over
+//! every h\* the shell can hold, and the ground's normal is the datum's. A kink lies on a surface
+//! of constant h\*, which the quadrics leave between the equator and the poles (by up to 1.7% of
+//! its height on Saturn), so a piece can hold one near its end. Measured on Saturn's grazing
+//! chords: an exponential profile agrees with an `f64` quadrature to 4 × 10⁻¹⁰, R08.T3.a's column
+//! (1,024 levels, each a slight kink) to 3 × 10⁻⁹, and a tent, whose kinks are sharp, to
+//! 1.4 × 10⁻⁶.
+//!
 //! **The Stokes mode** (Rayleigh, isotropic and absorbing terms) carries, beside the scalar
 //! weight, the 3 × 3 matrix that takes the Stokes vector (I, Q, U) of the light arriving along the
 //! current flight, in that flight's frame, to the detector's. The light's frame for a propagation
@@ -119,16 +129,16 @@ pub(crate) struct Source {
 }
 
 impl Source {
-    /// The detector of `geometry` in `case`.
+    /// The detector of `geometry` in `case`, over `grid`.
     #[must_use]
-    pub(crate) fn detector(case: &AtmosphereCase, geometry: &Geometry) -> Self {
+    pub(crate) fn detector(case: &AtmosphereCase, grid: &ShellGrid, geometry: &Geometry) -> Self {
         let frame = LocalFrame::at_latitude(geometry.observer.latitude_deg.to_radians());
         let (zenith, azimuth) = (
             geometry.view.zenith_deg.to_radians(),
             geometry.view.azimuth_deg.to_radians(),
         );
         Self {
-            origin_m: frame.up * (case.ground_radius_m() + geometry.observer.height_m),
+            origin_m: grid.point(&frame, geometry.observer.height_m),
             aim: Aim::Cone {
                 axis: frame.direction(zenith, azimuth),
                 e1: frame.zenith_tangent(zenith, azimuth),
@@ -140,16 +150,17 @@ impl Source {
     }
 
     /// The flux through a horizontal surface at the ground below `aggregate` from above, or at the
-    /// top above it from below.
+    /// top above it from below, over `grid`. Horizontal is normal to the local vertical at the
+    /// ground, which on a spheroid the top's quadric is not quite.
     #[must_use]
-    pub(crate) fn flux(case: &AtmosphereCase, aggregate: &Aggregate, level: Level) -> Self {
+    pub(crate) fn flux(grid: &ShellGrid, aggregate: &Aggregate, level: Level) -> Self {
         let frame = LocalFrame::at_latitude(aggregate.latitude_deg.to_radians());
-        let (height_m, normal) = match level {
-            Level::Ground => (0.0, frame.up),
-            Level::Top => (case.top_height_m(), -frame.up),
+        let (origin_m, normal) = match level {
+            Level::Ground => (grid.point(&frame, 0.0), frame.up),
+            Level::Top => (grid.top_point(&frame), -frame.up),
         };
         Self {
-            origin_m: frame.up * (case.ground_radius_m() + height_m),
+            origin_m,
             aim: Aim::Hemisphere { normal },
             cut_m: f64::INFINITY,
             suns: sun_vectors(&frame, &aggregate.sun_directions),
@@ -337,7 +348,7 @@ impl<'a> Medium<'a> {
             .collect();
         let majorant_per_m = (0..grid.len())
             .map(|shell| {
-                let (low_m, high_m) = grid.heights_m(shell);
+                let (low_m, high_m) = grid.scaled_height_bounds_m(shell);
                 profiles
                     .iter()
                     .zip(&scattering_per_m)
@@ -366,9 +377,10 @@ impl<'a> Medium<'a> {
         }
     }
 
-    /// The height of `x` above the ground, m.
+    /// The height the profiles are read at, at `x`: above the ground on a sphere, gravity-scaled
+    /// on a spheroid, m.
     fn height_m(&self, x: Vec3) -> f64 {
-        x.length() - self.grid.ground_radius_m()
+        self.grid.scaled_height_m(x)
     }
 
     /// The scattering and absorption coefficients at `x`, m⁻¹.
@@ -847,7 +859,7 @@ impl<'a> Medium<'a> {
     /// At the ground: adds each sun's next-event estimate to `out` and reflects the walker into a
     /// cosine-weighted direction, its weight times the albedo.
     fn reflect(&self, walker: &mut Walker, suns: &[Vec3], draws: &mut Draws, out: &mut [f64; 3]) {
-        let normal = walker.position_m.normalised();
+        let normal = self.grid.vertical(walker.position_m);
         for (&sun, &irradiance) in suns.iter().zip(&self.irradiance) {
             let cos_sun = normal.dot(sun);
             if irradiance <= 0.0 || cos_sun <= 0.0 || self.ground_albedo <= 0.0 {
@@ -875,10 +887,11 @@ impl<'a> Medium<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use hyperion_sim::galaxy::quad::gl_panels;
     use serde_json::json;
 
+    use super::super::spheroid;
     use super::*;
 
     #[test]
@@ -971,5 +984,294 @@ mod tests {
                 "{depth} against {expected}"
             );
         }
+    }
+
+    /// Saturn's γₑ and γₚ, m s⁻², as the client's `normalGravity` prints them (the spheroid
+    /// module's test of the two), so that the quadratures below share no gravity code with the
+    /// tracer.
+    pub(crate) const SATURN_GAMMA: (f64, f64) = (9.076_628_614_761_937, 12.036_945_078_629_161);
+
+    /// Saturn's scale height for these tests, m: about RT ÷ μg at 1 bar, 134 K, μ = 2.3 and
+    /// `g_ref` (46.3 km); NASA's Saturn fact sheet's μ = 2.07 would give 51 km. Illustrative.
+    const SATURN_SCALE_HEIGHT_M: f64 = 47_000.0;
+
+    /// The gravity-scaled height of `x` over Saturn's figure, m, with no code of the tracer's:
+    /// the geodetic latitude by bisection on the condition that the datum's normal there passes
+    /// through `x`, ρ sin φ − z cos φ − e² N sin φ cos φ = 0 (one root on the half meridian
+    /// outside the evolute), the height along that normal, ρ cos φ + z sin φ − a √(1 − e² sin²φ),
+    /// and Somigliana's gravity in NIMA TR8350.2's form, γₑ (1 + k sin²φ) ÷ √(1 − e² sin²φ) with
+    /// k = c γₚ ÷ (a γₑ) − 1 (eq. 4-1).
+    #[expect(
+        clippy::many_single_char_names,
+        reason = "the geodesy's own a, c, ρ's z, k and w, so that the formulas read as cited"
+    )]
+    pub(crate) fn saturn_scaled_height_m(x: Vec3) -> f64 {
+        let (a, c) = (spheroid::tests::SATURN.0, spheroid::tests::SATURN.1);
+        let e2 = 1.0 - (c / a) * (c / a);
+        let (rho, z) = ((x.x * x.x + x.y * x.y).sqrt(), x.z);
+        let condition = |phi: f64| {
+            let (sin, cos) = math::sin_cos(phi);
+            rho * sin - z * cos - e2 * a / (1.0 - e2 * sin * sin).sqrt() * sin * cos
+        };
+        let (mut low, mut high) = (-0.5 * PI, 0.5 * PI);
+        for _ in 0..64 {
+            let mid = f64::midpoint(low, high);
+            if condition(mid) < 0.0 {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        let (sin, cos) = math::sin_cos(f64::midpoint(low, high));
+        let w = (1.0 - e2 * sin * sin).sqrt();
+        let height = rho * cos + z * sin - a * w;
+        let (gamma_e, gamma_p) = SATURN_GAMMA;
+        let k = c * gamma_p / (a * gamma_e) - 1.0;
+        height * gamma_e * (1.0 + k * sin * sin) / w / (gamma_e * gamma_p).sqrt()
+    }
+
+    /// ∫ σ(h*) dt along the ray from `origin` along `dir` inside Saturn's medium, whose top is
+    /// the quadric (a + top ÷ sₑ, c + top ÷ sₚ) through h\* = `top_height_m` at the equator and the
+    /// poles (the spheroid module's definition, solved here), in 2,000 panels of 32 points.
+    pub(crate) fn saturn_chord_depth(
+        origin: Vec3,
+        dir: Vec3,
+        top_height_m: f64,
+        extinction: impl Fn(f64) -> f64,
+    ) -> f64 {
+        let (a, c) = (spheroid::tests::SATURN.0, spheroid::tests::SATURN.1);
+        let (gamma_e, gamma_p) = SATURN_GAMMA;
+        let g_ref = (gamma_e * gamma_p).sqrt();
+        let (big_a, big_c) = (
+            a + top_height_m * g_ref / gamma_e,
+            c + top_height_m * g_ref / gamma_p,
+        );
+        let form = |u: Vec3, v: Vec3| {
+            (u.x * v.x + u.y * v.y) / (big_a * big_a) + u.z * v.z / (big_c * big_c)
+        };
+        let (quadratic, linear, constant) = (
+            form(dir, dir),
+            form(origin, dir),
+            form(origin, origin) - 1.0,
+        );
+        let disc = (linear * linear - quadratic * constant).sqrt();
+        let enter = ((-linear - disc) / quadratic).max(0.0);
+        let leave = (-linear + disc) / quadratic;
+        let edges: Vec<f64> = (0..=2000)
+            .map(|i| enter + (leave - enter) * f64::from(i) / 2000.0)
+            .collect();
+        gl_panels(
+            |t| extinction(saturn_scaled_height_m(origin + dir * t)),
+            &edges,
+        )
+    }
+
+    /// An absorbing-only Saturn-class case of `terms`, with its top at `top_height_m`.
+    fn saturn_absorbing(terms: &serde_json::Value, top_height_m: f64) -> AtmosphereCase {
+        let (a, c, gm, omega) = spheroid::tests::SATURN;
+        AtmosphereCase::from_json(
+            &json!({
+                "format": 1, "name": "saturn-absorbing",
+                "wavelengthsNm": [550],
+                "shells": {
+                    "kind": "spheroid", "equatorialRadiusM": a, "polarRadiusM": c,
+                    "gmM3S2": gm, "angularVelocityRadS": omega
+                },
+                "topHeightM": top_height_m,
+                "groundAlbedo": [0.0],
+                "terms": terms,
+                "suns": [{ "name": "sun", "irradiance": [1.0] }],
+                "detectorHalfAngleDeg": 0.0,
+                "geometries": [{
+                    "name": "unused", "observer": { "heightM": 0.0 },
+                    "view": { "zenithDeg": 0.0, "azimuthDeg": 0.0 },
+                    "sunDirections": [{ "zenithDeg": 0.0, "azimuthDeg": 0.0 }]
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap()
+    }
+
+    /// The grazing rays of R08.T12.d's test: horizontal from 100 m at the equator north and east
+    /// and at the pole, and tangent to the 1 H and 3 H levels over the same, from far outside.
+    fn saturn_grazing_rays(grid: &ShellGrid) -> Vec<(String, Vec3, Vec3)> {
+        let mut rays = Vec::new();
+        for (place, latitude, azimuth) in [
+            ("equator north", 0.0, 0.0),
+            ("equator east", 0.0, 0.5 * PI),
+            ("pole", 0.5 * PI, 0.0),
+        ] {
+            let frame = LocalFrame::at_latitude(latitude);
+            let level = frame.direction(0.5 * PI, azimuth);
+            rays.push((
+                format!("{place} from 100 m"),
+                grid.point(&frame, 100.0),
+                level,
+            ));
+            for scale_heights in [1.0, 3.0] {
+                // The geodetic height whose h* is 1 or 3 H there.
+                let s = if latitude > 0.0 {
+                    SATURN_GAMMA.1
+                } else {
+                    SATURN_GAMMA.0
+                } / (SATURN_GAMMA.0 * SATURN_GAMMA.1).sqrt();
+                let tangent = grid.point(&frame, scale_heights * SATURN_SCALE_HEIGHT_M / s);
+                rays.push((
+                    format!("{place} tangent at {scale_heights} H"),
+                    tangent - level * 4e7,
+                    level,
+                ));
+            }
+        }
+        rays
+    }
+
+    /// A table of e^(−h ÷ H) at R08.T3.a's column levels: 1,024 intervals even in ln p from the
+    /// datum to 10⁻⁷ of its pressure (`column.ts`'s `COLUMN_INTERVALS` and
+    /// `COLUMN_TOP_PRESSURE_RATIO`), linear between them, as an isothermal column is.
+    fn column_like(scale_height_m: f64) -> (Vec<f64>, Vec<f64>) {
+        let span = math::ln(1e7);
+        let altitudes: Vec<f64> = (0..=1024)
+            .map(|i| scale_height_m * span * f64::from(i) / 1024.0)
+            .collect();
+        let relative = altitudes
+            .iter()
+            .map(|&h| math::exp(-h / scale_height_m))
+            .collect();
+        (altitudes, relative)
+    }
+
+    /// A profile's density as the case writes it, its top, its relative density at h\*, and the
+    /// tolerance its chords are held to.
+    type ProfileCase<'a> = (serde_json::Value, f64, &'a dyn Fn(f64) -> f64, f64);
+
+    #[test]
+    fn atmosphere_spheroid_absorbing_medium_gives_beer_lambert_along_grazing_chords() {
+        let (sigma, h) = (3e-6, SATURN_SCALE_HEIGHT_M);
+        let (bottom, peak, top) = (2.0 * h, 4.0 * h, 7.0 * h);
+        let tent = move |x: f64| {
+            if x <= bottom || x >= top {
+                0.0
+            } else if x <= peak {
+                (x - bottom) / (peak - bottom)
+            } else {
+                (top - x) / (top - peak)
+            }
+        };
+        let (altitudes, relative) = column_like(h);
+        let column_top = altitudes[altitudes.len() - 1];
+        let column = |x: f64| {
+            let x = x.max(0.0);
+            let above = altitudes.partition_point(|&a| a <= x);
+            if above == 0 {
+                relative[0]
+            } else if above == altitudes.len() {
+                relative[above - 1]
+            } else {
+                let (a0, a1) = (altitudes[above - 1], altitudes[above]);
+                relative[above - 1] + (relative[above] - relative[above - 1]) * (x - a0) / (a1 - a0)
+            }
+        };
+        // Measured: the exponential agrees to 4 × 10⁻¹⁰ (the 8-point rule on the piece about the
+        // tangent, as on a sphere), and T3.a's column, every level a kink, to 3 × 10⁻⁹: both to the
+        // task's 10⁻⁶. A kink lies on a surface h* = const, which the quadrics leave between the
+        // equator and the poles, so a piece's rule can straddle one; the column's are slight. A
+        // tent's are not, and cost up to 1.4 × 10⁻⁶ (held to 10⁻⁵, R08's Risks): the chords north
+        // and over the pole cross latitudes where the quadrics leave them, the chord east never
+        // leaves the equator.
+        let cases: [ProfileCase<'_>; 3] = [
+            (
+                json!({ "kind": "exponential", "scaleHeightM": h }),
+                40.0 * h,
+                &|x: f64| math::exp(-x.max(0.0) / h),
+                1e-6,
+            ),
+            (
+                json!({ "kind": "tabulated", "altitudesM": altitudes, "relative": relative }),
+                column_top,
+                &column,
+                1e-6,
+            ),
+            (
+                json!({ "kind": "tent", "bottomM": bottom, "peakM": peak, "topM": top }),
+                40.0 * h,
+                &tent,
+                1e-5,
+            ),
+        ];
+        for (density, top_height_m, profile, tolerance) in cases {
+            let case = saturn_absorbing(
+                &json!([{
+                    "name": "gas", "density": density,
+                    "scattering": [0.0], "absorption": [sigma], "phase": { "kind": "none" }
+                }]),
+                top_height_m,
+            );
+            let grid = super::super::shell_grid(&case);
+            let medium = Medium::new(&case, &grid, 0);
+            for (name, origin, dir) in saturn_grazing_rays(&grid) {
+                let depth = medium.optical_depth_to_space(origin, dir).unwrap();
+                let expected =
+                    saturn_chord_depth(origin, dir, top_height_m, |x| sigma * profile(x));
+                assert!(expected > 0.5, "{name}: {expected}");
+                assert!(
+                    (depth / expected - 1.0).abs() < tolerance,
+                    "{name}, top {top_height_m}: {depth} against {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn atmosphere_spheroid_majorants_bound_the_scattering_coefficient() {
+        // An exponential gas, a tent haze, and a table whose peak and kinks fall inside shells,
+        // over Saturn: every point of the meridian half-plane, on a grid, below its shell's bound.
+        let h = SATURN_SCALE_HEIGHT_M;
+        let case = saturn_absorbing(
+            &json!([
+                {
+                    "name": "gas", "density": { "kind": "exponential", "scaleHeightM": h },
+                    "scattering": [6e-6], "absorption": [0.0], "phase": { "kind": "isotropic" }
+                },
+                {
+                    "name": "haze",
+                    "density": { "kind": "tent", "bottomM": 1.3 * h, "peakM": 2.9 * h, "topM": 5.2 * h },
+                    "scattering": [2e-6], "absorption": [1e-7], "phase": { "kind": "isotropic" }
+                },
+                {
+                    "name": "cloud",
+                    "density": {
+                        "kind": "tabulated",
+                        "altitudesM": [0.0, 0.4 * h, 0.75 * h, 2.1 * h],
+                        "relative": [0.2, 1.0, 0.3, 0.0]
+                    },
+                    "scattering": [5e-6], "absorption": [0.0], "phase": { "kind": "isotropic" }
+                }
+            ]),
+            40.0 * h,
+        );
+        let grid = super::super::shell_grid(&case);
+        let medium = Medium::new(&case, &grid, 0);
+        let mut tightest = f64::INFINITY;
+        for i in -90..=90 {
+            let frame = LocalFrame::at_latitude(f64::from(i).to_radians());
+            for j in 0..=2_000 {
+                let x = grid.point(&frame, f64::from(j) * 1_000.0);
+                let Some(shell) = grid.locate(x, frame.up) else {
+                    continue;
+                };
+                let coefficient = medium.scattering_per_m_at(x);
+                let majorant = medium.majorant_per_m[shell];
+                assert!(
+                    coefficient <= majorant,
+                    "{i}°, {j} km, shell {shell}: {coefficient} above {majorant}"
+                );
+                if coefficient > 1e-9 {
+                    tightest = tightest.min(majorant / coefficient);
+                }
+            }
+        }
+        assert!(tightest < 1.01, "{tightest}");
     }
 }
