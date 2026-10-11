@@ -3181,7 +3181,7 @@ re-blessing this plan's payload and coarse goldens in that commit.
     - Earth: basalt (secondary), granite (tertiary), `H2O` as ice and as liquid, the main liquid
       `H2O`;
     - Mars: basalt (secondary), `CO2` and `H2O` ices, `mars_dust` (deposit);
-    - Moon: anorthosite (primary), basalt (province);
+    - Moon: anorthosite (primary), basalt (province), and `H2O` (ice) from R09.T10.c;
     - Ceres: phyllosilicate (primary, by science-r09-drainage.md §5, from R09.T10.c; secondary as
       built), `H2O` ice, `Na2CO3` (deposit). No share names the water
       ice, since plan 14 states no area for its cold traps yet.
@@ -3234,6 +3234,130 @@ re-blessing this plan's payload and coarse goldens in that commit.
       four reference worlds.
 
     No stream, tag or golden is added, and no output moved.
+- **Deviations in T10.c, as built** (R09.T10.c, the crust's options and the reference rows,
+  2026-10-11; after T2's follow-up C, `3dc599d5`; science-r09-drainage.md §3–§5, with
+  science-composition-crusts.md §3, §4 and §7's corrections to the rows; builder arguments,
+  revisable until P14.T54.a reads them from the record).
+  - _Basalt's density._ The task text has basalt's 2,900 kg m⁻³ "relabelled". The row takes
+    3,010 kg m⁻³, the mean of Alae lava lake's eight tholeiites (Peck 1978, USGS PP 935-B,
+    p. B20), as the ruling's §3.2 table and §3.3 code text give it and follow-up C's synthetic row
+    has it (accepted by "main", 2026-10-11). `mars_dust` 2,600, granite 2,650 and the
+    phyllosilicate 2,500 are the task's, all grain densities. The anorthosite is 2,790, not the
+    task's 2,900 (below).
+  - _The second ruling's corrections._ science-composition-crusts.md (adopted 2026-10-11, ruling
+    this task's gaps) arrived before the commit. "main" had the corrections that sit in
+    `reference.rs`'s own rows applied here, and left the new rows and members to R09.T10.d,
+    though the ruling's §8 lists them under T10.c. Applied:
+    - _the solidi_ (§4): the anorthosite's 1,260 °C, a plagioclase rock's first melt
+      (`PLAGIOCLASE_ROCK_SOLIDUS_K`, Andersen 1915), for its plagioclase's 1,500 °C; the
+      phyllosilicate residue's 1,150 °C, 1,423.15 K, an upper bound (`CHONDRITIC_SOLIDUS_K`,
+      Jurewicz et al. 1993; the ruling's corrected figure, which replaced its first 1,400 K), for
+      basalt's by assumption; the dust's 1,050 °C (`BASALT_FE_SOLIDUS_K`, the Lunar Sourcebook's, still an
+      assumption), for basalt's; and `Na2CO3`'s 850 °C (NIST-JANAF), for 851;
+    - _the densities_: the anorthosite rock's 2,790 kg m⁻³ (§7), for the highland crust's 2,900,
+      which is `feldspathic`'s; granite's 2,650 and `Na2CO3`'s 2,540 confirmed and sourced (§4);
+      and water ice's ρ_s(T) (§3), IAPWS R10-06 as a fitted polynomial (`ice_ih_density_kg_m3`),
+      each world's `Ice` entry at its coldest zone, T₀ − (2/3) × the equator–pole contrast
+      (`coldest_zone`: Earth 260 K, 918.6 kg m⁻³; Mars 177.3 K, 928.4), or at the cold-trap
+      threshold (`COLD_TRAP_H2O_K`, 110 K: the Moon and Ceres, 932.7), through
+      `Substance::ice_entry_at`. The row's own 916.72 is its melting point's.
+    - _The ruling's code text, adjusted by the science review of the delta._ That review found the
+      ruling's first chondritic solidus misattributed Jurewicz et al.'s "~1150-1160°C" (the H and
+      LL chondrites', not Murchison's and Allende's) and took Henke et al.'s 1,400 K, from Agee et
+      al.'s runs at 1–27 GPa, as a 1-atm figure; "main" had the ruling corrected (1,423.15 K, an
+      upper bound), and the constant takes its corrected text. The plagioclase rock's note uses
+      Andersen's "alteration point" and "clinoenstatite"; the anorthosite's
+      names albite's density, from which An₉₅'s 2.753 is interpolated; the ice fit's note gives
+      Table 5's 0.02 per cent above 268 K; `coldest_zone` states that it assumes a cold pole; and
+      the Mars table notes that its contrasts' placeholder pole, 160 K, is colder than the P₂
+      fit's.
+    - _Left to R09.T10.d_ (with follow-up D for the synthetic rows): the `feldspathic` row for the
+      lunar highlands (§7) and `basalt_fe` for the maria and Mars (§2), so until then the
+      reference Moon's lid is the 2,790 kg m⁻³ rock and its maria and Mars the 3,010 tholeiite;
+      `CrustInputs::lid: LidCrust` with `LidAbsent` (§5); and `bulk` with `BulkBesideCrust` (§1).
+  - _The crust mapping's two open cases._ Where both crusts are the provinces' substance and the
+    provinces have no `Province` entry, they take the secondary's entry before the primary's. The
+    primary crust takes its `PrimaryCrust` entry alone: the task gives the shared-entry fallback
+    to the provinces only, and a palette naming the lid's substance as a `Province` entry and
+    nothing else would break `PaletteRole::Province`'s "where it is not the lid's own". A
+    `Province` entry of the lid's substance beside its `PrimaryCrust` one is accepted, and names
+    the provinces (a test's case). The private `entry` helper's one fallback role became a list.
+    `build` refuses `NoCrust` straight after the crust's `Missing`, before the melt share and the
+    palette, in a new private `check_crust` that keeps `build` within Clippy's line limit.
+  - _Documentation beyond the task's._ The reference module says that the rows are the
+    substances', serving every body whose composition names them, and labels where a body's
+    measurement (the albedos) stands for a substance's. The basalt solidus's note replaces the
+    unread "about 1,050 °C (Yoder and Tilley 1962)" with the ruling's read quench runs (Yoder and
+    Tilley 1957, Year Book 56, pp. 157–158: two Kilauea tholeiites at about 1,065–1,090 °C, a
+    Mauna Kea alkali basalt at 1,040 °C) and Alae's corroboration (§2.1), and calls it a
+    terrestrial tholeiite's. The basalt row drops the unread Philpotts and Ague 2009 range, and
+    names `basalt_fe` (3,310) as the iron-rich basalt's row. The dust row names Viking Lander 1's
+    fine material, as follow-up C's science review found it, where the task has "the Viking
+    landers'". The phyllosilicate row gives Ceres's crust's bulk as Ermakov et al.'s 1,287
+    (+70/−87) kg m⁻³ in place of "1,200–1,400". `melt_area_fraction`'s documentation adds, after
+    the task's sentence, that science-composition-crusts.md §5 amends the crust to the lid's,
+    which T10.d's `lid` will name. `CrustInputs` states the classes by mode of origin, and each
+    table its crust and palette sources, the ice's temperature among them (§3, §4, §5).
+  - _Tests._ `NoCrust` on Earth's crust without its secondary and Ceres's without its primary; the
+    reference Ceres's `crust_palette`, `[None, None, shell, shell]` with its `PrimaryCrust` entry;
+    the provinces' entries (their own `Province` first, the secondary's before the primary's where
+    both crusts are their substance, a deposit never), and the primary refused without its own
+    `PrimaryCrust` entry; the reference palettes, the Moon's `H2O` ice and Ceres's
+    `PrimaryCrust` among them, with no share naming either ice; the grain densities within their
+    sources' ranges (the anorthosite 2,776–2,828, granite G-1's 2,635–2,671, Alae's 2,920–3,040)
+    and the dust's giving back Viking Lander 1's fines' 1,100 ± 150 at 58%; ice Ih's density
+    against IAPWS R10-06 at 273.15, 100 and 160 K (±0.03), its clamps, and each world's ice entry
+    (Earth 918.6, Mars 928.4, the Moon and Ceres 932.7, ±0.1); `NoCrust`'s message; and the
+    builder giving back all four reference worlds, not only Earth (its test helper generalised to
+    `builder_of`). The existing no-op pass builds each reference world's valid field.
+    `coarse_pass`'s Ceres example takes a primary phyllosilicate with no secondary and asserts its
+    `Oceanic` has no entry. `cargo test -p hyperion-sim planetary::surface` runs 35 unit tests,
+    four of them new, and `cargo test -p hyperion-sim --doc planetary::surface` its two doctests,
+    the changed `coarse_pass` example among them (the filter alone does not run the doctests, as
+    T10 found).
+  - _Moves:_ no pinned output. No reference golden exists before T16, no stream or tag is added,
+    and the synthetic worlds and the wire goldens are untouched. The reference worlds' unpinned
+    fields do change, at version 21: Ceres's `crust_palette` goes from `[None, 0, 0, 0]` to
+    `[None, None, 0, 0]`, its entry 0 from `SecondaryCrust` to `PrimaryCrust`; the Moon's palette
+    gains a third entry, `H2O` as `Ice` at index 2, its others keeping theirs; the basalt,
+    anorthosite and dust entries take their grain densities, every water-ice entry its ice's
+    temperature's, and the anorthosite, phyllosilicate, dust and `Na2CO3` entries their corrected
+    transitions. T16's first blessing pins them.
+  - _For R09.T12.a._ Ceres's `Oceanic` now has no entry, as `Continental` has none on Mars, the
+    Moon and Ceres. Nothing refuses a cell whose crust variant the header names no entry for
+    (`check_synthesis_cell`, the header's `crust_palette` check), so the step that first writes
+    a cell's crust should refuse one, in the field or the quantiser (the determinism review's
+    nit, 2026-10-11).
+  - _For R09.T10.d and T13.c._ With both crusts optional, "the crust at the surface" is
+    `secondary.or(primary)`, which `NoCrust` guarantees but the type does not carry (the Rust
+    review's nit). science-composition-crusts.md §5 replaces it with an explicit
+    `lid: LidCrust`, which `Lid` and the melt test both read; T10.d adds it, and `build` should
+    resolve the lid's substance once, so that no step unwraps the options.
+  - _Lint._ The sim's `clippy.toml` gains `McLennan` in `doc-valid-idents`, as the surface
+    crate's has it.
+  - _Gaps and questions found while building, ruled by science-composition-crusts.md_ (adopted
+    2026-10-11):
+    - an undifferentiated body (a chondritic asteroid, a comet nucleus) has neither crust, which
+      `NoCrust` refused: it gains `bulk`, its own uncrusted material, in a `Bulk` role (§1;
+      follow-up D and T10.d);
+    - the maria's and Mars's iron-rich basalt: `basalt_fe`, 3,310 kg m⁻³ and 1,050 °C (§2; T10.d);
+    - ice densities: ρ_s(T) for each solid phase (§3; applied here for water ice);
+    - the unread figures: verified or corrected (§4; applied here), granite's solidus still
+      unverified, and the albedos R10.T1.a's;
+    - which crust a stagnant lid shows: neither lean; an explicit `lid`, a `LidCrust` of
+      `Primary`, `Secondary` or `Bulk`, which `Lid` and the melt test read (§5; T10.d);
+    - a generated Moon's water ice before P14.T51.f: none, an interim labelled NOT YET MODELLED
+      under T54.a, which the reference and synthetic Moons, being test inputs, do not share (§6);
+    - the anorthosite's density: two rows, the rock's 2,790 (applied here) and the highland
+      crust's `feldspathic` 2,900 (§7; T10.d).
+  - _For P14.T54.a._ `CrustInputs`, with `primary`, `secondary` and `tertiary` each an
+    `Option<SubstanceKey>`, `provinces` a `SubstanceKey` and `melt_area_fraction`, is T51.c's
+    `CrustComposition` less its redox class, member for member. So `for_body` passes `secondary`
+    through as `None` on a Ceres, and `NoCrust` is the guard that matches T51.c's at-least-one
+    rule. The palette's sources must give an icy body's `H2O` primary crust a `PrimaryCrust` entry
+    apart from its `Ice` entry, and each ice entry ρ_s at the temperature where the ice lies
+    (science-composition-crusts.md §3). T10.d's `lid` and `bulk` follow T51.c's members of the
+    same names.
 - **Drainage semantics (ruled 2026-10-10, science-r09-drainage.md §1).** T6.a found that a k_s
   stored on Hergarten's runoff-weighted area and read with Hack's geometric area makes tributaries
   2.8 times too gentle at 0.1 m a⁻¹, and trunks' Hack lengths 4 times too short.

@@ -22,8 +22,21 @@
 //! the ones its row below states with their sources. They began as R09.T2's synthetic palettes'
 //! (`hyperion_surface::testing`) and are kept apart from them, so that a correction to either set
 //! moves only its own output (the wire goldens pin the synthetic fields' palettes, and R09.T16's
-//! coarse goldens will pin these): a science review of 2026-10-10 read a basalt solidus 70 K
-//! below the synthetic one, which these rows take, and labelled what it could not read.
+//! coarse goldens will pin these). A science review of 2026-10-10 read their basalt solidus,
+//! 980 °C, which the synthetic rows have taken since, and labelled what it could not read; the
+//! ruling science-r09-drainage.md made every density a grain density (§3), carried the Moon's
+//! cold-trapped water ice (§4) and Ceres's crust as primary (§5), which these rows and worlds
+//! follow (R09.T10.c). The ruling science-composition-crusts.md (2026-10-11) verified or
+//! corrected the figures that review could not read (granite's solidus is still unverified): the
+//! transitions of the plagioclase rock, the phyllosilicate's residue, the dust and `Na2CO3` (§4),
+//! the anorthosite's density (§7) and water ice's, now a function of temperature (§3), which these
+//! rows take. Its new rows `feldspathic` and `basalt_fe` and the crust's `lid` and `bulk` are
+//! R09.T10.d's, and its chondrite rows P14.T49.b's.
+//!
+//! The rows are the substances', not the worlds': a row serves every body whose composition names
+//! its substance (decision-composition §1.7), so each figure is the substance's own (a grain
+//! density, a solidus), or, where it is a body's measurement standing for the substance's (an
+//! albedo), says so.
 
 use hyperion_surface::craters::{self, CraterParams, CraterParamsParts, Screening};
 use hyperion_surface::field::{
@@ -70,10 +83,10 @@ const PHYLLOSILICATE_KEY: SubstanceKey = SubstanceKey::new_const("phyllosilicate
 /// its class (researched there, mostly from memory, and to be settled in R10.T1.a), but the
 /// anorthosite's, the top of its range, the phyllosilicate's, Ceres's measured albedo, and liquid
 /// water's, the Fresnel reflectance of its surface at normal incidence in each band. Every phase
-/// row is 0 until R10 assigns its rows. The densities follow no one convention yet (a grain
-/// density for the phyllosilicate, a porous bulk for the highlands and the dust): the field is the
-/// grain density the ruling makes every row's, porosity apart (science-r09-drainage.md §3), which
-/// R09.T10.c's rows take.
+/// row is 0 until R10 assigns its rows. Every density is a grain density, the porosity being how a
+/// material lies, which R10's forms carry (science-r09-drainage.md §3): a rock's or a mineral's
+/// solid over its own volume, and an ice's crystal density or a liquid's density at the
+/// temperature its row states.
 struct Substance {
     key: SubstanceKey,
     normal_albedo_bvr: [f64; 3],
@@ -96,31 +109,77 @@ impl Substance {
             mechanics: self.mechanics,
         }
     }
+
+    /// The substance's [`PaletteRole::Ice`] entry with ice Ih's density at `temperature`, where the
+    /// ice lies on its body ([`ice_ih_density_kg_m3`]): ice Ih's, so it serves [`WATER_ICE`] alone
+    /// (science-composition-crusts.md §3).
+    #[must_use]
+    fn ice_entry_at(&self, temperature: Kelvin) -> PaletteEntry {
+        PaletteEntry {
+            grain_density_kg_m3: ice_ih_density_kg_m3(temperature),
+            ..self.entry(PaletteRole::Ice)
+        }
+    }
 }
 
 /// The solidus of a basalt at about 1 atm, 980 °C, kelvin: a natural Hawaiian tholeiite's, below
 /// which its residual glass, 4 per cent, stops falling (Wright and Okamura 1977, USGS Professional
-/// Paper 1004, abstract and Table 15, after Wright and Weiblen 1967; ±10 °C). A dry basalt's is
-/// higher, about 1,050 °C (Yoder and Tilley 1962, J. Petrol. 3, 342, from memory and not read; low
-/// confidence). Basalt's, and, by assumption without a source, the basaltic dust's and the
-/// phyllosilicate's dehydrated residue's.
+/// Paper 1004, abstract and Table 15, after Wright and Weiblen 1967; ±10 °C), as Alae lava lake's
+/// (Peck 1978, USGS Professional Paper 935-B, p. B1; Wright and Peck 1978, Professional Paper
+/// 935-C, p. C1; science-r09-drainage.md §2). Short dry quench runs at 1 atm, against the lava
+/// lakes' slow natural cooling, leave two Kilauea tholeiites all crystalline at about 1,065–
+/// 1,090 °C and a Mauna Kea alkali basalt at 1,040 °C (Yoder and Tilley 1957, Carnegie
+/// Institution of Washington Year Book 56, pp. 157–158, which call them "approximate"; their 1962
+/// monograph, J. Petrol. 3, 342, not read). A terrestrial tholeiite's.
 const BASALT_SOLIDUS_K: f64 = 1_253.15;
 
-/// Basalt: Design note 8's basaltic rock, `A_N` 0.05–0.15; a typical bulk density of 2,900 kg m⁻³
-/// (2,700–3,100; Philpotts and Ague 2009, Principles of Igneous and Metamorphic Petrology, p. 22,
-/// not read; low confidence).
+/// The solidus of an anhydrous, iron-rich basalt at about 1 atm, 1,050 °C, kelvin: low-pressure
+/// experiments on the lunar mare basalts imply that "if solid mare basalts were heated they would
+/// begin to melt around 1050° C", about 100 °C above terrestrial basalts, "chiefly because of the
+/// lack of H2O" (Taylor et al. 1991, Lunar Sourcebook, ch. 6, p. 206; science-composition-crusts.md
+/// §2). Mars's dust takes it, an assumption: no measurement of the dust's melting was read (§4).
+/// The iron-rich basalt's own row, `basalt_fe`, is R09.T10.d's.
+const BASALT_FE_SOLIDUS_K: f64 = 1_323.15;
+
+/// The solidus of a plagioclase rock with a few per cent of low-calcium pyroxene at 1 atm,
+/// 1,260 °C, kelvin: the alteration point anorthite + forsterite + clinoenstatite + liquid of the
+/// system anorthite–forsterite–silica, "1260° ± 2°" (Andersen 1915, Am. J. Sci. s4-39, 407,
+/// p. 439), where a mixture on the anorthite–enstatite join first melts; a quartz-normative one
+/// begins at the ternary eutectic, 1,222 °C (p. 440). Its plagioclase alone, An₉₅, is on Bowen's
+/// loop near
+/// 1,524 °C (Bowen 1913, Am. J. Sci. s4-35, 577, Table IV), where the rock becomes mostly melt;
+/// iron and sodium lower both, by amounts not read (science-composition-crusts.md §4).
+const PLAGIOCLASE_ROCK_SOLIDUS_K: f64 = 1_533.15;
+
+/// The solidus of an anhydrous chondritic silicate assemblage at about 1 atm, 1,150 °C, kelvin, an
+/// upper bound: the H and LL chondrites' "~1150-1160°C" at IW−1 (Jurewicz et al., LPSC 24, 1993,
+/// p. 739), whose charges lost sodium, so a natural rock begins somewhat lower. Anhydrous
+/// Murchison (CM) and Allende (CV) had more melt at 1,170–1,180 °C, so theirs lie at or below it
+/// (Jurewicz, Mittlefehldt and Jones 1993, GCA 57, 2123, as that abstract reports it). The
+/// dehydrated residue of a phyllosilicate rock's (science-composition-crusts.md §4; corrected
+/// 2026-10-11).
+const CHONDRITIC_SOLIDUS_K: f64 = 1_423.15;
+
+/// Basalt: Design note 8's basaltic rock, `A_N` 0.05–0.15; a grain density of 3,010 kg m⁻³, the
+/// mean of eight Alae lava lake tholeiites, 2,920–3,040 (Peck 1978, USGS Professional Paper
+/// 935-B, p. B20; science-r09-drainage.md §3): a terrestrial tholeiite's. An iron-rich basalt, as
+/// the lunar maria's and Mars's, is `basalt_fe`'s row, 3,310 kg m⁻³ and [`BASALT_FE_SOLIDUS_K`]
+/// (science-composition-crusts.md §2), which R09.T10.d adds; until then the reference Moon's and
+/// Mars's basalt is this one.
 const BASALT: Substance = Substance {
     key: BASALT_KEY,
     normal_albedo_bvr: [0.10; 3],
-    grain_density_kg_m3: 2_900.0,
+    grain_density_kg_m3: 3_010.0,
     transition_k: BASALT_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
 };
 
-/// Granite: Design note 8's felsic rock, `A_N` 0.2–0.35; a bulk density of 2,650 kg m⁻³ (2,650–
-/// 2,750, from memory; no source read; low confidence) and a dry solidus at 1 atm of about 960 °C
-/// (from memory; the dry haplogranite solidus's primary source is Huang and Wyllie 1975, J. Geol.
-/// 83, 737, not read; low confidence).
+/// Granite: Design note 8's felsic rock, `A_N` 0.2–0.35; a grain density of 2,650 kg m⁻³ (2,654
+/// kg m⁻³ from the measured mode of the USGS standard granite G-1, Chayes in Fairbairn et al.
+/// 1951, USGS Bulletin 980, Table 26, with the Handbook of Mineralogy's mineral densities,
+/// 2,635–2,671 across their ranges; science-composition-crusts.md §4) and a dry solidus at 1 atm
+/// of about 960 °C (from memory; the dry haplogranite solidus's primary source is Huang and
+/// Wyllie 1975, J. Geol. 83, 737, not read; low confidence).
 const GRANITE: Substance = Substance {
     key: GRANITE_KEY,
     normal_albedo_bvr: [0.275; 3],
@@ -129,71 +188,107 @@ const GRANITE: Substance = Substance {
     mechanics: MechanicsFamily::Silicate,
 };
 
-/// Anorthosite, as the lunar highlands' mature regolith: the top of Design note 8's regolith
-/// range, 0.07–0.20, the highlands being its brightest; the highland crust's bulk density, 2,550
-/// kg m⁻³ at 12 per cent porosity (Wieczorek et al. 2013, Science 339, 671, from GRAIL); and the
-/// solidus of its calcic plagioclase (An₉₅) alone at 1 atm, about 1,500 °C (an ideal-solution loop
-/// gives 1,515–1,527 °C; Bowen 1913, Am. J. Sci. s4-35, 577, not read; low confidence), an upper
-/// bound for the rock: its few per cent of pyroxene begin to melt with the plagioclase near the
-/// anorthite–diopside eutectic, about 1,270 °C (Osborn 1942, Am. J. Sci. 240, 751, from memory and
-/// not read).
+/// Anorthosite, the rock, standing for the lunar highlands until R09.T10.d's `feldspathic` row
+/// (the impact-mixed highland crust's own, 2,900 kg m⁻³; science-composition-crusts.md §7)
+/// replaces it there: the top of Design note 8's regolith range, 0.07–0.20, the highlands being
+/// its brightest (a body's measurement standing for the substance's); a grain density of 2,790
+/// kg m⁻³, a lunar ferroan anorthosite's: about 95 per cent plagioclase An₉₄–₉₈ with a few per
+/// cent of low-calcium pyroxene of about 3.5 g cm⁻³ (both from memory), anorthite being 2.74–2.76
+/// g cm⁻³ measured and 2.760 calculated and albite 2.609–2.621 calculated (Handbook of
+/// Mineralogy), so An₉₅ about 2.753, which gives 2,776–2,828 at 97–90 per cent plagioclase
+/// (science-composition-crusts.md §7), against the more mafic highland
+/// crust's 2,900, which GRAIL's 2,550 kg m⁻³ at 12 per cent porosity implies (Wieczorek et al.
+/// 2013, Science 339, 671); and [`PLAGIOCLASE_ROCK_SOLIDUS_K`].
 const ANORTHOSITE: Substance = Substance {
     key: ANORTHOSITE_KEY,
     normal_albedo_bvr: [0.20; 3],
-    grain_density_kg_m3: 2_550.0,
-    transition_k: 1_773.15,
+    grain_density_kg_m3: 2_790.0,
+    transition_k: PLAGIOCLASE_ROCK_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
 };
 
-/// A phyllosilicate-rich rock, as Ceres's crust: Ceres's geometric albedo, 0.094 ± 0.007 at
-/// 0.55 µm (Ciarniello et al. 2017, A&A 598, A130), which is its normal albedo (Schröder et al.
-/// 2017, Icarus 288, 201, §4, who adopt Tedesco 1989's 0.10 ± 0.01); a grain density of 2,500
-/// kg m⁻³, between saponite's 2,240–2,300 and lizardite's 2,550 (Anthony et al., Handbook of
-/// Mineralogy), not Ceres's bulk crust, 1,200–1,400 kg m⁻³ with its ice and salts (Ermakov et al.
-/// 2017, JGR Planets 122, 2267); and, for its dehydrated residue's solidus, basalt's (an
-/// assumption, no source; low confidence: a magnesian residue, olivine and pyroxene, would melt
-/// hotter).
+/// A phyllosilicate-rich rock, as Ceres's crust, a primary one, its frozen ocean's shell
+/// (science-r09-drainage.md §5): Ceres's geometric albedo, 0.094 ± 0.007 at 0.55 µm (Ciarniello
+/// et al. 2017, A&A 598, A130), which is its normal albedo (Schröder et al. 2017, Icarus 288, 201,
+/// §4, who adopt Tedesco 1989's 0.10 ± 0.01; a body's measurement standing for the substance's); a
+/// grain density of 2,500 kg m⁻³, between saponite's 2,240–2,300 and lizardite's 2,550 (Anthony
+/// et al., Handbook of Mineralogy), not Ceres's crust's bulk, 1,287 (+70/−87) kg m⁻³ with its ice
+/// and salts (Ermakov et al. 2017, JGR Planets 122, 2267, §5.4), which is the body's mixture, not
+/// a substance's; and, for its dehydrated residue's solidus, [`CHONDRITIC_SOLIDUS_K`].
 const PHYLLOSILICATE: Substance = Substance {
     key: PHYLLOSILICATE_KEY,
     normal_albedo_bvr: [0.094; 3],
     grain_density_kg_m3: 2_500.0,
-    transition_k: BASALT_SOLIDUS_K,
+    transition_k: CHONDRITIC_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
 };
 
 /// Sodium carbonate, the salt of Ceres's faculae (De Sanctis et al. 2016, Nature 536, 54):
 /// Design note 8's evaporite, `A_N` 0.5–0.8, which Cerealia Facula's visual normal albedo,
-/// 0.6 ± 0.1, bears out (Schröder et al. 2017, Icarus 288, 201); its density, 2,540 kg m⁻³ (CRC
-/// Handbook of Chemistry and Physics, 95th edition, not read; International Chemical Safety Card
-/// 1135's 2.5 g cm⁻³ agrees), and melting point, 851 °C (International Chemical Safety Card 1135;
-/// the literature spans 850–856 °C, NIST's WebBook putting the change at 1,123 K and the CRC's
-/// 95th edition at 856 °C).
+/// 0.6 ± 0.1, bears out (Schröder et al. 2017, Icarus 288, 201); its grain density, 2,540 kg m⁻³:
+/// the X-ray density of γ-Na₂CO₃ at 295 K, 2,537, from Dusek et al. 2003's cell (Acta Cryst. B59,
+/// 337), and natrite's, 2,547 (Zubkova et al. 2002; the Handbook of Mineralogy's D(meas.) 2.54),
+/// 2,575 at 110 K by Dusek et al.'s colder cell, a 1.5 per cent change; and its melting point,
+/// 850 °C, where NIST-JANAF's solid ends and its liquid begins (Chase 1998, via the NIST WebBook;
+/// safety cards give 851 °C; science-composition-crusts.md §4).
 const SODIUM_CARBONATE: Substance = Substance {
     key: SubstanceKey::new_const("Na2CO3"),
     normal_albedo_bvr: [0.65; 3],
     grain_density_kg_m3: 2_540.0,
-    transition_k: 1_124.15,
+    transition_k: 1_123.15,
     mechanics: MechanicsFamily::Salt,
 };
 
-/// Mars's bright dust: Design note 8's 0.18–0.25 in V; the bulk density of the Viking landers'
-/// undisturbed drift material, 1,200 kg m⁻³ (Moore et al. 1987, USGS Professional Paper 1389,
-/// p. 126); basaltic, so basalt's solidus (an assumption, no source).
+/// Mars's bright dust: Design note 8's 0.18–0.25 in V; a grain density of 2,600 kg m⁻³, which
+/// Viking Lander 1's fine material's 58 per cent porosity assumes (Moore et al. 1987, USGS
+/// Professional Paper 1389, p. 121 and Table 36; an assumption there, labelled so), the drift's
+/// bulk, 1,200 kg m⁻³ (p. 126 and Table 37), being a form's (science-r09-drainage.md §3);
+/// iron-rich and basaltic, so [`BASALT_FE_SOLIDUS_K`] (an assumption: no measurement of the dust
+/// was found; its chlorides melt first and are minor; science-composition-crusts.md §4).
 const MARS_DUST: Substance = Substance {
     key: SubstanceKey::new_const("mars_dust"),
     normal_albedo_bvr: [0.215; 3],
-    grain_density_kg_m3: 1_200.0,
-    transition_k: BASALT_SOLIDUS_K,
+    grain_density_kg_m3: 2_600.0,
+    transition_k: BASALT_FE_SOLIDUS_K,
     mechanics: MechanicsFamily::Silicate,
 };
 
 /// The melting point of water ice at 1 atm, kelvin: 273.152 519 K (IAPWS R10-06), to 0.01 K.
 const WATER_MELTING_K: f64 = 273.15;
 
+/// The temperature below which water ice is held in a cold trap, kelvin: Hertz–Knudsen sublimation
+/// of 144 kg m⁻² Gyr⁻¹ (Schorghofer and Williams 2020, PSJ 1, 54, Table 1), P14.T51.f's threshold;
+/// a cold-trapped ice's density is taken there, an upper bound on its temperature
+/// (science-composition-crusts.md §3).
+const COLD_TRAP_H2O_K: f64 = 110.0;
+
+/// Ice Ih's density at `temperature` and 1 atm, kg m⁻³: the Gibbs function of IAPWS R10-06(2009)
+/// (Feistel and Wagner 2006, J. Phys. Chem. Ref. Data 35, 1021), as the polynomial
+/// 933.790 351 + 9.911 602 x³ − 109.185 868 x⁴ + 127.136 897 x⁵ − 44.949 496 x⁶ in
+/// x = T ÷ 273.15 K, fitted to it over 0.5–273.15 K within 0.02 kg m⁻³, below the release's own
+/// uncertainty, 0.1 per cent below 268 K and 0.02 per cent above (its Table 5;
+/// science-composition-crusts.md §3); clamped to 0 K and the melting point.
+#[must_use]
+fn ice_ih_density_kg_m3(temperature: Kelvin) -> f64 {
+    let x = temperature.value().clamp(0.0, WATER_MELTING_K) / 273.15;
+    let x3 = x * x * x;
+    933.790_351 + x3 * (9.911_602 + x * (-109.185_868 + x * (127.136_897 - 44.949_496 * x)))
+}
+
+/// The coldest zone's temperature, T₀ − (2/3) × the equator–pole contrast: the pole of the zonal
+/// fit T₀ + T₂ P₂(sin φ) whose contrast the tables define as −(3/2) T₂. It assumes a cold pole,
+/// a positive contrast, as every reference world has; a warm pole's coldest zone would be its
+/// equator, T₀ + (1/3) × the contrast.
+#[must_use]
+fn coldest_zone(mean: Kelvin, equator_pole_contrast_k: f64) -> Kelvin {
+    Kelvin::new(mean.value() - 2.0 / 3.0 * equator_pole_contrast_k)
+}
+
 /// Water ice, as snow-covered ice: Design note 8's fresh snow, 0.95–0.98 in the visible
-/// (Wiscombe and Warren 1980; Grenfell et al. 1994); ice Ih's density at its melting point at
-/// 1 atm, 916.72 kg m⁻³ (IAPWS R10-06(2009), Table 6: 916.721 463 kg m⁻³; the equation of Feistel
-/// and Wagner 2006, J. Phys. Chem. Ref. Data 35, 1021).
+/// (Wiscombe and Warren 1980; Grenfell et al. 1994); ice Ih's density, a function of temperature
+/// ([`ice_ih_density_kg_m3`]; 916.72 kg m⁻³ at its melting point, the row's figure, IAPWS
+/// R10-06(2009), Table 6: 916.721 463 kg m⁻³), each world's entry taking it where its ice lies
+/// ([`Substance::ice_entry_at`]; science-composition-crusts.md §3).
 const WATER_ICE: Substance = Substance {
     key: H2O,
     normal_albedo_bvr: [0.965; 3],
@@ -353,7 +448,7 @@ fn figure(radius_m: f64, f: f64) -> Spheroid {
 /// | craters | the lunar chronology at that age, screened by the air | Design note 12 |
 /// | wet epoch | 4.4 Gyr ago to now, the ocean's inventory | the oldest zircons' evidence of liquid water (Wilde, Valley, Peck and Graham 2001, Nature 409, 175) |
 /// | crust | basaltic oceanic, granitic continents, basaltic provinces | P14.T51.c's Earth |
-/// | palette | basalt (secondary crust), granite (tertiary), water as ice and as liquid | decision-composition §1.7; each figure its substance's row in this module, with its sources |
+/// | palette | basalt (secondary crust), granite (tertiary), water as ice and as liquid; the ice's density at its coldest zone, 260 K, 918.6 kg m⁻³ | decision-composition §1.7; each figure its substance's row in this module, with its sources; the coldest zone T₀ − (2/3) × the equator–pole contrast (science-composition-crusts.md §3) |
 ///
 /// # Panics
 ///
@@ -369,6 +464,7 @@ pub fn earth_like() -> CoarseInputs {
     let area_m2 = 510.082e12;
     let ocean = KilogramsPerSquareMetre::new(1.335e18 * 1_030.0 / area_m2);
     let ice = KilogramsPerSquareMetre::new(29.9e15 * 917.0 / area_m2);
+    let (mean, contrast) = (Kelvin::new(288.0), 42.0);
     CoarseInputs::builder()
         .body(BodyRef::new(0, 1))
         .figure(figure(radius_m, 1.0 / 298.257_223_563))
@@ -382,8 +478,8 @@ pub fn earth_like() -> CoarseInputs {
             substance: H2O,
             area_fraction: 0.041,
         }])
-        .mean_surface_temperature(Kelvin::new(288.0))
-        .equator_pole_contrast_k(42.0)
+        .mean_surface_temperature(mean)
+        .equator_pole_contrast_k(contrast)
         .day_night_contrast_k(3.0)
         .spin(Spin {
             obliquity: degrees(23.44),
@@ -423,7 +519,7 @@ pub fn earth_like() -> CoarseInputs {
         })
         .crust(CrustInputs {
             primary: None,
-            secondary: BASALT_KEY,
+            secondary: Some(BASALT_KEY),
             tertiary: Some(GRANITE_KEY),
             provinces: BASALT_KEY,
             melt_area_fraction: 0.0,
@@ -431,7 +527,7 @@ pub fn earth_like() -> CoarseInputs {
         .palette(palette(vec![
             BASALT.entry(PaletteRole::SecondaryCrust),
             GRANITE.entry(PaletteRole::TertiaryCrust),
-            WATER_ICE.entry(PaletteRole::Ice),
+            WATER_ICE.ice_entry_at(coldest_zone(mean, contrast)),
             WATER.entry(PaletteRole::Liquid),
         ]))
         .condensates([
@@ -474,7 +570,7 @@ pub fn earth_like() -> CoarseInputs {
 /// | craters | the lunar chronology at that age, screened by the air (d\* = 8.5 cm at 636 Pa) | Design note 12, whose 8.2 cm takes about 610 Pa; the Mars–Moon flux ratio is plan 14's belt scaling, not applied |
 /// | wet epoch | 3.9 to 3.6 Gyr ago, 10⁶ Earth-equivalent years, 1.56 × 10⁵ kg m⁻² of water | the valley networks of about 3.6–3.8 Ga (Hoke and Hynek 2009) in 10⁵–10⁷ such years (Hoke, Hynek and Tucker 2011; not read); Carr and Head 2003's ocean, about 2.3 × 10⁷ km³, 156 m as a global layer (low confidence) |
 /// | crust | basaltic, basaltic provinces | P14.T51.c's Mars |
-/// | palette | basalt (secondary crust, its provinces' too), CO₂ and water ices, the bright dust as its deposit | decision-composition §1.7; each figure its row's |
+/// | palette | basalt (secondary crust, its provinces' too), CO₂ and water ices, the bright dust as its deposit; the water ice's density at its coldest zone, 177.3 K, 928.4 kg m⁻³, and the CO₂ ice's at 150 K, near its frost point | decision-composition §1.7; each figure its row's; the coldest zone as Earth's, the P₂ fit's pole (science-composition-crusts.md §3), warmer than the contrasts' placeholder pole of 160 K, at which the ice would be 929.9 kg m⁻³ |
 ///
 /// # Panics
 ///
@@ -486,6 +582,7 @@ pub fn mars_like() -> CoarseInputs {
     let year = Seconds::new(686.980 * SECONDS_PER_DAY);
     let rotation = Seconds::new(24.6229 * 3_600.0);
     let surface_age = Gigayears::new(3.9);
+    let (mean, contrast) = (Kelvin::new(214.0), 55.0);
     CoarseInputs::builder()
         .body(BodyRef::new(0, 2))
         .figure(figure(3_389.5e3, 0.005_89))
@@ -501,8 +598,8 @@ pub fn mars_like() -> CoarseInputs {
                 area_fraction: 0.000_6,
             },
         ])
-        .mean_surface_temperature(Kelvin::new(214.0))
-        .equator_pole_contrast_k(55.0)
+        .mean_surface_temperature(mean)
+        .equator_pole_contrast_k(contrast)
         .day_night_contrast_k(60.0)
         .spin(Spin {
             obliquity: degrees(25.19),
@@ -542,7 +639,7 @@ pub fn mars_like() -> CoarseInputs {
         })
         .crust(CrustInputs {
             primary: None,
-            secondary: BASALT_KEY,
+            secondary: Some(BASALT_KEY),
             tertiary: None,
             provinces: BASALT_KEY,
             melt_area_fraction: 0.0,
@@ -550,7 +647,7 @@ pub fn mars_like() -> CoarseInputs {
         .palette(palette(vec![
             BASALT.entry(PaletteRole::SecondaryCrust),
             CARBON_DIOXIDE_ICE.entry(PaletteRole::Ice),
-            WATER_ICE.entry(PaletteRole::Ice),
+            WATER_ICE.ice_entry_at(coldest_zone(mean, contrast)),
             MARS_DUST.entry(PaletteRole::Deposit),
         ]))
         .condensates([
@@ -588,8 +685,8 @@ pub fn mars_like() -> CoarseInputs {
 /// | regime | stagnant lid, no constructional volcanism, airless | Design note 3; P14.T13.c |
 /// | heat flow | 0.018 W m⁻² | Apollo 15's 21 and Apollo 17's 14 mW m⁻² (Langseth, Keihm and Peters 1976, quoted by Saito et al. 2006), whose global estimate is about 1.8 µW cm⁻² |
 /// | surface age | 4.4 Gyr | R09.T12.d's test ("N(1 km) at 4.4 Gyr") |
-/// | crust | anorthositic, basaltic secondary crust and provinces | P14.T51.c's Moon |
-/// | palette | anorthosite (primary crust), basalt (provinces: the maria, its secondary crust) | decision-composition §1.7; each figure its row's |
+/// | crust | anorthositic primary crust, basaltic secondary crust and provinces | P14.T51.c's Moon |
+/// | palette | anorthosite (primary crust: the highlands, its magma ocean's flotation crust), basalt (provinces: the maria, its secondary crust), water ice (its cold traps', its density at their 110 K threshold, 932.7 kg m⁻³) | decision-composition §1.7; science-r09-drainage.md §4 and §5; science-composition-crusts.md §3; each figure its row's. The water-ice entry names the exposed ice of its polar cold traps (Li et al. 2018, PNAS 115, 8907), which no area share places until P14.T51.f states it and R09.T13.f places it; a generated Moon carries none until then (science-composition-crusts.md §6). R09.T10.d replaces the anorthosite with `feldspathic` and the basalt with `basalt_fe` (§7, §2) |
 ///
 /// # Panics
 ///
@@ -635,7 +732,7 @@ pub fn moon_like() -> CoarseInputs {
         })
         .crust(CrustInputs {
             primary: Some(ANORTHOSITE_KEY),
-            secondary: BASALT_KEY,
+            secondary: Some(BASALT_KEY),
             tertiary: None,
             provinces: BASALT_KEY,
             melt_area_fraction: 0.0,
@@ -643,6 +740,7 @@ pub fn moon_like() -> CoarseInputs {
         .palette(palette(vec![
             ANORTHOSITE.entry(PaletteRole::PrimaryCrust),
             BASALT.entry(PaletteRole::Province),
+            WATER_ICE.ice_entry_at(Kelvin::new(COLD_TRAP_H2O_K)),
         ]))
         .build()
         .expect("the reference Moon's inputs are valid")
@@ -663,8 +761,8 @@ pub fn moon_like() -> CoarseInputs {
 /// | heat flow | 0.001 W m⁻² | a placeholder: a chondritic radiogenic estimate's order (low confidence) |
 /// | surface age | 4.0 Gyr | a placeholder (low confidence) |
 /// | craters | the lunar chronology at that age, on an ice-rich target (`k_target` 0.12) | Design notes 3 and 12 |
-/// | crust | phyllosilicate, its provinces too (V = 0 builds none) | R09.T2's synthetic Ceres |
-/// | palette | phyllosilicate (secondary crust), water ice, sodium carbonate as its deposit (the faculae's) | decision-composition §1.7; each figure its row's. The water-ice entry names the ice of its cold traps and fresh craters (Platz et al. 2016, Nature Astronomy 1, 0007; Combe et al. 2016, Science 353, aaf3010), which no area share places until plan 14 states one |
+/// | crust | phyllosilicate (primary crust: Ceres's frozen ocean, Castillo-Rogez et al. 2018; Fu et al. 2017), no secondary crust, its rock having never melted; the provinces the phyllosilicate too (V = 0 builds none) | science-r09-drainage.md §5: "Ceres's crust encompasses the bulk of Ceres's original ocean" (Castillo-Rogez et al. 2018, MAPS 53, 1820, p. 1838); its rocky interior "avoided igneous differentiation" (Fu et al. 2017, EPSL 476, 153, abstract); R09.T2's synthetic Ceres |
+/// | palette | phyllosilicate (primary crust: Ceres's frozen ocean, Castillo-Rogez et al. 2018; Fu et al. 2017), water ice (its density at the cold traps' 110 K, 932.7 kg m⁻³), sodium carbonate as its deposit (the faculae's) | decision-composition §1.7; science-r09-drainage.md §5; science-composition-crusts.md §3; each figure its row's. The water-ice entry names the ice of its cold traps and fresh craters (Platz et al. 2016, Nature Astronomy 1, 0007; Combe et al. 2016, Science 353, aaf3010), which no area share places until plan 14 states one; a fresh crater's ice near the 163 K mean would be 929.6 kg m⁻³, 0.3% lighter |
 ///
 /// # Panics
 ///
@@ -710,15 +808,15 @@ pub fn ceres_like() -> CoarseInputs {
             model: ClimateModelKind::RadiativeEquilibrium,
         })
         .crust(CrustInputs {
-            primary: None,
-            secondary: PHYLLOSILICATE_KEY,
+            primary: Some(PHYLLOSILICATE_KEY),
+            secondary: None,
             tertiary: None,
             provinces: PHYLLOSILICATE_KEY,
             melt_area_fraction: 0.0,
         })
         .palette(palette(vec![
-            PHYLLOSILICATE.entry(PaletteRole::SecondaryCrust),
-            WATER_ICE.entry(PaletteRole::Ice),
+            PHYLLOSILICATE.entry(PaletteRole::PrimaryCrust),
+            WATER_ICE.ice_entry_at(Kelvin::new(COLD_TRAP_H2O_K)),
             SODIUM_CARBONATE.entry(PaletteRole::Deposit),
         ]))
         .build()
@@ -842,21 +940,86 @@ mod tests {
         );
         assert_eq!(
             entries(&moon_like()),
-            expect(&[(PrimaryCrust, "anorthosite"), (Province, "basalt")])
+            expect(&[
+                (PrimaryCrust, "anorthosite"),
+                (Province, "basalt"),
+                (Ice, "H2O"),
+            ])
         );
         assert_eq!(
             entries(&ceres_like()),
             expect(&[
-                (SecondaryCrust, "phyllosilicate"),
+                (PrimaryCrust, "phyllosilicate"),
                 (Ice, "H2O"),
                 (Deposit, "Na2CO3"),
             ])
         );
+        // The Moon's cold-trapped water ice and Ceres's are entries no share names yet
+        // (science-r09-drainage.md §4).
+        for world in [moon_like(), ceres_like()] {
+            assert!(world.ices().is_empty());
+            assert!(world.condensates().is_empty());
+        }
         // Each world's sea, where it has one, is its main liquid.
         let earth = earth_like();
         let sea = earth.palette().get(earth.main_liquid().unwrap()).unwrap();
         assert_eq!((sea.role, sea.substance), (Liquid, H2O));
         assert!((sea.grain_density_kg_m3 - 999.84).abs() < 1e-9);
+    }
+
+    /// Each row's density is a grain density, within its sources' range of solids, or, at the
+    /// porosity its sources state, giving back their bulk density (science-r09-drainage.md §3;
+    /// science-composition-crusts.md §4 and §7).
+    #[test]
+    fn the_grain_densities_follow_their_sources() {
+        let bulk = |row: &Substance, porosity: f64| row.grain_density_kg_m3 * (1.0 - porosity);
+        // A ferroan anorthosite of 97–90 per cent plagioclase, 2,776–2,828 kg m⁻³; the highland
+        // crust's GRAIL-derived 2,900 is `feldspathic`'s, R09.T10.d's.
+        assert!((2_776.0..=2_828.0).contains(&ANORTHOSITE.grain_density_kg_m3));
+        // Viking Lander 1's fine material, 1,100 ± 150 kg m⁻³, at the 58 per cent porosity that
+        // Moore et al. 1987 (p. 121) derive from an assumed grain density: this pins the row to
+        // their arithmetic, not to a measured grain density.
+        let fines = bulk(&MARS_DUST, 0.58);
+        assert!((fines - 1_100.0).abs() < 150.0, "{fines} kg m⁻³");
+        // Alae lava lake's eight tholeiites, 2,920–3,040 kg m⁻³ (Peck 1978).
+        assert!((2_920.0..=3_040.0).contains(&BASALT.grain_density_kg_m3));
+        // Granite G-1's measured mode across its minerals' ranges, 2,635–2,671 kg m⁻³.
+        assert!((2_635.0..=2_671.0).contains(&GRANITE.grain_density_kg_m3));
+        // Each palette entry carries its row's density.
+        let moon = moon_like();
+        let highlands = moon
+            .palette()
+            .get(moon.crust_palette()[2].unwrap())
+            .unwrap();
+        assert_eq!(highlands.substance, ANORTHOSITE_KEY);
+        assert!((highlands.grain_density_kg_m3 - 2_790.0).abs() < 1e-9);
+    }
+
+    /// Ice Ih's density follows IAPWS R10-06, and each world's ice entry takes it where its ice
+    /// lies: the coldest zone on Earth and Mars, the cold traps' threshold on the Moon and Ceres
+    /// (science-composition-crusts.md §3).
+    #[test]
+    fn the_ice_entries_take_ice_ih_s_density_where_the_ice_lies() {
+        let at = |k: f64| ice_ih_density_kg_m3(Kelvin::new(k));
+        for (k, rho) in [(273.15, 916.72), (100.0, 933.05), (160.0, 929.87)] {
+            assert!((at(k) - rho).abs() < 0.03, "{} kg m⁻³ at {k} K", at(k));
+        }
+        // Clamped to the melting point and to 0 K.
+        hyperion_testkit::float::assert_same_bits(at(300.0), at(WATER_MELTING_K));
+        hyperion_testkit::float::assert_same_bits(at(-1.0), at(0.0));
+        let ice = |inputs: &CoarseInputs| {
+            let entry = inputs.palette().find(PaletteRole::Ice, H2O).unwrap();
+            inputs.palette().get(entry).unwrap().grain_density_kg_m3
+        };
+        for (name, world, rho) in [
+            ("Earth", earth_like(), 918.6),
+            ("Mars", mars_like(), 928.4),
+            ("the Moon", moon_like(), 932.7),
+            ("Ceres", ceres_like(), 932.7),
+        ] {
+            let got = ice(&world);
+            assert!((got - rho).abs() < 0.1, "{name}'s ice: {got} kg m⁻³");
+        }
     }
 
     #[test]

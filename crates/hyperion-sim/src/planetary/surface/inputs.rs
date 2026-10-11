@@ -205,28 +205,43 @@ pub struct ClimateRegime {
 /// A body's crust by substance, P14.T51.c's crust composition as the pass reads it (its redox
 /// class is not read here).
 ///
+/// The classes are by mode of origin (Taylor and McLennan 2009, Planetary Crusts, Cambridge
+/// University Press, its chapters' titles and summaries read; science-r09-drainage.md §5, whose
+/// reading of a frozen ocean's shell as primary is an analogy, of medium confidence): a crust
+/// crystallised from the body's first global liquid is
+/// primary, whatever the liquid, and a solid mantle's partial melt is secondary. A body has at
+/// least one of the two, and may lack either: the reference Earth and Mars name no primary crust,
+/// and a Ceres, whose rock "avoided igneous differentiation" (Fu et al. 2017, EPSL 476, 153), has
+/// no secondary.
+///
 /// The lithologies name the palette entries of the field's [`Crust`] variants
 /// (decision-composition §1.7), as [`CoarseInputs::crust_palette`] states: `Continental` the
-/// tertiary crust's, `Oceanic` the secondary's (R09.T12.a), `Lid` the primary's where the body
-/// has one and the secondary's otherwise, and `Province` the provinces'.
+/// tertiary crust's, `Oceanic` the secondary's (R09.T12.a), or none without one, `Lid` the
+/// primary's where the body has one and the secondary's otherwise, and `Province` the provinces'.
 ///
-/// Plain data with public fields: [`CoarseInputsBuilder::build`] validates them, and refuses a
+/// Plain data with public fields: [`CoarseInputsBuilder::build`] validates them, refuses a crust
+/// with neither a primary nor a secondary ([`BuildCoarseInputsError::NoCrust`]), and refuses a
 /// lithology the palette has no entry for.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CrustInputs {
-    /// The primary crust, a flotation crust from a magma ocean (`anorthosite` on the Moon), or
-    /// `None`.
+    /// The primary crust, crystallised from the body's first global liquid: a magma ocean's
+    /// flotation crust (`anorthosite` on the Moon), or a frozen ocean's shell (`phyllosilicate` on
+    /// a Ceres, `H2O` on an icy body); or `None`.
     pub primary: Option<SubstanceKey>,
-    /// The secondary crust, from partial melting of the mantle (`basalt` by default, `H2O` on an
-    /// icy body).
-    pub secondary: SubstanceKey,
+    /// The secondary crust, a solid mantle's partial melt (`basalt` by default), or `None` on a
+    /// body whose mantle never melted (a Ceres).
+    pub secondary: Option<SubstanceKey>,
     /// The tertiary crust, from remelting of the secondary (`granite`, only where the continental
     /// fraction is above zero), or `None`.
     pub tertiary: Option<SubstanceKey>,
     /// The volcanic provinces' lithology.
     pub provinces: SubstanceKey,
-    /// The share of the surface above the secondary crust's solidus, 0 to 1 (a locked lava
-    /// world's dayside pool); R09.T13.c applies the solidus per cell.
+    /// The share of the surface above the solidus of the crust at the surface (the secondary's,
+    /// or the primary's where there is none; science-r09-drainage.md §5.2 item 4), 0 to 1 (a
+    /// locked lava world's dayside pool); R09.T13.c applies the solidus per cell. As written, a
+    /// Moon's melt test reads its maria's basalt solidus although its lid is anorthosite;
+    /// science-composition-crusts.md §5 amends the crust to the lid's, which the crust's `lid`
+    /// member, R09.T10.d's, will name.
     pub melt_area_fraction: f64,
 }
 
@@ -605,14 +620,18 @@ impl CoarseInputs {
     /// The palette entry of each [`Crust`] variant's lithology, in its code order (continental,
     /// oceanic, lid, province), as the field's header carries it: `Continental` the tertiary
     /// crust in [`PaletteRole::TertiaryCrust`], or `None` without one; `Oceanic` the secondary
-    /// crust; `Lid` the primary crust in [`PaletteRole::PrimaryCrust`] where the body has one (a
-    /// Moon's anorthosite), the secondary crust otherwise; and `Province` the provinces' lithology.
+    /// crust, or `None` without one (a Ceres); `Lid` the primary crust in
+    /// [`PaletteRole::PrimaryCrust`] where the body has one (a Moon's anorthosite, a Ceres's
+    /// phyllosilicate), the secondary crust otherwise; and `Province` the provinces' lithology.
     ///
     /// The secondary crust's entry is its [`PaletteRole::SecondaryCrust`] one and the provinces'
     /// their [`PaletteRole::Province`] one, but where the two are one substance either entry names
     /// both, the variant's own role tried first: a Mars's basaltic provinces take its lid's
     /// `SecondaryCrust` basalt, and a Moon's maria, basaltic provinces that are its secondary
-    /// crust, its `Province` basalt.
+    /// crust, its `Province` basalt. Where the provinces are the primary crust's substance and have
+    /// no entry of their own, they take its `PrimaryCrust` entry, after the secondary's where both
+    /// crusts are that substance: a Ceres's provinces would be its phyllosilicate lid's
+    /// (science-r09-drainage.md §5). The primary crust's entry is its `PrimaryCrust` one alone.
     #[must_use]
     pub const fn crust_palette(&self) -> [Option<u8>; 4] {
         self.crust_palette
@@ -670,6 +689,9 @@ pub enum BuildCoarseInputsError {
         /// The role its entry would take.
         role: PaletteRole,
     },
+    /// The crust has neither a primary nor a secondary crust, one of which the lid takes
+    /// (science-r09-drainage.md §5; P14.T51.c states at least one).
+    NoCrust,
     /// A list names a substance twice (a condensate twice in one phase).
     Duplicate {
         /// The list's name.
@@ -723,6 +745,7 @@ impl fmt::Display for BuildCoarseInputsError {
                 f,
                 "the palette has no {role:?} entry for {substance}, named by the {part}"
             ),
+            Self::NoCrust => f.write_str("the crust has neither a primary nor a secondary crust"),
             Self::Duplicate { part, substance } => {
                 write!(f, "the {part} name {substance} twice")
             }
@@ -1061,7 +1084,8 @@ impl CoarseInputsBuilder {
     /// first rule broken, as each value's setter states it: a value out of range or not finite, a
     /// figure that is not a spheroid, a gas-envelope surface, a substance named twice, shares
     /// above the whole, too many condensates, a wet epoch that ends before it starts, a crater
-    /// contract of another gravity, or a substance the palette has no entry for.
+    /// contract of another gravity, a crust with neither a primary nor a secondary crust
+    /// ([`BuildCoarseInputsError::NoCrust`]), or a substance the palette has no entry for.
     pub fn build(self) -> Result<CoarseInputs, BuildCoarseInputsError> {
         let figure = required(self.figure, "figure")?;
         let Spheroid {
@@ -1127,7 +1151,7 @@ impl CoarseInputsBuilder {
         }
         let climate = required(self.climate, "climate regime")?;
         let crust = required(self.crust, "crust")?;
-        check_fraction("melt area fraction", crust.melt_area_fraction)?;
+        check_crust(&crust)?;
         let condensates = condensates(self.condensates)?;
         let palette = required(self.palette, "palette")?;
         let main_liquid = check_on_the_ground(&palette, &liquids, &ices, &condensates)?;
@@ -1186,6 +1210,15 @@ fn check_spin(spin: &Spin) -> Result<(), BuildCoarseInputsError> {
     )
 }
 
+/// Refuses a crust with neither a primary nor a secondary crust, or with a melt share outside 0
+/// to 1.
+fn check_crust(crust: &CrustInputs) -> Result<(), BuildCoarseInputsError> {
+    if crust.primary.is_none() && crust.secondary.is_none() {
+        return Err(BuildCoarseInputsError::NoCrust);
+    }
+    check_fraction("melt area fraction", crust.melt_area_fraction)
+}
+
 /// Refuses a wet epoch outside its ranges or ending before it starts.
 fn check_wet_epoch(epoch: &WetEpoch) -> Result<(), BuildCoarseInputsError> {
     check_non_negative("wet epoch's start", epoch.start.value())?;
@@ -1200,18 +1233,18 @@ fn check_wet_epoch(epoch: &WetEpoch) -> Result<(), BuildCoarseInputsError> {
     check_non_negative("wet epoch's paleo-inventory", epoch.paleo_inventory.value())
 }
 
-/// The entry of `substance` in `role`, or else in `fallback`, that `palette` holds, or
-/// [`BuildCoarseInputsError::NotInPalette`] naming `part` and `role`.
+/// The entry of `substance` in `role`, or else in the first of `fallbacks` that has one, that
+/// `palette` holds, or [`BuildCoarseInputsError::NotInPalette`] naming `part` and `role`.
 fn entry(
     palette: &MaterialPalette,
     part: &'static str,
     substance: SubstanceKey,
     role: PaletteRole,
-    fallback: Option<PaletteRole>,
+    fallbacks: impl IntoIterator<Item = PaletteRole>,
 ) -> Result<u8, BuildCoarseInputsError> {
-    palette
-        .find(role, substance)
-        .or_else(|| fallback.and_then(|other| palette.find(other, substance)))
+    core::iter::once(role)
+        .chain(fallbacks)
+        .find_map(|r| palette.find(r, substance))
         .ok_or(BuildCoarseInputsError::NotInPalette {
             part,
             substance,
@@ -1262,15 +1295,22 @@ fn crust_palette(
     palette: &MaterialPalette,
     crust: &CrustInputs,
 ) -> Result<[Option<u8>; 4], BuildCoarseInputsError> {
-    // Where the secondary crust and the provinces are one substance, either's entry names both.
-    let shared = crust.secondary == crust.provinces;
-    let secondary = entry(
-        palette,
-        "secondary crust",
-        crust.secondary,
-        PaletteRole::SecondaryCrust,
-        shared.then_some(PaletteRole::Province),
-    )?;
+    // Where a crust and the provinces are one substance, the crust's entry names the provinces
+    // too, and the secondary crust may take the provinces' own.
+    let secondary_shared = crust.secondary == Some(crust.provinces);
+    let primary_shared = crust.primary == Some(crust.provinces);
+    let secondary = crust
+        .secondary
+        .map(|s| {
+            entry(
+                palette,
+                "secondary crust",
+                s,
+                PaletteRole::SecondaryCrust,
+                secondary_shared.then_some(PaletteRole::Province),
+            )
+        })
+        .transpose()?;
     let primary = crust
         .primary
         .map(|p| entry(palette, "primary crust", p, PaletteRole::PrimaryCrust, None))
@@ -1292,14 +1332,19 @@ fn crust_palette(
         "provinces",
         crust.provinces,
         PaletteRole::Province,
-        shared.then_some(PaletteRole::SecondaryCrust),
+        [
+            (secondary_shared, PaletteRole::SecondaryCrust),
+            (primary_shared, PaletteRole::PrimaryCrust),
+        ]
+        .into_iter()
+        .filter_map(|(shared, role)| shared.then_some(role)),
     )?;
     let mut entries = [None; 4];
     for (slot, crust) in entries.iter_mut().zip(Crust::ALL) {
         *slot = match crust {
             Crust::Continental => tertiary,
-            Crust::Oceanic => Some(secondary),
-            Crust::Lid => Some(primary.unwrap_or(secondary)),
+            Crust::Oceanic => secondary,
+            Crust::Lid => primary.or(secondary),
             Crust::Province => Some(provinces),
         };
     }
@@ -1396,40 +1441,56 @@ mod tests {
         MaterialPalette::new(entries).unwrap()
     }
 
+    /// The builder values of `inputs`, as a builder to vary.
+    fn builder_of(inputs: &CoarseInputs) -> CoarseInputsBuilder {
+        let mut builder = CoarseInputs::builder()
+            .body(inputs.body())
+            .figure(inputs.figure())
+            .gravity(inputs.gravity())
+            .sigma_h(inputs.sigma_h())
+            .liquids(inputs.liquids().iter().copied())
+            .ices(inputs.ices().iter().copied())
+            .mean_surface_temperature(inputs.mean_surface_temperature())
+            .equator_pole_contrast_k(inputs.equator_pole_contrast_k())
+            .day_night_contrast_k(inputs.day_night_contrast_k())
+            .spin(*inputs.spin())
+            .host_flux(inputs.host_flux())
+            .surface_pressure(inputs.surface_pressure())
+            .gases(inputs.gases().iter().copied())
+            .surface(inputs.surface_state(), inputs.surface_material())
+            .tectonics(inputs.tectonics(), inputs.continental_fraction())
+            .volcanism(inputs.volcanism())
+            .heat_flow(inputs.heat_flow())
+            .surface_age(inputs.surface_age())
+            .craters(*inputs.craters())
+            .climate(*inputs.climate())
+            .crust(*inputs.crust())
+            .condensates(inputs.condensates().iter().copied())
+            .palette(inputs.palette().clone());
+        if let Some(orbit) = inputs.seasonal_orbit() {
+            builder = builder.seasonal_orbit(*orbit);
+        }
+        if let Some(epoch) = inputs.wet_epoch() {
+            builder = builder.wet_epoch(*epoch);
+        }
+        builder
+    }
+
     /// The reference Earth's builder values, as a builder to vary.
     fn earth_builder() -> CoarseInputsBuilder {
-        let earth = reference::earth_like();
-        CoarseInputs::builder()
-            .body(earth.body())
-            .figure(earth.figure())
-            .gravity(earth.gravity())
-            .sigma_h(earth.sigma_h())
-            .liquids(earth.liquids().iter().copied())
-            .ices(earth.ices().iter().copied())
-            .mean_surface_temperature(earth.mean_surface_temperature())
-            .equator_pole_contrast_k(earth.equator_pole_contrast_k())
-            .day_night_contrast_k(earth.day_night_contrast_k())
-            .spin(*earth.spin())
-            .host_flux(earth.host_flux())
-            .seasonal_orbit(*earth.seasonal_orbit().unwrap())
-            .surface_pressure(earth.surface_pressure())
-            .gases(earth.gases().iter().copied())
-            .surface(earth.surface_state(), earth.surface_material())
-            .tectonics(earth.tectonics(), earth.continental_fraction())
-            .volcanism(earth.volcanism())
-            .heat_flow(earth.heat_flow())
-            .surface_age(earth.surface_age())
-            .craters(*earth.craters())
-            .wet_epoch(*earth.wet_epoch().unwrap())
-            .climate(*earth.climate())
-            .crust(*earth.crust())
-            .condensates(earth.condensates().iter().copied())
-            .palette(earth.palette().clone())
+        builder_of(&reference::earth_like())
     }
 
     #[test]
     fn the_builder_gives_back_what_it_was_given() {
-        assert_eq!(earth_builder().build().unwrap(), reference::earth_like());
+        for world in [
+            reference::earth_like(),
+            reference::mars_like(),
+            reference::moon_like(),
+            reference::ceres_like(),
+        ] {
+            assert_eq!(builder_of(&world).build().unwrap(), world);
+        }
     }
 
     #[test]
@@ -1767,6 +1828,14 @@ mod tests {
         assert!(lid.is_some());
         assert_eq!(mars.main_liquid(), None);
 
+        // Ceres has no secondary crust, so no oceanic crust's entry, and its lid and its
+        // provinces, were it to build any, take its primary phyllosilicate's.
+        let ceres = reference::ceres_like();
+        let shell = at(&ceres, "phyllosilicate", PaletteRole::PrimaryCrust);
+        assert_eq!(ceres.crust_palette(), [None, None, shell, shell]);
+        assert!(shell.is_some());
+        assert_eq!(ceres.main_liquid(), None);
+
         // Of two seas, the larger's liquid is the main one, whichever order they were given in.
         let mut entries = earth.palette().entries().to_vec();
         entries.push(entry("CH4", PaletteRole::Liquid));
@@ -1791,6 +1860,94 @@ mod tests {
         let methane = at(&two_seas, "CH4", PaletteRole::Liquid);
         assert_eq!(tied([share_of("H2O", 0.3), share_of("CH4", 0.3)]), methane);
         assert_eq!(tied([share_of("CH4", 0.3), share_of("H2O", 0.3)]), methane);
+    }
+
+    /// A crust needs a primary or a secondary crust for its lid, and may lack either one: Ceres
+    /// has no secondary, and Earth no primary.
+    #[test]
+    fn a_crust_with_neither_primary_nor_secondary_is_refused() {
+        let mut crust = *reference::earth_like().crust();
+        assert_eq!(crust.primary, None);
+        crust.secondary = None;
+        assert_eq!(
+            earth_builder().crust(crust).build(),
+            Err(BuildCoarseInputsError::NoCrust)
+        );
+        let ceres = reference::ceres_like();
+        assert_eq!(ceres.crust().secondary, None);
+        let mut crust = *ceres.crust();
+        crust.primary = None;
+        assert_eq!(
+            builder_of(&ceres).crust(crust).build(),
+            Err(BuildCoarseInputsError::NoCrust)
+        );
+    }
+
+    /// The provinces take their own `Province` entry first, then the entry of a crust of their
+    /// substance, the secondary's before the primary's; the primary crust takes its
+    /// `PrimaryCrust` entry alone, and the provinces only a crust's.
+    #[test]
+    fn the_provinces_share_a_crust_s_entry_and_the_primary_its_own() {
+        let ceres = reference::ceres_like();
+        let at = |inputs: &CoarseInputs, k, role| inputs.palette().find(role, key(k));
+        let with = |extra: PaletteEntry| {
+            let mut entries = ceres.palette().entries().to_vec();
+            entries.push(extra);
+            palette(entries)
+        };
+        // A province entry of the lid's substance is the provinces' own, and the lid keeps its.
+        let own = builder_of(&ceres)
+            .palette(with(entry("phyllosilicate", PaletteRole::Province)))
+            .build()
+            .unwrap();
+        let shell = at(&own, "phyllosilicate", PaletteRole::PrimaryCrust);
+        let provinces = at(&own, "phyllosilicate", PaletteRole::Province);
+        assert_eq!(own.crust_palette(), [None, None, shell, provinces]);
+        assert_ne!(shell, provinces);
+        // Where both crusts are the provinces' substance, the secondary's entry names them.
+        let mut both = *ceres.crust();
+        both.secondary = Some(key("phyllosilicate"));
+        let both = builder_of(&ceres)
+            .crust(both)
+            .palette(with(entry("phyllosilicate", PaletteRole::SecondaryCrust)))
+            .build()
+            .unwrap();
+        let shell = at(&both, "phyllosilicate", PaletteRole::PrimaryCrust);
+        let melt = at(&both, "phyllosilicate", PaletteRole::SecondaryCrust);
+        assert_eq!(both.crust_palette(), [None, melt, shell, melt]);
+        // The primary crust does not take a province's entry of its substance.
+        let provinces_only: Vec<PaletteEntry> = ceres
+            .palette()
+            .entries()
+            .iter()
+            .copied()
+            .filter(|e| e.role != PaletteRole::PrimaryCrust)
+            .chain([entry("phyllosilicate", PaletteRole::Province)])
+            .collect();
+        let refused = builder_of(&ceres)
+            .palette(palette(provinces_only))
+            .build()
+            .unwrap_err();
+        assert_eq!(
+            refused,
+            BuildCoarseInputsError::NotInPalette {
+                part: "primary crust",
+                substance: key("phyllosilicate"),
+                role: PaletteRole::PrimaryCrust
+            }
+        );
+        // A palette whose `Na2CO3` is a `Deposit` entry only has no `Province` entry for it: a
+        // deposit's entry never names the provinces.
+        let mut salt = *ceres.crust();
+        salt.provinces = key("Na2CO3");
+        assert_eq!(
+            builder_of(&ceres).crust(salt).build().unwrap_err(),
+            BuildCoarseInputsError::NotInPalette {
+                part: "provinces",
+                substance: key("Na2CO3"),
+                role: PaletteRole::Province
+            }
+        );
     }
 
     /// A −0 share or reservoir is refused, so that a list sorts by key, not by a zero's sign.
@@ -1846,6 +2003,10 @@ mod tests {
         assert_eq!(
             BuildCoarseInputsError::Missing("crust").to_string(),
             "the coarse inputs lack the crust"
+        );
+        assert_eq!(
+            BuildCoarseInputsError::NoCrust.to_string(),
+            "the crust has neither a primary nor a secondary crust"
         );
         assert_eq!(
             BuildCoarseInputsError::Duplicate {

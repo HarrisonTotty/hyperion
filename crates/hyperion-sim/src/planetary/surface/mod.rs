@@ -30,8 +30,10 @@
 //! graph, the quantiser, the six steps as no-ops and, behind the crate's `testing` feature,
 //! `reference`'s four reference worlds. R09.T10.b added the palette's sources: the inputs carry the
 //! body's palette, whose entries' values the server resolves from plan 14's registry, and the
-//! header and the cells' substance bytes carry it. Run on any inputs, the pass so far yields its
-//! initial state: a smooth, dry sphere at the datum under a still climate at the body's mean
+//! header and the cells' substance bytes carry it. R09.T10.c made the secondary crust optional
+//! (a Ceres's crust is primary, and its rock never melted), and the reference rows' densities
+//! grain densities (science-r09-drainage.md §3 and §5). Run on any inputs, the pass so far yields
+//! its initial state: a smooth, dry sphere at the datum under a still climate at the body's mean
 //! surface temperature, with the inputs' palette. R09.T11–T15 fill the steps and R09.T16 pins the
 //! reference worlds' fields.
 //!
@@ -102,10 +104,12 @@ use steps::{Pass, Working};
 ///
 /// // Its one lithology, with the values the server will resolve from plan 14's registry: Ceres's
 /// // normal albedo, a phyllosilicate's grain density and a basalt's solidus (`reference`'s rows).
+/// // It is a primary crust, the shell of Ceres's frozen ocean, and Ceres has no secondary crust,
+/// // its rock having never melted.
 /// let phyllosilicate = SubstanceKey::new("phyllosilicate")?;
 /// let palette = MaterialPalette::new(vec![PaletteEntry {
 ///     substance: phyllosilicate,
-///     role: PaletteRole::SecondaryCrust,
+///     role: PaletteRole::PrimaryCrust,
 ///     normal_albedo_bvr: [0.094; 3],
 ///     phase_row: 0,
 ///     grain_density_kg_m3: 2_500.0,
@@ -150,8 +154,8 @@ use steps::{Pass, Working};
 ///         model: ClimateModelKind::RadiativeEquilibrium,
 ///     })
 ///     .crust(CrustInputs {
-///         primary: None,
-///         secondary: phyllosilicate,
+///         primary: Some(phyllosilicate),
+///         secondary: None,
 ///         tertiary: None,
 ///         provinces: phyllosilicate,
 ///         melt_area_fraction: 0.0,
@@ -162,8 +166,10 @@ use steps::{Pass, Working};
 /// // A body of 470 km takes the shallowest level, 6,144 cells of about 21 km.
 /// assert_eq!(field.header().level().get(), 5);
 /// assert_eq!(field.synthesis().len(), 6_144);
-/// // Its lid names its lithology, the palette's one entry.
+/// // Its lid names its lithology, the palette's one entry, and with no secondary crust it has
+/// // no oceanic crust's.
 /// assert_eq!(field.header().crust_palette()[2], Some(0));
+/// assert_eq!(field.header().crust_palette()[1], None);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
