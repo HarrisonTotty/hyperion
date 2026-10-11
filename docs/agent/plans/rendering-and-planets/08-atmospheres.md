@@ -6450,7 +6450,9 @@ generator, and the reference's sampling needs no domain tag.
   - _The benchmarks run_ (module `atmosphere::benchmarks`, `just test-slow atmosphere::benchmarks`;
     all nine pass; each at seed 0, run one at a time on 4 threads under a 400% CPU quota at load
     19–25 for the figures below, the times including the N ÷ 4 trace). Of 957 values asserted, 4
-    stand past 3σ; 5 are left out by the N^−½ check.
+    stand past 3σ; 5 are left out by the N^−½ check. On the committed code (2026-10-11) the recipe
+    passes the nine run together, and a second run with their output shown gives every figure but
+    the times again, to the digit.
 
     | Benchmark                                     | Values | Left out | Samples   | Largest \|z\| (where)                     | Past 3σ | Bound | Largest σ ÷ I | χ² p: I, Q, U, V        | Time  |
     | --------------------------------------------- | ------ | -------- | --------- | ----------------------------------------- | ------- | ----- | ------------- | ----------------------- | ----- |
@@ -6469,8 +6471,9 @@ generator, and the reference's sampling needs no domain tag.
       to 0.012 over 19 values, Q from 0.39 to 0.35, U from 0.22 to 0.18).
     - Kokhanovsky et al.'s aerosol leaves out its V at VZA 60°, φ 90°, reflected and transmitted
       (4.4 × 10⁻⁵ and 6.8 × 10⁻⁵ of I). Its V then gives χ² 10.9 for 10 against 3,452 flipped.
-    - Every sign convention is decided by the run: the flipped χ² is at least 1.5 × 10⁵ for Q and U
-      in every benchmark, and 3,452, 13,124 and 112,247 for the V of the aerosol, A4 and A3.
+    - Every sign convention is decided by the run: the flipped χ² is at least 1.46 × 10⁵ for Q and
+      U in every benchmark (146,960, the aerosol's U; 1.5 × 10⁶ or more in T12.c's seven), and
+      3,452, 13,124 and 112,247 for the V of the aerosol, A4 and A3.
     - Before the N^−½ check (an earlier run of the same draws) the aerosol asserted 89 values, its
       V's χ² 17.7 for 12 against 3,488 flipped; A3's figures were those above.
 
