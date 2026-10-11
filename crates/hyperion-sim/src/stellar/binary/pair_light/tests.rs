@@ -955,15 +955,20 @@ fn the_lazy_values_are_fresh_builds() {
 
     for f in 0..FE_H_CELLS {
         for k in 0..AGE_BINS {
-            let v = cooling_brightest(f, k);
+            let v = cooling_brightest_mag(f, k);
             let fresh = to_cmag(if v.is_finite() {
                 v - MARGIN_MAG
             } else {
                 UNSEEN_MAG
             });
             assert_eq!(Some(cooling_floor_cmag(f, k)), fresh, "{f} {k}");
-            // The fit's build, `build_cooling_floor_cmag`, takes the same brightest V so.
-            assert_eq!(Some(cooling_floor_of_brightest(v)), fresh, "{f} {k}");
+            // The build the fit writes the table from is the same, so a change to it fails here
+            // too, not only at the slow pass's rerun.
+            assert_eq!(
+                cooling_floor_cmag(f, k),
+                build_cooling_floor_cmag(f, k),
+                "{f} {k}"
+            );
         }
         let held = held_floor_of(f);
         for k in 0..HELD_FLOOR_NODES {

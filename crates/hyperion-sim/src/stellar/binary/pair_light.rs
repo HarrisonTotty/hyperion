@@ -1666,15 +1666,17 @@ fn word_of(chars: &[u8]) -> Option<u32> {
 
 // --- The cooling floor -----------------------------------------------------------------------
 
-/// The masses, M☉, at which the cooling floor reads the cooling fits: 0.08–0.1 M☉ in 64 even
-/// steps, the fits' top (P06.T13; [`substellar::MAX_MASS`]) last.
+/// The even steps in mass, from [`LOWEST_COMPANION_MSUN`] to the cooling fits' top (P06.T13;
+/// [`substellar::MAX_MASS`]), at whose ends the cooling floor reads the fits: 64 steps, 65 masses
+/// of 0.08–0.1 M☉, edges included.
 pub const COOLING_FLOOR_MASSES: u32 = 64;
 
-/// The metallicities a cooling floor's interval is read at, edges included: its width in 8 even
-/// steps.
+/// The even steps across a cooling floor's metallicity interval at whose ends it reads the fits:
+/// 8 steps, 9 metallicities, edges included.
 pub const COOLING_FLOOR_FE_H: u32 = 8;
 
-/// The ages a cooling floor's bin is read at, edges included: its width in 8 even steps.
+/// The even steps across a cooling floor's age bin at whose ends it reads the fits: 8 steps,
+/// 9 ages, edges included.
 pub const COOLING_FLOOR_AGES: u32 = 8;
 
 /// The brightest V, mag, of a star on P06.T13's cooling fits of 0.08–0.1 M☉ and metallicity in
@@ -1686,7 +1688,7 @@ pub const COOLING_FLOOR_AGES: u32 = 8;
 ///
 /// If `fe_cell` or `bin` is past its axis.
 #[must_use]
-pub fn cooling_brightest(fe_cell: usize, bin: usize) -> f64 {
+pub fn cooling_brightest_mag(fe_cell: usize, bin: usize) -> f64 {
     let (f_lo, f_hi) = (FE_H_EDGES[fe_cell], FE_H_EDGES[fe_cell + 1]);
     let (t_lo, t_hi) = (age_edge_years(bin), age_edge_years(bin + 1));
     let mut brightest = f64::INFINITY;
@@ -1728,7 +1730,7 @@ pub fn cooling_floor_cmag(fe_cell: usize, bin: usize) -> i16 {
 }
 
 /// The cooling floor of metallicity interval `fe_cell` at age bin `bin` built afresh, hundredths of
-/// a magnitude: [`cooling_brightest`] brightened by [`MARGIN_MAG`] and rounded brighter
+/// a magnitude: [`cooling_brightest_mag`] brightened by [`MARGIN_MAG`] and rounded brighter
 /// ([`to_cmag`]), or [`UNSEEN_CMAG`] where it is +∞.
 ///
 /// Some 5,000 evaluations of the cooling fits. `hyperion-fit`'s task `binary_cooling_floor`
@@ -1740,7 +1742,7 @@ pub fn cooling_floor_cmag(fe_cell: usize, bin: usize) -> i16 {
 /// which the cooling fits' V (some +10 to +16 mag) rules out.
 #[must_use]
 pub fn build_cooling_floor_cmag(fe_cell: usize, bin: usize) -> i16 {
-    cooling_floor_of_brightest(cooling_brightest(fe_cell, bin))
+    cooling_floor_of_brightest(cooling_brightest_mag(fe_cell, bin))
 }
 
 /// The cooling floor's stored value for the brightest V `v` (mag) of its interval and bin: `v`

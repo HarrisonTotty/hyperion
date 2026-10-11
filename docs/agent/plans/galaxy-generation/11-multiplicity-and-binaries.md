@@ -5204,16 +5204,20 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     `binary_cooling_floor` from the sim's `pair_light::build_cooling_floor_cmag`, the old lazy
     build's code. `cooling_floor_cmag` reads the constant.
   - Freshness: the fast test `the_lazy_values_are_fresh_builds` holds every committed value to a
-    fresh build on every run, natively and on wasm32-wasip1; `just fit-check` checks the table's
-    inputs hash, its body's hash and a fingerprint of 16 brightest V's of the fits; the slow pass's
-    `--rerun-fast` reruns the task and compares bytes. The golden `stellar/pair_light_tables`,
+    fresh build on every run, natively and on wasm32-wasip1, both to its own copy of the formula
+    and to `build_cooling_floor_cmag`; `just fit-check` checks the table's inputs hash, its body's
+    hash and a fingerprint of 34 probes (the grid's two counts, and at 16 cells the fits'
+    brightest V and the stored value); the slow pass's `--rerun-fast` reruns the task and compares
+    bytes. The golden `stellar/pair_light_tables`,
     which pins the floor's values, is unchanged.
   - Written with `cargo run -p hyperion-fit -- run binary_cooling_floor --since 21`, the dev
     profile, whose sim is at opt-level 2 (not `just fit`'s release build, to spare it): the
     output is the same bits in any profile, and a rerun on one thread wrote the same bytes.
-    `just fit` wrote the table, its lock entry and its `MANIFEST` row but not its `pub mod` line
-    in `tables/mod.rs`, added by hand, against `task.rs`'s "Adding a task" step 4.
+    The run wrote the table, its lock entry and its `MANIFEST` row but not its `pub mod` line in
+    `tables/mod.rs`, added by hand, against `task.rs`'s "Adding a task" step 4 (reported to main).
   - Gates: `just fit-check` (27 fresh, 0 failures); fmt and Clippy `-D warnings` (sim and fit,
-    all targets); `stellar::binary::pair_light` and `light` tests and the tables' manifest test,
-    natively and on wasm32-wasip1 (38 each); the fit task's tests, the registry's, the toolchain's
-    and `list_prints_registered_tasks`; `golden_diff.py`: no golden changed.
+    all targets, and the workspace's); `stellar::binary::pair_light` and `light` tests and the
+    tables' manifest test, natively and on wasm32-wasip1 (38 each); the fit task's tests, the
+    registry's, the toolchain's and `list_prints_registered_tasks`; `golden_diff.py`: no golden
+    changed. The review's fixes renamed `cooling_brightest` to `cooling_brightest_mag` and added
+    the stored values to the fingerprint (the table's body unchanged).

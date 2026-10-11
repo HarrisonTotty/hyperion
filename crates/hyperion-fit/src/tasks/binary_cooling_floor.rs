@@ -20,7 +20,7 @@ use std::num::NonZeroUsize;
 use hyperion_sim::stellar::binary::pair_light::{
     AGE_BINS, AGE_STEP_DEX, COOLING_FLOOR_AGES, COOLING_FLOOR_FE_H, COOLING_FLOOR_MASSES,
     FE_H_CELLS, FE_H_EDGES, FIRST_AGE_EDGE_YEARS, LAST_AGE_YEARS, LOWEST_COMPANION_MSUN,
-    MARGIN_MAG, UNSEEN_CMAG, build_cooling_floor_cmag, cooling_brightest, from_cmag,
+    MARGIN_MAG, UNSEEN_CMAG, build_cooling_floor_cmag, cooling_brightest_mag, from_cmag,
 };
 use hyperion_sim::stellar::substellar;
 
@@ -235,7 +235,9 @@ impl FitTask for BinaryCoolingFloorTask {
 
     /// The grid's counts, and in each metallicity interval at each of [`FINGERPRINT_BINS`] the
     /// brightest V on the cooling fits before its margin and rounding (0, a finite stand-in, where
-    /// none has a V): some 84,000 evaluations of the fits, which `just ci`'s fit-check can afford.
+    /// none has a V) and the value the table stores there, so that a change to the fits, to the
+    /// margin, to the rounding or to the path of no V names the table stale: some 170,000
+    /// evaluations of the fits, which `just ci`'s fit-check can afford.
     fn fingerprint(&self) -> SimFingerprint {
         #[expect(clippy::cast_precision_loss, reason = "a few dozen values")]
         let mut probes = vec![
@@ -244,10 +246,14 @@ impl FitTask for BinaryCoolingFloorTask {
         ];
         for fe_cell in 0..FE_H_CELLS {
             for bin in FINGERPRINT_BINS {
-                let v = cooling_brightest(fe_cell, bin);
+                let v = cooling_brightest_mag(fe_cell, bin);
                 probes.push((
-                    format!("cooling_brightest({fe_cell}, {bin})"),
+                    format!("cooling_brightest_mag({fe_cell}, {bin})"),
                     if v.is_finite() { v } else { 0.0 },
+                ));
+                probes.push((
+                    format!("build_cooling_floor_cmag({fe_cell}, {bin})"),
+                    f64::from(build_cooling_floor_cmag(fe_cell, bin)),
                 ));
             }
         }
