@@ -149,7 +149,10 @@ pub mod hooks { pub struct BodyHooks { /* surface_seed (server-only, never in a 
     amended by R04.T3.a (rendering plans), accepted 2026-09-30 by a delegated decision), bulk,
     surface, habitability, resources, figures */ } pub struct BulkComposition;
     pub struct SurfaceConditions; pub struct HabitabilityAssessment; pub struct ResourceAbundances;
-    pub struct GlobalFigures; pub struct SubsurfaceOcean; pub enum OceanFloor; }
+    pub struct GlobalFigures; pub struct SubsurfaceOcean; pub enum OceanFloor;
+    pub enum VerticalStructure { RadiativeConvective { /* T_s, p_s, α, T_skin, (p, T) nodes:
+        T24.e */ }, Envelope { /* Guillot parameters, join, (p, T) nodes: T24.d */ } } }
+pub fn temperature_at(structure: &hooks::VerticalStructure, p: Pascals) -> Kelvin; // T24.e
 pub mod fate { pub enum BodyState { NotYetFormed, Present, Destroyed { cause: DestructionCause,
     at: UniverseTime }, Unbound { at: UniverseTime } } }
 
@@ -209,16 +212,28 @@ pub struct Substance {
        sources: &[Source] */
 }
 pub enum SubstanceKind { Molecule, Atom, Ion, Mineral, Lithology, Solution, Organic }
-pub enum Phase { Solid, Liquid, Supercritical }   // Vapour where phase_at is asked of the gas
+pub enum Phase { Solid, Liquid, Vapour, Supercritical }
 pub fn substance(id: SubstanceId) -> &'static Substance;
 pub fn by_key(key: &str) -> Option<SubstanceId>;
+pub fn condensables() -> impl Iterator<Item = SubstanceId>;          // registry order
 pub fn saturation_pressure(id: SubstanceId, temperature: Kelvin) -> Option<Pascals>;
 pub fn phase_at(id: SubstanceId, temperature: Kelvin, pressure: Pascals) -> Option<Phase>;
-pub fn mean_molar_mass(mixture: &[(SubstanceId, f64)]) -> f64;      // g mol⁻¹
-pub fn heat_capacity_over_r(mixture: &[(SubstanceId, f64)]) -> f64; // c_p ÷ R, mixed by c_p
+pub fn mean_molar_mass_g_per_mol(mixture: &[(SubstanceId, f64)]) -> Option<f64>;
+// T49.b: c_p(T) as a statistical sum over each gas row's molecular constants
+// (science-r08-gases-2.md §1.3); None for a row without gas columns. H̃(0 K) = 0. S̃'s zero is
+// arbitrary, and only its differences are read: S̃(T_ad) = S̃(T_s) + α ln(p ÷ p_s). T49.a's
+// heat_capacity_over_r(mixture), over the classes, retires with HeatCapacityClass.
+pub fn heat_capacity_over_r_at(id: SubstanceId, temperature: Kelvin) -> Option<f64>;
+pub fn enthalpy_over_r(id: SubstanceId, temperature: Kelvin) -> Option<Kelvin>; // ∫ c_p ÷ R dT
+pub fn entropy_over_r(id: SubstanceId, temperature: Kelvin) -> Option<f64>;     // ∫ c_p ÷ (R T) dT
+pub fn mixture_heat_capacity_over_r_at(mixture: &[(SubstanceId, f64)], temperature: Kelvin) -> Option<f64>;
+pub fn mixture_enthalpy_over_r(mixture: &[(SubstanceId, f64)], temperature: Kelvin) -> Option<Kelvin>;
+pub fn mixture_entropy_over_r(mixture: &[(SubstanceId, f64)], temperature: Kelvin) -> Option<f64>;
 pub enum Element { H, He, C, N, O, Ne, Na, Mg, Al, Si, P, S, Cl, Ar, K, Ca, Ti, V, Cr, Mn, Fe, Ni, Zn, Kr, Xe }
 ```
 
+The mixture forms sum xᵢvᵢ in the given order and do not renormalise, as T49.a's do (T49.a's
+names and signatures as built, and T49.b's functions; science-r08-gases-2.md §1.7).
 `planetary::derive::atmosphere::Gas` stays, the escape view of rows 0–8 (`Gas::substance`,
 `SubstanceId::gas`). The registry's public mirror is `packages/protocol/fixtures/substances.json`.
 
@@ -2167,10 +2182,12 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   twice, by P14.T35.e); atmosphere as ordered gas fractions, `(SubstanceId, x)` mole fractions
   largest first with ties by `SubstanceId` (with CH₄ and O₂ by P14.T24.f, built), and their mean
   molar mass μ and mixed c_p ÷ R from T49.a's `mean_molar_mass_g_per_mol` and
-  `heat_capacity_over_r`, summed over the list in its published order, computed here once and
-  published (decision-composition); stellar flux; the host's activity level as a radiation class;
-  liquid-water flag from the surface pressure and temperature range by the registry's `phase_at`
-  on `H2O`'s row (T49.a; from 22 → 23 T51.a derives it from the partition).
+  `heat_capacity_over_r` (from 22 → 23, T49.b's `mixture_heat_capacity_over_r_at` at the mean
+  surface temperature, P14.T35.e's definition), summed over the list in its published order,
+  computed here once and published (decision-composition); stellar flux; the host's activity
+  level as a radiation class; liquid-water flag from the surface pressure and temperature range by
+  the registry's `phase_at` on `H2O`'s row (T49.a; from 22 → 23 T51.a derives it from the
+  partition).
   - _Mole fractions_ (signoff-3.md, item 1.1). T13.c's partial pressures are column weights,
     p_i = M_i g ÷ 4πR², which sum to the surface pressure, so p_i ÷ p_s is a mass fraction. The
     published fraction is x_i = (p_i ÷ μ_i) ÷ Σ_j (p_j ÷ μ_j), μ_i the row's molar mass, and
@@ -2337,7 +2354,9 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
       takes a measured climatology). Once P14.T31.b exists, a `body.duststorm` phase raises the
       column while it lasts;
     - sulphuric acid by P14.T24.g:
-      - a deck of four modes on a runaway-greenhouse world (a Venus);
+      - a deck of four modes on a runaway-greenhouse world (a Venus), whose upper-cloud mode 2
+        carries the unidentified ultraviolet absorber as `acid_uv_absorber`
+        (science-r08-unowned-absorbers);
       - a thin stratospheric layer of one mode on a temperate or snowball world (an Earth);
       - SO₂ as an absorber.
 
@@ -2362,7 +2381,8 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
 - **P14.T24.d The envelope's visible atmosphere** (R08.T1's draft, accepted as re-scoped,
   signoff-3.md; re-scoped to the envelope's
   structure and built in the 22 → 23 batch with T52.d, which gives its composition and decks,
-  decision-composition). `hooks/envelope_atmosphere.rs`:
+  decision-composition; its adiabat after T49.b's heat-capacity step, science-r08-gases-2.md
+  §1.7). `hooks/envelope_atmosphere.rs`:
   `EnvelopeAtmosphere`, for every body in `SurfaceState::GasEnvelope`: the giants, and every
   sub-Neptune, which is one by construction (`PlanetClass::of` and `derive::atmosphere` share
   `THIN_ENVELOPE_FRACTION`). It fills the record's `envelope` section, `RecordSection::Envelope` at
@@ -2373,10 +2393,20 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   - T_int and T_irr: a giant's internal heat by ruling 112.7's split (the record's effective and
     equilibrium temperatures) and T12's flux. A sub-Neptune has no internal heat in the record
     today; the builder states one (its envelope's cooling, or none) and records it.
-  - A Guillot 2010 Eq. 29 profile, joined to an adiabat below the level where the radiative
-    gradient first exceeds the adiabatic one: the `Envelope` variant of T24.e's
-    `VerticalStructure`, so that one `temperature_at` serves both (whichever of T24.d and T24.e
-    lands first creates the type and the function).
+  - A Guillot 2010 Eq. 29 profile, joined to the dry adiabat below the level where its gradient
+    dln T ÷ dln p first exceeds ∇_ad = R ÷ c_p(T). c_p(T) is T49.b's function over the envelope's
+    composition, with hydrogen frozen at 3:1 ortho to para (normal hydrogen; equilibrium hydrogen
+    is the recorded other bound; science-r08-gases-2.md §1.3–§1.4).
+
+    Below the join the adiabat is integrated as T24.e's is, S̃(T) = S̃(T_join) + ln(p ÷ p_join).
+    It is published as (p, T) nodes at T24.e's spacing, from p_join to 100 bar (10⁷ Pa).
+    Deeper, `temperature_at` takes the last segment's exponent. Near 100 bar, hydrogen's density
+    departs from the ideal gas's by about 3% (its second virial coefficient, from memory), the
+    recorded limit for a later real-gas form.
+
+    It is the `Envelope` variant of T24.e's `VerticalStructure`, so that one `temperature_at`
+    serves both. Whichever of T24.d and T24.e lands first creates the type and the function.
+
   - He/H₂ at about 0.16 by number (Jupiter's, depleted by helium rain below a protosolar value near
     0.19, both from memory). A sub-Neptune's envelope is too warm and too light to rain helium, so
     the builder checks whether it keeps the protosolar value.
@@ -2390,7 +2420,10 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   profile is the semi-grey irradiated atmosphere of any envelope, and the decks follow the same
   saturation curves. R08.T1 checked this from memory, and a science check confirms it at build
   time.
-  - _Tests:_ Jupiter's T(1 bar) 166 K ± 10%, its NH₃ deck at 0.5–1 bar, and CH₄/H₂ ≈ 2 × 10⁻³;
+  - _Tests:_ Jupiter's T(1 bar) 166 K ± 10%, the adiabat from the Galileo probe's 22 bar and
+    427.7 K reaches 1 bar within 1 K of the measured 166.1 K (Seiff et al. 1998, from memory).
+    Computed: 166.5 K with normal hydrogen and 167.0 K with equilibrium hydrogen; constant classes
+    would give 170.7 K; its NH₃ deck at 0.5–1 bar, and CH₄/H₂ ≈ 2 × 10⁻³;
     the tests of T52.d; a sub-Neptune's envelope is `Ok` and its surface `NotApplicable`;
     a rocky body's envelope is `NotApplicable`; the figures are continuous in time, and a body
     that loses its envelope changes section at its recorded state change.
@@ -2426,10 +2459,12 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   - The adiabat integrates dln T ÷ dln p = α R ÷ c_p(T) from (p_s, T_s), with c_p(T) = Σ xᵢ
     c_p,ᵢ(T) over T24.a's published mixture from T49.b's function (never by averaging γ), through
     its closed-form S̃: S̃(T_ad) = S̃(T_s) + α ln(p ÷ p_s). For a constant c_p it is the power law.
-  - `RadiativeConvective` holds T_s, p_s, α and T_skin, and the adiabat at 17 nodes, evenly in
-    ln p from p_s to the tropopause where it meets T_skin, each node to 10⁻¹² of the exact
-    solution. `temperature_at` is the power law between nodes: within 5 × 10⁻⁴ (3.6 × 10⁻⁴ on
-    Venus, computed; 8 segments would give 1.4 × 10⁻³). Below p_s it is the first segment's
+  - `RadiativeConvective` holds T_s, p_s, α and T_skin, and the adiabat's (p, T) nodes, evenly in
+    ln p from p_s to the tropopause where it meets T_skin: max(16, ⌈ln(p_s ÷ p_trop) ÷ 0.3⌉)
+    segments, each node to 10⁻¹² of the exact solution. `temperature_at` is the power law between
+    nodes, within 5 × 10⁻⁴ (computed, science-r08-gases-2.md §1.7: 3.6 × 10⁻⁴ on Venus at 16
+    segments over 92–0.1 bar; 3.4–3.5 × 10⁻⁴ for Jupiter's and Uranus's hydrogen over 0.1–10⁴ bar
+    at Δln p = 0.3, where 0.35 gives up to 5.1 × 10⁻⁴). Below p_s it is the first segment's
     exponent, and above the tropopause T_skin.
   - T_skin = 2^(−1/4)·T_eff, with T_eff⁴ = T_eq⁴ + T_int⁴: the τ → 0 limit of a grey atmosphere
     in radiative equilibrium that emits the absorbed starlight and the internal flux. T13.c's
@@ -2616,15 +2651,26 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
       u = ln(p_base ÷ p) ÷ ln(p_base ÷ p_top), where Haus et al. 2016's layers sit on Venus, and
       each carries its share of τ(550):
 
-      | Mode | r_g (µm) | ln σ_g | r_eff (µm) | v_eff | u      | Share of τ(550) |
-      | ---- | -------- | ------ | ---------- | ----- | ------ | --------------- |
-      | 1    | 0.30     | 0.44   | 0.49       | 0.21  | 0–1    | 0.15            |
-      | 2    | 1.00     | 0.25   | 1.17       | 0.064 | 0.55–1 | 0.18            |
-      | 2′   | 1.40     | 0.21   | 1.56       | 0.045 | 0–0.5  | 0.27            |
-      | 3    | 3.65     | 0.25   | 4.27       | 0.064 | 0–0.33 | 0.39            |
+      | Mode | Material           | r_g (µm) | ln σ_g | r_eff (µm) | v_eff | u      | Share of τ(550) |
+      | ---- | ------------------ | -------- | ------ | ---------- | ----- | ------ | --------------- |
+      | 1    | `H2SO4`            | 0.30     | 0.44   | 0.49       | 0.21  | 0–1    | 0.15            |
+      | 2    | `acid_uv_absorber` | 1.00     | 0.25   | 1.17       | 0.064 | 0.55–1 | 0.18            |
+      | 2′   | `H2SO4`            | 1.40     | 0.21   | 1.56       | 0.045 | 0–0.5  | 0.27            |
+      | 3    | `H2SO4`            | 3.65     | 0.25   | 4.27       | 0.064 | 0–0.33 | 0.39            |
 
       The shares are Mie at 550 nm over Haus et al.'s columns. Mode 2's r_eff and v_eff agree with
       Hansen and Hovenier 1974's 1.05 ± 0.10 µm and 0.07 ± 0.02.
+
+      - _The ultraviolet absorber_ (science-r08-unowned-absorbers). Mode 2, the upper cloud's
+        droplets, is `acid_uv_absorber`: sulphuric acid carrying Venus's unidentified ultraviolet
+        absorber.
+        - Its absorption is the material's, an empirical stand-in that R08 fits to Venus's albedo
+          spectrum (R08.T5.d, T5.e). No mixing ratio is computed, since the absorber's chemistry
+          is unknown.
+        - It lies in the upper cloud and within its top scale height, where Lee et al. 2021
+          require it.
+        - Its markings and its factor-2 decadal change (Lee et al. 2019) are not modelled.
+        - The case-2 layer is `H2SO4`.
 
     - The deck's vapour above it is p_sat(T_skin) ÷ p_top (T24.c).
   - _The layer's mode_ (case 2) is one sulphuric-acid sphere mode.
@@ -2637,11 +2683,12 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     the deck's top, or to the tropopause. It is not one of T24.a's fractions.
   - _Tests:_
     - A Venus given its measured state by hand (90.4 bar of CO₂ and 2.09 of N₂ by weight, 735 K)
-      carries a deck of four modes: its SO₂ is 130 ppm to 10⁻⁶ (by t_dry), its vapour at the base
-      5–10 ppm (by ε_v), its τ(550) 34.5 to 10⁻⁶ (by σ_d), its shares as tabled to 10⁻⁹, and its
-      base at 345–390 K with its top at the skin level. Its base and top pressures are printed and
-      recorded against VIRA's 1.38 and 0.037 bar (computed by signoff-3.md on the fixed c_p ÷ R:
-      about 2.45 and 0.069 bar; near VIRA's along T49.b's c_p(T), science-r08-gases-2.md §1.4).
+      carries a deck of four modes, mode 2 `acid_uv_absorber` and the rest `H2SO4`: its SO₂ is
+      130 ppm to 10⁻⁶ (by t_dry), its vapour at the base 5–10 ppm (by ε_v), its τ(550) 34.5 to
+      10⁻⁶ (by σ_d), its shares as tabled to 10⁻⁹, and its base at 345–390 K with its top at the
+      skin level. Its base and top pressures are printed and recorded against VIRA's 1.38 and
+      0.037 bar (computed by signoff-3.md on the fixed c_p ÷ R: about 2.45 and 0.069 bar; near
+      VIRA's along T49.b's c_p(T), science-r08-gases-2.md §1.4).
     - The table's median Venus carries a deck of four modes with τ(550) above 10, so that R08
       classes it `cloudDeck`, its base below 3 bar and above its top. Its figures are printed for
       T54.a's bless note (computed by signoff-3.md on the fixed c_p ÷ R, before the refit: at
@@ -2659,6 +2706,7 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     - Every τ is non-negative, and every mode's base pressure is at least its top's.
     - The inventory is continuous in time but at T13.c's state changes, and T24.a's fractions are
       unchanged by this task.
+    - No case-2 layer, and no world without a case-1 deck, carries `acid_uv_absorber`.
   - _Files:_ `planetary/hooks/{sulphur, aerosols, mod}.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::sulphur`.
 
@@ -3129,9 +3177,11 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
     `bulk`, below `surface`. T24.a's and T48.c's mentions of g read it.
   - `BodyRecordDto` gains `envelope: Option<SectionDto<BodyEnvelopeDto>>`, optional as `rotation`
     is (absent reads `not_modelled`, P14.T46.f's `toOptionalSection`), with T24.d's figures: T_int
-    and T_irr, the Guillot profile's parameters with the adiabat's β and join pressure, the
-    composition as `{ species, mole_fraction }` by registry key, with its
-    `mean_molar_mass_g_per_mol` and `heat_capacity_over_r`, the decks
+    and T_irr, the Guillot profile's parameters, the join pressure and the adiabat's (p, T) nodes
+    below it (T24.d, at T24.e's spacing; science-r08-gases-2.md §1.7), the composition as
+    `{ species, mole_fraction }` by registry key, with its `mean_molar_mass_g_per_mol` and
+    `heat_capacity_over_r` (c_p ÷ R the mixture's at the 1-bar level's temperature, for display, as
+    the surface's: no reader derives a lapse rate from it), the decks
     as T24.c's modes, and the haze τ. It is
     `not_applicable` for every body not in the gas-envelope state, whose surface section is the
     applicable one; a giant's and a sub-Neptune's surface is `not_applicable`. The server always
@@ -4723,8 +4773,8 @@ rows' values.
   - **Heat capacities** (science-r08-gases-2.md §1.3–§1.4), this subtask's first step. One c_p(T)
     for every registry gas row, built before T24.e, which integrates it in the same bump (a lane
     edge, this step → T24.e; the saturation fits below do not gate T24.e). A fixed c_p from
-    equipartition holds only for the noble gases at every temperature, and for N₂, O₂ and CO below
-    about 400 K.
+    equipartition holds only for the noble gases at every temperature, and, within 1%, for N₂ and
+    CO below about 400 K and O₂ below about 300 K.
     - c_p ÷ R(T) = 5/2 + c_rot + Σᵢ gᵢ E(θᵢ ÷ T) + Σ (level sets), a statistical sum over a new
       column of each gas row's molecular constants:
       - c_rot is classical, 0 for an atom, 1 for a linear molecule and 3/2 for a non-linear one,
@@ -4767,13 +4817,19 @@ rows' values.
     - `Ne`, `Kr`, `Xe`, `N2O`;
     - `CO`, `SO2`, `H2S`, `O3`, `HCN`, `C2H2`, `C2H4`, `C2H6`, `PH3`, `CH3OH`, `H`, `O`, `e-`, `H-`,
       `Na`, `K`, `Fe`, `Mg`, `Si`, `Ca`, `Ti`, `SiO`, `TiO`, `VO`, `FeH`;
-    - `Ca+`, `Fe+`, `Mg+`, `Ti+`: the ions whose lines R08.T4.e draws in ultra-hot atmospheres.
-      `Na+` and `K+` are added too if this plan's ionisation chemistry lists them, with no client
-      optics. The atoms `Al`, `Mn`, `V` and `Ni` are added if its hot-atmosphere chemistry
-      carries them as vapour (decision-r08-t4b-t12c, follow-up 2);
+    - `Al`, `V`, `Mn`, `Ni`, `Zn`: the atoms of T50.b's metals not yet rows (`Cr`'s row serves its
+      vapour);
+    - `Na+`, `Mg+`, `Al+`, `Si+`, `K+`, `Ca+`, `Ti+`, `V+`, `Cr+`, `Mn+`, `Fe+`, `Ni+`, `Zn+`: the
+      first ion of every metal T52.a carries, for its charge balance. R08.T4.e draws the lines of
+      `Ca+`, `Ti+`, `V+`, `Cr+`, `Mn+` and `Fe+`, and R08.T4.c states the rest none;
+    - `HCl`, chlorine's gas in T52.a, and any further species T52.a's builder lists
+      (science-r08-unowned-absorbers);
     - `NH4SH`, `H2SO4`, `S8`, `KCl`, `NaCl`, `ZnS`, `Na2S`, `MnS`, `Cr`, `FeS`, `MgSiO3`,
       `Mg2SiO4`, `SiO2`, `Al2O3`, `CaTiO3`, `TiO2`, `graphite`;
-    - `tholin`, `soot`, `chromophore`, `ice_giant_haze`, `mars_dust`;
+    - `tholin`, `soot`, `chromophore`, `ice_giant_haze`, `mars_dust`, `acid_uv_absorber`. The
+      last is a material whose aerosol column is a sphere at `H2SO4`'s liquid density. It is
+      T24.g's mode 2, with sources Pérez-Hoyos et al. 2018, Lee et al. 2021 and 2022, and Spacek
+      et al. 2026 (science-r08-unowned-absorbers);
     - then, in the builder's stated order:
       - the solutions (`brine_nacl`, `brine_mgso4`, `brine_naclo4`, `brine_mgclo4`, `nh3_h2o`,
         `ch4_c2h6_n2`);
@@ -4786,20 +4842,20 @@ rows' values.
         a taxonomic class being T51.e's label, not a substance; science-composition-crusts.md
         §1.3), each with its kind and its sources (decision-composition, the surfaces audit §2
         and §4.2).
-  - **The client-optics flags** (decision-r08-t4b-t12c, follow-up 2). `absorber` is true for
-    every gas row this plan may list with a layer, and for the collision partners. R08 answers
-    each with cross-sections, or a stated "none" with its reason (R08.T4.c's
-    `NO_VISIBLE_ABSORPTION`, held by R08.T19).
+  - **The client-optics flags** (decision-r08-t4b-t12c, follow-ups 2 and 4). `absorber` means
+    that the client has absorption optics for the row, in its own right or as a member of a
+    collision pair. R08 answers each row with cross-sections, a pair, a pending entry, or a
+    stated "none" with its reason (R08.T4.c, held by R08.T19).
     - **True:**
       - `H2` and `He`, for their collision-induced absorption: T49.a's two rows' flag columns
         change at this batch's bump, and their identity columns stay;
+      - `N2` and `CO2`, as O₂'s collision partners (and CO₂ for any bands R08.T4.d draws);
       - `H2O`, `CH4`, `NH3` and `O2`, as now;
       - `N2O`, `CO`, `SO2`, `H2S`, `O3`, `HCN`, `C2H2`, `C2H4`, `C2H6`, `PH3`, `CH3OH`;
       - `H`, `O`, `e-`, `H-`;
       - `Na`, `K`, `Fe`, `Mg`, `Si`, `Ca`, `Ti`, `Cr` (its vapour), `SiO`, `TiO`, `VO`, `FeH`;
-      - the ions and any added atoms.
-    - **False:** `N2`, `Ar`, `Ne`, `Kr`, `Xe`, and `CO2` until R08.T4.d's check, besides the
-      condensate-only and material rows.
+      - `Al`, `V`, `Mn`, `Ni`, `Zn`, the thirteen ions, `HCl`, and any further gas T52.a lists;
+    - **False:** `Ar`, `Ne`, `Kr`, `Xe`, besides the condensate-only and material rows.
     - **`rayleigh`** is as decision-composition §1.1 gives it, and false for `e-`, `H-` and the
       ions.
   - **Fitted saturation curves.** A new `hyperion-fit` task, `saturation_curves`:
@@ -4955,7 +5011,9 @@ rows' values.
     - a stand-in index carries its stand-in flag;
     - emitted to `tables/condensate_extinction.rs`.
   - _Tests:_
-    - Venus's four H₂SO₄ modes at n = 1.44 give the sulphur note's 417 m² kg⁻¹ within 2%;
+    - Venus's four deck modes at n = 1.44 give the sulphur note's 417 m² kg⁻¹ within 2%, and
+      `acid_uv_absorber`'s κ_ext and single-scattering albedo at 550 nm equal `H2SO4`'s to the bit
+      (its k_UA is 0 there);
     - the Rayleigh and geometric limits;
     - five shared cases equal R08's `mieSphere` to 10⁻⁶;
     - every aerosol-material row has an entry.
@@ -5034,7 +5092,9 @@ Snapshot path, `planetary/chem/`.
     every carrier to the bit.
 - **P14.T50.b A gas envelope's element abundances** (22 → 23; read by T52.d).
   - `chem/envelope_abundances.rs`: for a body in `SurfaceState::GasEnvelope`, its abundances by
-    number relative to H, of He, C, N, O, S, P, Na, K, Ti, V, Fe, Mg, Si, Ca, Al and Cl:
+    number relative to H, of He, C, N, O, S, P, Na, K, Ti, V, Fe, Mg, Si, Ca, Al, Cl, Cr, Mn, Ni
+    and Zn (Cr, Mn and Zn are the limiting elements of T52.c's `Cr`, `MnS` and `ZnS` decks, and
+    all four have visible lines; science-r08-unowned-absorbers):
     - the metals are protosolar × 10^[Fe/H], with the α elements × 10^[α/Fe], times E(M) from
       Thorngren et al. 2016 (the radius model's heavy-element mass);
     - C/O is the host's times an ice-line factor from the formation distance against the H₂O,
@@ -5553,9 +5613,14 @@ feeding back into p_s, T_s, the albedo or the bulk.
     ("accurate at the ∼1% level for temperatures from 500 to 3000 K", gas phase), on T49.d's K(T),
     with:
     - H₂S carrying the sulphur (Visscher, Lodders and Fegley 2006);
-    - the trace elements (Na, K, Ti, V, Fe, Mg, Si, Ca, Al, P, Cl) in closed form from the major
-      solution;
-    - e⁻ and H⁻ by Saha's closed form.
+    - the trace elements (Na, K, Ti, V, Fe, Mg, Si, Ca, Al, P, Cl, Cr, Mn, Ni, Zn) in closed form
+      from the major solution, each metal as its neutral atom and its first ion. Second ions are
+      under 10⁻³ of the first below 5,000 K, and H⁺ is under 10⁻⁶ of H, so neither is carried. The
+      builder states every species it lists, each a T49.b row
+      (science-r08-unowned-absorbers);
+    - e⁻ and H⁻ by Saha's closed form, the charge balanced over the metals' first ions. Above
+      Heng and Tsai's 3,000 K, the closed form is extended to atoms and ions (T52.b's
+      dissociation), and the extension is recorded.
   - Below 500 K the major carriers are all-in, and the composition is the quench level's.
   - A fixed-count Newton refinement on the five element potentials from the analytic start is
     added only if the asserted values below fail the stated tolerance, and is recorded.
@@ -5569,6 +5634,7 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - H₂S the dominant sulphur gas;
     - Fe monatomic above the iron cloud (Visscher et al. 2010);
     - element conservation at 10⁻¹²;
+    - the charge balances to 10⁻¹², and each metal's atom and ion sum to its abundance to 10⁻¹²;
     - every asserted case within tolerance;
     - bit-identical natively and under `wasm32-wasip1` (the sim's slow wasip1 suite).
   - _Files:_ `planetary/chem/equilibrium.rs`.
@@ -5624,7 +5690,9 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - T50.b's abundances, speciated by T52.a and quenched and photolysed by T52.b;
     - decks by T52.c;
     - hazes by T52.b;
-    - the alkalis, TiO, VO, Fe, SiO, H⁻ and e⁻ where T52.a puts them.
+    - every atom and first ion of T52.a's metals (Na, K, Mg, Al, Si, Ca, Ti, V, Cr, Mn, Fe, Ni,
+      Zn), with TiO, VO, FeH, SiO, H, H⁻ and e⁻, where T52.a puts them, each with its column and
+      layer, for R08.T4.e's lines (science-r08-unowned-absorbers).
   - _Tests:_
     - Sudarsky et al. 2000's five classes in their ranges: NH₃ clouds below about 150 K, water
       near 250 K, clear above about 350 K, alkalis at 900–1,500 K, silicates above about 1,500 K
@@ -5633,6 +5701,7 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - Fortney et al. 2008's pM/pL split by TiO;
     - water and TiO dissociated on a KELT-9b-like dayside (Kitzmann et al. 2018; Lothringer et
       al. 2018);
+    - a KELT-9b-like dayside lists Fe⁺ above Fe and Ca⁺ above Ca, and every T50.b metal's atom;
     - Jupiter's T24.d tests kept (T(1 bar) 166 K ± 10%, NH₃ deck at 0.5–1 bar, CH₄/H₂ about
       2 × 10⁻³);
     - a sub-Neptune's envelope `Ok`;
@@ -5807,6 +5876,12 @@ Each is labelled "not yet modelled" where a console could show it:
   - with T55.j, a moon's k₂ read from its published ocean.
 
   All but Hammond et al. 2016 are from memory.
+
+- **P14.T55.l** trace heavy elements of ultra-hot daysides: Li, Sc, Co, Sr, Y and Ba, as
+  `Element`'s next variants, with their atoms and first ions in T50.b and T52.a, and R08's lines.
+  At a 10 mbar photosphere their lines change an ultra-hot dayside's transmitted sunlight by
+  Δu′v′ ≤ 2.3 × 10⁻⁴ and at most 0.6% in luminance together, and by up to 1.7 × 10⁻³ and 3% at
+  a 0.1 bar upper bound. Li also serves P14.T55.i's brown dwarfs (science-r08-unowned-absorbers).
 
 #### P14.T56 Moons and their parents (decision-p14-moons, 2026-10-10)
 
