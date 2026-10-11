@@ -25,7 +25,8 @@ Then run the plan's tiers in order. Tier 3 is the gate: work isn't done until it
 
 The gate is `just smart-ci`: the steps of `just ci` that the branch's change reaches, chosen from its
 diff against the integration branch (`just smart-ci --plan` lists them, each with the paths that
-caused it), and `just test-render` when a shader, the engine or the smoke harness changed. Of the
+caused it), and `just test-render`'s steps when a shader, the engine or the smoke harness changed
+(its harness in the same hold of the heavy-test lock as the suites; vitest takes no lock). Of the
 test suites it runs only the tests that reach the changed code, in any crate, through the code's
 dependency graph (Rust item by item, TypeScript by its imports), and the plan shows how many and
 why (`--explain` shows each test's chain). `just smart-ci --all-tests` runs every test of the

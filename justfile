@@ -198,10 +198,21 @@ child-window-check *args: gen-surface
 # frames. Not part of `ci` (R01.T9.e); every task touching `view/engine/`, `src/smoke/` or a
 # catalogued shader runs it. Arguments go to `apps/hyperion/scripts/testRender.sh`
 # (`--variant=`, `--fixture=broken-wgsl|external-fetch`, `--drop-adapter-switches`). The surface
-# module is made first, so that the build bundles the current one rather than a stale one.
-test-render *args: gen-surface
+# module is made first, so that the build bundles the current one rather than a stale one. Its two
+# steps are recipes of their own, so that `just smart-ci` builds the client beside its other builds
+# and runs the harness in the same hold of the heavy-test lock as its suites (perf-ts Q1).
+test-render *args: gen-surface _test-render-build
+    just _locked just _test-render-run {{ args }}
+
+# `test-render`'s build of the client, which bundles the surface module that `gen-surface` made.
+_test-render-build:
     pnpm --filter hyperion build
-    just _locked bash apps/hyperion/scripts/testRender.sh {{ args }}
+
+# `test-render`'s runs of the harness, on the client built already; the caller holds the heavy-test
+# lock.
+[positional-arguments]
+_test-render-run *args:
+    bash apps/hyperion/scripts/testRender.sh "$@"
 
 # Replay a descent-spike capture natively (R05.T15, Design note 22): `tools/gpu-replay`, outside
 # the workspace, so that the workspace's builds never build wgpu (`ci` checks the tool in a target
@@ -366,22 +377,74 @@ _prettier-check files:
 # the test runs that use every core. Parallel lanes build freely, but only one runs its tests at a
 # time: two suites at once each take twice as long, and the load fails the timing-sensitive server
 # tests (`ws`, `outbound`) and time budgets for no fault of the code. Builds happen before the lock.
-heavy_lock := `git rev-parse --path-format=absolute --git-common-dir` / "hyperion-heavy-tests.lock"
+# `HYPERION_HEAVY_LOCK` names another lock file, for smart-ci's tests of `_locked` alone.
+heavy_lock := env("HYPERION_HEAVY_LOCK", `git rev-parse --path-format=absolute --git-common-dir` / "hyperion-heavy-tests.lock")
+
+# The run that goes first (perf-build L5 part a): a `_locked` run with `HYPERION_HEAVY_PRIORITY=1`
+# (integration's) writes its PID here before it waits and removes it once it holds the lock.
+heavy_priority := trim_end_match(heavy_lock, ".lock") + ".priority"
 
 # Run a command under the heavy-test lock, waiting for its turn (a crashed holder releases it). The
 # lock is flock(2) on the lock file, held by this shell's descriptor 9 and the copies its children
 # inherit, and so released when they all end, whatever ends them. `flock` is util-linux's, or on
 # stock macOS `tools/portable/flock`, which takes the same lock, so the two exclude each other.
+# flock has no queue, so any waiter may win when the lock is released; a waiter tries it every 2 s
+# instead of blocking on it, so that while a run with priority waits (`heavy_priority` names it, a
+# live process other than this one, and it renews the file at least every minute) every other
+# waiter steps aside, re-checking every 10 s, and the priority run takes the lock when it is next
+# released. A file whose process has ended, or that is 5 minutes old (its PID may name another
+# process since), is ignored. The command runs without `HYPERION_HEAVY_PRIORITY`.
 [positional-arguments]
 _locked +cmd:
     #!/usr/bin/env bash
     set -euo pipefail
     exec 9>"{{ heavy_lock }}"
-    if ! flock -n 9; then
+    priority="{{ heavy_priority }}"
+    # The PID of another live run with priority that waits for the lock, if the file names one.
+    ahead() {
+        local pid
+        pid="$(cat "$priority" 2>/dev/null || true)"
+        [[ "$pid" =~ ^[0-9]+$ && "$pid" != "$$" ]] && kill -0 "$pid" 2>/dev/null \
+            && [[ -n "$(find "$priority" -mmin -5 2>/dev/null)" ]] && echo "$pid"
+    }
+    first="${HYPERION_HEAVY_PRIORITY:-}"
+    unset HYPERION_HEAVY_PRIORITY
+    # Remove the priority file if it names this run (and not another run with priority since).
+    give_up() { if [[ "$(cat "$priority" 2>/dev/null || true)" == "$$" ]]; then rm -f "$priority"; fi; }
+    if [[ "$first" == 1 ]]; then
+        echo "$$" >"$priority.$$"
+        mv -f "$priority.$$" "$priority"
+        trap give_up EXIT
+    fi
+    if [[ "$first" == 1 ]] && ! flock -n 9; then
+        echo "waiting, with priority, for another heavy test run to finish (lock {{ heavy_lock }})..." >&2
+        waited=$SECONDS
+        renewed=$SECONDS
+        until flock -n 9; do
+            sleep 2
+            if (( SECONDS - renewed >= 30 )); then
+                touch "$priority"
+                renewed=$SECONDS
+            fi
+        done
+        echo "lock taken after $((SECONDS - waited)) s of waiting, running: $*" >&2
+    elif [[ "$first" != 1 ]] && { [[ -n "$(ahead)" ]] || ! flock -n 9; }; then
         echo "waiting for another heavy test run to finish (lock {{ heavy_lock }})..." >&2
         waited=$SECONDS
-        flock 9
+        while true; do
+            pid="$(ahead || true)"
+            if [[ -n "$pid" ]]; then
+                echo "stepping aside for the run with priority ($pid)..." >&2
+                while [[ -n "$(ahead || true)" ]]; do sleep 10; done
+            fi
+            if flock -n 9; then break; fi
+            sleep 2
+        done
         echo "lock taken after $((SECONDS - waited)) s of waiting, running: $*" >&2
+    fi
+    if [[ "$first" == 1 ]]; then
+        give_up
+        trap - EXIT
     fi
     held=$SECONDS
     status=0
@@ -407,10 +470,11 @@ _locked +cmd:
 # a fixture in a `OnceLock` is built once per test rather than once per binary; the suite is written
 # for that already (`test-slow` and the wasip1 suites run under nextest too). It runs no doctests,
 # so `cargo test --doc` follows; doctests cannot be built without being run, so they build inside
-# the lock, as they did under `cargo test`.
-# Run all tests (built first, then run under the heavy-test lock).
+# the lock, as they did under `cargo test`. vitest follows, outside the lock (`_vitest-run`).
+# Run all tests (built first, then the Rust suites under the heavy-test lock, then vitest).
 test: gen-surface _test-build
     just _locked just _test-run
+    just _vitest-all
 
 # Build the native test binaries, outside the heavy-test lock. Not after `gen-surface` itself: `ci`
 # builds while `tsc` and oxlint read the module that `gen-surface` would delete and rewrite.
@@ -419,8 +483,8 @@ _test-build: (_test-build-for "--workspace")
 _test-build-for packages:
     cargo nextest run {{ packages }} --no-run
 
-# Run the native suites, the doctests and vitest; the caller holds the heavy-test lock.
-_test-run: (_nextest-run "--workspace" "") (_doctest-run "--workspace" "") (_vitest-run "" "")
+# Run the native suites and the doctests; the caller holds the heavy-test lock.
+_test-run: (_nextest-run "--workspace" "") (_doctest-run "--workspace" "")
 
 # `filter`, empty for every test, is nextest's filter expression (`-E`): `just smart-ci` gives the tests
 # that its change reaches.
@@ -432,10 +496,44 @@ _nextest-run packages filter:
 _doctest-run packages filters:
     cargo test {{ packages }} --doc{{ if filters == "" { "" } else { " -- " + filters } }}
 
+# Every package's vitest suite, which `ci` runs beside its builds, outside the heavy-test lock.
+_vitest-all: (_vitest-run "" "")
+
 # vitest: every package's suite (`pnpm test`) if `package` is empty, else that pnpm package's
-# `test` over the test files named (all of them if none), as paths from the package's directory.
+# `test` over the test files named (all of them if none), as paths from the package's directory. It
+# takes no heavy-test lock (decision-test-coverage.md R1): at most 4 workers, in a scope of its own
+# capped at 5 GB and 4 cores where systemd allows it, in the slice `HEAVY_SLICE` names as `_locked`'s
+# scope is, and at 4 workers alone elsewhere (macOS, Windows). It ends by printing its wall time, its
+# scope's peak memory and the load before and after, the figures that R1's trial records.
 _vitest-run package files:
-    pnpm {{ if package == "" { "test" } else { "--filter " + package + " test " + files } }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    suite=(pnpm {{ if package == "" { "test" } else { "--filter " + package + " test" } }} --maxWorkers=4 {{ files }})
+    # The 1, 5 and 15-minute load: Linux's /proc, or macOS's sysctl.
+    load() { cut -d ' ' -f 1-3 /proc/loadavg 2>/dev/null || sysctl -n vm.loadavg 2>/dev/null | tr -d '{}' || echo unknown; }
+    # The suite inside its scope, then the scope's peak (cgroup v2's `memory.peak`, over every process
+    # it held), read by this shell before the scope ends with it.
+    read -r -d '' in_scope <<'EOF' || true
+    status=0
+    "$@" || status=$?
+    group="$(sed -n 's/^0:://p' /proc/self/cgroup)"
+    peak="$(cat "/sys/fs/cgroup$group/memory.peak" 2>/dev/null || true)"
+    if [[ "$peak" =~ ^[0-9]+$ ]]; then echo "vitest: its scope's peak memory $((peak / 1048576)) MiB" >&2; fi
+    exit "$status"
+    EOF
+    start=$SECONDS
+    before="$(load)"
+    status=0
+    if command -v systemd-run >/dev/null && systemd-run --user --scope --quiet true 2>/dev/null; then
+        slice=()
+        if [ -n "${HEAVY_SLICE:-}" ]; then slice=(--slice="$HEAVY_SLICE"); fi
+        systemd-run --user --scope --quiet ${slice[@]+"${slice[@]}"} -p MemoryMax=5G -p MemorySwapMax=0 \
+            -p CPUQuota=400% bash -c "$in_scope" vitest "${suite[@]}" || status=$?
+    else
+        "${suite[@]}" || status=$?
+    fi
+    echo "vitest: exit $status after $((SECONDS - start)) s at 4 workers; load $before before, $(load) after" >&2
+    exit "$status"
 
 # Run the slow tests (`#[ignore = "slow: ..."]`) under the slow-test profile, with cargo-nextest
 # (`cargo install cargo-nextest --locked`) so that every binary's tests share one pool of cores.
@@ -584,9 +682,42 @@ _wasm-fast-build: (_wasm-preflight "wasip1" "browser")
     just _browser prepare
 
 # The fast WebAssembly suites, built already; the caller holds the heavy-test lock.
-_wasm-fast-run:
-    just _wasip1-nextest "{{ wasip1_crates }}" "" ""
-    just _browser run
+_wasm-fast-run: (_wasm-run wasip1_crates "" browser_crates)
+
+# The wasip1 suites of `wasip1` (cargo's selection, of `wasip1_crates`; none if empty), with nextest's
+# filter expression `filter` (`-E`, or empty), and the browser target's of `browser` (some of
+# `browser_crates`; none if empty), side by side in the caller's hold of the heavy-test lock (perf-wasm
+# W2): the browser's binaries run one at a time on one thread, about 42 s, beside wasip1's pool of
+# every core, rather than after it. The browser's output is held until both end, and the recipe
+# fails if either did.
+_wasm-run wasip1 filter browser:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{ justfile_directory() }}"
+    browser_log="$(mktemp)"
+    browser=""
+    # The browser's job in a process group of its own (`setsid` is util-linux's, or the justfile's
+    # `tools/portable` stand-in), killed whole if this recipe ends before it does, so that no runner
+    # outlives it holding the lock.
+    trap 'if [[ -n "$browser" ]]; then kill -- "-$browser" 2>/dev/null || true; fi; rm -f "$browser_log"' EXIT
+    if [[ -n {{ quote(browser) }} ]]; then
+        setsid just _browser run {{ quote(browser) }} >"$browser_log" 2>&1 &
+        browser=$!
+    fi
+    status=0
+    if [[ -n {{ quote(wasip1) }} ]]; then
+        just _wasip1-nextest {{ quote(wasip1) }} "" {{ quote(filter) }} || status=$?
+    fi
+    browser_status=0
+    if [[ -n "$browser" ]]; then
+        wait "$browser" || browser_status=$?
+        browser=""
+        cat "$browser_log"
+    fi
+    if [[ "$status" -ne 0 || "$browser_status" -ne 0 ]]; then
+        echo "error: the WebAssembly suites failed (wasip1: exit $status; the browser target: exit $browser_status)" >&2
+        exit 1
+    fi
 
 # Build the wasip1 suites of `packages` (cargo's selection, of `wasip1_crates`) and compile their
 # modules, outside the heavy-test lock. A test binary is a WebAssembly module, which wasmtime compiles
@@ -688,11 +819,15 @@ test-wasm-browser: (_browser "prepare")
 
 # The browser target's suites in two steps: `prepare` proves the shim, builds both targets and
 # compares the test lists, outside the lock; `run` runs the tests, built already, and its caller
-# holds the heavy-test lock. Both lists come from one `cargo test` over the three crates at once,
-# with each test attributed to its crate by the binary it is listed from: a `cargo test -p` of one
-# crate resolves features for that crate alone, and so built every crate a second time for its list
-# (47 s of a cold `ci`, 2026-10-03), and again after every edit. `crates`, some of
-# `browser_crates`, narrows the browser builds and runs, and the lists compared, to those crates
+# holds the heavy-test lock. `prepare` records each crate's test binaries as its build reports them
+# (`browser-tests/<crate>` in the target directory: path, crate directory, source), and `run` hands
+# each to the runner as `cargo test` would, from its crate's directory, so that no cargo runs under
+# the lock (perf-wasm W3): CI-93's run waited 10 minutes there for another build's lock on the
+# target directory, with nothing to build. Both lists come from one `cargo test` over the three
+# crates at once, with each test attributed to its crate by the binary it is listed from: a
+# `cargo test -p` of one crate resolves features for that crate alone, and so built every crate a
+# second time for its list (47 s of a cold `ci`, 2026-10-03), and again after every edit. `crates`,
+# some of `browser_crates`, narrows the browser builds and runs, and the lists compared, to those crates
 # (`just smart-ci`). `native` is the cargo selection the native lists are built and listed from,
 # `crates` among them: `browser_native`, or under smart-ci the selection of its own test build,
 # which then builds nothing again.
@@ -719,9 +854,27 @@ _browser mode crates=browser_crates native=browser_native: (_wasm-preflight "bro
     for crate in {{ crates }}; do packages+=(-p "$crate"); done
     browser=(--target wasm32-unknown-unknown --profile slow-test --lib --tests)
     host=(--lib --tests {{ native }})
+    binaries="${CARGO_TARGET_DIR:-target}/browser-tests"
     case "{{ mode }}" in
         run)
-            cargo test "${browser[@]}" "${packages[@]}"
+            for crate in {{ crates }}; do
+                if [[ ! -f "$binaries/$crate" ]]; then
+                    echo "error: no list of $crate's browser test binaries ($binaries/$crate): run \`just _browser prepare\` first" >&2
+                    exit 1
+                fi
+                runs=()
+                while IFS= read -r line; do runs+=("$line"); done <"$binaries/$crate"
+                for run in ${runs[@]+"${runs[@]}"}; do
+                    IFS="$(printf '\t')" read -r binary directory source <<<"$run"
+                    echo "     Running $source ($binary)"
+                    status=0
+                    (cd "$directory" && timeout {{ browser_timeout }} wasm-bindgen-test-runner "$binary") || status=$?
+                    if [[ "$status" -ne 0 ]]; then
+                        echo "error: $crate's browser tests failed: $source ($binary), exit $status" >&2
+                        exit "$status"
+                    fi
+                done
+            done
             exit 0
             ;;
         prepare) ;;
@@ -730,7 +883,36 @@ _browser mode crates=browser_crates native=browser_native: (_wasm-preflight "bro
             exit 2
             ;;
     esac
-    cargo test "${browser[@]}" "${packages[@]}" --no-run
+    # The test binaries of each crate, in the order `cargo test` runs them (the library's, then the
+    # integration tests' by name), each written beside and renamed into place.
+    mkdir -p "$binaries"
+    cargo test "${browser[@]}" "${packages[@]}" --no-run --message-format=json-render-diagnostics \
+        | python3 -c '
+    import json, os, sys
+    out, crates = sys.argv[1], sys.argv[2:]
+    found = {crate: [] for crate in crates}
+    for line in sys.stdin:
+        if not line.startswith("{"):
+            sys.stderr.write(line)
+            continue
+        message = json.loads(line)
+        if message.get("reason") != "compiler-artifact" or not message.get("executable"):
+            continue
+        if not message.get("profile", {}).get("test"):
+            continue
+        directory = os.path.dirname(message["manifest_path"])
+        target = message["target"]
+        found.setdefault(os.path.basename(directory), []).append(
+            (target["kind"] == ["test"], target["name"], message["executable"], directory, target["src_path"]))
+    for crate in crates:
+        if not found[crate]:
+            sys.exit(f"error: the build reported no browser test binary of {crate}")
+        path = os.path.join(out, crate)
+        with open(path + ".new", "w", encoding="utf-8", newline="\n") as listing:
+            for _, _, binary, directory, source in sorted(found[crate]):
+                listing.write(f"{binary}\t{directory}\t{os.path.relpath(source, directory)}\n")
+        os.replace(path + ".new", path)
+    ' "$binaries" {{ crates }}
     cargo test "${host[@]}" --no-run
     # `crate test` lines, sorted, of a `cargo test <args> -- --list` over the crates `args` select:
     # each binary's `Running` line names its file, and the build's artifact messages map the file to
@@ -830,26 +1012,33 @@ build: gen-surface
 # one after another, since they share the build directory's lock: Clippy, which compiles every
 # target as `cargo check` would, so `check`'s `cargo check` is not repeated; the bindings' check,
 # before any test can rewrite the bindings it compares; the fitted tables' check; then every test
-# build. Third, one hold of the heavy-test lock for all the suites, rather than three turns in the
-# queue behind other worktrees. `smart-ci` runs these same steps, fewer of them and narrower, and
-# `_smart-ci-test` fails if this recipe runs a step, or a step runs a command, that smart-ci does not
-# know (`CI_STEPS` in `tools/smart-ci/smart_ci.py`).
+# build. Beside both, vitest, as a job of its own at 4 workers in its capped scope, which takes no
+# lock (decision-test-coverage.md R1), its output held too. Third, one hold of the heavy-test lock
+# for all the Rust suites, rather than three turns in the queue behind other worktrees. `smart-ci`
+# runs these same steps, fewer of them and narrower, and `_smart-ci-test` fails if this recipe runs a
+# step, or a step runs a command, that smart-ci does not know (`CI_STEPS` in
+# `tools/smart-ci/smart_ci.py`).
 # The gate before a commit: everything but the slow tests, with the fast suites on WebAssembly.
 ci: gen-surface (_wasm-preflight "wasip1" "browser")
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{ justfile_directory() }}"
     side_log="$(mktemp)"
-    trap 'rm -f "$side_log"' EXIT
+    vitest_log="$(mktemp)"
+    trap 'rm -f "$side_log" "$vitest_log"' EXIT
     just fmt-check _typecheck-ts _oxlint _relaxed-simd-refused gpu-replay-check cross-clippy _smart-ci-test >"$side_log" 2>&1 &
     side=$!
+    just _vitest-all >"$vitest_log" 2>&1 &
+    vitest=$!
     status=0
     just _clippy _browser-clippy gen-protocol-check fit-check _test-build _wasm-fast-build || status=$?
     side_status=0
     wait "$side" || side_status=$?
-    cat "$side_log"
-    if [[ "$status" -ne 0 || "$side_status" -ne 0 ]]; then
-        echo "error: ci failed before the tests (builds and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: exit $side_status)" >&2
+    vitest_status=0
+    wait "$vitest" || vitest_status=$?
+    cat "$side_log" "$vitest_log"
+    if [[ "$status" -ne 0 || "$side_status" -ne 0 || "$vitest_status" -ne 0 ]]; then
+        echo "error: ci failed before the locked suites (builds and Rust checks: exit $status; formatting, TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: exit $side_status; vitest: exit $vitest_status)" >&2
         exit 1
     fi
     just _locked just _test-run _wasm-fast-run
@@ -860,13 +1049,15 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
 # files included, so it works before a commit as well as after; `A...B` plans the commits of B since
 # its merge-base with A, with `--plan`. Each path runs the checks that read it, through `ci`'s own
 # steps above, scoped and in `ci`'s order: a TypeScript-free change skips every TypeScript check; a
-# change to a crate's code runs that crate's rustfmt and Clippy (native, the other platforms', wasm32
-# where `ci` runs it), with the features `ci` gives it, and the tests that reach the changed code,
+# change to a crate's code runs that crate's rustfmt and Clippy (native, wasm32 where `ci` runs it,
+# and the other platforms' for a crate with code that differs between them: the server, and any other
+# its guard finds), with the features `ci` gives it, and the tests that reach the changed code,
 # in any crate, through the code's graph (`tools/smart-ci/rust_graph.py`): nextest and wasip1 test
 # by test, through the filters above, doctests by file, the browser suites by crate; a TypeScript
-# source the vitest files whose imports reach it. The protocol crate adds the bindings' check and the
-# TypeScript side, the surface module's sources `gen-surface` and the vitest files that import it,
-# Markdown Prettier alone, and shaders, the engine and the smoke harness `just test-render`. A path
+# source the vitest files whose imports reach it, outside the lock as `ci` runs them. The protocol
+# crate adds the bindings' check and the TypeScript side, the surface module's sources `gen-surface`
+# and the vitest files that import it, Markdown Prettier alone, and shaders, the engine and the smoke
+# harness `just test-render`'s steps, its run in the suites' hold of the heavy-test lock. A path
 # no rule knows, and the inputs of the whole workspace (this justfile, Cargo.toml, Cargo.lock,
 # pnpm-lock.yaml, rust-toolchain.toml, `.cargo/`, `tools/portable/`), run the full `ci`'s phases.
 # `--plan` prints the plan, each step with the paths that caused it and the tests chosen, and runs

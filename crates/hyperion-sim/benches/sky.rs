@@ -887,14 +887,15 @@ struct JobTimes {
 ///
 /// On Linux it reads the first field of `/proc/thread-self/schedstat`, the thread's time on a CPU
 /// in nanoseconds (the kernel's `Documentation/scheduler/sched-stats.rst`), through one open file
-/// and one buffer, read again from the start at each reading.
-#[cfg(target_os = "linux")]
+/// and one buffer, read again from the start at each reading. Where that file cannot be opened
+/// (every platform but Linux), [`ThreadCpu::open`] returns `None` and the benches report their jobs'
+/// wall time alone. It is `std::fs` and `std::io` alone, so it needs no gate on the platform, and
+/// Clippy for macOS and Windows lints it as Linux's does (decision-test-coverage.md L4).
 struct ThreadCpu {
     file: std::fs::File,
     text: String,
 }
 
-#[cfg(target_os = "linux")]
 impl ThreadCpu {
     /// The calling thread's clock, or `None` where its file cannot be opened.
     fn open() -> Option<Self> {
@@ -913,24 +914,6 @@ impl ThreadCpu {
         self.file.read_to_string(&mut self.text).ok()?;
         let nanos = self.text.split_whitespace().next()?.parse::<u64>().ok()?;
         Some(Duration::from_nanos(nanos))
-    }
-}
-
-/// A clock of a thread's CPU time, which no platform but Linux gives the benches: none is ever
-/// opened, and they report their jobs' wall time alone.
-#[cfg(not(target_os = "linux"))]
-enum ThreadCpu {}
-
-#[cfg(not(target_os = "linux"))]
-impl ThreadCpu {
-    /// Never a clock on this platform.
-    fn open() -> Option<Self> {
-        None
-    }
-
-    /// Unreachable, since no clock is ever opened.
-    fn now(&mut self) -> Option<Duration> {
-        match *self {}
     }
 }
 

@@ -351,8 +351,9 @@ def main() -> None:
     catalogued = catalogue_sources(root)
     render = [f for f in changed if RENDER_PATHS.search(f) or f in catalogued]
     if render:
-        notes.append(f"{render[0]} touches the engine, the harness or a shader: `just smart-ci` runs "
-                     "`just test-render` after its other steps.")
+        notes.append(f"{render[0]} touches the engine, the harness or a shader: `just smart-ci` builds "
+                     "the client beside its other steps and runs `just test-render`'s harness last, in the "
+                     "same hold of the heavy-test lock as its suites.")
     if determinism:
         notes.append("A determinism crate changed: its slow tests run at integration (`just ci-slow`). "
                      "`just smart-ci` runs the tests of the crates that depend on it that reach the change; "

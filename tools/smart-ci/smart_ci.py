@@ -10,11 +10,12 @@ instead, with no working tree: a plan for another branch, made with `--plan`.
 
 Each changed path maps to the checks that read it (`classify`, and the README's "smart-ci" table),
 and the plan runs those checks through the recipes `just ci` runs, scoped to the crates, packages
-and files concerned, in `ci`'s order and phases: the checks that need no build directory beside the
-cargo steps, then every suite in one hold of the heavy-test lock, then `just test-render` (which
-takes the lock itself) when a shader, the engine or the smoke harness changed. A path that no rule
-knows, and an input of the whole workspace (the justfile, the root manifest, the lock files, the
-toolchain, `.cargo/`), runs the full `just ci` instead.
+and files concerned, in `ci`'s order and phases: the checks that need no build directory, and vitest
+(which takes no lock), beside the cargo steps, then every Rust suite in one hold of the heavy-test
+lock, with `just test-render`'s run of the smoke harness in the same hold when a shader, the engine
+or the harness changed. A path that no rule knows, and an input of the whole workspace (the
+justfile, the root manifest, the lock files, the toolchain, `.cargo/`), runs the full `just ci`
+instead.
 
 `--plan` prints the plan, each step with the paths that caused it, and runs nothing; a run prints
 the plan first. The tests run are those that reach the changed code through the code's graph
@@ -167,30 +168,45 @@ CI_STEPS: Dict[str, Tuple[str, List[Tuple[str, Optional[List[str]]]]]] = {
     "_browser-clippy": ("scoped", [("_browser-clippy-for", ["browser_crates"])]),
     "gen-protocol-check": ("scoped", [("_gen-protocol-check-for", ["--workspace"])]),
     "fit-check": ("as is", []),
+    "_vitest-all": ("scoped", [("_vitest-run", ["", ""])]),
     "_test-build": ("scoped", [("_test-build-for", ["--workspace"])]),
     "_wasm-fast-build": ("scoped", [("_wasm-preflight", ["wasip1", "browser"]), ("_wasip1-build", None),
                                     ("_browser", None)]),
     "_locked": ("as is", []),
-    "_test-run": ("scoped", [("_nextest-run", ["--workspace", ""]), ("_doctest-run", ["--workspace", ""]),
-                             ("_vitest-run", ["", ""])]),
-    "_wasm-fast-run": ("scoped", [("_wasip1-nextest", None), ("_browser", None)]),
+    "_test-run": ("scoped", [("_nextest-run", ["--workspace", ""]), ("_doctest-run", ["--workspace", ""])]),
+    "_wasm-fast-run": ("scoped", [("_wasm-run", ["wasip1_crates", "", "browser_crates"])]),
 }
 # `just ci`'s phases, the `just` arguments of each as its recipe runs them: its dependencies, the side
-# steps (backgrounded, their output held), the cargo steps, and the suites under `_locked`. A full
+# steps (backgrounded, their output held), vitest (backgrounded on its own, its output held: it takes
+# no lock, decision-test-coverage.md R1), the cargo steps, and the Rust suites under `_locked`. A full
 # plan runs these through smart-ci's own phases, so that the build slot is released before the lock
 # as in any plan; `test_smart_ci.py` holds them to the recipe.
 CI_PHASES: Dict[str, List[List[str]]] = {
     "setup": [["gen-surface"], ["_wasm-preflight", "wasip1", "browser"]],
     "side": [["fmt-check"], ["_typecheck-ts"], ["_oxlint"], ["_relaxed-simd-refused"], ["gpu-replay-check"],
              ["cross-clippy"], ["_smart-ci-test"]],
+    "unlocked": [["_vitest-all"]],
     "main": [["_clippy"], ["_browser-clippy"], ["gen-protocol-check"], ["fit-check"], ["_test-build"],
              ["_wasm-fast-build"]],
     "locked": [["_test-run"], ["_wasm-fast-run"]],
+}
+# `just test-render`'s steps, its dependencies and then its locked run, which a plan runs in its own
+# phases when a change needs the smoke harness (R01.T9.e): the client's build beside the other steps,
+# and the harness's run last in the same hold of the heavy-test lock as the suites (perf-ts Q1), so
+# that the plan queues for the lock once. `test_smart_ci.py` holds them to the recipe.
+RENDER_PHASES: Dict[str, List[List[str]]] = {
+    "setup": [["gen-surface"]],
+    "side": [["_test-render-build"]],
+    "locked": [["_test-render-run"]],
 }
 
 # The environment variable naming the command that holds a build slot around smart-ci's phases that
 # build (`slot_command`); unset, they run directly.
 SLOT_VAR = "SMART_CI_SLOT"
+# Set to 1 with `--full` (integration's run, and a run that stands in for it), the variable that gives
+# its suites priority on the heavy-test lock: `_locked` with `HYPERION_HEAVY_PRIORITY=1` (perf-build
+# L5 part a). A lane's own full plan, or `--full` without it, waits its turn as any run does.
+PRIORITY_VAR = "SMART_CI_PRIORITY"
 # The recipes of `ci`'s setup, side and main phases that run a cargo build, which a group of phases
 # holds a build slot for; and the others: tools' checks, formatting, TypeScript, smart-ci's tests, and
 # the suites, which run under the heavy-test lock from the builds made before it. `test_smart_ci.py`
@@ -203,14 +219,318 @@ BUILDS = {
 }
 NO_BUILDS = {
     "_wasm-preflight", "fmt-check", "_rustfmt-check", "_prettier-check-all", "_prettier-check", "_typecheck-ts",
-    "_oxlint", "_smart-ci-test", "_locked", "_test-run", "_nextest-run", "_doctest-run", "_vitest-run",
-    "_wasm-fast-run",
+    "_oxlint", "_smart-ci-test", "_locked", "_test-run", "_nextest-run", "_doctest-run", "_vitest-all",
+    "_vitest-run", "_wasm-fast-run", "_wasm-run", "_test-render-build", "_test-render-run",
 }
 
 # The recipes smart-ci runs in place of one of `ci`'s for a narrower scope, where the step cannot be
 # the narrower one with a wider argument without changing `ci`'s command: Prettier over the changed
 # files, `prettier --check` with Prettier's configuration as `format:check` runs it over the tree.
 NARROWER = {"_prettier-check-all": "_prettier-check"}
+
+
+# --------------------------------------------------------------------------------------------------
+# Clippy for the other platforms, and its guard (decision-test-coverage.md L4 and its §3.4 addendum).
+
+# The workspace crates whose code differs between Linux, macOS and Windows: of the crates a change
+# reaches, `_cross-clippy-for` lints these alone for the platforms the host is not (tools/gpu-replay
+# has a rule of its own). Every other crate is the same code on all three after cfg expansion, which
+# native Clippy lints. A reached crate in which the guard (`os_dependence`) finds such code is linted
+# too, and the plan runs smart-ci's own tests, which fail until it is listed here, in the same commit.
+# `just ci` keeps `cross-clippy --workspace`, so integration lints every crate on every push.
+CROSS_CLIPPY_CRATES: Dict[str, str] = {
+    "hyperion-server": "Linux-only and Unix-only code (cfg(unix), cfg(target_os = \"linux\"), std::os::unix)",
+}
+# The platforms `cross-clippy` checks (the justfile's `cross_targets`), each with the cfg values that
+# `rustc --print cfg --target <triple>` gives, less those of no target (`debug_assertions`, `panic`).
+# `test_smart_ci.py` holds the table to rustc.
+DESKTOP_CFGS: Dict[str, str] = {
+    "x86_64-unknown-linux-gnu": (
+        'target_abi="" target_arch="x86_64" target_endian="little" target_env="gnu" target_family="unix" '
+        'target_feature="fxsr" target_feature="sse" target_feature="sse2" target_has_atomic="16" '
+        'target_has_atomic="32" target_has_atomic="64" target_has_atomic="8" target_has_atomic="ptr" '
+        'target_has_atomic_primitive_alignment="16" target_has_atomic_primitive_alignment="32" '
+        'target_has_atomic_primitive_alignment="64" target_has_atomic_primitive_alignment="8" '
+        'target_has_atomic_primitive_alignment="ptr" target_os="linux" target_pointer_width="64" '
+        'target_vendor="unknown" unix'),
+    "aarch64-apple-darwin": (
+        'target_abi="" target_arch="aarch64" target_endian="little" target_env="" target_family="unix" '
+        'target_feature="aes" target_feature="crc" target_feature="dit" target_feature="dotprod" '
+        'target_feature="dpb" target_feature="dpb2" target_feature="fcma" target_feature="fhm" '
+        'target_feature="flagm" target_feature="fp16" target_feature="frintts" target_feature="jsconv" '
+        'target_feature="lor" target_feature="lse" target_feature="neon" target_feature="paca" '
+        'target_feature="pacg" target_feature="pan" target_feature="pmuv3" target_feature="ras" '
+        'target_feature="rcpc" target_feature="rcpc2" target_feature="rdm" target_feature="sb" '
+        'target_feature="sha2" target_feature="sha3" target_feature="ssbs" target_feature="vh" '
+        'target_has_atomic="128" target_has_atomic="16" target_has_atomic="32" target_has_atomic="64" '
+        'target_has_atomic="8" target_has_atomic="ptr" target_has_atomic_primitive_alignment="128" '
+        'target_has_atomic_primitive_alignment="16" target_has_atomic_primitive_alignment="32" '
+        'target_has_atomic_primitive_alignment="64" target_has_atomic_primitive_alignment="8" '
+        'target_has_atomic_primitive_alignment="ptr" target_os="macos" target_pointer_width="64" '
+        'target_vendor="apple" unix'),
+    "x86_64-pc-windows-msvc": (
+        'target_abi="" target_arch="x86_64" target_endian="little" target_env="msvc" target_family="windows" '
+        'target_feature="cmpxchg16b" target_feature="fxsr" target_feature="sse" target_feature="sse2" '
+        'target_feature="sse3" target_has_atomic="128" target_has_atomic="16" target_has_atomic="32" '
+        'target_has_atomic="64" target_has_atomic="8" target_has_atomic="ptr" '
+        'target_has_atomic_primitive_alignment="128" target_has_atomic_primitive_alignment="16" '
+        'target_has_atomic_primitive_alignment="32" target_has_atomic_primitive_alignment="64" '
+        'target_has_atomic_primitive_alignment="8" target_has_atomic_primitive_alignment="ptr" '
+        'target_os="windows" target_pointer_width="64" target_vendor="pc" windows'),
+}
+# The dependencies that are OS interfaces, whichever cfg they sit under: the ruling's four, and the
+# other bindings of one platform's system interfaces.
+OS_CRATES = ("libc", "nix", "windows-sys", "winapi", "windows", "rustix", "core-foundation", "objc2", "mach2")
+# Where Clippy's `--all-targets` finds a crate's code: its library and binaries, its tests, benches
+# and examples, and its build script.
+CRATE_CODE = ("src/", "tests/", "benches/", "examples/")
+def desktop_cfgs() -> Dict[str, Set[Tuple[str, Optional[str]]]]:
+    """Each desktop target's cfg options, as (name, value) pairs; a bare option's value is None."""
+    out: Dict[str, Set[Tuple[str, Optional[str]]]] = {}
+    for triple, text in DESKTOP_CFGS.items():
+        options: Set[Tuple[str, Optional[str]]] = set()
+        for word in text.split():
+            name, eq, value = word.partition("=")
+            options.add((name, value.strip('"') if eq else None))
+        out[triple] = options
+    return out
+
+
+_DESKTOPS = list(desktop_cfgs().values())
+# std's and core's platform modules, each with the submodules that exist on no desktop target, so
+# that code using them fails native Clippy as it would the others' (and is gated to WebAssembly).
+_PORTABLE_MODULES = {"os": ("wasi",), "arch": ("wasm32", "wasm64")}
+# WebAssembly's target features, which `#[target_feature(enable = ...)]` may name without making code
+# differ between the desktop targets (none of which has them).
+WASM_FEATURES = ("simd128", "relaxed-simd", "atomics", "bulk-memory", "sign-ext", "nontrapping-fptoint",
+                 "multivalue", "mutable-globals", "reference-types", "tail-call", "extended-const", "multimemory")
+_FEATURE_DETECTED = re.compile(r"^is_\w+_feature_detected$")
+# Where a cfg predicate starts, and the rest of what the guard looks for (a use tree's included), in a
+# file's text, comments and strings included: what the guard reads a file for.
+_CFG_START = re.compile(r"\bcfg(?:_attr)?\s*!?\s*\(")
+_CFG_MARKS = re.compile(r'\\.|[()"]', re.S)  # an escape (skipped whole), a parenthesis, a quote
+_PLATFORM_WORD = re.compile(r"\b(?:os|arch|c_u?long|is_\w+_feature_detected|target_feature)\b")
+_PLATFORM_CODE = re.compile(r"\b(?:std|core)\s*::\s*(?:os|arch)\b|\buse\s+(?:::\s*)?(?:std|core)\b[^;]*\b(?:os|arch)\b"
+                            r"|\bffi\s*::\s*c_u?long\b|\bis_\w+_feature_detected\s*!|\btarget_feature\s*\(\s*enable\b")
+
+
+def _is_target_option(name: str) -> bool:
+    """Whether a cfg option depends on the target (`target_*`, `unix`, `windows`); every other option
+    (`test`, `feature`, `debug_assertions`, `doc`, a custom one) takes the same value on every target."""
+    return name.startswith("target_") or name in ("unix", "windows")
+
+
+Cfg = Tuple  # ("all" | "any" | "not", [children]) or ("option", name, value or None)
+
+
+def parse_cfg(vals: Sequence[str], kinds: Sequence[str], i: int) -> Tuple[Optional[Cfg], int]:
+    """The cfg predicate at token `i` (`rust_graph.lex`'s tokens) and the index after it; None where
+    the tokens are no predicate (a macro's `$meta`, a call of something named `cfg`)."""
+    if i >= len(vals) or kinds[i] != "i":
+        return None, i
+    name = vals[i]
+    if i + 1 < len(vals) and vals[i + 1] == "(" and kinds[i + 1] == "p":
+        children: List[Cfg] = []
+        j = i + 2
+        while j < len(vals) and vals[j] != ")":
+            child, j = parse_cfg(vals, kinds, j)
+            if child is None:
+                return None, j
+            children.append(child)
+            if j < len(vals) and vals[j] == ",":
+                j += 1
+            elif j >= len(vals) or vals[j] != ")":
+                return None, j
+        if j >= len(vals) or name not in ("all", "any", "not") or (name == "not" and len(children) != 1):
+            return None, j
+        return (name, children), j + 1
+    if i + 2 < len(vals) and vals[i + 1] == "=" and kinds[i + 2] == "s":
+        return ("option", name, vals[i + 2]), i + 3
+    return ("option", name, None), i + 1
+
+
+def _cfg_value(cfg: Cfg, target: Set[Tuple[str, Optional[str]]], free: Mapping[Tuple[str, Optional[str]], bool]) -> bool:
+    if cfg[0] == "option":
+        option = (cfg[1], cfg[2])
+        return option in target if _is_target_option(cfg[1]) else free[option]
+    values = [_cfg_value(child, target, free) for child in cfg[1]]
+    return all(values) if cfg[0] == "all" else any(values) if cfg[0] == "any" else not values[0]
+
+
+def _cfg_options(cfg: Cfg) -> Set[Tuple[str, Optional[str]]]:
+    if cfg[0] == "option":
+        return {(cfg[1], cfg[2])}
+    return set().union(*(_cfg_options(child) for child in cfg[1])) if cfg[1] else set()
+
+
+def differs_between_desktops(cfg: Cfg) -> bool:
+    """Whether a cfg predicate can take different values on Linux, macOS and Windows: evaluated on each
+    of the three, for every value of its options that no target sets (decision-test-coverage.md
+    §3.4 addendum). `all(target_arch = "wasm32", target_os = "unknown")` is false on all three, and
+    its `not(...)` true, so neither differs; `any(target_family = "wasm", unix)` does."""
+    options = _cfg_options(cfg)
+    if not any(_is_target_option(name) for name, _ in options):
+        return False
+    free = sorted(o for o in options if not _is_target_option(o[0]))
+    if len(free) > 10:
+        return True  # too many to try: as if it differed
+    for bits in range(1 << len(free)):
+        assignment = {option: bool(bits >> k & 1) for k, option in enumerate(free)}
+        if len({_cfg_value(cfg, target, assignment) for target in _DESKTOPS}) > 1:
+            return True
+    return False
+
+
+def cfg_text(cfg: Cfg) -> str:
+    if cfg[0] == "option":
+        return cfg[1] if cfg[2] is None else f'{cfg[1]} = "{cfg[2]}"'
+    return f"{cfg[0]}({', '.join(cfg_text(child) for child in cfg[1])})"
+
+
+def os_dependent_code(text: str) -> List[str]:
+    """What in a Rust file's code differs between Linux, macOS and Windows: each cfg predicate (of
+    `#[cfg]`, `#[cfg_attr]`, `cfg!`, `doc(cfg)`) that takes different values on them; each path
+    through std's or core's platform modules (`os`, but for WASI's, and `arch`, but for WebAssembly's)
+    and the C integers whose width is Windows' own (`ffi::c_long`, `c_ulong`); the CPU-feature
+    detection macros; and `#[target_feature(enable = ...)]` of a feature that is not WebAssembly's.
+    Comments and strings are no code (`rust_graph.lex`)."""
+    if not _maybe_os_dependent(text):
+        return []
+    try:
+        lexed = rust_graph.lex(text)
+    except rust_graph.LexError:
+        return ["code the guard cannot read"]
+    vals, kinds = lexed.vals, lexed.kinds
+    found: Set[str] = set()
+
+    def module_path(k: int, end: int) -> Optional[str]:
+        """`os::<x>` or `arch::<x>` at token k, if that is a platform module (`os` or `arch` alone is)."""
+        after = vals[k + 2] if k + 2 < end and vals[k + 1] == "::" and kinds[k + 2] == "i" else None
+        if after in _PORTABLE_MODULES.get(vals[k], ()):
+            return None
+        return vals[k] + ("::" + after if after else "")
+
+    i = 0
+    while i < len(vals):
+        word = vals[i] if kinds[i] == "i" else None
+        if word in ("cfg", "cfg_attr"):
+            j = i + 1
+            if word == "cfg" and j < len(vals) and vals[j] == "!":
+                j += 1
+            if j < len(vals) and vals[j] == "(":
+                cfg, _ = parse_cfg(vals, kinds, j + 1)
+                if cfg is not None and differs_between_desktops(cfg):
+                    found.add(f"cfg({cfg_text(cfg)})")
+        elif word in ("std", "core") and vals[i + 1 : i + 2] == ["::"] and vals[i + 2 : i + 3] in (["os"], ["arch"]):
+            path = module_path(i + 2, len(vals))
+            if path:
+                found.add(f"{word}::{path}")
+        elif word == "use":
+            # `use std::{fs, os::unix::...}`: a use tree of std's or core's that names a platform module.
+            end = next((k for k in range(i, len(vals)) if vals[k] == ";"), len(vals))
+            root = next((vals[k] for k in range(i + 1, end) if kinds[k] == "i"), "")
+            if root in ("std", "core"):
+                for k in range(i + 1, end):
+                    if kinds[k] == "i" and vals[k] in _PORTABLE_MODULES:
+                        path = module_path(k, end)
+                        if path:
+                            found.add(f"{root}::{path}")
+        elif word == "ffi" and vals[i + 1 : i + 2] == ["::"] and vals[i + 2 : i + 3] in (["c_long"], ["c_ulong"]):
+            found.add(f"ffi::{vals[i + 2]}")
+        elif word and _FEATURE_DETECTED.match(word) and vals[i + 1 : i + 2] == ["!"]:
+            found.add(f"{word}!")
+        elif word == "target_feature" and vals[i + 1 : i + 3] == ["(", "enable"] and vals[i + 3 : i + 4] == ["="]:
+            value = vals[i + 4] if i + 4 < len(vals) and kinds[i + 4] == "s" else "?"
+            if any(feature.strip() not in WASM_FEATURES for feature in value.split(",")):
+                found.add(f'target_feature(enable = "{value}")')
+        i += 1
+    return sorted(found)
+
+
+def _maybe_os_dependent(text: str) -> bool:
+    """Whether a file's text, its comments and strings included, has a cfg predicate that differs
+    between the desktop targets or a path through `std::os`: a quick test that the code has neither
+    (the comments and strings only add to what it finds), so that most files are never lexed whole."""
+    if _PLATFORM_WORD.search(text) and _PLATFORM_CODE.search(text):
+        return True
+    for start in _CFG_START.finditer(text):
+        # The predicate's text: to the parenthesis that closes the one opened, outside strings.
+        depth, end, quoted = 1, None, False
+        for mark in _CFG_MARKS.finditer(text, start.end()):
+            c = mark.group()
+            if quoted:
+                quoted = c != '"'
+            elif c == '"':
+                quoted = True
+            elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    end = mark.start()
+                    break
+        if end is None:
+            return True
+        try:
+            lexed = rust_graph.lex(text[start.end():end])
+        except rust_graph.LexError:
+            return True
+        cfg, _ = parse_cfg(lexed.vals, lexed.kinds, 0)
+        if cfg is not None and differs_between_desktops(cfg):
+            return True
+    return False
+
+
+def manifest_os_dependence(meta: dict) -> Dict[str, List[str]]:
+    """Each workspace crate's OS-dependent build, from `cargo metadata`: a dependency on an OS interface
+    (`OS_CRATES`), a dependency table of a platform whose cfg differs between Linux, macOS and Windows,
+    or a build script."""
+    members = set(meta["workspace_members"])
+    out: Dict[str, List[str]] = {}
+    for package in meta["packages"]:
+        if package["id"] not in members:
+            continue
+        reasons: Set[str] = set()
+        for dep in package["dependencies"]:
+            if dep["name"] in OS_CRATES:
+                reasons.add(f"a dependency on {dep['name']}")
+            platform = dep.get("target")
+            if platform and platform_differs(platform):
+                reasons.add(f"[target.'{platform}'] dependencies")
+        if any(t["kind"][0] == "custom-build" for t in package["targets"]):
+            reasons.add("a build script")
+        if reasons:
+            out[package["name"]] = sorted(reasons)
+    return out
+
+
+def platform_differs(platform: str) -> bool:
+    """Whether a `[target.<platform>]` table applies on some of the desktop targets and not others: a
+    `cfg(...)` by its predicate, a target triple by its name."""
+    if not platform.startswith("cfg("):
+        return platform in DESKTOP_CFGS
+    lexed = rust_graph.lex(platform)
+    cfg, end = parse_cfg(lexed.vals, lexed.kinds, 2)
+    return cfg is None or end != len(lexed.vals) - 1 or differs_between_desktops(cfg)
+
+
+def os_dependence(ws: "Workspace", crate: str) -> List[str]:
+    """Why a crate's code may differ between Linux, macOS and Windows (none if it cannot): its manifest's
+    reasons, and each of its files, over every target Clippy's `--all-targets` lints, with what in it
+    differs (decision-test-coverage.md L4)."""
+    directory = ws.crates[crate].dir + "/"
+    reasons = list(ws.os_manifest.get(crate, []))
+    # A range's plan reads the tree at its end, as the code's graph does.
+    at_end = ws.rust_files is not None and ws.read_bytes is not None
+    for path in ws.rust_files if at_end else ws.files:
+        rel = path[len(directory):] if path.startswith(directory) else None
+        if rel is None or not path.endswith(".rs") or not (rel.startswith(CRATE_CODE) or rel == "build.rs"):
+            continue
+        data = ws.read_bytes(path) if at_end else None
+        found = os_dependent_code(data.decode("utf-8", "ignore") if data is not None else ws.read(path))
+        if found:
+            reasons.append(f"{path}: {', '.join(found)}")
+    return reasons
 
 
 # --------------------------------------------------------------------------------------------------
@@ -258,6 +578,8 @@ class Workspace:
     ids: Dict[str, str] = field(default_factory=dict)
     cache: Optional[Path] = None
     rust_files: Optional[List[str]] = None  # the files of the tree the graph reads, if not the working tree's
+    # Each crate's OS-dependent build, from its manifest (`manifest_os_dependence`), for the guard.
+    os_manifest: Dict[str, List[str]] = field(default_factory=dict)
 
     def crate_of(self, path: str) -> Optional[Crate]:
         for crate in self.crates.values():
@@ -390,7 +712,7 @@ class Step:
 class Plan:
     full: Dict[str, Set[str]]  # why the full `just ci` runs -> the paths
     steps: List[Step]
-    render: Set[str]  # the paths that run `just test-render`
+    render: Set[str]  # the paths that run `just test-render`'s steps
     why: Dict[str, List[str]]  # what each changed path runs
     notes: List[str]
     details: List[str] = field(default_factory=list)  # the tests the code's graph chose, and why
@@ -400,9 +722,11 @@ class Plan:
         return bool(self.full)
 
     def recipes(self) -> List[str]:
-        """The recipes the plan runs, `ci` and `test-render` included."""
-        names = [step.recipe[0] for step in self.steps]
-        return (["ci"] if self.is_full else names) + (["test-render"] if self.render else [])
+        """The recipes the plan runs: its steps', or `ci` and, with the smoke harness, its steps'."""
+        if not self.is_full:
+            return [step.recipe[0] for step in self.steps]
+        return ["ci"] + ([recipe[0] for phase in ("side", "locked") for recipe in RENDER_PHASES[phase]]
+                         if self.render else [])
 
 
 class Needs:
@@ -1118,10 +1442,33 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     wasip1_filter = chosen.nextest_filter(wasip1_tests, whole) if chosen else ""
     doc_filters = chosen.doctest_filters(doc_crates, whole) if chosen else ""
 
+    # Clippy for the other platforms: of the crates whose Clippy runs, those with code that differs
+    # between Linux, macOS and Windows, listed or found by the guard, which runs smart-ci's own tests
+    # for a crate it finds that is not listed.
+    os_reasons = {crate: os_dependence(ws, crate) for crate in clippy}
+    cross = [c for c in clippy if c in CROSS_CLIPPY_CRATES or os_reasons[c]]
+    for crate in sorted(c for c in cross if c not in CROSS_CLIPPY_CRATES):
+        needs.smart_ci_tests.add(f"{crate}'s OS-dependent code, by the guard")
+        needs.notes.append(
+            f"{crate} has code that differs between Linux, macOS and Windows ({'; '.join(short(os_reasons[crate], 3))}), "
+            "so its Clippy for the other platforms runs, and smart-ci's own tests, which fail until it is in "
+            "CROSS_CLIPPY_CRATES (tools/smart-ci/smart_ci.py): add it there in this commit.")
+    for crate in sorted(c for c in cross if c in CROSS_CLIPPY_CRATES and not os_reasons[c]):
+        needs.smart_ci_tests.add(f"{crate}: no OS-dependent code left, by the guard")
+        needs.notes.append(
+            f"{crate} is in CROSS_CLIPPY_CRATES but the guard finds no code in it that differs between Linux, macOS "
+            "and Windows, so smart-ci's own tests run, which fail until it leaves the list: drop it in this commit.")
+    same = [c for c in clippy if c not in cross]
+    if same:
+        needs.notes.append(
+            "Clippy for the other platforms skips " + ", ".join(same) + ": the same code on Linux, macOS and "
+            "Windows, by the guard (decision-test-coverage.md L4); integration's `just ci` lints them there.")
+
     # Setup: `ci`'s own dependencies.
-    if needs.surface_module or needs.typecheck or needs.oxlint or vitest_any:
-        step("setup", "the surface module", ["gen-surface"],
-             needs.surface_module or {"the TypeScript checks below, which read it"})
+    if needs.surface_module or needs.typecheck or needs.oxlint or vitest_any or needs.render:
+        readers = ({"the TypeScript checks below, which read it"} if needs.typecheck or needs.oxlint or vitest_any
+                   else set()) | ({"the smoke harness's build below, which bundles it"} if needs.render else set())
+        step("setup", "the surface module", ["gen-surface"], needs.surface_module or readers)
     groups = (["wasip1"] if wasip1_tests else []) + (["browser"] if browser_tests or browser_clippy else [])
     if groups:
         step("setup", "the WebAssembly tools", ["_wasm-preflight", *groups], ["the WebAssembly steps below"])
@@ -1144,13 +1491,35 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         step("side", "the relaxed-SIMD refusal", ["_relaxed-simd-refused"], causes_of(needs.clippy, relaxed))
     if needs.gpu_replay:
         step("side", "tools/gpu-replay: Clippy and tests", ["gpu-replay-check"], needs.gpu_replay)
-    if clippy or needs.gpu_replay:
-        names = clippy + (["tools/gpu-replay"] if needs.gpu_replay else [])
+    if cross or needs.gpu_replay:
+        names = cross + (["tools/gpu-replay"] if needs.gpu_replay else [])
         step("side", "Clippy for the other platforms: " + ", ".join(names),
-             ["_cross-clippy-for", ws.cargo_packages(clippy) if clippy else "", "gpu-replay" if needs.gpu_replay else ""],
-             causes_of(needs.clippy) | needs.gpu_replay)
+             ["_cross-clippy-for", ws.cargo_packages(cross) if cross else "", "gpu-replay" if needs.gpu_replay else ""],
+             causes_of(needs.clippy, cross) | needs.gpu_replay)
     if needs.smart_ci_tests:
         step("side", "smart-ci's own tests", ["_smart-ci-test"], needs.smart_ci_tests)
+    if needs.render:
+        for recipe in RENDER_PHASES["side"]:
+            step("side", "build the client for the smoke harness (just test-render)", recipe, needs.render)
+
+    # vitest, beside the builds and outside the heavy-test lock (decision-test-coverage.md R1).
+    if needs.vitest_all:
+        step("unlocked", "vitest: every package", ["_vitest-run", "", ""], needs.vitest_all)
+    else:
+        for directory, (package, _) in sorted(ws.ts_packages.items()):
+            tests_here = needs.vitest_files.get(directory, {})
+            unsafe = {f for f in tests_here if not SAFE_PATH.match(f)}
+            if unsafe:
+                needs.vitest_package.setdefault(directory, set()).update(unsafe)
+            if sum(len(f) + 1 for f in tests_here) > MAX_FILTER:
+                # Too many files for one command line: the package's whole suite.
+                needs.vitest_package.setdefault(directory, set()).update(causes_of(tests_here))
+            if directory in needs.vitest_package:
+                step("unlocked", f"vitest: {package}", ["_vitest-run", package, ""], needs.vitest_package[directory])
+            elif tests_here:
+                rel = sorted(f[len(directory) + 1 :] for f in tests_here)
+                step("unlocked", f"vitest: {package}, {len(rel)} file(s) that read the change",
+                     ["_vitest-run", package, " ".join(rel)], causes_of(tests_here))
 
     # The cargo steps, one after another.
     if clippy:
@@ -1190,29 +1559,16 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     if doc_crates:
         step("locked", "doctests: " + ", ".join(doc_crates), ["_doctest-run", ws.cargo_packages(doc_crates), doc_filters],
              causes_of(needs.tests, doc_crates) | (chosen.causes(set(doc_crates), doctests=True) if chosen else set()))
-    if needs.vitest_all:
-        step("locked", "vitest: every package", ["_vitest-run", "", ""], needs.vitest_all)
-    else:
-        for directory, (package, _) in sorted(ws.ts_packages.items()):
-            tests_here = needs.vitest_files.get(directory, {})
-            unsafe = {f for f in tests_here if not SAFE_PATH.match(f)}
-            if unsafe:
-                needs.vitest_package.setdefault(directory, set()).update(unsafe)
-            if sum(len(f) + 1 for f in tests_here) > MAX_FILTER:
-                # Too many files for one command line: the package's whole suite.
-                needs.vitest_package.setdefault(directory, set()).update(causes_of(tests_here))
-            if directory in needs.vitest_package:
-                step("locked", f"vitest: {package}", ["_vitest-run", package, ""], needs.vitest_package[directory])
-            elif tests_here:
-                rel = sorted(f[len(directory) + 1 :] for f in tests_here)
-                step("locked", f"vitest: {package}, {len(rel)} file(s) that read the change",
-                     ["_vitest-run", package, " ".join(rel)], causes_of(tests_here))
-    if wasip1_tests:
-        step("locked", "the wasip1 suites: " + scope(wasip1_tests), ["_wasip1-nextest", wasip1_args, "", wasip1_filter],
-             wasm_causes)
-    if browser_tests:
-        step("locked", "the browser suites: " + ", ".join(browser_tests),
-             ["_browser", "run", " ".join(browser_tests), ws.cargo_packages(native)], browser_causes)
+    if wasip1_tests or browser_tests:
+        # Side by side, the browser's one thread beside wasip1's pool (perf-wasm W2).
+        suites = (["wasip1 " + scope(wasip1_tests)] if wasip1_tests else []) + (
+            ["the browser target " + ", ".join(browser_tests)] if browser_tests else [])
+        step("locked", "the WebAssembly suites: " + "; ".join(suites),
+             ["_wasm-run", wasip1_args if wasip1_tests else "", wasip1_filter if wasip1_tests else "",
+              " ".join(browser_tests)], wasm_causes | browser_causes)
+    if needs.render:
+        for recipe in RENDER_PHASES["locked"]:
+            step("locked", "the smoke harness on SwiftShader, both variants (just test-render)", recipe, needs.render)
 
     notes = list(needs.notes)
     if chosen is not None:
@@ -1352,6 +1708,7 @@ def load_workspace(root: Path, just: str, change: Optional[Change] = None) -> Wo
     ws.rust = rust_graph.crates_from_metadata(meta)
     ws.build_scripts = rust_graph.build_scripts(meta)
     ws.proc_macros = rust_graph.proc_macros(meta)
+    ws.os_manifest = manifest_os_dependence(meta)
     ws.cache = Path(os.environ.get("CARGO_TARGET_DIR") or root / "target") / "smart-ci" / "rust-facts.json"
     if change is not None and change.end is not None:
         # A range: the graph reads the tree at its end, from git, not the working tree.
@@ -1427,9 +1784,8 @@ def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, depende
         lines.append("Plan: the full `just ci`, its own phases, because of")
         for why, paths in sorted(plan.full.items()):
             lines.append(f"  - {why}" + (f": {', '.join(short(paths))}" if paths else ""))
-        for phase in PHASES:
-            recipes = [quoted(recipe)[len("just "):] for recipe in CI_PHASES[phase]]
-            lines.append(f"      [{phase}] just {' '.join(recipes)}")
+        for phase, recipes in phases_of(plan).items():
+            lines.append(f"      [{phase}] just {' '.join(quoted(recipe)[len('just '):] for recipe in recipes)}")
     elif not plan.steps:
         lines.append("Plan: no step of `just ci` reads these paths.")
     else:
@@ -1441,26 +1797,35 @@ def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, depende
             lines.append(f"      {quoted(shown)}")
             lines.append(f"      because of {', '.join(step.causes)}")
     lines += plan.details
-    if plan.render:
-        lines.append(f"Then `just test-render`, under the heavy-test lock, because of {', '.join(short(plan.render))}")
+    if plan.render and plan.is_full:
+        lines.append("With `just test-render`'s steps, its run in the same hold of the heavy-test lock, because of "
+                     + ", ".join(short(plan.render)))
     for note in plan.notes:
         lines.append(f"Note: {note}")
     if plan.is_full or plan.steps:
         slot = slot_command(env)
-        groups = [", ".join(group) for group, recipes in slot_groups(phases_of(plan)) if needs_slot(recipes)]
+        phases = phases_of(plan)
+        groups = [", ".join(p for p in group if phases[p]) for group, recipes in slot_groups(phases)
+                  if needs_slot(recipes)]
         if slot is not None and groups:
             lines.append(f"A build slot ({' '.join(slot)}) is held for the {' and then the '.join(groups)} "
                          "phases, which build, and released before the locked phase.")
-        elif env.get("BUILD_SLOT_HELD"):
+        if lock_priority(plan, env):
+            lines.append(f"The suites take the heavy-test lock with priority ({PRIORITY_VAR}=1): every other run "
+                         "waiting for it steps aside.")
+        elif env.get(PRIORITY_VAR) == "1":
+            lines.append(f"{PRIORITY_VAR}=1 is ignored: it gives priority on the heavy-test lock to `--full`, "
+                         "integration's run, alone.")
+        if slot is None and env.get("BUILD_SLOT_HELD"):
             lines.append("A build slot is held already (BUILD_SLOT_HELD), and stays held to the end, the locked "
                          f"phase included: run `just smart-ci` with {SLOT_VAR} set instead of inside build-slot.")
     return "\n".join(lines)
 
 
-PHASES = ("setup", "side", "main", "locked")
-# The phases that build, in the groups that hold a build slot: setup on its own, then the side and
-# main phases together, since they run at once.
-SLOT_GROUPS = (("setup",), ("side", "main"))
+PHASES = ("setup", "side", "unlocked", "main", "locked")
+# The phases that build, in the groups that hold a build slot: setup on its own, then the side,
+# unlocked and main phases together, since they run at once.
+SLOT_GROUPS = (("setup",), ("side", "unlocked", "main"))
 Phases = Dict[str, List[List[str]]]
 
 
@@ -1474,9 +1839,13 @@ def full_plan() -> Plan:
 
 def phases_of(plan: Plan) -> Phases:
     """The recipes of each phase, each with its arguments: the plan's steps, or `ci`'s own phases for a
-    full plan."""
+    full plan, with `just test-render`'s build and run where it needs them (setup has `gen-surface`)."""
     if plan.is_full:
-        return {phase: [list(recipe) for recipe in CI_PHASES[phase]] for phase in PHASES}
+        phases = {phase: [list(recipe) for recipe in CI_PHASES[phase]] for phase in PHASES}
+        if plan.render:
+            for phase in ("side", "locked"):
+                phases[phase] += [list(recipe) for recipe in RENDER_PHASES[phase]]
+        return phases
     phases: Phases = {phase: [] for phase in PHASES}
     for step in plan.steps:
         phases[step.phase].append(list(step.recipe))
@@ -1517,9 +1886,11 @@ class Runner:
     def __init__(self, root: Path, just: str) -> None:
         self.root, self.just = root, just
 
-    def run(self, args: Sequence[str]) -> int:
+    def run(self, args: Sequence[str], env: Optional[Mapping[str, str]] = None) -> int:
+        """`just <args>`, with `env` added to the environment."""
         print(f"smart-ci: {quoted(args)}", file=sys.stderr, flush=True)
-        return subprocess.run([self.just, *args], cwd=str(self.root)).returncode
+        return subprocess.run([self.just, *args], cwd=str(self.root),
+                              env={**os.environ, **env} if env else None).returncode
 
     def run_command(self, command: Sequence[str]) -> int:
         return subprocess.run(list(command), cwd=str(self.root)).returncode
@@ -1530,33 +1901,37 @@ class Runner:
 
 
 def run_build_phases(phases: Mapping[str, Sequence[Sequence[str]]], runner: Runner) -> int:
-    """Setup, then the side steps, their output held, beside the cargo steps, as `just ci` runs them;
-    whichever of them `phases` holds."""
-    setup, side_steps, main = (flat(phases.get(phase, [])) for phase in ("setup", "side", "main"))
+    """Setup, then the side steps and vitest, each a job of its own with its output held, beside the
+    cargo steps, as `just ci` runs them; whichever of them `phases` holds."""
+    setup, side_steps, unlocked, main = (flat(phases.get(phase, [])) for phase in ("setup", "side", "unlocked", "main"))
     if setup and runner.run(setup) != 0:
         return 1
-    status = side_status = 0
-    with tempfile.TemporaryFile(mode="w+") as side_log:
+    status = side_status = unlocked_status = 0
+    with tempfile.TemporaryFile(mode="w+") as side_log, tempfile.TemporaryFile(mode="w+") as unlocked_log:
         side = runner.spawn_held(side_steps, side_log) if side_steps else None
+        tests = runner.spawn_held(unlocked, unlocked_log) if unlocked else None
         if main:
             status = runner.run(main)
-        if side is not None:
-            side_status = side.wait()
-            side_log.seek(0)
-            sys.stdout.write(side_log.read())
-            sys.stdout.flush()
-    if status != 0 or side_status != 0:
-        print(f"error: smart-ci failed before the tests (builds and Rust checks: exit {status}; formatting, "
+        side_status = side.wait() if side is not None else 0
+        unlocked_status = tests.wait() if tests is not None else 0
+        for job, log in ((side, side_log), (tests, unlocked_log)):
+            if job is not None:
+                log.seek(0)
+                sys.stdout.write(log.read())
+        sys.stdout.flush()
+    if status != 0 or side_status != 0 or unlocked_status != 0:
+        print(f"error: smart-ci failed before the locked suites (builds and Rust checks: exit {status}; formatting, "
               f"TypeScript, the relaxed-SIMD refusal, gpu-replay, cross-clippy and smart-ci's tests: exit "
-              f"{side_status})", file=sys.stderr)
+              f"{side_status}; vitest: exit {unlocked_status})", file=sys.stderr)
         return 1
     return 0
 
 
 def execute(plan: Plan, root: Path, just: str, env: Mapping[str, str] = os.environ,
             runner: Optional[Runner] = None) -> int:
-    """Run the plan as `just ci` runs its steps: setup; the side steps, their output held, beside the
-    cargo steps; every suite in one hold of the heavy-test lock; then `just test-render`.
+    """Run the plan as `just ci` runs its steps: setup; the side steps and vitest, their output held,
+    beside the cargo steps; every Rust suite, and `just test-render`'s run of the smoke harness, in one
+    hold of the heavy-test lock.
 
     When `SMART_CI_SLOT` names the command that takes a build slot (`slot_command`), each group of
     phases that builds (`SLOT_GROUPS`, `BUILDS`) runs in a child of that command, which releases the
@@ -1588,11 +1963,14 @@ def execute(plan: Plan, root: Path, just: str, env: Mapping[str, str] = os.envir
         if status != 0:
             return 1
     locked = flat(phases["locked"])
-    if locked and runner.run(["_locked", just, *locked]) != 0:
-        return 1
-    if plan.render and runner.run(["test-render"]) != 0:
+    if locked and runner.run(["_locked", just, *locked], env=lock_priority(plan, env)) != 0:
         return 1
     return 0
+
+
+def lock_priority(plan: Plan, env: Mapping[str, str]) -> Optional[Dict[str, str]]:
+    """`HYPERION_HEAVY_PRIORITY=1` for `_locked`, for `--full` with `SMART_CI_PRIORITY=1`; else none."""
+    return {"HYPERION_HEAVY_PRIORITY": "1"} if FULL_RUN in plan.full and env.get(PRIORITY_VAR) == "1" else None
 
 
 HELP = """\
@@ -1604,12 +1982,14 @@ that read it, through the recipes `just ci` runs, scoped to the crates, packages
 concerned (`--plan` shows each step and the paths that caused it):
 
   Markdown                      Prettier on the changed files alone
-  TypeScript                    tsc, oxlint and vitest; no TypeScript change, no TypeScript check
-  a crate's code                rustfmt and Clippy (native, the other platforms', wasm32 for the
-                                browser crates) of that crate, with the features `just ci` gives it,
-                                and the tests, in any crate, that reach the changed code through the
-                                code's graph (nextest and wasip1 test by test, doctests by file,
-                                the browser suites by crate)
+  TypeScript                    tsc, oxlint and vitest (beside the builds, outside the heavy-test
+                                lock, at 4 workers); no TypeScript change, no TypeScript check
+  a crate's code                rustfmt and Clippy (native, wasm32 for the browser crates, and the
+                                other platforms' where its code differs between them: the server,
+                                and any crate the guard finds such code in) of that crate, with the
+                                features `just ci` gives it, and the tests, in any crate, that reach
+                                the changed code through the code's graph (nextest and wasip1 test
+                                by test, doctests by file, the browser suites by crate)
   a crate's Cargo.toml          that crate's checks and every test, and its dependents' Clippy and tests
   a crate's goldens             the tests of its crate that read goldens, and those that name the file
   a crate's other data          that crate's tests, those of any crate that name the file, and the
@@ -1621,7 +2001,8 @@ concerned (`--plan` shows each step and the paths that caused it):
                                 Prettier's files Prettier over every file
   crates/hyperion-protocol      the bindings' check and the TypeScript side
   the surface module's sources  gen-surface and the vitest files that import the module
-  shaders, engine, smoke        just test-render
+  shaders, engine, smoke        just test-render's build and run, the run in the suites' hold of
+                                the heavy-test lock
   the whole workspace's inputs  the full `just ci`: justfile, Cargo.toml, Cargo.lock, pnpm-lock.yaml,
                                 rust-toolchain.toml, .cargo/, tools/portable/, and any path no rule knows
 
@@ -1645,8 +2026,10 @@ and releases it before the heavy-test lock, so do not wrap it in that command yo
 on any machine without build slots, those phases run directly. A full plan runs `ci`'s own phases
 in the same way, and `--full` runs that plan whatever the diff: integration's run, `{slot}=<the
 build-slot command> just smart-ci --full`, which holds a slot only while it builds where
-`build-slot just ci` holds one through the wait for the lock and the suites.
-""".format(branch=INTEGRATION_BRANCH, slot=SLOT_VAR)
+`build-slot just ci` holds one through the wait for the lock and the suites. With {priority}=1
+as well, `--full`'s suites take the heavy-test lock first: every other run waiting for it steps
+aside until they hold it (`_locked`'s `HYPERION_HEAVY_PRIORITY`); a lane's own runs never set it.
+""".format(branch=INTEGRATION_BRANCH, slot=SLOT_VAR, priority=PRIORITY_VAR)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
