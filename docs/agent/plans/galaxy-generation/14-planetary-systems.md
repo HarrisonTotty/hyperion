@@ -2476,22 +2476,34 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   critical 190.6 K: Setzmann and Wagner 1991 via NIST; enthalpies from the same source, checked at
   build), and the partial pressures still indexed by `Gas` (T49.a's view), and is the
   precondition of T24.c's haze and ozone rules and of T48.d's condensable on a Titan.
-  - Carbon on cold bodies (T_s ≲ 150 K) beyond the snow line is CH₄, not CO₂, held at saturation,
-    calibrated on Titan's 5.65% (the Huygens probe's surface mole fraction, Niemann et al. 2010,
-    from memory). It enters the partial pressures, and so T24.a's fractions and pressure. Whether
-    it also enters T13.c's grey τ is the builder's to state: that τ's nitrogen term was fitted on
-    Titan without methane, so adding methane's warming there would count it twice.
+  - Carbon on a body formed beyond the snow line that lies beyond the maximum-greenhouse limit is
+    CH₄, not CO₂ (science-p14-t24f §5, in place of R08.T1's T_s ≲ 150 K, for which no literature
+    boundary exists), held over its reservoir at a relative humidity of 0.5 (main's ruling,
+    2026-10-10, in place of "held at saturation, calibrated"; Niemann et al. 2010, JGR 115, E12006,
+    §4.1), which gives Titan the Huygens probe's surface mole fraction, (5.65 ± 0.18) × 10⁻² from
+    6.7 km to the surface (their abstract). It enters the partial pressures, and so
+    T24.a's fractions and pressure. Its humidity caps methane's partial pressure in the air,
+    x p_s ≤ h p_sat(T_s), with x its mole fraction (the airborne weights over their molar masses)
+    and p_s the summed weights, never its column weight M g ÷ 4πR²: for a minor gas the two differ
+    by μ_CH₄ ÷ μ̄ (signoff-3.md, item 1.7). The methane's weight w is the smaller of its
+    inventory's and the positive root of w² + b w − c = 0, with b = W_o − h p_sat,
+    c = h p_sat μ_CH₄ Σ_o (w_o ÷ μ_o), and W_o and Σ_o over the other airborne gases
+    (w = 2c ÷ (b + √(b² + 4c)) for b ≥ 0, which avoids cancellation). Whether it also enters T13.c's grey τ is the builder's to
+    state: that τ's nitrogen term was fitted on Titan without methane, so adding methane's warming
+    there would count it twice.
   - Abiotic O₂ comes from water loss in the runaway state (Luger and Barnes 2015): the oxygen of
     the water lost, less what escapes with the hydrogen and what the crust takes up, by sinks the
     builder takes from the paper.
   - Biotic O₂ is a gap for the owner: no plan produces life, so a generated Earth has no O₂ and no
     ozone.
-  - _Tests:_ the table's Titan carries CH₄ at 5.65% of its surface gas to 10%; Earth, Venus and
-    Mars keep their carbon as CO₂; no body inside the snow line or warmer than the threshold takes
-    methane; a runaway-greenhouse world that lost an ocean carries O₂ by the mass balance of the
-    water lost less its sinks, and one that lost none carries none; Venus's O₂ stays under 10⁻³
-    of its CO₂, which the sinks must give (its measured O₂ is a trace, from memory); every body's
-    fractions sum to 1 to 10⁻⁹; the gases are continuous in time but at a recorded state change.
+  - _Tests:_ the table's Titan carries CH₄ at 5.65% of its surface gas to 10% (the Titan figure is
+    a mole fraction, (p_CH₄ ÷ μ_CH₄) ÷ Σ(p_j ÷ μ_j)); Earth, Venus and
+    Mars keep their carbon as CO₂; no body inside the snow line or inside the maximum-greenhouse
+    limit takes methane, and no icy body beyond the limit holds a CO₂ greenhouse; a
+    runaway-greenhouse world that lost an ocean carries O₂ by the mass balance of the water lost
+    less its sinks, and one that lost none carries none; Venus's O₂ stays under 10⁻³ of its CO₂,
+    which the sinks must give (its measured O₂ is a trace, from memory); every body's fractions
+    sum to 1 to 10⁻⁹; the gases are continuous in time but at a recorded state change.
   - _Files:_ `planetary/derive/atmosphere.rs`, `planetary/derive/atmosphere/tests.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`.
 - **P14.T24.g Sulphur: the sulphuric-acid deck and the sulphate layer.** Drafted by a science agent
@@ -9713,6 +9725,15 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     X-ray history, three runaway Earths, two cold moons, η, `runaway_oxygen` and the saturated
     flux. The bump moves none of its values.
 
+    The follow-up re-pins three of its held values, which no (seed, 21) output reads:
+    `titan_partial_pressure_methane` 8,780 → 5,159 Pa and `cold_moon_rich_partial_pressure_methane`
+    by the humidity's cap (signoff-3.md, item 1.7), and `ceres_carbon_carrier` carbon dioxide →
+    methane (science-p14-t24f §5). It adds `runaway_oxygen` for six oceans at Venus's saturated
+    flux with melts of 10, 31.6 and 100 Myr, and the wet runaway world about the Sun with its
+    history, with no melt and with one of 31.6 Myr (`wet_runaway_historic`,
+    `wet_runaway_historic_young_melt`). `golden_diff.py`'s "not bumped" problem is expected for
+    this held golden, as when it was first pinned (determinism-auditor).
+
   - _The hold._ `atmosphere` and `derive_body` take `Speciation::in_force()`: `CarbonAndOxygen`
     from `CARBON_SPECIATION_VERSION` = 22, and below it `Earlier`, P14.T13.c's rules bit for bit.
     The rules live in the crate-private `atmosphere_under` and `derive_body_under`, which the tests
@@ -9725,10 +9746,14 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       `carbon_and_oxygen_are_held_only_until_the_batch_s_bump`, which fails from version 22 to
       say so;
     - delete the tests' readings of `Speciation::Earlier`: the comparison with the held rules in
-      `earth_venus_and_mars_keep_their_carbon_as_carbon_dioxide` and the `held` case of
-      `a_runaway_world_carries_the_oxygen_of_the_water_it_lost_less_its_sinks`;
-    - in `atmosphere/tests.rs`, replace `derive_under`, `table_under` and the `atmosphere_under`
-      calls with `derive`, `table` and `atmosphere`;
+      `earth_venus_and_mars_keep_their_carbon_as_carbon_dioxide` (Ceres's included), the `held`
+      case of `a_runaway_world_carries_the_oxygen_of_the_water_it_lost_less_its_sinks`, the held
+      half of `icy_worlds_beyond_the_maximum_greenhouse_hold_no_carbon_dioxide_greenhouse` (its
+      CO₂ greenhouses above 500 K, and its equality with `derive_body`'s golden derivation, which
+      becomes the speciated body), and the held rules' Jeans retention in
+      `no_body_inside_the_snow_line_or_the_maximum_greenhouse_limit_takes_methane`;
+    - in `atmosphere/tests.rs`, replace `derive_under`, `table_under`, `derive_as_the_golden_under`
+      and the `atmosphere_under` calls with `derive`, `table`, `solar::derive` and `atmosphere`;
     - drop the hold's wording from:
       - the module documentation;
       - the docs of `atmosphere`, `Atmosphere::carbon_carrier` and `derive_body_under`;
@@ -9736,22 +9761,40 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       - `the_speciated_figures_are_pinned`'s doc;
       - the `derive_body` golden's comment on `titan` and `wet_runaway`.
   - _The rules, as built._
-    - **Carbon.** A body formed beyond the snow line (`AtmosphereInputs::formed`, the inventory's
-      side) whose surface is at most `METHANE_CARBON_TEMPERATURE`, 150 K, carries its carbon as
-      methane, mole for mole: M(CH₄) ÷ M(CO₂) of the inventory's carbon, with the registry's molar
-      masses. The swap debits no water and adds no oxygen for methane's hydrogen.
-      - The temperature is the greenhouse's own iterate, so the switch sits inside the 32 steps.
-        Methane enters no τ term, and CO₂ only adds one above 150 K, so the step map never
-        decreases and crosses the threshold at most once (determinism-auditor).
+    - **Carbon.** A body formed beyond the snow line (`AtmosphereInputs::formed`) that lies beyond
+      the maximum-greenhouse limit (`Insolation::BeyondMaximumGreenhouse`), with a solid crust,
+      carries its carbon as methane, mole for mole (science-p14-t24f §5: Kopparapu et al. 2013;
+      Kasting, Whitmire and Reynolds 1993; Wogan et al. 2020): M(CH₄) ÷ M(CO₂) of the inventory's
+      carbon, with the registry's molar masses. The swap debits no water and adds no oxygen for
+      methane's hydrogen. The rule reads a recorded state, not the greenhouse's iterate. It
+      replaces R08.T1's T_s ≲ 150 K, which had no literature boundary and sent icy bodies past
+      150 K onto CO₂ greenhouses of 580–743 K beyond the limit.
+      - `METHANE_CARBON_TEMPERATURE` is deleted, never released, since it was held. The carrier
+        leaves the greenhouse's iteration, which is T13.c's map with a fixed set of gases. The
+        private `ColdCarbon` goes with it: `Airborne` holds the `CarbonCarrier`.
+      - Carbon dioxide elsewhere stands in for magmatic outgassing's CO₂ and CO (the model
+        carries no CO), which outweigh methane at any plausible redox (Wogan, Krissansen-Totton
+        and Catling 2020, Fig. 3). The ruling's code text read "the carrier of magmatic
+        outgassing at any plausible redox"; the science-checker found the paper says CO₂ and CO,
+        as the ruling's own physics does, and the doc follows the paper (deviation, for "main").
       - A young magma ocean (`Crust::Molten`) keeps its carbon as CO₂.
-      - The threshold is the plan's figure. The science check found no literature boundary at
-        it, and its doc says so.
+      - The table's Ceres, at 2.77 au, formed beyond the generated Sun's snow line at 2.26 au and
+        lies beyond the limit, so its carrier is methane. It keeps no nitrogen, and so no methane,
+        and its gases are the held rules'. `atmosphere_speciation`'s `ceres_carbon_carrier` reads
+        methane.
+      - Above methane's critical point, 190.564 K, the registry's curve gives no cap, and a
+        nitrogen-warmed world's whole inventory is airborne (science-p14-t24f §5: about 1,600–3,100
+        bar for an Earth mass's median). P14.T50.a's reservoirs and P14.T51.a's supercritical phase
+        bound it.
       - `VolatileInventory` is unchanged: carbon is stored counted as CO₂, its carrier
         (decision-composition §1.2). The handoff's "carbon split" is the atmosphere's, in a private
         `Airborne`.
     - **The humidity** (main's ruling, 2026-10-10, in place of "held at saturation, calibrated").
       Where the surface holds a reservoir, methane's partial pressure is min(M g ÷ 4πR²,
       `METHANE_RELATIVE_HUMIDITY` × `p_sat`(`T_s`)), where `METHANE_RELATIVE_HUMIDITY` is 0.5.
+      **Amended in the follow-up** (signoff-3.md, item 1.7; open item 6): the cap is on the
+      partial pressure in the air, x p_s, and the weight kept is the root that meets it
+      (`capped_methane_weight`).
       - The 0.5 is cited, not fitted: Niemann et al. 2010 (JGR 115, E12006, §4.1), "the current
         CH4 mole fraction of 5.5x10-2 just above the surface is subsaturated, at a relative
         humidity of approximately 50%". It is relative to methane over liquid methane with N₂
@@ -9767,11 +9810,18 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
         humidity vary with liquid coverage: Titan's figure was measured far from its seas, and
         coverage decides only whether a reservoir exists.
     - **Retention.** Methane is kept where nitrogen is, not by its own Jeans test.
-      - At the exobase multiple its own λ ≈ 18 would strip Titan. Its real λ at Titan's exobase is
-        20–29, and its thermal escape is negligible (Johnson 2010, ApJ 716, 1573).
-      - Nitrogen's test at 5 `T_eq` is methane's own at 2.86 `T_eq`, above Titan's real ratio of
-        exobase to effective temperature, about 1.8.
-      - `Retention` itself is unchanged, and still says that Titan does not retain methane.
+      - At the exobase multiple its own λ ≈ 18 would strip Titan. Its real λ at Titan's exobase,
+        near 4,075 km and 150–180 K, is 24–28 by G M m ÷ k T r (Johnson 2010, ApJ 716, 1573,
+        gives about 20), and its thermal escape is negligible.
+      - `Retention::of`, the Jeans verdict, is unchanged. The atmosphere's reported retention
+        sets methane's bit to nitrogen's (`Retention::with_methane_as_nitrogen`, crate-private;
+        science-p14-t24f §4). The rule is methane's own test at 2.86 T_eq on any body, above the
+        real 1.8–2.5 of nitrogen and methane airs (Johnson 2010; Gladstone and Young 2019; Triton's
+        from memory). Its λ of 24–28 at Titan's real exobase is marginal against the threshold of
+        25: methane stays because its thermal escape is negligible at λ ≳ 20, and through nitrogen
+        a minor gas escapes at most at its diffusion limit, under a quarter of the median
+        reservoir over 4.57 Gyr (b after Banks and Kockarts 1973, from memory; Pluto's measured
+        escape, some 5 × 10²⁵ s⁻¹, is under 1% of its median reservoir).
     - **The grey τ.** Methane does not enter `optical_depth`. P14.T13.c's nitrogen term was fitted
       on Titan, whose greenhouse is "caused primarily by pressure-induced opacity of N2, CH4, and
       H2" (McKay, Pollack and Courtin 1991, Science 253, 1118), so a methane term would count it
@@ -9789,8 +9839,12 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
         §2.5.1), per unit area, over the body's age (`AtmosphereInputs::age`).
 
       O₂ is written straight from its mass, never capped whatever phase data its row gains, and
-      it is subject to Jeans's test. A molten surface holds it while molten (their §2.5.3–2.5.4).
-      A world that lost no water keeps none.
+      it is subject to Jeans's test. The oxygen of the water lost while the young magma ocean
+      lasted (`AtmosphereInputs::molten_for`, P14.T28.a's `molten_until`, at the eq. A9 rate)
+      goes into the melt and stays (Schaefer et al. 2016, ApJ 829, 63, §4.2; science-p14-t24f §3).
+      A surface the greenhouse holds molten holds the rest while molten (their §2.5.3). A
+      world that lost no water keeps none. At `molten_for` = 0 the figure is as built, bit for
+      bit.
 
       The generated Venus, at η 0.26, would keep 142 bar of O₂ against its 57 bar of CO₂ before its
       sinks, and after them keeps none. Its measured O₂ is under 0.3 ppmv (Trauger and Lunine
@@ -9801,7 +9855,8 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       - the saturated flux, valid while the ocean is lost within the saturation time (some two and
         a half Earth oceans at Venus's flux about a Sun-like host);
       - Earth's weathering-dominated sink on a dry world, scaled by area over the whole age;
-      - a melt that gives its oxygen back when it freezes.
+      - a melt held by the greenhouse that gives its oxygen back if it freezes again (untimed);
+        the young melt keeps what it took (science-p14-t24f §3).
 
     - **The carrier is recorded.** `Atmosphere::carbon_carrier() -> Option<CarbonCarrier>` gives
       `CarbonDioxide` or `Methane`, and `None` for a gas envelope or a body of no mass.
@@ -9810,58 +9865,106 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       - A change of carrier is a recorded state change, as a change of state or of retention is
         (P14.T16.b), and `planetary_properties`' continuity test now reads it.
   - _Tests_ (`atmosphere/tests.rs`, under `CarbonAndOxygen`):
-    - the table's Titan carries 5.82% CH₄ (5.65% required, to 10%), at 93.99 K and 1.51 bar; the
-      held rules give 1.42 bar;
-    - Mercury, Venus, Earth, Mars, the Moon and Ceres keep CO₂, their atmospheres equal to the
-      held rules'; the generated Earth has no O₂, the plan's biotic gap;
-    - a sweep over 0.05–39.7 au and 10⁻³–5 M⊕ gives no methane inside the snow line or above
-      150 K. It prints 76 methane worlds and asserts at least one;
+    - the table's Titan carries 5.96% CH₄ by number (5.65% required, to 10%; 3.50% by mass), at
+      93.99 K and 1.473 bar, its partial pressure in the air at the humidity to 10⁻¹²; the held
+      rules give 1.42 bar. As first built, with the cap on the column weight, it carried 5.82% by
+      mass, 9.73% by number, at 1.51 bar (signoff-3.md, item 1.7);
+    - the cap's root by hand: x p_s equals the cap to 10⁻¹² in both of the root's forms, an
+      inventory below it is all airborne, none where the cap is none, all above the critical
+      point, and the weight rises continuously with the cap through b = 0;
+    - Mercury, Venus, Earth, Mars and the Moon keep CO₂, their atmospheres equal to the held
+      rules'; Ceres's carrier is methane, with none airborne; the generated Earth has no O₂, the
+      plan's biotic gap;
+    - a sweep over 0.05–39.7 au and 10⁻³–5 M⊕ gives no methane inside the snow line or inside the
+      maximum-greenhouse limit, and methane the carrier of every solid body formed beyond the
+      snow line and beyond the limit, with no CO₂. Every body's methane retention is its
+      nitrogen's, and under the held rules its Jeans retention. It prints 104 methane worlds
+      (76 as first built, under the 150 K rule) and asserts at least one;
+    - `derive_body`'s golden `icy`, `beyond_dry` and `beyond_watery` carry methane, frozen, each
+      within 2% of its nitrogen-only grey temperature by hand (157.3, 180.1 and 174.5 K, under
+      45.6, 90.1 and 66.1 bar of N₂ and 4.83, 11.38 and 9.54 bar of CH₄), against the held rules'
+      CO₂ greenhouses of 579.7, 705.6 and 743.3 K;
     - the runaway mass balance by hand, the dry world's none, the sink's zero, the melt, the
       critical flux, and Venus's oxygen retained against Jeans escape and taken by its sinks;
+    - the young melt: at `molten_for` = 0 the as-built figure bit for bit; six oceans at Venus's
+      saturated flux with a 31.6 Myr melt keep less by the melt's share, by hand to 10⁻¹²
+      (η 0.198, an ocean lost in 36.3 Myr: 530 bar kept, 363 with the melt); a melt that outlasts the loss keeps none; the oxygen is non-increasing and
+      continuous in the melt's length; and the golden's wet runaway world about the Sun with its
+      history keeps less with a 31.6 Myr melt, by hand (1,616 bar, 1,460 with the melt);
     - the reservoir against a subsaturated inventory, and no carrier for an envelope or a
       massless body;
     - every body's fractions sum to 1 to 10⁻⁹;
-    - the gases are continuous in age (0.2–10 Gyr, at steps of 0.1%) and in equilibrium
-      temperature, except at a recorded change;
+    - the gases are continuous in age (0.2–10 Gyr, at steps of 0.1%) except at a recorded change;
+      an Earth mass formed beyond the snow line, moved from 1.3 to 2.3 au at steps of 0.1%,
+      changes its carrier once, where it crosses the maximum-greenhouse limit and its state
+      changes, and its gases are continuous elsewhere; and as its young magma ocean freezes its
+      carrier changes with the crust;
     - the rules give the same result twice.
   - _Files beyond the task's two._
     - `planetary/context.rs`: `XuvHistory::saturated_flux`, checked in the existing XUV test;
-    - `planetary/derive/mod.rs`: `derive_body_under`, `Sky::saturated_xuv_flux` and the extended
-      golden;
+    - `planetary/derive/mod.rs`: `derive_body_under`, `Sky::saturated_xuv_flux`, the extended
+      golden, `molten_for` from `PlacedBody::molten_until`, and `solar::beyond_the_snow_line`,
+      ruling 58's placement, shared by the golden and the atmosphere's tests;
     - `tests/planetary_properties.rs`: the carrier in its continuity test;
-    - the sim's `clippy.toml`, where `McKay` joins `doc-valid-idents`;
+    - the sim's `clippy.toml`, where `McKay` joins `doc-valid-idents`, and `McDonough` in the
+      follow-up;
     - the two goldens above.
 
     Accepted, besides the task's command, by `cargo test -p hyperion-sim planetary::context`,
     `planetary::derive::tests::derive_body_is_pinned` and `--test planetary_properties`.
 
   - _Added public items._
-    - the constants `METHANE_CARBON_TEMPERATURE`, `METHANE_RELATIVE_HUMIDITY`,
+    - the constants `METHANE_RELATIVE_HUMIDITY`,
       `WATER_LOSS_ESCAPE_EFFICIENCY`, `ESCAPING_FLOW_TEMPERATURE`,
       `OXYGEN_IN_HYDROGEN_DIFFUSION_PER_METRE_SECOND` and `EARTH_OXYGEN_SINK_MOL_PER_YEAR`;
     - `oxygen_escape_parameter`, `runaway_oxygen`, and `CarbonCarrier` with
       `From<CarbonCarrier> for Gas`;
-    - `AtmosphereInputs`' `formed`, `saturated_xuv_flux` and `age`;
+    - `AtmosphereInputs`' `formed`, `saturated_xuv_flux`, `molten_for` and `age`.
+      `runaway_oxygen` takes `molten_for`, after `saturated_xuv`;
     - `Atmosphere::carbon_carrier` and `XuvHistory::saturated_flux`.
-  - _What the bump moves_ (blessed with the gate open, measured, and restored, 2026-10-10;
-    P14.T14.d's gate closed):
-    - `planetary/derive_body`, seven values and a line, all on the two bodies this task added:
-      - `titan`: its surface temperature 94.017 → 93.992 K and pressure 1.4217 → 1.5095 bar, its
-        CH₄ 0 → 8,780 Pa (5.82%), its CO₂ 3.2 × 10⁻³ Pa → 0, and its carrier carbon dioxide →
-        methane;
-      - `wet_runaway`: its surface pressure 66.0 → 2,650 bar, of which O₂ 0 → 2,584 bar;
-      - their albedos and states hold, and with them their equilibrium temperatures;
+  - _What the bump moves_ (re-measured for the follow-up: blessed with the gate open, measured
+    against the held tree, and restored, 2026-10-10, on 495e5bf3 with the follow-up; P14.T14.d's
+    gate closed). As first built it was seven values and a line on `titan` and `wet_runaway`; the
+    follow-up's rulings and the humidity's cap make it 21 values and 4 lines, on five bodies:
+    - `planetary/derive_body`:
+      - `icy`, `beyond_dry` and `beyond_watery` (science-p14-t24f §5): their surfaces
+        579.7 / 705.6 / 743.3 K → 157.3 / 180.1 / 174.5 K and their pressures
+        4,479 / 8,861 / 65,687 bar → 50.4 / 101.5 / 75.6 bar. Their CO₂,
+        4,281 / 8,452 / 6,203 bar, → 0, and their CH₄ 0 → 4.83 / 11.38 / 9.54 bar. Their water,
+        153 / 319 / 59,418 bar, condenses at the colder surfaces to 3.9 × 10⁻⁵ / 5.5 × 10⁻³ /
+        1.9 × 10⁻³ Pa. Their carriers go from carbon dioxide to methane, and their N₂ (45.6 / 90.1
+        / 66.1 bar) holds;
+      - `titan`: its surface temperature 94.017 → 93.992 K and pressure 1.4217 → 1.4733 bar. Its
+        CH₄ goes 0 → 5,159 Pa (5.96% by number, 3.50% by mass; signoff-3.md, item 1.7) and its CO₂
+        3.2 × 10⁻³ Pa → 0, and its carrier carbon dioxide → methane;
+      - `wet_runaway`: its surface pressure 66.0 → 2,650 bar, of which O₂ 0 → 2,584 bar, as first
+        built. It has no young melt (no `with_magma_ocean_until`), so §3 leaves it;
+      - every body's state, albedo and equilibrium temperature hold;
     - `planetary/atmosphere_speciation`: its header only;
-    - nothing else. With the gate open, the sim's and the server's suites (`--tests`, at 2c5bdcf4
-      with this task) fail only the hold's tripwire.
-      - No other golden holds a body the rules change. `derive_body`'s icy bodies have nitrogen
-        enough to warm them past 150 K, onto carbon-dioxide greenhouses of 580–743 K, and its
-        Venus's sinks take all its oxygen.
-      - The merge of f3c6159d brought no golden and no reader of the atmosphere, and
-        `derive_body` was re-measured on it.
+    - nothing else. With the gate open, the sim's (`--features hyperion-sim/testing --tests`) and
+      the server's (`--tests`) suites fail only the hold's tripwire and the held half of
+      `icy_worlds_beyond_the_maximum_greenhouse_hold_no_carbon_dioxide_greenhouse`, its equality
+      with `derive_body`'s golden derivation, which holds only while the rules are held.
+      - The system goldens record `surface: NotModelled`, so none holds an atmosphere, and the
+        states that set their albedos hold. science-p14-t24f §5 expected their beyond-limit bodies
+        above 150 K to move; measured, none does.
+      - Generated runaway worlds with a young melt (every terrestrial body carries P14.T28.a's
+        `molten_until`) keep less O₂ by their melt's share (§3: 53–527 bar for a Venus-orbit Earth
+        over 10–100 Myr). No golden holds one, so T48.e's bless note states the rule.
 
-    The plan's Generator version section, "T24.f moves the existing goldens", holds only through
-    these two bodies.
+    The plan's Generator version section, "T24.f moves the existing goldens", holds through these
+    five bodies.
+
+  - _Finding, for P14.T49.b_ (science-checker, 2026-10-10): the registry's methane curve, with a
+    constant latent heat, lies 0.2% from Setzmann and Wagner's at Titan but 10.5–11.5% above it
+    at 157–180 K, so the icy bodies' CH₄ at the bump is about 10% high. T49.b's
+    temperature-dependent latent heats correct it.
+
+  - _Finding, for T13.c's owner and P14.T51.a_ (science-p14-t24f, finding 1): a rocky world formed
+    inside the snow line but beyond the maximum-greenhouse limit stores no carbon, and T13.c's
+    grey CO₂ term still runs it away to 490–575 K (an Earth at 1.8–2.5 au of 1 L☉, labelled
+    `Snowball`), which Kopparapu et al. 2013 and Kasting et al. 1993 forbid any CO₂ air there;
+    the planned fix is P14.T51.a's dominant condensable at its cold trap.
 
   - _Open, for "main"_ (each with the lane's lean):
     1. **The humidity below the triple point.** The ruling says 0.5 "over the liquid". Below
@@ -9875,10 +9978,23 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     3. **A melt's oxygen.** The science-checker would hold a world's O₂ at zero from the epoch its
        melt took it up. With no loss epoch, the "worst" proxy would also zero the M dwarfs'
        planets, whose mantles froze while they still lost water (Luger and Barnes §2.5.3). Lean:
-       keep the present-state rule, documented, until P14.T53.a times the loss.
-    4. **Methane kept where nitrogen is.** Lean: keep it, with its justification.
+       keep the present-state rule, documented, until P14.T53.a times the loss. **Ruled**
+       (science-p14-t24f §3): the worst-epoch proxy is rejected; the young melt keeps the oxygen
+       of the water lost while it lasted, timed by `molten_until`; the greenhouse's melt keeps the
+       present-state rule until P14.T53.a. Built in the follow-up, held.
+    4. **Methane kept where nitrogen is.** Lean: keep it, with its justification. **Ruled**
+       (science-p14-t24f §4): kept; it holds on any body in the methane domain. The atmosphere's
+       retention reports methane with nitrogen. Built in the follow-up, held.
     5. **The 150 K threshold.** It is unsourced, and the science check found no literature
-       boundary at it. Lean: keep it provisional until P14.T55.a's redox route.
+       boundary at it. Lean: keep it provisional until P14.T55.a's redox route. **Ruled**
+       (science-p14-t24f §5): replaced by the maximum-greenhouse limit. Built in the follow-up,
+       held.
+    6. **The humidity caps the weight** (signoff-3.md, item 1.7). `held` caps methane's column
+       weight at 0.5 p_sat, so the generated Titan's 5.82% is a mass fraction: 9.73% by number, a
+       humidity of 0.84. **Ruled:** the cap is on the partial pressure x p_s, built in the
+       follow-up behind `CARBON_SPECIATION_VERSION`. Titan then holds about 5.96% by number at
+       1.473 bar. `atmosphere_speciation.golden`'s held values and the `titan` move at the bump
+       re-measure. The same cap for every condensable is P14.T51.a's.
 
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might

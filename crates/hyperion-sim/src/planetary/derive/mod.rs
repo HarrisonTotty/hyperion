@@ -958,6 +958,7 @@ pub(crate) fn derive_body_under(
             saturated_xuv_flux: sky.saturated_xuv_flux,
             insolation: sky.insolation,
             crust,
+            molten_for: placed.molten_until.unwrap_or(Years::ZERO),
             age: age_now,
             hottest_host: sky.hottest,
         };
@@ -1558,6 +1559,28 @@ pub(crate) mod solar {
             chen_kipping_rank(mass, radius)
         };
         (confined - least) / (greatest - least)
+    }
+
+    /// Ruling 58's bodies of `derive_body`'s golden: an Earth mass at 4 au of the Sun, beyond the
+    /// snow line of `disc`, at the rank among the rocky outcomes, held to Earth's core fraction and
+    /// above, if `dry`, and otherwise at the rank between the Earth-like and rock curves, which
+    /// keeps Chen and Kipping's radius and its water.
+    pub(crate) fn beyond_the_snow_line(disc: &DiscProfile, dry: bool) -> PlacedBody {
+        let (earths, a_au, eccentricity) = (1.0, 4.0, 0.05);
+        let mass = EarthMasses::new(earths);
+        let axis = Metres::new(a_au * METRES_PER_AU);
+        let flux = luminosity_flux(disc.host_luminosity(), axis, eccentricity);
+        let window = radius_window(mass, SnowLineSide::Beyond, flux).unwrap();
+        let rank = |r: EarthRadii| chen_kipping_rank(mass, r);
+        let (least, greatest) = (rank(window.least()), rank(window.greatest()));
+        let (top, rock) = (rank(window.dry_top()), rank(window.rock()));
+        let target = if dry {
+            f64::midpoint(least, top)
+        } else {
+            f64::midpoint(top, rock)
+        };
+        let u = (target - least) / (greatest - least);
+        placed(earths * EARTH_MASS_KG, a_au, eccentricity, u)
     }
 
     pub(crate) fn derive(
@@ -2348,21 +2371,7 @@ mod tests {
         // fraction and above, and one between the Earth-like and rock curves, which keeps Chen
         // and Kipping's radius and its water.
         for (name, dry) in [("beyond_dry", true), ("beyond_watery", false)] {
-            let (earths, a_au, eccentricity) = (1.0, 4.0, 0.05);
-            let mass = EarthMasses::new(earths);
-            let axis = Metres::new(a_au * METRES_PER_AU);
-            let flux = luminosity_flux(disc.host_luminosity(), axis, eccentricity);
-            let window = radius_window(mass, SnowLineSide::Beyond, flux).unwrap();
-            let rank = |r: EarthRadii| chen_kipping_rank(mass, r);
-            let (least, greatest) = (rank(window.least()), rank(window.greatest()));
-            let (top, rock) = (rank(window.dry_top()), rank(window.rock()));
-            let target = if dry {
-                f64::midpoint(least, top)
-            } else {
-                f64::midpoint(top, rock)
-            };
-            let u = (target - least) / (greatest - least);
-            let placed = placed(earths * EARTH_MASS_KG, a_au, eccentricity, u);
+            let placed = beyond_the_snow_line(&disc, dry);
             let body = derive(&placed, &disc).unwrap();
             assert_eq!(body.formed(), SnowLineSide::Beyond);
             if dry {
