@@ -762,9 +762,11 @@ class Execution(unittest.TestCase):
         self.assertEqual(runner.handoffs, [{"setup": smart_ci.CI_PHASES["setup"]},
                                            {"side": smart_ci.CI_PHASES["side"], "main": smart_ci.CI_PHASES["main"]}])
         self.assertEqual(runner.calls[-1], ("run", ["_locked", "just", "_test-run", "_wasm-fast-run"]))
-        # The command line reads no diff for it.
+        # The command line reads no diff for it. (Its environment is this suite's own: no slot held
+        # already, as `ci`'s side phase, which runs this suite inside one, would have it.)
         shown = io.StringIO()
         with contextlib.redirect_stdout(shown), unittest.mock.patch.dict(os.environ, self.SLOT):
+            os.environ.pop("BUILD_SLOT_HELD", None)
             self.assertEqual(smart_ci.main(["--full", "--plan"]), 0)
         self.assertIn(smart_ci.FULL_RUN, shown.getvalue())
         self.assertIn("is held for the setup and then the side, main phases", shown.getvalue())
