@@ -789,9 +789,9 @@ pub fn oxygen_escape_parameter(mass: Kilograms, radius: Metres, xuv: WattsPerSqu
 ///   lane's, provisional, until P14.T53.a), gave its oxygen to the melt, which oxidised its
 ///   ferrous iron and keeps it when it freezes (Schaefer et al. 2016, ApJ 829, 63, §4.2). A
 ///   convecting melt can take all the oxygen that does not escape (Luger and Barnes, §2.5.3). Its
-///   capacity is no limit: an Earth mantle's iron, at 8 wt% `FeO` (McDonough and Sun 1995, Chem.
-///   Geol. 120, 223, from memory) all oxidised to `FeO₁.₅`, takes some 29 oceans' worth
-///   (science-p14-t24f §3);
+///   capacity is no limit: an Earth mantle's iron, at 8.05–8.18 wt% `FeO` (McDonough and Sun
+///   1995, Chem. Geol. 120, 223; Workman and Hart 2005, EPSL 231, 53) and 4.01 × 10²⁴ kg, all
+///   oxidised to `FeO₁.₅`, takes some 29–30 oceans' worth (science-p14-t24f §3 and §6.2);
 /// - the surface takes up oxygen at Earth's rate per unit area, [`EARTH_OXYGEN_SINK_MOL_PER_YEAR`]
 ///   over 4π R⊕², over the body's whole age, a rate Luger and Barnes (§5.1) find able to remove
 ///   Venus's. Earth's rate is mostly weathering, which a dry world lacks, and counting from
@@ -1142,11 +1142,13 @@ pub enum CarbonCarrier {
     /// photolysis, as on Titan; and a body formed beyond the snow line supplies it from its ices
     /// and its water–rock chemistry. Every body beyond the snow line that keeps a nitrogen air
     /// carries methane (Titan, Triton, Pluto). Anywhere else carbon is carbon dioxide, standing in
-    /// for magmatic outgassing's CO₂ and CO (the model carries no CO), which outweigh methane at
-    /// any plausible redox (Wogan, Krissansen-Totton and Catling 2020, PSJ 1, 58, Fig. 3). It
-    /// stands in for the redox route (decision-composition §1.3; P14.T50.a's ΔIW,
-    /// P14.T55.a), and reads a recorded state, the insolation, so that the carrier changes only
-    /// where the climate does.
+    /// for magmatic outgassing's CO₂ and CO (the model carries no CO): in almost all of Wogan,
+    /// Krissansen-Totton and Catling's outgassing calculations CO₂ and CO are much more abundant
+    /// than methane (2020, PSJ 1, 58, Fig. 3 and §3.1, where 2–7% give more CH₄ than CO), which
+    /// becomes a substantial share only below FMQ−3, at the extremes of Earth's and Mars's magmas,
+    /// or from magma colder than about 1,200 K (§4.1.2–4.1.3). It stands in for the redox route
+    /// (decision-composition §1.3; P14.T50.a's ΔIW, P14.T55.a), and reads a recorded state, the
+    /// insolation, so that the carrier changes only where the climate does.
     Methane,
 }
 
@@ -1392,10 +1394,11 @@ fn greenhouse(
 ///    kept where nitrogen, the cold worlds' bulk gas, is (P14.T24.f), and the reported
 ///    [`Atmosphere::retention`] says so. Kept where nitrogen is, methane passes its own Jeans test
 ///    at 5 × 16.043 ÷ 28.014 = 2.86 `T_eq`, on a body of any size, above the real ratio of
-///    exobase to equilibrium temperature of every nitrogen and methane air known, 1.8–2.5
+///    exobase to equilibrium temperature of every nitrogen and methane air known, 1.8–2.7
 ///    (Titan's exobase near 4,000 km and 150 K, Johnson 2010, ApJ 716, 1573, §5; Pluto's upper
 ///    atmosphere near 70 K, Gladstone and Young 2019, Annu. Rev. Earth Planet. Sci. 47, 119;
-///    Triton's near 95 K, Broadfoot et al. 1989, Science 246, 1459, from memory), whose methane
+///    Triton's isothermal 102 K to its exobase at 870 km, Krasnopolsky et al. 1993, JGR 98, 3065,
+///    over its nitrogen ice's 38 K, Tryka et al. 1993, Science 261, 751), whose methane
 ///    and its products cool their thermospheres. Titan's own methane, at λ ≈ 18 at the exobase
 ///    multiple that stands in for the bulk air's non-thermal losses ([`EXOBASE_MULTIPLE`]), has
 ///    λ ≈ 24–28 at its real exobase, near 4,075 km and 150–180 K (G M m ÷ k T r; Johnson 2010
@@ -1403,9 +1406,11 @@ fn greenhouse(
 ///    because its thermal escape is negligible at λ ≳ 20, and because through nitrogen a minor
 ///    gas escapes at most at its diffusion limit, which over 4.57 Gyr takes under a quarter of the
 ///    median reservoir on a body of any size (science-p14-t24f §4, with methane's diffusion in
-///    nitrogen after Banks and Kockarts 1973, from memory; Pluto's measured methane escape, some
-///    5 × 10²⁵ s⁻¹, Gladstone and Young 2019, is under 1% of its reservoir's median over that
-///    time). Methane's real loss is to photolysis, and the rule takes the reservoir as resupplied.
+///    nitrogen b = 7.34 × 10¹⁶ T^0.75 cm⁻¹ s⁻¹, Marrero and Mason 1972, J. Phys. Chem. Ref. Data
+///    1, 3, Table 13, fitted from 298 K and extrapolated below it; Pluto's measured methane
+///    escape, some 5 × 10²⁵ s⁻¹, Gladstone and Young 2019, is under 1% of its reservoir's median
+///    over that time). Methane's real loss is to photolysis, and the rule takes the reservoir as
+///    resupplied.
 /// 3. The climate divides what is kept: inside the runaway limit the oceans are lost and all the
 ///    carbon is airborne, and the oxygen of the water lost stays, less its sinks
 ///    ([`runaway_oxygen`], P14.T24.f, if oxygen is retained); in the habitable zone a world with

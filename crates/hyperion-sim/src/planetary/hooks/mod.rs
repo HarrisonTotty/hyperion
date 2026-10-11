@@ -1,7 +1,7 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23):
+//! Built so far (P14.T23, T24.a):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
@@ -9,11 +9,14 @@
 //! - [`BulkComposition`]: the body's mass fractions (P14.T11), the volatile inventory of its
 //!   atmosphere (P14.T13) and its host's \[Fe/H\] and \[α/Fe\], which the resource model and the
 //!   later generators read.
+//! - [`surface`]: the body's [`SurfaceConditions`] (P14.T24.a): its mean temperature and signed
+//!   contrasts, its surface pressure and gases as mole fractions, the light and radiation it
+//!   receives and whether water can be liquid on it; held until the 21 → 22 batch's bump.
 //!
 //! [`BodyHooks`] holds them, from
-//! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at). The surface
-//! conditions and global figures (P14.T24), the habitability assessment (T25) and the resource
-//! abundances (T26) join it with their tasks.
+//! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at). The global
+//! figures (P14.T24.b), the habitability assessment (T25) and the resource abundances (T26) join
+//! it with their tasks.
 //!
 //! # The surface seed stays on the server
 //!
@@ -25,8 +28,10 @@
 //! type is built from it.
 
 pub mod seed;
+pub mod surface;
 
 pub use seed::{SurfaceSeed, surface_seed};
+pub use surface::{RadiationClass, SurfaceConditions};
 
 use crate::planetary::derive::MassFractions;
 use crate::planetary::derive::atmosphere::VolatileInventory;
@@ -90,19 +95,29 @@ impl BulkComposition {
     }
 }
 
-/// What the layers above read of a body at a time (P14.T23): its surface seed and its bulk
-/// composition. Server-only (see the [module](self) documentation).
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// What the layers above read of a body at a time (P14.T23, T24.a): its surface seed, its bulk
+/// composition and its surface conditions. Server-only (see the [module](self) documentation).
+#[derive(Debug, Clone, PartialEq)]
 pub struct BodyHooks {
     surface_seed: SurfaceSeed,
     bulk: Section<BulkComposition>,
+    surface: Section<SurfaceConditions>,
 }
 
 impl BodyHooks {
-    /// The hooks of a body of surface seed `surface_seed` and bulk composition `bulk`.
+    /// The hooks of a body of surface seed `surface_seed`, bulk composition `bulk` and surface
+    /// conditions `surface`.
     #[must_use]
-    pub const fn new(surface_seed: SurfaceSeed, bulk: Section<BulkComposition>) -> Self {
-        Self { surface_seed, bulk }
+    pub const fn new(
+        surface_seed: SurfaceSeed,
+        bulk: Section<BulkComposition>,
+        surface: Section<SurfaceConditions>,
+    ) -> Self {
+        Self {
+            surface_seed,
+            bulk,
+            surface,
+        }
     }
 
     /// The surface seed, which a body keeps whatever happens to it.
@@ -117,5 +132,15 @@ impl BodyHooks {
     #[must_use]
     pub const fn bulk(&self) -> &Section<BulkComposition> {
         &self.bulk
+    }
+
+    /// The surface conditions (P14.T24.a): [`Section::Ok`] for a present body with a surface,
+    /// [`Section::NotApplicable`] for one in the gas-envelope state or not present, and
+    /// [`Section::NotModelled`] for a body whose spin or derivation this version does not compute.
+    /// Every body's is [`Section::NotModelled`] until the 21 → 22 batch's bump
+    /// ([`surface`](mod@surface)'s documentation, "Held until the batch's bump").
+    #[must_use]
+    pub const fn surface(&self) -> &Section<SurfaceConditions> {
+        &self.surface
     }
 }

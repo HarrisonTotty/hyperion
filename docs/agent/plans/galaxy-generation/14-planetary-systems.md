@@ -4582,6 +4582,11 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     `atmosphere_under` into `atmosphere` and `derive_body_under` into `derive_body`, as Risks,
     "Deviations in P14.T24.f, as built", lists step by step (with its follow-up's science-p14-t24f
     rules and signoff-3.md's partial-pressure cap). The bless re-measures both holds' moves.
+  - _P14.T24.a's hold._ The same commit removes `SURFACE_CONDITIONS_VERSION`, `ConditionsHold` and
+    the tripwire `the_surface_conditions_are_held_only_until_the_batch_s_bump`, folding
+    `hooks_at_under` into `hooks_at`, as Risks, "Deviations in P14.T24.a, as built", lists step
+    by step. The bless re-measures `planetary/surface_conditions_published`, which pins the held
+    publication on version 21's derivation.
   - _Tests:_ a 90°-obliquity world's equator–pole contrast is negative; a locked airless body's
     day–night contrast exceeds 300 K and Venus's is under 10 K (T24.a's, kept); every present body
     with a solid surface (`has_solid_surface()`), moons included, has its surface section `Ok` from
@@ -4800,6 +4805,12 @@ rows' values.
       1996; Span et al. 2000; Setzmann and Wagner 1991; Bücker and Wagner 2006; Lemmon and Span
       2006; Gao et al. 2016; Tegeler et al. 1999; Schmidt and Wagner 1985; NH₃'s published version
       of Gao, Wu, Bell and Lemmon, found at build), evaluated from the papers;
+    - for each liquid branch, the reference equation's auxiliary vapour-pressure equation,
+      ln(p ÷ p_c) = (T_c ÷ T) Σ aᵢ θ^tᵢ (methane's: Setzmann and Wagner 1991, a = (−6.036219,
+      1.409353, −0.4945199, −1.443048), t = (1, 1.5, 2, 4.5)), not a Clausius–Clapeyron form with
+      a temperature-dependent latent heat;
+    - each solid branch from a published sublimation fit (methane's: Fray and Schmitt 2009),
+      meeting the liquid branch at the triple point (science-p14-t24f §6.3);
     - NIST's WebBook (SRD 69) only as the cross-check of asserted values (decision-composition §5);
     - emitted to `crates/hyperion-sim/src/tables/saturation.rs` with its manifest;
     - they replace the five Clausius–Clapeyron sets, a deliberate output change at this batch's
@@ -4831,6 +4842,7 @@ rows' values.
     - triple and critical points exact;
     - each branch within its stated error of the reference equation at three temperatures, and
       continuous at the triple point;
+    - methane's curve within 0.1% of the WebBook at 100, 150 and 180 K (science-p14-t24f §6.3);
     - `phase_at`'s regions for each condensable;
     - the surfaces audit §2.5's liquid windows reproduced within 2 K;
     - each law aloft gives its paper's condensation temperature at 1 bar and solar metallicity
@@ -9753,7 +9765,10 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       becomes the speciated body), and the held rules' Jeans retention in
       `no_body_inside_the_snow_line_or_the_maximum_greenhouse_limit_takes_methane`;
     - in `atmosphere/tests.rs`, replace `derive_under`, `table_under`, `derive_as_the_golden_under`
-      and the `atmosphere_under` calls with `derive`, `table`, `solar::derive` and `atmosphere`;
+      and the `atmosphere_under` calls with `derive`, `table`, `solar::derive` and `atmosphere`.
+      P14.T24.a moved `derive_under` and `table_under` (with `SMALL_BODIES`,
+      `placed_about_the_sun` and `table_bodies`) into `derive::solar`, where `hooks/surface/tests.rs`
+      calls them too: fold them there, or drop their `speciation` parameter;
     - drop the hold's wording from:
       - the module documentation;
       - the docs of `atmosphere`, `Atmosphere::carbon_carrier` and `derive_body_under`;
@@ -9773,10 +9788,13 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
         leaves the greenhouse's iteration, which is T13.c's map with a fixed set of gases. The
         private `ColdCarbon` goes with it: `Airborne` holds the `CarbonCarrier`.
       - Carbon dioxide elsewhere stands in for magmatic outgassing's CO₂ and CO (the model
-        carries no CO), which outweigh methane at any plausible redox (Wogan, Krissansen-Totton
-        and Catling 2020, Fig. 3). The ruling's code text read "the carrier of magmatic
-        outgassing at any plausible redox"; the science-checker found the paper says CO₂ and CO,
-        as the ruling's own physics does, and the doc follows the paper (deviation, for "main").
+        carries no CO), which outweigh methane in almost all of Wogan, Krissansen-Totton and
+        Catling's (2020) outgassing calculations (Fig. 3, §3.1), methane becoming substantial
+        only below FMQ−3 or below about 1,200 K (§4.1.2–4.1.3). The ruling's code text read "the
+        carrier of magmatic outgassing at any plausible redox"; the science-checker found the
+        paper says CO₂ and CO, as the ruling's own physics does, and the doc follows the paper
+        (deviation, for "main"). Main confirmed CO₂ and CO and corrected "any plausible redox" to
+        the paper's "almost all" (science-p14-t24f §6.1).
       - A young magma ocean (`Crust::Molten`) keeps its carbon as CO₂.
       - The table's Ceres, at 2.77 au, formed beyond the generated Sun's snow line at 2.26 au and
         lies beyond the limit, so its carrier is methane. It keeps no nitrogen, and so no methane,
@@ -9816,12 +9834,13 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       - `Retention::of`, the Jeans verdict, is unchanged. The atmosphere's reported retention
         sets methane's bit to nitrogen's (`Retention::with_methane_as_nitrogen`, crate-private;
         science-p14-t24f §4). The rule is methane's own test at 2.86 T_eq on any body, above the
-        real 1.8–2.5 of nitrogen and methane airs (Johnson 2010; Gladstone and Young 2019; Triton's
-        from memory). Its λ of 24–28 at Titan's real exobase is marginal against the threshold of
-        25: methane stays because its thermal escape is negligible at λ ≳ 20, and through nitrogen
-        a minor gas escapes at most at its diffusion limit, under a quarter of the median
-        reservoir over 4.57 Gyr (b after Banks and Kockarts 1973, from memory; Pluto's measured
-        escape, some 5 × 10²⁵ s⁻¹, is under 1% of its median reservoir).
+        real 1.8–2.7 of nitrogen and methane airs (Johnson 2010; Gladstone and Young 2019;
+        Krasnopolsky et al. 1993 with Tryka et al. 1993 for Triton's 102 K over 38 K). Its λ of
+        24–28 at Titan's real exobase is marginal against the threshold of 25: methane stays
+        because its thermal escape is negligible at λ ≳ 20, and through nitrogen a minor gas
+        escapes at most at its diffusion limit, under a quarter of the median reservoir over
+        4.57 Gyr (b = 7.34 × 10¹⁶ T^0.75 cm⁻¹ s⁻¹, Marrero and Mason 1972, Table 13; Pluto's
+        measured escape, some 5 × 10²⁵ s⁻¹, is under 1% of its median reservoir).
     - **The grey τ.** Methane does not enter `optical_depth`. P14.T13.c's nitrogen term was fitted
       on Titan, whose greenhouse is "caused primarily by pressure-induced opacity of N2, CH4, and
       H2" (McKay, Pollack and Courtin 1991, Science 253, 1118), so a methane term would count it
@@ -9957,8 +9976,12 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
 
   - _Finding, for P14.T49.b_ (science-checker, 2026-10-10): the registry's methane curve, with a
     constant latent heat, lies 0.2% from Setzmann and Wagner's at Titan but 10.5–11.5% above it
-    at 157–180 K, so the icy bodies' CH₄ at the bump is about 10% high. T49.b's
-    temperature-dependent latent heats correct it.
+    at 157–180 K, so the icy bodies' CH₄ at the bump is about 10% high. Confirmed against NIST's
+    WebBook (Setzmann and Wagner 1991): 1.105 at 157.3 K, 1.114 at 170 K, 1.113 at 180 K, and
+    0.998 at Titan (science-p14-t24f §6.3). A temperature-dependent latent heat alone would not
+    correct it: with the WebBook's own L(T) and an ideal vapour, Clausius–Clapeyron runs 25–50%
+    low over 149–180 K. T49.b's fit of ln p to Setzmann and Wagner's auxiliary vapour-pressure
+    equation does. At that bump the icy bodies' CH₄ falls about 10%, at unchanged temperatures.
 
   - _Finding, for T13.c's owner and P14.T51.a_ (science-p14-t24f, finding 1): a rocky world formed
     inside the snow line but beyond the maximum-greenhouse limit stores no carbon, and T13.c's
@@ -9995,6 +10018,205 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
        follow-up behind `CARBON_SPECIATION_VERSION`. Titan then holds about 5.96% by number at
        1.473 bar. `atmosphere_speciation.golden`'s held values and the `titan` move at the bump
        re-measure. The same cap for every condensable is P14.T51.a's.
+
+- **Deviations in P14.T24.a, as built (`p14-batch`, 2026-10-11).** `GENERATOR_VERSION` stays 21,
+  and no existing golden value moves.
+  - _Where it lives._ `planetary/hooks/surface.rs`: `SurfaceConditions::derive(&SurfaceInputs)`,
+    a pure function of a body's derivation at a time (its atmosphere, equilibrium temperature,
+    stellar flux and X-ray and ultraviolet flux), its bulk section's gravity and radius, and its
+    `SeasonalSpin`. It returns `None` for a body in the gas-envelope state.
+    - It is published as Provides' `BodyHooks::surface`, a `Section<SurfaceConditions>`, by
+      `PlanetarySystem::hooks_at`, server-only as T23's bulk composition is.
+    - `record::Surface` stays uninhabited: it is P14.T48.e's, which builds it from the same
+      pieces as `hooks_at_under` does.
+    - `BodyHooks` loses `Copy`, since the gas list is a `Vec`, and `BodyHooks::new` takes the
+      surface section third.
+    - The section is `Ok` for a present body with a solid surface; `NotApplicable` for a body in
+      the gas-envelope state or not present; and `NotModelled` for one with no rotation law (every
+      body of `generate_planets`), no seasonal orbit or no derivation.
+    - T48.e's signed contrasts are built here, with its test "a 90°-obliquity world's equator–pole
+      contrast is negative" (`a_ninety_degree_obliquity_world_s_equator_pole_contrast_is_negative`).
+      T48.e keeps the record's section and its other tests.
+  - _The hold._ `hooks_at` publishes the conditions from `SURFACE_CONDITIONS_VERSION` = 22
+    (`ConditionsHold::in_force`). Below it every body's surface section is `NotModelled`, as
+    version 21 has none. The rules live in the crate-private `hooks_at_under(.., ConditionsHold)`,
+    which the tests call with `Published`. Every function of `hooks::surface` is in force; only
+    the publication is held. **P14.T48.e**, in the bump's commit:
+    - fold `hooks_at_under` into `hooks_at`, keeping the `Published` arm;
+    - delete `ConditionsHold`, `SURFACE_CONDITIONS_VERSION` and
+      `the_surface_conditions_are_held_only_until_the_batch_s_bump`, which fails from version 22
+      to say so;
+    - delete the held half of `the_hooks_publish_surface_conditions_only_from_the_batch_s_bump`
+      (`system/tests.rs`), and call `hooks_at` where its tests call `hooks_at_under`;
+    - in `hooks/surface/tests.rs`, delete the held loop of
+      `methane_and_oxygen_reach_the_fractions_through_the_speciated_derivation`, and fold
+      `table_under(CarbonAndOxygen)` and `derive_under` as P14.T24.f's fold does (they now live in
+      `derive::solar`);
+    - drop the hold's wording from the module documentation of `hooks::surface` and `hooks`, from
+      the docs of `hooks_at` and `BodyHooks::surface`, and from
+      `the_published_surface_conditions_are_pinned`'s;
+    - re-bless `planetary/surface_conditions_published` with the batch's other goldens.
+  - _New pins_, both at header 21.
+    - `planetary/surface_conditions` pins the conditions and X-ray fluxes of the table's bodies
+      under P14.T24.f's rules, read directly through `Speciation::CarbonAndOxygen`
+      (`table_under`, moved to `derive::solar` from the atmosphere's tests) and through no
+      `ConditionsHold`, each with its own spin (NASA's fact sheets). It also pins a 1:1-locked Earth
+      and Venus, an Earth at 90° of obliquity, `earth_xuv_flux` and the young Sun's flux and class
+      at 1 au. The bump moves only its header, provided the batch changes no field it pins.
+    - `planetary/surface_conditions_published` pins what `hooks_at_under(.., Published)` gives
+      every body with a surface in the sample's first eight systems, through `SeasonalSpin::of`
+      and the bulk sections. It reads version 21's derivation, so it moves at the bump with the
+      batch's held gases and tides (P14.T24.f, P14.T14.d): the bless re-measures it.
+  - _What the bump moves_ (measured: the gate opened, the sim's (`--features testing --tests`)
+    and the server's (`--tests`) suites blessed, measured with `golden_diff.py` against the held
+    tree, and restored, 2026-10-11): **no golden**. Nothing but the hold's own tests reads
+    `hooks_at`, so the suites failed only the tripwire and the held half of
+    `the_hooks_publish_surface_conditions_only_from_the_batch_s_bump`, and the server's passed.
+    P14.T24.f's moves, above, are the batch's only ones so far beside T14.d's.
+    `planetary/surface_conditions` moves its header only, and
+    `planetary/surface_conditions_published` moves where T24.f's and T14.d's holds move a body
+    with a surface (its cold beyond-limit bodies' gases and temperatures), which the bump's bless
+    re-measures.
+  - _Mole fractions._ `mole_fractions(weights)` takes any registry rows, each once, and sums in
+    the order given. It refuses a weighted row with no molar mass (`CountMolesError::NoMolarMass`)
+    and a weight that is not finite (`NotFinite`). `atmosphere_mole_fractions` gives it `Gas::ALL`'s rows, in registry order.
+    - Every gas of positive weight is listed, whatever its share (the owner's generality), sorted
+      by `total_cmp` with ties by `SubstanceId`. μ and `c_p` ÷ R are T49.a's functions over the
+      published list.
+    - The table under P14.T24.f's rules: Venus's N₂ is 1.646% by number (1.054% by mass), Titan's
+      CH₄ 5.96%, the wet runaway world's O₂ 97.1% (printed by its test, not pinned). μ is
+      p_s ÷ Σ(p_j ÷ μ_j) to an absolute 10⁻¹² g mol⁻¹. The generated Earth is 95.15% N₂, 3.67% H₂O,
+      1.14% Ar and 341 ppm CO₂, with no O₂ (the biotic gap).
+    - An airless body has no gases, no μ and no `c_p` ÷ R, and its published surface pressure is
+      0, not T13.c's residue, so that the pressure agrees with the list (the lane's choice; R09's
+      Moon-like reference world takes 0 too).
+  - _The contrasts_ (the lane's model, since the plan names none; checked by a science-checker,
+    2026-10-11, and provisional, for "main"). Both are closed forms on the body's mean state,
+    continuous in every input.
+    - **Equator–pole**: T_s (q_eq^¼ − q_pole^¼) ÷ (1 + 6D ÷ B), with B = 4F ÷ T_s the grey
+      column's restoring at fixed τ and D = c_p (p_s ÷ g) K f(Ω) w ÷ R².
+      - q is each latitude's annual-mean insolation over S ÷ 4 (`annual_insolation`): (8 ÷ π²)
+        E(sin β) at the equator and (4 ÷ π) sin β at a pole, exact for any eccentricity, E by the
+        arithmetic–geometric mean over 40 fixed steps. So the no-transport limit is each
+        latitude's radiative balance, and the transport flattens it as North's (1975) two-mode
+        diffusive model does. As first built the radiative term was North's linear P₂ form,
+        (15/64) P₂(cos β) T_s, which the science check found 3–4 times under the exact one on an
+        airless world at low obliquity (Mercury's 102 K against 392 K).
+      - K, `MERIDIONAL_DIFFUSIVITY_M2_S`, is 9.4325 × 10⁵ m² s⁻¹, fitted so that Earth's
+        measured state (288 K, 23.44°, 240.25 W m⁻² absorbed, 10,094 kg m⁻² of air) gives
+        North, Cahalan and Coakley's 42 K. The check read their observed T₂ = −28.0 °C in the
+        NASA preprint (NTRS 19810008165). There 6D ÷ B = 0.424, against their fit's 1.86.
+      - f(Ω) is the form of R09's transport law (after Kaspi and Showman 2015, Fig. 8a):
+        (Ω ÷ Ω⊕)^−¼ below Earth's rate and ^−½ above, held beyond Ω⊕ ÷ 24 and 12 Ω⊕, with Ω⊕
+        2π ÷ 86,164.0989 s (IERS's Ω).
+      - w is ½ where the mean surface holds no liquid water, R09's halving. Williams and Kasting
+        1997 could not be confirmed to hold it. Siler et al.'s split, by R09, gives 0.43.
+      - D grows linearly with the column's mass, where R09 takes Kaspi and Showman's
+        (p ÷ p⊕)^0.2 from their Fig. 15c. The linear law gives Venus its near-isothermal surface,
+        and the GCM's runs stop at 50 bar.
+      - The sign changes at 53.90° and 126.10°, where the equator's and the poles' light are
+        equal.
+    - **Day–night**, Cowan and Agol 2011 (eqs. 4–5) at Koll 2022's ε = X ÷ (k + X), with
+      X = τ^⅓ (p_s ÷ 1 bar)^⅔ (T_eq ÷ 600 K)^−4/3 (his eqs. 9–10) and k = 2 adopted from the
+      1.2–2.3 of his three test planets: T_s ((8/3 − 5ε/3)^¼ − ε^¼). On a rotating body it is
+      damped by 1 ÷ √(1 + (ωτ)²), with ω the solar rate and τ = c_p (p_s ÷ g) ÷ B the column's
+      radiative time (Showman and Guillot 2002, eq. 10). A world locked 1:1 to its seasonal host
+      takes it undamped, about its substellar axis.
+    - **The table's values** (the generated bodies under P14.T24.f's rules, each with its own
+      spin), equator–pole / day–night, K:
+
+      | Body     | Model         | For comparison                                                                    |
+      | -------- | ------------- | --------------------------------------------------------------------------------- |
+      | Mercury  | 391.6 / 558.3 | 590–725 K sunward (NASA's fact sheet), about 100 K at night (not seen)            |
+      | Venus    | 3.85 / 0.009  | a near-isothermal surface                                                         |
+      | Earth    | 44.6 / 0.45   | 42 K (the fit's); about 3 K area-weighted (R09's placeholder)                     |
+      | Mars     | 29.7 / 1.05   | the generated Mars holds 0.11 bar of N₂, not the real 6 mbar of CO₂               |
+      | Moon     | 170.8 / 345.5 | Diviner's equator, about 387–397 K at noon and 95 K before dawn (Williams et al.) |
+      | Ganymede | 60.1 / 140.0  | 152 K at most (Orton et al. 1996) and about 70 K (secondary, not checked)         |
+      | Titan    | 0.01 / 0.0007 | 1–4 K equator to pole, by season and hemisphere (Jennings et al. 2019)            |
+      | Ceres    | 83.8 / 207.8  |                                                                                   |
+
+      The model's dayside is Cowan and Agol's hemispheric temperature, (8/3)^¼ T_eq, 0.90 of
+      the subsolar point's, so a noon-to-night comparison flatters it: like for like, the Moon's
+      is about a third over its measured swing.
+
+    - **Limitations**, each for "main":
+      - an airless night is the radiative limit, 0 K, since the regolith's inertia and the
+        internal heat are not modelled, so an airless rotator's day–night contrast is an upper
+        bound;
+      - the rotating column's damping takes the whole column, so it under-reads land and thin
+        air, whose diurnal swing the surface skin and the boundary layer set;
+      - Titan's model contrast is far under its measured one, which its seasons and surface
+        coupling set;
+      - the grey restoring lacks water vapour's feedback, and the uniform albedo the poles'
+        brightening, so Earth sits nearer its radiative limit than in North, Cahalan and
+        Coakley's fit. The transport's factors then move its contrast less than an idealised
+        GCM's: an Earth spans 31–53 K over Ω⊕ ÷ 24 to 12 Ω⊕, against Kaspi and Showman's
+        23–77 K, and the dry halving raises it 17%. Fixing that needs a fitted forcing factor
+        or a feedback in B, which the lane left for a ruling;
+      - Koll's scaling was fitted on dry, tidally locked GCMs at T_eq of 391–805 K, and is
+        applied here to rotating and colder worlds too. His k scales as L g ÷ c_p, about 0.1–0.3
+        for a Mars- or Titan-sized body, and his τ_LW is a flux-transmission depth, about 1.5
+        times the grey τ, which would raise X by 1.14;
+      - an ocean enters only as the whole latent-heat share of the equator–pole transport, where
+        water is liquid at the mean surface temperature. The day–night contrast has no ocean term
+        and no ocean heat capacity is modelled: P14.T24.b's ocean fraction comes after this task;
+      - **the climate's range**, which the liquid-water flag reads as P14.T48.d defines it,
+        T_s ± (½|ΔT_ep| + ½|ΔT_dn|). The P₂ profile runs from T_s − ⅔ΔT_ep at a pole to
+        T_s + ⅓ΔT_ep at the equator, so the range overstates the equator by ΔT_ep ÷ 6 (7 K on
+        Earth), and on an airless world it reaches below 0 K (Mercury's to −38 K). For P14.T48.d,
+        and for the owner's ruling.
+  - _The seasonal spin._ `SeasonalSpin::of(frame, t, seasonal orbit, SeasonalOrbit)`.
+    - The obliquity is the frame's for `SeasonsFrom::Own`. For a moon (`SeasonsFrom::Planet`) it
+      is the angle between its pole and its planet's orbital normal at `t`. In the sample's first
+      60 systems, 95 moons read an obliquity more than 0.02 rad from the one to their own orbit.
+    - `SeasonsFrom` is a selector, named apart from rendering plan R09's `SeasonalOrbit` (the
+      orbit's eccentricity and period). `SeasonalSpin` is R09's `Spin` without its equinox, which
+      P14.T54.a's `for_body` takes from the orbit.
+    - The mean solar day is synodic, 2π ÷ |ω ∓ n|, less within 90° of the orbit's normal and
+      more beyond it (Venus's 116.75 d). It is `None` for a body locked 1:1 to its own orbit's
+      host. A moon locked to its planet keeps a solar day of about its orbit.
+  - _The radiation class_ (the lane's reading of "the host's activity level as a radiation class";
+    for "main"). It is the hosts' X-ray and ultraviolet flux at the body (the new
+    `XuvHistory::flux`, summed in `Sky` as `DerivedBody::xuv_flux`), in decades of the generated
+    Sun's at 1 au today (`earth_xuv_flux`, 9.75 × 10⁻⁴ W m⁻²): `Dark` for none, then `Quiet`
+    (under 10), `Active`, `Intense` and `Extreme` (from 1,000). Every table body is `Quiet` today,
+    and the saturated young Sun at 1 au gives `Intense`. Plan 06's `ActivityLevel` is not read, as
+    `XuvHistory` reads none.
+  - _The liquid-water flag_ is water's `phase_at` at p_s over T_s ± (½|ΔT_ep| + ½|ΔT_dn|), a
+    condition of the surface, whether or not water is held. Earth has it. The generated Mars
+    (215 K, up to 231 K) and Venus do not.
+  - _The stellar flux_ is the derivation's, orbit-averaged; a moon's includes its planet's glow.
+  - _Added public items._ In `hooks::surface`:
+    - `SurfaceConditions`, `SurfaceInputs`, `SeasonalSpin`, `SeasonsFrom`, `RadiationClass` and
+      `CountMolesError` (`NoMolarMass`, `NotFinite`);
+    - `mole_fractions`, `atmosphere_mole_fractions`, `annual_insolation`,
+      `rotation_transport_factor`, `liquid_water` and `earth_xuv_flux`;
+    - crate-private, for P14.T48.d and R09: `Column`, `Moisture`, `equator_pole_contrast_k`,
+      `day_night_contrast_k` and `heat_redistribution` (Koll's ε);
+    - the constants `EARTH_EQUATOR_POLE_CONTRAST_K`, `MERIDIONAL_DIFFUSIVITY_M2_S`,
+      `DRY_TRANSPORT_SHARE`, `EARTH_SIDEREAL_DAY`, `ROTATION_TRANSPORT_RANGE`,
+      `ROTATION_TRANSPORT_EXPONENTS`, `REDISTRIBUTION_SCALE`,
+      `REDISTRIBUTION_REFERENCE_PRESSURE` and `REDISTRIBUTION_REFERENCE_TEMPERATURE`.
+
+    Elsewhere: `hooks::{SurfaceConditions, RadiationClass}`, `BodyHooks::surface`,
+    `XuvHistory::flux`, `DerivedBody::xuv_flux` and `DerivedMoon::xuv_flux`.
+
+  - _Files beyond the task's._
+    - `planetary/context.rs`, `derive/mod.rs` (`Sky` and `DerivedBody`; the table's helpers moved
+      into `solar`), `derive/atmosphere/tests.rs` (which imports them), `moons/regular.rs`;
+    - `system.rs` and `system/tests.rs`, the publication and its four tests (the hold, a moon's
+      planet's orbit, the published pin, and order independence);
+    - `derive/atmosphere.rs`, for science-p14-t24f §6's doc fixes, which this commit applies to
+      the code and to this plan (§6.1–6.3).
+
+    Accepted by the task's command, and by `cargo test -p hyperion-sim planetary::derive`,
+    `planetary::context` and `planetary::system::tests::{the_hooks_publish,
+a_moon_s_published, the_published}`.
+
+  - _Not applied:_ science-r08-gases-2.md §1.7.5's wording of T24.a's mixed c_p ÷ R, queued for
+    the docs batch. The code already states it: the class value at 21 → 22, T49.b's function at
+    the mean surface temperature from 22 → 23.
 
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might

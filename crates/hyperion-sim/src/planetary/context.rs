@@ -394,6 +394,28 @@ impl XuvHistory {
         let area = 4.0 * core::f64::consts::PI * a * a * (1.0 - eccentricity * eccentricity).sqrt();
         WattsPerSquareMetre::new(self.saturated.value() / area)
     }
+
+    /// The X-ray and ultraviolet flux that a body on an orbit of semi-major axis
+    /// `semi_major_axis` and eccentricity `eccentricity` about the star receives at `age`: the
+    /// [`luminosity`](Self::luminosity) then over 4π a² √(1 − e²), the orbit average that
+    /// [`fluence`](Self::fluence) takes (P14.T24.a's radiation class reads it).
+    ///
+    /// Zero before birth, and for an axis that is not positive and finite or an eccentricity
+    /// outside [0, 1).
+    #[must_use]
+    pub fn flux(
+        &self,
+        age: Years,
+        semi_major_axis: Metres,
+        eccentricity: f64,
+    ) -> WattsPerSquareMetre {
+        let a = semi_major_axis.value();
+        if !(a.is_finite() && a > 0.0 && (0.0..1.0).contains(&eccentricity)) {
+            return WattsPerSquareMetre::ZERO;
+        }
+        let area = 4.0 * core::f64::consts::PI * a * a * (1.0 - eccentricity * eccentricity).sqrt();
+        WattsPerSquareMetre::new(self.luminosity(age).value() / area)
+    }
 }
 
 /// The saturation time of a star of initial mass `mass` (ruling 122.2): [`XUV_SATURATION_M`] up
@@ -2191,6 +2213,31 @@ mod tests {
             WattsPerSquareMetre::ZERO
         );
         assert_eq!(sun.saturated_flux(au, 1.0), WattsPerSquareMetre::ZERO);
+        // The flux at an age is the luminosity then over the orbit-averaged sphere (P14.T24.a):
+        // the saturated flux while saturated, some 300 times fainter today, and none before
+        // birth or on an orbit that is no orbit.
+        let now = Years::new(4.57e9);
+        let area = 4.0
+            * core::f64::consts::PI
+            * au.value()
+            * au.value()
+            * (1.0_f64 - 0.0167 * 0.0167).sqrt();
+        assert_same_bits(
+            sun.flux(now, au, 0.0167).value(),
+            sun.luminosity(now).value() / area,
+        );
+        assert_same_bits(
+            sun.flux(Years::new(5e7), au, 0.0167).value(),
+            sun.saturated_flux(au, 0.0167).value(),
+        );
+        assert_eq!(sun.flux(Years::ZERO, au, 0.0), WattsPerSquareMetre::ZERO);
+        assert_eq!(sun.flux(now, Metres::ZERO, 0.0), WattsPerSquareMetre::ZERO);
+        assert_eq!(
+            sun.flux(now, Metres::new(f64::INFINITY), 0.0),
+            WattsPerSquareMetre::ZERO
+        );
+        assert_eq!(sun.flux(now, au, 1.0), WattsPerSquareMetre::ZERO);
+        assert_eq!(sun.flux(now, au, -0.1), WattsPerSquareMetre::ZERO);
         // M dwarfs stay saturated ten times as long, K dwarfs as long as the Sun, and the blend
         // is continuous.
         let m = |mass: f64| {

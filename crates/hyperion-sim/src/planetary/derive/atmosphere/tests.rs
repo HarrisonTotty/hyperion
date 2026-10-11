@@ -3,8 +3,9 @@ use hyperion_testkit::float::assert_same_bits;
 use super::*;
 use crate::planetary::derive::composition::FORMATION_ENVELOPE_FLOOR;
 use crate::planetary::derive::solar::{
-    PLANETS, SOLAR_AGE, beyond_the_snow_line, derive as golden_derive, historic_sun, orbit,
-    placed as golden_placed, rank_for, solar_disc, sun,
+    SMALL_BODIES, SOLAR_AGE, beyond_the_snow_line, derive as golden_derive, derive_under,
+    historic_sun, orbit, placed as golden_placed, placed_about_the_sun, solar_disc, sun,
+    table_bodies, table_under,
 };
 use crate::planetary::derive::{
     BodyHosts, DerivedBody, HostLight, PlacedBody, composition, derive_body, derive_body_under,
@@ -15,34 +16,6 @@ use crate::stellar::Composition;
 use crate::time::UniverseTime;
 use crate::units::consts::{EARTH_MASS_KG, SOLAR_MASS_KG};
 use crate::units::{EarthFluxes, EarthRadii};
-
-/// The moons and the dwarf planet of the table, each placed about the Sun at its parent's
-/// distance, where its light comes from: name, mass (kg), mean radius (km), semi-major axis (au)
-/// and eccentricity (NASA's fact sheets).
-const SMALL_BODIES: [(&str, f64, f64, f64, f64); 4] = [
-    ("Moon", 7.342e22, 1_737.4, 1.000_001, 0.016_709),
-    ("Ganymede", 1.481_9e23, 2_634.1, 5.203_8, 0.048_9),
-    ("Titan", 1.345_2e23, 2_574.7, 9.582_6, 0.056_5),
-    ("Ceres", 9.39e20, 469.7, 2.767_5, 0.075_8),
-];
-
-/// A body of `kg` at `a_au` and `e` about the present Sun, formed there, at the rank that keeps
-/// its radius `km`.
-fn placed_about_the_sun(disc: &DiscProfile, (kg, km, a, e): (f64, f64, f64, f64)) -> PlacedBody {
-    let rank = rank_for(disc, kg, km, a, e);
-    assert!(
-        rank > 0.0 && rank < 1.0,
-        "a radius of {km} km is inside its window"
-    );
-    let orbit = orbit(a, e);
-    PlacedBody::new(
-        EarthMasses::new(kg / EARTH_MASS_KG),
-        orbit,
-        orbit.semi_major_axis(),
-        UnitUniform::new(rank).unwrap(),
-    )
-    .unwrap()
-}
 
 /// A body of `kg` at `a_au` and `e` about the present Sun with its history, at the rank that
 /// keeps its radius `km`, derived at `age`.
@@ -62,48 +35,11 @@ fn derive(placed: &PlacedBody, disc: &DiscProfile, age: Years) -> DerivedBody {
     derive_body(placed, &hosts, disc, age, UniverseTime::EPOCH).unwrap()
 }
 
-/// [`derive`] under the carbon and oxygen rules `speciation` (P14.T24.f, held).
-fn derive_under(
-    placed: &PlacedBody,
-    disc: &DiscProfile,
-    age: Years,
-    speciation: Speciation,
-) -> DerivedBody {
-    let lights = [historic_sun()];
-    let hosts = BodyHosts::new(
-        Kilograms::new(SOLAR_MASS_KG),
-        Composition::SOLAR,
-        &lights,
-        &[],
-    )
-    .unwrap();
-    derive_body_under(placed, &hosts, disc, age, UniverseTime::EPOCH, speciation).unwrap()
-}
-
-/// The table's bodies, the eight planets but the giants and the four small bodies.
-fn table_bodies() -> impl Iterator<Item = &'static (&'static str, f64, f64, f64, f64)> {
-    PLANETS
-        .iter()
-        .filter(|(name, ..)| !matches!(*name, "Jupiter" | "Saturn" | "Uranus" | "Neptune"))
-        .chain(SMALL_BODIES.iter())
-}
-
 /// Every body of the table: the eight planets and the four small bodies.
 fn table() -> Vec<(&'static str, DerivedBody)> {
     let disc = solar_disc();
     table_bodies()
         .map(|&(name, kg, km, a, e)| (name, about_the_sun(&disc, (kg, km, a, e), SOLAR_AGE)))
-        .collect()
-}
-
-/// [`table`] under the carbon and oxygen rules `speciation`.
-fn table_under(speciation: Speciation) -> Vec<(&'static str, DerivedBody)> {
-    let disc = solar_disc();
-    table_bodies()
-        .map(|&(name, kg, km, a, e)| {
-            let placed = placed_about_the_sun(&disc, (kg, km, a, e));
-            (name, derive_under(&placed, &disc, SOLAR_AGE, speciation))
-        })
         .collect()
 }
 

@@ -442,6 +442,7 @@ pub struct DerivedBody {
     core: CoreComposition,
     flux: EarthFluxes,
     xuv_fluence: JoulesPerSquareMetre,
+    xuv_flux: WattsPerSquareMetre,
     initial_envelope_fraction: f64,
     envelope_lost: EarthMasses,
     albedo: BondAlbedo,
@@ -529,6 +530,15 @@ impl DerivedBody {
     #[must_use]
     pub const fn xuv_fluence(&self) -> JoulesPerSquareMetre {
         self.xuv_fluence
+    }
+
+    /// The X-ray and ultraviolet flux the body receives at the time, averaged over its orbit now,
+    /// from every host with a history
+    /// ([`XuvHistory::flux`](crate::planetary::context::XuvHistory::flux)): what P14.T24.a's
+    /// radiation class reads.
+    #[must_use]
+    pub const fn xuv_flux(&self) -> WattsPerSquareMetre {
+        self.xuv_flux
     }
 
     /// The hydrogen and helium envelope's share of the body's mass at formation (P14.T11.c, the
@@ -994,6 +1004,7 @@ pub(crate) fn derive_body_under(
         core,
         flux: sky.flux,
         xuv_fluence: sky.xuv_fluence,
+        xuv_flux: sky.xuv_flux,
         initial_envelope_fraction: escape.initial,
         envelope_lost: escape.lost,
         albedo,
@@ -1054,6 +1065,8 @@ struct Sky {
     peak_flux: EarthFluxes,
     /// The X-ray and ultraviolet energy per unit area received so far.
     xuv_fluence: JoulesPerSquareMetre,
+    /// The X-ray and ultraviolet flux now, averaged over the orbit (P14.T24.a).
+    xuv_flux: WattsPerSquareMetre,
     /// The X-ray and ultraviolet flux received while each host is saturated, along the same
     /// orbits as the fluence (P14.T24.f).
     saturated_xuv_flux: WattsPerSquareMetre,
@@ -1084,6 +1097,7 @@ impl Sky {
             flux: EarthFluxes::ZERO,
             peak_flux: EarthFluxes::ZERO,
             xuv_fluence: JoulesPerSquareMetre::ZERO,
+            xuv_flux: WattsPerSquareMetre::ZERO,
             saturated_xuv_flux: WattsPerSquareMetre::ZERO,
             insolation: Insolation::Habitable,
             hottest: Kelvin::ZERO,
@@ -1093,10 +1107,12 @@ impl Sky {
             let flux = luminosity_flux(host.luminosity(), a, e);
             let peak = luminosity_flux(host.peak_luminosity(), a, e);
             let fluence = host.xuv().fluence(age, xuv_a, xuv_e);
+            let xuv = host.xuv().flux(age, a, e);
             let saturated = host.xuv().saturated_flux(xuv_a, xuv_e);
             sky.flux = sky.flux + flux;
             sky.peak_flux = sky.peak_flux + peak;
             sky.xuv_fluence = JoulesPerSquareMetre::new(sky.xuv_fluence.value() + fluence.value());
+            sky.xuv_flux = WattsPerSquareMetre::new(sky.xuv_flux.value() + xuv.value());
             sky.saturated_xuv_flux =
                 WattsPerSquareMetre::new(sky.saturated_xuv_flux.value() + saturated.value());
             if host.luminosity().value() > 0.0 {
@@ -1615,6 +1631,77 @@ pub(crate) mod solar {
                     "{name}'s radius is inside its window"
                 );
                 (name, derive(&placed(kg, a, e, rank), &disc).unwrap())
+            })
+            .collect()
+    }
+
+    /// The moons and the dwarf planet of the table, each placed about the Sun at its parent's
+    /// distance, where its light comes from: name, mass (kg), mean radius (km), semi-major axis
+    /// (au) and eccentricity (NASA's fact sheets).
+    pub(crate) const SMALL_BODIES: [(&str, f64, f64, f64, f64); 4] = [
+        ("Moon", 7.342e22, 1_737.4, 1.000_001, 0.016_709),
+        ("Ganymede", 1.481_9e23, 2_634.1, 5.203_8, 0.048_9),
+        ("Titan", 1.345_2e23, 2_574.7, 9.582_6, 0.056_5),
+        ("Ceres", 9.39e20, 469.7, 2.767_5, 0.075_8),
+    ];
+
+    /// A body of `kg` at `a_au` and `e` about the present Sun, formed there, at the rank that keeps
+    /// its radius `km`.
+    pub(crate) fn placed_about_the_sun(
+        disc: &DiscProfile,
+        (kg, km, a, e): (f64, f64, f64, f64),
+    ) -> PlacedBody {
+        let rank = rank_for(disc, kg, km, a, e);
+        assert!(
+            rank > 0.0 && rank < 1.0,
+            "a radius of {km} km is inside its window"
+        );
+        let orbit = orbit(a, e);
+        PlacedBody::new(
+            EarthMasses::new(kg / EARTH_MASS_KG),
+            orbit,
+            orbit.semi_major_axis(),
+            UnitUniform::new(rank).unwrap(),
+        )
+        .unwrap()
+    }
+
+    /// `placed` derived about the present Sun with its history ([`historic_sun`]) at `age`, under
+    /// the carbon and oxygen rules `speciation` (P14.T24.f, held).
+    pub(crate) fn derive_under(
+        placed: &PlacedBody,
+        disc: &DiscProfile,
+        age: Years,
+        speciation: Speciation,
+    ) -> DerivedBody {
+        let lights = [historic_sun()];
+        let hosts = BodyHosts::new(
+            Kilograms::new(SOLAR_MASS_KG),
+            Composition::SOLAR,
+            &lights,
+            &[],
+        )
+        .unwrap();
+        derive_body_under(placed, &hosts, disc, age, UniverseTime::EPOCH, speciation).unwrap()
+    }
+
+    /// The table's bodies, the eight planets but the giants and the four small bodies.
+    pub(crate) fn table_bodies() -> impl Iterator<Item = &'static (&'static str, f64, f64, f64, f64)>
+    {
+        PLANETS
+            .iter()
+            .filter(|(name, ..)| !matches!(*name, "Jupiter" | "Saturn" | "Uranus" | "Neptune"))
+            .chain(SMALL_BODIES.iter())
+    }
+
+    /// The table's bodies ([`table_bodies`]), each at the rank that keeps its radius, about the
+    /// present Sun with its history at its age, under the carbon and oxygen rules `speciation`.
+    pub(crate) fn table_under(speciation: Speciation) -> Vec<(&'static str, DerivedBody)> {
+        let disc = solar_disc();
+        table_bodies()
+            .map(|&(name, kg, km, a, e)| {
+                let placed = placed_about_the_sun(&disc, (kg, km, a, e));
+                (name, derive_under(&placed, &disc, SOLAR_AGE, speciation))
             })
             .collect()
     }

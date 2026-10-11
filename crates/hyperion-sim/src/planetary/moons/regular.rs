@@ -903,6 +903,13 @@ impl DerivedMoon {
         self.body.equilibrium_temperature()
     }
 
+    /// The X-ray and ultraviolet flux the stars give the moon at its planet's orbit, from
+    /// P14.T16's [`derive_body`] (P14.T24.a's radiation class reads it).
+    #[must_use]
+    pub const fn xuv_flux(&self) -> crate::units::WattsPerSquareMetre {
+        self.body.xuv_flux()
+    }
+
     /// The moon's atmosphere and surface at the time, from P14.T16's [`derive_body`] (P14.T13),
     /// which its photometry reads (P14.T47.b).
     #[must_use]

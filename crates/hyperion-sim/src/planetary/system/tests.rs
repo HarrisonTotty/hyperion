@@ -2183,3 +2183,229 @@ fn the_flattening_is_continuous_in_time() {
     }
     assert!(checked > 1_000, "{checked}");
 }
+
+/// P14.T24.a's surface conditions, held until the 21 → 22 batch's bump: `hooks_at` publishes none
+/// before it, and under the open hold every present body with a solid surface has its conditions,
+/// a moon's read under its planet's orbit, and every gas-envelope body none.
+#[test]
+fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
+    let t = UniverseTime::EPOCH;
+    let (mut planets, mut moons, mut envelopes) = (0_u32, 0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for index in system.indices() {
+            let Some(held) = system.hooks_at(ctx, index, t).unwrap() else {
+                continue;
+            };
+            assert_eq!(held.surface(), &Section::NotModelled, "{index:?}");
+            let open = system
+                .hooks_at_under(ctx, index, t, ConditionsHold::Published)
+                .unwrap()
+                .expect("a body with a surface seed has hooks under either hold");
+            assert_eq!(open.surface_seed(), held.surface_seed());
+            assert_eq!(open.bulk(), held.bulk());
+            let record = system.body_at(ctx, index, t).unwrap();
+            let present = record.identity().state() == BodyState::Present;
+            match open.surface() {
+                Section::Ok(conditions) => {
+                    assert!(present, "{index:?}");
+                    let Section::Ok(bulk) = record.bulk() else {
+                        panic!("{index:?} has conditions but no bulk section");
+                    };
+                    assert!(
+                        matches!(bulk.class(), PlanetClass::Rocky | PlanetClass::Icy),
+                        "{index:?} is a {:?}",
+                        bulk.class()
+                    );
+                    let sum = conditions.gases().iter().fold(0.0, |sum, &(_, x)| sum + x);
+                    assert!(
+                        conditions.gases().is_empty() || (sum - 1.0).abs() < 1e-9,
+                        "{index:?}: {sum}"
+                    );
+                    assert!(conditions.day_night_contrast_k() >= 0.0);
+                    match record.identity().kind() {
+                        BodyKind::Moon(_) => moons += 1,
+                        BodyKind::Planet | BodyKind::DwarfPlanet => planets += 1,
+                        kind @ (BodyKind::Ring
+                        | BodyKind::Belt(_)
+                        | BodyKind::CometaryHalo
+                        | BodyKind::ProtoplanetaryDisc
+                        | BodyKind::DebrisDisc
+                        | BodyKind::Unresolved) => {
+                            panic!("{index:?}, a {kind:?}, has surface conditions")
+                        }
+                    }
+                }
+                Section::NotApplicable => {
+                    if present {
+                        let Section::Ok(bulk) = record.bulk() else {
+                            panic!("{index:?} is present with no bulk section");
+                        };
+                        assert!(
+                            matches!(
+                                bulk.class(),
+                                PlanetClass::SubNeptune
+                                    | PlanetClass::IceGiant
+                                    | PlanetClass::GasGiant
+                            ),
+                            "{index:?} is a {:?}",
+                            bulk.class()
+                        );
+                        envelopes += 1;
+                    }
+                }
+                Section::NotModelled => {
+                    assert_eq!(open.bulk(), &Section::NotModelled, "{index:?}");
+                }
+                Section::NotResolved => panic!("{index:?}: hooks are never degraded"),
+            }
+        }
+    }
+    eprintln!("{planets} planets and {moons} moons with conditions, {envelopes} envelopes");
+    assert!(planets > 20 && moons > 5 && envelopes > 20);
+}
+
+/// A moon's surface conditions are read under its planet's orbit at the time, not its own
+/// (P14.T24.a): rebuilt here from the derivation, they are the planet's orbit's, which differ from
+/// the own orbit's where the moon's pole stands off its planet's orbital normal.
+#[test]
+fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
+    let t = UniverseTime::EPOCH;
+    let mut checked = 0_u32;
+    for (ctx, system) in whole().iter().take(60) {
+        for moon in system.bodies() {
+            let (OrbitHost::Body(parent), Part::Moon(part), Some(rotation)) =
+                (moon.host, &moon.part, moon.rotation.as_ref())
+            else {
+                continue;
+            };
+            let Some(hooks) = system
+                .hooks_at_under(ctx, moon.index(), t, ConditionsHold::Published)
+                .unwrap()
+            else {
+                continue;
+            };
+            let Section::Ok(published) = hooks.surface() else {
+                continue;
+            };
+            let planet = system.body(parent).unwrap();
+            let epoch = Epoch::new(system, ctx, t);
+            let host = fate_host(ctx, system.zone_of(planet));
+            let fate = system.fate_of(planet, &host);
+            let label = label::label(system, planet.index).unwrap();
+            let (_, now) = system.primary_record(&epoch, planet, label, &fate);
+            let seasonal = *fate.at(t).orbit().unwrap();
+            let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
+            let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
+            let bulk = PlanetarySystem::moon_bulk_of(part, &derived, &now);
+            let inputs = |spin: SeasonalSpin| SurfaceInputs {
+                atmosphere: derived.atmosphere(),
+                equilibrium_temperature: derived.equilibrium_temperature(),
+                surface_gravity: bulk.surface_gravity(),
+                radius: Metres::from(bulk.radius()),
+                stellar_flux: WattsPerSquareMetre::from(derived.flux()),
+                xuv_flux: derived.xuv_flux(),
+                spin,
+            };
+            let frame = rotation.frame();
+            let under_planet = SeasonalSpin::of(frame, t, &seasonal, SeasonsFrom::Planet);
+            let under_own = SeasonalSpin::of(frame, t, &orbit, SeasonsFrom::Own);
+            assert_eq!(
+                SurfaceConditions::derive(&inputs(under_planet)).as_ref(),
+                Some(published),
+                "{:?}",
+                moon.index()
+            );
+            if (under_planet.obliquity.value() - under_own.obliquity.value()).abs() > 0.02 {
+                let own = SurfaceConditions::derive(&inputs(under_own)).unwrap();
+                let apart =
+                    (own.equator_pole_contrast_k() - published.equator_pole_contrast_k()).abs();
+                assert!(apart > 1e-9, "{:?}", moon.index());
+                checked += 1;
+            }
+        }
+    }
+    eprintln!("{checked} moons read off their own orbit's obliquity");
+    assert!(checked > 0);
+}
+
+/// The surface conditions `hooks_at` publishes from the 21 → 22 batch's bump, pinned over the
+/// sample's first systems (P14.T24.a): what `SeasonalSpin::of` and the bulk sections feed the
+/// derivation reaches every contrast's bits. The pin reads the hold open on version 21's
+/// derivation, so it moves at the bump with the batch's held gases and tides, which the bless
+/// re-measures.
+#[test]
+fn the_published_surface_conditions_are_pinned() {
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    let mut w = GoldenWriter::new();
+    w.header(crate::GENERATOR_VERSION.get());
+    let t = UniverseTime::EPOCH;
+    let mut pinned = 0_u32;
+    for (ctx, system) in whole().iter().take(8) {
+        for body in system.bodies() {
+            let Some(hooks) = system
+                .hooks_at_under(ctx, body.index(), t, ConditionsHold::Published)
+                .unwrap()
+            else {
+                continue;
+            };
+            let Section::Ok(c) = hooks.surface() else {
+                continue;
+            };
+            let name = body.index().body_id(ctx.id()).to_string();
+            w.f64(
+                &format!("{name}_mean_surface_temperature"),
+                c.mean_surface_temperature().value(),
+            );
+            w.f64(
+                &format!("{name}_equator_pole_contrast_k"),
+                c.equator_pole_contrast_k(),
+            );
+            w.f64(
+                &format!("{name}_day_night_contrast_k"),
+                c.day_night_contrast_k(),
+            );
+            w.f64(
+                &format!("{name}_surface_pressure"),
+                c.surface_pressure().value(),
+            );
+            for &(id, x) in c.gases() {
+                w.f64(
+                    &format!("{name}_mole_fraction_{}", id.substance().key().as_str()),
+                    x,
+                );
+            }
+            w.f64(&format!("{name}_stellar_flux"), c.stellar_flux().value());
+            w.line(&format!("{name}_radiation = {:?}", c.radiation()));
+            w.line(&format!("{name}_liquid_water = {}", c.liquid_water()));
+            pinned += 1;
+        }
+    }
+    assert!(pinned > 20, "{pinned}");
+    golden!("planetary/surface_conditions_published", w.as_str());
+}
+
+/// The published hooks are the same whatever order the bodies are asked in, a moon before its
+/// planet included (P14.T24.a).
+#[test]
+fn the_published_hooks_are_order_independent() {
+    let (ctx, system) = whole()
+        .iter()
+        .find(|(_, system)| {
+            system
+                .bodies()
+                .iter()
+                .any(|body| matches!(body.host, OrbitHost::Body(_)))
+        })
+        .expect("the sample holds a system with moons");
+    let indices: Vec<BodyIndex> = system.bodies().iter().map(Body::index).collect();
+    let later = UniverseTime::from_julian_years(500).expect("in the window");
+    for t in [UniverseTime::EPOCH, later] {
+        assert_order_independent(&indices, |&index| {
+            system
+                .hooks_at_under(ctx, index, t, ConditionsHold::Published)
+                .unwrap()
+        });
+    }
+}
