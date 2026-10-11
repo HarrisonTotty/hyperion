@@ -53,9 +53,12 @@ import {
   sunIlluminanceRgb,
 } from "./solar";
 import {
+  absorberCount,
+  type AbsorberCurveSlots,
   AtmosphereTables,
   KERNEL_ARM_FORMAT,
   MULTI_SCATTERING_SIZE,
+  NO_ABSORBER_CURVES,
   packMediumUniform,
   type TableSize,
   TRANSMITTANCE_SIZE,
@@ -393,6 +396,10 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
     { name: "aerial", binding: 3, viewDimension: "3d" },
     { name: "rayMarch", binding: 4 },
     { name: "transmittance", binding: 5 },
+    // The absorbers' columns beside the transmittance, and the lights' curves of growth, f32 and
+    // read by `textureLoad` (R08.T6.c).
+    { name: "absorberColumns", binding: 7 },
+    { name: "absorberCurves", binding: 8, sampleType: "unfilterable-float" },
   ],
   cullMode: "none",
   depthWrite: false,
@@ -554,17 +561,20 @@ export class HillaireAtmosphere {
    * Makes the tables and the per-frame resources for `medium` on `figure`.
    *
    * @param tables - The setting's sizes, `SETTINGS[s].atmosphere`.
+   * @param curves - Each light's curves of growth for the medium's absorbers, light slot 0 the
+   *   drawn sun's (R08.T6.c); none for a medium with no absorber.
    */
   constructor(
     engine: RenderEngine,
     medium: AtmosphereMedium,
     tables: TableSizes,
     figure: SpheroidFigure,
+    curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
   ) {
     this.#engine = engine;
     this.#sizes = tables;
     this.#figure = figure;
-    this.#tables = new AtmosphereTables(engine, medium, tableRadiusM(figure));
+    this.#tables = new AtmosphereTables(engine, medium, tableRadiusM(figure), curves);
     this.#frame = createFrameResources(engine, tables);
     this.#uniforms = Object.fromEntries(
       [...VIEW_MEMBERS, "shell"].map((name) => [name, new Float32Array(4)]),
@@ -607,13 +617,15 @@ export class HillaireAtmosphere {
   }
 
   /**
-   * Rebuilds the per-planet tables for a new medium; the sun never does. The frames draw the medium
-   * the tables follow ({@link AtmosphereTables.medium}), so a medium they refuse is not drawn.
+   * Rebuilds the per-planet tables for a new medium, or new curves of growth for its absorbers; the
+   * sun's moving never does. The frames draw the medium the tables follow
+   * ({@link AtmosphereTables.medium}), so a medium they refuse is not drawn.
    *
+   * @param curves - Each light's curves for the medium's absorbers, light slot 0 the drawn sun's.
    * @throws Error, RangeError or `EngineUnavailable` as {@link AtmosphereTables.setMedium}.
    */
-  setMedium(medium: AtmosphereMedium): void {
-    this.#tables.setMedium(medium, tableRadiusM(this.#figure));
+  setMedium(medium: AtmosphereMedium, curves: AbsorberCurveSlots = NO_ABSORBER_CURVES): void {
+    this.#tables.setMedium(medium, tableRadiusM(this.#figure), curves);
   }
 
   /**
@@ -642,6 +654,8 @@ export class HillaireAtmosphere {
         aerial: frame.aerial,
         rayMarch,
         transmittance: this.#tables.transmittance,
+        absorberColumns: this.#tables.absorberColumns,
+        absorberCurves: this.#tables.absorberCurves,
       },
     };
   }
@@ -718,7 +732,7 @@ export class HillaireAtmosphere {
     const inputs = atmosphereInputs(view, this.#figure);
     const tables = this.#tables;
     const medium = tables.medium;
-    this.#fillView(view, sun, scene, inputs, medium.topHeightM);
+    this.#fillView(view, sun, scene, inputs, medium);
     const perFrameMedium = packMediumUniform(medium, inputs.radiusM - inputs.heightM, 1);
     const common = {
       buffers: { terms: tables.terms },
@@ -727,6 +741,8 @@ export class HillaireAtmosphere {
         phaseTables: tables.phaseTables,
         transmittance: tables.transmittance,
         multiScattering: tables.multiScattering,
+        absorberColumns: tables.absorberColumns,
+        absorberCurves: tables.absorberCurves,
       },
     };
     const viewUniforms = this.#viewBlock();
@@ -815,11 +831,12 @@ export class HillaireAtmosphere {
     sun: SunState,
     scene: AtmosphereScene,
     inputs: AtmosphereInputs,
-    topHeightM: number,
+    medium: AtmosphereMedium,
   ): void {
     const set = (name: string, values: readonly [number, number, number, number]): void => {
       this.#uniforms[name]?.set(values);
     };
+    const topHeightM = medium.topHeightM;
     const p = view.positionM;
     const n = inputs.normal;
     const s = sun.directionBodyFixed;
@@ -885,7 +902,8 @@ export class HillaireAtmosphere {
       exact.horizonAngleRad,
       exact.sinSunRadius,
     ]);
-    // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g).
-    set("shell", [topHeightM, 0, 0, 0]);
+    // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g), and how many of the
+    // medium's terms are absorbers, whose columns its transmittance to space reads (R08.T6.c).
+    set("shell", [topHeightM, absorberCount(medium), 0, 0]);
   }
 }

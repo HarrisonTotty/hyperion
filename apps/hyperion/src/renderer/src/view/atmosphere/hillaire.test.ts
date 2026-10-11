@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { fourAbsorberMedium } from "../../test/atmosphereFixtures";
 import { forbiddenIn } from "../../test/atmosphereWgsl";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { quaternion } from "../camera/quaternion";
@@ -328,6 +329,119 @@ describe("the atmosphere's WGSL", () => {
   it("keeps the composite's code clear of the medium, which it does not declare", () => {
     const code = COMPOSITE_MATERIAL.fragmentWgsl.replaceAll(/\/\/[^\n]*/gu, "");
     expect(code).not.toMatch(/\b(medium|terms|densityTables|phaseTables)\b/);
+  });
+});
+
+describe("the transmittance read as optical depth (R08.T6.c)", () => {
+  it.each([
+    ["the multiple-scattering kernel", MULTI_SCATTERING_KERNEL.reference],
+    ["the sky-view kernel", SKY_VIEW_KERNEL.reference],
+    ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
+    ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the composite", COMPOSITE_MATERIAL.fragmentWgsl],
+  ])(
+    "%s reads the table only through transmittanceThroughTables, exponentiated in f32",
+    (_n, source) => {
+      const code = source.replaceAll(/\/\/[^\n]*/gu, "");
+      // The one bilinear read of the stored optical depth is transmittanceThroughTables's own, which
+      // adds the curves and exponentiates; every read site calls it with the module's two tables.
+      expect([
+        /tableAtUnit\(transmittance,/u.test(code),
+        code.match(/tableAtUnit\(depthTable, unit\)/gu)?.length,
+        /return exp\(-\(stored\.rgb \+ absorberDepth\(/u.test(code),
+        /transmittanceThroughTables\(\s*\w+, absorberColumns, absorberCurves,/u.test(code),
+      ]).toEqual([false, 1, true, true]);
+    },
+  );
+
+  it("writes the optical depth and the absorber columns, never e^(−τ), in the transmittance kernel", () => {
+    const code = TRANSMITTANCE_KERNEL.reference.replaceAll(/\/\/[^\n]*/gu, "");
+    expect(code).toMatch(
+      /let stored = min\(vec4f\(ray\.depth, ray\.columns\.first\), vec4f\(HALF_MAX\)\);\s*textureStore\(transmittanceOut, id\.xy, stored\);/u,
+    );
+    expect(code).toMatch(
+      /textureStore\(absorberColumnsOut, id\.xy, min\(ray\.columns\.more, vec4f\(HALF_MAX\)\)\);/u,
+    );
+    expect(code).toMatch(/const HALF_MAX : f32 = 65504\.0;/u);
+    expect(code).not.toMatch(/exp\(-opticalDepth/u);
+  });
+
+  it.each([
+    ["the multiple-scattering kernel", MULTI_SCATTERING_KERNEL.reference],
+    ["the sky-view kernel", SKY_VIEW_KERNEL.reference],
+    ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
+    ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
+    ["the composite", COMPOSITE_MATERIAL.fragmentWgsl],
+  ])("%s declares the absorber-column table and the lights' curves", (_n, source) => {
+    expect([
+      /var absorberColumns : texture_2d<f32>;/u.test(source),
+      /var absorberCurves : texture_2d<f32>;/u.test(source),
+    ]).toEqual([true, true]);
+  });
+
+  const absorbing = fourAbsorberMedium();
+
+  it("binds the absorber columns and the lights' curves to every per-frame kernel", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = absorbing;
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const { absorberColumns, absorberCurves } = atmosphere.tables;
+    expect(engine.dispatched.map(({ bindings }) => bindings.sampled)).toEqual(
+      Array.from({ length: 3 }, () => expect.objectContaining({ absorberColumns, absorberCurves })),
+    );
+  });
+
+  it("gives every per-frame kernel the medium's four absorber slots and light slot 0", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = absorbing;
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    expect(
+      engine.dispatched.map(({ bindings }) => [...(bindings.uniforms["medium"] ?? [])].slice(8)),
+    ).toEqual([
+      [4, 0, 0, 0],
+      [4, 0, 0, 0],
+      [4, 0, 0, 0],
+    ]);
+  });
+
+  it("binds both tables to the composite and gives it the absorbers' count", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = absorbing;
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const { absorberColumns, absorberCurves } = atmosphere.tables;
+    expect(draw.textures).toMatchObject({ absorberColumns, absorberCurves });
+    expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 4, 0, 0]);
+  });
+
+  it("declares the curves to the composite as unfilterable rgba32float", () => {
+    expect(COMPOSITE_MATERIAL.textures).toContainEqual({
+      name: "absorberCurves",
+      binding: 8,
+      sampleType: "unfilterable-float",
+    });
+  });
+
+  it("takes new curves for its medium as a new build", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = absorbing;
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    const own = curves[0] ?? [];
+    atmosphere.setMedium(medium, [own, own]);
+    expect(atmosphere.tables.builds).toBe(2);
+  });
+
+  it("refuses a medium with absorbers given no curves", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = absorbing;
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    expect(() => {
+      atmosphere.setMedium(medium);
+    }).toThrow(/no light's curves/u);
   });
 });
 

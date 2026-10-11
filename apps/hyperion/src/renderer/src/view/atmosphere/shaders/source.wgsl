@@ -2,9 +2,10 @@
 // the single- and multiple-scattering source there, read from the per-planet tables, and the steps
 // of the per-frame marches (R05.T12.e). Prepended, after `common.wgsl`, `medium.wgsl` and
 // `view.wgsl`, to the sky-view, aerial-perspective and ray-march kernels, each of which also
-// declares the phase tables as `var phaseTables : texture_2d_array<f32>;` in group 0; like
-// `medium.wgsl`, it reads the kernel's `medium`, `terms` and tables in place, so the composite does
-// not take it.
+// declares the phase tables as `var phaseTables : texture_2d_array<f32>;`, and the absorber-column
+// table and the lights' curves of growth as `var absorberColumns : texture_2d<f32>;` and
+// `var absorberCurves : texture_2d<f32>;` (R08.T6.c), in group 0; like `medium.wgsl`, it reads the
+// kernel's `medium`, `terms` and tables in place, so the composite does not take it.
 //
 // The source is ported from Bevy 0.19.1's functions.wgsl (`sample_local_inscattering`, MIT; the
 // notice is in common.wgsl) and checked against sebh's IntegrateScatteredLuminance (MIT; the
@@ -12,8 +13,10 @@
 // per channel, a tabulated one among them (R08.T6.b); each term's density is evaluated once a
 // sample (R05.T12.e); the tables are read on their own sphere, at the sample's height above the
 // datum (Design note 16), from heights alone and through Bruneton's texel mapping (plan R08,
-// Design notes 18 and 19, R08.T6.g). Added here (R05.T12.e): the steps' placement (`marchSplit`,
-// `marchStep`).
+// Design notes 18 and 19, R08.T6.g); the transmittance is read as optical depth with the sun's
+// curves of growth added, and each march's own path takes its absorbers by the path's column
+// (plan R08, Design notes 5 and 8, R08.T6.c). Added here (R05.T12.e): the steps' placement
+// (`marchSplit`, `marchStep`).
 
 // The angle a ray scatters the sun's light through towards the eye: its cosine, which the closed
 // forms take; u = sqrt(theta / pi), the phase tables' coordinate (`medium.ts`'s `PhaseTable`); and
@@ -71,12 +74,13 @@ fn phaseOf(i : u32, term : Term, angle : ScatteringAngle) -> vec3f {
 }
 
 // The medium at a sample, each term's density evaluated once (R05.T12.e): the scattering and the
-// extinction, m^-1, and the scattering towards the eye, each term's scattering times its phase,
-// per channel, m^-1 sr^-1.
+// extinction, m^-1, the scattering towards the eye, each term's scattering times its phase,
+// per channel, m^-1 sr^-1, and the absorbers' columns per metre (R08.T6.c).
 struct SampleMedium {
   scattering : vec3f,
   extinction : vec3f,
   phasedScattering : vec3f,
+  columns : AbsorberColumns,
 }
 
 // The medium at a height above the datum, for the angle between the view direction and the
@@ -85,6 +89,7 @@ fn sampleMediumAt(heightM : f32, angle : ScatteringAngle) -> SampleMedium {
   var scattering = vec3f(0.0);
   var extinction = vec3f(0.0);
   var phased = vec3f(0.0);
+  var columns = AbsorberColumns(0.0, vec4f(0.0));
   let count = min(u32(medium.termCount), MAX_TERMS);
   for (var i = 0u; i < count; i++) {
     let term = terms[i];
@@ -93,15 +98,28 @@ fn sampleMediumAt(heightM : f32, angle : ScatteringAngle) -> SampleMedium {
     scattering += scattered;
     extinction += (term.scattering.rgb + term.absorption.rgb) * d;
     phased += scattered * phaseOf(i, term, angle);
+    columns = addColumns(columns, termColumns(term, d), 1.0);
   }
-  return SampleMedium(scattering, extinction, phased);
+  return SampleMedium(scattering, extinction, phased, columns);
 }
 
-// The transmittance from a height above the datum along a zenith cosine to the top, read from the
-// table on the tables' own sphere, of ground radius `tableBottomM` and the medium's height.
+// The sun's transmittance from a height above the datum along a zenith cosine to the top, read from
+// the table on the tables' own sphere, of ground radius `tableBottomM` and the medium's height:
+// its stored optical depth and absorber columns, with the sun's curves of growth (light slot 0,
+// the one sun the kernels draw until R08.T7), exponentiated in f32 (`transmittanceThroughTables`,
+// R08.T6.c). Each kernel that takes this declares `absorberColumns` and `absorberCurves`.
 fn tableTransmittance(table : texture_2d<f32>, tableBottomM : f32, heightM : f32, mu : f32) -> vec3f {
   let h = clamp(heightM, 0.0, medium.topHeightM);
-  return tableAtUnit(table, transmittanceUnitAt(tableBottomM, medium.topHeightM, h, mu)).rgb;
+  let unit = transmittanceUnitAt(tableBottomM, medium.topHeightM, h, mu);
+  return transmittanceThroughTables(
+    table, absorberColumns, absorberCurves, absorberCount(), 0u, unit
+  );
+}
+
+// A march's absorber path one step `dtM` on, through the sample `local` (`absorberStep`): the
+// view's own path, under the sun's curves, since what it carries is the sun's light (R08.T6.c).
+fn viewAbsorberStep(path : AbsorberPath, local : SampleMedium, dtM : f32) -> AbsorberPath {
+  return absorberStep(absorberCurves, absorberCount(), 0u, path, local.columns, dtM);
 }
 
 // The multiple-scattering source per unit illuminance at a height, for the sun's zenith cosine.

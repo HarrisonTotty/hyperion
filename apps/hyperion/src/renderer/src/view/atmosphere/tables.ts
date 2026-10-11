@@ -13,6 +13,14 @@
  * trigonometry (plan R08, Design note 18); every table maps its unit ranges to its texels by
  * Bruneton 2017's exact pair (Design note 19). Both since R08.T6.g.
  *
+ * The transmittance table stores optical depth, not transmittance (plan R08, Design note 8,
+ * R08.T6.c): rgb the optical depth of every term but the absorbers, alpha absorber slot 0's column
+ * u ÷ U, and a second `rgba16float` table beside it, the absorber columns, slots 1 to 4's. Each
+ * light's curves of growth (Design note 5), uploaded with the medium ({@link packAbsorberCurves}),
+ * turn the columns into optical depth on read, and every read site exponentiates in `f32`. Stored
+ * as T, a slant path through a Venus-class atmosphere fell below the half float's least value.
+ * The multiple-scattering table is built with light slot 0's curves.
+ *
  * The medium reaches every kernel in three parts (plan R08, R08.T6.b): its shell, term count,
  * steps and ground albedo in the `Medium` uniform ({@link packMediumUniform}), its terms in a
  * storage buffer of {@link MAX_TERMS} terms ({@link packMedium}), and its tabulated densities and
@@ -28,18 +36,20 @@
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { KernelPair } from "../engine/kernels";
 import type { BufferHandle, ComputeHandle, RenderEngine, TextureHandle } from "../engine/types";
+import type { AbsorberAmount, AbsorberCurve } from "./absorbers";
 import {
   type AtmosphereMedium,
-  checkNoAbsorbers,
   checkTabulatedTops,
   type DensityProfile,
   densityAt,
+  type MediumTerm,
   type PhaseFunction,
   type PhaseMatrixElement,
   type PhaseTable,
   phaseTable,
   type TabulatedDensity,
   tabulatedDensity,
+  type TermAbsorber,
 } from "./medium";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
@@ -82,6 +92,263 @@ export const TRANSMITTANCE_SAMPLES = 256;
 export const MULTI_SCATTERING_SAMPLES = 32;
 
 /**
+ * The absorber slots the per-planet tables hold: 5, the transmittance table's alpha and the
+ * absorber-column table's four channels (plan R08, Design note 8, R08.T6.c), `common.wgsl`'s
+ * `ABSORBER_SLOTS`. It is `absorbers.ts`'s `ABSORBER_COLUMNS`, which `absorberSpecs` fills, held
+ * equal by a test rather than imported, so that the render thread's bundle does not take that
+ * module's tables.
+ */
+export const ABSORBER_SLOTS = 5;
+
+/**
+ * The nodes of a curve of growth as the kernels read it: 241, u ÷ U = 10^(−3 + j ÷ 40) at node j,
+ * `absorbers.ts`'s `ABSORBER_CURVE_DECADES` and `ABSORBER_CURVE_NODES_PER_DECADE` (held equal by
+ * a test) and `common.wgsl`'s `curveDepth`, which finds a column's node from its logarithm.
+ */
+export const ABSORBER_CURVE_NODES = 241;
+
+/** The decade of a curve's first node about the absorber's vertical column U: 10⁻³ U. */
+const CURVE_FIRST_DECADE = -3;
+
+/** A curve's nodes per decade of column. */
+const CURVE_NODES_PER_DECADE = 40;
+
+/**
+ * The deepest optical depth a curve holds: −ln 10⁻⁶, `absorbers.ts`'s
+ * `ABSORBER_TRANSMITTANCE_FLOOR` as an optical depth (held equal by a test) and `common.wgsl`'s
+ * `CURVE_DEPTH_MAX`.
+ */
+export const ABSORBER_CURVE_DEPTH_MAX = -Math.log(1e-6);
+
+/**
+ * Each light's curves of growth for a medium's absorbers (plan R08, Design note 5): light slot
+ * k's curves, one an absorber slot, in the order of the medium's absorber terms
+ * ({@link absorberSlots}), each `absorbers.ts`'s `absorberCurve(term.absorber.spec, spectrum)`
+ * for that light's spectrum.
+ *
+ * @remarks
+ * Slot 0 is the body's brightest star. The one sun the per-frame kernels draw takes it until
+ * R08.T7 gives each source its slot, and the per-planet multiple-scattering table, shared by
+ * every sun, is built with it (plan R08's Risks, "Which star's absorber curve the shared tables
+ * are built with"), as a planetshine source takes it (Design note 7).
+ */
+export type AbsorberCurveSlots = ReadonlyArray<ReadonlyArray<AbsorberCurve>>;
+
+/** No light's curves: what a medium with no absorber term takes. */
+export const NO_ABSORBER_CURVES: AbsorberCurveSlots = [];
+
+/**
+ * One of a medium's absorber terms in its slot of the absorber columns (Design note 8): a column
+ * absorber's molecules, or a pair absorber's molecule pairs (R08.T4.c), whose term's density is
+ * already the square of its column's.
+ */
+export interface AbsorberSlot {
+  /** Its slot, 0 to {@link ABSORBER_SLOTS} − 1: its rank among the medium's absorber terms. */
+  readonly slot: number;
+  /** Its index among the medium's terms. */
+  readonly termIndex: number;
+  readonly term: MediumTerm;
+  readonly absorber: TermAbsorber;
+  /**
+   * U, the spec's vertical amount its curves are spaced about, of the absorber's kind
+   * (`absorbers.ts`'s `absorberVerticalAmount`).
+   */
+  readonly verticalAmount: AbsorberAmount;
+  /**
+   * The term's density at relative density 1 over U, m⁻¹: n ÷ U for a column absorber,
+   * n_A n_B ÷ U for a pair absorber, so that the term's relative density integrated along a path,
+   * times it, is the path's amount u over U, the quantity the tables store, whatever the kind.
+   */
+  readonly columnPerM: number;
+}
+
+/**
+ * A term absorber's density at relative density 1, m⁻³ or molecule pairs m⁻⁶, its spec's vertical
+ * amount, and that amount's value in its kind's unit, molecules m⁻² or molecule pairs m⁻⁵.
+ */
+function densityAndAmount(absorber: TermAbsorber): {
+  readonly density: number;
+  readonly amount: AbsorberAmount;
+  readonly value: number;
+} {
+  let of: { readonly density: number; readonly amount: AbsorberAmount; readonly value: number };
+  switch (absorber.kind) {
+    case "column": {
+      const value = absorber.spec.columnPerM2;
+      of = {
+        density: absorber.numberDensityPerM3,
+        amount: { kind: "column", columnPerM2: value },
+        value,
+      };
+      break;
+    }
+    case "pair": {
+      const value = absorber.spec.pairColumnPerM5;
+      of = {
+        density: absorber.pairDensityPerM6,
+        amount: { kind: "pair", pairColumnPerM5: value },
+        value,
+      };
+      break;
+    }
+  }
+  return of;
+}
+
+/**
+ * A medium's absorber terms in their slots: each term that carries an `absorber`, column or pair,
+ * in the order of the medium's terms.
+ *
+ * @throws RangeError for more than {@link ABSORBER_SLOTS} absorber terms, which the tables cannot
+ *   hold (`absorbers.ts`'s `absorberSpecs` keeps at most that many profiles), or for one whose
+ *   density or vertical amount is not finite and above 0.
+ */
+export function absorberSlots(medium: AtmosphereMedium): ReadonlyArray<AbsorberSlot> {
+  const slots: AbsorberSlot[] = [];
+  for (const [termIndex, term] of medium.terms.entries()) {
+    const absorber = term.absorber;
+    if (absorber === undefined) {
+      continue;
+    }
+    const { density: n, amount, value: u } = densityAndAmount(absorber);
+    if (!(Number.isFinite(n) && n > 0 && Number.isFinite(u) && u > 0)) {
+      throw new RangeError(
+        `${absorber.kind} absorber ${term.name} of medium ${medium.name} needs a density and a vertical amount above 0, not ${n} and ${u}`,
+      );
+    }
+    slots.push({
+      slot: slots.length,
+      termIndex,
+      term,
+      absorber,
+      verticalAmount: amount,
+      columnPerM: n / u,
+    });
+  }
+  if (slots.length > ABSORBER_SLOTS) {
+    throw new RangeError(
+      `atmosphere medium ${medium.name} has ${slots.length} absorber terms; at most ${ABSORBER_SLOTS} fit the tables`,
+    );
+  }
+  return slots;
+}
+
+/**
+ * An amount's value in its kind's unit, molecules m⁻² or molecule pairs m⁻⁵, as `absorbers.ts`
+ * reads it, here so that the render thread's bundle takes nothing from `absorbers.ts` but types.
+ */
+function amountValue(amount: AbsorberAmount): number {
+  let value: number;
+  switch (amount.kind) {
+    case "column":
+      value = amount.columnPerM2;
+      break;
+    case "pair":
+      value = amount.pairColumnPerM5;
+      break;
+  }
+  return value;
+}
+
+/** The relative tolerance a curve's node columns are held to on the kernels' grid. */
+const CURVE_GRID_TOLERANCE = 1e-9;
+
+/**
+ * Checks that `curves` give every light slot one curve an absorber slot of `medium`, each of its
+ * absorber's kind and on the kernels' grid about its absorber's vertical amount.
+ *
+ * @throws RangeError for a medium with absorbers and no light slot, a slot of another number of
+ *   curves, or a curve of the other kind (a pair curve on a column absorber or the reverse), whose
+ *   nodes are not {@link ABSORBER_CURVE_NODES}, at u ÷ U = 10^(−3 + j ÷ 40) about its own
+ *   absorber's U to 10⁻⁹ of ln u, or whose optical depths are not finite and in [0, −ln 10⁻⁶]
+ *   (`absorbers.ts`'s floor).
+ */
+export function checkAbsorberCurves(medium: AtmosphereMedium, curves: AbsorberCurveSlots): void {
+  const slots = absorberSlots(medium);
+  if (slots.length > 0 && curves.length === 0) {
+    throw new RangeError(
+      `atmosphere medium ${medium.name} has ${slots.length} absorber terms and no light's curves of growth`,
+    );
+  }
+  const deepest = ABSORBER_CURVE_DEPTH_MAX;
+  for (const [light, perAbsorber] of curves.entries()) {
+    if (perAbsorber.length !== slots.length) {
+      throw new RangeError(
+        `light slot ${light} gives ${perAbsorber.length} curves for medium ${medium.name}'s ${slots.length} absorbers`,
+      );
+    }
+    for (const [k, curve] of perAbsorber.entries()) {
+      const slot = slots[k];
+      if (curve.kind !== slot?.absorber.kind) {
+        throw new RangeError(
+          `light slot ${light}'s curve for absorber ${slot?.term.name ?? k} is a ${curve.kind} absorber's, not a ${slot?.absorber.kind ?? "missing"} absorber's`,
+        );
+      }
+      const vertical = amountValue(slot.verticalAmount);
+      const nodes = curve.logColumns;
+      const onGrid =
+        nodes.length === ABSORBER_CURVE_NODES &&
+        nodes.every((x, j) => {
+          const expected =
+            Math.log(vertical) + (CURVE_FIRST_DECADE + j / CURVE_NODES_PER_DECADE) * Math.LN10;
+          return Math.abs(x - expected) <= CURVE_GRID_TOLERANCE * Math.max(Math.abs(expected), 1);
+        });
+      const depthsHeld = curve.opticalDepth.every(
+        (depths) =>
+          depths.length === ABSORBER_CURVE_NODES &&
+          depths.every((d) => Number.isFinite(d) && d >= 0 && d <= deepest * (1 + 1e-12)),
+      );
+      if (!(onGrid && depthsHeld)) {
+        throw new RangeError(
+          `light slot ${light}'s curve for absorber ${slot.term.name} is not on the tables' grid of ${ABSORBER_CURVE_NODES} nodes about its vertical amount, or its optical depths leave [0, ${deepest}]`,
+        );
+      }
+    }
+  }
+}
+
+/** A 2D table's contents: RGBA per texel, row by row from texel (0, 0). */
+export interface PackedTable {
+  readonly widthTexels: number;
+  readonly heightTexels: number;
+  readonly texels: Float32Array;
+}
+
+/**
+ * The lights' curves of growth as `common.wgsl`'s `curveDepth` reads them, `rgba32float`: row
+ * light × {@link ABSORBER_SLOTS} + k holds light slot `light`'s curve for absorber slot k, texel j
+ * its optical depth −ln T_c per channel at node j in rgb and 0 in alpha; rows past the medium's
+ * absorbers are 0. A one-texel placeholder for a medium with no absorber, whose kernels read none.
+ *
+ * @throws RangeError as {@link checkAbsorberCurves}.
+ */
+export function packAbsorberCurves(
+  medium: AtmosphereMedium,
+  curves: AbsorberCurveSlots,
+): PackedTable {
+  checkAbsorberCurves(medium, curves);
+  if (absorberSlots(medium).length === 0) {
+    return { widthTexels: 1, heightTexels: 1, texels: new Float32Array(4) };
+  }
+  const width = ABSORBER_CURVE_NODES;
+  const height = curves.length * ABSORBER_SLOTS;
+  const texels = new Float32Array(width * height * 4);
+  for (const [light, perAbsorber] of curves.entries()) {
+    for (const [k, curve] of perAbsorber.entries()) {
+      const row = light * ABSORBER_SLOTS + k;
+      const [r, g, b] = curve.opticalDepth;
+      for (let j = 0; j < width; j += 1) {
+        texels.set(
+          [r[j] ?? Number.NaN, g[j] ?? Number.NaN, b[j] ?? Number.NaN, 0],
+          (row * width + j) * 4,
+        );
+      }
+    }
+  }
+  return { widthTexels: width, heightTexels: height, texels };
+}
+
+/**
  * The transmittance kernel: `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `medium.wgsl`, then
  * `transmittance.wgsl`.
  */
@@ -107,11 +374,13 @@ export const MULTI_SCATTERING_KERNEL: KernelPair = {
 export const KERNEL_ARM_FORMAT = "rgba32float";
 
 /**
- * A planet's two tables' textures: the stored `rgba16float` pair, or the kernel arm's
- * `rgba32float` one ({@link KERNEL_ARM_FORMAT}).
+ * A planet's tables' textures: the stored `rgba16float` ones, or the kernel arm's `rgba32float`
+ * ones ({@link KERNEL_ARM_FORMAT}). The transmittance kernel writes the transmittance table and the
+ * absorber-column table beside it (R08.T6.c).
  */
 export interface PlanetTableTextures {
   readonly transmittance: TextureHandle;
+  readonly absorberColumns: TextureHandle;
   readonly multiScattering: TextureHandle;
 }
 
@@ -150,8 +419,11 @@ export function withKernelArmFormat(pair: KernelPair): KernelPair {
 /** Floats a term takes in the `terms` buffer: four `vec4f` (`common.wgsl`'s `Term`). */
 const TERM_FLOATS = 16;
 
-/** Floats in the `Medium` uniform: its shell, term count and steps, and the ground's albedo. */
-const MEDIUM_UNIFORM_FLOATS = 8;
+/**
+ * Floats in the `Medium` uniform: its shell, term count and steps, the ground's albedo, and its
+ * absorber slots' count in a vec4f of its own (R08.T6.c).
+ */
+const MEDIUM_UNIFORM_FLOATS = 12;
 
 /** The bytes of the kernels' `terms` buffer: {@link MAX_TERMS} terms of 64 B, 512 B. */
 export const TERMS_BUFFER_BYTES = MAX_TERMS * TERM_FLOATS * 4;
@@ -225,12 +497,14 @@ function phaseCodeOf(phase: PhaseFunction): readonly [number, number, number, nu
  * per term its scattering, its absorption, its profile and its phase function, four `vec4f`, for
  * {@link MAX_TERMS} terms whatever the medium's count. A tabulated term's tables are its layer of
  * {@link packDensityTables} and {@link packPhaseTables}, its index here. A Rayleigh phase carries
- * its ρ per channel (R08.T3.c), which the kernels draw.
+ * its ρ per channel (R08.T3.c), which the kernels draw. An absorber term (R08.T6.c), whose rgb
+ * coefficients are 0, carries its slot + 1 in absorption.w ({@link absorberSlots}) and its
+ * n ÷ U, m⁻¹, in scattering.w; every other term 0 in both.
  *
  * @throws Error when the medium has more than {@link MAX_TERMS} terms; RangeError, as
  *   {@link checkTabulatedTops}, for a tabulated density held up to the top from a last level below
- *   it, and, as {@link checkNoAbsorbers}, for an absorber term, whose curves the kernels read only
- *   from R08.T6.c.
+ *   it, and, as {@link absorberSlots}, for more absorber terms than {@link ABSORBER_SLOTS} or one
+ *   with no column.
  */
 export function packMedium(medium: AtmosphereMedium): Float32Array {
   if (medium.terms.length > MAX_TERMS) {
@@ -239,12 +513,13 @@ export function packMedium(medium: AtmosphereMedium): Float32Array {
     );
   }
   checkTabulatedTops(medium);
-  checkNoAbsorbers(medium);
+  const slots = new Map(absorberSlots(medium).map((slot) => [slot.termIndex, slot]));
   const packed = new Float32Array(MAX_TERMS * TERM_FLOATS);
   for (const [i, term] of medium.terms.entries()) {
     const at = i * TERM_FLOATS;
-    packed.set([...term.scattering, 0], at);
-    packed.set([...term.absorption, 0], at + 4);
+    const slot = slots.get(i);
+    packed.set([...term.scattering, slot?.columnPerM ?? 0], at);
+    packed.set([...term.absorption, slot === undefined ? 0 : slot.slot + 1], at + 4);
     packed.set(densityCodeOf(term.density, medium.topHeightM), at + 8);
     packed.set(phaseCodeOf(term.phase), at + 12);
   }
@@ -253,22 +528,40 @@ export function packMedium(medium: AtmosphereMedium): Float32Array {
 
 /**
  * The medium's shell, term count and a kernel's steps as `common.wgsl`'s `Medium` uniform, with the
- * ground's albedo. The shell is the ground's radius and the atmosphere's height above it, H
- * itself, so that no kernel forms H as the top's radius less the ground's, which in `f32` would
- * carry both radii's rounding (plan R08, Design note 18, R08.T6.g).
+ * ground's albedo and the count of its absorber slots (R08.T6.c). The shell is the ground's radius
+ * and the atmosphere's height above it, H itself, so that no kernel forms H as the top's radius
+ * less the ground's, which in `f32` would carry both radii's rounding (plan R08, Design note 18,
+ * R08.T6.g).
  *
  * @param bottomRadiusM - The ground's radius, m.
  * @param samples - The kernel's steps along each ray.
+ * @param curveSlot - The light slot whose curves of growth a per-planet table is built with,
+ *   `medium.wgsl`'s `curveSlot()`: {@link SHARED_TABLE_CURVE_SLOT} until R08.T7.
  */
 export function packMediumUniform(
   medium: AtmosphereMedium,
   bottomRadiusM: number,
   samples: number,
+  curveSlot = SHARED_TABLE_CURVE_SLOT,
 ): Float32Array {
   const packed = new Float32Array(MEDIUM_UNIFORM_FLOATS);
   packed.set([bottomRadiusM, medium.topHeightM, medium.terms.length, samples], 0);
   packed.set([...medium.groundAlbedo, 0], 4);
+  packed.set([absorberCount(medium), curveSlot, 0, 0], 8);
   return packed;
+}
+
+/**
+ * The light slot whose curves of growth the shared multiple-scattering table is built with: 0,
+ * the body's brightest star's, which planetshine's transmittance takes too (Design note 7; ruled
+ * 2026-10-10, `decision-r08-t6b-floor.md` §8). Exact while one sun is drawn, as until R08.T7,
+ * which builds one table a light slot through the kernel's and the twin's `curveSlot`.
+ */
+export const SHARED_TABLE_CURVE_SLOT = 0;
+
+/** How many of a medium's terms are absorbers, each a slot of the absorber columns. */
+export function absorberCount(medium: AtmosphereMedium): number {
+  return medium.terms.filter((term) => term.absorber !== undefined).length;
 }
 
 /** The heights of a density table's {@link DENSITY_TABLE_LEVELS} levels under a top, m. */
@@ -501,9 +794,13 @@ function groupsOf(size: TableSize): readonly [number, number, number] {
   return [Math.ceil(size.widthTexels / 8), Math.ceil(size.heightTexels / 8), 1];
 }
 
-/** What fixes the tables' contents: the medium and the ground's radius. */
-function keyOf(medium: AtmosphereMedium, bottomRadiusM: number): string {
-  return JSON.stringify({ medium, bottomRadiusM });
+/** What fixes the tables' contents: the medium, the ground's radius and the lights' curves. */
+function keyOf(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  curves: AbsorberCurveSlots,
+): string {
+  return JSON.stringify({ medium, bottomRadiusM, curves });
 }
 
 /** A 2D array texture the tables made, with the shape it was made at. */
@@ -513,13 +810,25 @@ interface LayeredTexture {
   readonly layers: number;
 }
 
-/** The GPU objects of one device: the two tables, the medium's buffer and tables, the kernels. */
+/** A 2D texture the tables made and upload, with the shape it was made at. */
+interface UploadedTexture {
+  readonly texture: TextureHandle;
+  readonly widthTexels: number;
+  readonly heightTexels: number;
+}
+
+/**
+ * The GPU objects of one device: the transmittance, absorber-column and multiple-scattering
+ * tables, the medium's buffer and tables, the lights' curves, the kernels.
+ */
 interface TableResources {
   readonly transmittance: TextureHandle;
+  readonly absorberColumns: TextureHandle;
   readonly multiScattering: TextureHandle;
   readonly terms: BufferHandle;
   densityTables: LayeredTexture;
   phaseTables: LayeredTexture;
+  absorberCurves: UploadedTexture;
   readonly transmittanceKernel: ComputeHandle;
   readonly multiScatteringKernel: ComputeHandle;
 }
@@ -528,6 +837,31 @@ interface TableResources {
 const DENSITY_FORMAT: GPUTextureFormat = "r32float";
 /** The phase tables' texture format: the three channels and an unused alpha. */
 const PHASE_FORMAT: GPUTextureFormat = "rgba32float";
+/**
+ * The lights' curves' texture format: an optical depth a channel and an unused alpha, in `f32`,
+ * since a curve's 10⁻³ U node in the linear regime holds a depth far under rgba16float's least
+ * normal (R08.T6.c).
+ */
+const CURVES_FORMAT: GPUTextureFormat = "rgba32float";
+
+/** Makes a 2D table's texture for {@link packAbsorberCurves}'s contents, uploaded. */
+function createUploaded(
+  engine: RenderEngine,
+  name: string,
+  format: GPUTextureFormat,
+  table: Pick<PackedTable, "widthTexels" | "heightTexels">,
+): UploadedTexture {
+  const texture = engine.createTexture({
+    name,
+    size: [table.widthTexels, table.heightTexels],
+    dimension: "2d",
+    format,
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "atmosphere-tables",
+  });
+  return { texture, widthTexels: table.widthTexels, heightTexels: table.heightTexels };
+}
 
 /** Makes a layered table's texture, uploaded with `TEXTURE_BINDING` and `COPY_DST`. */
 function createLayered(
@@ -553,9 +887,11 @@ function releaseResources(engine: RenderEngine, resources: TableResources): void
   engine.releaseBuffer(resources.terms);
   for (const texture of [
     resources.transmittance,
+    resources.absorberColumns,
     resources.multiScattering,
     resources.densityTables.texture,
     resources.phaseTables.texture,
+    resources.absorberCurves.texture,
   ]) {
     engine.releaseTexture(texture);
   }
@@ -565,16 +901,19 @@ function createResources(engine: RenderEngine): TableResources {
   const usage =
     TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_SRC;
   const one = { widthTexels: 1, layers: 1 };
-  return {
-    transmittance: engine.createTexture({
-      name: "atmosphere transmittance",
+  const transmittanceTable = (name: string): TextureHandle =>
+    engine.createTexture({
+      name,
       size: [TRANSMITTANCE_SIZE.widthTexels, TRANSMITTANCE_SIZE.heightTexels],
       dimension: "2d",
       format: "rgba16float",
       mips: 1,
       usage,
       category: "atmosphere-tables",
-    }),
+    });
+  return {
+    transmittance: transmittanceTable("atmosphere transmittance"),
+    absorberColumns: transmittanceTable("atmosphere absorber columns"),
     multiScattering: engine.createTexture({
       name: "atmosphere multiple scattering",
       size: [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels],
@@ -592,6 +931,10 @@ function createResources(engine: RenderEngine): TableResources {
     }),
     densityTables: createLayered(engine, "atmosphere density tables", DENSITY_FORMAT, one),
     phaseTables: createLayered(engine, "atmosphere phase tables", PHASE_FORMAT, one),
+    absorberCurves: createUploaded(engine, "atmosphere absorber curves", CURVES_FORMAT, {
+      widthTexels: 1,
+      heightTexels: 1,
+    }),
     transmittanceKernel: engine.createCompute(TRANSMITTANCE_KERNEL),
     multiScatteringKernel: engine.createCompute(MULTI_SCATTERING_KERNEL),
   };
@@ -614,6 +957,7 @@ export class AtmosphereTables {
   #resources: TableResources;
   #medium: AtmosphereMedium;
   #bottomRadiusM: number;
+  #curves: AbsorberCurveSlots;
   #key: string | null = null;
   #builds = 0;
   /** The kernel arm's kernels ({@link AtmosphereTables.buildKernelArm}), made at its first call. */
@@ -623,16 +967,25 @@ export class AtmosphereTables {
    * Makes the tables and builds them for `medium`.
    *
    * @param bottomRadiusM - The ground's radius on the tables' sphere, m.
-   * @throws Error or RangeError as {@link packMedium}, and `EngineUnavailable` while the engine has
-   *   no device (a loss), having released the buffer and textures it made before.
+   * @param curves - Each light's curves of growth for the medium's absorbers; none for a medium
+   *   with no absorber.
+   * @throws Error or RangeError as {@link packMedium} and {@link packAbsorberCurves}, and
+   *   `EngineUnavailable` while the engine has no device (a loss), having released the buffer and
+   *   textures it made before.
    */
-  constructor(engine: RenderEngine, medium: AtmosphereMedium, bottomRadiusM: number) {
+  constructor(
+    engine: RenderEngine,
+    medium: AtmosphereMedium,
+    bottomRadiusM: number,
+    curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
+  ) {
     this.#engine = engine;
     this.#medium = medium;
     this.#bottomRadiusM = bottomRadiusM;
+    this.#curves = curves;
     this.#resources = createResources(engine);
     try {
-      this.setMedium(medium, bottomRadiusM);
+      this.setMedium(medium, bottomRadiusM, curves);
     } catch (error: unknown) {
       releaseResources(engine, this.#resources);
       throw error;
@@ -641,13 +994,32 @@ export class AtmosphereTables {
       this.#resources = createResources(engine);
       this.#armKernels = null;
       this.#key = null;
-      this.setMedium(this.#medium, this.#bottomRadiusM);
+      this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves);
     });
   }
 
-  /** Transmittance per (r, μ), `rgba16float`; a new handle after a restore. */
+  /**
+   * What light loses per (r, μ) to the top, `rgba16float`: the optical depth of every term but the
+   * absorbers in rgb and absorber slot 0's column u ÷ U in alpha (R08.T6.c); a new handle after a
+   * restore.
+   */
   get transmittance(): TextureHandle {
     return this.#resources.transmittance;
+  }
+
+  /** Absorber slots 1 to 4's columns u ÷ U per (r, μ) to the top, rgba, `rgba16float`. */
+  get absorberColumns(): TextureHandle {
+    return this.#resources.absorberColumns;
+  }
+
+  /** The lights' curves of growth, {@link packAbsorberCurves}'s, `rgba32float`. */
+  get absorberCurves(): TextureHandle {
+    return this.#resources.absorberCurves.texture;
+  }
+
+  /** The lights' curves of growth the tables follow, with their medium. */
+  get curves(): AbsorberCurveSlots {
+    return this.#curves;
   }
 
   /** Multiple scattering per (r, μ_sun), per unit illuminance, `rgba16float`. */
@@ -684,32 +1056,46 @@ export class AtmosphereTables {
   }
 
   /**
-   * Rebuilds the tables if `medium` or `bottomRadiusM` differs from what they were built for.
+   * Rebuilds the tables if `medium`, `bottomRadiusM` or `curves` differs from what they were built
+   * for.
    *
+   * @param curves - Each light's curves of growth for the medium's absorbers; none for a medium
+   *   with no absorber. The multiple-scattering table is built with light slot 0's.
    * @returns Whether they were rebuilt.
-   * @throws Error or RangeError as {@link packMedium}, and the tables keep what they held and
-   *   follow; or `EngineUnavailable` while the engine has no device (a loss), and the tables follow
-   *   `medium` from then on, so that the engine's restore builds it.
+   * @throws Error or RangeError as {@link packMedium} and {@link packAbsorberCurves}, and the
+   *   tables keep what they held and follow; or `EngineUnavailable` while the engine has no device
+   *   (a loss), and the tables follow `medium` from then on, so that the engine's restore builds it.
    */
-  setMedium(medium: AtmosphereMedium, bottomRadiusM: number): boolean {
-    const key = keyOf(medium, bottomRadiusM);
+  setMedium(
+    medium: AtmosphereMedium,
+    bottomRadiusM: number,
+    curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
+  ): boolean {
+    const key = keyOf(medium, bottomRadiusM, curves);
     if (key === this.#key) {
       return false;
     }
     const terms = packMedium(medium);
     const densityTables = packDensityTables(medium);
     const phaseTables = packPhaseTables(medium);
+    const absorberCurves = packAbsorberCurves(medium, curves);
     this.#medium = medium;
     this.#bottomRadiusM = bottomRadiusM;
+    this.#curves = curves;
     this.#key = null;
     const engine = this.#engine;
     const r = this.#resources;
     engine.writeBuffer(r.terms, 0, terms);
     r.densityTables = this.#upload(r.densityTables, densityTables, DENSITY_FORMAT);
     r.phaseTables = this.#upload(r.phaseTables, phaseTables, PHASE_FORMAT);
+    r.absorberCurves = this.#uploadCurves(r.absorberCurves, absorberCurves);
     this.#dispatchTables(
       { transmittance: r.transmittanceKernel, multiScattering: r.multiScatteringKernel },
-      { transmittance: r.transmittance, multiScattering: r.multiScattering },
+      {
+        transmittance: r.transmittance,
+        absorberColumns: r.absorberColumns,
+        multiScattering: r.multiScattering,
+      },
     );
     this.#key = key;
     this.#builds += 1;
@@ -718,12 +1104,12 @@ export class AtmosphereTables {
 
   /**
    * The tables built once more by their kernels assembled to write `rgba32float`
-   * ({@link withKernelArmFormat}), into two textures made for the call: the smoke's kernel arm (plan
-   * R08, R08.T6.g; `decision-r08-t6b-floor.md` §4). The transmittance is built from the medium and
-   * the multiple scattering over the stored `rgba16float` transmittance, as the stored table's
-   * twin takes it, so that each holds its kernel's own `f32` output.
+   * ({@link withKernelArmFormat}), into three textures made for the call: the smoke's kernel arm
+   * (plan R08, R08.T6.g; `decision-r08-t6b-floor.md` §4). The transmittance and absorber-column
+   * tables are built from the medium and the multiple scattering over the stored `rgba16float`
+   * ones, as the stored table's twin takes them, so that each holds its kernel's own `f32` output.
    *
-   * @returns The two textures, which the caller releases.
+   * @returns The three textures, which the caller releases.
    * @throws `EngineUnavailable` while the engine has no device (a loss).
    */
   buildKernelArm(): PlanetTableTextures {
@@ -745,6 +1131,7 @@ export class AtmosphereTables {
       });
     const tables: PlanetTableTextures = {
       transmittance: output("atmosphere transmittance (kernel arm)", TRANSMITTANCE_SIZE),
+      absorberColumns: output("atmosphere absorber columns (kernel arm)", TRANSMITTANCE_SIZE),
       multiScattering: output("atmosphere multiple scattering (kernel arm)", MULTI_SCATTERING_SIZE),
     };
     this.#dispatchTables(this.#armKernels, tables);
@@ -753,8 +1140,8 @@ export class AtmosphereTables {
 
   /**
    * Builds the tables for the medium and ground the tables follow: the transmittance kernel into
-   * `outputs.transmittance`, then the multiple-scattering kernel, reading the stored transmittance,
-   * into `outputs.multiScattering`.
+   * `outputs.transmittance` and `outputs.absorberColumns`, then the multiple-scattering kernel,
+   * reading the stored pair and the lights' curves, into `outputs.multiScattering`.
    */
   #dispatchTables(kernels: PlanetTableKernels, outputs: PlanetTableTextures): void {
     const engine = this.#engine;
@@ -768,7 +1155,10 @@ export class AtmosphereTables {
         uniforms: { medium: packMediumUniform(medium, bottomRadiusM, TRANSMITTANCE_SAMPLES) },
         buffers: { terms: r.terms },
         sampled,
-        storage: { transmittanceOut: { texture: outputs.transmittance, level: 0 } },
+        storage: {
+          transmittanceOut: { texture: outputs.transmittance, level: 0 },
+          absorberColumnsOut: { texture: outputs.absorberColumns, level: 0 },
+        },
       },
       groupsOf(TRANSMITTANCE_SIZE),
       "atmosphere tables",
@@ -776,9 +1166,21 @@ export class AtmosphereTables {
     engine.dispatch(
       kernels.multiScattering,
       {
-        uniforms: { medium: packMediumUniform(medium, bottomRadiusM, MULTI_SCATTERING_SAMPLES) },
+        uniforms: {
+          medium: packMediumUniform(
+            medium,
+            bottomRadiusM,
+            MULTI_SCATTERING_SAMPLES,
+            SHARED_TABLE_CURVE_SLOT,
+          ),
+        },
         buffers: { terms: r.terms },
-        sampled: { ...sampled, transmittance: r.transmittance },
+        sampled: {
+          ...sampled,
+          transmittance: r.transmittance,
+          absorberColumns: r.absorberColumns,
+          absorberCurves: r.absorberCurves.texture,
+        },
         storage: { multiScatteringOut: { texture: outputs.multiScattering, level: 0 } },
       },
       [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels, 1],
@@ -809,6 +1211,27 @@ export class AtmosphereTables {
         target.texture,
         [0, 0, 0],
         [table.widthTexels, 1, table.layers],
+        table.texels,
+      );
+    }
+    return target;
+  }
+
+  /**
+   * Writes the lights' curves into `current`, or into a texture made at their shape, releasing
+   * `current`, when their shape differs; a placeholder is left as it was made, zero.
+   */
+  #uploadCurves(current: UploadedTexture, table: PackedTable): UploadedTexture {
+    let target = current;
+    if (current.widthTexels !== table.widthTexels || current.heightTexels !== table.heightTexels) {
+      target = createUploaded(this.#engine, current.texture.name, CURVES_FORMAT, table);
+      this.#engine.releaseTexture(current.texture);
+    }
+    if (table.widthTexels > 1) {
+      this.#engine.writeTexture(
+        target.texture,
+        [0, 0, 0],
+        [table.widthTexels, table.heightTexels, 1],
         table.texels,
       );
     }

@@ -16,7 +16,9 @@
 // through the screen at (i, j) / (size - 1), Bruneton's texel mapping (Design note 19), so that the
 // composite's read of the screen's edges falls on the outer froxels' centres. The slice axis is
 // already the pair's: slice k holds the march at (k + 1) reach / slices, which the composite reads
-// at distance / reach - 1/2 / slices.
+// at distance / reach - 1/2 / slices. Changes (plan R08, R08.T6.c): the view's own path takes its
+// absorbers by the path's column, under the sun's curves of growth (`viewAbsorberStep`), so that
+// the mean transmittance in alpha carries them.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -26,6 +28,8 @@
 @group(0) @binding(5) var transmittance : texture_2d<f32>;
 @group(0) @binding(6) var multiScattering : texture_2d<f32>;
 @group(0) @binding(7) var aerialOut : texture_storage_3d<rgba16float, write>;
+@group(0) @binding(8) var absorberColumns : texture_2d<f32>;
+@group(0) @binding(9) var absorberCurves : texture_2d<f32>;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id : vec3u) {
@@ -47,6 +51,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let angle = scatteringAngle(dir, view.sun.xyz);
   var luminance = vec3f(0.0);
   var throughput = vec3f(1.0);
+  var path = absorberPathStart();
   for (var slice = 0u; slice < slices; slice++) {
     for (var step = 0u; step < perSlice; step++) {
       let t = (f32(slice * perSlice + step) + 0.5) * dt;
@@ -55,7 +60,9 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       let up = p / rP;
       let heightM = heightAlong(cameraHeightM, mu, t, rP);
       let local = sampleMediumAt(heightM, angle);
-      let stepDepth = local.extinction * dt;
+      let next = viewAbsorberStep(path, local, dt);
+      let stepDepth = local.extinction * dt + (next.depth - path.depth);
+      path = next;
       let stepTransmittance = exp(-stepDepth);
       let source = sourceAt(
         transmittance,

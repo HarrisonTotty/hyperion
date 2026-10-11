@@ -431,8 +431,8 @@ export interface MediumTerm {
   readonly phase: PhaseFunction;
   /**
    * An absorber's gases, absent for every other term. Its absorption is its curves of growth, one
-   * a sun, not `absorption`, which is 0 for it (`absorbers.ts`'s `absorberTerm`). The tables read
-   * the curves from R08.T6.c; until then {@link checkNoAbsorbers} refuses such a term.
+   * a sun, not `absorption`, which is 0 for it (`absorbers.ts`'s `absorberTerm`). The tables store
+   * its column along each ray and add each light's curve on read (R08.T6.c, Design notes 5 and 8).
    */
   readonly absorber?: TermAbsorber;
 }
@@ -512,17 +512,16 @@ function tentColumnM(bottomM: number, peakM: number, tentTopM: number, upToM: nu
 }
 
 /**
- * A term's extinction per channel at unit density, m⁻¹: scattering plus absorption.
+ * A term's extinction coefficient per channel at unit density, m⁻¹: scattering plus absorption.
  *
- * @throws RangeError for an absorber term, whose extinction is its curves of growth, one a sun,
- *   not a coefficient (R08.T4.b; the readers take it from R08.T6.c, {@link checkNoAbsorbers}).
+ * @remarks
+ * An absorber term's coefficients are 0: it absorbs by its curves of growth, one a light, through
+ * the amount a path crosses (R08.T4.b, R08.T4.c, Design notes 5 and 8), which the tables, the CPU
+ * twin and the oracle add beside this from R08.T6.c (`tables.ts`'s `absorberSlots`,
+ * `opticalDepth.ts`'s `absorberAmounts`). A reader that takes this alone for a medium's extinction
+ * leaves its absorbers out.
  */
 export function extinction(term: MediumTerm): Rgb {
-  if (term.absorber !== undefined) {
-    throw new RangeError(
-      `term ${term.name} is an absorber, whose extinction is its curves of growth, not a coefficient`,
-    );
-  }
   return [
     term.scattering[0] + term.absorption[0],
     term.scattering[1] + term.absorption[1],
@@ -557,26 +556,6 @@ export function checkTabulatedTops(medium: AtmosphereMedium): void {
         `term ${term.name} of medium ${medium.name} holds a density of ${atTop} from its last level at ${topLevelM} m up to the medium's top at ${medium.topHeightM} m`,
       );
     }
-  }
-}
-
-/**
- * Checks that no term of a medium is an absorber, whose curves of growth the tables do not yet
- * read.
- *
- * @remarks
- * An absorber term's absorption is its curves (`absorbers.ts`), and its `absorption` is 0, so
- * tables that ignored `absorber` would draw nothing for it, unlabelled. The kernels' packer and
- * the CPU twin refuse it alike until R08.T6.c adds the absorber columns and each sun's curve.
- *
- * @throws RangeError for a term that carries an absorber.
- */
-export function checkNoAbsorbers(medium: AtmosphereMedium): void {
-  const term = medium.terms.find((t) => t.absorber !== undefined);
-  if (term !== undefined) {
-    throw new RangeError(
-      `term ${term.name} of medium ${medium.name} is an absorber, whose curves of growth the tables read only from R08.T6.c`,
-    );
   }
 }
 

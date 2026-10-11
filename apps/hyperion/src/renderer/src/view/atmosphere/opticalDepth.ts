@@ -5,8 +5,11 @@
  *
  * @remarks
  * The smoke harness reads the GPU's transmittance table back and compares it with
- * {@link opticalDepth} at fixed texels; the unit tests hold the integrator to closed forms. The
- * geometry is Bruneton 2017's (precomputed_atmospheric_scattering, `atmosphere/functions.glsl`), as
+ * {@link opticalDepth} at fixed texels, in optical depth since the table stores it (plan R08,
+ * R08.T6.c); the unit tests hold the integrator to closed forms. An absorber's share is a light's
+ * curve of growth at the amount the ray crosses ({@link absorberAmounts},
+ * {@link curvesOpticalDepth}). The geometry is Bruneton 2017's
+ * (precomputed_atmospheric_scattering, `atmosphere/functions.glsl`), as
  * `shaders/common.wgsl` and `shaders/medium.wgsl` port it from Bevy: the transmittance table's
  * mapping is its `GetTransmittanceTextureUvFromRMu` and `GetRMuFromTransmittanceTextureUv` before
  * their texel mapping, of which only x_r = ρ ÷ H is Bruneton and Neyret 2008's (§4; plan R08's
@@ -17,7 +20,8 @@
  */
 
 import type { Rgb } from "../photometry/toneCurve";
-import { type AtmosphereMedium, densityAt, extinction } from "./medium";
+import { type AbsorberAmount, type AbsorberCurve, absorberTransmittance } from "./absorbers";
+import { type AtmosphereMedium, densityAt, extinction, type TermAbsorber } from "./medium";
 
 /** The spherical shell an atmosphere's tables are built on, radii from the centre, m. */
 export interface Shell {
@@ -125,7 +129,12 @@ export const ORACLE_STEPS = 20_000;
 
 /**
  * The optical depth per channel from radius `rM` along zenith cosine `mu` to the top of the
- * atmosphere or the ground, by composite Simpson's rule in `f64`.
+ * atmosphere or the ground, by composite Simpson's rule in `f64`, of every term but the absorbers.
+ *
+ * @remarks
+ * An absorber term's coefficients are 0 (`medium.ts`'s `extinction`): its optical depth is a
+ * light's curve of growth at the amount the ray crosses, {@link absorberAmounts}, which
+ * {@link curvesOpticalDepth} reads (plan R08, Design notes 5 and 8, R08.T6.c).
  *
  * @param bottomRadiusM - The ground's radius, m; the top is `medium.topHeightM` above it.
  * @param steps - Simpson intervals, even.
@@ -138,7 +147,7 @@ export function opticalDepth(
   steps = ORACLE_STEPS,
 ): Rgb {
   const shell: Shell = { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM };
-  return opticalDepthOver(medium, bottomRadiusM, rM, mu, maxDistanceM(shell, rM, mu), steps);
+  return alongRay(medium, bottomRadiusM, rM, mu, maxDistanceM(shell, rM, mu), steps).depth;
 }
 
 /**
@@ -146,7 +155,8 @@ export function opticalDepth(
  * atmosphere, as the transmittance table holds it: {@link opticalDepth} for a ray that does not meet
  * the ground, and for the ray tangent to it (the table's last column since R08.T6.g's texel
  * mapping) the whole grazing path, where {@link opticalDepth}'s ground test would decide by
- * rounding whether it stops at the tangent point.
+ * rounding whether it stops at the tangent point. Every term but the absorbers, as
+ * {@link opticalDepth}.
  *
  * @param bottomRadiusM - The ground's radius, m; the top is `medium.topHeightM` above it.
  * @param steps - Simpson intervals, even.
@@ -159,22 +169,118 @@ export function opticalDepthToTop(
   steps = ORACLE_STEPS,
 ): Rgb {
   const shell: Shell = { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM };
-  return opticalDepthOver(medium, bottomRadiusM, rM, mu, distanceToTopM(shell, rM, mu), steps);
+  return alongRay(medium, bottomRadiusM, rM, mu, distanceToTopM(shell, rM, mu), steps).depth;
 }
 
-/** Composite Simpson's rule over [0, tMax] along the ray, heights below the ground as the ground's. */
-function opticalDepthOver(
+/**
+ * Each absorber term's amount u along a ray from radius `rM` at zenith cosine `mu` to the top or
+ * the ground, in its kind's unit: n ∫ ρ ds by {@link opticalDepth}'s Simpson rule, one an absorber
+ * term in the medium's order of them (`tables.ts`'s `absorberSlots`), n its density at relative
+ * density 1. That is a column, molecules m⁻², for a column absorber, and a pair column, molecule
+ * pairs m⁻⁵, for a pair absorber (R08.T4.c), whose term's ρ is already the square of its column's
+ * (R08.T6.c).
+ *
+ * @param bottomRadiusM - The ground's radius, m; the top is `medium.topHeightM` above it.
+ * @param steps - Simpson intervals, even.
+ */
+export function absorberAmounts(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  rM: number,
+  mu: number,
+  steps = ORACLE_STEPS,
+): ReadonlyArray<AbsorberAmount> {
+  const shell: Shell = { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM };
+  return alongRay(medium, bottomRadiusM, rM, mu, maxDistanceM(shell, rM, mu), steps).amounts;
+}
+
+/**
+ * {@link absorberAmounts} to the top of the atmosphere, as the tables hold them, along the grazing
+ * ray too ({@link opticalDepthToTop}).
+ *
+ * @param bottomRadiusM - The ground's radius, m; the top is `medium.topHeightM` above it.
+ * @param steps - Simpson intervals, even.
+ */
+export function absorberAmountsToTop(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  rM: number,
+  mu: number,
+  steps = ORACLE_STEPS,
+): ReadonlyArray<AbsorberAmount> {
+  const shell: Shell = { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM };
+  return alongRay(medium, bottomRadiusM, rM, mu, distanceToTopM(shell, rM, mu), steps).amounts;
+}
+
+/**
+ * The optical depth per channel that a light's curves of growth give a path's absorber amounts:
+ * Σₖ −ln T_c(u_k), each read by `absorbers.ts`'s `absorberTransmittance`, clamp included (plan R08,
+ * Design note 5, R08.T6.c).
+ *
+ * @param curves - The light's curves, one an absorber term in the medium's order of them.
+ * @param amounts - Each absorber's amount u, of its curve's kind, as {@link absorberAmounts} gives.
+ * @throws RangeError when the counts differ, or as `absorberTransmittance` for an amount that is
+ *   not finite and at least 0.
+ * @throws Error as `absorberTransmittance` for an amount of the other kind than its curve's.
+ */
+export function curvesOpticalDepth(
+  curves: ReadonlyArray<AbsorberCurve>,
+  amounts: ReadonlyArray<AbsorberAmount>,
+): Rgb {
+  if (curves.length !== amounts.length) {
+    throw new RangeError(`${curves.length} curves for ${amounts.length} absorber amounts`);
+  }
+  const depth: [number, number, number] = [0, 0, 0];
+  for (const [k, curve] of curves.entries()) {
+    const amount = amounts[k];
+    if (amount === undefined) {
+      throw new RangeError(`no amount for absorber ${k}`);
+    }
+    const t = absorberTransmittance(curve, amount);
+    depth[0] -= Math.log(t[0]);
+    depth[1] -= Math.log(t[1]);
+    depth[2] -= Math.log(t[2]);
+  }
+  return depth;
+}
+
+/**
+ * A term absorber's amount along a path over which its relative density integrates to
+ * `densityPathM`, m: its density at relative density 1 times that, in its kind's unit.
+ */
+function amountAlong(absorber: TermAbsorber, densityPathM: number): AbsorberAmount {
+  let amount: AbsorberAmount;
+  switch (absorber.kind) {
+    case "column":
+      amount = { kind: "column", columnPerM2: absorber.numberDensityPerM3 * densityPathM };
+      break;
+    case "pair":
+      amount = { kind: "pair", pairColumnPerM5: absorber.pairDensityPerM6 * densityPathM };
+      break;
+  }
+  return amount;
+}
+
+/**
+ * Composite Simpson's rule over [0, tMax] along the ray, heights below the ground as the ground's:
+ * the optical depth of every term but the absorbers, and each absorber term's amount.
+ */
+function alongRay(
   medium: AtmosphereMedium,
   bottomRadiusM: number,
   rM: number,
   mu: number,
   tMax: number,
   steps: number,
-): Rgb {
+): { readonly depth: Rgb; readonly amounts: ReadonlyArray<AbsorberAmount> } {
   const n = steps + (steps % 2);
   const dt = tMax / n;
   const coefficients = medium.terms.map((term) => ({ term, sigma: extinction(term) }));
+  const absorbers = medium.terms.flatMap((term) =>
+    term.absorber === undefined ? [] : [{ term, absorber: term.absorber }],
+  );
   const sum = [0, 0, 0];
+  const paths = new Float64Array(absorbers.length);
   for (let i = 0; i <= n; i += 1) {
     let weight = 2;
     if (i === 0 || i === n) {
@@ -189,7 +295,13 @@ function opticalDepthOver(
       sum[1] = (sum[1] ?? 0) + sigma[1] * d;
       sum[2] = (sum[2] ?? 0) + sigma[2] * d;
     }
+    for (const [k, { term }] of absorbers.entries()) {
+      paths[k] = (paths[k] ?? 0) + densityAt(term.density, h) * weight;
+    }
   }
   const k = dt / 3;
-  return [(sum[0] ?? 0) * k, (sum[1] ?? 0) * k, (sum[2] ?? 0) * k];
+  return {
+    depth: [(sum[0] ?? 0) * k, (sum[1] ?? 0) * k, (sum[2] ?? 0) * k],
+    amounts: absorbers.map(({ absorber }, i) => amountAlong(absorber, (paths[i] ?? 0) * k)),
+  };
 }

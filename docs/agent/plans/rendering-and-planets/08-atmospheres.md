@@ -1833,10 +1833,12 @@ Names are those the owning plans give; the owning plan is authoritative.
       - R08.T6.g changes the twin and the kernels together, so the picture and the twin move
         towards the reference, chiefly the low sun from near the ground; elsewhere by under
         2 × 10⁻³ by day (estimated; T6.g records the measurement).
-      - That move holds for the table read as optical depth, as R08.T6.c stores it. Until then the
-        table stores T, and its bilinear read overshoots the grazing column: the sun from 2 m on
-        the horizon is +48.7% too bright where R05's mapping left it −37.5% too dark (Risks,
-        "Deviations in T6.g, as built"; accepted by main for the interim, T6.c removes it).
+      - That move holds for the table read as optical depth, as R08.T6.c stores it. Between T6.g
+        and T6.c the table stored T, and its bilinear read overshot the grazing column: the sun
+        from 2 m on the horizon was +48.7% too bright where R05's mapping left it −37.5% too dark
+        (Risks, "Deviations in T6.g, as built"; accepted by main for the interim). R08.T6.c removed
+        it: read as stored optical depth, the sun from 2 m on the horizon is +0.36% from the oracle,
+        and every point to 5° is within 1.96% (Risks, "Deviations in T6.c, as built").
 
 ## Tasks
 
@@ -2983,6 +2985,13 @@ together, towards the reference once T6.c stores optical depth, by amounts it re
   - R05.T12.e's quadrature gate in the twin (`tablesCpu.test.ts`) holds the ray "band, 20000 m,
     view zenith 94.441°, sun 95°/0°" within its 5% for twilight rays, and its pinned exception
     (`T6C_EXCEPTION`, 6.02%) is removed.
+
+  The shared multiple-scattering table is built with light slot 0's curves, the body's brightest
+  star's, which planetshine's transmittance already takes (Design note 7). It is exact while one sun
+  is drawn, as until R08.T7. Its kernel and twin take the curve slot as a parameter (`curveSlot`, 0
+  here), so that R08.T7 builds one table per light slot without changing either. Every march applies
+  slot 0's curves to the sun's path and to its own path's column alike; R08.T7 makes both per light
+  (`decision-r08-t6b-floor.md` §8).
 
   Acceptance: `pnpm test` and `just test-render` pass, the two exceptions above removed.
 
@@ -4974,7 +4983,8 @@ generator, and the reference's sampling needs no domain tag.
       - In a scratch emulation the same table read as optical depth (T6.c's storage) gives 1.29%,
         and stored T at 90 steps 0.87%. The second-worst ray ("band, 500 m, view zenith 90.703°,
         sun 90°/180°") is 2.93% read as T and 1.30% as τ.
-      - T6.c's acceptance requires the exception gone.
+      - T6.c's acceptance requires the exception gone. _Removed 2026-10-11 by R08.T6.c_: the ray is
+        0.22% ("Deviations in T6.c, as built").
     - _The edge test, the same shape._ Read as T, the twin's sun transmittance is held within 3%
       of the oracle from 2° to 5° and within 0.3% from 45° up, and R05's mapping fails as ruled
       (37.5% from 2 m at the horizon, 0.65% at the zenith). Below 2° the 3% is held on the table
@@ -4989,13 +4999,15 @@ generator, and the reference's sampling needs no domain tag.
       | 2 km, T  | +1.31%              | 0.95%  | 0.42%  | 0.27%  | 0.11%  | 0.01% | 0.00%              |
       | 2 m, τ   | +0.36%              | +1.44% | +1.83% | +1.56% | +1.01% | 0.18% | 0.13%              |
 
-      T6.c's acceptance takes the stored read below 2° to 3%.
+      T6.c's acceptance takes the stored read below 2° to 3%. _Done 2026-10-11 by R08.T6.c_: the
+      stored read is the "τ" row ("Deviations in T6.c, as built").
 
     - _The interim picture, accepted_ (main, 2026-10-10). Until T6.c stores optical depth, the
       drawn sun's disc from a camera below about 20 m on the horizon is too bright by the stored-T
       read's overshoot: +48.7% from 2 m and +41.0% from 20 m at 0°, +24.8% at 0.25° (R05's mapping
       was −37.5% from 2 m). The sky near a low sun moves with it (below). T6.c removes it, and
-      Design note 19 says so.
+      Design note 19 says so. _Removed 2026-10-11 by R08.T6.c_ ("Deviations in T6.c, as built"):
+      the stored read is now the τ row above, +0.36% from 2 m at 0°.
     - _The limb views_ (`decision-r08-f32.md` §10, with its plan text). The fixed 10⁻⁶ rad
       exemption is withdrawn. In a view from above the atmosphere's top, a sky-view or ray-march
       texel outside 10⁻³ passes only where the twin, re-marched with its ray turned by ±4ε (±5 × 10⁻⁷
@@ -5148,6 +5160,240 @@ generator, and the reference's sampling needs no domain tag.
   - _For R10._ `view/shaders/preciseTrig.wgsl` and `common.wgsl`'s `groundHitFromHeight` exist.
     R07's `litBody.wgsl` trigonometry stays with main's deferred list (`decision-r08-f32.md` §9).
 
+- **Deviations in T6.c, as built** (2026-10-11). Design notes 5 and 8 in R05's kernels, the twin,
+  the oracle and the smoke, with `decision-r08-t6b-floor.md` §5 and §8, built on R08.T4.c's
+  absorber kinds (158303cf). Files as T6 lists them (`opticalDepth.test.ts`, `tables.test.ts`,
+  `hillaire.test.ts`, `tablesCpu.test.ts`), with `medium.ts` (the refusals lifted),
+  `absorbers.test.ts` (their tests rewritten, T4.c's pair refusal among them, and its shared
+  constants moved to the fixture), `absorbers.ts` and `engine/memory.ts` (docs) and a new shared
+  fixture, `test/atmosphereFixtures.ts`. `precision.test.ts` is unchanged: no height form or texel
+  mapping moved.
+  - _What the tables store._ The transmittance table's rgb is the optical depth of every term but
+    the absorbers; its alpha is absorber slot 0's amount as u ÷ U, the path's amount over the
+    absorber's own vertical amount (`absorbers.ts`'s `absorberVerticalAmount`: a column
+    absorber's column, molecules m⁻², or a pair absorber's pair column, pairs m⁻⁵). A second
+    `rgba16float` table at 256 × 64, "atmosphere absorber columns", holds slots 1–4 the same way.
+    The kernel holds every stored value to the half float's largest, 65,504, and the twin with it,
+    so that a path deeper than that stores a finite τ whose e^(−τ) is 0, never an infinity whose
+    bilinear read at the table's edge (inf × 0) is NaN (the science check's finding; a test holds
+    a Venus deck a hundred times as deep to it). It is always made, 128 KB
+    a body, and the curves add 19 KB a light: Design note 11 names the table but its 0.40 MB counts
+    neither, for R08.T11. u ÷ U keeps the half float in range (grazing columns are tens of U on
+    Earth-like air, 23 for R05's ozone tent and 74 for a well-mixed gas by the science check, and
+    up to 10³ for thin layers near the ground, where u itself would be 10²⁵ m⁻² and more) and puts
+    node j of every curve at u ÷ U = 10^(−3 + j ÷ 40) whatever U, so a kernel finds its node from
+    ln(u ÷ U) alone.
+  - _The curves._ Each light's curves of growth, `absorbers.ts`'s `absorberCurve` per absorber,
+    travel in an `rgba32float` texture, "atmosphere absorber curves", 241 × 5 a light slot: row
+    slot × 5 + k holds −ln T_c at each node. `f32`, since node 0, in the linear regime, holds depths
+    of 10⁻⁵–10⁻⁷, under the half float's least normal. A one-texel placeholder serves a medium with
+    no absorber. The kernels read them by `absorberTransmittance`'s rule, clamp included
+    (`common.wgsl`'s `curveDepth`: log–log between nodes, linear where a node is 0, proportional to
+    u below node 0, the last interval's power law beyond the last node, clamped to
+    [0, −ln 10⁻⁶]).
+    `tables.ts` refuses curves off that grid, of another count, of the other kind, or none for a
+    medium with absorbers (`checkAbsorberCurves`).
+  - _Pair absorbers_ (R08.T4.c, merged before T6.c's commit). A pair term rides an ordinary slot:
+    `absorberTerm` gives it the square of its column's relative density and U ÷ ∫ ρ² dz, its
+    n_A n_B at relative density 1, so the slot's n ∫ ρ ds along any path is its pair column, which
+    T4.c's curve reads as `{ kind: "pair", pairColumnPerM5 }`. No second stored quantity is
+    needed. The
+    packed n ÷ U, m⁻¹, is what lets it fit: Earth's O₂–O₂ column is about 1.2 × 10⁵³ m⁻⁵
+    (1.2 × 10⁴³ cm⁻⁵), past `f32`'s 3.4 × 10³⁸, while its n ÷ U is of a column absorber's order.
+    The oracle reads each amount by its curve's kind.
+  - _The four read sites_ (`source.wgsl`'s `tableTransmittance`, `multiScattering.wgsl`'s
+    `transmittanceToSun`, `composite.wgsl`'s `transmittanceToSpace`, `rayMarch.wgsl`'s ground hit)
+    all take `common.wgsl`'s `transmittanceThroughTables`: the stored τ and columns read
+    bilinearly at R08.T6.g's unit range through `texelUvFromUnit`, the light's curves added and
+    the sum exponentiated in `f32`. A static check holds that no other read of the table remains.
+  - _Every march's own path takes its absorbers_ (the task's text since §8.3.1; built first, when
+    the text named the four read sites alone). An absorber term's coefficients are 0, so a march
+    that took only the terms' extinction would have drawn its view path clear of every absorber,
+    unlabelled. Each march (sky view, aerial perspective, ray march and the multiple-scattering
+    directions) tracks its path's columns from its start and adds, a step, how much the step
+    deepens the whole path's curve depth (`absorberStep`; Design note 5's rule, the curve applied
+    to the path's column). The twin does the same (`TwinAbsorberPath`). The sun's path and the
+    view's path are each read through the curve apart, and their product is not the curve of their
+    summed column: lower in saturated bands (methane, about 10% in red at 2 × 3 km-amagat), and
+    slightly higher where the signed weights' negative lobes act (ozone's red, +1.5% at
+    2 × 10 × 300 DU; the science check, from `curves.json`). Design note 5 leaves it to the
+    spectral check. A medium with no absorber skips all of it: R05's Earth runs nothing new.
+  - _Not twinned still: the composite_ (T6.a's handoff asked for its `transmittanceToSpace` in the
+    twin). Its read is `transmittanceThroughTables` at the camera's height, the same function as
+    `tableTransmittance`, which every per-frame twin checks; its wiring (bindings 7 and 8,
+    `shell.y`) is held by `hillaire.test.ts`, and the smoke checks its frame finite and within
+    `rgba16float`'s range for every medium of R08.T6.b's frame checks, the four absorbers' among
+    them (`frameAgreements`; T6.g's frame check runs on Earth's medium, which has none). Nor does
+    `TwinSources.sunTransmittance` take a curve slot: the per-frame kernels read slot 0 until T7,
+    which adds both.
+  - _The curve slot_ (ruled 2026-10-10, `decision-r08-t6b-floor.md` §8, applied: T6.c's text and the
+    two Risks entries above). The multiple-scattering kernel takes its curves from `curveSlot()`,
+    the `Medium` uniform's `absorbers.y`, and its twin from `multiScatteringTwin`'s `curveSlot`;
+    both are `SHARED_TABLE_CURVE_SLOT`, 0. The per-frame kernels and `tableSources` read slot 0,
+    the one sun drawn until T7. §8.3's T7, T9.b and Provides text is the docs pass's.
+  - _Names beside the Provides._
+    - `tables.ts`: `ABSORBER_SLOTS` (5), `ABSORBER_CURVE_NODES` (241), `ABSORBER_CURVE_DEPTH_MAX`,
+      held equal to `absorbers.ts`'s constants by a test rather than imported, so that the render
+      thread's bundle does not take `crossSections.json`; `AbsorberCurveSlots`,
+      `NO_ABSORBER_CURVES`, `AbsorberSlot` (`verticalAmount`, an `AbsorberAmount`; `columnPerM`,
+      n ÷ U), `absorberSlots`, `absorberCount`, `checkAbsorberCurves`, `PackedTable`,
+      `packAbsorberCurves`, `SHARED_TABLE_CURVE_SLOT`; a private `amountValue`, so that the render
+      thread's bundle takes only types from `absorbers.ts`;
+      `packMediumUniform`'s `curveSlot`; `PlanetTableTextures.absorberColumns`; the getters
+      `absorberColumns`, `absorberCurves` and `curves`; a trailing `curves` on the constructor and
+      `setMedium` of both `AtmosphereTables` and `HillaireAtmosphere`.
+    - Packing: an absorber term carries its slot + 1 in `Term.absorption.w` and n ÷ U, m⁻¹, in
+      `Term.scattering.w`; the `Medium` uniform grows to 48 B with `absorbers : vec4f` (x the
+      count, y the curve slot); the composite's `shell.y` is the count.
+    - WGSL (`common.wgsl`): `ABSORBER_SLOTS`, `AbsorberColumns`, `termColumns`, `addColumns`,
+      `curveDepth`, `absorberDepth`, `AbsorberPath`, `absorberPathStart`, `absorberStep`,
+      `transmittanceThroughTables` (named apart from `transmittanceUnitAt`, the table's coordinate);
+      `medium.wgsl`: `absorberCount`, `curveSlot`, `MediumSample.columns`; `source.wgsl`:
+      `SampleMedium.columns`, `viewAbsorberStep`; the transmittance kernel's `RayToTop` and
+      `absorberColumnsOut`, the one of the two it declares. Every later kernel and the composite
+      declare `absorberColumns` and `absorberCurves`.
+    - `opticalDepth.ts`: `absorberAmounts` and `absorberAmountsToTop`, which return
+      `ReadonlyArray<AbsorberAmount>`, each of its term's kind, and `curvesOpticalDepth`, which
+      takes them; `opticalDepth` and `opticalDepthToTop` give every term but the absorbers.
+    - `test/atmosphereFixtures.ts`: `amountValue`, `DOBSON_UNIT_PER_M2`, `KM_AMAGAT_PER_M2`,
+      `EARTH_OXYGEN_FRACTION` and `planckBakeSpectrum` (moved from `absorbers.test.ts`),
+      `SUN_TEFF_K`, `linearAbsorberCurve`, `r05EarthWithOzoneAbsorber`, `earthLikeColumn`,
+      `fourAbsorberMedium`, `venusClassMedium`.
+    - `tablesCpu.ts`: `transmittanceTablesTwin`, `TwinTransmittance`; `PlanetTwin` extends it
+      (`absorberColumns`, `curves`); `planetTwin`'s `curves`; `multiScatteringTwin` takes a
+      `TwinTransmittance` and a trailing `curveSlot`; `TwinSources.absorberPathDepth`;
+      `curveOpticalDepth`, `curveDepth` in `f64`, which finds its node on the even grid as the
+      kernels do (`absorberTransmittance`'s search over 241 nodes a read cost the smoke its
+      watchdog), held equal to `absorberTransmittance` to 10⁻¹² by a test.
+    - `medium.ts`: `checkNoAbsorbers` is removed, and `extinction` returns an absorber's 0
+      coefficients, column or pair, its doc pointing to the curves.
+  - _The two exceptions, removed._
+    - R05.T12.e's gate ray "band, 20000 m, view zenith 94.441°, sun 95°/0°" is 0.22% at high's 75
+      steps (6.01% read as stored T; T6.g's scratch emulation estimated 1.29%), and
+      `T6C_EXCEPTION` is gone: the gate holds every ray at high's counts. Its worst rays are now
+      "limb, 0.3 H, sun 90°/0°" 2.92% and "high band, 99999 m, view zenith 99.879°, sun 90°/180°"
+      2.58%, both twilight rays; T6.g's second-worst, "band, 500 m, view zenith 90.703°, sun
+      90°/180°" (2.93% read as T), is under 1.68%.
+    - _The gate at low_: `LOW_TWIN_WORST` is R05.T12.e's single-scattering twin's figure, which
+      T6.c does not touch, so nothing is re-pinned. The N-term twin's worst at low's counts is
+      4.80% and 5.87% (ray march, ordinary and twilight), 8.20% and 15.28% (sky view below 50 km)
+      and 8.25% and 38.26% (60–100 km), within it, as T6.a's were (8.20%, 15.24% and 38.26%).
+    - The twin's stored sun transmittance holds 3% at every point to 5° and 0.3% from 45° up. The
+      stored read is now T6.g's "τ" row, signed, worst channel:
+
+      | From  | 0°     | 0.25°  | 1°     | 2°     | 5°     | 45°   | 85°   | 90°   |
+      | ----- | ------ | ------ | ------ | ------ | ------ | ----- | ----- | ----- |
+      | 2 m   | +0.36% | +1.44% | +1.83% | +1.56% | +1.01% | 0.18% | 0.13% | 0.13% |
+      | 20 m  | +0.47% | +0.66% | +0.93% | +0.85% | +0.62% | 0.13% | 0.09% | 0.09% |
+      | 200 m | +1.96% | +1.82% | +1.54% | +1.10% | +0.67% | 0.13% | 0.09% | 0.09% |
+      | 2 km  | −0.16% | −0.15% | −0.12% | −0.09% | −0.03% | 0.00% | 0.00% | 0.00% |
+
+      So the interim picture main accepted in T6.g (the horizon sun from 2 m +48.7% too bright,
+      +41.0% from 20 m) is gone, and Design note 19 says so.
+  - _The picture's move from T6.g_, Earth's twins (high, the sky view at 96 × 54, the march over a
+    surface 60 km ahead) with the table read as optical depth against R08.T6.g's bilinear read of
+    T, the worst signed change of any texel and channel above 10⁻³ of the largest: from 2 m,
+    −0.02% (sun 20°), −0.22% (2°), −1.11% (0.5°) and −0.11% (−2°) in the sky view, −0.02%,
+    −0.18%, −0.34% and −0.25% in the march; from 20 m at 2° and 0.5°, −0.27% and −1.41% in both;
+    from 200 m, −0.18% and −0.41% (sky), −0.22% and −0.41% (march); from 2 km at 20°, −0.02%. So
+    of T6.g's +10.4% at 0.5° from 2 m, the stored-T overshoot was about a tenth, and the rest is the
+    texel mapping's.
+  - _The regression._ R05's Earth with its ozone as an absorber (`r05EarthWithOzoneAbsorber`: R05's
+    tent, n_peak = 300 DU ÷ 15 km, a linear curve of R05's own three coefficients over n_peak)
+    reproduces R05's medium through the twin as R08.T6.g leaves it: 6.4 × 10⁻¹⁴ in T at every
+    texel, 2.1 × 10⁻¹⁴ in the multiple-scattering table and 1.3 × 10⁻¹⁵ in a sky view from 2 m with
+    the sun 4° up (asserted 10⁻³). A linear curve read log–log is exact. R05's coefficients are
+    Bruneton's and sebh's upward 10 nm bins; R08.T4.b's 1 nm centred bins sit +8.9%, −6.4% and
+    −16.2% from them, where T6.c's text gives `decisions-r05.md` item 2's ±5 nm centred bins'
+    +10%, −6% and −19%.
+  - _A Venus-class medium_ (`venusClassMedium`, a test's: 92 bar of CO₂ on column.test.ts's
+    radiative-convective profile with α 0.8, which Design note 3's refit has since moved to 0.88,
+    and a cloud deck of τ 30). Its full 256 × 64 table reaches τ = 2,510; 45,513 of its 49,152
+    channels have T under 2⁻²⁵ and would have stored 0 (measured). The unit test asserts on a
+    64 × 16 table that every τ is finite, under the half float's largest and within its half
+    precision, and that some stored T would have underflowed; the smoke holds the full table to
+    its twin.
+  - _Four absorbers, one a pair_ (`fourAbsorberMedium`: 270 DU of stratospheric ozone; 1 km-amagat
+    of methane in the whole column, which T4.c merges with Earth's well-mixed O₂ on the same
+    profile as "absorber:CH4+O2", O₂'s own bands having no cross-sections yet; the O₂–O₂ pair that
+    O₂ forms; and 30 DU of tropospheric ozone; under R08.T4.b's and T4.c's curves for a 5,772 K
+    Planck sun). They fill alpha and three channels of the second table. At 20,000 steps the
+    twin's amounts are the oracle's to 2.3 × 10⁻⁴ and its transmittance the oracle's
+    (`absorberAmountsToTop` through `curvesOpticalDepth`) to 3.9 × 10⁻⁵, as is the sun's read at
+    each texel. A sky-view ray along the horizon from 2 km, whose absorbers are 4.06, 1.41 and
+    0.063 in red, green and blue, takes its path's amounts through the curves to 2.0 × 10⁻⁴ of the
+    oracle's.
+  - _Found, for main (not fixed here): the kernel's 256 equal steps and an absorber layer's edges._
+    `absorbers.ts`'s `absorberTerm` ramps a layer to 0 over one of the column's levels, about 115 m,
+    and the transmittance kernel's 256 equal midpoint steps (R05's, `TRANSMITTANCE_SAMPLES`) span
+    up to 8.9 km on the top row's grazing rays. On the fixture's three column absorbers (before the
+    pair joined it) the table at 256 steps is up to 4.1% off its own 4,096-step value in T
+    (|Δτ| 0.042, texel (242, 63), red), and slot
+    0's column 27% off where it is small; vertically from the ground a layer between 120 and 5 hPa
+    holds 0.974 of its column. R05's smooth Earth is 0.27% at the same comparison. The kernel and
+    its twin agree (the smoke's check), so only the reference would see it. Lean: R08.T6.d, which
+    first draws such a layer (Earth's ozone through `absorberTerm`), splits each transmittance ray
+    at the layers' edges or places its steps by them, and R08.T13's gate measures it.
+  - _R05.T12.b's oracle in optical depth._ The 20 texels are held to 1% of τ, with the format's
+    2⁻²⁴ below its least normal in place of `HALF_NORMAL_MIN`, as the twin's own test is. In T
+    that allows τ% where R05 held 1%: looser for 1 < τ < 9.7, tighter beyond, where the old floor
+    carried the check. A quadrature's error is relative in τ, which is why 1% of τ was kept.
+  - _Recorded, as T6.c's text asks._ Storing τ in half is coarser in T than storing T for τ between
+    about 1 and 12 (half a step 3.9 × 10⁻³ of T at τ = 9.7, against 4.9 × 10⁻⁴; at worst 16 times,
+    as τ nears 12 ln 2 ≈ 8.3 and 13 ln 2 ≈ 9.0, T just under 2⁻¹² and 2⁻¹³, by the science check),
+    within Design note 8's 10⁻³τ; finer beyond τ = 12.2 (the ruling's figure; the
+    crossing is at τ = 17 ln 2 = 11.8, T = 7.6 × 10⁻⁶, by the science check), and finite where T
+    underflowed. The radiance tables keep the floor. The multiple-scattering table's end-to-end
+    figure over the twin's transmittance stays recorded, not held.
+  - _The smoke_ (SwiftShader, both variants, 2026-10-11). R05.T12.b's 20 oracle texels hold
+    within 1% of τ. R08.T6.b's media all hold their twins: R05's Earth, the tabulated medium, the
+    four absorbers (transmittance, absorber columns, multiple scattering and every per-frame
+    kernel on both settings) and the Venus-class transmittance (worst 0.53 × 10⁻³). The channels
+    whose stored T would have been under 2⁻¹⁴ hold their τ to 10⁻³: 1,834 on Earth's table (worst
+    4.84 × 10⁻⁴, at τ 16.1), 2,817 on the tabulated medium's, 1,635 on the four absorbers' and
+    45,627 on the Venus-class one's (worst 4.85 × 10⁻⁴, at τ 1,026). Every frame's composite is
+    finite and within `rgba16float`'s range, the four absorbers' included.
+    - _The absorber amounts' floor_ (a deviation from R08.T6.b's bound, for these channels only).
+      The first run held the amounts as every other channel, to 10⁻³ above 10⁻⁶ of the table's
+      largest, and failed at one channel each: 4.0 × 10⁻⁴ of U, 1.2 × 10⁻³ off (alpha, texel
+      (164, 48)), and 1.2 × 10⁻³ of U, 3.9 × 10⁻³ off (slot 3, texel (215, 29)). Both are slant
+      paths that clip a layer's ramp, about 115 m, whose few steps' `f32` heights stand some 0.1 m
+      from the twin's. The amounts are now held to 10⁻³ of themselves down to u ÷ U = 10⁻² and to
+      10⁻⁵ of U below (`ABSORBER_AMOUNT_FLOOR`): a curve of growth is concave, so that moves an
+      absorber's optical depth by at most 10⁻⁵ of its linear vertical depth.
+    - _Found, for main (not fixed here): the Venus-class multiple-scattering table._ It is NaN at
+      160 channels, where the twin gives 0. In its deep, nearly conservative CO₂, f_ms nears 1, so
+      Hillaire's L₂ ÷ (1 − f_ms) (`multiScattering.wgsl`, his eqs. 9 and 10) has 1 − f_ms round to 0
+      in `f32`: 0 ÷ 0 where the sun is down, and a series far from converged elsewhere. That is
+      Design note 9's thick case, whose source-function table (R08.T14) replaces the term, so the
+      smoke holds the Venus-class medium's transmittance tables alone. Lean: guard the
+      denominator in kernel and twin alike (1 − f_ms at least some ε) so that a thick world's
+      shared table stays finite until R08.T14, in R08.T6.d or T14.
+  - _For T6.d._ Earth's ozone becomes R08.T4.b's curve through `absorberTerm`; its curves come with
+    the medium (`HillaireAtmosphere`'s and `setMedium`'s `curves`), light slot 0 the Sun's. The
+    four-absorber fixture shows the path. Its layer is the first drawn with ramped edges, which
+    the kernel's 256 equal steps under-resolve (the finding above).
+  - _For T9.a, T9.b and R11._ The table holds τ of every term but the absorbers and each slot's
+    u ÷ U. A reader binds the tables' `absorberColumns` and `absorberCurves` beside `transmittance`
+    and reads through `common.wgsl`'s `transmittanceThroughTables` at the light's slot. Provides'
+    "stores optical depth, curves of growth included" reads as if the curves were folded into the
+    stored τ: the docs pass's to word. `aerialPerspective(view)` hands R11 the transmittance table;
+    it now needs `absorberColumns` and `absorberCurves` beside it, which R11's Consumes takes up
+    when R11 is re-validated.
+  - _For T7._ The per-frame kernels read light slot 0 in `tableTransmittance` and
+    `viewAbsorberStep`, and the composite in `transmittanceToSpace`, the disc's read; T7 gives each
+    source its slot there (§8.1 makes the disc per light), tracks one `AbsorberPath` per light in
+    every march, and builds the multiple-scattering layers through `curveSlot`.
+  - _For T6.f._ The absorber-column table takes the transmittance table's κ slices, 131 KB each,
+    Design note 11's second absorber table: a thin Saturn-class world's 655 KB of transmittance
+    becomes about 1.31 MB, which Design note 11's oblate figures do not yet count.
+  - _For T4.d._ Pressure-dependent curves widen `curveDepth` and `absorberDepth` (and the twin's
+    `absorberDepthInto`) to a Curtis–Godson pressure: the transmittance pass would accumulate each
+    slot's pressure-weighted column beside its column, and the curves texture take a pressure axis.
+    Every channel of the two tables is taken (alpha and the second table's four), so the
+    pressure-weighted columns need their own: two more `rgba16float` tables of 128 KB for five
+    slots (one, for four), in the transmittance kernel's outputs and every reader's bindings.
+
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7).
   - _The finding._ R05's sky view, aerial volume and ray march store radiance per unit of the
@@ -5284,18 +5530,25 @@ generator, and the reference's sampling needs no domain tag.
   up. R08.T11 records it, and if the budget misses there, the low sky drops planetshine while a
   star lies within the twilight limit, recorded.
 
-- **Which star's absorber curve the shared tables are built with** (open; `decision-r08-design.md`,
-  adjacent finding 3, noticed there and not checked). Design note 5 makes each absorber's curve of
-  growth per sun, and Design note 8 applies each sun's curve when the transmittance table is read.
-  But the per-planet multiple-scattering and irradiance tables (Design note 7; R08.T6, R08.T9.b)
-  are built once and shared by every sun, and their builds take the light to the sun through the
-  absorbers. The plan does not yet state which star's curve those builds use. R08.T6.c's and
-  R08.T9.b's agents settle it, and state it here, before they build.
+- **Which star's absorber curve the shared tables are built with: decided 2026-10-10**
+  (`decision-r08-t6b-floor.md` §8; `decision-r08-design.md`, adjacent finding 3).
+  - R08.T6.c builds the multiple-scattering table with light slot 0's curves, which is exact while
+    one sun is drawn.
+  - From R08.T7, under a medium with an absorber, the multiple-scattering and irradiance tables have
+    one layer per light slot, each built with its own star's curves. Each sun's transmittance,
+    view-path absorber depth and disc take its own curves. Planetshine takes slot 0's.
+  - The error avoided is the companion's. Its curves differ from a K5 primary's by 2.2% (red, 10 ×
+    300 DU of ozone) to 8.3% (30 ×) for an M3 companion, and by 3.9% to 15.5% from a G2 primary's.
+    This matters where it lights the sky alone: a circumbinary world's companion after the primary
+    sets, or an S-type companion at night.
+  - Cost: 8 KB and under 0.1 ms a layer, per planet, never per frame.
 - **`atmosphere_sun_transmittance`'s fifth argument** (`decision-r08-design.md` item 2 and
   adjacent finding 1). R08.T9.b gives it `curve : u32`, the light's absorber-curve slot, and adds
   `atmosphere_source_transmittance` for planetshine (Provides, "Tables and passes"). R10's plan
   still names the four-argument form (its Consumes, for R10.T10.b's `terrainLit.wgsl`), as R11's
   does. R10's re-validation must pick up the fifth argument, `curve`.
+  `atmosphere_sky_irradiance` gains the same `curve : u32` as a fourth argument
+  (`decision-r08-t6b-floor.md` §8), which R10's and R11's re-validations pick up with it.
 - **Refraction and scintillation are not drawn.** On Venus, refraction near the surface raises the
   horizon; R06 leaves scintillation to this plan, and the brainstorm asks for neither. If the
   realism ruling wants them, they are later tasks. R10 asks this plan for the sun's refracted

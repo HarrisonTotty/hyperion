@@ -60,10 +60,17 @@
 // table maps its unit ranges to its texels by Bruneton's exact pair (`unitFromTexelUv`,
 // `texelUvFromUnit`; plan R08, Design note 19, R08.T6.g), in place of sebh's sub-texel remap, whose
 // read did not invert its write, and of the transmittance table's none. The multiple-scattering
-// table's ground offset is a deliberate change from sebh's code (GROUND_OFFSET_M, below).
+// table's ground offset is a deliberate change from sebh's code (GROUND_OFFSET_M, below). The
+// transmittance table holds optical depth and the absorbers' columns, not Bevy's transmittance,
+// and each light's curves of growth are added on read (plan R08, Design notes 5 and 8, R08.T6.c).
 
 // The most terms a medium may have; `tables.ts` holds the same number and refuses more.
 const MAX_TERMS: u32 = 8u;
+
+// The most absorber slots a medium has (plan R08, Design note 8, R08.T6.c): the transmittance
+// table's alpha and the absorber-column table's four channels, `tables.ts`'s ABSORBER_SLOTS and
+// `absorbers.ts`'s ABSORBER_COLUMNS. A light's curves take this many rows of `absorberCurves`.
+const ABSORBER_SLOTS: u32 = 5u;
 
 // One term (plan R08, R08.T6.b): per-channel coefficients at unit density, m^-1, in the rgb of
 // `scattering` and `absorption`, its density profile and its phase function. The profile:
@@ -71,7 +78,12 @@ const MAX_TERMS: u32 = 8u;
 // 2 for tabulated (y the top of its table, m, read from the term's layer of `densityTables`,
 // `medium.wgsl`). The phase: phase.w 0 none, 1 Rayleigh with its depolarisation ratio per channel
 // in xyz (R08.T3.c), 2 Cornette–Shanks with its g in x, 3 tabulated per channel (the term's layer
-// of `phaseTables`, `source.wgsl`). A term's layer in either table is its index in `terms`.
+// of `phaseTables`, `source.wgsl`). A term's layer in either table is its index in `terms`. An
+// absorber (R08.T6.c, Design notes 5 and 8), whose rgb coefficients are 0 since it absorbs by its
+// curves of growth, carries its slot in absorption.w, 1 to ABSORBER_SLOTS for slots 0 to 4 and 0
+// for every other term, and in scattering.w n / U, m^-1: its number density at relative density
+// 1 over its vertical column, so that the density times it, integrated along a path, is the
+// path's column over the vertical one, u / U.
 struct Term {
   scattering : vec4f,
   absorption : vec4f,
@@ -79,21 +91,147 @@ struct Term {
   phase : vec4f,
 }
 
-// The medium's shell, its term count, a kernel's steps along each ray and the ground's albedo:
-// R05's `Medium` uniform without its terms, which travel in a storage buffer of MAX_TERMS terms
-// (R08.T6.b). The shell is its ground's radius and the atmosphere's height above it, formed in
-// f64 (R08.T6.g), so that no kernel forms the height as the top's radius less the ground's.
+// The medium's shell, its term count, a kernel's steps along each ray, the ground's albedo and its
+// absorber slots: R05's `Medium` uniform without its terms, which travel in a storage buffer of
+// MAX_TERMS terms (R08.T6.b). The shell is its ground's radius and the atmosphere's height above
+// it, formed in f64 (R08.T6.g), so that no kernel forms the height as the top's radius less the
+// ground's. absorbers.x is how many of its terms are absorbers, 0 to ABSORBER_SLOTS, and
+// absorbers.y the light slot whose curves of growth a per-planet table is built with, its
+// `curveSlot` (R08.T6.c; 0 until R08.T7 builds one multiple-scattering table a light slot,
+// `decision-r08-t6b-floor.md` section 8); z and w are unused.
 struct Medium {
   bottomRadiusM : f32,
   topHeightM : f32,
   termCount : f32,
   samples : f32,
   groundAlbedo : vec4f,
+  absorbers : vec4f,
+}
+
+// A path's absorber columns, each slot's u / U, the column crossed over the absorber's own vertical
+// column (plan R08, Design notes 5 and 8, R08.T6.c): slot 0 in `first`, which the transmittance
+// table keeps in its alpha, and slots 1 to 4 in `more`, which the absorber-column table keeps in
+// its rgba. As a medium's sample, the same per metre.
+struct AbsorberColumns {
+  first : f32,
+  more : vec4f,
 }
 
 struct MediumSample {
   scattering : vec3f,
   extinction : vec3f,
+  columns : AbsorberColumns,
+}
+
+// A term's absorber columns per metre at relative density d: its n / U times d in its slot, and
+// nothing for a term that is not an absorber.
+fn termColumns(term : Term, d : f32) -> AbsorberColumns {
+  let slot = term.absorption.w;
+  let column = term.scattering.w * d;
+  let more = abs(vec4f(slot) - vec4f(2.0, 3.0, 4.0, 5.0)) < vec4f(0.5);
+  return AbsorberColumns(
+    select(0.0, column, abs(slot - 1.0) < 0.5),
+    select(vec4f(0.0), vec4f(column), more),
+  );
+}
+
+// a + k b, slot by slot.
+fn addColumns(a : AbsorberColumns, b : AbsorberColumns, k : f32) -> AbsorberColumns {
+  return AbsorberColumns(a.first + k * b.first, a.more + k * b.more);
+}
+
+// --- Curves of growth (plan R08, Design notes 5 and 8, R08.T6.c) ----------------------------------
+// A light's curves of growth stand in `absorberCurves` (rgba32float, `tables.ts`): row
+// slot * ABSORBER_SLOTS + k is light slot `slot`'s curve for absorber slot k, its texel j the
+// optical depth -ln T_c per channel (rgb) at node j, u / U = 10^(-3 + j / 40), the grid of
+// `absorbers.ts`'s ABSORBER_CURVE_DECADES and ABSORBER_CURVE_NODES_PER_DECADE. `tables.ts` holds
+// the same constants and refuses a curve on another grid.
+
+// ln(u / U) at node 0: ln 10^-3.
+const CURVE_FIRST_LN : f32 = -6.907755278982137;
+// The nodes per unit of ln u: 40 / ln 10.
+const CURVE_NODES_PER_LN : f32 = 17.37177927613007;
+// The least transmittance a curve holds, 10^-6 (`absorbers.ts`'s ABSORBER_TRANSMITTANCE_FLOOR), as
+// an optical depth: -ln 10^-6.
+const CURVE_DEPTH_MAX : f32 = 13.815510557964274;
+
+// -ln T_c per channel through a path's column `x`, as u / U, from row `row` of `curves`: the read
+// rule of `absorbers.ts`'s absorberTransmittance. Linear in ln u on a log-log scale between the
+// nodes about it, linear between them where either is 0; proportional to u below the first node,
+// the linear regime; the last interval's power law beyond the last node; clamped to
+// [0, -ln 10^-6] as the curve is. 0 for no column.
+fn curveDepth(curves : texture_2d<f32>, row : u32, x : f32) -> vec3f {
+  if (x <= 0.0) {
+    return vec3f(0.0);
+  }
+  let nodes = textureDimensions(curves).x;
+  // The column's place on the grid, in nodes from node 0.
+  let node = (log(x) - CURVE_FIRST_LN) * CURVE_NODES_PER_LN;
+  var depth : vec3f;
+  if (node <= 0.0) {
+    // exp(ln u - ln u_0) = (u / U) / 10^-3.
+    depth = textureLoad(curves, vec2u(0u, row), 0).rgb * (x * 1000.0);
+  } else {
+    let k = min(u32(node), nodes - 2u);
+    let t = node - f32(k);
+    let a = textureLoad(curves, vec2u(k, row), 0).rgb;
+    let b = textureLoad(curves, vec2u(k + 1u, row), 0).rgb;
+    let logLog = exp(log(a) + (log(b) - log(a)) * t);
+    depth = select(a + (b - a) * t, logLog, (a > vec3f(0.0)) & (b > vec3f(0.0)));
+  }
+  return clamp(depth, vec3f(0.0), vec3f(CURVE_DEPTH_MAX));
+}
+
+// The absorbers' optical depth per channel through a path's columns under light slot `slot`'s
+// curves, summed over the medium's `count` absorber slots.
+fn absorberDepth(
+  curves : texture_2d<f32>,
+  count : u32,
+  slot : u32,
+  columns : AbsorberColumns,
+) -> vec3f {
+  var depth = vec3f(0.0);
+  if (count == 0u) {
+    return depth;
+  }
+  let base = slot * ABSORBER_SLOTS;
+  depth += curveDepth(curves, base, columns.first);
+  for (var k = 1u; k < min(count, ABSORBER_SLOTS); k++) {
+    depth += curveDepth(curves, base + k, columns.more[k - 1u]);
+  }
+  return depth;
+}
+
+// A march's absorber path: the columns crossed from the ray's start, and the optical depth the
+// light's curves give them. A curve of growth is not exponential in u, so a step's share is not
+// its own column's depth but how much it deepens the whole path's: Design note 5's rule, the curve
+// applied to the path's column.
+struct AbsorberPath {
+  columns : AbsorberColumns,
+  depth : vec3f,
+}
+
+fn absorberPathStart() -> AbsorberPath {
+  return AbsorberPath(AbsorberColumns(0.0, vec4f(0.0)), vec3f(0.0));
+}
+
+// The path one step longer: its columns grown by `local`, per metre, over `dtM`, and its depth
+// under light slot `slot`'s curves there. The step's optical depth is the new depth less the
+// path's, never negative since every curve is non-decreasing in u. A medium with no absorber keeps
+// the path as it was.
+fn absorberStep(
+  curves : texture_2d<f32>,
+  count : u32,
+  slot : u32,
+  path : AbsorberPath,
+  local : AbsorberColumns,
+  dtM : f32,
+) -> AbsorberPath {
+  if (count == 0u) {
+    return path;
+  }
+  let columns = addColumns(path.columns, local, dtM);
+  return AbsorberPath(columns, absorberDepth(curves, count, slot, columns));
 }
 
 // A march step's in-scattering factor g(x) = (1 - e^-x) / x per channel, x = sigma_t dt the step's
@@ -229,4 +367,26 @@ fn bilinear(table : texture_2d<f32>, uv : vec2f) -> vec4f {
 fn tableAtUnit(table : texture_2d<f32>, unit : vec2f) -> vec4f {
   let size = vec2f(textureDimensions(table));
   return bilinear(table, texelUvFromUnit(clamp(unit, vec2f(0.0), vec2f(1.0)), size));
+}
+
+// The transmittance at the transmittance table's unit range (`transmittanceUnitAt`) for light slot
+// `slot` (plan R08, Design notes 5 and 8, R08.T6.c): the stored optical depth (rgb) and slot 0's
+// column (alpha) read bilinearly, the absorber-column table's slots 1 to 4 likewise where the
+// medium has them, the light's curves of growth added to the optical depth, and the sum
+// exponentiated in f32, so that no light's transmittance is ever stored in rgba16float on its way
+// to a lit point or the disc. The read sites keep R08.T6.g's height forms and its texel mapping.
+fn transmittanceThroughTables(
+  depthTable : texture_2d<f32>,
+  columnTable : texture_2d<f32>,
+  curves : texture_2d<f32>,
+  count : u32,
+  slot : u32,
+  unit : vec2f,
+) -> vec3f {
+  let stored = tableAtUnit(depthTable, unit);
+  var columns = AbsorberColumns(stored.a, vec4f(0.0));
+  if (count > 1u) {
+    columns.more = tableAtUnit(columnTable, unit);
+  }
+  return exp(-(stored.rgb + absorberDepth(curves, count, slot, columns)));
 }

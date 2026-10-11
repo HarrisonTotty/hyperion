@@ -27,6 +27,10 @@
 // taken about the ray's closest approach t*, q_a (t - t*)^2 + Q*, with Q* = -disc / q_a from
 // Lagrange's identity and t - t* carried from the steps' own offsets (`marchStep`), where the
 // constant's own error would grow as h0 (`decision-r08-f32.md` section 4.2).
+//
+// Changes (plan R08, R08.T6.c, Design notes 5 and 8): the ray's own path takes its absorbers by
+// the path's column, under the sun's curves of growth (`viewAbsorberStep` in source.wgsl), and
+// the sun's transmittance, the bare ground's included, is the table's optical depth with them.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -37,6 +41,8 @@
 @group(0) @binding(6) var multiScattering : texture_2d<f32>;
 @group(0) @binding(7) var sceneDepth : texture_depth_2d;
 @group(0) @binding(8) var rayMarchOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(9) var absorberColumns : texture_2d<f32>;
+@group(0) @binding(10) var absorberCurves : texture_2d<f32>;
 
 // A ray's quadric about a shell of equatorial radius `radius`, in space scaled by
 // S = diag(1, 1, k) to a sphere of that radius: Q(t) = |S (P + t d)|^2 - radius^2 = qa t^2 +
@@ -161,6 +167,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let angle = scatteringAngle(dir, view.sun.xyz);
   var luminance = vec3f(0.0);
   var throughput = vec3f(1.0);
+  var path = absorberPathStart();
   for (var i = 0u; i < samples; i++) {
     let stepAt = marchStep(split, i);
     let dt = stepAt.dtM;
@@ -175,7 +182,9 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     let heightM = radialHeight(length(p), bigQ / a2);
     let muSun = dot(view.sun.xyz, normalAt(p, a, c));
     let local = sampleMediumAt(heightM, angle);
-    let stepDepth = local.extinction * dt;
+    let next = viewAbsorberStep(path, local, dt);
+    let stepDepth = local.extinction * dt + (next.depth - path.depth);
+    path = next;
     let stepTransmittance = exp(-stepDepth);
     let source = sourceAt(transmittance, multiScattering, view.tables.x, heightM, muSun, local);
     luminance += throughput * source * dt * stepFactor(stepDepth);

@@ -5,8 +5,8 @@
  *
  * @remarks
  * The transmittance table agrees with the `f64` oracle (`view/atmosphere/opticalDepth.ts`) to 1%
- * at 20 fixed texels, and every texel of both tables is finite, transmittance within [0, 1] and
- * multiple scattering non-negative. R05.T12.c adds whole frames of the atmosphere on both settings
+ * at 20 fixed texels, and every texel of both tables is finite, the transmittance table's optical
+ * depth and absorber columns non-negative (R08.T6.c) and multiple scattering non-negative. R05.T12.c adds whole frames of the atmosphere on both settings
  * (`checkAtmosphereFrames`) and, when the run is asked for them, the comparison frames of
  * Hillaire's reference medium that a person sets beside his published images
  * (`captureAtmosphere`). R05.T12.e holds the sky view and the ray march at their settings' step
@@ -15,6 +15,10 @@
  * and phase function the kernels read (`checkAtmosphereTwins`). R08.T6.g holds them there from 1 m
  * to 2 km and from orbit, on Earth, a 2 R⊕ sphere and a Saturn-radius sphere, in two arms: the
  * stored `rgba16float` tables and each kernel's own `rgba32float` output (`checkAtmosphereHeights`).
+ * Since R08.T6.c the transmittance table stores optical depth and the absorbers' columns: the oracle
+ * check compares optical depth, and R08.T6.b's check holds them, a medium of four absorbers (one a
+ * molecule pair) under their curves of growth among its media, and reports the channels a stored
+ * T had under 2⁻¹⁴ on Earth's table and a Venus-class one.
  */
 
 import { add, normalise, scale, type Vec3 } from "../geometry/vec3";
@@ -47,9 +51,12 @@ import {
   unitFromTexelUv,
 } from "../view/atmosphere/opticalDepth";
 import {
+  absorberCount,
+  type AbsorberCurveSlots,
   AtmosphereTables,
   kernelMedium,
   MULTI_SCATTERING_SIZE,
+  NO_ABSORBER_CURVES,
   PHASE_TABLE_ENTRIES,
   type TableSize,
   TRANSMITTANCE_SIZE,
@@ -69,10 +76,12 @@ import {
   skyViewTwin,
   tableSources,
   type TwinTable,
+  type TwinTransmittance,
   transmittanceTwin,
   type TwinView,
   twinView,
 } from "../view/atmosphere/tablesCpu";
+import { fourAbsorberMedium, venusClassMedium } from "../test/atmosphereFixtures";
 import {
   PresentationOnlyReadback,
   type RenderEngine,
@@ -97,12 +106,6 @@ import {
 
 /** The ground's radius the check builds Earth's tables on, m: WGS 84's mean radius R₁. */
 const EARTH_MEAN_RADIUS_M = 6_371_008.8;
-
-/**
- * Below rgba16float's least normal, 2⁻¹⁴, a stored transmittance has lost its relative precision,
- * so a texel whose oracle lies below it is held to that absolute floor instead of to 1%.
- */
-const HALF_NORMAL_MIN = 2 ** -14;
 
 /**
  * The 20 texels compared with the oracle: five across μ by four across r, each at its own (r, μ)
@@ -144,24 +147,24 @@ export async function checkAtmosphereTables(engine: RenderEngine, checks: Checks
       unitFromTexelUv((x + 0.5) / width, width),
       unitFromTexelUv((y + 0.5) / height, height),
     );
-    // The table holds every ray to the top, the tangent column's whole grazing path (R08.T6.g).
-    const expected = opticalDepthToTop(EARTH_REFERENCE, EARTH_MEAN_RADIUS_M, rM, mu).map((tau) =>
-      Math.exp(-tau),
-    );
+    // The table holds every ray to the top, the tangent column's whole grazing path (R08.T6.g), as
+    // optical depth since R08.T6.c: compared in optical depth, to 1% of it, or the half float's
+    // step below its least normal, where the top row's τ near 0 stands.
+    const expected = opticalDepthToTop(EARTH_REFERENCE, EARTH_MEAN_RADIUS_M, rM, mu);
     const actual = texel(transmittance, width, x, y).slice(0, 3);
     const agrees = expected.every((e, c) => {
       const a = actual[c] ?? Number.NaN;
-      return Math.abs(a - e) <= Math.max(0.01 * e, HALF_NORMAL_MIN);
+      return Math.abs(a - e) <= Math.max(0.01 * e, HALF_SUBNORMAL_SPACING);
     });
     checks.check(
-      `R05.T12.b transmittance texel (${x}, ${y}) agrees with the f64 oracle to 1%`,
+      `R05.T12.b transmittance texel (${x}, ${y}) agrees with the f64 oracle to 1% in optical depth`,
       agrees,
-      `h ${((rM - EARTH_MEAN_RADIUS_M) / 1_000).toFixed(2)} km, mu ${mu.toFixed(4)}: GPU ${show(actual)}, oracle ${show(expected)}`,
+      `h ${((rM - EARTH_MEAN_RADIUS_M) / 1_000).toFixed(2)} km, mu ${mu.toFixed(4)}: GPU τ ${show(actual)}, oracle τ ${show(expected)}`,
     );
   }
-  const inRange = transmittance.every((v) => Number.isFinite(v) && v >= 0 && v <= 1);
+  const inRange = transmittance.every((v) => Number.isFinite(v) && v >= 0);
   checks.check(
-    "R05.T12.b every transmittance texel is finite and within [0, 1]",
+    "R05.T12.b every stored optical depth and absorber column is finite and non-negative",
     inRange,
     `${transmittance.length / 4} texels, first ${show(transmittance.subarray(0, 4))}`,
   );
@@ -790,6 +793,19 @@ const TWIN_FLOOR = 1e-6;
  */
 const HALF_SUBNORMAL_SPACING = 2 ** -24;
 
+/**
+ * The absorber amount u ÷ U below which a stored amount is held to 10⁻³ of this floor, 10⁻⁵ of U,
+ * rather than of itself (R08.T6.c): 10⁻².
+ *
+ * @remarks
+ * A layer's density ramps to 0 over one of its column's levels, about 115 m, so a slant path that
+ * clips a ramp takes its whole small amount from a few steps whose f32 heights stand some 0.1 m
+ * from the twin's: 4 × 10⁻⁴ of U was 1.2 × 10⁻³ off in the first run, and 1.2 × 10⁻³ of U
+ * 3.9 × 10⁻³. A curve of growth is concave, so an amount's error moves its optical depth by at most
+ * the linear regime's: 10⁻⁵ of U moves it by at most 10⁻⁵ of the absorber's linear vertical depth.
+ */
+const ABSORBER_AMOUNT_FLOOR = 1e-2;
+
 /** One kernel's readback against its twin. */
 interface TwinAgreement {
   /** The worst |ΔL| as a fraction of what its texel's channel is allowed: at most 1 to agree. */
@@ -818,6 +834,8 @@ interface TwinOptions {
    * `rgba32float` output (the kernel arm), with none.
    */
   readonly arm: "stored" | "kernel";
+  /** The channels that hold absorber amounts u ÷ U, floored at {@link ABSORBER_AMOUNT_FLOOR}. */
+  readonly amountChannels?: ReadonlyArray<number>;
   /**
    * A texel's twin envelope, asked only of a texel with a channel over its bound, where the view
    * is from above the atmosphere's top; absent elsewhere, so that the bound holds outright.
@@ -839,7 +857,9 @@ interface ChannelCheck {
  * A readback against its twin, texel for texel: each channel's |GPU − twin| against
  * max(10⁻³ · max(|twin|, 10⁻⁶ · largest), 2⁻²⁴) for a stored table, and without the 2⁻²⁴ for a
  * kernel's own output, the largest taken over the colour channels, and over alpha apart when
- * `alpha` holds a quantity of its own (a mean transmittance).
+ * `alpha` holds a quantity of its own (a mean transmittance, or an absorber amount). The channels
+ * `options.amountChannels` names hold absorber amounts, floored at {@link ABSORBER_AMOUNT_FLOOR}
+ * of their own unit as well.
  *
  * @remarks
  * Where `options.envelope` gives a texel's envelope, a channel over its bound passes by it when the
@@ -868,6 +888,7 @@ function twinAgreement(
   const colourFloor = TWIN_FLOOR * colourLargest;
   const alphaFloor = TWIN_FLOOR * largest([3]);
   const halfFloor = options.arm === "stored" ? HALF_SUBNORMAL_SPACING : 0;
+  const amountChannels = options.amountChannels ?? [];
   const perSlice = twin.widthTexels * twin.heightTexels;
   const count = texels.length / 4;
   let worst = gpu.length === texels.length ? 0 : Number.POSITIVE_INFINITY;
@@ -887,7 +908,10 @@ function twinAgreement(
     const checked: ChannelCheck[] = channels.map((c) => {
       const expected = texels[i * 4 + c] ?? Number.NaN;
       const actual = gpu[i * 4 + c] ?? Number.NaN;
-      const floor = c === 3 ? alphaFloor : colourFloor;
+      const tableFloor = c === 3 ? alphaFloor : colourFloor;
+      const floor = amountChannels.includes(c)
+        ? Math.max(tableFloor, ABSORBER_AMOUNT_FLOOR)
+        : tableFloor;
       const relative = TWIN_TOLERANCE * Math.max(Math.abs(expected), floor);
       const allowed = Math.max(relative, halfFloor);
       const delta = Math.abs(actual - expected);
@@ -949,8 +973,9 @@ function checkTwin(
   gpu: Float32Array,
   twin: TwinTable,
   alpha: boolean,
+  options: TwinOptions = { arm: "stored" },
 ): void {
-  recordAgreement(checks, name, twinAgreement(gpu, twin, alpha));
+  recordAgreement(checks, name, twinAgreement(gpu, twin, alpha, options));
 }
 
 /** A Henyey–Greenstein phase of asymmetry g at each u = √(θ ÷ π) of a grid, sr⁻¹. */
@@ -1045,10 +1070,17 @@ interface TwinFrame {
 /**
  * R08.T6.b: every kernel's readback against the CPU twin (`tablesCpu.ts`) of the medium as the
  * kernels read it (`kernelMedium`), to 10⁻³ above 10⁻⁶ of the table's largest value, on R05's
- * Earth and on a medium of every profile and phase the kernels read.
+ * Earth and on a medium of every profile and phase the kernels read; since R08.T6.c also on a
+ * medium of four absorbers, one a molecule pair, under their curves of growth, and, for the
+ * transmittance tables alone, on a Venus-class medium.
  *
  * @remarks
- * The transmittance table is held to the twin of the medium alone. Each later kernel is held to
+ * The transmittance table, its optical depth and absorber columns (R08.T6.c), is held to the twin
+ * of the medium alone, as is the absorber-column table beside it. The Venus-class medium's
+ * multiple-scattering table is not held: in its deep, nearly conservative air f_ms nears 1, where
+ * Hillaire's series L₂ ÷ (1 − f_ms) diverges and `f32`'s 1 − f_ms rounds to 0 (0 ÷ 0 where the
+ * sun is down), the thick worlds' source-function table's case (plan R08's Risks, "Deviations in
+ * T6.c, as built"). Each later kernel is held to
  * its twin given the GPU's own tables as its inputs (the transmittance for the multiple
  * scattering, both for the per-frame kernels), so that each is judged on its own arithmetic and
  * not on the `rgba16float` rounding of what it reads; the multiple-scattering table's agreement
@@ -1059,67 +1091,175 @@ interface TwinFrame {
  * R08.T6.b left it: R08.T6.g's group (`checkAtmosphereHeights`) holds the kernels from 1 m.
  */
 export async function checkAtmosphereTwins(engine: RenderEngine, checks: Checks): Promise<void> {
-  for (const medium of [EARTH_REFERENCE, smokeTabulatedMedium()]) {
-    const read = kernelMedium(medium);
+  const absorbing = fourAbsorberMedium();
+  const venus = venusClassMedium();
+  const media: ReadonlyArray<TwinMedium> = [
+    { ...EARTH_ONLY, scope: "everything" },
+    {
+      medium: smokeTabulatedMedium(),
+      curves: NO_ABSORBER_CURVES,
+      radiusM: EARTH_MEAN_RADIUS_M,
+      scope: "everything",
+    },
+    { ...absorbing, radiusM: EARTH_MEAN_RADIUS_M, scope: "everything" },
+    {
+      medium: venus.medium,
+      curves: NO_ABSORBER_CURVES,
+      radiusM: venus.radiusM,
+      scope: "transmittance",
+    },
+  ];
+  for (const entry of media) {
+    const read = kernelMedium(entry.medium);
     // The harness's checks run in order: each medium's tables are read back before the next's.
     // oxlint-disable-next-line no-await-in-loop
-    await checkPlanetTwins(engine, checks, medium, read);
+    await checkPlanetTwins(engine, checks, entry, read);
+    if (entry.scope === "transmittance") {
+      continue;
+    }
     for (const setting of ["high", "low"] as const) {
       // Each setting's frames are read back before the next setting's atmosphere draws.
       // oxlint-disable-next-line no-await-in-loop
-      await checkFrameTwins(engine, checks, medium, read, setting);
+      await checkFrameTwins(engine, checks, entry, read, setting);
     }
   }
 }
 
-/** A per-planet table pair, read back. */
+/**
+ * A medium R08.T6.b's and T6.c's checks build tables for: with its lights' curves of growth, the
+ * radius of its tables' ground, and what is held: `everything`, its multiple-scattering table and
+ * its per-frame kernels too, or `transmittance`, its transmittance tables alone.
+ */
+interface TwinMedium {
+  readonly medium: AtmosphereMedium;
+  readonly curves: AbsorberCurveSlots;
+  readonly radiusM: number;
+  readonly scope: "everything" | "transmittance";
+}
+
+/** R05's Earth, on WGS 84's mean radius, with no absorber. */
+const EARTH_ONLY = {
+  medium: EARTH_REFERENCE,
+  curves: NO_ABSORBER_CURVES,
+  radiusM: EARTH_MEAN_RADIUS_M,
+} as const;
+
+/** A planet's per-planet tables, read back. */
 interface PlanetReadback {
+  /** The optical depths in rgb and absorber slot 0's column in alpha (R08.T6.c). */
   readonly transmittance: Float32Array;
+  /** Absorber slots 1 to 4's columns (R08.T6.c). */
+  readonly absorberColumns: Float32Array;
   readonly multiScattering: Float32Array;
 }
 
-/** Reads a planet's two tables back with the harness's tolerance access. */
+/** Reads a planet's tables back with the harness's tolerance access. */
 async function readPlanetTables(
   engine: RenderEngine,
   tables: AtmosphereTables,
 ): Promise<PlanetReadback> {
-  const transmittance = await engine.readTexture(tables.transmittance, 0, undefined, "tolerance");
-  const multiScattering = await engine.readTexture(
-    tables.multiScattering,
-    0,
-    undefined,
-    "tolerance",
-  );
-  return { transmittance: halfTexels(transmittance), multiScattering: halfTexels(multiScattering) };
+  const read = async (texture: TextureHandle): Promise<Float32Array> =>
+    halfTexels(await engine.readTexture(texture, 0, undefined, "tolerance"));
+  return {
+    transmittance: await read(tables.transmittance),
+    absorberColumns: await read(tables.absorberColumns),
+    multiScattering: await read(tables.multiScattering),
+  };
+}
+
+/** The GPU's stored transmittance tables as the twins read them, with the lights' curves. */
+function storedTransmittance(gpu: PlanetReadback, curves: AbsorberCurveSlots): TwinTransmittance {
+  return {
+    transmittance: asTwinTable(gpu.transmittance, TRANSMITTANCE_SIZE),
+    absorberColumns: asTwinTable(gpu.absorberColumns, TRANSMITTANCE_SIZE),
+    curves,
+  };
 }
 
 /**
- * The per-planet tables against the twin: the transmittance against the twin of the medium, the
- * multiple scattering against its twin over the GPU's transmittance, with its agreement with the
- * twin's own tables reported beside it.
+ * The optical depth above which the stored transmittance fell under rgba16float's least normal,
+ * 2⁻¹⁴: −ln 2⁻¹⁴ = 9.70, the channels the half float's floor carried while T was stored
+ * (`decision-r08-t6b-floor.md` §5).
+ */
+const SUBNORMAL_TRANSMITTANCE_DEPTH = 14 * Math.LN2;
+
+/** How the channels whose twin T was under 2⁻¹⁴ are held, now that the table stores τ. */
+interface DeepChannels {
+  readonly count: number;
+  /** The worst |Δτ| ÷ τ among them. */
+  readonly worst: number;
+  readonly at: string;
+}
+
+/** The transmittance table's channels whose twin τ exceeds {@link SUBNORMAL_TRANSMITTANCE_DEPTH}. */
+function deepChannels(gpu: Float32Array, twin: TwinTable): DeepChannels {
+  let count = 0;
+  let worst = 0;
+  let at = "none";
+  for (let i = 0; i < twin.texels.length; i += 4) {
+    for (const c of [0, 1, 2]) {
+      const tau = twin.texels[i + c] ?? Number.NaN;
+      if (tau > SUBNORMAL_TRANSMITTANCE_DEPTH) {
+        count += 1;
+        const e = Math.abs((gpu[i + c] ?? Number.NaN) - tau) / tau;
+        if (!(e <= worst)) {
+          worst = e;
+          const t = i / 4;
+          at = `(${t % twin.widthTexels}, ${Math.floor(t / twin.widthTexels)}) c${c} at τ ${tau.toPrecision(4)}`;
+        }
+      }
+    }
+  }
+  return { count, worst, at };
+}
+
+/**
+ * The per-planet tables against the twin: the transmittance, stored as optical depth since
+ * R08.T6.c, and the absorber columns against the twin of the medium; the multiple scattering
+ * against its twin over the GPU's transmittance tables, with its agreement with the twin's own
+ * tables reported beside it. The channels whose twin T is under 2⁻¹⁴ are reported with their worst
+ * |Δτ| ÷ τ (`decision-r08-t6b-floor.md` §5); on R05's Earth there are some.
  */
 async function checkPlanetTwins(
   engine: RenderEngine,
   checks: Checks,
-  medium: AtmosphereMedium,
+  entry: TwinMedium,
   read: AtmosphereMedium,
 ): Promise<void> {
-  const tables = new AtmosphereTables(engine, medium, EARTH_MEAN_RADIUS_M);
+  const { medium, curves, radiusM } = entry;
+  const tables = new AtmosphereTables(engine, medium, radiusM, curves);
   try {
     const gpu = await readPlanetTables(engine, tables);
-    const twin = planetTwin(read, EARTH_MEAN_RADIUS_M);
+    const twin = planetTwin(read, radiusM, curves);
+    const absorbers = absorberCount(medium) > 0;
     checkTwin(
       checks,
-      `${medium.name}: the transmittance table`,
+      `${medium.name}: the transmittance table, as optical depth${absorbers ? " and absorber slot 0's column" : ""},`,
       gpu.transmittance,
       twin.transmittance,
-      false,
+      absorbers,
+      { arm: "stored", amountChannels: [3] },
     );
-    const overGpu = multiScatteringTwin(
-      read,
-      EARTH_MEAN_RADIUS_M,
-      asTwinTable(gpu.transmittance, TRANSMITTANCE_SIZE),
+    if (absorberCount(medium) > 1) {
+      checkTwin(
+        checks,
+        `${medium.name}: the absorber-column table`,
+        gpu.absorberColumns,
+        twin.absorberColumns,
+        true,
+        { arm: "stored", amountChannels: [0, 1, 2, 3] },
+      );
+    }
+    const deep = deepChannels(gpu.transmittance, twin.transmittance);
+    checks.check(
+      `R08.T6.c ${medium.name}: the channels whose transmittance was under 2⁻¹⁴ hold their optical depth to 10⁻³`,
+      deep.worst <= TWIN_TOLERANCE && (medium !== EARTH_REFERENCE || deep.count > 0),
+      `${deep.count} channels with twin τ above ${SUBNORMAL_TRANSMITTANCE_DEPTH.toFixed(2)}; worst |Δτ| ÷ τ ${deep.worst.toExponential(2)} at ${deep.at}`,
     );
+    if (entry.scope === "transmittance") {
+      return;
+    }
+    const overGpu = multiScatteringTwin(read, radiusM, storedTransmittance(gpu, curves));
     const own = twinAgreement(gpu.multiScattering, overGpu, false);
     const endToEnd = twinAgreement(gpu.multiScattering, twin.multiScattering, false);
     checks.check(
@@ -1174,11 +1314,16 @@ function twinSizes(sizes: TableSizes): TableSizes {
   };
 }
 
-/** The three per-frame kernels' agreements with their twins over one frame. */
+/**
+ * The three per-frame kernels' agreements with their twins over one frame, and whether its
+ * composite, which reads the tables at the camera (`composite.wgsl`'s `transmittanceToSpace`) and
+ * has no twin, came out finite and within `rgba16float`'s range.
+ */
 interface FrameAgreements {
   readonly skyView: TwinAgreement;
   readonly aerial: TwinAgreement;
   readonly rayMarch: TwinAgreement;
+  readonly compositeWithinRange: boolean;
 }
 
 /** The per-planet tables an atmosphere built, read back, as the twins' planet for `read`. */
@@ -1192,7 +1337,7 @@ async function planetOf(
   return {
     medium: read,
     bottomRadiusM: tableRadiusM(figure),
-    transmittance: asTwinTable(tables.transmittance, TRANSMITTANCE_SIZE),
+    ...storedTransmittance(tables, atmosphere.tables.curves),
     multiScattering: asTwinTable(tables.multiScattering, MULTI_SCATTERING_SIZE),
   };
 }
@@ -1208,7 +1353,7 @@ async function frameAgreements(
 ): Promise<FrameAgreements> {
   const camera = equatorCamera(frame.heightM, FRAME_SIZE, figure);
   const sun = sunAt(frame.elevationDeg);
-  await compositeFrame(engine, atmosphere, camera, sun, frame.surfaceM);
+  const composite = await compositeFrame(engine, atmosphere, camera, sun, frame.surfaceM);
   const gpu = await readFrameOutputs(engine, atmosphere);
   const view = twinView(camera, sun, figure, NEAR_M);
   const aerial = aerialPerspectiveTwin(
@@ -1231,6 +1376,7 @@ async function frameAgreements(
       rayMarchTwin(planet, view, sizes, () => surfaceDepth),
       true,
     ),
+    compositeWithinRange: withinHalfRange(composite),
   };
 }
 
@@ -1251,7 +1397,7 @@ function recordAgreement(checks: Checks, name: string, result: TwinAgreement): v
 async function checkFrameTwins(
   engine: RenderEngine,
   checks: Checks,
-  medium: AtmosphereMedium,
+  entry: TwinMedium,
   read: AtmosphereMedium,
   setting: QualitySetting,
 ): Promise<void> {
@@ -1259,8 +1405,9 @@ async function checkFrameTwins(
     { name: "2 km, a surface 60 km ahead", heightM: 2_000, elevationDeg: 20, surfaceM: 60_000 },
     { name: "400 km, the limb", heightM: 400_000, elevationDeg: 5, surfaceM: null },
   ];
+  const medium = entry.medium;
   const sizes = twinSizes(TABLE_SIZES[setting]);
-  const atmosphere = new HillaireAtmosphere(engine, medium, sizes, WGS84);
+  const atmosphere = new HillaireAtmosphere(engine, medium, sizes, WGS84, entry.curves);
   try {
     const planet = await planetOf(engine, atmosphere, read, WGS84);
     for (const frame of frames) {
@@ -1271,6 +1418,11 @@ async function checkFrameTwins(
       recordAgreement(checks, `${label}: the sky view`, result.skyView);
       recordAgreement(checks, `${label}: the aerial perspective`, result.aerial);
       recordAgreement(checks, `${label}: the ray march`, result.rayMarch);
+      checks.check(
+        `R08.T6.c ${label}: the composite, its read of the tables at the camera, is finite and within rgba16float's range`,
+        result.compositeWithinRange,
+        result.compositeWithinRange ? "every channel" : "a channel is not",
+      );
     }
   } finally {
     atmosphere.dispose();
@@ -1737,9 +1889,9 @@ async function checkPlanetArms(
 ): Promise<PlanetTwin> {
   const bottomM = tableRadiusM(body.figure);
   const gpu = await readPlanetTables(engine, atmosphere.tables);
-  const storedTransmittance = asTwinTable(gpu.transmittance, TRANSMITTANCE_SIZE);
+  const stored = storedTransmittance(gpu, atmosphere.tables.curves);
   const transmittance = transmittanceTwin(read, bottomM);
-  const multiScattering = multiScatteringTwin(read, bottomM, storedTransmittance);
+  const multiScattering = multiScatteringTwin(read, bottomM, stored);
   const arm = atmosphere.tables.buildKernelArm();
   try {
     const armTransmittance = new Float32Array(
@@ -1751,13 +1903,13 @@ async function checkPlanetArms(
     const label = `${body.name}: the per-planet`;
     recordHeights(
       checks,
-      `${label} transmittance table`,
+      `${label} transmittance table, as optical depth`,
       twinAgreement(gpu.transmittance, transmittance, false),
       "stored",
     );
     recordHeights(
       checks,
-      `${label} transmittance table`,
+      `${label} transmittance table, as optical depth`,
       twinAgreement(armTransmittance, transmittance, false, { arm: "kernel" }),
       "kernel",
     );
@@ -1775,12 +1927,13 @@ async function checkPlanetArms(
     );
   } finally {
     engine.releaseTexture(arm.transmittance);
+    engine.releaseTexture(arm.absorberColumns);
     engine.releaseTexture(arm.multiScattering);
   }
   return {
     medium: read,
     bottomRadiusM: bottomM,
-    transmittance: storedTransmittance,
+    ...stored,
     multiScattering: asTwinTable(gpu.multiScattering, MULTI_SCATTERING_SIZE),
   };
 }

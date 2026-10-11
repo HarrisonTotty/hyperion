@@ -1,9 +1,10 @@
 // The atmosphere's medium, read in place (plan R05, Design note 16; plan R08, R08.T6.b): each term's
-// density at a height, the medium at a height, and the shell's forms (`common.wgsl`) on the
-// medium's own shell. Prepended, after `common.wgsl`, to every kernel, each of which declares the
-// medium's shell, its terms and their density tables as `var<uniform> medium : Medium;`,
-// `var<storage, read> terms : array<Term, MAX_TERMS>;` and `var densityTables :
-// texture_2d_array<f32>;` in group 0. The composite declares none and does not take this.
+// density at a height, the medium at a height with its absorbers' columns (R08.T6.c), and the
+// shell's forms (`common.wgsl`) on the medium's own shell. Prepended, after `common.wgsl`, to every
+// kernel, each of which declares the medium's shell, its terms and their density tables as
+// `var<uniform> medium : Medium;`, `var<storage, read> terms : array<Term, MAX_TERMS>;` and
+// `var densityTables : texture_2d_array<f32>;` in group 0. The composite declares none and does
+// not take this.
 //
 // The helpers read `medium` and `terms` where they are rather than taking them by value. A 416 B
 // `Medium` passed by value and indexed by a loop variable (`terms[i]`) is, most likely, copied into
@@ -53,18 +54,32 @@ fn densityOf(i : u32, profile : vec4f, heightM : f32) -> f32 {
   return tabulatedDensityOf(i, profile.y, h);
 }
 
-// The medium at a height above the ground.
+// The medium at a height above the ground: its scattering and extinction, m^-1, and its absorbers'
+// columns per metre (R08.T6.c), which an absorber adds in place of an extinction.
 fn mediumAtHeight(h : f32) -> MediumSample {
   var scattering = vec3f(0.0);
   var extinction = vec3f(0.0);
+  var columns = AbsorberColumns(0.0, vec4f(0.0));
   let count = min(u32(medium.termCount), MAX_TERMS);
   for (var i = 0u; i < count; i++) {
     let term = terms[i];
     let d = densityOf(i, term.profile, h);
     scattering += term.scattering.rgb * d;
     extinction += (term.scattering.rgb + term.absorption.rgb) * d;
+    columns = addColumns(columns, termColumns(term, d), 1.0);
   }
-  return MediumSample(scattering, extinction);
+  return MediumSample(scattering, extinction, columns);
+}
+
+// How many of the medium's terms are absorbers, each a slot of the absorber columns (R08.T6.c).
+fn absorberCount() -> u32 {
+  return min(u32(medium.absorbers.x), ABSORBER_SLOTS);
+}
+
+// The light slot whose curves of growth a per-planet table is built with (R08.T6.c): 0, the body's
+// brightest star, until R08.T7 builds a table a light slot.
+fn curveSlot() -> u32 {
+  return u32(medium.absorbers.y);
 }
 
 // r^2 - bottom^2 for a point `heightM` above the medium's ground (`shellAboveGround`).

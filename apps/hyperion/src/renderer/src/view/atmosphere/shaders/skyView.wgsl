@@ -20,7 +20,10 @@
 // (view.wgsl). Changes (plan R08, R08.T6.g, Design notes 18 and 19): the horizon's angle comes
 // formed in f64 (`view.exact.z`), the ray's direction from precise sines and cosines, the sun's
 // shadow and the tables' coordinates from heights (`sourceAt`), and the texels stand at
-// Bruneton's mapping, which is sebh's write.
+// Bruneton's mapping, which is sebh's write. Changes (plan R08, R08.T6.c, Design notes 5 and 8):
+// the view's own path takes its absorbers by the path's column, under the sun's curves of growth
+// (`viewAbsorberStep` in source.wgsl), and the sun's transmittance is the table's optical depth
+// with them.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -30,6 +33,8 @@
 @group(0) @binding(5) var transmittance : texture_2d<f32>;
 @group(0) @binding(6) var multiScattering : texture_2d<f32>;
 @group(0) @binding(7) var skyViewOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(8) var absorberColumns : texture_2d<f32>;
+@group(0) @binding(9) var absorberCurves : texture_2d<f32>;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id : vec3u) {
@@ -58,6 +63,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let split = marchSplit(0.0, tMax, -r * viewZenithCos, samples, true);
   var luminance = vec3f(0.0);
   var throughput = vec3f(1.0);
+  var path = absorberPathStart();
   for (var i = 0u; i < samples; i++) {
     let stepAt = marchStep(split, i);
     let dt = stepAt.dtM;
@@ -66,7 +72,9 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     let sampleHeightM = heightAlong(heightM, viewZenithCos, stepAt.tM, rP);
     let muSun = dot(sun, p / rP);
     let local = sampleMediumAt(sampleHeightM, angle);
-    let stepDepth = local.extinction * dt;
+    let next = viewAbsorberStep(path, local, dt);
+    let stepDepth = local.extinction * dt + (next.depth - path.depth);
+    path = next;
     let stepTransmittance = exp(-stepDepth);
     let source = sourceAt(
       transmittance,

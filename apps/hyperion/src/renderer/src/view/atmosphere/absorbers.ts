@@ -1392,8 +1392,8 @@ function layerDensity(
  * square of the column's relative density over its overlap, ramped alike, and its pair density at
  * relative density 1, n_A n_B there, is U ÷ ∫ ρ² dz, so that u = n ∫ ρ² ds along any path is its
  * pair column. Scattering and `absorption` are 0 and the phase `none`: the term's absorption is
- * each sun's −ln T_c(u), which the tables add from R08.T6.c (`medium.ts`'s `checkNoAbsorbers`
- * refuses it until then).
+ * each sun's −ln T_c(u), which the tables add on read from the amount they store in its slot
+ * (R08.T6.c; `tables.ts`'s `absorberSlots`).
  *
  * @throws RangeError for a spec whose layer lies outside the column, or whose vertical amount is
  *   not above 0.

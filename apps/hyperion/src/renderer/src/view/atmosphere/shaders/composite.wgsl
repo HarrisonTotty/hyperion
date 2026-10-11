@@ -19,6 +19,8 @@
 // in f64, in place of cos(theta) >= cos(rho), which f32 cannot resolve for a disc under 3.5e-4 rad
 // (the Sun beyond about 13 au) and whose builtin cos WGSL bounds only to 2^-11; every table is read
 // through Bruneton's texel mapping (Design note 19), the aerial volume's screen axes included.
+// Changes (plan R08, R08.T6.c, Design notes 5 and 8): the transmittance to space is the table's
+// optical depth with the sun's curves of growth, exponentiated here.
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -35,7 +37,8 @@ struct Draw {
   output : vec4f,
   sunOverSky : vec4f,
   exact : vec4f,
-  // x: the atmosphere's height H above the ground, m, formed in f64; y, z, w: unused.
+  // x: the atmosphere's height H above the ground, m, formed in f64; y: how many of the medium's
+  // terms are absorbers, 0 to ABSORBER_SLOTS (R08.T6.c); z, w: unused.
   shell : vec4f,
 }
 
@@ -47,6 +50,8 @@ struct Draw {
 @group(2) @binding(4) var rayMarch : texture_2d<f32>;
 @group(2) @binding(5) var transmittance : texture_2d<f32>;
 @group(2) @binding(6) var linearClamp : sampler;
+@group(2) @binding(7) var absorberColumns : texture_2d<f32>;
+@group(2) @binding(8) var absorberCurves : texture_2d<f32>;
 
 const HALF_MAX : f32 = 65504.0;
 
@@ -78,7 +83,10 @@ fn viewOf() -> AtmosphereView {
   );
 }
 
-// The transmittance from the camera along `dir` to space, per channel, on the tables' sphere.
+// The sun's transmittance from the camera along `dir` to space, per channel, on the tables'
+// sphere: the table's optical depth and absorber columns, with the sun's curves of growth (light
+// slot 0), exponentiated in f32 (`transmittanceThroughTables`, R08.T6.c), so that the disc's light
+// is never a stored half float.
 fn transmittanceToSpace(v : AtmosphereView, dir : vec3f) -> vec3f {
   let bottom = v.tables.x;
   let topM = draw.shell.x;
@@ -87,7 +95,11 @@ fn transmittanceToSpace(v : AtmosphereView, dir : vec3f) -> vec3f {
   if (groundHitFromHeight(bottom, heightM, mu)) {
     return vec3f(0.0);
   }
-  return tableAtUnit(transmittance, transmittanceUnitAt(bottom, topM, heightM, mu)).rgb;
+  let unit = transmittanceUnitAt(bottom, topM, heightM, mu);
+  let count = min(u32(draw.shell.y), ABSORBER_SLOTS);
+  return transmittanceThroughTables(
+    transmittance, absorberColumns, absorberCurves, count, 0u, unit
+  );
 }
 
 // The ray march's texel for this pixel: at full resolution its own; at half, of the four nearest,

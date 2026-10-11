@@ -3,7 +3,9 @@
 // past the first adds, per unit illuminance, under an isotropic phase function, whatever the terms'
 // own phase functions: Hillaire's isotropic table for `thin` worlds (plan R08, R08.T6.b). Follows
 // `common.wgsl` and `medium.wgsl`; reads the medium's terms, their density tables and the
-// transmittance table.
+// transmittance table, as optical depth with its absorber columns, and one light slot's curves of
+// growth (`curveSlot`, 0 in R08.T6.c), which the sun's transmittance and each direction's own path
+// take (plan R08, Design notes 5 and 8, R08.T6.c).
 //
 // Ported from Bevy 0.19.1's crates/bevy_pbr/src/atmosphere/multiscattering_lut.wgsl (MIT or
 // Apache-2.0; the notice is in common.wgsl) and checked against sebh's NewMultiScattCS and
@@ -45,6 +47,8 @@
 @group(0) @binding(2) var densityTables : texture_2d_array<f32>;
 @group(0) @binding(3) var transmittance : texture_2d<f32>;
 @group(0) @binding(4) var multiScatteringOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(5) var absorberColumns : texture_2d<f32>;
+@group(0) @binding(6) var absorberCurves : texture_2d<f32>;
 
 const PI : f32 = 3.14159265358979;
 const DIRECTIONS : u32 = 64u;
@@ -74,11 +78,19 @@ fn azimuthOf(k : u32) -> vec2f {
 var<workgroup> secondOrder : array<vec3f, DIRECTIONS>;
 var<workgroup> transfer : array<vec3f, DIRECTIONS>;
 
-// The sun's transmittance from a height above the ground, read on the table's sphere.
+// The sun's transmittance from a height above the ground, read on the table's sphere: its stored
+// optical depth and absorber columns, with light slot `curveSlot()`'s curves of growth,
+// exponentiated in f32 (R08.T6.c). The one table R08.T6.c builds is shared by every sun and built
+// with slot 0's curves, the body's brightest star's (plan R08's Risks, "Which star's absorber
+// curve the shared tables are built with"); R08.T7 builds one a light slot through `curveSlot`.
 fn transmittanceToSun(heightM : f32, muSun : f32) -> vec3f {
   let h = clamp(heightM, 0.0, medium.topHeightM);
   let unit = transmittanceUnitAt(medium.bottomRadiusM, medium.topHeightM, h, muSun);
-  return tableAtUnit(transmittance, unit).rgb;
+  let count = absorberCount();
+  let slot = curveSlot();
+  return transmittanceThroughTables(
+    transmittance, absorberColumns, absorberCurves, count, slot, unit
+  );
 }
 
 struct Integrated {
@@ -100,6 +112,7 @@ fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
   var luminance = vec3f(0.0);
   var transferSum = vec3f(0.0);
   var throughput = vec3f(1.0);
+  var path = absorberPathStart();
   for (var i = 0u; i < samples; i++) {
     let t = (f32(i) + 0.5) * dt;
     let p = origin + t * dir;
@@ -107,7 +120,10 @@ fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
     let muSun = dot(sun, p / rP);
     let sampleHeightM = heightAlong(heightM, mu, t, rP);
     let local = mediumAtHeight(sampleHeightM);
-    let stepDepth = local.extinction * dt;
+    // The direction's own path takes its absorbers by its column, under the sun's curves (R08.T6.c).
+    let next = absorberStep(absorberCurves, absorberCount(), curveSlot(), path, local.columns, dt);
+    let stepDepth = local.extinction * dt + (next.depth - path.depth);
+    path = next;
     let stepTransmittance = exp(-stepDepth);
     let lit = select(1.0, 0.0, groundHitFromHeight(bottom, max(sampleHeightM, 0.0), muSun));
     let source = lit * transmittanceToSun(sampleHeightM, muSun) * local.scattering / (4.0 * PI);

@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { amountValue, fourAbsorberMedium } from "../../test/atmosphereFixtures";
 import { forbiddenIn } from "../../test/atmosphereWgsl";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import type { AllocationEvent } from "../engine/memory";
 import { EngineUnavailable } from "../engine/resilientEngine";
+import {
+  ABSORBER_COLUMNS,
+  ABSORBER_CURVE_DECADES,
+  ABSORBER_CURVE_NODES_PER_DECADE,
+  ABSORBER_TRANSMITTANCE_FLOOR,
+  type AbsorberCurve,
+} from "./absorbers";
 import { hydrostaticColumn } from "./column";
 import { EARTH_REFERENCE, HILLAIRE_REFERENCE } from "./earth";
 import {
@@ -17,7 +25,12 @@ import {
   phaseTable,
   tabulatedDensity,
 } from "./medium";
+import commonWgsl from "./shaders/common.wgsl?raw";
 import {
+  ABSORBER_CURVE_DEPTH_MAX,
+  ABSORBER_CURVE_NODES,
+  ABSORBER_SLOTS,
+  absorberSlots,
   AtmosphereTables,
   DENSITY_TABLE_LEVELS,
   densityTableLevelsM,
@@ -26,6 +39,8 @@ import {
   MAX_TERMS,
   MULTI_SCATTERING_KERNEL,
   MULTI_SCATTERING_SAMPLES,
+  NO_ABSORBER_CURVES,
+  packAbsorberCurves,
   packDensityTables,
   packMedium,
   packMediumUniform,
@@ -33,6 +48,7 @@ import {
   PHASE_TABLE_ENTRIES,
   resampledDensity,
   resampledPhase,
+  SHARED_TABLE_CURVE_SLOT,
   TERMS_BUFFER_BYTES,
   TRANSMITTANCE_KERNEL,
   TRANSMITTANCE_SAMPLES,
@@ -121,8 +137,9 @@ describe("AtmosphereTables", () => {
       "atmosphere transmittance",
       "atmosphere multiple scattering",
     ]);
-    // The two tables, the two placeholders of a medium with nothing tabulated, the terms buffer.
-    expect(engine.counts.textures).toBe(4);
+    // The transmittance, absorber-column and multiple-scattering tables, the three placeholders
+    // of a medium with nothing tabulated and no absorber, and the terms buffer.
+    expect(engine.counts.textures).toBe(6);
     expect(engine.counts.buffers).toBe(1);
     expect(engine.textureSpecs.every((s) => s.category === "atmosphere-tables")).toBe(true);
   });
@@ -133,10 +150,16 @@ describe("AtmosphereTables", () => {
     const [transmittance, multiScattering] = engine.dispatched;
     expect(transmittance?.bindings.buffers).toEqual({ terms: tables.terms });
     expect(transmittance?.bindings.sampled).toEqual({ densityTables: tables.densityTables });
+    expect(transmittance?.bindings.storage).toEqual({
+      transmittanceOut: { texture: tables.transmittance, level: 0 },
+      absorberColumnsOut: { texture: tables.absorberColumns, level: 0 },
+    });
     expect(multiScattering?.bindings.buffers).toEqual({ terms: tables.terms });
     expect(multiScattering?.bindings.sampled).toEqual({
       densityTables: tables.densityTables,
       transmittance: tables.transmittance,
+      absorberColumns: tables.absorberColumns,
+      absorberCurves: tables.absorberCurves,
     });
     expect(transmittance?.bindings.uniforms["medium"]?.[3]).toBe(TRANSMITTANCE_SAMPLES);
     expect(multiScattering?.bindings.uniforms["medium"]?.[3]).toBe(MULTI_SCATTERING_SAMPLES);
@@ -239,7 +262,7 @@ describe("AtmosphereTables", () => {
     expect(tables.setMedium(HILLAIRE_REFERENCE, 6_360_000)).toBe(true);
     expect(tables.builds).toBe(3);
     expect(engine.counts.dispatches).toBe(6);
-    expect(engine.counts.textures).toBe(4);
+    expect(engine.counts.textures).toBe(6);
   });
 
   it("keeps the old key when a build fails, so the same medium is tried again", async () => {
@@ -266,7 +289,7 @@ describe("AtmosphereTables", () => {
     engine.onAllocation((e) => events.push(e));
     const above: AtmosphereMedium = { ...TABULATED, topHeightM: COLUMN.topHeightM + 1 };
     expect(() => new AtmosphereTables(engine, above, R)).toThrow(RangeError);
-    expect(destroyedNames(events)).toHaveLength(5);
+    expect(destroyedNames(events)).toHaveLength(7);
     engine.restore();
     expect(engine.counts.dispatches).toBe(0);
   });
@@ -275,7 +298,7 @@ describe("AtmosphereTables", () => {
     const engine = await countingRenderEngine();
     const tables = new AtmosphereTables(engine, TABULATED, R);
     engine.restore();
-    expect(engine.counts.textures).toBe(12);
+    expect(engine.counts.textures).toBe(16);
     expect(engine.counts.buffers).toBe(2);
     expect(engine.counts.kernels).toBe(4);
     expect(tables.builds).toBe(2);
@@ -290,7 +313,9 @@ describe("AtmosphereTables", () => {
 describe("packMediumUniform", () => {
   it("lays out the ground's radius, the atmosphere's height, the term count, the samples and the albedo", () => {
     const packed = packMediumUniform(EARTH_REFERENCE, 6_371_000, 128);
-    expect([...packed]).toEqual([6_371_000, 100_000, 3, 128, 0.1, 0.1, 0.1, 0].map(Math.fround));
+    expect([...packed]).toEqual(
+      [6_371_000, 100_000, 3, 128, 0.1, 0.1, 0.1, 0, 0, 0, 0, 0].map(Math.fround),
+    );
   });
 
   it("carries the atmosphere's height itself, not the top's radius (R08.T6.g)", () => {
@@ -628,11 +653,15 @@ describe("the kernel arm (R08.T6.g)", () => {
       `atmosphere transmittance (${KERNEL_ARM_FORMAT})`,
       `atmosphere multiple scattering (${KERNEL_ARM_FORMAT})`,
     ]);
-    const formats = engine.textureSpecs.slice(-2).map((spec) => spec.format);
-    expect(formats).toEqual([KERNEL_ARM_FORMAT, KERNEL_ARM_FORMAT]);
+    const formats = engine.textureSpecs.slice(-3).map((spec) => spec.format);
+    expect(formats).toEqual([KERNEL_ARM_FORMAT, KERNEL_ARM_FORMAT, KERNEL_ARM_FORMAT]);
     expect(engine.dispatched[0]?.bindings.storage["transmittanceOut"]?.texture).toBe(
       arm.transmittance,
     );
+    expect(engine.dispatched[0]?.bindings.storage["absorberColumnsOut"]?.texture).toBe(
+      arm.absorberColumns,
+    );
+    expect(engine.dispatched[1]?.bindings.sampled["absorberColumns"]).toBe(tables.absorberColumns);
     expect(engine.dispatched[1]?.bindings.sampled["transmittance"]).toBe(tables.transmittance);
     expect(engine.dispatched[1]?.bindings.storage["multiScatteringOut"]?.texture).toBe(
       arm.multiScattering,
@@ -646,5 +675,326 @@ describe("the kernel arm (R08.T6.g)", () => {
     const kernels = engine.counts.kernels;
     tables.buildKernelArm();
     expect(engine.counts.kernels).toBe(kernels);
+  });
+});
+
+// --- Optical depth and curves of growth (plan R08, Design notes 5 and 8, R08.T6.c) ----------------
+
+/** A `const NAME : f32 = …;` literal of `common.wgsl`. */
+function wgslConstant(name: string): number {
+  const found = new RegExp(`const ${name} : f32 = (-?[0-9.]+);`, "u").exec(commonWgsl);
+  return Number(found?.[1] ?? Number.NaN);
+}
+
+describe("the absorber slots' and curves' constants", () => {
+  it("are absorbers.ts's: its five columns, its curve grid and its floor", () => {
+    const [first, last] = ABSORBER_CURVE_DECADES;
+    expect([ABSORBER_SLOTS, ABSORBER_CURVE_NODES, ABSORBER_CURVE_DEPTH_MAX]).toEqual([
+      ABSORBER_COLUMNS,
+      (last - first) * ABSORBER_CURVE_NODES_PER_DECADE + 1,
+      -Math.log(ABSORBER_TRANSMITTANCE_FLOOR),
+    ]);
+  });
+
+  it("are common.wgsl's, its f64 literals narrowed to f32 once", () => {
+    const [first] = ABSORBER_CURVE_DECADES;
+    expect(commonWgsl).toContain(`const ABSORBER_SLOTS: u32 = ${ABSORBER_SLOTS}u;`);
+    expect(wgslConstant("CURVE_FIRST_LN")).toBeCloseTo(first * Math.LN10, 14);
+    expect(wgslConstant("CURVE_NODES_PER_LN")).toBeCloseTo(
+      ABSORBER_CURVE_NODES_PER_DECADE / Math.LN10,
+      13,
+    );
+    expect(wgslConstant("CURVE_DEPTH_MAX")).toBe(ABSORBER_CURVE_DEPTH_MAX);
+  });
+});
+
+describe("the absorber slots", () => {
+  const { medium } = fourAbsorberMedium();
+  const absorber = medium.terms.at(-1);
+  if (absorber?.absorber?.kind !== "column") {
+    throw new Error("the medium ends with a column absorber");
+  }
+  const own = absorber.absorber;
+
+  it("are the medium's absorber terms in their order, the pair among them", () => {
+    expect(
+      absorberSlots(medium).map((slot) => [slot.slot, slot.termIndex, slot.absorber.kind]),
+    ).toEqual([
+      [0, 2, "column"],
+      [1, 3, "column"],
+      [2, 4, "pair"],
+      [3, 5, "column"],
+    ]);
+  });
+
+  it("carry a pair absorber's n_A n_B ÷ U, though its U is beyond f32's range", () => {
+    const pair = absorberSlots(medium).find((slot) => slot.absorber.kind === "pair");
+    // Earth's O₂–O₂ column is about 1.2 × 10⁵³ m⁻⁵ (1.2 × 10⁴³ cm⁻⁵), f32's greatest value
+    // 3.4 × 10³⁸: n ÷ U, packed, is of the column absorbers' order.
+    expect(pair === undefined ? 0 : amountValue(pair.verticalAmount)).toBeGreaterThan(1e52);
+    expect(Math.fround(pair?.columnPerM ?? Number.NaN)).toBeCloseTo(pair?.columnPerM ?? 0, 9);
+  });
+
+  it("carry n ÷ U, whose product with the vertical column of relative density is 1", () => {
+    for (const slot of absorberSlots(medium)) {
+      // 1, but for methane's 10⁻⁶ above the medium's 100 km top.
+      const vertical = slot.columnPerM * columnLengthM(slot.term.density, medium.topHeightM);
+      expect(vertical).toBeCloseTo(1, 5);
+    }
+  });
+
+  it("are packed with each absorber's slot + 1 in absorption.w and its n ÷ U in scattering.w", () => {
+    const packed = packMedium(medium);
+    const slots = absorberSlots(medium);
+    expect(
+      slots.map((slot) => [termOf(packed, slot.termIndex)[7], termOf(packed, slot.termIndex)[3]]),
+    ).toEqual(slots.map((slot) => [slot.slot + 1, Math.fround(slot.columnPerM)]));
+  });
+
+  it("leave 0 in scattering.w and absorption.w for every term that is not an absorber", () => {
+    const packed = packMedium(medium);
+    expect([0, 1].map((i) => [termOf(packed, i)[3], termOf(packed, i)[7]])).toEqual([
+      [0, 0],
+      [0, 0],
+    ]);
+  });
+
+  it("refuse a sixth absorber, which no slot holds", () => {
+    const six: AtmosphereMedium = {
+      ...medium,
+      terms: Array.from({ length: 6 }, (_, k) => ({ ...absorber, name: `absorber ${k}` })),
+    };
+    expect(() => packMedium(six)).toThrow(/6 absorber terms; at most 5 fit/u);
+  });
+
+  it("refuse an absorber of no number density", () => {
+    const empty: AtmosphereMedium = {
+      ...medium,
+      terms: [{ ...absorber, absorber: { ...own, numberDensityPerM3: 0 } }],
+    };
+    expect(() => absorberSlots(empty)).toThrow(/a density and a vertical amount above 0/u);
+  });
+
+  it("refuse an absorber whose column is not a number", () => {
+    const unknown: AtmosphereMedium = {
+      ...medium,
+      terms: [
+        { ...absorber, absorber: { ...own, spec: { ...own.spec, columnPerM2: Number.NaN } } },
+      ],
+    };
+    expect(() => absorberSlots(unknown)).toThrow(/a density and a vertical amount above 0/u);
+  });
+
+  it("are counted, with the curve slot, in the Medium uniform's absorbers", () => {
+    expect([...packMediumUniform(medium, R, 64, 2).subarray(8)]).toEqual([4, 2, 0, 0]);
+  });
+
+  it("take the shared table's curve slot, 0, by default", () => {
+    expect(SHARED_TABLE_CURVE_SLOT).toBe(0);
+    expect(packMediumUniform(medium, R, 64)[9]).toBe(0);
+  });
+});
+
+describe("the lights' curves as the kernels read them", () => {
+  const { medium, curves } = fourAbsorberMedium();
+  const own = curves[0] ?? [];
+
+  it("stand a row an absorber slot, five rows a light", () => {
+    const table = packAbsorberCurves(medium, curves);
+    expect([table.widthTexels, table.heightTexels]).toEqual([ABSORBER_CURVE_NODES, ABSORBER_SLOTS]);
+    expect(packAbsorberCurves(medium, [own, own]).heightTexels).toBe(2 * ABSORBER_SLOTS);
+  });
+
+  it("hold each node's optical depth per channel in rgb and 0 in alpha", () => {
+    const table = packAbsorberCurves(medium, curves);
+    for (const [k, curve] of own.entries()) {
+      for (const j of [0, 120, 240]) {
+        const at = (k * ABSORBER_CURVE_NODES + j) * 4;
+        expect([...table.texels.subarray(at, at + 4)]).toEqual(
+          [curve.opticalDepth[0][j], curve.opticalDepth[1][j], curve.opticalDepth[2][j], 0].map(
+            (v) => Math.fround(v ?? Number.NaN),
+          ),
+        );
+      }
+    }
+  });
+
+  it("leave the rows past the medium's absorbers 0", () => {
+    const table = packAbsorberCurves(medium, curves);
+    expect(table.texels.subarray(4 * ABSORBER_CURVE_NODES * 4).every((v) => v === 0)).toBe(true);
+  });
+
+  it("are a one-texel placeholder for a medium with no absorber", () => {
+    expect(packAbsorberCurves(EARTH_REFERENCE, NO_ABSORBER_CURVES).texels).toHaveLength(4);
+  });
+
+  it("are refused for a medium with absorbers given none", () => {
+    expect(() => packAbsorberCurves(medium, NO_ABSORBER_CURVES)).toThrow(/no light's curves/u);
+  });
+
+  it("are refused where a light gives another count than the medium's absorbers", () => {
+    expect(() => packAbsorberCurves(medium, [own.slice(1)])).toThrow(/gives 3 curves/u);
+    expect(() => packAbsorberCurves(EARTH_REFERENCE, [own])).toThrow(/gives 4 curves/u);
+  });
+
+  it("are refused off the kernels' grid of 241 nodes", () => {
+    const [ozone, ...rest] = own;
+    if (ozone === undefined) {
+      throw new Error("the medium has its ozone's curve");
+    }
+    const coarse = { ...ozone, logColumns: ozone.logColumns.filter((_, j) => j % 2 === 0) };
+    expect(() => packAbsorberCurves(medium, [[coarse, ...rest]])).toThrow(
+      /not on the tables' grid/u,
+    );
+  });
+
+  it.each([
+    ["below 0", -1],
+    ["not a number", Number.NaN],
+    ["past the floor's −ln 10⁻⁶", 14],
+  ])("are refused with an optical depth %s", (_, depth) => {
+    const [ozone, ...rest] = own;
+    if (ozone === undefined) {
+      throw new Error("the medium has its ozone's curve");
+    }
+    const red = Float64Array.from(ozone.opticalDepth[0]);
+    red[120] = depth;
+    const bad: AbsorberCurve = {
+      ...ozone,
+      opticalDepth: [red, ozone.opticalDepth[1], ozone.opticalDepth[2]],
+    };
+    expect(() => packAbsorberCurves(medium, [[bad, ...rest]])).toThrow(
+      /its optical depths leave \[0, /u,
+    );
+  });
+
+  it("are refused with fewer optical depths than nodes", () => {
+    const [ozone, ...rest] = own;
+    if (ozone === undefined) {
+      throw new Error("the medium has its ozone's curve");
+    }
+    const short = ozone.opticalDepth[0].subarray(1);
+    const bad: AbsorberCurve = {
+      ...ozone,
+      opticalDepth: [short, ozone.opticalDepth[1], ozone.opticalDepth[2]],
+    };
+    expect(() => packAbsorberCurves(medium, [[bad, ...rest]])).toThrow(RangeError);
+  });
+
+  it("are refused in another absorber's slot, whose grid stands about another column", () => {
+    const [ozone, methane, pair, troposphere] = own;
+    if (
+      ozone === undefined ||
+      methane === undefined ||
+      pair === undefined ||
+      troposphere === undefined
+    ) {
+      throw new Error("the medium has its four curves");
+    }
+    expect(() => packAbsorberCurves(medium, [[methane, ozone, pair, troposphere]])).toThrow(
+      /not on the tables' grid/u,
+    );
+  });
+
+  it("are refused where a pair's curve stands in a column absorber's slot, or the reverse", () => {
+    const [ozone, methane, pair, troposphere] = own;
+    if (
+      ozone === undefined ||
+      methane === undefined ||
+      pair === undefined ||
+      troposphere === undefined
+    ) {
+      throw new Error("the medium has its four curves");
+    }
+    expect(() => packAbsorberCurves(medium, [[ozone, methane, troposphere, pair]])).toThrow(
+      /is a column absorber's, not a pair absorber's/u,
+    );
+  });
+});
+
+describe("AtmosphereTables with the lights' curves", () => {
+  const { medium, curves } = fourAbsorberMedium();
+  const own = curves[0] ?? [];
+
+  it("uploads the curves with the medium, a row an absorber slot", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, medium, R, curves);
+    const written = engine.textureWritten.find((w) => w.texture === tables.absorberCurves.name);
+    expect(written?.size).toEqual([ABSORBER_CURVE_NODES, ABSORBER_SLOTS, 1]);
+  });
+
+  it("follows the curves it was given", async () => {
+    const engine = await countingRenderEngine();
+    expect(new AtmosphereTables(engine, medium, R, curves).curves).toBe(curves);
+  });
+
+  it("does not rebuild for the same curves", async () => {
+    const engine = await countingRenderEngine();
+    expect(new AtmosphereTables(engine, medium, R, curves).setMedium(medium, R, curves)).toBe(
+      false,
+    );
+  });
+
+  it("rebuilds for new curves, its curves texture made at their shape", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, medium, R, curves);
+    expect(tables.setMedium(medium, R, [own, own])).toBe(true);
+    expect(engine.textureSpecs.at(-1)?.size).toEqual([ABSORBER_CURVE_NODES, 2 * ABSORBER_SLOTS]);
+  });
+
+  it("returns to the curves' placeholder for a medium with no absorber, releasing the curves", async () => {
+    const engine = await countingRenderEngine();
+    const events: AllocationEvent[] = [];
+    const tables = new AtmosphereTables(engine, medium, R, curves);
+    engine.onAllocation((e) => events.push(e));
+    engine.textureWritten.length = 0;
+    expect(tables.setMedium(EARTH_REFERENCE, R)).toBe(true);
+    expect(destroyedNames(events)).toContain(tables.absorberCurves.name);
+    const made = engine.textureSpecs.findLast((s) => s.name === tables.absorberCurves.name);
+    expect(made?.size).toEqual([1, 1]);
+    expect(engine.textureWritten.some((w) => w.texture === tables.absorberCurves.name)).toBe(false);
+  });
+
+  it("releases the old curves texture when new curves take another shape", async () => {
+    const engine = await countingRenderEngine();
+    const events: AllocationEvent[] = [];
+    const tables = new AtmosphereTables(engine, medium, R, curves);
+    engine.onAllocation((e) => events.push(e));
+    tables.setMedium(medium, R, [own, own]);
+    expect(destroyedNames(events)).toEqual([tables.absorberCurves.name]);
+  });
+
+  it("uploads its curves again when the engine restores", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, medium, R, curves);
+    engine.textureWritten.length = 0;
+    engine.restore();
+    expect(tables.builds).toBe(2);
+    const written = engine.textureWritten.find((w) => w.texture === tables.absorberCurves.name);
+    expect(written?.size).toEqual([ABSORBER_CURVE_NODES, ABSORBER_SLOTS, 1]);
+  });
+
+  it("follows curves a lost device refused, and builds them at the restore", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, R);
+    const lost = vi.spyOn(engine, "createTexture").mockImplementationOnce(() => {
+      throw new EngineUnavailable("createTexture");
+    });
+    expect(() => tables.setMedium(medium, R, curves)).toThrow(EngineUnavailable);
+    lost.mockRestore();
+    expect(tables.curves).toBe(curves);
+    engine.textureWritten.length = 0;
+    engine.restore();
+    expect(tables.builds).toBe(2);
+    const written = engine.textureWritten.find((w) => w.texture === tables.absorberCurves.name);
+    expect(written?.size).toEqual([ABSORBER_CURVE_NODES, ABSORBER_SLOTS, 1]);
+  });
+
+  it("builds the multiple-scattering table with the shared table's curve slot", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, medium, R, [own, own]);
+    const multiScattering = engine.dispatched.at(-1);
+    expect(multiScattering?.bindings.sampled["absorberCurves"]).toBe(tables.absorberCurves);
+    expect(multiScattering?.bindings.uniforms["medium"]?.[9]).toBe(SHARED_TABLE_CURVE_SLOT);
   });
 });

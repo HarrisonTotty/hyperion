@@ -6,6 +6,7 @@ import {
   CONVERGED,
   describeFailures,
   errorOf,
+  errors,
   failures,
   type Gate,
   gateRays,
@@ -27,7 +28,21 @@ import {
   sunTransmittance,
   twilight,
 } from "../../test/atmosphereGate";
+import {
+  amountValue,
+  fourAbsorberMedium,
+  planckBakeSpectrum,
+  r05EarthWithOzoneAbsorber,
+  venusClassMedium,
+} from "../../test/atmosphereFixtures";
 import { quaternion } from "../camera/quaternion";
+import { fromHalfBits, HALF_MAX, toHalfBits } from "../sky/half";
+import {
+  type AbsorberCurve,
+  absorberCurve,
+  absorberTransmittance,
+  scaledAmount,
+} from "./absorbers";
 import { hydrostaticColumn } from "./column";
 import { EARTH_REFERENCE } from "./earth";
 import {
@@ -37,7 +52,7 @@ import {
   TABLE_SIZES,
   tableRadiusM,
 } from "./hillaire";
-import { marchSplit, marchStep } from "./marchSteps";
+import { marchSplit, marchStep, TWILIGHT_TOLERANCE } from "./marchSteps";
 import {
   type AtmosphereMedium,
   type MediumTerm,
@@ -46,6 +61,9 @@ import {
   tabulatedDensity,
 } from "./medium";
 import {
+  absorberAmounts,
+  absorberAmountsToTop,
+  curvesOpticalDepth,
   maxDistanceM,
   opticalDepth,
   opticalDepthToTop,
@@ -56,9 +74,16 @@ import {
 } from "./opticalDepth";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
-import { MULTI_SCATTERING_SIZE, TRANSMITTANCE_SIZE } from "./tables";
+import type { BakeSpectrum } from "./spectralColour";
+import {
+  absorberSlots,
+  MULTI_SCATTERING_SIZE,
+  NO_ABSORBER_CURVES,
+  TRANSMITTANCE_SIZE,
+} from "./tables";
 import {
   aerialPerspectiveTwin,
+  curveOpticalDepth,
   kernelOpticalDepth,
   marchTwin,
   MULTI_SCATTERING_DIRECTIONS,
@@ -77,6 +102,8 @@ import {
   type TwinRay,
   type TwinSources,
   type TwinTable,
+  type TwinTransmittance,
+  transmittanceTablesTwin,
   transmittanceTwin,
   twinView,
   type TwinView,
@@ -94,6 +121,8 @@ let earth: PlanetTwin = {
   medium: EARTH_REFERENCE,
   bottomRadiusM: R1,
   transmittance: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
+  absorberColumns: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
+  curves: [],
   multiScattering: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
 };
 
@@ -177,6 +206,9 @@ const R05_SOURCES: TwinSources = {
   multiScattering: (_heightM, _muSun, out) => {
     out.fill(0);
   },
+  absorberPathDepth: (_columns, out) => {
+    out.fill(0);
+  },
 };
 
 describe("R05's constants as a medium", () => {
@@ -226,7 +258,7 @@ describe("R05's constants as a medium", () => {
     expect(off).toEqual([]);
   });
 
-  it("hold R05.T12.b's 20 texels within its 1% of the oracle at the kernel's 256 steps", () => {
+  it("hold R05.T12.b's 20 texels within its 1% of the oracle's optical depth at the kernel's 256 steps", () => {
     const table = earth.transmittance;
     const shell = { bottomRadiusM: R1, topRadiusM: R1 + EARTH_REFERENCE.topHeightM };
     let worst = 0;
@@ -238,8 +270,9 @@ describe("R05's constants as a medium", () => {
       );
       const oracle = opticalDepthToTop(EARTH_REFERENCE, R1, rM, mu);
       for (const c of CHANNELS) {
+        // The table stores optical depth since R08.T6.c; the top row's zenith ray holds none.
         const twin = table.texels[(y * table.widthTexels + x) * 4 + c] ?? Number.NaN;
-        worst = Math.max(worst, Math.abs(twin / Math.exp(-oracle[c]) - 1));
+        worst = Math.max(worst, oracle[c] === 0 ? Math.abs(twin) : Math.abs(twin / oracle[c] - 1));
       }
     }
     // Recorded in plan R08's Risks ("Deviations in T6.a, as built"): the midpoint rule's own error.
@@ -250,18 +283,17 @@ describe("R05's constants as a medium", () => {
 // --- R05.T12.e's gate, with the multiple-scattering term -----------------------------------------
 
 /**
- * The one ray the gate's 5% for twilight rays does not hold since R08.T6.g's texel mapping, pinned
- * at its measured e (main's ruling, 2026-10-10; plan R08's Risks, "Deviations in T6.g, as built").
+ * The ray R08.T6.g pinned as the gate's one exception (`T6C_EXCEPTION`, 6.02%), which R08.T6.c
+ * removes (plan R08's Risks, "Deviations in T6.g, as built" and "Deviations in T6.c, as built").
  *
  * @remarks
- * Its e at high's 75 sky-view steps was under 0.76% with R05's mapping and is 6.01% with
- * Bruneton's. The mapping puts the transmittance table's last column on the ray tangent to the
- * ground, where T falls by orders of magnitude between texels, and the twin, like the kernels,
- * reads T bilinearly; R05's clamp held a ray 1.1′ higher there and hid it. Read as optical depth,
- * bilinearly and then exponentiated, as R08.T6.c stores it, the ray is 1.29% at 75 steps (a
- * scratch emulation). R08.T6.c removes this exception, and its acceptance requires it gone.
+ * Bruneton's texel mapping puts the transmittance table's last column on the ray tangent to the
+ * ground, where T falls by orders of magnitude between texels. Read bilinearly as T, as it was
+ * stored until R08.T6.c, the ray stood at 6.01% at high's 75 sky-view steps; the stored optical
+ * depth, read bilinearly and exponentiated, holds it at 0.22% (measured 2026-10-11), within the
+ * twilight rays' 5%.
  */
-const T6C_EXCEPTION = { name: "band, 20000 m, view zenith 94.441°, sun 95°/0°", e: 0.0602 };
+const T6G_PINNED_RAY = "band, 20000 m, view zenith 94.441°, sun 95°/0°";
 
 describe("the sky view's and the march's twins under R05.T12.e's quadrature gate", () => {
   let gate: Gate = { results: [], lMax: new Map() };
@@ -310,13 +342,13 @@ describe("the sky view's and the march's twins under R05.T12.e's quadrature gate
   });
 
   it("holds every ray within 2%, and twilight rays within 5%, at high's counts", () => {
-    const failed = failures(gate, HIGH);
-    expect(describeFailures(failed.filter(({ ray }) => ray.name !== T6C_EXCEPTION.name))).toEqual(
-      [],
-    );
-    // The one recorded exception, held at its measured e so that it cannot grow.
-    const excepted = failed.find(({ ray }) => ray.name === T6C_EXCEPTION.name);
-    expect(excepted?.e ?? 0).toBeLessThanOrEqual(T6C_EXCEPTION.e);
+    expect(describeFailures(failures(gate, HIGH))).toEqual([]);
+  });
+
+  it("holds R08.T6.g's pinned twilight ray within its 5%, with no exception (R08.T6.c)", () => {
+    const pinned = errors(gate, HIGH).find(({ ray }) => ray.name === T6G_PINNED_RAY);
+    expect(pinned).toBeDefined();
+    expect(pinned?.e ?? Number.NaN).toBeLessThanOrEqual(TWILIGHT_TOLERANCE);
   });
 
   it("keeps low's counts within the bounds low's GPU agreement check holds them to", () => {
@@ -363,7 +395,7 @@ describe("the multiple-scattering kernel's steps", () => {
     multiScatteringTwin(
       EARTH_REFERENCE,
       R1,
-      earth.transmittance,
+      earth,
       { ...MULTI_SCATTERING_KERNEL_OPTIONS, ...options },
       MEASURED_TEXELS,
     );
@@ -419,7 +451,7 @@ describe("the multiple-scattering kernel's step factor", () => {
   it("moves the f32 table by up to 5% through the old form's cancellation, and the new by 10⁻⁶", () => {
     const exact = earth.multiScattering;
     const withFactor = (stepFactor: (x: number) => number): TwinTable =>
-      multiScatteringTwin(EARTH_REFERENCE, R1, earth.transmittance, {
+      multiScatteringTwin(EARTH_REFERENCE, R1, earth, {
         ...MULTI_SCATTERING_KERNEL_OPTIONS,
         stepFactor,
       });
@@ -525,15 +557,19 @@ function sunAt(elevationDeg: number): SunState {
   };
 }
 
+/** A small transmittance table for the tests that build many. */
+const SMALL_TRANSMITTANCE = { widthTexels: 32, heightTexels: 8 } as const;
+
 /** Every twin's output for a medium, at small sizes, from a camera at 3 km and from 300 km. */
 function everyTwin(m: AtmosphereMedium): readonly TwinTable[] {
-  const transmittance = transmittanceTwin(m, R1, { widthTexels: 32, heightTexels: 8 }, 64);
-  const multiScattering = multiScatteringTwin(m, R1, transmittance, {
+  const tables = transmittanceTablesTwin(m, R1, NO_ABSORBER_CURVES, SMALL_TRANSMITTANCE, 64);
+  const multiScattering = multiScatteringTwin(m, R1, tables, {
     ...MULTI_SCATTERING_KERNEL_OPTIONS,
     size: { widthTexels: 8, heightTexels: 8 },
     samples: 16,
   });
-  const planet: PlanetTwin = { medium: m, bottomRadiusM: R1, transmittance, multiScattering };
+  const planet: PlanetTwin = { medium: m, bottomRadiusM: R1, ...tables, multiScattering };
+  const transmittance = tables.transmittance;
   const low = twinView(equatorCamera(WGS84, 3_000), sunAt(20), WGS84, 0.1);
   const high = twinView(equatorCamera(WGS84, 300_000), sunAt(5), WGS84, 0.1);
   const settings = { ...TABLE_SIZES.low, rayMarchSamples: 24 };
@@ -626,10 +662,11 @@ describe("tabulated densities and phases", () => {
     const view = twinView(equatorCamera(WGS84, 2), sunAt(30), WGS84, 0.1);
     const sky = (term: MediumTerm): TwinTable => {
       const m = medium([term]);
-      const transmittance = transmittanceTwin(m, R1, { widthTexels: 64, heightTexels: 16 }, 64);
-      const multiScattering = multiScatteringTwin(m, R1, transmittance);
+      const size = { widthTexels: 64, heightTexels: 16 };
+      const tables = transmittanceTablesTwin(m, R1, NO_ABSORBER_CURVES, size, 64);
+      const multiScattering = multiScatteringTwin(m, R1, tables);
       return skyViewTwin(
-        { medium: m, bottomRadiusM: R1, transmittance, multiScattering },
+        { medium: m, bottomRadiusM: R1, ...tables, multiScattering },
         view,
         { widthTexels: 24, heightTexels: 16 },
         32,
@@ -651,7 +688,7 @@ describe("tabulated densities and phases", () => {
     const term: MediumTerm = { ...GAS, density: column.density };
     const fits: AtmosphereMedium = { ...medium([term]), topHeightM: column.topHeightM };
     const tables = transmittanceTwin(fits, R1, { widthTexels: 16, heightTexels: 8 }, 64);
-    expect(tables.texels.every((v) => Number.isFinite(v) && v > 0 && v <= 1)).toBe(true);
+    expect(tables.texels.every((v) => Number.isFinite(v) && v >= 0)).toBe(true);
     const over: AtmosphereMedium = { ...fits, topHeightM: column.topHeightM + 1 };
     expect(() => transmittanceTwin(over, R1)).toThrow(RangeError);
     expect(() => planetTwin(over, R1)).toThrow(/holds a density/);
@@ -799,10 +836,11 @@ describe("Earth's tables at R05's sizes", () => {
     expect([multiScattering.widthTexels, multiScattering.heightTexels]).toEqual([32, 32]);
   });
 
-  it("keeps every transmittance texel finite and within [0, 1]", () => {
-    expect(earth.transmittance.texels.every((v) => Number.isFinite(v) && v >= 0 && v <= 1)).toBe(
-      true,
-    );
+  it("keeps every stored optical depth finite and non-negative, and no absorber column", () => {
+    const texels = earth.transmittance.texels;
+    expect(texels.every((v) => Number.isFinite(v) && v >= 0)).toBe(true);
+    expect(texels.filter((_, i) => i % 4 === 3).every((column) => column === 0)).toBe(true);
+    expect(earth.absorberColumns.texels.every((v) => v === 0)).toBe(true);
   });
 
   it("keeps every multiple-scattering texel finite and non-negative", () => {
@@ -969,27 +1007,17 @@ function largestOf(table: TwinTable): number {
   return largest;
 }
 
-/**
- * A table read as optical depth: −ln T per colour channel, as R08.T6.c stores it, so that a
- * bilinear read interpolates τ and the caller exponentiates.
- */
-function asOpticalDepth(table: TwinTable): TwinTable {
-  return {
-    ...table,
-    texels: table.texels.map((v, i) => (i % 4 === 3 ? v : -Math.log(Math.max(v, 1e-300)))),
-  };
-}
-
 describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
   // A read stands within about 10⁻¹² of a texel of its centre in f64, so a texel beside one 10⁵ to
   // 10⁷ times larger reads back off by that much of itself: T near 10⁻¹⁸ at the grazing column,
   // multiple scattering near 10⁻²² on the night side. They are held to 10⁻⁹ of the twin bound's
   // floor, 10⁻⁶ of the table's largest (Verification), far under anything a table stores.
-  it("reads every transmittance texel back at its own (h, μ) to 10⁻⁹", () => {
+  it("reads every transmittance texel back at its own (h, μ) to 10⁻⁹, as e^(−τ) of its τ", () => {
     const sources = tableSources(earth);
     const shell = { bottomRadiusM: R1, topRadiusM: R1 + EARTH_REFERENCE.topHeightM };
     const { widthTexels: w, heightTexels: h } = earth.transmittance;
-    const floor = 1e-6 * largestOf(earth.transmittance);
+    // The table's largest transmittance is 1, at the top row's zenith.
+    const floor = 1e-6;
     const out: Rgb3 = [0, 0, 0];
     let worst = 0;
     for (let y = 0; y < h; y += 1) {
@@ -1001,7 +1029,7 @@ describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
         );
         sources.sunTransmittance(rM - R1, mu, out);
         for (const c of CHANNELS) {
-          const stored = texelOf(earth.transmittance, x, y, c);
+          const stored = Math.exp(-texelOf(earth.transmittance, x, y, c));
           worst = Math.max(worst, Math.abs(out[c] - stored) / Math.max(stored, floor));
         }
       }
@@ -1032,12 +1060,13 @@ describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
     expect(worst).toBeLessThan(1e-9);
   });
 
-  // Read as T, as the table is stored until R08.T6.c, the bottom rows and last columns change by
-  // ×3 (red) to ×10 (blue) a texel near the horizon, and a bilinear read overshoots: from 2, 20
-  // and 200 m at 0°, +48.7%, +41.0% and +12.0% (R05's mapping: −37.5%, +50.1% and +12.3%).
-  // Read as optical depth, as T6.c stores it, the same table holds 3% at every point, the
-  // estimate of decision-r08-remap.md §6 (plan R08's Risks, "Deviations in T6.g, as built").
-  it("holds the stored sun's transmittance within 3% of the oracle from 2° to 5°, and 0.3% from 45° up", () => {
+  // Read as T, as the table was stored until R08.T6.c, the bottom rows and last columns change by
+  // ×3 (red) to ×10 (blue) a texel near the horizon, and a bilinear read overshot: from 2, 20 and
+  // 200 m at 0°, +48.7%, +41.0% and +12.0% (R05's mapping: −37.5%, +50.1% and +12.3%), so that
+  // R08.T6.g held the points below 2° on the table read as optical depth alone. Stored as optical
+  // depth since R08.T6.c, the stored read holds decision-r08-remap.md §6's 3% at every point (plan
+  // R08's Risks, "Deviations in T6.g, as built" and "Deviations in T6.c, as built").
+  it("holds the stored sun's transmittance within 3% of the oracle up to 5°, and 0.3% from 45° up", () => {
     const sources = tableSources(earth);
     const stored = (heightM: number, mu: number): Rgb3 => {
       const out: Rgb3 = [0, 0, 0];
@@ -1046,28 +1075,9 @@ describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
     };
     const off: string[] = [];
     for (const heightM of EDGE_HEIGHTS_M) {
-      for (const elevationDeg of EDGE_ELEVATIONS_DEG.filter((deg) => deg >= 2)) {
+      for (const elevationDeg of EDGE_ELEVATIONS_DEG) {
         const e = edgeError(stored, heightM, elevationDeg);
         if (!(e <= (elevationDeg >= 45 ? 0.003 : 0.03))) {
-          off.push(`${heightM} m at ${elevationDeg}°: ${(e * 100).toFixed(3)}%`);
-        }
-      }
-    }
-    expect(off).toEqual([]);
-  });
-
-  it("holds the table read as optical depth within 3% of the oracle at every point up to 5°", () => {
-    const sources = tableSources({ ...earth, transmittance: asOpticalDepth(earth.transmittance) });
-    const exponentiated = (heightM: number, mu: number): Rgb3 => {
-      const tau: Rgb3 = [0, 0, 0];
-      sources.sunTransmittance(heightM, mu, tau);
-      return [Math.exp(-tau[0]), Math.exp(-tau[1]), Math.exp(-tau[2])];
-    };
-    const off: string[] = [];
-    for (const heightM of EDGE_HEIGHTS_M) {
-      for (const elevationDeg of EDGE_ELEVATIONS_DEG.filter((deg) => deg <= 5)) {
-        const e = edgeError(exponentiated, heightM, elevationDeg);
-        if (!(e <= 0.03)) {
           off.push(`${heightM} m at ${elevationDeg}°: ${(e * 100).toFixed(3)}%`);
         }
       }
@@ -1102,3 +1112,328 @@ describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
     expect(Math.min(...axes)).toBeGreaterThanOrEqual(2);
   });
 });
+
+// --- Optical depth and curves of growth (plan R08, Design notes 5 and 8, R08.T6.c) ----------------
+
+/** The relative difference of a over b, or |a| where b is 0. */
+function relative(a: number, b: number): number {
+  return b === 0 ? Math.abs(a) : Math.abs(a / b - 1);
+}
+
+/** A transmittance texel's transmittance per channel, its stored τ and amounts under slot 0's curves. */
+function texelTransmittance(tables: TwinTransmittance, of: AtmosphereMedium, i: number): Rgb3 {
+  const relativeAmounts = Float64Array.from([
+    tables.transmittance.texels[i * 4 + 3] ?? Number.NaN,
+    ...tables.absorberColumns.texels.subarray(i * 4, i * 4 + 4),
+  ]);
+  const slots = absorberSlots(of);
+  const curves = tables.curves[0] ?? [];
+  const amounts = slots.map((slot, k) =>
+    scaledAmount(slot.verticalAmount, relativeAmounts[k] ?? 0),
+  );
+  const depth: Rgb3 = slots.length === 0 ? [0, 0, 0] : [...curvesOpticalDepth(curves, amounts)];
+  const tau = (c: number): number => tables.transmittance.texels[i * 4 + c] ?? Number.NaN;
+  return [
+    Math.exp(-(tau(0) + depth[0])),
+    Math.exp(-(tau(1) + depth[1])),
+    Math.exp(-(tau(2) + depth[2])),
+  ];
+}
+
+describe("R05's Earth with its ozone as an absorber curve in the linear regime", () => {
+  const { medium: withOzone, curves } = r05EarthWithOzoneAbsorber();
+  let planet: PlanetTwin = earth;
+
+  beforeAll(() => {
+    planet = planetTwin(withOzone, R1, curves);
+  }, 60_000);
+
+  it("reproduces R05's transmittance, as R08.T6.g's twin leaves it, at every texel to 10⁻³", () => {
+    // R05's: e^(−τ) of R05's medium at the same texels, the table R08.T6.g's twin stored.
+    let worst = 0;
+    const count = planet.transmittance.texels.length / 4;
+    for (let i = 0; i < count; i += 1) {
+      const t = texelTransmittance(planet, withOzone, i);
+      for (const c of CHANNELS) {
+        const r05 = Math.exp(-(earth.transmittance.texels[i * 4 + c] ?? Number.NaN));
+        worst = Math.max(worst, relative(t[c], r05));
+      }
+    }
+    expect(worst).toBeLessThan(1e-3);
+  });
+
+  it("stores the ozone's column in alpha, its whole 300 DU straight up from the ground", () => {
+    // Texel (0, 0): the ground, straight up; a tent's midpoint-rule column is exact to its kinks.
+    expect(planet.transmittance.texels[3] ?? Number.NaN).toBeCloseTo(1, 3);
+  });
+
+  it("reproduces R05's multiple scattering to 10⁻³", () => {
+    expect(worstRelative(planet.multiScattering.texels, earth.multiScattering.texels)).toBeLessThan(
+      1e-3,
+    );
+  });
+
+  it("reproduces R05's sky to 10⁻³, where the view's own path takes the curve", () => {
+    const view = twinView(equatorCamera(WGS84, 2), sunAt(4), WGS84, 0.1);
+    const size = { widthTexels: 24, heightTexels: 16 };
+    const sky = skyViewTwin(planet, view, size, 32);
+    const r05 = skyViewTwin(earth, view, size, 32);
+    expect(worstRelative(sky.texels, r05.texels)).toBeLessThan(1e-3);
+  }, 60_000);
+});
+
+describe("a Venus-class transmittance stored as optical depth", () => {
+  const { medium: venus, radiusM } = venusClassMedium();
+  const table = transmittanceTwin(venus, radiusM, { widthTexels: 64, heightTexels: 16 });
+
+  const depths = table.texels.filter((_, i) => i % 4 !== 3);
+
+  it("is finite and within rgba16float's range at every texel", () => {
+    expect(depths.every((tau) => Number.isFinite(tau) && tau >= 0 && tau <= HALF_MAX)).toBe(true);
+  });
+
+  it("is held to the half float's precision, 2⁻¹¹ of itself, at every texel", () => {
+    let worst = 0;
+    for (const tau of depths) {
+      const stored = fromHalfBits(toHalfBits(tau));
+      worst = Math.max(worst, Math.abs(stored - tau) / Math.max(tau, 2 ** -14));
+    }
+    // Half a step of the half float, past `toHalfBits`' rounding through f32.
+    expect(worst).toBeLessThanOrEqual(2 ** -11 * (1 + 1e-6));
+  });
+
+  it("has texels whose stored transmittance would have underflowed to 0", () => {
+    // A stored transmittance under half the half float's least step rounds to 0.
+    expect(depths.filter((tau) => Math.exp(-tau) < 2 ** -25).length).toBeGreaterThan(0);
+  });
+
+  it("holds a path deeper than the half float's largest to it, as the kernel stores it", () => {
+    // The deck a hundred times as deep: its grazing paths pass 65,504, which stored unclamped
+    // would be infinite, and an infinite texel's bilinear read at the table's edge NaN.
+    const cloud = venus.terms.find((term) => term.name === "cloud");
+    if (cloud === undefined) {
+      throw new Error("the Venus-class medium has its cloud deck");
+    }
+    const [s0, s1, s2] = cloud.scattering;
+    const [a0, a1, a2] = cloud.absorption;
+    const deeper: AtmosphereMedium = {
+      ...venus,
+      terms: [
+        ...venus.terms.filter((term) => term !== cloud),
+        {
+          ...cloud,
+          scattering: [100 * s0, 100 * s1, 100 * s2],
+          absorption: [100 * a0, 100 * a1, 100 * a2],
+        },
+      ],
+    };
+    const deep = transmittanceTwin(deeper, radiusM, { widthTexels: 64, heightTexels: 16 });
+    const stored = deep.texels.filter((_, i) => i % 4 !== 3);
+    expect([Math.max(...stored), stored.every((tau) => Number.isFinite(tau))]).toEqual([
+      HALF_MAX,
+      true,
+    ]);
+  });
+});
+
+describe("four absorbers, one a molecule pair, under their curves of growth", () => {
+  const { medium: four, curves } = fourAbsorberMedium();
+  const size = { widthTexels: 16, heightTexels: 8 };
+  // At 20,000 midpoint steps, so that the layers' sharp edges converge as the oracle's do.
+  const tables = transmittanceTablesTwin(four, R1, curves, size, 20_000);
+
+  it("fill the transmittance table's alpha and the absorber-column table's first three channels", () => {
+    const shell = { bottomRadiusM: R1, topRadiusM: R1 + four.topHeightM };
+    const slots = absorberSlots(four);
+    expect(slots.map((slot) => slot.term.name)).toEqual([
+      "absorber:O3",
+      "absorber:CH4+O2",
+      "pair:O2+O2",
+      "absorber:O3 (troposphere)",
+    ]);
+    let worst = 0;
+    for (let y = 0; y < size.heightTexels; y += 1) {
+      for (let x = 0; x < size.widthTexels; x += 1) {
+        const i = y * size.widthTexels + x;
+        const { rM, mu } = transmittanceUvToRMu(
+          shell,
+          unitFromTexelUv((x + 0.5) / size.widthTexels, size.widthTexels),
+          unitFromTexelUv((y + 0.5) / size.heightTexels, size.heightTexels),
+        );
+        const oracle = absorberAmountsToTop(four, R1, rM, mu);
+        const stored = [
+          tables.transmittance.texels[i * 4 + 3] ?? Number.NaN,
+          tables.absorberColumns.texels[i * 4] ?? Number.NaN,
+          tables.absorberColumns.texels[i * 4 + 1] ?? Number.NaN,
+          tables.absorberColumns.texels[i * 4 + 2] ?? Number.NaN,
+        ];
+        for (const [k, slot] of slots.entries()) {
+          const amount = oracle[k];
+          const expected =
+            (amount === undefined ? Number.NaN : amountValue(amount)) /
+            amountValue(slot.verticalAmount);
+          worst = Math.max(
+            worst,
+            Math.abs((stored[k] ?? Number.NaN) - expected) / Math.max(expected, 1e-3),
+          );
+        }
+        expect(tables.absorberColumns.texels[i * 4 + 3]).toBe(0);
+      }
+    }
+    // Measured 2.3 × 10⁻⁴: each layer's edge is a ramp over one of the column's levels, about
+    // 120 m, which both quadratures resolve to a fraction of their steps.
+    expect(worst).toBeLessThan(1e-3);
+  });
+
+  it("give every texel the oracle's transmittance, each column through its own curve", () => {
+    const shell = { bottomRadiusM: R1, topRadiusM: R1 + four.topHeightM };
+    let worst = 0;
+    for (let y = 0; y < size.heightTexels; y += 1) {
+      for (let x = 0; x < size.widthTexels; x += 1) {
+        const { rM, mu } = transmittanceUvToRMu(
+          shell,
+          unitFromTexelUv((x + 0.5) / size.widthTexels, size.widthTexels),
+          unitFromTexelUv((y + 0.5) / size.heightTexels, size.heightTexels),
+        );
+        const tau = opticalDepthToTop(four, R1, rM, mu);
+        const absorbed = curvesOpticalDepth(
+          curves[0] ?? [],
+          absorberAmountsToTop(four, R1, rM, mu),
+        );
+        const t = texelTransmittance(tables, four, y * size.widthTexels + x);
+        for (const c of CHANNELS) {
+          const oracle = Math.exp(-(tau[c] + absorbed[c]));
+          worst = Math.max(worst, Math.abs(t[c] - oracle) / Math.max(oracle, 1e-6));
+        }
+      }
+    }
+    expect(worst).toBeLessThan(1e-3);
+  });
+
+  it("are read on a march's own path by its whole column, never step by step (Design note 5)", () => {
+    const planet: PlanetTwin = {
+      medium: four,
+      bottomRadiusM: R1,
+      ...tables,
+      multiScattering: { widthTexels: 1, heightTexels: 1, texels: new Float64Array(4) },
+    };
+    const view = twinView(equatorCamera(WGS84, 2_000), sunAt(10), WGS84, 0.1);
+    const ray = skyViewRayTwin(four, view, 0, 15, { widthTexels: 24, heightTexels: 32 });
+    const marched = marchTwin(
+      four,
+      tableSources(planet),
+      { kind: "sphere", bottomRadiusM: view.cameraRadiusM },
+      ray,
+      placedSteps(ray, 4_096),
+    );
+    // The ray from the camera's sphere: its columns and smooth depth to the end, by the oracle.
+    const rM = ray.originM.z;
+    const mu = ray.direction.z;
+    const tau = opticalDepth(four, view.cameraRadiusM, rM, mu);
+    const columns = absorberAmounts(four, view.cameraRadiusM, rM, mu);
+    const absorbed = curvesOpticalDepth(curves[0] ?? [], columns);
+    for (const c of CHANNELS) {
+      expect(relative(marched.transmittance[c], Math.exp(-(tau[c] + absorbed[c])))).toBeLessThan(
+        1e-3,
+      );
+    }
+  }, 60_000);
+
+  it("give the sun's transmittance, read at each texel's own (h, μ), as the oracle's", () => {
+    // tableSources' read, bilinear in τ and in each slot's column through Bruneton's mapping,
+    // returns each texel at its own (h, μ): so every slot's column, the second table's included,
+    // must reach its own curve (decision-r08-t6b-floor.md §5's read path).
+    const planet: PlanetTwin = {
+      medium: four,
+      bottomRadiusM: R1,
+      ...tables,
+      multiScattering: { widthTexels: 1, heightTexels: 1, texels: new Float64Array(4) },
+    };
+    const sources = tableSources(planet);
+    const shell = { bottomRadiusM: R1, topRadiusM: R1 + four.topHeightM };
+    const out: Rgb3 = [0, 0, 0];
+    let worst = 0;
+    for (let y = 0; y < size.heightTexels; y += 1) {
+      for (let x = 0; x < size.widthTexels; x += 1) {
+        const { rM, mu } = transmittanceUvToRMu(
+          shell,
+          unitFromTexelUv((x + 0.5) / size.widthTexels, size.widthTexels),
+          unitFromTexelUv((y + 0.5) / size.heightTexels, size.heightTexels),
+        );
+        sources.sunTransmittance(rM - R1, mu, out);
+        const tau = opticalDepthToTop(four, R1, rM, mu);
+        const absorbed = curvesOpticalDepth(
+          curves[0] ?? [],
+          absorberAmountsToTop(four, R1, rM, mu),
+        );
+        for (const c of CHANNELS) {
+          const oracle = Math.exp(-(tau[c] + absorbed[c]));
+          worst = Math.max(worst, Math.abs(out[c] - oracle) / Math.max(oracle, 1e-6));
+        }
+      }
+    }
+    expect(worst).toBeLessThan(1e-3);
+  });
+
+  it("are read by the kernels' even-grid rule exactly as absorbers.ts's absorberTransmittance reads them, the pair's too", () => {
+    let worst = 0;
+    for (const [k, slot] of absorberSlots(four).entries()) {
+      const curve = (curves[0] ?? [])[k];
+      if (curve === undefined) {
+        throw new Error(`no curve for slot ${k}`);
+      }
+      const vertical = slot.verticalAmount;
+      // Below the first node, on and between nodes, and past the last, 10⁻⁵ to 10⁴ of U.
+      for (let i = 0; i <= 900; i += 1) {
+        const x = 10 ** (-5 + i / 100);
+        const rule = absorberTransmittance(curve, scaledAmount(vertical, x));
+        const read = curveOpticalDepth(curve, x);
+        for (const c of CHANNELS) {
+          worst = Math.max(worst, Math.abs(read[c] + Math.log(rule[c])));
+        }
+      }
+    }
+    expect(worst).toBeLessThan(1e-12);
+  });
+
+  const options = {
+    ...MULTI_SCATTERING_KERNEL_OPTIONS,
+    size: { widthTexels: 4, heightTexels: 4 },
+    samples: 8,
+  };
+  const other = fourAbsorberCurvesUnder(planckBakeSpectrum(3_300));
+  const both = { ...tables, curves: [curves[0] ?? [], other] };
+
+  it("build the multiple-scattering table with the curve slot it is given (decision-r08-t6b-floor.md §8)", () => {
+    const second = multiScatteringTwin(four, R1, both, options, undefined, 1);
+    const alone = multiScatteringTwin(four, R1, { ...tables, curves: [other] }, options);
+    expect(worstRelative(second.texels, alone.texels)).toBe(0);
+  }, 60_000);
+
+  it("build another multiple-scattering table at another light slot's curves", () => {
+    const first = multiScatteringTwin(four, R1, both, options);
+    const second = multiScatteringTwin(four, R1, both, options, undefined, 1);
+    expect(worstRelative(first.texels, second.texels)).toBeGreaterThan(1e-6);
+  }, 60_000);
+
+  it("refuse a curve slot the curves do not hold", () => {
+    expect(() => multiScatteringTwin(four, R1, tables, options, undefined, 1)).toThrow(
+      /no curves at light slot 1/u,
+    );
+  });
+
+  it("are refused where no light gives curves for the medium's absorbers", () => {
+    expect(() => transmittanceTablesTwin(four, R1, [], size, 8)).toThrow(/no light's curves/u);
+  });
+
+  it("are refused where a light gives fewer curves than the medium's absorbers", () => {
+    expect(() => planetTwin(four, R1, [(curves[0] ?? []).slice(0, 2)])).toThrow(/gives 2 curves/u);
+  });
+});
+
+/** The four-absorber medium's curves under another sun's spectrum, in its slots' order. */
+function fourAbsorberCurvesUnder(spectrum: BakeSpectrum): readonly AbsorberCurve[] {
+  return absorberSlots(fourAbsorberMedium().medium).map((slot) =>
+    absorberCurve(slot.absorber.spec, spectrum),
+  );
+}

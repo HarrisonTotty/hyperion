@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import bakeSpectra from "../../../../../../../packages/protocol/fixtures/bake_spectra.json" with { type: "json" };
+import {
+  amountValue,
+  DOBSON_UNIT_PER_M2,
+  EARTH_OXYGEN_FRACTION,
+  KM_AMAGAT_PER_M2,
+  planckBakeSpectrum,
+} from "../../test/atmosphereFixtures";
 import { blessMode, expectCommittedTable } from "../../test/bless";
 import type { Rgb } from "../photometry/toneCurve";
 import {
@@ -48,7 +55,6 @@ import {
   BAKE_BIN_COUNT,
   BAKE_BIN_WIDTH_NM,
   BAKE_RANGE_NM,
-  checkNoAbsorbers,
   columnLengthM,
   densityAt,
   extinction,
@@ -56,19 +62,6 @@ import {
 import { type BakeSpectrum, bakeSpectrumOf, deltaUv } from "./spectralColour";
 import { packMedium } from "./tables";
 import { transmittanceTwin } from "./tablesCpu";
-
-/**
- * One Dobson unit, molecules m⁻²: WMO/UNEP 2018 (_Twenty Questions_, glossary), as `earth.ts`
- * takes it.
- */
-const DOBSON_UNIT_PER_M2 = 2.687e20;
-
-/**
- * One km-amagat, molecules m⁻²: Loschmidt's number at 273.15 K and 101.325 kPa,
- * 2.686 780 111 × 10²⁵ m⁻³ (CODATA 2018, exact), times 1 km: the unit Karkoschka and Tomasko give
- * methane's k in, and PSG's factor.
- */
-const KM_AMAGAT_PER_M2 = 2.686_780_111e28;
 
 /** Ozone's reference column: 300 DU, Earth's global mean (WMO/UNEP 2018, Q3). */
 const OZONE_COLUMN_PER_M2 = 300 * DOBSON_UNIT_PER_M2;
@@ -79,23 +72,6 @@ const OZONE_COLUMN_PER_M2 = 300 * DOBSON_UNIT_PER_M2;
  */
 const METHANE_COLUMN_PER_M2 = 3 * KM_AMAGAT_PER_M2;
 
-/** A Planck spectrum as bake bins: the mean of B_λ(T) over each bin, by a 64-point midpoint rule. */
-function planckSpectrum(temperatureK: number): BakeSpectrum {
-  const h = 6.626_070_15e-34;
-  const c = 299_792_458;
-  const k = 1.380_649e-23;
-  const values = Array.from({ length: BAKE_BIN_COUNT }, (_, bin) => {
-    let sum = 0;
-    for (let j = 0; j < 64; j += 1) {
-      const m = (BAKE_RANGE_NM[0] + (bin + (j + 0.5) / 64) * BAKE_BIN_WIDTH_NM) * 1e-9;
-      sum += 1 / (m ** 5 * Math.expm1((h * c) / (m * k * temperatureK)));
-    }
-    return sum / 64;
-  });
-  const peak = Math.max(...values);
-  return bakeSpectrumOf(values.map((v) => v / peak));
-}
-
 /** The Sun: R06's `solar_colour()`, the 5,772 K main-sequence row of `bake_spectra.json`. */
 const THE_SUN: BakeSpectrum = (() => {
   const row = bakeSpectra.suns.find((s) => s.teff_k === 5_772 && s.grid === "MainSequence");
@@ -105,9 +81,9 @@ const THE_SUN: BakeSpectrum = (() => {
   return bakeSpectrumOf(row.bake_spectrum);
 })();
 
-const PLANCK_2500 = planckSpectrum(2_500);
-const PLANCK_6500 = planckSpectrum(6_500);
-const PLANCK_30000 = planckSpectrum(30_000);
+const PLANCK_2500 = planckBakeSpectrum(2_500);
+const PLANCK_6500 = planckBakeSpectrum(6_500);
+const PLANCK_30000 = planckBakeSpectrum(30_000);
 
 /** The suns the record holds, by name. */
 const SUNS: ReadonlyArray<{ readonly name: string; readonly spectrum: BakeSpectrum }> = [
@@ -305,11 +281,6 @@ function sigmaOf(optics: AbsorberOptics): Float64Array {
   return optics.kind === "column" ? optics.crossSectionM2 : optics.crossSectionM5;
 }
 
-/** An amount's value in its kind's unit: molecules m⁻², or molecule pairs m⁻⁵. */
-function valueOf(amount: AbsorberAmount): number {
-  return amount.kind === "column" ? amount.columnPerM2 : amount.pairColumnPerM5;
-}
-
 /** An amount of a spec's kind, its value given in that kind's unit. */
 function amountLike(spec: AbsorberSpec, value: number): AbsorberAmount {
   return spec.kind === "column"
@@ -349,7 +320,7 @@ function channelColourError(spec: AbsorberSpec, spectrum: BakeSpectrum, multiple
   const optics = absorberOptics(spec, spectrum);
   const curve = absorberCurve(spec, spectrum);
   const amount = scaledAmount(absorberVerticalAmount(spec), multiple);
-  const { star, through } = spectralColours(optics, valueOf(amount));
+  const { star, through } = spectralColours(optics, amountValue(amount));
   const t = absorberTransmittance(curve, amount);
   return deltaUv([star[0] * t[0], star[1] * t[1], star[2] * t[2]], through);
 }
@@ -370,7 +341,7 @@ function binColourError(spec: AbsorberSpec, spectrum: BakeSpectrum, multiple: nu
       colour[c] = (colour[c] ?? 0) + w * (bins[optics.bins[i] ?? 0] ?? Number.NaN);
     }
   }
-  const { through } = spectralColours(optics, valueOf(amount));
+  const { through } = spectralColours(optics, amountValue(amount));
   return deltaUv([colour[0] ?? 0, colour[1] ?? 0, colour[2] ?? 0], through);
 }
 
@@ -421,7 +392,7 @@ function withoutExit(record: {
  */
 function nodeColumn(spec: AbsorberSpec, k: number): number {
   return (
-    valueOf(absorberVerticalAmount(spec)) *
+    amountValue(absorberVerticalAmount(spec)) *
     10 ** (ABSORBER_CURVE_DECADES[0] + k / ABSORBER_CURVE_NODES_PER_DECADE)
   );
 }
@@ -595,11 +566,11 @@ describe("a curve of growth", () => {
     const [first, last] = ABSORBER_CURVE_DECADES;
     expect(curve.logColumns.length).toBe((last - first) * ABSORBER_CURVE_NODES_PER_DECADE + 1);
     expect(curve.logColumns[0]).toBeCloseTo(
-      Math.log(valueOf(absorberVerticalAmount(spec)) * 10 ** first),
+      Math.log(amountValue(absorberVerticalAmount(spec)) * 10 ** first),
       12,
     );
     expect(curve.logColumns.at(-1)).toBeCloseTo(
-      Math.log(valueOf(absorberVerticalAmount(spec)) * 10 ** last),
+      Math.log(amountValue(absorberVerticalAmount(spec)) * 10 ** last),
       12,
     );
   });
@@ -628,7 +599,7 @@ describe("a curve of growth", () => {
     const spec = absorberAt(0);
     const optics = absorberOptics(spec, PLANCK_2500);
     const amount = scaledAmount(absorberVerticalAmount(spec), 10);
-    expect(signedRatio(optics, 2, valueOf(amount))).toBeGreaterThan(1.1);
+    expect(signedRatio(optics, 2, amountValue(amount))).toBeGreaterThan(1.1);
     expect(channelTransmittance(optics, amount)[2]).toBe(1);
   });
 
@@ -636,7 +607,7 @@ describe("a curve of growth", () => {
     const spec = absorberAt(2);
     const optics = absorberOptics(spec, THE_SUN);
     const amount = scaledAmount(absorberVerticalAmount(spec), 100);
-    expect(signedRatio(optics, 0, valueOf(amount))).toBeLessThan(0);
+    expect(signedRatio(optics, 0, amountValue(amount))).toBeLessThan(0);
     expect(channelTransmittance(optics, amount)[0]).toBe(ABSORBER_TRANSMITTANCE_FLOOR);
   });
 
@@ -664,7 +635,7 @@ describe("a curve of growth", () => {
 
   it("weighs a channel by max(c̄, 0) where the sun's own colour in it is not positive", () => {
     // A Planck star's Rec. 709 blue is negative below about 1,900 K (decision-r08-t4b-t12c.md).
-    const cool = planckSpectrum(1_500);
+    const cool = planckBakeSpectrum(1_500);
     const spec = absorberAt(0);
     const optics = absorberOptics(spec, cool);
     expect(optics.weights[2].reduce((sum, w) => sum + w, 0)).toBeLessThanOrEqual(0);
@@ -673,7 +644,7 @@ describe("a curve of growth", () => {
     let total = 0;
     for (const [i, w] of optics.weights[2].entries()) {
       const clipped = Math.max(w, 0);
-      passed += clipped * Math.exp(-(sigmaOf(optics)[i] ?? Number.NaN) * valueOf(amount));
+      passed += clipped * Math.exp(-(sigmaOf(optics)[i] ?? Number.NaN) * amountValue(amount));
       total += clipped;
     }
     expect(channelTransmittance(optics, amount)[2]).toBeCloseTo(passed / total, 12);
@@ -1415,7 +1386,7 @@ describe("an absorber's term", () => {
     const numberDensity =
       term.absorber?.kind === "column" ? term.absorber.numberDensityPerM3 : Number.NaN;
     const column = numberDensity * columnLengthM(term.density, EARTH_COLUMN.topHeightM);
-    expect(Math.abs(column / valueOf(absorberVerticalAmount(spec)) - 1)).toBeLessThan(1e-12);
+    expect(Math.abs(column / amountValue(absorberVerticalAmount(spec)) - 1)).toBeLessThan(1e-12);
     expect(term.absorber?.spec).toBe(spec);
   });
 
@@ -1466,22 +1437,24 @@ describe("an absorber's term", () => {
     terms: [...EARTH_REFERENCE.terms, term],
   };
 
-  it("is refused by the kernels' packer until R08.T6.c reads its curves", () => {
-    expect(() => packMedium(withAbsorber)).toThrow(/is an absorber/u);
+  it("is packed by the kernels' packer in absorber slot 0, with its n ÷ U (R08.T6.c)", () => {
+    const packed = packMedium(withAbsorber).subarray(3 * 16, 4 * 16);
+    const numberDensity =
+      term.absorber?.kind === "column" ? term.absorber.numberDensityPerM3 : Number.NaN;
+    const perM = numberDensity / spec.columnPerM2;
+    expect([packed[3], packed[7]]).toEqual([Math.fround(perM), 1]);
   });
 
-  it("is refused by the CPU twin until R08.T6.c reads its curves", () => {
-    expect(() => transmittanceTwin(withAbsorber, 6_360_000)).toThrow(/is an absorber/u);
+  it("is read by the CPU twin, its vertical column from the ground u ÷ U = 1 (R08.T6.c)", () => {
+    // Texel (0, 0): the ground, straight up; its alpha is the absorber's column over its own. At
+    // 20,000 midpoint steps, since the layer's edges are sharp (the kernel's 256 give 0.974).
+    const size = { widthTexels: 8, heightTexels: 4 };
+    const table = transmittanceTwin(withAbsorber, 6_371_008.8, size, 20_000);
+    expect(table.texels[3]).toBeCloseTo(1, 3);
   });
 
-  it("has no extinction coefficient", () => {
-    expect(() => extinction(term)).toThrow(/is an absorber/u);
-  });
-
-  it("leaves a medium without absorbers to the tables", () => {
-    expect(() => {
-      checkNoAbsorbers(EARTH_REFERENCE);
-    }).not.toThrow();
+  it("has extinction coefficients of 0: it absorbs by its curves alone", () => {
+    expect(extinction(term)).toEqual([0, 0, 0]);
   });
 });
 
@@ -1841,9 +1814,6 @@ describe("the committed pairs", () => {
   });
 });
 
-/** O₂'s mole fraction in dry air, 0.209 476 (US Standard Atmosphere 1976, Table 3). */
-const EARTH_OXYGEN_FRACTION = 0.209_476;
-
 /** A well-mixed gas's layer on a column: x n_s ∫ ρ dz from the datum to the top. */
 function wellMixed(species: string, moleFraction: number, column: AtmosphereColumn): AbsorberLayer {
   return {
@@ -2067,10 +2037,8 @@ describe("pair absorbers", () => {
     ]);
   });
 
-  it("give a pair's term no extinction coefficient", () => {
-    expect(() => extinction(absorberTerm(earthOxygenPair(), EARTH_COLUMN))).toThrow(
-      /is an absorber/u,
-    );
+  it("give a pair's term extinction coefficients of 0: it absorbs by its curves alone (R08.T6.c)", () => {
+    expect(extinction(absorberTerm(earthOxygenPair(), EARTH_COLUMN))).toEqual([0, 0, 0]);
   });
 });
 

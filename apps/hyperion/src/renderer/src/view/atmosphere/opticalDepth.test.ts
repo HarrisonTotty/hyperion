@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 
+import {
+  amountValue,
+  fourAbsorberMedium,
+  r05EarthWithOzoneAbsorber,
+} from "../../test/atmosphereFixtures";
 import { EARTH_REFERENCE } from "./earth";
 import type { AtmosphereMedium } from "./medium";
 import {
+  absorberAmounts,
+  absorberAmountsToTop,
+  curvesOpticalDepth,
   distanceToTopM,
   intersectsGround,
   maxDistanceM,
@@ -145,5 +153,64 @@ describe("opticalDepthToTop", () => {
     expect(distanceToTopM(shell, rM, mu)).toBeGreaterThan(2 * toTangent);
     const [half] = opticalDepthToTop(medium, R, rM, -mu);
     expect(whole).toBeGreaterThan(half);
+  });
+});
+
+describe("the absorbers' columns and curves (R08.T6.c)", () => {
+  const { medium, curves } = r05EarthWithOzoneAbsorber();
+  const ozone = medium.terms.find((term) => term.absorber !== undefined);
+  const columnPerM2 =
+    ozone?.absorber?.kind === "column" ? ozone.absorber.spec.columnPerM2 : Number.NaN;
+  const withoutOzone = { ...medium, terms: medium.terms.filter((term) => term !== ozone) };
+
+  it("leaves an absorber out of the optical depth, its coefficients 0", () => {
+    expect(opticalDepth(medium, R, R + 2, 1)).toEqual(opticalDepth(withoutOzone, R, R + 2, 1));
+  });
+
+  it("gives the absorber's whole column from the ground straight up", () => {
+    const [ground] = absorberAmounts(medium, R, R, 1);
+    expect(ground?.kind).toBe("column");
+    expect((ground === undefined ? Number.NaN : amountValue(ground)) / columnPerM2).toBeCloseTo(
+      1,
+      9,
+    );
+  });
+
+  it("gives half the column to the top from the tent's peak straight up", () => {
+    const [peak] = absorberAmountsToTop(medium, R, R + 25_000, 1);
+    expect((peak === undefined ? Number.NaN : amountValue(peak)) / columnPerM2).toBeCloseTo(0.5, 9);
+  });
+
+  it("gives a pair absorber its pair column, from the ground straight up its whole (R08.T4.c)", () => {
+    const four = fourAbsorberMedium().medium;
+    const amounts = absorberAmounts(four, R, R, 1);
+    expect(amounts.map((amount) => amount.kind)).toEqual(["column", "column", "pair", "column"]);
+    const pair = four.terms.find((term) => term.absorber?.kind === "pair")?.absorber;
+    const vertical = pair?.kind === "pair" ? pair.spec.pairColumnPerM5 : Number.NaN;
+    const [, , ground] = amounts;
+    expect((ground === undefined ? Number.NaN : amountValue(ground)) / vertical).toBeCloseTo(1, 4);
+  });
+
+  it("refuses an amount of the other kind than its curve's", () => {
+    const [curve] = curves[0] ?? [];
+    if (curve === undefined) {
+      throw new Error("the medium has its ozone's curve");
+    }
+    expect(() => curvesOpticalDepth([curve], [{ kind: "pair", pairColumnPerM5: 1 }])).toThrow(
+      Error,
+    );
+  });
+
+  it("reads a linear curve as σ u, R05's ozone depth", () => {
+    const depth = curvesOpticalDepth(curves[0] ?? [], absorberAmounts(medium, R, R, 1));
+    const r05 = opticalDepth(EARTH_REFERENCE, R, R, 1);
+    const others = opticalDepth(withoutOzone, R, R, 1);
+    for (const c of [0, 1, 2] as const) {
+      expect(depth[c] / (r05[c] - others[c])).toBeCloseTo(1, 6);
+    }
+  });
+
+  it("refuses curves that do not match the columns one to one", () => {
+    expect(() => curvesOpticalDepth([], [{ kind: "column", columnPerM2: 1 }])).toThrow(RangeError);
   });
 });
