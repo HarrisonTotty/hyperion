@@ -556,7 +556,7 @@ function isAtom(formula: string): boolean {
  * The estimated atoms (H, O, Na, K, Fe, Mg, Si, Ca, Ti) are left out, on plausibility: none is an
  * atmosphere's bulk gas at an Earth-like Rayleigh depth. They are the dissociation and vapour
  * products of hot envelopes and lava worlds, beside the bulk gas, and Na's, K's, Ca's and Ti's
- * visible optics are their resonance lines (R08.T4.c). For all but two the omission changes
+ * visible optics are their resonance lines (R08.T4.e). For all but two the omission changes
  * nothing: each alone at dry air's τ(550) gives 0.0075 (H) or 0.0072 (O, Na, K, Si, Ca, Ti) at the
  * fitted triple, under the objective. Mg's and Fe's one oscillators, at 285.3 and 248.4 nm, steepen
  * σ to λ^−5.6 and λ^−5.1 over 450–650 nm, and would give 0.020 and 0.014: out of the family's

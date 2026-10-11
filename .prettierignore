@@ -27,3 +27,6 @@ crates/hyperion-fit/src/atmosphere/sphere_matrices/
 
 # Reduced data a tool writes one row a line (`apps/hyperion/scripts/atmosphereData.mjs cross-sections`)
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json
+# The pending absorbers' cell means, one temperature's 381 cells a line (plan R08, R08.T4.c)
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/bounds.json

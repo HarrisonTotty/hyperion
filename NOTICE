@@ -242,6 +242,69 @@ ruled 2026-10-09 and 2026-10-10).
   data/linelists/xuv/data/ch4.txt, fetched 2026-10-09). Resampled values in
   apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json.
 
+- Sulphur dioxide absorption cross-sections at 298, 318, 338 and 358 K: C. Hermans, A. C.
+  Vandaele and S. Fally, J. Quant. Spectrosc. Radiat. Transfer 110 (2009) 756-765, DOI:
+  10.1016/j.jqsrt.2009.01.031; A. C. Vandaele, C. Hermans and S. Fally, J. Quant. Spectrosc.
+  Radiat. Transfer 110 (2009) 2115-2126, DOI: 10.1016/j.jqsrt.2009.05.006; as held in the
+  MPI-Mainz UV/VIS Spectral Atlas of Gaseous Molecules' snapshot of 2013-06-24 (H. Keller-Rudek,
+  G. K. Moortgat, R. Sander and R. Sorensen, Earth Syst. Sci. Data 5 (2013) 365-373, DOI:
+  10.5194/essd-5-365-2013; Zenodo, DOI: 10.5281/zenodo.6951), licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/); fetched 2026-10-10. Binned to 1 nm, a
+  modification, in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json.
+
+- Collision-induced absorption of O2-O2, O2-N2, O2-CO2 and H2-He, from the HITRAN2024 database's
+  collision-induced absorption section (I. E. Gordon et al., J. Quant. Spectrosc. Radiat.
+  Transfer 353 (2026) 109807, DOI: 10.1016/j.jqsrt.2026.109807; J. Terragni et al., J. Quant.
+  Spectrosc. Radiat. Transfer 347 (2025) 109631, DOI: 10.1016/j.jqsrt.2025.109631; T. Karman et
+  al., Icarus 328 (2019) 160-175, DOI: 10.1016/j.icarus.2019.02.034; https://hitran.org/cia/,
+  files O2-O2_2024.cia, O2-N2_2024.cia, O2-CO2_2024.cia and H2-He_2011.cia, fetched 2026-10-10
+  and 2026-10-11), from the measurements and calculations of H. Finkenzeller and R. Volkamer, J.
+  Quant. Spectrosc. Radiat. Transfer 279 (2022) 108063; R. Thalman and R. Volkamer, Phys. Chem.
+  Chem. Phys. 15 (2013) 15371; F. R. Spiering et al., Phys. Chem. Chem. Phys. 13 (2011) 9616; H.
+  Tran, C. Boulet and J.-M. Hartmann, J. Geophys. Res. 111 (2006) D15210; M. Vangvichith, H. Tran
+  and J.-M. Hartmann, J. Quant. Spectrosc. Radiat. Transfer 110 (2009) 2212-2216, DOI:
+  10.1016/j.jqsrt.2009.06.002; and M. Abel, L. Frommhold, X. Li and K. L. C. Hunt, J. Chem. Phys.
+  136 (2012) 044319. Binned to 1 nm in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json.
+
+- The negative hydrogen and helium ions' continuous absorption: T. L. John, "Continuous absorption
+  by the negative hydrogen ion reconsidered", Astron. Astrophys. 193 (1988) 189-192, his fits'
+  coefficients (Eqs. 3-6, Tables 2, 3a and 3b), in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/hMinus.ts; and T. L. John, "Absorption
+  coefficients of the negative helium ion", Mon. Not. R. Astron. Soc. 269 (1994) 871-878, his
+  Table 2's free-free values over 506-911 nm, in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/heliumMinus.ts (plan R08, R08.T4.c).
+
+- Atomic line data: R. L. Kurucz, atomic line lists, http://kurucz.harvard.edu/linelists/gfall/
+  (the files named in each value's source, fetched 2026-10-11; R. L. Kurucz, "Including all the
+  lines", Can. J. Phys. 89 (2011) 417). The bounds of the atoms and ions in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json are computed from them (plan
+  R08, R08.T4.c). The forbidden [Fe II] lines Kurucz lacks are N. C. Deb and A. Hibbert's,
+  "Radiative transition rates for the forbidden lines in Fe II", Astron. Astrophys. 536 (2011)
+  A74, DOI: 10.1051/0004-6361/201118059 (CDS J/A+A/536/A74, fetched 2026-10-11); the forbidden
+  [Ti II] lines' are from N. C. Deb, A. Hibbert, Z. Felfli and A. Z. Msezane, J. Phys. B 42 (2009)
+  015701, and H. Hartman et al., Mon. Not. R. Astron. Soc. 361 (2005) 206, at the values NIST's
+  Atomic Spectra Database v5.12 lists for them (A. Kramida et al., 2024, DOI: 10.18434/T4W30F).
+
+- H2-H2 collision-induced absorption: A. Borysow, "Collision-induced absorption coefficients of H2
+  pairs at temperatures from 60 K to 1000 K", Astron. Astrophys. 390 (2002) 779-782, DOI
+  10.1051/0004-6361:20020555, from the tables at http://www.astro.ku.dk/~aborysow/programs/
+  (fetched 2026-10-11). Above 1000 K: A. Borysow, U. G. Jorgensen and Y. Fu, J. Quant. Spectrosc.
+  Radiat. Transfer 68 (2001) 235-255, from the same page. Reduced to 1 nm cell means in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json (plan R08,
+  R08.T4.c); the tables themselves are not committed.
+
+- Cross-sections of the pending molecules (1 nm cell means), derived from the HITRAN2024 line
+  lists (I. E. Gordon et al., as above; https://hitran.org), with the stated overtone-ladder and
+  band-model estimates, in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json.
+
+- Cross-sections of the pending absorbers derived from the ExoMol database (J. Tennyson et al., the
+  ExoMol database and the line lists each entry names, https://www.exomol.com), licensed under
+  CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). The values in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/bounds.json are reduced from
+  those line lists, a modification; that adapted material is offered under CC BY-SA 4.0 (its
+  README.md beside it).
+
 - Refractive indices of 75 and 84.5 wt% sulphuric acid at 300 K: K. F. Palmer and D. Williams,
   "Optical constants of sulfuric acid; application to the clouds of Venus?", Appl. Opt. 14
   (1975) 208-219, DOI: 10.1364/AO.14.000208, as distributed by the Aerosol Refractive Index

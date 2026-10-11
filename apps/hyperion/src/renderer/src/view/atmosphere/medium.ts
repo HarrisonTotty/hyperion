@@ -10,7 +10,7 @@
  */
 
 import type { Rgb } from "../photometry/toneCurve";
-import type { AbsorberSpec } from "./absorbers";
+import type { ColumnAbsorberSpec, PairAbsorberSpec } from "./absorbers";
 
 /**
  * The wavelengths of the three spectral channels, nm: 680, 550 and 440, red, green and blue.
@@ -389,25 +389,37 @@ export function phaseAt(phase: PhaseFunction, cosTheta: number): Rgb {
 }
 
 /**
- * What an absorber term absorbs (R08.T4.b, Design notes 5 and 8): its gases, whose transmittance
- * each sun's curve of growth gives from the column u crossed, and the number density that turns
- * the term's relative density into u.
+ * What an absorber term absorbs (R08.T4.b and T4.c, Design notes 5 and 8): its gases, whose
+ * transmittance each sun's curve of growth gives from the column u crossed, and the density that
+ * turns the term's relative density into u.
+ *
+ * - `column`: molecules, u = n ∫ ρ ds molecules m⁻², the spec's `columnPerM2` over the vertical.
+ * - `pair` (R08.T4.c): molecule pairs absorbing as σ n_A n_B, u = n ∫ ρ ds molecule pairs m⁻⁵,
+ *   the term's ρ the square of the column's relative density, and the spec's `pairColumnPerM5`
+ *   over the vertical.
  */
-export interface TermAbsorber {
-  /** The absorbing species on one vertical profile (`absorbers.ts`'s `absorberSpecs`). */
-  readonly spec: AbsorberSpec;
-  /**
-   * n at relative density 1, molecules m⁻³: the column crossed along a path is n ∫ ρ ds, which
-   * over the vertical is the spec's `columnPerM2`.
-   */
-  readonly numberDensityPerM3: number;
-}
+export type TermAbsorber =
+  | {
+      readonly kind: "column";
+      /** The absorbing species on one vertical profile (`absorbers.ts`'s `absorberSpecs`). */
+      readonly spec: ColumnAbsorberSpec;
+      /** n at relative density 1, molecules m⁻³. */
+      readonly numberDensityPerM3: number;
+    }
+  | {
+      readonly kind: "pair";
+      /** The molecule pairs on one vertical profile (`absorbers.ts`'s `absorberSpecs`). */
+      readonly spec: PairAbsorberSpec;
+      /** n_A n_B at relative density 1, molecule pairs m⁻⁶. */
+      readonly pairDensityPerM6: number;
+    };
 
 /** One constituent of an atmosphere: a gas, an aerosol or an absorbing layer. */
 export interface MediumTerm {
   /**
-   * A short name, unique within its medium: `rayleigh`, `aerosol`, `ozone`, or an absorber's
-   * `absorber:` and its species' registry keys joined by `+` (`absorber:O3+SO2`), keys keeping
+   * A short name, unique within its medium: `rayleigh`, `aerosol`, `ozone`, `thomson`, an
+   * absorber's `absorber:` and its species' registry keys joined by `+` (`absorber:O3+SO2`), or a
+   * pair absorber's `pair:` and its pairs' keys joined by `,` (`pair:O2+O2,H2+He`), keys keeping
    * their chemical case.
    */
   readonly name: string;

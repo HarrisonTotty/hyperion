@@ -325,7 +325,7 @@ points.
 - **Composition** (decision-composition, 2026-10-09; ruled under the owner's delegation, so
   accepted): galaxy plan 14's Phase L (P14.T49–T55, T33.c), in the 21 → 22 batch's head
   (T49.a), a 22 → 23 batch and a 23 → 24 batch. R08 reads its keys through an optics registry
-  (R08.T3.c, T4.b–c, T5.b, T5.d, T18, T19). R09 carries its palette (R09.T2's follow-up B). R10
+  (R08.T3.c, T4.b–f, T5.b, T5.d, T18, T19). R09 carries its palette (R09.T2's follow-up B). R10
   and R11 fold it in at their re-validations.
 
 ### Of the sessions plan and later plans (not written)

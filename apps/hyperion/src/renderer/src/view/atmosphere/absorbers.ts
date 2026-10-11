@@ -1,6 +1,7 @@
 /**
- * Absorbing gases (plan R08, Design notes 5 and 8; R08.T4.b): their cross-sections, the absorber
- * terms laid on a column, and each sun's curves of growth.
+ * Absorbing gases (plan R08, Design notes 5 and 8; R08.T4.b and R08.T4.c): their cross-sections,
+ * the absorber terms laid on a column, each sun's curves of growth, the pairs' collision-induced
+ * and free–free absorption, and Thomson scattering by free electrons.
  *
  * @remarks
  * An absorber is a gas whose absorption bands are narrow beside a channel, ozone's Chappuis band
@@ -26,15 +27,25 @@
  * σ_mix(λ) = Σ xᵢσᵢ(λ) is then exact, so the {@link ABSORBER_COLUMNS} stored columns count
  * vertical profiles, not species.
  *
- * Stated approximations: one temperature a profile, its column-weighted mean, for the
- * cross-sections ({@link absorberSpecs}); cross-sections held, and labelled, beyond their law's
- * measured temperatures; Karkoschka and Tomasko's methane at infinite pressure, without their
- * finite-pressure correction; and S from 15 bin means, adequate for FGK, A and B stars but not for
- * M dwarfs' TiO bands (R08's Risks).
+ * A pair absorber (R08.T4.c) absorbs as σ n_A n_B, its cross-section σ in m⁵ a molecule pair:
+ * the collision-induced absorption of two gases, or H⁻'s free–free absorption by an H atom and a
+ * free electron. Its column is the pair column u = ∫ n_A n_B ds, molecule pairs m⁻⁵, and its
+ * vertical profile is the product of its members' densities, so it takes a stored column of its
+ * own; otherwise its curves are a column absorber's, over σu. `absorberSpecs` forms each pair from
+ * its members' layers ({@link absorberSpecs}).
+ *
+ * Stated approximations: one temperature a profile, its column-weighted mean (the pair-weighted
+ * mean for a pair), for the cross-sections ({@link absorberSpecs}); cross-sections held, and
+ * labelled, beyond their law's measured temperatures; Karkoschka and Tomasko's methane at infinite
+ * pressure, without their finite-pressure correction; and S from 15 bin means, adequate for FGK, A
+ * and B stars but not for M dwarfs' TiO bands (R08's Risks).
  */
 
 import type { Rgb } from "../photometry/toneCurve";
 import crossSectionsFile from "./absorbers/crossSections.json" with { type: "json" };
+import { HE_MINUS_FREE_FREE_RANGE_K, heMinusFreeFreeM5 } from "./absorbers/heliumMinus";
+import { H_MINUS_FREE_FREE_RANGE_K, hMinusBoundFreeM2, hMinusFreeFreeM5 } from "./absorbers/hMinus";
+import { isTransparent } from "./absorbers/transparency";
 import type { AtmosphereColumn } from "./column";
 import {
   BAKE_BIN_COUNT,
@@ -74,12 +85,16 @@ export const ABSORBER_COLUMNS = 5;
  *   `tkark.f` and PICASO apply it; `decision-r08-t4b-t12c.md` §1.6). A point with a 0 at any of the
  *   three temperatures, below the table's three figures, is linear in σ instead, extrapolated from
  *   the nearest pair beyond them and floored at 0.
+ * - `lnLinear` (R08.T4.c): ln σ linear in T between the two temperatures around it, where σ is
+ *   above 0 at both, and linear in σ where it is not. H₂–He's, whose collision-induced absorption
+ *   grows by orders of magnitude over 200–9,900 K (`decision-r08-t4b-t12c.md`, follow-up 3), and
+ *   H₂–H₂'s, over 60–7,000 K.
  */
-export type TemperatureLaw = "linear" | "lnQuadratic";
+export type TemperatureLaw = "linear" | "lnQuadratic" | "lnLinear";
 
 /** Whether a file's string is a {@link TemperatureLaw}. */
 function isTemperatureLaw(value: string): value is TemperatureLaw {
-  return value === "linear" || value === "lnQuadratic";
+  return value === "linear" || value === "lnQuadratic" || value === "lnLinear";
 }
 
 /** A species' measured cross-sections at several temperatures on a uniform grid of vacuum wavelengths. */
@@ -105,19 +120,53 @@ export interface CrossSectionTable {
   readonly crossSectionsM2: ReadonlyArray<Float64Array>;
 }
 
-/** `crossSections.json`'s shape, as its JSON import reads it. */
+/**
+ * A molecule pair's measured cross-sections at several temperatures on a uniform grid of vacuum
+ * wavelengths (R08.T4.c): its absorption coefficient is σ n_A n_B.
+ */
+export interface PairCrossSectionTable {
+  /** The pair's key, its members' registry keys joined by `+` (`O2+O2`). */
+  readonly pair: string;
+  /** The members' registry keys, as the pair's key names them. */
+  readonly members: readonly [string, string];
+  /** The data's citation and how it was reduced. */
+  readonly source: string;
+  /** The first grid point, nm. */
+  readonly firstNm: number;
+  /** The grid's spacing, nm. */
+  readonly stepNm: number;
+  /** The tabulated temperatures, K, ascending. */
+  readonly temperaturesK: ReadonlyArray<number>;
+  /** How σ is taken between and beyond them. */
+  readonly temperatureLaw: TemperatureLaw;
+  /** The temperatures over which the law gives a `measured` σ, K. */
+  readonly measuredRangeK: readonly [number, number];
+  /** σ at each temperature, m⁵ a molecule pair: `crossSectionsM5[t][i]` at `firstNm + i stepNm`. */
+  readonly crossSectionsM5: ReadonlyArray<Float64Array>;
+}
+
+/** One table of a cross-sections file as its JSON import reads it, a species' or a pair's. */
+interface FileTable {
+  readonly source: string;
+  readonly reduction: string;
+  readonly firstNm: number;
+  readonly stepNm: number;
+  readonly temperaturesK: ReadonlyArray<number>;
+  readonly temperatureLaw: string;
+  readonly measuredRangeK: ReadonlyArray<number>;
+  readonly rows: ReadonlyArray<ReadonlyArray<number>>;
+}
+
+/** `crossSections.json`'s species tables, as its JSON import reads them. */
 export interface CrossSectionsFile {
-  readonly tables: ReadonlyArray<{
-    readonly species: string;
-    readonly source: string;
-    readonly reduction: string;
-    readonly firstNm: number;
-    readonly stepNm: number;
-    readonly temperaturesK: ReadonlyArray<number>;
-    readonly temperatureLaw: string;
-    readonly measuredRangeK: ReadonlyArray<number>;
-    readonly rows: ReadonlyArray<ReadonlyArray<number>>;
-  }>;
+  readonly tables: ReadonlyArray<FileTable & { readonly species: string }>;
+}
+
+/** `crossSections.json`'s pair tables, as its JSON import reads them. */
+export interface PairCrossSectionsFile {
+  readonly pairs: ReadonlyArray<
+    FileTable & { readonly pair: string; readonly members: ReadonlyArray<string> }
+  >;
 }
 
 /** How far a row's wavelength may lie from its grid point, nm. */
@@ -126,82 +175,138 @@ const GRID_TOLERANCE_NM = 1e-9;
 /** How far a wavelength may lie from a grid point and still be read as on it, in grid steps. */
 const GRID_TOLERANCE_STEPS = 1e-9;
 
+/** A file table's checked grid: its law, its measured range and its values at each temperature. */
+interface CheckedGrid {
+  readonly temperatureLaw: TemperatureLaw;
+  readonly measuredRangeK: readonly [number, number];
+  readonly columns: ReadonlyArray<Float64Array>;
+}
+
 /**
- * A cross-sections file's tables, checked: unique species, ascending temperatures and a law and a
- * measured range that fit them, rows on the grid with a finite σ ≥ 0 at each temperature, and a
- * grid that covers {@link BAKE_RANGE_NM} with a point on each of its ends.
+ * A file table's temperatures, law, measured range and rows, checked: ascending temperatures, a law
+ * and a measured range that fit them, rows on the grid with a finite σ ≥ 0 at each temperature,
+ * and a grid that covers {@link BAKE_RANGE_NM} with a point on each of its ends.
+ *
+ * @throws Error naming the table and the check it fails.
+ */
+function readGrid(table: FileTable, where: string): CheckedGrid {
+  const { firstNm, stepNm, temperaturesK, rows } = table;
+  if (
+    temperaturesK.length === 0 ||
+    temperaturesK.some((t, i) => !(t > (temperaturesK[i - 1] ?? 0)))
+  ) {
+    throw new Error(`${where}'s temperatures do not ascend from above 0 K`);
+  }
+  const law = table.temperatureLaw;
+  if (!isTemperatureLaw(law) || (law === "lnQuadratic" && temperaturesK.length !== 3)) {
+    throw new Error(`${where}'s temperature law ${law} does not fit its temperatures`);
+  }
+  const [lowK, highK] = table.measuredRangeK;
+  const coldest = temperaturesK[0] ?? Number.NaN;
+  const hottest = temperaturesK[temperaturesK.length - 1] ?? Number.NaN;
+  if (
+    lowK === undefined ||
+    highK === undefined ||
+    table.measuredRangeK.length !== 2 ||
+    !(lowK > 0 && highK >= lowK) ||
+    ((law === "linear" || law === "lnLinear") && !(lowK >= coldest && highK <= hottest))
+  ) {
+    throw new Error(`${where}'s measured range does not fit its law and temperatures`);
+  }
+  const columns = temperaturesK.map(() => new Float64Array(rows.length));
+  for (const [i, row] of rows.entries()) {
+    const nm = row[0] ?? Number.NaN;
+    if (
+      !(Math.abs(nm - (firstNm + i * stepNm)) <= GRID_TOLERANCE_NM) ||
+      row.length !== columns.length + 1
+    ) {
+      throw new Error(
+        `${where}'s row ${i} is not [${firstNm + i * stepNm}, σ at each temperature]`,
+      );
+    }
+    for (const [t, column] of columns.entries()) {
+      const sigma = row[t + 1] ?? Number.NaN;
+      if (!(Number.isFinite(sigma) && sigma >= 0)) {
+        throw new Error(`${where}'s σ at ${nm} nm and ${temperaturesK[t]} K is ${sigma}`);
+      }
+      column[i] = sigma;
+    }
+  }
+  const [low, high] = BAKE_RANGE_NM;
+  const lowIndex = (low - firstNm) / stepNm;
+  const highIndex = (high - firstNm) / stepNm;
+  if (
+    !(lowIndex >= 0 && highIndex <= rows.length - 1) ||
+    !Number.isInteger(lowIndex) ||
+    !Number.isInteger(highIndex)
+  ) {
+    throw new Error(`${where}'s grid does not cover ${low}–${high} nm with a point on each end`);
+  }
+  return { temperatureLaw: law, measuredRangeK: [lowK, highK], columns };
+}
+
+/**
+ * A cross-sections file's species tables, checked: unique species, ascending temperatures and a
+ * law and a measured range that fit them, rows on the grid with a finite σ ≥ 0 at each
+ * temperature, and a grid that covers {@link BAKE_RANGE_NM} with a point on each of its ends.
  *
  * @throws Error naming the table and the check it fails.
  */
 export function readCrossSections(file: CrossSectionsFile): ReadonlyArray<CrossSectionTable> {
   const seen = new Set<string>();
   return file.tables.map((table) => {
-    const { species, firstNm, stepNm, temperaturesK, rows } = table;
+    const { species, firstNm, stepNm, temperaturesK } = table;
     const where = `crossSections.json's ${species}`;
     if (seen.has(species)) {
       throw new Error(`${where} is listed twice`);
     }
     seen.add(species);
-    if (
-      temperaturesK.length === 0 ||
-      temperaturesK.some((t, i) => !(t > (temperaturesK[i - 1] ?? 0)))
-    ) {
-      throw new Error(`${where}'s temperatures do not ascend from above 0 K`);
-    }
-    const law = table.temperatureLaw;
-    if (!isTemperatureLaw(law) || (law === "lnQuadratic" && temperaturesK.length !== 3)) {
-      throw new Error(`${where}'s temperature law ${law} does not fit its temperatures`);
-    }
-    const [lowK, highK] = table.measuredRangeK;
-    const coldest = temperaturesK[0] ?? Number.NaN;
-    const hottest = temperaturesK[temperaturesK.length - 1] ?? Number.NaN;
-    if (
-      lowK === undefined ||
-      highK === undefined ||
-      table.measuredRangeK.length !== 2 ||
-      !(lowK > 0 && highK > lowK) ||
-      (law === "linear" && !(lowK >= coldest && highK <= hottest))
-    ) {
-      throw new Error(`${where}'s measured range does not fit its law and temperatures`);
-    }
-    const columns = temperaturesK.map(() => new Float64Array(rows.length));
-    for (const [i, row] of rows.entries()) {
-      const nm = row[0] ?? Number.NaN;
-      if (
-        !(Math.abs(nm - (firstNm + i * stepNm)) <= GRID_TOLERANCE_NM) ||
-        row.length !== columns.length + 1
-      ) {
-        throw new Error(
-          `${where}'s row ${i} is not [${firstNm + i * stepNm}, σ at each temperature]`,
-        );
-      }
-      for (const [t, column] of columns.entries()) {
-        const sigma = row[t + 1] ?? Number.NaN;
-        if (!(Number.isFinite(sigma) && sigma >= 0)) {
-          throw new Error(`${where}'s σ at ${nm} nm and ${temperaturesK[t]} K is ${sigma}`);
-        }
-        column[i] = sigma;
-      }
-    }
-    const [low, high] = BAKE_RANGE_NM;
-    const lowIndex = (low - firstNm) / stepNm;
-    const highIndex = (high - firstNm) / stepNm;
-    if (
-      !(lowIndex >= 0 && highIndex <= rows.length - 1) ||
-      !Number.isInteger(lowIndex) ||
-      !Number.isInteger(highIndex)
-    ) {
-      throw new Error(`${where}'s grid does not cover ${low}–${high} nm with a point on each end`);
-    }
+    const grid = readGrid(table, where);
     return {
       species,
       source: `${table.source}. ${table.reduction}`,
       firstNm,
       stepNm,
       temperaturesK,
-      temperatureLaw: law,
-      measuredRangeK: [lowK, highK],
-      crossSectionsM2: columns,
+      temperatureLaw: grid.temperatureLaw,
+      measuredRangeK: grid.measuredRangeK,
+      crossSectionsM2: grid.columns,
+    };
+  });
+}
+
+/**
+ * A cross-sections file's pair tables, checked as {@link readCrossSections} checks a species', and
+ * each pair's key its two members' joined by `+`, listed once.
+ *
+ * @throws Error naming the pair and the check it fails.
+ */
+export function readPairCrossSections(
+  file: PairCrossSectionsFile,
+): ReadonlyArray<PairCrossSectionTable> {
+  const seen = new Set<string>();
+  return file.pairs.map((table) => {
+    const { pair, members, firstNm, stepNm, temperaturesK } = table;
+    const where = `crossSections.json's pair ${pair}`;
+    const [a, b] = members;
+    if (members.length !== 2 || a === undefined || b === undefined || pair !== `${a}+${b}`) {
+      throw new Error(`${where} is not its two members' keys joined by +`);
+    }
+    if (seen.has(pair)) {
+      throw new Error(`${where} is listed twice`);
+    }
+    seen.add(pair);
+    const grid = readGrid(table, where);
+    return {
+      pair,
+      members: [a, b],
+      source: `${table.source}. ${table.reduction}`,
+      firstNm,
+      stepNm,
+      temperaturesK,
+      temperatureLaw: grid.temperatureLaw,
+      measuredRangeK: grid.measuredRangeK,
+      crossSectionsM5: grid.columns,
     };
   });
 }
@@ -224,10 +329,57 @@ export function readCrossSections(file: CrossSectionsFile): ReadonlyArray<CrossS
  *   line spacings at 100 K under the Sun, the correction would raise the red channel's
  *   transmittance through 30 km-amagat by at most 1.4% at 1 atm, 4.4% at 0.3 atm and 11.5% at
  *   0.1 atm (through 3 km-amagat, 0.1%, 0.4% and 1.0%); a body's methane lies chiefly at 0.5 bar
- *   and deeper.
+ *   and deeper. Above 300 K its values are held, `estimated`: no open line list reaches its
+ *   visible bands hotter (R08.T4.f confirms at fetch; `decision-r08-t4b-t12c.md`, follow-up 2);
+ * - `SO2` (R08.T4.c): its near-ultraviolet tail, Hermans, Vandaele and Fally 2009 (J. Quant.
+ *   Spectrosc. Radiat. Transfer 110, 756) at 298, 318, 338 and 358 K, as the MPI-Mainz atlas's
+ *   CC BY 4.0 snapshot holds them (Keller-Rudek et al. 2013), binned to 1 nm, linear in T and
+ *   measured over 298–358 K. The source ends at 416.66 nm, so σ is 0 from 417 nm up, where the
+ *   ã–X̃ band's tail has fallen below 10⁻²⁵ cm²: 2.4 × 10⁻²² cm² at 383 nm, 1.2 × 10⁻²⁴ at 400 nm.
  */
 export const ABSORBER_CROSS_SECTIONS: ReadonlyArray<CrossSectionTable> =
   readCrossSections(crossSectionsFile);
+
+/**
+ * The pairs' cross-sections the client holds (`absorbers/crossSections.json`'s `pairs`, R08.T4.c),
+ * m⁵ a molecule pair on vacuum wavelengths over 380–800 nm, binned to 1 nm, linear in T unless
+ * stated:
+ *
+ * - `O2+O2`, O₂–O₂ collision-induced absorption from HITRAN2024's file (Terragni et al. 2025;
+ *   Karman et al. 2019, Icarus 328, 160): its double transitions near 380, 446, 477, 532, 577
+ *   and 630 nm (the sets' own peaks: 380.3, 446.5, 477.0, 532.8, 577.7 and 630.1 nm),
+ *   Finkenzeller and Volkamer 2022's sets over 380–499 nm (with Thalman and Volkamer's 203 K set
+ *   below their 223 K) and Thalman and Volkamer 2013's over 500–653 nm, measured over 203–287 K,
+ *   where each bin lies between two of the measurements' sets (`decision-r08-t4b-t12c.md`,
+ *   follow-up 3, ruling 7), and held, `estimated`, beyond; and the B and A bands'
+ *   collision-induced absorption (Spiering et al. 2011, 672–703 nm at 293 K; Tran et al. 2006,
+ *   724–793 nm at 296 K), held at every temperature. Earth's vertical pair column, 1.28 × 10⁴³
+ *   cm⁻⁵ on Design note 3's column (US Standard Atmosphere 1976's is 1.32 × 10⁴³), gives
+ *   τ ≈ 0.009 at 477 nm;
+ * - `O2+N2`, O₂–N₂'s collision-induced absorption in the A band, from HITRAN2024's O₂–N₂ file
+ *   (Tran et al. 2006, at 296 K, measured there alone): its set spans 723–794 nm and is nonzero
+ *   from 733 nm, so over 733–760 nm of the bake range;
+ * - `O2+CO2`, O₂–CO₂'s in the A band, from HITRAN2024's O₂–CO₂ file (Vangvichith, Tran and
+ *   Hartmann 2009, at 296 K, measured there alone), nonzero over 733–760 nm in the range and 9.5
+ *   times O₂–N₂'s at 760 nm; found at T4.c's fetch, where follow-up 3 had found no source;
+ * - `H2+He`, Abel et al. 2012's ab initio coefficients (J. Chem. Phys. 136, 044319) from
+ *   HITRAN's file at 26 of its temperatures, 200–9,900 K, ln σ linear in T (`lnLinear`), the sets
+ *   of 950–1,175 K skipped for breaking the trend (the tool's `HYDROGEN_HELIUM_TEMPERATURES_K`):
+ *   the file ends at 20,000 cm⁻¹, so it covers 501–760 nm and is 0 below;
+ * - `H2+H2`, H₂–H₂ collision-induced absorption from Borysow 2002 (A&A 390, 779; DOI
+ *   10.1051/0004-6361:20020555), equilibrium hydrogen, reduced to 1 nm cell means where its tables
+ *   reach, 607–760 nm at 60–350 K and 589–760 nm at 400–1,000 K (597 nm at 600 K), and from
+ *   Borysow, Jørgensen and Fu 2001 (J. Quant. Spectrosc. Radiat. Transfer 68, 235) over 501–760 nm
+ *   at 2,000–7,000 K; ln σ linear in T (`lnLinear`), measured over 60–7,000 K. It is 0 below, where
+ *   the tables end (below 1,000 K the 5–0 overtone is not tabulated), a stated approximation
+ *   (`decision-r08-cmf-licence.md` §8). HITRAN's H₂–H₂ file ends at 1 µm.
+ *
+ * In closed form ({@link pairCrossSectionAt}): H⁻'s free–free, the `H+e-` pair, and He⁻'s, the
+ * `He+e-` pair. Pending, with its estimated cell means (`absorbers/transparency.ts`'s
+ * `PENDING_ABSORBERS`): H₂⁻'s free–free (`H2+e-`, Bell 1980's table not obtained).
+ */
+export const ABSORBER_PAIR_CROSS_SECTIONS: ReadonlyArray<PairCrossSectionTable> =
+  readPairCrossSections(crossSectionsFile);
 
 /** A species' cross-sections at one temperature, on its table's grid. */
 export interface SpeciesCrossSection {
@@ -250,12 +402,101 @@ export interface SpeciesCrossSection {
   readonly source: string;
 }
 
+/** A molecule pair's cross-sections at one temperature, on its table's grid (R08.T4.c). */
+export interface PairCrossSection {
+  /** The pair's key, its members' registry keys joined by `+`. */
+  readonly pair: string;
+  /** The members' registry keys, as the pair's key names them. */
+  readonly members: readonly [string, string];
+  /** As {@link SpeciesCrossSection.provenance}. */
+  readonly provenance: Exclude<OpticsProvenance, "none">;
+  /** The temperature asked for, K. */
+  readonly temperatureK: number;
+  /** The first grid point, nm. */
+  readonly firstNm: number;
+  /** The grid's spacing, nm. */
+  readonly stepNm: number;
+  /** σ at each grid point, m⁵ a molecule pair. */
+  readonly crossSectionsM5: Float64Array;
+  /** The data's citation. */
+  readonly source: string;
+}
+
+/** A table's temperatures, law and values, whatever their unit: what the laws read. */
+interface TemperatureGrid {
+  /** For messages: the species or the pair. */
+  readonly label: string;
+  readonly temperaturesK: ReadonlyArray<number>;
+  readonly temperatureLaw: TemperatureLaw;
+  readonly measuredRangeK: readonly [number, number];
+  readonly values: ReadonlyArray<Float64Array>;
+}
+
+/** Refuses a temperature that is not finite and above 0 K. */
+function checkTemperature(temperatureK: number): void {
+  if (!(Number.isFinite(temperatureK) && temperatureK > 0)) {
+    throw new RangeError(
+      `a cross-section's temperature is finite and above 0 K, not ${temperatureK}`,
+    );
+  }
+}
+
+/**
+ * A grid's values at a temperature by its law within its measured range, the nearest end's held
+ * beyond it, and the provenance that follows.
+ */
+function gridAt(
+  grid: TemperatureGrid,
+  temperatureK: number,
+): { readonly values: Float64Array; readonly provenance: "measured" | "estimated" } {
+  const [lowK, highK] = grid.measuredRangeK;
+  const atK = Math.min(Math.max(temperatureK, lowK), highK);
+  let values: Float64Array;
+  switch (grid.temperatureLaw) {
+    case "linear":
+      values = linearInTemperature(grid, atK);
+      break;
+    case "lnQuadratic":
+      values = lnQuadraticInTemperature(grid, atK);
+      break;
+    case "lnLinear":
+      values = lnLinearInTemperature(grid, atK);
+      break;
+  }
+  return {
+    values,
+    provenance: temperatureK < lowK || temperatureK > highK ? "estimated" : "measured",
+  };
+}
+
+/**
+ * The grid the closed forms are evaluated on: 380–800 nm at 1 nm, the committed tables' span and
+ * finest smooth step.
+ */
+const CLOSED_FORM_GRID = { firstNm: 380, stepNm: 1, points: 421 } as const;
+
+/** A closed form evaluated on {@link CLOSED_FORM_GRID}. */
+function onClosedFormGrid(value: (wavelengthNm: number) => number): Float64Array {
+  return Float64Array.from({ length: CLOSED_FORM_GRID.points }, (_, i) =>
+    value(CLOSED_FORM_GRID.firstNm + i * CLOSED_FORM_GRID.stepNm),
+  );
+}
+
+/** John 1988's citation, for the closed forms' sources. */
+const JOHN_1988 =
+  "T. L. John, Continuous absorption by the negative hydrogen ion reconsidered, Astron. " +
+  "Astrophys. 193 (1988) 189-192 (ADS 1988A&A...193..189J)";
+
 /**
  * A species' cross-sections at a temperature, or `undefined` if the client holds none for it.
  *
  * @remarks
  * By the table's {@link TemperatureLaw} within its measured range. Beyond it the nearest end's
- * values are held and the result is `estimated`: methane above 300 K is R08.T4.c's.
+ * values are held and the result is `estimated`: methane above 300 K is R08.T4.f's. A key no table
+ * holds may have a closed form (R08.T4.c): `H-`, H⁻'s bound–free cross-section by John 1988's
+ * Eqs. 4–5 with the stimulated-emission factor at the temperature (`absorbers/hMinus.ts`),
+ * `measured` at every temperature, since the fit holds over all of 125–1,641.9 nm and the factor
+ * is exact.
  *
  * @param tables - The tables to look in; the committed ones unless a test gives its own.
  * @throws RangeError for a temperature that is not finite and above 0 K.
@@ -265,29 +506,34 @@ export function crossSectionAt(
   temperatureK: number,
   tables: ReadonlyArray<CrossSectionTable> = ABSORBER_CROSS_SECTIONS,
 ): SpeciesCrossSection | undefined {
-  if (!(Number.isFinite(temperatureK) && temperatureK > 0)) {
-    throw new RangeError(
-      `a cross-section's temperature is finite and above 0 K, not ${temperatureK}`,
-    );
-  }
+  checkTemperature(temperatureK);
   const table = tables.find((t) => t.species === species);
   if (table === undefined) {
-    return undefined;
+    return species === "H-"
+      ? {
+          species,
+          provenance: "measured",
+          temperatureK,
+          firstNm: CLOSED_FORM_GRID.firstNm,
+          stepNm: CLOSED_FORM_GRID.stepNm,
+          crossSectionsM2: onClosedFormGrid((nm) => hMinusBoundFreeM2(nm, temperatureK)),
+          source: `${JOHN_1988}, Eqs. 3-5 and Table 2: bound-free, per H- ion, with the stimulated-emission factor`,
+        }
+      : undefined;
   }
-  const [lowK, highK] = table.measuredRangeK;
-  const atK = Math.min(Math.max(temperatureK, lowK), highK);
-  let values: Float64Array;
-  switch (table.temperatureLaw) {
-    case "linear":
-      values = linearInTemperature(table, atK);
-      break;
-    case "lnQuadratic":
-      values = lnQuadraticInTemperature(table, atK);
-      break;
-  }
+  const { values, provenance } = gridAt(
+    {
+      label: table.species,
+      temperaturesK: table.temperaturesK,
+      temperatureLaw: table.temperatureLaw,
+      measuredRangeK: table.measuredRangeK,
+      values: table.crossSectionsM2,
+    },
+    temperatureK,
+  );
   return {
     species,
-    provenance: temperatureK < lowK || temperatureK > highK ? "estimated" : "measured",
+    provenance,
     temperatureK,
     firstNm: table.firstNm,
     stepNm: table.stepNm,
@@ -296,35 +542,167 @@ export function crossSectionAt(
   };
 }
 
+/** A pair held in closed form: its members, the temperatures its source spans, and its σ. */
+interface ClosedFormPair {
+  readonly pair: string;
+  readonly members: readonly [string, string];
+  /** The source's temperatures, K: `measured` within, the nearer end held beyond. */
+  readonly measuredRangeK: readonly [number, number];
+  /** σ, m⁵ a pair, at a vacuum wavelength in nm and a temperature within the range. */
+  readonly crossSectionM5: (wavelengthNm: number, temperatureK: number) => number;
+  readonly source: string;
+}
+
 /**
- * σ linear in T between the two tabulated temperatures around it, or from the nearest pair beyond
- * them, floored at 0; a tabulated temperature's own values there.
+ * The pairs held in closed form (R08.T4.c; `decision-r08-t4b-t12c.md`, follow-up 3): H⁻'s
+ * free–free absorption, the `H+e-` pair, by John 1988's Eq. 6, and He⁻'s, the `He+e-` pair, from
+ * John 1994's Table 2 ({@link pairCrossSectionAt}).
  */
-function linearInTemperature(table: CrossSectionTable, temperatureK: number): Float64Array {
-  const { temperaturesK, crossSectionsM2 } = table;
+const CLOSED_FORM_PAIR_SOURCES: ReadonlyArray<ClosedFormPair> = [
+  {
+    pair: "H+e-",
+    members: ["H", "e-"],
+    measuredRangeK: H_MINUS_FREE_FREE_RANGE_K,
+    crossSectionM5: hMinusFreeFreeM5,
+    source: `${JOHN_1988}, Eq. 6 and Tables 3a-3b: free-free, per H atom and electron, k_ff k T`,
+  },
+  {
+    pair: "He+e-",
+    members: ["He", "e-"],
+    measuredRangeK: HE_MINUS_FREE_FREE_RANGE_K,
+    crossSectionM5: heMinusFreeFreeM5,
+    source:
+      "T. L. John, Absorption coefficients of the negative helium ion, Mon. Not. R. Astron. Soc. " +
+      "269 (1994) 871-878 (ADS 1994MNRAS.269..871J), Table 2: free-free, per He atom and " +
+      "electron, K k T, A = K/lambda^2 interpolated linearly in 1/lambda and in 5040/T, held " +
+      "below 506.3 nm",
+  },
+];
+
+/** The pairs held in closed form, by key and members (R08.T4.c). */
+export const CLOSED_FORM_PAIRS: ReadonlyArray<{
+  readonly pair: string;
+  readonly members: readonly [string, string];
+}> = CLOSED_FORM_PAIR_SOURCES.map(({ pair, members }) => ({ pair, members }));
+
+/**
+ * A molecule pair's cross-sections at a temperature, or `undefined` if the client holds none for
+ * it (R08.T4.c).
+ *
+ * @remarks
+ * As {@link crossSectionAt}, from the pair tables. The closed forms: `H+e-`, H⁻'s free–free
+ * absorption, John 1988's Eq. 6 as k_ff k_B T (`absorbers/hMinus.ts`), and `He+e-`, He⁻'s, John
+ * 1994's Table 2 as K k_B T (`absorbers/heliumMinus.ts`), each `measured` over its source's
+ * 1,400–10,080 K and held at the nearer end, `estimated`, beyond.
+ *
+ * @param tables - The pair tables to look in; the committed ones unless a test gives its own.
+ * @throws RangeError for a temperature that is not finite and above 0 K.
+ */
+export function pairCrossSectionAt(
+  pair: string,
+  temperatureK: number,
+  tables: ReadonlyArray<PairCrossSectionTable> = ABSORBER_PAIR_CROSS_SECTIONS,
+): PairCrossSection | undefined {
+  checkTemperature(temperatureK);
+  const table = tables.find((t) => t.pair === pair);
+  if (table === undefined) {
+    const closed = CLOSED_FORM_PAIR_SOURCES.find((c) => c.pair === pair);
+    if (closed === undefined) {
+      return undefined;
+    }
+    const [lowK, highK] = closed.measuredRangeK;
+    const atK = Math.min(Math.max(temperatureK, lowK), highK);
+    return {
+      pair,
+      members: closed.members,
+      provenance: temperatureK < lowK || temperatureK > highK ? "estimated" : "measured",
+      temperatureK,
+      firstNm: CLOSED_FORM_GRID.firstNm,
+      stepNm: CLOSED_FORM_GRID.stepNm,
+      crossSectionsM5: onClosedFormGrid((nm) => closed.crossSectionM5(nm, atK)),
+      source: closed.source,
+    };
+  }
+  const { values, provenance } = gridAt(
+    {
+      label: table.pair,
+      temperaturesK: table.temperaturesK,
+      temperatureLaw: table.temperatureLaw,
+      measuredRangeK: table.measuredRangeK,
+      values: table.crossSectionsM5,
+    },
+    temperatureK,
+  );
+  return {
+    pair,
+    members: table.members,
+    provenance,
+    temperatureK,
+    firstNm: table.firstNm,
+    stepNm: table.stepNm,
+    crossSectionsM5: values,
+    source: table.source,
+  };
+}
+
+/**
+ * Values linear in T between the two tabulated temperatures around it, or from the nearest pair
+ * beyond them, floored at 0; a tabulated temperature's own values there.
+ */
+function linearInTemperature(table: TemperatureGrid, temperatureK: number): Float64Array {
+  const { temperaturesK, values: columns } = table;
   const last = temperaturesK.length - 1;
   const exact = temperaturesK.indexOf(temperatureK);
   if (exact >= 0 || last === 0) {
-    return Float64Array.from(crossSectionsM2[Math.max(exact, 0)] ?? []);
+    return Float64Array.from(columns[Math.max(exact, 0)] ?? []);
   }
   let k = 0;
   while (k < last - 1 && (temperaturesK[k + 1] ?? Number.POSITIVE_INFINITY) < temperatureK) {
     k += 1;
   }
-  const below = crossSectionsM2[k] ?? new Float64Array(0);
-  const above = crossSectionsM2[k + 1] ?? new Float64Array(0);
+  const below = columns[k] ?? new Float64Array(0);
+  const above = columns[k + 1] ?? new Float64Array(0);
   const lowK = temperaturesK[k] ?? Number.NaN;
   const t = (temperatureK - lowK) / ((temperaturesK[k + 1] ?? Number.NaN) - lowK);
   return below.map((v, i) => Math.max(v + ((above[i] ?? Number.NaN) - v) * t, 0));
 }
 
 /**
+ * ln σ linear in T between the two tabulated temperatures around it; at a point with a 0 at either,
+ * {@link linearInTemperature}'s value there. The law's range is the table's, so it never
+ * extrapolates ({@link gridAt} holds the ends).
+ */
+function lnLinearInTemperature(table: TemperatureGrid, temperatureK: number): Float64Array {
+  const { temperaturesK, values: columns } = table;
+  const last = temperaturesK.length - 1;
+  const exact = temperaturesK.indexOf(temperatureK);
+  if (exact >= 0 || last === 0) {
+    return Float64Array.from(columns[Math.max(exact, 0)] ?? []);
+  }
+  const linear = linearInTemperature(table, temperatureK);
+  let k = 0;
+  while (k < last - 1 && (temperaturesK[k + 1] ?? Number.POSITIVE_INFINITY) < temperatureK) {
+    k += 1;
+  }
+  const below = columns[k] ?? new Float64Array(0);
+  const above = columns[k + 1] ?? new Float64Array(0);
+  const lowK = temperaturesK[k] ?? Number.NaN;
+  const t = (temperatureK - lowK) / ((temperaturesK[k + 1] ?? Number.NaN) - lowK);
+  return below.map((a, i) => {
+    const b = above[i] ?? Number.NaN;
+    return a > 0 && b > 0
+      ? Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * t)
+      : (linear[i] ?? Number.NaN);
+  });
+}
+
+/**
  * ln σ the Lagrange quadratic through a table's three temperatures (Eq. 8); at a point with a 0 at
  * any of the three, {@link linearInTemperature}'s value there.
  */
-function lnQuadraticInTemperature(table: CrossSectionTable, temperatureK: number): Float64Array {
+function lnQuadraticInTemperature(table: TemperatureGrid, temperatureK: number): Float64Array {
   const [t0, t1, t2] = table.temperaturesK;
-  const [s0, s1, s2] = table.crossSectionsM2;
+  const [s0, s1, s2] = table.values;
   if (
     t0 === undefined ||
     t1 === undefined ||
@@ -333,11 +711,11 @@ function lnQuadraticInTemperature(table: CrossSectionTable, temperatureK: number
     s1 === undefined ||
     s2 === undefined
   ) {
-    throw new Error(`${table.species}'s quadratic law needs three temperatures`);
+    throw new Error(`${table.label}'s quadratic law needs three temperatures`);
   }
   const exact = table.temperaturesK.indexOf(temperatureK);
   if (exact >= 0) {
-    return Float64Array.from(table.crossSectionsM2[exact] ?? []);
+    return Float64Array.from(table.values[exact] ?? []);
   }
   const linear = linearInTemperature(table, temperatureK);
   const t = temperatureK;
@@ -384,7 +762,8 @@ export interface AbsorberSpecies {
  * note 5; decision-composition §1.9): a layer between two pressures of a column, in which each
  * species' mixing ratio is constant.
  */
-export interface AbsorberSpec {
+export interface ColumnAbsorberSpec {
+  readonly kind: "column";
   /** The term's name, `absorber:` and the species' keys joined by `+`, unique within a medium. */
   readonly name: string;
   /** The species, in the order first listed, each once. */
@@ -397,6 +776,116 @@ export interface AbsorberSpec {
   readonly topPa: number;
   /** The temperature the cross-sections are taken at, K: the layer's column-weighted mean. */
   readonly temperatureK: number;
+}
+
+/** One molecule pair of a pair spec (R08.T4.c). */
+export interface AbsorberPair {
+  /** The pair's key, its members' registry keys joined by `+` (`O2+O2`, `H+e-`). */
+  readonly pair: string;
+  /** Its vertical pair column ∫ n_A n_B dz, molecule pairs m⁻⁵. */
+  readonly pairColumnPerM5: number;
+  /** Its cross-sections at the spec's temperature. */
+  readonly crossSection: PairCrossSection;
+}
+
+/**
+ * The molecule pairs on one vertical profile, which share one curve of growth a sun (R08.T4.c;
+ * `decision-r08-t4b-t12c.md`, follow-up 2): the overlap of their members' layers, where each
+ * member's mixing ratio is constant, so that every pair's density is a constant multiple of the
+ * column's n² there, and σ_mix = Σ (Uᵢ ÷ U) σᵢ is exact for every path.
+ */
+export interface PairAbsorberSpec {
+  readonly kind: "pair";
+  /** The term's name, `pair:` and the pairs' keys joined by `,` (`pair:O2+O2,H2+He`). */
+  readonly name: string;
+  /** The pairs, in the order formed, each once. */
+  readonly pairs: ReadonlyArray<AbsorberPair>;
+  /** Their summed vertical pair column U, molecule pairs m⁻⁵, above 0: the curve's u is of the mixture. */
+  readonly pairColumnPerM5: number;
+  /** The overlap's base on its column, Pa. */
+  readonly basePa: number;
+  /** The overlap's top on its column, Pa. */
+  readonly topPa: number;
+  /** The temperature the cross-sections are taken at, K: the overlap's pair-weighted mean. */
+  readonly temperatureK: number;
+}
+
+/**
+ * The absorbers on one vertical profile: molecules over their column (T4.b's), or molecule pairs
+ * over their pair column (R08.T4.c).
+ */
+export type AbsorberSpec = ColumnAbsorberSpec | PairAbsorberSpec;
+
+/**
+ * An amount of an absorber crossed, in its kind's unit (R08.T4.c): a column absorber's column,
+ * molecules m⁻², or a pair absorber's pair column, molecule pairs m⁻⁵. The curves and optics of
+ * one kind read only an amount of that kind.
+ */
+export type AbsorberAmount =
+  | { readonly kind: "column"; readonly columnPerM2: number }
+  | { readonly kind: "pair"; readonly pairColumnPerM5: number };
+
+/** An amount's value in its kind's unit, molecules m⁻² or molecule pairs m⁻⁵. */
+function amountValue(amount: AbsorberAmount): number {
+  let value: number;
+  switch (amount.kind) {
+    case "column":
+      value = amount.columnPerM2;
+      break;
+    case "pair":
+      value = amount.pairColumnPerM5;
+      break;
+  }
+  return value;
+}
+
+/**
+ * A spec's vertical amount U, the abscissa its curves are spaced about: a column spec's column, or a
+ * pair spec's pair column.
+ */
+export function absorberVerticalAmount(spec: AbsorberSpec): AbsorberAmount {
+  let amount: AbsorberAmount;
+  switch (spec.kind) {
+    case "column":
+      amount = { kind: "column", columnPerM2: spec.columnPerM2 };
+      break;
+    case "pair":
+      amount = { kind: "pair", pairColumnPerM5: spec.pairColumnPerM5 };
+      break;
+  }
+  return amount;
+}
+
+/** An amount times a pure number, of the same kind. */
+export function scaledAmount(amount: AbsorberAmount, factor: number): AbsorberAmount {
+  let scaled: AbsorberAmount;
+  switch (amount.kind) {
+    case "column":
+      scaled = { kind: "column", columnPerM2: amount.columnPerM2 * factor };
+      break;
+    case "pair":
+      scaled = { kind: "pair", pairColumnPerM5: amount.pairColumnPerM5 * factor };
+      break;
+  }
+  return scaled;
+}
+
+/**
+ * An amount's value, checked against the kind of the optics or curve that reads it.
+ *
+ * @throws Error for an amount of the other kind, a molecule column read as a pair column or the
+ *   reverse: a caller's bug, many orders of magnitude off.
+ * @throws RangeError for a value that is not finite and at least 0.
+ */
+function amountFor(amount: AbsorberAmount, kind: AbsorberSpec["kind"]): number {
+  if (amount.kind !== kind) {
+    throw new Error(`a ${amount.kind} amount is read on a ${kind} absorber's optics or curve`);
+  }
+  const value = amountValue(amount);
+  if (!(Number.isFinite(value) && value >= 0)) {
+    throw new RangeError(`an absorber's amount is finite and at least 0, not ${value}`);
+  }
+  return value;
 }
 
 /** Why a listed absorber is drawn approximately or not at all, for `atmosphereApproximate`. */
@@ -414,7 +903,7 @@ export type AbsorberApproximationReason =
 /**
  * A listed absorber drawn approximately or not at all: drawn as nothing (`none`) for want of
  * cross-sections or of a column, or with held cross-sections (`estimated`) beyond their table's
- * measured temperatures.
+ * measured temperatures. `species` is a pair's key (`O2+O2`) for a pair.
  */
 export type AbsorberApproximation =
   | {
@@ -532,14 +1021,32 @@ function layerOnColumn(column: AtmosphereColumn, basePa: number, topPa: number):
   };
 }
 
-/** The column-weighted mean temperature over a layer, K: ∫ n T dz ÷ ∫ n dz, by the trapezoid rule. */
-function layerTemperatureK(layer: LayerOnColumn): number {
+/**
+ * ∫ ρᵖ dz over a layer, by the trapezoid rule on its levels: p = 1 for a species' column, 2 for a
+ * pair's.
+ */
+function layerIntegralM(layer: LayerOnColumn, power: 1 | 2): number {
+  let sum = 0;
+  for (let i = 1; i < layer.altitudesM.length; i += 1) {
+    const dz = (layer.altitudesM[i] ?? Number.NaN) - (layer.altitudesM[i - 1] ?? Number.NaN);
+    const n0 = (layer.relative[i - 1] ?? Number.NaN) ** power;
+    const n1 = (layer.relative[i] ?? Number.NaN) ** power;
+    sum += 0.5 * (n0 + n1) * dz;
+  }
+  return sum;
+}
+
+/**
+ * The mean temperature over a layer weighted by ρᵖ, K: ∫ ρᵖ T dz ÷ ∫ ρᵖ dz by the trapezoid rule,
+ * the column-weighted mean for p = 1 and the pair-weighted mean for p = 2.
+ */
+function layerTemperatureK(layer: LayerOnColumn, power: 1 | 2): number {
   let weight = 0;
   let sum = 0;
   for (let i = 1; i < layer.altitudesM.length; i += 1) {
     const dz = (layer.altitudesM[i] ?? Number.NaN) - (layer.altitudesM[i - 1] ?? Number.NaN);
-    const n0 = layer.relative[i - 1] ?? Number.NaN;
-    const n1 = layer.relative[i] ?? Number.NaN;
+    const n0 = (layer.relative[i - 1] ?? Number.NaN) ** power;
+    const n1 = (layer.relative[i] ?? Number.NaN) ** power;
     weight += 0.5 * (n0 + n1) * dz;
     sum +=
       0.5 *
@@ -550,9 +1057,41 @@ function layerTemperatureK(layer: LayerOnColumn): number {
   return sum / weight;
 }
 
+/** A listed layer with a column, clamped to the column, at its place in the list. */
+interface ListedLayer {
+  readonly index: number;
+  readonly layer: AbsorberLayer;
+  readonly basePa: number;
+  readonly topPa: number;
+}
+
+/**
+ * A profile on its way to a spec: its place among the profiles, the species or pairs it reports,
+ * and its spec if it has anything to draw.
+ */
+interface BuiltProfile {
+  /** A column profile's first species' place in the list, a pair profile's later member's + ½. */
+  readonly order: number;
+  /** The keys it reports, with the provenance of each one's cross-sections, if any. */
+  readonly members: ReadonlyArray<{
+    readonly key: string;
+    readonly provenance: "measured" | "estimated" | undefined;
+  }>;
+  readonly spec: AbsorberSpec | undefined;
+}
+
+/** The pairs the client can form: the committed pair tables', then the closed forms'. */
+function formablePairs(
+  pairTables: ReadonlyArray<PairCrossSectionTable>,
+): ReadonlyArray<{ readonly pair: string; readonly members: readonly [string, string] }> {
+  const held = pairTables.map(({ pair, members }) => ({ pair, members }));
+  return [...held, ...CLOSED_FORM_PAIRS.filter((p) => !held.some((h) => h.pair === p.pair))];
+}
+
 /**
  * A body's absorbers merged into one spec per vertical profile on its column, each species' cross-
- * sections taken at its profile's temperature (decision-composition §1.9).
+ * sections taken at its profile's temperature (decision-composition §1.9), and the pairs its
+ * layers form (R08.T4.c).
  *
  * @remarks
  * Layers merge when their base and top, clamped to the column's datum and top, are equal: their
@@ -560,7 +1099,18 @@ function layerTemperatureK(layer: LayerOnColumn): number {
  * every path. A layer of column 0 has nothing to draw and is left out. A spec's temperature is the
  * layer's column-weighted mean, ∫ n T dz ÷ ∫ n dz, which gives the vertical column's mean σ exactly
  * where σ is linear in T (ozone) and nearly so for methane's Eq. 8; a slant path through part of
- * the layer reads the same σ, a stated approximation.
+ * the layer reads the same σ, a stated approximation. A species `absorbers/transparency.ts` states
+ * has no visible absorption, and for which no table is held, takes no column and no label.
+ *
+ * **Pairs** (`decision-r08-t4b-t12c.md`, follow-up 2). Each pair the client holds a table or a
+ * closed form for (`O2+O2`, `O2+N2`, `O2+CO2`, `H2+He`, `H2+H2`, `H+e-`, `He+e-`) is formed when
+ * both its members are listed with a column, and not otherwise. Each member's density is c ρ
+ * inside its layer, c = U ÷ ∫ ρ dz over it, so the pair's vertical column is c_A c_B ∫ ρ² dz over
+ * the overlap of the two layers (for a member paired with itself, c²). Pairs merge when their
+ * overlaps are equal, and their spec takes the overlap's pair-weighted mean temperature,
+ * ∫ ρ² T dz ÷ ∫ ρ² dz. A pair profile takes a stored
+ * column as a column profile does, and is ranked with them; it comes after the later listed of
+ * its members.
  *
  * Past {@link ABSORBER_COLUMNS} profiles, the five of greatest optical depth are kept
  * ({@link absorberRankingDepth}; `decision-r08-cmf-licence.md` §2). Equal depths keep the earlier
@@ -569,10 +1119,11 @@ function layerTemperatureK(layer: LayerOnColumn): number {
  * Reported, never dropped silently: a species with no cross-sections (`noCrossSections`, drawn as
  * nothing), one whose temperature lies beyond its table's measured range
  * (`temperatureOutsideTable`), and every species of a dropped profile (`noColumnFree`, drawn as
- * nothing), grouped by profile, each profile in the order its first species was listed. A
- * profile none of whose species has cross-sections takes no column.
+ * nothing), grouped by profile, each profile in the order its first species was listed; a pair
+ * is reported by its key. A profile none of whose species has cross-sections takes no column.
  *
  * @param tables - The cross-sections to take; the committed ones unless a test gives its own.
+ * @param pairTables - The pairs' cross-sections to take, likewise.
  * @throws RangeError for a species listed twice, a column that is not finite and at least 0, a
  *   layer whose base does not lie below its top, or a layer outside its column.
  */
@@ -580,14 +1131,19 @@ export function absorberSpecs(
   layers: ReadonlyArray<AbsorberLayer>,
   column: AtmosphereColumn,
   tables: ReadonlyArray<CrossSectionTable> = ABSORBER_CROSS_SECTIONS,
+  pairTables: ReadonlyArray<PairCrossSectionTable> = ABSORBER_PAIR_CROSS_SECTIONS,
 ): AbsorberSpecs {
-  const listed = new Set<string>();
-  const profiles = new Map<string, { basePa: number; topPa: number; layers: AbsorberLayer[] }>();
-  for (const layer of layers) {
-    if (listed.has(layer.species)) {
+  const seen = new Set<string>();
+  const listed = new Map<string, ListedLayer>();
+  const profiles = new Map<
+    string,
+    { basePa: number; topPa: number; order: number; layers: AbsorberLayer[] }
+  >();
+  for (const [index, layer] of layers.entries()) {
+    if (seen.has(layer.species)) {
       throw new RangeError(`absorber ${layer.species} is listed twice`);
     }
-    listed.add(layer.species);
+    seen.add(layer.species);
     if (!(Number.isFinite(layer.columnPerM2) && layer.columnPerM2 >= 0)) {
       throw new RangeError(
         `absorber ${layer.species}'s column is finite and at least 0, not ${layer.columnPerM2} m⁻²`,
@@ -597,44 +1153,40 @@ export function absorberSpecs(
     if (layer.columnPerM2 === 0) {
       continue;
     }
+    listed.set(layer.species, { index, layer, ...clamped });
+    if (
+      !tables.some((t) => t.species === layer.species) &&
+      isTransparent(
+        layer.species,
+        layerTemperatureK(layerOnColumn(column, clamped.basePa, clamped.topPa), 1),
+      )
+    ) {
+      continue;
+    }
     const key = `${clamped.basePa}:${clamped.topPa}`;
-    const profile = profiles.get(key) ?? { ...clamped, layers: [] };
+    const profile = profiles.get(key) ?? { ...clamped, order: index, layers: [] };
     profile.layers.push(layer);
     profiles.set(key, profile);
   }
-  const built = [...profiles.values()].map((profile) => {
-    const temperatureK = layerTemperatureK(layerOnColumn(column, profile.basePa, profile.topPa));
-    const species = profile.layers.map((layer): AbsorberSpecies => ({
-      species: layer.species,
-      columnPerM2: layer.columnPerM2,
-      crossSection: crossSectionAt(layer.species, temperatureK, tables),
-    }));
-    const spec: AbsorberSpec | undefined = species.some((s) => s.crossSection !== undefined)
-      ? {
-          name: `absorber:${species.map((s) => s.species).join("+")}`,
-          species,
-          columnPerM2: species.reduce((sum, s) => sum + s.columnPerM2, 0),
-          basePa: profile.basePa,
-          topPa: profile.topPa,
-          temperatureK,
-        }
-      : undefined;
-    return { species, spec };
-  });
+  const built: BuiltProfile[] = [...profiles.values()].map((profile) =>
+    columnProfile(profile, column, tables),
+  );
+  built.push(...pairProfiles(listed, column, pairTables));
+  built.sort((a, b) => a.order - b.order);
   const kept = keptProfiles(built.flatMap(({ spec }) => (spec === undefined ? [] : [spec])));
   const specs: AbsorberSpec[] = [];
   const approximations: AbsorberApproximation[] = [];
-  for (const { species, spec } of built) {
+  for (const { members, spec } of built) {
     const drawn = spec !== undefined && kept.has(spec);
     const dropped = spec !== undefined && !drawn;
-    for (const s of species) {
+    for (const { key, provenance } of members) {
       if (dropped) {
-        approximations.push({ species: s.species, provenance: "none", reason: "noColumnFree" });
-      } else if (s.crossSection === undefined) {
-        approximations.push({ species: s.species, provenance: "none", reason: "noCrossSections" });
-      } else if (s.crossSection.provenance === "estimated") {
+        approximations.push({ species: key, provenance: "none", reason: "noColumnFree" });
+      } else if (provenance === undefined) {
+        approximations.push({ species: key, provenance: "none", reason: "noCrossSections" });
+      } else if (provenance === "estimated") {
         approximations.push({
-          species: s.species,
+          species: key,
           provenance: "estimated",
           reason: "temperatureOutsideTable",
         });
@@ -645,6 +1197,108 @@ export function absorberSpecs(
     }
   }
   return { specs, approximations };
+}
+
+/** A column profile's species at its temperature, and its spec if any of them has cross-sections. */
+function columnProfile(
+  profile: {
+    readonly basePa: number;
+    readonly topPa: number;
+    readonly order: number;
+    readonly layers: ReadonlyArray<AbsorberLayer>;
+  },
+  column: AtmosphereColumn,
+  tables: ReadonlyArray<CrossSectionTable>,
+): BuiltProfile {
+  const temperatureK = layerTemperatureK(layerOnColumn(column, profile.basePa, profile.topPa), 1);
+  const species = profile.layers.map((layer): AbsorberSpecies => ({
+    species: layer.species,
+    columnPerM2: layer.columnPerM2,
+    crossSection: crossSectionAt(layer.species, temperatureK, tables),
+  }));
+  const spec: ColumnAbsorberSpec | undefined = species.some((s) => s.crossSection !== undefined)
+    ? {
+        kind: "column",
+        name: `absorber:${species.map((s) => s.species).join("+")}`,
+        species,
+        columnPerM2: species.reduce((sum, s) => sum + s.columnPerM2, 0),
+        basePa: profile.basePa,
+        topPa: profile.topPa,
+        temperatureK,
+      }
+    : undefined;
+  return {
+    order: profile.order,
+    members: species.map((s) => ({ key: s.species, provenance: s.crossSection?.provenance })),
+    spec,
+  };
+}
+
+/**
+ * The pair profiles the listed layers form: each formable pair whose members are both listed with
+ * a column and whose layers overlap, merged by overlap.
+ */
+function pairProfiles(
+  listed: ReadonlyMap<string, ListedLayer>,
+  column: AtmosphereColumn,
+  pairTables: ReadonlyArray<PairCrossSectionTable>,
+): BuiltProfile[] {
+  const densityAtUnit = (member: ListedLayer): number =>
+    member.layer.columnPerM2 /
+    layerIntegralM(layerOnColumn(column, member.basePa, member.topPa), 1);
+  const overlaps = new Map<
+    string,
+    {
+      readonly basePa: number;
+      readonly topPa: number;
+      order: number;
+      readonly pairs: { pair: string; pairColumnPerM5: number }[];
+    }
+  >();
+  for (const { pair, members } of formablePairs(pairTables)) {
+    const a = listed.get(members[0]);
+    const b = listed.get(members[1]);
+    if (a === undefined || b === undefined) {
+      continue;
+    }
+    const basePa = Math.min(a.basePa, b.basePa);
+    const topPa = Math.max(a.topPa, b.topPa);
+    if (!(basePa > topPa)) {
+      continue;
+    }
+    const overlap = layerOnColumn(column, basePa, topPa);
+    const pairColumnPerM5 = densityAtUnit(a) * densityAtUnit(b) * layerIntegralM(overlap, 2);
+    if (!(pairColumnPerM5 > 0)) {
+      continue;
+    }
+    const key = `${basePa}:${topPa}`;
+    const order = Math.max(a.index, b.index) + 0.5;
+    const entry = overlaps.get(key) ?? { basePa, topPa, order, pairs: [] };
+    entry.order = Math.min(entry.order, order);
+    entry.pairs.push({ pair, pairColumnPerM5 });
+    overlaps.set(key, entry);
+  }
+  return [...overlaps.values()].map((entry) => {
+    const temperatureK = layerTemperatureK(layerOnColumn(column, entry.basePa, entry.topPa), 2);
+    const pairs = entry.pairs.flatMap(({ pair, pairColumnPerM5 }): AbsorberPair[] => {
+      const crossSection = pairCrossSectionAt(pair, temperatureK, pairTables);
+      return crossSection === undefined ? [] : [{ pair, pairColumnPerM5, crossSection }];
+    });
+    const spec: PairAbsorberSpec = {
+      kind: "pair",
+      name: `pair:${pairs.map((p) => p.pair).join(",")}`,
+      pairs,
+      pairColumnPerM5: pairs.reduce((sum, p) => sum + p.pairColumnPerM5, 0),
+      basePa: entry.basePa,
+      topPa: entry.topPa,
+      temperatureK,
+    };
+    return {
+      order: entry.order,
+      members: pairs.map((p) => ({ key: p.pair, provenance: p.crossSection.provenance })),
+      spec,
+    };
+  });
 }
 
 /**
@@ -667,9 +1321,9 @@ const EQUAL_ENERGY: BakeSpectrum = bakeSpectrumOf(Array.from({ length: BAKE_BIN_
 /**
  * The optical depth by which a profile is ranked for the stored columns
  * (`decision-r08-cmf-licence.md` §2.1): the largest over the channels of
- * −ln[Σ w_c e^(−Σᵢ Uᵢσᵢ) ÷ Σ w_c] through its vertical column, w_c = max(c̄_c, 0) on σ's grid over
- * the bake range under an equal-energy spectrum, with the species that have cross-sections at the
- * profile's temperature.
+ * −ln[Σ w_c e^(−Σᵢ Uᵢσᵢ) ÷ Σ w_c] through its vertical column (its vertical pair column for a pair
+ * spec), w_c = max(c̄_c, 0) on σ's grid over the bake range under an equal-energy spectrum, with
+ * the species that have cross-sections at the profile's temperature.
  *
  * @remarks
  * The same for every sun, since the shared per-planet table is built once per body. The weights
@@ -678,19 +1332,20 @@ const EQUAL_ENERGY: BakeSpectrum = bakeSpectrumOf(Array.from({ length: BAKE_BIN_
  * weighed σ, so the depth stays finite however deep.
  */
 export function absorberRankingDepth(spec: AbsorberSpec): number {
-  const { crossSectionM2, weights } = absorberOptics(spec, EQUAL_ENERGY);
-  const u = spec.columnPerM2;
+  const optics = absorberOptics(spec, EQUAL_ENERGY);
+  const sigma = mixedCrossSection(optics);
+  const u = amountValue(absorberVerticalAmount(spec));
   return Math.max(
-    ...weights.map((channel) => {
+    ...optics.weights.map((channel) => {
       let least = Infinity;
       for (const [i, w] of channel.entries()) {
-        least = w > 0 ? Math.min(least, crossSectionM2[i] ?? Number.NaN) : least;
+        least = w > 0 ? Math.min(least, sigma[i] ?? Number.NaN) : least;
       }
       let passed = 0;
       let total = 0;
       for (const [i, w] of channel.entries()) {
         if (w > 0) {
-          passed += w * Math.exp(-((crossSectionM2[i] ?? Number.NaN) - least) * u);
+          passed += w * Math.exp(-((sigma[i] ?? Number.NaN) - least) * u);
           total += w;
         }
       }
@@ -700,29 +1355,20 @@ export function absorberRankingDepth(spec: AbsorberSpec): number {
 }
 
 /**
- * An absorber's term on its column (Design note 2): its layer's share of the column's density,
- * absorbing by its curves of growth alone.
- *
- * @remarks
- * The density is the column's relative density from the layer's base to its top, with a level at
- * each edge, and 0 at the column's next level outside each edge, which the `tabulated` rule
- * ramps to over that one interval. Its number density at relative density 1 is U ÷ ∫ ρ dz, so
- * that the vertical column is the spec's whatever the ramps hold. Scattering and `absorption` are
- * 0 and the phase `none`: the term's absorption is each sun's −ln T_c(u), which the tables add from
- * R08.T6.c (`medium.ts`'s `checkNoAbsorbers` refuses it until then).
- *
- * @throws RangeError for a spec whose layer lies outside the column, or whose column is not above 0.
+ * A layer's density on its column, ρᵖ of the column's relative density (p = 1 for a species, 2
+ * for a pair) from its base to its top, with a level at each edge, and 0 at the column's next level
+ * outside each edge, which the `tabulated` rule ramps to over that one interval.
  */
-export function absorberTerm(absorber: AbsorberSpec, column: AtmosphereColumn): MediumTerm {
-  if (!(Number.isFinite(absorber.columnPerM2) && absorber.columnPerM2 > 0)) {
-    throw new RangeError(
-      `absorber ${absorber.name}'s column is above 0, not ${absorber.columnPerM2} m⁻²`,
-    );
-  }
-  const clamped = clampedLayer(column, absorber.basePa, absorber.topPa);
+function layerDensity(
+  column: AtmosphereColumn,
+  basePa: number,
+  topPa: number,
+  power: 1 | 2,
+): TabulatedDensity {
+  const clamped = clampedLayer(column, basePa, topPa);
   const layer = layerOnColumn(column, clamped.basePa, clamped.topPa);
   const altitudes = [...layer.altitudesM];
-  const relative = [...layer.relative];
+  const relative = layer.relative.map((rho) => rho ** power);
   if (layer.belowM !== undefined) {
     altitudes.unshift(layer.belowM);
     relative.unshift(0);
@@ -731,18 +1377,103 @@ export function absorberTerm(absorber: AbsorberSpec, column: AtmosphereColumn): 
     altitudes.push(layer.aboveM);
     relative.push(0);
   }
-  const density: TabulatedDensity = tabulatedDensity(
-    Float64Array.from(altitudes),
-    Float64Array.from(relative),
-  );
-  const lengthM = columnLengthM(density, column.topHeightM);
-  return {
+  return tabulatedDensity(Float64Array.from(altitudes), Float64Array.from(relative));
+}
+
+/**
+ * An absorber's term on its column (Design note 2): its layer's share of the column's density,
+ * absorbing by its curves of growth alone.
+ *
+ * @remarks
+ * A column spec's density is the column's relative density from the layer's base to its top, with a
+ * level at each edge, and 0 at the column's next level outside each edge, which the `tabulated`
+ * rule ramps to over that one interval. Its number density at relative density 1 is U ÷ ∫ ρ dz, so
+ * that the vertical column is the spec's whatever the ramps hold. A pair spec's (R08.T4.c) is the
+ * square of the column's relative density over its overlap, ramped alike, and its pair density at
+ * relative density 1, n_A n_B there, is U ÷ ∫ ρ² dz, so that u = n ∫ ρ² ds along any path is its
+ * pair column. Scattering and `absorption` are 0 and the phase `none`: the term's absorption is
+ * each sun's −ln T_c(u), which the tables add from R08.T6.c (`medium.ts`'s `checkNoAbsorbers`
+ * refuses it until then).
+ *
+ * @throws RangeError for a spec whose layer lies outside the column, or whose vertical amount is
+ *   not above 0.
+ */
+export function absorberTerm(absorber: AbsorberSpec, column: AtmosphereColumn): MediumTerm {
+  const amount = amountValue(absorberVerticalAmount(absorber));
+  if (!(Number.isFinite(amount) && amount > 0)) {
+    throw new RangeError(`absorber ${absorber.name}'s vertical amount is above 0, not ${amount}`);
+  }
+  const common = {
     name: absorber.name,
-    density,
     scattering: [0, 0, 0],
     absorption: [0, 0, 0],
     phase: { kind: "none" },
-    absorber: { spec: absorber, numberDensityPerM3: absorber.columnPerM2 / lengthM },
+  } as const;
+  let term: MediumTerm;
+  switch (absorber.kind) {
+    case "column": {
+      const density = layerDensity(column, absorber.basePa, absorber.topPa, 1);
+      const lengthM = columnLengthM(density, column.topHeightM);
+      term = {
+        ...common,
+        density,
+        absorber: { kind: "column", spec: absorber, numberDensityPerM3: amount / lengthM },
+      };
+      break;
+    }
+    case "pair": {
+      const density = layerDensity(column, absorber.basePa, absorber.topPa, 2);
+      const lengthM = columnLengthM(density, column.topHeightM);
+      term = {
+        ...common,
+        density,
+        absorber: { kind: "pair", spec: absorber, pairDensityPerM6: amount / lengthM },
+      };
+      break;
+    }
+  }
+  return term;
+}
+
+/**
+ * The Thomson cross-section, m²: 6.652 458 7321 × 10⁻²⁹ (CODATA 2018), the same at every
+ * wavelength.
+ */
+export const THOMSON_CROSS_SECTION_M2 = 6.652_458_7321e-29;
+
+/**
+ * Thomson scattering by free electrons as a medium term (R08.T4.c): a scattering term, not an
+ * absorber, on e⁻'s layer, with {@link THOMSON_CROSS_SECTION_M2} in every channel, no absorption,
+ * and Rayleigh's phase at ρ = 0, the dipole phase (3 ÷ 16π)(1 + cos²θ) that Thomson's
+ * cross-section has.
+ *
+ * @remarks
+ * The density is the layer's, as {@link absorberTerm} lays a column spec's, and the electrons'
+ * number density at relative density 1 is U ÷ ∫ ρ dz. The term is named `thomson`. R08.T10.a builds
+ * it from the record's e⁻ (`decision-r08-t4b-t12c.md`, follow-up 2), whose `rayleigh` flag stays
+ * false: this term is its scattering.
+ *
+ * @throws RangeError for a layer that is not e⁻'s, whose column is not finite and above 0, or that
+ *   lies outside the column.
+ */
+export function thomsonTerm(electrons: AbsorberLayer, column: AtmosphereColumn): MediumTerm {
+  if (electrons.species !== "e-") {
+    throw new RangeError(`Thomson scattering is by e-, not ${electrons.species}`);
+  }
+  if (!(Number.isFinite(electrons.columnPerM2) && electrons.columnPerM2 > 0)) {
+    throw new RangeError(
+      `the electrons' column is finite and above 0, not ${electrons.columnPerM2} m⁻²`,
+    );
+  }
+  const density = layerDensity(column, electrons.basePa, electrons.topPa, 1);
+  const numberDensityPerM3 = electrons.columnPerM2 / columnLengthM(density, column.topHeightM);
+  const scattering = numberDensityPerM3 * THOMSON_CROSS_SECTION_M2;
+  return {
+    name: "thomson",
+    density,
+    scattering: [scattering, scattering, scattering],
+    absorption: [0, 0, 0],
+    phase: { kind: "rayleigh", depolarisation: [0, 0, 0] },
   };
 }
 
@@ -753,12 +1484,10 @@ export function absorberTerm(absorber: AbsorberSpec, column: AtmosphereColumn): 
  */
 export const ABSORBER_TRANSMITTANCE_FLOOR = 1e-6;
 
-/** One absorber under one sun on σ's grid: what its curves of growth are summed from. */
-export interface AbsorberOptics {
+/** What a column and a pair absorber's optics share under one sun on σ's grid. */
+export interface AbsorberOpticsBase {
   /** The grid, nm: the bake range at the finest step of the absorber's species. */
   readonly wavelengthsNm: Float64Array;
-  /** σ_mix = Σ xᵢσᵢ at each point, m² per molecule of the absorber's mixture. */
-  readonly crossSectionM2: Float64Array;
   /** S Δλ at each point, the trapezoid rule's weights of the sun's light, in R06's units. */
   readonly light: Float64Array;
   /**
@@ -770,33 +1499,111 @@ export interface AbsorberOptics {
   readonly bins: Uint8Array;
 }
 
+/** A column absorber under one sun on σ's grid: what its curves of growth are summed from. */
+export interface ColumnAbsorberOptics extends AbsorberOpticsBase {
+  readonly kind: "column";
+  /** σ_mix = Σ xᵢσᵢ at each point, m² per molecule of the absorber's mixture. */
+  readonly crossSectionM2: Float64Array;
+}
+
+/** A pair absorber under one sun on σ's grid (R08.T4.c). */
+export interface PairAbsorberOptics extends AbsorberOpticsBase {
+  readonly kind: "pair";
+  /** σ_mix = Σ (Uᵢ ÷ U) σᵢ at each point, m⁵ per molecule pair of the absorber's mixture. */
+  readonly crossSectionM5: Float64Array;
+}
+
+/** One absorber under one sun on σ's grid: a column absorber's or a pair absorber's. */
+export type AbsorberOptics = ColumnAbsorberOptics | PairAbsorberOptics;
+
+/**
+ * An optics' mixed cross-section, in its kind's unit (m² a molecule, m⁵ a molecule pair), which an
+ * amount of the same kind turns into an optical depth.
+ */
+function mixedCrossSection(optics: AbsorberOptics): Float64Array {
+  let sigma: Float64Array;
+  switch (optics.kind) {
+    case "column":
+      sigma = optics.crossSectionM2;
+      break;
+    case "pair":
+      sigma = optics.crossSectionM5;
+      break;
+  }
+  return sigma;
+}
+
 /** The grid step when no species of an absorber holds cross-sections, nm. */
 const DEFAULT_STEP_NM = 1;
 
-/** σ at a wavelength on a species' grid, linear between its points. */
-function sigmaAt(cross: SpeciesCrossSection, wavelengthNm: number): number {
-  const x = (wavelengthNm - cross.firstNm) / cross.stepNm;
+/** One part of an absorber's mixture: its fraction of the vertical amount and its σ on its grid. */
+interface MixturePart {
+  /** For messages: the species or the pair. */
+  readonly label: string;
+  /** Uᵢ ÷ U. */
+  readonly fraction: number;
+  readonly firstNm: number;
+  readonly stepNm: number;
+  /** σ at each grid point, in the spec's unit. */
+  readonly values: Float64Array;
+}
+
+/** The parts of a spec's mixture that hold cross-sections. */
+function mixtureParts(absorber: AbsorberSpec): ReadonlyArray<MixturePart> {
+  let parts: ReadonlyArray<MixturePart>;
+  switch (absorber.kind) {
+    case "column":
+      parts = absorber.species.flatMap((s): MixturePart[] =>
+        s.crossSection === undefined
+          ? []
+          : [
+              {
+                label: s.species,
+                fraction: s.columnPerM2 / absorber.columnPerM2,
+                firstNm: s.crossSection.firstNm,
+                stepNm: s.crossSection.stepNm,
+                values: s.crossSection.crossSectionsM2,
+              },
+            ],
+      );
+      break;
+    case "pair":
+      parts = absorber.pairs.map((p) => ({
+        label: p.pair,
+        fraction: p.pairColumnPerM5 / absorber.pairColumnPerM5,
+        firstNm: p.crossSection.firstNm,
+        stepNm: p.crossSection.stepNm,
+        values: p.crossSection.crossSectionsM5,
+      }));
+      break;
+  }
+  return parts;
+}
+
+/** σ at a wavelength on a part's grid, linear between its points. */
+function sigmaAt(part: MixturePart, wavelengthNm: number): number {
+  const x = (wavelengthNm - part.firstNm) / part.stepNm;
   const k = Math.floor(x + GRID_TOLERANCE_STEPS);
   const t = Math.max(x - k, 0);
-  const a = cross.crossSectionsM2[k] ?? Number.NaN;
-  return t <= GRID_TOLERANCE_STEPS ? a : a + ((cross.crossSectionsM2[k + 1] ?? Number.NaN) - a) * t;
+  const a = part.values[k] ?? Number.NaN;
+  return t <= GRID_TOLERANCE_STEPS ? a : a + ((part.values[k + 1] ?? Number.NaN) - a) * t;
 }
 
 /**
- * Refuses a species' cross-sections that do not cover {@link BAKE_RANGE_NM} or hold a σ that is not
+ * Refuses a part's cross-sections that do not cover {@link BAKE_RANGE_NM} or hold a σ that is not
  * finite and at least 0, which would otherwise turn into a curve black at the floor.
  */
-function checkCrossSection(cross: SpeciesCrossSection): void {
+function checkPart(part: MixturePart): void {
   const [low, high] = BAKE_RANGE_NM;
-  const last = cross.firstNm + (cross.crossSectionsM2.length - 1) * cross.stepNm;
-  if (!(cross.stepNm > 0 && cross.firstNm <= low && last >= high)) {
+  const last = part.firstNm + (part.values.length - 1) * part.stepNm;
+  if (!(part.stepNm > 0 && part.firstNm <= low && last >= high)) {
     throw new RangeError(
-      `${cross.species}'s cross-sections span ${cross.firstNm}–${last} nm, not the bake range ${low}–${high} nm`,
+      `${part.label}'s cross-sections span ${part.firstNm}–${last} nm, not the bake range ${low}–${high} nm`,
     );
   }
-  if (!cross.crossSectionsM2.every((sigma) => Number.isFinite(sigma) && sigma >= 0)) {
+  if (!part.values.every((sigma) => Number.isFinite(sigma) && sigma >= 0)) {
     throw new RangeError(
-      `${cross.species}'s cross-sections hold a σ that is not finite and at least 0`,
+      `${part.label}'s cross-sections hold a σ that is not finite and at least 0`,
     );
   }
 }
@@ -804,26 +1611,21 @@ function checkCrossSection(cross: SpeciesCrossSection): void {
 /**
  * An absorber's mixed cross-section and a sun's light and channel weights on σ's grid (Design
  * note 5): the bake range at the finest step among its species, so that a single species is summed
- * on its own grid, point for point.
+ * on its own grid, point for point. A pair spec's (R08.T4.c) mixes its pairs' σ in m⁵.
  *
- * @throws RangeError for a species whose cross-sections do not cover the bake range or are not
- *   finite and at least 0.
+ * @throws RangeError for a species or pair whose cross-sections do not cover the bake range or are
+ *   not finite and at least 0.
  */
 export function absorberOptics(absorber: AbsorberSpec, spectrum: BakeSpectrum): AbsorberOptics {
-  const measured = absorber.species.flatMap((s) => (s.crossSection === undefined ? [] : [s]));
-  for (const s of measured) {
-    if (s.crossSection !== undefined) {
-      checkCrossSection(s.crossSection);
-    }
+  const parts = mixtureParts(absorber);
+  for (const part of parts) {
+    checkPart(part);
   }
-  const stepNm = Math.min(
-    ...measured.map((s) => s.crossSection?.stepNm ?? DEFAULT_STEP_NM),
-    DEFAULT_STEP_NM,
-  );
+  const stepNm = Math.min(...parts.map((p) => p.stepNm), DEFAULT_STEP_NM);
   const [low, high] = BAKE_RANGE_NM;
   const count = Math.round((high - low) / stepNm) + 1;
   const wavelengthsNm = Float64Array.from({ length: count }, (_, i) => low + i * stepNm);
-  const crossSectionM2 = new Float64Array(count);
+  const mixed = new Float64Array(count);
   const light = new Float64Array(count);
   const bins = new Uint8Array(count);
   const weights: [Float64Array, Float64Array, Float64Array] = [
@@ -833,12 +1635,10 @@ export function absorberOptics(absorber: AbsorberSpec, spectrum: BakeSpectrum): 
   ];
   for (const [i, nm] of wavelengthsNm.entries()) {
     let sigma = 0;
-    for (const s of measured) {
-      if (s.crossSection !== undefined) {
-        sigma += (s.columnPerM2 / absorber.columnPerM2) * sigmaAt(s.crossSection, nm);
-      }
+    for (const part of parts) {
+      sigma += part.fraction * sigmaAt(part, nm);
     }
-    crossSectionM2[i] = sigma;
+    mixed[i] = sigma;
     const s = bakeSpectrumAt(spectrum, nm) * stepNm * (i === 0 || i === count - 1 ? 0.5 : 1);
     light[i] = s;
     bins[i] = Math.min(Math.floor((nm - low) / BAKE_BIN_WIDTH_NM), BAKE_BIN_COUNT - 1);
@@ -847,14 +1647,25 @@ export function absorberOptics(absorber: AbsorberSpec, spectrum: BakeSpectrum): 
       channel[i] = (matching[c] ?? Number.NaN) * s;
     }
   }
-  return { wavelengthsNm, crossSectionM2, light, weights, bins };
+  const base = { wavelengthsNm, light, weights, bins };
+  let optics: AbsorberOptics;
+  switch (absorber.kind) {
+    case "column":
+      optics = { kind: "column", crossSectionM2: mixed, ...base };
+      break;
+    case "pair":
+      optics = { kind: "pair", crossSectionM5: mixed, ...base };
+      break;
+  }
+  return optics;
 }
 
 /** An absorber's optics with the curves' rule applied, ready to be summed at any column. */
 interface PreparedOptics {
-  readonly crossSectionM2: Float64Array;
-  /** The least σ on the grid, m²: every sum is taken relative to it. */
-  readonly leastM2: number;
+  /** σ_mix at each point, in the spec's unit ({@link mixedCrossSection}). */
+  readonly sigma: Float64Array;
+  /** The least σ on the grid, in the spec's unit: every sum is taken relative to it. */
+  readonly leastSigma: number;
   /** Each channel's weights by the rule, and their sums. */
   readonly channelWeights: readonly [Float64Array, Float64Array, Float64Array];
   readonly channelTotals: readonly [number, number, number];
@@ -888,14 +1699,15 @@ function prepare(optics: AbsorberOptics): PreparedOptics {
   if (red === undefined || green === undefined || blue === undefined) {
     throw new Error("an absorber's optics have three channels");
   }
+  const sigma = mixedCrossSection(optics);
   const binTotals = new Float64Array(BAKE_BIN_COUNT);
   for (const [i, s] of optics.light.entries()) {
     const b = optics.bins[i] ?? 0;
     binTotals[b] = (binTotals[b] ?? 0) + s;
   }
   return {
-    crossSectionM2: optics.crossSectionM2,
-    leastM2: optics.crossSectionM2.reduce((least, sigma) => Math.min(least, sigma), Infinity),
+    sigma,
+    leastSigma: sigma.reduce((least, value) => Math.min(least, value), Infinity),
     channelWeights: [red.weights, green.weights, blue.weights],
     channelTotals: [red.total, green.total, blue.total],
     light: optics.light,
@@ -917,23 +1729,24 @@ function clampedTransmittance(value: number): number {
 }
 
 /**
- * The channels' clamped transmittances and, if asked, each bake bin's optical depth through a
- * column, from one exponential a point: e^(−(σ − σ_min)u), so that no sum underflows before
- * its own least term.
+ * The channels' clamped transmittances and, if asked, each bake bin's optical depth through an
+ * amount u, from one exponential a point: e^(−(σ − σ_min)u), so that no sum underflows before
+ * its own least term. u is in the unit of the optics' kind (molecules m⁻² or molecule pairs m⁻⁵),
+ * checked by its callers ({@link amountFor}, or a curve's columns from the same spec).
  */
 function sumsAt(
   p: PreparedOptics,
-  columnPerM2: number,
+  amountInKind: number,
   withBins: boolean,
 ): { readonly channels: Rgb; readonly binDepths: Float64Array | undefined } {
-  const u = columnPerM2;
+  const u = amountInKind;
   const [red, green, blue] = p.channelWeights;
   let passedRed = 0;
   let passedGreen = 0;
   let passedBlue = 0;
   const binPassed = withBins ? new Float64Array(BAKE_BIN_COUNT) : undefined;
-  for (let i = 0; i < p.crossSectionM2.length; i += 1) {
-    const e = Math.exp(-((p.crossSectionM2[i] ?? Number.NaN) - p.leastM2) * u);
+  for (let i = 0; i < p.sigma.length; i += 1) {
+    const e = Math.exp(-((p.sigma[i] ?? Number.NaN) - p.leastSigma) * u);
     passedRed += (red[i] ?? Number.NaN) * e;
     passedGreen += (green[i] ?? Number.NaN) * e;
     passedBlue += (blue[i] ?? Number.NaN) * e;
@@ -942,7 +1755,7 @@ function sumsAt(
       binPassed[b] = (binPassed[b] ?? 0) + (p.light[i] ?? Number.NaN) * e;
     }
   }
-  const scale = Math.exp(-p.leastM2 * u);
+  const scale = Math.exp(-p.leastSigma * u);
   const [totalRed, totalGreen, totalBlue] = p.channelTotals;
   const channels: Rgb = [
     clampedTransmittance((scale * passedRed) / totalRed),
@@ -954,7 +1767,7 @@ function sumsAt(
   }
   const binDepths = binPassed.map((passed, b) => {
     const total = p.binTotals[b] ?? Number.NaN;
-    return passed > 0 ? p.leastM2 * u - Math.log(passed / total) : binDepthAlone(p, b, u, total);
+    return passed > 0 ? p.leastSigma * u - Math.log(passed / total) : binDepthAlone(p, b, u, total);
   });
   return { channels, binDepths };
 }
@@ -964,14 +1777,13 @@ function binDepthAlone(p: PreparedOptics, bin: number, u: number, total: number)
   let least = Infinity;
   for (const [i, b] of p.bins.entries()) {
     if (b === bin) {
-      least = Math.min(least, p.crossSectionM2[i] ?? Number.NaN);
+      least = Math.min(least, p.sigma[i] ?? Number.NaN);
     }
   }
   let passed = 0;
   for (const [i, b] of p.bins.entries()) {
     if (b === bin) {
-      passed +=
-        (p.light[i] ?? Number.NaN) * Math.exp(-((p.crossSectionM2[i] ?? Number.NaN) - least) * u);
+      passed += (p.light[i] ?? Number.NaN) * Math.exp(-((p.sigma[i] ?? Number.NaN) - least) * u);
     }
   }
   return least * u - Math.log(passed / total);
@@ -990,20 +1802,13 @@ function binDepthAlone(p: PreparedOptics, bin: number, u: number, total: number)
  * leaves Rec. 709): those are where the clamp acts. A curve on a grid of columns also takes the
  * running minimum ({@link absorberCurve}); this single column does not.
  *
- * @param columnPerM2 - u, molecules m⁻², at least 0.
- * @throws RangeError for a column that is not finite and at least 0, or a sun with no light in a
+ * @param amount - u, of the optics' kind.
+ * @throws Error for an amount of the other kind.
+ * @throws RangeError for an amount that is not finite and at least 0, or a sun with no light in a
  *   channel's weights.
  */
-export function channelTransmittance(optics: AbsorberOptics, columnPerM2: number): Rgb {
-  checkColumn(columnPerM2);
-  return sumsAt(prepare(optics), columnPerM2, false).channels;
-}
-
-/** Refuses a column that is not finite and at least 0. */
-function checkColumn(columnPerM2: number): void {
-  if (!(Number.isFinite(columnPerM2) && columnPerM2 >= 0)) {
-    throw new RangeError(`a column is finite and at least 0, not ${columnPerM2} m⁻²`);
-  }
+export function channelTransmittance(optics: AbsorberOptics, amount: AbsorberAmount): Rgb {
+  return sumsAt(prepare(optics), amountFor(amount, optics.kind), false).channels;
 }
 
 /** The decades of the curve's column grid about the absorber's vertical column U: 10⁻³ U to 10³ U. */
@@ -1014,7 +1819,12 @@ export const ABSORBER_CURVE_NODES_PER_DECADE = 40;
 
 /** One absorber's curves of growth under one sun, computed at arrival (Design note 5). */
 export interface AbsorberCurve {
-  /** ln(u ÷ 1 m⁻²) at each node, ascending: {@link ABSORBER_CURVE_DECADES} about U, evenly. */
+  /** The absorber's kind, which sets the unit of its columns and the amount it reads. */
+  readonly kind: AbsorberSpec["kind"];
+  /**
+   * ln(u ÷ 1 m⁻²) at each node, ascending: {@link ABSORBER_CURVE_DECADES} about U, evenly; for a
+   * pair absorber, ln(u ÷ 1 m⁻⁵) of its pair column.
+   */
   readonly logColumns: Float64Array;
   /**
    * T_c(u) per channel at each node, in [{@link ABSORBER_TRANSMITTANCE_FLOOR}, 1] and
@@ -1027,7 +1837,9 @@ export interface AbsorberCurve {
 
 /** One absorber's curves of growth in each bake bin under one sun (Design note 5). */
 export interface AbsorberBinCurves {
-  /** ln(u ÷ 1 m⁻²) at each node, the channel curve's. */
+  /** The absorber's kind, as {@link AbsorberCurve.kind}. */
+  readonly kind: AbsorberSpec["kind"];
+  /** ln(u ÷ 1 m⁻²) at each node, the channel curve's (ln(u ÷ 1 m⁻⁵) for a pair absorber). */
   readonly logColumns: Float64Array;
   /** T_b(u) at each node, one array a bake bin: the bin's mean of e^(−σu) weighted by S. */
   readonly transmittance: ReadonlyArray<Float64Array>;
@@ -1035,18 +1847,20 @@ export interface AbsorberBinCurves {
   readonly opticalDepth: ReadonlyArray<Float64Array>;
 }
 
-/** The curve's columns, molecules m⁻², about a vertical column U. */
+/**
+ * The curve's columns about a spec's vertical amount U ({@link absorberVerticalAmount}):
+ * molecules m⁻², or molecule pairs m⁻⁵ for a pair spec.
+ */
 function curveColumns(absorber: AbsorberSpec): Float64Array {
-  if (!(Number.isFinite(absorber.columnPerM2) && absorber.columnPerM2 > 0)) {
-    throw new RangeError(
-      `absorber ${absorber.name}'s column is above 0, not ${absorber.columnPerM2} m⁻²`,
-    );
+  const amount = amountValue(absorberVerticalAmount(absorber));
+  if (!(Number.isFinite(amount) && amount > 0)) {
+    throw new RangeError(`absorber ${absorber.name}'s vertical amount is above 0, not ${amount}`);
   }
   const [first, last] = ABSORBER_CURVE_DECADES;
   const nodes = (last - first) * ABSORBER_CURVE_NODES_PER_DECADE + 1;
   return Float64Array.from(
     { length: nodes },
-    (_, k) => absorber.columnPerM2 * 10 ** (first + k / ABSORBER_CURVE_NODES_PER_DECADE),
+    (_, k) => amount * 10 ** (first + k / ABSORBER_CURVE_NODES_PER_DECADE),
   );
 }
 
@@ -1088,6 +1902,7 @@ function tabulate(
   const logColumns = columns.map(Math.log);
   return {
     channels: {
+      kind: absorber.kind,
       logColumns,
       transmittance,
       opticalDepth: [
@@ -1100,6 +1915,7 @@ function tabulate(
       binDepths === undefined
         ? undefined
         : {
+            kind: absorber.kind,
             logColumns,
             transmittance: binDepths.map((bin) => bin.map((t) => Math.exp(-t))),
             opticalDepth: binDepths,
@@ -1199,15 +2015,16 @@ function depthAt(logColumns: Float64Array, depths: Float64Array, x: number): num
  * The transmittance per channel through a column, read from a curve by its nodes' log–log rule,
  * clamped to [{@link ABSORBER_TRANSMITTANCE_FLOOR}, 1] as the curve is.
  *
- * @param columnPerM2 - u, molecules m⁻², at least 0.
- * @throws RangeError for a column that is not finite and at least 0.
+ * @param amount - u, of the curve's kind.
+ * @throws Error for an amount of the other kind.
+ * @throws RangeError for an amount that is not finite and at least 0.
  */
-export function absorberTransmittance(curve: AbsorberCurve, columnPerM2: number): Rgb {
-  checkColumn(columnPerM2);
-  if (columnPerM2 === 0) {
+export function absorberTransmittance(curve: AbsorberCurve, amount: AbsorberAmount): Rgb {
+  const column = amountFor(amount, curve.kind);
+  if (column === 0) {
     return [1, 1, 1];
   }
-  const x = Math.log(columnPerM2);
+  const x = Math.log(column);
   const read = (depths: Float64Array): number =>
     clampedTransmittance(Math.exp(-depthAt(curve.logColumns, depths, x)));
   return [read(curve.opticalDepth[0]), read(curve.opticalDepth[1]), read(curve.opticalDepth[2])];
@@ -1217,16 +2034,17 @@ export function absorberTransmittance(curve: AbsorberCurve, columnPerM2: number)
  * The transmittance in each bake bin through a column, read from the bins' curves by the same
  * rule as {@link absorberTransmittance}, unclamped.
  *
- * @param columnPerM2 - u, molecules m⁻², at least 0.
- * @throws RangeError for a column that is not finite and at least 0.
+ * @param amount - u, of the curves' kind.
+ * @throws Error for an amount of the other kind.
+ * @throws RangeError for an amount that is not finite and at least 0.
  */
 export function absorberBinTransmittance(
   curves: AbsorberBinCurves,
-  columnPerM2: number,
+  amount: AbsorberAmount,
 ): Float64Array {
-  checkColumn(columnPerM2);
-  const x = Math.log(columnPerM2);
+  const column = amountFor(amount, curves.kind);
+  const x = Math.log(column);
   return Float64Array.from(curves.opticalDepth, (depths) =>
-    columnPerM2 === 0 ? 1 : Math.exp(-depthAt(curves.logColumns, depths, x)),
+    column === 0 ? 1 : Math.exp(-depthAt(curves.logColumns, depths, x)),
   );
 }

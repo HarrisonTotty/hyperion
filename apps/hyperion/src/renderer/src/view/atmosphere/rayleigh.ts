@@ -914,7 +914,7 @@ function noKingFactor(why: string): KingFactor {
  * solar abundances in the gas phase their true far-wing scattering reaches about a third of a hot
  * giant's Rayleigh optical depth at 440 nm (Ca) and a tenth at 550 nm (Na), which these estimates
  * put at under 1.2% (the science check's budget at 2,000 K and 0.1 bar). Their lines are their
- * visible opacity, and R08.T4.c's absorbers.
+ * visible opacity, and R08.T4.e's absorbers.
  */
 export const ESTIMATED_RAYLEIGH: ReadonlyArray<EstimatedRayleigh> = [
   {
