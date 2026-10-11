@@ -29,6 +29,18 @@ sky-tables = { max-threads = 6 }
 filter = "package(hyperion-sim) & (test(/^sky::(luminosity|caps|census|envelope|band|limits|dgl)/) | binary(/^sky_/))"
 test-group = "sky-tables"
 
+# On WebAssembly, which has no threads, the sky census's identity tests run on one (`THREADS`), so
+# they take one slot there (the override below sets eight elsewhere; the first that matches wins).
+# At eight, more than their group's six, nextest 0.9.146 left them unrun in `ci`'s wasip1 run once
+# `wasm_sky` had thinned the group (2026-10-11): a test queued behind its full group is taken up
+# again only when another test of the group ends, and only if the whole pool has room for it then
+# (future-queue 0.4.0), so when the group's last other test ended with more than eight slots busy,
+# they never ran.
+[[profile.default.overrides]]
+platform = 'cfg(target_arch = "wasm32")'
+filter = "package(hyperion-sim) & binary(=sky_census)"
+threads-required = 1
+
 # The sky census's identity tests run the census and its oracle on eight threads of their own
 # (`THREADS` in `tests/common/sky.rs`), so each takes eight slots rather than a nominal one.
 [[profile.default.overrides]]
