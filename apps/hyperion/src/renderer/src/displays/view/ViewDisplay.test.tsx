@@ -1340,6 +1340,8 @@ async function drawPrecisionPhotoreal(view: Setup): Promise<void> {
 
 describe("the VIEW display's symbology over the image (R07.T16.a)", () => {
   it("cases every mark over the photorealistic image, the hull's edges too, as the wireframe does not", async () => {
+    // At a ratio of 1, jsdom's own, stated so that this is the strokes' ratio-1 case below.
+    vi.stubGlobal("devicePixelRatio", 1);
     const view = setup({ store: await nominalStore() });
     await settle();
     view.advance(300);
@@ -1353,9 +1355,9 @@ describe("the VIEW display's symbology over the image (R07.T16.a)", () => {
     ]).toEqual([[[3], false], "symbology", [7, 3], true]);
   });
 
+  // A ratio of 1 is the test above's. The floor of 2 device px at 0.78125 is `lib/strokes.test.ts`'s
+  // (decision-test-coverage, the strokes cases).
   it.each([
-    [0.78125, [7, 3]],
-    [1, [7, 3]],
     [2, [7, 3]],
     [3, [10.5, 4.5]],
   ] as const)(

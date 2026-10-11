@@ -1979,7 +1979,9 @@ passes, and the task refers back above 90 (sky view) or 48 (march).
   - **The quadrature gate,** with no GPU:
     - an `f64` twin of the two kernels' quadrature: Earth's terms on a sphere of WGS 84's a, single
       scattering, and a Lambertian ground of 0.15 lit through `opticalDepth.ts`'s sun transmittance;
-    - against 4,096 placed steps, themselves within 0.05% of 8,192;
+    - against 4,096 placed steps, themselves within 0.05% of 8,192; _since decision-test-coverage
+      R3(b) (2026-10-11), the coarsest of 2,048, 4,096 or 8,192 placed steps within 0.05% of
+      twice its steps ("Deviations in T12.e, as built", the reference)_;
     - over the decision's march rays: from 400 km, the disc and R08's limb heights; to terrain
       beyond 32 km from 20 and 60 km; and, near level, from 0.5–5 km to terrain at 40–150 km. Over
       its sky rays: from 2 m, 1 km, 10 km and 50 km; and, from cameras at 0.5–50 km, the band
@@ -6014,6 +6016,15 @@ medium, sizes, figure)`.
       - the band from 20 km at 0.98 of the dip, the sun at 95°/0°.
 
       The worst over the set is then 2.3 × 10⁻⁴.
+
+      _decision-test-coverage R3(b) (2026-10-11): the reference is now the coarsest of 2,048,
+      4,096 or 8,192 placed steps within 0.05% of twice its steps, the bound unchanged. A ray
+      starts at 2,048, confirmed against 4,096, and each of two levels doubles the steps of the rays
+      not yet converged. Measured that day over the 1,046 rays: 1,044 converge at 2,048, the same
+      two twilight rays take 8,192 (by way of 4,096), and the worst over the set is
+      4.6 × 10⁻⁴. No scheme's e moves by more than 0.046 percentage points (a twilight ray past the
+      visible horizon from 2 km, the sun at 90°/180°), and every scheme fails the same rays as
+      before. The twin's gate takes 6.6 s, not 14.3 s._
 
     - _The rays:_ 1,046, all gated:
       - 40 disc, 30 limb, 20 inside and 108 near-level for the march;

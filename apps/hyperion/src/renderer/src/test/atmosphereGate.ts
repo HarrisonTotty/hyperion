@@ -54,11 +54,15 @@ const SUN_GRID_U = 512;
 const SUN_GRID_V = 128;
 
 /**
- * The reference's placed steps, confirmed against twice as many to 0.05%. A ray whose reference has
- * not converged at 4,096 takes 8,192, confirmed against 16,384: a twilight ray that crosses the
- * ground's hard shadow edge converges only as 1 ÷ n there.
+ * The reference's placed steps at first, confirmed against twice as many to 0.05%. A ray whose
+ * reference has not converged at 2,048 takes 4,096, confirmed against 8,192, and one that has not
+ * converged at 4,096 takes 8,192, confirmed against 16,384 (decision-test-coverage R3(b), which
+ * lowered the first from 4,096): a twilight ray that crosses the ground's hard shadow edge
+ * converges only as 1 ÷ n there.
  */
-export const REFERENCE_STEPS = 4_096;
+export const REFERENCE_STEPS = 2_048;
+/** The most placed steps a reference takes, confirmed against twice as many. */
+const MAX_REFERENCE_STEPS = 8_192;
 /** The reference's convergence bound: its e against twice its steps under 0.05%. */
 export const CONVERGED = 5e-4;
 
@@ -584,7 +588,7 @@ export interface Scheme {
 /** One ray's reference, its confirmation and its pixel under each scheme. */
 export interface RayResult {
   readonly ray: GateRay;
-  /** The reference's steps, 4,096 or, where that has not converged, 8,192. */
+  /** The reference's steps: 2,048, or 4,096 or 8,192 where fewer have not converged. */
   readonly referenceSteps: number;
   readonly reference: Rgb3;
   /** The same placement at twice the reference's steps. */
@@ -635,15 +639,22 @@ function brightest(results: readonly RayResult[]): Map<"rayMarch" | "skyView", R
 }
 
 /**
- * Runs the gate: each ray's reference at 4,096 placed steps, confirmed against 8,192, or at 8,192
- * confirmed against 16,384 where 4,096 has not converged, and its pixel under each scheme.
+ * Runs the gate: each ray's reference, the coarsest of 2,048, 4,096 or 8,192 placed steps within
+ * 0.05% of twice its steps, and its pixel under each scheme.
+ *
+ * @remarks
+ * Every ray starts at 2,048 steps, confirmed against 4,096. Each of two levels then judges every
+ * ray against the brightest references of the level before, and doubles the steps of each one whose
+ * reference has not converged: the reference takes its confirmation's pixel, and the confirmation
+ * twice as many steps again. A ray at 8,192, confirmed against 16,384, goes no further; whether it
+ * has converged is the tests'.
  */
 export function runGate(
   rays: readonly GateRay[],
   pixelOf: PixelOf,
   schemes: readonly Scheme[],
 ): Gate {
-  const first = rays.map((ray) => {
+  let results: readonly RayResult[] = rays.map((ray) => {
     const steps = (s: Scheme): number => (kernelOf(ray) === "skyView" ? s.skySteps : s.marchSteps);
     return {
       ray,
@@ -653,20 +664,27 @@ export function runGate(
       pixels: new Map(schemes.map((s) => [keyOf(s), pixelOf(ray, s.placement, steps(s))])),
     };
   });
-  const firstMax = brightest(first);
-  const results = first.map((result) => {
-    const max = firstMax.get(kernelOf(result.ray)) ?? [0, 0, 0];
-    if (errorOf(result.reference, result.confirm, max) < CONVERGED) {
-      return result;
-    }
-    return {
-      ray: result.ray,
-      referenceSteps: 2 * REFERENCE_STEPS,
-      reference: result.confirm,
-      confirm: pixelOf(result.ray, "placed", 4 * REFERENCE_STEPS),
-      pixels: result.pixels,
-    };
-  });
+  // One level a doubling up to the most: 2,048 to 4,096, then 4,096 to 8,192.
+  for (let from = REFERENCE_STEPS; from < MAX_REFERENCE_STEPS; from *= 2) {
+    const lMax = brightest(results);
+    results = results.map((result) => {
+      const max = lMax.get(kernelOf(result.ray)) ?? [0, 0, 0];
+      if (
+        result.referenceSteps >= MAX_REFERENCE_STEPS ||
+        errorOf(result.reference, result.confirm, max) < CONVERGED
+      ) {
+        return result;
+      }
+      const doubled = 2 * result.referenceSteps;
+      return {
+        ray: result.ray,
+        referenceSteps: doubled,
+        reference: result.confirm,
+        confirm: pixelOf(result.ray, "placed", 2 * doubled),
+        pixels: result.pixels,
+      };
+    });
+  }
   return { results, lMax: brightest(results) };
 }
 

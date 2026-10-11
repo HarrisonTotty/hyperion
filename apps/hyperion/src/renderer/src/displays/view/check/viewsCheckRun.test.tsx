@@ -12,6 +12,7 @@ import {
   settle,
   timedEngineSource,
 } from "../../../test/viewDisplayHarness";
+import { memoised } from "../../../test/memo";
 import type { QualitySetting } from "../../../view/quality/qualitySetting";
 import {
   runViewsCheck,
@@ -45,9 +46,9 @@ type Call = readonly [operation: string, phase?: ViewsCheckPhaseName];
 
 /** When each trace started, the windows the script marked, and those it handed on. */
 interface Windows {
-  readonly tracesStartedMs: number[];
-  readonly marked: ViewsCheckWindow[];
-  readonly handed: ViewsCheckWindow[];
+  readonly tracesStartedMs: ReadonlyArray<number>;
+  readonly marked: ReadonlyArray<ViewsCheckWindow>;
+  readonly handed: ReadonlyArray<ViewsCheckWindow>;
 }
 
 /**
@@ -112,13 +113,15 @@ async function driven(
   harness.advance(100);
   const calls: Call[] = [];
   const stageWidths: string[] = [];
-  const windows: Windows = { tracesStartedMs: [], marked: [], handed: [] };
+  const tracesStartedMs: number[] = [];
+  const marked: ViewsCheckWindow[] = [];
+  const handed: ViewsCheckWindow[] = [];
   const stop = new AbortController();
   const deps: ViewsCheckDeps = {
     api: {
       startPhase: (name) => {
         calls.push(["start", name]);
-        windows.tracesStartedMs.push(nowMs());
+        tracesStartedMs.push(nowMs());
         if (name === stopAt) {
           stop.abort();
         }
@@ -126,7 +129,7 @@ async function driven(
       },
       endPhase: (name, window) => {
         calls.push(["end", name]);
-        windows.handed.push(window);
+        handed.push(window);
         const stage = screen
           .getByRole("application", { name: /PRIMARY/ })
           .closest<HTMLElement>(".view__stage");
@@ -143,7 +146,7 @@ async function driven(
     timing: TIMING,
     nowMs,
     markWindow: (window) => {
-      windows.marked.push(window);
+      marked.push(window);
     },
     sleep: (ms) =>
       new Promise((resolve) => {
@@ -175,25 +178,49 @@ async function driven(
     throw new Error("the script did not end");
   }
   await running;
-  return { outcome: ended, calls, stageWidths, windows };
+  return { outcome: ended, calls, stageWidths, windows: { tracesStartedMs, marked, handed } };
 }
 
-/** The script run to its end, its record and what it asked of the main process. */
+/** A run of the script to its end, with the views it left the cockpit showing. */
+interface Ended extends Driven {
+  /** The canvases' accessible names as the script ended, before the test's cleanup. */
+  readonly views: ReadonlyArray<string | null>;
+}
+
+/**
+ * The script run to its end on a setting, once for every test that reads that run (decision-test-
+ * coverage R4): a fake engine on the fake clock drives it, so each run of it is the same, and the
+ * tests only read what it returns. The test of what a run leaves behind on the page, and the one
+ * stopped part of the way, run their own.
+ */
+const runToEnd = memoised(
+  async (setting: QualitySetting): Promise<Ended> => {
+    const run = await runCheck(setting);
+    const views = screen
+      .getAllByRole("application")
+      .map((canvas) => canvas.getAttribute("aria-label"));
+    return { ...run, views };
+  },
+  (setting) => setting,
+);
+
+/** The script run to its end, its record, what it asked of the main process and its views. */
 async function completed(setting: QualitySetting = "high"): Promise<{
   readonly record: ViewsCheckRecord;
   readonly calls: ReadonlyArray<Call>;
   readonly stageWidths: ReadonlyArray<string>;
+  readonly views: ReadonlyArray<string | null>;
 }> {
-  const { outcome, calls, stageWidths } = await runCheck(setting);
+  const { outcome, calls, stageWidths, views } = await runToEnd(setting);
   if ("error" in outcome) {
     throw outcome.error;
   }
-  return { record: outcome.record, calls, stageWidths };
+  return { record: outcome.record, calls, stageWidths, views };
 }
 
 describe("the views check's script", () => {
   it("measures every phase in its order and asks last, with the cockpit set up again", async () => {
-    const { record, calls } = await completed();
+    const { record, calls, views } = await completed();
     expect(record.phases.map((phase) => phase.name)).toEqual(
       VIEWS_CHECK_PLAN.map((plan) => plan.name),
     );
@@ -204,9 +231,7 @@ describe("the views check's script", () => {
       ]),
       ["ask"],
     ]);
-    expect(
-      screen.getAllByRole("application").map((canvas) => canvas.getAttribute("aria-label")),
-    ).toEqual([
+    expect(views).toEqual([
       expect.stringMatching(/^VIEW, PHOTOREALISTIC, PRIMARY/),
       expect.stringMatching(/^VIEW, WIREFRAME, INSTRUMENT 1/),
       expect.stringMatching(/^VIEW, WIREFRAME, INSTRUMENT 2/),
@@ -237,7 +262,7 @@ describe("the views check's script", () => {
   });
 
   it("starts each measured window a guard after its trace starts", async () => {
-    const { windows } = await runCheck();
+    const { windows } = await runToEnd("high");
     expect(windows.marked).toHaveLength(windows.tracesStartedMs.length);
     // The test's clock is the last frame's stamp, so a wait is its length to within a frame.
     for (const [i, { startMs }] of windows.marked.entries()) {
@@ -248,7 +273,7 @@ describe("the views check's script", () => {
   });
 
   it("hands each window on as it marked it", async () => {
-    const { windows } = await runCheck();
+    const { windows } = await runToEnd("high");
     expect(windows.handed).toEqual(windows.marked);
   });
 

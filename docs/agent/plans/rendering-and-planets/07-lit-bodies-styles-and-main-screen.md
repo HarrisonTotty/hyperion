@@ -1577,6 +1577,8 @@ By hand, recorded: the occultation. Acceptance: `just ci`, `just test-render`.
   uneclipsed. Tests:
   - against a brute-force f64 surface integral (10⁶ points) to 10⁻³ absolute, over radius
     ratios 0.02–30, separations across the penumbra, phases 0°, 60° and 120°, and L 0 and 1;
+    _2.5 × 10⁵ points since decision-test-coverage R5 (2026-10-11); see "Deviations in T10.b, as
+    built"._
   - a body wholly in the umbra gives exactly 0, and one clear of every penumbra exactly 1;
   - Earth's light towards the Moon in a central solar eclipse is the oracle's 0.892 at 1 au
     (0.893 in parallel light) of clear (uniform Sun, Lambert);
@@ -7864,6 +7866,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       Over radius ratios 0.02–30, three separations, 0°, 60° and 120° and L 0 and 1, the worst error
       is 4.9 × 10⁻⁵ in V. Wherever the eclipse takes over a thousandth of the light, the error is
       within 0.25% of what it takes (tested at 1%). Each channel is pinned to its own law to 10⁻⁶.
+      _decision-test-coverage R5 (2026-10-11): the cases' oracle takes 500 × 500 points, not
+      1,000 × 1,000. Measured that day at every case, separation, phase and L, it is within
+      4.4 × 10⁻⁶ of 2,000 × 2,000, absolute and as a share of what the eclipse takes, against the
+      ruling's limit of a quarter of the case's least margin (2.0 × 10⁻⁴ and 0.22%). The central
+      solar eclipse keeps 10⁶ points for its 10⁻⁵._
     - **The central solar eclipse.** A full Lambert Earth keeps 0.8922 of its light towards the
       Moon, under a uniform Sun at 1 au; the oracle agrees to 3 × 10⁻⁷, and so does the science
       check's own (0.89220). The ruling's 0.893 matches the same eclipse in parallel light, 0.89272

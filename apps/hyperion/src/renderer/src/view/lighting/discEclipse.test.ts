@@ -121,7 +121,7 @@ describe("a body's eclipse over its disc against brute force", () => {
     [0, 60, 120].flatMap((phaseDeg) => [0, 1].map((share) => viewOf(radiusM, phaseDeg, share)));
 
   it.each(cases)(
-    "meets the f64 surface integral of 10⁶ points to 10⁻³ at a radius ratio of $ratio, across the penumbra, at 0°, 60° and 120° of phase and L 0 and 1",
+    "meets the f64 surface integral of 2.5 × 10⁵ points to 10⁻³ at a radius ratio of $ratio, across the penumbra, at 0°, 60° and 120° of phase and L 0 and 1",
     ({ ratio, distanceM, radiusM, behindM }) => {
       const r = ratio * radiusM;
       const along = distanceM - behindM;
@@ -141,13 +141,16 @@ describe("a body's eclipse over its disc against brute force", () => {
           behindM,
           nearest + across * (furthest - nearest),
         );
+        // 500 × 500 points (decision-test-coverage R5): over these cases, within 4.4 × 10⁻⁶ of
+        // 2,000 × 2,000, both absolute and of what the eclipse takes, against margins of at least
+        // 8.0 × 10⁻⁴ and 0.87% (measured 2026-10-11).
         const truth = discEclipseBruteForce(
           channelOf(SUN, 1),
           { centreM: body.centreM, radiusM },
           occluder,
           views,
           DISC_ANNULI_HIGH,
-          1000,
+          500,
         );
         views.forEach((view, n) => {
           const visible = discEclipseVisible(

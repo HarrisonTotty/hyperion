@@ -241,7 +241,7 @@ describe("the per-frame marches' quadrature (R05.T12.e's gate)", () => {
     expect(dark.map(({ ray }) => ray.name)).toEqual([]);
   });
 
-  it("has a reference of 4,096 placed steps within 0.05% of 8,192, or of 8,192 within 16,384", () => {
+  it("has a reference of 2,048, 4,096 or 8,192 placed steps within 0.05% of twice its steps", () => {
     const unconverged = gate.results
       .map(({ ray, reference, confirm }) => ({
         ray,

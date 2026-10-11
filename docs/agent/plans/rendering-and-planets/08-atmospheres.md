@@ -4599,6 +4599,11 @@ generator, and the reference's sampling needs no domain tag.
     `overLowBounds`, `singleScatteringPixel`, `stepFactorF32`, `oldFactorF32`), so that the twin is
     held to the same 1,046 rays. Run through it, R05's gate gives its recorded figures (high 1.65%
     and 4.58%, low's worst 49.48%, the same two rays at 8,192 steps): Earth is unchanged.
+    _decision-test-coverage R3(b) (2026-10-11): the gate's reference is now the coarsest of 2,048,
+    4,096 or 8,192 placed steps within 0.05% of twice its steps (R05's "Deviations in T12.e, as
+    built"). On the twin, measured that day, every ray converges at 2,048, the worst within
+    1.6 × 10⁻⁵ of 4,096; no ray's e at high's or low's counts moves by more than 0.002 percentage
+    points, and the same rays fail. The twin's gate takes 4.8 s, not 9.2 s._
   - _As measured_ (2026-10-09, load 7–11 on 16 threads; the file takes 25–35 s).
     - R05's constants as a medium. At the oracle's 20,000 steps the twin's optical depth is
       `opticalDepth`'s to 10⁻⁶ at R05.T12.b's 20 texels; at the kernel's 256 steps it is within
