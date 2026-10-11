@@ -6,12 +6,13 @@ import {
   aggregateOptics,
   gammaFunction,
   kummerNegative,
+  MMF_INDEX_CONTRAST_LIMIT,
   MMF_PHASE_SHIFT_LIMIT,
   mmfAggregate,
   mmfPhaseBasis,
   mmfPhaseShift,
 } from "./aggregate";
-import { refractiveIndex } from "./materials/materials";
+import { indexAt, refractiveIndex, resolveMaterial } from "./materials/materials";
 import { mieSphere } from "./mie";
 
 /**
@@ -187,6 +188,52 @@ describe("the phase-shift gate (science-r08-mmf.md §1.4)", () => {
       expect(mmfPhaseShift(channel)).toBeLessThan(MMF_PHASE_SHIFT_LIMIT);
     }
     expect(phaseLabels([{ material: "soot", optics, opticalDepthAbove550: 0 }])).toEqual([]);
+  });
+});
+
+describe("the index-contrast condition, Tazaki and Tanaka 2018's (7) (science-r08-mmf.md §4)", () => {
+  const SMALL_IRON = {
+    material: "Fe",
+    monomerRadiusUm: 0.01,
+    monomerCount: 1000,
+    fractalDimension: 1.8,
+  } as const;
+
+  it("makes small iron monomers an analogue inside (9)'s gate, by (7)", () => {
+    const optics = [380, 550, 780].map((nm) => aggregateOptics(SMALL_IRON, nm));
+    for (const channel of optics) {
+      expect(mmfPhaseShift(channel)).toBeLessThan(MMF_PHASE_SHIFT_LIMIT);
+      expect(channel.phaseBasis).toBe("analogue");
+      expect(channel.phaseModel).toBe("mmf");
+      expect(channel.matrix).toBeDefined();
+      expect(channel.phaseNote).toContain("(7)");
+    }
+    expect(phaseLabels([{ material: "Fe", optics, opticalDepthAbove550: 0 }])).not.toEqual([]);
+  });
+
+  it("keeps a compact large iron aggregate a fallback, naming both conditions", () => {
+    const optics = aggregateOptics(
+      { material: "Fe", monomerRadiusUm: 0.05, monomerCount: 3000, fractalDimension: 2.5 },
+      550,
+    );
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.phaseNote).toContain("(7)");
+  });
+
+  it("finds soot and tholin inside (7) at every 5 nm over 380–780 nm", () => {
+    for (const key of ["soot", "tholin"]) {
+      const material = resolveMaterial(key);
+      for (let nm = 380; nm <= 780; nm += 5) {
+        const m = indexAt(material, nm);
+        expect(Math.hypot(m.n - 1, m.k)).toBeLessThan(MMF_INDEX_CONTRAST_LIMIT);
+      }
+    }
+  });
+
+  it("puts |m − 1| = 2 itself past (7)", () => {
+    const inside = { phaseShift: 0.5, monomerPhaseShift: 0.5 };
+    expect(mmfPhaseBasis({ ...inside, indexContrast: 1.999 })).toBe("model");
+    expect(mmfPhaseBasis({ ...inside, indexContrast: 2 })).toBe("analogue");
   });
 });
 

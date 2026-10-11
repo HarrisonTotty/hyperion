@@ -48,6 +48,8 @@
  * that term reaches 1 it takes a Henyey–Greenstein phase from its MMF asymmetry, a `fallback`
  * with no matrix (Design note 6). The mean field degrades gradually past x₀ ≈ 0.5, where its pair
  * correlation has no contact peak (Rannou, Botet and Tazaki 2024, Icarus 424, 116247; R08's Risks).
+ * A monomer of index contrast |m − 1| ≥ 2, past the paper's (7), is an `analogue` even inside the
+ * gate (science-r08-mmf.md §4).
  */
 
 import { gaussLegendre } from "../lighting/quadrature";
@@ -82,10 +84,10 @@ export interface AggregateMode {
  *
  * @remarks
  * Below D_f 1.9 (soot near 1.8, say) no T-matrix comparison exists, but the model's stated
- * condition is (9)'s phase shift, not a fractal dimension, and below D_f 2 the multiple scattering
- * a mean field can miss does not grow with N (their Appendix C). Such a mode keeps (9)'s basis and
- * is unlabelled inside the gate (decided 2026-10-10, decision-r08-aerosol-labels.md item 1; the
- * evidence is in R08's Risks).
+ * conditions are (9)'s phase shift and (7)'s index contrast, not a fractal dimension, and below
+ * D_f 2 the multiple scattering a mean field can miss does not grow with N (their Appendix C). Such
+ * a mode keeps the basis those conditions give, and is unlabelled inside them (decided 2026-10-10,
+ * decision-r08-aerosol-labels.md item 1; the evidence is in R08's Risks).
  */
 export const MMF_FRACTAL_DIMENSION_MAX = 2.5;
 
@@ -98,7 +100,19 @@ export const MMF_FRACTAL_DIMENSION_MAX = 2.5;
 export const MMF_PHASE_SHIFT_LIMIT = 1;
 
 /**
- * What an aggregate carries wherever its MMF table is drawn (a `model`, or an `analogue` past (9)):
+ * The index contrast |m − 1| at and above which an aggregate's MMF optics are not a `model`:
+ * Tazaki and Tanaka 2018's (7), |m − 1| < 2.
+ *
+ * @remarks
+ * Past it the proximity effect between touching monomers puts the MMF's opacities more than 20%
+ * off (their §3.5 and §5). The mode keeps its MMF table, matrix and cross-sections as an
+ * `analogue` ({@link mmfPhaseBasis}; science-r08-mmf.md §4).
+ */
+export const MMF_INDEX_CONTRAST_LIMIT = 2;
+
+/**
+ * What an aggregate carries wherever its MMF table is drawn (a `model`, or an `analogue` past (9)
+ * or (7)):
  * its MMF matrix (`kept`), or none, a total depolariser.
  * The plan keeps the matrix only if it agrees with optool's elements to their stated tolerance
  * (Design note 10), which `aggregate.test.ts` holds against `fixtures/optool-titan.json`.
@@ -140,6 +154,8 @@ export interface MmfResult {
   readonly phaseShift: number;
   /** The monomer's term of (9), 2x₀|m − 1|. */
   readonly monomerPhaseShift: number;
+  /** The monomer's index contrast |m − 1| at this wavelength, Tazaki and Tanaka 2018's (7). */
+  readonly indexContrast: number;
   /** The mean-field matrix at the cosines asked, normalised as {@link ScatteringMatrix} is. */
   readonly matrix: ScatteringMatrix;
 }
@@ -769,7 +785,8 @@ export function mmfAggregate(
 
   const filling = count * (a0 / rc) ** 3;
   const phaseShift = 2 * k * rc * maxwellGarnettContrast(index, filling);
-  const monomerPhaseShift = 2 * x0 * Math.hypot(index.n - 1, index.k);
+  const indexContrast = Math.hypot(index.n - 1, index.k);
+  const monomerPhaseShift = 2 * x0 * indexContrast;
   return {
     extinctionCrossSectionUm2: cExt,
     scatteringCrossSectionUm2: cSca,
@@ -777,6 +794,7 @@ export function mmfAggregate(
     geometricCrossSectionUm2: geometric,
     phaseShift,
     monomerPhaseShift,
+    indexContrast,
     matrix,
   };
 }
@@ -808,24 +826,32 @@ export function mmfPhaseShift(result: Pick<MmfResult, "phaseShift" | "monomerPha
 }
 
 /**
- * The basis an aggregate's phase rests on (science-r08-mmf.md §1.3): `model` while (9) is below
- * {@link MMF_PHASE_SHIFT_LIMIT}; past it, `analogue` (the MMF table kept) while the aggregate's
- * own term is below the limit, and `fallback` (Henyey–Greenstein) once it reaches it.
+ * The basis an aggregate's phase rests on (science-r08-mmf.md §1.3 and §4): `fallback`
+ * (Henyey–Greenstein) once the aggregate's own term of (9) reaches {@link MMF_PHASE_SHIFT_LIMIT};
+ * otherwise `analogue` (the MMF table kept) past (9)'s gate or past (7)'s
+ * {@link MMF_INDEX_CONTRAST_LIMIT}; otherwise `model`.
  */
 export function mmfPhaseBasis(
-  result: Pick<MmfResult, "phaseShift" | "monomerPhaseShift">,
+  result: Pick<MmfResult, "phaseShift" | "monomerPhaseShift" | "indexContrast">,
 ): "model" | "analogue" | "fallback" {
-  if (mmfPhaseShift(result) < MMF_PHASE_SHIFT_LIMIT) {
-    return "model";
+  if (result.phaseShift >= MMF_PHASE_SHIFT_LIMIT) {
+    return "fallback";
   }
-  return result.phaseShift < MMF_PHASE_SHIFT_LIMIT ? "analogue" : "fallback";
+  if (
+    mmfPhaseShift(result) >= MMF_PHASE_SHIFT_LIMIT ||
+    result.indexContrast >= MMF_INDEX_CONTRAST_LIMIT
+  ) {
+    return "analogue";
+  }
+  return "model";
 }
 
 /**
  * An aggregate mode's optics at one wavelength (Design note 6): the MMF's cross-sections, with its
- * table and matrix as a `model` inside (9)'s gate and as an `analogue` past it while the
- * aggregate's own term is below 1; otherwise a labelled Henyey–Greenstein `fallback` from the
- * MMF asymmetry, with no matrix ({@link mmfPhaseBasis}).
+ * table and matrix as a `model` inside (9)'s gate with |m − 1| below
+ * {@link MMF_INDEX_CONTRAST_LIMIT}, and as an `analogue` past (9) or (7) while the aggregate's own
+ * term is below 1; otherwise a labelled Henyey–Greenstein `fallback` from the MMF asymmetry, with
+ * no matrix ({@link mmfPhaseBasis}).
  *
  * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
  * @param mu - The cosines to give the matrix at; the phase tables' by default.
@@ -844,16 +870,26 @@ export function aggregateOptics(
   const extM2 = result.extinctionCrossSectionUm2 * 1e-12;
   const scaM2 = result.scatteringCrossSectionUm2 * 1e-12;
   const shifts = `Δφ ${mmfPhaseShift(result).toFixed(2)} by Tazaki and Tanaka's (9) (aggregate term ${result.phaseShift.toFixed(2)})`;
+  const contrast = `|m − 1| ${result.indexContrast.toFixed(2)}, past their (7)`;
+  const contrastFails = result.indexContrast >= MMF_INDEX_CONTRAST_LIMIT;
   let note: string | undefined;
   switch (basis) {
     case "model":
       note = undefined;
       break;
-    case "analogue":
-      note = `an aggregate of ${mode.material}, ${shifts}, past the gate: the MMF table, an analogue`;
+    case "analogue": {
+      const reasons: string[] = [];
+      if (mmfPhaseShift(result) >= MMF_PHASE_SHIFT_LIMIT) {
+        reasons.push(`${shifts}, past the gate`);
+      }
+      if (contrastFails) {
+        reasons.push(contrast);
+      }
+      note = `an aggregate of ${mode.material}, ${reasons.join("; ")}: the MMF table, an analogue`;
       break;
+    }
     case "fallback":
-      note = `an aggregate of ${mode.material}, ${shifts}, its own term past the gate: a Henyey–Greenstein phase from its MMF asymmetry, a fallback`;
+      note = `an aggregate of ${mode.material}, ${shifts}, its own term past the gate${contrastFails ? `; ${contrast}` : ""}: a Henyey–Greenstein phase from its MMF asymmetry, a fallback`;
       break;
   }
   const hasTable = basis !== "fallback";

@@ -992,6 +992,11 @@ Names are those the owning plans give; the owning plan is authoritative.
      - otherwise it takes a Henyey–Greenstein phase from its MMF asymmetry, a `fallback` with no
        matrix.
 
+     A monomer of index contrast |m − 1| ≥ 2, past the paper's (7), is an `analogue` even inside
+     (9)'s gate, since the proximity of touching monomers then puts the MMF's opacities more than
+     20% off (its §3.5 and §5). Of the committed files only metallic iron fails it, at every
+     visible wavelength; soot and tholin pass with |m − 1| ≤ 0.78 (science-r08-mmf.md §4).
+
      Titan's haze is a `model` from 453 to 780 nm, where Δφ falls from 1.00 to 0.54 (0.80 at
      550 nm), and an `analogue` from 380 to 452 nm (Δφ up to 1.09). The monomer's term sets Δφ:
      for D_f = 2 at optool's k_f the aggregate's term is about 0.83 of it (0.45–0.92 over
@@ -2511,9 +2516,10 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
   - _Aggregates._ `aggregate.ts` implements Tazaki and Tanaka 2018's MMF with D_f ≤ 2.5. It gates by
     Design note 6 on their (9), Δφ = max(2x₀|m − 1|, 2kR_c|m_MG − 1|), as optool computes it
     (`mmfPhaseBasis`; ruled 2026-10-10, science-r08-mmf.md, which leaves no choice of rule):
-    - Δφ < 1: the MMF table and matrix, a `model`;
+    - Δφ < 1 and |m − 1| < 2: the MMF table and matrix, a `model`;
     - Δφ ≥ 1 with 2kR_c|m_MG − 1| < 1: the same table and matrix, optool's `-mmfss` result, an
       `analogue`;
+    - 2kR_c|m_MG − 1| < 1 with |m − 1| ≥ 2 (Tazaki and Tanaka's (7)): the same, an `analogue`;
     - 2kR_c|m_MG − 1| ≥ 1: its opacities, with a Henyey–Greenstein phase from its MMF asymmetry, a
       `fallback` with no matrix.
 
@@ -2582,11 +2588,12 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
     volume-equivalent one. v_eff is unchanged. Only a size fixed by mass or by absorption alone
     converts at equal V/A (science-r08-mmf.md §3).
   - _Basis and label._ `ModeOptics` gains `phaseBasis`:
-    - `model`: Mie for spheres, MMF inside Δφ < 1 at any D_f the inventory allows (1 < D_f ≤ 2.5;
-      `decision-r08-aerosol-labels.md` item 1), a kernel inside its ranges, Yang et al. for water
-      ice;
+    - `model`: Mie for spheres, MMF inside Δφ < 1 with |m − 1| < 2 (Tazaki and Tanaka's (9) and
+      (7)) at any D_f the inventory allows (1 < D_f ≤ 2.5; `decision-r08-aerosol-labels.md`
+      item 1), a kernel inside its ranges, Yang et al. for water ice;
     - `analogue`: the k-floor rule exceeded, another ice on water's table, the small-crystal
-      tail, or an aggregate past (9) whose own term 2kR_c|m_MG − 1| is below 1;
+      tail, an aggregate past (9) whose own term 2kR_c|m_MG − 1| is below 1, or an aggregate
+      monomer past (7);
     - `fallback`: the Henyey–Greenstein phase below.
 
     Two labelling questions were signed off 2026-10-10 (`signoff-2.md` item 5;
@@ -5149,9 +5156,9 @@ generator, and the reference's sampling needs no domain tag.
         J. Heat Transfer 117, 152, and 1996a, J. Quant. Spectrosc. Radiat. Transfer 55, 357, as
         reviewed by C. M. Sorensen, Aerosol Sci. Technol. 35 (2001) 648–687). "No optical
         comparison" above means none of the MMF itself.
-      - Tazaki and Tanaka state a second condition, (7) |m − 1| < 2, which `aggregate.ts` does not
-        apply. Soot (|m − 1| 0.73–0.78) and tholin (0.66–0.72) meet it over 380–780 nm; a monomer
-        material past it is for the composition audit.
+      - Tazaki and Tanaka's condition (7), |m − 1| < 2, makes an aggregate an `analogue`
+        (science-r08-mmf.md §4). Soot and tholin pass; metallic iron, chromium and graphite's
+        E ⊥ c component would fail as monomers.
 - **M-dwarf suns.** A curve of growth weighted by a 15-sample spectrum is adequate for FGK, A and B
   stars, but not for M dwarfs. Their TiO bands at 590–630 and 705–760 nm overlap Chappuis and
   methane's 727 nm band, so the weight correlates with σ (Design note 5). This is a recorded
@@ -5690,6 +5697,13 @@ generator, and the reference's sampling needs no domain tag.
   - _The MMF gate_ is the ruling's (science-r08-mmf.md, adopted 2026-10-10), not the first lean:
     (9) is the max of the monomer's and the aggregate's terms, so the switch the lane built while
     asking (`MMF_PHASE_SHIFT_RULE`) is gone and `mmfPhaseBasis` returns the three-way basis.
+    - _Condition (7)_ (a follow-up, science-r08-mmf.md §4, adopted 2026-10-10). `aggregate.ts`
+      gains `MMF_INDEX_CONTRAST_LIMIT` (2) and `MmfResult.indexContrast`, the monomer's |m − 1|.
+      A mode at or past it is an `analogue` inside (9)'s gate, with its MMF table, matrix and
+      cross-sections; a `fallback` stays one. Both notes name (7) where it fails. Of the
+      committed files only `iron.json` fails, at every wavelength (|m − 1| 2.73 at 380 nm to 3.82
+      at 780 nm), so an aggregate of iron monomers inside (9)'s gate, once a `model`, is an
+      `analogue`; no other class changes.
   - _The MMF against optool._ The lane built optool 1.9.14 (commit 21aecb46) offline with
     gfortran 16.2.1 from Arch's `gcc-fortran` package (its SHA-256 checked against the signed sync
     database), with `optool_manual.f90` stubbed (its help text fails gfortran 16's format checks;
