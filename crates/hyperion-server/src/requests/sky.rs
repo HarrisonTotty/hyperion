@@ -584,10 +584,10 @@ impl SkyAsk {
     /// The census's query, once the eye's cut is known: to the deeper of the eye's cut and the
     /// camera's limit, as asked, with the eye at its own cut if a camera's is deeper (R06.T9.j),
     /// its caps counted by the eye's visibility where `seen` has it, the request's `illumination`
-    /// (R06.T9.g), and every cap forced where `caps` forces them. `seen` is the request's eye with
-    /// its cut, or `None` where the request does not ask the eye. It states no synthetic ceiling:
-    /// the plan states the one the sky is served at (`compute::sky::plan`; rendering plan R13,
-    /// R13.T2.b).
+    /// (R06.T9.g), the band `caps` marches (the standard band but in a test), and every cap forced
+    /// where `caps` forces them. `seen` is the request's eye with its cut, or `None` where the
+    /// request does not ask the eye. It states no synthetic ceiling: the plan states the one the
+    /// sky is served at (`compute::sky::plan`; rendering plan R13, R13.T2.b).
     ///
     /// # Panics
     ///
@@ -624,7 +624,9 @@ impl SkyAsk {
                 builder = builder.eye_visibility(visibility);
             }
         }
-        builder = builder.illumination(illumination);
+        builder = builder
+            .illumination(illumination)
+            .band_spec(caps.band_spec());
         if let Some(cone) = self.cone {
             builder = builder.cone(cone);
         }
@@ -976,7 +978,7 @@ mod tests {
     use hyperion_sim::sky::MAX_CUT_V as SIM_MAX_CUT_V;
     use hyperion_sim::sky::REFERENCE_SP_RATIO;
     use hyperion_sim::sky::band::{BandSpec, CompleteTo};
-    use hyperion_sim::sky::census::{MAX_N_MAX, merge_census};
+    use hyperion_sim::sky::census::{ConeRegion, MAX_N_MAX, merge_census};
     use tokio::time::timeout;
 
     use super::*;
@@ -1201,6 +1203,36 @@ mod tests {
         assert_eq!(ask.query(None, light(), caps).n_max().get(), MAX_SKY_STARS);
     }
 
+    /// A sky's query is marched at the standard band (Design note 14) unless a test's caps ask
+    /// another ([`SkyCaps::with_band_spec`]), and a cone's region is made at the band marched.
+    #[test]
+    fn the_band_is_the_standard_one_unless_a_tests_caps_ask_another() {
+        let ask = SkyAsk::try_from(&request()).unwrap();
+        let forced = SkyCaps::forced(LightYears::new(30.0)).unwrap();
+        for caps in [SkyCaps::DERIVED, forced] {
+            assert_eq!(caps.band_spec(), BandSpec::STANDARD, "{caps:?}");
+            assert_eq!(
+                ask.query(None, light(), caps).band_spec(),
+                BandSpec::STANDARD,
+                "{caps:?}"
+            );
+        }
+        let coarse = BandSpec::new(16, 12).unwrap();
+        let caps = forced.with_band_spec(coarse);
+        assert_eq!(caps.band_spec(), coarse);
+        assert_eq!(ask.query(None, light(), caps).band_spec(), coarse);
+        let coned = SkyAsk::try_from(&SkyRequest {
+            cone: Some(cone([0.0, 0.0, 1.0], 2.5)),
+            ..request()
+        })
+        .unwrap();
+        let query = coned.query(None, light(), caps);
+        assert_eq!(
+            (query.band_spec(), query.cone_region().map(ConeRegion::spec)),
+            (coarse, Some(coarse))
+        );
+    }
+
     /// The reply at a synthetic ceiling states it, the real limit, and each layer's real boundary
     /// with its counts beyond, brighter than the cut and than the ceiling, bit for bit as the caps
     /// hold them, the final reply's per-ray radii C's, D's and E's boundary ray by ray; with no
@@ -1412,11 +1444,23 @@ mod tests {
         (query, census)
     }
 
-    /// Each listed star's wire form takes its own V and its reddened colour (R06.T9.e and the
-    /// band ruling's addendum item 4), over a small census near the Sun.
-    #[test]
-    fn a_wire_star_is_its_census_star_after_its_own_reddening() {
+    /// A small census near the Sun is its own on the wire, star by star and in jobs: the two
+    /// properties below, run on one census, some 10 s in a test build, since nextest runs each test
+    /// in its own process.
+    #[tokio::test]
+    async fn a_small_censuss_stars_are_its_own_on_the_wire_and_in_jobs() {
         let (query, census) = small_census();
+        a_wire_star_is_its_census_star_after_its_own_reddening(&query, &census);
+        a_payload_in_jobs_is_the_one_jobs(&query, census).await;
+    }
+
+    /// Each listed star's wire form takes its own V and its reddened colour (R06.T9.e and the
+    /// band ruling's addendum item 4), over a small census near the Sun, `query`'s `census`
+    /// ([`a_small_censuss_stars_are_its_own_on_the_wire_and_in_jobs`]).
+    fn a_wire_star_is_its_census_star_after_its_own_reddening(
+        query: &SkyQuery,
+        census: &SkyCensus,
+    ) {
         let observer = query.observer();
         for star in census.listed() {
             let reddened = star.colour().reddened(star.a_v());
@@ -1453,17 +1497,17 @@ mod tests {
     }
 
     /// A reply's payload in jobs, its stars a few to a job beside the band's texels and joined in
-    /// order, is the one job's byte for byte, with the eye's offsets and without (R06.T11.g).
-    #[tokio::test]
-    async fn a_payload_in_jobs_is_the_one_jobs() {
-        let (query, census) = small_census();
+    /// order, is the one job's byte for byte, with the eye's offsets and without (R06.T11.g), over
+    /// a small census near the Sun, `query`'s `census`
+    /// ([`a_small_censuss_stars_are_its_own_on_the_wire_and_in_jobs`]).
+    async fn a_payload_in_jobs_is_the_one_jobs(query: &SkyQuery, census: SkyCensus) {
         let galaxy = Galaxy::new(Seed::new(SEED));
         let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
         let mut texels = Vec::new();
         hyperion_sim::sky::band::band_rows(
             &galaxy,
             &mut tables.march_context(),
-            &query,
+            query,
             &SkyCensus::empty(),
             &CompleteTo::nowhere(),
             &BandSpec::new(4, 12).unwrap(),

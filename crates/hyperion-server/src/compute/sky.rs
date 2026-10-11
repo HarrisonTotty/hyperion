@@ -183,6 +183,8 @@ pub struct SkyCaps {
     /// A test's edge, ly, from which layer C's shells come a step late, in place of
     /// [`C_DEFERRED_BEYOND_LY`].
     c_deferred_beyond_ly: Option<u32>,
+    /// A test's band, in place of [`BandSpec::STANDARD`].
+    band: Option<BandSpec>,
 }
 
 /// The luminosity tables a sky reads (Design note 7).
@@ -203,6 +205,7 @@ impl SkyCaps {
         tables: SkyTablesSource::Galaxy,
         shell_edges_ly: None,
         c_deferred_beyond_ly: None,
+        band: None,
     };
 
     /// Every layer's cap forced to `radius`, over tables that hold no star.
@@ -235,6 +238,7 @@ impl SkyCaps {
                 tables: SkyTablesSource::Dark,
                 shell_edges_ly: None,
                 c_deferred_beyond_ly: None,
+                band: None,
             })
         } else {
             Err(ForceSkyCapsError)
@@ -293,6 +297,27 @@ impl SkyCaps {
     pub fn c_deferred_beyond_ly(&self) -> f64 {
         self.c_deferred_beyond_ly
             .map_or(C_DEFERRED_BEYOND_LY, f64::from)
+    }
+
+    /// The same caps with the sky's band marched at `spec`, in place of [`BandSpec::STANDARD`].
+    ///
+    /// For a test that never reads the band's texels, whose sky then marches the few rays of a
+    /// coarse band rather than the standard band's 24,576 (64² texels a face), some 27 CPU-s in a
+    /// test build. The reply states the band it sends (`band.face_texels`) and its bytes. No sky a
+    /// client asks is marched so: every machine sends the standard band (Design note 14).
+    #[must_use]
+    pub const fn with_band_spec(self, spec: BandSpec) -> Self {
+        Self {
+            band: Some(spec),
+            ..self
+        }
+    }
+
+    /// The band the sky is marched at: [`BandSpec::STANDARD`] unless a test's
+    /// ([`with_band_spec`](Self::with_band_spec)).
+    #[must_use]
+    pub(crate) fn band_spec(&self) -> BandSpec {
+        self.band.unwrap_or(BandSpec::STANDARD)
     }
 
     /// The radius each layer's cap is forced to, in [`CAPPED_LAYERS`]' order, or `None` for the
@@ -1588,6 +1613,7 @@ mod tests {
     use hyperion_sim::sky::census::{Completeness, census_cell, census_plan, census_plan_of};
     use hyperion_sim::time::UniverseTime;
     use hyperion_sim::{GENERATOR_VERSION, Seed};
+    use tokio::sync::oneshot;
     use tokio::time::timeout;
 
     use super::*;
@@ -1768,15 +1794,21 @@ mod tests {
             pool.counters()
         );
 
+        // Each step's serial census, of the same shells for the cold census and the warm one.
+        let serials: Vec<(Vec<Shell>, SkyCensus)> = (0..steps.len())
+            .map(|k| {
+                let done: Vec<Shell> = steps[..=k].concat();
+                let serial = serial_census(&galaxy, &tables, &query, &plan, &done);
+                (done, serial)
+            })
+            .collect();
         for censused in [&cold, &warm] {
             assert_eq!(censused.len(), steps.len());
-            for (k, (step, census)) in censused.iter().enumerate() {
-                let done: Vec<Shell> = steps[..=k].concat();
-                assert_eq!(step.done, done);
+            for (k, ((step, census), (done, serial))) in censused.iter().zip(&serials).enumerate() {
+                assert_eq!(&step.done, done);
                 assert_eq!(step.last, k + 1 == steps.len());
-                let serial = serial_census(&galaxy, &tables, &query, &plan, &done);
-                assert_eq!(census, &serial, "step {k}");
-                assert_eq!(bits(census), bits(&serial), "step {k}");
+                assert_eq!(census, serial, "step {k}");
+                assert_eq!(bits(census), bits(serial), "step {k}");
             }
         }
         // The last step's is the one pass over the plan's cells, merged to its whole completeness.
@@ -2209,6 +2241,21 @@ mod tests {
         timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
+    /// Runs `work` on a thread of its own and returns the receiver of its result. A wait on it that
+    /// runs out fails the test and leaves the thread behind, where a `spawn_blocking` task, which
+    /// cannot be aborted, would hold the runtime's drop until it returned.
+    fn on_a_thread<T: Send + 'static>(
+        work: impl FnOnce() -> T + Send + 'static,
+    ) -> oneshot::Receiver<T> {
+        let (sent, received) = oneshot::channel();
+        // Detached: the receiver is the test's only hold on the work.
+        std::thread::spawn(move || {
+            // A test that has stopped waiting has dropped the receiver, and wants nothing.
+            let _ = sent.send(work());
+        });
+        received
+    }
+
     /// Each cap's radii, rule bound and counts beyond it, by their bits.
     fn cap_bits(caps: &[LayerCap]) -> Vec<u64> {
         caps.iter()
@@ -2248,7 +2295,11 @@ mod tests {
     /// that plan is the sim's too, bit for bit, and C's, D's and E's counts beyond their boundary
     /// brighter than the ceiling are their counts brighter than the cut, bit for bit.
     ///
-    /// The tables are built serially here, as the server's sky tests build theirs, a minute or so.
+    /// The tables are built on the test's pool, as the server builds them, the serial build's bit
+    /// for bit (`compute::sky_tables`), and the sim's three references, each serial in itself, run
+    /// side by side on threads of their own, each with its own noise cache, which changes no value:
+    /// the test holds four slots (`.config/nextest.toml`), which a serial build and serial
+    /// references, a minute and some 45 s in a test build, left idle.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[expect(
         clippy::too_many_lines,
@@ -2256,11 +2307,22 @@ mod tests {
     )]
     async fn at_the_ceiling_the_caps_counts_in_jobs_are_the_sims_real_boundary() {
         use hyperion_sim::sky::caps::REAL_LIMIT_LY;
+
+        use crate::compute::sky_tables::build_on_pool;
+
+        // Bounds only a hang: the tables take about a minute to build serially in a test build,
+        // less on the pool, and each reference about 15 s (measured 2026-10-10 at a load of about
+        // 20).
+        let patience = Duration::from_secs(600);
         let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)).with_full_potential());
-        let tables = Arc::new(SkyTables::new(LuminosityTables::build(&galaxy), &galaxy));
         let pool = pool(3);
         let token = CancelToken::new();
-        let mut noise = NoiseCache::with_capacity(MARCH_NOISE_SLOTS);
+        let tables = Arc::new(
+            timeout(patience, build_on_pool(&pool, &galaxy, &token))
+                .await
+                .expect("timed out building the tables")
+                .unwrap(),
+        );
         let served = async |cut: f64| {
             let asked = SkyQuery::builder(sun(), Magnitudes::new(cut))
                 .build()
@@ -2282,18 +2344,63 @@ mod tests {
         };
 
         // A shallow cut: the ceiling is the cut, decided once the cut's caps are drawn.
-        let (shallow, planned) = served(4.6).await;
+        let (shallow, planned_shallow) = served(4.6).await;
         assert_eq!(shallow.synthetic_ceiling(), Some(Magnitudes::new(4.6)));
-        let sims = census_plan(
-            &galaxy,
-            &tables.tables,
-            &tables.envelope,
-            &shallow,
-            &mut noise,
+        let (query, planned) = served(7.95).await;
+        assert_eq!(query.synthetic_ceiling(), Some(SYNTHETIC_CEILING));
+        pool.shutdown().await.unwrap();
+
+        // The sim's three references, each serial in itself, side by side on threads of their own,
+        // each with its own noise cache: its plan of each query, and its caps at the second's cut.
+        let sim_plan = |query: &Arc<SkyQuery>| {
+            let (galaxy, tables, query) =
+                (Arc::clone(&galaxy), Arc::clone(&tables), Arc::clone(query));
+            on_a_thread(move || {
+                let mut noise = NoiseCache::with_capacity(MARCH_NOISE_SLOTS);
+                census_plan(
+                    &galaxy,
+                    &tables.tables,
+                    &tables.envelope,
+                    &query,
+                    &mut noise,
+                )
+            })
+        };
+        let (sims_shallow, sims) = (sim_plan(&shallow), sim_plan(&query));
+        let at_cut = {
+            let (galaxy, tables, query) =
+                (Arc::clone(&galaxy), Arc::clone(&tables), Arc::clone(&query));
+            on_a_thread(move || {
+                let mut noise = NoiseCache::with_capacity(MARCH_NOISE_SLOTS);
+                layer_caps(
+                    &galaxy,
+                    &tables.tables,
+                    &tables.envelope,
+                    query.observer(),
+                    query.cut(),
+                    &mut noise,
+                )
+            })
+        };
+        let sims_shallow = timeout(patience, sims_shallow)
+            .await
+            .expect("timed out on the sim's plan at 4.6")
+            .expect("the sim's plan at 4.6");
+        let sims = timeout(patience, sims)
+            .await
+            .expect("timed out on the sim's plan at 7.95")
+            .expect("the sim's plan at 7.95");
+        let at_cut = timeout(patience, at_cut)
+            .await
+            .expect("timed out on the sim's caps at 7.95")
+            .expect("the sim's caps at 7.95");
+
+        assert_eq!(planned_shallow, sims_shallow);
+        assert_eq!(
+            cap_bits(planned_shallow.caps()),
+            cap_bits(sims_shallow.caps())
         );
-        assert_eq!(planned, sims);
-        assert_eq!(cap_bits(planned.caps()), cap_bits(sims.caps()));
-        for cap in planned.caps() {
+        for cap in planned_shallow.caps() {
             if matches!(cap.layer(), Layer::C | Layer::D | Layer::E) {
                 let bright = cap.bright_beyond().expect("a real boundary states it");
                 assert_eq!(
@@ -2305,27 +2412,9 @@ mod tests {
             }
         }
 
-        let (query, planned) = served(7.95).await;
-        assert_eq!(query.synthetic_ceiling(), Some(SYNTHETIC_CEILING));
-        pool.shutdown().await.unwrap();
-        let sims = census_plan(
-            &galaxy,
-            &tables.tables,
-            &tables.envelope,
-            &query,
-            &mut noise,
-        );
         assert_eq!(planned, sims);
         assert_eq!(cap_bits(planned.caps()), cap_bits(sims.caps()));
 
-        let at_cut = layer_caps(
-            &galaxy,
-            &tables.tables,
-            &tables.envelope,
-            query.observer(),
-            query.cut(),
-            &mut noise,
-        );
         for (real, cut) in planned.caps().iter().zip(&at_cut) {
             let layer = real.layer();
             assert_eq!(layer, cut.layer());

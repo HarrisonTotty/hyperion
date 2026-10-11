@@ -289,7 +289,7 @@ impl fmt::Debug for SkyTablesService {
 /// # Errors
 ///
 /// Those of [`bulk`].
-async fn build_on_pool(
+pub(crate) async fn build_on_pool(
     pool: &CpuPool,
     galaxy: &Arc<Galaxy>,
     token: &CancelToken,

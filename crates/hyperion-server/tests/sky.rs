@@ -21,13 +21,18 @@
 //! than the thousands of CPU-seconds of one to the derived caps. Most of those seconds are the few
 //! cells of layers D and E about the observer, whose every system the census generates there, so
 //! a census of more cells runs longer mostly by its jobs' count. A served sky also marches its
-//! band, 24,576 rays, some 27 CPU-s in a test build. Forced caps read tables that hold no star, but
-//! for the test of the band's light, which builds the galaxy's own on the pool. Each wait is on
-//! what the server reports (its statistics, or the frames it sends), bounded by the harness's
-//! patience.
+//! band, 24,576 rays, some 27 CPU-s in a test build, so the tests of the census's stars, the cut
+//! and the tables' build, which read no texel, have their server march a coarse band
+//! ([`COARSE_BAND`], through the test seam [`SkyCaps::with_band_spec`]); the tests of the band's
+//! texels, of the manifest and the cell cache, and of the jobs' scheduling keep the standard one.
+//! Forced caps read tables that hold no star, but for the test of the band's light, which builds
+//! the galaxy's own on the pool. Each wait is on what the server reports (its statistics, or the
+//! frames it sends), bounded by the harness's patience. The sim's reference censuses of one query
+//! census each of its cells once ([`CellParts`]), however many of them fold it.
 
 mod common;
 
+use std::collections::BTreeMap;
 use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
@@ -99,6 +104,23 @@ fn galaxy() -> &'static Galaxy {
 /// stopped.
 async fn sky_server(radius_ly: f64, workers: usize) -> (TestServer, TempDir) {
     let caps = SkyCaps::forced(LightYears::new(radius_ly)).expect("a small forced cap");
+    sky_server_with(caps, workers).await
+}
+
+/// The band a server marches for a test that never reads the band's texels: 16² texels a face, of
+/// twelve nodes a decade, 1,536 rays against the standard band's 24,576 (Design note 14). Such a
+/// test asserts what the census, the tables, the cut or the time give, never a texel, and asks the
+/// sim's census of its query at this band, as the server's is (a star's texel can set its radius);
+/// the standard band's texels are asserted, texel for texel, by the tests that keep it.
+const COARSE_BAND: BandSpec =
+    BandSpec::new(16, 12).expect("16² texels a face and 12 nodes a decade");
+
+/// A server as [`sky_server`]'s, but marching the coarse band [`COARSE_BAND`], and its data
+/// directory: for a test that never reads the band's texels.
+async fn coarse_sky_server(radius_ly: f64, workers: usize) -> (TestServer, TempDir) {
+    let caps = SkyCaps::forced(LightYears::new(radius_ly))
+        .expect("a small forced cap")
+        .with_band_spec(COARSE_BAND);
     sky_server_with(caps, workers).await
 }
 
@@ -340,26 +362,80 @@ fn sim_census(query: &SkyQuery) -> SkyCensus {
 /// but at a synthetic ceiling, where C, D and E list only within their caps towards each star's
 /// texel (rendering plan R13, R13.T2.b), as the server's last reply does.
 fn sim_census_over(tables: &Tables, query: &SkyQuery) -> (CensusPlan, SkyCensus) {
-    let galaxy = galaxy();
-    let mut ctx = context_over(tables);
+    let plan = plan_over(tables, query);
+    let census = sim_census_of(&mut CellParts::over(tables, query), &plan);
+    (plan, census)
+}
+
+/// The sim's plan of `query` over `tables`.
+fn plan_over(tables: &Tables, query: &SkyQuery) -> CensusPlan {
     let mut noise = NoiseCache::with_capacity(1 << 16);
-    let plan = census_plan(galaxy, &tables.0, &tables.1, query, &mut noise);
-    let cells: Vec<_> = plan.cells().collect();
-    let mut stars = Vec::new();
-    let mut tallies: Option<CensusTallies> = None;
-    for key in cells {
-        let cell = census_cell(galaxy, &mut ctx, key, query, &mut stars);
-        match &mut tallies {
-            Some(sum) => sum.add(&cell),
-            None => tallies = Some(cell),
+    census_plan(galaxy(), &tables.0, &tables.1, query, &mut noise)
+}
+
+/// [`sim_census_over`]'s census of `plan`, the plan of `cells`' query, from `cells`.
+fn sim_census_of(cells: &mut CellParts<'_>, plan: &CensusPlan) -> SkyCensus {
+    merge_shells(
+        cells.fold(plan.cells()),
+        cells.query.n_max(),
+        plan.complete(),
+    )
+}
+
+/// One query's census cells as the sim censuses them over its tables with no cell cache
+/// ([`census_cell`]), each cell's stars and tallies censused once, the first time a census folds
+/// it, and kept for every census of the query that folds it again.
+///
+/// A cell's part is a function of the galaxy, the tables, the cell and the query alone, the
+/// context's noise cache being a cache that changes no value, and [`census_cell`] only appends to
+/// the stars it is given: so a census folded from the kept parts, in its own order, is that census
+/// run afresh, bit for bit. A test that holds several replies of one query, or merges one query's
+/// census two ways, so censuses each cell once rather than once a reference (some 5 s a census
+/// near the Sun).
+struct CellParts<'a> {
+    query: &'a SkyQuery,
+    ctx: SkyContext<'a>,
+    parts: BTreeMap<CellKey, (Vec<SkyStar>, CensusTallies)>,
+}
+
+impl<'a> CellParts<'a> {
+    /// `query`'s cells, none censused yet, over [`dark_tables`].
+    fn new(query: &'a SkyQuery) -> Self {
+        Self::over(dark_tables(), query)
+    }
+
+    /// `query`'s cells, none censused yet, over `tables`.
+    fn over(tables: &'a Tables, query: &'a SkyQuery) -> Self {
+        Self {
+            query,
+            ctx: context_over(tables),
+            parts: BTreeMap::new(),
         }
     }
-    let census = merge_shells(
-        tallies.map(|tallies| (stars, tallies)),
-        query.n_max(),
-        plan.complete(),
-    );
-    (plan, census)
+
+    /// The census of the cells `keys`, in their order, as one serial pass over them makes it: each
+    /// cell's stars appended and its tallies added, the first cell's starting the sum; `None` for
+    /// no cell.
+    fn fold(
+        &mut self,
+        keys: impl IntoIterator<Item = CellKey>,
+    ) -> Option<(Vec<SkyStar>, CensusTallies)> {
+        let mut stars = Vec::new();
+        let mut tallies: Option<CensusTallies> = None;
+        for key in keys {
+            let (cell_stars, cell) = self.parts.entry(key).or_insert_with(|| {
+                let mut cell_stars = Vec::new();
+                let cell = census_cell(galaxy(), &mut self.ctx, key, self.query, &mut cell_stars);
+                (cell_stars, cell)
+            });
+            stars.extend_from_slice(cell_stars);
+            match &mut tallies {
+                Some(sum) => sum.add(cell),
+                None => tallies = Some(*cell),
+            }
+        }
+        tallies.map(|tallies| (stars, tallies))
+    }
 }
 
 /// The wire's name of each capped layer, in the census's order.
@@ -374,10 +450,12 @@ const CAPPED: [(Layer, MassLayer); 6] = [
 
 /// A sky near the Sun lists the feature members as not modelled, as every sky does until
 /// R06.T16.a (`decision-r06-t16a-scope.md`), and the census its jobs merged is the sim's own, layer
-/// by layer.
+/// by layer. Its server marches the coarse band ([`COARSE_BAND`]), whose size and bytes the reply
+/// states; the standard band's are asserted by the tests that keep it
+/// (`decision-test-coverage.md`, N13).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
-    let (server, _data_dir) = sky_server(SMALL_CAP_LY, 2).await;
+    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 2).await;
     let (mut client, universe) = opened(&server).await;
     let response = served(&mut client, sky(&universe)).await.response;
 
@@ -398,11 +476,11 @@ async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
         response.not_modelled
     );
 
-    // The census the jobs merged is the sim's one pass at the ceiling, layer by layer.
-    let query = at_ceiling(SkyQuery::builder(
-        observer(),
-        Magnitudes::new(CAMERA_LIMIT_V),
-    ))
+    // The census the jobs merged is the sim's one pass at the ceiling, layer by layer, of the
+    // query at the band the server marched.
+    let query = at_ceiling(
+        SkyQuery::builder(observer(), Magnitudes::new(CAMERA_LIMIT_V)).band_spec(COARSE_BAND),
+    )
     .with_caps_forced(LightYears::new(SMALL_CAP_LY))
     .expect("a forced cap");
     let sim = sim_census(&query);
@@ -464,12 +542,16 @@ async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
         response.listed
     );
 
-    // The stars and the band in bulk (R06.T11.b and T11.c), and no disc with no system left out.
+    // The stars and the band in bulk (R06.T11.b and T11.c), the band the server marched, and no
+    // disc with no system left out.
     assert_eq!(
         (response.stars_bytes, response.band_bytes),
-        (u64::from(response.listed) * star_bytes(), band_bytes())
+        (
+            u64::from(response.listed) * star_bytes(),
+            band_bytes_of(COARSE_BAND)
+        )
     );
-    assert_eq!(response.band.face_texels, 64);
+    assert_eq!(response.band.face_texels, COARSE_BAND.face_texels());
     assert!(response.hosts.is_empty());
     assert_eq!(response.observer, sky(&universe).observer);
     // No listed star lies within a light-year, so the sky holds a Julian year.
@@ -488,7 +570,7 @@ async fn a_sky_near_the_sun_lists_feature_members_in_not_modelled() {
 /// sim's census of R06, the one-shot census to its caps.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_shallow_sky_within_the_limit_is_served_as_r06s() {
-    let (server, _data_dir) = sky_server(SMALL_CAP_LY, 2).await;
+    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 2).await;
     let (mut client, universe) = opened(&server).await;
     // The ruling's cut of 4.6, and the edge of its rule, a cut at the ceiling.
     for shallow in [4.6, SYNTHETIC_CEILING_V] {
@@ -513,15 +595,20 @@ async fn a_shallow_sky_within_the_limit_is_served_as_r06s() {
                 .iter()
                 .all(|layer| layer.bright_beyond.is_none())
         );
+        // The query at the band the server marched.
         let query = SkyQuery::builder(observer(), Magnitudes::new(shallow))
+            .band_spec(COARSE_BAND)
             .build()
             .expect("a query")
             .with_caps_forced(LightYears::new(SMALL_CAP_LY))
             .expect("a forced cap");
-        let r06 = sim_census(&query);
-        let one_shot = sim_census_one_shot(&query);
+        // Both merges of one plan's cells, each cell censused once.
+        let plan = plan_over(dark_tables(), &query);
+        let mut cells = CellParts::new(&query);
+        let r06 = sim_census_of(&mut cells, &plan);
+        let one_shot = sim_census_one_shot(&mut cells, &plan);
         assert_eq!(listed_on_the_wire(&r06), listed_on_the_wire(&one_shot));
-        assert_stars_are_the_sims(&sent, &query, &format!("a shallow sky at {shallow}"));
+        assert_stars_are_the_sims(&sent, &r06, &format!("a shallow sky at {shallow}"));
         if shallow.total_cmp(&SYNTHETIC_CEILING_V).is_eq() {
             assert!(
                 !r06.listed().is_empty(),
@@ -533,27 +620,12 @@ async fn a_shallow_sky_within_the_limit_is_served_as_r06s() {
     server.stop().await;
 }
 
-/// The sim's census of `query` in one pass over its plan's cells, merged by R06's one-shot rule
-/// (`merge_census`), which lists every star of the cells it opens: a query that states no
-/// synthetic ceiling, whose census `merge_shells` merges to the same.
-fn sim_census_one_shot(query: &SkyQuery) -> SkyCensus {
-    assert_eq!(query.synthetic_ceiling(), None);
-    let galaxy = galaxy();
-    let mut ctx = context();
-    let mut noise = NoiseCache::with_capacity(1 << 16);
-    let (tables, envelope, _) = dark_tables();
-    let plan = census_plan(galaxy, tables, envelope, query, &mut noise);
-    let cells: Vec<_> = plan.cells().collect();
-    let mut stars = Vec::new();
-    let mut tallies: Option<CensusTallies> = None;
-    for key in cells {
-        let cell = census_cell(galaxy, &mut ctx, key, query, &mut stars);
-        match &mut tallies {
-            Some(sum) => sum.add(&cell),
-            None => tallies = Some(cell),
-        }
-    }
-    merge_census(tallies.map(|tallies| (stars, tallies)), query.n_max())
+/// The sim's census of `cells`' query in one pass over the cells of its plan `plan`, merged by
+/// R06's one-shot rule (`merge_census`), which lists every star of the cells it opens: a query that
+/// states no synthetic ceiling, whose census `merge_shells` merges to the same.
+fn sim_census_one_shot(cells: &mut CellParts<'_>, plan: &CensusPlan) -> SkyCensus {
+    assert_eq!(cells.query.synthetic_ceiling(), None);
+    merge_census(cells.fold(plan.cells()), cells.query.n_max())
 }
 
 /// The request's cut is the deeper of the eye's and the camera's: under a shallower camera, the
@@ -561,7 +633,7 @@ fn sim_census_one_shot(query: &SkyQuery) -> SkyCensus {
 /// forced census reads tables that hold no star.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_cut_is_the_eyes_under_a_shallower_camera() {
-    let (server, _data_dir) = sky_server(SMALL_CAP_LY, 2).await;
+    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 2).await;
     let (mut client, universe) = opened(&server).await;
     let response = served(
         &mut client,
@@ -604,6 +676,13 @@ fn band_bytes() -> u64 {
     u64::try_from(BAND_TEXELS * SKY_TEXEL_BYTES).expect("288 KiB")
 }
 
+/// The bytes on the wire of a band of `spec`, which a test's server marches in place of the
+/// standard one: six faces of its texels, each of 12 bytes (Design note 17).
+fn band_bytes_of(spec: BandSpec) -> u64 {
+    let side = u64::from(spec.face_texels());
+    6 * side * side * u64::try_from(SKY_TEXEL_BYTES).expect("12 bytes")
+}
+
 /// A listed star's apparent V and distance as the wire carries them (Design note 17): bytes 16–17
 /// as millimagnitudes and 12–15 as light-years.
 fn wire_v_and_distance(star: &[u8; SKY_STAR_BYTES]) -> (i16, f32) {
@@ -613,11 +692,10 @@ fn wire_v_and_distance(star: &[u8; SKY_STAR_BYTES]) -> (i16, f32) {
     )
 }
 
-/// Asserts that the stars `sent` lists are the sim's census of `query`'s listed stars, in its
-/// order, by the V and distance the wire carries.
+/// Asserts that the stars `sent` lists are the sim's census `sim`'s listed stars, in its order, by
+/// the V and distance the wire carries.
 #[track_caller]
-fn assert_stars_are_the_sims(sent: &Sent, query: &SkyQuery, what: &str) {
-    let sim = sim_census(query);
+fn assert_stars_are_the_sims(sent: &Sent, sim: &SkyCensus, what: &str) {
     let payload = sent.payload();
     let stars_bytes = usize::try_from(sent.response.stars_bytes).unwrap();
     let (stars, rest) = payload[..stars_bytes].as_chunks::<SKY_STAR_BYTES>();
@@ -680,7 +758,7 @@ async fn a_skys_manifest_matches_what_was_sent() {
     ))
     .with_caps_forced(LightYears::new(SMALL_CAP_LY))
     .expect("a forced cap");
-    assert_stars_are_the_sims(&sent, &query, "near the Sun");
+    assert_stars_are_the_sims(&sent, &sim_census(&query), "near the Sun");
 
     // Asked again, every cell the census looked up is served from the cache, with the same bytes.
     let cold = server.stats().sky_cells();
@@ -728,7 +806,7 @@ async fn a_skys_manifest_matches_what_was_sent() {
     .with_caps_forced(LightYears::new(SMALL_CAP_LY))
     .expect("a forced cap");
     assert!(moved.response.listed > 0, "the moved sky lists stars");
-    assert_stars_are_the_sims(&moved, &query, "20 ly along x");
+    assert_stars_are_the_sims(&moved, &sim_census(&query), "20 ly along x");
 
     client.close().await;
     server.stop().await;
@@ -1261,12 +1339,13 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
         "the galaxy's light beyond the caps fills every texel"
     );
 
-    // The stars, then the texels, byte for byte.
+    // The stars, then the texels, byte for byte, of the standard band.
     let payload = sent.payload();
     assert_eq!(
         (response.stars_bytes, response.band_bytes),
         (u64::from(response.listed) * star_bytes(), band_bytes())
     );
+    assert_eq!(response.band.face_texels, 64);
     let (stars, texels) = payload.split_at(usize::try_from(response.stars_bytes).unwrap());
     for (index, ((star, offset), bytes)) in census
         .listed()
@@ -1301,7 +1380,7 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
 /// join the first's build: `compute::sky_tables`' unit test pins the single flight itself.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_second_identical_sky_shares_the_tables_build() {
-    let (server, _data_dir) = sky_server(SMALL_CAP_LY, 3).await;
+    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 3).await;
     let (mut first, universe) = opened(&server).await;
     let mut second = server.connected().await;
     let one = first.send_request(RequestBody::Sky(sky(&universe))).await;
@@ -1325,7 +1404,7 @@ async fn a_second_identical_sky_shares_the_tables_build() {
 /// `decision-r06-t11d-first-sky.md` §2). Opening the universe again starts nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn opening_a_universe_starts_its_sky_tables_which_a_sky_shares() {
-    let (server, _data_dir) = sky_server(SMALL_CAP_LY, 3).await;
+    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 3).await;
     let (mut client, universe) = opened(&server).await;
     let built = server
         .stats_until("the open's sky tables are held", |stats| {
@@ -1384,7 +1463,7 @@ async fn with_the_switch_off_an_open_starts_no_sky_tables() {
 /// `decision-r06-tables.md`, item B.2; R06.T11.c).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_second_sky_in_another_time_bucket_shares_the_build() {
-    let (server, _data_dir) = sky_server(SMALL_CAP_LY, 3).await;
+    let (server, _data_dir) = coarse_sky_server(SMALL_CAP_LY, 3).await;
     let (mut client, universe) = opened(&server).await;
     let now = served(&mut client, sky(&universe)).await.response;
     let built = server.stats().sky_tables();
@@ -1445,25 +1524,15 @@ fn delivery(plan: &CensusPlan) -> Vec<Vec<Shell>> {
     steps
 }
 
-/// The sim's census of `plan`'s shells `done`, serially in their order over [`dark_tables`],
-/// merged to their completeness (R06.T8.i's `merge_shells`).
-fn sim_shells_census(query: &SkyQuery, plan: &CensusPlan, done: &[Shell]) -> SkyCensus {
-    let galaxy = galaxy();
-    let mut ctx = context();
-    let mut stars = Vec::new();
-    let mut tallies: Option<CensusTallies> = None;
-    for &shell in done {
-        for key in plan.shell_slabs(shell).flat_map(|slab| slab.cells()) {
-            let cell = census_cell(galaxy, &mut ctx, key, query, &mut stars);
-            match &mut tallies {
-                Some(sum) => sum.add(&cell),
-                None => tallies = Some(cell),
-            }
-        }
-    }
+/// The sim's census of `plan`'s shells `done`, serially in their order over [`dark_tables`], from
+/// `cells`, the cells of `plan`'s query, merged to their completeness (R06.T8.i's `merge_shells`).
+fn sim_shells_census(cells: &mut CellParts<'_>, plan: &CensusPlan, done: &[Shell]) -> SkyCensus {
+    let keys = done
+        .iter()
+        .flat_map(|&shell| plan.shell_slabs(shell).flat_map(|slab| slab.cells()));
     merge_shells(
-        tallies.map(|tallies| (stars, tallies)),
-        query.n_max(),
+        cells.fold(keys),
+        cells.query.n_max(),
         plan.completeness(done.iter().copied()),
     )
 }
@@ -1610,6 +1679,8 @@ async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii()
     assert_eq!(steps.len(), 6, "{steps:?}");
     assert_eq!(replies.len(), steps.len(), "a reply a step");
     let marches = sim_marches(dark_tables(), &query, &plan);
+    // Every reply's census folds the cells of the shells done so far, each cell censused once.
+    let mut cells = CellParts::new(&query);
 
     let mut done: Vec<Shell> = Vec::new();
     let mut least_edges = Vec::new();
@@ -1625,7 +1696,7 @@ async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii()
 
         // The stars are the census of the shells done, in its order, and the census forced to the
         // reply's radii, less its stars beyond them, lists the same.
-        let census = sim_shells_census(&query, &plan, &done);
+        let census = sim_shells_census(&mut cells, &plan, &done);
         let sent = stars_sent(response, &payload);
         assert_eq!(sent, listed_on_the_wire(&census), "reply {k}'s stars");
         assert_eq!(
@@ -1659,8 +1730,9 @@ async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii()
         ]
     );
 
-    // The last reply is the whole plan's census in one pass, star for star and tally for tally.
-    let one_shot = sim_census(&query);
+    // The last reply is the whole plan's census in one pass, star for star and tally for tally,
+    // folded from the cells the replies' censuses opened.
+    let one_shot = sim_census_of(&mut cells, &plan_over(dark_tables(), &query));
     let last = replies.last().expect("a reply");
     assert_eq!(
         stars_sent(&last.response, &last.payload()),
