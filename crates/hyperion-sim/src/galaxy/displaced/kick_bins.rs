@@ -29,7 +29,8 @@
 //!   threshold, found once by bisection on the law's own rank table and speed map, and the share
 //!   beyond it is the truncated normal's tail at the threshold over c. Design note 18 took 64
 //!   quantile midpoints; a midpoint rule on a step function errs by up to half a cell at each
-//!   edge, 1 ÷ 128, far outside the 3σ of P08.T8.b's 10⁶-draw check.
+//!   edge, 1 ÷ 128, far outside the σ of 10⁶ draws (about 3 × 10⁻⁴) that P08.T8.b's check
+//!   resolves.
 //!
 //! Tracks stop at [`MAX_INITIAL_MASS`] (150 M☉ since P06.T14), so a star above it is taken as one
 //! of that mass, as `StarModel` does.
@@ -960,15 +961,20 @@ mod tests {
     /// kind, mode and bin, and of no remnant, follow the shares: one chi-square test a mass, its
     /// cells of under five expected merged, each at α ÷ 5, so that the five hold the skill's
     /// α = 10⁻³ family-wise (`decision-test-coverage.md`, the kick bins' ruling). A 3σ check of
-    /// each of the 485 cells, as this test made before, fails on half or more of the fresh draws
-    /// of a true law.
+    /// each cell, as this test made before, fails on some 15% or more of the fresh draws of a true
+    /// law (61 of the 485 cells have a share, at 0.27% each before the counts' discreteness), far
+    /// above 10⁻³.
+    ///
+    /// The cells whose share is all but nought (expected under [`NO_SHARE`] draws: a kind's modes
+    /// it never takes, and the vanishing tails) hold no draw at all, and their expectations sum
+    /// under [`NO_SHARE`]: a true law draws none there but once in 10⁶ runs, so the check costs no
+    /// α, and a draw in a cell the law cannot reach fails it, as it failed the 3σ check.
     #[test]
     fn the_shares_match_direct_draws_of_the_law() {
         let law = StandardKickLaw::default();
         let n = 1_000_000_u32;
         let masses = [8.5, 11.0, 16.0, 24.0, 38.0];
-        let alpha = ALPHA / 5.0;
-        assert_eq!(masses.len(), 5, "α is shared by the five masses");
+        let alpha = ALPHA / f64::from(u32::try_from(masses.len()).expect("five masses"));
         for (i, m) in masses.into_iter().enumerate() {
             let direct = Direct::new(m);
             let mut lcg = Lcg::new(0x08b0 + u64::try_from(i).unwrap());
@@ -1002,22 +1008,39 @@ mod tests {
                 u64::from(none),
                 shares.no_remnant() * total,
             ));
+            let mut no_share = 0.0;
+            for (label, o, e) in cells.iter().filter(|&&(_, _, e)| e < NO_SHARE) {
+                assert_eq!(*o, 0, "{m} M☉ {label}: drawn where the law expects {e:e}");
+                no_share += e;
+            }
+            assert!(
+                no_share < NO_SHARE,
+                "{m} M☉: the cells of no share expect {no_share:e} draws"
+            );
             let observed: Vec<u64> = cells.iter().map(|&(_, o, _)| o).collect();
             let expected: Vec<f64> = cells.iter().map(|&(_, _, e)| e).collect();
             let fit = chi_square_gof(&observed, &expected);
-            // The cell furthest from its share, in standard deviations, named should the test fail.
+            // The least expected count left once the thin cells are merged: the χ² law's
+            // approximation, and so the test's real α, rests on it.
+            let least = merged_expectations(&expected)
+                .into_iter()
+                .min_by(f64::total_cmp)
+                .expect("cells left");
+            // The cell of five or more expected furthest from its share, in standard deviations,
+            // named should the test fail.
             let (label, o, e) = cells
                 .iter()
-                .filter(|&&(_, _, e)| e > 0.0)
+                .filter(|&&(_, _, e)| e >= MERGE_FLOOR)
                 .max_by(|a, b| {
                     let z = |&(_, o, e): &(String, u64, f64)| (count(o) - e).abs() / e.sqrt();
                     z(a).total_cmp(&z(b))
                 })
-                .expect("a cell with a share");
+                .expect("a cell of five or more expected");
             let name = format!(
-                "{m} M☉: {} cells merged to {}, χ² {:.1} on {} degrees of freedom; furthest \
-                 {label}, {o} drawn against {e:.1}",
+                "{m} M☉: {} cells, {} with a share, merged to {} (the least expecting {least:.1}), \
+                 χ² {:.1} on {} degrees of freedom; furthest {label}, {o} drawn against {e:.1}",
                 cells.len(),
+                cells.iter().filter(|&&(_, _, e)| e >= NO_SHARE).count(),
                 fit.bins,
                 fit.statistic,
                 fit.dof
@@ -1025,6 +1048,39 @@ mod tests {
             eprintln!("{name}: p {:.3}", fit.p_value);
             assert_p_value(&name, fit.p_value, alpha);
         }
+    }
+
+    /// Expected draws below which a cell has no share: a kind's modes it never takes, and the
+    /// tails of under 10⁻¹² of the law.
+    const NO_SHARE: f64 = 1e-6;
+
+    /// The testkit's `chi_square_gof` merges the cells expecting fewer than this.
+    const MERGE_FLOOR: f64 = 5.0;
+
+    /// The cells' expected counts as `chi_square_gof` merges them: thin cells from the left end
+    /// and from the right end inwards, then any thin cell left inside into its right-hand
+    /// neighbour (the testkit's `stats::chi_square`, `merge_thin_bins`).
+    fn merged_expectations(expected: &[f64]) -> Vec<f64> {
+        let mut cells = expected.to_vec();
+        while cells.len() > 1 && cells[0] < MERGE_FLOOR {
+            let first = cells.remove(0);
+            cells[0] += first;
+        }
+        while cells.len() > 1 && cells[cells.len() - 1] < MERGE_FLOOR {
+            let last = cells.pop().expect("two cells or more");
+            let into = cells.len() - 1;
+            cells[into] += last;
+        }
+        let mut i = 0;
+        while i + 1 < cells.len() {
+            if cells[i] < MERGE_FLOOR {
+                let thin = cells.remove(i);
+                cells[i] += thin;
+            } else {
+                i += 1;
+            }
+        }
+        cells
     }
 
     /// A count as an `f64`, exactly: the counts here are at most 10⁶.

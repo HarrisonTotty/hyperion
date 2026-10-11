@@ -74,8 +74,8 @@ fn interior(cell: &CellBox, lcg: &mut Lcg) -> PointLy {
 /// [`flare_bound_is_tight_and_safe_over_100_000_pairs`]' sequence, no density exceeds its class's
 /// bound, and the bound lies within a factor of 1.6 of the sampled maximum on average.
 ///
-/// The tightness keeps its power at 10⁴ (a mean of 1.008 against 1.6, its standard error under
-/// 0.001), and the 5.1 × 10⁶ probes of the safety hunt find a violating share of about 6 × 10⁻⁷ at
+/// The tightness keeps its power at 10⁴ (a mean of 1.008 against 1.6, its standard error printed
+/// beside it), and the 5.1 × 10⁶ probes of the safety hunt find a violating share of about 6 × 10⁻⁷ at
 /// 95%; the plan's 10⁵ pairs run in the slow pass (`decision-test-coverage.md`, N2).
 #[test]
 fn flare_bound_is_tight_and_safe() {
@@ -99,7 +99,7 @@ fn assert_flare_bound_is_tight_and_safe(pairs: u32) {
     let (scales, fields) = scales_and_fields(&GalaxyParams::milky_way_like());
     let forms = classes(&scales, &fields);
     let mut lcg = Lcg::new(0x0811_0000);
-    let mut ratio_sum = 0.0;
+    let (mut ratio_sum, mut ratio_squares) = (0.0, 0.0);
     for _ in 0..pairs {
         let cell = random_cell(&mut lcg);
         let pick = usize::try_from(lcg.next_u64() % u64::try_from(forms.len()).unwrap()).unwrap();
@@ -116,10 +116,15 @@ fn assert_flare_bound_is_tight_and_safe(pairs: u32) {
             best = best.max(d);
         }
         assert!(best > 0.0, "class {pick} over {cell:?}");
-        ratio_sum += bound / best;
+        let ratio = bound / best;
+        ratio_sum += ratio;
+        ratio_squares += ratio * ratio;
     }
-    let mean = ratio_sum / f64::from(pairs);
-    eprintln!("mean bound ÷ sampled maximum: {mean:.4}");
+    let n = f64::from(pairs);
+    let mean = ratio_sum / n;
+    // The mean's standard error, printed beside it (the power the split keeps at 10⁴ pairs).
+    let error = ((ratio_squares / n - mean * mean).max(0.0) / (n - 1.0)).sqrt();
+    eprintln!("mean bound ÷ sampled maximum: {mean:.4} ± {error:.1e}");
     assert!(mean <= 1.6, "the bound is loose: {mean}");
 }
 

@@ -723,8 +723,10 @@ fn count_from_mean(galaxy: &Galaxy, first: CentreMemberId, mean: f64) -> u16 {
 ///
 /// As [`resolve_centre_member_with`], and [`ResolveSystemError::NoSuchSystem`] if the centre
 /// cannot be built: its [`BuildCentreError`](super::BuildCentreError) says only that no
-/// isotropic cluster has the drawn profile, which no seed of the sweeps draws
-/// (`no_drawn_centre_fails_its_inversion`), and a caller asking for a member can do nothing but
+/// isotropic cluster has the drawn profile, which no seed of the sweeps draws (16 drawn seeds per
+/// commit in `no_seed_s_centre_overflows_its_index`, 64 in the slow
+/// `no_drawn_centre_of_64_fails_its_inversion`, and the builder's extremes in
+/// `no_drawn_centre_fails_its_inversion`), and a caller asking for a member can do nothing but
 /// learn there is none.
 pub fn resolve_centre_member(
     galaxy: &Galaxy,
@@ -1028,10 +1030,9 @@ mod tests {
     /// Every member is resolved on the shared model (`resolve_centre_member_with`), and the first of
     /// each cell and band through the public `resolve` too, which builds a fresh model each call:
     /// ten such builds, two of the twelve cells and bands holding no member, rather than one a
-    /// member (`decision-test-coverage.md`, N1). The members
-    /// differ only in the argument passed, after the same dispatch, to the function asserted for
-    /// each; `centre_members_are_order_independent` holds the fresh model's members the shared
-    /// one's.
+    /// member (`decision-test-coverage.md`, N1). The members differ only in the argument passed,
+    /// after the same dispatch, to the function asserted for each;
+    /// `centre_members_are_order_independent` holds the fresh model's members the shared one's.
     #[test]
     fn members_round_trip_and_resolve() {
         let galaxy = milky_way_galaxy();
@@ -1076,9 +1077,9 @@ mod tests {
             }
         }
         assert!(seen > 100, "{seen}");
-        assert!(
-            public > 0,
-            "the first members of the cells and bands through `resolve`"
+        assert_eq!(
+            public, 10,
+            "the first member of each cell and band that holds one, through `resolve`"
         );
     }
 

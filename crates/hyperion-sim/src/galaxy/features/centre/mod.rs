@@ -70,7 +70,10 @@ impl CentreModel {
     ///
     /// [`BuildCentreError`] if the black hole's or the cluster's mass is not valid, or a profile
     /// has no isotropic distribution function in the potential (P09.T24.b), which no galaxy the
-    /// builder allows does (`no_drawn_centre_fails_its_inversion`).
+    /// builder allows does: 16 drawn seeds per commit (`members::tests`'
+    /// `no_seed_s_centre_overflows_its_index`), 64 in the slow
+    /// `no_drawn_centre_of_64_fails_its_inversion`, and the extreme black hole to cluster ratios
+    /// in `no_drawn_centre_fails_its_inversion`.
     pub fn new(galaxy: &Galaxy) -> Result<Self, BuildCentreError> {
         let params = galaxy.params();
         let profile = CentreProfile::new(params.nuclear_cluster(), params.black_hole().mass())?

@@ -989,6 +989,15 @@ fn a_point_is_nothing_and_the_corona_takes_no_steps() {
 /// the seed would still show.
 #[test]
 fn the_realised_line_keeps_the_mean_over_256_seeds() {
+    /// The seeds are this `| n` for n below 256: its low byte is nought, so `seed − SEED_BASE` is
+    /// the seed's index n.
+    const SEED_BASE: u64 = 0x0708_b000_0000_0000;
+    const {
+        assert!(
+            SEED_BASE.trailing_zeros() >= 8,
+            "a seed's index is its low byte"
+        );
+    }
     let fields = milky_way_fields();
     let (a, b) = (
         at([-1_500.0, 26_000.0, 10.0]),
@@ -1012,7 +1021,8 @@ fn the_realised_line_keeps_the_mean_over_256_seeds() {
                 let cold = sightline(&gas, &a, &b, NoiseMode::Realised, quality, &[], &mut cache);
                 let warm = sightline(&gas, &a, &b, NoiseMode::Realised, quality, &[], &mut cache);
                 assert_eq!(cold, warm, "a warm cache changed the line");
-                if seed.get() % 16 == 15 {
+                let n = seed.get() - SEED_BASE;
+                if n % 16 == 15 {
                     let fresh = &mut NoiseCache::with_capacity(0);
                     assert_eq!(
                         cold,
@@ -1024,7 +1034,7 @@ fn the_realised_line_keeps_the_mean_over_256_seeds() {
                 }
                 cold.a_v().value()
             },
-            (0..256_u64).map(|n| Seed::new(0x0708_b000_0000_0000 | n)),
+            (0..256_u64).map(|n| Seed::new(SEED_BASE | n)),
         );
         assert!(
             (realised.mean - mean_line.a_v().value()).abs() < 4.0 * realised.standard_error,
