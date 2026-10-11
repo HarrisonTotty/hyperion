@@ -893,14 +893,15 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     mass floor it was built with, in candidate order. A later query whose floor is at or above the
     cached one filters the cached list; a lower floor rebuilds the cell. Records are epoch state, so
     a jump of up to 1,000 ly reuses most cells, and the cache never changes a reply (tested, as plan
-    09's caches are). The server's is a `ByteLru` under `HYPERION_SKY_CACHE_MB` (default 1,280
-    MiB since R06.T8.n), behind a lock so that the census's parallel bulk jobs share it through
-    `&self`, as P09.T40's caches do for `SystemSource`. It is not the server's existing cell cache
-    (`HYPERION_CELL_CACHE_MB`): that holds whole cells from `generate_cell`, and the near-Sun caps
-    enclose some 2.6 × 10⁷ systems in C to E (the brainstorm's count at version 14), where the sky
-    keeps only the bright subset above each floor. From R06.T8.h the cache holds blocks of 4³
-    cells, each built for one observer and cut (decided 2026-10-05, `decision-r06-census-cost.md`;
-    amended 2026-10-08, `decision-r06-t8h-warm.md`).
+    09's caches are). The server's is a `ByteLru` under `HYPERION_SKY_CACHE_MB` (default 0, off,
+    since R06.T8.o; R06.T8.n's sized budget is 1,280 MiB), behind a lock so that the census's
+    parallel bulk jobs share it through `&self`, as P09.T40's caches do for `SystemSource`. It is
+    not the server's existing cell cache (`HYPERION_CELL_CACHE_MB`): that holds whole cells from
+    `generate_cell`, and the near-Sun caps enclose some 2.6 × 10⁷ systems in C to E (the
+    brainstorm's count at version 14), where the sky keeps only the bright subset above each
+    floor. From R06.T8.h the cache holds blocks of 4³ cells, each built for one observer and cut
+    (decided 2026-10-05, `decision-r06-census-cost.md`; amended 2026-10-08,
+    `decision-r06-t8h-warm.md`).
 
     - A cell's key is the faintest absolute V listable at its least distance from any observer
       within 1,000 ly of the builder's, and its window is every emitted time that such an observer,
@@ -910,8 +911,10 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
       serves a query whose key is no fainter and whose window it holds.
     - The stored bound only skips records. Every record it passes takes the census's own steps, so
       a warm census generates the same systems as a cold one, and its reply is the same bit for bit.
-    - R06.T8.n sets `HYPERION_SKY_CACHE_MB`'s default so that one near-Sun sky and a jump's new
-      cells fit (`decision-r06-census-cost-signoff.md`), at most 2,048 MiB.
+    - R06.T8.n sized the budget that holds one near-Sun sky and a jump's new cells
+      (`decision-r06-census-cost-signoff.md`), at most 2,048 MiB: 1,280 MiB on the served sky.
+      A warm census still generates every system, so the cache saves little. From R06.T8.o the
+      default is 0, off, until the cache pays (decided 2026-10-10, `decision-r06-t8n.md`).
 
 13. **Time.** The sky is asked at a time, like every query, within ±H. The response's
     `valid_until` is the least of one Julian year and the time at which the fastest-moving listed
@@ -1136,11 +1139,12 @@ Decided 2026-10-05 (`decision-r06-census-cost.md`), the census's cost work runs 
 T16.b; T8.f; T9.b; T9.e; T9.c, T9.h, T9.d and T9.i; T8.k with T8.j; T9.f; T9.j; T8.l; T8.m, which
 needs no plan-11 task; T7.b and T8.i, which no longer wait for T8.g; T8.g, once T8.m, P11.T16 and
 P11.T17.c are on `rendering-and-planets`; T8.h, built on T8.g as committed (decided 2026-10-08,
-`decision-r06-t8h-warm.md`); T8.g's final gates once P11.T17.c lands, then T8.n; T11.d, after
-T8.g, T8.i and T11.a–c (T11.c on T9.f); T11.f, the stars-arriving note split from T11.d
-(2026-10-08), after it; T11.g, the first sky within its budget, after T11.d, beside R13.T2; T7.c,
-the visibility caps' safety with the illumination, before the default switch (both decided
-2026-10-08, `decision-r06-t11d-first-sky.md`); T5.f and T9.g before T17's goldens; then T17
+`decision-r06-t8h-warm.md`); T8.g's final gates once P11.T17.c lands, then T8.n, then T8.o
+(decided 2026-10-10, `decision-r06-t8n.md`); T11.d, after T8.g, T8.i and T11.a–c (T11.c on
+T9.f); T11.f, the stars-arriving note split from T11.d (2026-10-08), after it; T11.g, the first
+sky within its budget, after T11.d, beside R13.T2; T7.c, the visibility caps' safety with the
+illumination, before the default switch (both decided 2026-10-08,
+`decision-r06-t11d-first-sky.md`); T5.f and T9.g before T17's goldens; then T17
 (the order amended 2026-10-06, `decision-r06-t9b-band.md`, `decision-r06-t9c-glare.md` and
 `decision-r06-t8k-cone.md`, and 2026-10-07, `decision-p11-t16-hierarchy-bound.md`).
 T7.b, T8.i and T11.d waited on the owner's sign-off. A decision agent advised on it, and its
@@ -1908,9 +1912,51 @@ the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`;
   - `just ci`.
 
   As built (Risks, "Deviations in T8.n, as built"): sized on the sky served since R13.T2.b, the
-  real tier at the ceiling, by new warm benches of it; `CACHE_CUT_SLACK_MAG` 0.2; the default
-  1,280 MiB, from 949 MB held after the Sun's sky and the jump on the server's galaxy; the warm
-  ratios about 100%, reported.
+  real tier at the ceiling, by new warm benches of it; `CACHE_CUT_SLACK_MAG` 0.2; the sized
+  budget 1,280 MiB, from 949 MB held after the Sun's sky and the jump on the server's galaxy;
+  the warm ratios about 100%, reported. Ruled 2026-10-10 (`decision-r06-t8n.md`): T17's warm gate
+  reads the served sky at 1,280 MiB, set explicitly; the slack stays 0.2; and since the cache
+  saves nothing a player feels at version 21, R06.T8.o makes the default 0, off.
+
+- **R06.T8.o The sky cache off by default (new; after T8.n, before T17; decided 2026-10-10,
+  `decision-r06-t8n.md`).** At version 21 a warm census generates every system a cold one
+  does. So the cache saves less than the runs' spread (warm ÷ cold 96–108%, R06.T8.n), and it
+  would hold up to 1,280 MiB to do so.
+  - **The default.** `DEFAULT_SKY_CACHE_MIB` is 0. Its doc keeps T8.n's sizing: 1,280 MiB holds
+    one near-Sun served sky and a 1,000 ly jump's new cells. It is the value to set for a warm
+    sky, and the budget at which T17's warm gate is judged.
+  - **A budget of 0 takes T8.g's path.** Each census job's context reads `NoSkyCellCache`
+    (`compute/sky.rs`, where the job takes `cells.handle(key)`). So no entry is built and no
+    verdict is taken twice, and the reply is the cached census's, bit for bit.
+  - **What brings it back.** The default returns to the sized budget, measured again, once
+    `census_near_sun_served/served_warm_5.0` (the repeat) is at most 50% of its cold by the
+    threads' CPU time (`deferred-corrections.md`, "Census cost").
+  - **Docs.** These follow:
+    - `config.rs`'s module table, the constant's doc and the option's help ("0 keeps no
+      cells");
+    - the root README's row;
+    - `compute/sky.rs`'s module docs on a superseded census;
+    - Design note 12's default, and the pointer under T11.d's "The jobs".
+
+    The sim bench's default budget stays 1,280 MiB, the gate's.
+
+  Tests:
+  - `config`'s default (`DEFAULT_SKY_CACHE.to_string()` is "0") and `defaults_match_the_builder`;
+  - a server test: at a budget of 0, a sky's census counts no cell served, missed or rebuilt and
+    keeps no block, and its stars and `CensusTallies` equal the same sky's at 1,280 MiB;
+  - the server's warm tests that read the default budget (`tests/sky.rs`, through
+    `TestServer::config`) set an explicit budget that holds their skies.
+
+  Acceptance:
+  - `cargo test -p hyperion-server`;
+  - `cargo test -p hyperion-sim --lib -- sky::census`;
+  - `just ci`.
+
+  No `GENERATOR_VERSION` bump, no protocol change, and no golden moves.
+
+  As built (Risks, "Deviations in T8.o, as built"): the switch is `SharedSkyCellCache::is_off`,
+  read by each census job and by the handle's `keeps_entries`; the warm server test runs at an
+  explicit 1,280 MiB, and the default's server test checks that its counters stay at nought.
 
 - **R06.T8.i Nearest first: the shell plan (new; signed off; it may precede T8.g, and T11.d builds
   on it; decided 2026-10-07).** Decided 2026-10-05 (`decision-r06-census-cost.md`). The sign-off
@@ -2447,7 +2493,8 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     reply's contents: each reply is still the exact census to its radii.
   - **The jobs.** Census jobs are sized to about 50 ms of expected work, since the pool never
     preempts a running job. A cancelled or superseded census keeps its finished cells, so that a
-    moving ship's outer shells still converge through the cache.
+    moving ship's outer shells still converge through the cache. At version 21 they do not,
+    since a warm census still generates every system (Risks, "The sky cache at version 21").
   - **The band.** Each reply's band is re-summed from one march per request (R06.T9.f's
     `BandMarch`): the rays keep their integrals over the fixed shell intervals, and each reply sums
     the light fainter than the cut inside its radii and all the light beyond them.
@@ -2941,23 +2988,30 @@ cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
     (`deferred-corrections.md`, "Census cost"). At that version the limit is re-measured for
     lifting.
 
-- after a jump of up to 1,000 ly, at the default `HYPERION_SKY_CACHE_MB` (R06.T8.n):
-  - every cell both plans open is served from the cache, none rebuilt;
+- after a jump of 1,000 ly toward the galactic centre, on the sky the server serves (R13.T2's
+  real tier at the ceiling: `census_near_sun_served/served_warm_jump_5.0` on the server's galaxy
+  and `…/warm_jump_5.0` on the fixture), with `HYPERION_SKY_CACHE_MB` at R06.T8.n's sized budget,
+  1,280 MiB, set explicitly (the default is 0, off, from R06.T8.o):
+  - every cell both plans open is served from the cache, and none is rebuilt;
   - the warm census's stars and tallies are the destination's cold census's, bit for bit;
-  - one near-Sun sky's entries and the jump's fit the default.
+  - one near-Sun sky's entries and the jump's fit the sized budget.
 
-  This is the gate (decided 2026-10-08, `decision-r06-t8h-warm.md`). Warm ÷ cold, sampled with
-  the cache budget scaled, is recorded against the target of at most 25%, with the repeat's.
-  About 30–45% is expected at version 21 after P11.T17.c, since a warm census still generates
-  every system its bound passes, and a jump's new cells are cold. A miss of the target is
-  deferred (`deferred-corrections.md`, "Census cost": lever 13, then the realised window bound)
-  and does not hold T17. Above 50%, it is reported before T17 closes.
-
-  _As built in R06.T8.n (2026-10-10; for "main" to adopt): since R13.T2.b the served sky is the
-  real tier at the ceiling, so S1–S3 read `census_near_sun_served/*warm_jump_5.0` at the default
-  (1,280 MiB), where all three are met. The exact census's `census_near_sun/{warm,warm_jump}` are
-  recorded against the 25% target only. Warm ÷ cold measured 96–108%, not 30–45%, and was
-  reported (R06's Risks, "Deviations in T8.n, as built")._
+  This is the gate on the cache working (decided 2026-10-08, `decision-r06-t8h-warm.md`;
+  re-stated 2026-10-10, `decision-r06-t8n.md` §1).
+  - **Other jumps.** The tests hold the same reply after every other jump of up to 1,000 ly. A
+    jump whose eye's cut deepens by more than `CACHE_CUT_SLACK_MAG` (0.2) rebuilds the cells
+    whose key binds. That is recorded, not a failure.
+  - **The served sky's ratio.** Warm ÷ cold is recorded by the jobs' threads' CPU time, sampled
+    with the budget scaled, with the repeat's (`…/served_warm_5.0`). R06.T8.n measured 96–108%,
+    reported and ruled (`decision-r06-t8n.md` §3).
+  - **The exact census.** Its `census_near_sun/{warm,warm_jump}` (T7.b's caps at the fixed cut,
+    which no server serves until R13's real limit lifts) are recorded against the target of at
+    most 25%, with the repeat's. They run at a budget that holds their entries (13.2–14.0 GB at
+    R06.T8.n, so no shippable size).
+  - **Why the target is read there.** On the served sky a jump's new cells, some 45% of those
+    it opens, are cold under any cell cache. So the target is read on the exact census alone.
+  - **A miss.** A miss of the target is deferred (`deferred-corrections.md`, "Census cost": the
+    realised window bound, then the kept attempt) and does not hold T17.
 
 The budget was accepted as the eye's only. A decision agent advised that, and the advice was
 adopted on 2026-10-05 under the owner's standing delegation (`decision-r06-census-cost-signoff.md`,
@@ -2980,7 +3034,9 @@ records near the Sun until T8.g's bound rejects most of them before their drift 
 - each layer's cells, candidates, records, generated and listed;
 - the share of pairs in each of T8.g's cases;
 - the time to each shell's reply;
-- the first reply, the full census and a warm jump at `HYPERION_WORKERS=4`, the laptop's proxy;
+- the first reply and the full census at `HYPERION_WORKERS=4`, the laptop's proxy, at the
+  default `HYPERION_SKY_CACHE_MB` (0), and the warm jump at the same workers, at the gate's
+  budget (1,280 MiB);
 - the photorealistic view's frame time, p95 and p99, while a census runs: on the dev machine here,
   and by the owner on the laptop. A census that breaks the frame budget is a finding. Its remedy is
   for the server to lower its bulk work's priority, or the workers it gives bulk work, beside a
@@ -6670,15 +6726,18 @@ CensusCost)`.
     The ruling measured on the exact census to T7.b's caps (C 14,563, D 13,232 and E 46,010 ly at
     most), which no server serves until the census levers lift the limit. So B is the served
     sky's, and the exact census's warm benches are recorded beside it, as step 2 names them.
-    - **So T17's warm gate reads the served sky** (as built; for "main" to adopt). S1–S3
-      (`decision-r06-t8h-warm.md` §2.3) are judged on `census_near_sun_served/*warm_jump_5.0` at the
-      default. The exact census's `census_near_sun/{warm,warm_jump}` are recorded against the 25%
-      target only. At the default they cannot hold S3: their entries are some ten times it
-      (below). A pointer is under T17's gate.
+    - **So T17's warm gate reads the served sky** (adopted 2026-10-10, `decision-r06-t8n.md` §1).
+      S1–S3 (`decision-r06-t8h-warm.md` §2.3) are judged on
+      `census_near_sun_served/*warm_jump_5.0` at the sized budget, 1,280 MiB, set explicitly,
+      since R06.T8.o makes the default 0. The exact census's `census_near_sun/{warm,warm_jump}`
+      are recorded against the 25% target only, at a budget that holds them. No budget under
+      the cap holds S3 there, since their entries are some ten times 1,280 MiB (below). T17's
+      gate states it.
     - **B is taken again when the limit lifts.** Once the census levers lift R13's real limit
       (`deferred-corrections.md`, "Census cost"), the served sky is the exact census again. B, the
       default and step 4's ordinal form are then measured again. At R13.T7's V<sub>P</sub> 4.5 the
-      tier shrinks, and the default still holds.
+      tier shrinks, and the default still holds. Deferred (`deferred-corrections.md`, "Census
+      cost"; `decision-r06-t8n.md` §4).
   - **Step 1, the window test**, on T17.c's verdicts:
     `the_entry_light_holds_every_narrower_window` and
     `the_prefilter_keeps_every_record_the_census_generates` pass (9.8 s). Test 4 now asks its third
@@ -6701,8 +6760,8 @@ CensusCost)`.
     - So 0.2 covers every jump in the plane but the server's galaxy's along −x, by 0.0007 mag.
       Jumps out of the plane deepen the cut beyond the ruled 0.25. Those jumps, or their returns,
       rebuild the cells whose key binds, at a cold cell's cost and with the same reply. 0.25
-      would cover the plane with margin, at a little more held, and would need B measured again
-      (asked of "main"; lean: keep 0.2, the ruled jump's).
+      would cover the plane with margin, at a little more held, and would need B measured again.
+      Kept at 0.2, with no re-measure (ruled 2026-10-10, `decision-r06-t8n.md` §2).
   - **The benches** (`benches/sky.rs`):
     - new: `census_near_sun_served/{,served_}warm_5.0` and `…/warm_jump_5.0`, in their own
       function (`census_near_sun_served_warm`), with the served query (`served_query`) and
@@ -6742,7 +6801,8 @@ CensusCost)`.
     MB, the larger. 1.25 × B is 1,131 MiB, rounded up to 1,280, within the 2,048 MiB cap, so the
     ordinal form is not needed. **S3 is met** there: the Sun's sky and the jump's fit, with 29% to
     spare. `config.rs`'s docs and table, its test and the README's table follow, and the
-    option's help no longer says "provisional".
+    option's help no longer says "provisional". _From R06.T8.o the default is 0, off, and
+    1,280 MiB is the sized budget (`decision-r06-t8n.md` §3)._
   - **Step 5, T17's warm figures, judged.**
     - The jump at 4 workers: about 24,200 CPU-s on the server's galaxy against the destination's
       cold 23,900, so some 100 minutes of wall on 4 workers before its last shell (_estimate_: the
@@ -6755,7 +6815,9 @@ CensusCost)`.
       bound comes into RM3). They are the ruled expectation (`decision-p11-t17c-bright.md` §2,
       "T8.n": about 95–100%), the same root cause as its §4, which the owner has since answered
       with the hybrid sky: a warm census still generates every system. T17's text still expects
-      30–45%; a pointer there gives these.
+      30–45%; a pointer there gives these. _Ruled 2026-10-10 (`decision-r06-t8n.md` §3): the
+      realised window bound stays deferred; the cache saves nothing a player feels at version
+      21, so R06.T8.o turns it off by default; T17's gate is re-stated._
   - **The exact census's warm benches, recorded** (2026-10-10, `census_near_sun/{warm,warm_jump}`,
     sampled 1 block in 1,000 as ruled, `HYPERION_WORKERS` 4 at `CPUQuota=400%`, under the
     heavy-test lock, load 3–31, so provisional). They are T8.h's benches: the fixture, the fixed
@@ -6774,6 +6836,64 @@ CensusCost)`.
   - **Not changed.** No generated output moves: the slack only widens what an entry holds, and a
     warm reply is the cold one bit for bit. `GENERATOR_VERSION` stays 21, and no golden, protocol
     type or plan Provides name moves (the constants are crate-private).
+- **The sky cache at version 21** (ruled 2026-10-10, `decision-r06-t8n.md`). A warm census
+  generates every system its cold census generates, which is what keeps its reply the cold one.
+  It skips only each served cell's placement and bounds, and still costs 96–108% of cold
+  (R06.T8.n). So nearly all of cold is work a warm census repeats.
+  - **What it does not save:**
+    - a revisit's final reply, which still waits for every system: about half an hour on 15
+      workers and 100 minutes on 4 on the server's galaxy (_estimates_);
+    - the first sky after a jump, which is mostly generation;
+    - a superseded census's outer shells, which converge only if the ship holds still for a
+      whole census. The sign-off's condition 5 keeps the cells, but not its purpose;
+    - a second client's identical sky.
+  - **What it would cost.** 705 MB after the first full sky and 949 MB after a jump, up to
+    1,280 MiB, on the laptop's 16 GB, which the CPU and the GPU share. Beside it sit the language
+    model and the server's other caches and tables (800 MiB). So R06.T8.o sets the default to 0,
+    which takes T8.g's path. The cache and its tests stay.
+  - **What brings it back.** The realised window bound with the kept attempt
+    (`deferred-corrections.md`, "Census cost"), the only remedy that moves the ratio.
+    - A repeat could fall to about 5–15% of cold. Its floor is `generated_listable`, 1.8% of
+      the systems generated on the server galaxy's jump, plus the work outside generation
+      (_estimate_).
+    - A 1,000 ly jump on the served sky could fall no lower than its new cells' share, about 45%.
+    - Lever 13 speeds warm and cold alike.
+    - The default returns to the sized budget once the repeat is at most 50% of cold.
+  - **Open point, not ruled.** Identical sky queries in flight, such as several clients at one
+    place, could share one census, since a reply is a pure function of its query. The cell cache
+    does not help them. It is for a decision agent when several clients share a server's sky.
+- **Deviations in T8.o, as built (2026-10-10).** The sky cache off by default, as ruled
+  (`decision-r06-t8n.md` §3).
+  - **The switch.** `SharedSkyCellCache` notes a budget of 0 when it is built, and the
+    crate-private `is_off` reports it. `census_job` passes `&NoSkyCellCache` when it is set, and
+    the handle otherwise. The handle's `keeps_entries` is `!is_off()` too (the Rust review's), so
+    that any other caller of `handle` takes T8.g's path at 0; no other census context reads the
+    cell cache today. `lib.rs` is unchanged.
+  - **Docs beyond the list.** A paragraph under the README's table and one in `config.rs`'s
+    module docs, beside `--serve-sky`'s, say why the default is 0 and that 1280 is the value for
+    a warm sky. `sky_cells.rs`'s module docs, `new`'s doc and the builder's `sky_cache_bytes` say
+    that 0 turns the cache off. The option's help reads "0, the default, keeps no cells, and 1280
+    holds a warm sky". The sim bench's docs, which called 1,280 MiB the server's default, are
+    corrected in a commit of their own (`docs(sim): R06.T8.o …`), since a bench's doc comment
+    reaches no test: they call it R06.T8.n's sized budget and the gate's, and condition 4's "the
+    shipped size's" there reads "the whole budget's", since the shipped size is 0.
+  - **The tests.**
+    - The server test is `compute::sky`'s
+      `at_a_budget_of_nought_the_census_reads_no_cache_and_is_the_cached_census`: a 30 ly forced
+      cap at V 9.0, censused in its delivery steps at 0 and at 1,280 MiB, asked twice. At 0 the
+      counters stay `SkyCellCounters::default()`; at 1,280 MiB every cell is missed first and
+      served again, none rebuilt; each step's census is the other's, bit for bit. Run with the
+      branch forced off, it fails (1,052 cells looked up and refused at 0).
+    - `a_cache_of_no_bytes_keeps_no_block` is renamed `…_is_off_and_keeps_no_block`, and checks
+      `is_off` at 0 bytes and not at 1.
+    - In `tests/sky.rs`, `a_skys_manifest_matches_what_was_sent` runs at `SIZED_SKY_CACHE_BYTES`
+      through `cached_sky_server` and a shared `sky_config`. It is the only server test that
+      reads the cache.
+    - `a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_returns`, at the
+      default, checks that the server's sky-cell counters stay at their defaults: the default end
+      to end.
+  - **Not changed.** No generated output moves. `GENERATOR_VERSION` stays 21, and no golden,
+    protocol type or Provides name moves (`is_off` is crate-private).
 - **Deviations in T9.f, as built (2026-10-07).** The band's march kept, as the band ruling
   (`decision-r06-t9b-band.md`, item 7) sets it out, with these details.
   - **The API** (`sky/band.rs`):

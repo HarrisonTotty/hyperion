@@ -1,9 +1,10 @@
 //! The sky over a real socket (rendering plan R06, R06.T11.a–d and T11.g): the census as bulk
 //! jobs, which a range query overtakes within a bounded wait and a cancel stops, its answer
 //! against the sim's own census, its stars and band in R03's bulk frames as the manifest states
-//! them, the stars, texels and host discs against the sim's for the same query, its census's cells
-//! served again from the server's cache, the galaxy's tables built once for every sky of it and
-//! started when its universe is opened, the fields a request it cannot serve names, the switch
+//! them, the stars, texels and host discs against the sim's for the same query with the sky's cell
+//! cache off, as it is by default since R06.T8.o, its census's cells served again from that cache
+//! at R06.T8.n's sized budget, set explicitly, the galaxy's tables built once for every sky of it
+//! and started when its universe is opened, the fields a request it cannot serve names, the switch
 //! turned off (it is on by default since rendering plan R13's R13.T2), under which `sky` is
 //! `unsupported`, and a sky arriving nearest first, each reply the census to its stated radii and
 //! the last the census of its whole plan.
@@ -28,6 +29,7 @@
 mod common;
 
 use std::num::NonZeroUsize;
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
 use common::{BinaryHeader, Frame, TestClient, TestServer};
@@ -37,9 +39,9 @@ use hyperion_protocol::{
     SKY_TEXEL_BYTES, ServerMessage, SkyGapDto, SkyRequest, SkyResponse, SystemIdHex,
     SystemsInRangeRequest, UniverseIdHex, UniverseTime,
 };
-use hyperion_server::compute::SkyCaps;
+use hyperion_server::compute::{SkyCaps, SkyCellCounters};
 use hyperion_server::limits::MAX_BINARY_FRAME_BYTES;
-use hyperion_server::{ServerStats, SkyService};
+use hyperion_server::{ServerConfigBuilder, ServerStats, SkyService};
 use hyperion_sim::Seed;
 use hyperion_sim::coords::{GalacticPosition as SimPosition, UnitVector};
 use hyperion_sim::galaxy::Galaxy;
@@ -101,14 +103,37 @@ async fn sky_server(radius_ly: f64, workers: usize) -> (TestServer, TempDir) {
 }
 
 /// A server that serves the sky to `caps`, with `workers` CPU workers, and its data directory.
+///
+/// Its sky's cell cache has the default budget, 0, which turns it off (R06.T8.o).
 async fn sky_server_with(caps: SkyCaps, workers: usize) -> (TestServer, TempDir) {
     let data_dir = tempfile::tempdir().expect("a temporary directory");
-    let config = TestServer::config(data_dir.path())
+    let config = sky_config(data_dir.path(), caps, workers).build();
+    (TestServer::start_with(config).await, data_dir)
+}
+
+/// R06.T8.n's sized budget of the sky's cell cache, 1,280 MiB, in bytes: one near-Sun sky's
+/// entries and a 1,000 ly jump's. A test that reads the cache sets it, since the server's default
+/// is 0, off (R06.T8.o; decided 2026-10-10, `decision-r06-t8n.md`).
+const SIZED_SKY_CACHE_BYTES: usize = 1_280 << 20;
+
+/// A server as [`sky_server`]'s, its caps forced to `radius_ly`, with the sky's cell cache at
+/// [`SIZED_SKY_CACHE_BYTES`] rather than off, and its data directory.
+async fn cached_sky_server(radius_ly: f64, workers: usize) -> (TestServer, TempDir) {
+    let caps = SkyCaps::forced(LightYears::new(radius_ly)).expect("a small forced cap");
+    let data_dir = tempfile::tempdir().expect("a temporary directory");
+    let config = sky_config(data_dir.path(), caps, workers)
+        .sky_cache_bytes(SIZED_SKY_CACHE_BYTES)
+        .build();
+    (TestServer::start_with(config).await, data_dir)
+}
+
+/// The configuration of a server over `data_dir` that serves the sky to `caps`, with `workers` CPU
+/// workers.
+fn sky_config(data_dir: &Path, caps: SkyCaps, workers: usize) -> ServerConfigBuilder {
+    TestServer::config(data_dir)
         .workers(NonZeroUsize::new(workers).expect("a worker or more"))
         .sky_caps(caps)
         .sky_service(SkyService::Served)
-        .build();
-    (TestServer::start_with(config).await, data_dir)
 }
 
 /// A client with a universe of [`SEED`] created and opened, so that its galaxy is warm, and where
@@ -613,12 +638,13 @@ fn assert_stars_are_the_sims(sent: &Sent, query: &SkyQuery, what: &str) {
 
 /// A sky's manifest is what was sent: its chunks in order before the response, each a frame of at
 /// most 256 KiB for the request, their bytes the manifest's, split into the listed stars and the
-/// band, the stars the sim's census in its order. The same sky asked again is served from the cell
-/// cache, with the same bytes (Design note 12), and a sky asked from a little way off rebuilds
-/// none of the cells both censuses open, its stars the sim's census's (R06.T8.h).
+/// band, the stars the sim's census in its order. With the cell cache at R06.T8.n's sized budget,
+/// set explicitly since the default is off (R06.T8.o), the same sky asked again is served from it,
+/// with the same bytes (Design note 12), and a sky asked from a little way off rebuilds none of the
+/// cells both censuses open, its stars the sim's census's (R06.T8.h).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_skys_manifest_matches_what_was_sent() {
-    let (server, _data_dir) = sky_server(SMALL_CAP_LY, 2).await;
+    let (server, _data_dir) = cached_sky_server(SMALL_CAP_LY, 2).await;
     let (mut client, universe) = opened(&server).await;
     let sent = served(&mut client, sky(&universe)).await;
     let response = &sent.response;
@@ -1185,6 +1211,9 @@ async fn a_sky_near_the_sun_returns_the_stars_texels_and_host_discs_the_sim_retu
     let response = &sent.response;
     let tables = building.join().expect("the sim's tables");
     assert_eq!(server.stats().sky_tables().builds(), 1);
+    // At the default budget, 0, the sky's cell cache is off (R06.T8.o): the census read none, as
+    // the sim's below reads none, and the server holds no cell of it.
+    assert_eq!(server.stats().sky_cells(), SkyCellCounters::default());
 
     // The same query in the sim: the illumination, the eye's cut, then the cut, the census, the
     // band and the discs.

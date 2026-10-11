@@ -158,7 +158,7 @@ An option given on the command line wins over its variable.
 | `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | `128`                                        | Cache of generated systems' stars, in MiB    |
 | `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | `128`                                        | Cache of generated planetary systems, in MiB |
 | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | `64`                                         | Cache of range briefs' star models, in MiB   |
-| `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | `1280`                                       | Cache of the sky census's cells, in MiB      |
+| `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | `0`, off                                     | Cache of the sky census's cells, in MiB      |
 | `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | `160`                                        | Cache of each galaxy's sky tables, in MiB    |
 | `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                           | Serve `sky` requests                         |
 | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          | Stop gracefully when standard input closes   |
@@ -177,6 +177,14 @@ the variable set to a false value, turns it off: the server then answers `sky` a
 as before the sky was served, and opening a universe builds no sky tables in the background. Its
 variable takes the same values as `--stop-on-stdin-close`'s, and so does the option after an equals
 sign (`--serve-sky=off`); given alone, `--serve-sky` is on.
+
+`--sky-cache` is 0 by default, which turns the sky's cell cache off: each sky's census reads no
+cache and keeps no cell. For now a sky served from the cache, asked again or after a jump, costs
+about what it costs without it, since its census still generates every star system, so the cache
+would hold up to 1,280 MiB for no saving a player would feel (rendering plan R06, R06.T8.o).
+`1280` is the size that holds a sky near the Sun and the cells a 1,000 ly jump adds, the value to
+set for a warm sky. The default returns to it once a sky asked again costs at most half of the
+first.
 
 The data directory is created with the first universe. Each universe is one directory,
 `universes/<id>/`, holding a small `universe.json` with its name, seed and generator version;

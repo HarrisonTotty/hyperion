@@ -1937,6 +1937,8 @@ caps_at_cut: &[LayerCap])` takes their count. The rule is the same: for C to E, 
     reply near the Sun came in **7.57 s wall and 95.9 CPU-s**, 3,192 stars, cut V 7.766, T2.b's
     census, against R06.T11.g's budget of 10 s and 150 CPU-s: **it passes**. It matches T2.b's
     7.16 s and 96.4 CPU-s (taken at load 39) and T11.g's 6.96 s and 94.6, within the runs' spread.
+    From R06.T8.o the cache's default is 0 (`decision-r06-t8n.md`). The figure stands, since the
+    first reply never reached the cache.
     - The eye was done at 0.55 s, the caps and plan at 1.99 s (T2.b 1.96 s), and the march at
       4.60 s. The first step's census and its band took until 7.43 s, and the reply 0.14 s more.
     - The tables were held 11.74 s and 47.4 CPU-s after the open's answer (T11.g 11.5 s and

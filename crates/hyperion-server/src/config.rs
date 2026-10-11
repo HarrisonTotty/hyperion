@@ -15,7 +15,7 @@
 //! | `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | 128 (MiB)                                    |
 //! | `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | 128 (MiB)                                    |
 //! | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | 64 (MiB)                                     |
-//! | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | 1,280 (MiB)                                  |
+//! | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | 0 (MiB), off                                 |
 //! | `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | 160 (MiB)                                    |
 //! | `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                           |
 //! | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          |
@@ -32,6 +32,14 @@
 //! R13's R13.T2, landed beside R06.T11.d and T11.g, as the owner decided on 2026-10-08 (R06.T11.d,
 //! "The default switch and the interim"). Off, the server answers `sky` as it did before
 //! R06.T11.a, `unsupported`, no job of it reaches the pool, and an open starts no sky tables.
+//!
+//! `--sky-cache` is 0 by default, which turns the sky's cell cache off: each census reads no cache
+//! and keeps no cell, R06.T8.g's path (rendering plan R06, R06.T8.o; decided 2026-10-10,
+//! `decision-r06-t8n.md`). At version 21 the cache saves nothing a player feels, since a warm
+//! census still generates every system a cold one does, and it would hold up to 1,280 MiB to do so.
+//! 1,280 MiB is R06.T8.n's sized budget, the value to set for a warm sky: one near-Sun sky and a
+//! 1,000 ly jump's new cells. The default returns to it once a repeated sky costs at most half of a
+//! cold one.
 
 use crate::scene::{CraftSource, GrantAsked, NoCraft, SceneKnowledge};
 use std::error::Error;
@@ -91,20 +99,29 @@ pub const DEFAULT_BODY_CACHE_MIB: usize = 128;
 /// 25,000 main-sequence rows at about 2.5 kB each, or 2,000–2,500 dead ones, whose model holds a
 /// full track, at 25–35 kB (P06.T38.e's measurement).
 pub const DEFAULT_BRIEF_CACHE_MIB: usize = 64;
-/// The sky's cell cache's budget when `--sky-cache` is not given, in MiB (rendering plan R06,
-/// Design note 12).
+/// The sky's cell cache's budget when `--sky-cache` is not given, in MiB: 0, which turns the cache
+/// off (rendering plan R06, R06.T8.o and Design note 12; decided 2026-10-10,
+/// `decision-r06-t8n.md`).
 ///
-/// Set by R06.T8.n's rule (decided 2026-10-08, `decision-r06-t8h-warm.md` §2.2): the larger of
-/// 64 and 1.25 times the held bytes of one near-Sun sky's entries and a 1,000 ly jump's, rounded up
-/// to a multiple of 256 MiB, at most 2,048. The sky is the one served since RM3's interim
-/// (rendering plan R13, R13.T2.b): the eye at its own cut, C, D and E within their real boundary
-/// at V 5.0 and 2,000 ly. Its entries, sampled 1 block in 20 (R06.T8.n's bench, 2026-10-10,
-/// provisional), are 705 MB after the Sun's sky on the server's galaxy and 949 MB after a jump
-/// toward the galactic centre (379 MB and 525 MB on the sim's fixture), so 1.25 × 949 MB
-/// is 1,131 MiB, and the default 1,280 MiB. A warm sky is still about as costly as a cold one,
-/// since its census generates every system it generated cold; the cache spares the bounds and
-/// keeps the reply the same bit for bit (R06's Risks, "Deviations in T8.n, as built").
-pub const DEFAULT_SKY_CACHE_MIB: usize = 1_280;
+/// At 0 each census job reads no cache, R06.T8.g's path bit for bit: no entry is built and no
+/// verdict is taken twice, and the reply is the cached census's. At version 21 a warm census still
+/// generates every system its cold census generates, which keeps its reply the cold one, so it
+/// costs 96–108% of cold (R06.T8.n's benches, 2026-10-10, provisional): less saved than the runs'
+/// spread, for up to 1,280 MiB held on a laptop whose 16 GB the CPU and the GPU share.
+///
+/// R06.T8.n's sizing stands, as the value to set for a warm sky and the budget at which R06.T17's
+/// warm gate is judged: 1,280 MiB, by the rule of `decision-r06-t8h-warm.md` §2.2, the larger of 64
+/// and 1.25 times the held bytes of one near-Sun sky's entries and a 1,000 ly jump's, rounded up to
+/// a multiple of 256 MiB, at most 2,048. The sky is the one served since RM3's interim (rendering
+/// plan R13, R13.T2.b): the eye at its own cut, C, D and E within their real boundary at V 5.0 and
+/// 2,000 ly. Its entries, sampled 1 block in 20, are 705 MB after the Sun's sky on the server's
+/// galaxy and 949 MB after a jump toward the galactic centre (379 MB and 525 MB on the sim's
+/// fixture), so 1.25 × 949 MB is 1,131 MiB, rounded up to 1,280 MiB.
+///
+/// The default returns to the sized budget, measured again, once the repeat's census
+/// (`census_near_sun_served/served_warm_5.0`) costs at most 50% of its cold by the threads' CPU
+/// time (R06's Risks, "The sky cache at version 21").
+pub const DEFAULT_SKY_CACHE_MIB: usize = 0;
 /// The sky tables' cache's budget when `--sky-tables` is not given, in MiB: two galaxies' luminosity
 /// tables, about 55 MiB each with their snapshots (rendering plan R06, R06.T11.c; decided
 /// 2026-10-03, `decision-r06-tables.md`, item B.2).
@@ -178,7 +195,8 @@ pub struct ServerArgs {
     #[arg(long, value_name = "MIB", env = ENV_BRIEF_CACHE_MB, default_value_t = DEFAULT_BRIEF_CACHE)]
     brief_cache: CacheBudget,
 
-    /// Budget of the cache of the sky census's cells, in MiB; 0 caches nothing
+    /// Budget of the cache of the sky census's cells, in MiB; 0, the default, keeps no cells, and
+    /// 1280 holds a warm sky
     #[arg(long, value_name = "MIB", env = ENV_SKY_CACHE_MB, default_value_t = DEFAULT_SKY_CACHE)]
     sky_cache: CacheBudget,
 
@@ -547,7 +565,8 @@ impl ServerConfigBuilder {
 
     /// The sky's cell cache's budget, in bytes.
     ///
-    /// Zero caches nothing: every census cell is built, censused and dropped.
+    /// Zero, the default, turns the cache off: each census reads no cache and keeps no cell
+    /// (R06.T8.o). [`DEFAULT_SKY_CACHE_MIB`] gives the budget to set for a warm sky.
     #[must_use]
     pub fn sky_cache_bytes(mut self, bytes: usize) -> Self {
         self.config.sky_cache_bytes = bytes;
@@ -711,7 +730,7 @@ mod tests {
                 128 * 1024 * 1024,
                 128 * 1024 * 1024,
                 64 * 1024 * 1024,
-                1_280 * 1024 * 1024,
+                0,
                 160 * 1024 * 1024,
                 SkyService::Served,
                 StdinStop::Ignore,
@@ -930,7 +949,7 @@ mod tests {
         assert_eq!(DEFAULT_SYSTEM_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BODY_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BRIEF_CACHE.to_string(), "64");
-        assert_eq!(DEFAULT_SKY_CACHE.to_string(), "1280");
+        assert_eq!(DEFAULT_SKY_CACHE.to_string(), "0");
         assert_eq!(DEFAULT_SKY_TABLES.to_string(), "160");
     }
 

@@ -12,6 +12,12 @@
 //! another (plan 04, design note 23), under its own budget, `HYPERION_SKY_CACHE_MB`. It is not the
 //! range queries' [`SharedCellCache`](super::SharedCellCache), which holds whole cells.
 //!
+//! The budget is 0 by default, which turns the cache off ([`SharedSkyCellCache::is_off`]): each
+//! census job then reads the sim's [`NoSkyCellCache`](hyperion_sim::sky::census::NoSkyCellCache),
+//! R06.T8.g's path, so that no entry is built
+//! and no verdict is taken twice (R06.T8.o; decided 2026-10-10, `decision-r06-t8n.md`). At version
+//! 21 a warm census costs about what a cold one does.
+//!
 //! A cell is kept by merging it into its block when the block was built for the same observer and
 //! cut bit for bit, or by replacing the block otherwise ([`SkyBlock::with_cell`]). The merged block
 //! is built outside the lock and stored only if the block it was built from is still the one held
@@ -104,15 +110,17 @@ pub(crate) struct SharedSkyCellCache {
     rebuilt_key: AtomicU64,
     rebuilt_window: AtomicU64,
     rebuilt_parameters: AtomicU64,
+    off: bool,
 }
 
 impl SharedSkyCellCache {
     /// An empty cache that holds at most `budget_bytes` of charged blocks.
     ///
-    /// A budget of zero caches nothing: every cell is built, censused and dropped.
+    /// A budget of zero turns it off ([`SharedSkyCellCache::is_off`]).
     #[must_use]
     pub(crate) fn new(budget_bytes: usize) -> Self {
         Self {
+            off: budget_bytes == 0,
             blocks: SharedByteLru::new(budget_bytes),
             served: AtomicU64::new(0),
             missed: AtomicU64::new(0),
@@ -120,6 +128,19 @@ impl SharedSkyCellCache {
             rebuilt_window: AtomicU64::new(0),
             rebuilt_parameters: AtomicU64::new(0),
         }
+    }
+
+    /// Whether the budget is zero, which turns the cache off.
+    ///
+    /// Each census job's context then takes the sim's
+    /// [`NoSkyCellCache`](hyperion_sim::sky::census::NoSkyCellCache) rather than
+    /// [`SharedSkyCellCache::handle`], R06.T8.g's path bit for bit, building no entry and taking
+    /// no verdict twice (R06.T8.o). The handle at a budget of zero would build every cell's entry
+    /// for the cache to refuse, so it keeps no entries either
+    /// ([`SkyCellCache::keeps_entries`]), for any other caller.
+    #[must_use]
+    pub(crate) fn is_off(&self) -> bool {
+        self.off
     }
 
     /// The cache as the census over the galaxy `galaxy` names reads it: the sim's
@@ -174,8 +195,10 @@ impl SkyCellCacheHandle<'_> {
 }
 
 impl SkyCellCache for SkyCellCacheHandle<'_> {
+    /// Whether the cache is on ([`SharedSkyCellCache::is_off`]): off, a census through the handle
+    /// takes R06.T8.g's path, as through `NoSkyCellCache`.
     fn keeps_entries(&self) -> bool {
-        true
+        !self.cache.is_off()
     }
 
     /// The block `key` of this handle's galaxy, marked as the most recently used.
@@ -361,10 +384,13 @@ mod tests {
         assert_eq!(cache.counters().cache().entries(), 1);
     }
 
-    /// With no budget nothing is kept.
+    /// With no budget the cache is off, so that the census reads none (R06.T8.o), and its handle,
+    /// were a census to read it, keeps nothing.
     #[test]
-    fn a_cache_of_no_bytes_keeps_no_block() {
+    fn a_cache_of_no_bytes_is_off_and_keeps_no_block() {
         let cache = SharedSkyCellCache::new(0);
+        assert!(cache.is_off());
+        assert!(!SharedSkyCellCache::new(1).is_off());
         let handle = cache.handle(key());
         let [a, ..] = row();
         handle.keep(galaxy(), a, &params(7.95), &held(galaxy(), a));

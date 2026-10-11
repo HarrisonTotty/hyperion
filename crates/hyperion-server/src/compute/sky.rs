@@ -47,7 +47,10 @@
 //! shared between threads, so each job builds its own [`SkyContext`] over the [`SkyTables`] they
 //! all read, and the census's jobs over the server's [`SharedSkyCellCache`], which every job and
 //! request shares (R06.T11.b; Design note 12): a census cancelled or superseded keeps the cells it
-//! built there, so that a moving ship's outer shells still converge through the cache.
+//! built there. At version 21 that does not make a moving ship's outer shells converge through the
+//! cache, since a warm census still generates every system a cold one does, so the cache is off by
+//! default (R06.T8.o; decided 2026-10-10, `decision-r06-t8n.md`). Off, at a budget of 0, each
+//! census job reads [`NoSkyCellCache`], R06.T8.g's path, and keeps no cell.
 //!
 //! [`SkyCaps`] says how far the census looks: each layer's derived cap (Design note 9), or radii
 //! forced on the layers, which keep a test's census small, and, for a test alone, nearer shell
@@ -1264,9 +1267,10 @@ pub(crate) struct CensusInputs {
 }
 
 /// One census job: `work`'s cells, in order, each with [`census_cell_with_cost`], in a context of
-/// its own over the shared cell cache, until `slice` is spent, and at least one cell. The cells it
-/// had no time for come back, walked and split in two. `None` if the job stopped early because its
-/// request's token was cancelled or its census `abandoned` it.
+/// its own over the shared cell cache, or over [`NoSkyCellCache`] when that cache is off
+/// ([`SharedSkyCellCache::is_off`]; R06.T8.o), until `slice` is spent, and at least one cell. The
+/// cells it had no time for come back, walked and split in two. `None` if the job stopped early
+/// because its request's token was cancelled or its census `abandoned` it.
 fn census_job(
     inputs: CensusInputs,
     mut work: CellWork,
@@ -1283,7 +1287,12 @@ fn census_job(
             query,
         } = inputs;
         let handle = cells.handle(key);
-        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, &handle);
+        let cache: &dyn SkyCellCache = if cells.is_off() {
+            &NoSkyCellCache
+        } else {
+            &handle
+        };
+        let mut ctx = tables.context(CENSUS_NOISE_SLOTS, cache);
         let (mut stars, mut tallies, mut cost) = (Vec::new(), None, CensusCost::default());
         let layer = work.layer;
         loop {
@@ -1582,6 +1591,7 @@ mod tests {
     use tokio::time::timeout;
 
     use super::*;
+    use crate::compute::SkyCellCounters;
     use crate::limits::INTERACTIVE_QUEUE_CAPACITY;
     use crate::testing::WAIT;
 
@@ -1792,6 +1802,74 @@ mod tests {
             (one_pass.listed(), one_pass.overflow(), one_pass.tallies())
         );
         assert_eq!(bits(last), bits(&one_pass));
+        pool.shutdown().await.unwrap();
+    }
+
+    /// At a budget of nought, the server's default since R06.T8.o, the census's jobs read no
+    /// cache, R06.T8.g's path: no cell is looked up, served, missed or rebuilt, and no block is
+    /// kept. Its stars and tallies are those of the same sky's census at R06.T8.n's sized budget,
+    /// 1,280 MiB, bit for bit, both when it is asked first and when it is asked again, the second
+    /// time served from the sized cache's entries (decided 2026-10-10, `decision-r06-t8n.md`).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn at_a_budget_of_nought_the_census_reads_no_cache_and_is_the_cached_census() {
+        let galaxy = Arc::new(Galaxy::new(Seed::new(0x4d2)));
+        let caps = SkyCaps::forced(LightYears::new(30.0)).unwrap();
+        let tables = Arc::new(SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy));
+        let query = caps.on(SkyQuery::builder(sun(), Magnitudes::new(9.0))
+            .build()
+            .unwrap());
+        let pool = pool(3);
+        let token = CancelToken::new();
+        let (query, plan) = timeout(
+            WAIT,
+            plan(
+                &pool,
+                &galaxy,
+                &tables,
+                Arc::new(query),
+                &SHELL_EDGES_LY,
+                &token,
+            ),
+        )
+        .await
+        .expect("timed out planning")
+        .unwrap();
+        let plan = Arc::new(plan);
+        let inputs = |budget_bytes| CensusInputs {
+            galaxy: Arc::clone(&galaxy),
+            key: GalaxyKey::new(0x4d2, GENERATOR_VERSION),
+            tables: Arc::clone(&tables),
+            cells: Arc::new(SharedSkyCellCache::new(budget_bytes)),
+            query: Arc::clone(&query),
+        };
+        let (off, sized) = (inputs(0), inputs(1_280 << 20));
+        assert!(off.cells.is_off() && !sized.cells.is_off());
+        let steps = delivery_steps(&plan, C_DEFERRED_BEYOND_LY);
+
+        for asked in ["first", "again"] {
+            let without = steps_censused(&pool, &off, &plan, &steps, CENSUS_JOB_SLICE).await;
+            let with = steps_censused(&pool, &sized, &plan, &steps, CENSUS_JOB_SLICE).await;
+            assert_eq!(without.len(), steps.len(), "asked {asked}");
+            for (k, ((_, without), (_, with))) in without.iter().zip(&with).enumerate() {
+                assert_eq!(without, with, "asked {asked}, step {k}");
+                assert_eq!(bits(without), bits(with), "asked {asked}, step {k}");
+            }
+        }
+        assert_eq!(
+            off.cells.counters(),
+            SkyCellCounters::default(),
+            "no cell looked up, served, missed or rebuilt, and no block kept"
+        );
+        let counters = sized.cells.counters();
+        assert!(
+            counters.missed() > 0 && counters.cache().entries() > 0,
+            "the sized cache built cells and kept them: {counters:?}"
+        );
+        assert_eq!(
+            (counters.served(), counters.rebuilt()),
+            (counters.missed(), 0),
+            "the sized cache built every cell first and served it again: {counters:?}"
+        );
         pool.shutdown().await.unwrap();
     }
 
