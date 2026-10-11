@@ -31,12 +31,15 @@ const COLUMN = hydrostaticColumn({
   referenceRadiusM: 3.3895e6,
 });
 
-/** Mars dust in the modes' volume-to-area radius: Wolff et al. 2009's surface-equivalent 1.5 µm × (2 ÷ 3)^½. */
+/**
+ * Mars dust in the modes' volume-to-area radius: Wolff et al. 2009's surface-equivalent 1.5 µm at
+ * equal projected area, × 0.71^(3/2) (science-r08-mmf.md §3).
+ */
 const MARS_DUST = {
   kind: "distribution",
   mode: {
     material: "mars_dust",
-    sizes: { kind: "gamma", effectiveRadiusUm: 1.2247, effectiveVariance: 0.3 },
+    sizes: { kind: "gamma", effectiveRadiusUm: 0.8974, effectiveVariance: 0.3 },
   },
 } as const;
 
@@ -238,7 +241,7 @@ describe("every committed phase file's tables, as the tracer reads them", () => 
   // A mode near each file's smallest sizes and one near its largest, where the files' angles miss
   // the forward peak; each within the table's reach at 440 nm.
   const files = [
-    ["mars-dust.json", "mars_dust", 1.2247, 30],
+    ["mars-dust.json", "mars_dust", 0.8974, 30],
     ["enstatite-glass.json", "MgSiO3", 1, 20],
     ["forsterite-amorphous.json", "Mg2SiO4", 1, 20],
     ["iron.json", "Fe", 0.5, 3],

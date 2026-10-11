@@ -426,23 +426,29 @@ export const MARS_FIT_COLUMN: AtmosphereColumn = hydrostaticColumn({
 
 /**
  * Mars's dust for the fit: R08.T5.b's `mars_dust` index file in a gamma distribution of r_eff
- * 1.2247 µm and v_eff 0.3, R08.T5.c's Mars dust mode. That is the r_eff of 1.5 µm
+ * 0.8974 µm and v_eff 0.3, R08.T5.c's Mars dust mode. That is the r_eff of 1.5 µm
  * `science-r08-nonspherical.md` §2.1 takes for Mars, read as the surface-equivalent radius of
  * Wolff et al. 2009's D/L = 1 cylinders (JGR 114, E00D04, ¶[26] and ¶[32]; gamma, v_eff 0.3,
- * ¶[27]) and converted to the modes' volume-to-area radius r = 3V ÷ 4A, × (2 ÷ 3)^½
- * (`science-r08-mmf.md` §2.3, ruled 2026-10-10).
+ * ¶[27]) and converted at equal projected area to the modes' volume-to-area radius r = 3V ÷ 4A,
+ * × 0.71^(3/2) (`science-r08-mmf.md` §3, ruled 2026-10-10).
  *
  * @remarks
+ * The size is a projected-area size because Mars's dust sizes were fixed by the sky near the Sun,
+ * whose forward lobe scales as 1 ÷ r_A: the hexahedra at r 0.8974 µm have r_A 1.5 µm, Wolff's,
+ * where §2.3's superseded equal-V/A conversion (1.2247 µm) gave r_A 2.05 µm and a lobe 1.37
+ * times narrower than at r_A 1.5 µm (half-widths 2.78° and 1.84° against 3.82° and 2.53° at 645
+ * and 434 nm).
+ *
  * Lemmon et al. 2015 (Icarus 251, 96–111, §4.2) quote the earlier missions' 1.5–1.65 µm as
  * volume-equivalent radii, with v_eff 0.2–0.5; Wolff's cylinders at a surface-equivalent 1.5 µm
- * are 1.40 µm in that measure.
+ * are 1.40 µm in that measure, and the hexahedra at r 0.8974 µm are r_V = r ÷ 0.71 = 1.264 µm.
  *
  * The file's indices are Wolff et al. 2009's CRISM retrievals from 440 nm; below that they are
  * interpolated towards the compilation's 321 nm row (`science-r08-nonspherical.md` §3.2).
  */
 export const MARS_DUST_MODE: AerosolMode = {
   material: "mars_dust",
-  sizes: { kind: "gamma", effectiveRadiusUm: 1.2247, effectiveVariance: 0.3 },
+  sizes: { kind: "gamma", effectiveRadiusUm: 0.8974, effectiveVariance: 0.3 },
 };
 
 /**
@@ -450,15 +456,16 @@ export const MARS_DUST_MODE: AerosolMode = {
  *
  * @remarks
  * For {@link MARS_DUST_MODE} that is τ(780) ≈ 0.51 on the hexahedra, whose table ends at 780 nm,
- * and τ(880) ≈ 0.52–0.54: 0.52 on the hexahedra extrapolated past 780 nm, 0.54 on its equal-V/A
- * spheres (Mie of the source's 800 and 900 nm rows), which rise faster to the red (6.1% against
- * 2.5% at 780 nm). Lemmon et al. 2015 (Icarus 251, 96–111) measured τ at 440 nm 3.2% (Spirit) and
- * 2.5% (Opportunity) below 880 nm (their ε, 0.0330 ± 0.0004 and 0.0256 ± 0.0007, §3.2), with the
- * 440 nm filter's red leak; the earlier missions' 1.5–1.65 µm dust would give 7–11% (§4.2). The
- * hexahedra put 440 nm 3.7% below 780 nm (about 4.7% below 880 nm, extrapolated), the spheres
- * 10.6% below 880 nm. It lies inside the range the rovers' Pancams recorded at 880 nm outside dust
- * storms over five Mars years: below about 0.3 (Spirit) and 0.5 (Opportunity) in the clear season,
- * and about 1 in the dusty season's background (their §4.1).
+ * and τ(880) ≈ 0.52–0.54: 0.52 on the hexahedra extrapolated past 780 nm (linearly in λ from their
+ * 650 and 780 nm values), 0.54 on its equal-V/A spheres (Mie of the source's 800 and 900 nm rows),
+ * which rise faster to the red (6.6% against 2.7% at 780 nm). Lemmon et al. 2015 (Icarus 251,
+ * 96–111) measured τ at 440 nm 3.2% (Spirit) and 2.5% (Opportunity) below 880 nm (their ε,
+ * 0.0330 ± 0.0004 and 0.0256 ± 0.0007, §3.2), with the 440 nm filter's red leak; the earlier
+ * missions' 1.5–1.65 µm dust would give 7–11% (§4.2). The hexahedra put 440 nm 4.2% below 780 nm
+ * (about 5.1% below 880 nm, extrapolated), the spheres 11.4% below 880 nm. It lies inside the
+ * range the rovers' Pancams recorded at 880 nm outside dust storms over five Mars years: below
+ * about 0.3 (Spirit) and 0.5 (Opportunity) in the clear season, and about 1 in the dusty season's
+ * background (their §4.1).
  */
 export const MARS_DUST_OPTICAL_DEPTH_550 = 0.5;
 

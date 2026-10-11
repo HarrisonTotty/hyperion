@@ -217,15 +217,17 @@ describe("Mars's dusty air", () => {
   });
 
   // The blue aureole is the dust's forward diffraction lobe, narrower and higher in blue. In the
-  // fit's single scattering, on the hexahedra at equal V/A (r_A 2.05 µm; R08.T5.c), the blue and
-  // red lobes cross between 5° and 10° from the Sun, and with the dust's absorption in blue the sky
-  // is bluer than the Sun's light only within about 4° of it. Mars's own glow is wider, bluer to
-  // 7–12° in MER's and MSL's sunsets (R08's Risks, T4.a).
-  it("colours the sky 3° from a setting Sun bluer than the Sun's light", () => {
+  // fit's single scattering, on the hexahedra at R08.T5.c's equal-projected-area size (r_A 1.5 µm;
+  // science-r08-mmf.md §3), the sky above a Sun 5° up is bluer than the Sun's light to about 5.6°
+  // from it (blue over red 1.25 at 3° and 0.92 at 5°, the Sun's 0.86). At the superseded equal-V/A
+  // size (r_A 2.05 µm) it was so only within about 4° (0.77 at 5°), which this test fails. Mars's
+  // own glow is wider, bluer to 7–12° in MER's and MSL's sunsets, where the forward lobe's higher
+  // orders, R08.T7's, carry the rest (R08's Risks, T4.a).
+  it("colours the sky 5° from a setting Sun bluer than the Sun's light", () => {
     const view: CaseView = {
       kind: "sky",
       sunZenithDeg: 85,
-      elevationDeg: 8,
+      elevationDeg: 10,
       azimuthFromSunDeg: 0,
     };
     expect(skyBlueToRed(view)).toBeGreaterThan(sunBlueToRed);
@@ -233,7 +235,7 @@ describe("Mars's dusty air", () => {
 
   it("scatters the dust's light at 150° within 0.5–0.85 of 90°'s at 650 nm (MSL's sky, 0.71)", () => {
     // Chen-Chen, Pérez-Hoyos and Sánchez-Lavega 2019, Icarus 330, 16, as R08.T5.c's Mars dust test
-    // takes it. The hexahedra's table gives about 0.63; a Henyey–Greenstein phase of its g, 0.71,
+    // takes it. The hexahedra's table gives about 0.60; a Henyey–Greenstein phase of its g, 0.71,
     // gives 0.41.
     const dust = mars.terms.find((term) => term.name === "dust");
     if (dust === undefined) {

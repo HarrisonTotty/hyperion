@@ -237,14 +237,42 @@ describe("MGS-1 M against Martikainen et al. (science-r08-nonspherical.md §2.1)
   });
 });
 
+/** The step and reach of the angles the forward lobe's half-width is read at, degrees. */
+const LOBE_STEP_DEG = 0.04;
+const LOBE_MAX_DEG = 8;
+/** The cosines of those angles, from 0° to {@link LOBE_MAX_DEG}. */
+const LOBE_MU = Float64Array.from(
+  { length: Math.round(LOBE_MAX_DEG / LOBE_STEP_DEG) + 1 },
+  (_, i) => cosine(LOBE_STEP_DEG * i),
+);
+
+/**
+ * The half-width at half maximum of a₁ at {@link LOBE_MU}, degrees, linear between the angles: the
+ * resolved lobe's, since a phase file's unresolved forward peak is a delta held apart from a₁.
+ */
+function lobeHalfWidthDeg(a1: Float64Array): number {
+  const half = (a1[0] ?? Number.NaN) / 2;
+  const i = a1.findIndex((v) => v <= half);
+  const before = a1[i - 1] ?? Number.NaN;
+  const after = a1[i] ?? Number.NaN;
+  if (!(i >= 1 && before > after)) {
+    throw new Error(`a₁ does not fall to half its forward value within ${LOBE_MAX_DEG}°`);
+  }
+  return LOBE_STEP_DEG * (i - 1 + (before - half) / (before - after));
+}
+
+/** A gamma distribution at Wolff et al. 2009's width for Mars dust, v_eff 0.3 (their ¶[27]). */
+function wolffGamma(effectiveRadiusUm: number) {
+  return { kind: "gamma", effectiveRadiusUm, effectiveVariance: 0.3 } as const;
+}
+
 describe("Mars dust (science-r08-nonspherical.md §2.1 (iii))", () => {
   // The test's r_eff 1.5 µm is in Wolff et al. 2009's convention, the surface-equivalent radius of
-  // D/L = 1 cylinders (their ¶[26], ¶[32]); in the modes' volume-to-area radius it is
-  // 1.5 × (2 ÷ 3)^½ = 1.2247 µm, the same v_eff (science-r08-mmf.md §2.3).
-  const mode = {
-    material: "mars_dust",
-    sizes: { kind: "gamma", effectiveRadiusUm: 1.2247, effectiveVariance: 0.3 },
-  } as const;
+  // D/L = 1 cylinders (their ¶[26], ¶[32]). Mars's dust sizes were fixed by the sky near the Sun,
+  // whose forward lobe scales as 1 ÷ r_A, so the size converts at equal projected area: in the
+  // modes' volume-to-area radius it is 1.5 × 0.71^(3/2) = 0.8974 µm, the same v_eff
+  // (science-r08-mmf.md §3, superseding §2.3's equal-V/A 1.2247 µm).
+  const mode = { material: "mars_dust", sizes: wolffGamma(0.8974) } as const;
   const optics = once(() =>
     nonSphericalModeOptics(mode, 650, Float64Array.from([90, 150], cosine)),
   );
@@ -266,6 +294,45 @@ describe("Mars dust (science-r08-nonspherical.md §2.1 (iii))", () => {
 
   it("gives ω within Wolff et al. 2009's 0.975 ± 0.015", () => {
     expect(Math.abs(optics().singleScatteringAlbedo - 0.975)).toBeLessThan(0.015);
+  });
+
+  // The forward lobe against Mie spheres of the same distribution in r_A (gamma r_eff 1.5 µm,
+  // v_eff 0.3, on the file's index): about 4.06° and 2.72°, as science-r08-mmf.md §3.2's proxy
+  // gives (4.04° and 2.72°). The hexahedra give 3.82° and 2.53° (6% and 7% narrower); at §2.3's
+  // equal-V/A 1.2247 µm they gave 2.78° and 1.84°, 32% narrower, which the bound refuses.
+  const lobeWavelengthsNm = [645, 434] as const;
+  const sphereLobesDeg = once(() =>
+    lobeWavelengthsNm.map((nm) =>
+      lobeHalfWidthDeg(
+        sphereModeOptics(wolffGamma(1.5), refractiveIndex("mars_dust", nm).index, nm, LOBE_MU)
+          .matrix.a1,
+      ),
+    ),
+  );
+  /** The hexahedra's lobe at r_eff over the spheres', minus 1, at each of the wavelengths. */
+  const lobeMisses = (effectiveRadiusUm: number): number[] =>
+    lobeWavelengthsNm.map((nm, i) => {
+      const { matrix } = nonSphericalModeOptics(
+        { ...mode, sizes: wolffGamma(effectiveRadiusUm) },
+        nm,
+        LOBE_MU,
+      );
+      if (matrix === undefined) {
+        throw new Error(`Mars dust at r_eff ${effectiveRadiusUm} µm has no matrix at ${nm} nm`);
+      }
+      return lobeHalfWidthDeg(matrix.a1) / (sphereLobesDeg()[i] ?? Number.NaN) - 1;
+    });
+
+  it("puts its forward lobe's half-width within 15% of equal-area spheres' at 645 and 434 nm", () => {
+    for (const miss of lobeMisses(0.8974)) {
+      expect(Math.abs(miss)).toBeLessThan(0.15);
+    }
+  });
+
+  it("is a bound that the equal-V/A size, 1.2247 µm, fails at both wavelengths", () => {
+    for (const miss of lobeMisses(1.2247)) {
+      expect(Math.abs(miss)).toBeGreaterThanOrEqual(0.15);
+    }
   });
 });
 

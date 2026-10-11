@@ -2419,8 +2419,12 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
     A is the orientation-averaged projected area, S ÷ 4 for a convex particle. A mode's r_eff and
     v_eff are Hansen and Travis's cross-section-weighted moments of r, so r_eff = (3 ÷ 4)⟨V⟩ ÷ ⟨A⟩
     for every shape class: a sphere's radius, and Yang et al. 2013's D_eff ÷ 2 for ice. A size cited
-    in another convention is converted with the source's own particle shape, r = Ψ^(3/2) r_S = Ψ r_V
-    at sphericity Ψ, with v_eff unchanged (science-r08-mmf.md §2).
+    from visible or near-infrared scattering (the sky near a sun, a phase function, an extinction
+    spectrum) is converted at equal projected area, which fixes the forward lobe and the
+    geometric-optics extinction: r = Ψ^(3/2) r_A with Ψ the mode's sphericity (0.71 for the
+    hexahedra), where r_A = r_S for a surface-equivalent size and r_V ÷ √Ψ_source for a
+    volume-equivalent one. v_eff is unchanged. Only a size fixed by mass or by absorption alone
+    converts at equal V/A (science-r08-mmf.md §3).
   - _Basis and label._ `ModeOptics` gains `phaseBasis`:
     - `model`: Mie for spheres, MMF inside Δφ < 1 at any D_f the inventory allows (1 < D_f ≤ 2.5;
       `decision-r08-aerosol-labels.md` item 1), a kernel inside its ranges, Yang et al. for water
@@ -2456,7 +2460,7 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
     only (Design note 6).
   - _A follow-up, once both R08.T4.a and T5.c have landed_ ("main", 2026-10-10): T4.a fitted the
     channels with Mars dust under T5.b's provisional Henyey–Greenstein phase, so `channels.ts`'s
-    `marsFitAir` moves to the hexahedra table (at r_eff 1.2247 µm, science-r08-mmf.md §2.3) and
+    `marsFitAir` moves to the hexahedra table (at r_eff 0.8974 µm, science-r08-mmf.md §3) and
     `channels.json` is blessed again before R08.T6.d, through T4.a's bless step (`test/bless.ts`,
     `spectralColour.ts`). The triple and residuals before and after are recorded in Risks. It is
     its own small commit, not T5.c's.
@@ -2483,12 +2487,16 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
 
       spheres of its distribution give 0.081, 0.041, 0.101 and 0.304, and fail;
 
-    - Mars dust (the `mars_dust` file; gamma r_eff 1.2247 µm, v_eff 0.3, which is a
-      surface-equivalent r_eff of 1.5 µm for Wolff et al. 2009's D/L = 1 cylinders, × (2 ÷ 3)^½) at
-      650 nm:
+    - Mars dust (the `mars_dust` file; gamma r_eff 0.8974 µm, v_eff 0.3, which is Wolff et al.
+      2009's surface-equivalent r_eff of 1.5 µm at equal projected area, × 0.71^(3/2);
+      science-r08-mmf.md §3) at 650 nm:
       - g within 0.673 ± 0.081, and a₁(150°) ÷ a₁(90°) within 0.5–0.85 (Chen-Chen, Pérez-Hoyos
         and Sánchez-Lavega 2019, Icarus 330, 16: MSL's sky, 0.71);
       - ω within 0.975 ± 0.015 (Wolff et al. 2009's, as Chen-Chen et al. take it);
+      - its forward lobe: the resolved a₁'s half-width at half maximum (without `forwardPeak`) at
+        645 and 434 nm within 15% of Mie spheres of the same distribution in r_A (gamma r_eff
+        1.5 µm, v_eff 0.3, on the file's index, by T5.b's Mie; the ruling's proxy gives 4.04° and
+        2.72°). At r_eff 1.2247 µm it fails, about 27% narrow (32% as built: T5.c's record);
     - enstatite at 520 nm (Frattin et al. 2019, MNRAS 484, 2198; ruled 2026-10-10,
       science-r08-nonspherical.md §7):
       - the particle takes the sample's own composition, Mg₀.₈₅Fe₀.₀₈Si₀.₉₉O₃ (its §4.1.2), as
@@ -4955,7 +4963,18 @@ generator, and the reference's sampling needs no domain tag.
       90°, with b₂ = +P₄₃. Spheres of the measured distribution (r = r_A, by Mie) give 0.065,
       0.035, 0.078 and 0.216, and fail by 40% or more at 90°, 120° and 170° (21% at 150°): the
       ruling's 0.081, 0.041, 0.101 and 0.304 came from a log-normal stand-in for the distribution.
-    - Mars dust at 650 nm, r_eff 1.2247 µm (ruled): g 0.707, ω 0.967, a₁(150°) ÷ a₁(90°) 0.633.
+    - Mars dust at 650 nm, r_eff 0.8974 µm (science-r08-mmf.md §3, at equal projected area;
+      2026-10-10, superseding §2.3's 1.2247 µm): g 0.709, ω 0.976, a₁(150°) ÷ a₁(90°) 0.596 (at
+      1.2247 µm: 0.707, 0.967, 0.633). Q̄_ext at 550 nm, ⟨C_ext⟩ ÷ ⟨A⟩, is 2.191 (2.145), so the
+      dust mass per unit τ(550), (4 ÷ 3) ρ r_eff ÷ Q̄_ext, is 1.37 against 1.90 g m⁻² at ρ
+      2,500 kg m⁻³ (Madeleine et al. 2011, JGR 116, E11010, eq. 1), 28% less; the relation is
+      unchanged. The forward lobe's half-width at half
+      maximum is 3.82° at 645 nm and 2.53° at 434 nm, against 4.06° and 2.72° for Mie spheres of
+      the distribution in r_A (6% and 7% narrower, within the test's 15%). At 1.2247 µm it was
+      2.78° and 1.84°, 32% narrower: the ruling's 27% is the r_A ratio alone, and the hexahedra at
+      equal r_A run the other 6–7% narrow. `mars-dust.json` is unchanged: it holds every size node
+      of the kernel (x 0.03–11,811), not a mode, so the new size needed no regeneration and no
+      second fetch of the archive.
     - Enstatite at 520 nm, on the ruled inputs (science-r08-nonspherical.md §7): the MIE section of
       `size_enstatite.txt` read as volume-equivalent radii, and the sample's iron-matched index
       1.594 + 4.5 × 10⁻⁴i.
@@ -6067,17 +6086,50 @@ generator, and the reference's sampling needs no domain tag.
     0.0024–0.0035 under the other eleven stars, against 0.0040–0.0059 over all twelve at
     680/550/440, and does not bind. A test holds the table's a₁(150°) ÷ a₁(90°) at 650 nm, 0.63,
     to MSL's sky (0.5–0.85), which a Henyey–Greenstein phase fails (0.41).
-    - _Found, for the owner's ruling through "main":_ in the fit's single scattering, on the
-      hexahedra at equal V/A (r_A 2.05 µm), the sky is bluer than the Sun's light only within
-      about 4° of a setting Sun (1.04 blue over red at 3°, 0.77 at 5°, the Sun's 0.86), so the
-      blue-sunset test looks 3° from it. Mars's glow is wider: blue over red stays above 1 to
-      7–12° in Pancam's sol 489 (PIA07997) and Mastcam's sol 956 (PIA19400) sunsets (gamma-encoded
-      images, sampled by the science check). The lobe is about 1.46 times narrower than the one
-      Wolff et al. 2009 fit to Tomasko et al. 1999 (r_eff 1.4 µm surface-equivalent, Fig. 3, which
-      is r_A for a convex particle); matching it on the hexahedra would need r_VA ≈ 0.84 µm.
-      `science-r08-mmf.md` §2.3 chose equal V/A for the mass–extinction relation and did not weigh
-      the forward lobe. Multiple scattering at the low sun's slant dust depth (about 4.5) widens
-      the glow too, and is the bakes', not this fit's.
+    - _Found, for the owner's ruling through "main"_ (ruled, next bullet): in the fit's single
+      scattering, on the hexahedra at equal V/A (r_A 2.05 µm), the sky is bluer than the Sun's
+      light only within about 4° of a setting Sun (1.04 blue over red at 3°, 0.77 at 5°, the
+      Sun's 0.86), so the blue-sunset test looked 3° from it. Mars's glow is wider: blue over red
+      stays above 1 to 7–12° in Pancam's sol 489 (PIA07997) and Mastcam's sol 956 (PIA19400)
+      sunsets (gamma-encoded images, sampled by the science check). The lobe is about 1.46 times
+      narrower than the one Wolff et al. 2009 fit to Tomasko et al. 1999 (r_eff 1.4 µm
+      surface-equivalent, Fig. 3, which is r_A for a convex particle); matching it on the hexahedra
+      would need r_VA ≈ 0.84 µm. `science-r08-mmf.md` §2.3 chose equal V/A for the mass–extinction
+      relation and did not weigh the forward lobe. Multiple scattering at the low sun's slant dust
+      depth (about 4.5) widens the glow too, and is the bakes', not this fit's.
+    - _Ruled_ (science-r08-mmf.md §3, 2026-10-10). The lobe was narrow for two reasons.
+      - §2.3's equal-V/A conversion gave the hexahedra r_A 2.05 µm against Wolff's 1.5 µm, and
+        Mars's canonical sizes are projected-area sizes, fixed by the sky near the Sun. The mode is
+        now r_eff 0.8974 µm, at equal projected area. Dust mass per τ(550) falls 27% (28% on the
+        table's Q̄_ext, T5.c's as-built record), and the relation is unchanged.
+      - R08 draws only the first order of the forward lobe. At a 5° sun (slant τ ≈ 4.5) the higher
+        orders carry an estimated 47–81% of the light 3–12° from the Sun, and Hillaire's isotropic
+        term spreads them over the sky. R08.T7 adds them, and R08.T13 measures the rest against the
+        tracer.
+      - Until then, a low sun's blue glow on Mars ends at about 5.5° (5.6° in the fit's single
+        scattering, below) rather than the 7–12° the rovers' sunsets show. It is recorded, not
+        labelled, as a resolution-class limit of the passes (`signoff-2.md` item 5's principle).
+
+    _Re-blessed at the equal-projected-area size_ (2026-10-10, science-r08-mmf.md §3; it supersedes
+    the size and figures of the paragraph above): `MARS_DUST_MODE` is gamma r_eff 0.8974 µm, v_eff
+    0.3, on the same table, which holds every size node and was not regenerated. τ(550) 0.5 is
+    still τ(780) ≈ 0.51 and τ(880) ≈ 0.52 on the hexahedra (extrapolated linearly from 650 and
+    780 nm) and 0.54 on equal-V/A spheres; the hexahedra put 440 nm 4.2% below 780 nm and about
+    5.1% below 880 nm (3.7% and 4.7% before), the spheres 11.4% below 880 nm (10.6%), against
+    Lemmon et al.'s measured 2.5–3.2%.
+    - Re-blessed with `HYPERION_BLESS=1`: the triple stays (645, 544, 433.625) nm, so it did not
+      move within the fit's valley. The objective stays 0.007693 (Earth's direct beam 5° up under
+      the 2,300 K star), 680/550/440's 0.014905, the start's 0.015377 and Earth at the plan's
+      three suns 0.006848, and `channels.json` is byte-identical.
+    - Mars's worst at the triple moves from 0.0037 (the 2,300 K star; the sky 10° up opposite the
+      Sun at 85°) to 0.0030 (the 4,750 K giant, the same view), 0.0018–0.0029 under the other
+      eleven stars (0.0024–0.0035 before). At 680/550/440 it is 0.0032–0.0056 over all twelve
+      (0.0040–0.0059). It does not bind.
+    - In the fit's single scattering the sky above a Sun 5° up is now bluer than the Sun's light
+      to about 5.6° from it (1.25 blue over red at 3°, 0.92 at 5°, 0.87 at 5.5°, the Sun's 0.86),
+      so the blue-sunset test looks 5° from the Sun, where the equal-V/A size gave 0.77 and fails.
+    - The dust's a₁(150°) ÷ a₁(90°) at 650 nm is 0.60 (0.63), still within MSL's 0.5–0.85;
+      Henyey–Greenstein at its g, 0.71, gives 0.41.
 
   - _What the objective models._ The direct beam's transmittance and the singly scattered sky seen
     from the ground, by the same quadrature in both colours; no ground reflection, no multiple
