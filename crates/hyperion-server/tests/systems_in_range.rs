@@ -345,12 +345,14 @@ fn by_id(answer: &SystemsInRange) -> BTreeMap<&str, &SystemRecord> {
 /// server's first universe and its client's second request, so its universe is created first and
 /// its query asked later. Then come the properties whose counts start from nothing: the refusals,
 /// which build no galaxy and generate no cell; the census that admits nothing, which generates no
-/// cell; the cache's, whose first query's cells are the first kept; and the briefs' cold and warm,
-/// whose first briefs are the first built. The rest read no count.
+/// cell; and the cache's, whose first query's cells are the first kept. The rest read no count.
+///
+/// [`briefs_are_the_same_cold_and_warm`] keeps a server of its own: its cold answer is cold in
+/// every cache, the cells' as well as the briefs', which no property after the cache's could be.
 #[tokio::test]
 async fn the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use() {
     // The reference is procedural generation of seconds, so it is built on a thread of its own,
-    // beside the server's build, and joined once the four properties that read none have run: by
+    // beside the server's build, and joined once the three properties that read none have run: by
     // then it is built, or nearly, and nothing waits on the runtime while the join does.
     let reference = std::thread::spawn(|| {
         galaxy();
@@ -362,7 +364,6 @@ async fn the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use() {
     each_field_it_cannot_use_is_a_bad_request_naming_that_field(&server).await;
     a_query_over_the_limit_returns_whole_layers_or_none(&server).await;
     the_answer_echoes_the_request_and_repeats_itself_from_the_cache(&server).await;
-    briefs_are_the_same_cold_and_warm(&server).await;
     reference.join().expect("the reference galaxy is built");
     the_answer_to_a_fixed_query_is_the_golden_response(golden_client, &golden_universe).await;
     every_system_returned_is_inside_the_radius_and_resolves_to_its_own_record(&server).await;
@@ -1322,20 +1323,11 @@ async fn a_range_request_with_include_stellar_returns_a_brief_on_every_row(serve
     client.close().await;
 }
 
-/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
-/// server, before any request there has asked for a brief, so that its first answer's briefs are
-/// built cold and the count it reads is its own.
-async fn briefs_are_the_same_cold_and_warm(server: &TestServer) {
+#[tokio::test]
+async fn briefs_are_the_same_cold_and_warm() {
+    let server = TestServer::start().await;
     let mut client = server.connected().await;
-    let universe = client
-        .create_universe("Kepler Reach: briefs cold and warm", SEED)
-        .await;
-    let fresh = server.stats().briefs();
-    assert_eq!(
-        (fresh.entries(), fresh.hits()),
-        (0, 0),
-        "asked before any request asked for a brief, as on a server of its own: {fresh:?}"
-    );
+    let universe = client.create_universe("Kepler Reach", SEED).await;
     let mut query = Query::sunlike();
     query.radius_ly = 30.0;
     query.include_stellar = true;
@@ -1357,6 +1349,7 @@ async fn briefs_are_the_same_cold_and_warm(server: &TestServer) {
         "every row of the second answer was the cache's"
     );
     client.close().await;
+    server.stop().await;
 }
 
 /// A short answer with briefs, pinned whole as the frame arrived (as
