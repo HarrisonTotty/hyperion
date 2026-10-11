@@ -529,7 +529,11 @@ _wasm-preflight +tools:
 # `cargo <args>` with wasmtime as the runner for wasm32-wasip1. Goldens are read at host paths fixed
 # at compile time, so the guest is given the repository, and the target directory if it lies
 # elsewhere, at those same paths. The runner is set here, not in `.cargo/config.toml`, so that a
-# bare `cargo test --target wasm32-wasip1` names none.
+# bare `cargo test --target wasm32-wasip1` names none. A guest sees none of the host's environment
+# but what the runner passes. It passes nextest's run id (`--env NEXTEST_RUN_ID`, nothing when the
+# variable is unset, as under `cargo test`), by which the sim's sky tests build their luminosity
+# tables once a run and share them (`sky::testing::shared`): 1,532 s of the sky's wasip1 tests
+# without it, 895 s with it (2026-10-11).
 [positional-arguments]
 _wasip1 +args:
     #!/usr/bin/env bash
@@ -540,7 +544,7 @@ _wasip1 +args:
         mkdir -p "$CARGO_TARGET_DIR"
         dirs+=" --dir=$(CDPATH='' cd -- "$CARGO_TARGET_DIR" && pwd -P)"
     fi
-    export CARGO_TARGET_WASM32_WASIP1_RUNNER="${WASMTIME:-wasmtime} $dirs"
+    export CARGO_TARGET_WASM32_WASIP1_RUNNER="${WASMTIME:-wasmtime} --env NEXTEST_RUN_ID $dirs"
     cargo "$@"
 
 # The wasip1 suites run under cargo-nextest, one wasmtime process per test across every core:
