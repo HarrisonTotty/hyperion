@@ -1618,6 +1618,17 @@ warnings` with "use of a disallowed method", and was reverted.
   `cargo tree -p hyperion-sim --target wasm32-wasip1 -e normal` lists no `wasm-bindgen`;
   `just gen-surface` leaves `git status --porcelain` unchanged; the surface crate's test passes
   natively, under wasip1 and on the browser target, and `_browser-clippy` covers `src/wasm.rs`.
+  Amended 2026-10-10 (perf-build Q1): the manifest's `crate-type` is `["lib"]` alone, and
+  `gen-surface` asks for the `cdylib` itself (`cargo rustc … --crate-type lib,cdylib`), since a
+  `cdylib` in the manifest gave the native library a name without a hash, so that the test build
+  and `_browser`'s native lists, built with and without `testing`, overwrote each other and rebuilt
+  the sim, the server and the fitting crate inside the heavy-test lock. The module is byte for byte
+  the one the manifest built (`cmp`); `cdylib` alone would add the release profile's thin LTO and
+  change it. `_browser`'s native lists are now built from a cargo selection it is given: by default
+  `browser_native`, the three crates with the features `--workspace` gives them, which links the
+  test build's libraries of those crates but builds the surface crate's test executables again
+  (outside `--workspace`, Criterion's dependencies resolve with fewer features); under
+  `just smart-ci`, the selection of its own test build, which builds nothing again.
 - **T8 review fixes, as built (2026-09-30).** The review found that `just bless`
   (`HYPERION_BLESS=1 cargo test`) failed on the testkit's new tests, since `check_embedded` reads
   the environment natively: every test of the embedded arm now calls

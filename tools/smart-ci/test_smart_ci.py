@@ -290,8 +290,10 @@ class TheRules(unittest.TestCase):
         self.assertEqual(args(p, "_wasm-preflight"), ["wasip1", "browser"])
         self.assertEqual(args(p, "_clippy-for"), ["-p hyperion-surface --features hyperion-surface/testing"])
         self.assertEqual(args(p, "_browser-clippy-for"), ["hyperion-surface"])
-        self.assertEqual(args(p, "_browser", 0), ["prepare", "hyperion-surface"])
-        self.assertEqual(args(p, "_browser", 1), ["run", "hyperion-surface"])
+        # Its native lists from the test build's own selection, so that they build nothing again.
+        surface = "-p hyperion-surface -p hyperion-testkit --features hyperion-surface/testing"
+        self.assertEqual(args(p, "_browser", 0), ["prepare", "hyperion-surface", surface])
+        self.assertEqual(args(p, "_browser", 1), ["run", "hyperion-surface", surface])
         self.assertEqual(args(p, "_vitest-run"), [
             "hyperion",
             "src/renderer/src/view/terrain/heightBake.test.ts src/renderer/src/view/terrain/heightWasm.test.ts"])
@@ -420,7 +422,9 @@ class TheRules(unittest.TestCase):
         self.assertEqual(args(plan("tools/gpu-replay/src/main.rs"), "_cross-clippy-for"), ["", "gpu-replay"])
         self.assertEqual(calls(plan("tools/smart-ci/smart_ci.py")), ["_smart-ci-test"])
         node = plan("tools/electron-node/node")
-        self.assertEqual(args(node, "_browser", 0), ["prepare", "hyperion-base hyperion-surface hyperion-testkit"])
+        self.assertEqual(args(node, "_browser", 0), [
+            "prepare", "hyperion-base hyperion-surface hyperion-testkit",
+            "-p hyperion-base -p hyperion-surface -p hyperion-testkit --features hyperion-surface/testing"])
         self.assertNotIn("_vitest-run", calls(node))
 
     def test_configuration_of_the_typescript_side_prettier_oxlint_and_nextest(self) -> None:
@@ -471,6 +475,17 @@ class TheRules(unittest.TestCase):
             "_wasip1-nextest", "_browser"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "locked"], [
             "_nextest-run", "_doctest-run", "_vitest-run", "_wasip1-nextest", "_browser"])
+
+    def test_the_browser_lists_are_built_from_the_test_builds_selection(self) -> None:
+        # Built from another selection, they would build their crates a second time, with other
+        # features, before the lock.
+        cases = [(["crates/hyperion-base/src/math.rs"], False), (["crates/hyperion-surface/src/field.rs"], True),
+                 (["crates/hyperion-testkit/src/lib.rs", "crates/hyperion-sim/src/galaxy/disc.rs"], False)]
+        for paths, dependents in cases:
+            with self.subTest(paths=paths, dependents=dependents):
+                p = plan(*paths, dependents=dependents)
+                for which in (0, 1):
+                    self.assertEqual(args(p, "_browser", which)[2], args(p, "_test-build-for")[0])
 
     def test_every_step_names_its_causes(self) -> None:
         p = plan("crates/hyperion-surface/src/field.rs", "README.md")
@@ -850,6 +865,17 @@ class RealWorkspace(unittest.TestCase):
             self.assertTrue(any(f.startswith(prefix) for f in self.ws.files), prefix)
         for path in smart_ci.FULL_CI_ROOT:
             self.assertIn(path, self.ws.files)
+
+    def test_the_browser_lists_default_to_the_features_the_workspace_gives(self) -> None:
+        # `_browser`'s native lists, as `ci` runs them, link the libraries `--workspace` built (the
+        # features of registry crates, which `unified_features` does not model, still differ).
+        dumped = dump()
+        defaults = {p["name"]: p["default"] for p in dumped["recipes"]["_browser"]["parameters"]}
+        self.assertEqual(defaults["crates"], ["variable", "browser_crates"])
+        self.assertEqual(defaults["native"], ["variable", "browser_native"])
+        self.assertEqual(dumped["assignments"]["browser_native"]["value"], self.ws.cargo_packages(self.ws.browser),
+                         "set `browser_native` in the justfile to `browser_crates` with the features `--workspace` "
+                         "gives them")
 
     def test_the_surface_module_has_readers(self) -> None:
         graph = smart_ci.TsGraph(self.ws)

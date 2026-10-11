@@ -47,7 +47,7 @@ sys.dont_write_bytecode = True
 # SMART_CI_BASE names another.
 INTEGRATION_BRANCH = os.environ.get("SMART_CI_BASE") or "rendering-and-planets"
 
-# The crate whose `cdylib`, which `just gen-surface` builds, is the client's WebAssembly module, and
+# The crate that `just gen-surface` builds as a `cdylib` into the client's WebAssembly module, and
 # where the module's glue lands. The module is this crate and the crates it links (hyperion-base),
 # so a change to the sources of either changes it.
 SURFACE_CRATE = "hyperion-surface"
@@ -839,8 +839,10 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         step("main", "build the wasip1 suites: " + ", ".join(wasip1_tests),
              ["_wasip1-nextest", wasip1_args, "--no-run"], causes_of(needs.tests, wasip1_tests))
     if browser_tests:
+        # Its native lists from the test build's own selection, so that they build nothing again.
         step("main", "build the browser suites: " + ", ".join(browser_tests),
-             ["_browser", "prepare", " ".join(browser_tests)], causes_of(needs.tests, browser_tests))
+             ["_browser", "prepare", " ".join(browser_tests), ws.cargo_packages(native)],
+             causes_of(needs.tests, browser_tests))
 
     # Every suite, in one hold of the heavy-test lock.
     if native:
@@ -867,7 +869,8 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
              causes_of(needs.tests, wasip1_tests))
     if browser_tests:
         step("locked", "the browser suites: " + ", ".join(browser_tests),
-             ["_browser", "run", " ".join(browser_tests)], causes_of(needs.tests, browser_tests))
+             ["_browser", "run", " ".join(browser_tests), ws.cargo_packages(native)],
+             causes_of(needs.tests, browser_tests))
 
     notes = list(needs.notes)
     if unchecked:

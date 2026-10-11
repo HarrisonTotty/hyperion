@@ -613,7 +613,14 @@ gen-surface: (_wasm-preflight "bindgen")
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{ justfile_directory() }}"
-    cargo build -q -p hyperion-surface --lib --target wasm32-unknown-unknown --release
+    # The crate's manifest names its `lib` alone, and the `cdylib` is asked for here: in the
+    # manifest it made cargo name the native library without a hash, so that two native builds of
+    # it with different features (the test build's, with `testing`, and one without) overwrote each
+    # other's copy, and each rebuilt every crate above it. `lib,cdylib`, not `cdylib` alone, builds
+    # the module the manifest's two crate types built, byte for byte: cargo runs the release
+    # profile's thin LTO only on a unit that is not also a `lib` (alone, the module was 145,093 B
+    # against 137,969 B, 2026-10-10).
+    cargo rustc -q -p hyperion-surface --lib --target wasm32-unknown-unknown --release --crate-type lib,cdylib
     target="${CARGO_TARGET_DIR:-target}"
     out=apps/hyperion/src/renderer/src/generated/surface
     # Generated beside the module and swapped in only when it differs, so that an unchanged module
@@ -642,6 +649,14 @@ test-wasm: test-wasm-fast test-wasm-slow
 # or tests with. Not the sim, which no browser loads (R04 Design note 11).
 browser_crates := "hyperion-base hyperion-surface hyperion-testkit"
 
+# The cargo selection that `_browser`'s native lists are built and listed from by default:
+# `browser_crates` with the features `--workspace` gives them (the fitting crate asks for the sim's
+# `testing`, which asks for the surface crate's), so that the lists link the libraries of these
+# crates that the test build made. The surface crate's test executables are still built again:
+# outside `--workspace`, the dependencies of its dev-dependency Criterion resolve with fewer
+# features. `_smart-ci-test` holds it to the workspace's.
+browser_native := "-p hyperion-base -p hyperion-surface -p hyperion-testkit --features hyperion-surface/testing"
+
 # How long one test binary may run on the browser target, in seconds: wasm-bindgen-test's Node mode
 # has no timeout of its own. The runner's `timeout` is coreutils', or `tools/portable/timeout`.
 browser_timeout := "600"
@@ -661,8 +676,11 @@ test-wasm-browser: (_browser "prepare")
 # with each test attributed to its crate by the binary it is listed from: a `cargo test -p` of one
 # crate resolves features for that crate alone, and so built every crate a second time for its list
 # (47 s of a cold `ci`, 2026-10-03), and again after every edit. `crates`, some of
-# `browser_crates`, narrows both steps to those crates (`just smart-ci`).
-_browser mode crates=browser_crates: (_wasm-preflight "browser")
+# `browser_crates`, narrows the browser builds and runs, and the lists compared, to those crates
+# (`just smart-ci`). `native` is the cargo selection the native lists are built and listed from,
+# `crates` among them: `browser_native`, or under smart-ci the selection of its own test build,
+# which then builds nothing again.
+_browser mode crates=browser_crates native=browser_native: (_wasm-preflight "browser")
     #!/usr/bin/env bash
     set -euo pipefail
     cd "{{ justfile_directory() }}"
@@ -684,6 +702,7 @@ _browser mode crates=browser_crates: (_wasm-preflight "browser")
     packages=()
     for crate in {{ crates }}; do packages+=(-p "$crate"); done
     browser=(--target wasm32-unknown-unknown --profile slow-test --lib --tests)
+    host=(--lib --tests {{ native }})
     case "{{ mode }}" in
         run)
             cargo test "${browser[@]}" "${packages[@]}"
@@ -696,13 +715,13 @@ _browser mode crates=browser_crates: (_wasm-preflight "browser")
             ;;
     esac
     cargo test "${browser[@]}" "${packages[@]}" --no-run
-    cargo test --lib --tests "${packages[@]}" --no-run
-    # `crate test` lines, sorted, of a `cargo test <args> -- --list` over the three crates: each
-    # binary's `Running` line names its file, and the build's artifact messages map the file to its
-    # crate. Every other line goes to standard error, so that a failed build or runner shows there
-    # and stops the recipe with its own message, not as a difference between the lists.
+    cargo test "${host[@]}" --no-run
+    # `crate test` lines, sorted, of a `cargo test <args> -- --list` over the crates `args` select:
+    # each binary's `Running` line names its file, and the build's artifact messages map the file to
+    # its crate. Every other line goes to standard error, so that a failed build or runner shows
+    # there and stops the recipe with its own message, not as a difference between the lists.
     lists() {
-        cargo test "$@" "${packages[@]}" --message-format=json-render-diagnostics -- --list 2>&1 \
+        cargo test "$@" --message-format=json-render-diagnostics -- --list 2>&1 \
             | python3 -c '
     import json, os, re, sys
     crate_of, crate = {}, None
@@ -723,20 +742,20 @@ _browser mode crates=browser_crates: (_wasm-preflight "browser")
             print(line, file=sys.stderr)
     ' | sort
     }
-    native_lists="$(lists --lib --tests)"
-    browser_lists="$(lists "${browser[@]}")"
+    native_lists="$(lists "${host[@]}")"
+    browser_lists="$(lists "${browser[@]}" "${packages[@]}")"
     # The names of one crate's tests in those lines; `grep` finding none is not an error.
     tests() { { grep -E "^$1 " || true; } | cut -d ' ' -f 2-; }
     for crate in {{ crates }}; do
-        native="$(tests "$crate" <<<"$native_lists" | { grep -v 'native_only::' || true; })"
+        on_native="$(tests "$crate" <<<"$native_lists" | { grep -v 'native_only::' || true; })"
         on_browser="$(tests "$crate" <<<"$browser_lists")"
-        if [[ "$native" != "$on_browser" ]]; then
+        if [[ "$on_native" != "$on_browser" ]]; then
             echo "error: $crate's tests on wasm32-unknown-unknown differ from its native ones less native_only::" >&2
             echo "(a test file or module without the \`wasm_bindgen_test as test\` import, or a test compiled out outside a native_only module):" >&2
-            diff <(echo "$native") <(echo "$on_browser") >&2 || true
+            diff <(echo "$on_native") <(echo "$on_browser") >&2 || true
             exit 1
         fi
-        echo "$crate: $(grep -c . <<<"$native") tests on the browser target, as natively less native_only"
+        echo "$crate: $(grep -c . <<<"$on_native") tests on the browser target, as natively less native_only"
     done
 
 # Run the Criterion benchmarks, e.g. `just bench -- samplers`.
