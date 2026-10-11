@@ -4896,8 +4896,8 @@ rows' values.
         3,270–3,460 (Kiefer et al. 2012); 1,323.15 K (1,050 °C, Taylor et al. 1991, the Lunar
         Sourcebook, p. 206); `Silicate`;
       - `feldspathic`, the impact-mixed highland crust, about 80–90% plagioclase: 2,900 kg m⁻³,
-        the highlands' GRAIL density at 12% porosity (Wieczorek et al. 2013); 1,533.15 K;
-        `Silicate`;
+        implied by the highlands' GRAIL bulk density, 2,550 kg m⁻³, at 12% porosity (Wieczorek
+        et al. 2013); 1,533.15 K; `Silicate`;
       - `anorthosite`, the rock: 2,790 kg m⁻³ (2,776–2,828 at 97–90% plagioclase, from the
         Handbook of Mineralogy's densities); 1,533.15 K (1,260 °C, Andersen 1915's reaction
         point, where plagioclase with a few per cent of low-Ca pyroxene first melts); `Silicate`;
