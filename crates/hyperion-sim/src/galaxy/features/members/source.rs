@@ -276,6 +276,11 @@ mod tests {
     use crate::id::Layer;
     use crate::rng::Seed;
 
+    /// The Milky Way fixture with its kinematic tables, built once per process.
+    ///
+    /// The build takes some 5 s in a test build, and nextest runs each test in a process of its
+    /// own, so the fast properties that read it or the clusters below run in one test,
+    /// [`the_member_source_finds_and_counts_what_a_scan_finds`].
     fn galaxy() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
         GALAXY.get_or_init(|| {
@@ -283,6 +288,15 @@ mod tests {
                 .unwrap()
                 .with_full_potential()
         })
+    }
+
+    /// The feature-member source (plan 09), each property below on one build of the fixture
+    /// ([`galaxy`]) and of its clusters ([`open_cluster`], [`globular`]), in turn.
+    #[test]
+    fn the_member_source_finds_and_counts_what_a_scan_finds() {
+        a_query_in_an_open_cluster_finds_every_member_a_scan_finds();
+        the_census_does_not_depend_on_what_is_cached();
+        hits_count_in_their_band_s_layer_and_the_unborn_are_dropped();
     }
 
     /// A cache that keeps everything it is asked for, keyed by feature cell and feature.
@@ -375,7 +389,8 @@ mod tests {
         brute
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_member_source_finds_and_counts_what_a_scan_finds`].
     fn a_query_in_an_open_cluster_finds_every_member_a_scan_finds() {
         let galaxy = galaxy();
         let interior = open_cluster();
@@ -448,7 +463,8 @@ mod tests {
         }
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_member_source_finds_and_counts_what_a_scan_finds`].
     fn the_census_does_not_depend_on_what_is_cached() {
         let galaxy = galaxy();
         let interior = globular();
@@ -475,7 +491,8 @@ mod tests {
         assert!(cold.get(Layer::BrownDwarf) <= 0.0);
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_member_source_finds_and_counts_what_a_scan_finds`].
     fn hits_count_in_their_band_s_layer_and_the_unborn_are_dropped() {
         let galaxy = galaxy();
         let interior = globular();

@@ -566,6 +566,7 @@ impl PotentialTables {
 
 #[cfg(test)]
 mod tests {
+    use super::super::force::tests::the_tables_force_is_the_gradient_of_the_tables_potential;
     use super::*;
     use crate::galaxy::params::GalaxyParams;
 
@@ -597,15 +598,27 @@ mod tests {
         );
     }
 
+    /// The Milky Way fixture's model and its full (R, z) tables, built once, some 5 s in a test
+    /// build, for the two tests that read them, which nextest would otherwise run in processes of
+    /// their own: [`the_grid_forces_match_the_mass_model`] here, then `force`'s
+    /// [`the_tables_force_is_the_gradient_of_the_tables_potential`].
+    #[test]
+    fn the_full_grid_s_forces_are_the_model_s_and_its_own_potential_s_gradient() {
+        let model = MassModel::new(&GalaxyParams::milky_way_like());
+        let tables = PotentialTables::full(&model);
+        the_grid_forces_match_the_mass_model(&model, &tables);
+        the_tables_force_is_the_gradient_of_the_tables_potential(&model, &tables);
+    }
+
     /// The tables' forces are the mass model's, to the interpolation's accuracy, across the disc,
     /// the bulge and the halo, above and below the plane, and beyond the grid (plan 08's force
     /// source).
-    #[test]
-    fn the_grid_forces_match_the_mass_model() {
-        let params = crate::galaxy::params::GalaxyParams::milky_way_like();
-        let model = MassModel::new(&params);
-        let tables = PotentialTables::full(&model);
-        assert!(PotentialTables::in_plane(&model).forces(1.0, 1.0).is_none());
+    ///
+    /// Run by [`the_full_grid_s_forces_are_the_model_s_and_its_own_potential_s_gradient`] on its one
+    /// build of the Milky Way fixture's model and full tables, which it gives as `model` and
+    /// `tables`.
+    fn the_grid_forces_match_the_mass_model(model: &MassModel, tables: &PotentialTables) {
+        assert!(PotentialTables::in_plane(model).forces(1.0, 1.0).is_none());
         for (r, z) in [
             (26_000.0, 300.0),
             (26_000.0, -1_500.0),

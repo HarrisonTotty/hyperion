@@ -190,6 +190,11 @@ mod tests {
     use crate::units::consts::METRES_PER_LIGHT_YEAR;
     use crate::units::{LightYears, Years};
 
+    /// The Milky Way fixture with its kinematic tables, built once per process.
+    ///
+    /// The build takes some 5 s in a test build, and nextest runs each test in a process of its
+    /// own, so the properties that read it run in one test,
+    /// [`observed_systems_are_seen_as_their_light_shows_them`].
     fn galaxy() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
         GALAXY.get_or_init(|| {
@@ -197,6 +202,16 @@ mod tests {
                 .expect("the Milky Way fixture's gas is mostly neutral")
                 .with_full_potential()
         })
+    }
+
+    /// A system as its light shows it (P12.T2), each property below on one build of the fixture
+    /// ([`galaxy`]), in turn.
+    #[test]
+    fn observed_systems_are_seen_as_their_light_shows_them() {
+        observed_system_is_a_supergiant_until_its_death_arrives();
+        observed_system_born_a_century_ago_is_not_yet_born_from_afar();
+        observed_extrapolated_jump_lands_on_the_star();
+        observed_centre_member_is_refused_until_its_orbit_is_built();
     }
 
     fn years(y: i64) -> UniverseTime {
@@ -274,7 +289,9 @@ mod tests {
 
     /// P12.T2: a layer-E system that dies at T, seen from d, is a living supergiant for
     /// t < T + d ÷ c and a remnant of age t − d ÷ c − T after it, with one ID throughout.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`observed_systems_are_seen_as_their_light_shows_them`].
     fn observed_system_is_a_supergiant_until_its_death_arrives() {
         let galaxy = galaxy();
         let (record, stars, death) = dying_supergiant();
@@ -331,7 +348,9 @@ mod tests {
 
     /// P12.T2: a system born 100 years ago is not yet born seen from 5,000 ly, and is found all the
     /// same; seen from 50 ly it exists.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`observed_systems_are_seen_as_their_light_shows_them`].
     fn observed_system_born_a_century_ago_is_not_yet_born_from_afar() {
         let galaxy = galaxy();
         let mut cell = Vec::new();
@@ -368,7 +387,9 @@ mod tests {
 
     /// P12.T2: an extrapolated jump lands on the star. Observe from `x_o`, extrapolate, place a
     /// second observer there at the same time, and the star is under a metre away.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`observed_systems_are_seen_as_their_light_shows_them`].
     fn observed_extrapolated_jump_lands_on_the_star() {
         let galaxy = galaxy();
         let mut cell = Vec::new();
@@ -419,7 +440,9 @@ mod tests {
     /// A member of the galactic centre is refused with a typed error until plan 09's P09.T28
     /// builds its Kepler regime: the black hole, member zero, which resolves without the centre's
     /// model.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`observed_systems_are_seen_as_their_light_shows_them`].
     fn observed_centre_member_is_refused_until_its_orbit_is_built() {
         use crate::galaxy::placement::resolve;
         use crate::id::{CentreMemberId, SystemId};

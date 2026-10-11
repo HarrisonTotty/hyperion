@@ -27,6 +27,10 @@ use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::order::assert_order_independent;
 
+/// The Milky Way fixture with its kinematic tables, built once per process.
+///
+/// The build takes some 5 s in a test build, and nextest runs each test in a process of its own,
+/// so the fast properties that read it run in one test, [`the_velocity_draw_is_pinned_pure_and_rarely_cut`].
 fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
@@ -72,13 +76,25 @@ fn pinned(galaxy: &Galaxy) -> Vec<SystemRecord> {
     records
 }
 
-/// P08.T5: the golden velocities of twelve pinned IDs across the populations.
+/// The velocity draw and the escape cut (P08.T5), each property below on one build of the fixture
+/// ([`galaxy`]) and of the [`pinned`] systems, in turn.
 #[test]
-fn the_pinned_velocities_are_golden() {
+fn the_velocity_draw_is_pinned_pure_and_rarely_cut() {
+    let records = pinned(galaxy());
+    the_pinned_velocities_are_golden(&records);
+    a_velocity_does_not_depend_on_how_its_system_is_reached(&records);
+    the_cut_rarely_redraws_near_the_sun();
+}
+
+/// P08.T5: the golden velocities of twelve pinned IDs across the populations.
+///
+/// Run on its one build of the fixture by [`the_velocity_draw_is_pinned_pure_and_rarely_cut`],
+/// which gives it the [`pinned`] systems.
+fn the_pinned_velocities_are_golden(records: &[SystemRecord]) {
     let galaxy = galaxy();
     let mut w = GoldenWriter::new();
     w.header(GENERATOR_VERSION.get());
-    for (k, record) in pinned(galaxy).iter().enumerate() {
+    for (k, record) in records.iter().enumerate() {
         let label = format!("system.{k:02}");
         let d = draw(galaxy, record);
         w.u64_hex(&format!("{label}.id"), record.id().raw());
@@ -102,12 +118,13 @@ fn the_pinned_velocities_are_golden() {
 /// P08.T5: a velocity is a pure function of the galaxy and the record, whatever order the records
 /// are drawn in; it is the same through `resolve` as through the cell; and the range query's
 /// `epoch_velocity` is it.
-#[test]
-fn a_velocity_does_not_depend_on_how_its_system_is_reached() {
+///
+/// Run on its one build of the fixture by [`the_velocity_draw_is_pinned_pure_and_rarely_cut`],
+/// which gives it the [`pinned`] systems.
+fn a_velocity_does_not_depend_on_how_its_system_is_reached(records: &[SystemRecord]) {
     let galaxy = galaxy();
-    let records = pinned(galaxy);
-    assert_order_independent(&records, |r| draw_velocity(galaxy, r));
-    for record in &records {
+    assert_order_independent(records, |r| draw_velocity(galaxy, r));
+    for record in records {
         let resolved = resolve(galaxy, record.id()).expect("a placed system resolves");
         assert_eq!(&resolved, record);
         assert_eq!(
@@ -128,7 +145,8 @@ fn a_velocity_does_not_depend_on_how_its_system_is_reached() {
 }
 
 /// P08.T5: at the Sun-like point the escape cut redraws under one draw in a hundred.
-#[test]
+///
+/// Run on its one build of the fixture by [`the_velocity_draw_is_pinned_pure_and_rarely_cut`].
 fn the_cut_rarely_redraws_near_the_sun() {
     let galaxy = galaxy();
     let (mut attempts, mut systems) = (0_u32, 0_u32);

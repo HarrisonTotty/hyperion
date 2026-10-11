@@ -21,6 +21,10 @@ use hyperion_sim::galaxy::{Galaxy, PointLy, Population};
 use hyperion_sim::math;
 use hyperion_sim::units::{Dex, KilometresPerSecond};
 
+/// The Milky Way fixture with its kinematic tables, built once per process.
+///
+/// The build takes some 5 s in a test build, and nextest runs each test in a process of its own,
+/// so the properties that read it run in one test, [`the_bulge_bar_and_nuclear_disc_hold_at_milky_way_values`].
 fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
@@ -33,6 +37,17 @@ fn galaxy() -> &'static Galaxy {
     })
 }
 
+/// The bulge's, the bar's and the nuclear disc's kinematics (P08.T4), each property below on one
+/// build of the fixture ([`galaxy`]), in turn.
+#[test]
+fn the_bulge_bar_and_nuclear_disc_hold_at_milky_way_values() {
+    the_tables_are_positive_and_still_on_the_axis();
+    the_bulge_s_flow_follows_its_density();
+    the_pattern_turns_at_the_measured_speed();
+    the_nuclear_disc_rotates_and_cools_outward();
+    the_bulge_dispersion_that_m_sigma_reads();
+}
+
 fn component(galaxy: &Galaxy, population: Population) -> ComponentId {
     galaxy
         .fields()
@@ -42,7 +57,9 @@ fn component(galaxy: &Galaxy, population: Population) -> ComponentId {
 }
 
 /// P08.T4.a: the three tables are positive everywhere a system can be, and still on the axis.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_bulge_bar_and_nuclear_disc_hold_at_milky_way_values`].
 fn the_tables_are_positive_and_still_on_the_axis() {
     let tables = galaxy().kinematics().unwrap();
     for table in [tables.bulge(), tables.bar(), tables.nuclear_disc()] {
@@ -64,7 +81,9 @@ fn the_tables_are_positive_and_still_on_the_axis() {
 
 /// P08.T4.b: the bulge's flow runs along its density's contours, `u · ∇ρ = 0` to 10⁻⁹ of `|u|
 /// |∇ρ|` at sampled points of the boxy bulge; and the mean velocity does not depend on z.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_bulge_bar_and_nuclear_disc_hold_at_milky_way_values`].
 fn the_bulge_s_flow_follows_its_density() {
     let galaxy = galaxy();
     let tables = galaxy.kinematics().unwrap();
@@ -108,7 +127,9 @@ fn the_bulge_s_flow_follows_its_density() {
 /// (4–5% over most of the bulge) where `ω` changes fast. Inside 1,000 ly the table does not rotate
 /// at all, `⟨v_φ²⟩` falling below `σ_R²`, and the bulge turns with the pattern. The test holds the
 /// mean to 10% of the table where the table outruns the pattern, and never below the pattern.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_bulge_bar_and_nuclear_disc_hold_at_milky_way_values`].
 fn the_pattern_turns_at_the_measured_speed() {
     let galaxy = galaxy();
     let tables = galaxy.kinematics().unwrap();
@@ -147,7 +168,9 @@ fn the_pattern_turns_at_the_measured_speed() {
 /// Aumer and Sale 2015: 123 +19 −7 km/s), and at 200 pc, the edge of Sormani et al.'s (2022) data,
 /// its radial dispersion is 55–75 km/s and its vertical 0.3–0.6 of it (ruling 5: about half).
 /// The radial law is Sormani et al.'s `σ_R² = max(σ_z², 67.7² e^(−2R ÷ R_σ))`, `R_σ` = 10^3.7 pc.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_bulge_bar_and_nuclear_disc_hold_at_milky_way_values`].
 fn the_nuclear_disc_rotates_and_cools_outward() {
     let galaxy = galaxy();
     let tables = galaxy.kinematics().unwrap();
@@ -176,7 +199,9 @@ fn the_nuclear_disc_rotates_and_cools_outward() {
 /// 2009, ApJ 698, 198; Kormendy and Ho 2013, ARA&A 51, 511), so the window is 100–120, not the
 /// brainstorm's 105–115. The reduced solution's cost, which the plan puts under 100 ms, is
 /// printed.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`the_bulge_bar_and_nuclear_disc_hold_at_milky_way_values`].
 fn the_bulge_dispersion_that_m_sigma_reads() {
     let galaxy = galaxy();
     let params = galaxy.params();

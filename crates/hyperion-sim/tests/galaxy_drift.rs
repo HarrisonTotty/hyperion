@@ -29,6 +29,10 @@ use hyperion_sim::units::consts::SECONDS_PER_JULIAN_YEAR;
 use hyperion_sim::units::{KilometresPerSecond, LightYears, SolarMasses};
 use hyperion_testkit::lcg::Lcg;
 
+/// The Milky Way fixture with its kinematic tables, built once per process.
+///
+/// The build takes some 5 s in a test build, and nextest runs each test in a process of its own,
+/// so the fast properties that read it run in one test, [`a_system_drifts_on_its_line_and_the_query_finds_it_there`].
 fn galaxy() -> &'static Galaxy {
     static GALAXY: OnceLock<Galaxy> = OnceLock::new();
     GALAXY.get_or_init(|| {
@@ -41,6 +45,14 @@ fn galaxy() -> &'static Galaxy {
     })
 }
 
+/// Drift (P08.T6): each property below on one build of the fixture ([`galaxy`]), in turn.
+#[test]
+fn a_system_drifts_on_its_line_and_the_query_finds_it_there() {
+    a_system_drifts_by_its_velocity_times_the_time();
+    a_moving_range_query_is_the_brute_force_answer();
+    a_century_s_curvature_is_negligible();
+}
+
 fn at(years: i64) -> UniverseTime {
     UniverseTime::from_julian_years(years).unwrap()
 }
@@ -51,7 +63,9 @@ fn at(years: i64) -> UniverseTime {
 /// "To a metre" is taken as 4 m: plan 01's position keeps its offset inside a light-year in
 /// metres, 9.46 × 10¹⁵ of them, whose last bit is 2 m, so a drift rounds by a bit or two however
 /// it is computed.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`a_system_drifts_on_its_line_and_the_query_finds_it_there`].
 fn a_system_drifts_by_its_velocity_times_the_time() {
     let galaxy = galaxy();
     let query = RangeQuery::builder(sunlike_point(galaxy), LightYears::new(60.0))
@@ -172,7 +186,9 @@ fn whole(x: f64) -> i32 {
 /// P08.T6: a range query at t = +1,000 yr is, as a set, the brute-force answer at the Sun-like
 /// point, at the galactic centre and at 40,000 ly; its expected counts do not depend on t; and it
 /// is a pure function of its arguments, cache warm or cold.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`a_system_drifts_on_its_line_and_the_query_finds_it_there`].
 fn a_moving_range_query_is_the_brute_force_answer() {
     let galaxy = galaxy();
     for (centre, radius) in [
@@ -247,7 +263,9 @@ fn the_query_is_the_brute_force_answer(
 /// and the test holds it beyond 40 ly (it fails out to 38 ly at Milky Way values). Provisional;
 /// ruling deferred: since plan 02's joint revision of the centre (R26) the circular speed inside
 /// 100 ly is some 30% higher, and the bound fails out to 43.9 ly, held here beyond 50 ly.
-#[test]
+///
+/// Run on its one build of the fixture by
+/// [`a_system_drifts_on_its_line_and_the_query_finds_it_there`].
 fn a_century_s_curvature_is_negligible() {
     let galaxy = galaxy();
     let potential = galaxy.potential();

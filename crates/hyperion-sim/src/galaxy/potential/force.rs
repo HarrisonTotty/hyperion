@@ -134,7 +134,7 @@ impl PotentialTables {
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::galaxy::potential) mod tests {
     use super::*;
     use crate::galaxy::params::GalaxyParams;
 
@@ -171,10 +171,16 @@ mod tests {
 
     /// The tables' force is the gradient of the tables' potential to rounding (it is the
     /// interpolant's own derivative), and the model's to the interpolation's accuracy.
-    #[test]
-    fn the_tables_force_is_the_gradient_of_the_tables_potential() {
-        let model = MassModel::new(&GalaxyParams::milky_way_like());
-        let tables = PotentialTables::full(&model);
+    ///
+    /// Run on its one build of the Milky Way fixture's model and full tables, which it gives as
+    /// `model` and `tables`, by [`tables`]' test
+    /// `the_full_grid_s_forces_are_the_model_s_and_its_own_potential_s_gradient`.
+    ///
+    /// [`tables`]: super::super::tables
+    pub(in crate::galaxy::potential) fn the_tables_force_is_the_gradient_of_the_tables_potential(
+        model: &MassModel,
+        tables: &PotentialTables,
+    ) {
         for (r, z) in [
             (26_000.0, 300.0),
             (26_000.0, -1_500.0),

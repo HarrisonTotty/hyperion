@@ -335,6 +335,11 @@ mod tests {
     use crate::math;
     use crate::rng::Seed;
 
+    /// The Milky Way fixture with its kinematic tables, built once per process.
+    ///
+    /// The build takes some 5 s in a test build, and nextest runs each test in a process of its
+    /// own, so the fast properties that read it or the clusters below run in one test,
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn galaxy() -> &'static Galaxy {
         static GALAXY: OnceLock<Galaxy> = OnceLock::new();
         GALAXY.get_or_init(|| {
@@ -342,6 +347,60 @@ mod tests {
                 .unwrap()
                 .with_full_potential()
         })
+    }
+
+    /// The members of the fixture's clusters (plan 09), each property below on one build of the
+    /// fixture ([`galaxy`]) and of its clusters ([`open_cluster`], [`globular`]), in turn.
+    ///
+    /// The golden runs first, so that a statistical property tripped by a version bump does not keep
+    /// `just bless` from writing it. Each property's name is printed before it runs: two of them
+    /// share [`assert_profiles`], whose failure names a class but not its cluster, and nextest
+    /// shows a failing test's output.
+    #[test]
+    fn the_fixture_s_clusters_place_resolve_and_pin_their_members() {
+        let properties: [(&str, fn()); 10] = [
+            ("members_golden", members_golden),
+            (
+                "every_member_s_id_round_trips_and_resolves_to_it",
+                every_member_s_id_round_trips_and_resolves_to_it,
+            ),
+            (
+                "a_galaxy_without_its_kinematic_tables_places_no_member",
+                a_galaxy_without_its_kinematic_tables_places_no_member,
+            ),
+            (
+                "resolving_through_a_kept_interior_does_not_depend_on_order",
+                resolving_through_a_kept_interior_does_not_depend_on_order,
+            ),
+            (
+                "an_index_past_the_count_or_a_rejected_candidate_is_no_such_system",
+                an_index_past_the_count_or_a_rejected_candidate_is_no_such_system,
+            ),
+            (
+                "a_globular_s_members_follow_their_class_profiles",
+                a_globular_s_members_follow_their_class_profiles,
+            ),
+            (
+                "a_collapsed_cluster_s_cusp_is_placed_by_its_envelope",
+                a_collapsed_cluster_s_cusp_is_placed_by_its_envelope,
+            ),
+            (
+                "a_member_does_not_depend_on_what_else_was_placed",
+                a_member_does_not_depend_on_what_else_was_placed,
+            ),
+            (
+                "the_axes_hold_the_fullest_cell_and_it_is_far_from_the_index",
+                the_axes_hold_the_fullest_cell_and_it_is_far_from_the_index,
+            ),
+            (
+                "a_globular_of_a_million_systems_peaks_near_600_a_cell_and_its_light_counts_rise_gently",
+                a_globular_of_a_million_systems_peaks_near_600_a_cell_and_its_light_counts_rise_gently,
+            ),
+        ];
+        for (name, property) in properties {
+            println!("property: {name}");
+            property();
+        }
     }
 
     /// An old open cluster of a few thousand solar masses at birth, shared by the tests: an
@@ -436,7 +495,8 @@ mod tests {
         out
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn every_member_s_id_round_trips_and_resolves_to_it() {
         let galaxy = galaxy();
         let interior = open_cluster();
@@ -460,7 +520,8 @@ mod tests {
         );
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn a_galaxy_without_its_kinematic_tables_places_no_member() {
         let bare =
             Galaxy::from_params(Seed::new(0x0921_0000), GalaxyParams::milky_way_like()).unwrap();
@@ -480,7 +541,9 @@ mod tests {
 
     /// Members of one feature resolved through one shared [`KeepInteriors`], in any order, are
     /// the members resolved cold.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn resolving_through_a_kept_interior_does_not_depend_on_order() {
         use crate::galaxy::features::members::KeepInteriors;
         use hyperion_testkit::order::assert_order_independent;
@@ -512,7 +575,8 @@ mod tests {
         }
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn an_index_past_the_count_or_a_rejected_candidate_is_no_such_system() {
         let galaxy = galaxy();
         let interior = open_cluster();
@@ -560,7 +624,8 @@ mod tests {
         tested
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn a_globular_s_members_follow_their_class_profiles() {
         let galaxy = galaxy();
         let interior = globular(false);
@@ -571,7 +636,8 @@ mod tests {
         assert!(tested >= 3, "{tested} classes tested");
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn a_collapsed_cluster_s_cusp_is_placed_by_its_envelope() {
         let galaxy = galaxy();
         let interior = globular(true);
@@ -596,7 +662,8 @@ mod tests {
 
     const CELL_TARGET: f64 = 2_000.0;
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn a_member_does_not_depend_on_what_else_was_placed() {
         let galaxy = galaxy();
         let interior = open_cluster();
@@ -640,7 +707,9 @@ mod tests {
 
     /// The fullest cell and band over every owned cell is the one on the axes, and under the
     /// target, for the shared open cluster and the two globulars.
-    #[test]
+    ///
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn the_axes_hold_the_fullest_cell_and_it_is_far_from_the_index() {
         for interior in [open_cluster(), globular(false), globular(true)] {
             let grid = interior.grid();
@@ -745,7 +814,8 @@ mod tests {
         build(&p)
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn a_globular_of_a_million_systems_peaks_near_600_a_cell_and_its_light_counts_rise_gently() {
         let galaxy = galaxy();
         let (model, table) = synthetic_globular(galaxy, 1e6, 240.0);
@@ -847,7 +917,8 @@ mod tests {
         }
     }
 
-    #[test]
+    /// Run on its one build of the fixture by
+    /// [`the_fixture_s_clusters_place_resolve_and_pin_their_members`].
     fn members_golden() {
         let galaxy = galaxy();
         let mut w = GoldenWriter::new();
