@@ -45,6 +45,8 @@ pub mod luminosity;
 pub mod phase;
 pub mod photometry;
 #[cfg(test)]
+mod pins;
+#[cfg(test)]
 mod testing;
 
 pub use eye::{EyeObserver, MAX_CUT_V, REFERENCE_SP_RATIO};
