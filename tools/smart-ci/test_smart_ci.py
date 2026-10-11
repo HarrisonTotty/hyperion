@@ -1205,6 +1205,25 @@ class AgreesWithCi(unittest.TestCase):
             self.assertEqual(run.wait(timeout=60), 0)
             self.assertIn("waiting, with priority", run.communicate()[0])
             self.assertFalse(os.path.exists(priority))
+            # Ended while it waits (it blocks on the lock in the background, so a signal ends it at
+            # once), it removes the file and leaves nothing waiting.
+            with open(lock, "w") as held:
+                fcntl.flock(held, fcntl.LOCK_EX)
+                run = locked("true", priority_run=True)
+                deadline = time.monotonic() + 30
+                while not os.path.exists(priority) and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                self.assertTrue(os.path.exists(priority))
+                os.killpg(run.pid, signal.SIGTERM)
+                run.wait(timeout=10)
+                deadline = time.monotonic() + 10
+                while os.path.exists(priority) and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                self.assertFalse(os.path.exists(priority), "the priority file outlived its run")
+                fcntl.flock(held, fcntl.LOCK_UN)
+            # Nothing of the ended run takes the lock afterwards.
+            with open(lock, "w") as probe:
+                fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
             # A live run with priority: another steps aside, though the lock is free.
             Path(priority).write_text(f"{os.getpid()}\n", encoding="utf-8")
             run = locked("true")

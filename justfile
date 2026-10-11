@@ -388,11 +388,12 @@ heavy_priority := trim_end_match(heavy_lock, ".lock") + ".priority"
 # lock is flock(2) on the lock file, held by this shell's descriptor 9 and the copies its children
 # inherit, and so released when they all end, whatever ends them. `flock` is util-linux's, or on
 # stock macOS `tools/portable/flock`, which takes the same lock, so the two exclude each other.
-# flock has no queue, so any waiter may win when the lock is released; a waiter tries it every 2 s
-# instead of blocking on it, so that while a run with priority waits (`heavy_priority` names it, a
-# live process other than this one, and it renews the file at least every minute) every other
-# waiter steps aside, re-checking every 10 s, and the priority run takes the lock when it is next
-# released. A file whose process has ended, or that is 5 minutes old (its PID may name another
+# flock has no queue, so any waiter blocked on it may win when the lock is released. A run with
+# priority blocks on it; every other waiter tries it every 2 s instead, so that while a run with
+# priority waits (`heavy_priority` names it, a live process other than this one, and it renews the
+# file every 30 s) the others step aside, re-checking every 10 s, and the priority run takes the
+# lock when it is next released (against a waiter that a `_locked` of before this rule blocks, at
+# even odds). A file whose process has ended, or that is 5 minutes old (its PID may name another
 # process since), is ignored. The command runs without `HYPERION_HEAVY_PRIORITY`.
 [positional-arguments]
 _locked +cmd:
@@ -409,24 +410,49 @@ _locked +cmd:
     }
     first="${HYPERION_HEAVY_PRIORITY:-}"
     unset HYPERION_HEAVY_PRIORITY
-    # Remove the priority file if it names this run (and not another run with priority since).
-    give_up() { if [[ "$(cat "$priority" 2>/dev/null || true)" == "$$" ]]; then rm -f "$priority"; fi; }
+    # End the wait's background jobs, and remove the priority file if it names this run (and not
+    # another run with priority since). On a hangup, an interrupt or a termination too: a shell that
+    # traps none of them ends at once, skipping its EXIT trap.
+    renewing=""
+    locking=""
+    give_up() {
+        local named=""
+        for job in $renewing $locking; do kill "$job" 2>/dev/null || true; done
+        renewing=""
+        locking=""
+        { IFS= read -r named <"$priority"; } 2>/dev/null || true
+        if [[ "$named" == "$$" ]]; then rm -f "$priority"; fi
+    }
     if [[ "$first" == 1 ]]; then
+        # The traps first, so that no signal finds the file written and no trap to remove it. A
+        # signal's trap ignores the next ones at once (the group's signal and `just`'s passing it on
+        # both arrive), so that none cuts its clean-up short.
+        trap give_up EXIT
+        trap 'trap "" HUP INT TERM; give_up; exit 129' HUP
+        trap 'trap "" HUP INT TERM; give_up; exit 130' INT
+        trap 'trap "" HUP INT TERM; give_up; exit 143' TERM
         echo "$$" >"$priority.$$"
         mv -f "$priority.$$" "$priority"
-        trap give_up EXIT
     fi
     if [[ "$first" == 1 ]] && ! flock -n 9; then
         echo "waiting, with priority, for another heavy test run to finish (lock {{ heavy_lock }})..." >&2
         waited=$SECONDS
-        renewed=$SECONDS
-        until flock -n 9; do
-            sleep 2
-            if (( SECONDS - renewed >= 30 )); then
-                touch "$priority"
-                renewed=$SECONDS
-            fi
-        done
+        # The file is renewed beside the wait by a loop without the lock's descriptor or the output's
+        # (its last `sleep` may outlive it), and only while it still names this run, since `touch`
+        # would make it anew. The wait itself blocks on the lock, as a waiter of before this rule
+        # does, in the background, so that a signal ends it at once (bash runs a trap only once its
+        # foreground command ends).
+        (
+            exec 9>&- </dev/null >/dev/null 2>&1
+            while sleep 30; do
+                if [[ "$(cat "$priority" 2>/dev/null || true)" == "$$" ]]; then touch "$priority"; fi
+            done
+        ) &
+        renewing=$!
+        flock 9 &
+        locking=$!
+        wait "$locking"
+        locking=""
         echo "lock taken after $((SECONDS - waited)) s of waiting, running: $*" >&2
     elif [[ "$first" != 1 ]] && { [[ -n "$(ahead)" ]] || ! flock -n 9; }; then
         echo "waiting for another heavy test run to finish (lock {{ heavy_lock }})..." >&2
@@ -444,7 +470,7 @@ _locked +cmd:
     fi
     if [[ "$first" == 1 ]]; then
         give_up
-        trap - EXIT
+        trap - EXIT HUP INT TERM
     fi
     held=$SECONDS
     status=0
