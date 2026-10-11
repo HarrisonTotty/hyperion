@@ -2386,6 +2386,142 @@ impl BrownDwarfGrid {
     }
 }
 
+/// The tables' every bit as a file's bytes and back, for the copy the sky's tests share within a
+/// nextest run ([`crate::sky::testing::shared`]). Test support only: the library does no I/O.
+///
+/// The payload, in [`WordWriter`]'s little-endian words: the time (whole seconds, as the bits of
+/// the `i64`, then nanoseconds), the solar radius, the layout (its length; per component its first
+/// bin, its bins' means and its radial means), then the functions (their count; per function its
+/// snapshots' count; per snapshot its light and counts brighter, its stars beyond, dark and
+/// remnant, its colour sums, four to an edge, and the pair correction's light, σ and clamp). Each
+/// list is preceded by its length and capacity, so that the decoded tables own the heap the
+/// encoded ones did ([`LuminosityTables::heap_bytes`]). The structs are taken apart in full, so
+/// that a field added to any of them fails to compile here until the codec writes it.
+#[cfg(test)]
+pub(crate) mod file {
+    use super::{Applied, ComponentBins, LuminosityFunction, LuminosityTables, Snapshot};
+    use crate::sky::testing::shared::{WordReader, WordWriter};
+    use crate::time::UniverseTime;
+
+    /// The bytes of `tables`' file.
+    ///
+    /// # Panics
+    ///
+    /// If a value of the tables is a NaN, whose bits are unspecified ([`WordWriter::float`]).
+    #[must_use]
+    pub(crate) fn encode(tables: &LuminosityTables) -> Vec<u8> {
+        let LuminosityTables {
+            time,
+            solar_radius,
+            layout,
+            functions,
+        } = tables;
+        let mut w = WordWriter::with_capacity(tables.heap_bytes() + 64 * layout.len());
+        w.word(time.seconds().cast_unsigned());
+        w.word(u64::from(time.subsec_nanos()));
+        w.float(*solar_radius);
+        w.lengths(layout.len(), layout.capacity());
+        for bins in layout {
+            let ComponentBins {
+                first,
+                means,
+                radial_means,
+            } = bins;
+            w.count(*first);
+            w.floats(means);
+            w.floats(radial_means);
+        }
+        w.lengths(functions.len(), functions.capacity());
+        for function in functions {
+            let LuminosityFunction { snapshots } = function;
+            w.lengths(snapshots.len(), snapshots.capacity());
+            for snapshot in snapshots {
+                let Snapshot {
+                    light_fainter,
+                    count_brighter,
+                    beyond,
+                    dark,
+                    remnants,
+                    colour_fainter,
+                    pair,
+                } = snapshot;
+                w.floats(light_fainter);
+                w.floats(count_brighter);
+                w.float(*beyond);
+                w.float(*dark);
+                w.float(*remnants);
+                w.lengths(colour_fainter.len(), colour_fainter.capacity());
+                for &sums in colour_fainter {
+                    for value in sums {
+                        w.float(value);
+                    }
+                }
+                let Applied {
+                    light,
+                    sigma,
+                    clamped,
+                } = pair;
+                w.float(*light);
+                w.float(*sigma);
+                w.float(*clamped);
+            }
+        }
+        w.finish()
+    }
+
+    /// The tables of a file [`encode`] wrote, or `None` for any other bytes: a damaged, cut or
+    /// lengthened file, or one of another format ([`WordReader::open`]). Each list is allocated at
+    /// the capacity written ([`WordReader::list`]).
+    #[must_use]
+    pub(crate) fn decode(bytes: &[u8]) -> Option<LuminosityTables> {
+        let mut r = WordReader::open(bytes)?;
+        let seconds = r.word()?.cast_signed();
+        let nanos = u32::try_from(r.word()?).ok()?;
+        let time = UniverseTime::new(seconds, nanos).ok()?;
+        let solar_radius = r.float()?;
+        let layout = r.list(|r| {
+            Some(ComponentBins {
+                first: r.count()?,
+                means: r.floats()?,
+                radial_means: r.floats()?,
+            })
+        })?;
+        let functions = r.list(|r| {
+            Some(LuminosityFunction {
+                snapshots: r.list(snapshot)?,
+            })
+        })?;
+        r.end()?;
+        Some(LuminosityTables {
+            time,
+            solar_radius,
+            layout,
+            functions,
+        })
+    }
+
+    fn snapshot(r: &mut WordReader<'_>) -> Option<Snapshot> {
+        let light_fainter = r.floats()?;
+        let count_brighter = r.floats()?;
+        let (beyond, dark, remnants) = (r.float()?, r.float()?, r.float()?);
+        let colour_fainter = r.list(|r| Some([r.float()?, r.float()?, r.float()?, r.float()?]))?;
+        let pair = Applied {
+            light: r.float()?,
+            sigma: r.float()?,
+            clamped: r.float()?,
+        };
+        Some(Snapshot {
+            light_fainter,
+            count_brighter,
+            beyond,
+            dark,
+            remnants,
+            colour_fainter,
+            pair,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::float::assert_same_bits;
@@ -2731,6 +2867,98 @@ mod tests {
     /// (R06.T5.e). It moves with [`SERIAL_FINGERPRINT`]: generator version 21 moved it from
     /// `0x9bc9_1279_f62c_9962`.
     const PAIR_SERIAL_FINGERPRINT: u64 = 0xc6c9_59ed_9001_fd37;
+
+    /// The shared tables' file holds every bit of a build: [`file::decode`] of [`file::encode`] is
+    /// the build bit for bit, time included, and encodes again to the same bytes. A file with a
+    /// byte changed, cut short or lengthened is refused. It runs on a coarse build of two
+    /// components, so that it is quick, and on the dark tables; the full tables' file is checked
+    /// against a fresh build in `the_shared_tables_are_a_fresh_build_bit_for_bit`.
+    #[test]
+    fn the_tables_file_holds_every_bit_and_refuses_a_damaged_one() {
+        let galaxy = milky_way_galaxy();
+        let options = BuildOptions {
+            samples_per_phase: 2,
+            ..BuildOptions::STANDARD
+        };
+        let ids = [Population::Halo, Population::Bulge].map(|p| component_of(galaxy, p));
+        let tables = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &ids, options);
+        let bytes = file::encode(&tables);
+        let back = file::decode(&bytes).expect("a whole file");
+        assert_eq!(bits(&back), bits(&tables));
+        assert_eq!(back.time, tables.time);
+        assert_eq!(back.heap_bytes(), tables.heap_bytes());
+        assert_eq!(file::encode(&back), bytes);
+        for at in [
+            0,
+            8,
+            16,
+            24,
+            bytes.len() / 2,
+            bytes.len() - 9,
+            bytes.len() - 1,
+        ] {
+            let mut damaged = bytes.clone();
+            damaged[at] ^= 0x01;
+            assert!(file::decode(&damaged).is_none(), "byte {at} changed");
+        }
+        assert!(
+            file::decode(&bytes[..bytes.len() - 8]).is_none(),
+            "cut short"
+        );
+        let mut long = bytes.clone();
+        long.extend_from_slice(&[0; 8]);
+        assert!(file::decode(&long).is_none(), "lengthened");
+        let dark = LuminosityTables::dark(galaxy);
+        let back = file::decode(&file::encode(&dark)).expect("a whole file");
+        assert_eq!(bits(&back), bits(&dark));
+    }
+
+    /// The full tables the sky's tests share ([`milky_way_tables`]) are a fresh build's bit for
+    /// bit, as is the file they are shared through, and they own the heap a fresh build does.
+    /// Under nextest this process either read the shared tables from this run's file, written by
+    /// another process of the binary, or built them and wrote the file; either way the file is
+    /// read back and compared here. Outside nextest (`cargo test`), or where the sharing failed,
+    /// the shared tables are this process's own build, and only the fresh build's file is
+    /// compared. The bits are some nine million words, so a difference is reported by what
+    /// differs, not printed.
+    ///
+    /// [`milky_way_tables`]: crate::sky::testing::milky_way_tables
+    #[test]
+    fn the_shared_tables_are_a_fresh_build_bit_for_bit() {
+        use crate::sky::testing::shared::{Sharing, read_shared};
+        use crate::sky::testing::{MILKY_WAY_TABLES_FILE, milky_way_tables_shared};
+        let (shared_tables, sharing) = milky_way_tables_shared();
+        let fresh = LuminosityTables::build(milky_way_galaxy());
+        let expected = bits(&fresh);
+        assert!(bits(shared_tables) == expected, "the shared tables differ");
+        assert_eq!(shared_tables.heap_bytes(), fresh.heap_bytes());
+        // The file's bytes hold every length and the time's nanoseconds too.
+        let bytes = file::encode(&fresh);
+        assert!(
+            file::encode(shared_tables) == bytes,
+            "the shared tables' bytes differ"
+        );
+        let back = file::decode(&bytes).expect("a whole file");
+        assert!(bits(&back) == expected, "a fresh build's file differs");
+        assert!(
+            file::encode(&back) == bytes,
+            "a fresh build's file re-encodes otherwise"
+        );
+        assert_eq!(back.heap_bytes(), fresh.heap_bytes());
+        drop(back);
+        match sharing {
+            Sharing::Read | Sharing::Written => {
+                let from_file = read_shared(MILKY_WAY_TABLES_FILE, file::decode)
+                    .expect("the file this process read or wrote");
+                assert!(bits(&from_file) == expected, "this run's file differs");
+                assert!(
+                    file::encode(&from_file) == bytes,
+                    "this run's file re-encodes otherwise"
+                );
+            }
+            Sharing::Unshared => {}
+        }
+    }
 
     #[test]
     fn parallel_build_equals_serial() {

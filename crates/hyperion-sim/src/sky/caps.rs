@@ -3479,9 +3479,12 @@ mod tests {
         );
         let cut = Magnitudes::new(7.95);
         let (tables, envelope) = (milky_way_tables(), milky_way_envelope());
+        // One measure of the caps, compared with the joined rays' here and with the counts in
+        // parts below: each call measures 3,072 rays.
+        let whole = layer_caps(galaxy, tables, envelope, &observer, cut, &mut cache);
         assert_eq!(
             layer_caps_over(galaxy, tables, envelope, &observer, cut, &joined),
-            layer_caps(galaxy, tables, envelope, &observer, cut, &mut cache)
+            whole
         );
         let visibility = EyeVisibility::uniform(observer, crate::sky::EyeObserver::default(), cut);
         let seen =
@@ -3500,7 +3503,6 @@ mod tests {
         // The count in parts of rays, out of order and of uneven sizes, joined, with its caps
         // drawn a layer at a time, is the count of one job bit for bit, at a uniform cut and by
         // the eye's visibility: the server's count jobs and cap jobs (R06.T11.g).
-        let whole = layer_caps(galaxy, tables, envelope, &observer, cut, &mut cache);
         let in_parts = |plan: CapCountPlan| -> Vec<LayerCap> {
             assert_eq!(plan.rays(), CAP_RAYS);
             let parts = [1_000..CAP_RAYS, 0..1, 1..1, 1..1_000]
@@ -3624,9 +3626,11 @@ mod tests {
         let observer = observer_at([0.0, 26_000.0, 68.0]);
         let mut cache = NoiseCache::with_capacity(1 << 10);
         let rays = RayExtinctions::measure(galaxy, observer.position(), CAP_RAYS, &mut cache);
+        // The rays' profile is checked before any table is read, so the dark tables refuse it
+        // alike.
         let _ = layer_caps_over(
             galaxy,
-            milky_way_tables(),
+            crate::sky::testing::milky_way_dark_tables(),
             milky_way_envelope(),
             &observer,
             Magnitudes::new(7.95),

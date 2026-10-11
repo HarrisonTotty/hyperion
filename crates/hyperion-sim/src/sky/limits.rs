@@ -1973,7 +1973,8 @@ mod tests {
         illuminance_of_magnitude, luminance, mesopic_weight, surface_brightness,
     };
     use crate::sky::testing::{
-        milky_way_envelope, milky_way_offsets, milky_way_tables, sun_illumination, uniforms,
+        milky_way_dark_context, milky_way_envelope, milky_way_offsets, milky_way_tables,
+        sun_illumination, uniforms,
     };
     use crate::time::UniverseTime;
     use crate::units::{Kelvin, LightYears, MagnitudesPerArcsec2};
@@ -2083,11 +2084,20 @@ mod tests {
     /// The stars a census near the Sun lists brighter than `cut` within `radius_ly`, every cap
     /// forced to it, with no eye.
     fn listed_near_the_sun(cut: f64, radius_ly: f64) -> Vec<SkyStar> {
+        listed_near_the_sun_on(context(), cut, radius_ly)
+    }
+
+    /// [`listed_near_the_sun`] on `ctx`'s tables: the same stars on any, the dark tables included,
+    /// since a census with forced caps reads only the envelope.
+    fn listed_near_the_sun_on(
+        mut ctx: SkyContext<'static>,
+        cut: f64,
+        radius_ly: f64,
+    ) -> Vec<SkyStar> {
         let galaxy = milky_way_galaxy();
         let query = query(cut)
             .with_caps_forced(LightYears::new(radius_ly))
             .expect("a forced cap");
-        let mut ctx = context();
         let plan = census_plan(galaxy, ctx.tables, ctx.envelope, &query, &mut ctx.noise);
         let mut stars = Vec::new();
         for key in plan.cells() {
@@ -3482,14 +3492,18 @@ mod tests {
     /// The six faces of the band near the Sun at 16² marched for `query`, keeping
     /// [`camera_replies`].
     fn marched(query: &SkyQuery) -> Vec<BandMarch> {
-        let mut ctx = context();
+        marched_on(&mut context(), query)
+    }
+
+    /// [`marched`] on `ctx`'s tables.
+    fn marched_on(ctx: &mut SkyContext<'static>, query: &SkyQuery) -> Vec<BandMarch> {
         CubeFace::ALL
             .iter()
             .map(|&face| {
                 let replies = camera_replies();
                 march_rows(
                     milky_way_galaxy(),
-                    &mut ctx,
+                    ctx,
                     query,
                     replies,
                     &spec(16),
@@ -4043,11 +4057,20 @@ mod tests {
     #[should_panic(expected = "under a glare to V")]
     fn a_glare_to_another_eye_cut_is_refused_by_the_eyes_light() {
         let spec = spec(16);
+        // The cut a texel's light was marched to is checked before its light is read, so the
+        // dark tables' band and census (the stars of `camera_stars`: its caps are forced) refuse
+        // the glare alike.
+        let stars = within_the_radius(&listed_near_the_sun_on(
+            milky_way_dark_context(),
+            CAMERA_CUT,
+            GLARE_RADIUS_LY,
+        ));
         let census = merge_census(
-            [(camera_stars().to_vec(), CensusTallies::default())],
+            [(stars, CensusTallies::default())],
             NonZeroU32::new(MAX_N_MAX).expect("not zero"),
         );
-        let mut band = summed(camera_marches(), &census, &camera_replies()[0]);
+        let marches = marched_on(&mut milky_way_dark_context(), &request(CAMERA_CUT, EYE_CUT));
+        let mut band = summed(&marches, &census, &camera_replies()[0]);
         let glare = Glare::of_listed(
             &observer(),
             census.listed(),

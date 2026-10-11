@@ -1,5 +1,9 @@
 //! The Milky Way fixture's sky tables, built once for every test of the crate that reads them: a
-//! full build of the luminosity tables takes a minute or more.
+//! full build of the luminosity tables takes a minute or more. Under nextest, which runs each test
+//! in a process of its own, the full tables are built once per run and test binary and shared
+//! through a file ([`shared`]).
+
+pub(crate) mod shared;
 
 use std::sync::{Arc, OnceLock};
 
@@ -14,13 +18,30 @@ use crate::time::UniverseTime;
 use super::census::{CellOffsets, NoSkyCellCache, SkyContext};
 use super::dgl::Illumination;
 use super::envelope::BrightnessEnvelope;
-use super::luminosity::LuminosityTables;
+use super::luminosity::{self, LuminosityTables};
 use super::phase::PhaseEnvelope;
 
-/// The fixture's luminosity tables, at the reference time.
+/// The name of the full tables' shared file ([`shared`]).
+pub(crate) const MILKY_WAY_TABLES_FILE: &str = "milky_way_tables";
+
+/// The fixture's luminosity tables, at the reference time: built once per process, and under
+/// nextest once per run and test binary, the run's other processes of the binary reading the
+/// builder's file ([`shared::shared`]) bit for bit.
 pub(crate) fn milky_way_tables() -> &'static LuminosityTables {
-    static TABLES: OnceLock<LuminosityTables> = OnceLock::new();
-    TABLES.get_or_init(|| LuminosityTables::build(milky_way_galaxy()))
+    &milky_way_tables_shared().0
+}
+
+/// [`milky_way_tables`], and how this process came by them.
+pub(crate) fn milky_way_tables_shared() -> &'static (LuminosityTables, shared::Sharing) {
+    static TABLES: OnceLock<(LuminosityTables, shared::Sharing)> = OnceLock::new();
+    TABLES.get_or_init(|| {
+        shared::shared(
+            MILKY_WAY_TABLES_FILE,
+            || LuminosityTables::build(milky_way_galaxy()),
+            luminosity::file::encode,
+            luminosity::file::decode,
+        )
+    })
 }
 
 /// The fixture's brightness envelope: the fitted table, which every galaxy shares, so it costs a
@@ -85,8 +106,19 @@ pub(crate) fn sun_observer() -> Observer {
 
 /// A job's context on the fixture's tables, with a fresh noise cache.
 pub(crate) fn milky_way_context() -> SkyContext<'static> {
+    context_on(milky_way_tables())
+}
+
+/// A job's context on the fixture's dark tables ([`milky_way_dark_tables`]), with a fresh noise
+/// cache: for a test whose refusal comes before any table is read, so that it builds none.
+pub(crate) fn milky_way_dark_context() -> SkyContext<'static> {
+    context_on(milky_way_dark_tables())
+}
+
+/// A job's context on `tables`, with the fixture's envelope and offsets and a fresh noise cache.
+fn context_on(tables: &'static LuminosityTables) -> SkyContext<'static> {
     SkyContext {
-        tables: milky_way_tables(),
+        tables,
         envelope: milky_way_envelope(),
         offsets: milky_way_offsets(),
         noise: NoiseCache::with_capacity(1 << 16),

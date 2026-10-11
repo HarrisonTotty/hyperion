@@ -2220,8 +2220,8 @@ mod tests {
     };
     use crate::sky::eye::surface_brightness;
     use crate::sky::testing::{
-        milky_way_dark_tables, milky_way_envelope, milky_way_offsets, milky_way_tables,
-        sun_illumination,
+        milky_way_dark_context, milky_way_dark_tables, milky_way_envelope, milky_way_offsets,
+        milky_way_tables, sun_illumination,
     };
     use crate::time::UniverseTime;
     use crate::units::consts::RADIANS_PER_DEGREE;
@@ -2988,9 +2988,10 @@ mod tests {
     #[should_panic(expected = "reach past a face of 8 rows")]
     fn rows_past_the_face_are_refused() {
         let mut out = Vec::new();
+        // The rows are checked before any table is read, so the dark tables refuse them alike.
         band_rows(
             milky_way_galaxy(),
-            &mut context(),
+            &mut milky_way_dark_context(),
             &query_at(SUN, 6.5),
             &SkyCensus::empty(),
             &CompleteTo::everywhere(),
@@ -3765,9 +3766,11 @@ mod tests {
     #[test]
     #[should_panic(expected = "is not a radius the march keeps")]
     fn a_reply_the_march_does_not_keep_is_refused() {
+        // The reply's radii are what is refused, which the dark tables' march keeps as the full
+        // tables' does.
         let march = march_rows(
             milky_way_galaxy(),
-            &mut context(),
+            &mut milky_way_dark_context(),
             &query_at(SUN, 6.5),
             [complete_within(100.0), complete_within(400.0)],
             &spec(2),
@@ -4548,9 +4551,10 @@ mod tests {
     #[should_panic(expected = "a cone's band is marched at its query's band")]
     fn a_cones_band_at_another_resolution_is_refused() {
         let cone = Cone::new(UnitVector::X, Degrees::new(10.0)).expect("a cone");
+        // The band is checked before any table is read, so the dark tables refuse it alike.
         let _ = march_rows(
             milky_way_galaxy(),
-            &mut context(),
+            &mut milky_way_dark_context(),
             &cone_query(cone, spec(16)),
             [CompleteTo::everywhere()],
             &spec(8),
