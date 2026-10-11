@@ -63,12 +63,12 @@ pub fn in_the_halo() -> KinematicsDto {
     }
 }
 
-/// A server, a client said hello, and a universe of [`SEED`].
-pub async fn universe() -> (TestServer, TestClient, UniverseIdHex) {
-    let server = TestServer::start().await;
+/// A client of `server` said hello, and a universe of [`SEED`] of its own, named `name`, which no
+/// other universe of the server may have.
+pub async fn universe_on(server: &TestServer, name: &str) -> (TestClient, UniverseIdHex) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Scene", SEED).await.id;
-    (server, client, universe)
+    let universe = client.create_universe(name, SEED).await.id;
+    (client, universe)
 }
 
 /// Sets the universe's ship stand-in and clock, keeping the notifications that arrive meanwhile.

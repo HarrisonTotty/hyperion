@@ -86,9 +86,16 @@ fn request(universe: &UniverseIdHex, system: u64, time: UniverseTime) -> Request
 /// A server, a client that has said hello, and a universe of [`SEED`].
 async fn started() -> (TestServer, TestClient, UniverseIdHex) {
     let server = TestServer::start().await;
-    let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await.id;
+    let (client, universe) = joined(&server, "Kepler Reach").await;
     (server, client, universe)
+}
+
+/// A client of `server` that has said hello, and a universe of [`SEED`] of its own, named `name`,
+/// which no other universe of the server may have.
+async fn joined(server: &TestServer, name: &str) -> (TestClient, UniverseIdHex) {
+    let mut client = server.connected().await;
+    let universe = client.create_universe(name, SEED).await.id;
+    (client, universe)
 }
 
 async fn summary(
@@ -412,9 +419,29 @@ fn assert_summary_is_the_sims(wire: &SystemSummaryDto, stars: &SystemStars) {
     }
 }
 
+/// Pinned systems' summaries on one server: the refusals, every star of pinned systems with their
+/// companions, and a pinned triple's three stars and two orbits, all against the sim's.
+///
+/// Nextest runs each test in its own process, and each server builds its galaxy, 4.4 s with its
+/// full potential in a test build, so the three share one server: each takes a client and a
+/// universe of its own, as it did with a server of its own, and its assertions and their messages
+/// are unchanged. The refusals come first, so that the count of systems they read is what a fresh
+/// server gives them; the others read no count. The cancellation, which needs the galaxy's build
+/// still running, and the cache's test, which counts from a fresh server too, keep a server each. A
+/// server holds one universe of a name, so each property's universe is named apart (no assertion
+/// reads a name), the first keeping its test's.
 #[tokio::test]
-async fn a_pinned_systems_summary_is_the_sims_companions_included() {
-    let (server, mut client, universe) = started().await;
+async fn pinned_summaries_are_the_sims_and_refusals_name_their_field() {
+    let server = TestServer::start().await;
+    a_bad_time_or_an_id_that_names_no_system_is_refused_naming_the_field(&server).await;
+    a_pinned_systems_summary_is_the_sims_companions_included(&server).await;
+    a_pinned_triple_returns_three_stars_and_two_orbits(&server).await;
+    server.stop().await;
+}
+
+/// Run by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared server.
+async fn a_pinned_systems_summary_is_the_sims_companions_included(server: &TestServer) {
+    let (mut client, universe) = joined(server, "Kepler Reach: pinned systems").await;
     let mut shapes = Vec::new();
     for raw in PINNED {
         let stars = sim_stars(raw);
@@ -439,7 +466,6 @@ async fn a_pinned_systems_summary_is_the_sims_companions_included() {
         "the pinned systems are what their names say"
     );
     client.close().await;
-    server.stop().await;
 }
 
 /// A node's total mass, M☉, summed from its stars' masses as a client sums them.
@@ -455,9 +481,10 @@ fn mass_under(nodes: &[HierarchyNodeDto], index: u8) -> f64 {
 /// P11.T13's test: a pinned triple returns three stars and two orbits, each orbit with its whole
 /// element set and its μ, and each star's mass, so that a client can place the stars about each
 /// barycentre as the server does.
-#[tokio::test]
-async fn a_pinned_triple_returns_three_stars_and_two_orbits() {
-    let (server, mut client, universe) = started().await;
+///
+/// Run by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared server.
+async fn a_pinned_triple_returns_three_stars_and_two_orbits(server: &TestServer) {
+    let (mut client, universe) = joined(server, "Kepler Reach: the triple").await;
     let answer = summary(&mut client, &universe, TRIPLE, at_years(0)).await;
     assert_eq!(answer.stars.len(), 3);
     assert_eq!(
@@ -519,12 +546,12 @@ async fn a_pinned_triple_returns_three_stars_and_two_orbits() {
     assert_eq!(pairs, 2);
     assert_summary_is_the_sims(&answer, &sim_stars(TRIPLE));
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn a_bad_time_or_an_id_that_names_no_system_is_refused_naming_the_field() {
-    let (server, mut client, universe) = started().await;
+/// Run first by [`pinned_summaries_are_the_sims_and_refusals_name_their_field`] on its shared
+/// server, so that the count of systems it reads is its own.
+async fn a_bad_time_or_an_id_that_names_no_system_is_refused_naming_the_field(server: &TestServer) {
+    let (mut client, universe) = joined(server, "Kepler Reach").await;
     let pinned = PINNED[0];
 
     // A time outside the clock window, either way, or with too many nanoseconds.
@@ -594,7 +621,6 @@ async fn a_bad_time_or_an_id_that_names_no_system_is_refused_naming_the_field() 
         "no refused ID was cached"
     );
     client.close().await;
-    server.stop().await;
 }
 
 /// A cancelled summary ends with exactly one terminal message, and nothing follows it.

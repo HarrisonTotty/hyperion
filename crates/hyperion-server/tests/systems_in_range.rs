@@ -17,7 +17,7 @@ use common::{TestClient, TestServer, pretty_json_frame};
 use hyperion_protocol::{
     Census, ErrorCode, GalacticPosition, LayerStatus, MassLayer, ObjectKindDto, RequestBody,
     RequestError, ResponseBody, ServerMessage, StellarBriefDto, SystemRecord, SystemsInRange,
-    SystemsInRangeRequest, UniverseIdHex, UniverseTime,
+    SystemsInRangeRequest, UniverseIdHex, UniverseInfo, UniverseTime,
 };
 use hyperion_server::limits::MAX_QUERY_CELLS;
 use hyperion_sim::coords::LyCell;
@@ -331,11 +331,79 @@ fn by_id(answer: &SystemsInRange) -> BTreeMap<&str, &SystemRecord> {
         .collect()
 }
 
+/// The range query on one server: what it returns and its census against the sim's, its cache, the
+/// golden answer without briefs, and every field it refuses.
+///
+/// Nextest runs each test in its own process, and each server builds its galaxy, 4.4 s with its
+/// full potential in a test build, as the test builds its own reference ([`galaxy`]), so the
+/// properties below share one server and one reference, built beside the server's: each takes a
+/// client and a universe of its own, as it did with a server of its own, and its assertions and
+/// their messages are unchanged. A server holds one universe of a name, so each property's universe
+/// is named apart (no assertion reads a name), the first keeping its test's.
+///
+/// The order keeps every count a property reads what a fresh server gives it. The golden pins the
+/// server's first universe and its client's second request, so its universe is created first and
+/// its query asked later. Then come the properties whose counts start from nothing: the refusals,
+/// which build no galaxy and generate no cell; the census that admits nothing, which generates no
+/// cell; the cache's, whose first query's cells are the first kept; and the briefs' cold and warm,
+/// whose first briefs are the first built. The rest read no count.
 #[tokio::test]
-async fn every_system_returned_is_inside_the_radius_and_resolves_to_its_own_record() {
+async fn the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use() {
+    // The reference is procedural generation of seconds, so it is built on a thread of its own,
+    // beside the server's build, and joined once the four properties that read none have run: by
+    // then it is built, or nearly, and nothing waits on the runtime while the join does.
+    let reference = std::thread::spawn(|| {
+        galaxy();
+    });
     let server = TestServer::start().await;
+    let mut golden_client = server.connected().await;
+    let golden_universe = golden_client.create_universe("Kepler Reach", SEED).await;
+
+    each_field_it_cannot_use_is_a_bad_request_naming_that_field(&server).await;
+    a_query_over_the_limit_returns_whole_layers_or_none(&server).await;
+    the_answer_echoes_the_request_and_repeats_itself_from_the_cache(&server).await;
+    briefs_are_the_same_cold_and_warm(&server).await;
+    reference.join().expect("the reference galaxy is built");
+    the_answer_to_a_fixed_query_is_the_golden_response(golden_client, &golden_universe).await;
+    every_system_returned_is_inside_the_radius_and_resolves_to_its_own_record(&server).await;
+    a_query_before_the_epoch_drops_only_the_systems_not_yet_born(&server).await;
+    a_system_a_thousand_years_on_has_moved_by_its_velocity(&server).await;
+    a_mass_floor_leaves_the_lighter_layers_out_and_says_so(&server).await;
+    a_lowered_min_layer_returns_the_free_floating_objects(&server).await;
+    a_query_over_the_cell_budget_still_answers(&server).await;
+    a_request_wrong_in_several_ways_is_refused_for_the_first_in_design_note_24s_order(&server)
+        .await;
+    the_edges_of_every_range_are_where_design_note_24_puts_them(&server).await;
+    a_radius_that_is_not_a_number_never_reaches_the_query(&server).await;
+
+    server.stop().await;
+}
+
+/// Answers with briefs on one server: the golden answer with briefs, and briefs on every row of a
+/// query answered in its own job and of one whose briefs are built in chunks.
+///
+/// The two share one server, whose galaxy is 4.4 s with its full potential in a test build, since
+/// nextest runs each test in its own process; each takes a client and a universe of its own, as it
+/// did with a server of its own. The golden pins the server's first universe, so it comes first. A
+/// server holds one universe of a name, so each property's universe is named apart (no assertion
+/// reads a name), the first keeping its test's.
+#[tokio::test]
+async fn answers_with_briefs_are_the_sims_and_the_golden_response() {
+    let server = TestServer::start().await;
+    an_answer_with_briefs_is_the_golden_response(&server).await;
+    a_range_request_with_include_stellar_returns_a_brief_on_every_row(&server).await;
+    server.stop().await;
+}
+
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server.
+async fn every_system_returned_is_inside_the_radius_and_resolves_to_its_own_record(
+    server: &TestServer,
+) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: every system", SEED)
+        .await;
     let query = Query::sunlike();
     let answer = ask(&mut client, &universe.id, &query).await.unwrap();
     assert!(
@@ -396,7 +464,6 @@ async fn every_system_returned_is_inside_the_radius_and_resolves_to_its_own_reco
     assert_answer_is_the_sims(&answer, &sim_query, &result);
 
     client.close().await;
-    server.stop().await;
 }
 
 /// The answer on the wire to one fixed query, pinned under the generator version (plan 04's Risks:
@@ -416,11 +483,14 @@ async fn every_system_returned_is_inside_the_radius_and_resolves_to_its_own_reco
 /// parsed answer, because `serde_json` without `float_roundtrip` reads some of these floats a last
 /// bit out: 16 of this answer's 185 (13 offsets and 3 ages) do not survive a parse and a print, so
 /// a golden of the parse could not see the server move one of them by an ulp.
-#[tokio::test]
-async fn the_answer_to_a_fixed_query_is_the_golden_response() {
-    let server = TestServer::start().await;
-    let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+///
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] with `client` and
+/// `universe`, which it made first on its shared server: the server's first universe, created by
+/// the client's first request, so that the frame's universe and ID are the golden's.
+async fn the_answer_to_a_fixed_query_is_the_golden_response(
+    mut client: TestClient,
+    universe: &UniverseInfo,
+) {
     let mut query = Query::sunlike();
     query.radius_ly = 40.0;
     query.time = at_years(-250);
@@ -483,14 +553,21 @@ async fn the_answer_to_a_fixed_query_is_the_golden_response() {
     golden!("systems_in_range", &golden.finish());
 
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn the_answer_echoes_the_request_and_repeats_itself_from_the_cache() {
-    let server = TestServer::start().await;
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server, before any query there has kept a cell, so that the counts it reads are its own.
+async fn the_answer_echoes_the_request_and_repeats_itself_from_the_cache(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: the cache", SEED)
+        .await;
+    let fresh = server.stats().cells();
+    assert_eq!(
+        (fresh.entries(), fresh.hits()),
+        (0, 0),
+        "asked before any query kept a cell, as on a server of its own: {fresh:?}"
+    );
     let mut query = Query::sunlike();
     query.time = at_years(-250);
     let first = ask(&mut client, &universe.id, &query).await.unwrap();
@@ -518,14 +595,15 @@ async fn the_answer_echoes_the_request_and_repeats_itself_from_the_cache() {
     );
 
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn a_query_before_the_epoch_drops_only_the_systems_not_yet_born() {
-    let server = TestServer::start().await;
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server.
+async fn a_query_before_the_epoch_drops_only_the_systems_not_yet_born(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: before the epoch", SEED)
+        .await;
     let epoch = ask(&mut client, &universe.id, &Query::sunlike())
         .await
         .unwrap();
@@ -596,7 +674,6 @@ async fn a_query_before_the_epoch_drops_only_the_systems_not_yet_born() {
     }
 
     client.close().await;
-    server.stop().await;
 }
 
 /// Asserts that `later` is `earlier` moved by its velocity over `years`, to 10⁻⁶ ly.
@@ -619,11 +696,14 @@ fn assert_moved_by(later: &SystemRecord, earlier: &SystemRecord, years: f64) {
 /// P08.T7.a: over the wire, a system's position a thousand years after the epoch is its epoch
 /// position plus its velocity times the thousand years, to 10⁻⁶ ly, and the velocity is the one
 /// the sim draws.
-#[tokio::test]
-async fn a_system_a_thousand_years_on_has_moved_by_its_velocity() {
-    let server = TestServer::start().await;
+///
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server.
+async fn a_system_a_thousand_years_on_has_moved_by_its_velocity(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: a thousand years on", SEED)
+        .await;
     let mut query = Query::sunlike();
     query.radius_ly = 20.0;
     let epoch = ask(&mut client, &universe.id, &query).await.unwrap();
@@ -657,14 +737,15 @@ async fn a_system_a_thousand_years_on_has_moved_by_its_velocity() {
     }
     assert!(moved > 10, "{moved} systems in both answers");
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn a_mass_floor_leaves_the_lighter_layers_out_and_says_so() {
-    let server = TestServer::start().await;
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server.
+async fn a_mass_floor_leaves_the_lighter_layers_out_and_says_so(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: a mass floor", SEED)
+        .await;
     let mut query = Query::sunlike();
     query.min_layer = MassLayer::C;
     let answer = ask(&mut client, &universe.id, &query).await.unwrap();
@@ -695,18 +776,20 @@ async fn a_mass_floor_leaves_the_lighter_layers_out_and_says_so() {
     assert_answer_is_the_sims(&answer, &sim_query, &result);
 
     client.close().await;
-    server.stop().await;
 }
 
 /// Plan 13, P13.T7: the default request returns no free-floating object, and a lowered
 /// `min_layer` returns them: the brown dwarfs with their briefs, the rogue planets with none but
 /// with their metallicity (P13.T5.d), and the census's substellar lines, all as the sim answers the
 /// same terms.
-#[tokio::test]
-async fn a_lowered_min_layer_returns_the_free_floating_objects() {
-    let server = TestServer::start().await;
+///
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server.
+async fn a_lowered_min_layer_returns_the_free_floating_objects(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: free-floating objects", SEED)
+        .await;
     let mut query = Query::sunlike();
     query.radius_ly = 10.0;
     query.include_stellar = true;
@@ -759,14 +842,15 @@ async fn a_lowered_min_layer_returns_the_free_floating_objects() {
     assert_answer_is_the_sims(&answer, &sim_query, &result);
 
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn a_query_over_the_limit_returns_whole_layers_or_none() {
-    let server = TestServer::start().await;
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server, before any query there has generated a cell, so that the count it reads is its own.
+async fn a_query_over_the_limit_returns_whole_layers_or_none(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: over the limit", SEED)
+        .await;
     // Fifty light-years of the galactic centre expects tens of thousands of systems in layer E
     // alone, so nothing fits under a limit of 5,000: a valid answer with no systems, not an error
     // (design note 13).
@@ -790,14 +874,15 @@ async fn a_query_over_the_limit_returns_whole_layers_or_none() {
     );
 
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn a_query_over_the_cell_budget_still_answers() {
-    let server = TestServer::start().await;
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server.
+async fn a_query_over_the_cell_budget_still_answers(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: over the cell budget", SEED)
+        .await;
     // Five thousand light-years of the halo, 30,000 ly above the centre: layer E alone would take
     // more than the 262,144 cells one query may visit, so every layer is out for the budget and the
     // answer says which rule stopped it (design note 24).
@@ -828,14 +913,16 @@ async fn a_query_over_the_cell_budget_still_answers() {
     );
 
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn each_field_it_cannot_use_is_a_bad_request_naming_that_field() {
-    let server = TestServer::start().await;
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server, before any request there has built the galaxy or generated a cell, so that the counts
+/// it reads are its own.
+async fn each_field_it_cannot_use_is_a_bad_request_naming_that_field(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: each field refused", SEED)
+        .await;
 
     // A radius wider than the galaxy's root cube.
     let mut wide = Query::sunlike();
@@ -882,7 +969,6 @@ async fn each_field_it_cannot_use_is_a_bad_request_naming_that_field() {
     assert_eq!((stats.cells().entries(), stats.galaxies().builds()), (0, 0));
 
     client.close().await;
-    server.stop().await;
 }
 
 /// One way a request can be wrong, with the code and the field it is refused with.
@@ -894,11 +980,16 @@ type Fault = (fn(&mut Query), ErrorCode, &'static str);
 /// A handler that checked the fields in another order would still name the right field for each
 /// fault alone, so every pair of faults is tried, and then all five at once, mended one at a time
 /// from the front.
-#[tokio::test]
-async fn a_request_wrong_in_several_ways_is_refused_for_the_first_in_design_note_24s_order() {
-    let server = TestServer::start().await;
+///
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server.
+async fn a_request_wrong_in_several_ways_is_refused_for_the_first_in_design_note_24s_order(
+    server: &TestServer,
+) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: several faults", SEED)
+        .await;
     // Not an ID `test_entropy` draws, so no universe has it.
     let unknown = UniverseIdHex::from_u64(0x0bad_0000_0000_0001);
     // Each fault, in design note 24's order.
@@ -964,18 +1055,20 @@ async fn a_request_wrong_in_several_ways_is_refused_for_the_first_in_design_note
     );
 
     client.close().await;
-    server.stop().await;
 }
 
 /// A centre whose offset is not canonical and a radius of zero or below each name their field, and
 /// the edges of every range are where design note 24 puts them: the widest radius is served and the
 /// next float up is not, both ends of the clock window are inside it and a nanosecond beyond either
 /// is outside, and a limit of one system is served.
-#[tokio::test]
-async fn the_edges_of_every_range_are_where_design_note_24_puts_them() {
-    let server = TestServer::start().await;
+///
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server.
+async fn the_edges_of_every_range_are_where_design_note_24_puts_them(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: the edges", SEED)
+        .await;
     let tiny = || {
         let mut query = Query::sunlike();
         query.radius_ly = 1.0;
@@ -1046,14 +1139,15 @@ async fn the_edges_of_every_range_are_where_design_note_24_puts_them() {
     );
 
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn a_radius_that_is_not_a_number_never_reaches_the_query() {
-    let server = TestServer::start().await;
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server.
+async fn a_radius_that_is_not_a_number_never_reaches_the_query(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: a radius not a number", SEED)
+        .await;
 
     // JSON carries no NaN and no infinity, so `1e999` is the nearest a client can come to one. It
     // is not a number JSON holds at all: the frame does not parse, and the lenient probe of design
@@ -1086,7 +1180,6 @@ async fn a_radius_that_is_not_a_number_never_reaches_the_query() {
     assert!(!answer.systems.is_empty());
 
     client.close().await;
-    server.stop().await;
 }
 
 /// The wire's kind of an object, written out here rather than read from the server.
@@ -1191,11 +1284,12 @@ fn assert_briefs_are_the_sims(
     }
 }
 
-#[tokio::test]
-async fn a_range_request_with_include_stellar_returns_a_brief_on_every_row() {
-    let server = TestServer::start().await;
+/// Run by [`answers_with_briefs_are_the_sims_and_the_golden_response`] on its shared server.
+async fn a_range_request_with_include_stellar_returns_a_brief_on_every_row(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: a brief on every row", SEED)
+        .await;
     let galaxy = Galaxy::new(Seed::new(SEED));
     // One query answered in its own job and one wide enough that its briefs are built in chunks.
     for radius_ly in [30.0, 65.0] {
@@ -1226,14 +1320,22 @@ async fn a_range_request_with_include_stellar_returns_a_brief_on_every_row() {
         }
     }
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn briefs_are_the_same_cold_and_warm() {
-    let server = TestServer::start().await;
+/// Run by [`the_range_query_answers_as_the_sim_and_refuses_what_it_cannot_use`] on its shared
+/// server, before any request there has asked for a brief, so that its first answer's briefs are
+/// built cold and the count it reads is its own.
+async fn briefs_are_the_same_cold_and_warm(server: &TestServer) {
     let mut client = server.connected().await;
-    let universe = client.create_universe("Kepler Reach", SEED).await;
+    let universe = client
+        .create_universe("Kepler Reach: briefs cold and warm", SEED)
+        .await;
+    let fresh = server.stats().briefs();
+    assert_eq!(
+        (fresh.entries(), fresh.hits()),
+        (0, 0),
+        "asked before any request asked for a brief, as on a server of its own: {fresh:?}"
+    );
     let mut query = Query::sunlike();
     query.radius_ly = 30.0;
     query.include_stellar = true;
@@ -1255,15 +1357,15 @@ async fn briefs_are_the_same_cold_and_warm() {
         "every row of the second answer was the cache's"
     );
     client.close().await;
-    server.stop().await;
 }
 
 /// A short answer with briefs, pinned whole as the frame arrived (as
 /// `the_answer_to_a_fixed_query_is_the_golden_response` pins one without), new at generator
 /// version 11 (plan 06, P06.T34).
-#[tokio::test]
-async fn an_answer_with_briefs_is_the_golden_response() {
-    let server = TestServer::start().await;
+///
+/// Run first by [`answers_with_briefs_are_the_sims_and_the_golden_response`] on its shared server,
+/// so that its universe is the server's first, as the golden's is.
+async fn an_answer_with_briefs_is_the_golden_response(server: &TestServer) {
     let mut client = server.connected().await;
     let universe = client.create_universe("Kepler Reach", SEED).await;
     let mut query = Query::sunlike();
@@ -1302,5 +1404,4 @@ async fn an_answer_with_briefs_is_the_golden_response() {
     }
     golden!("systems_in_range_briefs", &golden.finish());
     client.close().await;
-    server.stop().await;
 }

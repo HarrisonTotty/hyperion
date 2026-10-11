@@ -140,10 +140,31 @@ fn at(map: &DensityMap, column: u16, row: u16) -> usize {
     usize::from(row) * usize::from(map.width_px) + usize::from(column)
 }
 
+/// A map's geometry and codes on one server: both views at both depths, each with its own codes and
+/// geometry and one raster per view, and the face-on map's centre and corner.
+///
+/// Nextest runs each test in its own process, and each server builds its galaxy, 4.4 s with its
+/// full potential in a test build, so the two share one server: each takes a client and a universe
+/// of its own, as it did with a server of its own, and its assertions and their messages are
+/// unchanged. The views' and depths' comes first, so that the count of maps it reads is what a
+/// fresh server gives it; the centre's reads no count. The other tests that count maps
+/// (`the_young_disc_and_every_population_give_different_maps`,
+/// `a_repeated_request_is_served_from_the_cache`) each ask the face-on map of every population
+/// first and count it as a new entry, or not yet a hit, so they keep a server of their own. A
+/// server holds one universe of a name, so each property's universe is named apart (no assertion
+/// reads a name), the first keeping its test's.
 #[tokio::test]
-async fn both_views_and_both_depths_carry_their_own_codes_and_geometry() {
+async fn a_maps_views_depths_and_centre_carry_their_own_codes_and_geometry() {
     let server = TestServer::start().await;
-    let mut client = connected(&server).await;
+    both_views_and_both_depths_carry_their_own_codes_and_geometry(&server).await;
+    the_centre_pixel_of_a_face_on_map_holds_the_ceiling(&server).await;
+    server.stop().await;
+}
+
+/// Run first by [`a_maps_views_depths_and_centre_carry_their_own_codes_and_geometry`] on its shared
+/// server, so that the count of maps it reads is its own.
+async fn both_views_and_both_depths_carry_their_own_codes_and_geometry(server: &TestServer) {
+    let mut client = connected(server).await;
     let universe = create(&mut client, "Kepler Reach").await;
 
     for view in [MapView::FaceOn, MapView::EdgeOn] {
@@ -188,14 +209,13 @@ async fn both_views_and_both_depths_carry_their_own_codes_and_geometry() {
     assert_eq!(server.stats().maps().entries(), 2);
 
     client.close().await;
-    server.stop().await;
 }
 
-#[tokio::test]
-async fn the_centre_pixel_of_a_face_on_map_holds_the_ceiling() {
-    let server = TestServer::start().await;
-    let mut client = connected(&server).await;
-    let universe = create(&mut client, "Kepler Reach").await;
+/// Run by [`a_maps_views_depths_and_centre_carry_their_own_codes_and_geometry`] on its shared
+/// server.
+async fn the_centre_pixel_of_a_face_on_map_holds_the_ceiling(server: &TestServer) {
+    let mut client = connected(server).await;
+    let universe = create(&mut client, "Kepler Reach: the centre").await;
     let map = map(
         &mut client,
         &universe.id,
@@ -215,7 +235,6 @@ async fn the_centre_pixel_of_a_face_on_map_holds_the_ceiling() {
     assert_eq!(codes[at(&map, 0, 0)], 0);
 
     client.close().await;
-    server.stop().await;
 }
 
 #[tokio::test]

@@ -9,7 +9,7 @@ mod common;
 use common::TestServer;
 use common::scene::{
     SEED, TIME, TenCraft, in_system, in_the_halo, next_scene, set_ship, subscribe, systems,
-    universe,
+    universe_on,
 };
 use hyperion_protocol::{
     CameraReportDto, DetailLevelDto, ErrorCode, FramePositionDto, KinematicsDto, MassLayer,
@@ -20,9 +20,37 @@ use hyperion_server::scene::{CraftState, SceneKnowledge};
 use hyperion_sim::id::BodyId;
 use hyperion_sim::planetary::record::DetailLevel;
 
+/// Scene subscriptions on one server, each in a universe of its own: a scene in a pinned system
+/// holds its bodies as `system_bodies` answers them and its place as the chart has it, beats each
+/// second, is pushed a new ship and rate at once on every subscription and a departure from the
+/// system, and refuses an unknown subscription and a camera out of reach.
+///
+/// Nextest runs each test in its own process, and each server builds its galaxy, 4.4 s with its
+/// full potential in a test build, so the properties below share one server with the default
+/// configuration: each takes a client and a universe of its own, whose ship and clock it sets, as
+/// it did with a server of its own, and its assertions and their messages are unchanged. None reads
+/// a count of the server's, and subscriptions are numbered per connection. A server holds one
+/// universe of a name, so each property's universe is named apart (no assertion reads a name), the
+/// first keeping its test's.
 #[tokio::test]
-async fn a_scene_in_a_pinned_system_holds_every_body_as_system_bodies_answers_them() {
-    let (_server, mut client, universe) = universe().await;
+async fn scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports() {
+    let server = TestServer::start().await;
+    a_scene_in_a_pinned_system_holds_every_body_as_system_bodies_answers_them(&server).await;
+    the_scene_place_agrees_with_the_chart(&server).await;
+    a_heartbeat_comes_each_second_its_sequence_rising_by_one(&server).await;
+    a_new_ship_and_rate_are_pushed_at_once_to_every_subscription_of_the_universe(&server).await;
+    moving_the_stand_in_out_of_the_system_pushes_no_system(&server).await;
+    an_unknown_subscription_and_a_camera_out_of_reach_are_refused_naming_their_fields(&server)
+        .await;
+    server.stop().await;
+}
+
+/// Run by [`scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports`] on its
+/// shared server, in a universe of its own.
+async fn a_scene_in_a_pinned_system_holds_every_body_as_system_bodies_answers_them(
+    server: &TestServer,
+) {
+    let (mut client, universe) = universe_on(server, "Scene").await;
     let [system, _] = systems();
     set_ship(&mut client, &universe, in_system(&system), 0).await;
     let (_, state) = subscribe(&mut client, &universe, DetailLevelDto::Full).await;
@@ -52,9 +80,10 @@ async fn a_scene_in_a_pinned_system_holds_every_body_as_system_bodies_answers_th
     assert_eq!(state.sequence, 0);
 }
 
-#[tokio::test]
-async fn the_scene_place_agrees_with_the_chart() {
-    let (_server, mut client, universe) = universe().await;
+/// Run by [`scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports`] on its
+/// shared server, in a universe of its own.
+async fn the_scene_place_agrees_with_the_chart(server: &TestServer) {
+    let (mut client, universe) = universe_on(server, "Scene: place").await;
     let [system, _] = systems();
     set_ship(&mut client, &universe, in_system(&system), 0).await;
     let (_, state) = subscribe(&mut client, &universe, DetailLevelDto::Contact).await;
@@ -97,9 +126,10 @@ async fn the_scene_place_agrees_with_the_chart() {
     }
 }
 
-#[tokio::test]
-async fn a_heartbeat_comes_each_second_its_sequence_rising_by_one() {
-    let (_server, mut client, universe) = universe().await;
+/// Run by [`scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports`] on its
+/// shared server, in a universe of its own.
+async fn a_heartbeat_comes_each_second_its_sequence_rising_by_one(server: &TestServer) {
+    let (mut client, universe) = universe_on(server, "Scene: heartbeat").await;
     let [system, _] = systems();
     set_ship(&mut client, &universe, in_system(&system), 0).await;
     let (subscription, _) = subscribe(&mut client, &universe, DetailLevelDto::Bulk).await;
@@ -116,9 +146,12 @@ async fn a_heartbeat_comes_each_second_its_sequence_rising_by_one() {
     }
 }
 
-#[tokio::test]
-async fn a_new_ship_and_rate_are_pushed_at_once_to_every_subscription_of_the_universe() {
-    let (server, mut first, universe) = universe().await;
+/// Run by [`scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports`] on its
+/// shared server, in a universe of its own.
+async fn a_new_ship_and_rate_are_pushed_at_once_to_every_subscription_of_the_universe(
+    server: &TestServer,
+) {
+    let (mut first, universe) = universe_on(server, "Scene: new ship and rate").await;
     let [system, _] = systems();
     set_ship(&mut first, &universe, in_system(&system), 0).await;
     let mut second = server.connected().await;
@@ -151,9 +184,10 @@ async fn a_new_ship_and_rate_are_pushed_at_once_to_every_subscription_of_the_uni
     }
 }
 
-#[tokio::test]
-async fn moving_the_stand_in_out_of_the_system_pushes_no_system() {
-    let (_server, mut client, universe) = universe().await;
+/// Run by [`scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports`] on its
+/// shared server, in a universe of its own.
+async fn moving_the_stand_in_out_of_the_system_pushes_no_system(server: &TestServer) {
+    let (mut client, universe) = universe_on(server, "Scene: departure").await;
     let [system, _] = systems();
     set_ship(&mut client, &universe, in_system(&system), 0).await;
     let (_, state) = subscribe(&mut client, &universe, DetailLevelDto::Bulk).await;
@@ -172,9 +206,12 @@ async fn moving_the_stand_in_out_of_the_system_pushes_no_system() {
     assert_eq!(departure.ship, Some(in_the_halo()));
 }
 
-#[tokio::test]
-async fn an_unknown_subscription_and_a_camera_out_of_reach_are_refused_naming_their_fields() {
-    let (_server, mut client, universe) = universe().await;
+/// Run by [`scene_subscriptions_hold_their_system_beat_and_push_and_refuse_bad_reports`] on its
+/// shared server, in a universe of its own.
+async fn an_unknown_subscription_and_a_camera_out_of_reach_are_refused_naming_their_fields(
+    server: &TestServer,
+) {
+    let (mut client, universe) = universe_on(server, "Scene: refusals").await;
     let [system, other] = systems();
     set_ship(&mut client, &universe, in_system(&system), 0).await;
     let (subscription, _) = subscribe(&mut client, &universe, DetailLevelDto::Bulk).await;
@@ -253,7 +290,6 @@ async fn craft_are_pushed_at_64_hz_each_push_stating_its_time() {
     .await;
     let mut client = server.connected().await;
     let universe = client.create_universe("Scene", SEED).await.id;
-    let [system, _] = systems();
     set_ship(&mut client, &universe, in_system(&system), 1).await;
     let (_, state) = subscribe(&mut client, &universe, DetailLevelDto::Bulk).await;
     assert_eq!(
