@@ -69,7 +69,9 @@
 //! A mountain belt's ridged term lives above the spectrum's break, and a belt has its own
 //! spectral shape (`decision-r09-t5.md` item 7). Both are functions of octave m's lattice spacing
 //! in break wavelengths, x = `λ_m` ÷ `λ_b` = √(3π ÷ 2) `l_b` ÷ (2π 2^m), which is free of the
-//! radius:
+//! radius. It is a spacing, not a wavelength: the octave's band runs from 4/3 to 8/3 of its
+//! spacing (its median 1.9, "The octaves" above), so a figure in x compares with an observed
+//! valley spacing only after that factor:
 //!
 //! - the ridged share `ρ_m`, a cubic smoothstep in ln x from 0 at x = ½ and below to 1 at x = 1
 //!   and above. The ridges and valleys are a belt's dissected kilometre-scale structure; below the
@@ -85,9 +87,9 @@
 //! On the Earth-like world's spectrum a full belt (a = 2.5, b = 1) has adirectional RMS slopes of
 //! 37.9°, 37.5°, 36.1° and 26.0° over 1 m, 10 m, 100 m and 1 km (the ruling's 37.6°, 37.2°, 35.9°
 //! and 26.0°), inside the cores of real belts ([`BELT_VALLEY_GAIN`]); with the ridged term at
-//! every octave and no shape it measured 52.3°, 47.1° and 37.7° over 1, 10 and 100 m. The plain and ridged terms have their own
-//! unit-variance structure functions, pinned as tables ([`PLAIN_STRUCTURE`],
-//! [`RIDGED_STRUCTURE`]), which the closed forms sum octave by octave.
+//! every octave and no shape it measured 52.3°, 47.1° and 37.7° over 1, 10 and 100 m. The plain
+//! and ridged terms have their own unit-variance structure functions, pinned as tables
+//! ([`PLAIN_STRUCTURE`], [`RIDGED_STRUCTURE`]), which the closed forms sum octave by octave.
 //!
 //! # The warp
 //!
@@ -503,12 +505,14 @@ impl UnitStructure {
     }
 }
 
-/// The plain term n̂'s unit-variance structure function ([`UnitStructure`]): D(r) ÷ σ² at
-/// [`STRUCTURE_LAGS`], measured on R05's noise basis over 4 × 10⁶ samples (R09.T5's second
-/// follow-up; `the_terms_structure_functions_are_pinned` re-measures it, slow). It rises as
+/// The plain term n̂'s unit-variance structure function ([`UnitStructure`]).
+///
+/// D(r) ÷ σ² at [`STRUCTURE_LAGS`], measured on R05's noise basis over 4 × 10⁶ samples (R09.T5's
+/// second follow-up; `the_terms_structure_functions_are_pinned` re-measures it, slow). It rises as
 /// (2.61 r)² at small lags, the noise's gradient along a tangent at unit RMS being 2.61 per
-/// lattice spacing, and overshoots 2 at about a spacing. The ruling's replica of the noise
-/// measured 2% more at small lags (its 0.0173 at 0.05 spacings), normalised by its own RMS.
+/// lattice spacing, and overshoots 2 at about a spacing. The ruling's table, from its own replica
+/// of the noise normalised by that replica's measured RMS (0.2691, against R05's pinned
+/// [`NOISE_RMS`]), is 2% higher at small lags (0.0173 at 0.05 spacings).
 pub const PLAIN_STRUCTURE: UnitStructure = UnitStructure {
     values: [
         6.795e-4, 2.717e-3, 0.01693, 0.06698, 0.2567, 0.5385, 1.209, 1.867, 2.118, 2.032, 2.000,
@@ -516,12 +520,14 @@ pub const PLAIN_STRUCTURE: UnitStructure = UnitStructure {
     ],
 };
 
-/// The weighted ridged term r̃'s unit-variance structure function ([`UnitStructure`]): D(r) ÷ σ²
-/// at [`STRUCTURE_LAGS`], measured on R05's noise basis with the octave above's weight over
-/// 4 × 10⁶ samples (R09.T5's second follow-up; `the_terms_structure_functions_are_pinned`
+/// The weighted ridged term r̃'s unit-variance structure function ([`UnitStructure`]).
+///
+/// D(r) ÷ σ² at [`STRUCTURE_LAGS`], measured on R05's noise basis with the octave above's weight
+/// over 4 × 10⁶ samples (R09.T5's second follow-up; `the_terms_structure_functions_are_pinned`
 /// re-measures it, slow). At small lags it is 2.7 times the plain term's, the ridged term's
 /// gradient variance being that much larger at the same RMS height, which is why a belt's ridged
-/// octaves stop at the break; it reaches 2 by three quarters of a spacing.
+/// octaves stop at the break; it reaches 2 by three quarters of a spacing. The ruling's replica
+/// gives 2.64 times at small lags and 1–3% less than 2 at long lags (1.95–1.98).
 pub const RIDGED_STRUCTURE: UnitStructure = UnitStructure {
     values: [
         1.822e-3, 7.272e-3, 0.04482, 0.1714, 0.5911, 1.085, 1.808, 2.026, 2.001, 1.998, 2.003,
@@ -582,15 +588,17 @@ pub const ACTIVE_AMPLITUDE: f64 = 1.0;
 ///
 /// Oceanic crust's amplitude is `a_h` = min((H ÷ `H_REF`)^0.6, [`BELT_AMPLITUDE`]) of its hill
 /// relief H ([`SynthesisCell::hill_relief`]): the exponent ([`HILL_AMPLITUDE_EXPONENT`]) and the
-/// reference reconcile two of GMRT's measures of the floor against Earth's global mean (the grid
-/// of Ryan et al. 2009, G³ 10, Q03014, doi:10.1029/2008GC002332, at 61 m; R09.T5's science check
-/// and the ruling's). On the slow-spreading Mid-Atlantic Ridge's flank, H 223 m (item 5's H₀ at a
-/// half-rate of 14 mm a⁻¹), the floor measures 2.3 of the reference in 10 km windows and 1.35 in
-/// its 122 m slopes, and this gives 1.67; on the fast East Pacific Rise's, H 55–62 m, 0.8 and
-/// 0.78, and this gives 0.72–0.77; on the old fast Pacific floor, draped to 28 m, 0.6 in its
-/// 122 m slopes, and this gives 0.48. Goff 1991 (JGR 96, 21713, doi:10.1029/91JB02275) finds the
-/// slowest spreading the roughest. A style per band is the lever if R10 finds the slow floor's
-/// 10 km relief short. Medium confidence.
+/// reference reconcile two of GMRT's measures of the floor against Earth's global mean (the grid of
+/// Ryan et al. 2009, G³ 10, Q03014, doi:10.1029/2008GC002332, at 61 m; R09.T5's science check and
+/// the ruling's). On the slow-spreading Mid-Atlantic Ridge's flank, H about 236 m (Goff, Smith and
+/// Marks 2004, Oceanography 17(1), 24–37, Table 2: 235.8 m on the northern MAR; 230 ± 7 m from Webb
+/// and Jordan 1993 as the ruling cites them; `decision-r09-t5.md` item 8, item 5's fit giving 223 m
+/// at its 14 mm a⁻¹ half-rate), the floor measures 2.3 of the reference in 10 km windows and 1.35
+/// in its 122 m slopes, and this gives 1.73; on the fast East Pacific Rise's, H 55–62 m, 0.8 and
+/// 0.78, and this gives 0.72–0.77; on the old fast Pacific floor, draped to 28 m, 0.6 in its 122 m
+/// slopes, and this gives 0.48. Goff 1991 (JGR 96, 21713, doi:10.1029/91JB02275) finds the slowest
+/// spreading the roughest. A style per band is the lever if R10 finds the slow floor's 10 km relief
+/// short. Medium confidence.
 pub const H_REF: Metres = Metres::new(95.0);
 
 /// The exponent of oceanic crust's amplitude in its hill relief, 0.6 ([`H_REF`]).
@@ -632,12 +640,14 @@ pub const MAX_AMPLITUDE: f64 = BELT_AMPLITUDE;
 /// documentation's "The belts").
 ///
 /// Real belts concentrate their relief at the ridge–valley wavelength and hold their hillslopes
-/// near threshold below it. Eight tiles of SRTM's 1″ grid (Farr et al. 2007, Rev. Geophys. 45,
-/// RG2004, doi:10.1029/2005RG000183) over the Khumbu, Annapurna, the Yarlung Tsangpo gorge,
-/// Aconcagua, southern Peru, Valais and Uri, in 0.1° blocks of at least 2,000 m relief (the cores
-/// of active belts), have adirectional RMS slopes of 34.8–41.5° at 31 m, 32.0–38.6° at 93 m,
-/// 29.0–34.8° at 309 m and 23.2–28.6° at 1 km, and a mean slope that barely changes from 31 to
-/// 300 m (the ruling's measurements). That is the threshold behaviour Montgomery and Brandon 2002
+/// near threshold below it. The ruling measured eight tiles of SRTM's 1″ grid (Farr et al. 2007,
+/// Rev. Geophys. 45, RG2004, doi:10.1029/2005RG000183) over the Khumbu, Annapurna, the Yarlung
+/// Tsangpo gorge (two), Aconcagua, southern Peru, Valais and Uri, in 0.1° blocks of at least
+/// 2,000 m relief (the cores of active belts). Six of them have adirectional RMS slopes of
+/// 34.8–41.5° at 31 m, 32.0–38.6° at 93 m, 29.0–34.8° at 309 m and 23.2–28.6° at 1 km; the ruling
+/// leaves out Annapurna's RMS, which void-fill spikes inflate (53° at 31 m, its mean slope 32°),
+/// and southern Peru's Altiplano margin (25.6° at 31 m). In all of them the mean slope barely
+/// changes from 31 to 300 m. That is the threshold behaviour Montgomery and Brandon 2002
 /// find in a 10 m DEM (EPSL 201, 481, doi:10.1016/S0012-821X(02)00725-2, p. 483): erosion rate
 /// tracks mean slope up to about 25° and is uncorrelated with it above 30°, with a limiting slope
 /// of 40° in their fit. With the ridged term at every octave and no shape, a full belt measured
@@ -649,13 +659,17 @@ pub const MAX_AMPLITUDE: f64 = BELT_AMPLITUDE;
 /// these octaves, which gives a full belt 37.6°, 37.2°, 35.9° and 26.0° over 1 m, 10 m, 100 m and
 /// 1 km, and 3.2 times the reference style's RMS in 35 km windows, inside the 2.1–3.4 that sets
 /// [`BELT_AMPLITUDE`]; these octaves measure 37.9°, 37.5°, 36.1° and 26.0°, 37.1° at 31 m and
-/// 36.2° at 93 m, and 3.14 times the reference in 35 km windows (R09.T5's second follow-up). Tied to the break wavelength, they carry no gravity term, and belts exist
-/// only on mobile lids. Medium confidence: metre-scale lidar of threshold ranges would test the
-/// 1 m figure (the plan's Risks).
+/// 36.2° at 93 m, and 3.14 times the reference in 35 km windows (R09.T5's second follow-up).
+/// Tied to the break wavelength, they carry no gravity term, and belts exist only on mobile lids.
+/// Medium confidence: metre-scale lidar of threshold ranges would test the 1 m figure (the plan's
+/// Risks).
 pub const BELT_VALLEY_GAIN: f64 = 1.8;
 
-/// The wavelength of a belt's ridge–valley relief, in break wavelengths: 1.5, where its belt
-/// factor peaks at [`BELT_VALLEY_GAIN`], 3 km on a silicate crust (`decision-r09-t5.md` item 7).
+/// The octave spacing of a belt's ridge–valley relief, in break wavelengths: 1.5, where its belt
+/// factor peaks at [`BELT_VALLEY_GAIN`] (`decision-r09-t5.md` item 7).
+///
+/// On a silicate crust that is a lattice spacing of 3 km, whose octave carries wavelengths of
+/// about 4–8 km (the module documentation's "The belts").
 pub const BELT_VALLEY_SCALE: f64 = 1.5;
 
 /// The width of a belt's gain about its ridge–valley wavelength, 0.6 in ln λ: the standard
@@ -663,9 +677,10 @@ pub const BELT_VALLEY_SCALE: f64 = 1.5;
 /// `decision-r09-t5.md` item 7).
 pub const BELT_VALLEY_WIDTH: f64 = 0.6;
 
-/// How much steeper than the reference's a belt's degree variance is below the break, 0.4: β₂
-/// 3.4 against 3.0 on a silicate crust, the belt factor falling as (λ ÷ `λ_b`)^0.2 there, so that
-/// the belt's slopes approach threshold rather than growing towards the band limit
+/// How much steeper than the reference's a belt's degree variance is below the break: 0.4.
+///
+/// β₂ is 3.4 against 3.0 on a silicate crust, the belt factor falling as (λ ÷ `λ_b`)^0.2 there,
+/// so that the belt's slopes approach threshold rather than growing towards the band limit
 /// ([`BELT_VALLEY_GAIN`]; `decision-r09-t5.md` item 7). Below the first-order valley spacing
 /// hillslopes are planar (the land's spectral rollover, Perron, Kirchner and Dietrich 2008, JGR
 /// 113, F04003, doi:10.1029/2007JF000866; and the belt cores' flat mean slope from 31 to 300 m).
@@ -1043,11 +1058,11 @@ fn as_function_of_direction(header: &FieldHeader, dir: [f64; 3], g: [f64; 3]) ->
 }
 
 /// A body's structural octaves, prepared once for its field and detail seed: each octave's RMS
-/// height from the spectrum, its ridged share and belt factor from the spectrum's break, and its
-/// range of octaves (see the module documentation).
+/// height from the spectrum, its ridged share and belt factor from the spectrum's break, the
+/// spectrum's tail beyond them, and its range of octaves (see the module documentation).
 ///
 /// It is plain data, a function of the header and the seed alone, and [`at`](Self::at) reads the
-/// cells' styles from the field it is given, which must be the one whose header made it. At 792
+/// cells' styles from the field it is given, which must be the one whose header made it. At 800
 /// bytes it is `Clone` but not `Copy`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Relief {
@@ -1063,6 +1078,10 @@ pub struct Relief {
     /// The logarithm of each octave's belt factor, ln `g_m`, by index; 0 outside the body's
     /// octaves.
     belt_log_factor: [f64; OCTAVES as usize],
+    /// The reference style's variance of the degrees no octave carries, square metres: those beyond
+    /// the finest octave's Nyquist degree, or every degree beyond the coarse cell's on a body with
+    /// no octave ([`point_variance`](Self::point_variance)).
+    tail_m2: f64,
 }
 
 impl Relief {
@@ -1082,6 +1101,7 @@ impl Relief {
             ridged[at] = ridged_share(ratio);
             belt[at] = belt_log_factor(ratio);
         }
+        let beyond = nyquist_degree(header.level().get()).max(nyquist_degree(finest));
         Self {
             seed,
             first,
@@ -1090,6 +1110,7 @@ impl Relief {
             rms_m,
             ridged_share: ridged,
             belt_log_factor: belt,
+            tail_m2: spectrum.variance_from_degree(beyond).value(),
         }
     }
 
@@ -1144,6 +1165,28 @@ impl Relief {
     #[must_use]
     pub fn belt_factor(&self, m: u8) -> f64 {
         math::exp(self.belt_log_factor[usize::from(m)])
+    }
+
+    /// The relief's expected variance at a point whose interpolated style has amplitude `amplitude`
+    /// and belt weight `belt`, square metres: the sum over the body's octaves, in octave order, of
+    /// (a `g_m`^b)² `σ_m`², plus a² times the reference style's tail beyond the finest
+    /// (`decision-r09-t5.md` item 8).
+    ///
+    /// It is exact: each octave's term has unit variance whatever its ridged mix, and zero mean
+    /// independent of the style. Where b is 0 it is a² [`local_variance`] (to rounding), and on a
+    /// belt more, by the belt's shape. The coarse pass (R09.T12.e) books its area mean over the
+    /// reconstructed field, at the interpolated a and b, as the realised structural share in
+    /// `σ_h`'s budget.
+    #[must_use]
+    pub fn point_variance(&self, amplitude: f64, belt: f64) -> SquareMetres {
+        let mut variance = 0.0;
+        for m in self.first..=self.finest {
+            let at = usize::from(m);
+            let a = amplitude * math::exp(belt * self.belt_log_factor[at]);
+            let sigma = self.rms_m[at];
+            variance += a * a * (sigma * sigma);
+        }
+        SquareMetres::new(variance + amplitude * amplitude * self.tail_m2)
     }
 
     /// The structural octaves at the unit direction `dir`, octaves [`first_octave`] to `through`

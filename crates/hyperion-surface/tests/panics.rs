@@ -388,7 +388,7 @@ fn a_structure_function_at_a_negative_lag_is_refused() {
 
 #[test]
 #[should_panic(expected = "a lag must be non-negative")]
-fn a_structure_function_at_no_lag_is_refused() {
+fn a_structure_function_at_a_nan_lag_is_refused() {
     let _ = RIDGED_STRUCTURE.at(f64::NAN);
 }
 

@@ -595,23 +595,10 @@ fn no_octave_on_a_belt_exceeds_its_stated_bound() {
     }
 }
 
-/// The relief's expected variance at a point of interpolated amplitude `a` and belt weight `b`:
-/// a² (`local` + Σ (`g_m`^(2b) − 1) `σ_m`²), the reference style's `local_variance` lifted octave
-/// by octave by the belt's shape (`decision-r09-t5.md` item 7), exactly a² `local` where b is 0.
-fn expected_variance(relief: &Relief, local: f64, a: f64, b: f64) -> f64 {
-    let mut lift = 0.0;
-    for m in relief.first_octave()..=relief.finest_octave() {
-        let g = math::exp(b * relief.belt_log_factor[usize::from(m)]);
-        let sigma = relief.octave_rms(m).value();
-        lift += (g * g - 1.0) * sigma * sigma;
-    }
-    a * a * (local + lift)
-}
-
 /// The plan's test: over each synthetic world, the sampled variance of the relief is within 5% of
 /// `local_variance` times the mean square of the interpolated amplitude at the same points (1 on a
 /// world of the reference style alone), with each belt point's variance lifted by the belt's
-/// shape ([`expected_variance`]). 6 × 10⁴ points a world, so that the 5% is at least the
+/// shape ([`Relief::point_variance`]). 6 × 10⁴ points a world, so that the 5% is at least the
 /// two-sided z of `stats::ALPHA` (3.29) standard errors of the difference, measured from the
 /// samples as if they were independent (the coarsest octave's few thousand lattice cells over a
 /// small body make them less so).
@@ -635,7 +622,7 @@ fn local_variance_matches_the_sampled_variance_on_each_synthetic_world() {
             let h = relief.at(field, dir, 31, &mut cache).unwrap().height_m;
             let a = smooth(field, dir, Component::Amplitude).unwrap().value;
             let b = smooth(field, dir, Component::Belt).unwrap().value;
-            let at = expected_variance(&relief, local, a, b);
+            let at = relief.point_variance(a, b).value();
             sum += h;
             sum_sq += h * h;
             a_sq += a * a;
@@ -671,6 +658,62 @@ fn local_variance_matches_the_sampled_variance_on_each_synthetic_world() {
             a_sq / count
         );
     }
+}
+
+/// Off the belts the expected variance at a point is the reference style's `local_variance` times
+/// a², to 10⁻¹², on every synthetic world and on a body too small for any octave
+/// (`decision-r09-t5.md` item 8): the octaves' bands and the tail beyond them make the whole.
+#[test]
+fn the_point_variance_off_the_belts_is_the_local_variance() {
+    let tiny = FieldBuilder::new(Metres::new(20.0))
+        .spectrum(BandSpectrum::anchored(
+            SpectrumShape::SILICATE,
+            Metres::new(20.0),
+            Metres::new(1.0),
+        ))
+        .build();
+    let mut fields: Vec<&CoarseField> = SyntheticWorld::ALL.iter().map(|&k| world(k)).collect();
+    fields.push(&tiny);
+    for field in fields {
+        let header = field.header();
+        let relief = Relief::new(header, SEED);
+        let local = local_variance(header.spectrum(), header.level()).value();
+        for a in [1.0, INTERIOR_AMPLITUDE, PLAIN_AMPLITUDE, BELT_AMPLITUDE] {
+            let point = relief.point_variance(a, 0.0).value();
+            let want = a * a * local;
+            if want > 0.0 {
+                assert!(
+                    (point / want - 1.0).abs() < 1e-12,
+                    "{} m: {point} against {want}",
+                    header.radius().value()
+                );
+            } else {
+                assert_same_bits(point, 0.0);
+            }
+        }
+    }
+}
+
+/// The belts lift the Earth-like world's realised structural share above ⟨a²⟩ `local_variance` by
+/// 5.4% ± 0.5% (`decision-r09-t5.md` item 8, the variance test's measure): the area mean of
+/// [`Relief::point_variance`] at the interpolated a and b, over the variance test's 6 × 10⁴
+/// area-uniform points.
+#[test]
+fn the_earth_like_world_s_belts_lift_its_structural_share() {
+    let field = earth();
+    let header = field.header();
+    let relief = Relief::new(header, SEED);
+    let local = local_variance(header.spectrum(), header.level()).value();
+    let (mut a_sq, mut realised) = (0.0, 0.0);
+    for dir in uniform_points(0x6561_7274, 60_000) {
+        let a = smooth(field, dir, Component::Amplitude).unwrap().value;
+        let b = smooth(field, dir, Component::Belt).unwrap().value;
+        a_sq += a * a;
+        realised += relief.point_variance(a, b).value();
+    }
+    let lift = realised / (local * a_sq) - 1.0;
+    println!("the belts lift the realised share by {lift:.4}");
+    assert!((lift - 0.054).abs() <= 0.005, "a lift of {lift}");
 }
 
 /// The structural relief's adirectional RMS slope in `style` over each of `baselines` metres, on
@@ -803,11 +846,14 @@ fn the_reference_style_s_slopes_are_the_ruling_s() {
 /// A full mountain belt's adirectional RMS slopes on the Earth-like world's spectrum (amplitude
 /// 2.5, all belt), against the ruling's 37.6°, 37.2°, 35.9° and 26.0° at 1 m, 10 m, 100 m and 1 km
 /// (`decision-r09-t5.md` item 7, from its planar replica of these octaves), each tangent within
-/// 5% as the reference style's are; and against the belt cores of eight SRTM 1″ tiles of the
-/// Himalaya, the Andes and the Alps, whose RMS slopes are 34.8–41.5° at 31 m, 32.0–38.6° at 93 m
-/// and 23.2–28.6° at 1 km ([`BELT_VALLEY_GAIN`]). With the ridged term at every octave and no
-/// shape it measured 52.3°, 47.1° and 37.7° at 1, 10 and 100 m. 2 × 10⁴ points, so that the 5% is
-/// at least the two-sided z of `stats::ALPHA` standard errors of the sample.
+/// 5% as the reference style's are; and against the belt cores of the ruling's SRTM 1″ tiles of
+/// the Himalaya, the Andes and the Alps, whose RMS slopes are 34.8–41.5° at 31 m, 32.0–38.6° at
+/// 93 m and 23.2–28.6° at 1 km in six of its eight tiles ([`BELT_VALLEY_GAIN`]). With the ridged
+/// term at every octave and no shape it measured 52.3°, 47.1° and 37.7° at 1, 10 and 100 m.
+///
+/// A fast test, where the ruling lists it slow at 10%: at 2 × 10⁴ points the 5% on the tangent,
+/// tighter than 10% in degrees, is at least the two-sided z of `stats::ALPHA` standard errors of
+/// the sample.
 #[test]
 fn a_full_belt_s_slopes_are_the_ruling_s_and_the_belt_cores() {
     let baselines = [1.0, 10.0, 31.0, 93.0, 100.0, 1_000.0];
@@ -929,11 +975,18 @@ fn the_ridged_share_and_the_belt_factor_are_continuous_and_the_ruling_s() {
     assert_same_bits(ridged_share(0.3), 0.0);
     assert_same_bits(ridged_share(1.0), 1.0);
     assert_same_bits(ridged_share(7.0), 1.0);
-    assert!((ridged_share(core::f64::consts::FRAC_1_SQRT_2) - 0.5).abs() < 1e-15);
-    assert!((belt_factor(BELT_VALLEY_SCALE) - BELT_VALLEY_GAIN).abs() < 1e-14);
-    assert!((belt_factor(1e3) - 1.0).abs() < 1e-12);
+    let half = ridged_share(core::f64::consts::FRAC_1_SQRT_2);
+    assert!((half - 0.5).abs() < 1e-15, "ρ at 1 ÷ √2 breaks: {half}");
+    let peak = belt_factor(BELT_VALLEY_SCALE);
+    assert!(
+        (peak - BELT_VALLEY_GAIN).abs() < 1e-14,
+        "g at its scale: {peak}"
+    );
+    let far = belt_factor(1e3);
+    assert!((far - 1.0).abs() < 1e-12, "g at 1,000 breaks: {far}");
     let deep = 1e-3;
-    assert!((belt_factor(deep) / math::powf(deep, 0.2) - 1.0).abs() < 1e-12);
+    let low = belt_factor(deep) / math::powf(deep, 0.2);
+    assert!((low - 1.0).abs() < 1e-12, "g ÷ x^0.2 at {deep}: {low}");
     // At a break, the share's edges and the factor's kink, and every step of a fine scan: no
     // jump larger than the slope allows.
     for x in [0.5, 1.0, BELT_VALLEY_SCALE] {
@@ -951,7 +1004,7 @@ fn the_ridged_share_and_the_belt_factor_are_continuous_and_the_ruling_s() {
             "share at {x}"
         );
         assert!((now.1 - previous.1).abs() < 5e-3, "factor at {x}");
-        assert!((0.0..=1.0).contains(&now.0));
+        assert!((0.0..=1.0).contains(&now.0), "share {} at {x}", now.0);
         previous = now;
     }
     // On the Earth-like world's spectrum: the octave at 1.5 to 3 breaks (level 12, 3.4 km) is
@@ -967,7 +1020,8 @@ fn the_ridged_share_and_the_belt_factor_are_continuous_and_the_ruling_s() {
         );
     }
     assert_same_bits(relief.ridged_share(12), 1.0);
-    assert!((0.0..1.0).contains(&relief.ridged_share(13)) && relief.ridged_share(13) > 0.5);
+    let partial = relief.ridged_share(13);
+    assert!((0.5..1.0).contains(&partial), "ρ at level 13: {partial}");
     assert_same_bits(relief.ridged_share(14), 0.0);
     let peak = (relief.first_octave()..=relief.finest_octave())
         .max_by(|&a, &b| relief.belt_factor(a).total_cmp(&relief.belt_factor(b)))
@@ -1484,7 +1538,7 @@ fn styles_follow_the_crust_and_the_nearest_boundary() {
     );
     let half = style(Crust::Continental, BoundaryKind::Collision, 175, 0).belt();
     assert!((half - 0.5).abs() < 1e-12, "{half}");
-    let slow_floor = seafloor(223.0, 0.0);
+    let slow_floor = seafloor(236.0, 0.0);
     // An oblique boundary shears, over a narrower zone on oceanic crust; a head-on one does not.
     let oblique = style(Crust::Continental, BoundaryKind::Transform, 50, 255);
     assert_same_bits(oblique.shear(), 1.0);
@@ -1552,7 +1606,7 @@ fn arcs_lie_in_bands_behind_their_trenches_set_by_the_overriding_crust() {
     // on an oceanic plate.
     let forearc = style(Crust::Continental, BoundaryKind::Subduction, 60, 0);
     assert_same_bits(forearc.amplitude(), ACTIVE_AMPLITUDE);
-    let slow_floor = seafloor(223.0, 0.0);
+    let slow_floor = seafloor(236.0, 0.0);
     let island_forearc = ReliefStyle::of(&SynthesisCell {
         seafloor: slow_floor,
         ..cell(Crust::Oceanic, BoundaryKind::Subduction, 60, 0)
@@ -1609,10 +1663,10 @@ fn every_style_lies_within_the_octaves_bounds_and_comes_from_its_codes() {
     }
 }
 
-/// The sea floor's amplitude (`decision-r09-t5.md` item 5): the hills' (H ÷ 95 m)^0.6, 1.67 on a
-/// slow ridge's 223 m, 0.72 on a fast one's 55 m and 0.48 draped to 28 m, capped at the belts';
-/// unchanged while the ponded sediment is under half the hills' relief, a plain's from three
-/// times it, and continuous between.
+/// The sea floor's amplitude (`decision-r09-t5.md` items 5 and 8): the hills' (H ÷ 95 m)^0.6, 1.73
+/// on a slow ridge's 236 m, 0.72 on a fast one's 55 m and 0.48 draped to 28 m, capped at the
+/// belts'; unchanged while the ponded sediment is under half the hills' relief, a plain's from
+/// three times it, and continuous between.
 #[test]
 fn the_sea_floor_s_amplitude_follows_its_hills_and_their_burial() {
     let amplitude = |byte: u8| {
@@ -1629,7 +1683,7 @@ fn the_sea_floor_s_amplitude_follows_its_hills_and_their_burial() {
     };
     // The ruling's three floors, exactly and through the hill code nearest each, which is within
     // half the code's step, 2^(1 ÷ 6) in relief, so 2^(0.6 ÷ 6) in amplitude.
-    for (relief_m, expected) in [(223.0, 1.67), (55.0, 0.72), (28.0, 0.48)] {
+    for (relief_m, expected) in [(236.0, 1.73), (55.0, 0.72), (28.0, 0.48)] {
         let exact = math::powf(relief_m / H_REF.value(), HILL_AMPLITUDE_EXPONENT);
         assert!((exact - expected).abs() < 0.005, "{relief_m} m: {exact}");
         let a = amplitude(seafloor(relief_m, 0.0));
@@ -1657,7 +1711,7 @@ fn the_sea_floor_s_amplitude_follows_its_hills_and_their_burial() {
         let t = (math::ln(s / h / onset) / math::ln(buried / onset)).clamp(0.0, 1.0);
         math::powf(a_h, 1.0 - t) * math::powf(PLAIN_AMPLITUDE, t)
     };
-    for h in [28.0, 95.0, 223.0] {
+    for h in [28.0, 95.0, 236.0] {
         for s in [h / 2.0, 3.0 * h] {
             let below = law(h, s * (1.0 - 1e-9));
             let above = law(h, s * (1.0 + 1e-9));
@@ -1807,9 +1861,7 @@ fn plain_and_ridged(
 #[test]
 #[ignore = "slow: measures the terms' structure functions over 10^6 samples"]
 fn the_terms_structure_functions_are_pinned() {
-    const LAGS: [f64; 12] = [
-        0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0,
-    ];
+    const LAGS: [f64; 12] = STRUCTURE_LAGS;
     let header = earth().header();
     let relief = Relief::new(header, SEED);
     let table = octave_table(SEED);
@@ -1893,11 +1945,12 @@ fn the_terms_structure_functions_are_pinned() {
     }
 }
 
-/// The plane-detrended RMS of the structural relief in `style` over `windows` square windows 35 km
-/// a side on the Earth-like world, 40 × 40 points a window, centred at area-uniform points and
-/// turned at random: √(the windows' mean of their residuals' mean square), metres (R09.T5's
-/// measure of relief, which set the styles' amplitudes on Earth2014).
-fn window_rms(style: ReliefStyle, windows: usize, seed: u64) -> f64 {
+/// The plane-detrended mean square of the structural relief in `style` in each of `windows` square
+/// windows 35 km a side on the Earth-like world, 40 × 40 points a window, centred at area-uniform
+/// points and turned at random, square metres; the same windows for the same `seed` in every
+/// style. The square root of their mean is R09.T5's measure of relief in 35 km windows, which set
+/// the styles' amplitudes on Earth2014.
+fn window_mean_squares(style: ReliefStyle, windows: usize, seed: u64) -> Vec<f64> {
     const SIDE: usize = 40;
     let header = earth().header();
     let relief = Relief::new(header, SEED);
@@ -1913,7 +1966,7 @@ fn window_rms(style: ReliefStyle, windows: usize, seed: u64) -> f64 {
         .collect();
     // On the regular grid, centred, the plane's three terms are orthogonal.
     let squares: f64 = offsets.iter().map(|x| x * x).sum::<f64>() * side;
-    let mut total = 0.0;
+    let mut out = Vec::with_capacity(windows);
     for centre in uniform_points(seed, windows) {
         let p = header.figure().point(centre);
         let r = [0, 1, 2].map(|_| rng.next_f64() * 2.0 - 1.0);
@@ -1959,28 +2012,104 @@ fn window_rms(style: ReliefStyle, windows: usize, seed: u64) -> f64 {
                 residual += d * d;
             }
         }
-        total += residual / (side * side);
+        out.push(residual / (side * side));
     }
-    #[expect(clippy::cast_precision_loss, reason = "a few hundred windows")]
-    let count = windows as f64;
-    (total / count).sqrt()
+    out
 }
 
 /// A full belt's relief in 35 km windows is 2.8–3.6 times the reference style's on the same
 /// windows (`decision-r09-t5.md` item 7; the ruling's replica 505 m against 159 m, 3.2), within
 /// the 2.1–3.4 that active belts measure against Earth's mean on Earth2014 ([`BELT_AMPLITUDE`]),
-/// so that the belt's shape keeps its relief while it holds its slopes. Over 200 windows.
+/// so that the belt's shape keeps its relief while it holds its slopes. Over 200 windows, paired:
+/// the range's half-width about 3.2, 0.4, is at least the two-sided z of `stats::ALPHA` standard
+/// errors of the ratio, √(Σ belt ÷ Σ reference) over the windows' mean squares, by the delta
+/// method on the paired windows.
 #[test]
 #[ignore = "slow: samples 200 windows of 1,600 points in two styles"]
 fn a_full_belt_s_window_relief_is_three_times_the_reference_s() {
-    let reference = window_rms(ReliefStyle::REFERENCE, 200, 0x7769_6e31);
-    let belt = window_rms(FULL_BELT, 200, 0x7769_6e31);
+    let reference = window_mean_squares(ReliefStyle::REFERENCE, 200, 0x7769_6e31);
+    let belt = window_mean_squares(FULL_BELT, 200, 0x7769_6e31);
+    #[expect(clippy::cast_precision_loss, reason = "200 windows")]
+    let n = reference.len() as f64;
+    let (mean_r, mean_b) = (
+        reference.iter().sum::<f64>() / n,
+        belt.iter().sum::<f64>() / n,
+    );
+    let square = mean_b / mean_r;
+    let ratio = square.sqrt();
+    // The variance of the ratio of means, by the delta method: Var(b − q r) ÷ (n r̄²) with q the
+    // ratio of the mean squares; the square root halves its relative error.
+    let spread = reference
+        .iter()
+        .zip(&belt)
+        .map(|(r, b)| {
+            let d = b - square * r;
+            d * d
+        })
+        .sum::<f64>()
+        / (n - 1.0);
+    let error = (spread / n).sqrt() / mean_r / (2.0 * ratio);
+    let z = math::normal_quantile(1.0 - stats::ALPHA / 2.0);
     println!(
-        "35 km windows: reference {reference:.1} m, full belt {belt:.1} m, ratio {:.3}",
-        belt / reference
+        "35 km windows: reference {:.1} m, full belt {:.1} m, ratio {ratio:.3} ± {error:.3}",
+        mean_r.sqrt(),
+        mean_b.sqrt()
     );
     assert!(
-        (2.8..=3.6).contains(&(belt / reference)),
-        "{belt} m against {reference} m"
+        0.4 >= z * error,
+        "the range's half-width 0.4 is under {z} standard errors of {error}"
+    );
+    assert!(
+        (2.8..=3.6).contains(&ratio),
+        "{} m against {} m",
+        mean_b.sqrt(),
+        mean_r.sqrt()
+    );
+}
+
+/// A full belt's expected variance at a point is its sampled variance, within 5%
+/// (`decision-r09-t5.md` item 8): the relief in a full belt's style at 2 × 10⁵ area-uniform points
+/// of the Earth-like world, against [`Relief::point_variance`] of 2.5 and 1, its tail beyond the
+/// finest octave (under 10⁻⁶ of it) included. The 5% is at least the two-sided z of `stats::ALPHA`
+/// standard errors of the sample.
+#[test]
+#[ignore = "slow: samples a full belt's relief at 2 × 10^5 points"]
+fn a_full_belt_s_point_variance_is_its_sampled_variance() {
+    let header = earth().header();
+    let relief = Relief::new(header, SEED);
+    let table = octave_table(SEED);
+    let style = StyleSample::uniform(FULL_BELT);
+    let mut cache = LatticeCache::new();
+    let points = uniform_points(0x706f_696e, 200_000);
+    let (mut sum, mut sum_sq, mut sum_4) = (0.0, 0.0, 0.0);
+    for &dir in &points {
+        let mut h = 0.0;
+        relief.octave_terms(
+            &table,
+            header.figure().point(dir),
+            &style,
+            relief.finest_octave(),
+            &mut cache,
+            |t| h += t.height.value,
+        );
+        sum += h;
+        sum_sq += h * h;
+        sum_4 += h * h * h * h;
+    }
+    #[expect(clippy::cast_precision_loss, reason = "2 × 10^5 points")]
+    let n = points.len() as f64;
+    let mean = sum / n;
+    let sampled = sum_sq / n - mean * mean;
+    let expected = relief.point_variance(BELT_AMPLITUDE, 1.0).value();
+    let error = ((sum_4 / n - (sum_sq / n) * (sum_sq / n)) / n).sqrt();
+    let z = math::normal_quantile(1.0 - stats::ALPHA / 2.0);
+    println!("full belt: sampled {sampled:.1} m², expected {expected:.1} m² ± {error:.1}");
+    assert!(
+        0.05 * expected >= z * error,
+        "5% of {expected} m² is under {z} standard errors of {error} m²"
+    );
+    assert!(
+        (sampled / expected - 1.0).abs() < 0.05,
+        "sampled {sampled} m², expected {expected} m²"
     );
 }
