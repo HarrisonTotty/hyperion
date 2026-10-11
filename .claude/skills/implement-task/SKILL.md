@@ -122,8 +122,9 @@ excerpts of any failures. The gate is `just smart-ci`: the steps of `just ci` th
 reaches, chosen from its diff against the integration branch (`just smart-ci --plan` shows them
 and why), with `just test-render` where a shader, the engine or the smoke harness changed. A
 `just ci` in the acceptance criteria is met by it; the full `just ci` is integration's, run when
-the task is integrated. When the task changes what other crates use (a public item's name,
-signature or behaviour), run `just smart-ci --dependents`, so that their checks run too.
+the task is integrated. smart-ci runs the tests, in any crate, that reach the changed code; when
+the task changes what other crates use (a public item's name or signature), run
+`just smart-ci --dependents`, so that their Clippy runs too.
 
 The verdict:
 

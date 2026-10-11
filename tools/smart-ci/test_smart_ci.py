@@ -23,6 +23,7 @@ import shlex
 import subprocess
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
@@ -31,8 +32,16 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 
+import rust_graph  # noqa: E402
 import smart_ci  # noqa: E402
 from smart_ci import Crate, Plan, Workspace, make_plan  # noqa: E402
+import test_rust_graph  # noqa: E402
+
+
+def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: Optional[str]) -> unittest.TestSuite:
+    """These tests and the Rust graph's own, every class of them: `just ci` runs this file."""
+    tests.addTests(loader.loadTestsFromModule(test_rust_graph))
+    return tests
 
 BASE = "hyperion-base"
 TESTKIT = "hyperion-testkit"
@@ -179,9 +188,9 @@ def workspace() -> Workspace:
     return ws
 
 
-def plan(*paths: str, deleted: Iterable[str] = (), dependents: bool = False) -> Plan:
+def plan(*paths: str, deleted: Iterable[str] = (), dependents: bool = False, all_tests: bool = False) -> Plan:
     gone = set(deleted)
-    return make_plan(sorted((p, p in gone) for p in set(paths) | gone), workspace(), dependents)
+    return make_plan(sorted((p, p in gone) for p in set(paths) | gone), workspace(), dependents, all_tests)
 
 
 def calls(p: Plan) -> List[str]:
@@ -204,7 +213,7 @@ def packages(p: Plan, recipe: str, which: int = 0) -> List[str]:
 TS_RECIPES = {"_typecheck-ts", "_oxlint", "_vitest-run"}
 CARGO_RECIPES = {
     "_rustfmt-check", "_clippy-for", "_cross-clippy-for", "_browser-clippy-for", "_relaxed-simd-refused",
-    "_gen-protocol-check-for", "fit-check", "_test-build-for", "_nextest-run", "_doctest-run", "_wasip1-nextest",
+    "_gen-protocol-check-for", "fit-check", "_test-build-for", "_nextest-run", "_doctest-run", "_wasip1-build", "_wasip1-nextest",
     "_browser", "_wasm-preflight", "gen-surface",
 }
 
@@ -235,7 +244,10 @@ class TheRules(unittest.TestCase):
     def test_typescript_only_runs_the_typescript_side_and_no_cargo(self) -> None:
         p = plan("apps/hyperion/src/renderer/src/lib/format.ts")
         self.assertEqual(calls(p), ["gen-surface", "_prettier-check", "_typecheck-ts", "_oxlint", "_vitest-run"])
-        self.assertEqual(args(p, "_vitest-run"), ["", ""])
+        # The vitest files that reach it through the import graph; with --all-tests, every one.
+        self.assertEqual(args(p, "_vitest-run"), ["hyperion", "src/renderer/src/lib/format.test.ts"])
+        self.assertEqual(args(plan("apps/hyperion/src/renderer/src/lib/format.ts", all_tests=True), "_vitest-run"),
+                         ["", ""])
         self.assertEqual(args(p, "_prettier-check"), ["apps/hyperion/src/renderer/src/lib/format.ts"])
         self.assertFalse(set(calls(p)) & (CARGO_RECIPES - {"gen-surface"}))
 
@@ -253,14 +265,15 @@ class TheRules(unittest.TestCase):
         self.assertEqual(args(p, "_rustfmt-check"), ["-p hyperion-server"])
         self.assertEqual(args(p, "_clippy-for"), ["-p hyperion-server"])
         self.assertEqual(args(p, "_cross-clippy-for"), ["-p hyperion-server", ""])
-        for recipe in ("_test-build-for", "_nextest-run", "_doctest-run"):
-            self.assertEqual(args(p, recipe), ["-p hyperion-server"])
+        self.assertEqual(args(p, "_test-build-for"), ["-p hyperion-server"])
+        for recipe in ("_nextest-run", "_doctest-run"):
+            self.assertEqual(args(p, recipe), ["-p hyperion-server", ""])
 
     def test_a_sim_change_runs_the_sims_checks_wasip1_and_fit_check_but_no_typescript(self) -> None:
         p = plan("crates/hyperion-sim/src/galaxy/disc.rs")
         self.assertEqual(calls(p), [
             "_wasm-preflight", "_rustfmt-check", "_cross-clippy-for", "_clippy-for", "fit-check",
-            "_test-build-for", "_wasip1-nextest", "_nextest-run", "_doctest-run", "_wasip1-nextest"])
+            "_test-build-for", "_wasip1-build", "_nextest-run", "_doctest-run", "_wasip1-nextest"])
         self.assertEqual(args(p, "_wasm-preflight"), ["wasip1"])
         # The features `--workspace` gives the sim: the fitting crate asks for `testing`.
         self.assertEqual(args(p, "_clippy-for"), ["-p hyperion-sim --features hyperion-sim/testing"])
@@ -268,8 +281,8 @@ class TheRules(unittest.TestCase):
         self.assertEqual(packages(p, "_nextest-run"), [SIM, TESTKIT])
         self.assertEqual(packages(p, "_doctest-run"), [SIM])
         # On wasip1, the features of `ci`'s selection there, where nothing asks for `testing`.
-        self.assertEqual(args(p, "_wasip1-nextest", 0), ["-p hyperion-sim", "--no-run"])
-        self.assertEqual(args(p, "_wasip1-nextest", 1), ["-p hyperion-sim", ""])
+        self.assertEqual(args(p, "_wasip1-build"), ["-p hyperion-sim", ""])
+        self.assertEqual(args(p, "_wasip1-nextest"), ["-p hyperion-sim", "", ""])
         self.assertIn("hyperion-fit, hyperion-server", " ".join(p.notes))
 
     def test_dependents_adds_the_reverse_dependents_clippy_and_tests(self) -> None:
@@ -285,7 +298,7 @@ class TheRules(unittest.TestCase):
         p = plan("crates/hyperion-surface/src/field.rs")
         self.assertEqual(calls(p), [
             "gen-surface", "_wasm-preflight", "_rustfmt-check", "_relaxed-simd-refused", "_cross-clippy-for",
-            "_clippy-for", "_browser-clippy-for", "_test-build-for", "_wasip1-nextest", "_browser", "_nextest-run",
+            "_clippy-for", "_browser-clippy-for", "_test-build-for", "_wasip1-build", "_browser", "_nextest-run",
             "_doctest-run", "_vitest-run", "_wasip1-nextest", "_browser"])
         self.assertEqual(args(p, "_wasm-preflight"), ["wasip1", "browser"])
         self.assertEqual(args(p, "_clippy-for"), ["-p hyperion-surface --features hyperion-surface/testing"])
@@ -341,7 +354,9 @@ class TheRules(unittest.TestCase):
         p = plan("apps/hyperion/src/renderer/src/view/shaders/sky.wgsl")
         self.assertEqual(p.render, {"apps/hyperion/src/renderer/src/view/shaders/sky.wgsl"})
         self.assertIn("test-render", p.recipes())
-        self.assertIn("_vitest-run", calls(p))
+        # No vitest file imports the shader (as `?raw`), so none runs; tsc and oxlint do.
+        self.assertNotIn("_vitest-run", calls(p))
+        self.assertIn("_vitest-run", calls(plan("apps/hyperion/src/renderer/src/view/shaders/sky.wgsl", all_tests=True)))
         for path in ("apps/hyperion/src/renderer/src/view/engine/device.ts", "apps/hyperion/src/smoke/main.ts",
                      "apps/hyperion/scripts/testRender.sh", "apps/hyperion/electron.vite.config.mts",
                      # The shader catalogue imports it: a material's spec.
@@ -375,7 +390,7 @@ class TheRules(unittest.TestCase):
 
     def test_a_crates_data_runs_its_tests_and_the_vitest_files_that_read_it(self) -> None:
         p = plan("crates/hyperion-sim/tests/golden/orbit/states.golden")
-        self.assertEqual(calls(p), ["gen-surface", "_wasm-preflight", "fit-check", "_test-build-for", "_wasip1-nextest",
+        self.assertEqual(calls(p), ["gen-surface", "_wasm-preflight", "fit-check", "_test-build-for", "_wasip1-build",
                                     "_nextest-run", "_doctest-run", "_vitest-run", "_wasip1-nextest"])
         self.assertEqual(args(p, "_vitest-run"), ["hyperion", "src/renderer/src/lib/orbit.test.ts"])
         fit_data = plan("crates/hyperion-fit/data/cie_cmf/CIE_xyz_1931_2deg.csv")
@@ -449,8 +464,15 @@ class TheRules(unittest.TestCase):
         self.assertEqual(args(p, "_vitest-run"), ["hyperion", ""])
         self.assertNotIn("_typecheck-ts", calls(p))
 
-    def test_a_typescript_package_file_runs_vitest_over_every_package(self) -> None:
-        self.assertEqual(args(plan("packages/protocol/src/hex.ts"), "_vitest-run"), ["", ""])
+    def test_a_package_source_runs_the_vitest_files_of_every_package_that_reach_it(self) -> None:
+        # hex.ts: its own test, and through the package's entry (`export * from "./hex"`), the client's
+        # test of a file that imports `@hyperion/protocol`.
+        p = plan("packages/protocol/src/hex.ts")
+        self.assertEqual(args(p, "_vitest-run", 0), ["hyperion", "src/renderer/src/lib/format.test.ts"])
+        self.assertEqual(args(p, "_vitest-run", 1), ["@hyperion/protocol", "src/hex.test.ts"])
+        self.assertEqual(args(plan("packages/protocol/src/hex.ts", all_tests=True), "_vitest-run"), ["", ""])
+        # Outside `src/`: the package's configuration, every package's suite.
+        self.assertEqual(args(plan("packages/protocol/vitest.config.mts"), "_vitest-run"), ["", ""])
 
     def test_paths_that_are_not_one_word_widen_the_step_to_its_whole_scope(self) -> None:
         self.assertEqual(calls(plan("docs/agent/plans/a plan.md")), ["_prettier-check-all"])
@@ -472,7 +494,7 @@ class TheRules(unittest.TestCase):
             "gpu-replay-check", "_cross-clippy-for", "_smart-ci-test"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "main"], [
             "_clippy-for", "_browser-clippy-for", "_gen-protocol-check-for", "fit-check", "_test-build-for",
-            "_wasip1-nextest", "_browser"])
+            "_wasip1-build", "_browser"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "locked"], [
             "_nextest-run", "_doctest-run", "_vitest-run", "_wasip1-nextest", "_browser"])
 
@@ -507,6 +529,120 @@ class TheRules(unittest.TestCase):
         self.assertEqual(ws.surface_module_crates(), {BASE, SURFACE})
         self.assertEqual(ws.reverse_dependents([BASE]), {SURFACE, SIM, SERVER, FIT})
         self.assertEqual(ws.reverse_dependents([TESTKIT]), {BASE, SURFACE, SIM, SERVER, FIT})
+
+
+class GraphMode(unittest.TestCase):
+    """The plan with the code's graph: the tests that reach a change, by filter, in any crate."""
+
+    SOURCES = {
+        "crates/hyperion-base/src/lib.rs": (
+            "pub fn unit() -> u32 { 1 }\npub fn other() -> u32 { 2 }\n"
+            "/// ```\n/// assert_eq!(hyperion_base::unit(), 1);\n/// ```\npub fn documented() {}\n"
+            "#[cfg(test)]\nmod tests {\n    #[test]\n    fn unit_is_one() { assert_eq!(super::unit(), 1); }\n"
+            "    #[test]\n    fn other_is_two() { assert_eq!(super::other(), 2); }\n}\n"),
+        "crates/hyperion-sim/src/lib.rs": (
+            "pub mod sky;\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn plain() {}\n}\n"),
+        "crates/hyperion-sim/src/sky/mod.rs": (
+            "pub fn glow() -> u32 { hyperion_base::unit() * 3 }\n"
+            "#[cfg(test)]\nmod tests {\n    #[test]\n    fn glows() { assert_eq!(super::glow(), 3); }\n}\n"),
+    }
+
+    def workspace(self, now: Dict[str, str]) -> Workspace:
+        ws = workspace()
+        files = dict(FILES)
+        files.update(now)
+        ws.files = sorted(files)
+        ws.read = lambda path: files.get(path, "")
+        ws.rust = {
+            BASE: rust_graph.CrateInfo(BASE, "crates/" + BASE, [], [TESTKIT], [
+                rust_graph.Target("lib", "hyperion_base", "crates/hyperion-base/src/lib.rs", True, True)]),
+            TESTKIT: rust_graph.CrateInfo(TESTKIT, "crates/" + TESTKIT, [], [], [
+                rust_graph.Target("lib", "hyperion_testkit", "crates/hyperion-testkit/src/lib.rs", True, True)]),
+            SURFACE: rust_graph.CrateInfo(SURFACE, "crates/" + SURFACE, [BASE], [TESTKIT], []),
+            SIM: rust_graph.CrateInfo(SIM, "crates/" + SIM, [BASE, SURFACE], [TESTKIT], [
+                rust_graph.Target("lib", "hyperion_sim", "crates/hyperion-sim/src/lib.rs", True, True)]),
+            PROTOCOL: rust_graph.CrateInfo(PROTOCOL, "crates/" + PROTOCOL, [], [], []),
+            SERVER: rust_graph.CrateInfo(SERVER, "crates/" + SERVER, [PROTOCOL, SIM, SURFACE], [TESTKIT], []),
+            FIT: rust_graph.CrateInfo(FIT, "crates/" + FIT, [SIM], [TESTKIT], []),
+        }
+        ws.read_bytes = lambda path: files[path].encode() if path in files else None
+        ws.read_base = lambda path: self.SOURCES[path].encode() if path in self.SOURCES else None
+        return ws
+
+    def plan_change(self, path: str, old: str, new: str, all_tests: bool = False) -> Plan:
+        now = dict(self.SOURCES)
+        now[path] = now[path].replace(old, new)
+        return make_plan([(path, False)], self.workspace(now), False, all_tests)
+
+    def test_a_change_runs_the_tests_that_reach_it_in_every_crate(self) -> None:
+        p = self.plan_change("crates/hyperion-base/src/lib.rs", "{ 1 }", "{ 4 }")
+        self.assertEqual(packages(p, "_nextest-run"), [BASE, SIM, TESTKIT])
+        self.assertEqual(args(p, "_nextest-run")[1], "(binary_id(=hyperion-base) & (test(=tests::unit_is_one))) | "
+                                                     "(binary_id(=hyperion-sim) & (test(/^sky::tests::/))) | package(hyperion-testkit)")
+        self.assertEqual(args(p, "_doctest-run"), ["-p hyperion-base", "crates/hyperion-base/src/lib.rs"])
+        # wasip1: built and its modules compiled outside the lock, run under it, with the same filter.
+        self.assertEqual(args(p, "_wasip1-build")[1], args(p, "_wasip1-nextest")[2])
+        self.assertIn("binary_id(=hyperion-sim) & (test(/^sky::tests::/))", args(p, "_wasip1-build")[1])
+        details = "\n".join(p.details)
+        self.assertIn("hyperion-sim: 1 of 2 tests", details)
+        self.assertIn("hyperion-base: 1 of 2 tests", details)
+        self.assertIn("built in", details)
+        # rustfmt and Clippy stay the changed crate's.
+        self.assertEqual(packages(p, "_clippy-for"), [BASE])
+
+    def test_a_crates_data_runs_its_tests_and_other_crates_tests_that_name_its_directory(self) -> None:
+        now = dict(self.SOURCES)
+        reader = "crates/hyperion-sim/src/lib.rs"
+        now[reader] = now[reader].replace("fn plain() {}", "fn plain() {}\n    #[test]\n    fn reads() { let _ = "
+                                          "std::path::Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"../hyperion-base/data\"); }")
+        now["crates/hyperion-base/data/table.bin"] = ""
+        p = make_plan([("crates/hyperion-base/data/table.bin", False)], self.workspace(now), False)
+        self.assertEqual(packages(p, "_nextest-run"), [BASE, SIM])
+        self.assertIn("binary_id(=hyperion-sim) & (test(=tests::reads))", args(p, "_nextest-run")[1])
+        # With --all-tests, its crate's alone, as before the graph.
+        q = make_plan([("crates/hyperion-base/data/table.bin", False)], self.workspace(now), False, all_tests=True)
+        self.assertEqual(packages(q, "_nextest-run"), [BASE])
+
+    def test_markdown_that_a_crate_root_includes_as_its_documentation_is_its_data(self) -> None:
+        now = dict(self.SOURCES)
+        root = "crates/hyperion-base/src/lib.rs"
+        now[root] = "#![doc = include_str!(\"../README.md\")]\n" + now[root]
+        now["crates/hyperion-base/README.md"] = "# Base\n"
+        now["crates/hyperion-sim/README.md"] = "# Sim\n"
+        ws = self.workspace(now)
+        included = make_plan([("crates/hyperion-base/README.md", False)], ws, False)
+        self.assertEqual(packages(included, "_doctest-run"), [BASE])
+        self.assertNotIn("_nextest-run", calls(make_plan([("crates/hyperion-sim/README.md", False)], ws, False)))
+
+    def test_no_test_reaches_a_change_that_no_test_uses(self) -> None:
+        p = self.plan_change("crates/hyperion-base/src/lib.rs", "pub fn documented() {}", "pub fn documented() { }\npub fn new() {}")
+        # Only the testkit's suite, whose clippy_bans reads base's sources; no doctest names either.
+        self.assertEqual(packages(p, "_nextest-run"), [TESTKIT])
+        self.assertEqual(args(p, "_nextest-run")[1], "")
+        self.assertNotIn("_doctest-run", calls(p))
+        self.assertIn("_clippy-for", calls(p))
+
+    def test_a_build_script_or_a_proc_macro_crate_runs_every_test(self) -> None:
+        now = dict(self.SOURCES)
+        now["crates/hyperion-base/src/lib.rs"] = now["crates/hyperion-base/src/lib.rs"].replace("{ 1 }", "{ 4 }")
+        ws = self.workspace(now)
+        ws.build_scripts = {BASE}
+        p = make_plan([("crates/hyperion-base/src/lib.rs", False)], ws, False)
+        self.assertEqual(args(p, "_nextest-run")[1], "")  # every test of base, and none of its dependents'
+        self.assertEqual(packages(p, "_nextest-run"), [BASE, TESTKIT])
+        ws = self.workspace(now)
+        ws.proc_macros = {BASE}
+        p = make_plan([("crates/hyperion-base/src/lib.rs", False)], ws, False)
+        self.assertEqual(args(p, "_nextest-run")[1], "")  # every test of base and its dependents
+        self.assertIn(SIM, packages(p, "_nextest-run"))
+        self.assertIn(SIM, packages(p, "_clippy-for"))
+
+    def test_all_tests_restores_the_crates_whole_suites(self) -> None:
+        p = self.plan_change("crates/hyperion-base/src/lib.rs", "{ 1 }", "{ 4 }", all_tests=True)
+        self.assertEqual(args(p, "_nextest-run")[1], "")
+        self.assertEqual(packages(p, "_nextest-run"), [BASE, TESTKIT])
+        self.assertEqual(args(p, "_doctest-run"), ["-p hyperion-base", ""])
+        self.assertEqual(p.details, [])
 
 
 class FakeRunner(smart_ci.Runner):
@@ -614,6 +750,24 @@ class Execution(unittest.TestCase):
                                            {"side": smart_ci.CI_PHASES["side"], "main": smart_ci.CI_PHASES["main"]}])
         self.assertEqual(runner.calls[-1], ("run", ["_locked", "just", "_test-run", "_wasm-fast-run"]))
         self.assertIn("[locked] just _test-run _wasm-fast-run", smart_ci.describe(p, [("justfile", False)], "x", False))
+
+    def test_full_runs_cis_own_phases_whatever_the_diff(self) -> None:
+        # Integration's run: `ci`'s phases (which AgreesWithCi holds to the justfile's `ci`), its two
+        # build groups in the slot, the suites outside it, and no test-render, as `ci` has none.
+        p = smart_ci.full_plan()
+        self.assertEqual(smart_ci.phases_of(p), smart_ci.CI_PHASES)
+        self.assertEqual(p.recipes(), ["ci"])
+        runner = FakeRunner()
+        self.assertEqual(smart_ci.execute(p, ROOT, "just", env=self.SLOT, runner=runner), 0)
+        self.assertEqual(runner.handoffs, [{"setup": smart_ci.CI_PHASES["setup"]},
+                                           {"side": smart_ci.CI_PHASES["side"], "main": smart_ci.CI_PHASES["main"]}])
+        self.assertEqual(runner.calls[-1], ("run", ["_locked", "just", "_test-run", "_wasm-fast-run"]))
+        # The command line reads no diff for it.
+        shown = io.StringIO()
+        with contextlib.redirect_stdout(shown), unittest.mock.patch.dict(os.environ, self.SLOT):
+            self.assertEqual(smart_ci.main(["--full", "--plan"]), 0)
+        self.assertIn(smart_ci.FULL_RUN, shown.getvalue())
+        self.assertIn("is held for the setup and then the side, main phases", shown.getvalue())
 
     def test_a_failed_build_runs_no_suite(self) -> None:
         for env, fail in (({}, "_clippy-for"), (self.SLOT, "slot")):
@@ -814,26 +968,30 @@ class AgreesWithCi(unittest.TestCase):
                  ("docs/measurements/descent-spike/2026-10-07-effect-low.json", "crates/hyperion-fit/manifests/mge.toml")]
         known = set(smart_ci.CI_STEPS) | {name for _, calls_ in smart_ci.CI_STEPS.values() for name, _ in calls_}
         known |= set(smart_ci.NARROWER.values())
-        for paths in cases:
-            for dependents in (False, True):
-                p = plan(*paths, dependents=dependents)
-                for phase in ("setup", "side", "main", "locked"):
-                    words = [w for s in p.steps if s.phase == phase for w in s.recipe]
-                    grouped = group(words, self.recipes) if words else []
-                    self.assertEqual([g[0] for g in grouped], [s.recipe[0] for s in p.steps if s.phase == phase],
-                                     f"the {phase} phase does not parse into its steps: {words}")
-                    for step in (s for s in p.steps if s.phase == phase):
-                        recipe = self.recipes[step.recipe[0]]
-                        given = len(step.recipe) - 1
-                        most = max_args(recipe)
-                        self.assertGreaterEqual(given, min_args(recipe), step.recipe)
-                        if most is not None:
-                            self.assertEqual(given, most, f"{step.recipe}: give every parameter, so that the phase "
-                                                          "parses into its steps")
-                        else:
-                            self.assertIs(step, [s for s in p.steps if s.phase == phase][-1],
-                                          f"{step.recipe[0]} is variadic, so it must end its phase")
-                    self.assertLessEqual({s.recipe[0] for s in p.steps}, known, "smart-ci runs only `ci`'s steps")
+        plans = [plan(*paths, dependents=dependents) for paths in cases for dependents in (False, True)]
+        plans += [plan(*paths, all_tests=True) for paths in cases]
+        # And the plans with the code's graph, whose steps carry filters.
+        graph_mode = GraphMode()
+        plans += [graph_mode.plan_change("crates/hyperion-base/src/lib.rs", "{ 1 }", "{ 4 }"),
+                  graph_mode.plan_change("crates/hyperion-sim/src/sky/mod.rs", "* 3", "* 4")]
+        for p in plans:
+            for phase in ("setup", "side", "main", "locked"):
+                words = [w for s in p.steps if s.phase == phase for w in s.recipe]
+                grouped = group(words, self.recipes) if words else []
+                self.assertEqual([g[0] for g in grouped], [s.recipe[0] for s in p.steps if s.phase == phase],
+                                 f"the {phase} phase does not parse into its steps: {words}")
+                for step in (s for s in p.steps if s.phase == phase):
+                    recipe = self.recipes[step.recipe[0]]
+                    given = len(step.recipe) - 1
+                    most = max_args(recipe)
+                    self.assertGreaterEqual(given, min_args(recipe), step.recipe)
+                    if most is not None:
+                        self.assertEqual(given, most, f"{step.recipe}: give every parameter, so that the phase "
+                                                      "parses into its steps")
+                    else:
+                        self.assertIs(step, [s for s in p.steps if s.phase == phase][-1],
+                                      f"{step.recipe[0]} is variadic, so it must end its phase")
+                self.assertLessEqual({s.recipe[0] for s in p.steps}, known, "smart-ci runs only `ci`'s steps")
 
     def test_the_crate_lists_are_the_justfiles(self) -> None:
         assignments = self.dump["assignments"]
@@ -886,6 +1044,18 @@ class RealWorkspace(unittest.TestCase):
         self.assertFalse(p.is_full)
         self.assertNotIn("_vitest-run", calls(p))
         self.assertEqual(packages(p, "_clippy-for"), [SERVER])
+
+    def test_the_real_graph(self) -> None:
+        # The golden reader the graph names exists, and the workspace reads into a graph: its units,
+        # its tests, every file in a module tree.
+        for _, reader in smart_ci.GOLDEN_READERS:
+            self.assertIn(reader, self.ws.files)
+        chosen = smart_ci.choose_tests([], self.ws)
+        graph = chosen.graph
+        self.assertTrue(any(u.is_lib for u in graph.units.values()))
+        self.assertGreater(sum(len(t) for t in graph.tests.values()), 1000)
+        self.assertEqual(graph.missing_mods, [], "a `mod` declaration names no file the graph knows")
+        self.assertEqual([f for f in graph.orphans if "/src/" in f], [], "sources in no module tree: they widen")
 
 
 if __name__ == "__main__":

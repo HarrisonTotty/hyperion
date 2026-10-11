@@ -36,8 +36,11 @@ checks, task acceptance, and the gate.
   `grep -nE '^(error|warning)|FAILED|panicked|^test .* \.\.\. FAILED' "$log" | head -50`, and read
   the region around a hit.
 - Give long commands a generous timeout, up to 10 minutes. The gate, `just smart-ci`, runs the steps
-  of `just ci` that the change reaches, and can take several minutes; it runs the full `just ci`
-  when the change touches an input of the whole workspace.
+  of `just ci` that the change reaches, and of the suites only the tests that reach the changed
+  code (its plan says how many, and why); it can take several minutes, and runs the full `just ci`'s
+  phases when the change touches an input of the whole workspace. Run it with `SMART_CI_SLOT` set
+  to the build-slot command, not inside build-slot, and report its plan's test counts with the
+  verdict. `just smart-ci --all-tests` is the escape hatch: every test of the changed crates.
 - In acceptance criteria:
   - A `grep` criterion ("finds matches only in X"): run it and judge it by the plan's wording.
   - A step marked "by hand", "by eye" or "do not commit": don't do it. List it as manual.

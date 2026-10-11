@@ -420,13 +420,17 @@ _test-build-for packages:
     cargo nextest run {{ packages }} --no-run
 
 # Run the native suites, the doctests and vitest; the caller holds the heavy-test lock.
-_test-run: (_nextest-run "--workspace") (_doctest-run "--workspace") (_vitest-run "" "")
+_test-run: (_nextest-run "--workspace" "") (_doctest-run "--workspace" "") (_vitest-run "" "")
 
-_nextest-run packages:
-    cargo nextest run {{ packages }}
+# `filter`, empty for every test, is nextest's filter expression (`-E`): `just smart-ci` gives the tests
+# that its change reaches.
+_nextest-run packages filter:
+    cargo nextest run {{ packages }}{{ if filter == "" { "" } else { " -E " + quote(filter) } }}
 
-_doctest-run packages:
-    cargo test {{ packages }} --doc
+# `filters`, empty for every doctest, are rustdoc's test-name filters: `just smart-ci` gives the paths
+# of the files whose doctests its change reaches, each test's name starting with its file's path.
+_doctest-run packages filters:
+    cargo test {{ packages }} --doc{{ if filters == "" { "" } else { " -- " + filters } }}
 
 # vitest: every package's suite (`pnpm test`) if `package` is empty, else that pnpm package's
 # `test` over the test files named (all of them if none), as paths from the package's directory.
@@ -572,17 +576,25 @@ test-wasm-fast: _relaxed-simd-refused _browser-clippy _wasm-fast-build
 
 # The builds of `test-wasm-fast`, outside the heavy-test lock, and the browser target's test lists.
 _wasm-fast-build: (_wasm-preflight "wasip1" "browser")
-    just _wasip1-nextest "{{ wasip1_crates }}" --no-run
+    just _wasip1-build "{{ wasip1_crates }}" ""
     just _browser prepare
 
 # The fast WebAssembly suites, built already; the caller holds the heavy-test lock.
 _wasm-fast-run:
-    just _wasip1-nextest "{{ wasip1_crates }}" ""
+    just _wasip1-nextest "{{ wasip1_crates }}" "" ""
     just _browser run
 
-# The wasip1 suites of `packages` (cargo's selection, of `wasip1_crates`), with nextest's `flags`.
-_wasip1-nextest packages flags:
-    just _wasip1 nextest run --target wasm32-wasip1 {{ packages }} {{ flags }}
+# Build the wasip1 suites of `packages` (cargo's selection, of `wasip1_crates`) and compile their
+# modules, outside the heavy-test lock. A test binary is a WebAssembly module, which wasmtime compiles
+# to machine code the first time it runs and caches; nextest's listing runs each binary, so the listing
+# compiles them here and the run under the lock compiles nothing (a small saving: seconds). `filter`
+# (nextest's `-E`, or empty) skips the binaries it selects no test of, as the run does.
+_wasip1-build packages filter:
+    just _wasip1 nextest list --target wasm32-wasip1 {{ packages }}{{ if filter == "" { "" } else { " -E " + quote(filter) } }} >/dev/null
+
+# The wasip1 suites of `packages`, with nextest's `flags` and filter expression (`-E`, or empty).
+_wasip1-nextest packages flags filter:
+    just _wasip1 nextest run --target wasm32-wasip1 {{ packages }} {{ flags }}{{ if filter == "" { "" } else { " -E " + quote(filter) } }}
 
 # Clippy for the browser target over the crates that run there, so that code compiled only there
 # (the testkit's embedded golden arm, the surface crate's `src/wasm.rs`) is linted under the
@@ -600,7 +612,7 @@ _browser-clippy-for crates: (_wasm-preflight "browser")
 # cargo cannot build doctests without running them).
 # The slow WebAssembly checks, run by `ci-slow`: the slow suites and the doctests under wasip1.
 test-wasm-slow: (_wasm-preflight "wasip1")
-    just _wasip1 {{ wasip1_nextest }} --cargo-profile slow-test --profile slow --run-ignored only --no-run
+    just _wasip1 nextest list --target wasm32-wasip1 {{ wasip1_crates }} --cargo-profile slow-test --run-ignored only >/dev/null
     just _locked just _wasip1 {{ wasip1_nextest }} --cargo-profile slow-test --profile slow --run-ignored only
     just _locked just _wasip1 test --target wasm32-wasip1 {{ wasip1_crates }} --doc
 
@@ -838,24 +850,29 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     fi
     just _locked just _test-run _wasm-fast-run
 
-# `just smart-ci [BASE] [--plan] [--dependents]` (`tools/smart-ci/smart_ci.py`; `--help` for the
-# rules). The change is every path that differs between the merge-base of HEAD and BASE (by default
-# `rendering-and-planets`, the integration branch) and the working tree, untracked files included,
-# so it works before a commit as well as after; `A...B` plans the commits of B since its merge-base
-# with A, with `--plan`. Each path runs the checks that read it, through `ci`'s own steps above,
-# scoped and in `ci`'s order: a TypeScript-free change skips every TypeScript check, a change to a
-# crate runs rustfmt, Clippy (native, the other platforms', wasm32 where `ci` runs it) and the tests
-# (nextest, doctests, wasip1, browser) of that crate alone, with the features `ci` gives it; the
-# protocol crate adds the bindings' check and the TypeScript side, the surface module's sources
-# `gen-surface` and the vitest files that import it, Markdown Prettier alone, and shaders, the engine
-# and the smoke harness `just test-render`. A path no rule knows, and the inputs of the whole
-# workspace (this justfile, Cargo.toml, Cargo.lock, pnpm-lock.yaml, rust-toolchain.toml, `.cargo/`,
-# `tools/portable/`), run the full `ci`. `--plan` prints the plan, each step with the paths that
-# caused it, and runs nothing; a run prints it first. Dependents: only the changed crates are checked
-# by default (the owner's rule), since integration's full `ci` catches a break in a crate that
-# depends on them; `--dependents` adds the Clippy and tests of every crate that depends on a changed
-# one, for a change to what other crates use. A changed `Cargo.toml` always adds them. Run it as
-# `ci` is run (capped, through build-slot); its test phase takes the heavy-test lock as `ci`'s does.
+# `just smart-ci [BASE] [--plan] [--dependents] [--all-tests] [--explain]` (`tools/smart-ci/smart_ci.py`;
+# `--help` for the rules). The change is every path that differs between the merge-base of HEAD and
+# BASE (by default `rendering-and-planets`, the integration branch) and the working tree, untracked
+# files included, so it works before a commit as well as after; `A...B` plans the commits of B since
+# its merge-base with A, with `--plan`. Each path runs the checks that read it, through `ci`'s own
+# steps above, scoped and in `ci`'s order: a TypeScript-free change skips every TypeScript check; a
+# change to a crate's code runs that crate's rustfmt and Clippy (native, the other platforms', wasm32
+# where `ci` runs it), with the features `ci` gives it, and the tests that reach the changed code,
+# in any crate, through the code's graph (`tools/smart-ci/rust_graph.py`): nextest and wasip1 test
+# by test, through the filters above, doctests by file, the browser suites by crate; a TypeScript
+# source the vitest files whose imports reach it. The protocol crate adds the bindings' check and the
+# TypeScript side, the surface module's sources `gen-surface` and the vitest files that import it,
+# Markdown Prettier alone, and shaders, the engine and the smoke harness `just test-render`. A path
+# no rule knows, and the inputs of the whole workspace (this justfile, Cargo.toml, Cargo.lock,
+# pnpm-lock.yaml, rust-toolchain.toml, `.cargo/`, `tools/portable/`), run the full `ci`'s phases.
+# `--plan` prints the plan, each step with the paths that caused it and the tests chosen, and runs
+# nothing; a run prints it first. `--all-tests` runs every test of the changed crates and every
+# vitest file, as smart-ci did before the graph. `--dependents` adds the Clippy of every crate that
+# depends on a changed one (and with `--all-tests` their tests); a changed `Cargo.toml` always adds
+# their Clippy and tests. `--full` runs the full `ci`'s phases whatever the diff (integration's run).
+# Run it capped, with `SMART_CI_SLOT` naming the machine's build-slot command where there is one,
+# never inside it: smart-ci holds a slot only while it builds, and its test phase takes the
+# heavy-test lock as `ci`'s does.
 # The gate a change needs, chosen from its diff: `ci`'s steps, only those the change reaches.
 [positional-arguments]
 smart-ci *args:

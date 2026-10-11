@@ -308,7 +308,9 @@ def main() -> None:
         (
             f"{NO_EXPORT}just smart-ci",
             "the lane's gate: the steps of `just ci` the change reaches, test-render included where "
-            "needed (`just smart-ci --plan` lists them, each with its cause)",
+            "needed, and of the suites the tests that reach the changed code through its graph "
+            "(`just smart-ci --plan` lists them, each with its cause; `--all-tests` runs every test "
+            "of the changed crates instead)",
         )
     ]
     if slow_marked:
@@ -353,7 +355,8 @@ def main() -> None:
                      "`just test-render` after its other steps.")
     if determinism:
         notes.append("A determinism crate changed: its slow tests run at integration (`just ci-slow`). "
-                     "`just smart-ci --dependents` adds the crates that depend on it, for a change to what they use.")
+                     "`just smart-ci` runs the tests of the crates that depend on it that reach the change; "
+                     "`--dependents` adds their Clippy, for a change to what they use.")
     if notes:
         print("## Notes\n")
         for n in notes:
