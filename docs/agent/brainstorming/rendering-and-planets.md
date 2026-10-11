@@ -1551,9 +1551,14 @@ higher and is not used. The constants are derived from the formula at stated wav
 cited source, exactly as the project's rules already require of physical constants, and a test
 recomputes Bucholtz's figure to 1%. The three wavelengths are Bruneton's code constant, kept for
 that test and not used as render channels, where they make a low sun up to 60% too bright: the
-per-frame tables evaluate smooth terms at fitted channel wavelengths, 620, 540 and 445 nm for
-Earth's cases, and every bake off the frame loop is solved at 15 wavelengths across 380–760 nm
-and converted to colour (R08 Design note 5).
+per-frame tables evaluate smooth terms at channel wavelengths fitted by minimax over a family of
+suns and atmospheres, recorded with the fit in R08's `channels.json`: 645, 544 and 433.625 nm at
+R08.T4.a, over twelve suns from 2,300 to 45,000 K, Earth, Mars with dust and 27 gases, at most
+0.0077 off in u′v′, the red anywhere in 643–656 nm within 0.25% of the objective; the file is
+re-blessed when the optics it is fitted over change. Every bake off the frame loop is solved at 15
+wavelengths across 380–760 nm and converted to colour (R08 Design note 5). _Signed off 2026-10-10
+by the sign-off agent (owner's delegation; `signoff-3.md`), in place of the research figure, 620,
+540 and 445 nm, whose family was not recorded._
 
 Absorption and aerosols are where character comes from: ozone on an Earth-like world, suspended dust
 on a Mars-like one, hydrocarbon haze on a Titan-like one, and skipping them cannot be patched over by

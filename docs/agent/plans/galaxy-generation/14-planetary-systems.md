@@ -667,9 +667,9 @@ Order and parallelism:
 - Phase D needs B, T15 and T16. Phase E needs C and D. Phase F needs B–E. Phase G needs F.
 - Phase H's wire types (T35) can be drafted once T34 has fixed `BodyRecord`, in parallel with G.
 - Phase I's T38, T39 and T40 need only plan 05 and can start at any time; T41–T44 need H.
-- **The surface section, for the rendering plans** (drafted 2026-10-09 by R08.T1 and R09.T0.a, for
-  the owner). Phase E's T24, Phase K's T48 and Phase H's T35.e are built in this order, each after
-  what it names, with no cycle:
+- **The surface section, for the rendering plans** (drafted 2026-10-09 by R08.T1 and R09.T0.a;
+  accepted with amendments 2026-10-10, `signoff-3.md`). Phase E's T24, Phase K's T48 and Phase
+  H's T35.e are built in this order, each after what it names, with no cycle:
 
   0. T14.d, tides under a gas envelope (decision-backlog-1), first in the lane of the batch's bump.
      It reads nothing of 1–7, and nothing in them reads it: a gas-envelope body has no surface;
@@ -700,7 +700,7 @@ Order and parallelism:
     called by nothing on the record until T54.a, so each keeps `just ci` green and moves no golden.
     Lanes: T49.b → T49.c; T49.d; T49.e (after R08.T5.b and T5.d); T50.a → T51.a → T51.b (one lane:
     all three edit `derive/atmosphere.rs`); T51.c after T50.a; T24.e → T50.b → T52.a → T52.b →
-    T52.c → T24.c with T24.g → T24.d with T52.d; T56.a → T56.c →
+    T52.c → T24.c with T24.g (after T51.a) → T24.d with T52.d; T56.a → T56.c →
     T56.d (lane `p14-moons`; T56.c after T50.a), with T56.b in the client after T56.a; T57.a after
     T51.b in the T50.a lane; then T54.a.
   - **23 → 24**: T53.a → T53.b → T53.c; T53.d; T51.d → T51.e; T51.f (after R09.T7.d's
@@ -2130,21 +2130,22 @@ the resource model and later generators need.
 
 T24.c–f, after T24.b, are rendering plan R08's asks
 ([Atmospheres](../rendering-and-planets/08-atmospheres.md), Design notes 3, 6, 13 and 16, and task
-R08.T1), **drafted by R08.T1 (2026-10-09) for this plan's owner; not yet accepted**, against this
+R08.T1), **drafted by R08.T1 (2026-10-09) for this plan's owner; accepted with amendments
+2026-10-10 by the sign-off agent (owner's delegation, `signoff-3.md`)**, against this
 plan as built at `62c196c3` (`GENERATOR_VERSION` 21, `PROTOCOL_VERSION` 2). R08 computes each
 body's atmosphere in the client from this plan's figures. As built this plan fills only H₂O, CO₂,
 N₂ and Ar: its Titan is 1.4 bar of N₂ with no methane, no world has O₂, a gas envelope has no
 composition, and nothing says where a cloud, a haze or a dust layer lies or how the temperature
-falls with height. Nothing here is built or changes output until the owner accepts it; the
-orchestrator has a decision agent rule on it and then assigns the building. Until then R08 draws
-its hand fixtures (its Design note 16) and no generated body's air. The physics is R08's research
+falls with height. Until T35.e sends the section, R08 draws its hand fixtures (its Design note 16)
+and no generated body's air. The physics is R08's research
 of 2026-09-29, cited in each task; a figure or rule marked "from memory" was not researched, and
 the builder checks it against its paper before it becomes a constant. Each task is generated
 output (Generator version). The four are reconciled with Phase K's asks (R09's), so that no field
 is defined twice and the order across Phases E, K and H has no cycle (Tasks, "Order and
 parallelism"; Risks, "The rendering plans' asks of the surface section"). T24.g, sulphur, was
 drafted by a science agent on 2026-10-09 (`science-r08-sulphur-co2ice.md`, in the RM4
-orchestration directory) for this plan's owner, and is not yet accepted. It answers the second
+orchestration directory) for this plan's owner, and is accepted with amendments (`signoff-3.md`).
+It answers the second
 open question of R08's asks (Risks) and is built with T24.c.
 
 Typed by substance (decision-composition, 2026-10-09): every gas, condensable, liquid, ice,
@@ -2155,39 +2156,56 @@ T24.g move to the 22 → 23 batch, where T24.c's and T24.d's decks and T24.g's a
 T52.c's condensation loop, and T24.d's composition is T52.d's.
 
 - **P14.T24.a `SurfaceConditions`.** Mean surface temperature from T13 with day–night and
-  equator–pole contrasts from rotation state, obliquity and atmospheric column (a thick atmosphere
-  or an ocean flattens them; signed, and a locked world's about its substellar axis, by P14.T48.e,
-  drafted by R09.T0.a); surface pressure and gravity (the gravity is the bulk section's, read here
-  and not published twice, by P14.T35.e, drafted by R08.T1); atmosphere as ordered gas fractions,
-  `(SubstanceId, x)` mole fractions largest first with ties by `SubstanceId` (with CH₄ and O₂ by
-  P14.T24.f, drafted by R08.T1), and their mean molar mass μ and mixed c_p ÷ R from T49.a's
-  `mean_molar_mass` and `heat_capacity_over_r`, computed here once and published
-  (decision-composition); stellar flux; the host's activity level as a radiation class;
-  liquid-water flag from pressure and temperature range against water's phase diagram.
+  equator–pole contrasts from rotation state, the obliquity to the seasonal orbit (the body's own
+  about its star, or its planet's for a moon, as R09's `SeasonalOrbit` states it; a moon's moves
+  with P14.T56.a's Laplace planes at 22 → 23) and atmospheric column (a thick atmosphere or an
+  ocean flattens them; signed, and a locked world's about its substellar axis, by P14.T48.e);
+  surface pressure and gravity (the gravity is the bulk section's, read here and not published
+  twice, by P14.T35.e); atmosphere as ordered gas fractions, `(SubstanceId, x)` mole fractions
+  largest first with ties by `SubstanceId` (with CH₄ and O₂ by P14.T24.f, built), and their mean
+  molar mass μ and mixed c_p ÷ R from T49.a's `mean_molar_mass_g_per_mol` and
+  `heat_capacity_over_r`, summed over the list in its published order, computed here once and
+  published (decision-composition); stellar flux; the host's activity level as a radiation class;
+  liquid-water flag from the surface pressure and temperature range by the registry's `phase_at`
+  on `H2O`'s row (T49.a; from 22 → 23 T51.a derives it from the partition).
+  - _Mole fractions_ (signoff-3.md, item 1.1). T13.c's partial pressures are column weights,
+    p_i = M_i g ÷ 4πR², which sum to the surface pressure, so p_i ÷ p_s is a mass fraction. The
+    published fraction is x_i = (p_i ÷ μ_i) ÷ Σ_j (p_j ÷ μ_j), μ_i the row's molar mass, and
+    μ = Σ x_i μ_i = p_s ÷ Σ_j (p_j ÷ μ_j). R08's column, its Rayleigh terms and R09's `GasShare`
+    read mole fractions.
+  - An `Airless` body's list is empty, whatever residue its partial pressures hold, so that the
+    list agrees with the state (P14.T53.c's test). Its μ and c_p ÷ R are none, as T49.a's
+    functions give for an empty mixture.
 - **P14.T24.b `GlobalFigures`.** Ocean fraction: a logistic function of the liquid's volume, its
-  mass ÷ ρ_l from T49.a's row, over the basin capacity, where capacity ∝ surface area × relief,
+  mass ÷ ρ_l from T49.a's row (`PhaseColumns::triple_liquid_density`, which T49.b's ρ_l(T)
+  supersedes), over the basin capacity, where capacity ∝ surface area × σ_h (P14.T48.a's, built in
+  this step; no greatest relief is read),
   reaching 1 (an ocean world) above it, carried as `surface_liquids`, a list of
   `(SubstanceId, area fraction)` whose sum is the ocean fraction (water the only entry this
   subtask computes; T51.a adds the others, decision-composition); ice fraction, likewise a list
   `surface_ices` by substance (water only here), from the latitude at which the zonal temperature
-  crosses freezing (reading the climate
-  regime, by P14.T48.d, drafted by R09.T0.a); cloud fraction by
-  surface state; relief: greatest relief 20 km × (g⊕ ÷ g) scaled by a lithosphere factor from heat
-  flow (withdrawn for σ_h with a continental fraction by P14.T48.a, drafted by R09.T0.a); heat flow
-  from radiogenic heating (∝ rock mass × host [Fe/H] × e^(−age ÷ τ) summed over U,
-  Th and K), residual formation heat and tidal heating; tectonic regime and volcanism level from
-  heat flow and mass; the present volcanic outgassing O, relative to Earth's (by P14.T24.g's
-  draft, below); magnetic field class from rotation, core fraction and heat flow; surface age:
-  the smaller of the system's age and a resurfacing time that falls with heat flow, and the time
-  since a giant impact; crater density N(> 1 km) per km² from surface age by the lunar chronology
-  curve, 5.44 × 10⁻¹⁴ (e^(6.93T) − 1) + 8.38 × 10⁻⁴ T with T in Gyr (Neukum, Ivanov and Hartmann
-  2001), scaled by the system's belt masses and zeroed under a thick atmosphere for small craters
-  (screened instead by the shared crater density, by P14.T48.c, drafted by R09.T0.a).
-  - _The present outgassing_ (by P14.T24.g's draft, 2026-10-09). `GlobalFigures` gains `outgassing`,
+  crosses freezing (reading the climate regime, by P14.T48.d); a subsurface ocean,
+  `subsurface_ocean`, the regular moons' flag as P14.T17.b computes it (`has_subsurface_ocean`),
+  and not computed (absent) for every other body until a rule exists; cloud fraction by
+  surface state; relief as σ_h with the continental fraction (P14.T48.a; the greatest relief is
+  withdrawn); heat flow F in W m⁻², from radiogenic heating (rock mass × 10^[Fe/H] ×
+  Σ_k h_k e^(−age ÷ τ_k) over ²³⁸U, ²³⁵U, ²³²Th and ⁴⁰K, each with its own mean life, over the
+  surface area 4πR²), residual formation heat and tidal heating; tectonic regime (`MobileLid` or
+  `StagnantLid` by this rule; `HeatPipe`, `Episodic` and `IceShell` are reserved and produced by
+  none yet) and volcanism level from heat flow and mass; the present volcanic outgassing O,
+  relative to Earth's (by P14.T24.g, below); magnetic field class from rotation, core fraction and
+  heat flow; surface age: the smaller of the system's age and a resurfacing time that falls with
+  heat flow, and the time since a giant impact; crater density N(> 1 km) per km² from surface age
+  by the lunar chronology curve, 5.44 × 10⁻¹⁴ (e^(6.93T) − 1) + 8.38 × 10⁻⁴ T with T in Gyr
+  (Neukum, Ivanov and Hartmann 2001), scaled by the system's belt masses and zeroed under a thick
+  atmosphere for small craters (screened instead by the shared crater density, P14.T48.c).
+  - _The present outgassing_ (P14.T24.g, 2026-10-09). `GlobalFigures` gains `outgassing`,
     O = max(0, (F − F_c) ÷ (F⊕ − F_c)), with F the heat flow above.
     - F⊕ is the Solar System table's Earth's heat flow, so Earth's O is 1.
     - F_c is the heat flow below which no melt reaches the surface. It is the builder's,
-      provisional, set between the table's Mars and Venus, of order 0.03 W m⁻². For comparison,
+      provisional, set between the table's Mars and Venus, of order 0.03 W m⁻². It is a public
+      constant in `params.rs`, since P14.T56.d's tidal branch reads it (decision-p14-moons, item
+      3). For comparison,
       Earth's measured mean is 0.09 (Davies and Davies 2010), and Mars's and the Moon's are about
       0.02 (from memory, check at build).
     - The tectonic regime and the age enter through F and F_c. No regime factor is added, since only
@@ -2196,23 +2214,32 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
       relief over the surface's history and is calibrated on Mars: Mars has old volcanic relief and
       no outgassing now.
   - _Tests:_ Solar System table: (a) Earth has the liquid-water flag and Mars and Venus do not; a
-    locked airless body has a day–night contrast over 300 K and Venus one under 10 K. (b) Earth
-    ocean fraction 0.6–0.8, Mars and Venus 0, Europa flagged as subsurface ocean; the Moon's crater
-    density exceeds Earth's by over 100; relief of Mars exceeds Earth's; every fraction is within
-    0–1 and continuous in time. Earth's present outgassing is 1, the Moon's, Mercury's and Mars's 0,
-    and Venus's between 0.3 and 3; it is continuous in time and does not rise with age where the
-    heat flow falls. `surface_liquids` and `surface_ices` each sum to their fraction to 10⁻¹², and
-    hold `H2O` alone (T51.a widens them).
+    locked airless body has a day–night contrast over 300 K and Venus one under 10 K. The published
+    fractions are mole fractions: equal weights of N₂ and CO₂ give x(N₂) = μ_CO₂ ÷ (μ_CO₂ + μ_N₂),
+    with the registry's molar masses, to 10⁻¹², μ equals p_s ÷ Σ(p_j ÷ μ_j) to 10⁻¹², and the
+    table's Venus carries N₂ at its weight over its molar mass (about 1.65% by number from 0.61 of
+    57.8 bar, not 1.05%). An `Airless` body has no gases and no μ. A moon's contrasts read its
+    obliquity to its planet's orbit. (b) Earth ocean fraction 0.6–0.8, Mars and Venus 0, Europa
+    flagged as subsurface ocean; the Moon's crater density exceeds Earth's by over 100; relief of
+    Mars exceeds Earth's; every fraction is within 0–1 and continuous in time. Earth's present
+    outgassing is 1, the Moon's, Mercury's and Mars's 0, and Venus's between 0.3 and 3; it is
+    continuous in time and does not rise with age where the heat flow falls. `surface_liquids` and
+    `surface_ices` each sum to their fraction to 10⁻¹², and hold `H2O` alone (T51.a widens them).
+    The table's Earth's heat flow lies within a factor 1.5 of Davies and Davies 2010's
+    0.092 W m⁻²; at fixed composition and age it scales as 10^[Fe/H], and at fixed abundances as
+    the rock mass over R². `subsurface_ocean` is the table's Europa's flag and is absent for every
+    planet. The basin capacity reads σ_h.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface planetary::hooks::figures`.
-- **P14.T24.c The aerosol and absorber inventory** (R08.T1's draft; in the 22 → 23 batch, after
-  T24.e and T52.c, decision-composition).
+- **P14.T24.c The aerosol and absorber inventory** (R08.T1's draft, accepted with amendments,
+  signoff-3.md; in the 22 → 23 batch, after T24.e, T52.c and T51.a, decision-composition).
   `hooks/aerosols.rs`: `AerosolInventory { modes, absorbers }`, a member of the record's surface
   section (T48.e), a function of age + t.
   - _A mode_ has a material, a registry row (`SubstanceId`; its key on the wire) whose aerosol
     column gives its shape class (sphere, non-spherical mineral, crystal, aggregate), its particle
     density and its mass extinction at 550 nm (T49.e). One registry row serves every phase of its
     substance (`H2O` is a cloud's droplets and its ice crystals), so each mode on the wire also
-    carries its phase (T49.a's `Phase`), which with its row fixes its shape class and its optics
+    carries its phase (T49.a's `Phase`, `Solid` or `Liquid`: a mode is never `Vapour` or
+    `Supercritical`), which with its row fixes its shape class and its optics
     (R08.T5.b's finding, R08's Risks, "Deviations in T5.b, as built"). Liquid water, sulphuric acid
     and liquid methane are spheres; the ices are crystals; mineral dust and the silicates are
     non-spherical minerals; tholin and soot are spheres, the monomers of an aggregate. Any registry
@@ -2236,27 +2263,34 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     its vapour's mole fraction above it, the cold trap's, which R08 reads for the vapour's column
     there rather than re-deriving the saturation curve.
   - _An absorber_ is a registry gas row that is not one of T24.a's well-mixed gases, with its
-    column (molecules m⁻²) and its layer: ozone, and SO₂ by T24.g. A species appears in at most one
+    column (molecules m⁻²) and its layer: ozone, and SO₂ by T24.g, listed in registry order. A
+    species appears in at most one
     of the two lists. A gas that absorbs, methane by T24.f, is an absorber by its T24.a fraction
     and is not listed again, so its column is published once.
   - _The formation rules:_
     - condensate decks by T52.c's loop over the registry's laws aloft along T24.e's profile, with
-      the vapour's mixing ratio set at the ground by a surface relative humidity (Manabe and
-      Wetherald 1967's 0.77 for water, from memory), since a vapour held at saturation at the ground
-      would put every deck's base there. R11 takes its clouds' species from these decks (R11.T7).
+      the vapour's mole fraction at the ground T24.a's published fraction of that species, never
+      re-derived on the Surface path. The surface relative humidity that sets it is the constant
+      T51.a's partition reads: Manabe and Wetherald 1967's 0.77 for water (from memory) and
+      P14.T24.f's 0.5 for methane, since a vapour held at saturation at the ground would put every
+      deck's base there. R11 takes its clouds' species from these decks (R11.T7).
       The decks' coverage is scaled to the cloud fraction of the snapshot path (T51.b), which never
       reads them;
     - an ozone column N_⊕ × F(p_O₂/PAL) × U(star) (Segura et al. 2003, 2005), with N_⊕ Earth's,
       about 300 DU (1 DU = 2.687 × 10²⁰ molecules m⁻²), F(0) = 0, F(1) = 1 and U(Sun) = 1, as a
-      layer near 10–30 mbar;
+      layer near 10–30 mbar; beyond the range of p_O₂ the papers cover, as on P14.T24.f's runaway
+      worlds with thousands of bar of O₂, the builder states an extrapolation of the column and its
+      layer that stays monotonic and finite, and records it;
     - methane haze at CH₄ ≳ 10⁻³ on N₂–CH₄ worlds, or CH₄/CO₂ ≳ 0.1–0.2 on CO₂ worlds (Trainer
       et al. 2006; Arney et al. 2016), as a fractal-aggregate mode with Titan's monomers (about
       0.05 µm, some 3,000 of them, D_f 2; Tomasko et al. 2008, the case R08.T5.c tests). The rule
-      states methane's carbon budget: photolysis to hydrocarbons, not escape, is the sink, and
-      T24.f takes the reservoir as resupplied (science-p14-t24f, finding 3);
-    - dust on arid, windy, thin-aired worlds: arid with no surface liquid (T24.a's flag, T24.b's
-      ocean fraction 0), thin-aired below a pressure the builder states, and windy by a rule on
-      this plan's own figures (pressure, gravity and rotation), never on R09's coarse wind field,
+      states methane's carbon budget: its carbon is photolysed methane, the sink science-p14-t24f
+      §4 names (photolysis to hydrocarbons, not escape; finding 3), and the rule takes the methane
+      reservoir as resupplied, as T24.f does, and says so in its doc (P14.T53.a records the carbon's
+      outcome; signoff-3.md);
+    - dust on arid, windy, thin-aired worlds: arid with no surface liquid of any substance (T24.b's
+      `surface_liquids` empty), thin-aired below a pressure the builder states, and windy by a rule
+      on this plan's own figures (pressure, gravity and rotation), never on R09's coarse wind field,
       which reads this section (a cycle otherwise); a non-spherical mineral mode whose background
       column is calibrated on Mars's (from memory, τ of order 0.5 in the visible; the builder
       takes a measured climatology). Once P14.T31.b exists, a `body.duststorm` phase raises the
@@ -2276,22 +2310,25 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     builder reads the column in the paper); a Mars-like world carries non-spherical dust and an
     ocean world none; Earth carries water decks and no ozone, since its O₂ is biotic (T24.f); an
     airless body's inventory is empty; the inventory is continuous in time but at a recorded
-    state change.
+    state change; every mode's phase is `Solid` or `Liquid`; a deck's vapour at the ground equals
+    T24.a's mole fraction of it to 10⁻¹²; the ozone column is finite and monotonic in p_O₂ up to
+    the generator's largest O₂.
   - The record field's doc comment and its generated protocol binding state the radius convention
     and the phase, in the units the field already has.
   - _Files:_ `planetary/hooks/{aerosols, mod}.rs`, `planetary/record.rs` (the surface section's
     member), `planetary/chem/condense.rs` (read).
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::aerosols`.
-- **P14.T24.d The envelope's visible atmosphere** (R08.T1's draft; re-scoped to the envelope's
+- **P14.T24.d The envelope's visible atmosphere** (R08.T1's draft, accepted as re-scoped,
+  signoff-3.md; re-scoped to the envelope's
   structure and built in the 22 → 23 batch with T52.d, which gives its composition and decks,
   decision-composition). `hooks/envelope_atmosphere.rs`:
   `EnvelopeAtmosphere`, for every body in `SurfaceState::GasEnvelope`: the giants, and every
   sub-Neptune, which is one by construction (`PlanetClass::of` and `derive::atmosphere` share
   `THIN_ENVELOPE_FRACTION`). It fills the record's `envelope` section, `RecordSection::Envelope` at
   `DetailLevel::Surface`, which T48.e's gas-envelope split adds: `NotModelled` for every
-  gas-envelope body until this task, and `NotApplicable` for every other body. If this task is
-  built before T48.e, it builds the split itself (decision-p14-t35e-wire). A gas-envelope body's
-  surface section is `NotApplicable` (T48.e), so that exactly one of the two applies at any time.
+  gas-envelope body until this task, and `NotApplicable` for every other body. A gas-envelope
+  body's surface section is `NotApplicable` (T48.e), so that exactly one of the two applies at any
+  time.
   - T_int and T_irr: a giant's internal heat by ruling 112.7's split (the record's effective and
     equilibrium temperatures) and T12's flux. A sub-Neptune has no internal heat in the record
     today; the builder states one (its envelope's cooling, or none) and records it.
@@ -2323,15 +2360,21 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::envelope_atmosphere` and
     `cargo test -p hyperion-sim planetary::record`.
 
-- **P14.T24.e The vertical structure** (R08.T1's draft; first of the 22 → 23 batch's
-  atmosphere lane, decision-composition). `hooks/structure.rs`:
+- **P14.T24.e The vertical structure** (R08.T1's draft, accepted with amendments, signoff-3.md;
+  first of the 22 → 23 batch's atmosphere lane, decision-composition). `hooks/structure.rs`:
   `VerticalStructure::RadiativeConvective`, holding T_s, p_s, β and T_skin, a member of the
   record's surface section (T48.e). It is R08 Design note 3's scaled adiabat to an isothermal
   skin, T(p) = max(T_s (p ÷ p_s)^β, T_skin) (Robinson and Catling 2012, ApJ 757, 104, and 2014,
   Nature Geoscience 7, 12).
   - T_s and p_s are T24.a's mean surface temperature and surface pressure, one field each.
   - β = α·R/c_p. α is set by the condensing species that T48.d's classifier names: 0.6 for water,
-    0.77 for methane, 0.8 for CO₂ or none (R&C 2014 Table 1; R&C 2012 §4.1 for Venus). R/c_p is
+    0.77 for methane, and 0.8 for CO₂, for every other condensable and for none (R&C 2014 Table 1;
+    R&C 2012 §4.1 for Venus). A condensable sets α only where its latent heat can change the lapse
+    rate: where ε L² r ÷ (c_p R T²) at the ground, the moist adiabat's departure from the dry one
+    (r the condensable's mass mixing ratio, ε its molar mass over the air's, L its latent heat from
+    its registry row, c_p and R the air's), is under 0.1, the air takes 0.8. That is about 0.05 for
+    a Mars's water, against 1.6 for Earth's and 1.8 for Titan's methane (signoff-3.md; the builder
+    confirms the criterion against R&C 2012 and records it). R/c_p is
     T24.a's published mixture's, from each row's c_p ÷ R class in T49.a (kinetic theory with R&C
     2012's fixed degrees of freedom, their Eq. 9: 2/7 for H₂, N₂ and O₂, 0.400 for He and Ar, 3/13
     for CO₂ and 0.25 for H₂O, CH₄ and NH₃), mixed as c_p = Σxᵢc_p,ᵢ, never by averaging γ.
@@ -2352,12 +2395,17 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     above is the flight model's.
   - _Tests:_ Earth's tropopause at 0.12–0.25 bar and 205–220 K; Venus at 300–370 K at 1 bar;
     Titan's tropopause below 0.3 bar at 60–75 K. On the Solar System table as built (Earth at
-    0.78 bar of N₂ with T_eq 255 K; Venus at 735 K and 58 bar; Titan at 94 K and 1.4 bar, a
+    0.78 bar of N₂ with T_eq 255 K; Venus at 735 K and 58 bar, at about 695 K from
+    P14.T57.a once T54.a blesses it; Titan at 94 K and 1.4 bar, a
     snowball whose Bond albedo of 0.50 gives T_eq 75.6 K at its 9.583 au), these come to about
     0.14 bar at 214.5 K, 347 K, and 0.24 bar at 63.6 K: computed by R08.T1, for the builder to
     confirm. The mixed R/c_p is 3/13 for pure CO₂ and 2/7 for pure N₂; `temperature_at` is
     continuous and falls or holds with height; the golden is blessed; the table's Saturn's T_skin
     lies within 2 K of 2^(−1/4) × its T_eff, and Earth's within 0.05 K of the sunlight-only form.
+    A Venus given its measured state by hand (90.4 bar of CO₂ and 2.09 of N₂ by weight, 735 K) is
+    printed at VIRA's levels and recorded: about 321 K at 1.066 bar against 350.5 K [M], the fixed
+    c_p ÷ R's limitation, for a later β from T49.b's temperature-dependent heat capacities. A world
+    whose only condensable is water at a Mars's partial pressure takes α = 0.8.
   - _Files:_ `planetary/hooks/{structure, mod}.rs`, `planetary/record.rs`, `planetary/mod.rs`
     (the re-export of `temperature_at`), `tests/planetary_structure_golden.rs` and its golden.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::structure` and
@@ -2387,8 +2435,9 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   - _Files:_ `planetary/derive/atmosphere.rs`, `planetary/derive/atmosphere/tests.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`.
 - **P14.T24.g Sulphur: the sulphuric-acid deck and the sulphate layer.** Drafted by a science agent
-  on 2026-10-09 (`science-r08-sulphur-co2ice.md`) for this plan's owner, and not yet accepted. It
-  is built with T24.c, in the 22 → 23 batch, and its deck is a row of T52.c's loop with its own law
+  on 2026-10-09 (`science-r08-sulphur-co2ice.md`) for this plan's owner; accepted with amendments
+  2026-10-10 by the sign-off agent (owner's delegation, `signoff-3.md`). It is built with T24.c,
+  in the 22 → 23 batch, and its deck is a row of T52.c's loop with its own law
   (decision-composition).
 
   `hooks/sulphur.rs`, called by T24.c's inventory, is a function of age + t. It adds one species,
@@ -2427,10 +2476,12 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
          2022), returning its sulphur to SO₂.
        - Only the surface removes SO₂, by reaction with calcite to anhydrite. Its column is
          N_SO₂ = Φ t_dry.
-       - t_dry is fixed by the Solar System table: the table's Venus holds Venus's measured 130 ppm
-         below its clouds (Marcq et al. 2008, 130 ± 50 ppmv at 30–40 km). At Venus's O = 1 that is
-         2.75 Myr, beside Fegley and Prinn 1989's laboratory 1.9 Myr (Nature 337, 55).
-       - The builder recomputes t_dry from T24.b's Venus.
+       - t_dry is fixed on Venus's measured state: 130 ppm below its clouds (Marcq et al. 2008,
+         130 ± 50 ppmv at 30–40 km) in its measured column (4.69 × 10²⁰ kg of CO₂ and
+         1.08 × 10¹⁹ kg of N₂ [M], P14.T57.a's inventory), at T24.b's O for Venus. At O = 1 that is
+         about 4.4 Myr, beside Fegley and Prinn 1989's laboratory 1.9 Myr (Nature 337, 55). The SO₂
+         column is what the source and the sink fix, so the table's median Venus, with less air,
+         carries about 209 ppm.
     2. **Temperate or snowball: once through, a thin layer.**
        - Where there is surface liquid, SO₂ dissolves in cloud and rain and lives about 2 days (Hu
          et al. 2013, after Seinfeld and Pandis 2006). Where the air is dry and cold, the acid falls
@@ -2470,7 +2521,13 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
       Hovenier 1974 find τ = 1 "where the pressure is about 50 mb".
     - With no base below the top there is no deck: the hot limit.
     - τ(550) = σ_d x_SO₂ (p_base − p_top) ÷ (m̄ m_u g), the SO₂ molecules within the deck's layers
-      times σ_d = 1.27 × 10⁻²⁴ m², fixed on Venus.
+      times σ_d = 1.27 × 10⁻²⁴ m², fixed on Venus. **Fixed through this plan's own model**
+      (signoff-3.md; decision-p14-moons item 4's rule): σ_d is fitted so that a Venus given its
+      measured state by hand (as above, 735 K) carries Haus et al.'s τ(550) of 34.5 along T24.e's
+      profile. That is about 0.713 × 10⁻²⁴ m², since T24.e's fixed c_p ÷ R puts that Venus's deck at
+      about 2.45–0.069 bar, deeper than VIRA's 1.38–0.037 bar. It is `Adopted`, with the cited
+      1.27 × 10⁻²⁴ m² from Haus's column over VIRA's pressures beside it, and is refitted with
+      T24.e's β. ε_v stays 0.06, from the measured vapour.
       - Venus's τ of 34.5 comes from Haus et al. 2016's standard cloud model (Icarus 272, 178) with
         Pollack et al. 1993's sizes (Icarus 103, 1), through Mie at n = 1.44. Both were read via
         Reyes-Guerrero et al. 2026 (arXiv:2607.22187); the primaries check at build.
@@ -2504,19 +2561,21 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   - _SO₂ is published_ as one of T24.c's absorbers, with its column and its layer: the ground to
     the deck's top, or to the tropopause. It is not one of T24.a's fractions.
   - _Tests:_
-    - The table's Venus carries a deck of four modes.
-      - Its base lies at 1.0–2.0 bar and 345–390 K, and its top at its skin level, 0.03–0.06 bar.
-        These are the pressures of Venus's 48–70 km cloud (Imamura et al. 2017), which T24.e's
-        closed form puts about 43 and 63 km above its 58-bar surface.
-      - Its τ(550) is 20–40, its shares are as tabled to 10⁻⁹, its SO₂ is 130 ppm to 10⁻⁶ (by
-        t_dry), and its vapour at the base is 5–10 ppm.
-      - Computed by the science agent: 1.34 bar at 366 K, 0.0415 bar at 192.6 K, 42.6 and 62.7 km,
-        τ 33.1. The builder confirms them.
+    - A Venus given its measured state by hand (90.4 bar of CO₂ and 2.09 of N₂ by weight, 735 K)
+      carries a deck of four modes: its SO₂ is 130 ppm to 10⁻⁶ (by t_dry), its vapour at the base
+      5–10 ppm (by ε_v), its τ(550) 34.5 to 10⁻⁶ (by σ_d), its shares as tabled to 10⁻⁹, and its
+      base at 345–390 K with its top at the skin level. Its base and top pressures are printed and
+      recorded against VIRA's 1.38 and 0.037 bar (computed: about 2.45 and 0.069 bar, T24.e's
+      limitation).
+    - The table's median Venus carries a deck of four modes with τ(550) above 10, so that R08
+      classes it `cloudDeck`, its base below 3 bar and above its top. Its figures are printed for
+      T54.a's bless note (computed: at P14.T57.a's 694.5 K about 2.22–0.057 bar, τ 50 and 209 ppm;
+      at 735 K about 1.51–0.042 bar and τ 34).
     - The table's Earth carries no deck, but a sulphate layer from 0.14 to 0.028 bar with τ(550)
       between 10⁻³ and 10⁻². Its SO₂ is under 1 ppb (computed: τ 0.0032, 14 ppt).
     - The Moon, Mercury, Mars and Titan carry no sulphur (O is 0, or there is no air), and neither
       does any body with no host star.
-    - On the table's Venus, τ rises monotonically with O and tends to zero with it. Raising T_eq,
+    - On a measured Venus, τ rises monotonically with O and tends to zero with it. Raising T_eq,
       with T_s in proportion, thins the deck and removes it by T_eq = 400 K (Lincowski et al. 2018's
       TRAPPIST-1 b, near 400 K, condenses no acid).
     - No temperate or snowball world carries a deck at any O up to 10³, and its layer stays under
@@ -2935,9 +2994,10 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
   `halo` keep their shape, lists of IDs. `BodyOrbitDto.parent` of a member is its belt's host.
   One wire-form test per type; the shared fixture gains the populations.
 - **P14.T35.e The surface section and the gas envelope on the wire** (drafted by R08.T1,
-  2026-10-09, reconciled with R09.T0.a's Phase K, for this plan's owner; not yet accepted; after
-  T48.e). As built, the sim's `record::Surface` and the wire's `BodySurfaceDto` are uninhabited
-  enums, and no task gave them fields: T35.b only tags the section `not_modelled`. T48.e gives the
+  2026-10-09, reconciled with R09.T0.a's Phase K; accepted with amendments 2026-10-10 by the
+  sign-off agent, owner's delegation, `signoff-3.md`; after T48.e). As built, the sim's
+  `record::Surface` and the wire's `BodySurfaceDto` are uninhabited enums, and no task gave them
+  fields: T35.b only tags the section `not_modelled`. T48.e gives the
   record's section its contents, and this subtask is the one change of the wire's form for it and
   for T24.d's `envelope`, serving every reader of the wire: R08 (the atmosphere); R10 (its
   Consumes: the surface state and material, the ocean and ice fractions, the surface age, the
@@ -2952,21 +3012,28 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
       signed equator–pole and day–night contrasts; the surface pressure; `gases`, a list of
       `{ species, mole_fraction }`, `species` a registry key (a string, never a closed enum),
       largest first, summing to 1 to 10⁻⁹ (R08.T3.c refuses less), empty for an airless body, with
-      CH₄ and O₂ by T24.f; `mean_molecular_mass_g_mol` and `heat_capacity_over_r`, T24.a's μ and
-      c_p ÷ R of `gases`; the stellar flux; the radiation class; and the liquid-water flag;
+      CH₄ and O₂ by T24.f; `mean_molar_mass_g_per_mol` and `heat_capacity_over_r`, T24.a's μ and
+      c_p ÷ R of `gases` (`null` for an airless body); the stellar flux; the radiation class; and
+      the liquid-water flag;
     - T48.d's climate regime (its three fields and its named coarse model; the condensable a
-      registry key, or absent for none);
+      registry key, or `null` for none);
     - T24.b's figures with T48.a–c's: the ocean, ice and cloud fractions, with `surface_liquids`
       and `surface_ices` as lists of `{ substance, area_fraction }` by registry key, σ_h and the
       continental fraction, the heat flow, the tectonic regime, the volcanism level, the present
-      outgassing, the magnetic field class, the surface age, the crater contract (the production
+      outgassing, the magnetic field class, the surface age, `subsurface_ocean` (T24.b: a regular
+      moon's flag, absent for a body no rule computes), the crater contract (the production
       N(>1 km), the projectile density or the crater cutoff, k_target, and the optional impact
-      velocity) and the optional wet epoch;
+      velocity) and the wet epoch, `null` for a world never wet:
+      `{ liquid, start_ago_s, end_ago_s, effective_flow_yr, runoff_m_per_yr, paleo_inventory_kg_m2 }`,
+      `liquid` a registry key (T48.b);
     - T24.e's vertical structure (β and T_skin; its T_s and p_s are the fields above, sent once)
-      and T24.c's inventory (modes and absorbers, radii in metres, columns in molecules m⁻²; each
-      mode with its material key, its phase (T49.a's `Phase`, T24.c), its shape class, its deck's
-      condensate key, its column mass in kg m⁻² and its τ(550); each absorber by species key, O₃
-      and SO₂ first); and, declared
+      and T24.c's inventory, `{ modes, decks, absorbers }` (radii in metres, columns in
+      molecules m⁻², pressures in pascals): each mode
+      `{ material, phase, deck, shape, size_distribution, column_mass_kg_m2, tau_550, base_pa, top_pa, f_sed }`,
+      its `phase` `solid` or `liquid` and its `size_distribution` the gamma's or log-normal's r_eff
+      and v_eff, or an aggregate's a₀, N, D_f and k_f; each deck
+      `{ condensate, vapour_mole_fraction_above }`; each absorber
+      `{ species, column_m2, base_pa, top_pa }`, in registry order; and, declared
       `Modelled` and absent until their tasks land, T51.a's `condensates`
       (`{ substance, phase, reservoir_gel_m, area_fraction, seasonal }`), T51.c's `crust`
       (`{ primary, secondary, tertiary, provinces, redox, mantle_redox_iw, melt_area_fraction }`),
@@ -2979,7 +3046,8 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
   - `BodyRecordDto` gains `envelope: Option<SectionDto<BodyEnvelopeDto>>`, optional as `rotation`
     is (absent reads `not_modelled`, P14.T46.f's `toOptionalSection`), with T24.d's figures: T_int
     and T_irr, the Guillot profile's parameters with the adiabat's β and join pressure, the
-    composition as `{ species, mole_fraction }` by registry key, with its μ and c_p ÷ R, the decks
+    composition as `{ species, mole_fraction }` by registry key, with its
+    `mean_molar_mass_g_per_mol` and `heat_capacity_over_r`, the decks
     as T24.c's modes, and the haze τ. It is
     `not_applicable` for every body not in the gas-envelope state, whose surface section is the
     applicable one; a giant's and a sub-Neptune's surface is `not_applicable`. The server always
@@ -2991,6 +3059,10 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
     compute, which R08 reads as not modelled; each of those tasks fills its member in the server's
     conversion, so no later task changes the wire's shape (T35.b's slice gave `BodyKindDto` every
     variant from the start for the same reason).
+  - **None is `null`, never absent** (signoff-3.md, item 1.8). A value the generator computes as
+    none is `null`: an airless body's μ and c_p ÷ R, a world with no condensable's `condensable`, a
+    never-wet world's `wet_epoch`. Absent means not computed, by T34's rule, and R08, R10 and R11
+    read it as not modelled. A reader never takes `null` for not modelled, or absent for none.
   - `PROTOCOL_VERSION` stays 2 (decision-p14-t35e-wire). Filling the uninhabited `BodySurfaceDto` is
     not a change under plan 04's Design note 15: no build ever sent an `ok` surface, which was
     unrepresentable, so the first build that sends one sets its shape, and `not_resolved`,
@@ -3045,8 +3117,12 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
 
     A `bulk`-level and a `mass_and_orbit` record carry both sections `not_resolved`, a rocky body's
     envelope included, and no key of either value. `gases` sums to 1 to 10⁻⁹ and descends, and
-    every quantity's name carries its unit. The shared fixture
-    `packages/protocol/fixtures/planetary.json` gains the Earth's surface and the Jupiter's
+    every quantity's name carries its unit. An airless body's `mean_molar_mass_g_per_mol` and
+    `heat_capacity_over_r` are `null` and its `gases` empty; a never-wet world's `wet_epoch` and a
+    Venus's `condensable` are `null`; `subsurface_ocean` is present on a regular moon and absent on
+    a planet; a mode's `phase` outside `solid` and `liquid` is refused by the client's check; the
+    wet epoch's `liquid` and every mode's `material` and `deck` are registry keys. The shared
+    fixture `packages/protocol/fixtures/planetary.json` gains the Earth's surface and the Jupiter's
     envelope, which the TypeScript decode test reads, and keeps one record as an older server wrote
     it, with no `envelope` key. In `crates/hyperion-server/src/convert/planetary.rs`, over the
     golden systems at `full`:
@@ -4161,7 +4237,8 @@ phase beyond it; the phase integral is q_c = 2 ∫₀^π Φ_c(α) sin α dα.
 
 ### Phase K: the coarse surface's inputs (asked by rendering plan R09)
 
-**Drafted by R09.T0.a (2026-10-09) for this plan's owner; not yet accepted.** From rendering plan
+**Accepted with amendments 2026-10-10 by the sign-off agent (owner's delegation,
+`signoff-3.md`).** Drafted by R09.T0.a (2026-10-09) for this plan's owner. From rendering plan
 R09 ([The surface generator](../rendering-and-planets/09-surface-generator.md), Design note 3 and
 task R09.T0.a) against this plan as built at `bce2aef5` (`GENERATOR_VERSION` 21, `PROTOCOL_VERSION`
 2). R09's coarse pass (`planetary::surface`, run on the server only) is constrained to this plan's
@@ -4171,8 +4248,7 @@ finite realisation can match, and its 1/g scaling gives about 53 km for Mars and
 Moon against some 29 and 20 km observed (the rendering brainstorm's open question 20); T24.b's
 crater density is zeroed under a thick atmosphere rather than screened; and there is no climate
 regime classifier (the rendering brainstorm's open question 9, which assigns it to this plan).
-Nothing here is built or changes output until the owner accepts it; the orchestrator has a decision
-agent rule on it and then assigns the building. Until it lands R09 runs on inputs given by hand,
+Until it lands R09 runs on inputs given by hand,
 and its `CoarseInputs::for_body` answers `NotModelled(RecordSection::Surface)`.
 
 What exists, checked in the code: T24 is not built (`hooks/` holds `mod.rs` and `seed.rs`); the
@@ -4211,7 +4287,11 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     was calibrated (ruled by R09.T0.b, 2026-10-09: it is the mechanical lithosphere's 550–600 °C
     isotherm, and fits Venus's and Mars's T_e, where 723 K fails on Venus; R09's Design note 3);
     T_e is zero where T_s ≥ 870 K; the lithosphere factor acts on this share and the edifice cap
-    only.
+    only. An ice-rich crust (`SurfaceMaterial::Ice`, the predicate of k_comp and k_target) takes
+    ice's isotherm and conductivity instead: T_e = (a ÷ F) ln(T_ice ÷ T_s), with k = a ÷ T for ice
+    Ih (a ≈ 567 W m⁻¹, Klinger 1980, or 651, Petrenko and Whitworth 1999; checked at build) and
+    T_ice about 170 K (R09's lean, a source cited at build), zero where T_s ≥ T_ice. It is labelled
+    uncalibrated (signoff-3.md).
 
   Every constant calibrates on one body (Earth the mobile-lid terms, Venus the stagnant lid, the
   Moon the basin share, Mars the constructional share, Ceres k_comp and Vesta the cap), so the fit
@@ -4222,21 +4302,28 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   R09.T0.b (2026-10-09, medium-low confidence; Höning and Spohn 2023, Astrobiology 23(4),
   372–394): on a mobile lid, f_c = f_∞ (1 − e^(−(t − t_p) ÷ τ)) after t_p = 0.5 Gyr from formation
   and zero before, with τ = 1.1 Gyr and an asymptote f_∞ drawn once per body, uniform in
-  [0.2, 0.7], on a stream of this plan's own (a body tag such as `body.continents`, for this plan's
-  owner to name), since continental growth there is history-dependent (an ocean planet near 20%,
-  an Earth-like one near 40% and a land planet near 70% after 4.5 Gyr). f_c is zero on a stagnant
+  [0.2, 0.7], on `body.continents`, a Body-scope tag of this plan's own (word 0, one open uniform
+  u, f_∞ = 0.2 + 0.5 u; words 1–7 reserved; appended to `rng/tags.rs` after `body.surface.detail`
+  and added to the "Plan 14" heading's Body list; signoff-3.md), since continental growth there is
+  history-dependent (an ocean planet near 20%, an Earth-like one near 40% and a land planet near
+  70% after 4.5 Gyr). f_c is zero on a stagnant
   lid and on a world that never held surface water, and no mass dependence is modelled. Earth's
   0.405 at 4.5 Gyr is f_∞ = 0.416; the Solar System table passes Earth's measured 0.405.
   - _Tests:_ the Solar System table gives Earth 2.51 km at f_c 0.405 and Venus, the Moon, Mars,
     Ceres and Vesta their calibrating values within 5%, and Mercury within 25%; σ_h is continuous
     in time; no figure published is a greatest relief; f_c is zero before t_p, on a stagnant lid and
     on a never-wet world, rises monotonically to f_∞, and over 10⁴ bodies its asymptotes are
-    uniform on [0.2, 0.7] (Kolmogorov–Smirnov).
+    uniform on [0.2, 0.7] (Kolmogorov–Smirnov); an icy body's T_e follows the ice form and is zero
+    at T_s ≥ T_ice; the asymptote reads word 0 of `body.continents` and no other word.
+  - _Files:_ `rng/tags.rs` (`body.continents`) and the `rng/tags` golden.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
 
 - **P14.T48.b The volatile history** (with T24.b). `GlobalFigures` gains
-  `wet_epoch: Option<WetEpoch>`, `WetEpoch { start, end, effective_flow, runoff, paleo_inventory }`.
-  `start` and `end` bound the span over which the surface held liquid. `effective_flow` is R09's
+  `wet_epoch: Option<WetEpoch>`,
+  `WetEpoch { liquid, start, end, effective_flow, runoff, paleo_inventory }`, `liquid` the
+  `SubstanceId` that flowed (water the only one this subtask computes; a later rule may give
+  others, a Titan's methane among them, without a shape change; signoff-3.md). `start` and `end`
+  bound the span over which the surface held liquid. `effective_flow` is R09's
   stream-power solver's t, in Earth-equivalent years: the time channel-forming flow ran at a
   typical point of the surface over the epoch, divided by Earth's reference flood intermittency
   `REFERENCE_FLOOD_INTERMITTENCY` = 0.05. That is the share of the time an Earth river's
@@ -4249,10 +4336,10 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   of a point's wet episode and `runoff` its mean annual runoff. It is the time at a point, not
   the span scaled by a flood frequency. Mars's networks formed region by region, "each lasting
   10⁵–10⁷ years, over the 10⁸ years of valley formation" (Hoke et al. 2011, §4), so the span
-  would overstate it a hundredfold or more. `paleo_inventory` is the liquid inventory then,
-  which R09 places as a paleo-sea by this plan's own logistic of inventory over basin capacity,
-  or spreads through closed basins. Corrected by R09.T0.b on 2026-10-09 from "years at effective
-  discharge", which would run Mars's epoch twenty times too short, and on 2026-10-10 by
+  would overstate it a hundredfold or more. `paleo_inventory` is the liquid inventory then, of
+  that liquid, which R09 places as a paleo-sea by this plan's own logistic of inventory over basin
+  capacity, or spreads through closed basins. Corrected by R09.T0.b on 2026-10-09 from "years at
+  effective discharge", which would run Mars's epoch twenty times too short, and on 2026-10-10 by
   science-hoke.md (the reference, the point and the runoff). A world wet now has an epoch to the
   present, and one never wet has none. The history also says whether the world reached its
   present state from a colder one, which T48.d's ice belt reads. Mars's valley networks formed
@@ -4306,11 +4393,16 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     225 d: sidereal periods, not solar days (R09.T10's science review, 2026-10-09). An equatorial
     ice belt at obliquities of 54–126° (53.9°, recomputed) is decided with T48.b's history, since
     Kilic et al. 2018's belt is reached only from a colder state.
-  - _Condensable_, a `SubstanceId`: the most massive of the registry's condensables that the
-    inventory holds and whose phase changes inside the climate's range, found by a loop over
-    T49.a's condensable rows in registry order (water, CO₂, N₂, Ar and CH₄ today; any later row
-    joins as data), or none. From the 22 → 23 batch it is T51.a's choice over the partition
-    (decision-composition).
+  - _Condensable_, a `SubstanceId`: of the registry's condensables the inventory holds whose phase
+    changes inside the climate's range, the one with the largest partial pressure in the air, x p_s
+    (T24.a's mole fraction), with ties by registry order; or none. The loop runs over T49.a's
+    condensable rows in registry order: water, methane, nitrogen, carbon dioxide and argon today,
+    and any later row joins as data. The climate's range runs from
+    T_mean − ½|ΔT_ep| − ½|ΔT_dn| to T_mean + ½|ΔT_ep| + ½|ΔT_dn|, from T24.a's mean and signed
+    contrasts, until T51.a's cold-trap form refines it. A phase changes inside it where the
+    species' saturation temperature at its partial pressure lies within it, or the surface holds
+    a reservoir of it (signoff-3.md). From the 22 → 23 batch it is T51.a's choice over the
+    partition (decision-composition).
 
   T24.b's ice fraction then reads the regime (a locked nightside, an equatorial belt, water ice as
   bedrock on a Titan or a Pluto), as open question 9 requires, rather than the latitude at which the
@@ -4319,7 +4411,8 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     and the Moon radiative equilibrium; a locked temperate world takes the body-fixed model; the
     slow-rotator onset lies inside Yang et al.'s Table 1 brackets at 1.40 and 1.92 S⊕, in sidereal
     rotation period at their 225 d orbit; a 90°-obliquity world started cold has an equatorial
-    belt and one started warm has none.
+    belt and one started warm has none; a Mars given its measured 6 mbar of CO₂ by hand takes CO₂,
+    not water; Titan takes methane; a Venus takes none.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface`.
 
 - **P14.T48.e Signed contrasts and the surface section** (amends T24.a; with T35). T24.a's
@@ -4327,10 +4420,10 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   contrast is stated about T14's substellar axis. The record's surface section, `record::Surface`,
   carries `SurfaceState`, `SurfaceMaterial`, T24's `SurfaceConditions` and `GlobalFigures` and
   T48.a–d's figures, every substance in them a `SubstanceId` (T24.a's gases, T24.b's liquids and
-  ices, T48.d's condensable), and declares the members whose tasks land later, each `Modelled`:
-  T24.e's vertical structure, T24.c's aerosols, T51.a's condensates, T51.c's crust, T51.d's
-  modifiers and T53.d's biosphere (decision-composition §1.10), so that R09's
-  `CoarseInputs::for_body` reads one section. The wire carries all
+  ices, T48.b's wet-epoch liquid, T48.d's condensable), and declares the members whose tasks
+  land later, each `Modelled`: T24.e's vertical structure, T24.c's aerosols, T51.a's condensates,
+  T51.c's crust, T51.d's modifiers and T53.d's biosphere (decision-composition §1.10), so that
+  R09's `CoarseInputs::for_body` reads one section. The wire carries all
   of it, by P14.T35.e (drafted by rendering plan R08's R08.T1); R09 reads the record on the server
   alone. _Reconciled by R08.T1 (2026-10-09):_ T48.e is the one task that defines
   `record::Surface`, and T24.e and T24.c add their members, the vertical structure and the aerosol
@@ -4343,8 +4436,7 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   - `PlanetClass::is_giant` (`IceGiant`, `GasGiant`) takes the spin family (`SpinFamily::of`), so
     nothing of it moves. The tides ask no class predicate: T14.d's `rotation::tides` matches on
     the class (decision-backlog-1). Since T14.d is built first in the lane, the split finds the
-    tides readers gone. If T14.d is not yet built, `is_giant` takes them too, and T14.d replaces
-    them.
+    tides readers gone.
   - `PlanetClass::has_solid_surface` (`Rocky`, `Icy`) takes the record's reader, and `Datum::of` is
     written with it.
   - A body without a solid surface, which by the shared envelope fraction and
@@ -4358,14 +4450,19 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     `for_body` reads the tag.
   - Until T35.e, which follows this subtask directly, `convert/planetary.rs` sends an `Ok` surface
     as `not_modelled`, since the wire has no form for it yet. It is one line, which T35.e replaces.
-  - If T24.d is built first, T24.d builds the split, and this subtask finds it done.
   - _P14.T14.d's hold._ The batch's bump commit, this subtask's, removes it:
     `ENVELOPED_TIDES_VERSION`, `rotation::tides_in_force` and the tripwire test
     `the_envelope_s_tides_are_held_only_until_the_batch_s_bump` go, and every reader calls `tides`,
     as Risks, "A sub-Neptune's tides, as built", lists step by step.
+  - _P14.T24.f's hold._ The same commit removes `CARBON_SPECIATION_VERSION`, `Speciation` and
+    the tripwire `carbon_and_oxygen_are_held_only_until_the_batch_s_bump`, folding
+    `atmosphere_under` into `atmosphere` and `derive_body_under` into `derive_body`, as Risks,
+    "Deviations in P14.T24.f, as built", lists step by step (with its follow-up's science-p14-t24f
+    rules and signoff-3.md's partial-pressure cap). The bless re-measures both holds' moves.
   - _Tests:_ a 90°-obliquity world's equator–pole contrast is negative; a locked airless body's
-    day–night contrast exceeds 300 K and Venus's is under 10 K (T24.a's, kept); every present rocky
-    body's surface section is `Ok` from `DetailLevel::Surface`, and a gas-envelope body's, a
+    day–night contrast exceeds 300 K and Venus's is under 10 K (T24.a's, kept); every present body
+    with a solid surface (`has_solid_surface()`), moons included, has its surface section `Ok` from
+    `DetailLevel::Surface`, and a gas-envelope body's, a
     giant's or a sub-Neptune's, `NotApplicable`. `is_giant()` equals the old `!has_surface()` for
     every class, and `has_solid_surface()` holds exactly when `Datum::of` is `SolidSurface`. On the
     golden systems: a present planet's surface is `Ok` iff `has_solid_surface()`; no `Ok` surface
@@ -4376,8 +4473,10 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     test is this subtask's (decision-p14-t35e-wire §2.4).
   - _Files:_ `planetary/hooks/surface.rs`, `planetary/record.rs`,
     `planetary/derive/{mod, rotation, figure}.rs`, `planetary/system/tests.rs`,
-    `planetary/surface/inputs.rs` (the sub-Neptune's test) and
-    `crates/hyperion-server/src/convert/planetary.rs`.
+    `planetary/surface/inputs.rs` (the sub-Neptune's test),
+    `crates/hyperion-server/src/convert/planetary.rs`, `planetary/derive/atmosphere.rs` and
+    `atmosphere/tests.rs` (T24.f's fold), `planetary/params.rs` (T14.d's doc lines), the goldens
+    blessed.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface`;
     `cargo test -p hyperion-sim planetary::record`; `cargo test -p hyperion-sim planetary::derive`;
     `cargo test -p hyperion-sim planetary::surface`; `cargo test -p hyperion-server convert`.
@@ -4391,17 +4490,21 @@ its source when it becomes a constant. Their order with T24 and with rendering p
    T48.a answers each of the question's three parts (σ_h for the greatest relief, its gravity
    scaling, the lithosphere factor's part), on three conditions written into the ruling: f_c's law
    is part of the model, Mercury's 21% stays its out-of-sample measure, and the age law is stated
-   as global and uncalibrated between saturation and young surfaces.
+   as global and uncalibrated between saturation and young surfaces. **Accepted** (signoff-3.md),
+   with R09.T0.b's three conditions.
 2. **The law of f_c** for a generated mobile-lid world, which only Earth's 0.405 calibrated.
    Researched by R09.T0.b (2026-10-09) and drafted in T48.a: a seeded asymptote uniform in
    [0.2, 0.7] reached with τ = 1.1 Gyr from 0.5 Gyr (Höning and Spohn 2023). For the owner: the
    draw's stream and whether f_c should depend on mass or water inventory, which no source
-   constrains yet.
+   constrains yet. **Ruled** (signoff-3.md): the stream is `body.continents` (T48.a). f_c depends
+   on neither mass nor water inventory while no source constrains either; recorded.
 3. **The isotherm of T_e**: 870 K, the mechanical-thickness proxy the 70 km normalisation was
    calibrated with, or the elastic 723 K (450 °C). Researched by R09.T0.b (2026-10-09): 870 K
    stands (T48.a), since 723 K lies below Venus's surface temperature and gives Venus no elastic
    lithosphere against an observed 29 ± 6 km, and Mars's 70 km holds under either. An ice-rich
    crust needs an isotherm of its own (R09's lean: about 170 K with ice's conductivity).
+   **Ruled** (signoff-3.md): 870 K for rock. An ice-rich crust takes ice's isotherm, about 170 K,
+   with ice's conductivity k = a ÷ T (T48.a), labelled uncalibrated.
 
 ### Phase L: composition (decision-composition, 2026-10-09)
 
@@ -4530,7 +4633,10 @@ rows' values.
       N = 6, which R08's gas column takes at its c_p near 100 K (35.70 J mol⁻¹ K⁻¹, Gurvich et al.
       1989), holds only below about 120 K: its c_p reaches 52.49 J mol⁻¹ K⁻¹ at 298 K (R08's Risks,
       "Deviations in T3.b's follow-up, as built"). So the heat capacities need a temperature
-      dependence, c_p(T) from a cited source, which the builder adds to the gas rows.
+      dependence, c_p(T) from a cited source, which the builder adds to the gas rows. T24.e's β
+      needs CO₂'s temperature-dependent c_p ÷ R to place a measured Venus's cloud base
+      (signoff-3.md, item 1.5): when T49.b brings c_p(T), a T24.e follow-up and a refit of T24.g's
+      σ_d go together, under one bump.
   - **The laws aloft** for the condensates above, `log₁₀ p = A − B/T − C[M/H] − D log₁₀ p`, with
     limiting element and vapour stoichiometry, are published coefficients with citation (Visscher,
     Lodders and Fegley 2006, and Visscher et al. 2010; Morley et al. 2012; Wakeford et al. 2017).
@@ -4712,8 +4818,12 @@ Snapshot path, `planetary/chem/`.
       cold-traps, after Wordsworth 2015, as T48.d already cites) (methane included: a cold world
       whose methane at T24.f's 0.5 would exceed its background, which T24.f holds at 0.5
       meanwhile; science-p14-t24f §2). A minor one in a non-condensing
-      background takes the mean temperature with T24.c's surface humidity. Either way it is capped
-      by the inventory: p_s = min(M_s g ÷ 4πR², p_sat,s(T)). The change from the minor branch to
+      background takes the mean temperature with T24.c's surface humidity. Either way the cap is
+      on its partial pressure in the air, x_s p ≤ h p_sat,s(T) (h = 1 at a dominant condensable's
+      cold trap, T24.c's humidity for a minor one), x_s its mole fraction and p the summed weights.
+      Its airborne weight w_s is the smaller of M_s g ÷ 4πR² and the weight that meets the cap,
+      never the cap applied to the weight itself: for water in nitrogen the two differ by a factor
+      of 1.6 (signoff-3.md, item 1.7). The change from the minor branch to
       the dominant one is continuous in the condensable's share of the air (a weight the builder
       states and cites, not a switch), since the gases are continuous in time but at recorded state
       changes. Titan, at 5.7% methane, stays on the minor branch within its test.
@@ -4724,7 +4834,7 @@ Snapshot path, `planetary/chem/`.
       Whitmire and Reynolds 1993 put any CO₂ air below 273 K. This cold-trap rule is the planned
       fix: such a world's CO₂ is the dominant condensable, held at `p_sat`(T_cold) with T48.e's
       contrasts, as Mars's is after Wordsworth 2015.
-    - **The condensed reservoir**, M_s − p_s 4πR² ÷ g, as a global equivalent layer.
+    - **The condensed reservoir**, M_s − w_s 4πR² ÷ g, as a global equivalent layer.
     - **Its phase** where it lies: solid below the triple point (or the eutectic, for a
       solution); liquid inside its window at the surface pressure; supercritical above T_c and
       p_c, with no interface; `seasonal` where the warmest zone rises above the frost point.
@@ -4735,8 +4845,8 @@ Snapshot path, `planetary/chem/`.
       summing to the ocean fraction.
     - Its `surface_ices` take each solid's area.
     - T24.a's liquid-water flag is derived from them.
-    - T48.d's condensable is the most massive condensate whose phase changes inside the climate's
-      range.
+    - T48.d's condensable is, of the condensables whose phase changes inside the climate's range,
+      the one with the largest partial pressure in the air (P14.T48.d, signoff-3.md).
   - _Tests_ (the Solar System table):
     - Earth holds liquid and solid water;
     - a Mars given its measured 6 mbar of CO₂ by hand holds perennial and seasonal CO₂ ice and
@@ -4754,6 +4864,7 @@ Snapshot path, `planetary/chem/`.
     - Venus holds none, and at 92 bar given by hand a supercritical CO₂ surface;
     - a 10-bar CO₂ world at 250 K holds a liquid-CO₂ sea;
     - for every species, airborne and condensed masses sum to the inventory to 10⁻⁹;
+    - a minor condensable's partial pressure x_s p equals h p_sat,s to 10⁻⁹ where it is capped;
     - continuous in time but at recorded state changes;
     - the partition's pressures replace the mean-temperature caps only for dominant condensables;
       the bless note lists the bodies whose surface pressure moves.
@@ -5449,7 +5560,8 @@ it:
 - Drafted for the owner (R07.T1, Phase J): P14.T46 makes one bump for the moment of inertia, the
   rotation and figure sections and their pins, and one additive protocol change; P14.T47's
   photometry rides in it (decision-p14-phase-j). Neither adds a draw or a domain tag.
-- Drafted for the owner (R08.T1 and R09.T0.a, 2026-10-09): P14.T24.a–f and T48.a–e fill the
+- Accepted with amendments 2026-10-10 (`signoff-3.md`; drafted by R08.T1 and R09.T0.a,
+  2026-10-09): P14.T24.a–f and T48.a–e fill the
   record's surface section and add an `envelope` section, and every one moves output. T24.f moves
   the existing goldens (a cold body's carbon becomes methane, a runaway world gains O₂); the rest
   fill sections the goldens hold as `NotModelled`, and T48.e's gas-envelope split turns a
@@ -5457,7 +5569,8 @@ it:
   of `has_surface` moves nothing). T24.f, T24.a–b and T48.a–e take one bump, T24's; T24.e, T24.c
   (with T24.g) and T24.d take one each, or one between them if built together (_superseded by
   the Phase L bullet below:_ they join the 22 → 23 batch, whose one bump is P14.T54.a's); each is
-  coordinated through "main". None adds a draw or a domain tag as drafted. P14.T35.e changes the
+  coordinated through "main". T48.a adds one Body-scope tag, `body.continents`, for f_c's asymptote
+  (`signoff-3.md`); no other adds a draw or a domain tag. P14.T35.e changes the
   wire, not the output, and leaves `PROTOCOL_VERSION` at 2 (decision-p14-t35e-wire). T24.g adds no
   draw or domain tag. P14.T14.d (decision-backlog-1) rides the same bump. It moves the locking
   times, rotation laws, frames, figures and moon limits of every sub-Neptune and ice giant, and the
@@ -8783,8 +8896,9 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   in the failing order and 40 of 40 alone, under the same load. A mutation that drops `SystemDisplay`'s `key` per
   opening still fails it. The stub that breaks the frame function is the views lane's, reported
   to the orchestrator: any later test that waits on a real frame in the same worker would meet it.
-- **The rendering plans' asks of the surface section** (R08.T1 and R09.T0.a, 2026-10-09; drafted
-  for the owner, not yet accepted). Rendering plan R08 (Atmospheres) consumes T24.a–b, T24.c–f
+- **The rendering plans' asks of the surface section** (R08.T1 and R09.T0.a, 2026-10-09; accepted
+  with amendments 2026-10-10 by the sign-off agent, owner's delegation, `signoff-3.md`). Rendering
+  plan R08 (Atmospheres) consumes T24.a–b, T24.c–f
   and T35.e: it computes each body's atmosphere in the client from them, and draws no generated
   body's air until they land, only its hand fixtures. R09 (the surface generator) consumes T24.a–b
   and T48.a–e on the server. R10's material classifier, R11's clouds and R12.T5.b's pinnable
@@ -8811,7 +8925,9 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   The order is under Tasks, "Order and parallelism". Open questions of R08's asks, with R08's
   leans:
   1. **Biotic O₂.** No plan produces life, so a generated Earth has no O₂ and no ozone. Lean: a gap
-     until a biosphere plan exists; T24.f's and T24.c's tests record it.
+     until a biosphere plan exists; T24.f's and T24.c's tests record it. **Accepted**
+     (signoff-3.md): a recorded gap. Every generated world is abiotic, and its air is authentic as
+     such. P14.T53.d's hook and a life plan close it.
   2. **A sulphuric-acid deck.** This plan tracked no sulphur, so no rule formed Venus's H₂SO₄ deck,
      and R08 classed a generated Venus `thickScattering`.
      - Drafted by a science agent on 2026-10-09: P14.T24.g. It gives a deck on a runaway-greenhouse
@@ -8830,6 +8946,11 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
        - SO₂'s weak absorption reaching the violet below the deck is left to R08 (from memory,
          check at build).
      - "Volcanism level" is split into T48.a's V and T24.b's present O.
+
+     **Ruled** (signoff-3.md): T24.g accepted with amendments. Its Venus constants are fixed on
+     Venus's measured state through this plan's model, and the median Venus's deck is stated, not
+     tested against Venus's.
+
   3. **A sub-Neptune's sections.** T48.e as reconciled makes a sub-Neptune's surface
      `NotApplicable`, a change from the as-built `NotModelled`. Lean: accept, since nothing can
      stand on it, and R09's `for_body` already answers `NoSolidSurface`. **Decided**
@@ -8842,7 +8963,8 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
      of it. T35.e pins the premises on both sides.
   5. **The envelope's species and heat.** H₂S and H₂O are T24.d's own species, outside T13's
      `Gas`, and a sub-Neptune has no internal heat in the record. Lean: as drafted, the builder
-     stating the heat.
+     stating the heat. **Accepted** (signoff-3.md): H₂S and H₂O are registry rows
+     (decision-composition), and the builder states a sub-Neptune's internal heat.
 
 - **Composition (decision-composition, 2026-10-09).** The audits' closed sets are replaced by
   Phase L's registry. These remain closed, as physics classes, pinned with every variant:
@@ -8861,6 +8983,8 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
   - a runaway world loses all its water until T53.b;
   - Pluto and Triton are `Airless` until T53.c;
   - the grey skin (T24.e) lacks stratospheric heating;
+  - T24.e's fixed c_p ÷ R runs a measured Venus about 30 K cold at its cloud base (signoff-3.md),
+    until a β from T49.b's heat capacities;
   - the giants' class albedos are Sudarsky et al.'s fiducial models, accurate to about 10–15%.
 
 - **Moons' volatile ranks** (decision-composition finding, for a later ruling). Regular moons are

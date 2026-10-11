@@ -6703,7 +6703,8 @@ generator, and the reference's sampling needs no domain tag.
       (the science check). The research agent's family is not recorded. Design note 5's
       "(620, 540, 445) nm, within 0.0005–0.016" is corrected by this record for the plan's next
       revision; the brainstorm's figure is for "main", with the lean that it name the fitted
-      triple in `channels.json` before R08.T6.d moves `CHANNEL_WAVELENGTHS_NM`.
+      triple in `channels.json` before R08.T6.d moves `CHANNEL_WAVELENGTHS_NM`. Signed off
+      2026-10-10 (signoff-3.md, queue item 1).
     - _"680/550/440"_ here means those wavelengths in this module's pipeline, the star's colour
       times R at each channel, as R08.T6.d draws. It is not Bruneton 2017's own conversion (§14.3,
       eq. 2, with the sky's spectrum taken as λ⁻³), which R05's `solar.ts` keeps.

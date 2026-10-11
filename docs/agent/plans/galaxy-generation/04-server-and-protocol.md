@@ -455,17 +455,30 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   band travel as one bulk payload on R03's binary frames, announced by R03's `BulkManifestDto` in
   the terminal response.
 
-  Row R09 is the rendering plan R09's (the surface generator), drafted by R09.T0.a (2026-10-09)
-  for this plan's owner; not yet accepted. `surface_field` answers a body's coarse field, the
-  surveyed cells with their margin, as one bulk payload on R03's binary frames, about 12–15 MB for
-  an Earth, announced by R03's `BulkManifestDto` in the terminal response's `Ready` arm (a
-  `NotModelled` answer carries no bulk), so it is in the large size class and `is_large` returns
-  true for it before the kind is built; it is answered whole, never in parts. `survey_pass` records
-  one survey pass and answers small; its cell ranges are capped at R09's `MAX_SURVEY_RANGES` (256)
-  so that the request stays under `MAX_INBOUND_FRAME_BYTES`, a longer pass being sent as several
-  requests. Both name a body by `BodyIdHex`, which goes through the sim's `resolve` before use, as
-  the rule below requires, and both refuse as `body_detail` does (`unknown_system`,
-  `unknown_body` or `bad_request`, naming `body`). Neither moves `PROTOCOL_VERSION`.
+  Row R09 is the rendering plan R09's (the surface generator), drafted by R09.T0.a (2026-10-09) for
+  this plan's owner and accepted with amendments 2026-10-10 by the sign-off agent (owner's
+  delegation, `signoff-3.md`). `surface_field` answers a body's coarse field: the surveyed cells
+  with their margin, as one bulk payload on R03's binary frames. That is about 14.7 MB for an Earth
+  at R09's 25-byte synthesis cell, about 6% inside R03's 15 MiB check. The payload is announced by
+  R03's `BulkManifestDto` in the terminal response's `Ready` arm, and a `NotModelled` answer carries
+  no bulk. So the kind is in the large size class, and `is_large` returns true for it before the
+  kind is built. It is answered whole, never in parts.
+
+  `survey_pass` records one survey pass and answers small. Its cell ranges are capped at R09's
+  `MAX_SURVEY_RANGES` (256), at most 38 bytes each, so that the request stays under
+  `MAX_INBOUND_FRAME_BYTES`; a longer pass is sent as several requests sharing its time span. It is
+  a stand-in: until a sensors plan records passes from the ship's instruments, it lets an honest
+  client grant its ship coverage. That plan replaces its caller, not `SurveyLog::record`. The kind
+  string stays R09's and is never reused, and withdrawing the kind would be a change under Design
+  note 15.
+
+  Both kinds name a body by `BodyIdHex`, which goes through the sim's `resolve` before use, as the
+  rule below requires. Both refuse as `body_detail` does (`unknown_system`, `unknown_body` or
+  `bad_request`, naming `body`). A body with no solid surface, whose surface section is
+  `not_applicable` (P14.T48.e), is `bad_request` naming `body`. A field outside its range is
+  `bad_request` naming that field: more than 256 ranges, an inverted range or one beyond the field's
+  cells, `from` after `to`, or a resolution that is not finite and positive. Neither moves
+  `PROTOCOL_VERSION`.
 
 - Server message type `notification`, for pushes. A subscription is opened by an ordinary request
   whose response carries a `subscription: u32`; pushes name it; it ends with `unsubscribe`, the

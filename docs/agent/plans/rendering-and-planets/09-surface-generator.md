@@ -2044,7 +2044,9 @@ After T8, T17 and T18.
   body in `subscriptions::ScenePush::merge`, `PROTOCOL_VERSION` unchanged (Provides; R03's Design
   note 4 as drafted by T0.a), with `just gen-protocol`. Tests: a second pass's delta carries only
   new cells; the same request twice gives identical bytes; a `survey_pass` bumps the body's revision
-  on the scene topic; two pushes merged while a reader is slow carry each body's latest revision.
+  on the scene topic; two pushes merged while a reader is slow carry each body's latest revision;
+  a merge of two pushes keeps each body's larger revision whatever their order; a resubscribed
+  client's `have_revision` request returns the cells surveyed while it was away.
   Acceptance: `cargo test -p hyperion-server surface` and `cargo test -p hyperion-server
 subscriptions`.
 - **R09.T19.c The Knowledge-bound test.** Over a real socket, extending R03's, on
@@ -2263,17 +2265,16 @@ re-blessing this plan's payload and coarse goldens in that commit.
   paper did not test.
 - **Asks of other plans, which their owners may not yet carry**, each with its state in the
   roadmap's asks table (states as of the re-validation of 2026-10-09):
-  - plan 14's five of Design note 3: drafted by T0.a, as P14.T48.a–e in plan 14's "Phase K", for
-    plan 14's owner to accept;
+  - plan 14's five of Design note 3: drafted by T0.a as P14.T48.a–e in plan 14's "Phase K",
+    accepted with amendments 2026-10-10 (`signoff-3.md`);
   - plan 14's P14.T23 surface seed: carried by plan 14, built (sim side); the hooks section's wire
     value is this plan's T1.b;
   - plan 14's surface section and P14.T24.a–b's conditions and figures, which `for_body` reads:
     carried by plan 14, unbuilt;
-  - plan 04's two table rows: drafted by T0.a, in plan 04's reserved-kinds table, for plan 04's
-    owner to accept;
+  - plan 04's two table rows: accepted with amendments 2026-10-10 (`signoff-3.md`);
   - plan 12's P12.T7 store: carried by plan 12, built;
-  - R03's `surface_revisions` field: drafted by T0.a, its shape in R03's Design note 4, for R03's
-    owner to accept (R03 left room for it); the note that the camera reports do not bound the field:
+  - R03's `surface_revisions` field: accepted with amendments 2026-10-10 (`signoff-3.md`), its
+    shape in R03's Design note 4; the note that the camera reports do not bound the field:
     carried (R03's Design note 6 and Risks already say so);
   - R10's use of the header's `albedo_scale`: carried by R10;
   - R11's use of the header's `surface_age` and `surface_pressure` for its `RockSite`: carried by R11

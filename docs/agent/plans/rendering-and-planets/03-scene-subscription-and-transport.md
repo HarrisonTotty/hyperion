@@ -183,8 +183,8 @@ pub struct SceneNotificationDto { sequence: u64, clock: SceneClockDto,
     ship: Option<KinematicsDto>, arrival: Option<SceneArrivalDto>,
     bodies: Vec<SceneBodyDto>, craft: Option<Vec<SceneCraftDto>> }
 // later optional fields: R07's `main_screen`, R09's `surface_revisions:
-// Option<Vec<SurfaceRevisionDto { body: BodyIdHex, revision: u32 }>>` (Design note 4; drafted by
-// R09.T0.a)
+// Option<Vec<SurfaceRevisionDto { body: BodyIdHex, revision: u32 }>>` (Design note 4; accepted
+// 2026-10-10, signoff-3.md)
 pub enum SceneArrivalDto { System { system: Box<SceneSystemDto>, tidal_radius_m: f64 }, NoSystem }
 // tidal_radius_m: the system's FrameCandidate::tidal_radius at the arrival time (R02's ask)
 pub struct SceneCraftDto { craft: String, hull: String, state: KinematicsDto,
@@ -375,13 +375,19 @@ BodyPosition, GalacticPosition}`, `time::{UniverseTime, Span, ClockWindow}`,
    0.252 MB/s for ten craft at 64 Hz.
    The state leaves room for R07's camera field (`main_screen`) and R09's
    `surface_revisions` (a revision per body), each an optional field added by its plan, which moves
-   no version. _R09's field, drafted by R09.T0.a (2026-10-09) for this plan's owner, not yet
-   accepted:_ `surface_revisions: Option<Vec<SurfaceRevisionDto>>` on `SceneNotificationDto`, with
+   no version. _R09's field, drafted by R09.T0.a (2026-10-09) for this plan's owner and accepted
+   with amendments 2026-10-10 by the sign-off agent (owner's delegation, `signoff-3.md`):_
+   `surface_revisions: Option<Vec<SurfaceRevisionDto>>` on `SceneNotificationDto`, with
    `SurfaceRevisionDto { body: BodyIdHex, revision: u32 }`, each a body whose surveyed cover grew
    (a `survey_pass` raises its revision), declared `#[serde(default, skip_serializing_if =
 "Option::is_none")]` and `#[ts(optional)]` as `tidal_radius_m` is, so that `PROTOCOL_VERSION`
-   stays 2; a merged pending push (Design note 5) merges it by body, the latest revision winning,
-   as bodies are; a client re-asks R09's `surface_field` with `have_revision` for the new cells.
+   stays 2; a merged pending push (Design note 5) merges it by body, keeping the larger revision. A
+   body's revision only rises, since revision n is the fold of its first n passes (R09.T18 as
+   built), so the merge does not depend on order. A client re-asks R09's `surface_field` with
+   `have_revision` for the new cells. The scene's state (`SceneStateDto`) carries no revisions, and
+   a notification missed while unsubscribed is not replayed. So a client that subscribes or
+   resubscribes re-asks `surface_field`, with the `have_revision` it holds, for each body whose
+   field it keeps.
    R09.T19.b builds it. `SceneCraftDto` is a draft, the least a renderer needs of a craft (a hull
    definition's key, a pose and its rates), and belongs to the sessions plan, which may reshape it
    freely while nothing sends it. Its optional `planned_path` is the flight computer's predicted
