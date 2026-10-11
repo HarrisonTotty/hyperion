@@ -1732,6 +1732,32 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   server change. Run 15 times in a row and 40 times as 20 concurrent copies (load average over 20):
   no failure. Whether a merged arrival should state its own clock was decided on 2026-09-30 (the
   "T8 and T9 after review" note above): each record states its own time, as Design note 5 has it.
+- **T9 after review: the clock check without a wall-clock tolerance (lane fix-scene-agree,
+  2026-10-11).** The same test failed again at load averages of 21–22, once in a full native run
+  and once in three runs alone, a clock 15 s and 19 s of scene time off the line: its clock check
+  allowed one second of real time at 10× between the server's reading a clock and the client's
+  hearing it, and its stages were paced by the test's `sleep`s and real-time deadlines, so that a
+  slow setting or arrival could also miss them. Pausing the runtime's clock cannot fix it: a
+  paused runtime advances to its next timer whenever it waits on the pool's threads or a socket,
+  so the server's ticks and the harness's patience would run out at once. The test now holds
+  each clock between bounds that causality gives, with no tolerance: no earlier than its setting's
+  time, and no later than that time plus the rate times the real time from sending the setting to
+  hearing the clock; no earlier than the clock before it under the same setting; and, for a state,
+  no earlier than the setting's line where it stood when the subscription was sent, counted from
+  the setting's answer, which for the second client is ten seconds of scene time or more past the
+  first setting's time. How long a push waited before it was heard has no causal bound, so a
+  push's clock is bounded below only by its setting's time, where the old band also caught a push
+  lagging its line by more than 10 s. The minute is paced by the clock the clients hear: the
+  second opens once the first has heard a second of the server's clock past both the first
+  setting's answer and its own state, each stage runs until both clients have been told its
+  setting, its departure or arrival, and 20 s of scene time from the first clock each heard under
+  it, and the next setting continues from the latest clock either heard. The move back is now
+  set only after both clients have heard the departure, which the old sleeps could merge away
+  under an arrival. Two mutations of the server were caught: a state reading its setting's time
+  (a clock anchored at the subscription), and pushes reading two seconds ahead. No server change.
+  Run 20 times in a row at load averages of 4.8–12.7, 16–19 s each: no failure. Its scope held to
+  10% of a CPU (5 runs) or frozen for 2 s five times a run (3 runs): no failure either, but the old
+  test passed those too, so they do not reproduce the loaded machine's stall.
 - **Deviations in T14, as built.** `useScene(universe, { detail, designate })` reads the request
   client and the link's status from `useServerLink()`, as the app's other server hooks do, rather
   than taking `requests`; `detail` is the level asked of the topic. **The designation (T12's open
