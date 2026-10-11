@@ -3119,8 +3119,9 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
       `{ species, column_m2, base_pa, top_pa }`, in registry order; and, declared
       `Modelled` and absent until their tasks land, T51.a's `condensates`
       (`{ substance, phase, reservoir_gel_m, area_fraction, seasonal }`), T51.c's `crust`
-      (`{ primary, secondary, tertiary, provinces, redox, mantle_redox_iw, melt_area_fraction }`),
-      with `primary`, `secondary` and `tertiary` each optional (science-r09-drainage.md §5),
+      (`{ primary, secondary, tertiary, bulk, lid, provinces, redox, mantle_redox_iw, melt_area_fraction }`),
+      with `primary`, `secondary`, `tertiary` and `bulk` each optional and `lid` one of `primary`,
+      `secondary` and `bulk` (science-r09-drainage.md §5; science-composition-crusts.md §1 and §5),
       T51.d's `modifiers` (`{ maturity, organic_cover, resurfacing }`) and T53.d's `biosphere`
       (`{ fluxes: [{ species, flux_earth }] }`), whose tasks may reshape them until a build first
       sends a value (decision-composition §1.10).
@@ -4776,13 +4777,15 @@ rows' values.
     - then, in the builder's stated order:
       - the solutions (`brine_nacl`, `brine_mgso4`, `brine_naclo4`, `brine_mgclo4`, `nh3_h2o`,
         `ch4_c2h6_n2`);
-      - the lithologies (`anorthosite`, `basalt`, `komatiite`, `basalt_reduced`, `granite`,
-        `ultramafic`, `ferric`, `phyllosilicate`, `lava_glass`, `ca_al_residue`, `iron_nickel`,
-        `SiC`);
+      - the lithologies (`anorthosite`, `feldspathic`, `basalt`, `basalt_fe`, `komatiite`,
+        `basalt_reduced`, `granite`, `ultramafic`, `ferric`, `phyllosilicate`, `lava_glass`,
+        `ca_al_residue`, `iron_nickel`, `SiC`);
       - the salts (`MgSO4`, `Na2CO3`, `CaCO3`) and organics (`carbonaceous`);
-      - and the small bodies' assemblages (`c_type`, `s_type`, `d_type`, `e_type`, `kbo_red`,
-        `kbo_neutral`), each with its kind and its sources (decision-composition, the surfaces
-        audit §2 and §4.2).
+      - and the undifferentiated bodies' lithologies (`chondrite_ci`, `chondrite_cm`,
+        `chondrite_cv`, `chondrite_h`, `chondrite_l`, `chondrite_ll`, `chondrite_e`, `cometary`;
+        a taxonomic class being T51.e's label, not a substance; science-composition-crusts.md
+        §1.3), each with its kind and its sources (decision-composition, the surfaces audit §2
+        and §4.2).
   - **The client-optics flags** (decision-r08-t4b-t12c, follow-up 2). `absorber` is true for
     every gas row this plan may list with a layer, and for the collision partners. R08 answers
     each with cross-sections, or a stated "none" with its reason (R08.T4.c's
@@ -4817,10 +4820,53 @@ rows' values.
       bump.
   - **The other phase data:**
     - densities and latent heats, every density intrinsic: a solid's grain density, an ice's
-      crystal density at a stated temperature and a liquid's at a stated temperature and pressure,
+      crystal density as a function of temperature, ρ_s(T), over each solid phase's valid range
+      (ice Ih from IAPWS R10-06(2009), Feistel and Wagner 2006; CO₂ from Mangan et al. 2017; N₂'s
+      α and β phases, CO's, CH₄'s and NH₃'s from lattice or density measurements read here), a
+      transition being a step between phases, and evaluated where the ice lies (the lower of its
+      coldest zone's temperature and its frost point, or T51.f's threshold in a cold trap;
+      science-composition-crusts.md §3), and a liquid's at a stated temperature and pressure,
       with no porosity column, since porosity is how a material lies, which its reader states
-      (science-r09-drainage.md §3); `basalt`'s and `granite`'s grain densities are read from a
-      source here (R09's reference rows carry them from memory, at low confidence);
+      (science-r09-drainage.md §3); `basalt`'s, `basalt_fe`'s, `feldspathic`'s and
+      `anorthosite`'s grain densities are as R09's reference rows source them; `granite`'s rests
+      on a measured mode and the chondrite rows' on Macke et al. 2010 and 2011 and Consolmagno et
+      al. 2008, whose tables are read here (science-composition-crusts.md §1.3, §2, §4 and §7);
+    - the composition ruling's rows, each a grain density, a transition and a mechanics family
+      (science-composition-crusts.md §1.3, §2, §4 and §7; its solidi corrected 2026-10-11). A
+      rock or salt keeps one grain density at a stated (room) temperature, with its error
+      recorded (§3.2):
+      - `basalt_fe`, an iron-rich (FeO about 18–22 wt%), anhydrous basalt: 3,310 kg m⁻³, the
+        shergottites' mean (Macke, Britt and Consolmagno 2011), inside the lunar basalts'
+        3,270–3,460 (Kiefer et al. 2012); 1,323.15 K (1,050 °C, Taylor et al. 1991, the Lunar
+        Sourcebook, p. 206); `Silicate`;
+      - `feldspathic`, the impact-mixed highland crust, about 80–90% plagioclase: 2,900 kg m⁻³,
+        the highlands' GRAIL density at 12% porosity (Wieczorek et al. 2013); 1,533.15 K;
+        `Silicate`;
+      - `anorthosite`, the rock: 2,790 kg m⁻³ (2,776–2,828 at 97–90% plagioclase, from the
+        Handbook of Mineralogy's densities); 1,533.15 K (1,260 °C, Andersen 1915's reaction
+        point, where plagioclase with a few per cent of low-Ca pyroxene first melts); `Silicate`;
+      - the chondrite rows, each `Silicate` at 1,423.15 K (1,150 °C), an upper bound: the H and
+        LL chondrites' "~1150-1160°C" at 1 atm and IW−1 (Jurewicz et al., LPSC 24, 1993), the
+        carbonaceous groups' at or below it (Jurewicz, Mittlefehldt and Jones 1993, GCA 57,
+        2123). Their grain densities: `chondrite_ci` 2,590 kg m⁻³ (Ryugu's particles, Nakamura
+        E. et al. 2022), `chondrite_cm` 2,920, `chondrite_cv` 3,420 (from memory), `chondrite_h`
+        3,720 ± 120, `chondrite_l` 3,560 (from memory), `chondrite_ll` 3,540 ± 130 and
+        `chondrite_e` 3,660 (Macke et al. 2010 and 2011; Consolmagno et al. 2008). Their
+        sulphide–metal eutectic's first, metallic melt near 988 °C (from memory) is recorded,
+        not used;
+      - `cometary`, anhydrous silicates and sulphides with about 45 wt% organics (Bardyn et al.
+        2017): 2,000 ± 200 kg m⁻³, derived; 1,423.15 K for its silicates, the organics
+        pyrolysing first; `Organic`;
+      - `phyllosilicate`'s dehydrated residue 1,423.15 K, the chondritic solidus; `mars_dust`
+        1,323.15 K, `basalt_fe`'s (an assumption); `Na2CO3` 2,540 kg m⁻³ (Dusek et al. 2003's
+        cell; 2,575 at 110 K, recorded) and 1,123.15 K (850 °C, NIST-JANAF); `granite`
+        2,650 kg m⁻³ (2,654 from the measured mode of USGS G-1) and 1,233.15 K, still unverified;
+      - read here (the ruling's §9): the L and CV grain densities from Macke et al. 2011's and
+        Consolmagno et al. 2008's tables; the cometary refractory's organic and mineral
+        densities; the carbonaceous and enstatite chondrites' own 1-atm solidi (Jurewicz,
+        Mittlefehldt and Jones 1993, GCA 57, 2123, and an enstatite-chondrite run), which the
+        rows bound at 1,150 °C; granite's dry solidus (Huang and Wyllie 1975), Daly et al. 1966
+        and Baratoux et al. 2014;
     - eutectics (MgSO₄–H₂O 269.29 K at 17.30 wt%, Zarriz, Journaux and Powell-Palm; NaClO₄ 236 K
       and Mg(ClO₄)₂ 206 K, Chevrier, Hanley and Altheide 2009; NH₃–H₂O 176.15 K, Kargel 1992, via
       Hammond et al. 2018, checked at build; NaCl–H₂O 251.95 K at 23.3 wt%, Bodnar 1993, from
@@ -4844,6 +4890,8 @@ rows' values.
       continuous at the triple point;
     - methane's curve within 0.1% of the WebBook at 100, 150 and 180 K (science-p14-t24f §6.3);
     - `phase_at`'s regions for each condensable;
+    - ice Ih's ρ_s within 0.02 kg m⁻³ of IAPWS R10-06's Table 6 values and its Gibbs function at
+      20, 100, 160 and 273.15 K;
     - the surfaces audit §2.5's liquid windows reproduced within 2 K;
     - each law aloft gives its paper's condensation temperature at 1 bar and solar metallicity
       within 10 K;
@@ -5145,49 +5193,139 @@ Snapshot path, `planetary/chem/`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
 - **P14.T51.c Crust composition, redox class and melt area** (22 → 23; after T50.a).
   - `hooks/crust.rs`:
-    `CrustComposition { primary: Option<SubstanceId>, secondary: Option<SubstanceId>, tertiary: Option<SubstanceId>, provinces: SubstanceId, redox: RedoxClass, melt_area_fraction: f64 }`,
-    from T50.a's ΔIW and host Mg/Si, T48.a's f_c, T24.b's heat flow and regime, and P14.T28.a's
-    `molten_until`. At least one of `primary` and `secondary` is present
-    (science-r09-drainage.md §5).
-  - **Primary:** a plagioclase flotation crust (`anorthosite`) where a magma ocean existed on a
-    body small enough for plagioclase to float (the Moon). Earth- and Mars-mass bodies get an
-    ultramafic crust after overturn (Hu, Ehlmann and Seager 2012, after Elkins-Tanton et al. 2005,
-    the latter to be read at build). On a reduced body, graphite flotation (Mercury's
-    low-reflectance material). A frozen ocean's shell is primary too: Ceres's altered, salt- and
-    phyllosilicate-bearing crust, "the bulk of Ceres's original ocean" (Castillo-Rogez et al. 2018,
-    p. 1838; Fu et al. 2017), and an ocean world's ice shell.
-  - **Secondary:** a solid mantle's partial melt, `None` where the mantle never melted (a Ceres,
-    whose rock "avoided igneous differentiation", Fu et al. 2017); `basalt` by default; `komatiite`
-    where the mantle is hot (young, or radiogenically
-    or tidally heated); `basalt_reduced` on a reduced body; shifted towards silica-rich or
-    Mg-rich by Mg/Si, which reaches Putirka and Xu 2021's exotic mantle rocks without a special
-    case.
+    `CrustComposition { primary: Option<SubstanceId>, secondary: Option<SubstanceId>, tertiary: Option<SubstanceId>, bulk: Option<SubstanceId>, lid: LidCrust, provinces: SubstanceId, redox: RedoxClass, melt_area_fraction: f64 }`
+    and `LidCrust { Primary, Secondary, Bulk }`. The inputs are:
+    - T50.a's ΔIW, water fraction and host Mg/Si;
+    - T48.a's f_c;
+    - T24.b's heat flow, regime and surface age;
+    - P14.T28.a's `molten_until` and formation time;
+    - T56.d's tidal volcanism;
+    - the body's radius and core mass fraction;
+    - a formation time t_f (below).
+
+    The crusts are the body's, buried or not; `lid` names the one at the surface. Either `bulk`
+    is present alone, or at least one of `primary` and `secondary` is, and `lid` names a present
+    member (science-r09-drainage.md §5; science-composition-crusts.md §1 and §5).
+
+  - **The thermal history** decides between a crust and `bulk` (science-composition-crusts.md
+    §1.4).
+    - **The peak central temperature T_c,max** is that of a compact conductive sphere of the
+      body's radius, heated from t_f by ²⁶Al and the long-lived nuclides in its rock. The
+      eigenfunction series is summed over a fixed number of terms and times. Its constants
+      (²⁶Al/²⁷Al, half-lives, decay energies, Al, K, Th and U contents, c and κ) are each
+      stated with its source.
+    - **t_f:**
+      - a planet's is T28.a's;
+      - a regular moon's is drawn uniform in [its giant's formation, L];
+      - a belt member's, a captured moon's or a comet's is drawn uniform in [0, L], L being
+        T28.a's disc lifetime;
+      - the draws sit on a stream this task chooses under the determinism rules, so that no
+        existing value moves.
+    - **Rock melted, giving a crust** (the bullets below):
+      - a planet;
+      - a rocky parent's impact moon;
+      - a tidally volcanic body (T56.d);
+      - any body whose T_c,max reaches the chondritic solidus at low pressure, 1,423 K (1,150 °C:
+        Jurewicz et al., LPSC 24, 1993, for H and LL chondrites at 1 atm and IW−1).
+    - **Ice melted, rock not:** a body formed beyond the snow line whose T_c,max reaches the
+      ice's melting point (273.15 K, or 176 K for NH₃–H₂O), plus the ice's latent heat.
+      - At 200 km radius or more, its ocean froze into a primary crust (Ice crusts, below).
+      - Smaller, it altered in place, giving `bulk`:
+        - `cometary` where its surface keeps water ice (T51.a's airless branch at H₂O's 110 K
+          threshold);
+        - otherwise `chondrite_cv` where T_c,max reached 900 K;
+        - otherwise `chondrite_ci` where its ice-to-rock mass ratio is at least 0.5;
+        - otherwise `chondrite_cm`.
+    - **Nothing melted, giving `bulk`:**
+      - `cometary` beyond the snow line;
+      - inside it, by `RedoxClass`: `chondrite_e` (`Reduced`); `chondrite_h`, `chondrite_l` or
+        `chondrite_ll` from reduced to oxidised (`Intermediate`, at cited edges); `chondrite_ll`
+        (`Oxidised`).
+  - **Primary:**
+    - a plagioclase flotation crust where a magma ocean existed on a body small enough for
+      plagioclase to float (the Moon). It is named `feldspathic`, the crust as impacts have mixed
+      it, with 4–5 wt% FeO; the rock `anorthosite` is its purest part.
+    - Earth- and Mars-mass bodies get an ultramafic crust after overturn (Hu, Ehlmann and Seager
+      2012, after Elkins-Tanton et al. 2005, the latter to be read at build).
+    - On a reduced body, graphite flotation (Mercury's low-reflectance material).
+    - A frozen ocean's shell is primary too: Ceres's altered, salt- and phyllosilicate-bearing
+      crust, "the bulk of Ceres's original ocean" (Castillo-Rogez et al. 2018, p. 1838; Fu et al.
+      2017), and an ocean world's ice shell.
+  - **Secondary:** a solid mantle's partial melt. It is `None` where the mantle never melted (a
+    Ceres, whose rock "avoided igneous differentiation", Fu et al. 2017). Where it exists, the
+    first rule that applies gives it:
+    1. `basalt_reduced` on a reduced body;
+    2. `komatiite` where the mantle is hot (young, or radiogenically or tidally heated);
+    3. `basalt_fe`, an iron-rich basalt (FeO about 18–22 wt%), where its source is iron-rich:
+       - a magma ocean's cumulate mantle beneath a plagioclase flotation crust (the lunar maria);
+       - or a mantle with at least 12 wt% FeO by mass balance, a Mars or a Vesta. That is
+         1.2865 × max(0, w_Fe − f_core × 0.85) ÷ (1 − f_core), with w_Fe the bulk iron fraction
+         from the host's Fe/(Mg + Si) and Mg/Si, and 0.85 the core's iron fraction. The 12 wt%
+         is the geometric mean of the bulk silicate Earth's 8.05 wt% (McDonough and Sun 1995)
+         and Mars's 17.9 (Dreibus and Wänke 1985), both to be read at build;
+    4. `basalt` otherwise.
+
+    Each is shifted towards silica-rich or Mg-rich by Mg/Si, which reaches Putirka and Xu 2021's
+    exotic mantle rocks without a special case.
+
   - **Tertiary:** `granite` where f_c > 0, which already needs a mobile lid and surface water
     (Campbell and Taylor 1983).
-  - **Ice crusts:** an `Icy` body's primary crust is `H2O`, with salts, NH₃ hydrate or clathrate as
-    minor substances where the inventory carries them.
-  - **`melt_area_fraction`:** the surface's area above the solidus of the crust at the surface (the
-    secondary's, or the primary's where there is none), from the
+  - **Ice crusts:** the primary crust of a body whose ice melted and whose ocean froze is:
+    - `H2O` where ice is at least 0.3 of its mass, or its rock differentiated beneath the ocean
+      (Europa);
+    - `phyllosilicate` with its salts where rock is the larger part of its ocean's load (Ceres).
+
+    Salts, NH₃ hydrate or clathrate are minor substances where the inventory carries them. An
+    icy body that never melted has `bulk: cometary`, its ices being T51.a's and T51.f's
+    condensates.
+
+  - **Lid:**
+    - `Bulk` on an undifferentiated body;
+    - otherwise `Primary` where the body has a primary crust and nothing has resurfaced it since
+      it formed: T24.b's surface age is at least the time since the magma ocean's end
+      (`molten_until`), or since the ocean froze. That covers the Moon's highlands and a Ceres;
+    - otherwise `Secondary`: Mars and Mercury, over their buried primary crusts, and Earth and
+      Venus.
+    - Where `lid` is `Primary`, a resurfaced share shows as provinces (R09's V).
+  - **`melt_area_fraction`:** the surface's area above the solidus of the lid's crust, from the
     closed-form surface-temperature distribution. A locked airless world's is T_ss cos^¼θ, so a
     lava world has a dayside pool and a solid nightside (Léger et al. 2011; Kite et al. 2016).
-    `MagmaOcean` stays the global state. R09.T13.c applies the solidus per cell.
+    `MagmaOcean` stays the global state. R09.T13.c applies each cell's own entry's solidus.
+  - **The provinces** are the lid's own substance on a body with no constructional volcanism.
   - _Tests:_
-    - the Moon anorthositic with basaltic provinces;
-    - Mercury reduced, low-FeO and graphite-darkened;
+    - the Moon a `feldspathic` primary lid with `basalt_fe` provinces;
+    - Mercury reduced and low-FeO: a `basalt_reduced` lid over a graphite primary crust;
     - Earth granitic continents on basaltic oceanic crust;
-    - Venus a basaltic stagnant lid;
-    - Mars basaltic, with its ferric surface from T51.d;
-    - an icy body an `H2O` crust;
-    - a Ceres-like body (hydrated, never silicate-melted) a primary phyllosilicate crust and no
-      secondary;
+    - Venus a `basalt` stagnant lid;
+    - Mars a `basalt_fe` lid over a buried ultramafic primary crust, with its ferric surface from
+      T51.d;
+    - an icy body whose ice melted an `H2O` primary crust;
+    - a Ceres-like body (470 km, a quarter water, t_f 3 Myr) a primary phyllosilicate crust and
+      no secondary;
     - a hot young mantle komatiitic;
-    - the secondary crust shifts with Mg/Si at fixed everything else;
+    - the secondary crust shifts with Mg/Si at fixed everything else, and an Earth's mass
+      balance gives `basalt` and a Mars's `basalt_fe`;
     - a locked lava world's melt area is between 0 and 0.5 and rises with T_ss;
-    - the `RedoxClass` bands cited.
+    - the `RedoxClass` bands cited;
+    - the thermal history's anchors (science-composition-crusts.md §1.4):
+      - a dry 100 km body at t_f 2.3 Myr has an ordinary-chondrite `bulk` (Henke et al. 2012);
+      - a dry body of 60 km or more at 1.4 Myr has a crust (Hunt et al. 2018);
+      - a 25 km body at 0.1 Myr has a crust (Neumann et al. 2023);
+      - an icy 100 km body at 3 Myr melts its ice, and not after 4 Myr (Bland and Travis 2017);
+      - a Pluto (1,190 km, a third ice, 5 Myr) has a primary `H2O` crust;
+      - a 10 km icy body at 1 Myr or later, and a 200 km Kuiper-belt body at 5 Myr, are
+        `cometary`;
+      - a `Reduced` dry body that never melted is `chondrite_e`;
+    - `bulk` excludes every crust; `lid` names a present member;
+    - the series within 1% of 400 terms;
+    - the formation time's draw is deterministic, and no existing value moves.
   - _Sources:_ Taylor and McLennan 2009; Hu, Ehlmann and Seager 2012; Campbell and Taylor 1983;
     Nittler et al. 2011; McCubbin et al. 2012; Peplowski et al. 2016; Putirka and Xu 2021 (the
-    surfaces audit §2.1–2.3).
-  - _Files:_ `planetary/hooks/crust.rs`.
+    surfaces audit §2.1–2.3); Henke et al. 2012; Jurewicz et al. 1993 (LPSC 24, and GCA 57,
+    2123); Hunt et al. 2018; Neumann et al. 2023; Bland and Travis 2017; Keil 2010; McDonough and
+    Sun 1995; Dreibus and Wänke 1985 (science-composition-crusts.md).
+  - _Files:_ `planetary/hooks/crust.rs`, and the draw's tag (`rng/tags.rs` and `tags.golden`) if
+    it takes a new one.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::crust`.
 - **P14.T51.d Surface modifiers** (23 → 24).
   - `hooks/modifiers.rs`:
@@ -5208,10 +5346,20 @@ Snapshot path, `planetary/chem/`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::modifiers`.
 - **P14.T51.e Small bodies' surface types** (23 → 24; amends T21's members and T17–T19's small
   moons).
-  - `hooks/small_bodies.rs`: a taxonomic surface from the formation distance against the snow
-    line, the size (a differentiated body keeps a basaltic or metallic surface), and volatile
-    retention (`kbo_red` where it keeps its irradiated organics, `kbo_neutral` where not). If a
-    zone mixes types, it draws on a tag of its own.
+  - `hooks/small_bodies.rs`: a taxonomic class for the record and the census, a label and not a
+    substance, derived from T51.c's lithology and T51.d's maturity and cover:
+    - S (Q where fresh) for an ordinary chondrite;
+    - C for `chondrite_ci` and `chondrite_cm`;
+    - K or L for `chondrite_cv`;
+    - Xc for `chondrite_e`;
+    - V for a `basalt_fe` crust;
+    - D for `cometary` under an organic cover, and P without;
+    - red or neutral for a Kuiper-belt body by T51.d's cover.
+
+    These pairings are from memory, to be read at build (DeMeo and Carry 2014; Nakamura et al.
+    2011 for Itokawa's LL; science-composition-crusts.md §1.2). A rubble pile or a fragment takes
+    its parent's lithology. If a zone mixes types, it draws on a tag of its own.
+
   - _Tests:_
     - inner-belt members S-type and outer C-type, in DeMeo and Carry 2014's proportion
       qualitatively;
@@ -5593,6 +5741,11 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - The server's conversion fills each member, and the envelope's `match envelope {}` is
     replaced.
   - R09's `for_body` reads `crust`, `condensates` and the palette's sources from the record.
+    An airless body's palette carries no cold-trapped `Ice` entry until P14.T51.f, wired by T54.b,
+    since no condensate on the record names one. The bless note records it, the census (T33.c)
+    lists cold-trapped `H2O` and `CO2` as unreached until then, and where a console row shows an
+    airless body's condensates it labels its cold traps NOT YET MODELLED (P14.T43.b's `SURFACE`
+    rows; science-composition-crusts.md §6).
   - The goldens are blessed once through the `sim-determinism` skill, with the bless note
     accounting for every moved value by subtask. `GENERATOR_VERSION` goes 22 → 23.
   - _Tests:_
@@ -5608,9 +5761,10 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _Accept:_ `cargo test -p hyperion-sim planetary::record`; `cargo test -p hyperion-server convert`;
     `just gen-protocol-check`; the golden tests.
 - **P14.T54.b The 23 → 24 batch on the record, and its bump.** As T54.a, for T51.d's
-  `modifiers`, T51.e's types, T51.f's cold-trapped condensates, T51.g's `subsurface_ocean` for
-  every body (deleting `OCEAN_VERSION` and its tripwire), T53.a–c's states and gases, and
-  T53.d's member, which stays absent.
+  `modifiers`, T51.e's types, T51.f's cold-trapped condensates (each giving its body's palette an
+  `Ice` entry, removing T54.a's label), T51.g's `subsurface_ocean` for every body (deleting
+  `OCEAN_VERSION` and its tripwire), T53.a–c's states and gases, and T53.d's member, which stays
+  absent.
   `GENERATOR_VERSION` goes 23 → 24.
 
 #### P14.T55 Later composition (unscheduled)
