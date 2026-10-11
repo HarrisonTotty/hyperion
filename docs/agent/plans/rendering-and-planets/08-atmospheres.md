@@ -394,7 +394,7 @@ module R12 reads for this plan's ladder entries.
   New: `irradiance.wgsl`, a per-planet table of the sky's diffuse irradiance on a horizontal
   surface by altitude and sun zenith, one layer a latitude band, and `surfaceLighting.wgsl`, which
   exports `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad, curve)`,
-  `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad)` and
+  `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad, curve)` and
   `atmosphere_source_transmittance(altitude_m, mu_centre, latitude_rad, azimuth_rad, angular_radius_rad, curve)`,
   each `-> vec3f`. The last is Design note 7's three-node disc rule for a wide source
   (planetshine). `curve : u32` is the light's slot among the body's per-sun absorber curves
@@ -1858,7 +1858,8 @@ The order:
   (ExoMol's hot molecules) follow T4.d, on its machinery, in either order. T4.e's ions also wait
   on P14.T49.b's rows for R08.T19.
 - T5.a (Mie) needs nothing of T3 or T4 and can start at once; T5.b follows it, and T5.c follows
-  T5.b. T5.d follows T5.b, and precedes galaxy plan 14's P14.T49.e.
+  T5.b. T5.d follows T5.b, and precedes galaxy plan 14's P14.T49.e. T5.e follows T5.d and
+  R08.T12.e. It moves no generated output, so its place relative to P14.T49.e is free.
 - T6 generalises R05's tables over N terms. T6.a needs T3.a's `tabulated` density; T6.b follows
   T6.a and T0; T6.g (heights and angles in `f32`, Design note 18) follows T6.b; T6.c follows T6.g
   and T4.b (the ozone curve of growth); T6.d follows T6.c, T3.c and T4.a (the fitted channels),
@@ -2448,7 +2449,8 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers` and
     `just test-render`.
 
-- **R08.T4.e Atomic and ionic lines** (follow-ups 2 and 3). After T4.d, on its machinery.
+- **R08.T4.e Atomic and ionic lines** (follow-ups 2 and 3; science-r08-unowned-absorbers). After
+  T4.d, on its machinery.
   - **Populations and data.**
     - Boltzmann level populations at the profile's temperature, with Barklem and Collet 2016's
       partition functions (A&A 588, A96), cited.
@@ -2461,34 +2463,77 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     - Broadening by Barklem et al.'s ABO theory where tabulated, Unsöld's van der Waals
       otherwise, and Stark broadening for Balmer.
     - Each source is checked at fetch.
+    - **The reference column** for its line list and for T4.c's third reason
+      (science-r08-unowned-absorbers): the stage's vertical column above 0.1 bar at g = 10 m s⁻²,
+      doubled for the mean slant path. It is taken at solar abundances, with every atom of the
+      element in that stage, at Saha equilibrium, at the stage's most favourable temperature in
+      2,000–4,600 K.
+
+      Each drawn species takes every line in 380–760 nm, and within 20 nm outside it for its wings,
+      whose equivalent width there is at least 10⁻³ nm.
   - **The lines:**
     - Na D (589.0 and 589.6 nm), and K's resonance doublet (766.5 and 769.9 nm, outside the
       range, whose broadened blue wing enters it), with Allard et al.'s pressure-broadened
       profiles for H₂ and He perturbers;
-    - Ca I 422.7 nm; Cr I 425.4, 427.5 and 429.0 nm; Si I 390.6 nm;
-    - Mg I's b triplet (516.7, 517.3 and 518.4 nm; its resonance line at 285.2 nm lies outside
-      the range);
-    - Ti I's and Fe I's lines in the range;
-    - H I's Balmer lines in local thermodynamic equilibrium, from Hα 656.3 nm to the series'
-      members above 380 nm. A non-LTE thermosphere is not modelled, recorded. H's bound–free
-      from n ≥ 3 is stated negligible beside H⁻ below 5,000 K;
-    - the ions, once P14.T49.b's rows exist: Ca II's H and K (393.4 and 396.8 nm), and Fe II's
-      and Ti II's lines in the range. Mg II's 448.1 nm line (8.86 eV up, reaching τ 10⁻³ at
-      10³ km-amagat near 2,570 K);
+    - **Na I's and K I's other lines:** Na I's 2.10 eV subordinate lines (568.3, 568.8, 615.4,
+      616.1, 497.9 and 498.3 nm), and K I's second resonance doublet (404.4 and 404.7 nm);
+    - **Ca I:** 422.7 nm, its 1.88–1.90 eV lines (428–431, 442–446, 612–616 and 643–647 nm), and its
+      657.3 nm intercombination line;
+    - **Cr I:** 425.4, 427.5 and 429.0 nm, and the 520.5, 520.6 and 520.8 nm triplet;
+    - **Si I:** 390.6 nm;
+    - **Mg I:** the b triplet (516.7, 517.3 and 518.4 nm) and the 382.9, 383.2 and 383.8 nm triplet,
+      both from 2.71 eV. Its resonance line at 285.2 nm lies outside the range;
+    - **Al I:** 394.4 and 396.2 nm;
+    - **Mn I:** 403.1, 403.3 and 403.4 nm, and its 2.1–2.3 eV lines;
+    - **V I:** its lines, strongest at 437.9, 438.5, 439.0, 411.2 and 384.1 nm;
+    - **Ni I:** its lines, strongest at 385.8, 380.7 and 547.7 nm;
+    - **Zn I:** 468.0, 472.2 and 481.1 nm (4.0 eV) and 636.2 nm;
+    - **Ti I and Fe I:** their lines in the range;
+    - **H I:** the Balmer lines in local thermodynamic equilibrium, from Hα 656.3 nm to the series'
+      members above 380 nm. A non-LTE thermosphere is not modelled, which is recorded. H's
+      bound–free absorption from n ≥ 3 is stated negligible beside H⁻ below 5,000 K;
+    - **The ions,** once P14.T49.b's rows exist:
+      - Ca II's H and K (393.4 and 396.8 nm);
+      - Fe II's lines (492.4, 501.8 and 516.9 nm strongest);
+      - Ti II's;
+      - V II's (387–404 nm);
+      - Cr II's (455.9 and 458.8 nm and others, from 3.9–4.1 eV);
+      - Mn II's (412.8 and 420.5 nm, and 432–440 nm).
+
+      Mg II, Si II, Al II, Ni II, Na II, K II and Zn II are T4.c's stated none, by the third
+      reason below. Mg II's 448.1 nm line (8.86 eV up, reaching τ 10⁻³ at 10³ km-amagat near
+      2,570 K) is pending in T4.c as built (follow-up 5), and stays pending, its line drawn here,
+      unless Kurucz's full list confirms its share under the third reason's 10⁻³;
+
     - [Fe II]'s forbidden lines from Deb and Hibbert 2011 (A&A 536, A74; CDS J/A+A/536/A74);
     - Na D's and K's far wings as pairs with H₂ and He, from Allard et al.'s profiles over
       their density-linear range, beside each doublet's own profile per atom;
-    - the resonance lines in the range of any further atom P14.T49.b adds (Al I 394.4 and
-      396.2 nm, Mn I 403.1–403.4 nm, V I's);
     - O I's forbidden lines [O I] 630.0 and 636.4 nm (Kurucz's `gf0800.all`), and He I's lines in
       the range for profiles above 5,000 K;
+  - **Stated transparency, the third reason** (science-r08-unowned-absorbers). T4.c built two
+    reasons for a band absorber: its catalogued bands lie outside the range
+    (`bandsOutsideRange`), or its strongest catalogued band in or nearest the range, extrapolated
+    up the overtone ladder at a factor of at least 10 a quantum, stays under τ 10⁻³ in every 1 nm
+    cell at 10³ km-amagat (`underOvertoneBound`), with e⁻'s `noBoundStates`. Its
+    `NO_VISIBLE_ABSORPTION` gains a third, for an atom or ion: its catalogued lines in the range
+    take under 10⁻³ of every bake bin's light (a summed equivalent width under 0.0253 nm a bin) at
+    the reference column. Expected at build for the line species, each confirmed on Kurucz's full
+    list:
+    - `Mg+` (448.1 nm, 8.86 eV up): 7 × 10⁻⁴;
+    - `Si+` (from 6.86 and 8.12 eV): 5 × 10⁻⁴;
+    - `Ni+` (forbidden lines only): 1.5 × 10⁻⁴;
+    - `Al+`: 5 × 10⁻⁶;
+    - `Na+`, `K+` and `Zn+`: no line from below 11 eV.
   - Tests:
     - Na D's depth monotone in column;
     - a class IV giant's (900–1,500 K) geometric albedo under 0.1 at 550 nm (Sudarsky et al.
       2000's Bond albedo for class IV is 0.03, Table 1a);
     - each line's equivalent width against an `f64` line-by-line reference, within 1% over
       three columns;
-    - every T_c lies in [10⁻⁶, 1] and is non-increasing in u.
+    - every T_c lies in [10⁻⁶, 1] and is non-increasing in u;
+    - each drawn species' largest bake-bin share at the reference column is recorded beside
+      science-r08-unowned-absorbers' estimate, and the stated-none ions stay under 10⁻³ on Kurucz's
+      full lists.
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers`.
 
 - **R08.T4.f ExoMol's hot molecules** (follow-ups 2 and 3; decision-composition §5). After T4.d, on
@@ -2512,6 +2557,9 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       an LTE band model (Huber and Herzberg's constants), `estimated`;
     - hot CO, N₂O and HCN (HITEMP or ExoMol, checked at fetch), handing over from R08.T4.d's
       HITRAN at recorded temperatures;
+    - any molecule P14.T52.a lists with a visible band system (AlO's B–X near 450–540 nm, CaH's,
+      MgH's), from ExoMol or MoLLIST, checked at fetch. T52.a's other molecules are T4.c's stated
+      none (science-r08-unowned-absorbers).
   - Tests:
     - each reduced k-distribution reproduces its cell's line-by-line curve to 10⁻³ in T at three
       temperatures;
@@ -2862,8 +2910,19 @@ Acceptance for T5.b and T5.c:
   and before galaxy plan 14's P14.T49.e, which reads these files.
   - Index files, by T5.b's rules, for KCl, NaCl, ZnS, Na₂S, MnS, Cr, FeS, MgSiO₃, Mg₂SiO₄, SiO₂,
     Al₂O₃, CaTiO₃, TiO₂, graphite, S₈, H₂S ice, N₂ ice, CO ice, the chromophore (Braude et al.
-    2020's retrieved absorption, reduced) and the ice giants' haze (Irwin et al. 2022), each from
-    its primary measurement.
+    2020's retrieved absorption, reduced) and the ice giants' haze (Irwin et al. 2022), and
+    `acid_uv_absorber` (below), each from its primary measurement.
+    - `acid_uv_absorber` (science-r08-unowned-absorbers): `H2SO4`'s 75 wt% index, with
+      k = k_H₂SO₄ + k_UA. Its `provenance` is `standIn`.
+      - k_UA = k₃₆₅ e^(−(λ − 365 nm)/L) over 360–500 nm, times (550 − λ) ÷ 50 nm over 500–550 nm,
+        and 0 from 550 nm.
+      - The a-priori values are k₃₆₅ = 1.2 × 10⁻³ and L = 26.9 nm, the bound from Spacek et al.
+        2026's 1278 and under-54 cm⁻¹ at 375 and 455 nm. R08.T5.e refits them.
+      - The file covers 360–780 nm, so that T5.e can fit at 365 nm.
+      - Its shape class is sphere, and its phase basis is Mie, a `model`.
+      - Its stand-in text: "an empirical absorber: H₂SO₄ droplets with an unidentified ultraviolet
+        absorber, whose k is fitted to Venus's albedo spectrum (candidates FeCl₃, S₂O/OSSO, Sₓ,
+        organics)".
   - Kitzmann and Heng 2018's compilation (LX-MIE's `compilation/`, GPL-3.0 repository, no
     separate data terms) is the finding aid. Each primary is fetched from its own distribution
     where one exists. Where the compilation is the only machine-readable copy, its values are
@@ -2888,8 +2947,40 @@ Acceptance for T5.b and T5.c:
       stated fallback;
     - a 1 µm forsterite sphere's single-scattering albedo at 550 nm lies above 0.99, and an iron
       sphere's lies below a forsterite sphere's of the same size (Mie on the files);
-    - a solid-iron grain's a₂ ÷ a₁ at 170° lies below 0.95.
+    - a solid-iron grain's a₂ ÷ a₁ at 170° lies below 0.95;
+    - a Venus-class deck whose mode 2 is `acid_uv_absorber` gives `atmosphereApproximate` for it,
+      and its k is 0 from 550 nm.
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/materials view/atmosphere/nonSpherical`.
+
+- **R08.T5.e Venus's ultraviolet absorber, fitted** (science-r08-unowned-absorbers). After T5.d
+  and R08.T12.e, on the reference tracer's Venus deck: R08.T12's `venus-92bar` case, with
+  T24.g's four modes, mode 2 `acid_uv_absorber`. It moves no generated output, since k_UA is 0
+  at 550 nm, so it may land before or after P14.T49.e.
+  - **The geometric albedo.** p(λ) = 2∫₀¹ R(μ, μ; α = 0) μ dμ, on Gauss nodes, from the tracer's
+    plane-parallel runs. It is taken at 365 nm, and over Bessell 1990's B and V and SDSS's g′
+    and r′ responses (or their effective wavelengths, stated, if a response's licence bars it).
+  - **The fit.** k₃₆₅ is fitted to p(365) = 0.36, and L to p(g′) ÷ p(r′) = 0.933. The file is
+    rewritten through T4.a's tool and bless step.
+  - A fitted L above 26.9 nm, Spacek et al. 2026's bound, is recorded as a deviation.
+  - **Sources:**
+    - Lee et al. 2019: the 365 nm whole-disc geometric albedo, 0.33 in 2011 and 0.40 in
+      2015–2017;
+    - Mallama, Krobusek and Pavlov 2017 (Icarus 282, 19), Table 7: U 0.348, B 0.658, V 0.689,
+      g′ 0.664, r′ 0.712. Their B spans 0.78–0.955 in B/V between methods.
+  - **Tests:**
+    - p(365) lies in 0.33–0.40;
+    - p(g′) ÷ p(r′) lies in 0.90–0.96;
+    - p(B) ÷ p(V) lies in 0.78–0.96.
+  - **Recorded:**
+    - p(V) against 0.689;
+    - the 365 nm contrast against the same deck without the absorber, 1 − p ÷ p₀ (about 0.5 in
+      this ruling's estimate);
+    - the absorber's vertical absorption optical depth at 365 nm (about 0.3);
+    - its absorbed flux over 360–550 nm against the literature's "about half" of Venus's
+      absorbed sunlight (about 9% here);
+    - the fitted k₃₆₅ and L.
+  - Acceptance: `cargo test -p hyperion-fit venus_uv_absorber` and
+    `pnpm --filter hyperion exec vitest run view/atmosphere/materials`.
 
 ### R08.T6 Hillaire's tables over N terms
 
@@ -3295,6 +3386,26 @@ smoke checks.
 - the sky-view, aerial-perspective and composite passes blend alpha with source zero and
   destination one, keeping R07's `METER_CLASS` in the HDR target;
 - a sun below the horizon still feeds the sky through the planet's shadow in the tables;
+- each light takes its own absorber curves wherever its light crosses an absorber (Design note 5;
+  `decision-r08-t6b-floor.md` §8):
+  - its transmittance read, at its own slot;
+  - the absorber depth of its in-scattered light along each view path, tracked per light in every
+    march;
+  - its disc.
+
+  Under a medium with an absorber, the multiple-scattering table has one layer per light slot,
+  each built with that slot's curves through R08.T6.c's `curveSlot`, and each sun's source term
+  reads its own layer. A planetshine source reads slot 0's, as its transmittance does. A medium
+  with no absorber keeps one layer, since without one the table is the same for every star.
+  - The layers are rebuilt with the curves, when the body's light list or a star's curves change.
+  - With R08.T6.f's bands they are band × slot.
+  - Each is 8 KB and under 0.1 ms to build, by the T6.c lane's estimate. R08.T11 records both.
+
+  Slot 0's table for every sun was not adopted: from a K5 (4,450 K) and M3 (3,300 K) pair it puts
+  the companion's red curves 2.2% apart at 10 × 300 DU of ozone and 8.3% at 30 ×, 3.9% and 15.5%
+  for a G2 primary. The companion lights the sky alone after the primary sets, in a circumbinary
+  world for up to about an hour.
+
 - R06's sprites, band, cube and host discs are multiplied by the transmittance from the camera
   along their direction. As built none of R06's layers takes a per-direction factor (each takes one
   scalar `exposureScale`), and they are drawn into the scene target before the atmosphere, whose
@@ -3343,6 +3454,10 @@ smoke checks.
 Tests (no GPU, CPU twin):
 
 - a second equal sun at the same direction doubles the sky radiance;
+- under a medium with ozone and methane absorbers, with a K5 (4,450 K) primary and an M3
+  (3,300 K) companion (Planck spectra), the sky equals the sum of each star's single-sun sky, each
+  built with its own curves, to 10⁻⁶. The same sky with the companion on slot 0's layer and curves
+  is recorded beside it, with the companion 5° up and 3° below the horizon and the primary set;
 - the sky's stars and planetshine sources are the arrays R07 builds for the body, element for
   element, on a shared fixture;
 - on an Earth fixture, with the Sun 1° beyond the twilight limit and a full Moon at 45°, the Sun
@@ -3473,9 +3588,15 @@ to 10⁸ m shows no step at the switch, recorded here.
     outside R07's below-horizon `continue`, so that a source just set still lights the twilight
     ground;
   - gives `atmosphere_sun_transmittance` the light's absorber-curve slot as a fifth argument,
-    `curve : u32`. Design note 5's curves are per sun, and the four-argument form cannot pick one.
-    R10's `terrainLit.wgsl` and R11's lit passes pass it too, and take planetshine through the same
-    functions;
+    `curve : u32`, and `atmosphere_sky_irradiance` the same slot as a fourth. Design note 5's
+    curves are per sun, and the shorter forms cannot pick one.
+    - Under a medium with an absorber, the irradiance table has one layer per light slot (with
+      R08.T6.f's bands, band × slot), each built from that slot's multiple-scattering layer and
+      curves, as R08.T7 rules for the multiple-scattering table (`decision-r08-t6b-floor.md` §8).
+      A medium with no absorber keeps one.
+    - A planetshine source passes slot 0.
+    - R10's `terrainLit.wgsl` and R11's lit passes pass both, and take planetshine through the same
+      functions;
   - rewrites `view/appearance/litBodyProbe.ts`'s and its smoke check's pins of the stubs' 1, 1
     and 0 against the tables' twin.
 
@@ -5502,6 +5623,23 @@ generator, and the reference's sampling needs no domain tag.
     above 1,000 K.
   - Below each table's end (607 nm to 350 K, 589 nm to 1,000 K and 501 nm above) the pair is 0,
     as a stated approximation.
+- **Venus's ultraviolet absorber is an empirical stand-in** (science-r08-unowned-absorbers).
+  - Its identity is unknown: FeCl₃, S₂O/OSSO, Sₓ and organics each fail a constraint. So every
+    case-1 deck's mode 2 carries `acid_uv_absorber`, Venus's absorption fitted to its 365 nm
+    albedo and g′/r′ colour, and is labelled.
+  - **Not modelled:**
+    - its markings (Lee et al. 2022 see more than 20% peak-to-peak at 365 nm);
+    - its factor-2 decadal change and its latitude dependence (Lee et al. 2019);
+    - its 283 nm side;
+    - any dependence on a world's chemistry.
+  - The absorbed-energy share is recorded, not matched.
+- **Trace heavy elements are not carried** (science-r08-unowned-absorbers). Li, Sc, Co, Sr, Y and
+  Ba lie outside plan 14's `Element`.
+  - At a 0.1 bar upper-bound column their lines change an ultra-hot dayside's transmitted sunlight
+    by up to Δu′v′ 1.7 × 10⁻³ and 3% in luminance together.
+  - At a 10 mbar photosphere the change is 2.3 × 10⁻⁴ and 0.6%.
+  - They are P14.T55.l.
+  - Lava worlds' vapour waits on P14.T55.b.
 
 - **Stars beyond the body's two** (decided 2026-10-09, `decision-r08-design.md` item 3). The sky
   takes the body's own list (Design note 7), so it agrees with the surfaces by construction. A

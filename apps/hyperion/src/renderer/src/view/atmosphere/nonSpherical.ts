@@ -348,7 +348,7 @@ export const ICE_KEYS: ReadonlySet<string> = new Set([
  * The expected error in g of an ice drawn on water ice's table, Δg = g_expected − g_water, by van
  * Diedenhoven et al. 2014's eq. (16) with g_tot = (1 + g_RT) ÷ 2 at 550 nm (J. Atmos. Sci. 71,
  * 1763; science-r08-nonspherical.md §2.3): estimates of the bias, not corrections. Ices not listed
- * have none estimated. NH₄SH's n of 1.644 lies past the fit's 1.18–1.43, where eq. (16) would give
+ * have none estimated. NH₄SH's n of 1.638 lies past the fit's 1.18–1.43, where eq. (16) would give
  * about −0.10, the largest of all; it is left out as an extrapolation (R08.T5.c's science check).
  */
 export const ICE_ANALOGUE_ASYMMETRY_BIAS: Readonly<Record<string, number>> = {
