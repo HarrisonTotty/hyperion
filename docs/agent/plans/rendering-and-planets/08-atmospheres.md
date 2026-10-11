@@ -290,9 +290,12 @@ reads (R08.T4.a). As built, renderer code, tests included, reads no files throug
 (R04.T10.c; `tsconfig.web.json` carries no Node types), and no TypeScript bless path exists: a
 committed table is read as a JSON import, and `bless.ts` rewrites it through vitest's
 `toMatchFileSnapshot`, whose update mode `HYPERION_BLESS=1` turns on in `vitest.config.mts`. The
-raw inputs that are fetched and never committed (the CIE matching functions, the cross-sections;
-R05.T12.d's ruling) are reduced by a Node tool in `apps/hyperion/src/tools/`, run by a script under
-`apps/hyperion/scripts/`, as R05's `solarFactors.ts` and `solarFactors.mjs` are.
+raw inputs (the CIE matching functions, read from R06's committed, checksum-verified copy in
+`crates/hyperion-fit/data/cie_cmf/`, and the cross-sections, fetched with their checksums and never
+committed; R05.T12.d's ruling) are reduced by a Node tool in `apps/hyperion/src/tools/`, run by a
+script under `apps/hyperion/scripts/`, as R05's `solarFactors.ts` and `solarFactors.mjs` are.
+`colourMatching.json`, the CIE table re-expressed in Rec. 709, is committed and ships as adapted
+CC BY-SA 4.0 material (`decision-r08-cmf-licence.md`).
 
 ### Assembly, workers and cache (`assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts`)
 
@@ -745,33 +748,29 @@ Names are those the owning plans give; the owning plan is authoritative.
      an absorber carries its species and column, from which each sun's curve of growth is
      computed.
 3. **The vertical structure** (researched 2026-09-29, a physics ruling; Robinson and Catling 2012,
-   ApJ 757, 104, and 2014, Nature Geoscience 7, 12). The profile is a scaled adiabat from the
-   surface to an isothermal skin: T(p) = max(T_s (p/p_s)^β, T_skin).
-   - β = α·R/c_p. R/c_p comes from kinetic theory with fixed degrees of freedom, as R&C 2012 take
-     it (γ = 1 + 2/N, their Eq. 9), mixed as c_p = Σxᵢc_p,ᵢ, never by averaging γ (researched
-     2026-09-29). The values: 2/7 = 0.286 for H₂, N₂ and O₂ (H₂'s frozen rotation below about
-     150 K is a recorded caveat); 0.400 for He and Ar; 3/13 = 0.231 for CO₂, R&C's γ = 1.3; 0.25
-     for H₂O, CH₄ and NH₃ (N = 6, medium confidence for the last two). NIST's values at 298 K
-     (0.288, 0.285, 0.283, 0.400, 0.400, 0.224, 0.248, 0.233, 0.233) agree within about 7%. A
-     temperature-dependent c_p is not used: it breaks the constant-β form, and R&C calibrated α
-     against their constant γ.
+   ApJ 757, 104, and 2014, Nature Geoscience 7, 12). The profile is T(p) = max(T_ad(p), T_skin),
+   with dln T_ad ÷ dln p = α R ÷ c_p(T), P14.T49.b's c_p(T) mixed by mole fraction (a power law,
+   β = α R ÷ c_p, only for a constant c_p).
+   - β = α·R/c_p. c_p(T) is P14.T49.b's statistical sum (science-r08-gases-2.md §1). Fixed
+     degrees of freedom hold only for the noble gases at every temperature, and for N₂, O₂ and CO
+     below about 400 K.
    - α scales the dry adiabat for latent heat, by the condensing species: 0.6 with a water ocean,
-     0.77 for methane, 0.8 dry or CO₂, and 0.83–0.94 for giants (R&C 2014 Table 1; R&C 2012 §4.1
-     for Venus).
+     0.77 for methane, 0.88 dry or CO₂ (refitted on Venus's measured state with c_p(T); R&C's 0.8
+     took γ = 1.3), and 0.83–0.94 for giants (R&C 2014 Table 1; R&C 2012 §4.1 for Venus).
    - T_skin = 2^(−1/4)·T_eq is the τ → 0 limit of the same grey Eddington atmosphere as P14.T13.c,
      so the two plans agree at both ends.
    - The checks, with their inputs:
      - Earth (T_s 288 K, p_s 1 bar, α 0.6, β 0.171, T_skin 214.4 K): tropopause 0.179 bar at
        214 K, against about 0.16–0.23 bar and 217 K observed (R&C 2014 Table 1; US Standard
        Atmosphere 1976, 0.226 bar at 216.65 K).
-     - Venus (T_s 730 K, p_s 92 bar, α 0.8, R/c_p 3/13, β 0.1846): 316.8 K at 1 bar, against about
-       350 K (VIRA, Seiff et al. 1985). At plan 14's 58 bar the same β gives about 345 K.
+     - Venus (735 K, 92.5 bar, α 0.88): 350.5 K at 1.066 bar by the fit, and 346 K at 1 bar.
      - Titan (T_s 94 K, p_s 1.4 bar, α 0.77, R/c_p 2/7, β 0.22, T_skin 64 K): tropopause 0.244
        bar at 64 K (0.26 bar at the real 1.5 bar), against 0.1–0.2 bar and 70 K (R&C 2014 Table 1;
        Huygens HASI).
 
-   Plan 14 publishes the parameters (T_s, p_s, β, T_skin), and for giants its envelope form (R08.T1,
-   P14.T24.e), with `planetary::temperature_at(structure, p)` in the sim for the flight model's
+   Plan 14 publishes the parameters (T_s, p_s, α, T_skin and the adiabat's nodes in place of β;
+   science-r08-gases-2.md §1.4), and for giants its envelope form (R08.T1, P14.T24.e), with
+   `planetary::temperature_at(structure, p)` in the sim for the flight model's
    drag. The client copies the formula in `temperatureAt`, tested against golden levels from the
    sim, so the picture and the drag read the same air. The column integrates the hydrostatic
    equation in `f64` from p_s upward, with g = g₀(R/r)², the local kT/(μ m_u g) at each step, and a
@@ -1006,11 +1005,18 @@ Names are those the owning plans give; the owning plan is authoritative.
    T5.c's matrix agrees with optool's. A term with none is a total depolariser
    (Design note 10, Polarisation). How the forward peak is handled:
    - Single scattering (sky-view, aerial perspective, the march) uses the full table and the full
-     extinction.
+     extinction, but for a table's forward delta (R08.T5.c's `forwardPeak`, the diffraction peak
+     the reduced files do not resolve, inside their first angle of 0.05–0.08°).
+   - That delta is direct light (decided 2026-10-10, `decision-r08-aerosol-labels.md` item 3).
+     The medium the kernels read leaves it out of both the table and the extinction, which is
+     exact for a forward delta (Potter 1970). So the shared transmittance carries its light to the
+     star's image, whatever the star's angular size, and to the light at every scattering point
+     and on the ground, and no per-view table samples it (R08.T7).
    - Only the multiple-scattering bakes use delta-M truncation (Wiscombe 1977), with the scaled
-     τ′ = (1 − fω)τ and Nakajima and Tanaka 1988's single-scatter correction.
-   - The shared transmittance table is never truncated, which would double-count forward light.
-     Only diffraction narrower than the star's disc goes into the direct beam.
+     τ′ = (1 − fω)τ and Nakajima and Tanaka 1988's single-scatter correction. They, and R08.T12's
+     reference, read the full table, delta included.
+   - The shared transmittance table is otherwise never truncated, which would double-count
+     forward light: diffraction the tables resolve stays in the sky.
 
    Where the surface section is granted but the inventory is `not_modelled`, the medium has no
    aerosol terms and the label block says `AEROSOLS AND ABSORBERS: NOT YET MODELLED` (Design
@@ -1856,8 +1862,10 @@ The order:
 - T12.a (the tracer) needs nothing of this plan and can start at once. T12.c (its benchmarks) and
   T12.d (the spheroid mode) follow it; T12.c's cases whose matrices come from R08's Mie
   (Kokhanovsky's aerosol and cloud, IPRT's spheres) also wait on T5.b, and its other cases do not.
-  Those cases are T12.e's (the Mie-matrix writer), which follows T12.c and T5.b.
-  T12.b (the cases and references) needs T5, T10's fixtures, T12.c, T12.d and T12.e.
+  T12.e (the Mie-matrix writer and the sphere benchmarks) follows T12.c and T5.b. T12.f (variance
+  reduction for thick, forward-peaked media) follows T12.e. T12.b's cloud-free cases need T12.e;
+  its cloudy and hazy cases (the Venus-class and Titan-class cases and the decks) need T12.f.
+  T12.b (the cases and references) also needs T5, T10's fixtures, T12.c and T12.d.
 - T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14 follows T13: T14.a, T14.b and T14.c in
   turn; T14.e (the polarisation correction) after T14.a and T14.b; T14.f (its read path and the
   vector gates) after T13, T14.c and T14.e; and T14.d (the gates) after T14.f. T15 follows T14,
@@ -3086,7 +3094,8 @@ Sky-view and aerial perspective per photorealistic view, summed over the drawn s
 ½|d − s|² since R08.T6.g), each term's phase taken from it per channel, and `sourceAt` takes one
 μ_sun; this task widens them. Files: `settings.ts`, `sources.ts` and `sources.test.ts`,
 `view/quality/qualitySetting.ts`, `hillaire.ts`,
-`shaders/{view,source,skyView,aerialPerspective,rayMarch,composite}.wgsl`, `tablesCpu.ts` and the
+`shaders/{view,source,skyView,aerialPerspective,rayMarch,composite}.wgsl`, `tablesCpu.ts`,
+`tables.ts`, `medium.ts` and `aerosol.ts` (the forward delta, below), and the
 smoke checks.
 
 - the sky's sources are the body's, Design note 7's one list: the stars R07 lights it with
@@ -3113,6 +3122,23 @@ smoke checks.
   composite reads that colour (`AtmosphereScene.colour`). So the composite applies the
   transmittance to space along each sky pixel's ray, and R06's shaders (`view/sky/shaders/`) are
   edited only if that cannot serve, recorded here.
+- a phase table's forward delta is direct light (Design note 6; decided 2026-10-10,
+  `decision-r08-aerosol-labels.md` item 3). R08.T5.c lays a large particle's unresolved
+  diffraction peak on a table's first `FORWARD_PEAK_ENTRIES` entries, up to about 10⁶ sr⁻¹ within
+  0.044° of the source. No sky-view texel, froxel or march pixel can sample it without aliasing,
+  and a star whose disc is smaller than 0.044° (a Sun-like star beyond about 6 au) would leave it
+  in the sky.
+  - `PhaseTable` gains each channel's share of it, `forwardPeak` (0 where there is none, an
+    optional argument of `phaseTable`), which `aerosolPhaseTable` sets.
+  - One function in `tables.ts` takes it out of the medium the kernels read. In each channel it
+    removes the delta's entries from a₁, a₂, a₃ and a₄, divides what remains by 1 − f_c, and
+    multiplies the term's scattering by 1 − f_c, so its extinction falls by f_c times its
+    scattering. `aerosol.ts` exports the delta's shape for it.
+  - `setMedium` packs that medium, and `kernelMedium` applies the same function, so the kernels
+    and their twin read one medium. The shared transmittance then carries the delta's light into
+    every star's image, its glare source, the sunlight at each scattering point and R08.T9.b's
+    surface lighting.
+  - `aerosolTerm`'s table keeps the delta, for R08.T12's cases and the thick bakes' delta-M.
 - the per-view tables (the sky view, the aerial volume and the ray march) are written per unit of
   a per-frame scale formed in `f64`, the drawn sources' sky scale or the pre-exposure, as the
   composite's own output already is, and the composite divides it out where `skyScale` multiplies
@@ -3122,6 +3148,18 @@ smoke checks.
   (Risks, "The per-view tables' range at twilight and by moonlight"). The per-planet
   multiple-scattering table cannot take a frame's scale: this task records its night side against
   2⁻¹⁴ and states its answer, for "main";
+- the forward lobe's higher orders (science-r08-mmf.md §3). Near each source, light scattered
+  more than once within the forward lobe stays near the source's direction. The first-order term
+  and Hillaire's isotropic multiple scattering both miss that concentration: at a 5° sun on Mars
+  it is an estimated 47–81% of the radiance 3–12° from the Sun.
+  - In the small-angle approximation the orders n ≥ 2 along a slant depth τ_s add F e^(−τ_s) Σₙ
+    (ωτ_s)ⁿ ÷ n! · p^{*n}(θ). Here p is the table's forward part (to 30°), and p^{*n} is its n-fold
+    self-convolution, which a Hankel transform turns into e^(ωτ_s p̂) − 1 − ωτ_s p̂ (Wells 1973;
+    Zege, Ivanov and Katsev 1991; from memory, checked by the builder).
+  - How the kernels carry it is this task's choice, recorded: a per-channel table in (ωτ_s, θ),
+    or a per-sample effective phase.
+  - The light it adds is not counted twice in Hillaire's term. For example, the lobe can be
+    truncated out of the medium that table is built from, as the thick bakes' delta-M does.
 
 Tests (no GPU, CPU twin):
 
@@ -3141,6 +3179,16 @@ Tests (no GPU, CPU twin):
   built here and the finding recorded;
 - the per-view tables' bytes do not grow with the number of suns;
 - a star seen at the zenith from Earth's surface is dimmed by e^(−τ) of the column;
+- a term whose table holds a forward delta f_c in a channel reaches the kernels' medium with its
+  scattering times 1 − f_c and a table that integrates to 1, with mean cosine
+  (g − f_c μ_δ) ÷ (1 − f_c), μ_δ the delta's mean cosine, to 10⁻⁶. A term with no delta is
+  unchanged, bit for bit;
+- through such a term a source is dimmed by e^(−τ_ext + f_c τ_sca) in each channel, and with the
+  source exactly on a sky-view texel's direction that texel equals, in the twin to 10⁻³, the one
+  the same medium gives with the delta removed by hand;
+- on a homogeneous slab of the Mars mode at τ_s 1, 2.5 and 4.5, the added orders match a direct
+  numerical n-fold convolution of the table's forward part to 1% at 3–20° from the source, and
+  the slab's total scattered flux is unchanged to 1%;
 - with the Sun at −6°, −8°, −10° and −12°, and in the moonlit night, each per-view table's largest
   stored value is recorded against 2⁻¹⁴, the half float's least normal;
 - in air two, three and ten Earth columns deep, the colour error of a source's three-channel
@@ -3354,6 +3402,19 @@ By the composition ruling (decision-composition):
     and a kept scene's body set airless carries none. The note clears when the generator computes
     the exosphere and the console draws its light or finds it too faint for any view to show.
 
+By the heat-capacity ruling (`science-r08-gases-2.md` §1, 2026-10-10), the client keeps no
+thermodynamics of its own. P14.T24.e integrates P14.T49.b's c_p(T) and publishes the adiabat as
+nodes, in plan 14's 22 → 23 batch, and nothing R08 has built moves until then:
+
+- `TemperatureProfile.radiativeConvective` takes the published nodes, with a T3.a follow-up; the
+  existing closed form ∫ T dln p applies per segment.
+- `GAS_HEAT_CAPACITY`, `HeatCapacity`, `ofDegrees`, `LINEAR_TRIATOMIC_CP_OVER_R`,
+  `GasProperties.heatCapacityOverR` and `dryAdiabatExponent` retire.
+- Hand fixtures copy the nodes of the sim golden's Earth, Venus and Titan, or state β as a test
+  input.
+- Until then C₂H₆'s N = 6 stays, with its 100 K caveat (Risks, "Deviations in T3.b's follow-up,
+  as built").
+
 Tests (T10.a):
 
 - a withheld section gives no medium and `atmosphereNotResolved`, and a `not_modelled` one
@@ -3553,8 +3614,46 @@ here, and `pnpm test` passes.
   `cargo test -p hyperion-fit atmosphere`, `just test-slow atmosphere::benchmarks` and the
   writer's vitest.
 
-- **R08.T12.b Cases and references.** It needs R08.T5, R08.T10's fixtures, R08.T12.c,
-  R08.T12.d and R08.T12.e. It
+- **R08.T12.f Variance reduction for thick, forward-peaked media** (`decision-r08-t4b-t12c.md`,
+  follow-up, ruling 7). It needs R08.T12.e and precedes R08.T12.b's references of cloudy and
+  hazy media (the Venus-class and Titan-class cases and the decks), and so the gates of R08.T14.d
+  and R08.T15 on them. T12.b's cloud-free cases do not wait for it.
+  - **The problem, as R08.T12.e measured it.**
+    - In a τ 5 water cloud, a path can diffuse into a sun's forward peak (about 1° wide, some
+      500 sr⁻¹) by small scatterings near the cloud's top. It then scores next-event estimates
+      at weights that T12.c's sunward draws do not reduce, since each step's old and new
+      directions lie in the same peak.
+    - σ falls more slowly than N^−½, and the estimate converges from below.
+    - IPRT A5: at 6 × 10⁵ samples a geometry (62 geometries, about 200 s on 4 threads), traced ÷
+      expected averaged 0.9962, up from 0.9877 at 5 × 10⁴. The χ² of I was 113 for 62
+      (p ≈ 4 × 10⁻⁵), failing its agreement test.
+    - Kokhanovsky et al.'s cloud at 10⁶ reached σ/I of 1.5% at the median and 40% at its worst
+      (transmitted, VZA 89°, φ 90°).
+  - **The method.** An unbiased reduction of the next-event estimate's variance in sharply
+    forward-peaked media, beyond T12.c's detector directional importance sampling.
+    - It is chosen from Buras and Mayer 2011's VROOM (JQSRT 112, 434) or the literature, and
+      ported from the papers.
+    - A technique that biases (a truncated peak without its correction) is admitted only with its
+      bias measured below 10⁻³ of I on these clouds and recorded.
+    - The draws stay counter-based and independent of the thread count (R08.T12.a). Bit pins that
+      move are re-pinned, with the reason recorded.
+  - **Tests:**
+    - IPRT A5 (principal plane and almucantar) and Kokhanovsky et al.'s cloud pass Design note
+      10's agreement test at σ ≤ 0.3% of I at every value, with σ falling as N^−½. Kokhanovsky's
+      cloud takes R08.T12.e's errata, exclusions and σ_pub. Its values and A5's assertions are
+      committed then;
+    - with the reduction on and off, a Henyey–Greenstein slab of g 0.9 and τ 2, where the tracer
+      without it converges, agrees by the agreement test;
+    - energy is conserved for ω = 1 to the agreement test, in a slab of the A5 cloud's matrix;
+    - T12.c's seven benchmarks and T12.e's aerosol and A3 still pass;
+    - each cloud's samples a geometry and its time on 4 threads are recorded. A benchmark over
+      30 minutes is raised with "main".
+  - **Acceptance:** `cargo test -p hyperion-fit atmosphere` and
+    `just test-slow atmosphere::benchmarks`.
+
+- **R08.T12.b Cases and references.** It needs R08.T5, R08.T10's fixtures, R08.T12.c, R08.T12.d
+  and R08.T12.e, and R08.T12.f for its cloudy and hazy cases (the Venus-class and Titan-class
+  cases and the decks), which wait for it. It
   builds the case format, and a bless-style vitest (R08.T4.a's `bless.ts`) that writes the cases
   of Design note 16 from the client's optics, and `saturn-oblate`, Design note 17's thin
   Saturn-class case under `Shells::Spheroid` (H₂–He Rayleigh over a Lambertian 1-bar boundary;
@@ -3615,6 +3714,11 @@ cloud fraction 1). Tests:
 
 - Earth and Mars classify `thin` and pass the gate, or the finding is recorded and raised for a
   ruling;
+- Mars (`mars_dust` at τ(550) 0.5): the twin's sky radiance and its blue-over-red ratio at 3, 5,
+  8 and 12° from a sun 5° and 30° up, against R08.T12's reference at points added explicitly
+  (R08.T12's geometry rule). They are held to the gate's metric. A miss is recorded and raised
+  for a ruling, with the crossover angle of each recorded beside the rovers' 7–12° (PIA07997,
+  PIA19400; press images, so recorded only);
 - `saturn-oblate` classifies `thin` and passes the gate with R08.T6.e's slicing, and fails it with
   one slice and one band at the limb above 1 H, some comparison reaching |ΔL| ≥ T + 8σ_ref (the
   check that the gate sees oblateness beyond the reference's noise); both are recorded;
@@ -3845,8 +3949,9 @@ JSON import, and fails if:
 - a row flagged `rayleigh` has neither a measured nor an estimated entry;
 - a row flagged `absorber` has neither cross-sections nor a stated "none" with its reason;
 - a row flagged `aerosol_material` has neither an index file nor a stated stand-in;
-- `GAS_MOLAR_MASS_G_PER_MOL` or T3.a's `GAS_HEAT_CAPACITY` differs from the fixture for a shared
-  key by more than 10⁻¹²;
+- `GAS_MOLAR_MASS_G_PER_MOL` differs from the fixture for a shared key by more than 10⁻¹². It has
+  no c_p row: `GAS_HEAT_CAPACITY` retires through R08.T10.a, and the fixture's c_p ÷ R becomes
+  P14.T49.b's value at 298.15 K, for display and cross-check only (`science-r08-gases-2.md` §1.4);
 - once P14.T54.a ships τ(550), the client's τ(550) for the protocol fixture's modes differs from
   the record's by more than 1%.
 
@@ -4972,7 +5077,7 @@ generator, and the reference's sampling needs no domain tag.
     Spheres misplace that light by factors of 2–3, and Henyey–Greenstein by 2–4.
   - **Other ices.** They are drawn on water ice's roughened table. Their g is expected to run
     high by up to 0.056 (NH₃; van Diedenhoven et al. 2014, eq. 16), and they stay labelled until
-    their phase functions are measured. NH₄SH's n of 1.644 lies past the fit's 1.18–1.43, where
+    their phase functions are measured. NH₄SH's n of 1.638 lies past the fit's 1.18–1.43, where
     eq. (16) would put its g about 0.10 high (Δg ≈ −0.10), the largest of all; it is left
     unestimated as an extrapolation
     (R08.T5.c's science check).
@@ -5001,8 +5106,8 @@ generator, and the reference's sampling needs no domain tag.
     - P14.T24.c (science-r08-mmf.md §2.5): a mode's r_eff and v_eff are the moments of the
       volume-to-area radius r = 3V ÷ 4A, A the orientation-averaged projected area, for every
       shape class, so r_eff = (3 ÷ 4)⟨V⟩ ÷ ⟨A⟩ and τ(550) = (3 ÷ 4) Q̄_ext(550) M ÷ (ρ r_eff). A
-      size from a source in another convention is converted on the way in with that source's
-      particle shape.
+      size from visible scattering is converted on the way in at equal projected area
+      (r = Ψ^(3/2) r_A), and one fixed by mass or absorption at equal V/A.
   - _The MMF past x₀ ≈ 0.5_ (science-r08-mmf.md). The mean field's pair correlation has no
     contact peak, so for monomers above x₀ ≈ 0.5 it overestimates C_ext and C_sca near x₀ ≈ 0.6,
     most for D_f ≈ 1.9 (Rannou, Botet and Tazaki 2024, Icarus 424, 116247). In their Titan case ω
@@ -5064,6 +5169,22 @@ generator, and the reference's sampling needs no domain tag.
 - **The summed sky-view** (Design note 7) is a research lean of medium confidence, not checked
   against Hillaire's parameterisation. R08.T7 tests it, and the per-sun fallback costs 0.43 MB a
   sun a view.
+- **The forward delta in the direct beam** (decided 2026-10-10, `decision-r08-aerosol-labels.md`
+  item 3; Design note 6). The client draws the light of a table's forward delta at the source.
+  - Its total is the delta's scattering depth f_c τ_sca, sized to the source's g by R08.T5.c:
+    about 4% of the scattering for cirrus of r_eff 30 µm, 12% for dust of r_eff 30 µm, and up to
+    about 40% for crystals near a table's largest size.
+  - Physically it lies within the files' first angle (0.05° for Yang et al., 0.08° for
+    TAMUdust2020), inside the disc of a Sun-like star out to about 3–6 au and just beyond it
+    farther out. There the console draws it into the star's point, a displacement of about 2.6
+    pixels at the default 60° on a 1,920-pixel-wide view and up to about 31 at 10° on a
+    3,840-pixel-wide one, far finer than the sky-view's own 1.9° (2.8° on low).
+  - It is the tables' angular resolution, not a substitute, so it carries no label.
+  - R08.T12.b writes its cases from the full medium, delta included, so the reference keeps it as
+    scattering. The two differ only in the direct beam (the client's e^(−τ + f_c τ_sca) against
+    Beer–Lambert) and within 0.08° of a sun, which R08.T13's comparisons leave out or add back.
+  - Restoring the aureole's shape (Fraunhofer diffraction of the mode's projected areas) would be
+    a separate pass. It is not planned.
 - **The reference in `hyperion-fit`** is a new kind of output for that crate. If plan 15's owners
   prefer, it moves to a sibling offline tool, and nothing else changes.
 - **Knowledge.** Until a sensors plan builds the body-level overlay, the server grants the detail
@@ -5745,8 +5866,10 @@ generator, and the reference's sampling needs no domain tag.
       forward peak, up to about 10⁶ sr⁻¹. The bakes' delta-M moves it to the direct beam
       (f = χ_2M). Single scattering meets it within 0.044° of a star: inside the disc of a star
       whose angular radius is larger (the Sun's out to about 6 au), and just outside it beyond
-      that (the NH₃ and CH₄ analogues of Saturn and the ice giants). A sky-view texel that samples
-      those entries reads up to 10⁶ sr⁻¹; R08.T7 decides how the sky-view keeps it.
+      that (the NH₃ and CH₄ analogues of Saturn and the ice giants). R08.T7 takes the delta out
+      of the kernels' medium as direct light, so no per-view table samples it
+      (`decision-r08-aerosol-labels.md` item 3); the full table keeps it for the reference and the
+      bakes.
   - _The phase tables_ integrate to 1 as read, linear in u (R08.T12.c's tracer checks 10⁻⁴), and
     keep the model's g as read: to rounding for the phase files' models, 2 × 10⁻⁵ for sulphate,
     4 × 10⁻⁵ for the Titan-like haze, 1.3 × 10⁻⁴ for r_eff 10 µm water droplets, under 10⁻⁵ for
@@ -6596,8 +6719,18 @@ generator, and the reference's sampling needs no domain tag.
     - C₂H₆ takes N = 6 at low confidence: its c_p near 100 K (35.70, Gurvich et al. 1989), where
       ethane-bearing atmospheres lie. R ÷ c_p is 7% high there, 27% at 200 K and 58% at 298 K,
       where its torsion and bends lift c_p to 52.49, so the value is out of range above about
-      120 K. `column.test.ts` compares ethane at 100 K. _Pending main:_ keep N = 6, or take N
-      from a representative temperature (N ≈ 8.2 at 200 K).
+      120 K. `column.test.ts` compares ethane at 100 K. _Ruled 2026-10-10_
+      (`science-r08-gases-2.md` §1): neither. No fixed N holds over the galaxy's 30–1,500 K.
+      Equipartition serves only the noble gases, and N₂, O₂ and CO only below about 400 K.
+      P14.T49.b builds one c_p(T) for every registry gas row, a statistical sum over its molecular
+      constants (a rigid rotor, harmonic fundamentals from Shimanouchi 1972, hydrogen's levels at
+      3:1 ortho to para, hindered torsions and low electronic states), held to NASA Glenn within
+      1–3%. Ethane's sum, with its torsion as a hindered rotor, gives c_p ÷ R 4.297 at 100 K,
+      against Gurvich's 4.294, and lies within 0.6% of NASA Glenn from 200 to 1,500 K. P14.T24.e's
+      adiabat integrates it (dln T ÷ dln p = α R ÷ c_p(T), dry α refitted to 0.88 on Venus) and
+      publishes the profile as a piecewise power law, which this column will read (R08.T10.a, with
+      a T3.a follow-up). `GAS_HEAT_CAPACITY` and `dryAdiabatExponent` then retire, and C₂H₆'s
+      N = 6 stays only until then.
   - _Names beyond the sketch._
     - In `src/tools/materials.ts`: `HCL_REFRACTIVITY` (Cuthbertson 1914's HCl, for the
       increment only; HCl is no registry gas row, so it has no `rayleigh.ts` row),
