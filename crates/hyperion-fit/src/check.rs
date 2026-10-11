@@ -5,10 +5,11 @@
 //! from the hash of the task's name, revision, manifest and datasets computed now; its body's
 //! SHA-256 differs from the lock file's (a hand edit); its fingerprint's probes, recomputed, differ
 //! from the lock file's by more than 10⁻⁹ relative; its `since-generator-version` exceeds
-//! `GENERATOR_VERSION`; or the lock file and the header, or the lock file and the sim's
-//! `tables::MANIFEST`, disagree. A registered task with no lock entry fails too. With
-//! `--rerun-fast` it also reruns every fast task and compares the bytes it would write with the
-//! committed file. Provisional tables are listed as warnings until P15.T12 makes them errors.
+//! `GENERATOR_VERSION`; or the lock file and the header, or the lock file and the
+//! `tables::MANIFEST` of the table's crate, disagree. A registered task with no lock entry fails
+//! too. With `--rerun-fast` it also reruns every fast task and compares the bytes it would write
+//! with the committed file. Provisional tables are listed as warnings until P15.T12 makes them
+//! errors.
 
 use std::fmt;
 use std::fs;
@@ -20,7 +21,12 @@ use crate::data::{DatasetClass, Provenance};
 use crate::emit::{HeaderKind, Placement, TableText, Workspace};
 use crate::manifest::{InputsHash, LockEntry, LockFile, SimFingerprint};
 use crate::pipeline::{ManifestKind, load_manifest, placement_among, rerender};
-use crate::task::{FitTask, TaskClass};
+use crate::task::{FitTask, TableCrate, TaskClass, table_crate_of};
+
+/// The repository's `tables::MANIFEST`s, one for each crate that holds tables: what `check` and
+/// `list` compare with `tables.lock`. The crate split's move (CS.T2) adds the sky's.
+pub const REPOSITORY_MANIFESTS: &[(TableCrate, &[TableInfo])] =
+    &[(TableCrate::Sim, hyperion_sim::tables::MANIFEST)];
 
 /// What is wrong with one table.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -46,8 +52,8 @@ pub enum Problem {
         /// The sim's.
         current: u32,
     },
-    /// The lock file and the table's header, or the lock file and `tables::MANIFEST`, disagree;
-    /// the text says on what.
+    /// The lock file and the table's header, or the lock file and a crate's `tables::MANIFEST`,
+    /// disagree; the text says on what.
     Disagrees(String),
     /// A registered task has no lock entry, or a lock entry names a task that is not registered.
     NotRegistered(String),
@@ -159,8 +165,9 @@ pub struct CheckInputs<'a> {
     pub workspace: &'a Workspace,
     /// The registered tasks.
     pub tasks: &'a [&'static dyn FitTask],
-    /// The sim's `tables::MANIFEST`.
-    pub manifest: &'a [TableInfo],
+    /// Each crate's `tables::MANIFEST` ([`REPOSITORY_MANIFESTS`] for the repository); a crate
+    /// not given lists nothing.
+    pub manifests: &'a [(TableCrate, &'a [TableInfo])],
     /// The sim's `GENERATOR_VERSION`.
     pub current: u32,
 }
@@ -177,7 +184,7 @@ pub fn check(inputs: &CheckInputs<'_>, rerun: Rerun, threads: NonZeroUsize) -> C
             return report;
         }
     };
-    check_manifest_agrees(inputs.manifest, &lock, &mut report);
+    check_manifests_agree(inputs, &lock, &mut report);
     for task in inputs.tasks {
         if lock.get(task.name()).is_none() {
             report.fail(
@@ -245,21 +252,46 @@ pub fn check(inputs: &CheckInputs<'_>, rerun: Rerun, threads: NonZeroUsize) -> C
     report
 }
 
-/// Checks that `tables::MANIFEST` lists the lock file's tables, in order, with the same revision,
-/// `since` and provisional flag.
-fn check_manifest_agrees(manifest: &[TableInfo], lock: &LockFile, report: &mut CheckReport) {
+/// Checks that each crate's `tables::MANIFEST` lists the lock file's tables of that crate
+/// ([`table_crate_of`]), in order, with the same revision, `since` and provisional flag.
+fn check_manifests_agree(inputs: &CheckInputs<'_>, lock: &LockFile, report: &mut CheckReport) {
+    for table_crate in TableCrate::ALL {
+        let manifest: Vec<&TableInfo> = inputs
+            .manifests
+            .iter()
+            .filter(|(listed_in, _)| *listed_in == table_crate)
+            .flat_map(|(_, rows)| rows.iter())
+            .collect();
+        let entries: Vec<&LockEntry> = lock
+            .entries()
+            .iter()
+            .filter(|entry| table_crate_of(inputs.tasks, entry) == table_crate)
+            .collect();
+        check_manifest_agrees(table_crate, &manifest, &entries, report);
+    }
+}
+
+/// Checks that `table_crate`'s `tables::MANIFEST`, `manifest`, lists the tables of `entries`, in
+/// order, with the same revision, `since` and provisional flag.
+fn check_manifest_agrees(
+    table_crate: TableCrate,
+    manifest: &[&TableInfo],
+    entries: &[&LockEntry],
+    report: &mut CheckReport,
+) {
+    let label = format!("{}::tables::MANIFEST", table_crate.rust_name());
     let listed: Vec<&str> = manifest.iter().map(|t| t.name).collect();
-    let locked: Vec<&str> = lock.entries().iter().map(|e| e.name.as_str()).collect();
+    let locked: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
     if listed != locked {
         report.fail(
-            "tables::MANIFEST",
+            &label,
             Problem::Disagrees(format!(
-                "tables::MANIFEST lists {listed:?} but tables.lock holds {locked:?}"
+                "{label} lists {listed:?} but tables.lock holds {locked:?} for its crate"
             )),
         );
         return;
     }
-    for (info, entry) in manifest.iter().zip(lock.entries()) {
+    for (info, entry) in manifest.iter().zip(entries) {
         if info.revision != entry.revision
             || info.since_generator_version != entry.since_generator_version
             || info.provisional != entry.provisional
@@ -267,8 +299,7 @@ fn check_manifest_agrees(manifest: &[TableInfo], lock: &LockFile, report: &mut C
             report.fail(
                 &entry.name,
                 Problem::Disagrees(format!(
-                    "tables::MANIFEST has revision {}, since {}, provisional {}; tables.lock has \
-                     {}, {}, {}",
+                    "{label} has revision {}, since {}, provisional {}; tables.lock has {}, {}, {}",
                     info.revision,
                     info.since_generator_version,
                     info.provisional,
@@ -298,7 +329,8 @@ fn check_entry(
             },
         );
     }
-    let path = inputs.workspace.tables_dir.join(&entry.path);
+    let table_crate = task.map_or(TableCrate::Sim, FitTask::table_crate);
+    let path = inputs.workspace.tables_dir(table_crate).join(&entry.path);
     let Ok(text) = fs::read_to_string(&path) else {
         report.fail(name, Problem::Missing);
         return;
@@ -406,7 +438,12 @@ fn rerun_fast(
             return true;
         }
     }
-    let committed = fs::read_to_string(inputs.workspace.tables_dir.join(&entry.path));
+    let committed = fs::read_to_string(
+        inputs
+            .workspace
+            .tables_dir(task.table_crate())
+            .join(&entry.path),
+    );
     let rerun = rerender(
         inputs.tasks,
         task,

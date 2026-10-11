@@ -393,8 +393,11 @@ impl StarDraws {
     /// The Reimers η draw alone of `star` at `attempt`: [`StarDraws::for_attempt`]'s
     /// [`eta`](StarDraws::eta), bit for bit, from its one stream, for a caller that reads no
     /// other draw (the range brief of a main-sequence star, P06.T38.e).
+    ///
+    /// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+    #[doc(hidden)]
     #[must_use]
-    pub(crate) fn eta_for_attempt(seed: Seed, star: BodyId, attempt: u32) -> StandardNormal {
+    pub fn eta_for_attempt(seed: Seed, star: BodyId, attempt: u32) -> StandardNormal {
         let mut stream = Stream::open(seed, tags::STAR_ETA, ObjectKey::from(star));
         stream.seek(u64::from(attempt) * ATTEMPT_WORDS);
         StandardNormal::draw(&mut stream)

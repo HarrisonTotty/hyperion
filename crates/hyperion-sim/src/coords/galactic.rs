@@ -114,8 +114,11 @@ impl GalacticPosition {
 
     /// Whether the two are the same point bit for bit: the same light-year cell, and offsets of
     /// the same bits, where the derived `==` holds 0.0 and −0.0 equal.
+    ///
+    /// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+    #[doc(hidden)]
     #[must_use]
-    pub(crate) fn is_same_point(&self, other: &Self) -> bool {
+    pub fn is_same_point(&self, other: &Self) -> bool {
         self.cell == other.cell
             && self
                 .offset

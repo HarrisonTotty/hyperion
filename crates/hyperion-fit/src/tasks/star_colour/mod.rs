@@ -1179,7 +1179,7 @@ impl ReddeningFile {
         }
     }
 
-    /// The table's file, relative to the sim's `tables/`.
+    /// The table's file, relative to its crate's `tables/`.
     #[must_use]
     pub const fn table_path(self) -> &'static str {
         match self {

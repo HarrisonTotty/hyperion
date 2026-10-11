@@ -1480,11 +1480,11 @@ mod tests {
     use super::super::star::Member;
     use super::super::timeline::Context;
     use crate::coords::GalacticPosition;
-    use crate::sky::photometry::absolute_v_of_state;
     use crate::stellar::binary::evolve;
     use crate::stellar::draws::StarDraws;
     use crate::stellar::multiplicity::testing::records_near;
     use crate::stellar::multiplicity::{HierarchyNode, StarIndex, hierarchy_bound};
+    use crate::stellar::photometry::absolute_v_of_state;
     use crate::stellar::system::{draw_metallicity, primary_draws};
     use crate::time::ClockWindow;
 

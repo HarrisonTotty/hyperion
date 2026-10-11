@@ -257,10 +257,13 @@ fn companion_range(m: f64) -> (f64, f64) {
     ((MIN_MASS_RATIO * m).max(MASS_LIMIT_LO), m)
 }
 
-/// The panel edges for the quadratures of this module: the stellar range's ends, the given
-/// breaks inside it, ascending and without repeats.
+/// The panel edges for the quadratures of this module, masses in M☉: the stellar range's ends,
+/// the given breaks (M☉) inside it, ascending and without repeats.
+///
+/// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+#[doc(hidden)]
 #[must_use]
-pub(crate) fn panel_edges<'a>(breaks: impl IntoIterator<Item = &'a f64>) -> Vec<f64> {
+pub fn panel_edges<'a>(breaks: impl IntoIterator<Item = &'a f64>) -> Vec<f64> {
     let mut edges: Vec<f64> = breaks
         .into_iter()
         .copied()
@@ -291,10 +294,13 @@ pub(crate) fn mass_with_lifetime(fates: &(impl StellarFates + ?Sized), age: f64)
     Some(math::exp(ln_m))
 }
 
-/// The panels of the quadrature in `u = ln m`: the intervals between consecutive edges, each split
-/// into equal parts no wider than [`MAX_PANEL_LN_MASS`].
+/// The panels of the quadrature in `u = ln m`, `m` in M☉: the intervals between consecutive
+/// `edges` (masses in M☉), each split into equal parts no wider than [`MAX_PANEL_LN_MASS`].
+///
+/// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+#[doc(hidden)]
 #[must_use]
-pub(crate) fn ln_mass_panels(edges: &[f64]) -> Vec<(f64, f64)> {
+pub fn ln_mass_panels(edges: &[f64]) -> Vec<(f64, f64)> {
     let mut panels = Vec::with_capacity(4 * edges.len());
     for pair in edges.windows(2) {
         let (start, end) = (math::ln(pair[0]), math::ln(pair[1]));
@@ -471,10 +477,14 @@ impl CompanionMasses {
     }
 }
 
-/// The share of a primary of `m1`'s stellar companions whose mass is below `c`: its mass-ratio
-/// distribution at `c ÷ m1`, taken relative to its value at the lightest companion.
+/// The share of a primary of `m1`'s stellar companions whose mass is below `c`, both masses in
+/// M☉: its mass-ratio distribution at `c ÷ m1`, taken relative to its value at the lightest
+/// companion.
+///
+/// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+#[doc(hidden)]
 #[must_use]
-pub(crate) fn companion_share_below(fates: &(impl StellarFates + ?Sized), m1: f64, c: f64) -> f64 {
+pub fn companion_share_below(fates: &(impl StellarFates + ?Sized), m1: f64, c: f64) -> f64 {
     let q = c / m1;
     let cdf = if q >= 1.0 {
         1.0

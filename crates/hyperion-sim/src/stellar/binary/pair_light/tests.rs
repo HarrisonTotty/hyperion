@@ -2,8 +2,8 @@
 
 use super::*;
 
-use crate::sky::photometry::absolute_v_of_state;
 use crate::stellar::binary::testing::{Mix, generated_pairs, milky_way};
+use crate::stellar::photometry::absolute_v_of_state;
 use crate::units::consts::METRES_PER_AU;
 use hyperion_testkit::float::assert_same_bits;
 

@@ -787,7 +787,10 @@ impl Track {
     /// Each segment's start and end age, years (the remnant's end infinite), with its knots' ages,
     /// in the segments' order: the phases rendering plan R06's luminosity function cuts a life
     /// into (its Design note 7).
-    pub(crate) fn segment_ages(
+    ///
+    /// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+    #[doc(hidden)]
+    pub fn segment_ages(
         &self,
     ) -> impl Iterator<Item = (f64, f64, impl Iterator<Item = f64> + '_)> + '_ {
         self.segments.iter().map(|segment| {

@@ -1936,8 +1936,11 @@ fn record_attempt(record: &SystemRecord) -> u32 {
 ///
 /// **The same seam as [`primary_draws`]:** plan 08's P08.T12.c changes both to the record's
 /// `mark_attempt()` together.
+///
+/// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+#[doc(hidden)]
 #[must_use]
-pub(crate) fn primary_eta(galaxy: &Galaxy, record: &SystemRecord) -> StandardNormal {
+pub fn primary_eta(galaxy: &Galaxy, record: &SystemRecord) -> StandardNormal {
     StarDraws::eta_for_attempt(
         galaxy.seed(),
         BodyId::new(record.id(), 0),

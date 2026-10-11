@@ -1,9 +1,10 @@
 //! The Rust source emitter: a table's header, its items and the file they go into (plan 15, P15.T2
 //! and Design notes 4, 5 and 10).
 //!
-//! A table is Rust source under `crates/hyperion-sim/src/tables/`, because the sim does no I/O. Its
-//! file opens with a module doc whose first paragraph is a one-sentence summary, followed by the
-//! header of Design note 5, one `key: value` line each, and then any notes the task adds:
+//! A table is Rust source under `src/tables/` of the crate that reads it ([`TableCrate`]), because
+//! the sim does no I/O. Its file opens with a module doc whose first paragraph is a one-sentence
+//! summary, followed by the header of Design note 5, one `key: value` line each, and then any notes
+//! the task adds:
 //!
 //! ```text
 //! //! <one-sentence summary>.
@@ -41,6 +42,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::manifest::{LockEntry, LockFile, ReadLockError};
+use crate::task::{FitTask, TableCrate, table_crate_of};
 
 /// The marker opening one task's block in a file two tasks share.
 pub const BLOCK_BEGIN: &str = "// @begin-table ";
@@ -48,7 +50,7 @@ pub const BLOCK_BEGIN: &str = "// @begin-table ";
 /// The marker closing one task's block.
 pub const BLOCK_END: &str = "// @end-table ";
 
-/// The marker comments around `tables::MANIFEST` in the sim's `tables/mod.rs`.
+/// The marker comments around `tables::MANIFEST` in a crate's `tables/mod.rs`.
 pub const MANIFEST_BEGIN: &str =
     "// @begin-manifest: written by hyperion-fit from tables.lock. Do not edit.";
 
@@ -813,7 +815,9 @@ pub enum Placement {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Workspace {
     /// The sim's `src/tables/` directory.
-    pub tables_dir: PathBuf,
+    sim_tables_dir: PathBuf,
+    /// The sky's `src/tables/` directory, which the crate split's move (CS.T2) creates.
+    sky_tables_dir: PathBuf,
     /// The fitting crate's `manifests/` directory.
     pub manifests_dir: PathBuf,
     /// The fitting crate's `data/` directory.
@@ -829,29 +833,40 @@ impl Workspace {
     pub fn repository() -> Self {
         let fit = Path::new(env!("CARGO_MANIFEST_DIR"));
         Self {
-            tables_dir: fit.join("../hyperion-sim/src/tables"),
+            sim_tables_dir: fit.join("../hyperion-sim/src/tables"),
+            sky_tables_dir: fit.join("../hyperion-sky/src/tables"),
             manifests_dir: fit.join("manifests"),
             data_dir: fit.join("data"),
             lock_path: fit.join("tables.lock"),
         }
     }
 
-    /// A workspace laid out under `root` as the repository is: `tables/`, `manifests/`, `data/`
-    /// and `tables.lock`.
+    /// A workspace laid out under `root` as the repository is: `tables/` (the sim's),
+    /// `sky-tables/`, `manifests/`, `data/` and `tables.lock`.
     #[must_use]
     pub fn under(root: &Path) -> Self {
         Self {
-            tables_dir: root.join("tables"),
+            sim_tables_dir: root.join("tables"),
+            sky_tables_dir: root.join("sky-tables"),
             manifests_dir: root.join("manifests"),
             data_dir: root.join("data"),
             lock_path: root.join("tables.lock"),
         }
     }
 
-    /// The sim's `tables/mod.rs`, which holds `MANIFEST`.
+    /// `table_crate`'s `src/tables/` directory.
     #[must_use]
-    pub fn tables_mod(&self) -> PathBuf {
-        self.tables_dir.join("mod.rs")
+    pub fn tables_dir(&self, table_crate: TableCrate) -> &Path {
+        match table_crate {
+            TableCrate::Sim => &self.sim_tables_dir,
+            TableCrate::Sky => &self.sky_tables_dir,
+        }
+    }
+
+    /// `table_crate`'s `tables/mod.rs`, which holds its `MANIFEST`.
+    #[must_use]
+    pub fn tables_mod(&self, table_crate: TableCrate) -> PathBuf {
+        self.tables_dir(table_crate).join("mod.rs")
     }
 }
 
@@ -861,7 +876,9 @@ impl Workspace {
 pub struct Emission<'a> {
     /// The task's name, which is the table's name in the lock file and `MANIFEST`.
     pub name: &'a str,
-    /// The table's file, relative to the sim's `tables/`.
+    /// The crate whose `tables/` holds the table's file.
+    pub table_crate: TableCrate,
+    /// The table's file, relative to its crate's `tables/`.
     pub table_path: &'a str,
     /// Whether the task owns the file or a block of it.
     pub placement: Placement,
@@ -888,13 +905,16 @@ pub fn render_emission(emission: &Emission<'_>, since: u32) -> Result<String, Em
 }
 
 /// Where [`write_table`] writes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy)]
 pub enum Destination<'a> {
     /// Into the workspace's tables, updating its lock file and `MANIFEST`, with `--since`, which
     /// must equal the sim's current generator version.
     Tables {
         /// The paths.
         workspace: &'a Workspace,
+        /// The registered tasks, whose crates sort the lock file's entries into each crate's
+        /// `MANIFEST`.
+        tasks: &'a [&'static dyn FitTask],
         /// The `--since` given, if any.
         since: Option<u32>,
         /// The sim's `GENERATOR_VERSION`.
@@ -959,7 +979,9 @@ pub fn plan_write(
     if since != current {
         return Err(EmitTableError::SinceNotCurrent { since, current });
     }
-    let path = workspace.tables_dir.join(emission.table_path);
+    let path = workspace
+        .tables_dir(emission.table_crate)
+        .join(emission.table_path);
     let old_text = match fs::read_to_string(&path) {
         Ok(text) => Some(text),
         Err(e) if e.kind() == io::ErrorKind::NotFound => None,
@@ -1020,7 +1042,7 @@ pub fn plan_write(
 /// Writes `emission` to `destination`.
 ///
 /// Into the tables, by [`plan_write`]'s rules, then rewriting the table's lock-file entry and the
-/// sim's `MANIFEST` to match. With `--out`, to that file alone, the header's
+/// `MANIFEST`s to match ([`write_manifest`]). With `--out`, to that file alone, the header's
 /// `since-generator-version` the current version.
 ///
 /// # Errors
@@ -1043,6 +1065,7 @@ pub fn write_table(
         }
         Destination::Tables {
             workspace,
+            tasks,
             since,
             current,
         } => {
@@ -1051,7 +1074,7 @@ pub fn write_table(
             let mut lock = LockFile::read(&workspace.lock_path)?;
             lock.upsert(planned.entry);
             lock.write(&workspace.lock_path)?;
-            write_manifest(workspace, &lock)?;
+            write_manifest(workspace, &lock, tasks)?;
             Ok(Written {
                 path: planned.path,
                 since: planned.since,
@@ -1078,16 +1101,16 @@ fn write(path: &Path, text: &str) -> Result<(), EmitTableError> {
     })
 }
 
-/// The Rust source of `tables::MANIFEST` for `lock`'s entries, markers included.
+/// The Rust source of a crate's `tables::MANIFEST` listing `entries`, markers included.
 #[must_use]
-pub fn manifest_source(lock: &LockFile) -> String {
-    if lock.entries().is_empty() {
+pub fn manifest_source(entries: &[&LockEntry]) -> String {
+    if entries.is_empty() {
         return format!(
             "{MANIFEST_BEGIN}\npub const MANIFEST: &[TableInfo] = &[];\n{MANIFEST_END}\n"
         );
     }
     let mut out = format!("{MANIFEST_BEGIN}\npub const MANIFEST: &[TableInfo] = &[\n");
-    for entry in lock.entries() {
+    for entry in entries {
         let _ = writeln!(
             out,
             "    TableInfo {{\n        name: \"{}\",\n        revision: {},\n        \
@@ -1099,16 +1122,40 @@ pub fn manifest_source(lock: &LockFile) -> String {
     out
 }
 
-/// Rewrites `tables::MANIFEST` between its markers in the workspace's `tables/mod.rs`.
+/// Rewrites each crate's `tables::MANIFEST` between its markers in the workspace's
+/// `tables/mod.rs` of that crate: the lock file's entries whose tables the crate holds, by their
+/// tasks among `tasks` ([`table_crate_of`]), in name order.
+///
+/// A crate that holds no locked table keeps its `MANIFEST` as it is: the sky's `tables/mod.rs`
+/// exists only from the crate split's move (CS.T2).
 ///
 /// # Errors
 ///
-/// [`EmitTableError::Io`] if the file cannot be read or written, [`EmitTableError::Header`] if it
+/// [`EmitTableError::Io`] if a file cannot be read or written, [`EmitTableError::Header`] if it
 /// has no markers.
-pub fn write_manifest(workspace: &Workspace, lock: &LockFile) -> Result<(), EmitTableError> {
-    let path = workspace.tables_mod();
-    let text = fs::read_to_string(&path).map_err(|source| EmitTableError::Io {
-        path: path.clone(),
+pub fn write_manifest(
+    workspace: &Workspace,
+    lock: &LockFile,
+    tasks: &[&'static dyn FitTask],
+) -> Result<(), EmitTableError> {
+    for table_crate in TableCrate::ALL {
+        let entries: Vec<&LockEntry> = lock
+            .entries()
+            .iter()
+            .filter(|entry| table_crate_of(tasks, entry) == table_crate)
+            .collect();
+        if !entries.is_empty() {
+            write_manifest_of(&workspace.tables_mod(table_crate), &entries)?;
+        }
+    }
+    Ok(())
+}
+
+/// Rewrites `tables::MANIFEST` between its markers in the `tables/mod.rs` at `path`, listing
+/// `entries`.
+fn write_manifest_of(path: &Path, entries: &[&LockEntry]) -> Result<(), EmitTableError> {
+    let text = fs::read_to_string(path).map_err(|source| EmitTableError::Io {
+        path: path.to_owned(),
         source,
     })?;
     let no_markers =
@@ -1119,11 +1166,11 @@ pub fn write_manifest(workspace: &Workspace, lock: &LockFile) -> Result<(), Emit
     let fresh = format!(
         "{}{}{}",
         &text[..start],
-        manifest_source(lock),
+        manifest_source(entries),
         &text[end..]
     );
     if fresh != text {
-        write(&path, &fresh)?;
+        write(path, &fresh)?;
     }
     Ok(())
 }
@@ -1146,8 +1193,8 @@ pub enum EmitTableError {
     /// A header is incomplete or not in the grammar; the text says how.
     #[error("{0}")]
     Header(String),
-    /// Writing into the sim's tables needs `--since`.
-    #[error("writing into the sim's tables needs `--since <generator version>`")]
+    /// Writing into the tables needs `--since`.
+    #[error("writing into the tables needs `--since <generator version>`")]
     SinceRequired,
     /// `--since` is not the sim's current generator version.
     #[error("`--since {since}` is not the current generator version, {current}")]

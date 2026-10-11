@@ -38,7 +38,7 @@
 //!
 //!   A star on its own track bit for bit (the first segment's track, at no offset) is its own
 //!   model and is not read again. The brightness is the caller's photometry: the fit passes the
-//!   sky's ([`sky::photometry::absolute_v_of_state`](crate::sky::photometry::absolute_v_of_state)).
+//!   sky's ([`stellar::photometry::absolute_v_of_state`](crate::stellar::photometry::absolute_v_of_state)).
 //! - **Values** ([`assemble`]): each cell's brightest over its samples; cumulative over every wider
 //!   periastron bin, so that a cell bounds every orbit of a periastron at least its own; dilated by
 //!   one cell along each of the four axes and one age bin; brightened by [`MARGIN_MAG`]; runs of
@@ -853,11 +853,11 @@ impl PairRows {
 ///
 /// ```
 /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
-/// use hyperion_sim::sky::photometry::absolute_v_of_state;
 /// use hyperion_sim::stellar::Composition;
 /// use hyperion_sim::stellar::binary::BinaryInput;
 /// use hyperion_sim::stellar::binary::pair_light::{age_bin, pair_rows};
 /// use hyperion_sim::stellar::draws::StarDraws;
+/// use hyperion_sim::stellar::photometry::absolute_v_of_state;
 /// use hyperion_sim::units::consts::METRES_PER_AU;
 /// use hyperion_sim::units::{GravitationalParameter, Metres, Radians, SolarMasses, Years};
 ///

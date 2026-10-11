@@ -41,7 +41,9 @@ pub use request::{
 pub use result::{Census, CensusStop, LayerCounts, LayerSet, QueryStats, RangeResult, SystemHit};
 pub use segment::cells_along_segment;
 pub use source::SystemSource;
-pub(crate) use walk::cells_in_shell_slab;
+// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+#[doc(hidden)]
+pub use walk::cells_in_shell_slab;
 pub use walk::{
     BuildQuerySphereError, QuerySphere, cells_in_sphere, cells_in_sphere_slab,
     count_cells_in_sphere, sphere_slabs,

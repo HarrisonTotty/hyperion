@@ -9,7 +9,7 @@ use crate::emit::{
     Workspace, plan_write,
 };
 use crate::manifest::{InputsHash, LoadManifestError, Manifest, SimFingerprint};
-use crate::task::{FitTask, RunTaskError, TaskOutput, check_manifest};
+use crate::task::{FitTask, RunTaskError, TableCrate, TaskOutput, check_manifest};
 use crate::{RunFitError, task};
 
 /// Which of a task's manifests to run.
@@ -38,12 +38,15 @@ pub fn placement(task: &dyn FitTask) -> Placement {
     placement_among(task::registry(), task)
 }
 
-/// How `task`'s table sits in its file among `tasks`.
+/// How `task`'s table sits in its file among `tasks`: a file is shared by the tasks of one crate
+/// that name it.
 #[must_use]
 pub fn placement_among(tasks: &[&'static dyn FitTask], task: &dyn FitTask) -> Placement {
-    let shared = tasks
-        .iter()
-        .any(|other| other.name() != task.name() && other.table_path() == task.table_path());
+    let shared = tasks.iter().any(|other| {
+        other.name() != task.name()
+            && other.table_crate() == task.table_crate()
+            && other.table_path() == task.table_path()
+    });
     if shared {
         Placement::Block
     } else {
@@ -56,6 +59,8 @@ pub fn placement_among(tasks: &[&'static dyn FitTask], task: &dyn FitTask) -> Pl
 pub struct Prepared {
     /// The task's name.
     pub name: &'static str,
+    /// The crate whose `tables/` holds its table.
+    pub table_crate: TableCrate,
     /// Its table's file.
     pub table_path: &'static str,
     /// What the run produced.
@@ -74,6 +79,7 @@ impl Prepared {
     pub fn emission(&self) -> Emission<'_> {
         Emission {
             name: self.name,
+            table_crate: self.table_crate,
             table_path: self.table_path,
             placement: self.placement,
             table: &self.output.table,
@@ -143,6 +149,7 @@ pub fn prepare(
     let header = header_of(task, manifest, workspace, &output, &fingerprint)?;
     Ok(Prepared {
         name: task.name(),
+        table_crate: task.table_crate(),
         table_path: task.table_path(),
         output,
         header,

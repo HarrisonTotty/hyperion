@@ -401,7 +401,8 @@ impl SimFingerprint {
 pub struct LockEntry {
     /// The table's name: its task's, or its module's for a provisional table no task makes.
     pub name: String,
-    /// Its file, relative to the sim's `tables/`.
+    /// Its file, relative to the `tables/` of its task's crate, or of the sim for a table no task
+    /// makes ([`table_crate_of`](crate::task::table_crate_of)).
     pub path: String,
     /// The task that makes it, if one does.
     #[serde(default, skip_serializing_if = "Option::is_none")]

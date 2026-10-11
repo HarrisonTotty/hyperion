@@ -15,11 +15,11 @@
 //!                                        # R08.T12.a), not a fit: outside `tables.lock`
 //! ```
 //!
-//! `run` writes into the sim's `tables/` unless `--out` says otherwise, and then needs `--since`
-//! equal to the sim's `GENERATOR_VERSION` (Design note 10); `--out` elsewhere needs none, which is
-//! how plan 02's `run mge --out <path>` keeps working. `--smoke` runs the task's smoke manifest,
-//! and `--manifest` another manifest, and both need `--out`. `--data` reads the task's one dataset from another directory, for a fetched
-//! dataset kept outside the cache.
+//! `run` writes into the `tables/` of its table's crate unless `--out` says otherwise, and then
+//! needs `--since` equal to the sim's `GENERATOR_VERSION` (Design note 10); `--out` elsewhere
+//! needs none, which is how plan 02's `run mge --out <path>` keeps working. `--smoke` runs the
+//! task's smoke manifest, and `--manifest` another manifest, and both need `--out`. `--data` reads
+//! the task's one dataset from another directory, for a fetched dataset kept outside the cache.
 
 use std::io::Write;
 use std::num::{NonZeroU64, NonZeroUsize};
@@ -28,11 +28,10 @@ use std::time::Instant;
 
 use clap::{Args, Parser, Subcommand};
 use hyperion_sim::GENERATOR_VERSION;
-use hyperion_sim::tables::MANIFEST;
 
 use crate::RunFitError;
 use crate::atmosphere::{AtmosphereCase, Polarisation, trace_reference};
-use crate::check::{CheckInputs, Rerun, check};
+use crate::check::{CheckInputs, REPOSITORY_MANIFESTS, Rerun, check};
 use crate::emit::{Destination, Workspace, write_table};
 use crate::manifest::Manifest;
 use crate::pipeline::{ManifestKind, load_manifest, prepare};
@@ -56,8 +55,8 @@ pub enum Command {
     Run {
         /// The task.
         task: String,
-        /// The generator version the table takes effect at: required when writing into the sim's
-        /// tables, and equal to its `GENERATOR_VERSION`.
+        /// The generator version the table takes effect at: required when writing into the
+        /// tables, and equal to the sim's `GENERATOR_VERSION`.
         #[arg(long)]
         since: Option<u32>,
         /// Run the smoke manifest, a reduced run of a few seconds; needs `--out`.
@@ -66,7 +65,7 @@ pub enum Command {
         /// Threads for the fit; the output is the same for any number.
         #[arg(long)]
         threads: Option<NonZeroUsize>,
-        /// Write the table here instead of into the sim's tables.
+        /// Write the table here instead of into the tables of its crate.
         #[arg(long)]
         out: Option<PathBuf>,
         /// Read the task's dataset from this directory.
@@ -216,7 +215,7 @@ pub fn run_in(cli: &Cli, workspace: &Workspace, out: &mut dyn Write) -> Result<(
                 &CheckInputs {
                     workspace,
                     tasks: task::registry(),
-                    manifest: MANIFEST,
+                    manifests: REPOSITORY_MANIFESTS,
                     current: GENERATOR_VERSION.get(),
                 },
                 if *rerun_fast {
@@ -371,7 +370,7 @@ fn list(workspace: &Workspace, out: &mut dyn Write) -> Result<(), RunFitError> {
         &CheckInputs {
             workspace,
             tasks,
-            manifest: MANIFEST,
+            manifests: REPOSITORY_MANIFESTS,
             current: GENERATOR_VERSION.get(),
         },
         Rerun::None,
@@ -413,6 +412,7 @@ fn run_task(
         Some(path) => Destination::Out { path, current },
         None => Destination::Tables {
             workspace,
+            tasks: task::registry(),
             since,
             current,
         },

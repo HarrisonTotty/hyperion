@@ -4,8 +4,10 @@
 //! each time a galaxy is built: the dimensionless coefficients of the Gaussian expansions behind
 //! the potential, the cooling tables of planets and white dwarfs, the kick law's rank table, and
 //! later the samplers and constants of plan 15. This crate runs those fits and emits each result as
-//! Rust source, committed under `crates/hyperion-sim/src/tables/` with a header naming the tool,
-//! its inputs and its revision (plan 15).
+//! Rust source, committed under the `src/tables/` of the crate that reads it
+//! ([`TableCrate`](task::TableCrate); `crates/hyperion-sim/src/tables/` for every table until the
+//! crate split moves the sky's) with a header naming the tool, its inputs and its revision (plan
+//! 15).
 //!
 //! Nothing depends on this crate: it depends on `hyperion-sim`, never the reverse. Every
 //! transcendental it evaluates goes through [`hyperion_sim::math`], every quadrature through

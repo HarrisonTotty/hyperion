@@ -498,9 +498,13 @@ impl AgeDistribution {
         )
     }
 
-    /// The ages where the density has a kink or a jump: every piece's ends, ascending, without
-    /// repeats.
-    pub(crate) fn edges(&self) -> Vec<f64> {
+    /// The ages where the density has a kink or a jump, years: every piece's ends, ascending,
+    /// without repeats.
+    ///
+    /// `pub` for `hyperion-sky` alone (the crate split, CS.T1); not part of the sim's API.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn edges(&self) -> Vec<f64> {
         let mut edges = Vec::with_capacity(2 * self.pieces.len());
         for piece in &self.pieces {
             if edges.last() != Some(&piece.lo) {

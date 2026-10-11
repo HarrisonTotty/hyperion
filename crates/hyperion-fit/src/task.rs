@@ -18,14 +18,19 @@
 //!    order;
 //! 3. `manifests/<name>.toml`, and `manifests/<name>.smoke.toml` if the task is slow;
 //! 4. `just fit <name>`, which writes the table, its `tables.lock` entry and its row of
-//!    `tables::MANIFEST`, and the `pub mod` line of the table in the sim's `tables/mod.rs`.
+//!    `tables::MANIFEST`, and the `pub mod` line of the table in its crate's `tables/mod.rs`.
+//!
+//! A table lives in the `src/tables/` of the crate that reads it, which the task names
+//! ([`FitTask::table_crate`]; the sim's unless it says otherwise), and that crate's
+//! `tables::MANIFEST` lists it. `tables.lock` stays one file, whose entries name a table's file
+//! alone, found in its task's crate.
 
 use std::error::Error;
 use std::num::NonZeroUsize;
 
 use crate::data::LoadDatasetError;
 use crate::emit::RustTable;
-use crate::manifest::{Manifest, ManifestParamError, SimFingerprint};
+use crate::manifest::{LockEntry, Manifest, ManifestParamError, SimFingerprint};
 use crate::parallel::BuildThreadPoolError;
 use crate::tasks;
 
@@ -45,6 +50,33 @@ impl TaskClass {
         match self {
             Self::Fast => "fast",
             Self::Slow => "slow",
+        }
+    }
+}
+
+/// The crate whose `src/tables/` holds a table, and whose `tables::MANIFEST` lists it.
+///
+/// Every table is the sim's until the crate split moves the sky's twelve, with their `MANIFEST`
+/// rows, into `hyperion-sky` (CS.T2); their tasks then name [`TableCrate::Sky`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum TableCrate {
+    /// `hyperion-sim`, which also holds every table no registered task makes.
+    #[default]
+    Sim,
+    /// `hyperion-sky`.
+    Sky,
+}
+
+impl TableCrate {
+    /// Every crate that holds tables, in the order the check reports them.
+    pub const ALL: [Self; 2] = [Self::Sim, Self::Sky];
+
+    /// The crate's name in Rust paths: `hyperion_sim` or `hyperion_sky`.
+    #[must_use]
+    pub const fn rust_name(self) -> &'static str {
+        match self {
+            Self::Sim => "hyperion_sim",
+            Self::Sky => "hyperion_sky",
         }
     }
 }
@@ -73,7 +105,12 @@ pub trait FitTask: Sync + std::fmt::Debug {
     /// Whether CI may rerun it.
     fn class(&self) -> TaskClass;
 
-    /// Its table's file, relative to `crates/hyperion-sim/src/tables/`.
+    /// The crate whose `src/tables/` holds its table: the sim's unless the task says otherwise.
+    fn table_crate(&self) -> TableCrate {
+        TableCrate::Sim
+    }
+
+    /// Its table's file, relative to its crate's `src/tables/` ([`FitTask::table_crate`]).
     fn table_path(&self) -> &'static str;
 
     /// Its revision, bumped by hand when the algorithm changes: the inputs hash covers it and not
@@ -141,6 +178,17 @@ pub fn registry() -> &'static [&'static dyn FitTask] {
 #[must_use]
 pub fn find(name: &str) -> Option<&'static dyn FitTask> {
     registry().iter().copied().find(|task| task.name() == name)
+}
+
+/// The crate of the table that lock entry `entry` names: its task's crate, or the sim's for an
+/// entry that no task of `tasks` makes.
+#[must_use]
+pub fn table_crate_of(tasks: &[&'static dyn FitTask], entry: &LockEntry) -> TableCrate {
+    entry
+        .task
+        .as_deref()
+        .and_then(|name| tasks.iter().find(|task| task.name() == name))
+        .map_or(TableCrate::Sim, |task| task.table_crate())
 }
 
 /// Checks that `manifest` is `task`'s.
@@ -236,5 +284,21 @@ mod tests {
         );
         assert_eq!(find("mge").map(FitTask::table_path), Some("mge.rs"));
         assert!(find("kicks").is_none());
+    }
+
+    /// Each task names the crate its table lives in: the sky's for the tasks listed here, which
+    /// are none until the crate split's move (CS.T2) gives it the sky's twelve, and the sim's for
+    /// every other.
+    #[test]
+    fn each_task_names_its_tables_crate() {
+        let sky: [&str; 0] = [];
+        for task in registry() {
+            let expected = if sky.contains(&task.name()) {
+                TableCrate::Sky
+            } else {
+                TableCrate::Sim
+            };
+            assert_eq!(task.table_crate(), expected, "{}", task.name());
+        }
     }
 }

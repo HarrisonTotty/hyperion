@@ -1,20 +1,21 @@
 //! The emitter, the lock file and the staleness check against toy tasks in a temporary workspace
-//! (plan 15, P15.T2), and the check on the repository's own tables.
+//! (plan 15, P15.T2) whose tables live in two crates (the crate split, CS.T1), and the check on the
+//! repository's own tables.
 
 use std::fs;
 use std::num::NonZeroUsize;
 use std::sync::Mutex;
 
-use hyperion_fit::check::{CheckInputs, CheckReport, Problem, Rerun, check};
+use hyperion_fit::check::{CheckInputs, CheckReport, Problem, REPOSITORY_MANIFESTS, Rerun, check};
 use hyperion_fit::emit::{
     Destination, EmitTableError, Placement, RustTable, TableItem, Workspace, write_table,
 };
 use hyperion_fit::manifest::{LockFile, Manifest, SimFingerprint};
 use hyperion_fit::pipeline::{ManifestKind, manifest_path, prepare};
-use hyperion_fit::task::{FitTask, RunTaskError, TaskClass, TaskOutput, registry};
+use hyperion_fit::task::{FitTask, RunTaskError, TableCrate, TaskClass, TaskOutput, registry};
 use hyperion_fit::{RunFitError, emit};
 use hyperion_sim::GENERATOR_VERSION;
-use hyperion_sim::tables::{MANIFEST, TableInfo};
+use hyperion_sim::tables::TableInfo;
 use tempfile::TempDir;
 
 /// A toy fit: its table is `[value, 2 × value]` from its manifest, and its fingerprint one probe
@@ -22,6 +23,7 @@ use tempfile::TempDir;
 #[derive(Debug)]
 struct Toy {
     name: &'static str,
+    table_crate: TableCrate,
     path: &'static str,
     probe: Mutex<f64>,
 }
@@ -33,6 +35,10 @@ impl FitTask for Toy {
 
     fn class(&self) -> TaskClass {
         TaskClass::Fast
+    }
+
+    fn table_crate(&self) -> TableCrate {
+        self.table_crate
     }
 
     fn table_path(&self) -> &'static str {
@@ -73,31 +79,40 @@ impl FitTask for Toy {
     }
 }
 
-/// A toy task that lives as long as the test binary.
+/// A toy task of the sim's tables that lives as long as the test binary.
 fn toy(name: &'static str, path: &'static str) -> &'static Toy {
+    toy_in(TableCrate::Sim, name, path)
+}
+
+/// A toy task of `table_crate`'s tables that lives as long as the test binary.
+fn toy_in(table_crate: TableCrate, name: &'static str, path: &'static str) -> &'static Toy {
     Box::leak(Box::new(Toy {
         name,
+        table_crate,
         path,
         probe: Mutex::new(1.5),
     }))
 }
 
-/// A workspace with a `tables/mod.rs` holding the manifest's markers and each toy's manifest.
+/// A workspace whose two crates' `tables/mod.rs` hold the manifest's markers, with each toy's
+/// manifest.
 fn workspace(toys: &[&Toy]) -> (TempDir, Workspace) {
     let root = tempfile::tempdir().unwrap();
     let ws = Workspace::under(root.path());
-    fs::create_dir_all(&ws.tables_dir).unwrap();
+    for table_crate in TableCrate::ALL {
+        fs::create_dir_all(ws.tables_dir(table_crate)).unwrap();
+        fs::write(
+            ws.tables_mod(table_crate),
+            format!(
+                "//! Tables.\n\npub mod toy;\n\n{}\npub const MANIFEST: &[TableInfo] = &[];\n{}\n",
+                emit::MANIFEST_BEGIN,
+                emit::MANIFEST_END
+            ),
+        )
+        .unwrap();
+    }
     fs::create_dir_all(&ws.manifests_dir).unwrap();
     fs::create_dir_all(&ws.data_dir).unwrap();
-    fs::write(
-        ws.tables_mod(),
-        format!(
-            "//! Tables.\n\npub mod toy;\n\n{}\npub const MANIFEST: &[TableInfo] = &[];\n{}\n",
-            emit::MANIFEST_BEGIN,
-            emit::MANIFEST_END
-        ),
-    )
-    .unwrap();
     for t in toys {
         set_value(&ws, t, 0.25);
     }
@@ -127,40 +142,70 @@ fn run(
         &prepared.emission(),
         Destination::Tables {
             workspace: ws,
+            tasks,
             since,
             current,
         },
     )?)
 }
 
-/// `tables::MANIFEST` as the workspace's lock file says it should be.
-fn manifest_of(ws: &Workspace) -> Vec<TableInfo> {
-    LockFile::read(&ws.lock_path)
-        .unwrap()
-        .entries()
-        .iter()
-        .map(|e| TableInfo {
-            name: Box::leak(e.name.clone().into_boxed_str()),
-            revision: e.revision,
-            since_generator_version: e.since_generator_version,
-            provisional: e.provisional,
+/// The rows of `tables::MANIFEST` as the emitter wrote them into `table_crate`'s `tables/mod.rs`.
+fn manifest_in(ws: &Workspace, table_crate: TableCrate) -> Vec<TableInfo> {
+    let text = fs::read_to_string(ws.tables_mod(table_crate)).unwrap();
+    text.split("    TableInfo {\n")
+        .skip(1)
+        .map(|row| {
+            let field = |key: &str| {
+                row.lines()
+                    .find_map(|line| line.trim().strip_prefix(key))
+                    .and_then(|value| value.strip_suffix(','))
+                    .unwrap_or_else(|| panic!("no `{key}` in {row}"))
+            };
+            TableInfo {
+                name: Box::leak(field("name: ").trim_matches('"').into()),
+                revision: field("revision: ").parse().unwrap(),
+                since_generator_version: field("since_generator_version: ").parse().unwrap(),
+                provisional: field("provisional: ").parse().unwrap(),
+            }
         })
         .collect()
 }
 
-/// The staleness check on the workspace, the generator at `current`.
-fn check_at(ws: &Workspace, tasks: &[&'static dyn FitTask], current: u32) -> CheckReport {
-    let manifest = manifest_of(ws);
+/// Each crate's `tables::MANIFEST` as the emitter wrote it.
+fn manifests_of(ws: &Workspace) -> Vec<(TableCrate, Vec<TableInfo>)> {
+    TableCrate::ALL
+        .into_iter()
+        .map(|table_crate| (table_crate, manifest_in(ws, table_crate)))
+        .collect()
+}
+
+/// The staleness check on the workspace against `manifests`, the generator at `current`.
+fn check_with(
+    ws: &Workspace,
+    tasks: &[&'static dyn FitTask],
+    manifests: &[(TableCrate, Vec<TableInfo>)],
+    current: u32,
+    rerun: Rerun,
+) -> CheckReport {
+    let manifests: Vec<(TableCrate, &[TableInfo])> = manifests
+        .iter()
+        .map(|(table_crate, rows)| (*table_crate, rows.as_slice()))
+        .collect();
     check(
         &CheckInputs {
             workspace: ws,
             tasks,
-            manifest: &manifest,
+            manifests: &manifests,
             current,
         },
-        Rerun::Fast,
+        rerun,
         NonZeroUsize::MIN,
     )
+}
+
+/// The staleness check on the workspace, with the fast reruns, the generator at `current`.
+fn check_at(ws: &Workspace, tasks: &[&'static dyn FitTask], current: u32) -> CheckReport {
+    check_with(ws, tasks, &manifests_of(ws), current, Rerun::Fast)
 }
 
 /// The problems the check reports.
@@ -178,7 +223,7 @@ fn a_fresh_table_passes_and_its_manifest_row_is_written() {
     let report = check_at(&ws, &tasks, 11);
     assert!(report.passed(), "{report}");
     assert_eq!(report.fresh.len(), 1, "{report}");
-    let module = fs::read_to_string(ws.tables_mod()).unwrap();
+    let module = fs::read_to_string(ws.tables_mod(TableCrate::Sim)).unwrap();
     assert!(
         module.contains(
             "pub const MANIFEST: &[TableInfo] = &[\n    TableInfo {\n        name: \"toy\",\n        \
@@ -191,7 +236,7 @@ fn a_fresh_table_passes_and_its_manifest_row_is_written() {
         module.starts_with("//! Tables.\n\npub mod toy;\n\n"),
         "{module}"
     );
-    let table = fs::read_to_string(ws.tables_dir.join("toy.rs")).unwrap();
+    let table = fs::read_to_string(ws.tables_dir(TableCrate::Sim).join("toy.rs")).unwrap();
     assert!(
         table.contains("//! since-generator-version: 11\n"),
         "{table}"
@@ -209,7 +254,7 @@ fn check_reports_hand_edited_table() {
     let (_root, ws) = workspace(&[t]);
     let tasks: [&'static dyn FitTask; 1] = [t];
     run(&ws, &tasks, t, Some(11), 11).unwrap();
-    let path = ws.tables_dir.join("toy.rs");
+    let path = ws.tables_dir(TableCrate::Sim).join("toy.rs");
     let text = fs::read_to_string(&path).unwrap().replace("0.5,", "0.6,");
     fs::write(&path, text).unwrap();
     let report = check_at(&ws, &tasks, 11);
@@ -243,17 +288,7 @@ fn check_reports_fingerprint_drift() {
     let tasks: [&'static dyn FitTask; 1] = [t];
     run(&ws, &tasks, t, Some(11), 11).unwrap();
     *t.probe.lock().unwrap() = 1.5 * (1.0 + 1e-12);
-    let manifest = manifest_of(&ws);
-    let within = check(
-        &CheckInputs {
-            workspace: &ws,
-            tasks: &tasks,
-            manifest: &manifest,
-            current: 11,
-        },
-        Rerun::None,
-        NonZeroUsize::MIN,
-    );
+    let within = check_with(&ws, &tasks, &manifests_of(&ws), 11, Rerun::None);
     // Within the tolerance the table is fresh; a rerun would write the new probes' hash into the
     // header, so `--rerun-fast` asks for one.
     assert!(within.passed(), "{within}");
@@ -299,25 +334,97 @@ fn check_reports_a_missing_table_an_unlocked_task_and_a_disagreeing_manifest() {
         matches!(&problems(&report)[..], [Problem::NotRegistered(why)] if why.contains("beta")),
         "{report}"
     );
-    fs::remove_file(ws.tables_dir.join("alpha.rs")).unwrap();
+    fs::remove_file(ws.tables_dir(TableCrate::Sim).join("alpha.rs")).unwrap();
     assert!(problems(&check_at(&ws, &[a], 11)).contains(&Problem::Missing));
-    let stale = check(
-        &CheckInputs {
-            workspace: &ws,
-            tasks: &[a],
-            manifest: &[],
-            current: 11,
-        },
-        Rerun::None,
-        NonZeroUsize::MIN,
-    );
+    let stale = check_with(&ws, &[a], &[], 11, Rerun::None);
     assert!(
         stale
             .findings
             .iter()
-            .any(|f| f.table == "tables::MANIFEST" && matches!(f.problem, Problem::Disagrees(_))),
+            .any(|f| f.table == "hyperion_sim::tables::MANIFEST"
+                && matches!(f.problem, Problem::Disagrees(_))),
         "{stale}"
     );
+}
+
+/// A task whose table lives in a second crate (the sky's, from the crate split) writes its table
+/// and its `MANIFEST` row into that crate's `tables/`, and the check finds both there. A file of
+/// one name in each crate is two files, each its own task's, and the lock file names a table's
+/// file alone, whichever crate holds it.
+#[test]
+fn a_second_crates_tables_and_manifest_rows_stay_in_that_crate() {
+    let alpha = toy("alpha", "alpha.rs");
+    let beta = toy_in(TableCrate::Sky, "beta", "beta.rs");
+    let gamma = toy("gamma", "same.rs");
+    let delta = toy_in(TableCrate::Sky, "delta", "same.rs");
+    let (_root, ws) = workspace(&[alpha, beta, gamma, delta]);
+    let tasks: [&'static dyn FitTask; 4] = [alpha, beta, gamma, delta];
+    for t in [alpha, beta, gamma, delta] {
+        run(&ws, &tasks, t, Some(11), 11).unwrap();
+    }
+    let (sim, sky) = (
+        ws.tables_dir(TableCrate::Sim),
+        ws.tables_dir(TableCrate::Sky),
+    );
+    assert!(sim.join("alpha.rs").exists() && !sky.join("alpha.rs").exists());
+    assert!(sky.join("beta.rs").exists() && !sim.join("beta.rs").exists());
+    for dir in [sim, sky] {
+        let same = fs::read_to_string(dir.join("same.rs")).unwrap();
+        assert!(!same.contains(emit::BLOCK_BEGIN), "{same}");
+    }
+    let names = |table_crate| -> Vec<&str> {
+        manifest_in(&ws, table_crate)
+            .iter()
+            .map(|row| row.name)
+            .collect()
+    };
+    assert_eq!(names(TableCrate::Sim), ["alpha", "gamma"]);
+    assert_eq!(names(TableCrate::Sky), ["beta", "delta"]);
+    let lock = LockFile::read(&ws.lock_path).unwrap();
+    assert_eq!(lock.get("beta").unwrap().path, "beta.rs");
+    assert_eq!(lock.get("delta").unwrap().path, "same.rs");
+    let report = check_at(&ws, &tasks, 11);
+    assert!(report.passed(), "{report}");
+    assert_eq!(report.fresh.len(), 4, "{report}");
+
+    // Every row in the sim's `MANIFEST`, in name order, as a move that left the sky's rows behind
+    // would have it: both crates' `MANIFEST`s disagree with the lock file.
+    let mut rows: Vec<TableInfo> = manifests_of(&ws)
+        .into_iter()
+        .flat_map(|(_, rows)| rows)
+        .collect();
+    rows.sort_by_key(|row| row.name);
+    let misplaced = check_with(&ws, &tasks, &[(TableCrate::Sim, rows)], 11, Rerun::None);
+    let tables: Vec<&str> = misplaced
+        .findings
+        .iter()
+        .map(|f| f.table.as_str())
+        .collect();
+    assert_eq!(
+        tables,
+        [
+            "hyperion_sim::tables::MANIFEST",
+            "hyperion_sky::tables::MANIFEST"
+        ],
+        "{misplaced}"
+    );
+}
+
+/// A crate that holds no locked table is left alone, so a table is written, and checked, with no
+/// `tables/` of the other crate at all: the repository's state until the crate split's move
+/// (CS.T2) creates the sky's.
+#[test]
+fn a_crate_without_tables_needs_no_tables_directory() {
+    let t = toy("toy", "toy.rs");
+    let (_root, ws) = workspace(&[t]);
+    fs::remove_dir_all(ws.tables_dir(TableCrate::Sky)).unwrap();
+    let tasks: [&'static dyn FitTask; 1] = [t];
+    run(&ws, &tasks, t, Some(11), 11).unwrap();
+    let sim = manifest_in(&ws, TableCrate::Sim);
+    assert_eq!(sim.iter().map(|row| row.name).collect::<Vec<_>>(), ["toy"]);
+    assert!(!ws.tables_dir(TableCrate::Sky).exists());
+    let report = check_with(&ws, &tasks, &[(TableCrate::Sim, sim)], 11, Rerun::Fast);
+    assert!(report.passed(), "{report}");
 }
 
 #[test]
@@ -337,7 +444,7 @@ fn emitter_refuses_changed_body_without_new_since() {
         }))
     ));
     run(&ws, &tasks, t, Some(11), 11).unwrap();
-    let before = fs::read_to_string(ws.tables_dir.join("toy.rs")).unwrap();
+    let before = fs::read_to_string(ws.tables_dir(TableCrate::Sim).join("toy.rs")).unwrap();
     set_value(&ws, t, 0.75);
     match run(&ws, &tasks, t, Some(11), 11) {
         Err(RunFitError::Emit(EmitTableError::ChangedBodyWithoutNewSince { table, since: 11 })) => {
@@ -346,7 +453,7 @@ fn emitter_refuses_changed_body_without_new_since() {
         other => panic!("{other:?}"),
     }
     assert_eq!(
-        fs::read_to_string(ws.tables_dir.join("toy.rs")).unwrap(),
+        fs::read_to_string(ws.tables_dir(TableCrate::Sim).join("toy.rs")).unwrap(),
         before,
         "a refused write leaves the table alone"
     );
@@ -362,7 +469,7 @@ fn two_tasks_share_a_file_without_touching_each_other() {
     let b = toy("beta", "shared.rs");
     let (_root, ws) = workspace(&[a, b]);
     let tasks: [&'static dyn FitTask; 2] = [a, b];
-    let path = ws.tables_dir.join("shared.rs");
+    let path = ws.tables_dir(TableCrate::Sim).join("shared.rs");
     fs::write(&path, "//! Two tasks' table.\n").unwrap();
     run(&ws, &tasks, a, Some(11), 11).unwrap();
     run(&ws, &tasks, b, Some(11), 11).unwrap();
@@ -406,7 +513,7 @@ fn the_committed_tables_are_fresh() {
         &CheckInputs {
             workspace: &Workspace::repository(),
             tasks: registry(),
-            manifest: MANIFEST,
+            manifests: REPOSITORY_MANIFESTS,
             current: GENERATOR_VERSION.get(),
         },
         Rerun::None,
@@ -426,7 +533,8 @@ fn the_committed_tables_are_fresh() {
 fn every_committed_table_declares_its_tasks_items() {
     let ws = Workspace::repository();
     for task in registry() {
-        let text = fs::read_to_string(ws.tables_dir.join(task.table_path())).unwrap();
+        let text =
+            fs::read_to_string(ws.tables_dir(task.table_crate()).join(task.table_path())).unwrap();
         let body = match hyperion_fit::pipeline::placement(*task) {
             Placement::File => hyperion_fit::emit::TableText::of_file(&text).body,
             Placement::Block => {
