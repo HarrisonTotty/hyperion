@@ -8,7 +8,10 @@
  * multiple scattering 32 × 32, the same on both settings. Each is a `presentation-only` kernel
  * writing an `rgba16float` storage texture made under the `atmosphere-tables` memory category; only
  * the smoke harness reads them back. The tables are spherical, on a shell whose ground is
- * `bottomRadiusM` from the centre; T12.c's lookups take r = √(MN) + h on the spheroid.
+ * `bottomRadiusM` from the centre; T12.c's lookups take r = √(MN) + h on the spheroid. Every kernel
+ * forms its heights from heights, never as a radius less the ground's, and takes no builtin
+ * trigonometry (plan R08, Design note 18); every table maps its unit ranges to its texels by
+ * Bruneton 2017's exact pair (Design note 19). Both since R08.T6.g.
  *
  * The medium reaches every kernel in three parts (plan R08, R08.T6.b): its shell, term count,
  * steps and ground albedo in the `Medium` uniform ({@link packMediumUniform}), its terms in a
@@ -38,6 +41,7 @@ import {
   type TabulatedDensity,
   tabulatedDensity,
 } from "./medium";
+import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
@@ -77,26 +81,76 @@ export const TRANSMITTANCE_SAMPLES = 256;
 /** Midpoint steps along each of the 64 multiple-scattering rays: 32 (sebh's reference takes 20). */
 export const MULTI_SCATTERING_SAMPLES = 32;
 
-/** The transmittance kernel: `common.wgsl`, `medium.wgsl`, then `transmittance.wgsl`. */
+/**
+ * The transmittance kernel: `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `medium.wgsl`, then
+ * `transmittance.wgsl`.
+ */
 export const TRANSMITTANCE_KERNEL: KernelPair = {
   name: "atmosphere transmittance",
-  reference: `${commonWgsl}\n${mediumWgsl}\n${transmittanceWgsl}`,
+  reference: `${preciseTrigWgsl}\n${commonWgsl}\n${mediumWgsl}\n${transmittanceWgsl}`,
   subgroup: null,
   readback: "presentation-only",
 };
 
-/** The multiple-scattering kernel: `common.wgsl`, `medium.wgsl`, then `multiScattering.wgsl`. */
+/**
+ * The multiple-scattering kernel: `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `medium.wgsl`,
+ * then `multiScattering.wgsl`.
+ */
 export const MULTI_SCATTERING_KERNEL: KernelPair = {
   name: "atmosphere multiple scattering",
-  reference: `${commonWgsl}\n${mediumWgsl}\n${multiScatteringWgsl}`,
+  reference: `${preciseTrigWgsl}\n${commonWgsl}\n${mediumWgsl}\n${multiScatteringWgsl}`,
   subgroup: null,
   readback: "presentation-only",
 };
+
+/** The format the smoke's kernel arm writes its kernels' outputs in (R08.T6.g). */
+export const KERNEL_ARM_FORMAT = "rgba32float";
+
+/**
+ * A planet's two tables' textures: the stored `rgba16float` pair, or the kernel arm's
+ * `rgba32float` one ({@link KERNEL_ARM_FORMAT}).
+ */
+export interface PlanetTableTextures {
+  readonly transmittance: TextureHandle;
+  readonly multiScattering: TextureHandle;
+}
+
+/** The two per-planet kernels, as built or as the kernel arm assembles them. */
+interface PlanetTableKernels {
+  readonly transmittance: ComputeHandle;
+  readonly multiScattering: ComputeHandle;
+}
+
+/** A kernel's `rgba16float` storage-texture declaration, its format between the two groups. */
+const STORED_DECLARATION = /(texture_storage_[23]d<)rgba16float(, write>)/gu;
+
+/**
+ * `pair` assembled a second time with its storage textures' format `rgba32float` in place of
+ * `rgba16float`, under its own name: the smoke's kernel arm (plan R08, R08.T6.g;
+ * `decision-r08-t6b-floor.md` §4), which holds a kernel's own `f32` output to its twin with no
+ * half-float floor. It reads what the shipped kernel reads.
+ *
+ * @throws Error when `pair` declares no `rgba16float` storage texture.
+ */
+export function withKernelArmFormat(pair: KernelPair): KernelPair {
+  const rewrite = (wgsl: string): string =>
+    wgsl.replaceAll(STORED_DECLARATION, `$1${KERNEL_ARM_FORMAT}$2`);
+  const reference = rewrite(pair.reference);
+  if (reference === pair.reference) {
+    throw new Error(`kernel ${pair.name} declares no rgba16float storage texture`);
+  }
+  return {
+    ...pair,
+    name: `${pair.name} (${KERNEL_ARM_FORMAT})`,
+    reference,
+    subgroup: pair.subgroup === null ? null : rewrite(pair.subgroup),
+  };
+}
 
 /** Floats a term takes in the `terms` buffer: four `vec4f` (`common.wgsl`'s `Term`). */
 const TERM_FLOATS = 16;
 
-/** Floats in the `Medium` uniform: its radii, term count and steps, and the ground's albedo. */
+/** Floats in the `Medium` uniform: its shell, term count and steps, and the ground's albedo. */
 const MEDIUM_UNIFORM_FLOATS = 8;
 
 /** The bytes of the kernels' `terms` buffer: {@link MAX_TERMS} terms of 64 B, 512 B. */
@@ -199,7 +253,9 @@ export function packMedium(medium: AtmosphereMedium): Float32Array {
 
 /**
  * The medium's shell, term count and a kernel's steps as `common.wgsl`'s `Medium` uniform, with the
- * ground's albedo.
+ * ground's albedo. The shell is the ground's radius and the atmosphere's height above it, H
+ * itself, so that no kernel forms H as the top's radius less the ground's, which in `f32` would
+ * carry both radii's rounding (plan R08, Design note 18, R08.T6.g).
  *
  * @param bottomRadiusM - The ground's radius, m.
  * @param samples - The kernel's steps along each ray.
@@ -210,7 +266,7 @@ export function packMediumUniform(
   samples: number,
 ): Float32Array {
   const packed = new Float32Array(MEDIUM_UNIFORM_FLOATS);
-  packed.set([bottomRadiusM, bottomRadiusM + medium.topHeightM, medium.terms.length, samples], 0);
+  packed.set([bottomRadiusM, medium.topHeightM, medium.terms.length, samples], 0);
   packed.set([...medium.groundAlbedo, 0], 4);
   return packed;
 }
@@ -560,6 +616,8 @@ export class AtmosphereTables {
   #bottomRadiusM: number;
   #key: string | null = null;
   #builds = 0;
+  /** The kernel arm's kernels ({@link AtmosphereTables.buildKernelArm}), made at its first call. */
+  #armKernels: PlanetTableKernels | null = null;
 
   /**
    * Makes the tables and builds them for `medium`.
@@ -581,6 +639,7 @@ export class AtmosphereTables {
     }
     this.#offRestored = engine.onRestored(() => {
       this.#resources = createResources(engine);
+      this.#armKernels = null;
       this.#key = null;
       this.setMedium(this.#medium, this.#bottomRadiusM);
     });
@@ -648,32 +707,83 @@ export class AtmosphereTables {
     engine.writeBuffer(r.terms, 0, terms);
     r.densityTables = this.#upload(r.densityTables, densityTables, DENSITY_FORMAT);
     r.phaseTables = this.#upload(r.phaseTables, phaseTables, PHASE_FORMAT);
+    this.#dispatchTables(
+      { transmittance: r.transmittanceKernel, multiScattering: r.multiScatteringKernel },
+      { transmittance: r.transmittance, multiScattering: r.multiScattering },
+    );
+    this.#key = key;
+    this.#builds += 1;
+    return true;
+  }
+
+  /**
+   * The tables built once more by their kernels assembled to write `rgba32float`
+   * ({@link withKernelArmFormat}), into two textures made for the call: the smoke's kernel arm (plan
+   * R08, R08.T6.g; `decision-r08-t6b-floor.md` §4). The transmittance is built from the medium and
+   * the multiple scattering over the stored `rgba16float` transmittance, as the stored table's
+   * twin takes it, so that each holds its kernel's own `f32` output.
+   *
+   * @returns The two textures, which the caller releases.
+   * @throws `EngineUnavailable` while the engine has no device (a loss).
+   */
+  buildKernelArm(): PlanetTableTextures {
+    const engine = this.#engine;
+    this.#armKernels ??= {
+      transmittance: engine.createCompute(withKernelArmFormat(TRANSMITTANCE_KERNEL)),
+      multiScattering: engine.createCompute(withKernelArmFormat(MULTI_SCATTERING_KERNEL)),
+    };
+    const usage = TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_SRC;
+    const output = (name: string, size: TableSize): TextureHandle =>
+      engine.createTexture({
+        name,
+        size: [size.widthTexels, size.heightTexels],
+        dimension: "2d",
+        format: KERNEL_ARM_FORMAT,
+        mips: 1,
+        usage,
+        category: "atmosphere-tables",
+      });
+    const tables: PlanetTableTextures = {
+      transmittance: output("atmosphere transmittance (kernel arm)", TRANSMITTANCE_SIZE),
+      multiScattering: output("atmosphere multiple scattering (kernel arm)", MULTI_SCATTERING_SIZE),
+    };
+    this.#dispatchTables(this.#armKernels, tables);
+    return tables;
+  }
+
+  /**
+   * Builds the tables for the medium and ground the tables follow: the transmittance kernel into
+   * `outputs.transmittance`, then the multiple-scattering kernel, reading the stored transmittance,
+   * into `outputs.multiScattering`.
+   */
+  #dispatchTables(kernels: PlanetTableKernels, outputs: PlanetTableTextures): void {
+    const engine = this.#engine;
+    const r = this.#resources;
+    const medium = this.#medium;
+    const bottomRadiusM = this.#bottomRadiusM;
     const sampled = { densityTables: r.densityTables.texture };
     engine.dispatch(
-      r.transmittanceKernel,
+      kernels.transmittance,
       {
         uniforms: { medium: packMediumUniform(medium, bottomRadiusM, TRANSMITTANCE_SAMPLES) },
         buffers: { terms: r.terms },
         sampled,
-        storage: { transmittanceOut: { texture: r.transmittance, level: 0 } },
+        storage: { transmittanceOut: { texture: outputs.transmittance, level: 0 } },
       },
       groupsOf(TRANSMITTANCE_SIZE),
       "atmosphere tables",
     );
     engine.dispatch(
-      r.multiScatteringKernel,
+      kernels.multiScattering,
       {
         uniforms: { medium: packMediumUniform(medium, bottomRadiusM, MULTI_SCATTERING_SAMPLES) },
         buffers: { terms: r.terms },
         sampled: { ...sampled, transmittance: r.transmittance },
-        storage: { multiScatteringOut: { texture: r.multiScattering, level: 0 } },
+        storage: { multiScatteringOut: { texture: outputs.multiScattering, level: 0 } },
       },
       [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels, 1],
       "atmosphere tables",
     );
-    this.#key = key;
-    this.#builds += 1;
-    return true;
   }
 
   /**

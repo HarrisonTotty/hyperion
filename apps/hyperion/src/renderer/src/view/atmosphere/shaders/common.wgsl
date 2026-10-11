@@ -1,8 +1,8 @@
 // The atmosphere's shared WGSL (plan R05, Design note 16): the medium as a list of terms, the
-// spherical shell's geometry and the tables' parameterisations on a shell of given radii. Prepended
-// to every kernel and to the composite (`tables.ts`, `hillaire.ts`). The helpers that read a
-// kernel's `medium` uniform are in `medium.wgsl` and `source.wgsl`, which the composite does not
-// take.
+// spherical shell's geometry from a height and the tables' parameterisations on a sphere of given
+// radius (plan R08, Design notes 18 and 19). Prepended, after `view/shaders/preciseTrig.wgsl`, to
+// every kernel and to the composite (`tables.ts`, `hillaire.ts`). The helpers that read a kernel's
+// `medium` uniform are in `medium.wgsl` and `source.wgsl`, which the composite does not take.
 //
 // Ported from Bevy 0.19.1's atmosphere (crates/bevy_pbr/src/atmosphere/functions.wgsl and
 // bruneton_functions.wgsl, https://github.com/bevyengine/bevy, tag v0.19.1, fetched 2026-10-02),
@@ -53,11 +53,14 @@
 //
 // Changes: Bevy's medium density and scattering tables are replaced by the terms themselves,
 // evaluated per sample (each term's profile, scattering and absorption, from the kernel's `terms`
-// storage buffer, R08.T6.b); the functions take the shell's radii from the kernel's `medium`
-// uniform, read in place (`medium.wgsl`); names follow the project's WGSL style. The
-// multiple-scattering table's sub-texel remap follows sebh's UnrealEngineSkyAtmosphere (MIT,
-// Copyright (c) 2020 Epic Games, Inc.; the full notice is in multiScattering.wgsl); its ground
-// offset is a deliberate change from sebh's code (GROUND_OFFSET_M, below).
+// storage buffer, R08.T6.b); the functions take the shell from the kernel's `medium` uniform, read
+// in place (`medium.wgsl`); names follow the project's WGSL style. The shell's forms take a point's
+// height, never a difference of radii (plan R08, Design note 18, R08.T6.g): in f32 a radius near
+// 6.4e6 m carries 0.25 m of rounding, and r^2 - R^2 near the ground loses most of its digits. Every
+// table maps its unit ranges to its texels by Bruneton's exact pair (`unitFromTexelUv`,
+// `texelUvFromUnit`; plan R08, Design note 19, R08.T6.g), in place of sebh's sub-texel remap, whose
+// read did not invert its write, and of the transmittance table's none. The multiple-scattering
+// table's ground offset is a deliberate change from sebh's code (GROUND_OFFSET_M, below).
 
 // The most terms a medium may have; `tables.ts` holds the same number and refuses more.
 const MAX_TERMS: u32 = 8u;
@@ -76,12 +79,13 @@ struct Term {
   phase : vec4f,
 }
 
-// The medium's shell, metres from the centre, its term count, a kernel's steps along each ray and
-// the ground's albedo: R05's `Medium` uniform without its terms, which travel in a storage buffer
-// of MAX_TERMS terms (R08.T6.b).
+// The medium's shell, its term count, a kernel's steps along each ray and the ground's albedo:
+// R05's `Medium` uniform without its terms, which travel in a storage buffer of MAX_TERMS terms
+// (R08.T6.b). The shell is its ground's radius and the atmosphere's height above it, formed in
+// f64 (R08.T6.g), so that no kernel forms the height as the top's radius less the ground's.
 struct Medium {
   bottomRadiusM : f32,
-  topRadiusM : f32,
+  topHeightM : f32,
   termCount : f32,
   samples : f32,
   groundAlbedo : vec4f,
@@ -105,50 +109,107 @@ fn stepFactor(x : vec3f) -> vec3f {
   return select((1.0 - exp(-x)) / x, 1.0 - x * (0.5 - x / 6.0), x < vec3f(0.01));
 }
 
-// The radius at distance t along a ray from radius r at zenith cosine mu.
+// The radius at distance t along a ray from radius r at zenith cosine mu: a magnitude, which
+// carries f32's relative precision, so the forms below take it, never a difference of it.
 fn localR(r : f32, mu : f32, t : f32) -> f32 {
   return sqrt(max(t * t + 2.0 * r * mu * t + r * r, 0.0));
 }
 
-// Whether a ray from radius r at zenith cosine mu meets a sphere of radius `bottom`.
-fn shellIntersectsGround(bottom : f32, r : f32, mu : f32) -> bool {
-  return mu < 0.0 && r * r * (mu * mu - 1.0) + bottom * bottom >= 0.0;
+// --- The shell from a height (plan R08, Design note 18) -------------------------------------------
+// A sphere of radius `bottom`, the atmosphere `topHeightM` above it, and a point `heightM` above
+// the sphere at r = bottom + heightM, a ray from it at zenith cosine mu.
+
+// r^2 - bottom^2 = h (2 bottom + h).
+fn shellAboveGround(bottom : f32, heightM : f32) -> f32 {
+  return heightM * (2.0 * bottom + heightM);
 }
 
-// The transmittance table's (u, v) for (r, mu) on a shell of the given radii.
-fn shellRMuToUv(bottom : f32, top : f32, r : f32, mu : f32) -> vec2f {
-  let bigH = sqrt(top * top - bottom * bottom);
-  let rho = sqrt(max(r * r - bottom * bottom, 0.0));
-  let discriminant = max(r * r * (mu * mu - 1.0) + top * top, 0.0);
-  let d = max(-r * mu + sqrt(discriminant), 0.0);
-  let dMin = top - r;
+// top^2 - r^2 = (H - h)(2 bottom + H + h).
+fn shellBelowTop(bottom : f32, topHeightM : f32, heightM : f32) -> f32 {
+  return (topHeightM - heightM) * (2.0 * bottom + topHeightM + heightM);
+}
+
+// Whether the ray meets the sphere: mu < 0 and (r mu)^2 >= r^2 - bottom^2. Also the ground's
+// shadow at a point, for the sun's zenith cosine there.
+fn groundHitFromHeight(bottom : f32, heightM : f32, mu : f32) -> bool {
+  let rMu = (bottom + heightM) * mu;
+  return mu < 0.0 && rMu * rMu >= shellAboveGround(bottom, heightM);
+}
+
+// The distance to the sphere along a ray that meets it (`groundHitFromHeight`): the near root
+// A / (-r mu + sqrt((r mu)^2 - A)), A = r^2 - bottom^2, which does not cancel.
+fn shellDistanceToGround(bottom : f32, heightM : f32, mu : f32) -> f32 {
+  let rMu = (bottom + heightM) * mu;
+  let aboveGround = shellAboveGround(bottom, heightM);
+  return aboveGround / (-rMu + sqrt(max(rMu * rMu - aboveGround, 0.0)));
+}
+
+// The distance to the top: B / (r mu + sqrt((r mu)^2 + B)) upward and -r mu + sqrt((r mu)^2 + B)
+// otherwise, B = top^2 - r^2, each the root that does not cancel; 0 upward from above the top.
+// Every caller takes h at or below H.
+fn shellDistanceToTop(bottom : f32, topHeightM : f32, heightM : f32, mu : f32) -> f32 {
+  let rMu = (bottom + heightM) * mu;
+  let belowTop = shellBelowTop(bottom, topHeightM, heightM);
+  let root = sqrt(max(rMu * rMu + belowTop, 0.0));
+  return max(select(-rMu + root, belowTop / (rMu + root), mu > 0.0), 0.0);
+}
+
+// The ray's length inside the atmosphere, to the ground or to the top.
+fn shellMaxDistance(bottom : f32, topHeightM : f32, heightM : f32, mu : f32) -> f32 {
+  if (groundHitFromHeight(bottom, heightM, mu)) {
+    return shellDistanceToGround(bottom, heightM, mu);
+  }
+  return shellDistanceToTop(bottom, topHeightM, heightM, mu);
+}
+
+// The height at distance t along the ray, rT its radius there (`localR`):
+// (t^2 + 2 r mu t + (r^2 - bottom^2)) / (rT + bottom) = rT - bottom without the difference.
+fn shellHeightAlong(bottom : f32, heightM : f32, mu : f32, t : f32, rT : f32) -> f32 {
+  let rMu = (bottom + heightM) * mu;
+  return (t * t + 2.0 * rMu * t + shellAboveGround(bottom, heightM)) / (rT + bottom);
+}
+
+// The transmittance table's unit range (x_mu, x_r) at a point and zenith cosine: Bruneton 2017's
+// GetTransmittanceTextureUvFromRMu (precomputed_atmospheric_scattering, atmosphere/functions.glsl)
+// before its texel mapping. x_mu = (d - d_min) / (d_max - d_min), d the distance to the top along
+// mu, d_min = H - h and d_max = rho + H_rho; x_r = rho / H_rho, which is Bruneton and Neyret 2008's
+// (section 4), with rho = sqrt(h (2 bottom + h)) and H_rho = sqrt(H (2 bottom + H)) the distances
+// to the horizon from the point and from the top.
+fn transmittanceUnitAt(bottom : f32, topHeightM : f32, heightM : f32, mu : f32) -> vec2f {
+  let bigH = sqrt(topHeightM * (2.0 * bottom + topHeightM));
+  let rho = sqrt(max(shellAboveGround(bottom, heightM), 0.0));
+  let d = shellDistanceToTop(bottom, topHeightM, heightM, mu);
+  let dMin = topHeightM - heightM;
   let dMax = rho + bigH;
   return vec2f((d - dMin) / (dMax - dMin), rho / bigH);
 }
 
-// The multiple-scattering table's lowest radius sits this far above the ground, m, so that a sun
-// on the horizon is not shadowed by the ground it stands on. A deliberate change from sebh's code,
+// The multiple-scattering table's lowest row sits this far above the ground, m, so that a sun on
+// the horizon is not shadowed by the ground it stands on. A deliberate change from sebh's code,
 // which has the same aim (PLANET_RADIUS_OFFSET) and takes its 0.01 km off the height range as here,
 // but also adds the 0.01 to the unitless row coordinate when NewMultiScattCS writes a row, so that
 // row 0 sits about 1 km up on Earth, and applies no offset when GetMultipleScattering reads one.
-// Here the 10 m is a length on the write (`multiScatteringUvToRMu`) and on the read
-// (`shellMultiScatteringRMuToUv`) alike, so that the two agree.
+// Here the 10 m is a length on the write (`multiScattering.wgsl`) and on the read
+// (`multiScatteringUnitAt`) alike, so that the two agree.
 const GROUND_OFFSET_M: f32 = 10.0;
 
-// sebh's sub-texel remapping: texel centres to [0, 1] and back, so that the table's edge texels
-// hold its range's ends.
-fn subUvsToUnit(uv : vec2f, size : vec2f) -> vec2f {
-  return (uv - 0.5 / size) * (size / (size - 1.0));
+// The multiple-scattering table's unit range at a height and the sun's zenith cosine: x the sun's
+// cosine, mu_s / 2 + 1/2, and y the height, (h - 10 m) / (H - 10 m), from the height itself.
+fn multiScatteringUnitAt(topHeightM : f32, heightM : f32, muSun : f32) -> vec2f {
+  let y = (heightM - GROUND_OFFSET_M) / (topHeightM - GROUND_OFFSET_M);
+  return clamp(vec2f(muSun * 0.5 + 0.5, y), vec2f(0.0), vec2f(1.0));
 }
 
-fn unitToSubUvs(unit : vec2f, size : vec2f) -> vec2f {
-  return (unit + 0.5 / size) * (size / (size + 1.0));
+// Bruneton 2017's texel mapping (precomputed_atmospheric_scattering, functions.glsl:
+// GetUnitRangeFromTextureCoord and GetTextureCoordFromUnitRange; plan R08, Design note 19): a unit
+// range's 0 and 1 stand at the centres of an axis's first and last texels, and each function
+// inverts the other exactly. Every axis it maps has at least 2 texels.
+fn unitFromTexelUv(uv : vec2f, size : vec2f) -> vec2f {
+  return (uv * size - 0.5) / (size - 1.0);
 }
 
-// The multiple-scattering table's (u, v) for (r, mu_sun) on a shell of the given radii.
-fn shellMultiScatteringRMuToUv(bottom : f32, top : f32, r : f32, muSun : f32, size : vec2f) -> vec2f {
-  let v = (r - bottom - GROUND_OFFSET_M) / (top - bottom - GROUND_OFFSET_M);
-  return unitToSubUvs(clamp(vec2f(muSun * 0.5 + 0.5, v), vec2f(0.0), vec2f(1.0)), size);
+fn texelUvFromUnit(unit : vec2f, size : vec2f) -> vec2f {
+  return (unit * (size - 1.0) + 0.5) / size;
 }
 
 // Bilinear read of a table whose texel centres sit at (i + 0.5) / size, clamped at its edges:
@@ -162,4 +223,10 @@ fn bilinear(table : texture_2d<f32>, uv : vec2f) -> vec4f {
   let a = mix(textureLoad(table, p0, 0), textureLoad(table, vec2u(p1.x, p0.y), 0), f.x);
   let b = mix(textureLoad(table, vec2u(p0.x, p1.y), 0), textureLoad(table, p1, 0), f.x);
   return mix(a, b, f.y);
+}
+
+// A table's bilinear read at a unit range, clamped to [0, 1], through Bruneton's texel mapping.
+fn tableAtUnit(table : texture_2d<f32>, unit : vec2f) -> vec4f {
+  let size = vec2f(textureDimensions(table));
+  return bilinear(table, texelUvFromUnit(clamp(unit, vec2f(0.0), vec2f(1.0)), size));
 }

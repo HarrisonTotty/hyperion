@@ -16,6 +16,17 @@
 // Bevy spaces them evenly, and each is sampled at its midpoint; each term's density is evaluated
 // once a sample; a step's in-scattering is taken without f32's cancellation (`stepFactor` in
 // common.wgsl). The placement takes the centre alone: it needs no spheroid.
+//
+// Changes (plan R08, R08.T6.g, Design note 18): no height, root or discriminant is formed from the
+// camera's f32 position as a difference of radii, which in f32 near 6.4e6 m carry 0.25 m (2 m near
+// 6e7 m). Each shell is a quadric along the ray, Q(t) = q_a t^2 + 2 q_b t + q_c in space scaled to
+// a sphere, whose constant q_c comes formed in f64 (`view.exact.xy`); the camera's position enters
+// only in products with unit directions, where its rounding moves a height by about 6e-8 t. The
+// ray meets each shell at the roots that do not cancel, and a sample's height above the spheroid
+// along its radius is |p| q / (sqrt(1 + q)(sqrt(1 + q) + 1)), q = Q / a^2. Beyond h0 = a / 2, Q is
+// taken about the ray's closest approach t*, q_a (t - t*)^2 + Q*, with Q* = -disc / q_a from
+// Lagrange's identity and t - t* carried from the steps' own offsets (`marchStep`), where the
+// constant's own error would grow as h0 (`decision-r08-f32.md` section 4.2).
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -27,29 +38,56 @@
 @group(0) @binding(7) var sceneDepth : texture_depth_2d;
 @group(0) @binding(8) var rayMarchOut : texture_storage_2d<rgba16float, write>;
 
-// The near and far distances along a ray to a spheroid of radii (a, a, c), or (-1, -1) if missed:
-// a sphere's in space scaled by a ÷ c along z.
-fn spheroidHits(origin : vec3f, dir : vec3f, a : f32, c : f32) -> vec2f {
-  let s = vec3f(1.0, 1.0, a / c);
-  let o = origin * s;
-  let d = dir * s;
-  let qa = dot(d, d);
-  let qb = dot(o, d);
-  let qc = dot(o, o) - a * a;
-  let disc = qb * qb - qa * qc;
-  if (disc < 0.0) {
-    return vec2f(-1.0, -1.0);
-  }
-  let root = sqrt(disc);
-  return vec2f((-qb - root) / qa, (-qb + root) / qa);
+// A ray's quadric about a shell of equatorial radius `radius`, in space scaled by
+// S = diag(1, 1, k) to a sphere of that radius: Q(t) = |S (P + t d)|^2 - radius^2 = qa t^2 +
+// 2 qb t + qc, its constant qc formed in f64. `disc` is qb^2 - qa qc without its cancellation: as
+// written near the body, where qc is small, and from Lagrange's identity, qa radius^2 - |S P x S d|^2,
+// far from it (`far`), where qb^2 and qa qc nearly cancel.
+struct RayQuadric {
+  qa : f32,
+  qb : f32,
+  qc : f32,
+  disc : f32,
 }
 
-// A point's height above the spheroid along its radius, m.
-fn heightAbove(p : vec3f, a : f32, c : f32) -> f32 {
-  let r = length(p);
-  let d = p / r;
-  let surface = inverseSqrt((d.x * d.x + d.y * d.y) / (a * a) + d.z * d.z / (c * c));
-  return r - surface;
+fn rayQuadric(origin : vec3f, dir : vec3f, k : f32, radius : f32, qc : f32, far : bool) -> RayQuadric {
+  let scale = vec3f(1.0, 1.0, k);
+  let o = origin * scale;
+  let d = dir * scale;
+  let qa = dot(d, d);
+  let qb = dot(o, d);
+  var disc : f32;
+  if (far) {
+    let c = cross(o, d);
+    disc = qa * (radius * radius) - dot(c, c);
+  } else {
+    disc = qb * qb - qa * qc;
+  }
+  return RayQuadric(qa, qb, qc, disc);
+}
+
+// The near and far distances along the ray to the quadric's surface, or (-1, -1) if missed: its
+// roots s / qa and qc / s, s = -(qb + sign(qb) sqrt(disc)), neither of which cancels.
+fn quadricHits(q : RayQuadric) -> vec2f {
+  if (q.disc < 0.0) {
+    return vec2f(-1.0, -1.0);
+  }
+  let root = sqrt(q.disc);
+  let s = -(q.qb + select(-root, root, q.qb >= 0.0));
+  if (s == 0.0) {
+    return vec2f(0.0, 0.0);
+  }
+  let first = s / q.qa;
+  let second = q.qc / s;
+  return vec2f(min(first, second), max(first, second));
+}
+
+// A point's height above the spheroid along its radius, from its distance from the centre and
+// q = Q / a^2 (the ground's quadric there): |p| - |p| / sqrt(1 + q), the difference taken as
+// |p| q / (sqrt(1 + q)(sqrt(1 + q) + 1)).
+fn radialHeight(r : f32, q : f32) -> f32 {
+  let root = sqrt(max(1.0 + q, 1e-12));
+  return r * q / (root * (root + 1.0));
 }
 
 // The spheroid's outward normal at the ellipsoid through `p` similar to the datum.
@@ -68,7 +106,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let full = vec2u(view.output.xy);
   let depthTexel = min(vec2u(uv * vec2f(full)), full - 1u);
   let depth = textureLoad(sceneDepth, depthTexel, 0);
-  let topM = medium.topRadiusM - medium.bottomRadiusM;
+  let topM = medium.topHeightM;
   let aboveTop = view.camera.w >= topM;
   let reach = view.tables.y;
   var tSurface = 3.4e38;
@@ -84,8 +122,13 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let origin = view.camera.xyz;
   let a = view.figure.x;
   let c = view.figure.y;
-  let shell = spheroidHits(origin, dir, a + topM, c + topM);
-  let ground = spheroidHits(origin, dir, a, c);
+  let k = a / c;
+  // Beyond half the equatorial radius, the ground's quadric is taken about the closest approach.
+  let far = view.camera.w > 0.5 * a;
+  let shellQ = rayQuadric(origin, dir, (a + topM) / (c + topM), a + topM, view.exact.y, far);
+  let groundQ = rayQuadric(origin, dir, k, a, view.exact.x, far);
+  let shell = quadricHits(shellQ);
+  let ground = quadricHits(groundQ);
   let tStart = max(shell.x, 0.0);
   var tEnd = shell.y;
   let hitsGround = ground.x > 0.0;
@@ -98,7 +141,23 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     return;
   }
   let samples = max(u32(view.figure.w), 2u);
-  let split = marchSplit(tStart, tEnd, -dot(origin, dir), samples, shell.x <= 0.0);
+  let nearest = -dot(origin, dir);
+  let split = marchSplit(tStart, tEnd, nearest, samples, shell.x <= 0.0);
+  // The closest-approach form's offsets: t - t* = (t - t_low) + (t_low - t*), t_low the split's
+  // lowest point. Unclamped, t_low is t_o, the unscaled closest approach the split is placed about,
+  // and t_o - t* = (k^2 - 1) d_z [d x (P x d)]_z / qa, 0 on a sphere. Clamped at the ground's near
+  // root, t_low - t* is that root's own -sqrt(disc) / qa, with no difference of large distances,
+  // so that Q is 0 where the segment meets the ground. Clamped elsewhere (a surface drawn before
+  // t_o, or a segment's start), t_low - t_o is formed as a difference, which rounds to about
+  // eps |P|, the depth's or the shell root's own precision there.
+  let qStar = -groundQ.disc / groundQ.qa;
+  let nearestFromStar = (k - 1.0) * (k + 1.0) * dir.z * cross(dir, cross(origin, dir)).z
+    / groundQ.qa;
+  var lowestFromStar = (split.lowestM - nearest) + nearestFromStar;
+  if (hitsGround && split.lowestM == ground.x) {
+    lowestFromStar = -sqrt(max(groundQ.disc, 0.0)) / groundQ.qa;
+  }
+  let a2 = a * a;
   let angle = scatteringAngle(dir, view.sun.xyz);
   var luminance = vec3f(0.0);
   var throughput = vec3f(1.0);
@@ -106,7 +165,14 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     let stepAt = marchStep(split, i);
     let dt = stepAt.dtM;
     let p = origin + stepAt.tM * dir;
-    let heightM = heightAbove(p, a, c);
+    var bigQ : f32;
+    if (far) {
+      let fromStar = stepAt.fromLowestM + lowestFromStar;
+      bigQ = groundQ.qa * fromStar * fromStar + qStar;
+    } else {
+      bigQ = stepAt.tM * (groundQ.qa * stepAt.tM + 2.0 * groundQ.qb) + groundQ.qc;
+    }
+    let heightM = radialHeight(length(p), bigQ / a2);
     let muSun = dot(view.sun.xyz, normalAt(p, a, c));
     let local = sampleMediumAt(heightM, angle);
     let stepDepth = local.extinction * dt;

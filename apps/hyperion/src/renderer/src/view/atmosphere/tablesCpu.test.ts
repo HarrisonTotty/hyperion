@@ -45,10 +45,18 @@ import {
   phaseTable,
   tabulatedDensity,
 } from "./medium";
-import { maxDistanceM, opticalDepth, ORACLE_STEPS, transmittanceUvToRMu } from "./opticalDepth";
+import {
+  maxDistanceM,
+  opticalDepth,
+  opticalDepthToTop,
+  ORACLE_STEPS,
+  transmittanceRMuToUv,
+  transmittanceUvToRMu,
+  unitFromTexelUv,
+} from "./opticalDepth";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
-import { TRANSMITTANCE_SIZE } from "./tables";
+import { MULTI_SCATTERING_SIZE, TRANSMITTANCE_SIZE } from "./tables";
 import {
   aerialPerspectiveTwin,
   kernelOpticalDepth,
@@ -178,13 +186,20 @@ describe("R05's constants as a medium", () => {
     for (const [x, y] of ORACLE_TEXELS) {
       const { rM, mu } = transmittanceUvToRMu(
         shell,
-        (x + 0.5) / TRANSMITTANCE_SIZE.widthTexels,
-        (y + 0.5) / TRANSMITTANCE_SIZE.heightTexels,
+        unitFromTexelUv((x + 0.5) / TRANSMITTANCE_SIZE.widthTexels, TRANSMITTANCE_SIZE.widthTexels),
+        unitFromTexelUv(
+          (y + 0.5) / TRANSMITTANCE_SIZE.heightTexels,
+          TRANSMITTANCE_SIZE.heightTexels,
+        ),
       );
       const twin = kernelOpticalDepth(EARTH_REFERENCE, R1, rM, mu, ORACLE_STEPS);
-      const oracle = opticalDepth(EARTH_REFERENCE, R1, rM, mu);
+      const oracle = opticalDepthToTop(EARTH_REFERENCE, R1, rM, mu);
       for (const c of CHANNELS) {
-        worst = Math.max(worst, Math.abs(twin[c] / oracle[c] - 1));
+        // The top row's zenith ray has no air to cross: both are 0 there.
+        worst = Math.max(
+          worst,
+          oracle[c] === 0 ? Math.abs(twin[c]) : Math.abs(twin[c] / oracle[c] - 1),
+        );
       }
     }
     expect(worst).toBeLessThan(1e-6);
@@ -218,10 +233,10 @@ describe("R05's constants as a medium", () => {
     for (const [x, y] of ORACLE_TEXELS) {
       const { rM, mu } = transmittanceUvToRMu(
         shell,
-        (x + 0.5) / table.widthTexels,
-        (y + 0.5) / table.heightTexels,
+        unitFromTexelUv((x + 0.5) / table.widthTexels, table.widthTexels),
+        unitFromTexelUv((y + 0.5) / table.heightTexels, table.heightTexels),
       );
-      const oracle = opticalDepth(EARTH_REFERENCE, R1, rM, mu);
+      const oracle = opticalDepthToTop(EARTH_REFERENCE, R1, rM, mu);
       for (const c of CHANNELS) {
         const twin = table.texels[(y * table.widthTexels + x) * 4 + c] ?? Number.NaN;
         worst = Math.max(worst, Math.abs(twin / Math.exp(-oracle[c]) - 1));
@@ -233,6 +248,20 @@ describe("R05's constants as a medium", () => {
 });
 
 // --- R05.T12.e's gate, with the multiple-scattering term -----------------------------------------
+
+/**
+ * The one ray the gate's 5% for twilight rays does not hold since R08.T6.g's texel mapping, pinned
+ * at its measured e (main's ruling, 2026-10-10; plan R08's Risks, "Deviations in T6.g, as built").
+ *
+ * @remarks
+ * Its e at high's 75 sky-view steps was under 0.76% with R05's mapping and is 6.01% with
+ * Bruneton's. The mapping puts the transmittance table's last column on the ray tangent to the
+ * ground, where T falls by orders of magnitude between texels, and the twin, like the kernels,
+ * reads T bilinearly; R05's clamp held a ray 1.1′ higher there and hid it. Read as optical depth,
+ * bilinearly and then exponentiated, as R08.T6.c stores it, the ray is 1.29% at 75 steps (a
+ * scratch emulation). R08.T6.c removes this exception, and its acceptance requires it gone.
+ */
+const T6C_EXCEPTION = { name: "band, 20000 m, view zenith 94.441°, sun 95°/0°", e: 0.0602 };
 
 describe("the sky view's and the march's twins under R05.T12.e's quadrature gate", () => {
   let gate: Gate = { results: [], lMax: new Map() };
@@ -281,7 +310,13 @@ describe("the sky view's and the march's twins under R05.T12.e's quadrature gate
   });
 
   it("holds every ray within 2%, and twilight rays within 5%, at high's counts", () => {
-    expect(describeFailures(failures(gate, HIGH))).toEqual([]);
+    const failed = failures(gate, HIGH);
+    expect(describeFailures(failed.filter(({ ray }) => ray.name !== T6C_EXCEPTION.name))).toEqual(
+      [],
+    );
+    // The one recorded exception, held at its measured e so that it cannot grow.
+    const excepted = failed.find(({ ray }) => ray.name === T6C_EXCEPTION.name);
+    expect(excepted?.e ?? 0).toBeLessThanOrEqual(T6C_EXCEPTION.e);
   });
 
   it("keeps low's counts within the bounds low's GPU agreement check holds them to", () => {
@@ -848,5 +883,213 @@ describe("twinView", () => {
     expect(view.heightM).toBeCloseTo(2, 6);
     // √(MN) at the equator is b = c: M = c² ÷ a and N = a there.
     expect(view.cameraRadiusM).toBeCloseTo(WGS84.polarRadiusM, 3);
+  });
+});
+
+// --- Bruneton's texel mapping (plan R08, Design note 19, R08.T6.g) ---------------------------------
+
+/** A table's texel channel, row by row. */
+function texelOf(table: TwinTable, x: number, y: number, c: number): number {
+  return table.texels[(y * table.widthTexels + x) * 4 + c] ?? Number.NaN;
+}
+
+/** A bilinear read at uv in texel coordinates, centres at (i + ½) ÷ size, clamped: `bilinear`. */
+function bilinearAt(table: TwinTable, u: number, v: number, c: number): number {
+  const { widthTexels: w, heightTexels: h } = table;
+  const px = Math.min(Math.max(u * w - 0.5, 0), w - 1);
+  const py = Math.min(Math.max(v * h - 0.5, 0), h - 1);
+  const x0 = Math.floor(px);
+  const y0 = Math.floor(py);
+  const x1 = Math.min(x0 + 1, w - 1);
+  const y1 = Math.min(y0 + 1, h - 1);
+  const fx = px - x0;
+  const fy = py - y0;
+  const a = texelOf(table, x0, y0, c) * (1 - fx) + texelOf(table, x1, y0, c) * fx;
+  const b = texelOf(table, x0, y1, c) * (1 - fx) + texelOf(table, x1, y1, c) * fx;
+  return a * (1 - fy) + b * fy;
+}
+
+/**
+ * R05's transmittance table, kept as a reference: texel centres at (i + ½) ÷ size standing for
+ * the unit range itself, with no texel mapping, and read the same way, so that the clamp held the
+ * outer half texels.
+ */
+function r05Transmittance(bottomM: number): TwinTable {
+  const { widthTexels: w, heightTexels: h } = TRANSMITTANCE_SIZE;
+  const shell = { bottomRadiusM: bottomM, topRadiusM: bottomM + EARTH_REFERENCE.topHeightM };
+  const texels = new Float64Array(w * h * 4);
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const { rM, mu } = transmittanceUvToRMu(shell, (x + 0.5) / w, (y + 0.5) / h);
+      const tau = kernelOpticalDepth(EARTH_REFERENCE, bottomM, rM, mu);
+      texels.set([Math.exp(-tau[0]), Math.exp(-tau[1]), Math.exp(-tau[2]), 1], (y * w + x) * 4);
+    }
+  }
+  return { widthTexels: w, heightTexels: h, texels };
+}
+
+/** The sun's transmittance from R05's table at a height and zenith cosine, as R05 read it. */
+function r05SunTransmittance(table: TwinTable, bottomM: number, heightM: number, mu: number): Rgb3 {
+  const shell = { bottomRadiusM: bottomM, topRadiusM: bottomM + EARTH_REFERENCE.topHeightM };
+  const [u, v] = transmittanceRMuToUv(shell, bottomM + heightM, mu);
+  return [bilinearAt(table, u, v, 0), bilinearAt(table, u, v, 1), bilinearAt(table, u, v, 2)];
+}
+
+/** The heights and elevations above the horizontal at which the sun's transmittance is held. */
+const EDGE_HEIGHTS_M = [2, 20, 200, 2_000] as const;
+const EDGE_ELEVATIONS_DEG = [0, 0.25, 1, 2, 5, 45, 85, 90] as const;
+
+/** The worst relative error per channel of a sun transmittance against the oracle's. */
+function edgeError(
+  transmittanceAt: (heightM: number, mu: number) => Rgb3,
+  heightM: number,
+  elevationDeg: number,
+): number {
+  const mu = Math.sin((elevationDeg * Math.PI) / 180);
+  const oracle = opticalDepth(EARTH_REFERENCE, R1, R1 + heightM, mu).map((tau) => Math.exp(-tau));
+  const t = transmittanceAt(heightM, mu);
+  return Math.max(...CHANNELS.map((c) => Math.abs(t[c] / (oracle[c] ?? Number.NaN) - 1)));
+}
+
+/** A table's largest colour channel. */
+function largestOf(table: TwinTable): number {
+  let largest = 0;
+  for (const [i, value] of table.texels.entries()) {
+    largest = i % 4 === 3 ? largest : Math.max(largest, value);
+  }
+  return largest;
+}
+
+/**
+ * A table read as optical depth: −ln T per colour channel, as R08.T6.c stores it, so that a
+ * bilinear read interpolates τ and the caller exponentiates.
+ */
+function asOpticalDepth(table: TwinTable): TwinTable {
+  return {
+    ...table,
+    texels: table.texels.map((v, i) => (i % 4 === 3 ? v : -Math.log(Math.max(v, 1e-300)))),
+  };
+}
+
+describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
+  // A read stands within about 10⁻¹² of a texel of its centre in f64, so a texel beside one 10⁵ to
+  // 10⁷ times larger reads back off by that much of itself: T near 10⁻¹⁸ at the grazing column,
+  // multiple scattering near 10⁻²² on the night side. They are held to 10⁻⁹ of the twin bound's
+  // floor, 10⁻⁶ of the table's largest (Verification), far under anything a table stores.
+  it("reads every transmittance texel back at its own (h, μ) to 10⁻⁹", () => {
+    const sources = tableSources(earth);
+    const shell = { bottomRadiusM: R1, topRadiusM: R1 + EARTH_REFERENCE.topHeightM };
+    const { widthTexels: w, heightTexels: h } = earth.transmittance;
+    const floor = 1e-6 * largestOf(earth.transmittance);
+    const out: Rgb3 = [0, 0, 0];
+    let worst = 0;
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const { rM, mu } = transmittanceUvToRMu(
+          shell,
+          unitFromTexelUv((x + 0.5) / w, w),
+          unitFromTexelUv((y + 0.5) / h, h),
+        );
+        sources.sunTransmittance(rM - R1, mu, out);
+        for (const c of CHANNELS) {
+          const stored = texelOf(earth.transmittance, x, y, c);
+          worst = Math.max(worst, Math.abs(out[c] - stored) / Math.max(stored, floor));
+        }
+      }
+    }
+    expect(worst).toBeLessThan(1e-9);
+  });
+
+  it("reads every multiple-scattering texel back at its own (h, μ_s) to 10⁻⁹", () => {
+    const sources = tableSources(earth);
+    const { widthTexels: w, heightTexels: h } = earth.multiScattering;
+    const top = EARTH_REFERENCE.topHeightM;
+    const floor = 1e-6 * largestOf(earth.multiScattering);
+    const out: Rgb3 = [0, 0, 0];
+    let worst = 0;
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const heightM =
+          MULTI_SCATTERING_GROUND_OFFSET_M +
+          unitFromTexelUv((y + 0.5) / h, h) * (top - MULTI_SCATTERING_GROUND_OFFSET_M);
+        const muSun = unitFromTexelUv((x + 0.5) / w, w) * 2 - 1;
+        sources.multiScattering(heightM, muSun, out);
+        for (const c of CHANNELS) {
+          const stored = texelOf(earth.multiScattering, x, y, c);
+          worst = Math.max(worst, Math.abs(out[c] - stored) / Math.max(stored, floor));
+        }
+      }
+    }
+    expect(worst).toBeLessThan(1e-9);
+  });
+
+  // Read as T, as the table is stored until R08.T6.c, the bottom rows and last columns change by
+  // ×3 (red) to ×10 (blue) a texel near the horizon, and a bilinear read overshoots: from 2, 20
+  // and 200 m at 0°, +48.7%, +41.0% and +12.0% (R05's mapping: −37.5%, +50.1% and +12.3%).
+  // Read as optical depth, as T6.c stores it, the same table holds 3% at every point, the
+  // estimate of decision-r08-remap.md §6 (plan R08's Risks, "Deviations in T6.g, as built").
+  it("holds the stored sun's transmittance within 3% of the oracle from 2° to 5°, and 0.3% from 45° up", () => {
+    const sources = tableSources(earth);
+    const stored = (heightM: number, mu: number): Rgb3 => {
+      const out: Rgb3 = [0, 0, 0];
+      sources.sunTransmittance(heightM, mu, out);
+      return out;
+    };
+    const off: string[] = [];
+    for (const heightM of EDGE_HEIGHTS_M) {
+      for (const elevationDeg of EDGE_ELEVATIONS_DEG.filter((deg) => deg >= 2)) {
+        const e = edgeError(stored, heightM, elevationDeg);
+        if (!(e <= (elevationDeg >= 45 ? 0.003 : 0.03))) {
+          off.push(`${heightM} m at ${elevationDeg}°: ${(e * 100).toFixed(3)}%`);
+        }
+      }
+    }
+    expect(off).toEqual([]);
+  });
+
+  it("holds the table read as optical depth within 3% of the oracle at every point up to 5°", () => {
+    const sources = tableSources({ ...earth, transmittance: asOpticalDepth(earth.transmittance) });
+    const exponentiated = (heightM: number, mu: number): Rgb3 => {
+      const tau: Rgb3 = [0, 0, 0];
+      sources.sunTransmittance(heightM, mu, tau);
+      return [Math.exp(-tau[0]), Math.exp(-tau[1]), Math.exp(-tau[2])];
+    };
+    const off: string[] = [];
+    for (const heightM of EDGE_HEIGHTS_M) {
+      for (const elevationDeg of EDGE_ELEVATIONS_DEG.filter((deg) => deg <= 5)) {
+        const e = edgeError(exponentiated, heightM, elevationDeg);
+        if (!(e <= 0.03)) {
+          off.push(`${heightM} m at ${elevationDeg}°: ${(e * 100).toFixed(3)}%`);
+        }
+      }
+    }
+    expect(off).toEqual([]);
+  });
+
+  it("finds R05's mapping over 10% off from 2 m at the horizon and over 0.3% off at the zenith", () => {
+    const table = r05Transmittance(R1);
+    const r05 = (heightM: number, mu: number): Rgb3 => r05SunTransmittance(table, R1, heightM, mu);
+    expect(edgeError(r05, 2, 0)).toBeGreaterThan(0.1);
+    expect(edgeError(r05, 2, 90)).toBeGreaterThan(0.003);
+  });
+
+  it("maps no axis of fewer than 2 texels", () => {
+    const axes = [
+      TRANSMITTANCE_SIZE.widthTexels,
+      TRANSMITTANCE_SIZE.heightTexels,
+      MULTI_SCATTERING_SIZE.widthTexels,
+      MULTI_SCATTERING_SIZE.heightTexels,
+      ...(["high", "low"] as const).flatMap((setting) => {
+        const sizes = TABLE_SIZES[setting];
+        return [
+          sizes.skyView.widthTexels,
+          sizes.skyView.heightTexels,
+          sizes.aerialPerspective.widthTexels,
+          sizes.aerialPerspective.heightTexels,
+          sizes.aerialPerspective.slices,
+        ];
+      }),
+    ];
+    expect(Math.min(...axes)).toBeGreaterThanOrEqual(2);
   });
 });

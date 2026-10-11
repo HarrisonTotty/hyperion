@@ -14,7 +14,11 @@
 // transmittance read at the ground's radius (Bevy reads it at radius 0 and omits the 1 / pi); the
 // 64 directions are sebh's 8 x 8 stratified sphere, with its reduction. Each step is sampled at its
 // midpoint, and its in-scattering is taken without f32's cancellation (`stepFactor` in
-// common.wgsl, R05.T12.e's step factor, taken here in R08.T6.a). sebh's code is used under its
+// common.wgsl, R05.T12.e's step factor, taken here in R08.T6.a). Each texel stands at its height,
+// 10 m + v (H - 10 m), and the ray's length, each sample's height, the ground's shadow and the
+// sun's transmittance are taken from heights, never as a radius less the ground's (plan R08,
+// Design note 18, R08.T6.g); the transmittance table is read through Bruneton 2017's texel mapping
+// (Design note 19), whose write here is sebh's own, unchanged. sebh's code is used under its
 // licence (https://github.com/sebh/UnrealEngineSkyAtmosphere, master, fetched 2026-10-02):
 //
 //   MIT License
@@ -70,8 +74,11 @@ fn azimuthOf(k : u32) -> vec2f {
 var<workgroup> secondOrder : array<vec3f, DIRECTIONS>;
 var<workgroup> transfer : array<vec3f, DIRECTIONS>;
 
-fn transmittanceToSun(r : f32, muSun : f32) -> vec3f {
-  return bilinear(transmittance, transmittanceRMuToUv(r, muSun)).rgb;
+// The sun's transmittance from a height above the ground, read on the table's sphere.
+fn transmittanceToSun(heightM : f32, muSun : f32) -> vec3f {
+  let h = clamp(heightM, 0.0, medium.topHeightM);
+  let unit = transmittanceUnitAt(medium.bottomRadiusM, medium.topHeightM, h, muSun);
+  return tableAtUnit(transmittance, unit).rgb;
 }
 
 struct Integrated {
@@ -82,25 +89,28 @@ struct Integrated {
   transfer : vec3f,
 }
 
-fn integrate(r : f32, dir : vec3f, sun : vec3f) -> Integrated {
-  let origin = vec3f(0.0, 0.0, r);
+fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
+  let bottom = medium.bottomRadiusM;
+  let origin = vec3f(0.0, 0.0, bottom + heightM);
   let mu = dir.z;
-  let hitsGround = intersectsGround(r, mu);
-  let tMax = maxDistance(r, mu);
+  let hitsGround = groundHitFromHeight(bottom, heightM, mu);
+  let tMax = maxDistanceFromHeight(heightM, mu);
   let samples = max(u32(medium.samples), 1u);
   let dt = tMax / f32(samples);
   var luminance = vec3f(0.0);
   var transferSum = vec3f(0.0);
   var throughput = vec3f(1.0);
   for (var i = 0u; i < samples; i++) {
-    let p = origin + ((f32(i) + 0.5) * dt) * dir;
+    let t = (f32(i) + 0.5) * dt;
+    let p = origin + t * dir;
     let rP = length(p);
     let muSun = dot(sun, p / rP);
-    let local = mediumAt(rP);
+    let sampleHeightM = heightAlong(heightM, mu, t, rP);
+    let local = mediumAtHeight(sampleHeightM);
     let stepDepth = local.extinction * dt;
     let stepTransmittance = exp(-stepDepth);
-    let lit = select(1.0, 0.0, intersectsGround(rP, muSun));
-    let source = lit * transmittanceToSun(rP, muSun) * local.scattering / (4.0 * PI);
+    let lit = select(1.0, 0.0, groundHitFromHeight(bottom, max(sampleHeightM, 0.0), muSun));
+    let source = lit * transmittanceToSun(sampleHeightM, muSun) * local.scattering / (4.0 * PI);
     luminance += throughput * source * dt * stepFactor(stepDepth);
     transferSum += throughput * local.scattering * dt * stepFactor(stepDepth);
     throughput *= stepTransmittance;
@@ -109,7 +119,7 @@ fn integrate(r : f32, dir : vec3f, sun : vec3f) -> Integrated {
     let ground = origin + tMax * dir;
     let up = normalize(ground);
     let muSun = dot(sun, up);
-    luminance += transmittanceToSun(medium.bottomRadiusM, muSun) * throughput
+    luminance += transmittanceToSun(0.0, muSun) * throughput
       * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI;
   }
   return Integrated(luminance, transferSum);
@@ -121,9 +131,11 @@ fn main(
   @builtin(local_invocation_id) lid : vec3u,
 ) {
   let size = vec2f(textureDimensions(multiScatteringOut));
-  let uv = (vec2f(id.xy) + 0.5) / size;
-  let rMu = multiScatteringUvToRMu(uv, size);
-  let muSun = rMu.y;
+  // The texel's unit range (Bruneton's mapping, sebh's write): x the sun's zenith cosine, y the
+  // height from GROUND_OFFSET_M to the top.
+  let unit = clamp(unitFromTexelUv((vec2f(id.xy) + 0.5) / size, size), vec2f(0.0), vec2f(1.0));
+  let heightM = GROUND_OFFSET_M + unit.y * (medium.topHeightM - GROUND_OFFSET_M);
+  let muSun = unit.x * 2.0 - 1.0;
   let sun = vec3f(0.0, sqrt(max(1.0 - muSun * muSun, 0.0)), muSun);
 
   // sebh's stratified directions: uniform in azimuth and in the cosine of the polar angle.
@@ -133,7 +145,7 @@ fn main(
   let sinPhi = sqrt(max(1.0 - cosPhi * cosPhi, 0.0));
   let dir = vec3f(azimuth.x * sinPhi, azimuth.y * sinPhi, cosPhi);
 
-  let result = integrate(rMu.x, dir, sun);
+  let result = integrate(heightM, dir, sun);
   secondOrder[lid.z] = result.luminance;
   transfer[lid.z] = result.transfer;
   workgroupBarrier();

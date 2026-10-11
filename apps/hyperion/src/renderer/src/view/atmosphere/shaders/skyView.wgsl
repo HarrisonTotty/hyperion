@@ -17,7 +17,10 @@
 // distance to the ground lose the 0.5 m of an f32 radius near 6.4e6 m: from a camera 2 m up they
 // moved the table by up to 17% against the CPU twin, and 5.4% after. The rest, near the zenith
 // and at the limb, was the builtin trigonometry's, which `skyViewUvToParams` now avoids
-// (view.wgsl).
+// (view.wgsl). Changes (plan R08, R08.T6.g, Design notes 18 and 19): the horizon's angle comes
+// formed in f64 (`view.exact.z`), the ray's direction from precise sines and cosines, the sun's
+// shadow and the tables' coordinates from heights (`sourceAt`), and the texels stand at
+// Bruneton's mapping, which is sebh's write.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -35,22 +38,16 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     return;
   }
   let sizeF = vec2f(size);
-  let bottom = medium.bottomRadiusM;
-  let top = medium.topRadiusM;
   // The sky-view table serves cameras inside the atmosphere; above it the composite ray-marches.
-  let heightM = skyViewHeight(view.camera.w, top - bottom);
-  let r = bottom + heightM;
-  let params = skyViewUvToParams((vec2f(id.xy) + 0.5) / sizeF, sizeF, heightM, bottom);
+  let heightM = skyViewHeight(view.camera.w, medium.topHeightM);
+  let r = medium.bottomRadiusM + heightM;
+  let params = skyViewUvToParams((vec2f(id.xy) + 0.5) / sizeF, sizeF, view.exact.z);
   let viewZenithCos = params.x;
-  let lightViewCos = params.y;
-  let viewZenithSin = sqrt(max(1.0 - viewZenithCos * viewZenithCos, 0.0));
-  let dir = vec3f(
-    viewZenithSin * lightViewCos,
-    viewZenithSin * sqrt(max(1.0 - lightViewCos * lightViewCos, 0.0)),
-    viewZenithCos,
-  );
+  let viewZenithSin = params.y;
+  let dir = vec3f(viewZenithSin * params.z, viewZenithSin * params.w, viewZenithCos);
+  // The sun in the sky frame: its zenith's cosine and sine, the latter |s x up| (Design note 18).
   let muSunCamera = dot(view.sun.xyz, view.up.xyz);
-  let sun = vec3f(sqrt(max(1.0 - muSunCamera * muSunCamera, 0.0)), 0.0, muSunCamera);
+  let sun = vec3f(length(cross(view.sun.xyz, view.up.xyz)), 0.0, muSunCamera);
   let angle = scatteringAngle(dir, sun);
 
   let origin = vec3f(0.0, 0.0, r);

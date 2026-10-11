@@ -398,7 +398,13 @@ module R12 reads for this plan's ladder entries.
   (Design note 5), and a planetshine source passes slot 0. They serve the lit passes of R07, R10
   and R11 (R08.T9.b). The latitude and azimuth arguments are Design note 17's;
   `altitude_m` is the geodetic height, scaled inside. `oblate.wgsl` holds the shared WGSL: normal
-  gravity, R_α, κ and the slice and band reads. Every kernel is registered in R01's
+  gravity, R_α, κ and the slice and band reads. Since R08.T6.g (Design notes 18 and 19),
+  `view/shaders/preciseTrig.wgsl` holds `preciseSinCos`, `preciseCos`, `preciseAtan` and
+  `preciseAtan2`, prepended to every atmosphere module and offered to R07's, R10's and R11's lit
+  passes; and `common.wgsl` holds the shell's forms from a height (`groundHitFromHeight`,
+  `shellDistanceToGround`, `shellDistanceToTop`, `shellHeightAlong`, `transmittanceUnitAt`,
+  `multiScatteringUnitAt`) and Bruneton's texel pair (`unitFromTexelUv`, `texelUvFromUnit`,
+  `tableAtUnit`), through which R10's and R11's reads of these tables go. Every kernel is registered in R01's
   `WGSL_CATALOGUE` (`view/engine/catalogue.ts`; R05's are `ATMOSPHERE_TABLE_ENTRIES` and
   `ATMOSPHERE_VIEW_ENTRIES`; a compute entry carries no `displayName`, a material such as the
   composite's `"ATMOSPHERE"` does) and created through `RenderEngine.createCompute(KernelPair)`,
@@ -1693,7 +1699,8 @@ Names are those the owning plans give; the owning plan is authoritative.
       march missed the ground. From 2 km they were still 0.21% and 0.35% off there (R08.T6.b; the
       table is in `decision-r08-f32.md`). R05 also took WGSL's `cos`, `sin` and `acos`. WGSL bounds
       `cos` and `sin` only to 2⁻¹¹ absolute, and only within [−π, π]; it bounds `atan` and `atan2`
-      to 4,096 ULP, and `acos` and `asin` take atan2's bound. At the limb the sky view moves by
+      to 4,096 ULP, and `acos` and `asin` to the worse of 6.77 and 6.81 × 10⁻⁵ absolute and
+      atan2's inherited bound (W3C WGSL, §15.7.4.1). At the limb the sky view moves by
       2 × 10⁻² of itself for 10⁻⁴ in a ray's zenith cosine.
     - **The rule for heights.** No kernel forms a height, r² − R², a discriminant or a table
       coordinate as a difference of radii or of their squares.
@@ -1746,6 +1753,24 @@ Names are those the owning plans give; the owning plan is authoritative.
       - A cosine-only sky-view parameterisation was not adopted. It would change the sampling that
         R05.T12.e's gates and T8's limb interpolation are measured on, for a gain the precise forms
         give at under 1% of each kernel.
+    - **Texels the twin itself cannot resolve in `f32`** (ruled 2026-10-10, `decision-r08-f32.md`
+      §10). An `f32` kernel knows its ray only to its own resolution:
+      - the direction to 4ε (2.4 × 10⁻⁷ rad) from `rayThrough`, and to 5 × 10⁻⁷ rad in the sky
+        view's parameterisation;
+      - in the ray march, the ray's offset to 2ε|P| through q_b.
+
+      Where the twin moves by more than 10⁻³ over that resolution (the deep limb from far away, a
+      chord at tangency), no such kernel can hold 10⁻³. So in every kernel-against-twin check from
+      R08.T6.g on, a texel outside 10⁻³:
+      - passes only if the twin, re-marched over that resolution, moves by more than 10⁻³ of itself
+        there, and the GPU's value lies within the twin's range over it, widened by 10⁻³;
+      - may pass so only in views from above the atmosphere's top, never inside it and never in the
+        per-planet tables.
+
+      At most 1% of a check's channels pass so, and each is recorded with its row and tangent
+      height. Over that, the check fails and reports, and the response is not a wider bound. The
+      rule never applies to the 5% metric's comparisons with the reference.
+
     - **Scope.** Every atmosphere module, the per-planet kernels and the composite included, and
       every module this plan adds: `oblate.wgsl` (T6.f), `irradiance.wgsl` and
       `surfaceLighting.wgsl` (T9.b), and the thick, deck and disc reads (T14–T16). R08.T6.g builds
@@ -1797,6 +1822,10 @@ Names are those the owning plans give; the owning plan is authoritative.
       - R08.T6.g changes the twin and the kernels together, so the picture and the twin move
         towards the reference, chiefly the low sun from near the ground; elsewhere by under
         2 × 10⁻³ by day (estimated; T6.g records the measurement).
+      - That move holds for the table read as optical depth, as R08.T6.c stores it. Until then the
+        table stores T, and its bilinear read overshoots the grazing column: the sun from 2 m on
+        the horizon is +48.7% too bright where R05's mapping left it −37.5% too dark (Risks,
+        "Deviations in T6.g, as built"; accepted by main for the interim, T6.c removes it).
 
 ## Tasks
 
@@ -2692,7 +2721,7 @@ The seventh, T6.g, runs second, after T6.b. It takes the kernels' own `f32` roun
 trigonometry out of R05's arithmetic (Design note 18), which moves the picture only towards the
 twin, so that the kernels meet their twin at every height a descent reaches. It also gives every
 table Bruneton's exact texel mapping (Design note 19), which moves the twin and the picture
-together, towards the reference, by amounts it records.
+together, towards the reference once T6.c stores optical depth, by amounts it records.
 
 - **R08.T6.a The CPU twin over N terms.** `tablesCpu.ts`, built on R05's `opticalDepth.ts` and
   `marchSteps.ts`, gives each of R05's kernels in `f64` at R05's sizes over a list of terms, with
@@ -2767,7 +2796,17 @@ together, towards the reference, by amounts it records.
   end-to-end figure over the twin's transmittance stays recorded, not held. The radiance tables keep
   the floor, since this task changes neither their format nor their scale.
 
-  Acceptance: `pnpm test` and `just test-render` pass.
+  Two of R08.T6.g's recorded exceptions are this task's to lift (main's rulings, 2026-10-10; Risks,
+  "Deviations in T6.g, as built"), both bilinear reads of T where it falls by orders of magnitude
+  between texels, which the stored τ removes:
+  - the twin's sun transmittance read from the stored table holds `decision-r08-remap.md` §6's 3% of
+    the oracle below 2° too, from 2 m, 20 m, 200 m and 2 km, where T6.g holds it on the table read
+    as optical depth (the stored read was 48.7%, 41.0% and 12.0% off at 0° from 2, 20 and 200 m);
+  - R05.T12.e's quadrature gate in the twin (`tablesCpu.test.ts`) holds the ray "band, 20000 m,
+    view zenith 94.441°, sun 95°/0°" within its 5% for twilight rays, and its pinned exception
+    (`T6C_EXCEPTION`, 6.02%) is removed.
+
+  Acceptance: `pnpm test` and `just test-render` pass, the two exceptions above removed.
 
 - **R08.T6.d Earth rebuilt.** `EARTH_REFERENCE` (`earth.ts`) is rebuilt from R08.T3's column and
   molecular term (tabulated, about 8.4 km in scale height, in place of R05's exponential at the US
@@ -3017,8 +3056,12 @@ together, towards the reference, by amounts it records.
     - the limb from 400 km on Earth and on the Saturn-radius body, and Earth's limb from
       4.2 × 10⁷ m;
   - on low, from 2 m and 2 km on each body, with the sun 20° up;
-  - with no exemption but a ray-march pixel whose twin ray lies within 10⁻⁶ rad of tangency to the
-    ground or the top, counted and recorded.
+  - under Design note 18's rule for texels the twin cannot resolve: in views from above the
+    atmosphere's top, a texel outside 10⁻³ passes only if the twin, re-marched with its ray turned
+    by ±4ε (±5 × 10⁻⁷ rad in the sky view) about two axes and, in the ray march, moved by ±2ε|P|,
+    moves by more than 10⁻³ of itself, and the GPU's value lies within that range widened by 10⁻³.
+    At most 1% of a check's channels pass so, each recorded with its row, tangent height and
+    spread. Views from inside the atmosphere and the per-planet tables pass 10⁻³ outright.
 
   T6.b's table of worst errors is re-measured and recorded here beside T6.b's. By hand, through the
   smoke harness's hidden captures (`just test-render --captures=DIR`): the horizon at sunset from
@@ -3121,10 +3164,23 @@ and its planetshine sources), with no source skipped outside the air. The march 
 atmosphere other than the ship's local body (`SceneFrame.localBody`) at its `apparentM` from R03's
 `sceneAt(model, observer, time, previous)` (Design note 13), with the limb, the terminator and the
 planet's shadow in its own air; a `contact` body, which has no position, draws none. The switch to
-the sky-view table is by altitude, with a blend band. A body seen from outside takes Design note
-18's spheroid rule with its own quadric constants, formed in `f64` from the camera's position
-relative to it, and the closest-approach form beyond a ÷ 2. The twin agreement on its limb is
-recorded at 10⁷, 10⁸ and 10⁹ m. Tests (no GPU):
+the sky-view table is by altitude, with a blend band.
+
+A body seen from outside takes Design note 18's spheroid rule with its own quadric constants,
+formed in `f64` from the camera's position relative to it, and the closest-approach form beyond
+a ÷ 2. At the far limb this task delivers:
+
+- the twin checks at 10⁷, 10⁸ and 10⁹ m, under Design note 18's rule for texels the twin cannot
+  resolve, on views narrowed so that the limb's lowest scale height spans at least four texels.
+  The 1% cap holds at 10⁷ m. At 10⁸ and 10⁹ m the share is recorded rather than capped, every
+  texel stays within 10⁻³ or within its envelope, and the median and largest envelope half-widths
+  are recorded per distance;
+- the far limb's fidelity under Design note 10's 5%: per distance, the march's limb pixels at the
+  output resolution against the twin's mean over each pixel's footprint (8 × 8 sub-rays), on Design
+  note 10's limb set. A pixel over 5% is reported to "main" for a ruling: integration across the
+  limb, or R07's disc taking over sooner for that body.
+
+Tests (no GPU):
 
 - the CPU march just inside the top agrees with the sky-view twin to 1% at the band's edges;
 - R05.T12.e's quadrature gate holds for the widened march, at one source and at
@@ -4305,7 +4361,9 @@ generator, and the reference's sampling needs no domain tag.
     multiple-scattering directions, and took precise forms for the sky view's angles. R08.T6.g,
     run before T6.c, does the rest, under a static check that keeps it.
   - _Open._
-    - The far limb of another body, from 10⁷–10⁹ m, is T8's to record.
+    - The far limb of another body, from 10⁷–10⁹ m, is T8's. It is held under Design note 18's rule
+      for texels the twin cannot resolve, and against each pixel's footprint mean under the 5%
+      metric (`decision-r08-f32.md` §10.4).
     - R07's `litBody.wgsl` takes built-in trigonometry that R10's terrain lighting calls, with "main"
       (`decision-r08-f32.md` §7, §9).
     - The air below the datum is with "main" too (§9). Every density reads a negative height as the
@@ -4496,6 +4554,264 @@ generator, and the reference's sampling needs no domain tag.
     not mutually inverse: a texel written and read back lands (x − ½) ÷ (n + 1) of a texel off,
     up to 0.015 texel on the 32² table. R08.T6.g takes Bruneton's exact pair in every table,
     including the transmittance table, which took none.
+    - _Note_ (R08.T6.g, main's ruling 2026-10-10). The ruling's §3 and §6 estimates of the sun's
+      transmittance near the horizon (Bruneton's mapping "under +0.4% at 0°", the edge test's
+      "estimated worst 2.0%, from 200 m at 0°") assumed the table read as optical depth, as
+      R08.T6.c stores it, not as T, as it is stored until then. Measured in the twin, they hold for
+      the optical-depth read (0.36% and 1.96%). Read as T, Bruneton's mapping is 48.7%, 41.0% and
+      12.0% off at 0° from 2, 20 and 200 m, against R05's mapping's −37.5%, +50.1% and +12.3%: T
+      falls by ×3 (red) to ×10 (blue) a texel across the bottom rows and the last columns, where a
+      bilinear read of T overshoots. "Deviations in T6.g, as built" records how the tests stand
+      until T6.c.
+
+- **Deviations in T6.g, as built** (2026-10-10). Design notes 18 and 19 (`decision-r08-f32.md`,
+  `decision-r08-remap.md`, `decision-r08-t6b-floor.md` §4) in R05's kernels, the twin and the
+  smoke. Files as T6.g lists them, `test/atmosphereWgsl.ts`, the static check
+  `hillaire.test.ts` and `tables.test.ts` share, and `smoke/page.ts`, which registers the smoke's
+  group.
+  - _Names beside the Provides._
+    - `hillaire.ts`: `viewExactOf(positionM, figure, topHeightM, inputs, sunAngularRadiusRad)` and
+      `ViewExact` (q_g, q_t, β and sin ρ in f64), `skyViewHeight` (the WGSL's clamp, pinned by a
+      test), `FrameOutputs`, and `HillaireAtmosphere.drawKernelArm(view, sun, scene)`.
+    - `tables.ts`: `KERNEL_ARM_FORMAT`, `withKernelArmFormat(pair)`, `PlanetTableTextures` and
+      `AtmosphereTables.buildKernelArm()`.
+    - `opticalDepth.ts`: `unitFromTexelUv`, `texelUvFromUnit` and `opticalDepthToTop`.
+    - `tablesCpu.ts`: `rayMarchTexelTwin(planet, view, settings, marched)` and
+      `rayMarchRayAlongTwin(medium, view, originM, direction, tSurfaceM)`, `rayMarchTwin`'s texel
+      and its ray's clipping split out unchanged, which the smoke's envelope marches again.
+    - `test/atmosphereWgsl.ts`: `FORBIDDEN_IN_ATMOSPHERE_WGSL`, `wgslCode` and `forbiddenIn`,
+      shared by `hillaire.test.ts` and `tables.test.ts`. Beside the names T6.g lists, it refuses
+      `transmittanceUvToRMu`, `multiScatteringUvToRMu`, `multiScatteringRMuToUv` and the `Medium`
+      uniform's `topRadiusM`.
+    - WGSL:
+      - `common.wgsl`: `shellAboveGround`, `shellBelowTop`, `groundHitFromHeight` (moved here),
+        `shellDistanceToGround`, `shellDistanceToTop`, `shellMaxDistance`, `shellHeightAlong`,
+        `transmittanceUnitAt`, `multiScatteringUnitAt`, the pair and `tableAtUnit`;
+      - `medium.wgsl`: `transmittanceTexelOf`;
+      - `source.wgsl`: `ScatteringAngle.oneMinusCos` and `MarchStep.fromLowestM`;
+        `tableMultiScattering` loses its unused ground radius;
+      - `rayMarch.wgsl`: `RayQuadric`, `rayQuadric`, `quadricHits` and `radialHeight`;
+      - `preciseTrig.wgsl`: `preciseSinCos` and `preciseAtanUnit` beside T6.b's three.
+    - `view.wgsl`'s `skyViewUvToParams(uv, size, beta)` returns the ray's zenith cosine and sine
+      and its azimuth's, and `skyViewParamsToUv(ground, zenith, azimuthHalfSine, size, beta)`
+      takes the read's zenith angle and sin(φ ÷ 2).
+    - The composite's `shell` is x = H (y, z, w unused). The sky view's sphere is `view.up.w`, the
+      camera's Gaussian radius, as the kernels take it.
+  - _The arithmetic, beside the ruling's forms._
+    - _The transmittance texel's top² − r²_ is formed from its own height, (H − h)(2R + H + h), as
+      `transmittanceUnitAt` forms it on the read, not from H_ρ²(1 − v)(1 + v). At the top row h
+      stands f32's 8 mm below the top while the nominal form gives 0, so the first texel's ray
+      turned from the zenith to the horizontal and read back 0.036 of a texel off on the
+      Saturn-radius sphere. Now every texel of every sphere reads back within 10⁻³ of a texel.
+    - _Every transmittance ray is integrated to the top_, in the kernel and the twin
+      (`kernelOpticalDepth`), as Bruneton's `ComputeTransmittanceToTopAtmosphereBoundary` does. The
+      pair puts the last column on the ray tangent to the ground, which R05's rule ("to the top or
+      the ground") stopped at its tangent point by rounding: 0.30 in place of 8.9 × 10⁻⁵ beside it
+      on Earth's second row. R05's branch never ran at its texel centres. The oracle at table
+      texels is `opticalDepthToTop` (R05.T12.b's smoke check and the twin's tests).
+    - _The precise forms_ are Horner polynomials with constant coefficients (the ruling's lean).
+      `preciseSinCos` gives the sky view's write both sines and cosines (sin θ = 2sc, without
+      √(1 − cos²)). `preciseAtan2` takes one series on min ÷ max, so it divides nothing by zero
+      and costs one series where T6.b's took two.
+    - _The sky view's azimuth_ is written as cos φ = 1 − 2u², sin φ = 2u√(1 − u²) and read as
+      u = |ĥ − x̂| ÷ 2, the chord, in place of √((1 − cos φ) ÷ 2). The sun's horizontal component
+      in the sky frame is |s × n̂|.
+    - _Cornette–Shanks_ raises its denominator to 3/2 as x√x, not `pow`.
+    - _The ray march's far form_ takes k² − 1 as (k − 1)(k + 1) from the kernel's own k = a ÷ c,
+      so that t_o − t* belongs to the same quadric as q_a and q_b.
+    - _The far form's clamped split._ Where the ray meets the ground before t_o, the split's lowest
+      point is the ground's near root t_g, and t_g − t* is taken as −√disc ÷ q_a, with no
+      difference of large distances, so that Q is 0 where the segment meets the ground. Where it
+      is clamped elsewhere (a surface drawn before t_o, or a segment's start), t_low − t_o is still
+      formed as a difference, which rounds to about ε|P|, the depth's or the shell root's own
+      precision there. `precision.test.ts` holds ground-meeting rays from beyond a ÷ 2 (tangent
+      heights −0.3a, −50 km and −2 km) beside the limb's; the worst moves from 0.45 to 0.49 of the
+      bound, since it is the far form's Q* error elsewhere, not the clamp's.
+    - _The disc's solid angle_ in `#fillView` is 4π sin²(ρ ÷ 2), which keeps its digits in f64
+      for a sun far smaller than today's.
+  - _Main's rulings during the task (2026-10-10)._
+    - _The remap into T6.g_ (`decision-r08-remap.md`), with its plan text applied (Design note 19).
+    - _(B), the gate's one exception._ The pair moves one twilight ray of R05.T12.e's quadrature
+      gate in the twin, "band, 20000 m, view zenith 94.441°, sun 95°/0°", from under 0.76% to
+      6.01% at high's 75 steps, over its 5%. Every other ray holds, low's bounds and R05's own gate
+      (`marchSteps.test.ts`) included. It is pinned at 6.02% (`T6C_EXCEPTION`).
+      - The cause is bilinear T across the grazing column, which R05's clamp hid.
+      - In a scratch emulation the same table read as optical depth (T6.c's storage) gives 1.29%,
+        and stored T at 90 steps 0.87%. The second-worst ray ("band, 500 m, view zenith 90.703°,
+        sun 90°/180°") is 2.93% read as T and 1.30% as τ.
+      - T6.c's acceptance requires the exception gone.
+    - _The edge test, the same shape._ Read as T, the twin's sun transmittance is held within 3%
+      of the oracle from 2° to 5° and within 0.3% from 45° up, and R05's mapping fails as ruled
+      (37.5% from 2 m at the horizon, 0.65% at the zenith). Below 2° the 3% is held on the table
+      read as optical depth, emulating T6.c's storage (worst 1.96%, from 200 m at 0°). The
+      stored-T figures, with R05's beside them, signed, worst channel:
+
+      | From     | 0°                  | 0.25°  | 1°     | 2°     | 5°     | 45°   | 90°                |
+      | -------- | ------------------- | ------ | ------ | ------ | ------ | ----- | ------------------ |
+      | 2 m, T   | +48.7% (R05 −37.5%) | +24.8% | +7.08% | +2.78% | +1.07% | 0.19% | 0.13% (R05 −0.65%) |
+      | 20 m, T  | +41.0% (R05 +50.1%) | +19.5% | +4.09% | +1.51% | 0.67%  | 0.13% | 0.09%              |
+      | 200 m, T | +12.0% (R05 +12.3%) | +6.60% | +1.76% | +1.24% | 0.73%  | 0.13% | 0.09%              |
+      | 2 km, T  | +1.31%              | 0.95%  | 0.42%  | 0.27%  | 0.11%  | 0.01% | 0.00%              |
+      | 2 m, τ   | +0.36%              | +1.44% | +1.83% | +1.56% | +1.01% | 0.18% | 0.13%              |
+
+      T6.c's acceptance takes the stored read below 2° to 3%.
+
+    - _The interim picture, accepted_ (main, 2026-10-10). Until T6.c stores optical depth, the
+      drawn sun's disc from a camera below about 20 m on the horizon is too bright by the stored-T
+      read's overshoot: +48.7% from 2 m and +41.0% from 20 m at 0°, +24.8% at 0.25° (R05's mapping
+      was −37.5% from 2 m). The sky near a low sun moves with it (below). T6.c removes it, and
+      Design note 19 says so.
+    - _The limb views_ (`decision-r08-f32.md` §10, with its plan text). The fixed 10⁻⁶ rad
+      exemption is withdrawn. In a view from above the atmosphere's top, a sky-view or ray-march
+      texel outside 10⁻³ passes only where the twin, re-marched with its ray turned by ±4ε (±5 × 10⁻⁷
+      rad in the sky view) about two axes across it and, in the ray march, moved by ±2ε|P|, moves
+      by more than 10⁻³ of itself, and the GPU's value lies within that envelope widened by 10⁻³;
+      at most 1% of a check's channels (`ENVELOPE_SHARE_CAP`), each recorded with its texel, its
+      tangent height and its spread. The aerial perspective takes no envelope: from above the top
+      it holds no air, and it passes 10⁻³ outright everywhere. Views from inside the atmosphere and
+      the per-planet tables pass 10⁻³ outright.
+  - _The reviews' fixes._ β is described as sebh's angle from the nadir to the horizon (π − β the
+    horizon's zenith angle), and Design note 18's bound on WGSL's `acos` and `asin` as WGSL states
+    it, the worse of 6.77 and 6.81 × 10⁻⁵ absolute and atan2's inherited bound (§15.7.4.1); with
+    every division and `sqrt` at WGSL's extremes, `preciseAtan2` reaches about 1 × 10⁻⁶ (the
+    science check), twice its correctly rounded figure.
+  - _The twin's read-after-write tests_ hold 10⁻⁹ relative above 10⁻⁶ of the table's largest, the
+    twin bound's floor. A read stands about 10⁻¹² of a texel from its centre in f64, so a texel beside
+    one 10⁵–10⁷ times larger misses by that much of itself: T near 10⁻¹⁸ at the grazing column
+    (3.1 × 10⁻⁷ of itself) and multiple scattering near 10⁻²² on the night side.
+  - _`precision.test.ts`_, measured, as fractions of each bound (worst over the four spheres or
+    figures):
+    - heights along a ray 0.18–0.32 (that is, 1.8–3.2 × 10⁻⁷ of max(t, |h|, 1 km)); distances
+      0.11–0.24 (1.1–2.4 × 10⁻⁶ of themselves); no decision flips in 2,814–2,816 a sphere;
+      table coordinates 0.039–0.063 (4–6 × 10⁻⁵ of a texel);
+    - R05's |p| − R 374 (Earth) to 16,000 (2 R_J) times the height bound, and 122–167 decisions
+      flipped a sphere;
+    - the quadric's near form 0.43–0.47 of its bound, R05's `heightAbove` 1,027–25,406 times it;
+      the closest-approach form at most 0.49 of its bound (1.5a to 10⁹ m, ground-meeting rays
+      included), and the near form at 1.5a at most 0.66;
+    - the precise forms 3.7 × 10⁻⁷ (sin and cos), 2.2 × 10⁻⁷ (atan) and 3.7 × 10⁻⁷ (atan2);
+    - the pair at most 1.5 × 10⁻⁵ of a texel (exact at the powers of two), and the sky view's read
+      after its write 2.4 × 10⁻⁴ of a texel (192 × 108 and 128 × 64, from 1 m, 2 km and 99 km, on
+      Earth's and Saturn's radii). The zenith and nadir rows are held in v alone, since each holds
+      one ray whatever its column, and no other texel is skipped.
+    - The closest-approach form is held from 1.5a, 6.6a, 60a and 10⁹ m with the far form forced,
+      and at 1.5a the near form too, since at h₀ = a ÷ 2 exactly the kernel takes it.
+    - The near form's samples are those above −20 km: from −400 m straight down a ray crosses the
+      body's interior, where q → −1 and no height means anything, and terrain ends it.
+    - sebh's miss is held to (x − ½) ÷ (n + 1) in f64, since f32's own rounding of a position is
+      about 10⁻⁵ of a texel at these sizes, and to over 10⁻³ of a texel at both ends in f32.
+  - _The smoke_ (`checkAtmosphereHeights`, "R08.T6.g heights and angles in f32").
+    - The kernel arm is `HillaireAtmosphere.drawKernelArm` and `AtmosphereTables.buildKernelArm`,
+      over the same tables and view, so that both arms take one dispatch path. Nothing draws the
+      arm's targets.
+    - In-air views draw a surface 60 km ahead, which the march serves. Their sky view and aerial
+      volume are the open sky's, and an open-sky frame from inside the air marches nothing. The
+      composite's frame of each view is checked finite.
+    - The limb cameras look along the equatorial limb, ±150 km of tangent height about 50 km, with
+      the sun 20° up and 2° below the tangent point's horizon.
+    - The sky view runs at half its width and height (`twinSizes`), each texel one ray.
+    - Each check reports its table's largest value, the channels the floor carries, and any
+      envelope channels.
+    - The kernel arm's five kernels are made by `drawKernelArm` and `buildKernelArm` alone, outside
+      `WGSL_CATALOGUE`: each is a catalogued kernel with its storage format changed, and compiles
+      in the smoke's group. `HillaireAtmosphere.dispose()` releases the arm's three targets; the
+      frame's own are left to the engine, as before. `LOW_TWIN_WORST` does not move, and nothing
+      of R05.T12.e's gate is re-pinned but the one exception above.
+  - _Measured on SwiftShader_ (`just test-render`, both variants; the stored arm on both settings,
+    the kernel arm on high; worst relative error against the twin, of the bound 10⁻³):
+    - Near the ground every check passes on all three bodies. The kernel arm is within 2.1 × 10⁻⁴
+      at every height and sun (the sky view at 1–2 m), most of it near 10⁻⁵; the ray march is
+      3–4 × 10⁻⁶ and the aerial perspective 8 × 10⁻⁶ everywhere. The stored arm's worst is its
+      format's rounding, carried by the floor where under 2⁻¹⁴.
+    - T6.b's near-ground table, re-measured: the worst relative error against the twin, in 10⁻³
+      (stored arm, high, Earth's medium, sun 20° up, a surface 60 km ahead; the kernel arm in
+      brackets; * a channel under 2⁻¹⁴ that the format's floor carries):
+
+      | Camera height | Earth sky view | Earth ray march | Saturn-radius sky view | Saturn-radius ray march | Saturn-radius aerial |
+      | ------------- | -------------- | --------------- | ---------------------- | ----------------------- | -------------------- |
+      | 2 m           | 0.67 (0.21)    | 0.76 (0.004)    | 0.69 (0.014)           | 1.42* (0.003)           | 0.49 (0.008)         |
+      | 20 m          | 0.52 (0.012)   | 0.48 (0.004)    | 0.68 (0.032)           | 0.47 (0.004)            | 0.49 (0.008)         |
+      | 200 m         | 0.49 (0.003)   | 0.48 (0.004)    | 0.48 (0.005)           | 0.48 (0.003)            | 0.49 (0.008)         |
+      | 2 km          | 0.49 (0.004)   | 0.47 (0.003)    | 0.49 (0.004)           | 0.48 (0.003)            | 0.49 (0.008)         |
+
+      Before T6.b: 17%, 14%, 100% (the GPU gave 0), the ground missed and 0.39% at 2 m (T6.b's
+      table above). From 1 m on the 2 R⊕ body: sky view 0.59 (0.16), ray march 0.80 (0.003),
+      aerial perspective 0.49 (0.008). With the sun 2° below the horizon every view is within the
+      same figures in the kernel arm.
+
+    - _The limbs._ Earth's limb from 400 km passes outright (sky view 0.50, ray march 0.22, in the
+      kernel arm). Three checks pass by the envelope (`decision-r08-f32.md` §10), and the three
+      texels that failed 10⁻³ before the ruling (Earth's (49, 21), the Saturn-radius march's
+      (9, 10) and sky view's (36, 26)) each lie inside theirs:
+      - Earth's limb from 4.2 × 10⁷ m (3.56 × 10⁷ m up), the ray march's mean transmittance:
+        8 channels of 8,192 (0.10%) in the kernel arm and 2 in the stored arm, all on row 21 at
+        tangent heights 0.32–1.07 km, spreads 85–149 × 10⁻³ of the value, the GPU's value at most
+        0.05 of the half-width from the envelope's middle;
+      - the Saturn-radius limb from 400 km, the ray march, both suns: 12 channels (0.15%), texels
+        (9, 10), (10, 10), (53, 10) and (54, 10), all three colours, at tangent heights
+        99.96–99.98 km (20–40 m under the top), spreads 0.16–0.45 of the value, at most 0.12 of
+        the half-width;
+      - the same limb's sky view with the sun 2° below: 22 channels of 15,552 (0.14%), rows 26 and
+        27 about the horizon (tangent heights 2.0 and −1.9 km) and (46, 24) at 44 km, spreads
+        7.5–27 × 10⁻³, at most 0.25 of the half-width.
+    - _Format-limited stored tables_ (largest colour under 2.0 × 10⁻⁴), on both variants:
+      - every kernel of the Saturn-radius sphere with the sun 2° below the horizon from 2 m to
+        200 m, and its 2 km aerial perspective and ray march. Its sky view's largest from 2 m is
+        5.4 × 10⁻⁵, against Earth's 4.6 × 10⁻³ and the 2 R⊕ body's 1.9 × 10⁻³, and 2.5 × 10⁻⁴
+        from 2 km. The datum's shadow stands higher over the larger body, as
+        `decision-r08-t6b-floor.md` §4 estimated;
+      - the aerial perspective of every limb view, which from above the air holds none;
+      - the sky view of the limb views whose camera's own sky is dark: Earth's from 4.2 × 10⁷ m
+        with either sun (its sub-camera point is in night), and both 400 km limbs with the sun 2°
+        below.
+    - The smoke's group adds 260 checks a variant; every check passes on both (578 and 576), with
+      no uncaptured GPU error. The run took 87 s and 86 s a variant, against T6.b's 82 s and the
+      180 s watchdog.
+  - _The texel mapping's own change_, the twin before (T6.b, `be1646f5`) against after, at the
+    Earth views (high, the sky view at 96 × 54, the march over a surface 60 km ahead), the worst
+    signed change of any texel and channel; the aerial volume at the composite's read of each
+    pixel of the 64 × 32 frame, since its froxels now stand at other rays:
+
+    | From, sun        | Sky view      | Ray march     | Aerial perspective                    |
+    | ---------------- | ------------- | ------------- | ------------------------------------- |
+    | 2 m, 20°         | +0.51%        | +0.38%        | +2.0% (alpha, the horizon row, 32 km) |
+    | 2 m, 2°          | +5.4%         | +5.3%         | +8.6%                                 |
+    | 2 m, 0.5°        | +10.4%        | +10.1%        | +17.2%                                |
+    | 2 m, −2°         | +1.4%         | +1.4%         | +2.4%                                 |
+    | 20 m, 2° / 0.5°  | +1.5% / +2.5% | +1.5% / +2.4% | +8.3% / +16.8%                        |
+    | 200 m, 2° / 0.5° | +1.7% / +1.8% | +1.6% / +1.7% | +6.4% / +12.6%                        |
+    | 2 km, 20°        | +0.48%        | +0.43%        | +4.4% (alpha, the horizon row)        |
+    - The sun's transmittance points are the table under "The edge test".
+    - Against `decision-r08-remap.md` §3's estimates: the horizon sky at sunset from 2 m moves by
+      +10% with the sun 0.5° up and +5.4% at 2° (estimated 6–18% and 3.7–4.8%), toward a brighter
+      low sun, which is partly the stored-T overshoot until T6.c. By day it moves by up to 0.5%,
+      near the horizon in blue, where §3 estimated under 2 × 10⁻³: that is the
+      multiple-scattering read's own shift (§3's 0.1–0.7% of the term above 5°).
+    - The aerial volume's largest changes sit at the horizon row and the last slice, where the
+      volume changes fastest across a froxel and the two grids' interpolation errors differ.
+
+  - _Recorded by hand, the sunset captures_ (`just test-render --captures=DIR`, hidden, default
+    variant; Earth's medium, the sun 0.5° up). `r08-sunset-earth-2m` and
+    `r08-sunset-2-earth-radii-1m`, across the comparison captures' 90° field, show no band at the
+    horizon's row: the sky's last rows fall smoothly to the ground's, with no step (Earth from 2 m:
+    245, 242, 234 and 211 in red over the last four rows, then the ground). Their `-disc` twins, across 12°, show the
+    sun's disc 0.5° up, 8 rows high, saturated white at the capture's exposure, over the same smooth
+    horizon. In the 90° field the disc is under a pixel and no pixel centre falls inside it, which
+    is why the narrow pair exists.
+  - _The passes' times are not measured._ The machine was never quiet during the task (the
+    1-minute load 8–100, with other lanes' `just ci` runs). By the operation count of
+    `decision-r08-f32.md` §5 the arithmetic adds under 5% to each march. The measurement waits for
+    a quiet window: the descent spike, hidden, with the three per-frame dispatches labelled apart
+    for the run, at `be1646f5` and at this commit, under the heavy and GPU locks (the handoff has
+    the commands). T11 holds the budget.
+  - _For T6.c._ The gate exception and the stored-T edge reads are its to lift, as its acceptance
+    now says. The read sites take `transmittanceUnitAt` through `tableAtUnit`.
+  - _For T6.f._ `oblate.wgsl` follows Design note 18. `precision.test.ts` holds the emulations to
+    extend (`rayQuadric`, `marchSteps`, `radialHeight`), and the smoke's two arms
+    (`drawKernelArm`, `buildKernelArm`, `checkAtmosphereHeights`) take a Saturn-class figure as
+    they are.
+  - _For R10._ `view/shaders/preciseTrig.wgsl` and `common.wgsl`'s `groundHitFromHeight` exist.
+    R07's `litBody.wgsl` trigonometry stays with main's deferred list (`decision-r08-f32.md` §9).
 
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7).

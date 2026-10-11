@@ -11,32 +11,39 @@
 // notice is in multiScattering.wgsl). Changes: the phase functions are the medium's own terms',
 // per channel, a tabulated one among them (R08.T6.b); each term's density is evaluated once a
 // sample (R05.T12.e); the tables are read on their own sphere, at the sample's height above the
-// datum (Design note 16). Added here (R05.T12.e): the steps' placement (`marchSplit`, `marchStep`).
+// datum (Design note 16), from heights alone and through Bruneton's texel mapping (plan R08,
+// Design notes 18 and 19, R08.T6.g). Added here (R05.T12.e): the steps' placement (`marchSplit`,
+// `marchStep`).
 
 // The angle a ray scatters the sun's light through towards the eye: its cosine, which the closed
-// forms take, and u = sqrt(theta / pi), the phase tables' coordinate (`medium.ts`'s `PhaseTable`).
-// theta is atan2(|d x s|, d . s), which keeps its precision near the forward peak, where
-// acos(d . s) loses it in f32: 1 - cos(theta) falls below f32's resolution at 1 for theta under
-// about 3.5e-4 rad, the first three of 256 entries even in u. It is taken by `preciseAtan2`
-// (view.wgsl), since WGSL bounds the builtin atan2 only to 4096 ULP.
+// forms take; u = sqrt(theta / pi), the phase tables' coordinate (`medium.ts`'s `PhaseTable`); and
+// 1 - cos(theta) as half the squared chord, |d - s|^2 / 2 (plan R08, Design note 18, R08.T6.g),
+// which keeps its precision near the forward peak, where 1 - d . s loses it in f32: 1 - cos(theta)
+// falls below f32's resolution at 1 for theta under about 3.5e-4 rad. theta is atan2(|d x s|,
+// d . s), for the same reason in place of acos(d . s), taken by `preciseAtan2`
+// (`view/shaders/preciseTrig.wgsl`), since WGSL bounds the builtin atan2 only to 4096 ULP.
 struct ScatteringAngle {
   cosTheta : f32,
   u : f32,
+  oneMinusCos : f32,
 }
 
 // The scattering angle between a ray's unit direction and the unit direction to the sun.
 fn scatteringAngle(dir : vec3f, sun : vec3f) -> ScatteringAngle {
   let cosTheta = dot(dir, sun);
   let theta = preciseAtan2(length(cross(dir, sun)), cosTheta);
-  return ScatteringAngle(cosTheta, sqrt(theta / PI_VIEW));
+  let chord = dir - sun;
+  return ScatteringAngle(cosTheta, sqrt(theta / PI_VIEW), 0.5 * dot(chord, chord));
 }
 
 // Term i's phase per channel towards the eye, sr^-1 (`medium.ts`'s `phaseAt`). Term.phase.w: 0
 // none; 1 Rayleigh, with each channel's depolarisation ratio rho in Term.phase.xyz, Chandrasekhar's
 // 3 / (16 pi) ((1 + 3 gamma) + (1 - gamma) cos^2) / (1 + 2 gamma), gamma = rho / (2 - rho), which at
 // rho = 0 is R05's 3 / (16 pi) (1 + cos^2) (R08.T3.c); 2 Cornette–Shanks with its g in
-// Term.phase.x; 3 tabulated: layer i of `phaseTables`, its entries even in u from 0 to 1, read
-// linear in u between the two about it.
+// Term.phase.x, its denominator 1 + g^2 - 2 g cos(theta) taken as (1 - g)^2 + 2 g (1 - cos(theta))
+// (R08.T6.g), since in f32 the first form loses up to about 0.4% of the forward peak at g = 0.99,
+// where (1 - g)^2 is 1e-4, and raised to 3/2 as x sqrt(x); 3 tabulated: layer i of `phaseTables`,
+// its entries even in u from 0 to 1, read linear in u between the two about it.
 fn phaseOf(i : u32, term : Term, angle : ScatteringAngle) -> vec3f {
   let kind = term.phase.w;
   if (kind < 0.5) {
@@ -51,7 +58,8 @@ fn phaseOf(i : u32, term : Term, angle : ScatteringAngle) -> vec3f {
   if (kind < 2.5) {
     let g = term.phase.x;
     let k = 3.0 / (8.0 * PI_VIEW) * (1.0 - g * g) / (2.0 + g * g);
-    let peak = pow(max(1.0 + g * g - 2.0 * g * cosTheta, 1e-6), 1.5);
+    let denominator = max((1.0 - g) * (1.0 - g) + 2.0 * g * angle.oneMinusCos, 1e-6);
+    let peak = denominator * sqrt(denominator);
     return vec3f(k * (1.0 + cosTheta * cosTheta) / peak);
   }
   let n = textureDimensions(phaseTables).x;
@@ -90,24 +98,15 @@ fn sampleMediumAt(heightM : f32, angle : ScatteringAngle) -> SampleMedium {
 }
 
 // The transmittance from a height above the datum along a zenith cosine to the top, read from the
-// table on the tables' own sphere.
+// table on the tables' own sphere, of ground radius `tableBottomM` and the medium's height.
 fn tableTransmittance(table : texture_2d<f32>, tableBottomM : f32, heightM : f32, mu : f32) -> vec3f {
-  let top = tableBottomM + (medium.topRadiusM - medium.bottomRadiusM);
-  let r = tableBottomM + clamp(heightM, 0.0, top - tableBottomM);
-  return bilinear(table, shellRMuToUv(tableBottomM, top, r, mu)).rgb;
+  let h = clamp(heightM, 0.0, medium.topHeightM);
+  return tableAtUnit(table, transmittanceUnitAt(tableBottomM, medium.topHeightM, h, mu)).rgb;
 }
 
 // The multiple-scattering source per unit illuminance at a height, for the sun's zenith cosine.
-fn tableMultiScattering(
-  table : texture_2d<f32>,
-  tableBottomM : f32,
-  heightM : f32,
-  muSun : f32,
-) -> vec3f {
-  let top = tableBottomM + (medium.topRadiusM - medium.bottomRadiusM);
-  let size = vec2f(textureDimensions(table));
-  let r = tableBottomM + max(heightM, 0.0);
-  return bilinear(table, shellMultiScatteringRMuToUv(tableBottomM, top, r, muSun, size)).rgb;
+fn tableMultiScattering(table : texture_2d<f32>, heightM : f32, muSun : f32) -> vec3f {
+  return tableAtUnit(table, multiScatteringUnitAt(medium.topHeightM, max(heightM, 0.0), muSun)).rgb;
 }
 
 // The scattering source at a point per unit sun illuminance, per unit length: single scattering
@@ -121,11 +120,10 @@ fn sourceAt(
   muSun : f32,
   local : SampleMedium,
 ) -> vec3f {
-  let rTable = tableBottomM + max(heightM, 0.0);
-  let lit = select(1.0, 0.0, shellIntersectsGround(tableBottomM, rTable, muSun));
+  let lit = select(1.0, 0.0, groundHitFromHeight(tableBottomM, max(heightM, 0.0), muSun));
   let toSun = tableTransmittance(transmittance, tableBottomM, heightM, muSun);
   let single = lit * toSun * local.phasedScattering;
-  let multiple = tableMultiScattering(multiScattering, tableBottomM, heightM, muSun);
+  let multiple = tableMultiScattering(multiScattering, heightM, muSun);
   return single + multiple * local.scattering;
 }
 
@@ -179,10 +177,13 @@ fn marchSplit(
   return MarchSplit(tStartM, lowest, before, after, stepsBefore, stepsAfter, towardStart);
 }
 
-// One step of a march: its midpoint's distance along the ray and its length, m.
+// One step of a march: its midpoint's distance along the ray, its length, and its midpoint's
+// signed distance from the split's lowest point t*, formed without the difference of the two
+// distances (plan R08, Design note 18: the ray march's closest-approach form), m.
 struct MarchStep {
   tM : f32,
   dtM : f32,
+  fromLowestM : f32,
 }
 
 // Step `i` of a split segment, counted from tStart. A side of length L and n steps placed toward
@@ -194,13 +195,16 @@ fn marchStep(split : MarchSplit, i : u32) -> MarchStep {
     let unitM = split.beforeM / (n * n);
     if (split.beforeTowardStart) {
       let k = f32(i);
-      return MarchStep(split.startM + unitM * (k * k + k + 0.5), unitM * (2.0 * k + 1.0));
+      let fromStart = unitM * (k * k + k + 0.5);
+      return MarchStep(split.startM + fromStart, unitM * (2.0 * k + 1.0), fromStart - split.beforeM);
     }
     let k = f32(split.stepsBefore - 1u - i);
-    return MarchStep(split.lowestM - unitM * (k * k + k + 0.5), unitM * (2.0 * k + 1.0));
+    let fromLowest = unitM * (k * k + k + 0.5);
+    return MarchStep(split.lowestM - fromLowest, unitM * (2.0 * k + 1.0), -fromLowest);
   }
   let n = f32(split.stepsAfter);
   let k = f32(i - split.stepsBefore);
   let unitM = split.afterM / (n * n);
-  return MarchStep(split.lowestM + unitM * (k * k + k + 0.5), unitM * (2.0 * k + 1.0));
+  let fromLowest = unitM * (k * k + k + 0.5);
+  return MarchStep(split.lowestM + fromLowest, unitM * (2.0 * k + 1.0), fromLowest);
 }

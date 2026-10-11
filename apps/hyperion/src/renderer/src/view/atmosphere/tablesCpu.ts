@@ -7,7 +7,8 @@
  * Each twin follows its kernel's WGSL step for step, at the kernel's sizes and step counts unless
  * a caller asks for others: the same parameterisations, the same midpoints and placed steps
  * (`marchSteps.ts`, R05.T12.e), the same bilinear reads of the tables with their texel centres at
- * (i + ½) ÷ size, and the same in-scattering per step, throughput · S · Δt · g(σ_t Δt) with
+ * (i + ½) ÷ size, through the same texel mapping (Bruneton 2017's exact pair, plan R08, Design
+ * note 19, since R08.T6.g), and the same in-scattering per step, throughput · S · Δt · g(σ_t Δt) with
  * g(x) = (1 − e^(−x)) ÷ x. It differs only in arithmetic: `f64` throughout, g taken exactly where
  * `common.wgsl`'s `stepFactor` switches to a series for `f32`, and the tables kept in `f64` where
  * the GPU stores `rgba16float`. So it is the GPU's oracle (R08.T6.b's readbacks agree with it to
@@ -53,6 +54,7 @@ import type { Rgb } from "../photometry/toneCurve";
 import {
   type AtmosphereCamera,
   atmosphereInputs,
+  skyViewHeight,
   type SpheroidFigure,
   type SunState,
   type TableSizes,
@@ -70,12 +72,15 @@ import {
   phaseAt,
 } from "./medium";
 import {
+  distanceToTopM,
   intersectsGround,
   localRadiusM,
   maxDistanceM,
   type Shell,
+  texelUvFromUnit,
   transmittanceRMuToUv,
   transmittanceUvToRMu,
+  unitFromTexelUv,
 } from "./opticalDepth";
 import { SKY_SPECTRAL_TO_LUMINANCE, SUN_SPECTRAL_TO_LUMINANCE } from "./solar";
 import {
@@ -168,6 +173,29 @@ function phasesAt(terms: readonly TwinTerm[], cosTheta: number): Float64Array {
   return phases;
 }
 
+/** A value clamped to [0, 1]. */
+function unitClamp(x: number): number {
+  return Math.min(Math.max(x, 0), 1);
+}
+
+/** Texel i's unit range on an axis of n texels, Bruneton's mapping clamped, as the kernels write. */
+function unitOfTexel(i: number, n: number): number {
+  return unitClamp(unitFromTexelUv((i + 0.5) / n, n));
+}
+
+/**
+ * A table's bilinear read at a unit range (u, v), each clamped to [0, 1] and taken through
+ * Bruneton's texel mapping: `common.wgsl`'s `tableAtUnit`.
+ */
+function tableAtUnitInto(table: TwinTable, u: number, v: number, out: TwinRgb): void {
+  bilinearInto(
+    table,
+    texelUvFromUnit(unitClamp(u), table.widthTexels),
+    texelUvFromUnit(unitClamp(v), table.heightTexels),
+    out,
+  );
+}
+
 /** Bilinear read of a table's RGB, texel centres at (i + ½) ÷ size, clamped: `common.wgsl`'s. */
 function bilinearInto(table: TwinTable, u: number, v: number, out: TwinRgb): void {
   const w = table.widthTexels;
@@ -199,7 +227,7 @@ export function exactStepFactor(x: number): number {
 
 // --- Transmittance -------------------------------------------------------------------------------
 
-/** The optical depth along a ray by the transmittance kernel's midpoint rule, into `out`. */
+/** The optical depth along a ray to the top by the transmittance kernel's midpoint rule, into `out`. */
 function kernelOpticalDepthInto(
   terms: readonly TwinTerm[],
   shell: Shell,
@@ -210,7 +238,7 @@ function kernelOpticalDepthInto(
   scratch: Float64Array,
 ): void {
   const n = Math.max(Math.floor(samples), 1);
-  const dt = maxDistanceM(shell, rM, mu) / n;
+  const dt = distanceToTopM(shell, rM, mu) / n;
   out.fill(0);
   for (let i = 0; i < n; i += 1) {
     sampleInto(terms, null, localRadiusM(rM, mu, (i + 0.5) * dt) - shell.bottomRadiusM, scratch);
@@ -221,8 +249,15 @@ function kernelOpticalDepthInto(
 }
 
 /**
- * The optical depth per channel from radius `rM` along zenith cosine `mu` to the top or the
- * ground, by `transmittance.wgsl`'s rule: `samples` equal steps, each sampled at its midpoint.
+ * The optical depth per channel from radius `rM` along zenith cosine `mu` to the top, by
+ * `transmittance.wgsl`'s rule: `samples` equal steps, each sampled at its midpoint.
+ *
+ * @remarks
+ * The table's rays never pass below the ground's tangent (x_μ ≤ 1), and the tangent ray itself,
+ * its last column since R08.T6.g's texel mapping, is integrated to the top as Bruneton 2017's
+ * `ComputeTransmittanceToTopAtmosphereBoundary` integrates it, never to its tangent point. A ray
+ * that does meet the ground is marched through to the top, its heights below the ground taken as
+ * the ground's; no texel asks for one.
  *
  * @param bottomRadiusM - The ground's radius, m; the top is `medium.topHeightM` above it.
  * @param samples - The steps, at least 1: the kernel's {@link TRANSMITTANCE_SAMPLES} by default.
@@ -264,7 +299,7 @@ export function transmittanceTwin(
   const scratch = new Float64Array(9);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
-      const { rM, mu } = transmittanceUvToRMu(shell, (x + 0.5) / w, (y + 0.5) / h);
+      const { rM, mu } = transmittanceUvToRMu(shell, unitOfTexel(x, w), unitOfTexel(y, h));
       kernelOpticalDepthInto(terms, shell, rM, mu, samples, depth, scratch);
       texels.set(
         [Math.exp(-depth[0]), Math.exp(-depth[1]), Math.exp(-depth[2]), 1],
@@ -381,7 +416,7 @@ function integrateDirectionInto(
     sampleInto(terms, null, rP - shell.bottomRadiusM, scratch);
     const lit = intersectsGround(shell, rP, muSun) ? 0 : 1;
     const [u, v] = transmittanceRMuToUv(shell, rP, muSun);
-    bilinearInto(transmittance, u, v, toSun);
+    tableAtUnitInto(transmittance, u, v, toSun);
     for (const c of CHANNELS) {
       const scattering = scratch[c] ?? Number.NaN;
       const stepDepth = (scratch[3 + c] ?? Number.NaN) * dtM;
@@ -398,7 +433,7 @@ function integrateDirectionInto(
     const gz = rM + tMax * dir.z;
     const muSun = (sun.x * gx + sun.y * gy + sun.z * gz) / Math.sqrt(gx * gx + gy * gy + gz * gz);
     const [u, v] = transmittanceRMuToUv(shell, shell.bottomRadiusM, muSun);
-    bilinearInto(transmittance, u, v, toSun);
+    tableAtUnitInto(transmittance, u, v, toSun);
     for (const c of CHANNELS) {
       out[c] =
         (out[c] ?? 0) +
@@ -420,8 +455,8 @@ function multiScatteringTexelInto(
 ): void {
   const { widthTexels: w, heightTexels: h } = inputs.options.size;
   const { bottomRadiusM: bottom, topRadiusM: top } = inputs.shell;
-  const unitX = Math.min(Math.max(((x + 0.5) / w - 0.5 / w) * (w / (w - 1)), 0), 1);
-  const unitY = Math.min(Math.max(((y + 0.5) / h - 0.5 / h) * (h / (h - 1)), 0), 1);
+  const unitX = unitOfTexel(x, w);
+  const unitY = unitOfTexel(y, h);
   const rM =
     bottom +
     MULTI_SCATTERING_GROUND_OFFSET_M +
@@ -534,35 +569,26 @@ export interface TwinSources {
 
 /**
  * A planet's tables read as the per-frame kernels read them: `source.wgsl`'s `tableTransmittance`
- * (the height clamped into the shell) and `tableMultiScattering` (sebh's mapping, its sub-texel
- * remap), each bilinear.
+ * (the height clamped into the shell) and `tableMultiScattering` (sebh's unit range, its 10 m
+ * offset), each bilinear through Bruneton's texel mapping (plan R08, Design note 19).
  */
 export function tableSources(planet: PlanetTwin): TwinSources {
   const bottom = planet.bottomRadiusM;
   const atmosphereM = planet.medium.topHeightM;
   const shell = { bottomRadiusM: bottom, topRadiusM: bottom + atmosphereM };
   const table = planet.multiScattering;
-  const w = table.widthTexels;
-  const h = table.heightTexels;
   return {
     bottomRadiusM: bottom,
     sunTransmittance: (heightM, muSun, out) => {
       const rM = bottom + Math.min(Math.max(heightM, 0), atmosphereM);
       const [u, v] = transmittanceRMuToUv(shell, rM, muSun);
-      bilinearInto(planet.transmittance, u, v, out);
+      tableAtUnitInto(planet.transmittance, u, v, out);
     },
     multiScattering: (heightM, muSun, out) => {
       const v =
         (Math.max(heightM, 0) - MULTI_SCATTERING_GROUND_OFFSET_M) /
         (atmosphereM - MULTI_SCATTERING_GROUND_OFFSET_M);
-      const unitX = Math.min(Math.max(muSun * 0.5 + 0.5, 0), 1);
-      const unitY = Math.min(Math.max(v, 0), 1);
-      bilinearInto(
-        table,
-        (unitX + 0.5 / w) * (w / (w + 1)),
-        (unitY + 0.5 / h) * (h / (h + 1)),
-        out,
-      );
+      tableAtUnitInto(table, muSun * 0.5 + 0.5, v, out);
     },
   };
 }
@@ -814,11 +840,11 @@ export function skyViewRayTwin(
 ): TwinRay {
   const bottom = view.cameraRadiusM;
   const atmosphereM = medium.topHeightM;
-  const heightM = Math.min(Math.max(view.heightM, 1), atmosphereM - 1);
+  const heightM = skyViewHeight(view.heightM, atmosphereM);
   const rM = bottom + heightM;
   const { widthTexels: w, heightTexels: h } = size;
-  const unitX = Math.min(Math.max(((x + 0.5) / w - 0.5 / w) * (w / (w - 1)), 0), 1);
-  const unitY = Math.min(Math.max(((y + 0.5) / h - 0.5 / h) * (h / (h - 1)), 0), 1);
+  const unitX = unitOfTexel(x, w);
+  const unitY = unitOfTexel(y, h);
   const vHorizon = Math.sqrt(Math.max(heightM * (2 * bottom + heightM), 0));
   const beta = Math.acos(Math.min(Math.max(vHorizon / rM, -1), 1));
   const zenithHorizon = Math.PI - beta;
@@ -886,7 +912,8 @@ export function skyViewTwin(
  * The aerial-perspective volume's twin: for each froxel column, the running in-scattered radiance
  * per unit sun illuminance (rgb) and the mean transmittance (a) at each slice's far face, out to
  * `reachM` in slices of equal depth with `samplesPerSlice` even steps each (at least 1), on the
- * camera's own sphere, as `aerialPerspective.wgsl` stores them.
+ * camera's own sphere, as `aerialPerspective.wgsl` stores them, froxel (x, y) along the ray through
+ * the screen at (x, y) ÷ (size − 1), Bruneton's texel mapping (plan R08, Design note 19).
  *
  * @throws RangeError for a medium with a tabulated term that ends below its top at a density
  *   other than 0 (the module's remarks).
@@ -911,7 +938,8 @@ export function aerialPerspectiveTwin(
   const texels = new Float64Array(w * h * slices * 4);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
-      const direction = unit(unnormalisedRay(view, (x + 0.5) / w, (y + 0.5) / h));
+      // Bruneton's mapping on the screen axes (Design note 19): froxel (x, y) at (x, y) ÷ (size − 1).
+      const direction = unit(unnormalisedRay(view, unitOfTexel(x, w), unitOfTexel(y, h)));
       const ray: TwinRay = {
         originM,
         direction,
@@ -981,8 +1009,25 @@ export function rayMarchRayTwin(
   if (!(aboveTop || (depth > 0 && tSurfaceM > reachM))) {
     return null;
   }
-  const direction = unit(unnormalised);
-  const o = view.cameraM;
+  return rayMarchRayAlongTwin(medium, view, view.cameraM, unit(unnormalised), tSurfaceM);
+}
+
+/**
+ * A ray from `originM` along the unit `direction`, clipped as `rayMarch.wgsl` clips a texel's ray:
+ * against the datum spheroid's shells, ending at the ground or at a surface `tSurfaceM` along it
+ * (infinite where nothing is drawn). `null` where it misses the atmosphere. {@link rayMarchRayTwin}
+ * takes the camera's ray through a texel; the smoke takes it for a texel's ray turned or moved by
+ * the kernel's own resolution (R08.T6.g, `decision-r08-f32.md` §10).
+ */
+export function rayMarchRayAlongTwin(
+  medium: AtmosphereMedium,
+  view: TwinView,
+  originM: Vec3,
+  direction: Vec3,
+  tSurfaceM: number,
+): RayMarchRay | null {
+  const topM = medium.topHeightM;
+  const o = originM;
   const a = view.figure.equatorialRadiusM;
   const c = view.figure.polarRadiusM;
   const [shellNear, shellFar] = spheroidHits(o, direction, a + topM, c + topM);
@@ -995,7 +1040,8 @@ export function rayMarchRayTwin(
   }
   return {
     ray: { originM: o, direction, sun: view.sun, tStartM, tEndM, fromCamera: shellNear <= 0 },
-    bareGroundM: depth === 0 && hitsGround && groundNear <= tEndM ? groundNear : null,
+    bareGroundM:
+      !Number.isFinite(tSurfaceM) && hitsGround && groundNear <= tEndM ? groundNear : null,
   };
 }
 
@@ -1004,6 +1050,92 @@ export type RayMarchSettings = Pick<
   TableSizes,
   "rayMarchScale" | "rayMarchSamples" | "aerialPerspectiveReachM"
 >;
+
+/**
+ * One ray-march texel's twin along a clipped ray (`rayMarchRayTwin`, `rayMarchRayAlongTwin`): its
+ * in-scattered radiance per unit sun illuminance and mean transmittance, with the bare ground
+ * seen from above lit by the sun, and (0, 0, 0, 1) where the kernel marches nothing (`null`).
+ * The smoke marches a texel's ray again, turned or moved, through it (R08.T6.g).
+ *
+ * @throws RangeError for a medium with a tabulated term that ends below its top at a density
+ *   other than 0 (the module's remarks).
+ */
+export function rayMarchTexelTwin(
+  planet: PlanetTwin,
+  view: TwinView,
+  settings: RayMarchSettings,
+  marched: RayMarchRay | null,
+): readonly [number, number, number, number] {
+  const out = new Float64Array(4);
+  rayMarchTexelInto(rayMarchContext(planet, view, settings), marched, out);
+  return [out[0] ?? Number.NaN, out[1] ?? Number.NaN, out[2] ?? Number.NaN, out[3] ?? Number.NaN];
+}
+
+/** What every ray-march texel of a view reads. */
+interface RayMarchContext {
+  readonly medium: AtmosphereMedium;
+  readonly terms: readonly TwinTerm[];
+  readonly sources: TwinSources;
+  readonly geometry: MarchGeometry;
+  readonly view: TwinView;
+  readonly samples: number;
+}
+
+function rayMarchContext(
+  planet: PlanetTwin,
+  view: TwinView,
+  settings: RayMarchSettings,
+): RayMarchContext {
+  return {
+    medium: planet.medium,
+    terms: termsOf(planet.medium),
+    sources: tableSources(planet),
+    geometry: { kind: "spheroid", figure: view.figure },
+    view,
+    samples: Math.max(Math.floor(settings.rayMarchSamples), 2),
+  };
+}
+
+/** One ray-march texel into `out`, RGBA: `rayMarch.wgsl`'s `main` along its clipped ray. */
+function rayMarchTexelInto(
+  context: RayMarchContext,
+  marched: RayMarchRay | null,
+  out: Float64Array,
+): void {
+  const { medium, terms, sources, geometry, view, samples } = context;
+  if (marched === null) {
+    out.set([0, 0, 0, 1]);
+    return;
+  }
+  const { ray, bareGroundM } = marched;
+  const marcher = new Marcher(terms, sources, geometry, ray);
+  for (const { tM, dtM } of placedSteps(ray, samples)) {
+    marcher.step(tM, dtM);
+  }
+  const luminance = marcher.luminance;
+  const t = marcher.throughput;
+  let meanTransmittance = (t[0] + t[1] + t[2]) / 3;
+  if (bareGroundM !== null) {
+    const a2 = view.figure.equatorialRadiusM ** 2;
+    const c2 = view.figure.polarRadiusM ** 2;
+    const o = ray.originM;
+    const d = ray.direction;
+    const s = ray.sun;
+    const nx = (o.x + bareGroundM * d.x) / a2;
+    const ny = (o.y + bareGroundM * d.y) / a2;
+    const nz = (o.z + bareGroundM * d.z) / c2;
+    const muSun = (s.x * nx + s.y * ny + s.z * nz) / Math.sqrt(nx * nx + ny * ny + nz * nz);
+    const toSun: TwinRgb = [0, 0, 0];
+    sources.sunTransmittance(0, muSun, toSun);
+    for (const c of CHANNELS) {
+      luminance[c] +=
+        (t[c] * toSun[c] * Math.max(muSun, 0) * medium.groundAlbedo[c] * view.sunOverSky[c]) /
+        Math.PI;
+    }
+    meanTransmittance = 0;
+  }
+  out.set([...luminance, meanTransmittance]);
+}
 
 /**
  * The ray-march target's twin at the setting's scale of the viewport: each texel's in-scattered
@@ -1021,19 +1153,12 @@ export function rayMarchTwin(
   settings: RayMarchSettings,
   depthAt: (xPx: number, yPx: number) => number,
 ): TwinTable {
-  const medium = planet.medium;
-  const terms = termsOf(medium);
-  const sources = tableSources(planet);
-  const geometry: MarchGeometry = { kind: "spheroid", figure: view.figure };
+  const context = rayMarchContext(planet, view, settings);
   const fullW = view.viewport.widthPx;
   const fullH = view.viewport.heightPx;
   const w = Math.ceil(fullW * settings.rayMarchScale);
   const h = Math.ceil(fullH * settings.rayMarchScale);
-  const n = Math.max(Math.floor(settings.rayMarchSamples), 2);
   const texels = new Float64Array(w * h * 4);
-  const toSun: TwinRgb = [0, 0, 0];
-  const a2 = view.figure.equatorialRadiusM ** 2;
-  const c2 = view.figure.polarRadiusM ** 2;
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
       const u = (x + 0.5) / w;
@@ -1042,37 +1167,15 @@ export function rayMarchTwin(
         Math.min(Math.floor(u * fullW), fullW - 1),
         Math.min(Math.floor(v * fullH), fullH - 1),
       );
-      const at = (y * w + x) * 4;
-      const marched = rayMarchRayTwin(medium, view, u, v, depth, settings.aerialPerspectiveReachM);
-      if (marched === null) {
-        texels.set([0, 0, 0, 1], at);
-        continue;
-      }
-      const { ray, bareGroundM } = marched;
-      const marcher = new Marcher(terms, sources, geometry, ray);
-      for (const { tM, dtM } of placedSteps(ray, n)) {
-        marcher.step(tM, dtM);
-      }
-      const luminance = marcher.luminance;
-      const t = marcher.throughput;
-      let meanTransmittance = (t[0] + t[1] + t[2]) / 3;
-      if (bareGroundM !== null) {
-        const o = ray.originM;
-        const d = ray.direction;
-        const s = ray.sun;
-        const nx = (o.x + bareGroundM * d.x) / a2;
-        const ny = (o.y + bareGroundM * d.y) / a2;
-        const nz = (o.z + bareGroundM * d.z) / c2;
-        const muSun = (s.x * nx + s.y * ny + s.z * nz) / Math.sqrt(nx * nx + ny * ny + nz * nz);
-        sources.sunTransmittance(0, muSun, toSun);
-        for (const c of CHANNELS) {
-          luminance[c] +=
-            (t[c] * toSun[c] * Math.max(muSun, 0) * medium.groundAlbedo[c] * view.sunOverSky[c]) /
-            Math.PI;
-        }
-        meanTransmittance = 0;
-      }
-      texels.set([...luminance, meanTransmittance], at);
+      const marched = rayMarchRayTwin(
+        planet.medium,
+        view,
+        u,
+        v,
+        depth,
+        settings.aerialPerspectiveReachM,
+      );
+      rayMarchTexelInto(context, marched, texels.subarray((y * w + x) * 4, (y * w + x) * 4 + 4));
     }
   }
   return { widthTexels: w, heightTexels: h, texels };

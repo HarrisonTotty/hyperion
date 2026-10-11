@@ -2,48 +2,11 @@
 // camera's rays and the sky-view table's parameterisation. Prepended, after `common.wgsl`, to the
 // composite and, after `medium.wgsl`, to the sky-view, aerial-perspective and ray-march kernels,
 // which then take the scattering source (`source.wgsl`). It reads no medium. The sky-view
-// parameterisation is sebh's (MIT; the notice is in multiScattering.wgsl).
+// parameterisation is sebh's (MIT; the notice is in multiScattering.wgsl), its angles taken by the
+// precise forms of `view/shaders/preciseTrig.wgsl` and its texels by Bruneton's mapping (plan R08,
+// Design notes 18 and 19).
 
 const PI_VIEW : f32 = 3.14159265358979;
-
-// cos of an angle in [0, pi] to f32's precision, without the builtin (plan R08, R08.T6.b). WGSL
-// bounds cos, sin and the functions inherited from them only to 2^-11 absolute within [-pi, pi],
-// and an implementation such as SwiftShader comes near that bound, while at the limb the sky view
-// moves by 2e-2 of itself for 1e-4 in a ray's zenith cosine. Here s and c are the Taylor series of
-// sin and cos at y = theta / 2 in [0, pi / 2], to y^15 and y^14 (truncation under 1e-10), and
-// cos theta = (c - s)(c + s).
-fn preciseCos(theta : f32) -> f32 {
-  let y = 0.5 * theta;
-  let y2 = y * y;
-  let sDeep = 1.0 - y2 / 110.0 * (1.0 - y2 / 156.0 * (1.0 - y2 / 210.0));
-  let s = y * (1.0 - y2 / 6.0 * (1.0 - y2 / 20.0 * (1.0 - y2 / 42.0 * (1.0 - y2 / 72.0 * sDeep))));
-  let cDeep = 1.0 - y2 / 90.0 * (1.0 - y2 / 132.0 * (1.0 - y2 / 182.0));
-  let c = 1.0 - y2 / 2.0 * (1.0 - y2 / 12.0 * (1.0 - y2 / 30.0 * (1.0 - y2 / 56.0 * cDeep)));
-  return (c - s) * (c + s);
-}
-
-// atan of x >= 0 to f32's precision, without the builtin, whose WGSL bound is 4096 ULP (plan R08,
-// R08.T6.b): above 1 as pi / 2 - atan(1 / x); then two halvings, atan(x) = 2 atan(x / (1 +
-// sqrt(1 + x^2))), which take [0, 1] into [0, tan(pi / 16)], and there the Taylor series to x^15
-// (truncation under 1e-13 at the reduced argument, 3e-13 in the result).
-fn preciseAtan(x : f32) -> f32 {
-  let inverted = x > 1.0;
-  var t = select(x, 1.0 / x, inverted);
-  t = t / (1.0 + sqrt(1.0 + t * t));
-  t = t / (1.0 + sqrt(1.0 + t * t));
-  let t2 = t * t;
-  let deep = 1.0 / 9.0 - t2 * (1.0 / 11.0 - t2 * (1.0 / 13.0 - t2 / 15.0));
-  let quarter = t * (1.0 - t2 * (1.0 / 3.0 - t2 * (1.0 / 5.0 - t2 * (1.0 / 7.0 - t2 * deep))));
-  return select(4.0 * quarter, 0.5 * PI_VIEW - 4.0 * quarter, inverted);
-}
-
-// The angle in [0, pi] whose sine is proportional to y >= 0 and cosine to x, as atan2(y, x), by
-// `preciseAtan`; y and x are not both 0.
-fn preciseAtan2(y : f32, x : f32) -> f32 {
-  let ax = abs(x);
-  let a = select(0.5 * PI_VIEW - preciseAtan(ax / y), preciseAtan(y / ax), y <= ax);
-  return select(a, PI_VIEW - a, x < 0.0);
-}
 
 // The view, in the body-fixed frame (z along the pole), metres.
 struct AtmosphereView {
@@ -73,20 +36,20 @@ struct AtmosphereView {
   // rgb: the sun's spectral-to-luminance factors over the sky's, for sunlight the grey ground
   // reflects (Bruneton 2017, model.cc, GetSunAndSkyIlluminance); w: unused.
   sunOverSky : vec4f,
+  // What f32 cannot form here, formed in f64 by `HillaireAtmosphere` and narrowed once (plan R08,
+  // Design note 18): x and y, the ray march's ground and top-shell quadric constants,
+  // q_g = |S P|^2 - a^2 and q_t = |S_t P|^2 - (a + H)^2, P the camera's position, S = diag(1, 1,
+  // a / c) and S_t = diag(1, 1, (a + H) / (c + H)); z, the sky view's beta, the angle from the
+  // nadir to the horizon, atan2(R0, sqrt(h_s (2 R0 + h_s))), R0 the Gaussian radius and h_s
+  // `skyViewHeight`'s; w, sin of the sun's angular radius.
+  exact : vec4f,
 }
 
 // The camera's height on the sky view's sphere: kept 1 m clear of the ground and the top, where
-// the table's horizon split degenerates. The sky-view kernel and the composite both take it.
+// the table's horizon split degenerates. The sky-view kernel and the composite both take it, and
+// `hillaire.ts`'s `skyViewHeight` is its twin.
 fn skyViewHeight(heightM : f32, atmosphereM : f32) -> f32 {
   return clamp(heightM, 1.0, atmosphereM - 1.0);
-}
-
-// Whether a ray from height h above a sphere of radius `bottom`, at zenith cosine mu, meets it:
-// r^2 mu^2 >= r^2 - bottom^2, with r^2 - bottom^2 formed as h (2 bottom + h), which keeps its
-// precision near the ground where the difference of squares would cancel in f32.
-fn groundHitFromHeight(bottom : f32, heightM : f32, mu : f32) -> bool {
-  let r = bottom + heightM;
-  return mu < 0.0 && r * r * mu * mu >= heightM * (2.0 * bottom + heightM);
 }
 
 // The ray through a point of the output, (0, 0) at its top left, in the body-fixed frame.
@@ -125,53 +88,52 @@ fn skyFrame(v : AtmosphereView) -> SkyFrame {
 
 // sebh's sky-view parameterisation (RenderSkyCommon.hlsl, SkyViewLutParamsToUv and its inverse):
 // v splits at the horizon, each half with a square-root compression towards it; u is the azimuth
-// from the sun's, compressed towards the sun. The camera stands `heightM` above a sphere of
-// radius `bottom`, its own (Design note 16). The horizon's angle below the camera's horizontal,
-// beta = acos(vHorizon / r), is atan2(bottom, vHorizon) since r^2 - vHorizon^2 = bottom^2, and it
-// and the zenith cosine are taken by `preciseAtan` and `preciseCos` (plan R08, R08.T6.b).
-fn skyViewUvToParams(uv : vec2f, size : vec2f, heightM : f32, bottom : f32) -> vec2f {
-  let unit = clamp(subUvsToUnit(uv, size), vec2f(0.0), vec2f(1.0));
-  let r = bottom + heightM;
-  let vHorizon = sqrt(max(heightM * (2.0 * bottom + heightM), 0.0));
-  let beta = 0.5 * PI_VIEW - preciseAtan(vHorizon / bottom);
+// from the sun's, compressed towards the sun, u = sin(phi / 2). beta is the angle from the nadir to
+// the horizon (sebh's GroundToHorizonCos is its cosine), so that the horizon's zenith angle is
+// pi - beta: beta = acos(vHorizon / r) = atan2(bottom, vHorizon), formed in f64
+// (`AtmosphereView.exact.z`), and the zenith's sine and cosine are taken by `preciseSinCos`, the
+// azimuth's as 1 - 2u^2 and 2u sqrt(1 - u^2) (plan R08, Design note 18). The texel's (u, v) is
+// Bruneton's mapping of its centre (`unitFromTexelUv`), which is sebh's write. Its ray's direction
+// in the sky frame: x the zenith's cosine, y its sine, z the azimuth's cosine, w its sine.
+fn skyViewUvToParams(uv : vec2f, size : vec2f, beta : f32) -> vec4f {
+  let unit = clamp(unitFromTexelUv(uv, size), vec2f(0.0), vec2f(1.0));
   let zenithHorizon = PI_VIEW - beta;
-  var viewZenithCos : f32;
+  var zenith : f32;
   if (unit.y < 0.5) {
     var c = 1.0 - 2.0 * unit.y;
     c = 1.0 - c * c;
-    viewZenithCos = preciseCos(zenithHorizon * c);
+    zenith = zenithHorizon * c;
   } else {
     let c = unit.y * 2.0 - 1.0;
-    viewZenithCos = preciseCos(zenithHorizon + beta * c * c);
+    zenith = zenithHorizon + beta * c * c;
   }
-  let lightViewCos = -(unit.x * unit.x * 2.0 - 1.0);
-  return vec2f(viewZenithCos, lightViewCos);
+  let zenithSinCos = preciseSinCos(zenith);
+  let u = unit.x;
+  let lightViewCos = 1.0 - 2.0 * u * u;
+  let lightViewSin = 2.0 * u * sqrt(max(1.0 - u * u, 0.0));
+  return vec4f(zenithSinCos.y, zenithSinCos.x, lightViewCos, lightViewSin);
 }
 
+// The read: a ray's zenith angle, `preciseAtan2(|d x up|, d . up)`, and the sine of half its
+// azimuth from the sun's, |h - x| / 2 for h the ray's unit horizontal direction and x the sun's
+// (the chord, which keeps its precision near the sun's azimuth), to the table's coordinates through
+// Bruneton's mapping (`texelUvFromUnit`), so that a texel read at its own ray returns itself.
 fn skyViewParamsToUv(
   intersectsGroundView : bool,
-  viewZenithCos : f32,
-  lightViewCos : f32,
+  viewZenith : f32,
+  azimuthHalfSine : f32,
   size : vec2f,
-  heightM : f32,
-  bottom : f32,
+  beta : f32,
 ) -> vec2f {
-  // The angles as `skyViewUvToParams` takes them, so that the read matches the write (plan R08,
-  // R08.T6.b; decision-r08-f32.md): beta = acos(vHorizon / r) = pi / 2 - atan(vHorizon / bottom),
-  // and the zenith angle atan2(sqrt(1 - mu^2), mu).
-  let vHorizon = sqrt(max(heightM * (2.0 * bottom + heightM), 0.0));
-  let beta = 0.5 * PI_VIEW - preciseAtan(vHorizon / bottom);
   let zenithHorizon = PI_VIEW - beta;
-  let mu = clamp(viewZenithCos, -1.0, 1.0);
-  let zenith = preciseAtan2(sqrt(max(1.0 - mu * mu, 0.0)), mu);
   var v : f32;
   if (!intersectsGroundView) {
-    let c = 1.0 - sqrt(max(1.0 - zenith / zenithHorizon, 0.0));
+    let c = 1.0 - sqrt(max(1.0 - viewZenith / zenithHorizon, 0.0));
     v = c * 0.5;
   } else {
-    let c = sqrt(max((zenith - zenithHorizon) / max(beta, 1e-6), 0.0));
+    let c = sqrt(max((viewZenith - zenithHorizon) / max(beta, 1e-6), 0.0));
     v = c * 0.5 + 0.5;
   }
-  let u = sqrt(max(-lightViewCos * 0.5 + 0.5, 0.0));
-  return unitToSubUvs(vec2f(u, v), size);
+  let unit = clamp(vec2f(azimuthHalfSine, v), vec2f(0.0), vec2f(1.0));
+  return texelUvFromUnit(unit, size);
 }

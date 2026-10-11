@@ -7,8 +7,11 @@ import {
   intersectsGround,
   maxDistanceM,
   opticalDepth,
+  opticalDepthToTop,
+  texelUvFromUnit,
   transmittanceRMuToUv,
   transmittanceUvToRMu,
+  unitFromTexelUv,
 } from "./opticalDepth";
 
 const R = 6_360_000;
@@ -102,5 +105,45 @@ describe("the transmittance table's parameterisation", () => {
       expect(u2).toBeCloseTo(u, 9);
       expect(v2).toBeCloseTo(v, 9);
     }
+  });
+});
+
+describe("Bruneton's texel mapping (Design note 19)", () => {
+  it("puts 0 and 1 at the first and last texels' centres and inverts itself", () => {
+    for (const n of [2, 32, 54, 64, 96, 108, 128, 192, 256]) {
+      expect(unitFromTexelUv(0.5 / n, n)).toBeCloseTo(0, 14);
+      expect(unitFromTexelUv((n - 0.5) / n, n)).toBeCloseTo(1, 14);
+      for (let i = 0; i < n; i += 1) {
+        const unit = unitFromTexelUv((i + 0.5) / n, n);
+        expect(unit).toBeCloseTo(i / (n - 1), 14);
+        expect(texelUvFromUnit(unit, n)).toBeCloseTo((i + 0.5) / n, 14);
+      }
+    }
+  });
+});
+
+describe("opticalDepthToTop", () => {
+  it("is opticalDepth for a ray that misses the ground", () => {
+    const medium = exponential(100_000);
+    for (const [rM, mu] of [
+      [R, 1],
+      [R + 1_000, 0],
+      [R + 20_000, -0.05],
+    ] as const) {
+      expect(opticalDepthToTop(medium, R, rM, mu)).toEqual(opticalDepth(medium, R, rM, mu));
+    }
+  });
+
+  it("takes the ray tangent to the ground through to the top, the table's last column", () => {
+    const medium = exponential(100_000);
+    const rM = R + 5_000;
+    const mu = -Math.sqrt(1 - (R / rM) ** 2);
+    // The tangent ray's grazing path is longer than its part to the tangent point.
+    const [whole] = opticalDepthToTop(medium, R, rM, mu);
+    const shell = { bottomRadiusM: R, topRadiusM: R + 100_000 };
+    const toTangent = Math.sqrt(rM * rM - R * R);
+    expect(distanceToTopM(shell, rM, mu)).toBeGreaterThan(2 * toTangent);
+    const [half] = opticalDepthToTop(medium, R, rM, -mu);
+    expect(whole).toBeGreaterThan(half);
   });
 });

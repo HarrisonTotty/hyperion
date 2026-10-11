@@ -10,7 +10,13 @@
 // sampled at its midpoint; the sphere is the camera's own (Design note 16); each term's density is
 // evaluated once a sample, and a step's in-scattering is taken without f32's cancellation
 // (`stepFactor` in common.wgsl; R05.T12.e). The slices keep their equal depths, so the steps are
-// even.
+// even. Changes (plan R08, R08.T6.g): each sample's height comes from the camera's height and the
+// ray's zenith cosine by the sphere's identity (`heightAlong`), never as its radius less the
+// ground's, the origin carrying directions only (Design note 18); froxel (i, j) marches the ray
+// through the screen at (i, j) / (size - 1), Bruneton's texel mapping (Design note 19), so that the
+// composite's read of the screen's edges falls on the outer froxels' centres. The slice axis is
+// already the pair's: slice k holds the march at (k + 1) reach / slices, which the composite reads
+// at distance / reach - 1/2 / slices.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -27,11 +33,14 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   if (id.x >= size.x || id.y >= size.y) {
     return;
   }
-  let uv = (vec2f(id.xy) + 0.5) / vec2f(size.xy);
-  let dir = rayThrough(view, uv);
+  let sizeXy = vec2f(size.xy);
+  let dir = rayThrough(view, unitFromTexelUv((vec2f(id.xy) + 0.5) / sizeXy, sizeXy));
   let bottom = medium.bottomRadiusM;
-  // The camera on its own sphere, centred so that its datum normal is the sphere's.
-  let origin = view.up.xyz * (bottom + max(view.camera.w, 0.0));
+  // The camera on its own sphere, centred so that its datum normal is the sphere's; the origin
+  // carries the samples' directions, and their heights come from the camera's.
+  let cameraHeightM = max(view.camera.w, 0.0);
+  let origin = view.up.xyz * (bottom + cameraHeightM);
+  let mu = dot(dir, view.up.xyz);
   let slices = size.z;
   let perSlice = max(u32(view.tables.w), 1u);
   let dt = view.tables.y / f32(slices * perSlice);
@@ -44,7 +53,7 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       let p = origin + t * dir;
       let rP = length(p);
       let up = p / rP;
-      let heightM = rP - bottom;
+      let heightM = heightAlong(cameraHeightM, mu, t, rP);
       let local = sampleMediumAt(heightM, angle);
       let stepDepth = local.extinction * dt;
       let stepTransmittance = exp(-stepDepth);

@@ -8,9 +8,12 @@
  * {@link opticalDepth} at fixed texels; the unit tests hold the integrator to closed forms. The
  * geometry is Bruneton 2017's (precomputed_atmospheric_scattering, `atmosphere/functions.glsl`), as
  * `shaders/common.wgsl` and `shaders/medium.wgsl` port it from Bevy: the transmittance table's
- * mapping is its `GetTransmittanceTextureUvFromRMu` and `GetRMuFromTransmittanceTextureUv` without
- * their sub-texel remap, as Bevy and sebh take them, of which only x_r = ρ ÷ H is Bruneton and
- * Neyret 2008's (§4; plan R08's Risks, "Deviations in T6.a, as built").
+ * mapping is its `GetTransmittanceTextureUvFromRMu` and `GetRMuFromTransmittanceTextureUv` before
+ * their texel mapping, of which only x_r = ρ ÷ H is Bruneton and Neyret 2008's (§4; plan R08's
+ * Risks, "Deviations in T6.a, as built"). The texel mapping is Bruneton's exact pair,
+ * {@link unitFromTexelUv} and {@link texelUvFromUnit}, on every table since R08.T6.g (plan R08,
+ * Design note 19), where R05, as Bevy and sebh, took none for the transmittance table and sebh's
+ * sub-texel remap, whose read did not invert its write, for the others.
  */
 
 import type { Rgb } from "../photometry/toneCurve";
@@ -20,6 +23,28 @@ import { type AtmosphereMedium, densityAt, extinction } from "./medium";
 export interface Shell {
   readonly bottomRadiusM: number;
   readonly topRadiusM: number;
+}
+
+/**
+ * A unit range's value at a texel coordinate on an axis of `size` texels: Bruneton 2017's
+ * `GetUnitRangeFromTextureCoord` (precomputed_atmospheric_scattering, `functions.glsl`), as
+ * `common.wgsl`'s `unitFromTexelUv`. Texel i's centre, (i + ½) ÷ size, holds i ÷ (size − 1).
+ *
+ * @param size - The axis's texels, at least 2.
+ */
+export function unitFromTexelUv(uv: number, size: number): number {
+  return (uv * size - 0.5) / (size - 1);
+}
+
+/**
+ * The texel coordinate at which an axis of `size` texels holds a unit range's value: Bruneton
+ * 2017's `GetTextureCoordFromUnitRange`, as `common.wgsl`'s `texelUvFromUnit`, the exact inverse of
+ * {@link unitFromTexelUv}, so that 0 and 1 stand at the first and last texels' centres.
+ *
+ * @param size - The axis's texels, at least 2.
+ */
+export function texelUvFromUnit(unit: number, size: number): number {
+  return (unit * (size - 1) + 0.5) / size;
 }
 
 /** The radius at distance `tM` along a ray from radius `rM` at zenith cosine `mu`, m. */
@@ -58,9 +83,9 @@ export interface RadiusAndCosine {
 }
 
 /**
- * The (r, μ) a transmittance table's (u, v) stands for: Bruneton 2017's
- * `GetRMuFromTransmittanceTextureUv` without its sub-texel remap, as `transmittanceUvToRMu` in
- * `shaders/medium.wgsl`.
+ * The (r, μ) a transmittance table's unit range (u, v) stands for: Bruneton 2017's
+ * `GetRMuFromTransmittanceTextureUv` before its texel mapping ({@link unitFromTexelUv}), as
+ * `shaders/medium.wgsl`'s `transmittanceTexelOf` takes it from heights.
  *
  * @param u - The distance to the top, from its least (straight up) to its greatest, in [0, 1].
  * @param v - The distance to the horizon over its greatest, in [0, 1].
@@ -77,7 +102,10 @@ export function transmittanceUvToRMu(shell: Shell, u: number, v: number): Radius
   return { rM, mu: Math.min(Math.max(mu, -1), 1) };
 }
 
-/** The inverse of {@link transmittanceUvToRMu}: `transmittanceRMuToUv` in `medium.wgsl`. */
+/**
+ * The inverse of {@link transmittanceUvToRMu}, the unit range before the texel mapping
+ * ({@link texelUvFromUnit}): `common.wgsl`'s `transmittanceUnitAt`, which takes it from heights.
+ */
 export function transmittanceRMuToUv(
   shell: Shell,
   rM: number,
@@ -110,7 +138,39 @@ export function opticalDepth(
   steps = ORACLE_STEPS,
 ): Rgb {
   const shell: Shell = { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM };
-  const tMax = maxDistanceM(shell, rM, mu);
+  return opticalDepthOver(medium, bottomRadiusM, rM, mu, maxDistanceM(shell, rM, mu), steps);
+}
+
+/**
+ * The optical depth per channel from radius `rM` along zenith cosine `mu` to the top of the
+ * atmosphere, as the transmittance table holds it: {@link opticalDepth} for a ray that does not meet
+ * the ground, and for the ray tangent to it (the table's last column since R08.T6.g's texel
+ * mapping) the whole grazing path, where {@link opticalDepth}'s ground test would decide by
+ * rounding whether it stops at the tangent point.
+ *
+ * @param bottomRadiusM - The ground's radius, m; the top is `medium.topHeightM` above it.
+ * @param steps - Simpson intervals, even.
+ */
+export function opticalDepthToTop(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  rM: number,
+  mu: number,
+  steps = ORACLE_STEPS,
+): Rgb {
+  const shell: Shell = { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM };
+  return opticalDepthOver(medium, bottomRadiusM, rM, mu, distanceToTopM(shell, rM, mu), steps);
+}
+
+/** Composite Simpson's rule over [0, tMax] along the ray, heights below the ground as the ground's. */
+function opticalDepthOver(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  rM: number,
+  mu: number,
+  tMax: number,
+  steps: number,
+): Rgb {
   const n = steps + (steps % 2);
   const dt = tMax / n;
   const coefficients = medium.terms.map((term) => ({ term, sigma: extinction(term) }));

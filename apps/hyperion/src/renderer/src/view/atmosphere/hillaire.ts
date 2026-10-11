@@ -12,6 +12,12 @@
  * The tables hold radiance per unit spectral solar irradiance at the channels' wavelengths; the
  * composite turns it into pre-exposed Rec. 709 luminance with `solar.ts`'s sky factors and clamps
  * the sun's disc after pre-exposure.
+ *
+ * The kernels are `f32`. What they cannot form there without losing it, they are given formed in
+ * `f64` and narrowed once (plan R08, Design note 18, R08.T6.g): the camera's height above the
+ * datum and the datum's normal, the ray march's quadric constants, the sky view's horizon angle
+ * and the sine of the sun's angular radius ({@link viewExactOf}). No kernel forms a height as a
+ * difference of radii, and none takes WGSL's builtin trigonometry (`view/shaders/preciseTrig.wgsl`).
  */
 
 import type { Vec3 } from "../../geometry/vec3";
@@ -30,6 +36,7 @@ import type {
   WgslMaterialSpec,
 } from "../engine/types";
 import type { QualitySetting } from "../quality/qualitySetting";
+import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import type { AtmosphereMedium } from "./medium";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
@@ -47,10 +54,12 @@ import {
 } from "./solar";
 import {
   AtmosphereTables,
+  KERNEL_ARM_FORMAT,
   MULTI_SCATTERING_SIZE,
   packMediumUniform,
   type TableSize,
   TRANSMITTANCE_SIZE,
+  withKernelArmFormat,
 } from "./tables";
 
 /** A 3D table's size, texels. */
@@ -258,14 +267,82 @@ export function tableRadiusM(figure: SpheroidFigure): number {
 }
 
 /**
- * The per-frame kernels: `common.wgsl`, `medium.wgsl`, `view.wgsl`, `source.wgsl`, then each
- * kernel, which declares the `medium` uniform, the `terms` buffer and the `densityTables` and
- * `phaseTables` that `medium.wgsl` and `source.wgsl` read in place (R08.T6.b).
+ * The camera's height on the sky view's sphere, m: `view.wgsl`'s `skyViewHeight`, which keeps it
+ * 1 m clear of the ground and of the top, where the table's horizon split degenerates.
+ *
+ * @param atmosphereM - The atmosphere's height above the ground, m.
+ */
+export function skyViewHeight(heightM: number, atmosphereM: number): number {
+  return Math.min(Math.max(heightM, 1), atmosphereM - 1);
+}
+
+/**
+ * What the kernels cannot form in `f32` without losing it, formed in `f64` (plan R08, Design note
+ * 18): `view.wgsl`'s `AtmosphereView.exact`, which the uniform narrows once.
+ */
+export interface ViewExact {
+  /**
+   * The ray march's ground constant q_g = |S P|² − a², m², P the camera's body-fixed position and
+   * S = diag(1, 1, a ÷ c). Near the ground it is a small difference of large squares, which `f32`
+   * would leave without digits (0.25 m of an Earth radius); formed here it keeps about 10⁻⁹ m.
+   */
+  readonly groundQuadricM2: number;
+  /** Its top shell's q_t = |S_t P|² − (a + H)², m², S_t = diag(1, 1, (a + H) ÷ (c + H)). */
+  readonly topQuadricM2: number;
+  /**
+   * The sky view's β = atan2(R₀, √(h_s(2R₀ + h_s))), rad: the angle from the nadir to the horizon
+   * on the sky view's sphere (sebh's `GroundToHorizonCos` is its cosine), so that the horizon's
+   * zenith angle is π − β and its dip below the horizontal π/2 − β; R₀ is the camera's Gaussian
+   * radius and h_s its
+   * {@link skyViewHeight}. `skyViewUvToParams` and `skyViewParamsToUv` both take it, so that the
+   * table's write and read share it.
+   */
+  readonly horizonAngleRad: number;
+  /**
+   * sin ρ of the sun's angular radius, which the composite's disc test |d × s| ≤ sin ρ takes, since
+   * `f32` cannot resolve 1 − cos ρ for ρ under 3.5 × 10⁻⁴ rad.
+   */
+  readonly sinSunRadius: number;
+}
+
+/**
+ * The view's {@link ViewExact} for a camera at `positionM` with its {@link atmosphereInputs}.
+ *
+ * @param topHeightM - The atmosphere's height above the datum, m.
+ */
+export function viewExactOf(
+  positionM: Vec3,
+  figure: SpheroidFigure,
+  topHeightM: number,
+  inputs: AtmosphereInputs,
+  sunAngularRadiusRad: number,
+): ViewExact {
+  const a = figure.equatorialRadiusM;
+  const c = figure.polarRadiusM;
+  const quadric = (equatorialM: number, polarM: number): number => {
+    const z = (positionM.z * equatorialM) / polarM;
+    return positionM.x ** 2 + positionM.y ** 2 + z * z - equatorialM * equatorialM;
+  };
+  const gaussianM = inputs.radiusM - inputs.heightM;
+  const skyHeightM = skyViewHeight(inputs.heightM, topHeightM);
+  return {
+    groundQuadricM2: quadric(a, c),
+    topQuadricM2: quadric(a + topHeightM, c + topHeightM),
+    horizonAngleRad: Math.atan2(gaussianM, Math.sqrt(skyHeightM * (2 * gaussianM + skyHeightM))),
+    sinSunRadius: Math.sin(sunAngularRadiusRad),
+  };
+}
+
+/**
+ * The per-frame kernels: `view/shaders/preciseTrig.wgsl` (R08.T6.g), `common.wgsl`, `medium.wgsl`,
+ * `view.wgsl`, `source.wgsl`, then each kernel, which declares the `medium` uniform, the `terms`
+ * buffer and the `densityTables` and `phaseTables` that `medium.wgsl` and `source.wgsl` read in
+ * place (R08.T6.b).
  */
 function kernel(name: string, wgsl: string): KernelPair {
   return {
     name,
-    reference: `${commonWgsl}\n${mediumWgsl}\n${viewWgsl}\n${sourceWgsl}\n${wgsl}`,
+    reference: `${preciseTrigWgsl}\n${commonWgsl}\n${mediumWgsl}\n${viewWgsl}\n${sourceWgsl}\n${wgsl}`,
     subgroup: null,
     readback: "presentation-only",
   };
@@ -295,14 +372,18 @@ const VIEW_MEMBERS = [
   "figure",
   "output",
   "sunOverSky",
+  "exact",
 ] as const;
+
+/** The composite's WGSL: `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `view.wgsl`, then its own. */
+const COMPOSITE_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${compositeWgsl}`;
 
 /** The composite: a full-screen draw of pre-exposed luminance over the terrain target. */
 export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
   name: "atmosphere composite",
   displayName: "ATMOSPHERE",
-  vertexWgsl: `${commonWgsl}\n${viewWgsl}\n${compositeWgsl}`,
-  fragmentWgsl: `${commonWgsl}\n${viewWgsl}\n${compositeWgsl}`,
+  vertexWgsl: COMPOSITE_WGSL,
+  fragmentWgsl: COMPOSITE_WGSL,
   uniforms: [...VIEW_MEMBERS, "shell"].map((name) => ({ name, type: "vec4f" as const })),
   samplers: [{ name: "linearClamp", filter: "linear", address: "clamp-to-edge", binding: 6 }],
   textures: [
@@ -332,46 +413,81 @@ export interface AtmosphereScene {
 const STORAGE_SAMPLED =
   TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_SRC;
 
+/** The per-frame kernels, each with its output, as one frame dispatches them. */
+interface FrameKernels {
+  readonly skyView: ComputeHandle;
+  readonly aerial: ComputeHandle;
+  readonly rayMarch: ComputeHandle;
+}
+
+/** The per-frame tables a frame writes: the sky view, the aerial-perspective volume, the march. */
+export interface FrameOutputs {
+  readonly skyView: TextureHandle;
+  readonly aerial: TextureHandle;
+  readonly rayMarch: TextureHandle;
+}
+
 /** The per-frame GPU objects of one device. */
 interface FrameResources {
   readonly skyView: TextureHandle;
   readonly aerial: TextureHandle;
-  readonly skyViewKernel: ComputeHandle;
-  readonly aerialKernel: ComputeHandle;
-  readonly rayMarchKernel: ComputeHandle;
+  readonly kernels: FrameKernels;
   readonly composite: MaterialHandle;
   readonly triangle: MeshHandle;
   rayMarch: TextureHandle | null;
   rayMarchSize: ViewSize | null;
 }
 
+/** The kernel arm's per-frame GPU objects (R08.T6.g), made at its first frame. */
+interface KernelArmResources {
+  readonly kernels: FrameKernels;
+  readonly skyView: TextureHandle;
+  readonly aerial: TextureHandle;
+  rayMarch: TextureHandle | null;
+  rayMarchSize: ViewSize | null;
+}
+
+/** A per-frame table's texture: 2D or 3D, at `format`, under `atmosphere-view`. */
+function frameTexture(
+  engine: RenderEngine,
+  name: string,
+  size: [number, number] | [number, number, number],
+  format: GPUTextureFormat,
+): TextureHandle {
+  return engine.createTexture({
+    name,
+    size,
+    dimension: size.length === 3 ? "3d" : "2d",
+    format,
+    mips: 1,
+    usage: STORAGE_SAMPLED,
+    category: "atmosphere-view",
+  });
+}
+
 function createFrameResources(engine: RenderEngine, sizes: TableSizes): FrameResources {
   return {
-    skyView: engine.createTexture({
-      name: "atmosphere sky view",
-      size: [sizes.skyView.widthTexels, sizes.skyView.heightTexels],
-      dimension: "2d",
-      format: "rgba16float",
-      mips: 1,
-      usage: STORAGE_SAMPLED,
-      category: "atmosphere-view",
-    }),
-    aerial: engine.createTexture({
-      name: "atmosphere aerial perspective",
-      size: [
+    skyView: frameTexture(
+      engine,
+      "atmosphere sky view",
+      [sizes.skyView.widthTexels, sizes.skyView.heightTexels],
+      "rgba16float",
+    ),
+    aerial: frameTexture(
+      engine,
+      "atmosphere aerial perspective",
+      [
         sizes.aerialPerspective.widthTexels,
         sizes.aerialPerspective.heightTexels,
         sizes.aerialPerspective.slices,
       ],
-      dimension: "3d",
-      format: "rgba16float",
-      mips: 1,
-      usage: STORAGE_SAMPLED,
-      category: "atmosphere-view",
-    }),
-    skyViewKernel: engine.createCompute(SKY_VIEW_KERNEL),
-    aerialKernel: engine.createCompute(AERIAL_PERSPECTIVE_KERNEL),
-    rayMarchKernel: engine.createCompute(RAY_MARCH_KERNEL),
+      "rgba16float",
+    ),
+    kernels: {
+      skyView: engine.createCompute(SKY_VIEW_KERNEL),
+      aerial: engine.createCompute(AERIAL_PERSPECTIVE_KERNEL),
+      rayMarch: engine.createCompute(RAY_MARCH_KERNEL),
+    },
     composite: engine.createMaterial(COMPOSITE_MATERIAL),
     triangle: engine.createMesh({
       name: "atmosphere composite triangle",
@@ -380,6 +496,34 @@ function createFrameResources(engine: RenderEngine, sizes: TableSizes): FrameRes
       topology: "triangle-list",
       attributes: {},
     }),
+    rayMarch: null,
+    rayMarchSize: null,
+  };
+}
+
+function createKernelArmResources(engine: RenderEngine, sizes: TableSizes): KernelArmResources {
+  return {
+    kernels: {
+      skyView: engine.createCompute(withKernelArmFormat(SKY_VIEW_KERNEL)),
+      aerial: engine.createCompute(withKernelArmFormat(AERIAL_PERSPECTIVE_KERNEL)),
+      rayMarch: engine.createCompute(withKernelArmFormat(RAY_MARCH_KERNEL)),
+    },
+    skyView: frameTexture(
+      engine,
+      "atmosphere sky view (kernel arm)",
+      [sizes.skyView.widthTexels, sizes.skyView.heightTexels],
+      KERNEL_ARM_FORMAT,
+    ),
+    aerial: frameTexture(
+      engine,
+      "atmosphere aerial perspective (kernel arm)",
+      [
+        sizes.aerialPerspective.widthTexels,
+        sizes.aerialPerspective.heightTexels,
+        sizes.aerialPerspective.slices,
+      ],
+      KERNEL_ARM_FORMAT,
+    ),
     rayMarch: null,
     rayMarchSize: null,
   };
@@ -401,6 +545,8 @@ export class HillaireAtmosphere {
   readonly #tables: AtmosphereTables;
   readonly #offRestored: () => void;
   #frame: FrameResources;
+  /** The smoke's kernel arm (R08.T6.g), made at its first frame. */
+  #arm: KernelArmResources | null = null;
   /** Each view member's four floats, reused every frame. */
   readonly #uniforms: Record<string, Float32Array>;
 
@@ -425,6 +571,7 @@ export class HillaireAtmosphere {
     );
     this.#offRestored = engine.onRestored(() => {
       this.#frame = createFrameResources(engine, tables);
+      this.#arm = null;
     });
   }
 
@@ -474,16 +621,104 @@ export class HillaireAtmosphere {
    * for the caller to submit, with no depth test, into a target other than the scene's.
    */
   drawFrame(view: AtmosphereCamera, sun: SunState, scene: AtmosphereScene): DrawItem {
-    const engine = this.#engine;
     const frame = this.#frame;
+    const rayMarch = this.#rayMarchTexture(view.viewport);
+    this.#dispatchFrame(
+      frame.kernels,
+      { skyView: frame.skyView, aerial: frame.aerial, rayMarch },
+      view,
+      sun,
+      scene,
+    );
+    return {
+      mesh: frame.triangle,
+      material: frame.composite,
+      offsetFromCameraM: new Float32Array(3),
+      uniforms: this.#uniforms,
+      textures: {
+        sceneColour: scene.colour,
+        sceneDepth: scene.depth,
+        skyView: frame.skyView,
+        aerial: frame.aerial,
+        rayMarch,
+        transmittance: this.#tables.transmittance,
+      },
+    };
+  }
+
+  /**
+   * The frame's sky view, aerial perspective and ray march built again by their kernels assembled
+   * to write `rgba32float` ({@link withKernelArmFormat}), over the same tables, view and scene: the
+   * smoke's kernel arm (plan R08, R08.T6.g; `decision-r08-t6b-floor.md` §4), which holds each
+   * kernel's own `f32` output to its twin with no half-float floor. Nothing is drawn; the composite
+   * reads only {@link HillaireAtmosphere.drawFrame}'s tables. The kernels and targets are made at
+   * the first call, and the ray march's anew when the viewport changes.
+   *
+   * @returns The arm's three `rgba32float` targets, for a tolerance read-back.
+   */
+  drawKernelArm(view: AtmosphereCamera, sun: SunState, scene: AtmosphereScene): FrameOutputs {
+    const engine = this.#engine;
+    this.#arm ??= createKernelArmResources(engine, this.#sizes);
+    const arm = this.#arm;
+    const size = arm.rayMarchSize;
+    if (
+      arm.rayMarch === null ||
+      size === null ||
+      size.widthPx !== view.viewport.widthPx ||
+      size.heightPx !== view.viewport.heightPx
+    ) {
+      if (arm.rayMarch !== null) {
+        engine.releaseTexture(arm.rayMarch);
+      }
+      const scale = this.#sizes.rayMarchScale;
+      arm.rayMarch = frameTexture(
+        engine,
+        "atmosphere ray march (kernel arm)",
+        [
+          Math.max(1, Math.ceil(view.viewport.widthPx * scale)),
+          Math.max(1, Math.ceil(view.viewport.heightPx * scale)),
+        ],
+        KERNEL_ARM_FORMAT,
+      );
+      arm.rayMarchSize = view.viewport;
+    }
+    const outputs = { skyView: arm.skyView, aerial: arm.aerial, rayMarch: arm.rayMarch };
+    this.#dispatchFrame(arm.kernels, outputs, view, sun, scene);
+    return outputs;
+  }
+
+  /**
+   * Stops following the engine's restores, and releases the kernel arm's targets if it drew one
+   * (the smoke's, R08.T6.g). The frame's own textures are left to the engine, as before.
+   */
+  dispose(): void {
+    this.#offRestored();
+    this.#tables.dispose();
+    const arm = this.#arm;
+    if (arm !== null) {
+      for (const texture of [arm.skyView, arm.aerial, arm.rayMarch]) {
+        if (texture !== null) {
+          this.#engine.releaseTexture(texture);
+        }
+      }
+      this.#arm = null;
+    }
+  }
+
+  /** Fills the view's uniform for this frame and dispatches the three per-frame kernels. */
+  #dispatchFrame(
+    kernels: FrameKernels,
+    outputs: FrameOutputs,
+    view: AtmosphereCamera,
+    sun: SunState,
+    scene: AtmosphereScene,
+  ): void {
+    const engine = this.#engine;
     const sizes = this.#sizes;
     const inputs = atmosphereInputs(view, this.#figure);
-    const u = this.#uniforms;
-    this.#fillView(view, sun, scene, inputs);
-
-    const tableBottom = tableRadiusM(this.#figure);
     const tables = this.#tables;
     const medium = tables.medium;
+    this.#fillView(view, sun, scene, inputs, medium.topHeightM);
     const perFrameMedium = packMediumUniform(medium, inputs.radiusM - inputs.heightM, 1);
     const common = {
       buffers: { terms: tables.terms },
@@ -496,33 +731,32 @@ export class HillaireAtmosphere {
     };
     const viewUniforms = this.#viewBlock();
     engine.dispatch(
-      frame.skyViewKernel,
+      kernels.skyView,
       {
         ...common,
         uniforms: { medium: perFrameMedium, view: viewUniforms },
-        storage: { skyViewOut: { texture: frame.skyView, level: 0 } },
+        storage: { skyViewOut: { texture: outputs.skyView, level: 0 } },
       },
       groups8(sizes.skyView.widthTexels, sizes.skyView.heightTexels),
       "atmosphere view",
     );
     engine.dispatch(
-      frame.aerialKernel,
+      kernels.aerial,
       {
         ...common,
         uniforms: { medium: perFrameMedium, view: viewUniforms },
-        storage: { aerialOut: { texture: frame.aerial, level: 0 } },
+        storage: { aerialOut: { texture: outputs.aerial, level: 0 } },
       },
       groups8(sizes.aerialPerspective.widthTexels, sizes.aerialPerspective.heightTexels),
       "atmosphere view",
     );
-    const rayMarch = this.#rayMarchTexture(view.viewport);
     engine.dispatch(
-      frame.rayMarchKernel,
+      kernels.rayMarch,
       {
         buffers: common.buffers,
         sampled: { ...common.sampled, sceneDepth: scene.depth },
         uniforms: { medium: perFrameMedium, view: viewUniforms },
-        storage: { rayMarchOut: { texture: rayMarch, level: 0 } },
+        storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
       },
       groups8(
         Math.ceil(view.viewport.widthPx * sizes.rayMarchScale),
@@ -530,39 +764,12 @@ export class HillaireAtmosphere {
       ),
       "atmosphere view",
     );
-    const shell = u["shell"];
-    if (shell !== undefined) {
-      shell[0] = tableBottom + medium.topHeightM;
-      shell[1] = inputs.radiusM - inputs.heightM;
-      shell[2] = medium.topHeightM;
-      shell[3] = 0;
-    }
-    return {
-      mesh: frame.triangle,
-      material: frame.composite,
-      offsetFromCameraM: new Float32Array(3),
-      uniforms: u,
-      textures: {
-        sceneColour: scene.colour,
-        sceneDepth: scene.depth,
-        skyView: frame.skyView,
-        aerial: frame.aerial,
-        rayMarch,
-        transmittance: this.#tables.transmittance,
-      },
-    };
-  }
-
-  /** Stops following the engine's restores. */
-  dispose(): void {
-    this.#offRestored();
-    this.#tables.dispose();
   }
 
   /**
    * The ray-march target at the setting's scale of the largest output so far: it grows on a
-   * resize and is never remade smaller, since the engine offers no release of a texture; the
-   * kernel and the composite address it by the current output's size.
+   * resize and is never remade smaller, so that a window resized back and forth makes nothing new;
+   * the kernel and the composite address it by the current output's size.
    */
   #rayMarchTexture(viewport: ViewSize): TextureHandle {
     const frame = this.#frame;
@@ -578,18 +785,15 @@ export class HillaireAtmosphere {
       heightPx: Math.max(viewport.heightPx, frame.rayMarchSize?.heightPx ?? 0),
     };
     const scale = this.#sizes.rayMarchScale;
-    frame.rayMarch = this.#engine.createTexture({
-      name: "atmosphere ray march",
-      size: [
+    frame.rayMarch = frameTexture(
+      this.#engine,
+      "atmosphere ray march",
+      [
         Math.max(1, Math.ceil(grown.widthPx * scale)),
         Math.max(1, Math.ceil(grown.heightPx * scale)),
       ],
-      dimension: "2d",
-      format: "rgba16float",
-      mips: 1,
-      usage: STORAGE_SAMPLED,
-      category: "atmosphere-view",
-    });
+      "rgba16float",
+    );
     frame.rayMarchSize = grown;
     return frame.rayMarch;
   }
@@ -611,6 +815,7 @@ export class HillaireAtmosphere {
     sun: SunState,
     scene: AtmosphereScene,
     inputs: AtmosphereInputs,
+    topHeightM: number,
   ): void {
     const set = (name: string, values: readonly [number, number, number, number]): void => {
       this.#uniforms[name]?.set(values);
@@ -621,7 +826,9 @@ export class HillaireAtmosphere {
     const distance2 = sun.distanceAu * sun.distanceAu;
     const sky = skyLuminanceScale();
     const sunRgb = sunIlluminanceRgb();
-    const solidAngle = 2 * Math.PI * (1 - Math.cos(sun.angularRadiusRad));
+    // The disc's solid angle 2π(1 − cos ρ), as 4π sin²(ρ ÷ 2), which keeps its digits for a small
+    // disc where 1 − cos ρ would not even in f64 (a sun of 10⁻⁸ rad).
+    const solidAngle = 4 * Math.PI * Math.sin(sun.angularRadiusRad / 2) ** 2;
     const disc = solidAngle > 0 ? 1 / (distance2 * solidAngle) : 0;
     const sunFactors = SUN_SPECTRAL_TO_LUMINANCE;
     const skyFactors = SKY_SPECTRAL_TO_LUMINANCE;
@@ -632,6 +839,7 @@ export class HillaireAtmosphere {
     const up = rotate(view.orientation, { x: 0, y: 1, z: 0 });
     const forward = rotate(view.orientation, { x: 0, y: 0, z: -1 });
     const sizes = this.#sizes;
+    const exact = viewExactOf(p, this.#figure, topHeightM, inputs, sun.angularRadiusRad);
     set("camera", [p.x, p.y, p.z, inputs.heightM]);
     set("up", [n.x, n.y, n.z, inputs.radiusM - inputs.heightM]);
     set("sun", [s.x, s.y, s.z, sun.angularRadiusRad]);
@@ -671,5 +879,13 @@ export class HillaireAtmosphere {
       sizes.rayMarchScale,
       sizes.skyViewSamples,
     ]);
+    set("exact", [
+      exact.groundQuadricM2,
+      exact.topQuadricM2,
+      exact.horizonAngleRad,
+      exact.sinSunRadius,
+    ]);
+    // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g).
+    set("shell", [topHeightM, 0, 0, 0]);
   }
 }

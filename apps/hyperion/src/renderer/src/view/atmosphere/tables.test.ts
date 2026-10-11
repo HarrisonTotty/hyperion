@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { forbiddenIn } from "../../test/atmosphereWgsl";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import type { AllocationEvent } from "../engine/memory";
 import { EngineUnavailable } from "../engine/resilientEngine";
@@ -20,6 +21,7 @@ import {
   AtmosphereTables,
   DENSITY_TABLE_LEVELS,
   densityTableLevelsM,
+  KERNEL_ARM_FORMAT,
   kernelMedium,
   MAX_TERMS,
   MULTI_SCATTERING_KERNEL,
@@ -34,6 +36,7 @@ import {
   TERMS_BUFFER_BYTES,
   TRANSMITTANCE_KERNEL,
   TRANSMITTANCE_SAMPLES,
+  withKernelArmFormat,
 } from "./tables";
 import { kernelOpticalDepth } from "./tablesCpu";
 
@@ -285,9 +288,20 @@ describe("AtmosphereTables", () => {
 });
 
 describe("packMediumUniform", () => {
-  it("lays out the radii, the term count, the samples and the albedo", () => {
+  it("lays out the ground's radius, the atmosphere's height, the term count, the samples and the albedo", () => {
     const packed = packMediumUniform(EARTH_REFERENCE, 6_371_000, 128);
-    expect([...packed]).toEqual([6_371_000, 6_471_000, 3, 128, 0.1, 0.1, 0.1, 0].map(Math.fround));
+    expect([...packed]).toEqual([6_371_000, 100_000, 3, 128, 0.1, 0.1, 0.1, 0].map(Math.fround));
+  });
+
+  it("carries the atmosphere's height itself, not the top's radius (R08.T6.g)", () => {
+    // In f32 the top's radius less the ground's would carry both radii's rounding: 4 m apart at
+    // 6e7 m. The height is narrowed once, from f64.
+    const bottomM = 60_268_001.5;
+    const packed = packMediumUniform({ ...EARTH_REFERENCE, topHeightM: 100_000.37 }, bottomM, 1);
+    expect(packed[1]).toBe(Math.fround(100_000.37));
+    expect(Math.fround(bottomM + 100_000.37) - Math.fround(bottomM)).not.toBe(
+      Math.fround(100_000.37),
+    );
   });
 });
 
@@ -566,5 +580,71 @@ describe("the kernels", () => {
       expect(kernel.reference).toMatch(/var densityTables : texture_2d_array<f32>;/);
       expect(kernel.reference).not.toMatch(/struct Medium \{[^}]*\bterms\b/);
     }
+  });
+});
+
+describe("the per-planet kernels' arithmetic (R08.T6.g)", () => {
+  it.each([
+    ["the transmittance kernel", TRANSMITTANCE_KERNEL.reference],
+    ["the multiple-scattering kernel", MULTI_SCATTERING_KERNEL.reference],
+  ])("%s calls no builtin trigonometry, R05 radius form or sebh remap", (_name, source) => {
+    expect(forbiddenIn(source)).toEqual([]);
+  });
+
+  it("takes view/shaders/preciseTrig.wgsl first", () => {
+    for (const kernel of [TRANSMITTANCE_KERNEL, MULTI_SCATTERING_KERNEL]) {
+      expect(kernel.reference.indexOf("fn preciseSinCos")).toBeLessThan(
+        kernel.reference.indexOf("const MAX_TERMS"),
+      );
+    }
+  });
+});
+
+describe("the kernel arm (R08.T6.g)", () => {
+  it("assembles a kernel again writing rgba32float, under its own name, and changes nothing else", () => {
+    for (const kernel of [TRANSMITTANCE_KERNEL, MULTI_SCATTERING_KERNEL]) {
+      const arm = withKernelArmFormat(kernel);
+      expect(arm.name).toBe(`${kernel.name} (${KERNEL_ARM_FORMAT})`);
+      expect(arm.reference).not.toContain("rgba16float, write>");
+      expect(arm.reference.replaceAll("rgba32float, write>", "rgba16float, write>")).toBe(
+        kernel.reference,
+      );
+      expect(arm.readback).toBe(kernel.readback);
+    }
+  });
+
+  it("refuses a kernel with no rgba16float storage texture", () => {
+    expect(() =>
+      withKernelArmFormat({ ...TRANSMITTANCE_KERNEL, reference: "fn main() {}" }),
+    ).toThrow(/declares no rgba16float storage texture/);
+  });
+
+  it("builds both tables into rgba32float, the multiple scattering over the stored transmittance", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, 6_371_000);
+    engine.dispatched.length = 0;
+    const arm = tables.buildKernelArm();
+    expect(engine.dispatched.map((d) => d.kernel)).toEqual([
+      `atmosphere transmittance (${KERNEL_ARM_FORMAT})`,
+      `atmosphere multiple scattering (${KERNEL_ARM_FORMAT})`,
+    ]);
+    const formats = engine.textureSpecs.slice(-2).map((spec) => spec.format);
+    expect(formats).toEqual([KERNEL_ARM_FORMAT, KERNEL_ARM_FORMAT]);
+    expect(engine.dispatched[0]?.bindings.storage["transmittanceOut"]?.texture).toBe(
+      arm.transmittance,
+    );
+    expect(engine.dispatched[1]?.bindings.sampled["transmittance"]).toBe(tables.transmittance);
+    expect(engine.dispatched[1]?.bindings.storage["multiScatteringOut"]?.texture).toBe(
+      arm.multiScattering,
+    );
+  });
+
+  it("makes the arm's kernels once", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, 6_371_000);
+    tables.buildKernelArm();
+    const kernels = engine.counts.kernels;
+    tables.buildKernelArm();
+    expect(engine.counts.kernels).toBe(kernels);
   });
 });
