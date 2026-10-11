@@ -100,6 +100,14 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+# Electron's package fetches its binary the first time it is asked for it (`require("electron")`),
+# which runs started at once would each try, and all but one fail (seen in a fresh worktree,
+# 2026-10-11): it is asked for here first, alone. A binary already fetched is only looked up.
+if ! (cd "$here" && node -e 'require("electron")' >&2); then
+    echo "testRender.sh: Electron's binary is missing and could not be fetched" >&2
+    exit 2
+fi
+
 logs="$(mktemp -d "${TMPDIR:-/tmp}/hyperion-smoke-logs.XXXXXX")"
 start=$(now_ms)
 for i in "${!variants[@]}"; do
