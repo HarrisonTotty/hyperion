@@ -3543,8 +3543,9 @@ here, and `pnpm test` passes.
     published.
 
   Variance reduction for the clouds' forward peak is allowed only if unbiased. A case that
-  cannot reach σ ≤ 0.3% records the σ reached and asserts the agreement test at it, and "main" is
-  told.
+  cannot reach σ ≤ 0.3% of I, or whose σ does not fall as N^−½, is not asserted: it records its σ,
+  largest |z|, χ² and σ's scaling with N, and "main" is told (`decision-r08-t4b-t12c.md`,
+  follow-up, ruling 7).
 
   Unit tests:
   - a sphere's single-scattering degree of polarisation is −b₁ ÷ a₁;
@@ -3605,12 +3606,30 @@ here, and `pnpm test` passes.
     cosine from T5's Mie g, not from the table. Its output is a committed file with a test that it
     is current, passing `prettier --check` or listed in `.prettierignore`, and under the 500 kB
     added-file hook.
-  - **The cases.** Kokhanovsky et al. 2010's aerosol and cloud (lognormals at 412 nm, m 1.385 and
-    1.339) and IPRT Phase A's spheres, A3 and A5, in the Stokes mode, in `atmosphere::benchmarks`
-    beside T12.c's, each by Design note 10's agreement test with σ ≤ 0.3% of I at every value.
-  - **T5.b's b₂ sign.** Their V tables check it (R08's Risks, "Deviations in T5.b, as built"):
-    Kokhanovsky's V is taken as the tracer's negative meanwhile, IPRT's handedness, and each run
-    prints the χ² with the sign flipped, as T12.c's summaries do, so that the run decides it.
+  - **The cases.** In the Stokes mode in `atmosphere::benchmarks`, each by Design note 10's
+    agreement test with σ ≤ 0.3% of I at every value:
+    - Kokhanovsky et al. 2010's aerosol (a lognormal at 412 nm, m 1.385);
+    - IPRT Phase A's A3.
+
+    The τ 5 clouds, Kokhanovsky et al.'s cloud (m 1.339) and IPRT's A5, are written and their
+    matrices and A5's rows tested fast. They are asserted by R08.T12.f.
+
+    The handling of Kokhanovsky et al.'s tables (`decision-r08-t4b-t12c.md`, follow-up), each
+    recorded:
+    - Table A2's reflected −Q at φ 90°, VZA 40° and 60°, is negated as a sign erratum (SCIATRAN's
+      own output crosses zero once near 55°).
+    - Their V is the tracer's own (`KOKHANOVSKY_SIGNS.v` = +1). The cloud's VT is negated at VZA
+      20°, 40°, 80° and 89° to the convention of their other V columns.
+    - A printed value that differs from SCIATRAN's own output of the same run by more than the
+      stated Pstar spread is left out. That is the aerosol's 89° reflected I (three azimuths),
+      transmitted I at φ 0° and 180°, and reflected Q at φ 0° and 90°.
+    - The one transmitted value at the sun is left out (15°, chosen before any run).
+    - σ_pub is their stated Pstar spread, Q and U as max(spread·|c|, spread_I·I) and V relative
+      to itself. The cloud's I is 0.2%, and 0.6% for transmitted views at 80° and 89°.
+
+  - **T5.b's b₂ sign** is confirmed by A3's V (χ² 21.2 for 34, against 112,247 flipped), and
+    Kokhanovsky et al.'s printed V is the tracer's own sign (the aerosol's χ² 17.7 for 12, against
+    3,488 flipped).
   - **Still waiting, recorded with T12.c's.** Garcia and Siewert 1985's Haze L and Cloud C1 (no
     lawful copy is held; pending for the owner, for access) and Loughman et al. 2004 (its free
     copy is behind a check that refuses this machine; pending for access). IPRT A6 needs an ocean
@@ -4998,7 +5017,10 @@ generator, and the reference's sampling needs no domain tag.
   copy. Values derived from them are committed with the CIE's citation, and `colourMatching.json`,
   their re-expression in Rec. 709, ships as adapted material under CC BY-SA 4.0 (decided
   2026-10-10, `decision-r08-cmf-licence.md`). `NOTICE` must ship in the app once packaging
-  exists (`decisions-r05.md` item 4's packaging ask).
+  exists (`decisions-r05.md` item 4's packaging ask). GPL source may be read for a numerical method
+  stated in full in the implementing file's doc, never ported: none of its statements, structure,
+  names or comments enter the repository (`decision-r08-cmf-licence.md` §6, after
+  decision-composition row 17).
 
 - **Stars beyond the body's two** (decided 2026-10-09, `decision-r08-design.md` item 3). The sky
   takes the body's own list (Design note 7), so it agrees with the surfaces by construction. A
@@ -6299,6 +6321,203 @@ generator, and the reference's sampling needs no domain tag.
   - _Citations_ corrected as `decision-r08-vector.md` item 3 rules, in `optics.rs` and `case.rs`;
     Cornette and Shanks's mean cosine is now checked against the function's own quadrature
     (10⁻¹²) as well as its draws.
+- **Deviations in T12.e, as built** (2026-10-10;
+  `apps/hyperion/src/renderer/src/test/mieMatrices.ts` and `mieMatrices.test.ts`;
+  `crates/hyperion-fit/src/atmosphere/benchmarks.rs` and the new `sphere_matrices/`; four new files
+  in `crates/hyperion-fit/data/iprt_phase_a/`, with its `PROVENANCE.toml` and `README.md`;
+  `NOTICE`; `.prettierignore`. Rulings: `decision-r08-t4b-t12c.md`, follow-up, 1–7).
+  - _The writer_ is test code beside `bless.ts` (`test/mieMatrices.ts`), since only the benchmarks
+    read it: `SPHERE_CASES`, `SphereCase`, `RadiusDistribution` (`logNormal` by mode radius and s,
+    the σ of ln r; `gamma` by libRadtran's α), `RadiusRule` (`gaussLegendre`, `libRadtran`),
+    `radiusNodes`, `sphereCaseOptics`, `tableIntegral`, `tableValue`, `tabulatedPhase`,
+    `sphereMatrixFile`, `linearInUMoments` (the tracer's integral of a table, in TypeScript),
+    `evenU`, `cosinesOf`, `sampledEntries` and `SIGNIFICANT_DIGITS` (10). Each sphere's matrix is
+    T5.b's `sphereScatteringMatrix` of T5.a's `mieSphere`, weighted by n(r) dr × x² Q_sca, and ω and
+    g are the same sums', not the table's. T5.b's `sphereModeOptics` is not used: it takes an
+    effective radius and variance and its own interval, where each benchmark states its own
+    distribution, its own cut and, for IPRT, its own quadrature. A matrix with T5.c's
+    `forwardPeak` (a delta the case format cannot carry) is refused.
+  - _Its files_ are `crates/hyperion-fit/src/atmosphere/sphere_matrices/<case>.json`, one a case
+    (the tracer `include_str!`s them, the vitest imports them): the case's definition, its node
+    count, ω, g, the linear-in-u integral divided out, and the `tabulated` phase with all five
+    elements beside a₁, 513 or 1,025 entries even in u. 54–108 kB each, under the 500 kB hook,
+    listed in `.prettierignore` since `bless.ts` writes and compares them byte for byte.
+  - _The vitest_ checks IPRT A3's file whole in every run (69 radii, milliseconds), the others
+    whole only under a bless or by hand (`HYPERION_SLOW_TESTS=1`, with the file's vitest; no recipe
+    sets it for this file, and the two Kokhanovsky cases take 59 s and 148 s), and otherwise every
+    64th entry, ω, g and the node count exactly (8 s): Mie at one cosine does not depend on the
+    others asked for, and the sums run in the same order. Beside it, every written table's
+    integral is 1 to 10⁻⁹ and its mean cosine the Mie g's to 10⁻⁴ under the tracer's rule, with
+    each |a₂ … b₂| ≤ a₁(1 + 10⁻⁹); T12.c's load checks themselves run in Rust
+    (`sphere_matrix_tables_make_valid_cases_and_hold_the_tracers_normalisation`). The files were
+    blessed before T5.c's refactor of `mieSphere` (`mieCoefficients`, `mieAmplitudes`) and are
+    the same bits after it, whole.
+  - _Kokhanovsky et al.'s sums._ Their matrices came from Mishchenko's `spher.f`, whose quadrature
+    they do not state. The writer converges their stated integral (0.005 µm to a_end, eq. (10))
+    by T5.b's composite rule, refined 5 times for the aerosol (60,080 nodes) and 3 times for the
+    cloud (49,184). Non-absorbing spheres' resonances converge slowly: the aerosol's a₁ moves by
+    ≤ 6.6 × 10⁻⁴ between levels 5 and 6, the cloud's by ≤ 9 × 10⁻³ (150°–176°) between levels 2
+    and 3. g is 0.792762 against their 0.79275 and 0.861060 against their 0.86114, held to 2 × 10⁻⁴.
+  - _IPRT's sums_ (found here). IPRT's spheres are runs of libRadtran's Mie tool, whose netCDF
+    copies (`waso.mie.cdf`, `watercloud.mie.cdf`, read with a stdlib reader) record what the wiki
+    and Emde et al. do not all state:
+    - A3: index 1.422 − 0.002649i at 350 nm (the wiki's A3 page says 500 nm; Emde et al. §3.2.3
+      and both files say 350), a log-normal of mode radius 0.0262 µm and σ_g 2.24 (the file records
+      2.0, but only Emde et al.'s 2.24 reproduces the matrix), cut at `n_r_max` 5 × the radius
+      parameter on libRadtran's grid (`dx_max` 0.03);
+    - A5: a gamma distribution of α 7 and r_eff 10 µm (Emde et al.'s "width of 0.1" is v_eff),
+      index 1.3258698 − 1.250319 × 10⁻⁷i, `dx_max` 0.003.
+
+    The writer repeats the size sampling of libRadtran's Mie tool, radii from 0.02 r to n_r_max r
+    in steps of Δx = max(dx_max, dx_max √x) and the trapezoid in r, as a method stated in its doc,
+    not as code (ruled 2026-10-10, `decision-r08-cmf-licence.md` §6). A numerical method and its
+    parameters are not expression, and nothing of `src/mie.c` is copied or translated, so
+    decision-composition row 17's "ported" does not reach it. The √x step is F. Evans's, from
+    SHDOM's Mie tables, which libRadtran credits. A3's distribution is cut where its integrand
+    is still large, so the exact integral to 5 r is not IPRT's matrix (g 0.5544 against 0.5498);
+    A5's water resonances leave T5.b's rule 0.3% of a₁ from IPRT's at 50,240 nodes, where
+    libRadtran's sum gives 1.6 × 10⁻⁴. The vitest holds the writer to IPRT's own matrices
+    (`a3_sphere_matrix.txt`, all 68 angles, 10⁻⁵ of P1, 3.6 × 10⁻⁶ measured; `a5_cloud_matrix.txt`,
+    every fifth of 450 angles, 3 × 10⁻⁴, 1.6 × 10⁻⁴ measured) and both ω to the files' six digits.
+
+  - _T5.b's b₂ sign: confirmed._ A3's V gives χ² 21.2 for 34 values, against 112,247 with the sign
+    flipped, under T12.c's PSTAR handedness, which A4's own matrix fixed independently of T5.b; and
+    the writer's b₂ is IPRT's P4, sign included, at all 68 angles. Kokhanovsky et al.'s printed V is
+    the tracer's own sign (ruling 2): the aerosol's V gives χ² 10.9 for 10 against 3,452 flipped.
+    `KOKHANOVSKY_SIGNS.v` is +1 (T12.c had −1, unused there: the molecular case has no V).
+  - _Kokhanovsky et al.'s tables, checked against SCIATRAN's own output_ (the RTSOS repository's
+    copy of their SCIATRAN files, its `SCIATRAN_BENCHMARK_RESULTS/` directory, read only; no
+    licence is stated and none of its values is committed). Each handled by a ruling and recorded
+    in `benchmarks.rs`:
+    - Table A2's reflected −Q at φ 90°, VZA 40° and 60°, printed +0.5724128E−03 and
+      −0.4402361E−03, is negated in code (`KOKHANOVSKY_AEROSOL_ERRATA`; ruling 1): SCIATRAN's file
+      crosses zero once near 55°, the magnitudes agree to 7 digits, and the tracer stood 64σ and 31σ
+      from the printed signs and within 1σ of the corrected ones.
+    - SCIATRAN's V is −(printed) in every V column but the cloud's VT at 20°, 40°, 80° and 89°,
+      which R08.T12.f negates to the other columns' convention (ruling 2; its 60° entry,
+      5.9 × 10⁻⁹, is a numerical zero and stays). The cloud's V cannot decide its sign by a run
+      (|V| ≤ 1.2 × 10⁻⁴ of I against σ ≤ 3 × 10⁻³ of I), so it rests on the sources.
+    - Seven values of the aerosol's VZA 89° row are left out by a source rule (ruling 3,
+      `KOKHANOVSKY_AEROSOL_HORIZON`): reflected I at φ 0°, 90° and 180° (−0.51%, −0.74%, −0.59%
+      from SCIATRAN's output), transmitted I at φ 0° and 180° (−0.62%, −0.69%) and reflected Q at
+      φ 0° and 90° (−0.45%, −0.75%), all beyond the stated Pstar spread, where every other value
+      but the one at the sun matches the file to 5 × 10⁻⁵. The cloud's table matches its file to
+      10⁻⁶ everywhere, so the rule leaves none of the cloud's values out. Table 1's 1.2% (MYSTIC at
+      oblique angles) is not the reason. The paper is inconsistent there (240 streams in its text,
+      480 in Table A2's caption). The tracer matches SCIATRAN's output at the five intensities to
+      0.007%–0.14%, recorded but not the criterion.
+    - The transmitted value at the sun (VZA 60°, φ 0°) is left out (`SUN_EXCLUSION_DEG` 15°,
+      chosen before any sphere run; ruling 6). Its −Q also fails the source rule: the file differs
+      from it by 0.5%, beyond Q's 0.2% (its I by 0.046%). Table 1's Pstar spread covers that view
+      too, so the exclusion rests on the two rules, not on a missing error.
+    - The nine values left out are not committed (`decision-r08-licences.md` row 6c): the table's
+      cells are `None`, and a fast test holds them to the two rules
+      (`kokhanovsky_aerosol_leaves_out_exactly_the_ruled_values`).
+    - σ_pub (ruling 4): the stated Pstar–SCIATRAN spreads, 0.09% in I and 0.2% in Q, U and V
+      (Tables 1 and 2, §5), with Q and U as max(s·|c|, s_I·I), since Table 2 leaves out the values
+      near zero, and V relative to itself. With the floor σ_pub dominates the aerosol's Q at most
+      values (about 3–10 times σ), so the benchmark certifies Q to about 0.1% of I, still inside
+      Design note 10's consistency. Without it the nadir Q stood at z +5.3, +4.3 and −2.9, three
+      estimates of one direction, about 0.15% of I. For R08.T12.f the cloud's I spread is 0.2%,
+      and 0.6% for transmitted views at 80° and 89° (ruling 4's reading of Table 1's "not very
+      oblique"); its V's is 0.5%, relative to itself (§5).
+    - Exact backscatter (reflected, VZA 60°, φ 180°) is 0.47% high, z 4.1 under the bound, kept
+      and recorded (ruling 5). A difference of the two Mie quadratures at the glory, single
+      scattering at Θ = 180°, is a hypothesis, not a finding: a cone average would leave the tracer
+      low at a glory maximum, not high, and the paper notes discrete-ordinate errors near glories.
+      It can be checked against the single-scattering sum of the written matrix at 180°.
+  - _σ must fall as N^−½_ (ruling 7). Every benchmark in `atmosphere::benchmarks`, T12.c's seven
+    included, now traces its case twice, at N and N ÷ 4 samples (each sample draws from its own
+    counter-based stream, so the second is exactly the run's first quarter), and asserts only the
+    values whose σ at N is within 25% (`SIGMA_SCALING_TOLERANCE`) of half their σ at N ÷ 4. Any
+    other is named in the summary and not asserted, and the set each benchmark leaves out is pinned
+    in `EXPECTED_UNSCALED`, so that a value that starts or stops scaling fails the benchmark; a σ
+    that is not finite fails it, as does a benchmark left with nothing to assert
+    (`a_standard_error_scales_only_within_a_quarter_of_n_to_the_minus_half` tests the check).
+    T12.c's seven trace the same seeds and counts, so their full runs are unchanged to the bit;
+    they take 25% longer. T12.d's a = c test and the tracer's other statistical unit tests do not
+    carry the check yet (for "main"). No looser σ cap is admitted for an agreement test, T12.c's
+    allowance is withdrawn (its text, above), and no as-built case used it.
+  - _Names beyond the list above._ In `mieMatrices.ts`: `RadiusNodes`, `SphereCaseOptics`,
+    `TabulatedPhaseJson`, `SphereMatrixFile` and `SPHERE_MATRIX_DESCRIPTION`. In `benchmarks.rs`:
+    `SphereTable`, `SPHERE_TABLES`, `KOKHANOVSKY_AEROSOL`, `KOKHANOVSKY_AEROSOL_PERPENDICULAR`,
+    `KOKHANOVSKY_AEROSOL_SPREAD`, `View`, `Traced`, `sigma_scales`, `SIGMA_SCALING_TOLERANCE` and
+    `EXPECTED_UNSCALED`.
+  - _A3's benchmark error_ is IPOL's largest difference from PSTAR at the rows used, in every
+    component: 9.7 × 10⁻⁵, 4.7 × 10⁻⁵, 1.1 × 10⁻⁴ and 3.6 × 10⁻⁶ of I. MYSTIC's noise is larger
+    there (2.5 × 10⁻³ of I in I), so A4's use of MYSTIC for V is not followed.
+  - _`NOTICE`:_ the IPRT entry's sentence that T12.c's change had left duplicated is removed.
+  - _The benchmarks run_ (module `atmosphere::benchmarks`, `just test-slow atmosphere::benchmarks`;
+    all nine pass; each at seed 0, run one at a time on 4 threads under a 400% CPU quota at load
+    19–25 for the figures below, the times including the N ÷ 4 trace). Of 957 values asserted, 4
+    stand past 3σ; 5 are left out by the N^−½ check.
+
+    | Benchmark                                     | Values | Left out | Samples   | Largest \|z\| (where)                     | Past 3σ | Bound | Largest σ ÷ I | χ² p: I, Q, U, V        | Time  |
+    | --------------------------------------------- | ------ | -------- | --------- | ----------------------------------------- | ------- | ----- | ------------- | ----------------------- | ----- |
+    | Natraj et al. 2009, τ 0.5, μ₀ 0.2, A 0        | 78     | 0        | 5 × 10⁵   | 3.68 (top, μ 0.2, φ 180°, I)              | 1       | 4.51  | 0.24%         | 0.017, 0.22, 0.86       | 43 s  |
+    | Natraj et al. 2009, τ 1, μ₀ 0.6, A 0.8        | 78     | 0        | 4 × 10⁵   | 2.63 (bottom, μ 0.2, φ 60°, U)            | 0       | 4.51  | 0.18%         | 0.74, 0.44, 0.30        | 34 s  |
+    | Natraj and Hovenier 2012, τ 2, μ₀ 0.5, A 0.25 | 57     | 3        | 1.5 × 10⁶ | 2.56 (bottom, μ 0.9, φ 90°, I)            | 0       | 4.45  | 0.27%         | 0.012, 0.35, 0.18       | 160 s |
+    | Kokhanovsky et al. 2010, molecular            | 42     | 0        | 2.5 × 10⁵ | 2.75 (reflected, VZA 0°, φ 180°, Q)       | 0       | 4.38  | 0.20%         | 0.93, 0.14, 0.46        | 15 s  |
+    | IPRT A1 (PSTAR)                               | 246    | 0        | 2 × 10⁵   | 3.02 (ρ 0.03, bottom, sza 30°, vza 0°, I) | 1       | 4.75  | 0.19%         | 0.16, 0.11, 0.15        | 57 s  |
+    | IPRT A2 (PSTAR)                               | 99     | 0        | 10⁵       | 2.69 (top, vza 120°, vaa 0°, U)           | 0       | 4.56  | 0.15%         | 0.96, 0.62, 0.47        | 8 s   |
+    | IPRT A4 (PSTAR)                               | 136    | 0        | 4 × 10⁵   | 3.09 (bottom, vza 0°, vaa 90°, Q)         | 1       | 4.63  | 0.20%         | 0.99, 0.21, 0.69, 0.997 | 45 s  |
+    | IPRT A3 (PSTAR)                               | 136    | 0        | 4 × 10⁵   | 2.35 (top, vza 100°, vaa 135°, I)         | 0       | 4.63  | 0.27%         | 0.91, 0.93, 0.57, 0.96  | 36 s  |
+    | Kokhanovsky et al. 2010, aerosol              | 85     | 2        | 1.2 × 10⁶ | 4.10 (reflected, VZA 60°, φ 180°, I)      | 1       | 4.53  | 0.28%         | 0.27, 0.96, 0.99, 0.36  | 118 s |
+    - T12.c's seven give its own figures to the digit (their full runs are the same draws); only
+      Natraj and Hovenier's τ 2 changes, by its three left-out values (bottom μ 0.1, φ 180°, Q;
+      μ 1, φ 0°, I and U), T12.c's thick transmitted light, so its χ² p values move (I from 0.017
+      to 0.012 over 19 values, Q from 0.39 to 0.35, U from 0.22 to 0.18).
+    - Kokhanovsky et al.'s aerosol leaves out its V at VZA 60°, φ 90°, reflected and transmitted
+      (4.4 × 10⁻⁵ and 6.8 × 10⁻⁵ of I). Its V then gives χ² 10.9 for 10 against 3,452 flipped.
+    - Every sign convention is decided by the run: the flipped χ² is at least 1.5 × 10⁵ for Q and U
+      in every benchmark, and 3,452, 13,124 and 112,247 for the V of the aerosol, A4 and A3.
+    - Before the N^−½ check (an earlier run of the same draws) the aerosol asserted 89 values, its
+      V's χ² 17.7 for 12 against 3,488 flipped; A3's figures were those above.
+
+  - _The τ 5 clouds_ (ruling 7: option (a); R08.T12.f's starting point). Neither is asserted, their
+    slow tests are not committed, and Kokhanovsky et al.'s cloud values stay out of the commit
+    until a test asserts them. Committed: both written matrices (`kokhanovsky-cloud.json`,
+    `iprt-a5.json`), A5's 62 selected rows and its matrix, and their fast load and matrix tests.
+    Measured, at the counts and seed the tests would use:
+    - IPRT A5, 6 × 10⁵ samples a geometry, 62 geometries, about 200 s on 4 threads at load 33: the
+      per-value bound held (largest |z| 4.56 against 4.75) but the χ² of I was 113 for 62
+      (p ≈ 4 × 10⁻⁵); traced ÷ expected averaged 0.9962, up from 0.9877 at 5 × 10⁴ (median 0.994,
+      37 of 58 values low), σ/I 1.3% at the median and 6.9% at worst. Q, U and V hold (χ² 62, 60
+      and 70 for 62), and their flipped χ² decide the signs (90,295, 11,916).
+    - Kokhanovsky et al.'s cloud, 10⁶ samples, 36 geometries, about 200 s: σ/I 1.5% at the median
+      and 40% at its worst (transmitted, VZA 89°, φ 90°); traced ÷ expected 1.020 on average,
+      carried by one spike.
+    - _Why_ (diagnosed with temporary instrumentation, not committed): the heavy tail is next-event
+      estimates at vertices just under the cloud's top whose arrival direction lies within about 1°
+      of the sun (cos Θ > 0.9998, p up to 500 sr⁻¹) at weights 0.1–1.6. The path's direction
+      diffuses into the sun's forward peak by small scatterings, and T12.c's sunward draws do not
+      reduce the weight, since each step's old and new directions lie in the same peak. It is not
+      the polarisation: the scalar σ of the same paths is the same. At reflected VZA 0°, φ 90°, σ/I
+      fell from 3.9% to 2.8% over 2 × 10⁵ to 8 × 10⁵ samples, a factor 0.71 where N^−½ gives 0.5.
+    - _The cloud's matrix_ moved a₁ by up to 9 × 10⁻³ at 150°–176° from level 2 to level 3, its
+      committed level; R08.T12.f shows level 3 against level 4 before it asserts the cloud.
+    - _Tried and reverted:_ a sunward fraction proportional to the best-lit sun's transmittance from
+      the vertex below e⁻¹ (unbiased, and bit-identical on every T12.c case), meant to stop the
+      weights' growth by 1 ÷ 0.8 a vertex deep in the cloud. It gave no clear gain at 8 × 10⁵
+      samples (σ/I 2.0% against 2.8% at reflected VZA 0°, φ 90°, but 1.15% against 0.88% at
+      transmitted VZA 20°, φ 90°), so T12.c's tracer is unchanged.
+  - _Sources, as fetched_ (2026-10-10, into the untracked scratch directory):
+    - Kokhanovsky et al.'s DLR copy matched `93888e0b…` (T12.c's); Tables A2–A6 read with the
+      minus glyph restored and checked against the rendered pages.
+    - Emde et al. 2015, arXiv:1901.01813, SHA-256
+      `267003c4ea7d24a41bf3709d9f83772bb9cc2ec46725d96ace3b01ac80286280`, for A3's and A5's
+      definitions.
+    - IPRT's files: in `iprt_phase_a/README.md`, with `waso.mie.cdf` and `watercloud.mie.cdf`.
+    - libRadtran 2.0.6, `https://www.libradtran.org/download/libRadtran-2.0.6.tar.gz`, SHA-256
+      `64930cc40b6e4a37aa220520974d330fc1563796f466a649b2238131f2d69840`; only `src/mie.c` was
+      read, and nothing of it is committed or run. It is GPL-2.0-or-later, and was read for the
+      sampling method alone (§6 of `decision-r08-cmf-licence.md`).
+    - SCIATRAN's output (RTSOS, file commit 26def61e at `main`'s 3a8610fc), SHA-256:
+      `aerosol_refl_N_240.dat` `11b1f31c…c2a822`, `aerosol_trans_N_240.txt` `bca0734a…e43`,
+      `cloud_refl_N_360.dat` `87ead0c2…2db7`, `cloud_trans_N_360.dat` `6dc2059e…489`.
+  - _Plan text applied here_ from the follow-up: (c) T12.c's allowance, (d) and (e) T12.e's
+    bullets, and this record. Its (a) the order, (b) Design note 10's _Statistics_, (f) R08.T12.f's
+    text, (g) and (h) T12.b's are for the docs pass.
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:

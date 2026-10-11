@@ -340,13 +340,13 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
 
 - IPRT polarized radiative transfer model intercomparison, Phase A (C. Emde et al., J. Quant.
   Spectrosc. Radiat. Transfer 164 (2015) 8-36, DOI: 10.1016/j.jqsrt.2015.05.007), results and
-  case A4's optical properties from https://www.libradtran.org/iprt/, licensed under CC BY-SA 3.0
-  (https://creativecommons.org/licenses/by-sa/3.0/). The values in
-  crates/hyperion-fit/data/iprt_phase_a/ are selected rows of those results and case A4's phase
-  matrix less its Legendre moments, reformatted; that adapted material is offered under CC BY-SA
-  3.0.
-  crates/hyperion-fit/data/iprt_phase_a/ are selected rows of those results, reformatted; that
-  adapted material is offered under CC BY-SA 3.0.
+  the optical properties of cases A3, A4 and A5 from https://www.libradtran.org/iprt/, licensed
+  under CC BY-SA 3.0 (https://creativecommons.org/licenses/by-sa/3.0/). The values in
+  crates/hyperion-fit/data/iprt_phase_a/ are selected rows of those results, case A4's phase
+  matrix less its Legendre moments, and the phase matrices of A3 and A5 at selected angles,
+  reformatted; that adapted material is offered under CC BY-SA 3.0. The sphere cases' matrices
+  in crates/hyperion-fit/src/atmosphere/sphere_matrices/ are computed by the client's Mie from the
+  size distributions that Kokhanovsky et al. and IPRT state (plan R08, R08.T12.e), not copied.
 
 - Measured scattering matrices from the Granada-Amsterdam Light Scattering Database
   (https://scattering.iaa.es/; O. Muñoz et al., J. Quant. Spectrosc. Radiat. Transfer 331 (2025)
