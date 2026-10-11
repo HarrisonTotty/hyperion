@@ -3244,16 +3244,25 @@ mod tests {
     /// Lowering the cut moves the light of the stars between the cuts from the listed stars and
     /// the overflow into the band, and raising it moves it back: the listed, overflow and band
     /// light together is kept within 1% either way, as it is when `n_max` moves stars from the
-    /// list into the overflow (exactly, but for rounding). The eye is asked, and every total is
-    /// the bits it is without it (R06.T8.k).
+    /// list into the overflow (exactly, but for rounding). The eye is asked throughout, and three
+    /// of the totals are held to the bits they are without it (R06.T8.k): V 8 and V 6 with every
+    /// star listed, and V 8 with the 100 brightest. V 8 lies beside the eye's own cut (about
+    /// 8.10), V 6 is the farthest below it, and the 100 brightest bring an overflow. The other
+    /// three, V 7, and V 7 and V 6 with 100 listed, lie between those regimes and are not held
+    /// (`decision-test-coverage.md` §3.1). The fourth configuration held is the radius test's,
+    /// complete to 100 ly.
     #[test]
     fn lowering_or_raising_the_cut_conserves_the_light() {
         let spec = spec(8);
         let all = n(MAX_N_MAX);
         let r = CENSUS_RADIUS_LY;
         let mut totals = Vec::new();
-        for cut in [CENSUS_CUT, 7.0, 6.0] {
-            let (listed, band) = total_light_with_the_eye(cut, r, all, spec);
+        for (cut, held_to_the_bits) in [(CENSUS_CUT, true), (7.0, false), (6.0, true)] {
+            let (listed, band) = if held_to_the_bits {
+                total_light_with_the_eye(cut, r, all, spec)
+            } else {
+                total_light(cut, r, all, spec, Eye::Asked)
+            };
             eprintln!(
                 "cut {cut}, complete to {r} ly: listed {listed:.5e} lx, band {band:.5e} lx, \
                  together {:.5e} lx",
@@ -3283,9 +3292,14 @@ mod tests {
                 "V {deep} → {shallow}: {a} lx → {b} lx"
             );
         }
-        // n_max keeps the 100 brightest: the rest overflow into the band, with no light lost.
-        for (cut, listed, band) in totals {
-            let (listed_100, band_100) = total_light_with_the_eye(cut, r, n(100), spec);
+        // n_max keeps the 100 brightest: the rest overflow into the band, with no light lost. The
+        // first total, V 8's, is held to its bits without the eye.
+        for (i, (cut, listed, band)) in totals.into_iter().enumerate() {
+            let (listed_100, band_100) = if i == 0 {
+                total_light_with_the_eye(cut, r, n(100), spec)
+            } else {
+                total_light(cut, r, n(100), spec, Eye::Asked)
+            };
             let (moved_out, moved_in) = (listed - listed_100, band_100 - band);
             assert!(moved_out > 0.0, "cut {cut}");
             assert!(
@@ -3297,8 +3311,10 @@ mod tests {
 
     /// The listed, overflow and band light together does not depend on how far the census is
     /// complete, within 1%: a census complete to 100 ly and one complete to 200 ly (as a partial
-    /// and a later reply, R06.T8.i) give the same sky's light. The eye is asked, and every total
-    /// is the bits it is without it (R06.T8.k).
+    /// and a later reply, R06.T8.i) give the same sky's light. The eye is asked, and the partial
+    /// reply's total, complete to 100 ly, is held to the bits it is without it (R06.T8.k); the
+    /// total complete to 200 ly is the cut test's first, held there
+    /// (`decision-test-coverage.md` §3.1).
     ///
     /// Against the band of no census at all, complete nowhere, the listed stars' light falls
     /// short of the tables' expectation of it by more (printed, not asserted; R06's Risks, "The
@@ -3317,8 +3333,12 @@ mod tests {
             spec,
         );
         let mut totals = Vec::new();
-        for radius in [100.0, CENSUS_RADIUS_LY] {
-            let (listed, band) = total_light_with_the_eye(CENSUS_CUT, radius, all, spec);
+        for (radius, held_to_the_bits) in [(100.0, true), (CENSUS_RADIUS_LY, false)] {
+            let (listed, band) = if held_to_the_bits {
+                total_light_with_the_eye(CENSUS_CUT, radius, all, spec)
+            } else {
+                total_light(CENSUS_CUT, radius, all, spec, Eye::Asked)
+            };
             eprintln!(
                 "complete to {radius} ly: listed {listed:.5e} lx, band {band:.5e} lx, together \
                  {:.5e} lx, {:+.2}% against the band complete nowhere ({nowhere:.5e} lx); the \
