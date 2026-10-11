@@ -774,23 +774,49 @@ source: BirthSource)`, and `speed_bin_shares_against(law, m, comp, v_ref)`. The 
   plan's window. The black holes' first bin is 0.785 (0.78–0.88).
 - **Ruling 93.2** is recorded above; the kick loop that honours it is P08.T12.c's.
 - **The direct-draw test is one chi-square test a mass, as built (lane `perf-native-tests`,
-  2026-10-11, at `GENERATOR_VERSION` 21; no output moves; `decision-test-coverage.md` §3.2, the
-  kick bins' ruling, a correctness fix).** A 3σ check of each of the 97 cells of each mass (three
-  kinds by four modes by eight bins, and no remnant), 485 in all, of which 61 have a share, fails
-  on some 15% or more of the fresh draws of a true law (0.27% a cell before the counts'
-  discreteness), against the skill's α = 10⁻³. `the_shares_match_direct_draws_of_the_law` keeps
-  the five masses, their LCG seeds (`0x08b0` + the mass's index) and 10⁶ draws each, and tests
-  each mass's counts against its shares by one `chi_square_gof`, cells of under five expected
-  merged, at α ÷ 5 (`assert_p_value`), so that the five hold α family-wise; a failure names the
-  cell of five or more expected furthest from its share. Beforehand, every cell expecting under
-  10⁻⁶ draws (a kind's modes it never takes, and the vanishing tails) must hold none, and those
-  cells together expect under 10⁻⁶: a true law draws none there but once in 10⁶ runs, so this
-  costs no α and keeps the 3σ check's power against draws in cells the law cannot reach. Measured:
-  8.5 M☉ χ² 3.9 on 5 degrees of freedom (p 0.56), 11 M☉ 8.1 on 10 (0.62), 16 M☉ 10.1 on 14 (0.76),
-  24 M☉ 9.5 on 14 (0.80), 38 M☉ 7.5 on 5 (0.19); the least merged cells expect 16.4, 29.6, 31.7,
-  9.0 and 273.2 draws, and the test prints them. For the decision agent: the science-checker finds
-  that with merged cells near the floor of 5 the χ² approximation puts a mass's real false-failure
-  rate at 2.5–5.4 × 10⁻⁴ rather than α ÷ 5 = 2 × 10⁻⁴; the floor and α ÷ 5 are as ruled.
+  2026-10-11, at `GENERATOR_VERSION` 21; no output moves; `decision-test-coverage.md` §3.2, the kick
+  bins' ruling and its addendum on the merge floor, correctness fixes).** A 3σ check of each of the
+  97 cells of each mass (three kinds by four modes by eight bins, and no remnant), 485 in all, of
+  which 61 have a share, fails on some 15% or more of the fresh draws of a true law (0.27% a cell
+  before the counts' discreteness), against the skill's α = 10⁻³.
+  `the_shares_match_direct_draws_of_the_law` keeps the five masses, their LCG seeds (`0x08b0` + the
+  mass's index) and 10⁶ draws each, and tests each mass's counts against its shares by one
+  `chi_square_gof` at α ÷ 5 (`assert_p_value`), so that the five hold α family-wise. Beforehand,
+  every cell expecting under 10⁻⁶ draws (a kind's modes it never takes, and the vanishing tails)
+  must hold none, and those cells together expect under 10⁻⁶: a true law draws none there but once
+  in 10⁶ runs, so this costs no α and keeps the 3σ check's power against draws in cells the law
+  cannot reach; they are then left out of the χ². The rest are merged within each (kind, mode), in
+  bin order, until every cell expects at least 50 draws (`MERGE_FLOOR`, `merged_cells`: a run of
+  bins closes at 50 and a group's thin end joins its last cell; a group under 50 in all, of which
+  there is none today, fails the test until a ruling says where it goes), so the testkit's own floor
+  of 5 merges nothing more (both asserted); a failure names the unmerged cell of 50 or more expected
+  furthest from its share. The floor costs resolution only in the bins it merges, which hold at most
+  3.5 × 10⁻⁵ of a mass's draws. Measured: 8.5 M☉ χ² 2.6 on 4 degrees of freedom (p 0.62), 11 M☉ 8.0
+  on 9 (0.53), 16 M☉ 9.9 on 13 (0.70), 24 M☉ 8.9 on 13 (0.78), 38 M☉ 7.4 on 5 (0.19); the least
+  merged cells expect 19 883, 481, 1 855, 244 and 274 draws, and the test prints them. Run time
+  unchanged.
+  - _The false-failure rates._ An exact Monte Carlo of the test under the law's own shares: for
+    each mass, 10⁸ multinomial samples of 10⁶ draws over its merged cells (merging a
+    multinomial's cells is exact), each failing when Pearson's χ² exceeds the χ² law's quantile
+    at α ÷ 5 on the merged cells less one degrees of freedom, as `assert_p_value` fails it (NumPy
+    and SciPy, off the repository). At the floor of 50 the rates are 2.005, 2.009, 2.011, 1.991
+    and 2.025 × 10⁻⁴ (each ± 0.014 × 10⁻⁴, one standard error), under the addendum's
+    2.2 × 10⁻⁴; family-wise at most their sum, 1.004 × 10⁻³, with 1.8 × 10⁻⁷ more from the cells
+    of no share. The science-checker's independent check, conditioning exactly on the two least
+    cells' counts and taking the χ² law for the rest, gives 2.001, 2.009, 2.002, 2.013 and
+    2.033 × 10⁻⁴.
+  - _At the floor's edge._ With a mass's least cell moved to exactly 50 expected, the masses of
+    4 and 5 degrees of freedom sit at the bound: 8.5 M☉ 2.205 and 38 M☉ 2.198 × 10⁻⁴ (± 0.015,
+    10⁸ samples; the science-checker's conditional calculation gives 2.223 and 2.172), the others
+    2.10, 2.05 and 2.06 × 10⁻⁴ (± 0.033, 2 × 10⁷ samples). Several cells near 50 would go higher.
+    Today no merged cell expects under 244 draws, so the ruled floor of 50 is kept. **For "main":**
+    a floor of 60 would hold the edge too (2.19 × 10⁻⁴ at 4 degrees of freedom, 2.14 × 10⁻⁴ at 5,
+    the science-checker's figures), should a change to the law bring a cell near the floor.
+  - _At the old floor of 5_ the same computation gives 2.468, 2.150, 2.118, 2.290 and
+    2.072 × 10⁻⁴ (± 0.032–0.035, 2 × 10⁷ samples; the conditional calculation puts 8.5 M☉, whose
+    least cell expected 16.4 draws on 5 degrees of freedom, at 2.52 × 10⁻⁴), family-wise
+    1.10 × 10⁻³: over α ÷ 5 at 8.5 and 24 M☉, as the science-checker had found from the χ²
+    approximation near the floor, at the low end of its estimate of 2.5–5.4 × 10⁻⁴.
 
 ### P08.T9 The class table
 
@@ -1005,15 +1031,30 @@ CoredPowerLaw, BallisticLayer, OwnFormMixture, FlareFactor}`, as Provides has th
   forms is slow (`every_form_normalises_for_200_seeds`: 200 mass models, fields and 96 cube
   integrals each); the fast suite builds them at the fixture.
 - **The Monte Carlo's standard error, as built (lane `perf-native-tests`, 2026-10-11, at
-  `GENERATOR_VERSION` 21; no output moves; asked by `decision-test-coverage.md` §3.2 before any
-  ruling on the test's size).** `a_spheroids_normalisation_agrees_with_a_monte_carlo` now computes
-  and prints each estimate's standard error, the weighted values' sample deviation over √n times
-  the eight octants, beside the 0.5% tolerance; the estimate's bits are unchanged. At its seed the
-  three spheroids' errors are 5.55 × 10⁻⁴, 1.83 × 10⁻³ and 4.22 × 10⁻⁴ of the integral, and the
-  estimates lie 0.63, 0.56 and 0.23 errors below it. **Finding:** the flattened, steep spheroid
-  (a 0.4, q 0.3, γ 5) has the tolerance at 2.73 standard errors, a two-sided false-failure chance
-  of about 6 × 10⁻³ on a fresh seed, above α = 10⁻³; the round and the shallow ones are at 9.01
-  and 11.8 errors. For the decision agent, before any change of the seed or the sample.
+  `GENERATOR_VERSION` 21; no output moves; `decision-test-coverage.md` §3.2 and its addendum,
+  option (a)).** `a_spheroids_normalisation_agrees_with_a_monte_carlo` keeps the plan's 0.5% and
+  10⁷ points a spheroid, and asserts that each estimate's standard error (the weighted values'
+  sample deviation over √n, times the eight octants) is at most 0.5% over the two-sided normal
+  quantile at α ÷ 3, 3.588 (`−normal_quantile(α ÷ 6)`), so 1.394 × 10⁻³ of the integral, and the
+  three hold α = 10⁻³ family-wise. Each spheroid's z is drawn at its own flattened scale `q a` by a
+  Cauchy draw on [0, L], `q a tan(u atan(L ÷ q a))`, one LCG word a point as before; x and y keep
+  the `L u³` draw. The ruling named the flattened spheroid; the round and the shallow ones take
+  their own `q a` too, which lowers their errors, so one draw serves all three. Every weight is
+  bounded on the cube, so the variance is finite for any draw; the `z⁻²` tail, heavier than the
+  spheroids' `z^(−γ)`, keeps it small. The Monte Carlo stays independent of the quadrature. At the
+  seed the errors are 4.19 × 10⁻⁴, 9.91 × 10⁻⁴ and
+  4.03 × 10⁻⁴ of the integral (5.55 × 10⁻⁴, 1.83 × 10⁻³ and 4.22 × 10⁻⁴ before, every coordinate
+  `L u³`), the same to 0.2% at two other seeds, and the estimates lie 0.98, 0.93 and 0.16 errors
+  below the quadrature; the tolerance is at 11.9, 5.04 and 12.4 errors, a family-wise
+  false-failure chance of about 5 × 10⁻⁷. The draw costs no time: 3.1 s a 10⁷-point spheroid
+  against 4.0 s with `L u³` for z, measured side by side (provisional, shared machine), about
+  2.7 s off the test natively. Other z draws tried on the flattened spheroid at 10⁷ points: a log
+  draw of scale `q a`, 1.79 × 10⁻³; the Cauchy draw at `q a ÷ 2`, 8.90 × 10⁻⁴, and at `2 q a`,
+  1.30 × 10⁻³; a draw matched to its z-marginal `(1 + (z ÷ q a)²)^(−3/2)`, 8.57 × 10⁻⁴, but whose
+  `z⁻³` tail would raise the shallow spheroid's error to 7.05 × 10⁻⁴. The science-checker's
+  quadrature of the importance draws' moments gives the same errors (4.192, 9.918 and
+  4.024 × 10⁻⁴), and the weighted values' kurtosis (5.3, 32.9 and 11.2) leaves the estimated error
+  itself within 0.1%. Option (b), 1.75 × 10⁷ points, is not needed.
 
 ### P08.T11 Bounds for flared classes
 

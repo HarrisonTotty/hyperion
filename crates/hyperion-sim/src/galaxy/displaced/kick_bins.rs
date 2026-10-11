@@ -958,17 +958,20 @@ mod tests {
     }
 
     /// P08.T8.b: against 10⁶ direct draws of plan 06's law at five masses, the counts of every
-    /// kind, mode and bin, and of no remnant, follow the shares: one chi-square test a mass, its
-    /// cells of under five expected merged, each at α ÷ 5, so that the five hold the skill's
-    /// α = 10⁻³ family-wise (`decision-test-coverage.md`, the kick bins' ruling). A 3σ check of
-    /// each cell, as this test made before, fails on some 15% or more of the fresh draws of a true
-    /// law (61 of the 485 cells have a share, at 0.27% each before the counts' discreteness), far
-    /// above 10⁻³.
+    /// kind, mode and bin, and of no remnant, follow the shares: one chi-square test a mass, each
+    /// at α ÷ 5, so that the five hold the skill's α = 10⁻³ family-wise, to within the 1.1 × 10⁻³
+    /// that `decision-test-coverage.md` allows (the kick bins' ruling and its §3.2 addendum). A 3σ
+    /// check of each cell, as this test made before, fails on some 15% or more of the fresh draws
+    /// of a true law (61 of the 485 cells have a share, at 0.27% each before the counts'
+    /// discreteness), far above 10⁻³. Each (kind, mode)'s bins are merged in bin order until every
+    /// cell expects at least [`MERGE_FLOOR`] draws ([`merged_cells`]), where the χ² law's tail
+    /// puts each mass's real false-failure rate within the addendum's 2.2 × 10⁻⁴.
     ///
     /// The cells whose share is all but nought (expected under [`NO_SHARE`] draws: a kind's modes
     /// it never takes, and the vanishing tails) hold no draw at all, and their expectations sum
     /// under [`NO_SHARE`]: a true law draws none there but once in 10⁶ runs, so the check costs no
-    /// α, and a draw in a cell the law cannot reach fails it, as it failed the 3σ check.
+    /// α, and a draw in a cell the law cannot reach fails it, as it failed the 3σ check. They are
+    /// left out of the χ².
     #[test]
     fn the_shares_match_direct_draws_of_the_law() {
         let law = StandardKickLaw::default();
@@ -993,23 +996,26 @@ mod tests {
                 KilometresPerSecond::new(V_C),
             );
             let total = f64::from(n);
-            let mut cells: Vec<(String, u64, f64)> = Vec::new();
+            // Each (kind, mode)'s cells in bin order, then no remnant as a group of its own.
+            let mut groups: Vec<Vec<(String, u64, f64)>> = Vec::new();
             for (k, &kind) in KINDS.iter().enumerate() {
                 for (j, &mode) in MODES.iter().enumerate() {
                     let bins = shares.mode_bins(kind, mode);
-                    for (bin, &p) in bins.iter().enumerate() {
+                    let group = bins.iter().enumerate().map(|(bin, &p)| {
                         let label = format!("{kind:?} {mode:?} bin {bin}");
-                        cells.push((label, u64::from(counts[k][j][bin]), p * total));
-                    }
+                        (label, u64::from(counts[k][j][bin]), p * total)
+                    });
+                    groups.push(group.collect());
                 }
             }
-            cells.push((
+            groups.push(vec![(
                 "no remnant".to_owned(),
                 u64::from(none),
                 shares.no_remnant() * total,
-            ));
+            )]);
+            let cells = || groups.iter().flatten();
             let mut no_share = 0.0;
-            for (label, o, e) in cells.iter().filter(|&&(_, _, e)| e < NO_SHARE) {
+            for (label, o, e) in cells().filter(|&&(_, _, e)| e < NO_SHARE) {
                 assert_eq!(*o, 0, "{m} M☉ {label}: drawn where the law expects {e:e}");
                 no_share += e;
             }
@@ -1017,30 +1023,45 @@ mod tests {
                 no_share < NO_SHARE,
                 "{m} M☉: the cells of no share expect {no_share:e} draws"
             );
-            let observed: Vec<u64> = cells.iter().map(|&(_, o, _)| o).collect();
-            let expected: Vec<f64> = cells.iter().map(|&(_, _, e)| e).collect();
+            let merged = merged_cells(groups.iter().map(|group| {
+                group
+                    .iter()
+                    .filter(|&&(_, _, e)| e >= NO_SHARE)
+                    .map(|&(_, o, e)| (o, e))
+            }));
+            let observed: Vec<u64> = merged.iter().map(|&(o, _)| o).collect();
+            let expected: Vec<f64> = merged.iter().map(|&(_, e)| e).collect();
             let fit = chi_square_gof(&observed, &expected);
-            // The least expected count left once the thin cells are merged: the χ² law's
-            // approximation, and so the test's real α, rests on it.
-            let least = merged_expectations(&expected)
-                .into_iter()
+            assert_eq!(
+                fit.bins,
+                merged.len(),
+                "{m} M☉: chi_square_gof merged the merged cells again"
+            );
+            // The least expected count of the merged cells: the χ² law's approximation, and so
+            // the test's real α, rests on it.
+            let least = expected
+                .iter()
+                .copied()
                 .min_by(f64::total_cmp)
                 .expect("cells left");
-            // The cell of five or more expected furthest from its share, in standard deviations,
-            // named should the test fail.
-            let (label, o, e) = cells
-                .iter()
+            assert!(
+                least >= MERGE_FLOOR,
+                "{m} M☉: a merged cell expects {least}"
+            );
+            // The cell at the merge floor or more furthest from its share, in standard
+            // deviations, named should the test fail.
+            let (label, o, e) = cells()
                 .filter(|&&(_, _, e)| e >= MERGE_FLOOR)
                 .max_by(|a, b| {
                     let z = |&(_, o, e): &(String, u64, f64)| (count(o) - e).abs() / e.sqrt();
                     z(a).total_cmp(&z(b))
                 })
-                .expect("a cell of five or more expected");
+                .expect("a cell at the merge floor or more");
             let name = format!(
                 "{m} M☉: {} cells, {} with a share, merged to {} (the least expecting {least:.1}), \
                  χ² {:.1} on {} degrees of freedom; furthest {label}, {o} drawn against {e:.1}",
-                cells.len(),
-                cells.iter().filter(|&&(_, _, e)| e >= NO_SHARE).count(),
+                cells().count(),
+                cells().filter(|&&(_, _, e)| e >= NO_SHARE).count(),
                 fit.bins,
                 fit.statistic,
                 fit.dof
@@ -1054,30 +1075,51 @@ mod tests {
     /// tails of under 10⁻¹² of the law.
     const NO_SHARE: f64 = 1e-6;
 
-    /// The testkit's `chi_square_gof` merges the cells expecting fewer than this.
-    const MERGE_FLOOR: f64 = 5.0;
+    /// The least expected draws of a merged cell (`decision-test-coverage.md` §3.2 addendum).
+    ///
+    /// The testkit's floor of 5 left merged cells expecting as few as 9.0 draws, whose skewed
+    /// counts put a mass's real false-failure rate at up to about 2.5 × 10⁻⁴ against
+    /// α ÷ 5 = 2 × 10⁻⁴. At 50 the merged cells expect 244 draws or more, and an exact Monte Carlo
+    /// of the test under the law's shares (10⁸ multinomial samples of 10⁶ draws a mass) puts the
+    /// rates at 1.99–2.03 × 10⁻⁴; a mass whose least cell sat at exactly 50 would be at about
+    /// 2.2 × 10⁻⁴, the addendum's bound (P08's as-built note).
+    const MERGE_FLOOR: f64 = 50.0;
 
-    /// The cells' expected counts as `chi_square_gof` merges them: thin cells from the left end
-    /// and from the right end inwards, then any thin cell left inside into its right-hand
-    /// neighbour (the testkit's `stats::chi_square`, `merge_thin_bins`).
-    fn merged_expectations(expected: &[f64]) -> Vec<f64> {
-        let mut cells = expected.to_vec();
-        while cells.len() > 1 && cells[0] < MERGE_FLOOR {
-            let first = cells.remove(0);
-            cells[0] += first;
-        }
-        while cells.len() > 1 && cells[cells.len() - 1] < MERGE_FLOOR {
-            let last = cells.pop().expect("two cells or more");
-            let into = cells.len() - 1;
-            cells[into] += last;
-        }
-        let mut i = 0;
-        while i + 1 < cells.len() {
-            if cells[i] < MERGE_FLOOR {
-                let thin = cells.remove(i);
-                cells[i] += thin;
-            } else {
-                i += 1;
+    /// The (drawn, expected) cells of `groups`, each merged in bin order to the merge floor.
+    ///
+    /// A run of bins closes once it expects [`MERGE_FLOOR`] draws, and the thin run left at a
+    /// group's end joins the group's last cell. Merged, a multinomial's cells are still a
+    /// multinomial's, and the merge reads only the expectations, so the null stays exact; the
+    /// test's α is then the χ² law's approximation, which P08's as-built note measures.
+    ///
+    /// # Panics
+    ///
+    /// If a group with a share expects under the floor in all: the addendum merges only within a
+    /// (kind, mode), so such a group, of which there is none today, needs a ruling on where it
+    /// goes.
+    #[must_use]
+    fn merged_cells<G: IntoIterator<Item = (u64, f64)>>(
+        groups: impl IntoIterator<Item = G>,
+    ) -> Vec<(u64, f64)> {
+        let add = |a: (u64, f64), b: (u64, f64)| (a.0 + b.0, a.1 + b.1);
+        let mut cells: Vec<(u64, f64)> = Vec::new();
+        for group in groups {
+            let start = cells.len();
+            let mut run = (0, 0.0);
+            for cell in group {
+                run = add(run, cell);
+                if run.1 >= MERGE_FLOOR {
+                    cells.push(run);
+                    run = (0, 0.0);
+                }
+            }
+            match cells[start..].last_mut() {
+                Some(last) => *last = add(*last, run),
+                None => assert!(
+                    run.1 <= 0.0,
+                    "a (kind, mode) expects {} draws in all, under the merge floor",
+                    run.1
+                ),
             }
         }
         cells

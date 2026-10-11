@@ -16,6 +16,7 @@ use hyperion_sim::galaxy::displaced::{AGE_BINS, AgeBin, SPEED_BINS};
 use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::math;
 use hyperion_testkit::lcg::Lcg;
+use hyperion_testkit::stats::ALPHA;
 
 /// The cube's half-width, ly.
 const L: f64 = 65_536.0;
@@ -45,11 +46,21 @@ fn the_layers_column_is_its_closed_form() {
     }
 }
 
-/// The integral over the cube of `f(|x|, |y|, |z|)` by importance sampling, and its standard
-/// error: each coordinate is `L u³` with u uniform, whose density `t^(−2/3) ÷ (3 L^(1/3))` follows a
-/// cored form's rise to its core, and eight octants. The error is the sample standard deviation of
-/// the weighted values over √n, times the eight octants.
-fn monte_carlo(points: u32, lcg: &mut Lcg, shape: impl Fn(f64, f64, f64) -> f64) -> (f64, f64) {
+/// The integral over the cube of `f(|x|, |y|, |z|)` by importance sampling, and its standard error.
+///
+/// Each of x and y is `L u³` with u uniform, whose density `t^(−2/3) ÷ (3 L^(1/3))` follows a cored
+/// form's rise to its core; z is a Cauchy draw of scale `z_scale_ly` (ly, positive and finite) on
+/// `[0, L]`, `z_scale_ly tan(u atan(L ÷ z_scale_ly))`, of density `1 ÷ (z_scale_ly atan(L ÷
+/// z_scale_ly) (1 + (z ÷ z_scale_ly)²))`, which holds a flattened form's points near its plane, and
+/// whose `z⁻²` tail, heavier than the spheroids' `z^(−γ)` here, keeps the weights' variance small;
+/// and eight octants. The error is the sample standard deviation of the weighted values over √n,
+/// times the eight octants.
+fn monte_carlo(
+    points: u32,
+    z_scale_ly: f64,
+    lcg: &mut Lcg,
+    shape: impl Fn(f64, f64, f64) -> f64,
+) -> (f64, f64) {
     let mut sum = 0.0;
     let mut sum_of_squares = 0.0;
     let pick = |lcg: &mut Lcg| {
@@ -58,10 +69,16 @@ fn monte_carlo(points: u32, lcg: &mut Lcg, shape: impl Fn(f64, f64, f64) -> f64)
         let weight = 3.0 * math::cbrt(L) * math::cbrt(coordinate) * math::cbrt(coordinate);
         (coordinate, weight)
     };
+    let reach = math::atan(L / z_scale_ly);
+    let pick_z = |lcg: &mut Lcg| {
+        let z = z_scale_ly * math::tan(lcg.next_f64() * reach);
+        let t = z / z_scale_ly;
+        (z, z_scale_ly * reach * (1.0 + t * t))
+    };
     for _ in 0..points {
         let (x, wx) = pick(lcg);
         let (y, wy) = pick(lcg);
-        let (z, wz) = pick(lcg);
+        let (z, wz) = pick_z(lcg);
         let value = shape(x, y, z) * wx * wy * wz;
         sum += value;
         sum_of_squares += value * value;
@@ -73,10 +90,16 @@ fn monte_carlo(points: u32, lcg: &mut Lcg, shape: impl Fn(f64, f64, f64) -> f64)
 }
 
 /// P08.T10.a: the numerical normalisation of a spheroid agrees with a 10⁷-point Monte Carlo to
-/// 0.5%, for a round, a flattened and a steep one. Each prints the Monte Carlo's standard error
-/// beside the tolerance (asked by `decision-test-coverage.md` before any ruling on its size).
+/// 0.5%, for a round, a flattened and a steep one. So that the three hold the skill's α = 10⁻³
+/// family-wise, each Monte Carlo's standard error is at most 0.5% over the two-sided normal
+/// quantile at α ÷ 3, 3.59: 0.139% of the integral (`decision-test-coverage.md` §3.2 addendum).
+/// Each spheroid's z is drawn at its own flattened scale, `q a R_d`, which brings the flattened
+/// one's error from 0.183% to 0.099%; each prints its error beside the tolerance.
 #[test]
 fn a_spheroids_normalisation_agrees_with_a_monte_carlo() {
+    const TOLERANCE: f64 = 0.005;
+    let quantile = -math::normal_quantile(ALPHA / 6.0);
+    let most_error = TOLERANCE / quantile;
     let (scales, _) = scales_and_fields(&GalaxyParams::milky_way_like());
     let mut lcg = Lcg::new(0x0810_a000);
     for row in [
@@ -100,18 +123,26 @@ fn a_spheroids_normalisation_agrees_with_a_monte_carlo() {
         },
     ] {
         let spheroid = CoredPowerLaw::new(&row, &scales).unwrap();
-        let (sampled, error) = monte_carlo(10_000_000, &mut lcg, |x, y, z| {
+        let z_scale_ly = row.q * row.a * scales.r_d().value();
+        let (sampled, error) = monte_carlo(10_000_000, z_scale_ly, &mut lcg, |x, y, z| {
             spheroid.shape(math::hypot(x, y), z)
         });
         let integral = 1.0 / spheroid.norm();
         eprintln!(
-            "{row:?}: Monte Carlo {sampled:e} ± {error:e}, a standard error of {:.2e} of the \
-             integral against the tolerance's 5e-3; off by {:.2} standard errors",
+            "{row:?}: Monte Carlo {sampled:e} ± {error:e}, a standard error of {:.3e} of the \
+             integral against the tolerance's {TOLERANCE:e} at most {most_error:.3e}; off by {:.2} \
+             standard errors",
             error / integral,
             (sampled - integral) / error
         );
         assert!(
-            (sampled / integral - 1.0).abs() < 0.005,
+            error / integral <= most_error,
+            "{row:?}: the Monte Carlo's standard error is {:e} of the integral, over the \
+             {most_error:e} at which the tolerance holds α ÷ 3",
+            error / integral
+        );
+        assert!(
+            (sampled / integral - 1.0).abs() < TOLERANCE,
             "{row:?}: {sampled} against {integral}"
         );
     }
