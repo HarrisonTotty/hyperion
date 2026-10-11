@@ -249,8 +249,12 @@ of those the sim's (below). A task's gate is `just smart-ci`, the part of it tha
   `usize` is 32 bits, with cargo-nextest (one process per test, since wasip1 has no threads); and
   it checks that a build with relaxed SIMD fails, runs Clippy for the browser target over the
   crates that run there, and runs `just test-wasm-browser` (below), so that the same goldens are
-  compared natively, on wasip1 and in the browser. `just test-wasm-slow`, part of `just ci-slow`,
-  runs their slow tests and doctests there; `just test-wasm` runs both. A missing tool fails them
+  compared natively, on wasip1 and in the browser. Its wasip1 run, and smart-ci's, leave out the
+  sky table modules' tests that compare one wasip1 computation with another (the justfile's
+  `wasm_sky`): `just test-wasm-sky` runs them there, and integration's slow pass runs it every day a
+  commit lands. A test that pins a value on every target stays in `ci`, and smart-ci's tests fail
+  if `wasm_sky` selects one. `just test-wasm-slow`, part of `just ci-slow`, runs `just test-wasm-sky`
+  and their slow tests and doctests there; `just test-wasm` runs both. A missing tool fails them
   with a pointer to `just wasm-tools`; they never skip. Nothing checks AArch64.
 - `just test-wasm-browser` runs the tests of the crates the client ships or tests with
   (`hyperion-base`, `hyperion-surface`, `hyperion-testkit`; not the sim, which no browser loads) as
@@ -300,6 +304,7 @@ that priority. Unset, as on any machine without build slots, the phases run dire
 | `crates/hyperion-protocol`, the bindings                                                                                     | the bindings' check and the TypeScript side                                                                                                                                                                                                                                         |
 | `packages/protocol/fixtures/`                                                                                                | the TypeScript side and the tests of the crates that read the fixture                                                                                                                                                                                                               |
 | the surface module's sources (`hyperion-surface`, `hyperion-base`)                                                           | `gen-surface` and the vitest files that import the module; tsc and oxlint when its exports change                                                                                                                                                                                   |
+| the sim's sources (`crates/hyperion-sim/src/`), the testkit's `golden.rs`                                                    | smart-ci's own tests too, whose guard holds the tests that `wasm_sky` leaves out of the wasip1 runs to pinning no value                                                                                                                                                             |
 | WGSL, the engine, the smoke harness                                                                                          | `just test-render`'s build, and its run in the same hold of the heavy-test lock as the suites                                                                                                                                                                                       |
 | `.config/nextest.toml`, `rustfmt.toml`, `clippy.toml`, Prettier's or oxlint's configuration                                  | the checks it configures                                                                                                                                                                                                                                                            |
 | `justfile`, `Cargo.toml`, `Cargo.lock`, `pnpm-lock.yaml`, `rust-toolchain.toml`, `.cargo/`, `tools/portable/`, unknown paths | the full `just ci`                                                                                                                                                                                                                                                                  |

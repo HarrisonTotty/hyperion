@@ -599,6 +599,24 @@ wasm_bindgen_version := `sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\
 # The crates whose suites run under wasm32-wasip1.
 wasip1_crates := "-p hyperion-base -p hyperion-surface -p hyperion-sim -p hyperion-testkit"
 
+# The sky table modules' tests that `ci` and `just smart-ci` leave out of their wasip1 runs, as
+# nextest's filter expression (`M` in decision-test-coverage.md §3.3, W-R1, and its addendum). The
+# march's, the limits', the caps', dgl's, the luminosity tables' and the census plan's and cells'
+# tests compare one wasip1 computation with another: on wasip1 they prove only that nothing traps on
+# a threadless 32-bit target and that their same-target identities hold, so `test-wasm-sky` runs
+# them there, in the slow pass every day a commit lands. The tests that pin a value on every target
+# stay in `ci`'s wasip1 run: those named `golden` or `pinned`, and the three named here. smart-ci's
+# tests (`tools/smart-ci/test_smart_ci.py`) fail if a test this selects pins a value.
+wasm_sky := ("package(hyperion-sim) & test(/^sky::(band|limits|caps|dgl|luminosity|census::(cell|query))::/) & not ("
+    + "test(/golden|pinned/)"
+    + " | test(=sky::luminosity::tests::parallel_build_equals_serial)"
+    + " | test(=sky::census::cell::tests::the_capped_bulge_record_is_bounded_star_by_star)"
+    + " | test(=sky::limits::tests::on_300_000_synthetic_stars_the_pyramid_evaluates_at_most_a_hundredth_of_the_pairs)"
+    + ")")
+
+# The filter of `ci`'s wasip1 run: every test but `wasm_sky`'s.
+wasip1_filter := "not (" + wasm_sky + ")"
+
 # cargo-nextest is installed only if missing; `test-slow` needs it as well.
 # Install the WebAssembly checks' tools: both targets, wasmtime, wasm-bindgen-cli and nextest.
 wasm-tools:
@@ -697,7 +715,8 @@ _relaxed-simd-refused:
     fi
     echo "the +relaxed-simd build is refused by its guard" >&2
 
-# Built first, then run in one hold of the heavy-test lock. The doctests wait for `test-wasm-slow`.
+# Built first, then run in one hold of the heavy-test lock. The doctests wait for `test-wasm-slow`,
+# and the tests of `wasm_sky` for `test-wasm-sky`.
 # The fast WebAssembly checks, run by `ci`: relaxed SIMD refused, wasip1, Clippy and the browser.
 test-wasm-fast: _relaxed-simd-refused _browser-clippy _wasm-fast-build
     just _locked just _wasm-fast-run
@@ -707,15 +726,17 @@ _wasm-fast-build: (_wasm-preflight "wasip1" "browser")
     just _wasip1-build "{{ wasip1_crates }}" ""
     just _browser prepare
 
-# The fast WebAssembly suites, built already; the caller holds the heavy-test lock.
-_wasm-fast-run: (_wasm-run wasip1_crates "" browser_crates)
+# The fast WebAssembly suites, built already, less `wasm_sky`, which `test-wasm-sky` runs; the
+# caller holds the heavy-test lock.
+_wasm-fast-run: (_wasm-run wasip1_crates wasip1_filter browser_crates)
 
 # The wasip1 suites of `wasip1` (cargo's selection, of `wasip1_crates`; none if empty), with nextest's
 # filter expression `filter` (`-E`, or empty), and the browser target's of `browser` (some of
 # `browser_crates`; none if empty), side by side in the caller's hold of the heavy-test lock (perf-wasm
 # W2): the browser's binaries run one at a time on one thread, about 42 s, beside wasip1's pool of
 # every core, rather than after it. The browser's output is held until both end, and the recipe
-# fails if either did.
+# fails if either did. A filter may select no test, which passes: smart-ci's, less `wasm_sky`, for a
+# change that reaches only `wasm_sky`'s tests.
 _wasm-run wasip1 filter browser:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -732,7 +753,7 @@ _wasm-run wasip1 filter browser:
     fi
     status=0
     if [[ -n {{ quote(wasip1) }} ]]; then
-        just _wasip1-nextest {{ quote(wasip1) }} "" {{ quote(filter) }} || status=$?
+        just _wasip1-nextest {{ quote(wasip1) }} {{ if filter == "" { '""' } else { "--no-tests=warn" } }} {{ quote(filter) }} || status=$?
     fi
     browser_status=0
     if [[ -n "$browser" ]]; then
@@ -754,7 +775,7 @@ _wasip1-build packages filter:
     just _wasip1 nextest list --target wasm32-wasip1 {{ packages }}{{ if filter == "" { "" } else { " -E " + quote(filter) } }} >/dev/null
 
 # The wasip1 suites of `packages`, with nextest's `flags` and filter expression (`-E`, or empty).
-_wasip1-nextest packages flags filter:
+_wasip1-nextest packages flags filter="":
     just _wasip1 nextest run --target wasm32-wasip1 {{ packages }} {{ flags }}{{ if filter == "" { "" } else { " -E " + quote(filter) } }}
 
 # Clippy for the browser target over the crates that run there, so that code compiled only there
@@ -767,12 +788,23 @@ _browser-clippy: (_browser-clippy-for browser_crates)
 _browser-clippy-for crates: (_wasm-preflight "browser")
     cargo clippy --target wasm32-unknown-unknown -p {{ replace(crates, " ", " -p ") }} --all-targets -- -D warnings
 
-# Built first, then run under the heavy-test lock: the slow tests at the slow-test profile with
-# `test-slow`'s nextest profile, then the doctests, which nextest does not run and `cargo test` runs
-# one at a time (88 s under shared load, so not in `ci`; they are built in the locked step, since
-# cargo cannot build doctests without running them).
-# The slow WebAssembly checks, run by `ci-slow`: the slow suites and the doctests under wasip1.
-test-wasm-slow: (_wasm-preflight "wasip1")
+# The tests of `wasm_sky`, which `ci` leaves out, on wasip1 at the test profile: the slow pass's
+# part S. Built first, as `ci` builds the sim's suites there, so that after `ci` (or the pass's own
+# build of this first line, under a build slot) nothing builds; their module compiled by the
+# listing, outside the heavy-test lock; then run under it.
+# The sky table modules' tests on wasip1, which `ci` leaves to the slow pass.
+test-wasm-sky: (_wasm-preflight "wasip1")
+    just _wasip1-nextest "-p hyperion-sim" "--no-run"
+    just _wasip1-build "-p hyperion-sim" {{ quote(wasm_sky) }}
+    just _locked just _wasip1-nextest "-p hyperion-sim" "" {{ quote(wasm_sky) }}
+
+# `test-wasm-sky`, so that `ci-slow` runs every test; then, built first and run under the heavy-test
+# lock, the slow tests at the slow-test profile with `test-slow`'s nextest profile, and the
+# doctests, which nextest does not run and `cargo test` runs one at a time (88 s under shared load,
+# so not in `ci`; they are built in the locked step, since cargo cannot build doctests without
+# running them).
+# The slow WebAssembly checks, run by `ci-slow`: the sky's, the slow suites and the doctests.
+test-wasm-slow: (_wasm-preflight "wasip1") test-wasm-sky
     just _wasip1 nextest list --target wasm32-wasip1 {{ wasip1_crates }} --cargo-profile slow-test --run-ignored only >/dev/null
     just _locked just _wasip1 {{ wasip1_nextest }} --cargo-profile slow-test --profile slow --run-ignored only
     just _locked just _wasip1 test --target wasm32-wasip1 {{ wasip1_crates }} --doc

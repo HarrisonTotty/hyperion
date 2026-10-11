@@ -15,6 +15,8 @@ Standard library only: `python3 tools/smart-ci/test_smart_ci.py`.
 from __future__ import annotations
 
 import contextlib
+import fnmatch
+import functools
 import io
 import json
 import os
@@ -28,7 +30,7 @@ import time
 import unittest
 import unittest.mock
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
@@ -277,8 +279,9 @@ class TheRules(unittest.TestCase):
     def test_a_sim_change_runs_the_sims_checks_wasip1_and_fit_check_but_no_typescript(self) -> None:
         p = plan("crates/hyperion-sim/src/galaxy/disc.rs")
         # No cross-Clippy: the sim is the same code on Linux, macOS and Windows (CROSS_CLIPPY_CRATES).
+        # smart-ci's own tests: their guard of the justfile's `wasm_sky` reads the sim's sources.
         self.assertEqual(calls(p), [
-            "_wasm-preflight", "_rustfmt-check", "_clippy-for", "fit-check",
+            "_wasm-preflight", "_rustfmt-check", "_smart-ci-test", "_clippy-for", "fit-check",
             "_test-build-for", "_wasip1-build", "_nextest-run", "_doctest-run", "_wasm-run"])
         self.assertEqual(args(p, "_wasm-preflight"), ["wasip1"])
         # The features `--workspace` gives the sim: the fitting crate asks for `testing`.
@@ -1285,12 +1288,24 @@ class AgreesWithCi(unittest.TestCase):
         self.assertTrue(assignments["browser_crates"]["value"])
 
 
+@functools.lru_cache(maxsize=None)
+def real_workspace() -> Workspace:
+    """The real workspace, loaded once for the classes that read it."""
+    return smart_ci.load_workspace(ROOT, just())
+
+
+@functools.lru_cache(maxsize=None)
+def real_graph() -> rust_graph.Graph:
+    """The real workspace's code graph, built once."""
+    return smart_ci.choose_tests([], real_workspace()).graph
+
+
 class RealWorkspace(unittest.TestCase):
     """The names smart-ci builds on exist, and the real workspace loads."""
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls.ws = smart_ci.load_workspace(ROOT, just())
+        cls.ws = real_workspace()
 
     def test_the_named_crates_and_files_exist(self) -> None:
         crates = set(self.ws.crates)
@@ -1359,12 +1374,472 @@ class RealWorkspace(unittest.TestCase):
         # its tests, every file in a module tree.
         for _, reader in smart_ci.GOLDEN_READERS:
             self.assertIn(reader, self.ws.files)
-        chosen = smart_ci.choose_tests([], self.ws)
-        graph = chosen.graph
+        graph = real_graph()
         self.assertTrue(any(u.is_lib for u in graph.units.values()))
         self.assertGreater(sum(len(t) for t in graph.tests.values()), 1000)
         self.assertEqual(graph.missing_mods, [], "a `mod` declaration names no file the graph knows")
         self.assertEqual([f for f in graph.orphans if "/src/" in f], [], "sources in no module tree: they widen")
+
+
+# --------------------------------------------------------------------------------------------------
+# The justfile's `wasm_sky`, the tests that `ci`'s wasip1 run leaves to `just test-wasm-sky`: none of
+# them pins a value on every target (decision-test-coverage.md §3.3, W-R1, and its addendum). Every
+# such pin stays in `ci` on both targets.
+
+
+_FILTER_TOKEN = re.compile(r"\s*(?:(?P<word>and|or|not)\b|(?P<call>[a-z_]+)\((?P<arg>/(?:\\.|[^/\\])*/|[^()]*)\)"
+                           r"|(?P<op>[()&|!+-]))")
+_FILTER_CALLS = ("all", "none", "package", "binary_id", "test")
+
+
+class Filter:
+    """nextest's filter expression, as far as the guard reads one: `all()`, `none()`, `package()`,
+    `binary_id()` and `test()`, with the matchers `=`, `~`, `/regex/` and `#glob` and nextest's
+    defaults (a glob for a package or a binary, a substring for a test); `not` and `!`, then `&`, `and`
+    and `-`, then `|`, `or` and `+`, nextest's order; and parentheses. Anything else is refused, so that
+    the guard never misreads the filter it holds."""
+
+    def __init__(self, text: str) -> None:
+        self.tokens: List[Tuple[str, object]] = []
+        self.calls: List[Tuple[str, str]] = []  # each predicate, `(name, argument)`
+        at = 0
+        while text[at:].strip():
+            m = _FILTER_TOKEN.match(text, at)
+            if m is None:
+                raise ValueError(f"the guard cannot read the filter at {text[at:at + 40]!r}: teach `Filter` it")
+            if m.group("word"):
+                self.tokens.append(("op", m.group("word")))
+            elif m.group("call"):
+                if m.group("call") not in _FILTER_CALLS:
+                    raise ValueError(f"the guard cannot read `{m.group('call')}()`: teach `Filter` it")
+                self.calls.append((m.group("call"), m.group("arg").strip()))
+                self.tokens.append(("call", self.calls[-1]))
+            else:
+                self.tokens.append(("op", m.group("op")))
+            at = m.end()
+        self.at = 0
+        self.tree = self._any()
+        if self.at != len(self.tokens):
+            raise ValueError(f"the guard cannot read the filter past {self.tokens[self.at]}")
+
+    def _next(self) -> Tuple[str, object]:
+        return self.tokens[self.at] if self.at < len(self.tokens) else ("", "")
+
+    def _any(self) -> tuple:
+        node = self._all()
+        while self._next() in (("op", "|"), ("op", "or"), ("op", "+")):
+            self.at += 1
+            node = ("or", node, self._all())
+        return node
+
+    def _all(self) -> tuple:
+        node = self._one()
+        while self._next() in (("op", "&"), ("op", "and"), ("op", "-")):
+            difference = self._next() == ("op", "-")
+            self.at += 1
+            right = self._one()
+            node = ("and", node, ("not", right) if difference else right)
+        return node
+
+    def _one(self) -> tuple:
+        kind, value = self._next()
+        self.at += 1
+        if (kind, value) in (("op", "not"), ("op", "!")):
+            return ("not", self._one())
+        if (kind, value) == ("op", "("):
+            node = self._any()
+            if self._next() != ("op", ")"):
+                raise ValueError("the guard cannot read the filter: a `(` is not closed")
+            self.at += 1
+            return node
+        if kind == "call":
+            return ("call", *value)  # type: ignore[misc]
+        raise ValueError(f"the guard cannot read the filter at {value!r}")
+
+    def exact_tests(self) -> List[str]:
+        """The tests the filter names exactly, `test(=name)`."""
+        return [arg[1:] for name, arg in self.calls if name == "test" and arg.startswith("=")]
+
+    def matches(self, package: str, binary_id: str, test: str) -> bool:
+        def holds(node: tuple) -> bool:
+            if node[0] == "or":
+                return holds(node[1]) or holds(node[2])
+            if node[0] == "and":
+                return holds(node[1]) and holds(node[2])
+            if node[0] == "not":
+                return not holds(node[1])
+            _, name, arg = node
+            if name in ("all", "none"):
+                return name == "all"
+            subject = {"package": package, "binary_id": binary_id, "test": test}[name]
+            if arg.startswith("="):
+                return subject == arg[1:]
+            if arg.startswith("~"):
+                return arg[1:] in subject
+            if len(arg) >= 2 and arg[0] == arg[-1] == "/":
+                return re.search(arg[1:-1], subject) is not None
+            if arg.startswith("#"):
+                return fnmatch.fnmatchcase(subject, arg[1:])
+            return arg in subject if name == "test" else fnmatch.fnmatchcase(subject, arg)
+
+        return holds(self.tree)
+
+
+# What pins a value on every target: a golden, a float's bits written as a literal, a constant named
+# as a pin (`*_BITS`, `*FINGERPRINT*`, `*_DIGEST`), an assertion that a digest is a constant, or one
+# against a hexadecimal literal (bits, a digest or an id written out).
+PIN_CONSTANT = re.compile(r"[A-Z0-9_]*FINGERPRINT[A-Z0-9_]*|[A-Z0-9_]+_(?:BITS|DIGEST)")
+ASSERTS = {"assert", "assert_eq", "assert_ne", "debug_assert", "debug_assert_eq", "debug_assert_ne"}
+DIGEST_CALL = re.compile(r"\w*digest")
+CONSTANT_NAME = re.compile(r"[A-Z][A-Z0-9_]*")
+Token = Tuple[str, str]
+
+
+def unfolded(tokens: Sequence[Token]) -> List[Token]:
+    """The tokens with each run of numbers that `rust_graph.lex` reads as one (`1, 2, `) split into its
+    numbers and commas."""
+    out: List[Token] = []
+    for kind, value in tokens:
+        if kind == "n" and "," in value:
+            for number in value.split(",")[:-1]:  # the run ends with a comma
+                out += [("n", number.strip()), ("p", ",")]
+        else:
+            out.append((kind, value))
+    return out
+
+
+def closing(tokens: Sequence[Token], at: int) -> int:
+    """The index of the bracket that closes the one at `at`; the end if none does."""
+    depth = 0
+    for j in range(at, len(tokens)):
+        if tokens[j][0] == "p" and tokens[j][1] in "([{":
+            depth += 1
+        elif tokens[j][0] == "p" and tokens[j][1] in ")]}":
+            depth -= 1
+            if depth == 0:
+                return j
+    return len(tokens)
+
+
+def top_level(tokens: Sequence[Token], *separators: Tuple[str, ...]) -> List[List[Token]]:
+    """The tokens split at each separator (a run of punctuation) outside brackets."""
+    parts: List[List[Token]] = [[]]
+    depth = j = 0
+    while j < len(tokens):
+        kind, value = tokens[j]
+        if kind == "p" and value in "([{":
+            depth += 1
+        elif kind == "p" and value in ")]}":
+            depth -= 1
+        found = next((s for s in separators if depth == 0 and tuple(v for _, v in tokens[j:j + len(s)]) == s
+                      and all(k == "p" for k, _ in tokens[j:j + len(s)])), None)
+        if found:
+            parts.append([])
+            j += len(found)
+            continue
+        parts[-1].append(tokens[j])
+        j += 1
+    return parts
+
+
+def is_constant(operand: Sequence[Token]) -> bool:
+    """A literal number, or a path to an UPPER_CASE constant (`&` or `-` before it)."""
+    rest = list(operand)
+    while rest[:1] in ([("p", "&")], [("p", "-")]):
+        rest = rest[1:]
+    if len(rest) == 1 and rest[0][0] == "n":
+        return True
+    if not rest or len(rest) % 2 == 0 or rest[-1][0] != "i" or not CONSTANT_NAME.fullmatch(rest[-1][1]):
+        return False
+    return all(t == ("p", "::") if i % 2 else t[0] == "i" for i, t in enumerate(rest))
+
+
+def is_hex(operand: Sequence[Token]) -> bool:
+    """A hexadecimal literal (`&` before it)."""
+    rest = [t for t in operand if t != ("p", "&")]
+    return len(rest) == 1 and rest[0][0] == "n" and rest[0][1].lower().startswith("0x")
+
+
+def calls_digest(operand: Sequence[Token]) -> bool:
+    return any(k == "i" and DIGEST_CALL.fullmatch(v) and operand[i + 1:i + 2] == [("p", "(")]
+               for i, (k, v) in enumerate(operand))
+
+
+def pin_markers(tokens: Sequence[Token]) -> List[str]:
+    """What the tokens pin a value with, as the guard names it."""
+    tokens = unfolded(tokens)
+    found: Set[str] = set()
+    for i, (kind, value) in enumerate(tokens):
+        if kind != "i":
+            continue
+        after = [v for _, v in tokens[i + 1:i + 3]]
+        if value == "golden" and after[:1] == ["!"]:
+            found.add("golden!")
+        elif value == "golden" and after[:1] == ["::"] and after[1:2] and after[1].startswith("check"):
+            found.add(f"golden::{after[1]}")
+        elif value == "check_golden":
+            found.add(value)
+        elif value == "from_bits" and after[:1] == ["("] and tokens[i + 2:i + 3] \
+                and tokens[i + 2][0] == "n" and tokens[i + 2][1].lower().startswith("0x"):
+            found.add("from_bits(0x…)")
+        elif PIN_CONSTANT.fullmatch(value):
+            found.add(value)
+        elif value in ASSERTS and after == ["!", "("]:
+            args = top_level(tokens[i + 3:closing(tokens, i + 2)], (",",))
+            # `assert_eq!(a, b)`, or `assert!(a == b)` (the lexer reads `==` as two `=`).
+            operands = args[:2] if value.endswith(("_eq", "_ne")) else top_level(args[0], ("=", "="), ("!", "="))
+            if len(operands) == 2 and any(calls_digest(a) and is_constant(b)
+                                          for a, b in (operands, operands[::-1])):
+                found.add(f"{value}!(a digest, a constant)")
+            if len(operands) == 2 and any(is_hex(operand) for operand in operands):
+                found.add(f"{value}!(…, 0x…)")
+    return sorted(found)
+
+
+class WasmSkyScan:
+    """The tests a filter selects in the code's graph (not ignored: the fast runs run no other), and
+    what each pins a value with: in its own body, or in the test code it reaches through the graph's
+    edges (a helper, a constant), wherever that is."""
+
+    def __init__(self, graph: rust_graph.Graph, read: Callable[[str], str], wasm_sky: str) -> None:
+        self.graph = graph
+        self.read = read
+        self.filter = Filter(wasm_sky)
+        test_files = set().union(*(unit.test_files for unit in graph.units.values()))
+        self.test_code = {rust_graph.item_node(path, item[0]) for path, facts in graph.rs.items()
+                          for item in facts.items if item[5] or path in test_files}
+        # The testkit's golden checks, its public `check…` functions and its macro, which a test may
+        # call by a name its tokens do not show.
+        golden = smart_ci.GOLDEN_READERS[0][1]
+        facts = graph.rs.get(golden)
+        self.golden_checks = {rust_graph.item_node(golden, item[0]) for item in (facts.items if facts else [])
+                              if (item[1] == "fn" and item[3] == "pub" and item[2].startswith("check"))
+                              or item[1] == "macro"}
+        self.moved = [(unit, test) for unit in sorted(graph.units.values(), key=lambda u: u.id) if unit.runs
+                      for test in graph.tests.get(unit.id, []) if not test.ignored
+                      and self.filter.matches(unit.crate, unit.id, test.name)]
+        self._tokens: Dict[str, Dict[str, List[Token]]] = {}
+
+    def _walk(self, node: str, into: Callable[[str], bool]) -> Set[str]:
+        """The nodes reached from `node` through the graph's edges, entering only those `into` takes,
+        or an import or glob, which names an item without being one."""
+        seen, todo = {node}, [node]
+        while todo:
+            for target in self.graph.edges.get(todo.pop(), ()):
+                if target not in seen and (into(target) or target.split("#", 1)[-1].startswith(("use:", "glob:"))):
+                    seen.add(target)
+                    todo.append(target)
+        return seen
+
+    def reached(self, node: str) -> Set[str]:
+        """The test code a test runs: its own item and every item of test code it names."""
+        return {n for n in self._walk(node, self.test_code.__contains__) if n in self.test_code}
+
+    def pins(self, node: str) -> Dict[str, List[str]]:
+        """Each item of test code the test reaches that pins a value, with what it pins it with."""
+        out: Dict[str, List[str]] = {}
+        for item in sorted(self.reached(node)):
+            path, ident = item.split("#", 1)
+            if path not in self._tokens:
+                self._tokens[path] = rust_graph.item_tokens(self.read(path))
+            found = pin_markers(self._tokens[path].get(ident, []))
+            named = {target for n in self._walk(item, lambda _: False) for target in self.graph.edges.get(n, ())}
+            found += sorted(check.split("#", 1)[1] for check in named & self.golden_checks)  # named, or imported
+            if found:
+                out[rust_graph.describe_node(item)] = found
+        return out
+
+
+class TheWasmSkyGuard(unittest.TestCase):
+    """The guard's reading of a filter and of the pins, on a small workspace."""
+
+    FILTER = ("package(hyperion-sim) & test(/^sky::band::/) & not (test(/golden|pinned/) "
+              "| test(=sky::band::tests::excepted))")
+    SOURCES = {
+        "crates/hyperion-testkit/src/lib.rs": "pub mod golden;\n",
+        "crates/hyperion-testkit/src/golden.rs": "pub fn check(_: &str, _: &str, _: &str) {}\n",
+        "crates/hyperion-sim/src/lib.rs": "pub mod sky;\n",
+        "crates/hyperion-sim/src/sky/mod.rs": "pub mod band;\n#[cfg(test)]\nmod testing;\n",
+        "crates/hyperion-sim/src/sky/testing.rs": (
+            "pub const SKY_DIGEST: u64 = 0x12;\npub fn sky() -> u64 { SKY_DIGEST }\npub fn plain() -> u64 { 1 }\n"),
+        "crates/hyperion-sim/src/sky/band.rs": (
+            "pub fn march() -> f64 { 1.0 }\n"
+            "#[cfg(test)]\nmod tests {\n"
+            "    use super::*;\n    use hyperion_testkit::golden::check;\n"
+            "    const STEP_BITS: u64 = 0x3ff0_0000_0000_0000;\n"
+            "    fn helper() { assert_eq!(f64_digest(&[1.0, 2.0]), 0x1234, \"the digest\"); }\n"
+            "    #[test]\n    fn plain() { assert_eq!(march(), 1.0); }\n"
+            "    #[test]\n    fn same_target() { assert_eq!(f64_digest(&[march()]), f64_digest(&[1.0]), \"{STEP}\"); }\n"
+            "    #[test]\n    fn same_bits() { assert!(f64_digest(&[march()]) == f64_digest(&[1.0])); }\n"
+            "    #[test]\n    fn by_a_helper() { helper(); }\n"
+            "    #[test]\n    fn by_a_constant() { assert_eq!(march().to_bits(), STEP_BITS); }\n"
+            "    #[test]\n    fn by_its_bits() { assert_eq!(march(), f64::from_bits(0x3ff0_0000_0000_0000)); }\n"
+            "    #[test]\n    fn by_a_macro() { hyperion_testkit::golden!(\"band\", \"text\"); }\n"
+            "    #[test]\n    fn by_a_check() { check(\"\", \"band\", \"text\"); }\n"
+            "    #[test]\n    fn by_a_digest() { assert!(super::super::testing::sky() == 0x12); }\n"
+            "    #[test]\n    fn by_an_assert() { assert!(f64_digest(&[march()]) == crate::sky::PINNED); }\n"
+            "    #[test]\n    fn by_its_fingerprint() { let _ = SERIAL_FINGERPRINT; }\n"
+            "    #[test]\n    fn by_a_literal() { assert_ne!(&0xdead, march().to_bits()); }\n"
+            "    #[test]\n    fn by_a_count() { assert_eq!(march() as u32, 1, \"0x12\"); }\n"
+            "    #[test]\n    fn plain_from_testing() { assert_eq!(super::super::testing::plain(), 1); }\n"
+            "    #[test]\n    fn the_bits_are_pinned() { assert_eq!(march().to_bits(), STEP_BITS); }\n"
+            "    #[test]\n    fn excepted() { helper(); }\n"
+            "    #[test]\n    #[ignore = \"slow: a pin, but no fast run runs it\"]\n    fn slow() { helper(); }\n"
+            "}\n"),
+    }
+
+    def scan(self) -> WasmSkyScan:
+        ws = GraphMode().workspace(self.SOURCES)
+        files = dict(FILES)
+        files.update(self.SOURCES)
+        return WasmSkyScan(smart_ci.choose_tests([], ws).graph, lambda p: files.get(p, ""), self.FILTER)
+
+    def test_the_filter_reads_as_nextest_does(self) -> None:
+        f = Filter(self.FILTER)
+        self.assertTrue(f.matches(SIM, SIM, "sky::band::tests::plain"))
+        self.assertFalse(f.matches(SIM, SIM, "sky::band::tests::the_bits_are_pinned"))
+        self.assertFalse(f.matches(SIM, SIM, "sky::band::tests::excepted"))
+        self.assertFalse(f.matches(SIM, SIM, "sky::caps::tests::plain"))
+        self.assertFalse(f.matches(BASE, BASE, "sky::band::tests::plain"))
+        self.assertEqual(f.exact_tests(), ["sky::band::tests::excepted"])
+        # `&` before `|`, `-` as `& not`, `!` as `not`, and each matcher.
+        self.assertTrue(Filter("none() | all() & test(a)").matches(SIM, SIM, "a"))
+        self.assertFalse(Filter("all() - test(=a)").matches(SIM, SIM, "a"))
+        self.assertTrue(Filter("!test(~b) and package(hyperion-*)").matches(SIM, SIM, "a"))
+        self.assertTrue(Filter("binary_id(#hyperion-sim::*) or test(/^x$/)").matches(SIM, "hyperion-sim::sky", "y"))
+        for bad in ("kind(lib)", "test(a) &", "(test(a)", "test(a) test(b)"):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                Filter(bad)
+
+    def test_it_finds_each_pin_in_a_test_or_the_test_code_it_reaches(self) -> None:
+        scan = self.scan()
+        moved = {t.name.rsplit("::", 1)[1]: t for _, t in scan.moved}
+        self.assertEqual(sorted(moved), sorted([
+            "plain", "same_target", "same_bits", "by_a_helper", "by_a_constant", "by_its_bits", "by_a_macro",
+            "by_a_check", "by_a_digest", "by_an_assert", "by_its_fingerprint", "by_a_literal", "by_a_count",
+            "plain_from_testing"]))
+        pins = {name: sorted(m for found in scan.pins(t.node).values() for m in found) for name, t in moved.items()}
+        self.assertEqual(pins, {
+            "plain": [], "same_target": [], "same_bits": [], "plain_from_testing": [], "by_a_count": [],
+            "by_a_helper": ["assert_eq!(a digest, a constant)", "assert_eq!(…, 0x…)"],
+            "by_a_literal": ["assert_ne!(…, 0x…)"],
+            "by_a_constant": ["STEP_BITS", "STEP_BITS"],  # the test's and the constant's own
+            "by_its_bits": ["from_bits(0x…)"],
+            "by_a_macro": ["golden!"],
+            "by_a_check": ["fn::check"],
+            "by_a_digest": ["SKY_DIGEST", "SKY_DIGEST", "assert!(…, 0x…)"],
+            "by_an_assert": ["assert!(a digest, a constant)"],
+            "by_its_fingerprint": ["SERIAL_FINGERPRINT"],
+        })
+
+    def test_the_wasip1_runs_leave_it_out(self) -> None:
+        self.assertEqual(smart_ci.less_wasm_sky("", "M"), "not (M)")
+        self.assertEqual(smart_ci.less_wasm_sky("a | b", "M"), "(a | b) & not (M)")
+        self.assertEqual(smart_ci.less_wasm_sky("a | b", ""), "a | b")
+        self.assertEqual(smart_ci.just_string(["concatenate", "a", ["concatenate", "b", "c"]]), "abc")
+        ws = workspace()
+        ws.wasm_sky = "M"
+        p = make_plan([("crates/hyperion-sim/src/sky/colour.rs", False)], ws, False)
+        self.assertEqual(args(p, "_wasm-run"), ["-p hyperion-sim", "not (M)", ""])
+        self.assertEqual(args(p, "_wasip1-build"), ["-p hyperion-sim", "not (M)"])
+        self.assertIn("less `wasm_sky`", [s.title for s in p.steps if s.recipe[0] == "_wasm-run"][0])
+        # And smart-ci's own tests, this guard, since the change is to the sim's sources.
+        self.assertIn("_smart-ci-test", calls(p))
+        self.assertNotIn("_smart-ci-test", calls(plan("crates/hyperion-base/src/math.rs")))
+        # With the graph, its selection less the filter.
+        graph_mode = GraphMode()
+        now = dict(graph_mode.SOURCES)
+        now["crates/hyperion-base/src/lib.rs"] = now["crates/hyperion-base/src/lib.rs"].replace("{ 1 }", "{ 4 }")
+        chosen = make_plan([("crates/hyperion-base/src/lib.rs", False)], graph_mode.workspace(now), False)
+        ws = graph_mode.workspace(now)
+        ws.wasm_sky = "M"
+        less = make_plan([("crates/hyperion-base/src/lib.rs", False)], ws, False)
+        self.assertEqual(args(less, "_wasm-run")[1], f"({args(chosen, '_wasm-run')[1]}) & not (M)")
+        self.assertEqual(args(less, "_wasip1-build")[1], args(less, "_wasm-run")[1])
+
+
+class TheWasmSkyFilter(unittest.TestCase):
+    """The justfile's `wasm_sky` leaves out of `ci`'s and smart-ci's wasip1 runs no test that pins a
+    value: a test that pins one is named `golden` or `pinned`, or is one of the filter's exceptions."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.ws = real_workspace()
+        cls.graph = real_graph()
+        cls.scan = WasmSkyScan(cls.graph, cls.ws.read, cls.ws.wasm_sky)
+
+    def test_no_test_it_leaves_out_pins_a_value(self) -> None:
+        self.assertTrue(self.scan.moved, "`wasm_sky` selects no test")
+        found = {test.name: pins for _, test in self.scan.moved if (pins := self.scan.pins(test.node))}
+        self.assertEqual(found, {}, "these tests pin a value on every target, so `ci`'s wasip1 run keeps them: "
+                                    "name each `…_golden` or `…_pinned`, or add it to the exceptions of `wasm_sky` "
+                                    "in the justfile")
+
+    def test_its_exceptions_are_tests(self) -> None:
+        names = {test.name for tests in self.graph.tests.values() for test in tests}
+        self.assertTrue(self.scan.filter.exact_tests())
+        self.assertEqual([t for t in self.scan.filter.exact_tests() if t not in names], [],
+                         "`wasm_sky` names tests that do not exist: renamed, they would leave `ci`'s wasip1 run")
+
+    def test_it_reads_the_sources_whose_change_runs_it(self) -> None:
+        # smart-ci runs this file's tests for a change to WASM_SKY_SOURCES: the files of the tests the
+        # filter selects and of the test code they reach are all there, the reader follows each, and
+        # the golden checks it looks for exist.
+        read = {rust_graph.file_of(node) for _, test in self.scan.moved for node in self.scan.reached(test.node)}
+        self.assertEqual(sorted(f for f in read if not smart_ci.WASM_SKY_SOURCES.search(f)), [],
+                         "the guard reads files outside WASM_SKY_SOURCES (tools/smart-ci/smart_ci.py): widen it")
+        sources = [f for f in self.ws.files if smart_ci.WASM_SKY_SOURCES.search(f)]
+        self.assertLessEqual(read, set(sources))
+        self.assertEqual([f for f in sources if not self.graph.rs[f].ok], [])
+        golden = smart_ci.GOLDEN_READERS[0][1]
+        self.assertTrue(smart_ci.WASM_SKY_SOURCES.search(golden))
+        self.assertLessEqual({f"{golden}#fn::check", f"{golden}#fn::check_embedded", f"{golden}#macro::golden"},
+                             self.scan.golden_checks)
+
+    def test_no_macro_makes_tests_where_it_selects(self) -> None:
+        # The guard sees the tests the source names; one that a macro or a case attribute makes would
+        # pass it unseen.
+        files = {rust_graph.file_of(test.node) for _, test in self.scan.moved}
+        made = sorted(term for terms in self.graph.generators.values() for node, term in terms.items()
+                      if rust_graph.file_of(node) in files)
+        self.assertEqual(made, [])
+
+    def test_ci_and_smart_ci_leave_it_out_and_test_wasm_sky_runs_it(self) -> None:
+        wasm_sky = self.ws.wasm_sky
+        self.assertTrue(wasm_sky)
+
+        def dry_run(*recipe: str) -> List[str]:
+            out = subprocess.run([just(), "--dry-run", *recipe], cwd=str(ROOT), capture_output=True, text=True,
+                                 check=True)
+            return [line.strip() for line in out.stderr.splitlines() if line.strip().startswith("just ")]
+
+        # `ci`'s run passes `not (wasm_sky)` to `_wasm-run`, whose filter, when it has one, may select
+        # none (smart-ci's, for a change that reaches only `wasm_sky`'s tests).
+        dumped = dump()
+        fast = dumped["recipes"]["_wasm-fast-run"]["dependencies"]
+        self.assertEqual([(d["recipe"], [arg_text(a) for a in d["arguments"]]) for d in fast],
+                         [("_wasm-run", ["wasip1_crates", "wasip1_filter", "browser_crates"])])
+        evaluated = subprocess.run([just(), "--evaluate", "wasip1_filter"], cwd=str(ROOT), capture_output=True,
+                                   text=True, check=True).stdout
+        self.assertEqual(evaluated, f"not ({wasm_sky})")
+        self.assertIn("_wasip1-nextest '-p x' --no-tests=warn 'f'", dry_run("_wasm-run", "-p x", "f", "")[0])
+        self.assertIn("_wasip1-nextest '-p x' \"\" ''", dry_run("_wasm-run", "-p x", "", "")[0])
+        first, listing, run = dry_run("test-wasm-sky")
+        self.assertIn("--no-run", first)
+        self.assertTrue(listing.startswith("just _wasip1-build ") and listing.endswith(f"'{wasm_sky}'"), listing)
+        self.assertTrue(run.startswith("just _locked ") and run.endswith(f"'{wasm_sky}'"), run)
+        slow = dumped["recipes"]["test-wasm-slow"]
+        self.assertIn("test-wasm-sky", [d["recipe"] for d in slow["dependencies"]])
+        p = make_plan([("crates/hyperion-sim/src/sky/band.rs", False)], self.ws, False, all_tests=True)
+        self.assertEqual(args(p, "_wasm-run")[1], f"not ({wasm_sky})")
+
+    def test_every_wasip1_crate_keeps_tests_in_cis_run(self) -> None:
+        # `ci`'s wasip1 run passes with no test (`--no-tests=warn`), so a `wasm_sky` grown too wide
+        # would leave it running nothing: every crate it runs keeps a test outside the filter.
+        kept = {unit.crate for unit in self.graph.units.values() if unit.runs and unit.crate in self.ws.wasip1
+                for test in self.graph.tests.get(unit.id, []) if not test.ignored
+                and not self.scan.filter.matches(unit.crate, unit.id, test.name)}
+        self.assertEqual(sorted(set(self.ws.wasip1) - kept), [])
 
 
 if __name__ == "__main__":

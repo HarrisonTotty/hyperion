@@ -91,6 +91,11 @@ RUST_READERS: List[Tuple[str, str, str, str]] = [
     (r"^crates/hyperion-(base|surface|sim)/.*\.rs$", "hyperion-testkit", "native",
      "read by hyperion-testkit's clippy_bans"),
 ]
+# The sources of the tests that the justfile's `wasm_sky` leaves out of the wasip1 runs, of the test
+# code they reach (the sky's modules and the sim's shared test fixtures) and of the testkit's golden
+# checks: smart-ci's tests hold each such test to pinning no value (`test_smart_ci.py`'s guard, which
+# checks that it reads no other file), so a change here runs them.
+WASM_SKY_SOURCES = re.compile(r"^crates/hyperion-(sim/src/.*\.rs|testkit/src/golden\.rs)$")
 # GENERATOR_VERSION heads every golden file, so a change to it runs every crate's tests.
 GENERATOR_VERSION_FILE = "crates/hyperion-base/src/version.rs"
 # A crate's goldens, under its `tests/golden/`, which its tests read by name through the testkit's
@@ -174,7 +179,7 @@ CI_STEPS: Dict[str, Tuple[str, List[Tuple[str, Optional[List[str]]]]]] = {
                                     ("_browser", None)]),
     "_locked": ("as is", []),
     "_test-run": ("scoped", [("_nextest-run", ["--workspace", ""]), ("_doctest-run", ["--workspace", ""])]),
-    "_wasm-fast-run": ("scoped", [("_wasm-run", ["wasip1_crates", "", "browser_crates"])]),
+    "_wasm-fast-run": ("scoped", [("_wasm-run", ["wasip1_crates", "wasip1_filter", "browser_crates"])]),
 }
 # `just ci`'s phases, the `just` arguments of each as its recipe runs them: its dependencies, the side
 # steps (backgrounded, their output held), vitest (backgrounded on its own, its output held: it takes
@@ -567,6 +572,9 @@ class Workspace:
     # named on its command line that one of them excludes, so they are filtered out beforehand.
     prettier_excludes: List[str]
     catalogue_sources: Set[str] = field(default_factory=set)
+    # The justfile's `wasm_sky`: nextest's filter of the tests that `ci`'s wasip1 run leaves to
+    # `just test-wasm-sky`, and so the wasip1 run here too; empty, none.
+    wasm_sky: str = ""
     # The Rust graph's inputs (`rust_graph`): the crates' targets and dependencies, the crates with a
     # build script, a file's bytes now and at the base, git's ids of the files the index holds as they
     # are, and the cache's file. No crates: the graph is not built, and tests run by crate.
@@ -811,6 +819,9 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
         if re.search(regex, path) and reader in ws.crates:
             needs.add(needs.tests if kinds == "all" else needs.native, reader, path)
             needs.say(path, why)
+    if WASM_SKY_SOURCES.search(path):
+        needs.smart_ci_tests.add(path)
+        needs.say(path, "smart-ci's tests: the tests `wasm_sky` leaves out of wasip1 pin no value")
     if path == GENERATOR_VERSION_FILE:
         for crate in ws.crates:
             needs.add(needs.tests, crate, path)
@@ -1351,6 +1362,16 @@ def choose_tests(changes: Sequence[Tuple[str, bool]], ws: Workspace) -> Chosen:
     return Chosen(graph, selection, info)
 
 
+def less_wasm_sky(selection: str, wasm_sky: str) -> str:
+    """The wasip1 run's `-E`: the chosen tests (every test, for an empty `selection`) less the
+    justfile's `wasm_sky`, which `ci`'s wasip1 run leaves to `just test-wasm-sky`. It may pass
+    MAX_FILTER by that filter's length, far inside a command line's limit."""
+    if not wasm_sky:
+        return selection
+    rest = f"not ({wasm_sky})"
+    return f"({selection}) & {rest}" if selection else rest
+
+
 def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bool,
               all_tests: bool = False, explain: bool = False) -> Plan:
     needs = Needs()
@@ -1439,7 +1460,7 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     if chosen is not None:
         native_causes |= chosen.causes(graph_crates)
     native_filter = chosen.nextest_filter(native, whole | set(needs.native)) if chosen else ""
-    wasip1_filter = chosen.nextest_filter(wasip1_tests, whole) if chosen else ""
+    wasip1_filter = less_wasm_sky(chosen.nextest_filter(wasip1_tests, whole) if chosen else "", ws.wasm_sky)
     doc_filters = chosen.doctest_filters(doc_crates, whole) if chosen else ""
 
     # Clippy for the other platforms: of the crates whose Clippy runs, those with code that differs
@@ -1561,7 +1582,9 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
              causes_of(needs.tests, doc_crates) | (chosen.causes(set(doc_crates), doctests=True) if chosen else set()))
     if wasip1_tests or browser_tests:
         # Side by side, the browser's one thread beside wasip1's pool (perf-wasm W2).
-        suites = (["wasip1 " + scope(wasip1_tests)] if wasip1_tests else []) + (
+        # Less `wasm_sky`; the run of a change that reaches only its tests has none, and passes.
+        less = ", less `wasm_sky`, which `just test-wasm-sky` runs" if ws.wasm_sky else ""
+        suites = (["wasip1 " + scope(wasip1_tests) + less] if wasip1_tests else []) + (
             ["the browser target " + ", ".join(browser_tests)] if browser_tests else [])
         step("locked", "the WebAssembly suites: " + "; ".join(suites),
              ["_wasm-run", wasip1_args if wasip1_tests else "", wasip1_filter if wasip1_tests else "",
@@ -1658,6 +1681,15 @@ def parse_name_status(text: str) -> List[Tuple[str, bool]]:
     return sorted((words[i + 1], words[i].startswith("D")) for i in range(0, len(words) - 1, 2))
 
 
+def just_string(value: object) -> str:
+    """A justfile assignment's value as `just --dump` gives it: a string, or strings joined by `+`."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list) and value[:1] == ["concatenate"]:
+        return "".join(just_string(part) for part in value[1:])
+    raise ToolError(f"the justfile assigns no plain string here: {value!r}")
+
+
 def load_workspace(root: Path, just: str, change: Optional[Change] = None) -> Workspace:
     meta = json.loads(run_out(["cargo", "metadata", "--format-version", "1", "--no-deps"], root))
     workspace_root = Path(meta["workspace_root"]).resolve()
@@ -1703,6 +1735,7 @@ def load_workspace(root: Path, just: str, change: Optional[Change] = None) -> Wo
             ts_packages[posixpath.dirname(manifest)] = (data["name"], entry if isinstance(entry, str) else None)
     ws = Workspace(crates, wasip1, browser, ts_packages, files, read, format_check_excludes(read("package.json")))
     ws.catalogue_sources = catalogue_sources(ws)
+    ws.wasm_sky = just_string(assignments["wasm_sky"]["value"])
     # The Rust graph's inputs: cargo's view of the crates, the files as git's index has them (read only
     # where the working tree differs), and the cache, in the build directory.
     ws.rust = rust_graph.crates_from_metadata(meta)
@@ -2001,6 +2034,9 @@ concerned (`--plan` shows each step and the paths that caused it):
                                 Prettier's files Prettier over every file
   crates/hyperion-protocol      the bindings' check and the TypeScript side
   the surface module's sources  gen-surface and the vitest files that import the module
+  the sim's sources, golden.rs  smart-ci's own tests too, whose guard holds the tests that the
+                                wasip1 runs leave to `just test-wasm-sky` (`wasm_sky`) to pinning
+                                no value
   shaders, engine, smoke        just test-render's build and run, the run in the suites' hold of
                                 the heavy-test lock
   the whole workspace's inputs  the full `just ci`: justfile, Cargo.toml, Cargo.lock, pnpm-lock.yaml,

@@ -1084,14 +1084,20 @@ def doctests(docs: List[Tuple[int, str, str]]) -> List[list]:
     return out
 
 
+def _scanned(lexed: Lexed, test: bool) -> _Scanner:
+    """A file's tokens read into its items, paths and facts (`parse`, `item_tokens`)."""
+    scanner = _Scanner(lexed)
+    scanner.module(0, scanner.n, "", test)
+    scanner.body_items()
+    scanner.finish()
+    return scanner
+
+
 def parse(text: str, doc: bool = True, test: bool = False) -> FileFacts:
     """What one file says. A file the reader cannot follow is `ok = False`, and widens to its crate."""
     try:
         lexed = lex(text)
-        scanner = _Scanner(lexed)
-        scanner.module(0, scanner.n, "", test)
-        scanner.body_items()
-        scanner.finish()
+        scanner = _scanned(lexed, test)
         facts = scanner.facts
         if doc:
             facts.doctests = doctests(lexed.docs)
@@ -1101,6 +1107,24 @@ def parse(text: str, doc: bool = True, test: bool = False) -> FileFacts:
         facts.ok = False
         facts.problem = f"{scanner.unexpected} token(s) in a module scope that no item rule reads"
     return facts
+
+
+def item_tokens(text: str) -> Dict[str, List[Tuple[str, str]]]:
+    """Each item's own tokens, `(kind, value)` as `lex` gives them, by the item's id in `parse`'s facts
+    (`FileFacts.items`, whose node is `item_node(file, id)`): an item holds its attributes and the
+    items inside its bodies, not the members or items it declares (an impl's, an inline module's),
+    and not its `use` and `mod` declarations, which name items (the graph's import nodes) and run
+    nothing. Empty for a file the reader cannot follow."""
+    try:
+        scanner = _scanned(lex(text), False)
+    except (LexError, IndexError, KeyError):
+        return {}
+    ids = [item[0] for item in scanner.facts.items]
+    out: Dict[str, List[Tuple[str, str]]] = {ident: [] for ident in ids}
+    for j, owner in enumerate(scanner.item_of):
+        if not scanner.in_use[j]:
+            out[ids[owner]].append((scanner.k[j], scanner.v[j]))
+    return out
 
 
 # --------------------------------------------------------------------------------------------------
