@@ -12,7 +12,7 @@ use hyperion_base::units::{
     Gigayears, Kelvin, Metres, MetresPerSecondSquared, Pascals, PerSquareKilometre, Radians,
     SquareMetres,
 };
-use hyperion_surface::craters::{CraterParams, CraterParamsParts, Screening};
+use hyperion_surface::craters::{self, CraterParams, CraterParamsParts, Screening};
 use hyperion_surface::cube::{Face, MAX_LEVEL, PatchKey, unit_dir, xyz_to_face_uv};
 use hyperion_surface::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseField, CoarseLevel, Cover, Crust,
@@ -590,4 +590,77 @@ mod cold_trap {
     fn a_star_below_the_horizon_is_refused() {
         let _ = shadow_temperature(0.2, Radians::new(-0.1), &body());
     }
+}
+
+/// The airless Moon's crater contract at saturation's N(>1 km).
+fn lunar_craters() -> CraterParams {
+    CraterParams::new(CraterParamsParts {
+        n_1km: PerSquareKilometre::new(0.018),
+        screening: Screening::None,
+        gravity: MetresPerSecondSquared::new(1.62),
+        k_target: 1.0,
+        impact_velocity: None,
+    })
+    .unwrap()
+}
+
+#[test]
+#[should_panic(expected = "a crater diameter must be finite and positive")]
+fn a_density_at_no_diameter_is_refused() {
+    let _ = craters::cumulative_density(&lunar_craters(), Metres::ZERO);
+}
+
+#[test]
+#[should_panic(expected = "a crater diameter must be finite and positive")]
+fn a_density_at_a_diameter_too_small_for_kilometres_is_refused() {
+    let _ = craters::cumulative_density(&lunar_craters(), Metres::new(1e-322));
+}
+
+#[test]
+#[should_panic(expected = "a crater diameter must be finite and positive")]
+fn a_production_at_a_nan_diameter_is_refused() {
+    let _ = craters::production_density(&lunar_craters(), Metres::new(f64::NAN));
+}
+
+#[test]
+#[should_panic(expected = "a crater diameter must be finite and positive")]
+fn a_saturation_at_a_negative_diameter_is_refused() {
+    let _ = craters::saturation(Metres::new(-1.0));
+}
+
+#[test]
+#[should_panic(expected = "a crater diameter must be finite and positive")]
+fn a_shape_of_no_diameter_is_refused() {
+    let _ = craters::crater_shape(&lunar_craters(), Metres::ZERO);
+}
+
+#[test]
+#[should_panic(expected = "a distance from a crater's centre must be finite and non-negative")]
+fn a_relief_at_a_negative_distance_is_refused() {
+    let shape = craters::crater_shape(&lunar_craters(), Metres::new(1e3));
+    let _ = shape.relief(-0.5);
+}
+
+#[test]
+#[should_panic(expected = "a surface age must be finite and non-negative")]
+fn a_chronology_of_a_negative_surface_age_is_refused() {
+    let _ = craters::lunar_chronology(Gigayears::new(-1.0), craters::SOLAR_SYSTEM_AGE);
+}
+
+#[test]
+#[should_panic(expected = "is older than its system")]
+fn a_chronology_of_a_surface_older_than_its_system_is_refused() {
+    let _ = craters::lunar_chronology(Gigayears::new(2.0), Gigayears::new(1.0));
+}
+
+#[test]
+#[should_panic(expected = "a system age must be finite and non-negative")]
+fn a_chronology_age_in_an_infinite_system_is_refused() {
+    let _ = craters::chronology_age(PerSquareKilometre::new(0.01), Gigayears::new(f64::INFINITY));
+}
+
+#[test]
+#[should_panic(expected = "a crater density must not be NaN")]
+fn a_chronology_age_of_a_nan_density_is_refused() {
+    let _ = craters::chronology_age(PerSquareKilometre::new(f64::NAN), craters::SOLAR_SYSTEM_AGE);
 }

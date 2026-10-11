@@ -25,7 +25,7 @@
 //! coarse goldens will pin these): a science review of 2026-10-10 read a basalt solidus 70 K
 //! below the synthetic one, which these rows take, and labelled what it could not read.
 
-use hyperion_surface::craters::{CraterParams, CraterParamsParts, Screening};
+use hyperion_surface::craters::{self, CraterParams, CraterParamsParts, Screening};
 use hyperion_surface::field::{
     BodyRef, ClimateModelKind, MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole,
 };
@@ -43,8 +43,7 @@ use crate::planetary::hooks::SurfaceSeed;
 use crate::units::consts::{SECONDS_PER_DAY, SOLAR_CONSTANT_W_PER_M2};
 use crate::units::{
     EarthFluxes, Gigayears, Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres,
-    MetresPerSecondSquared, Pascals, PerSquareKilometre, Radians, Seconds, WattsPerSquareMetre,
-    Years,
+    MetresPerSecondSquared, Pascals, Radians, Seconds, WattsPerSquareMetre, Years,
 };
 
 /// The surface seed the reference worlds' tests run under.
@@ -264,15 +263,6 @@ const PROJECTILE_DENSITY: KilogramsPerCubicMetre = KilogramsPerCubicMetre::new(3
 /// The sidereal year, days (NASA's Earth fact sheet: 365.256 d).
 const SIDEREAL_YEAR_DAYS: f64 = 365.256;
 
-/// N(>1 km), km⁻², at a surface age of `t` by the lunar chronology of Neukum, Ivanov and Hartmann
-/// 2001 (Space Science Reviews 96, 55), as plan 14's P14.T24.b cites it: 5.44 × 10⁻¹⁴ (e^(6.93 T)
-/// − 1) plus 8.38 × 10⁻⁴ T with T in Gyr, before plan 14's scaling by the system's belts.
-#[must_use]
-fn lunar_chronology(t: Gigayears) -> PerSquareKilometre {
-    let t = t.value();
-    PerSquareKilometre::new(5.44e-14 * (math::exp(6.93 * t) - 1.0) + 8.38e-4 * t)
-}
-
 /// The Sun's light averaged over an orbit of semi-major axis `a_au` astronomical units and
 /// eccentricity `e`: S☉ ÷ (a² √(1 − e²)), P14.T12's orbit average.
 #[must_use]
@@ -304,7 +294,9 @@ fn degrees(deg: f64) -> Radians {
     Radians::new(deg.to_radians())
 }
 
-/// The crater contract at the lunar chronology's N(>1 km) for `surface_age`, under `gravity`,
+/// The crater contract at the lunar chronology's N(>1 km) for `surface_age` in a system of the
+/// Solar System's age ([`craters::lunar_chronology`], Neukum, Ivanov and Hartmann 2001's curve as
+/// plan 14's P14.T24.b cites it, before its scaling by the system's belts), under `gravity`,
 /// screened by `screening`, on a target of factor `k_target`.
 #[must_use]
 fn crater_params(
@@ -314,7 +306,7 @@ fn crater_params(
     k_target: f64,
 ) -> CraterParams {
     CraterParams::new(CraterParamsParts {
-        n_1km: lunar_chronology(surface_age),
+        n_1km: craters::lunar_chronology(surface_age, craters::SOLAR_SYSTEM_AGE),
         screening,
         gravity,
         k_target,

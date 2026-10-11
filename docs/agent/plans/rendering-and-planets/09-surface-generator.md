@@ -1555,7 +1555,12 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   10 m–300 km, the optional diameter map, and the screening taper on the differential production
   with exponent 4.5 (Design note 12; T0.b withdrew the break-up rule);
   `saturation`; `transition_diameter`; `diameter_in_octave` by bisection in log D with a fixed
-  iteration count. `CraterShape` and `crater_shape`: Design note 12's fresh depth, rim height,
+  iteration count. `lunar_chronology(S, A)` and its inverse `chronology_age` (fixed 64-step bisection),
+  counted from the system's formation, with `SOLAR_SYSTEM_AGE` 4.567 Gyr; `reference.rs`'s private
+  copy calls it at `SOLAR_SYSTEM_AGE`, bit-identical. Tests: N(S; 4.567) equals the published curve
+  to the bit; N is monotone in S; `chronology_age` inverts N to 10⁻¹² Gyr; a 10-Gyr system's 10-Gyr
+  surface lies within 1% of the Solar System's 4.567-Gyr one (3.03 km⁻²); `CraterShape` and
+  `crater_shape`: Design note 12's fresh depth, rim height,
   floor and peak by zone, and Design note 13's exterior width a by the closed-form balance
   (`decision-r09-t2.md` item 3). `testing::FieldBuilder`'s craters switch to it from T2's inline
   0.2 D and 0.84 (D_t ÷ 19 km) D^0.33. Tests: N(>1 km) is the parameter exactly; the function is
@@ -1565,8 +1570,10 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   636 Pa, Design note 12), and the crater cutoffs 20 d\*; Venus's screened counts over its area
   at N(>1 km) = 3.07 × 10⁻⁴ km⁻² lie within 10% of the Gazetteer's at 3, 5, 10, 20 and 40 km
   (878, 850, 642, 335 and 104 named craters at or above each, Design note 12); the map at Mars's
-  ratios reproduces Ivanov 2001's Mars function within ×1.5 in N over 1–100 km; D_t gives Pike's
-  Moon and Earth within 10%;
+  ratios (g 3.71, D_t 8.3 km, U = 16.7 × 9.6 ÷ 16.1 km/s, Ivanov's velocity ratio) reproduces
+  Ivanov 2001's Mars function within ×1.5 in N over 1–100 km (0.97–1.03 computed by
+  science-r09-craters.md), and P14.T48.f's 10.6 km/s within ×1.5 too (0.92–1.03); D_t gives
+  Pike's Moon and Earth within 10%;
   - _The bowl._ It is 0.20 D deep with a rim of 0.0369 D and a = 1.54 to 10⁻³, within 12% of
     Pike 1980b, Stopar et al., Pike 1988 and Robbins and Hynek's deepest at 1–5 km. On an airless
     Moon its d/D is Stopar et al.'s 0.125, 0.152 and 0.166 at 63, 141 and 283 m.
@@ -2242,8 +2249,9 @@ re-blessing this plan's payload and coarse goldens in that commit.
   gravities; the energy-balance transport cap; Venus's crater screening; the complex-crater peak's
   base width (0.3 D, Mars's) and the regolith bowl's gravity scaling (`decision-r09-t2.md` item
   3); Mars's complex craters deepening faster than the one law (exponent 0.53–0.58 against 0.30),
-  which leaves its largest fresh complex craters about 30% shallow. Each is a named constant with
-  its source and confidence in its doc comment.
+  which leaves its largest fresh complex craters about 30% shallow; the diameter map's non-porous
+  exponents, applied to every target, and its lunar impact velocity (T7.a, "Deviations in T7.a, as
+  built"). Each is a named constant with its source and confidence in its doc comment.
   T0.b's checks (2026-10-09) covered the first four; what they left open is under "Remaining
   checks, as researched" below.
 - **Several tasks are near a day.** T8 (assembly, the bound, the patch and the read set) and T6.b
@@ -3934,3 +3942,121 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     1.8–2.8°. T12.c or T14 may fill the nibble, under the layout rule.
   - _The T5 lane's worktree was mid-merge_ when the ruling was read. The follow-up merged T5's
     branch afresh and kept both T4's "_Applied 2026-10-09_" sentence and T5's deviations.
+- **Deviations in T7.a, as built** (2026-10-10).
+  - _Files and public items._ `craters.rs` keeps `CraterParams` and gains `transition_diameter`
+    and `LUNAR_IMPACT_VELOCITY`; its public children `craters::chronology` (`lunar_chronology`,
+    `chronology_age`, `SOLAR_SYSTEM_AGE`), `craters::density` and `craters::shape` (tests in
+    `density/tests.rs`, `shape/tests.rs` and the golden's `craters/golden.rs`) hold the rest,
+    re-exported from `craters`:
+    - `cumulative_density`, `saturation` and `diameter_in_octave`, as Provides has them, with
+      `production_density` (the same before screening), `projectile_scale` (d\*) and
+      `crater_cutoff` (`D_c`) added;
+    - Provides' `Octave` is `DiameterOctave` (`new(lower)`, `lower`, `upper`, the octave from its
+      lower diameter to twice it), since `noise::Octave` is already public in the crate;
+      `UnitUniform` (`new`, `get`, a value in [0, 1)); their errors `BuildDiameterOctaveError`
+      and `BuildUnitUniformError` (each with `value()`);
+    - `CraterShape` (`diameter`, `morphology`, `depth`, `rim_height`, `floor_depth`,
+      `floor_radius`, `peak_relief`, `peak_radius`, `exterior_width`, `reach`, `relief`) and
+      `crater_shape`. `relief(r_over_radius)` is the fresh profile, unfiltered; Provides'
+      band-limited `profile` stays T7.b's, built on it.
+  - _Ranges._ Every diameter must be finite and positive in km too (from about 10⁻³²⁰ m), and
+    `CraterParams::new` now also refuses (as `Screening`) a screening whose crater cutoff is under
+    that or whose 1,000 `D_c` overflows, so that the quadrature's bounds are always finite.
+    `lunar_chronology` refuses a surface older than its system (item 5's 0 ≤ S ≤ A). Each assert
+    has its test in `tests/panics.rs`.
+  - _The ends of the polynomial._ Above 300 km the cumulative production continues at the
+    polynomial's own slope there, −1.826, so it is continuously differentiable; below 10 m at the
+    plan's −2 (the polynomial's own slope at 10 m is −3.16, a kink). The a0 "misprint" is one of
+    two readings: Ivanov et al. 2002 (Asteroids III, Table 1) print −3.0768 for Neukum 1983's
+    polynomial and −3.0876 for this one, and Cratermaker corrects the chronology's linear term to
+    10^−3.0876 instead. a0 never enters, and item 5 keeps 8.38 × 10⁻⁴; the doc records both.
+  - _The diameter map._ Design note 12 names π-group scaling and nothing more. As built, after
+    Ivanov 2001: the body's crater is uncollapsed to a transient cavity by D ∝ `D_tc`^1.13
+    `D_t`^−0.13 (McKinnon and Schenk 1985 as Collins, Melosh and Marcus 2005 state it, made
+    continuous at the body's `D_t`; Ivanov himself used Croft 1985's 1.18), scaled by
+    (g ÷ g☾)^0.22 (v☾ ÷ v)^0.43 (Ivanov et al. 2002, eq. 4's γ and β for non-porous rock), and
+    recollapsed about the Moon's 19 km, with v☾ = `LUNAR_IMPACT_VELOCITY`, 16.7 km/s
+    (science-r09-craters.md item 4, replacing the first build's 16.1). The Mars test runs at
+    item 4's ratios: at g 3.71 and U = 16.7 × 9.6 ÷ 16.1 km/s (Ivanov's velocity ratio) the map
+    reproduces Ivanov's Mars function (Craterstats' coefficients) within 3.3% in N over 1–100 km,
+    and at P14.T48.f's 10.6 km/s within 9.2%, against the test's ×1.5; the lunar shape alone is
+    2.6× off at 10 km. Per T2's contract the map runs only when `impact_velocity` is given, and
+    the strength regime below a few hundred metres is not mapped. R09.T7.e adds the target's
+    class and density and the projectiles' density, with exponents derived from each class's μ
+    (item 2).
+  - _Screening._ "Airless" is no cutoff: `Screening::None`, or an atmosphere of no column mass,
+    both for the taper and for the airless bowls. The screened density is integrated in ln D by
+    eight-point Gauss–Legendre panels a quarter of a decade wide (the sim's GL8 values), on a
+    grid fixed per body and split at the production's kinks (10 m and 300 km lunar-equivalent
+    and, under a map, its two collapses), to 1,000 `D_c`, then the closed form; it agrees with an
+    independent Simpson integration to 10⁻⁶ and is summed from the top down, so it never rises
+    with D to the last bit (it is flat in f64 far below a thick atmosphere's cutoff, so the
+    monotonicity test is non-increasing; the production is strictly decreasing). Venus's counts
+    lie within 3% of the Gazetteer's at 3–40 km; its N(>1 km) is 1.94 × 10⁻⁶ km⁻² against a
+    production of 3.07 × 10⁻⁴. Trask's 0.079 is his 10^−1.1 = 0.0794, rounded as Design note 12
+    has it; Hartmann 1984's equilibrium is a different law (slope −1.83), no longer cited for it.
+  - _Venus without the map._ The Gazetteer check runs on the unmapped lunar shape, as T0.b's fit
+    did. Under P14.T48.f's 25.7 km/s the map would raise Venus's N(>D) ÷ N(>1 km) by ×1.3 at
+    3 km to ×2.0 at 40 km, beyond the test's 10%. Adopted lean ("main", 2026-10-10, sent on to
+    the crater science agent): R09.T7.e re-runs the check through the map and refits the taper's
+    exponent and N(>1 km) if it fails.
+  - _The central peak's jump._ By `decision-r09-t2.md` item 3's table the peak enters at full
+    relief at 1.5 `D_t` and ends at 9 `D_t`, so the profile jumps in D there (a steps −0.016 and
+    +0.040). Adopted lean ("main", 2026-10-10): keep the ruling's jump; a ramp, if the science
+    agent rules one, goes to R09.T7.e or the docs pass.
+  - _a0's two readings._ Adopted lean ("main", 2026-10-10): the doc records both readings of the
+    printed a0 (Design note 12's misprint and Cratermaker's correction of the linear term), with
+    the values as ruled; a0 never enters.
+  - _The inversion_ bisects ln D 40 times (an interval of 6.3 × 10⁻¹³) on the craters between the
+    octave's lower diameter and the midpoint alone, and is clamped into [lower, upper). Its
+    Kolmogorov–Smirnov test runs 10⁵ draws on the unscreened Moon and on mapped, screened Mars
+    (2–4 m, by its 1.7 m cutoff) in the fast suite; Venus's 10⁵, each tested against its full
+    quadrature, is slow (`#[ignore]`), with a 5,000-draw fast version.
+  - _The shapes._ As `decision-r09-t2.md` item 3, with these readings:
+    - the floor is held at 0.778 of D from 16.2 `D_t`, where 0.389 x^0.249 reaches it (the
+      ruling's script), so it stays continuous;
+    - the bowl's exterior width is 1.5426 (d ÷ h = 5.42), which the test pins to 10⁻³; the
+      plan's "a = 1.54 to 10⁻³" is that rounded;
+    - the exterior widths: transitional craters fall from the bowl's 1.5426 at 0.8 `D_t` to 1.33
+      at 1.5 `D_t`, and complex craters lie in 1.28–1.36 to 25 `D_t` (1.05 at 100 `D_t`), with
+      steps of −0.016 at 1.5 `D_t`, where the central peak enters at full relief, and +0.040 at
+      9 `D_t`, where it ends. Design note 13's "1.28–1.46 for transitional and complex craters"
+      holds for the complex ones (1.46 is a at `D_t`), so the test checks 1.28–1.36 and
+      1.33–1.543 apart. a ≤ 1.543 everywhere, so the reach stands;
+    - the gravity test checks d ∝ g^−0.697 and h ∝ g^−0.601 to 10⁻⁹, the laws' exact exponents
+      (1 − 0.303, 1 − 0.399), which the plan rounds to 0.70 and 0.60;
+    - a shape whose interior holds no net cavity (D beyond about 10⁵ `D_t`, a basin wider than
+      any body) gets no exterior rather than a NaN;
+    - 5.42 is Pike 1980a's 0.195 (Table 2) over Pike 1980b's 0.036, not Pike 1980b's own 0.196
+      over 0.036 (5.44), as the docs now say.
+  - _The transition test_ checks Pike 1980a's Table 3: the Moon against 19 km and Earth against
+    3.1 km (the build gives 19.0 and 3.14 km), within 10%.
+  - _`FieldBuilder`._ Each crater's morphology and relief are now `crater_shape`'s, and its reach
+    is its own (1 + a) rim radii rather than 2.54; a new test holds every listed crater's
+    morphology and OneCrater's every cell to its shape. Every cratered synthetic world's elevation
+    moves, so `tests/golden/wire/payloads.golden` is re-blessed at 21 under Generator version's
+    rule ("main", 2026-10-10); no other golden moves.
+  - _A new golden_, `tests/golden/craters/density_and_shapes.golden` (header 21), pins the
+    density, the production, the inversion, the chronology and its inverse, and every shape's
+    dimensions and relief as `f64` bits on six bodies, so that the WebAssembly runs check the
+    targets agree (the determinism review). It extends the goldens; nothing generated moves.
+  - _Icy and porous targets, impactors and time_ (raised by the T7.a lane, ruled in
+    `science-r09-craters.md`, 2026-10-10). Item 1: `k_target` 0.12 stands, sourced by nine icy
+    bodies' transitions (T7.a's docs cite it). Item 2: the target's scaling class (non-porous,
+    porous) and density and the projectiles' density are R09.T7.e's; until then the map takes
+    non-porous rock's exponents and no density for every target. Item 3: the airless bowls'
+    shallowing applies to rocky and icy airless bodies alike (T7.a's docs say so). Item 4: every
+    body's mean impact velocity is P14.T48.f's closed-form model, and the map's lunar reference
+    is its 16.7 km/s. Item 5: the chronology lives here (below).
+  - _The chronology_ (item 5). `lunar_chronology(S, A)` counts Neukum, Ivanov and Hartmann 2001's
+    curve from the system's formation, N = 5.44 × 10⁻¹⁴ (e^(6.93 (o + S)) − e^(6.93 o)) +
+    8.38 × 10⁻⁴ S with o = `SOLAR_SYSTEM_AGE` (4.567 Gyr, Connelly et al. 2012's 4.5673 rounded)
+    − A, in `craters/chronology.rs`; `chronology_age` inverts it by 64 fixed halvings of [0, A],
+    zero for a density of zero or less and A at or above the system's whole. `reference.rs`'s
+    private copy is gone: its worlds call it at `SOLAR_SYSTEM_AGE`, bit-identical (o is 0.0 and
+    e^0.0 is 1.0; the test pins every reference world's age), so nothing moves.
+  - _For P14.T48.c._ `cumulative_density(&CraterParams, Metres) -> PerSquareKilometre` returns
+    N(>1 km) exactly at 1 km on an unscreened body, and Venus's screened density at 1 km is 0.6%
+    of its production. Without `impact_velocity` a body takes the lunar shape, up to 2.6× off on a
+    Mars at 10 km: P14.T48.f supplies the velocity. P14.T24.b's N(>1 km) is
+    `craters::lunar_chronology(S, A)`.

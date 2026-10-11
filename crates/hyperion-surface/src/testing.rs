@@ -17,8 +17,9 @@
 //! the builder says so: the header's realised `σ_h` and relief are the cells' (their area-weighted
 //! RMS about the mean, and their range), not the reconstructed field's, which needs R09.T4's
 //! interpolant; the reference temperature is the climate layer's area-weighted mean; flow follows
-//! steepest descent with no depression filling; and a crater's relief is its profile sampled at
-//! each cell's centre, not smoothed to the cell.
+//! steepest descent with no depression filling; and a crater's relief is its fresh profile
+//! ([`crater_shape`](crate::craters::crater_shape), R09.T7.a) sampled at each cell's centre, not
+//! smoothed to the cell nor degraded.
 
 mod worlds;
 
@@ -30,13 +31,13 @@ use hyperion_base::units::{
     PerSquareKilometre, Radians, SquareMetres,
 };
 
-use crate::craters::{CraterParams, CraterParamsParts, Screening};
+use crate::craters::{CraterParams, CraterParamsParts, CraterShape, Screening, crater_shape};
 use crate::cube::{Edge, PatchKey, st_to_uv};
 use crate::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseCrater, CoarseField, CoarseLevel,
     Cover, Crust, FieldHeader, FieldHeaderParts, FlowDirection, LogArea, LogPrecipitation,
-    LogRunoff, LogSteepness, MaterialPalette, Morphology, PaletteRole, PrecipitationSource,
-    SurfaceClass, SynthesisCell, Wind, boundary_diameter, cell_at_index, cell_index, coarse_level,
+    LogRunoff, LogSteepness, MaterialPalette, PaletteRole, PrecipitationSource, SurfaceClass,
+    SynthesisCell, Wind, boundary_diameter, cell_at_index, cell_index, coarse_level,
 };
 use crate::spheroid::Spheroid;
 use crate::synth::relief::H_REF;
@@ -200,15 +201,6 @@ impl std::fmt::Debug for FieldBuilder {
             .finish_non_exhaustive()
     }
 }
-
-/// The rim radii a crater's reach extends to, its ejecta's edge: 1 + a with a = 1.54, the exterior
-/// width that balances a lunar depth-to-rim-height ratio of 5.42 (Design note 13): 0.195 ÷ 0.036,
-/// Pike 1980's Table 2 depth of fresh mare simple craters, d = 0.195 D^1.013, over the rim height
-/// h = 0.036 D^1.014 usually credited to Pike 1977, which is not yet checked (R09.T7.b checks it).
-const REACH_RIM_RADII: f64 = 2.54;
-
-/// The width of the crater profile's exterior, rim radii (Design note 13's a).
-const EJECTA_WIDTH: f64 = REACH_RIM_RADII - 1.0;
 
 impl FieldBuilder {
     /// A dry, airless, flat sphere of volumetric radius `radius`, with a one-month year on a
@@ -433,8 +425,9 @@ impl FieldBuilder {
 
     /// A crater of `diameter` (at least the field's boundary diameter) centred on the unit vector
     /// `centre`, formed `age` ago, of degradation code `degradation` (255ths of its rim lost). Its
-    /// morphology, depth and rim follow from its diameter, and its relief, Design note 13's
-    /// volume-balanced profile sampled at each cell's centre, is added to the elevation.
+    /// morphology and fresh profile are [`crater_shape`]'s for its diameter on the builder's crater
+    /// contract, and that profile, sampled at each cell's centre, is added to the elevation; the
+    /// degradation code is recorded, not applied.
     #[must_use]
     pub fn crater(
         mut self,
@@ -792,7 +785,7 @@ impl FieldBuilder {
         }
     }
 
-    /// `spec`'s morphology and profile, from its diameter and the body's transition diameter.
+    /// `spec` with its fresh shape on the builder's crater contract (Design notes 12 and 13).
     fn prepare(&self, spec: &CraterSpec, d_b: Metres) -> PreparedCrater {
         let d = spec.diameter.value();
         assert!(
@@ -800,69 +793,34 @@ impl FieldBuilder {
             "a coarse crater of {d} m is narrower than the boundary diameter {} m",
             d_b.value()
         );
-        // D_t = 19 km × (1.62 ÷ g) × k_target (Design note 12, after Pike 1980), a zone: bowls
-        // below 0.8 D_t, transitional to 1.5 D_t, central peaks above, peak rings from about 9 D_t
-        // and multi-ring basins above about 16 D_t.
-        let params = &self.crater_params;
-        let d_t = 19e3 * (1.62 / params.gravity().value()) * params.k_target();
-        let morphology = match d / d_t {
-            x if x < 0.8 => Morphology::Simple,
-            x if x < 1.5 => Morphology::Transitional,
-            x if x < 9.0 => Morphology::CentralPeak,
-            x if x < 16.0 => Morphology::PeakRing,
-            _ => Morphology::MultiRingBasin,
-        };
-        // Depth, rim to floor: 0.2 D for a bowl, 0.84 (D_t ÷ 19 km) D^0.33 km for a complex crater
-        // (Design note 12, Pike 1980's Table 2 lunar mare fits 0.195 D^1.013 and 0.841 D^0.332,
-        // rounded); the rim height H balances the volume, d ÷ H = 2 + 1.6a + 0.4a² (Design note 13).
-        let depth = if d < d_t {
-            0.2 * d
-        } else {
-            840.0 * (d_t / 19e3) * math::powf(d / 1e3, 0.33)
-        };
-        let rim_m = depth / (2.0 + 1.6 * EJECTA_WIDTH + 0.4 * EJECTA_WIDTH * EJECTA_WIDTH);
         PreparedCrater {
             spec: *spec,
-            morphology,
-            rim_m,
-            floor_m: depth - rim_m,
+            shape: crater_shape(&self.crater_params, spec.diameter),
         }
     }
 }
 
-/// A crater with its morphology and its profile's rim height and floor depth.
+/// A crater with its fresh shape.
 struct PreparedCrater {
     spec: CraterSpec,
-    morphology: Morphology,
-    rim_m: f64,
-    floor_m: f64,
+    shape: CraterShape,
 }
 
 impl PreparedCrater {
-    /// The crater's relief at the unit vector `dir` on a body of radius `r` metres: Design note
-    /// 13's interior −d₀ + (H + d₀) x² and exterior H (1 − s)³ (1 + 3s), s = (x − 1) ÷ a, with x
-    /// the distance in rim radii.
+    /// The crater's relief at the unit vector `dir` on a body of radius `r` metres: its fresh
+    /// profile ([`CraterShape::relief`]) at the arc's distance from its centre in rim radii.
     fn relief(&self, dir: [f64; 3], r: f64) -> f64 {
         let x = arc(self.spec.centre, dir) * r / (self.spec.diameter.value() / 2.0);
-        if x <= 1.0 {
-            -self.floor_m + (self.rim_m + self.floor_m) * x * x
-        } else {
-            let s = (x - 1.0) / EJECTA_WIDTH;
-            if s >= 1.0 {
-                0.0
-            } else {
-                let t = 1.0 - s;
-                self.rim_m * t * t * t * (1.0 + 3.0 * s)
-            }
-        }
+        self.shape.relief(x).value()
     }
 
     /// The crater as the field lists it, with the index of its centre's cell: its reach is every
-    /// cell whose nearest point may lie within [`REACH_RIM_RADII`] of the centre, by the angle to
-    /// the cell's centre less the cell's circumradius, with the centre's own cell.
+    /// cell whose nearest point may lie within the shape's [`reach`](CraterShape::reach), 1 + a rim
+    /// radii, of the centre, by the angle to the cell's centre less the cell's circumradius, with
+    /// the centre's own cell.
     fn listed(&self, grid: &Grid, level: CoarseLevel, r: f64) -> (u32, CoarseCrater) {
         let spec = &self.spec;
-        let reach_angle = REACH_RIM_RADII * spec.diameter.value() / 2.0 / r;
+        let reach_angle = self.shape.reach().value() / r;
         let centre_cell = cell_index(
             PatchKey::containing(level.get(), spec.centre).expect("a coarse level is valid"),
         );
@@ -874,7 +832,7 @@ impl PreparedCrater {
         let crater = CoarseCrater {
             centre: spec.centre,
             diameter: spec.diameter,
-            morphology: self.morphology,
+            morphology: self.shape.morphology(),
             age: spec.age,
             degradation: spec.degradation,
             reach: Cover::from_cells(touched),
@@ -1157,6 +1115,7 @@ fn arc(a: [f64; 3], b: [f64; 3]) -> f64 {
 mod tests {
     use super::*;
     use crate::field::FieldView;
+    use crate::field::Morphology;
     use hyperion_testkit::float::assert_same_bits;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -1170,6 +1129,35 @@ mod tests {
             (total - 4.0 * core::f64::consts::PI).abs() < 1e-12,
             "4π against {total}"
         );
+    }
+
+    /// The builder's craters are [`crater_shape`]'s (R09.T7.a): every listed crater's morphology
+    /// is its shape's, and every cell of the flat `OneCrater` world holds the shape's fresh relief
+    /// at the cell's centre, to the millimetre.
+    #[test]
+    fn a_built_crater_is_its_crater_shape() {
+        for &world in SyntheticWorld::ALL {
+            let field = synthetic_field(world);
+            for crater in field.craters() {
+                let shape = crater_shape(field.header().craters(), crater.diameter);
+                assert_eq!(crater.morphology, shape.morphology(), "{world:?}");
+            }
+        }
+        let one = synthetic_field(SyntheticWorld::OneCrater);
+        let crater = &one.craters()[0];
+        let shape = crater_shape(one.header().craters(), crater.diameter);
+        let r = one.header().radius().value();
+        let grid = Grid::new(one.header().level().get());
+        let mut inside = 0_u32;
+        for (cell, &dir) in one.synthesis().iter().zip(&grid.centres) {
+            let x = arc(crater.centre, dir) * r / (crater.diameter.value() / 2.0);
+            let expected = SynthesisCell::quantise_height(shape.relief(x)).unwrap();
+            assert_eq!(cell.elevation_mm, expected, "at {x} rim radii");
+            if x < 1.0 {
+                inside += 1;
+            }
+        }
+        assert!(inside > 10, "only {inside} cells lie inside the crater");
     }
 
     /// A field built twice is the same to the bit: its header, every record and every crater.
