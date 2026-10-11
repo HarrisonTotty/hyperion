@@ -270,24 +270,21 @@ mod tests {
         golden!("galaxy/features/centre", w.as_str());
     }
 
-    /// P09.T24.b and ruling 144.1: no drawn galaxy's centre fails its inversions (f positive at
-    /// every node, for every tracer), over 64 seeds; nor does a centre at the extreme black hole
-    /// to cluster ratios the draws allow in practice, in the Milky Way's potential: black holes
-    /// 1.5 dex either side of the Milky Way's (±4σ of the M–σ scatter's 0.38 dex), about clusters
-    /// from 10⁶ M☉ to plan 02's cap (ruling 144.5b).
+    /// P09.T24.b and ruling 144.1: no centre at the extreme black hole to cluster ratios the draws
+    /// allow in practice fails its inversions (f positive at every node, for every tracer), in the
+    /// Milky Way's potential: black holes 1.5 dex either side of the Milky Way's (±4σ of the M–σ
+    /// scatter's 0.38 dex), about clusters from 10⁶ M☉ to plan 02's cap (ruling 144.5b).
+    ///
+    /// Drawn galaxies' centres are inverted per commit by `members::tests`'
+    /// `no_seed_s_centre_overflows_its_index` (16 seeds of family `0x0927`, through
+    /// `CentreModel::from_params`), and the 64 seeds of family `0x0924` this test once swept by
+    /// [`no_drawn_centre_of_64_fails_its_inversion`], in the slow pass (`decision-test-coverage.md`,
+    /// N3).
     #[test]
     fn no_drawn_centre_fails_its_inversion() {
         use crate::galaxy::imf::MassFunctionKind;
         use crate::galaxy::params::NuclearClusterParams;
         use crate::galaxy::potential::MassModel;
-        for n in 0..64_u64 {
-            let params =
-                GalaxyParams::from_seed(Seed::new(0x0924_0000 | n), MassFunctionKind::default());
-            let profile = CentreProfile::from_params(&params).unwrap();
-            if let Err(e) = CentreModel::invert(&profile) {
-                panic!("seed {n}: {e}");
-            }
-        }
         let model = MassModel::new(&GalaxyParams::milky_way_like());
         let cap = NuclearClusterParams::mass_cap(MassFunctionKind::Chabrier).value();
         for cluster in [1e6, 2.5e7, cap] {
@@ -303,6 +300,24 @@ mod tests {
                 if let Err(e) = CentreModel::invert(&profile) {
                     panic!("cluster {cluster:e}, black hole {black_hole:e}: {e}");
                 }
+            }
+        }
+    }
+
+    /// P09.T24.b and ruling 144.1: no drawn galaxy's centre fails its inversions (f positive at
+    /// every node, for every tracer), over 64 seeds of family `0x0924`. A slow test since
+    /// `decision-test-coverage.md`'s N3, which moved it out of [`no_drawn_centre_fails_its_inversion`]:
+    /// it runs in the slow pass beside `members::tests`' 512-seed sweep.
+    #[test]
+    #[ignore = "slow: 64 drawn centres"]
+    fn no_drawn_centre_of_64_fails_its_inversion() {
+        use crate::galaxy::imf::MassFunctionKind;
+        for n in 0..64_u64 {
+            let params =
+                GalaxyParams::from_seed(Seed::new(0x0924_0000 | n), MassFunctionKind::default());
+            let profile = CentreProfile::from_params(&params).unwrap();
+            if let Err(e) = CentreModel::invert(&profile) {
+                panic!("seed {n}: {e}");
             }
         }
     }

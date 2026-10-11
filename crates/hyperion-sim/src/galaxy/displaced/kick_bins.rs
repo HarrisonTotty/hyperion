@@ -798,6 +798,7 @@ fn maxwell_cdf(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::lcg::Lcg;
+    use hyperion_testkit::stats::{ALPHA, assert_p_value, chi_square_gof};
 
     use super::*;
     use crate::galaxy::imf::MassFunctionKind;
@@ -955,13 +956,20 @@ mod tests {
         }
     }
 
-    /// P08.T8.b: against 10⁶ direct draws of plan 06's law at five masses, every bin of every kind
-    /// and mode agrees within 3σ of the Monte Carlo error.
+    /// P08.T8.b: against 10⁶ direct draws of plan 06's law at five masses, the counts of every
+    /// kind, mode and bin, and of no remnant, follow the shares: one chi-square test a mass, its
+    /// cells of under five expected merged, each at α ÷ 5, so that the five hold the skill's
+    /// α = 10⁻³ family-wise (`decision-test-coverage.md`, the kick bins' ruling). A 3σ check of
+    /// each of the 485 cells, as this test made before, fails on half or more of the fresh draws
+    /// of a true law.
     #[test]
     fn the_shares_match_direct_draws_of_the_law() {
         let law = StandardKickLaw::default();
         let n = 1_000_000_u32;
-        for (i, m) in [8.5, 11.0, 16.0, 24.0, 38.0].into_iter().enumerate() {
+        let masses = [8.5, 11.0, 16.0, 24.0, 38.0];
+        let alpha = ALPHA / 5.0;
+        assert_eq!(masses.len(), 5, "α is shared by the five masses");
+        for (i, m) in masses.into_iter().enumerate() {
             let direct = Direct::new(m);
             let mut lcg = Lcg::new(0x08b0 + u64::try_from(i).unwrap());
             let mut counts = [[[0_u32; SPEED_BINS]; MODES.len()]; KINDS.len()];
@@ -979,23 +987,49 @@ mod tests {
                 KilometresPerSecond::new(V_C),
             );
             let total = f64::from(n);
+            let mut cells: Vec<(String, u64, f64)> = Vec::new();
             for (k, &kind) in KINDS.iter().enumerate() {
                 for (j, &mode) in MODES.iter().enumerate() {
                     let bins = shares.mode_bins(kind, mode);
                     for (bin, &p) in bins.iter().enumerate() {
-                        let measured = f64::from(counts[k][j][bin]) / total;
-                        let sigma = (p * (1.0 - p) / total).sqrt().max(1.0 / total);
-                        assert!(
-                            (measured - p).abs() <= 3.0 * sigma,
-                            "{m} M☉ {kind:?} {mode:?} bin {bin}: {measured} against {p} (σ {sigma})"
-                        );
+                        let label = format!("{kind:?} {mode:?} bin {bin}");
+                        cells.push((label, u64::from(counts[k][j][bin]), p * total));
                     }
                 }
             }
-            let measured = f64::from(none) / total;
-            let p = shares.no_remnant();
-            assert!((measured - p).abs() <= 3.0 * (p * (1.0 - p) / total).sqrt().max(1.0 / total));
+            cells.push((
+                "no remnant".to_owned(),
+                u64::from(none),
+                shares.no_remnant() * total,
+            ));
+            let observed: Vec<u64> = cells.iter().map(|&(_, o, _)| o).collect();
+            let expected: Vec<f64> = cells.iter().map(|&(_, _, e)| e).collect();
+            let fit = chi_square_gof(&observed, &expected);
+            // The cell furthest from its share, in standard deviations, named should the test fail.
+            let (label, o, e) = cells
+                .iter()
+                .filter(|&&(_, _, e)| e > 0.0)
+                .max_by(|a, b| {
+                    let z = |&(_, o, e): &(String, u64, f64)| (count(o) - e).abs() / e.sqrt();
+                    z(a).total_cmp(&z(b))
+                })
+                .expect("a cell with a share");
+            let name = format!(
+                "{m} M☉: {} cells merged to {}, χ² {:.1} on {} degrees of freedom; furthest \
+                 {label}, {o} drawn against {e:.1}",
+                cells.len(),
+                fit.bins,
+                fit.statistic,
+                fit.dof
+            );
+            eprintln!("{name}: p {:.3}", fit.p_value);
+            assert_p_value(&name, fit.p_value, alpha);
         }
+    }
+
+    /// A count as an `f64`, exactly: the counts here are at most 10⁶.
+    fn count(n: u64) -> f64 {
+        f64::from(u32::try_from(n).expect("a count of at most 10⁶ draws"))
     }
 
     /// The bins averaged over layer E's band, weighted by the mass function over 33 log-spaced

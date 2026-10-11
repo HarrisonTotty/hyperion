@@ -22,7 +22,7 @@ use hyperion_sim::galaxy::params::GalaxyParams;
 use hyperion_sim::galaxy::placement::{NoCache, SystemKind, rogue_planet_saturation_density};
 use hyperion_sim::galaxy::query::{
     CensusStop, MassFloor, PAD_SPEED, QuerySphere, RangeQuery, RangeResult, SubstellarRequest,
-    count_cells_in_sphere, pad_for, range_query,
+    count_cells_in_sphere, expected_counts, pad_for, range_query,
 };
 use hyperion_sim::galaxy::substellar::SubstellarParams;
 use hyperion_sim::id::Layer;
@@ -295,19 +295,24 @@ fn assert_centre_census(centre: GalacticPosition) {
 
 /// The Milky Way fixture's own centre does not saturate (ruling 125): its count there is the
 /// linear one, below C times the volume.
+///
+/// The count is the census's expectation, `expected_counts` at the query's centre, radius and
+/// request, as the census takes it, which needs no walk of the cells (`decision-test-coverage.md`,
+/// Q6's ruling; the two were checked equal bit for bit in every layer at this query, P13.T4's
+/// as-built note). The walk of rogue-planet cells at the centre is
+/// [`a_query_near_the_centre_counts_the_saturated_density`]'s, and the slow
+/// [`a_query_at_the_very_centre_counts_the_saturated_density`]'s, on the saturated galaxy.
 #[test]
 fn the_fixture_s_centre_does_not_saturate() {
-    let result = run(
-        galaxy(),
-        &query(
-            GalacticPosition::ORIGIN,
-            0.5,
-            SubstellarRequest::BrownDwarfsAndRoguePlanets,
-            4_096,
-        ),
+    let asked = query(
+        GalacticPosition::ORIGIN,
+        0.5,
+        SubstellarRequest::BrownDwarfsAndRoguePlanets,
+        4_096,
     );
     let volume = 4.0 / 3.0 * core::f64::consts::PI * 0.125;
-    let expected = result.census().expected().get(Layer::RoguePlanet);
+    let expected = expected_counts(galaxy(), asked.centre(), asked.radius(), asked.substellar())
+        .get(Layer::RoguePlanet);
     assert!(
         expected < 0.8 * rogue_planet_saturation_density() * volume,
         "{expected}"

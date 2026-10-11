@@ -773,6 +773,17 @@ source: BirthSource)`, and `speed_bin_shares_against(law, m, comp, v_ref)`. The 
   The test holds the measured values to 0.005, the plan's figures beside them, and bins 3–7 to the
   plan's window. The black holes' first bin is 0.785 (0.78–0.88).
 - **Ruling 93.2** is recorded above; the kick loop that honours it is P08.T12.c's.
+- **The direct-draw test is one chi-square test a mass, as built (lane `perf-native-tests`,
+  2026-10-11, at `GENERATOR_VERSION` 21; no output moves; `decision-test-coverage.md` §3.2, the
+  kick bins' ruling, a correctness fix).** A 3σ check of each of the 97 cells of each mass (three
+  kinds by four modes by eight bins, and no remnant), 485 in all, fails on half or more of the
+  fresh draws of a true law, against the skill's α = 10⁻³. `the_shares_match_direct_draws_of_the_law`
+  keeps the five masses, their LCG seeds (`0x08b0` + the mass's index) and 10⁶ draws each, and
+  tests each mass's counts against its shares by one `chi_square_gof`, cells of under five
+  expected merged, at α ÷ 5 (`assert_p_value`), so that the five hold α family-wise; a failure
+  names the cell furthest from its share. Measured: 8.5 M☉ χ² 3.9 on 5 degrees of freedom
+  (p 0.56), 11 M☉ 8.1 on 10 (0.62), 16 M☉ 10.1 on 14 (0.76), 24 M☉ 9.5 on 14 (0.80), 38 M☉ 7.5
+  on 5 (0.19).
 
 ### P08.T9 The class table
 
@@ -986,6 +997,16 @@ CoredPowerLaw, BallisticLayer, OwnFormMixture, FlareFactor}`, as Provides has th
   integral unchanged to 10⁻⁴ for a ballistic and a fitted class. The 200-seed sweep of all 96
   forms is slow (`every_form_normalises_for_200_seeds`: 200 mass models, fields and 96 cube
   integrals each); the fast suite builds them at the fixture.
+- **The Monte Carlo's standard error, as built (lane `perf-native-tests`, 2026-10-11, at
+  `GENERATOR_VERSION` 21; no output moves; asked by `decision-test-coverage.md` §3.2 before any
+  ruling on the test's size).** `a_spheroids_normalisation_agrees_with_a_monte_carlo` now computes
+  and prints each estimate's standard error, the weighted values' sample deviation over √n times
+  the eight octants, beside the 0.5% tolerance; the estimate's bits are unchanged. At its seed the
+  three spheroids' errors are 5.6 × 10⁻⁴, 1.8 × 10⁻³ and 4.2 × 10⁻⁴ of the integral, and the
+  estimates lie 0.63, 0.56 and 0.23 errors below it. **Finding:** the flattened, steep spheroid
+  (a 0.4, q 0.3, γ 5) has the tolerance at 2.7 standard errors, a two-sided false-failure chance
+  of about 6 × 10⁻³ on a fresh seed, above α = 10⁻³; the round and the shallow ones are at 9 and
+  12 errors. For the decision agent, before any change of the seed or the sample.
 
 ### P08.T11 Bounds for flared classes
 
@@ -1046,6 +1067,15 @@ form_bound}` bound one class's normalised form over a cell: the layer's radial e
   azimuths. What the shortcut gives up is the second coordinate ascent of the same function, run
   with the axes in another order; the cells, classes, starts, seeds and the 10⁻¹² window are
   unchanged.
+- **As built (lane `perf-native-tests`, 2026-10-11, at `GENERATOR_VERSION` 21; no output moves;
+  `decision-test-coverage.md` §3.2, N2).** `flare_bound_is_tight_and_safe` is split. The fast test
+  takes 10⁴ pairs on the same LCG seed `0x0811_0000`, the first 10⁴ of the plan's sequence, with
+  the same assertions; the plan's 10⁵ run as the slow test
+  `flare_bound_is_tight_and_safe_over_100_000_pairs` ("slow: 10⁵ pairs of 512 points"), in the
+  slow pass beside the hunt's four shards. The tightness keeps its power at 10⁴
+  (a mean of 1.008 against the bound of 1.6, its standard error 0.001 or less); the safety hunt per
+  commit drops from 5.1 × 10⁷ probes to 5.1 × 10⁶, which still finds a violating share of about
+  6 × 10⁻⁷ at 95%.
 
 ### P08.T12 Displaced classes in placement
 

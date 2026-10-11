@@ -981,7 +981,12 @@ fn a_point_is_nothing_and_the_corona_takes_no_steps() {
 /// P07.T8.b: the realised line keeps the mean. Over 256 seeds the mean extinction of a fixed
 /// 3,000 ly in-plane segment at the Sun's radius agrees with the mean mode's within four standard
 /// errors, at full quality and at a budget of 64 steps; a budget is never exceeded; and a warm
-/// cache changes nothing.
+/// cache changes nothing, on every seed, nor does a cache of no slots against the shared one, on
+/// the last seed of each sixteen.
+///
+/// The fresh cache's line is drawn on 16 seeds at each quality (`decision-test-coverage.md`, N4):
+/// by each of them the shared cache has served at least 15 other seeds, so a cache key that dropped
+/// the seed would still show.
 #[test]
 fn the_realised_line_keeps_the_mean_over_256_seeds() {
     let fields = milky_way_fields();
@@ -1007,11 +1012,13 @@ fn the_realised_line_keeps_the_mean_over_256_seeds() {
                 let cold = sightline(&gas, &a, &b, NoiseMode::Realised, quality, &[], &mut cache);
                 let warm = sightline(&gas, &a, &b, NoiseMode::Realised, quality, &[], &mut cache);
                 assert_eq!(cold, warm, "a warm cache changed the line");
-                let fresh = &mut NoiseCache::with_capacity(0);
-                assert_eq!(
-                    cold,
-                    sightline(&gas, &a, &b, NoiseMode::Realised, quality, &[], fresh)
-                );
+                if seed.get() % 16 == 15 {
+                    let fresh = &mut NoiseCache::with_capacity(0);
+                    assert_eq!(
+                        cold,
+                        sightline(&gas, &a, &b, NoiseMode::Realised, quality, &[], fresh)
+                    );
+                }
                 if let Quality::Budget(steps) = quality {
                     assert!(cold.steps() <= steps.get());
                 }

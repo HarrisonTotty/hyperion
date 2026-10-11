@@ -1000,6 +1000,12 @@ mod tests {
 
     /// P09.T27 and ruling 144.5: the headroom check over 16 drawn seeds, none of which fails under
     /// plan 02's cap; the slow sweep takes 512.
+    ///
+    /// It also proves the inversion of those 16 drawn centres (family `0x0927`), each built by
+    /// `CentreModel::from_params`, which inverts every tracer (`invert_tracers`) and is checked:
+    /// with the extreme corners of `centre::tests::no_drawn_centre_fails_its_inversion`, the fast
+    /// tier's drawn inversions, since the 64 seeds of family `0x0924` run in the slow pass
+    /// (`no_drawn_centre_of_64_fails_its_inversion`; `decision-test-coverage.md`, N3).
     #[test]
     fn no_seed_s_centre_overflows_its_index() {
         let (_, failing, clamping) = sweep_fullest_cells(0..16);
@@ -1018,12 +1024,20 @@ mod tests {
 
     /// P09.T27: every member's ID round-trips through plan 01's decode, at every level; a
     /// resolved ID gives the generated member; an index past the count is no system.
+    ///
+    /// Every member is resolved on the shared model (`resolve_centre_member_with`), and the first of
+    /// each cell and band through the public `resolve` too, which builds a fresh model each call:
+    /// ten such builds, two of the twelve cells and bands holding no member, rather than one a
+    /// member (`decision-test-coverage.md`, N1). The members
+    /// differ only in the argument passed, after the same dispatch, to the function asserted for
+    /// each; `centre_members_are_order_independent` holds the fresh model's members the shared
+    /// one's.
     #[test]
     fn members_round_trip_and_resolve() {
         let galaxy = milky_way_galaxy();
         let model = milky_way_centre();
         let placement = CentrePlacement::new(model);
-        let mut seen = 0;
+        let (mut seen, mut public) = (0, 0);
         for (level, cell) in [
             (0, [16, 16, 16]),
             (0, [15, 16, 17]),
@@ -1033,7 +1047,7 @@ mod tests {
             let cell = placement.grid().cell(level, cell).unwrap();
             for band in [MassBand::A, MassBand::C, MassBand::E] {
                 let members = placement.members_in_cell(galaxy, band, cell);
-                for m in members.iter().take(40) {
+                for (index, m) in members.iter().take(40).enumerate() {
                     let id = m.record().id();
                     assert_eq!(SystemId::from_raw(id.raw()), Ok(id));
                     let SystemIdKind::Centre(member) = id.kind() else {
@@ -1045,7 +1059,10 @@ mod tests {
                     assert!(l < 12);
                     let resolved = resolve_centre_member_with(galaxy, model, member).unwrap();
                     assert_eq!(&resolved, m);
-                    assert_eq!(resolve(galaxy, id).unwrap(), *m.record());
+                    if index == 0 {
+                        assert_eq!(resolve(galaxy, id).unwrap(), *m.record());
+                        public += 1;
+                    }
                     let r = m.local_position();
                     assert_eq!(placement.grid().owner_of(&r), Some(cell), "{r:?}");
                     seen += 1;
@@ -1059,6 +1076,10 @@ mod tests {
             }
         }
         assert!(seen > 100, "{seen}");
+        assert!(
+            public > 0,
+            "the first members of the cells and bands through `resolve`"
+        );
     }
 
     /// P09.T27: the black hole resolves from `0xF000_0007_0000_0000`, with the parameters' mass.

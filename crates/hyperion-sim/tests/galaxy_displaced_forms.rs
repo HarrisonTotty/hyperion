@@ -45,11 +45,13 @@ fn the_layers_column_is_its_closed_form() {
     }
 }
 
-/// The integral over the cube of `f(|x|, |y|, |z|)` by importance sampling: each coordinate is
-/// `L u³` with u uniform, whose density `t^(−2/3) ÷ (3 L^(1/3))` follows a cored form's rise to its
-/// core, and eight octants.
-fn monte_carlo(points: u32, lcg: &mut Lcg, shape: impl Fn(f64, f64, f64) -> f64) -> f64 {
+/// The integral over the cube of `f(|x|, |y|, |z|)` by importance sampling, and its standard
+/// error: each coordinate is `L u³` with u uniform, whose density `t^(−2/3) ÷ (3 L^(1/3))` follows a
+/// cored form's rise to its core, and eight octants. The error is the sample standard deviation of
+/// the weighted values over √n, times the eight octants.
+fn monte_carlo(points: u32, lcg: &mut Lcg, shape: impl Fn(f64, f64, f64) -> f64) -> (f64, f64) {
     let mut sum = 0.0;
+    let mut sum_of_squares = 0.0;
     let pick = |lcg: &mut Lcg| {
         let u = lcg.next_f64().max(1e-300);
         let coordinate = L * u * u * u;
@@ -60,13 +62,19 @@ fn monte_carlo(points: u32, lcg: &mut Lcg, shape: impl Fn(f64, f64, f64) -> f64)
         let (x, wx) = pick(lcg);
         let (y, wy) = pick(lcg);
         let (z, wz) = pick(lcg);
-        sum += shape(x, y, z) * wx * wy * wz;
+        let value = shape(x, y, z) * wx * wy * wz;
+        sum += value;
+        sum_of_squares += value * value;
     }
-    8.0 * sum / f64::from(points)
+    let n = f64::from(points);
+    let mean = sum / n;
+    let variance = (sum_of_squares / n - mean * mean) * n / (n - 1.0);
+    (8.0 * sum / n, 8.0 * (variance.max(0.0) / n).sqrt())
 }
 
 /// P08.T10.a: the numerical normalisation of a spheroid agrees with a 10⁷-point Monte Carlo to
-/// 0.5%, for a round, a flattened and a steep one.
+/// 0.5%, for a round, a flattened and a steep one. Each prints the Monte Carlo's standard error
+/// beside the tolerance (asked by `decision-test-coverage.md` before any ruling on its size).
 #[test]
 fn a_spheroids_normalisation_agrees_with_a_monte_carlo() {
     let (scales, _) = scales_and_fields(&GalaxyParams::milky_way_like());
@@ -92,10 +100,16 @@ fn a_spheroids_normalisation_agrees_with_a_monte_carlo() {
         },
     ] {
         let spheroid = CoredPowerLaw::new(&row, &scales).unwrap();
-        let sampled = monte_carlo(10_000_000, &mut lcg, |x, y, z| {
+        let (sampled, error) = monte_carlo(10_000_000, &mut lcg, |x, y, z| {
             spheroid.shape(math::hypot(x, y), z)
         });
         let integral = 1.0 / spheroid.norm();
+        eprintln!(
+            "{row:?}: Monte Carlo {sampled:e} ± {error:e}, a standard error of {:.2e} of the \
+             integral against the tolerance's 5e-3; off by {:.2} standard errors",
+            error / integral,
+            (sampled - integral) / error
+        );
         assert!(
             (sampled / integral - 1.0).abs() < 0.005,
             "{row:?}: {sampled} against {integral}"

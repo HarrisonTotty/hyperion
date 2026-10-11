@@ -42,9 +42,13 @@ fn radius_ly(f: &FeatureRecord) -> f64 {
 
 // --- P09.T12.a ---
 
+/// P09.T12.a: drawn galaxies hold 80 to 800 globulars, here over 16 seeds, and the fixture 130
+/// to 190. The bound is asserted over 32 more seeds per commit and 10⁴ in the slow sweep, by
+/// `tests/common/mod.rs`' `assert_params_in_ranges` (`tests/galaxy_params.rs` and
+/// `tests/galaxy_sweeps.rs`), so this loop took 200 until `decision-test-coverage.md`'s N5.
 #[test]
 fn every_seed_holds_80_to_800_and_the_fixture_about_160() {
-    for n in 0..200 {
+    for n in 0..16 {
         let params = GalaxyParams::from_seed(Seed::new(SEED | n), MassFunctionKind::default());
         let count = params.accretion().globular_count();
         assert!((80..=800).contains(&count), "seed {n}: {count}");
