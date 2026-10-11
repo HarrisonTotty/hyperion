@@ -705,11 +705,17 @@ describe("a curve of growth", () => {
       for (const sun of SUNS) {
         const optics = absorberOptics(spec, sun.spectrum);
         const curve = absorberCurve(spec, sun.spectrum);
-        const atNode = (j: number): Rgb =>
-          channelTransmittance(
-            optics,
-            amountLike(spec, Math.exp(curve.logColumns[j] ?? Number.NaN)),
-          );
+        // Each node's exact transmittance, once: an interval reads both of its ends.
+        const atNodes: ReadonlyArray<Rgb> = Array.from(curve.logColumns, (logColumn) =>
+          channelTransmittance(optics, amountLike(spec, Math.exp(logColumn))),
+        );
+        const atNode = (j: number): Rgb => {
+          const node = atNodes[j];
+          if (node === undefined) {
+            throw new Error(`no node ${String(j)}`);
+          }
+          return node;
+        };
         for (let k = 0; k + 1 < curve.logColumns.length; k += 1) {
           const u = amountLike(
             spec,

@@ -362,17 +362,10 @@ describe("the terrain pass", () => {
   });
 
   it("selects no more patches than its budget, and says the budget bound", async () => {
-    const { pass, pool } = await passOn("high");
-    // 1.5 km up, 69° from straight down, at 1080p: even under the fake pool's flat bakes, whose
-    // ranges are tight, the high setting wants several thousand patches, beyond its budget of 981.
-    // Selection descends as bakes land (R05.T7's streaming gate), so the demand is baked until it
-    // empties.
-    const view = { ...tilted(1_500, 1.2), viewport: { widthPx: 1920, heightPx: 1080 } };
-    let frame = pass.frame(inputAt(view));
-    expect(frame.selection.patches.size).toBeLessThanOrEqual(pass.maxPatches);
-    for (let n = 1; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
-      frame = pass.frame(inputAt(view, 16 * n));
-      expect(frame.selection.patches.size).toBeLessThanOrEqual(pass.maxPatches);
+    // At BUDGET_VIEW the demand is baked until it empties, every frame's selection counted.
+    const { maxPatches, sizes, frame } = await streamedUnderBudget();
+    for (const size of sizes) {
+      expect(size).toBeLessThanOrEqual(maxPatches);
     }
     expect(frame.selection.limited).toBe(true);
     expect(frame.conditions.detailLimited).toBe(true);
@@ -718,6 +711,56 @@ function streamed(pass: TerrainPass, pool: () => FakePool, view: TerrainView): T
 }
 
 /**
+ * 1.5 km up, 69° from straight down, at 1080p: even under the fake pool's flat bakes, whose ranges
+ * are tight, the high setting wants several thousand patches here, beyond its budget of 981.
+ */
+const BUDGET_VIEW: TerrainView = {
+  ...tilted(1_500, 1.2),
+  viewport: { widthPx: 1920, heightPx: 1080 },
+};
+
+/** The high setting's pass streamed at {@link BUDGET_VIEW}, as {@link streamed} streams it. */
+interface BudgetStream {
+  /** The pass's budget, patches. */
+  readonly maxPatches: number;
+  /** Each frame's selected patches, the first frame's first. */
+  readonly sizes: ReadonlyArray<number>;
+  /** The last frame, whose draw set no later frame rewrites. */
+  readonly frame: TerrainFrame;
+  /** The morph bands the last frame wrote ({@link writtenBands}). */
+  readonly bands: ReadonlyMap<string, readonly [number, number]>;
+}
+
+let budgetStream: Promise<BudgetStream> | undefined;
+
+/**
+ * {@link BUDGET_VIEW}'s stream, run once for the budget's test and the morph bands' tests under
+ * it, which all read the same run: every input is fixed (the setting, the view, the fake pool's
+ * bakes and the frames' clock), and the run's figures are only read.
+ */
+function streamedUnderBudget(): Promise<BudgetStream> {
+  budgetStream ??= (async (): Promise<BudgetStream> => {
+    const { pass, pool, engine } = await passOn("high");
+    // Selection descends as bakes land (R05.T7's streaming gate), so the demand is baked until it
+    // empties.
+    const sizes: number[] = [];
+    let frame = pass.frame(inputAt(BUDGET_VIEW));
+    sizes.push(frame.selection.patches.size);
+    for (let n = 1; n < 60 && pool().bakeDemand(pass) > 0; n += 1) {
+      frame = pass.frame(inputAt(BUDGET_VIEW, 16 * n));
+      sizes.push(frame.selection.patches.size);
+    }
+    return {
+      maxPatches: pass.maxPatches,
+      sizes,
+      frame,
+      bands: writtenBands(engine, frame.drawSet),
+    };
+  })();
+  return budgetStream;
+}
+
+/**
  * The pass's d_min: the box distance from `cameraM` to the nearest selected patch not at the
  * finest level, floored at one finest patch, metres.
  */
@@ -805,8 +848,8 @@ function morphFactor([start, end]: readonly [number, number], distanceM: number)
 }
 
 describe("the morph bands under the patch budget", () => {
-  // As in the budget test above: the high setting wants several thousand patches here, beyond 981.
-  const limitedView = { ...tilted(1_500, 1.2), viewport: { widthPx: 1920, heightPx: 1080 } };
+  // The budget test's run: the high setting wants several thousand patches here, beyond 981.
+  const limitedView = BUDGET_VIEW;
 
   it("are at the setting's τ, bit for bit, while the budget does not bind", async () => {
     const { pass, pool, engine } = await passOn("high");
@@ -820,24 +863,21 @@ describe("the morph bands under the patch budget", () => {
   });
 
   it("are at τ × max(1, the limit excess) while the budget binds", async () => {
-    const { pass, pool, engine } = await passOn("high");
-    const frame = streamed(pass, pool, limitedView);
+    const { frame, bands } = await streamedUnderBudget();
     expect(frame.selection.limited).toBe(true);
     // Above 1, so that τ′ is not the setting's τ.
     expect(frame.selection.limitExcess).toBeGreaterThan(1);
     const tauPx = TERRAIN_SETTINGS.high.tauPx * frame.selection.limitExcess;
-    expect(writtenBands(engine, frame.drawSet)).toEqual(bandsAt(limitedView, frame.drawSet, tauPx));
+    expect(bands).toEqual(bandsAt(limitedView, frame.drawSet, tauPx));
   });
 
   it("keep every coarse–fine edge at morph 1 while the budget binds", async () => {
-    const { pass, pool, engine } = await passOn("high");
-    const frame = streamed(pass, pool, limitedView);
+    const { frame, bands } = await streamedUnderBudget();
     expect(frame.selection.limited).toBe(true);
     // Past the bands' margin, so that bands at the setting's τ would leave edges unmorphed.
     expect(frame.selection.limitExcess).toBeGreaterThan(1 + SELECTION_MARGIN);
     // Nothing stands in, so every drawn patch is a selected leaf.
     expect(frame.drawSet.standingIn).toBe(0);
-    const bands = writtenBands(engine, frame.drawSet);
     const camera = limitedView.cameraM;
     let edges = 0;
     const unmorphed: string[] = [];

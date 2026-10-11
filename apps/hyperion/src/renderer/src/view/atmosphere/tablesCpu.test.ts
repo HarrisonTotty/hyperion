@@ -369,7 +369,10 @@ describe("the multiple-scattering kernel's steps", () => {
     );
 
   beforeAll(() => {
-    tables.set("even", build({}));
+    // The kernel's own steps are the planet's table: `planetTwin` builds it by the same
+    // `multiScatteringTwin` of the same medium, radius, transmittance and options, each texel on
+    // its own, so at the measured texels it is this table's `build({})` bit for bit.
+    tables.set("even", earth.multiScattering);
     tables.set("placed", build({ placement: "placed" }));
     tables.set("reference", build({ placement: "placed", samples: MS_REFERENCE_STEPS }));
     tables.set("confirm", build({ placement: "placed", samples: 2 * MS_REFERENCE_STEPS }));
@@ -545,8 +548,14 @@ function everyTwin(m: AtmosphereMedium): readonly TwinTable[] {
 }
 
 describe("the twin over N terms", () => {
+  // The three-term medium's tables, built once for the two tests that compare against them: a
+  // pure function of the medium, which neither test writes to.
+  let wholeTables: readonly TwinTable[] | undefined;
+  const wholeTwins = (): readonly TwinTable[] =>
+    (wholeTables ??= everyTwin(medium([GAS, HAZE, ABSORBER])));
+
   it("gives two identical half-density terms the tables of one", () => {
-    const whole = everyTwin(medium([GAS, HAZE, ABSORBER]));
+    const whole = wholeTwins();
     const halves = everyTwin(
       medium([GAS, scaledTerm(HAZE, 0.5, "haze a"), scaledTerm(HAZE, 0.5, "haze b"), ABSORBER]),
     );
@@ -559,7 +568,7 @@ describe("the twin over N terms", () => {
 
   it("takes more terms than the kernels' uniform holds: a term split in ten is the term", () => {
     const tenths = Array.from({ length: 10 }, (_, k) => scaledTerm(HAZE, 0.1, `haze ${k}`));
-    const whole = everyTwin(medium([GAS, HAZE, ABSORBER]));
+    const whole = wholeTwins();
     const split = everyTwin(medium([GAS, ...tenths, ABSORBER]));
     for (const [i, table] of whole.entries()) {
       expect(worstRelative(split[i]?.texels ?? new Float64Array(0), table.texels)).toBeLessThan(

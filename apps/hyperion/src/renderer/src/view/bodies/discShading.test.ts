@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { add, scale, vec3 } from "../../geometry/vec3";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
+import { memoised } from "../../test/memo";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { pixelSolidAngle, type ProjectionCamera, type Viewport } from "../camera/projection";
 import type { PlacedLight } from "../lighting/hostLights";
@@ -185,6 +186,23 @@ function referenceSamples(px: number): DiscSamples {
   return { interior: cells, limb: cells };
 }
 
+/** The one placement off the sub-pixel grid's centre that G5 and G5′ take, px. */
+const OFF_CENTRE: readonly [number, number] = [0.25, 0.75];
+
+/**
+ * The reference twin's pixels of a sphere `px` across at `phaseDeg`, placed {@link OFF_CENTRE}:
+ * made once for G5 and G5′, which both compare against the 3 px crescent's. It is a pure function
+ * of the size and the phase (the figure, the placement and the counts being fixed), and no test
+ * writes to it.
+ */
+const referenceTwinOf = memoised(
+  ([px, phaseDeg]: readonly [number, number]): ReadonlyMap<string, PixelValue> =>
+    drawnPixels(withSamples(recordAt(px, phaseDeg, SPHERE, OFF_CENTRE), referenceSamples(px))),
+  ([px, phaseDeg]) => `${String(px)} ${String(phaseDeg)}`,
+);
+const referenceTwin = (px: number, phaseDeg: number): ReadonlyMap<string, PixelValue> =>
+  referenceTwinOf([px, phaseDeg]);
+
 describe("the cells a disc takes by its size (T8.c)", () => {
   for (const [diameterPx, samples] of [
     [3.99, { interior: 8, limb: 8 }],
@@ -229,15 +247,12 @@ describe("each pixel of a small disc against the reference twin (T8.c, G5)", () 
   // One placement off the sub-pixel grid's centre; the disc drawn with the counts it is planned
   // with. 4.01 px stands for the ruling's 4 px, which a placement off the centre, a little farther
   // off, takes just under 4 px and back to 8 × 8.
-  const offset = [0.25, 0.75] as const;
+  const offset = OFF_CENTRE;
   for (const px of [3, 4.01, 6, 12, 24]) {
     for (const phaseDeg of [0, 90, 150]) {
       it(`keeps every pixel within 1.5% of the peak, the RMS within 0.3% and the coverage within 0.0025 at ${String(px)} px and ${String(phaseDeg)}°`, () => {
         const record = recordAt(px, phaseDeg, SPHERE, offset);
-        const errors = pixelErrors(
-          drawnPixels(record),
-          drawnPixels(withSamples(record, referenceSamples(px))),
-        );
+        const errors = pixelErrors(drawnPixels(record), referenceTwin(px, phaseDeg));
         expect(errors.worst, "the worst pixel").toBeLessThan(0.015);
         expect(errors.rms, "the RMS").toBeLessThan(0.003);
         expect(errors.coverage, "the coverage").toBeLessThan(0.0025);
@@ -262,7 +277,7 @@ describe("each pixel of a small disc against the reference twin (T8.c, G5)", () 
 
 describe("the reference twin against brute force (T8.c, G5′)", () => {
   it("draws a 4 px crescent at 150° within 0.3% of its peak of 256 × 256 point samples in each pixel", () => {
-    const record = withSamples(recordAt(4, 150, SPHERE, [0.25, 0.75]), referenceSamples(4));
+    const record = withSamples(recordAt(4, 150, SPHERE, OFF_CENTRE), referenceSamples(4));
     const brute = pixelMap(pointSampleDisc(record, CAMERA, VIEWPORT, 256));
     expect(pixelErrors(drawnPixels(record), brute).worst).toBeLessThan(0.003);
   });
@@ -270,9 +285,9 @@ describe("the reference twin against brute force (T8.c, G5′)", () => {
   // At 3 px the brute force takes 512 × 512 samples a pixel: 256 × 256 is itself 0.20% of the
   // peak from 1,024 × 1,024 on the 0.2 px crescent, 512 × 512 0.017%. It takes several seconds.
   it("draws a 3 px crescent at 150° within 0.3% of its peak of 512 × 512 point samples in each pixel", () => {
-    const record = withSamples(recordAt(3, 150, SPHERE, [0.25, 0.75]), referenceSamples(3));
+    const record = withSamples(recordAt(3, 150, SPHERE, OFF_CENTRE), referenceSamples(3));
     const brute = pixelMap(pointSampleDisc(record, CAMERA, VIEWPORT, 512));
-    expect(pixelErrors(drawnPixels(record), brute).worst).toBeLessThan(0.003);
+    expect(pixelErrors(referenceTwin(3, 150), brute).worst).toBeLessThan(0.003);
   }, 60_000);
 });
 

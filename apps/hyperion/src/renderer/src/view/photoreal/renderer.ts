@@ -123,6 +123,21 @@ const GLARE_CAPACITY = 8;
 /** The smallest sprite buffer made, bytes; it grows by doubling. */
 const MIN_SPRITE_BYTES = 4_096;
 
+let blueNoiseHalves: Uint16Array | null = null;
+
+/**
+ * The blue-noise tile's texels as the texture takes them, in half precision.
+ *
+ * @remarks
+ * The tile is a fixed pattern, the same for every renderer and every device, and takes about
+ * 0.2 s to make, so it is made once and its halves kept, as `bloom.ts` keeps its levels'
+ * responses. The texture write copies it; nothing writes into it.
+ */
+function blueNoiseTexels(): Uint16Array {
+  blueNoiseHalves ??= toHalfArray(blueNoiseTile());
+  return blueNoiseHalves;
+}
+
 /** The renderer's GPU objects on one device. */
 interface Resources {
   readonly target: RenderTarget;
@@ -266,7 +281,7 @@ export class PhotorealRenderer {
       blueNoise,
       { x: 0, y: 0 },
       { width: BLUE_NOISE_SIDE, height: BLUE_NOISE_SIDE },
-      toHalfArray(blueNoiseTile()),
+      blueNoiseTexels(),
     );
     this.#resources = {
       target: createSceneTarget(engine, this.#name, size),

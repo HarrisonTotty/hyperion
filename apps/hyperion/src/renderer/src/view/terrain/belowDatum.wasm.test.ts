@@ -12,11 +12,12 @@ import {
 import wasmDataUrl from "../../generated/surface/hyperion_surface_bg.wasm?inline";
 import type { Quaternion } from "../camera/pose";
 import { lookAlong } from "../camera/quaternion";
+import { memoised } from "../../test/memo";
 import { WGS84_FIGURE } from "../../test/terrainFixtures";
 import { DrawSetResolver, PatchCache } from "./cache";
 import { vertexDir } from "./cube";
 import type { GroundContact } from "./grounded";
-import type { PatchKey } from "./patchKey";
+import { type PatchKey, patchKeyString } from "./patchKey";
 import { planetGeometry, type PlanetGeometry, surfacePoint } from "./planet";
 import { type Selection, selectPatches } from "./select";
 import { slotLayout } from "./slotLayout";
@@ -28,7 +29,13 @@ function wasmBytes(): Uint8Array {
 }
 
 /** A real bake's height range and the height of its centre vertex, metres. */
-function bake(key: PatchKey): { range: readonly [number, number]; centreM: number } {
+interface Baked {
+  readonly range: readonly [number, number];
+  readonly centreM: number;
+}
+
+/** A real bake of `key`, ridges off. */
+function bake(key: PatchKey): Baked {
   const patch = bakePatch(
     key.face,
     key.level,
@@ -56,6 +63,9 @@ function bake(key: PatchKey): { range: readonly [number, number]; centreM: numbe
 const SITE: PatchKey = { face: 3, level: 19, i: 330_180, j: 300_910 };
 
 describe("selection with the camera below the datum", () => {
+  // Each key's bake, made once for every hover that demands it: a bake is a pure function of its
+  // key (the module's other arguments are fixed here), and its range is read, never written.
+  const bakeOnce = memoised(bake, patchKeyString);
   let planet: PlanetGeometry;
   let groundM: number;
   let ground: Vec3;
@@ -65,7 +75,7 @@ describe("selection with the camera below the datum", () => {
   beforeAll(() => {
     initSync({ module: wasmBytes() });
     planet = planetGeometry(WGS84_FIGURE, levelTable(Ridges.Off));
-    groundM = bake(SITE).centreM;
+    groundM = bakeOnce(SITE).centreM;
     ground = vec3(...surfacePoint(WGS84_FIGURE, vertexDir(SITE, 32, 32), groundM));
     up = normalise(ground);
     east = normalise(vec3(-up.y, up.x, 0));
@@ -114,7 +124,7 @@ describe("selection with the camera below the datum", () => {
           key: request.key,
           generation: n,
           originM: vec3(0, 0, 0),
-          heightRangeM: bake(request.key).range,
+          heightRangeM: bakeOnce(request.key).range,
           boundingRadiusM: 1,
         });
       }

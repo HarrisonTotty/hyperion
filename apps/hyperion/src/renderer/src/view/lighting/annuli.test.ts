@@ -11,7 +11,12 @@ import {
   type LimbDarkenedDisc,
   type Occluder,
 } from "./annuli";
-import { denseAnnulusVisibleFraction, eclipseIntegralVisibleFraction } from "./oracle";
+import { memoised } from "../../test/memo";
+import {
+  denseAnnulusVisibleFraction,
+  eclipseIntegralOf,
+  eclipseIntegralVisibleFraction,
+} from "./oracle";
 
 /** A power-2 law's c and α. */
 interface Power2 {
@@ -45,14 +50,26 @@ function grid(): Array<readonly [number, number]> {
   return points;
 }
 
+/**
+ * The exact integral at each point of {@link grid}, in its order. It depends on the law alone,
+ * not on K, so each law's grid is integrated once for every test that measures a term against it.
+ */
+const exactOverGrid = memoised(
+  (law: Power2): ReadonlyArray<number> => {
+    const exact = eclipseIntegralOf(law.c, law.alpha);
+    return grid().map(([ratio, separation]) => exact(ratio, separation));
+  },
+  (law) => `${String(law.c)} ${String(law.alpha)}`,
+);
+
 /** The term's worst absolute error over the grid against the exact integral. */
 function worstError(law: Power2, k: number): number {
   const annuli = annulusEdges(law.c, law.alpha, k);
+  const exact = exactOverGrid(law);
   let worst = 0;
-  for (const [ratio, separation] of grid()) {
+  for (const [index, [ratio, separation]] of grid().entries()) {
     const error = Math.abs(
-      annulusVisibleFraction(annuli, ratio, separation) -
-        eclipseIntegralVisibleFraction(law.c, law.alpha, ratio, separation),
+      annulusVisibleFraction(annuli, ratio, separation) - (exact[index] ?? Number.NaN),
     );
     worst = Math.max(worst, error);
   }
@@ -157,13 +174,17 @@ describe("the eclipse term against the exact integral", () => {
   });
 
   it("is met by the 400-annulus sum to 10⁻⁵", () => {
+    const exact = exactOverGrid(SUN_V);
     let worst = 0;
-    for (const [ratio, separation] of grid().filter((_, index) => index % 7 === 0)) {
+    for (const [index, [ratio, separation]] of grid().entries()) {
+      if (index % 7 !== 0) {
+        continue;
+      }
       worst = Math.max(
         worst,
         Math.abs(
           denseAnnulusVisibleFraction(SUN_V.c, SUN_V.alpha, ratio, separation) -
-            eclipseIntegralVisibleFraction(SUN_V.c, SUN_V.alpha, ratio, separation),
+            (exact[index] ?? Number.NaN),
         ),
       );
     }

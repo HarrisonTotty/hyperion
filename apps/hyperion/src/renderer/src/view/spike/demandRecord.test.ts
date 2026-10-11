@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import { memoised } from "../../test/memo";
 import { goldenLevelTable } from "../../test/terrainFixtures";
-import { TERRAIN_SETTINGS } from "../quality/qualitySetting";
+import { type QualitySetting, TERRAIN_SETTINGS } from "../quality/qualitySetting";
 import { levelHeightRangeM, planetGeometry } from "../terrain/planet";
 import { SELECTION_MARGIN } from "../terrain/selectionTolerance";
 import { TEST_PLANET_FIGURE } from "./testPlanetFigure";
@@ -9,6 +10,7 @@ import ridgesOffRanges from "./fixtures/descentRanges.txt?raw";
 import {
   DEMAND_RECORD_SCHEMA,
   DEMAND_RECORD_VERSION,
+  type DemandCell,
   type DemandRecordFile,
   demandSummary,
   fixtureRangeOf,
@@ -88,6 +90,35 @@ const WITHIN_TWO: ReadonlyArray<string> = [
 
 const PROFILE = recordProfile();
 
+/**
+ * The cell of a setting's window as the pins run it: calibrated, ridges off, over the fixture at
+ * 64 Hz. A cell is a pure function of the setting and the window (its clock reads 0, it has no
+ * deadline, and both name constants of this file), so the tests that read one window's cell
+ * share one run of it.
+ */
+const windowCell = memoised(
+  ([setting, segment]: readonly [QualitySetting, string]): DemandCell => {
+    const settingView = SETTING_VIEWS.find((s) => s.setting === setting);
+    const window = testWindows(PROFILE).find((w) => w.segment === segment);
+    if (settingView === undefined || window === undefined) {
+      throw new Error(`no window ${setting}/${segment}`);
+    }
+    return runCell({
+      rule: "calibrated",
+      ridges: "off",
+      settingView,
+      source: SOURCE,
+      rateHz: 64,
+      fromS: window.fromS,
+      toS: window.toS,
+      measureFromS: window.measureFromS,
+      nowMs: () => 0,
+      deadlineMs: Infinity,
+    });
+  },
+  ([setting, segment]) => `${setting}/${segment}`,
+);
+
 describe("the ranges fixture", () => {
   it("holds the module's ridges-off level table, as the golden pins it", () => {
     expect(FIXTURE.levelTable).toEqual(goldenLevelTable("off"));
@@ -99,18 +130,7 @@ describe("the descent's fixed-step windows", () => {
   for (const settingView of SETTING_VIEWS) {
     for (const window of testWindows(PROFILE)) {
       it(`pins ${settingView.setting}'s ${window.segment} selection sequence`, () => {
-        const cell = runCell({
-          rule: "calibrated",
-          ridges: "off",
-          settingView,
-          source: SOURCE,
-          rateHz: 64,
-          fromS: window.fromS,
-          toS: window.toS,
-          measureFromS: window.measureFromS,
-          nowMs: () => 0,
-          deadlineMs: Infinity,
-        });
+        const cell = windowCell([settingView.setting, window.segment]);
         expect(cell.hash).toBe(PINNED[settingView.setting]?.[window.segment]);
         expect(cell.segments[0]?.segment).toBe(window.segment);
       });
@@ -122,24 +142,10 @@ describe("the measured demand", () => {
   for (const entry of WITHIN_TWO) {
     const [setting, segment] = entry.split("/");
     it(`lies within a factor of two of D in ${setting}'s ${segment}`, () => {
-      const settingView = SETTING_VIEWS.find((s) => s.setting === setting);
-      const window = testWindows(PROFILE).find((w) => w.segment === segment);
-      if (settingView === undefined || window === undefined) {
+      if ((setting !== "high" && setting !== "low") || segment === undefined) {
         throw new Error(`no window ${entry}`);
       }
-      const cell = runCell({
-        rule: "calibrated",
-        ridges: "off",
-        settingView,
-        source: SOURCE,
-        rateHz: 64,
-        fromS: window.fromS,
-        toS: window.toS,
-        measureFromS: window.measureFromS,
-        nowMs: () => 0,
-        deadlineMs: Infinity,
-      });
-      const [figures] = cell.segments;
+      const [figures] = windowCell([setting, segment]).segments;
       const ratio = (figures?.demandPerS ?? NaN) / (figures?.predictedPerS ?? NaN);
       expect(ratio).toBeGreaterThanOrEqual(0.5);
       expect(ratio).toBeLessThanOrEqual(2);
@@ -196,10 +202,11 @@ describe("the demand record", () => {
         nowMs: () => 0,
         deadlineMs: Infinity,
       });
-    expect(cellOf("calibrated", "on").note).toBe(RIDGED_CALIBRATED_NOTE);
+    const ridgedCalibrated = cellOf("calibrated", "on");
+    expect(ridgedCalibrated.note).toBe(RIDGED_CALIBRATED_NOTE);
     expect(cellOf("calibrated", "off").note).toBeNull();
     expect(cellOf("hard", "on").note).toBeNull();
-    expect(demandSummary([cellOf("calibrated", "on")], "2026-10-03T00:00:00Z")).toContain(
+    expect(demandSummary([ridgedCalibrated], "2026-10-03T00:00:00Z")).toContain(
       RIDGED_CALIBRATED_NOTE,
     );
   });
@@ -225,29 +232,39 @@ function fileOf(startedAt: string, cells: RecordedCell[]): DemandRecordFile {
 
 describe("the record's file (version 4)", () => {
   const [high] = SETTING_VIEWS;
+  /**
+   * A short orbit-coast cell of a rule, under a budget of patches, as the script records it: a
+   * pure function of the two (its clock reads 0 and it has no deadline), so this block's tests
+   * share one run of each of the three they read.
+   */
+  const recorded = memoised(
+    ([rule, maxPatches]: readonly ["hard" | "calibrated", number]): RecordedCell => {
+      if (high === undefined) {
+        throw new Error("no high setting");
+      }
+      const planet = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
+      const cell = runCell({
+        rule,
+        ridges: "off",
+        settingView: { ...high, maxPatches },
+        source: {
+          ...SOURCE,
+          rangeOf: (key) => levelHeightRangeM(planet, key.level),
+        },
+        rateHz: 16,
+        fromS: 10,
+        toS: 12,
+        measureFromS: 11,
+        nowMs: () => 0,
+        deadlineMs: Infinity,
+      });
+      return { ...cell, capHours: 0.5, wallCapHours: null, wallS: 1, loadAverage: [1, 2, 3] };
+    },
+    ([rule, maxPatches]) => `${rule} ${String(maxPatches)}`,
+  );
   /** A short orbit-coast cell of `rule`, under a budget of `maxPatches`, as the script records it. */
-  const cellOf = (rule: "hard" | "calibrated", maxPatches: number): RecordedCell => {
-    if (high === undefined) {
-      throw new Error("no high setting");
-    }
-    const planet = planetGeometry(TEST_PLANET_FIGURE, goldenLevelTable("off"));
-    const cell = runCell({
-      rule,
-      ridges: "off",
-      settingView: { ...high, maxPatches },
-      source: {
-        ...SOURCE,
-        rangeOf: (key) => levelHeightRangeM(planet, key.level),
-      },
-      rateHz: 16,
-      fromS: 10,
-      toS: 12,
-      measureFromS: 11,
-      nowMs: () => 0,
-      deadlineMs: Infinity,
-    });
-    return { ...cell, capHours: 0.5, wallCapHours: null, wallS: 1, loadAverage: [1, 2, 3] };
-  };
+  const cellOf = (rule: "hard" | "calibrated", maxPatches: number): RecordedCell =>
+    recorded([rule, maxPatches]);
 
   /** Two records, the hard cell's started later, merged in that order. */
   const merged = (): DemandRecordFile =>
@@ -415,23 +432,7 @@ describe("the record's file (version 4)", () => {
 
 describe("the forced region's bakes", () => {
   it("are part of the demand in high's approach, where the craft descends", () => {
-    const [high] = SETTING_VIEWS;
-    const window = testWindows(PROFILE).find((w) => w.segment === "approach and flare");
-    if (high === undefined || window === undefined) {
-      throw new Error("no approach window");
-    }
-    const [figures] = runCell({
-      rule: "calibrated",
-      ridges: "off",
-      settingView: high,
-      source: SOURCE,
-      rateHz: 64,
-      fromS: window.fromS,
-      toS: window.toS,
-      measureFromS: window.measureFromS,
-      nowMs: () => 0,
-      deadlineMs: Infinity,
-    }).segments;
+    const [figures] = windowCell(["high", "approach and flare"]).segments;
     expect(figures?.forcedDemandPerS).toBeGreaterThan(0);
     expect(figures?.forcedDemandPerS).toBeLessThanOrEqual(figures?.demandPerS ?? 0);
   });

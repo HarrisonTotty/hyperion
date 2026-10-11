@@ -519,10 +519,33 @@ export function viewRay(
   viewport: Viewport,
 ): Vec3 {
   const s = 1 / Math.tan(camera.fovXRad / 2);
-  const aspect = viewport.widthPx / viewport.heightPx;
+  return rayThrough(xPx, yPx, viewport, s, s * (viewport.widthPx / viewport.heightPx));
+}
+
+/**
+ * {@link viewRay} for one camera and viewport, its projection's scales taken once: the rasterisers
+ * cast millions of rays through one view, and the tangent is the same for each.
+ */
+function viewRays(
+  camera: ProjectionCamera,
+  viewport: Viewport,
+): (xPx: number, yPx: number) => Vec3 {
+  const s = 1 / Math.tan(camera.fovXRad / 2);
+  const sAspect = s * (viewport.widthPx / viewport.heightPx);
+  return (xPx, yPx) => rayThrough(xPx, yPx, viewport, s, sAspect);
+}
+
+/** The ray through a point of the view, px, from the projection's scales s and s × aspect. */
+function rayThrough(
+  xPx: number,
+  yPx: number,
+  viewport: Viewport,
+  s: number,
+  sAspect: number,
+): Vec3 {
   const ndcX = (xPx / viewport.widthPx) * 2 - 1;
   const ndcY = 1 - (yPx / viewport.heightPx) * 2;
-  return normalise(vec3(ndcX / s, ndcY / (s * aspect), -1));
+  return normalise(vec3(ndcX / s, ndcY / sAspect, -1));
 }
 
 /**
@@ -798,10 +821,10 @@ export function rasteriseDisc(
   const body = viewBodyOf(record, camera, classMap);
   const pixels: DiscPixel[] = [];
   const { rect } = record;
-  const angleAt = (x: number, y: number): number =>
-    limbAngle(body, viewRay(x, y, camera, viewport));
+  const rayAt = viewRays(camera, viewport);
+  const angleAt = (x: number, y: number): number => limbAngle(body, rayAt(x, y));
   const shadeAt = (x: number, y: number): Shaded | null => {
-    const ray = viewRay(x, y, camera, viewport);
+    const ray = rayAt(x, y);
     const q = hitSpheroid(body, ray);
     return q === null ? null : shade(body, record, q, ray);
   };
@@ -877,12 +900,34 @@ export function rasteriseDisc(
       shaded,
     };
   };
-  for (let y = Math.floor(rect.topPx); y < Math.ceil(rect.bottomPx); y += 1) {
-    for (let x = Math.floor(rect.leftPx); x < Math.ceil(rect.rightPx); x += 1) {
-      if (dot(body.centre, viewRay(x + 0.5, y + 0.5, camera, viewport)) <= 0) {
+  // Each pixel corner's limb angle, taken once: four pixels share a corner.
+  const left = Math.floor(rect.leftPx);
+  const top = Math.floor(rect.topPx);
+  const cornersAcross = Math.ceil(rect.rightPx) - left + 1;
+  const cornersDown = Math.ceil(rect.bottomPx) - top + 1;
+  const cornerAngles = new Float64Array(Math.max(cornersAcross * cornersDown, 0));
+  const cornerKnown = new Uint8Array(cornerAngles.length);
+  const cornerAt = (x: number, y: number): number => {
+    const index = (y - top) * cornersAcross + (x - left);
+    if (cornerKnown[index] === 1) {
+      return cornerAngles[index] ?? Number.NaN;
+    }
+    const angle = angleAt(x, y);
+    cornerAngles[index] = angle;
+    cornerKnown[index] = 1;
+    return angle;
+  };
+  for (let y = top; y < Math.ceil(rect.bottomPx); y += 1) {
+    for (let x = left; x < Math.ceil(rect.rightPx); x += 1) {
+      if (dot(body.centre, rayAt(x + 0.5, y + 0.5)) <= 0) {
         continue;
       }
-      const corners = [angleAt(x, y), angleAt(x + 1, y), angleAt(x, y + 1), angleAt(x + 1, y + 1)];
+      const corners = [
+        cornerAt(x, y),
+        cornerAt(x + 1, y),
+        cornerAt(x, y + 1),
+        cornerAt(x + 1, y + 1),
+      ];
       const [c00 = 0, c10 = 0, c01 = 0, c11 = 0] = corners;
       // The angle's gradient across the pixel, rad per px, from its corners.
       const gradient = Math.hypot((c10 + c11 - c00 - c01) / 2, (c01 + c11 - c00 - c10) / 2);
@@ -1014,13 +1059,14 @@ export function pointSampleDisc(
   const share = 1 / (m * m);
   const pixels: SampledPixel[] = [];
   const { rect } = record;
+  const rayAt = viewRays(camera, viewport);
   for (let y = Math.floor(rect.topPx); y < Math.ceil(rect.bottomPx); y += 1) {
     for (let x = Math.floor(rect.leftPx); x < Math.ceil(rect.rightPx); x += 1) {
       const sum: [number, number, number] = [0, 0, 0];
       let hits = 0;
       for (let i = 0; i < m; i += 1) {
         for (let j = 0; j < m; j += 1) {
-          const ray = viewRay(x + (i + 0.5) / m, y + (j + 0.5) / m, camera, viewport);
+          const ray = rayAt(x + (i + 0.5) / m, y + (j + 0.5) / m);
           const q = hitSpheroid(body, ray);
           if (q === null) {
             continue;

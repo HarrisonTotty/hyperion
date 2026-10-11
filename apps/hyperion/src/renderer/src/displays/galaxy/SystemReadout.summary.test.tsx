@@ -1,13 +1,26 @@
 /**
  * The `GALAXY` display's readout of the selected system's stars, from `system_summary` at the
- * chart's time (plan 06, P06.T36), and its star list (plan 11, P11.T14), through `App`.
+ * chart's time (plan 06, P06.T36), and its star list (plan 11, P11.T14), through `App`; and how it
+ * reads each kind of star, through `SystemReadout` itself.
  */
-import { type SystemSummaryDto, universeTimeFromYears } from "@hyperion/protocol";
+import {
+  decodeServerMessage,
+  type RequestKind,
+  type ResponseBody,
+  type ResponseFor,
+  type ServerMessage,
+  type SystemSummaryDto,
+  universeTimeFromYears,
+} from "@hyperion/protocol";
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "../../App";
+import { localFrameAt } from "../../geometry/frame";
+import { vec3 } from "../../geometry/vec3";
+import { toChartResult } from "../../lib/galaxy/wire";
+import { toSystemModel } from "../../lib/system/wire";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   anOpenedUniverse,
@@ -28,9 +41,23 @@ import {
   aTripleSummary,
   aWhiteDwarf,
 } from "../../test/systemFixtures";
+import { DEFAULT_DRIVE_RANGE_LY, distanceDecimalsFor } from "./chartModel";
+import { SystemReadout } from "./SystemReadout";
 
 /** The chart's time, at which the stars are asked about. */
 const CHART_TIME_YR = 12.5;
+
+/** The chart's answer: two systems, 10 and 20 ly from the centre. */
+function aChartAnswer(): ResponseFor<"systems_in_range"> {
+  return aSystemsInRange({
+    centreLy: [26_000, 0, 0],
+    timeYr: CHART_TIME_YR,
+    systems: [
+      { relLy: [0, 0, 10], layer: "c" },
+      { relLy: [0, 0, 20], layer: "c" },
+    ],
+  });
+}
 
 async function server(play: () => void): Promise<void> {
   await act(async () => {
@@ -63,18 +90,69 @@ async function renderCharted() {
   await user.type(screen.getByRole("textbox", { name: "X" }), "26000");
   await user.click(screen.getByRole("button", { name: "C CENTRE CHART" }));
   await server(() => {
-    socket.serverAnswers("systems_in_range", () =>
-      aSystemsInRange({
-        centreLy: [26_000, 0, 0],
-        timeYr: CHART_TIME_YR,
-        systems: [
-          { relLy: [0, 0, 10], layer: "c" },
-          { relLy: [0, 0, 20], layer: "c" },
-        ],
-      }),
-    );
+    socket.serverAnswers("systems_in_range", aChartAnswer);
   });
   return { user, socket };
+}
+
+function isResponseOf<K extends RequestKind>(body: ResponseBody, kind: K): body is ResponseFor<K> {
+  return body.kind === kind;
+}
+
+/** `body` as the client reads it: sent in a response frame and decoded, as the console's are. */
+function throughTheWire<K extends RequestKind>(body: ResponseFor<K>, kind: K): ResponseFor<K> {
+  const frame: ServerMessage = { type: "response", id: 1, body };
+  const message = decodeServerMessage(JSON.stringify(frame));
+  if (message.type !== "response" || !isResponseOf(message.body, kind)) {
+    throw new Error(`the frame is not a ${kind} response`);
+  }
+  return message.body;
+}
+
+/**
+ * Renders the readout as the console shows it once `summary` answers for the chart's first system
+ * at the time asked, without the console: `SystemReadout` given what `SystemsPanel` gives it, from
+ * the chart's answer and `summary`, each sent and decoded as a frame and read by `toChartResult`
+ * and `toSystemModel`.
+ *
+ * @remarks
+ * For the tests of how the readout reads each kind of star. That the console asks, and hands the
+ * answer on to the readout, is the business of the tests through `App`, the living star's
+ * ({@link selectAnswered}) and the request's, refusal's, stale and superseded answers'.
+ */
+function renderAnswered(summary: SystemSummaryDto): void {
+  const chart = toChartResult(throughTheWire(aChartAnswer(), "systems_in_range"));
+  const system = chart.systems.find(({ designation }) => designation === "H7K 4C0RFZ C-1");
+  if (system === undefined) {
+    throw new Error("the chart has no H7K 4C0RFZ C-1");
+  }
+  const answer = toSystemModel(
+    throughTheWire(
+      aSummaryResponse({
+        ...summary,
+        universe: aUniverse().id,
+        system: system.id,
+        time: universeTimeFromYears(chart.timeYr),
+      }),
+      "system_summary",
+    ),
+    system.designation,
+  );
+  if (answer.kind !== "ok") {
+    throw new Error(`the answer cannot be read: ${answer.fault}`);
+  }
+  const [x, y, z] = chart.centreLy;
+  render(
+    <SystemReadout
+      system={system}
+      frame={localFrameAt(vec3(x, y, z))}
+      driveRangeLy={DEFAULT_DRIVE_RANGE_LY}
+      timeYr={chart.timeYr}
+      distanceDecimals={distanceDecimalsFor(chart.radiusLy)}
+      stars={answer.model}
+      starsStale={false}
+    />,
+  );
 }
 
 /** Selects the chart's first system and answers its stars with `summary`, at the time asked. */
@@ -170,8 +248,8 @@ describe("the GALAXY readout's stars", () => {
     expect(within(readout()).getByRole("heading", { name: "STAR A" })).toBeInTheDocument();
   });
 
-  it("reads what this generator version does not model as the em dash, never a zero", async () => {
-    await selectAnswered(aSingleStarSummary(aSunlikeStar()));
+  it("reads what this generator version does not model as the em dash, never a zero", () => {
+    renderAnswered(aSingleStarSummary(aSunlikeStar()));
 
     for (const label of ["ROTATION", "VARIABILITY", "NEBULA RADIUS", "EVENTS"]) {
       expect(valueOf(label)).toBe("—");
@@ -179,9 +257,9 @@ describe("the GALAXY readout's stars", () => {
     expect(valuesOf("DIES IN")).toEqual([]);
   });
 
-  it("reads a death inside the clock window as DIES IN, from the answer's time", async () => {
+  it("reads a death inside the clock window as DIES IN, from the answer's time", () => {
     const at = universeTimeFromYears(CHART_TIME_YR);
-    await selectAnswered(
+    renderAnswered(
       aSingleStarSummary(
         aSunlikeStar({ death_time: { seconds: at.seconds + 312 * 31_557_600, nanos: at.nanos } }),
       ),
@@ -190,8 +268,8 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("DIES IN")).toBe("312 yr");
   });
 
-  it("reads a white dwarf's remnant and cooling age", async () => {
-    await selectAnswered(aSingleStarSummary(aWhiteDwarf()));
+  it("reads a white dwarf's remnant and cooling age", () => {
+    renderAnswered(aSingleStarSummary(aWhiteDwarf()));
 
     expect(valueOf("KIND")).toBe("WHITE DWARF");
     expect(valueOf("REMNANT")).toBe("WHITE DWARF");
@@ -200,16 +278,16 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("KICK")).toBe("—");
   });
 
-  it("reads a neutron star's radius in km and its pulsar as not modelled", async () => {
-    await selectAnswered(aSingleStarSummary(aNeutronStar()));
+  it("reads a neutron star's radius in km and its pulsar as not modelled", () => {
+    renderAnswered(aSingleStarSummary(aNeutronStar()));
 
     expect(valueOf("KIND")).toBe("NEUTRON STAR");
     expect(valuesOf("RADIUS")[1]).toBe("12.2 km");
     expect(valueOf("PULSAR PERIOD")).toBe("—");
   });
 
-  it("reads a black hole's light as missing, with the reason", async () => {
-    await selectAnswered(aSingleStarSummary(aBlackHole()));
+  it("reads a black hole's light as missing, with the reason", () => {
+    renderAnswered(aSingleStarSummary(aBlackHole()));
 
     expect(valueOf("KIND")).toBe("BLACK HOLE");
     expect(valueOf("LUM")).toBe("—NO LIGHT");
@@ -217,8 +295,8 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("SPIN")).toBe("—");
   });
 
-  it("reads a star that left no remnant with no light or size, and its mass as the em dash", async () => {
-    await selectAnswered(
+  it("reads a star that left no remnant with no light or size, and its mass as the em dash", () => {
+    renderAnswered(
       aSingleStarSummary(
         aBlackHole({
           kind: "no_remnant",
@@ -242,8 +320,8 @@ describe("the GALAXY readout's stars", () => {
     expect(within(stars).getAllByRole("row")[1]?.textContent).toBe("ANONE—NO REMNANT");
   });
 
-  it("reads NOT YET FORMED for a system not yet born", async () => {
-    await selectAnswered(aNotYetBornSummary());
+  it("reads NOT YET FORMED for a system not yet born", () => {
+    renderAnswered(aNotYetBornSummary());
 
     expect(valueOf("STARS")).toBe("NOT YET FORMED");
     expect(within(readout()).queryByRole("heading", { name: "STAR A" })).not.toBeInTheDocument();
@@ -347,8 +425,8 @@ describe("the GALAXY readout's stars", () => {
     expect(valueOf("DESIG")).toBe("H7K 4C0RFZ C-2");
   });
 
-  it("lists a single star alone, with no orbits", async () => {
-    await selectAnswered(aSingleStarSummary(aSunlikeStar()));
+  it("lists a single star alone, with no orbits", () => {
+    renderAnswered(aSingleStarSummary(aSunlikeStar()));
 
     const stars = within(readout()).getByRole("table", { name: "STARS" });
     expect(within(stars).getAllByRole("row")).toHaveLength(2);
@@ -365,8 +443,8 @@ describe("the GALAXY readout's stars", () => {
     expect(within(systemsPanel()).getByText(/^1-\d+ of \d+$/)).toBeInTheDocument();
   });
 
-  it("lists every star of a triple and each orbit that holds them", async () => {
-    await selectAnswered(aTripleSummary());
+  it("lists every star of a triple and each orbit that holds them", () => {
+    renderAnswered(aTripleSummary());
 
     const stars = within(readout()).getByRole("table", { name: "STARS" });
     expect(
@@ -382,8 +460,8 @@ describe("the GALAXY readout's stars", () => {
     ).toEqual(["AB–C", "A–B"]);
   });
 
-  it("reads the stars of the pinned binary with its white dwarf first", async () => {
-    await selectAnswered(aSystemSummary());
+  it("reads the stars of the pinned binary with its white dwarf first", () => {
+    renderAnswered(aSystemSummary());
 
     const stars = within(readout()).getByRole("table", { name: "STARS" });
     const rows = within(stars).getAllByRole("row").slice(1);

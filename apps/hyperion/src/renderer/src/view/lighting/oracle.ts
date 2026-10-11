@@ -92,6 +92,11 @@ export function sphereIrradianceBruteForce(
   const centre = [Math.sin(phiRad), 0, Math.cos(phiRad)] as const;
   const across1 = [Math.cos(phiRad), 0, -Math.sin(phiRad)] as const;
   const dPsi = (2 * Math.PI) / azimuthSteps;
+  // cos ψ at each azimuth's midpoint, the same at every θ.
+  const cosPsi = new Float64Array(azimuthSteps);
+  for (let k = 0; k < azimuthSteps; k += 1) {
+    cosPsi[k] = Math.cos((k + 0.5) * dPsi);
+  }
   let lit = 0;
   let faceOn = 0;
   for (let i = 0; i < radialNodes; i += 1) {
@@ -100,13 +105,12 @@ export function sphereIrradianceBruteForce(
     const intensity = profile(Math.sqrt(1 - ratio * ratio));
     const weight = (w[i] ?? 0) * (rho / 2) * Math.sin(theta) * intensity;
     faceOn += weight * 2 * Math.PI * Math.cos(theta);
+    const c = Math.cos(theta);
+    const s = Math.sin(theta);
     let ring = 0;
     for (let k = 0; k < azimuthSteps; k += 1) {
-      const psi = (k + 0.5) * dPsi;
-      const c = Math.cos(theta);
-      const s = Math.sin(theta);
       // ω = cos θ ĉ + sin θ (cos ψ e₁ + sin ψ e₂), e₂ = ŷ; its z component is n · ω.
-      const nz = c * centre[2] + s * Math.cos(psi) * across1[2];
+      const nz = c * centre[2] + s * (cosPsi[k] ?? 0) * across1[2];
       if (nz > sinHorizon) {
         ring += nz;
       }
@@ -176,15 +180,37 @@ export function eclipseIntegralVisibleFraction(
   ratio: number,
   separation: number,
 ): number {
-  let integral = 0;
+  return eclipseIntegralOf(c, alpha)(ratio, separation);
+}
+
+/**
+ * {@link eclipseIntegralVisibleFraction} for one power-2 law, as a function of the occulter's
+ * radius and separation (stellar radii), for a grid of occulters over that law.
+ *
+ * @remarks
+ * The law's 8,000 cut radii √(1 − t^(2 ÷ α)) depend on α alone, so they are tabulated once here
+ * rather than at every occulter. Each value is the same midpoint sum, term for term and in the
+ * same order, so it is bit for bit {@link eclipseIntegralVisibleFraction}'s.
+ */
+export function eclipseIntegralOf(
+  c: number,
+  alpha: number,
+): (ratio: number, separation: number) => number {
+  const radii = new Float64Array(ECLIPSE_INTEGRAL_STEPS);
   for (let i = 0; i < ECLIPSE_INTEGRAL_STEPS; i += 1) {
     const t = (i + 0.5) / ECLIPSE_INTEGRAL_STEPS;
-    integral += circleOverlapArea(Math.sqrt(Math.max(0, 1 - t ** (2 / alpha))), ratio, separation);
+    radii[i] = Math.sqrt(Math.max(0, 1 - t ** (2 / alpha)));
   }
-  integral /= ECLIPSE_INTEGRAL_STEPS;
-  const hidden = (1 - c) * circleOverlapArea(1, ratio, separation) + c * integral;
   const total = Math.PI * (1 - c + (2 * c) / (alpha + 2));
-  return Math.max(0, 1 - hidden / total);
+  return (ratio, separation) => {
+    let integral = 0;
+    for (const radius of radii) {
+      integral += circleOverlapArea(radius, ratio, separation);
+    }
+    integral /= ECLIPSE_INTEGRAL_STEPS;
+    const hidden = (1 - c) * circleOverlapArea(1, ratio, separation) + c * integral;
+    return Math.max(0, 1 - hidden / total);
+  };
 }
 
 /** A power-2 law I(μ) ÷ I(1) = 1 − c (1 − μ^α) as a {@link LimbProfile}. */
@@ -262,15 +288,22 @@ export function discEclipseBruteForce(
   const dTheta = (theta1 - theta0) / side;
   const dPhi = (2 * halfWidth) / side;
   const deficits = views.map(() => 0);
+  // cos φ and sin φ at each azimuth's midpoint, the same at every θ.
+  const cosPhi = new Float64Array(side);
+  const sinPhi = new Float64Array(side);
+  for (let j = 0; j < side; j += 1) {
+    const phi = phi0 + (j + 0.5) * dPhi;
+    cosPhi[j] = Math.cos(phi);
+    sinPhi[j] = Math.sin(phi);
+  }
   for (let i = 0; i < side; i += 1) {
     const theta = theta0 + (i + 0.5) * dTheta;
     const mu0 = Math.cos(theta);
     const sinTheta = Math.sin(theta);
     const area = radius * radius * sinTheta * dTheta * dPhi;
     for (let j = 0; j < side; j += 1) {
-      const phi = phi0 + (j + 0.5) * dPhi;
-      const u = sinTheta * Math.cos(phi);
-      const v = sinTheta * Math.sin(phi);
+      const u = sinTheta * (cosPhi[j] ?? 0);
+      const v = sinTheta * (sinPhi[j] ?? 0);
       const normal = vec3(
         u * e1.x + v * e2.x + mu0 * s.x,
         u * e1.y + v * e2.y + mu0 * s.y,

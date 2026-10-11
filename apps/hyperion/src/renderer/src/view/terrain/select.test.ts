@@ -4,6 +4,7 @@ import { normalise, type Vec3, vec3 } from "../../geometry/vec3";
 import type { Quaternion } from "../camera/pose";
 import { NEAR_PLANE_M } from "../camera/projection";
 import { lookAlong, multiply, quaternionFromAxisAngle } from "../camera/quaternion";
+import { memoised } from "../../test/memo";
 import { seededRandom } from "../../test/seededRandom";
 import { goldenLevelTable, UNIT_BOUNDS, WGS84_FIGURE } from "../../test/terrainFixtures";
 import { distanceToBoxM, type PatchBounds, patchBounds, relativeBounds } from "./bounds";
@@ -902,8 +903,18 @@ describe("the budget's limit excess", () => {
     }),
   ];
 
+  // Each case's selections with no budget and under its budget, made once for the tests that read
+  // them: a selection is a pure function of the case, whose input is built once above, and no test
+  // writes to one.
+  // The cases' names are distinct.
+  const freeOf = memoised(
+    (c: BudgetCase): Selection => selectPatches(c.free),
+    (c) => c.name,
+  );
+  const budgetedOf = memoised(underBudget, (c) => c.name);
+
   it.each(cases)("is 0 with no budget, or one not reached, with $name", (c) => {
-    const free = selectPatches(c.free);
+    const free = freeOf(c);
     const roomy = selectPatches({ ...c.free, maxPatches: 2 * free.patches.size });
     expect([free.limited, free.limitExcess, roomy.limited, roomy.limitExcess]).toEqual([
       false,
@@ -914,7 +925,7 @@ describe("the budget's limit excess", () => {
   });
 
   it.each(cases)("bounds every baked leaf's ρ by τ × max(1, excess ÷ w), with $name", (c) => {
-    const sel = underBudget(c);
+    const sel = budgetedOf(c);
     expect(sel.limited).toBe(true);
     expect(sel.limitExcess).toBeGreaterThan(0);
     const over: string[] = [];
@@ -940,7 +951,7 @@ describe("the budget's limit excess", () => {
   it.each(cases)(
     "equals the largest weighted excess of a leaf still wanting a split, with $name",
     (c) => {
-      const sel = underBudget(c);
+      const sel = budgetedOf(c);
       expect(sel.limited).toBe(true);
       // The greedy splits the largest weighted excess first, so the refused patch is the leaf that
       // most wants a split, and stays one.
@@ -965,7 +976,7 @@ describe("the budget's limit excess", () => {
   it.each(cases)(
     "is at most the weighted excess of every split the balance did not make, with $name",
     (c) => {
-      const sel = underBudget(c);
+      const sel = budgetedOf(c);
       expect(sel.limited).toBe(true);
       // Every split patch: every ancestor of a selected one.
       const split = new Map<string, PatchKey>();
@@ -1000,11 +1011,11 @@ describe("the budget's limit excess", () => {
   );
 
   it.each(cases)("leaves the selection with no budget as recorded, with $name", (c) => {
-    expect(selectionDigest(selectPatches(c.free))).toBe(c.digests.free);
+    expect(selectionDigest(freeOf(c))).toBe(c.digests.free);
   });
 
   it.each(cases)("leaves the selection under the budget as recorded, with $name", (c) => {
-    expect(selectionDigest(underBudget(c))).toBe(c.digests.budgeted);
+    expect(selectionDigest(budgetedOf(c))).toBe(c.digests.budgeted);
   });
 });
 

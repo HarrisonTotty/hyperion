@@ -622,7 +622,9 @@ export function sphereModeOptics(
     const fine = sumNodes(quadrature, index, wavelengthUm, mu, undefined);
     if (converged(coarse, fine)) {
       const sums = emptyMatrix(mu);
-      const final = sumNodes(quadrature, index, wavelengthUm, mu, sums);
+      // With no angles to sum the matrix at, a second pass would repeat `fine`'s sums, node for
+      // node in the same order, and add nothing to the matrix.
+      const final = mu.length === 0 ? fine : sumNodes(quadrature, index, wavelengthUm, mu, sums);
       return finish(sizes, wavelengthNm, final, sums, nodes);
     }
     coarse = fine;

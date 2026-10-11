@@ -123,6 +123,11 @@ const ORACLE_PHI = 800;
  * (its horizon term, the Lommel–Seeliger floor and its oblate albedo scale) integrated over the
  * visible, lit spheroid in `f64`, each element weighted by μ dA ÷ r² (decision-r07-t8a, follow-up
  * (b)). No eclipses: the bodies tested have no occluders.
+ *
+ * Each element's vectors are written out in scalars, each component by the very operations of
+ * `vec3`'s `add`, `sub`, `scale`, `dot`, `norm` and `normalise`, in their order, and cos φ and
+ * sin φ are tabulated once: the same sum, bit for bit, as through those functions, without a
+ * dozen objects for each of the 320,000 elements.
  */
 function nearFieldFlux(
   body: LitBodyInput,
@@ -139,36 +144,68 @@ function nearFieldFlux(
   const flux: [number, number, number] = [0, 0, 0];
   const dTheta = Math.PI / ORACLE_THETA;
   const dPhi = (2 * Math.PI) / ORACLE_PHI;
+  const cosPhi = new Float64Array(ORACLE_PHI);
+  const sinPhi = new Float64Array(ORACLE_PHI);
+  for (let j = 0; j < ORACLE_PHI; j += 1) {
+    const phi = (j + 0.5) * dPhi;
+    cosPhi[j] = Math.cos(phi);
+    sinPhi[j] = Math.sin(phi);
+  }
+  const centre = body.centreM;
   for (const host of hosts) {
     const e = starIlluminance(host.disc, norm(sub(host.centreM, body.centreM)));
+    const star = host.centreM;
     for (let i = 0; i < ORACLE_THETA; i += 1) {
       const theta = (i + 0.5) * dTheta;
       const sinT = Math.sin(theta);
       const cosT = Math.cos(theta);
       for (let j = 0; j < ORACLE_PHI; j += 1) {
-        const phi = (j + 0.5) * dPhi;
-        const sx = sinT * Math.cos(phi);
-        const sy = sinT * Math.sin(phi);
-        const local = (u: number, v: number, w: number) =>
-          vec3(
-            u * ex.x + v * ey.x + w * pole.x,
-            u * ex.y + v * ey.y + w * pole.y,
-            u * ex.z + v * ey.z + w * pole.z,
-          );
-        const x = add(body.centreM, local(a * sx, a * sy, c * cosT));
-        const normal = normalise(local(sx / a, sy / a, cosT / c));
+        const sx = sinT * (cosPhi[j] ?? 0);
+        const sy = sinT * (sinPhi[j] ?? 0);
+        // The point x = centre + local(a sx, a sy, c cos θ).
+        const pu = a * sx;
+        const pv = a * sy;
+        const pw = c * cosT;
+        const xx = centre.x + (pu * ex.x + pv * ey.x + pw * pole.x);
+        const xy = centre.y + (pu * ex.y + pv * ey.y + pw * pole.y);
+        const xz = centre.z + (pu * ex.z + pv * ey.z + pw * pole.z);
+        // The normal, local(sx ÷ a, sy ÷ a, cos θ ÷ c) normalised.
+        const nu = sx / a;
+        const nv = sy / a;
+        const nw = cosT / c;
+        const mx = nu * ex.x + nv * ey.x + nw * pole.x;
+        const my = nu * ex.y + nv * ey.y + nw * pole.y;
+        const mz = nu * ex.z + nv * ey.z + nw * pole.z;
+        const length = Math.hypot(mx, my, mz);
+        if (!(length > 0) || !Number.isFinite(length)) {
+          throw new RangeError(`cannot normalise a normal of length ${String(length)}`);
+        }
+        const inverseLength = 1 / length;
+        const nx = mx * inverseLength;
+        const ny = my * inverseLength;
+        const nz = mz * inverseLength;
         const area =
           a * sinT * Math.sqrt(c * c * sinT * sinT + a * a * cosT * cosT) * dTheta * dPhi;
-        const r = norm(x);
-        const toCamera = scale(x, -1 / r);
-        const mu = dot(normal, toCamera);
+        const r = Math.hypot(xx, xy, xz);
+        // The unit vector to the camera, x × (−1 ÷ r).
+        const toR = -1 / r;
+        const cx = xx * toR;
+        const cy = xy * toR;
+        const cz = xz * toR;
+        const mu = nx * cx + ny * cy + nz * cz;
         if (mu <= 0) {
           continue;
         }
-        const toStar = sub(host.centreM, x);
-        const d = norm(toStar);
-        const towards = scale(toStar, 1 / d);
-        const mu0 = dot(normal, towards);
+        // The unit vector to the star, (star − x) × (1 ÷ d).
+        const sxM = star.x - xx;
+        const syM = star.y - xy;
+        const szM = star.z - xz;
+        const d = Math.hypot(sxM, syM, szM);
+        const toD = 1 / d;
+        const tx = sxM * toD;
+        const ty = syM * toD;
+        const tz = szM * toD;
+        const mu0 = nx * tx + ny * ty + nz * tz;
         const horizon = sphereIrradianceFactor(
           d / host.disc.radius_m,
           Math.acos(Math.min(1, Math.max(-1, mu0))),
@@ -176,7 +213,7 @@ function nearFieldFlux(
         if (horizon <= 0) {
           continue;
         }
-        const alpha = Math.acos(Math.min(1, Math.max(-1, dot(towards, toCamera))));
+        const alpha = Math.acos(Math.min(1, Math.max(-1, tx * cx + ty * cy + tz * cz)));
         const f = phaseFactorFromTable(table, alpha);
         const share = law.lommelSeeligerShare;
         const floor = Math.asin(Math.min(1, host.disc.radius_m / d));

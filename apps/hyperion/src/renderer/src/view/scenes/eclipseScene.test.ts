@@ -228,24 +228,23 @@ interface ShadowAgreement {
 }
 
 /**
- * The planet's drawn shadow against an oracle's classes over its wholly covered pixels: a pixel may
- * differ only where one of its eight neighbours is of another class in the oracle, which is the
- * boundary to a pixel.
- *
- * @param moonAt - The moon's place the oracle takes for a point of the planet's surface.
+ * What {@link shadowAgreement} reads of a drawing whatever the oracle's moon: the planet's
+ * interiors lit by its stars, with and without occluders, and where each pixel's ray meets the
+ * planet, by index (y × width + x).
  */
-function shadowAgreement(
-  drawn: Drawn,
-  sceneS: number,
-  moonAt: (pointM: Vec3) => Vec3,
-): ShadowAgreement {
+interface PlanetPixels {
+  readonly shadowed: ReadonlyMap<number, DiscPixel>;
+  readonly clear: ReadonlyMap<number, DiscPixel>;
+  readonly pointsM: ReadonlyMap<number, Vec3>;
+}
+
+/** The planet's pixels in the drawing at scene time `sceneS`. */
+function planetPixels(drawn: Drawn, sceneS: number): PlanetPixels {
   const { camera, viewport, cameraM, plan } = drawn;
   const [starlit, unshadowed] = starlitPair(recordOf(plan, ECLIPSE_PLANET));
   const width = viewport.widthPx;
-  const shadowed = interiorByIndex(rasteriseDisc(starlit, camera, viewport), width);
-  const clear = interiorByIndex(rasteriseDisc(unshadowed, camera, viewport), width);
   const planetM = eclipsePlaceAt(ECLIPSE_PLANET, sceneS).centreM;
-  const oracle = new Map<number, 0 | 1 | 2>();
+  const pointsM = new Map<number, Vec3>();
   for (let y = 0; y < viewport.heightPx; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const point = hitSphere(
@@ -255,9 +254,37 @@ function shadowAgreement(
         ECLIPSE_PLANET_RADIUS_M,
       );
       if (point !== null) {
-        oracle.set(y * width + x, shadowClass(skyAt(point, moonAt(point))));
+        pointsM.set(y * width + x, point);
       }
     }
+  }
+  return {
+    shadowed: interiorByIndex(rasteriseDisc(starlit, camera, viewport), width),
+    clear: interiorByIndex(rasteriseDisc(unshadowed, camera, viewport), width),
+    pointsM,
+  };
+}
+
+/**
+ * The planet's drawn shadow against an oracle's classes over its wholly covered pixels: a pixel may
+ * differ only where one of its eight neighbours is of another class in the oracle, which is the
+ * boundary to a pixel.
+ *
+ * @param moonAt - The moon's place the oracle takes for a point of the planet's surface.
+ * @param pixels - The drawing's {@link planetPixels} at `sceneS`, which two oracles of one drawing
+ *   share.
+ */
+function shadowAgreement(
+  drawn: Drawn,
+  sceneS: number,
+  moonAt: (pointM: Vec3) => Vec3,
+  pixels: PlanetPixels = planetPixels(drawn, sceneS),
+): ShadowAgreement {
+  const width = drawn.viewport.widthPx;
+  const { shadowed, clear } = pixels;
+  const oracle = new Map<number, 0 | 1 | 2>();
+  for (const [index, point] of pixels.pointsM) {
+    oracle.set(index, shadowClass(skyAt(point, moonAt(point))));
   }
   const counts: [number, number, number] = [0, 0, 0];
   let beyondAPixel = 0;
@@ -375,7 +402,14 @@ describe("the moon's shadow on the planet (T10.c)", () => {
     // 10° across 320 px: 10.9 km a pixel at the camera's foot, the umbra 155 km across.
     const sceneS = ECLIPSE_MID_S;
     const drawn = await drawnAt(sceneS, ECLIPSE_CAMERA_POSE, 10, NARROW);
-    const retarded = shadowAgreement(drawn, sceneS, (point) => retardedMoonM(point, sceneS));
+    // The two oracles differ only in the moon; the drawing's pixels are read once for both.
+    const pixels = planetPixels(drawn, sceneS);
+    const retarded = shadowAgreement(
+      drawn,
+      sceneS,
+      (point) => retardedMoonM(point, sceneS),
+      pixels,
+    );
     // The umbra's 160 px, every one of them the oracle's.
     expect(retarded.drawn[2]).toBeGreaterThan(150);
     expect(retarded.beyondAPixel).toBe(0);
@@ -383,7 +417,7 @@ describe("the moon's shadow on the planet (T10.c)", () => {
     // time to the planet puts that shadow 34.8 km, 3.2 px, off, which the comparison sees (40
     // pixels beyond a pixel of its boundary).
     const drawnMoon = eclipsePlaceAt(ECLIPSE_MOON, sceneS).centreM;
-    const instantaneous = shadowAgreement(drawn, sceneS, () => drawnMoon);
+    const instantaneous = shadowAgreement(drawn, sceneS, () => drawnMoon, pixels);
     expect(instantaneous.beyondAPixel).toBeGreaterThan(20);
   });
 });
@@ -512,15 +546,21 @@ function starStep(plan: BodyFramePlan): number {
 describe("the bodies before and behind the star (T10.c)", () => {
   const ZOOMED: Viewport = { widthPx: 320, heightPx: 180 };
   const FULL: Viewport = { widthPx: 1920, heightPx: 1080 };
-
-  it("covers the giant behind the star with the star's disc, drawn after it", async () => {
-    // 2° across 320 px: the star 85 px across, the giant 8 px, a disc.
-    const drawn = await drawnAt(
+  // The conjunction 2° across 320 px, drawn once for the two tests that read it: a drawing is a
+  // pure function of the scene's time, the pose, the field and the viewport, and neither test
+  // writes to it.
+  let conjunction: Promise<Drawn> | undefined;
+  const atConjunction = (): Promise<Drawn> =>
+    (conjunction ??= drawnAt(
       ECLIPSE_CONJUNCTION_S,
       eclipsePoseAtStar(ECLIPSE_CONJUNCTION_S),
       2,
       ZOOMED,
-    );
+    ));
+
+  it("covers the giant behind the star with the star's disc, drawn after it", async () => {
+    // 2° across 320 px: the star 85 px across, the giant 8 px, a disc.
+    const drawn = await atConjunction();
     expect(drawn.plan.regimes.get(ECLIPSE_GIANT)).toBe("disc");
     expect(bodyStep(drawn.plan, ECLIPSE_GIANT)).toBeLessThan(starStep(drawn.plan));
     const giant = rasteriseDisc(recordOf(drawn.plan, ECLIPSE_GIANT), drawn.camera, ZOOMED);
@@ -532,7 +572,7 @@ describe("the bodies before and behind the star (T10.c)", () => {
   it("hides the giant behind the star as a mesh too, the star's disc on its limb's plane", async () => {
     const sceneS = ECLIPSE_CONJUNCTION_S;
     const pose = eclipsePoseAtStar(sceneS);
-    const drawn = await drawnAt(sceneS, pose, 2, ZOOMED);
+    const drawn = await atConjunction();
     const giant = drawn.frame.bodies.find((body) => body.id === ECLIPSE_GIANT);
     // R07.T9's synthetic depth writer over the giant promotes it: its figure writes its depth.
     const writer =

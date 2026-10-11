@@ -5,7 +5,12 @@ import { cross, dot, norm } from "../../geometry/vec3";
 import { toViewAxes } from "../camera/projection";
 import { type DiscRecord, viewRay } from "../bodies/discShading";
 import { type BodyFramePlan, planLitBodies } from "../bodies/draw";
-import { compositeBodyFrame, firstHitShares, type OracleBody } from "../bodies/frameTwin";
+import {
+  type BodyFrame,
+  compositeBodyFrame,
+  firstHitShares,
+  type OracleBody,
+} from "../bodies/frameTwin";
 import type { LitRegime } from "../bodies/regime";
 import { DISC_ANNULI_HIGH } from "../lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
@@ -94,9 +99,9 @@ interface StepAgreement {
   readonly holes: number;
 }
 
-function agreement(plan: BodyFramePlan, step: number): StepAgreement {
+/** How step `step`'s plan, composited as `drawn`, agrees with the oracle. */
+function agreement(plan: BodyFramePlan, step: number, drawn: BodyFrame): StepAgreement {
   const frame = occultationFrame(step);
-  const drawn = compositeBodyFrame(plan, CAMERA, VIEW);
   const planet = recordOf(plan, OCCULTATION_PLANET);
   const moon = recordOf(plan, OCCULTATION_MOON);
   // The moon's rectangle, and every pixel the frame gives any of the moon's light.
@@ -158,6 +163,19 @@ function agreement(plan: BodyFramePlan, step: number): StepAgreement {
 
 describe("the scripted occultation (R07.T9)", () => {
   const promoted = plans(true);
+  // Each promoted step's composite, made once for the two tests that read it: the plans are this
+  // block's own and never change, and the composite is a pure function of a plan, the camera and
+  // the viewport, which no test writes to.
+  let promotedFrames: readonly BodyFrame[] | undefined;
+  const promotedComposites = (): readonly BodyFrame[] =>
+    (promotedFrames ??= promoted.map((plan) => compositeBodyFrame(plan, CAMERA, VIEW)));
+  const promotedComposite = (step: number): BodyFrame => {
+    const drawn = promotedComposites()[step];
+    if (drawn === undefined) {
+      throw new Error(`no step ${String(step)} in the script`);
+    }
+    return drawn;
+  };
 
   it("draws the planet as a mesh throughout and promotes the moon once their footprints meet", () => {
     expect(promoted.every((plan) => plan.regimes.get(OCCULTATION_PLANET) === "mesh")).toBe(true);
@@ -170,7 +188,7 @@ describe("the scripted occultation (R07.T9)", () => {
   });
 
   it("hides the moon behind the planet's limb where the oracle says, on every step", () => {
-    const steps = promoted.map((plan, step) => agreement(plan, step));
+    const steps = promoted.map((plan, step) => agreement(plan, step, promotedComposite(step)));
     for (const each of steps) {
       expect(each.holes).toBe(0);
       expect(each.misplaced).toBe(0);
@@ -198,12 +216,11 @@ describe("the scripted occultation (R07.T9)", () => {
     ).toBe(true);
     let worst = 0;
     for (const [step, plan] of discs.entries()) {
-      const mesh = promoted[step];
-      if (mesh === undefined) {
+      if (promoted[step] === undefined) {
         continue;
       }
       const asDiscs = compositeBodyFrame(plan, CAMERA, VIEW);
-      const asMeshes = compositeBodyFrame(mesh, CAMERA, VIEW);
+      const asMeshes = promotedComposite(step);
       // Where the moon is behind the planet's interior, the two orders agree pixel for pixel; on
       // the planet's limb the painter blends the moon beneath as the depth test does.
       for (const [index, pixel] of asDiscs.pixels) {

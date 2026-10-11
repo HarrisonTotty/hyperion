@@ -204,28 +204,45 @@ describe("the orbit coast", () => {
       const coast = profile.segmentSpans().find((span) => span.name === "orbit coast");
       const steps = (coast?.endS ?? NaN) * 64;
       expect(steps).toBe(60 * 64);
+      // Each sample's failures, as `toBe` (`Object.is`) and `toBeLessThan` would find them,
+      // asserted once over the 3,841 samples.
+      const off: string[] = [];
       for (let n = 0; n <= steps; n += 1) {
         const pose = profile.poseAt(n / 64);
         // The profile is closed-form, not integrated, and the coast's rate is 0: its altitude is
         // exact.
-        expect(pose.clearanceM).toBe(400_000);
-        expect(pose.verticalSpeedMps).toBe(0);
+        if (!Object.is(pose.clearanceM, 400_000)) {
+          off.push(`${String(n)}: clearance ${String(pose.clearanceM)} m`);
+        }
+        if (!Object.is(pose.verticalSpeedMps, 0)) {
+          off.push(`${String(n)}: vertical speed ${String(pose.verticalSpeedMps)} m/s`);
+        }
         // From the position alone: 400 km above the site's height along the spheroid's normal, to
         // the rounding of |p| ≈ 6.8 × 10⁶ m, whose ulp is 0.9 nm.
         const { heightM, offNormalM } = heightOverGround(pose);
-        expect(Math.abs(heightM - (siteM + 400_000))).toBeLessThan(1e-6);
-        expect(offNormalM).toBeLessThan(1e-6);
+        if (!(Math.abs(heightM - (siteM + 400_000)) < 1e-6)) {
+          off.push(`${String(n)}: height ${String(heightM)} m`);
+        }
+        if (!(offNormalM < 1e-6)) {
+          off.push(`${String(n)}: ${String(offNormalM)} m off the normal`);
+        }
       }
+      expect(off).toEqual([]);
       // The velocity is a central difference over ±1 ms of exact positions. Its rounding is about
       // 10 nm ÷ 2 ms = 5 µm/s, and its truncation |p‴| h² ÷ 6 about 2 nm/s, so 1 mm/s bounds it
       // with room; the climb this replaced was 18.4 m/s. The coast's two ends are left out: one
       // takes a one-sided step, the other straddles the arc's lead-in.
+      const climbing: string[] = [];
       for (let n = 1; n < steps; n += 1) {
         const pose = profile.poseAt(n / 64);
         const d = pose.groundDir;
         const nu = spheroidNormal(WGS84_FIGURE, [d.x, d.y, d.z]);
-        expect(Math.abs(dot(pose.velocityMps, vec3(nu[0], nu[1], nu[2])))).toBeLessThan(1e-3);
+        const rate = Math.abs(dot(pose.velocityMps, vec3(nu[0], nu[1], nu[2])));
+        if (!(rate < 1e-3)) {
+          climbing.push(`${String(n)}: ${String(rate)} m/s along the normal`);
+        }
       }
+      expect(climbing).toEqual([]);
     });
   }
 
@@ -281,6 +298,14 @@ function poseHash(profile: DescentProfile): string {
 /** Every 64 Hz sample time of a profile. */
 function grid(profile: DescentProfile): number[] {
   return Array.from({ length: Math.round(profile.durationS * 64) + 1 }, (_, n) => n / 64);
+}
+
+/**
+ * Whether two of `vec3`'s vectors are equal as `toEqual` finds them, each component by
+ * `Object.is`, for checking every sample of a profile before asserting once.
+ */
+function sameVec3(a: Vec3, b: Vec3): boolean {
+  return Object.is(a.x, b.x) && Object.is(a.y, b.y) && Object.is(a.z, b.z);
 }
 
 describe("the descent over the stretches' floors (decision-r05-descent-clearance.md)", () => {
@@ -351,10 +376,14 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
       const climbing = new DescentProfile(WGS84_FIGURE, site, terrain, CLIMBING_COAST);
       expect(poseHash(level)).toBe(today[k]);
       const approach = level.segmentSpans().find((span) => span.name === "approach and flare");
+      const apart: string[] = [];
       for (const t of grid(level).filter((tS) => tS >= (approach?.startS ?? NaN))) {
         const apartM = norm(sub(level.poseAt(t).positionM, climbing.poseAt(t).positionM));
-        expect(apartM).toBeLessThan(1e-6);
+        if (!(apartM < 1e-6)) {
+          apart.push(`${String(t)} s: ${String(apartM)} m apart`);
+        }
       }
+      expect(apart).toEqual([]);
     }
   });
 
@@ -381,22 +410,28 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
       trackMaxHeightM: SITE_M,
     });
     expect(atSite.segments).toEqual(today.segments);
-    for (const t of grid(today)) {
-      expect(atSite.poseAt(t).positionM).toEqual(today.poseAt(t).positionM);
-    }
+    const moved = grid(today).filter(
+      (t) => !sameVec3(atSite.poseAt(t).positionM, today.poseAt(t).positionM),
+    );
+    expect(moved).toEqual([]);
     expect(atSite.minFloorMarginM).toBeGreaterThanOrEqual(-FLOOR_TOLERANCE_M);
   });
 
   it("keeps every pose its piece's clearance above the floor", () => {
     expect(rough.minFloorMarginM).toBeGreaterThanOrEqual(-FLOOR_TOLERANCE_M);
     for (const [k, stretch] of rough.stretches.entries()) {
+      // The poses below the clearance, as `toBeGreaterThanOrEqual` would find them, asserted
+      // once a stretch.
+      const below: string[] = [];
       for (let t = stretch.startS; t <= stretch.endS; t += 1 / 64) {
         const pose = rough.poseAt(t);
         const floorM = floors(RIDGES)[k] ?? NaN;
-        expect(pose.altitudeM - floorM).toBeGreaterThanOrEqual(
-          stretch.clearanceM - FLOOR_TOLERANCE_M,
-        );
+        const aboveM = pose.altitudeM - floorM;
+        if (!(aboveM >= stretch.clearanceM - FLOOR_TOLERANCE_M)) {
+          below.push(`${stretch.piece} at ${String(t)} s: ${String(aboveM)} m above the floor`);
+        }
       }
+      expect(below).toEqual([]);
       const inside = rough.poseAt((stretch.startS + stretch.endS) / 2);
       expect(inside.floorM).toBe(floors(RIDGES)[k]);
       expect(inside.heightAboveFloorM).toBeCloseTo(inside.altitudeM - inside.floorM, 6);
@@ -421,12 +456,15 @@ describe("the descent over the stretches' floors (decision-r05-descent-clearance
   });
 
   it("keeps the ground track and the horizontal speed whatever the floors", () => {
-    for (const t of grid(plain)) {
+    const moved = grid(plain).filter((t) => {
       const a = plain.poseAt(t);
       const b = rough.poseAt(t);
-      expect(b.groundDir).toEqual(a.groundDir);
-      expect(b.horizontalSpeedMps).toBe(a.horizontalSpeedMps);
-    }
+      return (
+        !sameVec3(b.groundDir, a.groundDir) ||
+        !Object.is(b.horizontalSpeedMps, a.horizontalSpeedMps)
+      );
+    });
+    expect(moved).toEqual([]);
   });
 
   it("flies the low pass level at its floor plus 300 m where its neighbours do not bind", () => {
