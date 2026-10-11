@@ -5237,16 +5237,17 @@ Snapshot path, `planetary/chem/`.
   - **T51.a's airless branch:** a condensable lies as a zonal solid only where the zonal annual
     maximum, not the mean, is below its threshold, and otherwise only in cold traps.
   - _Tests:_
-    - the Moon's cold traps are 0.03–0.2% of its surface and 1.6–13% of 80–90°, with almost none
+    - the Moon's cold traps are 0.024–0.2% of its surface and 1.6–13% of 80–90°, with almost none
       below 70°. The bounds run from half of Williams et al. 2019's Diviner-mapped 0.048% (and its
       ~3.2% of 80–90°) to twice Hayne et al.'s point-source 0.10% (and 6.7%), since the Sun's disk
       lowers the closed form by about a fifth (R09.T7.d tests Hayne's bands at a point source);
     - its exposed water at f_x = 0.035 is within a factor of two of Li et al.'s;
     - at the temperature T49.b's curve gives for Schorghofer et al.'s 10 kg m⁻² Gyr⁻¹, the Moon's
-      CO₂ cold traps are within a factor of three of their 286 km² (LPSC 2021, 1389; "roughly
-      200 km²" in GRL 48, e2021GL095533). The factor is three because their time-averaged
-      criterion gives 3.6 times the area a peak-temperature one does, and this form is one. The
-      area at the rule's own threshold is recorded, not asserted;
+      CO₂ cold traps lie within 40–572 km²: from half of their peak-temperature criterion's 79 km²
+      to twice their time-averaged 286 km² (LPSC 2021, 1389; "roughly 200 km²" in GRL 48,
+      e2021GL095533). This form is a peak-temperature one, which their comparison finds 3.6 times
+      too small for CO₂ (science-r09-drainage.md §8.12). The area at the rule's own threshold is
+      recorded, not asserted;
     - Ceres's permanent shadow (`cold_trap::permanent_shadow`, at Ceres's flux and angular radius,
       with Hayne et al.'s lunar terrain: 20% craters, plains σ_s 5.7°) holds Schorghofer et al.
       2024's 2,282 km² at a 4° greatest declination between craters of distribution B and A. At
