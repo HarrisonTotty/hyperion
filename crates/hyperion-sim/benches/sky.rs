@@ -32,9 +32,9 @@
 //!
 //! The cell cache is the benches' own, built on `SkyBlock::with_cell` as the server's is
 //! (R06.T11.b, T8.h): blocks of 4³ cells, least recently used out, bounded by
-//! `HYPERION_SKY_CACHE_MB` (default 1,280 MiB, the server's since R06.T8.n) divided by the sample,
-//! so that a sampled warm census
-//! is the shipped size's (`decision-r06-census-cost-signoff.md`, condition 4), each block weighing
+//! `HYPERION_SKY_CACHE_MB` (default 1,280 MiB, R06.T8.n's sized budget and T17's gate's; the
+//! server's default is 0, off, since R06.T8.o) divided by the sample, so that a sampled warm census
+//! is the whole budget's (`decision-r06-census-cost-signoff.md`, condition 4), each block weighing
 //! its held records plus its own size. The cold census starts each iteration with an empty cache;
 //! `census_near_sun/cold` reads no cache, R06.T8.g's path, so that its record reads it, as do
 //! `/cold_eye_visibility` and `/cold_spheres`, the same path on R06.T7.b's caps by the eye's
@@ -47,7 +47,7 @@
 //! blocks, cells built and bytes (times the sample, the sky's estimate), and the warm ratio.
 //! `census_near_sun_served/{,served_}warm_5.0` and `…/warm_jump_5.0` (R06.T8.n) are the same two
 //! for the sky the server serves since R13.T2.b, the real tier at the ceiling
-//! ([`census_near_sun_served`]'s query), each place at its own eye's cut; the server's default
+//! ([`census_near_sun_served`]'s query), each place at its own eye's cut; R06.T8.n's sized
 //! budget is set from their bytes after the jump. A pool's width is `HYPERION_WORKERS` where it is
 //! set, the server's variable, so that a run can take a given width inside a CPU quota.
 //!
@@ -61,7 +61,7 @@
 //! | `sky/census_near_sun/warm` | target ≤ 25% of cold, recorded (T17, T8.n): the exact census, which no server serves since R13.T2.b | 99.9% on 4 workers, at P11.T17.c (below) |
 //! | `sky/census_near_sun/warm_jump` | target ≤ 25% of cold, recorded (T17, T8.n): the exact census, as `/warm` | 95.2%, none rebuilt, the same reply; 14.0 GB held, at P11.T17.c (below) |
 //! | `sky/census_near_sun_served/*warm_5.0` | gate: none rebuilt, the same reply (T17); target ≤ 25% of cold | 96.4% on the server's galaxy, 108.2% on the fixture, on 4 workers (below) |
-//! | `sky/census_near_sun_served/*warm_jump_5.0` | gate: none rebuilt, the same reply, within the default (T17, T8.n); target ≤ 25% of cold | 101.9% and 98.1%, none rebuilt, the same reply; 949 MB held on the server's galaxy, within 1,280 MiB (below) |
+//! | `sky/census_near_sun_served/*warm_jump_5.0` | gate: none rebuilt, the same reply, within the sized budget (T17, T8.n); target ≤ 25% of cold | 101.9% and 98.1%, none rebuilt, the same reply; 949 MB held on the server's galaxy, within 1,280 MiB (below) |
 //! | `sky/star_bound/*` | about 6 µs a record but `hierarchy_bound` (T8.g) | at most 2.7 µs a step, at P11.T17.c (below) |
 //! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
 //! | `sky/caps_by_ray_near_sun` | none: a record (R06.T7.b) | 1,475 CPU-s, sampled 1 in 1,000 |
@@ -219,9 +219,10 @@
 //!   98.1% (98.3%), with 16,957 of 47,012 cells new (36.1%), none rebuilt, the same reply. The
 //!   entries: 379 MB after the Sun's sky, 525 MB after the jump.
 //!
-//! So the server's default is 1.25 × 949 MB, 1,131 MiB, rounded up to 1,280 MiB (R06's Risks,
-//! "Deviations in T8.n, as built"). The ratios are noise about 100%, as `decision-r06-t8h-warm.md`
-//! expected: the warm census generates every system the cold one does. The same task's run of
+//! So R06.T8.n's sized budget is 1.25 × 949 MB, 1,131 MiB, rounded up to 1,280 MiB (R06's Risks,
+//! "Deviations in T8.n, as built"; the server's default is 0, off, since R06.T8.o). The ratios
+//! are noise about 100%, as `decision-r06-t8h-warm.md` expected: the warm census generates every
+//! system the cold one does. The same task's run of
 //! `census_near_sun/warm` and `/warm_jump`, the exact census at 7.95 on T7.b's caps (sampled 1 in
 //! 1,000, the same workers and lock, load 3–31): the Sun's fill 8.49 × 10⁵ CPU-s and its repeat
 //! 99.9%; the destination cold 8.74 × 10⁵ and the jump 95.2%, 9.6% of its cells new, none
@@ -357,8 +358,9 @@ const NUCLEAR_DISC_LY: [f64; 3] = [0.0, 150.0, 0.0];
 /// Noise-cache slots per job: 1 MiB of the sightlines' lattice words.
 const NOISE_SLOTS: usize = 1 << 16;
 
-/// The server's default cell-cache budget, MiB (R06.T11.b; set by R06.T8.n), when
-/// `HYPERION_SKY_CACHE_MB` is unset: the server's `DEFAULT_SKY_CACHE_MIB`.
+/// The benches' cell-cache budget, MiB, when `HYPERION_SKY_CACHE_MB` is unset: R06.T8.n's sized
+/// budget, at which R06.T17's warm gate is judged. The server's own default
+/// (`DEFAULT_SKY_CACHE_MIB`) is 0, off, since R06.T8.o (decided 2026-10-10, `decision-r06-t8n.md`).
 const DEFAULT_CACHE_MB: usize = 1_280;
 
 /// Whether each census bench has printed its first census.
@@ -1145,7 +1147,7 @@ struct Kept {
 /// are not counted). A block is read outside the lock, and merged under it.
 ///
 /// Its budget is `HYPERION_SKY_CACHE_MB` divided by the bench's sample, so that a sampled warm
-/// census is the shipped size's (`decision-r06-census-cost-signoff.md`, condition 4).
+/// census is the whole budget's (`decision-r06-census-cost-signoff.md`, condition 4).
 #[derive(Debug)]
 struct BenchCellCache<'g> {
     galaxy: &'g Galaxy,
@@ -2091,8 +2093,8 @@ fn report_cuts_about_the_sun(name: &str, sky: &Sky, sun_v: f64) {
     );
 }
 
-/// R06.T8.n's warm benches of the served sky near the Sun, from whose entries the server's
-/// default `HYPERION_SKY_CACHE_MB` is set: the eye alone at its own cut and RM3's ceiling
+/// R06.T8.n's warm benches of the served sky near the Sun, from whose entries R06.T8.n sized the
+/// sky cache's budget, 1,280 MiB: the eye alone at its own cut and RM3's ceiling
 /// ([`served_query`]), planned and merged as [`census_near_sun_served`]'s, through the benches'
 /// cell cache ([`BenchCellCache`]), on the fixture and, as `served_*`, on the server's galaxy.
 ///
