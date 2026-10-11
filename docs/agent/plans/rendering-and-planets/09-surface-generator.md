@@ -735,17 +735,19 @@ every timing below is provisional and is re-measured on a quiet machine by the t
    10 km on the Moon, Mercury and Mars is T7.b's), so its expected variance below the coarse cell
    is closed-form (`local_variance`). `local_variance` is the reference style's. The styles'
    amplitudes are absolute ratios to the body class's reference ground, so the realised structural
-   share is ⟨a²⟩ `local_variance`, ⟨a²⟩ the solid-angle mean of the interpolated squared
-   amplitude. It is never normalised away: a world with more belts is rougher (`decision-r09-t5.md`
-   item 1). V₁ is anchored at the coarse cell, never from degree 1: the structural RMS in
-   wavelengths shorter than 72 km is 200 m × (g⊕ ÷ g) on a mobile lid (Earth2014 with the abyssal
-   hills its altimetric bathymetry lacks), 60 m on a rocky stagnant lid (Mars's crater-poor plains
-   and the maria) and 50 m on an ice-rich crust (Europa), all medium to medium-low confidence
-   (`decision-r09-t5.md` item 3). The coarse elevation is scaled affinely about its area-weighted
-   mean so that the **reconstructed** field's variance, the interpolant of Design note 13
-   integrated by solid-angle quadrature at sub-cell points, is σ_h² less the local shares: the
-   structural share ⟨a²⟩ `local_variance`, and the craters' and channels' closed forms finer than
-   the coarse cell's Nyquist wavelength, the coarse craters' sharpening included
+   share is the solid-angle mean of Σ_m (a g_m^b)² σ_m² over the reconstructed field, a and b
+   interpolated, with the reference-style tail beyond the finest octave: ⟨a²⟩ `local_variance` off
+   belts, and more where belts lift their ridge–valley octaves (5.4% on the Earth-like world;
+   `decision-r09-t5.md` items 7 and 8). It is never normalised away: a world with more belts is
+   rougher (`decision-r09-t5.md` item 1). V₁ is anchored at the coarse cell, never from degree 1:
+   the structural RMS in wavelengths shorter than 72 km is 200 m × (g⊕ ÷ g) on a mobile lid
+   (Earth2014 with the abyssal hills its altimetric bathymetry lacks), 60 m on a rocky stagnant lid
+   (Mars's crater-poor plains and the maria) and 50 m on an ice-rich crust (Europa), all medium to
+   medium-low confidence (`decision-r09-t5.md` item 3). The coarse elevation is scaled affinely
+   about its area-weighted mean so that the **reconstructed** field's variance, the interpolant of
+   Design note 13 integrated by solid-angle quadrature at sub-cell points, is σ_h² less the local
+   shares: the realised structural share (above), and the craters' and channels' closed forms finer
+   than the coarse cell's Nyquist wavelength, the coarse craters' sharpening included
    (`decision-r09-t5.md` item 4); and again after erosion, when the channels' share is known; the
    cell values alone would fall several per cent short by the spline's smoothing. The local share
    is not negligible at the plan's own levels: above the coarse cell's Nyquist degree it is 0.6% of
@@ -1027,17 +1029,25 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     5 km, 25% at 8 km, 46% at 10 km and 94% at 20 km (science-r09-craters.md F1). The exponent is
     measured on Venus alone, so it is low confidence for thinner atmospheres, whose cutoffs keep
     their projectile scales. The transition
-    is D_t = 19 km × (1.62 ÷ g) × k_target (Pike's four bodies give g^−1.01), a zone: bowls below
-    0.8 D_t, transitional to 1.5 D_t, central peaks above, peak rings from about 9 D_t, multi-ring
-    basins above about 16 D_t. Fresh shapes (`decision-r09-t2.md` item 3; d is rim crest to floor,
-    h is rim crest above the surrounding surface):
+    is D_t = 19 km × (1.62 ÷ g) × k_target (Pike's four bodies give g^−1.01), with k_target 1 for a
+    silicate crust and 0.12 for an ice-rich one (science-r09-craters.md item 1: the morphological
+    transitions of Ganymede, Rhea, Iapetus, Dione, Tethys, Ceres, Charon, Europa and Pluto, read as
+    0.82 D_t, give a geometric mean of 0.125 and a range of 0.06–0.26; Schenk et al. 2004;
+    Aponte-Hernández et al. 2021; Ermakov et al. 2017's mixed crust behaves as ice; no resolvable
+    temperature term between 40 and 150 K), a zone: bowls below 0.8 D_t, transitional to 1.5 D_t,
+    central peaks above, peak rings from about 9 D_t, multi-ring basins above about 16 D_t. Fresh
+    shapes (`decision-r09-t2.md` item 3; d is rim crest to floor, h is rim crest above the
+    surrounding surface):
     - _Bowls_ do not depend on gravity: d = 0.20 D and h = 0.20 D ÷ 5.42 = 0.0369 D.
       - Pike 1980b's 0.196 D^1.010 and 0.036 D^1.014; Stopar et al.'s 0.209 and "∼0.04"; Mercury's
         0.199 D^0.995 (Pike 1988).
       - On an airless body (`Screening::None`), the bowl's d/D falls through Stopar et al.'s A-class
         bins, which are 0.125, 0.152 and 0.166 at 63, 141 and 283 m and 0.20 from 400 m. The fall
         is linear in log D between the bins, held below 63 m, and at D × g ÷ 1.62 off the Moon. The
-        plan's own gravity scaling is of low confidence.
+        plan's own gravity scaling is of low confidence. Icy airless bodies take the same rule:
+        their only fresh simple-crater depths, all at 1 km and above (Ganymede 0.21, Callisto 0.19,
+        Europa 0.17, Schenk 2002; Rhea 0.221, Iapetus 0.187, White et al. 2013), lie within what it
+        predicts (science-r09-craters.md item 3).
       - On a porous-class target, the bowl is 0.14 D deep at every size, less where the regolith
         rule gives less (the asteroidal value, Aponte-Hernández et al. 2021 §1; medium
         confidence).
@@ -1372,7 +1382,8 @@ decision-r09-t2's follow-up, which edits the same files).
   follow-up and P14.T49.a is first creates it.
 - **`field/palette.rs`:**
   - `PaletteRole` (`u8`, append-only): `PrimaryCrust` 0, `SecondaryCrust` 1, `TertiaryCrust` 2,
-    `Province` 3, `Ice` 4, `Liquid` 5, `Cover` 6, `Deposit` 7;
+    `Province` 3, `Ice` 4, `Liquid` 5, `Cover` 6, `Deposit` 7; `Bulk` 8 (an undifferentiated
+    body's own material, not a crust), appended by follow-up D;
   - `MechanicsFamily` (`u8`): `Silicate` 0, `Metal` 1, `WaterIce` 2, `VolatileIce` 3, `Salt` 4,
     `Organic` 5;
   - `PaletteEntry { substance, role, normal_albedo_bvr: [f64; 3], phase_row: u8,`
@@ -1393,12 +1404,14 @@ decision-r09-t2's follow-up, which edits the same files).
   - a `crust_palette` entry whose role is not a crust's.
 - **The synthetic worlds carry palettes:**
   - Earth: `basalt`, `granite`, `H2O` as ice and as liquid;
-  - Mars: `basalt`, `mars_dust`, `H2O` and `CO2` ices;
-  - Moon: `anorthosite` (primary), `basalt` (province), `H2O` (ice);
+  - Mars: `basalt_fe`, `mars_dust` (deposit), `H2O` and `CO2` (ice);
+  - Moon: `feldspathic` (primary), `basalt_fe` (province), `H2O` (ice);
   - Ceres: `phyllosilicate` (primary), `Na2CO3` (deposit), `H2O` (ice).
 
   Keys are checked by grammar until P14.T49.b's rows exist, when P14.T49.b's test checks every key
-  these worlds use.
+  these worlds use. Mars's and the Moon's rows are as follow-up D makes them
+  (science-composition-crusts.md §1.5 (e)); B built `basalt` for both and `anorthosite` for the
+  Moon's primary.
 
 - **The shape is frozen only from R09.T19's first send.** R10's and R11's re-validations may add
   members (a liquid's index, absorption, viscosity and surface tension for R11.T8) before then,
@@ -1442,6 +1455,39 @@ _Follow-up C, runoff, grain densities and the read solidus_ (science-r09-drainag
   `codes.golden` gains the `LogRunoff` rows.
 - _Accept:_ `cargo test -p hyperion-surface field`; `cargo test -p hyperion-surface wire`;
   `cargo test -p hyperion-sim planetary::surface`.
+
+- **R09.T2.d Follow-up D, an undifferentiated body's role and the crust ruling's synthetic rows**
+  (science-composition-crusts.md §1, §3, §4, §7 and §8, 2026-10-11; after follow-up C). One lane,
+  in the surface crate: it touches `field/palette.rs` and `testing/worlds.rs`, not R09.T10.c's or
+  R09.T10.d's files, and the ruling's §1.6 and §3.3 hold its code text.
+  - **`PaletteRole::Bulk = 8`**, appended: an undifferentiated body's own material where no crust
+    covers it, its accreted, never-melted rock or ice–dust, as a chondrite or a comet's dust mantle
+    (or, on a fragment of a differentiated body, its exposed mantle or core). It is not a crust in
+    Taylor's sense (§1).
+  - **`is_crust`** takes it: `PrimaryCrust | SecondaryCrust | TertiaryCrust | Province | Bulk`,
+    documented as "Whether the role is one a [`Crust`](super::Crust) variant's entry may take: the
+    three crusts, a province's and an undifferentiated body's bulk."
+  - **`grain_density_kg_m3`'s documentation:** "an ice's crystal density" reads "an ice's crystal
+    density at the temperature where it lies on the body" (§3).
+  - **B's synthetic rows** (`testing/worlds.rs`), as R09.T10.c and T10.d take them into the
+    reference rows:
+    - the Moon-like world's primary crust is `feldspathic`, renamed from `anorthosite` and keeping
+      its 2,900 kg m⁻³, the highland crust's grain density (§7); its province is `basalt_fe`;
+    - the Mars-like world's secondary crust is `basalt_fe` (§2);
+    - `basalt_fe` is an iron-rich basalt, 3,310 kg m⁻³ and 1,050 °C (§2);
+    - the solidi (§4): `feldspathic`'s 1,260 °C, a plagioclase rock's first melt; the
+      phyllosilicate residue's 1,150 °C (1,423.15 K), an upper bound; and the dust's 1,050 °C,
+      `basalt_fe`'s (still an assumption);
+    - `Na2CO3`'s melting point is 850 °C (NIST-JANAF), its 2,540 kg m⁻³ confirmed (§4);
+    - each water-ice entry's density is ice Ih's ρ_s where the ice lies (§3; IAPWS R10-06): the
+      Earth- and Mars-like worlds' at their coldest zones, and the Moon- and Ceres-like worlds' at
+      the 110 K cold-trap threshold, 932.7 kg m⁻³.
+  - _Tests:_ `field_palette_crust_roles_are_the_crusts_and_the_provinces` expects the five roles;
+    every synthetic world is valid, with the rows above.
+  - _Goldens:_ `payloads.golden` is re-blessed at 21 and `codes.golden` gains `Bulk`'s
+    `palette_role` row, an extension (codes only gain), before T19's first send. Neither
+    `GENERATOR_VERSION` nor `SURFACE_PAYLOAD_FORMAT` is bumped (Generator version).
+  - _Accept:_ `cargo test -p hyperion-surface field`; `cargo test -p hyperion-surface wire`.
 
 ### R09.T3 The payload codec
 
@@ -1551,9 +1597,9 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
 - **R09.T7.a The density and the shapes.** After T0.b's Venus item. `craters.rs`:
   `CraterParams` (T2's type, in
   `PerSquareKilometre`); `cumulative_density` from Neukum et al.'s
-  a1…a11 with a0 = log₁₀ N(>1 km) (the misprint recorded in the doc comment), the end slopes outside
-  10 m–300 km, the optional diameter map, and the screening taper on the differential production
-  with exponent 4.5 (Design note 12; T0.b withdrew the break-up rule);
+  a1…a11 with a0 = log₁₀ N(>1 km) (both published a0 recorded in the doc comment), the end slopes
+  outside 10 m–300 km, the optional diameter map, and the screening taper on the differential
+  production with exponent 4.5 (Design note 12; T0.b withdrew the break-up rule);
   `saturation`; `transition_diameter`; `diameter_in_octave` by bisection in log D with a fixed
   iteration count. `lunar_chronology(S, A)` and its inverse `chronology_age` (fixed 64-step bisection),
   counted from the system's formation, with `SOLAR_SYSTEM_AGE` 4.567 Gyr; `reference.rs`'s private
@@ -1569,7 +1615,8 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   10⁵ draws); the projectile scale d\* is 5.2 m, 0.52 km and 8.5 cm for Earth, Venus and Mars (at
   636 Pa, Design note 12), and the crater cutoffs 20 d\*; Venus's screened counts over its area
   at N(>1 km) = 3.07 × 10⁻⁴ km⁻² lie within 10% of the Gazetteer's at 3, 5, 10, 20 and 40 km
-  (878, 850, 642, 335 and 104 named craters at or above each, Design note 12); the map at Mars's
+  (878, 850, 642, 335 and 104 named craters at or above each, Design note 12; the mapped check is
+  T7.e's); the map at Mars's
   ratios (g 3.71, D_t 8.3 km, U = 16.7 × 9.6 ÷ 16.1 km/s, Ivanov's velocity ratio) reproduces
   Ivanov 2001's Mars function within ×1.5 in N over 1–100 km (0.97–1.03 computed by
   science-r09-craters.md), and P14.T48.f's 10.6 km/s within ×1.5 too (0.92–1.03); D_t gives
@@ -1840,11 +1887,70 @@ vertex neighbours. Acceptance: `cargo test -p hyperion-sim planetary::surface`.
     `PrimaryCrust`, and its table's crust and palette rows read "phyllosilicate (primary crust:
     Ceres's frozen ocean, Castillo-Rogez et al. 2018; Fu et al. 2017)". `moon_like` and `mars_like`
     keep their crusts, with `secondary: Some(BASALT_KEY)`. The
-    reference Moon's palette gains `H2O` as `Ice`, which no share names until P14.T51.f (§4). Each
-    table states its sources.
+    reference Moon's palette gains `H2O` as `Ice`, which no share names until P14.T51.f (§4). A
+    generated Moon carries no such entry until P14.T51.f is on the record (T54.b), an interim the
+    reference and synthetic Moons, being test inputs, do not share (science-composition-crusts.md
+    §6). Each table states its sources.
   - _Tests:_ a crust with neither primary nor secondary is refused with `NoCrust`; the reference
     Ceres's `Oceanic` has no entry, and its `Lid` and `Province` take the phyllosilicate's; every
     reference world builds a valid field.
+  - _Moves:_ nothing, since no reference golden exists before T16.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::surface`.
+
+- **R09.T10.d An undifferentiated body's bulk, the lid, and the highland and iron-rich rows**
+  (science-composition-crusts.md §1, §2, §5 and §7; after T2's follow-up D, R09.T2.d, and T10.c,
+  which left these to it: Risks, "Deviations in T10.c, as built"). `planetary/surface/inputs.rs`
+  and `reference.rs`; the ruling's §1.6, §2.3, §5.3 and §7.3 hold its code text. The members follow
+  P14.T51.c's `bulk` and `lid`, and stay builder arguments until P14.T54.a reads them from the
+  record.
+  - **The lid** (§5). `LidCrust { Primary, Secondary, Bulk }` and `CrustInputs::lid: LidCrust`,
+    which of the crusts the surface shows (P14.T51.c's `lid`). `BuildCoarseInputsError` gains `LidAbsent(LidCrust)`, refusing a lid that names an
+    absent crust ("the lid names a crust the body does not have"). `CrustInputs::primary`'s
+    documentation adds "buried or at the surface, as `lid` says".
+  - **The Lid rule and the melt test read it** (§5). `crust_palette`'s `Lid` takes the entry of the
+    crust `lid` names, in place of T10.c's "the primary's, else the secondary's": `Primary` the
+    primary's, `Secondary` the secondary's and `Bulk` the bulk's. `melt_area_fraction`'s
+    documentation reads "the share of the surface above the solidus of the lid's crust", which
+    amends science-r09-drainage.md §5.2 item 4's "the secondary's, or the primary's where there is
+    none". `build` resolves the lid's substance once, so that no step unwraps the options.
+  - **The bulk** (§1). `CrustInputs::bulk: Option<SubstanceKey>`, an undifferentiated body's own
+    material at its surface (`chondrite_h`, `cometary`), with no crust beside it, or `None`: not a
+    crust in Taylor's sense. `BuildCoarseInputsError::BulkBesideCrust` ("the crust names a bulk
+    material beside a crust"), and `NoCrust` widened to "neither a primary nor a secondary crust nor
+    a bulk material". `check_crust` refuses, in this order: none of `primary`, `secondary` and
+    `bulk` (`NoCrust`); `bulk` with any of `primary`, `secondary` and `tertiary`
+    (`BulkBesideCrust`); a `lid` whose member is `None` (`LidAbsent`). `crust_palette` maps the bulk
+    through a `Bulk` entry, which `Lid` takes where `lid` is `Bulk`, and the provinces may share.
+    `CrustInputs`'s type documentation states the two forms and the lid.
+  - **The reference rows** (§2 and §7):
+    - `basalt_fe` (`BASALT_FE_KEY`, `BASALT_FE`), an iron-rich basalt: 3,310 kg m⁻³, the
+      shergottites' mean (Macke, Britt and Consolmagno 2011), inside the lunar basalts'
+      3,270–3,460 (Kiefer et al. 2012), with `BASALT_FE_SOLIDUS_K`. `mars_like`'s secondary and
+      provinces and `moon_like`'s take it; `earth_like` keeps `BASALT`, whose documentation reads
+      "a terrestrial tholeiite's; an iron-rich basalt is [`BASALT_FE`]".
+    - `feldspathic` (`FELDSPATHIC_KEY`, `FELDSPATHIC`), the highland crust as impacts mixed it:
+      2,900 kg m⁻³, implied by the highlands' GRAIL bulk density at 12% porosity (Wieczorek et al.
+      2013), with `PLAGIOCLASE_ROCK_SOLIDUS_K`. It replaces `ANORTHOSITE` in `moon_like`, since a
+      reference module keeps no unused row; the `anorthosite` rock, 2,790 kg m⁻³, lives in
+      P14.T49.b. The GRAIL test reads `bulk(&FELDSPATHIC, 0.12)`.
+    - The tables' rows: the Moon's crust and palette read "feldspathic (primary crust: the
+      highlands, its magma ocean's flotation crust as impacts mixed it), iron-rich basalt
+      (provinces: the maria, its secondary crust)", and Mars's "iron-rich basalt (secondary crust,
+      its provinces' too)". The module documentation's row list follows.
+  - **The reference worlds' lids** (§5.2):
+    - `moon_like`: `primary: Some(FELDSPATHIC_KEY)`, `secondary: Some(BASALT_FE_KEY)`,
+      `lid: LidCrust::Primary`;
+    - `mars_like`: `secondary: Some(BASALT_FE_KEY)`, `lid: LidCrust::Secondary`;
+    - `earth_like`: `lid: LidCrust::Secondary`;
+    - `ceres_like`: `lid: LidCrust::Primary`.
+  - _Tests:_
+    - the three refusals, a lid naming an absent crust among them (`LidAbsent`);
+    - a chondritic body's `Lid` and `Province` take its `Bulk` entry, and `Oceanic` and
+      `Continental` none;
+    - a Mars given a buried primary with `lid: Secondary` takes its secondary for `Lid`;
+    - `BASALT_FE`'s grain density lies within Kiefer et al.'s 3,270–3,460;
+    - the reference palettes list `(PrimaryCrust, "feldspathic")`, and `basalt_fe` for the Moon and
+      Mars.
   - _Moves:_ nothing, since no reference golden exists before T16.
   - _Accept:_ `cargo test -p hyperion-sim planetary::surface`.
 
@@ -1899,17 +2005,22 @@ capped at 200 Myr; a plate with no divergent boundary has 200 Myr and 23 mm a⁻
   about 300 above 100 km with N(1 km) at 4.4 Gyr; ages split before and after the wet epoch on the
   reference Mars; the list is sorted and each crater's `reach` is complete; before degradation,
   the reference Moon's coarse craters' rim heights are Pike 1980b's 0.236 D^0.399 to 1%.
-- **R09.T12.e σ_h and sea level.** Design note 7, on the reconstructed field, after T4 and T5. The
-  header's spectrum is `BandSpectrum::anchored` of the body's crust class (`decision-r09-t5.md`
-  item 3), chosen from `surface_material` and `tectonics`.
+- **R09.T12.e σ_h and sea level.** Design note 7, on the reconstructed field, after T4 and T5.
+  Its σ_h budget books the realised structural share, the area mean of each quadrature point's
+  `Relief::point_variance`, which includes the belts' lift (`decision-r09-t5.md` item 8), with
+  the craters' and channels' closed forms finer than λ_c. The header's spectrum is
+  `BandSpectrum::anchored` of the body's crust class (`decision-r09-t5.md` item 3), chosen from
+  `surface_material` and `tectonics`.
   Tests: the reconstructed σ_h equals the input to 10⁻⁶ relative after the step; the local share,
-  ⟨a²⟩ `local_variance` plus the craters' and channels' closed forms finer than λ_c, divided by
-  σ_h², is 4–10% on the reference Moon, 3–8% on the reference Ceres and 0.3–1% on the reference
-  Earth and Mars (Design note 7's 7, 5 and 0.6%); craters supply at least 80% of the Moon's; ⟨a²⟩
-  on the reference Earth is 0.6–1.2; the realised relief lies at 6–16 σ_h on every reference
-  world (Design note 7's observed 7–15 widened by one σ_h each way, since one realisation scatters
-  about it); the ocean fraction below sea level equals the input to one cell's solid angle; the
-  header reports realised σ_h and relief.
+  the realised structural share plus the craters' and channels' closed forms finer than λ_c,
+  divided by σ_h², is 4–10% on the reference Moon, 3–8% on the reference Ceres and 0.3–1% on the
+  reference Earth and Mars (Design note 7's 7, 5 and 0.6%); craters supply at least 80% of the
+  Moon's; ⟨a²⟩ on the reference Earth is 0.6–1.2; the realised structural share equals ⟨a²⟩
+  `local_variance` to 10⁻¹² on a world with no belt, and on the reference Earth exceeds it by
+  0–15%; the realised relief lies at 6–16 σ_h on every reference world (Design note 7's observed
+  7–15 widened by one σ_h each way, since one realisation scatters about it); the ocean fraction
+  below sea level equals the input to one cell's solid angle; the header reports realised σ_h and
+  relief.
 
 Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.a–c and e) and
 `cargo test -p hyperion-sim planetary::surface::steps::craters` (T12.d).
@@ -1940,9 +2051,11 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
   its months differ.
 - **R09.T13.c The other regimes.** `steps/climate/{airless,isothermal}.rs`: radiative equilibrium
   with thermal inertia for airless and thin-atmosphere worlds, and the isothermal surface for a
-  Venus. On a locked lava world, cells above the transition temperature of the crust at the surface
-  (the secondary's, or the primary's where there is none) are melt, from this task's per-cell
-  temperature, not from the global state. Tests: an airless world's
+  Venus. On a locked lava world, cells above the transition temperature of their own crust entry
+  are melt, from this task's per-cell temperature, not from the global state; the body's
+  `melt_area_fraction` is the lid's crust's, the crust P14.T51.c's `lid` names (`CrustInputs::lid`,
+  R09.T10.d; science-composition-crusts.md §5, which replaces "the secondary's, or the primary's
+  where there is none"). Tests: an airless world's
   day–night contrast exceeds 300 K; the isothermal model's surface varies by under 1 K; a locked
   lava world's melt is the dayside region above the solidus, and its nightside is solid.
 - **R09.T13.d Normalisation and ice.** Plan 14's mean and signed contrasts imposed on their
@@ -2386,6 +2499,14 @@ re-blessing this plan's payload and coarse goldens in that commit.
     heights grow like central peaks' (Baker et al. 2012). Its ring-to-rim ratio and cross-section
     need Baker et al. 2011 (Icarus 214, 377), which was not read. Lean: a later shape task draws it
     from that source.
+  - _Ice transitions at very low gravity._ 1/g × 0.12 overstates D_t on the smallest icy moons:
+    Tethys's ~10 km against 25 km (White et al. 2017), with Mimas Schenk's standing exception, and
+    Aponte-Hernández et al. 2021 fit g^−0.4 across all icy bodies. Lean: keep 1/g, which fits
+    everything from Ganymede to Rhea and Charon; revisit when Schenk et al. 2021's table is read.
+  - _Small icy craters._ No fresh crater under 1 km has a measured depth on any icy body. The
+    lunar regolith rule is applied to icy airless bodies by physical analogy (a weak porous layer)
+    and stretches to 2.9 km on Iapetus through D × g ÷ 1.62. Thin-atmosphere icy bodies (Pluto,
+    Triton) keep the plain bowl, because the key is `Screening::None`.
 - **The survey stand-in.** `survey_pass` lets a client grant its ship coverage, as the server
   grants detail levels today. It is a discipline for an honest client, and the sensors plan
   replaces the caller, not the core.
@@ -2675,9 +2796,9 @@ re-blessing this plan's payload and coarse goldens in that commit.
     (USGS PP 1046-C, Table 6, eq. 3), a different Pike 1980 from Design note 12's. One ratio of
     5.42 did make complex rims about half the observed. Item 3 gives complex craters their own
     self-similar depth and rim laws, which T7.a builds. Ceres's 469.7 km is Ermakov et al. 2017's;
-    Design note 12's bounds of 9 and 16 D_t (0.8 and 1.5 now match Krüger et al. 2018), the 0.12
-    ice factor and the −1.7 to −2.05 spectral range carry no external
-    source and are labelled the plan's own.
+    Design note 12's bounds of 9 and 16 D_t (0.8 and 1.5 now match Krüger et al. 2018) and the −1.7
+    to −2.05 spectral range carry no external source and are labelled the plan's own; the 0.12 ice
+    factor is sourced by science-r09-craters.md item 1.
   - _For T3, T4, T9 and T18._ `SYNTHESIS_MARGIN_CELLS` is not yet defined (T3 or T4 adds it).
     `PartialField` can reuse `field.rs`'s private `reaching_index` (which returns `None` on
     overflow) for its crater index. The decoders (`LogArea::area`, `index_m0_9`,
@@ -3970,8 +4091,9 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     nearest bisector with a continental plate that does not converge with this one. Its floor is
     old (median about 130 Myr), so GlobSed's drape freezes most of it at H₀ ÷ 2 within 5–20 Myr:
     only some 5% keeps undraped hills. The test therefore classes the floor by its amplitude,
-    against the ruling's three floors: hills at a ≥ 1 (the slow ridges', 1.71 undraped), draped
-    hills at 0.2 < a < 1 (the fast ridges' and the frozen drape, 0.48) and plains at a ≤ 0.2:
+    against the ruling's three floors: hills at a ≥ 1 (the slow ridges', 1.73 undraped at the slow
+    MAR's measured H of about 236 m, `decision-r09-t5.md` item 8), draped hills at 0.2 < a < 1 (the
+    fast ridges' and the frozen drape, 0.48) and plains at a ≤ 0.2:
     36.6%, 49.6% and 13.8% of its oceanic cells. Its ⟨a²⟩ as ruled, the mean square of the
     interpolated amplitude at the variance test's area-uniform points, is 0.594 (T5's 0.74; its
     cells' unweighted mean is 0.594 too, 0.693 over its oceanic cells); Mars-like 0.934, Moon-like
@@ -4201,10 +4323,9 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     has its test in `tests/panics.rs`.
   - _The ends of the polynomial._ Above 300 km the cumulative production continues at the
     polynomial's own slope there, −1.826, so it is continuously differentiable; below 10 m at the
-    plan's −2 (the polynomial's own slope at 10 m is −3.16, a kink). The a0 "misprint" is one of
-    two readings: Ivanov et al. 2002 (Asteroids III, Table 1) print −3.0768 for Neukum 1983's
-    polynomial and −3.0876 for this one, and Cratermaker corrects the chronology's linear term to
-    10^−3.0876 instead. a0 never enters, and item 5 keeps 8.38 × 10⁻⁴; the doc records both.
+    plan's −2 (the polynomial's own slope at 10 m is −3.16, a kink). Neither a0 is a misprint
+    (science-r09-craters.md F3): −3.0876 is the 2001 polynomial's own level and −3.0768 Neukum
+    1983's; the chronology keeps 8.38 × 10⁻⁴; a0 never enters.
   - _The diameter map._ Design note 12 names π-group scaling and nothing more. As built, after
     Ivanov 2001: the body's crater is uncollapsed to a transient cavity by D ∝ `D_tc`^1.13
     `D_t`^−0.13 (McKinnon and Schenk 1985 as Collins, Melosh and Marcus 2005 state it, made
