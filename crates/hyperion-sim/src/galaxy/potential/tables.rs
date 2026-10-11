@@ -566,7 +566,6 @@ impl PotentialTables {
 
 #[cfg(test)]
 mod tests {
-    use super::super::force::tests::the_tables_force_is_the_gradient_of_the_tables_potential;
     use super::*;
     use crate::galaxy::params::GalaxyParams;
 
@@ -600,8 +599,8 @@ mod tests {
 
     /// The Milky Way fixture's model and its full (R, z) tables, built once, some 5 s in a test
     /// build, for the two tests that read them, which nextest would otherwise run in processes of
-    /// their own: [`the_grid_forces_match_the_mass_model`] here, then `force`'s
-    /// [`the_tables_force_is_the_gradient_of_the_tables_potential`].
+    /// their own: [`the_grid_forces_match_the_mass_model`], then
+    /// [`the_tables_force_is_the_gradient_of_the_tables_potential`], `force`'s.
     #[test]
     fn the_full_grid_s_forces_are_the_model_s_and_its_own_potential_s_gradient() {
         let model = MassModel::new(&GalaxyParams::milky_way_like());
@@ -646,6 +645,58 @@ mod tests {
                 "R ∂Φ/∂R at ({r}, {z}): {radial} against {by_ln_r}"
             );
         }
+    }
+
+    /// The tables' force is the gradient of the tables' potential to rounding (it is the
+    /// interpolant's own derivative), and the model's to the interpolation's accuracy.
+    ///
+    /// Run by [`the_full_grid_s_forces_are_the_model_s_and_its_own_potential_s_gradient`] on its one
+    /// build of the Milky Way fixture's model and full tables, which it gives as `model` and
+    /// `tables`; it tests `force`'s [`PotentialTables::force`].
+    fn the_tables_force_is_the_gradient_of_the_tables_potential(
+        model: &MassModel,
+        tables: &PotentialTables,
+    ) {
+        for (r, z) in [
+            (26_000.0, 300.0),
+            (26_000.0, -1_500.0),
+            (3_000.0, 400.0),
+            (500.0, 60.0),
+            (40_000.0, 20_000.0),
+            (70_000.0, 3_000.0),
+        ] {
+            let f = tables
+                .force(LightYears::new(r), LightYears::new(z))
+                .expect("the full tables");
+            let phi = |a: f64, b: f64| {
+                tables
+                    .potential(LightYears::new(a), LightYears::new(b))
+                    .expect("the full tables")
+            };
+            let d = 1e-5 * math::hypot(r, z);
+            let by_r = (phi(r + d, z) - phi(r - d, z)) / (2.0 * d);
+            let by_z = (phi(r, z + d) - phi(r, z - d)) / (2.0 * d);
+            assert!(
+                (f.radial - by_r).abs() < 1e-6 * f.radial.abs().max(f.vertical.abs()),
+                "∂Φ/∂R at ({r}, {z}): {} against {by_r}",
+                f.radial
+            );
+            assert!(
+                (f.vertical - by_z).abs() < 1e-6 * f.radial.abs().max(f.vertical.abs()),
+                "∂Φ/∂z at ({r}, {z}): {} against {by_z}",
+                f.vertical
+            );
+            let exact = model.force(LightYears::new(r), LightYears::new(z));
+            assert!((f.radial / exact.radial - 1.0).abs() < 5e-3, "({r}, {z})");
+            assert!(
+                (f.vertical / exact.vertical - 1.0).abs() < 5e-3,
+                "({r}, {z})"
+            );
+        }
+        let axis = tables
+            .force(LightYears::ZERO, LightYears::new(100.0))
+            .expect("the full tables");
+        assert!(axis.radial.abs() < f64::EPSILON && axis.vertical > 0.0);
     }
 
     #[test]
