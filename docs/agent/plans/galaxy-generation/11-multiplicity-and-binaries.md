@@ -5193,3 +5193,27 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
   - **For `deferred-corrections.md`** (reported to main): the proposed F18 and the C2 caps in C and
     D, with T4.m, in the deferred bump batch's engine work; then the follow-up's probes again, and
     the floor dropped if no timeline is capped, which restores D's and E's `Remnants` and the 18%.
+- **The cooling floor as a fitted table** (lane perf-native-tests, 2026-10-11, at version 21;
+  `decision-test-coverage.md` §3.2, N7, adopted). No generated output moves.
+  - The floor of P11.T17.b's first widening was built lazily, once a process: about 1.1 × 10⁶
+    evaluations of the cooling fits, 2.6 s in a test build, paid again by every test process that
+    read a pair whose lighter star lies below 0.1 M☉ (some ten fast tests, and every census's
+    first sky).
+  - It is now the fitted table `tables::binary_cooling_floor` (`COOLING_FLOOR_CMAG`, 4 metallicity
+    intervals × 53 age bins of `i16`), written by `hyperion-fit`'s fast task
+    `binary_cooling_floor` from the sim's `pair_light::build_cooling_floor_cmag`, the old lazy
+    build's code. `cooling_floor_cmag` reads the constant.
+  - Freshness: the fast test `the_lazy_values_are_fresh_builds` holds every committed value to a
+    fresh build on every run, natively and on wasm32-wasip1; `just fit-check` checks the table's
+    inputs hash, its body's hash and a fingerprint of 16 brightest V's of the fits; the slow pass's
+    `--rerun-fast` reruns the task and compares bytes. The golden `stellar/pair_light_tables`,
+    which pins the floor's values, is unchanged.
+  - Written with `cargo run -p hyperion-fit -- run binary_cooling_floor --since 21`, the dev
+    profile, whose sim is at opt-level 2 (not `just fit`'s release build, to spare it): the
+    output is the same bits in any profile, and a rerun on one thread wrote the same bytes.
+    `just fit` wrote the table, its lock entry and its `MANIFEST` row but not its `pub mod` line
+    in `tables/mod.rs`, added by hand, against `task.rs`'s "Adding a task" step 4.
+  - Gates: `just fit-check` (27 fresh, 0 failures); fmt and Clippy `-D warnings` (sim and fit,
+    all targets); `stellar::binary::pair_light` and `light` tests and the tables' manifest test,
+    natively and on wasm32-wasip1 (38 each); the fit task's tests, the registry's, the toolchain's
+    and `list_prints_registered_tasks`; `golden_diff.py`: no golden changed.

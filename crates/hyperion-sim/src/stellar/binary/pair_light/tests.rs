@@ -944,8 +944,10 @@ fn the_cooling_floor_and_the_readers_are_pinned() {
     golden!("stellar/pair_light_tables", w.as_str());
 }
 
-/// The lazily built values are what fresh builds give: the cooling and held floors, and each layer's
-/// decoded table against a fresh decoding of the same fitted constants.
+/// The lazily built values and the fitted cooling floor are what fresh builds give: the committed
+/// cooling floor (`tables::binary_cooling_floor`, which `hyperion-fit`'s task
+/// `binary_cooling_floor` writes from [`build_cooling_floor_cmag`]) and the held floor, and each
+/// layer's decoded table against a fresh decoding of the same fitted constants.
 #[test]
 fn the_lazy_values_are_fresh_builds() {
     use crate::tables::binary_pair_light_e as e;
@@ -960,6 +962,8 @@ fn the_lazy_values_are_fresh_builds() {
                 UNSEEN_MAG
             });
             assert_eq!(Some(cooling_floor_cmag(f, k)), fresh, "{f} {k}");
+            // The fit's build, `build_cooling_floor_cmag`, takes the same brightest V so.
+            assert_eq!(Some(cooling_floor_of_brightest(v)), fresh, "{f} {k}");
         }
         let held = held_floor_of(f);
         for k in 0..HELD_FLOOR_NODES {

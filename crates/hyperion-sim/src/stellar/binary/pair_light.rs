@@ -65,7 +65,9 @@
 //!   past their cells' values. The engine evaluates such a member at its own age and at no more
 //!   than 0.1 M☉, however much wind it accretes, so no such star is brighter than the cooling fit
 //!   at 0.1 M☉ at that age. For a pair whose lighter star lies below 0.1 M☉ the reader takes each
-//!   value that is not DARK as the brighter of it and that floor, margin included.
+//!   value that is not DARK as the brighter of it and that floor, margin included. The floor is a
+//!   fitted table, [`tables::binary_cooling_floor`](crate::tables::binary_cooling_floor), of
+//!   [`build_cooling_floor_cmag`]'s values.
 //! - **The held floor** (`held_floor`, crate-private; P11.T17.c's follow-up). A timeline capped
 //!   at the engine's [`MAX_SEGMENTS`](super::MAX_SEGMENTS) holds a star the binary carries on its
 //!   main sequence for ever, which the tables' samples seldom catch. The floor is the brightest hydrogen or
@@ -80,7 +82,7 @@
 //!   R06.T8.m's phase envelope packs its rows (as plain decimals a table would be some 2 MB).
 //!   [`PairLightTable::generator`] decodes a layer's table once.
 //!
-//! The decoded tables and the two floors are built lazily, once a process (`OnceLock` statics),
+//! The decoded tables and the held floor are built lazily, once a process (`OnceLock` statics),
 //! each a pure function of the crate's constants, the same whichever is asked first (the
 //! sim-determinism skill's order independence; a test holds each to a fresh build).
 //!
@@ -91,6 +93,13 @@
 //! They are statistical: a rare channel left unsampled in a cell's neighbourhood could hide a
 //! brighter star (the ruling's §10), which the margins, the dilation, T17.c's `None` for thin cells
 //! and the slow tests guard against.
+//!
+//! The cooling floor depends on no galaxy either, only on the cooling fits and the photometry:
+//! `hyperion-fit`'s task `binary_cooling_floor` writes it from [`build_cooling_floor_cmag`] and
+//! checks it in as `tables::binary_cooling_floor`, which a fast test holds to a fresh build on
+//! every run, natively and on WebAssembly, rather than each process building it at its first
+//! read, some 10⁶ evaluations of the fits and 2.6 s in a test build (decided 2026-10-11,
+//! `decision-test-coverage.md` §3.2, N7).
 
 use std::sync::{Arc, OnceLock};
 
@@ -106,7 +115,9 @@ use crate::stellar::multiplicity::MultiplicityModel;
 use crate::stellar::photometry::absolute_magnitude_v;
 use crate::stellar::sse::{self, MIN_INITIAL_MASS, ZCoeffs};
 use crate::stellar::{Composition, StarState, substellar};
-use crate::tables::{binary_pair_light_c, binary_pair_light_d, binary_pair_light_e};
+use crate::tables::{
+    binary_cooling_floor, binary_pair_light_c, binary_pair_light_d, binary_pair_light_e,
+};
 use crate::units::consts::{GM_SUN, SECONDS_PER_DAY, SOLAR_RADIUS_M};
 use crate::units::{
     Days, Dex, GravitationalParameter, HeliumExcess, Magnitudes, Metres, Radians, SolarMasses,
@@ -1657,20 +1668,25 @@ fn word_of(chars: &[u8]) -> Option<u32> {
 
 /// The masses, M☉, at which the cooling floor reads the cooling fits: 0.08–0.1 M☉ in 64 even
 /// steps, the fits' top (P06.T13; [`substellar::MAX_MASS`]) last.
-const COOLING_FLOOR_MASSES: u32 = 64;
+pub const COOLING_FLOOR_MASSES: u32 = 64;
 
-/// The metallicities a cooling floor's interval is read at, edges included.
-const COOLING_FLOOR_FE_H: u32 = 8;
+/// The metallicities a cooling floor's interval is read at, edges included: its width in 8 even
+/// steps.
+pub const COOLING_FLOOR_FE_H: u32 = 8;
 
-/// The ages a cooling floor's bin is read at, edges included.
-const COOLING_FLOOR_AGES: u32 = 8;
+/// The ages a cooling floor's bin is read at, edges included: its width in 8 even steps.
+pub const COOLING_FLOOR_AGES: u32 = 8;
 
 /// The brightest V, mag, of a star on P06.T13's cooling fits of 0.08–0.1 M☉ and metallicity in
 /// interval `fe_cell` of [`FE_H_EDGES`] at an age in bin `bin`: read on a grid of masses,
 /// metallicities and ages, edges included, through plan 06's photometry (the sky's for these
-/// states, which it never darkens).
+/// states, which it never darkens); +∞ where none has a V.
+///
+/// # Panics
+///
+/// If `fe_cell` or `bin` is past its axis.
 #[must_use]
-fn cooling_brightest(fe_cell: usize, bin: usize) -> f64 {
+pub fn cooling_brightest(fe_cell: usize, bin: usize) -> f64 {
     let (f_lo, f_hi) = (FE_H_EDGES[fe_cell], FE_H_EDGES[fe_cell + 1]);
     let (t_lo, t_hi) = (age_edge_years(bin), age_edge_years(bin + 1));
     let mut brightest = f64::INFINITY;
@@ -1700,30 +1716,47 @@ fn cooling_brightest(fe_cell: usize, bin: usize) -> f64 {
 ///
 /// It is the brightest V ([`from_cmag`]) of a star on the cooling fits of the interval at an age in
 /// the bin, brightened by [`MARGIN_MAG`] and rounded brighter, or [`UNSEEN_CMAG`] where none has a
-/// V. Computed once, at the first call.
+/// V: [`build_cooling_floor_cmag`]'s value, as the fitted table
+/// [`tables::binary_cooling_floor`](crate::tables::binary_cooling_floor) holds it.
 ///
 /// # Panics
 ///
 /// If `fe_cell` or `bin` is past its axis.
 #[must_use]
 pub fn cooling_floor_cmag(fe_cell: usize, bin: usize) -> i16 {
-    static FLOOR: OnceLock<Vec<[i16; AGE_BINS]>> = OnceLock::new();
-    let floor = FLOOR.get_or_init(|| {
-        (0..FE_H_CELLS)
-            .map(|f| {
-                core::array::from_fn(|k| {
-                    let v = cooling_brightest(f, k);
-                    let v = if v.is_finite() {
-                        v - MARGIN_MAG
-                    } else {
-                        UNSEEN_MAG
-                    };
-                    to_cmag(v).expect("a cooling star's V is storable")
-                })
-            })
-            .collect()
-    });
-    floor[fe_cell][bin]
+    binary_cooling_floor::COOLING_FLOOR_CMAG[fe_cell][bin]
+}
+
+/// The cooling floor of metallicity interval `fe_cell` at age bin `bin` built afresh, hundredths of
+/// a magnitude: [`cooling_brightest`] brightened by [`MARGIN_MAG`] and rounded brighter
+/// ([`to_cmag`]), or [`UNSEEN_CMAG`] where it is +∞.
+///
+/// Some 5,000 evaluations of the cooling fits. `hyperion-fit`'s task `binary_cooling_floor`
+/// writes these values as the table [`cooling_floor_cmag`] reads.
+///
+/// # Panics
+///
+/// If `fe_cell` or `bin` is past its axis, or the brightest V is past what the table stores,
+/// which the cooling fits' V (some +10 to +16 mag) rules out.
+#[must_use]
+pub fn build_cooling_floor_cmag(fe_cell: usize, bin: usize) -> i16 {
+    cooling_floor_of_brightest(cooling_brightest(fe_cell, bin))
+}
+
+/// The cooling floor's stored value for the brightest V `v` (mag) of its interval and bin: `v`
+/// brightened by [`MARGIN_MAG`] and rounded brighter, or [`UNSEEN_CMAG`] for +∞.
+///
+/// # Panics
+///
+/// If `v` is past what the table stores.
+#[must_use]
+fn cooling_floor_of_brightest(v: f64) -> i16 {
+    let v = if v.is_finite() {
+        v - MARGIN_MAG
+    } else {
+        UNSEEN_MAG
+    };
+    to_cmag(v).expect("a cooling star's V is storable")
 }
 
 /// A cell's value as a pair whose lighter star lies below 0.1 M☉ reads it.

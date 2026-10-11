@@ -14,6 +14,7 @@
 //! [`GENERATOR_VERSION`]: crate::GENERATOR_VERSION
 
 pub mod binary;
+pub mod binary_cooling_floor;
 // The three `binary_pair_light` tables are written whole by `hyperion-fit`, whose dimensions'
 // counts reach six digits, so their one lint allowance is on their modules.
 #[allow(
@@ -93,6 +94,12 @@ pub struct TableInfo {
 /// listed.
 // @begin-manifest: written by hyperion-fit from tables.lock. Do not edit.
 pub const MANIFEST: &[TableInfo] = &[
+    TableInfo {
+        name: "binary_cooling_floor",
+        revision: 0,
+        since_generator_version: 21,
+        provisional: false,
+    },
     TableInfo {
         name: "binary_pair_light_c",
         revision: 0,

@@ -2,6 +2,18 @@
 # `hyperion-fit check`. Do not edit.
 
 [[table]]
+name = "binary_cooling_floor"
+path = "binary_cooling_floor.rs"
+task = "binary_cooling_floor"
+revision = 0
+inputs_sha256 = "ad373b9c00ea234be39929744e186614c28d487bde080e3739c08f98c9b41bc4"
+body_sha256 = "bd6f65a9bb49829e11c43bdecbf6d8ec7e53b40f9c2e134a2fcc610c5f471004"
+fingerprint = [4.0, 53.0, 10.575539587421403, 10.742286216643546, 14.287777844693743, 15.069499575952564, 10.987455740641234, 11.15424096869619, 14.407691179764827, 16.07553209081891, 11.064789173746222, 11.231597577803782, 14.348788867189512, 16.72643456883263, 10.990884358175533, 11.157683567268858, 14.225949416310911, 16.226455842541974]
+since_generator_version = 21
+provisional = false
+acceptance = "212 values (4 metallicity intervals × 53 age bins) from 1116180 evaluations of the cooling fits; stored V +10.27 to +16.42 mag, margin included, 0 with no V; every interval's floor rises or holds with age; the sim's `no_cooling_star_is_brighter_than_its_floor` checks 20,000 random cooling stars against it and `the_lazy_values_are_fresh_builds` holds it to a fresh build"
+
+[[table]]
 name = "binary_pair_light_c"
 path = "binary_pair_light_c.rs"
 task = "binary_pair_light_c"
