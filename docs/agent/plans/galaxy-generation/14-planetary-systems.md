@@ -677,9 +677,9 @@ Order and parallelism:
      (decision-composition), which moves no output and by which 2–7 type their members;
   2. T24.f, carbon speciation and O₂ in T13.c's inventory, since every later rule reads the gases;
   3. T24.a, with T48.e's signed contrasts, the gases as registry rows with their μ and c_p ÷ R;
-  4. T24.b, with T48.a's σ_h and continental fraction, T48.b's wet epoch and T48.c's crater
-     contract (T48.c also waits on R09.T7.a), and T24.g's present outgassing; its ocean and ice by
-     substance;
+  4. T24.b, with T48.a's σ_h and continental fraction, T48.b's wet epoch, T48.f's impactors and
+     T48.c's crater contract (both wait on R09.T7.e), and T24.g's present outgassing; its ocean and
+     ice by substance;
   5. T48.d, the climate regime classifier, which reads T24.a and T48.b; its condensable a registry
      row; T24.b's ice fraction then reads it;
   6. T48.e, the record's surface section, holding 2–5, with the gas-envelope split (the envelope's
@@ -710,8 +710,8 @@ Order and parallelism:
   - **Later**: T55.
 
   _The bump plan_ (ruled by "main", 2026-10-09). Steps 0–6 (T14.d; T49.a, which moves no output;
-  T24.f; T24.a with T48.e's contrasts; T24.b with T48.a–c and the present outgassing; T48.d; T48.e)
-  and rendering plan R09's R09.T1.b (the detail seed in the hooks section) form one
+  T24.f; T24.a with T48.e's contrasts; T24.b with T48.a–c, T48.f and the present outgassing; T48.d;
+  T48.e) and rendering plan R09's R09.T1.b (the detail seed in the hooks section) form one
   `GENERATOR_VERSION` batch, 21 → 22, built serially in one lane. Each task keeps `just ci` green
   on its own. A task whose output moves generated records before the batch's last task holds the
   new figures off the record, or behind the batch's wiring, so that the goldens move once, at the
@@ -2209,10 +2209,13 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   from heat flow and mass; the present volcanic outgassing O, relative to Earth's (by P14.T24.g,
   below); magnetic field class from rotation, core fraction and heat flow; surface age: the
   smaller of the system's age and a resurfacing time that falls with heat flow, and the time since
-  a giant impact; crater density N(> 1 km) per km² from surface age by the lunar chronology curve,
-  5.44 × 10⁻¹⁴ (e^(6.93T) − 1) + 8.38 × 10⁻⁴ T with T in Gyr (Neukum, Ivanov and Hartmann 2001),
-  scaled by the system's belt masses and zeroed under a thick atmosphere for small craters
-  (screened instead by the shared crater density, P14.T48.c).
+  a giant impact; crater density N(> 1 km) per km² from the surface age S and the system's age A
+  by the lunar chronology counted from the system's formation,
+  `hyperion_surface::craters::lunar_chronology(S, A)` = 5.44 × 10⁻¹⁴ (e^(6.93 (o + S)) −
+  e^(6.93 o)) + 8.38 × 10⁻⁴ S with o = 4.567 Gyr − A, in Gyr (Neukum, Ivanov and Hartmann 2001's
+  curve, whose T is time before the Solar System's present; science-r09-craters.md item 5), scaled
+  by the system's belt masses and zeroed under a thick atmosphere for small craters (screened
+  instead by the shared crater density, P14.T48.c).
   - _The present outgassing_ (P14.T24.g, 2026-10-09). `GlobalFigures` gains `outgassing`,
     O = max(0, (F − F_c) ÷ (F⊕ − F_c)), with F the heat flow above.
     - F⊕ is the Solar System table's Earth's heat flow, so Earth's O is 1.
@@ -2285,8 +2288,10 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     log-normal) of the volume-to-area radius r = 3V ÷ 4A, A the orientation-averaged projected area
     (a sphere's radius), so that r_eff = (3 ÷ 4)⟨V⟩ ÷ ⟨A⟩ for every shape class and τ(550) = (3 ÷ 4)
     Q̄_ext(550) M ÷ (ρ r_eff), with Q̄_ext = ⟨C_ext⟩ ÷ ⟨A⟩, the relation T49.e's κ_ext uses (a size
-    taken from a source in another convention, an equal-volume or equal-surface sphere, is converted
-    on the way in with that source's particle shape; R08's science-r08-mmf.md §2), or an aggregate's
+    taken from visible or near-infrared scattering is converted on the way in at equal projected
+    area, r = Ψ^(3/2) r_A, with Ψ the shape class's sphericity (1 for spheres, 0.71 for
+    `nonSphericalMineral`); one fixed by mass or absorption alone converts at equal V/A; settling
+    and mass per particle read r_V = r ÷ Ψ; R08's science-r08-mmf.md §3), or an aggregate's
     monomer radius, count and fractal dimension D_f ≤ 2.5, the enum's cap, inside which Tazaki and
     Tanaka 2018's model is validated (R08 Design note 6), its sizes staying a₀ (the monomer's
     radius), N and D_f, with k_f = (5/3)^(D_f/2) unless the wire carries it; a column optical depth
@@ -3086,8 +3091,9 @@ hyperion exec vitest run src/renderer/src/lib/system src/renderer/src/displays/s
       `{ shell_thickness_m, thickness_m, floor, liquid, solute_mass_fraction, base_temperature_k }`,
       `floor` one of `rock`, `ice_iii`, `ice_v`, `ice_vi` and `ice_vii`, `liquid` a registry key;
       `null` for a body computed to have none and absent for one no rule computes), the crater
-      contract (the production N(>1 km), the projectile density or the crater cutoff, k_target, and
-      the optional impact velocity) and the wet epoch, `null` for a world never wet:
+      contract (the production N(>1 km), lunar-equivalent by science-r09-craters.md F1, the column
+      mass or the crater cutoff, the projectile density, k_target, the target's class and density,
+      the system's age and the impact velocity) and the wet epoch, `null` for a world never wet:
       `{ liquid, start_ago_s, end_ago_s, effective_flow_yr, runoff_m_per_yr, paleo_inventory_kg_m2 }`,
       `liquid` a registry key (T48.b);
     - T24.e's vertical structure (α, T_skin and the adiabat's nodes, science-r08-gases-2.md §1.4;
@@ -4326,8 +4332,10 @@ flow, a tectonic regime, a surface age, a crater density, an ocean fraction or a
 fraction, but for regular moons' tidal heat flux, `Volcanism` and ice fraction (`moons/regular.rs`);
 T14's `BodyFixedFrame` (pole, obliquity, `RotationLaw`) and T46's figure are in the record.
 
-One task of five subtasks, each built with T24 or after it and amending T24 where it says so: T48.a
-to T48.c in `hooks/figures.rs`, T48.d and T48.e in `hooks/surface.rs` (T48.e also in `record.rs`).
+One task of six subtasks, each built with T24 or after it and amending T24 where it says so: T48.a
+to T48.c and T48.f in `hooks/figures.rs`, T48.d and T48.e in `hooks/surface.rs` (T48.e also in
+`record.rs`). T48.f, the impactors that feed T48.c's contract, was added by science-r09-craters.md
+item 4 (2026-10-10).
 Each is generated output and joins T24's bump, one task, one bump. Formulas and constants are R09's
 research of 2026-09-29 (its Design note 3, with the sources named there), each re-checked against
 its source when it becomes a constant. Their order with T24 and with rendering plan R08's asks
@@ -4431,20 +4439,56 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     - `REFERENCE_FLOOD_INTERMITTENCY` is 0.05.
     - The Moon and Mercury have none.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
+- **P14.T48.f The impactors** (with T48.c, in step 4 of the 21 → 22 batch; after R09.T7.e).
+  `hooks/figures.rs`:
+  `impactors(body) -> Impactors { velocity, projectile_density, target: CraterTarget, k_target }`,
+  by science-r09-craters.md items 2 and 4.
+  - Velocity:
+    - v² = v∞² + v_esc² for a planet, dwarf planet or belt member;
+    - v² = v∞,P² + 3v_K,s² + v_esc,s² for a moon (Brasser et al. 2025, after Zahnle et al. 2003);
+    - v∞ = U · v_K(a), with U² = U_src² + e² + sin² i;
+    - U_src² is the belt component's own 2σ_e² + 2 sin² σ_i in a belt; 0.30² for giants, bodies
+      at or beyond the innermost giant and their moons; otherwise the nearest asteroid belt's
+      U_b² + (1 − a ÷ a_b)³ inside it or U_b² + (1 − a_b ÷ a)³ outside;
+    - with no belt, 0.30² + (1 − a ÷ a_g)³ from the innermost giant, or 0.30² with no giant.
+  - Projectile density: 3,000 kg m⁻³ from a rocky belt, 500 from an icy belt or comets.
+  - Target:
+    - Porous below a radius of 150 km, at the body's bulk density;
+    - otherwise NonPorous, at 940 kg m⁻³ with k_target 0.12 for an ice-rich crust, or
+      2,550 kg m⁻³ with k_target 1;
+    - ice-rich means a moon formed beyond its planet's ice line, a member of an icy belt, or a
+      body under 273 K whose water would make a global layer at least 10 km deep.
+    - The 150 km threshold, between Hyperion (135 km, porous) and Mimas (198 km), and the 10 km
+      layer are the plan's own (science-r09-craters.md item 2). Once P14.T51.c lands (22 → 23),
+      ρ_t is the primary crust's bulk density (Ceres's 1,287 kg m⁻³) and the ice-rich test reads
+      the primary crust.
+  - Closed form, no draws.
+  - Tests:
+    - a Solar-System-like system gives Mercury 41.4, Venus 25.7, Earth 19.9, the Moon 16.7
+      (to 0.1, R09's `LUNAR_IMPACT_VELOCITY`), Mars 10.6 and Ceres 5.6 km/s;
+    - Mars ÷ Moon lies in 0.53–0.65;
+    - the 15 regular moons of Jupiter, Saturn and Uranus lie within 10% of Brasser et al. 2025's
+      Table 5;
+    - Pluto lies within 20% of 2.2 km/s;
+    - Ganymede and Ceres are ice-rich, Hyperion porous, the Moon and Mars silicate.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
 - **P14.T48.c The crater contract** (amends T24.b's crater density). T24.b's N(>1 km) per km², by
-  the lunar chronology with its belt scaling, is published as the production at the surface age
-  before any screening, with the screening inputs beside it: the surface pressure over gravity and a
-  projectile density, or a crater cutoff; g; a target factor k_target (1 for rock, 0.12 for
-  ice-rich crusts); and optionally a mean impact velocity. "Zeroed under a thick atmosphere for
+  the lunar chronology with its belt scaling, is published as the lunar-equivalent production at
+  the surface age before any screening and any diameter map, with the screening input beside it
+  (the surface pressure over gravity, or a crater cutoff), g, the system's age, and T48.f's
+  impactors: the mean impact velocity, the projectile density, k_target (1 for rock, 0.12 for
+  ice-rich crusts) and the target's class and density. "Zeroed under a thick atmosphere for
   small craters" is replaced by the screening taper of the one shared density, which this plan calls
   rather than re-implements: `hyperion_surface::craters::{CraterParams, cumulative_density}`
   (R09.T7.a; Neukum, Ivanov and Hartmann 2001's polynomial with a0 = log₁₀ N(>1 km), the projectile
   scale d\* = 1.5 (P ÷ g) ÷ ρ_p and the crater cutoff 20 d\*), a new edge from the sim to the
   surface crate that R04's split allows. The surface crate derives the rest (R09's Design note 12).
-  Waits on R09.T7.a.
+  Waits on R09.T7.e and T48.f.
   - _Tests:_ the Moon's N(>1 km) exceeds Earth's by over 100 (T24.b's, kept); the shared function
-    returns the published N(>1 km) at 1 km on an unscreened body; Venus's screened density at 1 km
-    is far below its production.
+    returns the published N(>1 km) at 1 km on an unscreened body at the lunar reference, and
+    N(>1 km) × `own_density_at_1km ÷ n_1km` under a map (the contract's density is
+    lunar-equivalent, science-r09-craters.md F1); Venus's screened density at 1 km is far below
+    its production.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
 - **P14.T48.d The climate regime classifier** (the rendering brainstorm's open question 9; with
   T24.a). `SurfaceConditions` gains a `ClimateRegime` of three fields and the regime's named coarse
@@ -5903,7 +5947,9 @@ it:
   draw or domain tag. P14.T14.d (decision-backlog-1) rides the same bump. It moves the locking
   times, rotation laws, frames, figures and moon limits of every sub-Neptune and ice giant, and the
   moons those limits keep, and it adds no draw or domain tag. It is built first and held until
-  the bump, which applies it (Risks, "A sub-Neptune's tides, as built").
+  the bump, which applies it (Risks, "A sub-Neptune's tides, as built"). P14.T48.f, the impactors
+  (science-r09-craters.md item 4), rides the same bump with T48.c, in closed form with no draw:
+  every record's crater contract moves once, at 21 → 22.
 - Phase L (decision-composition, 2026-10-09):
   - P14.T49.a moves no output and rides the 21 → 22 batch.
   - The 22 → 23 batch (T49.b–e, T50, T51.a–c, T52, and T24.c–e and T24.g with it) moves every

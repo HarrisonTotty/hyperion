@@ -4217,7 +4217,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     21", has the refit as built.
   - _Stale by rerun: the fates, refitted in 21 too._ `hyperion-fit check --rerun-fast` at 21 also
     found plan 06's `stellar_fates_low` and `_mid` stale by rerun, moved by T4.h alone. The
-    orchestrator first kept them for 21 with a refit in the version-22 batch. The same day
+    orchestrator first kept them for 21 with a refit in the version-22 batch (as the deferred bump
+    batch was numbered then, before plan 14's batches took versions 22–24). The same day
     (`status.md`, 2026-10-07) it ruled them refitted at 21 instead:
     - no version-21 output is published;
     - kept, they would leave `just test-slow` and `just ci-slow` red at 21 and could hide a third
@@ -4725,7 +4726,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
       taken the CPU past the approved 7 h. The floor also needs the lighter star's exact mass,
       which no cell holds.
     - The deferred bump batch's refit should store E's margin and smear. This is to be added to
-      that batch's entry in `deferred-corrections.md` (headed there "The 21 → 22 batch"), which
+      that batch's entry in `deferred-corrections.md` (headed there "The 21 → 22 batch", its number
+      before plan 14's batches took versions 22–24; it now follows plan 14's 23 → 24), which
       today says only "refit the tables".
   - **The slow test** (`the_pair_light_tables_bound_evolved_pairs`):
     - It takes 10⁴ pairs a layer sampled as the fit samples them, on a seed of the test's own,
