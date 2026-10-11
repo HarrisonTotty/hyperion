@@ -17,7 +17,8 @@
 //! `Synthesiser` returning the base elevation, the coarse cells interpolated over the sphere
 //! (`synth::interp`), with the header's spectrum, and beside it the structural octaves
 //! (`synth::relief`) and the channel network (`synth::channels`) that the assembly will add to it;
-//! and, for tests, synthetic fields (`testing`, feature `testing`).
+//! the cold-trap fraction that plan 14 and R09.T13.f share ([`cold_trap`]); and, for tests,
+//! synthetic fields (`testing`, feature `testing`).
 //!
 //! # The contract of the height function
 //!
@@ -51,6 +52,7 @@ compile_error!(
      client's terrain would not match the server's bit for bit"
 );
 
+pub mod cold_trap;
 pub mod craters;
 pub mod cube;
 pub mod field;

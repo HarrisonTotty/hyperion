@@ -4871,14 +4871,26 @@ Snapshot path, `planetary/chem/`.
     pure and in `f64` in the surface crate (the galaxy audit's B4), and R09.T13.f calls the same
     function to place the ice per cell. It is Hayne et al. 2021's template (Nat. Astron. 5, 169,
     eqs. 1 and 26), with Ingersoll, Svitek and Murray 1992's shadow temperature (Icarus 100, 40)
-    at the highest sun elevation. Its inputs are:
-    - the present obliquity, labelled, since cold traps record the obliquity's history;
-    - the host flux at periapsis, the Bond albedo and the emissivity;
-    - the crater fraction and d/D distribution from the crater state;
-    - the plains' RMS slope.
+    at the star's highest elevation (R09.T7.d; science-r09-drainage.md §8).
+    `cold_trap::permanent_shadow`, the same model without the temperature cut, serves the Ceres
+    test. The fraction's inputs are:
+    - the star's greatest declination in the body's sky, min(ε, 180° − ε) of the present
+      obliquity to the seasonal orbit, labelled, since cold traps record the obliquity's history;
+    - the star's angular radius and flux at periapsis, the Bond albedo, the emissivity, and the
+      internal heat flow (T24.b), which sets the shadows' floor (about 24 K on the Moon) and decides
+      N₂, CO and CH₄;
+    - the crater fraction and d/D distribution (log-normal mean and variance) from the crater state;
+    - the plains' directional RMS slope;
+    - the share of the cold-trapping area under lateral conduction's cut-off, the lunar 0.05
+      (labelled).
   - **The threshold of each species:** the temperature at which Hertz–Knudsen sublimation from its
     T49.b saturation curve is 144 kg m⁻² Gyr⁻¹ (Schorghofer and Williams 2020, PSJ 1, 54, Table 1:
     110 K for H₂O).
+    It is one rule for every species. For CO₂ it gives about 57 K: Clausius–Clapeyron from the
+    194.7 K sublimation point at 25–27 kJ mol⁻¹ gives 55.5–58.4 K, and T49.b's curve decides.
+    Schorghofer, Williams and Paige's ~51 K (LPSC 2021, 1389) is their stricter 10 kg m⁻² Gyr⁻¹, a
+    delivery rate, on their own extrapolated curve. A loss criterion scaled by each species'
+    delivery waits for a delivery budget (with T55.c).
   - **The exposed fraction f_x:** drawn once a body, log-uniform in [0.016, 0.45], on a stream this
     task chooses under the determinism rules, so that no existing value moves. The bounds are
     Ceres's 10 of 634 shadowed craters (Platz et al. 2016), the Moon's 3.5% (Li et al. 2018) and
@@ -4891,12 +4903,21 @@ Snapshot path, `planetary/chem/`.
   - **T51.a's airless branch:** a condensable lies as a zonal solid only where the zonal annual
     maximum, not the mean, is below its threshold, and otherwise only in cold traps.
   - _Tests:_
-    - the Moon's cold traps are 0.05–0.2% of its surface, about 6.7% of 80–90° and almost none
-      below 70° (Hayne et al.'s Table 1, within a factor of two);
+    - the Moon's cold traps are 0.03–0.2% of its surface and 1.6–13% of 80–90°, with almost none
+      below 70°. The bounds run from half of Williams et al. 2019's Diviner-mapped 0.048% (and its
+      ~3.2% of 80–90°) to twice Hayne et al.'s point-source 0.10% (and 6.7%), since the Sun's disk
+      lowers the closed form by about a fifth (R09.T7.d tests Hayne's bands at a point source);
     - its exposed water at f_x = 0.035 is within a factor of two of Li et al.'s;
-    - CO₂ cold traps on the Moon are of order 200 km² (Schorghofer et al. 2021);
-    - Ceres's permanent shadow is of order 2,300 km² at 4° and essentially zero at 20°
-      (Schorghofer et al. 2024);
+    - at the temperature T49.b's curve gives for Schorghofer et al.'s 10 kg m⁻² Gyr⁻¹, the Moon's
+      CO₂ cold traps are within a factor of three of their 286 km² (LPSC 2021, 1389; "roughly
+      200 km²" in GRL 48, e2021GL095533). The factor is three because their time-averaged
+      criterion gives 3.6 times the area a peak-temperature one does, and this form is one. The
+      area at the rule's own threshold is recorded, not asserted;
+    - Ceres's permanent shadow (`cold_trap::permanent_shadow`, at Ceres's flux and angular radius,
+      with Hayne et al.'s lunar terrain: 20% craters, plains σ_s 5.7°) holds Schorghofer et al.
+      2024's 2,282 km² at a 4° greatest declination between craters of distribution B and A. At
+      20° it is under 3% of that, 68 km², with either: their "essentially zero"
+      (science-r09-drainage.md §8.10);
     - an airless body at 30° obliquity has none;
     - a smooth lunar pole lays no zonal cap, and a body whose zonal annual maximum is below the
       threshold everywhere lays one over its whole surface.

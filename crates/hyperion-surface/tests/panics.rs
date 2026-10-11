@@ -527,3 +527,67 @@ fn a_head_length_past_the_deepest_level_is_refused() {
 fn a_tributary_rise_of_negative_steepness_is_refused() {
     let _ = tributary_rise(-1.0, Metres::new(10.0), Metres::new(10.0));
 }
+
+/// The cold-trap fraction's refusals (plan R09, T7.d), in a module of their own so that their
+/// imports stay apart from the rest.
+mod cold_trap {
+    use hyperion_base::units::{Kelvin, Radians, WattsPerSquareMetre};
+    use hyperion_surface::cold_trap::{
+        Body, BodyParts, DepthRatios, Terrain, TerrainParts, fraction, permanent_shadow,
+        shadow_temperature,
+    };
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    fn body() -> Body {
+        Body::new(BodyParts {
+            flux: WattsPerSquareMetre::new(1361.0),
+            greatest_declination: Radians::new(0.027),
+            star_radius: Radians::ZERO,
+            bond_albedo: 0.12,
+            emissivity: 0.95,
+            heat_flow: WattsPerSquareMetre::ZERO,
+        })
+        .unwrap()
+    }
+
+    fn terrain() -> Terrain {
+        Terrain::new(TerrainParts {
+            crater_fraction: 0.2,
+            crater_depths: DepthRatios::HAYNE_A,
+            plains_slope: Radians::new(0.1),
+            share_under_cutoff: 0.0,
+        })
+        .unwrap()
+    }
+
+    #[test]
+    #[should_panic(expected = "a latitude must be in [-π/2, π/2]")]
+    fn a_fraction_beyond_the_pole_is_refused() {
+        let _ = fraction(Radians::new(1.6), &body(), &terrain(), Kelvin::new(110.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "a latitude must be in [-π/2, π/2]")]
+    fn a_shadow_beyond_the_pole_is_refused() {
+        let _ = permanent_shadow(Radians::new(-1.6), &body(), &terrain());
+    }
+
+    #[test]
+    #[should_panic(expected = "a threshold must be finite and positive")]
+    fn a_fraction_below_absolute_zero_is_refused() {
+        let _ = fraction(Radians::new(1.5), &body(), &terrain(), Kelvin::new(-1.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "a bowl's depth ratio must be in (0, 0.5]")]
+    fn a_bowl_deeper_than_a_hemisphere_is_refused() {
+        let _ = shadow_temperature(0.6, Radians::new(0.03), &body());
+    }
+
+    #[test]
+    #[should_panic(expected = "a star's elevation must be in [0, π/2]")]
+    fn a_star_below_the_horizon_is_refused() {
+        let _ = shadow_temperature(0.2, Radians::new(-0.1), &body());
+    }
+}
