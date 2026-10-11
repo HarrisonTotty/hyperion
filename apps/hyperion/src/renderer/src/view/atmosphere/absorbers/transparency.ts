@@ -273,8 +273,10 @@ interface PendingListing {
 
 /**
  * The species and pairs whose absorption over the bake range R08.T4.d–f draw
- * (`decision-r08-t4b-t12c.md`, follow-ups 2 to 4). The ions are listed for when P14.T49.b adds
- * their rows.
+ * (`decision-r08-t4b-t12c.md`, follow-ups 2 to 5). The ions are listed for when P14.T49.b adds
+ * their rows. A resonance line's far wing, which grows with its perturbers' density, is a pair of
+ * the atom and each perturber (`K+H2`, `K+He`; follow-up 5, ruling 2), beside the atom's own
+ * entry per atom.
  */
 const PENDING: ReadonlyArray<PendingListing> = [
   {
@@ -323,7 +325,17 @@ const PENDING: ReadonlyArray<PendingListing> = [
     what: "HITRAN2024's bands over 565-737 nm, the (20052)-(00001) band near 716 nm the strongest",
   },
   { key: "Na", task: "R08.T4.e", what: "Na D (589.0 and 589.6 nm), pressure-broadened" },
-  { key: "K", task: "R08.T4.e", what: "the broadened blue wing of K I 766.5 and 769.9 nm" },
+  { key: "K", task: "R08.T4.e", what: "K I's lines in the range, per atom (404.5 and 404.8 nm)" },
+  {
+    key: "K+H2",
+    task: "R08.T4.e",
+    what: "the far blue wing of K I 766.7 and 770.1 nm per (K, H2) pair, from Allard et al.",
+  },
+  {
+    key: "K+He",
+    task: "R08.T4.e",
+    what: "the far blue wing of K I 766.7 and 770.1 nm per (K, He) pair, from Allard et al.",
+  },
   { key: "Ca", task: "R08.T4.e", what: "Ca I 422.7 nm" },
   { key: "Cr", task: "R08.T4.e", what: "Cr I 425.4, 427.5 and 429.0 nm" },
   { key: "Si", task: "R08.T4.e", what: "Si I 390.6 nm" },

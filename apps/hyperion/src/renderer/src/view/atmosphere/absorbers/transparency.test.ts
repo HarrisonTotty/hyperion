@@ -19,6 +19,11 @@ function cellMeans(bound: AbsorberBound): ReadonlyArray<Float64Array> {
   return bound.kind === "species" ? bound.cellMeansM2 : bound.cellMeansM5;
 }
 
+/** A pending key's cell means, or `undefined` if it is not pending. */
+function pendingBound(key: string): AbsorberBound | undefined {
+  return PENDING_ABSORBERS.find((p) => p.key === key)?.bound;
+}
+
 describe("the registry's absorbers", () => {
   it("each have cross-sections, a pending entry with its cell means, or a stated none", () => {
     const flagged = registry.substances.filter((row) => row.absorber).map((row) => row.key);
@@ -112,6 +117,28 @@ describe("the pending absorbers", () => {
         expect(row.length).toBe(PENDING_CELL_COUNT);
         expect(row.filter((v) => Number(v.toPrecision(3)) !== v)).toEqual(new Float64Array(0));
       }
+    }
+  });
+
+  it("hold K's far wing as pairs with H₂ and He, estimated, beside K's own lines per atom", () => {
+    expect(
+      ["K", "K+H2", "K+He"].map((key) => {
+        const bound = pendingBound(key);
+        return [bound?.kind, bound?.basis, bound?.task];
+      }),
+    ).toEqual([
+      ["species", "measured", "R08.T4.e"],
+      ["pair", "estimated", "R08.T4.e"],
+      ["pair", "estimated", "R08.T4.e"],
+    ]);
+  });
+
+  it("give K's wing pairs their largest value in the range at 760 nm, nearest the doublet", () => {
+    for (const key of ["K+H2", "K+He"]) {
+      const bound = pendingBound(key);
+      const row =
+        bound === undefined ? new Float64Array(0) : (cellMeans(bound)[1] ?? new Float64Array(0));
+      expect(row.indexOf(Math.max(...row)) + 380).toBe(760);
     }
   });
 

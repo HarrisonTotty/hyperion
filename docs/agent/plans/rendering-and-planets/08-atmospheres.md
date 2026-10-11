@@ -2335,8 +2335,8 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     - O₂–O₂ collision-induced absorption (its bands near 380, 446, 477, 532, 577 and 630 nm),
       from HITRAN's CIA file (Karman et al. 2019), measured over the file's temperatures
       (223–287 K, or colder if a set holds it), held and `estimated` beyond;
-    - O₂–N₂ (O₂–air) in the A band, over the 733–760 nm in the range, from HITRAN's CIA file
-      (Tran et al. 2006);
+    - O₂–N₂ in the A band, over 733–760 nm, from HITRAN2024's O₂–N₂ file (Tran et al. 2006),
+      not its O₂–air file, which would count O₂–O₂'s A band twice;
     - O₂–CO₂ in the A band, over 733–760 nm, from HITRAN2024's `O2-CO2_2024.cia`
       (Vangvichith et al. 2009). It and O₂–N₂ are measured at 296 K and held, `estimated`,
       beyond it;
@@ -2362,10 +2362,9 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   - **Stated transparency and pending absorbers** (`decision-r08-t4b-t12c.md`, follow-up 3).
     - `NO_VISIBLE_ABSORPTION` holds only what no column can make visible, each with its reason:
       He (`bandsOutsideRange`, below 5,000 K: its levels start 19.8 eV up), e⁻
-      (`noBoundStates`), and N₂ (`bandsOutsideRange`, unless its quadrupole overtones fail the
-      check: they pass, but its first positive bands from the metastable A state absorb in the
-      range when hot, so the statement holds below 1,800 K). CO₂, by the same check, is pending:
-      HITRAN2024 holds its bands over 565–737 nm (`decision-r08-t4b-t12c.md`, follow-up 4).
+      (`noBoundStates`), and N₂ (`bandsOutsideRange`, below 1,800 K; above it, its first
+      positive bands are R08.T4.f's). CO₂, by the same check, is pending: HITRAN2024 holds its
+      bands over 565–737 nm (`decision-r08-t4b-t12c.md`, follow-ups 4 and 5).
     - `PENDING_ABSORBERS` names each absorber-flagged species whose data are still to be built,
       with its task and its 1 nm cell-mean cross-sections over 380–760 nm at its source's
       temperature nodes, marked measured or estimated.
@@ -2375,6 +2374,8 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       - H₂S, SiO, hot CO, N₂O and HCN, and N₂ above 1,800 K are R08.T4.f's.
       - Mg⁺, from 2,570 K (its 448.1 nm line, 8.86 eV up), and H₂⁻'s free–free (`H2+e-`, while
         Bell 1980's table is not obtained, its values estimated), are R08.T4.e's.
+      - K's resonance doublet's far wing is R08.T4.e's as the pairs `K+H2` and `K+He`, per
+        (atom, perturber) pair, `estimated`, beside K's own lines per atom (follow-up 5).
       - ExoMol-derived bounds go in `absorbers/exomol/bounds.json`.
       - CO's ExoMol Li2015 bands from 8–0 up are dropped, recorded: they break the overtone
         ladder's monotone decline. Their bound is the ladder below HITRAN2024's 7–0.
@@ -2404,9 +2405,12 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     - H₂O's visible bands (near 590, 650 and 700–735 nm), from HITRAN, to 500 K;
     - NH₃'s 552 and 648 nm bands, from ExoMol's C2018 list (Coles et al. 2018), in
       `absorbers/exomol/` under its CC BY-SA terms;
-    - CO₂'s bands over 565–737 nm, which HITRAN2024 holds: T4.c's check finds τ about 0.7 in
-      the 716 nm cell through a Venus-class vertical column (about 5 × 10² km-amagat), above
-      τ 10⁻³, so CO₂'s `absorber` flag stands for P14 (follow-up 4);
+    - CO₂'s bands over 565–737 nm (HITRAN2024, 1,204 lines; measured at 200, 296 and 500 K;
+      τ ≈ 0.7 at 716 nm through Venus's vertical column);
+    - Karman et al. 2018's computed A- and B-band collision-induced sets at 206–346 K (Nature
+      Chem. 10, 549; HITRAN's alternate files), in place of R08.T4.c's single-temperature A
+      and B bands, for each pair they cover: `measured` over 206–346 K, held and `estimated`
+      beyond.
     - CO's 7–0 band (691–700 nm, HITRAN2024), its higher overtones bounded by the ladder;
     - N₂O from HITRAN2024 (to 714 nm) and ExoMol's TYM list below it (to 500 nm), the latter in
       `absorbers/exomol/`;
@@ -2467,9 +2471,11 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       members above 380 nm. A non-LTE thermosphere is not modelled, recorded. H's bound–free
       from n ≥ 3 is stated negligible beside H⁻ below 5,000 K;
     - the ions, once P14.T49.b's rows exist: Ca II's H and K (393.4 and 396.8 nm), and Fe II's
-      and Ti II's lines in the range. Mg II's in-range line (448.1 nm) lies 8.86 eV up, and
-      reaches τ 10⁻³ at 10³ km-amagat near 2,570 K, so Mg⁺ is pending with its bound
-      (R08.T4.c's finding; follow-up 2's "stated none" is corrected);
+      and Ti II's lines in the range. Mg II's 448.1 nm line (8.86 eV up, reaching τ 10⁻³ at
+      10³ km-amagat near 2,570 K);
+    - [Fe II]'s forbidden lines from Deb and Hibbert 2011 (A&A 536, A74; CDS J/A+A/536/A74);
+    - Na D's and K's far wings as pairs with H₂ and He, from Allard et al.'s profiles over
+      their density-linear range, beside each doublet's own profile per atom;
     - the resonance lines in the range of any further atom P14.T49.b adds (Al I 394.4 and
       396.2 nm, Mn I 403.1–403.4 nm, V I's);
     - O I's forbidden lines [O I] 630.0 and 636.4 nm (Kurucz's `gf0800.all`), and He I's lines in
@@ -2489,18 +2495,19 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     licence note and a `NOTICE` entry offering the adapted files under CC BY-SA 4.0. Never inside
     `crossSections.json` or code.
   - **The species:**
-    - TiO (McKemmish et al. 2019, Toto) and VO (McKemmish et al. 2016, VOMYT);
+    - TiO (McKemmish et al. 2019, Toto) and VO (ExoMol's HyVO list, cited at fetch);
     - FeH's F⁴Δ–X⁴Δ bands below 760 nm (MoLLIST, Dulick et al. 2003, as ExoMol carries it);
     - hot H₂O (POKAZATEL, Polyansky et al. 2018), handing over from R08.T4.d's HITRAN at a
       recorded temperature where the two agree;
     - H₂S's visible overtones (AYT2, Azzam et al. 2016), from 296 K;
-    - hot NH₃, and CH₄ above 300 K, where an open line list reaches 380–760 nm. As known when
-      ruled, none does: HITEMP 2020's CH₄ stops at 746 nm, and ExoMol's CoYuTe NH₃ at 1 µm.
-      This is confirmed at fetch. Failing one, CH₄ is held at Eq. 8's 300 K value and NH₃ at
-      C2018's temperature, both `estimated`.
+    - hot NH₃ from ExoMol's CoYuTe (Coles, Yurchenko and Tennyson 2019), which reaches 500 nm,
+      over its coverage, with C2018 below 500 nm held at its temperature, `estimated`;
+    - CH₄ above 300 K, where an open line list reaches 380–760 nm. As known when ruled, none
+      does: HITEMP 2020's CH₄ stops at 746 nm. Failing one, CH₄ is held at Eq. 8's 300 K
+      value, `estimated`;
     - SiO's A–X hot bands (ExoMol's SiOUVenIR), which reach the range above about 1,000 K;
-    - hot N₂'s first positive (B–A) bands from its metastable A state, above 1,800 K (T4.c's
-      stated band-model estimate until a line list is found at fetch);
+    - N₂'s first positive (B–A) bands above 1,800 K, from its metastable A state 6.17 eV up, as
+      an LTE band model (Huber and Herzberg's constants), `estimated`;
     - hot CO, N₂O and HCN (HITEMP or ExoMol, checked at fetch), handing over from R08.T4.d's
       HITRAN at recorded temperatures;
   - Tests:
@@ -3549,28 +3556,39 @@ By the composition ruling (decision-composition):
 - `atmosphereApproximate` collects the reasons of the optics registry: an estimated or absent
   Rayleigh, an absent absorber, or one with no column free (`noColumnFree`), a stand-in or
   unknown material.
-- **Negligible absorbers** (`decision-r08-t4b-t12c.md`, follow-ups 3 and 4).
-  - **The test.** For each listed absorber still in R08.T4.c's `PENDING_ABSORBERS`, and each
-    species drawn with estimated optics or a held temperature, the medium takes the species'
-    1 nm cell-mean σ at the profile's column-weighted temperature (interpolated in ln σ). It
-    takes too the profile's largest column, u_max, along the horizontal ray at the medium's
-    lowest level.
-  - **When a species is negligible.** For each of the body's suns and each channel it bounds
-    the change of the channel's light:
-    - Δ_c = Σ_cells |c̄_c| S min(1, k⟨σ⟩_cell u_max) ÷ Σ_cells c̄_c S;
-    - k = 1 for measured data, and 100 for estimated data or a temperature past the data's.
-
-    The species is negligible where Δ_c ≤ 10⁻³ in every channel. A negligible pending species
-    takes no column and no curve. No negligible species takes a label, and the medium names
-    it `negligible`.
-
-  - **Otherwise** it labels the body under Design note 12's τ rule until its task lands.
+- **Negligible absorbers** (`decision-r08-t4b-t12c.md`, follow-ups 3–5).
+  - **What is tested:**
+    - each listed absorber still in R08.T4.c's `PENDING_ABSORBERS`;
+    - each species drawn with estimated optics or past its data's temperatures.
+  - **The medium takes:**
+    - each entry's 1 nm cell means at the profile's column-weighted temperature: per molecule,
+      or per pair for a pair, and for a resonance line's wing per (atom, perturber) pair, as K's
+      with H₂ and He. They are interpolated with ln σ linear in 1/T between the nodes and held
+      beyond;
+    - the profile's largest column, u_max, along the horizontal ray at the medium's lowest level:
+      a column, or ∫ n_A n_B ds for a pair or a wing.
+  - **The bound.** For each of the body's suns and each channel:
+    - Δ_c = Σ_cells |c̄_c| S min(1, Σ_kinds max_entries(k⟨σ⟩_cell) u_max) ÷ Σ_cells c̄_c S;
+    - k = 1 for measured data, and k = 100 for estimated data, a temperature past the data's, or
+      HITRAN's 500 K nodes above 296 K, which lack hot lines;
+    - where a species has a temperate and a hot entry (CO, N₂O, HCN, H₂O), the larger k⟨σ⟩ is
+      taken cell by cell at the profile's temperature.
+  - **Negligible** means Δ_c ≤ 10⁻³ in every channel. Δ_c bounds the change of the channel's
+    light from above, since 1 − e^(−x) ≤ min(1, x).
+    - A negligible pending species takes no column and no curve.
+    - No negligible species takes a label, and the medium names it `negligible`.
+    - Otherwise the species labels the body under Design note 12's τ rule until its task lands.
   - Tests:
     - a Mars-class body's CO, an Earth-class body's N₂O, and Earth's O₂–N₂ and O₂–CO₂ slices
       are negligible;
-    - a Uranus-class H₂ column's quadrupole lines are negligible (about 4 × 10⁻⁵ in red);
+    - a Uranus-class H₂ column's quadrupole lines are negligible;
+    - a Venus-class body's CO₂ is not, until R08.T4.d;
+    - a hot giant's K wing grows with its perturber density, and is negligible only where the
+      pair column allows;
     - a species whose column is raised past its bound labels the body;
-    - an estimated cross-section needs its hundredfold margin;
+    - an estimated entry needs its hundredfold margin;
+    - for a line from a single lower level, the interpolation between nodes equals the
+      Boltzmann law to 10⁻⁹;
     - Δ_c bounds the channel change of an `f64` spectral reference from above.
 - A body in the `Tenuous` state with a drawable haze is drawn in the `thin` regime. One whose gas
   is only an exosphere takes no medium, since its scattering is negligible (vertical τ about
@@ -5215,7 +5233,8 @@ generator, and the reference's sampling needs no domain tag.
     reduced values with citation, no raw file.
   - Where Kurucz lacks a line, the primary paper's value is used, cited to it.
   - A spectrum held by no source but ASD may take an ASD-derived bound, as a derived value with
-    citation, listed here as a stated exception. Listed (R08.T4.c, for main's confirmation): Ti⁺'s
+    citation, listed here as a stated exception. Listed (R08.T4.c; accepted,
+    `decision-r08-cmf-licence.md` §9.1): Ti⁺'s
     15 forbidden [Ti II] lines in the range, which Kurucz lacks and whose primary papers (Deb et
     al. 2009; Hartman et al. 2005) are closed, at ASD's values with citation, Ti⁺'s entry marked
     `estimated`. They lead its largest cell only at 300 K; from 1,000 K Kurucz's permitted lines
@@ -7850,17 +7869,17 @@ generator, and the reference's sampling needs no domain tag.
       ¹⁶O¹²C¹⁸O); the (20052)–(00001) band's 716 nm cell is 5.1 × 10⁻³² m² at 296 K, τ 1.4 at
       10³ km-amagat and about 0.7 through Venus's vertical column. CO₂ is pending in R08.T4.d,
       measured at 200, 296 and 500 K.
-    - `PENDING_ABSORBERS` lists 39 entries of key and task. By follow-up 4, ruling 3, each holds
+    - `PENDING_ABSORBERS` lists 41 entries of key and task. By follow-up 4, ruling 3, each holds
       its 1 nm cell-mean σ over 380–760 nm, 381 cells, at its source's nodes (`cellMeansM2` or
       `cellMeansM5`), rounded up to 3 significant figures, not σ̄_max and its cell:
-      `bounds.json` (334 kB; HITRAN2024's, Kurucz's, the ladder's and the stated estimates) and
+      `bounds.json` (384 kB; HITRAN2024's, Kurucz's, the ladder's and the stated estimates) and
       `exomol/bounds.json` (119 kB; adapted material under CC BY-SA 4.0 with its `README.md` and a
       `NOTICE` entry). Prettier would write each 381-cell row one value a line, so both files are
       in `.prettierignore`, one node's row a line. Missing cell means fail at load. H₂–H₂ and
       O₂–CO₂ are drawn, no longer pending; CO₂ (T4.d) and N₂ (T4.f) are added.
     - A species with a temperate and a hot source has one entry a task (CO, N₂O, HCN, H₂O).
-      R08.T10.a takes, cell by cell, the larger at the profile's temperature: a rule of this
-      record, not yet of T10.a's text, for "main".
+      R08.T10.a takes, cell by cell, the larger k⟨σ⟩ at the profile's temperature (follow-up 5,
+      ruling 3, now in T10.a's text).
     - _The atomic and ionic entries_ (§7) are Kurucz's per-spectrum lists with Barklem and Collet
       2016's partition functions; against the earlier ASD sums the largest cells moved for Ti⁺
       (down 63–82% at 3,000–5,000 K, chiefly an ASD error: its Ti II 455.09 nm entry is internally
@@ -7871,16 +7890,23 @@ generator, and the reference's sampling needs no domain tag.
       Si (+31% to 1,000 K, −11% above),
       Mg (−14%), Ti (−14% to −16%), O (−10%), K (+9%) and Fe⁺ (+7% at 2,000 K); the rest within
       2%. Kurucz holds no forbidden [Fe II] or [Ti II] line. Fe⁺'s 1,099 in range are Deb and
-      Hibbert 2011's A-values (A&A 536, A74; CDS J/A+A/536/A74), the primary paper. Ti⁺'s 15 are
-      ASD's values cited to their primary papers (Deb et al. 2009; Hartman et al. 2005), both
-      closed, so Ti⁺ is `estimated`: whether that is §7.3.3's stated exception is for "main".
+      Hibbert 2011's A-values (A&A 536, A74; CDS J/A+A/536/A74), the primary paper, `measured`
+      (follow-up 5). Ti⁺'s 15 are ASD's values, which ASD attributes to Deb et al. 2009 and
+      Hartman et al. 2005, both closed: §7.3.3's stated exception, accepted
+      (`decision-r08-cmf-licence.md` §9.1). Ti⁺ is `estimated` on the lines' grades (B to E).
       Kurucz's `gf0800.all` holds [O I] 630.0 and 636.4 nm. He's τ figures are recomputed from
       `gf0200.all` (unchanged).
-    - _K_ is `estimated`. Its resonance doublet's pressure-broadened blue wing (766.7 and
-      770.1 nm) reaches the 760 nm cell and grows with the perturbers' density, so it fits no
-      value a molecule and is not in the cells. Under σ̄_max the hundredfold margin covered it to
-      13–28 amagat; per cell it does not, so R08.T10.a must add the wing at the body's perturber
-      density (for "main").
+    - _K's wing as a pair_ (follow-up 5, ruling 2). Its resonance doublet's pressure-broadened
+      blue wing (766.7 and 770.1 nm) reaches the 760 nm cell and grows with the perturbers'
+      density, so it is held per (K, H₂) and (K, He) pair in two pair entries, `K+H2` and `K+He`
+      (R08.T4.e, `estimated`), beside K's own entry per atom, which holds its in-range lines and
+      is now `measured`. The ruling's "K's pending entry holds two kinds of cell mean" is these
+      three entries, so that each keeps one unit. Until Allard et al.'s profiles (R08.T4.e) the
+      wing is the impact (Lorentz) estimate, linear in the perturber's density: Kurucz's D lines,
+      whose damping field is blank, with Unsöld's C6 by the perturber's polarisability. Its
+      760 nm cell is 4.0 × 10⁻⁴⁷ m⁵ for (K, H₂) at 1,000 K and half that for He. Past about
+      50 cm⁻¹ from the lines the wing is quasi-static, not impact, so the true blue wing may lie a
+      few times either side; the hundredfold margin is for it.
     - Choices recorded per entry: hot CO (Li2015, bands 8–0 and up dropped as ruled) is scaled by
       2.13 to HITRAN2024's measurement-anchored 7–0; hot HCN (Harris) is `estimated`; ExoMol's TYM
       below HITRAN's 714 nm limit stays under T4.d's HITRAN values; H₂'s cells sum ¹H₂'s and HD's
@@ -7902,9 +7928,8 @@ generator, and the reference's sampling needs no domain tag.
     - _Between and past the nodes._ A line's cell means follow its lower level's Boltzmann
       factor, ln σ linear in 1/T, which `transparency.ts`'s doc asks of R08.T10.a: ln σ linear in T
       would fall below a node pair's line (Mg⁺'s 448 nm cell at 2,500 K, 5.6 times). HITRAN's
-      500 K nodes lack hot bands and are lower limits, though their entries are `measured`;
-      R08.T10.a should take a temperature past 296 K as past the data's (k = 100) for them, as it
-      does for Harris's HCN (for main).
+      500 K nodes lack hot bands and are lower limits, though their entries are `measured`, so
+      above 296 K R08.T10.a takes k = 100 for them (follow-up 5, ruling 4, in T10.a's text).
     - _Not reproducible from committed code:_ the cell means were summed by the lane's scratch
       scripts, deleted with the downloads; each entry's `source` and `method` name its inputs by
       URL and SHA-256 and its rule. A tool subcommand is a later task's if they must be recomputed.
@@ -7925,29 +7950,33 @@ generator, and the reference's sampling needs no domain tag.
     in `heliumMinus.ts`) are committed in code as reduced values with their citations, read from
     ADS's scans; A&A and MNRAS hold them and state no grant. The lane reads the five rows, a
     visible subset cut to the range R08 uses, as reduced under `decision-r08-licences.md`'s
-    definitions (for main). Deb and Hibbert 2011's CDS tables and Barklem and Collet 2016's
-    partition functions (CDS) feed derived cell means only and are not committed; CDS's own terms
-    were not read at the fetch (for main).
+    definitions (upheld, `decision-r08-cmf-licence.md` §9.2). Deb and Hibbert 2011's CDS tables and
+    Barklem and Collet 2016's partition functions (CDS) feed derived cell means only and are not
+    committed. CDS's terms, read on 2026-10-11 (`decision-r08-cmf-licence.md` §9.3): VizieR's data
+    are "free of usage in a scientific context", commercial use following the origin's rules;
+    A&A's are "free for a scientific usage"; neither catalogue's ReadMe states a copyright. Only
+    derived cell means are committed, so the use stands. AAS-origin catalogues (CC BY-NC by CDS)
+    are not inputs.
   - _Acceptance._ The command selects `absorbers.test.ts`, `absorbers/hMinus.test.ts`,
     `absorbers/heliumMinus.test.ts` and `absorbers/transparency.test.ts`;
     `src/tools/atmosphereData.test.ts` runs under `pnpm test`.
-  - _The plan's text, as built:_ T4.c's pairs name O₂–CO₂ by follow-up 4's text and H₂–H₂ by §8,
-    its transparency names N₂ with its 1,800 K limit and CO₂ as pending, and its pending list
-    holds cell means; T4.d's CO₂ item states what was found; T4.f gains hot N₂; T10.a's
-    "Negligible absorbers" is follow-up 4's per-channel test; T4.e's line data and [O I] follow
-    §7; the README's "T4.b–c" reads "T4.b–f". Follow-up 4's (d), P14.T49.b's flags, is plan 14's,
-    for "main".
-  - _Findings for "main":_
+  - _The plan's text, as built:_ T4.c's pairs name O₂–N₂ and O₂–CO₂ by follow-ups 4 and 5's
+    text and H₂–H₂ by §8, its transparency names N₂ with its 1,800 K limit and CO₂ as pending,
+    and its pending list holds cell means and K's wing pairs; T4.d's CO₂ and Karman et al. 2018
+    items, T4.e's lines ([Fe II], the Na D and K wings as pairs, Mg II) and T4.f's VO, NH₃, CH₄ and
+    N₂ items are follow-up 5's text; T10.a's "Negligible absorbers" is follow-up 5's; T4.e's line
+    data and [O I] follow §7; the README's "T4.b–c" reads "T4.b–f". Follow-up 4's (d), P14.T49.b's
+    flags, is plan 14's, for "main".
+  - _Findings, as ruled_ (follow-up 5):
     - ExoMol's CoYuTe (hot NH₃; Coles, Yurchenko and Tennyson 2019, MNRAS 490, 4638) covers
-      0–20,000 cm⁻¹, to 500 nm, with super-lines at 100–2,000 K (its page, fetched 2026-10-11), so
-      T4.f's "CoYuTe NH₃ at 1 µm" does not hold: hot NH₃ has an open list across the range, and
-      NH₃'s pending entry holds only C2018's 200 and 296 K.
-    - T4.f's VO is VOMYT (McKemmish et al. 2016), but ExoMol's cross-section service serves
-      HyVO (Bowesman et al. 2024), whose values VO's pending entry holds.
+      0–20,000 cm⁻¹, to 500 nm, with super-lines at 100–2,000 K (its page, fetched 2026-10-11):
+      T4.f now takes hot NH₃ from it. NH₃'s pending entry holds only C2018's 200 and 296 K.
+    - ExoMol's cross-section service serves VO's HyVO list (Bowesman et al. 2024), whose values
+      VO's pending entry holds: T4.f now names HyVO.
     - O₂–O₂'s held A and B bands are `measured` inside 203–287 K, since provenance goes by
-      temperature, while O₂–N₂'s and O₂–CO₂'s are `estimated` off 296 K; He⁻'s held A below
-      506.3 nm likewise. Karman et al. 2018's sets (above) would give the bands a temperature
-      dependence.
+      temperature, while O₂–N₂'s and O₂–CO₂'s are `estimated` off 296 K: left and recorded (ruling
+      7). Karman et al. 2018's sets replace the held bands in R08.T4.d. He⁻'s held coefficient
+      below 1,400 K is left, T10.a's test deciding.
   - _For R08.T6.c._ A pair term's u is `pairDensityPerM6` times ∫ρ ds of its own density (which is
     ρ² of the air), molecule pairs m⁻⁵, read from its curve as a column term's:
     `absorberTransmittance(curve, { kind: "pair", pairColumnPerM5: u })`, or
@@ -7956,7 +7985,8 @@ generator, and the reference's sampling needs no domain tag.
   - _For R08.T10.a._ It builds `thomsonTerm` from e⁻'s layer. Pairs form from their members'
     layers, so the members must be listed: H, e⁻, H⁻, H₂ and He as follow-up 2 asks of P14.T49.b,
     and N₂ and CO₂, which follow-up 4 flags. N₂ below 1,800 K takes no label; CO₂ is pending. It
-    applies follow-up 4's per-channel test to the pending cell means, and adds K's wing.
+    applies follow-up 5's per-channel test to the pending cell means, K's wing pairs at the pair
+    columns ∫ n_K n_H₂ ds and ∫ n_K n_He ds.
   - _Closed set, for the composition audit:_ none. The pair tables are keyed by their members'
     registry keys and formed from whatever the file holds; a pair the client holds no table for
     is not formed and not reported, a stated limit (any two gases absorb a little in collision).

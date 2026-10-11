@@ -279,12 +279,16 @@ ruled 2026-10-09 and 2026-10-10).
   (the files named in each value's source, fetched 2026-10-11; R. L. Kurucz, "Including all the
   lines", Can. J. Phys. 89 (2011) 417). The bounds of the atoms and ions in
   apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json are computed from them (plan
-  R08, R08.T4.c). The forbidden [Fe II] lines Kurucz lacks are N. C. Deb and A. Hibbert's,
-  "Radiative transition rates for the forbidden lines in Fe II", Astron. Astrophys. 536 (2011)
-  A74, DOI: 10.1051/0004-6361/201118059 (CDS J/A+A/536/A74, fetched 2026-10-11); the forbidden
-  [Ti II] lines' are from N. C. Deb, A. Hibbert, Z. Felfli and A. Z. Msezane, J. Phys. B 42 (2009)
-  015701, and H. Hartman et al., Mon. Not. R. Astron. Soc. 361 (2005) 206, at the values NIST's
-  Atomic Spectra Database v5.12 lists for them (A. Kramida et al., 2024, DOI: 10.18434/T4W30F).
+  R08, R08.T4.c), with P. S. Barklem and R. Collet's partition functions, Astron. Astrophys. 588
+  (2016) A96, via CDS VizieR (DOI: 10.26093/cds/vizier), catalogue J/A+A/588/A96. The forbidden
+  [Fe II] lines Kurucz lacks are N. C. Deb and A. Hibbert's, "Radiative transition rates for the
+  forbidden lines in Fe II", Astron. Astrophys. 536 (2011) A74, DOI: 10.1051/0004-6361/201118059,
+  via CDS VizieR, catalogue J/A+A/536/A74 (fetched 2026-10-11); the forbidden
+  [Ti II] lines' are NIST's Atomic Spectra Database v5.12 values (A. Kramida, Yu. Ralchenko, J.
+  Reader and NIST ASD Team, 2024, DOI: 10.18434/T4W30F; a stated exception, Kurucz lacking them
+  and their primary papers being closed), which ASD attributes to N. C. Deb, A. Hibbert, Z.
+  Felfli and A. Z. Msezane, J. Phys. B 42 (2009) 015701, and H. Hartman et al., Mon. Not. R.
+  Astron. Soc. 361 (2005) 206.
 
 - H2-H2 collision-induced absorption: A. Borysow, "Collision-induced absorption coefficients of H2
   pairs at temperatures from 60 K to 1000 K", Astron. Astrophys. 390 (2002) 779-782, DOI
