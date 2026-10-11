@@ -234,9 +234,17 @@ pub mod wire {
     pub struct DecodedBlock;
 }
 pub mod craters {
-    pub struct CraterParams { /* n_1km: PerSquareKilometre, screening: Screening (P ÷ g,
-        projectile density, or a crater cutoff), g, k_target, impact_velocity: Option */ }
+    pub struct CraterParams { /* n_1km: PerSquareKilometre, screening: Screening (P ÷ g, or a
+        crater cutoff), g, k_target, impact_velocity: Option, projectile_density,
+        target: CraterTarget, system_age: Gigayears */ }
+    pub enum TargetClass { NonPorous, Porous }      // codes 0, 1, appended only
+    pub struct CraterTarget { /* class: TargetClass, density: KilogramsPerCubicMetre */ }
+    pub const LUNAR_IMPACT_VELOCITY: MetresPerSecond;  // 16.7 km/s, the map's reference
+    pub const SOLAR_SYSTEM_AGE: Gigayears;             // 4.567 Gyr, the chronology's clock
+    pub fn lunar_chronology(surface_age: Gigayears, system_age: Gigayears) -> PerSquareKilometre;
+    pub fn chronology_age(n_1km: PerSquareKilometre, system_age: Gigayears) -> Gigayears;
     pub fn cumulative_density(p: &CraterParams, d: Metres) -> PerSquareKilometre;
+    pub fn own_density_at_1km(p: &CraterParams) -> PerSquareKilometre;  // T7.e: the body's own
     pub fn saturation(d: Metres) -> PerSquareKilometre;   // Trask 1966, 0.079 D⁻² km⁻²
     pub fn transition_diameter(p: &CraterParams) -> Metres;  // 19 km × (1.62 ÷ g) × k_target
     pub struct CraterShape { /* morphology, depth, rim_height, floor_radius, peak_relief,
@@ -629,10 +637,12 @@ every timing below is provisional and is re-measured on a quiet machine by the t
      t, and `runoff` the epoch's runoff at that intermittency, which weights the drainage area on a
      world dry now (Design note 9; corrected 2026-10-09 by T0.b from "years at effective
      discharge", and 2026-10-10 by science-hoke.md).
-   - **The crater contract**: N(>1 km) with its belt scaling, the screening inputs (surface
-     pressure over gravity and a projectile density, or a crater cutoff), g, a target factor
-     k_target (1 rock, 0.12 ice-rich), and optionally a mean impact velocity; the surface crate
-     derives the rest (Design note 12).
+   - **The crater contract**: the lunar-equivalent N☾(>1 km) with its belt scaling (Design note
+     12), the screening input (surface pressure over gravity, or a crater cutoff), the
+     projectiles' density, g, a target factor k_target (1 rock, 0.12 ice-rich), the target's
+     scaling class (non-porous or porous) and density, the system's age, and a mean impact
+     velocity (optional for builder inputs; plan 14 always gives it, by P14.T48.f); the surface
+     crate derives the rest (Design note 12).
    - **The climate regime classifier** of open question 9, which plan 14 does not yet have: its
      three fields (a thermal regime, a forcing from the locking state, the solar day and the
      obliquity, and a condensable) and the regime's named coarse model, with four corrections:
@@ -965,11 +975,27 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     `hyperion-surface`, which cannot depend on the sim, so the function lives in
     `hyperion-surface::craters` and plan 14 calls it from the sim. Its production shape is Neukum's
     polynomial log₁₀ N(>D) = Σ aₙ (log₁₀ D)ⁿ, 10 m to 300 km, holding a1…a11 only: a0 is log₁₀ N(>1
-    km), the parameter, so the input is exact (the published a0 of −3.0876 is a misprint of
-    −3.0768), extended by the end slopes outside its range (−2 below 10 m). Other bodies take a
-    monotone diameter map by π-group scaling (Holsapple 1993), optional in `CraterParams` and the
-    identity at unit ratios. Saturation is Trask's N(>D) = 0.079 D⁻² km⁻²; capped craters draw their
-    ages from the last T × N_sat ÷ N_prod of the surface age, inverted through the chronology. That
+    km), the parameter, so the input is exact and neither published a0 enters (Neukum et al. 2001's
+    −3.0876 is the reworked polynomial's own 1-Gyr level, which matches Neukum 1983's below 1 km,
+    where the 1983 polynomial's a0 is −3.0768, Ivanov et al. 2002, Table 1; the chronology's linear
+    term, 8.38 × 10⁻⁴ = 10^−3.0768, is the 1983 normalisation, kept as published, as Craterstats
+    keeps it, rather than Cratermaker's 10^−3.0876 = 8.17 × 10⁻⁴; science-r09-craters.md F3),
+    extended by the end slopes outside its range (−2 below 10 m). The contract's N(>1 km) is
+    lunar-equivalent: the Moon's density for the body's projectile flux (the chronology × the belt
+    scaling). Other bodies take it to their own craters by a monotone diameter map by π-group
+    scaling, N(>D) = N☾ × 10^(Σ aₙ (log₁₀ φ(D))ⁿ), so a body's own N(>1 km) is N☾ at φ(1 km): 0.52
+    of N☾ on Venus, 0.25 on Mars at Ivanov's velocities, whose 0.49 Mars chronology then implies his
+    R_b ≈ 2 (science-r09-craters.md F1). The map is in the gravity regime (Holsapple 1993; Ivanov
+    2001's construction of Mars's function), optional in `CraterParams` and the identity at the
+    lunar reference. A lunar crater's transient cavity gives its projectile at the reference
+    (non-porous, ρ_t 2,550 kg m⁻³, ρ_p 3,000 kg m⁻³, U 16.7 km/s, g 1.62 m s⁻², D_t 19 km). The same
+    projectile's crater on the body follows from its class (non-porous μ 0.55 and K₁ 0.095; porous μ
+    0.41 and K₁ 0.132; ν 1/3 for both; Holsapple 1993 as Singer et al. 2019 apply it), its target
+    and projectile densities, U and g, and its own collapse at its D_t. Ice is non-porous at 940 kg
+    m⁻³ (science-r09-craters.md item 2). The strength regime is not modelled (Risks). Saturation is
+    Trask's N(>D) = 0.079 D⁻² km⁻²; capped craters draw their ages from the last T × N_sat ÷ N_prod
+    of the surface age, inverted through the chronology, `craters::chronology_age`, which counts
+    from the system's formation (the contract's system age; science-r09-craters.md item 5). That
     window is τ(D), the span a crater of diameter D draws its age from: the whole surface age where
     production is under saturation, and T × N_sat(D) ÷ N_prod(D) where it is capped.
     Screening is a projectile scale, d\* = 1.5 (P ÷ g) ÷ ρ_p (5.2 m for Earth, 0.52 km for Venus
@@ -977,9 +1003,10 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     kg m⁻³ and the brainstorm's 5 m, 0.5 km and 8 cm; this note's earlier 8.2 cm for Mars took
     about 610 Pa, T10's science review, 2026-10-09), giving a crater cutoff D_c = 20 d\* (about
     100 m, 10.4 km, 1.7 m) and a taper on the differential production,
-    f(D) = 1 ÷ (1 + (D_c ÷ D)^4.5), one rule for every body (researched 2026-10-09, by R09.T0.b;
-    the first draft's exponent 2 and its break-up branch above 1 MPa, D_c = 20 km with exponent 1.5
-    and a floor at 1.5 km, are withdrawn). The check is against Venus's crater catalogue itself, the
+    f(D) = 1 ÷ (1 + (D_c ÷ D)^4.2), one rule for every body (researched 2026-10-09, by R09.T0.b,
+    and refitted through the diameter map by science-r09-craters.md F1; the first draft's
+    exponent 2 and its break-up branch above 1 MPa, D_c = 20 km with exponent 1.5 and a floor at
+    1.5 km, are withdrawn). The check is against Venus's crater catalogue itself, the
     population Herrick and Phillips 1994 (Icarus 112, 253–281) model, whose text could not be
     reached (publisher paywall): the 881 named craters of the IAU's Gazetteer of Planetary
     Nomenclature (USGS, retrieved 2026-10-09; 2.0–270 km, of about 940 that Magellan mapped, from
@@ -987,12 +1014,19 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     Neukum's polynomial (Craterstats' coefficients) and a free N(>1 km). The best taper is D_c =
     9.0 km with exponent 5.4; 20 d\* = 10.4 km with exponent 4.5 lies 8 below it in ln L (exponent
     4 lies 28, 5 lies 11), while the first draft's exponent 2 lies 714, its break-up branch 846 and
-    the two multiplied 116. The adopted taper passes 0.4% of the production at 3 km, 4% at 5 km,
+    the two multiplied 116. Unmapped, that taper passes 0.4% of the production at 3 km, 4% at 5 km,
     23% at 8 km, 46% at 10 km and 95% at 20 km, so it needs no floor; its cumulative counts lie
     within 7% of the catalogue's from 1.5 to 95 km, and its N(>1 km) of 3.1 × 10⁻⁴ km⁻² is a
     lunar-chronology age of 0.37 Ga, inside the few hundred Myr to about 0.75 Gyr published for
-    Venus's mean surface (from memory). The exponent is measured on Venus alone, so it is low
-    confidence for thinner atmospheres, whose cutoffs keep their projectile scales. The transition
+    Venus's mean surface (from memory). Through the diameter map, at P14.T48.f's 25.7 km/s, the
+    same fit gives exponent 4.2 at 20 d\* (ΔlnL < 0.5 over 4.1–4.4; 4.5 lies 2.2 below) and a
+    lunar-equivalent N☾(>1 km) of 3.40 × 10⁻⁴ km⁻², 1.76 × 10⁻⁴ of Venus's own, an age of 0.41 Gyr
+    ÷ R_b. Its cumulative counts lie within 11% at 3–40 km. A free cutoff, 8.5 km with exponent
+    5.2, lies 18.8 above it in ln L, but π-scaling puts a d\* projectile's crater at 18–21 d\* on
+    Venus, so the rule stands. The adopted taper passes 0.5% of the production at 3 km, 4.5% at
+    5 km, 25% at 8 km, 46% at 10 km and 94% at 20 km (science-r09-craters.md F1). The exponent is
+    measured on Venus alone, so it is low confidence for thinner atmospheres, whose cutoffs keep
+    their projectile scales. The transition
     is D_t = 19 km × (1.62 ÷ g) × k_target (Pike's four bodies give g^−1.01), a zone: bowls below
     0.8 D_t, transitional to 1.5 D_t, central peaks above, peak rings from about 9 D_t, multi-ring
     basins above about 16 D_t. Fresh shapes (`decision-r09-t2.md` item 3; d is rim crest to floor,
@@ -1004,14 +1038,24 @@ every timing below is provisional and is re-measured on a quiet machine by the t
         bins, which are 0.125, 0.152 and 0.166 at 63, 141 and 283 m and 0.20 from 400 m. The fall
         is linear in log D between the bins, held below 63 m, and at D × g ÷ 1.62 off the Moon. The
         plan's own gravity scaling is of low confidence.
+      - On a porous-class target, the bowl is 0.14 D deep at every size, less where the regolith
+        rule gives less (the asteroidal value, Aponte-Hernández et al. 2021 §1; medium
+        confidence).
     - _Complex craters_ are self-similar in D ÷ D_t:
       - d = 0.150 D_t (D ÷ D_t)^0.303, the mean of Kalynn et al.'s LOLA mare and highland fits;
       - h = 0.0402 D_t (D ÷ D_t)^0.399, Pike 1980b's eq. (4);
       - floor diameter 0.389 (D ÷ D_t)^0.249 of D, held at 0.778 above 16 D_t;
-      - a central peak to 9 D_t, of relief 0.0238 D_t (D ÷ D_t)^0.900 (Pike 1980b, Table 6) and
-        base diameter 0.3 D (Garvin et al. 2003, Mars).
+      - a central peak of relief 0.0238 D_t (D ÷ D_t)^0.900 (Pike 1980b, Table 6) × w_on × w_off.
+        It grows from 0.8 D_t by the transitional blend's weight, w_on = ln(x ÷ 0.8) ÷ ln(1.875)
+        with x = D ÷ D_t: peaks occur in 0% to 100% of fresh lunar craters across 17–35 km (Wood
+        and Andersson 1978), Smith and Sanchez 1973's median is 14 km, and Pike's seven peaks under
+        28 km sit below his law. It fades across the protobasins, w_off = 1 − ln(x ÷ 9) ÷ ln(13 ÷ 9), Head
+        1977's 150–250 km (both via Hale and Head 1979). Its base diameter is Hale and Head 1979's
+        0.259 D − 2.5 km, written as 0.259 D − 0.132 D_t and never wider than the floor
+        (science-r09-craters.md F2).
       - So at a fixed D, d ∝ g^−0.70 and h ∝ g^−0.60.
-    - _Transitional craters_ blend the two in log D across 0.8–1.5 D_t.
+    - _Transitional craters_ blend the two in log D across 0.8–1.5 D_t, their central peak growing
+      by the same weight.
 
     Out of sample, the laws hold:
     - Mercury's depths within 10% of MLA (Susorney et al. 2016) and its rims within 14%;
@@ -1199,10 +1243,11 @@ every timing below is provisional and is re-measured on a quiet machine by the t
 T0 first. T1–T3 are the base: seeds, then types and codec; T2 needs nothing of T1 and may run
 beside T1.a. T4–T9 build the synthesis on T2 (T5, T6 and T7.b open their streams from T1.a's
 `DetailSeed`); T10–T16, the coarse pass, need T1.a and T2 and may run beside the synthesis only up
-to the points where they read it: T12.d (coarse craters) needs T7.a's density; T12.e (σ_h on the
-reconstructed field) needs T4's interpolant and T5's `local_variance`; T14.b (the multigrid's
-upsample) needs T4; and T14.c (the Mars volume check) needs T6.b's closed-form incision. T17–T19 are
-the server: T17 needs T3 and T10, T18 needs T2 (P12.T7 is built), and T19 needs T8, T17 and T18.
+to the points where they read it: T12.d (coarse craters) needs T7.a's density and T7.e's target;
+T12.e (σ_h on the reconstructed field) needs T4's interpolant and T5's `local_variance`; T14.b (the
+multigrid's upsample) needs T4; and T14.c (the Mars volume check) needs T6.b's closed-form
+incision. T17–T19 are the server: T17 needs T3 and T10, T18 needs T2 (P12.T7 is built), and T19
+needs T8, T17 and T18.
 T7.d (the cold-trap fraction, a pure closed form) needs nothing and is built early, since T13.f
 and galaxy plan 14's P14.T51.f both call it. T20 closes. T0.b's research items gate T7.a, T12.c,
 T13.a and T14.b. Every task ends with `just ci` green, which the orchestrator runs on
@@ -1538,10 +1583,51 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
     1.5 D_t.
   - _The balance._ Every shape's interior, peak and exterior sum to zero to 10⁻⁹ of its cavity
     volume. a ≤ 1.543 for every D ÷ D_t from 10⁻⁴ to 100, so the reach stays 2.54 rim radii.
+- **R09.T7.e The target and the impactors** (science-r09-craters.md items 2 and 5, F1 and F2).
+  After T7.a. `craters.rs`, `wire/form.rs`, `testing/worlds.rs`, `testing.rs` and
+  `planetary/surface/reference.rs`.
+  - `CraterParamsParts` gains `projectile_density`, `target: CraterTarget { class, density }` and
+    `system_age`. `Screening::Atmosphere` keeps `column_mass` only, and d\* reads the top-level
+    projectile density. `TargetClass` codes are NonPorous 0 and Porous 1.
+  - The map takes the class constants of Design note 12, with exponents derived from μ.
+    Porous-class bowls are 0.14.
+  - The wire layout changes; `tests/golden/wire/` is re-blessed at the current version, as the
+    Generator version section allows until T19.
+  - The reference and synthetic worlds take the new fields:
+    - Earth, Mars and the Moon are non-porous at 2,550 kg m⁻³; Ceres at Ermakov et al. 2017's
+      1,287;
+    - projectile density 3,000;
+    - system age 4.567 Gyr;
+    - impact velocities P14.T48.f's: Earth 19.9, Mars 10.6, the Moon 16.7 (the identity) and
+      Ceres 5.6 km/s, as named constants citing it.
+  - The contract's density is lunar-equivalent (F1). `cumulative_density` maps N☾ without
+    renormalising at the body's 1 km, and `own_density_at_1km` gives the body's own.
+  - The taper exponent is 4.2.
+  - The reference Mars takes R_b 1.94.
+  - The central peak's onset and end ramps and Hale and Head's base (F2).
+  - Tests:
+    - the identity at the reference holds exactly;
+    - the map is monotone for both classes;
+    - for a fixed projectile, a porous target's crater is smaller than a non-porous one's at
+      Charon's g, U and densities. Singer et al. 2019 need a 1.3 km impactor for a 10 km
+      non-porous crater and a 1.8 km one for a porous crater; check within 15%;
+    - an icy target of 940 kg m⁻³ widens a crater by (3,000 ÷ 940 against 3,000 ÷ 2,550)^0.261
+      to 10⁻⁹;
+    - every porous bowl's a ≤ 1.543;
+    - at the identity, N(>1 km) is the parameter exactly;
+    - under Mars's map at Ivanov's 9.6 ÷ 16.1, `own_density_at_1km` ÷ N☾ is 0.254 within 2%;
+    - Venus at N☾ 3.40 × 10⁻⁴, 25.7 km/s and 20 d\* gives the Gazetteer's counts at 3, 5, 10,
+      20 and 40 km within 12%;
+    - d, h, the floor radius, the peak relief and a are continuous in D at 0.8, 1.5, 9 and
+      13 D_t, to 10⁻⁹ relative across each bound;
+    - the peak base never exceeds the floor;
+    - a ≤ 1.543 over 10⁻⁴–100 D_t;
+    - the peak relief is Pike's law to 10⁻⁹ over 1.5–9 D_t;
+    - it is zero at and below 0.8 D_t and at and above 13 D_t.
 - **R09.T7.b Small craters.** `synth/craters.rs`: octave levels, the 3 × 3 search across face edges,
   counts from the header's density at the canonical point by true area capped at saturation with
-  ages from τ(D) (Design note 12), morphology by
-  the transition zone, the volume-balanced profile of each crater's `crater_shape` (its own a, at
+  ages from τ(D) through `chronology_age` at the contract's system age (Design note 12), morphology
+  by the transition zone, the volume-balanced profile of each crater's `crater_shape` (its own a, at
   most 1.54), its fillet and compensation;
   their `unresolved_variance` and `structure_function`. Tests: the realised size–frequency of a
   sampled region matches min(production, saturation) (Poisson interval per octave); a crater
@@ -1588,8 +1674,9 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
       least the angular radius, and the visible segment's first moment below that.
     - The internal heat flow adds q (1 − (1 − ε) f) ÷ (ε (1 − f)) to σT⁴, exact in the same
       sphere.
-    - Equilibrium at e_max stands in for T_max. It is labelled, and errs low against Hayne et
-      al.'s transient model.
+    - Equilibrium at e_max stands in for T_max. Its critical d/D at 110 K matches Hayne et al.'s
+      no-conduction curve (their Fig. S8). The fraction's low bias against their Table 1 is mainly
+      eq. 26's declination term, which removes shallow bowls' shadow; R09.T7.f replaces eq. 26.
   - It opens no stream, reads no field and moves no output: no golden, tag or version changes
     until a caller lands.
   - Its tests:
@@ -1628,7 +1715,28 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
       between 0.1 and 0.3 of its area, against exact ray geometry's 0.17. A d/D 0.1 bowl there
       keeps none.
 
-Acceptance: `cargo test -p hyperion-surface craters` (T7.a–c) and
+- **R09.T7.f The exact bowl's permanent shadow** (a T7 follow-up; science-r09-drainage.md §8.12).
+  After T7.d.
+  - **The table:** a new `hyperion-fit` task, `bowl_permanent_shadow`, tabulates a spherical
+    bowl's permanent shadow by exact ray geometry. A point is lit when its chord toward any
+    position of the star's upper limb leaves through the rim. The axes are ln(d/D) over
+    0.02–0.5, the colatitude over 0–45°, and the greatest declination plus the star's angular
+    radius over 0–30°. It is emitted with plan 15's manifest and staleness check, as a table or
+    as a closed form that fits the table within 0.02.
+  - **Its use:** `cold_trap::permanent_shadow` and `fraction` read it in place of Hayne et al.
+    2021's eq. 26, for craters and plains, trilinear in its axes. Eq. 26 overstates deep bowls
+    away from the pole, and its declination term removes shallow bowls' shadow, so that a d/D 0.1
+    bowl at 80° keeps 0.031 against an exact 0.222.
+  - _Tests:_
+    - the table matches direct ray tracing to 0.01 at d/D 0.06, 0.1, 0.2 and 0.3 from the pole
+      to 60°;
+    - at the pole it gives Hayne et al.'s eq. 6 exactly, as eq. 8 does to first order;
+    - T7.d's band, Ceres and CO₂ tests re-run against it, with which distribution serves the
+      permanent-shadow bands re-ruled from the result.
+  - It moves no output, since no consumer has landed. _Acceptance:_
+    `cargo test -p hyperion-surface cold_trap`; `cargo test -p hyperion-fit bowl_permanent_shadow`.
+
+Acceptance: `cargo test -p hyperion-surface craters` (T7.a–c and T7.e) and
 `cargo test -p hyperion-surface cold_trap` (T7.d).
 
 ### R09.T8 Assembly, the bound and the patch
@@ -1663,7 +1771,8 @@ recorded provisional).
 each synthetic world, and one baked patch per world, written with `GoldenWriter`, blessed natively
 and compared on `wasm32-wasip1` and on `wasm32-unknown-unknown` through R04's embedded arm (each
 golden named by a literal, which the browser arm `include_str!`s). Bump `GENERATOR_VERSION` here if
-T16 (or T1.b) has not already (whichever lands first bumps, through the orchestrator). R05's
+T16 has not already (whichever of the two lands first bumps, through the orchestrator; T1.b rides
+galaxy plan 14's 21 → 22 batch and its one bump instead). R05's
 goldens stay headed `TEST_PLANET_VERSION` and these carry `GENERATOR_VERSION`, so they live in a
 subdirectory, `crates/hyperion-surface/tests/golden/height/`, which `cube_golden.rs`'s flat
 `every_golden_file_carries_the_test_planet_version` does not read; `height_golden.rs` holds that
@@ -1776,7 +1885,7 @@ capped at 200 Myr; a plate with no divergent boundary has 200 Myr and 23 mm a⁻
   with height 0.043 w₀; α at T_e = 70
   km under Mars's gravity is 180 km ± 10; T_e is 108 km ± 1 at Mars's 19 mW m⁻² and 210 K, and
   zero where T_s ≥ 870 K, where each load is compensated locally (α = 0).
-- **R09.T12.d Coarse craters.** `steps/craters.rs`, Design notes 5 and 10, after T7.a. Each
+- **R09.T12.d Coarse craters.** `steps/craters.rs`, Design notes 5 and 10, after T7.e. Each
   crater's shape is T7.a's `crater_shape`, so the coarse elevation and the client's T7.c rims are
   one profile. Tests:
   counts over the reference Moon match min(production, saturation) above D_b (Poisson interval),
@@ -1860,7 +1969,10 @@ Acceptance: `cargo test -p hyperion-sim planetary::surface::steps::relief` (T12.
     lunar reference.
   - **In the airless model:** each cell's fraction for each cold-trapped condensate, at the cell's
     latitude, with its crater fraction from the body's crater state and its plains' slope from the
-    synthesis's slope variance at the cold traps' scales.
+    synthesis's slope variance at the cold traps' scales. The plains' slope is clamped to 45°
+    before a `Terrain` is built, since T7.d's `Terrain::new` refuses a plains' RMS slope above 45°
+    (Risks, "Deviations in T7.d, as built"; its stand-in is checked against Smith 1967 only to
+    26.6°).
   - **The placement:** T13.d places a cold-trapped ice in proportion to each cell's fraction,
     capped at it and scaled so that its area matches plan 14's. Its quantised shares are rounded
     coldest first, so the total matches to one cell. It is never placed coldest-first by whole
@@ -1975,9 +2087,10 @@ per binary and that R10's world tests reuse: the quantised fields of the referen
 and Moon (fast, so they run on native and wasip1 under R04's recipes) and of the reference Earth
 and Mars (slow). The coarse goldens pin each reference world's palette. Bench `coarse/pass` per
 level 5–8, beside T14's `coarse/erosion_l8` in
-`crates/hyperion-sim/benches/surface.rs`. Bump `GENERATOR_VERSION` if T9 (or
-T1.b) has not already (whichever lands first bumps, through the orchestrator), or again if the first
-bump has been released to a save. Acceptance: `cargo test -p hyperion-sim --test
+`crates/hyperion-sim/benches/surface.rs`. Bump `GENERATOR_VERSION` if T9 has not already
+(whichever of the two lands first bumps, through the orchestrator; T1.b rides galaxy plan 14's
+21 → 22 batch and its one bump instead), or again if the first bump has been released to a save.
+Acceptance: `cargo test -p hyperion-sim --test
 surface_coarse_golden`, the task's own slow tests (`just test-slow` filtered to them), and
 `just bench -- coarse`; the orchestrator's `just ci` runs the fast goldens on wasip1.
 
@@ -2099,10 +2212,12 @@ The coarse pass, its quantisation and payload format, and the synthesis are gene
 question 4), so a change to any of them bumps `GENERATOR_VERSION` (21 at the re-validation).
 Until R09.T19 first sends a payload, a change to the codec's layout or to the `testing` worlds
 re-blesses `tests/golden/wire/` at the current version with neither version bumped (ruling of
-2026-10-09); from then it bumps both. The first bump is made by whichever of T1.b (whose filled
-hooks section moves plan 14's golden
-systems), T9 and T16 lands first, through the orchestrator, which coordinates bumps one lane at a
-time; later tasks that change a committed golden bump again. R05's `FINEST_SPACING_M`, `BAND_LIMIT_M`
+2026-10-09); from then it bumps both. T1.b, whose filled hooks section moves plan 14's golden
+systems, makes no bump of its own: it is built in galaxy plan 14's 21 → 22 batch and lands under
+that batch's one bump (plan 14's bump plan, under its Tasks' order). This plan's own first bump is
+made by whichever of T9 and T16 lands first, through the orchestrator, which coordinates bumps one
+lane at a time; later tasks that change a committed golden bump again. R05's `FINEST_SPACING_M`,
+`BAND_LIMIT_M`
 and `finest_level` join the version when T9 reads them, as R05 notes. Nothing upstream moves but
 the hooks section T1.b fills: every draw is on a new tag, plan 14's `body.surface` seed is
 unchanged (T1.a moves its type, not its value), and T5's generalised noise leaves the test planet's
@@ -2231,6 +2346,9 @@ re-blessing this plan's payload and coarse goldens in that commit.
     (the Gazetteer omits some small craters and the crater fields). Lean: one exponent for every
     body; Earth's small-crater record (Bland and Artemieva 2006) or Mars's catalogue of new impacts
     would test it under thin atmospheres, and Herrick and Phillips 1994's own fits remain unread.
+    Refitted through the map (science-r09-craters.md F1), the exponent is 4.2. It depends on
+    Venus's impact velocity (20, 25.7 and 30 km/s give worst cumulative errors of 7, 11 and 19%)
+    and on the collapse law (Croft's 1.176 gives 22%), so it is tied to P14.T48.f's model.
   - _Erosion at the coarse cell._ At 36–40 km every cell carries a trunk channel (A ≥ 1.3 × 10⁹
     m²), so the transient solver lowers a whole cell at the trunk's rate, and T14.c's Mars volume
     (at least 1.2 m of global layer) could pass by over-erosion (about 100 m a cell at K t ≈ 1.7,
@@ -2248,6 +2366,18 @@ re-blessing this plan's payload and coarse goldens in that commit.
     not the span; `WetEpoch` gains `runoff`; Mars is 2.2 × 10⁵ yr at 0.1 m a⁻¹ (Design note 9).
     Howard 2007 and Barnhart et al. 2009's full text were not read for it; Barnhart's 2% is
     DELIM's own clock.
+  - _The strength regime._ The map is gravity-regime only. On low-g icy bodies, craters below
+    Y ÷ (ρ_t g), kilometres at Y ≈ 1 MPa, are strength-dominated, and the map over-enlarges them,
+    up to ×2 in D at g = 0.06 m s⁻². Lean: none until a body's small-crater counts test it;
+    Holsapple's two-regime π_V form with K₂ and a size-dependent Y is the fix.
+  - _The porous threshold._ Porous below a radius of 150 km is the plan's own, between Hyperion
+    and Mimas. Above 60% porosity μ falls to about 0.35. Kraus et al. 2011 (ice scaling, CTH) was
+    not read.
+  - _Peak rings and basin rings are not drawn._ From 9 D_t the central peak fades over the
+    protobasins (science-r09-craters.md F2). The peak ring that replaces it is not drawn: its
+    heights grow like central peaks' (Baker et al. 2012). Its ring-to-rim ratio and cross-section
+    need Baker et al. 2011 (Icarus 214, 377), which was not read. Lean: a later shape task draws it
+    from that source.
 - **The survey stand-in.** `survey_pass` lets a client grant its ship coverage, as the server
   grants detail levels today. It is a discipline for an honest client, and the sensors plan
   replaces the caller, not the core.
@@ -2373,10 +2503,11 @@ re-blessing this plan's payload and coarse goldens in that commit.
     the client and its wasm entry points are R10's (R10 Design note 16, T6–T7), and this plan
     builds no client code.
   - _Task readiness._ Ready now: T0.b, T1.a and T2 (beside each other). Then, each after what it
-    names: T1.b after T1.a (with the bump); T3 and T4 after T2; T5, T6.a and T10 after T1.a and T2;
-    T7.a after T2 and T0.b's Venus item; T7.b after T7.a; T7.c after T7.b; T6.b after T6.a; T8 after
+    names: T1.b after T1.a, in galaxy plan 14's 21 → 22 batch; T3 and T4 after T2; T5, T6.a and
+    T10 after T1.a and T2; T7.a after T2 and T0.b's Venus item; T7.e after T7.a; T7.b after T7.e;
+    T7.c after T7.b; T6.b after T6.a; T8 after
     T4–T7; T9 after T8; T11 after T10; T12.a–b after T11; T12.c after T11 and T0.b's isotherm item;
-    T12.d after T10 and T7.a; T12.e after T12.a, T4 and T5; T13.a after T10 and T0.b's transport-cap
+    T12.d after T10 and T7.e; T12.e after T12.a, T4 and T5; T13.a after T10 and T0.b's transport-cap
     items, T13.b–e after it; T14.a after T12; T14.b after T14.a, T4 and T0.b's erodibility item;
     T14.c after T14.b and T6.b; T14.d after T14.c and T13; T15 after T13 and T14; T16 after T15;
     T17 after T3 and T10; T18 after T2; T19.a after T17 and T18; T19.b after T19.a and T8; T19.c
@@ -3114,8 +3245,10 @@ re-blessing this plan's payload and coarse goldens in that commit.
     ground (crater floors and pole-facing slopes), not uniformly over the cell, and the share is
     exposed ice, not the cold-trap area.
   - _R09.T7.d's form_ (science-r09-drainage.md §8): the plains are a labelled half-normal
-    bowl-population stand-in (§8.10), and equilibrium at the highest sun stands in for T_max.
-    - At Hayne et al.'s best fit it gives about 0.7 of their cold-trap bands. Eq. 26 itself
+    bowl-population stand-in (§8.10), and eq. 26 stands in for the exact bowl until R09.T7.f.
+    - At Hayne et al.'s best fit it gives about 0.7 of their cold-trap bands. The low bias is
+      mainly eq. 26's declination term on shallow bowls, not the equilibrium temperature, whose
+      critical d/D matches Hayne et al.'s Fig. S8 (science-r09-drainage.md §8.12). Eq. 26 itself
       overstates deep bowls equatorward of 75° (up to 1.7 times) and understates shallow ones away
       from the pole (d/D 0.1 at 80°: 3% against an exact 22%).
     - Distribution A's deep bowls give 2.4 times their permanent shadow, and B is within a factor of
