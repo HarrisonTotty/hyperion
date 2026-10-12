@@ -715,14 +715,9 @@ mod tests {
                 crate::field::BuildPaletteError::TooManyEntries(16)
             ))
         );
-        assert_eq!(
-            PaletteRole::read(&mut Reader::new(&[8])),
-            Ok(PaletteRole::Bulk)
-        );
-        assert_eq!(
-            PaletteRole::read(&mut Reader::new(&[9])),
-            Err(unknown("PaletteRole", 9))
-        );
+        let role = |code: u8| PaletteRole::read(&mut Reader::new(&[code]));
+        assert_eq!(role(8), Ok(PaletteRole::Bulk));
+        assert_eq!(role(9), Err(unknown("PaletteRole", 9)));
         assert_eq!(
             MechanicsFamily::read(&mut Reader::new(&[6])),
             Err(unknown("MechanicsFamily", 6))
