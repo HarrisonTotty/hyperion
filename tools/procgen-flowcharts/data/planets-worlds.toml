@@ -1,0 +1,2394 @@
+# Procedural generation flowchart data: planets, second half (worlds).
+# Read from rendering-and-planets at the snapshot commit; see SCHEMA.md.
+
+[meta]
+stage = "planets"
+part = "planets-worlds"
+prefix = "pw"
+title = "Planets"
+snapshot = "25d5d636"
+
+[[cluster]]
+id = "pw.seeds"
+label = "Seeds & stream keys"
+parent = ""
+
+[[cluster]]
+id = "pw.atmo"
+label = "Atmosphere & climate state"
+parent = ""
+
+[[cluster]]
+id = "pw.hooks"
+label = "Surface figures & hooks"
+parent = ""
+
+[[cluster]]
+id = "pw.coarse"
+label = "Coarse surface pass (server)"
+parent = ""
+
+[[cluster]]
+id = "pw.synth"
+label = "Height synthesis (both sides)"
+parent = ""
+
+[[cluster]]
+id = "pw.look"
+label = "Materials & appearance"
+parent = ""
+
+[[cluster]]
+id = "pw.life"
+label = "Biosphere: origin & stages"
+parent = ""
+
+[[cluster]]
+id = "pw.biota"
+label = "Biomes & organisms"
+parent = ""
+
+[[cluster]]
+id = "pw.geo"
+label = "Resources & geology"
+parent = ""
+
+[[cluster]]
+id = "pw.text"
+label = "Catalogue & enrichment"
+parent = ""
+
+[[node]]
+id = "pw.coarse_streams"
+label = "Coarse streams surface.coarse.*"
+kind = "seed"
+cluster = "pw.seeds"
+summary = "SurfaceSeed.stream(tag, surface_item or surface_cell)"
+detail = [
+  "the surface seed takes the universe seed's place",
+  "opens SurfaceCoarse tags only (asserted at open)",
+  "plates, crater: ObjectKey::surface_item(k)",
+  "warp, relief, erosion: surface_cell(face, L, i, j)",
+  "server only; .deposit, .landmark, .sample are",
+  "  life-brainstorm proposals, not declared",
+]
+source = ["crates/hyperion-base/src/rng/surface.rs", "crates/hyperion-base/src/rng/key.rs", "crates/hyperion-surface/src/tags.rs", "R09.T1.a"]
+status = "partial"
+
+[[node]]
+id = "pw.detail_seed"
+label = "Detail seed (sent to clients)"
+kind = "seed"
+cluster = "pw.seeds"
+summary = "Word 0 of body.surface.detail; keys local synthesis"
+detail = [
+  "opens SurfaceDetail tags only; shares nothing",
+  "  with the surface seed but the universe seed",
+  "surface.relief: surface_item of lattice corners",
+  "surface.channel, surface.crater: surface_cell keys",
+  "tag and type built; derivation (R09.T1.b) planned",
+]
+source = ["crates/hyperion-base/src/rng/surface.rs", "crates/hyperion-sim/src/rng/tags.rs", "crates/hyperion-surface/src/tags.rs", "R09.T1.b"]
+status = "partial"
+
+[[node]]
+id = "pw.life_streams"
+label = "Life streams body.life.*"
+kind = "seed"
+cluster = "pw.seeds"
+summary = "Proposed Body tags, keyed per (window, attempt)"
+detail = [
+  "steps, transfer, gases, lineage, biochemistry,",
+  "  metabolism, strategies, designation",
+  "window = open interval of the abiotic timeline",
+  "never keyed by epoch ordinal or by time",
+  "appended at the end of the sim's domain_tags!",
+  "all brainstorm leans; none is in code",
+]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.lineage_seed"
+label = "LineageSeed (server only)"
+kind = "seed"
+cluster = "pw.seeds"
+summary = "Block of body.life.lineage per (window, attempt)"
+detail = [
+  "proposed: opens only a new Clade scope",
+  "ObjectKey::clade(path, depth): 8 bits per rank",
+  "clade.traits, .children, .transfer, .taxon, .sample",
+  "Stream::open refuses the Clade scope",
+  "panspermia: donor's seed above the transfer rank",
+]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.taxon_seed"
+label = "TaxonSeed (drawing record)"
+kind = "seed"
+cluster = "pw.seeds"
+summary = "Block on clade.taxon; opens a proposed Biota scope"
+detail = [
+  "surface.biota.place, .range, .path, .shape",
+  "keyed by ObjectKey::surface_cell",
+  "sent in drawing records; the tree stays on server",
+]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.volatile_draws"
+label = "Volatile ranks"
+kind = "draw"
+cluster = "pw.atmo"
+summary = "Water, carbon, nitrogen: one open uniform each"
+detail = [
+  "words 0-2 of planet.volatiles; words 3-7 reserved",
+  "rank 0.5 gives Earth's inventory per unit mass",
+  "moons' own ranks are planned (P14.T56.c)",
+]
+source = ["crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "crates/hyperion-sim/src/rng/tags.rs", "P14.T13.a"]
+status = "built"
+
+[[node]]
+id = "pw.inventory"
+label = "Volatile inventory"
+kind = "model"
+cluster = "pw.atmo"
+summary = "Earth's per-mass budget x 10^(0.5 z), x100 if icy"
+detail = [
+  "H2O 2.3e-4, CO2 6.1e-5, N2 6.5e-7 of body mass",
+  "beyond snow line: C and N x100, water ≥ bulk ice",
+  "40Ar 1.64e-8 per rock mass at 4.57 Gyr, grown",
+  "  by 40K decay (half-life 1.248 Gyr)",
+  "a migrated body keeps its formation side's",
+]
+cite = ["Charette & Smith 2010", "Sleep & Zahnle 2001", "Kossert & Gunther 2004"]
+source = ["crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "P14.T13.a"]
+status = "built"
+
+[[node]]
+id = "pw.exobase_jeans"
+label = "Exobase & Jeans retention"
+kind = "model"
+cluster = "pw.atmo"
+summary = "Gas kept if λ = G M m / (k T_exo R) ≥ 25"
+detail = [
+  "T_exo = 5 T_eq(peak L) x max(1, Φ/Φ⊕)^0.5",
+  "Φ⊕ ≈ 2.6e15 J/m², Earth's XUV fluence at 4.57 Gyr",
+  "judged for nine gases, H2 to Ar",
+  "the exobase never cools: a lost gas stays lost",
+  "planned: shoreline + fractionating escape (T53.a)",
+]
+cite = ["Tian et al. 2008", "Zahnle & Catling 2017"]
+source = ["crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "P14.T13.b", "P14.T53.a"]
+status = "built"
+
+[[node]]
+id = "pw.climate_branch"
+label = "Crust & insolation branch"
+kind = "decision"
+cluster = "pw.atmo"
+summary = "Molten / inside runaway / habitable / beyond max GH"
+detail = [
+  "molten while the system is younger than molten_until",
+  "inside runaway: Σ F_peak/S_eff(runaway) ≥ 1",
+  "beyond max greenhouse: Σ F_now/S_eff(max) < 1",
+  "every star summed, each at its own orbit",
+]
+cite = ["Kopparapu et al. 2013"]
+source = ["crates/hyperion-sim/src/planetary/derive/mod.rs", "crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "P14.T12.b", "P14.T13.c"]
+status = "built"
+
+[[node]]
+id = "pw.climate_storage"
+label = "Climate storage"
+kind = "model"
+cluster = "pw.atmo"
+summary = "What the climate locks away before the air forms"
+detail = [
+  "runaway: oceans lost, all carbon airborne",
+  "temperate with water: 6e-6 of CO2 stays airborne",
+  "  (carbonate-silicate cycle, simplest form)",
+  "snowball: carbon airborne; molten: nothing held",
+]
+cite = ["Walker, Hays & Kasting 1981"]
+source = ["crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "P14.T13.c"]
+status = "built"
+
+[[node]]
+id = "pw.carbon_oxygen"
+label = "Carbon carrier & abiotic O2"
+kind = "model"
+cluster = "pw.atmo"
+summary = "CH4 on cold icy worlds; O2 left by lost oceans"
+detail = [
+  "CH4 if formed beyond snow line and beyond max GH,",
+  "  partial pressure capped at 0.5 of saturation",
+  "runaway O2: (8 - 8η)/9 of the water lost, less",
+  "  melt uptake and a 2.21e13 mol/yr surface sink",
+  "built; held until generator version 22 (now 21)",
+]
+cite = ["Luger & Barnes 2015", "Schaefer et al. 2016", "Niemann et al. 2010", "Catling 2014"]
+source = ["crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "crates/hyperion-base/src/version.rs", "P14.T24.f"]
+status = "partial"
+
+[[node]]
+id = "pw.substance_registry"
+label = "Substance registry"
+kind = "table"
+cluster = "pw.atmo"
+summary = "Rows 0-8: H2 He H2O CH4 NH3 N2 O2 CO2 Ar"
+detail = [
+  "append-only SubstanceId; SubstanceKey on the wire",
+  "molar masses: IUPAC 2021 atomic weights",
+  "Clausius-Clapeyron from the triple point for",
+  "  H2O, CH4, N2, CO2 and Ar",
+  "fitted reference EOS planned (P14.T49.b)",
+]
+source = ["crates/hyperion-sim/src/substance/mod.rs", "crates/hyperion-sim/src/substance/rows.rs", "crates/hyperion-sim/src/substance/phase.rs", "P14.T49.a"]
+status = "built"
+
+[[node]]
+id = "pw.greenhouse"
+label = "Grey greenhouse"
+kind = "model"
+cluster = "pw.atmo"
+summary = "T_s = T_eq (1 + 0.75 τ)^(1/4), iterated 32 times"
+detail = [
+  "τ = 18.5 sqrt(pCO2) + 2.89 sqrt(pH2O)",
+  "  + 1.55 (75.6 K/T_eq)² sqrt(pN2), p in bar",
+  "p_i = M_i g / 4πR², held at saturation pressure",
+  "constants fixed on Venus, Earth and Titan",
+  "T_s never above the hottest host's T_eff",
+  "planned: CO2 constant refit on measured Venus (T57.a)",
+]
+cite = ["McKay, Pollack & Courtin 1991"]
+source = ["crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "P14.T13.c", "P14.T57.a"]
+status = "built"
+
+[[node]]
+id = "pw.surface_state"
+label = "Surface state"
+kind = "decision"
+cluster = "pw.atmo"
+summary = "GasEnvelope, Magma, Airless, Runaway, Temperate, Snowball"
+detail = [
+  "envelope ≥ 0.1% of mass → GasEnvelope, no surface",
+  "T_s ≥ 1394 K (solidus) or molten crust → Magma",
+  "p_s < 100 Pa → Airless, at T_eq",
+  "Bond A: 0.34 env, 0.10 magma, 0.11 rock, 0.35 ice,",
+  "  0.76 runaway, 0.294 temperate, 0.50 snowball",
+  "cloud: 1 envelope & runaway, 0.67 temperate",
+]
+cite = ["Hirschmann 2000", "Haus et al. 2016", "Loeb et al. 2018", "King et al. 2013"]
+source = ["crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "P14.T13.c"]
+status = "built"
+
+[[node]]
+id = "pw.atmosphere"
+label = "Atmosphere record"
+kind = "entity"
+cluster = "pw.atmo"
+summary = "State, T_s, p_s, partials, retention, τ, A, cloud"
+detail = [
+  "derived for planets and moons in derive_body",
+  "no record field until P14.T48.e / T35.e",
+  "dry worlds beyond max GH reach 490-575 K, still",
+  "  labelled Snowball until T51.a's cold trap",
+]
+source = ["crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "crates/hyperion-sim/src/planetary/derive/mod.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T16.a"]
+status = "built"
+
+[[node]]
+id = "pw.bulk_composition"
+label = "Bulk composition hook"
+kind = "entity"
+cluster = "pw.hooks"
+summary = "Mass fractions, volatile inventory, [Fe/H], [α/Fe]"
+detail = [
+  "server-only, beside the surface seed (hooks_at)",
+  "read by the resource model and later layers",
+]
+source = ["crates/hyperion-sim/src/planetary/hooks/mod.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T23"]
+status = "built"
+
+[[node]]
+id = "pw.surface_conditions"
+label = "Surface conditions"
+kind = "model"
+cluster = "pw.hooks"
+summary = "Signed contrasts, mole fractions, radiation class"
+detail = [
+  "eq-pole: annual insolation, flattened by 1 + 6D/B",
+  "  K fitted to Earth's 42 K: 9.43e5 m²/s, x f(Ω)",
+  "day-night: Cowan & Agol with Koll ε = X/(2 + X)",
+  "radiation class: decades of Earth's XUV flux",
+  "liquid-water flag from the registry's phase_at",
+  "built; published only from generator version 22",
+]
+cite = ["North 1975", "Cowan & Agol 2011", "Koll 2022", "Kaspi & Showman 2015"]
+source = ["crates/hyperion-sim/src/planetary/hooks/surface.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T24.a", "P14.T48.e"]
+status = "partial"
+
+[[node]]
+id = "pw.global_figures"
+label = "Global figures"
+kind = "model"
+cluster = "pw.hooks"
+summary = "Ocean & ice, heat flow, regime, age, crater density"
+detail = [
+  "ocean: logistic of liquid volume over capacity",
+  "heat flow: U, Th, K x 10^[Fe/H] / Urey ratio",
+  "  (rocky: 0.42 mobile lid, 0.75 stagnant lid)",
+  "Mobile or StagnantLid; outgassing O vs F_c",
+  "N(>1 km) = lunar chronology(S, A) x belt scaling",
+  "wet epoch at 5% intermittency; impactors (T48.f)",
+]
+cite = ["Davies & Davies 2010", "Neukum, Ivanov & Hartmann 2001", "Kleinhans 2005"]
+source = ["P14.T24.b", "P14.T48.b", "P14.T48.c", "P14.T48.f"]
+status = "planned"
+
+[[node]]
+id = "pw.continents"
+label = "Continental fraction"
+kind = "draw"
+cluster = "pw.hooks"
+summary = "f_inf = 0.2 + 0.5u, one open uniform on word 0"
+detail = [
+  "f_c = f_inf (1 - exp(-(t - 0.5 Gyr)/1.1 Gyr))",
+  "zero on a stagnant lid or a never-wet world",
+  "Earth: 0.405 at 4.5 Gyr, f_inf = 0.416",
+]
+cite = ["Honing & Spohn 2023"]
+source = ["P14.T48.a", "docs/agent/plans/rendering-and-planets/09-surface-generator.md"]
+status = "planned"
+
+[[node]]
+id = "pw.sigma_h"
+label = "Hypsometric σ_h"
+kind = "model"
+cluster = "pw.hooks"
+summary = "σ_h² = structural² + basin² + constructional²"
+detail = [
+  "mobile: f_c(1-f_c)Δ² + f_c σc² + (1-f_c) σo²,",
+  "  Δ 4.69, σc 1.08, σo 0.93 km; stagnant 0.9 km",
+  "basin: 2.05 km (1.62/g) k_comp sqrt(min(1,N/0.018))",
+  "volc: 2.76 km (3.71/g) V min(1, T_e/70 km)",
+  "T_e = 3.1 W/m/K x (870 K - T_s)/F",
+  "replaces the withdrawn greatest relief",
+]
+cite = ["Parsons & Sclater 1977", "Stein & Stein 1992", "Johnson & McGetchin 1973"]
+source = ["P14.T48.a", "R09.T0.b", "docs/agent/plans/rendering-and-planets/09-surface-generator.md"]
+status = "planned"
+
+[[node]]
+id = "pw.climate_regime"
+label = "Climate regime classifier"
+kind = "decision"
+cluster = "pw.hooks"
+summary = "Thermal regime x forcing x condensable → model"
+detail = [
+  "Koll X: airless-like < 0.087k, efficient > 15.7k",
+  "forcing: Seasonal, IceBelt (54-126°), SlowRotator,",
+  "  Locked (substellar coordinates)",
+  "condensable: largest x p_s whose phase changes",
+  "names the coarse climate model to run",
+  "types built in surface/inputs.rs; no classifier",
+]
+cite = ["Koll 2022", "Yang et al. 2014", "Kilic, Raible & Stocker 2017", "Wordsworth 2015"]
+source = ["P14.T48.d", "crates/hyperion-sim/src/planetary/surface/inputs.rs"]
+status = "planned"
+
+[[node]]
+id = "pw.surface_composition"
+label = "Condensates & crust"
+kind = "model"
+cluster = "pw.hooks"
+summary = "Ices and liquids by substance; crust lithologies"
+detail = [
+  "T51.a: each condensable's partition, x_s p ≤ h p_sat",
+  "  up to 8 condensates by reservoir, with phase",
+  "T51.c: primary, secondary, tertiary crust,",
+  "  provinces, redox class, melt area",
+  "feeds the field's palette (P14.T54.a)",
+  "T51.b: Bond A = Σ a_i A_i inside the three passes",
+]
+source = ["P14.T51.a", "P14.T51.b", "P14.T51.c", "P14.T54.a"]
+status = "planned"
+
+[[node]]
+id = "pw.aerosols"
+label = "Aerosols & vertical profile"
+kind = "model"
+cluster = "pw.hooks"
+summary = "Decks, hazes, absorbers; T(p) = max(T_ad, T_skin)"
+detail = [
+  "decks by condensation aloft along the profile",
+  "haze: CH4 ≈ 1e-3 in N2 air, CH4/CO2 ≈ 0.1-0.2",
+  "T24.g: sulphuric-acid deck, or a sulphate layer",
+  "T_skin = 2^(-1/4) T_eff, T_eff^4 = T_eq^4 + T_int^4",
+  "adiabat scaled by α, set by the condensable:",
+  "  0.6 water, 0.77 CH4, 0.88 CO2, other or none",
+]
+cite = ["Robinson & Catling 2012", "Ackerman & Marley 2001", "Arney et al. 2016"]
+source = ["P14.T24.c", "P14.T24.e", "P14.T24.g", "P14.T52.c"]
+status = "planned"
+
+[[node]]
+id = "pw.envelope_atmosphere"
+label = "Envelope atmosphere (giants)"
+kind = "model"
+cluster = "pw.hooks"
+summary = "Guillot 2010 profile joined to the dry adiabat, to 100 bar"
+detail = [
+  "every GasEnvelope body: giants and sub-Neptunes",
+  "T_int by ruling 112.7's split; T_irr from the flux",
+  "T50.b: metals protosolar x 10^[Fe/H] x E(M)",
+  "T52.a-c: speciation, quench, photolysis, decks",
+  "fills the record's envelope section, not surface",
+]
+cite = ["Guillot 2010", "Thorngren et al. 2016", "Sudarsky et al. 2000"]
+source = ["P14.T24.d", "P14.T50.b", "P14.T52.d"]
+status = "planned"
+
+[[node]]
+id = "pw.subsurface_ocean"
+label = "Ice shell & subsurface ocean"
+kind = "model"
+cluster = "pw.hooks"
+summary = "Shell D = 651 ln(273 K/T_s)/F; ocean if D < water layer"
+detail = [
+  "built for moons only: ps.moon_derive's flag (T17.b)",
+  "T51.g: every body, solutes, floor of ice phases",
+  "T51.g held behind OCEAN_VERSION = 24 (planned)",
+]
+cite = ["Petrenko & Whitworth 1999", "Hammond et al. 2016"]
+source = ["crates/hyperion-sim/src/planetary/moons/regular.rs", "P14.T17.b", "P14.T24.b", "P14.T51.g"]
+status = "planned"
+
+[[node]]
+id = "pw.cold_traps"
+label = "Cold traps (airless bodies)"
+kind = "draw"
+cluster = "pw.hooks"
+summary = "Hayne template area x exposed share f_x"
+detail = [
+  "fraction(lat): bowl craters + rough plains σ_s",
+  "shadow T: Ingersoll sphere; Moon floor ≈ 24 K",
+  "threshold: 144 kg/m²/Gyr sublimation (110 K H2O)",
+  "f_x log-uniform [0.016, 0.45]; tag not yet chosen",
+  "closed form built, opens no stream (R09.T7.d);",
+  "  T51.f's integral and f_x draw planned",
+]
+cite = ["Hayne, Aharonson & Schorghofer 2021", "Ingersoll, Svitek & Murray 1992", "Schorghofer & Williams 2020"]
+source = ["crates/hyperion-surface/src/cold_trap.rs", "R09.T7.d", "P14.T51.f"]
+status = "partial"
+
+[[node]]
+id = "pw.habitability"
+label = "Habitability assessment"
+kind = "decision"
+cluster = "pw.hooks"
+summary = "Hostile / SubsurfaceOcean / Marginal / Temperate"
+detail = [
+  "Temperate: rocky 0.1-5 M⊕ in the conservative",
+  "  zone with liquid water at the surface",
+  "limit reasons from a closed list (runaway, ...)",
+  "says nothing about life",
+]
+source = ["P14.T25"]
+status = "planned"
+
+[[node]]
+id = "pw.surface_section"
+label = "Record surface section"
+kind = "entity"
+cluster = "pw.hooks"
+summary = "Conditions, figures, condensates, crust, aerosols"
+detail = [
+  "record::Surface is an uninhabited enum today",
+  "filled at the 22, 23 and 24 bumps (T48.e, T54.a/b)",
+  "CoarseInputs::for_body reads it (NotModelled now)",
+  "T53.d's biosphere member stays absent (T54.b)",
+]
+source = ["crates/hyperion-sim/src/planetary/record.rs", "P14.T48.e", "P14.T54.a", "P14.T54.b", "P14.T35.e"]
+status = "planned"
+
+[[node]]
+id = "pw.coarse_inputs"
+label = "Coarse inputs & level"
+kind = "model"
+cluster = "pw.coarse"
+summary = "CoarseInputs, palette, level ≤ 40 km mean cell"
+detail = [
+  "for_body → NotModelled until the section lands;",
+  "  the builder takes plan 14's figures by hand",
+  "palette ≤ 15 substances: crusts, ice, liquid, ...",
+  "level: Earth 8, Mars 7, Moon 6, Ceres 5 (5 to 8)",
+  "D_b = 2 x largest edge: 84.9 km Earth, 50 km Ceres",
+]
+source = ["crates/hyperion-sim/src/planetary/surface/inputs.rs", "crates/hyperion-surface/src/field.rs", "crates/hyperion-surface/src/field/palette.rs", "R09.T10", "R09.T10.b"]
+status = "partial"
+
+[[node]]
+id = "pw.plates"
+label = "Plates"
+kind = "draw"
+cluster = "pw.coarse"
+summary = "N(>A) = 7 (A / 1 sr)^-0.31 to 0.002 sr: ~48 plates"
+detail = [
+  "mobile lid only; a stagnant lid has none",
+  "per plate: seed point, Euler pole, crust type",
+  "cell → seed of largest dot product, warped",
+  "distance transform: signed distance, boundary",
+  "  kind (subduction, collision, divergent, transform)",
+]
+cite = ["Bird 2003"]
+source = ["crates/hyperion-sim/src/planetary/surface/steps/plates.rs", "R09.T11"]
+status = "planned"
+
+[[node]]
+id = "pw.coarse_relief"
+label = "Coarse elevation"
+kind = "draw"
+cluster = "pw.coarse"
+summary = "Two crusts, ridges, belts, arcs, volcanic provinces"
+detail = [
+  "continental +406 m, oceanic -4,279 m (Earth2014)",
+  "GDH1 depth from own-ridge age, capped at 200 Myr",
+  "belts 200-500 km; volcanic fronts 190 / 260 km",
+  "flexure α = [4D/((ρm - ρfill) g)]^(1/4)",
+  "scaled to σ_h; sea level = ocean-fraction quantile",
+  "sea floor: abyssal hills, pelagic drape, ponded wedge",
+]
+cite = ["Stein & Stein 1992", "Syracuse & Abers 2006", "Goff et al. 2004", "Turcotte & Schubert 2014"]
+source = ["crates/hyperion-sim/src/planetary/surface/steps/relief.rs", "R09.T12.a", "R09.T12.b", "R09.T12.c", "R09.T12.e"]
+status = "planned"
+
+[[node]]
+id = "pw.coarse_craters"
+label = "Coarse craters (D ≥ D_b)"
+kind = "draw"
+cluster = "pw.coarse"
+summary = "min(production, saturation) per octave"
+detail = [
+  "count, place, age, morphology per item slot k",
+  "places uniform on the sphere",
+  "capped ages from the last T x N_sat/N_prod",
+  "smoothed into elevation; list sorted by cell",
+  "each lists every cell within its 2.54 rim radii",
+]
+source = ["crates/hyperion-sim/src/planetary/surface/steps/craters.rs", "R09.T12.d"]
+status = "planned"
+
+[[node]]
+id = "pw.crater_density"
+label = "Crater density N(>D)"
+kind = "model"
+cluster = "pw.coarse"
+summary = "Neukum polynomial; a0 = lunar-equivalent log10 N(>1 km)"
+detail = [
+  "chronology 5.44e-14 (e^6.93T - 1) + 8.38e-4 T,",
+  "  counted from the system's own formation",
+  "π-group map of D to its lunar image, per target class",
+  "  μ, K1: non-porous 0.55, 0.095; porous 0.41, 0.132",
+  "screening d* = 1.5 (P/g)/ρ_p, cutoff D_c = 20 d*",
+  "taper 1/(1 + (D_c/D)^4.2); saturation 0.079 D^-2",
+]
+cite = ["Neukum, Ivanov & Hartmann 2001", "Ivanov 2001", "Holsapple 1993", "Melosh 1989", "Trask 1966"]
+source = ["crates/hyperion-surface/src/craters/density.rs", "crates/hyperion-surface/src/craters/chronology.rs", "R09.T7.a", "R09.T7.e"]
+status = "built"
+
+[[node]]
+id = "pw.crater_shapes"
+label = "Fresh crater shapes"
+kind = "model"
+cluster = "pw.coarse"
+summary = "D_t = 19 km x (1.62/g) x k_target (rock 1, ice 0.12)"
+detail = [
+  "bowl < 0.8 D_t: 0.20 D deep (porous 0.14 D), rim 0.0369 D",
+  "  airless bowls shallower below 400 m",
+  "complex from 1.5 D_t: d = 0.150 D_t (D/D_t)^0.303",
+  "  rim 0.0402 D_t (D/D_t)^0.399; floor ≤ 0.778 D",
+  "peak grows 0.8-1.5 D_t, fades 9-13 D_t (rings undrawn)",
+  "volume-balanced ejecta to 2.54 rim radii",
+]
+cite = ["Pike 1980", "Kalynn et al. 2013", "Stopar et al. 2017", "Hale & Head 1979"]
+source = ["crates/hyperion-surface/src/craters/shape.rs", "crates/hyperion-surface/src/craters.rs", "R09.T7.a", "R09.T7.e"]
+status = "built"
+
+[[node]]
+id = "pw.climate_ebm"
+label = "Coarse climate (moist EBM)"
+kind = "model"
+cluster = "pw.coarse"
+summary = "72x72 grid, implicit 6 h steps, 1 or 12 months"
+detail = [
+  "diffuses moist static energy, D⊕ 1.16e6 m²/s",
+  "albedo 0.525 - 0.245 tanh((T - 268 K)/5 K)",
+  "month = 1/12 of eccentric anomaly from periapsis",
+  "imposes plan 14's mean, contrasts and ice areas",
+  "precipitation: labelled heuristic, rain shadows",
+  "else airless thermal inertia, or isothermal",
+]
+cite = ["Spiegel, Menou & Scharf 2008", "Siler, Roe & Armour 2018", "Hergarten & Robl 2022", "Williams & Kasting 1997"]
+source = ["crates/hyperion-sim/src/planetary/surface/steps/climate.rs", "R09.T13"]
+status = "planned"
+
+[[node]]
+id = "pw.erosion_branch"
+label = "Fluvial history branch"
+kind = "decision"
+cluster = "pw.coarse"
+summary = "Wet now / dry now with a wet epoch / never wet"
+detail = [
+  "wet now: steady state, the sea as base level",
+  "dry now: run effective_flow where the surface",
+  "  is older than the epoch's end (a Mars)",
+  "never wet (Moon, Mercury, Venus now): no erosion",
+]
+source = ["R09.T14.c", "docs/agent/plans/rendering-and-planets/09-surface-generator.md"]
+status = "planned"
+
+[[node]]
+id = "pw.erosion"
+label = "Stream-power erosion"
+kind = "draw"
+cluster = "pw.coarse"
+summary = "dz/dt = u - K A^m |grad z|, n = 1, m = 0.45"
+detail = [
+  "random receiver: a lower one of 4 edge neighbours",
+  "Tzathas analytic solver, multigrid to level 4",
+  "K = 6.3e-6 m^0.1/yr x (g/g⊕)(ρf/ρw) x B",
+  "base level: the sea, or priority flood + Fill-Spill-Merge",
+  "out: flow, drainage, k_s, runoffs, water surface",
+]
+cite = ["Tzathas et al. 2024", "Hergarten 2021", "Kirby & Whipple 2012", "Barnes, Lehman & Mulla 2014", "Barnes, Callaghan & Wickert 2021"]
+source = ["crates/hyperion-sim/src/planetary/surface/steps/erosion.rs", "R09.T14"]
+status = "planned"
+
+[[node]]
+id = "pw.classes"
+label = "Surface classes & crater state"
+kind = "model"
+cluster = "pw.coarse"
+summary = "Koppen-Geiger or surface-state class per cell"
+detail = [
+  "Peel et al. table on monthly rates; B tested first",
+  "C/D split at a coldest month of 0 °C",
+  "non-seasonal: liquid, ice, rock, regolith, melt,",
+  "  organic sediment, the regime's zones",
+  "classifies climate: no vegetation class",
+]
+cite = ["Peel, Finlayson & McMahon 2007", "Beck et al. 2018"]
+source = ["crates/hyperion-sim/src/planetary/surface/steps/classes.rs", "R09.T15"]
+status = "planned"
+
+[[node]]
+id = "pw.coarse_field"
+label = "Coarse field"
+kind = "entity"
+cluster = "pw.coarse"
+summary = "Quantised cells, climate layer at L-1, crater list"
+detail = [
+  "elevation mm, plate, crust, boundary, flow, k_s,",
+  "  runoffs, ice, substance byte, class",
+  "12 months of anomaly, precipitation, 10 m wind",
+  "~14.7 MB for an Earth at L8; cached, never stored",
+  "types, codec, quantiser built; steps are no-ops",
+  "  (today: a smooth dry sphere at the datum)",
+]
+source = ["crates/hyperion-sim/src/planetary/surface/mod.rs", "crates/hyperion-sim/src/planetary/surface/quantise.rs", "crates/hyperion-surface/src/field.rs", "crates/hyperion-surface/src/wire.rs", "R09.T2", "R09.T3", "R09.T10"]
+status = "partial"
+
+[[node]]
+id = "pw.base_elevation"
+label = "Base elevation"
+kind = "model"
+cluster = "pw.synth"
+summary = "Cubic B-spline per face; C1 and bit-equal at edges"
+detail = [
+  "ghost cells 3 deep, blended by quintic smoothstep",
+  "approximating: never overshoots the cells' range",
+  "categorical fields from the nearest cell",
+]
+source = ["crates/hyperion-surface/src/synth/interp.rs", "R09.T4"]
+status = "built"
+
+[[node]]
+id = "pw.octaves"
+label = "Structural octaves"
+kind = "draw"
+cluster = "pw.synth"
+summary = "Improved Perlin per level, ridged on mountain belts"
+detail = [
+  "spacing 1.5 mean cells, levels L+1 down to 2 m",
+  "spectrum: β1 2.0, break 2 km, β2 3.0 (silicate);",
+  "  1.8, 1 km, 2.6 (ice-rich)",
+  "styles: belt 2.5, interior 0.12, plain 0.1; warp 0.5",
+  "octave offsets: words 2^40 + 4m + axis of item 0",
+]
+cite = ["Perlin 2002"]
+source = ["crates/hyperion-surface/src/synth/relief.rs", "crates/hyperion-surface/src/noise.rs", "R09.T5"]
+status = "built"
+
+[[node]]
+id = "pw.channels"
+label = "Channel network (Dendry)"
+kind = "draw"
+cluster = "pw.synth"
+summary = "Key point per cell; level 1 = the coarse flow network"
+detail = [
+  "key point in the cell's central half (ε 0.25)",
+  "tributaries join the nearest segment in 3x3",
+  "bed S = k_s A^-0.45; Hack L = 0.32 A^0.6 (SI)",
+  "T6.a network built; incision and ~14 levels: T6.b",
+]
+cite = ["Gaillard et al. 2019", "Hack 1957", "Kirby & Whipple 2012"]
+source = ["crates/hyperion-surface/src/synth/channels.rs", "R09.T6.a", "R09.T6.b"]
+status = "partial"
+
+[[node]]
+id = "pw.small_craters"
+label = "Small craters (D < D_b)"
+kind = "draw"
+cluster = "pw.synth"
+summary = "Per-octave cells; counts from the body's density"
+detail = [
+  "octave level with cells ≥ its reach; 3x3 search",
+  "count x true cell area, capped at saturation",
+  "diameters by inverting N(>D) within the octave",
+  "rim fillet by level or diffusive age",
+]
+source = ["R09.T7.b", "R09.T7.c"]
+status = "planned"
+
+[[node]]
+id = "pw.height_fn"
+label = "Height function"
+kind = "query"
+cluster = "pw.synth"
+summary = "h(field, detail seed, direction, level) in f64"
+detail = [
+  "same bits native, wasm32-wasip1 and browser",
+  "today: base elevation only; the bands join in T8",
+  "2 m band limit; collision reads the same function",
+]
+source = ["crates/hyperion-surface/src/synth.rs", "crates/hyperion-surface/src/lib.rs", "R09.T8", "R09.T9"]
+status = "partial"
+
+[[node]]
+id = "pw.survey"
+label = "Survey coverage"
+kind = "query"
+cluster = "pw.synth"
+summary = "Survey passes gate which cells a client receives"
+detail = [
+  "knowledge/surveys.v1.jsonl, one line a pass",
+  "folded to a ResolutionCode byte per cell",
+  "payload: surveyed cells + a 5-cell margin, held",
+  "  but not surveyed (wire, partial field)",
+  "server requests and gate (R09.T19) planned",
+]
+source = ["crates/hyperion-server/src/knowledge/surveys.rs", "crates/hyperion-surface/src/wire.rs", "crates/hyperion-surface/src/field/partial.rs", "R09.T18", "R09.T19"]
+status = "partial"
+
+[[node]]
+id = "pw.material"
+label = "Material classifier"
+kind = "model"
+cluster = "pw.look"
+summary = "Authoritative class from slope, ice, water, climate"
+detail = [
+  "Seabed, ice, Bedrock above 40°, Snow, Melt,",
+  "  Evaporite, Sediment, then by regime and class",
+  "lunar-Lambert for all; the Moon's L(α) for dark ones",
+  "class albedo scale solved on the server",
+  "no stream: nothing is drawn",
+]
+cite = ["Kleinhans et al. 2011", "McEwen 1996"]
+source = ["R10.T1", "R10.T10", "docs/agent/plans/rendering-and-planets/10-terrain-on-generated-worlds.md"]
+status = "planned"
+
+[[node]]
+id = "pw.rocks"
+label = "Authoritative rocks"
+kind = "draw"
+cluster = "pw.look"
+summary = "F_k(D) = k e^(-qD), q = 1.79 + 0.152/k per m"
+detail = [
+  "k in [0, 0.40] by material, age, crater ejecta",
+  "4 octaves 0.4-6.4 m; Poisson count per cell",
+  "h/D uniform [0.25, 0.50]; superquadric shapes",
+  "D ≥ 0.4 m authoritative; smaller is decoration",
+  "tags: surface.scatter (reserved), .scatter.shape",
+]
+cite = ["Golombek & Rapp 1997", "Golombek et al. 2012"]
+source = ["R11.T3", "R11.T4", "docs/agent/plans/rendering-and-planets/11-surface-detail-clouds-oceans-rings-stills.md"]
+status = "planned"
+
+[[node]]
+id = "pw.clouds"
+label = "Cloud cover"
+kind = "draw"
+cluster = "pw.look"
+summary = "Zonal climatology refined by survey, scaled to plan 14"
+detail = [
+  "Sundqvist C = 1 - sqrt((1 - RH)/(1 - RH_c))",
+  "logistic offset bisected once to cloud fraction",
+  "sub-cell τ log-normal, χ ≈ 0.75",
+  "stateless flow map; noise from the detail seed",
+  "plan 14 gives every temperate world 0.67",
+]
+cite = ["Sundqvist et al. 1989", "Klein & Hartmann 1993", "Oreopoulos & Cahalan 2005"]
+source = ["R11.T7", "docs/agent/plans/rendering-and-planets/11-surface-detail-clouds-oceans-rings-stills.md"]
+status = "planned"
+
+[[node]]
+id = "pw.oceans"
+label = "Ocean surface"
+kind = "model"
+cluster = "pw.look"
+summary = "Sea-level sphere; Cox-Munk slopes from the wind"
+detail = [
+  "σ² = 0.003 + 5.12e-3 U (12.5 m wind)",
+  "Gerstner waves below 20 km, Pierson-Moskowitz",
+  "sea ice where the coarse field froze the sea",
+  "other liquids by an equivalent Earth wind",
+]
+cite = ["Cox & Munk 1954", "Bruneton, Neyret & Holzschuch 2010"]
+source = ["R11.T8", "docs/agent/plans/rendering-and-planets/11-surface-detail-clouds-oceans-rings-stills.md"]
+status = "planned"
+
+[[node]]
+id = "pw.rings"
+label = "Ring appearance"
+kind = "model"
+cluster = "pw.look"
+summary = "Provisional profile: gaps 0.039 r wide at τ x 0.1"
+detail = [
+  "power-law phase n = 3.09, opposition surge",
+  "lit and unlit faces; baked shadowing table",
+  "plan 14's radial profile will replace it",
+]
+cite = ["Salo & French 2010", "Dones et al. 1993"]
+source = ["R11.T9", "docs/agent/plans/rendering-and-planets/11-surface-detail-clouds-oceans-rings-stills.md"]
+status = "planned"
+
+[[node]]
+id = "pw.wet_timelines"
+label = "Habitability timelines"
+kind = "model"
+cluster = "pw.life"
+summary = "Each body's abiotic liquid-water history, as crossings"
+detail = [
+  "system.habitability_timelines(ctx), every body",
+  "asked of plan 14 (the brainstorm's request 4)",
+  "the origin gate's windows; judged on the twin",
+]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.origin_gate"
+label = "Origin gate & rate"
+kind = "decision"
+cluster = "pw.life"
+summary = "λ = λ0 (w_v + (1 - w_v) g) while the gate is open"
+detail = [
+  "open: liquid water, solid crust, impacts done",
+  "  (judged on the abiotic twin's timeline)",
+  "λ0 = 2/Gyr [1e-3, 1e2]; hydrothermal w_v = 0.1",
+  "g = 1 with land and enough 200-280 nm light",
+  "under ice: λ0 w_v, gated on heat flow",
+  "most bodies: the gate never opens, no record",
+]
+cite = ["Spiegel & Turner 2012", "Kipping 2020", "Rimmer et al. 2018", "Weiss et al. 2016"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.life_clocks"
+label = "Transition clocks"
+kind = "draw"
+cluster = "pw.life"
+summary = "T_k: gate open for a total E_k/λ_k, E_k ~ Exp(1)"
+detail = [
+  "OxygenicPhotosynthesis 0.3/Gyr; ComplexCells 0.1",
+  "Oxygenation: mean delay 0.5 Gyr (stand-in)",
+  "SimpleMulticell 5; ComplexMulticell 2 at P_O2 ≥ 1e3 Pa",
+  "Land 5: exposed land, O2 > 1e-2 PAL, no flare stripping",
+  "counter-based: a setback's redraw shifts no other",
+]
+cite = ["Carter 1983", "Watson 2008", "Mills et al. 2025", "Catling et al. 2005"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.panspermia"
+label = "Panspermia in a system"
+kind = "draw"
+cluster = "pw.life"
+summary = "Extra origin rate κ from each inhabited neighbour"
+detail = [
+  "κ: 0.3/Gyr rocky pairs, 1 between moons of a giant,",
+  "  0.003 into a giant's moon",
+  "a seeded epoch copies the donor's biochemistry",
+  "no transfer between systems",
+]
+cite = ["Mileikowsky et al. 2000", "Lingam & Loeb 2017"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.extinction"
+label = "Extinction pulses"
+kind = "draw"
+cluster = "pw.life"
+summary = "Supernova and GRB pulses graded by fluence"
+detail = [
+  "rate ≈ 2/Myr x (D/100 pc)³ within 100 pc",
+  "Poisson bins of 2^44 s before the source horizon",
+  "recovery gate: > 1 lethal event per 10 Myr bars",
+  "  complex multicellularity and land",
+  "proposed tag system.life.pulse (0x0500); the",
+  "  0x0500 block is unallocated in code",
+]
+cite = ["Melott & Thomas 2011", "Gehrels et al. 2003", "Thomas et al. 2016"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.biosphere_history"
+label = "BiosphereHistory"
+kind = "entity"
+cluster = "pw.life"
+summary = "≤ 4 epochs: origin, stage times, setbacks, end"
+detail = [
+  "source: surface, subsurface or a donor body",
+  "setback past S_deox ≈ 1.11 S⊕ (deoxygenation)",
+  "sterilised: runaway, engulfment, giant impact",
+  "ended epochs kept as fossil biospheres",
+]
+cite = ["Ozaki & Reinhard 2021", "Caldeira & Kasting 1992"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.biochemistry"
+label = "Biochemistry"
+kind = "draw"
+cluster = "pw.life"
+summary = "Water-carbon; handedness bit with p_left = 0.5"
+detail = [
+  "one word per epoch on body.life.biochemistry",
+  "exotic_solvents = 0: no methane or acid life",
+  "growth: -15 to 122 °C, a_w ≥ 0.611, pH 0-12.5,",
+  "  pressure ≤ 125 MPa",
+]
+cite = ["Takai et al. 2008", "Stevenson et al. 2015", "Glavin & Dworkin 2009"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.metabolism"
+label = "Metabolic menu"
+kind = "draw"
+cluster = "pw.life"
+summary = "Redox pairs and light on offer, gated by stage"
+detail = [
+  "first phototrophy: a wait at 5 per Gyr",
+  "a reaction pays from 20 kJ per mole",
+  "fixing C: 1,060 kJ/mol from H2, 3,500 from H2S, Fe",
+]
+cite = ["Schink 1997", "LaRowe & Amend 2015", "Heijnen & van Dijken 1992"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.photon_table"
+label = "Photon-yield table"
+kind = "table"
+cluster = "pw.life"
+summary = "q(T_eff, log g; band) from PHOENIX spectra"
+detail = [
+  "2,300-12,000 K, log g 0-6; blackbody outside",
+  "oxygenic 400-750 nm, anoxygenic 400-1,100 nm",
+  "per host, above the air; productivity takes it down",
+]
+cite = ["Husser et al. 2013"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.energy_budget"
+label = "Productivity closed form"
+kind = "model"
+cluster = "pw.life"
+summary = "P = min(f_T P_L, P_W, P_N) x f_C per cell and month"
+detail = [
+  "P_L = ε_q a Φ, ε_q = 0.0060 mol C per photon mol",
+  "f_T = 1/(1 + e^(1.315 - 0.119 T)), T in °C",
+  "P_W = 3,000 (1 - e^(-0.000664 W)) g dry/m²/yr",
+  "f_C: C3 ramp 150-300 ppm, C4 ramp 10-150 ppm",
+  "chemotrophs: Σ R |ΔG| / G per habitat",
+  "test: Earth's land 36-74 Pg C/yr",
+]
+cite = ["Potter et al. 1993", "Lieth 1975", "Field et al. 1998", "Zaks et al. 2007"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.forcing"
+label = "Biological forcing"
+kind = "draw"
+cluster = "pw.life"
+summary = "CH4, O2, N2O fluxes, f_bio, cover term, branch"
+detail = [
+  "units: Earth's biotic flux (T53.d: present; the",
+  "  brainstorm asks pre-industrial, request 2)",
+  "anoxic: CH4 a drawn share of reductant supply",
+  "oxic bands: 1e-2 PAL to p_cx, p_cx to 1 PAL,",
+  "  with land 0.7-1.5 PAL",
+  "held for the stage",
+]
+cite = ["Kharecha, Kasting & Siefert 2005", "Cooke et al. 2022", "Lenton et al. 2016"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.biosphere_hook"
+label = "Biosphere slot (second pass)"
+kind = "model"
+cluster = "pw.life"
+summary = "Plan 14 re-runs its passes with fluxes as sources"
+detail = [
+  "O2 steady state against sinks; O3 by T24.c's rule",
+  "CH4 lifetime in oxic air; haze cooling term",
+  "changes gases, albedo, T_s; never SurfaceState",
+  "the abiotic twin stays evaluable, server-only",
+]
+cite = ["Goldblatt, Lenton & Watson 2006", "Claire, Catling & Zahnle 2006"]
+source = ["P14.T53.d", "docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.strategies"
+label = "Growth strategies"
+kind = "draw"
+cluster = "pw.biota"
+summary = "≤ 16 stratified strategies spanning trade-offs"
+detail = [
+  "thermal window, water use, C3 or C4 pathway,",
+  "  rigid tissue, allocation, residence time",
+  "survive where yearly carbon balance stays > 0",
+  "treeline fitted at 6.7 °C root-zone temperature",
+]
+cite = ["Kleidon & Mooney 2000", "Pavlick et al. 2013", "Korner & Paulsen 2004"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.life_table"
+label = "LifeTable"
+kind = "entity"
+cluster = "pw.biota"
+summary = "~1-2 kB per living world: strategies and covers"
+detail = [
+  "pigments computed from the ground photon",
+  "  spectrum by Kiang's rules, never drawn",
+  "covers: B, V, R albedos, phase row, dormant albedo",
+  "cover threshold + productivity scale realise",
+  "  the body-level snapshot",
+]
+cite = ["Kiang et al. 2007", "Duffy et al. 2023"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.life_state"
+label = "Per-cell life state"
+kind = "model"
+cluster = "pw.biota"
+summary = "life_at: biome, cover, rigid share, height, NPP"
+detail = [
+  "scored at L-1 on both sides from the field",
+  "light shared tallest first; IGBP labels, crust,",
+  "  mat, reef; Longhurst biomes at sea",
+  "H_hyd = (Ψ0 - Ψlim)/(ρ_w g): 122 m at 1 g",
+  "phenology by a growing-season index",
+]
+cite = ["Sulla-Menashe & Friedl 2018", "Longhurst 1998", "Koch et al. 2004", "Jolly, Nemani & Running 2005"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.phylogeny"
+label = "Phylogeny"
+kind = "draw"
+cluster = "pw.biota"
+summary = "8 ranks; children geometric (birth-death process)"
+detail = [
+  "clades addressed by path, nothing stored",
+  "conserved traits drift: Brownian or Markov",
+  "convergent traits from niche and physics",
+  "body-plan caps from g, air density, P_O2, light",
+  "stage-gated: complex clades from ComplexCells",
+]
+cite = ["Kendall 1948", "Yule 1925", "Mora et al. 2011"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.ecology"
+label = "Pools & densities"
+kind = "draw"
+cluster = "pw.biota"
+summary = "Richness by area, temperature, time; energy budget"
+detail = [
+  "S = S_ref (A/A_ref)^z ..., z ≈ 0.25",
+  "taxa below 1,377 individuals pruned once",
+  "herbivory after McNaughton; transfer 8% at sea",
+  "density = level share / metabolic rate (M^3/4)",
+  "a taxon's share of its level drawn log-normal",
+]
+cite = ["McNaughton et al. 1989", "Damuth 1981", "Brook, Traill & Bradshaw 2006", "Gillooly et al. 2001"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.flora"
+label = "Plant instances"
+kind = "draw"
+cluster = "pw.biota"
+summary = "Height octaves from 0.2 m to H_max, one per cell"
+detail = [
+  "kept with p = cover x rigid x cell area / crown",
+  "2.8x the stems in each lower octave",
+  "rigid plants ≥ 0.2 m tall are authoritative",
+]
+cite = ["West, Enquist & Brown 2009"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.fauna"
+label = "Animal instances"
+kind = "draw"
+cluster = "pw.biota"
+summary = "Poisson per size-octave cell, made near observers"
+detail = [
+  "count = density x true area, thinned by habitat",
+  "social taxa: Neyman-Scott clusters",
+  "paths: sinusoids in activity time; flight records",
+  "generation = floor((t + phase)/lifespan)",
+]
+cite = ["Speakman 2005", "Lindstedt, Miller & Buskirk 1986"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.biosignatures"
+label = "Biosignatures"
+kind = "model"
+cluster = "pw.biota"
+summary = "One atmosphere, biotic and abiotic sources"
+detail = [
+  "false positives emerge from the same physics",
+  "seasonal anomaly ΔF τ cos(ωt - φ)/sqrt(1 + ω²τ²)",
+  "red edge where the computed pigment puts it",
+  "claims folded from measurements, never truth",
+]
+cite = ["Schwieterman et al. 2018", "Meadows et al. 2018", "Olson et al. 2018", "Green et al. 2021"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.samples"
+label = "Field samples"
+kind = "query"
+cluster = "pw.biota"
+summary = "A scoop's living and abiotic contents, made on demand"
+detail = [
+  "keyed by the site's finest surface_cell:",
+  "  instance 0 the community, n + 1 the nth scoop",
+  "rarefaction at the analysis's effective depth",
+  "places taxa: form, metabolism, then species",
+]
+cite = ["Louca et al. 2019", "Jain et al. 2018"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.resources"
+label = "Resource abundances"
+kind = "draw"
+cluster = "pw.geo"
+summary = "11 resource fractions x one 0.3 dex lognormal each"
+detail = [
+  "iron group ~ 10^[Fe/H]; α elements ~ [α/Fe]",
+  "platinum group poor where the body differentiated",
+  "helium-3 and deuterium for giants",
+  "radioactives decay with age",
+]
+source = ["P14.T26"]
+status = "planned"
+
+[[node]]
+id = "pw.deposits"
+label = "Ore deposits"
+kind = "draw"
+cluster = "pw.geo"
+summary = "Processes on permissive tracts; Poisson per tract"
+detail = [
+  "porphyry at arcs, VMS at ridges, BIF by stage",
+  "count by tract-area regression (Singer 2008)",
+  "log-normal tonnage and grade per type",
+  "server-only list; 1e3-1e4 on an Earth",
+]
+cite = ["Singer 2008", "Cox & Singer 1986", "Sillitoe 2010"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.landmarks"
+label = "Geological landmarks"
+kind = "draw"
+cluster = "pw.geo"
+summary = "Lava tubes, vents, plumes, dunes, karst, peaks"
+detail = [
+  "tube width ~ g^-1.8; skylights are height pits",
+  "hydrothermal list shared with massive sulfides",
+  "plumes on ocean moons, output by orbital phase",
+  "proposed detail tags surface.dune, surface.doline",
+]
+cite = ["Sauro et al. 2020", "Hedman et al. 2013", "Kok et al. 2012"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.surface_events"
+label = "Geyser eruptions"
+kind = "draw"
+cluster = "pw.geo"
+summary = "Proposed body.geyser (0x0501): monotone-phase eruptions"
+detail = [
+  "members of the hydrothermal list on silicic crust",
+  "a long eruption is followed by a long wait",
+  "P14.T31.b's monotone-phase construction",
+  "one clock per body until EventSubject gains items",
+  "EventKey: one block under the Event tag",
+  "0x0501 is unallocated in code (request 22)",
+]
+source = ["docs/agent/brainstorming/life-and-planet-content.md", "P14.T31.b"]
+status = "planned"
+
+[[node]]
+id = "pw.designation"
+label = "Catalogue designations"
+kind = "draw"
+cluster = "pw.text"
+summary = "Feistel permutation keyed once per body"
+detail = [
+  "round keys from body.life.designation",
+  "unique across epochs; reveals no rank or kin",
+  "only the server can invert it",
+]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "pw.enrich"
+label = "LLM description text"
+kind = "enrich"
+cluster = "pw.text"
+summary = "An LLM writes text from fact sheets, never seeds"
+detail = [
+  "fact sheet: a fold of Knowledge, never the truth",
+  "keyed (subject, rung, fact-sheet digest)",
+  "enrichment/enrichment.v1.jsonl: model, prompt version",
+  "stored; never feeds back into simulation values",
+  "superseded, and kept, when the digest changes",
+  "lives in hyperion-server; store.rs reserves the dir",
+]
+source = ["docs/agent/brainstorming/galaxy-generation.md", "docs/agent/brainstorming/life-and-planet-content.md", "crates/hyperion-server/src/universe/store.rs"]
+status = "planned"
+
+[[edge]]
+from = "ps.key_body"
+to = "pw.volatile_draws"
+kind = "seed"
+label = "planet.volatiles w0-2"
+
+[[edge]]
+from = "ps.surface_seed"
+to = "pw.coarse_streams"
+kind = "seed"
+label = "SurfaceCoarse scope"
+
+[[edge]]
+from = "ps.key_body"
+to = "pw.detail_seed"
+kind = "seed"
+label = "body.surface.detail w0"
+
+[[edge]]
+from = "ps.key_body"
+to = "pw.continents"
+kind = "seed"
+label = "body.continents w0 (planned)"
+
+[[edge]]
+from = "ps.key_body"
+to = "pw.resources"
+kind = "seed"
+label = "body.resources (reserved)"
+
+[[edge]]
+from = "ps.key_body"
+to = "pw.cold_traps"
+kind = "seed"
+label = "f_x stream (tag TBD)"
+
+[[edge]]
+from = "ps.key_body"
+to = "pw.life_streams"
+kind = "seed"
+label = "body.life.* (proposed)"
+
+[[edge]]
+from = "pw.life_streams"
+to = "pw.life_clocks"
+kind = "seed"
+label = "body.life.steps"
+
+[[edge]]
+from = "pw.life_streams"
+to = "pw.panspermia"
+kind = "seed"
+label = "body.life.transfer"
+
+[[edge]]
+from = "pw.life_streams"
+to = "pw.biochemistry"
+kind = "seed"
+label = "body.life.biochemistry"
+
+[[edge]]
+from = "pw.life_streams"
+to = "pw.metabolism"
+kind = "seed"
+label = "body.life.metabolism"
+
+[[edge]]
+from = "pw.life_streams"
+to = "pw.forcing"
+kind = "seed"
+label = "body.life.gases"
+
+[[edge]]
+from = "pw.life_streams"
+to = "pw.strategies"
+kind = "seed"
+label = "body.life.strategies"
+
+[[edge]]
+from = "pw.life_streams"
+to = "pw.designation"
+kind = "seed"
+label = "body.life.designation"
+
+[[edge]]
+from = "pw.life_streams"
+to = "pw.lineage_seed"
+kind = "seed"
+label = "body.life.lineage block"
+
+[[edge]]
+from = "pw.lineage_seed"
+to = "pw.phylogeny"
+kind = "seed"
+label = "clade.traits/.children"
+
+[[edge]]
+from = "pw.lineage_seed"
+to = "pw.taxon_seed"
+kind = "seed"
+label = "clade.taxon block"
+
+[[edge]]
+from = "pw.taxon_seed"
+to = "pw.fauna"
+kind = "seed"
+label = "surface.biota.*"
+
+[[edge]]
+from = "g.event_key"
+to = "pw.surface_events"
+kind = "seed"
+label = "body.geyser 0x0501, proposed"
+
+[[edge]]
+from = "g.event_key"
+to = "pw.extinction"
+kind = "seed"
+label = "system.life.pulse, proposed"
+
+[[edge]]
+from = "pw.lineage_seed"
+to = "pw.samples"
+kind = "seed"
+label = "clade.sample"
+
+[[edge]]
+from = "pw.coarse_streams"
+to = "pw.samples"
+kind = "seed"
+label = "coarse.sample (proposed)"
+
+[[edge]]
+from = "pw.coarse_streams"
+to = "pw.plates"
+kind = "seed"
+label = ".plates, .warp (planned)"
+
+[[edge]]
+from = "pw.coarse_streams"
+to = "pw.coarse_relief"
+kind = "seed"
+label = ".relief (planned)"
+
+[[edge]]
+from = "pw.coarse_streams"
+to = "pw.coarse_craters"
+kind = "seed"
+label = ".crater (planned)"
+
+[[edge]]
+from = "pw.coarse_streams"
+to = "pw.erosion"
+kind = "seed"
+label = ".erosion (planned)"
+
+[[edge]]
+from = "pw.coarse_streams"
+to = "pw.deposits"
+kind = "seed"
+label = "coarse.deposit (proposed)"
+
+[[edge]]
+from = "pw.coarse_streams"
+to = "pw.landmarks"
+kind = "seed"
+label = "coarse.landmark (proposed)"
+
+[[edge]]
+from = "pw.detail_seed"
+to = "pw.octaves"
+kind = "seed"
+label = "surface.relief"
+
+[[edge]]
+from = "pw.detail_seed"
+to = "pw.channels"
+kind = "seed"
+label = "surface.channel"
+
+[[edge]]
+from = "pw.detail_seed"
+to = "pw.small_craters"
+kind = "seed"
+label = "surface.crater (planned)"
+
+[[edge]]
+from = "pw.detail_seed"
+to = "pw.rocks"
+kind = "seed"
+label = "surface.scatter (reserved)"
+
+[[edge]]
+from = "pw.detail_seed"
+to = "pw.clouds"
+kind = "seed"
+label = "hashed lattices (planned)"
+
+[[edge]]
+from = "pw.detail_seed"
+to = "pw.flora"
+kind = "seed"
+label = "surface.flora (proposed)"
+
+[[edge]]
+from = "ps.radius_now"
+to = "pw.inventory"
+kind = "data"
+label = "M, fractions, snow side"
+
+[[edge]]
+from = "pw.volatile_draws"
+to = "pw.inventory"
+kind = "data"
+label = "3 ranks"
+
+[[edge]]
+from = "pw.inventory"
+to = "pw.climate_storage"
+kind = "data"
+label = "H2O, CO2, N2, Ar"
+
+[[edge]]
+from = "pw.exobase_jeans"
+to = "pw.climate_storage"
+kind = "constraint"
+label = "drop unretained gases"
+
+[[edge]]
+from = "ps.irradiation"
+to = "pw.exobase_jeans"
+kind = "data"
+label = "XUV fluence"
+
+[[edge]]
+from = "ps.t_eq"
+to = "pw.exobase_jeans"
+kind = "data"
+label = "T_eq at peak luminosity"
+
+[[edge]]
+from = "ps.t_eq"
+to = "pw.greenhouse"
+kind = "data"
+label = "T_eq this pass"
+
+[[edge]]
+from = "ps.hz"
+to = "pw.climate_branch"
+kind = "data"
+label = "HZ insolation class"
+
+[[edge]]
+from = "ps.formation_draws"
+to = "pw.climate_branch"
+kind = "data"
+label = "magma ocean's molten_until"
+
+[[edge]]
+from = "pw.climate_branch"
+to = "pw.climate_storage"
+kind = "data"
+label = "runaway/temperate/snowball"
+
+[[edge]]
+from = "pw.climate_branch"
+to = "pw.carbon_oxygen"
+kind = "data"
+label = "beyond max GH / runaway"
+
+[[edge]]
+from = "pw.climate_storage"
+to = "pw.greenhouse"
+kind = "data"
+label = "airborne masses"
+
+[[edge]]
+from = "pw.carbon_oxygen"
+to = "pw.greenhouse"
+kind = "data"
+label = "CH4 or CO2; O2"
+
+[[edge]]
+from = "pw.substance_registry"
+to = "pw.greenhouse"
+kind = "lookup"
+label = "saturation pressures"
+
+[[edge]]
+from = "pw.greenhouse"
+to = "pw.surface_state"
+kind = "data"
+label = "T_s, p_s, τ"
+
+[[edge]]
+from = "ps.radius_now"
+to = "pw.surface_state"
+kind = "data"
+label = "envelope fraction"
+
+[[edge]]
+from = "pw.surface_state"
+to = "pw.atmosphere"
+kind = "data"
+label = "state, A, clouds, partials"
+
+[[edge]]
+from = "pw.inventory"
+to = "pw.bulk_composition"
+kind = "data"
+label = "volatile inventory"
+
+[[edge]]
+from = "ps.context"
+to = "pw.bulk_composition"
+kind = "data"
+label = "[Fe/H], [α/Fe]"
+
+[[edge]]
+from = "pw.atmosphere"
+to = "pw.surface_conditions"
+kind = "data"
+label = "T_s, p_s, partials"
+
+[[edge]]
+from = "ps.locking"
+to = "pw.surface_conditions"
+kind = "data"
+label = "obliquity, solar day"
+
+[[edge]]
+from = "pw.substance_registry"
+to = "pw.surface_conditions"
+kind = "lookup"
+label = "μ, c_p/R, phase_at"
+
+[[edge]]
+from = "pw.surface_conditions"
+to = "pw.surface_section"
+kind = "data"
+label = "conditions (planned)"
+
+[[edge]]
+from = "pw.bulk_composition"
+to = "pw.global_figures"
+kind = "data"
+label = "rock mass, [Fe/H] (planned)"
+
+[[edge]]
+from = "ps.belt_record"
+to = "pw.global_figures"
+kind = "data"
+label = "belt scaling, v (planned)"
+
+[[edge]]
+from = "pw.continents"
+to = "pw.sigma_h"
+kind = "data"
+label = "f_c(t)"
+
+[[edge]]
+from = "pw.global_figures"
+to = "pw.sigma_h"
+kind = "data"
+label = "regime, F, N(>1 km), V"
+
+[[edge]]
+from = "pw.sigma_h"
+to = "pw.surface_section"
+kind = "data"
+label = "σ_h, f_c"
+
+[[edge]]
+from = "pw.global_figures"
+to = "pw.surface_section"
+kind = "data"
+label = "figures, wet epoch"
+
+[[edge]]
+from = "pw.global_figures"
+to = "pw.crater_density"
+kind = "data"
+label = "crater contract (planned)"
+
+[[edge]]
+from = "pw.surface_conditions"
+to = "pw.climate_regime"
+kind = "data"
+label = "contrasts, spin (planned)"
+
+[[edge]]
+from = "pw.climate_regime"
+to = "pw.surface_section"
+kind = "data"
+label = "regime, model"
+
+[[edge]]
+from = "pw.bulk_composition"
+to = "pw.surface_composition"
+kind = "data"
+label = "inventory (planned)"
+
+[[edge]]
+from = "pw.surface_composition"
+to = "pw.surface_section"
+kind = "data"
+label = "condensates, crust"
+
+[[edge]]
+from = "pw.surface_composition"
+to = "pw.greenhouse"
+kind = "constraint"
+label = "cold-trap cap (planned)"
+
+[[edge]]
+from = "pw.surface_conditions"
+to = "pw.aerosols"
+kind = "data"
+label = "gases, T_s, p_s (planned)"
+
+[[edge]]
+from = "pw.aerosols"
+to = "pw.surface_section"
+kind = "data"
+label = "aerosols, T(p)"
+
+[[edge]]
+from = "ps.moon_derive"
+to = "pw.subsurface_ocean"
+kind = "data"
+label = "tidal heat, ocean (planned)"
+
+[[edge]]
+from = "pw.subsurface_ocean"
+to = "pw.habitability"
+kind = "data"
+label = "ocean under ice"
+
+[[edge]]
+from = "pw.surface_conditions"
+to = "pw.habitability"
+kind = "data"
+label = "liquid water, p (planned)"
+
+[[edge]]
+from = "ps.locking"
+to = "pw.cold_traps"
+kind = "data"
+label = "highest solar elevation"
+
+[[edge]]
+from = "pw.cold_traps"
+to = "pw.surface_composition"
+kind = "data"
+label = "cold-trapped ices (planned)"
+
+[[edge]]
+from = "pw.surface_section"
+to = "pw.coarse_inputs"
+kind = "data"
+label = "for_body (planned)"
+
+[[edge]]
+from = "pw.coarse_inputs"
+to = "pw.plates"
+kind = "data"
+label = "tectonic regime (planned)"
+
+[[edge]]
+from = "pw.plates"
+to = "pw.coarse_relief"
+kind = "data"
+label = "plates, boundaries"
+
+[[edge]]
+from = "pw.coarse_inputs"
+to = "pw.coarse_relief"
+kind = "constraint"
+label = "σ_h, ocean share (planned)"
+
+[[edge]]
+from = "pw.coarse_relief"
+to = "pw.coarse_craters"
+kind = "data"
+label = "elevation"
+
+[[edge]]
+from = "pw.crater_density"
+to = "pw.coarse_craters"
+kind = "data"
+label = "N(>D), saturation (planned)"
+
+[[edge]]
+from = "pw.crater_shapes"
+to = "pw.coarse_craters"
+kind = "data"
+label = "morphology (planned)"
+
+[[edge]]
+from = "pw.coarse_inputs"
+to = "pw.climate_ebm"
+kind = "data"
+label = "regime, contrasts (planned)"
+
+[[edge]]
+from = "pw.coarse_inputs"
+to = "pw.erosion_branch"
+kind = "data"
+label = "wet epoch, liquids (planned)"
+
+[[edge]]
+from = "pw.erosion_branch"
+to = "pw.erosion"
+kind = "data"
+label = "wet now / dry now"
+
+[[edge]]
+from = "pw.erosion_branch"
+to = "pw.coarse_craters"
+kind = "constraint"
+label = "split at wet-epoch end"
+
+[[edge]]
+from = "pw.climate_ebm"
+to = "pw.erosion"
+kind = "data"
+label = "runoff"
+
+[[edge]]
+from = "pw.erosion"
+to = "pw.classes"
+kind = "data"
+label = "elevation, water"
+
+[[edge]]
+from = "pw.classes"
+to = "pw.coarse_field"
+kind = "data"
+label = "cells, climate (planned)"
+
+[[edge]]
+from = "pw.coarse_craters"
+to = "pw.coarse_field"
+kind = "data"
+label = "crater list (planned)"
+
+[[edge]]
+from = "pw.coarse_field"
+to = "pw.base_elevation"
+kind = "data"
+label = "cells, 5-cell margin"
+
+[[edge]]
+from = "pw.coarse_field"
+to = "pw.octaves"
+kind = "data"
+label = "crust, boundary, spectrum"
+
+[[edge]]
+from = "pw.coarse_field"
+to = "pw.channels"
+kind = "data"
+label = "flow, k_s, runoffs"
+
+[[edge]]
+from = "pw.crater_density"
+to = "pw.small_craters"
+kind = "data"
+label = "N(>D) inversion (planned)"
+
+[[edge]]
+from = "pw.base_elevation"
+to = "pw.height_fn"
+kind = "data"
+label = "base"
+
+[[edge]]
+from = "pw.octaves"
+to = "pw.height_fn"
+kind = "data"
+label = "bands to 2 m"
+
+[[edge]]
+from = "pw.channels"
+to = "pw.height_fn"
+kind = "data"
+label = "incision"
+
+[[edge]]
+from = "pw.small_craters"
+to = "pw.height_fn"
+kind = "data"
+label = "crater relief (planned)"
+
+[[edge]]
+from = "pw.survey"
+to = "pw.height_fn"
+kind = "constraint"
+label = "surveyed cells only"
+
+[[edge]]
+from = "pw.height_fn"
+to = "pw.material"
+kind = "data"
+label = "height, slope (planned)"
+
+[[edge]]
+from = "pw.material"
+to = "pw.rocks"
+kind = "data"
+label = "material class"
+
+[[edge]]
+from = "pw.coarse_field"
+to = "pw.clouds"
+kind = "data"
+label = "ClimateCells (planned)"
+
+[[edge]]
+from = "pw.atmosphere"
+to = "pw.clouds"
+kind = "constraint"
+label = "cloud fraction (planned)"
+
+[[edge]]
+from = "pw.coarse_field"
+to = "pw.oceans"
+kind = "data"
+label = "sea level, wind (planned)"
+
+[[edge]]
+from = "ps.moon_record"
+to = "pw.rings"
+kind = "data"
+label = "extent, τ, gaps (planned)"
+
+[[edge]]
+from = "pw.habitability"
+to = "pw.origin_gate"
+kind = "data"
+label = "prefilter, ocean class"
+
+[[edge]]
+from = "ps.body_state"
+to = "pw.origin_gate"
+kind = "data"
+label = "engulfed, unbound (planned)"
+
+[[edge]]
+from = "ps.impact_moon"
+to = "pw.origin_gate"
+kind = "data"
+label = "giant impact (planned)"
+
+[[edge]]
+from = "s.star_model"
+to = "pw.origin_gate"
+kind = "data"
+label = "near-UV, activity (planned)"
+
+[[edge]]
+from = "s.events"
+to = "pw.origin_gate"
+kind = "data"
+label = "flares (planned)"
+
+[[edge]]
+from = "pw.origin_gate"
+to = "pw.life_clocks"
+kind = "data"
+label = "gate open: windows, rate"
+
+[[edge]]
+from = "pw.origin_gate"
+to = "pw.biosphere_history"
+kind = "data"
+label = "never opens: no record"
+
+[[edge]]
+from = "pw.panspermia"
+to = "pw.life_clocks"
+kind = "data"
+label = "extra origin rate κ"
+
+[[edge]]
+from = "pw.biosphere_hook"
+to = "pw.life_clocks"
+kind = "constraint"
+label = "O2 gates on abiotic snap"
+
+[[edge]]
+from = "pw.extinction"
+to = "pw.life_clocks"
+kind = "constraint"
+label = "recovery gate"
+
+[[edge]]
+from = "g.layer_density"
+to = "pw.extinction"
+kind = "data"
+label = "population ρ (planned)"
+
+[[edge]]
+from = "g.type_ia"
+to = "pw.extinction"
+kind = "data"
+label = "Type Ia DTD (planned)"
+
+[[edge]]
+from = "pw.life_clocks"
+to = "pw.biosphere_history"
+kind = "data"
+label = "stage times"
+
+[[edge]]
+from = "pw.biochemistry"
+to = "pw.biosphere_history"
+kind = "data"
+label = "Biochemistry"
+
+[[edge]]
+from = "pw.metabolism"
+to = "pw.biosphere_history"
+kind = "data"
+label = "phototrophy date"
+
+[[edge]]
+from = "pw.photon_table"
+to = "pw.energy_budget"
+kind = "lookup"
+label = "photon yield q"
+
+[[edge]]
+from = "pw.biosphere_history"
+to = "pw.energy_budget"
+kind = "data"
+label = "stage"
+
+[[edge]]
+from = "pw.energy_budget"
+to = "pw.forcing"
+kind = "data"
+label = "productivity"
+
+[[edge]]
+from = "pw.forcing"
+to = "pw.biosphere_hook"
+kind = "data"
+label = "fluxes, f_bio, cover"
+
+[[edge]]
+from = "pw.biosphere_hook"
+to = "pw.greenhouse"
+kind = "constraint"
+label = "second pass (planned)"
+
+[[edge]]
+from = "pw.biosphere_hook"
+to = "pw.surface_section"
+kind = "data"
+label = "biosphere member (absent)"
+
+[[edge]]
+from = "pw.biosphere_history"
+to = "pw.strategies"
+kind = "data"
+label = "stage bounds traits"
+
+[[edge]]
+from = "pw.strategies"
+to = "pw.life_table"
+kind = "data"
+label = "traits"
+
+[[edge]]
+from = "pw.energy_budget"
+to = "pw.life_table"
+kind = "data"
+label = "body cover, P scale"
+
+[[edge]]
+from = "pw.life_table"
+to = "pw.life_state"
+kind = "data"
+label = "LifeTable"
+
+[[edge]]
+from = "pw.coarse_field"
+to = "pw.life_state"
+kind = "data"
+label = "climate, terrain (planned)"
+
+[[edge]]
+from = "pw.life_state"
+to = "pw.material"
+kind = "data"
+label = "cover over substrate"
+
+[[edge]]
+from = "pw.biosphere_history"
+to = "pw.phylogeny"
+kind = "data"
+label = "stage-gated clades"
+
+[[edge]]
+from = "pw.phylogeny"
+to = "pw.ecology"
+kind = "data"
+label = "clades, traits"
+
+[[edge]]
+from = "pw.life_state"
+to = "pw.ecology"
+kind = "data"
+label = "productivity"
+
+[[edge]]
+from = "pw.ecology"
+to = "pw.fauna"
+kind = "data"
+label = "densities"
+
+[[edge]]
+from = "pw.ecology"
+to = "pw.samples"
+kind = "data"
+label = "habitat pools, abundance"
+
+[[edge]]
+from = "pw.life_state"
+to = "pw.flora"
+kind = "data"
+label = "cover, rigid, height"
+
+[[edge]]
+from = "pw.biosphere_hook"
+to = "pw.biosignatures"
+kind = "data"
+label = "biotic gases"
+
+[[edge]]
+from = "pw.atmosphere"
+to = "pw.biosignatures"
+kind = "data"
+label = "abiotic twin (planned)"
+
+[[edge]]
+from = "pw.bulk_composition"
+to = "pw.resources"
+kind = "data"
+label = "fractions, [Fe/H] (planned)"
+
+[[edge]]
+from = "pw.resources"
+to = "pw.deposits"
+kind = "data"
+label = "commodity scaling"
+
+[[edge]]
+from = "pw.coarse_field"
+to = "pw.deposits"
+kind = "data"
+label = "tracts (planned)"
+
+[[edge]]
+from = "pw.biosphere_history"
+to = "pw.deposits"
+kind = "constraint"
+label = "BIF, phosphorite gates"
+
+[[edge]]
+from = "pw.coarse_field"
+to = "pw.landmarks"
+kind = "data"
+label = "provinces, wind (planned)"
+
+[[edge]]
+from = "pw.landmarks"
+to = "pw.surface_events"
+kind = "data"
+label = "geyser sites"
+
+[[edge]]
+from = "pw.global_figures"
+to = "ps.events"
+kind = "data"
+label = "eruption heat flow (planned)"
+
+[[edge]]
+from = "pw.designation"
+to = "pw.enrich"
+kind = "data"
+label = "designations"
+
+[[edge]]
+from = "pw.survey"
+to = "pw.enrich"
+kind = "constraint"
+label = "Knowledge gate (planned)"
+
+[[edge]]
+from = "pw.surface_section"
+to = "pw.enrich"
+kind = "data"
+label = "surface facts"
+
+[[edge]]
+from = "pw.ecology"
+to = "pw.enrich"
+kind = "data"
+label = "taxon traits"
+
+# --- added on verification against the code and plans (snapshot a6d3f6dd)
+
+[[edge]]
+from = "ps.irradiation"
+to = "pw.climate_branch"
+kind = "data"
+label = "Σ F now and at peak L"
+
+[[edge]]
+from = "ps.irradiation"
+to = "pw.carbon_oxygen"
+kind = "data"
+label = "saturated XUV flux"
+
+[[edge]]
+from = "ps.formation_draws"
+to = "pw.carbon_oxygen"
+kind = "data"
+label = "molten_for: melt takes O2"
+
+[[edge]]
+from = "ps.radius_now"
+to = "pw.bulk_composition"
+kind = "data"
+label = "mass fractions at t"
+
+[[edge]]
+from = "ps.irradiation"
+to = "pw.surface_conditions"
+kind = "data"
+label = "flux, XUV flux now"
+
+[[edge]]
+from = "pw.global_figures"
+to = "pw.aerosols"
+kind = "data"
+label = "outgassing (sulphur)"
+
+[[edge]]
+from = "pw.climate_regime"
+to = "pw.aerosols"
+kind = "data"
+label = "condensable sets α"
+
+[[edge]]
+from = "pw.surface_composition"
+to = "pw.surface_state"
+kind = "constraint"
+label = "area-mix Bond A (planned)"
+
+[[edge]]
+from = "pw.surface_state"
+to = "pw.envelope_atmosphere"
+kind = "data"
+label = "GasEnvelope (planned)"
+
+[[edge]]
+from = "pw.bulk_composition"
+to = "pw.envelope_atmosphere"
+kind = "data"
+label = "[Fe/H], [α/Fe] (planned)"
+
+[[edge]]
+from = "ps.t_eq"
+to = "pw.envelope_atmosphere"
+kind = "data"
+label = "T_eq, T_eff (planned)"
+
+[[edge]]
+from = "pw.global_figures"
+to = "pw.cold_traps"
+kind = "data"
+label = "heat flow floor (planned)"
+
+[[edge]]
+from = "pw.cold_traps"
+to = "pw.climate_ebm"
+kind = "data"
+label = "per-cell fraction (planned)"
+
+[[edge]]
+from = "ps.hz"
+to = "pw.habitability"
+kind = "data"
+label = "conservative HZ (planned)"
+
+[[edge]]
+from = "pw.coarse_craters"
+to = "pw.climate_ebm"
+kind = "data"
+label = "elevation (orography)"
+
+[[edge]]
+from = "pw.climate_ebm"
+to = "pw.classes"
+kind = "data"
+label = "monthly T, precipitation"
+
+[[edge]]
+from = "pw.coarse_field"
+to = "pw.rocks"
+kind = "data"
+label = "craters, age, p (planned)"
+
+[[edge]]
+from = "pw.crater_shapes"
+to = "pw.small_craters"
+kind = "data"
+label = "crater profile (planned)"
+
+[[edge]]
+from = "g.feh_field"
+to = "pw.extinction"
+kind = "data"
+label = "young [Fe/H] (planned)"
+
+[[edge]]
+from = "g.sn_entry"
+to = "pw.extinction"
+kind = "constraint"
+label = "catalogue SNe (planned)"
+
+[[edge]]
+from = "pw.surface_state"
+to = "pw.biosphere_history"
+kind = "constraint"
+label = "runaway, snowball (planned)"
+
+[[edge]]
+from = "pw.life_table"
+to = "pw.biosignatures"
+kind = "data"
+label = "pigment edge, covers"
+
+[[edge]]
+from = "pw.surface_conditions"
+to = "pw.wet_timelines"
+kind = "data"
+label = "liquid-water flag (planned)"
+
+[[edge]]
+from = "pw.wet_timelines"
+to = "pw.origin_gate"
+kind = "data"
+label = "abiotic wet windows"
+
+[[edge]]
+from = "pw.global_figures"
+to = "pw.origin_gate"
+kind = "data"
+label = "ocean fraction, heat flow"
+
+[[edge]]
+from = "pw.detail_seed"
+to = "pw.landmarks"
+kind = "seed"
+label = "dune, doline (proposed)"
+
+[[edge]]
+from = "pw.atmosphere"
+to = "ps.events"
+kind = "data"
+label = "thin air: dust (planned)"

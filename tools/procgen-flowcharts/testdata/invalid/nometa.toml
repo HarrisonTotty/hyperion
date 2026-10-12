@@ -1,0 +1,6 @@
+# Test fixture: no [meta], an unknown table, and nodes that are not an array of tables.
+
+node = "not an array of tables"
+
+[notes]
+text = "not a table the schema names"

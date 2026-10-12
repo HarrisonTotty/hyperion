@@ -1,0 +1,154 @@
+# Test fixture: every kind of problem the validator reports, one or two of each.
+
+[meta]
+stage = "galaxy"
+part = "galaxy"
+prefix = "g"
+title = "Galactic Properties & Megastructures"
+snapshot = "a6d3f6dd"
+
+[[cluster]]
+id = "g.disc"
+label = "Stellar disc"
+
+[[cluster]]
+id = "g.arms"
+label = "Spiral arms"
+parent = "g.bulge"
+
+[[cluster]]
+id = "g.loop_a"
+label = "Loop A"
+parent = "g.loop_b"
+
+[[cluster]]
+id = "g.loop_b"
+label = "Loop B"
+parent = "g.loop_a"
+
+[[cluster]]
+id = "g.disc"
+label = "Stellar disc, again"
+
+[[node]]
+id = "g.seed"
+label = "Galaxy seed"
+kind = "seed"
+summary = "u64 root seed"
+status = "built"
+
+[[node]]
+id = "g.imf"
+label = "Initial mass function"
+kind = "sample"
+cluster = "g.disc"
+summary = "Broken power law, 0.08–150 M☉"
+status = "done"
+
+[[node]]
+id = "x.halo"
+label = "Dark matter halo"
+kind = "model"
+summary = "NFW profile, r_s = 16 kpc"
+status = "built"
+
+[[node]]
+id = "g.Bar-Density"
+label = "Bar density"
+kind = "model"
+summary = "Triaxial exponential bar"
+status = "built"
+
+[[node]]
+id = "g.seed"
+label = "Galaxy seed, again"
+kind = "seed"
+summary = "the same id twice"
+status = "built"
+
+[[node]]
+id = "g.long"
+label = "A label of thirty-three chars, ok"
+kind = "model"
+cluster = "g.nowhere"
+summary = "A summary of exactly sixty-one characters, one over the limit"
+detail = ["one", "two", "three", "four", "five", "six", "seven"]
+status = "planned"
+notes = "an unknown key"
+
+[[node]]
+id = "g.wide"
+label = "Detail too wide"
+kind = "draw"
+summary = """two
+lines"""
+detail = ["a detail line of sixty-one characters, one more than allowed."]
+status = "partial"
+
+[[node]]
+id = "g.blank"
+label = ""
+kind = "model"
+summary = "a label with nothing in it"
+status = "built"
+
+[[node]]
+id = "g.typed"
+label = "Summary of the wrong type"
+kind = "model"
+summary = 3
+detail = "not a list"
+status = "built"
+
+[[node]]
+id = "g.tabbed"
+label = "A\ttab"
+kind = "model"
+summary = "a label with a control character"
+status = "built"
+
+[[node]]
+id = "g.partial_entry"
+label = "Missing its summary"
+kind = "entity"
+status = "built"
+
+[[edge]]
+from = "g.seed"
+to = "g.imf"
+kind = "seed"
+label = "a label of twenty-nine chars."
+
+[[edge]]
+from = "g.seed"
+to = "g.imf"
+kind = "seed"
+
+[[edge]]
+from = "g.seed"
+to = "g.missing"
+
+[[edge]]
+from = "g.disc"
+to = "g.imf"
+
+[[edge]]
+from = "g.imf"
+to = "g.imf"
+
+[[edge]]
+from = "g.imf"
+to = "s.mass"
+kind = "flows"
+
+[[edge]]
+from = "@stars:primary mass"
+to = "g.imf"
+
+[[edge]]
+from = "g.imf"
+to = "@no placeholder"
+
+[[edge]]
+from = "@stars:primary mass"
+to = "@planets-systems:disc mass"

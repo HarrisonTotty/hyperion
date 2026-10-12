@@ -1,0 +1,2127 @@
+[meta]
+stage = "stars"
+part = "stars"
+prefix = "s"
+title = "Star Systems"
+snapshot = "25d5d636"
+
+# ---------------------------------------------------------------------------------------------
+# Clusters
+
+[[cluster]]
+id = "s.c_seed"
+label = "Seed path: keys and streams"
+
+[[cluster]]
+id = "s.c_seed_sys"
+label = "System-keyed streams"
+parent = "s.c_seed"
+
+[[cluster]]
+id = "s.c_seed_body"
+label = "Body-keyed streams"
+parent = "s.c_seed"
+
+[[cluster]]
+id = "s.c_slot"
+label = "Slot inputs and composition"
+
+[[cluster]]
+id = "s.c_sse"
+label = "Single-star evolution"
+
+[[cluster]]
+id = "s.c_death"
+label = "Death, remnants and kicks"
+
+[[cluster]]
+id = "s.c_mult"
+label = "Multiplicity and orbits"
+
+[[cluster]]
+id = "s.c_binary"
+label = "Binary evolution"
+
+[[cluster]]
+id = "s.c_derived"
+label = "Classes and derived properties"
+
+[[cluster]]
+id = "s.c_system"
+label = "Assembly, records and access"
+
+# ---------------------------------------------------------------------------------------------
+# Seed path
+
+[[node]]
+id = "s.key_body"
+label = "Star body indices (BodyId)"
+kind = "seed"
+cluster = "s.c_seed"
+summary = "Stars take slot 0, subs 0-15; sub 0 is the primary"
+detail = [
+  "stars take body indices 0-15 (STAR_BODY_INDEX_END)",
+  "spine companion k is body k, depth-first order",
+  "direct construction: indices given after sorting",
+  "spine pair's binary.* key: the star it brings in",
+  "direct pair's key: its draw slot (1-3, 4-6 subsystems)",
+  "the brown-dwarf companion is the system's last body",
+]
+source = ["crates/hyperion-sim/src/id/mod.rs", "crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "P11.T2.a"]
+status = "built"
+
+[[node]]
+id = "s.attempt"
+label = "Redraw attempt block (64 words)"
+kind = "seed"
+cluster = "s.c_seed"
+summary = "Attempt k reads words 64k to 64k+63 of every stream"
+detail = [
+  "StarDraws::for_attempt and RedrawAttempt share it",
+  "grid records: attempt 0; feature members carry theirs",
+  "MAX_REDRAWS = 8 attempts (0-7) of a system's binaries",
+  "each word read by number: random access, order-free",
+  "the primary's draws are never redrawn by the carve",
+  "every stream above but system.metallicity",
+]
+source = ["crates/hyperion-sim/src/stellar/draws.rs", "crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "P06.T2", "P11.T7"]
+status = "built"
+
+[[node]]
+id = "s.st_metal"
+label = "system.metallicity"
+kind = "seed"
+cluster = "s.c_seed_sys"
+summary = "Two words: one Box-Muller standard normal per system"
+source = ["crates/hyperion-sim/src/rng/tags.rs", "crates/hyperion-sim/src/stellar/system.rs", "P06.T3"]
+status = "built"
+
+[[node]]
+id = "s.st_mult"
+label = "system.multiplicity"
+kind = "seed"
+cluster = "s.c_seed_sys"
+summary = "Marks of attempt n at words 64n, 64n+1, 64n+2, 64n+3+k"
+detail = [
+  "64n: multiple or not",
+  "64n+1: the companion count",
+  "64n+2: spine or direct construction (1.5-3 M☉)",
+  "64n+3+k: direct companion k's subsystem, k = 1-3",
+]
+source = ["crates/hyperion-sim/src/rng/tags.rs", "crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "P11.T2.a"]
+status = "built"
+
+[[node]]
+id = "s.st_substellar"
+label = "system.substellar"
+kind = "seed"
+cluster = "s.c_seed_sys"
+summary = "64n: whether; try r at words 64n+1+7r to 64n+7+7r"
+detail = [
+  "per try: window-and-period mark, q, e, cos i,",
+  "  node, periapsis, mean anomaly (one word each)",
+  "9 tries fit an attempt's 64-word block",
+]
+source = ["crates/hyperion-sim/src/rng/tags.rs", "crates/hyperion-sim/src/stellar/multiplicity/substellar.rs", "P11.T2.d"]
+status = "built"
+
+[[node]]
+id = "s.st_binary"
+label = "binary.orbit/orientation/phase"
+kind = "seed"
+cluster = "s.c_seed_body"
+summary = "Three tags keyed by BodyId: spine body or direct slot"
+detail = [
+  "binary.orbit, try r at 64n+3r: node-and-period mark,",
+  "  then mass-ratio and eccentricity ranks",
+  "binary.orientation, 64n+3r..+2: cos i, node, periapsis",
+  "binary.phase, word 64n+r: mean anomaly at the epoch",
+  "direct tries past 21 keyed by draw slot k + 8",
+]
+source = ["crates/hyperion-sim/src/rng/tags.rs", "crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "P11.T2.a"]
+status = "built"
+
+[[node]]
+id = "s.st_reserved"
+label = "binary.ia_mark (reserved)"
+kind = "seed"
+cluster = "s.c_seed_body"
+summary = "Named in plan 11's Provides; not registered at this commit"
+detail = [
+  "binary.kick and binary.ce are reserved likewise",
+  "class.awd, .xrb, .merger, .nsm (system-keyed) too",
+]
+source = ["crates/hyperion-sim/src/rng/tags.rs", "P11.T6", "P11.T8"]
+status = "planned"
+
+[[node]]
+id = "s.sd_life"
+label = "Living-star StarDraws tags"
+kind = "seed"
+cluster = "s.c_seed_body"
+summary = "star.eta, .rotation, .magnetism, .spin_axis, .disc_lifetime"
+detail = [
+  "one stream per tag, keyed by BodyId, from word 64k",
+  "star.eta: 2 words (normal); star.rotation: 1 rank",
+  "star.magnetism: 1 mark; star.spin_axis: 2 (isotropic)",
+  "star.disc_lifetime: 1 rank; star.nebula: 1 rank",
+]
+source = ["crates/hyperion-sim/src/stellar/draws.rs", "crates/hyperion-sim/src/rng/tags.rs", "P06.T2"]
+status = "built"
+
+[[node]]
+id = "s.sd_death"
+label = "Death StarDraws tags"
+kind = "seed"
+cluster = "s.c_seed_body"
+summary = "star.stripped, star.remnant.*, star.kick.*"
+detail = [
+  "stripped, remnant.type, remnant.fallback: 1 mark each",
+  "remnant.mass: one standard normal (2 words)",
+  "kick.score: 8 normal tries (16 words), first ξ > 0",
+  "kick.mode: 1 mark; kick.low: 3 normals; direction 2",
+]
+source = ["crates/hyperion-sim/src/stellar/draws.rs", "crates/hyperion-sim/src/rng/tags.rs", "P06.T2"]
+status = "built"
+
+[[node]]
+id = "s.sd_compact"
+label = "Compact-remnant StarDraws tags"
+kind = "seed"
+cluster = "s.c_seed_body"
+summary = "star.wd.*, star.ns.*, star.bh.spin"
+detail = [
+  "wd.atmosphere, wd.carbon, wd.metals: 1 mark each",
+  "ns.spin: 8 normal tries; ns.field: 1 normal",
+  "ns.geometry: spin axis (words 0-1), inclination (2)",
+  "ns.phase: 1 rank; bh.spin: 1 normal",
+]
+source = ["crates/hyperion-sim/src/stellar/draws.rs", "crates/hyperion-sim/src/rng/tags.rs", "P06.T2"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Slot inputs and composition
+
+[[node]]
+id = "s.ctx"
+label = "Multiplicity context"
+kind = "decision"
+cluster = "s.c_slot"
+summary = "Free (grid star), ForcedSingle, or ForcedMultiple"
+detail = [
+  "grid star: Free, the model's own hierarchy draw",
+  "brown dwarf or rogue planet record: ForcedSingle",
+  "feature member: binary class ForcedMultiple, else",
+  "  ForcedSingle; no width cap passed yet (P11.T8.f)",
+  "ForcedSingle gives plan 06's single-star system",
+]
+source = ["crates/hyperion-sim/src/stellar/system.rs", "crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "crates/hyperion-sim/src/galaxy/features/members.rs", "P11.T2.c"]
+status = "built"
+
+[[node]]
+id = "s.draw_feh"
+label = "[Fe/H] per system"
+kind = "draw"
+cluster = "s.c_slot"
+summary = "Normal of the slot's component at its position and age"
+detail = [
+  "[Fe/H] = mean + σ z, z on system.metallicity",
+  "a system not yet born reads the law at age 0",
+  "fixed at birth: independent of the query time",
+  "thin disc at the solar circle: solar mean, σ 0.2 dex",
+]
+source = ["crates/hyperion-sim/src/stellar/system.rs", "P06.T3", "P02.T7.e"]
+status = "built"
+
+[[node]]
+id = "s.composition"
+label = "Composition (Z, z_fit, ΔY)"
+kind = "model"
+cluster = "s.c_slot"
+summary = "Z = 0.02 × 10^[Fe/H]; the fits see Z held to 1e-4 to 0.03"
+detail = [
+  "Z☉ = 0.02, the metal fraction HPT were fitted at",
+  "[Fe/H] kept as drawn for consoles and planets",
+  "grid systems: helium excess ΔY = 0",
+  "feature members bring their cluster's composition",
+  "[α/Fe] is not drawn and does not enter the fits",
+]
+cite = ["Hurley, Pols and Tout 2000"]
+source = ["crates/hyperion-sim/src/stellar/composition.rs", "P06.T1.a", "P06.T3"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Single-star evolution
+
+[[node]]
+id = "s.mass_branch"
+label = "Initial mass ≥ 0.1 M☉?"
+kind = "decision"
+cluster = "s.c_sse"
+summary = "Track from 0.1 M☉; cooling fits for 0.01-0.1 M☉"
+detail = [
+  "a StarModel takes 0.01-150 M☉ and a finite age",
+  "≥ 0.1 M☉: HPT track built to the age at +H",
+  "< 0.1 M☉: closed-form cooling, never dies",
+  "the same branch for primaries and companions",
+]
+source = ["crates/hyperion-sim/src/stellar/system.rs", "P06.T29.a"]
+status = "built"
+
+[[node]]
+id = "s.tab_hpt"
+label = "HPT 2000 and Tout 1996 coeffs"
+kind = "table"
+cluster = "s.c_sse"
+summary = "Appendix polynomials in ζ = log10(Z/0.02); ZAMS L, R fits"
+detail = [
+  "coefficient tables A, B, ZAMS_L, ZAMS_R transcribed",
+  "giant radii (HPT eqs 46, 74) at 7 calibration Z",
+  "log R interpolated in log Z by a monotone cubic",
+  "  (ruling 92: departs from the printed clamps)",
+]
+cite = ["Hurley, Pols and Tout 2000", "Tout, Pols, Eggleton and Han 1996", "Fritsch and Carlson 1980"]
+source = ["crates/hyperion-sim/src/stellar/sse/coeffs.rs", "crates/hyperion-sim/src/stellar/sse/coeffs_data.rs", "crates/hyperion-sim/src/stellar/sse/calibration.rs", "crates/hyperion-sim/src/stellar/sse/zams.rs", "P06.T4"]
+status = "built"
+
+[[node]]
+id = "s.draw_eta"
+label = "Reimers η"
+kind = "draw"
+cluster = "s.c_sse"
+summary = "η = 0.5 + 0.07 z, held ≥ 0, one per star"
+detail = [
+  "z: standard normal on star.eta",
+  "mean is HPT's 0.5; σ from globular clusters",
+  "widens the horizontal branch (RR Lyrae spread)",
+]
+cite = ["McDonald and Zijlstra 2015", "Hurley, Pols and Tout 2000"]
+source = ["crates/hyperion-sim/src/stellar/sse/track.rs", "crates/hyperion-sim/src/stellar/draws.rs", "P06.T2", "P06.T10.a"]
+status = "built"
+
+[[node]]
+id = "s.premain"
+label = "Protostar and pre-main sequence"
+kind = "model"
+cluster = "s.c_sse"
+summary = "Age 0 = onset of collapse; 0.5 Myr accretion, contraction"
+detail = [
+  "mass m_f (1 - (1 - t/t_p)²), t_p = 0.5 Myr",
+  "Class 0 while the envelope outweighs it, then Class I",
+  "Hayashi (R ~ t^-1/3), then Henyey to the ZAMS",
+  "above ~6 M☉ the star arrives before accretion ends",
+  "T Tauri, Herbig Ae/Be phases; their class: T24.b",
+]
+cite = ["Dunham et al. 2014", "Baraffe et al. 2015", "Palla and Stahler 1993"]
+source = ["crates/hyperion-sim/src/stellar/premain.rs", "P06.T15.a", "P06.T15.b"]
+status = "built"
+
+[[node]]
+id = "s.draw_disc"
+label = "Protostellar disc lifetime"
+kind = "draw"
+cluster = "s.c_sse"
+summary = "Exponential, mean 2.5 Myr at 1 M☉, held to 0.3-15 Myr"
+detail = [
+  "rank on star.disc_lifetime through the inverse CDF",
+  "mean ~ m^-0.1 up to 1 M☉, m^-1.06 above",
+  "one lifetime per star, read by its planets (P14.T3)",
+  "T Tauri class and FU Ori bound: planned (T24.b, T28)",
+  "circumbinary discs draw on plan 14's planet.disc",
+]
+cite = ["Mamajek 2009", "Luhman et al. 2005", "Ribas, Bouy and Merin 2015"]
+source = ["crates/hyperion-sim/src/stellar/premain.rs", "P06.T15.c"]
+status = "built"
+
+[[node]]
+id = "s.winds"
+label = "Wind mass loss (Modern)"
+kind = "model"
+cluster = "s.c_sse"
+summary = "Vink hot stars, LBV beyond HD limit, HK98 He stars, HPT else"
+detail = [
+  "Vink 2001 from 12,500 K; bi-stability 22.5-27.5 kK",
+  "beyond the Humphreys-Davidson limit 1.5e-4 M☉/yr",
+  "naked He stars 1e-13 L^1.5 (Z/Z☉)^0.86",
+  "cool: Kudritzki-Reimers (η), Vassiliadis-Wood AGB",
+  "Γe > 0.7, not AGB: max(own, rate at 0.7 × (Γe/0.7)^3.99)",
+]
+cite = ["Vink, de Koter and Lamers 2001", "Belczynski et al. 2010", "Hamann and Koesterke 1998", "Vink and de Koter 2005", "Vink et al. 2011", "Vassiliadis and Wood 1993"]
+source = ["crates/hyperion-sim/src/stellar/sse/wind.rs", "P06.T10.a", "P06.T10.b", "P06.T39"]
+status = "built"
+
+[[node]]
+id = "s.track"
+label = "HPT single-star track"
+kind = "model"
+cluster = "s.c_sse"
+summary = "Hurley, Pols and Tout 2000 phases on a fixed knot grid"
+detail = [
+  "MS, HG, GB, CHeB, E-AGB, TP-AGB; He MS, HG, GB",
+  "16 knots per lossy phase (32 on the TP-AGB)",
+  "continuous in age, never reads the age asked for",
+  "built to the age at +H (H = 1,000 yr) or to death",
+  "He flash bridged over 1e4 yr",
+  "100-150 M☉: Yusof et al. 2013 correction factors",
+]
+cite = ["Hurley, Pols and Tout 2000", "Yusof et al. 2013"]
+source = ["crates/hyperion-sim/src/stellar/sse/track.rs", "crates/hyperion-sim/src/stellar/sse/track/build.rs", "crates/hyperion-sim/src/stellar/sse/track/phases.rs", "crates/hyperion-sim/src/stellar/sse/vms.rs", "P06.T5", "P06.T9", "P06.T10.c", "P06.T14"]
+status = "built"
+
+[[node]]
+id = "s.helium"
+label = "Helium-excess hook"
+kind = "model"
+cluster = "s.c_sse"
+summary = "ΔY > 0 shortens MS and GB, shifts HB Teff; table is identity"
+detail = [
+  "MS, HG and GB timescales × exp(s(m, Z) ΔY)",
+  "HB log Teff shifted by (a + b M_env) ΔY",
+  "tables::helium committed as the identity",
+  "the fit to helium-rich models is P15.T7",
+  "grid stars (ΔY = 0) never take the hook",
+]
+source = ["crates/hyperion-sim/src/stellar/sse/track/excess.rs", "crates/hyperion-sim/src/tables/helium.rs", "P06.T17", "P15.T7"]
+status = "partial"
+
+[[node]]
+id = "s.postagb"
+label = "Post-AGB bridge"
+kind = "model"
+cluster = "s.c_sse"
+summary = "Envelope gone: the star fades and heats to the WD knee"
+detail = [
+  "log L falls by 0.2939 - 0.8304 log10 M_f to the knee",
+  "knee radius and crossing time fitted to MB16's 24",
+  "then MB16's fade to 10 L☉, Montreal cooling after",
+  "lazy cores below ~0.53 M☉ light no nebula",
+]
+cite = ["Miller Bertolami 2016"]
+source = ["crates/hyperion-sim/src/stellar/sse/track/post_agb.rs", "P06.T16.a"]
+status = "built"
+
+[[node]]
+id = "s.bd_cooling"
+label = "Substellar cooling fits"
+kind = "model"
+cluster = "s.c_sse"
+summary = "0.01-0.1 M☉: L, R, Teff as closed forms in m, t, Z"
+detail = [
+  "Hayashi contraction at T_H = 3,020 K (m/0.1)^0.09",
+  "degenerate: L = 4e-5 L☉ (t/Gyr)^-1.3 (m/0.05)^2.64",
+  "hydrogen-burning floor above m_e(Z)",
+  "m_e = 0.068 M☉ at solar Z, 0.083 metal-poor",
+  "meets the backbone's ZAMS at 0.1 M☉",
+]
+cite = ["Burrows, Hubbard, Lunine and Liebert 2001", "Baraffe et al. 2015", "Baraffe et al. 1997"]
+source = ["crates/hyperion-sim/src/stellar/substellar/mod.rs", "P06.T13", "P13.T5.a"]
+status = "built"
+
+[[node]]
+id = "s.giant_cooling"
+label = "Giant-planet cooling fit"
+kind = "model"
+cluster = "s.c_sse"
+summary = "0.3-13 MJ: L, R, Teff from mass, age and Z, for planets"
+detail = [
+  "tables::giant_cooling: log L, log R at 12 masses × 12 ages",
+  "fitted to Sonora Bobcat; bilinear in log m, log t",
+  "held at 1 Myr below; past 15 Gyr L ~ t^-1.3",
+  "Z moves L as the substellar fit's opacity term",
+  "continuous with the substellar fit at 13 MJ",
+]
+cite = ["Marley et al. 2021", "Burrows, Hubbard, Lunine and Liebert 2001"]
+source = ["crates/hyperion-sim/src/stellar/substellar/giant.rs", "crates/hyperion-sim/src/tables/giant_cooling.rs", "P13.T5.b", "P13.T5.c"]
+status = "built"
+
+[[node]]
+id = "s.state"
+label = "Star state at age"
+kind = "entity"
+cluster = "s.c_sse"
+summary = "Phase, M, Mc, L, R, Teff, log g, wind rate, phase fraction"
+detail = [
+  "state = evolve(m0, Z, draws, age at epoch + t)",
+  "19 phases: HPT types 0-15, protostar, PMS,",
+  "  post-AGB and substellar",
+  "Teff by Stefan-Boltzmann, T☉ = 5,772 K",
+  "log g in cgs (the Sun 4.438)",
+  "age an f64 of years; no table binned by age",
+]
+source = ["crates/hyperion-sim/src/stellar/state.rs", "crates/hyperion-sim/src/stellar/sse/evolve.rs", "P06.T1.a"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Death, remnants and kicks
+
+[[node]]
+id = "s.draw_stripped"
+label = "Companion-stripped mark"
+kind = "draw"
+cluster = "s.c_death"
+summary = "Mark vs plan 11's stripped share, from m_cc(Z) - 1 M☉"
+detail = [
+  "applies from 7.2 M☉ at Z = 0.02 (never below 5.7)",
+  "share: drawn companions whose periastron lies in",
+  "  the stripping band (Case A or B, not merged)",
+  "set: 1 M☉-wide electron-capture window, low-kick ramp",
+  "set: the primary's innermost orbit drawn in the band",
+]
+cite = ["Podsiadlowski et al. 2004"]
+source = ["crates/hyperion-sim/src/stellar/draws.rs", "crates/hyperion-sim/src/stellar/remnant/kick.rs", "crates/hyperion-sim/src/galaxy/displaced/binarity.rs", "P06.T2", "P11.T1.d"]
+status = "built"
+
+[[node]]
+id = "s.tab_stripping"
+label = "Stripping table"
+kind = "table"
+cluster = "s.c_death"
+summary = "Stripped share and stage radii over m0 and z_fit"
+detail = [
+  "hyperion-fit task stripping (since version 16)",
+  "34 masses 5.5-150 M☉ × 11 [Fe/H] of z_fit (Z 1e-4-0.03)",
+  "exact quadrature and track outside its domain",
+  "band (a_merge, a_B] from Eggleton's lobe and",
+  "  the binary engine's onset ratios",
+]
+cite = ["Podsiadlowski et al. 2004", "Eggleton 1983", "Hurley, Tout and Pols 2002", "Moe and Di Stefano 2017"]
+source = ["crates/hyperion-sim/src/tables/stripping.rs", "crates/hyperion-sim/src/galaxy/displaced/binarity.rs", "P11.T1.d"]
+status = "built"
+
+[[node]]
+id = "s.fate"
+label = "How the star dies"
+kind = "decision"
+cluster = "s.c_death"
+summary = "Envelope loss, e-capture, iron collapse, PI, C ignition"
+detail = [
+  "envelope lost: He, CO or ONe white dwarf",
+  "ONe core in the EC window: 1.26 M☉ neutron star",
+  "  window [m_cc - 0.1, m_cc), stripped [m_cc - 1, m_cc)",
+  "core at base of AGB ≥ 2.25 M☉: iron-core collapse",
+  "He core 45-65 M☉: PPI → 40.5 M☉ BH; 65-135: none",
+  "CO core to 1.44 M☉ with envelope left: no remnant",
+]
+cite = ["Hurley, Pols and Tout 2000", "Mandel and Muller 2020", "Belczynski et al. 2016"]
+source = ["crates/hyperion-sim/src/stellar/sse/track/phases.rs", "crates/hyperion-sim/src/stellar/remnant/collapse.rs", "crates/hyperion-sim/src/stellar/remnant/death.rs", "P06.T10.e", "P06.T18.b", "P06.T18.c"]
+status = "built"
+
+[[node]]
+id = "s.draw_collapse"
+label = "Core-collapse remnant (MM20)"
+kind = "draw"
+cluster = "s.c_death"
+summary = "Type, fallback and mass from M_CO with three fixed draws"
+detail = [
+  "M_CO < 2 M☉: NS; else BH with p = (M_CO - 2)/5",
+  "complete fallback p = (M_CO - 2)/6: BH = He core",
+  "else BH ~ N(0.8 M_CO, 0.5) from 2 M☉ to the He core",
+  "NS 1.2 ± 0.02 below 2, two strands to 7; 1.13-2.0",
+  "one normal through the truncated quantile",
+  "SN type: IIP > 2 M☉ H, IIL, IIb < 0.5, Ib, Ic",
+]
+cite = ["Mandel and Muller 2020", "Heger et al. 2003", "Sravan, Marchant and Kalogera 2019", "Hachinger et al. 2012"]
+source = ["crates/hyperion-sim/src/stellar/remnant/collapse.rs", "crates/hyperion-sim/src/stellar/remnant/death.rs", "P06.T18.a", "P06.T18.d"]
+status = "built"
+
+[[node]]
+id = "s.draw_kick"
+label = "Natal kick"
+kind = "draw"
+cluster = "s.c_death"
+summary = "MM20 score ranked onto the young-pulsar log-normal"
+detail = [
+  "x = (M_CO - M_rem)/M_rem × ξ, ξ = 1 + 0.45 z > 0",
+  "rank 0.001-0.999 → ln v ~ N(5.60, 0.68) cut at 1000 km/s",
+  "low mode Maxwellian σ 5 km/s: EC, AIC, stripped",
+  "  with p = clamp(3 - M_CO, 0, 1); BH speed × 0.75",
+  "WD Maxwellian σ 1 km/s; complete fallback: none",
+  "direction isotropic on the galactic axes",
+]
+cite = ["Mandel and Muller 2020", "Disberg and Mandel 2025", "Disberg, Mandel and Hirai 2026", "Valli et al. 2025"]
+source = ["crates/hyperion-sim/src/stellar/remnant/kick.rs", "P06.T19.a", "P06.T19.c"]
+status = "built"
+
+[[node]]
+id = "s.tab_kick_rank"
+label = "Kick rank table"
+kind = "table"
+cluster = "s.c_death"
+summary = "257 quantiles of 10^6 ordinary-mode NS kick scores"
+detail = [
+  "Kroupa 8-150 M☉ at Z = 0.02 on the own tracks",
+  "iron-core NS collapses that take the ordinary mode",
+  "sampled on stellar.reference, galaxy_item(i) keys",
+  "provisional (hyperion-fit kick_rank revision 1)",
+  "a 10^7-score refit is P15.T5.a",
+]
+cite = ["Kroupa 2001", "Mandel and Muller 2020"]
+source = ["crates/hyperion-sim/src/tables/kick_rank.rs", "crates/hyperion-sim/src/stellar/remnant/reference.rs", "P06.T19.b", "P15.T5.a"]
+status = "built"
+
+[[node]]
+id = "s.wd"
+label = "White dwarf cooling"
+kind = "model"
+cluster = "s.c_death"
+summary = "Mass = the track's final core mass; Montreal cooling"
+detail = [
+  "no separate initial-final mass relation",
+  "L(t) inverts the cooling-age column at fixed mass",
+  "He and ONe cores: clock × A/A_CO (Mestel)",
+  "ONe capped at 1.37 M☉",
+  "outside 0.2-1.3 M☉: the nearest sequence's column",
+  "no progenitor-metallicity dependence",
+]
+cite = ["Bedard et al. 2020", "Mestel 1952", "Cummings et al. 2018"]
+source = ["crates/hyperion-sim/src/stellar/remnant/cooling.rs", "crates/hyperion-sim/src/stellar/remnant/white_dwarf.rs", "P06.T20.a"]
+status = "built"
+
+[[node]]
+id = "s.tab_wd"
+label = "Montreal WD cooling table"
+kind = "table"
+cluster = "s.c_death"
+summary = "23 DA sequences 0.2-1.3 M☉, cooling age at 96 log L"
+detail = [
+  "hyperion-fit task wd_cooling (since version 11)",
+  "thick H layers on equimassic C/O cores",
+  "fades as L ~ t^-1.4 past each sequence's end",
+]
+cite = ["Bedard, Bergeron, Brassard and Fontaine 2020"]
+source = ["crates/hyperion-sim/src/tables/wd_cooling.rs", "P06.T20.a"]
+status = "built"
+
+[[node]]
+id = "s.draw_wd_type"
+label = "White dwarf spectral type"
+kind = "draw"
+cluster = "s.c_death"
+summary = "Three marks against Teff-dependent measured fractions"
+detail = [
+  "He atmosphere if mark < f_He: 24% hot, 8% at 30 kK,",
+  "  rising again to 32% at 5.5-7 kK",
+  "H: DA ≥ 5,000 K, DC below; He: DO > 45 kK, DB > 11 kK",
+  "DQ if the carbon mark < its share (38% at 8-9 kK)",
+  "metals: 8.0% of DA, 15.8% of others (DZ if DC)",
+]
+cite = ["Sion et al. 1983", "Bedard et al. 2020", "Kilic et al. 2025", "O'Brien et al. 2024"]
+source = ["crates/hyperion-sim/src/stellar/remnant/wd_spectral.rs", "P06.T20.b"]
+status = "built"
+
+[[node]]
+id = "s.draw_ns_bh"
+label = "Neutron star and BH birth"
+kind = "draw"
+cluster = "s.c_death"
+summary = "NS P0 ~ N(250, 100) ms, log B0 ~ N(12.95, 0.6); BH spin"
+detail = [
+  "P0 redrawn at or below 10 ms (8 tries held)",
+  "B = B0/(1 + t/τ), τ = 1e4 yr × 1e15 G/B0, floor 1e12 G",
+  "spin-down a closed form in age; glitch reversal 1%",
+  "magnetar above 4.4e13 G; death line; beam; phase",
+  "BH spin |N(0, 0.1)| held below 0.998; dark",
+]
+cite = ["Popov et al. 2010", "Colpi, Geppert and Page 2000", "Beniamini et al. 2019", "Bhattacharya et al. 1992", "Fuentes et al. 2017", "Fuller and Ma 2019", "Thorne 1974"]
+source = ["crates/hyperion-sim/src/stellar/remnant/neutron_star.rs", "crates/hyperion-sim/src/stellar/remnant/black_hole.rs", "P06.T21", "P06.T22"]
+status = "built"
+
+[[node]]
+id = "s.remnant"
+label = "Compact remnant and kick"
+kind = "entity"
+cluster = "s.c_death"
+summary = "Kind, mass, formation age, cooling or spin-down, kick"
+detail = [
+  "death kind; clock time T = lifetime - age at epoch",
+  "white-dwarf type, pulsar state or BH spin",
+  "reads only star.remnant.*, .stripped, .kick.*:",
+  "  P08's kick loop repeats it on the built track",
+]
+source = ["crates/hyperion-sim/src/stellar/remnant/mod.rs", "crates/hyperion-sim/src/stellar/system.rs", "P06.T18.d", "P06.T29.a"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Multiplicity and orbits
+
+[[node]]
+id = "s.mult_model"
+label = "Multiplicity anchors"
+kind = "table"
+cluster = "s.c_mult"
+summary = "MF and CF by primary mass, linear in ln m between anchors"
+detail = [
+  "MF/CF 0.09 M☉: 0.22/0.22; 0.25: 0.26/0.33; 1: 0.44/0.62",
+  "3.5-28 M☉: MDS17 Table 13 re-solved over the",
+  "  model's own q and P ranges",
+  "≤ 3 companions; Sun-like single:2:3:4 = 56:30:9:4",
+]
+cite = ["Duchene and Kraus 2013", "Raghavan et al. 2010", "Moe and Di Stefano 2017", "Tokovinin 2014"]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/model.rs", "crates/hyperion-sim/src/stellar/multiplicity/direct.rs", "P11.T1.a"]
+status = "built"
+
+[[node]]
+id = "s.construction"
+label = "Spine or direct construction"
+kind = "decision"
+cluster = "s.c_mult"
+summary = "Below 1.5 M☉ spine, from 3 M☉ direct, a mark between"
+detail = [
+  "direct weight ln(m1/1.5)/ln 2 on 1.5-3 M☉",
+  "spine: each companion joins the outer spine",
+  "direct: MDS17 direct companions, sorted by period",
+  "direct companion k may gain one subsystem at its",
+  "  own rate × Tokovinin ε (0.5, or 1.2 with inner pair)",
+]
+cite = ["Moe and Di Stefano 2017", "Tokovinin 2014"]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "crates/hyperion-sim/src/stellar/multiplicity/direct.rs", "P11.T2.a"]
+status = "built"
+
+[[node]]
+id = "s.draw_count"
+label = "Multiple? and companion count"
+kind = "draw"
+cluster = "s.c_mult"
+summary = "Mark vs drawn MF, then a capped geometric or MDS17 count"
+detail = [
+  "word 64n: multiple with probability MF",
+  "  stripped primary: forced; unstripped (MF-s)/(1-s)",
+  "word 64n+1: 1 + G, G geometric capped at 2 more",
+  "  ratio solved so the mean count is CF exactly",
+  "direct: Table 13 count pmf 0-3 on the same words",
+]
+cite = ["Moe and Di Stefano 2017", "Duchene and Kraus 2013"]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "crates/hyperion-sim/src/stellar/multiplicity/model.rs", "P11.T2.a", "P11.T1.d"]
+status = "built"
+
+[[node]]
+id = "s.period_law"
+label = "Period distributions"
+kind = "model"
+cluster = "s.c_mult"
+summary = "Mixtures of anchor laws in x = log10(P/1 d), -1 to 11"
+detail = [
+  "0.09 M☉ N(3.92, 0.5); 0.25 M☉ N(3.85, 1.3)",
+  "1 M☉ N(5.03, 2.28), Raghavan's solar-type fit",
+  "2.7 M☉ bimodal (VAST visual + spectroscopic)",
+  "30 M☉ Sana x^-0.55 on 0.15-3.5, Opik flat to 7.76",
+  "direct: MDS17 f_logP × fitted period correction",
+]
+cite = ["Raghavan et al. 2010", "Duchene and Kraus 2013", "De Rosa et al. 2014", "Sana et al. 2012", "Moe and Di Stefano 2017"]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/dist.rs", "crates/hyperion-sim/src/stellar/multiplicity/direct.rs", "crates/hyperion-sim/src/tables/period_correction.rs", "P11.T1.b"]
+status = "built"
+
+[[node]]
+id = "s.qe_law"
+label = "Mass-ratio and eccentricity laws"
+kind = "model"
+cluster = "s.c_mult"
+summary = "q^γ below 0.8 M☉, MDS17 above; p(e) ~ e^η under e_max"
+detail = [
+  "q on [0.08 M☉/m1, 1]; γ 4.2, 0.4, 0.3 at 0.09, 0.25, 1",
+  "≥ 0.8 M☉: broken power law at q 0.3, twins q > 0.95",
+  "P < 12 d circular; late η = 0.6 - 0.7/(log P - 0.5)",
+  "  early η = 0.9 - 0.2/(log P - 0.5), blended 3-7 M☉",
+  "e_max = 1 - (P/2 d)^(-2/3); e < 0.9999",
+]
+cite = ["Duchene and Kraus 2013", "Moe and Di Stefano 2017", "Raghavan et al. 2010"]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/dist.rs", "P11.T1.b"]
+status = "built"
+
+[[node]]
+id = "s.tab_period_corr"
+label = "Direct period correction"
+kind = "table"
+cluster = "s.c_mult"
+summary = "Factors on MDS17's period law so survivors follow it"
+detail = [
+  "hyperion-fit task period_correction (since version 14)",
+  "4 masses (3.5, 7, 12, 28 M☉) × 8 bins of log P 0.2-8",
+  "12 iterations: c × target/measured each,",
+  "  over 20,000 systems a row, after rejection",
+]
+cite = ["Moe and Di Stefano 2017", "Mardling and Aarseth 2001"]
+source = ["crates/hyperion-sim/src/tables/period_correction.rs", "crates/hyperion-sim/src/stellar/multiplicity/direct.rs", "crates/hyperion-sim/src/stellar/multiplicity/period_fit.rs", "P11.T2.a"]
+status = "built"
+
+[[node]]
+id = "s.draw_orbit"
+label = "Companion node, period, q, e"
+kind = "draw"
+cluster = "s.c_mult"
+summary = "One mark picks node window and period; q, e by inverse CDF"
+detail = [
+  "windows from the stability test's necessary bounds",
+  "weights × Tokovinin subsystem factors 0.275 and 20",
+  "laws read at the mass of the node's first star",
+  "companion mass = q × that star (≥ 0.08 M☉)",
+  "spine: tries 0-16; direct: up to 42 tries",
+]
+cite = ["Tokovinin 2014", "Moe and Di Stefano 2017"]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "P11.T2.a"]
+status = "built"
+
+[[node]]
+id = "s.draw_orient"
+label = "Orbit orientation and phase"
+kind = "draw"
+cluster = "s.c_mult"
+summary = "Isotropic plane and periapsis; uniform mean anomaly"
+detail = [
+  "cos i, ascending node, argument of periapsis",
+  "  one uniform each on binary.orientation",
+  "mean anomaly at the epoch on binary.phase",
+  "KeplerElements with μ = G (M_inner + M_outer)",
+]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "crates/hyperion-sim/src/orbit", "P11.T2.a", "P11.T3.a"]
+status = "built"
+
+[[node]]
+id = "s.stability"
+label = "Stability and tidal cut"
+kind = "model"
+cluster = "s.c_mult"
+summary = "Whole-hierarchy test; a failure redraws the newest orbit"
+detail = [
+  "Mardling-Aarseth: R_p/a_in > 2.8 (1 - 0.3 i/π) ×",
+  "  [(1 + q)(1 + e)/sqrt(1 - e)]^0.4 for every pair",
+  "every apocentre < 0.5 × the Jacobi tidal radius",
+  "  at the system's total initial mass",
+  "forced multiples' widest separation; stripping band",
+  "after the last try the companion is dropped",
+]
+cite = ["Mardling and Aarseth 2001"]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/stability.rs", "crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "P11.T2.b"]
+status = "built"
+
+[[node]]
+id = "s.draw_bd"
+label = "Brown-dwarf companion"
+kind = "draw"
+cluster = "s.c_mult"
+summary = "One bound 13 MJ-0.08 M☉ companion, outermost, own stream"
+detail = [
+  "p(m1): 0.035 at 0.3, 0.06 at 1, 0.03 at 2.5, 0.02 at 8",
+  "period: primary's law thinned × 0.3 below 1,000 d",
+  "q continues the lowest q^γ segment down to 13 MJ",
+  "e by the stellar law; isotropic; ≤ 9 tries",
+  "moves no star; never enters the binary engine",
+]
+cite = ["Grether and Lineweaver 2006", "Dieterich et al. 2012", "Metchev and Hillenbrand 2009", "Kiefer et al. 2019", "Nielsen et al. 2019"]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/substellar.rs", "P11.T2.d"]
+status = "built"
+
+[[node]]
+id = "s.cond_mult"
+label = "Placement-class multiplicity"
+kind = "decision"
+cluster = "s.c_mult"
+summary = "Kicked remnants and runaways forced single (P11.T10)"
+detail = [
+  "displaced remnant with an ordinary kick: ForcedSingle",
+  "retained and low-mode remnants keep their companion",
+  "  and move at the pair's recoil (10-30 km/s)",
+  "runaways and walkaways: ForcedSingle",
+]
+source = ["P11.T10"]
+status = "planned"
+
+[[node]]
+id = "s.hierarchy"
+label = "System hierarchy of orbits"
+kind = "entity"
+cluster = "s.c_mult"
+summary = "Binary tree of pairs: up to 4 stars plus one brown dwarf"
+detail = [
+  "star slots: body index, initial mass, star or BD",
+  "each pair: KeplerElements on rails from its period",
+  "stable by construction (Mardling-Aarseth, tide)",
+  "star_positions_at(t): barycentric positions",
+]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/hierarchy.rs", "crates/hyperion-sim/src/stellar/multiplicity/positions.rs", "P11.T2.a", "P11.T3.b"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Binary evolution
+
+[[node]]
+id = "s.interact"
+label = "Can the pair interact by +H?"
+kind = "decision"
+cluster = "s.c_binary"
+summary = "Lobe test at the largest radius, or decay sinks reach it"
+detail = [
+  "Eggleton lobe vs each star's largest radius to +H",
+  "magnetic braking, GR and tidal sinks at their largest",
+  "a pair holding a remnant by +H runs regardless",
+  "pairs with a brown dwarf or a sub-pair never run",
+]
+cite = ["Eggleton 1983", "Hurley, Tout and Pols 2002"]
+source = ["crates/hyperion-sim/src/stellar/binary/evolve.rs", "crates/hyperion-sim/src/stellar/system.rs", "P11.T4.a", "P11.T4.j"]
+status = "built"
+
+[[node]]
+id = "s.bse"
+label = "BSE binary engine"
+kind = "model"
+cluster = "s.c_binary"
+summary = "Hurley, Tout and Pols 2002, run once from zero age to +H"
+detail = [
+  "detached: wind accretion (α_W 1.5), tides, MB, GR",
+  "starts at the first star's arrival on the MS",
+  "on plan 06's tracks; at most 64 segments",
+  "Eddington-limited accretion onto compact stars",
+  "β_W by StarTrack type; opens no stream of its own",
+]
+cite = ["Hurley, Tout and Pols 2002", "Belczynski et al. 2008"]
+source = ["crates/hyperion-sim/src/stellar/binary/evolve.rs", "crates/hyperion-sim/src/stellar/binary/detached.rs", "crates/hyperion-sim/src/stellar/binary/params.rs", "P11.T4.b", "P11.T4.f", "P11.T4.i"]
+status = "built"
+
+[[node]]
+id = "s.rlof"
+label = "Roche-lobe overflow stability"
+kind = "decision"
+cluster = "s.c_binary"
+summary = "Donor q = Md/Ma against q_crit by the donor's type"
+detail = [
+  "low-mass MS 0.695; giants BSE eq 57; HG 4",
+  "He giant 0.784 (stable onto NS or BH); WD 0.628",
+  "MS type 1 and core-He-burning donors: 3",
+  "stable rate ~ [ln(R/R_L)]³, thermal or dynamical cap",
+  "accretor: min(1, 10 τ_M/τ_KH) or Eddington",
+]
+cite = ["Hurley, Tout and Pols 2002", "Tauris, Langer and Podsiadlowski 2015"]
+source = ["crates/hyperion-sim/src/stellar/binary/rlof.rs", "P11.T4.c"]
+status = "built"
+
+[[node]]
+id = "s.ce"
+label = "Common envelope and mergers"
+kind = "model"
+cluster = "s.c_binary"
+summary = "α-λ energy balance, α_CE = 1, λ = 0.5; collision matrix"
+detail = [
+  "cores left on a circular orbit unless one fills",
+  "  its lobe; otherwise they coalesce (BSE eq 77)",
+  "MS + MS contact persists (W UMa channel)",
+  "a rapid contact overfilling ≤ 10% is temporary",
+  "Thorne-Zytkow object keeps only the compact core",
+]
+cite = ["Hurley, Tout and Pols 2002", "Claeys et al. 2014", "Nelson and Eggleton 2001", "de Mink, Pols and Hilditch 2007"]
+source = ["crates/hyperion-sim/src/stellar/binary/common_envelope.rs", "P11.T4.d"]
+status = "built"
+
+[[node]]
+id = "s.bin_sn"
+label = "Supernovae in the pair"
+kind = "model"
+cluster = "s.c_binary"
+summary = "Pinned primary death, kick from star draws, new orbit"
+detail = [
+  "a collapsing primary ≥ m_cc - 1 M☉ dies at plan 06's age",
+  "  with plan 06's remnant and kick",
+  "companion: own draws; marked companion-stripped",
+  "  if the binary took its envelope (low mode)",
+  "orbit rebuilt from the state at explosion; may unbind",
+  "the barycentre's recoil is kept (BSE eq A14)",
+]
+cite = ["Hurley, Tout and Pols 2002"]
+source = ["crates/hyperion-sim/src/stellar/binary/supernova.rs", "P11.T4.e", "P11.T4.k"]
+status = "built"
+
+[[node]]
+id = "s.timeline"
+label = "Binary timeline"
+kind = "entity"
+cluster = "s.c_binary"
+summary = "Segments: state, class and orbit at any age by lookup"
+detail = [
+  "detached, transfer, contact, envelope, merged, disrupted",
+  "supernova records, recoil, merger age",
+  "pooled Type Ia candidates kept, not exploded",
+  "a paired star is read from it, not from its model",
+]
+source = ["crates/hyperion-sim/src/stellar/binary/timeline.rs", "crates/hyperion-sim/src/stellar/system.rs", "P11.T4.f", "P11.T11"]
+status = "built"
+
+[[node]]
+id = "s.bin_class"
+label = "Binary class from state"
+kind = "model"
+cluster = "s.c_binary"
+summary = "First rule that matches: contact, RLOF by accretor, bound"
+detail = [
+  "CV (dwarf nova, nova-like), AM CVn, symbiotic",
+  "LMXB, HMXB, Be/X, Algol, DNS, DWD, Ia progenitor",
+  "MSP (recycled, < 30 ms), R CrB, hot subdwarf,",
+  "  blue straggler (above the turn-off)",
+  "magnetic CV by the white dwarf's own draw",
+]
+source = ["crates/hyperion-sim/src/stellar/binary/classify.rs", "crates/hyperion-sim/src/stellar/binary/recycling.rs", "P11.T5"]
+status = "built"
+
+[[node]]
+id = "s.carve"
+label = "Carved class in source horizon?"
+kind = "decision"
+cluster = "s.c_binary"
+summary = "Merger, X-ray binary or accreting WD → redraw the system"
+detail = [
+  "the same deterministic test as the catalogue side",
+  "attempt n+1 redraws the hierarchy and companions'",
+  "  StarDraws; the primary is never redrawn",
+  "all 8 attempts carved: the primary is kept alone",
+  "about 1e-4 of grid systems redraw",
+]
+source = ["crates/hyperion-sim/src/stellar/binary/carve.rs", "crates/hyperion-sim/src/stellar/binary/classify.rs", "crates/hyperion-sim/src/stellar/system.rs", "P11.T7"]
+status = "built"
+
+[[node]]
+id = "s.tab_shares"
+label = "Binary class share matrix"
+kind = "table"
+cluster = "s.c_binary"
+summary = "Scratch CLASS_SHARES: hosts per M☉ formed, by layer"
+detail = [
+  "9e6 accreting WDs, 1e4 XRBs, 9e4 stellar mergers,",
+  "  10 NS mergers at Milky Way parameters",
+  "folded into plan 09's field factor",
+  "provisional; the fit against the engine is P15.T10.b",
+]
+cite = ["Pala et al. 2020", "Corral-Santana et al. 2016", "Kochanek et al. 2014"]
+source = ["crates/hyperion-sim/src/tables/binary.rs", "P11.T7", "P15.T10.b"]
+status = "built"
+
+[[node]]
+id = "s.ia_mark"
+label = "Type Ia explosion mark"
+kind = "draw"
+cluster = "s.c_binary"
+summary = "A pooled Ia event explodes if its mark < η (P11.T6)"
+detail = [
+  "integer draw on binary.ia_mark by delay bin, channel",
+  "scratch yield η = 1/6 everywhere",
+  "an explosion at or before +H redraws the system",
+]
+source = ["P11.T6"]
+status = "planned"
+
+[[node]]
+id = "s.pair_bound"
+label = "Census hierarchy and light bound"
+kind = "query"
+cluster = "s.c_binary"
+summary = "Fitted bounds let the sky census skip generation"
+detail = [
+  "hierarchy_bound: every hierarchy an attempt can keep",
+  "pair_light_bound: Detached, Unchanged, Remnants or",
+  "  Bright (V bound), without running the engine",
+  "tables: binary_reach, binary_pair_light_c/d/e,",
+  "  binary_cooling_floor (hyperion-fit, version 21)",
+]
+source = ["crates/hyperion-sim/src/stellar/multiplicity/bound.rs", "crates/hyperion-sim/src/stellar/binary/light.rs", "crates/hyperion-sim/src/stellar/binary/pair_light.rs", "crates/hyperion-sim/src/tables/binary_reach.rs", "P11.T16", "P11.T17"]
+status = "built"
+
+# ---------------------------------------------------------------------------------------------
+# Classes and derived properties
+
+[[node]]
+id = "s.tab_mk"
+label = "MK calibration tables"
+kind = "table"
+cluster = "s.c_derived"
+summary = "PM13 dwarf sequence (v2022.04.16) and the SK81 grid"
+detail = [
+  "Pecaut-Mamajek: Teff, BC_V, B-V by dwarf subtype",
+  "Straizys-Kuriliene: Teff, M_bol, log g for O5-M6",
+  "  and classes V to Ia",
+]
+cite = ["Pecaut and Mamajek 2013", "Straizys and Kuriliene 1981"]
+source = ["crates/hyperion-sim/src/stellar/classify/pm13.rs", "crates/hyperion-sim/src/stellar/classify/sk81.rs", "P06.T23.a", "P06.T23.b"]
+status = "built"
+
+[[node]]
+id = "s.classify"
+label = "Spectral type and class"
+kind = "model"
+cluster = "s.c_derived"
+summary = "O-M subtype from Teff, then L, T, Y; classes Ia+ to V"
+detail = [
+  "V, IV or brighter by gravity; III to Ia by luminosity",
+  "Ia+ above 10^5.7 L☉ within 0.2 dex of the HD limit",
+  "class V with [Fe/H] < -1.0: sd, < -1.7: esd",
+  "white dwarfs: Sion types; NS and BH: no type",
+]
+cite = ["Pecaut and Mamajek 2013", "Straizys and Kuriliene 1981", "Lepine, Rich and Shara 2007", "Sion et al. 1983"]
+source = ["crates/hyperion-sim/src/stellar/classify/mod.rs", "crates/hyperion-sim/src/stellar/classify/luminosity.rs", "crates/hyperion-sim/src/stellar/classify/scales.rs", "P06.T23"]
+status = "built"
+
+[[node]]
+id = "s.peculiar"
+label = "Classes beyond the MK grid"
+kind = "model"
+cluster = "s.c_derived"
+summary = "WR, sdB/sdO, LBV from state; Be, Ap/Bp, Am from rotation"
+detail = [
+  "WR ≥ 30 kK above 10^4.9 L☉ (Z/0.02)^-0.4: WNh, WN, WC, WO",
+  "sdB/sdO: naked He stars under the floor, from 20 kK",
+  "LBV: beyond the HD limit (L > 6e5 L☉), Teff > 8,000 K",
+  "Be at v ≥ 0.7 v_crit; Am under 120 km/s, 7-10 kK",
+  "Ap/Bp: a fossil field at 7,000-20,000 K",
+  "carbon and S stars, young-star classes: P06.T24.b",
+]
+source = ["crates/hyperion-sim/src/stellar/classify/peculiar.rs", "crates/hyperion-sim/src/stellar/rotation.rs", "P06.T24.a", "P06.T25", "P06.T24.b"]
+status = "partial"
+
+[[node]]
+id = "s.photometry"
+label = "Absolute photometry"
+kind = "model"
+cluster = "s.c_derived"
+summary = "BC_V, M_V and B-V from PM13, linear in log Teff"
+detail = [
+  "IAU 2015: M_bol☉ = 4.74; the Sun's M_V = 4.825",
+  "hotter than O3V: BC_V falls 7.5 mag per dex",
+  "no V magnitude for WDs, NS, BH; protostars dark",
+  "apparent V and reddening: the sky census (R06)",
+]
+cite = ["Pecaut and Mamajek 2013"]
+source = ["crates/hyperion-sim/src/stellar/photometry.rs", "P06.T23.a"]
+status = "built"
+
+[[node]]
+id = "s.draw_rot"
+label = "Rotation and magnetism"
+kind = "draw"
+cluster = "s.c_derived"
+summary = "One rotation rank, one fossil-field mark, one spin axis"
+detail = [
+  "> 1.3 M☉: rank → v/v_crit, bimodal slow and fast",
+  "< 1.3 M☉: P0 log-normal 4 d, 0.35 dex; Skumanich on",
+  "  the MH08 gyro clock, saturated below Ro 0.13",
+  "fossil share 0.5% at 1.4 M☉, 11% at 3.6-5, 7% at 15",
+  "  strength log-normal 2.6 kG, 0.4 dex",
+  "activity log Lx/Lbol -3.13 saturated, then Ro^-2.7",
+]
+cite = ["Huang et al. 2010", "Zorec and Royer 2012", "Mamajek and Hillenbrand 2008", "Wright et al. 2011", "Sikora et al. 2019", "Grunhut et al. 2017", "Reiners et al. 2022"]
+source = ["crates/hyperion-sim/src/stellar/rotation.rs", "P06.T25"]
+status = "built"
+
+[[node]]
+id = "s.variability"
+label = "Variability (derived)"
+kind = "model"
+cluster = "s.c_derived"
+summary = "Region tests on the state: strips, LPVs, other pulsators"
+detail = [
+  "δ Sct, RR Lyr, classical and type II Cepheids",
+  "Miras, semiregulars, red supergiants (VW93 periods)",
+  "β Cep, SPB, γ Dor, ZZ Ceti, V777 Her, GW Vir,",
+  "  α Cyg, S Dor, BY Dra, α² CVn",
+  "P = Q (ρ/ρ☉)^-1/2; Cepheid amplitude peaks 300 K",
+  "  inside the blue edge",
+]
+cite = ["Bono, Castellani and Marconi 2000", "Vassiliadis and Wood 1993"]
+source = ["crates/hyperion-sim/src/stellar/variability.rs", "P06.T26.a", "P06.T26.b", "P06.T26.c"]
+status = "built"
+
+[[node]]
+id = "s.light"
+label = "Cycle-keyed light factor"
+kind = "draw"
+cluster = "s.c_derived"
+summary = "Monotone pulsation phase; per-cycle marks on the cycle key"
+detail = [
+  "clock from the epoch frequency and its derivative",
+  "cycle n's amplitude and shape marks drawn on the",
+  "  star.var.cycle stream of cycle n",
+  "regular pulsators none; Miras 20% amplitude scatter",
+]
+source = ["crates/hyperion-sim/src/stellar/variability.rs", "crates/hyperion-sim/src/events/phase.rs", "P06.T26.d", "P06.T27.c"]
+status = "built"
+
+[[node]]
+id = "s.draw_nebula"
+label = "Planetary nebula"
+kind = "draw"
+cluster = "s.c_derived"
+summary = "Shell speed uniform 20-40 km/s; lit while core > 25,000 K"
+detail = [
+  "edge moves at 1.3 v; dispersed at 0.9 pc",
+  "visible ~16,900-33,900 yr, mean ~23,500",
+  "shell from the last 16 of 31 TP-AGB knot intervals",
+  "only after a post-AGB crossing",
+]
+cite = ["Jacob, Schonberner and Steffen 2013", "Moe and De Marco 2006", "Frew, Parker and Bojicic 2016"]
+source = ["crates/hyperion-sim/src/stellar/nebula.rs", "P06.T16.b"]
+status = "built"
+
+[[node]]
+id = "s.events"
+label = "Event kinds (stars, binaries)"
+kind = "draw"
+cluster = "s.c_derived"
+summary = "Flares, glitches, FU Ori, LBV, thermal pulses, novae"
+detail = [
+  "Poisson bins: flares (1 d), Crab glitches, magnetar",
+  "  bursts, FU Ori (500 yr), LBV giant eruptions",
+  "monotone phase: Vela glitches, thermal pulses,",
+  "  novae, dwarf novae, X-ray transients (P11.T9)",
+  "change what a console reads, never the track",
+  "machinery built (P06.T27); kinds not yet",
+]
+cite = ["Contreras Pena et al. 2019", "Melatos et al. 2008", "Fuentes et al. 2017"]
+source = ["crates/hyperion-sim/src/events/mod.rs", "crates/hyperion-sim/src/stellar/events/mod.rs", "P06.T28", "P11.T9"]
+status = "planned"
+
+# ---------------------------------------------------------------------------------------------
+# Assembly, records and access
+
+[[node]]
+id = "s.star_model"
+label = "StarModel (per-star record)"
+kind = "entity"
+cluster = "s.c_system"
+summary = "m0, composition, draws, age: the star at any clock time"
+detail = [
+  "track (≥ 0.1 M☉) shared with its pair's engine",
+  "lifetime, death, remnant, natal kick",
+  "max radius and luminosity until t (engulfment)",
+  "pulsar, nebula, rotation, variability at t",
+  "how plans 11 and 14 read every star (ruling 34)",
+]
+source = ["crates/hyperion-sim/src/stellar/system.rs", "P06.T29.a"]
+status = "built"
+
+[[node]]
+id = "s.system_stars"
+label = "SystemStars (system record)"
+kind = "entity"
+cluster = "s.c_system"
+summary = "Primary, companions, hierarchy, pair timelines, attempt"
+detail = [
+  "primary is plan 06's model whatever the hierarchy",
+  "companions: slot mass, the system's Z and age,",
+  "  their own body draws at the kept attempt",
+  "state_at(t): paired stars from their timelines",
+  "system mass and luminosity at t; pair recoil",
+]
+source = ["crates/hyperion-sim/src/stellar/system.rs", "P06.T29.b", "P11.T2.c", "P11.T11"]
+status = "built"
+
+[[node]]
+id = "s.summary"
+label = "System and star summaries"
+kind = "entity"
+cluster = "s.c_system"
+summary = "Per star: state, kind, class, M_V, B-V, remnant, rotation"
+detail = [
+  "variability, nebula, death in window, binary class",
+  "SystemSummary answers the server's system_summary",
+  "existence at t: not yet born or exists",
+]
+source = ["crates/hyperion-sim/src/stellar/system.rs", "P06.T29.b", "P06.T34"]
+status = "built"
+
+[[node]]
+id = "s.tab_fates"
+label = "Stellar fates tables"
+kind = "table"
+cluster = "s.c_system"
+summary = "Fate over (log m0, [Fe/H] of z_fit, η), tricubic Lagrange"
+detail = [
+  "route, remnant mass, formation age, WD origin",
+  "low, mid and high mass panels; validated per cell",
+  "fitted by hyperion-fit from the generator's tracks",
+  "over mass, metallicity and a draw, never age",
+]
+source = ["crates/hyperion-sim/src/stellar/fates.rs", "crates/hyperion-sim/src/tables/stellar_fates_low.rs", "crates/hyperion-sim/src/tables/stellar_fates_mid.rs", "crates/hyperion-sim/src/tables/stellar_fates_high.rs", "P06.T38.c", "P06.T38.d"]
+status = "built"
+
+[[node]]
+id = "s.brief"
+label = "Range-row stellar brief"
+kind = "query"
+cluster = "s.c_system"
+summary = "Primary's kind, class, log L, Teff and the star count"
+detail = [
+  "route 1: fate table for stars dead the whole window",
+  "route 2: knot-free main sequence (~8 rows in 10)",
+  "route 3: exact StarModel or cooling fits",
+  "count from the count-only multiplicity draw",
+  "a guard sends doubtful table rows to the exact route",
+]
+source = ["crates/hyperion-sim/src/stellar/brief.rs", "crates/hyperion-sim/src/stellar/fates.rs", "P06.T38.e"]
+status = "built"
+
+[[node]]
+id = "s.mean_mass"
+label = "Stellar fates for the mean mass"
+kind = "model"
+cluster = "s.c_system"
+summary = "fates_for: track lifetimes, remnants and companion laws"
+detail = [
+  "TrackFates: 96 masses 0.08-150 M☉ on the own tracks",
+  "  at η's median, the fate table where it answers",
+  "reference [Fe/H] 0.0, -0.5, +0.1, -1.2 by population",
+  "companions: drawn CF and q law of the multiplicity",
+  "  model, the same at every [Fe/H]",
+]
+source = ["crates/hyperion-sim/src/stellar/fates.rs", "crates/hyperion-sim/src/galaxy/fates.rs", "crates/hyperion-sim/src/stellar/multiplicity/fates.rs", "P06.T30", "P11.T1.d"]
+status = "built"
+
+[[node]]
+id = "s.observed"
+label = "Observed at retarded time"
+kind = "query"
+cluster = "s.c_system"
+summary = "Brief at t - d/c for an observer; alerts still to come"
+detail = [
+  "the spatial search on present positions is unchanged",
+  "state read at the emitted time, back to the horizon",
+  "the catalogue walk for alerts is P12.T5 (planned)",
+]
+source = ["crates/hyperion-sim/src/observe/system.rs", "crates/hyperion-sim/src/observe/stars_cache.rs", "crates/hyperion-sim/src/alerts/mod.rs", "P12.T2", "P12.T3", "P12.T5"]
+status = "partial"
+
+[[node]]
+id = "s.sky_census"
+label = "Sky census (apparent V)"
+kind = "query"
+cluster = "s.c_system"
+summary = "Stars brighter than a cut, each at its retarded time"
+detail = [
+  "cells opened shell by shell, nearest first",
+  "each star reddened by A_V along its own sight line",
+  "pair light bounds skip what cannot reach the cut",
+  "reads the galaxy only: draws nothing, changes nothing",
+]
+source = ["crates/hyperion-sim/src/sky/census/mod.rs", "crates/hyperion-sim/src/sky/census/cell.rs", "crates/hyperion-sim/src/sky/photometry.rs", "R06.T8.a", "R06.T8.b"]
+status = "built"
+
+[[node]]
+id = "s.kick_loop"
+label = "Kick-constraint redraw (P08)"
+kind = "model"
+cluster = "s.c_system"
+summary = "Repeat remnant, stripped and kick draws on one track"
+detail = [
+  "primary draws at record.mark_attempt()",
+  "honours record.kick_constraint() in layers D and E",
+  "draw_metallicity to read record.formation_site()",
+  "seams in place: primary_draws, primary_eta",
+]
+source = ["crates/hyperion-sim/src/stellar/system.rs", "P08.T12.c"]
+status = "planned"
+
+# ---------------------------------------------------------------------------------------------
+# Edges: seed path
+
+[[edge]]
+from = "g.key_system"
+to = "s.key_body"
+kind = "seed"
+label = "star index as sub"
+
+[[edge]]
+from = "g.key_system"
+to = "s.st_metal"
+kind = "seed"
+label = "system.metallicity"
+
+[[edge]]
+from = "g.key_system"
+to = "s.st_mult"
+kind = "seed"
+label = "system.multiplicity"
+
+[[edge]]
+from = "g.key_system"
+to = "s.st_substellar"
+kind = "seed"
+label = "system.substellar"
+
+[[edge]]
+from = "s.key_body"
+to = "s.st_binary"
+kind = "seed"
+label = "BodyId of body or slot"
+
+[[edge]]
+from = "s.key_body"
+to = "s.sd_life"
+kind = "seed"
+label = "each star's BodyId"
+
+[[edge]]
+from = "s.key_body"
+to = "s.sd_death"
+kind = "seed"
+
+[[edge]]
+from = "s.key_body"
+to = "s.sd_compact"
+kind = "seed"
+
+[[edge]]
+from = "s.key_body"
+to = "s.st_reserved"
+kind = "seed"
+label = "binary.ia_mark (planned)"
+
+[[edge]]
+from = "s.attempt"
+to = "s.st_mult"
+kind = "seed"
+label = "words 64n to 64n+63"
+
+[[edge]]
+from = "s.attempt"
+to = "s.st_binary"
+kind = "seed"
+
+[[edge]]
+from = "s.attempt"
+to = "s.sd_death"
+kind = "seed"
+
+[[edge]]
+from = "s.attempt"
+to = "s.sd_life"
+kind = "seed"
+
+[[edge]]
+from = "s.attempt"
+to = "s.sd_compact"
+kind = "seed"
+
+[[edge]]
+from = "s.attempt"
+to = "s.st_substellar"
+kind = "seed"
+
+# Edges: streams into draws
+[[edge]]
+from = "s.st_metal"
+to = "s.draw_feh"
+kind = "seed"
+label = "2 words, Box-Muller"
+
+[[edge]]
+from = "s.st_mult"
+to = "s.draw_count"
+kind = "seed"
+label = "marks 64n, 64n+1"
+
+[[edge]]
+from = "s.st_mult"
+to = "s.construction"
+kind = "seed"
+label = "64n+2; subsystems 64n+3+k"
+
+[[edge]]
+from = "s.st_binary"
+to = "s.draw_orbit"
+kind = "seed"
+label = "binary.orbit, try r"
+
+[[edge]]
+from = "s.st_binary"
+to = "s.draw_orient"
+kind = "seed"
+label = "orientation, phase"
+
+[[edge]]
+from = "s.st_substellar"
+to = "s.draw_bd"
+kind = "seed"
+label = "decision + 7 words a try"
+
+[[edge]]
+from = "s.st_reserved"
+to = "s.ia_mark"
+kind = "seed"
+label = "binary.ia_mark"
+
+[[edge]]
+from = "s.sd_life"
+to = "s.draw_eta"
+kind = "seed"
+label = "star.eta"
+
+[[edge]]
+from = "s.sd_life"
+to = "s.draw_rot"
+kind = "seed"
+label = "rotation, magnetism, axis"
+
+[[edge]]
+from = "s.sd_life"
+to = "s.draw_disc"
+kind = "seed"
+label = "star.disc_lifetime"
+
+[[edge]]
+from = "s.sd_life"
+to = "s.draw_nebula"
+kind = "seed"
+label = "star.nebula"
+
+[[edge]]
+from = "s.sd_death"
+to = "s.draw_stripped"
+kind = "seed"
+label = "star.stripped"
+
+[[edge]]
+from = "s.sd_death"
+to = "s.draw_collapse"
+kind = "seed"
+label = "star.remnant.*"
+
+[[edge]]
+from = "s.sd_death"
+to = "s.draw_kick"
+kind = "seed"
+label = "star.kick.*"
+
+[[edge]]
+from = "s.sd_compact"
+to = "s.draw_wd_type"
+kind = "seed"
+label = "star.wd.*"
+
+[[edge]]
+from = "s.sd_compact"
+to = "s.draw_ns_bh"
+kind = "seed"
+label = "star.ns.*, star.bh.spin"
+
+[[edge]]
+from = "g.event_key"
+to = "s.light"
+kind = "seed"
+label = "star.var.cycle, cycle n"
+
+# Edges: slot inputs and composition
+
+[[edge]]
+from = "g.system_record"
+to = "s.draw_feh"
+label = "component, position, age"
+
+[[edge]]
+from = "s.draw_feh"
+to = "s.composition"
+label = "[Fe/H]"
+
+[[edge]]
+from = "g.system_record"
+to = "s.ctx"
+label = "kind and origin"
+
+[[edge]]
+from = "s.cond_mult"
+to = "s.ctx"
+kind = "constraint"
+label = "by placement class"
+
+[[edge]]
+from = "g.displaced"
+to = "s.cond_mult"
+kind = "constraint"
+label = "kicked, runaway: single"
+
+# Edges: single-star evolution
+
+[[edge]]
+from = "g.system_record"
+to = "s.mass_branch"
+label = "primary m0"
+
+[[edge]]
+from = "s.mass_branch"
+to = "s.premain"
+label = "≥ 0.1 M☉"
+
+[[edge]]
+from = "s.mass_branch"
+to = "s.bd_cooling"
+label = "0.01 to 0.1 M☉"
+
+[[edge]]
+from = "s.mass_branch"
+to = "s.draw_disc"
+label = "every star: m0"
+
+[[edge]]
+from = "s.tab_hpt"
+to = "s.track"
+kind = "lookup"
+label = "coefficients at Z (clamped)"
+
+[[edge]]
+from = "s.composition"
+to = "s.track"
+label = "z_fit"
+
+[[edge]]
+from = "s.premain"
+to = "s.track"
+label = "arrival on the ZAMS"
+
+[[edge]]
+from = "s.draw_eta"
+to = "s.winds"
+label = "Reimers η"
+
+[[edge]]
+from = "s.winds"
+to = "s.track"
+label = "mass loss on the knots"
+
+[[edge]]
+from = "s.composition"
+to = "s.helium"
+label = "ΔY > 0 only"
+
+[[edge]]
+from = "s.helium"
+to = "s.track"
+label = "timescales, HB Teff shift"
+
+[[edge]]
+from = "s.composition"
+to = "s.winds"
+label = "Z/Z☉ of z_fit"
+
+[[edge]]
+from = "s.composition"
+to = "s.bd_cooling"
+label = "Z: opacity, m_e(Z)"
+
+[[edge]]
+from = "s.postagb"
+to = "s.wd"
+label = "knee, fade to 10 L☉"
+
+[[edge]]
+from = "s.track"
+to = "s.postagb"
+label = "AGB envelope gone"
+
+[[edge]]
+from = "s.track"
+to = "s.state"
+label = "state_at(age)"
+
+[[edge]]
+from = "s.bd_cooling"
+to = "s.state"
+label = "substellar state"
+
+[[edge]]
+from = "s.bd_cooling"
+to = "s.giant_cooling"
+label = "Z term, join at 13 MJ"
+
+# Edges: death, remnants and kicks
+
+[[edge]]
+from = "s.track"
+to = "s.fate"
+label = "cores at death"
+
+[[edge]]
+from = "g.system_record"
+to = "s.draw_stripped"
+label = "m0 ≥ m_cc(Z) - 1 M☉"
+
+[[edge]]
+from = "s.tab_stripping"
+to = "s.draw_stripped"
+kind = "lookup"
+label = "stripped share"
+
+[[edge]]
+from = "s.draw_stripped"
+to = "s.fate"
+kind = "constraint"
+label = "widens the EC window"
+
+[[edge]]
+from = "s.fate"
+to = "s.wd"
+label = "envelope lost"
+
+[[edge]]
+from = "s.fate"
+to = "s.draw_collapse"
+label = "iron core collapses"
+
+[[edge]]
+from = "s.fate"
+to = "s.remnant"
+label = "EC NS, PI or C: none"
+
+[[edge]]
+from = "s.tab_wd"
+to = "s.wd"
+kind = "lookup"
+label = "cooling age vs log L"
+
+[[edge]]
+from = "s.wd"
+to = "s.draw_wd_type"
+label = "Teff"
+
+[[edge]]
+from = "s.draw_collapse"
+to = "s.draw_kick"
+label = "M_CO, M_rem, channel"
+
+[[edge]]
+from = "s.draw_stripped"
+to = "s.draw_kick"
+kind = "constraint"
+label = "low-mode ramp"
+
+[[edge]]
+from = "s.tab_kick_rank"
+to = "s.draw_kick"
+kind = "lookup"
+label = "score rank F_x"
+
+[[edge]]
+from = "s.draw_collapse"
+to = "s.draw_ns_bh"
+label = "NS or BH, mass"
+
+[[edge]]
+from = "s.wd"
+to = "s.remnant"
+label = "WD mass, L(t)"
+
+[[edge]]
+from = "s.draw_ns_bh"
+to = "s.remnant"
+label = "pulsar state, BH spin"
+
+[[edge]]
+from = "s.draw_kick"
+to = "s.remnant"
+label = "natal kick"
+
+# Edges: multiplicity and orbits
+
+[[edge]]
+from = "g.system_record"
+to = "s.construction"
+label = "primary m1"
+
+[[edge]]
+from = "s.construction"
+to = "s.draw_count"
+label = "spine or direct"
+
+[[edge]]
+from = "s.mult_model"
+to = "s.draw_count"
+kind = "lookup"
+label = "MF, CF at m1"
+
+[[edge]]
+from = "s.ctx"
+to = "s.draw_count"
+kind = "constraint"
+label = "Free / forced single, multi"
+
+[[edge]]
+from = "s.draw_stripped"
+to = "s.draw_count"
+kind = "constraint"
+label = "stripped: multiple"
+
+[[edge]]
+from = "s.draw_count"
+to = "s.draw_orbit"
+label = "n companions"
+
+[[edge]]
+from = "s.period_law"
+to = "s.draw_orbit"
+label = "P law at node mass"
+
+[[edge]]
+from = "s.qe_law"
+to = "s.draw_orbit"
+label = "q and e laws at P"
+
+[[edge]]
+from = "s.tab_period_corr"
+to = "s.period_law"
+kind = "lookup"
+label = "direct f_logP factors"
+
+[[edge]]
+from = "s.draw_stripped"
+to = "s.stability"
+kind = "constraint"
+label = "periastron in or out of band"
+
+[[edge]]
+from = "s.mult_model"
+to = "s.tab_stripping"
+label = "drawn companions (offline)"
+
+[[edge]]
+from = "s.mult_model"
+to = "s.mean_mass"
+kind = "lookup"
+label = "companion count, q laws"
+
+[[edge]]
+from = "s.draw_orbit"
+to = "s.stability"
+label = "trial orbit"
+
+[[edge]]
+from = "s.draw_orient"
+to = "s.stability"
+label = "mutual inclination"
+
+[[edge]]
+from = "s.stability"
+to = "s.draw_orbit"
+kind = "constraint"
+label = "reject: next try"
+
+[[edge]]
+from = "g.potential_tables"
+to = "s.stability"
+kind = "constraint"
+label = "half the tidal radius"
+
+[[edge]]
+from = "s.stability"
+to = "s.hierarchy"
+label = "accepted orbits"
+
+[[edge]]
+from = "s.period_law"
+to = "s.draw_bd"
+label = "primary's P law"
+
+[[edge]]
+from = "s.stability"
+to = "s.draw_bd"
+kind = "constraint"
+label = "same whole test"
+
+[[edge]]
+from = "s.draw_bd"
+to = "s.hierarchy"
+label = "outermost BD orbit"
+
+# Edges: binary evolution
+
+[[edge]]
+from = "s.hierarchy"
+to = "s.interact"
+label = "two-star pairs, orbits"
+
+[[edge]]
+from = "s.star_model"
+to = "s.interact"
+label = "largest radius to +H"
+
+[[edge]]
+from = "s.interact"
+to = "s.bse"
+label = "yes, or a remnant by +H"
+
+[[edge]]
+from = "s.interact"
+to = "s.system_stars"
+label = "no: two single stars"
+
+[[edge]]
+from = "s.bse"
+to = "s.rlof"
+label = "a star fills its lobe"
+
+[[edge]]
+from = "s.rlof"
+to = "s.ce"
+label = "q > q_crit, or contact"
+
+[[edge]]
+from = "s.rlof"
+to = "s.timeline"
+label = "stable transfer"
+
+[[edge]]
+from = "s.ce"
+to = "s.timeline"
+label = "envelope, merger"
+
+[[edge]]
+from = "s.bse"
+to = "s.bin_sn"
+label = "a star dies"
+
+[[edge]]
+from = "s.draw_kick"
+to = "s.bin_sn"
+label = "kick law, star draws"
+
+[[edge]]
+from = "s.bin_sn"
+to = "s.timeline"
+label = "new orbit or disrupted"
+
+[[edge]]
+from = "s.timeline"
+to = "s.bin_class"
+label = "state at each age"
+
+[[edge]]
+from = "s.bin_class"
+to = "s.carve"
+label = "class over the horizon"
+
+[[edge]]
+from = "s.carve"
+to = "s.attempt"
+kind = "constraint"
+label = "carved: attempt n+1"
+
+[[edge]]
+from = "s.carve"
+to = "s.system_stars"
+label = "not carved: keep"
+
+[[edge]]
+from = "s.carve"
+to = "g.class_grid"
+kind = "constraint"
+label = "complement on catalogue"
+
+[[edge]]
+from = "s.tab_shares"
+to = "g.phi"
+kind = "lookup"
+label = "class shares leave grid"
+
+[[edge]]
+from = "s.timeline"
+to = "s.ia_mark"
+label = "pooled Ia events"
+
+[[edge]]
+from = "s.ia_mark"
+to = "s.carve"
+kind = "constraint"
+label = "explodes by +H: redraw"
+
+[[edge]]
+from = "s.hierarchy"
+to = "s.pair_bound"
+label = "attempts, periastra"
+
+# Edges: classes and derived properties
+[[edge]]
+from = "s.state"
+to = "s.classify"
+label = "Teff, L, log g, phase"
+
+[[edge]]
+from = "s.tab_mk"
+to = "s.classify"
+kind = "lookup"
+label = "subtype, class bounds"
+
+[[edge]]
+from = "s.draw_wd_type"
+to = "s.classify"
+label = "WD type"
+
+[[edge]]
+from = "s.peculiar"
+to = "s.classify"
+label = "peculiar class"
+
+[[edge]]
+from = "s.state"
+to = "s.photometry"
+label = "Teff, L"
+
+[[edge]]
+from = "s.state"
+to = "s.draw_rot"
+label = "M, R, phase, age"
+
+[[edge]]
+from = "s.draw_rot"
+to = "s.peculiar"
+label = "v/v_crit, fossil field"
+
+[[edge]]
+from = "s.state"
+to = "s.variability"
+label = "Teff, L, mean density"
+
+[[edge]]
+from = "s.variability"
+to = "s.light"
+label = "kind, period, amplitude"
+
+[[edge]]
+from = "s.draw_rot"
+to = "s.variability"
+label = "rotation period, activity"
+
+[[edge]]
+from = "s.classify"
+to = "s.variability"
+label = "class, WD atmosphere"
+
+[[edge]]
+from = "s.postagb"
+to = "s.draw_nebula"
+label = "crossing, core Teff"
+
+# Edges: assembly, records and access
+[[edge]]
+from = "s.state"
+to = "s.star_model"
+
+[[edge]]
+from = "s.remnant"
+to = "s.star_model"
+label = "remnant stage"
+
+[[edge]]
+from = "s.star_model"
+to = "s.system_stars"
+label = "primary and companions"
+
+[[edge]]
+from = "s.system_stars"
+to = "s.summary"
+label = "summary_at(t)"
+
+[[edge]]
+from = "s.classify"
+to = "s.summary"
+label = "classification"
+
+[[edge]]
+from = "s.photometry"
+to = "s.summary"
+label = "M_V, B-V"
+
+[[edge]]
+from = "s.variability"
+to = "s.summary"
+label = "variable kind and period"
+
+[[edge]]
+from = "s.draw_rot"
+to = "s.summary"
+label = "rotation, field, activity"
+
+[[edge]]
+from = "s.bin_class"
+to = "s.summary"
+label = "binary class of the pair"
+
+[[edge]]
+from = "s.draw_nebula"
+to = "s.summary"
+label = "planetary nebula"
+
+[[edge]]
+from = "s.events"
+to = "s.summary"
+label = "transient factors"
+
+[[edge]]
+from = "s.tab_fates"
+to = "s.brief"
+kind = "lookup"
+label = "dead-all-window route"
+
+[[edge]]
+from = "s.star_model"
+to = "s.brief"
+label = "exact route: the primary"
+
+[[edge]]
+from = "s.draw_count"
+to = "s.brief"
+label = "count-only star count"
+
+[[edge]]
+from = "g.range_query"
+to = "s.brief"
+label = "each hit's record and t"
+
+[[edge]]
+from = "s.tab_fates"
+to = "s.mean_mass"
+kind = "lookup"
+label = "η median, per [Fe/H]"
+
+[[edge]]
+from = "s.mean_mass"
+to = "g.system_count"
+label = "fates_for(population)"
+
+[[edge]]
+from = "s.system_stars"
+to = "s.observed"
+label = "brief_at(t - d/c)"
+
+[[edge]]
+from = "s.photometry"
+to = "s.sky_census"
+label = "absolute V of the state"
+
+[[edge]]
+from = "s.pair_bound"
+to = "s.sky_census"
+label = "light bounds skip systems"
+
+[[edge]]
+from = "s.system_stars"
+to = "s.sky_census"
+label = "state_at(t - d/c)"
+
+[[edge]]
+from = "s.kick_loop"
+to = "s.draw_kick"
+kind = "constraint"
+label = "redraw until in its bin"
+
+# Edges: exports to the other parts
+[[edge]]
+from = "s.system_stars"
+to = "ps.context"
+label = "SystemStars, [Fe/H]"
+
+[[edge]]
+from = "s.draw_disc"
+to = "ps.disc_profile"
+label = "circumstellar lifetime"
+
+[[edge]]
+from = "s.remnant"
+to = "ps.supernova"
+label = "ΔM, remnant, kick"
+
+[[edge]]
+from = "s.system_stars"
+to = "g.sn_entry"
+kind = "constraint"
+label = "death, kick, type (planned)"

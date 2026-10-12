@@ -1,0 +1,2164 @@
+# Procedural Generation Flowchart - Planets, first half: from a finished star system to its
+# planetary system (planets, moons, belts, rings, halo) and the per-body bulk record.
+# Read from rendering-and-planets at a6d3f6dd (GENERATOR_VERSION 21).
+
+[meta]
+stage = "planets"
+part = "planets-systems"
+prefix = "ps"
+title = "Planets"
+snapshot = "25d5d636"
+
+# ---------------------------------------------------------------- clusters
+
+[[cluster]]
+id = "ps.cl_seed"
+label = "Seed & stream keys"
+
+[[cluster]]
+id = "ps.cl_ctx"
+label = "System context"
+
+[[cluster]]
+id = "ps.cl_zones"
+label = "Orbit hosts & stable zones"
+
+[[cluster]]
+id = "ps.cl_disc"
+label = "Protoplanetary disc"
+
+[[cluster]]
+id = "ps.cl_arch"
+label = "Architecture class"
+
+[[cluster]]
+id = "ps.cl_place"
+label = "Placement"
+
+[[cluster]]
+id = "ps.cl_fate"
+label = "Formation & fate in time"
+
+[[cluster]]
+id = "ps.cl_bulk"
+label = "Bulk derivation"
+
+[[cluster]]
+id = "ps.cl_spin"
+label = "Spin, tides & figure"
+
+[[cluster]]
+id = "ps.cl_moons"
+label = "Moons & rings"
+
+[[cluster]]
+id = "ps.cl_belts"
+label = "Belts, halo & events"
+
+[[cluster]]
+id = "ps.cl_out"
+label = "Records & queries"
+
+# ---------------------------------------------------------------- seed & keys
+
+[[node]]
+id = "ps.key_body"
+label = "Planetary body index (BodyId)"
+kind = "seed"
+cluster = "ps.cl_seed"
+summary = "Planets, moons, rings, belts: a 16-bit index each"
+detail = [
+  "index = slot << 8 | sub (D3), in counter word 1",
+  "slots 0x01-0xBF planets, 0xC0-0xCF 2nd gen, 0xE0-0xEF",
+  "  belts, discs, halo; slot 0x00 is the stellar level",
+  "subs 0x00 body, 0x01-0x7F moons, 0x80-0x8F rings",
+  "a moon's own draws use its candidate key (r. 112.5):",
+  "regular k at sub k, impact 0x10, captures 0x20+/0x30+",
+]
+source = ["crates/hyperion-sim/src/planetary/index.rs", "crates/hyperion-sim/src/id/mod.rs", "crates/hyperion-sim/src/planetary/satellites.rs", "P14.T1.c", "P14.T22.a"]
+status = "built"
+
+[[node]]
+id = "ps.surface_seed"
+label = "Surface seed"
+kind = "seed"
+cluster = "ps.cl_seed"
+summary = "body.surface word 0: a function of seed and BodyId only"
+detail = [
+  "no derivation change can move a map (P14.T23)",
+  "server-only: no wire type carries it (R04)",
+  "clients get body.surface.detail instead (R09.T1.b)",
+]
+source = ["crates/hyperion-sim/src/planetary/hooks/seed.rs", "crates/hyperion-sim/src/rng/tags.rs", "P14.T23"]
+status = "built"
+
+# ---------------------------------------------------------------- context
+
+[[node]]
+id = "ps.context"
+label = "SystemContext"
+kind = "model"
+cluster = "ps.cl_ctx"
+summary = "Stars, hierarchy, [Fe/H], age and sphere of influence"
+detail = [
+  "for_system: resolve record, SystemStars, metallicity",
+  "[α/Fe] closed form of [Fe/H] and population: thick",
+  "  disc, halo, bulge +0.30 to -0.5, then -0.36 per dex;",
+  "  thin disc -0.13 per dex through solar, floor -0.05",
+  "slice: binaries evolve as single stars, zones at birth",
+  "builder(): synthetic hosts for tests and tools",
+]
+cite = ["Bensby, Feltzing & Oey 2014", "Hayden et al. 2015"]
+source = ["crates/hyperion-sim/src/planetary/context.rs", "P14.T1.a", "P14.T1.d"]
+status = "built"
+
+[[node]]
+id = "ps.host_kind"
+label = "Host kind"
+kind = "decision"
+cluster = "ps.cl_ctx"
+summary = "Stellar path built; brown-dwarf and rogue hosts planned"
+detail = [
+  "every context is HostKind::Stellar at this commit",
+  "for_system refuses the brown-dwarf and rogue layers",
+  "a bound brown dwarf is a component: its own zone",
+  "  draws the built SubstellarCompact row",
+  "plan 13 places free-floating objects; P14.T27",
+  "  gives them contexts",
+]
+source = ["crates/hyperion-sim/src/planetary/context.rs", "P14.T27"]
+status = "partial"
+
+[[node]]
+id = "ps.free_hosts"
+label = "Substellar & rogue hosts"
+kind = "model"
+cluster = "ps.cl_ctx"
+summary = "Brown dwarfs on the SubstellarCompact row; rogues' moons"
+detail = [
+  "T27.a: Barren 0.5, chain 0.5 at 0.05 M☉, 0.2 at 13 MJ",
+  "BD light from its cooling state at age + t",
+  "rogue: the object is body 0x0000, internal heat only",
+  "rogue < 1 MJ (ejected) keeps moons inside 0.1 R_H",
+  "  of a drawn birth orbit",
+]
+cite = ["Hong et al. 2018"]
+source = ["P14.T27.a", "P14.T27.b"]
+status = "planned"
+
+[[node]]
+id = "ps.xuv"
+label = "XUV history"
+kind = "model"
+cluster = "ps.cl_ctx"
+summary = "Saturated at 10^-3.5 L_ZAMS, then (t/t_sat)^-1.5"
+detail = [
+  "t_sat 1 Gyr ≤ 0.30 M☉, 250 Myr 0.35-0.6, 100 Myr ≥ 0.7",
+  "  blended log-linearly between (ruling 122.2)",
+  "closed form of initial mass and L_ZAMS: monotone",
+  "plan 06 ActivityLevel not read (fluence must not fall)",
+  "its fluence drives envelope escape",
+]
+cite = ["Ribas et al. 2005", "Owen & Wu 2017", "Johnstone et al. 2021", "Loyd et al. 2021"]
+source = ["crates/hyperion-sim/src/planetary/context.rs", "P14.T1.a"]
+status = "built"
+
+[[node]]
+id = "ps.strip"
+label = "Strip radius"
+kind = "model"
+cluster = "ps.cl_ctx"
+summary = "0.4895 × sphere of influence: nothing generated beyond"
+detail = [
+  "interim sphere: galactic tidal radius at the position",
+  "(G m / (4Ω² - κ²))^(1/3) of the system mass:",
+  "  1.372 pc for 1 M☉ with Bovy's Oort constants",
+  "cuts the discs (T3.b) and the cometary halo (T21.d)",
+  "T29 not built: no encounter-radius cut at the age,",
+  "  no feature or central-black-hole rule",
+]
+cite = ["Domingos, Winter & Yokoyama 2006", "King 1962", "Jiang & Tremaine 2010", "Bovy 2017"]
+source = ["crates/hyperion-sim/src/planetary/context.rs", "crates/hyperion-sim/src/planetary/params.rs", "P14.T1.d", "P14.T29"]
+status = "partial"
+
+# ---------------------------------------------------------------- zones
+
+[[node]]
+id = "ps.zones"
+label = "Stable zones (S/P-type)"
+kind = "model"
+cluster = "ps.cl_zones"
+summary = "Holman & Wiegert 1999 fits at every hierarchy level"
+detail = [
+  "S-type: least over pairs above of a_L hw_s(μ, e_L)",
+  "  × (1 - ρ / (a_L (1 - e_L))), at closest approach",
+  "P-type inner edge a hw_p(μ, e), μ folded, μ ≥ 0.1",
+  "continued outside fitted μ, e where a clamp errs big",
+  "pair zones narrower than ×1.5 in radius dropped",
+  "evolved-binary intersection (D10) not built",
+]
+cite = ["Holman & Wiegert 1999", "Jaime, Aguilar & Pichardo 2014", "Pichardo et al. 2005"]
+source = ["crates/hyperion-sim/src/planetary/placement/zones.rs", "P14.T9.a", "P14.T9.b"]
+status = "partial"
+
+[[node]]
+id = "ps.zone_kind"
+label = "Zone host: star or pair?"
+kind = "decision"
+cluster = "ps.cl_zones"
+summary = "Circumstellar (S-type) or circumbinary (P-type) host"
+detail = [
+  "star n: host number n; pair k: 16 + k; root Barycentre",
+  "star: disc from its own zero-age state and lifetime",
+  "pair: total mass, summed L_ZAMS, own lifetime rank w6",
+  "each zone is an independent orbit host (D10)",
+]
+source = ["crates/hyperion-sim/src/planetary/placement/zones.rs", "P14.T9.c"]
+status = "built"
+
+[[node]]
+id = "ps.host_plane"
+label = "Host planetary plane"
+kind = "draw"
+cluster = "ps.cl_zones"
+summary = "Isotropic normal per host; aligned for pairs < 47 au"
+detail = [
+  "planet.plane words 4h, 4h+1: cos i and node",
+  "circumbinary zone of a pair < 47 au: pair's plane",
+  "reference plane of the SYSTEM orbit map (D21)",
+]
+source = ["crates/hyperion-sim/src/planetary/placement/classes/orbits.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T8.d"]
+status = "built"
+
+# ---------------------------------------------------------------- disc
+
+[[node]]
+id = "ps.disc_draws"
+label = "Disc variates"
+kind = "draw"
+cluster = "ps.cl_disc"
+summary = "Gas fraction, stellar spin, r_c; circumbinary lifetime"
+detail = [
+  "planet.disc words 16h to 16h+6 (16 words per host)",
+  "log10(M_d/M*) ~ N(-2.0, 0.5), capped at -1.0",
+  "corotation period 8 d × 10^N(0, 0.25 dex)",
+  "r_c = 30 au (M*/M☉)^0.5 × 10^N(0, 0.3 dex)",
+  "w6: a circumbinary disc's lifetime rank; circumstellar",
+  "  discs reuse their star's own rank (ruling 33)",
+]
+cite = ["Andrews et al. 2010", "Andrews et al. 2013", "Andrews et al. 2018", "Kratter & Lodato 2016", "Lee & Chiang 2017"]
+source = ["crates/hyperion-sim/src/planetary/disc.rs", "crates/hyperion-sim/src/planetary/placement/zones.rs", "P14.T3", "P14.T9.c"]
+status = "built"
+
+[[node]]
+id = "ps.snow_line"
+label = "Snow line"
+kind = "model"
+cluster = "ps.cl_disc"
+summary = "2.7 au × sqrt(L_ZAMS/L☉): primordial, never present L"
+detail = [
+  "T = 280 K r^-0.5 L^0.25 falls to 170 K at 2.7 au",
+  "zero-age L because draws may not depend on time (D6)",
+  "brown dwarf: cooling-fit luminosity at 10 Myr",
+  "0.08-0.1 M☉: cooling-fit state at 5 Gyr (ruling 61.3)",
+]
+cite = ["Hayashi 1981", "Kennedy & Kenyon 2008"]
+source = ["crates/hyperion-sim/src/planetary/disc.rs", "crates/hyperion-sim/src/planetary/context.rs", "P14.T3"]
+status = "built"
+
+[[node]]
+id = "ps.disc_profile"
+label = "Disc profile, solids & edges"
+kind = "model"
+cluster = "ps.cl_disc"
+summary = "Σ ~ r^-1 exp(-r/r_c); solids scale as 10^[Fe/H]"
+detail = [
+  "solids 0.489% × 10^[Fe/H] inside, 1.060% beyond SL",
+  "inner edge max(2.5 R_ZAMS, Roche 1000 kg/m³, corot.)",
+  "outer edge 3 r_c (95%); truncated, never renormalised",
+  "isolation mass over a 2 sqrt3 R_H feeding half-width",
+  "a budget and a ruler: never decides the class (D5)",
+  "lifetime: s.draw_disc's law, a pair's rank from w6",
+]
+cite = ["Lodders 2003", "Andrews et al. 2010", "Lissauer 1987", "Armitage 2007"]
+source = ["crates/hyperion-sim/src/planetary/disc.rs", "P14.T3.a", "P14.T3.b"]
+status = "built"
+
+[[node]]
+id = "ps.protodisc_body"
+label = "Protoplanetary disc body"
+kind = "entity"
+cluster = "ps.cl_disc"
+summary = "Belt slot 0xE0 until the lifetime, then Dispersed"
+detail = [
+  "carries the disc's masses, radii, gaps at giants",
+  "deferred from the slice; slot 0xE0 kept reserved",
+]
+source = ["P14.T28.a"]
+status = "planned"
+
+# ---------------------------------------------------------------- architecture
+
+[[node]]
+id = "ps.class_table"
+label = "Architecture class table"
+kind = "table"
+cluster = "ps.cl_arch"
+summary = "9 classes: w0 × mass scaling × metallicity scaling"
+detail = [
+  "Barren 0.24, TerrestrialOnly 0.35, CompactMulti 0.21",
+  "CompactWithColdGiant 0.1701, SolarLike 0.01701",
+  "EccentricGiant 0.06804, WarmGiant 0.03402, HJ 0.0127",
+  "SubstellarCompact for hosts under 0.08 M☉",
+  "after fallbacks at 1 M☉: giants 19.5%, HJ 0.82%,",
+  "  compact classes 35.7%",
+]
+cite = ["Cumming et al. 2008", "Zhu et al. 2018", "Zhu & Wu 2018", "Wright et al. 2012", "Howard et al. 2012", "Dressing & Charbonneau 2015"]
+source = ["crates/hyperion-sim/src/planetary/architecture.rs", "P14.T4.a", "P14.T4.b"]
+status = "built"
+
+[[node]]
+id = "ps.class_weights"
+label = "Class weights"
+kind = "model"
+cluster = "ps.cl_arch"
+summary = "w(M*, [Fe/H]): giants ~10^(2[Fe/H]), CompactMulti ~M^-3"
+detail = [
+  "giants g(M) = M/M☉ to 1.9 M☉, Gaussian σ 0.5 above",
+  "z = 10^(2[Fe/H]) on -0.5..+0.5, 10 above, thinned below",
+  "small s = 1 / (1 + 10^(-2([Fe/H] + 1.5)))",
+  "early M dwarfs 0.35-0.6 M☉: no Barren/TerrestrialOnly",
+  "weight lost in the halo goes to Barren",
+]
+cite = ["Fischer & Valenti 2005", "Johnson et al. 2010", "Reffert et al. 2015", "Sozzetti et al. 2009", "Mortier et al. 2013", "Buchhave et al. 2012", "Hsu, Ford & Terrien 2020"]
+source = ["crates/hyperion-sim/src/planetary/architecture.rs", "P14.T4.b"]
+status = "built"
+
+[[node]]
+id = "ps.class_constraints"
+label = "Class constraints (D5, D10)"
+kind = "model"
+cluster = "ps.cl_arch"
+summary = "No disc → Barren; no giant budget → giant-free sibling"
+detail = [
+  "no giants if the SL lies beyond the reach (nearer of",
+  "  disc edge, zone end) or solids SL-reach < 10 M⊕",
+  "SolarLike, EccentricGiant → TerrestrialOnly",
+  "CWCG, WarmGiant, HotJupiter → CompactMulti",
+  "host inside a pair < 47 au (its P-type zone exempt):",
+  "  each class but Barren keeps 0.34, Barren the rest",
+]
+cite = ["Kraus et al. 2016"]
+source = ["crates/hyperion-sim/src/planetary/architecture.rs", "crates/hyperion-sim/src/planetary/placement/zones.rs", "P14.T4.c"]
+status = "built"
+
+[[node]]
+id = "ps.class_draw"
+label = "Class draw"
+kind = "draw"
+cluster = "ps.cl_arch"
+summary = "One mark picks a class against the constrained weights"
+detail = [
+  "planet.class word 4h (words 4h+1 to 4h+3 reserved)",
+  "Mark::pick_weighted, bound = the weights' own total",
+  "order of ArchitectureClass::ALL is part of the output",
+]
+source = ["crates/hyperion-sim/src/planetary/architecture.rs", "P14.T4.c"]
+status = "built"
+
+[[node]]
+id = "ps.giant_core"
+label = "Giant core growth"
+kind = "model"
+cluster = "ps.cl_arch"
+summary = "10 M⊕ core by pebble accretion within the disc lifetime"
+detail = [
+  "starts at the isolation mass at the snow line",
+  "grows by Lambrechts & Johansen 2014 eq. 35",
+  "median solar disc: core in 0.32 Myr at its SL",
+  "TooFewSolids / TooSlow → giant-free sibling",
+  "D5's second fallback, applied after the draw",
+]
+cite = ["Lambrechts & Johansen 2014", "Lissauer 1987"]
+source = ["crates/hyperion-sim/src/planetary/placement/masses.rs", "crates/hyperion-sim/src/planetary/placement/classes.rs", "P14.T7.c", "P14.T8"]
+status = "built"
+
+[[node]]
+id = "ps.class_branch"
+label = "Placed class"
+kind = "decision"
+cluster = "ps.cl_arch"
+summary = "The class after both fallbacks selects its template"
+detail = [
+  "Barren: no planets placed; belts still allowed",
+  "giant classes kept only if the core grows in time",
+  "template is the class's after the core fallback",
+  "no disc, or groups that place nothing → Barren",
+  "every primordial slot taken → Barren (ruling 112.8)",
+]
+source = ["crates/hyperion-sim/src/planetary/placement/classes.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T8", "P14.T30.a"]
+status = "built"
+
+[[node]]
+id = "ps.templates"
+label = "Class templates"
+kind = "table"
+cluster = "ps.cl_arch"
+summary = "Groups, counts, first sites, e laws, origins per class"
+detail = [
+  "chain 1-20 M⊕, first P break 12 d × 10^(-0.4[Fe/H]),",
+  "  1-50 d; ZT-Poisson mean 3.5 (6.1 ≤ 0.48 M☉), ≤ 10",
+  "rocky 2-6 of 0.05-2 M⊕ from 0.5-0.8 au sqrt(L), in SL",
+  "CWCG: 1-2 giants 0.3-10 MJ at 1-3 snow-line radii",
+  "HJ 1-10 d (~3.5 d); 60% outer giant 1-10 MJ at 2-8 SL",
+  "SolarLike: 1-3 giants at 1-2 SL, 0-2 ice giants 10-30 M⊕",
+]
+cite = ["Mulders et al. 2018", "Weiss et al. 2018", "Ballard & Johnson 2016", "Huang, Wu & Triaud 2016", "Bryan et al. 2016", "Kipping 2013", "Raymond et al. 2009"]
+source = ["crates/hyperion-sim/src/planetary/architecture/template.rs", "P14.T5"]
+status = "built"
+
+# ---------------------------------------------------------------- placement
+
+[[node]]
+id = "ps.group_draws"
+label = "Group presence, counts & sites"
+kind = "draw"
+cluster = "ps.cl_place"
+summary = "Per group: present?, count, first body's location rank"
+detail = [
+  "planet.count words 64h+: w0 hot-variant mark,",
+  "  w1 resonance mark, group g from word 8 + 8g",
+  "first site drawn inside its bounds, law's shape kept",
+  "rocky count from a tally of 2-6 (ruling 106.2)",
+  "outward / flanking groups start from earlier planets",
+]
+source = ["crates/hyperion-sim/src/planetary/placement/classes.rs", "P14.T8.a", "P14.T8.b", "P14.T8.c"]
+status = "built"
+
+[[node]]
+id = "ps.slots"
+label = "Slot reservation"
+kind = "model"
+cluster = "ps.cl_place"
+summary = "Counts reserve consecutive planet slots, inside out"
+detail = [
+  "host by host in hierarchy order, groups inside out",
+  "reserved before placing: an index never depends on",
+  "  anything placed after it (D3)",
+  "a member not placed or not formed leaves its slot",
+]
+source = ["crates/hyperion-sim/src/planetary/placement/classes.rs", "crates/hyperion-sim/src/planetary/index.rs", "P14.T8", "P14.T30.a"]
+status = "built"
+
+[[node]]
+id = "ps.mass_draws"
+label = "Planet masses (peas in a pod)"
+kind = "draw"
+cluster = "ps.cl_place"
+summary = "Correlated log-normal members about a group's m_c"
+detail = [
+  "drift-fed m_c = 7.7 M⊕ (M*/M☉) 10^(0.513 z)",
+  "members σ_w 0.17 dex, +0.21 dex per step outward",
+  "rocky m_c = 0.5 M⊕ × M_s / 32.2 M⊕, σ_w 0.2, no step",
+  "giants dN/dlnM ~ M^-0.31; chains taper as q^-2.9",
+  "  above 20 M⊕ (M*/M☉)",
+  "planet.mass words 8s: 2 normals + group law rank",
+]
+cite = ["Wu 2019", "Pascucci et al. 2018", "Cumming et al. 2008", "Weiss et al. 2018", "Lambrechts et al. 2019", "Mulders, Pascucci & Apai 2015"]
+source = ["crates/hyperion-sim/src/planetary/placement/masses.rs", "P14.T7.a", "P14.T7.b"]
+status = "built"
+
+[[node]]
+id = "ps.spacing_draws"
+label = "Hill spacing draws"
+kind = "draw"
+cluster = "ps.cl_place"
+summary = "Mean spacing per host; each pair Δ = μ + N(0, 3) R_H"
+detail = [
+  "small planets: μ ~ N(17, 2.5) held to 13-24",
+  "terrestrial groups: μ ~ N(40, 8) held to 26-59",
+  "giant pairs: μ ~ N(9, 2) held to 7-13",
+  "planet.spacing w8h (means); pair s at 2048 + 64s",
+  "≤ 16 redraws under the floor, then the floor",
+]
+cite = ["Weiss et al. 2018", "Pu & Wu 2015", "Raymond, Quinn & Lunine 2006"]
+source = ["crates/hyperion-sim/src/planetary/placement/spacing.rs", "P14.T6.b"]
+status = "built"
+
+[[node]]
+id = "ps.spacing_floor"
+label = "Stability floor & admission"
+kind = "model"
+cluster = "ps.cl_place"
+summary = "D7 floors, Gladman gap, chaotic zones, Roche, zone"
+detail = [
+  "small pairs, chains included: 10 + 80 mean e, ≤ 12",
+  "with a giant (≥ 0.1 MJ): 7; apo-peri gap ≥ 2 sqrt3 R_H",
+  "small planets outside 2 × 1.3 μ^(2/7) a of giants,",
+  "  none between a giant and its formation site but flankers",
+  "every planet outside twice the host's Roche limit",
+  "re-checked with e and a(1-e²); e scaled, no redraw",
+]
+cite = ["Pu & Wu 2015", "Chambers et al. 1996", "Marzari & Weidenschilling 2002", "Gladman 1993", "Wisdom 1980", "Ford & Rasio 2006"]
+source = ["crates/hyperion-sim/src/planetary/placement/spacing.rs", "crates/hyperion-sim/src/planetary/placement/classes.rs", "crates/hyperion-sim/src/planetary/params.rs", "P14.T6.a", "P14.T8"]
+status = "built"
+
+[[node]]
+id = "ps.resonance"
+label = "Resonant chains"
+kind = "draw"
+cluster = "ps.cl_place"
+summary = "Cold chains of ≥ 3 snap to 4:3, 3:2, 5:3 or 2:1"
+detail = [
+  "resonant with p 0.1 (0.3 for hosts < 0.3 M☉)",
+  "wide of exact by Fabrycky's ζ excess, e.g.",
+  "  0.56-1.11% at 3:2 and 1.67-3.33% at 2:1",
+  "kept only if admitted: the same 10-12 R_H floor",
+  "planet.count w1 mark; pair s offset at 16384 + 4s",
+]
+cite = ["Fabrycky et al. 2014"]
+source = ["crates/hyperion-sim/src/planetary/placement/classes.rs", "P14.T8.a"]
+status = "built"
+
+[[node]]
+id = "ps.orbit_draws"
+label = "Planet orbital elements"
+kind = "draw"
+cluster = "ps.cl_place"
+summary = "e and i ranks inside truncated laws; angles uniform"
+detail = [
+  "planet.orbit w0-4: e rank, i rank, node, ω, M0",
+  "e Rayleigh 0.04 chains, half-normal 0.3 hot/survivor,",
+  "  Rayleigh 0.05 SolarLike/terrestrial, Kipping others",
+  "e truncated: orbit inside zone, beyond 2 Roche",
+  "i Rayleigh 1.5° cold chains, else σ_i = σ_e / 2",
+  "KeplerElements, μ = G(M* + m), e ≤ 0.99",
+]
+cite = ["Kipping 2013", "Xie et al. 2016", "Van Eylen et al. 2019", "Fabrycky et al. 2014"]
+source = ["crates/hyperion-sim/src/planetary/placement/classes/orbits.rs", "crates/hyperion-sim/src/orbit/kepler.rs", "P14.T8.d"]
+status = "built"
+
+[[node]]
+id = "ps.formation_site"
+label = "Formation distance & origin"
+kind = "model"
+cluster = "ps.cl_place"
+summary = "Giants formed at max(a, core site); others in situ"
+detail = [
+  "migration is not simulated: migrated giants are placed",
+  "  on final orbits and keep their birth side",
+  "the snow-line side sets composition (D8)",
+  "Origin: InSitu, BeyondSnowLine or Migrated",
+]
+source = ["crates/hyperion-sim/src/planetary/placement/classes.rs", "crates/hyperion-sim/src/planetary/architecture/template.rs", "P14.T8", "P14.T11"]
+status = "built"
+
+[[node]]
+id = "ps.placed_planet"
+label = "PlacedPlanet"
+kind = "entity"
+cluster = "ps.cl_place"
+summary = "Index, mass, primordial orbit, birth side, resonance"
+detail = [
+  "one per placed slot, about its orbit host",
+  "also formation distance, origin, group, hot flag",
+  "fate takes its orbit, mass and circularisation time",
+]
+source = ["crates/hyperion-sim/src/planetary/placement/classes.rs", "P14.T8"]
+status = "built"
+
+# ---------------------------------------------------------------- fate
+
+[[node]]
+id = "ps.formation_draws"
+label = "Formation age & magma ocean"
+kind = "draw"
+cluster = "ps.cl_fate"
+summary = "Giants form while the gas lasts; small ones at its end"
+detail = [
+  "planet.origin w0: giant age log-uniform 0.5 Myr-life",
+  "small planets (< 0.1 MJ) form at the disc lifetime",
+  "w1: magma ocean ends log-uniform 10-100 Myr",
+  "belt members: at the lifetime, with no draw",
+]
+source = ["crates/hyperion-sim/src/planetary/hosts/young.rs", "crates/hyperion-sim/src/planetary/params.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T28.a"]
+status = "built"
+
+[[node]]
+id = "ps.circularisation"
+label = "Tidal circularisation"
+kind = "model"
+cluster = "ps.cl_fate"
+summary = "e decays to a neighbour-forced floor at fixed a(1-e²)"
+detail = [
+  "τ = (4/63) Q' (m/M*) (a/R)^5 / n; Q' 10^6 or 10^2",
+  "R: Chen & Kipping's median at the planet's mass",
+  "floor: surviving Laplace-Lagrange mode (GR, tides)",
+  "  or near-resonant forced e, whichever is larger",
+  "a(t) stays between pericentre and a0 (D9)",
+]
+cite = ["Goldreich & Soter 1966", "Jackson, Greenberg & Barnes 2008", "Ogilvie 2014", "Wu & Goldreich 2002", "Lithwick, Xie & Wu 2012", "Agol et al. 2021"]
+source = ["crates/hyperion-sim/src/planetary/placement/classes/tides.rs", "crates/hyperion-sim/src/planetary/placement/classes/secular.rs", "crates/hyperion-sim/src/planetary/hosts/evolved.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T8.e"]
+status = "built"
+
+[[node]]
+id = "ps.expansion"
+label = "Expansion & engulfment"
+kind = "model"
+cluster = "ps.cl_fate"
+summary = "a(t) = a0 M0/M(t); destroyed inside f × max R*"
+detail = [
+  "adiabatic while Ψ = (Mdot/M)/n << 1, e kept",
+  "f = (1 + Mp / 3.1 M⊕)^(1/8): 1.04 Earth, 1.79 Jupiter",
+  "first crossing found by fixed-point scan + bisection",
+  "a white dwarf's birth by winds is part of expansion",
+]
+cite = ["Veras et al. 2011", "Mustill & Villaver 2012"]
+source = ["crates/hyperion-sim/src/planetary/fate.rs", "crates/hyperion-sim/src/planetary/hosts/evolved.rs", "P14.T28.b"]
+status = "built"
+
+[[node]]
+id = "ps.supernova"
+label = "Supernova response"
+kind = "model"
+cluster = "ps.cl_fate"
+summary = "Instant mass loss plus natal kick: new orbit or unbound"
+detail = [
+  "state vector just before; host mass → remnant mass",
+  "elements_from_state: bound, unbound, or disrupted",
+  "  if pericentre lies inside the remnant's Roche limit",
+  "kick: P06.T19's law; a companion's planets see a",
+  "  single star until P11.T4's post-explosion orbits",
+]
+source = ["crates/hyperion-sim/src/planetary/fate.rs", "crates/hyperion-sim/src/planetary/hosts/evolved.rs", "crates/hyperion-sim/src/orbit/state.rs", "P14.T28.c"]
+status = "partial"
+
+[[node]]
+id = "ps.scatter"
+label = "Post-supernova scattering"
+kind = "draw"
+cluster = "ps.cl_fate"
+summary = "Crossing pairs lose the lighter: ejected or collided"
+detail = [
+  "walk in slot order until no pair within 2 sqrt3 R_H",
+  "Θ = (m/M)(a/R) of the heavier ≥ 1: lighter Unbound,",
+  "  heavier takes the binding energy, e from Table 1",
+  "Θ < 1: Collided, merged with mass-weighted L and E",
+  "planet.scatter w4k e rank, w4k+1 mean anomaly",
+]
+cite = ["Ford & Rasio 2008", "Petrovich et al. 2014", "Gladman 1993"]
+source = ["crates/hyperion-sim/src/planetary/fate/scatter.rs", "crates/hyperion-sim/src/planetary/fate.rs", "P14.T28.c"]
+status = "built"
+
+[[node]]
+id = "ps.body_state"
+label = "Body state & orbit at t"
+kind = "entity"
+cluster = "ps.cl_fate"
+summary = "NotYetFormed → Present → Destroyed or Unbound"
+detail = [
+  "resolve_all fixes one host's histories once",
+  "causes: Engulfed, TidallyDisrupted, Collided, ...",
+  "elements continuous in time except at a supernova",
+  "unbound bodies are not tracked further (D11);",
+  "  the rogue layer's fixed abundance stands for them",
+]
+source = ["crates/hyperion-sim/src/planetary/fate.rs", "P14.T28"]
+status = "built"
+
+[[node]]
+id = "ps.wd_pollution"
+label = "White-dwarf pollution & debris"
+kind = "draw"
+cluster = "ps.cl_fate"
+summary = "Polluted 25-50% given belt + planet; dusty disc 1-4%"
+detail = [
+  "debris disc inside the WD Roche limit, slot 0xEE",
+  "drawn on belt.population; falls with cooling age",
+]
+cite = ["Koester et al. 2014", "Farihi 2016"]
+source = ["P14.T28.d"]
+status = "planned"
+
+[[node]]
+id = "ps.secondgen"
+label = "Second-generation planets"
+kind = "draw"
+cluster = "ps.cl_fate"
+summary = "Neutron stars: p 0.005, 1-3 bodies at 0.2-0.5 au"
+detail = [
+  "appear 10 Myr after the death, slots 0xC0-0xCF",
+  "planet.secondgen: name fixed, no tag defined yet",
+  "lit by the pulsar's spin-down luminosity only",
+]
+cite = ["Nitu et al. 2022"]
+source = ["P14.T28.e"]
+status = "planned"
+
+[[node]]
+id = "ps.drift"
+label = "Evolving-orbit drift cells"
+kind = "model"
+cluster = "ps.cl_fate"
+summary = "Drifting elements on dyadic cells of 2^16-2^25 s"
+detail = [
+  "three laws only: tidal circularisation, adiabatic",
+  "  expansion and an impact moon's tidal recession",
+  "no migration: giants are placed on final orbits",
+  "phase: integral of n, 16-point Gauss-Legendre rule",
+  "in a cell a, e linear and M quadratic, to 0.1 mm",
+  "valid_until: the cell's end, or the next change",
+]
+cite = ["Veras et al. 2011", "Murray & Dermott 1999"]
+source = ["crates/hyperion-sim/src/planetary/drift.rs", "crates/hyperion-sim/src/planetary/fate.rs", "crates/hyperion-sim/src/orbit/kepler.rs", "P14.T45"]
+status = "built"
+
+# ---------------------------------------------------------------- bulk
+
+[[node]]
+id = "ps.radius_rank"
+label = "Radius rank"
+kind = "draw"
+cluster = "ps.cl_bulk"
+summary = "The one drawn number of a body's derivation (D8)"
+detail = [
+  "planet.radius word 0; words 1-7 reserved",
+  "confined to the radii its composition can hold",
+  "places the body in Chen & Kipping's scatter, or in",
+  "  the observed CMF spread for a rocky outcome",
+  "moons draw it on candidate keys; members on belt.member",
+]
+source = ["crates/hyperion-sim/src/planetary/system.rs", "crates/hyperion-sim/src/planetary/derive/mod.rs", "P14.T30.a", "P14.T11"]
+status = "built"
+
+[[node]]
+id = "ps.ck_relation"
+label = "Chen & Kipping 2017 M-R"
+kind = "table"
+cluster = "ps.cl_bulk"
+summary = "Probabilistic broken power law, four segments"
+detail = [
+  "indices 0.279, 0.589, -0.044, 0.881",
+  "scatter 0.0403, 0.146, 0.0737, 0.0443 dex",
+  "breaks at 2.04 M⊕, 0.414 MJ and 0.080 M☉",
+  "R(1 M⊕) = 1.008 R⊕; Table 1 posterior medians",
+]
+cite = ["Chen & Kipping 2017"]
+source = ["crates/hyperion-sim/src/planetary/derive/radius.rs", "P14.T11.a"]
+status = "built"
+
+[[node]]
+id = "ps.zeng_curves"
+label = "Zeng iron-rock-water curves"
+kind = "table"
+cluster = "ps.cl_bulk"
+summary = "M-R table 0.125-32 M⊕, blended toward pure water"
+detail = [
+  "Zeng 2016 Table 2: Fe, 50/30/25/20% Fe, pure rock",
+  "interpolated in log M, log R and core mass fraction",
+  "water: f(x) = 1 + 0.55x - 0.14x², 1.41 for pure water",
+]
+cite = ["Zeng, Sasselov & Jacobsen 2016", "Zeng et al. 2019"]
+source = ["crates/hyperion-sim/src/planetary/derive/radius.rs", "P14.T11.a", "P14.T11.b"]
+status = "built"
+
+[[node]]
+id = "ps.envelope_tables"
+label = "Envelope radius grids"
+kind = "table"
+cluster = "ps.cl_bulk"
+summary = "H/He envelope thickness on a core, by age and flux"
+detail = [
+  "Lopez & Fortney 2014 Tables 2-4: 1-20 M⊕, 0.01-20%",
+  "  at 0.1, 10, 1000 F⊕ and 100 Myr, 1 Gyr, 10 Gyr",
+  "20% to coreless: log-linear bridge to Fortney 2007",
+  "outside 1-20 M⊕ thickness scales as M^-0.21",
+]
+cite = ["Lopez & Fortney 2014", "Fortney, Marley & Barnes 2007"]
+source = ["crates/hyperion-sim/src/planetary/derive/envelope.rs", "P14.T11.b"]
+status = "built"
+
+[[node]]
+id = "ps.rocky_cmf"
+label = "Rocky core mass fraction"
+kind = "model"
+cluster = "ps.cl_bulk"
+summary = "Rank → observed CMF spread: 0.06 / 0.24 / 0.57"
+detail = [
+  "two-piece logit-normal through 16th/50th/84th pct",
+  "Earth's 0.325 sits at the 62nd percentile",
+  "beyond the snow line held to ≥ Earth's (ruling 58)",
+  "radius is then Zeng's curve at that fraction",
+]
+cite = ["Plotnykov & Valencia 2020"]
+source = ["crates/hyperion-sim/src/planetary/derive/rocky.rs", "P14.T11.c"]
+status = "built"
+
+[[node]]
+id = "ps.mdwarf_branch"
+label = "M-dwarf rocky branch"
+kind = "decision"
+cluster = "ps.cl_bulk"
+summary = "Hosts < 0.6 M☉: inner planets rocky unless enveloped"
+detail = [
+  "blended away by 0.70 M☉; FGK hosts unchanged",
+  "envelope probability rises with mass, half at 5 M⊕",
+  "  (pivot host 0.35 M☉, slope -1.5, width 0.15 dex)",
+  "rank split at 1 - p: rocky below, enveloped above",
+]
+cite = ["Ment & Charbonneau 2023", "Luque & Palle 2022", "Dressing & Charbonneau 2015"]
+source = ["crates/hyperion-sim/src/planetary/derive/m_dwarfs.rs", "P14.T11"]
+status = "built"
+
+[[node]]
+id = "ps.composition"
+label = "Composition solve"
+kind = "model"
+cluster = "ps.cl_bulk"
+summary = "(M, R) → iron, rock, water, envelope by birth side"
+detail = [
+  "inside SL: above rock and > 1.5 M⊕ → envelope, else",
+  "  rock with ≤ 0.1% water: no inner water worlds",
+  "beyond SL: ≤ 53.9% water on Earth-like core, then H/He",
+  "inner birth envelope 3% (M/5 M⊕)^0.6 × 10^(0.5 z)",
+  "solved at 5 Gyr and the zero-age flux",
+  "≥ 0.414 MJ: no solve, giant composition instead",
+]
+cite = ["Zeng et al. 2019", "Lopez & Fortney 2014", "Rogers & Owen 2021", "Lodders 2003"]
+source = ["crates/hyperion-sim/src/planetary/derive/composition.rs", "crates/hyperion-sim/src/planetary/derive/mod.rs", "crates/hyperion-sim/src/planetary/params.rs", "P14.T11.c"]
+status = "built"
+
+[[node]]
+id = "ps.giant_bulk"
+label = "Giant radius & heavy elements"
+kind = "model"
+cluster = "ps.cl_bulk"
+summary = "Cooling radius, inflation, cap 2 RJ; M_z ~ M^0.61"
+detail = [
+  "≥ 0.3 MJ: larger of cooling radius at age and the",
+  "  inflated radius (faded in from 500 K to 1000 K)",
+  "ε = 2.37% exp(-(log F - 0.14)² / (2 × 0.37²))",
+  "M_z = 57.9 M⊕ (M/MJ)^0.61; internal luminosity",
+  "blend into the envelope model over 0.3-0.414 MJ",
+]
+cite = ["Thorngren & Fortney 2018", "Thorngren et al. 2016"]
+source = ["crates/hyperion-sim/src/planetary/derive/radius.rs", "crates/hyperion-sim/src/planetary/derive/composition.rs", "P14.T11.d"]
+status = "built"
+
+[[node]]
+id = "ps.irradiation"
+label = "Irradiation & XUV fluence"
+kind = "model"
+cluster = "ps.cl_bulk"
+summary = "Orbit-mean L / (4π a² sqrt(1-e²)), summed over hosts"
+detail = [
+  "flux now and at each host's largest past L (D11)",
+  "XUV fluence and saturated flux along the orbits",
+  "a companion is seen along the binary's own orbit",
+  "black holes irradiate nothing (ruling 40)",
+]
+cite = ["Kopparapu et al. 2013", "Williams & Pollard 2002"]
+source = ["crates/hyperion-sim/src/planetary/derive/irradiation.rs", "crates/hyperion-sim/src/planetary/derive/mod.rs", "P14.T12.a"]
+status = "built"
+
+[[node]]
+id = "ps.escape"
+label = "H/He envelope escape"
+kind = "model"
+cluster = "ps.cl_bulk"
+summary = "Energy-limited loss ε π R³ Φ / (G M K), ε = 0.1"
+detail = [
+  "Φ: XUV fluence to the time; R taken at 100 Myr",
+  "K: Roche-lobe factor from the Hill radius",
+  "bodies from 0.3 MJ keep their envelopes",
+  "the radius valley emerges here, not imposed (D8)",
+  "law in atmosphere.rs, applied in derive/mod.rs",
+]
+cite = ["Owen & Wu 2017", "Erkaev et al. 2007", "Fulton et al. 2017"]
+source = ["crates/hyperion-sim/src/planetary/derive/atmosphere.rs", "crates/hyperion-sim/src/planetary/derive/mod.rs", "P14.T13.b"]
+status = "built"
+
+[[node]]
+id = "ps.radius_now"
+label = "Radius, density & class at t"
+kind = "model"
+cluster = "ps.cl_bulk"
+summary = "Envelope radius at age and flux; stripped → bare core"
+detail = [
+  "density and surface gravity from mass and radius",
+  "class: envelope ≥ 0.5 GasGiant; ≥ 0.001 SubNeptune,",
+  "  or IceGiant from 10 M⊕; water ≥ 0.1 Icy; else Rocky",
+  "gas and ice giants have no surface (ruling 34)",
+]
+source = ["crates/hyperion-sim/src/planetary/derive/mod.rs", "crates/hyperion-sim/src/planetary/params.rs", "P14.T11", "P14.T16.a"]
+status = "built"
+
+[[node]]
+id = "ps.t_eq"
+label = "Equilibrium temperature"
+kind = "model"
+cluster = "ps.cl_bulk"
+summary = "T_eq = [S (1 - A) / 4σ]^(1/4), A from the atmosphere"
+detail = [
+  "first pass A = 0.3; 3 passes, each with the albedo",
+  "  of the previous pass's surface state (T13.c)",
+  "giants: internal luminosity gives a separate T_eff",
+  "worst T_eq at peak flux for scorched survivors",
+]
+source = ["crates/hyperion-sim/src/planetary/derive/irradiation.rs", "crates/hyperion-sim/src/planetary/derive/mod.rs", "P14.T12.a", "P14.T13.c"]
+status = "built"
+
+[[node]]
+id = "ps.hz"
+label = "Habitable zone"
+kind = "model"
+cluster = "ps.cl_bulk"
+summary = "Kopparapu et al. 2013 limits, erratum coefficients"
+detail = [
+  "S_eff polynomial in Teff - 5780 K, fit 2600-7200 K",
+  "five limits; conservative 0.99-1.69 au for the Sun",
+  "multiple stars: Σ F_i / S_eff,i at the time asked",
+  "runaway limit judged at the largest past L",
+]
+cite = ["Kopparapu et al. 2013"]
+source = ["crates/hyperion-sim/src/planetary/derive/habitable_zone.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T12.b"]
+status = "built"
+
+[[node]]
+id = "ps.limits"
+label = "Roche, Hill & moon limits"
+kind = "model"
+cluster = "ps.cl_bulk"
+summary = "Where rings, moons and captures may lie (T15)"
+detail = [
+  "fluid Roche 2.456 R (ρp/ρs)^(1/3); rigid 1.26",
+  "prograde 0.4895 R_H (1 - 1.0305 e_p - 0.2738 e_s)",
+  "retrograde 0.9309 R_H (1 - 1.0764 e_p - 0.9812 e_s)",
+  "heaviest moon that survives tidal migration to t",
+]
+cite = ["Domingos, Winter & Yokoyama 2006", "Barnes & O'Brien 2002", "Chandrasekhar 1969", "Tiscareno 2013", "Kipping 2009"]
+source = ["crates/hyperion-sim/src/planetary/derive/limits.rs", "P14.T15"]
+status = "built"
+
+# ---------------------------------------------------------------- spin
+
+[[node]]
+id = "ps.spin_draws"
+label = "Primordial spin & obliquity"
+kind = "draw"
+cluster = "ps.cl_spin"
+summary = "Log-normal period; Rayleigh or isotropic obliquity"
+detail = [
+  "planet.spin w0 period rank, w1 obliquity rank,",
+  "  w2 pole azimuth, w3 rotation phase at the epoch",
+  "period 15 h (giants 10 h) × 10^N(0, 0.2 dex),",
+  "  never shorter than break-up",
+  "obliquity Rayleigh 10°; isotropic after giant impact",
+]
+source = ["crates/hyperion-sim/src/planetary/derive/rotation.rs", "crates/hyperion-sim/src/planetary/params.rs", "P14.T14.a"]
+status = "built"
+
+[[node]]
+id = "ps.locking"
+label = "Despin, locking & frame"
+kind = "model"
+cluster = "ps.cl_spin"
+summary = "Gladman 1996 τ; spin runs linearly to the lock; W(t)"
+detail = [
+  "τ = ω a^6 I Q / (3 G M² k2 R^5), I = α m R²",
+  "rocky k2 0.3, Q 100; giant k2 0.4, Q 10^5",
+  "lock 1:1, or 3:2 for e > 0.1",
+  "pole from obliquity and azimuth; a locked prime",
+  "  meridian faces the primary at pericentre (D23)",
+  "T14.d enveloped tides built, held until version 22",
+]
+cite = ["Gladman et al. 1996"]
+source = ["crates/hyperion-sim/src/planetary/derive/rotation.rs", "crates/hyperion-sim/src/planetary/frames.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T14.b", "P14.T14.c", "P14.T14.d", "P14.T46.b"]
+status = "built"
+
+[[node]]
+id = "ps.figure"
+label = "Figure (Darwin-Radau)"
+kind = "model"
+cluster = "ps.cl_spin"
+summary = "Rotational flattening from q and C/Ma²; height datum"
+detail = [
+  "f = 2.5 q / [1 + 6.25 (1 - 1.5 C/Ma²)²], iterated",
+  "spheres below 200 km (ice) or 300 km (rock) radius",
+  "locked 1:1: × 2.5 for the tide; capped at 0.2",
+  "datum: 1 bar under H/He, else the solid surface",
+]
+cite = ["Murray & Dermott 1999", "Bourda & Capitaine 2004", "Dermott 1979", "Lineweaver & Norman 2010"]
+source = ["crates/hyperion-sim/src/planetary/derive/figure.rs", "P14.T46.c", "P14.T46.d", "P14.T46.e"]
+status = "built"
+
+[[node]]
+id = "ps.photometry"
+label = "Disc photometry"
+kind = "model"
+cluster = "ps.cl_spin"
+summary = "Phase-curve template and B, V, R albedos by state"
+detail = [
+  "McEwen 1991 law; analogue curves (Mallama & Hilton)",
+  "by surface state: giant analogue, Venus, magma,",
+  "  snowball, Mercury, airless ice, Mars or Earth",
+  "p_c = p_analogue × A_Bond / A_ref, with p q ≤ 1",
+]
+cite = ["McEwen 1991", "Mallama & Hilton 2018", "Mallama, Krobusek & Pavlov 2017", "Robinson 2026", "Krisciunas & Schaefer 1991"]
+source = ["crates/hyperion-sim/src/planetary/derive/photometry.rs", "P14.T47"]
+status = "built"
+
+# ---------------------------------------------------------------- moons & rings
+
+[[node]]
+id = "ps.parent_class"
+label = "Satellite parent class"
+kind = "decision"
+cluster = "ps.cl_moons"
+summary = "What a parent can hold depends on its class and mass"
+detail = [
+  "giant (≥ 10 M⊕ enveloped): regular moons, irregular",
+  "  population, dusty ring, maybe a massive ring",
+  "rocky/icy 0.001-5 M⊕ or dwarf planet: impact moon",
+  "ice giant: Triton-like capture; rocky by a belt:",
+  "  small captures",
+  "parent read at the epoch (or the window's end)",
+]
+source = ["crates/hyperion-sim/src/planetary/satellites.rs", "crates/hyperion-sim/src/planetary/moons/mod.rs", "P14.T22.a"]
+status = "built"
+
+[[node]]
+id = "ps.regular_moons"
+label = "Regular moons of giants"
+kind = "draw"
+cluster = "ps.cl_moons"
+summary = "Total M_p × 10^N(-3.8, 0.3) split among 1-6 moons"
+detail = [
+  "count ZT-Poisson λ 3.5, ≤ 6; Titan-like p 1/3",
+  "shares σ 0.40 dex, +0.30 dex per step outward",
+  "innermost 3-8 R_p; spacing 15 + N(0, 3) mutual R_H",
+  "2:1 resonance p 0.5; e Rayleigh 0.005, i 0.5°",
+  "inside 0.05 R_H and the surviving-moon mass",
+  "moonlets: Poisson count, mean 6",
+]
+cite = ["Canup & Ward 2006", "Sasaki, Stewart & Ida 2010", "Crida & Charnoz 2012"]
+source = ["crates/hyperion-sim/src/planetary/moons/regular.rs", "P14.T17.a"]
+status = "built"
+
+[[node]]
+id = "ps.impact_moon"
+label = "Giant-impact moon"
+kind = "draw"
+cluster = "ps.cl_moons"
+summary = "p 0.15; mass ratio log-uniform 0.002-0.05"
+detail = [
+  "dwarf planets: intact 0.03-0.2 or disc 0.0005-0.01",
+  "forms at 2.15 ± 0.27 fluid Roche radii (1.3-2.4)",
+  "recedes: a^(13/2) grows linearly with age (k2/Q)",
+  "Unbound once past the prograde stability limit",
+  "moon.impact words 0-4",
+]
+cite = ["Elser et al. 2011", "Murray & Dermott 1999"]
+source = ["crates/hyperion-sim/src/planetary/moons/impact.rs", "P14.T18"]
+status = "built"
+
+[[node]]
+id = "ps.captures"
+label = "Captured irregular moons"
+kind = "draw"
+cluster = "ps.cl_moons"
+summary = "Giants: about 90 over 2.8 km; up to 4 become bodies"
+detail = [
+  "count log-normal, 0.25 dex; D1 150-350 km",
+  "a 0.1-0.45 R_H at the birth distance; e 0.1-0.6",
+  "80% retrograde; i isotropic outside 60-120°",
+  "ice giant Triton-like p 0.2: 1e-4-1e-3 M_p, 10-20 R_p",
+  "rocky by a belt p 0.2: 1-2 moons of 1-15 km",
+  "moon.capture stream; hot giants keep none",
+]
+cite = ["Ashton et al. 2021", "Jewitt & Haghighipour 2007", "Spalding, Batygin & Adams 2016", "Domingos, Winter & Yokoyama 2006"]
+source = ["crates/hyperion-sim/src/planetary/moons/irregular.rs", "P14.T19"]
+status = "built"
+
+[[node]]
+id = "ps.moon_prune"
+label = "Satellite assembly & pruning"
+kind = "model"
+cluster = "ps.cl_moons"
+summary = "Regular, impact, captures; remove crossings; number"
+detail = [
+  "Triton-like capture removes regulars beyond/near it",
+  "other captures kept only outside every apocentre",
+  "regulars keep their longest inner run with the gap",
+  "subs 0x01-0x7F in that order; rings from 0x80",
+  "member k's impact moon is Member(0x80 + k)",
+]
+source = ["crates/hyperion-sim/src/planetary/satellites.rs", "P14.T22.a"]
+status = "built"
+
+[[node]]
+id = "ps.rings"
+label = "Rings"
+kind = "draw"
+cluster = "ps.cl_moons"
+summary = "Dusty ring on every giant; sometimes a massive ring"
+detail = [
+  "massive p 0.15 if particles < 115 K (ice), else 0.03",
+  "1.1 R_p out to 0.6-1.0 of the fluid Roche limit",
+  "mass 1e-9-1e-7 M_p; gaps at moons' 2:1 and 3:2",
+  "dusty τ < 1e-3; no > 10 km moon in a massive ring",
+  "ring.system w0 mark, w1-4 ranks",
+]
+cite = ["Schlichting & Chang 2011", "de Pater et al. 2017", "Tiscareno 2013"]
+source = ["crates/hyperion-sim/src/planetary/rings.rs", "crates/hyperion-sim/src/planetary/params.rs", "P14.T20"]
+status = "built"
+
+[[node]]
+id = "ps.moon_derive"
+label = "Moon derivation"
+kind = "model"
+cluster = "ps.cl_moons"
+summary = "Ice line, radius, light, tidal heat and ocean flag"
+detail = [
+  "ice line 2.7 au sqrt(L_p) at disc dispersal (170 K)",
+  "beyond it ice 0.35-0.50 by radius rank, else rock",
+  "R: Fortney 2007 eq. 7 from 0.01 M⊕, else spheres",
+  "heat H = 10.5 (k2/Q) G Mp² R^5 n e² / a^6",
+  "ocean if the conducting shell is thinner than water",
+]
+cite = ["Fortney, Marley & Barnes 2007", "Canup & Ward 2006", "Segatz et al. 1988", "Peale, Cassen & Reynolds 1979"]
+source = ["crates/hyperion-sim/src/planetary/moons/regular.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T17.b"]
+status = "built"
+
+[[node]]
+id = "ps.laplace"
+label = "Laplace-surface planes"
+kind = "model"
+cluster = "ps.cl_moons"
+summary = "Moons and rings on the parent's Laplace surface"
+detail = [
+  "r_L^5 = J2' R² a_p³ (1 - e_p²)^(3/2) M_p / M*",
+  "hydrostatic J2 by Darwin-Radau; unstable band removed",
+  "held behind MOONS_VERSION = 23 (22 → 23 batch)",
+]
+cite = ["Tremaine, Touma & Namouni 2009", "Goldreich 1965"]
+source = ["P14.T56.a"]
+status = "planned"
+
+# ---------------------------------------------------------------- belts & halo
+
+[[node]]
+id = "ps.belt_sites"
+label = "Belt sites"
+kind = "model"
+cluster = "ps.cl_belts"
+summary = "Asteroid belts at a giant's resonances; Kuiper beyond"
+detail = [
+  "inside innermost ≥ 10 M⊕ giant beyond SL: 4:1-2:1,",
+  "  0.397-0.630 a; Kirkwood gaps 3:1, 5:2, 7:3",
+  "no such giant: belts in gaps > 40 mutual R_H",
+  "Kuiper-like 1.31-1.59 a of the outermost (3:2-2:1)",
+  "  plus a scattered part to the disc's outer edge",
+  "outside chaotic zones; slots 0xE1-0xED",
+]
+cite = ["Wisdom 1980"]
+source = ["crates/hyperion-sim/src/planetary/belts.rs", "P14.T21.a", "P14.T21.b"]
+status = "built"
+
+[[node]]
+id = "ps.belt_draws"
+label = "Belt depletion & brightness"
+kind = "draw"
+cluster = "ps.cl_belts"
+summary = "Mass = band solids × drawn depletion or efficiency"
+detail = [
+  "depletion log-uniform 1e-4-1e-2 (giant), 1e-2-1 (gap)",
+  "size slope q uniform 2.5-3.5",
+  "Kuiper: bright p 0.60, ε 10^N(-0.25, 0.5), else 1e-3",
+  "largest member's share 0.1-0.4 of primordial mass",
+  "belt.population words 8n to 8n + 5",
+]
+cite = ["Sibthorpe et al. 2018", "Eiroa et al. 2013", "Montesinos et al. 2016"]
+source = ["crates/hyperion-sim/src/planetary/belts.rs", "crates/hyperion-sim/src/planetary/params.rs", "P14.T21.a", "P14.T21.b", "P14.T21.c"]
+status = "built"
+
+[[node]]
+id = "ps.belt_wear"
+label = "Collisional wear & dust"
+kind = "model"
+cluster = "ps.cl_belts"
+summary = "M(t) = M0 / (1 + t/t_c); dust fades about as 1/age"
+detail = [
+  "t_c: Wyatt et al. 2007a eq. 17 with the full G",
+  "D_c 450 km, Q_D* 495 J/kg, e 0.05, ρ 2700 kg/m³",
+  "f = 0.37 r^-2 D_bl^-0.5 D_c^-0.5 M, capped at f_max",
+  "detected at 100 μm when weighted f ≥ 1e-6",
+]
+cite = ["Wyatt et al. 2007", "Wyatt 2008", "Kains, Wyatt & Greaves 2011", "Sibthorpe et al. 2018"]
+source = ["crates/hyperion-sim/src/planetary/belts.rs", "P14.T21.a", "P14.T21.b"]
+status = "built"
+
+[[node]]
+id = "ps.belt_members"
+label = "Belt largest members"
+kind = "draw"
+cluster = "ps.cl_belts"
+summary = "Dwarf planets: D_k = D1 k^(-1/1.8) under a growth cap"
+detail = [
+  "icy cap 3300 km x^0.2 with spread; rocky 0.1 M⊕",
+  "over 400 km across, at most 8, largest first",
+  "e Rayleigh 0.1, i 8°; 0.3, 20° in the scattered 35%",
+  "belt.member w0-7 orbit and radius rank, w8 spread",
+  "derived as dwarf planets; impact-moon eligible",
+]
+source = ["crates/hyperion-sim/src/planetary/belts.rs", "crates/hyperion-sim/src/planetary/belts/sizes.rs", "P14.T21.c"]
+status = "built"
+
+[[node]]
+id = "ps.halo"
+label = "Cometary halo"
+kind = "draw"
+cluster = "ps.cl_belts"
+summary = "Oort cloud as a population: 1e11-1e12 comets > 1 km"
+detail = [
+  "2000 au to ≤ 1e5 au, × (M*/M☉)^(1/3), cut by strip",
+  "  radius and 1/3 of a wide companion's pericentre",
+  "count log-uniform × disc solids / 32.2 M⊕",
+  "needs a planet > 10 M⊕ beyond the snow line",
+  "LP comets/yr: 3 × 3.9e-12 N × 5 sqrt(L)/4 inside 5 au",
+  "cometary.population word 0; slot 0xEF",
+]
+cite = ["Duncan, Quinn & Tremaine 1987", "Kaib & Volk 2022", "Francis 2005", "Vokrouhlicky, Nesvorny & Dones 2019", "Veras et al. 2011"]
+source = ["crates/hyperion-sim/src/planetary/halo.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T21.d"]
+status = "built"
+
+[[node]]
+id = "ps.events"
+label = "Body events"
+kind = "draw"
+cluster = "ps.cl_belts"
+summary = "Impacts, eruptions, storms, dust storms, comets"
+detail = [
+  "Poisson bins: body.impact, body.eruption, system.comet",
+  "monotone phases: body.storm, body.duststorm",
+  "EventKey::derive on BodyId or SystemId",
+  "no event leaves a mark on a body (D15)",
+]
+source = ["P14.T31.a", "P14.T31.b", "P14.T31.c"]
+status = "planned"
+
+# ---------------------------------------------------------------- records & queries
+
+[[node]]
+id = "ps.system"
+label = "PlanetarySystem (primordial)"
+kind = "entity"
+cluster = "ps.cl_out"
+summary = "Zones, hosts, discs, bodies, satellites, belts, halo"
+detail = [
+  "generate = generate_planets, then belts, satellites",
+  "  and halo, each on its own streams and slots",
+  "what the server caches: birth state, no positions",
+  "rotation laws derived once at parent time, held",
+]
+source = ["crates/hyperion-sim/src/planetary/system.rs", "P14.T30.a"]
+status = "built"
+
+[[node]]
+id = "ps.body_query"
+label = "body_at / snapshot_at"
+kind = "query"
+cluster = "ps.cl_out"
+summary = "Lazy fate, derivation and record at any time t"
+detail = [
+  "fate → derive_body → BodyRecord with its label",
+  "sections Ok, NotResolved, NotModelled, NotApplicable",
+  "position_at: star_positions_at + Kepler; moon adds",
+  "an evolving orbit is its drift cell's model (T45)",
+  "degrade() withholds sections by DetailLevel (D16)",
+]
+source = ["crates/hyperion-sim/src/planetary/system.rs", "crates/hyperion-sim/src/planetary/record.rs", "crates/hyperion-sim/src/planetary/drift.rs", "crates/hyperion-sim/src/orbit/kepler.rs", "P14.T30.b", "P14.T34", "P14.T45"]
+status = "built"
+
+[[node]]
+id = "ps.planet_record"
+label = "Planet bulk record"
+kind = "entity"
+cluster = "ps.cl_out"
+summary = "DerivedBody at t, then the BodyRecord's sections"
+detail = [
+  "derived: M, R, ρ, g, class, iron/rock/water/envelope,",
+  "  birth side, flux, XUV fluence and flux, Bond albedo,",
+  "  T_eq, T_eff, envelope at birth and lost, atmosphere,",
+  "  Hill radius, moon stability limits, max moon mass",
+  "record: mass, orbit, moons, rings, bulk, surface,",
+  "  hooks, photometry, figure, rotation (held law)",
+]
+source = ["crates/hyperion-sim/src/planetary/derive/mod.rs", "crates/hyperion-sim/src/planetary/record.rs", "crates/hyperion-sim/src/planetary/system.rs", "P14.T16.a", "P14.T34"]
+status = "built"
+
+[[node]]
+id = "ps.moon_record"
+label = "Moon & ring records"
+kind = "entity"
+cluster = "ps.cl_out"
+summary = "Moons by origin about their parent; ring populations"
+detail = [
+  "moon: M, R, ρ, ice fraction, orbit, MoonOrigin,",
+  "  tidal heat flux, volcanism, subsurface-ocean flag",
+  "ring: porous ice or rock, extent, mass, τ, gaps",
+  "a moon or ring shares its planet's state",
+]
+source = ["crates/hyperion-sim/src/planetary/satellites.rs", "crates/hyperion-sim/src/planetary/moons/regular.rs", "crates/hyperion-sim/src/planetary/rings.rs", "crates/hyperion-sim/src/planetary/record.rs", "P14.T17.b", "P14.T22.a", "P14.T34"]
+status = "built"
+
+[[node]]
+id = "ps.belt_record"
+label = "Belt & halo records"
+kind = "entity"
+cluster = "ps.cl_out"
+summary = "Belt populations with members; the cometary halo"
+detail = [
+  "belt: site, mass at t, size slope, mean e and i,",
+  "  composition by snow-line side, members, gaps, f",
+  "halo: bounds, comet count and rate at t",
+  "edges widen with the host's mass loss (D11)",
+]
+source = ["crates/hyperion-sim/src/planetary/belts.rs", "crates/hyperion-sim/src/planetary/halo.rs", "crates/hyperion-sim/src/planetary/record.rs", "P14.T21", "P14.T34"]
+status = "built"
+
+# ================================================================ edges
+
+# --- seed path
+
+[[edge]]
+from = "g.key_system"
+to = "ps.key_body"
+kind = "seed"
+label = "+ body index as sub"
+
+[[edge]]
+from = "ps.slots"
+to = "ps.key_body"
+kind = "seed"
+label = "slot << 8 | sub"
+
+[[edge]]
+from = "ps.key_body"
+to = "ps.surface_seed"
+kind = "seed"
+label = "body.surface word 0"
+
+# --- context
+
+[[edge]]
+from = "g.system_record"
+to = "ps.context"
+label = "age, population"
+
+[[edge]]
+from = "g.potential_tables"
+to = "ps.strip"
+label = "tidal (Jacobi) radius"
+
+[[edge]]
+from = "ps.context"
+to = "ps.host_kind"
+
+[[edge]]
+from = "ps.host_kind"
+to = "ps.zones"
+label = "Stellar"
+
+[[edge]]
+from = "ps.host_kind"
+to = "ps.free_hosts"
+label = "BD or rogue (planned)"
+
+[[edge]]
+from = "s.tab_hpt"
+to = "ps.xuv"
+kind = "lookup"
+label = "ZAMS L (Tout et al. 1996)"
+
+# --- zones
+[[edge]]
+from = "s.hierarchy"
+to = "ps.zones"
+label = "pairs' a, e, masses"
+
+[[edge]]
+from = "ps.zones"
+to = "ps.zone_kind"
+label = "orbit zones"
+
+[[edge]]
+from = "ps.zone_kind"
+to = "ps.disc_profile"
+label = "star: own ZAMS and lifetime"
+
+[[edge]]
+from = "ps.zone_kind"
+to = "ps.disc_draws"
+label = "pair: lifetime rank w6"
+
+[[edge]]
+from = "ps.strip"
+to = "ps.disc_profile"
+kind = "constraint"
+label = "truncate at strip radius"
+
+[[edge]]
+from = "ps.zones"
+to = "ps.class_constraints"
+kind = "constraint"
+label = "zone end; < 47 au pair: 0.34"
+
+[[edge]]
+from = "g.key_system"
+to = "ps.host_plane"
+kind = "seed"
+label = "planet.plane w4h, 4h+1"
+
+# --- disc
+[[edge]]
+from = "g.key_system"
+to = "ps.disc_draws"
+kind = "seed"
+label = "planet.disc w16h-16h+6"
+
+[[edge]]
+from = "ps.disc_draws"
+to = "ps.disc_profile"
+label = "f, P_rot, r_c"
+
+[[edge]]
+from = "s.tab_hpt"
+to = "ps.snow_line"
+kind = "lookup"
+label = "L_ZAMS"
+
+[[edge]]
+from = "ps.snow_line"
+to = "ps.disc_profile"
+label = "snow line"
+
+[[edge]]
+from = "ps.disc_profile"
+to = "ps.protodisc_body"
+label = "pre-lifetime disc (planned)"
+
+# --- architecture
+[[edge]]
+from = "ps.class_table"
+to = "ps.class_weights"
+kind = "lookup"
+label = "w0, g(M), z, s"
+
+[[edge]]
+from = "ps.context"
+to = "ps.class_weights"
+label = "[Fe/H]"
+
+[[edge]]
+from = "ps.class_weights"
+to = "ps.class_constraints"
+
+[[edge]]
+from = "ps.disc_profile"
+to = "ps.class_constraints"
+kind = "constraint"
+label = "SL in reach, ≥ 10 M⊕ solids"
+
+[[edge]]
+from = "ps.class_constraints"
+to = "ps.class_draw"
+label = "constrained weights"
+
+[[edge]]
+from = "g.key_system"
+to = "ps.class_draw"
+kind = "seed"
+label = "planet.class word 4h"
+
+[[edge]]
+from = "ps.class_draw"
+to = "ps.class_branch"
+label = "drawn class"
+
+[[edge]]
+from = "ps.disc_profile"
+to = "ps.giant_core"
+label = "Σ, Z, lifetime"
+
+[[edge]]
+from = "ps.giant_core"
+to = "ps.class_branch"
+kind = "constraint"
+label = "no core: giant-free"
+
+[[edge]]
+from = "ps.class_branch"
+to = "ps.group_draws"
+label = "planet-bearing class"
+
+[[edge]]
+from = "ps.templates"
+to = "ps.group_draws"
+kind = "lookup"
+label = "groups and laws"
+
+# --- placement
+[[edge]]
+from = "g.key_system"
+to = "ps.group_draws"
+kind = "seed"
+label = "planet.count w64h+"
+
+[[edge]]
+from = "ps.group_draws"
+to = "ps.slots"
+label = "counts reserve slots"
+
+[[edge]]
+from = "g.key_system"
+to = "ps.mass_draws"
+kind = "seed"
+label = "planet.mass w8s+"
+
+[[edge]]
+from = "ps.disc_profile"
+to = "ps.mass_draws"
+kind = "constraint"
+label = "solid and gas budgets"
+
+[[edge]]
+from = "g.key_system"
+to = "ps.spacing_draws"
+kind = "seed"
+label = "planet.spacing"
+
+[[edge]]
+from = "ps.spacing_draws"
+to = "ps.spacing_floor"
+label = "Δ in mutual R_H"
+
+[[edge]]
+from = "ps.mass_draws"
+to = "ps.spacing_floor"
+label = "pair masses"
+
+[[edge]]
+from = "ps.spacing_floor"
+to = "ps.spacing_draws"
+kind = "constraint"
+label = "reject: ≤ 16 redraws"
+
+[[edge]]
+from = "g.key_system"
+to = "ps.resonance"
+kind = "seed"
+label = "planet.count w1, 16384+4s"
+
+[[edge]]
+from = "ps.spacing_floor"
+to = "ps.orbit_draws"
+label = "admitted axes"
+
+[[edge]]
+from = "ps.resonance"
+to = "ps.orbit_draws"
+label = "snapped axes"
+
+[[edge]]
+from = "ps.key_body"
+to = "ps.orbit_draws"
+kind = "seed"
+label = "planet.orbit w0-4"
+
+[[edge]]
+from = "ps.host_plane"
+to = "ps.orbit_draws"
+label = "host plane"
+
+[[edge]]
+from = "ps.orbit_draws"
+to = "ps.spacing_floor"
+kind = "constraint"
+label = "re-check, scale e down"
+
+[[edge]]
+from = "ps.giant_core"
+to = "ps.formation_site"
+label = "core site"
+
+[[edge]]
+from = "ps.orbit_draws"
+to = "ps.placed_planet"
+label = "Kepler elements"
+
+[[edge]]
+from = "ps.formation_site"
+to = "ps.placed_planet"
+label = "formation distance"
+
+[[edge]]
+from = "ps.key_body"
+to = "ps.formation_draws"
+kind = "seed"
+label = "planet.origin w0-1"
+
+[[edge]]
+from = "ps.placed_planet"
+to = "ps.formation_draws"
+label = "giant if ≥ 0.1 MJ"
+
+[[edge]]
+from = "ps.placed_planet"
+to = "ps.circularisation"
+label = "m, a, e, neighbours"
+
+[[edge]]
+from = "ps.circularisation"
+to = "ps.expansion"
+label = "circularised orbit"
+
+[[edge]]
+from = "s.star_model"
+to = "ps.expansion"
+label = "M(t), largest R*"
+
+[[edge]]
+from = "ps.expansion"
+to = "ps.body_state"
+label = "widened or engulfed"
+
+[[edge]]
+from = "ps.expansion"
+to = "ps.supernova"
+label = "state before death"
+
+[[edge]]
+from = "ps.supernova"
+to = "ps.scatter"
+label = "bound survivors"
+
+[[edge]]
+from = "ps.key_body"
+to = "ps.scatter"
+kind = "seed"
+label = "planet.scatter w4k+"
+
+[[edge]]
+from = "ps.scatter"
+to = "ps.body_state"
+label = "ejected or collided"
+
+[[edge]]
+from = "ps.formation_draws"
+to = "ps.body_state"
+label = "NotYetFormed before age"
+
+[[edge]]
+from = "ps.supernova"
+to = "ps.secondgen"
+label = "neutron star (planned)"
+
+[[edge]]
+from = "g.key_system"
+to = "ps.secondgen"
+kind = "seed"
+label = "planet.secondgen (planned)"
+
+[[edge]]
+from = "g.key_system"
+to = "ps.wd_pollution"
+kind = "seed"
+label = "belt.population (planned)"
+
+# --- bulk
+[[edge]]
+from = "ps.key_body"
+to = "ps.radius_rank"
+kind = "seed"
+label = "planet.radius word 0"
+
+[[edge]]
+from = "ps.radius_rank"
+to = "ps.composition"
+label = "rank in radius window"
+
+[[edge]]
+from = "ps.radius_rank"
+to = "ps.rocky_cmf"
+label = "same rank"
+
+[[edge]]
+from = "ps.rocky_cmf"
+to = "ps.composition"
+label = "rocky outcome CMF"
+
+[[edge]]
+from = "ps.ck_relation"
+to = "ps.composition"
+kind = "lookup"
+label = "R at rank and mass"
+
+[[edge]]
+from = "ps.zeng_curves"
+to = "ps.composition"
+kind = "lookup"
+label = "Fe, rock, water curves"
+
+[[edge]]
+from = "ps.envelope_tables"
+to = "ps.composition"
+kind = "lookup"
+label = "envelope thickness"
+
+[[edge]]
+from = "ps.context"
+to = "ps.mdwarf_branch"
+label = "host mass"
+
+[[edge]]
+from = "ps.mdwarf_branch"
+to = "ps.composition"
+kind = "constraint"
+label = "< 0.6 M☉: split at p_env"
+
+[[edge]]
+from = "ps.placed_planet"
+to = "ps.composition"
+label = "mass, birth side"
+
+[[edge]]
+from = "ps.composition"
+to = "ps.giant_bulk"
+label = "≥ 0.3 MJ: blend"
+
+[[edge]]
+from = "s.giant_cooling"
+to = "ps.giant_bulk"
+kind = "data"
+label = "R, L_int at age"
+
+[[edge]]
+from = "s.star_model"
+to = "ps.irradiation"
+label = "L, Teff, R*, max L"
+
+[[edge]]
+from = "ps.xuv"
+to = "ps.irradiation"
+label = "XUV history"
+
+[[edge]]
+from = "ps.body_state"
+to = "ps.irradiation"
+label = "orbit at t"
+
+[[edge]]
+from = "ps.irradiation"
+to = "ps.giant_bulk"
+label = "flux: inflation"
+
+[[edge]]
+from = "ps.irradiation"
+to = "ps.escape"
+label = "XUV fluence"
+
+[[edge]]
+from = "ps.composition"
+to = "ps.escape"
+label = "envelope, core"
+
+[[edge]]
+from = "ps.escape"
+to = "ps.radius_now"
+label = "mass, envelope left"
+
+[[edge]]
+from = "ps.giant_bulk"
+to = "ps.radius_now"
+label = "giant radius"
+
+[[edge]]
+from = "ps.irradiation"
+to = "ps.t_eq"
+label = "orbit-mean flux"
+
+[[edge]]
+from = "pw.surface_state"
+to = "ps.t_eq"
+kind = "constraint"
+label = "Bond albedo, next pass"
+
+[[edge]]
+from = "s.star_model"
+to = "ps.hz"
+label = "Teff, L at t"
+
+[[edge]]
+from = "ps.radius_now"
+to = "ps.limits"
+label = "m, R, class"
+
+# --- spin
+[[edge]]
+from = "ps.key_body"
+to = "ps.spin_draws"
+kind = "seed"
+label = "planet.spin w0-3"
+
+[[edge]]
+from = "ps.impact_moon"
+to = "ps.spin_draws"
+kind = "constraint"
+label = "impact: isotropic"
+
+[[edge]]
+from = "ps.spin_draws"
+to = "ps.locking"
+label = "period, obliquity, pole"
+
+[[edge]]
+from = "ps.radius_now"
+to = "ps.locking"
+label = "k2, Q, I by class"
+
+[[edge]]
+from = "ps.locking"
+to = "ps.figure"
+label = "spin rate, lock"
+
+[[edge]]
+from = "pw.atmosphere"
+to = "ps.photometry"
+label = "surface state, A_Bond"
+
+# --- moons & rings
+[[edge]]
+from = "ps.radius_now"
+to = "ps.parent_class"
+label = "parent derived at epoch"
+
+[[edge]]
+from = "ps.parent_class"
+to = "ps.regular_moons"
+label = "giant ≥ 10 M⊕"
+
+[[edge]]
+from = "ps.parent_class"
+to = "ps.impact_moon"
+label = "rocky/icy 0.001-5 M⊕"
+
+[[edge]]
+from = "ps.parent_class"
+to = "ps.captures"
+label = "giant, or rocky by belt"
+
+[[edge]]
+from = "ps.parent_class"
+to = "ps.rings"
+label = "gas or ice giant"
+
+[[edge]]
+from = "ps.key_body"
+to = "ps.regular_moons"
+kind = "seed"
+label = "moon.count/mass/orbit"
+
+[[edge]]
+from = "ps.key_body"
+to = "ps.impact_moon"
+kind = "seed"
+label = "moon.impact w0-4"
+
+[[edge]]
+from = "ps.key_body"
+to = "ps.captures"
+kind = "seed"
+label = "moon.capture"
+
+[[edge]]
+from = "ps.key_body"
+to = "ps.rings"
+kind = "seed"
+label = "ring.system w0-4"
+
+[[edge]]
+from = "ps.limits"
+to = "ps.regular_moons"
+kind = "constraint"
+label = "≤ 0.05 R_H, moon max"
+
+[[edge]]
+from = "ps.regular_moons"
+to = "ps.moon_prune"
+
+[[edge]]
+from = "ps.impact_moon"
+to = "ps.moon_prune"
+
+[[edge]]
+from = "ps.captures"
+to = "ps.moon_prune"
+
+[[edge]]
+from = "ps.moon_prune"
+to = "ps.moon_derive"
+label = "kept moons"
+
+[[edge]]
+from = "ps.key_body"
+to = "ps.moon_derive"
+kind = "seed"
+label = "planet.radius, cand. key"
+
+[[edge]]
+from = "ps.laplace"
+to = "ps.moon_prune"
+kind = "constraint"
+label = "band removal (planned T56.a)"
+
+# --- belts & halo
+[[edge]]
+from = "ps.placed_planet"
+to = "ps.belt_sites"
+label = "planets, chaotic zones"
+
+[[edge]]
+from = "ps.disc_profile"
+to = "ps.belt_sites"
+label = "solids, edges"
+
+[[edge]]
+from = "ps.belt_sites"
+to = "ps.belt_draws"
+label = "bands"
+
+[[edge]]
+from = "g.key_system"
+to = "ps.belt_draws"
+kind = "seed"
+label = "belt.population w8n+"
+
+[[edge]]
+from = "ps.belt_draws"
+to = "ps.belt_wear"
+label = "M0, size slope"
+
+[[edge]]
+from = "ps.belt_draws"
+to = "ps.belt_members"
+label = "largest share"
+
+[[edge]]
+from = "ps.key_body"
+to = "ps.belt_members"
+kind = "seed"
+label = "belt.member w0-8"
+
+[[edge]]
+from = "g.key_system"
+to = "ps.halo"
+kind = "seed"
+label = "cometary.population w0"
+
+[[edge]]
+from = "ps.placed_planet"
+to = "ps.halo"
+kind = "constraint"
+label = "scatterer > 10 M⊕"
+
+[[edge]]
+from = "ps.strip"
+to = "ps.halo"
+kind = "constraint"
+label = "outer edge ≤ strip"
+
+[[edge]]
+from = "ps.halo"
+to = "ps.events"
+label = "comet rate (planned)"
+
+[[edge]]
+from = "g.event_key"
+to = "ps.events"
+kind = "seed"
+label = "body.*/system.comet planned"
+
+# --- records & queries
+[[edge]]
+from = "ps.placed_planet"
+to = "ps.system"
+label = "planets"
+
+[[edge]]
+from = "ps.moon_prune"
+to = "ps.system"
+label = "satellites"
+
+[[edge]]
+from = "ps.belt_members"
+to = "ps.system"
+label = "belts and members"
+
+[[edge]]
+from = "ps.system"
+to = "ps.body_query"
+label = "cached birth state"
+
+[[edge]]
+from = "ps.body_query"
+to = "ps.planet_record"
+label = "derive at t"
+
+[[edge]]
+from = "ps.radius_now"
+to = "ps.planet_record"
+label = "R, ρ, g, class, fractions"
+
+[[edge]]
+from = "ps.t_eq"
+to = "ps.planet_record"
+label = "T_eq, T_eff"
+
+[[edge]]
+from = "ps.hz"
+to = "ps.planet_record"
+label = "insolation vs HZ"
+
+[[edge]]
+from = "ps.locking"
+to = "ps.planet_record"
+label = "rotation law, frame"
+
+[[edge]]
+from = "ps.figure"
+to = "ps.planet_record"
+label = "flattening, datum"
+
+[[edge]]
+from = "ps.photometry"
+to = "ps.planet_record"
+label = "template, p_B, p_V, p_R"
+
+[[edge]]
+from = "ps.moon_derive"
+to = "ps.moon_record"
+label = "moon bulk at t"
+
+[[edge]]
+from = "ps.rings"
+to = "ps.moon_record"
+label = "ring extent, mass, τ"
+
+[[edge]]
+from = "ps.belt_wear"
+to = "ps.belt_record"
+label = "mass and dust at t"
+
+[[edge]]
+from = "ps.halo"
+to = "ps.belt_record"
+label = "halo population"
+
+# --- added on verification
+[[edge]]
+from = "ps.zones"
+to = "ps.disc_profile"
+kind = "constraint"
+label = "truncate to zone limits"
+
+[[edge]]
+from = "ps.zone_kind"
+to = "ps.host_plane"
+label = "pair < 47 au: its plane"
+
+[[edge]]
+from = "ps.zone_kind"
+to = "ps.class_weights"
+label = "host mass: star or pair"
+
+[[edge]]
+from = "ps.spacing_floor"
+to = "ps.resonance"
+kind = "constraint"
+label = "snap only if admitted"
+
+[[edge]]
+from = "ps.slots"
+to = "ps.mass_draws"
+kind = "seed"
+label = "slot s: words 8s+"
+
+[[edge]]
+from = "ps.disc_profile"
+to = "ps.group_draws"
+kind = "constraint"
+label = "edges, snow line bound"
+
+[[edge]]
+from = "ps.zones"
+to = "ps.orbit_draws"
+kind = "constraint"
+label = "e inside zone limits"
+
+[[edge]]
+from = "ps.disc_profile"
+to = "ps.formation_draws"
+label = "disc lifetime"
+
+[[edge]]
+from = "ps.circularisation"
+to = "ps.drift"
+label = "e(t), a(t) law"
+
+[[edge]]
+from = "ps.expansion"
+to = "ps.drift"
+label = "a(t) = a0 M0 / M(t)"
+
+[[edge]]
+from = "ps.impact_moon"
+to = "ps.drift"
+label = "tidal recession"
+
+[[edge]]
+from = "ps.drift"
+to = "ps.body_query"
+label = "cell model, valid_until"
+
+[[edge]]
+from = "ps.envelope_tables"
+to = "ps.radius_now"
+kind = "lookup"
+label = "R at age and flux"
+
+[[edge]]
+from = "ps.belt_draws"
+to = "ps.captures"
+kind = "constraint"
+label = "nearest belt's mass"
+
+[[edge]]
+from = "ps.belt_members"
+to = "ps.impact_moon"
+label = "dwarf planets eligible"
+
+[[edge]]
+from = "ps.halo"
+to = "ps.system"
+label = "halo"
+
+[[edge]]
+from = "ps.disc_profile"
+to = "ps.halo"
+label = "disc solids: count scale"
+
+[[edge]]
+from = "ps.belt_record"
+to = "ps.events"
+label = "impactor flux (planned)"

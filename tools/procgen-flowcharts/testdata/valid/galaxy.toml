@@ -1,0 +1,315 @@
+# Test fixture: a cut-down galaxy stage, shaped like the real data (not the real data).
+
+[meta]
+stage = "galaxy"
+part = "galaxy"
+prefix = "g"
+title = "Galactic Properties & Megastructures"
+snapshot = "a6d3f6dd"
+
+[[cluster]]
+id = "g.root"
+label = "Seed & parameters"
+
+[[cluster]]
+id = "g.structure"
+label = "Galactic structure"
+
+[[cluster]]
+id = "g.fields"
+label = "Fields"
+parent = "g.structure"
+
+[[cluster]]
+id = "g.population"
+label = "Stellar population"
+
+[[cluster]]
+id = "g.mega"
+label = "Megastructures"
+
+[[node]]
+id = "g.seed"
+label = "Galaxy seed"
+kind = "seed"
+cluster = "g.root"
+summary = "u64 root seed; every stream hashes from it"
+detail = ["SplitMix64 over (seed, domain tag, index)"]
+source = ["crates/hyperion-sim/src/rng/mod.rs", "P01.T2"]
+status = "built"
+
+[[node]]
+id = "g.params"
+label = "Galaxy parameters"
+kind = "param"
+cluster = "g.root"
+summary = "Disc, bulge and halo masses; scale lengths; arm count"
+detail = [
+  "M_disc = 5×10¹⁰ M☉, R_d = 2.6 kpc, z_d = 0.3 kpc",
+  "bulge 0.9×10¹⁰ M☉, halo r_s = 16 kpc, 2–4 arms",
+]
+source = ["crates/hyperion-sim/src/galaxy/params/mod.rs"]
+status = "built"
+
+[[node]]
+id = "g.cell_stream"
+label = "Cell stream"
+kind = "seed"
+cluster = "g.root"
+summary = "hash(seed, CELL, cell index) → per-cell stream"
+source = ["crates/hyperion-sim/src/rng/tags.rs"]
+status = "built"
+
+[[node]]
+id = "g.potential"
+label = "Gravitational potential"
+kind = "model"
+cluster = "g.structure"
+summary = "Miyamoto–Nagai disc, Hernquist bulge, NFW halo"
+detail = [
+  "Φ(R, z) summed from the three components",
+  "v_c(R) ≈ 220 km/s at R☉ = 8.2 kpc",
+]
+cite = ["Miyamoto & Nagai 1975", "Hernquist 1990", "Navarro, Frenk & White 1996"]
+source = ["crates/hyperion-sim/src/galaxy/potential/mod.rs"]
+status = "built"
+
+[[node]]
+id = "g.density"
+label = "Stellar density field"
+kind = "model"
+cluster = "g.fields"
+summary = "ρ(R, z) = ρ₀ exp(−R/R_d) sech²(z/2z_d), thin and thick discs"
+detail = [
+  "thick disc: z_d = 0.9 kpc, 12% of the local density",
+  "a 3.2 kpc bar replaces the inner disc's exponential",
+  "density integrates to the disc mass within 0.1%",
+  "evaluated per octree cell at its centre and corners",
+  "corner values reused by the eight cells that share them",
+  "falls to zero beyond 6 R_d, where the cells are empty",
+]
+cite = ["Bland-Hawthorn & Gerhard 2016"]
+source = ["crates/hyperion-sim/src/galaxy/fields/density.rs"]
+status = "built"
+
+[[node]]
+id = "g.metallicity"
+label = "Metallicity gradient"
+kind = "model"
+cluster = "g.fields"
+summary = "[Fe/H] falls 0.06 dex/kpc outward, +0.3 at the centre"
+detail = ["scatter σ = 0.1 dex added at the star, not here"]
+cite = ["Luck & Lambert 2011"]
+source = ["crates/hyperion-sim/src/galaxy/fields/metallicity.rs"]
+status = "built"
+
+[[node]]
+id = "g.arms"
+label = "Spiral arm pattern"
+kind = "draw"
+cluster = "g.structure"
+summary = "Logarithmic spirals, pitch 12° ± 3°, one draw per galaxy"
+detail = ["arm density contrast 1.3–1.6, Gaussian across the arm"]
+cite = ["Vallée 2017"]
+source = ["crates/hyperion-sim/src/galaxy/features/arms.rs"]
+status = "partial"
+
+[[node]]
+id = "g.sfh"
+label = "Star-formation history"
+kind = "table"
+cluster = "g.population"
+summary = "Fitted SFR(t) per population, 13.6 Gyr ago to now"
+detail = ["thin disc, thick disc, bulge and halo, 50 Myr bins"]
+cite = ["Snaith et al. 2015"]
+source = ["crates/hyperion-sim/src/tables/sfh.rs", "P15.T4"]
+status = "built"
+
+[[node]]
+id = "g.imf"
+label = "Initial mass function"
+kind = "draw"
+cluster = "g.population"
+summary = "Broken power law, 0.08–150 M☉, α = 1.3 then 2.3"
+detail = [
+  "α = 1.3 below 0.5 M☉, 2.3 above",
+  "mass drawn by inverse CDF from one stream word",
+]
+cite = ["Kroupa 2001"]
+source = ["crates/hyperion-sim/src/galaxy/imf.rs", "P06.T3"]
+status = "built"
+
+[[node]]
+id = "g.cell_count"
+label = "Stars per cell"
+kind = "draw"
+cluster = "g.population"
+summary = "Poisson count with mean ∫ ρ dV / ⟨m⟩ over the cell"
+source = ["crates/hyperion-sim/src/galaxy/placement/mod.rs"]
+status = "built"
+
+[[node]]
+id = "g.in_bulge"
+label = "Inside the bar?"
+kind = "decision"
+cluster = "g.population"
+summary = "R < 3.2 kpc and |z| < 1 kpc switch to the bar's model"
+status = "built"
+
+[[node]]
+id = "g.bar"
+label = "Bar density"
+kind = "model"
+cluster = "g.fields"
+summary = "Triaxial exponential bar, 3.2 kpc half-length, 27° to R☉"
+cite = ["Wegg, Gerhard & Portail 2015"]
+status = "partial"
+
+[[node]]
+id = "g.system"
+label = "Star system placement record"
+kind = "entity"
+summary = "Position, birth time, [Fe/H] and population of a system"
+detail = ["ids are (cell, index): stable under any query order"]
+source = ["crates/hyperion-sim/src/galaxy/map.rs"]
+status = "built"
+
+[[node]]
+id = "g.range_query"
+label = "Range query"
+kind = "query"
+summary = "Systems within r of a point; cells evaluated lazily"
+detail = ["octree walk, cells cached by id, LRU-bounded"]
+source = ["crates/hyperion-sim/src/galaxy/query/mod.rs"]
+status = "partial"
+
+[[node]]
+id = "g.dyson"
+label = "Dyson swarm siting"
+kind = "model"
+cluster = "g.mega"
+summary = "Kardashev II civilisations enclose their host stars"
+detail = ["needs a civilisation on a world of the system"]
+source = ["docs/agent/brainstorming/life-and-planet-content.md"]
+status = "planned"
+
+[[node]]
+id = "g.mega_lore"
+label = "Megastructure description"
+kind = "enrich"
+cluster = "g.mega"
+summary = "Gemma 4 writes the structure's history and appearance"
+status = "planned"
+
+[[edge]]
+from = "g.seed"
+to = "g.cell_stream"
+kind = "seed"
+label = "domain tag CELL"
+
+[[edge]]
+from = "g.seed"
+to = "g.arms"
+kind = "seed"
+label = "stream ARMS"
+
+[[edge]]
+from = "g.params"
+to = "g.potential"
+
+[[edge]]
+from = "g.params"
+to = "g.density"
+label = "scale lengths, masses"
+
+[[edge]]
+from = "g.potential"
+to = "g.density"
+kind = "constraint"
+label = "vertical equilibrium"
+
+[[edge]]
+from = "g.arms"
+to = "g.density"
+label = "arm contrast"
+
+[[edge]]
+from = "g.density"
+to = "g.in_bulge"
+
+[[edge]]
+from = "g.in_bulge"
+to = "g.bar"
+label = "yes"
+
+[[edge]]
+from = "g.bar"
+to = "g.cell_count"
+label = "bar density"
+
+[[edge]]
+from = "g.in_bulge"
+to = "g.cell_count"
+label = "no: disc density"
+
+[[edge]]
+from = "g.cell_stream"
+to = "g.cell_count"
+kind = "seed"
+label = "word 0"
+
+[[edge]]
+from = "g.sfh"
+to = "g.cell_count"
+kind = "lookup"
+label = "mean stellar mass ⟨m⟩"
+
+[[edge]]
+from = "g.cell_stream"
+to = "g.imf"
+kind = "seed"
+label = "one word per star"
+
+[[edge]]
+from = "g.cell_count"
+to = "g.system"
+label = "n systems in the cell"
+
+[[edge]]
+from = "g.metallicity"
+to = "g.system"
+label = "[Fe/H] at position"
+
+[[edge]]
+from = "g.sfh"
+to = "g.system"
+kind = "lookup"
+label = "birth time"
+
+[[edge]]
+from = "g.system"
+to = "g.range_query"
+
+[[edge]]
+from = "g.dyson"
+to = "g.mega_lore"
+
+[[edge]]
+from = "g.system"
+to = "g.dyson"
+label = "host system"
+
+[[edge]]
+from = "g.params"
+to = "g.metallicity"
+label = "central [Fe/H], gradient"
+
+[[edge]]
+from = "g.params"
+to = "g.arms"
+label = "arm count"
+
+[[edge]]
+from = "g.params"
+to = "g.sfh"
+label = "disc age"
