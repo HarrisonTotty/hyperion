@@ -1422,6 +1422,13 @@ Names are those the owning plans give; the owning plan is authoritative.
       about 0.79 MB. Where the sum would pass 2 MB, the correction's μ₀ axis halves first, then the
       widening above applies. Its per-frame cost is three reads per sample per source in the
       sky-view, aerial-perspective and march kernels, recorded by R08.T14.f.
+    - **The pressure-axis curves texture** (R08.T4.d; `decision-r08-t4d-kdist.md` §2.4 and §4)
+      joins the per-planet row; the k-tables, in the optics worker's heap, do not. Its rows are
+      the stored pressure nodes over the pressures the body's tables see, and one more each side.
+      Earth's 19 rows × 241 u-nodes × 16 B × 2 line slots (O₂'s lines, H₂O's lines) × 4 suns come
+      to about 0.59 MB in `rgba32float`, and with the pressure-weighted column table (128 KB) its
+      per-planet tables to about 1.1 MB. Where a body would pass 2 MB, the texture may move to
+      `rgba16float` (Design note 8's 10⁻³τ).
     - The table sizes are R05's `TABLE_SIZES`, taken from Hillaire's code, which the research
       agent's reading of his Table 2 confirms in kind: 32² multiple scattering, 32³ aerial
       perspective over 32 km, and a sky-view of about 200 × 100. R05's low sizes and its deferred,
@@ -2563,12 +2570,14 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       an LTE band model (Huber and Herzberg's constants), `estimated`;
     - hot CO, N₂O and HCN (HITEMP or ExoMol, checked at fetch), handing over from R08.T4.d's
       HITRAN at recorded temperatures;
+    - CO₂ above HITRAN's 500 K, considering ExoMol's UCL-4000 list (Yurchenko et al. 2020,
+      MNRAS 496, 5282, to 20,000 cm⁻¹), checked at fetch. Venus's lower 40 km is held and
+      `estimated` until then;
     - any molecule P14.T52.a lists with a visible band system (AlO's B–X near 450–540 nm, CaH's,
       MgH's), from ExoMol or MoLLIST, checked at fetch. T52.a's other molecules are T4.c's stated
       none (science-r08-unowned-absorbers).
   - Tests:
-    - each reduced k-distribution reproduces its cell's line-by-line curve to 10⁻³ in T at three
-      temperatures;
+    - each reduced k-distribution passes R08.T4.d's node and between-node tests;
     - every T_c lies in [10⁻⁶, 1] and is non-increasing in u, for a 2,500 K and a 30,000 K sun;
     - the M-dwarf limitation (TiO in both the star and the planet) is recorded.
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers`.
