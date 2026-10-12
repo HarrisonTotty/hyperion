@@ -13,8 +13,9 @@ and the plan runs those checks through the recipes `just ci` runs, scoped to the
 and files concerned, in `ci`'s order and phases: the checks that need no build directory, and vitest
 (which takes no lock), beside the cargo steps, then every Rust suite in one hold of the heavy-test
 lock, with `just test-render`'s run of the smoke harness in the same hold when a shader, the engine
-or the harness changed. A path that no rule knows, and an input of the whole workspace (the
-justfile, the root manifest, the lock files, the toolchain, `.cargo/`), runs the full `just ci`
+or the harness changed. Suites small by the timings recorded from earlier runs (`weigh`) run
+without the lock instead, capped. A path that no rule knows, and an input of the whole workspace
+(the justfile, the root manifest, the lock files, the toolchain, `.cargo/`), runs the full `just ci`
 instead.
 
 `--plan` prints the plan, each step with the paths that caused it, and runs nothing; a run prints
@@ -39,6 +40,7 @@ import os
 import posixpath
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -208,10 +210,46 @@ RENDER_PHASES: Dict[str, List[List[str]]] = {
 # The environment variable naming the command that holds a build slot around smart-ci's phases that
 # build (`slot_command`); unset, they run directly.
 SLOT_VAR = "SMART_CI_SLOT"
-# Set to 1 with `--full` (integration's run, and a run that stands in for it), the variable that gives
-# its suites priority on the heavy-test lock: `_locked` with `HYPERION_HEAVY_PRIORITY=1` (perf-build
-# L5 part a). A lane's own full plan, or `--full` without it, waits its turn as any run does.
+# Set to 1 for integration's runs (over its unpushed commits, or `--full`), the variable that gives a
+# plan's suites priority on the heavy-test lock, whatever the plan: `_locked` with
+# `HYPERION_HEAVY_PRIORITY=1` (perf-build L5 part a). A lane's runs never set it, and wait their turn.
 PRIORITY_VAR = "SMART_CI_PRIORITY"
+
+# The heavy-test lock is for full suites and runs over 4 GB (common.md's Load limits; the owner's
+# rule: never single tests), and a lane's 8 tests once waited 2 h 35 min for it behind hour-long
+# holds. So a plan's suites run without it when they are small by the timings recorded from earlier
+# runs (`Timings`, `weigh`): at most SMALL_TESTS of nextest's tests, native and wasip1 together, and at
+# most SMALL_SECONDS of test time, the doctests' and the browser suites' included. Chosen from the
+# plans of the last 112 code commits on the integration branch (2026-10-09 to 10-11), weighed by
+# CI-97's timings (integration's full `ci` of 2026-10-11): 47 of them (42%) come to 300 s or less,
+# with at most 286 tests, and at 4 test threads would take at most 121 s (one sim test of 117–121 s
+# is the longest), under a full vitest run's 126–161 s at 4 workers, which R1 ruled no heavy run; the
+# median plan comes to 396 s, and the rest to as much as 8,500 s. 44 (39%) run without the lock once
+# the rules below count as large the one that reads the sky's shared tables and the two that change
+# a test generator's own file. At 4 threads the heaviest tests'
+# processes (671 MiB natively, 807 MiB on wasip1, `.config/nextest.toml`) come to 3.3 GB at most. A
+# test or a suite with no recorded time counts as large, as do tests that read a fixture built once a
+# run (`RUN_SHARED`), and `just test-render`'s run and `--full` always take the lock. The suites run capped all the same, in a scope of their own as vitest's is
+# (`UNLOCKED_SCOPE`: 5 GB, no swap, 4 cores, where systemd allows it) at 4 test threads
+# (`UNLOCKED_ENV`), and hold no build slot.
+SMALL_TESTS = 300
+SMALL_SECONDS = 300.0
+UNLOCKED_SCOPE = ("-p", "MemoryMax=5G", "-p", "MemorySwapMax=0", "-p", "CPUQuota=400%")
+UNLOCKED_ENV = {"NEXTEST_TEST_THREADS": "4", "RUST_TEST_THREADS": "4", "CARGO_BUILD_JOBS": "4"}
+# The locked steps that may run without the lock: the suites that the timings weigh.
+WEIGHED = {"_nextest-run", "_doctest-run", "_wasm-run"}
+# Fixtures built once a nextest run and test binary and shared through a file with the run's other
+# processes: a test's recorded time leaves the build out unless it built or waited for it, and a
+# small run pays it at its start (natively one process builds while those beside it wait; on wasip1
+# each builds), so suites with a test that reaches the fixture's file count as large.
+RUN_SHARED = {
+    "crates/hyperion-sim/src/sky/testing/shared.rs":
+        "the sky's luminosity tables (sky::testing::shared), 40–53 s natively and 50–75 s a process on wasip1",
+}
+# The timings' file, in `target/smart-ci/` beside the graph's cache, its version, and its tables.
+TIMINGS_FILE = "test-times.json"
+TIMINGS_VERSION = 1
+TIMED = ("native", "wasip1", "doctests", "browser")
 # The recipes of `ci`'s setup, side and main phases that run a cargo build, which a group of phases
 # holds a build slot for; and the others: tools' checks, formatting, TypeScript, smart-ci's tests, and
 # the suites, which run under the heavy-test lock from the builds made before it. `test_smart_ci.py`
@@ -705,6 +743,119 @@ class Workspace:
 
 
 # --------------------------------------------------------------------------------------------------
+# nextest's filter expressions.
+
+
+_FILTER_TOKEN = re.compile(r"\s*(?:(?P<word>and|or|not)\b|(?P<call>[a-z_]+)\((?P<arg>/(?:\\.|[^/\\])*/|[^()]*)\)"
+                           r"|(?P<op>[()&|!+-]))")
+_FILTER_CALLS = ("all", "none", "package", "binary_id", "test")
+
+
+class Filter:
+    """nextest's filter expression, as far as smart-ci reads one (the filters it writes, the justfile's
+    `wasm_sky`, which its tests' guard reads, and the terms its weighing of the suites evaluates):
+    `all()`, `none()`, `package()`, `binary_id()` and `test()`, with the matchers `=`, `~`, `/regex/`
+    and `#glob` and nextest's defaults (a glob for a package or a binary, a substring for a test);
+    `not` and `!`, then `&`, `and` and `-`, then `|`, `or` and `+`, nextest's order; and parentheses.
+    Anything else is refused, so that smart-ci never misreads a filter."""
+
+    def __init__(self, text: str) -> None:
+        self.tokens: List[Tuple[str, object]] = []
+        self.calls: List[Tuple[str, str]] = []  # each predicate, `(name, argument)`
+        self.patterns: Dict[str, "re.Pattern[str]"] = {}  # each `/regex/` argument, compiled
+        at = 0
+        while text[at:].strip():
+            m = _FILTER_TOKEN.match(text, at)
+            if m is None:
+                raise ValueError(f"smart-ci cannot read the filter at {text[at:at + 40]!r}: teach `Filter` it")
+            if m.group("word"):
+                self.tokens.append(("op", m.group("word")))
+            elif m.group("call"):
+                if m.group("call") not in _FILTER_CALLS:
+                    raise ValueError(f"smart-ci cannot read `{m.group('call')}()`: teach `Filter` it")
+                self.calls.append((m.group("call"), m.group("arg").strip()))
+                self.tokens.append(("call", self.calls[-1]))
+                arg = self.calls[-1][1]
+                if len(arg) >= 2 and arg[0] == arg[-1] == "/" and arg not in self.patterns:
+                    try:
+                        self.patterns[arg] = re.compile(arg[1:-1])
+                    except re.error as err:
+                        raise ValueError(f"smart-ci cannot read the regular expression {arg}: {err}") from err
+            else:
+                self.tokens.append(("op", m.group("op")))
+            at = m.end()
+        self.at = 0
+        self.tree = self._any()
+        if self.at != len(self.tokens):
+            raise ValueError(f"smart-ci cannot read the filter past {self.tokens[self.at]}")
+
+    def _next(self) -> Tuple[str, object]:
+        return self.tokens[self.at] if self.at < len(self.tokens) else ("", "")
+
+    # `|` and `&` chains are one node each, of all their operands, so that a filter of many terms
+    # is read without recursing once a term.
+    def _any(self) -> tuple:
+        nodes = [self._all()]
+        while self._next() in (("op", "|"), ("op", "or"), ("op", "+")):
+            self.at += 1
+            nodes.append(self._all())
+        return nodes[0] if len(nodes) == 1 else ("or", nodes)
+
+    def _all(self) -> tuple:
+        nodes = [self._one()]
+        while self._next() in (("op", "&"), ("op", "and"), ("op", "-")):
+            difference = self._next() == ("op", "-")
+            self.at += 1
+            right = self._one()
+            nodes.append(("not", right) if difference else right)
+        return nodes[0] if len(nodes) == 1 else ("and", nodes)
+
+    def _one(self) -> tuple:
+        kind, value = self._next()
+        self.at += 1
+        if (kind, value) in (("op", "not"), ("op", "!")):
+            return ("not", self._one())
+        if (kind, value) == ("op", "("):
+            node = self._any()
+            if self._next() != ("op", ")"):
+                raise ValueError("smart-ci cannot read the filter: a `(` is not closed")
+            self.at += 1
+            return node
+        if kind == "call":
+            return ("call", *value)  # type: ignore[misc]
+        raise ValueError(f"smart-ci cannot read the filter at {value!r}")
+
+    def exact_tests(self) -> List[str]:
+        """The tests the filter names exactly, `test(=name)`."""
+        return [arg[1:] for name, arg in self.calls if name == "test" and arg.startswith("=")]
+
+    def matches(self, package: str, binary_id: str, test: str) -> bool:
+        def holds(node: tuple) -> bool:
+            if node[0] == "or":
+                return any(holds(n) for n in node[1])
+            if node[0] == "and":
+                return all(holds(n) for n in node[1])
+            if node[0] == "not":
+                return not holds(node[1])
+            _, name, arg = node
+            if name in ("all", "none"):
+                return name == "all"
+            subject = {"package": package, "binary_id": binary_id, "test": test}[name]
+            if arg.startswith("="):
+                return subject == arg[1:]
+            if arg.startswith("~"):
+                return arg[1:] in subject
+            if arg in self.patterns:
+                return self.patterns[arg].search(subject) is not None
+            if arg.startswith("#"):
+                return fnmatch.fnmatchcase(subject, arg[1:])
+            return arg in subject if name == "test" else fnmatch.fnmatchcase(subject, arg)
+
+        return holds(self.tree)
+
+
+
+# --------------------------------------------------------------------------------------------------
 # The plan.
 
 
@@ -717,6 +868,32 @@ class Step:
 
 
 @dataclass
+class Suite:
+    """What one of the plan's locked steps runs, for weighing it against the recorded timings (`weigh`).
+
+    `native` and `wasip1`: nextest's tests on that target, as the code's graph lists them, by binary:
+    the tests by name, the filter terms of the tests the source does not name (a `#[test_case]`'s, a
+    macro's, ts-rs's), the crates whose every test runs, and the filter the step passes, which says
+    which of the recorded tests run. `doctests` and `browser`: the crates, timed by crate. `listed` is
+    False where there is no graph to list them; `coarse`, where the step's filter was made coarser
+    than the listing to fit a command line, past MAX_FILTER (hundreds of tests). `shared`: the listed
+    tests that read a fixture built once a run (`RUN_SHARED`); `fresh`: the terms whose generator's
+    own file changed, which may now make tests that no run has timed.
+    """
+
+    kind: str
+    crates: Set[str] = field(default_factory=set)
+    tests: Dict[str, Set[str]] = field(default_factory=dict)  # binary id -> test names
+    terms: Dict[str, Set[str]] = field(default_factory=dict)  # binary id -> filter terms
+    whole: Set[str] = field(default_factory=set)  # the crates every test of which runs
+    filter: str = ""  # nextest's `-E` (empty: every test of `crates`)
+    listed: bool = True
+    coarse: bool = False
+    shared: Dict[str, Set[str]] = field(default_factory=dict)  # binary id -> test names
+    fresh: Dict[str, Set[str]] = field(default_factory=dict)  # binary id -> filter terms
+
+
+@dataclass
 class Plan:
     full: Dict[str, Set[str]]  # why the full `just ci` runs -> the paths
     steps: List[Step]
@@ -724,6 +901,11 @@ class Plan:
     why: Dict[str, List[str]]  # what each changed path runs
     notes: List[str]
     details: List[str] = field(default_factory=list)  # the tests the code's graph chose, and why
+    suites: List[Suite] = field(default_factory=list)  # what the locked steps run, to weigh them
+    # Whether the suites take the heavy-test lock, which `weigh` decides (until then, they do), and
+    # what it found: why they take it, or what they come to.
+    unlocked: bool = False
+    weight: str = ""
 
     @property
     def is_full(self) -> bool:
@@ -1219,6 +1401,13 @@ class Chosen:
     graph: "rust_graph.Graph"
     selection: "rust_graph.Selection"
     info: str  # what the graph is and what building it took
+    _readers: Optional[Dict[str, Dict[str, Set[str]]]] = field(default=None, repr=False)
+
+    def fixture_readers(self) -> Dict[str, Dict[str, Set[str]]]:
+        """The tests, by unit, that reach a fixture built once a run (`RUN_SHARED`), found once."""
+        if self._readers is None:
+            self._readers = self.graph.readers(RUN_SHARED)
+        return self._readers
 
     def _units(self) -> Dict[str, Set[str]]:
         out: Dict[str, Set[str]] = {}
@@ -1269,11 +1458,16 @@ class Chosen:
         """nextest's `-E` for the chosen tests of `crates`, every test of those in `whole`; empty for
         every test of them all. Coarser where the expression would be too long for a command line:
         modules by their paths, then whole binaries, then whole crates."""
+        return self.filter_of(crates, whole)[0]
+
+    def filter_of(self, crates: Iterable[str], whole: Set[str]) -> Tuple[str, bool]:
+        """`nextest_filter`'s expression, and whether it was made coarser than the chosen tests."""
         crates = sorted(set(crates))
         units = self._units()
         if all(c in whole or c not in units for c in crates):
-            return ""
+            return "", False
         expression = ""
+        level = 0
         for level in range(4):
             terms: List[str] = []
             for crate in crates:
@@ -1291,7 +1485,40 @@ class Chosen:
             expression = " | ".join(terms) or "none()"
             if len(expression) <= MAX_FILTER:
                 break
-        return expression
+        return expression, level > 0
+
+    def suite(self, kind: str, crates: Iterable[str], whole: Set[str], step_filter: str, coarse: bool,
+              changed: Set[str], less: Optional[Filter] = None) -> Suite:
+        """The tests a nextest step over `crates` runs on `kind`'s target, as the graph lists them: the
+        chosen tests, not ignored, and the terms of those it generates; every test of the crates in
+        `whole`, and every term. `less` names those the step leaves out (wasip1's `wasm_sky`), and
+        `changed` the changed paths, for the terms whose generator changed."""
+        out = Suite(kind, crates=set(crates), filter=step_filter, coarse=coarse)
+        readers = self.fixture_readers()
+        makers = {unit: {term: node for node, term in made.items()} for unit, made in self.graph.generators.items()}
+        for crate in sorted(out.crates):
+            every = crate in whole
+            if every:
+                out.whole.add(crate)
+            for unit in self.graph.runnable(crate):
+                picked = self.selection.tests.get(unit.id, {})
+                names = {t.name for t in self.graph.tests.get(unit.id, ())
+                         if not t.ignored and (every or t.name in picked)}
+                if less is not None:
+                    names = {n for n in names if not less.matches(crate, unit.id, n)}
+                terms = set(self.graph.generators.get(unit.id, {}).values() if every
+                            else self.selection.generated.get(unit.id, {}))
+                if names:
+                    out.tests[unit.id] = names
+                if terms:
+                    out.terms[unit.id] = terms
+                shared = names & set(readers.get(unit.id, {}))
+                if shared:
+                    out.shared[unit.id] = shared
+                fresh = {term for term in terms if rust_graph.file_of(makers.get(unit.id, {}).get(term, "")) in changed}
+                if fresh:
+                    out.fresh[unit.id] = fresh
+        return out
 
     def doctest_filters(self, crates: Sequence[str], whole: Set[str]) -> str:
         """rustdoc's filters for the chosen doctests: a crate's directory for every doctest of it, the
@@ -1459,9 +1686,28 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     native_causes = causes_of(needs.tests) | causes_of(needs.native) | causes_of(needs.graph, graph_crates & set(needs.graph))
     if chosen is not None:
         native_causes |= chosen.causes(graph_crates)
-    native_filter = chosen.nextest_filter(native, whole | set(needs.native)) if chosen else ""
-    wasip1_filter = less_wasm_sky(chosen.nextest_filter(wasip1_tests, whole) if chosen else "", ws.wasm_sky)
+    native_filter, native_coarse = chosen.filter_of(native, whole | set(needs.native)) if chosen else ("", False)
+    wasip1_chosen, wasip1_coarse = chosen.filter_of(wasip1_tests, whole) if chosen else ("", False)
+    wasip1_filter = less_wasm_sky(wasip1_chosen, ws.wasm_sky)
     doc_filters = chosen.doctest_filters(doc_crates, whole) if chosen else ""
+    # What the locked steps run, as the graph lists them, for `weigh`; without the graph, unlisted.
+    weighed: List[Suite] = []
+    changed = {path for path, _ in changes}
+    if native:
+        weighed.append(chosen.suite("native", native, whole | set(needs.native), native_filter, native_coarse, changed)
+                      if chosen else Suite("native", crates=set(native), listed=False))
+    if wasip1_tests:
+        try:
+            less, readable = (Filter(ws.wasm_sky) if ws.wasm_sky else None), True
+        except ValueError:  # a `wasm_sky` smart-ci cannot read: which listed tests it leaves out is unknown
+            less, readable = None, False
+        weighed.append(chosen.suite("wasip1", wasip1_tests, whole, wasip1_filter, wasip1_coarse, changed, less)
+                       if chosen and readable else Suite("wasip1", crates=set(wasip1_tests), filter=wasip1_filter,
+                                                         listed=False))
+    if doc_crates:
+        weighed.append(Suite("doctests", crates=set(doc_crates)))
+    if browser_tests:
+        weighed.append(Suite("browser", crates=set(browser_tests)))
 
     # Clippy for the other platforms: of the crates whose Clippy runs, those with code that differs
     # between Linux, macOS and Windows, listed or found by the guard, which runs smart-ci's own tests
@@ -1605,7 +1851,7 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
                "`--dependents` adds their Clippy and tests. ")
             + "Integration's `just ci` runs them anyway."
         )
-    plan = Plan({}, steps, needs.render, needs.why, notes)
+    plan = Plan({}, steps, needs.render, needs.why, notes, suites=weighed)
     if chosen is not None:
         plan.details = chosen.describe(graph_crates, whole, explain)
     return plan
@@ -1617,6 +1863,11 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
 
 class ToolError(Exception):
     pass
+
+
+def build_dir(root: Path) -> Path:
+    """cargo's build directory, `CARGO_TARGET_DIR` or `target/`, which holds smart-ci's caches."""
+    return Path(os.environ.get("CARGO_TARGET_DIR") or root / "target")
 
 
 def run_out(args: Sequence[str], cwd: Path) -> str:
@@ -1742,7 +1993,7 @@ def load_workspace(root: Path, just: str, change: Optional[Change] = None) -> Wo
     ws.build_scripts = rust_graph.build_scripts(meta)
     ws.proc_macros = rust_graph.proc_macros(meta)
     ws.os_manifest = manifest_os_dependence(meta)
-    ws.cache = Path(os.environ.get("CARGO_TARGET_DIR") or root / "target") / "smart-ci" / "rust-facts.json"
+    ws.cache = build_dir(root) / "smart-ci" / "rust-facts.json"
     if change is not None and change.end is not None:
         # A range: the graph reads the tree at its end, from git, not the working tree.
         listing = git(root, "ls-tree", "-r", "-z", change.end)
@@ -1843,12 +2094,17 @@ def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, depende
         if slot is not None and groups:
             lines.append(f"A build slot ({' '.join(slot)}) is held for the {' and then the '.join(groups)} "
                          "phases, which build, and released before the locked phase.")
-        if lock_priority(plan, env):
-            lines.append(f"The suites take the heavy-test lock with priority ({PRIORITY_VAR}=1): every other run "
-                         "waiting for it steps aside.")
-        elif env.get(PRIORITY_VAR) == "1":
-            lines.append(f"{PRIORITY_VAR}=1 is ignored: it gives priority on the heavy-test lock to `--full`, "
-                         "integration's run, alone.")
+        if phases["locked"] and plan.unlocked:
+            lines.append(f"The suites run without the heavy-test lock: {plan.weight}. They run capped all the same, "
+                         "at 4 test threads, in a scope of 5 GB and 4 cores where systemd allows it, and hold no "
+                         "build slot.")
+            if env.get(PRIORITY_VAR) == "1":
+                lines.append(f"{PRIORITY_VAR}=1 has nothing to do: the suites take no heavy-test lock.")
+        elif phases["locked"]:
+            lines.append("The suites take the heavy-test lock" + (f": {plan.weight}." if plan.weight else "."))
+            if lock_priority(env):
+                lines.append(f"They take it with priority ({PRIORITY_VAR}=1): every other run waiting for it steps "
+                             "aside.")
         if slot is None and env.get("BUILD_SLOT_HELD"):
             lines.append("A build slot is held already (BUILD_SLOT_HELD), and stays held to the end, the locked "
                          f"phase included: run `just smart-ci` with {SLOT_VAR} set instead of inside build-slot.")
@@ -1919,11 +2175,62 @@ class Runner:
     def __init__(self, root: Path, just: str) -> None:
         self.root, self.just = root, just
 
-    def run(self, args: Sequence[str], env: Optional[Mapping[str, str]] = None) -> int:
-        """`just <args>`, with `env` added to the environment."""
-        print(f"smart-ci: {quoted(args)}", file=sys.stderr, flush=True)
-        return subprocess.run([self.just, *args], cwd=str(self.root),
-                              env={**os.environ, **env} if env else None).returncode
+    def run(self, args: Sequence[str], env: Optional[Mapping[str, str]] = None,
+            watch: Optional[Callable[[str], None]] = None, scope: Sequence[str] = ()) -> int:
+        """`just <args>`, with `env` added to the environment, inside `scope` (a command that runs its
+        arguments, such as `systemd-run`'s) if one is given. With `watch`, its output and errors pass
+        through here as one stream, each line to `watch` as well."""
+        print(f"smart-ci: {' '.join(scope) + ' ' if scope else ''}{quoted(args)}", file=sys.stderr, flush=True)
+        command = [*scope, self.just, *args]
+        environment = {**os.environ, **env} if env else None
+        if watch is None:
+            return subprocess.run(command, cwd=str(self.root), env=environment).returncode
+        if sys.stdout.isatty() and "CARGO_TERM_COLOR" not in os.environ:
+            # Through a pipe, cargo and nextest would drop their colours; the reader strips them.
+            environment = {**(environment or os.environ), "CARGO_TERM_COLOR": "always"}
+        out = getattr(sys.stdout, "buffer", None)
+        interrupted = False
+        with subprocess.Popen(command, cwd=str(self.root), env=environment, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT) as proc:
+            assert proc.stdout is not None
+            while True:
+                try:
+                    raw = proc.stdout.readline()
+                    if not raw:
+                        break
+                    text = raw.decode("utf-8", errors="replace")
+                    if out is not None:
+                        out.write(raw)
+                        out.flush()
+                    else:
+                        sys.stdout.write(text)
+                        sys.stdout.flush()
+                    watch(text)
+                except KeyboardInterrupt:
+                    # The command had the same interrupt: read what it says while it cleans up (the
+                    # heavy-test lock's release among it), to its end, rather than close its output.
+                    # A second interrupt stops at once.
+                    if interrupted:
+                        raise
+                    interrupted = True
+        if interrupted:
+            raise KeyboardInterrupt
+        return proc.returncode
+
+    def suite_scope(self, env: Mapping[str, str]) -> List[str]:
+        """The capped scope that the suites run in without the heavy-test lock, where systemd allows it
+        (as `_vitest-run`'s, in the slice `HEAVY_SLICE` names); none elsewhere (macOS, Windows), where
+        they run at their 4 test threads alone."""
+        if shutil.which("systemd-run") is None:
+            return []
+        try:
+            probe = subprocess.run(["systemd-run", "--user", "--scope", "--quiet", "true"], capture_output=True)
+        except OSError:
+            return []
+        if probe.returncode != 0:
+            return []
+        place = [f"--slice={env['HEAVY_SLICE']}"] if env.get("HEAVY_SLICE") else []
+        return ["systemd-run", "--user", "--scope", "--quiet", *place, *UNLOCKED_SCOPE, "--"]
 
     def run_command(self, command: Sequence[str]) -> int:
         return subprocess.run(list(command), cwd=str(self.root)).returncode
@@ -1961,16 +2268,18 @@ def run_build_phases(phases: Mapping[str, Sequence[Sequence[str]]], runner: Runn
 
 
 def execute(plan: Plan, root: Path, just: str, env: Mapping[str, str] = os.environ,
-            runner: Optional[Runner] = None) -> int:
+            runner: Optional[Runner] = None, timings: Optional["Timings"] = None) -> int:
     """Run the plan as `just ci` runs its steps: setup; the side steps and vitest, their output held,
     beside the cargo steps; every Rust suite, and `just test-render`'s run of the smoke harness, in one
-    hold of the heavy-test lock.
+    hold of the heavy-test lock, or, for suites that `weigh` found small, in a capped scope of their
+    own without it.
 
     When `SMART_CI_SLOT` names the command that takes a build slot (`slot_command`), each group of
     phases that builds (`SLOT_GROUPS`, `BUILDS`) runs in a child of that command, which releases the
     slot when the group ends: no slot is held while the suites wait for the heavy-test lock or hold
-    it, nor for a group that builds nothing. A full plan runs `ci`'s own phases (`CI_PHASES`) the
-    same way, rather than `just ci`, whose recipe would keep a slot to its end.
+    it, or run without it, nor for a group that builds nothing. A full plan runs `ci`'s own phases
+    (`CI_PHASES`) the same way, rather than `just ci`, whose recipe would keep a slot to its end. What
+    the suites print times their tests, for `timings` to record.
     """
     runner = runner or Runner(root, just)
     phases = phases_of(plan)
@@ -1995,15 +2304,380 @@ def execute(plan: Plan, root: Path, just: str, env: Mapping[str, str] = os.envir
                 handoff.unlink(missing_ok=True)
         if status != 0:
             return 1
+    if not phases["locked"]:
+        return 0
     locked = flat(phases["locked"])
-    if locked and runner.run(["_locked", just, *locked], env=lock_priority(plan, env)) != 0:
-        return 1
-    return 0
+    record = RunRecord(nextest_kinds(phases["locked"]), browser_binaries(root, env))
+    if plan.unlocked:
+        status = runner.run(locked, env=dict(UNLOCKED_ENV), watch=record.line, scope=runner.suite_scope(env))
+    else:
+        status = runner.run(["_locked", just, *locked], env=lock_priority(env), watch=record.line)
+    if timings is not None:
+        timings.record(record, plan.suites, complete=status == 0)
+        try:
+            timings.save()
+        except OSError as err:
+            print(f"smart-ci: the tests' timings were not saved ({err})", file=sys.stderr)
+    return 1 if status != 0 else 0
 
 
-def lock_priority(plan: Plan, env: Mapping[str, str]) -> Optional[Dict[str, str]]:
-    """`HYPERION_HEAVY_PRIORITY=1` for `_locked`, for `--full` with `SMART_CI_PRIORITY=1`; else none."""
-    return {"HYPERION_HEAVY_PRIORITY": "1"} if FULL_RUN in plan.full and env.get(PRIORITY_VAR) == "1" else None
+def lock_priority(env: Mapping[str, str]) -> Optional[Dict[str, str]]:
+    """`HYPERION_HEAVY_PRIORITY=1` for `_locked`, with `SMART_CI_PRIORITY=1`, whatever the plan
+    (integration's runs, `--full` or over its unpushed commits); else none."""
+    return {"HYPERION_HEAVY_PRIORITY": "1"} if env.get(PRIORITY_VAR) == "1" else None
+
+
+# --------------------------------------------------------------------------------------------------
+# The suites small enough to run without the heavy-test lock, by their recorded timings.
+
+
+def weigh(plan: Plan, timings: Optional[Timings]) -> None:
+    """Decide whether the plan's suites take the heavy-test lock (`plan.unlocked`), and say why or what
+    they come to (`plan.weight`). `--full`, and any locked step but the suites the timings weigh
+    (`WEIGHED`: `just test-render`'s run), always take it; so do suites with a test or a suite that has
+    no recorded time, and those over SMALL_TESTS tests or SMALL_SECONDS of test time."""
+    plan.unlocked = False
+    locked = phases_of(plan)["locked"]
+    if not locked:
+        plan.weight = ""
+        return
+    if plan.is_full:
+        plan.weight = "the full `just ci`'s always do"
+        return
+    others = sorted({recipe[0] for recipe in locked} - WEIGHED)
+    if others:
+        plan.weight = ("`just test-render`'s run of the smoke harness always does" if "_test-render-run" in others
+                       else ", ".join(others) + " always do")
+        return
+    if timings is None or not plan.suites:
+        plan.weight = "no timings were read" if timings is None else "the plan lists none of its suites"
+        return
+    found = timings.weigh(plan.suites)
+    size = (f"{found.tests} test(s) and {found.seconds:,.0f} s of test time by the timings recorded in "
+            f"{timings.where()}")
+    if found.unknown:
+        shown = ", ".join(found.unknown[:3]) + (f", and {len(found.unknown) - 3} more" if len(found.unknown) > 3 else "")
+        plan.weight = f"{len(found.unknown)} test(s) or suite(s) with no recorded time, which counts as large: {shown}"
+        if found.large:
+            plan.weight += f"; and large: {'; '.join(found.large)}"
+    elif found.large:
+        plan.weight = f"large: {'; '.join(found.large)}"
+    elif found.tests > SMALL_TESTS or found.seconds > SMALL_SECONDS:
+        plan.weight = f"{size}, more than {SMALL_TESTS} tests or {SMALL_SECONDS:,.0f} s"
+    else:
+        plan.unlocked = True
+        plan.weight = f"{size}, within {SMALL_TESTS} tests and {SMALL_SECONDS:,.0f} s"
+
+
+@dataclass
+class Weight:
+    """What suites come to by the recorded timings: nextest's tests, the test-seconds of every suite,
+    what has no recorded time, and the suites too many to count (`large`, each with why)."""
+
+    tests: int = 0
+    seconds: float = 0.0
+    unknown: List[str] = field(default_factory=list)
+    large: List[str] = field(default_factory=list)
+
+
+def _seconds(value: object) -> Optional[float]:
+    """A recorded time, or None for none (or a value that is not one)."""
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0 else None
+
+
+def doctest_name(crate: str) -> str:
+    """The name rustdoc gives a crate's doctests (`Doc-tests hyperion_sim`): its library's."""
+    return crate.replace("-", "_")
+
+
+class Timings:
+    """The last recorded time of each test, kept in `target/smart-ci/test-times.json` (or under
+    `CARGO_TARGET_DIR`), from what each run of the suites through smart-ci printed (`RunRecord`):
+
+    - `native`, `wasip1`: nextest's duration of each test that passed, by target, binary id and name;
+      None for a test, or a filter term, that a complete run listing it did not run there (compiled
+      out on that target, skipped by nextest's default filter);
+    - `doctests`: rustdoc's time for each crate's doctests, run and compiled, by its library's name,
+      the largest recorded (a run of some of them takes less);
+    - `browser`: the browser runner's time for each crate's suite, its binaries' together.
+    """
+
+    def __init__(self, path: Optional[Path] = None, data: Optional[Mapping[str, object]] = None) -> None:
+        self.path = path
+        self.data: Dict[str, Dict[str, object]] = {kind: {} for kind in TIMED}
+        # What this run recorded, for `save` to lay over the file as it is then.
+        self.updates: Dict[str, Dict[str, object]] = {kind: {} for kind in TIMED}
+        for kind in TIMED:
+            table = (data or {}).get(kind)
+            if not isinstance(table, dict):
+                continue
+            if kind in ("native", "wasip1"):  # binary -> {test or term: seconds or None}
+                self.data[kind] = {b: dict(tests) for b, tests in table.items() if isinstance(tests, dict)}
+            else:
+                self.data[kind] = dict(table)
+
+    @classmethod
+    def load(cls, path: Path) -> "Timings":
+        """The timings in `path`, or none if it is missing, unreadable or of another version."""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = None
+        return cls(path, data if isinstance(data, dict) and data.get("version") == TIMINGS_VERSION else None)
+
+    def save(self) -> None:
+        """This run's records laid over the file as it is now (another run in the same build
+        directory may have saved its own since this one read it), written beside and renamed into
+        place, so that a reader never sees half of it."""
+        if self.path is None:
+            return
+        now = Timings.load(self.path)
+        for kind in ("native", "wasip1"):
+            for binary, tests in self.updates[kind].items():
+                now.data[kind].setdefault(binary, {}).update(tests)  # type: ignore[union-attr]
+        for kind in ("doctests", "browser"):
+            now.data[kind].update(self.updates[kind])
+        self.data = now.data
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fresh = self.path.with_name(f"{self.path.name}.{os.getpid()}")
+        fresh.write_text(json.dumps({"version": TIMINGS_VERSION, **self.data}, sort_keys=True), encoding="utf-8")
+        os.replace(fresh, self.path)
+
+    def where(self) -> str:
+        return str(self.path) if self.path is not None else "this run"
+
+    def tests_of(self, kind: str, binary: str) -> Dict[str, object]:
+        table = self.data[kind].get(binary)
+        return table if isinstance(table, dict) else {}
+
+    def weigh(self, suites: Sequence[Suite]) -> Weight:
+        """What the suites come to: the recorded tests that each nextest step's filter selects, with
+        their times, the doctests' and browser suites' times by crate, and what of them all, listed by
+        the graph, has no recorded time (a listed test, a term that matches no recorded test, a crate
+        run whole with none recorded)."""
+        found = Weight()
+        for suite in suites:
+            if suite.kind in ("doctests", "browser"):
+                for crate in sorted(suite.crates):
+                    key = doctest_name(crate) if suite.kind == "doctests" else crate
+                    value = _seconds(self.data[suite.kind].get(key))
+                    if value is None:
+                        found.unknown.append(f"{crate}'s {'doctests' if suite.kind == 'doctests' else 'browser suite'}")
+                    else:
+                        found.seconds += value
+                continue
+            on = "" if suite.kind == "native" else " on wasip1"
+            crates = ", ".join(sorted(suite.crates))
+            if not suite.listed:
+                found.unknown.append(f"the tests of {crates}{on}, which no graph lists")
+                continue
+            if suite.coarse:
+                found.large.append(f"the tests of {crates}{on}, too many for one command line's filter")
+                continue
+            if suite.shared:
+                count = sum(map(len, suite.shared.values()))
+                found.large.append(f"{count} test(s) of {crates}{on} read a fixture built once a run, whose build "
+                                   f"their recorded times leave out: {'; '.join(sorted(RUN_SHARED.values()))}")
+                continue
+            for binary, terms in sorted(suite.fresh.items()):
+                for term in sorted(terms):
+                    found.unknown.append(f"{binary}'s tests {term}{on}, whose generator changed")
+            listed = 0
+            known = len(found.unknown)
+            for binary, names in sorted(suite.tests.items()):
+                recorded = self.tests_of(suite.kind, binary)
+                for name in sorted(names):
+                    if name not in recorded:
+                        found.unknown.append(f"{binary} {name}{on}")
+                    elif recorded[name] is not None:
+                        listed += 1
+            for binary, terms in sorted(suite.terms.items()):
+                recorded = self.tests_of(suite.kind, binary)
+                for term in sorted(terms):
+                    if term in recorded:
+                        continue  # a complete run found it matches no test there
+                    try:
+                        matcher: Optional[Filter] = Filter(term)
+                    except ValueError:
+                        matcher = None
+                    package = binary.split("::")[0]
+                    if matcher is None or not any(not _is_term(n) and matcher.matches(package, binary, n) for n in recorded):
+                        found.unknown.append(f"{binary}'s tests {term}{on}")
+            for crate in sorted(suite.whole):
+                if not any(b.split("::")[0] == crate for b in list(self.data[suite.kind]) + list(suite.tests)):
+                    found.unknown.append(f"{crate}'s tests{on}")
+            if len(found.unknown) > known:
+                continue  # large already, so the filter is not read over the recorded tests (a long one is slow)
+            if listed > SMALL_TESTS:
+                found.large.append(f"{listed} listed tests of {crates}{on}, more than {SMALL_TESTS}")
+                continue
+            try:
+                selector = Filter(suite.filter) if suite.filter else None
+            except ValueError:
+                found.unknown.append(f"the tests of {crates}{on}: smart-ci cannot read its filter")
+                continue
+            for binary in sorted(self.data[suite.kind]):
+                package = binary.split("::")[0]
+                if package not in suite.crates:
+                    continue
+                for name, value in self.tests_of(suite.kind, binary).items():
+                    seconds = _seconds(value)
+                    if seconds is None or _is_term(name):
+                        continue
+                    if selector is None or selector.matches(package, binary, name):
+                        found.tests += 1
+                        found.seconds += seconds
+        return found
+
+    def record(self, run: "RunRecord", suites: Sequence[Suite], complete: bool) -> None:
+        """Keep what a run of the suites timed. For a complete run (it passed, and each nextest run ran
+        as many tests as it started), the listed tests and terms of each nextest step that it did not
+        run there are recorded as not run (None), so that they no longer count as unknown."""
+        for kind, started, seen in run.runs:
+            for binary, tests in seen.items():
+                for name, seconds in tests.items():
+                    self._put(kind, binary, name, seconds)
+            suite = next((s for s in suites if s.kind == kind), None)
+            if (not complete or suite is None or not suite.listed or suite.coarse
+                    or sum(map(len, seen.values())) != started):
+                continue
+            for binary, names in suite.tests.items():
+                for name in names - set(seen.get(binary, {})):
+                    self._put(kind, binary, name, None)
+            for binary, terms in suite.terms.items():
+                ran = seen.get(binary, {})
+                for term in terms:
+                    try:
+                        matcher = Filter(term)
+                    except ValueError:
+                        continue
+                    if not any(matcher.matches(binary.split("::")[0], binary, name) for name in ran):
+                        self._put(kind, binary, term, None)
+        run.finish()
+        for crate, seconds in run.doctests.items():
+            known = _seconds(self.data["doctests"].get(crate))
+            self._put("doctests", None, crate, seconds if known is None else max(known, seconds))
+        if complete:
+            for crate, seconds in run.browser.items():
+                self._put("browser", None, crate, seconds)
+
+    def _put(self, kind: str, binary: Optional[str], name: str, value: Optional[float]) -> None:
+        """One record, in the timings and in this run's updates (`save`)."""
+        for data in (self.data, self.updates):
+            table = data[kind] if binary is None else data[kind].setdefault(binary, {})
+            table[name] = value  # type: ignore[index]
+
+def _is_term(name: str) -> bool:
+    """A filter term recorded beside the tests (a test's name has no parenthesis)."""
+    return "(" in name
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+_NEXTEST_START = re.compile(r"^\s*Starting (\d+) tests? across \d+ binar")
+# A test that passed (`LEAK`: and left a handle open, which nextest passes), with its duration.
+_NEXTEST_PASS = re.compile(r"^\s*(?:PASS|LEAK) \[\s*([0-9]+(?:\.[0-9]+)?)s\]\s+(?:\([^)]*\)\s+)?(\S+)\s+(\S+)\s*$")
+_DOCTESTS = re.compile(r"^\s*Doc-tests (\S+)\s*$")
+# rustdoc's time for a crate's doctests, its merged ones' compilation included.
+_DOCTESTS_RAN = re.compile(r"^\s*all doctests ran in ([0-9.]+)s")
+_BROWSER_BINARY = re.compile(r"^\s*Running \S.* \((.+\.wasm)\)\s*$")
+_TEST_RESULT = re.compile(r"^\s*test result: .*finished in ([0-9.]+)s")
+
+
+class RunRecord:
+    """What a run of the suites prints that times them, read line by line as it runs: nextest's line
+    for each test that passed (`PASS [ 0.123s] (1/9) hyperion-sim::bin test::name`), each nextest run
+    begun by its `Starting N tests` and taken to be the next of `kinds`, the targets of the steps'
+    nextest runs in their order; rustdoc's time for each crate's doctests, run and compiled (`all
+    doctests ran in`, or where it prints none, libtest's `finished in` summed); and the browser
+    runner's `finished in` for each binary that `_browser run` names (`Running <source> (<binary>)`),
+    whose crate `binaries` gives (`browser_binaries`). `finish` ends what the output left open."""
+
+    def __init__(self, kinds: Sequence[str], binaries: Mapping[str, str]) -> None:
+        self.kinds = list(kinds)
+        self.binaries = dict(binaries)
+        self.runs: List[Tuple[str, int, Dict[str, Dict[str, float]]]] = []  # kind, tests started, binary -> {test: s}
+        self.doctests: Dict[str, float] = {}
+        self.browser: Dict[str, float] = {}
+        self._doctests: Optional[str] = None
+        self._doctest_seconds = 0.0
+        self._browser: Optional[str] = None
+        self._other = False  # a nextest run beyond `kinds`, whose lines are not kept
+
+    def finish(self) -> None:
+        """A crate's doctests whose rustdoc printed no total: libtest's times, summed."""
+        if self._doctests is not None:
+            self.doctests[self._doctests] = round(self._doctest_seconds, 3)
+            self._doctests = None
+
+    def line(self, text: str) -> None:
+        text = _ANSI.sub("", text).rstrip("\r\n")
+        started = _NEXTEST_START.match(text)
+        if started:
+            self.finish()
+            if len(self.runs) < len(self.kinds) and not self._other:
+                self.runs.append((self.kinds[len(self.runs)], int(started.group(1)), {}))
+            else:
+                self._other = True
+            return
+        passed = _NEXTEST_PASS.match(text)
+        if passed:
+            if self.runs and not self._other:
+                self.runs[-1][2].setdefault(passed.group(2), {})[passed.group(3)] = round(float(passed.group(1)), 3)
+            return
+        doctests = _DOCTESTS.match(text)
+        if doctests:
+            self.finish()
+            self._doctests, self._doctest_seconds = doctests.group(1), 0.0
+            return
+        ran = _DOCTESTS_RAN.match(text)
+        if ran and self._doctests is not None:
+            self.doctests[self._doctests] = round(float(ran.group(1)), 3)
+            self._doctests = None
+            return
+        binary = _BROWSER_BINARY.match(text)
+        if binary:
+            self.finish()
+            self._browser = self.binaries.get(binary.group(1))
+            return
+        result = _TEST_RESULT.match(text)
+        if result and self._browser is not None:
+            self.browser[self._browser] = round(self.browser.get(self._browser, 0.0) + float(result.group(1)), 3)
+            self._browser = None
+        elif result and self._doctests is not None:
+            self._doctest_seconds += float(result.group(1))
+
+
+def nextest_kinds(recipes: Sequence[Sequence[str]]) -> List[str]:
+    """The targets of the nextest runs that the locked recipes make, in their order."""
+    kinds: List[str] = []
+    for recipe in recipes:
+        if recipe[0] in ("_nextest-run", "_test-run"):
+            kinds.append("native")
+        elif recipe[0] == "_wasm-fast-run" or (recipe[0] == "_wasm-run" and len(recipe) > 1 and recipe[1].strip()):
+            kinds.append("wasip1")
+    return kinds
+
+
+def browser_binaries(root: Path, env: Mapping[str, str]) -> Dict[str, str]:
+    """Each browser test binary that `_browser prepare` listed, with its crate: the lists
+    `<target>/browser-tests/<crate>`, a binary's path first on each line."""
+    target = Path(env.get("CARGO_TARGET_DIR") or "target")
+    directory = (target if target.is_absolute() else root / target) / "browser-tests"
+    found: Dict[str, str] = {}
+    try:
+        listings = sorted(p for p in directory.iterdir() if p.is_file() and "." not in p.name)
+    except OSError:
+        return found
+    for listing in listings:
+        try:
+            text = listing.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            binary = line.split("\t", 1)[0]
+            if binary:
+                found[binary] = listing.name
+    return found
 
 
 HELP = """\
@@ -2055,17 +2729,27 @@ runs everything. `--dependents` adds the Clippy of every crate that depends on a
 `--all-tests`, their tests too): use it when the change alters what other crates use (a public item's
 name or signature). A changed Cargo.toml always adds their Clippy and tests.
 
-Run it as `just ci` is run, capped; its test phase takes the heavy-test lock as `ci`'s does. With
+Run it as `just ci` is run, capped; its test phase takes the heavy-test lock as `ci`'s does (but
+see below). With
 {slot} naming the command that holds one of the machine's build slots (`build-slot`; on Windows with
 its interpreter, `bash <path>`), smart-ci holds a slot only for its setup, side and main phases,
 and releases it before the heavy-test lock, so do not wrap it in that command yourself. Unset, as
 on any machine without build slots, those phases run directly. A full plan runs `ci`'s own phases
-in the same way, and `--full` runs that plan whatever the diff: integration's run, `{slot}=<the
-build-slot command> just smart-ci --full`, which holds a slot only while it builds where
-`build-slot just ci` holds one through the wait for the lock and the suites. With {priority}=1
-as well, `--full`'s suites take the heavy-test lock first: every other run waiting for it steps
-aside until they hold it (`_locked`'s `HYPERION_HEAVY_PRIORITY`); a lane's own runs never set it.
-""".format(branch=INTEGRATION_BRANCH, slot=SLOT_VAR, priority=PRIORITY_VAR)
+in the same way, and `--full` runs that plan whatever the diff, which holds a slot only while it
+builds where `build-slot just ci` holds one through the wait for the lock and the suites.
+
+The heavy-test lock is for full suites: a plan's suites run without it when they are small by the
+timings recorded from earlier runs (target/smart-ci/{timings}), at most {tests} of nextest's tests
+and at most {seconds:.0f} s of test time, doctests and browser suites included; capped all the same,
+at 4 test threads in a scope of 5 GB and 4 cores where systemd allows it, holding no build slot.
+A test with no recorded time counts as large, as does one that reads a fixture built once a run
+(the sky's luminosity tables), and `--full` and the smoke harness always take the lock. With
+{priority}=1 (integration's runs: `{slot}=<the build-slot command> just smart-ci <its base>`, or
+`--full`), suites that take the lock take it first, whatever the plan: every other run waiting for
+it steps aside until they hold it (`_locked`'s `HYPERION_HEAVY_PRIORITY`); a lane's own runs never
+set it.
+""".format(branch=INTEGRATION_BRANCH, slot=SLOT_VAR, priority=PRIORITY_VAR, timings=TIMINGS_FILE,
+           tests=SMALL_TESTS, seconds=SMALL_SECONDS)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -2096,15 +2780,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.build_phases:
         phases = json.loads(Path(args.build_phases).read_text(encoding="utf-8"))
         return run_build_phases(phases, Runner(root, just))
+    timings = Timings.load(build_dir(root) / "smart-ci" / TIMINGS_FILE)
     if args.full:
         # Integration's run: `ci`'s phases (`CI_PHASES`, which `just ci` defines and the agreement
         # tests hold to it), no test-render, as `ci` has none.
         plan = full_plan()
+        weigh(plan, timings)
         print(describe(plan, [], "--full", args.dependents), flush=True)
         if args.plan:
             return 0
         print(flush=True)
-        return execute(plan, root, just)
+        return execute(plan, root, just, timings=timings)
     try:
         change = changed_paths(root, args.base)
         if change.is_range and not args.plan:
@@ -2122,11 +2808,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         plan = make_plan(changes, load_workspace(root, just, change), args.dependents, args.all_tests, args.explain)
     except (ToolError, KeyError, ValueError) as err:
         plan = Plan({f"smart-ci could not read the workspace ({err})": {"every path"}}, [], set(), {}, [])
+    weigh(plan, timings)
     print(describe(plan, changes, what, args.dependents, explain=args.explain), flush=True)
     if args.plan:
         return 0
     print(flush=True)
-    return execute(plan, root, just)
+    return execute(plan, root, just, timings=timings)
 
 
 if __name__ == "__main__":

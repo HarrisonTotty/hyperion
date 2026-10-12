@@ -2376,6 +2376,29 @@ class Graph:
                 sel.doctests[crate] = docs
         return sel
 
+    def readers(self, paths: Iterable[str]) -> Dict[str, Dict[str, Set[str]]]:
+        """The tests, unit by unit, whose code reaches an item of one of `paths` (Rust files), each with
+        the paths it reaches, whatever changed: the readers of what those files define."""
+        starts = {node: {path} for path in paths if path in self.rs for node in self.all_nodes(path)}
+        if not starts:
+            return {}
+        reverse: Dict[str, Set[str]] = {}
+        for source, targets in self.edges.items():
+            for target in targets:
+                reverse.setdefault(target, set()).add(source)
+        out: Dict[str, Dict[str, Set[str]]] = {}
+        for crate in sorted(self.crates):
+            allowed = self.allowed_test[crate] | {""}
+            mine = {node: set(c) for node, c in starts.items() if (self.crate_of(file_of(node)) or "") in allowed}
+            if not mine:
+                continue
+            causes, _ = self._reach(mine, reverse, allowed)
+            for unit in self.runnable(crate):
+                found = {t.name: causes[t.node] for t in self.tests.get(unit.id, ()) if t.node in causes}
+                if found:
+                    out[unit.id] = found
+        return out
+
     def changed_nodes(self, path: str, base: Optional[FileFacts],
                       facts: Optional[FileFacts]) -> Tuple[Set[str], List[Tuple[str, str]]]:
         """The nodes of a changed file that changed, and its changed members of impls whose members

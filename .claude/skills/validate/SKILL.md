@@ -32,6 +32,9 @@ dependency graph (Rust item by item, TypeScript by its imports), and the plan sh
 why (`--explain` shows each test's chain). `just smart-ci --all-tests` runs every test of the
 changed crates instead, as before the graph. It runs the full `just ci`'s phases by itself when the
 change touches an input of the whole workspace (the justfile, a manifest or lock file, the
-toolchain) or a path no rule knows. A lane runs `just smart-ci`, not `just ci`, with
-`SMART_CI_SLOT` naming the build-slot command and never inside it; integration runs the full
-`just ci`. A `just ci` in a task's acceptance criteria is met by `just smart-ci`.
+toolchain) or a path no rule knows. Suites small by the timings recorded from earlier runs run
+without the heavy-test lock, capped at 4 test threads and 4 cores (the plan says which, and why).
+A lane runs `just smart-ci`, not `just ci`, with `SMART_CI_SLOT` naming the build-slot command and
+never inside it; integration runs it over its unpushed commits with `SMART_CI_PRIORITY=1`, which
+gives its suites priority on the lock. A `just ci` in a task's acceptance criteria is met by
+`just smart-ci`.

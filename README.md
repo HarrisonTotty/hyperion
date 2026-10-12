@@ -288,9 +288,22 @@ set `SMART_CI_SLOT` to that command instead of wrapping smart-ci in it. smart-ci
 only for its setup phase and then its side, vitest and main phases, which build, and releases it
 before the heavy-test lock:
 a wrapper would keep the slot through the wait for the lock and the suites. A full plan runs `ci`'s
-own phases the same way, and `just smart-ci --full` runs that plan whatever the diff: integration's
-run, in place of `build-slot just ci`, and with `SMART_CI_PRIORITY=1` its suites take the lock with
-that priority. Unset, as on any machine without build slots, the phases run directly.
+own phases the same way, and `just smart-ci --full` runs that plan whatever the diff, in place of
+`build-slot just ci`. Unset, as on any machine without build slots, the phases run directly. With
+`SMART_CI_PRIORITY=1` (integration's runs, over its unpushed commits or with `--full`), any plan's
+suites that take the heavy-test lock take it with that priority.
+
+**Small suites run without the heavy-test lock.** The lock is for full suites and runs over 4 GB.
+A plan's suites run without it when they are small by the timings recorded from earlier runs: at
+most 300 of nextest's tests and 300 s of test time, doctests and browser suites included (39% of
+the last 112 commits' plans, which at 4 test threads take about 2 minutes at most). They still run
+capped, at 4 test threads in a scope of 5 GB and 4 cores where systemd allows it, and hold no build
+slot. Each run of the suites through smart-ci records nextest's time for each test that passed,
+rustdoc's for each crate's doctests and the browser runner's for each crate's suite in
+`target/smart-ci/test-times.json`; a test with no recorded time counts as large, so the first run
+in a fresh build directory takes the lock, and so does a test that reads a fixture built once a run
+(the sky's luminosity tables), whose recorded time leaves its build out. `--full` and the smoke
+harness always take it. The plan says which, and why.
 
 | A change to                                                                                                                  | runs                                                                                                                                                                                                                                                                                |
 | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

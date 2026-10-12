@@ -15,7 +15,6 @@ Standard library only: `python3 tools/smart-ci/test_smart_ci.py`.
 from __future__ import annotations
 
 import contextlib
-import fnmatch
 import functools
 import io
 import json
@@ -789,17 +788,28 @@ class TheGuard(unittest.TestCase):
 class FakeRunner(smart_ci.Runner):
     """Records what `execute` runs, and reads the build phases a slot's child would run."""
 
-    def __init__(self, fail: Sequence[str] = ()) -> None:
+    SCOPE = ["scope", "--"]  # the suites' capped scope, without the heavy-test lock
+
+    def __init__(self, fail: Sequence[str] = (), output: Sequence[str] = ()) -> None:
         super().__init__(ROOT, "just")
         self.calls: List[Tuple[str, List[str]]] = []
         self.handoffs: List[dict] = []
         self.envs: List[Optional[Dict[str, str]]] = []  # what each `run` adds to the environment
+        self.scopes: List[List[str]] = []  # the scope each `run` runs in
         self.fail = set(fail)
+        self.output = list(output)  # what the suites print, to the run's `watch`
 
-    def run(self, args: Sequence[str], env=None) -> int:
+    def run(self, args: Sequence[str], env=None, watch=None, scope=()) -> int:
         self.calls.append(("run", list(args)))
         self.envs.append(dict(env) if env else None)
+        self.scopes.append(list(scope))
+        if watch is not None:
+            for line in self.output:
+                watch(line + "\n")
         return 1 if args[0] in self.fail else 0
+
+    def suite_scope(self, env) -> List[str]:
+        return list(self.SCOPE)
 
     def run_command(self, command: Sequence[str]) -> int:
         self.calls.append(("command", list(command)))
@@ -937,21 +947,29 @@ class Execution(unittest.TestCase):
         self.assertTrue(any(kind == "spawn" and args[-1] == "_test-render-build" for kind, args in full.calls))
         self.assertNotIn(["_test-render-run"], smart_ci.phases_of(smart_ci.full_plan())["locked"])
 
-    def test_integrations_run_takes_the_lock_with_priority_when_asked(self) -> None:
-        # perf-build L5 part a: `--full` with SMART_CI_PRIORITY=1 gives `_locked` HYPERION_HEAVY_PRIORITY=1.
-        for plan_, env, wanted in ((smart_ci.full_plan(), {"SMART_CI_PRIORITY": "1"}, {"HYPERION_HEAVY_PRIORITY": "1"}),
+    def test_integrations_runs_take_the_lock_with_priority_when_asked(self) -> None:
+        # perf-build L5 part a: SMART_CI_PRIORITY=1 gives `_locked` HYPERION_HEAVY_PRIORITY=1, for any
+        # plan: integration runs smart-ci over its unpushed commits (owner, 2026-10-12), not only --full.
+        priority = {"SMART_CI_PRIORITY": "1"}
+        for plan_, env, wanted in ((smart_ci.full_plan(), priority, {"HYPERION_HEAVY_PRIORITY": "1"}),
                                    (smart_ci.full_plan(), {}, None),
-                                   (plan("justfile"), {"SMART_CI_PRIORITY": "1"}, None),
-                                   (plan("crates/hyperion-server/src/main.rs"), {"SMART_CI_PRIORITY": "1"}, None)):
+                                   (plan("justfile"), priority, {"HYPERION_HEAVY_PRIORITY": "1"}),
+                                   (plan("crates/hyperion-server/src/main.rs"), priority, {"HYPERION_HEAVY_PRIORITY": "1"}),
+                                   (plan("crates/hyperion-server/src/main.rs"), {"SMART_CI_PRIORITY": "0"}, None),
+                                   (plan("crates/hyperion-server/src/main.rs"), {}, None)):
             with self.subTest(full=plan_.full, env=env):
                 runner = FakeRunner()
                 self.assertEqual(smart_ci.execute(plan_, ROOT, "just", env=env, runner=runner), 0)
                 locked = [e for (kind, args), e in zip([c for c in runner.calls if c[0] == "run"], runner.envs)
                           if args[0] == "_locked"]
                 self.assertEqual(locked, [wanted])
-        self.assertIn("with priority", smart_ci.describe(smart_ci.full_plan(), [], "x", False,
-                                                         env={"SMART_CI_PRIORITY": "1"}))
-        self.assertIn("is ignored", smart_ci.describe(plan("justfile"), [], "x", False, env={"SMART_CI_PRIORITY": "1"}))
+        for plan_ in (smart_ci.full_plan(), plan("justfile"), plan("crates/hyperion-server/src/main.rs")):
+            with self.subTest(full=plan_.full):
+                text = smart_ci.describe(plan_, [], "x", False, env=priority)
+                self.assertIn("They take it with priority (SMART_CI_PRIORITY=1)", text)
+                self.assertNotIn("with priority", smart_ci.describe(plan_, [], "x", False, env={}))
+        # A plan with no suites takes no lock, and says nothing of priority.
+        self.assertNotIn("heavy-test lock", smart_ci.describe(plan("README.md"), [], "x", False, env=priority))
 
     def test_a_failed_build_runs_no_suite(self) -> None:
         for env, fail in (({}, "_clippy-for"), (self.SLOT, "slot")):
@@ -965,6 +983,348 @@ class Execution(unittest.TestCase):
         self.assertIsNone(smart_ci.slot_command({}))
         self.assertIsNone(smart_ci.slot_command({"SMART_CI_SLOT": " "}))
         self.assertEqual(smart_ci.slot_command({"SMART_CI_SLOT": "bash /opt/build-slot"}), ["bash", "/opt/build-slot"])
+
+
+class SmallSuites(unittest.TestCase):
+    """Suites small by their recorded timings run without the heavy-test lock, capped, holding no build
+    slot; large ones, unknown ones, `--full` and the smoke harness take it."""
+
+    # A change to the sim's sky: its one test there, natively and on wasip1, and the testkit's suite,
+    # whose `clippy_bans` reads the sim's sources, natively and whole (`GraphMode`'s workspace).
+    CHANGE = ("crates/hyperion-sim/src/sky/mod.rs", "* 3", "* 4")
+    NATIVE = {"hyperion-sim": {"sky::tests::glows": 2.0, "tests::plain": 500.0}, "hyperion-testkit": {"kit": 0.1}}
+    WASIP1 = {"hyperion-sim": {"sky::tests::glows": 3.0, "tests::plain": 900.0}}
+    SLOT = {"SMART_CI_SLOT": "/opt/build-slot"}
+
+    def setUp(self) -> None:
+        quiet = contextlib.redirect_stderr(io.StringIO())
+        quiet.__enter__()
+        self.addCleanup(quiet.__exit__, None, None, None)
+
+    def plan(self, wasm_sky: str = "") -> Plan:
+        graph = GraphMode()
+        now = dict(graph.SOURCES)
+        path, old, new = self.CHANGE
+        now[path] = now[path].replace(old, new)
+        ws = graph.workspace(now)
+        ws.wasm_sky = wasm_sky
+        return make_plan([(path, False)], ws, False)
+
+    def timings(self, native: Optional[dict] = None, wasip1: Optional[dict] = None) -> smart_ci.Timings:
+        return smart_ci.Timings(None, json.loads(json.dumps({"native": self.NATIVE if native is None else native,
+                                                             "wasip1": self.WASIP1 if wasip1 is None else wasip1})))
+
+    def weighed(self, p: Plan, timings: smart_ci.Timings) -> Plan:
+        smart_ci.weigh(p, timings)
+        return p
+
+    def test_a_small_plan_runs_without_the_lock_capped_and_holding_no_slot(self) -> None:
+        p = self.weighed(self.plan(), self.timings())
+        self.assertEqual([s.kind for s in p.suites], ["native", "wasip1"])
+        self.assertTrue(p.unlocked, p.weight)
+        # glows and the testkit's one test natively, glows on wasip1: not the sim's `plain`, which the
+        # step's filter leaves out.
+        found = self.timings().weigh(p.suites)
+        self.assertEqual((found.tests, round(found.seconds, 1), found.unknown), (3, 5.1, []))
+        runner = FakeRunner()
+        self.assertEqual(smart_ci.execute(p, ROOT, "just", env=self.SLOT, runner=runner), 0)
+        # The builds in the slot's command; the suites after it, in the parent, in their own capped
+        # scope at 4 test threads, and no `_locked`.
+        self.assertEqual([kind for kind, _ in runner.calls][-2:], ["command", "run"])
+        self.assertNotIn("_nextest-run", smart_ci.flat(runner.handoffs[-1].get("main", [])))
+        kind, suites = runner.calls[-1]
+        self.assertEqual(suites, smart_ci.flat(smart_ci.phases_of(p)["locked"]))
+        self.assertEqual([suites[0], suites[3]], ["_nextest-run", "_wasm-run"])
+        self.assertEqual(runner.scopes[-1], FakeRunner.SCOPE)
+        self.assertEqual(runner.envs[-1], {"NEXTEST_TEST_THREADS": "4", "RUST_TEST_THREADS": "4", "CARGO_BUILD_JOBS": "4"})
+        self.assertFalse(any(args[:1] == ["_locked"] for _, args in runner.calls))
+        text = smart_ci.describe(p, [], "x", False, env={"SMART_CI_PRIORITY": "1"})
+        self.assertIn("The suites run without the heavy-test lock: 3 test(s) and 5 s of test time", text)
+        self.assertIn(f"within {smart_ci.SMALL_TESTS} tests and {smart_ci.SMALL_SECONDS:.0f} s", text)
+        self.assertIn("SMART_CI_PRIORITY=1 has nothing to do", text)
+
+    def test_the_scope_is_vitests_where_systemd_allows_it(self) -> None:
+        # The caps of `_vitest-run`'s scope, which R1 ruled no heavy run.
+        justfile = (ROOT / "justfile").read_text(encoding="utf-8")
+        vitest = justfile[justfile.index("\n_vitest-run "):justfile.index("\n\n", justfile.index("\n_vitest-run "))]
+        for cap in smart_ci.UNLOCKED_SCOPE[1::2]:
+            self.assertIn(f"-p {cap}", vitest)
+        self.assertEqual(smart_ci.UNLOCKED_SCOPE, ("-p", "MemoryMax=5G", "-p", "MemorySwapMax=0", "-p", "CPUQuota=400%"))
+        runner = smart_ci.Runner(ROOT, "just")
+        with unittest.mock.patch.object(smart_ci.shutil, "which", return_value="/usr/bin/systemd-run"), \
+                unittest.mock.patch.object(smart_ci.subprocess, "run", return_value=subprocess.CompletedProcess([], 0)):
+            self.assertEqual(runner.suite_scope({"HEAVY_SLICE": "agents.slice"}),
+                             ["systemd-run", "--user", "--scope", "--quiet", "--slice=agents.slice",
+                              *smart_ci.UNLOCKED_SCOPE, "--"])
+        with unittest.mock.patch.object(smart_ci.shutil, "which", return_value=None):
+            self.assertEqual(runner.suite_scope({}), [])  # macOS, Windows: 4 test threads alone
+
+    def test_a_large_plan_takes_the_lock(self) -> None:
+        slow = {**self.NATIVE, "hyperion-sim": {"sky::tests::glows": smart_ci.SMALL_SECONDS}}
+        p = self.weighed(self.plan(), self.timings(native=slow))
+        self.assertFalse(p.unlocked)
+        self.assertIn(f"more than {smart_ci.SMALL_TESTS} tests or {smart_ci.SMALL_SECONDS:.0f} s", p.weight)
+        many = {**self.NATIVE, "hyperion-testkit": {f"kit_{i}": 0.01 for i in range(smart_ci.SMALL_TESTS)}}
+        p = self.weighed(self.plan(), self.timings(native=many))
+        self.assertFalse(p.unlocked)
+        self.assertIn(f"{smart_ci.SMALL_TESTS + 2} test(s)", p.weight)
+        runner = FakeRunner()
+        self.assertEqual(smart_ci.execute(p, ROOT, "just", env={}, runner=runner), 0)
+        self.assertEqual(runner.calls[-1][1][:3], ["_locked", "just", "_nextest-run"])
+        self.assertEqual(runner.scopes[-1], [])
+        self.assertIn(f"The suites take the heavy-test lock: {smart_ci.SMALL_TESTS + 2} test(s)",
+                      smart_ci.describe(p, [], "x", False, env={}))
+        # More listed tests than that, or a filter made coarser to fit a command line: large, uncounted.
+        names = {f"t{i}" for i in range(smart_ci.SMALL_TESTS + 1)}
+        listed = smart_ci.Suite("native", crates={SIM}, tests={SIM: names}, filter="package(hyperion-sim)")
+        recorded = smart_ci.Timings(None, {"native": {SIM: {name: 0.01 for name in names}}})
+        coarse = smart_ci.Suite("wasip1", crates={SIM}, coarse=True)
+        found = recorded.weigh([listed, coarse])
+        self.assertEqual((found.tests, found.unknown), (0, []))
+        self.assertEqual(found.large, [f"{smart_ci.SMALL_TESTS + 1} listed tests of hyperion-sim, more than {smart_ci.SMALL_TESTS}",
+                                       "the tests of hyperion-sim on wasip1, too many for one command line's filter"])
+
+    def test_unknown_timings_take_the_lock(self) -> None:
+        for name, timings in (("none at all", smart_ci.Timings()),
+                              ("not on wasip1", self.timings(wasip1={"hyperion-sim": {"tests::plain": 1.0}})),
+                              ("none of the testkit's", self.timings(native={"hyperion-sim": {"sky::tests::glows": 1.0}}))):
+            with self.subTest(name):
+                p = self.weighed(self.plan(), timings)
+                self.assertFalse(p.unlocked)
+                self.assertIn("no recorded time, which counts as large", p.weight)
+        p = self.weighed(self.plan(), self.timings(wasip1={}))
+        self.assertIn("hyperion-sim sky::tests::glows on wasip1", p.weight)
+        # Without the graph (no Rust graph, or --all-tests), the suites are not listed: unknown.
+        q = plan("crates/hyperion-server/src/main.rs")
+        smart_ci.weigh(q, self.timings())
+        self.assertFalse(q.unlocked)
+        self.assertIn("which no graph lists", q.weight)
+        # And unweighed, a plan takes the lock.
+        self.assertFalse(self.plan().unlocked)
+
+    def test_full_and_the_smoke_harness_always_take_the_lock(self) -> None:
+        full = smart_ci.full_plan()
+        smart_ci.weigh(full, self.timings())
+        self.assertFalse(full.unlocked)
+        self.assertIn("the full `just ci`'s always do", smart_ci.describe(full, [], "x", False, env={}))
+        render = plan("crates/hyperion-server/src/main.rs", "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl")
+        smart_ci.weigh(render, self.timings())
+        self.assertFalse(render.unlocked)
+        self.assertIn("smoke harness always does", render.weight)
+        for p in (full, render):
+            runner = FakeRunner()
+            self.assertEqual(smart_ci.execute(p, ROOT, "just", env={}, runner=runner), 0)
+            self.assertEqual(runner.calls[-1][1][:2], ["_locked", "just"])
+
+    def test_a_test_that_reads_a_fixture_built_once_a_run_is_large(self) -> None:
+        # `sky::testing::shared` builds the luminosity tables once a run and binary: the tests' recorded
+        # times leave the build out, which a small run pays at once.
+        graph = GraphMode()
+        now = dict(graph.SOURCES)
+        sky = "crates/hyperion-sim/src/sky/mod.rs"
+        now[sky] = ("pub fn glow() -> u32 { hyperion_base::unit() * 4 }\n#[cfg(test)]\nmod testing;\n"
+                    "#[cfg(test)]\nmod tests {\n    #[test]\n"
+                    "    fn glows() { assert_eq!(super::glow(), super::testing::shared::tables()); }\n}\n")
+        now["crates/hyperion-sim/src/sky/testing.rs"] = "pub(crate) mod shared;\n"
+        now["crates/hyperion-sim/src/sky/testing/shared.rs"] = "pub(crate) fn tables() -> u32 { 4 }\n"
+        p = self.weighed(make_plan([(sky, False)], graph.workspace(now), False), self.timings())
+        self.assertEqual(p.suites[0].shared, {SIM: {"sky::tests::glows"}})
+        self.assertFalse(p.unlocked)
+        self.assertIn("read a fixture built once a run", p.weight)
+        self.assertEqual(set(smart_ci.RUN_SHARED), {"crates/hyperion-sim/src/sky/testing/shared.rs"})
+        self.assertTrue((ROOT / next(iter(smart_ci.RUN_SHARED))).is_file())
+
+    def test_a_term_whose_generator_changed_is_unknown(self) -> None:
+        # A `#[test_case]`'s cases, in the changed file: the change may add one that no run has timed.
+        graph = GraphMode()
+        now = dict(graph.SOURCES)
+        sky = "crates/hyperion-sim/src/sky/mod.rs"
+        now[sky] = now[sky].replace("* 3", "* 4").replace(
+            "    fn glows()", "    #[test_case(1)]\n    fn cases(n: u32) { assert_eq!(super::glow(), 4 * n); }\n"
+                             "    #[test]\n    fn glows()")
+        recorded = {**self.NATIVE, SIM: {**self.NATIVE[SIM], "sky::tests::cases::_1_expects": 0.1}}
+        p = self.weighed(make_plan([(sky, False)], graph.workspace(now), False),
+                         self.timings(native=recorded, wasip1={SIM: {**self.WASIP1[SIM], "sky::tests::cases::_1_expects": 0.1}}))
+        self.assertEqual(p.suites[0].fresh, {SIM: {"test(/^sky::tests::cases::/)"}})
+        self.assertFalse(p.unlocked)
+        self.assertIn("whose generator changed", p.weight)
+
+    def test_a_test_that_wasm_sky_leaves_out_is_not_wasip1s(self) -> None:
+        p = self.weighed(self.plan(wasm_sky="package(hyperion-sim) & test(/^sky::/)"), self.timings(wasip1={}))
+        wasip1 = next(s for s in p.suites if s.kind == "wasip1")
+        self.assertEqual(wasip1.tests, {})
+        self.assertTrue(p.unlocked, p.weight)
+        # One smart-ci cannot read leaves the wasip1 suite unlisted, and the plan still made.
+        unread = self.weighed(self.plan(wasm_sky="M"), self.timings())
+        self.assertFalse(next(s for s in unread.suites if s.kind == "wasip1").listed)
+        self.assertFalse(unread.unlocked)
+
+    def test_a_run_records_what_it_timed(self) -> None:
+        output = [
+            "    Starting 2 tests across 2 binaries (5 tests skipped)",
+            "        PASS [   1.250s] (1/2) hyperion-sim sky::tests::glows",
+            "\x1b[32m        LEAK\x1b[0m [   0.010s] (2/2) hyperion-testkit kit",
+            "     Summary [   1.300s] 2 tests run: 2 passed, 5 skipped",
+            "   Doc-tests hyperion_sim",
+            "all doctests ran in 8.73s; merged doctests compilation took 2.35s",
+            "    Starting 1 test across 1 binary",
+            "        FAIL [   0.500s] (1/1) hyperion-sim sky::tests::glows",
+            "     Running src/lib.rs (/t/wasm32-unknown-unknown/slow-test/deps/hyperion_surface-1.wasm)",
+            "test result: ok. 266 passed; 0 failed; 15 ignored; 0 filtered out; finished in 70.43s",
+            "     Running tests/bake.rs (/t/bake-2.wasm)",
+            "test result: ok. 1 passed; 0 failed; 0 ignored; 0 filtered out; finished in 0.50s",
+        ]
+        record = smart_ci.RunRecord(["native", "wasip1"], {"/t/wasm32-unknown-unknown/slow-test/deps/hyperion_surface-1.wasm":
+                                                           SURFACE, "/t/bake-2.wasm": SURFACE})
+        for line in output:
+            record.line(line + "\n")
+        self.assertEqual(record.runs, [("native", 2, {SIM: {"sky::tests::glows": 1.25}, TESTKIT: {"kit": 0.01}}),
+                                       ("wasip1", 1, {})])
+        self.assertEqual(record.doctests, {"hyperion_sim": 8.73})  # rustdoc's whole time, its compilation in it
+        self.assertEqual(record.browser, {SURFACE: 70.93})
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "smart-ci" / smart_ci.TIMINGS_FILE
+            timings = smart_ci.Timings.load(path)
+            p = self.plan()
+            runner = FakeRunner(output=output[:4])
+            self.assertEqual(smart_ci.execute(p, ROOT, "just", env={}, runner=runner, timings=timings), 0)
+            again = smart_ci.Timings.load(path)
+            self.assertEqual(again.data["native"], {SIM: {"sky::tests::glows": 1.25}, TESTKIT: {"kit": 0.01}})
+            # The wasip1 run printed nothing: its listed test stays unknown, so the plan takes the lock.
+            smart_ci.weigh(p, again)
+            self.assertFalse(p.unlocked)
+            self.assertIn("hyperion-sim sky::tests::glows on wasip1", p.weight)
+            # A failed run records its passes and its doctests, but no browser suite, cut short.
+            failed = smart_ci.Timings.load(path)
+            failed.record(record, p.suites, complete=False)
+            self.assertEqual(failed.data["browser"], {})
+            self.assertEqual(failed.data["doctests"], {"hyperion_sim": 8.73})
+
+    def test_doctests_keep_their_largest_time_and_a_crate_without_a_total(self) -> None:
+        record = smart_ci.RunRecord([], {})
+        for line in ("   Doc-tests hyperion_surface", "running 2 tests", "test result: ok. 2 passed; finished in 0.25s",
+                     "running 1 test", "test result: ok. 1 passed; finished in 0.50s", "   Doc-tests hyperion_sim",
+                     "all doctests ran in 3.00s; merged doctests compilation took 1.00s"):
+            record.line(line)
+        timings = smart_ci.Timings(None, {"doctests": {"hyperion_sim": 8.0}})
+        timings.record(record, [], complete=True)
+        # The surface crate printed no total: its tests' times, summed. The sim's run of some of its
+        # doctests took less than its last: the larger is kept.
+        self.assertEqual(timings.data["doctests"], {"hyperion_surface": 0.75, "hyperion_sim": 8.0})
+        last = smart_ci.RunRecord([], {})
+        for line in ("   Doc-tests hyperion_base", "test result: ok. 0 passed; finished in 0.00s"):
+            last.line(line)
+        timings.record(last, [], complete=True)  # the output ended with the crate's doctests
+        self.assertEqual(timings.data["doctests"]["hyperion_base"], 0.0)
+
+    def test_a_save_keeps_what_another_run_saved_meanwhile(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / smart_ci.TIMINGS_FILE
+            mine, theirs = smart_ci.Timings.load(path), smart_ci.Timings.load(path)
+            for timings, line in ((mine, "PASS [ 1.000s] hyperion-sim a"), (theirs, "PASS [ 2.000s] hyperion-base b")):
+                record = smart_ci.RunRecord(["native"], {})
+                for text in ("Starting 1 test across 1 binary", line):
+                    record.line(text)
+                timings.record(record, [], complete=True)
+            theirs.save()
+            mine.save()
+            self.assertEqual(smart_ci.Timings.load(path).data["native"], {SIM: {"a": 1.0}, BASE: {"b": 2.0}})
+
+    def test_the_runner_streams_the_output_and_reads_it_to_its_end_when_interrupted(self) -> None:
+        # The real `Runner.run`, on Python for `just`: each line to the console and to `watch`.
+        runner = smart_ci.Runner(ROOT, sys.executable)
+        code = "import sys; print('one'); print('two', file=sys.stderr); sys.exit(3)"
+        seen: List[str] = []
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(runner.run(["-u", "-c", code], watch=seen.append), 3)  # unbuffered, as cargo's lines are
+        self.assertEqual(seen, ["one\n", "two\n"])
+        # An interrupt while it runs: its output read to its end, then the interrupt raised.
+        lines: List[str] = []
+
+        def interrupted(text: str) -> None:
+            lines.append(text)
+            if len(lines) == 1:
+                raise KeyboardInterrupt
+
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(KeyboardInterrupt):
+            runner.run(["-u", "-c", "print('one'); print('two'); print('three')"], watch=interrupted)
+        self.assertEqual(lines, ["one\n", "two\n", "three\n"])
+
+    def test_a_complete_run_marks_what_it_did_not_run_there(self) -> None:
+        # The plan lists `glows` on wasip1, where (say) it is compiled out: a complete run that does not
+        # run it records it as not run there, and it no longer counts as unknown, or as a test.
+        p = self.plan()
+        timings = self.timings(wasip1={})
+        record = smart_ci.RunRecord(["native", "wasip1"], {})
+        for line in ("Starting 2 tests across 2 binaries", "PASS [ 2.000s] hyperion-sim sky::tests::glows",
+                     "PASS [ 0.100s] hyperion-testkit kit", "Starting 0 tests across 1 binary"):
+            record.line(line)
+        timings.record(record, p.suites, complete=True)
+        self.assertEqual(timings.data["wasip1"], {SIM: {"sky::tests::glows": None}})
+        found = timings.weigh(p.suites)
+        self.assertEqual((found.tests, found.unknown), (2, []))
+        # Natively too; but not after a run that started more tests than it timed, or one that failed.
+        for started, complete, marked in ((1, True, True), (2, True, False), (1, False, False)):
+            with self.subTest(started=started, complete=complete):
+                native = self.timings()
+                lines = smart_ci.RunRecord(["native"], {})
+                for line in (f"Starting {started} tests across 2 binaries", "PASS [ 0.100s] hyperion-testkit kit"):
+                    lines.line(line)
+                native.record(lines, p.suites, complete=complete)
+                self.assertEqual(native.data["native"][SIM]["sky::tests::glows"], None if marked else 2.0)
+                self.assertEqual(native.data["native"][TESTKIT], {"kit": 0.1})
+
+    def test_terms_count_the_recorded_tests_they_match(self) -> None:
+        suite = smart_ci.Suite("native", crates={PROTOCOL}, terms={PROTOCOL: {"test(/^cases::/)", "test(/^ts::export_bindings_x$/)"}},
+                               filter="binary_id(=hyperion-protocol) & (test(/^cases::/) | test(/^ts::export_bindings_x$/))")
+        timings = smart_ci.Timings(None, {"native": {PROTOCOL: {"cases::one": 1.0, "cases::two": 2.0, "other": 5.0}}})
+        found = timings.weigh([suite])
+        self.assertEqual(found.unknown, ["hyperion-protocol's tests test(/^ts::export_bindings_x$/)"])
+        # nextest's default filter skips the export test: a complete run marks its term as matching nothing.
+        record = smart_ci.RunRecord(["native"], {})
+        for line in ("Starting 2 tests across 1 binary", "PASS [ 1.000s] hyperion-protocol cases::one",
+                     "PASS [ 2.000s] hyperion-protocol cases::two"):
+            record.line(line)
+        timings.record(record, [suite], complete=True)
+        self.assertIsNone(timings.data["native"][PROTOCOL]["test(/^ts::export_bindings_x$/)"])
+        found = timings.weigh([suite])
+        self.assertEqual((found.tests, found.seconds, found.unknown), (2, 3.0, []))
+
+    def test_doctests_and_browser_suites_count_by_crate(self) -> None:
+        suites = [smart_ci.Suite("doctests", crates={SIM}), smart_ci.Suite("browser", crates={SURFACE})]
+        timings = smart_ci.Timings(None, {"doctests": {"hyperion_sim": 11.0}, "browser": {SURFACE: 71.0}})
+        found = timings.weigh(suites)
+        self.assertEqual((found.tests, found.seconds, found.unknown), (0, 82.0, []))
+        self.assertEqual(smart_ci.Timings().weigh(suites).unknown,
+                         ["hyperion-sim's doctests", "hyperion-surface's browser suite"])
+
+    def test_the_timings_survive_a_bad_file(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            path = Path(scratch) / "t.json"
+            for text in ("not json", '{"version": 0, "native": {"a": {"b": 1}}}', '{"version": 1, "native": []}'):
+                path.write_text(text, encoding="utf-8")
+                self.assertEqual(smart_ci.Timings.load(path).data["native"], {})
+            path.write_text('{"version": 1, "native": {"hyperion-testkit": {"kit": "slow"}}}', encoding="utf-8")
+            found = smart_ci.Timings.load(path).weigh([smart_ci.Suite("native", crates={TESTKIT}, tests={TESTKIT: {"kit"}})])
+            self.assertEqual(found.tests, 0)
+            # A binary's table that is not one is dropped, and a run records over it.
+            path.write_text('{"version": 1, "native": {"hyperion-sim": 5}}', encoding="utf-8")
+            timings = smart_ci.Timings.load(path)
+            self.assertEqual(timings.data["native"], {})
+            record = smart_ci.RunRecord(["native"], {})
+            for line in ("Starting 1 test across 1 binary", "PASS [ 1.000s] hyperion-sim a"):
+                record.line(line)
+            timings.record(record, [], complete=True)
+            timings.save()
+            self.assertEqual(smart_ci.Timings.load(path).data["native"], {SIM: {"a": 1.0}})
+
+    def test_the_nextest_runs_are_the_locked_steps(self) -> None:
+        self.assertEqual(smart_ci.nextest_kinds(smart_ci.CI_PHASES["locked"]), ["native", "wasip1"])
+        self.assertEqual(smart_ci.nextest_kinds(smart_ci.phases_of(self.plan())["locked"]), ["native", "wasip1"])
+        self.assertEqual(smart_ci.nextest_kinds([["_wasm-run", "", "", "hyperion-base"], ["_doctest-run", "-p x", ""]]), [])
+        self.assertEqual(smart_ci.WEIGHED | {"_test-render-run"},
+                         {r[0] for r in smart_ci.phases_of(plan("crates/hyperion-surface/src/field.rs",
+                                                                    "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl"))["locked"]})
 
 
 class Parsing(unittest.TestCase):
@@ -1387,102 +1747,8 @@ class RealWorkspace(unittest.TestCase):
 # such pin stays in `ci` on both targets.
 
 
-_FILTER_TOKEN = re.compile(r"\s*(?:(?P<word>and|or|not)\b|(?P<call>[a-z_]+)\((?P<arg>/(?:\\.|[^/\\])*/|[^()]*)\)"
-                           r"|(?P<op>[()&|!+-]))")
-_FILTER_CALLS = ("all", "none", "package", "binary_id", "test")
-
-
-class Filter:
-    """nextest's filter expression, as far as the guard reads one: `all()`, `none()`, `package()`,
-    `binary_id()` and `test()`, with the matchers `=`, `~`, `/regex/` and `#glob` and nextest's
-    defaults (a glob for a package or a binary, a substring for a test); `not` and `!`, then `&`, `and`
-    and `-`, then `|`, `or` and `+`, nextest's order; and parentheses. Anything else is refused, so that
-    the guard never misreads the filter it holds."""
-
-    def __init__(self, text: str) -> None:
-        self.tokens: List[Tuple[str, object]] = []
-        self.calls: List[Tuple[str, str]] = []  # each predicate, `(name, argument)`
-        at = 0
-        while text[at:].strip():
-            m = _FILTER_TOKEN.match(text, at)
-            if m is None:
-                raise ValueError(f"the guard cannot read the filter at {text[at:at + 40]!r}: teach `Filter` it")
-            if m.group("word"):
-                self.tokens.append(("op", m.group("word")))
-            elif m.group("call"):
-                if m.group("call") not in _FILTER_CALLS:
-                    raise ValueError(f"the guard cannot read `{m.group('call')}()`: teach `Filter` it")
-                self.calls.append((m.group("call"), m.group("arg").strip()))
-                self.tokens.append(("call", self.calls[-1]))
-            else:
-                self.tokens.append(("op", m.group("op")))
-            at = m.end()
-        self.at = 0
-        self.tree = self._any()
-        if self.at != len(self.tokens):
-            raise ValueError(f"the guard cannot read the filter past {self.tokens[self.at]}")
-
-    def _next(self) -> Tuple[str, object]:
-        return self.tokens[self.at] if self.at < len(self.tokens) else ("", "")
-
-    def _any(self) -> tuple:
-        node = self._all()
-        while self._next() in (("op", "|"), ("op", "or"), ("op", "+")):
-            self.at += 1
-            node = ("or", node, self._all())
-        return node
-
-    def _all(self) -> tuple:
-        node = self._one()
-        while self._next() in (("op", "&"), ("op", "and"), ("op", "-")):
-            difference = self._next() == ("op", "-")
-            self.at += 1
-            right = self._one()
-            node = ("and", node, ("not", right) if difference else right)
-        return node
-
-    def _one(self) -> tuple:
-        kind, value = self._next()
-        self.at += 1
-        if (kind, value) in (("op", "not"), ("op", "!")):
-            return ("not", self._one())
-        if (kind, value) == ("op", "("):
-            node = self._any()
-            if self._next() != ("op", ")"):
-                raise ValueError("the guard cannot read the filter: a `(` is not closed")
-            self.at += 1
-            return node
-        if kind == "call":
-            return ("call", *value)  # type: ignore[misc]
-        raise ValueError(f"the guard cannot read the filter at {value!r}")
-
-    def exact_tests(self) -> List[str]:
-        """The tests the filter names exactly, `test(=name)`."""
-        return [arg[1:] for name, arg in self.calls if name == "test" and arg.startswith("=")]
-
-    def matches(self, package: str, binary_id: str, test: str) -> bool:
-        def holds(node: tuple) -> bool:
-            if node[0] == "or":
-                return holds(node[1]) or holds(node[2])
-            if node[0] == "and":
-                return holds(node[1]) and holds(node[2])
-            if node[0] == "not":
-                return not holds(node[1])
-            _, name, arg = node
-            if name in ("all", "none"):
-                return name == "all"
-            subject = {"package": package, "binary_id": binary_id, "test": test}[name]
-            if arg.startswith("="):
-                return subject == arg[1:]
-            if arg.startswith("~"):
-                return arg[1:] in subject
-            if len(arg) >= 2 and arg[0] == arg[-1] == "/":
-                return re.search(arg[1:-1], subject) is not None
-            if arg.startswith("#"):
-                return fnmatch.fnmatchcase(subject, arg[1:])
-            return arg in subject if name == "test" else fnmatch.fnmatchcase(subject, arg)
-
-        return holds(self.tree)
+# nextest's filter expressions, as smart-ci reads them (`smart_ci.Filter`).
+Filter = smart_ci.Filter
 
 
 # What pins a value on every target: a golden, a float's bits written as a literal, a constant named
@@ -1707,9 +1973,13 @@ class TheWasmSkyGuard(unittest.TestCase):
         self.assertFalse(Filter("all() - test(=a)").matches(SIM, SIM, "a"))
         self.assertTrue(Filter("!test(~b) and package(hyperion-*)").matches(SIM, SIM, "a"))
         self.assertTrue(Filter("binary_id(#hyperion-sim::*) or test(/^x$/)").matches(SIM, "hyperion-sim::sky", "y"))
-        for bad in ("kind(lib)", "test(a) &", "(test(a)", "test(a) test(b)"):
+        for bad in ("kind(lib)", "test(a) &", "(test(a)", "test(a) test(b)", "test(/[/)"):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 Filter(bad)
+        # A filter of many terms (smart-ci's, up to MAX_FILTER) is read without recursing once a term.
+        many = Filter(" | ".join(f"(binary_id(=b) & test(=t{i}))" for i in range(5000)))
+        self.assertTrue(many.matches(SIM, "b", "t4999"))
+        self.assertFalse(many.matches(SIM, "b", "t5000"))
 
     def test_it_finds_each_pin_in_a_test_or_the_test_code_it_reaches(self) -> None:
         scan = self.scan()
