@@ -71,7 +71,7 @@ const ZOOM_STEP = 1.25;
  * The view's keys, shown above it and describing its canvas. The preset views' keys are shown on
  * their buttons, and are not repeated here.
  */
-const KEY_LEGEND: ReadonlyArray<string> = ["ARROWS ROTATE", "+/− ZOOM", "Z FIT"];
+const KEY_LEGEND: ReadonlyArray<string> = ["ARROWS ROTATE", "+/- ZOOM", "Z FIT"];
 
 /** The shortest time between two changes of the azimuth and elevation readouts: 4 Hz. */
 const READOUT_INTERVAL_MS = 250;

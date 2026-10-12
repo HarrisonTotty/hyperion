@@ -122,7 +122,7 @@ describe("SpatialView", () => {
     renderView();
 
     expect(screen.getByRole("application", { name: "Local chart" })).toHaveAccessibleDescription(
-      "AZM 030° ELV +30° ARROWS ROTATE +/− ZOOM Z FIT",
+      "AZM 030° ELV +30° ARROWS ROTATE +/- ZOOM Z FIT",
     );
   });
 
