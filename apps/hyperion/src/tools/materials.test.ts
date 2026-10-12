@@ -244,11 +244,11 @@ describe("the derived files", () => {
     }
   });
 
-  it("state NH₄SH's band over the grid, +0.081 and −0.022, in its file", () => {
+  it("state NH₄SH's band over the grid, +0.081 and -0.022, in its file", () => {
     // The foot is 0.02247: science-r08-gases-2.md §2.2's −0.023 rounded its 4-figure 0.0225.
     const nh4sh = DERIVED_MATERIALS.find((file) => file.key === "NH4SH");
     expect(nh4sh?.standIn).toBe(
-      "a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, since no visible optical constants of NH4SH are published: 1.674 at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and −0.022",
+      "a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, since no visible optical constants of NH4SH are published: 1.674 at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and -0.022",
     );
     expect(nh4sh?.source).toContain(
       "1.80 would need a molar refraction 22% above the additive one.",

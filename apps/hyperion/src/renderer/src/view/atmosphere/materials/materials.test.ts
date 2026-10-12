@@ -204,6 +204,28 @@ describe("refractiveIndex", () => {
     expect(misnamed).toEqual([]);
   });
 
+  it("states a sample's temperature in its name in kelvin, as its file holds it", () => {
+    const misstated = MATERIAL_FILES.filter((file) => {
+      const kelvin = /(?:at|near) ([0-9]+) K\b/u.exec(file.name)?.[1];
+      return (
+        file.name.includes("°C") || (kelvin !== undefined && Number(kelvin) !== file.temperatureK)
+      );
+    }).map((file) => file.name);
+    expect(misstated).toEqual([]);
+  });
+
+  it("signs a number in a file's player text with the hyphen-minus, as the formatters do", () => {
+    expect(
+      MATERIAL_FILES.flatMap((file) => [file.name, file.standIn ?? ""]).filter((text) =>
+        /−[0-9]/u.test(text),
+      ),
+    ).toEqual([]);
+  });
+
+  it("names the enstatite glass by its phase and formula, with no mineral name", () => {
+    expect(MATERIAL_FILES.find((file) => file.key === "MgSiO3")?.name).toBe("amorphous MgSiO3");
+  });
+
   it("writes a variant's mass fraction in words, and any other variant as another composition", () => {
     expect(["75wt%", "84.5wt%", "dilute", undefined].map(variantWords)).toEqual([
       "mass fraction 75 %",
@@ -310,7 +332,7 @@ describe("NH₄SH, a stated stand-in", () => {
   it("stays a stand-in that states its estimate", () => {
     expect(refractiveIndex("NH4SH", 550).provenance).toBe("standIn");
     expect(resolveMaterial("NH4SH").standIn).toBe(
-      "a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, since no visible optical constants of NH4SH are published: 1.674 at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and −0.022",
+      "a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, since no visible optical constants of NH4SH are published: 1.674 at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and -0.022",
     );
     expect(fileOf("NH4SH").source).toContain(
       "1.80 would need a molar refraction 22% above the additive one.",
