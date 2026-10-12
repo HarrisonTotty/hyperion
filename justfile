@@ -35,7 +35,14 @@ install:
 # exists, and when the filesystem cannot clone it says so and copies nothing, since a plain copy
 # would be tens of gigabytes. It holds each of the source's cargo build-directory locks while
 # copying, so that no build of the source is caught half-written; a build there waits for the copy,
-# and the copy for a build.
+# and the copy for a build. On Linux, when the source's `target/` is the root of a btrfs subvolume
+# (`just target-subvolume`), it takes a snapshot of it instead, still under those locks: seconds
+# rather than minutes, so the source's builds barely wait (a 33 GB, 115k-file tree that took 31.6 s
+# to clone took 1.5 s to snapshot; perf-build.md Q3), and the snapshot shares the source's metadata
+# where a clone writes an extent reference per extent. The snapshot is a subvolume itself, so seeds
+# from a seeded worktree snapshot too, and it is deleted with `rm -rf` like any directory. Both
+# tests are unprivileged reads (`stat`: the filesystem's type, and inode 256, a subvolume's root);
+# where either fails, or the snapshot does (another filesystem), it clones as before.
 # Seed this worktree's `target/` from another worktree's, e.g. `just seed-target ../agent-x`.
 seed-target source:
     #!/usr/bin/env bash
@@ -90,9 +97,82 @@ seed-target source:
         fd=$((fd + 1))
     done
     start=$SECONDS
-    "${clone[@]}" "$src" "$here/target.seeding"
+    # `stat -f -c` and `stat -c` are GNU's, so on Linux alone.
+    if [[ "$(uname -s)" == Linux && "$(stat -f -c %T "$src")" == btrfs && "$(stat -c %i "$src")" == 256 ]] \
+        && command -v btrfs >/dev/null; then
+        if btrfs subvolume snapshot "$src" "$here/target.seeding" >/dev/null; then
+            how="btrfs subvolume snapshot"
+        else
+            echo "the snapshot failed, so cloning instead..." >&2
+            rm -rf "$here/target.seeding"
+        fi
+    fi
+    if [[ "$how" != "btrfs subvolume snapshot" ]]; then
+        "${clone[@]}" "$src" "$here/target.seeding"
+    fi
     mv "$here/target.seeding" "$here/target"
-    echo "seeded $here/target from $src in $((SECONDS - start)) s" >&2
+    echo "seeded $here/target from $src in $((SECONDS - start)) s ($how)" >&2
+
+# A worktree's `target/` becomes the root of a btrfs subvolume of its own, so that `just
+# seed-target` from this worktree takes a snapshot instead of cloning the tree file by file (Linux,
+# on btrfs; nothing to do elsewhere). It clones the tree into a new subvolume, as a seed does, then
+# swaps the two and deletes the old tree, holding the cargo build-directory locks of `target/`
+# throughout. A build that starts meanwhile waits on the old tree's lock, and builds into the new
+# tree, unlocked, once it ends: run it when this worktree is idle. Once per worktree; a seed taken
+# from a converted one is a subvolume already.
+# Make this worktree's `target/` a btrfs subvolume, the source of instant seeds (Linux, btrfs).
+target-subvolume:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    here="{{ justfile_directory() }}"
+    target="$here/target"
+    new="$here/target.subvolume"
+    old="$here/target.unconverted"
+    if [[ "$(uname -s)" != Linux ]]; then
+        echo "error: btrfs subvolumes are Linux's; on $(uname -s), seed-target clones" >&2
+        exit 1
+    fi
+    if [[ -e "$new" || -e "$old" ]]; then
+        echo "error: $new or $old exists, from a conversion that did not finish: if target/ is missing," \
+            "rename $old to target/; then remove what is left" >&2
+        exit 1
+    fi
+    if [[ ! -d "$target" ]]; then
+        echo "error: $target is not a directory: there is nothing to convert" >&2
+        exit 1
+    fi
+    if [[ "$(stat -f -c %T "$target")" != btrfs ]]; then
+        echo "error: $target is not on btrfs ($(stat -f -c %T "$target")), so seed-target clones from it" >&2
+        exit 1
+    fi
+    if [[ "$(stat -c %i "$target")" == 256 ]]; then
+        echo "$target is a subvolume already" >&2
+        exit 0
+    fi
+    locks=()
+    while IFS= read -r -d '' lock; do
+        locks+=("$lock")
+    done < <(find "$target" -maxdepth 3 -name .cargo-lock -print0)
+    # As in seed-target: each lock on a descriptor of its own, numbered from 20.
+    fd=20
+    for lock in ${locks[@]+"${locks[@]}"}; do
+        eval "exec $fd<\"\$lock\""
+        if ! flock -n "$fd"; then
+            echo "waiting for a build in this worktree to finish ($lock)..." >&2
+            flock "$fd"
+        fi
+        fd=$((fd + 1))
+    done
+    # Until the swap, a failure leaves `target/` as it was; after it, only the old tree is left.
+    trap '[[ -e "$target" ]] || mv "$old" "$target"; rm -rf "$new"' EXIT
+    start=$SECONDS
+    btrfs subvolume create "$new" >/dev/null
+    cp -r --reflink=always --preserve=timestamps "$target/." "$new/"
+    mv "$target" "$old"
+    mv "$new" "$target"
+    trap - EXIT
+    rm -rf "$old"
+    echo "converted $target to a btrfs subvolume in $((SECONDS - start)) s" >&2
 
 # Install the git pre-commit and pre-push hooks into this clone.
 hooks:

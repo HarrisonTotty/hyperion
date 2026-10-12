@@ -94,7 +94,9 @@ Options to `just client` reach the client: `just client --address 10.0.0.5 --por
 HYPERION builds and runs on Linux, macOS and Windows. The recipes are bash scripts.
 
 - **Linux** is the reference: the checks and every recorded measurement run there. Where
-  `systemd-run --user` works, the heavy test runs are capped in memory.
+  `systemd-run --user` works, the heavy test runs are capped in memory. `just seed-target` clones
+  with `cp --reflink`, or on btrfs takes a snapshot of a source that `just target-subvolume` has
+  made a subvolume.
 - **macOS** needs the Xcode Command Line Tools (`xcode-select --install`, for clang, git and
   Python 3) and the prerequisites above, all of which Homebrew has. The recipes run on macOS's own
   bash 3.2 and BSD tools. Where macOS lacks a util-linux or coreutils tool that a recipe uses
