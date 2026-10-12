@@ -1150,9 +1150,10 @@ variants exist.
     one raster, one hue and one mandatory legend, and already names dust among the fields it covers
     ("such as column density or dust"), so this is an extension of the rule rather than a new one.
   - **Nomenclature.** Add `EXTINCTION`, `DUST OVERLAY`, `A(V)`, `A(K)`, `E(B−V)` and `N(H)` to the
-    list, in the parenthesised form until the owner rules on `<sub>`, with `-` as the guide's signed
-    form (plan 05's ruling 8) rather than the typographic minus. The guide's "One name per thing" rule
-    means nothing on the console may use an abbreviation that is not on this list.
+    list, in the parenthesised form until the owner rules on `<sub>`, with `E(B−V)` taking the minus
+    sign for its subtraction (signoff-6; plan 05's ruling 8 governs a number's sign). The guide's
+    "One name per thing" rule means nothing on the console may use an abbreviation that is not on
+    this list.
 - **P07.T11.b Galaxy map.** A quantity selector (`SYSTEMS`, `EXTINCTION`, and a `DUST OVERLAY` toggle
   available under `SYSTEMS`), keyboard-operable with its key shown, a display control and styled as
   one. It belongs in `GalaxyMapPanel.tsx` beside the `POPULATION` choice it already owns, and is passed

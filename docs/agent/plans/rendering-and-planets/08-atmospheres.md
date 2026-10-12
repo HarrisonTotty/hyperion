@@ -582,6 +582,13 @@ Names are those the owning plans give; the owning plan is authoritative.
     passed in by R08.T10.a.
   - `DetailLevel::Surface`, and `Section::{NotResolved, NotModelled, NotApplicable}` (built;
     `DetailLevelDto` and `SectionDto` on the wire).
+  - P14.T49.f's substance names (built, by this plan's lane first:
+    `apps/hyperion/src/renderer/src/lib/substances.ts`):
+    `substanceName(key: string, nameCase: NameCase = "sentence"): string`,
+    `SUBSTANCE_NAMES: Readonly<Record<string, string>>`, `UNLISTED_MATERIAL`
+    (`"unlisted material"`) and `type NameCase = "sentence" | "upper"`. The notes and the optics
+    registry's stand-ins name each material through `substanceName`, and `materials.test.ts`
+    holds each material file's `name` to it (R08.T5.c, T10.a; decision-substance-names).
   - The asks of R08.T1: P14.T24.c–f and P14.T35.e.
 - **R01:**
   - `RenderEngine.createCompute(pair: KernelPair): ComputeHandle` (and `createComputeAsync`), and
