@@ -293,7 +293,10 @@ a wrapper would keep the slot through the wait for the lock and the suites. A fu
 own phases the same way, and `just smart-ci --full` runs that plan whatever the diff, in place of
 `build-slot just ci`. Unset, as on any machine without build slots, the phases run directly. With
 `SMART_CI_PRIORITY=1` (integration's runs, over its unpushed commits or with `--full`), any plan's
-suites that take the heavy-test lock take it with that priority.
+suites that take the heavy-test lock take it with that priority, and every recipe line carries the
+time it started (`JUST_TIMESTAMP=true`). Each nextest run writes a JUnit report of its tests' start
+times and durations to `target/nextest/<profile>/junit.xml`: `default` for the native suites,
+`wasip1` for the wasip1 ones.
 
 **Small suites run without the heavy-test lock.** The lock is for full suites and runs over 4 GB.
 A plan's suites run without it when they are small by the timings recorded from earlier runs: at

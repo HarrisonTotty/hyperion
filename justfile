@@ -768,6 +768,9 @@ _wasip1 +args:
         dirs+=" --dir=$(CDPATH='' cd -- "$CARGO_TARGET_DIR" && pwd -P)"
     fi
     export CARGO_TARGET_WASM32_WASIP1_RUNNER="${WASMTIME:-wasmtime} --env NEXTEST_RUN_ID $dirs"
+    # nextest's `wasip1` profile (`.config/nextest.toml`), for a JUnit report of its own, unless the
+    # run gives its own `--profile`, which wins.
+    export NEXTEST_PROFILE="${NEXTEST_PROFILE:-wasip1}"
     cargo "$@"
 
 # The wasip1 suites run under cargo-nextest, one wasmtime process per test across every core:
@@ -1205,8 +1208,12 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
 # depends on a changed one (and with `--all-tests` their tests); a changed `Cargo.toml` always adds
 # their Clippy and tests. `--full` runs the full `ci`'s phases whatever the diff (integration's run).
 # Run it capped, with `SMART_CI_SLOT` naming the machine's build-slot command where there is one,
-# never inside it: smart-ci holds a slot only while it builds, and its test phase takes the
-# heavy-test lock as `ci`'s does.
+# never inside it: smart-ci holds a slot only while it builds. Its suites take the heavy-test lock as
+# `ci`'s do, unless they are small by the timings recorded from earlier runs (at most 300 of
+# nextest's tests and 300 s), which run capped without it; `--full` and test-render's run always
+# take it. `SMART_CI_PRIORITY=1` (integration's runs, over its unpushed commits or with `--full`)
+# gives any plan that takes the lock priority on it, and integration's runs timestamp every recipe
+# line (`JUST_TIMESTAMP=true`).
 # The gate a change needs, chosen from its diff: `ci`'s steps, only those the change reaches.
 [positional-arguments]
 smart-ci *args:

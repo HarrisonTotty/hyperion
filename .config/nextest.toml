@@ -17,6 +17,18 @@
 [profile.default]
 default-filter = "not (package(hyperion-protocol) & test(/export_bindings/))"
 
+# Each run's JUnit report, with every test's start time and duration, in
+# `target/nextest/<profile>/junit.xml`, from which a log's suites can be read for their wall time
+# and their use of the cores (perf-build.md Q4 and L6). Every profile inherits it.
+[profile.default.junit]
+path = "junit.xml"
+
+# The wasip1 suites' profile, which `just _wasip1` names (`NEXTEST_PROFILE`, unless a run gives its
+# own `--profile`): the default one, whose settings and overrides every profile inherits, under a
+# name of its own, so that the wasip1 run's report does not replace the native run's, which `ci`
+# makes just before it in the same hold of the heavy-test lock.
+[profile.wasip1]
+
 # wasm32-wasip1 has no threads, so there every test runs on one: the sky's census and oracle helpers
 # and the bound checks run their jobs in turn (`THREADS` is 1 in `tests/common/sky.rs`; the others
 # branch on `target_family = "wasm"`). So under wasip1 each test takes one slot, whatever it

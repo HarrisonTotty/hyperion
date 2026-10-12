@@ -971,6 +971,22 @@ class Execution(unittest.TestCase):
         # A plan with no suites takes no lock, and says nothing of priority.
         self.assertNotIn("heavy-test lock", smart_ci.describe(plan("README.md"), [], "x", False, env=priority))
 
+    def test_integrations_runs_timestamp_their_recipe_lines(self) -> None:
+        # perf-build Q4: `--full` or SMART_CI_PRIORITY=1 sets JUST_TIMESTAMP=true for every `just` smart-ci
+        # runs, unless the environment sets it; a lane's runs are unchanged.
+        stamp = {"JUST_TIMESTAMP": "true"}
+        for full, env, wanted in ((True, {}, stamp), (False, {"SMART_CI_PRIORITY": "1"}, stamp),
+                                  (True, {"SMART_CI_PRIORITY": "1"}, stamp), (False, {}, {}),
+                                  (False, {"SMART_CI_PRIORITY": "0"}, {}),
+                                  (True, {"JUST_TIMESTAMP": "false"}, {})):
+            with self.subTest(full=full, env=env):
+                self.assertEqual(smart_ci.timestamps(full, env), wanted)
+        said = "Each recipe line is timestamped (JUST_TIMESTAMP=true)"
+        self.assertIn(said, smart_ci.describe(smart_ci.full_plan(), [], "x", False, env={}))
+        server = plan("crates/hyperion-server/src/main.rs")
+        self.assertIn(said, smart_ci.describe(server, [], "x", False, env={"SMART_CI_PRIORITY": "1"}))
+        self.assertNotIn(said, smart_ci.describe(server, [], "x", False, env={}))
+
     def test_a_failed_build_runs_no_suite(self) -> None:
         for env, fail in (({}, "_clippy-for"), (self.SLOT, "slot")):
             with self.subTest(env=env):

@@ -214,6 +214,12 @@ SLOT_VAR = "SMART_CI_SLOT"
 # plan's suites priority on the heavy-test lock, whatever the plan: `_locked` with
 # `HYPERION_HEAVY_PRIORITY=1` (perf-build L5 part a). A lane's runs never set it, and wait their turn.
 PRIORITY_VAR = "SMART_CI_PRIORITY"
+# just's switch for a timestamp before each recipe line it runs (`--timestamp`, `[HH:MM:SS]`; `true`
+# or `false`, as just 1.58 refuses `1`), which every `just` that smart-ci runs inherits, nested ones
+# included. Integration's runs set it, so that the wall time of each phase, and of the waits for a
+# build slot and for the heavy-test lock, can be read from their logs (perf-build.md Q4); a lane's
+# runs print as before.
+TIMESTAMP_VAR = "JUST_TIMESTAMP"
 
 # The heavy-test lock is for full suites and runs over 4 GB (common.md's Load limits; the owner's
 # rule: never single tests), and a lane's 8 tests once waited 2 h 35 min for it behind hour-long
@@ -2108,6 +2114,8 @@ def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, depende
         if slot is None and env.get("BUILD_SLOT_HELD"):
             lines.append("A build slot is held already (BUILD_SLOT_HELD), and stays held to the end, the locked "
                          f"phase included: run `just smart-ci` with {SLOT_VAR} set instead of inside build-slot.")
+        if timestamps(FULL_RUN in plan.full, env):
+            lines.append(f"Each recipe line is timestamped ({TIMESTAMP_VAR}=true), as in all of integration's runs.")
     return "\n".join(lines)
 
 
@@ -2325,6 +2333,13 @@ def lock_priority(env: Mapping[str, str]) -> Optional[Dict[str, str]]:
     """`HYPERION_HEAVY_PRIORITY=1` for `_locked`, with `SMART_CI_PRIORITY=1`, whatever the plan
     (integration's runs, `--full` or over its unpushed commits); else none."""
     return {"HYPERION_HEAVY_PRIORITY": "1"} if env.get(PRIORITY_VAR) == "1" else None
+
+
+def timestamps(full: bool, env: Mapping[str, str]) -> Dict[str, str]:
+    """`JUST_TIMESTAMP=true` for integration's runs (`--full`, or `SMART_CI_PRIORITY=1`) where the
+    environment does not set it already; else nothing."""
+    integration = full or env.get(PRIORITY_VAR) == "1"
+    return {TIMESTAMP_VAR: "true"} if integration and TIMESTAMP_VAR not in env else {}
 
 
 # --------------------------------------------------------------------------------------------------
@@ -2747,9 +2762,10 @@ A test with no recorded time counts as large, as does one that reads a fixture b
 {priority}=1 (integration's runs: `{slot}=<the build-slot command> just smart-ci <its base>`, or
 `--full`), suites that take the lock take it first, whatever the plan: every other run waiting for
 it steps aside until they hold it (`_locked`'s `HYPERION_HEAVY_PRIORITY`); a lane's own runs never
-set it.
+set it. Integration's runs, with {priority}=1 or `--full`, also set {timestamp}=true unless it is set:
+just prints the time before each recipe line, so that their logs show each phase's wall time.
 """.format(branch=INTEGRATION_BRANCH, slot=SLOT_VAR, priority=PRIORITY_VAR, timings=TIMINGS_FILE,
-           tests=SMALL_TESTS, seconds=SMALL_SECONDS)
+           tests=SMALL_TESTS, seconds=SMALL_SECONDS, timestamp=TIMESTAMP_VAR)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -2790,6 +2806,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.plan:
             return 0
         print(flush=True)
+        os.environ.update(timestamps(True, os.environ))
         return execute(plan, root, just, timings=timings)
     try:
         change = changed_paths(root, args.base)
@@ -2813,6 +2830,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.plan:
         return 0
     print(flush=True)
+    os.environ.update(timestamps(False, os.environ))
     return execute(plan, root, just, timings=timings)
 
 
