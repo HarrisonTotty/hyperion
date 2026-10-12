@@ -675,7 +675,8 @@ _wasm-preflight +tools:
 # but what the runner passes. It passes nextest's run id (`--env NEXTEST_RUN_ID`, nothing when the
 # variable is unset, as under `cargo test`), by which the sim's sky tests build their luminosity
 # tables once a run and share them (`sky::testing::shared`): 1,532 s of the sky's wasip1 tests
-# without it, 895 s with it (2026-10-11).
+# without it, 895 s with it (2026-10-11). The modules carry no DWARF: `.cargo/config.toml` says why,
+# and how to build one test's with it.
 [positional-arguments]
 _wasip1 +args:
     #!/usr/bin/env bash
