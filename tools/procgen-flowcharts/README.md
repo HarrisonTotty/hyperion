@@ -66,7 +66,10 @@ just flowcharts --out docs/diagrams/procgen      # anywhere else
 | `--dpi DPI`            | PNG resolution (default 96), lowered automatically for large charts             |
 | `--timeout SECONDS`    | the limit for each Graphviz run (default 600)                                   |
 
-**Requirements.** Python 3.11 or later, standard library only (it uses `tomllib`). Graphviz (`dot`
+**Requirements.** uv, which runs the tool in the Python 3.14 that `pyproject.toml` asks for and
+fetches it where the machine's `python3` is older (macOS's lacks `tomllib`, standard since 3.11). At
+run time the tool needs only the standard library; `mypy` and `ruff` are its dev dependencies (see
+"Tests"). Graphviz (`dot`
 and `neato`, tested with 16.1). The DejaVu Sans and DejaVu Sans Mono fonts. `fc-match` and
 `fc-query` are used, when present, to warn about characters the font lacks.
 
@@ -303,7 +306,14 @@ data/stars.toml: edge s.mass -> s.track: dangling 'to': no node 's.track' in any
 ## Tests
 
 ```sh
-python3 -B tools/procgen-flowcharts/test_procgen_flowcharts.py
+uv run --project tools/procgen-flowcharts python -B tools/procgen-flowcharts/test_procgen_flowcharts.py
+```
+
+The code is linted, formatted (at 100 columns, the repo's width) and type-checked by the project's
+dev tools, from this directory:
+
+```sh
+uv run ruff check . && uv run ruff format --check . && uv run mypy
 ```
 
 Standard library only, about 6 s. The tests use the fixtures in `testdata/`. One test also checks

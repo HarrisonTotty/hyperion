@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """`just flowcharts`: the flowcharts of HYPERION's procedural generation, drawn from `data/*.toml`.
 
 Usage: procgen_flowcharts.py [--check] [--only CHARTS] [--format FORMATS] [--detail LEVEL]
@@ -38,7 +37,8 @@ to measure them, then packed in bands in the order the data flows through them, 
 edge still long. The title, the legend and the sections are stacked on one canvas, and `neato -n2`
 draws every format from it, PNGs at a resolution capped so that the complete chart stays viewable.
 
-Standard library only, Python 3.11 or later (tomllib); drawing needs Graphviz (`dot` and `neato`).
+Standard library only, in the Python 3.14 of `pyproject.toml` (`just flowcharts` runs it under uv);
+drawing needs Graphviz (`dot` and `neato`).
 `test_procgen_flowcharts.py` beside it holds the validation, the charts and the palette to their
 rules, on the fixtures in `testdata/`. The visual language is in the README.
 """
@@ -48,6 +48,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import functools
+import itertools
 import json
 import math
 import os
@@ -59,9 +60,9 @@ import textwrap
 import time
 import tomllib
 import unicodedata
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 sys.dont_write_bytecode = True
 
@@ -193,9 +194,13 @@ class KindStyle:
 # one: the terminal oval for a seed, the data parallelogram, the stored-data cylinder, the
 # process rectangle, the decision diamond, the document for generated text.
 NODE_KINDS: dict[str, KindStyle] = {
-    "seed": KindStyle("randomness", "ellipse", "ellipse", False, "root seed, derived key or stream"),
+    "seed": KindStyle(
+        "randomness", "ellipse", "ellipse", False, "root seed, derived key or stream"
+    ),
     "draw": KindStyle("randomness", "box", "", True, "samples a distribution"),
-    "param": KindStyle("inputs", "polygon", "parallelogram", False, "parameter, setting or constant"),
+    "param": KindStyle(
+        "inputs", "polygon", "parallelogram", False, "parameter, setting or constant"
+    ),
     "table": KindStyle("inputs", "cylinder", "", False, "fitted or tabulated data"),
     "model": KindStyle("derivation", "box", "", False, "deterministic physics step"),
     "decision": KindStyle("derivation", "diamond", "diamond", False, "branch; edges name the case"),
@@ -361,7 +366,9 @@ class _Reader:
             item = value[key]
             if kind is str and not isinstance(item, str):
                 self.problem(where, f"'{key}' must be a string")
-            elif kind is list and not (isinstance(item, list) and all(isinstance(x, str) for x in item)):
+            elif kind is list and not (
+                isinstance(item, list) and all(isinstance(x, str) for x in item)
+            ):
                 self.problem(where, f"'{key}' must be a list of strings")
             else:
                 out[key] = item
@@ -376,7 +383,9 @@ class _Reader:
         elif control := next((ch for ch in text if unicodedata.category(ch) == "Cc"), ""):
             self.problem(where, f"'{key}' holds a control character (U+{ord(control):04X})")
         if limit and len(text) > limit:
-            self.problem(where, f"'{key}' is {len(text)} characters, over the limit of {limit}: \"{text}\"")
+            self.problem(
+                where, f"'{key}' is {len(text)} characters, over the limit of {limit}: \"{text}\""
+            )
 
     def ident(self, where: str, ident: str, prefix: str) -> None:
         if not prefix:
@@ -438,8 +447,14 @@ def _read_file(path: Path, file: str, doc: dict, problems: list[Problem]):
     for key in ("title", "snapshot"):
         if key in meta:
             reader.line("meta", key, meta[key])
-    part = Part(file, path.stem, stage if stage in STAGE_NAMES else "", prefix, meta.get("title", ""),
-                meta.get("snapshot", ""))
+    part = Part(
+        file,
+        path.stem,
+        stage if stage in STAGE_NAMES else "",
+        prefix,
+        meta.get("title", ""),
+        meta.get("snapshot", ""),
+    )
 
     clusters: list[Cluster] = []
     for index, raw in enumerate(_list(doc, "cluster", reader)):
@@ -453,7 +468,10 @@ def _read_file(path: Path, file: str, doc: dict, problems: list[Problem]):
     local = {cluster.id: cluster for cluster in clusters}
     for cluster in clusters:
         if cluster.parent and cluster.parent not in local:
-            reader.problem(cluster.id, f"unknown parent cluster '{cluster.parent}' (a parent must be in the same file)")
+            reader.problem(
+                cluster.id,
+                f"unknown parent cluster '{cluster.parent}' (a parent must be in the same file)",
+            )
         seen = {cluster.id}
         parent = local.get(cluster.parent)
         while parent is not None:
@@ -471,26 +489,45 @@ def _read_file(path: Path, file: str, doc: dict, problems: list[Problem]):
             continue
         reader.ident(where, table["id"], prefix)
         if table["kind"] not in NODE_KINDS:
-            reader.problem(where, f"unknown kind '{table['kind']}' (expected {', '.join(NODE_KINDS)})")
+            reader.problem(
+                where, f"unknown kind '{table['kind']}' (expected {', '.join(NODE_KINDS)})"
+            )
         if table["status"] not in STATUSES:
-            reader.problem(where, f"unknown status '{table['status']}' (expected {', '.join(STATUSES)})")
+            reader.problem(
+                where, f"unknown status '{table['status']}' (expected {', '.join(STATUSES)})"
+            )
         reader.line(where, "label", table["label"], LABEL_MAX)
         reader.line(where, "summary", table["summary"], SUMMARY_MAX)
         detail = table.get("detail", [])
         if len(detail) > DETAIL_LINES_MAX:
-            reader.problem(where, f"'detail' has {len(detail)} lines, over the limit of {DETAIL_LINES_MAX}")
+            reader.problem(
+                where, f"'detail' has {len(detail)} lines, over the limit of {DETAIL_LINES_MAX}"
+            )
         for number, text in enumerate(detail, 1):
             reader.line(where, f"detail line {number}", text, DETAIL_MAX)
         for key in ("cite", "source"):
             for number, text in enumerate(table.get(key, []), 1):
                 reader.line(where, f"{key} entry {number}", text)
-        cluster = table.get("cluster", "")
-        if cluster and cluster not in local:
-            reader.problem(where, f"unknown cluster '{cluster}' (a node's cluster must be in its own file)")
-            cluster = ""
-        nodes.append(Node(table["id"], table["label"], table["kind"], table["summary"], table["status"],
-                          part.name, cluster, tuple(detail), tuple(table.get("cite", [])),
-                          tuple(table.get("source", []))))
+        cluster_id = table.get("cluster", "")
+        if cluster_id and cluster_id not in local:
+            reader.problem(
+                where, f"unknown cluster '{cluster_id}' (a node's cluster must be in its own file)"
+            )
+            cluster_id = ""
+        nodes.append(
+            Node(
+                table["id"],
+                table["label"],
+                table["kind"],
+                table["summary"],
+                table["status"],
+                part.name,
+                cluster_id,
+                tuple(detail),
+                tuple(table.get("cite", [])),
+                tuple(table.get("source", [])),
+            )
+        )
 
     edges: list[Edge] = []
     for index, raw in enumerate(_list(doc, "edge", reader)):
@@ -563,11 +600,22 @@ def load(data_dir: Path) -> tuple[Pipeline, list[Problem]]:
                 if ref.startswith("@"):
                     match = PLACEHOLDER.fullmatch(ref)
                     if not match:
-                        reader.problem(where, f"'{end}' is not a placeholder of the form '@<part>:<description>': '{ref}'")
+                        reader.problem(
+                            where,
+                            f"'{end}' is not a placeholder of the form '@<part>:<description>': '{ref}'",
+                        )
                         ok = False
                     else:
-                        known = "" if match.group(1) in pipe.parts else f" (and no part '{match.group(1)}' is loaded)"
-                        reader.problem(where, f"unresolved placeholder in '{end}': '{ref}'{known}", placeholder=True)
+                        known = (
+                            ""
+                            if match.group(1) in pipe.parts
+                            else f" (and no part '{match.group(1)}' is loaded)"
+                        )
+                        reader.problem(
+                            where,
+                            f"unresolved placeholder in '{end}': '{ref}'{known}",
+                            placeholder=True,
+                        )
                 elif ref in pipe.nodes:
                     continue
                 elif ref in pipe.clusters:
@@ -601,14 +649,24 @@ def font_coverage(family: str = GLYPH_FONT) -> frozenset[int] | None:
     """The code points `family` draws, from fontconfig; None where fontconfig cannot say."""
     try:
         # fc-match answers with a stand-in when the family is missing: only the family itself counts.
-        match = subprocess.run(["fc-match", "--format=%{family}\n%{file}", family], capture_output=True, text=True,
-                               timeout=30, check=True).stdout
+        match = subprocess.run(
+            ["fc-match", "--format=%{family}\n%{file}", family],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout
         names, _, found = match.partition("\n")
         if family not in names.split(","):
             return None
-        charset = subprocess.run(["fc-query", "--format=%{charset}", found], capture_output=True, text=True,
-                                 timeout=30, check=True).stdout
-    except (OSError, subprocess.SubprocessError):
+        charset = subprocess.run(
+            ["fc-query", "--format=%{charset}", found],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout
+    except OSError, subprocess.SubprocessError:
         return None
     points: set[int] = set()
     for chunk in charset.split():
@@ -641,7 +699,13 @@ def glyph_gaps(pipe: Pipeline, coverage: frozenset[int] | None) -> list[Problem]
         for ch in text:
             if ord(ch) not in coverage and not ch.isspace() and (file, where, ch) not in warned:
                 warned.add((file, where, ch))
-                out.append(Problem(file, where, f"'{ch}' (U+{ord(ch):04X}) is not in {GLYPH_FONT}: it will be drawn in another font, or as a box"))
+                out.append(
+                    Problem(
+                        file,
+                        where,
+                        f"'{ch}' (U+{ord(ch):04X}) is not in {GLYPH_FONT}: it will be drawn in another font, or as a box",
+                    )
+                )
     return out
 
 
@@ -686,7 +750,10 @@ def hub_cuts(pipe: Pipeline, stage: str) -> set[int]:
     for index, edge in enumerate(pipe.edges):
         if edge.src in pipe.nodes and edge.dst in pipe.nodes and fanout[edge.src] >= HUB_FANOUT:
             src, dst = pipe.nodes[edge.src], pipe.nodes[edge.dst]
-            if pipe.stage_of(edge.src) == stage == pipe.stage_of(edge.dst) and src.cluster != dst.cluster:
+            if (
+                pipe.stage_of(edge.src) == stage == pipe.stage_of(edge.dst)
+                and src.cluster != dst.cluster
+            ):
                 cuts.add(index)
     return cuts
 
@@ -702,7 +769,9 @@ class Item:
     of the legend."""
 
     key: str
-    look: str  # a node kind, "stub", "connector", "placeholder", "plain" (legend text) or "plain-box"
+    look: (
+        str  # a node kind, "stub", "connector", "placeholder", "plain" (legend text) or "plain-box"
+    )
     status: str
     label: str  # an HTML-like label's inside
     centred: bool = False
@@ -749,9 +818,13 @@ class Section:
     connectors: int
     placeholders: int
     drawn: set[int] = field(default_factory=set)  # the pipeline edges it draws, by index
-    units: dict[str, str] = field(default_factory=dict)  # item key -> its unit: a top-level cluster, or a lone step
+    units: dict[str, str] = field(
+        default_factory=dict
+    )  # item key -> its unit: a top-level cluster, or a lone step
     bands: list[list[str]] = field(default_factory=list)
-    aligned: list[list[str]] = field(default_factory=list)  # items ranked together: each band's top row
+    aligned: list[list[str]] = field(
+        default_factory=list
+    )  # items ranked together: each band's top row
 
 
 @dataclass
@@ -769,8 +842,13 @@ class Chart:
 def esc(text: str) -> str:
     """`text` for an HTML-like label: `&`, `<`, `>` and `"` as entities, and a backslash doubled, since
     Graphviz reads `\\N`, `\\G` and `\\E` in HTML-like labels as the node's, graph's and edge's names."""
-    return (text.replace("\\", "\\\\").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            .replace('"', "&quot;"))
+    return (
+        text.replace("\\", "\\\\")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
 
 
 def _font(inner: str, size: float, colour: str = "", face: str = "") -> str:
@@ -811,14 +889,18 @@ STUBBED_LINES = 3
 def stubbed_line(numbers: Sequence[str]) -> str:
     """Where a step's stubs are: "↻ stubs at G12 · G15 · G20", wrapped, the rest summed up."""
     shown = list(numbers[: STUBBED_PER_LINE * STUBBED_LINES])
-    lines = [" · ".join(shown[i : i + STUBBED_PER_LINE]) for i in range(0, len(shown), STUBBED_PER_LINE)]
+    lines = [
+        " · ".join(shown[i : i + STUBBED_PER_LINE]) for i in range(0, len(shown), STUBBED_PER_LINE)
+    ]
     if len(numbers) > len(shown):
         lines[-1] += f" and {len(numbers) - len(shown)} more"
     lines[0] = "↻ stubs at " + lines[0]
     return _lines(lines)
 
 
-def node_label(node: Node, detail: str, centred: bool, number: str = "", stubbed: Sequence[str] = ()) -> str:
+def node_label(
+    node: Node, detail: str, centred: bool, number: str = "", stubbed: Sequence[str] = ()
+) -> str:
     """A step's label: its number, kind and status above a bold title, the summary, where its stubs are
     (if it has any), then (standard) the detail lines, then (full) its id, citations in italic and
     sources in monospace."""
@@ -850,13 +932,16 @@ def node_label(node: Node, detail: str, centred: bool, number: str = "", stubbed
 
 def stub_label(number: str, node: Node) -> str:
     """A reference to a step elsewhere in the chart: "↻ G12  Galaxy seed"."""
-    return f'{_font(f"<B>↻ {esc(number)}</B>", 8)}  {_font(esc(node.label), 9)}'
+    return f"{_font(f'<B>↻ {esc(number)}</B>', 8)}  {_font(esc(node.label), 9)}"
 
 
 def connector_label(direction: str, chart: str, number: str, node: Node, detail: str) -> str:
     """The classic off-page reference: "from <chart>: <node>" or "to <chart>: <node>"."""
     lead = f"{'from' if direction == 'in' else 'to'} {CHART_NAMES[chart]}:"
-    rows = [_font(esc(lead), 8, INK_SECONDARY), _font(f"<B>{esc(number)}  {esc(node.label)}</B>", 9.5)]
+    rows = [
+        _font(esc(lead), 8, INK_SECONDARY),
+        _font(f"<B>{esc(number)}  {esc(node.label)}</B>", 9.5),
+    ]
     if detail == "full":
         rows.append(_font(esc(node.id), 7, INK_SECONDARY, MONO))
     return _table(rows, True)
@@ -878,7 +963,10 @@ def outputs_label(chart: str, targets: Sequence[tuple[str, Node]]) -> str:
 def placeholder_label(ref: str) -> str:
     match = PLACEHOLDER.fullmatch(ref)
     part, description = (match.group(1), match.group(2)) if match else ("?", ref)
-    rows = [_font(esc(f"⚠ UNRESOLVED  ·  @{part}"), 7, INK_SECONDARY), _font(f"<B>{esc(description.strip())}</B>", 9)]
+    rows = [
+        _font(esc(f"⚠ UNRESOLVED  ·  @{part}"), 7, INK_SECONDARY),
+        _font(f"<B>{esc(description.strip())}</B>", 9),
+    ]
     return _table(rows, False)
 
 
@@ -907,7 +995,9 @@ def _feedback(links: list[Link]) -> list[Link]:
             while stack:
                 current = stack.pop()
                 if current == link.src:
-                    link = Link(link.src, link.dst, link.kind, link.label, feedback=True, edge=link.edge)
+                    link = Link(
+                        link.src, link.dst, link.kind, link.label, feedback=True, edge=link.edge
+                    )
                     break
                 for nxt in adjacency.get(current, ()):
                     if nxt not in seen:
@@ -927,9 +1017,16 @@ def unit_of(pipe: Pipeline, node_id: str) -> str:
     return f"cluster:{cluster}"
 
 
-def build_section(pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail: str,
-                  allow_placeholders: bool, cuts: set[int], boxed: bool,
-                  bands: Sequence[Sequence[str]] = ()) -> Section:
+def build_section(
+    pipe: Pipeline,
+    numbers: Mapping[str, str],
+    stage: str,
+    detail: str,
+    allow_placeholders: bool,
+    cuts: set[int],
+    boxed: bool,
+    bands: Sequence[Sequence[str]] = (),
+) -> Section:
     """`stage`'s section: its steps in their clusters, inside a stage box if `boxed` (the complete
     chart). An edge with another stage, or a placeholder, ends at a connector beside the step of
     this stage; an edge in `cuts` begins at a stub beside its consumer. One stub or connector for
@@ -943,7 +1040,11 @@ def build_section(pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail
     if boxed:
         home_box = Box(f"cluster_stage_{stage}", STAGE_NAMES[stage], "stage")
         root.boxes.append(home_box)
-    boxes = {cid: Box(f"cluster:{cid}", c.label, "cluster") for cid, c in pipe.clusters.items() if c.part in parts}
+    boxes = {
+        cid: Box(f"cluster:{cid}", c.label, "cluster")
+        for cid, c in pipe.clusters.items()
+        if c.part in parts
+    }
     for cid, box in boxes.items():
         parent = pipe.clusters[cid].parent
         (boxes[parent].boxes if parent in boxes else home_box.boxes).append(box)
@@ -951,7 +1052,11 @@ def build_section(pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail
     stubbed: dict[str, list[str]] = {}
     for index in sorted(cuts):
         edge = pipe.edges[index]
-        if edge.src in pipe.nodes and edge.dst in pipe.nodes and pipe.stage_of(edge.src) == stage == pipe.stage_of(edge.dst):
+        if (
+            edge.src in pipe.nodes
+            and edge.dst in pipe.nodes
+            and pipe.stage_of(edge.src) == stage == pipe.stage_of(edge.dst)
+        ):
             stubbed.setdefault(edge.src, [])
             if numbers[edge.dst] not in stubbed[edge.src]:
                 stubbed[edge.src].append(numbers[edge.dst])
@@ -960,7 +1065,14 @@ def build_section(pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail
         key = f"n:{node.id}"
         where = sorted(stubbed.get(node.id, ()), key=lambda number: int(number[1:]))
         label = node_label(node, detail, bool(style.fit), numbers[node.id], where)
-        items[key] = Item(key, node.kind, node.status, label, bool(style.fit), node_tooltip(node, numbers[node.id]))
+        items[key] = Item(
+            key,
+            node.kind,
+            node.status,
+            label,
+            bool(style.fit),
+            node_tooltip(node, numbers[node.id]),
+        )
         (boxes.get(node.cluster) or home_box).items.append(key)
 
     units = {f"n:{node.id}": unit_of(pipe, node.id) for node in nodes}
@@ -981,12 +1093,24 @@ def build_section(pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail
             other = pipe.stage_of(ref)
             if other == stage:
                 key = f"ref:{ref}@{token}"
-                item = Item(key, "stub", "", stub_label(numbers[ref], node), tooltip=f"{numbers[ref]} {ref}",
-                            family=NODE_KINDS[node.kind].family)
+                item = Item(
+                    key,
+                    "stub",
+                    "",
+                    stub_label(numbers[ref], node),
+                    tooltip=f"{numbers[ref]} {ref}",
+                    family=NODE_KINDS[node.kind].family,
+                )
             else:
                 key = f"{direction}:{ref}@{token}"
-                item = Item(key, "connector", "", connector_label(direction, other, numbers[ref], node, detail), True,
-                            f"{numbers[ref]} {ref}, in {CHART_NAMES[other]}")
+                item = Item(
+                    key,
+                    "connector",
+                    "",
+                    connector_label(direction, other, numbers[ref], node, detail),
+                    True,
+                    f"{numbers[ref]} {ref}, in {CHART_NAMES[other]}",
+                )
         else:
             serial = placeholders.setdefault(ref, len(placeholders) + 1)
             key = f"ph:{serial}@{token}"
@@ -1001,8 +1125,12 @@ def build_section(pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail
     # A step's edges to another stage end at one connector for that stage, which lists their targets.
     outputs: dict[tuple[str, str], list[Edge]] = {}
     for edge in pipe.edges:
-        if (edge.src in pipe.nodes and pipe.stage_of(edge.src) == stage and edge.dst in pipe.nodes
-                and pipe.stage_of(edge.dst) != stage):
+        if (
+            edge.src in pipe.nodes
+            and pipe.stage_of(edge.src) == stage
+            and edge.dst in pipe.nodes
+            and pipe.stage_of(edge.dst) != stage
+        ):
             outputs.setdefault((edge.src, pipe.stage_of(edge.dst)), []).append(edge)
 
     def output(src: str, other: str, kind: str) -> Link:
@@ -1012,13 +1140,21 @@ def build_section(pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail
         group = outputs[(src, other)]
         if key not in items:
             targets = list(dict.fromkeys(edge.dst for edge in group))
-            items[key] = Item(key, "connector", "", outputs_label(other, [(numbers[t], pipe.nodes[t]) for t in targets]),
-                              True, "to " + ", ".join(f"{numbers[t]} {t}" for t in targets))
+            items[key] = Item(
+                key,
+                "connector",
+                "",
+                outputs_label(other, [(numbers[t], pipe.nodes[t]) for t in targets]),
+                True,
+                "to " + ", ".join(f"{numbers[t]} {t}" for t in targets),
+            )
             beside(src)[0].items.append(key)
             counts["connector"] += 1
             units[key] = unit_of(pipe, src)
         labels = {edge.label for edge in group if edge.kind == kind}
-        return Link(f"n:{src}", key, kind, labels.pop() if len(labels) == 1 else "", weight=REFERENCE_WEIGHT)
+        return Link(
+            f"n:{src}", key, kind, labels.pop() if len(labels) == 1 else "", weight=REFERENCE_WEIGHT
+        )
 
     links: list[Link] = []
     drawn: set[int] = set()
@@ -1033,20 +1169,38 @@ def build_section(pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail
         if src_here and dst_here and index not in cuts:
             links.append(Link(f"n:{edge.src}", f"n:{edge.dst}", edge.kind, edge.label, edge=index))
         elif dst_here:
-            links.append(Link(reference(edge.src, edge.dst, "in"), f"n:{edge.dst}", edge.kind, edge.label,
-                              weight=REFERENCE_WEIGHT))
+            links.append(
+                Link(
+                    reference(edge.src, edge.dst, "in"),
+                    f"n:{edge.dst}",
+                    edge.kind,
+                    edge.label,
+                    weight=REFERENCE_WEIGHT,
+                )
+            )
         elif edge.dst in pipe.nodes:
             link = output(edge.src, pipe.stage_of(edge.dst), edge.kind)
             if link not in links:
                 links.append(link)
         else:
-            links.append(Link(f"n:{edge.src}", reference(edge.dst, edge.src, "out"), edge.kind, edge.label,
-                              weight=REFERENCE_WEIGHT))
+            links.append(
+                Link(
+                    f"n:{edge.src}",
+                    reference(edge.dst, edge.src, "out"),
+                    edge.kind,
+                    edge.label,
+                    weight=REFERENCE_WEIGHT,
+                )
+            )
     links = _feedback(links)
     # Each band below the last: a gate between them, below every step of the band above that feeds no
     # other step of its band, and above every step of the band below that no step of its band feeds.
     band_of = {unit: number for number, band in enumerate(bands) for unit in band}
-    within = [link for link in links if band_of.get(units.get(link.src, "")) == band_of.get(units.get(link.dst, ""))]
+    within = [
+        link
+        for link in links
+        if band_of.get(units.get(link.src, "")) == band_of.get(units.get(link.dst, ""))
+    ]
     # In the direction the DOT is written: feedback runs head to tail (`_emit_links`).
     feeds = {link.dst if link.feedback else link.src for link in within}
     fed = {link.src if link.feedback else link.dst for link in within}
@@ -1063,7 +1217,9 @@ def build_section(pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail
         gate = f"gate:{stage}:{number}"
         items[gate] = Item(gate, "gate", "", "")
         home_box.items.append(gate)
-        links += [Link(key, gate, "data", "", invisible=True) for key in previous if key not in feeds]
+        links += [
+            Link(key, gate, "data", "", invisible=True) for key in previous if key not in feeds
+        ]
         row: list[str] = []
         for unit in band:
             anchor = f"anchor:{unit}"
@@ -1071,20 +1227,42 @@ def build_section(pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail
             unit_boxes.get(unit, home_box).items.insert(0, anchor)
             row.append(anchor)
             links.append(Link(gate, anchor, "data", "", invisible=True))
-            links += [Link(anchor, key, "data", "", invisible=True, weight=1) for key in members
-                      if units[key] == unit and key not in fed]
+            links += [
+                Link(anchor, key, "data", "", invisible=True, weight=1)
+                for key in members
+                if units[key] == unit and key not in fed
+            ]
         aligned.append(row)
         # Left to right in flow order, as far as dot's crossing reduction allows.
-        links += [Link(a, b, "data", "", invisible=True, weight=1) for a, b in zip(row, row[1:])]
+        links += [
+            Link(a, b, "data", "", invisible=True, weight=1) for a, b in itertools.pairwise(row)
+        ]
         previous = members
-    return Section(stage, items, root, links, len(nodes), len(drawn), counts["stub"], counts["connector"],
-                   len(placeholders), drawn, units, [list(band) for band in bands], aligned)
+    return Section(
+        stage,
+        items,
+        root,
+        links,
+        len(nodes),
+        len(drawn),
+        counts["stub"],
+        counts["connector"],
+        len(placeholders),
+        drawn,
+        units,
+        [list(band) for band in bands],
+        aligned,
+    )
 
 
 def chart_stages(pipe: Pipeline, chart: str) -> list[str]:
     """The stages `chart` draws: those with a step."""
     stages = list(STAGE_NAMES) if chart == COMPLETE else [chart]
-    return [stage for stage in stages if any(pipe.parts[node.part].stage == stage for node in pipe.nodes.values())]
+    return [
+        stage
+        for stage in stages
+        if any(pipe.parts[node.part].stage == stage for node in pipe.nodes.values())
+    ]
 
 
 def subtitle(pipe: Pipeline, chart: str, sections: Sequence[Section], detail: str) -> str:
@@ -1096,7 +1274,9 @@ def subtitle(pipe: Pipeline, chart: str, sections: Sequence[Section], detail: st
     if len(snapshots) == 1:
         snap = f"snapshot {next(iter(snapshots))}"
     else:
-        snap = "snapshots " + ", ".join(f"{s} ({', '.join(names)})" for s, names in snapshots.items())
+        snap = "snapshots " + ", ".join(
+            f"{s} ({', '.join(names)})" for s, names in snapshots.items()
+        )
     nodes = [node for node in pipe.nodes.values() if pipe.parts[node.part].stage in stages]
     counts = {status: sum(node.status == status for node in nodes) for status in STATUSES}
     tally = ", ".join(f"{counts[status]} {status}" for status in STATUSES)
@@ -1105,7 +1285,9 @@ def subtitle(pipe: Pipeline, chart: str, sections: Sequence[Section], detail: st
         pieces.append(f"{len(sections)} stages, {len(parts)} parts")
     connectors = sum(section.connectors for section in sections)
     stubs = sum(section.stubs for section in sections)
-    pieces.append(f"{plural(connectors, 'connector')} to other stages, {plural(stubs, 'reference stub')}")
+    pieces.append(
+        f"{plural(connectors, 'connector')} to other stages, {plural(stubs, 'reference stub')}"
+    )
     placeholders = sum(section.placeholders for section in sections)
     if placeholders:
         pieces.append(plural(placeholders, "unresolved placeholder"))
@@ -1113,14 +1295,23 @@ def subtitle(pipe: Pipeline, chart: str, sections: Sequence[Section], detail: st
     return "  ·  ".join(pieces)
 
 
-def build_legend(chart: str, detail: str, placeholders: bool) -> tuple[Box, dict[str, Item], list[Link]]:
+def build_legend(
+    chart: str, detail: str, placeholders: bool
+) -> tuple[Box, dict[str, Item], list[Link]]:
     """The legend: every node kind with its family, the statuses, the references and the edge kinds,
     each drawn as the chart draws it."""
     legend = Box("cluster_legend", "Legend", "legend")
     items: dict[str, Item] = {}
     links: list[Link] = []
 
-    def add(key: str, look: str, label: str, status: str = "built", centred: bool = False, family: str = "") -> str:
+    def add(
+        key: str,
+        look: str,
+        label: str,
+        status: str = "built",
+        centred: bool = False,
+        family: str = "",
+    ) -> str:
         items[key] = Item(key, look, status, label, centred, family=family)
         legend.items.append(key)
         return key
@@ -1130,16 +1321,28 @@ def build_legend(chart: str, detail: str, placeholders: bool) -> tuple[Box, dict
 
     row = [heading("legend:h:kinds", "Node kinds")]
     for kind, style in NODE_KINDS.items():
-        label = _table([_font(esc(style.family.upper()), 6.5, INK_SECONDARY), _font(f"<B>{esc(kind)}</B>", 10),
-                        _font(esc(style.meaning), 8)], bool(style.fit))
+        label = _table(
+            [
+                _font(esc(style.family.upper()), 6.5, INK_SECONDARY),
+                _font(f"<B>{esc(kind)}</B>", 10),
+                _font(esc(style.meaning), 8),
+            ],
+            bool(style.fit),
+        )
         row.append(add(f"legend:k:{kind}", kind, label, centred=bool(style.fit)))
     legend.rows.append(row)
 
     row = [heading("legend:h:status", "Status")]
     for status in STATUSES:
         eyebrow = "  ·  ".join(["MODEL", STATUS_MARK[status]]) if STATUS_MARK[status] else "MODEL"
-        label = _table([_font(esc(eyebrow), 6.5, INK_SECONDARY), _font(f"<B>{esc(status)}</B>", 10),
-                        _font(esc(STATUS_MEANING[status]), 8)], False)
+        label = _table(
+            [
+                _font(esc(eyebrow), 6.5, INK_SECONDARY),
+                _font(f"<B>{esc(status)}</B>", 10),
+                _font(esc(STATUS_MEANING[status]), 8),
+            ],
+            False,
+        )
         row.append(add(f"legend:s:{status}", "model", label, status))
     anatomy = "<B>G12</B>  ·  KIND  ·  STATUS" + ("  ·  id" if detail == "full" else "")
     rows = [_font(anatomy, 6.5, INK_SECONDARY), _font("<B>Title</B>", 10), _font("Summary", 8)]
@@ -1149,50 +1352,119 @@ def build_legend(chart: str, detail: str, placeholders: bool) -> tuple[Box, dict
         rows.append(_font("<I>Citations</I>", 7.5, INK_SECONDARY))
         rows.append(_font("source/paths.rs, plan tasks", 7, INK_SECONDARY, MONO))
     row.append(add("legend:s:anatomy", "plain-box", _table(rows, False)))
-    row.append(add("legend:s:number", "plain", _font("G12: the 12th step of the galaxy stage<BR/>"
-                                                     "(S: star systems, P: planets)", 8)))
+    row.append(
+        add(
+            "legend:s:number",
+            "plain",
+            _font("G12: the 12th step of the galaxy stage<BR/>(S: star systems, P: planets)", 8),
+        )
+    )
     legend.rows.append(row)
 
     row = [heading("legend:h:refs", "References")]
-    row.append(add("legend:r:stub", "stub", f'{_font("<B>↻ G12</B>", 8)}  {_font("the step numbered G12", 9)}',
-                   family="randomness"))
-    row.append(add("legend:r:stub:meaning", "plain", _font("an edge from a hub or from far away, drawn from a stub<BR/>"
-                                                           "beside the step it feeds, in the colours of the step it<BR/>"
-                                                           "names; that step's line \u201c↻ stubs at G15 · G20\u201d says<BR/>"
-                                                           "where its stubs are", 8)))
-    connector = _table([_font("from / to another stage:", 8, INK_SECONDARY), _font("<B>S7  the step there</B>", 9.5)],
-                       True)
+    row.append(
+        add(
+            "legend:r:stub",
+            "stub",
+            f"{_font('<B>↻ G12</B>', 8)}  {_font('the step numbered G12', 9)}",
+            family="randomness",
+        )
+    )
+    row.append(
+        add(
+            "legend:r:stub:meaning",
+            "plain",
+            _font(
+                "an edge from a hub or from far away, drawn from a stub<BR/>"
+                "beside the step it feeds, in the colours of the step it<BR/>"
+                "names; that step's line \u201c↻ stubs at G15 · G20\u201d says<BR/>"
+                "where its stubs are",
+                8,
+            ),
+        )
+    )
+    connector = _table(
+        [
+            _font("from / to another stage:", 8, INK_SECONDARY),
+            _font("<B>S7  the step there</B>", 9.5),
+        ],
+        True,
+    )
     row.append(add("legend:r:connector", "connector", connector, "", True))
-    row.append(add("legend:r:connector:meaning", "plain", _font("an edge to or from another stage: one connector for each<BR/>"
-                                                                "step there and cluster here; outputs list what they feed", 8)))
+    row.append(
+        add(
+            "legend:r:connector:meaning",
+            "plain",
+            _font(
+                "an edge to or from another stage: one connector for each<BR/>"
+                "step there and cluster here; outputs list what they feed",
+                8,
+            ),
+        )
+    )
     if placeholders:
-        label = _table([_font(esc("⚠ UNRESOLVED  ·  @part"), 6.5, INK_SECONDARY),
-                        _font("<B>placeholder awaiting an id</B>", 9)], False)
+        label = _table(
+            [
+                _font(esc("⚠ UNRESOLVED  ·  @part"), 6.5, INK_SECONDARY),
+                _font("<B>placeholder awaiting an id</B>", 9),
+            ],
+            False,
+        )
         row.append(add("legend:r:placeholder", "placeholder", label, ""))
     legend.rows.append(row)
 
     row = [heading("legend:h:boxes", "Boxes")]
-    row.append(add("legend:b:cluster", "box-sample:0", _table([_font("<B>Subsystem</B>", 11, INK_SECONDARY),
-                                                                _font("the steps of one subsystem", 8)], False)))
-    row.append(add("legend:b:nested", "box-sample:1", _table([_font("<B>Part of it</B>", 11, INK_SECONDARY),
-                                                               _font("a box in a box: shaded darker", 8)], False)))
+    row.append(
+        add(
+            "legend:b:cluster",
+            "box-sample:0",
+            _table(
+                [
+                    _font("<B>Subsystem</B>", 11, INK_SECONDARY),
+                    _font("the steps of one subsystem", 8),
+                ],
+                False,
+            ),
+        )
+    )
+    row.append(
+        add(
+            "legend:b:nested",
+            "box-sample:1",
+            _table(
+                [
+                    _font("<B>Part of it</B>", 11, INK_SECONDARY),
+                    _font("a box in a box: shaded darker", 8),
+                ],
+                False,
+            ),
+        )
+    )
     if chart == COMPLETE:
-        row.append(add("legend:b:stage", "box-sample:stage", _table([_font("<B>STAGE</B>", 13, INK),
-                                                                      _font("each stage's section", 8)], False)))
+        row.append(
+            add(
+                "legend:b:stage",
+                "box-sample:stage",
+                _table([_font("<B>STAGE</B>", 13, INK), _font("each stage's section", 8)], False),
+            )
+        )
     legend.rows.append(row)
 
     row = [heading("legend:h:edges", "Edges")]
-    for kind, style in EDGE_KINDS.items():
+    for kind, edge_style in EDGE_KINDS.items():
         name = add(f"legend:e:{kind}", "plain", _font(f"<B>{esc(kind)}</B>", 9))
-        meaning = add(f"legend:e:{kind}:meaning", "plain", _font(esc(style.meaning), 8))
+        meaning = add(f"legend:e:{kind}:meaning", "plain", _font(esc(edge_style.meaning), 8))
         links.append(Link(name, meaning, kind, "", minlen=3, weight=10))
         row.extend([name, meaning])
     legend.rows.append(row)
     drawn = {(link.src, link.dst) for link in links}
     for row in legend.rows:
-        links.extend(Link(a, b, "data", "", invisible=True, weight=10) for a, b in zip(row, row[1:])
-                     if (a, b) not in drawn)
-    for upper, lower in zip(legend.rows, legend.rows[1:]):
+        links.extend(
+            Link(a, b, "data", "", invisible=True, weight=10)
+            for a, b in itertools.pairwise(row)
+            if (a, b) not in drawn
+        )
+    for upper, lower in itertools.pairwise(legend.rows):
         links.append(Link(upper[0], lower[0], "data", "", invisible=True, weight=10))
     return legend, items, links
 
@@ -1269,7 +1541,12 @@ def fit_shape(rule: str, width: float, height: float) -> dict[str, str | float |
         extra = {}
     else:
         raise ValueError(f"no fitting rule '{rule}'")
-    return {"fixedsize": True, "width": round(outer_w / 72, 3), "height": round(outer_h / 72, 3), **extra}
+    return {
+        "fixedsize": True,
+        "width": round(outer_w / 72, 3),
+        "height": round(outer_h / 72, 3),
+        **extra,
+    }
 
 
 def look_style(look: str) -> tuple[str, str, Family | None]:
@@ -1294,24 +1571,47 @@ def item_attrs(item: Item, size: tuple[float, float] | None) -> dict[str, str | 
     shape, fit, family = look_style(item.look)
     out: dict[str, str | float | bool] = {"shape": shape}
     if item.look == "gate":
-        return {"shape": "point", "style": "invis", "width": 0.01, "height": 0.01, "ordering": "out"}
+        return {
+            "shape": "point",
+            "style": "invis",
+            "width": 0.01,
+            "height": 0.01,
+            "ordering": "out",
+        }
     if item.look.startswith("box-sample:"):
         # The legend's picture of a box: drawn as `_emit_box` draws a cluster at that depth.
         depth = item.look.partition(":")[2]
         if depth == "stage":
-            look = {"color": MUTED, "fillcolor": SURFACE, "penwidth": 2.4}
+            look: dict[str, str | float | bool] = {
+                "color": MUTED,
+                "fillcolor": SURFACE,
+                "penwidth": 2.4,
+            }
         else:
-            look = {"color": BASELINE, "penwidth": 1.0,
-                    "fillcolor": mix(HAIRLINE, SURFACE, CLUSTER_FILLS[min(int(depth), len(CLUSTER_FILLS) - 1)])}
-        return {"shape": "box", "style": "rounded,filled", "margin": "0.12,0.1", **look, "label": Html(item.label)}
+            look = {
+                "color": BASELINE,
+                "penwidth": 1.0,
+                "fillcolor": mix(
+                    HAIRLINE, SURFACE, CLUSTER_FILLS[min(int(depth), len(CLUSTER_FILLS) - 1)]
+                ),
+            }
+        return {
+            "shape": "box",
+            "style": "rounded,filled",
+            "margin": "0.12,0.1",
+            **look,
+            "label": Html(item.label),
+        }
     if item.look == "plain":
         # `plaintext`, not `plain`: the margin keeps the legend's words off its sample edges.
         return {"shape": "plaintext", "margin": "0.06,0.02", "label": Html(item.label)}
     if item.look == "stub":
         # A chip: a rounded tag in the muted tint of the family of the step it names.
         named = FAMILIES[item.family]
-        chip = (f'<TABLE STYLE="rounded" BORDER="1" COLOR="{named.hue}" BGCOLOR="{named.planned_fill}" '
-                f'CELLBORDER="0" CELLSPACING="0" CELLPADDING="3"><TR><TD>{item.label}</TD></TR></TABLE>')
+        chip = (
+            f'<TABLE STYLE="rounded" BORDER="1" COLOR="{named.hue}" BGCOLOR="{named.planned_fill}" '
+            f'CELLBORDER="0" CELLSPACING="0" CELLPADDING="3"><TR><TD>{item.label}</TD></TR></TABLE>'
+        )
         out = {"shape": "plain", "label": Html(chip)}
         if item.tooltip:
             out["tooltip"] = tooltip(item.tooltip)
@@ -1341,7 +1641,9 @@ def item_attrs(item: Item, size: tuple[float, float] | None) -> dict[str, str | 
         out.update({"color": BASELINE, "fillcolor": SURFACE, "penwidth": 1})
     out["style"] = ",".join(styles)
     if shape == "cds":
-        out["margin"] = "0.3,0.12"  # room for the point, and for the outline inset at top and bottom
+        out["margin"] = (
+            "0.3,0.12"  # room for the point, and for the outline inset at top and bottom
+        )
     if fit:
         if size is None:
             raise ValueError(f"{item.key}: no measured size for a fitted shape")
@@ -1364,8 +1666,10 @@ def link_attrs(link: Link) -> dict[str, str | float | bool]:
     }
     if link.label:
         # On a patch of the surface, so that a line passing behind it does not strike it through.
-        out["label"] = Html(f'<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="1" BGCOLOR="{SURFACE}">'
-                            f'<TR><TD>{_font(esc(link.label), 8, INK_SECONDARY)}</TD></TR></TABLE>')
+        out["label"] = Html(
+            f'<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="1" BGCOLOR="{SURFACE}">'
+            f"<TR><TD>{_font(esc(link.label), 8, INK_SECONDARY)}</TD></TR></TABLE>"
+        )
     if link.feedback:
         # Written head to tail and drawn backwards, at weight 0: ranked so that it agrees with the
         # flow and pulls nothing. (`constraint=false`, the usual way, makes dot fail, "trouble in
@@ -1380,7 +1684,7 @@ def link_attrs(link: Link) -> dict[str, str | float | bool]:
     return out
 
 
-LAYOUT = {
+LAYOUT: dict[str, str | float | bool] = {
     "newrank": True,
     "splines": "spline",
     "nodesep": 0.28,
@@ -1402,23 +1706,49 @@ def _graph_head(name: str) -> list[str]:
     ]
 
 
-def _emit_box(lines: list[str], box: Box, items: Mapping[str, Item], sizes: Mapping[str, tuple[float, float]],
-              depth: int, indent: str) -> None:
+def _emit_box(
+    lines: list[str],
+    box: Box,
+    items: Mapping[str, Item],
+    sizes: Mapping[str, tuple[float, float]],
+    depth: int,
+    indent: str,
+) -> None:
     def node_line(key: str, pad: str) -> str:
         return f"{pad}{quote(key)} {attrs(item_attrs(items[key], sizes.get(key)))};"
 
     if box.level == "stage":
         label = _font(f"<B>{esc(box.label.upper())}</B>", 22, INK)
-        look = {"style": "rounded,filled", "color": MUTED, "fillcolor": SURFACE, "penwidth": 2.4, "margin": 24}
+        look: dict[str, str | float | bool] = {
+            "style": "rounded,filled",
+            "color": MUTED,
+            "fillcolor": SURFACE,
+            "penwidth": 2.4,
+            "margin": 24,
+        }
     elif box.level == "legend":
         label = _font(f"<B>{esc(box.label)}</B>", 13, INK)
-        look = {"style": "rounded,filled", "color": BASELINE, "fillcolor": SURFACE, "penwidth": 1.2, "margin": 14}
+        look = {
+            "style": "rounded,filled",
+            "color": BASELINE,
+            "fillcolor": SURFACE,
+            "penwidth": 1.2,
+            "margin": 14,
+        }
     else:
         label = _font(f"<B>{esc(box.label)}</B>", 12, INK_SECONDARY)
         fill = mix(HAIRLINE, SURFACE, CLUSTER_FILLS[min(depth, len(CLUSTER_FILLS) - 1)])
-        look = {"style": "rounded,filled", "color": BASELINE, "fillcolor": fill, "penwidth": 1.0, "margin": 12}
+        look = {
+            "style": "rounded,filled",
+            "color": BASELINE,
+            "fillcolor": fill,
+            "penwidth": 1.0,
+            "margin": 12,
+        }
     lines.append(f"{indent}subgraph {quote(box.key)} {{")
-    lines.append(f"{indent}  graph {attrs({'label': Html(label), 'labeljust': 'l', 'fontname': FONT, **look})};")
+    lines.append(
+        f"{indent}  graph {attrs({'label': Html(label), 'labeljust': 'l', 'fontname': FONT, **look})};"
+    )
     if box.rows:
         for row in box.rows:
             lines.append(f"{indent}  {{")
@@ -1428,7 +1758,9 @@ def _emit_box(lines: list[str], box: Box, items: Mapping[str, Item], sizes: Mapp
     else:
         lines.extend(node_line(key, indent + "  ") for key in box.items)
     for child in box.boxes:
-        _emit_box(lines, child, items, sizes, depth + (0 if box.level == "stage" else 1), indent + "  ")
+        _emit_box(
+            lines, child, items, sizes, depth + (0 if box.level == "stage" else 1), indent + "  "
+        )
     lines.append(f"{indent}}}")
 
 
@@ -1447,7 +1779,13 @@ def emit_section(section: Section, sizes: Mapping[str, tuple[float, float]]) -> 
     # The units in band order: dot starts from the order its input gives, and keeps much of it.
     for box in sorted(section.root.boxes, key=lambda box: order.get(box.key, 0)):
         if box.level == "stage":
-            box = Box(box.key, box.label, box.level, box.items, sorted(box.boxes, key=lambda b: order.get(b.key, 0)))
+            box = Box(
+                box.key,
+                box.label,
+                box.level,
+                box.items,
+                sorted(box.boxes, key=lambda b: order.get(b.key, 0)),
+            )
         _emit_box(lines, box, section.items, sizes, 0, "  ")
     for row in section.aligned:
         if len(row) > 1:
@@ -1467,11 +1805,13 @@ def emit_legend(chart: Chart, sizes: Mapping[str, tuple[float, float]]) -> str:
 
 def emit_title(chart: Chart) -> str:
     size = 40 if chart.name == COMPLETE else 26
-    label = Html(f'<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3">'
-                 f'<TR><TD ALIGN="LEFT">{_font(f"<B>{esc(chart.title)}</B>", size)}</TD></TR>'
-                 f'<TR><TD ALIGN="LEFT">{_font(esc(chart.subtitle), size * 0.5, INK_SECONDARY)}</TD></TR></TABLE>')
+    label = Html(
+        f'<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="3">'
+        f'<TR><TD ALIGN="LEFT">{_font(f"<B>{esc(chart.title)}</B>", size)}</TD></TR>'
+        f'<TR><TD ALIGN="LEFT">{_font(esc(chart.subtitle), size * 0.5, INK_SECONDARY)}</TD></TR></TABLE>'
+    )
     lines = _graph_head("title")
-    lines.append(f"  \"title\" {attrs({'shape': 'plaintext', 'margin': 0, 'label': label})};")
+    lines.append(f'  "title" {attrs({"shape": "plaintext", "margin": 0, "label": label})};')
     lines.append("}")
     return "\n".join(lines) + "\n"
 
@@ -1484,16 +1824,26 @@ class GraphvizError(Exception):
     pass
 
 
-def run_graphviz(command: Sequence[str], text: str, timeout: float, env: Mapping[str, str] | None = None) -> bytes:
+def run_graphviz(
+    command: Sequence[str], text: str, timeout: float, env: Mapping[str, str] | None = None
+) -> bytes:
     try:
-        done = subprocess.run(list(command), input=text.encode("utf-8"), capture_output=True, timeout=timeout,
-                              env={**os.environ, **env} if env else None)
+        done = subprocess.run(
+            list(command),
+            input=text.encode("utf-8"),
+            capture_output=True,
+            timeout=timeout,
+            env={**os.environ, **env} if env else None,
+            check=False,
+        )
     except FileNotFoundError as error:
         raise GraphvizError(f"{command[0]} is not installed (Graphviz): {error}") from error
     except subprocess.TimeoutExpired as error:
         raise GraphvizError(f"{' '.join(command)} took longer than {timeout:g} s") from error
     if done.returncode != 0:
-        raise GraphvizError(f"{' '.join(command)} failed ({done.returncode}): {done.stderr.decode(errors='replace').strip()}")
+        raise GraphvizError(
+            f"{' '.join(command)} failed ({done.returncode}): {done.stderr.decode(errors='replace').strip()}"
+        )
     return done.stdout
 
 
@@ -1502,13 +1852,19 @@ def measure(labels: Mapping[str, str], timeout: float) -> dict[str, tuple[float,
     the labels alone, unconnected, which takes a moment."""
     if not labels:
         return {}
-    lines = ["digraph measure {", f"  node {attrs({'shape': 'plain', 'fontname': FONT, 'fontsize': 9})};"]
+    lines = [
+        "digraph measure {",
+        f"  node {attrs({'shape': 'plain', 'fontname': FONT, 'fontsize': 9})};",
+    ]
     for key, label in labels.items():
         lines.append(f"  {quote(key)} [label=<{label}>];")
     lines.append("}")
     out = json.loads(run_graphviz(["dot", "-Tjson"], "\n".join(lines) + "\n", timeout))
-    return {obj["name"]: (float(obj["width"]) * 72, float(obj["height"]) * 72) for obj in out.get("objects", [])
-            if obj.get("name") in labels}
+    return {
+        obj["name"]: (float(obj["width"]) * 72, float(obj["height"]) * 72)
+        for obj in out.get("objects", [])
+        if obj.get("name") in labels
+    }
 
 
 def fitted_labels(items: Mapping[str, Item]) -> dict[str, str]:
@@ -1584,8 +1940,12 @@ GAP = 36.0  # points between pieces
 # `neato -n2` draws: in the stars stage, well past the clusters.
 INVISIBLE_EDGE = re.compile(r'\n\s*"[^"]*"\s*->\s*"[^"]*"\s*\[[^\]]*\bstyle=invis\b[^\]]*\];')
 # An edge's label (`link_attrs`, on its patch of the surface) and its place.
-EDGE_LABEL = re.compile(r'("[^"]*")\s*->\s*("[^"]*")(\s*\[[^\]]*?)label=<(<TABLE [^>]*BGCOLOR="'
-                        + SURFACE + r'">.*?</TABLE>)>,\s*lp="([^"]*)",?', re.S)
+EDGE_LABEL = re.compile(
+    r'("[^"]*")\s*->\s*("[^"]*")(\s*\[[^\]]*?)label=<(<TABLE [^>]*BGCOLOR="'
+    + SURFACE
+    + r'">.*?</TABLE>)>,\s*lp="([^"]*)",?',
+    re.DOTALL,
+)
 
 
 def lift_labels(positioned: str, nodes: list[str]) -> str:
@@ -1597,7 +1957,9 @@ def lift_labels(positioned: str, nodes: list[str]) -> str:
         tail, head, before, label, place = match.groups()
         ends = " -> ".join(end.strip('"') for end in (tail, head))
         key = f"label {len(nodes) + 1}: {ends}"
-        nodes.append(f"  {quote(key)} {attrs({'shape': 'plain', 'fontname': FONT, 'pos': place, 'label': Html(label)})};")
+        nodes.append(
+            f"  {quote(key)} {attrs({'shape': 'plain', 'fontname': FONT, 'pos': place, 'label': Html(label)})};"
+        )
         return f"{tail} -> {head}{before}"
 
     return EDGE_LABEL.sub(lift, positioned)
@@ -1616,13 +1978,24 @@ def compose(name: str, pieces: Sequence[Piece]) -> str:
     for index, (piece, (x0, y0, x1, y1)) in enumerate(zip(pieces, sizes)):
         left = (width - (x1 - x0)) / 2 if piece.align == "centre" else 0.0
         moved = translate(piece.positioned, left - x0, top - y1)
-        inner = lift_labels(INVISIBLE_EDGE.sub("", moved[moved.index("{") + 1 : moved.rindex("}")]), labels)
+        inner = lift_labels(
+            INVISIBLE_EDGE.sub("", moved[moved.index("{") + 1 : moved.rindex("}")]), labels
+        )
         body.append(f"  subgraph {quote(f'piece_{index}')} {{{inner}  }}")
         top -= (y1 - y0) + GAP
-    head = {"bb": f"0,0,{width:.2f},{height:.2f}", "bgcolor": SURFACE, "pad": 0.4, "fontname": FONT,
-            "outputorder": LAYOUT["outputorder"]}
-    return (f"digraph {quote('procgen_' + name)} {{\n  graph {attrs(head)};\n" + "".join(f"{node}\n" for node in labels)
-            + "\n".join(body) + "\n}\n")
+    head: dict[str, str | float | bool] = {
+        "bb": f"0,0,{width:.2f},{height:.2f}",
+        "bgcolor": SURFACE,
+        "pad": 0.4,
+        "fontname": FONT,
+        "outputorder": LAYOUT["outputorder"],
+    }
+    return (
+        f"digraph {quote('procgen_' + name)} {{\n  graph {attrs(head)};\n"
+        + "".join(f"{node}\n" for node in labels)
+        + "\n".join(body)
+        + "\n}\n"
+    )
 
 
 def png_dpi(positioned: bytes | str, dpi: float) -> float:
@@ -1637,7 +2010,9 @@ def png_dpi(positioned: bytes | str, dpi: float) -> float:
     if width <= 0 or height <= 0:
         return dpi
     # The image is a little larger than the layout's bounds (padding, rounding): 3% to spare.
-    cap = 0.97 * min(PNG_MAX_SIDE / max(width, height), math.sqrt(PNG_MAX_PIXELS / (width * height)))
+    cap = 0.97 * min(
+        PNG_MAX_SIDE / max(width, height), math.sqrt(PNG_MAX_PIXELS / (width * height))
+    )
     return math.floor(min(dpi, cap) * 100) / 100
 
 
@@ -1650,7 +2025,11 @@ def flow_order(pipe: Pipeline, stage: str) -> list[str]:
             order.append(unit_of(pipe, node.id))
     feeders: dict[str, set[str]] = {unit: set() for unit in order}
     for edge in pipe.edges:
-        if edge.src in pipe.nodes and edge.dst in pipe.nodes and pipe.stage_of(edge.src) == stage == pipe.stage_of(edge.dst):
+        if (
+            edge.src in pipe.nodes
+            and edge.dst in pipe.nodes
+            and pipe.stage_of(edge.src) == stage == pipe.stage_of(edge.dst)
+        ):
             src, dst = unit_of(pipe, edge.src), unit_of(pipe, edge.dst)
             if src != dst:
                 feeders[dst].add(src)
@@ -1661,7 +2040,9 @@ def flow_order(pipe: Pipeline, stage: str) -> list[str]:
     return placed
 
 
-def pack(order: Sequence[str], sizes: Mapping[str, tuple[float, float]], width: float) -> list[list[str]]:
+def pack(
+    order: Sequence[str], sizes: Mapping[str, tuple[float, float]], width: float
+) -> list[list[str]]:
     """`order` cut into bands no wider than `width` (each holds one unit at least)."""
     bands: list[list[str]] = [[]]
     used = 0.0
@@ -1675,21 +2056,35 @@ def pack(order: Sequence[str], sizes: Mapping[str, tuple[float, float]], width: 
     return bands
 
 
-def packed_height(bands: Sequence[Sequence[str]], sizes: Mapping[str, tuple[float, float]]) -> float:
+def packed_height(
+    bands: Sequence[Sequence[str]], sizes: Mapping[str, tuple[float, float]]
+) -> float:
     return sum(max(sizes[unit][1] for unit in band) + 72 for band in bands)
 
 
-def choose_width(orders: Sequence[Sequence[str]], sizes: Mapping[str, tuple[float, float]],
-                 aspect: float = ASPECT) -> float:
+def choose_width(
+    orders: Sequence[Sequence[str]],
+    sizes: Mapping[str, tuple[float, float]],
+    aspect: float = ASPECT,
+) -> float:
     """The band width that packs every section, stacked, closest to `aspect`."""
     units = [unit for order in orders for unit in order]
     widest = max(sizes[unit][0] + 20 for unit in units)
-    candidates = sorted({widest} | {widest * (1.05 ** k) for k in range(1, 200)})
+    candidates = sorted({widest} | {widest * (1.05**k) for k in range(1, 200)})
     best, score = widest, math.inf
     for width in candidates:
         height = sum(packed_height(pack(order, sizes, width), sizes) for order in orders)
-        actual = max(min(width, max(sum(sizes[u][0] + 20 for u in band) for order in orders
-                                    for band in pack(order, sizes, width))), 1.0)
+        actual = max(
+            min(
+                width,
+                max(
+                    sum(sizes[u][0] + 20 for u in band)
+                    for order in orders
+                    for band in pack(order, sizes, width)
+                ),
+            ),
+            1.0,
+        )
         miss = abs(math.log(actual / height / aspect))
         if miss < score - 1e-9:
             best, score = width, miss
@@ -1715,8 +2110,16 @@ class SectionLayout:
     """One stage's section, laid out in passes: its units alone to measure them, then packed in bands,
     then again for each set of edges still too long."""
 
-    def __init__(self, pipe: Pipeline, numbers: Mapping[str, str], stage: str, detail: str,
-                 allow_placeholders: bool, boxed: bool, timeout: float) -> None:
+    def __init__(
+        self,
+        pipe: Pipeline,
+        numbers: Mapping[str, str],
+        stage: str,
+        detail: str,
+        allow_placeholders: bool,
+        boxed: bool,
+        timeout: float,
+    ) -> None:
         self.pipe, self.numbers, self.stage, self.detail = pipe, numbers, stage, detail
         self.allow, self.boxed, self.timeout = allow_placeholders, boxed, timeout
         self.labels: dict[str, tuple[float, float]] = {}  # each fitted label's size, by its text
@@ -1724,14 +2127,20 @@ class SectionLayout:
         self.passes = 0
         self.order = flow_order(pipe, stage)
         self.hubs = hub_cuts(pipe, stage)
-        self.between = {index for index, edge in enumerate(pipe.edges)
-                        if edge.src in pipe.nodes and edge.dst in pipe.nodes
-                        and pipe.stage_of(edge.src) == stage == pipe.stage_of(edge.dst)
-                        and unit_of(pipe, edge.src) != unit_of(pipe, edge.dst)}
+        self.between = {
+            index
+            for index, edge in enumerate(pipe.edges)
+            if edge.src in pipe.nodes
+            and edge.dst in pipe.nodes
+            and pipe.stage_of(edge.src) == stage == pipe.stage_of(edge.dst)
+            and unit_of(pipe, edge.src) != unit_of(pipe, edge.dst)
+        }
 
     def run(self, cuts: set[int], bands: Sequence[Sequence[str]] = ()) -> tuple[Section, str, dict]:
         started = time.monotonic()
-        section = build_section(self.pipe, self.numbers, self.stage, self.detail, self.allow, cuts, self.boxed, bands)
+        section = build_section(
+            self.pipe, self.numbers, self.stage, self.detail, self.allow, cuts, self.boxed, bands
+        )
         # By text, not key: a step's label changes between passes as its stubs do.
         fitted = fitted_labels(section.items)
         fresh = [label for label in dict.fromkeys(fitted.values()) if label not in self.labels]
@@ -1779,42 +2188,70 @@ class Layout:
     passes: int  # the most passes a section took
 
 
-def lay_out_chart(pipe: Pipeline, name: str, detail: str, allow_placeholders: bool,
-                  timeout: float = 600) -> Layout | None:
+def lay_out_chart(
+    pipe: Pipeline, name: str, detail: str, allow_placeholders: bool, timeout: float = 600
+) -> Layout | None:
     """The chart `name` laid out: its sections at once, each by its own `dot` runs, packed to one band
     width, then its legend and title, stacked on one canvas. None where the chart has no data."""
     stages = chart_stages(pipe, name)
     if not stages:
         return None
     numbers = step_numbers(pipe)
-    layouts = [SectionLayout(pipe, numbers, stage, detail, allow_placeholders, name == COMPLETE, timeout)
-               for stage in stages]
+    layouts = [
+        SectionLayout(pipe, numbers, stage, detail, allow_placeholders, name == COMPLETE, timeout)
+        for stage in stages
+    ]
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(stages)) as pool:
         sizes: dict[str, tuple[float, float]] = {}
         for measured in pool.map(SectionLayout.measure_units, layouts):
             sizes.update(measured)
         width = choose_width([layout.order for layout in layouts], sizes)
-        laid = list(pool.map(lambda layout: layout.finish(pack(layout.order, sizes, width)), layouts))
+        laid = list(
+            pool.map(lambda layout: layout.finish(pack(layout.order, sizes, width)), layouts)
+        )
         # Edges between the units of a band stretch it past the estimate: once, widen the bands by
         # the shortfall and lay out again, where that is closer to the shape aimed at.
         shape = stacked_aspect([positioned for _, positioned in laid])
         if abs(math.log(shape / ASPECT)) > math.log(1.25):
             wider = width * math.sqrt(ASPECT / shape)
-            again = list(pool.map(lambda layout: layout.finish(pack(layout.order, sizes, wider)), layouts))
-            if abs(math.log(stacked_aspect([p for _, p in again]) / ASPECT)) < abs(math.log(shape / ASPECT)):
+            again = list(
+                pool.map(lambda layout: layout.finish(pack(layout.order, sizes, wider)), layouts)
+            )
+            if abs(math.log(stacked_aspect([p for _, p in again]) / ASPECT)) < abs(
+                math.log(shape / ASPECT)
+            ):
                 laid = again
     sections = [section for section, _ in laid]
-    legend, legend_items, legend_links = build_legend(name, detail, any(s.placeholders for s in sections))
-    chart = Chart(name, TITLE_PREFIX + CHART_NAMES[name], detail, sections, legend, legend_items, legend_links,
-                  subtitle(pipe, name, sections, detail))
+    legend, legend_items, legend_links = build_legend(
+        name, detail, any(s.placeholders for s in sections)
+    )
+    chart = Chart(
+        name,
+        TITLE_PREFIX + CHART_NAMES[name],
+        detail,
+        sections,
+        legend,
+        legend_items,
+        legend_links,
+        subtitle(pipe, name, sections, detail),
+    )
     legend_text = emit_legend(chart, measure(fitted_labels(legend_items), timeout))
-    pieces = [Piece(positioned_dot(emit_title(chart), timeout), "left"), Piece(positioned_dot(legend_text, timeout), "left")]
+    pieces = [
+        Piece(positioned_dot(emit_title(chart), timeout), "left"),
+        Piece(positioned_dot(legend_text, timeout), "left"),
+    ]
     pieces += [Piece(positioned, "centre") for _, positioned in laid]
-    return Layout(chart, compose(name, pieces), max(layout.seconds for layout in layouts),
-                  max(layout.passes for layout in layouts))
+    return Layout(
+        chart,
+        compose(name, pieces),
+        max(layout.seconds for layout in layouts),
+        max(layout.passes for layout in layouts),
+    )
 
 
-def render(layout: Layout, out_dir: Path, formats: Sequence[str], dpi: float, timeout: float) -> list[Path]:
+def render(
+    layout: Layout, out_dir: Path, formats: Sequence[str], dpi: float, timeout: float
+) -> list[Path]:
     """Each format drawn by `neato -n2` from the one layout; the paths written."""
     written: list[Path] = []
     for fmt in formats:
@@ -1833,6 +2270,7 @@ def render(layout: Layout, out_dir: Path, formats: Sequence[str], dpi: float, ti
         written.append(path)
     return written
 
+
 # ---------------------------------------------------------------------------------------------
 # The command line.
 
@@ -1841,7 +2279,9 @@ def _choices(value: str, allowed: Sequence[str], what: str) -> list[str]:
     chosen = [v.strip() for v in value.split(",") if v.strip()]
     unknown = [v for v in chosen if v not in allowed]
     if unknown or not chosen:
-        raise argparse.ArgumentTypeError(f"unknown {what} {', '.join(unknown) or '(none)'}: expected {','.join(allowed)}")
+        raise argparse.ArgumentTypeError(
+            f"unknown {what} {', '.join(unknown) or '(none)'}: expected {','.join(allowed)}"
+        )
     return [v for v in allowed if v in chosen]
 
 
@@ -1857,26 +2297,72 @@ def _positive(value: str) -> float:
 
 def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     # The module docstring's account of the charts, the validation and the output, without its usage.
-    parser = argparse.ArgumentParser(prog="just flowcharts", description="\n\n".join((__doc__ or "").split("\n\n")[2:7]),
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--check", action="store_true", help="validate the data, draw nothing; exit 1 on a problem")
-    parser.add_argument("--only", metavar="CHARTS", default=",".join(CHARTS), type=lambda v: _choices(v, CHARTS, "chart"),
-                        help=f"the charts to draw, of {','.join(CHARTS)} (default all)")
-    parser.add_argument("--format", metavar="FORMATS", default="svg", type=lambda v: _choices(v, FORMATS, "format"),
-                        help=f"the formats to write, of {','.join(FORMATS)} (default svg)")
-    parser.add_argument("--detail", choices=DETAILS,
-                        help="brief (title, summary), standard (+ detail lines) or full (+ citations, sources, ids); "
-                             "default standard for a stage, full for the complete chart")
-    parser.add_argument("--out", metavar="DIR", type=Path, default=OUT_DIR, help=f"where to write (default {display_path(OUT_DIR)})")
-    parser.add_argument("--data", metavar="DIR", type=Path, default=DATA_DIR, help=f"the TOML files (default {display_path(DATA_DIR)})")
-    parser.add_argument("--keep-dot", action="store_true",
-                        help="also write each chart's laid-out DOT: its canvas, which `neato -n2` draws as it is")
-    parser.add_argument("--allow-placeholders", action="store_true",
-                        help="draw unresolved @part:... placeholders as marked stubs instead of refusing (preview)")
-    parser.add_argument("--dpi", metavar="DPI", type=_positive, default=PNG_DPI,
-                        help=f"PNG resolution (default {PNG_DPI:g}), lowered for charts too large to view")
-    parser.add_argument("--timeout", metavar="SECONDS", type=_positive, default=600,
-                        help="seconds allowed for each Graphviz run (default 600)")
+    parser = argparse.ArgumentParser(
+        prog="just flowcharts",
+        description="\n\n".join((__doc__ or "").split("\n\n")[2:7]),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--check", action="store_true", help="validate the data, draw nothing; exit 1 on a problem"
+    )
+    parser.add_argument(
+        "--only",
+        metavar="CHARTS",
+        default=",".join(CHARTS),
+        type=lambda v: _choices(v, CHARTS, "chart"),
+        help=f"the charts to draw, of {','.join(CHARTS)} (default all)",
+    )
+    parser.add_argument(
+        "--format",
+        metavar="FORMATS",
+        default="svg",
+        type=lambda v: _choices(v, FORMATS, "format"),
+        help=f"the formats to write, of {','.join(FORMATS)} (default svg)",
+    )
+    parser.add_argument(
+        "--detail",
+        choices=DETAILS,
+        help="brief (title, summary), standard (+ detail lines) or full (+ citations, sources, ids); "
+        "default standard for a stage, full for the complete chart",
+    )
+    parser.add_argument(
+        "--out",
+        metavar="DIR",
+        type=Path,
+        default=OUT_DIR,
+        help=f"where to write (default {display_path(OUT_DIR)})",
+    )
+    parser.add_argument(
+        "--data",
+        metavar="DIR",
+        type=Path,
+        default=DATA_DIR,
+        help=f"the TOML files (default {display_path(DATA_DIR)})",
+    )
+    parser.add_argument(
+        "--keep-dot",
+        action="store_true",
+        help="also write each chart's laid-out DOT: its canvas, which `neato -n2` draws as it is",
+    )
+    parser.add_argument(
+        "--allow-placeholders",
+        action="store_true",
+        help="draw unresolved @part:... placeholders as marked stubs instead of refusing (preview)",
+    )
+    parser.add_argument(
+        "--dpi",
+        metavar="DPI",
+        type=_positive,
+        default=PNG_DPI,
+        help=f"PNG resolution (default {PNG_DPI:g}), lowered for charts too large to view",
+    )
+    parser.add_argument(
+        "--timeout",
+        metavar="SECONDS",
+        type=_positive,
+        default=600,
+        help="seconds allowed for each Graphviz run (default 600)",
+    )
     return parser.parse_args(argv)
 
 
@@ -1899,8 +2385,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"warning: {problem}{suffix}", file=sys.stderr)
     files = len(pipe.parts)
     if errors:
-        print(f"{len(errors)} problem{'s' if len(errors) != 1 else ''} in {display_path(args.data)}"
-              + ("" if args.check else ": nothing drawn"), file=sys.stderr)
+        print(
+            f"{len(errors)} problem{'s' if len(errors) != 1 else ''} in {display_path(args.data)}"
+            + ("" if args.check else ": nothing drawn"),
+            file=sys.stderr,
+        )
         return 1
     if args.check:
         print(f"ok: {files} files, {len(pipe.nodes)} nodes, {len(pipe.edges)} edges")
@@ -1912,7 +2401,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         args.out.mkdir(parents=True, exist_ok=True)
     except OSError as error:
-        print(f"error: cannot write to {display_path(args.out)}: {error.strerror or error}", file=sys.stderr)
+        print(
+            f"error: cannot write to {display_path(args.out)}: {error.strerror or error}",
+            file=sys.stderr,
+        )
         return 2
     for name in args.only:
         detail = args.detail or DEFAULT_DETAIL[name]
@@ -1928,16 +2420,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"error: {name}: {error}", file=sys.stderr)
             return 2
         except OSError as error:
-            print(f"error: {name}: cannot write {error.filename or display_path(args.out)}: {error.strerror or error}",
-                  file=sys.stderr)
+            print(
+                f"error: {name}: cannot write {error.filename or display_path(args.out)}: {error.strerror or error}",
+                file=sys.stderr,
+            )
             return 2
         sections = layout.chart.sections
         x0, y0, x1, y1 = bounds(layout.positioned)
-        print(f"{name}: {sum(s.nodes for s in sections)} nodes, {len(set().union(*(s.drawn for s in sections)))} edges "
-              f"({sum(s.stubs for s in sections)} stubs, {sum(s.connectors for s in sections)} connectors), "
-              f"{(x1 - x0) / 72:.0f} x {(y1 - y0) / 72:.0f} in, laid out in {layout.seconds:.1f} s "
-              f"({layout.passes} pass{'es' if layout.passes != 1 else ''}): {', '.join(display_path(path) for path in written)}",
-              file=sys.stderr)
+        print(
+            f"{name}: {sum(s.nodes for s in sections)} nodes, {len(set().union(*(s.drawn for s in sections)))} edges "
+            f"({sum(s.stubs for s in sections)} stubs, {sum(s.connectors for s in sections)} connectors), "
+            f"{(x1 - x0) / 72:.0f} x {(y1 - y0) / 72:.0f} in, laid out in {layout.seconds:.1f} s "
+            f"({layout.passes} pass{'es' if layout.passes != 1 else ''}): {', '.join(display_path(path) for path in written)}",
+            file=sys.stderr,
+        )
     return 0
 
 

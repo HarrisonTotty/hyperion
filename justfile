@@ -1154,12 +1154,15 @@ _gen-protocol-check-for packages:
 # Graphviz from `tools/procgen-flowcharts/data/*.toml` after validating them: one chart for each stage
 # (galaxy, stars, planets) and the complete pipeline, into `out/procgen-flowcharts/`, which is
 # gitignored. `just flowcharts --help` lists the options (charts, formats, detail, output); `--check`
-# validates and draws nothing. Its tests are `python3 -B
-# tools/procgen-flowcharts/test_procgen_flowcharts.py`. Not part of `ci`.
+# validates and draws nothing. It runs under uv, in the Python 3.14 of its
+# `tools/procgen-flowcharts/pyproject.toml`, which uv fetches where the machine's `python3` is older
+# (macOS's lacks `tomllib`), without the project's dev tools (mypy, ruff). Its tests are `uv run
+# --project tools/procgen-flowcharts python -B tools/procgen-flowcharts/test_procgen_flowcharts.py`.
+# Not part of `ci`.
 # Draw the procedural-generation flowcharts, e.g. `just flowcharts --check` or `just flowcharts --format svg,png`.
 [positional-arguments]
 flowcharts *args:
-    @python3 -B "{{ justfile_directory() }}/tools/procgen-flowcharts/procgen_flowcharts.py" "$@"
+    @uv run --no-dev --project "{{ justfile_directory() }}/tools/procgen-flowcharts" python -B "{{ justfile_directory() }}/tools/procgen-flowcharts/procgen_flowcharts.py" "$@"
 
 # Build release artifacts.
 build: gen-surface
