@@ -87,16 +87,16 @@ lto = "thin"
 # `CARGO_PROFILE_DEV_DEBUG=true cargo build`.
 #
 # Split, the line tables stay in a `.dwo` file per object, written once per compile, and each
-# executable links only their skeleton: lld otherwise copies into every test binary the debug
-# sections of each object it links, those of the functions it discards included. The workspace's
-# 129 test executables came to 2.62 GB with 1.77 GB of debug sections, against 4.23 GB with 3.38 GB
-# unsplit, for 0.89 GB of `.dwo` files in 44k files; the rebuild after touching the sim's `lib.rs`
-# took 1,350 and 1,206 unit-seconds (374 and 312 s at 4 jobs) against 1,459 and 1,521 (370 and
-# 391 s), A/B back to back at a 1-minute load of 25 to 34 (measured 2026-10-12, perf-build.md L2).
-# Backtraces keep file and line, and gdb and lldb read the `.dwo` files. Cargo passes the option
-# only to targets for which `rustc --print split-debuginfo` lists it: Linux and macOS (macOS's
-# default already), not Windows MSVC (`packed` only) or the wasm targets (`off` only), which keep
-# their defaults (checked with `cargo build -v` for each target).
+# executable links only the objects' skeleton units: lld otherwise copies into every test binary the
+# debug sections of each object it links, those of the functions it discards included. The
+# workspace's 129 test executables came to 2.62 GB with 1.77 GB of debug sections, against 4.23 GB
+# with 3.38 GB unsplit, for 0.89 GB of `.dwo` files in 44k files; the rebuild after touching the
+# sim's `lib.rs` took 1,350 and 1,206 unit-seconds (374 and 312 s at 4 jobs) against 1,459 and 1,521
+# (370 and 391 s), A/B back to back at a 1-minute load of 25 to 34 (measured 2026-10-12,
+# perf-build.md L2). Backtraces keep file and line (checked on a test's panic). Cargo passes the
+# option only to targets for which `rustc --print split-debuginfo` lists it: Linux and macOS
+# (macOS's default already), not Windows MSVC (`packed` only) or the wasm targets (`off` only),
+# which keep their defaults (checked with `cargo build -v` for each target).
 [profile.dev]
 debug = "line-tables-only"
 split-debuginfo = "unpacked"

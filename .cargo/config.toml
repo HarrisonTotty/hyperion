@@ -5,11 +5,13 @@ TS_RS_EXPORT_DIR = { value = "packages/protocol/src/generated", relative = true 
 # The wasip1 test modules carry no DWARF (perf-build.md Q5, ruled 2026-10-12). Cargo puts these
 # flags after the profile's, so `-Cdebuginfo=0` overrides the dev profile's line tables here, and
 # `-Cstrip=debuginfo` drops the standard library's own DWARF when the module links. DWARF was 90% of
-# the modules: the 99 of `just ci`'s wasip1 suites came to 0.17 GB, against 1.76 GB of which
-# 1.59 GB was DWARF, with the same 0.09 GB of code; the wasip1 test build after touching the sim's
-# `lib.rs` took 245 and 491 unit-seconds (113 and 234 s at 4 jobs), against 356 and 520 (163 and
-# 221 s), A/B back to back at a 1-minute load of 13 to 31 (measured 2026-10-12). Debug info changes
-# no generated code, so no output moves: a probe's code and data sections were byte-identical.
+# the modules: the 99 of `just ci`'s wasip1 suites came to 0.17 GB, against 1.76 GB of which 1.59 GB
+# was DWARF, with the same 0.09 GB of code; the wasip1 test build after touching the sim's `lib.rs`
+# took 245 and 491 unit-seconds (113 and 234 s at 4 jobs), against 356 and 520 (163 and 221 s), A/B
+# back to back at a 1-minute load of 13 to 31 (measured 2026-10-12). `target/wasm32-wasip1` was not
+# measured for each build alone: it grew from 21.5 to 23.2 GB when the stripped build was added
+# beside the other. Debug info changes no generated code, so no output moves: a probe's code and
+# data sections were byte-identical.
 #
 # What stays: a panic's message keeps its file, line and column (its `Location`, data in the
 # module), and wasmtime's trap backtraces keep every function's name (the `name` section, which
@@ -24,5 +26,6 @@ TS_RS_EXPORT_DIR = { value = "packages/protocol/src/generated", relative = true 
 # -p <crate> --test <binary> -E 'test(=<name>)'` (`--lib` for a unit test). That builds the crate
 # and its dependencies for wasip1 a second time, the first time it runs, beside the ordinary build,
 # which it leaves fresh: the flags are part of the artefacts' hashes (checked on base's `panics`).
+# Those artefacts, with their DWARF, stay in the target directory until it is cleaned.
 [target.wasm32-wasip1]
 rustflags = ["-Cstrip=debuginfo", "-Cdebuginfo=0"]
