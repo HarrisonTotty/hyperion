@@ -300,7 +300,10 @@ ambiguous, the design note that reads it is named.
 - **R08:** `HillaireAtmosphere`, whose `aerialPerspective(view)` exposes the volume and the
   transmittance table, for lighting clouds (a 2D array texture, one layer a curvature slice, read
   through `oblate.wgsl`'s slice lookup at the ray's latitude and azimuth, never as one texture;
-  R08 Design note 17), and the medium the clouds and the ocean are drawn inside;
+  R08 Design note 17), with the absorber-column table `absorberColumns` and the lights' curves of
+  growth `absorberCurves` beside it, since the table stores optical depth without the absorbers
+  and a reader binds all three and reads through `common.wgsl`'s `transmittanceThroughTables` at
+  the light's curve slot (R08.T6.c); and the medium the clouds and the ocean are drawn inside;
   `skyView(view): SkyViewTable` (R08.T9.a), the view's sky radiance by local azimuth and elevation
   summed over the drawn suns, with the per-sun fallback in the same type, for reflecting the sky
   in the ocean; `surfaceLighting.wgsl`'s

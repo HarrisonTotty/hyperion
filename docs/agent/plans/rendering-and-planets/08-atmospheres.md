@@ -380,8 +380,12 @@ module R12 reads for this plan's ladder entries.
   item 1). A one-slice, one-band or one-term table is therefore an ordinary array of one layer. A
   medium with no term of a kind binds a one-texel placeholder of one layer, since a texture has at
   least one. The kernels:
-  - `transmittance.wgsl`, which stores optical depth, curves of growth included (Design note 8),
-    in a 2D array texture of one layer a κ slice (Design note 17);
+  - `transmittance.wgsl`, which stores optical depth (Design note 8): in rgb every term's but the
+    absorbers', and in alpha absorber slot 0's amount as u ÷ U (the path's amount over its
+    vertical amount), with a second table, `absorberColumns`, holding slots 1–4 the same way.
+    Each light's curves of growth (`absorberCurves`) are not stored in either table: they are
+    added on read, through `common.wgsl`'s `transmittanceThroughTables` at the light's slot
+    (R08.T6.c). Both tables are 2D array textures of one layer a κ slice (Design note 17);
   - `multiScattering.wgsl`, Hillaire's isotropic 32² table for `thin` worlds, one layer a latitude
     band;
   - `skyView.wgsl`;
@@ -432,7 +436,8 @@ module R12 reads for this plan's ladder entries.
     sun's per-channel illuminance, R07's `starIlluminance` (R08.T6.d);
   - `aerialPerspective(view)`, widening R05's `aerialPerspectiveVolume()`, exposes the volume and
     the transmittance table to R11, the table as its 2D array texture of κ slices, read through
-    `oblate.wgsl`'s slice lookup;
+    `oblate.wgsl`'s slice lookup, with `absorberColumns` and `absorberCurves` beside it, which
+    `transmittanceThroughTables` reads with it;
   - `skyView(view): SkyViewTable` exposes the view's sky-view table (R05's `frameTables.skyView`),
     the sky's radiance by local azimuth and elevation summed over the drawn suns, for R11's sky
     reflection in the ocean. If R08.T7's check forces the per-sun fallback, it returns the per-sun
@@ -3047,8 +3052,9 @@ together, towards the reference once T6.c stores optical depth, by amounts it re
   Tests: a Venus-class transmittance is finite with no underflow, and R05's Earth, with its ozone as
   an absorber curve reduced to the linear regime, reproduces R05's transmittance to 10⁻³. That
   regression feeds the curve R05's own three ozone coefficients (`OZONE_ABSORPTION_PER_M`,
-  Bruneton's and sebh's upward 10 nm bins), not T4.b's centred 1 nm bins, which differ by +10%, −6%
-  and −19% at the three channels (`decisions-r05.md` item 2).
+  Bruneton's and sebh's upward 10 nm bins), not T4.b's centred 1 nm bins, which differ from them by
+  +8.9%, −6.4% and −16.2% at the three channels (`absorbers.test.ts`). The +10%, −6% and −19% of
+  `decisions-r05.md` item 2 are for bins centred ±5 nm.
 
   Smoke (`decision-r08-t6b-floor.md` §5):
   - R08.T6.b's transmittance check compares stored optical depth with the twin's, under
@@ -3063,9 +3069,10 @@ together, towards the reference once T6.c stores optical depth, by amounts it re
 
   Recorded here: storing τ is coarser in T than storing T for τ between about 1 and 12 (half a
   step is 3.9 × 10⁻³ of T against 4.9 × 10⁻⁴ at τ = 9.7), within Design note 8's 10⁻³τ. It is finer
-  beyond τ = 12.2 (T under 5 × 10⁻⁶), and finite where T underflowed. The multiple-scattering table's
-  end-to-end figure over the twin's transmittance stays recorded, not held. The radiance tables keep
-  the floor, since this task changes neither their format nor their scale.
+  beyond τ = 17 ln 2 = 11.8 (T under 2⁻¹⁷ = 7.6 × 10⁻⁶; corrected from 12.2,
+  `decision-r08-t6b-floor.md` §9.1 (4)), and finite where T underflowed. The multiple-scattering
+  table's end-to-end figure over the twin's transmittance stays recorded, not held. The radiance
+  tables keep the floor, since this task changes neither their format nor their scale.
 
   Two of R08.T6.g's recorded exceptions are this task's to lift (main's rulings, 2026-10-10; Risks,
   "Deviations in T6.g, as built"), both bilinear reads of T where it falls by orders of magnitude
@@ -3156,8 +3163,12 @@ together, towards the reference once T6.c stores optical depth, by amounts it re
   s = g(φ) ÷ g_ref from R08.T3.d (`gravityRatio`'s, `BodyGravity.gravityOffsetMS2` included, which
   `oblate.wgsl` takes beside γ_e, γ_p and g_ref), and R05.T12.c's tests (`hillaire.test.ts`) keep
   passing with s ≡ 1 at a = c. `setMedium` allocates the layers under `atmosphere-tables`; Earth's
-  one slice and one band are one-layer arrays, bound through R08.T0's seam. When this lands,
-  `ATMOSPHERE: APPROXIMATE` clears for oblate thin bodies.
+  one slice and one band are one-layer arrays, bound through R08.T0's seam. R08.T6.c's
+  absorber-column table ("atmosphere absorber columns", slots 1–4) takes the transmittance
+  table's κ slices too, one layer a slice at 131 KB (256 × 64 `rgba16float`). So a thin
+  Saturn-class world's 655 KB of transmittance becomes about 1.31 MB, which Design note 11's
+  oblate figures do not yet count; R08.T11 records it (Risks, "Deviations in T6.c, as built").
+  When this lands, `ATMOSPHERE: APPROXIMATE` clears for oblate thin bodies.
 
   `oblate.wgsl` follows Design note 18:
   - A ray's osculating sphere R_α takes heights from h₀ by the sphere identity at R_α.
@@ -4080,6 +4091,11 @@ cloud fraction 1). Tests:
   (R08.T6.e's spheroid march on `saturn-oblate`), and the client's beam (the sliced lookup on
   `saturn-oblate`) in radiance under the metric. A sphere's beam that fails at the horizon, R05's
   256 × 64 table being short there, is recorded and raised for a ruling, not excused;
+- R08.T6.d's layer split is measured against the reference on Earth's case, whose ozone is a
+  ramped layer (`absorberTerm`). The client's beam at the ground geometries with the sun at 80°
+  and 90° and at the limb geometries is taken with the split and with 256 equal steps, each
+  recorded under the beam's metric (`decision-r08-t6b-floor.md` §9.2). A miss with the split is
+  raised for a ruling;
 - two-layer media (Rayleigh over a g ≈ 0.7 aerosol) that straddle the boundary classify on each
   side of it as the sweep predicts;
 - whether τ* collapses onto constant τ(1 − ωg) within one grid step is tested and recorded. Only if
@@ -4124,8 +4140,16 @@ Per Design notes 9 and 10, in six subtasks. R08.T14.d follows R08.T14.f.
   `ATMOSPHERE: COMPUTING` shows while a gated bake runs, in `ATMOSPHERE: APPROXIMATE`'s place and
   never beside it for one body, and `ATMOSPHERE: APPROXIMATE` takes its place if the bake fails,
   until the body's atmosphere is next computed, and after a bake that succeeds only where something
-  else, such as an NH₄SH stand-in, still holds it (the guide's rows, R08.T2). Acceptance:
-  `pnpm test` and `just test-render` pass.
+  else, such as an NH₄SH stand-in, still holds it (the guide's rows, R08.T2).
+
+  Until a thick world's bake lands, its analytic multiple-scattering table stays finite by
+  R08.T6.d's accumulated escape (`decision-r08-t6b-floor.md` §9.3), under
+  `ATMOSPHERE: APPROXIMATE`. The Venus-class analytic table's largest 1 ÷ mean(escape) and Ψ_ms
+  are recorded here, beside the bake's J_ms at the same points, so that what the label covered is
+  known.
+
+  Acceptance: `pnpm test` and `just test-render` pass.
+
 - **R08.T14.e The polarisation correction** (Design note 10; ruled 2026-10-09,
   `decision-r08-vector.md` item 2). It needs R08.T14.a and R08.T14.b.
   - **The solver.** `thick/polarisation.ts` is a vector mode of `thick/discreteOrdinates.ts`
@@ -5454,18 +5478,22 @@ generator, and the reference's sampling needs no domain tag.
     holds 0.974 of its column. R05's smooth Earth is 0.27% at the same comparison. The kernel and
     its twin agree (the smoke's check), so only the reference would see it. Lean: R08.T6.d, which
     first draws such a layer (Earth's ozone through `absorberTerm`), splits each transmittance ray
-    at the layers' edges or places its steps by them, and R08.T13's gate measures it.
+    at the layers' edges or places its steps by them, and R08.T13's gate measures it. Ruled
+    2026-10-11 (`decision-r08-t6b-floor.md` §9): R08.T6.d fixes it, and its text says how.
   - _R05.T12.b's oracle in optical depth._ The 20 texels are held to 1% of τ, with the format's
     2⁻²⁴ below its least normal in place of `HALF_NORMAL_MIN`, as the twin's own test is. In T
     that allows τ% where R05 held 1%: looser for 1 < τ < 9.7, tighter beyond, where the old floor
     carried the check. A quadrature's error is relative in τ, which is why 1% of τ was kept.
+    Kept (`decision-r08-t6b-floor.md` §9.1). The quadrature's own bound across every texel is
+    R08.T6.d's, max(0.005, 10⁻³ τ) against the table's 4,096-step value.
   - _Recorded, as T6.c's text asks._ Storing τ in half is coarser in T than storing T for τ between
     about 1 and 12 (half a step 3.9 × 10⁻³ of T at τ = 9.7, against 4.9 × 10⁻⁴; at worst 16 times,
     as τ nears 12 ln 2 ≈ 8.3 and 13 ln 2 ≈ 9.0, T just under 2⁻¹² and 2⁻¹³, by the science check),
-    within Design note 8's 10⁻³τ; finer beyond τ = 12.2 (the ruling's figure; the
-    crossing is at τ = 17 ln 2 = 11.8, T = 7.6 × 10⁻⁶, by the science check), and finite where T
-    underflowed. The radiance tables keep the floor. The multiple-scattering table's end-to-end
-    figure over the twin's transmittance stays recorded, not held.
+    within Design note 8's 10⁻³τ; finer beyond τ = 17 ln 2 = 11.8, T = 7.6 × 10⁻⁶ (the science
+    check's crossing, which corrects the ruling's first 12.2, `decision-r08-t6b-floor.md`
+    §9.1 (4)), and finite where T underflowed. The radiance tables keep the floor. The
+    multiple-scattering table's end-to-end figure over the twin's transmittance stays recorded,
+    not held.
   - _The smoke_ (SwiftShader, both variants, 2026-10-11). R05.T12.b's 20 oracle texels hold
     within 1% of τ. R08.T6.b's media all hold their twins: R05's Earth, the tabulated medium, the
     four absorbers (transmittance, absorber columns, multiple scattering and every per-frame
@@ -5489,7 +5517,8 @@ generator, and the reference's sampling needs no domain tag.
       Design note 9's thick case, whose source-function table (R08.T14) replaces the term, so the
       smoke holds the Venus-class medium's transmittance tables alone. Lean: guard the
       denominator in kernel and twin alike (1 − f_ms at least some ε) so that a thick world's
-      shared table stays finite until R08.T14, in R08.T6.d or T14.
+      shared table stays finite until R08.T14, in R08.T6.d or T14. Ruled 2026-10-11
+      (`decision-r08-t6b-floor.md` §9): R08.T6.d fixes it, and its text says how.
   - _For T6.d._ Earth's ozone becomes R08.T4.b's curve through `absorberTerm`; its curves come with
     the medium (`HillaireAtmosphere`'s and `setMedium`'s `curves`), light slot 0 the Sun's. The
     four-absorber fixture shows the path. Its layer is the first drawn with ramped edges, which
