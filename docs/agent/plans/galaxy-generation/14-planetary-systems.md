@@ -3730,7 +3730,10 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
     the current client without a `SURFACE` row for a modelled world, so this amendment lands with
     T35.e or directly after it: the rows of an `ok` surface section, the surface state, the mean
     surface temperature, the pressure and the gases, in the guide's units. It is built with the
-    console-ux skill and a UX review, which settle its rows.
+    console-ux skill and a UX review, which settle its rows. Every substance in those rows, and in
+    any later row, is named by T49.f's `substanceName`, never by its key. The gases are listed
+    largest first, each with its mole fraction. The quantity is named once, in the row's label, and
+    never on the `%` sign (decision-substance-names).
 - **P14.T43.c Events.** A list of the body events of the century around the display time, from a
   `body_events` request, each with its time in the chart's time system and a countdown in the
   guide's `T-` form.
@@ -4858,7 +4861,9 @@ rows' values.
         `chondrite_cv`, `chondrite_h`, `chondrite_l`, `chondrite_ll`, `chondrite_e`, `cometary`;
         a taxonomic class being T51.e's label, not a substance; science-composition-crusts.md
         §1.3), each with its kind and its sources (decision-composition, the surfaces audit §2
-        and §4.2).
+        and §4.2). Each name-form row lands with its name in the client's `SUBSTANCE_NAMES`
+        (T49.f), whose test reads the fixture. decision-substance-names §4.3 drafts the names, and
+        the builder confirms each against the row's sources.
   - **The client-optics flags** (decision-r08-t4b-t12c, follow-ups 2 and 4). `absorber` means
     that the client has absorption optics for the row, in its own right or as a member of a
     collision pair. R08 answers each row with cross-sections, a pair, a pending entry, or a
@@ -5023,8 +5028,10 @@ rows' values.
     - a Rust Mie on Wiscombe 1980's structure, held to the same MIEV cases as R08.T5.a (asserted
       values only);
     - over each material's committed index file, `apps/hyperion/src/renderer/src/view/atmosphere/materials/`,
-      read as a committed dataset with its hash, so the record's τ(550) and the client's Mie use
-      one source of truth;
+      read as a committed dataset, its hash taken over each file's `key`, `phase`, `variant`,
+      `shape`, `wavelengthsNm`, `n` and `k` only, so that the record's τ(550) and the client's Mie
+      use one source of truth and a file's prose (`name`, `paper`, `source`, `licence`,
+      `reduction`, `standIn`) moves no output (decision-substance-names);
     - a stand-in index carries its stand-in flag;
     - emitted to `tables/condensate_extinction.rs`.
   - _Tests:_
@@ -5037,6 +5044,42 @@ rows' values.
   - _Files:_ `substance/aerosol.rs`, `tables/condensate_extinction.rs`, `tasks/condensate_extinction.rs`.
   - _Accept:_ `cargo test -p hyperion-fit condensate_extinction`;
     `cargo test -p hyperion-sim substance::aerosol`.
+- **P14.T49.f The substance names on the client** (moves no output and rides no bump; built ahead
+  of T49.b by rendering plan R08's notes, decision-substance-names, 2026-10-12; before T43.b's
+  `SURFACE` rows).
+  - `apps/hyperion/src/renderer/src/lib/substances.ts`: `substanceName(key, nameCase)`,
+    `SUBSTANCE_NAMES` and `UNLISTED_MATERIAL`. A console names a substance only through it, never
+    by its key.
+    - A formula key is its own name: its digits on the line and its case kept, in an upper-case
+      label too; an ion's sign on the line, a minus as the minus sign (`Fe+`, `H−`); and `e-` as
+      `e−`. So a newer server's formula key has a name too.
+    - A name key takes its name from `SUBSTANCE_NAMES`: words, as the literature names the
+      material, in sentence case, three words or fewer. In upper case the words are upper-cased
+      and a formula among them keeps its case (`NaCl BRINE`).
+    - Any other string, a newer server's name key among them, reads `unlisted material`
+      (`UNLISTED MATERIAL`).
+  - A name holds neither the phase nor an amount. A reading puts the phase beside it in words
+    (`liquid CH4`, `CO2 ice`) and an amount as a quantity named in words (`mass fraction 75 %`),
+    never as a modifier on `%`.
+  - The names are the client's. The registry, its fixture and its golden hold none, so a name can
+    change without moving a golden, and the generator never reads one. A generated composition is
+    named from its rows' names and its quantities on the wire, and no name is drawn.
+  - A task that appends a name-form row adds its name in the same commit.
+    decision-substance-names §4.3 drafts the names of T49.b's rows.
+  - _Tests_ (`lib/substances.test.ts`):
+    - formula keys, ions and the electron as above;
+    - a name key's sentence and upper-case forms;
+    - an unknown name key, a prototype key (`constructor`) and strings outside the grammar read
+      `unlisted material`;
+    - every row of `packages/protocol/fixtures/substances.json` is named, with no underscore;
+    - `SUBSTANCE_NAMES` holds name keys only, no two keys share a name, each name is three words
+      or fewer in characters both B612 faces hold, and none is written as a key is, with an
+      underscore or as a formula.
+
+    Rendering plan R08's `materials.test.ts` holds every material file's key to a name.
+
+  - _Files:_ `apps/hyperion/src/renderer/src/lib/{substances, substances.test}.ts`.
+  - _Accept:_ `pnpm --filter hyperion exec vitest run lib/substances`.
 
 #### P14.T50 Elements and redox
 

@@ -3710,7 +3710,9 @@ By the composition ruling (decision-composition):
   Rayleigh, an absent absorber, or one with no column free (`noColumnFree`), a stand-in or
   unknown material. The reasons are player text. Each uses only characters both B612 faces hold,
   and names in words any quantity the literature writes with another symbol (science-r08-mmf.md
-  §4.7).
+  §4.7). Each names a species or material through `substanceName` (P14.T49.f), and a composition
+  variant through `variantWords`, never by a key or a variant's identifier
+  (decision-substance-names).
 - **Negligible absorbers** (`decision-r08-t4b-t12c.md`, follow-ups 3–5).
   - **What is tested:**
     - each listed absorber still in R08.T4.c's `PENDING_ABSORBERS`;
@@ -6404,6 +6406,15 @@ generator, and the reference's sampling needs no domain tag.
       write 10⁻³ as 1E-3. No note names a plan task or a code identifier, and none abbreviates the
       modified mean-field theory. The notes show a shape class in words, and the material names
       spell out "wt%", CRISM and MER (§4.8).
+    - _The notes' substances_ (decision-substance-names, 2026-10-12). Each note names its material
+      through `substanceName` (`lib/substances.ts`, galaxy plan 14's P14.T49.f, built here first),
+      never by its key: `an aggregate of tholin`, `a non-spherical mineral of Mars-type dust`, and
+      `unlisted material` for a key the client does not name. A stand-in names a variant through
+      `variantWords` (`mass fraction 75 %`), and a mode with no note of its own names its basis in
+      words. Each material file's `name` names its substance as `substanceName` does
+      (`H2O ice Ih at −7 °C`, `aqueous H2SO4, mass fraction 75 %, at 300 K`). That supersedes
+      science-r08-mmf.md §4.8's "75% by mass", which the SI Brochure's §5.4.7 forbids. The notes
+      call water ice `H2O ice`, and a percentage takes a space before `%`.
   - _The MMF against optool._ The lane built optool 1.9.14 (commit 21aecb46) offline with
     gfortran 16.2.1 from Arch's `gcc-fortran` package (its SHA-256 checked against the signed sync
     database), with `optool_manual.f90` stubbed (its help text fails gfortran 16's format checks;

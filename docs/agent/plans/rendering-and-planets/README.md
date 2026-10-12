@@ -267,6 +267,11 @@ Figures rule. Only what differs is stated here.
   owner and ends in "the owner signs off"; the client is built to the draft meanwhile, as the galaxy
   slice was. R02.T2 drafts the brainstorm's nine items in one pass and absorbs R01's nomenclature;
   later plans add only their own entries.
+- **Substances are named by `substanceName`** (`apps/hyperion/src/renderer/src/lib/substances.ts`,
+  P14.T49.f; decision-substance-names). Player text never prints a registry key or a variant's
+  identifier. A formula key is its own name, a name key takes the client's name for it, and any
+  other key reads `unlisted material`. A plan that shows a substance names it so: R08's reasons,
+  R10's materials, and R11's clouds and seas.
 
 ## Asks of other plans
 
