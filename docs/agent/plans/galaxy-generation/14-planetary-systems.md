@@ -4557,10 +4557,14 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   T24.a). `SurfaceConditions` gains a `ClimateRegime` of three fields and the regime's named coarse
   model: radiative equilibrium with thermal inertia for airless and thin-atmosphere worlds, a
   seasonal or body-fixed energy-balance model for the rest, and an isothermal surface for a Venus.
-  - _Thermal regime_, from Koll's (2022) redistribution factor f = 2/3 − (5/12) X ÷ (k + X) at
-    k = 2, airless-like below X < 0.087 k and efficient above 15.7 k, for locked and slow rotators
-    only, with Wordsworth's (2015, his eq. 43) CO₂ collapse pressure as its thin end, for pure CO₂
-    between 1 and 10 M⊕ only.
+  - _Thermal regime_, from Koll's (2022) redistribution factor f = 2/3 − (5/12) X ÷ (k + X):
+    - at the body's own k (his eq. 9's definition, T24.a's `redistribution_scale`) and
+      τ_LW = (3/2)τ;
+    - airless-like below X < 0.087 k and efficient above 15.7 k;
+    - for locked rotators, and for rotators whose solar day is long against the column's effective
+      radiative time (ω C (1 − ε) ÷ B ≤ 1, science-p14-t24a-climate §4);
+    - with Wordsworth's (2015, his eq. 43) CO₂ collapse pressure as its thin end, for pure CO₂
+      between 1 and 10 M⊕ only.
   - _Forcing_, from the locking state, the solar day and the obliquity: the slow-rotator onset rises
     with flux, not one number. Yang et al. 2014's Table 1 brackets it between sidereal rotation
     periods of 8 and 16 d at 1.40 S⊕ and of 32 and 48 d at 1.92 S⊕, at an orbital period of
@@ -4571,9 +4575,22 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     changes inside the climate's range, the one with the largest partial pressure in the air, x p_s
     (T24.a's mole fraction), with ties by registry order; or none. The loop runs over T49.a's
     condensable rows in registry order: water, methane, nitrogen, carbon dioxide and argon today,
-    and any later row joins as data. The climate's range runs from
-    T_mean − ½|ΔT_ep| − ½|ΔT_dn| to T_mean + ½|ΔT_ep| + ½|ΔT_dn|, from T24.a's mean and signed
-    contrasts, until T51.a's cold-trap form refines it. A phase changes inside it where the
+    and any later row joins as data. The climate's range is T24.a's `climate_range`
+    (science-p14-t24a-climate §3). It runs from
+
+    T_cold = max(T_floor, min(T₀, T₉₀) − (T_mean − T_night))
+
+    to
+
+    T_warm = max(T₀, T₉₀) + (T_day − T_mean),
+
+    where:
+    - T₀ = T_mean + ⅓ΔT_ep and T₉₀ = T_mean − ⅔ΔT_ep are the zonal profile T_mean + T₂ P₂(sin φ),
+      T₂ = −⅔ΔT_ep (R09's), at the equator and a pole;
+    - T_day and T_night are T24.a's dayside and nightside temperatures, whose difference is ΔT_dn;
+    - T_floor = (T_CMB⁴ + F ÷ ε_r σ)^¼ is the night floor from T24.b's heat flow F.
+
+    It holds until T51.a's cold-trap form refines it. A phase changes inside it where the
     species' saturation temperature at its partial pressure lies within it, or the surface holds
     a reservoir of it (signoff-3.md). From the 22 → 23 batch it is T51.a's choice over the
     partition (decision-composition).
@@ -5169,8 +5186,8 @@ Snapshot path, `planetary/chem/`.
   - `chem/partition.rs`, called inside T13's three passes after escape and before the greenhouse.
   - For each registry condensable the exchangeable inventory carries, in registry order:
     - **The vapour pressure.** A condensable that dominates its air takes its saturation pressure
-      at the coldest zone (a closed form of T24.a's mean and signed contrasts, where its reservoir
-      cold-traps, after Wordsworth 2015, as T48.d already cites) (methane included: a cold world
+      at the coldest zone (T24.a's `climate_range`, its coldest, where its reservoir cold-traps,
+      after Wordsworth 2015, as T48.d already cites) (methane included: a cold world
       whose methane at T24.f's 0.5 would exceed its background, which T24.f holds at 0.5
       meanwhile; science-p14-t24f §2). A minor one in a non-condensing
       background takes the mean temperature with T24.c's surface humidity. Either way the cap is
