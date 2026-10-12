@@ -15,7 +15,7 @@ use hyperion_base::units::{
 };
 
 use super::DecodeBlockError;
-use crate::craters::{CraterParams, CraterParamsParts, Screening};
+use crate::craters::{CraterParams, CraterParamsParts, CraterTarget, Screening, TargetClass};
 use crate::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, Crust, FieldHeaderParts, FlowDirection,
     LogArea, LogPrecipitation, LogRunoff, LogSteepness, MaterialPalette, MechanicsFamily,
@@ -145,13 +145,23 @@ wire_table!(fixed Spheroid {
     polar_radius_m: f64,
 });
 
-// The crater contract's parts, which `CraterParams::new` validates.
+// The crater contract's parts, which `CraterParams::new` validates: R09.T7.e's projectile density,
+// target and system age after T7.a's five.
 wire_table!(CraterParamsParts {
     n_1km: PerSquareKilometre,
     screening: Screening,
     gravity: MetresPerSecondSquared,
     k_target: f64,
     impact_velocity: Option<MetresPerSecond>,
+    projectile_density: KilogramsPerCubicMetre,
+    target: CraterTarget,
+    system_age: Gigayears,
+});
+
+// A crater target (9 bytes): its class's code, then its density.
+wire_table!(fixed CraterTarget {
+    class: TargetClass,
+    density: KilogramsPerCubicMetre,
 });
 
 /// The integers' forms: their little-endian bytes.
@@ -260,7 +270,8 @@ wire_coded!(
     ClimateModelKind,
     PrecipitationSource,
     PaletteRole,
-    MechanicsFamily
+    MechanicsFamily,
+    TargetClass
 );
 
 /// The forms of the field's scaled and open codes: the code's integer.
@@ -446,18 +457,14 @@ pub(super) const SCREENING_ATMOSPHERE: u8 = 1;
 pub(super) const SCREENING_CUTOFF: u8 = 2;
 
 impl Wire for Screening {
-    /// A tag, then the variant's parts: none for [`Screening::None`], the column mass and the
-    /// projectile density for [`Screening::Atmosphere`], the diameter for [`Screening::Cutoff`].
+    /// A tag, then the variant's parts: none for [`Screening::None`], the column mass for
+    /// [`Screening::Atmosphere`], the diameter for [`Screening::Cutoff`].
     fn put(&self, out: &mut Vec<u8>) {
         match self {
             Self::None => out.push(SCREENING_NONE),
-            Self::Atmosphere {
-                column_mass,
-                projectile_density,
-            } => {
+            Self::Atmosphere { column_mass } => {
                 out.push(SCREENING_ATMOSPHERE);
                 column_mass.put(out);
-                projectile_density.put(out);
             }
             Self::Cutoff { diameter } => {
                 out.push(SCREENING_CUTOFF);
@@ -471,7 +478,6 @@ impl Wire for Screening {
             SCREENING_NONE => Ok(Self::None),
             SCREENING_ATMOSPHERE => Ok(Self::Atmosphere {
                 column_mass: KilogramsPerSquareMetre::read(r)?,
-                projectile_density: KilogramsPerCubicMetre::read(r)?,
             }),
             SCREENING_CUTOFF => Ok(Self::Cutoff {
                 diameter: Metres::read(r)?,
@@ -652,11 +658,16 @@ mod tests {
         round_trip(&Some(Metres::new(-3.5)));
         round_trip(&None::<f64>);
         round_trip(&BodyRef::new(u64::MAX, 7));
+        for class in TargetClass::ALL {
+            round_trip(&CraterTarget {
+                class: *class,
+                density: KilogramsPerCubicMetre::new(544.0),
+            });
+        }
         for screening in [
             Screening::None,
             Screening::Atmosphere {
                 column_mass: KilogramsPerSquareMetre::new(10_300.0),
-                projectile_density: KilogramsPerCubicMetre::new(3_000.0),
             },
             Screening::Cutoff {
                 diameter: Metres::new(1.6),
@@ -711,6 +722,10 @@ mod tests {
         assert_eq!(
             MechanicsFamily::read(&mut Reader::new(&[6])),
             Err(unknown("MechanicsFamily", 6))
+        );
+        assert_eq!(
+            TargetClass::read(&mut Reader::new(&[2])),
+            Err(unknown("TargetClass", 2))
         );
         let read = |bytes: &[u8]| Crust::read(&mut Reader::new(bytes));
         assert_eq!(read(&[3]), Ok(Crust::Province));

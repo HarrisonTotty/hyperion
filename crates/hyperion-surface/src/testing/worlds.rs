@@ -14,7 +14,11 @@
 //! water ice. Their keys are checked by the grammar alone until plan 14's rows exist (P14.T49.b's
 //! test then checks them against the registry), and their values are illustrative ones, each with
 //! its basis, standing in for nothing: the server resolves a generated world's from the registry.
-//! The flat field and the single crater have an empty palette. The four bodies' structural spectra
+//! Their crater contracts' targets, projectiles, system age and impact velocities are the
+//! reference worlds' (R09.T7.e): non-porous at the rock class's 2,550 kg m⁻³ (Ceres's crust at
+//! 1,287), stony projectiles of 3,000, the Solar System's age, and P14.T48.f's velocities, so the
+//! Moon-like world sits at the diameter map's lunar reference and the others are mapped. The flat
+//! field and the single crater have an empty palette. The four bodies' structural spectra
 //! are their crust classes' anchored laws (`decision-r09-t5.md` item 3): the Earth-like world's a
 //! mobile lid's, the others a rocky stagnant lid's (Ceres-like as the reference Ceres's rock); and
 //! the Earth-like world's sea floor is closed forms in the place of R09.T11's and T12.a's (item
@@ -34,7 +38,10 @@ use super::{
     CellSite, ClimateSample, FieldBuilder, PlateSpec, Routing, SeafloorSample, arc, cross, dot,
     norm, scale, sub, unit,
 };
-use crate::craters::{CraterParams, CraterParamsParts, Screening};
+use crate::craters::{
+    CraterParams, CraterParamsParts, CraterTarget, LUNAR_IMPACT_VELOCITY, LUNAR_PROJECTILE_DENSITY,
+    LUNAR_TARGET, SOLAR_SYSTEM_AGE, Screening, TargetClass,
+};
 use crate::cube::unit_dir;
 use crate::field::{
     BodyRef, BoundaryKind, ClimateModelKind, CoarseField, Crust, MaterialPalette, MechanicsFamily,
@@ -105,6 +112,28 @@ const EARTH_RADIUS_M: f64 = 6.371e6;
 const MARS_RADIUS_M: f64 = 3.3895e6;
 const MOON_RADIUS_M: f64 = 1.7374e6;
 const CERES_RADIUS_M: f64 = 4.697e5;
+
+/// The Earth-like world's mean impact velocity: P14.T48.f's model's 19.9 km/s for the Earth
+/// (science-r09-craters.md item 4; Ivanov et al. 2002's 18.6–20.2 km/s), as the reference Earth's.
+const EARTH_IMPACT_VELOCITY: MetresPerSecond = MetresPerSecond::new(19_900.0);
+
+/// The Mars-like world's mean impact velocity: P14.T48.f's model's 10.6 km/s for Mars
+/// (science-r09-craters.md item 4; 9.6 km/s, Ivanov 2001 via Ivanov et al. 2002, §5.2, to 11.5,
+/// JeongAhn and Malhotra 2015), as the reference Mars's.
+const MARS_IMPACT_VELOCITY: MetresPerSecond = MetresPerSecond::new(10_600.0);
+
+/// The Ceres-like world's mean impact velocity: P14.T48.f's model's 5.6 km/s for Ceres and Vesta
+/// (science-r09-craters.md item 4; about 5 km/s, Bottke et al. 1994 as the ruling recalls it,
+/// unverified), as the reference Ceres's.
+const CERES_IMPACT_VELOCITY: MetresPerSecond = MetresPerSecond::new(5_600.0);
+
+/// The Ceres-like world's crater target: non-porous at its crust's bulk density, 1,287 kg m⁻³
+/// (Ermakov et al. 2017, JGR Planets 122, 2267, §5.4; science-r09-craters.md item 2's refinement), its
+/// ice-rich `k_target` apart.
+const CERES_TARGET: CraterTarget = CraterTarget {
+    class: TargetClass::NonPorous,
+    density: KilogramsPerCubicMetre::new(1_287.0),
+};
 
 /// The eccentricities of the synthetic worlds' seasonal orbits (Design note 8): the Earth–Moon
 /// barycentre's 0.016 711 23 and Mars's 0.093 394 10 at J2000 (Standish and Williams 1992, as
@@ -651,11 +680,13 @@ fn earth_like() -> CoarseField {
                 n_1km: PerSquareKilometre::new(1e-4),
                 screening: Screening::Atmosphere {
                     column_mass: KilogramsPerSquareMetre::new(101_325.0 / 9.81),
-                    projectile_density: KilogramsPerCubicMetre::new(3_000.0),
                 },
                 gravity: MetresPerSecondSquared::new(9.81),
                 k_target: 1.0,
-                impact_velocity: None,
+                impact_velocity: Some(EARTH_IMPACT_VELOCITY),
+                projectile_density: LUNAR_PROJECTILE_DENSITY,
+                target: LUNAR_TARGET,
+                system_age: SOLAR_SYSTEM_AGE,
             })
             .expect("the Earth-like crater contract is valid"),
         )
@@ -793,11 +824,13 @@ fn mars_like() -> CoarseField {
                 n_1km: PerSquareKilometre::new(0.005),
                 screening: Screening::Atmosphere {
                     column_mass: KilogramsPerSquareMetre::new(610.0 / 3.71),
-                    projectile_density: KilogramsPerCubicMetre::new(3_000.0),
                 },
                 gravity: MetresPerSecondSquared::new(3.71),
                 k_target: 1.0,
-                impact_velocity: None,
+                impact_velocity: Some(MARS_IMPACT_VELOCITY),
+                projectile_density: LUNAR_PROJECTILE_DENSITY,
+                target: LUNAR_TARGET,
+                system_age: SOLAR_SYSTEM_AGE,
             })
             .expect("the Mars-like crater contract is valid"),
         )
@@ -887,7 +920,11 @@ fn moon_like() -> CoarseField {
                 screening: Screening::None,
                 gravity: MetresPerSecondSquared::new(1.62),
                 k_target: 1.0,
-                impact_velocity: None,
+                // The lunar reference itself, where the diameter map is the identity.
+                impact_velocity: Some(LUNAR_IMPACT_VELOCITY),
+                projectile_density: LUNAR_PROJECTILE_DENSITY,
+                target: LUNAR_TARGET,
+                system_age: SOLAR_SYSTEM_AGE,
             })
             .expect("the Moon-like crater contract is valid"),
         )
@@ -961,7 +998,10 @@ fn ceres_like() -> CoarseField {
                 screening: Screening::None,
                 gravity: MetresPerSecondSquared::new(0.28),
                 k_target: 0.12,
-                impact_velocity: None,
+                impact_velocity: Some(CERES_IMPACT_VELOCITY),
+                projectile_density: LUNAR_PROJECTILE_DENSITY,
+                target: CERES_TARGET,
+                system_age: SOLAR_SYSTEM_AGE,
             })
             .expect("the Ceres-like crater contract is valid"),
         )

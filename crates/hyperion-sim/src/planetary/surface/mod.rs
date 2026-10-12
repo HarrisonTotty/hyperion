@@ -92,10 +92,13 @@ use steps::{Pass, Working};
 ///     TectonicRegime, ThermalRegime, coarse_pass,
 /// };
 /// use hyperion_sim::units::{
-///     Gigayears, Kelvin, Metres, MetresPerSecondSquared, Pascals, PerSquareKilometre, Radians,
-///     Seconds, WattsPerSquareMetre,
+///     Gigayears, Kelvin, KilogramsPerCubicMetre, Metres, MetresPerSecond, MetresPerSecondSquared,
+///     Pascals, PerSquareKilometre, Radians, Seconds, WattsPerSquareMetre,
 /// };
-/// use hyperion_surface::craters::{CraterParams, CraterParamsParts, Screening};
+/// use hyperion_surface::craters::{
+///     CraterParams, CraterParamsParts, CraterTarget, LUNAR_PROJECTILE_DENSITY, SOLAR_SYSTEM_AGE,
+///     Screening, TargetClass,
+/// };
 /// use hyperion_surface::field::{
 ///     ClimateModelKind, FieldView, MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole,
 /// };
@@ -123,7 +126,13 @@ use steps::{Pass, Working};
 ///     screening: Screening::None,
 ///     gravity,
 ///     k_target: 0.12,
-///     impact_velocity: None,
+///     impact_velocity: Some(MetresPerSecond::new(5_600.0)),
+///     projectile_density: LUNAR_PROJECTILE_DENSITY,
+///     target: CraterTarget {
+///         class: TargetClass::NonPorous,
+///         density: KilogramsPerCubicMetre::new(1_287.0),
+///     },
+///     system_age: SOLAR_SYSTEM_AGE,
 /// })?;
 /// let inputs = CoarseInputs::builder()
 ///     .figure(Spheroid::sphere(469.7e3))

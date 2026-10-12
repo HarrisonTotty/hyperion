@@ -126,7 +126,7 @@ mod tests {
                 published(t),
             );
         }
-        // 1 Gyr is Craterstats' a0, 10^−3.0768.
+        // 1 Gyr is Neukum 1983's a0, 10^−3.0768 (science-r09-craters.md F3).
         let n = lunar_chronology(Gigayears::new(1.0), SOLAR_SYSTEM_AGE).value();
         assert!((math::log10(n) + 3.0768).abs() < 5e-5, "{n}");
     }

@@ -1,9 +1,13 @@
-//! Tests of the crater shapes against the sources of `decision-r09-t2.md` item 3, their gravity
-//! scaling, their continuity across the transition zone and their volume balance.
+//! Tests of the crater shapes against the sources of `decision-r09-t2.md` item 3, the porous bowl
+//! of science-r09-craters.md item 2 and the central peak's ramps of its F2, their gravity scaling,
+//! their continuity across the zones and their volume balance.
 
 use super::*;
 use crate::craters::density::GAUSS_LEGENDRE_8;
-use crate::craters::{CraterParamsParts, Screening};
+use crate::craters::{
+    CraterParamsParts, CraterTarget, LUNAR_PROJECTILE_DENSITY, LUNAR_TARGET, SOLAR_SYSTEM_AGE,
+    Screening,
+};
 use hyperion_base::units::{
     KilogramsPerCubicMetre, KilogramsPerSquareMetre, MetresPerSecondSquared, PerSquareKilometre,
 };
@@ -11,7 +15,7 @@ use hyperion_testkit::float::assert_same_bits;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
-/// A contract at gravity `g` under `screening` on a target of factor `k`.
+/// A contract at gravity `g` under `screening` on a non-porous target of factor `k`.
 fn body(g: f64, screening: Screening, k: f64) -> CraterParams {
     CraterParams::new(CraterParamsParts {
         n_1km: PerSquareKilometre::new(0.01),
@@ -19,16 +23,31 @@ fn body(g: f64, screening: Screening, k: f64) -> CraterParams {
         gravity: MetresPerSecondSquared::new(g),
         k_target: k,
         impact_velocity: None,
+        projectile_density: LUNAR_PROJECTILE_DENSITY,
+        target: LUNAR_TARGET,
+        system_age: SOLAR_SYSTEM_AGE,
     })
     .unwrap()
 }
 
-/// An atmosphere of 636 Pa at gravity `g` over stony projectiles: Mars's, enough to screen and so
-/// to keep every bowl at 0.20 D.
+/// A contract at gravity `g` under `screening` on a porous target of factor `k` and 544 kg m⁻³
+/// (Hyperion's bulk density).
+fn porous_body(g: f64, screening: Screening, k: f64) -> CraterParams {
+    CraterParams::new(CraterParamsParts {
+        target: CraterTarget {
+            class: TargetClass::Porous,
+            density: KilogramsPerCubicMetre::new(544.0),
+        },
+        ..*body(g, screening, k).parts()
+    })
+    .unwrap()
+}
+
+/// An atmosphere of 636 Pa at gravity `g`: Mars's, enough to screen stony projectiles and so to
+/// keep every bowl at 0.20 D.
 fn thin_air(g: f64) -> Screening {
     Screening::Atmosphere {
         column_mass: KilogramsPerSquareMetre::new(636.0 / g),
-        projectile_density: KilogramsPerCubicMetre::new(3_000.0),
     }
 }
 
@@ -170,6 +189,59 @@ fn airless_bowls_are_stopars_a_class() {
     let s = crater_shape(&moon(), Metres::new(63.0));
     assert!((s.rim_height().value() / 63.0 - 0.0369).abs() < 1e-5);
 }
+
+#[test]
+fn porous_bowls_are_the_asteroidal_ones() {
+    // 0.14 D deep at every size on a porous target with air, and on an airless one wherever the
+    // regolith's bowls are deeper; shallower where they are (science-r09-craters.md item 2). The
+    // rim stays 0.0369 D, and a ≤ 1.543.
+    let ratio =
+        |p: &CraterParams, d_m: f64| crater_shape(p, Metres::new(d_m)).depth().value() / d_m;
+    let screened = porous_body(1.62, thin_air(1.62), 1.0);
+    let airless = porous_body(1.62, Screening::None, 1.0);
+    for d_m in [1.0, 63.0, 300.0, 3e3, 14e3] {
+        assert!((ratio(&screened, d_m) - 0.14).abs() < 1e-12, "{d_m} m");
+        let s = crater_shape(&screened, Metres::new(d_m));
+        assert_eq!(s.morphology(), Morphology::Simple);
+        assert!((s.rim_height().value() / d_m - 0.0369).abs() < 1e-5);
+        assert!(s.exterior_width() <= 1.543, "{}", s.exterior_width());
+    }
+    for (d_m, expected) in [
+        (20.0, 0.125),
+        (63.0, 0.125),
+        (
+            80.0,
+            0.125 + (0.152 - 0.125) * math::ln(80.0 / 63.0) / math::ln(141.0 / 63.0),
+        ),
+        (100.0, 0.14),
+        (141.0, 0.14),
+        (283.0, 0.14),
+        (900.0, 0.14),
+    ] {
+        assert!(
+            (ratio(&airless, d_m) - expected).abs() < 1e-12,
+            "{d_m} m: {} against {expected}",
+            ratio(&airless, d_m)
+        );
+    }
+    // Shallower than the non-porous bowl, so its exterior is narrower: a 0.73–0.913 against the
+    // bowl's 1.5426.
+    let a = |p: &CraterParams, d_m: f64| crater_shape(p, Metres::new(d_m)).exterior_width();
+    assert!(
+        (a(&screened, 300.0) - POROUS_BOWL_A).abs() < 1e-3,
+        "{}",
+        a(&screened, 300.0)
+    );
+    assert!(
+        (a(&airless, 20.0) - 0.73).abs() < 0.01,
+        "{}",
+        a(&airless, 20.0)
+    );
+}
+
+/// The exterior width of a porous bowl 0.14 D deep with a rim of 0.0369 D: N = (d₀ − h) ÷ 2h =
+/// 0.897, so a = (−0.8 + √(0.64 + 0.8 N)) ÷ 0.4 = 0.9129.
+const POROUS_BOWL_A: f64 = 0.9129;
 
 #[test]
 fn the_moons_complex_craters_are_kalynns_and_pikes() {
@@ -338,6 +410,8 @@ fn every_shape_balances_its_volume() {
         ("mercury", mercury()),
         ("icy", body(1.428, Screening::None, 0.12)),
         ("earth", body(9.81, thin_air(9.81), 1.0)),
+        ("porous", porous_body(0.02, Screening::None, 0.12)),
+        ("porous with air", porous_body(1.62, thin_air(1.62), 1.0)),
     ];
     let mut widest: f64 = 0.0;
     for (name, p) in bodies {
@@ -375,12 +449,16 @@ fn the_exterior_widths_are_the_rulings() {
     let t = transition_diameter(&p).value();
     let a = |x: f64| crater_shape(&p, Metres::new(x * t)).exterior_width();
     // Complex craters to 25 D_t lie in 1.28–1.36, and the widest basin's narrows to 1.05 at
-    // 100 D_t; transitional ones fall from the bowl's 1.5426 at 0.8 D_t to 1.33 at 1.5 D_t.
+    // 100 D_t; transitional ones fall from the bowl's 1.5426 at 0.8 D_t to 1.326 at 1.5 D_t.
+    // science-r09-craters.md F2 computes 1.326 at 1.5 D_t, 1.302 at 9 D_t and 1.323 at 11 D_t.
     for k in 0..=100 {
         let x = 1.5 * math::powf(25.0 / 1.5, f64::from(k) / 100.0);
         assert!((1.28..=1.36).contains(&a(x)), "a = {} at {x} D_t", a(x));
         let x = 0.8 * math::powf(1.5 / 0.8, f64::from(k) / 101.0);
-        assert!((1.33..=1.543).contains(&a(x)), "a = {} at {x} D_t", a(x));
+        assert!((1.32..=1.543).contains(&a(x)), "a = {} at {x} D_t", a(x));
+    }
+    for (x, expected) in [(1.5, 1.326), (9.0, 1.302), (11.0, 1.323)] {
+        assert!((a(x) - expected).abs() < 1e-3, "a = {} at {x} D_t", a(x));
     }
     assert!((a(100.0) - 1.05).abs() < 0.01, "{}", a(100.0));
     // The airless regolith's bowls span 0.73 (at 63 m and below) to the bowl's 1.54.
@@ -389,6 +467,136 @@ fn the_exterior_widths_are_the_rulings() {
     // An absurd basin, beyond any body, holds no net cavity and has no exterior, never a NaN.
     let huge = crater_shape(&p, Metres::new(1e7 * t));
     assert_same_bits(huge.exterior_width(), 0.0);
+}
+
+/// Every measure of a shape that must be continuous in D: depth, rim height, floor radius, peak
+/// relief and exterior width.
+fn measures(s: &CraterShape) -> [(&'static str, f64); 5] {
+    [
+        ("depth", s.depth().value()),
+        ("rim", s.rim_height().value()),
+        ("floor", s.floor_radius().value()),
+        ("peak", s.peak_relief().value()),
+        ("a", s.exterior_width()),
+    ]
+}
+
+#[test]
+fn the_shape_is_continuous_at_every_zones_bound() {
+    // d, h, the floor radius, the peak relief and a are continuous in D at 0.8, 1.5, 9 and 13 D_t,
+    // to 10⁻⁹ relative across each bound (science-r09-craters.md F2): no step in a where the
+    // central peak enters or ends.
+    for p in [
+        moon(),
+        mars(),
+        body(1.428, Screening::None, 0.12),
+        porous_body(1.62, Screening::None, 1.0),
+    ] {
+        let t = transition_diameter(&p).value();
+        for x in [
+            TRANSITIONAL_FROM,
+            COMPLEX_FROM,
+            PEAK_RING_FROM,
+            PEAK_GONE_FROM,
+        ] {
+            let below = crater_shape(&p, Metres::new(x * t * (1.0 - 1e-12)));
+            let above = crater_shape(&p, Metres::new(x * t * (1.0 + 1e-12)));
+            for ((what, u), (_, v)) in measures(&below).into_iter().zip(measures(&above)) {
+                // Relative to its own value; but the floor and the peak, which start from zero
+                // at a bound, relative to the crater's diameter.
+                let reference = if what == "floor" || what == "peak" {
+                    x * t
+                } else {
+                    v.abs()
+                };
+                assert!(
+                    (u - v).abs() <= 1e-9 * reference,
+                    "{what} at {x} D_t: {u} {v}"
+                );
+            }
+        }
+    }
+}
+
+/// The largest D at or below `x` `D_t` on `p`, as `crater_shape` reckons D ÷ `D_t`.
+fn at_most(p: &CraterParams, x: f64) -> Metres {
+    let t = transition_diameter(p).value();
+    let mut d = x * t;
+    while d / t > x {
+        d = d.next_down();
+    }
+    Metres::new(d)
+}
+
+/// The smallest D at or above `x` `D_t` on `p`, as `crater_shape` reckons D ÷ `D_t`.
+fn at_least(p: &CraterParams, x: f64) -> Metres {
+    let t = transition_diameter(p).value();
+    let mut d = x * t;
+    while d / t < x {
+        d = d.next_up();
+    }
+    Metres::new(d)
+}
+
+#[test]
+fn the_central_peak_ramps_in_and_out_on_pikes_law() {
+    for p in [moon(), mars(), body(1.428, Screening::None, 0.12)] {
+        let t = transition_diameter(&p).value();
+        let law = |x: f64| 0.0238 * t * math::powf(x, 0.900);
+        // Zero at and below 0.8 D_t and at and above 13 D_t.
+        for d in [
+            at_most(&p, TRANSITIONAL_FROM),
+            Metres::new(0.5 * t),
+            at_least(&p, PEAK_GONE_FROM),
+            Metres::new(20.0 * t),
+        ] {
+            let s = crater_shape(&p, d);
+            assert_same_bits(s.peak_relief().value(), 0.0);
+            assert_same_bits(s.peak_radius().value(), 0.0);
+        }
+        // Pike's law to 10⁻⁹ over 1.5–9 D_t, and below it on either side.
+        for k in 0..=200 {
+            let x = 1.5 * math::powf(9.0 / 1.5, f64::from(k) / 200.0);
+            let s = crater_shape(&p, Metres::new(x * t));
+            assert!(
+                (s.peak_relief().value() / law(x) - 1.0).abs() < 1e-9,
+                "{x} D_t"
+            );
+        }
+        for x in [0.9, 1.2, 1.45, 9.5, 11.0, 12.9] {
+            let s = crater_shape(&p, Metres::new(x * t));
+            let relief = s.peak_relief().value();
+            assert!(relief > 0.0 && relief < law(x), "{x} D_t: {relief}");
+        }
+        // The base never exceeds the floor, and is Hale and Head's 0.259 D − 0.132 D_t where the
+        // floor is wider.
+        for k in 0..=2_000 {
+            let x = math::exp10(-1.0 + 3.0 * f64::from(k) / 2_000.0);
+            let s = crater_shape(&p, Metres::new(x * t));
+            assert!(
+                s.peak_radius() <= s.floor_radius(),
+                "{x} D_t: base {} m over a floor of {} m",
+                s.peak_radius().value(),
+                s.floor_radius().value()
+            );
+            if s.peak_relief().value() > 0.0 && x >= COMPLEX_FROM {
+                let base = (0.259 - 0.132 / x) * s.diameter().value() / 2.0;
+                assert!(
+                    (s.peak_radius().value() / base - 1.0).abs() < 1e-12,
+                    "{x} D_t"
+                );
+            }
+        }
+    }
+    // On the Moon the ramp gives 0.07, 0.21, 0.41 and 0.62 km at 17, 20, 24 and 28 km
+    // (science-r09-craters.md F2), rising to Pike's law at 28.5 km.
+    for (d_km, relief_km) in [(17.0, 0.07), (20.0, 0.21), (24.0, 0.41), (28.0, 0.62)] {
+        let relief = crater_shape(&moon(), Metres::new(d_km * 1e3))
+            .peak_relief()
+            .value()
+            / 1e3;
+        assert!((relief - relief_km).abs() < 0.005, "{d_km} km: {relief} km");
+    }
 }
 
 #[test]

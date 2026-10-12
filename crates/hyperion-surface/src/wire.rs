@@ -34,12 +34,13 @@
 //! 1. In block 0 alone, the field header: its length in bytes, `u16`, then the parts of
 //!    [`FieldHeaderParts`] in their declared order: the body as in the block's header (and the
 //!    same), each `f64` and unit as 8 bytes, each one-byte code as a byte, the figure as a then c,
-//!    the spectrum as β₁, V₁, the break degree and β₂, the crater contract as N(>1 km), the
-//!    screening (a tag, 0 for none, 1 for an atmosphere followed by its column mass and
-//!    projectile density, 2 for a cutoff followed by its diameter), the gravity, the target factor
-//!    and the impact velocity, each `Option` (the impact velocity, the albedo scale, each crust's
-//!    palette entry and the main liquid's) as a presence byte, 0 or 1, followed by its value when
-//!    1, and the palette as its entry count, a byte, then each entry, 59 bytes: its key
+//!    the spectrum as β₁, V₁, the break degree and β₂, the crater contract as N☾(>1 km), the
+//!    screening (a tag, 0 for none, 1 for an atmosphere followed by its column mass, 2 for a
+//!    cutoff followed by its diameter), the gravity, the target factor, the impact velocity, the
+//!    projectile density, the target (its class's code, a byte, then its density) and the
+//!    system's age, each `Option` (the impact velocity, the albedo scale, each crust's palette
+//!    entry and the main liquid's) as a presence byte, 0 or 1, followed by its value when 1, and
+//!    the palette as its entry count, a byte, then each entry, 59 bytes: its key
 //!    NUL-padded to 16 bytes, its role (a byte), its normal albedo in B, V and R (three `f64`),
 //!    its phase row (a byte), its grain density and transition temperature (`f64`) and its
 //!    mechanics family (a byte).
@@ -106,7 +107,8 @@ mod form;
 ///
 /// The one-byte codes of the closed sets are registries that grow without a new format: the
 /// field's enums ([`BoundaryKind`], [`FlowDirection`], [`Morphology`], [`ClimateModelKind`],
-/// [`PrecipitationSource`], [`PaletteRole`], [`MechanicsFamily`]) and this layout's own tags (the
+/// [`PrecipitationSource`], [`PaletteRole`], [`MechanicsFamily`]), the crater contract's
+/// [`TargetClass`](crate::craters::TargetClass), and this layout's own tags (the
 /// screening's 0, 1 and 2, and the presence bytes). [`Crust`] is the exception: the header holds
 /// one palette entry a crust, so a new crust lengthens the header and takes a new format. A new
 /// variant takes the next unused code, and no code is ever renumbered, reused or removed, so a

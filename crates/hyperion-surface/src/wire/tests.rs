@@ -3,7 +3,7 @@
 
 use std::sync::OnceLock;
 
-use hyperion_base::units::Kelvin;
+use hyperion_base::units::{Gigayears, Kelvin};
 use hyperion_testkit::golden;
 use hyperion_testkit::golden::GoldenWriter;
 use hyperion_testkit::lcg::Lcg;
@@ -14,7 +14,7 @@ use super::form::{
     ABSENT, PRESENT, SCREENING_ATMOSPHERE, SCREENING_CUTOFF, SCREENING_NONE, unknown,
 };
 use super::*;
-use crate::craters::Screening;
+use crate::craters::{Screening, TargetClass};
 use crate::field::{
     BoundaryKind, BuildPaletteError, ClimateModelKind, Crust, FieldView, FlowDirection,
     InsertBlockError, LogArea, LogPrecipitation, LogRunoff, LogSteepness, MechanicsFamily,
@@ -673,7 +673,7 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
     };
     // Block 0's header section: its length at 33, then the body at 35, the radius at 45, the
     // spectrum's exponent at 85, its break degree at 101 and its small-scale exponent at 109,
-    // N(>1 km) at 117 and the screening's tag at 125.
+    // N☾(>1 km) at 117 and the screening's tag at 125.
     let body = ceres.header().body();
     let other = BodyRef::new(body.raw_system_id(), body.body_index() + 1);
     let header_body = DecodeBlockError::HeaderBody {
@@ -773,6 +773,44 @@ fn malformed_wire_parts_are_refused_with_their_errors() {
         decode_block(&swapped),
         Err(DecodeBlockError::Record(unsorted))
     );
+}
+
+/// Block 0's crater contract's R09.T7.e parts out of their ranges, an unknown target class and a
+/// system younger than the header's surface are each refused with their own error.
+#[test]
+fn malformed_wire_crater_contracts_are_refused_with_their_errors() {
+    let (ceres, bytes, _) = ceres_blocks();
+    let block = |block: usize, error: DecodeBlockError| DecodePayloadError::Block { block, error };
+    let damaged = |at: usize, value: &[u8]| {
+        let mut b = bytes.clone();
+        patch(&mut b, at, value);
+        decode_payload(&b).unwrap_err()
+    };
+    // The contract's last parts after the gravity at 126, the target factor at 134 and the impact
+    // velocity's presence at 142 and value at 143: the projectile density at 151, the target's
+    // class at 159 and density at 160, and the system's age at 168.
+    let craters = ceres.header().craters();
+    assert_eq!(bytes[142], PRESENT);
+    assert_eq!(
+        bytes[151..159],
+        f64_bytes(craters.projectile_density().value())
+    );
+    assert_eq!(bytes[159], u8::from(craters.target().class));
+    assert_eq!(bytes[160..168], f64_bytes(craters.target().density.value()));
+    assert_eq!(bytes[168..176], f64_bytes(craters.system_age().value()));
+    let projectile = DecodeBlockError::CraterParams(BuildCraterParamsError::ProjectileDensity(0.0));
+    assert_eq!(damaged(151, &f64_bytes(0.0)), block(0, projectile));
+    assert_eq!(damaged(159, &[2]), block(0, unknown("TargetClass", 2)));
+    let target = DecodeBlockError::CraterParams(BuildCraterParamsError::TargetDensity(-1.0));
+    assert_eq!(damaged(160, &f64_bytes(-1.0)), block(0, target));
+    let age = DecodeBlockError::CraterParams(BuildCraterParamsError::SystemAge(-1.0));
+    assert_eq!(damaged(168, &f64_bytes(-1.0)), block(0, age));
+    // A system younger than the surface the header carries.
+    let young = DecodeBlockError::Header(BuildFieldHeaderError::SurfaceOlderThanSystem {
+        surface: ceres.header().surface_age(),
+        system: Gigayears::new(1.0),
+    });
+    assert_eq!(damaged(168, &f64_bytes(1.0)), block(0, young));
 }
 
 /// A crater that reaches none of its block's cells, a block of another level than block 0, and a
@@ -1137,6 +1175,7 @@ fn write_enum_codes(w: &mut GoldenWriter) {
     write_codes(w, "precipitation_source", PrecipitationSource::ALL);
     write_codes(w, "palette_role", PaletteRole::ALL);
     write_codes(w, "mechanics_family", MechanicsFamily::ALL);
+    write_codes(w, "target_class", TargetClass::ALL);
     w.line(&format!("substance_nibble {NO_ENTRY} = None"));
     write_surface_class_ranges(w);
     w.line(&format!("screening {SCREENING_NONE} = None"));

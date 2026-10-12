@@ -4,59 +4,81 @@
 //! # The production
 //!
 //! The shape is Neukum, Ivanov and Hartmann 2001's lunar production polynomial,
-//! log₁₀ N(>D) = Σ aₙ (log₁₀ D)ⁿ with D in km, holding a1…a11 only. a0 is log₁₀ N(>1 km), the
-//! body's parameter, so N(>1 km) comes out exactly as given. Beyond the polynomial's range, 10 m to
-//! 300 km, the cumulative density continues as a power law of the end slopes: −2 below 10 m (the
-//! plan's), and the polynomial's own slope at 300 km, −1.83, above it, so it is continuous
-//! everywhere and continuously differentiable above.
+//! log₁₀ N(>D) = Σ aₙ (log₁₀ D)ⁿ with D in km, holding a1…a11 only. a0 is log₁₀ N☾(>1 km), the
+//! body's lunar-equivalent density, so the Moon's N(>1 km) comes out exactly as given. Beyond the
+//! polynomial's range, 10 m to 300 km, the cumulative density continues as a power law of the end
+//! slopes: −2 below 10 m (the plan's), and the polynomial's own slope at 300 km, −1.83, above it,
+//! so it is continuous everywhere and continuously differentiable above.
 //!
 //! # The diameter map
 //!
-//! A body other than the Moon is struck at another speed and craters under another gravity, so the
-//! projectile that makes a crater of D on it makes a crater of φ(D) on the Moon, and the body's
-//! production is the Moon's at φ(D), still normalised to its own N(>1 km). The map, π-group scaling
-//! in the gravity regime as Ivanov 2001 used it to carry the lunar production function to Mars, is
-//! the identity without an impact velocity and at the lunar reference: g☾ = 1.62 m s⁻², `D_t` =
-//! 19 km and v☾ = [`LUNAR_IMPACT_VELOCITY`], 16.7 km/s.
+//! The contract's density is lunar-equivalent: the Moon's crater density for the body's
+//! projectile flux (science-r09-craters.md F1). A body other than the Moon is struck at another
+//! speed, by projectiles of another density, and craters under another gravity in another target,
+//! so the projectile that makes a crater of D on it makes a crater of φ(D) on the Moon, and the
+//! body's production is the Moon's at φ(D): N(>D) = N☾ × 10^(Σ aₙ (log₁₀ φ(D))ⁿ), not renormalised
+//! at the body's 1 km. Its own N(>1 km) is N☾ at φ(1 km) ([`own_density_at_1km`]): 0.53 of N☾ on
+//! Venus at 25.7 km/s, and 0.26 on Mars at Ivanov 2001's velocities, whose Mars chronology, 0.49
+//! of the Moon's (Craterstats), then implies his Mars-to-Moon impact rate of about 2 (Ivanov et al.
+//! 2002, §5.2). The map is π-group scaling in the gravity regime (Holsapple 1993), as Ivanov 2001
+//! used it to carry the lunar production function to Mars, and is the identity without an impact
+//! velocity and, exactly, at the lunar reference: g☾ = 1.62 m s⁻², `D_t` = 19 km, v☾ =
+//! [`LUNAR_IMPACT_VELOCITY`], 16.7 km/s, a non-porous target of 2,550 kg m⁻³
+//! ([`LUNAR_TARGET`]) and projectiles of 3,000 ([`LUNAR_PROJECTILE_DENSITY`]).
 //!
-//! 1. the body's crater D becomes the diameter of the bowl its transient cavity would have made,
+//! 1. The body's crater D becomes the diameter of the bowl its transient cavity would have made,
 //!    D itself below the body's transition diameter `D_t`, and `D_t` (D ÷ `D_t`)^(1 ÷ 1.13) above
 //!    it, where a complex crater has collapsed from a smaller cavity (McKinnon and Schenk 1985's
 //!    collapse law, D = 1.17 `D_tc`^1.13 `D_t`^−0.13, as Collins, Melosh and Marcus 2005 state it,
 //!    made continuous at `D_t` by dropping the 1.17, which cancels where a crater is complex on
-//!    both bodies; Ivanov 2001 used Croft 1985's D ∝ `D_tc`^1.18);
-//! 2. the same projectile's cavity on the Moon is that times (g ÷ g☾)^0.22 (v☾ ÷ v)^0.43, since
-//!    a transient cavity scales as v^0.43 g^−0.22 in non-porous rock (Ivanov et al. 2002, eq. 4,
-//!    β = 0.43 and γ = 0.22; Holsapple 1993's π groups at μ = 0.55 give 0.431 and 0.216);
-//! 3. and it collapses on the Moon by the same law about the Moon's 19 km.
+//!    both bodies; Ivanov 2001 used Croft 1985's D ∝ `D_tc`^1.18).
+//! 2. That cavity is the π-group cavity of a projectile of radius a: with ν = 1/3,
+//!    `D_tc` = C K₁^(1/3) a^(2 ÷ (2 + μ)) (`ρ_p` ÷ `ρ_t`)^(2 ÷ (3 (2 + μ))) (U² ÷ g)^(μ ÷ (2 + μ)),
+//!    from Holsapple 1993's `π_V` = K₁ π₂^(−3μ ÷ (2 + μ)) (`ρ_t` ÷ `ρ_p`)^(μ ÷ (2 + μ)), with the
+//!    target class's μ and K₁ ([`TargetClass`]) and the mean impact speed as given, with no angle
+//!    factor. C turns the cavity's volume into its diameter: a paraboloid as deep as the class's
+//!    fresh bowl, C = (4/3 × 8 ÷ k)^(1/3), 3.764 for a non-porous bowl 0.20 D deep (Singer et al.
+//!    2019's transient depth of 0.2) and 4.239 for a porous one 0.14 D deep, since porous
+//!    transients are shallower (Holsapple 2022, Table 2; science-r09-craters.md F4.2). At μ = 0.55
+//!    the cavity goes as U^0.431, g^−0.216 and the density ratio^0.261 (Ivanov et al. 2002, eq. 4,
+//!    round them to β = 0.43 and γ = 0.22), and at μ = 0.41 as U^0.340, g^−0.170 and the
+//!    ratio^0.277.
+//! 3. The same projectile's cavity on the Moon follows from the lunar reference's, so the lunar
+//!    cavity is a power of the body's, of exponent (2 + μ) ÷ (2 + μ☾): 1 for a non-porous body,
+//!    between which and the reference C, K₁ and the absolute speed cancel, and 0.945 for a porous
+//!    one, for which they do not.
+//! 4. It collapses on the Moon by the same law about the Moon's 19 km.
 //!
 //! At Mars's gravity (3.71 m s⁻²) and Ivanov 2001's ratio of mean impact velocities, 9.6 ÷ 16.1,
 //! the map reproduces Ivanov's Mars production function (Craterstats' "Mars, Ivanov (2001)"
-//! coefficients) to within 3.3% in N over 1–100 km, both normalised at 1 km, and P14.T48.f's Mars
-//! at 10.6 km/s to within 9.2%; the lunar shape alone departs from it by up to 2.6× at 10 km. The
-//! target's scaling class and density, and the projectiles' density, are R09.T7.e's
-//! (science-r09-craters.md item 2), and the strength regime, below a few hundred metres, is not
-//! mapped.
+//! coefficients) to within 3.9% in N at 20 diameters a decade over 1–100 km (4.2% sampled
+//! continuously), both normalised at 1 km, and P14.T48.f's Mars at 10.6 km/s to within 9.9% (10.2%)
+//! (3.3% and 9.2% under R09.T7.a's rounded exponents); the lunar shape
+//! alone departs from it by up to 2.6× at 10 km. The strength regime, below Y ÷ (`ρ_t` g),
+//! kilometres on low-gravity icy bodies, is not mapped (plan R09, Risks).
 //!
 //! # Screening
 //!
 //! An atmosphere stops projectiles smaller than about the projectile scale d\* = 1.5 (P ÷ g) ÷
 //! `ρ_p`, the size that meets its own mass of air, so the craters below the cutoff `D_c` = 20 d\*
-//! are missing. The differential production is tapered by f(D) = 1 ÷ (1 + (`D_c` ÷ D)^4.5), one
-//! rule for every body (Design note 12, researched 2026-10-09: the exponent is fitted on Venus's
-//! 881 named craters, whose cumulative counts the taper reproduces within 7% from 1.5 to 95 km). The
-//! screened cumulative density N(>D) = ∫ f n dD′ from D up has no closed form: it is integrated in
-//! ln D by eight-point Gauss–Legendre panels a quarter of a decade wide, on a grid fixed per body
-//! and split wherever the integrand is not smooth, up to 1,000 `D_c`, beyond which f differs from 1
-//! by less than 10⁻¹³ and the production's own closed form takes over. The panels are summed from
-//! the top down, so the density never rises with D, to the last bit.
+//! are missing. The differential production is tapered by f(D) = 1 ÷ (1 + (`D_c` ÷ D)^4.2), one
+//! rule for every body (Design note 12: the exponent is fitted on Venus's 881 named craters
+//! through the diameter map, science-r09-craters.md F1). The screened cumulative density
+//! N(>D) = ∫ f n dD′ from D up has no closed form: it is integrated in ln D by eight-point
+//! Gauss–Legendre panels a quarter of a decade wide, on a grid fixed per body and split wherever
+//! the integrand is not smooth, up to 1,000 `D_c`, beyond which f differs from 1 by less than
+//! 3 × 10⁻¹³ and the production's own closed form takes over. The panels are summed from the top
+//! down, so the density never rises with D, to the last bit.
 
 use hyperion_base::math;
-use hyperion_base::units::{Metres, PerSquareKilometre};
+use hyperion_base::units::{
+    KilogramsPerCubicMetre, Metres, MetresPerSecond, MetresPerSecondSquared, PerSquareKilometre,
+};
 
+use super::shape::fresh_bowl_depth;
 use super::{
-    CraterParams, LUNAR_IMPACT_VELOCITY, MOON_GRAVITY_M_PER_S2, MOON_TRANSITION_M, Screening,
-    transition_diameter,
+    CraterParams, LUNAR_IMPACT_VELOCITY, LUNAR_PROJECTILE_DENSITY, LUNAR_TARGET,
+    MOON_GRAVITY_M_PER_S2, MOON_TRANSITION_M, Screening, TargetClass, transition_diameter,
 };
 
 /// Neukum, Ivanov and Hartmann 2001's lunar production polynomial, a1…a11 of log₁₀ N(>D) =
@@ -65,12 +87,12 @@ use super::{
 /// 0.01–300 km).
 ///
 /// a0 is not held: it is log₁₀ N(>1 km), the body's parameter, so neither published value enters.
-/// Craterstats' a0 of −3.0768 is log₁₀ of the lunar chronology's N(>1 km) at 1 Gyr, 8.38 × 10⁻⁴
-/// km⁻², and Design note 12 reads the paper's printed −3.0876 as a misprint of it, with
-/// Craterstats ("appears to be a typo"). Ivanov et al. 2002 (Asteroids III, Table 1) print
-/// −3.0768 for Neukum 1983's polynomial and −3.0876 for this one, and Cratermaker corrects the
-/// chronology's linear term to 10^−3.0876 = 8.17 × 10⁻⁴ instead (science-r09-craters.md item 5
-/// keeps the published 8.38 × 10⁻⁴).
+/// Neukum et al. 2001's −3.0876 (Table 1, and Ivanov et al. 2002, Table 1, "New N(D)") is this
+/// polynomial's own 1-Gyr level: it matches Neukum 1983's polynomial (a0 −3.0768) below 1 km to
+/// 0.011 dex, where the rework did not reach. The lunar chronology's linear term, 8.38 × 10⁻⁴ =
+/// 10^−3.0768, is the 1983 normalisation, kept as published and as Craterstats pairs it with this
+/// polynomial (Craterstats calls −3.0876 "a typo"; Cratermaker instead rescales the linear term to
+/// 8.17 × 10⁻⁴). See science-r09-craters.md F3.
 const NEUKUM: [f64; 11] = [
     -3.557_528, 0.781_027, 1.021_521, -0.156_012, -0.444_058, 0.019_977, 0.086_850, -0.005_874,
     -0.006_809, 8.25e-4, 5.54e-5,
@@ -86,15 +108,59 @@ const LOG_D_MAX: f64 = 2.477_121_254_719_662_4;
 /// the polynomial's own slope at 10 m is −3.16).
 const SLOPE_BELOW: f64 = -2.0;
 
-/// The gravity exponent of a transient cavity, `D_tc` ∝ g^−0.22: Ivanov et al. 2002's γ (Asteroids
-/// III, eq. 4, non-porous rock, as Ivanov 2001 built Mars's function with it); μ = 0.55 in
-/// Holsapple 1993's π groups gives μ ÷ (2 + μ) = 0.216. R09.T7.e derives both exponents from each
-/// target class's μ (science-r09-craters.md item 2).
-const GRAVITY_EXPONENT: f64 = 0.22;
+/// A target class's π-group constants in the gravity regime, (μ, K₁): non-porous 0.55 and 0.095,
+/// porous 0.41 and 0.132, with ν = 1/3 for both (Holsapple 1993, Annu. Rev. Earth Planet. Sci. 21,
+/// 333, eq. 18, p. 351's "ν = 1/3 in all cases", and its fitted laws, Fig. 4 for dry soils and
+/// sand, `π_V` = 0.132 (…)^−0.51 at μ 0.41, and Fig. 5 for wet soils, 0.095 (…)^−0.65 at μ 0.55;
+/// Table 1 gives wet soil and rock one μ, so rock takes wet soil's gravity-regime law; as Singer et
+/// al. 2019, Science 363, 955, supplement, apply them to non-porous and 30%-porous ice; Williams et
+/// al. 2014, arXiv 1309.2849, for lunar regolith; science-r09-craters.md item 2). Holsapple 2022's "cold ice" K₁ of 1.93, inconsistent with his
+/// own §3.1.4, is not used.
+#[must_use]
+const fn class_constants(class: TargetClass) -> (f64, f64) {
+    match class {
+        TargetClass::NonPorous => (0.55, 0.095),
+        TargetClass::Porous => (0.41, 0.132),
+    }
+}
 
-/// The velocity exponent of a transient cavity, `D_tc` ∝ v^0.43: Ivanov et al. 2002's β (eq. 4,
-/// as [`GRAVITY_EXPONENT`]); 2μ ÷ (2 + μ) = 0.431 at μ = 0.55.
-const VELOCITY_EXPONENT: f64 = 0.43;
+/// The diameter of a transient cavity of `class` over the cube root of its volume, C = (4/3 × 8 ÷
+/// k)^(1/3) for a paraboloid k D deep, k the class's fresh bowl depth ([`fresh_bowl_depth`]):
+/// 3.764 non-porous and 4.239 porous ([`transient_coefficient`]; science-r09-craters.md F4.2).
+#[must_use]
+fn transient_shape(class: TargetClass) -> f64 {
+    math::cbrt(4.0 / 3.0 * 8.0 / fresh_bowl_depth(class))
+}
+
+/// The coefficient P of a transient cavity of a target of `class` and density `target`, struck at
+/// `speed` by projectiles of density `projectile` under `gravity`: the cavity's diameter
+/// is P a^(2 ÷ (2 + μ)) metres for a projectile of radius a metres, with P = C K₁^(1/3)
+/// (`ρ_p` ÷ `ρ_t`)^(2 ÷ (3 (2 + μ))) (U² ÷ g)^(μ ÷ (2 + μ)) ([the module documentation](self),
+/// step 2).
+///
+/// C = (4/3 × 8 ÷ k)^(1/3) is the diameter over the cube root of the volume of a paraboloid
+/// k D deep, k the class's fresh bowl depth ([`fresh_bowl_depth`]): 3.764 at 0.20 (Singer et al.
+/// 2019's transient depth-to-diameter ratio of 0.2, supplement) and 4.239 at 0.14 (porous
+/// transients are shallower: Holsapple 2022, arXiv 2203.07476, Table 2, gives sand's 0.096 of the
+/// rim diameter against rock's 0.21; science-r09-craters.md F4.2).
+#[must_use]
+fn transient_coefficient(
+    class: TargetClass,
+    target: KilogramsPerCubicMetre,
+    projectile: KilogramsPerCubicMetre,
+    speed: MetresPerSecond,
+    gravity: MetresPerSecondSquared,
+) -> f64 {
+    let (mu, k1) = class_constants(class);
+    let (u, g) = (speed.value(), gravity.value());
+    transient_shape(class)
+        * math::cbrt(k1)
+        * math::powf(
+            projectile.value() / target.value(),
+            2.0 / (3.0 * (2.0 + mu)),
+        )
+        * math::powf(u * u / g, mu / (2.0 + mu))
+}
 
 /// The collapse exponent of a complex crater, D ∝ `D_tc`^1.13 `D_t`^−0.13: McKinnon and Schenk 1985
 /// (LPSC XVI, 544), as Collins, Melosh and Marcus 2005 (Meteoritics & Planetary Science 40, 817,
@@ -109,15 +175,19 @@ const CUTOFF_PER_PROJECTILE: f64 = 20.0;
 /// the projectile that meets about its own mass of air (Design note 12, after Melosh 1989).
 const PROJECTILE_PER_COLUMN: f64 = 1.5;
 
-/// The screening taper's exponent: f(D) = 1 ÷ (1 + (`D_c` ÷ D)^4.5) on the differential production
-/// (Design note 12, researched 2026-10-09 by R09.T0.b: Poisson likelihood against the 881 named
-/// craters of the IAU's Gazetteer of Planetary Nomenclature for Venus, with `D_c` = 20 d\*; the
-/// best free fit was `D_c` 9.0 km with 5.4, and 4.5 lies 8 below it in ln L). Low confidence for
-/// thinner atmospheres, on which it was not measured (plan R09, Risks).
-const TAPER_EXPONENT: f64 = 4.5;
+/// The screening taper's exponent: f(D) = 1 ÷ (1 + (`D_c` ÷ D)^4.2) on the differential production
+/// (Design note 12; science-r09-craters.md F1 and F4.1). It is fitted by Poisson likelihood against
+/// the 881 named craters of the IAU's Gazetteer of Planetary Nomenclature for Venus, in 23
+/// logarithmic bins from 1.5 to 300 km, with `D_c` held at 20 d\* and the production through the
+/// diameter map at P14.T48.f's 25.7 km/s: the likelihood peaks at 4.25, 0.14 above 4.2; 4.5 lies
+/// 2.1 below, 4.0 3.0 and 5.0 17.5. Its lunar-equivalent N☾(>1 km) is then 3.36 × 10⁻⁴ km⁻², and
+/// its cumulative counts lie within 11% of the catalogue's at 3–40 km (10.8% at 20 km). R09.T0.b's
+/// fit without the map gave 4.5. Low confidence for thinner atmospheres, on which it was not
+/// measured, and tied to Venus's impact velocity and the collapse law (plan R09, Risks).
+const TAPER_EXPONENT: f64 = 4.2;
 
 /// How far above the cutoff the screened density is integrated, in units of `D_c`: beyond 1,000
-/// `D_c` the taper differs from 1 by 1,000^−4.5 ≈ 3 × 10⁻¹⁴, and the production's closed form
+/// `D_c` the taper differs from 1 by 1,000^−4.2 ≈ 2.5 × 10⁻¹³, and the production's closed form
 /// carries the rest.
 pub(super) const SCREENED_REACH: f64 = 1_000.0;
 
@@ -200,7 +270,10 @@ fn lunar_slope(x: f64) -> f64 {
 struct DiameterMap {
     /// The body's transition diameter, km.
     transition_km: f64,
-    /// The lunar cavity over the body's for one projectile: (g ÷ g☾)^0.22 (v☾ ÷ v)^0.43.
+    /// The power of the body's cavity that the Moon's is, (2 + μ) ÷ (2 + μ☾): 1 for a non-porous
+    /// body.
+    exponent: f64,
+    /// The lunar cavity, km, over the body's to the power [`exponent`](Self::exponent), km.
     cavity_scale: f64,
 }
 
@@ -208,15 +281,45 @@ struct DiameterMap {
 const MOON_TRANSITION_KM: f64 = MOON_TRANSITION_M / 1e3;
 
 impl DiameterMap {
-    /// The map of `p`, or none without an impact velocity.
+    /// The map of `p`: none without an impact velocity, and none at the lunar reference, where it
+    /// is the identity exactly.
     #[must_use]
     fn of(p: &CraterParams) -> Option<Self> {
-        let v = p.impact_velocity()?.value();
-        let g = p.gravity().value();
+        let map = Self::built(p)?;
+        let identity = map.exponent.total_cmp(&1.0).is_eq()
+            && map.cavity_scale.total_cmp(&1.0).is_eq()
+            && map.transition_km.total_cmp(&MOON_TRANSITION_KM).is_eq();
+        (!identity).then_some(map)
+    }
+
+    /// The map of `p` whenever it has an impact velocity, the identity included.
+    #[must_use]
+    fn built(p: &CraterParams) -> Option<Self> {
+        let speed = p.impact_velocity()?;
+        let target = p.target();
+        let body = transient_coefficient(
+            target.class,
+            target.density,
+            p.projectile_density(),
+            speed,
+            p.gravity(),
+        );
+        let moon = transient_coefficient(
+            LUNAR_TARGET.class,
+            LUNAR_TARGET.density,
+            LUNAR_PROJECTILE_DENSITY,
+            LUNAR_IMPACT_VELOCITY,
+            MetresPerSecondSquared::new(MOON_GRAVITY_M_PER_S2),
+        );
+        let (mu, _) = class_constants(target.class);
+        let (mu_moon, _) = class_constants(LUNAR_TARGET.class);
+        let exponent = (2.0 + mu) / (2.0 + mu_moon);
+        // In km: the Moon's cavity is (P☾ ÷ 1,000) (D ÷ (P ÷ 1,000))^e of the body's D. A
+        // non-porous body's e is exactly 1, and pow(x, 1) is x, so its scale is P☾ ÷ P.
         Some(Self {
             transition_km: transition_diameter(p).value() / 1e3,
-            cavity_scale: math::powf(g / MOON_GRAVITY_M_PER_S2, GRAVITY_EXPONENT)
-                * math::powf(LUNAR_IMPACT_VELOCITY.value() / v, VELOCITY_EXPONENT),
+            exponent,
+            cavity_scale: (moon / 1e3) / math::powf(body / 1e3, exponent),
         })
     }
 
@@ -228,7 +331,7 @@ impl DiameterMap {
         } else {
             self.transition_km * math::powf(d_km / self.transition_km, 1.0 / COLLAPSE_EXPONENT)
         };
-        let lunar = cavity * self.cavity_scale;
+        let lunar = self.cavity_scale * math::powf(cavity, self.exponent);
         if lunar <= MOON_TRANSITION_KM {
             lunar
         } else {
@@ -245,7 +348,7 @@ impl DiameterMap {
         } else {
             MOON_TRANSITION_KM * math::powf(lunar_km / MOON_TRANSITION_KM, 1.0 / COLLAPSE_EXPONENT)
         };
-        let cavity = lunar / self.cavity_scale;
+        let cavity = math::powf(lunar / self.cavity_scale, 1.0 / self.exponent);
         if cavity <= self.transition_km {
             cavity
         } else {
@@ -253,7 +356,8 @@ impl DiameterMap {
         }
     }
 
-    /// d ln φ ÷ d ln D at the body's crater of `d_km`: the product of the two collapses' slopes.
+    /// d ln φ ÷ d ln D at the body's crater of `d_km`: the product of the two collapses' slopes
+    /// and the cavities' exponent.
     #[must_use]
     fn log_slope(&self, d_km: f64) -> f64 {
         let body = if d_km <= self.transition_km {
@@ -266,33 +370,27 @@ impl DiameterMap {
         } else {
             COLLAPSE_EXPONENT
         };
-        body * moon
+        body * self.exponent * moon
     }
 }
 
 /// A body's unscreened production, N(>D) per km² at D in km.
 #[derive(Debug, Clone, Copy)]
 struct Production {
-    /// N(>1 km), km⁻².
+    /// The lunar-equivalent N☾(>1 km), km⁻².
     n_1km: f64,
     /// The diameter map, if any.
     map: Option<DiameterMap>,
-    /// The lunar log-shape at the image of 1 km, which normalises the map's output to N(>1 km).
-    offset: f64,
 }
 
 impl Production {
     /// The production of `p`.
     #[must_use]
     fn of(p: &CraterParams) -> Self {
-        let map = DiameterMap::of(p);
-        let mut production = Self {
+        Self {
             n_1km: p.n_1km().value(),
-            map,
-            offset: 0.0,
-        };
-        production.offset = lunar_log_shape(production.lunar_log10(1.0));
-        production
+            map: DiameterMap::of(p),
+        }
     }
 
     /// log₁₀ of the lunar diameter, km, of the body's `d_km`.
@@ -304,10 +402,11 @@ impl Production {
         })
     }
 
-    /// N(>D) per km² at D = `d_km`.
+    /// N(>D) per km² at D = `d_km`: N☾ at the lunar image of D, not renormalised at the body's
+    /// 1 km (science-r09-craters.md F1).
     #[must_use]
     fn cumulative(&self, d_km: f64) -> f64 {
-        self.n_1km * math::exp10(lunar_log_shape(self.lunar_log10(d_km)) - self.offset)
+        self.n_1km * math::exp10(lunar_log_shape(self.lunar_log10(d_km)))
     }
 
     /// −dN(>D) ÷ d ln D per km² at D = `d_km`: the differential production per unit ln D.
@@ -318,7 +417,7 @@ impl Production {
             Some(map) => map.log_slope(d_km),
             None => 1.0,
         };
-        -lunar_slope(x) * jacobian * self.n_1km * math::exp10(lunar_log_shape(x) - self.offset)
+        -lunar_slope(x) * jacobian * self.n_1km * math::exp10(lunar_log_shape(x))
     }
 
     /// The body's diameters, km, at which the integrand of the screened density is not smooth,
@@ -342,7 +441,7 @@ impl Production {
     }
 }
 
-/// The screening taper f(D) = 1 ÷ (1 + (`D_c` ÷ D)^4.5) at ln D = `u` with `ln_cutoff` = ln `D_c`
+/// The screening taper f(D) = 1 ÷ (1 + (`D_c` ÷ D)^4.2) at ln D = `u` with `ln_cutoff` = ln `D_c`
 /// (both in km).
 #[must_use]
 fn taper(u: f64, ln_cutoff: f64) -> f64 {
@@ -454,70 +553,84 @@ fn diameter_km(d: Metres) -> f64 {
     m / 1e3
 }
 
-/// Whether `screening`'s cutoff, if any, is one the density can integrate to: positive in km, and
-/// finite at [`SCREENED_REACH`] times it, so that the quadrature's bounds are finite. Checked by
-/// [`CraterParams::new`].
+/// Whether `screening`'s cutoff over projectiles of density `projectile`, if any, is one the
+/// density can integrate to: positive in km, and finite at [`SCREENED_REACH`] times it, so that
+/// the quadrature's bounds are finite. Checked by [`CraterParams::new`].
 #[must_use]
-pub(super) fn screening_in_range(screening: Screening) -> bool {
-    screening_cutoff(screening).is_none_or(|d| {
+pub(super) fn screening_in_range(screening: Screening, projectile: KilogramsPerCubicMetre) -> bool {
+    screening_cutoff(screening, projectile).is_none_or(|d| {
         let km = d.value() / 1e3;
         km > 0.0 && (km * SCREENED_REACH).is_finite()
     })
 }
 
-/// The projectile scale of `screening`, as [`projectile_scale`].
+/// The diameter map's cavity scale of `p`, if it has a map and the scale is not finite and
+/// positive: parts each in range whose combination lies beyond the scaling's, such as a density
+/// ratio that underflows while the speed's square overflows. Checked by [`CraterParams::new`].
 #[must_use]
-fn screening_projectile(screening: Screening) -> Option<Metres> {
+pub(super) fn map_out_of_range(p: &CraterParams) -> Option<f64> {
+    DiameterMap::built(p)
+        .map(|map| map.cavity_scale)
+        .filter(|&scale| !(scale.is_finite() && scale > 0.0))
+}
+
+/// The projectile scale of `screening` over projectiles of density `projectile`, as
+/// [`projectile_scale`].
+#[must_use]
+fn screening_projectile(
+    screening: Screening,
+    projectile: KilogramsPerCubicMetre,
+) -> Option<Metres> {
     match screening {
-        Screening::Atmosphere {
-            column_mass,
-            projectile_density,
-        } if column_mass.value() > 0.0 => Some(Metres::new(
-            PROJECTILE_PER_COLUMN * column_mass.value() / projectile_density.value(),
+        Screening::Atmosphere { column_mass } if column_mass.value() > 0.0 => Some(Metres::new(
+            PROJECTILE_PER_COLUMN * column_mass.value() / projectile.value(),
         )),
         Screening::None | Screening::Atmosphere { .. } | Screening::Cutoff { .. } => None,
     }
 }
 
-/// The crater cutoff of `screening`, as [`crater_cutoff`].
+/// The crater cutoff of `screening` over projectiles of density `projectile`, as
+/// [`crater_cutoff`].
 #[must_use]
-fn screening_cutoff(screening: Screening) -> Option<Metres> {
+fn screening_cutoff(screening: Screening, projectile: KilogramsPerCubicMetre) -> Option<Metres> {
     match screening {
         Screening::Cutoff { diameter } => Some(diameter),
         Screening::None | Screening::Atmosphere { .. } => {
-            screening_projectile(screening).map(|d| d * CUTOFF_PER_PROJECTILE)
+            screening_projectile(screening, projectile).map(|d| d * CUTOFF_PER_PROJECTILE)
         }
     }
 }
 
 /// The projectile scale d\* = 1.5 (P ÷ g) ÷ `ρ_p` of a body screened by its atmosphere, the size of
-/// projectile that meets about its own mass of air before it reaches the ground.
+/// projectile that meets about its own mass of air before it reaches the ground, `ρ_p` the
+/// contract's [`projectile_density`](CraterParams::projectile_density).
 ///
 /// About 5.2 m for Earth, 0.52 km for Venus and 8.5 cm for Mars at 636 Pa, at a projectile density
-/// of 3,000 kg m⁻³ (Design note 12, after Melosh 1989). None for [`Screening::None`], for an
-/// atmosphere of no column mass, and for a cutoff given directly ([`Screening::Cutoff`]), which
-/// names no projectile.
+/// of 3,000 kg m⁻³ (Design note 12, after Melosh 1989); six times as large for comets of 500. None
+/// for [`Screening::None`], for an atmosphere of no column mass, and for a cutoff given directly
+/// ([`Screening::Cutoff`]), which names no projectile.
 #[must_use]
 pub fn projectile_scale(p: &CraterParams) -> Option<Metres> {
-    screening_projectile(p.screening())
+    screening_projectile(p.screening(), p.projectile_density())
 }
 
 /// The crater cutoff `D_c` of a screened body: 20 d\* ([`projectile_scale`]) under an atmosphere,
 /// or [`Screening::Cutoff`]'s diameter.
 ///
 /// About 100 m for Earth, 10.4 km for Venus and 1.7 m for Mars (Design note 12). The differential
-/// production is tapered by 1 ÷ (1 + (`D_c` ÷ D)^4.5), which passes half of it at `D_c`. None when
+/// production is tapered by 1 ÷ (1 + (`D_c` ÷ D)^4.2), which passes half of it at `D_c`. None when
 /// nothing screens the body: [`Screening::None`], or an atmosphere of no column mass.
 #[must_use]
 pub fn crater_cutoff(p: &CraterParams) -> Option<Metres> {
-    screening_cutoff(p.screening())
+    screening_cutoff(p.screening(), p.projectile_density())
 }
 
 /// The body's crater production above `d` before screening, N(>D) per km².
 ///
-/// Neukum, Ivanov and Hartmann 2001's lunar polynomial scaled to N(>1 km), through the diameter
-/// map when `p` has an impact velocity ([the module documentation](self)). It is N(>1 km) exactly
-/// at 1 km, and strictly decreasing in D.
+/// Neukum, Ivanov and Hartmann 2001's lunar polynomial at the contract's lunar-equivalent
+/// N☾(>1 km), through the diameter map when `p` has an impact velocity ([the module
+/// documentation](self)). It is N☾(>1 km) exactly at 1 km at the lunar reference, the body's own
+/// N(>1 km) ([`own_density_at_1km`]) under a map, and strictly decreasing in D.
 ///
 /// # Panics
 ///
@@ -527,26 +640,40 @@ pub fn production_density(p: &CraterParams, d: Metres) -> PerSquareKilometre {
     PerSquareKilometre::new(Production::of(p).cumulative(diameter_km(d)))
 }
 
+/// The body's own crater density above 1 km before screening, per km²: the lunar-equivalent
+/// N☾(>1 km) carried to the body's craters by the diameter map, N☾ × 10^(Σ aₙ (log₁₀ φ(1 km))ⁿ)
+/// (science-r09-craters.md F1), for tests and display.
+///
+/// It is [`CraterParams::n_1km`] itself at the lunar reference and without an impact velocity.
+/// About 0.53 of it on Venus at 25.7 km/s and 0.26 on Mars at Ivanov 2001's velocities: a body
+/// struck more slowly, or under a stronger gravity, makes smaller craters of the same projectiles.
+#[must_use]
+pub fn own_density_at_1km(p: &CraterParams) -> PerSquareKilometre {
+    production_density(p, Metres::new(1e3))
+}
+
 /// The body's cumulative crater density N(>D) per km², the craters of diameter `d` and wider that
 /// its surface accumulates over its age.
 ///
 /// It is Design note 12's one density for the coarse pass, the synthesis and plan 14:
-/// [`production_density`] where nothing screens the body, so N(>1 km) is the parameter exactly.
-/// Under an atmosphere it is the integral of the differential production tapered by
-/// 1 ÷ (1 + (`D_c` ÷ D)^4.5) ([`crater_cutoff`]), by fixed quadrature ([the module
-/// documentation](self)): Venus's at N(>1 km) = 3.07 × 10⁻⁴ km⁻² is about 1.9 × 10⁻⁶ km⁻² at
-/// 1 km, under 1% of its production. It is non-increasing in D, and not capped at [`saturation`],
-/// which the caller applies per octave.
+/// [`production_density`] where nothing screens the body, so N(>1 km) is the contract's N☾ exactly
+/// at the lunar reference and the body's own ([`own_density_at_1km`]) under a map. Under an
+/// atmosphere it is the integral of the differential production tapered by
+/// 1 ÷ (1 + (`D_c` ÷ D)^4.2) ([`crater_cutoff`]), by fixed quadrature ([the module
+/// documentation](self)): Venus's at N☾(>1 km) = 3.36 × 10⁻⁴ km⁻² and 25.7 km/s is about
+/// 1.9 × 10⁻⁶ km⁻² at 1 km, 1.1% of its own production. It is non-increasing in D, and not capped
+/// at [`saturation`], which the caller applies per octave.
 ///
 /// # Examples
 ///
-/// Plan 14's crater contract for an airless body gives back its N(>1 km) at 1 km, and fewer
-/// craters at every larger diameter:
+/// Plan 14's crater contract for an airless body at the lunar reference gives back its N(>1 km)
+/// at 1 km, and fewer craters at every larger diameter:
 ///
 /// ```
 /// use hyperion_base::units::{Metres, MetresPerSecondSquared, PerSquareKilometre};
 /// use hyperion_surface::craters::{
-///     CraterParams, CraterParamsParts, Screening, cumulative_density,
+///     CraterParams, CraterParamsParts, LUNAR_PROJECTILE_DENSITY, LUNAR_TARGET, SOLAR_SYSTEM_AGE,
+///     Screening, cumulative_density,
 /// };
 ///
 /// let moon = CraterParams::new(CraterParamsParts {
@@ -555,6 +682,9 @@ pub fn production_density(p: &CraterParams, d: Metres) -> PerSquareKilometre {
 ///     gravity: MetresPerSecondSquared::new(1.62),
 ///     k_target: 1.0,
 ///     impact_velocity: None,
+///     projectile_density: LUNAR_PROJECTILE_DENSITY,
+///     target: LUNAR_TARGET,
+///     system_age: SOLAR_SYSTEM_AGE,
 /// })?;
 /// let at_1_km = cumulative_density(&moon, Metres::new(1e3));
 /// assert_eq!(at_1_km, PerSquareKilometre::new(0.018));

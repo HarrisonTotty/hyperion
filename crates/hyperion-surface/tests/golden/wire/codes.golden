@@ -37,6 +37,8 @@ mechanics_family 2 = WaterIce
 mechanics_family 3 = VolatileIce
 mechanics_family 4 = Salt
 mechanics_family 5 = Organic
+target_class 0 = NonPorous
+target_class 1 = Porous
 substance_nibble 15 = None
 surface_class 0..=0 = Unclassified
 surface_class 1..=63 = KoppenGeiger

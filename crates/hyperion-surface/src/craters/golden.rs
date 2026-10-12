@@ -4,9 +4,10 @@
 //! The coarse pass (T12.d) places craters natively, and the client's synthesis (T7.b, T7.c) draws
 //! them in WebAssembly through the same functions, so a split between targets would draw craters
 //! the server does not collide with. The golden pins, as `f64` bits, the density, the production,
-//! the inversion within an octave, the chronology and its inverse, and every shape's dimensions
-//! and relief, on bodies screened in every way and in every morphological zone. They are
-//! generated output: a change to them fails here, and is a generator-version change.
+//! the body's own N(>1 km), the inversion within an octave, the chronology and its inverse, and
+//! every shape's dimensions and relief, on bodies screened in every way, mapped and not, on both
+//! target classes and in every morphological zone. They are generated output: a change to them
+//! fails here, and is a generator-version change.
 
 use hyperion_base::units::{
     Gigayears, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres, MetresPerSecond,
@@ -18,13 +19,14 @@ use hyperion_testkit::golden::GoldenWriter;
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
 use super::{
-    CraterParams, CraterParamsParts, DiameterOctave, SOLAR_SYSTEM_AGE, Screening, UnitUniform,
-    chronology_age, crater_cutoff, crater_shape, cumulative_density, diameter_in_octave,
-    lunar_chronology, production_density, saturation, transition_diameter,
+    CraterParams, CraterParamsParts, CraterTarget, DiameterOctave, LUNAR_PROJECTILE_DENSITY,
+    LUNAR_TARGET, SOLAR_SYSTEM_AGE, Screening, TargetClass, UnitUniform, chronology_age,
+    crater_cutoff, crater_shape, cumulative_density, diameter_in_octave, lunar_chronology,
+    own_density_at_1km, production_density, saturation, transition_diameter,
 };
 
-/// A contract of N(>1 km) `n`, gravity `g`, the screening `screening`, target factor `k` and
-/// impact velocity `v` (m/s).
+/// A contract of lunar-equivalent N(>1 km) `n`, gravity `g`, the screening `screening`, target
+/// factor `k` and impact velocity `v` (m/s), on the lunar target, by stony projectiles.
 fn params(n: f64, g: f64, screening: Screening, k: f64, v: Option<f64>) -> CraterParams {
     CraterParams::new(CraterParamsParts {
         n_1km: PerSquareKilometre::new(n),
@@ -32,24 +34,43 @@ fn params(n: f64, g: f64, screening: Screening, k: f64, v: Option<f64>) -> Crate
         gravity: MetresPerSecondSquared::new(g),
         k_target: k,
         impact_velocity: v.map(MetresPerSecond::new),
+        projectile_density: LUNAR_PROJECTILE_DENSITY,
+        target: LUNAR_TARGET,
+        system_age: SOLAR_SYSTEM_AGE,
     })
     .unwrap()
 }
 
-/// An atmosphere of surface pressure `pressure` (Pa) at gravity `g`, over stony projectiles.
+/// `p` with projectiles of `projectile` kg m⁻³ striking a target of `class` and `density` kg m⁻³.
+fn struck(p: CraterParams, projectile: f64, class: TargetClass, density: f64) -> CraterParams {
+    CraterParams::new(CraterParamsParts {
+        projectile_density: KilogramsPerCubicMetre::new(projectile),
+        target: CraterTarget {
+            class,
+            density: KilogramsPerCubicMetre::new(density),
+        },
+        ..*p.parts()
+    })
+    .unwrap()
+}
+
+/// An atmosphere of surface pressure `pressure` (Pa) at gravity `g`.
 fn air(pressure: f64, g: f64) -> Screening {
     Screening::Atmosphere {
         column_mass: KilogramsPerSquareMetre::new(pressure / g),
-        projectile_density: KilogramsPerCubicMetre::new(3_000.0),
     }
 }
 
-/// The bodies the golden pins: airless, under thin and thick air, under a given cutoff, icy and
-/// mapped.
-fn bodies() -> [(&'static str, CraterParams); 6] {
+/// The bodies the golden pins: airless, under thin and thick air, under a given cutoff, icy,
+/// mapped, and porous; the last two illustrative, a Hyperion-like porous moon struck by comets
+/// and a Titan-like icy moon under thick air.
+fn bodies() -> [(&'static str, CraterParams); 8] {
     [
         ("moon", params(0.018, 1.62, Screening::None, 1.0, None)),
-        ("venus", params(3.07e-4, 8.87, air(9.2e6, 8.87), 1.0, None)),
+        (
+            "venus",
+            params(3.36e-4, 8.87, air(9.2e6, 8.87), 1.0, Some(25_700.0)),
+        ),
         (
             "mars",
             params(2.0e-3, 3.73, air(636.0, 3.73), 1.0, Some(10_600.0)),
@@ -74,6 +95,24 @@ fn bodies() -> [(&'static str, CraterParams); 6] {
                 None,
             ),
         ),
+        (
+            "porous",
+            struck(
+                params(0.02, 0.02, Screening::None, 0.12, Some(5_000.0)),
+                500.0,
+                TargetClass::Porous,
+                544.0,
+            ),
+        ),
+        (
+            "titan",
+            struck(
+                params(1e-4, 1.352, air(146_700.0, 1.352), 0.12, Some(10_500.0)),
+                500.0,
+                TargetClass::NonPorous,
+                940.0,
+            ),
+        ),
     ]
 }
 
@@ -90,6 +129,10 @@ fn crater_physics_matches_its_golden() {
         w.f64(
             &format!("{name} transition"),
             transition_diameter(&p).value(),
+        );
+        w.f64(
+            &format!("{name} own N(>1 km)"),
+            own_density_at_1km(&p).value(),
         );
         if let Some(cutoff) = crater_cutoff(&p) {
             w.f64(&format!("{name} cutoff"), cutoff.value());

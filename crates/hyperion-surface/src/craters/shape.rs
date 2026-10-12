@@ -1,20 +1,22 @@
 //! A fresh crater's shape: its depth, rim, floor and central peak by morphological zone, and the
 //! width of its volume-balanced exterior (plan R09, Design notes 12 and 13; `decision-r09-t2.md`
-//! item 3).
+//! item 3; science-r09-craters.md items 2 and 3 and F2).
 //!
 //! # The laws
 //!
 //! Bowls do not depend on gravity, and every complex dimension is self-similar in D ÷ `D_t`, so a
-//! body's gravity and target enter only through its [`transition_diameter`]. All are fresh craters:
-//! the depth d is rim crest to floor, the rim height h is the rim crest above the surrounding
-//! surface, and the floor lies d₀ = d − h below the surroundings.
+//! body's gravity and target enter only through its [`transition_diameter`] and, for the bowls,
+//! its [`TargetClass`]. All are fresh craters: the depth d is rim crest to floor, the rim height h
+//! is the rim crest above the surrounding surface, and the floor lies d₀ = d − h below the
+//! surroundings.
 //!
 //! | Zone | Depth d | Rim height h | Floor and peak |
 //! | --- | --- | --- | --- |
 //! | Bowl, D < 0.8 `D_t` | 0.20 D | 0.20 D ÷ 5.42 = 0.0369 D | none |
 //! | Bowl on an airless body | D × 0.125, 0.152, 0.166 and 0.20 at D′ = 63, 141, 283 and 400 m, linear in log D′ between, held below 63 m and from 400 m, D′ = D g ÷ 1.62 m s⁻² | 0.0369 D | none |
-//! | Transitional, 0.8–1.5 `D_t` | log-linear in log D from the bowl's at 0.8 `D_t` to the complex law's at 1.5 `D_t` | likewise | floor radius from 0 to its 1.5 `D_t` value, linear in log D; no peak |
-//! | Complex, from 1.5 `D_t` | 0.150 `D_t` (D ÷ `D_t`)^0.303 | 0.0402 `D_t` (D ÷ `D_t`)^0.399 | floor diameter 0.389 (D ÷ `D_t`)^0.249 of D, held at 0.778 of D from about 16 `D_t`; below 9 `D_t` a central cone of relief 0.0238 `D_t` (D ÷ `D_t`)^0.900 above the floor and base diameter 0.3 D |
+//! | Bowl on a porous target | 0.14 D, or the airless bowl's where that is shallower | 0.0369 D | none |
+//! | Transitional, 0.8–1.5 `D_t` | log-linear in log D from the bowl's at 0.8 `D_t` to the complex law's at 1.5 `D_t` | likewise | floor radius from 0 to its 1.5 `D_t` value, linear in log D; the central peak growing by the same weight |
+//! | Complex, from 1.5 `D_t` | 0.150 `D_t` (D ÷ `D_t`)^0.303 | 0.0402 `D_t` (D ÷ `D_t`)^0.399 | floor diameter 0.389 (D ÷ `D_t`)^0.249 of D, held at 0.778 of D from about 16 `D_t`; a central cone of relief 0.0238 `D_t` (D ÷ `D_t`)^0.900 above the floor, fading across 9–13 `D_t`, and base diameter 0.259 D − 0.132 `D_t`, never wider than the floor |
 //!
 //! Their sources:
 //!
@@ -31,6 +33,11 @@
 //!   or one of no column mass), to rocky and icy airless bodies alike (science-r09-craters.md
 //!   item 3: the icy bodies' only fresh simple-crater depths, all from 1 km, lie within what it
 //!   predicts); bodies with air keep 0.20 D at every size.
+//! - _The porous bowl_, 0.14 D, is the "asteroidal-like" d/D (Aponte-Hernández et al. 2021,
+//!   PSJ 2, 235, §1, compiling Sullivan et al. 1996, Robinson et al. 2002, Burchell and Johnson
+//!   2005 and Vincent et al. 2014); Holsapple 2022's Table 2 gives porous transients half as deep
+//!   as non-porous ones (science-r09-craters.md item 2, medium confidence). Its rim stays
+//!   0.0369 D.
 //! - _The complex depth_ is the geometric mean of Kalynn et al. 2013's LOLA mare and highland fits
 //!   (Geophysical Research Letters 40, 38–42), 0.870 D^0.352 and 1.558 D^0.254, that is
 //!   1.164 D^0.303 km, written at the Moon's `D_t` of 19 km.
@@ -38,10 +45,18 @@
 //!   floor diameter 0.187 D^1.249 and central-peak relief 0.032 D^0.900, written the same way. The
 //!   floor is held at 0.778 of D, twice 0.389, which the law reaches at 16.2 `D_t`, so that it
 //!   stays continuous (the ruling's script, `min(0.778, 0.389 x^0.249)`).
-//! - _The peak's base diameter_, 0.3 D, is Garvin et al. 2003's Mars fit (0.25 D^1.05, Sixth
-//!   International Conference on Mars, abstract 3277), of low confidence; it carries little of the
-//!   volume. The peak ends at 9 `D_t`, where peak rings begin; neither the ring nor a multi-ring
-//!   basin's rings are drawn, only their floor, wall and rim.
+//! - _The central peak's onset and end_ (science-r09-craters.md F2). Its relief is Pike's law times
+//!   `w_on` `w_off`. It grows across the transitional zone by the blend's own weight, `w_on` =
+//!   ln(x ÷ 0.8) ÷ ln(1.875) with x = D ÷ `D_t`, held to [0, 1]: peaks occur "with increasing
+//!   frequency in craters between 17 and 35 km diameter, reaching 100% occurrence at the latter"
+//!   (Wood and Andersson 1978), Smith and Sanchez 1973's craters with peaks centre on 14 km, and
+//!   Pike 1980b's seven peaks under 28 km lie below his law (all via Hale and Head 1979 and Pike
+//!   1980b). It fades across the protobasins, `w_off` = 1 − ln(x ÷ 9) ÷ ln(13 ÷ 9), held to [0, 1]:
+//!   Head 1977's central-peak basins span 150–250 km (via Hale and Head 1979), 7.9–13.2 of the
+//!   Moon's 19 km, and 9 is the plan's own start. The peak ring that replaces it is not drawn.
+//! - _The peak's base diameter_ is Hale and Head 1979's lunar 0.259 D − 2.5 km (175 fresh craters
+//!   of 17–175 km; Proc. LPSC 10th, 2623–2633), written as 0.259 D − 0.132 `D_t`, and never wider
+//!   than the floor; it carries little of the volume.
 //! - _The zone's bounds_: 0.8 and 1.5 `D_t` match Krüger, Hergarten and Kenkmann 2018's lunar
 //!   14–17 and 24–28 km (0.74–0.89 and 1.26–1.47 of 19 km); 9 and 16 `D_t` are the plan's own.
 //!
@@ -64,23 +79,26 @@
 //! The exterior's width a balances the volume, so the crater adds no material: with N = −(`V_int` +
 //! `V_peak`) ÷ (π R² h), the exterior's (0.8 a + 0.2 a²) π R² h equals N π R² h, so a = (−0.8 +
 //! √(0.64 + 0.8 N)) ÷ 0.4. The bowl's d ÷ h = 5.42 gives a = 1.5426, ejecta to 2.54 rim radii;
-//! transitional craters fall from the bowl's 1.5426 at 0.8 `D_t` to 1.33 at 1.5 `D_t`, complex
-//! craters to 25 `D_t` give 1.28–1.36 (1.05 at 100 `D_t`), and the airless bowls 0.73–1.54. (Design
-//! note 13's "1.28–1.46 for transitional and complex craters" holds for the complex ones; 1.46 is
-//! a at `D_t`.) a steps by −0.016 at 1.5 `D_t`, where the central peak enters at full relief, and
-//! by +0.040 at 9 `D_t`, where it ends. None exceeds the bowl's, so 2.54 rim radii, 1.27 D, is
-//! every crater's reach (Design notes 10 and 15). These widths lie within 15% of the observed
-//! continuous ejecta's edge, 1.35 rim radii beyond the rim (Moore et al. 1974, in Pike 1980b,
-//! Table 6), but for the airless bowls' smallest and the largest basins, which fall short of it.
+//! transitional craters fall from the bowl's 1.5426 at 0.8 `D_t` to 1.326 at 1.5 `D_t`, complex
+//! craters to 25 `D_t` give 1.28–1.36 (1.302 at 9 `D_t`, 1.323 at 11 `D_t`, 1.05 at 100 `D_t`),
+//! the airless bowls 0.73–1.54 and the porous ones 0.73–0.913. a is continuous in D: the central
+//! peak's ramps leave no step. None exceeds the bowl's, so 2.54 rim radii, 1.27 D, is every
+//! crater's reach (Design notes 10 and 15). These widths lie within 15% of the observed continuous
+//! ejecta's edge, 1.35 rim radii beyond the rim (Moore et al. 1974, in Pike 1980b, Table 6), but
+//! for the airless and porous bowls' smallest and the largest basins, which fall short of it.
 
 use hyperion_base::math;
-use hyperion_base::units::Metres;
+use hyperion_base::units::{Metres, MetresPerSecondSquared};
 
-use super::{CraterParams, MOON_GRAVITY_M_PER_S2, crater_cutoff, transition_diameter};
+use super::{CraterParams, MOON_GRAVITY_M_PER_S2, TargetClass, crater_cutoff, transition_diameter};
 use crate::field::Morphology;
 
 /// A fresh bowl's depth over its diameter, d ÷ D: 0.20 (the module documentation).
 const BOWL_DEPTH: f64 = 0.20;
+
+/// A fresh bowl's depth over its diameter on a porous target, d ÷ D: 0.14, the "asteroidal-like"
+/// value (Aponte-Hernández et al. 2021, §1; science-r09-craters.md item 2).
+const POROUS_BOWL_DEPTH: f64 = 0.14;
 
 /// A fresh lunar bowl's depth over its rim height, d ÷ h: 5.42, Pike 1980a's fresh mare depth
 /// 0.195 D^1.013 (Table 2) over Pike 1980b's rim 0.036 D^1.014 (eq. 3).
@@ -102,8 +120,12 @@ const TRANSITIONAL_FROM: f64 = 0.8;
 /// Where central-peak craters begin, in `D_t`: 1.5.
 const COMPLEX_FROM: f64 = 1.5;
 
-/// Where peak rings begin and central peaks end, in `D_t`: about 9 (the plan's own).
+/// Where peak rings begin and central peaks start to fade, in `D_t`: about 9 (the plan's own).
 const PEAK_RING_FROM: f64 = 9.0;
+
+/// Where the central peak has faded away, in `D_t`: 13, the top of Head 1977's 150–250 km
+/// central-peak basins at the Moon's 19 km (via Hale and Head 1979; science-r09-craters.md F2).
+const PEAK_GONE_FROM: f64 = 13.0;
 
 /// Where multi-ring basins begin, in `D_t`: about 16 (the plan's own).
 const MULTI_RING_FROM: f64 = 16.0;
@@ -129,9 +151,10 @@ const FLOOR_HELD: f64 = 0.778;
 /// 0.032 D^0.900 km, at 19 km.
 const PEAK_RELIEF: (f64, f64) = (0.0238, 0.900);
 
-/// A central peak's base radius in rim radii: its base diameter 0.3 D (Garvin et al. 2003's Mars
-/// fit, 0.25 D^1.05).
-const PEAK_BASE_RADIUS: f64 = 0.3;
+/// A central peak's base diameter over the crater's, 0.259 − 0.132 (`D_t` ÷ D): Hale and Head
+/// 1979's lunar 0.259 D − 2.5 km, the 2.5 km at the Moon's 19 km (the slope and the offset in
+/// `D_t`; science-r09-craters.md F2).
+const PEAK_BASE: (f64, f64) = (0.259, 0.132);
 
 /// A fresh crater: its morphology, its relief and the width of its ejecta, from which its profile
 /// follows ([`relief`](Self::relief)). Built by [`crater_shape`].
@@ -187,8 +210,8 @@ impl CraterShape {
         self.rim_radius() * self.floor_fraction
     }
 
-    /// The central peak's relief above the floor: zero for a bowl, a transitional crater, and a
-    /// crater of 9 `D_t` or more.
+    /// The central peak's relief above the floor: zero for a bowl and from 13 `D_t`, growing across
+    /// the transitional zone and fading across 9–13 `D_t`.
     #[must_use]
     pub const fn peak_relief(&self) -> Metres {
         self.peak_relief
@@ -261,14 +284,22 @@ impl CraterShape {
     }
 }
 
-/// A fresh bowl's depth over its diameter at `d_m` metres on the body of `p`: 0.20, or Stopar et
-/// al.'s shallower small bowls where nothing screens the body.
+/// A fresh bowl's depth over its diameter on a target of `class` before any regolith shallows it:
+/// 0.20 for a non-porous one and 0.14 for a porous one (the module documentation). The diameter
+/// map's cavity shape takes it too (`density::transient_coefficient`; science-r09-craters.md F4.2).
 #[must_use]
-fn bowl_depth_ratio(p: &CraterParams, d_m: f64) -> f64 {
-    if crater_cutoff(p).is_some() {
-        return BOWL_DEPTH;
+pub(super) const fn fresh_bowl_depth(class: TargetClass) -> f64 {
+    match class {
+        TargetClass::NonPorous => BOWL_DEPTH,
+        TargetClass::Porous => POROUS_BOWL_DEPTH,
     }
-    let lunar_m = d_m * p.gravity().value() / MOON_GRAVITY_M_PER_S2;
+}
+
+/// An airless regolith's bowl depth over its diameter at `d_m` metres under `gravity`: Stopar et
+/// al.'s A-class bins at D × g ÷ 1.62, linear in log D between, held beyond.
+#[must_use]
+fn regolith_bowl_depth(d_m: f64, gravity: MetresPerSecondSquared) -> f64 {
+    let lunar_m = d_m * gravity.value() / MOON_GRAVITY_M_PER_S2;
     let (first_m, first_ratio) = AIRLESS_BOWLS[0];
     if lunar_m <= first_m {
         return first_ratio;
@@ -281,6 +312,32 @@ fn bowl_depth_ratio(p: &CraterParams, d_m: f64) -> f64 {
         }
     }
     BOWL_DEPTH
+}
+
+/// A fresh bowl's depth over its diameter at `d_m` metres on the body of `p`: its target class's
+/// ([`fresh_bowl_depth`]), or Stopar et al.'s shallower small bowls where nothing screens the body
+/// and they are shallower.
+#[must_use]
+fn bowl_depth_ratio(p: &CraterParams, d_m: f64) -> f64 {
+    let fresh = fresh_bowl_depth(p.target().class);
+    if crater_cutoff(p).is_some() {
+        return fresh;
+    }
+    let regolith = regolith_bowl_depth(d_m, p.gravity());
+    if regolith < fresh { regolith } else { fresh }
+}
+
+/// The weight of `x` across [`lo`, `hi`], linear in ln x: exactly 0 at and below `lo` and exactly
+/// 1 at and above `hi`.
+#[must_use]
+fn log_ramp(x: f64, lo: f64, hi: f64) -> f64 {
+    if x <= lo {
+        0.0
+    } else if x >= hi {
+        1.0
+    } else {
+        math::ln(x / lo) / math::ln(hi / lo)
+    }
 }
 
 /// `coefficient` `D_t` (D ÷ `D_t`)^`exponent`, metres, for the transition `transition_m` metres
@@ -355,21 +412,22 @@ pub fn crater_shape(p: &CraterParams, d: Metres) -> CraterShape {
     );
     let transition_m = transition_diameter(p).value();
     let x = d_m / transition_m;
+    // The transitional blend's weight, log-linear in D from 0.8 to 1.5 D_t, which the central
+    // peak's onset takes too (F2).
+    let blend = log_ramp(x, TRANSITIONAL_FROM, COMPLEX_FROM);
     let (depth_m, rim_m, floor) = if x < TRANSITIONAL_FROM {
         let depth_m = bowl_depth_ratio(p, d_m) * d_m;
         (depth_m, BOWL_RIM * d_m, 0.0)
     } else if x < COMPLEX_FROM {
-        // Log-linear in log D from the bowl at 0.8 D_t to the complex law at 1.5 D_t.
-        let w = math::ln(x / TRANSITIONAL_FROM) / math::ln(COMPLEX_FROM / TRANSITIONAL_FROM);
         let bowl_m = TRANSITIONAL_FROM * transition_m;
         let bowl_depth_m = bowl_depth_ratio(p, bowl_m) * bowl_m;
         let bowl_rim_m = BOWL_RIM * bowl_m;
         let complex_depth_m = self_similar(COMPLEX_DEPTH, transition_m, COMPLEX_FROM);
         let complex_rim_m = self_similar(COMPLEX_RIM, transition_m, COMPLEX_FROM);
         (
-            bowl_depth_m * math::powf(complex_depth_m / bowl_depth_m, w),
-            bowl_rim_m * math::powf(complex_rim_m / bowl_rim_m, w),
-            w * complex_floor(COMPLEX_FROM),
+            bowl_depth_m * math::powf(complex_depth_m / bowl_depth_m, blend),
+            bowl_rim_m * math::powf(complex_rim_m / bowl_rim_m, blend),
+            blend * complex_floor(COMPLEX_FROM),
         )
     } else {
         (
@@ -378,8 +436,17 @@ pub fn crater_shape(p: &CraterParams, d: Metres) -> CraterShape {
             complex_floor(x),
         )
     };
-    let (peak_m, cone) = if (COMPLEX_FROM..PEAK_RING_FROM).contains(&x) {
-        (self_similar(PEAK_RELIEF, transition_m, x), PEAK_BASE_RADIUS)
+    // The central peak grows with the blend and fades across the protobasins (F2); between 1.5
+    // and 9 D_t both weights are exactly 1, so its relief is Pike's law itself.
+    let weight = blend * (1.0 - log_ramp(x, PEAK_RING_FROM, PEAK_GONE_FROM));
+    let (peak_m, cone) = if weight > 0.0 {
+        // Hale and Head's base, positive from 0.51 D_t, so wherever the peak is, and never wider
+        // than the floor.
+        let base = PEAK_BASE.0 - PEAK_BASE.1 / x;
+        (
+            weight * self_similar(PEAK_RELIEF, transition_m, x),
+            if base < floor { base } else { floor },
+        )
     } else {
         (0.0, 0.0)
     };

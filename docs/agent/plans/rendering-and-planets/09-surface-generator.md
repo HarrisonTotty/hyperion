@@ -985,16 +985,20 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     extended by the end slopes outside its range (−2 below 10 m). The contract's N(>1 km) is
     lunar-equivalent: the Moon's density for the body's projectile flux (the chronology × the belt
     scaling). Other bodies take it to their own craters by a monotone diameter map by π-group
-    scaling, N(>D) = N☾ × 10^(Σ aₙ (log₁₀ φ(D))ⁿ), so a body's own N(>1 km) is N☾ at φ(1 km): 0.52
-    of N☾ on Venus, 0.25 on Mars at Ivanov's velocities, whose 0.49 Mars chronology then implies his
-    R_b ≈ 2 (science-r09-craters.md F1). The map is in the gravity regime (Holsapple 1993; Ivanov
-    2001's construction of Mars's function), optional in `CraterParams` and the identity at the
-    lunar reference. A lunar crater's transient cavity gives its projectile at the reference
+    scaling, N(>D) = N☾ × 10^(Σ aₙ (log₁₀ φ(D))ⁿ), so a body's own N(>1 km) is N☾ at φ(1 km): 0.53
+    of N☾ on Venus, 0.256 on Mars at Ivanov's velocities, whose 0.49 Mars chronology then implies
+    his R_b ≈ 2 (science-r09-craters.md F1). The map is in the gravity regime (Holsapple 1993;
+    Ivanov 2001's construction of Mars's function), optional in `CraterParams` and the identity at
+    the lunar reference. A lunar crater's transient cavity gives its projectile at the reference
     (non-porous, ρ_t 2,550 kg m⁻³, ρ_p 3,000 kg m⁻³, U 16.7 km/s, g 1.62 m s⁻², D_t 19 km). The same
     projectile's crater on the body follows from its class (non-porous μ 0.55 and K₁ 0.095; porous μ
     0.41 and K₁ 0.132; ν 1/3 for both; Holsapple 1993 as Singer et al. 2019 apply it), its target
-    and projectile densities, U and g, and its own collapse at its D_t. Ice is non-porous at 940 kg
-    m⁻³ (science-r09-craters.md item 2). The strength regime is not modelled (Risks). Saturation is
+    and projectile densities, the mean impact speed (no angle factor), g, its own collapse at its
+    D_t, and the class's transient volume-to-diameter constant, a paraboloid as deep as the class's
+    fresh bowl: (4/3 · 8/0.20)^⅓ = 3.764 non-porous, (4/3 · 8/0.14)^⅓ = 4.239 porous. Between two
+    non-porous bodies the constant, K₁ and the absolute speed cancel; for a porous body they do not
+    (science-r09-craters.md F4.2). Ice is non-porous at 940 kg m⁻³ (science-r09-craters.md
+    item 2). The strength regime is not modelled (Risks). Saturation is
     Trask's N(>D) = 0.079 D⁻² km⁻²; capped craters draw their ages from the last T × N_sat ÷ N_prod
     of the surface age, inverted through the chronology, `craters::chronology_age`, which counts
     from the system's formation (the contract's system age; science-r09-craters.md item 5). That
@@ -1021,11 +1025,11 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     within 7% of the catalogue's from 1.5 to 95 km, and its N(>1 km) of 3.1 × 10⁻⁴ km⁻² is a
     lunar-chronology age of 0.37 Ga, inside the few hundred Myr to about 0.75 Gyr published for
     Venus's mean surface (from memory). Through the diameter map, at P14.T48.f's 25.7 km/s, the
-    same fit gives exponent 4.2 at 20 d\* (ΔlnL < 0.5 over 4.1–4.4; 4.5 lies 2.2 below) and a
-    lunar-equivalent N☾(>1 km) of 3.40 × 10⁻⁴ km⁻², 1.76 × 10⁻⁴ of Venus's own, an age of 0.41 Gyr
-    ÷ R_b. Its cumulative counts lie within 11% at 3–40 km. A free cutoff, 8.5 km with exponent
-    5.2, lies 18.8 above it in ln L, but π-scaling puts a d\* projectile's crater at 18–21 d\* on
-    Venus, so the rule stands. The adopted taper passes 0.5% of the production at 3 km, 4.5% at
+    same fit gives exponent 4.2 at 20 d\* (the likelihood peaks at 4.25, 0.14 above 4.2; 4.5 lies
+    2.1 below, 4.0 3.0 and 5.0 17.5) and a lunar-equivalent N☾(>1 km) of 3.36 × 10⁻⁴ km⁻², 1.79 ×
+    10⁻⁴ of Venus's own, an age of 0.40 Gyr ÷ R_b. Its cumulative counts lie within 11% at 3–40 km
+    (10.8% at 20 km). A free cutoff, 8.5 km with exponent 5.2, lies 18.8 above it in ln L, but
+    π-scaling puts a d\* projectile's crater at 18–21 d\* on Venus, so the rule stands. The adopted taper passes 0.5% of the production at 3 km, 4.5% at
     5 km, 25% at 8 km, 46% at 10 km and 94% at 20 km (science-r09-craters.md F1). The exponent is
     measured on Venus alone, so it is low confidence for thinner atmospheres, whose cutoffs keep
     their projectile scales. The transition
@@ -1657,21 +1661,23 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   - The contract's density is lunar-equivalent (F1). `cumulative_density` maps N☾ without
     renormalising at the body's 1 km, and `own_density_at_1km` gives the body's own.
   - The taper exponent is 4.2.
-  - The reference Mars takes R_b 1.94.
+  - The reference Mars takes R_b 1.92 (0.4928 ÷ own/N☾ at Ivanov's velocities,
+    science-r09-craters.md F4.1).
   - The central peak's onset and end ramps and Hale and Head's base (F2).
   - Tests:
     - the identity at the reference holds exactly;
     - the map is monotone for both classes;
-    - for a fixed projectile, a porous target's crater is smaller than a non-porous one's at
-      Charon's g, U and densities. Singer et al. 2019 need a 1.3 km impactor for a 10 km
-      non-porous crater and a 1.8 km one for a porous crater; check within 15%;
+    - at Charon (g 0.288 m s⁻², U 2.0 km/s, δ 920, ρ_t 920 and 644), a 10 km simple crater needs a
+      1.37 km non-porous and a 1.59 km porous impactor to 1%, both within 15% of Singer et al.
+      2019's worked example (1.3 and 1.8 km); the class constants are 3.764 and 4.239
+      (science-r09-craters.md F4.2);
     - an icy target of 940 kg m⁻³ widens a crater by (3,000 ÷ 940 against 3,000 ÷ 2,550)^0.261
       to 10⁻⁹;
     - every porous bowl's a ≤ 1.543;
     - at the identity, N(>1 km) is the parameter exactly;
     - under Mars's map at Ivanov's 9.6 ÷ 16.1, `own_density_at_1km` ÷ N☾ is 0.254 within 2%;
-    - Venus at N☾ 3.40 × 10⁻⁴, 25.7 km/s and 20 d\* gives the Gazetteer's counts at 3, 5, 10,
-      20 and 40 km within 12%;
+    - Venus at N☾ 3.36 × 10⁻⁴, 25.7 km/s and 20 d\* gives the Gazetteer's counts at 3, 5, 10, 20 and
+      40 km within 12%; under Mars's map at Ivanov's velocities, R_b × own/N☾ = 0.4928 within 1%;
     - d, h, the floor radius, the peak relief and a are continuous in D at 0.8, 1.5, 9 and
       13 D_t, to 10⁻⁹ relative across each bound;
     - the peak base never exceeds the floor;
@@ -2360,11 +2366,12 @@ re-blessing this plan's payload and coarse goldens in that commit.
 - **Low-confidence constants.** The σ_h fit rests on one body per constant (0.9 km, 0.16, the √N
   age law, the 70 km lithosphere normalisation); stream-power erodibility across fluids and
   gravities; the energy-balance transport cap; Venus's crater screening; the complex-crater peak's
-  base width (0.3 D, Mars's) and the regolith bowl's gravity scaling (`decision-r09-t2.md` item
-  3); Mars's complex craters deepening faster than the one law (exponent 0.53–0.58 against 0.30),
-  which leaves its largest fresh complex craters about 30% shallow; the diameter map's non-porous
-  exponents, applied to every target, and its lunar impact velocity (T7.a, "Deviations in T7.a, as
-  built"). Each is a named constant with its source and confidence in its doc comment.
+  base width (Hale and Head 1979's lunar law since R09.T7.e, which was Garvin et al.'s 0.3 D for
+  Mars) and the regolith bowl's gravity scaling (`decision-r09-t2.md` item 3); Mars's complex
+  craters deepening faster than the one law (exponent 0.53–0.58 against 0.30), which leaves its
+  largest fresh complex craters about 30% shallow; the diameter map's class constants, the porous
+  class's absolute size and its lunar impact velocity (T7.a and T7.e, "Deviations … as built").
+  Each is a named constant with its source and confidence in its doc comment.
   T0.b's checks (2026-10-09) covered the first four; what they left open is under "Remaining
   checks, as researched" below.
 - **Several tasks are near a day.** T8 (assembly, the bound, the patch and the read set) and T6.b
@@ -2493,7 +2500,11 @@ re-blessing this plan's payload and coarse goldens in that commit.
     Holsapple's two-regime π_V form with K₂ and a size-dependent Y is the fix.
   - _The porous threshold._ Porous below a radius of 150 km is the plan's own, between Hyperion
     and Mimas. Above 60% porosity μ falls to about 0.35. Kraus et al. 2011 (ice scaling, CTH) was
-    not read.
+    not read. The porous class's absolute crater size is uncertain. For one impactor, Singer et al.
+    2019's same-shape assumption and Holsapple 2022's lab shapes bracket porous craters from about
+    22% narrower than non-porous ones to the same width; the plan's per-class bowl constant lies
+    between (F4.2). Singer et al.'s supplement is internally inconsistent (worked example against
+    S2/S4, 13–31%).
   - _Peak rings and basin rings are not drawn._ From 9 D_t the central peak fades over the
     protobasins (science-r09-craters.md F2). The peak ring that replaces it is not drawn: its
     heights grow like central peaks' (Baker et al. 2012). Its ring-to-rim ratio and cross-section
@@ -4362,7 +4373,11 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     agent rules one, goes to R09.T7.e or the docs pass.
   - _a0's two readings._ Adopted lean ("main", 2026-10-10): the doc records both readings of the
     printed a0 (Design note 12's misprint and Cratermaker's correction of the linear term), with
-    the values as ruled; a0 never enters.
+    the values as ruled; a0 never enters. **Ruled (F3)** (science-r09-craters.md F3): neither a0 is
+    a misprint. −3.0876 is the 2001 polynomial's own 1-Gyr level, which matches Neukum 1983's below
+    1 km, and −3.0768 is Neukum 1983's; the chronology keeps the published 8.38 × 10⁻⁴, as
+    Craterstats pairs it with this polynomial, rather than Cratermaker's 8.17 × 10⁻⁴. R09.T7.e's
+    `NEUKUM` doc takes F3's text.
   - _The inversion_ bisects ln D 40 times (an interval of 6.3 × 10⁻¹³) on the craters between the
     octave's lower diameter and the midpoint alone, and is clamped into [lower, upper). Its
     Kolmogorov–Smirnov test runs 10⁵ draws on the unscreened Moon and on mapped, screened Mars
@@ -4416,3 +4431,91 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     of its production. Without `impact_velocity` a body takes the lunar shape, up to 2.6× off on a
     Mars at 10 km: P14.T48.f supplies the velocity. P14.T24.b's N(>1 km) is
     `craters::lunar_chronology(S, A)`.
+- **Deviations in T7.e, as built** (2026-10-11; science-r09-craters.md items 2 and 5, F1–F4).
+  - _Files and public items._ Beyond the task's five files: `field.rs` exports its `coded_enum!` to
+    the crate, so that `craters::TargetClass` is one byte like the field's enums; `field/header.rs`
+    refuses a surface older than its system; `wire.rs`, `wire/tests.rs`, `craters/golden.rs`,
+    `tests/panics.rs` and the sim's `planetary/surface/mod.rs` doctest take the new fields. Added
+    public items: `TargetClass` (`NonPorous` 0, `Porous` 1, `ALL`, `u8` conversions), `CraterTarget`
+    (`class`, `density`), `LUNAR_TARGET` (non-porous, 2,550 kg m⁻³) and `LUNAR_PROJECTILE_DENSITY`
+    (3,000), the map's reference beside `LUNAR_IMPACT_VELOCITY`; `own_density_at_1km` (before
+    screening); `CraterParams::{projectile_density, target, system_age}`;
+    `BuildCraterParamsError::{ProjectileDensity, TargetDensity, SystemAge, DiameterMap}`, the last
+    for parts each in range whose cavity scale is not finite (a density ratio of 10⁻⁴⁰⁰ against a
+    speed's square of 10³¹⁰), so that no NaN reaches the density; and
+    `BuildFieldHeaderError::SurfaceOlderThanSystem { surface, system }` (in `Gigayears`), so that
+    T7.b's chronology cannot panic on a decoded header, with the sim's
+    `BuildCoarseInputsError::SurfaceOlderThanSystem` refusing the same inputs before the coarse pass
+    runs (`planetary/surface/inputs.rs`). `TargetClass` is a closed set of two scaling classes,
+    appended only (for the composition audit; above 60% porosity μ falls to about 0.35, Risks).
+  - _The wire._ The contract appends the projectile density, the target (its class's byte, then its
+    density) and the system's age, 25 bytes, after the impact velocity; the atmosphere's tag carries
+    its column mass alone, 8 bytes fewer. `wire/codes.golden` extends by the two class codes.
+  - _The map._ Each class's exponents come from its μ (2μ ÷ (2 + μ) = 0.4314 and μ ÷ (2 + μ) =
+    0.2157 non-porous, 0.340 and 0.170 porous), with each class's own transient constant, a
+    paraboloid as deep as its fresh bowl (3.764 and 4.239, F4.2): F4.2's `TRANSIENT_DEPTH` is
+    `shape::fresh_bowl_depth(class)`, the bowls' own 0.20 and 0.14, so the volume the map converts
+    is the bowl the profile draws, and the regolith's shallowing never enters C. The lunar cavity is
+    a power of the body's, (2 + μ) ÷ (2 + μ☾): exactly 1 for a non-porous body, whose form is the
+    pure scale P☾ ÷ P (pow(x, 1) is x in the pinned libm; `a_non_porous_map_is_a_pure_scale` pins
+    it). At the lunar reference the map is none at all, so the identity holds to the bit, screened
+    or not. Against Ivanov's Mars the map lies within 3.9% at his velocity ratio and 9.9% at 10.6
+    km/s, at the test's 20 diameters a decade (4.2% and 10.2% sampled continuously; T7.a's rounded
+    0.43 and 0.22 gave 3.3% and 9.2%); the test normalises both at 1 km itself, since the production
+    no longer does.
+  - _Lunar-equivalent densities (F1)._ The production is N☾ at the lunar image of D, not
+    renormalised; `n_1km` is the body's own N(>1 km) only at the identity, which T7.a's test, now
+    `n_1km_is_the_parameter_exactly_at_the_identity`, checks, and every mapped body's production at
+    1 km is `own_density_at_1km`. T7.a's identity-and-monotonicity test splits into
+    `the_map_is_the_identity_at_the_lunar_reference_exactly` (bit-exact, screened or not, where it
+    held 10⁻¹¹) and `the_map_is_monotone_and_inverted_for_both_classes`.
+  - _Venus (F4.1)._ At N☾ 3.36 × 10⁻⁴ km⁻², 25.7 km/s and 20 d\* the built counts lie −1.8, −2.5,
+    +5.5, +10.8 and +10.3% from the Gazetteer's at 3, 5, 10, 20 and 40 km (the test: 12%, pinned at
+    11%); its own N(>1 km) is 1.79 × 10⁻⁴ (0.532 of N☾) and its screened density at 1 km 1.93 ×
+    10⁻⁶, 1.1% of it: its test now holds it under 2% of its own density and in 1.8–2.1 × 10⁻⁶, where
+    T7.a's held it under 1% of a production then equal to N(>1 km). T7.a's unmapped check at 3.07 ×
+    10⁻⁴ km⁻² stays, as `…_without_the_map`, now at the taper's 4.2: within 2.8%. The taper-share
+    test takes F1's 0.5, 4.5, 25, 46 and 94%. Mars's own N(>1 km) at Ivanov's velocities is 0.2560
+    of N☾, and R_b 1.92 times it 0.4915, 0.3% under Ivanov's 0.4928.
+  - _Charon (F4.2)._ The built impactors for a 10 km simple crater are 1.372 km non-porous and 1.594
+    km porous, and the class constants 3.7641 and 4.2394. Charon's 0.288 m s⁻² is GM ÷ R² from
+    Brozović et al. 2015 and Nimmo et al. 2017 (from memory), which Singer et al.'s supplement does
+    not state.
+  - _The shapes._ The porous bowl is 0.14 D, or the airless regolith's where that is shallower, so
+    its a lies in 0.73–0.913. F2's peak gives a = 1.326 at 1.5 `D_t`, 1.302 at 9 and 1.323 at 11, so
+    T7.a's transitional bracket of 1.33–1.543 becomes 1.32–1.543. The ramps' weights are exactly 0
+    at and below their lower bounds and 1 at and above their upper ones, so the relief is Pike's law
+    itself over 1.5–9 `D_t` and zero beyond 13. Continuity across 0.8, 1.5, 9 and 13 `D_t` is held
+    to 10⁻⁹ of their own values for d, h and a, and of D for the floor radius and the peak relief,
+    which start from zero at a bound, on four bodies, a porous one among them. Added tests:
+    `porous_bowls_are_the_asteroidal_ones`, `the_shape_is_continuous_at_every_zones_bound`,
+    `the_central_peak_ramps_in_and_out_on_pikes_law` (the base against the floor over 0.1–100
+    `D_t`), `a_non_porous_map_is_a_pure_scale`, `charons_impactors_are_singers`,
+    `an_icy_target_widens_a_crater_by_its_density`, `mars_own_density_implies_ivanovs_impact_rate`,
+    `target_classes_have_their_codes`,
+    `malformed_wire_crater_contracts_are_refused_with_their_errors`,
+    `a_field_header_refuses_a_surface_older_than_its_system` and the sim's
+    `the_reference_crater_contracts_carry_their_impactors`.
+  - _The reference worlds._ `reference.rs` names `SILICATE_TARGET` (2,550 kg m⁻³), `CERES_TARGET`
+    (1,287), the three velocities and `MARS_IMPACT_RATE` (1.92), and its `crater_params` takes an
+    `Impactors` (target factor, velocity, target, rate). The reference Moon's gravity, GM ÷ R² =
+    1.624 m s⁻², is not the map's 1.62, so its own density lies 0.2% under its N☾. It is not the
+    identity to the bit; the synthetic Moon-like world, at 1.62, is.
+  - _The synthetic worlds_ take the velocities too, as the task's list has it (F1's "testing worlds
+    have no impact velocity" described T7.a). The Moon-like world sits at the reference; the Earth-,
+    Mars- and Ceres-like worlds are mapped, with Ceres at 1,287 kg m⁻³. Their N(>1 km) values stay
+    as they were but now read as N☾, with no `R_b`, so the mapped worlds' own densities are N☾ times
+    own/N☾; no test pins those.
+  - _Goldens._ `tests/golden/wire/payloads.golden` and `codes.golden` are re-blessed at 21 with no
+    bump under Generator version's rule, and `tests/golden/craters/density_and_shapes.golden` under
+    F1's and F2's "Moves" (no bump before this plan's first, T9's or T16's; "main", 2026-10-11).
+    `payloads.golden` moves by the layout (block 0 by +25 bytes, the Earth- and Mars-like worlds'
+    atmospheres −8 and their new velocities +8, the Moon- and Ceres-like worlds' velocities +8) and
+    by F2's shapes through the testing builder's relief and reaches: the Mars-like world gains 100
+    bytes of reach ranges and the Moon-like loses 8, and every digest moves with the cells'
+    elevations. The crater golden's Venus is now the mapped one at 3.36 × 10⁻⁴; it adds a porous
+    Hyperion-like and an icy, thick-aired Titan-like body and each body's own N(>1 km). Its
+    saturation and chronology lines, the Moon's densities and the cutoff body's production are
+    unchanged. No other golden moves.
+  - _F3_ (the docs pass's, T7.e if earlier). `NEUKUM`'s doc and the chronology test's comment take
+    F3's text.

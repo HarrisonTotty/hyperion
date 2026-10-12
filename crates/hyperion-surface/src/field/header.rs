@@ -147,7 +147,8 @@ pub struct FieldHeaderParts {
     /// with land.
     pub anomaly_step: u8,
     /// The body's surface age, thousands of millions of years: plan 14's, carried for R11's rock
-    /// abundance (Design note 18). Finite and non-negative.
+    /// abundance (Design note 18) and the craters' ages (R09.T7.b). Finite and non-negative, and
+    /// at most the crater contract's system age.
     pub surface_age: Gigayears,
     /// The body's mean surface pressure, pascals: plan 14's, carried for R11's atmosphere class
     /// (Design note 18); 0 on an airless body. Finite and non-negative.
@@ -225,6 +226,14 @@ pub enum BuildFieldHeaderError {
     },
     /// The main liquid's entry is past the palette or not a liquid's.
     MainLiquid(u8),
+    /// The surface is older than its system, the crater contract's system age, which the
+    /// chronology cannot count (R09.T7.e).
+    SurfaceOlderThanSystem {
+        /// The surface age.
+        surface: Gigayears,
+        /// The system age.
+        system: Gigayears,
+    },
 }
 
 impl std::fmt::Display for BuildFieldHeaderError {
@@ -256,6 +265,12 @@ impl std::fmt::Display for BuildFieldHeaderError {
             Self::MainLiquid(entry) => write!(
                 f,
                 "the main liquid's palette entry {entry} is past the palette or not a liquid's"
+            ),
+            Self::SurfaceOlderThanSystem { surface, system } => write!(
+                f,
+                "a surface of {} Gyr is older than its system of {} Gyr",
+                surface.value(),
+                system.value()
             ),
         }
     }
@@ -314,7 +329,8 @@ impl FieldHeader {
     /// radius's spheroid, the months are neither 1 nor 12, the season eccentricity is outside
     /// [0, 1) or not 0 in a one-month year, a step's exponent is above 15, a part is not finite
     /// or out of its range (each part's documentation states it), a crust's palette entry is past
-    /// the palette or not of a crust's role, or the main liquid's is past it or not a liquid's.
+    /// the palette or not of a crust's role, the main liquid's is past it or not a liquid's, or the
+    /// surface is older than the crater contract's system.
     pub fn new(parts: FieldHeaderParts) -> Result<Self, BuildFieldHeaderError> {
         let r = parts.radius.value();
         if !(r.is_finite() && r > 0.0) {
@@ -391,6 +407,10 @@ impl FieldHeader {
             && !parts.palette.has_role(entry, PaletteRole::Liquid)
         {
             return Err(BuildFieldHeaderError::MainLiquid(entry));
+        }
+        let (surface, system) = (parts.surface_age, parts.craters.system_age());
+        if surface.value() > system.value() {
+            return Err(BuildFieldHeaderError::SurfaceOlderThanSystem { surface, system });
         }
         let level = coarse_level(parts.radius);
         let boundary_diameter = boundary_diameter(level, parts.radius);
@@ -820,6 +840,25 @@ mod tests {
             refuse(|p| p.main_liquid = Some(9)),
             BuildFieldHeaderError::MainLiquid(9)
         );
+    }
+
+    /// A surface older than its system, the crater contract's system age, which the chronology
+    /// cannot count, is refused; one as old is not (R09.T7.e).
+    #[test]
+    fn a_field_header_refuses_a_surface_older_than_its_system() {
+        let system = parts().craters.system_age();
+        let mut older = parts();
+        older.surface_age = Gigayears::new(5.0);
+        assert_eq!(
+            FieldHeader::new(older).unwrap_err(),
+            BuildFieldHeaderError::SurfaceOlderThanSystem {
+                surface: Gigayears::new(5.0),
+                system
+            }
+        );
+        let mut as_old = parts();
+        as_old.surface_age = as_old.craters.system_age();
+        assert!(FieldHeader::new(as_old).is_ok());
     }
 
     /// A crust's entry names its lithology, and a crust with none names nothing.

@@ -235,6 +235,9 @@ fn level_five_field_flowing(flow: FlowDirection) -> CoarseField {
         gravity: MetresPerSecondSquared::new(0.28),
         k_target: 1.0,
         impact_velocity: None,
+        projectile_density: craters::LUNAR_PROJECTILE_DENSITY,
+        target: craters::LUNAR_TARGET,
+        system_age: craters::SOLAR_SYSTEM_AGE,
     })
     .unwrap();
     let header = FieldHeader::new(FieldHeaderParts {
@@ -635,6 +638,9 @@ fn lunar_craters() -> CraterParams {
         gravity: MetresPerSecondSquared::new(1.62),
         k_target: 1.0,
         impact_velocity: None,
+        projectile_density: craters::LUNAR_PROJECTILE_DENSITY,
+        target: craters::LUNAR_TARGET,
+        system_age: craters::SOLAR_SYSTEM_AGE,
     })
     .unwrap()
 }

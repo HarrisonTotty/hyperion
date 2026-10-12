@@ -38,7 +38,9 @@
 //! density, a solidus), or, where it is a body's measurement standing for the substance's (an
 //! albedo), says so.
 
-use hyperion_surface::craters::{self, CraterParams, CraterParamsParts, Screening};
+use hyperion_surface::craters::{
+    self, CraterParams, CraterParamsParts, CraterTarget, Screening, TargetClass,
+};
 use hyperion_surface::field::{
     BodyRef, ClimateModelKind, MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole,
 };
@@ -56,7 +58,7 @@ use crate::planetary::hooks::SurfaceSeed;
 use crate::units::consts::{SECONDS_PER_DAY, SOLAR_CONSTANT_W_PER_M2};
 use crate::units::{
     EarthFluxes, Gigayears, Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres,
-    MetresPerSecondSquared, Pascals, Radians, Seconds, WattsPerSquareMetre, Years,
+    MetresPerSecond, MetresPerSecondSquared, Pascals, Radians, Seconds, WattsPerSquareMetre, Years,
 };
 
 /// The surface seed the reference worlds' tests run under.
@@ -350,10 +352,63 @@ fn palette(entries: Vec<PaletteEntry>) -> MaterialPalette {
     MaterialPalette::new(entries).expect("a reference palette is valid")
 }
 
-/// The density of a stony projectile that screening assumes, kg m⁻³: 3,000, the value that turns
+/// The density of the reference worlds' stony projectiles, kg m⁻³: 3,000, the value that turns
 /// Design note 12's d\* = 1.5 (P ÷ g) ÷ `ρ_p` into its 5.2 m for Earth and 0.52 km for Venus (its
-/// 8.2 cm for Mars takes about 610 Pa; NASA's 636 Pa gives 8.5 cm).
+/// 8.2 cm for Mars takes about 610 Pa; NASA's 636 Pa gives 8.5 cm), and P14.T48.f's for a rocky
+/// source belt (science-r09-craters.md item 2).
 const PROJECTILE_DENSITY: KilogramsPerCubicMetre = KilogramsPerCubicMetre::new(3_000.0);
+
+/// The crater target of a silicate crust: non-porous at the rock class's 2,550 kg m⁻³, the lunar
+/// highlands crust's bulk density from GRAIL (Wieczorek et al. 2013, Science 339, 671), as
+/// P14.T48.f gives it to every silicate body above 150 km (science-r09-craters.md item 2). Earth,
+/// Mars and the Moon take it; Earth's continental crust's 2,700–2,900 would shrink a transient
+/// cavity by up to 3.4% and a complex crater by up to 3.9% (the ruling's "3% at most" rounds the
+/// cavity's).
+const SILICATE_TARGET: CraterTarget = CraterTarget {
+    class: TargetClass::NonPorous,
+    density: KilogramsPerCubicMetre::new(2_550.0),
+};
+
+/// Ceres's crater target: non-porous at its crust's bulk density, 1,287 kg m⁻³ (Ermakov et al.
+/// 2017, JGR Planets 122, 2267, §5.4, from Dawn's shape and gravity), as P14.T51.c's primary crust will
+/// give it (science-r09-craters.md item 2's refinement).
+const CERES_TARGET: CraterTarget = CraterTarget {
+    class: TargetClass::NonPorous,
+    density: KilogramsPerCubicMetre::new(1_287.0),
+};
+
+/// The Earth's mean impact velocity under P14.T48.f's model: 19.9 km/s, against Ivanov et al.
+/// 2002's 18.6–20.2 km/s and about 21 from Le Feuvre and Wieczorek 2008 (via quotation;
+/// science-r09-craters.md item 4).
+const EARTH_IMPACT_VELOCITY: MetresPerSecond = MetresPerSecond::new(19_900.0);
+
+/// Mars's mean impact velocity under P14.T48.f's model: 10.6 km/s, against 9.6 (Ivanov 2001, via
+/// Ivanov et al. 2002, §5.2) to 11.5 km/s (JeongAhn and Malhotra 2015, arXiv 1503.03885)
+/// (science-r09-craters.md item 4).
+const MARS_IMPACT_VELOCITY: MetresPerSecond = MetresPerSecond::new(10_600.0);
+
+/// Ceres's mean impact velocity under P14.T48.f's model: 5.6 km/s, as Vesta's, against about 5
+/// (Bottke et al. 1994, Icarus 107, 255, as science-r09-craters.md item 4 recalls it, unverified).
+const CERES_IMPACT_VELOCITY: MetresPerSecond = MetresPerSecond::new(5_600.0);
+
+/// The reference Mars's impact rate per projectile size over the Moon's, `R_b` = 1.92, which plan
+/// 14's belt scaling will supply: what Ivanov 2001's Mars chronology, 0.4928 of the Moon's
+/// (Craterstats' "Mars, Ivanov (2001)": 2.68 × 10⁻¹⁴ and 4.13 × 10⁻⁴ against 5.44 × 10⁻¹⁴ and
+/// 8.38 × 10⁻⁴), implies under the diameter map as built, 0.4928 ÷ 0.2560, the map's own N(>1 km)
+/// over its N☾ at Ivanov's 9.6 and 16.1 km/s (science-r09-craters.md F1 and F4.1). Ivanov et al.
+/// 2002, §5.2, quote "~2 for asteroids of the same size (Ivanov, 2001)". A change to the map
+/// re-derives it.
+const MARS_IMPACT_RATE: f64 = 1.92;
+
+/// What a reference world's crater contract takes beyond its age, gravity and screening: its
+/// target factor, P14.T48.f's impactors, and its impact rate per projectile size over the Moon's,
+/// which multiplies the lunar chronology into the lunar-equivalent density.
+struct Impactors {
+    k_target: f64,
+    velocity: MetresPerSecond,
+    target: CraterTarget,
+    rate: f64,
+}
 
 /// The sidereal year, days (NASA's Earth fact sheet: 365.256 d).
 const SIDEREAL_YEAR_DAYS: f64 = 365.256;
@@ -389,34 +444,37 @@ fn degrees(deg: f64) -> Radians {
     Radians::new(deg.to_radians())
 }
 
-/// The crater contract at the lunar chronology's N(>1 km) for `surface_age` in a system of the
-/// Solar System's age ([`craters::lunar_chronology`], Neukum, Ivanov and Hartmann 2001's curve as
-/// plan 14's P14.T24.b cites it, before its scaling by the system's belts), under `gravity`,
-/// screened by `screening`, on a target of factor `k_target`.
+/// The crater contract at the lunar-equivalent N☾(>1 km) for `surface_age` in a system of the
+/// Solar System's age: the lunar chronology ([`craters::lunar_chronology`], Neukum, Ivanov and
+/// Hartmann 2001's curve as plan 14's P14.T24.b cites it) times the world's impact rate, standing
+/// for the system's belt scaling (science-r09-craters.md F1), under `gravity`, screened by
+/// `screening`, with `impactors`.
 #[must_use]
 fn crater_params(
     surface_age: Gigayears,
     gravity: MetresPerSecondSquared,
     screening: Screening,
-    k_target: f64,
+    impactors: &Impactors,
 ) -> CraterParams {
     CraterParams::new(CraterParamsParts {
-        n_1km: craters::lunar_chronology(surface_age, craters::SOLAR_SYSTEM_AGE),
+        n_1km: craters::lunar_chronology(surface_age, craters::SOLAR_SYSTEM_AGE) * impactors.rate,
         screening,
         gravity,
-        k_target,
-        impact_velocity: None,
+        k_target: impactors.k_target,
+        impact_velocity: Some(impactors.velocity),
+        projectile_density: PROJECTILE_DENSITY,
+        target: impactors.target,
+        system_age: craters::SOLAR_SYSTEM_AGE,
     })
     .expect("a reference world's crater contract is valid")
 }
 
-/// An atmosphere's screening of projectiles: its column mass P ÷ g over a stony projectile
-/// (Design note 12).
+/// An atmosphere's screening of projectiles: its column mass P ÷ g (Design note 12), over the
+/// contract's stony projectiles.
 #[must_use]
 fn atmosphere_screening(pressure: Pascals, gravity: MetresPerSecondSquared) -> Screening {
     Screening::Atmosphere {
         column_mass: KilogramsPerSquareMetre::new(pressure.value() / gravity.value()),
-        projectile_density: PROJECTILE_DENSITY,
     }
 }
 
@@ -445,7 +503,7 @@ fn figure(radius_m: f64, f: f64) -> Spheroid {
 /// | volcanism V | 1 | a placeholder: plan 14 has not set V's scale, which Mars calibrates at 1 (P14.T48.a) |
 /// | heat flow | 0.0916 W m⁻² | Davies and Davies 2010, Solid Earth 1, 5, Table 7 (46.7 TW) |
 /// | surface age | 0.1 Gyr | a placeholder until P14.T24.b defines its resurfacing time, of the order of the oceanic crust's mean age, 64.2 Myr (Seton et al. 2020, G³ 21, e2020GC009214) |
-/// | craters | the lunar chronology at that age, screened by the air | Design note 12 |
+/// | craters | lunar-equivalent: the lunar chronology at that age, screened by the air; struck at 19.9 km/s by stony projectiles of 3,000 kg m⁻³, on a non-porous target of 2,550 kg m⁻³ | Design note 12; P14.T48.f's model (science-r09-craters.md items 2 and 4) |
 /// | wet epoch | 4.4 Gyr ago to now, the ocean's inventory | the oldest zircons' evidence of liquid water (Wilde, Valley, Peck and Graham 2001, Nature 409, 175) |
 /// | crust | basaltic oceanic, granitic continents, basaltic provinces | P14.T51.c's Earth |
 /// | palette | basalt (secondary crust), granite (tertiary), water as ice and as liquid; the ice's density at its coldest zone, 260 K, 918.6 kg m⁻³ | decision-composition §1.7; each figure its substance's row in this module, with its sources; the coldest zone T₀ − (2/3) × the equator–pole contrast (science-composition-crusts.md §3) |
@@ -503,7 +561,12 @@ pub fn earth_like() -> CoarseInputs {
             surface_age,
             gravity,
             atmosphere_screening(pressure, gravity),
-            1.0,
+            &Impactors {
+                k_target: 1.0,
+                velocity: EARTH_IMPACT_VELOCITY,
+                target: SILICATE_TARGET,
+                rate: 1.0,
+            },
         ))
         .wet_epoch(WetEpoch {
             start: Gigayears::new(4.4),
@@ -567,7 +630,7 @@ pub fn earth_like() -> CoarseInputs {
 /// | regime | stagnant lid, V = 1 | Design note 3 (Mars calibrates V) |
 /// | heat flow | 0.019 W m⁻² | Parro et al. 2017, Sci. Rep. 7, 45629 (Design note 3) |
 /// | surface age | 3.9 Gyr | a placeholder: the Noachian highlands' age, from memory |
-/// | craters | the lunar chronology at that age, screened by the air (d\* = 8.5 cm at 636 Pa) | Design note 12, whose 8.2 cm takes about 610 Pa; the Mars–Moon flux ratio is plan 14's belt scaling, not applied |
+/// | craters | lunar-equivalent: the lunar chronology at that age times `R_b` = 1.92, screened by the air (d\* = 8.5 cm at 636 Pa); struck at 10.6 km/s by stony projectiles of 3,000 kg m⁻³, on a non-porous target of 2,550 kg m⁻³ | Design note 12, whose 8.2 cm takes about 610 Pa; `R_b` is Ivanov 2001's Mars-to-Moon impact rate under the map, standing for plan 14's belt scaling (science-r09-craters.md F1, F4.1); P14.T48.f's model (items 2 and 4) |
 /// | wet epoch | 3.9 to 3.6 Gyr ago, 10⁶ Earth-equivalent years, 1.56 × 10⁵ kg m⁻² of water | the valley networks of about 3.6–3.8 Ga (Hoke and Hynek 2009) in 10⁵–10⁷ such years (Hoke, Hynek and Tucker 2011; not read); Carr and Head 2003's ocean, about 2.3 × 10⁷ km³, 156 m as a global layer (low confidence) |
 /// | crust | basaltic, basaltic provinces | P14.T51.c's Mars |
 /// | palette | basalt (secondary crust, its provinces' too), CO₂ and water ices, the bright dust as its deposit; the water ice's density at its coldest zone, 177.3 K, 928.4 kg m⁻³, and the CO₂ ice's at 150 K, near its frost point | decision-composition §1.7; each figure its row's; the coldest zone as Earth's, the P₂ fit's pole (science-composition-crusts.md §3), warmer than the contrasts' placeholder pole of 160 K, at which the ice would be 929.9 kg m⁻³ |
@@ -623,7 +686,12 @@ pub fn mars_like() -> CoarseInputs {
             surface_age,
             gravity,
             atmosphere_screening(pressure, gravity),
-            1.0,
+            &Impactors {
+                k_target: 1.0,
+                velocity: MARS_IMPACT_VELOCITY,
+                target: SILICATE_TARGET,
+                rate: MARS_IMPACT_RATE,
+            },
         ))
         .wet_epoch(WetEpoch {
             start: Gigayears::new(3.9),
@@ -685,6 +753,7 @@ pub fn mars_like() -> CoarseInputs {
 /// | regime | stagnant lid, no constructional volcanism, airless | Design note 3; P14.T13.c |
 /// | heat flow | 0.018 W m⁻² | Apollo 15's 21 and Apollo 17's 14 mW m⁻² (Langseth, Keihm and Peters 1976, quoted by Saito et al. 2006), whose global estimate is about 1.8 µW cm⁻² |
 /// | surface age | 4.4 Gyr | R09.T12.d's test ("N(1 km) at 4.4 Gyr") |
+/// | craters | lunar-equivalent: the lunar chronology at that age; the diameter map's lunar reference, 16.7 km/s on a non-porous target of 2,550 kg m⁻³ by stony projectiles of 3,000 kg m⁻³, so its own density is the chronology's but for its gravity's 1.624 m s⁻² against the reference's 1.62 (0.2% lower) | Design note 12; P14.T48.f's model (science-r09-craters.md items 2 and 4) |
 /// | crust | anorthositic primary crust, basaltic secondary crust and provinces | P14.T51.c's Moon |
 /// | palette | anorthosite (primary crust: the highlands, its magma ocean's flotation crust), basalt (provinces: the maria, its secondary crust), water ice (its cold traps', its density at their 110 K threshold, 932.7 kg m⁻³) | decision-composition §1.7; science-r09-drainage.md §4 and §5; science-composition-crusts.md §3; each figure its row's. The water-ice entry names the exposed ice of its polar cold traps (Li et al. 2018, PNAS 115, 8907), which no area share places until P14.T51.f states it and R09.T13.f places it; a generated Moon carries none until then (science-composition-crusts.md §6). R09.T10.d replaces the anorthosite with `feldspathic` and the basalt with `basalt_fe` (§7, §2) |
 ///
@@ -723,7 +792,17 @@ pub fn moon_like() -> CoarseInputs {
         .volcanism(0.0)
         .heat_flow(WattsPerSquareMetre::new(0.018))
         .surface_age(surface_age)
-        .craters(crater_params(surface_age, gravity, Screening::None, 1.0))
+        .craters(crater_params(
+            surface_age,
+            gravity,
+            Screening::None,
+            &Impactors {
+                k_target: 1.0,
+                velocity: craters::LUNAR_IMPACT_VELOCITY,
+                target: SILICATE_TARGET,
+                rate: 1.0,
+            },
+        ))
         .climate(ClimateRegime {
             thermal: ThermalRegime::AirlessLike,
             forcing: Forcing::SlowRotator,
@@ -760,7 +839,7 @@ pub fn moon_like() -> CoarseInputs {
 /// | regime | stagnant lid, no constructional volcanism, airless | Design note 3 |
 /// | heat flow | 0.001 W m⁻² | a placeholder: a chondritic radiogenic estimate's order (low confidence) |
 /// | surface age | 4.0 Gyr | a placeholder (low confidence) |
-/// | craters | the lunar chronology at that age, on an ice-rich target (`k_target` 0.12) | Design notes 3 and 12 |
+/// | craters | lunar-equivalent: the lunar chronology at that age, on an ice-rich target (`k_target` 0.12), non-porous at its crust's 1,287 kg m⁻³; struck at 5.6 km/s by stony projectiles of 3,000 kg m⁻³ | Design notes 3 and 12; Ermakov et al. 2017 (JGR Planets 122, 2267); P14.T48.f's model (science-r09-craters.md items 2 and 4) |
 /// | crust | phyllosilicate (primary crust: Ceres's frozen ocean, Castillo-Rogez et al. 2018; Fu et al. 2017), no secondary crust, its rock having never melted; the provinces the phyllosilicate too (V = 0 builds none) | science-r09-drainage.md §5: "Ceres's crust encompasses the bulk of Ceres's original ocean" (Castillo-Rogez et al. 2018, MAPS 53, 1820, p. 1838); its rocky interior "avoided igneous differentiation" (Fu et al. 2017, EPSL 476, 153, abstract); R09.T2's synthetic Ceres |
 /// | palette | phyllosilicate (primary crust: Ceres's frozen ocean, Castillo-Rogez et al. 2018; Fu et al. 2017), water ice (its density at the cold traps' 110 K, 932.7 kg m⁻³), sodium carbonate as its deposit (the faculae's) | decision-composition §1.7; science-r09-drainage.md §5; science-composition-crusts.md §3; each figure its row's. The water-ice entry names the ice of its cold traps and fresh craters (Platz et al. 2016, Nature Astronomy 1, 0007; Combe et al. 2016, Science 353, aaf3010), which no area share places until plan 14 states one; a fresh crater's ice near the 163 K mean would be 929.6 kg m⁻³, 0.3% lighter |
 ///
@@ -800,7 +879,17 @@ pub fn ceres_like() -> CoarseInputs {
         .volcanism(0.0)
         .heat_flow(WattsPerSquareMetre::new(0.001))
         .surface_age(surface_age)
-        .craters(crater_params(surface_age, gravity, Screening::None, 0.12))
+        .craters(crater_params(
+            surface_age,
+            gravity,
+            Screening::None,
+            &Impactors {
+                k_target: 0.12,
+                velocity: CERES_IMPACT_VELOCITY,
+                target: CERES_TARGET,
+                rate: 1.0,
+            },
+        ))
         .climate(ClimateRegime {
             thermal: ThermalRegime::AirlessLike,
             forcing: Forcing::Seasonal,
@@ -876,14 +965,10 @@ mod tests {
         assert!((mars.gravity().value() - 3.73).abs() < 0.01);
         // Design note 12's projectile scale on Mars from the air's column: 8.5 cm at 636 Pa (the
         // note's 8.2 cm takes about 610 Pa).
-        let Screening::Atmosphere {
-            column_mass,
-            projectile_density,
-        } = mars.craters().screening()
-        else {
+        let Screening::Atmosphere { column_mass } = mars.craters().screening() else {
             panic!("Mars's craters are screened by its air");
         };
-        let d_star = 1.5 * column_mass.value() / projectile_density.value();
+        let d_star = 1.5 * column_mass.value() / mars.craters().projectile_density().value();
         assert!((0.08..0.09).contains(&d_star), "{d_star} m");
         assert_eq!(mars.condensates()[0].substance, H2O);
 
@@ -902,6 +987,48 @@ mod tests {
         assert!((ceres.gravity().value() - 0.284).abs() < 0.001);
         let t = ceres.mean_surface_temperature().value();
         assert!((160.0..166.0).contains(&t), "{t} K");
+    }
+
+    /// Each world's crater contract is lunar-equivalent and carries P14.T48.f's impactors
+    /// (science-r09-craters.md items 2 and 4, F1 and F4.1): the Moon sits at the diameter map's
+    /// lunar reference but for its gravity, and Mars takes Ivanov 2001's impact rate.
+    #[test]
+    fn the_reference_crater_contracts_carry_their_impactors() {
+        use hyperion_testkit::float::assert_same_bits;
+        let chronology = |inputs: &CoarseInputs| {
+            craters::lunar_chronology(inputs.surface_age(), craters::SOLAR_SYSTEM_AGE).value()
+        };
+        for (name, world, velocity, target, rate) in [
+            ("Earth", earth_like(), 19_900.0, SILICATE_TARGET, 1.0),
+            ("Mars", mars_like(), 10_600.0, SILICATE_TARGET, 1.92),
+            ("the Moon", moon_like(), 16_700.0, SILICATE_TARGET, 1.0),
+            ("Ceres", ceres_like(), 5_600.0, CERES_TARGET, 1.0),
+        ] {
+            let c = world.craters();
+            assert_eq!(
+                c.impact_velocity(),
+                Some(MetresPerSecond::new(velocity)),
+                "{name}"
+            );
+            assert_eq!(c.target(), target, "{name}");
+            assert_eq!(c.projectile_density(), PROJECTILE_DENSITY, "{name}");
+            assert_eq!(c.system_age(), craters::SOLAR_SYSTEM_AGE, "{name}");
+            assert_same_bits(c.n_1km().value(), chronology(&world) * rate);
+        }
+        // The rock target and the projectiles are the map's lunar reference, so the Moon's own
+        // density is its N☾ but for its gravity, GM ÷ R² = 1.624 m s⁻² against the reference's
+        // 1.62: 0.2% lower.
+        assert_eq!(SILICATE_TARGET, craters::LUNAR_TARGET);
+        assert_eq!(PROJECTILE_DENSITY, craters::LUNAR_PROJECTILE_DENSITY);
+        let moon = moon_like();
+        let own =
+            craters::own_density_at_1km(moon.craters()).value() / moon.craters().n_1km().value();
+        assert!((own - 1.0).abs() < 0.005, "{own}");
+        // Mars's own N(>1 km) is about half its lunar chronology's, as Ivanov's 0.49 has it at his
+        // velocities; at P14.T48.f's 10.6 km/s its craters are larger, so a little more.
+        let mars = mars_like();
+        let own = craters::own_density_at_1km(mars.craters()).value() / chronology(&mars);
+        assert!((0.49..0.56).contains(&own), "{own}");
     }
 
     /// Each world's palette holds decision-composition §1.7's substances in their roles, its

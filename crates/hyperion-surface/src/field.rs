@@ -85,6 +85,9 @@ macro_rules! coded_enum {
     };
 }
 
+// The crater contract's target class is carried as one byte too (`crate::craters`).
+pub(crate) use coded_enum;
+
 mod cells;
 mod cover;
 mod crater;

@@ -663,6 +663,28 @@ impl CoarseInputs {
     }
 }
 
+/// Refuses a crater contract of another gravity than the body's, or of a system younger than its
+/// surface, which the chronology cannot count.
+fn check_craters(
+    craters: &CraterParams,
+    gravity: MetresPerSecondSquared,
+    surface_age: Gigayears,
+) -> Result<(), BuildCoarseInputsError> {
+    if (craters.gravity().value() / gravity.value() - 1.0).abs() > GRAVITY_TOLERANCE {
+        return Err(BuildCoarseInputsError::CraterGravity {
+            body: gravity,
+            craters: craters.gravity(),
+        });
+    }
+    if surface_age.value() > craters.system_age().value() {
+        return Err(BuildCoarseInputsError::SurfaceOlderThanSystem {
+            surface: surface_age,
+            system: craters.system_age(),
+        });
+    }
+    Ok(())
+}
+
 /// Why [`CoarseInputsBuilder::build`] refused its values.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BuildCoarseInputsError {
@@ -722,6 +744,14 @@ pub enum BuildCoarseInputsError {
         /// The crater contract's.
         craters: MetresPerSecondSquared,
     },
+    /// The surface is older than its system, the crater contract's system age, which the
+    /// chronology cannot count (R09.T7.e).
+    SurfaceOlderThanSystem {
+        /// The surface age.
+        surface: Gigayears,
+        /// The crater contract's system age.
+        system: Gigayears,
+    },
 }
 
 impl fmt::Display for BuildCoarseInputsError {
@@ -770,6 +800,12 @@ impl fmt::Display for BuildCoarseInputsError {
                 "the crater contract's gravity {} m s⁻² is not the body's {} m s⁻²",
                 craters.value(),
                 body.value()
+            ),
+            Self::SurfaceOlderThanSystem { surface, system } => write!(
+                f,
+                "a surface of {} Gyr is older than its system of {} Gyr",
+                surface.value(),
+                system.value()
             ),
         }
     }
@@ -1019,14 +1055,15 @@ impl CoarseInputsBuilder {
         self
     }
 
-    /// The surface age, finite and non-negative.
+    /// The surface age, finite and non-negative, and at most the crater contract's system age.
     #[must_use]
     pub const fn surface_age(mut self, age: Gigayears) -> Self {
         self.surface_age = Some(age);
         self
     }
 
-    /// The crater contract, whose gravity must be the body's.
+    /// The crater contract, whose gravity must be the body's and whose system must be at least
+    /// as old as the surface.
     #[must_use]
     pub const fn craters(mut self, craters: CraterParams) -> Self {
         self.craters = Some(craters);
@@ -1084,7 +1121,9 @@ impl CoarseInputsBuilder {
     /// first rule broken, as each value's setter states it: a value out of range or not finite, a
     /// figure that is not a spheroid, a gas-envelope surface, a substance named twice, shares
     /// above the whole, too many condensates, a wet epoch that ends before it starts, a crater
-    /// contract of another gravity, a crust with neither a primary nor a secondary crust
+    /// contract of another gravity or of a system younger than the surface
+    /// ([`BuildCoarseInputsError::SurfaceOlderThanSystem`]), a crust with neither a primary nor a
+    /// secondary crust
     /// ([`BuildCoarseInputsError::NoCrust`]), or a substance the palette has no entry for.
     pub fn build(self) -> Result<CoarseInputs, BuildCoarseInputsError> {
         let figure = required(self.figure, "figure")?;
@@ -1140,12 +1179,7 @@ impl CoarseInputsBuilder {
         let surface_age = required(self.surface_age, "surface age")?;
         check_non_negative("surface age", surface_age.value())?;
         let craters = required(self.craters, "crater contract")?;
-        if (craters.gravity().value() / gravity.value() - 1.0).abs() > GRAVITY_TOLERANCE {
-            return Err(BuildCoarseInputsError::CraterGravity {
-                body: gravity,
-                craters: craters.gravity(),
-            });
-        }
+        check_craters(&craters, gravity, surface_age)?;
         if let Some(epoch) = &self.wet_epoch {
             check_wet_epoch(epoch)?;
         }
@@ -1588,6 +1622,16 @@ mod tests {
             refused(earth_builder().craters(*mars.craters())),
             BuildCoarseInputsError::CraterGravity { .. }
         ));
+        // A surface older than the contract's system, which the chronology cannot count, before
+        // the coarse pass's header would refuse it.
+        let system = reference::earth_like().craters().system_age();
+        assert_eq!(
+            refused(earth_builder().surface_age(Gigayears::new(5.0))),
+            BuildCoarseInputsError::SurfaceOlderThanSystem {
+                surface: Gigayears::new(5.0),
+                system
+            }
+        );
     }
 
     #[test]

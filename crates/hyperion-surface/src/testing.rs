@@ -31,7 +31,10 @@ use hyperion_base::units::{
     PerSquareKilometre, Radians, SquareMetres,
 };
 
-use crate::craters::{CraterParams, CraterParamsParts, CraterShape, Screening, crater_shape};
+use crate::craters::{
+    CraterParams, CraterParamsParts, CraterShape, LUNAR_PROJECTILE_DENSITY, LUNAR_TARGET,
+    SOLAR_SYSTEM_AGE, Screening, crater_shape,
+};
 use crate::cube::{Edge, PatchKey, st_to_uv};
 use crate::field::{
     BodyRef, BoundaryKind, ClimateCell, ClimateModelKind, CoarseCrater, CoarseField, CoarseLevel,
@@ -207,7 +210,8 @@ impl FieldBuilder {
     /// circular orbit, a still climate at 250 K, no fine relief (a silicate crust's spectrum
     /// anchored at zero), the reference hills on any oceanic crust ([`SeafloorSample::REFERENCE`])
     /// and no craters: no coarse crater, and a crater density of zero, so that the synthesis draws
-    /// no small ones either (at the Moon's gravity, `k_target` 1). The radius is checked by
+    /// no small ones either (at the Moon's gravity, `k_target` 1, on the lunar target, in a system of
+    /// the Solar System's age, with no impact velocity). The radius is checked by
     /// [`build`](Self::build).
     ///
     /// # Panics
@@ -228,6 +232,9 @@ impl FieldBuilder {
                 gravity: MetresPerSecondSquared::new(1.62),
                 k_target: 1.0,
                 impact_velocity: None,
+                projectile_density: LUNAR_PROJECTILE_DENSITY,
+                target: LUNAR_TARGET,
+                system_age: SOLAR_SYSTEM_AGE,
             })
             .expect("the default crater contract is valid"),
             climate_model: ClimateModelKind::RadiativeEquilibrium,
@@ -325,7 +332,8 @@ impl FieldBuilder {
         self
     }
 
-    /// The surface age.
+    /// The surface age, at most the crater contract's system age ([`build`](Self::build)
+    /// refuses an older one).
     #[must_use]
     pub fn surface_age(mut self, age: Gigayears) -> Self {
         self.surface_age = age;
@@ -464,7 +472,9 @@ impl FieldBuilder {
     ///   sediment is not finite and non-negative;
     /// - a crust's palette entry or a main liquid the header refuses, a cell with ice and no ice
     ///   entry to name (none in the palette, or [`ice_entry`](Self::ice_entry)'s not an `Ice`
-    ///   entry), or a cell under water and no main liquid.
+    ///   entry), or a cell under water and no main liquid;
+    /// - a surface age above the crater contract's system age
+    ///   ([`CraterParams::system_age`]).
     #[must_use]
     pub fn build(self) -> CoarseField {
         self.check_plates();
