@@ -46,6 +46,16 @@ reaches for.
 - **Type**: at least `0.875rem`, sized in rem, at most four sizes on a console. No italics. Bold
   for display titles only. Upper case "for display titles, panel titles, field labels, button
   labels and status annunciations of three words or fewer"; mixed case for sentences.
+- **Characters**: only what both B612 faces hold, a space being U+0020 or the no-break U+00A0. A
+  quantity B612 can't set is named in words (`phase shift`, not `Δφ` or `delta phi`). A formula
+  keeps its case and its digits on the line, in an upper-case label too: `CO2`, never `CO(2)`
+  or `CO₂`, and `Co` is cobalt. An isotope is `He-3`, never `³He`.
+- **Substances** are named through `substanceName` (`lib/substances.ts`, P14.T49.f), never by a
+  registry key or any other code name. The phase is a word beside the name (`liquid CH4`, never
+  `CH4(l)`), an ion is singly charged with its sign on the line (`Fe+`, `H−`), and a fraction is a named quantity
+  (`mass fraction 75 %`, never `75 wt%`, `% w/w`, `% by mass` or `ppmv`).
+- **Signs and temperatures** (decision-ux-numbers-names): a number's sign is the hyphen-minus `-`;
+  the minus sign U+2212 is an ion's charge or an operator. A temperature is in kelvin, never °C.
 - **Voice**: terse, literal, impersonal, as in `NO CARRIER`. No "I", "please", "you", `!`,
   "Loading…" or "thinking…". The guide allows only abbreviations on a ship-wide nomenclature list,
   which doesn't exist yet: bring a new abbreviation to the owner rather than coining one.
@@ -94,12 +104,25 @@ python3 .claude/skills/console-ux/scripts/glyphs.py "☉ ↑ µ"     # can the b
   `50%` radius may be a contact symbol, and a hover handler may have a keyboard twin. Fix and re-run
   until it is clean, or until every remaining line is a justified exception with a code comment
   giving the reason. The guide lets a "should" rule be broken with a stated reason.
+- Its typography and substance rules read displayed strings. Errors: a formula's count in
+  parentheses or subscripts, a raised isotope, ion sign or charge number, a state symbol, a
+  qualified per cent and a snake_case key. Checks: a formula whose case was changed (`MG2SIO4`,
+  `Co2`), `Fe3+`, `H-` with a hyphen, `3He`, a per cent with no space, a symbol spelled by its
+  letters' names, `10^`, `x 10-6`, `1e-3`, `c_p`, `<=`, U+2212 before a digit, `°C`, and a
+  `${…material}`, `${…species}` or `${…substance}` not passed to `substanceName`. They skip
+  developer text: the smoke pages, provenance and identifier fields (`source`, `paper`, `basis`,
+  `key`, ...) and shader sources. The descent spike (`view/spike/`) is a display, and is read.
 - Run `contrast.py` whenever a token changes or a new foreground and background meet. Text needs
   6:1 and control outlines 3:1.
-- Run `glyphs.py` for any character outside ASCII before it reaches the screen. A glyph B612 lacks
-  falls back to a system font, so name the quantity in words (guide, Typography); only a unit
-  symbol or a key's own sign is drawn as an inline SVG. Look in `components/` and the plan for
-  an existing drawn glyph first (galaxy-generation's P05.T3.b plans `SunGlyph` for `☉`).
+- Run `glyphs.py` for any character outside ASCII before it reaches the screen, spaces
+  included: it skips only the ASCII whitespace that separates its arguments, so
+  `glyphs.py '\u2009'` (a thin space) fails.
+  A glyph B612 lacks falls back to a system font, so name the quantity in words (guide,
+  Typography); only a unit symbol or a key's own sign is drawn as an inline SVG. Look in
+  `components/` and the plan for an existing drawn glyph first (galaxy-generation's P05.T3.b plans
+  `SunGlyph` for `☉`).
+- After changing a script, run its tests (no step of `just ci` runs them):
+  `python3 -B .claude/skills/console-ux/scripts/test_ux_lint.py`, and `test_glyphs.py` beside it.
 
 The scripts cannot see layout, data states or command flow. When the change is visible, run the
 client (`just server` and `just client`) and check it at 1920×1080 and 1280×720 if you can take a

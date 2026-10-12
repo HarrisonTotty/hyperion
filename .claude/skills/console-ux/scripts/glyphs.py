@@ -2,9 +2,14 @@
 """Check which characters the bundled B612 and B612 Mono fonts can draw.
 
 Usage:
-    glyphs.py "☉ ° µ ↑"        Report each non-space character: in B612? in B612 Mono?
+    glyphs.py "☉ ° µ ↑"        Report each character: in B612? in B612 Mono?
     glyphs.py '\\u2609 \\u2192'   Escapes are decoded first: \\uXXXX, \\u{…}, \\UXXXXXXXX and \\xXX.
     glyphs.py --ranges          Print every code point range each font covers.
+
+Spaces are checked like any other character (the guide: neither face has "a space other than
+U+0020 and the no-break U+00A0"), so `glyphs.py '\\u2009'` exits 1. Only ASCII whitespace is
+skipped, the space, tab, line feed, form feed and carriage return that separate what is checked:
+a command line cannot avoid them, and the DOM collapses each into U+0020, which both faces hold.
 
 Reads the regular-weight WOFF files that @fontsource bundles (apps/hyperion/node_modules), so
 the answer is what the client actually ships, not what the full upstream font contains. A
@@ -27,6 +32,11 @@ from pathlib import Path
 from typing import NoReturn
 
 FONTS = {"B612": "b612", "B612 Mono": "b612-mono"}
+# The separators a command line cannot avoid: HTML's ASCII whitespace, which the DOM collapses into
+# U+0020. Every other space (U+00A0, U+2009, U+202F, ...) is checked.
+SEPARATORS = frozenset(" \t\n\f\r")
+# A space, a line separator or a paragraph separator.
+SPACE_CATEGORIES = {"Zs", "Zl", "Zp"}
 # What coverage() raises when the fonts are missing (OSError) or not the WOFF files expected.
 FONT_ERRORS = (OSError, ValueError, struct.error, zlib.error)
 ESCAPE = re.compile(r"\\(?:u\{([0-9a-fA-F]{1,6})\}|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|x([0-9a-fA-F]{2})|\\)")
@@ -178,7 +188,7 @@ def main() -> None:
         fail(f"unknown option {unknown[0]}\nusage: glyphs.py CHARS... | --ranges")
     if options and len(options) != len(args):
         fail("--ranges takes no characters")
-    chars = [c for c in dict.fromkeys("".join(decode_escapes(a) for a in args)) if not c.isspace()]
+    chars = [c for c in dict.fromkeys("".join(decode_escapes(a) for a in args)) if c not in SEPARATORS]
     if not options and not chars:
         fail("no characters to check")
     try:
@@ -191,16 +201,23 @@ def main() -> None:
             spans = ", ".join(f"U+{a:04X}" if a == b else f"U+{a:04X}–{b:04X}" for a, b in ranges(points))
             print(f"{font}: {spans}\n")
         return
-    bad = False
+    bad_space = bad_other = False
     print(f"{'char':<6}{'code':<9}{'B612':<7}{'Mono':<7}name")
     for c in chars:
         gone = missing(c)
-        bad = bad or bool(gone)
+        space = unicodedata.category(c) in SPACE_CATEGORIES
+        bad_space = bad_space or (bool(gone) and space)
+        bad_other = bad_other or (bool(gone) and not space)
         marks = ["no" if f in gone else "yes" for f in FONTS]
-        shown = c if c.isprintable() else "?"  # a control character or lone surrogate from an escape
+        # A space shows as nothing and its name says which; "?" is a control character or a lone
+        # surrogate from an escape.
+        shown = "" if space else c if c.isprintable() else "?"
         print(f"{shown:<6}U+{ord(c):04X}   {marks[0]:<7}{marks[1]:<7}{unicodedata.name(c, '?')}")
-    if bad:
+    if bad_other:
         print("\nMissing glyphs fall back to a system font. Name the quantity in words; only a unit symbol or a key's own sign is drawn as an inline SVG (UX guide, Typography).")
+    if bad_space:
+        print("\nNeither face has a space other than U+0020 and the no-break U+00A0: write one of those (UX guide, Typography).")
+    if bad_other or bad_space:
         sys.exit(1)
 
 
