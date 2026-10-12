@@ -74,8 +74,12 @@ PROTOCOL_CRATE = "hyperion-protocol"
 BINDINGS = "packages/protocol/src/generated/"
 FIXTURES = "packages/protocol/fixtures/"
 
-# `just fit-check` checks the fitting crate's lock file and inputs against the sim's tables, so it
-# runs whenever either crate's tests do.
+# `just fit-check` checks the fitting crate's lock file and inputs against the tables of every crate
+# that holds them: the sim's, and the surface crate's since R09.T7.f. It runs whenever the fitting
+# crate's or the sim's tests do. A change under either crate's `src/tables/` runs the fitting crate's
+# tests (`RUST_READERS`), and so the check. The sim is named for its code as well, which the fits'
+# fingerprints probe. No fit probes the surface crate's code (decision-r09-t7f.md); a task whose
+# fingerprint does adds the crate here.
 FIT_CRATE = "hyperion-fit"
 FIT_CHECK_CRATES = (FIT_CRATE, "hyperion-sim")
 
@@ -84,8 +88,9 @@ FIT_CHECK_CRATES = (FIT_CRATE, "hyperion-sim")
 # compiled out on WebAssembly, so only their native suite runs; `all` readers include them at
 # compile time, so their WebAssembly suites run too.
 RUST_READERS: List[Tuple[str, str, str, str]] = [
-    # The fitting crate's tests include_str! the committed tables and compare them with the fits.
-    (r"^crates/hyperion-sim/src/tables/", "hyperion-fit", "all", "read by hyperion-fit's tests"),
+    # The fitting crate's tests include_str! the committed tables and compare them with the fits:
+    # the sim's, and the surface crate's since R09.T7.f.
+    (r"^crates/hyperion-(sim|surface)/src/tables/", "hyperion-fit", "all", "read by hyperion-fit's tests"),
     # The testkit's `tests/clippy_bans.rs` holds every clippy.toml to one ban list, checks that each
     # crate has one of its own or the root's, and reads the sources of base, the surface crate and
     # the sim for the relaxed-SIMD guards and `target_feature` attributes.

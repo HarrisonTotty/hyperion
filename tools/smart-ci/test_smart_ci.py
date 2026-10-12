@@ -137,6 +137,7 @@ FILES: Dict[str, str] = {
     "crates/hyperion-surface/src/lib.rs": "",
     "crates/hyperion-surface/src/field.rs": "#[cfg(test)]\nuse wasm_bindgen_test::wasm_bindgen_test as test;",
     "crates/hyperion-surface/src/wasm.rs": "use wasm_bindgen::prelude::wasm_bindgen;",
+    "crates/hyperion-surface/src/tables/bowl_permanent_shadow.rs": "",
     "crates/hyperion-surface/tests/golden/bake.golden": "",
     "crates/hyperion-surface/tests/golden/wire/codes.golden": "",
     "crates/hyperion-surface/benches/test_planet.rs": "",
@@ -458,6 +459,12 @@ class TheRules(unittest.TestCase):
         self.assertEqual(packages(p, "_nextest-run"), [FIT, SIM, TESTKIT])
         self.assertEqual(packages(p, "_doctest-run"), [FIT, SIM])
         self.assertEqual(packages(p, "_clippy-for"), [SIM])
+
+    def test_the_surface_crates_tables_run_the_fitting_crates_tests_and_check(self) -> None:
+        p = plan("crates/hyperion-surface/src/tables/bowl_permanent_shadow.rs")
+        self.assertIn(FIT, packages(p, "_nextest-run"))
+        # The fitting crate's test build makes the binary the staleness check runs.
+        self.assertIn("_fit-check-built", calls(p))
 
     def test_the_generator_version_runs_every_crates_tests(self) -> None:
         p = plan("crates/hyperion-base/src/version.rs")
