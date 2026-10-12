@@ -76,7 +76,8 @@ FIXTURES = "packages/protocol/fixtures/"
 
 # `just fit-check` checks the fitting crate's lock file and inputs against the sim's tables, so it
 # runs whenever either crate's tests do.
-FIT_CHECK_CRATES = ("hyperion-fit", "hyperion-sim")
+FIT_CRATE = "hyperion-fit"
+FIT_CHECK_CRATES = (FIT_CRATE, "hyperion-sim")
 
 # Tests that read other crates' files as data: a change to a matching path runs the reader's tests
 # as well, whatever `--dependents` says. `native` readers read files at run time, from a module
@@ -174,9 +175,9 @@ CI_STEPS: Dict[str, Tuple[str, List[Tuple[str, Optional[List[str]]]]]] = {
     "_clippy": ("scoped", [("_clippy-for", ["--workspace"])]),
     "_browser-clippy": ("scoped", [("_browser-clippy-for", ["browser_crates"])]),
     "gen-protocol-check": ("scoped", [("_gen-protocol-check-for", ["--workspace"])]),
-    "fit-check": ("as is", []),
     "_vitest-all": ("scoped", [("_vitest-run", ["", ""])]),
     "_test-build": ("scoped", [("_test-build-for", ["--workspace"])]),
+    "_fit-check-built": ("as is", []),
     "_wasm-fast-build": ("scoped", [("_wasm-preflight", ["wasip1", "browser"]), ("_wasip1-build", None),
                                     ("_browser", None)]),
     "_locked": ("as is", []),
@@ -193,7 +194,7 @@ CI_PHASES: Dict[str, List[List[str]]] = {
     "side": [["fmt-check"], ["_typecheck-ts"], ["_oxlint"], ["_relaxed-simd-refused"], ["gpu-replay-check"],
              ["cross-clippy"], ["_smart-ci-test"]],
     "unlocked": [["_vitest-all"]],
-    "main": [["_clippy"], ["_browser-clippy"], ["gen-protocol-check"], ["fit-check"], ["_test-build"],
+    "main": [["_clippy"], ["_browser-clippy"], ["gen-protocol-check"], ["_test-build"], ["_fit-check-built"],
              ["_wasm-fast-build"]],
     "locked": [["_test-run"], ["_wasm-fast-run"]],
 }
@@ -269,13 +270,19 @@ BUILDS = {
 NO_BUILDS = {
     "_wasm-preflight", "fmt-check", "_rustfmt-check", "_prettier-check-all", "_prettier-check", "_typecheck-ts",
     "_oxlint", "_smart-ci-test", "_locked", "_test-run", "_nextest-run", "_doctest-run", "_vitest-all",
-    "_vitest-run", "_wasm-fast-run", "_wasm-run", "_test-render-build", "_test-render-run",
+    "_vitest-run", "_wasm-fast-run", "_wasm-run", "_test-render-build", "_test-render-run", "_fit-check-built",
 }
 
 # The recipes smart-ci runs in place of one of `ci`'s for a narrower scope, where the step cannot be
 # the narrower one with a wider argument without changing `ci`'s command: Prettier over the changed
 # files, `prettier --check` with Prettier's configuration as `format:check` runs it over the tree.
 NARROWER = {"_prettier-check-all": "_prettier-check"}
+
+# The recipes smart-ci runs in place of one of `ci`'s where the plan's own test build does not make
+# what that one reads: the fitted tables' check, which `ci` runs with the test build's `hyperion-fit`
+# binary (`_fit-check-built`, perf-build.md Q6), builds the crate itself (`fit-check`) when the plan
+# tests no `hyperion-fit`, whose integration tests are what make the test build build the binary.
+SELF_BUILT = {"_fit-check-built": "fit-check"}
 
 
 # --------------------------------------------------------------------------------------------------
@@ -1804,9 +1811,6 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
         # Over the test build's selection, as `ci` runs it over the workspace's: the same build.
         step("main", "the protocol bindings are fresh",
              ["_gen-protocol-check-for", ws.cargo_packages(set(native) | {PROTOCOL_CRATE})], needs.gen_protocol)
-    if fit_check:
-        step("main", "the fitted tables are fresh", ["fit-check"],
-             causes_of(needs.tests, fit_check) | causes_of(needs.native, fit_check))
     def scope(crates: Sequence[str]) -> str:
         """The crates of a suite, each with how many of its tests run."""
         return ", ".join(chosen.count(c) if chosen and c in graph_crates and c not in whole else c for c in crates)
@@ -1816,6 +1820,12 @@ def make_plan(changes: Sequence[Tuple[str, bool]], ws: Workspace, dependents: bo
     if native:
         step("main", "build the tests: " + ", ".join(native), ["_test-build-for", ws.cargo_packages(native)],
              native_causes)
+    if fit_check:
+        # As `ci` runs it, with the binary of the test build just before it, where that build makes one.
+        built = FIT_CRATE in native
+        step("main", "the fitted tables are fresh" + (", with the test build's hyperion-fit" if built else ""),
+             ["_fit-check-built"] if built else [SELF_BUILT["_fit-check-built"]],
+             causes_of(needs.tests, fit_check) | causes_of(needs.native, fit_check))
     wasip1_args = ws.cargo_packages(wasip1_tests, universe=ws.wasip1)
     if wasip1_tests:
         step("main", "build the wasip1 suites and compile their modules: " + scope(wasip1_tests),

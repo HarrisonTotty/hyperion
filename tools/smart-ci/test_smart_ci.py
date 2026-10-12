@@ -219,7 +219,8 @@ TS_RECIPES = {"_typecheck-ts", "_oxlint", "_vitest-run"}
 RENDER_RECIPES = {recipe[0] for recipes in smart_ci.RENDER_PHASES.values() for recipe in recipes}
 CARGO_RECIPES = {
     "_rustfmt-check", "_clippy-for", "_cross-clippy-for", "_browser-clippy-for", "_relaxed-simd-refused",
-    "_gen-protocol-check-for", "fit-check", "_test-build-for", "_nextest-run", "_doctest-run", "_wasip1-build", "_wasip1-nextest",
+    "_gen-protocol-check-for", "fit-check", "_fit-check-built", "_test-build-for", "_nextest-run", "_doctest-run",
+    "_wasip1-build", "_wasip1-nextest",
     "_browser", "_wasm-run", "_wasm-preflight", "gen-surface",
 }
 
@@ -279,9 +280,11 @@ class TheRules(unittest.TestCase):
         p = plan("crates/hyperion-sim/src/galaxy/disc.rs")
         # No cross-Clippy: the sim is the same code on Linux, macOS and Windows (CROSS_CLIPPY_CRATES).
         # smart-ci's own tests: their guard of the justfile's `wasm_sky` reads the sim's sources.
+        # The fitted tables' check after the test build, building hyperion-fit itself, which the plan
+        # does not test, so that the test build makes no binary for it (perf-build Q6).
         self.assertEqual(calls(p), [
-            "_wasm-preflight", "_rustfmt-check", "_smart-ci-test", "_clippy-for", "fit-check",
-            "_test-build-for", "_wasip1-build", "_nextest-run", "_doctest-run", "_wasm-run"])
+            "_wasm-preflight", "_rustfmt-check", "_smart-ci-test", "_clippy-for", "_test-build-for",
+            "fit-check", "_wasip1-build", "_nextest-run", "_doctest-run", "_wasm-run"])
         self.assertEqual(args(p, "_wasm-preflight"), ["wasip1"])
         # The features `--workspace` gives the sim: the fitting crate asks for `testing`.
         self.assertEqual(args(p, "_clippy-for"), ["-p hyperion-sim --features hyperion-sim/testing"])
@@ -402,18 +405,20 @@ class TheRules(unittest.TestCase):
 
     def test_a_crates_data_runs_its_tests_and_the_vitest_files_that_read_it(self) -> None:
         p = plan("crates/hyperion-sim/tests/golden/orbit/states.golden")
-        self.assertEqual(calls(p), ["gen-surface", "_wasm-preflight", "_vitest-run", "fit-check", "_test-build-for",
+        self.assertEqual(calls(p), ["gen-surface", "_wasm-preflight", "_vitest-run", "_test-build-for", "fit-check",
                                     "_wasip1-build", "_nextest-run", "_doctest-run", "_wasm-run"])
         self.assertEqual(args(p, "_vitest-run"), ["hyperion", "src/renderer/src/lib/orbit.test.ts"])
         fit_data = plan("crates/hyperion-fit/data/cie_cmf/CIE_xyz_1931_2deg.csv")
         self.assertEqual(packages(fit_data, "_nextest-run"), [FIT])
         self.assertEqual(args(fit_data, "_vitest-run"), ["hyperion", "src/tools/atmosphereData.test.ts"])
-        self.assertIn("fit-check", calls(fit_data))
+        # The plan tests hyperion-fit, so its test build makes the binary that the check runs, as `ci`'s does.
+        self.assertIn("_fit-check-built", calls(fit_data))
+        self.assertNotIn("fit-check", calls(fit_data))
         # A README in a data directory is data: a dataset's files are hashed through its PROVENANCE.toml.
         self.assertEqual(packages(plan("crates/hyperion-fit/data/iprt_phase_a/README.md"), "_nextest-run"), [FIT])
         self.assertEqual(packages(plan("crates/hyperion-sim/tests/data/sse/README.md"), "_nextest-run"), [SIM])
         manifest = plan("crates/hyperion-fit/manifests/mge.toml")
-        self.assertEqual(calls(manifest), ["fit-check", "_test-build-for", "_nextest-run", "_doctest-run"])
+        self.assertEqual(calls(manifest), ["_test-build-for", "_fit-check-built", "_nextest-run", "_doctest-run"])
 
     def test_the_sims_tables_run_the_fitting_crates_tests(self) -> None:
         p = plan("crates/hyperion-sim/src/tables/mge.rs")
@@ -506,7 +511,7 @@ class TheRules(unittest.TestCase):
             "gpu-replay-check", "_cross-clippy-for", "_smart-ci-test"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "unlocked"], ["_vitest-run"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "main"], [
-            "_clippy-for", "_browser-clippy-for", "_gen-protocol-check-for", "fit-check", "_test-build-for",
+            "_clippy-for", "_browser-clippy-for", "_gen-protocol-check-for", "_test-build-for", "fit-check",
             "_wasip1-build", "_browser"])
         self.assertEqual([s.recipe[0] for s in p.steps if s.phase == "locked"], [
             "_nextest-run", "_doctest-run", "_wasm-run"])
@@ -1511,7 +1516,8 @@ class AgreesWithCi(unittest.TestCase):
             self.assertIn(phase, smart_ci.PHASES)
 
     def test_every_recipe_says_whether_it_builds(self) -> None:
-        recipes = set(smart_ci.CI_STEPS) | set(smart_ci.NARROWER.values()) | RENDER_RECIPES
+        recipes = set(smart_ci.CI_STEPS) | set(smart_ci.NARROWER.values()) | set(smart_ci.SELF_BUILT.values())
+        recipes |= RENDER_RECIPES
         recipes |= {name for _, calls_ in smart_ci.CI_STEPS.values() for name, _ in calls_}
         self.assertEqual(recipes - smart_ci.BUILDS - smart_ci.NO_BUILDS, set(),
                          "say in BUILDS or NO_BUILDS (tools/smart-ci/smart_ci.py) whether each runs a cargo build, "
@@ -1631,7 +1637,7 @@ class AgreesWithCi(unittest.TestCase):
                   "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl"),
                  ("docs/measurements/descent-spike/2026-10-07-effect-low.json", "crates/hyperion-fit/manifests/mge.toml")]
         known = set(smart_ci.CI_STEPS) | {name for _, calls_ in smart_ci.CI_STEPS.values() for name, _ in calls_}
-        known |= set(smart_ci.NARROWER.values()) | RENDER_RECIPES
+        known |= set(smart_ci.NARROWER.values()) | set(smart_ci.SELF_BUILT.values()) | RENDER_RECIPES
         plans = [plan(*paths, dependents=dependents) for paths in cases for dependents in (False, True)]
         plans += [plan(*paths, all_tests=True) for paths in cases]
         # And the plans with the code's graph, whose steps carry filters.

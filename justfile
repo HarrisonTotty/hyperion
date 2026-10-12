@@ -1115,6 +1115,15 @@ fit task *args:
 fit-check:
     cargo run -q -p hyperion-fit -- check
 
+# `fit-check` with the `hyperion-fit` binary that the test build just before it made: `_test-build`,
+# or smart-ci's of a selection with the crate, which builds the binary for the crate's integration
+# tests and puts it at `target/debug/hyperion-fit`. `cargo run -p hyperion-fit` resolves features for
+# the crate alone, so after an edit to the sim it built the crate's lib and binary a second time
+# (27.9 s at 4 jobs, perf-build.md Q6), and `cargo build --workspace --bin hyperion-fit`, without the
+# dev-dependencies, rebuilds them too (1m09s). The same binary, from the same sources.
+_fit-check-built:
+    "${CARGO_TARGET_DIR:-target}/debug/hyperion-fit" check
+
 # Regenerate the golden files after a deliberate GENERATOR_VERSION bump.
 bless:
     HYPERION_BLESS=1 cargo test --workspace
@@ -1153,8 +1162,8 @@ build: gen-surface
 # their own, and `_smart-ci-test`), their output held until they finish. Second, the cargo steps
 # one after another, since they share the build directory's lock: Clippy, which compiles every
 # target as `cargo check` would, so `check`'s `cargo check` is not repeated; the bindings' check,
-# before any test can rewrite the bindings it compares; the fitted tables' check; then every test
-# build. Beside both, vitest, as a job of its own at 4 workers in its capped scope, which takes no
+# before any test can rewrite the bindings it compares; then every test build, the fitted tables'
+# check right after the native one, whose `hyperion-fit` binary it runs. Beside both, vitest, as a job of its own at 4 workers in its capped scope, which takes no
 # lock (decision-test-coverage.md R1), its output held too. Third, one hold of the heavy-test lock
 # for all the Rust suites, rather than three turns in the queue behind other worktrees. `smart-ci`
 # runs these same steps, fewer of them and narrower, and `_smart-ci-test` fails if this recipe runs a
@@ -1173,7 +1182,7 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
     just _vitest-all >"$vitest_log" 2>&1 &
     vitest=$!
     status=0
-    just _clippy _browser-clippy gen-protocol-check fit-check _test-build _wasm-fast-build || status=$?
+    just _clippy _browser-clippy gen-protocol-check _test-build _fit-check-built _wasm-fast-build || status=$?
     side_status=0
     wait "$side" || side_status=$?
     vitest_status=0
