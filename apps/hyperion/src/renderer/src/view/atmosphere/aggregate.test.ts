@@ -175,6 +175,24 @@ describe("the phase-shift gate (science-r08-mmf.md §1.4)", () => {
     expect(optics.asymmetry).toBeGreaterThan(0);
   });
 
+  it("names an analogue aggregate's material in words, never by its key", () => {
+    const optics = aggregateOptics(
+      { material: "mars_dust", monomerRadiusUm: 0.1, monomerCount: 300, fractalDimension: 1.8 },
+      550,
+    );
+    expect(optics.phaseBasis).toBe("analogue");
+    expect(optics.phaseNote).toMatch(/^an aggregate of Mars-type dust, phase shift /u);
+  });
+
+  it("names a fallback aggregate's unlisted material as such, never by its key", () => {
+    const optics = aggregateOptics(
+      { material: "brine_xyz", monomerRadiusUm: 0.1, monomerCount: 5000, fractalDimension: 2.5 },
+      550,
+    );
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.phaseNote).toMatch(/^an aggregate of unlisted material, phase shift /u);
+  });
+
   it("gives the Titan-like aggregate as a model with its matrix", () => {
     const optics = aggregateOptics({ material: "tholin", ...TITAN }, 550);
     expect(optics.phaseBasis).toBe("model");

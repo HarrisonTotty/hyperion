@@ -2,7 +2,7 @@
   "key": "soot",
   "phase": "solid",
   "variant": null,
-  "name": "propane soot at room temperature",
+  "name": "soot from a C3H8 flame at room temperature",
   "temperatureK": 295,
   "shape": "sphere",
   "provenance": "measured",

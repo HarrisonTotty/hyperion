@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { substanceName, UNLISTED_MATERIAL } from "../../../lib/substances";
 import { mieSphere } from "../mie";
 import { type Dispersion, GAS_DISPERSION } from "../rayleigh";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "../thick/regime";
@@ -12,6 +13,7 @@ import {
   parseMaterialFile,
   refractiveIndex,
   resolveMaterial,
+  variantWords,
 } from "./materials";
 import waterFile from "./water.json" with { type: "json" };
 
@@ -156,12 +158,14 @@ describe("refractiveIndex", () => {
     const liquidIron = resolveMaterial("Fe", { phase: "liquid" });
     expect(liquidIron.provenance).toBe("standIn");
     expect(liquidIron.file?.key).toBe("Fe");
-    expect(liquidIron.standIn).toMatch(/analogue/u);
+    expect(liquidIron.standIn).toBe(
+      "no liquid Fe on file: metallic Fe films at room temperature stands in, a named analogue",
+    );
     const strongAcid = resolveMaterial("H2SO4", { variant: "96wt%" });
     expect(strongAcid.provenance).toBe("standIn");
     expect(strongAcid.file?.variant).toBe("75wt%");
     expect(strongAcid.standIn).toBe(
-      "no 96wt% H2SO4 on file: aqueous sulphuric acid, 75% by mass, at 300 K stands in, a named analogue",
+      "no H2SO4, mass fraction 96 %, on file: aqueous H2SO4, mass fraction 75 %, at 300 K stands in, a named analogue",
     );
   });
 
@@ -171,6 +175,42 @@ describe("refractiveIndex", () => {
       provenance: "standIn",
     });
     expect(GENERIC_STAND_IN_INDEX).toEqual({ n: 1.5, k: 0 });
+  });
+
+  it("names an unknown name key in its stand-in as an unlisted material, never as the key", () => {
+    expect(resolveMaterial("brine_xyz").standIn).toBe(
+      "no index file for unlisted material: the generic stand-in, a non-absorbing sphere of real index 1.5, a stated convention",
+    );
+  });
+
+  it("names a name key's material in words where another phase stands in", () => {
+    expect(resolveMaterial("mars_dust", { phase: "liquid" }).standIn).toBe(
+      "no liquid Mars-type dust on file: Mars-type dust from Mars's atmosphere, indices retrieved from Mars Reconnaissance Orbiter spectrometer and Mars Exploration Rover observations stands in, a named analogue",
+    );
+  });
+
+  it("names a name key's material in words where another variant stands in", () => {
+    expect(resolveMaterial("mars_dust", { variant: "75wt%" }).standIn).toBe(
+      "no Mars-type dust, mass fraction 75 %, on file: Mars-type dust from Mars's atmosphere, indices retrieved from Mars Reconnaissance Orbiter spectrometer and Mars Exploration Rover observations stands in, a named analogue",
+    );
+  });
+
+  it("names each file's substance as every console names it", () => {
+    const misnamed = MATERIAL_FILES.filter(
+      (file) =>
+        substanceName(file.key) === UNLISTED_MATERIAL ||
+        !file.name.includes(substanceName(file.key)),
+    ).map((file) => file.name);
+    expect(misnamed).toEqual([]);
+  });
+
+  it("writes a variant's mass fraction in words, and any other variant as another composition", () => {
+    expect(["75wt%", "84.5wt%", "dilute", undefined].map(variantWords)).toEqual([
+      "mass fraction 75 %",
+      "mass fraction 84.5 %",
+      "another composition",
+      "another composition",
+    ]);
   });
 });
 

@@ -2,7 +2,7 @@
   "key": "CH4",
   "phase": "solid",
   "variant": null,
-  "name": "phase I solid methane at 90 K",
+  "name": "phase I CH4 ice at 90 K",
   "temperatureK": 90,
   "shape": "crystal",
   "provenance": "measured",

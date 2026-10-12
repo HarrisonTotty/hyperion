@@ -10507,6 +10507,24 @@ a_moon_s_published, the_published}`.
     the docs batch. The code already states it: the class value at 21 → 22, T49.b's function at
     the mean surface temperature from 22 → 23.
 
+- **Deviations in P14.T49.f, as built (`r08-mmf-contrast`, 2026-10-12).** No output moves: no Rust
+  reads a name, and `GENERATOR_VERSION` stays 21. `lib/substances.ts` and its test are
+  decision-substance-names §3.1–§3.2 as written, built first by rendering plan R08 for its notes and
+  its material files' names (R08.T5.c's _The notes' substances_), with two additions from
+  signoff-5 (item 8, adopted 2026-10-12).
+  - _The list_ holds only the three name keys the client meets today, `mars_dust`, `soot` and
+    `tholin`. The fixture's rows 0–8 are all formula keys.
+  - _A test added_ (signoff-5's "For main" item 4, its second option). `SUBSTANCE_NAMES`'s test
+    also pins each name's upper-case form (`MARS-TYPE DUST`, `SOOT`, `THOLIN`), so that a task
+    that adds a name also states its label. `FORMULA_WORD` keeps the case of any word made of a
+    capital and an optional small letter, an element's or not, so `Io-type dust` would read
+    `Io-TYPE DUST`. No name holds such a word yet; when one does, `FORMULA_WORD` is held to the
+    element symbols.
+  - _The module's TSDoc_ says a name holds no fraction, where §3.1 said "amount", and that a
+    solution's fraction is its solute's.
+  - _`NameCase`_ (`"sentence" | "upper"`), the type of `substanceName`'s second parameter, is
+    exported beside the three names, as §3.1 writes it.
+
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might
   expect to exist"; noted by "main"). The drafted surface-section tasks define closed sets that

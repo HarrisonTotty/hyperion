@@ -6414,7 +6414,9 @@ generator, and the reference's sampling needs no domain tag.
       words. Each material file's `name` names its substance as `substanceName` does
       (`H2O ice Ih at −7 °C`, `aqueous H2SO4, mass fraction 75 %, at 300 K`). That supersedes
       science-r08-mmf.md §4.8's "75% by mass", which the SI Brochure's §5.4.7 forbids. The notes
-      call water ice `H2O ice`, and a percentage takes a space before `%`.
+      call water ice `H2O ice`, and a percentage takes a space before `%`. `soot.json`'s `name`
+      reads `soot from a C3H8 flame at room temperature` (signoff-5, item 8), where
+      decision-substance-names §3.4 kept `propane soot`.
   - _The MMF against optool._ The lane built optool 1.9.14 (commit 21aecb46) offline with
     gfortran 16.2.1 from Arch's `gcc-fortran` package (its SHA-256 checked against the signed sync
     database), with `optool_manual.f90` stubbed (its help text fails gfortran 16's format checks;

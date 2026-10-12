@@ -26,6 +26,7 @@
  *   at each end, and scaled so that its vertical optical depth at 550 nm is the mode's.
  */
 
+import { substanceName } from "../../lib/substances";
 import { gaussLegendre } from "../lighting/quadrature";
 import { type AggregateMode, aggregateOptics } from "./aggregate";
 import type { AtmosphereColumn } from "./column";
@@ -560,6 +561,13 @@ export interface PhaseApproximation {
   readonly reason: string;
 }
 
+/** A phase basis in words, for the reason of a mode that states no note of its own. */
+const PHASE_BASIS_WORDS: Readonly<Record<PhaseBasis, string>> = {
+  model: "a published model's phase",
+  analogue: "a named analogue's phase",
+  fallback: "a fallback phase",
+};
+
 /** Whether a model with known residuals is labelled, by {@link MODEL_RESIDUALS_LABEL}. */
 function modelLabelled(model: PhaseModel): boolean {
   let label: boolean;
@@ -626,7 +634,7 @@ export function phaseApproximations(
     if (depth < CLOUD_DECK_SPLIT_OPTICAL_DEPTH && channel !== undefined) {
       out.push({
         material: layer.material,
-        reason: `${channel.phaseNote ?? `${layer.material}: a ${channel.phaseBasis} phase`} (at ${channel.wavelengthNm} nm)`,
+        reason: `${channel.phaseNote ?? `${substanceName(layer.material)}: ${PHASE_BASIS_WORDS[channel.phaseBasis]}`} (at ${channel.wavelengthNm} nm)`,
       });
     }
   }

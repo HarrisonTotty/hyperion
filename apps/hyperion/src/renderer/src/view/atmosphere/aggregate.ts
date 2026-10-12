@@ -52,6 +52,7 @@
  * gate (science-r08-mmf.md §4).
  */
 
+import { substanceName } from "../../lib/substances";
 import { gaussLegendre } from "../lighting/quadrature";
 import { type MaterialForm, indexAt, resolveMaterial } from "./materials/materials";
 import { type ComplexIndex, mieAmplitudes, mieCoefficients, type MieCoefficients } from "./mie";
@@ -888,11 +889,11 @@ export function aggregateOptics(
       if (contrastFails) {
         reasons.push(contrast);
       }
-      note = `an aggregate of ${mode.material}, ${reasons.join("; ")}: the modified mean-field table, an analogue`;
+      note = `an aggregate of ${substanceName(mode.material)}, ${reasons.join("; ")}: the modified mean-field table, an analogue`;
       break;
     }
     case "fallback":
-      note = `an aggregate of ${mode.material}, ${shifts}, the aggregate term past the limit of ${MMF_PHASE_SHIFT_LIMIT}${contrastFails ? `; ${contrast}` : ""}: a Henyey–Greenstein phase from its modified mean-field asymmetry, a fallback`;
+      note = `an aggregate of ${substanceName(mode.material)}, ${shifts}, the aggregate term past the limit of ${MMF_PHASE_SHIFT_LIMIT}${contrastFails ? `; ${contrast}` : ""}: a Henyey–Greenstein phase from its modified mean-field asymmetry, a fallback`;
       break;
   }
   const hasTable = basis !== "fallback";

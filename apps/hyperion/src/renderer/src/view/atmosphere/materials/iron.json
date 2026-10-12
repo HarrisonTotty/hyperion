@@ -2,7 +2,7 @@
   "key": "Fe",
   "phase": "solid",
   "variant": null,
-  "name": "metallic iron films at room temperature",
+  "name": "metallic Fe films at room temperature",
   "temperatureK": 295,
   "shape": "nonSphericalMineral",
   "provenance": "measured",

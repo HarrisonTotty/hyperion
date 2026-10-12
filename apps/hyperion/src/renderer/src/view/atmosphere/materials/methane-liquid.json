@@ -2,7 +2,7 @@
   "key": "CH4",
   "phase": "liquid",
   "variant": null,
-  "name": "liquid methane at 90 K",
+  "name": "liquid CH4 at 90 K",
   "temperatureK": 90,
   "shape": "sphere",
   "provenance": "measured",

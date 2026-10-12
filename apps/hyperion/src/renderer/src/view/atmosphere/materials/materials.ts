@@ -19,6 +19,7 @@
  * (Design note 12), which clears only when measured constants replace the stand-in.
  */
 
+import { substanceName } from "../../../lib/substances";
 import type { AtmosphereLabel } from "../labels";
 import type { ComplexIndex } from "../mie";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "../thick/regime";
@@ -276,6 +277,21 @@ export interface MaterialForm {
   readonly variant?: string;
 }
 
+/**
+ * A file's composition variant in words, for a note: `75wt%`, the files' form for a solute's mass
+ * fraction in per cent, reads `mass fraction 75 %`.
+ *
+ * @remarks
+ * The quantity is named and the % sign carries nothing (the SI Brochure, 9th edition, §5.4.7:
+ * "percentage by mass" shall not be used). Any other variant, or none, reads `another
+ * composition`, so that a variant's identifier never reaches the screen.
+ */
+export function variantWords(variant: string | undefined): string {
+  const percent =
+    variant === undefined ? undefined : /^([0-9]+(?:\.[0-9]+)?)wt%$/u.exec(variant)?.[1];
+  return percent === undefined ? "another composition" : `mass fraction ${percent} %`;
+}
+
 /** A material key resolved to the file it is drawn with, and how far that file is its own. */
 export interface ResolvedMaterial {
   /** The key asked for. */
@@ -305,7 +321,7 @@ export function resolveMaterial(material: string, form?: MaterialForm): Resolved
       material,
       file: undefined,
       provenance: "standIn",
-      standIn: `no index file for "${material}": the generic stand-in, a non-absorbing sphere of real index ${GENERIC_STAND_IN_INDEX.n}, a stated convention`,
+      standIn: `no index file for ${substanceName(material)}: the generic stand-in, a non-absorbing sphere of real index ${GENERIC_STAND_IN_INDEX.n}, a stated convention`,
     };
   }
   const phase = form?.phase;
@@ -316,7 +332,7 @@ export function resolveMaterial(material: string, form?: MaterialForm): Resolved
       material,
       file: first,
       provenance: "standIn",
-      standIn: `no ${phase ?? ""} ${material} on file: ${first.name} stands in, a named analogue`,
+      standIn: `no ${phase ?? ""} ${substanceName(material)} on file: ${first.name} stands in, a named analogue`,
     };
   }
   const variant = form?.variant;
@@ -326,7 +342,7 @@ export function resolveMaterial(material: string, form?: MaterialForm): Resolved
       material,
       file: phaseFirst,
       provenance: "standIn",
-      standIn: `no ${variant ?? ""} ${material} on file: ${phaseFirst.name} stands in, a named analogue`,
+      standIn: `no ${substanceName(material)}, ${variantWords(variant)}, on file: ${phaseFirst.name} stands in, a named analogue`,
     };
   }
   return { material, file, provenance: file.provenance, standIn: file.standIn };

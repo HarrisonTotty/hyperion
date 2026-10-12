@@ -2,7 +2,7 @@
   "key": "H2O",
   "phase": "liquid",
   "variant": null,
-  "name": "liquid water at 25 °C",
+  "name": "liquid H2O at 25 °C",
   "temperatureK": 298,
   "shape": "sphere",
   "provenance": "measured",

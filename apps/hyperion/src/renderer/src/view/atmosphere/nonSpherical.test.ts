@@ -505,7 +505,7 @@ describe("the fallback", () => {
       550,
     );
     expect(optics.phaseNote).toBe(
-      "an absorbing mineral: no reduced TAMUdust2020 table on file; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback",
+      "unlisted material: no reduced TAMUdust2020 table on file; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback",
     );
   });
 });
@@ -576,7 +576,9 @@ describe("the other ices, on water ice's table as named analogues", () => {
     const optics = nonSphericalModeOptics({ material: "NH3", sizes }, 550);
     expect(optics.phaseBasis).toBe("analogue");
     expect(optics.phaseModel).toBe("yang2013");
-    expect(optics.phaseNote).toContain("-0.056");
+    expect(optics.phaseNote).toBe(
+      "NH3 ice drawn on H2O ice's roughened 8-column table, a named analogue; its g expected -0.056 from H2O ice's (van Diedenhoven et al. 2014)",
+    );
     const water = nonSphericalModeOptics({ material: "H2O", form: { phase: "solid" }, sizes }, 550);
     expect(optics.singleScatteringAlbedo).toBeLessThan(water.singleScatteringAlbedo);
   });
@@ -610,6 +612,19 @@ describe("the floor rule's two exits", () => {
     );
   });
 
+  it("names a material past the floor rule in words, never by its key", () => {
+    const particles: NonSphericalParticles = {
+      material: "brine_xyz",
+      shape: "nonSphericalMineral",
+      index: (nm) => refractiveIndex("MgSiO3", nm).index,
+      provenance: "measured",
+      table: enstatiteTable(),
+    };
+    expect(opticsOfParticles(particles, coarse, 550).phaseNote).toMatch(
+      /^unlisted material: the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\), the floor's table stands in, a named analogue$/u,
+    );
+  });
+
   it("makes it a fallback instead above n 1.70", () => {
     const particles: NonSphericalParticles = {
       material: "a transparent high-index mineral",
@@ -622,7 +637,7 @@ describe("the floor rule's two exits", () => {
     expect(optics.phaseBasis).toBe("fallback");
     expect(optics.matrix).toBeUndefined();
     expect(optics.phaseNote).toMatch(
-      /^a transparent high-index mineral: the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\) at n 1\.800 above 1\.7; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback$/u,
+      /^unlisted material: the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\) at n 1\.800 above 1\.7; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback$/u,
     );
   });
 });
@@ -664,6 +679,9 @@ describe("the particles below a table's smallest size", () => {
     const sizes = { kind: "gamma", effectiveRadiusUm: 0.5, effectiveVariance: 0.3 } as const;
     const ice = nonSphericalModeOptics({ material: "H2O", form: { phase: "solid" }, sizes }, 550);
     expect(ice.phaseBasis).toBe("analogue");
+    expect(ice.phaseNote).toMatch(
+      /^crystals below the table's 2 µm carry \d+ % of the scattering at 550 nm, drawn as volume-to-area spheres$/u,
+    );
   });
 });
 

@@ -456,6 +456,14 @@ describe("the label", () => {
     expect(reasons[0]?.reason).toContain("440 nm");
   });
 
+  it("names the substance and its basis in words where a mode states no note", () => {
+    const bare: ModeOptics = { ...dust(), phaseBasis: "fallback", phaseNote: undefined };
+    expect(
+      phaseApproximations([{ material: "mars_dust", optics: [bare], opticalDepthAbove550: 0 }])[0]
+        ?.reason,
+    ).toBe("Mars-type dust: a fallback phase (at 550 nm)");
+  });
+
   it("does not label a Mars dust mode, a model", () => {
     expect(
       phaseLabels([{ material: "mars_dust", optics: [dust()], opticalDepthAbove550: 0 }]),

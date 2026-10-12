@@ -312,7 +312,7 @@ describe("a mode's optics", () => {
     expect(dust.phaseBasis).toBe("fallback");
     expect(dust.phaseModel).toBe("henyeyGreenstein");
     expect(dust.phaseNote).toBe(
-      "a non-spherical mineral of mars_dust through sphere Mie: Henyey–Greenstein from Mie's g, a fallback",
+      "a non-spherical mineral of Mars-type dust through sphere Mie: Henyey–Greenstein from Mie's g, a fallback",
     );
     const droplets = modeOptics({ material: "H2SO4", sizes }, 550);
     expect(droplets.phaseBasis).toBe("model");

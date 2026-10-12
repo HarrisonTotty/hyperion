@@ -38,6 +38,7 @@
  * less above.
  */
 
+import { substanceName } from "../../lib/substances";
 import { gaussLegendre } from "../lighting/quadrature";
 import {
   type MaterialForm,
@@ -753,6 +754,6 @@ export function modeOptics(
     phaseModel: keepsMatrix ? "mie" : "henyeyGreenstein",
     phaseNote: keepsMatrix
       ? undefined
-      : `${SHAPE_WORDS[shape]} of ${mode.material} through sphere Mie: Henyey–Greenstein from Mie's g, a fallback`,
+      : `${SHAPE_WORDS[shape]} of ${substanceName(mode.material)} through sphere Mie: Henyey–Greenstein from Mie's g, a fallback`,
   };
 }

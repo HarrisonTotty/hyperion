@@ -51,6 +51,7 @@ import {
   type ResolvedMaterial,
   indexAt,
 } from "./materials/materials";
+import { substanceName } from "../../lib/substances";
 import { gaussLegendre } from "../lighting/quadrature";
 import { type ComplexIndex, mieSphere } from "./mie";
 import {
@@ -1096,7 +1097,7 @@ function fallbackOptics(
     provenance: particles.provenance,
     phaseBasis: "fallback",
     phaseModel: small ? "mie" : "henyeyGreenstein",
-    phaseNote: `${particles.material}: ${reason}; ${
+    phaseNote: `${substanceName(particles.material)}: ${reason}; ${
       small
         ? `a small grain (effective size parameter ${effective.toFixed(2)} < ${SMALL_GRAIN_SIZE_PARAMETER}), drawn with the sphere's own Mie matrix`
         : "a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix"
@@ -1123,7 +1124,7 @@ export function opticsOfParticles(
   const water = waterIceTable();
   if (particles.shape === "crystal" && isIce(particles.material)) {
     if (water === undefined) {
-      return fallbackOptics(particles, sizes, wavelengthNm, mu, "water ice's table is not on file");
+      return fallbackOptics(particles, sizes, wavelengthNm, mu, "H2O ice's table is not on file");
     }
     const own = particles.table === water;
     const optics = tableModeOptics(water, distribution, index, wavelengthNm, mu);
@@ -1134,7 +1135,7 @@ export function opticsOfParticles(
         : tableModeOptics(water, distribution, particles.index(550), 550, NO_ANGLES).tailShare;
     const tail = share > SMALL_CRYSTAL_SHARE_MAX;
     const tailNote = tail
-      ? `crystals below the table's 2 µm carry ${(100 * share).toFixed(0)}% of the scattering at 550 nm, drawn as volume-to-area spheres`
+      ? `crystals below the table's 2 µm carry ${(100 * share).toFixed(0)} % of the scattering at 550 nm, drawn as volume-to-area spheres`
       : undefined;
     if (own) {
       return fromTable(optics, particles, tail ? "analogue" : "model", "yang2013", tailNote);
@@ -1151,10 +1152,10 @@ export function opticsOfParticles(
       extinctionCrossSectionM2: mie.extinctionCrossSectionM2,
       scatteringCrossSectionM2: mie.scatteringCrossSectionM2,
       volumeM3: mie.volumeM3,
-      phaseNote: `${particles.material} ice drawn on water ice's roughened 8-column table, a named analogue${
+      phaseNote: `${substanceName(particles.material)} ice drawn on H2O ice's roughened 8-column table, a named analogue${
         bias === undefined
           ? ""
-          : `; its g expected ${bias.toFixed(3)} from water's (van Diedenhoven et al. 2014)`
+          : `; its g expected ${bias.toFixed(3)} from H2O ice's (van Diedenhoven et al. 2014)`
       }${tailNote === undefined ? "" : `; ${tailNote}`}`,
     };
   }
@@ -1188,7 +1189,7 @@ export function opticsOfParticles(
       particles,
       "analogue",
       "tamudust2020",
-      `${particles.material}: the k-floor rule exceeded (the floor's single-scattering albedo ${optics.tableAlbedo.toFixed(4)} < ${FLOOR_ALBEDO_MIN}), the floor's table stands in, a named analogue`,
+      `${substanceName(particles.material)}: the k-floor rule exceeded (the floor's single-scattering albedo ${optics.tableAlbedo.toFixed(4)} < ${FLOOR_ALBEDO_MIN}), the floor's table stands in, a named analogue`,
     );
   }
   return fromTable(optics, particles, "model", "tamudust2020", undefined);
