@@ -638,7 +638,7 @@ def check_text(texts: list[tuple[int, str]], unchecked: dict[str, str]) -> list[
                 unchecked.setdefault(ch, str(err))
                 continue
             if len(lacking) == 2:
-                found.append(Finding(at(text.index(ch)), "error", "glyph", f"'{ch}' (U+{ord(ch):04X}) is not in B612 or B612 Mono: draw it as an inline SVG.", "Typography"))
+                found.append(Finding(at(text.index(ch)), "error", "glyph", f"'{ch}' (U+{ord(ch):04X}) is not in B612 or B612 Mono: name it in words, or draw it as an inline SVG if it is a unit symbol or a key's sign.", "Typography"))
             elif lacking:
                 found.append(Finding(at(text.index(ch)), "check", "glyph", f"'{ch}' (U+{ord(ch):04X}) is missing from {lacking[0]}.", "Typography"))
     return found

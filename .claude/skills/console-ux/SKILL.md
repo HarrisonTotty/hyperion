@@ -97,7 +97,8 @@ python3 .claude/skills/console-ux/scripts/glyphs.py "☉ ↑ µ"     # can the b
 - Run `contrast.py` whenever a token changes or a new foreground and background meet. Text needs
   6:1 and control outlines 3:1.
 - Run `glyphs.py` for any character outside ASCII before it reaches the screen. A glyph B612 lacks
-  falls back to a system font, so draw it as an inline SVG. Look in `components/` and the plan for
+  falls back to a system font, so name the quantity in words (guide, Typography); only a unit
+  symbol or a key's own sign is drawn as an inline SVG. Look in `components/` and the plan for
   an existing drawn glyph first (galaxy-generation's P05.T3.b plans `SunGlyph` for `☉`).
 
 The scripts cannot see layout, data states or command flow. When the change is visible, run the

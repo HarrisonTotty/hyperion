@@ -757,8 +757,8 @@ Names are those the owning plans give; the owning plan is authoritative.
    with dln T_ad ÷ dln p = α R ÷ c_p(T), P14.T49.b's c_p(T) mixed by mole fraction (a power law,
    β = α R ÷ c_p, only for a constant c_p).
    - β = α·R/c_p. c_p(T) is P14.T49.b's statistical sum (science-r08-gases-2.md §1). Fixed
-     degrees of freedom hold only for the noble gases at every temperature, and for N₂, O₂ and CO
-     below about 400 K.
+     degrees of freedom hold only for the noble gases at every temperature, and for N₂ and CO
+     below about 400 K and O₂ below about 300 K.
    - α scales the dry adiabat for latent heat, by the condensing species: 0.6 with a water ocean,
      0.77 for methane, 0.88 dry or CO₂ (refitted on Venus's measured state with c_p(T); R&C's 0.8
      took γ = 1.3), and 0.83–0.94 for giants (R&C 2014 Table 1; R&C 2012 §4.1 for Venus).

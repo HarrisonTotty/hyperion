@@ -1277,11 +1277,13 @@ Per height query, on both sides, with no iteration and no global state:
    basin. Both passes draw diameters by inverting one shared function, the cumulative crater
    density, which lives in the surface crate, since the fine pass runs there and that crate cannot
    depend on the sim; plan 14 calls it from the sim and supplies its inputs, since T24.b serves only
-   N(>1 km): the production function's shape (Neukum, Ivanov and Hartmann 2001, 10 m to 300 km)
-   scaled from N(>1 km); an atmospheric cutoff with a taper rather than a hard zero, from screening
-   — a projectile stops once it has met its own mass of air, about 5 m across on Earth, 0.5 km on
-   Venus and 8 cm on Mars, so the crater cutoff lies some twenty times larger, near 100 m, 10 km and
-   1.6 m, with a taper steep enough that Venus's crater catalogue needs no separate break-up term;
+   N(>1 km), the Moon's crater density for the body's projectile flux: the production function's
+   shape (Neukum, Ivanov and Hartmann 2001, 10 m to 300 km) scaled from it and carried to the body's
+   own craters by a π-scaling diameter map (science-r09-craters.md F1); an atmospheric cutoff with a
+   taper rather than a hard zero, from screening — a projectile stops once it has met its own mass
+   of air, about 5 m across on Earth, 0.5 km on Venus and 8.5 cm on Mars, so the crater cutoff lies
+   some twenty times larger, near 100 m, 10 km and 1.7 m (R09 Design note 12, at Mars's mean
+   636 Pa), with a taper steep enough that Venus's crater catalogue needs no separate break-up term;
    the equilibrium saturation; and the simple-to-complex transition, which scales as 1/g. The number
    of octaves moves with the body's D_b. The cost is about nine cells per octave, which is still why
    the crater field is baked into the patch's height texture rather than evaluated per frame.
@@ -1534,10 +1536,17 @@ evaluated at the density its formula states, the real gas's, not the ideal one, 
 NH₃'s cross-section 3% and CO₂'s 1.4% high. The scale height follows from temperature, mean
 molecular mass and gravity at each height, so the medium needs a vertical structure, not one
 temperature: a column isothermal at the surface temperature is three times too tall in scale
-height at Venus's cloud tops. The structure is a scaled adiabat from the surface to an isothermal
-skin, T(p) = max(T_s (p ÷ p_s)^β, T_skin) (Robinson and Catling 2012), and plan 14 provides its
-parameters with the pressure, the gas fractions, the mean molecular mass and c_p ÷ R (P14.T24.a,
-T24.e). Earth's reference values anchor the implementation: a Rayleigh scale height near 8 km
+height at Venus's cloud tops. The structure is Robinson and Catling 2012's scaled adiabat from the
+surface to an isothermal skin, T(p) = max(T_ad(p), T_skin), with dln T_ad ÷ dln p = α R ÷ c_p(T).
+Their α scales the dry adiabat for latent heat: 0.6 where water condenses, 0.77 where methane does,
+and otherwise the dry 0.88, refitted on Venus's measured state. c_p(T), mixed by mole fraction,
+follows temperature, because no fixed value serves a molecular gas from Triton's 38 K to a
+near-runaway world's 1,500 K; only the noble gases' 5/2 holds throughout (science-r08-gases-2.md
+§1). Plan 14 integrates the profile and publishes it as (T_s, p_s, α, T_skin) and the adiabat's
+(p, T) nodes, with the pressure, the gas fractions and the mean molecular mass (P14.T24.a, T24.e,
+T49.b). The client reads the nodes and keeps no thermodynamics of its own; the published c_p ÷ R,
+the mixture's at the mean surface temperature, is for display. Earth's reference values anchor the
+implementation: a Rayleigh scale height near 8 km
 (8.43 km at the US Standard Atmosphere's sea
 level, which with the sea-level density carries Earth's whole column; 8 km leaves it 5% short), an
 aerosol scale height near 1.2 km, and an aerosol asymmetry (the phase function's mean cosine) near
@@ -3752,9 +3761,13 @@ than read: its details, and the figure it supports, must be checked before eithe
   1984 for the saturation, N(>D) = 0.079 D⁻² km⁻².
 - Atmospheric screening of small impactors, after Melosh 1989, _Impact Cratering_ (**from memory**):
   a projectile scale d\* = 1.5 (P ÷ g) ÷ ρ_p and a crater cutoff of 20 d\*, with the taper 1 ÷ (1 +
-  (D_c ÷ D)^4.5), checked by Poisson likelihood against the 881 named Venusian craters of the IAU's
-  Gazetteer of Planetary Nomenclature (USGS, retrieved 2026-10-09): the best fit is D_c = 9.0 km
-  with exponent 5.4, the adopted rule lies 8 below it in ln L, and neither needs a break-up term;
+  (D_c ÷ D)^4.2), its exponent fitted by Poisson likelihood to the 881 named Venusian craters of the
+  IAU's Gazetteer of Planetary Nomenclature (USGS, retrieved 2026-10-09) through the π-scaling
+  diameter map, at a mean impact speed of 25.7 km/s and with D_c held at 20 d\*, since π-scaling
+  puts a d\* projectile's crater at 18–21 d\* on Venus: the likelihood peaks at 4.25, 4.5 lies 2.1
+  below it in ln L, and the cumulative counts at 3–40 km lie within 11% (science-r09-craters.md F1
+  and F4.1). Unmapped, as first fitted, the best taper is D_c = 9.0 km with exponent 5.4, with
+  20 d\* and exponent 4.5 8 below it in ln L. Neither fit needs a break-up term;
   Herrick and Phillips 1994, Icarus 112, 253, was not reached.
 - Daubar et al. 2014, JGR Planets, for the depth of new metre-scale Martian craters (d/D 0.23), and
   Stopar et al. 2017, Icarus, for fresh and mature small lunar craters (0.10 and about 0.05),
@@ -3828,7 +3841,11 @@ than read: its details, and the figure it supports, must be checked before eithe
   Heiner, Kalashnikov, Kovács and Osvay 2008, Applied Optics 47, 4856, for Ne, Kr and Xe; and
   Dalgarno and Williams 1962, ApJ 136, 690, as H₂'s cross-check. Tabulated refractive indices at
   <https://refractiveindex.info> (CC0). Robinson and Catling 2012, ApJ 757, 104, for the scaled
-  adiabat (from R08's research).
+  adiabat, and 2014, Nature Geoscience 7, 12, for its α (from R08's research). c_p(T) is a
+  statistical sum over each gas's molecular constants: the vibrational fundamentals from
+  Shimanouchi 1972, NSRDS-NBS 39, and the diatomics' constants and O₂'s low electronic states from
+  Huber and Herzberg 1979 (**from memory**), held within 1–3% to NASA Glenn's polynomials (McBride,
+  Zehe and Gordon 2002, NASA/TP-2002-211556) (science-r08-gases-2.md §1).
 - Scale heights, the Cornette–Shanks phase function and the tutorial Rayleigh coefficients, from
   Scratchapixel's _Simulating the Colors of the Sky_ and Zucconi's _Atmospheric Scattering_; the
   tutorials' coefficients, taken from Bruneton, are 15–20% above the formula's and are not used.

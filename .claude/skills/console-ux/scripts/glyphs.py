@@ -9,9 +9,10 @@ Usage:
 Reads the regular-weight WOFF files that @fontsource bundles (apps/hyperion/node_modules), so
 the answer is what the client actually ships, not what the full upstream font contains. A
 character missing here falls back to a system font that will not match (UX guide, Typography):
-draw it as an SVG instead. Exit status is 1 when a checked character is missing from either
-font, and 2 on a usage error (an unknown option, nothing to check) or when the font files are
-missing or unreadable (run `pnpm install`). Uses only the Python standard library.
+name it in words, or draw it as an SVG if it is a unit symbol or a key's sign. Exit status is 1
+when a checked character is missing from either font, and 2 on a usage error (an unknown option,
+nothing to check) or when the font files are missing or unreadable (run `pnpm install`). Uses
+only the Python standard library.
 """
 
 from __future__ import annotations
@@ -199,7 +200,7 @@ def main() -> None:
         shown = c if c.isprintable() else "?"  # a control character or lone surrogate from an escape
         print(f"{shown:<6}U+{ord(c):04X}   {marks[0]:<7}{marks[1]:<7}{unicodedata.name(c, '?')}")
     if bad:
-        print("\nMissing glyphs fall back to a system font. Draw them as an inline SVG (UX guide, Typography).")
+        print("\nMissing glyphs fall back to a system font. Name the quantity in words; only a unit symbol or a key's own sign is drawn as an inline SVG (UX guide, Typography).")
         sys.exit(1)
 
 

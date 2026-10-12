@@ -124,9 +124,34 @@ never use them for decoration, branding, chart series or hover effects.
   table. They were designed for aircraft cockpit displays. Both are bundled through
   `@fontsource` and exposed as `--font-sans` and `--font-mono`. Never fetch a font at
   runtime.
-- B612 covers Latin text and a small symbol set, including `°`, `µ`, `×`, `·`, `−`, `—`, `↑`
-  and `↓`. Check that a new symbol exists in the font before using it, because a fallback glyph
-  from the system font will not match. Draw anything else as an SVG icon.
+- B612 and B612 Mono, as bundled, hold Latin-1 (U+0020–007E and U+00A0–00FF, among them `°`,
+  `µ`, `±`, `×`, `÷`, `·`, `§`, `¹`, `²` and `³`), `Œ` and `œ`, and a few marks: `–`, `—`, `−`,
+  `′`, `″`, `…`, `•`, curly quotes, `€`, `™`, `↑` and `↓`. Check that any other character is in
+  both faces before it reaches the screen, in the DOM or on a canvas, because a fallback glyph
+  from the system font will not match and differs on each platform. A character neither face
+  holds follows the next bullet.
+- Neither face has a Greek letter (`µ` is the micro sign, U+00B5; the Greek `μ` is missing), a
+  Latin letter outside Latin-1 other than `Œ` and `œ` (`ł`, `ř`, `ā`), a subscript, a
+  superscript other than `¹`, `²` and `³`, an arrow other than `↑` and `↓`, a space other than
+  U+0020 and the no-break U+00A0, or a mathematical sign beyond Latin-1's and `−`, such as `≤`,
+  `≥`, `≈`, `≠`, `√`, `∞` or `∆`.
+  - Text that reaches the screen names such a quantity in words, by the name the literature
+    gives it: `phase shift`, not `Δφ`; `single-scattering albedo`, not `ω`;
+    `effective size parameter`, not `2πr ÷ λ`.
+  - A power of ten is written in E notation and a symbol's subscript in parentheses (see
+    "Numbers, units and time"). A relation is written as `<` or `>`, or in words.
+  - A chemical formula keeps its case and its digits on the line, even in an upper-case label:
+    `CO2`, `H2O`, `NH4SH`, as the substance keys are written. Its digits count atoms and are not
+    a symbol's subscript, so never `CO(2)`, and `Co` is cobalt where `CO` is carbon monoxide. An
+    isotope takes its mass number after a hyphen, `He-3`, `C-14`, even where `¹`, `²` and `³`
+    could set it, so that every isotope reads alike.
+  - Where the literature's own name for a thing is a letter's name, the thing keeps it, as
+    `DELTA-V`, `H-alpha` and oxygen's `gamma` band do. A symbol that has a name in words is never
+    spelled out letter by letter (`delta phi` for the phase shift).
+  - A name is written in the letters both faces hold, and a generated language is romanised
+    within them.
+  - Only a unit symbol or a key's own sign is drawn, as an inline SVG: `☉`, `⊕` and `⌘` are, and
+    `Ω` would be.
 - `☉` (U+2609) is in neither B612 nor B612 Mono. It is drawn as an inline SVG sized to the
   text, a circle with a centre dot in `currentColor`, and the accessible name "solar
   masses" goes on the unit as a whole. `⊕` (U+2295) is drawn the same way, a circle with a
