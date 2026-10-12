@@ -4869,7 +4869,9 @@ rows' values.
         and §4.2). Each name-form row lands with its name in the client's `SUBSTANCE_NAMES`
         (T49.f), whose test reads the fixture. decision-substance-names §4.3 drafts the names,
         `basalt_fe`'s amended to `Fe-rich basalt` (`Fe-RICH BASALT`) by signoff-5, item 8, and
-        the builder confirms each against the row's sources.
+        the builder confirms each against the row's sources. A formula among a name's words keeps
+        IUPAC's parentheses round a group of atoms, with the group's count after them
+        (`Mg(ClO4)2 brine`, `Mg(ClO4)2 BRINE`; decision-ux-numbers-names).
   - **The client-optics flags** (decision-r08-t4b-t12c, follow-ups 2 and 4). `absorber` means
     that the client has absorption optics for the row, in its own right or as a member of a
     collision pair. R08 answers each row with cross-sections, a pair, a pending entry, or a

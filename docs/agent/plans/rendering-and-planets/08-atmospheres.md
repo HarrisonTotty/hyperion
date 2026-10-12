@@ -6412,11 +6412,14 @@ generator, and the reference's sampling needs no domain tag.
       `unlisted material` for a key the client does not name. A stand-in names a variant through
       `variantWords` (`mass fraction 75 %`, the solute's), and a mode with no note of its own names
       its basis in words. Each material file's `name` names its substance as `substanceName` does
-      (`H2O ice Ih at −7 °C`, `aqueous H2SO4, mass fraction 75 %, at 300 K`). That supersedes
+      (`H2O ice Ih at 266 K`, `aqueous H2SO4, mass fraction 75 %, at 300 K`). That supersedes
       science-r08-mmf.md §4.8's "75% by mass", which the SI Brochure's §5.4.7 forbids. The notes
       call water ice `H2O ice`, and a percentage takes a space before `%`. `soot.json`'s `name`
       reads `soot from a C3H8 flame at room temperature` (signoff-5, item 8), where
-      decision-substance-names §3.4 kept `propane soot`.
+      decision-substance-names §3.4 kept `propane soot`. A name gives a temperature only in
+      kelvin, the figure its file's `temperatureK` holds (`liquid H2O at 298 K`), signs a number
+      with the hyphen-minus, as the console's formatters do (NH₄SH's stand-in reads "within +0.081
+      and -0.022"), and takes no mineral name (`amorphous MgSiO3`; decision-ux-numbers-names).
   - _The MMF against optool._ The lane built optool 1.9.14 (commit 21aecb46) offline with
     gfortran 16.2.1 from Arch's `gcc-fortran` package (its SHA-256 checked against the signed sync
     database), with `optool_manual.f90` stubbed (its help text fails gfortran 16's format checks;
@@ -7710,9 +7713,10 @@ generator, and the reference's sampling needs no domain tag.
     0.027. NH₄SH's n is 1.674, 1.638 and 1.623 at 380, 550 and 780 nm (1.67445, 1.63815 and
     1.62282); all 81 values fall by 0.0061–0.0067.
   - _The band's foot is −0.022, not §2.2's −0.023._ The span is +0.08066 and −0.02247, and the
-    file prints three places, so its text, the tool's test and T5.b's sub-bullet read "+0.081 and
-    −0.022". The ruling rounded its four-figure 0.0225. The test bounds (< 0.082, < 0.024) are as
-    ruled.
+    file prints three places, so its text and the tool's test read "+0.081 and -0.022", a number's
+    sign being the hyphen-minus in player text (decision-ux-numbers-names), and T5.b's sub-bullet
+    "+0.081 and −0.022". The ruling rounded its four-figure 0.0225. The test bounds
+    (< 0.082, < 0.024) are as ruled.
   - _`nh4clIndex`'s range is 313–768.2 nm_, the paper's 3130–7682 Å, where §2.3 writes 768. It
     throws a `RangeError` outside it, NaN included. The fit's wavelengths are taken in air, as
     `SODIUM_D_NM` is; read as vacuum wavelengths, n_D moves by 1.3 × 10⁻⁵.
