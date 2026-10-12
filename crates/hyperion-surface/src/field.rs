@@ -548,8 +548,8 @@ impl CoarseField {
     /// another role, an ice share without an ice entry, water without a liquid entry), a crater is
     /// not a valid coarse crater of this field or is not after its predecessor, or the reaches are
     /// too many to index. The palette's own rules (at most 15 entries, sorted, a crust's entry of a
-    /// crust's role) are the header's ([`FieldHeader::new`], [`MaterialPalette::new`]), so no field
-    /// has a palette that breaks them.
+    /// role a [`Crust`] variant may take) are the header's ([`FieldHeader::new`],
+    /// [`MaterialPalette::new`]), so no field has a palette that breaks them.
     pub fn new(
         header: FieldHeader,
         synthesis: Vec<SynthesisCell>,

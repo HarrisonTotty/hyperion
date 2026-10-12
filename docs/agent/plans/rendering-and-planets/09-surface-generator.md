@@ -3022,8 +3022,8 @@ re-blessing this plan's payload and coarse goldens in that commit.
       "at the temperature where it lies on the body" (§3.3). `PrimaryCrust`'s documentation names
       the lunar highlands' feldspathic crust, not their anorthosite (§7). _Supersedes_ B's crust
       roles: a `Crust` variant may name a `Bulk` entry. `header.rs`'s documentation and
-      `CrustPalette`'s message still say "a crust's role" for the five, which a later task may
-      reword (science-composition-crusts.md §1.2: nothing calls the bulk a crust).
+      `CrustPalette`'s message say "a role a `Crust` variant may take"
+      (science-composition-crusts.md §10.1).
     - _B's rows_ (`testing/worlds.rs`). The ruling's code text is `reference.rs`'s:
       `BASALT_FE`, `BASALT_FE_SOLIDUS_K` and `FELDSPATHIC` take §2.3's and §7.3's, since T10.c
       left those rows to T10.d, and the other rows take T10.c's as-built text (the plagioclase
@@ -3035,14 +3035,24 @@ re-blessing this plan's payload and coarse goldens in that commit.
       phyllosilicate's residue at `CHONDRITIC_SOLIDUS_K` (1,423.15 K) and the dust at
       `basalt_fe`'s; `Na2CO3` at 1,123.15 K, its 2,540 sourced; granite's 2,650 sourced, its
       solidus still unverified. The Earth-like world keeps `basalt` (3,010, 980 °C).
-    - _The science review's citation corrections_ to that text, no figure moved (reported to
-      "main" for `reference.rs` and R09.T10.d): the sodium loss of Jurewicz et al.'s charges is
-      cited to LPSC 25 (1994), p. 651, not LPSC 24; `basalt_fe`'s 18–22 against 10–12 wt% `FeO`
-      and `feldspathic`'s 80–90 per cent plagioclase and 4–6 wt% `FeO` are labelled from memory
-      (§2.1, §7.1), the latter as the bulk's, held in the mafic minerals; Hu, Ehlmann and Seager
-      2012 give the name only, their surface type being 97 per cent plagioclase (Table 2); and
-      Kiefer et al.'s 2,750–2,890 is derived from their 2,200–2,600 kg m⁻³ at 10–20 per cent
-      porosity.
+    - _The citation check and its rulings_ (science-composition-crusts.md §10 and §10.1, a
+      second commit; no figure or golden moved). `CHONDRITIC_SOLIDUS_K`, `BASALT_FE` and
+      `FELDSPATHIC` take §10.1's code text:
+      - the charges' volatile loss is LPSC 25's (1994, p. 651), not LPSC 24's, and the lower
+        natural solidus is labelled an inference;
+      - `basalt_fe`'s `FeO` is sourced (the Lunar Sourcebook's Table A6.1, Meyer 2012's
+        shergottites, Peck 1978's Alae tholeiite), and its Kiefer et al. citation adds Table 1
+        (NWA 4898 and 70215);
+      - `feldspathic` is about 75–80 per cent plagioclase by mass (about 80 by volume), not
+        80–90, with its 4–6 wt% bulk `FeO` sourced (Peplowski et al. 2016; McKay et al. 1991;
+        Lawrence et al. 2002); Hu, Ehlmann and Seager 2012 give the name only, their type being
+        97 per cent plagioclase; and its 2,900 kg m⁻³ lies inside Kiefer et al.'s four
+        feldspathic rocks' 2,840–2,910 by helium pycnometry (Table 1) and what 75–78 per cent
+        plagioclase with the highlands' mafics gives, 2,880–2,910, the derived 2,750–2,890
+        dropped;
+      - `header.rs` and `field.rs` say "a role a `Crust` variant may take" for the five roles,
+        and `CrustPalette`'s message "not a crust's, a province's or a bulk material's";
+      - `McKay` joins the surface crate's `doc-valid-idents` (`clippy.toml`), as the sim's has it.
     - _The ices_ (§3.2 item 3). `ice_ih_density_kg_m3` (the ruling's fit), `COLD_TRAP_H2O_K` and
       `Substance::ice_entry_at` as R09.T10.c built them. Each synthetic climate's zonal mean is
       its equator's value less a constant times sin² φ, so the coldest zone is the pole's annual
@@ -3059,9 +3069,11 @@ re-blessing this plan's payload and coarse goldens in that commit.
       rows on the Earth-like basalt, and the new
       `the_synthetic_fields_palettes_take_the_crust_rulings_rows`), a test module in `worlds.rs`
       for the fit against IAPWS and the worlds' temperatures, `header.rs`'s
-      `a_field_header_takes_a_bulk_entry_for_a_crusts_lithology` (the review's: `FieldHeader::new`
-      takes a `Bulk` entry for `Lid` and `Province`), and `wire/form.rs`'s unknown-code test, whose
-      first unknown `PaletteRole` code is now 9. The palette test keeps the task's name,
+      `a_field_header_takes_a_bulk_entry_for_the_lid_and_the_provinces` (the review's:
+      `FieldHeader::new` takes a `Bulk` entry for `Lid` and `Province`), and `wire/form.rs`'s
+      unknown-code test, whose first unknown `PaletteRole` code is now 9 (read through one
+      helper, so that the test stays within Clippy's 100 lines beside R09.T7.e's additions). The
+      palette test keeps the task's name,
       `field_palette_crust_roles_are_the_crusts_and_the_provinces`, though it expects `Bulk`
       too. The two acceptance commands select every test this changed.
     - _Goldens._ `payloads.golden`'s 7 digest lines are re-blessed at 21: the four bodies' whole
@@ -3072,8 +3084,9 @@ re-blessing this plan's payload and coarse goldens in that commit.
       `codes.golden` gains `palette_role 8 = Bulk`. Neither version is bumped (Generator
       version).
     - _For R09.T10.d._ The reference rows' `feldspathic` and `basalt_fe` (the synthetic ones are
-      the same figures, with the citation corrections above), `CrustInputs::bulk`, and `lid`,
-      whose `LidCrust::Bulk` takes the `Bulk` entry built here.
+      the same figures, their docs §10.1's word for word), `CHONDRITIC_SOLIDUS_K`'s LPSC 25
+      citation, the `FELDSPATHIC` assertion against Kiefer et al.'s 2,840–2,910,
+      `CrustInputs::bulk`, and `lid`, whose `LidCrust::Bulk` takes the `Bulk` entry built here.
 - **Deviations in T3, as built** (2026-10-09; the layout is generated output from T9's and T16's
   goldens on, revisable until then).
   - _Files._ `wire.rs` (the API, the block layout in its module documentation, the encoder and the

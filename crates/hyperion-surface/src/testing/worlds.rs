@@ -222,10 +222,11 @@ const PLAGIOCLASE_ROCK_SOLIDUS_K: f64 = 1_533.15;
 /// The solidus of an anhydrous chondritic silicate assemblage at about 1 atm, 1,150 °C, kelvin, an
 /// upper bound: the H and LL chondrites' "~1150-1160°C" at IW−1 (Jurewicz et al., LPSC 24, 1993,
 /// p. 739), whose charges lost their volatiles, sodium among them (Jurewicz et al., LPSC 25, 1994,
-/// p. 651), so a natural rock begins somewhat lower. Anhydrous Murchison (CM) and Allende (CV) had
-/// more melt at 1,170–1,180 °C, so theirs lie at or below it (Jurewicz, Mittlefehldt and Jones
-/// 1993, GCA 57, 2123, as that abstract reports it). The dehydrated residue of a phyllosilicate
-/// rock's (science-composition-crusts.md §4; corrected 2026-10-11).
+/// p. 651), so a natural, sodium-bearing rock likely begins somewhat lower (an inference: neither
+/// abstract measures a solidus). Anhydrous Murchison (CM) and Allende (CV) had more melt at
+/// 1,170–1,180 °C, so theirs lie at or below it (Jurewicz, Mittlefehldt and Jones 1993, GCA 57,
+/// 2123, as LPSC 24 reports it). The dehydrated residue of a phyllosilicate rock's
+/// (science-composition-crusts.md §4 and §10.1; corrected 2026-10-11).
 const CHONDRITIC_SOLIDUS_K: f64 = 1_423.15;
 
 /// Basalt: Design note 8's basaltic rock, `A_N` 0.05–0.15; a grain density of 3,010 kg m⁻³, the
@@ -240,13 +241,19 @@ const BASALT: Substance = Substance {
     mechanics: MechanicsFamily::Silicate,
 };
 
-/// An iron-rich basalt, `FeO` about 18–22 wt% against a terrestrial tholeiite's 10–12 (from memory;
-/// science-composition-crusts.md §2.1), as the lunar maria's and Mars's (P14.T51.c's `basalt_fe`):
-/// Design note 8's basaltic rock, `A_N` 0.05–0.15; a grain density of 3,310 kg m⁻³, the
-/// shergottites' mean (Macke, Britt and Consolmagno 2011, MAPS 46, 311, abstract), inside the lunar
-/// basalts' 3,270 (high-alumina) to 3,460 kg m⁻³ (high-titanium), which rises with `TiO₂` (Kiefer
-/// et al. 2012, GRL 39, L07201, abstract; a high-titanium row waits for a second province
-/// lithology, science-composition-crusts.md §2); and [`BASALT_FE_SOLIDUS_K`].
+/// An iron-rich basalt, `FeO` about 18–22 wt% against a terrestrial tholeiite's 10–12, as the lunar
+/// maria's and Mars's (P14.T51.c's `basalt_fe`): the representative mare basalts' 16.0–22.4 wt%,
+/// the high- and low-titanium ones' 18.7–22.1 (Taylor et al. 1991, Lunar Sourcebook, ch. 6,
+/// Table A6.1, p. 261), and the shergottites', Shergotty's 18.7–19.8 and Zagami's 17.3–19 (Meyer
+/// 2012, Mars Meteorite Compendium, NASA JSC, each one's Table 1a), against the Alae tholeiite's
+/// 11.0 as total `FeO`, 9.80 `FeO` with 1.30 `Fe₂O₃` (Peck 1978, USGS Professional Paper 935-B,
+/// p. B3; a mid-ocean ridge basalt's about 10, not read; science-composition-crusts.md §2.1, §10
+/// and §10.1). Design note 8's basaltic rock, `A_N` 0.05–0.15; a grain density of 3,310 kg m⁻³,
+/// the shergottites' mean (Macke, Britt and Consolmagno 2011, MAPS 46, 311, abstract), inside the
+/// lunar basalts' 3,270 (high-alumina, NWA 4898) to 3,460 kg m⁻³ (high-titanium, 70215), which
+/// rises with `TiO₂` (Kiefer et al. 2012, GRL 39, L07201, abstract and Table 1; a high-titanium
+/// row waits for a second province lithology, science-composition-crusts.md §2); and
+/// [`BASALT_FE_SOLIDUS_K`].
 const BASALT_FE: Substance = Substance {
     key: SubstanceKey::new_const("basalt_fe"),
     normal_albedo_bvr: [0.10; 3],
@@ -270,15 +277,21 @@ const GRANITE: Substance = Substance {
 };
 
 /// A feldspathic crust, as the lunar highlands': a primary flotation crust as basin-scale impacts
-/// mixed it, about 80–90 per cent plagioclase with 4–6 wt% `FeO` in bulk, held in its mafic
-/// minerals (both from memory), more mafic than an anorthosite (the name is Hu, Ehlmann and Seager
-/// 2012's surface type, theirs 97 per cent plagioclase, ApJ 752, 7, Table 2;
-/// science-composition-crusts.md §7). The top of Design note 8's regolith range, 0.07–0.20, the
-/// highlands being its brightest (a body's measurement standing for the substance's); its grain
-/// density, 2,900 kg m⁻³, implied by the highlands' GRAIL bulk density, 2,550 kg m⁻³, at 12 per
-/// cent porosity (Wieczorek et al. 2013, Science 339, 671, who note "2800 to 2900 kg m⁻³ … used
-/// typically for anorthositic crustal materials"; Kiefer et al. 2012, GRL 39, L07201, whose
-/// 2,200–2,600 kg m⁻³ at 10–20 per cent porosity implies 2,750–2,890), against a pure
+/// mixed it, about 75–80 per cent plagioclase by mass (about 80 by volume) with 4–6 wt% `FeO` in
+/// bulk, held in its mafic minerals: the Apollo 16 soils' 76 per cent plagioclase from their
+/// aluminium and the feldspathic lunar meteorites' 64–86, mean 77 (Peplowski, Beck and Lawrence
+/// 2016, JGR Planets 121, 388, eqs. 3 and 4, Tables 1 and 3), the Apollo 16 soils' 4.7–5.4 wt%
+/// `FeO` (McKay et al. 1991, Lunar Sourcebook, ch. 7, Table 7.15, p. 346) and the highlands' about
+/// 5 from orbit (Lawrence et al. 2002, JGR 107, E12, abstract); more mafic than an anorthosite
+/// (the name is Hu, Ehlmann and Seager 2012's surface type, theirs 97 per cent plagioclase, ApJ
+/// 752, 7, Table 2; science-composition-crusts.md §7, §10 and §10.1). The top of Design note 8's
+/// regolith range, 0.07–0.20, the highlands being its brightest (a body's measurement standing for
+/// the substance's); its grain density, 2,900 kg m⁻³, implied by the highlands' GRAIL bulk
+/// density, 2,550 kg m⁻³, at 12 per cent porosity (Wieczorek et al. 2013, Science 339, 671, who
+/// note "2800 to 2900 kg m⁻³ … used typically for anorthositic crustal materials"), inside the
+/// four feldspathic highland rocks' 2,840–2,910 by helium pycnometry (Kiefer et al. 2012, GRL 39,
+/// L07201, Table 1), and what 75–78 per cent An₉₅ plagioclase gives with low-calcium pyroxene and
+/// olivine of Mg# 66–72, 2,880–2,910 (science-composition-crusts.md §10.1), against a pure
 /// anorthosite's about 2,790 (P14.T49.b's row); and [`PLAGIOCLASE_ROCK_SOLIDUS_K`].
 const FELDSPATHIC: Substance = Substance {
     key: SubstanceKey::new_const("feldspathic"),

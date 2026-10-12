@@ -161,7 +161,8 @@ pub struct FieldHeaderParts {
     pub palette: MaterialPalette,
     /// The palette entry of each [`Crust`] variant, in code order (continental, oceanic, lid,
     /// province), whose lithology it names, or `None` where the field names none: an entry of a
-    /// crust's role ([`PaletteRole::is_crust`]).
+    /// role a [`Crust`] variant may take ([`PaletteRole::is_crust`]: a crust's, a province's or an
+    /// undifferentiated body's bulk material).
     pub crust_palette: [Option<u8>; 4],
     /// The palette entry of the body's main liquid, its sea's, or `None`: a
     /// [`PaletteRole::Liquid`] entry.
@@ -217,7 +218,7 @@ pub enum BuildFieldHeaderError {
         /// The part's name.
         part: &'static str,
     },
-    /// A crust's palette entry is past the palette or not of a crust's role.
+    /// A crust's palette entry is past the palette or of a role no [`Crust`] variant may take.
     CrustPalette {
         /// The crust.
         crust: Crust,
@@ -260,7 +261,8 @@ impl std::fmt::Display for BuildFieldHeaderError {
             Self::NotPositive { part } => write!(f, "{part} is not positive"),
             Self::CrustPalette { crust, entry } => write!(
                 f,
-                "the {crust:?} crust's palette entry {entry} is past the palette or not a crust's"
+                "the {crust:?} crust's palette entry {entry} is past the palette or not a \
+                 crust's, a province's or a bulk material's"
             ),
             Self::MainLiquid(entry) => write!(
                 f,
@@ -329,8 +331,8 @@ impl FieldHeader {
     /// radius's spheroid, the months are neither 1 nor 12, the season eccentricity is outside
     /// [0, 1) or not 0 in a one-month year, a step's exponent is above 15, a part is not finite
     /// or out of its range (each part's documentation states it), a crust's palette entry is past
-    /// the palette or not of a crust's role, the main liquid's is past it or not a liquid's, or the
-    /// surface is older than the crater contract's system.
+    /// the palette or of a role no [`Crust`] variant may take, the main liquid's is past it or not a
+    /// liquid's, or the surface is older than the crater contract's system.
     pub fn new(parts: FieldHeaderParts) -> Result<Self, BuildFieldHeaderError> {
         let r = parts.radius.value();
         if !(r.is_finite() && r > 0.0) {
@@ -874,10 +876,11 @@ mod tests {
         assert_eq!(header.palette().len(), 3);
     }
 
-    /// An undifferentiated body's bulk material is a lithology a crust's entry may name: its
-    /// `Bulk` entry is the lid's and the provinces' (science-composition-crusts.md §1).
+    /// An undifferentiated body's bulk material is a lithology a [`Crust`] variant's entry may
+    /// name, though not a crust: its `Bulk` entry is the lid's and the provinces'
+    /// (science-composition-crusts.md §1).
     #[test]
-    fn a_field_header_takes_a_bulk_entry_for_a_crusts_lithology() {
+    fn a_field_header_takes_a_bulk_entry_for_the_lid_and_the_provinces() {
         let mut parts = parts();
         // The Ceres-like palette's water ice and sodium carbonate, then a bulk material.
         let mut entries = parts.palette.entries()[1..].to_vec();
