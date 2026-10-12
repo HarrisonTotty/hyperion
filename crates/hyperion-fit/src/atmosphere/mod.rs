@@ -15,8 +15,9 @@
 //!
 //! - [`case`]: the case format and its validation;
 //! - [`transport`]: the estimator (absorption as a weight, delta tracking, a forced first
-//!   collision, next-event estimation to every sun, a Lambertian ground, Russian roulette and the
-//!   Stokes mode, which scores the scalar radiance of the same paths beside the vector one);
+//!   collision, next-event estimation to every sun, a Lambertian ground, Russian roulette, Buras
+//!   and Mayer 2011's VROOM where a medium is forward-peaked (R08.T12.f) and the Stokes mode,
+//!   which scores the scalar radiance of the same paths beside the vector one);
 //! - [`optics`]: profiles, phase functions (closed forms, tables on u = √(Θ ÷ π) and Legendre
 //!   series) and the block-diagonal scattering matrices;
 //! - [`geometry`]: frames and the shells;
@@ -57,7 +58,7 @@ pub use reference::{
 
 use geometry::ShellGrid;
 use reference::{Moments, REFERENCE_FORMAT};
-use transport::{COMPONENTS, I, Level, Medium, SCALAR_I, Scratch, Source};
+use transport::{COMPONENTS, Estimator, I, Level, Medium, SCALAR_I, Scratch, Source};
 
 use crate::parallel::{BuildThreadPoolError, map_reduce_chunks};
 use crate::tasks::displaced_forms::births::Draws;
@@ -150,6 +151,26 @@ pub fn trace_reference(
     samples: NonZeroU64,
     threads: NonZeroUsize,
 ) -> Result<ReferenceRadiances, TraceReferenceError> {
+    trace_reference_with(case, polarisation, samples, threads, Estimator::ByMedium)
+}
+
+/// [`trace_reference`] with the estimator `estimator`, so that the tests can turn R08.T12.f's
+/// variance reduction on and off.
+///
+/// # Errors
+///
+/// As [`trace_reference`].
+///
+/// # Panics
+///
+/// As [`trace_reference`].
+pub(crate) fn trace_reference_with(
+    case: &AtmosphereCase,
+    polarisation: Polarisation,
+    samples: NonZeroU64,
+    threads: NonZeroUsize,
+    estimator: Estimator,
+) -> Result<ReferenceRadiances, TraceReferenceError> {
     if polarisation == Polarisation::Stokes
         && let Some(term) = case
             .terms()
@@ -167,7 +188,7 @@ pub fn trace_reference(
     }
     let grid = shell_grid(case);
     let media: Vec<Medium<'_>> = (0..case.wavelengths_nm().len())
-        .map(|w| Medium::new(case, &grid, w))
+        .map(|w| Medium::new(case, &grid, w, estimator))
         .collect();
     // Each source with its key: its kind (0 a geometry, 1 an aggregate's ground, 2 its top) above
     // its index within the kind, which the case keeps below 2³².
@@ -435,11 +456,22 @@ mod tests {
         samples: u64,
         threads: usize,
     ) -> ReferenceRadiances {
-        trace_reference(
+        trace_with(value, polarisation, samples, threads, Estimator::ByMedium)
+    }
+
+    fn trace_with(
+        value: &Value,
+        polarisation: Polarisation,
+        samples: u64,
+        threads: usize,
+        estimator: Estimator,
+    ) -> ReferenceRadiances {
+        trace_reference_with(
             &case_of(value),
             polarisation,
             NonZeroU64::new(samples).unwrap(),
             NonZeroUsize::new(threads).unwrap(),
+            estimator,
         )
         .unwrap()
     }
@@ -569,6 +601,53 @@ mod tests {
         let one = trace(&polarising, Polarisation::Stokes, 300, 1).to_json();
         let four = trace(&polarising, Polarisation::Stokes, 300, 4).to_json();
         assert_eq!(one, four);
+        // And R08.T12.f's VROOM deep in a thick forward-peaked slab, τ 5 at g 0.9, where every
+        // path makes clones and many split: 64 samples of eight sources and wavelengths, one block
+        // each, shared among the four threads.
+        let thick = thick_peaked_slab();
+        let one = trace(&thick, Polarisation::Stokes, 64, 1).to_json();
+        let four = trace(&thick, Polarisation::Stokes, 64, 4).to_json();
+        assert_eq!(one, four);
+    }
+
+    /// A conservative slab of τ 5 (550 nm) and 2.5 (440 nm) scattering by Henyey–Greenstein at g
+    /// 0.9 as a table with a matrix, over a black ground and a white one, seen at the top and the
+    /// bottom away from the sun, with an aggregate: VROOM's clones and splits in every sample.
+    fn thick_peaked_slab() -> Value {
+        let terms = json!([{
+            "name": "cloud", "density": uniform(),
+            "scattering": [5e-3, 2.5e-3], "absorption": [0.0, 0.0],
+            "phase": case::tests::tabulated_phase_json(512, 2, |c| {
+                let p = optics::tests::henyey_greenstein(0.9, c);
+                let sin2 = 1.0 - c * c;
+                [p, p, c * p, c * p, -0.2 * sin2 * p, 0.1 * sin2.sqrt() * p]
+            })
+        }]);
+        let mut case = slab(
+            &terms,
+            &json!([0.0, 1.0]),
+            &json!([
+                geometry("down", 0.0, (40.0, 120.0), (30.0, 0.0)),
+                geometry("up", 1000.0, (130.0, 60.0), (30.0, 0.0))
+            ]),
+        );
+        case["aggregates"] =
+            json!([{ "name": "sun", "sunDirections": [{ "zenithDeg": 30.0, "azimuthDeg": 0.0 }] }]);
+        case
+    }
+
+    #[test]
+    fn atmosphere_rayleigh_alone_keeps_the_sunward_draws_paths() {
+        // Where no term is forward-peaked, `Estimator::ByMedium` runs R08.T12.c's estimator, so
+        // that every Rayleigh case's paths are R08.T12.c's to the bit (R08.T12.f).
+        let mut rayleigh = case::tests::sample_case();
+        rayleigh["terms"].as_array_mut().unwrap().remove(1);
+        for polarisation in [Polarisation::Scalar, Polarisation::Stokes] {
+            assert_eq!(
+                trace(&rayleigh, polarisation, 300, 2).to_json(),
+                trace_with(&rayleigh, polarisation, 300, 2, Estimator::SunwardDraws).to_json()
+            );
+        }
     }
 
     /// The sample case with R08.T12.c's paths in it: its aerosol a forward-peaked table
@@ -619,24 +698,27 @@ mod tests {
         // The Stokes mode's counterpart of `atmosphere_reference_bits_are_pinned`, on R08.T12.c's
         // paths (`polarising_case`): the ground view's I, Q, V, scalar radiance and the error of
         // their difference, and the scalar upwelling flux. A change to the tables' draws, the
-        // series' proposal, the sunward draws, the 4 × 4 product or the moments shows here before
-        // it moves a committed reference.
-        let reference = trace(&polarising_case(), Polarisation::Stokes, 64, 1);
-        let ground = &reference.geometries()[0];
-        let stokes = ground.stokes().unwrap();
-        let pinned = [
-            format!("{:?}", ground.radiance()[0]),
-            format!("{:?}", stokes.q()[0]),
-            format!("{:?}", stokes.v()[0]),
-            format!("{:?}", stokes.scalar_radiance()[1]),
-            format!("{:?}", stokes.difference_standard_error()[0]),
-            format!(
-                "{:?}",
-                reference.aggregates()[0].scalar().unwrap().upwelling_top()[0]
-            ),
-        ];
+        // series' proposal, the sunward draws, VROOM, the 4 × 4 product or the moments shows here
+        // before it moves a committed reference.
+        let pinned = |estimator: Estimator| {
+            let reference = trace_with(&polarising_case(), Polarisation::Stokes, 64, 1, estimator);
+            let ground = &reference.geometries()[0];
+            let stokes = ground.stokes().unwrap();
+            [
+                format!("{:?}", ground.radiance()[0]),
+                format!("{:?}", stokes.q()[0]),
+                format!("{:?}", stokes.v()[0]),
+                format!("{:?}", stokes.scalar_radiance()[1]),
+                format!("{:?}", stokes.difference_standard_error()[0]),
+                format!(
+                    "{:?}",
+                    reference.aggregates()[0].scalar().unwrap().upwelling_top()[0]
+                ),
+            ]
+        };
+        // R08.T12.c's estimator, unchanged to the bit by R08.T12.f.
         assert_eq!(
-            pinned,
+            pinned(Estimator::SunwardDraws),
             [
                 "0.051914114460382",
                 "-0.005734264674987712",
@@ -646,14 +728,54 @@ mod tests {
                 "0.5466892681652658"
             ]
         );
+        // VROOM, which the peaked table turns on, as every reference of the case now runs.
+        assert_eq!(pinned(Estimator::ByMedium), pinned(Estimator::Vroom));
+        assert_eq!(
+            pinned(Estimator::ByMedium),
+            [
+                "0.050112677671275564",
+                "-0.005845951069894733",
+                "-7.921756602999342e-6",
+                "0.09859597110749957",
+                "0.00024901108218867773",
+                "0.5249233156144391"
+            ]
+        );
+    }
+
+    /// Asserts that a standard error `full` falls as N^(−1/2) from `quarter`'s, over the run's
+    /// first quarter, to 25% (`decision-r08-t4b-t12c.md`, follow-up, ruling 7): every σ a
+    /// statistical test asserts must.
+    fn assert_sigma_scales(full: f64, quarter: f64, what: &str) {
+        assert!(
+            benchmarks::sigma_scales(full, quarter),
+            "{what}: σ {full} does not fall as N^(-1/2) from {quarter} at N ÷ 4"
+        );
+    }
+
+    /// `value` traced in the scalar mode at `samples` on four threads, after asserting that every
+    /// geometry's σ falls as N^(−1/2) from the run's first quarter.
+    fn trace_scaling(value: &Value, samples: u64) -> ReferenceRadiances {
+        let full = trace(value, Polarisation::Scalar, samples, 4);
+        let quarter = trace(value, Polarisation::Scalar, samples / 4, 4);
+        for (g, first) in full.geometries().iter().zip(quarter.geometries()) {
+            for (sigma, quarter_sigma) in g.standard_error().iter().zip(first.standard_error()) {
+                assert_sigma_scales(*sigma, *quarter_sigma, g.name());
+            }
+        }
+        full
     }
 
     #[test]
-    fn atmosphere_sunward_draws_keep_a_forward_peaked_slab_unbiased() {
+    fn atmosphere_vroom_keeps_a_forward_peaked_slab_unbiased() {
         // Henyey–Greenstein at g 0.9 as a table, a conservative slab of τ 1 over a black ground
         // (550 nm) and a white one (440 nm), so that every vertex draws towards the suns: energy
         // is conserved to 4σ, as in the Rayleigh slab, and two suns in different directions give
-        // the sum of the two lit alone, whose paths draw towards other suns, to 4σ.
+        // the sum of the two lit alone, whose paths draw towards other suns, to 4σ. The peak
+        // turns on R08.T12.f's VROOM, whose clones draw sunward at every vertex. R08.T12.c's
+        // sunward draws alone passed this test as built (it was
+        // `atmosphere_sunward_draws_keep_a_forward_peaked_slab_unbiased`), and are pinned to the
+        // bit since (`atmosphere_reference_bits_are_pinned`).
         let terms = json!([{
             "name": "haze", "density": uniform(),
             "scattering": [1e-3, 1e-3], "absorption": [0.0, 0.0],
@@ -667,11 +789,13 @@ mod tests {
             { "name": "low", "sunDirections": [{ "zenithDeg": 65.0, "azimuthDeg": 0.0 }] }
         ]);
         // The diffuse flux at the ground carries the aureole's noise, which the hemisphere's draws
-        // do not aim at: σ is 1.4% of the incident flux at 20,000 samples with the sun high, and
-        // 1.3% at 80,000 with it at 65° (measured), so the test holds σ under 2%. A flaw in the
-        // sunward weights would be far larger: leaving out the mixture's branch alone is 25%.
+        // do not aim at: σ is 0.68% of the incident flux at 80,000 samples with the sun high, and
+        // 1.17% with it at 65° (measured; 0.70% and 1.30% by R08.T12.c's estimator), so the test
+        // holds σ under 2%. A flaw in the sunward weights would be far larger: leaving out the
+        // mixture's branch alone is 25%.
         let reference = trace(&case, Polarisation::Scalar, 80_000, 4);
-        for aggregate in reference.aggregates() {
+        let quarter = trace(&case, Polarisation::Scalar, 20_000, 4);
+        for (aggregate, first) in reference.aggregates().iter().zip(quarter.aggregates()) {
             let incident = aggregate.incident_top();
             let total = aggregate.upwelling_top()[0]
                 + aggregate.direct_ground()[0]
@@ -679,6 +803,18 @@ mod tests {
             let sigma = math::hypot(
                 aggregate.upwelling_top_standard_error()[0],
                 aggregate.diffuse_ground_standard_error()[0],
+            );
+            for w in 0..2 {
+                assert_sigma_scales(
+                    aggregate.upwelling_top_standard_error()[w],
+                    first.upwelling_top_standard_error()[w],
+                    aggregate.name(),
+                );
+            }
+            assert_sigma_scales(
+                aggregate.diffuse_ground_standard_error()[0],
+                first.diffuse_ground_standard_error()[0],
+                aggregate.name(),
             );
             assert!(
                 (total - incident[0]).abs() < 4.0 * sigma && sigma < 0.02 * incident[0],
@@ -716,11 +852,12 @@ mod tests {
                         .collect::<Vec<Value>>()
                 );
             }
-            trace(&case, Polarisation::Scalar, 60_000, 4)
+            trace_scaling(&case, 60_000)
         };
-        // The view down from the top is dim under so forward a haze, and its σ falls slowly: 3.5%
-        // at 20,000 samples and 2.7% at 60,000 (measured), so the test holds σ under 4%; the view
-        // up from the ground is near 1%.
+        // The view down from the top is dim under so forward a haze: the comparison's σ is 1.7%
+        // at 60,000 samples (measured; R08.T12.c's estimator, whose σ fell slowly there, 3.5% at
+        // 20,000 and 2.7% at 60,000), so the test holds σ under 4%; the view up from the ground
+        // is near 0.6%.
         let (a, b) = ((20.0, 0.0, 1.0), (60.0, 140.0, 0.5));
         let [both, only_a, only_b] = [vec![a, b], vec![a], vec![b]].map(|s| with_suns(&s));
         for ((g, ga), gb) in both
@@ -750,14 +887,32 @@ mod tests {
         // Two of the sample case's values to the last bit, so that a change to the estimator,
         // its draws or `births::Draws` shows here before it moves every committed reference
         // (R08.T12.b). A deliberate change updates both, and the references are traced again.
-        let reference = trace(&case::tests::sample_case(), Polarisation::Scalar, 64, 1);
-        let pinned = [
-            format!("{:?}", reference.geometries()[0].radiance()[0]),
-            format!("{:?}", reference.aggregates()[0].upwelling_top()[1]),
-        ];
+        let pinned = |estimator: Estimator| {
+            let reference = trace_with(
+                &case::tests::sample_case(),
+                Polarisation::Scalar,
+                64,
+                1,
+                estimator,
+            );
+            [
+                format!("{:?}", reference.geometries()[0].radiance()[0]),
+                format!("{:?}", reference.aggregates()[0].upwelling_top()[1]),
+            ]
+        };
         // The ground view moved with R08.T12.c's sun-directed draws, which its Cornette–Shanks
         // aerosol takes where it is forward-peaked; it was 0.039731668489903935 in R08.T12.a.
-        assert_eq!(pinned, ["0.04009082837728386", "0.5324772871217555"]);
+        // R08.T12.f leaves that estimator unchanged to the bit.
+        assert_eq!(
+            pinned(Estimator::SunwardDraws),
+            ["0.04009082837728386", "0.5324772871217555"]
+        );
+        // Both values moved with R08.T12.f's VROOM, which the aerosol's forward value of
+        // 4.1 sr⁻¹ turns on at both wavelengths.
+        assert_eq!(
+            pinned(Estimator::ByMedium),
+            ["0.04122938235795757", "0.5181556568558089"]
+        );
     }
 
     #[test]
@@ -1885,22 +2040,42 @@ mod tests {
         // normal gravity or the majorants shows here before it moves a committed reference. A
         // ground view at 60°, the top flux at 45°, the view down from orbit (the entry through
         // the top), and the pole's direct beam, which no draw touches.
-        let reference = trace(&case::tests::saturn_case(), Polarisation::Scalar, 64, 1);
-        let pinned = [
-            format!("{:?}", reference.geometries()[1].radiance()[0]),
-            format!("{:?}", reference.aggregates()[0].upwelling_top()[1]),
-            format!("{:?}", reference.geometries()[3].radiance()[0]),
-            format!(
-                "{:?}",
-                reference.geometries()[2].sun_optical_depth()[0][0].unwrap()
-            ),
-        ];
+        let pinned = |estimator: Estimator| {
+            let reference = trace_with(
+                &case::tests::saturn_case(),
+                Polarisation::Scalar,
+                64,
+                1,
+                estimator,
+            );
+            [
+                format!("{:?}", reference.geometries()[1].radiance()[0]),
+                format!("{:?}", reference.aggregates()[0].upwelling_top()[1]),
+                format!("{:?}", reference.geometries()[3].radiance()[0]),
+                format!(
+                    "{:?}",
+                    reference.geometries()[2].sun_optical_depth()[0][0].unwrap()
+                ),
+            ]
+        };
+        // R08.T12.c's estimator, unchanged to the bit by R08.T12.f.
         assert_eq!(
-            pinned,
+            pinned(Estimator::SunwardDraws),
             [
                 "0.2276473839689261",
                 "0.8929036838129342",
                 "0.2583970654014467",
+                "1.3245982101763956"
+            ]
+        );
+        // VROOM, which the haze's forward peak turns on, moved the three traced values; the beam
+        // is a quadrature.
+        assert_eq!(
+            pinned(Estimator::ByMedium),
+            [
+                "0.23452698641642764",
+                "0.7895400585805432",
+                "0.25315517266447024",
                 "1.3245982101763956"
             ]
         );

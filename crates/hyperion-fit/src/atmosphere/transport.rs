@@ -47,6 +47,65 @@
 //!   Elsewhere, Rayleigh's sky included, directions are drawn as before. The roulette's threshold
 //!   scales with every such importance weight (a Legendre series' too), so that the roulette
 //!   answers to losses alone.
+//! - **VROOM** (R08.T12.f) at every wavelength where a term is forward-peaked: the variance
+//!   reduction of Buras and Mayer 2011 (above), §2.2–2.6, ported from the paper, for media as
+//!   sharply peaked as a water cloud's diffraction peak (280–620 sr⁻¹ forward in the benchmarks'
+//!   clouds, about 1° wide). The sunward draws alone leave such a medium's estimate heavy-tailed:
+//!   a path whose direction diffuses into a sun's peak by small scatterings, each old and new
+//!   direction inside the same peak, keeps its weight, and scores the peak (R08.T12.e measured σ
+//!   falling more slowly than N^(−1/2) at τ 5, and the estimate converging from below). VROOM's
+//!   four methods, none of which alters the phase function, so that none biases:
+//!   - _The n-tuple local estimate_ (§2.3). The mother path estimates at its first
+//!     [`MOTHER_ORDERS`] vertices (the forced collision or the ground seen directly is the first),
+//!     its draws guided below that order and natural, from the phase function about the old
+//!     direction, from it on. At its vertex of order m = [`MOTHER_ORDERS`] +
+//!     i [`ESTIMATES_PER_CLONE`], i = 0, 1, …, a clone is made, the mother's state there, which
+//!     scatters there itself and follows its own guided path. Clone i estimates at its orders
+//!     [`CLONE_SCATTERINGS`] to [`CLONE_SCATTERINGS`] + [`ESTIMATES_PER_CLONE`] − 1, counted from m
+//!     as its first, that is at the mother's orders m + [`CLONE_SCATTERINGS`] − 1 onwards, and the
+//!     first clone at every order from [`MOTHER_ORDERS`] + 1, so that every order of the von
+//!     Neumann series is estimated once. Given the mother's state at m, a clone's weighted
+//!     estimates keep the expectations of the mother's own at those orders, while the mother's
+//!     weight, and so the depth it reaches in a thick cloud, is thinned by importance sampling at
+//!     its first orders alone.
+//!   - _Sunward draws_ (§2.2, DDIS) at every vertex of a clone and at the mother's below
+//!     [`MOTHER_ORDERS`] (the scatterings whose next estimate is the mother's own, `n_firstCP` − 1
+//!     of them as the paper's Fig. 8 and §2.4 have it; its §2.6 says the first `n_firstCP`), with
+//!     the fraction [`VROOM_SUNWARD_FRACTION`]. The sunward branch draws from the vertex's own
+//!     phase mixture, R08.T12.c's, where the paper's eq. 10 takes the largest of the scene's phase
+//!     functions; the two agree in a medium of one term, and either is unbiased.
+//!   - _Prediction-based splitting_ (§2.4, PBS). After each such vertex the path's next estimate
+//!     is predicted as w = W p(μ′) ÷ max(1, the least of the path's earlier predictions), W the
+//!     weight relative to the sample's first-flight weight (which its clones and copies inherit)
+//!     and p(μ′) 4π times the largest of the terms' phase functions at the new direction's cosine
+//!     with a sun, the largest over the suns: the paper's phase functions are normalised to 2 over
+//!     μ, so 4π times this tracer's. Where w passes [`SPLIT_ABOVE`] the path is split into ⌊w⌋
+//!     copies (at most [`MOST_COPIES`]), each with the weight ÷ ⌊w⌋, followed one after another.
+//!     Splitting is unbiased, and it turns the rare path that heads into a sun's peak with its
+//!     weight unthinned, whose estimate a few vertices on is a spike, into many paths whose
+//!     estimates average it.
+//!   - _Prediction-based Russian roulette_ (§2.4, PBRR). Where w falls below [`ROULETTE_BELOW`]
+//!     at such a vertex the path survives with probability max(w, [`LEAST_SURVIVAL`]), its weight
+//!     divided by it, never above its first-flight weight, so that the many thinned paths that
+//!     cannot score much cost little. The paper's §2.6 plays it at every vertex; here it plays at
+//!     the guided ones alone, so not on the natural mother past its first orders, whose weight
+//!     changes by losses alone (the cap would keep a full-weight mother out of it anyway).
+//!     Leaving a roulette out is unbiased.
+//!
+//!   The paper's fifth method, circumsolar virtual importance sampling (§2.5), is for a detector
+//!   that looks into or near a sun through a thin peaked medium (its trigger, `w_redspl` > 10,
+//!   holds within some 7°–8° of the sun in the benchmarks' clouds); no benchmark looks within 15°
+//!   of a sun, so it is not built, and a reference's view a few degrees from a sun through a thin
+//!   peaked layer relies on its N^(−1/2) check. Iwabuchi 2006 (J. Atmos. Sci. 63, 2324;
+//!   doi:10.1175/JAS3755.1; its text was not reachable here) was weighed from its abstract and
+//!   Buras and Mayer's account: its truncation approximation alters the phase function and biases
+//!   by an amount the run cannot state (Buras and Mayer, §1), and its modified local estimate, a
+//!   roulette of the estimate's own ray, saves time, not variance (ibid., §2.6); its collision
+//!   forcing for optically thin media and its numerical diffusion technique were weighed from the
+//!   abstract only. The draws stay counter-based per sample: a sample's clones and copies are
+//!   followed in a fixed order from its own stream. Elsewhere (a medium whose every term is at
+//!   most [`FORWARD_PEAK_PER_SR`] forward, Rayleigh's sky among them) the paths are R08.T12.c's,
+//!   bit for bit.
 //!
 //! The quadrature is 8-point Gauss–Legendre on each shell's piece of a ray, where the integrand is
 //! smooth: the profiles' kinks are shell boundaries, and an exponential profile changes by at most
@@ -112,6 +171,46 @@ pub(crate) const FORWARD_PEAK_PER_SR: f64 = 1.0;
 /// of the others, for an exact draw.
 pub(crate) const SUNWARD_FRACTION: f64 = 0.2;
 
+/// VROOM's fraction of sunward draws, `ε_DDIS` (Buras and Mayer 2011, §2.6): smaller than
+/// [`SUNWARD_FRACTION`], since a clone draws sunward at up to [`CLONE_SCATTERINGS`] +
+/// [`ESTIMATES_PER_CLONE`] − 1 vertices in a row and each natural draw's weight grows by up to
+/// 1 ÷ (1 − this).
+pub(crate) const VROOM_SUNWARD_FRACTION: f64 = 0.1;
+
+/// The mother path's vertices that estimate, `n_firstCP` (Buras and Mayer 2011, §2.3 and §2.6): the
+/// first clone is made at the last of them.
+pub(crate) const MOTHER_ORDERS: u32 = 4;
+
+/// A clone's first estimate is at its own order this, its first vertex the mother's where it was
+/// made, `n_scCP` (Buras and Mayer 2011, §2.3 and §2.6): about the scatterings a path takes to
+/// forget its direction in a cloud, so that its estimates no longer remember the mother's.
+pub(crate) const CLONE_SCATTERINGS: u32 = 12;
+
+/// The estimates each clone but the first makes, at consecutive orders, `n_LEperCP` (Buras and
+/// Mayer 2011, §2.3 and §2.6), the first making [`CLONE_SCATTERINGS`] + this − 2 from the mother's
+/// last: a clone is made every this many of the mother's orders.
+pub(crate) const ESTIMATES_PER_CLONE: u32 = 11;
+
+/// A path is split where its predicted estimate passes this, `w_crit,spl` (Buras and Mayer 2011,
+/// §2.4 and §2.6), the prediction in the paper's units (4π times this tracer's phase functions, so
+/// that an isotropic scatterer's is 1 at the sample's first-flight weight).
+pub(crate) const SPLIT_ABOVE: f64 = 3.0;
+
+/// The most copies one split makes, `n_spl,max` (Buras and Mayer 2011, §2.4 and §2.6).
+pub(crate) const MOST_COPIES: u32 = 5000;
+
+/// A path plays prediction-based Russian roulette where its predicted estimate is below this,
+/// `w_crit,rr` (Buras and Mayer 2011, §2.4 and §2.6).
+pub(crate) const ROULETTE_BELOW: f64 = 1.0 / 3.0;
+
+/// The least probability with which a path survives the prediction-based roulette, `w_rr,min`
+/// (Buras and Mayer 2011, §2.4 and §2.6).
+pub(crate) const LEAST_SURVIVAL: f64 = 0.2;
+
+/// 4π: the paper's phase functions over this tracer's (theirs integrate to 2 over μ, these to 1
+/// over the sphere).
+const PAPER_PHASE_SCALE: f64 = 4.0 * PI;
+
 /// A sun's transmittance is taken as zero once its optical depth passes this: e^(−50) is
 /// 2 × 10⁻²², below any radiance a case compares.
 const NEGLIGIBLE_OPTICAL_DEPTH: f64 = 50.0;
@@ -141,6 +240,25 @@ pub(crate) struct Medium<'a> {
     ground_albedo: f64,
     /// Per sun, in the case's unit.
     irradiance: Vec<f64>,
+    /// Whether the samples run VROOM (module documentation), or R08.T12.c's estimator.
+    vroom: bool,
+}
+
+/// Which estimator a medium's samples run (module documentation; R08.T12.f).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) enum Estimator {
+    /// VROOM at a wavelength where some term that scatters is forward-peaked (its phase function
+    /// forward passes [`FORWARD_PEAK_PER_SR`]), R08.T12.c's estimator elsewhere: what every
+    /// reference runs.
+    #[default]
+    ByMedium,
+    /// R08.T12.c's estimator everywhere: an estimate at every vertex, sunward draws at every
+    /// forward-peaked one, no clones, splitting or prediction-based roulette.
+    #[cfg(test)]
+    SunwardDraws,
+    /// VROOM everywhere.
+    #[cfg(test)]
+    Vroom,
 }
 
 /// How a sample is aimed.
@@ -224,6 +342,24 @@ fn count(n: usize) -> f64 {
     f64::from(u32::try_from(n).expect("a case has fewer than 2³² suns"))
 }
 
+/// The copies a split makes of a path whose predicted estimate is `predicted`, which passes
+/// [`SPLIT_ABOVE`]: ⌊`predicted`⌋, at most [`MOST_COPIES`] (Buras and Mayer 2011, §2.4: their
+/// `n_spl = int(w_spl)`).
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a whole number from 3 to MOST_COPIES, exact in a u32: the callers pass only a \
+              prediction above SPLIT_ABOVE, never NaN, which the clamp would keep"
+)]
+#[must_use]
+fn split_count(predicted: f64) -> u32 {
+    debug_assert!(
+        predicted > SPLIT_ABOVE,
+        "{predicted} is not above SPLIT_ABOVE"
+    );
+    predicted.clamp(SPLIT_ABOVE, f64::from(MOST_COPIES)).floor() as u32
+}
+
 /// An index drawn uniformly from `0..n`, `n` positive; no draw for `n` = 1.
 fn uniform_index(n: usize, draws: &mut Draws) -> usize {
     if n == 1 {
@@ -247,6 +383,8 @@ pub(crate) fn sun_vectors(frame: &LocalFrame, directions: &[LocalDirection]) -> 
 pub(crate) struct Scratch {
     pieces: Vec<Piece>,
     terms_per_m: Vec<f64>,
+    /// The branches waiting to be followed, each with its number of copies.
+    pending: Vec<(Branch, u32)>,
 }
 
 /// One shell's stretch of the first flight.
@@ -381,11 +519,29 @@ struct Walker {
     /// The weight below which the path plays Russian roulette.
     roulette: f64,
     stokes: Option<Stokes>,
+    /// The order of the vertex the path is at, or flies to: 1 at the branch's first.
+    order: u32,
+    /// The weight of the sample's first flight this path descends from (the forced collision's,
+    /// or the ground seen directly), which its clones and copies inherit: VROOM's unit of weight.
+    unit: f64,
+    /// The least prediction, in the paper's units, of the path's directions so far, its first
+    /// flight's included: Buras and Mayer 2011's `w_redspl` (§2.4), which damps the splitting of a
+    /// path that has pointed at a sun from the start. Infinite where VROOM is off.
+    least_prediction: f64,
 }
 
 impl Walker {
-    /// A branch starting at `position_m` along `dir` in `shell` with `weight`.
-    fn new(position_m: Vec3, dir: Vec3, shell: usize, weight: f64, stokes: Option<Stokes>) -> Self {
+    /// A branch starting at `position_m` along `dir` in `shell` with `weight`, its first
+    /// direction's prediction `prediction` (infinite where VROOM is off).
+    #[must_use]
+    fn new(
+        position_m: Vec3,
+        dir: Vec3,
+        shell: usize,
+        weight: f64,
+        stokes: Option<Stokes>,
+        prediction: f64,
+    ) -> Self {
         Self {
             position_m,
             dir,
@@ -393,14 +549,116 @@ impl Walker {
             weight,
             roulette: ROULETTE_FRACTION * weight,
             stokes,
+            order: 1,
+            unit: weight,
+            least_prediction: prediction,
         }
     }
 }
 
-impl<'a> Medium<'a> {
-    /// The medium of `case` at wavelength index `wavelength`, on `grid`.
+/// What a path does at its vertices under VROOM's n-tuple local estimate (module documentation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Role {
+    /// The mother path: R08.T12.c's every path, or VROOM's natural one.
+    Mother,
+    /// A clone, which estimates at the orders `first..=last` and ends at `last`.
+    Clone { first: u32, last: u32 },
+}
+
+impl Role {
+    /// The clone the mother makes at its vertex of order `order`, if it makes one there.
     #[must_use]
-    pub(crate) fn new(case: &'a AtmosphereCase, grid: &'a ShellGrid, wavelength: usize) -> Self {
+    fn clone_made_at(order: u32) -> Option<Self> {
+        let since = order.checked_sub(MOTHER_ORDERS)?;
+        if since % ESTIMATES_PER_CLONE != 0 {
+            return None;
+        }
+        // Clone i covers the mother's orders m + n_scCP − 1 to m + n_scCP + n_LEperCP − 2, and the
+        // first also the orders between the mother's last estimate and its own block.
+        let last = order + CLONE_SCATTERINGS + ESTIMATES_PER_CLONE - 2;
+        let first = if since == 0 {
+            MOTHER_ORDERS + 1
+        } else {
+            order + CLONE_SCATTERINGS - 1
+        };
+        Some(Self::Clone { first, last })
+    }
+
+    /// Whether the path estimates at its vertex of order `order`.
+    #[must_use]
+    fn estimates(self, order: u32) -> bool {
+        match self {
+            Self::Mother => order <= MOTHER_ORDERS,
+            Self::Clone { first, last } => (first..=last).contains(&order),
+        }
+    }
+
+    /// Whether the path's draw at its vertex of order `order` is guided (sunward draws, splitting
+    /// and the prediction-based roulette): every clone's, and the mother's whose next estimate is
+    /// its own.
+    #[must_use]
+    fn guided(self, order: u32) -> bool {
+        match self {
+            Self::Mother => order < MOTHER_ORDERS,
+            Self::Clone { .. } => true,
+        }
+    }
+
+    /// The path's duty at its vertex of order `order` under VROOM.
+    #[must_use]
+    fn duty(self, order: u32) -> Duty {
+        Duty {
+            estimates: self.estimates(order),
+            guided: self.guided(order),
+        }
+    }
+}
+
+/// What a path does at one vertex.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Duty {
+    /// The path adds its next-event estimates there.
+    estimates: bool,
+    /// Its draw there is guided: drawn partly sunward where the vertex is forward-peaked, then,
+    /// under VROOM, split or rouletted by its prediction.
+    guided: bool,
+}
+
+impl Duty {
+    /// R08.T12.c's duty at every vertex: an estimate, and a guided draw.
+    const EVERYWHERE: Self = Self {
+        estimates: true,
+        guided: true,
+    };
+}
+
+/// A path waiting to be followed from a vertex.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Branch {
+    stage: Stage,
+    walker: Walker,
+    role: Role,
+}
+
+/// Where a waiting branch takes up its path.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stage {
+    /// At a vertex, before it scatters or reflects there: a first flight's end, or a clone's.
+    At(Vertex),
+    /// Having scattered or reflected at its vertex, and split there: a split's copy flies on.
+    Leaving,
+}
+
+impl<'a> Medium<'a> {
+    /// The medium of `case` at wavelength index `wavelength`, on `grid`, its samples running
+    /// `estimator`.
+    #[must_use]
+    pub(crate) fn new(
+        case: &'a AtmosphereCase,
+        grid: &'a ShellGrid,
+        wavelength: usize,
+        estimator: Estimator,
+    ) -> Self {
         let terms = case.terms();
         let profiles: Vec<&DensityProfile> = terms.iter().map(|t| &t.density).collect();
         let scattering_per_m: Vec<f64> = terms
@@ -426,9 +684,21 @@ impl<'a> Medium<'a> {
             .iter()
             .map(|t| Phase::of(&t.phase, wavelength))
             .collect();
+        let forward_per_sr: Vec<f64> = phases.iter().map(|p| p.value(1.0)).collect();
+        let vroom = match estimator {
+            Estimator::ByMedium => forward_per_sr
+                .iter()
+                .zip(&scattering_per_m)
+                .any(|(&forward, &s)| s > 0.0 && forward > FORWARD_PEAK_PER_SR),
+            #[cfg(test)]
+            Estimator::SunwardDraws => false,
+            #[cfg(test)]
+            Estimator::Vroom => true,
+        };
         Self {
             grid,
-            forward_per_sr: phases.iter().map(|p| p.value(1.0)).collect(),
+            forward_per_sr,
+            vroom,
             phases,
             absorbs: absorption_per_m.iter().any(|&a| a > 0.0),
             profiles,
@@ -618,12 +888,13 @@ impl<'a> Medium<'a> {
         let end = self.first_flight(start_m, look, shell, cut_m, &mut scratch.pieces);
         let scattering_depth: f64 = scratch.pieces.iter().map(|p| p.scattering_depth).sum();
         let absorption_depth: f64 = scratch.pieces.iter().map(|p| p.absorption_depth).sum();
+        let prediction = self.prediction(look, &source.suns);
         if scattering_depth > 0.0 {
             let collided = -math::exp_m1(-scattering_depth);
             let target = -math::ln_1p(-draws.uniform() * collided);
             let (at_m, shell, absorbed) = self.forced_collision(&scratch.pieces, look, target);
             let weight = collided * math::exp(-absorbed);
-            let walker = Walker::new(at_m, look, shell, weight, stokes);
+            let walker = Walker::new(at_m, look, shell, weight, stokes, prediction);
             self.follow(
                 Vertex::Scatter,
                 walker,
@@ -635,7 +906,7 @@ impl<'a> Medium<'a> {
         }
         if let FirstEnd::Ground(at_m) = end {
             let weight = math::exp(-scattering_depth - absorption_depth);
-            let walker = Walker::new(at_m, look, 0, weight, stokes);
+            let walker = Walker::new(at_m, look, 0, weight, stokes, prediction);
             self.follow(
                 Vertex::Ground,
                 walker,
@@ -824,29 +1095,79 @@ impl<'a> Medium<'a> {
         z
     }
 
-    /// Follows a path from a vertex until it escapes or is lost to roulette, adding its
-    /// next-event estimates to `out`.
+    /// The prediction of a path's next estimate along `dir` at unit relative weight, in the
+    /// paper's units (module documentation): 4π times the largest of the terms' phase functions
+    /// at the cosine of `dir` with a sun, the largest over the suns, whose irradiance it leaves
+    /// out so that the draws do not depend on it. Infinite where VROOM is off, which never reads
+    /// it.
+    #[must_use]
+    fn prediction(&self, dir: Vec3, suns: &[Vec3]) -> f64 {
+        if !self.vroom {
+            return f64::INFINITY;
+        }
+        let largest = suns
+            .iter()
+            .map(|&sun| {
+                let cos_theta = sun.dot(dir).clamp(-1.0, 1.0);
+                self.phases
+                    .iter()
+                    .zip(&self.scattering_per_m)
+                    .filter(|&(_, &s)| s > 0.0)
+                    .map(|(phase, _)| phase.value(cos_theta))
+                    .fold(0.0, f64::max)
+            })
+            .fold(0.0, f64::max);
+        PAPER_PHASE_SCALE * largest
+    }
+
+    /// Follows a path from a vertex, with every clone and copy it makes under VROOM, until each
+    /// escapes, ends or is lost to roulette, adding their next-event estimates to `out`. The
+    /// branches wait on a stack and are followed one after another, the last made first, so
+    /// that their draws come from the sample's stream in a fixed order.
     fn follow(
         &self,
-        mut vertex: Vertex,
-        mut walker: Walker,
+        vertex: Vertex,
+        walker: Walker,
         suns: &[Vec3],
         draws: &mut Draws,
         scratch: &mut Scratch,
         out: &mut [f64; COMPONENTS],
     ) {
-        loop {
-            match vertex {
-                Vertex::Scatter => {
-                    if !self.scatter(&mut walker, suns, draws, scratch, out) {
-                        return;
-                    }
-                }
-                Vertex::Ground => self.reflect(&mut walker, suns, draws, out),
+        let mut pending = core::mem::take(&mut scratch.pending);
+        pending.clear();
+        pending.push((
+            Branch {
+                stage: Stage::At(vertex),
+                walker,
+                role: Role::Mother,
+            },
+            1,
+        ));
+        while let Some((branch, copies)) = pending.pop() {
+            if copies > 1 {
+                pending.push((branch, copies - 1));
             }
-            if walker.weight <= 0.0 {
+            self.walk(branch, suns, draws, scratch, &mut pending, out);
+        }
+        scratch.pending = pending;
+    }
+
+    /// Follows one branch from where it waits until it escapes, ends or is lost to roulette, adding
+    /// its next-event estimates to `out` and the clones and copies it makes to `pending`.
+    fn walk(
+        &self,
+        mut branch: Branch,
+        suns: &[Vec3],
+        draws: &mut Draws,
+        scratch: &mut Scratch,
+        pending: &mut Vec<(Branch, u32)>,
+        out: &mut [f64; COMPONENTS],
+    ) {
+        loop {
+            if !self.visit(&mut branch, suns, draws, scratch, pending, out) {
                 return;
             }
+            let walker = &mut branch.walker;
             if walker.weight < walker.roulette {
                 if draws.uniform() * walker.roulette < walker.weight {
                     walker.weight = walker.roulette;
@@ -854,22 +1175,115 @@ impl<'a> Medium<'a> {
                     return;
                 }
             }
-            vertex = match self.fly(&mut walker, draws) {
-                Event::Scatter => Vertex::Scatter,
-                Event::Ground => Vertex::Ground,
+            branch.stage = match self.fly(walker, draws) {
+                Event::Scatter => Stage::At(Vertex::Scatter),
+                Event::Ground => Stage::At(Vertex::Ground),
                 Event::Escape => return,
             };
+            // No path reaches 2³² vertices: it escapes or is lost within some τ² of them, τ the
+            // medium's optical depth, even where nothing is lost and the roulette never plays;
+            // a saturated order makes no clone and estimates nowhere.
+            walker.order = walker.order.saturating_add(1);
         }
     }
 
-    /// At a scattering vertex: adds each sun's next-event estimate to `out` and turns the walker
-    /// into a direction drawn from the terms' phase functions there, its weight times the draw's.
-    /// `false` if nothing scatters at the vertex, or the draw carries no weight, which ends the
-    /// path.
+    /// The branch's work at its vertex, if it waits at one (a split's copy does not): under VROOM
+    /// the mother's clone made there, then the scattering or reflection with its estimate, then
+    /// VROOM's splitting, whose copies wait in `pending` to fly on, or its roulette. `false` if the
+    /// branch ends there.
+    fn visit(
+        &self,
+        branch: &mut Branch,
+        suns: &[Vec3],
+        draws: &mut Draws,
+        scratch: &mut Scratch,
+        pending: &mut Vec<(Branch, u32)>,
+        out: &mut [f64; COMPONENTS],
+    ) -> bool {
+        let Stage::At(vertex) = branch.stage else {
+            return true;
+        };
+        let order = branch.walker.order;
+        let duty = if self.vroom {
+            if branch.role == Role::Mother
+                && let Some(clone) = Role::clone_made_at(order)
+            {
+                // The mother's state at the vertex, before it scatters there.
+                pending.push((
+                    Branch {
+                        role: clone,
+                        ..*branch
+                    },
+                    1,
+                ));
+            }
+            branch.role.duty(order)
+        } else {
+            Duty::EVERYWHERE
+        };
+        let walker = &mut branch.walker;
+        match vertex {
+            Vertex::Scatter => {
+                if !self.scatter(walker, suns, duty, draws, scratch, out) {
+                    return false;
+                }
+            }
+            Vertex::Ground => self.reflect(walker, suns, duty, draws, out),
+        }
+        if walker.weight <= 0.0 {
+            return false;
+        }
+        if let Role::Clone { last, .. } = branch.role
+            && order >= last
+        {
+            return false;
+        }
+        if !self.vroom {
+            return true;
+        }
+        let prediction = self.prediction(walker.dir, suns);
+        let relative = walker.weight / walker.unit;
+        let predicted = relative * prediction / walker.least_prediction.max(1.0);
+        walker.least_prediction = walker.least_prediction.min(prediction);
+        if duty.guided && predicted > SPLIT_ABOVE {
+            // Prediction-based splitting: ⌊w⌋ copies, the roulette's threshold divided with the
+            // weight, so that the copies are not rouletted for being copies. The others wait to
+            // fly on from here.
+            let copies = split_count(predicted);
+            let share = 1.0 / f64::from(copies);
+            walker.weight *= share;
+            walker.roulette *= share;
+            pending.push((
+                Branch {
+                    stage: Stage::Leaving,
+                    ..*branch
+                },
+                copies - 1,
+            ));
+        } else if duty.guided && predicted < ROULETTE_BELOW {
+            // Prediction-based roulette, never lifting the weight past the first flight's.
+            let survival = predicted.max(LEAST_SURVIVAL).max(relative);
+            if survival < 1.0 {
+                if draws.uniform() < survival {
+                    walker.weight /= survival;
+                } else {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// At a scattering vertex: adds each sun's next-event estimate to `out` if the path's `duty`
+    /// is to estimate there, and turns the walker into a direction drawn from the terms' phase
+    /// functions there, partly towards the suns where the vertex is forward-peaked and the draw
+    /// guided, its weight times the draw's. `false` if nothing scatters at the vertex, or the draw
+    /// carries no weight, which ends the path.
     fn scatter(
         &self,
         walker: &mut Walker,
         suns: &[Vec3],
+        duty: Duty,
         draws: &mut Draws,
         scratch: &mut Scratch,
         out: &mut [f64; COMPONENTS],
@@ -887,7 +1301,7 @@ impl<'a> Medium<'a> {
             return false;
         }
         for (&sun, &irradiance) in suns.iter().zip(&self.irradiance) {
-            if irradiance <= 0.0 {
+            if !duty.estimates || irradiance <= 0.0 {
                 continue;
             }
             let transmittance = self.transmittance_to_space(walker.position_m, sun, walker.shell);
@@ -931,12 +1345,17 @@ impl<'a> Medium<'a> {
             .map(|(&f, &s)| s * f)
             .sum::<f64>()
             / total_per_m;
-        let (new, cos_theta, weight) = if forward > FORWARD_PEAK_PER_SR {
+        let (new, cos_theta, weight) = if duty.guided && forward > FORWARD_PEAK_PER_SR {
             // DDIS (module documentation): the direction from the mixture, about the old one or
             // about a sun's, weighted by the phase function over both branches' density. Every sun
             // of the case is a target, lit or not at this wavelength, so that the draws do not
             // depend on the irradiance and the radiance stays linear in it path by path.
-            let towards_sun = draws.uniform() < SUNWARD_FRACTION;
+            let fraction = if self.vroom {
+                VROOM_SUNWARD_FRACTION
+            } else {
+                SUNWARD_FRACTION
+            };
+            let towards_sun = draws.uniform() < fraction;
             let draw = phase.sample(draws);
             let axis = if towards_sun {
                 suns[uniform_index(suns.len(), draws)]
@@ -952,9 +1371,8 @@ impl<'a> Medium<'a> {
                 })
                 .sum::<f64>()
                 / count(suns.len());
-            let density = (1.0 - SUNWARD_FRACTION)
-                * self.sampling_density(terms, total_per_m, cos_theta)
-                + SUNWARD_FRACTION * sunward;
+            let density = (1.0 - fraction) * self.sampling_density(terms, total_per_m, cos_theta)
+                + fraction * sunward;
             (
                 new,
                 cos_theta,
@@ -984,19 +1402,21 @@ impl<'a> Medium<'a> {
         true
     }
 
-    /// At the ground: adds each sun's next-event estimate to `out` and reflects the walker into a
-    /// cosine-weighted direction, its weight times the albedo.
+    /// At the ground: adds each sun's next-event estimate to `out` if the path's `duty` is to
+    /// estimate there, and reflects the walker into a cosine-weighted direction, its weight times
+    /// the albedo.
     fn reflect(
         &self,
         walker: &mut Walker,
         suns: &[Vec3],
+        duty: Duty,
         draws: &mut Draws,
         out: &mut [f64; COMPONENTS],
     ) {
         let normal = self.grid.vertical(walker.position_m);
         for (&sun, &irradiance) in suns.iter().zip(&self.irradiance) {
             let cos_sun = normal.dot(sun);
-            if irradiance <= 0.0 || cos_sun <= 0.0 || self.ground_albedo <= 0.0 {
+            if !duty.estimates || irradiance <= 0.0 || cos_sun <= 0.0 || self.ground_albedo <= 0.0 {
                 continue;
             }
             let transmittance = self.transmittance_to_space(walker.position_m, sun, 0);
@@ -1047,6 +1467,99 @@ pub(crate) mod tests {
         let (mut once, mut twice) = (Draws::new(5, 1, 0), Draws::new(5, 1, 0));
         assert_eq!(uniform_index(1, &mut once), 0);
         assert!((once.uniform() - twice.uniform()).abs() < f64::MIN_POSITIVE);
+    }
+
+    #[test]
+    fn atmosphere_vroom_estimates_every_order_exactly_once() {
+        // The mother estimates its first `MOTHER_ORDERS` orders and each clone its block, so that
+        // every order of the von Neumann series is estimated once, by a path made at or before
+        // it (Buras and Mayer 2011, §2.3 and their Fig. 8).
+        let clones: Vec<(u32, Role)> = (1..=400)
+            .filter_map(|m| Role::clone_made_at(m).map(|role| (m, role)))
+            .collect();
+        for order in 1..=300 {
+            let by_mother = usize::from(Role::Mother.estimates(order));
+            let by_clones = clones
+                .iter()
+                .filter(|&&(made, role)| made <= order && role.estimates(order))
+                .count();
+            assert_eq!(by_mother + by_clones, 1, "order {order}");
+        }
+        let made: Vec<u32> = clones.iter().take(4).map(|&(m, _)| m).collect();
+        assert_eq!(made, [4, 15, 26, 37]);
+        assert_eq!(clones[0].1, Role::Clone { first: 5, last: 25 });
+        assert_eq!(
+            clones[1].1,
+            Role::Clone {
+                first: 26,
+                last: 36
+            }
+        );
+        for &(made, role) in &clones {
+            let Role::Clone { first, last } = role else {
+                panic!("the mother makes clones")
+            };
+            // A clone first estimates after the vertex it was made at, and lives at most
+            // n_scCP + n_LEperCP − 1 vertices; every one but the first waits n_scCP − 1.
+            let at = format!("the clone made at {made}, estimating {first}..={last}");
+            assert!(first > made, "{at}");
+            assert!(
+                last + 2 - made <= CLONE_SCATTERINGS + ESTIMATES_PER_CLONE,
+                "{at}"
+            );
+            if made > MOTHER_ORDERS {
+                assert_eq!(first - made, CLONE_SCATTERINGS - 1, "{at}");
+            }
+            assert!(role.guided(made), "{at}");
+            assert!(role.guided(last), "{at}");
+        }
+        // The mother's draws are guided only where its next estimate is its own.
+        assert!(
+            Role::Mother.guided(MOTHER_ORDERS - 1),
+            "the mother's last own estimate"
+        );
+        assert!(
+            !Role::Mother.guided(MOTHER_ORDERS),
+            "the first clone's vertex"
+        );
+        assert!(
+            !Role::Mother.estimates(MOTHER_ORDERS + 1),
+            "the first clone's first estimate"
+        );
+    }
+
+    #[test]
+    fn atmosphere_vroom_runs_where_a_scattering_term_is_forward_peaked() {
+        // `Estimator::ByMedium` takes VROOM at a wavelength where some term that scatters there is
+        // forward-peaked: not for Rayleigh alone, nor for a peaked term that does not scatter at
+        // the wavelength; and either estimator can be forced.
+        let mut value = super::super::case::tests::sample_case();
+        value["terms"][1]["scattering"] = json!([0.0, 4.4e-6]);
+        let case = super::super::tests::case_of(&value);
+        let grid = super::super::shell_grid(&case);
+        let vroom = |w: usize, estimator: Estimator| Medium::new(&case, &grid, w, estimator).vroom;
+        assert!(
+            !vroom(0, Estimator::ByMedium),
+            "the aerosol does not scatter at 550 nm"
+        );
+        assert!(
+            vroom(1, Estimator::ByMedium),
+            "its forward value of 4.1 sr⁻¹ at 440 nm"
+        );
+        assert!(vroom(0, Estimator::Vroom));
+        assert!(!vroom(1, Estimator::SunwardDraws));
+        value["terms"].as_array_mut().unwrap().remove(1);
+        let rayleigh = super::super::tests::case_of(&value);
+        let grid = super::super::shell_grid(&rayleigh);
+        assert!((0..2).all(|w| !Medium::new(&rayleigh, &grid, w, Estimator::ByMedium).vroom));
+    }
+
+    #[test]
+    fn atmosphere_vroom_splits_into_the_whole_part_of_the_prediction() {
+        assert_eq!(split_count(3.0 + 1e-12), 3);
+        assert_eq!(split_count(7.99), 7);
+        assert_eq!(split_count(4999.5), 4999);
+        assert_eq!(split_count(1e300), MOST_COPIES);
     }
 
     #[test]
@@ -1152,7 +1665,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let grid = super::super::shell_grid(&case);
-        let medium = Medium::new(&case, &grid, 0);
+        let medium = Medium::new(&case, &grid, 0, Estimator::ByMedium);
         let frame = LocalFrame::at_latitude(0.2);
         // The extinction, written out again.
         let extinction = |x: Vec3| {
@@ -1428,7 +1941,7 @@ pub(crate) mod tests {
                 top_height_m,
             );
             let grid = super::super::shell_grid(&case);
-            let medium = Medium::new(&case, &grid, 0);
+            let medium = Medium::new(&case, &grid, 0, Estimator::ByMedium);
             for (name, origin, dir) in saturn_grazing_rays(&grid) {
                 let depth = medium.optical_depth_to_space(origin, dir).unwrap();
                 let expected =
@@ -1471,7 +1984,7 @@ pub(crate) mod tests {
             40.0 * h,
         );
         let grid = super::super::shell_grid(&case);
-        let medium = Medium::new(&case, &grid, 0);
+        let medium = Medium::new(&case, &grid, 0, Estimator::ByMedium);
         let mut tightest = f64::INFINITY;
         for i in -90..=90 {
             let frame = LocalFrame::at_latitude(f64::from(i).to_radians());

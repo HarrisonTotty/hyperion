@@ -26,6 +26,14 @@
 //!   seven values of their VZA 89° row, five intensities and two reflected −Q
 //!   ([`KOKHANOVSKY_AEROSOL_HORIZON`]), and two signs of their Table A2 are corrected
 //!   ([`KOKHANOVSKY_AEROSOL_ERRATA`]).
+//! - (R08.T12.f) the two τ 5 clouds, whose forward peaks (280–620 sr⁻¹, about 1° wide) the
+//!   tracer's VROOM handles (`transport`): Kokhanovsky et al.'s cloud (Tables A3–A6: τ 5, θ₀ 60°,
+//!   black ground, the writer's matrix at its level 3), its one view at the sun left out and four
+//!   signs of its transmitted V corrected ([`KOKHANOVSKY_CLOUD_ERRATA`]), and IPRT's A5 (a water
+//!   cloud, τ 5, θ₀ 50°, in the principal plane and the almucantar), against PSTAR's results.
+//!   Beside them, two checks of VROOM itself: against R08.T12.c's sunward draws alone in a
+//!   Henyey–Greenstein slab where those converge, and energy conservation in a conservative slab
+//!   of A5's matrix.
 //!
 //! **What waits** (R08's Risks, "Deviations in T12.c, as built" and "Deviations in T12.e, as
 //! built"):
@@ -33,15 +41,6 @@
 //! - Garcia and Siewert 1985's Haze L and Cloud C1 (scalar, Legendre series): no lawful copy of
 //!   the paper is held, so their values are pending for the owner, for access. The `legendre`
 //!   phase kind they need is built and tested.
-//! - The two τ 5 clouds, Kokhanovsky et al.'s (Tables A3–A6) and IPRT A5 (a water cloud, θ₀ 50°,
-//!   in the principal plane and the almucantar), whose matrices the writer gives
-//!   (`sphere_matrices/`) and whose IPRT rows are committed (`a5_cloud.txt`): not run. A path whose
-//!   direction diffuses into a sun's forward peak by small scatterings near the cloud's top scores
-//!   the peak, some 500 sr⁻¹, at a weight the sunward draws do not reduce, since each step's old
-//!   and new directions lie in the same peak. At 6 × 10⁵–10⁶ samples a geometry σ ÷ I is 1.3–1.5%
-//!   at the median and up to 40%, and the estimate converges from below with its σ understated
-//!   (IPRT A5's χ² of I, p ≈ 4 × 10⁻⁵). They wait on a stronger variance reduction (R08's Risks,
-//!   "Deviations in T12.e, as built").
 //! - IPRT A6 (an ocean surface): not run, since the tracer's ground is Lambertian.
 //! - Loughman et al. 2004 (JGR 109, D06303): the publisher's free copy is behind a bot wall that
 //!   refuses every fetch from here, so the case is pending for access.
@@ -70,7 +69,9 @@
 //! only where it falls as N^(−1/2): every case is traced at N and at N ÷ 4 samples, and a value
 //! whose σ at N stands more than 25% from half its σ at N ÷ 4 is left out of the assertions and
 //! named, the set each benchmark leaves out pinned in [`EXPECTED_UNSCALED`]
-//! (`decision-r08-t4b-t12c.md`, follow-up, ruling 7).
+//! (`decision-r08-t4b-t12c.md`, follow-up, ruling 7). R08.T12.f's sample counts were set from
+//! pilot runs at other seeds, so that each σ falls under its cap with some 15% to spare, and the
+//! benchmarks are traced afresh at their own (Design note 10, _Statistics_).
 //!
 //! **Licences** (`decision-r08-licences.md` row 6): only the values each test asserts are
 //! committed, in the tests' own layout, with their tables cited: Natraj's and Kokhanovsky's
@@ -86,7 +87,8 @@ use hyperion_sim::math;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, regularised_gamma_q};
 use serde_json::{Value, json};
 
-use super::{AtmosphereCase, Polarisation, ReferenceRadiances, trace_reference};
+use super::transport::Estimator;
+use super::{AtmosphereCase, Polarisation, ReferenceRadiances, trace_reference_with};
 use crate::data::load_dataset;
 use Level::{Bottom, Top};
 
@@ -104,12 +106,17 @@ const SIGMA_SCALING_TOLERANCE: f64 = 0.25;
 
 /// The values each benchmark leaves out by [`SIGMA_SCALING_TOLERANCE`], by its name and as its
 /// summary names them; a benchmark not listed leaves none out. Recorded from the runs at their
-/// seeds and counts (R08's Risks, "Deviations in T12.e, as built").
+/// seeds and counts (R08's Risks, "Deviations in T12.e, as built", and "Deviations in T12.f, as
+/// built" for the benchmarks VROOM runs since and R08.T12.f's own).
 ///
 /// - Natraj and Hovenier's τ 2: three of its thick transmitted values, where T12.c measured the
 ///   estimator's coefficient of variation at about 3.
-/// - Kokhanovsky et al.'s aerosol: its V at VZA 60°, φ 90°, reflected and transmitted, which is
-///   4.4 × 10⁻⁵ and 6.8 × 10⁻⁵ of I.
+/// - R08.T12.f's check of VROOM against the sunward draws: the transmitted view at VZA 10°, φ 0°,
+///   where the sunward draws' σ does not fall as N^(−1/2) (VROOM's does).
+///
+/// Kokhanovsky et al.'s aerosol left out its V at VZA 60°, φ 90°, reflected and transmitted, under
+/// R08.T12.c's estimator; under VROOM, which its forward peak turns on since R08.T12.f, it leaves
+/// out nothing.
 const EXPECTED_UNSCALED: [(&str, &[&str]); 2] = [
     (
         "Natraj and Hovenier 2012, τ 2, μ₀ 0.5, A 0.25",
@@ -119,10 +126,7 @@ const EXPECTED_UNSCALED: [(&str, &[&str]); 2] = [
             "Bottom μ 1 φ 0 U",
         ],
     ),
-    (
-        "Kokhanovsky et al. 2010, aerosol",
-        &["R VZA 60 φ 90 V", "T VZA 60 φ 90 V"],
-    ),
+    (VROOM_CHECK, &["Bottom VZA 10 φ 0 I"]),
 ];
 
 /// The slab's thickness, m.
@@ -257,15 +261,21 @@ struct Traced {
 }
 
 /// Traces `case` in the Stokes mode with `samples` samples a geometry, a multiple of 4, and again
-/// with a quarter of them.
+/// with a quarter of them, by the estimator every reference runs.
 fn trace(case: &AtmosphereCase, samples: u64) -> Traced {
+    trace_with(case, samples, Estimator::ByMedium)
+}
+
+/// [`trace`] by `estimator`.
+fn trace_with(case: &AtmosphereCase, samples: u64, estimator: Estimator) -> Traced {
     assert_eq!(samples % 4, 0, "a benchmark's samples are a multiple of 4");
     let at = |n: u64| {
-        trace_reference(
+        trace_reference_with(
             case,
             Polarisation::Stokes,
             NonZeroU64::new(n).expect("a benchmark traces samples"),
             NonZeroUsize::new(THREADS).expect("a benchmark traces on threads"),
+            estimator,
         )
         .expect("a benchmark case traces")
     };
@@ -278,7 +288,7 @@ fn trace(case: &AtmosphereCase, samples: u64) -> Traced {
 /// Whether a standard error `full` at N samples is within [`SIGMA_SCALING_TOLERANCE`] of
 /// `quarter`'s at N ÷ 4 scaled as N^(−1/2), that is of `quarter` ÷ 2; false for a σ that is NaN.
 #[must_use]
-fn sigma_scales(full: f64, quarter: f64) -> bool {
+pub(super) fn sigma_scales(full: f64, quarter: f64) -> bool {
     let expected = 0.5 * quarter;
     (full - expected).abs() <= SIGMA_SCALING_TOLERANCE * expected
 }
@@ -1136,7 +1146,7 @@ fn angle_from_sun_deg(view: View, sun_zenith_deg: f64) -> f64 {
 }
 
 /// A layer of Kokhanovsky et al.'s spheres: its tables and the writer's matrix.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy)]
 struct KokhanovskyLayer<'a> {
     name: &'a str,
     table: &'a str,
@@ -1145,7 +1155,11 @@ struct KokhanovskyLayer<'a> {
     perpendicular: &'a [KokhanovskyPerpendicularRow],
     /// The reflected views whose printed −Q carries the wrong sign ([`KOKHANOVSKY_AEROSOL_ERRATA`]).
     errata: &'a [View],
-    spread: [f64; 4],
+    /// The transmitted views whose printed V carries the wrong sign ([`KOKHANOVSKY_CLOUD_ERRATA`]).
+    circular_errata: &'a [View],
+    /// The stated spread of each of I, Q, U and V at a view, relative to the component
+    /// ([`KOKHANOVSKY_AEROSOL_SPREAD`], [`kokhanovsky_cloud_spread`]).
+    spread: fn(View) -> [f64; 4],
     samples: u64,
 }
 
@@ -1248,10 +1262,10 @@ const KOKHANOVSKY_AEROSOL_ERRATA: [View; 2] = [
     },
 ];
 
-/// Runs a layer of Kokhanovsky et al.'s spheres: every committed value of its Table A2 or A3,
-/// reflected and transmitted, with U and V at φ 90° from Tables A4–A6.
-fn kokhanovsky_layer(layer: &KokhanovskyLayer<'_>) {
-    let mu0 = 0.5;
+/// The case of a layer of Kokhanovsky et al.'s spheres, its draws from `seed`: every view of its
+/// Table A2 or A3, reflected and then transmitted.
+#[must_use]
+fn kokhanovsky_case(layer: &KokhanovskyLayer<'_>, seed: u64) -> AtmosphereCase {
     let sun = (KOKHANOVSKY_SUN_ZENITH_DEG, 0.0);
     let sphere = sphere_table(layer.table);
     let mut geometries = Vec::new();
@@ -1274,9 +1288,16 @@ fn kokhanovsky_layer(layer: &KokhanovskyLayer<'_>) {
         phase: &sphere.phase,
         albedo: 0.0,
         irradiance: 1.0,
-        seed: 0,
+        seed,
     };
-    let reference = trace(&slab.case(&geometries), layer.samples);
+    slab.case(&geometries)
+}
+
+/// The comparisons of a layer of Kokhanovsky et al.'s spheres traced as `reference` (from
+/// [`kokhanovsky_case`]): every committed value of its Table A2 or A3, reflected and transmitted,
+/// with U and V at φ 90° from Tables A4–A6.
+fn kokhanovsky_comparisons(layer: &KokhanovskyLayer<'_>, reference: &Traced) -> Vec<Comparison> {
+    let mu0 = 0.5;
     let mut comparisons = Comparisons::new(Convention {
         scale: PI / mu0,
         signs: KOKHANOVSKY_SIGNS,
@@ -1299,20 +1320,30 @@ fn kokhanovsky_layer(layer: &KokhanovskyLayer<'_>) {
         let ([u_r, v_r], [u_t, v_t]) = perpendicular(vza, phi);
         let erratum = layer.errata.iter().any(|view| view.is(Top, vza, phi));
         let minus_q_r = minus_q_r.map(|q| if erratum { -q } else { q });
+        let circular_erratum = layer
+            .circular_errata
+            .iter()
+            .any(|view| view.is(Bottom, vza, phi));
+        let v_t = v_t.map(|v| if circular_erratum { -v } else { v });
         for (index, level, expected) in [
             (g, Top, [i_r, minus_q_r, u_r, v_r]),
             (rows + g, Bottom, [i_t, minus_q_t, u_t, v_t]),
         ] {
+            let spread = (layer.spread)(View {
+                level,
+                vza_deg: vza,
+                phi_deg: phi,
+            });
             // The floor of Q's and U's spread and the printed digits scale with I: the traced I,
             // since the printed one may be left out.
             let intensity = PI / mu0 * reference.full.geometries()[index].radiance()[0];
             let sigma = core::array::from_fn(|c| {
                 let value = expected[c].unwrap_or(0.0);
-                let relative = layer.spread[c] * value.abs();
+                let relative = spread[c] * value.abs();
                 // Near Q = 0 and U = 0 the reference's accuracy is the inter-code spread's absolute
                 // scale, which I's sets (ruling 4).
                 let spread = if c == Component::Q.index() || c == Component::U.index() {
-                    relative.max(layer.spread[Component::I.index()] * intensity)
+                    relative.max(spread[Component::I.index()] * intensity)
                 } else {
                     relative
                 };
@@ -1323,7 +1354,7 @@ fn kokhanovsky_layer(layer: &KokhanovskyLayer<'_>) {
                 Bottom => "T",
             };
             comparisons.push(
-                &reference,
+                reference,
                 index,
                 expected,
                 sigma,
@@ -1331,7 +1362,14 @@ fn kokhanovsky_layer(layer: &KokhanovskyLayer<'_>) {
             );
         }
     }
-    assert_agreement(layer.name, &comparisons.values);
+    comparisons.values
+}
+
+/// Runs a layer of Kokhanovsky et al.'s spheres at its samples and seed 0, and asserts its
+/// comparisons' agreement.
+fn kokhanovsky_layer(layer: &KokhanovskyLayer<'_>) {
+    let reference = trace(&kokhanovsky_case(layer, 0), layer.samples);
+    assert_agreement(layer.name, &kokhanovsky_comparisons(layer, &reference));
 }
 
 #[test]
@@ -1344,9 +1382,318 @@ fn stokes_radiances_match_kokhanovsky_2010_aerosol_layer() {
         rows: &KOKHANOVSKY_AEROSOL,
         perpendicular: &KOKHANOVSKY_AEROSOL_PERPENDICULAR,
         errata: &KOKHANOVSKY_AEROSOL_ERRATA,
-        spread: KOKHANOVSKY_AEROSOL_SPREAD,
+        circular_errata: &[],
+        spread: |_| KOKHANOVSKY_AEROSOL_SPREAD,
         samples: 1_200_000,
     });
+}
+
+/// Kokhanovsky et al. 2010, Table A3: the cloud layer, τ 5, ω 1, θ₀ 60°, black ground, its
+/// matrix from the writer's Mie over their size distribution (a lognormal of a₀ 5 µm, σ 0.4, to
+/// `a_end` 100 µm, m 1.339 at 412 nm); the values as printed (SCIATRAN's, 360 streams in a
+/// hemisphere, which equal SCIATRAN's own output of the case to 10⁻⁶ everywhere, R08.T12.e), less
+/// the transmitted I and −Q at the sun (VZA 60°, φ 0°, [`SUN_EXCLUSION_DEG`]). Their source rule
+/// (ruling 3) leaves nothing of the cloud out.
+#[expect(
+    clippy::unreadable_literal,
+    reason = "the values as the table prints them, to be checked digit by digit"
+)]
+const KOKHANOVSKY_CLOUD: [KokhanovskyLayerRow; 18] = [
+    (
+        0.0,
+        0.0,
+        Some(0.2230386E+00),
+        Some(0.1458306E-01),
+        Some(0.4626634E+00),
+        Some(-0.1300066E-01),
+    ),
+    (
+        0.0,
+        90.0,
+        Some(0.2230386E+00),
+        Some(-0.1458306E-01),
+        Some(0.4626634E+00),
+        Some(0.1300066E-01),
+    ),
+    (
+        0.0,
+        180.0,
+        Some(0.2230386E+00),
+        Some(0.1458306E-01),
+        Some(0.4626634E+00),
+        Some(-0.1300066E-01),
+    ),
+    (
+        20.0,
+        0.0,
+        Some(0.2619955E+00),
+        Some(0.2192489E-02),
+        Some(0.7871585E+00),
+        Some(-0.1575456E-01),
+    ),
+    (
+        20.0,
+        90.0,
+        Some(0.2416682E+00),
+        Some(-0.1164763E-01),
+        Some(0.4634229E+00),
+        Some(0.1180246E-01),
+    ),
+    (
+        20.0,
+        180.0,
+        Some(0.3301769E+00),
+        Some(0.7511787E-01),
+        Some(0.3147638E+00),
+        Some(-0.3126918E-02),
+    ),
+    (
+        40.0,
+        0.0,
+        Some(0.4587779E+00),
+        Some(-0.9805261E-02),
+        Some(0.1248475E+01),
+        Some(-0.2553568E-02),
+    ),
+    (
+        40.0,
+        90.0,
+        Some(0.3007135E+00),
+        Some(-0.5759207E-02),
+        Some(0.4646386E+00),
+        Some(0.9685827E-02),
+    ),
+    (
+        40.0,
+        180.0,
+        Some(0.3761572E+00),
+        Some(0.2496259E-02),
+        Some(0.2823214E+00),
+        Some(0.6388771E-02),
+    ),
+    (
+        60.0,
+        0.0,
+        Some(0.9851353E+00),
+        Some(-0.3790092E-01),
+        None,
+        None,
+    ),
+    (
+        60.0,
+        90.0,
+        Some(0.3921383E+00),
+        Some(-0.2105265E-02),
+        Some(0.4388206E+00),
+        Some(0.8307814E-02),
+    ),
+    (
+        60.0,
+        180.0,
+        Some(0.6797278E+00),
+        Some(0.9801442E-03),
+        Some(0.2889342E+00),
+        Some(0.1341101E-01),
+    ),
+    (
+        80.0,
+        0.0,
+        Some(0.2186265E+01),
+        Some(-0.8132911E-01),
+        Some(0.6816960E+00),
+        Some(0.2234633E-02),
+    ),
+    (
+        80.0,
+        90.0,
+        Some(0.4003249E+00),
+        Some(-0.2089776E-02),
+        Some(0.3124113E+00),
+        Some(0.5702380E-02),
+    ),
+    (
+        80.0,
+        180.0,
+        Some(0.5330462E+00),
+        Some(-0.2216694E-02),
+        Some(0.2304723E+00),
+        Some(0.1257132E-01),
+    ),
+    (
+        89.0,
+        0.0,
+        Some(0.2776746E+01),
+        Some(-0.9160169E-01),
+        Some(0.3971848E+00),
+        Some(-0.6617358E-03),
+    ),
+    (
+        89.0,
+        90.0,
+        Some(0.2728933E+00),
+        Some(-0.4403001E-02),
+        Some(0.1986522E+00),
+        Some(0.3243696E-02),
+    ),
+    (
+        89.0,
+        180.0,
+        Some(0.4380821E+00),
+        Some(0.1232541E-01),
+        Some(0.1522583E+00),
+        Some(0.7785649E-02),
+    ),
+];
+
+/// Kokhanovsky et al. 2010, the cloud columns of Tables A4 (U reflected), A5 (U transmitted) and
+/// A6 (V reflected and transmitted), as printed.
+#[expect(
+    clippy::unreadable_literal,
+    reason = "the values as the tables print them, to be checked digit by digit"
+)]
+const KOKHANOVSKY_CLOUD_PERPENDICULAR: [KokhanovskyPerpendicularRow; 6] = [
+    (0.0, 0.0, 0.0, 0.0, 0.0),
+    (
+        20.0,
+        0.4223818E-02,
+        0.3947605E-06,
+        -0.4523557E-02,
+        0.4382299E-05,
+    ),
+    (
+        40.0,
+        0.4437616E-02,
+        -0.1453557E-04,
+        -0.6480793E-02,
+        0.3722931E-05,
+    ),
+    (
+        60.0,
+        0.4442162E-02,
+        -0.4132179E-04,
+        -0.5535509E-02,
+        0.5919457E-08,
+    ),
+    (
+        80.0,
+        0.5205060E-02,
+        -0.4582790E-04,
+        -0.2947084E-02,
+        -0.5441439E-05,
+    ),
+    (
+        89.0,
+        0.6632575E-02,
+        -0.3166770E-04,
+        -0.1604392E-02,
+        -0.7481497E-05,
+    ),
+];
+
+/// Four signs of Kokhanovsky et al.'s Table A6, the cloud's transmitted V at VZA 20°, 40°, 80° and
+/// 89° (φ 90°), negated in code as a cited erratum (`decision-r08-t4b-t12c.md`, follow-up, ruling
+/// 2). SCIATRAN's own output of the case (the RTSOS copy, `cloud_trans_N_360.dat`, SHA-256
+/// `6dc2059e…489`, read only; none of its values is committed) carries V of the opposite sign to
+/// the printed one in every V column of the paper but these four entries, where it carries the
+/// printed sign: the paper prints −(SCIATRAN's V) elsewhere, so these take the same convention.
+/// The 60° entry, 5.9 × 10⁻⁹, a numerical zero, already has it. The cloud's V cannot decide its
+/// sign by a run (|V| ≤ 1.2 × 10⁻⁴ of I against σ ≤ 3 × 10⁻³ of I), so it rests on the sources.
+const KOKHANOVSKY_CLOUD_ERRATA: [View; 4] = [
+    View {
+        level: Bottom,
+        vza_deg: 20.0,
+        phi_deg: 90.0,
+    },
+    View {
+        level: Bottom,
+        vza_deg: 40.0,
+        phi_deg: 90.0,
+    },
+    View {
+        level: Bottom,
+        vza_deg: 80.0,
+        phi_deg: 90.0,
+    },
+    View {
+        level: Bottom,
+        vza_deg: 89.0,
+        phi_deg: 90.0,
+    },
+];
+
+/// Kokhanovsky et al.'s stated spread for their cloud at `view`, relative to each of I, Q, U and
+/// V (`decision-r08-t4b-t12c.md`, follow-up, ruling 4): Pstar's largest difference from SCIATRAN.
+/// I's is 0.2%, Table 1's comment ("for reflected light, and also for transmitted light and not
+/// very oblique observation angles differences are below 0.2%"), and its 0.6% for the transmitted
+/// views at VZA 80° and 89°; Q's 0.5% and U's 0.2% (Table 2), each floored at I's spread times I
+/// as the aerosol's are; V's 0.5%, relative to itself (§5).
+#[must_use]
+fn kokhanovsky_cloud_spread(view: View) -> [f64; 4] {
+    let intensity = if view.level == Bottom && view.vza_deg >= 80.0 {
+        6e-3
+    } else {
+        2e-3
+    };
+    [intensity, 5e-3, 2e-3, 5e-3]
+}
+
+#[test]
+#[ignore = "slow: Kokhanovsky et al. 2010's cloud layer, τ 5, 36 geometries, with VROOM"]
+fn stokes_radiances_match_kokhanovsky_2010_cloud_layer() {
+    kokhanovsky_layer(&KOKHANOVSKY_CLOUD_LAYER);
+}
+
+/// Kokhanovsky et al.'s cloud layer as its benchmark runs it.
+const KOKHANOVSKY_CLOUD_LAYER: KokhanovskyLayer<'static> = KokhanovskyLayer {
+    name: "Kokhanovsky et al. 2010, cloud",
+    table: "kokhanovsky-cloud",
+    tau: 5.0,
+    rows: &KOKHANOVSKY_CLOUD,
+    perpendicular: &KOKHANOVSKY_CLOUD_PERPENDICULAR,
+    errata: &[],
+    circular_errata: &KOKHANOVSKY_CLOUD_ERRATA,
+    spread: kokhanovsky_cloud_spread,
+    samples: 3_400_000,
+};
+
+#[test]
+fn kokhanovsky_cloud_leaves_out_exactly_the_view_at_the_sun() {
+    // The cloud's table matches SCIATRAN's own output everywhere, so only the transmitted I and
+    // −Q of the views within 15° of the sun are left out (ruling 6).
+    let mut empty = Vec::new();
+    for &(vza_deg, phi_deg, i_r, minus_q_r, i_t, minus_q_t) in &KOKHANOVSKY_CLOUD {
+        for (level, value) in [
+            (Top, i_r),
+            (Top, minus_q_r),
+            (Bottom, i_t),
+            (Bottom, minus_q_t),
+        ] {
+            if value.is_none() {
+                empty.push((level, vza_deg, phi_deg));
+            }
+        }
+        let near = angle_from_sun_deg(
+            View {
+                level: Bottom,
+                vza_deg,
+                phi_deg,
+            },
+            KOKHANOVSKY_SUN_ZENITH_DEG,
+        ) < SUN_EXCLUSION_DEG;
+        assert_eq!(i_t.is_none(), near, "VZA {vza_deg} φ {phi_deg}");
+        assert_eq!(minus_q_t.is_none(), near, "VZA {vza_deg} φ {phi_deg}");
+    }
+    // The view's I and −Q, and nothing else.
+    assert_eq!(empty.len(), 2);
+    assert!(
+        empty.iter().all(|&(level, vza, phi)| View {
+            level: Bottom,
+            vza_deg: 60.0,
+            phi_deg: 0.0
+        }
+        .is(level, vza, phi)),
+        "{empty:?}"
+    );
 }
 
 #[test]
@@ -1450,13 +1797,15 @@ fn iprt_rows(file: &str) -> Vec<IprtRow> {
 
 /// The benchmark's own error in each of I, Q, U and V, relative to I: PSTAR's largest difference
 /// from IPOL (whose U and V negated) at the case's rows, and in A4's V from MYSTIC, which agrees
-/// with PSTAR there to 1.4 × 10⁻⁶ of I (measured on the fetched files, R08's Risks). A3's is
-/// IPOL's (R08.T12.e; MYSTIC's noise is larger there, 2.5 × 10⁻³ of I).
-const IPRT_SPREAD: [(&str, [f64; 4]); 4] = [
+/// with PSTAR there to 1.4 × 10⁻⁶ of I (measured on the fetched files, R08's Risks). A3's and
+/// A5's are IPOL's (R08.T12.e; MYSTIC's noise is larger there, 2.5 × 10⁻³ of I in A3's I), A5's
+/// over its principal plane and almucantar both (`iprt_phase_a/README.md`).
+const IPRT_SPREAD: [(&str, [f64; 4]); 5] = [
     ("a1_rayleigh.txt", [1.1e-6, 7.7e-7, 1.1e-6, 1.1e-6]),
     ("a2_lambert.txt", [6.9e-6, 2.3e-6, 2.5e-6, 2.5e-6]),
     ("a4_spheroid.txt", [1.8e-4, 2.9e-6, 2.7e-6, 1.4e-6]),
     ("a3_sphere.txt", [9.7e-5, 4.7e-5, 1.1e-4, 3.6e-6]),
+    ("a5_cloud.txt", [6.5e-4, 3.8e-4, 2.2e-5, 5.2e-7]),
 ];
 
 /// PSTAR's U and V against the tracer's.
@@ -1635,6 +1984,12 @@ fn stokes_radiances_match_pstar_on_iprt_a3_spheres() {
 }
 
 #[test]
+#[ignore = "slow: IPRT Phase A case A5, a τ 5 water cloud, the client's Mie matrix, 62 geometries"]
+fn stokes_radiances_match_pstar_on_iprt_a5_water_cloud() {
+    iprt_sphere("IPRT A5", "a5_cloud.txt", "iprt-a5", 5.0, 1_700_000);
+}
+
+#[test]
 fn sphere_matrix_tables_make_valid_cases_and_hold_the_tracers_normalisation() {
     // Every table the client's Mie-matrix writer wrote passes the case format's load checks (its
     // elements bounded by a₁, its integral and mean cosine within 10⁻⁴ of 1 and of the Mie
@@ -1713,3 +2068,318 @@ fn iprt_files_load_against_their_checksums_and_make_valid_cases() {
     assert_eq!(case.terms().len(), 1);
     assert!(case.terms()[0].phase.has_matrix());
 }
+
+/// The sun's zenith angle in R08.T12.f's two checks of VROOM, IPRT A5's.
+const VROOM_CHECK_SUN_ZENITH_DEG: f64 = 50.0;
+
+/// The views of R08.T12.f's check of VROOM against the sunward draws: of 57 views at view zenith
+/// 0°–85° and relative azimuth 0°–180°, every transmitted one at least [`SUN_EXCLUSION_DEG`] from
+/// the sun, the 14 transmitted views where the sunward draws' σ was smallest in a pilot at other
+/// seeds (0.09%–0.14% of I at 3.2 × 10⁶ samples), and the two reflected views where it was (0.16%
+/// and 0.18%; R08's Risks, "Deviations in T12.f, as built"), so that the estimator the check holds
+/// VROOM to converges there. The other reflected views of so forward a slab, dim, and its views far
+/// from the sun in azimuth need 2–10 times the samples for the same σ.
+const VROOM_CHECK_VIEWS: [(Level, f64, f64); 16] = [
+    (Bottom, 0.0, 0.0),
+    (Bottom, 10.0, 0.0),
+    (Bottom, 10.0, 30.0),
+    (Bottom, 20.0, 0.0),
+    (Bottom, 20.0, 30.0),
+    (Bottom, 20.0, 60.0),
+    (Bottom, 30.0, 0.0),
+    (Bottom, 30.0, 30.0),
+    (Bottom, 40.0, 30.0),
+    (Bottom, 40.0, 60.0),
+    (Bottom, 60.0, 30.0),
+    (Bottom, 70.0, 0.0),
+    (Bottom, 70.0, 30.0),
+    (Bottom, 80.0, 0.0),
+    (Top, 80.0, 0.0),
+    (Top, 85.0, 0.0),
+];
+
+#[test]
+fn vroom_check_views_keep_away_from_the_sun() {
+    // Every transmitted view of the check of VROOM against the sunward draws is at least 15°
+    // from the sun, as Kokhanovsky et al.'s and IPRT's are, and none repeats.
+    for (k, &(level, vza_deg, phi_deg)) in VROOM_CHECK_VIEWS.iter().enumerate() {
+        let view = View {
+            level,
+            vza_deg,
+            phi_deg,
+        };
+        let angle = angle_from_sun_deg(view, VROOM_CHECK_SUN_ZENITH_DEG);
+        assert!(
+            level == Top || angle >= SUN_EXCLUSION_DEG,
+            "{view:?}: {angle}°"
+        );
+        assert!(
+            VROOM_CHECK_VIEWS[..k]
+                .iter()
+                .all(|&(l, z, p)| !(view.is(l, z, p))),
+            "{view:?} repeats"
+        );
+    }
+}
+
+/// The comparisons of R08.T12.f's check of VROOM against the sunward draws: a conservative slab of
+/// τ 2 scattering by Henyey–Greenstein at g 0.9 (a table without polarisation, so that I alone is
+/// compared), over a black ground, seen from `views`, traced with VROOM at `seeds[0]` and
+/// `samples[0]`, and with R08.T12.c's sunward draws alone at `seeds[1]` and `samples[1]`. Each
+/// value is VROOM's I against the sunward draws', with their two standard errors, and its σ is
+/// taken to fall as N^(−1/2) only where both sides' do.
+fn vroom_against_sunward_draws(
+    views: &[(Level, f64, f64)],
+    seeds: [u64; 2],
+    samples: [u64; 2],
+) -> Vec<Comparison> {
+    let phase = super::case::tests::tabulated_phase_json(1024, 1, |c| {
+        [
+            super::optics::tests::henyey_greenstein(0.9, c),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+        ]
+    });
+    let sun = (VROOM_CHECK_SUN_ZENITH_DEG, 0.0);
+    let geometries: Vec<Value> = views
+        .iter()
+        .map(|&(level, vza, phi)| {
+            let zenith = if level == Top { 180.0 - vza } else { vza };
+            geometry(&format!("{level:?} {vza} {phi}"), level, zenith, phi, sun)
+        })
+        .collect();
+    let slab = |seed: u64| Slab {
+        name: VROOM_CHECK,
+        tau: 2.0,
+        omega: 1.0,
+        phase: &phase,
+        albedo: 0.0,
+        irradiance: 1.0,
+        seed,
+    };
+    let on = trace_with(
+        &slab(seeds[0]).case(&geometries),
+        samples[0],
+        Estimator::Vroom,
+    );
+    let off = trace_with(
+        &slab(seeds[1]).case(&geometries),
+        samples[1],
+        Estimator::SunwardDraws,
+    );
+    views
+        .iter()
+        .enumerate()
+        .map(|(g, &(level, vza, phi))| {
+            let side = |traced: &Traced| {
+                let (full, quarter) = (
+                    &traced.full.geometries()[g],
+                    &traced.quarter.geometries()[g],
+                );
+                let sigma = full.standard_error()[0];
+                (
+                    full.radiance()[0],
+                    sigma,
+                    sigma_scales(sigma, quarter.standard_error()[0]),
+                )
+            };
+            let ((i_on, sigma_on, on_scales), (i_off, sigma_off, off_scales)) =
+                (side(&on), side(&off));
+            Comparison {
+                label: format!("{level:?} VZA {vza} φ {phi}"),
+                component: Component::I,
+                traced: i_on,
+                sigma: sigma_on,
+                sigma_scales: on_scales && off_scales,
+                expected: i_off,
+                expected_sigma: sigma_off,
+                intensity: i_off,
+            }
+        })
+        .collect()
+}
+
+/// The name of R08.T12.f's check of VROOM against the sunward draws.
+const VROOM_CHECK: &str = "VROOM against the sunward draws, Henyey–Greenstein g 0.9, τ 2";
+
+#[test]
+#[ignore = "slow: VROOM on and off in a Henyey–Greenstein slab of g 0.9 and τ 2, 16 geometries"]
+fn vroom_agrees_with_the_sunward_draws_where_they_converge() {
+    // R08.T12.f's check that the variance reduction is unbiased: the two estimators, each at its
+    // own seed so that they are independent, held to each other by the agreement test, each
+    // value's z = (on − off) ÷ √(σ_on² + σ_off²), with both σ at most 0.3% of I. The views are
+    // those where the sunward draws converge best (`VROOM_CHECK_VIEWS`); a value whose σ still
+    // does not fall as N^(−1/2) on either side is left out and named, and the set is pinned in
+    // `EXPECTED_UNSCALED`.
+    let values = vroom_against_sunward_draws(&VROOM_CHECK_VIEWS, [0, 1], VROOM_CHECK_SAMPLES);
+    for c in values.iter().filter(|c| c.sigma_scales) {
+        assert!(
+            c.expected_sigma <= SIGMA_LIMIT * c.expected,
+            "{VROOM_CHECK}, {}: the sunward draws' σ {} is above 0.3% of I = {}",
+            c.label,
+            c.expected_sigma,
+            c.expected
+        );
+    }
+    assert_agreement(VROOM_CHECK, &values);
+}
+
+/// The samples a geometry of R08.T12.f's check of VROOM against the sunward draws, VROOM's and
+/// the sunward draws': set from the pilot (R08's Risks), so that each σ is some 0.25% of I at most.
+const VROOM_CHECK_SAMPLES: [u64; 2] = [700_000, 1_600_000];
+
+/// One balance of R08.T12.f's energy check: the plane albedo, the diffuse transmission and the
+/// direct beam against the incident flux, with the standard error of the two traced terms and
+/// whether both fall as N^(−1/2).
+#[derive(Debug, Clone, PartialEq)]
+struct Balance {
+    name: String,
+    total: f64,
+    incident: f64,
+    sigma: f64,
+    sigma_scales: bool,
+}
+
+/// The balances of R08.T12.f's energy check: a slab of τ 5 scattering by IPRT A5's cloud matrix
+/// (the writer's) with ω set to 1, over a black ground, its fluxes' hemispheres traced in the
+/// Stokes mode at `seed` and `samples` with the suns 0°, 50° and 75° from the zenith; the vector
+/// I and the scalar radiance of the same paths each balanced.
+fn energy_balances(seed: u64, samples: u64) -> Vec<Balance> {
+    let sphere = sphere_table("iprt-a5");
+    let aggregates: Vec<Value> = [0.0, VROOM_CHECK_SUN_ZENITH_DEG, 75.0]
+        .iter()
+        .map(|&zenith| {
+            json!({
+                "name": format!("sun {zenith}"),
+                "sunDirections": [{ "zenithDeg": zenith, "azimuthDeg": 0.0 }]
+            })
+        })
+        .collect();
+    let case = json!({
+        "format": 1,
+        "name": "A5's matrix, ω 1",
+        "seed": seed,
+        "wavelengthsNm": [800],
+        "shells": { "kind": "sphere", "radiusM": 1e12 },
+        "topHeightM": SLAB_M,
+        "groundAlbedo": [0.0],
+        "terms": [{
+            "name": "cloud",
+            "density": {
+                "kind": "tabulated", "altitudesM": [0.0, SLAB_M], "relative": [1.0, 1.0]
+            },
+            "scattering": [5.0 / SLAB_M],
+            "absorption": [0.0],
+            "phase": sphere.phase
+        }],
+        "suns": [{ "name": "sun", "irradiance": [1.0] }],
+        "detectorHalfAngleDeg": 0.0,
+        "geometries": [],
+        "aggregates": aggregates
+    });
+    let case = AtmosphereCase::from_json(&case.to_string()).expect("the slab is a valid case");
+    let traced = trace_with(&case, samples, Estimator::ByMedium);
+    let mut balances = Vec::new();
+    for (aggregate, quarter) in traced
+        .full
+        .aggregates()
+        .iter()
+        .zip(traced.quarter.aggregates())
+    {
+        let scalar = aggregate
+            .scalar()
+            .expect("the Stokes mode scores the scalar fluxes");
+        let quarter_scalar = quarter
+            .scalar()
+            .expect("the Stokes mode scores the scalar fluxes");
+        for (label, [up, up_sigma, down, down_sigma], [up_quarter, down_quarter]) in [
+            (
+                "vector I",
+                [
+                    aggregate.upwelling_top()[0],
+                    aggregate.upwelling_top_standard_error()[0],
+                    aggregate.diffuse_ground()[0],
+                    aggregate.diffuse_ground_standard_error()[0],
+                ],
+                [
+                    quarter.upwelling_top_standard_error()[0],
+                    quarter.diffuse_ground_standard_error()[0],
+                ],
+            ),
+            (
+                "scalar",
+                [
+                    scalar.upwelling_top()[0],
+                    scalar.upwelling_top_standard_error()[0],
+                    scalar.diffuse_ground()[0],
+                    scalar.diffuse_ground_standard_error()[0],
+                ],
+                [
+                    quarter_scalar.upwelling_top_standard_error()[0],
+                    quarter_scalar.diffuse_ground_standard_error()[0],
+                ],
+            ),
+        ] {
+            balances.push(Balance {
+                name: format!("{}, {label}", aggregate.name()),
+                total: up + aggregate.direct_ground()[0] + down,
+                incident: aggregate.incident_top()[0],
+                sigma: math::hypot(up_sigma, down_sigma),
+                sigma_scales: sigma_scales(up_sigma, up_quarter)
+                    && sigma_scales(down_sigma, down_quarter),
+            });
+        }
+    }
+    balances
+}
+
+#[test]
+#[ignore = "slow: energy conservation with VROOM in a conservative τ 5 slab of IPRT A5's matrix"]
+fn vroom_conserves_energy_in_a_conservative_slab_of_the_a5_cloud() {
+    // R08.T12.f: the plane albedo, the diffuse transmission and the direct beam add to the
+    // incident flux for ω = 1. The fluxes' hemispheres are traced with VROOM, which the matrix's
+    // forward peak turns on, and the balances are held to the agreement test: each to the
+    // Bonferroni bound z_N over the balances asserted (3.93 for six; too few for a χ²), each σ at
+    // most 0.3% of the incident flux. A balance whose σ does not fall as N^(−1/2) is left out and
+    // named, as a benchmark's value is, and the set is pinned in `EXPECTED_UNSCALED`.
+    let balances = energy_balances(0, ENERGY_CHECK_SAMPLES);
+    assert_eq!(balances.len(), 6);
+    let (asserted, unscaled): (Vec<&Balance>, Vec<&Balance>) =
+        balances.iter().partition(|b| b.sigma_scales);
+    let mut left_out: Vec<String> = unscaled.iter().map(|b| b.name.clone()).collect();
+    left_out.sort();
+    assert!(
+        !asserted.is_empty(),
+        "{ENERGY_CHECK}: no balance's σ falls as N^(−1/2)"
+    );
+    let count = u32::try_from(asserted.len()).expect("six balances at most");
+    let bound = -math::normal_quantile(ALPHA / (4.0 * f64::from(count)));
+    for b in asserted {
+        let z = (b.total - b.incident) / b.sigma;
+        eprintln!(
+            "{ENERGY_CHECK}, {}: {:.6} against {:.6} ± {:.2e}, z {z:+.2}, bound {bound:.2}",
+            b.name, b.total, b.incident, b.sigma
+        );
+        assert!(
+            b.sigma <= SIGMA_LIMIT * b.incident,
+            "{}: σ {} above 0.3% of the incident {}",
+            b.name,
+            b.sigma,
+            b.incident
+        );
+        assert!(z.abs() <= bound, "{}: z = {z:.2}, past {bound:.2}", b.name);
+    }
+    eprintln!("{ENERGY_CHECK}: left out, their σ not falling as N^(−1/2): {left_out:?}");
+    assert_unscaled_as_recorded(ENERGY_CHECK, &left_out);
+}
+
+/// The name of R08.T12.f's energy check.
+const ENERGY_CHECK: &str = "VROOM's energy check, A5's matrix at ω 1";
+
+/// The samples each flux of R08.T12.f's energy check takes: set from a pilot at another seed (σ
+/// at most 0.49% of the incident flux at 4 × 10⁵ samples, the sun overhead; R08's Risks), so that
+/// each σ is some 0.25% at most.
+const ENERGY_CHECK_SAMPLES: u64 = 1_500_000;

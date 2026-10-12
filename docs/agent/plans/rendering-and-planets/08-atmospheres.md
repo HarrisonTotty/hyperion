@@ -1894,7 +1894,9 @@ The order:
   T12.d (the spheroid mode) follow it; T12.c's cases whose matrices come from R08's Mie
   (Kokhanovsky's aerosol and cloud, IPRT's spheres) also wait on T5.b, and its other cases do not.
   T12.e (the Mie-matrix writer and the sphere benchmarks) follows T12.c and T5.b. T12.f (variance
-  reduction for thick, forward-peaked media) follows T12.e. T12.b's cloud-free cases need T12.e;
+  reduction for thick, forward-peaked media) follows T12.e, and T12.g (the standard-error check in
+  the tracer's unit tests) follows T12.f; nothing waits for T12.g. T12.b's cloud-free cases need
+  T12.e;
   its cloudy and hazy cases (the Venus-class and Titan-class cases and the decks) need T12.f.
   T12.b (the cases and references) also needs T5, T10's fixtures, T12.c and T12.d.
 - T13 needs T6 (T6.e for `saturn-oblate`) and T12. T14 follows T13: T14.a, T14.b and T14.c in
@@ -4029,14 +4031,52 @@ here, and `pnpm test` passes.
       10's agreement test at σ ≤ 0.3% of I at every value, with σ falling as N^−½. Kokhanovsky's
       cloud takes R08.T12.e's errata, exclusions and σ_pub. Its values and A5's assertions are
       committed then;
-    - with the reduction on and off, a Henyey–Greenstein slab of g 0.9 and τ 2, where the tracer
-      without it converges, agrees by the agreement test;
+    - with the reduction on and off, a Henyey–Greenstein slab of g 0.9 and τ 2 (sun 50°, black
+      ground) agrees by the agreement test at the views where the tracer without it converges:
+      the 16 where its σ was smallest in a pilot over 57 at seeds the test does not use
+      (`VROOM_CHECK_VIEWS`; 14 transmitted, and reflected VZA 80° and 85° at φ 0°), each σ ≤ 0.3%
+      of I on both sides and falling as N^−½. The views it leaves out, the dim reflected ones and
+      the transmitted ones far from the sun in azimuth, are held by the two clouds' benchmarks, and
+      VROOM's pilots there agree with an adding-doubling solve of the slab
+      (`decision-r08-t12f.md` ruling 1);
     - energy is conserved for ω = 1 to the agreement test, in a slab of the A5 cloud's matrix;
     - T12.c's seven benchmarks and T12.e's aerosol and A3 still pass;
     - each cloud's samples a geometry and its time on 4 threads are recorded. A benchmark over
-      30 minutes is raised with "main".
+      30 minutes is raised with "main";
+    - near a sun, recorded and not gated (`decision-r08-t12f.md` ruling 2): Buras and Mayer's
+      circumsolar virtual importance sampling (§2.5) is not built. A pilot traces VROOM from the
+      ground at 3°, 5°, 8° and 12° from a sun 60° and 85° from the zenith, through slabs of τ 0.5
+      of Henyey–Greenstein g 0.9, against the ruling's adding-doubling values, and of A5's
+      matrix, by σ's scaling. Its outcome sets R08.T12.b's item near a sun.
   - **Acceptance:** `cargo test -p hyperion-fit atmosphere` and
     `just test-slow atmosphere::benchmarks`.
+
+- **R08.T12.g The standard-error check in the tracer's unit tests** (`decision-r08-t12f.md`
+  ruling 4; R08.T12.e's open question 1). It needs R08.T12.f; nothing waits for it, and it moves no
+  output. The unit tests that hold a Monte Carlo value to a σ the run estimates take Design note
+  10's check (σ at N within 25% of half its σ over the run's first quarter, asserted), and hold
+  their values to z_N, with 4σ only where a test holds 8 values or fewer:
+  - in `atmosphere/mod.rs`, `atmosphere_spheroid_with_a_equal_to_c_agrees_with_the_sphere` (its
+    independent draws, 8 values) and `atmosphere_a_legendre_series_traces_as_a_table_of_the_same_function`
+    (12; z_12 = 4.10), which VROOM runs since R08.T12.f;
+  - `atmosphere_circular_polarisation_is_odd_in_azimuth_and_absent_without_b2` (12; 4.10),
+    `atmosphere_conservative_layer_conserves_energy` (4),
+    `atmosphere_spheroid_conservative_layer_conserves_energy` (4),
+    `atmosphere_a_small_spheres_tabulated_matrix_traces_as_rayleigh` (24 beside its 10⁻⁴ of I;
+    4.26) and `atmosphere_a_spheres_single_scattering_degree_of_polarisation_is_minus_b1_over_a1`
+    (48 beside its 2 × 10⁻⁴; 4.41);
+  - in `atmosphere/optics.rs`, over their draws' first quarter,
+    `atmosphere_cornette_shanks_sampling_has_its_mean_cosine` (4),
+    `atmosphere_tabulated_sampling_follows_the_table` (4) and
+    `atmosphere_legendre_series_is_followed_exactly` (2).
+
+  Each test's count is set before the check first runs, from a pilot at seeds it does not use, so
+  that the check's own scatter is under 5%; its seed is kept. A check that fails at the test's seed
+  is a finding, raised with "main", and is not re-seeded or re-counted. Not covered, as they read no
+  estimated σ: the deterministic comparisons, the thin layers held to 10⁻⁴ of single scattering,
+  and the two tests whose σ is exact (the suns' index counts, the cone's mean cosine).
+  `atmosphere_vroom_keeps_a_forward_peaked_slab_unbiased` and the `atmosphere::benchmarks` tests
+  have the check already. Acceptance: `cargo test -p hyperion-fit atmosphere`.
 
 - **R08.T12.b Cases and references.** It needs R08.T5, R08.T10's fixtures, R08.T12.c, R08.T12.d
   and R08.T12.e, and R08.T12.f for its cloudy and hazy cases (the Venus-class and Titan-class
@@ -4071,6 +4111,17 @@ here, and `pnpm test` passes.
     The references are traced to σ_ref ≤ T ÷ 8 at every geometry (decision-backlog-1) and
     σ_F ≤ 0.0025·F at each aggregate. Each case's sample count is set from a pilot run's σ and
     traced afresh at its own seed, and is committed with it.
+
+    Near a sun in a forward-peaked medium (`decision-r08-t12f.md` ruling 2). R08.T12.f's VROOM has
+    no circumsolar virtual importance sampling (Buras and Mayer 2011, §2.5), whose trigger holds
+    within some 7°–8° of a sun in the τ 5 clouds. A case whose medium runs VROOM and that has
+    geometries within 15° of a sun (Design note 10's ground views 5°–15° from a low sun, its
+    aureole points, and R08.T13's Mars points at 3°–12°) pilots those geometries first and records
+    each σ and its scaling. §2.5 is built first, as a subtask of its own raised with "main", ported
+    from the paper as R08.T12.f's method was and checked against an adding-doubling solve of a thin
+    slab, if R08.T12.f's near-sun pilot found it needed for a peak like the case's, or if the
+    case's pilot finds a σ there that does not fall as N^−½, or σ_ref ≤ T ÷ 8 there would take the
+    case past 30 minutes on 4 threads. The case waits for it.
 
   - Sanity tests on the references, each range [a, b] held as a − 4σ ≤ F ≤ b + 4σ with
     σ ≤ (b − a) ÷ 16 (Design note 10, _Statistics_):
@@ -7222,6 +7273,208 @@ generator, and the reference's sampling needs no domain tag.
   - _Plan text applied here_ from the follow-up: (c) T12.c's allowance, (d) and (e) T12.e's
     bullets, and this record. Its (a) the order, (b) Design note 10's _Statistics_, (f) R08.T12.f's
     text, (g) and (h) T12.b's are for the docs pass.
+- **Deviations in T12.f, as built** (2026-10-12; `crates/hyperion-fit/src/atmosphere/`:
+  `transport.rs`, `mod.rs`, `benchmarks.rs`; `crates/hyperion-fit/data/iprt_phase_a/README.md`).
+  - _The method_ is Buras and Mayer 2011's VROOM (JQSRT 112, 434; their DLR copy,
+    <https://elib.dlr.de/65843/1/buras2011.pdf>, SHA-256 `27857d27…cf364`), ported from the
+    paper's text (§2.2–2.6) with its parameter set (§2.6), in `transport.rs`'s module
+    documentation and constants:
+    - the n-tuple local estimate (§2.3): a mother path estimates its first `MOTHER_ORDERS` (4)
+      orders, natural from its order 4 on, and clones made at its orders 4 + 11i estimate the
+      rest in blocks (`CLONE_SCATTERINGS` 12, `ESTIMATES_PER_CLONE` 11), each order once
+      (`atmosphere_vroom_estimates_every_order_exactly_once`);
+    - sunward draws (DDIS, §2.2) at every clone vertex and at the mother's orders 1–3, those whose
+      next estimate is its own, as the paper's Fig. 8 and §2.4 have it (its §2.6 says the first
+      n_firstCP), at `VROOM_SUNWARD_FRACTION` 0.1;
+    - prediction-based splitting and roulette (§2.4: `SPLIT_ABOVE` 3, `MOST_COPIES` 5,000,
+      `ROULETTE_BELOW` 1/3, `LEAST_SURVIVAL` 0.2, the weight never lifted past the sample's
+      first-flight weight), the prediction in the paper's units (`PAPER_PHASE_SCALE`, 4π).
+
+    Not built: circumsolar virtual importance sampling (§2.5), for a detector that looks into or
+    near a sun through a thin peaked medium. Its trigger, w_redspl > 10, holds within some 7°–8° of
+    the sun in these clouds; no benchmark looks within 15° of a sun. The near-sun pilot (`decision-r08-t12f.md`
+    ruling 2; through the `atmosphere-reference` command at seeds 1000 and 1001, not committed):
+    slabs of τ 0.5 and ω 1 over a black ground, seen from the ground at 3°, 5°, 8° and 12° from a
+    sun 60° (above, below and in its almucantar) and 85° (above and in its almucantar) from the
+    zenith, 20 views, at 1.6 × 10⁶, 4 × 10⁵ and 10⁵ samples a view:
+    - (i) the 1,024-entry Henyey–Greenstein g 0.9 table (forward 15 sr⁻¹, w_redspl > 10 within
+      15° of the sun): against the ruling's adding-doubling values, largest |z| 1.87 (bound z_20
+      4.21), χ² 14.9 for 20 (p 0.78), Σz ÷ √n −0.43; σ ÷ I at worst 0.174% at 1.6 × 10⁶ (0.35%
+      at 4 × 10⁵); every σ ratio to N^(−1/2) from 0.989 to 1.007 at both steps; 87 s.
+    - (ii) A5's matrix (forward 283 sr⁻¹, w_redspl > 10 within 8.2°): σ ÷ I at worst 0.221% at
+      1.6 × 10⁶ (85° sun, 3° in azimuth); every σ ratio from 0.981 to 1.013; 86 s.
+    - The outcome under the ruling's rule, stated before the run: neither fails, so §2.5 stays
+      unbuilt, and R08.T12.b's item near a sun guards its own media.
+      Iwabuchi 2006 (J. Atmos. Sci. 63, 2324) was weighed from its abstract and Buras and Mayer's
+      account of it (its text is behind a 403 here): its truncation approximation alters the phase
+      function and biases by an amount the run cannot state (Buras and Mayer §1), and the task
+      admits a biasing technique only with its bias measured below 10⁻³ of I, which the benchmarks'
+      own 0.2% spreads cannot show; its modified local estimate, a roulette of the estimate's ray,
+      saves time, not variance (ibid. §2.6); its collision forcing for optically thin media and its
+      numerical diffusion were weighed from the abstract only.
+
+  - _Choices beyond the paper_, each unbiased, any splitting or roulette rule being so:
+    - splitting and the prediction-based roulette play at the guided vertices alone, with the
+      sunward draws, so on the mother at its orders 1–3 (as Fig. 8 has the draws), where §2.6
+      plays the roulette at every vertex: not on the natural mother past its order 3, whose
+      weight changes by losses alone (the cap would keep a full-weight mother out of it anyway);
+      both read the prediction after its division by w_redspl;
+    - the sunward branch draws from the vertex's own phase mixture (R08.T12.c's), where eq. 10
+      takes the largest of the scene's phase functions; the two agree in a medium of one term,
+      every benchmark's, and in a layered one (T12.b's haze over a deck) a sunward draw at a haze
+      vertex does not bound the next cloud vertex's estimate, which the splitting does;
+    - the prediction is 4π times the largest of the case's terms' phase functions at the new
+      direction's cosine with a sun, the largest over the suns, in place of the paper's
+      C_ddis·max normalised: no irradiance enters it, so the draws stay independent of it;
+    - W is relative to the sample's first-flight weight (the forced collision's 1 − e^(−τ), or
+      the ground seen directly), which its clones and copies inherit, not to 1, so that a thin
+      limb's small first weight is not split or rouletted for being small;
+    - the least prediction of w_redspl (eq. 12) includes the first flight's direction;
+    - the existing roulette's threshold divides with a split, so that copies are not rouletted
+      for being copies.
+  - _Where it runs:_ `Estimator::ByMedium`, what every reference runs, takes VROOM at a wavelength
+    where some term that scatters has a forward phase value above `FORWARD_PEAK_PER_SR`
+    (1 sr⁻¹), and R08.T12.c's estimator elsewhere, so that Rayleigh's sky and every Rayleigh
+    benchmark (Natraj ×3, Kokhanovsky's molecular case, IPRT A1 and A2) run the same paths to
+    the bit. `Estimator::SunwardDraws` and `Estimator::Vroom` force either; the tests' switch,
+    through the crate-private `trace_reference_with` (`trace_reference`'s signature is
+    unchanged). `Medium::new` takes the estimator. The reference format does not record which
+    estimator ran: it is a function of the case.
+  - _Bit pins_: `atmosphere_reference_bits_are_pinned`,
+    `atmosphere_stokes_reference_bits_are_pinned` and
+    `atmosphere_spheroid_reference_bits_are_pinned` now pin both: R08.T12.c's estimator at
+    its old values to the bit, and the default, whose values moved because the sample case's
+    Cornette–Shanks aerosol (forward 4.1 sr⁻¹), `polarising_case`'s table and the Saturn case's
+    haze turn VROOM on. `atmosphere_rayleigh_alone_keeps_the_sunward_draws_paths` holds a
+    Rayleigh-only case to R08.T12.c's bits under the default, and
+    `atmosphere_vroom_runs_where_a_scattering_term_is_forward_peaked` the selection (a peaked term
+    that does not scatter at a wavelength leaves it off there). The thread test gains a thick
+    peaked slab (τ 5 at g 0.9), so that clones and splits are traced on one and four threads.
+  - _The forward-peaked slab's unit test_ is renamed
+    `atmosphere_vroom_keeps_a_forward_peaked_slab_unbiased` (it was
+    `atmosphere_sunward_draws_keep_a_forward_peaked_slab_unbiased`): it runs VROOM now (σ 0.68%
+    and 1.17% of the incident flux, 1.7% of the dimmest view, against T12.c's 0.70%, 1.30% and
+    2.7%), and asserts that every σ it uses falls as N^(−1/2) over the run's first quarter.
+  - _Pilots_ (seeds 1000–1020, never the tests'; times on 4 threads under a 400% quota at load
+    6–25):
+    - IPRT A5 at 4 × 10⁴: VROOM σ ÷ I 1.17% at the median and 1.65% at worst, χ² of I 47.5 for
+      62, against T12.c's 3.65% and 16.2%, χ² 97.6, 154 of 248 values left out by the N^(−1/2)
+      check; at 4 × 10⁵, 0.371% and 0.520% (the factor 1 ÷ √10), none left out, χ² of I, Q, U and
+      V 55.2, 42.9, 85.7 and 57.0 for 62, traced ÷ expected 1.00076; 247 s.
+    - Kokhanovsky et al.'s cloud at 4 × 10⁴: 1.35% and 2.28%, χ² of I 22.7 for 35, against
+      T12.c's 4.03% and 38.9%, χ² 91.2, 47 of 94 left out; at 4 × 10⁵, 0.427% and 0.727% (the
+      transmitted VZA 89°, φ 180°), none left out, χ² 32.5, 6.0, 2.4 and 12.8, traced ÷ expected
+      1.00056; 142 s.
+    - ε 0.2, T12.c's fraction, under VROOM (8 × 10⁴): σ ÷ I at worst 1.45% (A5) and 2.03% (the
+      cloud) against 1.16% and 1.63% for ε 0.1 at the same cost, so the paper's 0.1 stands.
+    - The sample counts are set from these so that every σ falls some 15% under its cap: A5
+      1.7 × 10⁶ a geometry, the cloud 3.4 × 10⁶, then traced afresh at seed 0.
+  - _The cloud's matrix at level 3 (committed) against level 4_ (98,368 nodes; the writer at
+    level 4, not committed): a₁ moves by at most 4.1 × 10⁻³ of itself (at 120°), 2.5 × 10⁻³ at
+    150°–176° and 5.4 × 10⁻³ within 0.4° of backscatter, the other elements by at most
+    5.4 × 10⁻³ of a₁, g from 0.861060 to 0.861023 (theirs 0.86114, so level 4 is no nearer
+    their sums), ω unchanged. Its single-scattering share of the reflected radiance moves by at
+    most 1.1 × 10⁻³ of I (exact backscatter, VZA 60°, φ 180°, where single scattering is 24% of
+    I) and by at most 2.2 × 10⁻⁴ elsewhere; traced at one pilot seed with either matrix, the 36
+    intensities differ by +0.026% on average, each well inside its σ. Both are under the stated
+    0.2% spread, so level 3 stands.
+  - _The check of VROOM against the sunward draws_
+    (`vroom_agrees_with_the_sunward_draws_where_they_converge`): the task's Henyey–Greenstein slab
+    of g 0.9 and τ 2 (sun 50°, black ground). The sunward draws do not converge there everywhere:
+    at 4 × 10⁵ samples their σ is 1–2% of I in most reflected views, which are dim (about 1–3% of
+    I's largest), and in transmitted views far from the sun in azimuth, and 7 of 57 views fail the
+    N^(−1/2) check. So the check takes the views where they converge best in a pilot over 57
+    (`VROOM_CHECK_VIEWS`): the 14 transmitted views where their σ was smallest (0.09%–0.14% of I at
+    3.2 × 10⁶) and the two reflected views where it was (VZA 80° and 85°, φ 0°: 0.16% and 0.18%),
+    VROOM at 7 × 10⁵ and the sunward draws at 1.6 × 10⁶ samples, each at its own seed (0 and 1),
+    every σ some 0.25% of I at most; z takes both σ, and both are held to 0.3% of I. The pilots:
+    - over the 57 views at 4 × 10⁵ each, χ² 69.1 for 57, but Σz ÷ √n = +2.73 over the 50 that
+      scale (VROOM about 0.13% above). The excess lay in the 28 best-converged views themselves
+      (+2.38 over them, +0.85 over the other 29).
+    - Those 28, at 4 and 8 times the samples (1.6 and 3.2 × 10⁶): VROOM ÷ sunward draws 1.00005
+      on average, χ² 30.3 for 28 and Σz ÷ √n = +0.45. So the first was chance and the sunward
+      draws' tail at 4 × 10⁵.
+    - VROOM's means against the two clouds' references scatter on both sides across the pilots:
+      A5 0.9975 (4 × 10⁴), 1.0008 (4 × 10⁵); the cloud 0.9989 (4 × 10⁴), 0.9993 (2 × 10⁵),
+      1.0006 (4 × 10⁵).
+    - Against an exact answer (`decision-r08-t12f.md` ruling 1): a scalar adding-doubling solve
+      of the slab (Fourier modes to 191, 96 Gauss nodes a hemisphere, exact single scattering;
+      converged to 3 × 10⁻⁶ and conserving energy to 2 × 10⁻⁷), against the three pilots. VROOM:
+      χ² 92.8 for 104 (p 0.78); at the 68 values outside `VROOM_CHECK_VIEWS` χ² 64.0 (p 0.62), its
+      mean ÷ exact 1.0003 ± 0.0005 over the 57-view pilot's 41 and 1.0020 ± 0.0017 over the 9 dim
+      reflected views. The sunward draws: χ² 126.6 for 104 (p 0.065), 0.9989 over the 57 at
+      4 × 10⁵ (Σz ÷ √n −1.96), and χ² 25.7 for the check's 16 at 3.2 × 10⁶ (p 0.058). The
+      comparator is the side that converges from below; the 57-view pilot's +2.73 was its tail
+      (−1.96 against the exact answer) and VROOM's chance (+1.02).
+  - _The energy check_ (`vroom_conserves_energy_in_a_conservative_slab_of_the_a5_cloud`): A5's
+    matrix at ω 1, τ 5, black ground, the suns at 0°, 50° and 75°, the vector I and the scalar
+    radiance of the same paths each balanced: six values, each held to the Bonferroni bound z_N
+    over the values asserted (3.93 for six, too few for a χ²), each σ at most 0.3% of the incident
+    flux. A balance whose σ does not fall as N^(−1/2) is left out and named, as a benchmark's value
+    is, the set pinned in `EXPECTED_UNSCALED`. 1.5 × 10⁶ samples a flux (σ at most 0.49% of the
+    incident flux at 4 × 10⁵ in the pilot, the sun overhead).
+  - _The clouds' σ_pub._
+    - Kokhanovsky et al.'s cloud (`kokhanovsky_cloud_spread`): I 0.2%, and 0.6% at transmitted
+      VZA 80° and 89° (ruling 4); Q 0.5% and U 0.2%, Pstar's dQ/Q and dU/U for the cloud (Table 2),
+      each floored at I's spread times I, as the aerosol's are; V 0.5%, relative to itself (§5).
+    - IPRT A5: IPOL's largest difference from PSTAR at the rows used, over both planes:
+      6.5 × 10⁻⁴, 3.8 × 10⁻⁴, 2.2 × 10⁻⁵ and 5.2 × 10⁻⁷ of I (`IPRT_SPREAD`; recomputed by the
+      science check as 6.42 × 10⁻⁴, 3.70 × 10⁻⁴, 2.16 × 10⁻⁵ and 5.14 × 10⁻⁷, rounded up). MYSTIC is
+      not used, as for A3.
+  - _The benchmarks VROOM reaches._ `Estimator::ByMedium` runs VROOM in IPRT A4 (T12.c; IPRT's
+    matrix, forward 44 sr⁻¹) and Kokhanovsky et al.'s aerosol (T12.e; 116 sr⁻¹) too: their rows in
+    T12.e's table, and its "unchanged to the bit" for A4, are superseded by the run below, and the
+    aerosol's two left-out values of `EXPECTED_UNSCALED` are gone (under VROOM it leaves none out).
+    IPRT A3's water-soluble aerosol (forward 0.37 sr⁻¹) and T12.c's five Rayleigh benchmarks stay
+    on its estimator and give T12.e's figures to the digit.
+  - _Not changed:_ the slow profile gives the two clouds no nextest priority, since
+    `.config/nextest.toml` widens every gate's selection (`decision-r08-t12f.md` ruling 3: a perf
+    lane adds one only if the first slow pass after landing shows either ending after the suite's
+    other tests).
+  - _The N^(−1/2) check elsewhere_ (R08.T12.e's open question 1; `decision-r08-t12f.md` ruling 4).
+    T12.f adds it to `atmosphere_vroom_keeps_a_forward_peaked_slab_unbiased` and to its own two
+    checks. VROOM now also runs in two unit tests that hold values to an estimated σ,
+    `atmosphere_spheroid_with_a_equal_to_c_agrees_with_the_sphere` (the sample case's
+    Cornette–Shanks aerosol) and `atmosphere_a_legendre_series_traces_as_a_table_of_the_same_function`
+    (g 0.8). Both sides of each run VROOM, so an understated σ there can only fail a correct
+    comparison. They and eight more are R08.T12.g's.
+  - _The benchmarks at seed 0_ (`just test-slow atmosphere::benchmarks`, on a0c1ab6f with this
+    change; times from nextest, four benchmarks at a time on 4 threads each, under the heavy lock):
+
+    | Benchmark                       | Estimator | Values | Left out | Samples      | Largest \|z\| (where)               | Past 3σ | Bound | Largest σ ÷ I | χ² p: I, Q, U, V       | Time    |
+    | ------------------------------- | --------- | ------ | -------- | ------------ | ----------------------------------- | ------- | ----- | ------------- | ---------------------- | ------- |
+    | Natraj et al. 2009, τ 0.5       | T12.c's   | 78     | 0        | 5 × 10⁵      | 3.68 (Top μ 0.2 φ 180 I)            | 1       | 4.51  | 0.24%         | 0.017, 0.22, 0.86      | 55 s    |
+    | Natraj et al. 2009, τ 1         | T12.c's   | 78     | 0        | 4 × 10⁵      | 2.63 (Bottom μ 0.2 φ 60 U)          | 0       | 4.51  | 0.18%         | 0.74, 0.44, 0.30       | 50 s    |
+    | Natraj and Hovenier 2012, τ 2   | T12.c's   | 57     | 3        | 1.5 × 10⁶    | 2.56 (Bottom μ 0.9 φ 90 I)          | 0       | 4.45  | 0.27%         | 0.012, 0.35, 0.18      | 156 s   |
+    | Kokhanovsky et al., molecular   | T12.c's   | 42     | 0        | 2.5 × 10⁵    | 2.75 (R VZA 0 φ 180 Q)              | 0       | 4.38  | 0.20%         | 0.93, 0.14, 0.46       | 24 s    |
+    | IPRT A1                         | T12.c's   | 246    | 0        | 2 × 10⁵      | 3.02 (ρ 0.03 Bottom sza 30 vza 0 I) | 1       | 4.75  | 0.19%         | 0.16, 0.11, 0.15       | 51 s    |
+    | IPRT A2                         | T12.c's   | 99     | 0        | 10⁵          | 2.69 (Top sza 50 vza 120 vaa 0 U)   | 0       | 4.56  | 0.15%         | 0.96, 0.62, 0.47       | 10 s    |
+    | IPRT A4                         | VROOM     | 136    | 0        | 4 × 10⁵      | 2.54 (Bottom vza 80 vaa 180 V)      | 0       | 4.63  | 0.22%         | 0.90, 0.83, 0.79, 0.99 | 39 s    |
+    | IPRT A3                         | T12.c's   | 136    | 0        | 4 × 10⁵      | 2.35 (Top vza 100 vaa 135 I)        | 0       | 4.63  | 0.27%         | 0.91, 0.93, 0.57, 0.96 | 43 s    |
+    | Kokhanovsky et al., aerosol     | VROOM     | 87     | 0        | 1.2 × 10⁶    | 4.18 (R VZA 60 φ 180 I)             | 1       | 4.54  | 0.26%         | 0.17, 0.99, 0.99, 0.76 | 164 s   |
+    | IPRT A5 (new)                   | VROOM     | 248    | 0        | 1.7 × 10⁶    | 2.99 (Top vza 130 vaa 180 V)        | 0       | 4.75  | 0.25%         | 0.86, 0.98, 0.87, 0.58 | 1,108 s |
+    | Kokhanovsky et al., cloud (new) | VROOM     | 94     | 0        | 3.4 × 10⁶    | 1.87 (R VZA 0 φ 90 I)               | 0       | 4.55  | 0.25%         | 0.98, 1.00, 1.00, 0.80 | 1,308 s |
+    | VROOM against the sunward draws | both      | 15     | 1        | 7 / 16 × 10⁵ | 1.88 (Bottom VZA 80 φ 0 I)          | 0       | 4.15  | 0.23%         | 0.69                   | 233 s   |
+    | The energy check, A5's matrix   | VROOM     | 6      | 0        | 1.5 × 10⁶    | 1.34 (sun 50°, scalar)              | 0       | 3.93  | 0.25% of F    | —                      | 134 s   |
+    - Both clouds pass, each under 30 minutes on 4 threads (18.5 and 21.8). A5's χ² of I is 50.2
+      for 62 where T12.c's estimator gave 113, its σ ÷ I 0.25% at worst where it gave 6.9%; the
+      cloud's worst is 0.25% where it gave 40%. Neither leaves a value out.
+    - The cloud's σ_pub dominates its Q and U (χ² 0.9 for 35 and 0.4 for 12): their spreads of 0.5%
+      and 0.2%, floored at 0.2% of I, are wide against the tracer's agreement. Its V, which T12.e
+      expected no run to decide, gives χ² 7.9 for 12 with ruling 2's errata against 65 flipped.
+    - The aerosol's exact backscatter (VZA 60°, φ 180°) stands at z 4.18 under the bound, as it did
+      at 4.10 under T12.c's estimator (ruling 5); its V gives χ² 8.3 for 12 against 4,533 flipped.
+    - The left-out sets are recorded in `EXPECTED_UNSCALED` from this run: the aerosol's two are
+      gone, and the check of VROOM against the sunward draws leaves out the transmitted VZA 10°,
+      φ 0°, where the sunward draws' σ does not fall as N^(−1/2). VROOM's does there (σ_N ÷ (σ_N/4 ÷ 2) = 1.005 in a trace of its side by the `atmosphere-reference` command at seed 0, the same
+      case with its table normalised by another rule, so not to the bit). The two benchmarks were
+      then traced again by name at the same seeds and counts, and pass with the record.
+
+  - _Licences:_ Kokhanovsky et al.'s cloud values (Tables A3–A6) are committed now that a test
+    asserts them (`decision-r08-licences.md` row 6c), inline in `benchmarks.rs` with their tables
+    cited, less the view at the sun; their transmitted V at VZA 20°, 40°, 80° and 89° is negated
+    in code as a cited erratum (`KOKHANOVSKY_CLOUD_ERRATA`, ruling 2). The level-4 matrix and
+    the pilots' logs are not committed. Nothing of libRadtran was read for this task.
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:

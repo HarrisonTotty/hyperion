@@ -33,8 +33,8 @@ before they read it.
 - `a5_cloud.txt`: case A5 (a liquid water cloud at 800 nm, optical thickness 5), 62 rows of
   PSTAR's results: 35 in the principal plane (the cloudbow's at the top, at a relative azimuth of
   180° and 6°–14° from nadir, every 2°) and 27 in the almucantar (the bow's at the top, 115°–135°
-  in azimuth, every 5°). Loaded and counted by the fast tests; the benchmark that asserts them
-  waits for the tracer's variance reduction in thick clouds (R08.T12.f).
+  in azimuth, every 5°). Loaded and counted by the fast tests, and asserted by the benchmark of
+  R08.T12.f, which traces them with the tracer's variance reduction for thick clouds.
 - `a5_cloud_matrix.txt`: case A5's phase matrix, P1–P4 at every fifth of the file's 450
   scattering angles from 0° and at 180°, one row per angle in ascending order, the values as
   printed.
