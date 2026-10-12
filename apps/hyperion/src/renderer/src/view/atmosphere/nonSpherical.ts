@@ -1098,8 +1098,8 @@ function fallbackOptics(
     phaseModel: small ? "mie" : "henyeyGreenstein",
     phaseNote: `${particles.material}: ${reason}; ${
       small
-        ? `a small grain (2πr_eff ÷ λ ${effective.toFixed(2)} < ${SMALL_GRAIN_SIZE_PARAMETER}), drawn with the sphere's own Mie matrix`
-        : "a Henyey–Greenstein phase from Mie's g, with Mie's ω and no matrix"
+        ? `a small grain (effective size parameter ${effective.toFixed(2)} < ${SMALL_GRAIN_SIZE_PARAMETER}), drawn with the sphere's own Mie matrix`
+        : "a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix"
     }, a fallback`,
   };
 }
@@ -1160,6 +1160,7 @@ export function opticsOfParticles(
   }
   const table = particles.table;
   if (table === undefined || table.model !== "tamudust2020") {
+    // R08.T5.d adds the floor tables and the other minerals' reduced tables.
     const outside = index.n > KERNEL_TRANSPARENT_N_MAX && index.k < 1e-3;
     return fallbackOptics(
       particles,
@@ -1167,8 +1168,8 @@ export function opticsOfParticles(
       wavelengthNm,
       mu,
       outside
-        ? `n ${index.n.toFixed(3)} above ${KERNEL_TRANSPARENT_N_MAX} with k under 10⁻³, below the longwave kernel's k floor, with no floor table on file (R08.T5.d)`
-        : "no reduced TAMUdust2020 table on file (R08.T5.d)",
+        ? `n ${index.n.toFixed(3)} above ${KERNEL_TRANSPARENT_N_MAX} with k under 1E-3, below the longwave kernel's k floor, with no floor table on file`
+        : "no reduced TAMUdust2020 table on file",
     );
   }
   const optics = tableModeOptics(table, distribution, index, wavelengthNm, mu);
@@ -1179,7 +1180,7 @@ export function opticsOfParticles(
         sizes,
         wavelengthNm,
         mu,
-        `the k-floor rule exceeded (the floor's ω ${optics.tableAlbedo.toFixed(4)} < ${FLOOR_ALBEDO_MIN}) at n ${index.n.toFixed(3)} above ${KERNEL_TRANSPARENT_N_MAX}`,
+        `the k-floor rule exceeded (the floor's single-scattering albedo ${optics.tableAlbedo.toFixed(4)} < ${FLOOR_ALBEDO_MIN}) at n ${index.n.toFixed(3)} above ${KERNEL_TRANSPARENT_N_MAX}`,
       );
     }
     return fromTable(
@@ -1187,7 +1188,7 @@ export function opticsOfParticles(
       particles,
       "analogue",
       "tamudust2020",
-      `${particles.material}: the k-floor rule exceeded (the floor's ω ${optics.tableAlbedo.toFixed(4)} < ${FLOOR_ALBEDO_MIN}), the floor's table stands in, a named analogue`,
+      `${particles.material}: the k-floor rule exceeded (the floor's single-scattering albedo ${optics.tableAlbedo.toFixed(4)} < ${FLOOR_ALBEDO_MIN}), the floor's table stands in, a named analogue`,
     );
   }
   return fromTable(optics, particles, "model", "tamudust2020", undefined);

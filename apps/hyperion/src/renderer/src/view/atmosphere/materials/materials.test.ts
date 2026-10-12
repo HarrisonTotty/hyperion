@@ -160,6 +160,9 @@ describe("refractiveIndex", () => {
     const strongAcid = resolveMaterial("H2SO4", { variant: "96wt%" });
     expect(strongAcid.provenance).toBe("standIn");
     expect(strongAcid.file?.variant).toBe("75wt%");
+    expect(strongAcid.standIn).toBe(
+      "no 96wt% H2SO4 on file: aqueous sulphuric acid, 75% by mass, at 300 K stands in, a named analogue",
+    );
   });
 
   it("gives an unknown key the generic stand-in, a non-absorbing sphere of index 1.5", () => {
@@ -266,7 +269,12 @@ describe("NH₄SH, a stated stand-in", () => {
 
   it("stays a stand-in that states its estimate", () => {
     expect(refractiveIndex("NH4SH", 550).provenance).toBe("standIn");
-    expect(resolveMaterial("NH4SH").standIn).toMatch(/Lorentz–Lorenz/u);
+    expect(resolveMaterial("NH4SH").standIn).toBe(
+      "a non-absorbing particle whose real index is a Lorentz–Lorenz estimate, since no visible optical constants of NH4SH are published: 1.674 at 380 nm, 1.638 at 550 nm and 1.623 at 780 nm, within +0.081 and −0.022",
+    );
+    expect(fileOf("NH4SH").source).toContain(
+      "1.80 would need a molar refraction 22% above the additive one.",
+    );
   });
 
   it("takes rayleigh.ts's NH₃ and H₂S rows, stated at 0 °C and 760 mm, as its estimate does", () => {

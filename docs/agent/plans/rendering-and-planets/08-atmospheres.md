@@ -2713,9 +2713,11 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers vi
 - **The follow-up to R08.T5.b: two rulings on its files** (science-r08-nonspherical.md §3,
   2026-10-10).
   - NH₄SH: the tool computes the stand-in's n(λ) from the formula in §3.1 on the file's grid,
-    replacing `NH4SH_STAND_IN_N`. The file's `standIn` text states the estimate, its inputs (the
-    two Cuthbertson dispersions, West 1934's cell via COD 1010249, NH₄Cl's increment) and its
-    band. `provenance` stays `standIn`, and the label is unchanged.
+    replacing `NH4SH_STAND_IN_N`. The file's `standIn`, which the operator reads under the label,
+    states the estimate, its three indices and its band. Its `source` states the inputs (the two
+    Cuthbertson dispersions, West 1934's cell via COD 1010249, NH₄Cl's increment), the NH₃-ice
+    check, the basis for k = 0 and the withdrawn 1.80 (science-r08-mmf.md §4.8). `provenance`
+    stays `standIn`, and the label is unchanged.
   - Mars dust: the values are unchanged, and the 321 nm row stays the 380–440 nm anchor. The
     file's reduction text no longer counts the 263 nm row as used. It states that the two
     ultraviolet rows are part of Wolff's distributed compilation, separately retrieved (k to
@@ -3697,7 +3699,9 @@ By the composition ruling (decision-composition):
 - The record's `gases` pass to `molecularTerm` unconverted (a type test pins the assignability).
 - `atmosphereApproximate` collects the reasons of the optics registry: an estimated or absent
   Rayleigh, an absent absorber, or one with no column free (`noColumnFree`), a stand-in or
-  unknown material.
+  unknown material. The reasons are player text. Each uses only characters both B612 faces hold,
+  and names in words any quantity the literature writes with another symbol (science-r08-mmf.md
+  §4.7).
 - **Negligible absorbers** (`decision-r08-t4b-t12c.md`, follow-ups 3–5).
   - **What is tested:**
     - each listed absorber still in R08.T4.c's `PENDING_ABSORBERS`;
@@ -6383,6 +6387,14 @@ generator, and the reference's sampling needs no domain tag.
       committed files only `iron.json` fails, at every wavelength (|m − 1| 2.73 at 380 nm to 3.82
       at 780 nm), so an aggregate of iron monomers inside (9)'s gate, once a `model`, is an
       `analogue`; no other class changes.
+    - _The notes' text_ (science-r08-mmf.md §4.7, 2026-10-12). Each `phaseNote` is player text,
+      so it uses only characters both B612 faces hold. The aggregate's note takes its limits from
+      `MMF_PHASE_SHIFT_LIMIT` and `MMF_INDEX_CONTRAST_LIMIT` and names the phase shift in words. It
+      calls (9) Tazaki and Tanaka's equation, and (7) and (8) their conditions. The non-spherical
+      notes call ω the single-scattering albedo and 2πr_eff ÷ λ the effective size parameter, and
+      write 10⁻³ as 1E-3. No note names a plan task or a code identifier, and none abbreviates the
+      modified mean-field theory. The notes show a shape class in words, and the material names
+      spell out "wt%", CRISM and MER (§4.8).
   - _The MMF against optool._ The lane built optool 1.9.14 (commit 21aecb46) offline with
     gfortran 16.2.1 from Arch's `gcc-fortran` package (its SHA-256 checked against the signed sync
     database), with `optool_manual.f90` stubbed (its help text fails gfortran 16's format checks;

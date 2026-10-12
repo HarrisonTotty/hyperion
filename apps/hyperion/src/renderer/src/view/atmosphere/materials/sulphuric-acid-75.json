@@ -2,7 +2,7 @@
   "key": "H2SO4",
   "phase": "liquid",
   "variant": "75wt%",
-  "name": "75 wt% aqueous sulphuric acid at 300 K",
+  "name": "aqueous sulphuric acid, 75% by mass, at 300 K",
   "temperatureK": 300,
   "shape": "sphere",
   "provenance": "measured",

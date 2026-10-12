@@ -689,6 +689,14 @@ export function modeShape(mode: AerosolMode, material: ResolvedMaterial): ShapeC
   return material.file?.shape ?? "sphere";
 }
 
+/** A shape class in words, for a note the operator reads. */
+const SHAPE_WORDS: Readonly<Record<ShapeClass, string>> = {
+  sphere: "a sphere",
+  nonSphericalMineral: "a non-spherical mineral",
+  crystal: "a crystal",
+  aggregate: "an aggregate",
+};
+
 /**
  * A mode's optics at one wavelength, over its size distribution, with its material's index from
  * the registry.
@@ -745,6 +753,6 @@ export function modeOptics(
     phaseModel: keepsMatrix ? "mie" : "henyeyGreenstein",
     phaseNote: keepsMatrix
       ? undefined
-      : `a ${shape} of ${mode.material} through sphere Mie: Henyey–Greenstein from Mie's g, a fallback`,
+      : `${SHAPE_WORDS[shape]} of ${mode.material} through sphere Mie: Henyey–Greenstein from Mie's g, a fallback`,
   };
 }

@@ -870,8 +870,8 @@ export function aggregateOptics(
   const geometricM2 = result.geometricCrossSectionUm2 * 1e-12;
   const extM2 = result.extinctionCrossSectionUm2 * 1e-12;
   const scaM2 = result.scatteringCrossSectionUm2 * 1e-12;
-  const shifts = `Δφ ${mmfPhaseShift(result).toFixed(2)} by Tazaki and Tanaka's (9) (aggregate term ${result.phaseShift.toFixed(2)})`;
-  const contrast = `index contrast |m − 1| ${result.indexContrast.toFixed(2)} by Tazaki and Tanaka's (7), past the limit of 2`;
+  const shifts = `phase shift ${mmfPhaseShift(result).toFixed(2)} by Tazaki and Tanaka's equation (9) (aggregate term ${result.phaseShift.toFixed(2)})`;
+  const contrast = `index contrast |m − 1| ${result.indexContrast.toFixed(2)}, past the limit of ${MMF_INDEX_CONTRAST_LIMIT} in Tazaki and Tanaka's condition (7)`;
   const contrastFails = result.indexContrast >= MMF_INDEX_CONTRAST_LIMIT;
   let note: string | undefined;
   switch (basis) {
@@ -881,16 +881,18 @@ export function aggregateOptics(
     case "analogue": {
       const reasons: string[] = [];
       if (mmfPhaseShift(result) >= MMF_PHASE_SHIFT_LIMIT) {
-        reasons.push(`${shifts}, past the gate`);
+        reasons.push(
+          `${shifts}, past the limit of ${MMF_PHASE_SHIFT_LIMIT} in their condition (8)`,
+        );
       }
       if (contrastFails) {
         reasons.push(contrast);
       }
-      note = `an aggregate of ${mode.material}, ${reasons.join("; ")}: the MMF table, an analogue`;
+      note = `an aggregate of ${mode.material}, ${reasons.join("; ")}: the modified mean-field table, an analogue`;
       break;
     }
     case "fallback":
-      note = `an aggregate of ${mode.material}, ${shifts}, its own term past the gate${contrastFails ? `; ${contrast}` : ""}: a Henyey–Greenstein phase from its MMF asymmetry, a fallback`;
+      note = `an aggregate of ${mode.material}, ${shifts}, the aggregate term past the limit of ${MMF_PHASE_SHIFT_LIMIT}${contrastFails ? `; ${contrast}` : ""}: a Henyey–Greenstein phase from its modified mean-field asymmetry, a fallback`;
       break;
   }
   const hasTable = basis !== "fallback";

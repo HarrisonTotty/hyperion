@@ -154,6 +154,9 @@ describe("the phase-shift gate (science-r08-mmf.md §1.4)", () => {
     expect(optics.phaseModel).toBe("mmf");
     expect(optics.matrix).toBeDefined();
     expect(optics.phaseNote).toContain("analogue");
+    expect(optics.phaseNote).toMatch(
+      /^an aggregate of tholin, phase shift \d\.\d\d by Tazaki and Tanaka's equation \(9\) \(aggregate term \d\.\d\d\), past the limit of 1 in their condition \(8\): the modified mean-field table, an analogue$/u,
+    );
   });
 
   it("falls back for a compact large aggregate, keeping its cross-sections", () => {
@@ -206,8 +209,9 @@ describe("the index-contrast condition, Tazaki and Tanaka 2018's (7) (science-r0
       expect(channel.phaseBasis).toBe("analogue");
       expect(channel.phaseModel).toBe("mmf");
       expect(channel.matrix).toBeDefined();
-      expect(channel.phaseNote).toContain("(7)");
-      expect(channel.phaseNote).toContain("by Tazaki and Tanaka's (7), past the limit of 2");
+      expect(channel.phaseNote).toMatch(
+        /^an aggregate of Fe, index contrast \|m − 1\| \d\.\d\d, past the limit of 2 in Tazaki and Tanaka's condition \(7\): the modified mean-field table, an analogue$/u,
+      );
     }
     expect(phaseLabels([{ material: "Fe", optics, opticalDepthAbove550: 0 }])).not.toEqual([]);
   });
@@ -218,7 +222,9 @@ describe("the index-contrast condition, Tazaki and Tanaka 2018's (7) (science-r0
       550,
     );
     expect(optics.phaseBasis).toBe("fallback");
-    expect(optics.phaseNote).toContain("(7)");
+    expect(optics.phaseNote).toMatch(
+      /^an aggregate of Fe, phase shift \d+\.\d\d by Tazaki and Tanaka's equation \(9\) \(aggregate term \d+\.\d\d\), the aggregate term past the limit of 1; index contrast \|m − 1\| \d\.\d\d, past the limit of 2 in Tazaki and Tanaka's condition \(7\): a Henyey–Greenstein phase from its modified mean-field asymmetry, a fallback$/u,
+    );
   });
 
   it("finds soot and tholin inside (7) at every 5 nm over 380–780 nm", () => {

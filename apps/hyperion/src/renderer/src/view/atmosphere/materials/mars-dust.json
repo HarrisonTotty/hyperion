@@ -2,7 +2,7 @@
   "key": "mars_dust",
   "phase": "solid",
   "variant": null,
-  "name": "Martian atmospheric dust, indices retrieved from CRISM and MER observations",
+  "name": "Martian atmospheric dust, indices retrieved from Mars Reconnaissance Orbiter spectrometer and Mars Exploration Rover observations",
   "temperatureK": null,
   "shape": "nonSphericalMineral",
   "provenance": "measured",

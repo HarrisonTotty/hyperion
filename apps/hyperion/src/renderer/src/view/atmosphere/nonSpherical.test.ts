@@ -478,7 +478,9 @@ describe("the fallback", () => {
     expect(optics.phaseBasis).toBe("fallback");
     expect(optics.phaseModel).toBe("henyeyGreenstein");
     expect(optics.matrix).toBeUndefined();
-    expect(optics.phaseNote).toContain("below the longwave kernel's k floor");
+    expect(optics.phaseNote).toMatch(
+      /^TiO2: n \d\.\d{3} above 1\.7 with k under 1E-3, below the longwave kernel's k floor, with no floor table on file; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback$/u,
+    );
   });
 
   it("draws a small TiO₂ grain with the sphere's own Mie matrix, still a fallback", () => {
@@ -491,6 +493,20 @@ describe("the fallback", () => {
     expect(optics.phaseBasis).toBe("fallback");
     expect(optics.phaseModel).toBe("mie");
     expect(optics.matrix).toBeDefined();
+    expect(optics.phaseNote).toContain(
+      "; a small grain (effective size parameter 0.11 < 0.22), drawn with the sphere's own Mie matrix, a fallback",
+    );
+  });
+
+  it("draws a mineral with no reduced table as a fallback, and says it has none on file", () => {
+    const optics = opticsOfParticles(
+      { ...rutile, material: "an absorbing mineral", index: () => ({ n: 1.5, k: 0.01 }) },
+      { kind: "gamma", effectiveRadiusUm: 3, effectiveVariance: 0.1 },
+      550,
+    );
+    expect(optics.phaseNote).toBe(
+      "an absorbing mineral: no reduced TAMUdust2020 table on file; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback",
+    );
   });
 });
 
@@ -589,7 +605,9 @@ describe("the floor rule's two exits", () => {
     const optics = opticsOfParticles(particles, coarse, 550);
     expect(optics.phaseBasis).toBe("analogue");
     expect(optics.phaseModel).toBe("tamudust2020");
-    expect(optics.phaseNote).toContain("k-floor rule exceeded");
+    expect(optics.phaseNote).toMatch(
+      /^MgSiO3: the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\), the floor's table stands in, a named analogue$/u,
+    );
   });
 
   it("makes it a fallback instead above n 1.70", () => {
@@ -603,6 +621,9 @@ describe("the floor rule's two exits", () => {
     const optics = opticsOfParticles(particles, coarse, 550);
     expect(optics.phaseBasis).toBe("fallback");
     expect(optics.matrix).toBeUndefined();
+    expect(optics.phaseNote).toMatch(
+      /^a transparent high-index mineral: the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\) at n 1\.800 above 1\.7; a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix, a fallback$/u,
+    );
   });
 });
 
