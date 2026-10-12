@@ -207,6 +207,7 @@ describe("the index-contrast condition, Tazaki and Tanaka 2018's (7) (science-r0
       expect(channel.phaseModel).toBe("mmf");
       expect(channel.matrix).toBeDefined();
       expect(channel.phaseNote).toContain("(7)");
+      expect(channel.phaseNote).toContain("by Tazaki and Tanaka's (7), past the limit of 2");
     }
     expect(phaseLabels([{ material: "Fe", optics, opticalDepthAbove550: 0 }])).not.toEqual([]);
   });

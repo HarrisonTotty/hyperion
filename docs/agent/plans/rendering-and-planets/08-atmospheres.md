@@ -998,9 +998,10 @@ Names are those the owning plans give; the owning plan is authoritative.
        matrix.
 
      A monomer of index contrast |m − 1| ≥ 2, past the paper's (7), is an `analogue` even inside
-     (9)'s gate, since the proximity of touching monomers then puts the MMF's opacities more than
-     20% off (its §3.5 and §5). Of the committed files only metallic iron fails it, at every
-     visible wavelength; soot and tholin pass with |m − 1| ≤ 0.78 (science-r08-mmf.md §4).
+     (9)'s gate, since touching monomers then absorb more than the mean field allows, and the MMF
+     reads the absorption opacity more than 20% low (its §3.5 and §5). Of the committed files only
+     metallic iron fails it, at every visible wavelength; soot and tholin pass with |m − 1| ≤ 0.78
+     (science-r08-mmf.md §4).
 
      Titan's haze is a `model` from 453 to 780 nm, where Δφ falls from 1.00 to 0.54 (0.80 at
      550 nm), and an `analogue` from 380 to 452 nm (Δφ up to 1.09). The monomer's term sets Δφ:
@@ -5833,9 +5834,10 @@ generator, and the reference's sampling needs no domain tag.
         J. Heat Transfer 117, 152, and 1996a, J. Quant. Spectrosc. Radiat. Transfer 55, 357, as
         reviewed by C. M. Sorensen, Aerosol Sci. Technol. 35 (2001) 648–687). "No optical
         comparison" above means none of the MMF itself.
-      - Tazaki and Tanaka's condition (7), |m − 1| < 2, makes an aggregate an `analogue`
-        (science-r08-mmf.md §4). Soot and tholin pass; metallic iron, chromium and graphite's
-        E ⊥ c component would fail as monomers.
+      - An aggregate whose monomers fail Tazaki and Tanaka's condition (7), with |m − 1| ≥ 2, is
+        an `analogue` even inside (9)'s gate (science-r08-mmf.md §4). Soot and tholin meet (7).
+        Metallic iron fails it at every visible wavelength, and chromium and graphite's E ⊥ c
+        component would fail it as monomers.
 - **M-dwarf suns.** A curve of growth weighted by a 15-sample spectrum is adequate for FGK, A and B
   stars, but not for M dwarfs. Their TiO bands at 590–630 and 705–760 nm overlap Chappuis and
   methane's 727 nm band, so the weight correlates with σ (Design note 5). This is a recorded

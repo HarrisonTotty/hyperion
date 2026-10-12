@@ -104,9 +104,10 @@ export const MMF_PHASE_SHIFT_LIMIT = 1;
  * Tazaki and Tanaka 2018's (7), |m − 1| < 2.
  *
  * @remarks
- * Past it the proximity effect between touching monomers puts the MMF's opacities more than 20%
- * off (their §3.5 and §5). The mode keeps its MMF table, matrix and cross-sections as an
- * `analogue` ({@link mmfPhaseBasis}; science-r08-mmf.md §4).
+ * Past it the MMF reads the absorption opacity more than 20% low: touching monomers absorb more
+ * than the mean field allows, the proximity effect (their §3.5 and §5). The mode keeps its MMF
+ * table, matrix and cross-sections as an `analogue` ({@link mmfPhaseBasis};
+ * science-r08-mmf.md §4).
  */
 export const MMF_INDEX_CONTRAST_LIMIT = 2;
 
@@ -870,7 +871,7 @@ export function aggregateOptics(
   const extM2 = result.extinctionCrossSectionUm2 * 1e-12;
   const scaM2 = result.scatteringCrossSectionUm2 * 1e-12;
   const shifts = `Δφ ${mmfPhaseShift(result).toFixed(2)} by Tazaki and Tanaka's (9) (aggregate term ${result.phaseShift.toFixed(2)})`;
-  const contrast = `|m − 1| ${result.indexContrast.toFixed(2)}, past their (7)`;
+  const contrast = `index contrast |m − 1| ${result.indexContrast.toFixed(2)} by Tazaki and Tanaka's (7), past the limit of 2`;
   const contrastFails = result.indexContrast >= MMF_INDEX_CONTRAST_LIMIT;
   let note: string | undefined;
   switch (basis) {
