@@ -438,6 +438,8 @@ Names are as the owning plans give them where those plans exist. P08.T1 reconcil
     the same age bin, and an `origin_bin` mark says which bin the kick is drawn in. The fastest
     class's velocities are not cut at the escape speed; they are capped at `UNBOUND_PAD_SPEED`. The
     bound beyond the cube and the unbound beyond it are dropped, which is the brainstorm's "gone".
+    So are the few remnants that plan 15's orbits see captured by the black hole (P15.T6.g): the
+    table's shares are of each class's resolved orbits, and a captured one is in none of them.
     The brainstorm's figures are tests (P08.T14.4): 13–14% of neutron stars unbound, 71–73% of
     neutron stars and 99% of black holes inside the cube, and a few hundred thousand unbound still
     inside, since at 500 km/s a remnant leaves within about 50 Myr.

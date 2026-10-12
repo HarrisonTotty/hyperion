@@ -826,6 +826,101 @@ ignores `layer`; the fitted values are kept for the record, and `kinematics`, `i
   number inside the cube is 10⁴–10⁵, of them 1,500–3,500 fast and 1.5–4.5 × 10⁴ slow; the
   rate-weighted share of slow launches below 1.5 times the local escape speed, where the straight
   line is poor, is reported as a finding.
+- **P15.T6.g Orbits through the centre: the time-transformed leapfrog** (decision-p15-t6g-orbits,
+  2026-10-12; slow-pass 2 triage F2 and F1). It replaces T6.a's fixed step, and ruling 140.7's
+  halving as the method (the halving stays as the check), for every orbit, plain and barred, of every
+  class. From version 16's potential on, two of T6.a's 1,000 barred test orbits never converged under
+  the halving (368 and 740: 1.41 and 0.143 after six), because no fixed step resolves an orbit that the
+  bar throws into the black hole's radius of influence and the cluster's cusp (Gerhard and Binney
+  1985, MNRAS 216, 467: a central mass makes such orbits chaotic, so they belong in the table).
+  - **The integrator.** The time-transformed leapfrog of Mikkola and Aarseth (2002, Celest. Mech.
+    Dyn. Astron. 84, 343) in the bar's rotating frame, with the time transformation dt = ds ÷ Ω(r): Ω
+    is the circular frequency `v_c(r) ÷ r` of the plane's tables at the spherical radius r = |x|, so
+    that every step is `step_fraction` (1 ÷ 200) of the local circular period, as T6.a first asked. A
+    step of fictitious length h = 2π × `step_fraction` is K(h ÷ 2) D(h) K(h ÷ 2). Each kick adds
+    `−∇Φ δt` to the momentum, with δt = (h ÷ 2) ÷ Ω(r) at the current position, and adds
+    `δt Ω′(r) (x · (p + p′) ÷ 2) ÷ r` to the auxiliary W (p and p′ the momentum before and after the
+    kick). The drift is T6.a's exact rotate-and-drift of the kinetic-plus-rotation flow over the
+    physical time h ÷ W. W starts at Ω(r₀). The step that would pass the orbit's age is replaced by
+    one plain kick-drift-kick step of the time left, so the orbit ends at its age exactly. Ω and Ω′
+    are read from a table of ln Ω against ln r built once per potential from
+    `PotentialTables::v_circ_sq` and its derivative (cubic Hermite with exact slopes, at least 40
+    knots a decade from 10⁻⁶ to 4 × 10⁶ ly, continued as r^−3/2 inside and with its last slope
+    outside), so that a step costs one force, one table read and one rotation. The method is
+    time-symmetric, not symplectic, and needs no step floor: `min_step_years` leaves the three orbit
+    manifests, and `step_fraction` and `nuclear_step_fraction` keep their values as fractions of the
+    local period. Nothing is softened: the black hole stays a point mass and the cusp the potential's.
+    Every operation is IEEE-754 arithmetic, `sqrt` or `hyperion_sim::math` (`ln`, `exp`, `sin_cos`,
+    `hypot`), never `mul_add` or a `std` transcendental, and an orbit stays a pure function of its
+    manifest and number, so the smoke histograms' digest is the same on Linux, macOS and Windows.
+  - **Not chosen** (the decision's measurements): the logarithmic-Hamiltonian leapfrog with U = −Φ
+    (Mikkola and Tanikawa 1999, MNRAS 310, 745; Preto and Tremaine 1999, AJ 118, 2532), whose step
+    follows 1 ÷ U, and −Φ changes
+    only 1.6-fold from 3,500 ly to 1 ly while the period falls 5,200-fold; Bulirsch–Stoer or IAS15
+    (Rein and Spiegel 2015, MNRAS 446, 1424) for the plunging orbits, whose order and error control assume a smooth
+    force where the tables' force has derivative jumps at every grid line; a fixed step per orbit,
+    which cannot know a chaotic orbit's pericentre.
+  - **The check stays.** An orbit whose Jacobi integral (its energy without the bar) has drifted by
+    more than `drift_tolerance` is integrated again from its start at half the step fraction, up to
+    `max_halvings` times. Production keeps 10⁻³ and three (ruling 120.3: δ ln r ≈ (|E| ÷ v_c²) δE ÷ E,
+    3–8 times the relative drift, so 10⁻³ moves an apocentre by a few thousandths in ln r against
+    cells 0.20 wide); the smoke manifest 10⁻² and one; T6.a's tests 10⁻⁴ and six.
+  - **Capture.** Within 1 ly of the centre, where the black hole holds about 96% of the enclosed mass,
+    an orbit whose specific angular momentum |x × p| is below 4GM•/c (c = 1 ly per Julian year) falls
+    into the black hole at its next pericentre (Shapiro and Teukolsky 1983, _Black Holes, White Dwarfs
+    and Neutron Stars_, §12.4; the marginally bound orbit at 4GM/c², Bardeen, Press and Teukolsky
+    1972, ApJ 178, 347). Its integration stops, and its class's record counts it as captured, with its
+    time; it takes no histogram cell, and every share keeps it in its denominator, so the class table
+    counts it as gone. No other relativistic term: the first post-Newtonian corrections are of order
+    r_s ÷ r, under 10⁻³ outside 10⁻³ ly, and the histograms begin at 16 ly. No tidal disruption: the
+    table's objects are compact remnants, and even a white dwarf's tidal radius about Sgr A* (about
+    1.4 × 10⁹ m) lies inside the horizon (1.27 × 10¹⁰ m).
+  - **Unresolved orbits.** An orbit still over `drift_tolerance` after its last halving is not
+    classified: it takes no histogram cell, no bound or unbound count and no place in any share's
+    numerator or denominator, and its class's record counts it as unresolved, with its drift and its
+    closest approach to the centre. Every share is therefore of the class's resolved orbits, those kept
+    within the tolerance and those captured. Production allows at most 10⁻⁴ of each class unresolved
+    (21 of a disc class, 20 of an old one, 10 of a nuclear-disc one), and T6.c–f refuse histograms
+    over it; a class over it is rerun with `max_halvings` six, and one still over goes to a decision
+    agent, not to a waiver. The smoke run records its counts without the limit. The table's header
+    gives each class's captured and unresolved counts.
+  - **Acceptance.** T6.a's, on the new method: the energy without the bar to 10⁻⁴ relative over
+    10 Gyr for its 1,000 test orbits on the first pass, and the Jacobi integral with the bar to 10⁻⁴
+    for its 1,000 on the checked integration (1 ÷ 200, 10⁻⁴, six halvings), at most 20 refined, with
+    the first pass's worst reported; orbits 368 and 740 of the barred set asserted by number; circular
+    orbits at 3,000–50,000 ly to 10⁻³ in radius; one and four threads the same bytes. New: 16 in-plane
+    orbits, released at zero radial speed from 300 and 3,000 ly with a tangential speed of 10⁻², 10⁻³,
+    10⁻⁴ and 10⁻⁵ of v_c, in the plain and the barred potential, each hold 10⁻⁴ over 10 Gyr on the
+    checked integration or are captured; an orbit released at 0.5 ly with |x × p| 0.9 of 4GM•/c is
+    reported captured, and one with 1.1 of it is not; the barred set's worst first-pass drift falls
+    3–6 fold per halving of the step fraction from 1 ÷ 50 to 1 ÷ 400. Re-time the 4,950-orbit
+    reduced run and restate the production run's hours in T6.b's record. (The decision's scratch
+    measurement, at version 21's potential: on the barred set the checked integration kept at most
+    8.6 × 10⁻⁵ with 3 refined, orbits 368 and 740 at 3.5 and 5.5 × 10⁻⁵ on the first pass, the plain
+    set's worst 6.5 × 10⁻⁵, and 0.59 of the fixed step's steps at about 1.6 times the time a step.)
+  - **Then re-emit the provisional table** (the triage's F1; the smoke pin c07edb86 left stale). Run
+    `cargo run --profile slow-test -p hyperion-fit -- orbits --smoke --out
+crates/hyperion-fit/data/cache/displaced_smoke`; update `data/displaced_smoke/PROVENANCE.toml`'s
+    `sha256`, `retrieved` and `release` ("rerun with P15.T6.g's time-transformed leapfrog, in the
+    potential of P11.T4.h's early-AGB remnant blend"); re-emit `tables/displaced_forms.rs` with
+    `hyperion-fit run displaced_forms` (which writes `tables.lock`); re-bless the goldens that read
+    `galaxy::displaced` at header 21 and check `golden_diff`; then run
+    `the_smoke_fit_runs_end_to_end_on_fresh_smoke_histograms`,
+    `energy_and_jacobi_hold_over_ten_gyr_for_a_thousand_orbits`, the new tests and `just fit-check`,
+    and record the acceptance line's move in this plan's Risks. The integrator and the re-emission are
+    the task's two commits.
+  - **Generator version.** The task moves generated output through the re-emitted table only, so it
+    lands with the 21 → 22 batch: committed with no bump, held out of integration until p14-batch's
+    bump (as c07edb86 was for 21), and cherry-picked just before the bump commit, so that the goldens
+    are re-blessed once at 22. If it is not through its gate and review when that bump is otherwise
+    ready, the batch goes without it, and the task, re-emission included, waits as one unit for
+    22 → 23. The re-emission never lands alone: the integrator changes every smoke orbit, and the
+    manifests' change makes the committed table stale for `fit-check`.
+  - **Files.** `src/tasks/displaced_forms/{orbits,mod,histogram}.rs` (the integrator, the capture, the
+    record's captured and unresolved counts), the shares' readers in
+    `src/tasks/displaced_forms/{table,fit_disc,fit_old,kinematics}.rs`,
+    `manifests/displaced_orbits{,.smoke,.one_percent}.toml`, `data/displaced_smoke/PROVENANCE.toml`,
+    `crates/hyperion-sim/src/tables/displaced_forms.rs`, `tables.lock`.
 
 **Files.** `src/tasks/displaced/{mod,orbits,births,histogram,fit_disc,fit_old,kinematics}.rs`,
 `manifests/displaced.toml`, `manifests/displaced.smoke.toml`, `tables/displaced_forms.rs`.
@@ -868,6 +963,9 @@ K(h ÷ 2)`: the kinetic and rotation terms commute, so their joint flow (drift, 
   potential, ruling 140.7: 17 refined, the worst kept 9.93 × 10⁻⁵, the first pass's worst 0.377;
   the fast suite's 20 barred orbits are checked the same way, not on the first pass). Circular orbits
   at 3,000–50,000 ly stay circular to 10⁻³ over 10 Gyr; one and four threads give the same bits.
+  **Superseded as the method by P15.T6.g** (decision-p15-t6g-orbits, 2026-10-12): from version 16's
+  potential on, orbits 368 and 740 never converged under the halving (1.41 and 0.143 after six),
+  and the 14 refined orbits that did converge did so by chance (slow-pass 2 triage).
 - **T6.b's births** follow the text, with one change: the halo, bulge and bar draw their velocities
   from plan 08's velocity ellipsoid of the component they were born in, not an isotropic Jeans
   dispersion, since plan 08's laws exist (so T6.e's "plan 08's births" is this run). Old sources
@@ -900,8 +998,9 @@ orbits --threads 3` (writes `crates/hyperion-fit/data/cache/displaced/displaced_
   SHA-256 it prints for `tables.lock`). Each class's record counts its orbits integrated again at
   a smaller step, those kept still over the tolerance after the last halving, and the worst drift
   kept, so that T6.c–e can judge the histograms by them (**for T6.c**: the nuclear disc's classes
-  refine most); whether 10⁻³ is acceptable for production is the owner's call. A lever, for the owner: the nuclear disc's classes at a
-  tenth of the count (still 2 × 10⁴ a class) would cut it to about 37 hours.
+  refine most); 10⁻³ is acceptable for production (decision-p15-t6g-orbits: it moves an apocentre
+  by a few thousandths in ln r, against histogram cells 0.20 wide). A lever, for the owner: the
+  nuclear disc's classes at a tenth of the count (still 2 × 10⁴ a class) would cut it to about 37 hours.
 
 **Ruling 120.3–4 as built (lane `disp08`, 2026-09-27; the production run not started).**
 
@@ -1212,7 +1311,8 @@ Every table belongs to the generator version. A commit that changes a table whic
 reads bumps `GENERATOR_VERSION` by the rule of Design note 10. Known bumps from this plan: P15.T3.c,
 P15.T4.b, P15.T5.a (through P06.T19.e), any moved default of P15.T5.b, P15.T7.b (only members with a
 helium excess change), P15.T8, P15.T9, P15.T10 and P15.T11.b. Moving a constant into a table at the
-same value is not a bump. P15.T6 lands with plan 08's own bump.
+same value is not a bump. P15.T6 lands with plan 08's own bump; P15.T6.g's re-emission lands with
+the 21 → 22 batch, or as one unit with 22 → 23 if it misses it.
 
 Reserved so that later tables move nothing they need not: table paths and item names are final from
 the scratch stage on; the node arrays of `displaced_forms`, so that a finer dependence on the halo
