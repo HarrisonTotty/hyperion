@@ -760,6 +760,34 @@ Files: `galaxy/potential/{mod,mge,nfw,spherical,model,tables,sigma}.rs`, `src/ta
 `crates/hyperion-fit/{Cargo.toml,src/main.rs,src/lib.rs,src/tasks/mge.rs,tests/mge.rs}`,
 `tests/galaxy_potential.rs`, `tests/golden/galaxy_potential.golden`.
 
+**P02.T6.f The far field's force is its potential's gradient** (decision-p15-t6g-orbits §2,
+2026-10-12; no output moves). Beyond the grid's box (R or |z| above L = 2¹⁸ ly) `potential`
+continues the Gaussian components as Φ_G = A(R_c, z_c) ÷ h, with R_c = min(R, L), z_c = min(|z|, L),
+h = √(R² + z²), h_c = √(R_c² + z_c²) and A = g h_c, g = `Grid::at(R_c, z_c)`. `forces` returned
+−Φ_G R² ÷ h² and −Φ_G |z| ÷ h², the gradient only where both coordinates exceed L; where exactly one
+does it dropped A's change along the other. That error reaches 3.6 × 10⁻⁴ of |∇Φ| and does a work
+on escaping orbits that no step removes (P15.T6.g's reduced run). Make `forces` the exact gradient:
+R ∂Φ_G ÷ ∂R = R [𝟙(R < L) A_R ÷ h − A R ÷ h³] and ∂Φ_G ÷ ∂|z| = 𝟙(|z| < L) A_z ÷ h − A |z| ÷ h³,
+with A_R = h_c (∂g ÷ ∂ln R) ÷ R_c + g R_c ÷ h_c and A_z = h_c (∂g ÷ ∂ln z) ÷ z_c + g z_c ÷ h_c from
+`Grid::log_derivatives(R_c, z_c)`, ∂g ÷ ∂ln z taken as zero below 2⁻⁴ ly, where `Grid::at` is
+constant in z. Where both coordinates exceed L the code keeps today's arithmetic, bit for bit;
+`potential` is unchanged. The force still jumps at the box's faces, a kink of a continuous
+potential, which conserves energy. Correct `global_list/orbit.rs`'s "The far field" paragraph,
+whose "their force there is not the gradient of their potential" no longer holds; the global list
+keeps its own point-mass-plus-quadrupole far field, since replacing it would move output.
+**Moves no generated output**: no sim caller reads `forces` where exactly one coordinate exceeds L
+for anything a system receives (the Jeans tables evaluate on and inside the box; the disc tables'
+nodes beyond L, for discs over 17,830 ly, lie beyond every system; the global list's leapfrog uses
+its own far field from 2¹⁷·⁵ ly). It lands without a bump, ahead of P15.T6.g's re-emission.
+**Acceptance:** every sim golden bit-identical (a moved golden makes this a GENERATOR_VERSION
+change: stop and report to main); a new test in `tests/galaxy_potential.rs` holds `forces` to the
+central differences of `potential` within 10⁻⁷ of |∇Φ| at 30 points with exactly one coordinate
+beyond L (R to 2 × 10⁶ ly, |z| to 10⁶ ly), where today's code misses by up to 3.6 × 10⁻⁴.
+Files: `galaxy/potential/tables.rs`, `tests/galaxy_potential.rs`, `galaxy/global_list/orbit.rs`
+(documentation). A finding for the Risks: the face's kink and `InPlaneTable::at`'s separately
+scaled v_c² and Φ beyond L remain; smoothing either changes `potential` where the Jeans tables
+integrate and would move output.
+
 Acceptance for T6, and for each subtask with its own tests:
 `cargo test -p hyperion-sim galaxy_potential` passes and `just ci` is green; `just bench` reports
 `PotentialTables::in_plane` and `full` (targets 50 ms and 2 s; a miss is a finding).
