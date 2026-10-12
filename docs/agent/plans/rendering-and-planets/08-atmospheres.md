@@ -6410,8 +6410,8 @@ generator, and the reference's sampling needs no domain tag.
       through `substanceName` (`lib/substances.ts`, galaxy plan 14's P14.T49.f, built here first),
       never by its key: `an aggregate of tholin`, `a non-spherical mineral of Mars-type dust`, and
       `unlisted material` for a key the client does not name. A stand-in names a variant through
-      `variantWords` (`mass fraction 75 %`), and a mode with no note of its own names its basis in
-      words. Each material file's `name` names its substance as `substanceName` does
+      `variantWords` (`mass fraction 75 %`, the solute's), and a mode with no note of its own names
+      its basis in words. Each material file's `name` names its substance as `substanceName` does
       (`H2O ice Ih at −7 °C`, `aqueous H2SO4, mass fraction 75 %, at 300 K`). That supersedes
       science-r08-mmf.md §4.8's "75% by mass", which the SI Brochure's §5.4.7 forbids. The notes
       call water ice `H2O ice`, and a percentage takes a space before `%`. `soot.json`'s `name`

@@ -3734,6 +3734,11 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
     any later row, is named by T49.f's `substanceName`, never by its key. The gases are listed
     largest first, each with its mole fraction. The quantity is named once, in the row's label, and
     never on the `%` sign (decision-substance-names).
+  - _The `BULK` rows' quantity_ (signoff-5, item 8; a display change only). Built with the
+    `SURFACE` rows above, under the same UX review, or by the next console-ux lane. The rows keep
+    `IRON`, `ROCK`, `WATER` and `ENVELOPE`, the layers of the structure model, which are not
+    substances, and a `MASS FRACTION` label over them, or the section's own, names the quantity
+    once.
 - **P14.T43.c Events.** A list of the body events of the century around the display time, from a
   `body_events` request, each with its time in the chart's time system and a countdown in the
   guide's `T-` form.
@@ -4862,7 +4867,8 @@ rows' values.
         a taxonomic class being T51.e's label, not a substance; science-composition-crusts.md
         §1.3), each with its kind and its sources (decision-composition, the surfaces audit §2
         and §4.2). Each name-form row lands with its name in the client's `SUBSTANCE_NAMES`
-        (T49.f), whose test reads the fixture. decision-substance-names §4.3 drafts the names, and
+        (T49.f), whose test reads the fixture. decision-substance-names §4.3 drafts the names,
+        `basalt_fe`'s amended to `Fe-rich basalt` (`Fe-RICH BASALT`) by signoff-5, item 8, and
         the builder confirms each against the row's sources.
   - **The client-optics flags** (decision-r08-t4b-t12c, follow-ups 2 and 4). `absorber` means
     that the client has absorption optics for the row, in its own right or as a member of a
@@ -5058,14 +5064,16 @@ rows' values.
       and a formula among them keeps its case (`NaCl BRINE`).
     - Any other string, a newer server's name key among them, reads `unlisted material`
       (`UNLISTED MATERIAL`).
-  - A name holds neither the phase nor an amount. A reading puts the phase beside it in words
-    (`liquid CH4`, `CO2 ice`) and an amount as a quantity named in words (`mass fraction 75 %`),
-    never as a modifier on `%`.
+  - A name holds neither the phase nor a fraction. A reading puts the phase beside it in words
+    (`liquid CH4`, `CO2 ice`) and a fraction as a quantity named in words, `mass fraction` or for
+    a gas `mole fraction` (`mass fraction 75 %`, a solution's fraction being its solute's),
+    never as a modifier on `%` or on any unit (signoff-5, item 8).
   - The names are the client's. The registry, its fixture and its golden hold none, so a name can
     change without moving a golden, and the generator never reads one. A generated composition is
     named from its rows' names and its quantities on the wire, and no name is drawn.
   - A task that appends a name-form row adds its name in the same commit.
-    decision-substance-names §4.3 drafts the names of T49.b's rows.
+    decision-substance-names §4.3 drafts the names of T49.b's rows, `basalt_fe`'s amended to
+    `Fe-rich basalt` by signoff-5.
   - _Tests_ (`lib/substances.test.ts`):
     - formula keys, ions and the electron as above;
     - a name key's sentence and upper-case forms;
