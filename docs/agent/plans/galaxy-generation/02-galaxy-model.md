@@ -2388,7 +2388,8 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
 - **P02.T8.a's tightness check at its rounding floor (P11.T4.h, 2026-10-04).**
   `envelopes_never_exceed_their_bounds` allows the exponent's rounding (4 |ln corner| ε) and, for a
   disc, 2⌈n0⌉ subnormal units in its tightness half; safety stays exact and `bounds.rs` is
-  untouched. See plan 09's and plan 11's Risks ("P11.T4.h as built").
+  untouched. See plan 09's and plan 11's Risks ("P11.T4.h as built"). Since 2026-10-12 the disc's
+  2⌈n0⌉ applies in both halves ("P02.T8.a's subnormal check, either way", below).
 - **The local V light is low (a pointer from rendering plan R06, 2026-10-06,
   `decision-r06-t9b-band.md`; for this plan's owner, not a ruling on this plan).** Nothing in the
   model is fitted to light, so the local V light is a prediction. This plan fits number and mass,
@@ -2416,3 +2417,24 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
 
   A fix is a `GENERATOR_VERSION` change here. R06's near-Sun tests carry the offset meanwhile, and
   if the light is raised they recentre towards their references, with nothing to re-rule.
+
+- **P02.T8.a's subnormal check, either way (lane slow-fix-tests, 2026-10-12, at version 21; the
+  slow-pass triage's T1).** Test-only: no generated output moves, and `bounds.rs` is untouched.
+  - `envelopes_never_exceed_their_bounds_over_many_cells_seed_0` and `_seed_1`
+    (`tests/galaxy_bounds.rs`) failed in slow passes 1A and 2A, as they had since ad16be12 (on
+    `origin/galaxy-generation`: pot02, ruling 144's holed inner part of the nuclear disc). That part
+    goes subnormal far out in the plane. There `envelope_sup`'s reconstruction, n0 times three
+    factors, stood above the sim's bound, n0 times one exponential, by more than the 64 units that
+    the half holding the reconstruction under the bound allowed: by 66–206 units in 12 cells, 10 at
+    seed 0 (n0 = 222.5 per ly³) and 2 at seed 1 (136.5).
+  - Each path rounds the subnormal factor once, by up to a unit in either direction, before × n0,
+    so the two may stand 2⌈n0⌉ units apart either way. P11.T4.h (above) allowed that in the
+    tightness half only. `assert_envelopes_bounded`'s subnormal branch now allows 64 + 2⌈n0⌉ units
+    on both sides (510 at seed 0, 338 at seed 1). The bulge's, the bar's and the halo's 64 units
+    are unchanged, as is the normal range.
+  - The bound is safe, and the test still proves it exactly. Every probe's envelope is at or below
+    the bound, as before. The nearest corner is one of the lattice's probes; the branch now names it
+    in an assertion of its own, for the message, with no new coverage. In the 12 cells the envelope
+    at the nearest corner stands 0 to 3.4 × 10⁷ units below the bound. In one (seed 0,
+    3.9 × 10⁻³²²) the bound's exponential underflows to 0, and so does the envelope at every probe.
+  - Both seeds pass by name (`--cargo-profile slow-test --run-ignored only`).

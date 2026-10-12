@@ -12,7 +12,7 @@ use hyperion_sim::stellar::Phase;
 use hyperion_sim::stellar::binary::SegmentKind;
 use hyperion_sim::stellar::draws::StarDraws;
 use hyperion_sim::stellar::multiplicity::{
-    MAX_COMPANIONS, MultiplicityContext, MultiplicityModel, RedrawAttempt, StarSlot,
+    MAX_COMPANIONS, MultiplicityContext, MultiplicityModel, RedrawAttempt, SlotKind, StarSlot,
     draw_hierarchy, draw_star_count,
 };
 use hyperion_sim::stellar::rotation::Magnetism;
@@ -405,6 +405,13 @@ fn sample_records(galaxy: &Galaxy, seed: u64, n: usize) -> Vec<SystemRecord> {
 /// spine and direct constructions), to within 3.29 standard
 /// deviations (α = 10⁻³, two-sided). A system whose every companion the stability test dropped
 /// still counts as drawn multiple.
+///
+/// The fraction is stellar, so only [`SlotKind::Star`] slots count. A brown-dwarf companion
+/// (P11.T2.d) is one of the hierarchy's
+/// [`stars`](hyperion_sim::stellar::multiplicity::SystemHierarchy::stars) and counts in its
+/// [`star_count`](hyperion_sim::stellar::multiplicity::SystemHierarchy::star_count), but a single
+/// star with one is not drawn multiple, and a dropped brown dwarf is not a dropped companion. Its
+/// rate, `substellar_companion_probability`, is the substellar module's to test.
 fn check_multiple_share(seed: u64, n: usize) {
     let galaxy = milky_way();
     let model = MultiplicityModel::default_v1();
@@ -413,7 +420,12 @@ fn check_multiple_share(seed: u64, n: usize) {
     for record in &records {
         let stars = SystemStars::generate(&galaxy, record);
         let h = stars.hierarchy();
-        multiples += u32::from(h.star_count() > 1 || h.dropped_companions() > 0);
+        let stellar = h
+            .stars()
+            .iter()
+            .filter(|s| s.kind() == SlotKind::Star)
+            .count();
+        multiples += u32::from(stellar > 1 || h.dropped_companions() > 0);
         let p = model.drawn_multiple_fraction(record.primary_initial_mass());
         expected += p;
         variance += p * (1.0 - p);

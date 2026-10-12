@@ -747,6 +747,22 @@ fn young_members(galaxy: &Galaxy, lo: f64, hi: f64) -> f64 {
     )
 }
 
+/// At three seeds, every population's field, feature members and carved binary classes add up
+/// to its budget in every mass band, to 10⁻⁶ relative (P09.T6).
+///
+/// The members come from closed forms, not from sampling: the clusters' and nurseries' rates ×
+/// their mean members, mass outermost, not in the order φ is computed in, and the globulars'
+/// expected mass over the population's mean system mass, by band weight. The carved classes'
+/// share is the one that
+/// [`field_factor`](hyperion_sim::galaxy::features::shares::FeatureShares::field_factor) gives up
+/// to plan 11's catalogue classes (P11.T7). By age, in ten bins of 10 Myr, the young disc's
+/// members and its 1 − φ, the field with the carved classes, add up to its budget likewise.
+///
+/// The tolerance is P09.T6's. The carved share is the value the field factor subtracts, so it
+/// adds only rounding. What is left is the young disc's members' quadratures', far inside it
+/// (2026-10-12): 5.1 × 10⁻¹² in the bands and 2.9 × 10⁻¹¹ by age (bins 7–9). Leaving the carved
+/// share out fails bands B to E by its size, 1.8 × 10⁻⁶ to 7.7 × 10⁻⁴, in every population at
+/// every seed (band A's 1.6 × 10⁻⁷ passes).
 #[test]
 #[ignore = "slow: the budget's quadratures at three seeds"]
 fn field_and_features_add_up_to_every_budget() {
@@ -790,8 +806,11 @@ fn field_and_features_add_up_to_every_budget() {
             for band in MassBand::ALL {
                 let share = band_shares.share(band);
                 let field = budget * share * shares.field_factor(population, band);
-                let total =
-                    field + members * share + globular_members * share * weights[band.index()];
+                let carved = budget * share * shares.class_share(population, band);
+                let total = field
+                    + carved
+                    + members * share
+                    + globular_members * share * weights[band.index()];
                 let relative = total / (budget * share) - 1.0;
                 assert!(
                     relative.abs() < 1e-6,

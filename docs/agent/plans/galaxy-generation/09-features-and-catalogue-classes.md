@@ -2544,4 +2544,22 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
   2⌈n0⌉ subnormal units beyond its 64 in the subnormal range, in the tightness half only (safety
   stays exact; `bounds.rs` is untouched). The same change to the galaxy's parameters took it to
   1.08 × 10⁻¹² at ln corner = −634 and to 81 units for the nuclear disc at 3.5 × 10⁻³¹¹. See plan
-  11's Risks, "P11.T4.h as built".
+  11's Risks, "P11.T4.h as built". Since 2026-10-12 a disc's 2⌈n0⌉ applies in both halves (plan
+  02's Risks, "P02.T8.a's subnormal check, either way").
+- **P09.T6's budget test takes P11.T7's carved classes (lane slow-fix-tests, 2026-10-12, at version
+  21; the slow-pass triage's T2).** Test-only: no generated output moves.
+  - `field_and_features_add_up_to_every_budget` (`tests/galaxy_features.rs`) failed in slow passes
+    1A and 2A, as it had since ad16be12 (on `origin/galaxy-generation`: bin5b, P11.T7).
+    `FeatureShares::field_factor` became 1 − φ − `class_share`, the carved binary classes that plan
+    11's catalogue will hold (P11.T8), while the test still summed only the field, the members and
+    the globulars. It fell short by exactly the class share, the same in every population:
+    1.6 × 10⁻⁷ in band A, 1.8 × 10⁻⁶ in band B (the first to fail, the young disc at seed 0), 4.8
+    and 7.7 × 10⁻⁴ in bands C and D, and 1.8 × 10⁻⁵ in band E.
+  - The sum now adds `budget × share × class_share(population, band)`, and the test has a doc
+    comment. The tolerance stays P09.T6's 10⁻⁶ relative. The carved share is the value the field
+    factor subtracts, so it adds only rounding. The error left is the members' quadratures': at
+    worst 5.1 × 10⁻¹², the young disc's, in every band at all three seeds; the other populations
+    reach 4.7 × 10⁻¹³ at most. The young disc's ten age bins read 1 − φ(age) and are unchanged;
+    they reach 2.9 × 10⁻¹¹ (bins 7–9, the triage's run). The carved share itself is checked by
+    `shares.rs`'s `the_field_features_and_carved_classes_add_up_to_the_budget`.
+  - It passes by name (`--cargo-profile slow-test --run-ignored only`).

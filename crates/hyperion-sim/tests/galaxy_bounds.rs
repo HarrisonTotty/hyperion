@@ -264,22 +264,33 @@ fn assert_envelopes_bounded(fields: &Fields, cell: &CellBox, lattice: u32) {
             // so the two may differ by a subnormal unit either way (plan 08 moved the discs'
             // profiles by bits and exposed it at 4 × 10⁻³¹⁸); the probes below hold the bound
             // against the envelope itself, exactly. The nuclear disc's holed inner part (plan 02,
-            // R26) goes subnormal before its amplitude of some thousands per ly³ multiplies it, so
-            // a rounding of one unit in its exponential becomes tens: the two differed by nine
-            // units at 3 × 10⁻³¹¹, by 32 at 4 × 10⁻³²⁰ and by 81 at 3.5 × 10⁻³¹¹ (P11.T4.h).
-            // Sixty-four units are allowed either way, and the bound may stand above by more:
-            // each path rounds the subnormal factor once, by up to a unit, before × A (n0): 2⌈A⌉.
+            // R26) goes subnormal far out in the plane before its amplitude A, some hundreds per
+            // ly³, multiplies it, so a rounding of one unit in its exponential becomes up to A: the
+            // two differed by nine units at 3 × 10⁻³¹¹, by 32 at 4 × 10⁻³²⁰ and by 81 at
+            // 3.5 × 10⁻³¹¹ (P11.T4.h). Sixty-four units are allowed either way, and a disc 2⌈A⌉
+            // more, also either way: each path rounds the subnormal factor once, by up to a unit
+            // in either direction, before × A (n0). At A = 222.5 and 136.5 (seeds 0 and 1) the
+            // reconstruction stood 66–206 units above the bound in 12 cells of the slow check
+            // (2026-10-12). Here the reconstruction checks tightness, not safety: the envelope
+            // itself is held against the bound exactly at every probe below, the nearest corner
+            // among them, which is also asserted on its own for a plainer message.
             let unit = f64::MIN_POSITIVE * f64::EPSILON;
             let slack = 64.0 * unit;
             let amplitude = match component.shape() {
                 Shape::Disc(disc) => disc.n0(),
                 Shape::Bulge(_) | Shape::Bar(_) | Shape::Halo(_) => 0.0,
             };
-            let above = slack + 2.0 * amplitude.ceil() * unit;
+            let apart = slack + 2.0 * amplitude.ceil() * unit;
             assert!(
-                corner <= bound + slack && bound - corner <= 1e-12 * corner + above,
+                corner <= bound + apart && bound - corner <= 1e-12 * corner + apart,
                 "component {i} in {cell:?}: bound {bound:e} against the subnormal corner's \
                  {corner:e}"
+            );
+            let nearest = component.envelope(&cell.nearest_corner());
+            assert!(
+                nearest <= bound,
+                "component {i} in {cell:?}: the envelope {nearest:e} at the nearest corner \
+                 exceeds the bound {bound:e}"
             );
         } else {
             assert!(

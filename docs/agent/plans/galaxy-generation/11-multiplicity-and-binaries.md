@@ -3400,7 +3400,8 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
         ln corner = −634.
       - The subnormal range allows a disc 2⌈n0⌉ units beyond its 64: each path rounds the
         subnormal factor once before × n0. It reached 81 units for the nuclear disc, n0 = 105, at
-        3.5 × 10⁻³¹¹.
+        3.5 × 10⁻³¹¹. Since 2026-10-12 it applies in both halves (plan 02's Risks, "P02.T8.a's
+        subnormal check, either way").
       - Pointers are in plans 02's and 09's Risks.
   - _Tests added_ (`agb.rs`):
     - `the_nuclear_end_is_sses`: SSE's landmarks; t_n falls with the mass; the pulses' relation
@@ -5221,3 +5222,22 @@ SystemVelocity)>)` in `stellar/multiplicity/positions.rs`: `star_positions_at`'s
     registry's, the toolchain's and `list_prints_registered_tasks`; `golden_diff.py`: no golden
     changed. The review's fixes renamed `cooling_brightest` to `cooling_brightest_mag` and added
     the stored values to the fingerprint (the table's body unchanged).
+- **P11.T2.c's multiplicity test counts stellar slots (lane slow-fix-tests, 2026-10-12, at version
+  21; the slow-pass triage's T4).** Test-only: no generated output moves.
+  - `multiple_systems_follow_the_model_over_ten_thousand_systems` (`tests/stellar_system.rs`)
+    failed in slow passes 1A and 2A, as it had since ad16be12 (on `origin/galaxy-generation`:
+    bin5b's P11.T2.d, "Counted as a star" in "Deviations in P11.T2.d, as built"). It counted
+    `star_count() > 1`, which includes the brown-dwarf slot, against `drawn_multiple_fraction`,
+    which is stellar: 6,230 of 10,002 systems against 6,037.3 ± 44.8, z = 4.30.
+  - `check_multiple_share`, which the 400-system fast twin `multiple_systems_follow_the_model`
+    shares, now counts a system multiple when more than one of its slots is a `SlotKind::Star`, or
+    the stability test dropped a companion. A brown dwarf never counts there: a dropped one leaves
+    the stellar hierarchy as drawn (`substellar.rs`'s draw falls back to it), and a placed one keeps
+    the stellar draw's dropped count (`with_outer_brown_dwarf`). Measured: 6,084, z = 1.04. The 146
+    systems between the two counts are single stars whose only companion is a brown dwarf.
+  - The expectation is unchanged; the triage's science-checker found no model defect. Adding the
+    brown-dwarf rate to it was rejected: its survival of the stability test has no closed form,
+    and `substellar.rs` tests the rate. The expectation also leaves out P11.T7's redraw, which
+    keeps only systems with no carved pair: at the measured redraw rate that moves the count by
+    about 0.2σ at most (this lane's science-checker).
+  - The slow test passes by name (`--cargo-profile slow-test --run-ignored only`).
