@@ -1,20 +1,20 @@
 # generator_version = 21
 EarthLike whole blocks 15 bytes 14747646 lengths 1048574,1048550,1048550,1048550,1048550,1048550,1048565,1048575,1048575,1048541,1048566,1048550,1048550,1048550,67850
-EarthLike whole digest = 0x97eb7c94b9819fd0
+EarthLike whole digest = 0x711e4e86062c6209
 MarsLike whole blocks 4 bytes 3701713 lengths 1048560,1048576,1048566,556011
-MarsLike whole digest = 0xa23094dd43281cda
+MarsLike whole digest = 0xc405b8bb05fbf211
 MoonLike whole blocks 1 bytes 935854 lengths 935854
-MoonLike whole digest = 0x675f033acbad7753
+MoonLike whole digest = 0x0b163982075acf0a
 CeresLike whole blocks 1 bytes 236808 lengths 236808
-CeresLike whole digest = 0xe36d068356a5d6e7
+CeresLike whole digest = 0x669dbbd20616896b
 Flat whole blocks 1 bytes 921845 lengths 921845
 Flat whole digest = 0xf899b74d541492b1
 OneCrater whole blocks 1 bytes 922147 lengths 922147
 OneCrater whole digest = 0xae4d5da363f47d8d
 MarsLike region blocks 1 bytes 93111 lengths 93111
-MarsLike region digest = 0xc7b1e876d214fa55
+MarsLike region digest = 0x7f556338a98f5cf2
 MarsLike region since its first range blocks 1 bytes 23858 lengths 23858
-MarsLike region since its first range digest = 0x000f4f190b432424
+MarsLike region since its first range digest = 0xc719c73dc40d4599
 MarsLike region held 0..1024 code 30
 MarsLike region held 1024..1041 code 0
 MarsLike region held 1042..1043 code 0
@@ -196,4 +196,4 @@ MarsLike region held 93874..93875 code 0
 MarsLike region held 93880..93881 code 0
 MarsLike region held 93882..93883 code 0
 MoonLike whole in 48 KiB blocks 21 bytes 990788 lengths 49088,49141,49083,49152,49149,49115,49116,49134,49104,49128,49124,49147,49075,49088,49137,49136,49134,49132,49121,49146,8338
-MoonLike whole in 48 KiB digest = 0x5f4672fe0a4479ce
+MoonLike whole in 48 KiB digest = 0x76bc502880447f17

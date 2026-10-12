@@ -874,6 +874,30 @@ mod tests {
         assert_eq!(header.palette().len(), 3);
     }
 
+    /// An undifferentiated body's bulk material is a lithology a crust's entry may name: its
+    /// `Bulk` entry is the lid's and the provinces' (science-composition-crusts.md §1).
+    #[test]
+    fn a_field_header_takes_a_bulk_entry_for_a_crusts_lithology() {
+        let mut parts = parts();
+        // The Ceres-like palette's water ice and sodium carbonate, then a bulk material.
+        let mut entries = parts.palette.entries()[1..].to_vec();
+        entries.push(PaletteEntry {
+            substance: crate::substance_key::SubstanceKey::new("cometary").unwrap(),
+            role: PaletteRole::Bulk,
+            ..parts.palette.entries()[0]
+        });
+        parts.palette = MaterialPalette::new(entries).unwrap();
+        parts.crust_palette = [None, None, Some(2), Some(2)];
+        let header = FieldHeader::new(parts).unwrap();
+        for crust in [Crust::Lid, Crust::Province] {
+            let entry = header.crust_entry(crust).unwrap();
+            assert_eq!(
+                (entry.substance.as_str(), entry.role),
+                ("cometary", PaletteRole::Bulk)
+            );
+        }
+    }
+
     /// Design note 17's steps: 0.25 K for an Earth's ±31 K, 0.5 K for a Mars's ±60 K and 1 K for
     /// ±70 K; 0.01 K for a departure of 300 K, 0.02 K for 600 K.
     #[test]

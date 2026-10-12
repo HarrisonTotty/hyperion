@@ -26,9 +26,10 @@ coded_enum! {
     /// 2009, Planetary Crusts, Cambridge University Press; not read).
     PaletteRole {
         /// A primary crust, crystallised from the body's first global liquid: a magma ocean's
-        /// flotation crust, as the lunar highlands' anorthosite, or a frozen ocean's shell with what
-        /// it trapped, as Ceres's ice-, salt- and phyllosilicate-bearing crust (Castillo-Rogez et
-        /// al. 2018, MAPS 53, 1820, p. 1838; science-r09-drainage.md §5).
+        /// flotation crust, as the lunar highlands' feldspathic crust
+        /// (science-composition-crusts.md §7), or a frozen ocean's shell with what it trapped, as
+        /// Ceres's ice-, salt- and phyllosilicate-bearing crust (Castillo-Rogez et al. 2018, MAPS
+        /// 53, 1820, p. 1838; science-r09-drainage.md §5).
         PrimaryCrust = 0,
         /// A secondary crust, a solid mantle's partial melt, as basalt: the ocean floors, a Mars's
         /// crust. A body may have none (a Ceres, whose rock "avoided igneous differentiation", Fu
@@ -48,18 +49,26 @@ coded_enum! {
         Cover = 6,
         /// The source of a body's sand and dust where it is not the crust's, as a Mars's dust.
         Deposit = 7,
+        /// An undifferentiated body's own material where no crust covers it: its accreted,
+        /// never-melted rock or ice–dust, as a chondrite or a comet's dust mantle (or, on a
+        /// fragment of a differentiated body, its exposed mantle or core).
+        ///
+        /// It is not a crust in Taylor's sense (science-composition-crusts.md §1).
+        Bulk = 8,
     }
 }
 
 impl PaletteRole {
-    /// Whether the role is a crust's, the roles a [`Crust`](super::Crust) variant's entry may
-    /// take: the three crusts and a province's.
+    /// Whether the role is one a [`Crust`](super::Crust) variant's entry may take: the three
+    /// crusts, a province's and an undifferentiated body's bulk.
     #[must_use]
     pub const fn is_crust(self) -> bool {
         match self {
-            Self::PrimaryCrust | Self::SecondaryCrust | Self::TertiaryCrust | Self::Province => {
-                true
-            }
+            Self::PrimaryCrust
+            | Self::SecondaryCrust
+            | Self::TertiaryCrust
+            | Self::Province
+            | Self::Bulk => true,
             Self::Ice | Self::Liquid | Self::Cover | Self::Deposit => false,
         }
     }
@@ -104,10 +113,11 @@ pub struct PaletteEntry {
     /// field until it does.
     pub phase_row: u8,
     /// The substance's grain density, kg m⁻³: the mass of its solid or liquid over that solid's or
-    /// liquid's own volume, without pore space (a rock's grain density, an ice's crystal density, a
-    /// liquid's density); finite and positive. A layer's bulk density is this times one less its
-    /// porosity, which the reader takes from how the material lies (R10's forms by depth), never
-    /// from the palette (science-r09-drainage.md §3).
+    /// liquid's own volume, without pore space (a rock's grain density, an ice's crystal density at
+    /// the temperature where it lies on the body, a liquid's density); finite and positive. A
+    /// layer's bulk density is this times one less its porosity, which the reader takes from how
+    /// the material lies (R10's forms by depth), never from the palette (science-r09-drainage.md
+    /// §3; science-composition-crusts.md §3).
     pub grain_density_kg_m3: f64,
     /// The temperature above which the substance is melt or liquid: the solidus of a lithology,
     /// the melting point or eutectic of an ice or a liquid. Finite and positive.
@@ -395,7 +405,8 @@ mod tests {
         assert!(MaterialPalette::new(vec![bright]).is_ok());
     }
 
-    /// The crust roles are the four a `Crust` variant's entry may take.
+    /// The crust roles are the five a `Crust` variant's entry may take: the three crusts, a
+    /// province's and an undifferentiated body's bulk (science-composition-crusts.md §1).
     #[test]
     fn field_palette_crust_roles_are_the_crusts_and_the_provinces() {
         let crusts: Vec<PaletteRole> = PaletteRole::ALL
@@ -409,7 +420,8 @@ mod tests {
                 PaletteRole::PrimaryCrust,
                 PaletteRole::SecondaryCrust,
                 PaletteRole::TertiaryCrust,
-                PaletteRole::Province
+                PaletteRole::Province,
+                PaletteRole::Bulk
             ]
         );
     }

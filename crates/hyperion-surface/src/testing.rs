@@ -1125,6 +1125,7 @@ fn arc(a: [f64; 3], b: [f64; 3]) -> f64 {
 mod tests {
     use super::*;
     use crate::field::FieldView;
+    use crate::field::MechanicsFamily;
     use crate::field::Morphology;
     use hyperion_testkit::float::assert_same_bits;
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
@@ -1293,14 +1294,17 @@ mod tests {
         assert_eq!(
             keys(&mars),
             [
-                ("basalt", SecondaryCrust),
+                ("basalt_fe", SecondaryCrust),
                 ("CO2", Ice),
                 ("H2O", Ice),
                 ("mars_dust", Deposit)
             ]
         );
-        assert_eq!(lithology(&mars, Crust::Lid).as_deref(), Some("basalt"));
-        assert_eq!(lithology(&mars, Crust::Province).as_deref(), Some("basalt"));
+        assert_eq!(lithology(&mars, Crust::Lid).as_deref(), Some("basalt_fe"));
+        assert_eq!(
+            lithology(&mars, Crust::Province).as_deref(),
+            Some("basalt_fe")
+        );
         let level = mars.header().level().get();
         let mut caps = std::collections::BTreeSet::new();
         for (n, c) in (0_u32..).zip(mars.synthesis()) {
@@ -1320,12 +1324,11 @@ mod tests {
         assert_eq!(
             keys(&moon),
             [
-                ("anorthosite", PrimaryCrust),
-                ("basalt", Province),
+                ("feldspathic", PrimaryCrust),
+                ("basalt_fe", Province),
                 ("H2O", Ice)
             ]
         );
-        assert_eq!(lithology(&moon, Crust::Province).as_deref(), Some("basalt"));
         assert!(
             moon.synthesis()
                 .iter()
@@ -1348,33 +1351,34 @@ mod tests {
         }
     }
 
+    /// The entry of `key` in `role` of `field`'s palette, which it must have.
+    fn entry<'a>(
+        field: &'a CoarseField,
+        key: &str,
+        role: PaletteRole,
+    ) -> &'a crate::field::PaletteEntry {
+        let palette = field.header().palette();
+        let index = palette
+            .find(role, crate::substance_key::SubstanceKey::new(key).unwrap())
+            .unwrap_or_else(|| panic!("no {key} as {role:?}"));
+        palette.get(index).unwrap()
+    }
+
     /// The synthetic palettes take the drainage ruling's rows (science-r09-drainage.md §2, §3 and
     /// §5): basalt's solidus is Wright and Okamura's 980 °C, the basalt's, the highlands' and the
     /// dust's densities are their grains', and Ceres's crust is primary, its lid's and its
     /// provinces' alike, with no oceanic crust.
     #[test]
     fn the_synthetic_fields_palettes_take_the_drainage_rulings_rows() {
-        // The entry of `key` in `role` of `field`'s palette, which it must have.
-        fn entry<'a>(
-            field: &'a CoarseField,
-            key: &str,
-            role: PaletteRole,
-        ) -> &'a crate::field::PaletteEntry {
-            let palette = field.header().palette();
-            let index = palette
-                .find(role, crate::substance_key::SubstanceKey::new(key).unwrap())
-                .unwrap_or_else(|| panic!("no {key} as {role:?}"));
-            palette.get(index).unwrap()
-        }
-        let mars = synthetic_field(SyntheticWorld::MarsLike);
-        let basalt = entry(&mars, "basalt", PaletteRole::SecondaryCrust);
-        let dust = entry(&mars, "mars_dust", PaletteRole::Deposit);
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        let basalt = entry(&earth, "basalt", PaletteRole::SecondaryCrust);
         assert_same_bits(basalt.transition.value(), 1_253.15);
-        assert_same_bits(dust.transition.value(), 1_253.15);
         assert_same_bits(basalt.grain_density_kg_m3, 3_010.0);
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        let dust = entry(&mars, "mars_dust", PaletteRole::Deposit);
         assert_same_bits(dust.grain_density_kg_m3, 2_600.0);
         let moon = synthetic_field(SyntheticWorld::MoonLike);
-        let highlands = entry(&moon, "anorthosite", PaletteRole::PrimaryCrust);
+        let highlands = entry(&moon, "feldspathic", PaletteRole::PrimaryCrust);
         assert_same_bits(highlands.grain_density_kg_m3, 2_900.0);
         entry(&moon, "H2O", PaletteRole::Ice);
         let ceres = synthetic_field(SyntheticWorld::CeresLike);
@@ -1385,6 +1389,69 @@ mod tests {
         assert_eq!(
             named(&ceres, Some(0)),
             Some(("phyllosilicate", PaletteRole::PrimaryCrust))
+        );
+    }
+
+    /// The synthetic palettes take the crust ruling's rows (science-composition-crusts.md §2–§4
+    /// and §7): the iron-rich basalt, 3,310 kg m⁻³ and 1,050 °C, is the Mars-like world's crust and
+    /// the Moon-like world's maria; the highlands are `feldspathic`, 2,900 kg m⁻³ and the
+    /// plagioclase rock's 1,260 °C; the phyllosilicate's residue melts at the chondritic
+    /// 1,150 °C and the dust at the iron-rich basalt's; `Na2CO3` is 2,540 kg m⁻³ and melts at
+    /// 850 °C; and each water ice is ice Ih's density where it lies, within 0.1 kg m⁻³ of IAPWS
+    /// R10-06's Gibbs function there (the ruling's script, recomputed): the Earth-like and
+    /// Mars-like caps at their coldest zones, 253 K and 180 K, the Moon-like and Ceres-like cold
+    /// traps at 110 K.
+    #[test]
+    fn the_synthetic_fields_palettes_take_the_crust_rulings_rows() {
+        let mars = synthetic_field(SyntheticWorld::MarsLike);
+        let moon = synthetic_field(SyntheticWorld::MoonLike);
+        let iron_rich = [
+            entry(&mars, "basalt_fe", PaletteRole::SecondaryCrust),
+            entry(&moon, "basalt_fe", PaletteRole::Province),
+        ];
+        for basalt in iron_rich {
+            assert_same_bits(basalt.grain_density_kg_m3, 3_310.0);
+            assert_same_bits(basalt.transition.value(), 1_323.15);
+            assert_eq!(basalt.mechanics, MechanicsFamily::Silicate);
+        }
+        let dust = entry(&mars, "mars_dust", PaletteRole::Deposit);
+        assert_same_bits(dust.transition.value(), 1_323.15);
+        let highlands = entry(&moon, "feldspathic", PaletteRole::PrimaryCrust);
+        assert_same_bits(highlands.grain_density_kg_m3, 2_900.0);
+        assert_same_bits(highlands.transition.value(), 1_533.15);
+        // The Moon-like lid is its highlands, and its provinces its maria.
+        assert_eq!(moon.header().crust_entry(Crust::Lid), Some(highlands));
+        assert_eq!(
+            moon.header().crust_entry(Crust::Province),
+            Some(iron_rich[1])
+        );
+        let ceres = synthetic_field(SyntheticWorld::CeresLike);
+        let shell = entry(&ceres, "phyllosilicate", PaletteRole::PrimaryCrust);
+        assert_same_bits(shell.transition.value(), 1_423.15);
+        let salt = entry(&ceres, "Na2CO3", PaletteRole::Deposit);
+        assert_same_bits(salt.grain_density_kg_m3, 2_540.0);
+        assert_same_bits(salt.transition.value(), 1_123.15);
+        let earth = synthetic_field(SyntheticWorld::EarthLike);
+        // IAPWS R10-06's ρ at 1 atm: 919.586 at 253 K, 928.151 at 180 K, 932.728 at 110 K.
+        for (field, iapws) in [
+            (&earth, 919.586),
+            (&mars, 928.151),
+            (&moon, 932.728),
+            (&ceres, 932.728),
+        ] {
+            let ice = entry(field, "H2O", PaletteRole::Ice);
+            assert!(
+                (ice.grain_density_kg_m3 - iapws).abs() < 0.1,
+                "{} kg m⁻³ against {iapws}",
+                ice.grain_density_kg_m3
+            );
+            assert_same_bits(ice.transition.value(), 273.15);
+            assert_eq!(ice.mechanics, MechanicsFamily::WaterIce);
+        }
+        // The liquid keeps its own density.
+        assert_same_bits(
+            entry(&earth, "H2O", PaletteRole::Liquid).grain_density_kg_m3,
+            999.84,
         );
     }
 

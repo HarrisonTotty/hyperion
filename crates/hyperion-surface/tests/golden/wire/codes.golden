@@ -31,6 +31,7 @@ palette_role 4 = Ice
 palette_role 5 = Liquid
 palette_role 6 = Cover
 palette_role 7 = Deposit
+palette_role 8 = Bulk
 mechanics_family 0 = Silicate
 mechanics_family 1 = Metal
 mechanics_family 2 = WaterIce
