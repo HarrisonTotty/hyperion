@@ -29,7 +29,7 @@ import time
 import unittest
 import unittest.mock
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
 
 sys.dont_write_bytecode = True
 HERE = Path(__file__).resolve().parent
@@ -46,6 +46,39 @@ def load_tests(loader: unittest.TestLoader, tests: unittest.TestSuite, pattern: 
     """These tests and the Rust graph's own, every class of them: `just ci` runs this file."""
     tests.addTests(loader.loadTestsFromModule(test_rust_graph))
     return tests
+
+
+# just takes its settings from `JUST_*` variables as well as from its flags, and a nested `just`
+# inherits them: `JUST_TIMESTAMP` puts the time before each recipe line it echoes, and `JUST_COLOR`,
+# `JUST_QUIET`, `JUST_EXPLAIN`, `JUST_DRY_RUN`, `JUST_NO_DEPS` or `JUST_JUSTFILE` change what it
+# prints, what it runs or which justfile it reads. Integration's runs set `JUST_TIMESTAMP=true` for
+# every `just` that smart-ci runs, this suite's `_smart-ci-test` among them (perf-build Q4). The tests
+# read just's own output (its dry runs, dump and evaluations) and run this checkout's recipes, so they
+# run just with none of these, whoever calls them; the justfile reads none itself. Kept: where just may
+# write its scripts and find `cygpath`, which are the machine's and change nothing it prints.
+JUST_MACHINE_SETTINGS = ("JUST_TEMPDIR", "JUST_CYGPATH")
+
+
+@contextlib.contextmanager
+def without_just_settings() -> Iterator[None]:
+    """The environment without just's settings (`JUST_*`, but the machine's), until the block ends."""
+    with unittest.mock.patch.dict(os.environ):
+        for name in [n for n in os.environ if n.upper().startswith("JUST_")
+                     and n.upper() not in JUST_MACHINE_SETTINGS]:
+            del os.environ[name]
+        yield
+
+
+_MODULE_ENVIRONMENT = contextlib.ExitStack()
+
+
+def setUpModule() -> None:
+    _MODULE_ENVIRONMENT.enter_context(without_just_settings())
+
+
+def tearDownModule() -> None:
+    _MODULE_ENVIRONMENT.close()
+
 
 BASE = "hyperion-base"
 TESTKIT = "hyperion-testkit"
@@ -1376,6 +1409,29 @@ def dump() -> dict:
     return json.loads(out.stdout)
 
 
+def dry_run(*recipe: str) -> List[str]:
+    """The lines of `just --dry-run <recipe>` that run `just`, as it echoes them."""
+    out = subprocess.run([just(), "--dry-run", *recipe], cwd=str(ROOT), capture_output=True, text=True, check=True)
+    return [line.strip() for line in out.stderr.splitlines() if line.strip().startswith("just ")]
+
+
+class TheCallersJustSettings(unittest.TestCase):
+    """The suite reads just as just prints by default, whatever `JUST_*` its caller sets."""
+
+    def test_a_caller_that_timestamps_just_changes_nothing_it_reads(self) -> None:
+        # Integration's runs set JUST_TIMESTAMP=true for every `just` smart-ci runs, `_smart-ci-test`
+        # among them (perf-build Q4), and `dry_run` once read no line of `[HH:MM:SS] just …`; with
+        # JUST_COLOR=always none of `\x1b[1mjust …` either. The module's setup takes them away.
+        plain = dry_run("test-wasm-sky")
+        self.assertTrue(plain)
+        for caller in ({"JUST_TIMESTAMP": "true"}, {"JUST_COLOR": "always"}):
+            with self.subTest(caller=caller), unittest.mock.patch.dict(os.environ, caller):
+                self.assertEqual(dry_run("test-wasm-sky"), [],
+                                 "the setting no longer changes what just echoes: pick one that does")
+                with without_just_settings():
+                    self.assertEqual(dry_run("test-wasm-sky"), plain)
+
+
 def line_text(fragments: list) -> str:
     """A recipe line from the dump, its interpolations as `{{}}`."""
     return "".join(f if isinstance(f, str) else "{{}}" for f in fragments)
@@ -2099,12 +2155,6 @@ class TheWasmSkyFilter(unittest.TestCase):
     def test_ci_and_smart_ci_leave_it_out_and_test_wasm_sky_runs_it(self) -> None:
         wasm_sky = self.ws.wasm_sky
         self.assertTrue(wasm_sky)
-
-        def dry_run(*recipe: str) -> List[str]:
-            out = subprocess.run([just(), "--dry-run", *recipe], cwd=str(ROOT), capture_output=True, text=True,
-                                 check=True)
-            return [line.strip() for line in out.stderr.splitlines() if line.strip().startswith("just ")]
-
         # `ci`'s run passes `not (wasm_sky)` to `_wasm-run`, whose filter, when it has one, may select
         # none (smart-ci's, for a change that reaches only `wasm_sky`'s tests).
         dumped = dump()
