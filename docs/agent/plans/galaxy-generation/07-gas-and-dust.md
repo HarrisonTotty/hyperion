@@ -1149,7 +1149,7 @@ variants exist.
     only when both legends are shown and the overlay is named on the display. The rule as built allows
     one raster, one hue and one mandatory legend, and already names dust among the fields it covers
     ("such as column density or dust"), so this is an extension of the rule rather than a new one.
-  - **Nomenclature.** Add `EXTINCTION`, `DUST OVERLAY`, `A(V)`, `A(K)`, `E(B-V)` and `N(H)` to the
+  - **Nomenclature.** Add `EXTINCTION`, `DUST OVERLAY`, `A(V)`, `A(K)`, `E(B−V)` and `N(H)` to the
     list, in the parenthesised form until the owner rules on `<sub>`, with `-` as the guide's signed
     form (plan 05's ruling 8) rather than the typographic minus. The guide's "One name per thing" rule
     means nothing on the console may use an abbreviation that is not on this list.
@@ -1184,7 +1184,7 @@ variants exist.
   `decodeExtinctionMap`'s accessor is `log10Mag`, not `log10PerLy2`, so any shared helper takes the
   accessor as an argument.
 - **P07.T11.c Chart readout.** When a system is selected the chart requests its extinction from the
-  chart centre at the chart's time and the readout gains four rows: `A(V)`, `E(B-V)`, `A(K)` in `mag`
+  chart centre at the chart's time and the readout gains four rows: `A(V)`, `E(B−V)`, `A(K)` in `mag`
   to two decimals, and `N(H)` in `/cm²` in E notation through `formatSci` (there is no formatter that
   writes a mantissa and a separate power of ten, and the guide's standing rule is E notation; if the
   owner had allowed `<sup>` under T11.a, this row would have changed with it; the owner did not). The request lives in a new
@@ -1624,7 +1624,7 @@ windows:
   no superscript minus and so `cm⁻²` cannot be set. Whether `<sup>` and `<sub>` may be used — which
   would allow `cm⁻²`, `A_V` and `10⁻⁴`, since they shift ordinary glyphs rather than needing superscript
   characters — reverses the guide's standing E-notation rule, on which plan 05 built `formatSci` and
-  `DensityLegend`'s ticks. Until it is ruled on, the nomenclature names are `A(V)`, `A(K)`, `E(B-V)` and
+  `DensityLegend`'s ticks. Until it is ruled on, the nomenclature names are `A(V)`, `A(K)`, `E(B−V)` and
   `N(H)` and `N(H)` is written in E notation. Ruled on 2026-09-25: the owner kept E notation and the
   parenthesised names, and accepted the four units and the second raster quantity with its overlay.
 - **For the owner: the four units themselves**, and the second raster quantity with its overlay, which
