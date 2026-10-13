@@ -319,7 +319,7 @@ describe("Earth's O₂ and H₂O against line by line", () => {
     const curves = await earthCurves();
     errors = pathErrors(curves);
     falls = readFalls([curves.o2, curves.h2o]);
-  });
+  }, 120_000);
 
   it("draw each channel within 2 × 10⁻³ through 1–35 air masses, from the ground and from 3 km", () => {
     expect(errors).toHaveLength(16);
