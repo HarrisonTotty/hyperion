@@ -725,7 +725,7 @@ Order and parallelism:
     T57.a after T51.b in the T50.a lane; then T54.a.
   - **23 → 24**: T53.a → T53.b → T53.c; T53.d; T51.d → T51.e → T51.g (one lane: T51.e and T51.g
     both edit `moons/`; T51.g after T56.d, T50.c and T49.b); T51.f (after R09.T7.d's
-    `cold_trap::fraction`); then T54.b. T33.c follows.
+    `cold_trap::fraction`); T48.g (its own lane, after T54.a); then T54.b. T33.c follows.
   - **Later**: T55.
 
   _The bump plan_ (ruled by "main", 2026-10-09). Steps 0–6 (T14.d; T49.a, which moves no output;
@@ -4429,7 +4429,8 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     σ_o², with Δ = 4.69 km, σ_c = 1.08 km and σ_o = 0.93 km from Earth2014's two crustal
     populations (2.51 km at f_c = 0.405); on a stagnant lid 0.9 km (Venus's);
   - _basin_, ∝ 1/g: 2.05 km × (1.62 m s⁻² ÷ g) × k_comp × √min(1, N(>1 km) ÷ 0.018 km⁻²), with
-    k_comp 1 for rock and 0.16 for ice-rich crusts, the share capped at 0.02 R;
+    k_comp 1 for a silicate crust and 0.16 for an ice-rich one (T48.f's `Crust`), the share
+    capped at 0.02 R;
   - _constructional_, ∝ 1/g and gated by the lithosphere: 2.76 km × (3.71 m s⁻² ÷ g) × V ×
     min(1, T_e ÷ 70 km), V the volcanism level and T_e ≈ k (870 K − T_s) ÷ F from the heat flow F,
     with k = 3.1 W m⁻¹ K⁻¹, the plate model's mantle value (Parsons and Sclater 1977; Stein and
@@ -4437,11 +4438,12 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     was calibrated (ruled by R09.T0.b, 2026-10-09: it is the mechanical lithosphere's 550–600 °C
     isotherm, and fits Venus's and Mars's T_e, where 723 K fails on Venus; R09's Design note 3);
     T_e is zero where T_s ≥ 870 K; the lithosphere factor acts on this share and the edifice cap
-    only. An ice-rich crust (`SurfaceMaterial::Ice`, the predicate of k_comp and k_target) takes
-    ice's isotherm and conductivity instead: T_e = (a ÷ F) ln(T_ice ÷ T_s), with k = a ÷ T for ice
-    Ih (a ≈ 567 W m⁻¹, Klinger 1980, or 651, Petrenko and Whitworth 1999; checked at build) and
-    T_ice about 170 K (R09's lean, a source cited at build), zero where T_s ≥ T_ice. It is labelled
-    uncalibrated (signoff-3.md).
+    only. An ice-rich crust (T48.f's `Crust::of`, the one predicate of k_comp, k_target and this
+    lithosphere; not `SurfaceMaterial`, which classes the surface's albedo; science-r09-craters.md
+    F5.4) takes ice's isotherm and conductivity instead: T_e = (a ÷ F) ln(T_ice ÷ T_s), with
+    k = a ÷ T for ice Ih (a ≈ 567 W m⁻¹, Klinger 1980, or 651, Petrenko and Whitworth 1999;
+    checked at build) and T_ice about 170 K (R09's lean, a source cited at build), zero where
+    T_s ≥ T_ice. It is labelled uncalibrated (signoff-3.md).
 
   Every constant calibrates on one body (Earth the mobile-lid terms, Venus the stagnant lid, the
   Moon the basin share, Mars the constructional share, Ceres k_comp and Vesta the cap), so the fit
@@ -4460,7 +4462,9 @@ its source when it becomes a constant. Their order with T24 and with rendering p
   lid and on a world that never held surface water, and no mass dependence is modelled. Earth's
   0.405 at 4.5 Gyr is f_∞ = 0.416; the Solar System table passes Earth's measured 0.405.
   - _Tests:_ the Solar System table gives Earth 2.51 km at f_c 0.405 and Venus, the Moon, Mars,
-    Ceres and Vesta their calibrating values within 5%, and Mercury within 25%; σ_h is continuous
+    Ceres and Vesta their calibrating values within 5% (Ceres ice-rich by `Crust`, though its
+    `SurfaceMaterial` is Rock, science-p14-t24a-climate.md §6 item 2), and Mercury within 25%; σ_h
+    is continuous
     in time; no figure published is a greatest relief; f_c is zero before t_p, on a stagnant lid and
     on a never-wet world, rises monotonically to f_∞, and over 10⁴ bodies its asymptotes are
     uniform on [0.2, 0.7] (Kolmogorov–Smirnov); an icy body's T_e follows the ice form and is zero
@@ -4526,27 +4530,75 @@ its source when it becomes a constant. Their order with T24 and with rendering p
       at or beyond the innermost giant and their moons; otherwise the nearest asteroid belt's
       U_b² + (1 − a ÷ a_b)³ inside it or U_b² + (1 − a_b ÷ a)³ outside;
     - with no belt, 0.30² + (1 − a ÷ a_g)³ from the innermost giant, or 0.30² with no giant.
-  - Projectile density: 3,000 kg m⁻³ from a rocky belt, 500 from an icy belt or comets.
+  - Projectile density: 3,000 kg m⁻³ from a rocky belt, 500 from an icy belt or comets (Britt
+    et al. 2006's nominal cometary density; Groussin et al. 2019's mean of 20 estimates,
+    480 ± 220; 67P's 532 ± 7, Jorda et al. 2016; science-r09-craters.md F5.2).
   - Target:
     - Porous below a radius of 150 km, at the body's bulk density;
-    - otherwise NonPorous, at 940 kg m⁻³ with k_target 0.12 for an ice-rich crust, or
-      2,550 kg m⁻³ with k_target 1;
-    - ice-rich means a moon formed beyond its planet's ice line, a member of an icy belt, or a
-      body under 273 K whose water would make a global layer at least 10 km deep.
+    - otherwise NonPorous: an ice-rich crust at ice Ih's density at the body's mean surface
+      temperature (IAPWS R10-06(2009), `substance::ice_ih_density`, 916.7–933.8 kg m⁻³,
+      science-r09-craters.md F5.3) with k_target 0.12, or a silicate one at 2,550 kg m⁻³ with
+      k_target 1;
+    - ice-rich (`Crust::of`, public) means a body under 273 K that is a moon formed beyond its
+      planet's ice line, a member of an icy belt, or a body whose water would make a global layer
+      at least 10 km deep. It is the one predicate of k_target, the ice target's density, and
+      T48.a's k_comp and ice lithosphere; `SurfaceMaterial`, a bulk-water class, stays the
+      albedo's and the photometry's (science-r09-craters.md F5.4).
     - The 150 km threshold, between Hyperion (135 km, porous) and Mimas (198 km), and the 10 km
       layer are the plan's own (science-r09-craters.md item 2). Once P14.T51.c lands (22 → 23),
       ρ_t is the primary crust's bulk density (Ceres's 1,287 kg m⁻³) and the ice-rich test reads
       the primary crust.
   - Closed form, no draws.
+  - _Files:_ `hooks/figures.rs`; `substance/phase.rs`, which receives `ice_ih_density` from
+    `planetary/surface/reference.rs`, bit-identical (F5.3).
   - Tests:
-    - a Solar-System-like system gives Mercury 41.4, Venus 25.7, Earth 19.9, the Moon 16.7
-      (to 0.1, R09's `LUNAR_IMPACT_VELOCITY`), Mars 10.6 and Ceres 5.6 km/s;
+    - a Solar-System-like system, on JPL's elements and masses, gives Mercury 41.4, Venus 25.7,
+      Earth 19.9, the Moon 16.7 (R09's `LUNAR_IMPACT_VELOCITY`), Mars 10.6 and Ceres 5.6 km/s,
+      each within 0.1 km/s, an absolute bound and not a rounding: the figures are
+      science-r09-craters.md's script's on rounded elements, and JPL's give 41.43, 25.68, 19.87,
+      16.68, 10.55 and 5.65 (science-r09-craters.md F5.5);
     - Mars ÷ Moon lies in 0.53–0.65;
     - the 15 regular moons of Jupiter, Saturn and Uranus lie within 10% of Brasser et al. 2025's
       Table 5;
     - Pluto lies within 20% of 2.2 km/s;
-    - Ganymede and Ceres are ice-rich, Hyperion porous, the Moon and Mars silicate.
+    - Ganymede and Ceres are ice-rich, Hyperion porous, the Moon and Mars silicate; an icy
+      belt's member or an icy-born moon at or above 273 K is silicate; Ganymede's, Ceres's and
+      Pluto's ice targets are ice Ih's at 110, 163 and 40 K within 0.03 kg m⁻³ (F5.3).
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::figures`.
+- **P14.T48.g The belts' encounter speeds** (23 → 24; amends T21.c's population moments and
+  T48.f's U_b²; science-r09-craters.md F5.6). `planetary/belts.rs` and `hooks/figures.rs`.
+  - _The population's laws._ A belt part's small bodies follow its members' laws (T21.c):
+    eccentricity Rayleigh in σₑ truncated at `eccentricity_limit(a)`, inclination Rayleigh in
+    σᵢ, and semi-major axis as the disc's solids lie over the annulus.
+    - The record's mean eccentricity and inclination for each part become that law's means,
+      integrated over the annulus by a fixed-node quadrature (no draws, fixed order), in place
+      of the untruncated σ√(π/2).
+    - A scattered component is first tested against a perihelion-anchored law (q near the
+      outermost planet's chaotic zone, e = 1 − q ÷ a). Whichever reproduces the scattered
+      disc's e of 0.2–0.6 better is adopted (the elements are read from JPL's Small-Body
+      Database at build).
+    - The apocentre cap at the disc's edge stays a placement guard for members, not a bound on
+      the population.
+  - _The excitation._ U_b²(a) is the mean of Öpik's U² = 3 − 1 ÷ A − 2√(A(1 − e²)) cos i,
+    A = a_p ÷ a, over the population's orbits that cross a (q ≤ a ≤ Q), weighted by Öpik's
+    collision probability (Öpik 1951; Wetherill 1967; Bottke et al. 1994; from memory, read at
+    build). It is evaluated at the target's a for rule 1, and at the belt proper's mid-radius
+    for rule 3. In the limit of equal a and untruncated laws it gives F5.6's 0.0586 and 0.408.
+  - _Rule 3's cube_ is re-checked against T48.f's Solar-System figures and bounds, and refitted
+    only if one fails. If the Moon moves by more than 0.1 km/s, R09's `LUNAR_IMPACT_VELOCITY`
+    and its reference worlds follow, with a note to R09.
+  - _Tests:_
+    - the equal-a, untruncated limit gives 0.0586 and 0.408 within 10⁻³;
+    - the Solar asteroid belt's population ⟨e²⟩ lies within 5% of 0.020, and a scattered
+      component's below 0.18;
+    - Ceres lies within 10% of Bottke et al. 1994's main-belt mean, about 5.3 km/s (from
+      memory, read at build);
+    - T48.f's Solar-System, Mars ÷ Moon, regular-moon and Pluto tests still pass;
+    - the population means are deterministic: the same bits natively and as WebAssembly.
+  - _Moves:_ every belt's recorded mean eccentricity and inclination, and every impact velocity
+    and mapped crater density, at the 23 → 24 bump (T54.b).
+  - _Accept:_ `cargo test -p hyperion-sim planetary::belts`;
+    `cargo test -p hyperion-sim planetary::hooks::figures`.
 - **P14.T48.c The crater contract** (amends T24.b's crater density). T24.b's N(>1 km) per km², by
   the lunar chronology with its belt scaling, is published as the lunar-equivalent production at
   the surface age before any screening and any diameter map, with the screening input beside it
@@ -4911,7 +4963,8 @@ rows' values.
   - **The other phase data:**
     - densities and latent heats, every density intrinsic: a solid's grain density, an ice's
       crystal density as a function of temperature, ρ_s(T), over each solid phase's valid range
-      (ice Ih from IAPWS R10-06(2009), Feistel and Wagner 2006; CO₂ from Mangan et al. 2017; N₂'s
+      (ice Ih from IAPWS R10-06(2009), Feistel and Wagner 2006, as `substance::ice_ih_density`,
+      moved there by P14.T48.f, science-r09-craters.md F5.3; CO₂ from Mangan et al. 2017; N₂'s
       α and β phases, CO's, CH₄'s and NH₃'s from lattice or density measurements read here), a
       transition being a step between phases, and evaluated where the ice lies (the lower of its
       coldest zone's temperature and its frost point, or T51.f's threshold in a cold trap;
@@ -5906,7 +5959,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
 - **P14.T54.b The 23 → 24 batch on the record, and its bump.** As T54.a, for T51.d's
   `modifiers`, T51.e's types, T51.f's cold-trapped condensates (each giving its body's palette an
   `Ice` entry, removing T54.a's label), T51.g's `subsurface_ocean` for every body (deleting
-  `OCEAN_VERSION` and its tripwire), T53.a–c's states and gases, and T53.d's member, which stays
+  `OCEAN_VERSION` and its tripwire), T53.a–c's states and gases, T48.g's belt moments and impact
+  velocities, and T53.d's member, which stays
   absent.
   `GENERATOR_VERSION` goes 23 → 24.
 
@@ -10538,6 +10592,118 @@ a_moon_s_published, the_published}`.
     solution's fraction is its solute's.
   - _`NameCase`_ (`"sentence" | "upper"`), the type of `substanceName`'s second parameter, is
     exported beside the three names, as §3.1 writes it.
+
+- _The crust's ice-rich predicate_ (science-r09-craters.md F5.4).
+  - A cold body with a 10–40 km water layer takes ice's k_comp, though its largest basins reach
+    rock: k_comp's one calibrator, Ceres, has a crust of about 40 km.
+  - A warm water world's sea floor (high-pressure ice under a deep ocean) is classed silicate.
+    Neither coefficient is calibrated for it, and its craters are screened.
+  - Lean: none until P14.T51.c's lid gives the crust's lithology and thickness, when both read it.
+
+- **Deviations in P14.T48.f, as built (`p14-impactors`, 2026-10-12).** No output moves: nothing
+  on the record calls `impactors` until T48.c's crater contract, it draws nothing and opens no
+  tag, and `GENERATOR_VERSION` stays 21, so it needs no hold.
+  - _The signature._ `hooks::figures::impactors` takes an `&ImpactorBody` and returns
+    `Result<Impactors, DeriveImpactorsError>`, where the task wrote `impactors(body) -> Impactors`:
+    its inputs are plain values, as T24.a's `SurfaceInputs` are, checked once, each refusal
+    naming its part and carrying it in its unit.
+    - `ImpactorBody` holds `orbit: ImpactorOrbit`, the bulk section's radius, density and gravity,
+      T24.a's mean surface temperature, the body's water and `sources: &ImpactorSources`.
+    - `ImpactorOrbit::Host(HostOrbiter)` is a planet, dwarf planet or belt member, and
+      `ImpactorOrbit::Moon { parent, semi_major_axis, formed: SnowLineSide }` a moon, whose
+      impactors are its parent's.
+    - `HostOrbiter { orbit: HostOrbit, mass, belt: Option<BeltMembership { part, composition }> }`
+      and `HostOrbit { semi_major_axis, eccentricity, inclination }`.
+    - `ImpactorSources::new(host, belts, planets)` is built and validated once per host
+      (`BuildImpactorSourcesError`), with getters `host`, `belts` and `innermost_giant`, the
+      innermost planet of 10 M⊕ or more (`IMPACTOR_GIANT_MASS` = `BELT_GIANT_MASS`). Its belts are
+      `SourceBelt`s, `From<&Belt>`, whose mid-radius is the belt's own to the bit.
+  - _`Impactors` adds two getters_ to the task's four (velocity, projectile density, target,
+    `k_target`): `crust()`, a `Crust` of `Silicate` or `IceRich` by T48.f's ice-rich predicate;
+    and `source()`, the `ImpactorSource` rule that applied (`InBelt`, `Comets`, `NearestBelt` or
+    `InnerComets`, each with its `U_src`²).
+  - _A golden_, `planetary/impactors` at header 21, pins every Solar-System test body's rule,
+    excitation, velocity, projectile and target density, class, `k_target` and crust, at the
+    determinism review's asking. The bump moves only its header unless the batch changes the model.
+  - _Choices the ruling leaves open_ (the lane's, recorded in the module's documentation):
+    - The inclination is to the host's plane, not the system frame's: a host's plane is tilted
+      against the galactic axes. T24.b takes it as the angle between the orbit's normal and
+      `SystemPlane::frame()`'s.
+    - The nearest belt of rule 3 is the one of the least max(a, `a_b`) ÷ min(a, `a_b`), the first
+      given on a tie. An annulus holds its edges. The cube is continuous at `a_b`, but not at an
+      annulus's edges, where rule 1 takes over (a step of about 0.012 in U² at the asteroid belt's
+      inner edge).
+    - A porous target's `k_target` is its crust's, so an icy Hyperion takes 0.12.
+    - The 10 km layer is a global equivalent layer at 1,000 kg m⁻³ (`WATER_LAYER_DENSITY`, liquid
+      water's); ice's 917–934 would deepen it by 7–9%.
+    - The escape speed is √(2 g R) from the bulk section, and a moon's parent's GM is GM⊕ times
+      its mass in M⊕.
+  - _Two ice-rich predicates_ (for "main"). `Crust` follows T48.f's, which is
+    science-r09-craters.md item 2's. T48.a's text names `SurfaceMaterial::Ice`, a bulk water
+    fraction of at least 0.1, as the predicate of `k_comp` and `k_target`. The two disagree on a
+    warm water world (`Ice` by bulk, silicate here) and on an inner moon with a deep cold water
+    layer. Lean: T48.a's `k_comp` reads `Crust`, one predicate for the crust's two factors;
+    pending a ruling, `crust()` serves `k_target` only. _Ruled_ (F5.4): one predicate,
+    `Crust::of`, for k_target, the ice target's density, and T48.a's k_comp and ice lithosphere.
+    It is gated on 273 K for every clause. The lane takes its birthplace as a `Birthplace` of
+    `Icy` or `Other` rather than F5.4's `bool`, as the ruling allows.
+  - _Moons with no `DerivedMoon`_ (for T24.b). Only regular moons have an ice fraction. Lean: a
+    giant-impact moon takes its parent's side of the snow line (an icy belt member's moon
+    `Beyond`), and a capture takes `Inside` unless its own origin is known, so that its crust
+    follows the water test alone.
+  - _Findings of the science review, for "main"_ (each built as ruled, its doc corrected):
+    - The scattered component's excitation is 0.414, 2 × 0.3² + 2 sin² 20° at T21.c's widths,
+      where science-r09-craters.md item 4 quotes 0.30, probably 2σₑ² + sin² σᵢ = 0.297 with a
+      factor 2 dropped. No test figure reads it; scattered members and bodies in a scattered
+      annulus do.
+    - The comets' 500 kg m⁻³ is the ruling's own figure between 9P's about 400 (Richardson et
+      al. 2007) and 67P's 533. Brasser, Wong and Werner 2025 adopt 400 (Table 3), not 500 as the
+      ruling says. 400 would scale a crater by (400 ÷ 500)^0.261 = 0.943.
+    - The moon's sum is the ruling's assembly: Brasser et al.'s eq. 2 is a ratio of crossers,
+      with 2 `v_K`² = `v_esc`² after it, and their §2.3 the √3 `v_K` mean encounter speed after
+      Zahnle et al. 2003, not read. The task text's "eq. 2" is read so.
+    - `U_c` = 0.30 stands: Brasser et al.'s three comet speeds are 0.24, 0.38 and 0.35 of the
+      planets' orbital speeds, and Nesvorný et al. 2023 (PSJ 4, 139) find "approximately 30%" at
+      Jupiter.
+    - The ice target's 940 kg m⁻³ lies about 1% above ice Ih's 930.6–933.8 kg m⁻³ at 50–150 K
+      (IAPWS R10-06(2009)), a 0.25% change in a crater's diameter.
+    - The belt excitation's formula approximates the moments. For a Rayleigh inclination the
+      exact ⟨sin² i⟩ gives `U_b`² of 0.0580 and 0.388, and the members' eccentricities are cut at
+      the planet-crossing limit, so a scattered component's ⟨e²⟩ is nearer 0.083 than 0.18.
+    - _Ruled_ (science-r09-craters.md F5): the scattered 0.414 stands, and the ruling's 0.30 was a
+      slip (F5.1). 500 kg m⁻³ stays, re-cited to Britt et al. 2006 and Groussin et al. 2019
+      (F5.2). The ice target is ice Ih at the mean surface temperature, through
+      `substance::ice_ih_density` (F5.3): `ICE_TARGET_DENSITY` is withdrawn,
+      `Crust::non_porous_density` takes the surface temperature, and `reference.rs`'s
+      `ice_ih_density_kg_m3` moved to `substance/phase.rs` verbatim, with its IAPWS checks, its
+      palette entries bit-identical. The formula is kept over the exact moments, being nearer
+      Öpik's mean, and truncation goes to P14.T48.g (F5.6).
+  - _The test figures_ come from JPL's elements and masses, not the ruling's script's inputs:
+    Table 1 of "Keplerian Elements for Approximate Positions of the Major Planets" (J2000), its
+    "Planetary Physical Parameters", the Small-Body Database's osculating elements for Ceres and
+    Pluto, and its satellites' mean elements and GMs. The ecliptic stands for the host's plane.
+    - Mercury 41.43, Venus 25.68, Earth 19.87, the Moon 16.68, Mars 10.550 and Ceres 5.655 km/s.
+      "To 0.1" is read as within 0.1 km/s. Read as rounding to the figure, Ceres would round to
+      5.7 (the ruling's script, at a 2.7675 au, e 0.0785 and i 10.6°, gave 5.649), and Mars lies
+      0.3 m/s above 10.55.
+    - Mars ÷ the Moon is 0.632.
+    - The 15 regular moons lie from −6.29% (Dione) to +7.38% (Mimas) of Brasser et al. 2025's
+      Table 5.
+    - Pluto is 2.48 km/s, +12.7% of 2.2.
+    - Ganymede (beyond its parent's ice line) and Ceres (17% water, McCord and Sotin 2005's
+      lowest, a 58 km layer at 163 K) are ice-rich, Hyperion porous at its 538.6 kg m⁻³, and the
+      Moon and Mars silicate.
+    - The ruling's sanity cases hold: an Earth at 0.05 au gives 134 km/s, and one with only
+      giants 25.9 km/s.
+    - "To 0.1" is within 0.1 km/s (F5.5).
+  - _Clippy._ "McCord" joins `doc-valid-idents` in `crates/hyperion-sim/clippy.toml`, for the
+    tests' citation of McCord and Sotin 2005.
+  - _For T48.c and T24.b._ Per host, build `ImpactorSources::new` from its GM, its belts
+    (`SourceBelt::from`) and its planets' masses and semi-major axes. Per body, fill
+    `ImpactorBody`: belt members with their part and composition, moons with their parent and
+    `formed` from `DerivedMoon::ice_fraction() > 0` (others as leaned above), the water from the
+    volatile inventory or a moon's ice. The contract's impact velocity is then
+    `Some(velocity())`, beside `projectile_density()`, `target()` and `k_target()`.
 
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might

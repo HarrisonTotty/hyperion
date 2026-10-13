@@ -233,6 +233,29 @@ pub fn phase_at(id: SubstanceId, temperature: Kelvin, pressure: Pascals) -> Opti
         .and_then(|phase| phase.phase_at(temperature, pressure))
 }
 
+/// The melting point of ice Ih at 1 atm, kelvin: 273.152 519 K (IAPWS R10-06), to 0.01 K, where
+/// [`ice_ih_density`] stops.
+const ICE_IH_MELTING_K: f64 = 273.15;
+
+/// Ice Ih's density at `temperature` and 1 atm: the Gibbs function of IAPWS R10-06(2009)
+/// (Feistel and Wagner 2006, J. Phys. Chem. Ref. Data 35, 1021), as the polynomial
+/// 933.790 351 + 9.911 602 x³ − 109.185 868 x⁴ + 127.136 897 x⁵ − 44.949 496 x⁶ in
+/// x = T ÷ 273.15 K, fitted to it over 0.5–273.15 K within 0.02 kg m⁻³, below the release's own
+/// uncertainty, 0.1 per cent below 268 K and 0.02 per cent above (its Table 5;
+/// science-composition-crusts.md §3); clamped to 0 K and the melting point.
+///
+/// Moved here verbatim from the reference worlds' palettes by P14.T48.f, whose ice-rich crater
+/// targets take it at the body's mean surface temperature (science-r09-craters.md F5.3);
+/// P14.T49.b makes it water's `ρ_s`(T).
+#[must_use]
+pub fn ice_ih_density(temperature: Kelvin) -> KilogramsPerCubicMetre {
+    let x = temperature.value().clamp(0.0, ICE_IH_MELTING_K) / 273.15;
+    let x3 = x * x * x;
+    KilogramsPerCubicMetre::new(
+        933.790_351 + x3 * (9.911_602 + x * (-109.185_868 + x * (127.136_897 - 44.949_496 * x))),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use hyperion_testkit::float::assert_same_bits;
@@ -371,5 +394,17 @@ mod tests {
             assert_eq!(saturation_pressure(id, Kelvin::new(100.0)), None);
             assert_eq!(phase_at(id, Kelvin::new(100.0), Pascals::new(1e5)), None);
         }
+    }
+
+    /// Ice Ih's density follows IAPWS R10-06(2009) to 0.03 kg m⁻³ (science-composition-crusts.md
+    /// §3), clamped to its melting point and to 0 K.
+    #[test]
+    fn ice_ih_s_density_follows_iapws() {
+        let at = |k: f64| ice_ih_density(Kelvin::new(k)).value();
+        for (k, rho) in [(273.15, 916.72), (100.0, 933.05), (160.0, 929.87)] {
+            assert!((at(k) - rho).abs() < 0.03, "{} kg m⁻³ at {k} K", at(k));
+        }
+        assert_same_bits(at(300.0), at(ICE_IH_MELTING_K));
+        assert_same_bits(at(-1.0), at(0.0));
     }
 }

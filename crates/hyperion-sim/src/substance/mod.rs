@@ -46,7 +46,9 @@ mod rows;
 pub use element::Element;
 pub use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
 pub use mix::{GasColumns, HeatCapacityClass, heat_capacity_over_r, mean_molar_mass_g_per_mol};
-pub use phase::{MOLAR_GAS_CONSTANT, Phase, PhaseColumns, phase_at, saturation_pressure};
+pub use phase::{
+    MOLAR_GAS_CONSTANT, Phase, PhaseColumns, ice_ih_density, phase_at, saturation_pressure,
+};
 
 use crate::planetary::derive::atmosphere::Gas;
 use rows::ROWS;

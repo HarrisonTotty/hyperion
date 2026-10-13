@@ -55,6 +55,7 @@ use crate::math;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::irradiation;
 use crate::planetary::hooks::SurfaceSeed;
+use crate::substance;
 use crate::units::consts::{SECONDS_PER_DAY, SOLAR_CONSTANT_W_PER_M2};
 use crate::units::{
     EarthFluxes, Gigayears, Kelvin, KilogramsPerCubicMetre, KilogramsPerSquareMetre, Metres,
@@ -113,12 +114,12 @@ impl Substance {
     }
 
     /// The substance's [`PaletteRole::Ice`] entry with ice Ih's density at `temperature`, where the
-    /// ice lies on its body ([`ice_ih_density_kg_m3`]): ice Ih's, so it serves [`WATER_ICE`] alone
-    /// (science-composition-crusts.md §3).
+    /// ice lies on its body ([`substance::ice_ih_density`]): ice Ih's, so it serves [`WATER_ICE`]
+    /// alone (science-composition-crusts.md §3).
     #[must_use]
     fn ice_entry_at(&self, temperature: Kelvin) -> PaletteEntry {
         PaletteEntry {
-            grain_density_kg_m3: ice_ih_density_kg_m3(temperature),
+            grain_density_kg_m3: substance::ice_ih_density(temperature).value(),
             ..self.entry(PaletteRole::Ice)
         }
     }
@@ -264,19 +265,6 @@ const WATER_MELTING_K: f64 = 273.15;
 /// (science-composition-crusts.md §3).
 const COLD_TRAP_H2O_K: f64 = 110.0;
 
-/// Ice Ih's density at `temperature` and 1 atm, kg m⁻³: the Gibbs function of IAPWS R10-06(2009)
-/// (Feistel and Wagner 2006, J. Phys. Chem. Ref. Data 35, 1021), as the polynomial
-/// 933.790 351 + 9.911 602 x³ − 109.185 868 x⁴ + 127.136 897 x⁵ − 44.949 496 x⁶ in
-/// x = T ÷ 273.15 K, fitted to it over 0.5–273.15 K within 0.02 kg m⁻³, below the release's own
-/// uncertainty, 0.1 per cent below 268 K and 0.02 per cent above (its Table 5;
-/// science-composition-crusts.md §3); clamped to 0 K and the melting point.
-#[must_use]
-fn ice_ih_density_kg_m3(temperature: Kelvin) -> f64 {
-    let x = temperature.value().clamp(0.0, WATER_MELTING_K) / 273.15;
-    let x3 = x * x * x;
-    933.790_351 + x3 * (9.911_602 + x * (-109.185_868 + x * (127.136_897 - 44.949_496 * x)))
-}
-
 /// The coldest zone's temperature, T₀ − (2/3) × the equator–pole contrast: the pole of the zonal
 /// fit T₀ + T₂ P₂(sin φ) whose contrast the tables define as −(3/2) T₂. It assumes a cold pole,
 /// a positive contrast, as every reference world has; a warm pole's coldest zone would be its
@@ -288,7 +276,7 @@ fn coldest_zone(mean: Kelvin, equator_pole_contrast_k: f64) -> Kelvin {
 
 /// Water ice, as snow-covered ice: Design note 8's fresh snow, 0.95–0.98 in the visible
 /// (Wiscombe and Warren 1980; Grenfell et al. 1994); ice Ih's density, a function of temperature
-/// ([`ice_ih_density_kg_m3`]; 916.72 kg m⁻³ at its melting point, the row's figure, IAPWS
+/// ([`substance::ice_ih_density`]; 916.72 kg m⁻³ at its melting point, the row's figure, IAPWS
 /// R10-06(2009), Table 6: 916.721 463 kg m⁻³), each world's entry taking it where its ice lies
 /// ([`Substance::ice_entry_at`]; science-composition-crusts.md §3).
 const WATER_ICE: Substance = Substance {
@@ -1122,18 +1110,11 @@ mod tests {
         assert!((highlands.grain_density_kg_m3 - 2_790.0).abs() < 1e-9);
     }
 
-    /// Ice Ih's density follows IAPWS R10-06, and each world's ice entry takes it where its ice
-    /// lies: the coldest zone on Earth and Mars, the cold traps' threshold on the Moon and Ceres
-    /// (science-composition-crusts.md §3).
+    /// Each world's ice entry takes ice Ih's density ([`substance::ice_ih_density`], whose
+    /// IAPWS checks moved with it) where its ice lies: the coldest zone on Earth and Mars, the
+    /// cold traps' threshold on the Moon and Ceres (science-composition-crusts.md §3).
     #[test]
     fn the_ice_entries_take_ice_ih_s_density_where_the_ice_lies() {
-        let at = |k: f64| ice_ih_density_kg_m3(Kelvin::new(k));
-        for (k, rho) in [(273.15, 916.72), (100.0, 933.05), (160.0, 929.87)] {
-            assert!((at(k) - rho).abs() < 0.03, "{} kg m⁻³ at {k} K", at(k));
-        }
-        // Clamped to the melting point and to 0 K.
-        hyperion_testkit::float::assert_same_bits(at(300.0), at(WATER_MELTING_K));
-        hyperion_testkit::float::assert_same_bits(at(-1.0), at(0.0));
         let ice = |inputs: &CoarseInputs| {
             let entry = inputs.palette().find(PaletteRole::Ice, H2O).unwrap();
             inputs.palette().get(entry).unwrap().grain_density_kg_m3

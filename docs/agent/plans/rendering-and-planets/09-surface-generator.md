@@ -997,8 +997,9 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     D_t, and the class's transient volume-to-diameter constant, a paraboloid as deep as the class's
     fresh bowl: (4/3 · 8/0.20)^⅓ = 3.764 non-porous, (4/3 · 8/0.14)^⅓ = 4.239 porous. Between two
     non-porous bodies the constant, K₁ and the absolute speed cancel; for a porous body they do not
-    (science-r09-craters.md F4.2). Ice is non-porous at 940 kg m⁻³ (science-r09-craters.md
-    item 2). The strength regime is not modelled (Risks). Saturation is
+    (science-r09-craters.md F4.2). Ice is non-porous, at ice Ih's density at the body's mean
+    surface temperature, 916.7–933.8 kg m⁻³ (IAPWS R10-06(2009); science-r09-craters.md item 2 and
+    F5.3). The strength regime is not modelled (Risks). Saturation is
     Trask's N(>D) = 0.079 D⁻² km⁻²; capped craters draw their ages from the last T × N_sat ÷ N_prod
     of the surface age, inverted through the chronology, `craters::chronology_age`, which counts
     from the system's formation (the contract's system age; science-r09-craters.md item 5). That

@@ -1,7 +1,7 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23, T24.a):
+//! Built so far (P14.T23, T24.a, T48.f):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
@@ -12,6 +12,9 @@
 //! - [`surface`]: the body's [`SurfaceConditions`] (P14.T24.a): its mean temperature and signed
 //!   contrasts, its surface pressure and gases as mole fractions, the light and radiation it
 //!   receives and whether water can be liquid on it; held until the 21 → 22 batch's bump.
+//! - [`figures`]: the body's global figures, so far its [`Impactors`] (P14.T48.f): the mean
+//!   impact velocity and density of what strikes it, and the crater target it is, which
+//!   P14.T48.c's crater contract will carry; nothing on the record reads them yet.
 //!
 //! [`BodyHooks`] holds them, from
 //! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at). The global
@@ -27,9 +30,11 @@
 //! [`Section::NotModelled`] until the wire's hooks carry a detail seed in its place, and no wire
 //! type is built from it.
 
+pub mod figures;
 pub mod seed;
 pub mod surface;
 
+pub use figures::{Impactors, impactors};
 pub use seed::{SurfaceSeed, surface_seed};
 pub use surface::{RadiationClass, SurfaceConditions};
 
