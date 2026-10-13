@@ -264,6 +264,10 @@ pub mod cold_trap {                      // T7.d (science-r09-drainage.md §8); 
     pub fn permanent_shadow(latitude: Radians, body: &Body, terrain: &Terrain) -> f64;
     pub fn shadow_temperature(depth_ratio: f64, elevation: Radians, body: &Body) -> Kelvin;
 }
+pub mod tables {                         // T7.f: the fitted tables the crate reads (plan 15)
+    pub mod bowl_permanent_shadow;       // a spherical bowl's exact permanent shadow
+    pub const MANIFEST: &[hyperion_base::version::TableInfo];
+}
 pub mod synth {
     pub struct BandLevel(u8);
     pub struct BandSpectrum;   // the structural share's law: V₁, β₁, break degree, β₂
@@ -1724,17 +1728,22 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   - **`permanent_shadow`** is the share of ground that no part of the star's disk ever reaches:
     - bowl craters by Hayne et al. 2021's eq. 26 (Nat. Astron. 5, 169), with δ plus the angular
       radius, over the log-normal d/D, with d/D above 0.5 counted as 0.5;
-    - the plains as a population of bowls whose d/D is half the magnitude of a Gaussian surface's
-      directional slope: a half-normal of scale tan σ_s ÷ 2, whose mean-square slope is the
-      surface's (science-r09-drainage.md §8.10). It is not a log-normal of the same moments, whose
-      heavier tail would leave deep bowls in shadow equatorward of 70°. It is a labelled stand-in
-      for Hayne et al.'s ray-traced plains, which have no closed form.
+    - the plains as a population of bowls whose d/D is a half-normal of scale 0.6 × tan σ_s ÷ 2, 0.6
+      of half the magnitude of a Gaussian surface's directional slope (science-r09-drainage.md §8.10
+      and §8.13). The 0.6 is fitted to the permanent shadow of ray-traced Gaussian surfaces built as
+      Hayne et al.'s Methods D builds them, since a bowl, a closed hollow, keeps several times the
+      permanent shadow of a surface of its own mean-square slope. It is not a log-normal of the same
+      moments, whose heavier tail would leave deep bowls in shadow equatorward of 70°. It is a
+      labelled stand-in for Hayne et al.'s ray-traced plains, which have no closed form.
   - **`fraction`** is the part of that shadow whose Ingersoll, Svitek and Murray 1992 temperature
     (Icarus 100, 40) stays below the threshold, times one less the conduction share.
     - The star is taken at its flux-weighted elevation at e_max: e_max itself where e_max is at
       least the angular radius, and the visible segment's first moment below that.
     - The internal heat flow adds q (1 − (1 − ε) f) ÷ (ε (1 − f)) to σT⁴, exact in the same
       sphere.
+    - The plains' shadows also absorb 0.0035 × S sin e from sunlit terrain beyond their hollows,
+      which a bowl's sphere omits. It is fitted to the ray-traced surfaces' CO₂ cold traps at
+      σ_s 5.7°, and moves their water cold traps by 1% (science-r09-drainage.md §8.13).
     - Equilibrium at e_max stands in for T_max. Its critical d/D at 110 K matches Hayne et al.'s
       no-conduction curve (their Fig. S8). The fraction's low bias against their Table 1 is mainly
       eq. 26's declination term, which removes shallow bowls' shadow; R09.T7.f replaces eq. 26.
@@ -1746,26 +1755,31 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
     - _The exact bowl._ The transect form matches a direct ray test of the bowl to 0.005 at d/D
       0.1 (sun at 2° and 10°), 0.2 (5°) and 0.3 (20°). The cap, the permanent shadow at most the
       instantaneous shadow at the highest sun, uses it.
-    - _The plains._ The bowl population's instantaneous shadow is a spherical bowl's exact
-      horizontal shadow: Hayne et al.'s eq. 3 applied to each transect at its own aspect ratio,
-      since their eq. 5's similar transects overstate it (science-r09-drainage.md §8.11). The
-      plains' cold-trapping share over 80–90° peaks at a σ_s between 10° and 20°. At σ_s 5.7°,
-      16.7° and 26.6°:
-      - it is within 15% of Smith 1967's at sun elevations up to 4°;
-      - over 4° to 12° it is at most 1.8 times Smith's, wherever Smith's is at least 5%;
-      - its overstatement above 12° is recorded in the Risks.
+    - _The plains._ Plains alone (no craters) under a point star 1.54° from the equator
+      (science-r09-drainage.md §8.13):
+      - their permanent shadow over 80–90° is within 20% of ray-traced Gaussian surfaces' 2.8%,
+        23.6% and 34.8% at σ_s 5.7°, 16.7° and 26.6°; over 70–80° it is within a factor of two of
+        0.08%, 7.8% and 18.8%, and over 60–70° at σ_s 5.7° at most 10⁻⁵;
+      - their instantaneous shadow is 0.35–1.0 of Smith 1967's at sun elevations of 1–12°, wherever
+        Smith's is at least 5%: the recorded cost of matching the permanent one;
+      - under the real Sun (1,407.6 W m⁻², angular radius 0.2711°, heat flow 0.018 W m⁻²) at
+        σ_s 5.7°, their cold traps over 80–90° are within 15% of the ray traces' 2.16% at 110 K,
+        and within a factor of two of their 0.12% at 57 K;
+      - their cold-trapping share over 80–90° peaks at a σ_s between 10° and 20°.
     - _Hayne's bands._ These run with a point star (angular radius 0, Hayne et al.'s Methods D),
-      Hayne et al.'s best fit (20% craters, plains σ_s 5.7°), 110 K and no conduction share.
+      Hayne et al.'s best fit (20% craters, plains σ_s 5.7°), 110 K and no conduction share
+      (science-r09-drainage.md §8.13).
       - With craters of distribution B (d/D mean 0.076, variance 2.3 × 10⁻⁴; Hayne's "σ" read as
-        variances), the cold-trap and permanent-shadow fractions are within a factor of two of
-        Table 1 over 80–90° (6.7%, 8.5%) and the whole Moon (0.10%, 0.15%).
-      - With B, permanent shadow over 70–80° is within a factor of four of 0.5%, since eq. 26
-        understates shallow bowls' shadow away from the pole (science-r09-drainage.md §8.10,
-        recorded). Over 60–70° it is at most 0.01%, and over 50–60° at most 0.001%.
-      - Over 70–80°, the cold traps are at most 1.4 × 10⁻³%, twice Table 1's transient tail of
-        7 × 10⁻⁴%.
-      - With distribution A (mean 0.14, variance 1.6 × 10⁻³), the cold-trap bands are within a
-        factor of two too.
+        variances) and of distribution A (mean 0.14, variance 1.6 × 10⁻³), the cold-trap fraction
+        is within a factor of two of Table 1 over 80–90° (6.7%) and the whole Moon (0.10%).
+      - With both, the cold traps over 70–80° are between 0.016% and 0.14%: from half of Landis et
+        al. 2022's Diviner-mapped 553 km² over 60–80° (0.032% of 70–80°) to twice that taken to all
+        scales. Table 1's 7 × 10⁻⁴% multiplies its shadow by the cold share of all bowls, which at
+        70–80° hold their shadow in the warm ones.
+      - With B, the permanent shadow is within a factor of two of Table 1 over 80–90° (8.5%),
+        70–80° (0.5%) and the whole Moon (0.15%); it is at most 0.01% over 60–70° and 0.001% over
+        50–60°. Table 1's shadow is LROC's times f at d/D 0.1, which B's mean is nearer. A's is
+        recorded in the Risks.
     - _Bounds._
       - Both functions lie in [0, 1], and the fraction never exceeds the permanent shadow.
       - Neither rises with the greatest declination or the angular radius, and the fraction does
@@ -1776,26 +1790,106 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
       between 0.1 and 0.3 of its area, against exact ray geometry's 0.17. A d/D 0.1 bowl there
       keeps none.
 
-- **R09.T7.f The exact bowl's permanent shadow** (a T7 follow-up; science-r09-drainage.md §8.12).
-  After T7.d.
+- **R09.T7.f The exact bowl's permanent shadow** (a T7 follow-up; science-r09-drainage.md §8.12;
+  decision-r09-t7f.md). After T7.d.
   - **The table:** a new `hyperion-fit` task, `bowl_permanent_shadow`, tabulates a spherical
-    bowl's permanent shadow by exact ray geometry. A point is lit when its chord toward any
-    position of the star's upper limb leaves through the rim. The axes are ln(d/D) over
-    0.02–0.5, the colatitude over 0–45°, and the greatest declination plus the star's angular
-    radius over 0–30°. It is emitted with plan 15's manifest and staleness check, as a table or
-    as a closed form that fits the table within 0.02.
+    bowl's permanent shadow by exact ray geometry, as a share of the bowl's plan-view area.
+    - A point is lit when its chord toward any position of the star's upper limb leaves through
+      the rim. Over a year the star's disc sweeps every declination within D = δ + α of the
+      equator, where δ is the greatest declination and α the angular radius. So one axis in D is
+      exact.
+    - The axes scale with the bowl's rim slope θr = 2 atan(2 d/D), which bounds its shadow:
+      ln(d/D) over 0.02–0.5 (17 nodes), the colatitude ÷ θr over 0–1 (41) and D ÷ θr over 0–½
+      (26), each uniform. That is 18,122 values, about 150 kB, under the 500 kB hook.
+    - Its pole row is Hayne et al.'s eq. 6, x₀″² with x₀″ = sin(θr − 2D) ÷ sin θr (their eq. 3 at
+      e = D), held at zero once x₀″ ≤ 0.
+    - It is a fast task that reads only `math`, so its fingerprint is `none`. It is emitted with
+      plan 15's manifest and staleness check, as a table or as a closed form that fits the table
+      within 0.02.
+  - **Where:** `crates/hyperion-surface/src/tables/bowl_permanent_shadow.rs`, in the surface
+    crate's own `tables::MANIFEST`, since `cold_trap` reads it and the surface crate cannot see
+    the sim.
+    - `TableInfo` moves to `hyperion_base::version` and is re-exported at
+      `hyperion_sim::tables::TableInfo`.
+    - `hyperion-fit` gains `TableCrate::Surface` and a direct dependency on `hyperion-surface`.
+      Its `no_runtime_crate_depends_on_hyperion_fit` reads `hyperion-base` and
+      `hyperion-surface` too.
   - **Its use:** `cold_trap::permanent_shadow` and `fraction` read it in place of Hayne et al.
-    2021's eq. 26, for craters and plains, trilinear in its axes. Eq. 26 overstates deep bowls
-    away from the pole, and its declination term removes shallow bowls' shadow, so that a d/D 0.1
-    bowl at 80° keeps 0.031 against an exact 0.222.
-  - _Tests:_
-    - the table matches direct ray tracing to 0.01 at d/D 0.06, 0.1, 0.2 and 0.3 from the pole
-      to 60°;
-    - at the pole it gives Hayne et al.'s eq. 6 exactly, as eq. 8 does to first order;
-    - T7.d's band, Ceres and CO₂ tests re-run against it, with which distribution serves the
-      permanent-shadow bands re-ruled from the result.
-  - It moves no output, since no consumer has landed. _Acceptance:_
-    `cargo test -p hyperion-surface cold_trap`; `cargo test -p hyperion-fit bowl_permanent_shadow`.
+    2021's eq. 26, for craters and plains, trilinear in its axes. T7.d's cap stays as the
+    physical bound.
+    - Outside the table the shadow is zero. None survives once (colatitude + D) ÷ θr ≥ 1, where
+      the highest sun clears the rim slope, or once D ÷ θr ≥ ½, where eq. 6's polar cap closes.
+      Off the pole it closes sooner.
+    - Below d/D 0.02 it reads the 0.02 slice at the bowl's own θr, since the shadow is
+      self-similar in these axes as the slope falls. Above 0.5 it reads 0.5, as T7.d does.
+    - Eq. 26 overstates deep bowls away from the pole, and its declination term removes shallow
+      bowls' shadow. A d/D 0.1 bowl at 80° keeps 0.031 by eq. 26, against an exact 0.224.
+  - **The plains** (science-r09-drainage.md §8.13): with the exact table, T7.d's half-normal
+    plains kept 3.5 times a ray-traced Gaussian surface's permanent shadow over 80–90° at σ_s 5.7°
+    and 12 times over 70–80°, and their shadows were too cold for CO₂. So T7.f scales the plains'
+    bowls to 0.6 of half the surface's slope, and gives their shadows 0.0035 × S sin e from beyond
+    their hollows, both fitted to ray-traced surfaces and labelled.
+  - _Tests_ in `hyperion-fit`:
+    - the committed table is what `run bowl_permanent_shadow --since <current>` writes;
+    - read trilinearly, it matches direct ray tracing to 0.01 at D 1.54°:
+      - for d/D 0.06, 0.1, 0.2 and 0.3, every 5° from the pole to 60°;
+      - for d/D 0.5 at 45° and 30°, and d/D 0.4 at 50°, where deep bowls keep shadow past 45°
+        colatitude;
+    - it matches ray tracing to 0.01 at larger D:
+      - at 4°: d/D 0.2 at 85° and d/D 0.3 at 75°;
+      - at 20°: d/D 0.3 at 80° and d/D 0.5 at 60°;
+      - and a hemisphere at the pole at 30° and 40°;
+    - ray tracing finds no shadow at D ÷ θr = ½, or at (colatitude + D) ÷ θr = 1. It checks d/D
+      0.02, 0.1 and 0.5 at colatitudes 0.1, 0.3 and 0.5 θr;
+    - a d/D 0.005 bowl at colatitude 0.2 θr and D 0.05 θr, read from the 0.02 slice, matches ray
+      tracing to 0.002;
+    - the header's acceptance records the worst error of the read against exact geometry. It
+      covers these points and the cells near the pole for d/D above 0.37, where the error peaks.
+  - _Tests_ in `hyperion-surface`:
+    - the pole row holds eq. 6, held at zero, to 10⁻¹², as eq. 8 does to first order;
+    - each of these reads matches its exact value to 0.005:
+      - 0.2240 at d/D 0.1, 80° and D 1.54°;
+      - 0.2735 at 0.3, 60° and 1.54°;
+      - 0.3217 at 0.5, 45° and 1.54°;
+      - 0.5375 at 0.3, 75° and 4°;
+      - 0.1987 at 0.5, 60° and 20°;
+    - the read is zero at both edges;
+    - T7.d's band and plains tests re-run against it, as T7.d now states them
+      (science-r09-drainage.md §8.13): B serves the permanent-shadow bands, and B and A the cold
+      traps;
+    - _Ceres._ At Ceres's perihelion flux and angular radius (2.5577 au, 0.1042°), with Hayne et
+      al.'s lunar terrain, Ceres's permanent shadow holds Schorghofer et al. 2024's 2,282 km²
+      between B's and A's at a 4° greatest declination, and is under 68 km² with either at 20°;
+    - _CO₂._ Under the real Sun with the lunar conduction share, with B and with A, half the Moon's
+      area below 52.9 K and below 55.6 K lies within 30–408 km²: from half of Schorghofer et al.
+      2021's peak-rate 59 km² to twice their time-averaged 204 km² over 80–90°S (GRL 48,
+      e2021GL095533, Table 1; 10 kg m⁻² Gyr⁻¹, 55.6 K on Bryson et al. 1974's curve). Half, since the
+      model is symmetric and their area is the south's.
+  - It moves no output, since no consumer has landed. The client's surface module does not
+    change, since no export reaches `cold_trap`. _Acceptance:_
+    `cargo test -p hyperion-surface cold_trap`; `cargo test -p hyperion-fit bowl_permanent_shadow`;
+    `just fit-check`; `just gen-surface` leaves `hyperion_surface_bg.wasm` unchanged byte for
+    byte.
+- **R09.T7.g The plains from ray-traced surfaces** (a T7 follow-up; science-r09-drainage.md
+  §8.13; drafted). After T7.f. It is not needed before the 23 → 24 batch, but lands before any
+  caller relies on supervolatile or rough-plains cold traps.
+  - **The table:** a new `hyperion-fit` task, `rough_plains_cold_traps`, ray traces Gaussian
+    surfaces built as Hayne et al. 2021's Methods D builds them:
+    - random phases on the task's own seeded stream;
+    - Fourier amplitudes |k|^−(1+H), H 0.9, between two cut-offs;
+    - heights scaled to a directional RMS slope w; periodic; horizons by rays at fixed azimuths; a
+      point star;
+    - each permanently shadowed pixel's peak absorbed flux from the sunlit terrain it sees.
+
+    Over w 0.05–0.6, the colatitude and D = δ + α, it tabulates the permanent shadow and the
+    shares of it whose peak absorbed flux lies below fixed fractions of S sin e.
+
+  - **Its use:** `cold_trap`'s plains read it in place of the half-normal bowls,
+    `PLAINS_DEPTH_SCALE` and `PLAINS_SURROUNDINGS`. The threshold's flux, less the heat flow's,
+    over S sin e picks the share.
+  - _Tests:_ its instantaneous shadow is within 10% of Smith 1967's at sun elevations up to 4°. It
+    reproduces science-r09-drainage.md §8.13's ray-traced bands within their surfaces' spread.
+    T7.d's band, Ceres and CO₂ tests hold.
 
 Acceptance: `cargo test -p hyperion-surface craters` (T7.a–c and T7.e) and
 `cargo test -p hyperion-surface cold_trap` (T7.d).
@@ -3583,26 +3677,36 @@ re-blessing this plan's payload and coarse goldens in that commit.
   - _For R10's re-validation:_ the classifier puts a cell's cold-trapped share on its shadowed
     ground (crater floors and pole-facing slopes), not uniformly over the cell, and the share is
     exposed ice, not the cold-trap area.
-  - _R09.T7.d's form_ (science-r09-drainage.md §8): the plains are a labelled half-normal
-    bowl-population stand-in (§8.10), and eq. 26 stands in for the exact bowl until R09.T7.f.
-    - At Hayne et al.'s best fit it gives about 0.7 of their cold-trap bands. The low bias is
-      mainly eq. 26's declination term on shallow bowls, not the equilibrium temperature, whose
-      critical d/D matches Hayne et al.'s Fig. S8 (science-r09-drainage.md §8.12). Eq. 26 itself
-      overstates deep bowls equatorward of 75° (up to 1.7 times) and understates shallow ones away
-      from the pole (d/D 0.1 at 80°: 3% against an exact 22%).
-    - Distribution A's deep bowls give 2.4 times their permanent shadow, and B is within a factor of
-      two.
-    - A peak-temperature form understates supervolatile traps (Schorghofer et al.: 3.6 times for
-      CO₂).
+  - _R09.T7.d's form, with T7.f's exact bowl_ (science-r09-drainage.md §8 and §8.13): the plains
+    are labelled half-normal bowls at 0.6 of the surface's half slope, with a fitted share of
+    light from beyond their hollows, and equilibrium at the highest sun stands in for T_max.
+    - At Hayne et al.'s best fit with B, it gives Table 1's permanent shadow within 15% over
+      80–90°, 70–80° and the whole Moon, and its cold traps within 12% over 80–90° and the whole
+      Moon.
+    - Over 70–80° it keeps 0.12% (B) and 0.025% (A) as cold traps. Table 1 has 7 × 10⁻⁴% and
+      Diviner's resolved maps 0.032% (Landis et al. 2022). Table 1 counts the cold share of all
+      bowls (its eq. 32), not each cold bowl's own shadow.
+    - Distribution A's deep bowls keep 1.5, 8 and 3 times Table 1's permanent shadow over
+      80–90°, 70–80° and the whole Moon, and 0.93% of 60–70°, against the LOLA maps' ~0.08%. B
+      keeps 0.003% there, since it has no fresh deep bowls. The Moon's craters lie between them.
+    - Under the real Sun, A's cold traps over 70–80° (0.016%) fall below Diviner's resolved
+      figure.
+    - A peak-temperature form understates supervolatile traps (Schorghofer et al. 2021: 3.5
+      times for CO₂). Spherical bowls cannot make Amundsen's CO₂ traps at 84.5°, where flat
+      floors can, and the model is symmetric where the Moon's north has almost none.
     - The conduction share is lunar, and independent of latitude.
-  - _The plains' instantaneous shadow_ (science-r09-drainage.md §8.11).
-    - The half-normal bowl population, at the surface's mean-square slope, fits Smith 1967 within
-      11% at sun elevations up to 4°.
-    - It overstates as the sun climbs, by up to 1.75 times at σ_s 5.7° near 9.5°, and beyond 12° by
-      up to 2.4 times near the edge of Smith's shadow, since a bowl's rim is steeper than a Gaussian
-      surface's typical facet.
-    - Matching the rim slope instead would halve the plains' mean-square slope and lower every band.
-      It is not adopted.
+  - _The plains against ray-traced Gaussian surfaces_ (science-r09-drainage.md §8.13).
+    - A bowl keeps several times the permanent shadow of a Gaussian surface of its mean-square
+      slope, since its shadow stays put as the star circles. So the plains' bowls are scaled to
+      0.6, which matches the ray traces within 0.87–1.09 over 80–90° at σ_s 5.7–26.6° (D 1.54°),
+      and within 1.00–1.17 at D 4°.
+    - So their instantaneous shadow is 0.38–0.92 of Smith 1967's, and their shadow at the pole
+      itself 1.3–1.6 times the ray traces'. At D 10° and 20° on rough plains they keep up to 2.4
+      and 15 times the ray traces' shadow.
+    - Their shadows take the bowl's temperature plus 0.0035 S sin e from beyond the hollow. At
+      σ_s 5.7° this matches the ray traces' water and CO₂ cold traps. On rougher plains it still
+      overstates them: water by 1.3, 1.9 and 2.8 times at σ_s 11°, 17° and 27°, and CO₂ by 1.4–9
+      times, since a rough surface's shadows see more sunlit terrain. R09.T7.g replaces both fits.
     - Hayne et al.'s eq. 5 overstates a spherical bowl's shadow (off-centre transects are not
       similar), so the exact transect form replaces it.
 - **Deviations in T7.d, as built** (2026-10-10; the inputs ruled in science-r09-drainage.md §8,
@@ -3685,6 +3789,90 @@ re-blessing this plan's payload and coarse goldens in that commit.
     degree 31; a smooth crater-free body; the inputs' refusals, a variance that overflows the
     moment of 1 ÷ γ, a star radius and a declination with no normal square and a subnormal
     emissivity among them; the panics.
+
+- **Deviations in T7.f, as built** (2026-10-12; decision-r09-t7f.md, science-r09-drainage.md
+  §8.12–8.13).
+  - _The axes and the table's home_ are decision-r09-t7f.md's, which replaced the task's text
+    before the build: the plan's degree axes (colatitude 0–45°, δ + α 0–30°) are withdrawn.
+  - _The method._ A floor point is in permanent shadow exactly when every direction toward the rim
+    has a declination above D = δ + α. The cone of the opening is convex and holds the zenith,
+    whose declination 90° − e₀ is above D, so the chord test at the band's upper edge decides it.
+    The fit finds each lattice point's least rim declination once (a 48-point scan and 24
+    golden-section steps), and so serves every D of a row at once. It counts a 256-point lattice
+    to the rim's radius on the half disk, within 2 × 10⁻⁴ of a 1,024-point one. Shares off the pole
+    are rounded to four places, which keeps the file at 147 kB. One run takes 45 s on one thread,
+    so the task is fast, and `check --rerun-fast` reruns it. One and four threads give the same
+    bytes.
+  - _The acceptance line_ gives Δ for δ + α, since a wrapped "+ α" at a line's start would be a
+    Markdown list item to Clippy's `doc_lazy_continuation`. Its figures cover the d/D 0.005 bowl
+    too, and its pole-row figure samples the limb's nodes as well as its cells' centres, eight
+    points a depth-ratio cell: 0.0045, against decision-r09-t7f.md's 0.0046 by a denser sweep (at
+    d/D 0.454 and Δ ÷ θr 0.2). `SHADOW` is a `pub static`, emitted
+    whole as `stellar_fates`'s and `binary_reach`'s large arrays are (`large_const_arrays`). The
+    surface crate's `tables/mod.rs` keeps `#[rustfmt::skip]` on `MANIFEST`, whose one row rustfmt
+    would fold, and `#[allow(clippy::approx_constant)]` on the table's module, as the sim's tables
+    have.
+  - _Public items beyond the text._
+    `cold_trap::bowl_permanent_shadow(depth_ratio, colatitude, limb) -> f64`, one bowl's read with
+    the cap, which the fitting crate's acceptance test reads;
+    it panics on a depth ratio that is not finite and positive, a colatitude outside [0, π/2] or a
+    D outside [0, π) (`tests/panics.rs`). The fitting task's module exposes `Params`, `rim_slope`,
+    `shadow_shares`, `polar_shadow`, `TracedPoint` and `traced_points`, `BowlShadowFit` (with
+    `interpolate`, the read without the cap), `fit`, `figures`, `Figures`, `Worst` and `render`;
+    its ray tracer is the tests'. The surface crate's `tables` imports `TableInfo` privately.
+  - _The integral over d/D._ T7.d's closed-form moments (the exponential integral E₁ and the
+    partial moments of γ⁰, γ¹ and γ⁻¹) and its 40-step crossing go with eq. 26. Each population
+    takes the trapezoid rule on 512 fixed intervals of its own ±8σ window (ln γ for the log-normal,
+    γ for the half-normal), and stops at the cold limit under its interval's chord. The nodes
+    depend on the population alone, so every monotonicity of the tests holds to the bit, and
+    `fraction` ≤ `permanent_shadow` by construction. A Gauss–Legendre composite whose panels
+    followed the cold limit broke both by 10⁻⁴ of themselves. The bands moved by under 10⁻⁵ of
+    themselves against 16 panels of the 16-point rule.
+  - _The flat limit._ A zero colatitude or D reads as zero over any slope, so that γ → 0 at a pole
+    the star never leaves reads the first row's 1, not 0 ÷ 0.
+  - _Kept._ `Body::new`'s refusal of a declination or star radius with no normal square, and
+    `DepthRatios::new`'s of a variance whose moment of 1 ÷ γ overflows, stay as T7.d built them,
+    though E₁ no longer needs them: the API is unchanged.
+  - _Tests replaced._ E₁'s series, the half-normal's moments, the crossing at 80° and the
+    instantaneous cap of a d/D 0.45 bowl at 30° go with the code they tested. The cap's test now
+    holds the read's overshoot of the instantaneous shadow to 0.005 from 10° to the pole, and the
+    capped read never above it. A new test holds the trapezoid rule to each population's mass to
+    10⁻⁵ (its h² f′ ÷ 12 where it stops) and never falling as the cold limit rises. Eq. 8's first
+    order is held as a gap of at most 1.5 (β² + 4) δ², since x₀″ = 1 − βδ − 2δ² + O(δ³). The
+    exact transect test and the plains' cold-trap peak (now at σ_s 16°) are unchanged and pass;
+    §8.13's tests replace the plains' Smith test.
+  - _The client's module_ is byte-identical, 108,985 B before and after (`just gen-surface`).
+  - _The plan text._ T7.f's acceptance closes its last bullet rather than standing as a bullet of
+    its own, so that `plan_task.py` keeps it with T7.f and does not file it under all of T7, as
+    T7.d's "Its tests:" does.
+  - _The plains_ (science-r09-drainage.md §8.13): the half-normal's scale is 0.6 × tan σ_s ÷ 2
+    (`PLAINS_DEPTH_SCALE`), and the plains' shadows absorb 0.0035 × S sin e more
+    (`PLAINS_SURROUNDINGS`, through `coldest_limit`'s new `surroundings` argument, so `fraction`
+    takes one cold limit for the craters and one for the plains). Both are private; the API is
+    unchanged. §8.11's Smith test is replaced by the ray-traced plains' tests, and the plains'
+    water peak moves to σ_s 16°.
+  - _The bands as built_, which reproduce §8.13's figures to the digits it quotes. Point Sun,
+    Hayne et al.'s best fit, 110 K, no conduction share:
+
+    | band                   | Table 1   | B           | A      |
+    | ---------------------- | --------- | ----------- | ------ |
+    | cold traps 80–90°      | 6.7%      | 6.99%       | 4.73%  |
+    | cold traps 70–80°      | 7 × 10⁻⁴% | 0.118%      | 0.025% |
+    | cold traps, whole Moon | 0.10%     | 0.112%      | 0.073% |
+    | PSR 80–90°             | 8.5%      | 7.42%       | 12.7%  |
+    | PSR 70–80°             | 0.5%      | 0.452%      | 4.10%  |
+    | PSR 60–70°             | ∼0        | 0.0031%     | 0.93%  |
+    | PSR 50–60°             | ∼0        | 5.1 × 10⁻⁶% | 0.137% |
+    | PSR, whole Moon        | 0.15%     | 0.133%      | 0.461% |
+    - The real Sun (1,407.6 W m⁻², α 0.2711°, q 0.018 W m⁻², conduction share 0.05) gives water
+      cold traps over 80–90° and the whole Moon of 5.84% and 0.092% with B, and 3.87% and 0.059%
+      with A, inside P14.T51.f's 1.6–13% and 0.024–0.2%.
+    - CO₂ under the real Sun, half the Moon's area: B 86.9 km² at 52.9 K and 198.1 km² at 55.6 K,
+      A 85.3 and 190.9 km², inside 30–408 km²; at the rule's 57 K, B 280 and A 266 km² (recorded).
+    - Ceres at 4°: B 1,050 km² ≤ 2,282 ≤ A 7,558 km²; at 20°, B 0 and A 52.7 km².
+    - The plains alone keep 2.79%, 22.9% and 38.1% of 80–90° at σ_s 5.7°, 16.7° and 26.6°, and
+      0.049%, 6.32% and 17.3% of 70–80°; their instantaneous shadow is 0.383–0.915 of Smith's;
+      under the real Sun at σ_s 5.7° they trap 2.27% of 80–90° below 110 K and 0.121% below 57 K.
 
 - **Rulings of "main" for T10's findings** (2026-10-10).
   - `for_body`'s missing arguments, the record's time and a moon's planet's orbit, are settled by

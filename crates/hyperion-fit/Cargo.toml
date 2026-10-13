@@ -13,10 +13,12 @@ publish.workspace = true
 # `parallel::map_reduce_chunks`, whose reduction is in index order. `serde_json` reads and writes
 # the atmosphere reference's cases and references, the client's JSON fixtures (plan R08,
 # R08.T12.a); it computes nothing either. The sim's `testing` feature gives the fits plan 09's
-# copy of the Baumgardt–Hilker catalogue (plan 15's Consumes).
+# copy of the Baumgardt–Hilker catalogue (plan 15's Consumes). The surface crate holds tables of
+# its own (R09.T7.f), whose `tables::MANIFEST` the staleness check reads.
 [dependencies]
 clap.workspace = true
 hyperion-sim = { workspace = true, features = ["testing"] }
+hyperion-surface.workspace = true
 rayon.workspace = true
 serde.workspace = true
 serde_json.workspace = true

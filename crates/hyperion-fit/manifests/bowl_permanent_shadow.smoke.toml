@@ -1,0 +1,14 @@
+# The bowl's permanent shadow's smoke run, for the crate's tests: a 3 × 5 × 4 table on a lattice of
+# 24 points to the rim's radius, well under a second.
+task = "bowl_permanent_shadow"
+
+[params]
+depth_ratio_min = 0.02
+depth_ratio_max = 0.5
+depth_ratio_nodes = 3
+colatitude_nodes = 5
+limb_nodes = 4
+grid = 24
+scan = 24
+refine = 12
+decimals = 4

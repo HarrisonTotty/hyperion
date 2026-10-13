@@ -62,6 +62,17 @@ provisional = false
 acceptance = "672 cells × 105 age bins from 33067 samples and 385968 tracks; stored radii 0.1479 to 6606.9 R☉; 214 cells may all be on their main sequence at 10¹⁰ years; 286 cells hold a sudden death, the lightest from 5.548 M☉; the slow test `the_reach_table_bounds_dense_tracks` checks the bound against dense tracks"
 
 [[table]]
+name = "bowl_permanent_shadow"
+path = "bowl_permanent_shadow.rs"
+task = "bowl_permanent_shadow"
+revision = 0
+inputs_sha256 = "fa7e02f4e36e54002fde50df637388e1efd7bd7353151c4448f9db03d408e1bd"
+body_sha256 = "605f4be2d23f9147f6c2cc95a793e776e8c35da59ff4cd797b2522548fbc277a"
+since_generator_version = 21
+provisional = false
+acceptance = "17 × 41 × 26 nodes from 680 bowls of 102946 lattice points each (half disk), Δ standing for δ + α; at the pole the lattice gives eq. 6 within 0.00019; read trilinearly against exact geometry on the lattice, within 0.0030 (d/D 0.300, 89.00°, Δ 1.54°: 0.9306 against 0.9337) at R09.T7.f's points, every degree from the pole to 60° for d/D 0.06, 0.1, 0.2 and 0.3 at Δ of 0–30° and a d/D 0.005 bowl (mean 0.00041), within 0.0036 (d/D 0.452, 88.95°, Δ 19.38°: 0.5165 against 0.5129) at the cell centres near the pole for d/D above 0.37, where the error peaks, and within 0.0045 of eq. 6 on the pole's row between its depth-ratio nodes"
+
+[[table]]
 name = "chabrier"
 path = "chabrier.rs"
 task = "chabrier"

@@ -56,8 +56,10 @@ impl TaskClass {
 
 /// The crate whose `src/tables/` holds a table, and whose `tables::MANIFEST` lists it.
 ///
-/// Every table is the sim's until the crate split moves the sky's twelve, with their `MANIFEST`
-/// rows, into `hyperion-sky` (CS.T2); their tasks then name [`TableCrate::Sky`].
+/// A table is the sim's unless its task says otherwise. The crate split moves the sky's twelve,
+/// with their `MANIFEST` rows, into `hyperion-sky` (CS.T2), and their tasks then name
+/// [`TableCrate::Sky`]. The surface crate's tables, which its `cold_trap` reads for the sim and
+/// which no export of the client's module reaches, name [`TableCrate::Surface`] (R09.T7.f).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum TableCrate {
     /// `hyperion-sim`, which also holds every table no registered task makes.
@@ -65,18 +67,21 @@ pub enum TableCrate {
     Sim,
     /// `hyperion-sky`.
     Sky,
+    /// `hyperion-surface`.
+    Surface,
 }
 
 impl TableCrate {
     /// Every crate that holds tables, in the order the check reports them.
-    pub const ALL: [Self; 2] = [Self::Sim, Self::Sky];
+    pub const ALL: [Self; 3] = [Self::Sim, Self::Sky, Self::Surface];
 
-    /// The crate's name in Rust paths: `hyperion_sim` or `hyperion_sky`.
+    /// The crate's name in Rust paths: `hyperion_sim`, `hyperion_sky` or `hyperion_surface`.
     #[must_use]
     pub const fn rust_name(self) -> &'static str {
         match self {
             Self::Sim => "hyperion_sim",
             Self::Sky => "hyperion_sky",
+            Self::Surface => "hyperion_surface",
         }
     }
 }
@@ -133,12 +138,13 @@ pub trait FitTask: Sync + std::fmt::Debug {
 }
 
 /// Every task, in name order. A new task is one more entry (see the module's documentation).
-pub static REGISTRY: [&dyn FitTask; 33] = [
+pub static REGISTRY: [&dyn FitTask; 34] = [
     &tasks::binary_cooling_floor::BinaryCoolingFloorTask,
     &tasks::binary_pair_light::C_TASK,
     &tasks::binary_pair_light::D_TASK,
     &tasks::binary_pair_light::E_TASK,
     &tasks::binary_reach::BinaryReachTask,
+    &tasks::bowl_permanent_shadow::BowlPermanentShadowTask,
     &tasks::chabrier::ChabrierTask,
     &tasks::cluster_bh::ClusterBhTask,
     &tasks::cluster_retention::ClusterRetentionTask,
@@ -254,6 +260,7 @@ mod tests {
                 "binary_pair_light_d",
                 "binary_pair_light_e",
                 "binary_reach",
+                "bowl_permanent_shadow",
                 "chabrier",
                 "cluster_bh",
                 "cluster_retention",
@@ -289,14 +296,17 @@ mod tests {
     }
 
     /// Each task names the crate its table lives in: the sky's for the tasks listed here, which
-    /// are none until the crate split's move (CS.T2) gives it the sky's twelve, and the sim's for
-    /// every other.
+    /// are none until the crate split's move (CS.T2) gives it the sky's twelve, the surface
+    /// crate's for the bowl's permanent shadow, and the sim's for every other.
     #[test]
     fn each_task_names_its_tables_crate() {
         let sky: [&str; 0] = [];
+        let surface = ["bowl_permanent_shadow"];
         for task in registry() {
             let expected = if sky.contains(&task.name()) {
                 TableCrate::Sky
+            } else if surface.contains(&task.name()) {
+                TableCrate::Surface
             } else {
                 TableCrate::Sim
             };

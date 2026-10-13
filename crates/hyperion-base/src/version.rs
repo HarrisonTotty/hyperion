@@ -1,4 +1,5 @@
-//! The generator version, half of what identifies a universe.
+//! The generator version, half of what identifies a universe, and [`TableInfo`], the record by
+//! which a fitted table belongs to it.
 //!
 //! A universe is `(seed, generator_version)`. Any change that alters generated output bumps
 //! [`GENERATOR_VERSION`], and the golden files are regenerated with `just bless` in the same
@@ -48,6 +49,24 @@ impl fmt::Display for GeneratorVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+/// What the fitting toolchain records of one fitted table: its revision and the generator version
+/// it took effect at (plan 15, P15.T2).
+///
+/// Each crate that holds fitted tables lists them in its own `tables::MANIFEST` of these, which
+/// `hyperion-fit` writes from its lock file and `hyperion-fit check` compares with it. It lives
+/// here, beneath every such crate, so that the sim's tables and the surface crate's share one type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TableInfo {
+    /// The table's name: the task that makes it, and in general its module's.
+    pub name: &'static str,
+    /// The table's own revision, from its header.
+    pub revision: u32,
+    /// The [`GENERATOR_VERSION`] at which this revision took effect.
+    pub since_generator_version: u32,
+    /// Whether a scratch stand-in is in place.
+    pub provisional: bool,
 }
 
 #[cfg(test)]

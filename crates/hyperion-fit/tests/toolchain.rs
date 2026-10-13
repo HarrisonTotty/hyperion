@@ -570,7 +570,13 @@ fn no_runtime_crate_depends_on_hyperion_fit() {
         }
     }
     let crates = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
-    for name in ["hyperion-sim", "hyperion-protocol", "hyperion-server"] {
+    for name in [
+        "hyperion-base",
+        "hyperion-sim",
+        "hyperion-surface",
+        "hyperion-protocol",
+        "hyperion-server",
+    ] {
         let text = fs::read_to_string(format!("{crates}/{name}/Cargo.toml")).unwrap();
         let manifest: toml::Value = toml::from_str(&text).unwrap();
         assert!(

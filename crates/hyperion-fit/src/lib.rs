@@ -5,11 +5,12 @@
 //! the potential, the cooling tables of planets and white dwarfs, the kick law's rank table, and
 //! later the samplers and constants of plan 15. This crate runs those fits and emits each result as
 //! Rust source, committed under the `src/tables/` of the crate that reads it
-//! ([`TableCrate`](task::TableCrate); `crates/hyperion-sim/src/tables/` for every table until the
-//! crate split moves the sky's) with a header naming the tool, its inputs and its revision (plan
-//! 15).
+//! ([`TableCrate`](task::TableCrate); `crates/hyperion-sim/src/tables/` for every table but the
+//! surface crate's, until the crate split moves the sky's) with a header naming the tool, its
+//! inputs and its revision (plan 15).
 //!
-//! Nothing depends on this crate: it depends on `hyperion-sim`, never the reverse. Every
+//! Nothing depends on this crate: it depends on `hyperion-sim` and `hyperion-surface`, never the
+//! reverse. Every
 //! transcendental it evaluates goes through [`hyperion_sim::math`], every quadrature through
 //! [`hyperion_sim::galaxy::quad`], and a fit's output is a pure function of its manifest, whatever
 //! the thread count ([`parallel`]), so a table comes out bit for bit the same on every platform.

@@ -77,18 +77,9 @@ pub mod stripping;
 pub mod type_ia_delay;
 pub mod wd_cooling;
 
-/// What the fitting toolchain records of one fitted table.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct TableInfo {
-    /// The table's name: the task that makes it, and in general its module's.
-    pub name: &'static str,
-    /// The table's own revision, from its header.
-    pub revision: u32,
-    /// The [`GENERATOR_VERSION`](crate::GENERATOR_VERSION) at which this revision took effect.
-    pub since_generator_version: u32,
-    /// Whether a scratch stand-in is in place.
-    pub provisional: bool,
-}
+/// What the fitting toolchain records of one fitted table, shared with the surface crate's
+/// `tables::MANIFEST` (R09.T7.f).
+pub use hyperion_base::version::TableInfo;
 
 /// The fitted tables, in name order; hand-entered constants such as [`gauss_legendre`] are not
 /// listed.

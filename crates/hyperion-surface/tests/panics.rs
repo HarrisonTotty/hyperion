@@ -571,8 +571,8 @@ fn a_tributary_rise_of_negative_steepness_is_refused() {
 mod cold_trap {
     use hyperion_base::units::{Kelvin, Radians, WattsPerSquareMetre};
     use hyperion_surface::cold_trap::{
-        Body, BodyParts, DepthRatios, Terrain, TerrainParts, fraction, permanent_shadow,
-        shadow_temperature,
+        Body, BodyParts, DepthRatios, Terrain, TerrainParts, bowl_permanent_shadow, fraction,
+        permanent_shadow, shadow_temperature,
     };
     #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
     use wasm_bindgen_test::wasm_bindgen_test as test;
@@ -627,6 +627,24 @@ mod cold_trap {
     #[should_panic(expected = "a star's elevation must be in [0, π/2]")]
     fn a_star_below_the_horizon_is_refused() {
         let _ = shadow_temperature(0.2, Radians::new(-0.1), &body());
+    }
+
+    #[test]
+    #[should_panic(expected = "a bowl's depth ratio must be finite and positive")]
+    fn a_bowl_of_no_depth_is_refused() {
+        let _ = bowl_permanent_shadow(0.0, Radians::new(0.1), Radians::new(0.03));
+    }
+
+    #[test]
+    #[should_panic(expected = "a colatitude must be in [0, π/2]")]
+    fn a_colatitude_past_the_equator_is_refused() {
+        let _ = bowl_permanent_shadow(0.2, Radians::new(1.6), Radians::new(0.03));
+    }
+
+    #[test]
+    #[should_panic(expected = "a star's declination and radius must sum to [0, π)")]
+    fn a_band_of_negative_width_is_refused() {
+        let _ = bowl_permanent_shadow(0.2, Radians::new(0.1), Radians::new(-0.1));
     }
 }
 

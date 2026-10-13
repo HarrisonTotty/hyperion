@@ -127,6 +127,11 @@ pub struct TableInfo {
 pub const MANIFEST: &[TableInfo];       // fitted tables only, in name order
 ```
 
+`TableInfo` is `hyperion_base::version::TableInfo` since R09.T7.f, re-exported here. A crate
+beneath the sim lists its own fitted tables in its own `tables::MANIFEST` of the same type: the
+surface crate does, for `cold_trap`'s `bowl_permanent_shadow`. `hyperion-fit` compares every such
+`MANIFEST` with `tables.lock`, through `TableCrate` (decision-r09-t7f.md).
+
 | Module                          | Shape owned by | Consumer    | Contents                                                  |
 | ------------------------------- | -------------- | ----------- | --------------------------------------------------------- |
 | `tables::mge`                   | plan 02        | 02, 08      | `MGE_EXP`, `MGE_BAR`; this plan adds `MGE_BOXY`           |

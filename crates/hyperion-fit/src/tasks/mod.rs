@@ -5,6 +5,7 @@
 pub mod binary_cooling_floor;
 pub mod binary_pair_light;
 pub mod binary_reach;
+pub mod bowl_permanent_shadow;
 pub mod chabrier;
 pub mod cluster_bh;
 pub mod cluster_retention;

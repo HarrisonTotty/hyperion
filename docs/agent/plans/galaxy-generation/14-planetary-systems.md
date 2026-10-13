@@ -5619,8 +5619,9 @@ Snapshot path, `planetary/chem/`.
     110 K for H₂O).
     It is one rule for every species. For CO₂ it gives about 57 K: Clausius–Clapeyron from the
     194.7 K sublimation point at 25–27 kJ mol⁻¹ gives 55.5–58.4 K, and T49.b's curve decides.
-    Schorghofer, Williams and Paige's ~51 K (LPSC 2021, 1389) is their stricter 10 kg m⁻² Gyr⁻¹, a
-    delivery rate, on their own extrapolated curve. A loss criterion scaled by each species'
+    Schorghofer et al. 2021's stricter 10 kg m⁻² Gyr⁻¹, a delivery rate, is 55.6 K on Bryson et
+    al. 1974's vapour pressures (GRL 48, e2021GL095533, supplement; the LPSC 2021 abstract's "about
+    51 K" is superseded), and 52.9–55.7 K by Clausius–Clapeyron. A loss criterion scaled by each species'
     delivery waits for a delivery budget (with T55.c).
   - **The exposed fraction f_x:** drawn once a body, log-uniform in [0.016, 0.45], on a stream this
     task chooses under the determinism rules, so that no existing value moves. The bounds are
@@ -5639,17 +5640,18 @@ Snapshot path, `planetary/chem/`.
       ~3.2% of 80–90°) to twice Hayne et al.'s point-source 0.10% (and 6.7%), since the Sun's disk
       lowers the closed form by about a fifth (R09.T7.d tests Hayne's bands at a point source);
     - its exposed water at f_x = 0.035 is within a factor of two of Li et al.'s;
-    - at the temperature T49.b's curve gives for Schorghofer et al.'s 10 kg m⁻² Gyr⁻¹, the Moon's
-      CO₂ cold traps lie within 40–572 km²: from half of their peak-temperature criterion's 79 km²
-      to twice their time-averaged 286 km² (LPSC 2021, 1389; "roughly 200 km²" in GRL 48,
-      e2021GL095533). This form is a peak-temperature one, which their comparison finds 3.6 times
-      too small for CO₂ (science-r09-drainage.md §8.12). The area at the rule's own threshold is
-      recorded, not asserted;
+    - at the temperature T49.b's curve gives for Schorghofer et al.'s 10 kg m⁻² Gyr⁻¹, half the
+      Moon's CO₂ cold-trap area lies within 30–408 km². The bounds run from half of their
+      peak-rate 59 km² to twice their time-averaged 204 km², over 80–90°S on 500 m Diviner pixels
+      (GRL 48, e2021GL095533, Table 1). Half, since the model is symmetric and their area is the
+      south's. This form is a peak-temperature one, which their comparison finds 3.5 times too small
+      for CO₂ (science-r09-drainage.md §8.13). The area at the rule's own threshold is recorded,
+      not asserted;
     - Ceres's permanent shadow (`cold_trap::permanent_shadow`, at Ceres's flux and angular radius,
       with Hayne et al.'s lunar terrain: 20% craters, plains σ_s 5.7°) holds Schorghofer et al.
       2024's 2,282 km² at a 4° greatest declination between craters of distribution B and A. At
       20° it is under 3% of that, 68 km², with either: their "essentially zero"
-      (science-r09-drainage.md §8.10);
+      (science-r09-drainage.md §8.10 and §8.13);
     - an airless body at 30° obliquity has none;
     - a smooth lunar pole lays no zonal cap, and a body whose zonal annual maximum is below the
       threshold everywhere lays one over its whole surface.

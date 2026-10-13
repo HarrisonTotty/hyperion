@@ -17,8 +17,9 @@
 //! `Synthesiser` returning the base elevation, the coarse cells interpolated over the sphere
 //! (`synth::interp`), with the header's spectrum, and beside it the structural octaves
 //! (`synth::relief`) and the channel network (`synth::channels`) that the assembly will add to it;
-//! the cold-trap fraction that plan 14 and R09.T13.f share ([`cold_trap`]); and, for tests,
-//! synthetic fields (`testing`, feature `testing`).
+//! the cold-trap fraction that plan 14 and R09.T13.f share ([`cold_trap`]), with the fitted table
+//! of a bowl's permanent shadow it reads ([`tables`]); and, for tests, synthetic fields
+//! (`testing`, feature `testing`).
 //!
 //! # The contract of the height function
 //!
@@ -64,6 +65,7 @@ pub mod patch;
 pub mod spheroid;
 pub mod substance_key;
 pub mod synth;
+pub mod tables;
 pub mod tags;
 pub mod test_planet;
 #[cfg(any(test, feature = "testing"))]

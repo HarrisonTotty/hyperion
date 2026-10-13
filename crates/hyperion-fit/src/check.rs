@@ -25,8 +25,10 @@ use crate::task::{FitTask, TableCrate, TaskClass, table_crate_of};
 
 /// The repository's `tables::MANIFEST`s, one for each crate that holds tables: what `check` and
 /// `list` compare with `tables.lock`. The crate split's move (CS.T2) adds the sky's.
-pub const REPOSITORY_MANIFESTS: &[(TableCrate, &[TableInfo])] =
-    &[(TableCrate::Sim, hyperion_sim::tables::MANIFEST)];
+pub const REPOSITORY_MANIFESTS: &[(TableCrate, &[TableInfo])] = &[
+    (TableCrate::Sim, hyperion_sim::tables::MANIFEST),
+    (TableCrate::Surface, hyperion_surface::tables::MANIFEST),
+];
 
 /// What is wrong with one table.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]

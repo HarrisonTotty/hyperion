@@ -818,6 +818,8 @@ pub struct Workspace {
     sim_tables_dir: PathBuf,
     /// The sky's `src/tables/` directory, which the crate split's move (CS.T2) creates.
     sky_tables_dir: PathBuf,
+    /// The surface crate's `src/tables/` directory.
+    surface_tables_dir: PathBuf,
     /// The fitting crate's `manifests/` directory.
     pub manifests_dir: PathBuf,
     /// The fitting crate's `data/` directory.
@@ -835,6 +837,7 @@ impl Workspace {
         Self {
             sim_tables_dir: fit.join("../hyperion-sim/src/tables"),
             sky_tables_dir: fit.join("../hyperion-sky/src/tables"),
+            surface_tables_dir: fit.join("../hyperion-surface/src/tables"),
             manifests_dir: fit.join("manifests"),
             data_dir: fit.join("data"),
             lock_path: fit.join("tables.lock"),
@@ -842,12 +845,13 @@ impl Workspace {
     }
 
     /// A workspace laid out under `root` as the repository is: `tables/` (the sim's),
-    /// `sky-tables/`, `manifests/`, `data/` and `tables.lock`.
+    /// `sky-tables/`, `surface-tables/`, `manifests/`, `data/` and `tables.lock`.
     #[must_use]
     pub fn under(root: &Path) -> Self {
         Self {
             sim_tables_dir: root.join("tables"),
             sky_tables_dir: root.join("sky-tables"),
+            surface_tables_dir: root.join("surface-tables"),
             manifests_dir: root.join("manifests"),
             data_dir: root.join("data"),
             lock_path: root.join("tables.lock"),
@@ -860,6 +864,7 @@ impl Workspace {
         match table_crate {
             TableCrate::Sim => &self.sim_tables_dir,
             TableCrate::Sky => &self.sky_tables_dir,
+            TableCrate::Surface => &self.surface_tables_dir,
         }
     }
 
