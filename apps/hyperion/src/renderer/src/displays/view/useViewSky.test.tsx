@@ -10,6 +10,7 @@ import { autoAt, manualAt } from "../../test/exposureFixtures";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
 import {
+  FIXTURE_BAND_CD_M2,
   type FixtureStar,
   InThreadSkyWorker,
   nearestFirstCensus,
@@ -130,17 +131,18 @@ const ONE_STAR: ReadonlyArray<FixtureStar> = [{ direction: [0, 0, -1], distanceL
 
 /**
  * Plays the server's answer to the latest sky request, with `stars` listed, and lets the decode
- * settle.
+ * settle; its band texels lit at `luminanceOf` their index where that is given.
  */
 async function answerSky(
   socket: FakeWebSocket,
   stars: ReadonlyArray<FixtureStar> = ONE_STAR,
+  luminanceOf?: (texel: number) => number,
 ): Promise<void> {
   const sent = socket.requestsOfKind("sky").at(-1);
   if (sent === undefined) {
     throw new Error("no sky was asked");
   }
-  const payload = skyPayload(stars, 2, null);
+  const payload = skyPayload(stars, 2, null, luminanceOf);
   await act(async () => {
     socket.serverSendsBinary(binaryFrame(sent.id, 0, 1, [...payload]));
     socket.serverResponds(sent.id, {
@@ -182,10 +184,10 @@ describe("a camera view's sky", () => {
     { level: "AUTO −10", exposure: autoAt(-10) },
     { level: "AUTO 0", exposure: autoAt(0) },
     { level: "AUTO 15", exposure: autoAt(15) },
-  ])("asks at the camera's deepest limit, V 10.06 at 60°, under $level", ({ exposure }) => {
+  ])("asks at the camera's black-sky limit, V 10.15 at 60°, under $level", ({ exposure }) => {
     const { socket } = renderViewSky(exposure);
     const limitV = socket.requestsOfKind("sky").at(-1)?.body.camera_limit_v ?? Number.NaN;
-    expect(Math.round(limitV * 100) / 100).toBe(10.06);
+    expect(Math.round(limitV * 100) / 100).toBe(10.15);
   });
 
   it("is not asked again as AUTO steps and MAN is entered once it is held", async () => {
@@ -210,14 +212,56 @@ describe("a camera view's sky", () => {
     expect([drawn === null, kept.filter((same) => !same).length]).toEqual([false, 0]);
   });
 
-  it("labels the camera's limit at the exposure shown: V 10.1 at MAN −1, V 2.6 at AUTO 15", async () => {
+  it("labels the camera's limit at the exposure shown over the band (μ 21.6): V 9.6 at MAN −1, V 2.6 at AUTO 15", async () => {
     const { result, rerender, socket } = renderViewSky(DEFAULT_EXPOSURE);
     await answerSky(socket);
     const atDefault = result.current.label("alone")?.value;
     rerender({ exposure: autoAt(15) });
     expect([atDefault, result.current.label("alone")?.value]).toEqual([
-      "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED",
+      "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED",
       "V 2.6 mag CAM · CLUSTERS: NOT YET MODELLED",
+    ]);
+  });
+
+  it("labels the darkest texel's limit over the whole sky, the same wherever the camera points", async () => {
+    // The fixture's band at μ 21.6 but its last texel, on the −Z face, at μ 25.25, whose limit at
+    // 60° and the default exposure, V 10.12, is the label's whether it lies ahead or behind.
+    const darkest = 6 * 2 * 2 - 1;
+    const pointed = (orientation: ViewRun["camera"]["pose"]["orientation"]): ViewRun => ({
+      ...RUN,
+      camera: { ...RUN.camera, move: null, pose: { ...RUN.camera.pose, orientation } },
+    });
+    const runs = [
+      pointed({ w: 1, x: 0, y: 0, z: 0 }),
+      pointed({ w: 0, x: 0, y: 1, z: 0 }),
+      pointed({ w: Math.SQRT1_2, x: Math.SQRT1_2, y: 0, z: 0 }),
+    ];
+    const { result, rerender } = renderHook(
+      ({ run }: { readonly run: ViewRun }) =>
+        useViewSky({
+          universe: UNIVERSE,
+          place: chartedPlace(),
+          run,
+          exposure: DEFAULT_EXPOSURE,
+          widthPx: 1_920,
+          setting: "high",
+        }),
+      { initialProps: { run: runs[0] ?? RUN }, wrapper: ServerLinkHarness },
+    );
+    const socket = FakeWebSocket.latest();
+    act(() => {
+      socket.serverWelcomes();
+    });
+    await answerSky(socket, ONE_STAR, (texel) =>
+      texel === darkest ? 10 ** ((12.58 - 25.25) / 2.5) : FIXTURE_BAND_CD_M2,
+    );
+    const labels = runs.map((run) => {
+      rerender({ run });
+      return result.current.label("alone")?.value;
+    });
+    expect([labels, socket.requestsOfKind("sky").length]).toEqual([
+      runs.map(() => "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED"),
+      1,
     ]);
   });
 });
@@ -284,10 +328,10 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
     expect([result.current.awaiting, streaming, result.current.label("alone")]).toEqual([
       false,
       {
-        value: "V 10.1 mag CAM · BEYOND 500 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
+        value: "V 9.6 mag CAM · BEYOND 500 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
         field: { text: "500 ly", widthCh: 12, stale: false },
       },
-      { value: "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED" },
+      { value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED" },
     ]);
   });
 
@@ -296,10 +340,10 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
     await replyAt(socket, [2_000, 4_000, 4_000], false);
     expect([result.current.label("beside"), result.current.label("beside-unshown")]).toEqual([
       {
-        value: "V 10.1 mag CAM · BEYOND 2000 ly: STREAMING",
+        value: "V 9.6 mag CAM · BEYOND 2000 ly: STREAMING",
         field: { text: "2000 ly", widthCh: 12, stale: false },
       },
-      { value: "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED" },
+      { value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED" },
     ]);
   });
 
@@ -310,7 +354,7 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
       socket.close();
     });
     expect(result.current.label("alone")).toEqual({
-      value: "V 10.1 mag CAM · BEYOND 2000 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
+      value: "V 9.6 mag CAM · BEYOND 2000 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
       field: { text: "2000 ly", widthCh: 12, stale: true },
     });
   });
@@ -323,11 +367,11 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
       socket.close();
     });
     const value =
-      "V 10.1 mag CAM · BEYOND 1000 ly: STREAMING · DISTANT STARS: DETAIL LIMITED · CLUSTERS: NOT YET MODELLED";
+      "V 9.6 mag CAM · BEYOND 1000 ly: STREAMING · DISTANT STARS: DETAIL LIMITED · CLUSTERS: NOT YET MODELLED";
     expect([live, result.current.label("alone"), result.current.label("instrument")]).toEqual([
       { value, field: { text: "1000 ly", widthCh: 12, stale: false } },
       { value, field: { text: "1000 ly", widthCh: 12, stale: true } },
-      { value: "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED" },
+      { value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED" },
     ]);
   });
 
@@ -338,10 +382,10 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
     await replyAt(socket, [null, null, null], true, 5.0);
     expect([streaming, result.current.label("beside")]).toEqual([
       {
-        value: "V 10.1 mag CAM · BEYOND 1000 ly: STREAMING",
+        value: "V 9.6 mag CAM · BEYOND 1000 ly: STREAMING",
         field: { text: "1000 ly", widthCh: 12, stale: false },
       },
-      { value: "V 10.1 mag CAM · DISTANT STARS: DETAIL LIMITED" },
+      { value: "V 9.6 mag CAM · DISTANT STARS: DETAIL LIMITED" },
     ]);
   });
 });
@@ -413,7 +457,7 @@ describe("a view's sky asked again within its arrival (R06.T12.b)", () => {
     });
   }
 
-  const FINAL_LINE = { value: "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED" };
+  const FINAL_LINE = { value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED" };
 
   it("keeps the held sky's line, neither PENDING nor STREAMING, through a deeper re-ask", async () => {
     const { rerender, result, socket } = renderArriving({ system: FIXTURE_SYSTEM, setting: "low" });
@@ -455,11 +499,11 @@ describe("a view's sky asked again within its arrival (R06.T12.b)", () => {
     await replyAt(next, [1_000, 1_000, 1_000]);
     expect([behind, result.current.label("alone")]).toEqual([
       {
-        value: "V 10.1 mag CAM · BEYOND 500 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
+        value: "V 9.6 mag CAM · BEYOND 500 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
         field: { text: "500 ly", widthCh: 12, stale: false },
       },
       {
-        value: "V 10.1 mag CAM · BEYOND 1000 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
+        value: "V 9.6 mag CAM · BEYOND 1000 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
         field: { text: "1000 ly", widthCh: 12, stale: false },
       },
     ]);

@@ -222,7 +222,7 @@ export function skyLineNotes(
  * The `STARS` line's reading, after its label, once a reply of the sky is held: the limit, then
  * {@link skyLineNotes}, each after a middle dot.
  *
- * @param limitV - The view's limit: a camera's, or the eye's deepest over the view.
+ * @param limitV - The view's limit, quoted at its deepest over the sky: a camera's or the eye's.
  * @param gaps - The response's `not_modelled`.
  * @param standing - Where the line stands and the edge reached. The stale mark the edge takes while
  *   the link is down is the label block's, which sets the edge in its field.

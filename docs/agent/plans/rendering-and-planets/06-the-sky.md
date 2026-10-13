@@ -3500,6 +3500,8 @@ it needs no bump.
   texels in `f64` (`bandIlluminanceLx`, three channels a texel). `photometry.ts` exports
   `unitLuminanceRgb` (the wire's chromaticity to unit luminance by Rec. 709's weights),
   `starIlluminanceRgbLx` and `starPixelLuminanceRgb`. A black background (0 cd/m²) is allowed and reads as read noise alone.
+  _Since R06.T13.i the camera's variant holds `limitAt(x, y, z)` too, its band texel's limit, in
+  place of `limitV` (T13.i's record, after T13.g's)._
 - **Deviations in T13.f, as built (2026-10-03).** `view/sky/setting.ts` exports `SkySettings`
   (`faceSizePx`, `spriteBudget`, `nMax`, `rebakeShiftPx`), `HIGH_SKY` (3,072, 4,096, 3 × 10⁵,
   0.1 px) and `LOW_SKY` (1,024, 2,048, 10⁵, 0.1 px), wired as R05's `ViewSettings.sky` (appended
@@ -3626,7 +3628,8 @@ cameras)`, true only through `partial`, `limits` or `parallax` (an exhaustive sw
   labelled only for the system it was asked about while that system's position is known; otherwise
   the interim field and its labels stand. `just test-render` compiles `STAR SPRITES HDR`
   (2026-10-03, exit 0). _Since 2026-10-13 the sky is asked from the camera's galactic position,
-  not the barycentre (the entry after this one)._
+  not the barycentre (the entry after this one), and a camera view culls by its band texel's limit
+  and asks the black-sky limit, with no `DARK_SKY_CD_M2` (T13.i's record, after T13.g's)._
 - **The view asks from its camera (2026-10-13, a correction to T13.c; T12.b's open point 1).**
   T13.c's `useViewSky` asked the sky from `barycentreAt(place, t)` alone, where T12 has the
   observer the barycentre plus the camera's offset, while the parallax rule measures the camera
@@ -3789,6 +3792,70 @@ cube, peak, faceSizePx, path }`, and `bakeSkyCubeOnCpu`, `releaseBakedCube`, `pa
   packer bit for bit over 10⁴ texels, the GPU splat against the CPU splat to 10⁻⁶, the whole bake
   against the CPU bake to one mantissa step at levels 0 and 5 (each cube's own scale undone),
   finiteness, and the two memory categories.
+- **Deviations in T13.i, as built (2026-10-13).** A camera view culls each star by its band
+  texel's limit and asks the black-sky limit (`decision-r06-camera-budget.md` §1–§3; the label to
+  `signoff-8.md`). Client only: no protocol, golden or generator change.
+  - **The limits** (`view/sky/viewSky.ts`). New export `cameraTexelLimitsV(model, fovDeg)`, a
+    `Float64Array` in the band's texel order: `cameraLimitV` at `deepestTriple(VIEW_CAMERA)` over
+    each texel's `luminanceCdM2` as sent, each capped at `cut_v`. `viewSkyLimit` computes it on each
+    call (once per held reply, role, field, width and setting, through `cullViewSky`'s `useMemo`:
+    6 × 64² calls, about 10 ms here) and looks a star's texel up by `cubeTexelOf`. A texel that is
+    not finite or is below 0, or lies past a short band (the decoder does not check the count),
+    reads as a black sky, the deepest limit, as the eye keeps every star where it has no limit; the
+    server sends none of these. `DARK_SKY_CD_M2` and the module's μ 24 comment are gone (the
+    deferred list's sub-bullet); tests that read μ 24 state it themselves.
+  - **`ViewStarLimit`** (`cull.ts`): the camera variant's `limitV` becomes `limitAt(x, y, z)`, as
+    the eye's. `starIsSeen` reads the direction once for both kinds.
+  - **The cut caps the limit V + c is compared with**, as the task's cull bullet reads. So a listed
+    star with a positive band term (to A0V's +0.14) whose V + c lies past `cut_v` goes to the band,
+    its light kept, even where its texel's limit is deeper. That happens only where the cut is
+    shallower than the texel's limit: at about 43° and narrower (cut 11.0), and for an instrument's
+    camera culling the primary eye's sky. Open for "main": the ruling's §2.1 caps only the label.
+  - **The request** asks `min(MAX_CUT_V, cameraLimitV(deepest, fov, 0))`: 11.0 at 10°–30°, 10.87
+    at 45°, 10.15 (10.1533) at 60°, 8.96 at 90°, 7.77 at 120°. Today no running view asks it: the
+    `PRIMARY` view is the eye, and the instruments cull its sky (R07.T19).
+  - **The label** (`viewSkyLabelV`): `cameraLimitV` at `shownTriple(exposure)` and the view's
+    field over the darkest texel's luminance, capped at `cut_v`. The limit falls as the background
+    brightens, so that is the deepest of all six faces', and it reads no pointing. Over T17's band
+    at 60° it is V 10.1 (10.12); at 30° V 11.0, the cut, where it read 11.7. An instrument's camera
+    on the eye's sky now reads the eye's cut (V 9.5 in the fixtures, where it read 10.1).
+    `label.ts`'s `@param limitV` says "over the sky" (`signoff-8.md`, For main 3). `useViewSky.ts`:
+    docs only, the label's path unchanged.
+  - **The fixture** (`test/skyFixtures.ts`). `skyResponse` states `cut_v` as the server does, the
+    deeper of the eye's 9.5 and the request's camera limit, the camera's alone where no eye is
+    asked (it was 9.5 for every request). `skyPayload` takes an optional `luminanceOf(texel)`, and
+    `FIXTURE_BAND_CD_M2` (2.5 × 10⁻⁴ cd/m², μ 21.6) names its default. So the camera lines of
+    `displays/view/useViewSky.test.tsx` read V 9.6 (that band's limit at 60°) and the instrument
+    lines of `InstrumentView.test.tsx` V 9.5 (the eye's cut); the request there is 10.15.
+  - **Tests.** `viewSky.test.ts`: the task's six (a bright and a dark texel, by V plus band term;
+    a uniform μ 24 band keeps the 10.06 cull's set of 2,000 stars; the dropped light through
+    `bandTexels` to 10⁻⁶; the request at every `FOV_STEPS_DEG` step, exactly the black-sky limit
+    and to 0.01 the figures above; μ 15 to 30 and a black texel on a reply cut at 11, none deeper
+    than the request at any step; the label equal to the deepest of all 96 texels at six exposures,
+    and the cut on a final and an overflowing reply at 30°), with `cameraTexelLimitsV`'s 9.55 and
+    10.12, its cap, the unsent texels and the short band, the instrument at the eye's cut, and
+    `deepestTriple` over three skies. `displays/view/useViewSky.test.tsx`: the same label at three
+    pointings with the darkest texel on −Z, and one request. `cull.test.ts`: a camera's star by
+    the limit in its own direction. `cameraLimit.test.ts`: a black sky 0.095 mag deeper than μ 24
+    at every step. R07.T13.e's 13° figures are gone, 13° being no step of `FOV_STEPS_DEG`.
+  - **R07.T13.e's deeper cull, checked texel by texel.** The cull stays at the deepest triple and
+    the label at the shown one. Over uniform bands of μ 17, 21.26, 24, 25.25 and a black sky (the
+    tests' set; μ 18 to 30 computed too), the two part by 0.05 mag from EV100 6.0, 4.3, 3.5, 3.4
+    and 3.3; a centred Sun-coloured star at the shown limit stays at least 2.8 EV below AgX's floor
+    at 1080p and 0.8 EV at 4K (60°), and the bluest at a 4K corner moves under 0.01 of an 8-bit
+    code. **Finding, measured once and not tested:** brighter than about μ 16.5 the margin narrows.
+    The 4K corner's bluest moves 0.022 of a code at μ 16.5, 0.08 at 16 and 0.28 at 15, and at μ 15
+    a centred 4K star stands 0.33 EV above the floor, all under half a code. T17's band near the
+    Sun is μ 21.26–25.25; how bright the generated galaxy's band gets towards the bulge is not
+    measured. The floor test is a star over black, where a texel that bright draws its own light.
+    For "main".
+  - **Acceptance:** vitest over `view/sky` and `displays/view` (48 files, 797 tests); tsc from a
+    clean cache, oxlint, Prettier; `just smart-ci` exit 0. ux_lint and glyphs clean.
+  - **Open, for "main":** R07's record of T13.e still lists the request and cull at 10.06 and the
+    `V 10.1 mag CAM` test lines, now changed here. The UX review's two considers: the `CAM` figure
+    now reads the held reply, as `EYE` does, and neither takes the stale mark while the link is
+    down; and "Views"' reason clause (`signoff-8.md`, Seen 1). Pending by hand: the camera and
+    instrument lines in a running client against a served band.
 - **Deviations in T14, as built (2026-10-03).** `view/sky/cache.ts` exports `SkyCubeCache`
   (`acquire(view, request)`, `release(view)`, `size`) over `CubeRequest { stars, baked,
 bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cube is shared by
@@ -7674,7 +7741,8 @@ CensusCost)`.
       census. Adopted 2026-10-13 (`decision-r06-camera-budget.md` §2–§3) as R06.T13.i. T17 measured
       the black-sky caps at +4.8% of the systems at 10.06, not 9–14%, and on the served sky they
       cost about none. Until T13.i lands the request and the cull stay at μ 24 together. Nothing
-      changes in T7.b, the census or the server.
+      changes in T7.b, the census or the server. _T13.i landed 2026-10-13 (its record, after
+      T13.g's)._
   - **The caps' move from v☉** (R06.T7's spheres): none near the Sun (A 11, B 68, C 8,193, D 9,925,
     E 21,369 ly). In the nuclear disc B–E stay on the same radial nodes. Every radius there moves
     about 3% (17 → 18, 127 → 131, 225 → 232, 362 → 374 ly), because the farthest rule bound, which

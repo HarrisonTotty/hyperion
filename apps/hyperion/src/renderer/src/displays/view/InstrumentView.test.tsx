@@ -671,7 +671,7 @@ describe("VIEW's instruments in the server's scene (R07.T19)", () => {
     expect(await nextReport(view)).toBe(2);
   });
 
-  it("states an instrument's camera limit at the primary's exposure (R07.T13.e)", async () => {
+  it("states an instrument's camera limit at the primary's exposure, held to the sky's cut (R07.T13.e; R06.T13.i)", async () => {
     vi.stubGlobal("Worker", InThreadSkyWorker);
     const view = await serverScene();
     await skyArrives(view);
@@ -681,7 +681,7 @@ describe("VIEW's instruments in the server's scene (R07.T19)", () => {
     await view.user.keyboard("15{Enter}");
     view.advance(300);
     expect([atDefault, instrumentStars("INSTRUMENT 1")]).toEqual([
-      "V 10.1 mag CAM",
+      "V 9.5 mag CAM",
       "V 2.6 mag CAM",
     ]);
   });
@@ -736,9 +736,12 @@ function starsLines(instruments: ReadonlyArray<string>): Array<string | null> {
   ];
 }
 
-/** The primary eye's and an instrument camera's limits at the default exposure. */
+/**
+ * The primary eye's and an instrument camera's limits at the default exposure: the camera's held to
+ * the eye's sky's cut, V 9.5, where its own over the fixture's band is 9.6 at 60° (R06.T13.i).
+ */
 const EYE = "V 7.4 mag EYE";
-const CAM = "V 10.1 mag CAM";
+const CAM = "V 9.5 mag CAM";
 /** The fixture reply's one gap, as the line names it. */
 const LEFT_OUT = "CLUSTERS: NOT YET MODELLED";
 

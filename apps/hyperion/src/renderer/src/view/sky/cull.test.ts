@@ -30,21 +30,31 @@ function starsOf(
 describe("cullSky", () => {
   it("keeps a camera's stars brighter than its limit, by V plus the band term", () => {
     const stars = starsOf([5, 7, 9, 9.4], { cameraBand: 0.2 });
-    const culled = cullSky(stars, { kind: "camera", limitV: 9.5 }, 8);
+    const culled = cullSky(stars, { kind: "camera", limitAt: () => 9.5 }, 8);
     expect([...culled.kept]).toEqual([0, 1, 2]);
     expect(culled.culledCount).toBe(1);
   });
 
   it("keeps a red star that its band term lifts over a camera's limit", () => {
     const stars = starsOf([9.6], { cameraBand: -0.25 });
-    expect(starIsSeen(stars, 0, { kind: "camera", limitV: 9.5 })).toBe(true);
+    expect(starIsSeen(stars, 0, { kind: "camera", limitAt: () => 9.5 })).toBe(true);
+  });
+
+  it("keeps a camera's star by the limit in its own direction", () => {
+    // Two stars of V 9.6 with a band term of +0.1, one towards +x and one towards −x.
+    const stars = starsOf([9.6, 9.6], { cameraBand: 0.1 });
+    const limit = {
+      kind: "camera" as const,
+      limitAt: (x: number): number => (x > 0 ? 9.75 : 9.65),
+    };
+    expect([starIsSeen(stars, 0, limit), starIsSeen(stars, 1, limit)]).toEqual([true, false]);
   });
 
   it("puts a culled star's light in the band texel of its direction, and nowhere else", () => {
     const stars = starsOf([8]);
     stars.directions.set([0, 0, -1]);
     stars.chroma.set([0.5, 0.3]);
-    const culled = cullSky(stars, { kind: "camera", limitV: 7 }, 4);
+    const culled = cullSky(stars, { kind: "camera", limitAt: () => 7 }, 4);
     const { face, column, row } = cubeTexelOf(0, 0, -1, 4);
     const at = ((face * 4 + row) * 4 + column) * 3;
     const light = starIlluminanceRgbLx(8, Math.fround(0.5), Math.fround(0.3));
@@ -68,7 +78,7 @@ describe("cullSky", () => {
   it("hands every culled star's light to the band, to 10⁻⁶", () => {
     const vMag = Array.from({ length: 2_000 }, (_, i) => 4 + (i % 60) / 10);
     const stars = starsOf(vMag);
-    const culled = cullSky(stars, { kind: "camera", limitV: 7 }, 16);
+    const culled = cullSky(stars, { kind: "camera", limitAt: () => 7 }, 16);
     let expected = 0;
     for (let i = 0; i < stars.count; i += 1) {
       if (!culled.kept.includes(i)) {

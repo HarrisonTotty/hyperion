@@ -130,8 +130,8 @@ export function primarySkyPlace(
  * primary's sky for its own camera (R07.T19).
  *
  * @remarks
- * A camera's limit is the view camera's deepest at every exposure (R07.T13.e), so the cull, the
- * selection and the bake never depend on the exposure.
+ * A camera's limit is its band texel's at the view camera's deepest triple, at every exposure
+ * (R07.T13.e; R06.T13.i), so the cull, the selection and the bake never depend on the exposure.
  *
  * @param setting - The quality setting `VIEW` is given, whose sprite budget the selection keeps
  *   (R06 Design note 22; R07.T17).
@@ -156,8 +156,9 @@ export function cullViewSky(
 }
 
 /**
- * A view's label block's `STARS` reading of a sky it holds: its role's limit, a camera's at the
- * exposure shown (R07.T13.e), then the notes its place holds: while the reply held is not final,
+ * A view's label block's `STARS` reading of a sky it holds: its role's limit quoted at its deepest
+ * over the sky, a camera's at the exposure shown and never deeper than the reply's cut (R07.T13.e;
+ * R06.T13.i), then the notes its place holds: while the reply held is not final,
  * the stars-arriving note, its edge in its field and stale with the sky (R06.T11.f); while it holds
  * the sky at a synthetic ceiling, the interim note (R13.T2.b), which names no figure and so takes
  * no field; and what the sky leaves out.
