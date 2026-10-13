@@ -99,7 +99,7 @@ pub use stellar::{
 pub use surface::{
     CellRangeDto, ClimateModelDto, CoverDto, CoverRangeDto, PaletteEntryDto, PaletteRoleDto,
     PrecipitationSourceDto, RecordSectionDto, SurfaceFieldDto, SurfaceFieldRequest,
-    SurfaceHeaderDto, SurveyPassDto, SurveyPassRequest, SurveySourceDto,
+    SurfaceHeaderDto, SurfaceRevisionDto, SurveyPassDto, SurveyPassRequest, SurveySourceDto,
 };
 pub use universe::{
     CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList, UniverseStatus,

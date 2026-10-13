@@ -21,7 +21,8 @@ revision: number,
 /**
  * The cells the payload holds, each range with the resolution it was surveyed at;
  * [`CoverRangeDto::resolution`] 0 marks the margin about a survey, whose cells are sent
- * whole and exact for the synthesis but were not surveyed.
+ * whole and exact for the synthesis but were not surveyed. For a delta (a request with
+ * `have_revision`), the delta's cells alone, which replace the client's copies.
  */
 coverage: CoverDto, 
 /**

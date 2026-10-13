@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use hyperion_protocol::{
     BodyIdHex, CameraReportDto, ErrorCode, KinematicsDto, NotificationBody, RequestError,
     RequestId, SceneArrivalDto, SceneBodyDto, SceneClockDto, SceneCraftDto, SceneNotificationDto,
-    ServerMessage,
+    ServerMessage, SurfaceRevisionDto,
 };
 use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -68,6 +68,7 @@ impl PendingPush {
                 arrival: notification.arrival,
                 bodies: notification.bodies,
                 craft: notification.craft,
+                surface_revisions: notification.surface_revisions,
             }),
         }
     }
@@ -91,7 +92,9 @@ impl Merge for PendingPush {
 
 /// The scene's changes not yet sent (Design note 5): the clock, the ship and the craft list are
 /// the latest; bodies are merged by ID, the latest record winning; an arrival replaces everything
-/// before it, bodies included.
+/// before it, bodies included; and the surface revisions are merged by body, the larger revision
+/// winning, whatever the order, and kept across an arrival, since they name bodies of any system
+/// (R09.T19.b).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ScenePush {
     /// The scene clock at the latest change.
@@ -104,6 +107,9 @@ pub(crate) struct ScenePush {
     pub(crate) bodies: Vec<SceneBodyDto>,
     /// The whole craft list, if it changed.
     pub(crate) craft: Option<Vec<SceneCraftDto>>,
+    /// The bodies whose surveyed coverage grew, one per body with its largest revision, in the
+    /// order first sent, if any did (R09.T19.b).
+    pub(crate) surface_revisions: Option<Vec<SurfaceRevisionDto>>,
 }
 
 impl ScenePush {
@@ -116,6 +122,7 @@ impl ScenePush {
             arrival: None,
             bodies: Vec::new(),
             craft: None,
+            surface_revisions: None,
         }
     }
 
@@ -129,6 +136,7 @@ impl ScenePush {
             arrival: self.arrival,
             bodies: self.bodies,
             craft: self.craft,
+            surface_revisions: self.surface_revisions,
         }
     }
 }
@@ -141,6 +149,9 @@ impl Merge for ScenePush {
         }
         if later.craft.is_some() {
             self.craft = later.craft;
+        }
+        if let Some(revisions) = later.surface_revisions {
+            merge_revisions(&mut self.surface_revisions, revisions);
         }
         if later.arrival.is_some() {
             // The arrival carries the whole system: nothing before it still applies.
@@ -166,6 +177,24 @@ impl Merge for ScenePush {
                 at.insert(body.record.id.clone(), self.bodies.len());
                 self.bodies.push(body);
             }
+        }
+    }
+}
+
+/// Folds the surface revisions `later` into `earlier`'s, by body: a body in both keeps the larger
+/// revision, so that the merge does not depend on which push came first, and a body new to
+/// `earlier` is appended.
+fn merge_revisions(earlier: &mut Option<Vec<SurfaceRevisionDto>>, later: Vec<SurfaceRevisionDto>) {
+    let Some(held) = earlier.as_mut() else {
+        *earlier = Some(later);
+        return;
+    };
+    // A notification names the few bodies surveyed since the last: a scan is cheaper than an
+    // index.
+    for revision in later {
+        match held.iter_mut().find(|held| held.body == revision.body) {
+            Some(held) => held.revision = held.revision.max(revision.revision),
+            None => held.push(revision),
         }
     }
 }
@@ -415,8 +444,9 @@ pub(crate) enum Step {
     Send(SubscriptionId, String),
     /// Serialise this notification, then offer it with [`Subscriptions::offer`]. A large one is
     /// already marked as serialising: the connection serialises it off its own path, and its
-    /// subscription sends nothing until it is offered.
-    Serialise(Unsent),
+    /// subscription sends nothing until it is offered. Boxed, since a scene notification is some
+    /// 230 bytes and the other steps a few words.
+    Serialise(Box<Unsent>),
     /// Its notification waits for room for this many bytes.
     Waiting(SubscriptionId, usize),
 }
@@ -865,7 +895,7 @@ impl Subscription {
             }
             self.outgoing = Outgoing::Serialising;
         }
-        Some(Step::Serialise(unsent))
+        Some(Step::Serialise(Box::new(unsent)))
     }
 }
 
@@ -1046,6 +1076,124 @@ mod tests {
         let PendingPush::Scene(scene) = pending;
         assert_eq!(scene.ship, Some(ship()));
         assert_eq!(scene.craft, Some(Vec::new()));
+    }
+
+    /// A push of the clock at `seconds` naming surface revisions `(body index, revision)`.
+    fn surveyed(seconds: i64, revisions: &[(u16, u32)]) -> PendingPush {
+        PendingPush::Scene(ScenePush {
+            surface_revisions: Some(
+                revisions
+                    .iter()
+                    .map(|&(index, revision)| SurfaceRevisionDto {
+                        body: BodyIdHex::from_parts(0x0200_0800_2000_0000, index),
+                        revision,
+                    })
+                    .collect(),
+            ),
+            ..ScenePush::heartbeat(clock(seconds))
+        })
+    }
+
+    /// The surface revisions a push names, by body index, sorted.
+    fn revisions_of(pending: PendingPush) -> Vec<(u16, u32)> {
+        let PendingPush::Scene(scene) = pending;
+        let mut revisions: Vec<(u16, u32)> = scene
+            .surface_revisions
+            .unwrap_or_default()
+            .into_iter()
+            .map(|revision| (revision.body.to_parts().1, revision.revision))
+            .collect();
+        revisions.sort_unstable();
+        revisions
+    }
+
+    /// R09.T19.b: a merge keeps each body's larger revision whichever push came first, adds the
+    /// bodies new to it, and keeps them across a push that names none and across an arrival,
+    /// since they name bodies of any system.
+    #[test]
+    fn surface_revisions_merge_by_body_keeping_the_larger_whatever_the_order() {
+        let (one, other) = (
+            surveyed(1, &[(0x0100, 2), (0x0200, 5)]),
+            surveyed(2, &[(0x0100, 3), (0x0200, 4), (0x0300, 1)]),
+        );
+        let mut forwards = one.clone();
+        forwards.merge(other.clone());
+        let mut backwards = other;
+        backwards.merge(one);
+        let expected = vec![(0x0100, 3), (0x0200, 5), (0x0300, 1)];
+        assert_eq!(revisions_of(forwards.clone()), expected);
+        assert_eq!(revisions_of(backwards), expected);
+
+        forwards.merge(push(3, vec![body(0x0100, 1.0)]));
+        forwards.merge(arrival(4));
+        assert_eq!(revisions_of(forwards.clone()), expected);
+        let PendingPush::Scene(scene) = forwards;
+        assert!(
+            scene.bodies.is_empty(),
+            "the arrival still replaces the bodies"
+        );
+
+        let mut quiet = push(1, Vec::new());
+        quiet.merge(surveyed(2, &[(0x0400, 7)]));
+        assert_eq!(revisions_of(quiet.clone()), [(0x0400, 7)]);
+        let PendingPush::Scene(quiet) = quiet;
+        let notification = quiet.into_notification(9);
+        assert_eq!(
+            notification.surface_revisions.as_ref().map(Vec::len),
+            Some(1)
+        );
+        // A notification put back unsent keeps its revisions.
+        assert_eq!(
+            revisions_of(PendingPush::from_body(NotificationBody::Scene(
+                notification
+            ))),
+            [(0x0400, 7)]
+        );
+    }
+
+    /// R09.T19.b: survey revisions pushed while the reader is slow reach it in one notification,
+    /// each body once with its latest revision.
+    #[tokio::test]
+    async fn surface_revisions_merged_while_a_reader_is_slow_carry_each_body_s_latest() {
+        let (handler, mut calls, mut openings) = Scripted::with_openings();
+        let harness = Harness::start_with_limits(
+            handler,
+            ConnectionLimits {
+                outbound_bytes: 1 << 20,
+                write_timeout: NEVER,
+                close_timeout: WAIT,
+            },
+        )
+        .await;
+        let mut client = harness.connect_slow_reader().await;
+        client.hello().await;
+        let (subscription, pusher) = subscribed(&mut client, &mut openings, 1).await;
+        let clogging = harness.stick_writer(&mut calls, &mut client, 2).await;
+        harness
+            .outbound_until(|counters| counters.queued_bytes() >= clogging)
+            .await;
+        assert!(pusher.push(surveyed(1, &[(0x0100, 1)])));
+        assert!(pusher.push(surveyed(2, &[(0x0100, 2), (0x0200, 1)])));
+        assert!(pusher.push(surveyed(3, &[(0x0200, 2)])));
+        match client.next_message().await {
+            ServerMessage::Response { id, .. } => assert_eq!(id, RequestId(2)),
+            other => panic!("expected the clogging response, got {other:?}"),
+        }
+        let merged = notification(&mut client, subscription).await;
+        assert_eq!(merged.sequence, 1);
+        assert_eq!(merged.clock, clock(3));
+        let revisions = merged.surface_revisions.unwrap();
+        assert_eq!(
+            revisions
+                .iter()
+                .map(|revision| (revision.body.to_parts().1, revision.revision))
+                .collect::<Vec<_>>(),
+            [(0x0100, 2), (0x0200, 2)],
+            "each body once, in the order first pushed, at its latest revision"
+        );
+        assert!(client.ping(1).await.is_empty(), "nothing more was queued");
+        client.close().await;
+        harness.stop().await;
     }
 
     #[tokio::test]

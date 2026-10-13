@@ -24,6 +24,16 @@
 //! Knowledge yet (P12.T8 will), so the surface service will open each universe's log on its first
 //! `survey_pass` or `surface_field` and keep it (R09.T19.a).
 //!
+//! # Revisions
+//!
+//! A body's [`CoverageRevision`] counts its passes, and revision n is always the fold of its first
+//! n, so the log keeps each body's passes in their order beside its fold: a `surface_field` that
+//! names the revision a client holds is answered with the cells surveyed since
+//! ([`SurveyLog::history`], [`CoverageHistory::at`]; R09.T19.b). Every pass recorded also raises
+//! its body's revision in the log's `RaisedRevisions`, a [`watch`] channel the scene topic reads
+//! to tell its subscribers which bodies' coverage grew (`SurveyLog::open_announcing`, which the
+//! surface service opens each universe's log with).
+//!
 //! [`cell_index`]: hyperion_surface::field::cell_index
 //! [`coarse_level`]: hyperion_surface::field::coarse_level
 
@@ -39,8 +49,9 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use hyperion_sim::id::BodyId;
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
-use hyperion_surface::field::{CoarseLevel, ResolutionCode};
+use hyperion_surface::field::{CoarseLevel, Cover, CoverRange, ResolutionCode};
 use serde::{Deserialize, Serialize};
+use tokio::sync::watch;
 
 use super::jsonl::{self, KnowledgeLog, LogName, TimeLine};
 use super::{LoadKnowledgeError, SaveKnowledgeError};
@@ -360,13 +371,19 @@ impl Coverage {
     /// The coverage of a body's first pass, `pass`.
     #[must_use]
     fn first(pass: &SurveyPass) -> Self {
-        let mut coverage = Self {
-            level: pass.level,
-            revision: CoverageRevision::FIRST,
-            codes: vec![0; to_usize(pass.level.cell_count())].into_boxed_slice(),
-        };
-        coverage.fold_codes(pass);
+        let mut coverage = Self::none(pass.level);
+        coverage.fold_codes(pass.code, &pass.cells);
         coverage
+    }
+
+    /// No cell covered at `level`, at revision 1 until a pass is folded in.
+    #[must_use]
+    fn none(level: CoarseLevel) -> Self {
+        Self {
+            level,
+            revision: CoverageRevision::FIRST,
+            codes: vec![0; to_usize(level.cell_count())].into_boxed_slice(),
+        }
     }
 
     /// The level of the body's coarse field.
@@ -403,6 +420,33 @@ impl Coverage {
         self.codes.iter().map(|&code| u32::from(code != 0)).sum()
     }
 
+    /// The surveyed cells with their codes as a [`Cover`] at the field's level: each run of
+    /// cells of one code other than [`ResolutionCode::NONE`] a range, as the payload's encoder
+    /// takes them (R09.T19.b), without the margin, which it adds.
+    ///
+    /// # Panics
+    ///
+    /// Never: a field's 6 · 4ᴸ cells fit a `u32`, and runs found in index order are sorted and
+    /// disjoint.
+    #[must_use]
+    pub fn to_cover(&self) -> Cover {
+        let mut ranges = Vec::new();
+        let mut start = 0_u32;
+        for run in self.codes.chunk_by(|a, b| a == b) {
+            let end = start + u32::try_from(run.len()).expect("a field's 6 · 4ᴸ cells fit a u32");
+            if let Some(&code) = run.first()
+                && code != 0
+            {
+                ranges.push(
+                    CoverRange::new(start, end, ResolutionCode::new(code))
+                        .expect("a run holds a cell"),
+                );
+            }
+            start = end;
+        }
+        Cover::from_ranges(ranges).expect("runs found in index order are sorted and disjoint")
+    }
+
     /// The revision `pass` would fold in at: refused unless it is at this field's level and a
     /// revision is left to count it.
     fn next_revision(&self, pass: &SurveyPass) -> Result<CoverageRevision, FitPassError> {
@@ -419,23 +463,105 @@ impl Coverage {
     }
 
     /// Folds `pass` in at revision `revision`, which [`next_revision`](Self::next_revision) gave.
-    fn fold(&mut self, pass: &SurveyPass, revision: CoverageRevision) {
-        self.fold_codes(pass);
-        self.revision = revision;
-    }
-
-    /// Keeps the finer of each cell's code and `pass`'s over the pass's cells.
     ///
     /// # Panics
     ///
     /// If the pass is at another level, which the callers have refused.
-    fn fold_codes(&mut self, pass: &SurveyPass) {
+    fn fold(&mut self, pass: &SurveyPass, revision: CoverageRevision) {
         assert_eq!(pass.level, self.level, "a pass folds at its field's level");
-        for run in &pass.cells {
-            for code in &mut self.codes[to_usize(run.start)..to_usize(run.end)] {
-                *code = ResolutionCode::new(*code).finer(pass.code).get();
+        self.fold_codes(pass.code, &pass.cells);
+        self.revision = revision;
+    }
+
+    /// Keeps the finer of each cell's code and `code` over `cells`, runs at the field's level.
+    fn fold_codes(&mut self, code: ResolutionCode, cells: &[Range<u32>]) {
+        for run in cells {
+            for held in &mut self.codes[to_usize(run.start)..to_usize(run.end)] {
+                *held = ResolutionCode::new(*held).finer(code).get();
             }
         }
+    }
+}
+
+/// What of a pass a body's history keeps to fold it again: its code and its cells.
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct FoldedPass {
+    code: ResolutionCode,
+    cells: Box<[Range<u32>]>,
+}
+
+/// A body's coverage with the passes folded into it, in their order, as one snapshot of its log
+/// ([`SurveyLog::history`]): the coverage at any of its revisions so far.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CoverageHistory {
+    latest: Arc<Coverage>,
+    passes: Vec<Arc<FoldedPass>>,
+}
+
+impl CoverageHistory {
+    /// The coverage with every pass of the snapshot folded in.
+    #[must_use]
+    pub fn latest(&self) -> &Arc<Coverage> {
+        &self.latest
+    }
+
+    /// The coverage at `revision`, the fold of the body's first `revision` passes, or `None` past
+    /// the latest revision.
+    ///
+    /// Folding again costs a byte a cell of the field and a pass of each pass's cells.
+    #[must_use]
+    pub fn at(&self, revision: CoverageRevision) -> Option<Arc<Coverage>> {
+        if revision == self.latest.revision {
+            return Some(Arc::clone(&self.latest));
+        }
+        if revision > self.latest.revision {
+            return None;
+        }
+        let first = self.passes.get(..to_usize(revision.get()))?;
+        let mut coverage = Coverage::none(self.latest.level);
+        for pass in first {
+            coverage.fold_codes(pass.code, &pass.cells);
+        }
+        coverage.revision = revision;
+        Some(Arc::new(coverage))
+    }
+}
+
+/// The revisions survey passes have raised since a log was opened, the latest of each body's
+/// (R09.T19.b): what the scene topic reads to tell its subscribers whose coverage grew.
+///
+/// It holds only the passes recorded since, not those loaded from the file, so that a scene
+/// subscribed before the log is opened is told of no body that no pass has raised.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
+pub(crate) struct RaisedRevisions {
+    bodies: BTreeMap<BodyId, CoverageRevision>,
+}
+
+impl RaisedRevisions {
+    /// Body `body`'s latest revision raised, or `None` if no pass of it has been recorded since.
+    #[must_use]
+    pub(crate) fn get(&self, body: BodyId) -> Option<CoverageRevision> {
+        self.bodies.get(&body).copied()
+    }
+
+    /// The bodies whose revision here is above `earlier`'s, or absent there, each with its
+    /// revision here, in body order.
+    pub(crate) fn raised_since<'a>(
+        &'a self,
+        earlier: &'a Self,
+    ) -> impl Iterator<Item = (BodyId, CoverageRevision)> + 'a {
+        self.bodies
+            .iter()
+            .filter(|(body, revision)| earlier.get(**body).is_none_or(|then| then < **revision))
+            .map(|(&body, &revision)| (body, revision))
+    }
+
+    /// Raises `body`'s revision to `revision`, keeping the larger.
+    fn raise(&mut self, body: BodyId, revision: CoverageRevision) {
+        self.bodies
+            .entry(body)
+            .and_modify(|held| *held = (*held).max(revision))
+            .or_insert(revision);
     }
 }
 
@@ -458,11 +584,19 @@ enum FitPassError {
     },
 }
 
-/// Every body's coverage, as the log has it.
+/// Every body's coverage and passes, as the log has them.
 #[derive(Debug, Default)]
 struct Surveys {
+    bodies: BTreeMap<BodyId, BodySurveys>,
+}
+
+/// One body's coverage and the passes folded into it.
+#[derive(Debug)]
+struct BodySurveys {
     /// Shared with readers' snapshots: a fold copies a coverage only while a reader holds it.
-    bodies: BTreeMap<BodyId, Arc<Coverage>>,
+    coverage: Arc<Coverage>,
+    /// Each pass in the order folded, so that revision n is the fold of the first n.
+    passes: Vec<Arc<FoldedPass>>,
 }
 
 impl Surveys {
@@ -470,21 +604,31 @@ impl Surveys {
     fn next_revision(&self, pass: &SurveyPass) -> Result<CoverageRevision, FitPassError> {
         self.bodies
             .get(&pass.body)
-            .map_or(Ok(CoverageRevision::FIRST), |coverage| {
-                coverage.next_revision(pass)
+            .map_or(Ok(CoverageRevision::FIRST), |body| {
+                body.coverage.next_revision(pass)
             })
     }
 
-    /// Folds `pass` into its body's coverage and returns the body's new revision.
-    fn apply(&mut self, pass: &SurveyPass) -> Result<CoverageRevision, FitPassError> {
-        match self.bodies.entry(pass.body) {
-            Entry::Vacant(vacant) => Ok(vacant.insert(Arc::new(Coverage::first(pass))).revision),
-            Entry::Occupied(mut occupied) => {
-                let revision = occupied.get().next_revision(pass)?;
-                Arc::make_mut(occupied.get_mut()).fold(pass, revision);
-                Ok(revision)
+    /// Folds `pass` into its body's coverage, keeps it in the body's history, and returns the
+    /// body's new revision.
+    fn apply(&mut self, pass: SurveyPass) -> Result<CoverageRevision, FitPassError> {
+        let body = match self.bodies.entry(pass.body) {
+            Entry::Vacant(vacant) => vacant.insert(BodySurveys {
+                coverage: Arc::new(Coverage::first(&pass)),
+                passes: Vec::new(),
+            }),
+            Entry::Occupied(occupied) => {
+                let body = occupied.into_mut();
+                let revision = body.coverage.next_revision(&pass)?;
+                Arc::make_mut(&mut body.coverage).fold(&pass, revision);
+                body
             }
-        }
+        };
+        body.passes.push(Arc::new(FoldedPass {
+            code: pass.code,
+            cells: pass.cells,
+        }));
+        Ok(body.coverage.revision)
     }
 }
 
@@ -505,6 +649,8 @@ pub struct SurveyLog {
 struct Shared {
     log: Mutex<KnowledgeLog>,
     surveys: Mutex<Surveys>,
+    /// Each pass recorded raises its body's revision here, under the file's lock.
+    raised: watch::Sender<RaisedRevisions>,
 }
 
 impl SurveyLog {
@@ -525,6 +671,23 @@ impl SurveyLog {
         store: &UniverseStore,
         universe: UniverseId,
     ) -> Result<Self, LoadKnowledgeError> {
+        Self::open_announcing(store, universe, watch::Sender::default()).await
+    }
+
+    /// [`open`](Self::open), with every pass recorded from then on raising its body's revision in
+    /// `raised`, whose receivers it wakes (R09.T19.b): the surface service gives each universe's
+    /// log the channel its scene subscriptions watch, made before the log is opened.
+    ///
+    /// The passes loaded from the file raise nothing.
+    ///
+    /// # Errors
+    ///
+    /// As [`open`](Self::open).
+    pub(crate) async fn open_announcing(
+        store: &UniverseStore,
+        universe: UniverseId,
+        raised: watch::Sender<RaisedRevisions>,
+    ) -> Result<Self, LoadKnowledgeError> {
         let dir = store.knowledge_dir(universe);
         let (surveys, log) = tokio::task::spawn_blocking(move || load(dir))
             .await
@@ -536,6 +699,7 @@ impl SurveyLog {
             shared: Arc::new(Shared {
                 log: Mutex::new(log),
                 surveys: Mutex::new(surveys),
+                raised,
             }),
         })
     }
@@ -543,7 +707,9 @@ impl SurveyLog {
     /// Records `pass`, appending it to the file first, and returns its body's new revision.
     ///
     /// The revision is [`CoverageRevision::FIRST`] for the body's first pass, and one more for
-    /// each pass after.
+    /// each pass after. Once the pass is folded in, its body's revision is raised in the log's
+    /// `RaisedRevisions` (the crate-private `open_announcing`), so that a scene told of it finds
+    /// the pass in [`coverage`](Self::coverage).
     ///
     /// # Errors
     ///
@@ -555,7 +721,7 @@ impl SurveyLog {
     /// part-way it is [`SaveKnowledgeError::Poisoned`], and the log must be opened again.
     pub async fn record(&self, pass: SurveyPass) -> Result<CoverageRevision, RecordSurveyError> {
         let shared = Arc::clone(&self.shared);
-        tokio::task::spawn_blocking(move || shared.record(&pass))
+        tokio::task::spawn_blocking(move || shared.record(pass))
             .await
             .map_err(|error| {
                 tracing::error!(%error, "a survey log append's blocking task did not finish");
@@ -569,25 +735,47 @@ impl SurveyLog {
     /// its codes and its revision always agree.
     #[must_use]
     pub fn coverage(&self, body: BodyId) -> Option<Arc<Coverage>> {
-        lock(&self.shared.surveys).bodies.get(&body).map(Arc::clone)
+        lock(&self.shared.surveys)
+            .bodies
+            .get(&body)
+            .map(|body| Arc::clone(&body.coverage))
+    }
+
+    /// Body `body`'s coverage with its passes, or `None` if no pass has covered it: one snapshot,
+    /// from which its coverage at any revision so far can be folded again
+    /// ([`CoverageHistory::at`]).
+    ///
+    /// Taking it shares the passes rather than copying them.
+    #[must_use]
+    pub fn history(&self, body: BodyId) -> Option<CoverageHistory> {
+        lock(&self.shared.surveys)
+            .bodies
+            .get(&body)
+            .map(|body| CoverageHistory {
+                latest: Arc::clone(&body.coverage),
+                passes: body.passes.clone(),
+            })
     }
 }
 
 impl Shared {
-    fn record(&self, pass: &SurveyPass) -> Result<CoverageRevision, RecordSurveyError> {
+    fn record(&self, pass: SurveyPass) -> Result<CoverageRevision, RecordSurveyError> {
         // Refused once a pass panicked while holding it: the pass may be on disk and not in
         // memory, and the revisions handed out would then fall behind the file's.
         let mut log = self
             .log
             .lock()
             .map_err(|_| RecordSurveyError::Save(SaveKnowledgeError::Poisoned))?;
-        let planned = lock(&self.surveys).next_revision(pass)?;
-        log.append(&PassLine::from(pass))
+        let planned = lock(&self.surveys).next_revision(&pass)?;
+        log.append(&PassLine::from(&pass))
             .map_err(RecordSurveyError::Save)?;
+        let body = pass.body;
         let revision = lock(&self.surveys)
             .apply(pass)
             .expect("a pass that fitted under the file's lock still fits");
         debug_assert_eq!(revision, planned, "only this lock's holder folds passes");
+        self.raised
+            .send_modify(|raised| raised.raise(body, revision));
         Ok(revision)
     }
 }
@@ -604,7 +792,7 @@ fn load(dir: PathBuf) -> Result<(Surveys, KnowledgeLog), LoadKnowledgeError> {
     let log = jsonl::load(dir, SURVEYS, |line: PassLine| {
         let pass = SurveyPass::try_from(line)?;
         surveys
-            .apply(&pass)
+            .apply(pass)
             .map_err(|_| "does not fit the passes before it")?;
         Ok(())
     })?;
@@ -1109,9 +1297,14 @@ mod tests {
         let fold = |order: &[usize]| {
             let mut surveys = Surveys::default();
             for &i in order {
-                surveys.apply(&passes[i]).unwrap();
+                surveys.apply(passes[i].clone()).unwrap();
             }
-            surveys.bodies
+            // The coverage alone: each body's history keeps its passes in the order folded.
+            surveys
+                .bodies
+                .into_iter()
+                .map(|(body, surveyed)| (body, surveyed.coverage))
+                .collect::<BTreeMap<_, _>>()
         };
         let orders = permutations(passes.len());
         assert_eq!(orders.len(), 120);
@@ -1535,8 +1728,8 @@ mod tests {
         {
             // As if 2³² − 2 more passes had followed the first.
             let mut surveys = lock(&log.shared.surveys);
-            let coverage = surveys.bodies.get_mut(&moon()).unwrap();
-            Arc::make_mut(coverage).revision = last;
+            let body = surveys.bodies.get_mut(&moon()).unwrap();
+            Arc::make_mut(&mut body.coverage).revision = last;
         }
         let before = fs::read_to_string(surveys_file(&store)).unwrap();
         let error = log.record(first).await.unwrap_err();
@@ -1546,6 +1739,156 @@ mod tests {
         );
         assert_eq!(fs::read_to_string(surveys_file(&store)).unwrap(), before);
         assert_eq!(log.coverage(moon()).unwrap().revision(), last);
+    }
+
+    /// R09.T19.b: a body's history gives its coverage at every revision so far, each the fold of
+    /// its first passes alone, as a log that recorded only those would hold it; none past the
+    /// latest, and the latest shared rather than folded again.
+    #[tokio::test]
+    async fn survey_history_folds_each_revision_again() {
+        let (_dir, store) = universe();
+        let log = SurveyLog::open(&store, UNIVERSE).await.unwrap();
+        let passes = passes();
+        record_all(&log, &passes).await;
+        let history = log.history(earth()).unwrap();
+        assert_eq!(history.latest(), &log.coverage(earth()).unwrap());
+        let earths: Vec<SurveyPass> = passes
+            .iter()
+            .filter(|pass| pass.body() == earth())
+            .cloned()
+            .collect();
+        for n in 1..=earths.len() {
+            let mut fresh = Surveys::default();
+            for pass in &earths[..n] {
+                fresh.apply(pass.clone()).unwrap();
+            }
+            let revision = CoverageRevision::new(u32::try_from(n).unwrap()).unwrap();
+            assert_eq!(
+                history.at(revision).as_deref(),
+                Some(fresh.bodies[&earth()].coverage.as_ref()),
+                "revision {n}"
+            );
+        }
+        let latest = history.latest().revision();
+        assert!(Arc::ptr_eq(&history.at(latest).unwrap(), history.latest()));
+        assert_eq!(history.at(latest.next().unwrap()), None);
+        assert_eq!(log.history(BodyId::new(host(), 0x0004)), None);
+
+        // A snapshot keeps its revision as later passes fold in.
+        let later = pass(
+            earth(),
+            earth_level(),
+            9,
+            SurveySource::Orbital,
+            10.0,
+            once(0..1),
+        );
+        log.record(later).await.unwrap();
+        assert_eq!(history.latest().revision(), latest);
+        assert_eq!(
+            log.history(earth()).unwrap().at(latest).as_deref(),
+            Some(history.latest().as_ref())
+        );
+    }
+
+    /// R09.T19.b: a coverage's cover is each run of one code a range, at that code, and holds
+    /// exactly the surveyed cells.
+    #[tokio::test]
+    async fn survey_coverage_converts_to_a_cover_of_its_runs() {
+        let (_dir, store) = universe();
+        let log = SurveyLog::open(&store, UNIVERSE).await.unwrap();
+        record_all(&log, &passes()).await;
+        for body in [earth(), moon()] {
+            let coverage = log.coverage(body).unwrap();
+            let cover = coverage.to_cover();
+            assert_eq!(cover.cell_count(), u64::from(coverage.surveyed()));
+            for index in 0..coverage.level().cell_count() {
+                let code = coverage.code(index).unwrap();
+                assert_eq!(
+                    cover.code(index),
+                    code.is_surveyed().then_some(code),
+                    "{body} cell {index}"
+                );
+            }
+        }
+        let moon = log.coverage(moon()).unwrap().to_cover();
+        let code = ResolutionCode::from_resolution(Metres::new(120.0)).unwrap();
+        assert_eq!(
+            moon.ranges(),
+            [
+                CoverRange::new(0, 96, code).unwrap(),
+                CoverRange::new(1_000, 1_001, code).unwrap(),
+            ]
+        );
+        let none = Coverage::none(moon_level());
+        assert!(none.to_cover().is_empty());
+    }
+
+    /// R09.T19.b: each pass recorded raises its body's revision in the channel the log was opened
+    /// with, waking its receivers; the passes loaded from the file raise nothing.
+    #[tokio::test]
+    async fn survey_passes_recorded_raise_their_revisions_and_loaded_ones_none() {
+        let (_dir, store) = universe();
+        let raised = watch::Sender::default();
+        let mut watching = raised.subscribe();
+        let log = SurveyLog::open_announcing(&store, UNIVERSE, raised.clone())
+            .await
+            .unwrap();
+        assert!(!watching.has_changed().unwrap());
+        record_all(&log, &passes()).await;
+        assert!(watching.has_changed().unwrap());
+        let now = watching.borrow_and_update().clone();
+        assert_eq!(
+            (
+                now.get(earth()).map(CoverageRevision::get),
+                now.get(moon()).map(CoverageRevision::get)
+            ),
+            (Some(4), Some(1))
+        );
+        drop(log);
+
+        let fresh = watch::Sender::default();
+        let reopened = SurveyLog::open_announcing(&store, UNIVERSE, fresh.clone())
+            .await
+            .unwrap();
+        assert_eq!(reopened.coverage(earth()).unwrap().revision().get(), 4);
+        assert_eq!(*fresh.borrow(), RaisedRevisions::default());
+        let more = pass(
+            moon(),
+            moon_level(),
+            5,
+            SurveySource::Orbital,
+            50.0,
+            once(0..1),
+        );
+        reopened.record(more).await.unwrap();
+        let raised_now = fresh.borrow().clone();
+        assert_eq!(
+            raised_now
+                .raised_since(&RaisedRevisions::default())
+                .collect::<Vec<_>>(),
+            [(moon(), CoverageRevision::new(2).unwrap())]
+        );
+    }
+
+    /// R09.T19.b: a raise keeps a body's larger revision, so raises out of order never lower it,
+    /// and `raised_since` names each body above the earlier revisions or new to them.
+    #[test]
+    fn raised_revisions_keep_the_larger_and_name_what_rose() {
+        let revision = |n| CoverageRevision::new(n).unwrap();
+        let mut earlier = RaisedRevisions::default();
+        earlier.raise(earth(), revision(3));
+        let mut later = earlier.clone();
+        later.raise(earth(), revision(5));
+        later.raise(earth(), revision(4));
+        later.raise(moon(), revision(1));
+        assert_eq!(later.get(earth()), Some(revision(5)));
+        assert_eq!(
+            later.raised_since(&earlier).collect::<BTreeMap<_, _>>(),
+            BTreeMap::from([(earth(), revision(5)), (moon(), revision(1))])
+        );
+        assert_eq!(later.raised_since(&later).count(), 0);
+        assert_eq!(earlier.raised_since(&later).count(), 0);
     }
 
     /// Once a pass panicked while holding the file's lock, every later pass is refused as

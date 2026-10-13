@@ -5,9 +5,12 @@
 //! the body cache, and answers the whole state. A task per subscription, handed to its [`Pusher`]
 //! so that it ends with the subscription, then waits on the universe's scene setting, the next
 //! `valid_until` mapped to an instant by the clock, the cameras the connection routes to it, the
-//! heartbeat and, while the scene holds craft, the 64 Hz tick, and merges each change into the
-//! subscription's pending push (Design notes 4 and 5). The core's work runs on the pool; the task
-//! only waits.
+//! heartbeat, the universe's survey passes and, while the scene holds craft, the 64 Hz tick, and
+//! merges each change into the subscription's pending push (Design notes 4 and 5). A survey pass
+//! recorded raises its body's revision, which the task pushes as `surface_revisions` (R09.T19.b;
+//! Design note 4): the revisions raised when the subscription opened count as told, since its
+//! state carries none and its client asks `surface_field` again on subscribing. The core's work
+//! runs on the pool; the task only waits.
 
 use std::collections::BTreeMap;
 use std::panic::AssertUnwindSafe;
@@ -17,7 +20,7 @@ use futures_util::FutureExt;
 
 use hyperion_protocol::{
     CameraReportDto, ErrorCode, RequestError, SceneClockDto, SceneSubscribeRequest,
-    SubscriptionState, UniverseIdHex,
+    SubscriptionState, SurfaceRevisionDto, UniverseIdHex,
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::id::SystemId;
@@ -32,6 +35,8 @@ use crate::compute::{
     CancelOnDrop, CancelToken, GalaxyKey, GenerateBodiesError, GeneratedSystem, JobError, Priority,
     panic_message,
 };
+use crate::convert::surface_revision;
+use crate::knowledge::surveys::RaisedRevisions;
 use crate::limits::{CRAFT_PUSH_INTERVAL, SCENE_HEARTBEAT};
 use crate::requests::{bodies_of, openable_universe, request_error};
 use crate::subscriptions::{PendingPush, Pusher, ScenePush, SubscriptionCommand};
@@ -147,6 +152,8 @@ pub(crate) async fn open(
     };
     let mut setting = state.scene.watch(source.id);
     let current = setting.borrow_and_update().clone();
+    let mut surveys = state.surface.watch_surveys(source.id);
+    let told = surveys.borrow_and_update().clone();
     let asked = crate::convert::detail_level(request.detail);
     let (core, scene) = build(&mut source, &token, asked, &current, request.cameras).await?;
     let commands = pusher.take_commands();
@@ -156,6 +163,8 @@ pub(crate) async fn open(
         core: Some(core),
         setting,
         current,
+        surveys,
+        told,
         commands,
         pusher: pusher.clone(),
     };
@@ -253,6 +262,10 @@ struct Topic {
     core: Option<SceneCore>,
     setting: watch::Receiver<SceneSetting>,
     current: SceneSetting,
+    /// The universe's revisions raised by survey passes.
+    surveys: watch::Receiver<RaisedRevisions>,
+    /// The revisions the subscriber has been told of, or that were raised before it subscribed.
+    told: RaisedRevisions,
     commands: Option<mpsc::Receiver<SubscriptionCommand>>,
     pusher: Pusher,
 }
@@ -264,6 +277,7 @@ enum Wake {
     Due,
     Heartbeat,
     Craft,
+    Surveyed,
     Command(SubscriptionCommand),
 }
 
@@ -288,6 +302,11 @@ impl Topic {
                     Ok(()) => Wake::Setting,
                     Err(_) => Wake::Ended,
                 },
+                // The surface service keeps the sender as long as the server runs.
+                changed = self.surveys.changed() => match changed {
+                    Ok(()) => Wake::Surveyed,
+                    Err(_) => Wake::Ended,
+                },
                 Some(command) = async { match commands {
                     Some(commands) => commands.recv().await,
                     None => std::future::pending().await,
@@ -303,6 +322,10 @@ impl Topic {
                 Wake::Heartbeat => self.on_heartbeat().await,
                 Wake::Craft => {
                     self.push_craft();
+                    Ok(())
+                }
+                Wake::Surveyed => {
+                    self.push_surveyed();
                     Ok(())
                 }
                 Wake::Command(command) => self.on_command(command).await,
@@ -366,6 +389,24 @@ impl Topic {
             push.craft = Some(list);
             self.pusher.push(PendingPush::Scene(push));
         }
+    }
+
+    /// Pushes the bodies whose survey revision rose past what the subscriber was told, each with
+    /// its latest revision, stating the clock now.
+    fn push_surveyed(&mut self) {
+        let raised = self.surveys.borrow_and_update().clone();
+        let revisions: Vec<SurfaceRevisionDto> = raised
+            .raised_since(&self.told)
+            .map(|(body, revision)| surface_revision(body, revision))
+            .collect();
+        self.told = raised;
+        if revisions.is_empty() {
+            return;
+        }
+        let reading = self.current.clock.reading_at(Instant::now());
+        let mut push = ScenePush::heartbeat(SceneClockDto::from(reading));
+        push.surface_revisions = Some(revisions);
+        self.pusher.push(PendingPush::Scene(push));
     }
 
     /// Answers a command the connection routed here.
@@ -553,6 +594,8 @@ mod tests {
             core: Some(core),
             setting: state.scene.watch(universe.id()),
             current: setting,
+            surveys: state.surface.watch_surveys(universe.id()),
+            told: RaisedRevisions::default(),
             commands: pusher.take_commands(),
             pusher: pusher.clone(),
         };

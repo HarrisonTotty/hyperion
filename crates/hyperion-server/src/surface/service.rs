@@ -18,6 +18,7 @@ use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
 use hyperion_surface::field::{CoarseField, CoarseLevel, FieldView, coarse_level};
+use tokio::sync::watch;
 use tokio::task::JoinSet;
 
 use super::{FieldCache, FieldKey, InputsSource};
@@ -28,7 +29,7 @@ use crate::compute::{
     SingleFlight, SubmitJobError,
 };
 use crate::knowledge::LoadKnowledgeError;
-use crate::knowledge::surveys::SurveyLog;
+use crate::knowledge::surveys::{RaisedRevisions, SurveyLog};
 use crate::universe::{UniverseId, UniverseStore};
 
 /// The time at which the service reads a body's record for its inputs: the epoch.
@@ -155,6 +156,10 @@ pub struct SurfaceService {
     surveys: Arc<Mutex<HashMap<UniverseId, SurveyLog>>>,
     /// The survey logs being opened, so that two first requests of a universe open its log once.
     opening: SingleFlight<UniverseId, SurveyLog, Arc<LoadKnowledgeError>>,
+    /// Each universe's raised revisions, made by the first of its scene subscriptions or its log's
+    /// opening, whichever comes first, and given to the log when it opens
+    /// ([`watch_surveys`](Self::watch_surveys)).
+    raised: Arc<Mutex<HashMap<UniverseId, watch::Sender<RaisedRevisions>>>>,
 }
 
 impl SurfaceService {
@@ -174,6 +179,7 @@ impl SurfaceService {
             prefetching: Mutex::new(JoinSet::new()),
             surveys: Arc::new(Mutex::new(HashMap::new())),
             opening: SingleFlight::new(),
+            raised: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -341,6 +347,7 @@ impl SurfaceService {
             return Ok(log.clone());
         }
         let (surveys, store) = (Arc::clone(&self.surveys), store.clone());
+        let raised = raised_sender(&self.raised, universe);
         let opened = self
             .opening
             .run(universe, move || async move {
@@ -349,12 +356,27 @@ impl SurfaceService {
                 if let Some(log) = lock(&surveys).get(&universe) {
                     return Ok(Arc::new(log.clone()));
                 }
-                let log = SurveyLog::open(&store, universe).await.map_err(Arc::new)?;
+                let log = SurveyLog::open_announcing(&store, universe, raised)
+                    .await
+                    .map_err(Arc::new)?;
                 let log = lock(&surveys).entry(universe).or_insert(log).clone();
                 Ok(Arc::new(log))
             })
             .await?;
         Ok(SurveyLog::clone(&opened))
+    }
+
+    /// A receiver of universe `universe`'s [`RaisedRevisions`]: woken whenever a survey pass of one
+    /// of its bodies is recorded, the body's revision raised in it (R09.T19.b).
+    ///
+    /// It holds the revisions raised since the universe's log was opened; the scene topic reads
+    /// what it holds when a subscription opens as already told, and tells its subscriber of each
+    /// body raised past that. The channel is made here if the universe has none yet, and the log
+    /// is given it when it opens, so a scene subscribed before the universe's first survey pass is
+    /// told of it.
+    #[must_use]
+    pub(crate) fn watch_surveys(&self, universe: UniverseId) -> watch::Receiver<RaisedRevisions> {
+        raised_sender(&self.raised, universe).subscribe()
     }
 
     /// Stops waiting on the passes [`prefetch`](Self::prefetch) started.
@@ -572,6 +594,17 @@ fn surface_record(
         .body_at(ctx, index, RECORD_TIME)
         .map_err(SurfaceJobError::Body)?;
     Ok((seed, record))
+}
+
+/// Universe `universe`'s raised-revisions channel in `raised`, made empty if it has none yet.
+///
+/// A universe's channel is kept for the service's life: it is a few bytes a body surveyed, and a
+/// log opened again after it was dropped (P12.T8's holder) keeps telling the same subscriptions.
+fn raised_sender(
+    raised: &Mutex<HashMap<UniverseId, watch::Sender<RaisedRevisions>>>,
+    universe: UniverseId,
+) -> watch::Sender<RaisedRevisions> {
+    lock(raised).entry(universe).or_default().clone()
 }
 
 /// Takes the survey logs' lock whether or not a holder panicked: each critical section is one map

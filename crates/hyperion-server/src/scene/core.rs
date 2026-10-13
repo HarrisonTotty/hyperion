@@ -1868,6 +1868,7 @@ mod tests {
             arrival: None,
             bodies: Vec::new(),
             craft: None,
+            surface_revisions: None,
         };
         assert!(!is_large_notification(&quiet));
         let leaving = SceneNotificationDto {

@@ -119,7 +119,7 @@ import type { SkyGapDto } from "./generated/SkyGapDto";
 import type { SkyLayerCensusDto } from "./generated/SkyLayerCensusDto";
 import type { SkyRequest } from "./generated/SkyRequest";
 import type { SkyResponse } from "./generated/SkyResponse";
-// The surface (rendering plan R09, R09.T19.a).
+// The surface (rendering plan R09, R09.T19.a and R09.T19.b).
 import type { CellRangeDto } from "./generated/CellRangeDto";
 import type { ClimateModelDto } from "./generated/ClimateModelDto";
 import type { CoverDto } from "./generated/CoverDto";
@@ -131,6 +131,7 @@ import type { RecordSectionDto } from "./generated/RecordSectionDto";
 import type { SurfaceFieldDto } from "./generated/SurfaceFieldDto";
 import type { SurfaceFieldRequest } from "./generated/SurfaceFieldRequest";
 import type { SurfaceHeaderDto } from "./generated/SurfaceHeaderDto";
+import type { SurfaceRevisionDto } from "./generated/SurfaceRevisionDto";
 import type { SurveyPassDto } from "./generated/SurveyPassDto";
 import type { SurveyPassRequest } from "./generated/SurveyPassRequest";
 import type { SurveySourceDto } from "./generated/SurveySourceDto";
@@ -289,6 +290,7 @@ export type {
   SurfaceFieldDto,
   SurfaceFieldRequest,
   SurfaceHeaderDto,
+  SurfaceRevisionDto,
   SurveyPassDto,
   SurveyPassRequest,
   SurveySourceDto,

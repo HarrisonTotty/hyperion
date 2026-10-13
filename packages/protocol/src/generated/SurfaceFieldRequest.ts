@@ -22,6 +22,7 @@ universe: UniverseIdHex,
 body: BodyIdHex, 
 /**
  * The revision of the body's coverage the client holds, from an earlier answer: the answer
- * then carries only the cells surveyed since. `null` for the whole surveyed field.
+ * then carries only the cells surveyed since. `null` (or 0) for the whole surveyed field. A
+ * revision above the body's own is `bad_request` naming `have_revision`.
  */
 have_revision: number | null, };

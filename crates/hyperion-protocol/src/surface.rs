@@ -23,6 +23,23 @@
 //! revision of the body's coverage that it reflects. A body whose plan 14 sections the coarse pass
 //! reads are not modelled yet answers [`SurfaceFieldDto::NotModelled`], with no bulk.
 //!
+//! # Revisions and deltas
+//!
+//! A body's coverage revision counts its survey passes: 0 before the first, and revision n is
+//! always the fold of its first n passes, so a revision names one cover for good. A request with
+//! no `have_revision` is answered with every surveyed cell and its margin; one naming the revision
+//! a client holds is answered with the delta, the cells the client's revision did not hold or held
+//! with another resolution code (a cell surveyed again more finely, or a margin cell since
+//! surveyed). A delta's cells replace the client's copies, code and all, and the cells it leaves
+//! out are unchanged. Asking with the revision answered last gives block 0 alone. The same request
+//! of the same revision gives the same bytes.
+//!
+//! The scene topic names each body whose revision rises ([`SurfaceRevisionDto`], on the scene's
+//! notifications as `surface_revisions`), so that a client keeping the body's field asks for the
+//! delta. A subscription's state carries no revisions and a notification missed while
+//! unsubscribed is not replayed, so a client that subscribes again asks `surface_field` with the
+//! revision it holds for each body whose field it keeps.
+//!
 //! # The survey stand-in
 //!
 //! Until a sensors plan records passes from the ship's instruments, `survey_pass` lets an honest
@@ -51,7 +68,8 @@ pub struct SurfaceFieldRequest {
     /// The body.
     pub body: BodyIdHex,
     /// The revision of the body's coverage the client holds, from an earlier answer: the answer
-    /// then carries only the cells surveyed since. `null` for the whole surveyed field.
+    /// then carries only the cells surveyed since. `null` (or 0) for the whole surveyed field. A
+    /// revision above the body's own is `bad_request` naming `have_revision`.
     pub have_revision: Option<u32>,
 }
 
@@ -71,7 +89,8 @@ pub enum SurfaceFieldDto {
         revision: u32,
         /// The cells the payload holds, each range with the resolution it was surveyed at;
         /// [`CoverRangeDto::resolution`] 0 marks the margin about a survey, whose cells are sent
-        /// whole and exact for the synthesis but were not surveyed.
+        /// whole and exact for the synthesis but were not surveyed. For a delta (a request with
+        /// `have_revision`), the delta's cells alone, which replace the client's copies.
         coverage: CoverDto,
         /// The payload's manifest.
         bulk: BulkManifestDto,
@@ -336,6 +355,21 @@ pub struct SurveyPassDto {
     pub revision: u32,
 }
 
+/// A body whose surveyed coverage grew, as the scene topic tells it (rendering plan R03's Design
+/// note 4, R09.T19.b): a client that keeps the body's field asks `surface_field` again with the
+/// revision it holds as `have_revision`, for the new cells alone.
+///
+/// A body's revision only rises, since revision n is the fold of the body's first n survey passes,
+/// so a later notification never names a smaller revision for a body than an earlier one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SurfaceRevisionDto {
+    /// The body surveyed.
+    pub body: BodyIdHex,
+    /// Its coverage's revision, from 1: how many survey passes of the body are recorded.
+    pub revision: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{Value, json};
@@ -550,6 +584,17 @@ mod tests {
     #[test]
     fn survey_pass_answer_wire_form() {
         assert_wire_form(&SurveyPassDto { revision: 7 }, json!({ "revision": 7 }));
+    }
+
+    #[test]
+    fn surface_revision_wire_form() {
+        assert_wire_form(
+            &SurfaceRevisionDto {
+                body: body(),
+                revision: 4,
+            },
+            json!({ "body": "0200080020000000.0103", "revision": 4 }),
+        );
     }
 
     #[test]

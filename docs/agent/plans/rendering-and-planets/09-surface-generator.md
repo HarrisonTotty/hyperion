@@ -2434,7 +2434,13 @@ The coarse pass, its quantisation and payload format, and the synthesis are gene
 question 4), so a change to any of them bumps `GENERATOR_VERSION` (21 at the re-validation).
 Until R09.T19 first sends a payload, a change to the codec's layout or to the `testing` worlds
 re-blesses `tests/golden/wire/` at the current version with neither version bumped (ruling of
-2026-10-09); from then it bumps both. T1.b, whose filled hooks section moves plan 14's golden
+2026-10-09); from then it bumps both. _The first send (ruling of "main", 2026-10-13):_ the first
+payload the server serves for a generated body, once production inputs inhabit the surface
+section (P14.T24 and P14.T48), or a client's first persisting of a payload (a disk cache, say),
+whichever comes first. T19.b serves payloads to tests and the `testing` worlds alone, so it is not
+the first send, and R11's liquid palette member is still a re-bless with no bump. The freeze
+protects consumers that hold payloads across versions, and none exists while every generated body
+answers `not_modelled` and no client asks. T1.b, whose filled hooks section moves plan 14's golden
 systems, makes no bump of its own: it is built in galaxy plan 14's 21 → 22 batch and lands under
 that batch's one bump (plan 14's bump plan, under its Tasks' order). This plan's own first bump is
 made by whichever of T9 and T16 lands first, through the orchestrator, which coordinates bumps one
@@ -4232,6 +4238,146 @@ re-blessing this plan's payload and coarse goldens in that commit.
   - _The store is the caller's._ `survey_log` takes the `UniverseStore` each call, and the open
     in flight uses the first caller's. The server has one store, so nothing differs. Lean: give
     the service the store at construction when P12.T8's holder takes the logs over.
+- **Deviations in T19.b, as built** (2026-10-13).
+  - _Files._ The protocol's `surface.rs` (`SurfaceRevisionDto`), `scene.rs` (the field),
+    `envelope.rs` and `lib.rs`, the bindings `just gen-protocol` writes and
+    `packages/protocol/src/index.ts`'s re-export. The server's `requests/surface.rs` (the handler)
+    and `requests/mod.rs`, `convert/surface.rs` and `convert.rs`, `knowledge/surveys.rs`,
+    `surface/service.rs`, `scene/topic.rs`, `subscriptions.rs`, and in passing `bulk.rs`,
+    `testing.rs`, `scene/core.rs` and `convert/scene_fixture.rs`.
+  - _The answer, for R10.T7._
+    - `surface_field` answers `Ready { header, revision, coverage, bulk }` after the payload's
+      binary frames, or `NotModelled { section }` with no bulk.
+    - `revision` is the body's coverage revision the payload reflects: its count of passes, 0
+      before the first. A body with no pass is served at revision 0 as block 0 alone, the header.
+    - With no `have_revision`, or with 0, the payload is the whole surveyed field: every
+      surveyed cell with its code and its margin of `SYNTHESIS_MARGIN_CELLS` at code 0, the
+      climate over them and every crater reaching them (`encode_payload`'s gate).
+    - With `have_revision` n, the payload is the delta since revision n: the cells of the cover
+      and its margin that revision n's cover and its margin did not hold, or held with another
+      code. So a cell surveyed again more finely, or a margin cell since surveyed, is sent again
+      with its new code. Block 0 always carries the header; asking with the latest revision gives
+      block 0 alone.
+    - `coverage` is the payload's own cells with their codes, margin cells at 0, the union of
+      its blocks' covers. For a delta, these are the delta's cells alone: a client replaces its
+      copies of them and keeps the rest. It is not the whole cover at `revision`.
+    - A `have_revision` above the body's revision is `bad_request` naming `have_revision`; the
+      client asks again without it.
+    - The same request at the same revision gives the same bytes, from the field kept or
+      computed again.
+  - _The order._ The universe; the body ID's two parts; the body's system from `bodies_of`
+    (`unknown_system` naming `body`); `SurfaceService::field_level` on an interactive job. Its
+    `NotModelled`, and an `Inputs(NotModelled(section))` error, answer `NotModelled` with no bulk
+    job, so no bulk slot is taken (T17's deferred finding). The error names `figure` for a body
+    whose figure is not modelled either, which `survey_pass` refuses `bad_request` naming `body`
+    (T19.a); that case has no test, since no source gives such a record. Other refusals go through `convert::surface_refusal`. Then the survey log
+    and the body's coverage, so that a bad `have_revision` is refused before a pass is run; then
+    `SurfaceService::field`; then the gate, on one bulk job. A body whose passes index another
+    level than its field is `internal`, logged; only a server fault makes it.
+  - _The revisions' history._ `Surveys` keeps each body's passes, a code and the cells each, in
+    their order beside its fold. `SurveyLog::history(body)` gives a `CoverageHistory` snapshot:
+    `latest()`, and `at(revision)`, which folds the first n passes again (a byte a cell, on the
+    bulk job). `Coverage::to_cover` gives the `Cover` of its runs, without the margin, for
+    `encode_payload`.
+  - _The hook is in `SurveyLog::record`, not in the handler._ Every pass recorded raises its body's
+    revision in the log's `watch` channel of `RaisedRevisions`, under the file's lock, so a later
+    caller of `record` (the sensors plan) notifies too. The surface service makes each universe's
+    channel on whichever comes first, a scene subscription (`watch_surveys`) or the log's opening
+    (`SurveyLog::open_announcing`). So a scene subscribed before the universe's first pass is told
+    of it. The channel holds only the revisions raised since the log was opened, never those
+    loaded from the file.
+  - _The scene topic._ A subscription takes the revisions raised when it opens as already told,
+    since its state carries none (R03's Design note 4). It then pushes each body raised past what
+    it told, with its latest revision, as `surface_revisions`, stating the clock then. Every
+    surveyed body of the universe is named, not only the scene system's bodies; the client keeps
+    those whose fields it holds.
+  - _The merge._ `ScenePush::merge` merges `surface_revisions` by body, keeping the larger
+    revision, so the order of the pushes does not matter. Bodies new to the push are appended in
+    the order first sent. The revisions are kept across an arrival, which replaces only the
+    scene's own state. `SurfaceRevisionDto` sits in the protocol's `surface.rs`, beside the other
+    surface types; `PROTOCOL_VERSION` stays 2.
+  - _Clippy._ The notification's 24 more bytes put `subscriptions::Step` past
+    `large_enum_variant`, so `Step::Serialise` holds a `Box<Unsent>`, one allocation a
+    notification sent. The tests' `testing::Received` takes an `#[expect]` instead, since every
+    socket test matches it by value.
+  - _Public items beyond Provides._ In `knowledge::surveys`: `CoverageHistory` (`latest`, `at`),
+    `Coverage::to_cover` and `SurveyLog::history`, and crate-private `RaisedRevisions` (`get`,
+    `raised_since`) and `SurveyLog::open_announcing`. In the server, crate-private:
+    `SurfaceService::watch_surveys`; in `convert`, `FieldRequest`, `surface_header`,
+    `climate_model`, `precipitation_source`, `palette_role`, `record_section`, `cover_dto` and
+    `surface_revision`; and the tests' `BulkPayload::bytes`.
+  - _Tests_ (`requests::surface`, `subscriptions`, `knowledge::surveys`, `convert::surface`, and
+    the protocol's `scene` and `surface`):
+    - a second pass's delta carries only the new and re-surveyed cells and the margin newly
+      reached, cell for cell against `Cover::with_margin`; the whole field holds both passes';
+    - the same request twice gives identical bytes, whole and as deltas, from one pass;
+    - a body with no pass is block 0 alone; `have_revision` above the body's is refused;
+    - a body not modelled answers `not_modelled`, with no bulk job;
+    - the refusals naming `body`;
+    - a `survey_pass` raises the body's revision on a scene subscribed before the first pass: the
+      first rise named alone, then each body's latest revision;
+    - two pushes merged while a reader is slow carry each body's latest revision;
+    - a merge keeps each body's larger revision whatever the order, and across an arrival;
+    - a resubscribed client is told nothing while away, its `have_revision` request over the
+      socket returns the cells surveyed meanwhile, and the rise made while it was away is not
+      replayed;
+    - each revision folded again equals a log of only those passes; a coverage's cover; recorded
+      passes raise their revisions and loaded ones none; a raise keeps the larger revision;
+    - a field request's revision checked against the body's; the header's members, each against
+      its getter; the classes' wire names;
+    - `SurfaceRevisionDto`'s wire form, and a notification without the field omitting it.
+    - In every answer taken from the handler directly, the tests check that the answer's header
+      is block 0's and that `coverage` is the union of the blocks' covers; the answers over the
+      socket check their bytes against the manifest.
+  - _Acceptance._ `cargo test -p hyperion-server surface`, then
+    `cargo test -p hyperion-server subscriptions`. The two filters miss tests this task added or
+    edited, which T19.b ran by name (`--lib -- surveys requests:: scene:: convert::`, and the
+    protocol's `--lib`), and which the gate, `just smart-ci`, ran with the rest of both crates:
+    - `knowledge::surveys`'s four new tests, whose names say `survey`;
+    - the protocol's `surface::tests::surface_revision_wire_form`,
+      `scene::tests::a_notification_without_surface_revisions_omits_them` and
+      `a_notification_carries_what_changed`, and `envelope::tests::notification_wire_form`;
+    - the server's `requests::tests::kinds_without_a_handler_are_answered_unsupported` (five kinds
+      now, not six), `scene::core::tests::only_an_arrival_is_a_large_notification`,
+      `scene::topic::tests::a_body_whose_valid_until_passes_at_100_000x_is_pushed` and
+      `convert::scene_fixture`'s sizes;
+    - `just gen-protocol-check` for the bindings.
+  - _The first send (ruled by "main", 2026-10-13)._ T19.b is the first commit that serves a
+    payload, though only to tests: under `RecordInputs` every generated body answers
+    `not_modelled`, and no client asks yet (R10.T7). Main's ruling, now in the Generator version
+    section: the first send is the first payload served for a generated body (once P14.T24 and
+    P14.T48 inhabit the surface section), or a client's first persisting of a payload, whichever
+    comes first. So R11's liquid palette member (R11.T8), and any other layout change before then,
+    still re-blesses `tests/golden/wire/` with no bump.
+- **Deferred findings (2026-10-13 rule)** (R09.T19.b). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The margin is flooded twice._ `encode_payload` adds the margin to the cover and to `since`,
+    and the handler's `sent` repeats both floods to name the payload's cells in `coverage`: four
+    floods for a delta where two would do, and two for a whole answer where one would do, each
+    a 6 · 4ᴸ-byte map, on the bulk job. `sent` also copies the encoder's selection rule from the
+    surface crate, which only the tests' check of the blocks' covers would catch drifting from.
+    Lean: a surface-crate function that gives the payload's cover with its bytes, once T16's
+    benches measure the cost.
+  - _A level job for each request._ Every `surface_field` runs `field_level`'s interactive job,
+    even when the field is kept, so each request after a revision rise reads the record and asks
+    the source once more. `for_body`'s cost is unknown until P14.T54.a. Lean: skip the job when
+    the field is held, since a held field's body is modelled.
+  - _The cover's JSON is bounded only by the field._ `coverage` holds a range for each run of the
+    payload's cells. Each pass carries at most 256 runs, but passes accumulate, so a fragmented
+    whole answer could hold up to one range a cell: 393,216 at level 8, about 40 bytes each in
+    JSON, some 15 MB at the worst, near `OUTBOUND_BYTES`' 16 MiB, in a terminal response the pool
+    serialises. The blocks already carry the same cover. Lean: measure with R10.T7's client. If it
+    grows, the main thread could take the cover from the blocks' own covers, or the answer could
+    send a summary.
+  - _A body's passes are kept in memory._ The history holds every pass's runs for the process's
+    life, about as much as the log file. Lean: checkpoint covers every k revisions with P12.T8's
+    holder, if a sensors plan records passes often.
+  - _Every surveyed body is named._ A scene subscription is told of every surveyed body of its
+    universe, not only those its client keeps. Lean: fine for the stand-in; sessions may scope it
+    to the ship's.
+  - _The raised revisions are never dropped._ A universe's channel and its map stay for the
+    server's life, a few bytes for each body surveyed since it started. Lean: drop them with
+    P12.T8's holder when a universe closes.
 - **Deviations in T18, as built** (2026-10-09).
   - _The shared log._ `knowledge/jsonl.rs` (private) holds what `persist.rs` held privately:
     `KnowledgeLog` (now carrying its header's format), `push_line`, `sync_directory`, `save_io`

@@ -1,5 +1,5 @@
-//! The surface's handlers (rendering plan R09): `survey_pass` (R09.T19.a), and `surface_field`
-//! once R09.T19.b serves it.
+//! The surface's handlers (rendering plan R09): `survey_pass` (R09.T19.a) and `surface_field`
+//! (R09.T19.b).
 //!
 //! A `survey_pass` starts from [`openable_universe`], as every handler that names a universe does,
 //! checks its fields and decodes the body's ID ([`SurveyRequest`]), takes the body's system from
@@ -7,25 +7,50 @@
 //! field on an interactive pool job ([`SurfaceService::field_level`]). The pass is then recorded
 //! through the universe's survey log, which the surface service opens on its first use and keeps:
 //! [`SurveyLog::record`](crate::knowledge::surveys::SurveyLog::record) is the only way coverage
-//! grows, and this request its stand-in caller until sensors exist (Design note 16). A pass of a
-//! body whose inputs are modelled also starts the body's field, so that the `surface_field` that
-//! follows finds it computed or computing (Design note 19).
+//! grows, and this request its stand-in caller until sensors exist (Design note 16). Recording
+//! raises the body's revision on the universe's scene topic, whose subscriptions name it in their
+//! next notification's `surface_revisions`. A pass of a body whose inputs are modelled also starts
+//! the body's field, so that the `surface_field` that follows finds it computed or computing
+//! (Design note 19).
+//!
+//! A `surface_field` resolves its body in the same order, answers a body whose inputs are not
+//! modelled `not_modelled` from the same interactive job, with no bulk slot taken, and reads the
+//! body's coverage from the survey log, the revision the client says it holds checked against it,
+//! before it asks the service for the field, computed once and kept. The payload is then encoded
+//! on a bulk job, gated by the coverage ([`gate`]): the surveyed cells with their codes and their
+//! margin, the climate over them and every crater that reaches them, and with `have_revision`
+//! only what the client's revision did not hold (Design notes 15 to 17). Its bytes are R03's bulk
+//! payload, sent as binary frames before the answer ([`Answer`]).
 //!
 //! [`SurfaceService::field_level`]: crate::surface::SurfaceService::field_level
 
 use std::sync::Arc;
 
-use hyperion_protocol::{RequestError, ResponseBody, SurveyPassDto, SurveyPassRequest};
-use hyperion_sim::planetary::ResolveBodyError;
-
-use super::bodies_of;
-use super::universe::openable_universe;
-use crate::AppState;
-use crate::compute::{CancelToken, GenerateBodiesError};
-use crate::convert::{
-    SurveyRequest, body_refusal, open_surveys_refusal, record_survey_refusal, surface_refusal,
+use axum::body::Bytes;
+use hyperion_protocol::{
+    BodyIdHex, ErrorCode, RequestError, ResponseBody, SurfaceFieldDto, SurfaceFieldRequest,
+    SurveyPassDto, SurveyPassRequest,
 };
-use crate::surface::{FieldKey, FieldLevel};
+use hyperion_sim::id::SystemId;
+use hyperion_sim::planetary::ResolveBodyError;
+use hyperion_sim::planetary::surface::SurfaceInputsError;
+use hyperion_surface::field::{
+    CoarseField, CoarseLevel, Cover, CoverRange, FieldView, ResolutionCode, SYNTHESIS_MARGIN_CELLS,
+};
+use hyperion_surface::wire::encode_payload;
+
+use super::universe::openable_universe;
+use super::{bodies_of, request_error};
+use crate::AppState;
+use crate::bulk::{Answer, BulkPayload};
+use crate::compute::sky::bulk;
+use crate::compute::{CancelToken, GalaxyKey, GenerateBodiesError, GeneratedSystem};
+use crate::convert::{
+    FieldRequest, SurveyRequest, body_refusal, cover_dto, open_surveys_refusal, record_section,
+    record_survey_refusal, surface_header, surface_refusal,
+};
+use crate::knowledge::surveys::{CoverageHistory, CoverageRevision};
+use crate::surface::{FieldKey, FieldLevel, SurfaceJobError};
 
 /// Records one survey pass of a body and answers with the body's new coverage revision.
 ///
@@ -56,15 +81,7 @@ pub(crate) async fn survey_pass(
     let universe = openable_universe(&state, &request.universe)?;
     let wanted = SurveyRequest::try_from(&request)?;
     let key = universe.key();
-    let galaxy = state.galaxies.get(key).await?;
-    let system = bodies_of(&state, key, &galaxy, wanted.system())
-        .await
-        .map_err(|error| match error {
-            GenerateBodiesError::NoSuchSystem(error) => {
-                body_refusal(&request.body, ResolveBodyError::NoSuchSystem(error))
-            }
-            GenerateBodiesError::Compute(error) => error.into(),
-        })?;
+    let system = system_of(&state, key, wanted.system(), &request.body).await?;
     let field = FieldKey::new(key, wanted.body());
     let level = state
         .surface
@@ -96,14 +113,224 @@ pub(crate) async fn survey_pass(
     }))
 }
 
+/// Answers `surface_field`: the body's coarse field in the cells its survey passes covered, with
+/// their margin, as R03's bulk payload before a [`SurfaceFieldDto::Ready`]; or, for a body whose
+/// inputs are not modelled, [`SurfaceFieldDto::NotModelled`] naming the section, with no bulk.
+///
+/// The answer states the body's coverage revision it reflects, 0 before the first pass, whose
+/// payload is block 0 alone, the field's header. With `have_revision` (other than 0) the payload is
+/// the delta since that revision: the cells of the body's cover and margin that the client's did
+/// not hold, or held with another code, and the answer's `coverage` names them alone. The field is
+/// computed on the first request for it, or found computing or kept, and the payload encoded on a
+/// bulk job; the same request at the same revision gives the same bytes.
+///
+/// # Errors
+///
+/// Those of [`openable_universe`]; on the field `body`, `unknown_system`, `bad_request` for an
+/// index outside plan 14's layout and `unknown_body` for one at which the system holds no body,
+/// as `body_detail` refuses them, and `bad_request` for a body with no solid surface; the
+/// galaxy's; `unsupported_save_format` or `internal` if the universe's survey log cannot be opened;
+/// `bad_request` naming `have_revision` for a revision above the body's; `queue_full`, `internal`
+/// or `cancelled` from the pool's jobs; and `internal` if the body's passes index another level
+/// than its field, which only a server fault makes.
+pub(crate) async fn field(
+    state: Arc<AppState>,
+    request: SurfaceFieldRequest,
+    token: CancelToken,
+) -> Result<Answer, RequestError> {
+    let universe = openable_universe(&state, &request.universe)?;
+    let asked = FieldRequest::try_from(&request)?;
+    let key = universe.key();
+    let system = system_of(&state, key, asked.system(), &request.body).await?;
+    let field_key = FieldKey::new(key, asked.body());
+    // The interactive job reads the record and the inputs, so that a body with no field is
+    // answered without a bulk slot (R09.T17's deferred finding).
+    match state
+        .surface
+        .field_level(field_key, &system, token.clone())
+        .await
+    {
+        Ok(FieldLevel::Modelled(_)) => {}
+        Ok(FieldLevel::NotModelled { section, .. })
+        | Err(SurfaceJobError::Inputs(SurfaceInputsError::NotModelled(section))) => {
+            return Ok(Answer::from(ResponseBody::SurfaceField(
+                SurfaceFieldDto::NotModelled {
+                    section: record_section(section),
+                },
+            )));
+        }
+        Err(error) => return Err(surface_refusal(&request.body, error)),
+    }
+    let log = state
+        .surface
+        .survey_log(state.registry.store(), universe.id())
+        .await
+        .map_err(|error| open_surveys_refusal(&error))?;
+    let history = log.history(asked.body());
+    let latest = history.as_ref().map(|history| history.latest().revision());
+    let since = asked.since(latest)?;
+    let revision = latest.map_or(0, CoverageRevision::get);
+    let field = state
+        .surface
+        .field(field_key, &system)
+        .await
+        .map_err(|error| surface_refusal(&request.body, error))?;
+    if let Some(history) = &history {
+        check_level(&request, history.latest().level(), field.header().level())?;
+    }
+    let header = Box::new(surface_header(field.header()));
+    let gated = bulk(&state.pool, &token, move |_: &CancelToken| {
+        gate(&field, history.as_ref(), since)
+    })
+    .await?;
+    let payload = BulkPayload::new(Bytes::from(gated.bytes)).expect(
+        "a field's payload, some 15 MB at the most, has far fewer chunks than a u32 counts",
+    );
+    tracing::debug!(
+        body = request.body.as_str(),
+        revision,
+        since = since.map(CoverageRevision::get),
+        bytes = payload.manifest().bytes,
+        "answered a body's coarse field"
+    );
+    Ok(Answer {
+        body: ResponseBody::SurfaceField(SurfaceFieldDto::Ready {
+            header,
+            revision,
+            coverage: cover_dto(&gated.cover),
+            bulk: payload.manifest(),
+        }),
+        bulk: Some(payload),
+    })
+}
+
+/// The planetary system of the body `body` names, `system`, from the body cache, refused as
+/// `body_detail` refuses an unresolved system, naming `body`.
+///
+/// # Errors
+///
+/// `unknown_system` naming `body`, and the pool's errors.
+async fn system_of(
+    state: &Arc<AppState>,
+    key: GalaxyKey,
+    system: SystemId,
+    body: &BodyIdHex,
+) -> Result<Arc<GeneratedSystem>, RequestError> {
+    let galaxy = state.galaxies.get(key).await?;
+    bodies_of(state, key, &galaxy, system)
+        .await
+        .map_err(|error| match error {
+            GenerateBodiesError::NoSuchSystem(error) => {
+                body_refusal(body, ResolveBodyError::NoSuchSystem(error))
+            }
+            GenerateBodiesError::Compute(error) => error.into(),
+        })
+}
+
+/// Refuses a body whose survey passes index `passes`, another level than its field's, `field`:
+/// both come from one source's radius, so only a fault of the server's makes them differ, and the
+/// payload's cells would be another level's.
+///
+/// # Errors
+///
+/// `internal`, logged with both levels.
+fn check_level(
+    request: &SurfaceFieldRequest,
+    passes: CoarseLevel,
+    field: CoarseLevel,
+) -> Result<(), RequestError> {
+    if passes == field {
+        return Ok(());
+    }
+    tracing::error!(
+        body = request.body.as_str(),
+        passes = passes.get(),
+        field = field.get(),
+        "a body's survey passes index another level than its coarse field"
+    );
+    Err(request_error(
+        ErrorCode::Internal,
+        "the server's survey of the body does not fit its field",
+    ))
+}
+
+/// A field's payload as the coverage gates it, and the cells it holds.
+#[derive(Debug)]
+struct Gated {
+    /// The payload's blocks.
+    bytes: Vec<u8>,
+    /// The cells the blocks hold, with their codes, margin cells at [`ResolutionCode::NONE`].
+    cover: Cover,
+}
+
+/// The payload of `field` that the coverage `history` lets a client hold, and the cells it holds,
+/// whole or, with `since`, the delta since that revision (Design notes 15 to 17).
+///
+/// The body's latest coverage, converted to a [`Cover`] of its runs, is what
+/// [`encode_payload`] gates by: its cells with their codes and their margin of
+/// [`SYNTHESIS_MARGIN_CELLS`], the climate over them and every crater whose reach touches one; and
+/// `since`'s coverage, folded again from the body's first passes, is the cover the client holds,
+/// never with its margin, which the encoder adds to both. No history is no pass: block 0 alone.
+///
+/// # Panics
+///
+/// If `since` is past the history's latest revision, which the handler refused, or `since` names a
+/// revision with no history.
+#[must_use]
+fn gate(
+    field: &CoarseField,
+    history: Option<&CoverageHistory>,
+    since: Option<CoverageRevision>,
+) -> Gated {
+    let cover = history.map_or_else(Cover::new, |history| history.latest().to_cover());
+    let since = since.map(|revision| {
+        history
+            .and_then(|history| history.at(revision))
+            .expect("a revision at most the body's own is in its history")
+            .to_cover()
+    });
+    let bytes = encode_payload(field, &cover, since.as_ref());
+    let cover = sent(field.header().level(), &cover, since.as_ref());
+    Gated { bytes, cover }
+}
+
+/// The cells [`encode_payload`] sends for `cover` since `since` at `level`, with their codes: the
+/// cells of `cover` and its margin that `since` and its margin did not hold, or held with another
+/// code, as the encoder chooses them; the whole of `cover` with its margin without `since`.
+#[must_use]
+fn sent(level: CoarseLevel, cover: &Cover, since: Option<&Cover>) -> Cover {
+    let held = cover.with_margin(level, SYNTHESIS_MARGIN_CELLS);
+    let Some(since) = since else {
+        return held;
+    };
+    let had = since.with_margin(level, SYNTHESIS_MARGIN_CELLS);
+    let mut runs: Vec<(u32, u32, ResolutionCode)> = Vec::new();
+    for range in held.ranges() {
+        let code = range.code();
+        for cell in (range.start()..range.end()).filter(|&cell| had.code(cell) != Some(code)) {
+            match runs.last_mut() {
+                Some((_, end, last)) if *end == cell && *last == code => *end = cell + 1,
+                _ => runs.push((cell, cell + 1, code)),
+            }
+        }
+    }
+    Cover::from_ranges(
+        runs.into_iter().map(|(start, end, code)| {
+            CoverRange::new(start, end, code).expect("a run holds a cell")
+        }),
+    )
+    .expect("runs found in index order are sorted and disjoint")
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::OnceLock;
 
     use hyperion_protocol::{
-        BodyIdHex, CellRangeDto, ClientMessage, CreateUniverseRequest, ErrorCode, RecordSectionDto,
-        RequestBody, RequestId, ServerMessage, SurfaceFieldDto, SurveySourceDto, UniverseIdHex,
-        UniverseTime,
+        CellRangeDto, ClientMessage, CoverDto, CreateUniverseRequest, DetailLevelDto,
+        NotificationBody, RecordSectionDto, RequestBody, RequestId, SceneNotificationDto,
+        SceneSubscribeRequest, ServerMessage, SubscribeRequest, SubscriptionTopic,
+        SurfaceRevisionDto, SurveySourceDto, UniverseIdHex, UniverseTime, UnsubscribeRequest,
     };
     use hyperion_sim::Seed;
     use hyperion_sim::galaxy::Galaxy;
@@ -113,15 +340,17 @@ mod tests {
     use hyperion_sim::planetary::surface::{CoarseInputs, SurfaceInputsError, reference};
     use hyperion_sim::planetary::{SystemContext, generate};
     use hyperion_sim::units::Metres;
-    use hyperion_surface::field::{CoarseLevel, ResolutionCode, coarse_level};
+    use hyperion_surface::field::coarse_level;
+    use hyperion_surface::wire::decode_payload;
     use tokio::time::timeout;
 
     use super::*;
+    use crate::convert::cover_dto;
     use crate::knowledge::surveys::SurveyLog;
     use crate::limits::{MAX_INBOUND_FRAME_BYTES, MAX_SURVEY_RANGES};
     use crate::requests::{Handlers, is_large, to_frame};
     use crate::surface::{InputsSource, RECORD_TIME};
-    use crate::testing::{Harness, WAIT};
+    use crate::testing::{Client, Harness, Received, WAIT};
     use crate::universe::UniverseId;
     use crate::ws::ConnectionLimits;
 
@@ -633,5 +862,529 @@ mod tests {
         let system: SystemId = solid.system();
         assert_eq!((other_solid.system(), giant.system()), (system, system));
         assert_ne!(solid, other_solid);
+    }
+
+    /// A `surface_field` request for `body`, holding `have_revision`.
+    fn field_request(
+        universe: &UniverseIdHex,
+        body: BodyId,
+        have_revision: Option<u32>,
+    ) -> SurfaceFieldRequest {
+        SurfaceFieldRequest {
+            universe: universe.clone(),
+            body: hex(body),
+            have_revision,
+        }
+    }
+
+    async fn ask(harness: &Harness, request: SurfaceFieldRequest) -> Result<Answer, RequestError> {
+        timeout(
+            WAIT,
+            field(Arc::clone(harness.state()), request, CancelToken::new()),
+        )
+        .await
+        .expect("timed out asking for a surface field")
+    }
+
+    /// What a `ready` answer says, and its payload's bytes.
+    #[derive(Debug, PartialEq)]
+    struct Served {
+        revision: u32,
+        coverage: CoverDto,
+        bytes: Vec<u8>,
+    }
+
+    fn served(answer: Result<Answer, RequestError>) -> Served {
+        let Ok(Answer {
+            body:
+                ResponseBody::SurfaceField(SurfaceFieldDto::Ready {
+                    header,
+                    revision,
+                    coverage,
+                    bulk: manifest,
+                }),
+            bulk: Some(payload),
+        }) = answer
+        else {
+            panic!("expected a field served in bulk, got {answer:?}");
+        };
+        assert_eq!(payload.manifest(), manifest);
+        let blocks = decode_payload(payload.bytes()).expect("the payload decodes");
+        let decoded = blocks[0].header().expect("block 0 carries the header");
+        assert_eq!(
+            *header,
+            surface_header(decoded),
+            "the answer's header is block 0's"
+        );
+        // The blocks' covers, in cell-index order, are the cells the answer names.
+        let held = Cover::from_ranges(
+            blocks
+                .iter()
+                .flat_map(|block| block.cover().ranges().iter().copied()),
+        )
+        .expect("the blocks' covers are in order");
+        assert_eq!(
+            cover_dto(&held),
+            coverage,
+            "the answer names the payload's cells"
+        );
+        Served {
+            revision,
+            coverage,
+            bytes: payload.bytes().to_vec(),
+        }
+    }
+
+    /// The cells of a cover as the wire names them, with their codes.
+    fn cells(coverage: &CoverDto) -> Vec<(u32, u8)> {
+        coverage
+            .ranges
+            .iter()
+            .flat_map(|range| (range.start..range.end).map(|cell| (cell, range.resolution)))
+            .collect()
+    }
+
+    /// The cover of `runs` at `code`, as a pass covers them.
+    fn cover_of(runs: &[(u32, u32)], code: ResolutionCode) -> Cover {
+        Cover::from_ranges(
+            runs.iter()
+                .map(|&(start, end)| CoverRange::new(start, end, code).unwrap()),
+        )
+        .unwrap()
+    }
+
+    /// Each cell of `now` with its margin, at `level`, whose code `then` with its margin did not
+    /// hold: a delta's cells, found cell by cell.
+    fn delta(level: CoarseLevel, now: &Cover, then: &Cover) -> Vec<(u32, u8)> {
+        let (now, then) = (
+            now.with_margin(level, SYNTHESIS_MARGIN_CELLS),
+            then.with_margin(level, SYNTHESIS_MARGIN_CELLS),
+        );
+        (0..level.cell_count())
+            .filter_map(|cell| {
+                let code = now.code(cell)?;
+                (then.code(cell) != Some(code)).then_some((cell, code.get()))
+            })
+            .collect()
+    }
+
+    /// A field asked for with no `have_revision` holds the surveyed cells with their codes and
+    /// their margin; after a second pass, the delta since the first revision holds only the cells
+    /// it added or surveyed more finely, and the margin newly reached, while the whole field holds
+    /// both passes' cells.
+    #[tokio::test]
+    async fn a_second_pass_s_delta_carries_only_new_cells() {
+        let (harness, universe) = started(Ceres).await;
+        let solid = bodies().solid;
+        let level = ceres_level();
+        let coarse = ResolutionCode::from_resolution(Metres::new(120.0)).unwrap();
+        let fine = ResolutionCode::from_resolution(Metres::new(2.0)).unwrap();
+        assert_eq!(
+            revision(survey(&harness, pass(&universe, solid, &[(0, 64)])).await),
+            1
+        );
+        let first = served(ask(&harness, field_request(&universe, solid, None)).await);
+        let first_cover = cover_of(&[(0, 64)], coarse);
+        assert_eq!(first.revision, 1);
+        assert_eq!(
+            first.coverage,
+            cover_dto(&first_cover.with_margin(level, SYNTHESIS_MARGIN_CELLS)),
+            "the surveyed cells at their code and the margin at 0"
+        );
+
+        let mut second = pass(&universe, solid, &[(32, 48), (3_000, 3_064)]);
+        second.resolution_m = 2.0;
+        assert_eq!(revision(survey(&harness, second).await), 2);
+        let since = served(ask(&harness, field_request(&universe, solid, Some(1))).await);
+        assert_eq!(since.revision, 2);
+        let both = Cover::from_ranges([
+            CoverRange::new(0, 32, coarse).unwrap(),
+            CoverRange::new(32, 48, fine).unwrap(),
+            CoverRange::new(48, 64, coarse).unwrap(),
+            CoverRange::new(3_000, 3_064, fine).unwrap(),
+        ])
+        .unwrap();
+        let sent = cells(&since.coverage);
+        assert_eq!(sent, delta(level, &both, &first_cover));
+        let at = |cell: u32| {
+            sent.iter()
+                .find(|&&(at, _)| at == cell)
+                .map(|&(_, code)| code)
+        };
+        assert_eq!(at(0), None, "a cell surveyed once is not sent again");
+        assert_eq!(
+            at(40),
+            Some(fine.get()),
+            "a cell surveyed again more finely is"
+        );
+        assert_eq!(at(3_000), Some(fine.get()), "and so is a new one");
+        assert!(
+            sent.iter().all(|&(cell, _)| (32..48).contains(&cell)
+                || first_cover
+                    .with_margin(level, SYNTHESIS_MARGIN_CELLS)
+                    .code(cell)
+                    .is_none()),
+            "nothing the first answer held unchanged"
+        );
+
+        let whole = served(ask(&harness, field_request(&universe, solid, None)).await);
+        assert_eq!(
+            whole.coverage,
+            cover_dto(&both.with_margin(level, SYNTHESIS_MARGIN_CELLS))
+        );
+        assert!(whole.bytes.len() > since.bytes.len());
+        harness.stop().await;
+    }
+
+    /// The same request at the same revision gives the same bytes, whole or as a delta, from the
+    /// field kept; and a request naming the latest revision gets block 0 alone.
+    #[tokio::test]
+    async fn the_same_surface_field_request_twice_gives_identical_bytes() {
+        let (harness, universe) = started(Ceres).await;
+        let solid = bodies().solid;
+        revision(survey(&harness, pass(&universe, solid, &[(0, 96), (100, 101)])).await);
+        revision(survey(&harness, pass(&universe, solid, &[(2_000, 2_100)])).await);
+        for have in [None, Some(1), Some(2)] {
+            let once = served(ask(&harness, field_request(&universe, solid, have)).await);
+            let twice = served(ask(&harness, field_request(&universe, solid, have)).await);
+            assert_eq!(once, twice, "have_revision {have:?}");
+        }
+        assert_eq!(
+            harness.state().surface.counters().computed(),
+            1,
+            "one pass served them all"
+        );
+        let latest = served(ask(&harness, field_request(&universe, solid, Some(2))).await);
+        assert_eq!(latest.coverage, CoverDto { ranges: Vec::new() });
+        assert_eq!(decode_payload(&latest.bytes).unwrap().len(), 1);
+        harness.stop().await;
+    }
+
+    /// A body with no pass is served at revision 0, block 0 alone, as it is asked with 0; a
+    /// revision above the body's is refused naming `have_revision`.
+    #[tokio::test]
+    async fn a_body_with_no_pass_is_served_as_its_header_alone() {
+        let (harness, universe) = started(Ceres).await;
+        let solid = bodies().solid;
+        let none = served(ask(&harness, field_request(&universe, solid, None)).await);
+        assert_eq!(
+            (none.revision, none.coverage.ranges.len()),
+            (0, 0),
+            "no cell"
+        );
+        let blocks = decode_payload(&none.bytes).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert!(blocks[0].cells().is_empty());
+        assert_eq!(
+            served(ask(&harness, field_request(&universe, solid, Some(0))).await),
+            none
+        );
+        let ahead = ask(&harness, field_request(&universe, solid, Some(1)))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (ahead.code, ahead.field.as_deref()),
+            (ErrorCode::BadRequest, Some("have_revision")),
+            "{ahead:?}"
+        );
+        revision(survey(&harness, pass(&universe, solid, &[(0, 1)])).await);
+        let ahead = ask(&harness, field_request(&universe, solid, Some(2)))
+            .await
+            .unwrap_err();
+        assert_eq!(ahead.field.as_deref(), Some("have_revision"));
+        harness.stop().await;
+    }
+
+    /// Plan 14's surface section is not modelled yet, so under the production source a solid body
+    /// answers `not_modelled` naming it, with no bulk and no pass run, whether or not it was
+    /// surveyed.
+    #[tokio::test]
+    async fn a_body_not_modelled_answers_not_modelled_with_no_bulk() {
+        let harness = Harness::start(Handlers).await;
+        let created = super::super::universe::create(
+            Arc::clone(harness.state()),
+            CreateUniverseRequest {
+                name: "Unmodelled".to_owned(),
+                seed: Some(hyperion_protocol::SeedHex::from_u64(SEED)),
+            },
+        )
+        .await
+        .unwrap();
+        let ResponseBody::CreateUniverse(info) = created else {
+            panic!("create_universe answers with the universe: {created:?}");
+        };
+        let solid = bodies().solid;
+        let not_modelled = Ok(Answer {
+            body: ResponseBody::SurfaceField(SurfaceFieldDto::NotModelled {
+                section: RecordSectionDto::Surface,
+            }),
+            bulk: None,
+        });
+        assert_eq!(
+            ask(&harness, field_request(&info.id, solid, None)).await,
+            not_modelled
+        );
+        revision(survey(&harness, pass(&info.id, solid, &[(0, 1)])).await);
+        assert_eq!(
+            ask(&harness, field_request(&info.id, solid, Some(1))).await,
+            not_modelled
+        );
+        assert_eq!(harness.state().surface.counters().cache().misses(), 0);
+        assert_eq!(harness.state().pool.counters().queued_bulk(), 0);
+        harness.stop().await;
+    }
+
+    /// A body is resolved and refused as `body_detail` refuses it, naming `body`, and a giant has
+    /// no solid surface.
+    #[tokio::test]
+    async fn a_surface_field_of_no_solid_body_is_refused_naming_body() {
+        let (harness, universe) = started(Ceres).await;
+        let Bodies { solid, giant, .. } = *bodies();
+        let with_body = |raw: u64, index: u16| {
+            let mut request = field_request(&universe, solid, None);
+            request.body = BodyIdHex::from_parts(raw, index);
+            request
+        };
+        let system = solid.system().raw();
+        let cases = [
+            (field_request(&universe, giant, None), ErrorCode::BadRequest),
+            (with_body(system, 0xd000), ErrorCode::BadRequest),
+            (with_body(system, 0xcf00), ErrorCode::UnknownBody),
+            (with_body(u64::MAX, 0x0100), ErrorCode::UnknownSystem),
+        ];
+        for (request, code) in cases {
+            let error = ask(&harness, request.clone()).await.unwrap_err();
+            assert_eq!(
+                (error.code, error.field.as_deref()),
+                (code, Some("body")),
+                "{request:?}: {error:?}"
+            );
+        }
+        harness.stop().await;
+    }
+
+    /// `future`'s output within [`WAIT`]: the loops that skip the scene's heartbeats would
+    /// otherwise wait for ever, since each heartbeat restarts a frame's own wait.
+    async fn within<T>(what: &str, future: impl Future<Output = T>) -> T {
+        timeout(WAIT, future)
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for {what}"))
+    }
+
+    /// A scene subscription of the universe on a fresh connection, its number.
+    async fn subscribe(client: &mut Client, universe: &UniverseIdHex, id: u32) -> u32 {
+        client
+            .request(
+                id,
+                RequestBody::Subscribe(SubscribeRequest {
+                    universe: universe.clone(),
+                    topic: SubscriptionTopic::Scene(SceneSubscribeRequest {
+                        detail: DetailLevelDto::Contact,
+                        cameras: Vec::new(),
+                    }),
+                }),
+            )
+            .await;
+        within("the subscription", async {
+            loop {
+                match client.next_message().await {
+                    ServerMessage::Response {
+                        id: answered,
+                        body: ResponseBody::Subscribe(subscribed),
+                    } if answered == RequestId(id) => return subscribed.subscription,
+                    ServerMessage::Notification { .. } => {}
+                    other => panic!("expected `subscribed`, got {other:?}"),
+                }
+            }
+        })
+        .await
+    }
+
+    /// The next scene notification on `subscription` that names surface revisions; heartbeats
+    /// between are skipped.
+    async fn revisions_notified(client: &mut Client, subscription: u32) -> SceneNotificationDto {
+        within("surface revisions", async {
+            loop {
+                match client.next_message().await {
+                    ServerMessage::Notification {
+                        subscription: on,
+                        body: NotificationBody::Scene(notification),
+                    } if on == subscription => {
+                        if notification.surface_revisions.is_some() {
+                            return notification;
+                        }
+                    }
+                    other => panic!("expected a notification on {subscription}, got {other:?}"),
+                }
+            }
+        })
+        .await
+    }
+
+    /// `surface_field` asked over `client` as request `id`: its chunks rejoined, then its answer.
+    async fn ask_over(client: &mut Client, id: u32, request: SurfaceFieldRequest) -> Served {
+        client.request(id, RequestBody::SurfaceField(request)).await;
+        within("the surface field", async {
+            let mut payload = Vec::new();
+            loop {
+                match client.next_frame().await {
+                    Received::Binary(frame) => {
+                        payload.extend_from_slice(&frame[crate::bulk::HEADER_BYTES..]);
+                    }
+                    Received::Message(ServerMessage::Response {
+                        id: answered,
+                        body:
+                            ResponseBody::SurfaceField(SurfaceFieldDto::Ready {
+                                revision,
+                                coverage,
+                                bulk,
+                                ..
+                            }),
+                    }) if answered == RequestId(id) => {
+                        assert_eq!(u64::try_from(payload.len()).unwrap(), bulk.bytes);
+                        return Served {
+                            revision,
+                            coverage,
+                            bytes: payload,
+                        };
+                    }
+                    Received::Message(ServerMessage::Notification { .. }) => {}
+                    Received::Message(other) => panic!("expected the field, got {other:?}"),
+                }
+            }
+        })
+        .await
+    }
+
+    /// A survey pass raises its body's revision on a scene subscription of the universe made
+    /// before the universe's first pass: the first rise is named alone, and later ones with each
+    /// body's latest revision.
+    #[tokio::test]
+    async fn a_survey_pass_raises_the_body_s_revision_on_the_scene_topic() {
+        let (harness, universe) = started(Ceres).await;
+        let Bodies {
+            solid, other_solid, ..
+        } = *bodies();
+        let mut client = harness.connect().await;
+        client.hello().await;
+        let subscription = subscribe(&mut client, &universe, 1).await;
+        revision(survey(&harness, pass(&universe, solid, &[(0, 8)])).await);
+        let first = revisions_notified(&mut client, subscription).await;
+        assert_eq!(
+            first.surface_revisions,
+            Some(vec![SurfaceRevisionDto {
+                body: hex(solid),
+                revision: 1,
+            }])
+        );
+        revision(survey(&harness, pass(&universe, solid, &[(8, 16)])).await);
+        revision(survey(&harness, pass(&universe, other_solid, &[(0, 8)])).await);
+        let mut told = Vec::new();
+        while told.len() < 2 {
+            let notified = revisions_notified(&mut client, subscription).await;
+            for revision in notified.surface_revisions.unwrap() {
+                told.retain(|held: &SurfaceRevisionDto| held.body != revision.body);
+                told.push(revision);
+            }
+        }
+        told.sort_by(|a, b| a.body.as_str().cmp(b.body.as_str()));
+        let mut expected = vec![
+            SurfaceRevisionDto {
+                body: hex(solid),
+                revision: 2,
+            },
+            SurfaceRevisionDto {
+                body: hex(other_solid),
+                revision: 1,
+            },
+        ];
+        expected.sort_by(|a, b| a.body.as_str().cmp(b.body.as_str()));
+        assert_eq!(told, expected);
+        client.close().await;
+        harness.stop().await;
+    }
+
+    /// A client that unsubscribes is told nothing while it is away, and on subscribing again asks
+    /// with the revision it holds: the answer is the cells surveyed while it was away, over the
+    /// socket as a bulk payload.
+    #[tokio::test]
+    async fn a_resubscribed_client_s_have_revision_returns_the_cells_surveyed_while_away() {
+        let (harness, universe) = started(Ceres).await;
+        let solid = bodies().solid;
+        let level = ceres_level();
+        let code = ResolutionCode::from_resolution(Metres::new(120.0)).unwrap();
+        let mut client = harness.connect().await;
+        client.hello().await;
+        let subscription = subscribe(&mut client, &universe, 1).await;
+        revision(survey(&harness, pass(&universe, solid, &[(0, 64)])).await);
+        let told = revisions_notified(&mut client, subscription).await;
+        let held = told.surface_revisions.unwrap()[0].revision;
+        let first = ask_over(&mut client, 2, field_request(&universe, solid, None)).await;
+        assert_eq!((held, first.revision), (1, 1));
+
+        client
+            .request(
+                3,
+                RequestBody::Unsubscribe(UnsubscribeRequest { subscription }),
+            )
+            .await;
+        within("the unsubscription", async {
+            loop {
+                match client.next_message().await {
+                    ServerMessage::Response {
+                        id: RequestId(3),
+                        body: ResponseBody::Unsubscribe,
+                    } => break,
+                    ServerMessage::Notification { .. } => {}
+                    other => panic!("expected the unsubscription, got {other:?}"),
+                }
+            }
+        })
+        .await;
+        assert_eq!(
+            revision(survey(&harness, pass(&universe, solid, &[(4_000, 4_032)])).await),
+            2
+        );
+        let between = client.ping(4).await;
+        assert!(
+            between
+                .iter()
+                .all(|message| !matches!(message, ServerMessage::Notification { .. })),
+            "nothing is told while unsubscribed: {between:?}"
+        );
+
+        let again = subscribe(&mut client, &universe, 5).await;
+        assert_ne!(again, subscription);
+        let away = ask_over(&mut client, 6, field_request(&universe, solid, Some(held))).await;
+        assert_eq!(away.revision, 2);
+        let before = cover_of(&[(0, 64)], code);
+        let now = cover_of(&[(0, 64), (4_000, 4_032)], code);
+        assert_eq!(cells(&away.coverage), delta(level, &now, &before));
+        assert!(
+            cells(&away.coverage)
+                .iter()
+                .any(|&(cell, resolution)| cell == 4_000 && resolution == code.get())
+        );
+        let blocks = decode_payload(&away.bytes).unwrap();
+        assert!(
+            blocks[0].header().is_some(),
+            "a delta's block 0 carries the header"
+        );
+
+        // The rise made while it was away is not replayed: the next notification names only the
+        // body surveyed since it subscribed again.
+        let other = bodies().other_solid;
+        revision(survey(&harness, pass(&universe, other, &[(0, 8)])).await);
+        assert_eq!(
+            revisions_notified(&mut client, again)
+                .await
+                .surface_revisions,
+            Some(vec![SurfaceRevisionDto {
+                body: hex(other),
+                revision: 1,
+            }])
+        );
+        client.close().await;
+        harness.stop().await;
     }
 }

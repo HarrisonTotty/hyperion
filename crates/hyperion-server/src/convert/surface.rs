@@ -1,26 +1,37 @@
-//! The surface requests (rendering plan R09, R09.T19.a): the checks of a `survey_pass`'s fields,
-//! and the refusals of a body whose surface cannot be surveyed or served.
+//! The surface requests (rendering plan R09, R09.T19): the checks of a `survey_pass`'s and a
+//! `surface_field`'s fields, the refusals of a body whose surface cannot be surveyed or served,
+//! and a field's header, cover and revisions as the wire carries them.
 //!
 //! The order is `body_detail`'s (plan 14, P14.T36.b), the universe being looked up before this:
 //! the times, which need nothing, then the body ID's two parts, both named `body`. A pass's cells
 //! are checked against the field's cell count only once the body is resolved, since its level
-//! follows from the body's radius ([`SurveyRequest::into_pass`]).
+//! follows from the body's radius ([`SurveyRequest::into_pass`]), and a field's `have_revision`
+//! against the body's revision only once its coverage is read ([`FieldRequest::since`]).
 
 use std::ops::Range;
 
-use hyperion_protocol::{BodyIdHex, ErrorCode, RequestError, SurveyPassRequest, SurveySourceDto};
+use hyperion_protocol::{
+    BodyIdHex, ClimateModelDto, CoverDto, CoverRangeDto, ErrorCode, PaletteEntryDto,
+    PaletteRoleDto, PrecipitationSourceDto, RecordSectionDto, RequestError, SurfaceFieldRequest,
+    SurfaceHeaderDto, SurfaceRevisionDto, SurveyPassRequest, SurveySourceDto,
+};
 use hyperion_sim::id::{BodyId, SystemId};
+use hyperion_sim::planetary::record::RecordSection;
 use hyperion_sim::planetary::surface::SurfaceInputsError;
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
-use hyperion_surface::field::{CoarseLevel, ResolutionCode};
+use hyperion_surface::field::{
+    ClimateModelKind, CoarseLevel, Cover, FieldHeader, PaletteRole, PrecipitationSource,
+    ResolutionCode,
+};
 
 use super::planetary::{body_refusal, unknown_body_system};
 use super::{ConvertRequestError, clock_time};
 use crate::knowledge::LoadKnowledgeError;
 use crate::knowledge::surveys::{
-    BuildSurveyPassError, RecordSurveyError, SurveyPass, SurveyPassParts, SurveySource,
+    BuildSurveyPassError, CoverageRevision, RecordSurveyError, SurveyPass, SurveyPassParts,
+    SurveySource,
 };
 use crate::limits::MAX_SURVEY_RANGES;
 use crate::surface::SurfaceJobError;
@@ -118,14 +129,8 @@ impl TryFrom<&SurveyPassRequest> for SurveyRequest {
             )
             .into());
         }
-        let (system, index) = request.body.to_parts();
-        let system = SystemId::from_raw(system)
-            .map_err(|error| unknown_body_system(&request.body, error))?;
-        let index = BodyIndex::try_from(index).map_err(|error| {
-            body_refusal(&request.body, ResolveBodyError::MalformedIndex(error))
-        })?;
         Ok(Self {
-            body: index.body_id(system),
+            body: decode_body(&request.body)?,
             from,
             to,
             source: survey_source(request.source),
@@ -136,6 +141,197 @@ impl TryFrom<&SurveyPassRequest> for SurveyRequest {
                 .map(|range| range.start..range.end)
                 .collect(),
         })
+    }
+}
+
+/// The body ID `body` decoded, not yet resolved: bits that are not a system ID name no system
+/// (`unknown_system`), and an index outside plan 14's layout is malformed (`bad_request`), both
+/// naming `body`, as `body_detail` refuses them.
+fn decode_body(body: &BodyIdHex) -> Result<BodyId, RequestError> {
+    let (system, index) = body.to_parts();
+    let system = SystemId::from_raw(system).map_err(|error| unknown_body_system(body, error))?;
+    let index = BodyIndex::try_from(index)
+        .map_err(|error| body_refusal(body, ResolveBodyError::MalformedIndex(error)))?;
+    Ok(index.body_id(system))
+}
+
+/// A `surface_field` request with its body decoded (R09.T19.b); its `have_revision` is checked
+/// against the body's coverage once that is read ([`since`](Self::since)).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct FieldRequest {
+    body: BodyId,
+    have_revision: Option<u32>,
+}
+
+impl FieldRequest {
+    /// The body asked for, decoded but not yet resolved.
+    #[must_use]
+    pub(crate) fn body(self) -> BodyId {
+        self.body
+    }
+
+    /// The system of the body, decoded but not yet resolved.
+    #[must_use]
+    pub(crate) fn system(self) -> SystemId {
+        self.body.system()
+    }
+
+    /// The revision the client holds, against which the answer is a delta, given the body's
+    /// revision `revision` (`None` before its first pass): `None` for the whole field, asked with
+    /// no `have_revision` or with 0.
+    ///
+    /// # Errors
+    ///
+    /// `bad_request` naming `have_revision` for a revision above the body's, which no answer
+    /// gave.
+    pub(crate) fn since(
+        self,
+        revision: Option<CoverageRevision>,
+    ) -> Result<Option<CoverageRevision>, RequestError> {
+        let revision = revision.map_or(0, CoverageRevision::get);
+        match self.have_revision {
+            Some(held) if held > revision => Err(ConvertRequestError::new(
+                "have_revision",
+                format!(
+                    "revision {held} is above the body's coverage revision, {revision}: ask \
+                     again without `have_revision` for the whole field"
+                ),
+            )
+            .into()),
+            Some(held) => Ok(CoverageRevision::new(held)),
+            None => Ok(None),
+        }
+    }
+}
+
+impl TryFrom<&SurfaceFieldRequest> for FieldRequest {
+    type Error = RequestError;
+
+    /// Decodes `body`, as a `survey_pass`'s is decoded.
+    fn try_from(request: &SurfaceFieldRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            body: decode_body(&request.body)?,
+            have_revision: request.have_revision,
+        })
+    }
+}
+
+/// A field's header as the main thread reads it: the scalars of `header`, its classes, and its
+/// palette's substances and roles (ruled by "main", 2026-10-13, R09.T19.a's record).
+///
+/// The body is the header's own, which on the reference worlds is theirs, not the body asked for
+/// (R09.T17's deferred finding).
+#[must_use]
+pub(crate) fn surface_header(header: &FieldHeader) -> SurfaceHeaderDto {
+    let body = header.body();
+    let figure = header.figure();
+    SurfaceHeaderDto {
+        body: BodyIdHex::from_parts(body.raw_system_id(), body.body_index()),
+        level: header.level().get(),
+        radius_m: header.radius().value(),
+        equatorial_radius_m: figure.equatorial_radius_m,
+        polar_radius_m: figure.polar_radius_m,
+        boundary_diameter_m: header.boundary_diameter().value(),
+        sea_level_m: header.sea_level().value(),
+        lapse_rate_k_per_m: header.lapse_rate_k_per_m(),
+        realised_sigma_h_m: header.realised_sigma_h().value(),
+        realised_relief_m: header.realised_relief().value(),
+        months: header.months(),
+        season_eccentricity: header.season_eccentricity(),
+        reference_temperature_k: header.reference_temperature().value(),
+        surface_age_gyr: header.surface_age().value(),
+        surface_pressure_pa: header.surface_pressure().value(),
+        albedo_scale: header.albedo_scale(),
+        climate_model: climate_model(header.climate_model()),
+        precipitation: precipitation_source(header.precipitation()),
+        palette: header
+            .palette()
+            .entries()
+            .iter()
+            .map(|entry| PaletteEntryDto {
+                substance: entry.substance.as_str().to_owned(),
+                role: palette_role(entry.role),
+            })
+            .collect(),
+    }
+}
+
+/// A climate model's class as the wire names it.
+#[must_use]
+pub(crate) fn climate_model(kind: ClimateModelKind) -> ClimateModelDto {
+    match kind {
+        ClimateModelKind::EnergyBalance => ClimateModelDto::EnergyBalance,
+        ClimateModelKind::LockedEnergyBalance => ClimateModelDto::LockedEnergyBalance,
+        ClimateModelKind::RadiativeEquilibrium => ClimateModelDto::RadiativeEquilibrium,
+        ClimateModelKind::Isothermal => ClimateModelDto::Isothermal,
+    }
+}
+
+/// Where a field's precipitation came from, as the wire names it.
+#[must_use]
+pub(crate) fn precipitation_source(source: PrecipitationSource) -> PrecipitationSourceDto {
+    match source {
+        PrecipitationSource::Heuristic => PrecipitationSourceDto::Heuristic,
+    }
+}
+
+/// A palette entry's role as the wire names it.
+#[must_use]
+pub(crate) fn palette_role(role: PaletteRole) -> PaletteRoleDto {
+    match role {
+        PaletteRole::PrimaryCrust => PaletteRoleDto::PrimaryCrust,
+        PaletteRole::SecondaryCrust => PaletteRoleDto::SecondaryCrust,
+        PaletteRole::TertiaryCrust => PaletteRoleDto::TertiaryCrust,
+        PaletteRole::Province => PaletteRoleDto::Province,
+        PaletteRole::Ice => PaletteRoleDto::Ice,
+        PaletteRole::Liquid => PaletteRoleDto::Liquid,
+        PaletteRole::Cover => PaletteRoleDto::Cover,
+        PaletteRole::Deposit => PaletteRoleDto::Deposit,
+        PaletteRole::Bulk => PaletteRoleDto::Bulk,
+    }
+}
+
+/// A record section as a `not_modelled` answer names it.
+#[must_use]
+pub(crate) fn record_section(section: RecordSection) -> RecordSectionDto {
+    match section {
+        RecordSection::Label => RecordSectionDto::Label,
+        RecordSection::Mass => RecordSectionDto::Mass,
+        RecordSection::Orbit => RecordSectionDto::Orbit,
+        RecordSection::Moons => RecordSectionDto::Moons,
+        RecordSection::Rings => RecordSectionDto::Rings,
+        RecordSection::Population => RecordSectionDto::Population,
+        RecordSection::Bulk => RecordSectionDto::Bulk,
+        RecordSection::Surface => RecordSectionDto::Surface,
+        RecordSection::Hooks => RecordSectionDto::Hooks,
+        RecordSection::Photometry => RecordSectionDto::Photometry,
+        RecordSection::Figure => RecordSectionDto::Figure,
+        RecordSection::Rotation => RecordSectionDto::Rotation,
+    }
+}
+
+/// A cover as the wire carries it: each range with its resolution code, 0 for a margin cell.
+#[must_use]
+pub(crate) fn cover_dto(cover: &Cover) -> CoverDto {
+    CoverDto {
+        ranges: cover
+            .ranges()
+            .iter()
+            .map(|range| CoverRangeDto {
+                start: range.start(),
+                end: range.end(),
+                resolution: range.code().get(),
+            })
+            .collect(),
+    }
+}
+
+/// A body's raised revision as the scene topic tells it.
+#[must_use]
+pub(crate) fn surface_revision(body: BodyId, revision: CoverageRevision) -> SurfaceRevisionDto {
+    SurfaceRevisionDto {
+        body: BodyIdHex::from_parts(body.system().raw(), body.body_index()),
+        revision: revision.get(),
     }
 }
 
@@ -248,9 +444,12 @@ mod tests {
     use std::io;
     use std::path::PathBuf;
 
-    use hyperion_sim::id::SystemId;
+    use hyperion_protocol::UniverseIdHex;
+    use hyperion_sim::Seed;
     use hyperion_sim::planetary::DecodeBodyIndexError;
-    use hyperion_sim::planetary::record::RecordSection;
+    use hyperion_sim::planetary::hooks::surface_seed;
+    use hyperion_sim::planetary::surface::{coarse_pass, reference};
+    use hyperion_surface::field::FieldView;
 
     use super::*;
     use crate::compute::{ComputeError, JobError, SubmitJobError};
@@ -313,6 +512,178 @@ mod tests {
             "{figure:?}"
         );
         assert!(figure.message.contains(body.as_str()), "{figure:?}");
+    }
+
+    /// R09.T19.b: a field asked with no revision or with 0 is the whole field, one with the
+    /// body's revision or below a delta since it, and one above refused naming `have_revision`.
+    #[test]
+    fn a_field_request_s_revision_is_checked_against_the_body_s() {
+        let request = |have_revision| {
+            FieldRequest::try_from(&SurfaceFieldRequest {
+                universe: UniverseIdHex::from_u64(42),
+                body: body(),
+                have_revision,
+            })
+            .unwrap()
+        };
+        let seventh = CoverageRevision::new(7);
+        assert_eq!(request(None).since(None), Ok(None));
+        assert_eq!(request(None).since(seventh), Ok(None));
+        assert_eq!(request(Some(0)).since(seventh), Ok(None));
+        assert_eq!(request(Some(0)).since(None), Ok(None));
+        assert_eq!(
+            request(Some(3)).since(seventh),
+            Ok(CoverageRevision::new(3))
+        );
+        assert_eq!(request(Some(7)).since(seventh), Ok(seventh));
+        for (held, revision) in [(8, seventh), (1, None)] {
+            let refused = request(Some(held)).since(revision).unwrap_err();
+            assert_eq!(
+                code_and_field(&refused),
+                (ErrorCode::BadRequest, Some("have_revision")),
+                "{refused:?}"
+            );
+        }
+        assert_eq!(
+            request(None).body(),
+            BodyId::new(SystemId::from_raw(0x0200_0800_2000_0000).unwrap(), 0x0103)
+        );
+        let malformed = FieldRequest::try_from(&SurfaceFieldRequest {
+            universe: UniverseIdHex::from_u64(42),
+            body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0xd000),
+            have_revision: None,
+        })
+        .unwrap_err();
+        assert_eq!(
+            code_and_field(&malformed),
+            (ErrorCode::BadRequest, Some("body"))
+        );
+    }
+
+    /// R09.T19.b: every record section is named on the wire as the record names it, and every
+    /// palette role and climate model by its own name, in code order.
+    #[test]
+    fn surface_classes_map_to_their_wire_names() {
+        for section in RecordSection::ALL {
+            assert_eq!(
+                serde_json::to_value(record_section(section)).unwrap(),
+                section.to_string()
+            );
+        }
+        let roles: Vec<_> = PaletteRole::ALL
+            .iter()
+            .map(|&role| serde_json::to_value(palette_role(role)).unwrap())
+            .collect();
+        assert_eq!(
+            roles,
+            [
+                "primary_crust",
+                "secondary_crust",
+                "tertiary_crust",
+                "province",
+                "ice",
+                "liquid",
+                "cover",
+                "deposit",
+                "bulk",
+            ]
+        );
+        let models: Vec<_> = ClimateModelKind::ALL
+            .iter()
+            .map(|&model| serde_json::to_value(climate_model(model)).unwrap())
+            .collect();
+        assert_eq!(
+            models,
+            [
+                "energy_balance",
+                "locked_energy_balance",
+                "radiative_equilibrium",
+                "isothermal",
+            ]
+        );
+        let sources: Vec<_> = PrecipitationSource::ALL
+            .iter()
+            .map(|&source| serde_json::to_value(precipitation_source(source)).unwrap())
+            .collect();
+        assert_eq!(sources, ["heuristic"]);
+    }
+
+    /// R09.T19.b: a field's header reaches the wire with each scalar in its unit, the spheroid's
+    /// radii in order, and its palette's keys and roles in the palette's order.
+    #[test]
+    fn a_field_header_carries_its_scalars_and_palette() {
+        let inputs = reference::ceres_like();
+        let seed = surface_seed(
+            Seed::new(0x4d2),
+            BodyId::new(SystemId::from_raw(0x0200_0800_2000_0000).unwrap(), 0x0103),
+        );
+        let field = coarse_pass(seed, &inputs);
+        let header = field.header();
+        let wire = surface_header(header);
+        assert_eq!(
+            wire.body.to_parts(),
+            (header.body().raw_system_id(), header.body().body_index())
+        );
+        assert_eq!(wire.level, header.level().get());
+        assert_eq!(wire.radius_m.to_bits(), inputs.radius().value().to_bits());
+        assert!(wire.equatorial_radius_m >= wire.polar_radius_m, "{wire:?}");
+        let figure = header.figure();
+        let scalars = [
+            (wire.equatorial_radius_m, figure.equatorial_radius_m, "a"),
+            (wire.polar_radius_m, figure.polar_radius_m, "c"),
+            (
+                wire.boundary_diameter_m,
+                header.boundary_diameter().value(),
+                "D_b",
+            ),
+            (wire.sea_level_m, header.sea_level().value(), "sea level"),
+            (
+                wire.lapse_rate_k_per_m,
+                header.lapse_rate_k_per_m(),
+                "lapse rate",
+            ),
+            (
+                wire.realised_sigma_h_m,
+                header.realised_sigma_h().value(),
+                "sigma_h",
+            ),
+            (
+                wire.realised_relief_m,
+                header.realised_relief().value(),
+                "relief",
+            ),
+            (
+                wire.season_eccentricity,
+                header.season_eccentricity(),
+                "eccentricity",
+            ),
+            (
+                wire.reference_temperature_k,
+                header.reference_temperature().value(),
+                "temperature",
+            ),
+            (wire.surface_age_gyr, header.surface_age().value(), "age"),
+            (
+                wire.surface_pressure_pa,
+                header.surface_pressure().value(),
+                "pressure",
+            ),
+        ];
+        for (sent, held, name) in scalars {
+            assert_eq!(sent.to_bits(), held.to_bits(), "{name}");
+        }
+        assert_eq!(wire.months, header.months());
+        assert_eq!(wire.climate_model, climate_model(header.climate_model()));
+        assert_eq!(
+            wire.precipitation,
+            precipitation_source(header.precipitation())
+        );
+        assert_eq!(wire.albedo_scale, None);
+        assert_eq!(wire.palette.len(), header.palette().len());
+        for (entry, held) in wire.palette.iter().zip(header.palette().entries()) {
+            assert_eq!(entry.substance, held.substance.as_str());
+            assert_eq!(entry.role, palette_role(held.role));
+        }
     }
 
     /// A survey log of a later format is the save's, and any other failure to open it the

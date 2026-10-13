@@ -200,11 +200,11 @@ fn open_topic(
 /// answered in bulk, behind its switch ([`SkyService`](crate::SkyService)): it is on by default
 /// since rendering plan R13's R13.T2, and when the server is started with `--serve-sky=false`,
 /// `sky` is answered `unsupported`, as before R06.T11.a. Rendering plan R09's `survey_pass` is
-/// served (R09.T19.a). A later plan's kind that this server's [`REQUEST_KINDS`] does not hold is
-/// refused before it reaches here, as `unsupported`. A kind the protocol already defines but whose
-/// handler has not landed is answered `unsupported` here, under its own ID, as an older server
-/// would answer it (plan 04, design note 15): `body_events` until plan 14's P14.T31, and R09's
-/// `surface_field` until R09.T19.b. Each handler that names a universe starts from
+/// served (R09.T19.a), and its `surface_field`, answered in bulk (R09.T19.b). A later plan's kind
+/// that this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
+/// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
+/// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
+/// 15): `body_events` until plan 14's P14.T31. Each handler that names a universe starts from
 /// [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
@@ -260,8 +260,7 @@ impl Handler for Handlers {
                 // The switch is off (R06.T11.c): answered as before R06.T11.a, with no job.
                 SkyService::Unsupported => Box::pin(ready(Err(not_served_yet("sky")))),
             },
-            // R09.T19.b serves it: the payload, gated by coverage, through `Answer`.
-            RequestBody::SurfaceField(_) => Box::pin(ready(Err(not_served_yet("surface_field")))),
+            RequestBody::SurfaceField(request) => Box::pin(surface::field(state, request, token)),
             RequestBody::SurveyPass(request) => {
                 Box::pin(surface::survey_pass(state, request, token).map(answered))
             }
@@ -287,7 +286,7 @@ fn answered(result: Result<ResponseBody, RequestError>) -> Result<Answer, Reques
 
 /// The answer to a kind the protocol defines and this server does not serve yet: `unsupported`,
 /// as an older server would answer it (plan 04, design note 15). Plan 14's `body_events` takes it
-/// until P14.T31 lands, and rendering plan R09's `surface_field` until R09.T19.b.
+/// until P14.T31 lands.
 #[must_use]
 fn not_served_yet(kind: &str) -> RequestError {
     request_error(
@@ -1383,9 +1382,9 @@ mod tests {
     async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, R06's `sky`
+        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, and R06's `sky`
         // while its switch is off (R06.T11.c), as this test turns it: it is on by default since
-        // rendering plan R13's R13.T2, and R09's `surface_field` until R09.T19.b serves it.
+        // rendering plan R13's R13.T2.
         let harness = Harness::start_configured(Handlers, ConnectionLimits::default(), |config| {
             config.sky_service(SkyService::Unsupported)
         })
@@ -1400,11 +1399,10 @@ mod tests {
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
                         | RequestBody::Sky(_)
-                        | RequestBody::SurfaceField(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 6);
+        assert_eq!(events.len(), 5);
         for body in events {
             let name = kind(&body);
             let answer = Handlers

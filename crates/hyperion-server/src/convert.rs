@@ -58,7 +58,8 @@ pub(crate) use self::stellar::{
     SummaryRequest, brief_dto, system_summary, unknown_system, wire_time,
 };
 pub(crate) use self::surface::{
-    SurveyRequest, open_surveys_refusal, record_survey_refusal, surface_refusal,
+    FieldRequest, SurveyRequest, cover_dto, open_surveys_refusal, record_section,
+    record_survey_refusal, surface_header, surface_refusal, surface_revision,
 };
 use crate::compute::{CodeDepth, GalaxyKey, MapKey, MapResolution, QuantisedMap, RawDensityMap};
 use crate::limits::{MAX_CENSUS_LIMIT, MAX_QUERY_CELLS, MAX_QUERY_RADIUS_LY};

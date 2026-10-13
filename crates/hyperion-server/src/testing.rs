@@ -556,6 +556,10 @@ pub(crate) enum Tap {
 
 /// A frame a [`Client`] received.
 #[derive(Debug)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "a test's frames, matched by value in every socket test, one at a time"
+)]
 pub(crate) enum Received {
     /// A text frame: a message.
     Message(ServerMessage),

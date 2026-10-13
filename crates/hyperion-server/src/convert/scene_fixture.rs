@@ -206,6 +206,7 @@ fn scene_message_sizes() {
                     }),
                     bodies: Vec::new(),
                     craft: None,
+                    surface_revisions: None,
                 }),
             });
             let count = summaries.len();
@@ -243,6 +244,7 @@ fn scene_message_sizes() {
             arrival: None,
             bodies: Vec::new(),
             craft: Some(craft.clone()),
+            surface_revisions: None,
         }),
     });
     let one_craft = serde_json::to_string(&craft[0])

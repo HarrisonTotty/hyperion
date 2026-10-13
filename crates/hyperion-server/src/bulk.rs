@@ -120,6 +120,13 @@ impl BulkPayload {
         }
     }
 
+    /// The payload's bytes, whole, for a test to decode.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
     /// The payload's frames for `request`: each a header and up to [`CHUNK_PAYLOAD_BYTES`] of the
     /// payload, in order; none for an empty payload.
     pub(crate) fn frames(&self, request: RequestId) -> impl Iterator<Item = Bytes> + use<> {

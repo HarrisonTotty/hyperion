@@ -1221,6 +1221,7 @@ mod tests {
                     arrival: None,
                     bodies: Vec::new(),
                     craft: None,
+                    surface_revisions: None,
                 }),
             },
             json!({
