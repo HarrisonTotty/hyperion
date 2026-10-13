@@ -10,6 +10,7 @@ import {
   PHASE_TABLE_SIZE,
   PHASE_TABLE_U,
   type ScatteringMatrix,
+  SIZE_LEVEL_MAX,
   type SizeDistribution,
   sizeQuadrature,
   sizeRange,
@@ -125,7 +126,7 @@ describe("size distributions", () => {
     expect(() => sizeQuadrature(VENUS_MODE_2, 0)).toThrow(RangeError);
     expect(() => sizeQuadrature(VENUS_MODE_2, Number.NaN)).toThrow(RangeError);
     expect(() => sizeQuadrature(VENUS_MODE_2, 550, 1.5)).toThrow(RangeError);
-    expect(() => sizeQuadrature(VENUS_MODE_2, 550, 17)).toThrow(RangeError);
+    expect(() => sizeQuadrature(VENUS_MODE_2, 550, SIZE_LEVEL_MAX + 1)).toThrow(RangeError);
   });
 
   it("refuses a gamma variance outside (0, 0.5) and a radius that is not positive", () => {
@@ -263,7 +264,9 @@ describe("a mode's optics", () => {
     expect(optics.asymmetry).toBeGreaterThan(0.705);
     expect(optics.asymmetry).toBeLessThan(0.725);
     expect(optics.singleScatteringAlbedo).toBeCloseTo(1, 12);
-    expect(optics.nodes).toBeLessThanOrEqual(2656);
+    // T5.b's single agreement stopped at 1,328 nodes; R08.T5.f's second takes the next level.
+    expect(optics.sizeConvergence.converged).toBe(true);
+    expect(optics.sizeConvergence.nodes).toBeLessThanOrEqual(2656);
   });
 
   it("of Venus's mode 2 on the sulphuric-acid file stay inside the same figure", () => {

@@ -14,8 +14,15 @@
  * about each weight's centre. The rule is composite: Gauss–Legendre of order
  * {@link SIZE_PANEL_ORDER} on panels no wider than {@link SIZE_PANEL_SIZE_PARAMETER} in size
  * parameter and {@link SIZE_PANEL_LN_RADIUS} in ln r, every panel halved, so the node count doubles,
- * until the mean scattering and extinction efficiencies change by under {@link SIZE_CONVERGENCE} of
- * themselves and the asymmetry by under {@link SIZE_CONVERGENCE}.
+ * until two successive refinements each change the mean scattering and extinction efficiencies by
+ * under {@link SIZE_CONVERGENCE} of themselves and the asymmetry by under {@link SIZE_CONVERGENCE}
+ * (R08.T5.f). A lossless sphere's narrowest resonances, of high partial-wave order, are narrower
+ * than any panel the cap allows (P. Chýlek, J. T. Kiehl and M. K. W. Ko, "Narrow resonance
+ * structure in the Mie scattering characteristics", Appl. Opt. 17, 3019–3021, 1978; M. I.
+ * Mishchenko, L. D. Travis and A. A. Lacis 2002, "Scattering, Absorption, and Emission of Light by
+ * Small Particles", Cambridge, §9.1, pp. 241–245), and in this rule they make one change fall
+ * under the tolerance by chance (decision-r08-t6d-findings.md §4). Past {@link SIZE_NODES_MAX} the
+ * finest level within it is taken, marked unconverged ({@link SizeConvergence}).
  *
  * The matrix is block-diagonal (a₁, a₂, a₃, a₄, b₁, b₂; J. W. Hovenier, C. van der Mee and H.
  * Domke 2004, "Transfer of polarized light in planetary atmospheres", Kluwer), normalised so that
@@ -101,13 +108,35 @@ export const SIZE_PANEL_SIZE_PARAMETER = 2;
 /** The widest a panel may be in ln r at the coarsest level, so the distribution's own shape is resolved. */
 export const SIZE_PANEL_LN_RADIUS = 0.5;
 
-/** The node count past which the quadrature gives up as unconverged. */
-export const SIZE_NODES_MAX = 65_536;
+/**
+ * The node count past which the quadrature stops, unconverged: 2²⁰ (R08.T5.f; ruled 2026-10-13
+ * over decision-r08-t6d-findings.md §4's 2¹⁸).
+ *
+ * @remarks
+ * Set by `aerosol.test.ts`'s lossless TiO₂ stand-in (n 2.65, k 0, gamma r_eff 0.5 µm, v_eff 0.1),
+ * whose level-to-level changes stay erratic near 10⁻⁴ to about 140,000 nodes. At every 0.125 nm
+ * from 430 to 437 nm and at the fitted channels and bake bins (74 wavelengths), two successive
+ * changes fall under {@link SIZE_CONVERGENCE} by 566,904 nodes at the worst, on the last level the
+ * cap admits there; at 2¹⁸ nine had not, and at 2¹⁹ three. A wavelength between those that needs
+ * one level more is marked unconverged. That worst case costs about 9 s for the efficiencies alone
+ * (Node 26.10, Ryzen 7 3700X, load 15), and a matrix at 256 angles would add about 33 s; most modes
+ * stop at a few hundred to some tens of thousands of nodes (plan R08's Risks, "Deviations in T5.f,
+ * as built").
+ */
+export const SIZE_NODES_MAX = 1_048_576;
 
-/** The finest refinement {@link sizeQuadrature} gives: its panels 2⁻¹⁶ of the coarsest's. */
-export const SIZE_LEVEL_MAX = 16;
+/**
+ * The finest refinement {@link sizeQuadrature} gives, and the last {@link sphereModeOptics} tries:
+ * its panels 2⁻²⁰ of the coarsest's. The default {@link SIZE_NODES_MAX} usually stops refinement
+ * first; this bound holds the loop finite for a very narrow distribution, whose few panels stay
+ * few for many levels, and under a larger cap.
+ */
+export const SIZE_LEVEL_MAX = 20;
 
-/** The convergence tolerance on the mean efficiencies (relative) and the asymmetry (absolute). */
+/**
+ * The convergence tolerance on the mean efficiencies (relative) and the asymmetry (absolute), which
+ * two successive refinements must each meet.
+ */
 export const SIZE_CONVERGENCE = 1e-4;
 
 /** The number of phase-table angles, on u = √(θ ÷ π) (Design note 6). */
@@ -180,12 +209,31 @@ export interface ModeBulkOptics {
   readonly volumeM3: number;
 }
 
+/**
+ * How a mode's size quadrature ended (R08.T5.f): at the first level whose change and its
+ * predecessor's were both under {@link SIZE_CONVERGENCE}, or, past the cap
+ * ({@link sphereModeOptics}' `nodesMax`, {@link SIZE_NODES_MAX} by default), at the finest level
+ * within it.
+ */
+export interface SizeConvergence {
+  /** Whether two successive refinements agreed before the cap; false marks the optics approximate. */
+  readonly converged: boolean;
+  /** The node count of the level the optics are from. */
+  readonly nodes: number;
+  /**
+   * That level's change from the level before: the largest of the relative changes in the mean
+   * extinction and scattering efficiencies and the absolute change in the asymmetry; infinite
+   * where no finer level than the coarsest fitted under the cap.
+   */
+  readonly lastChange: number;
+}
+
 /** The optics of a mode of spheres at one wavelength, as {@link sphereModeOptics} gives them. */
 export interface SphereModeOptics extends ModeBulkOptics {
-  /** The mode's matrix, summed once at the converged level (not itself a convergence test). */
+  /** The mode's matrix, summed once at the level taken (not itself a convergence test). */
   readonly matrix: ScatteringMatrix;
-  /** The quadrature's node count at the converged level. */
-  readonly nodes: number;
+  /** How the quadrature ended, and its node count. */
+  readonly sizeConvergence: SizeConvergence;
 }
 
 /** A mode of aerosol particles by its registry material (decision-composition §1.9). */
@@ -243,6 +291,12 @@ export interface ModeOptics extends ModeBulkOptics {
   readonly phaseModel: PhaseModel;
   /** Why an `analogue` or `fallback` is one, for the label's reasons; undefined for a `model`. */
   readonly phaseNote: string | undefined;
+  /**
+   * How the Mie size quadrature that any of these optics rest on ended (R08.T5.f): undefined where
+   * none do (a phase file's own sizes, the MMF). An unconverged one is a reason R08.T10.a's
+   * `atmosphereApproximate` takes.
+   */
+  readonly sizeConvergence: SizeConvergence | undefined;
 }
 
 /** A distribution's weights in y = ln(r ÷ 1 µm), for the quadrature and its interval. */
@@ -389,6 +443,12 @@ function panelEnds(low: number, high: number, wavenumberPerUm: number, level: nu
     ends.push(y);
   }
   return ends;
+}
+
+/** A level's node count from its panels alone, so that a level past a cap is never built. */
+function levelNodes(range: SizeRange, wavenumberPerUm: number, level: number): number {
+  const ends = panelEnds(Math.log(range.fromUm), Math.log(range.toUm), wavenumberPerUm, level);
+  return (ends.length - 1) * SIZE_PANEL_ORDER;
 }
 
 function quadratureOn(
@@ -560,11 +620,16 @@ function relative(a: number, b: number): number {
   return Math.abs(a - b) / Math.abs(b);
 }
 
-function converged(coarse: Sums, fine: Sums): boolean {
-  return (
-    relative(coarse.ext / coarse.area, fine.ext / fine.area) < SIZE_CONVERGENCE &&
-    relative(coarse.sca / coarse.area, fine.sca / fine.area) < SIZE_CONVERGENCE &&
-    Math.abs(coarse.scaG / coarse.sca - fine.scaG / fine.sca) < SIZE_CONVERGENCE
+/**
+ * One refinement's change: the largest of the relative changes in the mean extinction and
+ * scattering efficiencies and the absolute change in the asymmetry (NaN, which never converges, if
+ * any is undefined: `Math.max` propagates it).
+ */
+function levelChange(coarse: Sums, fine: Sums): number {
+  return Math.max(
+    relative(coarse.ext / coarse.area, fine.ext / fine.area),
+    relative(coarse.sca / coarse.area, fine.sca / fine.area),
+    Math.abs(coarse.scaG / coarse.sca - fine.scaG / fine.sca),
   );
 }
 
@@ -576,20 +641,31 @@ function converged(coarse: Sums, fine: Sums): boolean {
  * The radii below the one at {@link MIE_MIN_SIZE_PARAMETER} are left out of the interval: their
  * weight in scattering, r⁶, is about 5 × 10⁻²⁶ of a 1 nm particle's at 380 nm.
  *
+ * A level is taken once its change and its predecessor's are both under {@link SIZE_CONVERGENCE},
+ * so the coarsest it can take is level 2. Past the cap, the finest level within it is taken with
+ * its last change, marked unconverged ({@link SphereModeOptics.sizeConvergence}): a mode inside
+ * Mie's range never throws for want of convergence.
+ *
  * @param wavelengthNm - The vacuum wavelength, nm.
  * @param mu - The cosines to give the matrix at; the phase tables' by default.
+ * @param nodesMax - The node count past which no finer level is tried, {@link SIZE_NODES_MAX} by
+ *   default; a positive integer. A smaller cap trades accuracy for time.
  * @throws RangeError if the distribution reaches past {@link MIE_MAX_SIZE_PARAMETER} at this
- *   wavelength (a geometric-optics particle, not modelled here), or for a bad distribution or index.
- * @throws Error if the quadrature has not converged by {@link SIZE_NODES_MAX} nodes.
+ *   wavelength (a geometric-optics particle, not modelled here), for a bad distribution, index or
+ *   cap.
  */
 export function sphereModeOptics(
   sizes: SizeDistribution,
   index: ComplexIndex,
   wavelengthNm: number,
   mu: Float64Array = PHASE_TABLE_MU,
+  nodesMax: number = SIZE_NODES_MAX,
 ): SphereModeOptics {
   if (!(wavelengthNm > 0 && Number.isFinite(wavelengthNm))) {
     throw new RangeError(`wavelength ${wavelengthNm} nm must be finite and > 0`);
+  }
+  if (!(Number.isInteger(nodesMax) && nodesMax > 0)) {
+    throw new RangeError(`node cap ${nodesMax} must be a positive integer`);
   }
   const wavelengthUm = wavelengthNm / 1000;
   const full = sizeRange(sizes);
@@ -607,41 +683,44 @@ export function sphereModeOptics(
   }
   const range = { fromUm: Math.max(full.fromUm, smallestUm), toUm: full.toUm };
   const wavenumberPerUm = (2 * Math.PI) / wavelengthUm;
-  let coarse = sumNodes(
-    quadratureOn(sizes, range, wavenumberPerUm, 0),
-    index,
-    wavelengthUm,
-    mu,
-    undefined,
-  );
-  for (let level = 1; ; level += 1) {
-    const quadrature = quadratureOn(sizes, range, wavenumberPerUm, level);
-    const nodes = quadrature.radiiUm.length;
-    if (nodes > SIZE_NODES_MAX) {
-      throw new Error(`the size quadrature did not converge by ${SIZE_NODES_MAX} nodes`);
+  // The coarsest level is always taken, so a cap below its node count gives it, unconverged.
+  let quadrature = quadratureOn(sizes, range, wavenumberPerUm, 0);
+  let sums = sumNodes(quadrature, index, wavelengthUm, mu, undefined);
+  let change = Number.POSITIVE_INFINITY;
+  let converged = false;
+  for (let level = 1; level <= SIZE_LEVEL_MAX && !converged; level += 1) {
+    if (levelNodes(range, wavenumberPerUm, level) > nodesMax) {
+      break;
     }
-    const fine = sumNodes(quadrature, index, wavelengthUm, mu, undefined);
-    if (converged(coarse, fine)) {
-      const sums = emptyMatrix(mu);
-      // With no angles to sum the matrix at, a second pass would repeat `fine`'s sums, node for
-      // node in the same order, and add nothing to the matrix.
-      const final = mu.length === 0 ? fine : sumNodes(quadrature, index, wavelengthUm, mu, sums);
-      return finish(sizes, wavelengthNm, final, sums, nodes);
-    }
-    coarse = fine;
+    const finer = quadratureOn(sizes, range, wavenumberPerUm, level);
+    const finerSums = sumNodes(finer, index, wavelengthUm, mu, undefined);
+    const finerChange = levelChange(sums, finerSums);
+    converged = finerChange < SIZE_CONVERGENCE && change < SIZE_CONVERGENCE;
+    quadrature = finer;
+    sums = finerSums;
+    change = finerChange;
   }
+  const matrix = emptyMatrix(mu);
+  // With no angles to sum the matrix at, a second pass would repeat `sums`, node for node in the
+  // same order, and add nothing to the matrix.
+  const final = mu.length === 0 ? sums : sumNodes(quadrature, index, wavelengthUm, mu, matrix);
+  return finish(sizes, wavelengthNm, final, matrix, {
+    converged,
+    nodes: quadrature.radiiUm.length,
+    lastChange: change,
+  });
 }
 
 /**
- * The mode's optics from its converged sums. The matrix sums took each area weight w ∝ x² n(r) dr
- * divided by x², so the scattering sum that normalises them is Σ w Q_sca.
+ * The mode's optics from the sums of the level taken. The matrix sums took each area weight
+ * w ∝ x² n(r) dr divided by x², so the scattering sum that normalises them is Σ w Q_sca.
  */
 function finish(
   sizes: SizeDistribution,
   wavelengthNm: number,
   sums: Sums,
   matrix: MutableMatrix,
-  nodes: number,
+  end: SizeConvergence,
 ): SphereModeOptics {
   const weight = logWeight(sizes);
   const qExt = sums.ext / sums.area;
@@ -658,7 +737,7 @@ function finish(
     scatteringCrossSectionM2: qSca * geometricUm2 * 1e-12,
     volumeM3: (4 / 3) * Math.PI * sizes.effectiveRadiusUm * weight.meanSquareRadiusUm2 * 1e-18,
     matrix: finishMatrix(matrix, sums.sca),
-    nodes,
+    sizeConvergence: end,
   };
 }
 
@@ -709,11 +788,13 @@ const SHAPE_WORDS: Readonly<Record<ShapeClass, string>> = {
  * Henyey–Greenstein's from this g. The published models for those classes are R08.T5.c's
  * `nonSphericalModeOptics`, which `aerosol.ts`'s `aerosolModeOptics` routes them to.
  *
+ * A quadrature that has not converged by {@link SIZE_NODES_MAX} nodes gives its finest level's
+ * optics, marked by {@link ModeOptics.sizeConvergence} (R08.T5.f), never a throw.
+ *
  * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
  * @param mu - The cosines to give the matrix at; the phase tables' by default.
  * @throws RangeError as {@link sphereModeOptics} does, for a wavelength outside the files' range,
  *   or for an aggregate, whose optics are R08.T5.c's `aggregateOptics`.
- * @throws Error if the quadrature has not converged by {@link SIZE_NODES_MAX} nodes.
  */
 export function modeOptics(
   mode: AerosolMode,
@@ -755,5 +836,6 @@ export function modeOptics(
     phaseNote: keepsMatrix
       ? undefined
       : `${SHAPE_WORDS[shape]} of ${substanceName(mode.material)} through sphere Mie: Henyey–Greenstein from Mie's g, a fallback`,
+    sizeConvergence: optics.sizeConvergence,
   };
 }

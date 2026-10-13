@@ -4215,7 +4215,8 @@ By the composition ruling (decision-composition):
 - The record's `gases` pass to `molecularTerm` unconverted (a type test pins the assignability).
 - `atmosphereApproximate` collects the reasons of the optics registry: an estimated or absent
   Rayleigh, an absent absorber, or one with no column free (`noColumnFree`), a stand-in or unknown
-  material, or a mode whose size quadrature did not converge (R08.T5.f). The reasons are player
+  material, or a mode whose size quadrature did not converge (R08.T5.f: `ModeOptics.sizeConvergence`
+  with `converged` false, in any channel or bake bin drawn). The reasons are player
   text. Each uses only characters both B612 faces hold,
   and names in words any quantity the literature writes with another symbol (science-r08-mmf.md
   §4.7). Each names a species or material through `substanceName` (P14.T49.f), and a composition
@@ -6328,6 +6329,8 @@ generator, and the reference's sampling needs no domain tag.
     435 nm converge): a k = 0 sphere's resonances defeat the refinement's 10⁻⁴ test there. The test
     keeps Bruneton's 680/550/440, where it was built; a generated lossless mode at that channel would
     throw. Lean: a T5.b follow-up. Ruled 2026-10-13 (`decision-r08-t6d-findings.md` §4): R08.T5.f.
+    Built 2026-10-13 ("Deviations in T5.f, as built"): the stand-in converges at the fitted channels
+    by 2²⁰ nodes, and a mode past the cap is marked, never thrown.
   - _The differences from R05_, in the twin: the zenith from 2 m on R₁ at 4,096 placed steps, each
     pipeline under its own photometry (R05's tables times `skyLuminanceScale()`, the rebuilt Earth's
     times R06's Sun):
@@ -8126,6 +8129,116 @@ generator, and the reference's sampling needs no domain tag.
     _Settled 2026-10-10_ by T3.b's follow-up (below, "Deviations in T3.b's follow-up, as built"):
     Z = 0.998 14, δ = +3.5% from NH₃ and HCl in the same paper, n(550) = 1.644, and the NH₃-ice
     check 1.465.
+- **Deviations in T5.f, as built** (2026-10-13; `view/atmosphere/sizeDistribution.ts`, one field
+  each in `nonSpherical.ts` and `aggregate.ts`; tests in the new `sizeDistributionStop.test.ts`,
+  `sizeDistribution.test.ts` and `aerosol.test.ts`).
+  - _The stop:_ as the task gives it. A level is taken once its change and its predecessor's are
+    both under `SIZE_CONVERGENCE` (10⁻⁴, unchanged), so level 2 is the coarsest taken. There is no
+    absorption floor. Past the cap, the finest level within it is taken, with its last change.
+  - _The cap is 2²⁰, not 2¹⁸_ (ruled by "main", 2026-10-13, on the lane's figures).
+    `SIZE_NODES_MAX` is 1,048,576 and `SIZE_LEVEL_MAX` is 20, which `sphereModeOptics` now also
+    bounds its levels by.
+    - The lane's code sees the stand-in's changes stay erratic near 10⁻⁴ to about 140,000 nodes,
+      where the decision's model had 1–6 × 10⁻⁵ by about 60,000. The size intervals differ.
+    - Two agreements at 2¹⁸ left 9 of the task's 75 wavelengths (74 distinct: 433.625 nm is both a
+      sweep point and the blue channel) unconverged: 430.75, 431.375,
+      433.0, 434.125, 434.875, 435.875 and 436.125 nm, and the bake bins at 443.33 and 468.67 nm.
+      Their last changes were 0.03–1.5 × 10⁻⁴ at about 140,000 nodes, so the task's first test
+      could not pass.
+    - At 2¹⁹, 3 were left (431.375, 434.125 and 443.33 nm). At 2²⁰ none was: the worst stops at
+      566,904 nodes (431.375 nm), and 443.33 nm at 554,608.
+    - The fitted channels converge at 105,072 (645 nm), 236,984 (544 nm) and 141,136
+      (433.625 nm) nodes.
+    - The worst case converges on the last level the cap admits there (level 12; level 13 holds
+      1.06–1.14 million nodes at 430–469 nm), so a wavelength between the sampled ones that needs
+      one level more is marked unconverged.
+    - A level's node count is taken from its panels before it is built, so a level past the cap
+      (up to about 2.1 million nodes, some 60 MB of arrays) is never built.
+  - _The mark._ `SizeConvergence { converged, nodes, lastChange }`, the change being the largest of
+    the relative changes in Q_ext and Q_sca and the absolute change in g.
+    - `lastChange` is infinite where no level finer than the coarsest fitted under the cap.
+    - `SphereModeOptics.sizeConvergence` replaces T5.b's `nodes`. One test read it. The field is
+      not named `sizeQuadrature`, which is the nodes-and-weights function's name.
+    - `ModeOptics` gains `sizeConvergence: SizeConvergence | undefined`. `modeOptics`,
+      `nonSpherical.ts`'s Mie fallback and its other ices' analogue carry Mie's. A phase file's own
+      sizes and the MMF carry `undefined`.
+    - R08.T10.a's `atmosphereApproximate` reads `converged === false` as its reason.
+      `phaseApproximations` does not read it yet. T10.a's text (its `atmosphereApproximate` bullet)
+      now names the field, and asks for the mark in any channel or bake bin drawn.
+    - `sphereModeOptics` gains an optional trailing `nodesMax` (a positive integer,
+      `SIZE_NODES_MAX` by default; `RangeError` otherwise). A caller can trade accuracy for time
+      with it, and the tests reach the unconverged path with it. The coarsest level is always
+      summed, so a cap below its node count gives that level, unconverged.
+  - _The tests._
+    - The stand-in converges at all 75 wavelengths: every 0.125 nm from 430 to 437 nm, the fitted
+      channels and the 15 bake bins. This sweep is the slow test. It took 154 s at 4 workers and
+      load 17, and it runs by hand with `HYPERION_SLOW_TESTS=1`, as `mieMatrices.test.ts`'s whole
+      files do; no recipe sets it.
+    - The fast tier asserts the fitted channels' convergence through `aerosol.test.ts`'s moved
+      stand-in. That test now runs at the fitted channels, where it ran at Bruneton's 680, 550 and
+      440 nm. It takes about 7 s at load 12, so it has its own 120 s timeout against the suite's
+      15 s default.
+    - Lossless spheres of n 1.33, 1.5 and 2.0 at r_eff 0.5 and 5 µm (gamma, v_eff 0.1) converge at
+      the fitted channels. They need 416–70,568 nodes; n 2.0 at 0.5 µm and 433.625 nm is the most.
+    - _Every mode the tests held is unchanged to 10⁻⁴,_ read as the stop's own quantities, Q_ext,
+      Q_sca and g. This covers 30 sphere-Mie modes from `sizeDistribution.test.ts`,
+      `aerosol.test.ts` and `nonSpherical.test.ts`: 29 fast cases, and the stand-in at 440 nm in
+      the slow tier. T5.b's values at 3ce63f6d are written into the test, which holds the new
+      values to them.
+      - The largest move is 8.3 × 10⁻⁵ (3 µm TiO₂), then 6.8 × 10⁻⁵ (n 1.8, 8 µm) and
+        6.5 × 10⁻⁵ (NH₃ ice, 10 µm).
+      - The one held mode that moves by more is apart: the stand-in at 440 nm. T5.b stopped there
+        on a chance agreement at 8,720 nodes. Two agreements take 278,984, which moves it by
+        1.66 × 10⁻⁴; a slow test asserts that it moves.
+      - The matrices are not part of the stop. Their a₁ moves more between T5.b's level and the
+        new one: up to 4.3 × 10⁻³ of itself for Venus's mode 2, 3.6 × 10⁻³ for 1.5 µm water and
+        1.4 × 10⁻³ for 1 µm H₂SO₄. That is under 10⁻³ for most modes. The modes drawn without a
+        sphere's matrix (the other ices' analogues and the large fallbacks) would move by up to
+        2.2 × 10⁻². No test holds a sphere's matrix that tightly.
+    - _The chance agreement:_ the decision's 435 nm does not reproduce in the lane's code. Its first
+      agreement, at 35,200 nodes (4.4 × 10⁻⁵), is followed by 5.6 × 10⁻⁵, so it is not a chance
+      stop here. So two tests:
+      - at 435 nm, the stop does not take that first agreement (it takes 70,392 nodes);
+      - at 435.125 nm, T5.b's first agreement at 2,200 nodes (6.9 × 10⁻⁵) is followed by
+        4.9 × 10⁻⁴. The new stop takes 140,744 nodes and differs from that level by more than
+        10⁻⁴;
+      - the levels these assert are summed in the test from `sizeQuadrature` and `mieSphere`, apart
+        from `sphereModeOptics`.
+    - Past a cap (10,000 nodes at 433.625 nm), the result is the finest level's optics: 8,824
+      nodes, Q and g to 10⁻¹², marked unconverged with that level's change.
+    - The new tests are in their own file, `sizeDistributionStop.test.ts`, so that vitest runs them
+      beside `sizeDistribution.test.ts` (the acceptance filter matches both). At 4 workers and
+      load 12 the acceptance command takes 19.7 s, where it took 3.6 s.
+  - _Cost_ (provisional, Node 26.10, Ryzen 7 3700X, shared machine):
+    - Every mode takes at least one more level, and its matrix at twice the nodes. Venus's mode 2
+      at 550 nm, with its 256-angle matrix, went from 69 to 203 ms at load 11. A mode's 18
+      wavelengths (the 3 channels and the 15 bake bins) cost about 2–3 times what T5.b's did.
+    - The worst case is the stand-in at 431.375 nm. Its efficiencies alone take 5.7 s at load 8 (1
+      worker) and about 9 s at load 15 (4 workers) to 566,904 nodes.
+    - A lossless high-index sphere would add a 256-angle matrix pass there. That pass was 4.1 s at
+      70,568 nodes, so about 33 s at 570,000 (estimated).
+    - Only lossless high-index modes pay this. R08.T10.a's arrival budget may cache them or lower
+      the cap per mode (main, 2026-10-13: not settled here).
+    - The quiet-machine run (load under 1) is pending.
+- **Deferred findings (2026-10-13 rule)** (R08.T5.f). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _Two agreements can still stop by chance._ For the stand-in, 4 of the 75 wavelengths stop on
+    two chance agreements: 430.375 nm at 4,440 nodes, 431.875 nm at 35,400, 435.625 nm at 17,584
+    and 436.25 nm at 35,120. A later level there moves by 1.0–1.4 × 10⁻⁴, so those results hold to
+    about 1–2 × 10⁻⁴, not 10⁻⁴. Three agreements remove these stops, but leave 4 wavelengths
+    unconverged even at 2²⁰.
+  - _The matrix's own convergence._ a₁ moves by up to 4.3 × 10⁻³ (Venus's mode 2) between T5.b's
+    level and the new one, where the efficiencies had already agreed once. The matrix is not
+    tested at the stop (T5.b's design), so a sphere's rainbow and glory angles may carry an error
+    of that order. Ripple effects can be larger in the matrix's elements than in the cross-sections
+    and g (Mishchenko, Travis and Lacis 2002, p. 245).
+  - _The slow sweep runs by hand only._ Adding `sizeDistributionStop.test.ts` to
+    `test-slow-client` is a justfile change, which plans the full `ci`: for main's next justfile
+    batch.
+  - _The fast tier's time._ The acceptance files rose from 3.6 s to 19.7 s at 4 workers. That is
+    mostly the lossless and high-index modes, plus the stand-in at the fitted channels (7.2 s in
+    `aerosol.test.ts`). It is for the perf lane.
+  - _The cost at arrival_ (above). This is for R08.T10.a's budget.
 - **Deviations in T5.c, as built** (2026-10-10; `view/atmosphere/aggregate.ts`, `nonSpherical.ts`,
   `aerosol.ts` and their tests, `materials/phase/`, `fixtures/`, `mie.ts`, `sizeDistribution.ts`,
   `labels.ts` and `materials/materials.ts` (their TSDoc), `materials/iron.json`;

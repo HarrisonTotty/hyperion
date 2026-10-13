@@ -913,6 +913,7 @@ export function aggregateOptics(
     phaseBasis: basis,
     phaseModel: hasTable ? "mmf" : "henyeyGreenstein",
     phaseNote: note,
+    sizeConvergence: undefined,
     phaseShift: result.phaseShift,
     monomerPhaseShift: result.monomerPhaseShift,
   };

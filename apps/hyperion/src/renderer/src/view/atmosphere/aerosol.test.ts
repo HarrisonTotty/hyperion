@@ -96,6 +96,21 @@ describe("optics by shape", () => {
     expect(solid.phaseModel).toBe("tamudust2020");
   });
 
+  it("marks how Mie's size quadrature ended where the optics rest on it, and only there", () => {
+    expect(aerosolModeOptics(SULPHATE, 550).sizeConvergence?.converged).toBe(true);
+    // Another ice takes Mie's cross-sections and ω on water ice's table.
+    const ammonia = {
+      kind: "distribution",
+      mode: {
+        material: "NH3",
+        sizes: { kind: "gamma", effectiveRadiusUm: 3, effectiveVariance: 0.1 },
+      },
+    } as const;
+    expect(aerosolModeOptics(ammonia, 550).sizeConvergence?.converged).toBe(true);
+    expect(aerosolModeOptics(MARS_DUST, 550).sizeConvergence).toBeUndefined();
+    expect(aerosolModeOptics(TITAN_HAZE, 550).sizeConvergence).toBeUndefined();
+  });
+
   it("refuses a distribution declared an aggregate", () => {
     expect(() =>
       aerosolModeOptics(
@@ -150,7 +165,9 @@ describe("the phase tables", () => {
     });
   }
 
-  it("tabulate the Henyey–Greenstein fallback from g, with no matrix", () => {
+  // The lossless stand-in takes 105,072–236,984 nodes at the fitted channels (R08.T5.f), about 7 s
+  // at a load of 12, within reach of the 15 s default on a loaded gate.
+  it("tabulate the Henyey–Greenstein fallback from g, with no matrix", { timeout: 120_000 }, () => {
     const rutile = {
       material: "TiO2",
       shape: "nonSphericalMineral",
@@ -159,16 +176,15 @@ describe("the phase tables", () => {
       table: undefined,
     } as const;
     const sizes = { kind: "gamma", effectiveRadiusUm: 0.5, effectiveVariance: 0.1 } as const;
-    // At Bruneton's 680, 550 and 440 nm, where it was built: at the fitted blue channel since
-    // R08.T6.d, 433.625 nm, this lossless n = 2.65 mode's size quadrature does not converge by its
-    // 65,536 nodes (433.5–434 nm), a finding for T5.b (plan R08's Risks, "Deviations in T6.d, as
-    // built").
-    const [red, green, blue] = [680, 550, 440] as const;
+    // At the fitted channels, where this lossless n = 2.65 mode's size quadrature converges since
+    // R08.T5.f (at 433.625 nm it did not by T5.b's 65,536 nodes).
+    const [red, green, blue] = CHANNEL_WAVELENGTHS_NM;
     const optics: [ModeOptics, ModeOptics, ModeOptics] = [
       opticsOfParticles(rutile, sizes, red),
       opticsOfParticles(rutile, sizes, green),
       opticsOfParticles(rutile, sizes, blue),
     ];
+    expect(optics.map((c) => c.sizeConvergence?.converged)).toEqual([true, true, true]);
     const table = aerosolPhaseTable(optics);
     expect(table.matrix).toBeUndefined();
     expect(Math.abs(phaseTableIntegral(table, 1) - 1)).toBeLessThan(1e-6);

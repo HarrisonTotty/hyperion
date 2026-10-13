@@ -1058,6 +1058,7 @@ function fromTable(
     phaseBasis: basis,
     phaseModel: model,
     phaseNote: note,
+    sizeConvergence: undefined,
   };
 }
 
@@ -1102,6 +1103,7 @@ function fallbackOptics(
         ? `a small grain (effective size parameter ${effective.toFixed(2)} < ${SMALL_GRAIN_SIZE_PARAMETER}), drawn with the sphere's own Mie matrix`
         : "a Henyey–Greenstein phase from Mie's g, with Mie's single-scattering albedo and no matrix"
     }, a fallback`,
+    sizeConvergence: optics.sizeConvergence,
   };
 }
 
@@ -1157,6 +1159,7 @@ export function opticsOfParticles(
           ? ""
           : `; its g expected ${bias.toFixed(3)} from H2O ice's (van Diedenhoven et al. 2014)`
       }${tailNote === undefined ? "" : `; ${tailNote}`}`,
+      sizeConvergence: mie.sizeConvergence,
     };
   }
   const table = particles.table;
