@@ -16,11 +16,12 @@
 //! [`Handler`] is the seam where each kind's handler plugs in (plan 04, P04.T14). The server's is
 //! [`Handlers`]; unit tests inject doubles through [`AppState`]. The handlers of the universe
 //! lifecycle are in [`universe`], the galaxy's in [`galaxy`], the system's in [`system`], the
-//! scene's in [`scene`], and the sky's in [`sky`].
+//! scene's in [`scene`], the sky's in [`sky`], and the surface's in [`surface`].
 
 mod galaxy;
 mod scene;
 mod sky;
+mod surface;
 mod system;
 mod universe;
 
@@ -198,11 +199,12 @@ fn open_topic(
 /// (R06.T11.a–d: the census's JSON, its stars and band in bulk, and the host discs), the one kind
 /// answered in bulk, behind its switch ([`SkyService`](crate::SkyService)): it is on by default
 /// since rendering plan R13's R13.T2, and when the server is started with `--serve-sky=false`,
-/// `sky` is answered `unsupported`, as before R06.T11.a. A later plan's kind that this server's
-/// [`REQUEST_KINDS`] does not hold is refused before it reaches here, as `unsupported`. A kind the
-/// protocol already defines but whose handler has not landed is answered `unsupported` here, under
-/// its own ID, as an older server would answer it (plan 04, design note 15): `body_events` until
-/// plan 14's P14.T31. Each handler that names a universe starts from
+/// `sky` is answered `unsupported`, as before R06.T11.a. Rendering plan R09's `survey_pass` is
+/// served (R09.T19.a). A later plan's kind that this server's [`REQUEST_KINDS`] does not hold is
+/// refused before it reaches here, as `unsupported`. A kind the protocol already defines but whose
+/// handler has not landed is answered `unsupported` here, under its own ID, as an older server
+/// would answer it (plan 04, design note 15): `body_events` until plan 14's P14.T31, and R09's
+/// `surface_field` until R09.T19.b. Each handler that names a universe starts from
 /// [`universe::openable_universe`].
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct Handlers;
@@ -258,6 +260,11 @@ impl Handler for Handlers {
                 // The switch is off (R06.T11.c): answered as before R06.T11.a, with no job.
                 SkyService::Unsupported => Box::pin(ready(Err(not_served_yet("sky")))),
             },
+            // R09.T19.b serves it: the payload, gated by coverage, through `Answer`.
+            RequestBody::SurfaceField(_) => Box::pin(ready(Err(not_served_yet("surface_field")))),
+            RequestBody::SurveyPass(request) => {
+                Box::pin(surface::survey_pass(state, request, token).map(answered))
+            }
         }
     }
 
@@ -280,7 +287,7 @@ fn answered(result: Result<ResponseBody, RequestError>) -> Result<Answer, Reques
 
 /// The answer to a kind the protocol defines and this server does not serve yet: `unsupported`,
 /// as an older server would answer it (plan 04, design note 15). Plan 14's `body_events` takes it
-/// until P14.T31 lands.
+/// until P14.T31 lands, and rendering plan R09's `surface_field` until R09.T19.b.
 #[must_use]
 fn not_served_yet(kind: &str) -> RequestError {
     request_error(
@@ -307,6 +314,8 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::SceneShip(_) => "scene_ship",
         RequestBody::SceneCameras(_) => "scene_cameras",
         RequestBody::Sky(_) => "sky",
+        RequestBody::SurfaceField(_) => "surface_field",
+        RequestBody::SurveyPass(_) => "survey_pass",
     }
 }
 
@@ -318,14 +327,17 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 /// record cannot. A subscription's answer is as large as its topic's state: the scene's holds a
 /// whole system's bodies (rendering plan R03, Design note 14). `scene_ship`, `scene_cameras` and
 /// `unsubscribe` are small. The sky's JSON is small but its census and hosts grow with the request,
-/// and rendering plan R06 classes it large (`is_large`; Design note 17's size class).
+/// and rendering plan R06 classes it large (`is_large`; Design note 17's size class). Rendering
+/// plan R09 classes its `surface_field` large as plan 04's row R09 requires, whose payload runs to
+/// some 15 MB, though its JSON is a header and a cover; its `survey_pass` answers one revision.
 pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
         | ResponseBody::SystemsInRange(_)
         | ResponseBody::SystemBodies(_)
         | ResponseBody::BodyEvents(_)
-        | ResponseBody::Sky(_) => true,
+        | ResponseBody::Sky(_)
+        | ResponseBody::SurfaceField(_) => true,
         ResponseBody::Subscribe(subscribed) => match subscribed.state {
             SubscriptionState::Scene(_) => true,
         },
@@ -337,7 +349,8 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::BodyDetail(_)
         | ResponseBody::Unsubscribe
         | ResponseBody::SceneShip(_)
-        | ResponseBody::SceneCameras => false,
+        | ResponseBody::SceneCameras
+        | ResponseBody::SurveyPass(_) => false,
     }
 }
 
@@ -1096,9 +1109,9 @@ mod tests {
         GalaxyParametersRequest, KinematicsDto, MapPopulation, MapView, MassLayer,
         OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
         SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SkyRequest,
-        SubscribeRequest, Subscribed, SubscriptionTopic, SystemBodiesRequest, SystemIdHex,
-        SystemSummaryRequest, SystemsInRangeRequest, UniverseIdHex, UniverseTime,
-        UnsubscribeRequest,
+        SubscribeRequest, Subscribed, SubscriptionTopic, SurfaceFieldRequest, SurveyPassRequest,
+        SurveySourceDto, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
+        SystemsInRangeRequest, UniverseIdHex, UniverseTime, UnsubscribeRequest,
     };
 
     use tokio::time::timeout;
@@ -1188,6 +1201,20 @@ mod tests {
                 n_max: None,
                 cone: None,
                 exclude_system: None,
+            }),
+            RequestBody::SurfaceField(SurfaceFieldRequest {
+                universe: UniverseIdHex::from_u64(42),
+                body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100),
+                have_revision: None,
+            }),
+            RequestBody::SurveyPass(SurveyPassRequest {
+                universe: UniverseIdHex::from_u64(42),
+                body: BodyIdHex::from_parts(0x0200_0800_2000_0000, 0x0100),
+                from: UniverseTime::default(),
+                to: UniverseTime::default(),
+                source: SurveySourceDto::Orbital,
+                resolution_m: 100.0,
+                cells: Vec::new(),
             }),
         ]
     }
@@ -1356,9 +1383,9 @@ mod tests {
     async fn kinds_without_a_handler_are_answered_unsupported() {
         // The kind is the protocol's (P14.T35.c), so it parses and reaches the handlers, which
         // answer it as an older server would until P14.T31 serves it. So are rendering plan R03's
-        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, and R06's `sky`
+        // kinds the connection routes, `scene_cameras` until R03.T8 serves it, R06's `sky`
         // while its switch is off (R06.T11.c), as this test turns it: it is on by default since
-        // rendering plan R13's R13.T2.
+        // rendering plan R13's R13.T2, and R09's `surface_field` until R09.T19.b serves it.
         let harness = Harness::start_configured(Handlers, ConnectionLimits::default(), |config| {
             config.sky_service(SkyService::Unsupported)
         })
@@ -1373,10 +1400,11 @@ mod tests {
                         | RequestBody::Unsubscribe(_)
                         | RequestBody::SceneCameras(_)
                         | RequestBody::Sky(_)
+                        | RequestBody::SurfaceField(_)
                 )
             })
             .collect::<Vec<_>>();
-        assert_eq!(events.len(), 5);
+        assert_eq!(events.len(), 6);
         for body in events {
             let name = kind(&body);
             let answer = Handlers

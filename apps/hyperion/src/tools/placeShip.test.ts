@@ -158,6 +158,8 @@ class FakeServer {
       case "unsubscribe":
       case "scene_cameras":
       case "sky":
+      case "surface_field":
+      case "survey_pass":
         break;
     }
     return { code: "unsupported", message: `not faked: ${body.kind}`, field: null };

@@ -117,6 +117,14 @@ pub const CRAFT_PUSH_INTERVAL: Duration = Duration::from_micros(15_625);
 /// `bad_request` naming `cameras`.
 pub const MAX_SCENE_CAMERAS: usize = 8;
 
+/// Cell ranges one `survey_pass` may carry: 256 (rendering plan R09, Design note 16; plan 04's row
+/// R09). A 257th is refused with `bad_request` naming `cells`.
+///
+/// At most 38 bytes a range, the widest `{"start":…,"end":…},` two ten-digit indices make, 256 of
+/// them keep the request under [`MAX_INBOUND_FRAME_BYTES`]; a pass whose cover needs more ranges is
+/// sent as several requests sharing its time span.
+pub const MAX_SURVEY_RANGES: usize = 256;
+
 /// Universes the server holds, counting those on disk and those being created.
 pub const MAX_UNIVERSES: usize = 256;
 
@@ -167,7 +175,8 @@ mod tests {
 
     /// Every limit holds the figure plan 04 gives it: design note 24's, T13.a's frame count, T15's
     /// byte budget and write timeout, design note 16's name length and design note 23's four
-    /// galaxies; `CLOSE_TIMEOUT` and the queue capacities are this server's own choice (T13, T8).
+    /// galaxies, and the rendering plans' (R03's and R09's); `CLOSE_TIMEOUT` and the queue
+    /// capacities are this server's own choice (T13, T8).
     ///
     /// The tests that exercise a limit read its value from here, so that a frame one byte over the
     /// limit is over it whatever the limit is; this is the test that notices the limit itself move.
@@ -199,6 +208,7 @@ mod tests {
             MAX_SCENE_CAMERAS, 8,
             "one per view of R07's largest layout, with room"
         );
+        assert_eq!(MAX_SURVEY_RANGES, 256, "R09's ranges a survey pass");
         assert_eq!(SCENE_HEARTBEAT, Duration::from_secs(1));
         assert_eq!(
             CRAFT_PUSH_INTERVAL * 64,

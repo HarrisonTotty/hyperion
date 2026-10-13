@@ -119,6 +119,21 @@ import type { SkyGapDto } from "./generated/SkyGapDto";
 import type { SkyLayerCensusDto } from "./generated/SkyLayerCensusDto";
 import type { SkyRequest } from "./generated/SkyRequest";
 import type { SkyResponse } from "./generated/SkyResponse";
+// The surface (rendering plan R09, R09.T19.a).
+import type { CellRangeDto } from "./generated/CellRangeDto";
+import type { ClimateModelDto } from "./generated/ClimateModelDto";
+import type { CoverDto } from "./generated/CoverDto";
+import type { CoverRangeDto } from "./generated/CoverRangeDto";
+import type { PaletteEntryDto } from "./generated/PaletteEntryDto";
+import type { PaletteRoleDto } from "./generated/PaletteRoleDto";
+import type { PrecipitationSourceDto } from "./generated/PrecipitationSourceDto";
+import type { RecordSectionDto } from "./generated/RecordSectionDto";
+import type { SurfaceFieldDto } from "./generated/SurfaceFieldDto";
+import type { SurfaceFieldRequest } from "./generated/SurfaceFieldRequest";
+import type { SurfaceHeaderDto } from "./generated/SurfaceHeaderDto";
+import type { SurveyPassDto } from "./generated/SurveyPassDto";
+import type { SurveyPassRequest } from "./generated/SurveyPassRequest";
+import type { SurveySourceDto } from "./generated/SurveySourceDto";
 import type { SectionDto } from "./generated/SectionDto";
 import type { SeedHex } from "./generated/SeedHex";
 import type { ServerMessage } from "./generated/ServerMessage";
@@ -263,6 +278,20 @@ export type {
   SkyLayerCensusDto,
   SkyRequest,
   SkyResponse,
+  CellRangeDto,
+  ClimateModelDto,
+  CoverDto,
+  CoverRangeDto,
+  PaletteEntryDto,
+  PaletteRoleDto,
+  PrecipitationSourceDto,
+  RecordSectionDto,
+  SurfaceFieldDto,
+  SurfaceFieldRequest,
+  SurfaceHeaderDto,
+  SurveyPassDto,
+  SurveyPassRequest,
+  SurveySourceDto,
   SeedHex,
   ServerMessage,
   StarEventDto,

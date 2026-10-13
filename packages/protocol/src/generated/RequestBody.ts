@@ -9,6 +9,8 @@ import type { SceneCamerasRequest } from "./SceneCamerasRequest";
 import type { SceneShipRequest } from "./SceneShipRequest";
 import type { SkyRequest } from "./SkyRequest";
 import type { SubscribeRequest } from "./SubscribeRequest";
+import type { SurfaceFieldRequest } from "./SurfaceFieldRequest";
+import type { SurveyPassRequest } from "./SurveyPassRequest";
 import type { SystemBodiesRequest } from "./SystemBodiesRequest";
 import type { SystemSummaryRequest } from "./SystemSummaryRequest";
 import type { SystemsInRangeRequest } from "./SystemsInRangeRequest";
@@ -17,4 +19,4 @@ import type { UnsubscribeRequest } from "./UnsubscribeRequest";
 /**
  * What a request asks for, discriminated by `kind`.
  */
-export type RequestBody = { "kind": "create_universe" } & CreateUniverseRequest | { "kind": "list_universes" } | { "kind": "open_universe" } & OpenUniverseRequest | { "kind": "galaxy_parameters" } & GalaxyParametersRequest | { "kind": "density_map" } & DensityMapRequest | { "kind": "systems_in_range" } & SystemsInRangeRequest | { "kind": "system_summary" } & SystemSummaryRequest | { "kind": "system_bodies" } & SystemBodiesRequest | { "kind": "body_detail" } & BodyDetailRequest | { "kind": "body_events" } & BodyEventsRequest | { "kind": "subscribe" } & SubscribeRequest | { "kind": "unsubscribe" } & UnsubscribeRequest | { "kind": "scene_ship" } & SceneShipRequest | { "kind": "scene_cameras" } & SceneCamerasRequest | { "kind": "sky" } & SkyRequest;
+export type RequestBody = { "kind": "create_universe" } & CreateUniverseRequest | { "kind": "list_universes" } | { "kind": "open_universe" } & OpenUniverseRequest | { "kind": "galaxy_parameters" } & GalaxyParametersRequest | { "kind": "density_map" } & DensityMapRequest | { "kind": "systems_in_range" } & SystemsInRangeRequest | { "kind": "system_summary" } & SystemSummaryRequest | { "kind": "system_bodies" } & SystemBodiesRequest | { "kind": "body_detail" } & BodyDetailRequest | { "kind": "body_events" } & BodyEventsRequest | { "kind": "subscribe" } & SubscribeRequest | { "kind": "unsubscribe" } & UnsubscribeRequest | { "kind": "scene_ship" } & SceneShipRequest | { "kind": "scene_cameras" } & SceneCamerasRequest | { "kind": "sky" } & SkyRequest | { "kind": "surface_field" } & SurfaceFieldRequest | { "kind": "survey_pass" } & SurveyPassRequest;

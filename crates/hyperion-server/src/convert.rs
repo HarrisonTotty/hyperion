@@ -5,14 +5,16 @@
 //! cannot be used becomes a [`ConvertRequestError`], answered `bad_request` with the field named.
 //! Answers are built here too, by `From` from the server's types to the wire's, as are the request
 //! errors that the server's own errors become. The `system_summary` request and its answer are in
-//! [`stellar`], plan 14's `system_bodies` and `body_detail` in [`planetary`], and the scene's
-//! requests (rendering plan R03) in [`scene`].
+//! [`stellar`], plan 14's `system_bodies` and `body_detail` in [`planetary`], the scene's
+//! requests (rendering plan R03) in [`scene`], and the surface's (rendering plan R09) in
+//! [`surface`].
 
 mod planetary;
 mod scene;
 #[cfg(test)]
 mod scene_fixture;
 mod stellar;
+mod surface;
 
 use std::error::Error;
 use std::fmt;
@@ -54,6 +56,9 @@ pub(crate) use self::planetary::{
 pub(crate) use self::scene::{ShipRequest, unknown_frame_body, unknown_frame_system};
 pub(crate) use self::stellar::{
     SummaryRequest, brief_dto, system_summary, unknown_system, wire_time,
+};
+pub(crate) use self::surface::{
+    SurveyRequest, open_surveys_refusal, record_survey_refusal, surface_refusal,
 };
 use crate::compute::{CodeDepth, GalaxyKey, MapKey, MapResolution, QuantisedMap, RawDensityMap};
 use crate::limits::{MAX_CENSUS_LIMIT, MAX_QUERY_CELLS, MAX_QUERY_RADIUS_LY};
@@ -272,11 +277,20 @@ impl TryFrom<&SystemsInRangeRequest> for RangeRequest {
 pub(crate) fn query_time(
     time: &hyperion_protocol::UniverseTime,
 ) -> Result<UniverseTime, ConvertRequestError> {
+    clock_time("time", time)
+}
+
+/// A well-formed time inside the clock window, refused naming `field`: a query's `time`, a survey
+/// pass's `from` and `to`.
+pub(crate) fn clock_time(
+    field: &'static str,
+    time: &hyperion_protocol::UniverseTime,
+) -> Result<UniverseTime, ConvertRequestError> {
     let t = UniverseTime::new(time.seconds, time.nanos)
-        .map_err(|error| ConvertRequestError::new("time", error))?;
+        .map_err(|error| ConvertRequestError::new(field, error))?;
     if !ClockWindow::contains(t) {
         return Err(ConvertRequestError::new(
-            "time",
+            field,
             format!(
                 "{t} lies outside the {} Julian years either side of the epoch where positions are \
                  guaranteed",

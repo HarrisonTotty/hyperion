@@ -29,6 +29,7 @@ use crate::scene::{
 };
 use crate::sky::{SkyRequest, SkyResponse};
 use crate::stellar::{SystemSummaryDto, SystemSummaryRequest};
+use crate::surface::{SurfaceFieldDto, SurfaceFieldRequest, SurveyPassDto, SurveyPassRequest};
 use crate::universe::{CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList};
 
 /// A request's ID, chosen by the client and unique among its requests in flight.
@@ -292,6 +293,11 @@ pub enum RequestBody {
     SceneCameras(SceneCamerasRequest),
     /// The stars and the band seen from a point at a time, answered in bulk (rendering plan R06).
     Sky(SkyRequest),
+    /// A body's coarse field in the cells the ship has surveyed, answered in bulk (rendering plan
+    /// R09).
+    SurfaceField(SurfaceFieldRequest),
+    /// Record one survey pass of a body (rendering plan R09).
+    SurveyPass(SurveyPassRequest),
 }
 
 /// The answer to a request, with the same `kind` as the request it answers.
@@ -333,6 +339,10 @@ pub enum ResponseBody {
     // Boxed: the hosts' discs make it the largest answer but one.
     /// The sky computed, its stars and band in the binary frames before it.
     Sky(Box<SkyResponse>),
+    /// The body's coarse field, its cells in the binary frames before it, or why it has none.
+    SurfaceField(SurfaceFieldDto),
+    /// The survey pass recorded.
+    SurveyPass(SurveyPassDto),
 }
 
 /// The `kind` string of every [`RequestBody`] variant, which is also that of the
@@ -356,6 +366,8 @@ pub const REQUEST_KINDS: &[&str] = &[
     "scene_ship",
     "scene_cameras",
     "sky",
+    "surface_field",
+    "survey_pass",
 ];
 
 #[cfg(test)]
@@ -381,6 +393,7 @@ mod tests {
     };
     use crate::sky::BandSpecDto;
     use crate::stellar::SystemExistenceDto;
+    use crate::surface::{CellRangeDto, RecordSectionDto, SurveySourceDto};
     use crate::testing::{assert_wire_form, assert_wire_strings};
     use crate::universe::UniverseStatus;
 
@@ -453,6 +466,31 @@ mod tests {
             stars_bytes: 0,
             band_bytes: 0,
             is_final: true,
+        }
+    }
+
+    /// A moon's whole surveyed field, for the walk.
+    fn surface_field_request() -> SurfaceFieldRequest {
+        SurfaceFieldRequest {
+            universe: universe(),
+            body: BodyIdHex::from_parts(system().to_u64(), 0x0103),
+            have_revision: None,
+        }
+    }
+
+    /// One orbit's survey of a moon's first 96 cells, for the walk.
+    fn survey_pass_request() -> SurveyPassRequest {
+        SurveyPassRequest {
+            universe: universe(),
+            body: BodyIdHex::from_parts(system().to_u64(), 0x0103),
+            from: UniverseTime::default(),
+            to: UniverseTime {
+                seconds: 5_400,
+                nanos: 0,
+            },
+            source: SurveySourceDto::Orbital,
+            resolution_m: 100.0,
+            cells: vec![CellRangeDto { start: 0, end: 96 }],
         }
     }
 
@@ -552,7 +590,11 @@ mod tests {
                 }))
             }
             Some(RequestBody::SceneCameras(_)) => Some(RequestBody::Sky(sky_request())),
-            Some(RequestBody::Sky(_)) => None,
+            Some(RequestBody::Sky(_)) => Some(RequestBody::SurfaceField(surface_field_request())),
+            Some(RequestBody::SurfaceField(_)) => {
+                Some(RequestBody::SurveyPass(survey_pass_request()))
+            }
+            Some(RequestBody::SurveyPass(_)) => None,
         }
     }
 
@@ -670,7 +712,15 @@ mod tests {
             })),
             Some(ResponseBody::SceneShip(_)) => Some(ResponseBody::SceneCameras),
             Some(ResponseBody::SceneCameras) => Some(ResponseBody::Sky(Box::new(sky_response()))),
-            Some(ResponseBody::Sky(_)) => None,
+            Some(ResponseBody::Sky(_)) => {
+                Some(ResponseBody::SurfaceField(SurfaceFieldDto::NotModelled {
+                    section: RecordSectionDto::Surface,
+                }))
+            }
+            Some(ResponseBody::SurfaceField(_)) => {
+                Some(ResponseBody::SurveyPass(SurveyPassDto { revision: 1 }))
+            }
+            Some(ResponseBody::SurveyPass(_)) => None,
         }
     }
 
@@ -956,6 +1006,8 @@ mod tests {
                 "scene_ship",
                 "scene_cameras",
                 "sky",
+                "surface_field",
+                "survey_pass",
             ]
         );
     }
@@ -1105,6 +1157,55 @@ mod tests {
         assert_wire_form(
             &ResponseBody::SceneCameras,
             json!({ "kind": "scene_cameras" }),
+        );
+    }
+
+    /// Rendering plan R09's kinds: the field's own `state` tag sits beside the body's `kind`.
+    #[test]
+    fn surface_field_and_survey_pass_wire_forms() {
+        assert_wire_form(
+            &RequestBody::SurfaceField(SurfaceFieldRequest {
+                universe: universe(),
+                body: BodyIdHex::from_parts(system().to_u64(), 0x0103),
+                have_revision: Some(2),
+            }),
+            json!({
+                "kind": "surface_field",
+                "universe": "000000000000002a",
+                "body": "0200080020000000.0103",
+                "have_revision": 2,
+            }),
+        );
+        assert_wire_form(
+            &ResponseBody::SurfaceField(SurfaceFieldDto::NotModelled {
+                section: RecordSectionDto::Surface,
+            }),
+            json!({ "kind": "surface_field", "state": "not_modelled", "section": "surface" }),
+        );
+        assert_wire_form(
+            &RequestBody::SurveyPass(SurveyPassRequest {
+                universe: universe(),
+                body: BodyIdHex::from_parts(system().to_u64(), 0x0103),
+                from: UniverseTime::default(),
+                to: UniverseTime::default(),
+                source: SurveySourceDto::Landed,
+                resolution_m: 0.004,
+                cells: vec![CellRangeDto { start: 5, end: 8 }],
+            }),
+            json!({
+                "kind": "survey_pass",
+                "universe": "000000000000002a",
+                "body": "0200080020000000.0103",
+                "from": { "seconds": 0, "nanos": 0 },
+                "to": { "seconds": 0, "nanos": 0 },
+                "source": "landed",
+                "resolution_m": 0.004,
+                "cells": [{ "start": 5, "end": 8 }],
+            }),
+        );
+        assert_wire_form(
+            &ResponseBody::SurveyPass(SurveyPassDto { revision: 4 }),
+            json!({ "kind": "survey_pass", "revision": 4 }),
         );
     }
 

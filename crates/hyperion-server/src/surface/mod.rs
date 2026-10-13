@@ -34,7 +34,16 @@
 //! # What starts a field
 //!
 //! The first `surface_field` or `survey_pass` for the body (R09.T19, which wires them), and
-//! [`SurfaceService::prefetch`], which session code will call as the ship approaches a body.
+//! [`SurfaceService::prefetch`], which session code will call as the ship approaches a body. A
+//! `survey_pass` first reads the field's level on an interactive job
+//! ([`SurfaceService::field_level`]) and starts the field only where the body's inputs are
+//! modelled.
+//!
+//! # The survey logs
+//!
+//! Nothing holds a universe's Knowledge yet (P12.T8 will), so the service opens each universe's
+//! [`SurveyLog`](crate::knowledge::surveys::SurveyLog) on its first use and keeps it
+//! ([`SurfaceService::survey_log`]): a universe's survey file has one writer (R09.T18).
 //!
 //! # The floating-point mode
 //!
@@ -50,4 +59,5 @@ mod service;
 
 pub use cache::{FieldCache, FieldKey};
 pub use inputs::{InputsSource, RecordInputs};
+pub(crate) use service::FieldLevel;
 pub use service::{RECORD_TIME, SurfaceCounters, SurfaceJobError, SurfaceService};

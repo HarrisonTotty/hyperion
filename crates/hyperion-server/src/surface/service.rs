@@ -1,28 +1,35 @@
 //! The surface service: a body's coarse field, computed once on the pool through a single flight
 //! and kept in the [`FieldCache`] (the [module](super) documentation).
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use hyperion_protocol::SeedHex;
 use hyperion_sim::Seed;
-use hyperion_sim::planetary::hooks::surface_seed;
-use hyperion_sim::planetary::surface::{SurfaceInputsError, coarse_pass};
+use hyperion_sim::planetary::derive::figure::BodyFigure;
+use hyperion_sim::planetary::hooks::{SurfaceSeed, surface_seed};
+use hyperion_sim::planetary::record::{BodyRecord, RecordSection, Section};
+use hyperion_sim::planetary::surface::{CoarseInputs, SurfaceInputsError, coarse_pass};
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use hyperion_sim::time::UniverseTime;
-use hyperion_surface::field::{CoarseField, FieldView};
+use hyperion_sim::units::Metres;
+use hyperion_surface::field::{CoarseField, CoarseLevel, FieldView, coarse_level};
 use tokio::task::JoinSet;
 
 use super::{FieldCache, FieldKey, InputsSource};
 use crate::cache::LruCounters;
 use crate::compute::sky::bulk;
 use crate::compute::{
-    CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GeneratedSystem, JobError,
+    CancelOnDrop, CancelToken, ComputeError, CpuPool, Flight, GeneratedSystem, JobError, Priority,
     SingleFlight, SubmitJobError,
 };
+use crate::knowledge::LoadKnowledgeError;
+use crate::knowledge::surveys::SurveyLog;
+use crate::universe::{UniverseId, UniverseStore};
 
 /// The time at which the service reads a body's record for its inputs: the epoch.
 ///
@@ -101,6 +108,35 @@ impl SurfaceCounters {
     }
 }
 
+/// The level of a body's coarse field, which its survey passes index, and whether the field can be
+/// computed now ([`SurfaceService::field_level`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum FieldLevel {
+    /// The service's source gives the body's inputs: its field is at this level, the one their
+    /// radius gives, and can be computed.
+    Modelled(CoarseLevel),
+    /// The source answers that a section of the record the coarse pass reads is not modelled, so
+    /// the body has no field yet. Its passes are still Knowledge, kept at the level of the
+    /// record's figure, whose volumetric radius is the one the inputs will read once the section
+    /// is modelled (R09.T19.a, ruled 2026-10-13).
+    NotModelled {
+        /// The level the figure's radius gives.
+        level: CoarseLevel,
+        /// The section the pass needs.
+        section: RecordSection,
+    },
+}
+
+impl FieldLevel {
+    /// The level the body's cells are indexed at.
+    #[must_use]
+    pub(crate) const fn level(self) -> CoarseLevel {
+        match self {
+            Self::Modelled(level) | Self::NotModelled { level, .. } => level,
+        }
+    }
+}
+
 /// Every body's coarse field, computed once on the CPU pool and kept in one byte budget (the
 /// [module](super) documentation).
 pub struct SurfaceService {
@@ -115,6 +151,10 @@ pub struct SurfaceService {
     /// [`stop_prefetching`](Self::stop_prefetching), at the server's shutdown, or when the service
     /// is dropped.
     prefetching: Mutex<JoinSet<()>>,
+    /// Each universe's survey log, opened once ([`survey_log`](Self::survey_log)).
+    surveys: Arc<Mutex<HashMap<UniverseId, SurveyLog>>>,
+    /// The survey logs being opened, so that two first requests of a universe open its log once.
+    opening: SingleFlight<UniverseId, SurveyLog, Arc<LoadKnowledgeError>>,
 }
 
 impl SurfaceService {
@@ -132,6 +172,8 @@ impl SurfaceService {
             flights: SingleFlight::new(),
             computed: Arc::new(AtomicU64::new(0)),
             prefetching: Mutex::new(JoinSet::new()),
+            surveys: Arc::new(Mutex::new(HashMap::new())),
+            opening: SingleFlight::new(),
         }
     }
 
@@ -181,11 +223,12 @@ impl SurfaceService {
     /// held, and returns at once whether it started or joined a pass.
     ///
     /// The pass runs on the pool at bulk priority through the service's single flight, waited on
-    /// by a task the service owns, and a request made meanwhile joins it. Session code calls it as
-    /// the ship approaches a body (Design note 19); it is public for that, and unused in the crate
-    /// until R09.T19's `survey_pass` calls it. It looks for the field as a request does, so it
-    /// counts a hit when the field is held; otherwise a miss, and one more inside the flight where
-    /// it starts the pass, but none there where it joins a pass already in flight. A pass that
+    /// by a task the service owns, and a request made meanwhile joins it. Session code will call it
+    /// as the ship approaches a body (Design note 19), and is why it is public; `survey_pass` calls
+    /// it for a body whose inputs are modelled (R09.T19.a). It looks for the field as a request
+    /// does, so it counts a hit when the field is held; otherwise a miss, and one more inside the
+    /// flight where it starts the pass, but none there where it joins a pass already in flight. A
+    /// pass that
     /// fails is logged (a refused body at `debug`, a job that did not run at `warn`), and the next
     /// request asks again.
     ///
@@ -233,6 +276,85 @@ impl SurfaceService {
             }
         });
         true
+    }
+
+    /// The level of the coarse field of the body `key` names, whose planetary system is `system`,
+    /// and whether the field can be computed now, read as one interactive job on the pool.
+    ///
+    /// The job reads what [`field`](Self::field)'s pass reads before it runs: the body's surface
+    /// seed, its record at [`RECORD_TIME`] and its inputs from the service's source, so that a
+    /// survey pass is checked against the field's own cells and a body with no field is answered
+    /// without a bulk slot. Where the source gives inputs, the level is their radius's; where it
+    /// answers [`SurfaceInputsError::NotModelled`], the record's figure's
+    /// ([`FieldLevel::NotModelled`]).
+    ///
+    /// # Errors
+    ///
+    /// - [`SurfaceJobError::Body`] and [`SurfaceJobError::Inputs`], as [`field`](Self::field)
+    ///   gives them, except that a source's [`SurfaceInputsError::NotModelled`] is answered from
+    ///   the record's figure ([`level_from`]): an error naming [`RecordSection::Figure`] only where
+    ///   the figure gives no level either;
+    /// - [`SurfaceJobError::Compute`] if the interactive queue is full or the pool is shutting down
+    ///   or faulted, or the job was cancelled through `token`, panicked or was dropped with the
+    ///   pool.
+    ///
+    /// # Panics
+    ///
+    /// As [`field`](Self::field), if `system` is not the key's body's or the key's generator
+    /// version is not one this build generates.
+    pub(crate) async fn field_level(
+        &self,
+        key: FieldKey,
+        system: &Arc<GeneratedSystem>,
+        token: CancelToken,
+    ) -> Result<FieldLevel, SurfaceJobError> {
+        check_system(key, system);
+        let (source, system) = (Arc::clone(&self.source), Arc::clone(system));
+        let receiver = self
+            .pool
+            .try_submit(Priority::Interactive, token, move |_: &CancelToken| {
+                level_of(source.as_ref(), key, &system)
+            })
+            .map_err(|error| SurfaceJobError::Compute(error.into()))?;
+        receiver
+            .await
+            .unwrap_or_else(|closed| Err(JobError::from(closed)))
+            .map_err(|error| SurfaceJobError::Compute(error.into()))?
+    }
+
+    /// Universe `universe`'s survey log, opened from `store` on its first use and kept, so that its
+    /// file has one writer (R09.T18's record).
+    ///
+    /// Callers that ask at once while it is being opened share one open. The service keeps the log
+    /// until P12.T8's holder of a universe's Knowledge exists and takes it over.
+    ///
+    /// # Errors
+    ///
+    /// [`LoadKnowledgeError`], shared between the callers that waited on the open, as
+    /// [`SurveyLog::open`] gives it; nothing is kept, and the next call opens the log again.
+    pub(crate) async fn survey_log(
+        &self,
+        store: &UniverseStore,
+        universe: UniverseId,
+    ) -> Result<SurveyLog, Arc<LoadKnowledgeError>> {
+        if let Some(log) = lock(&self.surveys).get(&universe) {
+            return Ok(log.clone());
+        }
+        let (surveys, store) = (Arc::clone(&self.surveys), store.clone());
+        let opened = self
+            .opening
+            .run(universe, move || async move {
+                // As in `flight`: a caller can arrive just after another open has finished and
+                // left the registry, and the log it opened is the one to share.
+                if let Some(log) = lock(&surveys).get(&universe) {
+                    return Ok(Arc::new(log.clone()));
+                }
+                let log = SurveyLog::open(&store, universe).await.map_err(Arc::new)?;
+                let log = lock(&surveys).entry(universe).or_insert(log).clone();
+                Ok(Arc::new(log))
+            })
+            .await?;
+        Ok(SurveyLog::clone(&opened))
     }
 
     /// Stops waiting on the passes [`prefetch`](Self::prefetch) started.
@@ -319,6 +441,7 @@ impl fmt::Debug for SurfaceService {
             .field("counters", &self.counters())
             .field("computing", &self.flights.len())
             .field("prefetching", &prefetching)
+            .field("survey_logs", &lock(&self.surveys).len())
             .finish_non_exhaustive()
     }
 }
@@ -364,6 +487,80 @@ fn compute(
     key: FieldKey,
     system: &GeneratedSystem,
 ) -> Result<CoarseField, SurfaceJobError> {
+    let (seed, record) = surface_record(key, system)?;
+    let inputs = source
+        .inputs(&record, &system.0)
+        .map_err(SurfaceJobError::Inputs)?;
+    Ok(coarse_pass(seed, &inputs))
+}
+
+/// The level of the field of `key`'s body in `system`, on the pool, as
+/// [`SurfaceService::field_level`] gives it.
+///
+/// # Errors
+///
+/// As [`SurfaceService::field_level`], but for a pool job's failure.
+fn level_of(
+    source: &dyn InputsSource,
+    key: FieldKey,
+    system: &GeneratedSystem,
+) -> Result<FieldLevel, SurfaceJobError> {
+    let (_, record) = surface_record(key, system)?;
+    level_from(source.inputs(&record, &system.0), record.figure())
+}
+
+/// The level of a body's field from what the source answered for it, `inputs`, and its record's
+/// figure section, `figure`.
+///
+/// Inputs give the level of their radius. A section the inputs need that is not modelled gives the
+/// level of the figure's volumetric radius, the radius the inputs will read once the section is
+/// modelled ([`FieldLevel::NotModelled`]).
+///
+/// # Errors
+///
+/// The source's [`SurfaceInputsError::NoSolidSurface`] and [`SurfaceInputsError::NotResolved`];
+/// and where the source answers [`SurfaceInputsError::NotModelled`], by the figure's state:
+/// [`SurfaceInputsError::NotModelled`] naming [`RecordSection::Figure`] for a figure not
+/// modelled, [`SurfaceInputsError::NotResolved`] naming it for one withheld, which full records
+/// never are, and [`SurfaceInputsError::NoSolidSurface`] for one not applicable, a body absent at
+/// the record's time.
+fn level_from(
+    inputs: Result<CoarseInputs, SurfaceInputsError>,
+    figure: &Section<BodyFigure>,
+) -> Result<FieldLevel, SurfaceJobError> {
+    let section = match inputs {
+        Ok(inputs) => return Ok(FieldLevel::Modelled(coarse_level(inputs.radius()))),
+        Err(SurfaceInputsError::NotModelled(section)) => section,
+        Err(error @ (SurfaceInputsError::NoSolidSurface | SurfaceInputsError::NotResolved(_))) => {
+            return Err(SurfaceJobError::Inputs(error));
+        }
+    };
+    let error = match figure {
+        Section::Ok(figure) => {
+            return Ok(FieldLevel::NotModelled {
+                level: coarse_level(Metres::new(figure.spheroid().volumetric_radius_m())),
+                section,
+            });
+        }
+        Section::NotModelled => SurfaceInputsError::NotModelled(RecordSection::Figure),
+        Section::NotResolved => SurfaceInputsError::NotResolved(RecordSection::Figure),
+        Section::NotApplicable => SurfaceInputsError::NoSolidSurface,
+    };
+    Err(SurfaceJobError::Inputs(error))
+}
+
+/// The surface seed of `key`'s body in `system` and its record at [`RECORD_TIME`]: what the coarse
+/// pass reads before its inputs.
+///
+/// # Errors
+///
+/// [`SurfaceJobError::Body`] for an index outside plan 14's layout or one at which the system
+/// holds no body, and [`SurfaceJobError::Inputs`] with [`SurfaceInputsError::NoSolidSurface`] for
+/// a body with no surface seed (a ring, a belt or the halo).
+fn surface_record(
+    key: FieldKey,
+    system: &GeneratedSystem,
+) -> Result<(SurfaceSeed, BodyRecord), SurfaceJobError> {
     let (ctx, planets) = system;
     let index = BodyIndex::try_from(key.body().body_index())
         .map_err(|error| SurfaceJobError::Body(ResolveBodyError::MalformedIndex(error)))?;
@@ -374,10 +571,13 @@ fn compute(
     let record = planets
         .body_at(ctx, index, RECORD_TIME)
         .map_err(SurfaceJobError::Body)?;
-    let inputs = source
-        .inputs(&record, ctx)
-        .map_err(SurfaceJobError::Inputs)?;
-    Ok(coarse_pass(seed, &inputs))
+    Ok((seed, record))
+}
+
+/// Takes the survey logs' lock whether or not a holder panicked: each critical section is one map
+/// operation, which leaves the map whole.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Logs a pass the pool refused or did not finish where it means the server cannot generate at
@@ -988,6 +1188,122 @@ mod tests {
         assert_eq!(
             compute.source().map(ToString::to_string).as_deref(),
             Some("the computation did not finish")
+        );
+    }
+
+    /// Two first asks for a universe's survey log at once share one open, so that its file has one
+    /// writer: a pass recorded through either is the other's too, and a later ask is the same log.
+    /// A universe with no survey file yet gets a log with no coverage, and nothing is written.
+    #[tokio::test]
+    async fn two_first_asks_for_a_survey_log_open_it_once() {
+        use crate::knowledge::surveys::{SurveyPass, SurveyPassParts, SurveySource};
+        use crate::universe::{SavedUniverse, UniverseId, UniverseStore};
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = UniverseStore::new(dir.path());
+        let universe = UniverseId::new(0xab);
+        store
+            .write(&SavedUniverse::new(
+                universe,
+                "Kepler Reach".parse().unwrap(),
+                SEED,
+                GENERATOR_VERSION,
+            ))
+            .unwrap();
+        let pool = one_worker();
+        let (service, _) = service(&pool, 0);
+        let (one, other) = timeout(
+            WAIT,
+            futures_util::future::join(
+                service.survey_log(&store, universe),
+                service.survey_log(&store, universe),
+            ),
+        )
+        .await
+        .expect("timed out opening the survey log");
+        let (one, other) = (one.unwrap(), other.unwrap());
+        let body = system().1[0];
+        assert_eq!(other.coverage(body), None);
+        assert!(!store.knowledge_dir(universe).exists(), "nothing written");
+
+        let level = hyperion_surface::field::coarse_level(reference::ceres_like().radius());
+        let pass = SurveyPass::new(SurveyPassParts {
+            body,
+            from: UniverseTime::EPOCH,
+            to: UniverseTime::EPOCH,
+            source: SurveySource::Orbital,
+            resolution: hyperion_sim::units::Metres::new(500.0),
+            level,
+            cells: std::iter::once(0..6).collect(),
+        })
+        .unwrap();
+        assert_eq!(one.record(pass).await.unwrap().get(), 1);
+        let later = service.survey_log(&store, universe).await.unwrap();
+        for log in [&other, &later] {
+            let coverage = log.coverage(body).expect("the pass is the shared log's");
+            assert_eq!((coverage.revision().get(), coverage.surveyed()), (1, 6));
+        }
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
+    }
+
+    /// A body's level: its inputs' where the source gives them; where it answers a section not
+    /// modelled, the figure's, or a refusal by the figure's state; the source's other refusals
+    /// as they are.
+    #[test]
+    fn a_field_s_level_comes_from_the_inputs_or_else_the_figure() {
+        let ceres = coarse_level(reference::ceres_like().radius());
+        let not_modelled = || Err(SurfaceInputsError::NotModelled(RecordSection::Surface));
+        assert_eq!(
+            level_from(Ok(reference::ceres_like()), &Section::NotModelled),
+            Ok(FieldLevel::Modelled(ceres))
+        );
+        for (figure, refusal) in [
+            (
+                Section::NotModelled,
+                SurfaceInputsError::NotModelled(RecordSection::Figure),
+            ),
+            (
+                Section::NotResolved,
+                SurfaceInputsError::NotResolved(RecordSection::Figure),
+            ),
+            (Section::NotApplicable, SurfaceInputsError::NoSolidSurface),
+        ] {
+            assert_eq!(
+                level_from(not_modelled(), &figure),
+                Err(SurfaceJobError::Inputs(refusal)),
+                "{figure:?}"
+            );
+        }
+        for refusal in [
+            SurfaceInputsError::NoSolidSurface,
+            SurfaceInputsError::NotResolved(RecordSection::Bulk),
+        ] {
+            assert_eq!(
+                level_from(Err(refusal), &Section::NotModelled),
+                Err(SurfaceJobError::Inputs(refusal))
+            );
+        }
+        // A figure that is modelled: the first body of `system` with one.
+        let (ctx, planets) = system().0.as_ref();
+        let record = system()
+            .1
+            .iter()
+            .find_map(|body| {
+                let index = BodyIndex::try_from(body.body_index()).ok()?;
+                let record = planets.body_at(ctx, index, RECORD_TIME).ok()?;
+                matches!(record.figure(), Section::Ok(_)).then_some(record)
+            })
+            .expect("a body of the system has a figure");
+        let Section::Ok(figure) = record.figure() else {
+            panic!("the record found has a figure");
+        };
+        let level = coarse_level(Metres::new(figure.spheroid().volumetric_radius_m()));
+        assert_eq!(
+            level_from(not_modelled(), record.figure()),
+            Ok(FieldLevel::NotModelled {
+                level,
+                section: RecordSection::Surface,
+            })
         );
     }
 

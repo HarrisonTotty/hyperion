@@ -46,6 +46,7 @@ mod primitives;
 mod scene;
 mod sky;
 mod stellar;
+mod surface;
 #[cfg(test)]
 pub(crate) mod testing;
 mod universe;
@@ -94,6 +95,11 @@ pub use stellar::{
     ObjectKindDto, PhaseDto, PlanetaryNebulaDto, PulsarDto, RemnantDto, StarEventDto,
     StarEventKindDto, StarSummaryDto, StellarBriefDto, SystemExistenceDto, SystemSummaryDto,
     SystemSummaryRequest, VariabilityDto, VariableKindDto, XrayBinaryKindDto,
+};
+pub use surface::{
+    CellRangeDto, ClimateModelDto, CoverDto, CoverRangeDto, PaletteEntryDto, PaletteRoleDto,
+    PrecipitationSourceDto, RecordSectionDto, SurfaceFieldDto, SurfaceFieldRequest,
+    SurfaceHeaderDto, SurveyPassDto, SurveyPassRequest, SurveySourceDto,
 };
 pub use universe::{
     CreateUniverseRequest, OpenUniverseRequest, UniverseInfo, UniverseList, UniverseStatus,
