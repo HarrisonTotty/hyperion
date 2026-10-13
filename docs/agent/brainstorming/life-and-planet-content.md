@@ -3073,12 +3073,13 @@ life](#detail-levels-for-life-and-how-they-degrade)).
 A content readout makes four kinds of statement, and the guide has a form for one of them:
 
 - **A measured number** is Estimated, with its one-standard-deviation uncertainty in R10.T13's
-  drafted form, still awaiting the owner, which is NIST's (SP 811 §7.7):
+  form, signed off 2026-10-13 (signoff-9), which is NIST's (SP 811 §7.7):
   `NPP ~650 g/(m²·yr) ± 200 g/(m²·yr)`. A reading taken from afar is also Observed, with its light
   age, as any other is.
 - **A non-detection** is a limit, and a value in its own right: `CH4 < 0.5 µmol/mol`, with the
   limit's confidence stated once for its section. It is never `0`, never the em dash, which says
-  that there is no value at all (none computed, or the ground `NOT SURVEYED`), and never `NONE`.
+  that no value is computed, never `NOT SURVEYED`, which says the ground has not been surveyed, and
+  never `NONE`.
 - **A categorical claim**, that a biosphere exists, what its stage is, that a deposit is there, is
   an inference, and takes a confidence rung after a middle dot instead of the `~`. For life the
   rungs are [Biosignatures'](#biosignatures) ladder, shown as `LEVEL 3/7` under a heading that names
@@ -3119,8 +3120,8 @@ Collected so that a plan can make the edits in one pass:
    turn while a map turns with its body (plan 14's `BodyFixedFrame`); and
    `PLANETOCENTRIC · EAST LONGITUDE` in the legend. A position is `LAT +12.35° LON 047.21°`, the
    latitude signed and zero-padded as an elevation is, the longitude zero-padded as a bearing is.
-   The survey edge is drawn, an unsurveyed region never looks empty, and its readings are the em
-   dash with R10.T13's `NOT SURVEYED`. Marks for places take outlines of their own, each named in
+   The survey edge is drawn, an unsurveyed region never looks empty, and its readings are R10.T13's
+   `NOT SURVEYED`, once in their place. Marks for places take outlines of their own, each named in
    words in the legend and the list.
 3. **The class raster**, with the class tokens and the rules above, stated as the single-hue rule's
    first exception; the raster rule's floor, log scale and ban on invented values still bind every
@@ -3968,7 +3969,7 @@ such a member be reshaped until a build first sends a value.
 39. **A canopy row and a general `±`.** A row of R07's phase table for vegetation's backscatter
     hotspot under lunar-Lambert, R10's to rule ([The per-cell
     state](#the-per-cell-state-the-material-and-the-instances)); R10.T12's `±` formatter, to
-    R10.T13's drafted form, generalised to any quantity, with `NOT SURVEYED` shared ([Confidence,
+    R10.T13's signed-off form, generalised to any quantity, with `NOT SURVEYED` shared ([Confidence,
     estimates and limits](#confidence-estimates-and-limits)). The formatter before the guide's
     drafts; the row later.
 

@@ -7360,7 +7360,8 @@ SCRIPTED`; `VIEW, WIREFRAME, CRAFT, CHASE`), and points with `aria-details` to t
         with hysteresis at 9.5 and 10.5 km;
       - the ground speed, whole from 100 m/s; the vertical speed, signed, to 0.01 m/s;
       - `CAMERA ELV`, signed;
-      - `SITE HEIGHT`, signed whole metres;
+      - `SITE HEIGHT`, signed whole metres (renamed `SITE ELEVATION`, in `ELEVATION`'s form, by
+        R10.T12; signoff-9);
       - `FINEST TERRAIN HELD` `YES`/`NO`;
       - the patch counts, which break only at their `·`.
 

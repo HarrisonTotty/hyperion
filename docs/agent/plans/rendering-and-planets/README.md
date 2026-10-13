@@ -449,9 +449,12 @@ it is recorded, and stays here so that the owner can review it.
   `POSITION`, `POINTING`, `LOOK`, legend, `CTRL`/`⌘` and Layout drafts; and R08.T2's six
   atmosphere labels, `AEROSOLS: NOT YET MODELLED` renamed
   `AEROSOLS AND ABSORBERS: NOT YET MODELLED`, with decision-r08-licences' NH₄SH clause.
-  **Still awaiting:** R10.T13's readout notation (`~2140 m ± 180 m`, `ELEVATION`, `SLANT RANGE`,
-  `DATUM`, contours), not yet drafted into the guide. R11's reading of item 2 is decided (below,
-  "Decided by the brainstorm sign-off").
+  **Decided** (2026-10-13, signed off under the owner's delegation; `signoff-9.md`): R10.T13's
+  seven drafts, one adopted and six amended, and its 15 questions, 14 leans accepted and
+  `SITE HEIGHT`'s timing changed: `±` and the Estimated value's rounding, the readout under
+  `GROUND AT LINE OF SIGHT`, the survey line, the material reading, the survey edge and the
+  contours. The span form is left to a later sign-off (queue item 18). R11's reading of item 2 is
+  decided (below, "Decided by the brainstorm sign-off").
 - **Data licences** before data are committed: the Karkoschka and Tomasko methane coefficients
   (Elsevier), Serdyuchenko's ozone data files (terms unstated), and whether raw tables may be
   committed beside the reduced values (R08.T4.b); H₂SO₄ (Palmer and Williams 1975), Mars dust

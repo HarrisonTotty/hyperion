@@ -61,8 +61,9 @@ In scope:
   the interval stated, the grounded-body rule in this style.
 - Terrain shadows: horizon maps on both settings, soft by the star's disc, and on the high setting
   cascaded shadow maps near the camera combined with them.
-- The view's survey coverage readout, the survey edge, and the cursor readouts (`ELEVATION`,
-  `SLOPE`, `SLANT RANGE`) with coverage- and resolution-gated uncertainty.
+- The view's survey coverage readout, the survey edge, and the readouts of the ground on the view's
+  line of sight (`ELEVATION`, `SLOPE`, `SLANT RANGE`, `MATERIAL`, `RESOLUTION`) with coverage- and
+  resolution-gated uncertainty.
 - The patch cache's sizes, formats and slot layout per setting, and the resident-memory check.
 - Draft UX guide entries these need, for the owner's sign-off.
 
@@ -498,29 +499,31 @@ land**, and each is marked so below.
    note 18 leaves it to this plan over `FieldView` and `HeightSample`'s gradient. It sits beside the
    synthesis, under the same determinism discipline, and goldens pin it on native and both wasm
    targets. Its order of decision is fixed: `Seabed` below R09's water surface; the coarse pass's
-   ice (`SeaIce` over the sea, `WaterIce` or `VolatileFrost` on land by the condensable plan 14
-   names), since glaciers and ice caps stand in cliffs of their own; `Bedrock` above `CLIFF_SLOPE`;
-   `Snow`, giving way to `Bedrock` above `SNOW_SHED_SLOPE`; `Melt` where the surface state is a
-   magma ocean or a young volcanic province; `Evaporite` in arid basins whose base level the coarse
-   pass filled (playas, among the brightest land surfaces); `Sediment` along channels and in the
-   other filled basins; then by regime and R09's `SurfaceClass`: `Regolith` on an airless world,
-   `Dust` on an arid thin-aired world where R09's wind field deposits, `Sand` and `Soil` by aridity,
-   `OrganicSediment` for a Titan-like haze regime, `VolcanicRock` in older provinces. Loose material
-   cannot rest above its static angle of repose, so steeper ground is exposed rock: `CLIFF_SLOPE` is
-   40° with a 5° transition band either side, covering the 35–45° of the literature. Kleinhans et
-   al. 2011 (JGR 116, E11004) measured about 40° for angular grains at 0.1, 0.38 and 1 g, with the
-   static angle rising about 5° at low gravity, while Atwood-Stone and McEwen 2013 (GRL 40, 2929)
-   found Martian dune lee faces at 30–34°, as on Earth; since the two disagree on gravity, the
-   threshold does not scale with it. The Lunar Sourcebook (§9.1.10) gives dumped lunar soil nearly
-   40° and compacted soil about 45°. `SNOW_SHED_SLOPE`, about 50–60°, is from memory; T1.a finds a
-   source or removes the rule and records the gap. Nothing is drawn from a stream, so the classifier
-   needs no domain tag. _Folded in at the re-validation (decision-composition §1.8; R09's "Cold
-   traps" ruling): each rule names its substance through R09's palette, frost or glacier of the
-   cell's ice entry, `Seabed` under its liquid entry, `Melt` where R09's cell temperature exceeds
-   the lithology's transition, and `Regolith`, `Sand` and `Dust` of the crust's entry or of a
-   `Deposit` or `Cover` entry; and a cell's cold-trapped share, which is exposed ice and not the
-   cold-trap area, lies on its shadowed ground (crater floors and pole-facing slopes), not evenly
-   over the cell._
+   ice (`SeaIce` over the sea, `WaterIce` or `VolatileFrost` on land, of the cell's ice entry: the
+   guide reads them `ICE`, a glacier or ice cap, and `FROST`, so T1 tells them apart by form
+   whatever the species, and a nitrogen glacier is `ICE · N2`; signoff-9), since glaciers and ice
+   caps stand in cliffs of their own; `Bedrock` above `CLIFF_SLOPE`; `Snow`, giving way to `Bedrock`
+   above `SNOW_SHED_SLOPE`; `Melt` where the surface state is a magma ocean or a young volcanic
+   province; `Evaporite` in arid basins whose base level the coarse pass filled (playas, among the
+   brightest land surfaces); `Sediment` along channels and in the other filled basins; then by
+   regime and R09's `SurfaceClass`: `Regolith` on an airless world, `Dust` on an arid thin-aired
+   world where R09's wind field deposits, `Sand` and `Soil` by aridity, `OrganicSediment` for a
+   Titan-like haze regime, `VolcanicRock` in older provinces. Loose material cannot rest above its
+   static angle of repose, so steeper ground is exposed rock: `CLIFF_SLOPE` is 40° with a 5°
+   transition band either side, covering the 35–45° of the literature. Kleinhans et al. 2011 (JGR
+   116, E11004) measured about 40° for angular grains at 0.1, 0.38 and 1 g, with the static angle
+   rising about 5° at low gravity, while Atwood-Stone and McEwen 2013 (GRL 40, 2929) found Martian
+   dune lee faces at 30–34°, as on Earth; since the two disagree on gravity, the threshold does not
+   scale with it. The Lunar Sourcebook (§9.1.10) gives dumped lunar soil nearly 40° and compacted
+   soil about 45°. `SNOW_SHED_SLOPE`, about 50–60°, is from memory; T1.a finds a source or removes
+   the rule and records the gap. Nothing is drawn from a stream, so the classifier needs no domain
+   tag. _Folded in at the re-validation (decision-composition §1.8; R09's "Cold traps" ruling): each
+   rule names its substance through R09's palette, frost or glacier of the cell's ice entry,
+   `Seabed` of the floor's entry (the crust's, the bulk's or a `Deposit`'s), never its liquid's
+   (signoff-9), `Melt` where R09's cell temperature exceeds the lithology's transition, and
+   `Regolith`, `Sand` and `Dust` of the crust's entry or of a `Deposit` or `Cover` entry; and a
+   cell's cold-trapped share, which is exposed ice and not the cold-trap area, lies on its shadowed
+   ground (crater floors and pole-facing slopes), not evenly over the cell._
 2. **Physical properties are data with sources, and bearing capacity is a function** (researched
    2026-09-29). Ultimate bearing capacity is not a constant of the ground: it grows with footing
    width and gravity, q_ult = c N_c ξ_c + ½ ρ g B N_γq ξ_γq (Lunar Sourcebook §9.1.9, after
@@ -625,10 +628,12 @@ land**, and each is marked so below.
    specification). The value is rounded to its uncertainty by the Particle Data Group's rule: take
    the uncertainty's three leading digits; 100–354 keep two significant figures, 355–949 one,
    950–999 round up to 1000 and keep two; the value takes the same decimal place. So
-   `~2140 m ± 180 m` and `~2100 m ± 500 m`. When the survey reaches the band limit the uncertainty
-   is zero, the value is the ground itself at the ship-wide elevation precision of 0.1 m, and both
-   the `~` and the `± …` go. Unsurveyed ground has no reading: the guide's em dash with
-   `NOT SURVEYED`.
+   `~2140 m ± 180 m` and `~2100 m ± 500 m`. Neither number goes finer than the quantity's own
+   precision; where the rule would, the uncertainty is rounded up to one step (the guide's Estimated
+   exception, signoff-9). When the survey reaches the band limit the uncertainty is zero, the value
+   is the ground itself at the ship-wide elevation precision of 0.1 m, and both the `~` and the
+   `± …` go. Unsurveyed ground has no reading: `NOT SURVEYED` stands once in place of the readings
+   (signoff-9).
 7. **Slope and slant range state their basis** (researched 2026-09-29). The slope is the
    adirectional slope, the gradient magnitude from central differences over a baseline b along the
    local east and north axes; a two-point profile slope is smaller by about √2 on isotropic terrain
@@ -643,14 +648,14 @@ land**, and each is marked so below.
    value: 2 m by default, the band limit and a lander pad's scale, with 5 m and 100 m selectable,
    the ladder InSight's site selection used (lander-stability slopes at 2–5 m from HiRISE DEMs
    against a 15° limit, and 300 m scale from MOLA: Golombek et al. 2014, LPSC 45, 1499, verified).
-   The slant range to the ground under the view's reticle is a march of the ray against the surface
-   at the survey's resolution. Linearising the hit of p(t) = o + t d on z = h + δ gives dt ÷ dδ =
-   cos θ_s ÷ sin γ_s, with θ_s the resolved surface's slope and γ_s the grazing angle to the local
-   surface plane, so σ_R = σ_h cos θ_s ÷ sin γ_s. The linearisation fails once unresolved relief can
-   occlude the hit, so when sin γ_s < 2√v at b equal to the survey's cell size the readout drops its
-   σ and says `GRAZING`: the true range is then biased short and its error one-sided. Consoles that
-   draw no terrain would need a server request for the same numbers; none exists yet, and when one
-   does it wraps these functions unchanged.
+   The slant range to the ground on the view's line of sight is a march of the ray against the
+   surface at the survey's resolution. Linearising the hit of p(t) = o + t d on z = h + δ gives dt ÷
+   dδ = cos θ_s ÷ sin γ_s, with θ_s the resolved surface's slope and γ_s the grazing angle to the
+   local surface plane, so σ_R = σ_h cos θ_s ÷ sin γ_s. The linearisation fails once unresolved
+   relief can occlude the hit, so when sin γ_s < 2√v at b equal to the survey's cell size the
+   readout drops its σ and says `GRAZING`: the true range is then biased short and its error
+   one-sided. Consoles that draw no terrain would need a server request for the same numbers; none
+   exists yet, and when one does it wraps these functions unchanged.
 8. **One photometric law for every class, and the disc and terrain share it** (researched
    2026-09-29). Every class takes McEwen's lunar-Lambert law, r(i, e, α) = A_N f(α) [2 L(α) μ₀ ÷
    (μ₀ + μ) + (1 − L(α)) μ₀], with f(0) = 1, μ₀ = cos i, μ = cos e and A_N the normal albedo; L = 1
@@ -847,26 +852,28 @@ land**, and each is marked so below.
     height passes the geometric midpoint to the next step by 20%, and down 20% below it. Every fifth
     contour is an index contour, as on USGS maps; sea level on an ocean world is the coastline,
     drawn at R09's header `sea_level` whether or not it is a multiple of the interval. Widths, since
-    colour alone may not carry meaning: minor 1 px and index 2 px in `--text-muted`, coastline 2 px
-    in `--text`; never dashed, since the guide reserves dashes for predictions; no contour labels in
-    the image, since the cursor's `ELEVATION` and the stated datum carry the values. The line is
+    colour alone may not carry meaning: minor 1 px and index 1.5 px in `--text-muted`, coastline 2
+    px in `--text`; never dashed, since the guide reserves dashes for predictions; no contour labels
+    in the image, since the readout's `ELEVATION` and the stated datum carry the values. The line is
     antialiased at constant width from u = (h_local + φ) ÷ CI: dist_px = |fract(u − 0.5) − 0.5| ÷
     length((dpdxFine(u), dpdyFine(u))), coverage = clamp(w ÷ 2 + 0.5 − dist_px, 0, 1), the
     gradient's length rather than `fwidth`, whose L1 norm varies widths by up to √2 with direction
     (after Golus 2021). The derivatives are taken in uniform control flow, before the survey mask's
-    `discard`. Where a family's spacing falls below about 4 px it fades out over 3–6 px, minor
-    contours first, and the guide draft says so, so that an absent line is not read as flat ground;
-    this is the grazing case, where spacing collapses faster than any interval can follow. The
-    height varying is patch-local, h − h_patch, with a per-patch phase φ = h_patch mod CI formed in
-    `f64` on the CPU, because the `f32` height above the reference spheroid steps 2 mm at ±20 km and
-    would quantise the derivative near the camera. The label block states
-    `CONTOUR INTERVAL 200 m · INDEX 1 km · DATUM …`, the USGS margin form and guide item 5's
-    substitute for a scale bar, scaling to km with hysteresis. Unsurveyed ground has no contours;
-    R02's graticule is drawn over the terrain's height where terrain is surveyed. The datum is the
-    body's rotational spheroid, R07's reference body, from which every height in the patch is
-    measured along its normal (R07's Design note 19, researched there with high confidence; R09's
-    Design note 17 measures its elevations and sea level the same way), stated as
-    `DATUM REFERENCE SPHEROID 6378.1 × 6356.8 km` with the equatorial and polar radii (a sphere,
+    `discard`. A family is drawn in full at 6 px of spacing or more and fades out as its spacing
+    closes to 3 px (CSS pixels), minor contours first, and is not scored for contrast in its fade;
+    the guide says that surveyed ground without contours lies within one interval or is too steep
+    for them, so that an absent line is not read as flat ground; this is the grazing case, where
+    spacing collapses faster than any interval can follow. The height varying is patch-local, h −
+    h_patch, with a per-patch phase φ = h_patch mod CI formed in `f64` on the CPU, because the `f32`
+    height above the reference spheroid steps 2 mm at ±20 km and would quantise the derivative near
+    the camera. The label block states `CONTOUR INTERVAL 200 m · INDEX 1 km`, the USGS margin form,
+    with the `DATUM` on a line of its own in both styles (T12), and guide item 5's substitute for a
+    scale bar, scaling to km with hysteresis. Unsurveyed ground has no contours; R02's graticule is
+    drawn over the terrain's height where terrain is surveyed. The datum is the body's rotational
+    spheroid, R07's reference body, from which every height in the patch is measured along its
+    normal (R07's Design note 19, researched there with high confidence; R09's Design note 17
+    measures its elevations and sea level the same way), stated as
+    `DATUM REFERENCE SPHEROID 6378.1 km × 6356.8 km` with the equatorial and polar radii (a sphere,
     `DATUM REFERENCE SPHERE 6371.0 km`, until plan 14 sends a flattening); the sea level, a height
     above the spheroid, is stated beside it on an ocean world. The h ÷ 20 figure has no published
     precedent for perspective views and is settled by T11's check on steep and gentle terrain; the
@@ -1383,14 +1390,14 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
 - **R10.T10.c The survey edge.** The survey mask's discard, the skirts at the survey edge, and the
   reference surface drawn beneath with the inverse mask from the GPU coverage mask (Design note 12),
   in `terrainLit.wgsl` and the `mesh`-regime body's material; the edge mark over the image from
-  `surveyEdges`. Files: `shaders/terrainLit.wgsl`, `coverage.ts`, R07's `mesh`-regime material
-  (`bodies/smoothMesh.ts`, `shaders/smoothMesh.wgsl`, `SMOOTH_MESH_MATERIAL` in `bodies/draw.ts`).
-  Tests: `surveyEdges` returns exactly the boundary between surveyed and unsurveyed cells on a
-  fixture coverage, margin cells counted unsurveyed; the smoke harness renders a half-surveyed patch
-  set with no fragment where both terrain and the reference surface write. By hand, recorded: the
-  skirt heights seen at the edge on a flattened generated world, which stay within the terrain's
-  local relief. Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`
-  and the smoke run.
+  `surveyEdges`, the guide's `SURVEY EDGE`. Files: `shaders/terrainLit.wgsl`, `coverage.ts`, R07's
+  `mesh`-regime material (`bodies/smoothMesh.ts`, `shaders/smoothMesh.wgsl`, `SMOOTH_MESH_MATERIAL`
+  in `bodies/draw.ts`). Tests: `surveyEdges` returns exactly the boundary between surveyed and
+  unsurveyed cells on a fixture coverage, margin cells counted unsurveyed; the smoke harness renders
+  a half-surveyed patch set with no fragment where both terrain and the reference surface write. By
+  hand, recorded: the skirt heights seen at the edge on a flattened generated world, which stay
+  within the terrain's local relief. Acceptance:
+  `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the smoke run.
 - **R10.T10.d The class map on the disc.**
   - **The map.** `classMap.ts` builds the per-body coarse class-weights map over surveyed cells
     that R07's disc samples (Design note 8), under `coarse-field-gpu` with the coverage mask. It
@@ -1483,44 +1490,64 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
 
 Depth-only terrain in the wireframe style at τ = 4 px from the same bounds and bakes (heights and
 mask only), as one instanced draw, with the contours of Design note 14 evaluated in the same pass,
-the interval, index and datum stated in the label block through R02's label API (as built
-`displays/view/viewRun.ts`'s `labelStatements`, drawn by `ViewLabelBlock.tsx`), analytic line
-antialiasing and no MSAA, and the patches under every grounded body in view at the finest level with
-morph held at zero, as in the lit style (Performance budget, the second rule). Unsurveyed ground has
-no contours, and the survey edge is drawn. Files: `terrainWire.ts`, `shaders/terrainWire.wgsl`.
-Tests (pure): `contourInterval` walks the 1-2-5 sequence from the nadir's height above ground with
-±20% hysteresis and never falls below 1 m; `contourPhase` with the patch-local height equals the
-`f64` contour levels to 1 mm at ±20 km; the fade thresholds sit at 4 px and 3–6 px; the wireframe's
-selection is within a factor of two of `patchCountModel`'s ratio to the lit style, about a fifth;
-the grounded-body rule holds in this style. Smoke run on SwiftShader. By hand, recorded: a station
+the interval and index stated in the label block (`CONTOUR INTERVAL 200 m · INDEX 1 km`; the `DATUM`
+line is T12's, in both styles) through R02's label API (as built `displays/view/viewRun.ts`'s
+`labelStatements`, drawn by `ViewLabelBlock.tsx`), analytic line antialiasing and no MSAA, and the
+patches under every grounded body in view at the finest level with morph held at zero, as in the lit
+style (Performance budget, the second rule). Unsurveyed ground has no contours, and the survey edge
+is drawn. Files: `terrainWire.ts`, `shaders/terrainWire.wgsl`. Tests (pure): `contourInterval` walks
+the 1-2-5 sequence from the nadir's height above ground with ±20% hysteresis and never falls below 1
+m; `contourPhase` with the patch-local height equals the `f64` contour levels to 1 mm at ±20 km;
+each family is drawn in full at 6 px of spacing or more and fades to nothing at 3 px, in CSS pixels
+times the stroke scale, minor before index; the index contour is 1.5 px; the wireframe's selection
+is within a factor of two of `patchCountModel`'s ratio to the lit style, about a fifth; the
+grounded-body rule holds in this style. Smoke run on SwiftShader. By hand, recorded: a station
 wireframe at 1080p on the UHD 620, by the owner, during the low fast pass of the scripted descent
 with the height workers busy, by `timestamp-query` with developer features, p50, p95 and p99 GPU
 time per pass and the GPU clock from `intel_gpu_top`, with the patch and triangle counts, against
 the brainstorm's 60 fps and its 4–9 ms for the whole view (Two deployments, one scene; the
 research's provisional estimate is 3–6.5 ms with analytic antialiasing); and legibility on steep and
-gentle terrain. Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`,
-the smoke run, and the figures recorded.
+gentle terrain, including that the graticule is told from the contours, on a small body too. If it
+is not, the graticule is left out over surveyed terrain, the finding is recorded, and the guide's
+graticule sentence (the contours' bullet under "Views") is changed to match in the same commit
+(signoff-9). Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`, the
+smoke run, and the figures recorded.
 
 ### R10.T12 Coverage and terrain readouts on the view
 
-`SurveyLine` in the view's label block: the survey's coverage of the body and its best resolution,
-and the resolution beneath the view's centre (the brainstorm's "states the survey's resolution
-beneath its centre", after the star chart's census line), stale with its `S` when the link is lost.
-`TerrainReadout`: `ELEVATION`, `SLOPE` with its baseline part and `SLANT RANGE` from
+`SurveyLine` in the view's label block: the survey's coverage of the body and its finest resolution
+(`SURVEY COVERAGE 12.4 % · FINEST 2.0 m`, after the star chart's census line), or
+`SURVEY COVERAGE: PENDING`, `SURVEY COVERAGE NONE` or `TERRAIN: NOT YET MODELLED`, each value stale
+with its `S` when the link is lost. The resolution at the line of sight (the brainstorm's "states
+the survey's resolution beneath its centre") stands in the readout as `RESOLUTION`. The `DATUM`
+line, with its `SEA LEVEL` on a world with a sea, is stated once in both styles. `TerrainReadout`,
+under `GROUND AT LINE OF SIGHT`: `ELEVATION`, `SLOPE` with its `· BASELINE 2 m` part and
+`SLANT RANGE` (`SLANT RANGE FROM CAMERA` whenever the camera is off the hull) from
 `surveyed_reading` and `slant_range`, run in a worker at the guide's 4 Hz, in `output` elements on
-their `--surface-0` plates, with `~` and `± …` until resolved, rounded by Design note 6's rule, the
-em dash with `NOT SURVEYED` over unsurveyed ground, `GRAZING` where it applies, and the material
-class's name with its properties as a reading; the datum stated once. The DOM list gains the survey
-edge as an item when it is in view. As built, the label block is `viewRun.ts`'s `labelStatements`
-and `ViewLabelBlock.tsx`, and the DOM list `ViewMarkList.tsx` over `viewRun.ts`'s `MarkRow`; the
+their `--surface-0` plates, with `~` and `± …` until resolved, rounded by Design note 6's rule,
+`NOT SURVEYED` once in place of the readings over unsurveyed ground, `NO GROUND` where the line of
+sight misses the body's ground, `GRAZING` where it applies, the material as its form and its
+substance (`MATERIAL REGOLITH · Fe-RICH BASALT`; the seabed's substance the floor's; the em dash for
+a substance not computed), and `RESOLUTION`. The material's properties (bearing capacity and pad
+friction, with their footing width and temperature) and a mark at the line of sight, of a shape no
+other mark uses, are drafted in this task's entry for a sign-off before either is built; the rest of
+the task does not wait for them. The DOM list notes the survey edge while it is in view, as
+`SURVEY EDGE` with its nearest range, a note that cannot be selected. The task also renames the
+descent spike's `SITE HEIGHT` to `SITE ELEVATION`, in `ELEVATION`'s form, and makes the guide's row
+edit in the same commit (signoff-9). Build to the guide's rows as signed off on 2026-10-13
+(`signoff-9.md`). As built, the label block is `viewRun.ts`'s `labelStatements` and
+`ViewLabelBlock.tsx`, and the DOM list `ViewMarkList.tsx` over `viewRun.ts`'s `MarkRow`; the
 material is named by its form and its entry's substance through P14.T49.f's `substanceName`
 (`lib/substances.ts`; the roadmap's Conventions), never by a registry key. Files: `readouts.ts`,
 `SurveyLine.tsx`, `TerrainReadout.tsx` and their tests; `displays/view/viewRun.ts` and
-`ViewMarkList.tsx`. Tests (Vitest and Testing Library): the formats of T13's drafts for each state,
-`~2140 m ± 180 m` among them; the PDG rounding at its breakpoints (354, 355, 949, 950); no value is
-shown finer than its uncertainty; the field keeps its fixed width; stale on link loss; keyboard
-reach of the readout's target through the DOM list; the console-ux skill's lint, contrast and glyph
-checks pass, with no `σ` anywhere (B612 has none). Acceptance:
+`ViewMarkList.tsx`; `view/spike/DescentSpike.tsx` and its test. Tests (Vitest and Testing Library):
+the formats of T13's drafts for each state, `~2140 m ± 180 m` among them; the PDG rounding at its
+breakpoints (354, 355, 949, 950), and the round-up to one step where it would go finer than the
+quantity's precision (0.12 m → `± 0.2 m`); no value is shown finer than its uncertainty; the field
+keeps its fixed width, and the value's unit its place, from Estimated to resolved and stale;
+`SITE ELEVATION` in `ELEVATION`'s form; stale on link loss; keyboard reach of the readout's target
+through the DOM list; the console-ux skill's lint, contrast and glyph checks pass, with no `σ`
+anywhere (B612 has none). Acceptance:
 `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the console-ux checks.
 
 ### R10.T13 Guide drafts for the owner
@@ -1544,16 +1571,17 @@ the guide edit is made as the owner directs.
 
 #### The drafts, for the owner
 
-_Drafted for the owner (lane 5, 2026-10-13); not signed off._ Each draft gives its wording for the
-guide, where it goes, and the guide rows it extends or excepts, by section heading and line in
-`docs/frontend/ux-guidelines.md` as it stands at `be8f8a6f`. Each ends in its own marker. The guide
-is not edited here: once the owner signs a draft off, it is applied as the owner directs, and T11
-and T12 are built to it. The drafts extend R02's item 1 (Views), item 3 (outlines for symbology),
-item 5 (scale without a scale bar) and item 7 (limited detail). They also fill item 2's honesty
-rule, whose "survey coverage" Draft 4 supplies. Every string proposed here passes the console-ux
-skill's glyph and lint scripts ("Checks", below). Over a surveyed plain, a label block would show
-them as below, the substance as `substanceName` names it today (Draft 5), and the contour line in
-the wireframe style alone:
+_Drafted by lane 5 (2026-10-13); signed off 2026-10-13 under the owner's delegation
+(`signoff-9.md`): draft 6 adopted, drafts 1–5 and 7 amended, and the guide edited as that file
+directs._ Each draft gives its wording for the guide, where it goes, and the guide rows it extends
+or excepts, by section heading and line in `docs/frontend/ux-guidelines.md` as it stands at
+`be8f8a6f`. Each ends in its own marker. The guide is not edited here: once the owner signs a draft
+off, it is applied as the owner directs, and T11 and T12 are built to it. The drafts extend R02's
+item 1 (Views), item 3 (outlines for symbology), item 5 (scale without a scale bar) and item 7
+(limited detail). They also fill item 2's honesty rule, whose "survey coverage" Draft 4 supplies.
+Every string proposed here passes the console-ux skill's glyph and lint scripts ("Checks", below).
+Over a surveyed plain, a label block would show them as below, the substance as `substanceName`
+names it today (Draft 5), and the contour line in the wireframe style alone:
 
 ```text
 SURVEY COVERAGE  12.4 % · FINEST 2.0 m
@@ -1561,9 +1589,9 @@ DATUM            REFERENCE SPHERE 6371.0 km · SEA LEVEL -2.4 m
 CONTOUR INTERVAL 200 m · INDEX 1 km
 GROUND AT LINE OF SIGHT
 ELEVATION        ~2140 m ± 180 m
-SLOPE            ~12° ± 4° · 2 m BASELINE
+SLOPE            ~12° ± 4° · BASELINE 2 m
 SLANT RANGE      ~41.2 km ± 0.3 km
-MATERIAL         REGOLITH · UNLISTED MATERIAL
+MATERIAL         SOIL · UNLISTED MATERIAL
 RESOLUTION       410 m
 ```
 
@@ -1605,7 +1633,7 @@ RESOLUTION       410 m
     uncertainty; "Numbers, units and time", line 187–188 (a unit on every value, with a space) and
     line 227–229 (a span takes one unit; an uncertainty is no span); "Typography", lines 127–137
     (`±` among Latin-1's signs; Greek letters, `≈` and `∆` among what neither face holds).
-  - _Drafted for the owner (plan R10, R10.T13, draft 1): the owner signs off._
+  - _Signed off (signoff-9): amended._
 
 - **Draft 2. The Estimated value rounded to its uncertainty** (an exception).
   - _Wording,_ after "The same quantity uses the same unit and precision everywhere on the ship":
@@ -1631,7 +1659,7 @@ RESOLUTION       410 m
     precision everywhere on the ship"). _Keeps_ line 238 ("A field has a fixed width sized for its
     longest possible value and its status marks") and "Typography", line 183 (numbers
     right-aligned).
-  - _Drafted for the owner (plan R10, R10.T13, draft 2): the owner signs off._
+  - _Signed off (signoff-9): amended._
 
 - **Draft 3. The readout names.**
   - _The vertical distances._ The names follow ICAO's distinction of three vertical distances. It
@@ -1726,7 +1754,7 @@ RESOLUTION       410 m
       reading of parts joined by `·`).
   - _Leaves_ the descent spike's `SITE HEIGHT` (line 977) as R05 has it, although by this
     distinction it is an elevation (a question below).
-  - _Drafted for the owner (plan R10, R10.T13, draft 3): the owner signs off._
+  - _Signed off (signoff-9): amended._
 
 - **Draft 4. The survey line.**
   - _Wording,_ a bullet of "Views": "While a view's `FRAME` is a body's and the body has a
@@ -1765,7 +1793,7 @@ RESOLUTION       410 m
     - "Numbers, units and time", lines 208–211 (ladders with hysteresis; E notation off the
       ladder);
     - "Voice and nomenclature", line 755–758 (a fraction named in words, a space before `%`).
-  - _Drafted for the owner (plan R10, R10.T13, draft 4): the owner signs off._
+  - _Signed off (signoff-9): amended._
 
 - **Draft 5. The material reading.**
   - _Wording,_ a bullet of "Voice and nomenclature", after the phase bullet (lines 750–754): "The
@@ -1827,7 +1855,7 @@ RESOLUTION       410 m
     - "Typography", lines 143–145 (a formula keeps its case in an upper-case label);
     - the `UNLISTED MATERIAL` row (line 933), and a ring's `COMPOSITION` (`POROUS ICE`, `ROCK`;
       line 883), the precedent for a form word.
-  - _Drafted for the owner (plan R10, R10.T13, draft 5): the owner signs off._
+  - _Signed off (signoff-9): amended._
 
 - **Draft 6. The survey edge, a mark in both styles.**
   - _Wording,_ a bullet of "Views": "Where a body's surveyed terrain meets ground the ship has not
@@ -1866,7 +1894,7 @@ RESOLUTION       410 m
       not a contact;
     - lines 666–669 (every list entry carries a range) and 671–672 (the list names every kind in
       words).
-  - _Drafted for the owner (plan R10, R10.T13, draft 6): the owner signs off._
+  - _Signed off (signoff-9): adopted._
 
 - **Draft 7. Contours, their interval and index.**
   - _Wording,_ a bullet of "Views", after the paragraph on both styles (lines 644–658): "In the
@@ -1922,7 +1950,7 @@ RESOLUTION       410 m
     - "Layout", lines 286–294 (widths times the larger of the device-pixel ratio and 2).
   - _Excepts_ nothing. It departs from Design note 14 in three places, each a question below: the
     index contour's width, the fade's scoring, and the datum on a line of its own (Draft 3).
-  - _Drafted for the owner (plan R10, R10.T13, draft 7): the owner signs off._
+  - _Signed off (signoff-9): amended._
 
 - **Questions for the sign-off**, each with this draft's lean.
   - _Unsurveyed readings._ Design note 6, and the life-and-planet-content brainstorm in two places,
