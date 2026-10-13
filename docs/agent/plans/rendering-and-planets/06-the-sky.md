@@ -8939,10 +8939,19 @@ CensusCost)`.
       R13.T1.b's capped tier again (0.97–1.12 times it). Recorded beside it: the exact census at
       7.95 1.08 × 10⁶ CPU-s (T7.b's caps by ray), at the eye's own cut 8.18 by its visibility 7.19 ×
       10⁵, the camera's at 10.06 2.62 × 10⁶; the real tier at the ceiling's caps without the limit
-      stays R13.T1's 1.43–1.45 × 10⁵ (not re-run); the nuclear disc at 7.95, sampled 1 in 10, 6.27 ×
-      10⁴ (its 935 cells; the sample 1 in 1,000 opened none). The 4,000 CPU-s target stays for the
-      version that lands the census levers (lever 13): at version 21 it is not a gate, and its step
-      1 is the deferral already listed.
+      stays R13.T1's 1.43–1.45 × 10⁵ (not re-run); the nuclear disc at 7.95, sampled 1 in 10, 6.27
+      × 10⁴ (its 935 cells; the sample 1 in 1,000 opened none). **Sampled, the inner disc at the
+      limit** (`census_inner_disc_served/{,served_}eye_5.0`, (0, 8,000, 0), 1 in 20, 15 workers,
+      under the lock on 2026-10-12, load 13–151): 2.42 × 10⁵ CPU-s on the server's galaxy at its
+      eye's cut 6.679 (C 6.01, D 9.93, E 8.27 × 10⁴) and 1.70 × 10⁵ on the fixture at 6.722 (C
+      4.22, D 6.97, E 5.79 × 10⁴), 0.81–1.21 and 0.57–0.85 times `decision-r13-guard-trip.md`'s 2–3
+      × 10⁵. Over 1.05–1.08 × 10⁶ cells, D's and E's rays reach the 2,000 ly limit on 871–999 and
+      1,116–1,305 of 1,536, C's on 330–539; some 1.2 × 10⁵ and 1.0 × 10⁵ stars are listed
+      (sampled), none behind A<sub>V</sub> 5, and the band holds 871 and 882 stars of C to E
+      brighter than V 5.0 beyond the boundary. Multiples pass the star bound at C 0.57–0.61, D
+      7.0–7.1 and E 257–272, as near the Sun. The 4,000 CPU-s target stays for the version that
+      lands the census levers (lever 13): at version 21 it is not a gate, and its step 1 is the
+      deferral already listed.
     - **The warm gate**, on the served sky's ruled jump at 1,280 MiB set explicitly
       (`census_near_sun_served/{,served_}warm_jump_5.0`, 1 in 20, 4 workers at `CPUQuota=400%`,
       load 3–123): **S1 met** (none rebuilt: 24,711 of the server galaxy's sampled cells served and

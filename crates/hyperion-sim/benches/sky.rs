@@ -70,6 +70,7 @@
 //! | `sky/census_near_sun_ceiling/*` | under twice the feasibility study's estimate, or to the owner (R13.T1) | R13's Risks (not re-run) |
 //! | `sky/census_near_sun_limit/*` | under twice `decision-r13-guard-trip.md` §2.3's estimate, or to the owner (R13.T1.b) | R13's Risks (not re-run) |
 //! | `sky/census_near_sun_served/*eye_5.0` | none: the full cold census at the real boundary, recorded (T17) | 2.75 × 10⁴ CPU-s on the server's galaxy, 1.41 × 10⁴ on the fixture, by the threads' CPU time on 15 workers, sampled 1 in 20 |
+//! | `sky/census_inner_disc_served/*eye_5.0` | none: the inner disc at the limit, recorded (T17), beside `decision-r13-guard-trip.md`'s 2–3 × 10⁵ | 2.42 × 10⁵ CPU-s on the server's galaxy, 1.70 × 10⁵ on the fixture, by the threads' CPU time on 15 workers, sampled 1 in 20 (2026-10-12) |
 //! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 1.26 CPU-s (rays 1.12, field 0.14), 0.22 s wall |
 //! | `sky/band_near_sun/march` | within the first sky's (T17) | 30.2 CPU-s, 2.04 s wall, ten replies, 30.2 MB |
 //! | `sky/band_near_sun/march_no_dgl` | none (the lit march's reference, R06.T9.g) | 28.5 CPU-s: the light and the march's increase 2.96 CPU-s, 10.4%, over the 10% by 0.4 point, within a single run's ±2 CPU-s: a finding for T9.g, to re-take on a quiet machine |
