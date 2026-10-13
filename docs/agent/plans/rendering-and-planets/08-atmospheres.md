@@ -1442,8 +1442,10 @@ Names are those the owning plans give; the owning plan is authoritative.
       `rgba16float` (Design note 8's 10⁻³τ).
     - The table sizes are R05's `TABLE_SIZES`, taken from Hillaire's code, which the research
       agent's reading of his Table 2 confirms in kind: 32² multiple scattering, 32³ aerial
-      perspective over 32 km, and a sky-view of about 200 × 100. R05's low sizes and its deferred,
-      terrain-only aerial perspective are this plan's low setting.
+      perspective, and a sky-view of about 200 × 100. The aerial perspective's 32 km reach is
+      Hillaire 2020 §5.4's: his code spans 128 km in squared slices, and Table 2 gives no range
+      (corrected after R08.T9.a's science check, "Deviations in T9.a, as built"). R05's low sizes
+      and its deferred, terrain-only aerial perspective are this plan's low setting.
     - This plan adds Design note 7's source count: the body's stars (`SKY_SUN_CAP`) and its
       planetshine sources. These bound the per-frame cost of the source loop, at most 4 sources on
       high and 3 on low, against `MAX_SKY_SOURCES` = 6 in the kernels. It also adds the thick
@@ -2325,12 +2327,13 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     σ_mix(λ) = Σ xᵢσᵢ(λ) is exact for them. So Design note 8's five stored columns count distinct
     vertical profiles, not species, and do not cap the composition. A listed absorber with no
     cross-sections draws nothing and is reported for `atmosphereApproximate`. Past five profiles,
-    the five of greatest optical depth are kept. A profile's depth is the largest over the three
-    channels of −ln[Σ w_c e^(−Σᵢ Uᵢσᵢ) ÷ Σ w_c] for its vertical column, under an equal-energy
-    spectrum, with w_c = max(c̄_c, 0) on σ's grid over the bake range. Equal depths keep the
-    earlier listed, and the kept profiles take their columns in the order listed. Every species
-    of a dropped profile draws nothing and is reported `noColumnFree` for `atmosphereApproximate`
-    (decided 2026-10-10, `decision-r08-cmf-licence.md`).
+    after H₂O's two continuum pairs share one column (R08.T4.d), the five of greatest optical depth
+    are kept. A profile's depth is the largest over the three channels of
+    −ln[Σ w_c e^(−Σᵢ Uᵢσᵢ) ÷ Σ w_c] for its vertical column, under an equal-energy spectrum, with
+    w_c = max(c̄_c, 0) on σ's grid over the bake range. Equal depths keep the earlier listed, and the
+    kept profiles take their columns in the order listed. Every species of a dropped profile draws
+    nothing and is reported `noColumnFree` for `atmosphereApproximate` (decided 2026-10-10,
+    `decision-r08-cmf-licence.md`).
 
   Tests:
   - a flat spectrum's curve is e^(−σu);
@@ -4165,7 +4168,10 @@ photorealistic view at all): T10.a assembles and caches the medium, and T10.b dr
   notes (`atmosphereStatements`, `labels.ts`); a kept scene's body with no atmosphere set, such as
   R07's `TEST GIANT`, carries `ATMOSPHERE: NOT YET MODELLED` (decision-r08-giant-label).
   Acceptance: `pnpm test` and `just test-render` pass, and by hand a flight past every fixture, on
-  a kept test scene that carries them (`view/scenes/`), is recorded here.
+  a kept test scene that carries them (`view/scenes/`), is recorded here, with the moonlit night on
+  the Earth fixture (the Sun beyond the twilight limit, a full Moon), whose sky over R06's star
+  layer shows the fainter stars washed out (R08.T7's acceptance, which its record, "Deviations in
+  T7, as built", leaves to this task, since the smoke's frames draw no star layer).
 
 `assemble.ts`, `optics.worker.ts`, `AtmosphereCache.ts` build, from the body's appearance and its
 surface section, in a module worker, cached as Design note 14 says. The appearance is the scene's

@@ -2051,6 +2051,9 @@ vertex neighbours. Acceptance: `cargo test -p hyperion-sim planetary::surface`.
       `Continental` none;
     - a Mars given a buried primary with `lid: Secondary` takes its secondary for `Lid`;
     - `BASALT_FE`'s grain density lies within Kiefer et al.'s 3,270–3,460;
+    - `FELDSPATHIC`'s grain density lies within Kiefer et al. 2012's four feldspathic highland
+      rocks, 2,840–2,910 kg m⁻³ by helium pycnometry (Table 1; science-composition-crusts.md
+      §10.1);
     - the reference palettes list `(PrimaryCrust, "feldspathic")`, and `basalt_fe` for the Moon and
       Mars.
   - _Moves:_ nothing, since no reference golden exists before T16.

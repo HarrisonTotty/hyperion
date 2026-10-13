@@ -1,8 +1,9 @@
-// The per-pixel ray march (plan R05, Design note 16; Hillaire 2020, section 5.4): the light
-// scattered into a pixel's ray, summed over the view's drawn sources and weighted by each one's
-// illuminance times the frame's scale (plan R08, R08.T7) (rgb), and the ray's mean transmittance (a),
-// where the tables do not serve: the sky seen from above the atmosphere, and surfaces beyond the
-// aerial-perspective volume's reach. Elsewhere it writes nothing the composite reads. At
+// The per-pixel ray march (plan R05, Design note 16): the light scattered into a pixel's ray,
+// summed over the view's drawn sources and weighted by each one's illuminance times the frame's
+// scale (plan R08, R08.T7) (rgb), and the ray's mean transmittance (a), where the tables do not
+// serve: the sky seen from above the atmosphere, which Hillaire 2020 (section 7) also marches on
+// screen, and surfaces beyond the aerial-perspective volume's reach (32 km, his section 5.4), past
+// which nothing of his marches. Elsewhere it writes nothing the composite reads. At
 // `view.output.z` of the output's resolution (1 high, 0.5 low, with the composite's depth-aware
 // upsample). Follows `common.wgsl`, `medium.wgsl`, `view.wgsl` and `source.wgsl`.
 //

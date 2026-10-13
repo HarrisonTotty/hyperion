@@ -1,4 +1,4 @@
-// The transmittance table (plan R05, Design note 16; Hillaire 2020, section 4): for each (r, mu)
+// The transmittance table (plan R05, Design note 16; Hillaire 2020, section 5.2): for each (r, mu)
 // of Bruneton's parameterisation, what light loses from radius r along zenith cosine mu to the top
 // of the atmosphere, kept as optical depth (plan R08, Design note 8, R08.T6.c): rgb the optical
 // depth per channel of every term but the absorbers, alpha absorber slot 0's column u / U, and the

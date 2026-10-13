@@ -1056,18 +1056,21 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     limit at 60° runs from V 9.55 in the brightest texel to 10.12 in the darkest (10th–90th
     9.79–10.10, median 10.03), against 10.06 at μ 24. Over a black sky, where read noise alone sets
     it, the limit is 10.15, 0.095 mag deeper than μ 24's at every field. A camera's request asks
-    that black-sky limit, clamped at `MAX_CUT_V`, so no texel's cull is deeper than its census. The
-    field moves every texel's limit alike, by 5 log₁₀ of the focal lengths' ratio (+1.67 mag at 30°,
-    −1.19 at 90°). So near the Sun the clamp holds the request at 11.0 below about 43°, and the
-    limit by texel matters at 45°, 60°, 90° and 120°, and at every field where the band is bright
-    (at 60°, 9.11 at μ 20 and 8.25 at μ 18). Where the band also holds light a sensor would resolve,
-    its background reads brighter and the limit shallower: the pending region's light in a reply not
-    yet final; in RM3's interim, the light of the stars brighter than the cut beyond the real
-    boundary (from R13.T7 the band there holds only the light fainter than the cut); and the
-    overflow's. A share f of such light over the unresolved light takes 0.06 mag at f = 0.2 and 0.14
-    at f = 0.5 off the brightest texels, and a third of that at the median. The label quotes the
-    limit at its deepest, as the eye's is quoted: the darkest texel's at the exposure shown, never
-    deeper than the reply's cut.
+    that black-sky limit, clamped at `MAX_CUT_V`, so no texel's cull is deeper than its census, and
+    the cull, as the label, never keeps a star whose V plus its band term lies past the reply's
+    cut: a hot star there goes to the band with its light (at about 43° and narrower, or for a
+    camera culling a sky asked at a shallower cut; decided 2026-10-13,
+    `decision-r06-camera-budget.md` §10.1). The field moves every texel's limit alike, by 5 log₁₀ of
+    the focal lengths' ratio (+1.67 mag at 30°, −1.19 at 90°). So near the Sun the clamp holds the
+    request at 11.0 below about 43°, and the limit by texel matters at 45°, 60°, 90° and 120°, and
+    at every field where the band is bright (at 60°, 9.11 at μ 20 and 8.25 at μ 18). Where the band
+    also holds light a sensor would resolve, its background reads brighter and the limit shallower:
+    the pending region's light in a reply not yet final; in RM3's interim, the light of the stars
+    brighter than the cut beyond the real boundary (from R13.T7 the band there holds only the light
+    fainter than the cut); and the overflow's. A share f of such light over the unresolved light
+    takes 0.06 mag at f = 0.2 and 0.14 at f = 0.5 off the brightest texels, and a third of that at
+    the median. The label quotes the limit at its deepest, as the eye's is quoted: the darkest
+    texel's at the exposure shown, never deeper than the reply's cut.
 
 19. **Humphreys–Davidson, protostars and giants: the leans handed to plan 06** (researched
     2026-09-29, a physics ruling left to plan 06). The cause of the excess is in the code: under the
@@ -2517,7 +2520,9 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   (`decision-r06-census-cost-signoff.md`, question 2), with its amendments here. The server runs a
   sky request's census shell by shell as bulk jobs. After each shell it sends a sky reply with that
   census and the band for that completeness, and it marks the last reply final. The client
-  replaces its sky with each reply (T12, T13).
+  replaces its sky with each reply (T12, T13). _Since R06.T12.b a sky re-asked within an arrival
+  for `partial`, `limits` or `parallax` is held until a reply is as complete, or until an open
+  camera's shift reaches 1 px (T12.b's record, "Deviations in T12.b, as built")._
   - **The default** (decided 2026-10-08, `decision-p11-t17c-bright.md`). T11.d's landing turns
     T11.c's switch on by default if two things hold:
     - near the Sun, its first reply meets T17's first-sky budget on the dev machine (the test

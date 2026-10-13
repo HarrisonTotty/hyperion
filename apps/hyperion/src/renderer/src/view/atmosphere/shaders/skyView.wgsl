@@ -1,4 +1,4 @@
-// The sky-view table (plan R05, Design note 16; Hillaire 2020, section 5.2): the sky's luminance
+// The sky-view table (plan R05, Design note 16; Hillaire 2020, section 5.3): the sky's luminance
 // around the camera, summed over the view's drawn sources and weighted by each one's illuminance
 // times the frame's scale (plan R08, R08.T7), by view zenith and local azimuth, rebuilt every
 // frame. Follows `common.wgsl`, `medium.wgsl`, `view.wgsl` and `source.wgsl`.

@@ -302,8 +302,12 @@ ambiguous, the design note that reads it is named.
   through `oblate.wgsl`'s slice lookup at the ray's latitude and azimuth, never as one texture;
   R08 Design note 17), with the absorber-column table `absorberColumns` and the lights' curves of
   growth `absorberCurves` beside it, since the table stores optical depth without the absorbers
-  and a reader binds all three and reads through `common.wgsl`'s `transmittanceThroughTables` at
-  the light's curve slot (R08.T6.c); and the medium the clouds and the ocean are drawn inside;
+  and a reader reads through `common.wgsl`'s `transmittanceThroughTables` at the light's curve
+  slot (R08.T6.c). Since R08.T4.d such a reader binds five textures, `transmittance`,
+  `absorberColumns`, `absorberCurves`, `absorberPressureColumns` and `lastAbsorberPressureColumn`,
+  and takes the medium's line-slot bitmask (`Draw.shell.z` in the composite, `Medium.absorbers.w`
+  in the kernels), each line slot reading its own pressure channel (plan 08's Risks, "Deviations in
+  T4.d, as built"); and the medium the clouds and the ocean are drawn inside;
   `skyView(view): SkyViewTable` (R08.T9.a), the view's sky radiance by local azimuth and elevation
   summed over the drawn suns, with the per-sun fallback in the same type, for reflecting the sky
   in the ocean; `surfaceLighting.wgsl`'s

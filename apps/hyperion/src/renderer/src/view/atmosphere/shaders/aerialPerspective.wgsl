@@ -1,4 +1,4 @@
-// The aerial-perspective volume (plan R05, Design note 16; Hillaire 2020, section 5.3): for each
+// The aerial-perspective volume (plan R05, Design note 16; Hillaire 2020, section 5.4): for each
 // froxel of the camera's frustum, the light scattered into the ray between the camera and the
 // froxel's far face, summed over the view's drawn sources and weighted by each one's illuminance
 // times the frame's scale (plan R08, R08.T7) (rgb), and the ray's mean transmittance (a), in

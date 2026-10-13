@@ -3693,7 +3693,11 @@ altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` (1) and
     illustrative warm white of unit luminance. The Sun at 1 au gives 1.287 × 10⁵ lx (the
     brainstorm's 1.28 to 0.6%), and the disc form agrees with the magnitude form. The light-time
     direction error is v ÷ c for the Sun's reflex speed about the Sun–Jupiter barycentre,
-    4.16 × 10⁻⁸ rad.
+    4.16 × 10⁻⁸ rad. _R08.T6.j re-baselined the reference Sun from R06's fixture: the disc now
+    takes R06's Sun, `hostDisc.ts`'s `SUN_COLOUR_RGB`, `SUN_LUX_PER_V0` (1.0367468662789598) and
+    `SUN_BAKE_SPECTRUM`, in place of the warm white, `lux_per_v0` 1 and a bake spectrum of ones, so
+    the Sun at 1 au gives 133,462 lx, E-490's 133,318 lx to 0.11% (plan 08's Risks, "Deviations in
+    T6.j, as built")._
 - **Deviations in T2.a, as built.**
   - **A thirteenth template, `lambert`** (approved by the coordinator, 2026-10-03): Φ_t is Lambert's
     closed form to 179° (f held at 1 beyond, where Φ_L reaches 0), L = 0, provisional and labelled.
@@ -7079,14 +7083,21 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
       same warm white of `sunLikeHostDisc` (T4.d's science check). It is the closed form
       E★ p (R ÷ Δ)² to 10⁻⁹, inside the task's 7.7 lx ± 15%. T11 built it with a local copy of
       decision-r07-earth-albedo's photometry; R07.T4.d moved the fixture's row to the same values
-      and pointed the test back at `planetPhotometry("Earth")`.
+      and pointed the test back at `planetPhotometry("Earth")`. _R08.T6.j re-baselined the
+      reference Sun from R06's fixture (its colour, `lux_per_v0` and bake spectrum in place of the
+      warm white, 1 and ones), and re-pinned this at 7.959 lx (7.96 to 0.005), +3.79%, inside the
+      task's 7.7 lx ± 15% (plan 08's Risks, "Deviations in T6.j, as built")._
     - The full Moon is 0.3140 lx against 0.3168 lx from V = −12.74 (−0.9%), with p_V 0.12 (NASA's
       fact sheet, without the opposition surge; Krisciunas and Schaefer 1991, p. 1035). Earth is
-      left out as an occluder there, because at zero phase the Moon is in its shadow.
+      left out as an occluder there, because at zero phase the Moon is in its shadow. _Since
+      R08.T6.j, 0.3255 lx (+2.73%, inside the test's 5%); with the Sun's own correction (× 1.037)
+      V = −12.74 is about 0.328 lx, which it is about 0.9% under (the same record)._
     - Jupiter-shine on Io at inferior conjunction is 66.7 lx, in Io's own shadow transit, with
       Jupiter 6.5% oblate. That is within 10⁻³ of the closed form over √(a c) and 6.16 stops below
       the sunlight. The plan's 70 lx ± 10% is kept. _R07.T10.b: Io's own shadow now takes 0.104%
-      of it, and the closed form is met by the clear light._
+      of it, and the closed form is met by the clear light._ _Since R08.T6.j, 69.00 lx (69.07 clear
+      of Io's shadow), 6.160 stops under the sunlight at Io, which moves from 4,759 to 4,934 lx (the
+      same record)._
     - A neighbour at new phase gives under 10⁻¹² of full.
     - The `view/bodies` tests: a lunar disc's night-side pixel equals E (Δ ÷ d)² × exposure ÷ π ×
       `brdf` to 10⁻⁶, and the night side keeps `unlitBody`.
