@@ -113,12 +113,12 @@ name = "displaced_forms"
 path = "displaced_forms.rs"
 task = "displaced_forms"
 revision = 0
-inputs_sha256 = "349d91b7c28bb56bf4dfad997f2cae86b5e316603f32d341bc337021432a3bd8"
-body_sha256 = "c0f23cfb3ade5d3851ff58f45cf810967d4e828c5698f2880853a2fab448f9a0"
-fingerprint = [7000.0, 223.96085201572214, 2.5745808582515446, 130.6894785661944, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
-since_generator_version = 16
+inputs_sha256 = "d2291407c15aaf95bf5122ee2662fc74117e9593cde3d59268640ba0744ba462"
+body_sha256 = "fb8db9ceed3af24ab084dc46f589c00bdd56e0ed7464fea027e0bcdabff85b04"
+fingerprint = [7000.0, 223.9608520157194, 2.5745808582515655, 130.68947856619133, 1.24, 0.0054, 0.26, 1000.0, 1500.0, 0.04, 2000.0, 2500.0]
+since_generator_version = 21
 provisional = true
-acceptance = "on P15.T6.b's smoke histograms (211 orbits): disc-born weighted mean misplaced share 0.9661 (unregularised 0.9641, λ 0.01); 52 of 56 classes with a parameter on a box edge, 19 of them over 10⁻⁴ of the weight; 66 second-difference sign changes along the rows; worst misplaced share thick disc 0.986, halo 0.983, bulge 0.998, bar 1.000, nuclear disc 0.999; own-form shares at the fixture's corotation ratio 1.24, bar 1.00, 0.00, 0.00, 0.00, bulge 0.00, 0.00, 0.00, 0.00, nuclear disc 1.00, 0.00, 0.00, 0.00; bar elongation over the control 0.80, -2.04, 1.04, 0.80, -, -, -, - and length within 0.76 of it; slowest thin class's mean rotation 0.889 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 238 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
+acceptance = "on P15.T6.b's smoke histograms (211 orbits, 0 captured by the black hole and 0 unresolved): disc-born weighted mean misplaced share 0.9718 (unregularised 0.9716, λ 0.001); 54 of 56 classes with a parameter on a box edge, 18 of them over 10⁻⁴ of the weight; 85 second-difference sign changes along the rows; worst misplaced share thick disc 0.983, halo 0.986, bulge 0.996, bar 0.999, nuclear disc 0.999; own-form shares at the fixture's corotation ratio 1.24, bar 1.00, 0.00, 0.00, 0.00, bulge 0.00, 0.00, 0.00, 0.00, nuclear disc 1.00, 0.00, 1.00, 0.00; bar elongation over the control 0.79, 0.00, 1.13, -20.39, -, -, -, - and length within 0.98 of it; slowest thin class's mean rotation 0.882 `v_c`, fastest's -; the neutron stars' half-density height at 26,000 ly 102 pc; hypervelocity row misplaced 0.053, 29123 survivors inside the cube (26849 slow, 2273 fast; mean path 78662 ly), 0.017 of slow launches below 1.5 times the local escape speed. Not yet run: the universality potentials, plan 08's births' baseline and the other halo masses and corotation ratios (P15.T6.d–e), and the kick-law reweighting of the unbound, in-cube and phase-mixing checks (the histograms hold no total unbound count and one last age bin)"
 
 [[table]]
 name = "equipartition"

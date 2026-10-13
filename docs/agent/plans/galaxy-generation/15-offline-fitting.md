@@ -1023,7 +1023,7 @@ orbits --threads 3` (writes `crates/hyperion-fit/data/cache/displaced/displaced_
   by a few thousandths in ln r, against histogram cells 0.20 wide). A lever, for the owner: the
   nuclear disc's classes at a tenth of the count (still 2 × 10⁴ a class) would cut it to about 37 hours. The production run starts only from a commit holding P15.T6.g and P02.T6.f
   (decision-p15-t6g-orbits §2), so that its committed histograms can be regenerated from committed
-  code. P15.T6.g restates the run's hours (about 23 on three threads) under ruling 120.3–4's
+  code. P15.T6.g restates the run's hours (about 25 on three threads) under ruling 120.3–4's
   estimate below.
 
 **Ruling 120.3–4 as built (lane `disp08`, 2026-09-27; the production run not started).**
@@ -1050,7 +1050,7 @@ orbits --threads 3` (writes `crates/hyperion-fit/data/cache/displaced/displaced_
   `nice -n 19 cargo run --profile slow-test -p hyperion-fit -- orbits --threads 3`; add
   `--max-parts N` to stop after N parts, and run the same command again to resume. It writes
   `crates/hyperion-fit/data/cache/displaced/displaced_orbits.txt` and prints its SHA-256 for
-  `tables.lock`. **Restated by P15.T6.g** (below): about 23 hours on three threads, 3.2 × 10¹¹
+  `tables.lock`. **Restated by P15.T6.g** (below): about 25 hours on three threads, 3.2 × 10¹¹
   steps.
 
 **T6.c–f as built (lane `disp08b`, 2026-09-27, at `GENERATOR_VERSION` 13; the table is
@@ -1211,7 +1211,13 @@ duration_years, fraction, tolerance, refinements) -> Checked` take the step frac
   - Scaled by class to the production counts: 3.17 × 10¹¹ steps. The nuclear disc takes 58%, the
     bulge 15%, the bar 9%, the thick disc 8%, the halo 6% and the thin disc 4%.
   - **About 23 hours on three threads** at that rate, against ruling 120.3–4's 61. A timed rerun
-    under the heavy lock, and §2(c)'s rerun on a base holding P02.T6.f, are pending.
+    under the heavy lock is pending.
+  - **§2(c)'s check, on a base holding P02.T6.f** (lane `p15-orbits`, 2026-10-13, P02.T6.f's
+    47ba6178 picked in; provisional timing): 41 s at load 12, 1.453 × 10⁸ steps, 847 ns a step and
+    thread; 54 refined, none unresolved and none captured, so every class is within the limit of
+    one in 10⁴. The worst drift kept is 9.85 × 10⁻⁴, in `thin_s7_a6`. Scaled to production: 3.17 ×
+    10¹¹ steps, about 25 hours on three threads. The production run may start from a commit
+    holding P15.T6.g and P02.T6.f.
 - **The unresolved limit, ruled** (decision-p15-t6g-orbits §2, 2026-10-12).
   - On the old |J₀| scale the same run left 13 orbits unresolved and 456 refined. All 13 were fast
     kicks (speed bins 4–7) with closest approaches of 190–26,000 ly, 1–4 of 50 in the bin-6
@@ -1533,3 +1539,23 @@ fit-check`; review-changes on this lane's diff.
   max(|J₀|, |Φ(x₀)|). P02.T6.f makes the far field conservative. The production run starts only
   from a commit holding both, after the reduced run is repeated there. The convergence check is
   the median's fall, 3–5 fold. Details are in "T6.g as built".
+- **P15.T6.g's re-emission moved the provisional table's acceptance line** (lane `p15-orbits`,
+  2026-10-13, at header 21, on a base holding P02.T6.f). The smoke histograms, 7fbfd48f… at
+  version 16, are now 88db652d…: 211 orbits, none captured or unresolved, 6 refined. Without
+  P02.T6.f the digest was 8163fd3f…, with the same table body.
+  - Disc-born weighted mean misplaced 0.9661 → 0.9718 (unregularised 0.9641 → 0.9716, λ 0.01 →
+    0.001).
+  - Classes with a parameter on a box edge 52 → 54, of them over 10⁻⁴ of the weight 19 → 18.
+  - Second-difference sign changes 66 → 85.
+  - The nuclear disc's own-form shares 1, 0, 0, 0 → 1, 0, 1, 0.
+  - Bar elongation 0.80, −2.04, 1.04, 0.80 → 0.79, 0.00, 1.13, −20.39; length within 0.76 → 0.98.
+  - The slowest thin class's rotation 0.889 → 0.882 `v_c`; the neutron stars' half-density height
+    238 → 102 pc.
+  - The hypervelocity row is unchanged.
+  - The `galaxy_class_table` golden moves 70 values at header 21 (for example `ThinDisc.gone`
+    0.214 → 0.134), all read from the table.
+  - These moves come from the smoke run's handful of orbits per class, from c07edb86's potential
+    shift and from the integrator, not from a physical change. Refits on one and on three threads
+    give the committed bytes.
+  - The table's `since` is 21, because the emitter writes only the current version. It keeps 21
+    over an unchanged body. At the 21 → 22 bump, main makes it 22 or rules that 21 stands.
