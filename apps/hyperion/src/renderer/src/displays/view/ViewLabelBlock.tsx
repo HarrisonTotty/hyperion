@@ -41,25 +41,43 @@ const UNBREAKABLE =
  * its notes (decision-r07-owner-ux-signoff, item 1). Its text is unchanged.
  *
  * @param runs - The runs that never break, a global pattern.
- * @param field - A value of the text set in a field of its own: the run that reads its text.
+ * @param fields - Values of the text set in fields of their own: each the run that reads its text,
+ *   the sky's edge, or the start of one before a space, the sky's limit before its kind, whose rest
+ *   stays on the run's line after the field (R06.T13.j).
  */
-export function unbrokenRuns(text: string, runs: RegExp, field?: LabelField): ReactNode {
+export function unbrokenRuns(
+  text: string,
+  runs: RegExp,
+  fields: ReadonlyArray<LabelField> = [],
+): ReactNode {
   const nodes: ReactNode[] = [];
   let from = 0;
   for (const match of text.matchAll(runs)) {
     if (match.index > from) {
       nodes.push(withMissing(text.slice(from, match.index), `t${String(from)}`));
     }
-    nodes.push(
-      field !== undefined && match[0] === field.text ? (
-        <FieldRun field={field} key={match.index} />
-      ) : (
+    const run = match[0];
+    const whole = fields.find((field) => field.text === run);
+    const leading = fields.find((field) => run.startsWith(`${field.text} `));
+    let node: ReactNode;
+    if (whole !== undefined) {
+      node = <FieldRun field={whole} isRun key={match.index} />;
+    } else if (leading === undefined) {
+      node = (
         <span className="view-label__run" key={match.index}>
-          {withMissing(match[0], `r${String(match.index)}`)}
+          {withMissing(run, `r${String(match.index)}`)}
         </span>
-      ),
-    );
-    from = match.index + match[0].length;
+      );
+    } else {
+      node = (
+        <span className="view-label__run" key={match.index}>
+          <FieldRun field={leading} isRun={false} />
+          {withMissing(run.slice(leading.text.length), `r${String(match.index)}`)}
+        </span>
+      );
+    }
+    nodes.push(node);
+    from = match.index + run.length;
   }
   if (nodes.length === 0) {
     return withMissing(text, "t0");
@@ -74,17 +92,23 @@ export function unbrokenRuns(text: string, runs: RegExp, field?: LabelField): Re
 interface FieldRunProps {
   /** The value and its field: its text, width and staleness. */
   readonly field: LabelField;
+  /**
+   * Whether the field is a run of its own: `true` for a whole run that never breaks, the sky's
+   * edge; `false` for the start of one, the sky's limit, set inside its run before its kind.
+   */
+  readonly isRun: boolean;
 }
 
 /**
- * A value set in its field: a run right-aligned in its fixed width, and while it is stale muted
- * with its trailing `S` inside that width, so that neither its growth nor the mark moves the line
- * (the guide's "Numbers" and "Data states"; R06.T11.f).
+ * A value set in its field: right-aligned in its fixed width, and while it is stale muted with its
+ * trailing `S` inside that width, so that neither its growth nor the mark moves the line (the
+ * guide's "Numbers" and "Data states"; R06.T11.f, and for the limit, whose `S` so stands after its
+ * unit and before its kind, R06.T13.j).
  */
-function FieldRun({ field }: FieldRunProps) {
+function FieldRun({ field, isRun }: FieldRunProps) {
   return (
     <span
-      className="view-label__run view-label__field"
+      className={isRun ? "view-label__run view-label__field" : "view-label__field"}
       style={{ minWidth: `${String(field.widthCh)}ch` }}
     >
       {field.stale ? (
@@ -138,9 +162,10 @@ function withMissing(text: string, key: string): ReactNode {
  * never inside a status phrase (decision-r07-t19b-exposure-fit, item 1(c)). Its text is the
  * reading's, unchanged.
  *
- * @param field - A value of the reading set in a field of its own (`LabelLine.field`), or none.
+ * @param fields - The values of the reading set in fields of their own (`LabelLine.fields`), or
+ *   none.
  */
-export function readingParts(value: string, field?: LabelField): ReactNode {
+export function readingParts(value: string, fields: ReadonlyArray<LabelField> = []): ReactNode {
   const seen = new Map<string, number>();
   const nodes: ReactNode[] = [];
   for (const part of value.split(PART_SEPARATOR)) {
@@ -151,7 +176,7 @@ export function readingParts(value: string, field?: LabelField): ReactNode {
     seen.set(part, count + 1);
     nodes.push(
       <span className="view-label__part" key={`${part}:${String(count)}`}>
-        {unbrokenRuns(part, UNBREAKABLE, field)}
+        {unbrokenRuns(part, UNBREAKABLE, fields)}
       </span>,
     );
   }
@@ -169,11 +194,11 @@ export function readingParts(value: string, field?: LabelField): ReactNode {
  * under the value (decision-r07-t19-layout, item 2).
  * Each reading is an `output`; none is announced as it changes, since they change continuously. A
  * reading of a stale server scene is muted with its trailing `S` (the guide's "Data states"); a
- * line's field, the sky's edge, is set in its fixed width and goes stale alone (R06.T11.f). A
- * graphics fault is set as `StatusLine`'s fault, in `--status-caution`, apart from the steady
- * statements (the guide's "Alerts": a console's report on its own graphics is never an alert). The
- * stars' count line is a reading of numbers, so an `output` in B612 Mono (the guide's
- * "Typography"), not a statement.
+ * line's fields, the sky's limit and edge, are each set in a fixed width and go stale alone
+ * (R06.T11.f, R06.T13.j). A graphics fault is set as `StatusLine`'s fault, in `--status-caution`,
+ * apart from the steady statements (the guide's "Alerts": a console's report on its own graphics
+ * is never an alert). The stars' count line is a reading of numbers, so an `output` in B612 Mono
+ * (the guide's "Typography"), not a statement.
  */
 export function ViewLabelBlock({ lines, statements, countLine, fault, id }: ViewLabelBlockProps) {
   return (
@@ -185,7 +210,7 @@ export function ViewLabelBlock({ lines, statements, countLine, fault, id }: View
             <dt className="field__label">{line.label}</dt>
             <dd>
               <output aria-live="off" className={line.stale === true ? "stale" : undefined}>
-                {readingParts(line.value, line.field)}
+                {readingParts(line.value, line.fields)}
               </output>
               {line.stale === true ? <StaleMark /> : null}
             </dd>

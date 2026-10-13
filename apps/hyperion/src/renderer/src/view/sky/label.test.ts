@@ -2,18 +2,30 @@ import type { SkyGapDto, SkyLayerCensusDto } from "@hyperion/protocol";
 import { describe, expect, it } from "vitest";
 
 import { STAR_SOURCE, STARS_WITHOUT_POSITION } from "../../displays/view/viewRun";
-import { nearestFirstCensus, skyPayload, skyRequest, skyResponse } from "../../test/skyFixtures";
+import { autoAt, manualAt } from "../../test/exposureFixtures";
+import {
+  decodedSky,
+  nearestFirstCensus,
+  skyPayload,
+  skyRequest,
+  skyResponse,
+} from "../../test/skyFixtures";
+import { FOV_STEPS_DEG } from "../camera/projection";
 import {
   detailLimited,
   SKY_DETAIL_LIMITED_NOTE,
   SKY_EDGE_FIELD_CH,
+  SKY_LIMIT_FIELD_CH,
   SKY_PENDING,
   skyEdgeReading,
   skyLabelValue,
+  skyLimitReading,
   type SkyLineStanding,
   type SkyLinePlace,
   streamingEdgeLy,
 } from "./label";
+import type { SkyModel } from "./model";
+import { viewSkyLabelV, viewSkyRequest } from "./viewSky";
 
 /** The gaps every reply states until R06.T16.a, and those of a sky near the centre. */
 const GAPS: ReadonlyArray<SkyGapDto> = ["white_dwarfs", "feature_members", "centre_members"];
@@ -67,6 +79,74 @@ describe("the sky line", () => {
   it("leaves R02's interim readings as they were drafted", () => {
     expect(STAR_SOURCE).toBe("RANGE QUERY · VOLUME-LIMITED · NO EXTINCTION");
     expect(STARS_WITHOUT_POSITION).toBe("NOT AVAILABLE: the system's position is not known");
+  });
+});
+
+/** A camera's held sky asked at `fovDeg`, its band uniform at `backgroundCdM2`. */
+function cameraSkyOver(backgroundCdM2: number, fovDeg: number): SkyModel {
+  const payload = skyPayload([], 2, null, () => backgroundCdM2);
+  const request = viewSkyRequest({
+    universe: "000000000000002a",
+    observer: skyRequest(0).observer,
+    system: "0200080020000000",
+    time: { seconds: 0, nanos: 0 },
+    role: "camera",
+    fovDeg,
+    nMax: 300_000,
+  });
+  return {
+    request,
+    response: skyResponse(request, payload, 0, 2),
+    ...decodedSky(payload, 0),
+    stale: false,
+  };
+}
+
+/** A sky of surface brightness μ, mag arcsec⁻², as a luminance: B = 10^((12.58 − μ) ÷ 2.5). */
+function skyOf(mu: number): number {
+  return 10 ** ((12.58 - mu) / 2.5);
+}
+
+describe("the limit's field (R06.T13.j)", () => {
+  it("holds the limit before its kind, to one decimal in mag", () => {
+    expect([skyLimitReading(9.46), skyLimitReading(11), skyLimitReading(-20.2)]).toEqual([
+      "V 9.5 mag",
+      "V 11.0 mag",
+      "V -20.2 mag",
+    ]);
+  });
+
+  it("composes the line from the limit as its field holds it", () => {
+    expect(skyLabelValue(10.12, "camera", [], at("alone"))).toBe(`${skyLimitReading(10.12)} CAM`);
+  });
+
+  it("sizes the field for its widest reading with its stale mark, V -20.2 mag S, not the cut's V 11.0 mag S", () => {
+    expect([SKY_LIMIT_FIELD_CH, "V -20.2 mag S".length, "V 11.0 mag S".length]).toEqual([
+      13, 13, 12,
+    ]);
+  });
+
+  it("reads V -20.2 for a camera at 120° and EV100 42, the darkest exposure MAN takes", () => {
+    expect(skyLimitReading(viewSkyLabelV(cameraSkyOver(0, 120), "camera", manualAt(42), 120))).toBe(
+      "V -20.2 mag",
+    );
+  });
+
+  it("holds every limit a camera states with its mark: EV100 -14 to 60, every field, a black sky to daylight", () => {
+    // Past EV100 42 only AUTO goes, its ND pegged; the darkest texel of a band is far fainter than
+    // a daylit sky's 10,000 cd/m².
+    const backgrounds = [0, skyOf(30), skyOf(24), skyOf(21.6), skyOf(15), 1, 100, 10_000];
+    let widest = "";
+    for (const fovDeg of FOV_STEPS_DEG) {
+      for (const backgroundCdM2 of backgrounds) {
+        const sky = cameraSkyOver(backgroundCdM2, fovDeg);
+        for (let ev100 = -14; ev100 <= 60; ev100 += 0.5) {
+          const reading = `${skyLimitReading(viewSkyLabelV(sky, "camera", autoAt(ev100), fovDeg))} S`;
+          widest = reading.length > widest.length ? reading : widest;
+        }
+      }
+    }
+    expect(widest.length).toBeLessThanOrEqual(SKY_LIMIT_FIELD_CH);
   });
 });
 

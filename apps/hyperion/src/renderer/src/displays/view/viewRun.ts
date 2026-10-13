@@ -439,11 +439,15 @@ export const STARS_WITHOUT_POSITION = "NOT AVAILABLE: the system's position is n
 
 /**
  * A value within a reading that is set in a field of its own: right-aligned in a fixed width, and
- * stale apart from the rest of the reading. The sky's edge in the stars-arriving note,
- * `BEYOND 2000 ly: STREAMING`, is one (R06.T11.f).
+ * stale apart from the rest of the reading. The sky's limit before its kind, `V 9.5 mag` in
+ * `V 9.5 mag CAM` (R06.T13.j), and its edge in the stars-arriving note,
+ * `BEYOND 2000 ly: STREAMING` (R06.T11.f), are two.
  */
 export interface LabelField {
-  /** Its text as it stands in the reading, a run that never breaks: `2000 ly`. */
+  /**
+   * Its text as it stands in the reading: a run that never breaks, `2000 ly`, or the start of one
+   * before a space, `V 9.5 mag`, whose rest stays on its line after the field.
+   */
   readonly text: string;
   /** Its width, ch: its longest reading's with its stale mark, so that the line never moves. */
   readonly widthCh: number;
@@ -457,8 +461,8 @@ export interface LabelLine {
   readonly value: string;
   /** Set on a reading of the server's scene while the scene is stale: muted, with its `S`. */
   readonly stale?: true;
-  /** A value of the reading set in a field of its own, or none. */
-  readonly field?: LabelField;
+  /** The values of the reading set in fields of their own, in the reading's order, or none. */
+  readonly fields?: ReadonlyArray<LabelField>;
 }
 
 /**

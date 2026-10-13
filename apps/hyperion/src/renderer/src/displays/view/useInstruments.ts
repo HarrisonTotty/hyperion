@@ -50,7 +50,13 @@ import type { ViewStar } from "../../view/scene/model";
 import type { DrawAnchor } from "../../view/wireframe/drawList";
 import { availabilityOf, styleRefusals } from "./styleRefusals";
 import type { SkyModel } from "../../view/sky/model";
-import { type CulledViewSky, cullViewSky, type DrawnSky, viewSkyLabel } from "./useViewSky";
+import {
+  type CulledViewSky,
+  cullViewSky,
+  type DrawnSky,
+  type SkyLineReading,
+  viewSkyLabel,
+} from "./useViewSky";
 import type { ViewEngineState } from "./useViewEngine";
 import { type DragKind, dragKindOf } from "./useViewDrag";
 import { makeViewFrameDrawer, type ViewFrameDrawer } from "./viewFrameDrawer";
@@ -95,8 +101,11 @@ export interface Instrument {
   readonly refused: boolean;
   /** Its stage as laid out, or `null` before it is. */
   readonly size: ElementSize | null;
-  /** Its `STARS` reading of its own cull of the sky, or `null` while the interim field stands. */
-  readonly skyLabel: string | null;
+  /**
+   * Its `STARS` reading of its own cull of the sky, its limit in its field and stale with the sky
+   * (R06.T13.j), or `null` while the interim field stands.
+   */
+  readonly skyLabel: SkyLineReading | null;
   /** Its canvas while mounted, by which a key pressed on it is told to act on it. */
   readonly canvas: HTMLCanvasElement | null;
   /** Receive its canvas and its stage, which the display measures. */
@@ -307,7 +316,7 @@ function useSlotSky(
   );
   return drawn === null || role === null || fovDeg === null
     ? null
-    : { drawn, labelValue: viewSkyLabel(drawn.model, role, exposure, fovDeg, "instrument").value };
+    : { drawn, label: viewSkyLabel(drawn.model, role, exposure, fovDeg, "instrument") };
 }
 
 /** The instruments of a `VIEW` stage. */
@@ -601,7 +610,7 @@ export function useInstruments(input: InstrumentsInput): Instruments {
         shown: state.shown,
         refused: state.refused,
         size: slot === 1 ? stageOne.size : stageTwo.size,
-        skyLabel: (slot === 1 ? skyOne : skyTwo)?.labelValue ?? null,
+        skyLabel: (slot === 1 ? skyOne : skyTwo)?.label ?? null,
         canvas: slot === 1 ? canvasOne : canvasTwo,
         canvasRef: slot === 1 ? setCanvasOne : setCanvasTwo,
         stageRef: slot === 1 ? stageOne.ref : stageTwo.ref,

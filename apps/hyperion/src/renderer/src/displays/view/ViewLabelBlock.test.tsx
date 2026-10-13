@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { ViewLabelBlock } from "./ViewLabelBlock";
@@ -86,7 +86,9 @@ describe("the view's label block's field (R06.T11.f)", () => {
   function fieldOf(stale: boolean): HTMLElement {
     const { container } = render(
       <ViewLabelBlock
-        lines={[{ label: "STARS", value: VALUE, field: { text: "2000 ly", widthCh: 12, stale } }]}
+        lines={[
+          { label: "STARS", value: VALUE, fields: [{ text: "2000 ly", widthCh: 12, stale }] },
+        ]}
         statements={[]}
         countLine={null}
         fault={null}
@@ -116,5 +118,87 @@ describe("the view's label block's field (R06.T11.f)", () => {
       field.querySelector(".stale-mark")?.textContent,
       screen.getByRole("status").classList.contains("stale"),
     ]).toEqual(["2000 ly", "S", false]);
+  });
+});
+
+/** A block's first field, the limit's. */
+function limitOf(block: HTMLElement): HTMLElement {
+  const field = block.querySelector<HTMLElement>(".view-label__field");
+  if (field === null) {
+    throw new Error("the block sets no field");
+  }
+  return field;
+}
+
+/** A block's parts, as the count of runs in each, and each field's width. */
+function shapeOf(block: HTMLElement): ReadonlyArray<ReadonlyArray<number | string>> {
+  return [
+    [...block.querySelectorAll(".view-label__part")].map(
+      (part) => part.querySelectorAll(".view-label__run").length,
+    ),
+    [...block.querySelectorAll<HTMLElement>(".view-label__field")].map(
+      (field) => field.style.minWidth,
+    ),
+  ];
+}
+
+describe("the view's label block's limit field (R06.T13.j)", () => {
+  const VALUE = "V 9.5 mag CAM · BEYOND 2000 ly: STREAMING";
+
+  /** The block with the sky's limit and edge in their fields, live or stale together. */
+  function blockOf(stale: boolean): HTMLElement {
+    const { container } = render(
+      <ViewLabelBlock
+        lines={[
+          {
+            label: "STARS",
+            value: VALUE,
+            fields: [
+              { text: "V 9.5 mag", widthCh: 13, stale },
+              { text: "2000 ly", widthCh: 12, stale },
+            ],
+          },
+        ]}
+        statements={[]}
+        countLine={null}
+        fault={null}
+      />,
+    );
+    return container;
+  }
+
+  it("sets the limit in its fixed width at the head of its run, its kind after it", () => {
+    const field = limitOf(blockOf(false));
+    expect([
+      field.textContent,
+      field.style.minWidth,
+      field.classList.contains("view-label__run"),
+      field.parentElement?.classList.contains("view-label__run"),
+      field.parentElement?.textContent,
+      screen.getByRole("status").textContent,
+    ]).toEqual(["V 9.5 mag", "13ch", false, true, "V 9.5 mag CAM", VALUE]);
+  });
+
+  it("mutes the limit while it is stale, its S after its unit and before its kind", () => {
+    const field = limitOf(blockOf(true));
+    expect([
+      field.querySelector(".stale")?.textContent,
+      field.querySelector(".stale-mark")?.textContent,
+      field.nextSibling?.textContent,
+      screen.getByRole("status").textContent,
+      screen.getByRole("status").classList.contains("stale"),
+    ]).toEqual([
+      "V 9.5 mag",
+      "S",
+      " CAM",
+      "V 9.5 mag Sstale CAM · BEYOND 2000 ly Sstale: STREAMING",
+      false,
+    ]);
+  });
+
+  it("keeps the line's parts, its runs and its fields' widths when it goes stale", () => {
+    const live = shapeOf(blockOf(false));
+    cleanup();
+    expect(shapeOf(blockOf(true))).toEqual(live);
   });
 });
