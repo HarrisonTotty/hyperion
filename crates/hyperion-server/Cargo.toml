@@ -28,6 +28,9 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
+# The coarse pass's reference worlds (`planetary::surface::reference`), which the surface
+# service's tests compute fields from (rendering plan R09, R09.T17).
+hyperion-sim = { workspace = true, features = ["testing"] }
 # The golden-file harness of plan 01, for the pinned `galaxy_parameters` response.
 hyperion-testkit.workspace = true
 tempfile.workspace = true

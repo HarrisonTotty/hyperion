@@ -1,0 +1,53 @@
+//! The surface service: each body's coarse field, computed once on the CPU pool and kept in memory
+//! (rendering plan R09, R09.T17; Design note 19).
+//!
+//! A body's coarse field is the sim's
+//! [`coarse_pass`](hyperion_sim::planetary::surface::coarse_pass) of its surface seed and its
+//! inputs, plan 14's global figures for the body, so it is a function of the universe and the body
+//! alone. [`SurfaceService`] keys it by [`FieldKey`], the universe's
+//! [`GalaxyKey`](crate::compute::GalaxyKey) and the body's ID, and keeps each field as an
+//! `Arc<CoarseField>` in a [`FieldCache`], a byte-bounded LRU of its own budget,
+//! `HYPERION_SURFACE_CACHE_MB` (128 MiB by default, `--surface-cache`; [`config`](crate::config)).
+//! Callers that ask for one body's field at once share one pass through a
+//! [`SingleFlight`](crate::compute::SingleFlight), and the pass runs as one bulk job on the pool,
+//! never on the runtime, under a [`CancelToken`](crate::compute::CancelToken) raised when every one
+//! of them has given up: a pass still queued is then skipped, and a field nobody waits for any
+//! more is not kept. A field is never persisted (the plan's open question 4): after an eviction or
+//! a restart it is computed again, to the bit.
+//!
+//! # Where the inputs come from
+//!
+//! The pass's inputs come through the [`InputsSource`] seam, which reads them from the body's
+//! record and its system's context. In production it is [`RecordInputs`], plan 14's record read by
+//! [`CoarseInputs::for_body`](hyperion_sim::planetary::surface::CoarseInputs::for_body), which
+//! answers [`SurfaceInputsError::NotModelled`](hyperion_sim::planetary::surface::SurfaceInputsError::NotModelled)
+//! naming the surface section until plan 14's surface section is inhabited (P14.T24, P14.T48 and
+//! P14.T54.a). Until then the service and the wire are tested on the coarse pass's reference
+//! worlds, given as the source through
+//! [`ServerConfigBuilder::surface_inputs`](crate::ServerConfigBuilder::surface_inputs).
+//!
+//! The record is read at [`RECORD_TIME`], the epoch, whoever asks first and whenever: the field is
+//! a function of its key, and a record read at the asker's time would make the field kept depend on
+//! who asked first. P14.T54.a, which settles the time the record's surface section is read at (the
+//! hosts' light and a despinning body's spin change with it), settles this one too (R09's Risks).
+//!
+//! # What starts a field
+//!
+//! The first `surface_field` or `survey_pass` for the body (R09.T19, which wires them), and
+//! [`SurfaceService::prefetch`], which session code will call as the ship approaches a body.
+//!
+//! # The floating-point mode
+//!
+//! The pass runs on R04's probed pool. A worker whose floating-point mode is found to flush
+//! subnormals withholds the field
+//! ([`JobError::FloatingPointMode`](crate::compute::JobError::FloatingPointMode)), and the service
+//! logs the refusal at `error`, naming the body; a request answers it `internal`, as every job's
+//! refusal is ([`ComputeError`](crate::compute::ComputeError)'s conversion).
+
+mod cache;
+mod inputs;
+mod service;
+
+pub use cache::{FieldCache, FieldKey};
+pub use inputs::{InputsSource, RecordInputs};
+pub use service::{RECORD_TIME, SurfaceCounters, SurfaceJobError, SurfaceService};

@@ -253,6 +253,13 @@ impl MaterialPalette {
         &self.entries
     }
 
+    /// The bytes the entries take on the heap, by the vector's capacity
+    /// ([`CoarseField::heap_bytes`](super::CoarseField::heap_bytes)).
+    #[must_use]
+    pub(super) fn heap_bytes(&self) -> usize {
+        super::vec_heap_bytes(&self.entries)
+    }
+
     /// The entry of index `index`, or `None` past the palette.
     #[must_use]
     pub fn get(&self, index: u8) -> Option<&PaletteEntry> {

@@ -8,6 +8,7 @@
 
 pub mod process;
 pub mod scene;
+pub mod surface;
 
 use std::future::IntoFuture;
 use std::net::SocketAddr;

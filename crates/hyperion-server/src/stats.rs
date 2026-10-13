@@ -12,6 +12,7 @@ use crate::cache::LruCounters;
 use crate::compute::{
     BodyCacheCounters, GalaxyCounters, PoolCounters, SkyCellCounters, SkyTablesCounters,
 };
+use crate::surface::SurfaceCounters;
 
 /// A snapshot of the server's activity.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
@@ -28,6 +29,7 @@ pub struct ServerStats {
     briefs: LruCounters,
     sky_cells: SkyCellCounters,
     sky_tables: SkyTablesCounters,
+    surface: SurfaceCounters,
 }
 
 impl ServerStats {
@@ -47,6 +49,7 @@ impl ServerStats {
             briefs: state.briefs.counters(),
             sky_cells: state.sky_cells.counters(),
             sky_tables: state.sky_tables.counters(),
+            surface: state.surface.counters(),
         }
     }
 
@@ -130,6 +133,14 @@ impl ServerStats {
     #[must_use]
     pub fn sky_tables(&self) -> SkyTablesCounters {
         self.sky_tables
+    }
+
+    /// The surface service's cache's contents and use, including its byte budget, and the coarse
+    /// passes computed: requests for one body's field at once share one pass, and a field asked
+    /// again is a hit (rendering plan R09, R09.T17).
+    #[must_use]
+    pub fn surface(&self) -> SurfaceCounters {
+        self.surface
     }
 }
 

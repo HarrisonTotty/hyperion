@@ -3975,6 +3975,120 @@ re-blessing this plan's payload and coarse goldens in that commit.
   - The airless mean temperature is imposed as the radiative mean ⟨T⁴⟩^¼ in R09.T13.c–d, T10's
     lean, with T13's science check to confirm. `CoarseInputs::mean_surface_temperature`'s
     documentation says so.
+- **Deviations in T17, as built** (2026-10-13).
+  - _Files._ The task's `surface/{mod,cache,service,inputs}.rs` and `config.rs`, with `lib.rs`
+    (the `AppState::surface` field, its start and its shutdown), `stats.rs`
+    (`ServerStats::surface`), `tests/common/surface.rs`, `tests/surface_service.rs` and the
+    README's table of options; and in the surface crate `CoarseField::heap_bytes` (below).
+  - _The API T19 wires._
+    - `SurfaceService::new(pool, source, budget_bytes)`, taking an `Arc<CpuPool>`, an
+      `Arc<dyn InputsSource>` and a `usize`.
+    - `async fn field(&self, key: FieldKey, system: &Arc<GeneratedSystem>)`, which gives a
+      `Result<Arc<CoarseField>, SurfaceJobError>`.
+    - `fn prefetch(&self, key, system) -> bool` (whether it started or joined a pass),
+      `fn stop_prefetching(&self)`, and `fn counters(&self) -> SurfaceCounters` (`cache()`, an
+      `LruCounters`, and `computed()`, the passes run).
+    - `FieldKey::new(GalaxyKey, BodyId)` with `galaxy()` and `body()`; `FieldCache` (`new`, `get`,
+      `insert`, `charge`, `counters`) and `impl HeapBytes for CoarseField`.
+    - `SurfaceJobError`, Provides' name kept: `Body(ResolveBodyError)`,
+      `Inputs(SurfaceInputsError)` and `Compute(ComputeError)`, with `From<ComputeError>`.
+    - `InputsSource: Debug + Send + Sync`, whose one method is Provides' `inputs`, and
+      `RecordInputs`.
+    - `RECORD_TIME`, the time the record is read at (below).
+    - In `config.rs`: `ENV_SURFACE_CACHE_MB`, `DEFAULT_SURFACE_CACHE_MIB` (128), `--surface-cache`,
+      `ServerConfig::surface_cache_bytes` and its builder's, on the sky cache's pattern; and,
+      beyond Provides, `ServerConfig::surface_inputs` and the builder's `surface_inputs`, which
+      takes an `impl InputsSource` (by default `RecordInputs`), on `scene_knowledge`'s pattern.
+      T19.c's socket test gives the reference worlds through it.
+  - _The system comes from the caller._ The service holds no galaxy, system or body cache:
+    `field` and `prefetch` take the body's planetary system, which a handler has from
+    `requests::system::bodies_of` (as `body_detail` takes it), and panic if it is not the key's
+    body's (its system ID, and for a body with a surface seed that seed against the key's
+    universe's), or if the key's generator version is not one this build generates
+    (`GeneratorVersion::is_supported`, as the galaxy cache asserts), so that no field is kept
+    under another version's key. T19's handler: `openable_universe`, the galaxy, `bodies_of` (its `NoSuchSystem`
+    through `body_refusal`), then `state.surface.field(FieldKey::new(universe.key(), body), &system)`.
+  - _One bulk job._ It decodes the index, takes the seed from `PlanetarySystem::surface_seed` (a
+    ring, a belt or the halo has none: `Inputs(NoSolidSurface)`), reads the record, asks the source
+    and runs `coarse_pass`. A refusal is not kept, as no error is: a generated body's `NotModelled`
+    costs a bulk job each time it is asked, behind any other bulk work (Deferred findings, below).
+  - _The record's time._ The record is read at `RECORD_TIME`, `UniverseTime::EPOCH`, whoever asks
+    and whenever: the field is keyed without a time, so a record read at the asker's time would
+    make the field kept depend on who asked first. The smallest reversible choice; P14.T54.a, which
+    settles `for_body`'s time (the ruling above), settles this one.
+  - _The refusals, for T19.a._ `Body(e)` through `body_refusal(&request.body, e)`;
+    `Inputs(NoSolidSurface)` `bad_request` naming `body`; `Inputs(NotModelled(section))` the wire's
+    `SurfaceFieldDto::NotModelled { section }`; `Inputs(NotResolved(_))` `internal` (T10's
+    record); `Compute(e)` through `RequestError::from(e)`, so `FloatingPointMode` and a faulted
+    pool are `internal`. The service logs those two at `error`, naming the body; the test checks
+    the refusal and its code, not the log line.
+  - _The charge._ `HeapBytes` counts a `Vec` by its capacity, which the server cannot see through
+    `CoarseField`'s getters, so the surface crate gains `CoarseField::heap_bytes` (a public item
+    beyond Provides, with `pub(super)` helpers on `Cover` and `MaterialPalette`): its records, its
+    craters and their reaches, its per-cell crater index and its palette, by capacity. Not
+    generated output; nothing that generates reads it. Measured on the reference worlds at version
+    21, before T12.d's craters: 24.4 MB at level 8, 6.1 MB at 7, 1.5 MB at 6 and 0.38 MB at 5, so
+    the default 128 MiB (Provides'; Design note 19 gives the 32 GB context) keeps five Earths'
+    fields (an Earth's whole payload is 14.7 MB).
+  - _For R10.T10.a._ The albedo scale's call site is `service::compute`, after `coarse_pass`, with
+    the record's photometry; the tests that compare the served field with `coarse_pass` bit for
+    bit (`tests/surface_service.rs` and two in `surface::service`) then apply the same
+    `with_albedo_scale`.
+  - _Not here._ The survey logs (T19.a opens them, T18's record); `survey_pass` starting a field
+    (T19.a calls `prefetch`); any request handler or wire type.
+  - _Test helpers._ `tests/common/surface.rs`: `reference_inputs(ReferenceWorld)` (`Earth`,
+    `Mars`, `Moon`, `Ceres`, not `EarthLike`…, which Clippy's `enum_variant_names` refuses), an
+    `InputsSource` giving every body whose surface section applies the world's inputs and a giant
+    `NoSolidSurface`; `surface_system()`, a generated system of seed `0x4d2` with a solid body and
+    a giant; and `SEED`.
+  - _Tests._ `surface::service`: two requests at once compute once (the source's calls and
+    `computed`, three misses); the cache bounded and evicting the least recently used, computed
+    again; a budget of nought keeps nothing; a cancelled pass, queued or running, keeps nothing;
+    a prefetch joined by a request, a prefetch with none, prefetches given up at shutdown; a
+    flushing worker refused (`internal`), then the faulted pool; a malformed index, the primary's
+    and an empty slot refused as the body's; the errors' texts and causes; another system's and
+    another generator version's refused (panics). The eviction test's field computed again is
+    the first's payload, to the bit. `surface::cache`: the charge and the budget. `config`: the default source and a
+    given one. `tests/surface_service.rs`: the field from the Ceres and Moon reference worlds is
+    `coarse_pass` of the body's seed on the same inputs, compared as whole payloads; with
+    `RecordInputs` a solid body answers `NotModelled(Surface)` and a giant `NoSolidSurface`, and so
+    does a giant with the reference inputs. The surface crate: `heap_bytes` by capacity, exact and
+    with spare room.
+  - _Acceptance._ `cargo test -p hyperion-server surface` runs 16 unit tests (13 under
+    `surface::service`, 2 under `surface::cache`, and `config`'s
+    `the_surface_inputs_are_the_records_unless_given`) and the 2 of `tests/surface_service.rs`.
+    The filter does not select the tests this task edited elsewhere: `config`'s that pin the
+    option (`defaults_match_the_builder`, `every_option_is_read`,
+    `every_option_falls_back_to_its_variable`, `a_cache_budget_is_written_in_mib`,
+    `the_builder_overrides_defaults`), `lib.rs`'s `counters_move_as_requests_are_accepted_run_and_finish`
+    and the surface crate's `a_field_counts_its_heap_bytes_by_capacity`, so T17 also ran
+    `cargo test -p hyperion-server --lib config::` with `counters_move`, and
+    `cargo test -p hyperion-surface --features testing --lib heap_bytes`; the gate, `just smart-ci`,
+    ran the whole server and the surface tests the change reaches on every target.
+- **Deferred findings (2026-10-13 rule)** (R09.T17). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The quantiser's spare capacity._ `quantise`'s `collect::<Result<Vec<_>, _>>()` grows the
+    records' vectors by doubling, so a level-8 field holds 5.3 MB of spare capacity (24.4 MB
+    charged against 19.0 MB of records). An exact capacity in the quantiser, or a `shrink_to_fit`
+    in `CoarseField::new`, saves it; no output moves. Lean: with T16's benches.
+  - _Concurrent passes._ Passes of different bodies run at once, as many as the pool's workers.
+    Once T11–T15 fill the steps, a level-8 pass's working state (`f64`s a cell) may reach some
+    100 MB, so a pool of 15 could hold over a gigabyte in passes. Lean: measure the pass's peak
+    with T16's benches, and bound the passes in flight (a semaphore in the service) if it is large.
+  - _A refusal waits for a bulk slot._ A generated body's `NotModelled` is answered by a bulk job,
+    behind a sky's census. Lean: T19.a reads the record's surface tag in an interactive job before
+    the bulk pass, or P14.T54.a's inhabited section makes it moot.
+  - _The reference worlds name another body._ `reference::*` builds inputs with `BodyRef::new(0, 1)`
+    to `BodyRef::new(0, 4)` (system 0, bodies 1–4), so a field served from them names that body in
+    its header and blocks, whatever body was asked for. T19.c's checks pass (the blocks agree with
+    their header), but a client that compares the header's body with the one it asked for would
+    refuse it. Lean: a `CoarseInputs` method that changes the body on built inputs, or
+    `reference::*` taking a `BodyRef` (the builder already has `body`), in the sim when T19.c
+    needs it.
+  - _Repeated prefetches._ A prefetch of a body whose pass is in flight spawns one more waiter on
+    the same flight, and finished waiters are reaped only by the next prefetch, as the sky
+    tables' are; session code calling it often on approach grows the set by its call rate times
+    the pass's length. Lean: a `SingleFlight` query for a key in flight, with session code.
 - **Deviations in T18, as built** (2026-10-09).
   - _The shared log._ `knowledge/jsonl.rs` (private) holds what `persist.rs` held privately:
     `KnowledgeLog` (now carrying its header's format), `push_line`, `sync_directory`, `save_io`

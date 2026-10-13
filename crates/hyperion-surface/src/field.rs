@@ -636,6 +636,33 @@ impl CoarseField {
         Ok(self)
     }
 
+    /// The bytes the field owns on the heap, by its vectors' capacities: its records, its craters
+    /// and their reaches, the per-cell index of the craters reaching each cell, and the header's
+    /// palette.
+    ///
+    /// A holder's count of its memory, for a budget (the server's surface cache charges a field
+    /// this, R09.T17), not generated output: it depends on how the vectors were built, and nothing
+    /// that generates or synthesises reads it.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        let reaches = self
+            .craters
+            .iter()
+            .map(|crater| crater.reach.heap_bytes())
+            .fold(0, usize::saturating_add);
+        [
+            self.header.palette().heap_bytes(),
+            vec_heap_bytes(&self.synthesis),
+            vec_heap_bytes(&self.climate),
+            vec_heap_bytes(&self.craters),
+            reaches,
+            vec_heap_bytes(&self.reaching_start),
+            vec_heap_bytes(&self.reaching),
+        ]
+        .into_iter()
+        .fold(0, usize::saturating_add)
+    }
+
     /// The indices into [`craters`](Self::craters) of the craters whose reach holds the cell of
     /// index `index`, in list order; empty past the field's cells.
     #[must_use]
@@ -657,6 +684,13 @@ impl CoarseField {
             None
         }
     }
+}
+
+/// The bytes `vec` holds on the heap for its elements, by its capacity, not its length: what a
+/// holder of it pays.
+#[must_use]
+fn vec_heap_bytes<T>(vec: &Vec<T>) -> usize {
+    vec.capacity().saturating_mul(size_of::<T>())
 }
 
 /// Checks the rules of the synthesis record of cell `cell`: its water surface is not below its
@@ -1434,5 +1468,54 @@ mod tests {
         let level = field.header().level().get();
         let any = cell_at_index(level, 17).unwrap();
         assert_eq!(field.craters_reaching(any).count(), 0);
+    }
+
+    /// A field counts its heap bytes by its vectors' capacities (R09.T17, the surface cache's
+    /// charge). Built from vectors of exact capacity, they are its records', its craters' and
+    /// their reaches', the per-cell crater index's (one start a cell and one more, and an entry
+    /// for each cell of each reach) and its palette's; records given spare room add that room.
+    #[test]
+    fn a_field_counts_its_heap_bytes_by_capacity() {
+        let count = |n: usize, each: usize| n * each;
+        for world in [SyntheticWorld::CeresLike, SyntheticWorld::OneCrater] {
+            let built = synthetic_field(world);
+            assert!(!built.craters().is_empty(), "{world:?} has craters");
+            let exact = CoarseField::new(
+                built.header().clone(),
+                built.synthesis().to_vec(),
+                built.climate_layer().to_vec(),
+                built.craters().to_vec(),
+            )
+            .unwrap();
+            let cells = exact.synthesis().len();
+            let reach_ranges: usize = exact.craters().iter().map(|c| c.reach.ranges().len()).sum();
+            let reach_cells: u64 = exact.craters().iter().map(|c| c.reach.cell_count()).sum();
+            let expected = count(cells, size_of::<SynthesisCell>())
+                + count(exact.climate_layer().len(), size_of::<ClimateCell>())
+                + count(exact.craters().len(), size_of::<CoarseCrater>())
+                + count(reach_ranges, size_of::<CoverRange>())
+                + count(cells + 1, size_of::<usize>())
+                + count(usize::try_from(reach_cells).unwrap(), size_of::<u32>())
+                + count(
+                    exact.header().palette().entries().len(),
+                    size_of::<PaletteEntry>(),
+                );
+            assert_eq!(exact.heap_bytes(), expected, "{world:?}");
+
+            let mut roomy = Vec::with_capacity(2 * cells);
+            roomy.extend_from_slice(exact.synthesis());
+            let spare = CoarseField::new(
+                exact.header().clone(),
+                roomy,
+                exact.climate_layer().to_vec(),
+                exact.craters().to_vec(),
+            )
+            .unwrap();
+            assert_eq!(
+                spare.heap_bytes(),
+                expected + count(cells, size_of::<SynthesisCell>()),
+                "{world:?}"
+            );
+        }
     }
 }

@@ -2,9 +2,9 @@
 //!
 //! The server owns everything the sim may not: universes and their saves ([`universe`]), the CPU
 //! pool that runs generation off the async runtime and the caches of galaxies, maps, cells and
-//! systems ([`compute`]), the byte-bounded cache they are built on ([`cache`]), and the WebSocket
-//! clients speak `hyperion-protocol` over. What the crew has detected is in [`knowledge`]. Every
-//! limit it enforces is in [`limits`].
+//! systems ([`compute`]), the bodies' coarse surface fields ([`surface`]), the byte-bounded cache
+//! they are built on ([`cache`]), and the WebSocket clients speak `hyperion-protocol` over. What
+//! the crew has detected is in [`knowledge`]. Every limit it enforces is in [`limits`].
 //!
 //! [`Server::start`] builds the shared state from a [`ServerConfig`], [`Server::router`] serves
 //! it, [`Server::stats`] reports on it, and [`Server::shutdown`] is the explicit teardown once
@@ -24,6 +24,7 @@ pub mod scene;
 mod stats;
 pub mod stop;
 mod subscriptions;
+pub mod surface;
 #[cfg(test)]
 mod testing;
 pub mod universe;
@@ -47,6 +48,7 @@ use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use crate::requests::{Handler, Handlers};
 use crate::scene::SceneService;
 use crate::stats::{OutboundStats, RequestStats};
+use crate::surface::SurfaceService;
 use crate::universe::{LoadRegistryError, UniverseRegistry, UniverseStore};
 use crate::ws::ConnectionLimits;
 
@@ -122,6 +124,9 @@ pub(crate) struct AppState {
     /// The census cells' entries built so far, in blocks, in the configured byte budget: what a
     /// sky's census jobs read and share (rendering plan R06, R06.T11.b and T8.h; Design note 12).
     pub(crate) sky_cells: Arc<SharedSkyCellCache>,
+    /// Each body's coarse surface field, computed once on the pool and kept in the configured byte
+    /// budget (rendering plan R09, R09.T17; Design note 19).
+    pub(crate) surface: SurfaceService,
 }
 
 impl Server {
@@ -183,6 +188,11 @@ impl Server {
             config.sky_caps().tables(),
             config.sky_tables_bytes(),
         );
+        let surface = SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(config.surface_inputs()),
+            config.surface_cache_bytes(),
+        );
         tracing::info!(
             data_dir = %config.data_dir().display(),
             workers = config.workers().get(),
@@ -193,6 +203,7 @@ impl Server {
             brief_cache_mib = config.brief_cache_bytes() / (1 << 20),
             sky_cache_mib = config.sky_cache_bytes() / (1 << 20),
             sky_tables_mib = config.sky_tables_bytes() / (1 << 20),
+            surface_cache_mib = config.surface_cache_bytes() / (1 << 20),
             sky_service = ?config.sky_service(),
             "server started"
         );
@@ -219,6 +230,7 @@ impl Server {
                 sky_caps: config.sky_caps(),
                 sky_tables,
                 sky_cells,
+                surface,
             }),
         })
     }
@@ -243,9 +255,9 @@ impl Server {
     /// flight is cancelled. axum's graceful shutdown does neither, nor does it wait for those
     /// connections, so this does all three. A connection opened meanwhile is refused. Each
     /// connection has [`CLOSE_TIMEOUT`](limits::CLOSE_TIMEOUT) to finish closing, so a client
-    /// that has stopped reading cannot hold this up. The sky tables' builds that opens started are
-    /// given up. Then the CPU pool stops: queued jobs are dropped and the workers finish the jobs
-    /// in hand.
+    /// that has stopped reading cannot hold this up. The sky tables' builds that opens started, and
+    /// the coarse passes that prefetches started, are given up. Then the CPU pool stops: queued
+    /// jobs are dropped and the workers finish the jobs in hand.
     ///
     /// # Errors
     ///
@@ -254,6 +266,8 @@ impl Server {
         self.state.connections.close_all().await;
         // The sky tables' builds started at opens wait on no connection.
         self.state.sky_tables.stop_prefetching();
+        // Nor do the coarse passes started by prefetches.
+        self.state.surface.stop_prefetching();
         self.state
             .pool
             .shutdown()
@@ -450,6 +464,7 @@ mod tests {
             (fresh.briefs(), defaults.brief_cache_bytes()),
             (fresh.sky_cells().cache(), defaults.sky_cache_bytes()),
             (fresh.sky_tables().cache(), defaults.sky_tables_bytes()),
+            (fresh.surface().cache(), defaults.surface_cache_bytes()),
         ] {
             assert_eq!(
                 (
@@ -466,6 +481,7 @@ mod tests {
         }
         assert_eq!(fresh.sky_cells().rebuilt(), 0);
         assert_eq!(fresh.sky_tables().builds(), 0);
+        assert_eq!(fresh.surface().computed(), 0);
         let mut client = harness.connect().await;
         assert_eq!(stats().connections(), 1);
         client.hello().await;

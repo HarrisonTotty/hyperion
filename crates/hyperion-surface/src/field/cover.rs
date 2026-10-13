@@ -259,6 +259,13 @@ impl Cover {
         &self.ranges
     }
 
+    /// The bytes the ranges take on the heap, by the vector's capacity
+    /// ([`CoarseField::heap_bytes`](super::CoarseField::heap_bytes)).
+    #[must_use]
+    pub(super) fn heap_bytes(&self) -> usize {
+        super::vec_heap_bytes(&self.ranges)
+    }
+
     /// Whether the cover holds no cell.
     #[must_use]
     pub fn is_empty(&self) -> bool {

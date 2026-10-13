@@ -17,6 +17,7 @@
 //! | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | 64 (MiB)                                     |
 //! | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | 0 (MiB), off                                 |
 //! | `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | 160 (MiB)                                    |
+//! | `--surface-cache`       | `HYPERION_SURFACE_CACHE_MB`    | 128 (MiB)                                    |
 //! | `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                           |
 //! | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          |
 //!
@@ -56,6 +57,7 @@ use clap::{ArgAction, Parser};
 use crate::DEFAULT_ADDR;
 use crate::compute::SkyCaps;
 use crate::stop::StdinStop;
+use crate::surface::{InputsSource, RecordInputs};
 use crate::universe::{Entropy, OsEntropy};
 
 /// The variable giving the IP address to listen on, for `--address`.
@@ -80,6 +82,8 @@ pub const ENV_BRIEF_CACHE_MB: &str = "HYPERION_BRIEF_CACHE_MB";
 pub const ENV_SKY_CACHE_MB: &str = "HYPERION_SKY_CACHE_MB";
 /// The variable giving the sky tables' cache's budget in MiB, for `--sky-tables`.
 pub const ENV_SKY_TABLES_MB: &str = "HYPERION_SKY_TABLES_MB";
+/// The variable giving the surface service's cache budget in MiB, for `--surface-cache`.
+pub const ENV_SURFACE_CACHE_MB: &str = "HYPERION_SURFACE_CACHE_MB";
 /// The variable that turns the sky off, or on, for `--serve-sky`.
 pub const ENV_SERVE_SKY: &str = "HYPERION_SERVE_SKY";
 /// The variable that makes the end of standard input stop the server, for `--stop-on-stdin-close`.
@@ -126,6 +130,16 @@ pub const DEFAULT_SKY_CACHE_MIB: usize = 0;
 /// tables, about 55 MiB each with their snapshots (rendering plan R06, R06.T11.c; decided
 /// 2026-10-03, `decision-r06-tables.md`, item B.2).
 pub const DEFAULT_SKY_TABLES_MIB: usize = 160;
+/// The surface service's cache budget when `--surface-cache` is not given, in MiB: the bodies'
+/// coarse fields (rendering plan R09: its Provides, "Server", gives 128 MiB, and Design note 19,
+/// for context, the 32 GB of RAM of the development machine that hosts the server in testing).
+///
+/// A field is charged its heap bytes by its vectors' capacities. On the reference worlds at
+/// version 21, before the coarse craters (R09.T12.d) add theirs, that is 24.4 MB at level 8 (an
+/// Earth's), 6.1 MB at level 7 (a Mars's), 1.5 MB at level 6 (the Moon's) and 0.38 MB at level 5
+/// (Ceres's), measured 2026-10-13 (R09.T17): the default keeps five Earths, or twenty bodies the
+/// size of Mars. An Earth's whole payload on the wire is 14.7 MB.
+pub const DEFAULT_SURFACE_CACHE_MIB: usize = 128;
 
 /// Bytes in a MiB, the unit of the cache options.
 const BYTES_PER_MIB: usize = 1 << 20;
@@ -150,6 +164,9 @@ const DEFAULT_SKY_CACHE: CacheBudget = CacheBudget {
 };
 const DEFAULT_SKY_TABLES: CacheBudget = CacheBudget {
     bytes: DEFAULT_SKY_TABLES_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_SURFACE_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_SURFACE_CACHE_MIB * BYTES_PER_MIB,
 };
 
 /// The server's command line.
@@ -203,6 +220,10 @@ pub struct ServerArgs {
     /// Budget of the cache of each galaxy's sky tables, in MiB; 0 caches nothing
     #[arg(long, value_name = "MIB", env = ENV_SKY_TABLES_MB, default_value_t = DEFAULT_SKY_TABLES)]
     sky_tables: CacheBudget,
+
+    /// Budget of the cache of bodies' coarse surface fields, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_SURFACE_CACHE_MB, default_value_t = DEFAULT_SURFACE_CACHE)]
+    surface_cache: CacheBudget,
 
     /// Serve `sky` requests; `--serve-sky=false` answers them `unsupported`
     #[arg(
@@ -279,6 +300,7 @@ impl From<ServerArgs> for ServerConfig {
             brief_cache,
             sky_cache,
             sky_tables,
+            surface_cache,
             serve_sky,
             stop_on_stdin_close,
         } = args;
@@ -293,6 +315,7 @@ impl From<ServerArgs> for ServerConfig {
             .brief_cache_bytes(brief_cache.bytes)
             .sky_cache_bytes(sky_cache.bytes)
             .sky_tables_bytes(sky_tables.bytes)
+            .surface_cache_bytes(surface_cache.bytes)
             .sky_service(serve_sky)
             .stdin_stop(stop_on_stdin_close)
             .build()
@@ -358,12 +381,14 @@ pub struct ServerConfig {
     brief_cache_bytes: usize,
     sky_cache_bytes: usize,
     sky_tables_bytes: usize,
+    surface_cache_bytes: usize,
     sky_service: SkyService,
     stdin_stop: StdinStop,
     entropy: Arc<dyn Entropy>,
     scene_knowledge: Arc<dyn SceneKnowledge>,
     craft_source: Arc<dyn CraftSource>,
     sky_caps: SkyCaps,
+    surface_inputs: Arc<dyn InputsSource>,
 }
 
 impl ServerConfig {
@@ -433,6 +458,12 @@ impl ServerConfig {
         self.sky_tables_bytes
     }
 
+    /// The surface service's cache budget, in bytes (rendering plan R09, Design note 19).
+    #[must_use]
+    pub fn surface_cache_bytes(&self) -> usize {
+        self.surface_cache_bytes
+    }
+
     /// Whether the server answers `sky` (rendering plan R06, R06.T11.c's switch).
     #[must_use]
     pub fn sky_service(&self) -> SkyService {
@@ -471,6 +502,13 @@ impl ServerConfig {
     pub fn sky_caps(&self) -> SkyCaps {
         self.sky_caps
     }
+
+    /// Where the surface service takes each body's coarse-pass inputs from (rendering plan R09,
+    /// the `InputsSource` seam).
+    #[must_use]
+    pub fn surface_inputs(&self) -> &Arc<dyn InputsSource> {
+        &self.surface_inputs
+    }
 }
 
 /// Builds a [`ServerConfig`], starting from the defaults.
@@ -493,12 +531,14 @@ impl Default for ServerConfigBuilder {
                 brief_cache_bytes: DEFAULT_BRIEF_CACHE.bytes,
                 sky_cache_bytes: DEFAULT_SKY_CACHE.bytes,
                 sky_tables_bytes: DEFAULT_SKY_TABLES.bytes,
+                surface_cache_bytes: DEFAULT_SURFACE_CACHE.bytes,
                 sky_service: SkyService::default(),
                 stdin_stop: StdinStop::default(),
                 entropy: Arc::new(OsEntropy),
                 scene_knowledge: Arc::new(GrantAsked),
                 craft_source: Arc::new(NoCraft),
                 sky_caps: SkyCaps::DERIVED,
+                surface_inputs: Arc::new(RecordInputs),
             },
         }
     }
@@ -583,6 +623,16 @@ impl ServerConfigBuilder {
         self
     }
 
+    /// The surface service's cache budget, in bytes.
+    ///
+    /// Zero caches nothing: every request computes its body's field, though requests made at once
+    /// still share one pass.
+    #[must_use]
+    pub fn surface_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.surface_cache_bytes = bytes;
+        self
+    }
+
     /// Whether the server answers `sky`; [`SkyService::Served`] by default, since rendering plan
     /// R13's R13.T2.
     #[must_use]
@@ -628,6 +678,17 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn sky_caps(mut self, caps: SkyCaps) -> Self {
         self.config.sky_caps = caps;
+        self
+    }
+
+    /// Where the surface service takes each body's coarse-pass inputs from.
+    ///
+    /// [`RecordInputs`], the body's record, by default. Until plan 14's surface section lands,
+    /// that answers every body `NotModelled`, so tests give the coarse pass's reference worlds; no
+    /// option or variable sets it.
+    #[must_use]
+    pub fn surface_inputs(mut self, inputs: impl InputsSource + 'static) -> Self {
+        self.config.surface_inputs = Arc::new(inputs);
         self
     }
 
@@ -677,17 +738,14 @@ mod tests {
         parse(args).unwrap_err().kind()
     }
 
+    /// The address, the data directory, the workers, the caches' budgets (cells, maps, systems,
+    /// bodies, briefs, the sky's cells, the sky tables and the surface), the sky's switch and the
+    /// stop on standard input.
     type Fields<'a> = (
         SocketAddr,
         &'a Path,
         usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
-        usize,
+        [usize; 8],
         SkyService,
         StdinStop,
     );
@@ -697,13 +755,16 @@ mod tests {
             config.addr(),
             config.data_dir(),
             config.workers().get(),
-            config.cell_cache_bytes(),
-            config.map_cache_bytes(),
-            config.system_cache_bytes(),
-            config.body_cache_bytes(),
-            config.brief_cache_bytes(),
-            config.sky_cache_bytes(),
-            config.sky_tables_bytes(),
+            [
+                config.cell_cache_bytes(),
+                config.map_cache_bytes(),
+                config.system_cache_bytes(),
+                config.body_cache_bytes(),
+                config.brief_cache_bytes(),
+                config.sky_cache_bytes(),
+                config.sky_tables_bytes(),
+                config.surface_cache_bytes(),
+            ],
             config.sky_service(),
             config.stdin_stop(),
         )
@@ -725,13 +786,16 @@ mod tests {
                 SocketAddr::from((Ipv4Addr::LOCALHOST, 7878)),
                 Path::new("./hyperion-data"),
                 cores.saturating_sub(1).max(1),
-                256 * 1024 * 1024,
-                64 * 1024 * 1024,
-                128 * 1024 * 1024,
-                128 * 1024 * 1024,
-                64 * 1024 * 1024,
-                0,
-                160 * 1024 * 1024,
+                [
+                    256 * 1024 * 1024,
+                    64 * 1024 * 1024,
+                    128 * 1024 * 1024,
+                    128 * 1024 * 1024,
+                    64 * 1024 * 1024,
+                    0,
+                    160 * 1024 * 1024,
+                    128 * 1024 * 1024,
+                ],
                 SkyService::Served,
                 StdinStop::Ignore,
             )
@@ -763,6 +827,8 @@ mod tests {
             "11",
             "--sky-tables",
             "13",
+            "--surface-cache",
+            "17",
             "--serve-sky=false",
             "--stop-on-stdin-close",
         ]);
@@ -772,13 +838,16 @@ mod tests {
                 SocketAddr::from((Ipv4Addr::UNSPECIFIED, 9000)),
                 Path::new("/srv/hyperion"),
                 3,
-                1 << 20,
-                0,
-                2 << 20,
-                5 << 20,
-                7 << 20,
-                11 << 20,
-                13 << 20,
+                [
+                    1 << 20,
+                    0,
+                    2 << 20,
+                    5 << 20,
+                    7 << 20,
+                    11 << 20,
+                    13 << 20,
+                    17 << 20
+                ],
                 SkyService::Unsupported,
                 StdinStop::Watch,
             )
@@ -859,6 +928,7 @@ mod tests {
                 (Some("brief-cache"), Some("HYPERION_BRIEF_CACHE_MB")),
                 (Some("sky-cache"), Some("HYPERION_SKY_CACHE_MB")),
                 (Some("sky-tables"), Some("HYPERION_SKY_TABLES_MB")),
+                (Some("surface-cache"), Some("HYPERION_SURFACE_CACHE_MB")),
                 (Some("serve-sky"), Some("HYPERION_SERVE_SKY")),
                 (
                     Some("stop-on-stdin-close"),
@@ -951,6 +1021,7 @@ mod tests {
         assert_eq!(DEFAULT_BRIEF_CACHE.to_string(), "64");
         assert_eq!(DEFAULT_SKY_CACHE.to_string(), "0");
         assert_eq!(DEFAULT_SKY_TABLES.to_string(), "160");
+        assert_eq!(DEFAULT_SURFACE_CACHE.to_string(), "128");
     }
 
     #[test]
@@ -988,6 +1059,39 @@ mod tests {
         assert_eq!(ServerConfig::from(args).data_dir(), Path::new(&dir));
     }
 
+    /// The surface service reads each body's record by default, and a test gives its own source.
+    #[test]
+    fn the_surface_inputs_are_the_records_unless_given() {
+        #[derive(Debug)]
+        struct Given;
+        impl InputsSource for Given {
+            fn inputs(
+                &self,
+                _: &hyperion_sim::planetary::record::BodyRecord,
+                _: &hyperion_sim::planetary::SystemContext,
+            ) -> Result<
+                hyperion_sim::planetary::surface::CoarseInputs,
+                hyperion_sim::planetary::surface::SurfaceInputsError,
+            > {
+                Err(hyperion_sim::planetary::surface::SurfaceInputsError::NoSolidSurface)
+            }
+        }
+        assert_eq!(
+            format!("{:?}", ServerConfig::builder().build().surface_inputs()),
+            "RecordInputs"
+        );
+        assert_eq!(
+            format!(
+                "{:?}",
+                ServerConfig::builder()
+                    .surface_inputs(Given)
+                    .build()
+                    .surface_inputs()
+            ),
+            "Given"
+        );
+    }
+
     #[test]
     fn the_builder_overrides_defaults() {
         let config = ServerConfig::builder()
@@ -1001,6 +1105,7 @@ mod tests {
             .brief_cache_bytes(50)
             .sky_cache_bytes(60)
             .sky_tables_bytes(70)
+            .surface_cache_bytes(80)
             .sky_service(SkyService::Unsupported)
             .stdin_stop(StdinStop::Watch)
             .build();
@@ -1010,13 +1115,7 @@ mod tests {
                 SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
                 Path::new("/tmp/x"),
                 2,
-                10,
-                20,
-                30,
-                40,
-                50,
-                60,
-                70,
+                [10, 20, 30, 40, 50, 60, 70, 80],
                 SkyService::Unsupported,
                 StdinStop::Watch,
             )
