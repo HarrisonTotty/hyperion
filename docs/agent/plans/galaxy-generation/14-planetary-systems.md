@@ -2335,10 +2335,16 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     its vapour's mole fraction above it, the cold trap's, which R08 reads for the vapour's column
     there rather than re-deriving the saturation curve.
   - _An absorber_ is a registry gas row that is not one of T24.a's well-mixed gases, with its
-    column (molecules m⁻²) and its layer: ozone, and SO₂ by T24.g, listed in registry order. A
-    species appears in at most one
-    of the two lists. A gas that absorbs, methane by T24.f, is an absorber by its T24.a fraction
-    and is not listed again, so its column is published once.
+    column (molecules m⁻²) and its layer, which is either:
+    - a base and a top pressure, between which its mixing ratio is constant; or
+    - for ozone, a profile of (pressure, relative mixing ratio) nodes, the pressures descending. The
+      mixing ratio is linear in ln x against ln p between nodes and 0 outside them, and the first and
+      last nodes are the base and the top (R08.T6.h reads it; `decision-r08-t6d-findings.md` §2).
+
+    The absorbers are ozone, and SO₂ by T24.g, listed in registry order. A species appears in at
+    most one of the two lists. A gas that absorbs, methane by T24.f, is an absorber by its T24.a
+    fraction and is not listed again, so its column is published once.
+
   - _The formation rules:_
     - condensate decks by T52.c's loop over the registry's laws aloft along T24.e's profile, with
       the vapour's mole fraction at the ground T24.a's published fraction of that species, never
@@ -2349,10 +2355,26 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
       The decks' coverage is scaled to the cloud fraction of the snapshot path (T51.b), which never
       reads them;
     - an ozone column N_⊕ × F(p_O₂/PAL) × U(star) (Segura et al. 2003, 2005), with N_⊕ Earth's,
-      about 300 DU (1 DU = 2.687 × 10²⁰ molecules m⁻²), F(0) = 0, F(1) = 1 and U(Sun) = 1, as a
-      layer near 10–30 mbar; beyond the range of p_O₂ the papers cover, as on P14.T24.f's runaway
-      worlds with thousands of bar of O₂, the builder states an extrapolation of the column and its
-      layer that stays monotonic and finite, and records it;
+      about 300 DU (1 DU = 2.687 × 10²⁰ molecules m⁻²), F(0) = 0, F(1) = 1 and U(Sun) = 1, on
+      Earth's measured profile:
+      - The template is the AFGL U.S. Standard ozone's mixing ratio by pressure (Anderson et al.
+        1986, AFGL-TR-86-0110; R08.T6.h's table, held in the sim with its citation).
+      - Each node moves to the pressure at which the O₂ column above it equals the node's on
+        Earth: the layer forms at a fixed overhead O₂ column, to first order (Chapman 1930).
+      - The nodes outside the column are dropped, and the mixing ratio is scaled to the column.
+      - It is Earth's at 1 PAL on an Earth-like column.
+      - The builder compares the shift with Segura et al. 2003's profiles at 10⁻¹ and 10⁻² PAL,
+        and records it. The star's ultraviolet moves the column (U), not the profile.
+
+      Not a thin slab. A ray tangent near a constant-mixing slab's base crosses about
+      √(2πR ÷ H) ≈ 80 of its vertical columns (95–145 for a slab at 10–30 mbar), against about 41
+      on Earth's measured profile. Under the Sun, ozone's red leaves Rec. 709 at about 99 (R08's
+      Risks, "Deviations in T6.d, as built").
+
+      Beyond the range of p_O₂ the papers cover, as on P14.T24.f's runaway worlds with thousands of
+      bar of O₂, the builder states an extrapolation of the column that stays monotonic and finite,
+      and records it. The profile follows the same O₂-column rule;
+
     - methane haze at CH₄ ≳ 10⁻³ on N₂–CH₄ worlds, or CH₄/CO₂ ≳ 0.1–0.2 on CO₂ worlds (Trainer
       et al. 2006; Arney et al. 2016), as a fractal-aggregate mode with Titan's monomers (about
       0.05 µm, some 3,000 of them, D_f 2; Tomasko et al. 2008, the case R08.T5.c tests). The rule
@@ -2386,9 +2408,11 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     airless body's inventory is empty; the inventory is continuous in time but at a recorded
     state change; every mode's phase is `Solid` or `Liquid`; a deck's vapour at the ground equals
     T24.a's mole fraction of it to 10⁻¹²; the ozone column is finite and monotonic in p_O₂ up to
-    the generator's largest O₂.
-  - The record field's doc comment and its generated protocol binding state the radius convention
-    and the phase, in the units the field already has.
+    the generator's largest O₂; ozone's profile at 1 PAL on Earth's column is Earth's template to
+    10⁻⁹ in pressure, and every profile's nodes are finite, descending in pressure and within the
+    column.
+  - The record field's doc comment and its generated protocol binding state the radius convention,
+    the phase and an absorber's profile, in the units the field already has.
   - _Files:_ `planetary/hooks/{aerosols, mod}.rs`, `planetary/record.rs` (the surface section's
     member), `planetary/chem/condense.rs` (read).
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::aerosols`.
