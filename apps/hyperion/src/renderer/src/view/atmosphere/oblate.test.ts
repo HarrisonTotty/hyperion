@@ -5,6 +5,7 @@ import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../../lib/system/constants"
 import { type SpheroidFigure, tableRadiusM } from "./hillaire";
 import {
   BAND_STEP,
+  bandLatitudeRad,
   bodyGravity,
   type BodyGravity,
   type BodyGravityInput,
@@ -12,12 +13,14 @@ import {
   directionalCurvatureRadiusM,
   type FigureLawInput,
   gravityRatio,
+  gravityRatioSlope,
   KAPPA_STEP,
   type LevelSpheroid,
   normalGravity,
   oblateSlicing,
   ONE_BAND_BELOW,
   ONE_SLICE_BELOW,
+  principalRadiiM,
   referenceGravity,
 } from "./oblate";
 
@@ -926,5 +929,83 @@ describe("gravityRatio", () => {
     for (const latitude of LATITUDES_DEG) {
       expect(gravityRatio(gravity, latitude * DEG)).toBe(1);
     }
+  });
+});
+
+/** Saturn's gravity as a record gives it, its spin and no figure law (R08.T6.e's tests). */
+function saturnGravity(): BodyGravity {
+  return bodyGravity(
+    {
+      figure: SATURN,
+      massKg: SATURN.gmM3S2 / GRAVITATIONAL_CONSTANT_M3_PER_KG_S2,
+      angularVelocityRadS: SATURN.angularVelocityRadS,
+      bulkGravityMS2: 10.44,
+      figureLaw: null,
+    },
+    tableRadiusM(SATURN),
+  );
+}
+
+/** A central difference of `gravityRatio` at φ, rad⁻¹, at a step of 10⁻⁵ rad. */
+function centralDifference(gravity: BodyGravity, latitudeRad: number): number {
+  return (
+    (gravityRatio(gravity, latitudeRad + 1e-5) - gravityRatio(gravity, latitudeRad - 1e-5)) / 2e-5
+  );
+}
+
+describe("gravityRatioSlope (R08.T6.e)", () => {
+  it("is the derivative of s in latitude on WGS 84, Saturn and a tidal giant", () => {
+    const gravities = [
+      bodyGravity(EARTH_INPUT, tableRadiusM(WGS84)),
+      saturnGravity(),
+      hotJupiterGravity(HOT_JUPITER_LAW),
+    ];
+    for (const gravity of gravities) {
+      for (const latitude of [5, 15, 30, 45, 60, 75, 85]) {
+        const slope = gravityRatioSlope(gravity, latitude * DEG);
+        expect(Math.abs(slope - centralDifference(gravity, latitude * DEG))).toBeLessThan(
+          1e-8 + 1e-6 * Math.abs(slope),
+        );
+      }
+    }
+  });
+
+  it("is 0 at the equator, at the pole and with no rotation section", () => {
+    const gravity = saturnGravity();
+    expect(Math.abs(gravityRatioSlope(gravity, 0))).toBeLessThan(1e-15);
+    expect(Math.abs(gravityRatioSlope(gravity, Math.PI / 2))).toBeLessThan(1e-15);
+    expect(gravityRatioSlope(bodyGravity(NO_ROTATION_INPUT, tableRadiusM(STILL_SPHERE)), 0.4)).toBe(
+      0,
+    );
+  });
+});
+
+describe("principalRadiiM (R08.T6.e)", () => {
+  it("gives M along the meridian and N along the prime vertical", () => {
+    for (const latitude of [0, 30, 60, 90]) {
+      const { meridionalM, primeVerticalM } = principalRadiiM(SATURN, latitude * DEG);
+      expect(
+        relative(meridionalM, directionalCurvatureRadiusM(SATURN, latitude * DEG, 0)),
+      ).toBeLessThan(1e-12);
+      expect(
+        relative(primeVerticalM, directionalCurvatureRadiusM(SATURN, latitude * DEG, Math.PI / 2)),
+      ).toBeLessThan(1e-12);
+    }
+  });
+});
+
+describe("bandLatitudeRad (R08.T6.e)", () => {
+  it("finds the latitude of each of Saturn's bands, at its own s", () => {
+    const gravity = saturnGravity();
+    for (const s of gravity.slicing.bandGravityRatio) {
+      expect(relative(gravityRatio(gravity, bandLatitudeRad(gravity, s)), s)).toBeLessThan(1e-12);
+    }
+  });
+
+  it("holds an s beyond the range to the nearer end, and gives the equator with no spheroid", () => {
+    const gravity = saturnGravity();
+    expect(bandLatitudeRad(gravity, 0.5)).toBeLessThan(1e-12);
+    expect(Math.abs(bandLatitudeRad(gravity, 2) - Math.PI / 2)).toBeLessThan(1e-12);
+    expect(bandLatitudeRad(bodyGravity(NO_ROTATION_INPUT, tableRadiusM(STILL_SPHERE)), 1)).toBe(0);
   });
 });

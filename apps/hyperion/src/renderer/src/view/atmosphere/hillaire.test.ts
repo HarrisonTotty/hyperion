@@ -94,6 +94,113 @@ describe("atmosphereInputs", () => {
   });
 });
 
+/**
+ * Saturn's 1-bar figure, as R08.T3.d's tests give it (Archinal et al. 2018): f = 0.098, past where
+ * R05's fixed-point iteration converged.
+ */
+const SATURN: SpheroidFigure = { equatorialRadiusM: 60_268e3, polarRadiusM: 54_364e3 };
+
+/**
+ * Saturn's H₂–He scale height at 1 bar, m: k T ÷ (μ m_u g_ref) at the NSSDCA Saturn fact sheet's
+ * 134 K and fractions (μ 2.1436 g mol⁻¹), g_ref 10.4525 m s⁻², as `tablesCpuOblate.test.ts`
+ * builds it: 49.7 km.
+ */
+const SATURN_SCALE_HEIGHT_M = 49_700;
+
+/** The body-fixed point at geodetic latitude φ, longitude λ and height h on a figure (eq. 4-14). */
+function figurePoint(
+  figure: SpheroidFigure,
+  latitudeRad: number,
+  longitudeRad: number,
+  heightM: number,
+): { x: number; y: number; z: number } {
+  const a = figure.equatorialRadiusM;
+  const e2 = 1 - (figure.polarRadiusM / a) ** 2;
+  const sin = Math.sin(latitudeRad);
+  const n = a / Math.sqrt(1 - e2 * sin * sin);
+  const across = (n + heightM) * Math.cos(latitudeRad);
+  return {
+    x: across * Math.cos(longitudeRad),
+    y: across * Math.sin(longitudeRad),
+    z: (n * (1 - e2) + heightM) * sin,
+  };
+}
+
+describe("geodeticOf's closed form (R08.T6.e)", () => {
+  const latitudesDeg = [0, 1e-7, 15, 30, 45, 60, 75, 89.999_99, 90];
+  const heightsM = [
+    0,
+    1,
+    1_000,
+    ...[0.3, 1, 3, 10].map((scaleHeights) => scaleHeights * SATURN_SCALE_HEIGHT_M),
+  ];
+
+  it("round-trips a Saturn-class figure to 10⁻⁶ m from the datum to 10 scale heights", () => {
+    let worstM = 0;
+    for (const latitudeDeg of latitudesDeg) {
+      for (const longitudeDeg of [0, 37, -120]) {
+        for (const heightM of heightsM) {
+          const phi = (latitudeDeg * Math.PI) / 180;
+          const lambda = (longitudeDeg * Math.PI) / 180;
+          const p = figurePoint(SATURN, phi, lambda, heightM);
+          const g = geodeticOf(p, SATURN);
+          const back = figurePoint(SATURN, g.latitudeRad, g.longitudeRad, g.heightM);
+          worstM = Math.max(
+            worstM,
+            Math.abs(g.heightM - heightM),
+            Math.hypot(back.x - p.x, back.y - p.y, back.z - p.z),
+          );
+        }
+      }
+    }
+    expect(worstM).toBeLessThan(1e-6);
+  });
+
+  it("gives the datum's normal at the point's own latitude on a Saturn-class figure", () => {
+    let worst = 0;
+    for (const latitudeDeg of latitudesDeg) {
+      for (const heightM of heightsM) {
+        const phi = (latitudeDeg * Math.PI) / 180;
+        const g = geodeticOf(figurePoint(SATURN, phi, 0.7, heightM), SATURN);
+        worst = Math.max(
+          worst,
+          Math.abs(g.normal.x - Math.cos(phi) * Math.cos(0.7)),
+          Math.abs(g.normal.y - Math.cos(phi) * Math.sin(0.7)),
+          Math.abs(g.normal.z - Math.sin(phi)),
+        );
+      }
+    }
+    expect(worst).toBeLessThan(1e-12);
+  });
+
+  it("round-trips WGS 84 and a figure flattened to c ÷ a = 0.2 as closely", () => {
+    for (const figure of [WGS84, { equatorialRadiusM: 7e7, polarRadiusM: 1.4e7 }]) {
+      for (const latitudeDeg of latitudesDeg) {
+        for (const heightM of [0, 2, 20_000, 400_000]) {
+          const phi = (latitudeDeg * Math.PI) / 180;
+          const p = figurePoint(figure, phi, 0.3, heightM);
+          const g = geodeticOf(p, figure);
+          const back = figurePoint(figure, g.latitudeRad, g.longitudeRad, g.heightM);
+          expect(Math.abs(g.heightM - heightM)).toBeLessThan(1e-6);
+          expect(Math.hypot(back.x - p.x, back.y - p.y, back.z - p.z)).toBeLessThan(1e-6);
+        }
+      }
+    }
+  });
+
+  it("gives the Gaussian radius √(MN) at the point's latitude on Saturn", () => {
+    for (const latitudeDeg of [0, 45, 90]) {
+      const phi = (latitudeDeg * Math.PI) / 180;
+      const a = SATURN.equatorialRadiusM;
+      const e2 = 1 - (SATURN.polarRadiusM / a) ** 2;
+      const w2 = 1 - e2 * Math.sin(phi) ** 2;
+      const expected = Math.sqrt(((a * (1 - e2)) / (w2 * Math.sqrt(w2))) * (a / Math.sqrt(w2)));
+      const g = geodeticOf(figurePoint(SATURN, phi, 0, 10_000), SATURN);
+      expect(Math.abs(g.gaussianRadiusM / expected - 1)).toBeLessThan(1e-12);
+    }
+  });
+});
+
 /** The unit tangent at a ground point of latitude φ, northwards or eastwards. */
 function tangent(
   latitudeDeg: number,

@@ -241,6 +241,38 @@ function somigliana(g: PoleAndEquator, latitudeRad: number): number {
 }
 
 /**
+ * dγ ÷ dφ of {@link somigliana}, m s⁻² rad⁻¹: with C = cos²φ, S = sin²φ, the numerator
+ * a γ_e C + c γ_p S and the denominator's square a² C + c² S, each of whose derivatives is
+ * sin 2φ times its coefficients' difference (derived here).
+ */
+function somiglianaSlope(g: PoleAndEquator, latitudeRad: number): number {
+  const cos = Math.cos(latitudeRad);
+  const sin = Math.sin(latitudeRad);
+  const c2 = cos * cos;
+  const s2 = sin * sin;
+  const numerator = g.a * g.equatorialMS2 * c2 + g.c * g.polarMS2 * s2;
+  const square = g.a * g.a * c2 + g.c * g.c * s2;
+  const root = Math.sqrt(square);
+  const sin2 = 2 * sin * cos;
+  const numeratorSlope = sin2 * (g.c * g.polarMS2 - g.a * g.equatorialMS2);
+  const squareSlope = sin2 * (g.c * g.c - g.a * g.a);
+  return numeratorSlope / root - (numerator * squareSlope) / (2 * square * root);
+}
+
+/** Each spheroid's γ_e and γ_p, found once: the twin reads s at every sample (R08.T6.e). */
+const POLE_AND_EQUATOR = new WeakMap<LevelSpheroid, PoleAndEquator>();
+
+/** {@link poleAndEquator}, kept for the spheroid object. */
+function poleAndEquatorOf(body: LevelSpheroid): PoleAndEquator {
+  let g = POLE_AND_EQUATOR.get(body);
+  if (g === undefined) {
+    g = poleAndEquator(body);
+    POLE_AND_EQUATOR.set(body, g);
+  }
+  return g;
+}
+
+/**
  * Somigliana's closed-form normal gravity on a level spheroid at geodetic latitude φ, m s⁻² (Design
  * note 17).
  *
@@ -608,6 +640,77 @@ export function bodyGravity(input: BodyGravityInput, referenceRadiusM: number): 
 export function gravityRatio(gravity: BodyGravity, geodeticLatitudeRad: number): number {
   return gravity.spheroid === null
     ? 1
-    : (normalGravity(gravity.spheroid, geodeticLatitudeRad) + gravity.gravityOffsetMS2) /
+    : (somigliana(poleAndEquatorOf(gravity.spheroid), geodeticLatitudeRad) +
+        gravity.gravityOffsetMS2) /
         gravity.referenceGravityMS2;
+}
+
+/**
+ * ds ÷ dφ, rad⁻¹: the slope of {@link gravityRatio} in geodetic latitude, Somigliana's γ(φ)
+ * differentiated in closed form over g_ref (the added ω²R is the same at every latitude); 0 for a
+ * body with no spheroid. The sliced lookup takes a ray's slope of h\* from it (plan R08, Design
+ * note 17, _The ray's own gradient_; R08.T6.e).
+ *
+ * @throws RangeError as {@link normalGravity}.
+ */
+export function gravityRatioSlope(gravity: BodyGravity, geodeticLatitudeRad: number): number {
+  return gravity.spheroid === null
+    ? 0
+    : somiglianaSlope(poleAndEquatorOf(gravity.spheroid), geodeticLatitudeRad) /
+        gravity.referenceGravityMS2;
+}
+
+/**
+ * The principal radii of curvature of a datum at geodetic latitude φ, m: the meridional M and the
+ * prime-vertical N ({@link directionalCurvatureRadiusM}'s, Heiskanen and Moritz 1967, eq. 2-81).
+ *
+ * @throws RangeError for radii not 0 < c ≤ a.
+ */
+export function principalRadiiM(
+  figure: SpheroidFigure,
+  geodeticLatitudeRad: number,
+): { readonly meridionalM: number; readonly primeVerticalM: number } {
+  const { a, c } = radiiOf(figure);
+  const { m, n } = principalRadii(a, c, geodeticLatitudeRad);
+  return { meridionalM: m, primeVerticalM: n };
+}
+
+/** Bisections of {@link bandLatitudeRad}: 2⁻⁶⁰ of a right angle, past `f64`'s resolution. */
+const BAND_LATITUDE_BISECTIONS = 60;
+
+/**
+ * The geodetic latitude in [0, π ÷ 2] at which s = g(φ) ÷ g_ref is `gravityRatioValue`, rad: where
+ * a latitude band of {@link OblateSlicing.bandGravityRatio} stands, so that the band is built at
+ * that latitude's g(φ) and √(MN) (plan R08, Design note 17, _Latitude bands_; R08.T6.e).
+ *
+ * @remarks
+ * By bisection between the equator and the pole, s being monotonic in sin²φ: Somigliana's γ is a
+ * linear function of S = sin²φ over the root of another, so the sign of dγ ÷ dS is linear in S and
+ * γ is monotonic wherever γ_p ÷ γ_e ≥ (a² + c²) ÷ 2ac ≈ 1 + f² ÷ 2. Clairaut's
+ * γ_p ÷ γ_e − 1 ≈ 5m ÷ 2 − f meets that while f stays below about 5m ÷ 2, and every Darwin–Radau
+ * figure with C ÷ Ma² ≤ 0.4 has f ≤ 5m ÷ 4 (derived here; the science check of R08.T6.e).
+ * A value beyond the range s takes is held to the nearer end; a body with no spheroid, whose s is
+ * 1 everywhere, gives the equator.
+ *
+ * @throws RangeError as {@link normalGravity}.
+ */
+export function bandLatitudeRad(gravity: BodyGravity, gravityRatioValue: number): number {
+  if (gravity.spheroid === null) {
+    return 0;
+  }
+  const atEquator = gravityRatio(gravity, 0);
+  const atPole = gravityRatio(gravity, Math.PI / 2);
+  const rising = atPole >= atEquator;
+  let low = 0;
+  let high = Math.PI / 2;
+  for (let i = 0; i < BAND_LATITUDE_BISECTIONS; i += 1) {
+    const middle = 0.5 * (low + high);
+    const below = gravityRatio(gravity, middle) < gravityRatioValue;
+    if (below === rising) {
+      low = middle;
+    } else {
+      high = middle;
+    }
+  }
+  return 0.5 * (low + high);
 }

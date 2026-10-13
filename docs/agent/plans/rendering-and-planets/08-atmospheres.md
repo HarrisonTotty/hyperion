@@ -7318,6 +7318,186 @@ generator, and the reference's sampling needs no domain tag.
     group. It was left so that smart-ci does not plan the full `ci` for a comment. Done by
     perf-smoke's four-run split, which rewrote it.
 
+- **Deviations in T6.e, as built** (2026-10-13). `tablesCpu.ts`, `oblate.ts` and `hillaire.ts`;
+  tests in a new `tablesCpuOblate.test.ts` (inside the acceptance's `view/atmosphere/tablesCpu`
+  filter) and in `hillaire.test.ts`. No kernel, no smoke group and no version moves: the twin is
+  the oracle T6.f's kernels will be held to.
+  - _Names beyond the text._ `tablesCpu.ts`: `TwinBody` (the figure and R08.T3.d's
+    `BodyGravity`), `OblateTwinSizes` and `OBLATE_KERNEL_SIZES`, `TwinBand` and `twinBandOf`,
+    `OblatePlanetTwin` and `oblatePlanetTwin`; `SlicedFit`, `SliceRead`, `SlicedRay`, `SliceRule`,
+    `SlicedSunTransmittance` and `slicedSunTransmittance`, `slicedStoredOpticalDepth`,
+    `bandMultiScattering`; `SpheroidOpticalDepth` and `spheroidOpticalDepth` (the brute force);
+    `OblateSkyViewRay`, `oblateSkyViewRayTwin`, `oblateSkyViewTexelsTwin`, `oblateSkyViewTwin`,
+    `oblateSkyViewReadTwin`, `oblateAerialPerspectiveTwin`, `oblateRayMarchRayAlongTwin`,
+    `oblateRayMarchRayTwin`, `oblateRayMarchTexelTwin` and `oblateRayMarchTwin`. `MarchGeometry`
+    gains `gravitySpheroid`. Internal: `OblateReader` (the lookups), the marches' `MarchReads`,
+    `OblateMarch` and `MarchFrame`, and `scaledTerms`. `oblate.ts`: `gravityRatioSlope` (ds ÷ dφ
+    in closed form), `principalRadiiM` and `bandLatitudeRad`; `gravityRatio` keeps each spheroid's
+    γ_e and γ_p (the same arithmetic, the same values).
+  - _A twin of its own, the body beside the medium._ The medium carries no slicing (T3.d's
+    deviations), so T6.e takes the `BodyGravity` beside it, in `TwinBody`, as T3.d left open; T10.a
+    may still move it into the medium. The spherical twin is unchanged and stays the kernels' oracle
+    for the smoke until T6.f; the oblate functions sit beside it.
+  - _The bands in their own frame._ A band at s is the reference medium read at h\* = s h; on
+    lengths l\* = s l it is the reference medium with every coefficient, and every absorber column
+    per metre, divided by s, on the sphere s √(MN) (Design note 17's scaling, which makes τ ÷ s of a
+    table exact where s and R_α are uniform). So each band is "an ordinary build at the band's g(φ)
+    and √(MN)", its own transmittance table and multiple-scattering layers, with its rows at h\* and
+    the reference medium's top, and Ψ, which the change of length does not move, is read at a
+    sample's h\*. A band's latitude is where s is its s (bisection, s being monotonic in sin²φ). A
+    body of one band takes R05's build as it is, at s = 1 on R_ref, and with one slice at κ = 1
+    shares slice 0's table.
+  - _No irradiance table yet._ The text's "multiple scattering and irradiance per band": there is
+    no irradiance table in the code before T9.b, so the bands carry the multiple scattering, and
+    T9.b adds its irradiance to `TwinBand`, built per band in the same frame.
+  - _The fit, for any medium._ The decision measured an isothermal gas of one H. The twin's
+    "local scale height" is the stored vertical optical depth above the start in green (slice 0's
+    table) over the extinction there, between 1 m and the room to the top: one H for an
+    exponential, and the column's own e-folding for any profile. The rest is the decision's rule:
+    the start, the analytic slope s μ + h (∂s ÷ ∂φ) √(1 − μ²) cos α ÷ (M + h), and h\* where the ray
+    on the start's R_α has risen H ÷ s (one geodetic conversion). A dip of over H ÷ 2 in h\* is
+    fitted at its lowest point by the parabola through h\* at the start sphere's tangent point and
+    √(2 R_α H ÷ s) either side (three conversions), whose vertex is the lowest h\* and whose
+    curvature c gives the radius s² ÷ 2c less it, in place of the decision's golden-section minimum:
+    over the deep rays the two give the same worst, 0.905 and 0.905 of the bound through the slices
+    (0.78 and 0.77 on the fitted sphere alone; scratch `deep-fit variants`). Every
+    dipping ray is read on each slice at the cosine that keeps its lowest h\*, the ground hiding the
+    source below the datum; a body of one band reads the start's own sphere (the decision's "may skip
+    the fit"); one slice and one band read the slice at h\* and μ. The slices are interpolated
+    linearly in ln κ, as written.
+  - _Where a march's lookup starts._ The sky view's and the aerial perspective's samples start
+    their lookups at the march's own height and normal on R_α, at the sample's own geodetic latitude
+    (Vermeille at its body-fixed place), the density's own state; the fit's far points are on the
+    true spheroid. The ray march reads every sample at its geodetic height h, not R05's radial
+    height, which departs from it by h(1 ÷ cos ψ − 1), ψ the angle between the radius and the
+    normal (0.5% of h on Saturn at 45°, 6 × 10⁻⁶ on Earth), since h\* = s h is geodetic (Design note
+    17); its layer edges and top are the quadrics through h\* at the equator and the poles,
+    (a + e ÷ s_e, c + e ÷ s_p), as R08.T12.d's tracer's shells are. The sky view's and the aerial
+    perspective's spheres take the medium's top over the camera's s, and the sky view's layer
+    edges cross R_α at e ÷ s at the camera. The sky view's horizon split is each column's R_α, and
+    `oblateSkyViewReadTwin` takes it at the direction's own azimuth.
+  - _R_α_ is taken as M ÷ (1 − (1 − M ÷ N) sin²α), which is M = N on a sphere to the bit, and √(MN)
+    for a vertical ray. With the lookup's start above, a sphere with ω = 0 gives T6.d's sky view,
+    aerial perspective and ray march to 10⁻¹² (from 2 m, 2 km and 400 km); its per-planet tables
+    are T6.d's to the bit.
+  - _`geodeticOf`_ is Vermeille 2002 in Karney 2011's forms, R08.T12.d's Rust operation for
+    operation, its signature kept. It round-trips Saturn from the datum to 10 H (H = 49.7 km), WGS 84
+    and c ÷ a = 0.2 to under 10⁻⁶ m. R05.T12.c's tests pass unchanged.
+  - _The tests' Saturn-class medium_ is the H₂–He air's molecular term (R08.T3.c, the NSSDCA
+    fractions, 134 K) on e^(−h\* ÷ H) at the isothermal H = 49.7 km, its top at 16 H, about 10⁻⁷ of
+    the datum's density: smooth, so
+    that the brute force converges spectrally (Gauss–Legendre's 8 points on 5 km pieces; halving
+    them moves it by 1.4 × 10⁻¹⁴, held under 10⁻⁷). Its vertical optical depth is 0.142, 0.285 and
+    0.728. A table's or a tent's kinks converge more slowly, which `spheroidOpticalDepth`'s
+    documentation states (decision-r08-spheroid §1's "splits at the kinks where it must").
+  - _What the bound is held on._ `decision-r08-spheroid.md` §2 measured the lookup with each slice
+    integrated exactly. The test does the same: the lookup's sphere and slices, each slice
+    integrated along its own read's ray (R05's rule at 8,192 steps), and that meets the bound on
+    every ray. The twin's own read through the slices' 256 × 64 tables does not: it misses the
+    text's criterion, and Verification's T6.e line, on 5 of the 598 rays, at most 1.244 times. It
+    is pinned there (under 1.3, at most 5 rays over) and deferred under the 2026-10-13 rule
+    (below); the cure goes to "main" before T6.f builds kernels on the same tables.
+  - _The slices' interpolation test_ holds the halfway κ's interpolation against the exact
+    integral there, not against a table built at the exact value, whose texels would add their own
+    1.44 × 10⁻³; the twin's read of the slices' tables is held to that exact interpolation beside
+    it (under 2 × 10⁻³). The march's convergence is checked on every ray of the set.
+  - _The bands' bound is held in radiance._ Ψ itself is curved in s high up: between the bands it
+    is off linear interpolation in ln s by up to 4% at 12 H and 10% at 15 H (converged in the
+    steps: 32 and 128 give the same), where the air holds e⁻¹² of the datum's. So the test holds
+    the radiance Ψ adds along views from the datum (zenith, 60° and 80°, the sun at μ_s 1 to
+    0.05), Ψ weighted by the scattering through the view's transmittance, against a band built at
+    the exact s halfway in ln s: under 0.5%, as the text asks. It also holds the limb from orbit in
+    the band's frame, the sun at 0°, 10° and 30° above the tangent point's horizon, in the view's
+    plane and across it: under 0.5% to 3 H, and pinned at 10 H, where it is not (below).
+  - Figures (the scratch logs are in `.git/rm45-scratch/r08-tables/t6e/`):
+    - Saturn's slicing: five slices, κ 0.7304–1.3197, and four bands, s 0.8684, 0.9540, 1.0482
+      and 1.1516 at 0°, 34.98°, 54.50° and 90°, on spheres of 47.21, 55.25, 65.01 and 76.94 Mm.
+    - Of the set's 700 rays, 598 clear the ground. The fitted lookup: worst 0.905 of the bound, at
+      30° north-east from 1 H at μ −0.035 (τ 7.68, 15.4 and 39.4), the decision's 0.87 on its
+      medium. At the sample's own s and R_α: worst 12.8 of the bound and 228 rays over; 110 of the
+      192 at 30–75° north and north-east, and 24 at the equator, the pole and east, all of them
+      dipping rays that rule reads at a fixed μ.
+    - κ\* left the slices' range on 99 rays: by under 0.003 in ln κ at the equator and the pole,
+      where the range ends, and by up to 0.176 only at μ 0.2 and 0.5 along the meridian at
+      15–75°, where a steep ray hardly curves and its depth hardly depends on κ.
+    - Through the slices' tables: worst 1.244 of the bound, and 5 rays over: from 3 H at μ −0.035,
+      15° north, 30° north and north-east, and 45° north and north-east (τ_blue 4.4–5.8), each
+      deep. Their parts, at 30° north-east: the fitted sphere 1.1 × 10⁻³ of τ, the slices'
+      interpolation 0.7 × 10⁻³ more, the tables' texels 0.7 × 10⁻³ more.
+    - The slices' interpolation in ln κ, halfway between neighbours, grazing from the datum, 0.3,
+      1 and 3 H: 6.84 × 10⁻⁴ (the √κ law of Chapman's grazing column read linearly in ln κ),
+      against the text's 0.1%. The twin's read of the tables differs from that interpolation by
+      1.44 × 10⁻³ (their texels).
+    - The bands' interpolation in ln s, halfway, in multiple-scattering radiance against the text's
+      0.5%: 3.2 × 10⁻⁴ from the datum; on the limb from orbit 0.45%, 0.24%, 0.094% and 0.19% at
+      0.3, 1, 3 and 5 H, and 3.25% at 10 H.
+    - The oblate ray march's limb from orbit at 45° (τ 0.773, 1.55 and 3.97), the medium at h\* of
+      each sample's geodetic height, against the true spheroid's e^(−τ): within 2.2 × 10⁻⁸ at
+      8,192 steps; it enters the air at h\* = the top to 10⁻⁶ over the equator and the pole. An
+      aerial-perspective column on R_α from 2 km at 45°, against the true spheroid over its 32 km:
+      5.5 × 10⁻¹⁰.
+    - Earth: one slice and one band; s from 0.997 36 at the equator to 1.002 65 at the pole
+      (±0.265%). Its differences from T6.d, the tables at the kernel's sizes and the views reduced
+      (the sky view 96 × 54 at 40 steps, where high's is 192 × 108 at 75; high's aerial volume;
+      low's ray march), relative above 10⁻³ of each table's largest:
+
+      | Latitude, height, sun | Sky view, mean / worst | Aerial perspective, mean / worst |
+      | --------------------- | ---------------------- | -------------------------------- |
+      | 0°, 2 m, 20°          | 0.076% / 0.32%         | 0.11% / 0.26%                    |
+      | 0°, 2 m, −2°          | 0.079% / 1.03%         | 0.094% / 0.79%                   |
+      | 0°, 2 km, 20°         | 0.14% / 0.51%          | 0.18% / 0.50%                    |
+      | 0°, 2 km, −2°         | 0.13% / 2.07%          | 0.19% / 1.21%                    |
+      | 45°, 2 m, 20°         | 0.0011% / 0.039%       | 0.0001% / 0.0009%                |
+      | 45°, 2 m, −2°         | 0.0077% / 0.22%        | 0.0008% / 0.031%                 |
+      | 45°, 2 km, 20°        | 0.0026% / 0.019%       | 0.0001% / 0.0020%                |
+      | 45°, 2 km, −2°        | 0.011% / 0.49%         | 0.0012% / 0.049%                 |
+
+      The ray march from 400 km: 0.020% mean and 0.11% worst over the equator, 0.003% and 0.023%
+      over 45°. At the equator s_e makes the air 0.27% deeper than T6.d's, and grazing paths and
+      twilight carry the most of it; at 45°, where s ≈ 1, what is left is R_α in place of √(MN).
+
+    - Times, at a load of about 10–20 (provisional): Saturn's tables at the kernel's sizes, five
+      slices and four bands' transmittance, 9.2 s; Earth's oblate sky view at 96 × 54 and 40 steps
+      0.78–0.83 s against T6.d's 0.55 s; `tablesCpuOblate.test.ts` 35 s at four workers.
+  - _For T6.f, and a contract for "main"._ The kernels are held to this twin, so T6.f carries two
+    of its choices into Design note 18's forms. The ray march's top and layer edges become the
+    quadrics through h\* at the equator and the poles, in place of S_t = diag(1, 1, (a + H) ÷
+    (c + H)) and T6.g's q_t. The sky view's horizon split becomes each column's R_α, in place of
+    one `exact.z` a frame; `SkyViewTable`'s single `bottomRadiusM` and `horizonAngleRad`
+    (`hillaire.ts`), which R11 reads, then become per azimuth on an oblate body, a widening of a
+    public interface that "main" settles before T6.f. T6.f's own geodetic height (the root along
+    the level normal) is held against this twin's closed form, as its text says.
+  - Reviewed by the TypeScript, plan-conformance and science reviewers: no must-fix in the code.
+    Their fixes are in: the oblate ray march and aerial perspective tested on Saturn against the
+    true spheroid, `gravityRatioSlope`, `principalRadiiM` and `bandLatitudeRad` tested, the
+    limb added to the bands' test, the slices' interpolation shared by the twin and its test, the
+    builds moved out of the tests' timeouts, and the record's figures corrected (Earth's radial
+    height, s_e, the tests' scale height, Saturn's period cited as NSSDCA's).
+
+- **Deferred findings (2026-10-13 rule)** (R08.T6.e). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The slices' tables on a giant._ Saturn's 64 rows span 16 H, 0.22 H a row at 3 H, so the
+    tables' bilinear read adds up to 1.4 × 10⁻³ of τ there, and through the tables 5 of the 598
+    rays pass over the component bound, at most 1.244 times (all deep dips from 3 H). R08.T13's
+    client-beam check holds the tables in radiance. Cheapest cure, measured: weights linear in √κ
+    in place of ln κ, exact for Chapman's √R law at grazing and for a vertical ray, at no cost a
+    read: the exact slices' worst goes from 0.905 to 0.782, and the tables' from 1.244 to 1.072 (one
+    ray over); log–log interpolation gives the same. Lean: √κ weights in T6.f, with a ruling; rows
+    placed by h\* ÷ H on a giant, or a taller table, are contract changes.
+  - _Ψ's curvature in s high up_ (4% at 12 H, 10% at 15 H between bands) reaches the limb from
+    orbit: the bands' interpolation costs 3.25% of the multiple-scattering radiance at a 10 H
+    tangent, against the text's 0.5% (0.19% at 5 H). The single scattering dominates a sunlit limb
+    there, so the sky's share is smaller; R08.T13's limb at 10 H and Saturn's case measure it.
+    Cures, for later: bands interpolated in ln of each band's own radius s √(MN), or a band more
+    where s is steep; R08.T15's deck tables and R08.T16's disc, built per band, may want the same.
+  - _The sky view's lookups start on R_α_ and fit their far points on the true spheroid. The two
+    heights part by the osculating sphere's third-order error, estimated at metres a thousand
+    kilometres out on Saturn and not measured beyond the sphere test; T6.f's readbacks against the
+    twin will see it.
+  - _The layer edges at the camera's s._ The sky view's crossings take e ÷ s at the camera, not at
+    each crossing's own latitude. A medium with edges on a body of several bands is the case;
+    none is built yet.
+
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7; built and recorded by R08.T7, "Deviations in T7,
   as built").
