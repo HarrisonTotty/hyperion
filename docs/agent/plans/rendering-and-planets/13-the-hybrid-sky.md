@@ -980,7 +980,14 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   (R13.T1.b), against 38.0% and 22.8% beyond the cap at V_P alone (R13.T1), of some 3.9 × 10⁵
   stars to V 10.06, and its N_max overflow the norm. The camera-budget ruling owed by R06.T17
   rules on the real tier at the real boundary (T1 measured the camera's at 0.98–1.00 times the
-  eye's), not on the exact census.
+  eye's), not on the exact census. Ruled 2026-10-13 (`decision-r06-camera-budget.md`). The camera's
+  budget is the eye's, since R(u) does not depend on the cut: R06.T17 measured the camera's census
+  at 10.06 at 0.99 times the eye's CPU-s on both galaxies. Its limit is R06 Design note 18's by
+  texel (R06.T13.i), read from each reply's band. Until T7, the band beyond R(u) holds the light of
+  the stars brighter than the cut, which reads as background there. So the camera's limit there is
+  shallower than a sensor's, by 0.06 mag in the brightest texels if that light is a fifth of the
+  rest (arithmetic). From T7 the band beyond R(u) holds only the light fainter than the cut, and
+  the background is exact.
 - **Multiplayer.** Two ships far apart see the same world-anchored synthetic stars, but each its own
   real boundary, so a star real for one may be absent for the other, replaced by synthetic ones.
   Inherent to any hybrid.

@@ -914,7 +914,13 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     - R06.T8.n sized the budget that holds one near-Sun sky and a jump's new cells
       (`decision-r06-census-cost-signoff.md`), at most 2,048 MiB: 1,280 MiB on the served sky.
       A warm census still generates every system, so the cache saves little. From R06.T8.o the
-      default is 0, off, until the cache pays (decided 2026-10-10, `decision-r06-t8n.md`).
+      default is 0, off, until the cache pays (decided 2026-10-10, `decision-r06-t8n.md`). A
+      camera's sky holds more. Near the Sun at 10.06 its entries are 862 MB on the server's galaxy
+      and 465 MB on the fixture, 1.22–1.23 times the eye's (R06.T17). With a jump's new cells that
+      is about 1.16 GB (_estimate_, at the eye's ratio), so 1,536 MiB by the rule, and 1,280 MiB
+      stays the eye's. The re-measure sizes the one budget on the camera's sky, which the bridge's
+      main screen always asks, and the default returns only if client and server together then stay
+      within 8 GB on the minimum machine (decided 2026-10-13, `decision-r06-camera-budget.md`).
 
 13. **Time.** The sky is asked at a time, like every query, within ±H. The response's
     `valid_until` is the least of one Julian year and the time at which the fastest-moving listed
@@ -1037,6 +1043,28 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     digitally and the limit stays at the high-gain figure. The sensitivity never falls below base,
     where the gain term would not hold. The brainstorm's "about V 10" is the 60° figure to 0.1 mag;
     the plan's figure is always stated with the field of view.
+
+    **The limit by texel** (decided 2026-10-13, `decision-r06-camera-budget.md`; R06.T13.i). A
+    camera view culls each star against the limit at the background of the band texel it lies in, at
+    the deepest triple. The background is the reply's band as sent, before the view adds the stars
+    it culls, whose photons fall on their own pixels. Near the Sun the camera's lit band at 10.06,
+    at the caps by ray, runs μ 21.26–25.25 (R06.T17; 10th–90th 22.17–24.59, median 23.72), so the
+    limit at 60° runs from V 9.55 in the brightest texel to 10.12 in the darkest (10th–90th
+    9.79–10.10, median 10.03), against 10.06 at μ 24. Over a black sky, where read noise alone sets
+    it, the limit is 10.15, 0.095 mag deeper than μ 24's at every field. A camera's request asks
+    that black-sky limit, clamped at `MAX_CUT_V`, so no texel's cull is deeper than its census. The
+    field moves every texel's limit alike, by 5 log₁₀ of the focal lengths' ratio (+1.67 mag at 30°,
+    −1.19 at 90°). So near the Sun the clamp holds the request at 11.0 below about 43°, and the
+    limit by texel matters at 45°, 60°, 90° and 120°, and at every field where the band is bright
+    (at 60°, 9.11 at μ 20 and 8.25 at μ 18). Where the band also holds light a sensor would resolve,
+    its background reads brighter and the limit shallower: the pending region's light in a reply not
+    yet final; in RM3's interim, the light of the stars brighter than the cut beyond the real
+    boundary (from R13.T7 the band there holds only the light fainter than the cut); and the
+    overflow's. A share f of such light over the unresolved light takes 0.06 mag at f = 0.2 and 0.14
+    at f = 0.5 off the brightest texels, and a third of that at the median. The label quotes the
+    limit at its deepest, as the eye's is quoted: the darkest texel's at the exposure shown, never
+    deeper than the reply's cut.
+
 19. **Humphreys–Davidson, protostars and giants: the leans handed to plan 06** (researched
     2026-09-29, a physics ruling left to plan 06). The cause of the excess is in the code: under the
     default `WindRecipe::Modern` (`stellar/sse/wind.rs`) a star beyond the limit loses a constant
@@ -1055,19 +1083,20 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     for M giants and Levesque et al. 2005's column for supergiants. Each is a generator-version
     change in plan 06; this plan reads whatever the envelope and photometry then give.
 20. **Culling, bake and sprites.** Each view culls the stars fainter than its limit in their
-    direction (eye) or overall (camera) and adds their flux into the band layer's texel, so its
-    total light is kept. Of those it keeps, a star is a sprite if it is among the view's sprite
-    budget brightest or its parallax across the system (206,265 × 30 au ÷ d arcseconds, the
-    brainstorm's 30 au journey as the baseline, which takes every star within about 9 ly at a tenth
-    of a 110″ pixel) exceeds a tenth of a pixel; the rest are baked. A sprite is drawn by R02's
-    `starSprite.wgsl` with R02's `psfPixelWeights`: the pixel-integrated Gaussian of σ = 0.64 px,
-    whose erf-differenced weights sum to one, so its flux is the same at every sub-pixel position
-    and it cannot alias or flash, and whose luminance takes the pixel's true solid angle through
-    `pixelLuminance`, so point sources brighten with resolution (R02's Design note 10). This plan
-    adds only the selection, the per-frame parallax positions and instancing; a change to the PSF
-    would be an ask of R02. The hand-over between bake and sprite is at the same total flux. Where
-    parallax sprites outrun the budget (the nuclear disc and cluster), the bake is redone whenever
-    the nearest baked star's accumulated shift reaches a tenth of a pixel.
+    direction, the eye's by the limit map and a camera's by its band texel's background (Design note
+    18; R06.T13.i, decided 2026-10-13, `decision-r06-camera-budget.md`), and adds their flux into
+    the band layer's texel, so its total light is kept. Of those it keeps, a star is a sprite if it
+    is among the view's sprite budget brightest or its parallax across the system (206,265 × 30 au ÷
+    d arcseconds, the brainstorm's 30 au journey as the baseline, which takes every star within
+    about 9 ly at a tenth of a 110″ pixel) exceeds a tenth of a pixel; the rest are baked. A sprite
+    is drawn by R02's `starSprite.wgsl` with R02's `psfPixelWeights`: the pixel-integrated Gaussian
+    of σ = 0.64 px, whose erf-differenced weights sum to one, so its flux is the same at every
+    sub-pixel position and it cannot alias or flash, and whose luminance takes the pixel's true
+    solid angle through `pixelLuminance`, so point sources brighten with resolution (R02's Design
+    note 10). This plan adds only the selection, the per-frame parallax positions and instancing; a
+    change to the PSF would be an ask of R02. The hand-over between bake and sprite is at the same
+    total flux. Where parallax sprites outrun the budget (the nuclear disc and cluster), the bake is
+    redone whenever the nearest baked star's accumulated shift reaches a tenth of a pixel.
 21. **The cubemap** (researched 2026-09-29; WebGPU §26.1.3 packed formats;
     EXT_texture_shared_exponent). `rgb9e5ufloat` is filterable and copyable but neither renderable
     nor a storage format, so the bake draws the baked stars as a `point-list` with additive blending
@@ -1154,7 +1183,9 @@ advice was adopted on 2026-10-05 under the owner's standing delegation
 
 After T17 (decided 2026-10-13, `decision-r06-t17-findings.md`): T12.b, then T11.h, on the sky
 lane, neither waiting on R13; T11.i after RM4/RM5's close, or before it if the owner's laptop run
-finds the session's start objectionable (T17's trigger for T11.e).
+finds the session's start objectionable (T17's trigger for T11.e). Then T13.i and T11.j, in either
+order, on the sky lane, before any bridge play-test (decided 2026-10-13,
+`decision-r06-camera-budget.md`). Neither waits on R13, and neither holds T17.
 
 Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise.
 
@@ -2704,6 +2735,35 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
 the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read` if a stage's
   arithmetic moves, the bench recorded, `just smart-ci`.
 
+- **R06.T11.j The camera's sky measured (new; after T17 and T11.h; decided 2026-10-13,
+  `decision-r06-camera-budget.md`).** T17 benched the first sky at the eye's cut alone and ran no
+  camera census whole. The request throughout is the eye at its defaults with `camera_limit_v`
+  10.153, the black-sky limit at 60° (R06.T13.i's request; a literal whose doc comment names
+  `cameraLimitV`'s value), on the server's galaxy. No output moves.
+  - **The camera's first sky.** `sky_near_sun_cold/camera_first_reply`, at 15 workers and at
+    `HYPERION_WORKERS=4`, under the heavy lock. Record the wall, the CPU-s and each layer's cap,
+    cells, generated and listed, against the first-sky budget (150 CPU-s and 10 s on 15 workers).
+    _Estimate:_ 130–175 CPU-s and 9.5–12.5 s, since A's and B's single shells (161 and 286 ly here,
+    sampled) lie in the first step.
+  - **If it misses,** report to main. The ruled lever is a new task: A's and B's caps get shells at
+    `SHELL_EDGES_LY`, as C's to E's have. It moves no final reply, and it re-blesses T8.i's
+    partial-reply golden with no `GENERATOR_VERSION` bump.
+  - **The camera's census whole** (`HYPERION_SKY_BENCH_UNTIL_LY=final`, 15 workers, about 35 minutes
+    under the heavy lock). Record:
+    - each reply's time, listed and overflow, and the V 3.0 delivery;
+    - the bench process's peak resident memory, and its resident with the tables held before the
+      request (Linux's `VmHWM` and `VmRSS`; elsewhere printed as not measured), so that their
+      difference is the sky's share;
+    - the final band's μ distribution (least, 10th percentile, median, 90th, greatest), decoded from
+      its band bytes, against T17's at the caps (μ 21.26–25.25);
+    - the camera band terms of the listed stars within 0.5 mag of the cut (10th percentile, median,
+      90th, and the shares below −0.3 and −0.7).
+
+    It takes the place of T17's pending camera census whole.
+
+  - **Files:** `crates/hyperion-server/benches/sky.rs` (its doc's figures), this plan.
+  - **Acceptance:** the bench recorded, `just smart-ci`.
+
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
 `crates/hyperion-server/tests/sky.rs`. Bench (server, Criterion): `sky_near_sun_cold` with the
@@ -2830,6 +2890,38 @@ run src/renderer/src/view/sky`, `just test-render`. _Since 2026-10-06 the disc l
   catalogue test covers the new kind. Files: `view/engine/{types,memory,catalogue,resilientEngine}.ts`,
   `view/engine/webgpu/{engine,resources,pointSplat}.ts`, `smoke/catalogue.ts`. Acceptance: `pnpm
 --filter hyperion exec vitest run src/renderer/src/view/engine`, `just test-render`.
+- **R06.T13.i The camera's limit by texel (new; after T17; decided 2026-10-13,
+  `decision-r06-camera-budget.md`).** A camera view's request and cull both read Design note 18's
+  limit over a uniform μ 24 sky (`viewSky.ts`' `DARK_SKY_CD_M2`), V 10.06 at 60°. Design note 18
+  reads each band texel's background, and T17 measured that limit at 60° near the Sun at 9.55–10.12
+  over the camera's lit band. The change is client-only: nothing moves on the server or the wire.
+  - **The cull.** `viewSkyLimit` gives a camera a limit by direction, as the eye has one. It is
+    `cameraLimitV` at the deepest triple and the view's field over the luminance of the band texel
+    the star lies in (`cubeTexelOf`), never deeper than the reply's `cut_v`. The luminance is the
+    reply's band as sent, before the view adds its culled stars. The limits are computed once per
+    held reply and field. The culled stars' light reaches the band layer as before.
+  - **The request.** `camera_limit_v` is the black-sky limit: `cameraLimitV` at the deepest triple
+    over a background of 0. That is V 10.15 at 60°, 10.87 at 45°, 8.96 at 90° and 7.77 at 120°,
+    clamped at `MAX_CUT_V` (11.0 at 30° and narrower). So no texel's cull is deeper than its census
+    (`decision-r06-t7b-brackets.md`'s invariant). `DARK_SKY_CD_M2` and its comment ("which asks the
+    deepest limit") go.
+  - **The label.** A camera's figure is its limit quoted at its deepest, as the eye's is: the
+    darkest texel's limit over all six faces at the exposure shown, never deeper than the reply's
+    `cut_v`. At 30° near the Sun it reads `V 11.0 mag CAM`, where it read 11.7. Build to the guide's
+    `EYE`, `CAM` row (signed off 2026-10-13, `signoff-8.md`).
+  - **Tests:**
+    - in one sky a camera keeps a star whose V plus band term is brighter than its own texel's limit
+      and drops it otherwise, in a bright texel and a dark one;
+    - over a uniform μ 24 band the cull keeps what the uniform cull at 10.06 kept;
+    - the dropped stars' light reaches the band layer to 10⁻⁶ relative;
+    - the request asks the black-sky limit at every step of `FOV_STEPS_DEG`, clamped at 11.0;
+    - over bands of μ 15 to 30, no texel's limit is deeper than the request's cut;
+    - the label states the darkest texel's limit over all six faces at the exposure shown, the same
+      wherever the camera points, and at most `cut_v`, including on a reply that overflows.
+  - **Files:** `apps/hyperion/src/renderer/src/view/sky/{viewSky,cull}.ts` and their tests,
+    `displays/view/useViewSky.ts` if the label's path moves, this plan.
+  - **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky
+src/renderer/src/displays/view`, `just smart-ci`.
 
 Acceptance for T13 as a whole: `pnpm test`, `just ci`, `just test-render`, and by hand, recorded
 in the plan: near the Sun the brightest stars the census lists match the brainstorm's statistics
@@ -3043,8 +3135,9 @@ eye's cut as T9.d computes it (about 8.0 on the fixture with the diffuse light, 
 before it; 8.18 as built, Risks, "Deviations in T9.g, as built"), benched also at 7.95, its
 estimate when
 the budget was set (decided 2026-10-06, `decision-r06-t9b-band.md`; the eye's cut; the camera's
-cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
-`decision-r06-census-cost-signoff.md`), at the current caps, on a quiet machine:
+cut, 10.06 at 60°, is benched beside it, and its budget, ruled from that figure on 2026-10-13, is
+the eye's, `decision-r06-census-cost-signoff.md` and `decision-r06-camera-budget.md`), at the
+current caps, on a quiet machine:
 
 - the first sky in at most 150 CPU-s and 10 s wall on the dev machine's default workers;
 - the full cold census at the hybrid's real boundary: recorded, not gated.
@@ -3089,8 +3182,25 @@ cut, 10.06 at 60°, is benched beside it and its budget ruled from that figure,
 
 The budget was accepted as the eye's only. A decision agent advised that, and the advice was
 adopted on 2026-10-05 under the owner's standing delegation (`decision-r06-census-cost-signoff.md`,
-question 1). A decision agent rules the camera's budget from the cut-10.06 bench, and reports it to
-the owner, before T17 closes and before any bridge play-test.
+question 1). **The camera's budget is the eye's** (ruled 2026-10-13 from T17's cut-10.06 figures,
+`decision-r06-camera-budget.md`, and reported to the owner). On the served sky a camera's census
+costs what the eye's does, since R13's real boundary does not depend on the cut: at 10.06 near the
+Sun 0.99 times the eye's on both galaxies (2.75 × 10⁴ CPU-s on the server's galaxy and 1.46 × 10⁴
+on the fixture, sampled).
+
+- The camera's first sky, asked at its black-sky cut with the eye beside it, in at most 150 CPU-s
+  and 10 s wall on the dev machine's default workers. R06.T11.j benches it before any bridge
+  play-test, and names the lever if it misses.
+- Its full cold census: recorded, not gated, under the eye's 4,000 CPU-s target for the census
+  levers' version.
+- Its limit: Design note 18's by texel, with the request at the black-sky limit (R06.T13.i). The cut
+  stays in V (Risks, "The camera cut is in V").
+- Its served entries: the sky cache stays off by default. With a camera open the value to set for a
+  warm sky is 1,536 MiB (_estimate_), and the re-measure sizes the one budget on the camera's sky
+  (Design note 12).
+- Its memory: the server holds about 1.0–1.2 GB with a camera's sky at its defaults (_estimate_),
+  within the envelope client and server share, 8 GB on the minimum machine (Risks, "The camera's
+  budget, ruled").
 
 Run the census benches sampled (`HYPERION_SKY_BENCH_SAMPLE`), at the eye's cut as T9.d computes it
 and at 7.95 (`decision-r06-t9b-band.md`), and beside them at 10.06, with, near the Sun, the caps by
@@ -3698,16 +3808,22 @@ bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cub
   old analogue cameras by about 2.5 mag (CAMS, Design note 18), and the split of a large exposure
   change between gain and photons is R07's view camera (decision-r07-exposure-camera): 12 stops of
   gain, then shutter and ND, which takes the limit to V 2.56 at 60° for a sunlit planet at
-  EV100 15. A camera view's request asks the camera's deepest limit, V 10.06 at 60°, so it holds
-  fewer stars than under R02's old f/1, 2 s default (V 13.7, cut at `MAX_CUT_V`'s 11).
+  EV100 15. A camera view's request asks the camera's deepest limit, V 10.06 at 60° under μ 24 (from
+  R06.T13.i its black-sky limit, 10.15), so it holds fewer stars than under R02's old f/1, 2 s
+  default (V 13.7, cut at `MAX_CUT_V`'s 11).
 - **The camera cut is in V.** The census and `camera_limit_v` cut in V, so a star redder than the
   Sun that only its camera band term lifts over a camera's limit is not listed (a late M dwarf up
   to 2–3 mag below the cut); its light is in the band. Padding the flux bound by the most negative
   term would cost more census than those stars are worth (decision-camera-eta.md). Reddening
   widens it (decided 2026-10-06, `decision-r06-t9b-band.md`, addendum): the camera term reaches
   about −3 mag at A_V 10 and −8 at A_V 20, so a camera towards the galactic centre misses many
-  near-infrared-bright stars, and the band carries their light at its photopic colour. For the
-  camera's budget decision before any bridge play-test (T17).
+  near-infrared-bright stars, and the band carries their light at its photopic colour. Ruled
+  2026-10-13 (`decision-r06-camera-budget.md` §4): the cut stays in V. The census-cost sign-off's
+  pad of the flux bound stays declined. On the served sky a pad in the request would cost little
+  census, but `sky_order` keeps the brightest N_max by V, so the padded red stars are the first
+  overflowed, and near the Sun a camera's listing already passes N_max on the server's galaxy at
+  high and on both galaxies at low. The gap is the N_max ruling's, with R06.T11.j's record of the
+  listed stars' camera band terms near the cut.
 - **Binaries.** The flux bound and the envelope are exact for single-star systems today; once plan
   11 wires binary evolution in, R06.T16.b must land with it or the census can miss blue
   stragglers and mergers (P11.T11 has wired it, so T16.b follows T8.e; re-validated 2026-10-02), and its cost (up to about 2.5 times the
@@ -7399,9 +7515,10 @@ CensusCost)`.
       - the request asks the black-sky limit, so that no cull is deeper than its census.
 
       Near the Sun its extra stars are N_max overflow, and it costs about 9–14% more of a camera
-      census. The camera-budget ruling adopts or defers it with T17's figures. Until then the
-      request and the cull stay at μ 24 together. Nothing changes in T7.b, the census or the
-      server.
+      census. Adopted 2026-10-13 (`decision-r06-camera-budget.md` §2–§3) as R06.T13.i. T17 measured
+      the black-sky caps at +4.8% of the systems at 10.06, not 9–14%, and on the served sky they
+      cost about none. Until T13.i lands the request and the cull stay at μ 24 together. Nothing
+      changes in T7.b, the census or the server.
   - **The caps' move from v☉** (R06.T7's spheres): none near the Sun (A 11, B 68, C 8,193, D 9,925,
     E 21,369 ly). In the nuclear disc B–E stay on the same radial nodes. Every radius there moves
     about 3% (17 → 18, 127 → 131, 225 → 232, 362 → 374 ly), because the farthest rule bound, which
@@ -9051,9 +9168,11 @@ CensusCost)`.
     - **The camera's served entries at 10.06** (still open from T8.n; `…/{,served_}camera_fill_5.0`,
       one camera sky with the eye at its own cut, 1 in 20, 65,536 MiB): 862 MB on the server's
       galaxy and 465 MB on the fixture, against the eye's 705 and 379 MB, so a camera's sky and a
-      jump would be about 1.2 GB, near the 1,280 MiB budget, for the camera-budget ruling. Its
-      served census costs 2.75 × 10⁴ CPU-s too and lists some 4.0 × 10⁵ stars on the server's
-      galaxy (2.3 × 10⁵ on the fixture; sampled), past N_max.
+      jump would be about 1.16 GB (_estimate_, at the eye's jump ratio; corrected 2026-10-13,
+      `decision-r06-camera-budget.md` §6), for the camera-budget ruling. Its served census costs
+      2.75 × 10⁴ CPU-s too and lists some 4.0 × 10⁵ stars on the server's galaxy, past high's
+      N_max, and 2.3 × 10⁵ on the fixture, past low's only (sampled; corrected 2026-10-13, the
+      same ruling's §7).
     - **The pass rates by multiplicity** (T16.b's 25% trigger; generated ÷ skipped of the records
       bounded star by star, the served sky on the server's galaxy): single C 0.063, D 0.018, E
       0.024; multiple C 0.60, D 7.4, E 266. Multiple systems are 86%, 99% and 99.6% of the systems
@@ -9155,8 +9274,9 @@ CensusCost)`.
     - R03.T15's transfer check at N_max: a camera's served sky near the Sun lists some 4 × 10⁵
       stars, so a camera sky at 10.06 run to its final reply in the hidden real renderer reaches
       N_max (7,494,912 bytes, 29 chunks); its harness is not built.
-    - The camera-budget ruling, a decision agent's from the 10.06 figures above, before T17 closes
-      and before any bridge play-test: for "main".
+    - The camera-budget ruling: ruled 2026-10-13 (`decision-r06-camera-budget.md`; Risks, "The
+      camera's budget, ruled"). It no longer holds T17. Owed from it before any bridge play-test:
+      R06.T13.i and R06.T11.j.
     - The tables' stage chain's schedule (above).
     - T9.f's largest per-texel difference at 64² between the march's sum and `band_rows`
       (Deviations in T9.f), T7.b's dropped and gained stars on the final census (Deviations in
@@ -9190,3 +9310,32 @@ CensusCost)`.
     gate.
   - **T16.b's trigger:** met, its remedy the census-cost levers (T16.b).
   - **The brainstorm's C-cap wording and sky counts:** sign-off queue items 10 and 11.
+- **The camera's budget, ruled (2026-10-13, `decision-r06-camera-budget.md`).**
+  - **The budget is the eye's.** On the served sky the camera's census costs 0.99 times the eye's.
+    Its full census is recorded, not gated. Its first sky is held to 150 CPU-s and 10 s and is
+    benched by R06.T11.j (_estimate_ 130–175 CPU-s and 9.5–12.5 s on the server's galaxy, A's and
+    B's whole caps, 161 and 286 ly, lying in the first step). If it misses, A's and B's caps get
+    shells at the fixed edges, which moves no final reply.
+  - **The limit by texel** (Design note 18; R06.T13.i). At 60° near the Sun, V 9.55–10.12 over the
+    band, median 10.03, against the uniform 10.06. The request asks the black-sky 10.15, and the
+    label quotes the darkest texel's limit, never deeper than the cut.
+  - **The black-sky caps stand.** +4.8% of the systems at T7.b's caps, which no server serves. On
+    the served sky about 0.04% more systems generated, some 9% more stars listed and about 1% more
+    entries (_estimates_).
+  - **The cut stays in V** (Risks, "The camera cut is in V").
+  - **Memory.** The record's camera paragraph is corrected:
+    - A camera's sky and a jump would be about 1.16 GB (_estimate_, at the eye's jump ratio). That
+      fits 1,280 MiB with 13.5% spare, but not the rule's margin, so 1,536 MiB by the rule. The
+      default stays 0.
+    - The camera's served sky near the Sun lists some 4.0 × 10⁵ stars on the server's galaxy, past
+      high's N_max, and 2.3 × 10⁵ on the fixture, past low's only.
+  - **The envelope** (provisional; no plan states a host-memory limit). HYPERION's client and server
+    together, with the UHD 620's GPU-resident memory in them, may use at most 8 GB of the minimum
+    machine's 16 GB, at their defaults with every cache full. The same 8 GB of host memory holds on
+    the RTX 3080 machine. With a camera's sky, the server holds about 1.0–1.2 GB on either machine
+    (0.67 GB of other caches full, the tables' 68 MiB, the camera's census in flight), and
+    2.6–2.8 GB with the sky cache at 1,536 MiB. The client holds about 2 GB on the laptop, the
+    GPU's 1 GB ceiling included. So 3.0–3.2 GB in all, within the envelope (_estimates_).
+    R06.T11.j measures the server's sky share, and R12's resident-memory run measures both.
+  - **N_max** binds a dense sky's camera before its sensor does: on the server's galaxy at high, the
+    points end near V 9.7 (_estimate_). That is for the N_max ruling.
