@@ -1026,6 +1026,11 @@ colour table or the synthetic code moves, as R06's sky goldens are.
   fix (i): rays, with each ray's cone widened by ρ, at every ceiling, point and cut
   (`decision-r13-guard-trip.md` §1; Design note 3; T1's figures below, "Spheres or rays, and
   fix (i)").
+  Open, from R06.T17 (`decision-r06-t17-findings.md` §2): stand-ins for a streaming reply's
+  pending real region. This tier's thinning would be applied beyond each reply's complete-to radius,
+  so that a sky that never finishes, as a ship chaining jumps sees it, is right in expectation as
+  points, and labelled. It would cost a swap at each shell, against Design note 11's one synthetic
+  set per request. For T6, with T9's seam figures.
 - **Deviations in T1, as built, and its measurements (2026-10-09).** Measured at
   `rendering-and-planets` 4dec82b4, so with P11.T17.c's held floor (about +18% on a cold census)
   and R06.T11.d. Then rebased onto 090d880d (R06.T11.f and T11.g). T11.g tests each of its splits

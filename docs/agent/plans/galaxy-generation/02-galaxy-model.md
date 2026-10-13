@@ -2446,6 +2446,35 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
   A fix is a `GENERATOR_VERSION` change here. R06's near-Sun tests carry the offset meanwhile, and
   if the light is raised they recentre towards their references, with nothing to re-rule.
 
+- **A drawn galaxy's sky at the fixture's solar radius (a pointer from rendering plan R06,
+  R06.T17, 2026-10-12; ruled 2026-10-13, `decision-r06-t17-findings.md` §3).**
+  - **Measured.** At (0, 26,000, 68) ly the server's galaxy for seed 0x4d2 lists 805 stars
+    brighter than V 3.0, 4.7 times Hipparcos's 172, and 66,614 to V 7.766, 1.9 times Tycho-2's
+    3.55 × 10⁴. The fixture at the same point lists 138 brighter than V 3.0 (0.80) and 9,430 to
+    V 6.5 (1.06), with the star-count slope within 7% of the real sky's. Within 125 ly the
+    server's galaxy holds 2.5 times the fixture's stars brighter than V 3.0, and over the whole
+    sky some 5.8 times, so the excess is the local density first, then young stars.
+  - **Both are draws here, not errors on present evidence.** The point is the fixture's solar
+    radius, not the drawn galaxy's own (`SOLAR_RADIUS_LENGTHS` thin scale lengths). Over the
+    ranges the plane's density at 26,000 ly spans 0.0008–0.008 systems per ly³ (the brainstorm,
+    "Fields"). The young disc's sharp arms put the young density there anywhere from 0.2 to about
+    7.4 times its azimuthal mean at the fixture's arm parameters, and wider at a drawn galaxy's.
+    Milky Way catalogues are compared on `milky_way_like` alone; a drawn galaxy is judged by its
+    own tables.
+  - **For this plan's owner, a measurement with no bump** (no census, minutes of CPU). At that
+    point on both galaxies:
+    1. `CapCount`'s expected count brighter than V 3.0, 6.5 and 7.766 per layer, against the
+       served census's listed counts (within R06.T5.f's realised-over-tabulated C 0.966 and
+       E 1.164);
+    2. each component's density and the young disc's arm factor;
+    3. the median A_V per 1,000 ly in the plane;
+    4. `CapCount` brighter than V 3.0 at the server galaxy's own solar radius, at four azimuths
+       on and between its arms.
+  - **The verdict.** If step 1 holds and steps 2 and 3 account for the ratio within a factor of
+    1.5, the item closes with no change. If step 1 fails at the bright end, it is plan 06's and
+    the tables lane's. If step 1 holds and the young density or dust at the point lies outside
+    what the drawn ranges give, it is this plan's (plan 07's for the dust).
+
 - **P02.T8.a's subnormal check, either way (lane slow-fix-tests, 2026-10-12, at version 21; the
   slow-pass triage's T1).** Test-only: no generated output moves, and `bounds.rs` is untouched.
   - `envelopes_never_exceed_their_bounds_over_many_cells_seed_0` and `_seed_1`

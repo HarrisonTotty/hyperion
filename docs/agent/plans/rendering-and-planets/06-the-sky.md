@@ -1152,6 +1152,10 @@ advice was adopted on 2026-10-05 under the owner's standing delegation
 (`decision-r06-census-cost-signoff.md`). T8.j, the census in motion (decided 2026-10-05,
 `decision-r06-pad-speed.md`), runs after T9.b–d and before T8.g.
 
+After T17 (decided 2026-10-13, `decision-r06-t17-findings.md`): T12.b, then T11.h, on the sky
+lane, neither waiting on R13; T11.i after RM4/RM5's close, or before it if the owner's laptop run
+finds the session's start objectionable (T17's trigger for T11.e).
+
 Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise.
 
 ### R06.T1 Enter the kind and the asks
@@ -2362,7 +2366,10 @@ star_colour` and `just fit-check`, and once on the fetched spectra the four slow
       light").
   - Bench: `sky/illumination`, and `sky/band_near_sun/march` with and without it. Gate,
     provisional: the illumination and the march's increase together at most 10% of the march
-    without them, in one run (the ruling's estimate: 6–9%).
+    without them, read as the median of at least five interleaved pairs of runs, with and without,
+    on a quiet machine (the ruling's estimate: 6–9%). One run's reading is recorded, not judged,
+    since the march alone spreads ±2 CPU-s in a run, ±7 points of the share (decided 2026-10-13,
+    `decision-r06-t17-findings.md` §6; T9.g read 8.4% and 9.7%, T17 10.4%).
   - Files: `sky/{dgl,band,limits,mod}.rs`, `sky/census/query.rs`, `benches/sky.rs`. Acceptance:
     `cargo test -p hyperion-sim sky::dgl`, `cargo test -p hyperion-sim sky::band` and
     `cargo test -p hyperion-sim sky::limits`, as three commands.
@@ -2488,9 +2495,11 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     decision agent rules from the measured figure. Its levers are the order of the first reply's
     layers and the first shell's edge.
 
-  - **The order.** Within a layer, nearest first. Across layers, D's and E's shells to 4,000 ly run
-    before C's beyond 2,000 ly, or any order that passes T17's V 3.0 gate. The order changes no
-    reply's contents: each reply is still the exact census to its radii.
+  - **The order.** Within a layer, nearest first. Across layers, D's and E's shells to 4,000 ly
+    run before C's beyond 2,000 ly, and E's shells beyond 1,000 ly a step ahead of C's and D's of
+    the same edge (R06.T11.h; decided 2026-10-13, `decision-r06-t17-findings.md` §1), or any order
+    that passes T17's V 3.0 gate. The order changes no reply's contents: each reply is still the
+    exact census to its radii.
   - **The jobs.** Census jobs are sized to about 50 ms of expected work, since the pool never
     preempts a running job. A cancelled or superseded census keeps its finished cells, so that a
     moving ship's outer shells still converge through the cache. At version 21 they do not,
@@ -2638,6 +2647,62 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   69 s; 2.34 s outside the census and the march. The tables at the open took 11.5 s and
   46.9 CPU-s on 15 workers, over their own 30 CPU-s: a finding for T17. The caps' count is split
   by rays for every layer at once, then a cap job a layer.
+
+- **R06.T11.h E's far shell first (new; after T17 and T12.b; decided 2026-10-13,
+  `decision-r06-t17-findings.md` §1).** T17 found the V 3.0 delivery missed. Near the Sun on the
+  server's galaxy the final reply's 805 stars brighter than V 3.0 all came with the final reply,
+  at 1,987 s on 15 workers, 32 of them in the 1,000–2,000 ly step. That step is 76% of the
+  census's job-seconds (C 15%, D 37%, E 24%).
+  - **The order.** `delivery_steps` puts E's shells whose inner edge is at or beyond 1,000 ly a
+    step ahead of C's and D's of the same edge, each step with its reply. D's and E's shells to
+    4,000 ly stay ahead of C's beyond 2,000 ly.
+  - **The record first.** From `CapCount` alone (no census), near the Sun on the fixture and on
+    the server's galaxy, at the served eye's cut and ceiling, record each layer's expected count
+    brighter than V 3.0 between 1,000 ly and its real boundary. If D's is more than a third of C's,
+    D's and E's together, D's shells move with E's.
+  - **Tests:** the delivery order's test at the new deferral (E's 2,000 ly shell a step before
+    C's and D's, the steps otherwise as before); every reply's stars are the census to its stated
+    radii, and the final reply equals the one-shot census, as T11.d's tests hold them.
+  - **Bench:** `sky_near_sun_cold/first_reply` once to the final reply
+    (`HYPERION_SKY_BENCH_UNTIL_LY=final`, 15 workers, under the heavy lock), recording each
+    reply's time and the V 3.0 delivery against T17's figures. _Estimate:_ E's stars by about 48%
+    of the wall, some 16 minutes. The V 3.0 gate stays recorded, not gated, at version 21 (T17).
+  - **Files:** `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/benches/sky.rs`
+    (its doc's figures), the slow test that prints the caps' records for the count, this plan.
+  - **Acceptance:** `cargo test -p hyperion-server compute::sky`,
+    `cargo test -p hyperion-server --test sky`, the bench recorded, `just smart-ci`.
+
+- **R06.T11.i The tables' schedule (new; after T17; decided 2026-10-13,
+  `decision-r06-t17-findings.md` §4).** T17 measured the per-galaxy tables at the open:
+  - 11.6 s wall and 47.0 CPU-s on 15 workers, and 17.9 s and 45.8 CPU-s on four;
+  - serially 34.3 s at load 4–15, against T5.e's quiet 31.3–31.7;
+  - against their 30 CPU-s and T11.g's 5 s trigger. The session's first sky, which waits on them,
+    came 18.0 s after the open's answer.
+
+  In order:
+  1. **The schedule.** `SkyTablesService` logs each stage of `LuminosityTables::plan` as it
+     starts and ends: its jobs, their job-seconds and the pool's idle workers. The bench
+     `sky_near_sun_cold/session_first_reply` prints the schedule at 15 and at four workers. No
+     output moves.
+  2. **The critical path.** Any stage or job whose length sets the wall is split as R06.T11.g
+     split the request's path, each split giving its one-job form's bits. Targets:
+     - the tables' wall at the open at most 5 s on 15 workers;
+     - their CPU-s on 15 workers within 1.25 times the serial build's;
+     - the serial build at most 30 CPU-s on a quiet machine, re-taken quiet.
+  3. **If it still misses**, a decision agent rules from the schedule between two options:
+     - deeper node cuts of `BuildOptions::STANDARD`, which must pass T5.e's two slow tests;
+     - a disk cache of the tables, outside the universe's directory and bounded by size. It is
+       keyed by `GalaxyKey`, `GENERATOR_VERSION`, the fit-check fingerprints of every committed
+       table the build reads and a `SKY_CACHE_VERSION`, with T17's start probe (T17's step 2).
+
+  Tests: `parallel_build_equals_serial`, and each split against its one-job form, bit for bit.
+  Files: `crates/hyperion-server/src/compute/sky_tables.rs`,
+  `crates/hyperion-sim/src/sky/luminosity.rs` (a split stage),
+  `crates/hyperion-server/benches/sky.rs`, this plan. Acceptance:
+  `cargo test -p hyperion-sim sky::luminosity`, `cargo test -p hyperion-server compute::sky_tables`,
+  `just test-slow standard_nodes_match_the_full_build_where_the_tables_are_read
+the_full_build_matches_thirty_two_nodes_a_panel_where_the_tables_are_read` if a stage's
+  arithmetic moves, the bench recorded, `just smart-ci`.
 
 Files: `crates/hyperion-server/src/requests/{mod,sky}.rs`,
 `crates/hyperion-server/src/compute/sky.rs`, `crates/hyperion-server/src/config.rs`, `stats.rs`,
@@ -2899,6 +2964,14 @@ ci`. Decided 2026-10-05 (`decision-r06-census-cost.md`): the widened bound is th
   bound's 2.35, 267 Myr) are T16.b's pinned systems. As built: Risks, "Deviations in T16.b, as
   built".
 
+  **The trigger is met (R06.T17, 2026-10-12).** Multiples pass the star bound at C 0.60, D 7.4
+  and E 266 generated per skipped record, and are 86–99.6% of the systems C to E generate. The
+  ask is answered in the form plan 11 built for R06.T8.g: P11.T16's `hierarchy_bound` and P11.T17's
+  `pair_light_bound`. What remains is their tightness in E, whose pairs are 96.9% `Bright`. That is
+  the census-cost levers' work (`deferred-corrections.md`, "Census cost": T8.g's levers 1–3 and 5,
+  and lever 13), taken with plan 11's refit batch (decided 2026-10-13,
+  `decision-r06-t17-findings.md` §8).
+
 ### R06.T17 Verification pass
 
 Run the slow tests and benches this plan creates (by name, not the whole slow suite or every bench,
@@ -2913,9 +2986,10 @@ the_star_bound_holds_for_realised_systems`,
 `just bench -- sky`) and record the
 figures in the doc comments that own them and in this plan: the caps (at the six points of
 `caps_converge_in_rays`, against the brainstorm's C 3,000, D 4,300, E 10,000 ly near the Sun and
-"a few hundred to about 1,000" in the nuclear disc, with what sets each: C the M_V −2 to −4 AGB tips
-and post-AGB crossings, D post-AGB and bright giants through clear windows, E supergiants; since
-R06.T7.b, for each layer, the sphere at the same count (`CapCount::spheres`, the radius the
+"a few hundred to about 1,000" in the nuclear disc, with what sets each: C post-AGB crossings and
+pair-channel products (R CrB-like; the M_V −2 to −4 AGB tips count only nearer in, Risks,
+"Deviations in T17, as built"), D post-AGB and bright giants through clear windows, E supergiants;
+since R06.T7.b, for each layer, the sphere at the same count (`CapCount::spheres`, the radius the
 brainstorm's figures describe), the rays' median, 10th and 90th percentiles and largest, the median
 of the rays within 10° of the plane, and the largest ray's galactic longitude and latitude
 (`decision-r06-t7b-brackets.md`; a D or E ray beyond 10,000 ly at |b| above 30° is a finding for the
@@ -3053,8 +3127,12 @@ records near the Sun until T8.g's bound rejects most of them before their drift 
   (`decision-r06-t9c-glare.md`, addendum 2). Where a whole camera census runs, the realised count,
   and how many of those stars the eye sees;
 - the delivery time of the final reply's stars brighter than V 3.0, against 25% of the capped
-  census's wall time (R13.T2's real boundary, decided 2026-10-09). If it misses, its lever is the
-  per-layer order, E's 1,000–2,000 ly shell first (T11.d allows any order that passes);
+  census's wall time (R13.T2's real boundary, decided 2026-10-09). At version 21 this is
+  recorded, not gated. At the 2,000 ly limit no order passes it, since E's 1,000–2,000 ly shell
+  alone is 24% of the census's job-seconds and the replies before it another 24% (decided
+  2026-10-13, `decision-r06-t17-findings.md` §1). Its lever, E's 1,000–2,000 ly shell first, is
+  R06.T11.h's. The 25% target is read again at the version that lands the census levers, with
+  the 4,000 CPU-s target;
 - R03.T15's transfer check at the sky's largest payload: a real sky near the Sun at N_max
   (3 × 10⁵ stars with the band; 7,494,912 bytes, 29 chunks), with T11.c's switch on, asked in the
   real renderer, hidden. Its chunks arrive in order before the response, and its bytes are the
@@ -3107,9 +3185,13 @@ bench -- sky` runs above complete.
   (T3), the solar limb and the discs' flux (T4), and the camera model at 60°, 30° and 13° (T13.a).
   The camera model's agreement with measured cameras (Vida et al. 2021; Jenniskens et al. 2011) is
   Design note 18's research, re-checked by hand in T17, not a test.
-- **The galaxy's statistics:** the star-count slope and the band's surface brightness near the Sun
-  (T5, T9); the brainstorm's sky table rows re-derived at the current version (T17), all but the
-  globular core's, which waits on R06.T16.a.
+- **The galaxy's statistics:** the star-count slope and the band's surface brightness near the
+  Sun (T5, T9), on `milky_way_like` at its Sun, the one place Milky Way catalogues are compared
+  with. A drawn galaxy is judged by its own tables (`decision-r06-t17-findings.md` §3). The
+  brainstorm's sky counts are re-derived at the current version (T17; sign-off queue item 11).
+  The sky table's near-Sun row is checked by R13.T1.b's count, 9,430 to V 6.5 on the fixture
+  against 8,874. Its rows away from the Sun stay the hand model's until R13.T9's benches, and the
+  globular core's until R06.T16.a.
 - **Conservation:** light moves between points, overflow and band without loss (T9, T13).
 - **Order independence** of the census over jobs and cells (T8.c) and of the band over rows (T9.b).
 - **Benches:** `sky/luminosity_tables`, `sky/census_near_sun`, `sky/census_nuclear_disc`,
@@ -9083,3 +9165,28 @@ CensusCost)`.
       not run; the server's galaxy's eye census ran whole (the server bench, above).
     - The brainstorm's globular-core row (47 Tuc): pending R06.T16.a, as T17 rules.
     - `just ci`: integration's.
+- **Rulings on T17's findings (2026-10-13, `decision-r06-t17-findings.md`).**
+  - **The V 3.0 delivery** is recorded, not gated, at version 21. No order passes it at the
+    2,000 ly limit. R06.T11.h runs E's far shell first, and the 25% target is read again with the
+    census levers.
+  - **A moving ship's sky:**
+    - Within one arrival, R06.T12.b keeps the held sky through a re-ask.
+    - A ship that jumps again sooner than the census's wall never has its final reply: 33
+      minutes on 15 workers and some 1.85 h on four at the server galaxy's point, about half that
+      at the fixture's density. Until then the stars beyond the edge reached are band light and
+      the `STREAMING` note holds. The remedies are prefetch on a plotted jump (with the
+      jump-drive plan), lever 13 and the realised window bound, all deferred.
+  - **The server galaxy's bright end** (4.7 times Hipparcos at V 3.0) is not a model error on
+    present evidence. (0, 26,000, 68) ly is the fixture's solar radius, not the drawn galaxy's
+    own, and its density, young arms and dust there are draws. The fixture meets Hipparcos and
+    Tycho-2 at its Sun. Milky Way catalogues are compared on `milky_way_like` alone, and figures
+    on the server's galaxy are a denser place's, about twice the fixture's cost. Plan 02's Risks
+    carry the confirming measurement.
+  - **The tables at the open:** R06.T11.i.
+  - **The exact census's warm ratio:** deferred, as T17 rules.
+  - **The illumination's 10.4%:** within one run's spread. T9.g's gate is now read as a median of
+    interleaved pairs.
+  - **The inner disc's D beyond 10,000 ly:** for the tables lane, by component, before R13.T9's
+    gate.
+  - **T16.b's trigger:** met, its remedy the census-cost levers (T16.b).
+  - **The brainstorm's C-cap wording and sky counts:** sign-off queue items 10 and 11.
