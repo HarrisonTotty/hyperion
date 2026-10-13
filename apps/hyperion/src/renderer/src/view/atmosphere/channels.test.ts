@@ -14,7 +14,6 @@ import {
   channelFitAirs,
   channelFitCases,
   channelObjective,
-  EARTH_DRY_AIR,
   EARTH_FIT_COLUMN,
   earthFitAir,
   FIT_SKY_DIRECTIONS_DEG,
@@ -24,13 +23,14 @@ import {
   type SpectralAir,
   viewResponse,
 } from "./channels";
+import { EARTH_DRY_AIR } from "./earth";
 import { FITTED_CHANNEL_WAVELENGTHS_NM, fittedTriple } from "./fittedChannels";
 import { CHANNEL_WAVELENGTHS_NM, columnLengthM, densityAt } from "./medium";
 import { distanceToTopM, localRadiusM } from "./opticalDepth";
 import { molecularMixture } from "./rayleigh";
 import { bakeSpectrumOf, spectralRgb, sunWeights } from "./spectralColour";
 
-/** Bruneton's triple, R05's `CHANNEL_WAVELENGTHS_NM` until R08.T6.d. */
+/** Bruneton's triple, R05's `CHANNEL_WAVELENGTHS_NM` until R08.T6.d moved it to the fitted one. */
 const BRUNETON_NM: Rgb = [680, 550, 440];
 
 /** The suns of R06's colour table that `bake_spectra.json` holds, by grid. */
@@ -357,7 +357,8 @@ describe("the fitted triple", () => {
     },
   );
 
-  it("leaves R05's CHANNEL_WAVELENGTHS_NM at 680/550/440 until R08.T6.d", () => {
-    expect(CHANNEL_WAVELENGTHS_NM).toEqual(BRUNETON_NM);
+  it("is what CHANNEL_WAVELENGTHS_NM reads since R08.T6.d, in place of R05's 680/550/440", () => {
+    expect(CHANNEL_WAVELENGTHS_NM).toEqual(recorded.wavelengthsNm);
+    expect(CHANNEL_WAVELENGTHS_NM).not.toEqual(BRUNETON_NM);
   });
 });

@@ -54,11 +54,13 @@ fn densityOf(i : u32, profile : vec4f, heightM : f32) -> f32 {
   return tabulatedDensityOf(i, profile.y, h);
 }
 
-// The medium at a height above the ground: its scattering and extinction, m^-1, and its absorbers'
-// columns per metre (R08.T6.c), which an absorber adds in place of an extinction.
+// The medium at a height above the ground: its scattering, extinction and absorption, m^-1, the
+// last the terms' own absorption coefficients summed (R08.T6.d), and its absorbers' columns per
+// metre (R08.T6.c), which an absorber adds in place of an extinction.
 fn mediumAtHeight(h : f32) -> MediumSample {
   var scattering = vec3f(0.0);
   var extinction = vec3f(0.0);
+  var absorption = vec3f(0.0);
   var columns = AbsorberColumns(0.0, vec4f(0.0));
   let count = min(u32(medium.termCount), MAX_TERMS);
   for (var i = 0u; i < count; i++) {
@@ -66,9 +68,10 @@ fn mediumAtHeight(h : f32) -> MediumSample {
     let d = densityOf(i, term.profile, h);
     scattering += term.scattering.rgb * d;
     extinction += (term.scattering.rgb + term.absorption.rgb) * d;
+    absorption += term.absorption.rgb * d;
     columns = addColumns(columns, termColumns(term, d), 1.0);
   }
-  return MediumSample(scattering, extinction, columns);
+  return MediumSample(scattering, extinction, absorption, columns);
 }
 
 // How many of the medium's terms are absorbers, each a slot of the absorber columns (R08.T6.c).

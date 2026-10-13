@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import bakeWavelengths from "../../../../../../../packages/protocol/fixtures/bake_wavelengths_nm.json" with { type: "json" };
-import { EARTH_REFERENCE } from "./earth";
+import { R05_EARTH_REFERENCE } from "./earth";
 import {
   BAKE_BIN_WIDTH_NM,
   BAKE_WAVELENGTHS_NM,
   columnLengthM,
   type DensityProfile,
   densityAt,
+  densityLookup,
   extinction,
   type MediumTerm,
   phaseAt,
@@ -54,6 +55,24 @@ describe("the bake wavelengths", () => {
     const expected = Array.from({ length: 15 }, (_, k) => 380 + (k * 380) / 15);
     const offsets = lowEdges.map((edge, k) => Math.abs(edge - (expected[k] ?? Number.NaN)));
     expect([offsets.length, Math.max(...offsets) < 1e-9]).toEqual([15, true]);
+  });
+});
+
+describe("densityLookup (R08.T6.d)", () => {
+  it.each([
+    ["the layer from the ground", TABLE],
+    ["the cut table", CUT],
+    ["the raised layer", RAISED],
+    ["the tent", TENT],
+    ["the exponential", EXP],
+  ])("gives %s densityAt's value to the bit, asked in any order", (_name, profile) => {
+    const lookup = densityLookup(profile);
+    // Below the ground, below the first level, on levels, between them and above the last,
+    // shuffled, then again in reverse.
+    const heights = [2_500, -10, 4_000, 0, 999.5, 3_000, 5_000, 1_000, 0.25, 3_999.999, 1_500, 7];
+    for (const h of [...heights, ...heights.toReversed()]) {
+      expect(lookup(h)).toBe(densityAt(profile, h));
+    }
   });
 });
 
@@ -152,8 +171,8 @@ describe("terms", () => {
   });
 
   it("finds a term by name and refuses a missing one", () => {
-    expect(termNamed(EARTH_REFERENCE, "ozone").name).toBe("ozone");
-    expect(() => termNamed(EARTH_REFERENCE, "dust")).toThrow(/no term dust/);
+    expect(termNamed(R05_EARTH_REFERENCE, "ozone").name).toBe("ozone");
+    expect(() => termNamed(R05_EARTH_REFERENCE, "dust")).toThrow(/no term dust/);
   });
 });
 

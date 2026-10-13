@@ -42,6 +42,7 @@ import {
   checkTabulatedTops,
   type DensityProfile,
   densityAt,
+  layerEdgesM,
   type MediumTerm,
   type PhaseFunction,
   type PhaseMatrixElement,
@@ -85,10 +86,27 @@ export const MULTI_SCATTERING_SIZE: TableSize = { widthTexels: 32, heightTexels:
  * transmittance 1.2% above the oracle on SwiftShader; 256 quarters the error. Hillaire's 40, sampled
  * at 0.3 of each step, misses the plan's 1% by more. The table is built only when the medium
  * changes, so the cost is paid rarely.
+ *
+ * Since R08.T6.d each ray is split where it crosses a term's layer edges ({@link packLayerEdges}),
+ * and the steps are spread over the pieces in proportion to their length, at least
+ * {@link TRANSMITTANCE_STEPS_A_PIECE} a piece (`decision-r08-t6b-floor.md` §9.2).
  */
 export const TRANSMITTANCE_SAMPLES = 256;
 
-/** Midpoint steps along each of the 64 multiple-scattering rays: 32 (sebh's reference takes 20). */
+/**
+ * The fewest steps a piece of a transmittance ray between two layer edges takes: 4
+ * (`decision-r08-t6b-floor.md` §9.2), or the ray's steps over its pieces where they are fewer than
+ * four a piece. `transmittance.wgsl` holds the same number.
+ */
+export const TRANSMITTANCE_STEPS_A_PIECE = 4;
+
+/**
+ * Steps along each of the 64 multiple-scattering rays: 32 (sebh's reference takes 20), placed
+ * toward each ray's lowest point and, before it, toward the texel's point (`marchSplit` with
+ * `fromCamera`, R05.T12.e's rule) since R08.T6.d, where R05 took 32 even midpoints (plan R08's
+ * Risks, "Deviations in T6.a, as built": even steps erred by up to 10.5% in the table, placed ones
+ * by 2.6%).
+ */
 export const MULTI_SCATTERING_SAMPLES = 32;
 
 /**
@@ -551,6 +569,33 @@ export function packMediumUniform(
   return packed;
 }
 
+/** A term's layer edges in {@link packLayerEdges}: at most four, `medium.ts`'s `layerEdgesM`. */
+const EDGES_PER_TERM = 4;
+
+/** What stands in an unused edge's place: a height the kernel never crosses. */
+const NO_EDGE_M = -1;
+
+/**
+ * The medium's layer edges as `transmittance.wgsl`'s `layerEdges` uniform reads them (plan R08,
+ * R08.T6.d; `decision-r08-t6b-floor.md` §9.2): term i's in `vec4f` i, the heights where its density
+ * table, as the kernels read it ({@link kernelMedium}), leaves 0 and where each ramp ends, and −1
+ * in an unused place, for {@link MAX_TERMS} terms.
+ *
+ * @throws Error when the medium has more than {@link MAX_TERMS} terms, as {@link packMedium}.
+ */
+export function packLayerEdges(medium: AtmosphereMedium): Float32Array {
+  if (medium.terms.length > MAX_TERMS) {
+    throw new Error(
+      `atmosphere medium ${medium.name} has ${medium.terms.length} terms; at most ${MAX_TERMS} fit`,
+    );
+  }
+  const packed = new Float32Array(MAX_TERMS * EDGES_PER_TERM).fill(NO_EDGE_M);
+  for (const [i, term] of kernelMedium(medium).terms.entries()) {
+    packed.set(layerEdgesM(term.density).slice(0, EDGES_PER_TERM), i * EDGES_PER_TERM);
+  }
+  return packed;
+}
+
 /**
  * The light slot whose curves of growth the shared multiple-scattering table is built with: 0,
  * the body's brightest star's, which planetshine's transmittance takes too (Design note 7; ruled
@@ -576,14 +621,45 @@ export function densityTableLevelsM(topHeightM: number): Float64Array {
 /**
  * A tabulated density resampled onto its table's levels ({@link densityTableLevelsM}) under the
  * medium's top: its density at each level by the `tabulated` rule, as `medium.wgsl` reads the
- * table, linear in h between levels and constant beyond the last.
+ * table, linear in h between levels and constant beyond the last; with its layer's edges, where it
+ * has any (`medium.ts`'s `layerEdgesM`), widened outward to the table's levels about them.
+ *
+ * @remarks
+ * A ramp of up to one column interval, about 115 m on a 250 K column, spreads over one to three of
+ * the new levels about it, 62–124 m apart between 10 and 40 km under a 100 km top. Each ramp's two edges are taken to the level at or below its
+ * lower edge and the level at or above its upper one (plan R08, R08.T6.d), so that the whole
+ * resampled ramp lies in the transmittance ray's piece between them and every other piece is
+ * smooth. The levels alone could not give them: the first level above 0 may stand inside the old
+ * ramp.
  */
 export function resampledDensity(profile: TabulatedDensity, topHeightM: number): TabulatedDensity {
   const levels = densityTableLevelsM(topHeightM);
-  return tabulatedDensity(
+  const resampled = tabulatedDensity(
     levels,
     levels.map((h) => densityAt(profile, h)),
   );
+  const edges = layerEdgesM(profile);
+  if (edges.length === 0) {
+    // A profile that says it has none keeps saying so, whatever its new levels would show.
+    return profile.edgesM === undefined ? resampled : { ...resampled, edgesM: [] };
+  }
+  const last = levels.length - 1;
+  const below = (h: number): number => {
+    let k = last;
+    while (k > 0 && (levels[k] ?? Number.NaN) > h) {
+      k -= 1;
+    }
+    return levels[k] ?? Number.NaN;
+  };
+  const above = (h: number): number => {
+    let k = 0;
+    while (k < last && (levels[k] ?? Number.NaN) < h) {
+      k += 1;
+    }
+    return levels[k] ?? Number.NaN;
+  };
+  // The edges come in pairs, each a ramp's lower and upper edge (`layerEdgesM`).
+  return { ...resampled, edgesM: edges.map((h, i) => (i % 2 === 0 ? below(h) : above(h))) };
 }
 
 /**
@@ -1152,7 +1228,10 @@ export class AtmosphereTables {
     engine.dispatch(
       kernels.transmittance,
       {
-        uniforms: { medium: packMediumUniform(medium, bottomRadiusM, TRANSMITTANCE_SAMPLES) },
+        uniforms: {
+          medium: packMediumUniform(medium, bottomRadiusM, TRANSMITTANCE_SAMPLES),
+          layerEdges: packLayerEdges(medium),
+        },
         buffers: { terms: r.terms },
         sampled,
         storage: {

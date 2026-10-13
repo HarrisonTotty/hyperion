@@ -10,12 +10,18 @@
  * 2026-10-02). Solar spectral irradiance values derived from ASTM E490-00a(2019), obtained from the
  * U.S. DOE National Laboratory of the Rockies (NLR, formerly NREL); credit DOE/NLR/Alliance. The
  * matching functions: CIE 2019, DOI 10.25039/CIE.DS.xvudnb9b, CC BY-SA 4.0 (see `NOTICE`).
- * R08.T6.d replaces the factors with R07's `starIlluminance` and keeps this file as a 1%
- * luminance check.
+ * Since R08.T6.d the atmosphere draws none of it: a `SunState` carries the sun's per-channel
+ * illuminance from R07's `starIlluminance` through R06's colour, and the tables hold light per
+ * unit of it. This file is kept as the check of that Sun (`solar.test.ts`): the two agree in
+ * luminance but for R06's photopic factor of the Sun's spectrum, 1.037, which puts R06's Sun at
+ * E-490's own {@link E490_ILLUMINANCE_LX} to 0.11%, and the 0.002 mag between R07's Sun (M_V 4.81 at
+ * 1 au, V −26.762) and {@link SUN_APPARENT_V}; their chromaticity difference is recorded in plan
+ * R08's Risks.
  *
- * The tables hold radiance per unit solar spectral irradiance at each channel's wavelength. A
- * table value T_c becomes Rec. 709 luminance as T_c × {@link skyLuminanceScale}()_c; the Sun's own
- * disc as {@link sunIlluminanceRgb}()_c ÷ its solid angle.
+ * Under R05 the tables held radiance per unit solar spectral irradiance at each channel's
+ * wavelength (680, 550 and 440 nm): a table value T_c became Rec. 709 luminance as T_c ×
+ * {@link skyLuminanceScale}()_c, and the Sun's own disc {@link sunIlluminanceRgb}()_c ÷ its solid
+ * angle.
  */
 
 import { illuminanceLx } from "../photometry/magnitude";

@@ -35,7 +35,6 @@ struct Draw {
   tables : vec4f,
   figure : vec4f,
   output : vec4f,
-  sunOverSky : vec4f,
   exact : vec4f,
   // x: the atmosphere's height H above the ground, m, formed in f64; y: how many of the medium's
   // terms are absorbers, 0 to ABSORBER_SLOTS (R08.T6.c); z, w: unused.
@@ -78,7 +77,6 @@ fn viewOf() -> AtmosphereView {
     draw.tables,
     draw.figure,
     draw.output,
-    draw.sunOverSky,
     draw.exact,
   );
 }

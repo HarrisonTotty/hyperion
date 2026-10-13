@@ -7,6 +7,7 @@ import {
   describeFailures,
   errorOf,
   errors,
+  FAMILIES,
   failures,
   type Gate,
   gateRays,
@@ -44,7 +45,12 @@ import {
   scaledAmount,
 } from "./absorbers";
 import { hydrostaticColumn } from "./column";
-import { EARTH_REFERENCE } from "./earth";
+import {
+  EARTH_REFERENCE,
+  EARTH_REFERENCE_CURVES,
+  R05_EARTH_REFERENCE,
+  referenceSunIlluminanceLx,
+} from "./earth";
 import {
   type AtmosphereCamera,
   type SpheroidFigure,
@@ -89,6 +95,10 @@ import {
   MULTI_SCATTERING_DIRECTIONS,
   MULTI_SCATTERING_GROUND_OFFSET_M,
   MULTI_SCATTERING_KERNEL_OPTIONS,
+  type MultiScatteringSeries,
+  type MultiScatteringStored,
+  multiScatteringStored,
+  multiScatteringSeriesTwin,
   multiScatteringTwin,
   type MultiScatteringOptions,
   placedSteps,
@@ -118,7 +128,7 @@ const R1 = tableRadiusM(WGS84);
 
 /** Earth's per-planet twin on R₁, built once for the tests that read it. */
 let earth: PlanetTwin = {
-  medium: EARTH_REFERENCE,
+  medium: R05_EARTH_REFERENCE,
   bottomRadiusM: R1,
   transmittance: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
   absorberColumns: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
@@ -127,7 +137,7 @@ let earth: PlanetTwin = {
 };
 
 beforeAll(() => {
-  earth = planetTwin(EARTH_REFERENCE, R1);
+  earth = planetTwin(R05_EARTH_REFERENCE, R1);
 }, 60_000);
 
 const CHANNELS = [0, 1, 2] as const;
@@ -213,7 +223,7 @@ const R05_SOURCES: TwinSources = {
 
 describe("R05's constants as a medium", () => {
   it("give R05's oracle optical depth at R05.T12.b's 20 texels to 10⁻⁶, at the oracle's steps", () => {
-    const shell = { bottomRadiusM: R1, topRadiusM: R1 + EARTH_REFERENCE.topHeightM };
+    const shell = { bottomRadiusM: R1, topRadiusM: R1 + R05_EARTH_REFERENCE.topHeightM };
     let worst = 0;
     for (const [x, y] of ORACLE_TEXELS) {
       const { rM, mu } = transmittanceUvToRMu(
@@ -224,8 +234,8 @@ describe("R05's constants as a medium", () => {
           TRANSMITTANCE_SIZE.heightTexels,
         ),
       );
-      const twin = kernelOpticalDepth(EARTH_REFERENCE, R1, rM, mu, ORACLE_STEPS);
-      const oracle = opticalDepthToTop(EARTH_REFERENCE, R1, rM, mu);
+      const twin = kernelOpticalDepth(R05_EARTH_REFERENCE, R1, rM, mu, ORACLE_STEPS);
+      const oracle = opticalDepthToTop(R05_EARTH_REFERENCE, R1, rM, mu);
       for (const c of CHANNELS) {
         // The top row's zenith ray has no air to cross: both are 0 there.
         worst = Math.max(
@@ -238,7 +248,7 @@ describe("R05's constants as a medium", () => {
   });
 
   it("give R05.T12.e's twin's pixels on its 1,046 rays to 10⁻⁶, with its sun and no multiple scattering", () => {
-    const pixelOf = twinPixel(EARTH_REFERENCE, R05_SOURCES);
+    const pixelOf = twinPixel(R05_EARTH_REFERENCE, R05_SOURCES);
     const off: string[] = [];
     for (const ray of gateRays()) {
       for (const scheme of [HIGH, evenAt(HIGH), LOW, evenAt(LOW)]) {
@@ -260,7 +270,7 @@ describe("R05's constants as a medium", () => {
 
   it("hold R05.T12.b's 20 texels within its 1% of the oracle's optical depth at the kernel's 256 steps", () => {
     const table = earth.transmittance;
-    const shell = { bottomRadiusM: R1, topRadiusM: R1 + EARTH_REFERENCE.topHeightM };
+    const shell = { bottomRadiusM: R1, topRadiusM: R1 + R05_EARTH_REFERENCE.topHeightM };
     let worst = 0;
     for (const [x, y] of ORACLE_TEXELS) {
       const { rM, mu } = transmittanceUvToRMu(
@@ -268,7 +278,7 @@ describe("R05's constants as a medium", () => {
         unitFromTexelUv((x + 0.5) / table.widthTexels, table.widthTexels),
         unitFromTexelUv((y + 0.5) / table.heightTexels, table.heightTexels),
       );
-      const oracle = opticalDepthToTop(EARTH_REFERENCE, R1, rM, mu);
+      const oracle = opticalDepthToTop(R05_EARTH_REFERENCE, R1, rM, mu);
       for (const c of CHANNELS) {
         // The table stores optical depth since R08.T6.c; the top row's zenith ray holds none.
         const twin = table.texels[(y * table.widthTexels + x) * 4 + c] ?? Number.NaN;
@@ -301,10 +311,10 @@ describe("the sky view's and the march's twins under R05.T12.e's quadrature gate
   let singleOnly = new Map<string, Rgb3>();
 
   beforeAll(() => {
-    const sources = tableSources(planetTwin(EARTH_REFERENCE, BOTTOM_M));
+    const sources = tableSources(planetTwin(R05_EARTH_REFERENCE, BOTTOM_M));
     const rays = gateRays();
-    gate = runGate(rays, twinPixel(EARTH_REFERENCE, sources), [HIGH, LOW]);
-    const noMultiple = twinPixel(EARTH_REFERENCE, {
+    gate = runGate(rays, twinPixel(R05_EARTH_REFERENCE, sources), [HIGH, LOW]);
+    const noMultiple = twinPixel(R05_EARTH_REFERENCE, {
       ...sources,
       multiScattering: (_heightM, _muSun, out) => {
         out.fill(0);
@@ -393,7 +403,7 @@ describe("the multiple-scattering kernel's steps", () => {
   const tables = new Map<string, TwinTable>();
   const build = (options: Partial<MultiScatteringOptions>): TwinTable =>
     multiScatteringTwin(
-      EARTH_REFERENCE,
+      R05_EARTH_REFERENCE,
       R1,
       earth,
       { ...MULTI_SCATTERING_KERNEL_OPTIONS, ...options },
@@ -401,11 +411,11 @@ describe("the multiple-scattering kernel's steps", () => {
     );
 
   beforeAll(() => {
-    // The kernel's own steps are the planet's table: `planetTwin` builds it by the same
-    // `multiScatteringTwin` of the same medium, radius, transmittance and options, each texel on
-    // its own, so at the measured texels it is this table's `build({})` bit for bit.
-    tables.set("even", earth.multiScattering);
-    tables.set("placed", build({ placement: "placed" }));
+    // The kernel's own steps, placed since R08.T6.d, are the planet's table: `planetTwin` builds
+    // it by the same `multiScatteringTwin` of the same medium, radius, transmittance and options,
+    // each texel on its own, so at the measured texels it is this table's `build({})` bit for bit.
+    tables.set("even", build({ placement: "even" }));
+    tables.set("placed", earth.multiScattering);
     tables.set("reference", build({ placement: "placed", samples: MS_REFERENCE_STEPS }));
     tables.set("confirm", build({ placement: "placed", samples: 2 * MS_REFERENCE_STEPS }));
   }, 600_000);
@@ -423,26 +433,31 @@ describe("the multiple-scattering kernel's steps", () => {
   });
 
   // Measured on 2026-10-09 and recorded in plan R08's Risks ("Deviations in T6.a, as built"): over
-  // these 81 texels 10.1% for the kernel's even steps and 2.0% for placed ones (over all 1,024,
-  // 10.5% and 2.6%), the even steps' worst at the ground with the sun 84°–88° from the zenith.
-  it("measures the kernel's 32 even steps against it: about 10% at the ground at sunset", () => {
+  // these 81 texels 10.1% for R05's even steps and 2.0% for placed ones (over all 1,024, 10.5% and
+  // 2.6%), the even steps' worst at the ground with the sun 84°–88° from the zenith. R08.T6.d
+  // placed the kernel's.
+  it("measures R05's 32 even steps against it: about 10% at the ground at sunset", () => {
     const e = worstOver(table("even"), table("reference"));
     expect(e).toBeGreaterThan(0.09);
     expect(e).toBeLessThan(0.11);
   });
 
-  it("measures 32 placed steps against it, for comparison: about 2%", () => {
+  it("measures the kernel's 32 placed steps against it: about 2% (R08.T6.d)", () => {
+    expect(MULTI_SCATTERING_KERNEL_OPTIONS.placement).toBe("placed");
+    // The kernel places them as the twin does: from the texel's point, t* at the ray's lowest.
+    expect(multiScatteringWgsl).toContain(
+      "let split = marchSplit(0.0, tMax, -(bottom + heightM) * mu, samples, true);",
+    );
     expect(worstOver(table("placed"), table("reference"))).toBeLessThan(0.025);
   });
 });
 
 describe("the multiple-scattering kernel's step factor", () => {
   it("takes R05.T12.e's stable step factor from common.wgsl", () => {
+    expect(multiScatteringWgsl).toMatch(/let factor = stepFactor\(stepDepth\);/);
+    expect(multiScatteringWgsl).toMatch(/luminance \+= throughput \* source \* dt \* factor;/);
     expect(multiScatteringWgsl).toMatch(
-      /luminance \+= throughput \* source \* dt \* stepFactor\(stepDepth\);/,
-    );
-    expect(multiScatteringWgsl).toMatch(
-      /transferSum \+= throughput \* local\.scattering \* dt \* stepFactor\(stepDepth\);/,
+      /escaped \+= throughput \* \(local\.absorption \* dt \+ stepAbsorbed\) \* factor;/,
     );
     expect(multiScatteringWgsl).not.toMatch(/source - source \* stepTransmittance/);
     expect(multiScatteringWgsl).not.toMatch(/max\(local\.extinction, vec3f\(1e-12\)\)/);
@@ -451,7 +466,7 @@ describe("the multiple-scattering kernel's step factor", () => {
   it("moves the f32 table by up to 5% through the old form's cancellation, and the new by 10⁻⁶", () => {
     const exact = earth.multiScattering;
     const withFactor = (stepFactor: (x: number) => number): TwinTable =>
-      multiScatteringTwin(EARTH_REFERENCE, R1, earth, {
+      multiScatteringTwin(R05_EARTH_REFERENCE, R1, earth, {
         ...MULTI_SCATTERING_KERNEL_OPTIONS,
         stepFactor,
       });
@@ -512,6 +527,11 @@ const ABSORBER: MediumTerm = {
   phase: { kind: "none" },
 };
 
+/** A term with its density and edges, scattering and absorbing nothing. */
+function withoutCoefficients(term: MediumTerm): MediumTerm {
+  return { ...term, scattering: [0, 0, 0], absorption: [0, 0, 0] };
+}
+
 const medium = (terms: readonly MediumTerm[]): AtmosphereMedium => ({
   name: "test",
   topHeightM: 100_000,
@@ -552,7 +572,7 @@ function sunAt(elevationDeg: number): SunState {
   const e = (elevationDeg * Math.PI) / 180;
   return {
     directionBodyFixed: { x: Math.sin(e), y: 0, z: Math.cos(e) },
-    distanceAu: 1,
+    illuminanceLx: referenceSunIlluminanceLx(),
     angularRadiusRad: 0.004_650_5,
   };
 }
@@ -622,7 +642,16 @@ describe("the twin over N terms", () => {
       [R1 + 40_000, -0.3],
     ] as const) {
       const all = kernelOpticalDepth(medium(terms), R1, rM, mu);
-      const each = terms.map((term) => kernelOpticalDepth(medium([term]), R1, rM, mu));
+      // A ray is split at every term's layer edges (R08.T6.d), so each term is marched with the
+      // others beside it at no coefficient, which keeps their edges and so the same steps.
+      const each = terms.map((term) =>
+        kernelOpticalDepth(
+          medium(terms.map((t) => (t === term ? t : withoutCoefficients(t)))),
+          R1,
+          rM,
+          mu,
+        ),
+      );
       for (const c of CHANNELS) {
         const sum = each.reduce((total, depth) => total + depth[c], 0);
         expect(Math.abs(all[c] / sum - 1)).toBeLessThan(1e-12);
@@ -709,7 +738,7 @@ describe("the per-frame twins' steps", () => {
     const table = skyViewTwin(earth, view, size, 16);
     const shell = {
       bottomRadiusM: view.cameraRadiusM,
-      topRadiusM: view.cameraRadiusM + EARTH_REFERENCE.topHeightM,
+      topRadiusM: view.cameraRadiusM + R05_EARTH_REFERENCE.topHeightM,
     };
     for (const [x, y] of [
       [0, 0],
@@ -717,7 +746,7 @@ describe("the per-frame twins' steps", () => {
       [11, 5],
       [3, 9],
     ] as const) {
-      const ray = skyViewRayTwin(EARTH_REFERENCE, view, x, y, size);
+      const ray = skyViewRayTwin(R05_EARTH_REFERENCE, view, x, y, size);
       const rM = ray.originM.z;
       expect(ray.fromCamera).toBe(true);
       expect(ray.tStartM).toBe(0);
@@ -725,7 +754,7 @@ describe("the per-frame twins' steps", () => {
       const split = marchSplit(0, ray.tEndM, -rM * ray.direction.z, 16, true);
       const steps = Array.from({ length: 16 }, (_, i) => marchStep(split, i));
       const marched = marchTwin(
-        EARTH_REFERENCE,
+        R05_EARTH_REFERENCE,
         tableSources(earth),
         { kind: "sphere", bottomRadiusM: view.cameraRadiusM },
         ray,
@@ -739,19 +768,19 @@ describe("the per-frame twins' steps", () => {
 
   it("start the ray march from orbit toward its lowest point, and end it on the bare ground", () => {
     const orbit = twinView(equatorCamera(WGS84, 400_000), sunAt(30), WGS84, 0.1);
-    const down = rayMarchRayTwin(EARTH_REFERENCE, orbit, 0.5, 0.9, 0, 32_000);
+    const down = rayMarchRayTwin(R05_EARTH_REFERENCE, orbit, 0.5, 0.9, 0, 32_000);
     expect(down?.ray.fromCamera).toBe(false);
     expect(down?.bareGroundM).not.toBeNull();
   });
 
   it("start the ray march at a camera inside the air, toward a surface beyond the reach", () => {
-    const inside = rayMarchRayTwin(EARTH_REFERENCE, view, 0.5, 0.5, 0.1 / 60_000, 32_000);
+    const inside = rayMarchRayTwin(R05_EARTH_REFERENCE, view, 0.5, 0.5, 0.1 / 60_000, 32_000);
     expect(inside?.ray.fromCamera).toBe(true);
     expect(inside?.ray.tStartM).toBe(0);
   });
 
   it("march nothing from inside the air to a surface within the aerial-perspective reach", () => {
-    expect(rayMarchRayTwin(EARTH_REFERENCE, view, 0.5, 0.5, 0.1 / 20_000, 32_000)).toBeNull();
+    expect(rayMarchRayTwin(R05_EARTH_REFERENCE, view, 0.5, 0.5, 0.1 / 20_000, 32_000)).toBeNull();
   });
 
   it("march each ray-march texel on the spheroid over its placed steps, as rayMarch.wgsl does", () => {
@@ -764,7 +793,7 @@ describe("the per-frame twins' steps", () => {
       const x = i % target.widthTexels;
       const y = Math.floor(i / target.widthTexels);
       const marched = rayMarchRayTwin(
-        EARTH_REFERENCE,
+        R05_EARTH_REFERENCE,
         orbit,
         (x + 0.5) / target.widthTexels,
         (y + 0.5) / target.heightTexels,
@@ -775,7 +804,7 @@ describe("the per-frame twins' steps", () => {
         continue;
       }
       const { luminance } = marchTwin(
-        EARTH_REFERENCE,
+        R05_EARTH_REFERENCE,
         sources,
         { kind: "spheroid", figure: WGS84 },
         marched.ray,
@@ -794,7 +823,7 @@ describe("the per-frame twins' steps", () => {
     // is 1, so v = (1 + tan(dip)) ÷ 2.
     const dip = Math.acos((R1 + 20_000) / (R1 + 400_000));
     const marched = rayMarchRayTwin(
-      EARTH_REFERENCE,
+      R05_EARTH_REFERENCE,
       orbit,
       0.5,
       (1 + Math.tan(dip)) / 2,
@@ -808,14 +837,14 @@ describe("the per-frame twins' steps", () => {
     const steps = placedSteps(marched.ray, 32);
     const sources = tableSources(earth);
     const onSpheroid = marchTwin(
-      EARTH_REFERENCE,
+      R05_EARTH_REFERENCE,
       sources,
       { kind: "spheroid", figure: sphere },
       marched.ray,
       steps,
     );
     const onSphere = marchTwin(
-      EARTH_REFERENCE,
+      R05_EARTH_REFERENCE,
       sources,
       { kind: "sphere", bottomRadiusM: R1 },
       marched.ray,
@@ -963,12 +992,12 @@ function bilinearAt(table: TwinTable, u: number, v: number, c: number): number {
  */
 function r05Transmittance(bottomM: number): TwinTable {
   const { widthTexels: w, heightTexels: h } = TRANSMITTANCE_SIZE;
-  const shell = { bottomRadiusM: bottomM, topRadiusM: bottomM + EARTH_REFERENCE.topHeightM };
+  const shell = { bottomRadiusM: bottomM, topRadiusM: bottomM + R05_EARTH_REFERENCE.topHeightM };
   const texels = new Float64Array(w * h * 4);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
       const { rM, mu } = transmittanceUvToRMu(shell, (x + 0.5) / w, (y + 0.5) / h);
-      const tau = kernelOpticalDepth(EARTH_REFERENCE, bottomM, rM, mu);
+      const tau = kernelOpticalDepth(R05_EARTH_REFERENCE, bottomM, rM, mu);
       texels.set([Math.exp(-tau[0]), Math.exp(-tau[1]), Math.exp(-tau[2]), 1], (y * w + x) * 4);
     }
   }
@@ -977,7 +1006,7 @@ function r05Transmittance(bottomM: number): TwinTable {
 
 /** The sun's transmittance from R05's table at a height and zenith cosine, as R05 read it. */
 function r05SunTransmittance(table: TwinTable, bottomM: number, heightM: number, mu: number): Rgb3 {
-  const shell = { bottomRadiusM: bottomM, topRadiusM: bottomM + EARTH_REFERENCE.topHeightM };
+  const shell = { bottomRadiusM: bottomM, topRadiusM: bottomM + R05_EARTH_REFERENCE.topHeightM };
   const [u, v] = transmittanceRMuToUv(shell, bottomM + heightM, mu);
   return [bilinearAt(table, u, v, 0), bilinearAt(table, u, v, 1), bilinearAt(table, u, v, 2)];
 }
@@ -993,7 +1022,9 @@ function edgeError(
   elevationDeg: number,
 ): number {
   const mu = Math.sin((elevationDeg * Math.PI) / 180);
-  const oracle = opticalDepth(EARTH_REFERENCE, R1, R1 + heightM, mu).map((tau) => Math.exp(-tau));
+  const oracle = opticalDepth(R05_EARTH_REFERENCE, R1, R1 + heightM, mu).map((tau) =>
+    Math.exp(-tau),
+  );
   const t = transmittanceAt(heightM, mu);
   return Math.max(...CHANNELS.map((c) => Math.abs(t[c] / (oracle[c] ?? Number.NaN) - 1)));
 }
@@ -1014,7 +1045,7 @@ describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
   // floor, 10⁻⁶ of the table's largest (Verification), far under anything a table stores.
   it("reads every transmittance texel back at its own (h, μ) to 10⁻⁹, as e^(−τ) of its τ", () => {
     const sources = tableSources(earth);
-    const shell = { bottomRadiusM: R1, topRadiusM: R1 + EARTH_REFERENCE.topHeightM };
+    const shell = { bottomRadiusM: R1, topRadiusM: R1 + R05_EARTH_REFERENCE.topHeightM };
     const { widthTexels: w, heightTexels: h } = earth.transmittance;
     // The table's largest transmittance is 1, at the top row's zenith.
     const floor = 1e-6;
@@ -1040,7 +1071,7 @@ describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
   it("reads every multiple-scattering texel back at its own (h, μ_s) to 10⁻⁹", () => {
     const sources = tableSources(earth);
     const { widthTexels: w, heightTexels: h } = earth.multiScattering;
-    const top = EARTH_REFERENCE.topHeightM;
+    const top = R05_EARTH_REFERENCE.topHeightM;
     const floor = 1e-6 * largestOf(earth.multiScattering);
     const out: Rgb3 = [0, 0, 0];
     let worst = 0;
@@ -1428,6 +1459,228 @@ describe("four absorbers, one a molecule pair, under their curves of growth", ()
 
   it("are refused where a light gives fewer curves than the medium's absorbers", () => {
     expect(() => planetTwin(four, R1, [(curves[0] ?? []).slice(0, 2)])).toThrow(/gives 2 curves/u);
+  });
+});
+
+// --- R08.T6.d: the multiple-scattering denominator accumulated ------------------------------------
+
+describe("the multiple-scattering table's 1 − f_ms, accumulated (decision-r08-t6b-floor.md §9.3)", () => {
+  const everyTexel = Array.from(
+    { length: 32 * 32 },
+    (_, i) => [i % 32, Math.floor(i / 32)] as const,
+  );
+
+  /** The worst |escape − (1 − f_ms)| over channels where 1 − f_ms is at least 10⁻³. */
+  const worstIdentity = (series: readonly MultiScatteringSeries[]): number => {
+    let worst = 0;
+    for (const { fMs, escape } of series) {
+      for (const c of CHANNELS) {
+        if (1 - fMs[c] >= 1e-3) {
+          worst = Math.max(worst, Math.abs(escape[c] - (1 - fMs[c])));
+        }
+      }
+    }
+    return worst;
+  };
+
+  /** R05's Earth's series at every texel, built once for the two tests that read it. */
+  let r05Series: MultiScatteringSeries[] = [];
+  const r05 = (): MultiScatteringSeries[] =>
+    r05Series.length > 0
+      ? r05Series
+      : (r05Series = multiScatteringSeriesTwin(R05_EARTH_REFERENCE, R1, earth, everyTexel));
+
+  it("is the escape, 1 − f_ms exactly, to 10⁻¹² on R05's Earth at every texel", () => {
+    const series = r05();
+    expect(series.every(({ escape }) => escape.every((e) => e > 0))).toBe(true);
+    expect(worstIdentity(series)).toBeLessThan(1e-12);
+  }, 60_000);
+
+  it("is the escape to 10⁻¹² through absorbers too, whose step depths it counts", () => {
+    const { medium: four, curves } = fourAbsorberMedium();
+    const tables = transmittanceTablesTwin(four, R1, curves, SMALL_TRANSMITTANCE, 64);
+    expect(
+      worstIdentity(multiScatteringSeriesTwin(four, R1, tables, MEASURED_TEXELS)),
+    ).toBeLessThan(1e-12);
+  }, 60_000);
+
+  it("leaves R05's Earth's table as L₂ ÷ (1 − f_ms) formed would, to 10⁻⁶", () => {
+    const series = r05();
+    const formed = new Float64Array(earth.multiScattering.texels.length);
+    for (const [i, { secondOrder, fMs }] of series.entries()) {
+      formed.set([...CHANNELS.map((c) => secondOrder[c] / (1 - fMs[c])), 0], i * 4);
+    }
+    expect(worstRelative(earth.multiScattering.texels, formed)).toBeLessThan(1e-6);
+  }, 60_000);
+
+  it("stores L₂ ÷ mean(escape), or L₂ alone in a channel whose escape is 0, counting those in alpha", () => {
+    const stored = multiScatteringStored({
+      secondOrder: [0.3, 0.2, 0],
+      fMs: [1, 0.5, 1],
+      escape: [0, 0.5, 0],
+    });
+    expect(stored).toEqual({ value: [0.3, 0.4, 0], alone: 2 });
+    expect(
+      multiScatteringStored({ secondOrder: [1, 2, 3], fMs: [0.5, 0.5, 0.5], escape: [0.5, 1, 2] }),
+    ).toEqual({ value: [2, 2, 1.5], alone: 0 });
+  });
+
+  describe("on the Venus-class medium, where 1 − f_ms formed rounds to 0 in f32", () => {
+    const { medium: venus, radiusM } = venusClassMedium();
+    let transmittance: TwinTransmittance = {
+      transmittance: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
+      absorberColumns: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
+      curves: [],
+    };
+    let series: MultiScatteringSeries[] = [];
+    /** The table every texel stores, from its series: `multiScatteringTwin`'s, built once. */
+    let stored: MultiScatteringStored[] = [];
+
+    beforeAll(() => {
+      transmittance = transmittanceTablesTwin(venus, radiusM);
+      series = multiScatteringSeriesTwin(venus, radiusM, transmittance, everyTexel);
+      stored = series.map(multiScatteringStored);
+    }, 300_000);
+
+    it("is what multiScatteringTwin stores, at a row of texels", () => {
+      const row = everyTexel.slice(32 * 4, 32 * 5);
+      const table = multiScatteringTwin(
+        venus,
+        radiusM,
+        transmittance,
+        MULTI_SCATTERING_KERNEL_OPTIONS,
+        row,
+      );
+      for (const [x, y] of row) {
+        const offset = (y * 32 + x) * 4;
+        const { value, alone } = stored[y * 32 + x] ?? { value: [], alone: Number.NaN };
+        expect([...table.texels.subarray(offset, offset + 4)]).toEqual([...value, alone]);
+      }
+    });
+
+    it("is finite, non-negative and within the half float's range at every texel", () => {
+      const colours = stored.flatMap(({ value }) => [...value]);
+      expect(colours.length).toBe(32 * 32 * 3);
+      expect(colours.every((v) => Number.isFinite(v) && v >= 0 && v <= HALF_MAX)).toBe(true);
+    });
+
+    it("is the escape, 1 − f_ms exactly, to 10⁻¹² wherever 1 − f_ms is at least 10⁻³", () => {
+      expect(worstIdentity(series)).toBeLessThan(1e-12);
+      // The cut leaves out the channels where the identity cannot be read from f_ms in f64.
+      const cut = series.flatMap(({ fMs }) => fMs.filter((f) => 1 - f < 1e-3)).length;
+      expect(cut).toBeGreaterThan(0);
+      expect(cut).toBeLessThan(32 * 32 * 3);
+    });
+
+    it("has texels whose 1 − f_ms is under f32's spacing at 1, which formed it rounded to 0", () => {
+      const underSpacing = series.filter(({ fMs }) => fMs.some((f) => 1 - f < 2 ** -24));
+      expect(underSpacing.length).toBeGreaterThan(0);
+      // Each still escapes: its escape, accumulated, is above 0.
+      expect(underSpacing.every(({ escape }) => escape.every((e) => e > 0))).toBe(true);
+    });
+
+    it("keeps L₂ alone in a channel only where its escape is 0, its alpha counting them", () => {
+      for (const [i, { escape }] of series.entries()) {
+        expect(stored[i]?.alone).toBe(escape.filter((e) => !(e > 0)).length);
+      }
+    });
+  });
+});
+
+// --- R08.T6.d: R05.T12.e's quadrature gate on the rebuilt Earth ----------------------------------
+
+/**
+ * The miss R05.T12.e's gate records on the rebuilt Earth (R08.T6.d; plan R08's Risks, "Deviations
+ * in T6.d, as built"; raised with "main", not widened): the worst e of each family, in percent,
+ * at high's counts and at low's, as measured on 2026-10-12. The marches' placed steps
+ * under-resolve the ozone layer, which is densest at its base and ramps to 0 over 78 m there and
+ * 10 m at its top, where their absorber columns cross it (`decision-r08-t6b-floor.md` §9.2); the
+ * same layer absorbing linearly misses alike, and the Earth without its ozone holds. Pinned both
+ * ways, to 0.01 point, so that a change to the miss is seen, a cure as well as a worsening.
+ */
+const RECORDED_LAYER_MISS: Readonly<
+  Record<string, { readonly high: number; readonly low: number }>
+> = {
+  disc: { high: 7.75, low: 8.33 },
+  limb: { high: 21.28, low: 44.86 },
+  inside: { high: 1.43, low: 9.88 },
+  "near-level": { high: 0.41, low: 1.61 },
+  sky: { high: 0.51, low: 9.58 },
+  band: { high: 4.71, low: 61.39 },
+  past: { high: 3.21, low: 11.78 },
+  "high band": { high: 5.7, low: 46.31 },
+  "high limb": { high: 14.21, low: 59.05 },
+};
+
+/** A gate's worst e of each family under a scheme, in percent. */
+function worstByFamily(gate: Gate, scheme: typeof HIGH): Map<string, number> {
+  const worst = new Map<string, number>();
+  for (const { ray, e } of errors(gate, scheme)) {
+    worst.set(ray.family, Math.max(worst.get(ray.family) ?? 0, 100 * e));
+  }
+  return worst;
+}
+
+/** The families whose worst e under a scheme stands off its record by over 0.01 point, either way. */
+function offRecord(gate: Gate, scheme: typeof HIGH, level: "high" | "low"): string[] {
+  const worst = worstByFamily(gate, scheme);
+  return FAMILIES.filter((family) => {
+    const recorded = RECORDED_LAYER_MISS[family]?.[level] ?? Number.NaN;
+    return !(Math.abs((worst.get(family) ?? Number.NaN) - recorded) <= 0.01);
+  }).map(
+    (family) =>
+      `${family}: ${String(worst.get(family))}, recorded ${String(RECORDED_LAYER_MISS[family]?.[level])}`,
+  );
+}
+
+describe("R05.T12.e's quadrature gate on the rebuilt Earth, its ozone a layer (R08.T6.d)", () => {
+  let gate: Gate = { results: [], lMax: new Map() };
+  let withoutOzone: Gate = { results: [], lMax: new Map() };
+
+  beforeAll(() => {
+    const sources = tableSources(planetTwin(EARTH_REFERENCE, BOTTOM_M, EARTH_REFERENCE_CURVES));
+    gate = runGate(gateRays(), twinPixel(EARTH_REFERENCE, sources), [HIGH, LOW]);
+    const clear = {
+      ...EARTH_REFERENCE,
+      terms: EARTH_REFERENCE.terms.filter((term) => term.absorber === undefined),
+    };
+    // The rays the layer's miss reaches, at high's counts or low's bounds, run again without it.
+    const missed = new Set(
+      [...failures(gate, HIGH), ...overLowBounds(gate, LOW)].map(({ ray }) => ray.name),
+    );
+    withoutOzone = runGate(
+      gateRays().filter((ray) => missed.has(ray.name)),
+      twinPixel(clear, tableSources(planetTwin(clear, BOTTOM_M))),
+      [HIGH, LOW],
+    );
+  }, 600_000);
+
+  it("has a reference of 2,048, 4,096 or 8,192 placed steps within 0.05% of twice its steps", () => {
+    const unconverged = gate.results
+      .map(({ ray, reference, confirm }) => ({
+        ray,
+        e: errorOf(reference, confirm, gate.lMax.get(kernelOf(ray)) ?? [0, 0, 0]),
+      }))
+      .filter(({ e }) => !(e < CONVERGED));
+    expect(describeFailures(unconverged)).toEqual([]);
+  });
+
+  it("misses at high's counts only where it recorded, by what it recorded", () => {
+    const missing = new Set(failures(gate, HIGH).map(({ ray }) => ray.family));
+    expect([...missing].toSorted()).toEqual(
+      ["band", "disc", "high band", "high limb", "limb", "past"].toSorted(),
+    );
+    expect(offRecord(gate, HIGH, "high")).toEqual([]);
+  });
+
+  it("misses low's bounds by what it recorded", () => {
+    expect(offRecord(gate, LOW, "low")).toEqual([]);
+  });
+
+  it("holds every ray it misses outright without its ozone: the miss is the layer's", () => {
+    expect(withoutOzone.results.length).toBeGreaterThan(80);
+    expect(describeFailures(failures(withoutOzone, HIGH))).toEqual([]);
+    expect(describeFailures(overLowBounds(withoutOzone, LOW))).toEqual([]);
   });
 });
 

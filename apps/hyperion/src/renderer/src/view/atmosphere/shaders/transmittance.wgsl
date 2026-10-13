@@ -15,8 +15,10 @@
 // Ported from Bevy 0.19.1's crates/bevy_pbr/src/atmosphere/transmittance_lut.wgsl (MIT or
 // Apache-2.0; the notice is in common.wgsl), checked against sebh's UnrealEngineSkyAtmosphere
 // (MIT, Copyright (c) 2020 Epic Games, Inc.). Changes: the medium's terms are evaluated directly,
-// and the optical depth is the midpoint rule over equal steps with `medium.samples` of them, where
-// Bevy samples at 0.3 of each step and drops the last step's remainder. Each texel's point is taken
+// and the optical depth is the midpoint rule over `medium.samples` steps, where Bevy samples at 0.3
+// of each step and drops the last step's remainder; the steps are equal on each piece of the ray
+// between the places it crosses a term's layer edges, since plan R08's R08.T6.d (`rayToTop`), and
+// were equal along the whole ray before. Each texel's point is taken
 // from its rho = sqrt(r^2 - bottom^2) as a height (`transmittanceTexelOf`, plan R08, Design note
 // 18), and each step's height as h = (t^2 + 2 r mu t + rho^2) / (r(t) + bottom), without f32's
 // cancellation (R08.T6.b, R08.T6.g). Formed as differences of radii, they lost the 0.5 m spacing
@@ -37,9 +39,25 @@
 @group(0) @binding(2) var densityTables : texture_2d_array<f32>;
 @group(0) @binding(3) var transmittanceOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(4) var absorberColumnsOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(5) var<uniform> layerEdges : LayerEdges;
 
 // rgba16float's largest finite value (IEEE 754-2008 binary16), to which every stored value is held.
 const HALF_MAX : f32 = 65504.0;
+
+// Each term's layer edges, heights above the ground, m (plan R08, R08.T6.d; `tables.ts`'s
+// packLayerEdges): term i's in heights[i], where its density table leaves 0 and where each ramp
+// ends, -1 where unused.
+struct LayerEdges {
+  heights : array<vec4f, MAX_TERMS>,
+}
+
+// The most places a ray may cross the terms' layer edges: four edges a term, each crossed at most
+// twice.
+const MAX_CROSSINGS : u32 = 8u * MAX_TERMS;
+
+// The fewest steps a piece of a ray between two crossings takes (`tables.ts`'s
+// TRANSMITTANCE_STEPS_A_PIECE).
+const STEPS_A_PIECE : u32 = 4u;
 
 // What the table keeps of a ray from a texel's point to the top: the optical depth of every term
 // but the absorbers, and each absorber slot's column over its vertical one (R08.T6.c).
@@ -49,23 +67,83 @@ struct RayToTop {
 }
 
 // The optical depth and the absorber columns from a texel's point along its zenith cosine to the
-// top.
+// top. The ray is split where it crosses the terms' layer edges (`shellCrossings`), so that no
+// ramp of a layer, up to one column interval (about 115 m on a 250 K column), falls inside a step
+// of up to 8.9 km, where the midpoint rule errs
+// to first order (R08.T6.d; `decision-r08-t6b-floor.md` section 9.2). The `medium.samples` steps
+// are spread over the pieces in proportion to their length, STEPS_A_PIECE a piece at least, by
+// rounding each piece's end's share of the rest (so that they sum to the rest exactly), each piece
+// at its own steps' midpoints. A ray that crosses no edge is R05's one piece of equal steps.
 fn rayToTop(texel : TransmittanceTexel) -> RayToTop {
   let samples = max(u32(medium.samples), 1u);
-  let r = medium.bottomRadiusM + texel.heightM;
+  let bottom = medium.bottomRadiusM;
+  let r = bottom + texel.heightM;
   let mu = texel.mu;
   let rho2 = texel.rho * texel.rho;
   let rMu = r * mu;
-  let tMax = shellDistanceToTop(medium.bottomRadiusM, medium.topHeightM, texel.heightM, mu);
-  let dt = tMax / f32(samples);
+  let tMax = shellDistanceToTop(bottom, medium.topHeightM, texel.heightM, mu);
+  // The crossings within (0, tMax), ascending, each distance once.
+  var ends : array<f32, MAX_CROSSINGS + 1u>;
+  var crossings = 0u;
+  let termCount = min(u32(medium.termCount), MAX_TERMS);
+  for (var i = 0u; i < termCount; i++) {
+    let edges = layerEdges.heights[i];
+    for (var k = 0u; k < 4u; k++) {
+      let edgeM = edges[k];
+      if (edgeM <= 0.0 || edgeM >= medium.topHeightM) {
+        continue;
+      }
+      let roots = shellCrossings(bottom, texel.heightM, mu, edgeM);
+      for (var j = 0u; j < 2u; j++) {
+        let t = roots[j];
+        if (t <= 0.0 || t >= tMax) {
+          continue;
+        }
+        var at = crossings;
+        while (at > 0u && ends[at - 1u] > t) {
+          ends[at] = ends[at - 1u];
+          at--;
+        }
+        ends[at] = t;
+        crossings++;
+      }
+    }
+  }
+  // The pieces' ends, each distance once, the ray's own end last.
+  var pieces = 0u;
+  for (var j = 0u; j < crossings; j++) {
+    if (pieces == 0u || ends[j] > ends[pieces - 1u]) {
+      ends[pieces] = ends[j];
+      pieces++;
+    }
+  }
+  ends[pieces] = tMax;
+  pieces++;
+  let least = min(STEPS_A_PIECE, samples / pieces);
+  let rest = samples - least * pieces;
   var depth = vec3f(0.0);
   var columns = AbsorberColumns(0.0, vec4f(0.0));
-  for (var i = 0u; i < samples; i++) {
-    let t = (f32(i) + 0.5) * dt;
-    let heightM = (t * t + 2.0 * rMu * t + rho2) / (localR(r, mu, t) + medium.bottomRadiusM);
-    let local = mediumAtHeight(heightM);
-    depth += local.extinction * dt;
-    columns = addColumns(columns, local.columns, dt);
+  var start = 0.0;
+  var spent = 0u;
+  for (var p = 0u; p < pieces; p++) {
+    let end = ends[p];
+    var share = rest;
+    if (p + 1u < pieces) {
+      share = u32(floor(f32(rest) * (end / tMax) + 0.5));
+    }
+    let steps = least + share - spent;
+    spent = share;
+    if (steps > 0u) {
+      let dt = (end - start) / f32(steps);
+      for (var i = 0u; i < steps; i++) {
+        let t = start + (f32(i) + 0.5) * dt;
+        let heightM = (t * t + 2.0 * rMu * t + rho2) / (localR(r, mu, t) + bottom);
+        let local = mediumAtHeight(heightM);
+        depth += local.extinction * dt;
+        columns = addColumns(columns, local.columns, dt);
+      }
+    }
+    start = end;
   }
   return RayToTop(depth, columns);
 }

@@ -1,7 +1,7 @@
 /**
  * The per-frame marches' steps (plan R05, R05.T12.e, with addendum A of
  * `decision-r05-high-atmosphere.md`): the TypeScript twin of `marchSplit` and `marchStep` in
- * `shaders/source.wgsl`, which the sky-view and ray-march kernels take, and the quadrature gate's
+ * `shaders/common.wgsl`, which the sky-view, ray-march and multiple-scattering kernels take, and the quadrature gate's
  * tolerances.
  *
  * @remarks

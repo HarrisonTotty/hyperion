@@ -1,11 +1,46 @@
 /**
- * Earth's reference atmosphere (plan R05, Design note 16, R05.T12.a): Rayleigh, aerosol and ozone
- * terms at Earth's measured values, each cited, and Hillaire 2020's reference medium beside it for
- * comparison against his published images.
+ * Earth's reference atmospheres: R08.T6.d's Earth rebuilt (plan R08, R08.T6.d), from R08.T3's
+ * column and molecular term, R05's aerosol, R08.T4.b's ozone curve of growth and R08.T4.a's fitted
+ * channels, under R06's Sun; R05's constants (plan R05, Design note 16, R05.T12.a), Rayleigh,
+ * aerosol and ozone terms at Earth's measured values, each cited, kept as a second medium for
+ * comparison; and Hillaire 2020's reference medium beside them for comparison against his
+ * published images.
+ *
+ * @remarks
+ * The rebuilt Earth's ozone is an absorber term (`absorbers.ts`'s `absorberTerm`), whose
+ * absorption is each sun's curve of growth: {@link EARTH_REFERENCE_CURVES} are the reference Sun's,
+ * which every table of {@link EARTH_REFERENCE} is built with. This module therefore takes the
+ * absorbers' cross-sections into whatever bundle reads it, and builds the curve when it loads: the
+ * descent spike's chunk, which `main.tsx` loads only for a `--descent-spike` launch, and the
+ * smoke's, until R08.T10.a's optics worker builds each body's medium and curves off the render
+ * thread.
  */
 
+import type { HostDiscDto } from "@hyperion/protocol";
+
+import { CHANNEL_LUMINANCE, starIlluminance } from "../lighting/illuminance";
+import { frozenHostDisc, sunLikeHostDisc } from "../lighting/hostDisc";
 import type { Rgb } from "../photometry/toneCurve";
-import type { AtmosphereMedium, MediumTerm, PhaseFunction } from "./medium";
+import { AU_M } from "../scenes/kept";
+import { type AbsorberSpec, absorberCurve, absorberSpecs, absorberTerm } from "./absorbers";
+import {
+  type AtmosphereColumn,
+  dryAdiabatExponent,
+  gasProperties,
+  hydrostaticColumn,
+  meanMolarMassGPerMol,
+  type MixtureComponent,
+} from "./column";
+import {
+  type AtmosphereMedium,
+  CHANNEL_WAVELENGTHS_NM,
+  type MediumTerm,
+  type PhaseFunction,
+} from "./medium";
+import { type LevelSpheroid, referenceGravity } from "./oblate";
+import { type GasFractions, molecularTerm } from "./rayleigh";
+import { bakeSpectrumOf } from "./spectralColour";
+import type { AbsorberCurveSlots } from "./tables";
 
 /**
  * Dry air's Rayleigh scattering coefficients at sea level, m⁻¹, at 680, 550 and 440 nm:
@@ -133,7 +168,8 @@ function aerosolExtinctionPerM(wavelengthNm: number): number {
   return opticalDepth / AEROSOL_SCALE_HEIGHT_M;
 }
 
-const AEROSOL_EXTINCTION_PER_M: Rgb = [
+/** R05's aerosol extinction at Bruneton's 680, 550 and 440 nm, where R05's constants stand. */
+const R05_AEROSOL_EXTINCTION_PER_M: Rgb = [
   aerosolExtinctionPerM(680),
   aerosolExtinctionPerM(550),
   aerosolExtinctionPerM(440),
@@ -159,11 +195,14 @@ const OZONE_TERM: MediumTerm = {
 };
 
 /**
- * Earth's reference atmosphere: dry-air Rayleigh scattering, a continental aerosol and the ozone
- * layer, at Earth's measured values (Design note 16).
+ * R05's Earth (plan R05, Design note 16): dry-air Rayleigh scattering on an exponential of the US
+ * Standard Atmosphere's 8,434.5 m, a continental aerosol and Bruneton's ozone tent, at Earth's
+ * measured values evaluated at Bruneton's 680, 550 and 440 nm. Kept as a second medium for
+ * comparison beside {@link HILLAIRE_REFERENCE} (plan R08, R08.T6.d), which R05's gates and
+ * recorded figures were measured on; {@link EARTH_REFERENCE} is drawn.
  */
-export const EARTH_REFERENCE: AtmosphereMedium = {
-  name: "earth",
+export const R05_EARTH_REFERENCE: AtmosphereMedium = {
+  name: "earth (R05)",
   topHeightM: EARTH_TOP_HEIGHT_M,
   groundAlbedo: [EARTH_GROUND_ALBEDO, EARTH_GROUND_ALBEDO, EARTH_GROUND_ALBEDO],
   terms: [
@@ -177,8 +216,8 @@ export const EARTH_REFERENCE: AtmosphereMedium = {
     {
       name: "aerosol",
       density: { kind: "exponential", scaleHeightM: AEROSOL_SCALE_HEIGHT_M },
-      scattering: scaled(AEROSOL_EXTINCTION_PER_M, AEROSOL_SINGLE_SCATTERING_ALBEDO),
-      absorption: scaled(AEROSOL_EXTINCTION_PER_M, 1 - AEROSOL_SINGLE_SCATTERING_ALBEDO),
+      scattering: scaled(R05_AEROSOL_EXTINCTION_PER_M, AEROSOL_SINGLE_SCATTERING_ALBEDO),
+      absorption: scaled(R05_AEROSOL_EXTINCTION_PER_M, 1 - AEROSOL_SINGLE_SCATTERING_ALBEDO),
       phase: { kind: "cornette-shanks", asymmetry: AEROSOL_ASYMMETRY },
     },
     OZONE_TERM,
@@ -218,3 +257,231 @@ export const HILLAIRE_REFERENCE: AtmosphereMedium = {
     OZONE_TERM,
   ],
 };
+
+// --- Earth rebuilt (plan R08, R08.T6.d) -----------------------------------------------------------
+
+/**
+ * Dry air by volume, as fractions: N₂ 78.084, O₂ 20.946 and Ar 0.934 percent (Bodhaine et al.
+ * 1999, J. Atmos. Oceanic Technol. 16, 1854, eq. 23) and Peck and Reeder's 330 ppm of CO₂
+ * (Bodhaine §1), over their sum of 99.997: `rayleigh.test.ts`'s dry air, which gives Earth's 4.85,
+ * 11.5 and 28.7 × 10⁻⁶ m⁻¹ at 680, 550 and 440 nm through R08.T3.c's molecular term, and
+ * `channels.ts`'s fit air.
+ */
+export const EARTH_DRY_AIR_COMPONENTS = [
+  ["N2", 78.084],
+  ["O2", 20.946],
+  ["Ar", 0.934],
+  ["CO2", 0.033],
+] as const;
+
+const DRY_AIR_PERCENT = EARTH_DRY_AIR_COMPONENTS.reduce((sum, [, percent]) => sum + percent, 0);
+
+/** {@link EARTH_DRY_AIR_COMPONENTS} as the molecular term takes it. */
+export const EARTH_DRY_AIR: GasFractions = EARTH_DRY_AIR_COMPONENTS.map(([species, percent]) => ({
+  species,
+  moleFraction: percent / DRY_AIR_PERCENT,
+}));
+
+/** {@link EARTH_DRY_AIR_COMPONENTS} as the column takes it: each gas's molar mass and c_p. */
+const DRY_AIR_MIXTURE: ReadonlyArray<MixtureComponent> = EARTH_DRY_AIR_COMPONENTS.map(
+  ([gas, percent]) => ({ properties: gasProperties(gas), moleFraction: percent / DRY_AIR_PERCENT }),
+);
+
+/**
+ * WGS 84's level spheroid (NIMA TR8350.2, Third Edition, Amendment 1, Table 3.1): a = 6,378,137 m,
+ * 1 ÷ f = 298.257 223 563, GM = 3.986 004 418 × 10¹⁴ m³ s⁻² and ω = 7.292 115 × 10⁻⁵ rad s⁻¹.
+ */
+export const WGS84_LEVEL_SPHEROID: LevelSpheroid = {
+  equatorialRadiusM: 6_378_137,
+  polarRadiusM: 6_378_137 * (1 - 1 / 298.257_223_563),
+  gmM3S2: 3.986_004_418e14,
+  angularVelocityRadS: 7.292_115e-5,
+};
+
+/**
+ * The latent heat's flattening of Earth's lapse rate, α in β = α R ÷ c_p: 0.6, Design note 3's for a
+ * world with a water ocean (Robinson and Catling 2014, Nature Geoscience 7, 12, Table 1).
+ */
+export const EARTH_LAPSE_FLATTENING = 0.6;
+
+/**
+ * Earth's isothermal skin, K: 214.4, 2^(−1/4) × 255 K, the τ → 0 limit of a grey Eddington
+ * atmosphere at Earth's equilibrium temperature, Design note 3's Earth check (tropopause 0.179 bar
+ * at 214 K against about 0.16–0.23 bar and 217 K observed; US Standard Atmosphere 1976, 0.226 bar
+ * at 216.65 K). On {@link EARTH_COLUMN}, whose sea level is 288.15 K, it is reached at 0.181 bar,
+ * 12.59 km.
+ */
+export const EARTH_SKIN_K = 214.4;
+
+/**
+ * Earth's column (plan R08, Design note 3, R08.T3.a; R08.T6.d): the US Standard Atmosphere 1976's
+ * sea level, 101,325 Pa and 288.15 K, on Design note 3's scaled dry adiabat, β =
+ * {@link EARTH_LAPSE_FLATTENING} × R ÷ c_p of {@link EARTH_DRY_AIR_COMPONENTS} (0.172), up to
+ * {@link EARTH_SKIN_K}, with dry air's molar mass from its gases (28.96 g mol⁻¹), at WGS 84's
+ * g_ref = √(γ_e γ_p) (R08.T3.d) on R05's table sphere, (2a + c) ÷ 3.
+ *
+ * @remarks
+ * Its scale height at the ground is kT ÷ (μ m_u g_ref), 8.43 km, so its column is R05's
+ * exponential's and Bodhaine et al. 1999's: τ_R(550 nm) = 0.097 through dry air (`earth.test.ts`).
+ * It differs from R05's in its vertical distribution: the adiabat thins the air above the
+ * ground more slowly than an exponential of the ground's scale height, and the 214 K skin
+ * faster, at about 6.3 km. The skin has no ozone heating (Design note 3's stated limit), so the
+ * stratosphere is about 60 K colder than the real one's top at 50 km.
+ */
+export const EARTH_COLUMN: AtmosphereColumn = hydrostaticColumn({
+  surfacePa: 101_325,
+  temperature: {
+    kind: "radiativeConvective",
+    surfaceK: 288.15,
+    surfacePa: 101_325,
+    beta: EARTH_LAPSE_FLATTENING * dryAdiabatExponent(DRY_AIR_MIXTURE),
+    skinK: EARTH_SKIN_K,
+  },
+  meanMolarMassGPerMol: meanMolarMassGPerMol(DRY_AIR_MIXTURE),
+  referenceGravityMS2: referenceGravity(WGS84_LEVEL_SPHEROID),
+  referenceRadiusM:
+    (2 * WGS84_LEVEL_SPHEROID.equatorialRadiusM + WGS84_LEVEL_SPHEROID.polarRadiusM) / 3,
+});
+
+/** One Dobson unit, molecules m⁻²: 2.687 × 10²⁰ (WMO/UNEP 2018, _Twenty Questions_, glossary). */
+export const DOBSON_UNIT_PER_M2 = 2.687e20;
+
+/**
+ * The ozone layer's base and top, Pa: 70 and 3 hPa, 18.6–38.5 km on {@link EARTH_COLUMN}, where
+ * Earth's measured ozone mostly lies (about 15–35 km; WMO/UNEP 2018, _Twenty Questions_, Q1). Its
+ * column-weighted mean height is 24.0 km, beside R05's tent's 25 km (`earth.test.ts`).
+ *
+ * @remarks
+ * A layer of constant mixing ratio (`absorbers.ts`'s `absorberSpecs`), its number density the air's
+ * times a constant, so densest at its base. A ray tangent to its base crosses about √(2πR ÷ H) ≈ 80
+ * of its vertical columns (Chapman's grazing incidence; 81.6 at the transmittance table's deepest
+ * texel), under where the red curve of growth leaves its last node above the 10⁻⁶ floor under
+ * R06's Sun, 94.4 columns: the red channel leaves Rec. 709 at about 99 columns (29,700 DU), and the
+ * read depth climbs from that node to the floor at d ln τ ÷ d ln u = 15, against 4.3 for the
+ * spectral curve at 95 columns. A thin slab would not keep under it: galaxy plan 14's "layer near
+ * 10–30 mbar" for an oxygen-bearing world's ozone (P14.T24.c) gives rays tangent near its base
+ * 95–145 columns, where the table's own 4,096-step value cannot be met
+ * to `decision-r08-t6b-floor.md` §9.2's bound, nor the stored column's half-float rounding (plan
+ * R08's Risks, "Deviations in T6.d, as built", for "main").
+ */
+export const EARTH_OZONE_LAYER_PA: readonly [number, number] = [7_000, 300];
+
+/** Earth's ozone, {@link OZONE_COLUMN_DU} in {@link EARTH_OZONE_LAYER_PA} on its column. */
+export const EARTH_OZONE: AbsorberSpec = ((): AbsorberSpec => {
+  const [basePa, topPa] = EARTH_OZONE_LAYER_PA;
+  const { specs } = absorberSpecs(
+    [{ species: "O3", columnPerM2: OZONE_COLUMN_DU * DOBSON_UNIT_PER_M2, basePa, topPa }],
+    EARTH_COLUMN,
+  );
+  const [ozone] = specs;
+  if (specs.length !== 1 || ozone === undefined) {
+    throw new Error(`Earth's ozone is one absorber profile, not ${specs.length}`);
+  }
+  return ozone;
+})();
+
+/** R05's aerosol at {@link CHANNEL_WAVELENGTHS_NM}, the fitted channels. */
+const EARTH_AEROSOL_EXTINCTION_PER_M: Rgb = [
+  aerosolExtinctionPerM(CHANNEL_WAVELENGTHS_NM[0]),
+  aerosolExtinctionPerM(CHANNEL_WAVELENGTHS_NM[1]),
+  aerosolExtinctionPerM(CHANNEL_WAVELENGTHS_NM[2]),
+];
+
+/**
+ * Earth's reference atmosphere, rebuilt (plan R08, R08.T6.d): R08.T3.c's molecular term of
+ * {@link EARTH_DRY_AIR} on {@link EARTH_COLUMN} (`rayleigh`, tabulated, with air's depolarisation
+ * per channel), R05's continental aerosol, and {@link EARTH_OZONE} as an absorber term
+ * (`absorber:O3`), whose absorption is each sun's curve of growth (R08.T4.b), every smooth term at
+ * the fitted channels, {@link CHANNEL_WAVELENGTHS_NM}. The top and the ground's albedo are R05's.
+ * Its tables are built with {@link EARTH_REFERENCE_CURVES}.
+ */
+export const EARTH_REFERENCE: AtmosphereMedium = {
+  name: "earth",
+  topHeightM: EARTH_TOP_HEIGHT_M,
+  groundAlbedo: [EARTH_GROUND_ALBEDO, EARTH_GROUND_ALBEDO, EARTH_GROUND_ALBEDO],
+  terms: [
+    molecularTerm(EARTH_COLUMN, EARTH_DRY_AIR).term,
+    {
+      name: "aerosol",
+      density: { kind: "exponential", scaleHeightM: AEROSOL_SCALE_HEIGHT_M },
+      scattering: scaled(EARTH_AEROSOL_EXTINCTION_PER_M, AEROSOL_SINGLE_SCATTERING_ALBEDO),
+      absorption: scaled(EARTH_AEROSOL_EXTINCTION_PER_M, 1 - AEROSOL_SINGLE_SCATTERING_ALBEDO),
+      phase: { kind: "cornette-shanks", asymmetry: AEROSOL_ASYMMETRY },
+    },
+    absorberTerm(EARTH_OZONE, EARTH_COLUMN),
+  ],
+};
+
+/**
+ * R06's solar colour, linear Rec. 709 at unit luminance: `hyperion_sim::sky::colour::solar_colour()`,
+ * the colour table (`tables/star_colour.rs`, ATLAS9, Castelli and Kurucz 2003) at 5,772 K and
+ * log g 4.438 by `star_colour`'s bilinear rule, its red and green 1.0844255 and 0.98155972, and its
+ * blue from the luminance row R06 builds the channels with (R07's `CHANNEL_LUMINANCE`), 0.934006,
+ * as R06's `blue()` gives it.
+ *
+ * @remarks
+ * The same spectrum through the bake bins, {@link R06_SOLAR_BAKE_SPECTRUM} under the matching
+ * functions (`spectralColour.ts`'s `sunWeights`), lies 1.2 × 10⁻⁴ from it in u′v′ (`earth.test.ts`),
+ * the bins' interpolation of a spectrum R06 integrates at 1 nm.
+ */
+export const R06_SOLAR_COLOUR_RGB: Rgb = ((): Rgb => {
+  const red = 1.084_425_5;
+  const green = 0.981_559_72;
+  const [yr, yg, yb] = CHANNEL_LUMINANCE;
+  return [red, green, (1 - yr * red - yg * green) / yb];
+})();
+
+/**
+ * R06's photopic illuminance of a V = 0 star of the Sun's spectrum over 2.54 µlx: 1.036747,
+ * `solar_colour().lux_per_v0()` to seven figures, which puts the Sun at 1.3346 × 10⁵ lx (133,462 lx)
+ * at 1 au, E-490's own 133,318 lx to 0.11%, where R07's stand-in takes 1 (`hostDisc.ts`).
+ */
+export const R06_SOLAR_LUX_PER_V0 = 1.036_747;
+
+/**
+ * R06's solar bake spectrum: `solar_colour().bake_spectrum()`, the Sun's mean spectral irradiance
+ * over the 15 bake bins per lux, W m⁻² nm⁻¹, as `packages/protocol/fixtures/bake_spectra.json`
+ * holds it (held there by `hyperion-fit`'s `star_colour` test, and here by `earth.test.ts`).
+ */
+export const R06_SOLAR_BAKE_SPECTRUM = bakeSpectrumOf([
+  8.960915207343157e-6, 1.2362490278026274e-5, 1.3612987280831015e-5, 1.5485020042778694e-5,
+  1.4690473858970552e-5, 1.3958072723148161e-5, 1.4076616230965863e-5, 1.381707381874496e-5,
+  1.3363324889932911e-5, 1.2474684459518065e-5, 1.1775456367565396e-5, 1.1371777803239652e-5,
+  1.0711433533074792e-5, 1.001879082420593e-5, 9.483862860417408e-6,
+]);
+
+/**
+ * The reference Sun's disc as R06's `host_discs` would send it (plan R08, R08.T6.d): R07's
+ * `sunLikeHostDisc` (M_V 4.81, R☉ 6.957 × 10⁸ m, the V-band limb darkening) with R06's solar
+ * colour, photopic factor and bake spectrum in place of its stand-ins. The descent spike, the smoke
+ * and the tests light the reference Earth with it; generated bodies take their stars' own from
+ * the wire.
+ */
+export const REFERENCE_SUN: HostDiscDto = frozenHostDisc(
+  sunLikeHostDisc({
+    colourRgb: R06_SOLAR_COLOUR_RGB,
+    lux_per_v0: R06_SOLAR_LUX_PER_V0,
+    bake_spectrum: [...R06_SOLAR_BAKE_SPECTRUM],
+  }),
+);
+
+/**
+ * The reference Sun's illuminance per channel at a distance, lx: R07's `starIlluminance` of
+ * {@link REFERENCE_SUN}, what a `SunState` carries.
+ *
+ * @param distanceM - From the Sun's centre, m; 1 au, 149,597,870,700 m (IAU 2012 Resolution B2), by
+ *   default.
+ */
+export function referenceSunIlluminanceLx(distanceM: number = AU_M): Rgb {
+  return starIlluminance(REFERENCE_SUN, distanceM);
+}
+
+/**
+ * The reference Earth's curves of growth: light slot 0 the reference Sun's, R08.T4.b's
+ * `absorberCurve` of {@link EARTH_OZONE} under {@link R06_SOLAR_BAKE_SPECTRUM}, which every table
+ * of {@link EARTH_REFERENCE} is built with (`HillaireAtmosphere`'s and `AtmosphereTables`'s
+ * `curves`).
+ */
+export const EARTH_REFERENCE_CURVES: AbsorberCurveSlots = [
+  [absorberCurve(EARTH_OZONE, R06_SOLAR_BAKE_SPECTRUM)],
+];

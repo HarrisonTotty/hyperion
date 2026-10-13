@@ -406,6 +406,110 @@ describe.each(SPHERES_M)(
   },
 );
 
+// --- The layer edges' crossings (common.wgsl, R08.T6.d) -----------------------------------------
+
+/** `shellCrossings`: the signed distances, m, at which a ray crosses the sphere at `edgeM`. */
+function shellCrossings(
+  bottomM: number,
+  heightM: number,
+  mu: number,
+  edgeM: number,
+): readonly [number, number] | null {
+  const rMu = f(f(bottomM + heightM) * mu);
+  const c = f(f(heightM - edgeM) * f(f(f(2 * bottomM) + heightM) + edgeM));
+  const disc = f(f(rMu * rMu) - c);
+  if (disc < 0) {
+    return null;
+  }
+  const q = -f(rMu + (rMu >= 0 ? 1 : -1) * f(Math.sqrt(disc)));
+  if (q === 0) {
+    return null;
+  }
+  const other = f(c / q);
+  return [Math.min(q, other), Math.max(q, other)];
+}
+
+/** The layer edges the check takes, m: the rebuilt Earth's ozone's four and two more. */
+const EDGES_M = [15_000, 18_596, 18_674, 38_491, 38_501, 60_000] as const;
+
+/** The zenith cosines about the ray tangent to an edge's sphere from a height, and every 0.05. */
+function cosinesAboutEdge(bottomM: number, heightM: number, edgeM: number): number[] {
+  const even = Array.from({ length: 41 }, (_, i) => -1 + i / 20);
+  if (edgeM >= heightM) {
+    return even.map(f);
+  }
+  const tangent = -Math.sqrt(1 - ((bottomM + edgeM) / (bottomM + heightM)) ** 2);
+  const near = Array.from({ length: 49 }, (_, k) => 10 ** ((k - 56) / 6)).flatMap((s) => [
+    tangent * (1 + s),
+    tangent * (1 - s),
+  ]);
+  return [...even, ...near].map((mu) => f(Math.min(Math.max(mu, -1), 1)));
+}
+
+/**
+ * The worst height off its edge, m, of a crossing ahead on a transmittance ray (one that misses the
+ * ground, up to the top), their count, and the worst height off its edge of a ray's lowest point
+ * where f64 finds crossings the f32 form does not.
+ */
+function crossingReport(radiusM: number): {
+  readonly worstM: number;
+  readonly crossings: number;
+  readonly missedM: number;
+} {
+  const bottom = f(radiusM);
+  let worstM = 0;
+  let missedM = 0;
+  let crossings = 0;
+  for (const height of [...CAMERA_HEIGHTS_M, 30_000, 60_000, 99_000]) {
+    const heightM = f(height);
+    for (const edge of EDGES_M) {
+      const edgeM = f(edge);
+      for (const mu of cosinesAboutEdge(bottom, heightM, edgeM)) {
+        // f64 at the same f32 inputs: the height along the ray at t, and the ray's crossings, of
+        // the rays the transmittance table takes, which miss the ground, up to the top.
+        const r = bottom + heightM;
+        const along = (t: number): number =>
+          Math.sqrt(r * r + t * t + 2 * r * mu * t) - bottom - edgeM;
+        const disc64 = (r * mu) ** 2 - (heightM - edgeM) * (2 * bottom + heightM + edgeM);
+        const toGround = (r * mu) ** 2 - heightM * (2 * bottom + heightM);
+        const topM = bottom + ATMOSPHERE_M;
+        const tTop = -r * mu + Math.sqrt((r * mu) ** 2 + topM * topM - r * r);
+        if (mu < 0 && toGround >= 0) {
+          continue;
+        }
+        const found = shellCrossings(bottom, heightM, mu, edgeM);
+        if (found === null) {
+          // A miss f64 does not make is a graze: the ray's lowest point stands at the edge.
+          if (disc64 >= 0) {
+            missedM = Math.max(missedM, Math.abs(along(Math.max(-r * mu, 0))));
+          }
+          continue;
+        }
+        for (const t of found.filter((root) => root > 0 && root < tTop)) {
+          crossings += 1;
+          worstM = Math.max(worstM, Math.abs(along(t)));
+        }
+      }
+    }
+  }
+  return { worstM, crossings, missedM };
+}
+
+describe.each(SPHERES_M)(
+  "the layer edges' crossings (common.wgsl), on a sphere of %d m",
+  (radiusM) => {
+    const report = crossingReport(radiusM);
+
+    // The rebuilt Earth's narrowest ramp is 10 m, its ozone's top (`earth.ts`): the split's own
+    // error, measured 0.012–0.017 m on these spheres, is a few hundredths of a metre in height.
+    it("puts every crossing ahead within 0.05 m of its edge in height, and misses only grazes", () => {
+      expect(report.crossings).toBeGreaterThan(2_500);
+      expect(report.worstM).toBeLessThan(0.05);
+      expect(report.missedM).toBeLessThan(0.05);
+    });
+  },
+);
+
 // --- The ray march's quadric (rayMarch.wgsl) ---------------------------------------------------
 
 /** WGS 84 (NIMA TR8350.2). */
@@ -472,7 +576,7 @@ function radialHeight(r: number, q: number): number {
   return f(f(r * q) / f(root * f(root + 1)));
 }
 
-/** `source.wgsl`'s `marchSplit` and `marchStep`: each step's t and signed offset from t*. */
+/** `common.wgsl`'s `marchSplit` and `marchStep`: each step's t and signed offset from t*. */
 function marchSteps(
   tStart: number,
   tEnd: number,

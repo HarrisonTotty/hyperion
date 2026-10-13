@@ -3137,6 +3137,33 @@ together, towards the reference once T6.c stores optical depth, by amounts it re
     vertical distribution, not in column.
   - The differences from R05 are recorded here, in the sky's zenith radiance at noon and at a sun
     zenith of 85°, and in u′v′.
+  - **Layer edges in the transmittance table** (`decision-r08-t6b-floor.md` §9.2; R08.T6.c's
+    finding).
+    - The transmittance kernel (`transmittance.wgsl`'s `rayToTop`) and its twin split each ray at
+      the heights where it crosses a term's layer edges: where its density leaves 0 and where each
+      ramp ends, at most four a term, carried with the term from its density table. The crossings
+      come from R08.T6.g's shell forms from a height.
+    - The 256 steps are spread over the pieces in proportion to their length, at least 4 a piece,
+      midpoint in each.
+    - Test (no GPU): the table read through `transmittanceThroughTables`'s rule, curves included,
+      is within max(0.005, 10⁻³ τ) in optical depth of its own 4,096-step value at every texel, on
+      the four-absorber fixture, this task's Earth and R05's Earth. T6.c's 4.1% texel ((242, 63),
+      red) is recorded before and after.
+    - R05.T12.e's quadrature gate is re-run on this task's Earth, its ozone a layer through
+      `absorberTerm`. A miss is recorded here and raised.
+  - **The multiple-scattering denominator** (`decision-r08-t6b-floor.md` §9.3; R08.T6.c's
+    finding).
+    - `multiScattering.wgsl` and its twin accumulate 1 − f_ms instead of forming it. Per
+      direction: the throughput at the ray's end plus Σ throughput · (σ_a dt + the step's absorber
+      depth) · `stepFactor(d)`, beside the transfer. `MediumSample` gains `absorption`, the terms'
+      own coefficients summed, never extinction less scattering. The table is L₂ ÷ mean(escape).
+    - Where mean(escape) is 0 in `f32` (or in the twin's `f64`), the texel stores L₂ alone, the
+      second order, a lower bound of the term, and the smoke counts such texels. No ε and no cap.
+    - Tests (no GPU): in the twin, escape equals 1 − f_ms to 10⁻¹² wherever 1 − f_ms ≥ 10⁻³, and
+      R05's Earth's table is unchanged to 10⁻⁶. The Venus-class table is finite, non-negative and
+      within the half float's range in the twin.
+    - Smoke: the Venus-class multiple-scattering table is held to its twin in both arms under
+      Verification's twin bound, with the count of L₂-only texels recorded.
 
   Acceptance: `pnpm test` and `just test-render` pass. By hand, R05's descent at Earth is compared
   with R05's recorded run, and the differences are noted here.
@@ -5617,6 +5644,217 @@ generator, and the reference's sampling needs no domain tag.
     Every channel of the two tables is taken (alpha and the second table's four), so the
     pressure-weighted columns need their own: two more `rgba16float` tables of 128 KB for five
     slots (one, for four), in the transmittance kernel's outputs and every reader's bindings.
+
+- **Deviations in T6.d, as built** (2026-10-12). `earth.ts`, `medium.ts`, `tables.ts`, `tablesCpu.ts`,
+  `hillaire.ts`, the WGSL (`common`, `medium`, `transmittance`, `multiScattering`, `source`, `view`,
+  `composite` and `rayMarch`), `channels.ts`, `view/lighting/hostDisc.ts`, the spike (`spikeScene.ts`,
+  `spikeRun.ts`), the smoke, `solar.ts`'s doc, `test/atmosphereFixtures.ts` and
+  `test/atmosphereGate.ts`, `marchSteps.ts`'s doc and `main.tsx`; tests in `earth.test.ts`,
+  `solar.test.ts`, a new `layerEdges.test.ts`, `tablesCpu.test.ts`, `hillaire.test.ts`,
+  `tables.test.ts`, `channels.test.ts`, `rayleigh.test.ts`, `aerosol.test.ts`, `medium.test.ts`,
+  `precision.test.ts`, and the renames in `absorbers.test.ts` and `opticalDepth.test.ts`.
+  - _Names beyond the text._ `earth.ts`: `R05_EARTH_REFERENCE`, `EARTH_DRY_AIR_COMPONENTS`,
+    `EARTH_DRY_AIR` and `WGS84_LEVEL_SPHEROID` (moved from `channels.ts`), `EARTH_LAPSE_FLATTENING`,
+    `EARTH_SKIN_K`, `EARTH_COLUMN`, `DOBSON_UNIT_PER_M2`, `EARTH_OZONE_LAYER_PA`, `EARTH_OZONE`,
+    `EARTH_REFERENCE_CURVES`, `R06_SOLAR_COLOUR_RGB`, `R06_SOLAR_LUX_PER_V0`,
+    `R06_SOLAR_BAKE_SPECTRUM`, `REFERENCE_SUN` and `referenceSunIlluminanceLx`. `medium.ts`:
+    `layerEdgesM`, `densityLookup` and `TabulatedDensity.edgesM`. `tables.ts`: `packLayerEdges`,
+    `EDGES_PER_TERM`, `NO_EDGE_M` and `TRANSMITTANCE_STEPS_A_PIECE`. `tablesCpu.ts`:
+    `shellCrossingsM`, `transmittancePieces` (`RayPieces`), `kernelRayToTop` (`TwinRayToTop`),
+    `multiScatteringSeriesTwin` (`MultiScatteringSeries`) and `multiScatteringStored`
+    (`MultiScatteringStored`). `hostDisc.ts`: `SUN_COLOUR_RGB` and `sunLikeHostDisc`'s
+    `colourRgb`. `spikeSunState` takes the illuminance.
+  - _Two Earths._ R05's constants are `R05_EARTH_REFERENCE` ("earth (R05)"), beside
+    `HILLAIRE_REFERENCE`. R05.T12.b's oracle check and R05.T12.e's steps check in the smoke, R05.T12.e's
+    gate fixture (`atmosphereGate.ts`), T6.c's fixtures, the tables' mechanics tests and the smoke's
+    R08.T6.g heights group keep it, the medium their figures were measured on (the heights group
+    holds the kernels' geometry). `EARTH_REFERENCE` is the rebuilt one: the spike draws it, and the
+    smoke's R08.T6.b twins, frames and sunset captures hold it.
+    - The rebuilt Earth keeps R05's aerosol, Cornette–Shanks g 0.584, as the text asks. Design note
+      2's "Cornette–Shanks is kept only for R05's `EARTH_REFERENCE`" so covers both Earths until an
+      aerosol of Earth's is generated with its phase tabulated (Design note 6).
+  - _The column_ (`EARTH_COLUMN`): Design note 3's radiative-convective Earth, not T3.a's isothermal
+    seam. 101,325 Pa and 288.15 K (the US Standard Atmosphere 1976's sea level), α 0.6, β 0.172,
+    T_skin 214.4 K (Design note 3's Earth check), μ 28.965 g mol⁻¹ from dry air's gases, and WGS 84's
+    g_ref 9.80622 m s⁻² on R₁. Its scale height at the ground is 8.43 km, the text's "about 8.4 km";
+    the tropopause is at 12.59 km (181 hPa) and the top at 104.6 km. τ_R(550) through dry air is
+    0.09704, Bodhaine's 0.097 to 0.04%.
+    - Chosen because ∫n dz is p_s ÷ (m g) whatever T(p), so R05's column holds and the comparison
+      differs in vertical distribution, as the text asks; and because it puts pressure levels (the
+      ozone's) at Earth's heights. T3.a's isothermal seam at 288.15 K would meet the text too: a
+      choice, for main.
+  - _The ozone_ (`EARTH_OZONE`): 300 DU in one layer of constant mixing ratio from 70 to 3 hPa,
+    18.6–38.5 km on the column, at the skin's 214.4 K, under R08.T4.b's curve for R06's Sun.
+    - Its column-weighted mean height is 24.0 km, within 1.5 km of R05's tent's 25 km (tested);
+      Earth's ozone mostly lies at 15–35 km (WMO/UNEP 2018, Q1).
+    - Plan 14's "layer near 10–30 mbar" (P14.T24.c), tried first, is not taken: see the finding
+      on the red curve below.
+  - _The channels._ `CHANNEL_WAVELENGTHS_NM` reads `FITTED_CHANNEL_WAVELENGTHS_NM`, (645, 544,
+    433.625) nm, and R05's aerosol is evaluated there.
+    - Tests that hold R05's or the tutorials' figures at 680/550/440 now name that triple
+      (`rayleigh.test.ts`, `earth.test.ts`); `aerosol.test.ts` reads its channels' own wavelengths.
+    - `phaseApproximations`' reasons now say "at 433.625 nm" (T5.c's text), for T10.a's labels and
+      the console's units.
+  - _The Sun_ (`REFERENCE_SUN`, `referenceSunIlluminanceLx`). R06 sends the spike and the tests no
+    host disc, so the reference Sun is R07's `sunLikeHostDisc`, given an optional `colourRgb`, with
+    R06's `solar_colour()` in place of its stand-ins:
+    - its colour, (r, g) = (1.0844255, 0.98155972) and b 0.934006 from R06's luminance row;
+    - its `lux_per_v0`, 1.036747;
+    - its bake spectrum, held equal to `bake_spectra.json`'s row.
+
+    The colour and the factor are copied from `star_colour.rs` by R06's bilinear rule at 5,772 K and
+    log g 4.438, since no fixture carries them; the bake bins' own colour lies 1.2 × 10⁻⁴ from it in
+    u′v′ (tested). For main: a fixture of R06's host discs would hold the copy.
+
+  - _`SunState`_ carries `illuminanceLx` in place of `distanceAu`, where the Provides says it
+    "gains" it. The illuminance at the body already carries the inverse square, and taking both from
+    one disc at one distance keeps the disc's luminance the star's.
+    - The composite's `skyScale` is it, and the disc's luminance is it over the disc's solid angle.
+    - `sunOverSky` is removed from the view (`view.wgsl`, the composite, the ray march, `TwinView`):
+      the tables and the ground the march sees both hold light per unit of the sun's illuminance in
+      each channel, so the ground's factor is 1.
+    - The spike's terrain takes the same illuminance as its sky. The smoke's terrain check
+      (`smoke/terrain.ts`) keeps `solar.ts`'s Sun: it draws no atmosphere, and its pinned figures
+      were measured under it.
+  - _`solar.ts` as a check._ Against R06's Sun at 1 au:
+    - luminance 133,462 lx against `sunIlluminanceRgb()`'s 128,479, +3.88%. That is R06's
+      `lux_per_v0` (R02's photometry takes 1) times the 0.002 mag between M_V 4.81 at 1 au and
+      V −26.76 (tested to 10⁻⁶). Against E-490's own photopic illuminance, `E490_ILLUMINANCE_LX`'s
+      133,318 lx, it is +0.11%. So the text's "agree in luminance to 1%" holds against the E-490
+      illuminance `solar.ts` holds, not against its V-scaled factors, and the test holds both
+      statements;
+    - chromaticity: Δu′v′ 0.0012, (0.2031, 0.4726) against (0.2040, 0.4719).
+
+    For main: R05's Sun and R07's `sunLikeHostDisc` stand-in (`lux_per_v0` 1) are 3.7% under R06's
+    photometry of the Sun's spectrum.
+
+  - _The multiple-scattering kernel's steps_ are placed: `marchSplit` with `fromCamera`, which moved
+    with `marchStep` from `source.wgsl` to `common.wgsl`, since the per-planet kernels do not take
+    `source.wgsl`. `MULTI_SCATTERING_KERNEL_OPTIONS.placement` is `placed`; the test keeps R05's even
+    steps' 10% as a measurement.
+  - _Layer edges_ (`decision-r08-t6b-floor.md` §9.2).
+    - `medium.ts`'s `layerEdgesM`: a tabulated density's last level at 0 below its first above 0, and
+      that level; its last above 0, and the next at 0. None for a column, an exponential or a tent:
+      R05's tent's kinks are slopes of 1 ÷ 15 km, not ramps, and R05's tables stay as measured.
+    - The kernels read a tabulated density resampled onto 1,024 levels (`kernelMedium`), where a
+      ramp of one column interval (78 m at the rebuilt Earth's ozone base and 10 m at its top, 115 m
+      on the four absorbers' 250 K column) spreads over one to three levels, and the first level
+      above 0 may stand inside it.
+      So `resampledDensity` carries the edges widened outward to its levels
+      (`TabulatedDensity.edgesM`), the whole resampled ramp between them. `packLayerEdges` packs
+      those, a `vec4f` a term, into the transmittance kernel's new `layerEdges` uniform (binding 5).
+    - The crossings: `common.wgsl`'s `shellCrossings` (the twin's `shellCrossingsM`), the roots of
+      t² + 2rμt + (h − e)(2R + h + e) as q and C ÷ q (Press et al., _Numerical Recipes_, §5.6), each
+      within (0, t_max) once, sorted in the loop. `precision.test.ts` emulates it in `f32` on
+      R08.T6.g's four spheres: every crossing ahead on a transmittance ray stands within 0.05 m of
+      its edge in height (measured 0.012–0.017 m), and `f32` drops only grazes (within 7 × 10⁻⁴ m).
+    - The allocation (`transmittancePieces`): min(4, n ÷ pieces) a piece, and round(rest × end ÷
+      t_max) less its predecessors', the last the rest, so that the 256 sum exactly. The twin follows
+      it, but forms each share in `f64` where the kernel rounds it in `f32`, so that at a rounding
+      boundary a piece may differ by a step.
+    - Measured. The four-absorber fixture's texel (242, 63), red: before, 0.0416 off its 4,096-step
+      value (4.07% in T, 8.3 times the bound); after, 1.3 × 10⁻⁴. Every texel within
+      max(0.005, 10⁻³ τ): the worst 0.549 of the bound (the four absorbers, (145, 0) blue, τ 3.47),
+      0.567 (the rebuilt Earth, (139, 0) blue, and as the kernels read it) and 0.535 (R05's, (136, 0)
+      blue, its 0.27%): the smooth error of the horizontal rays from the ground, no longer a ramp's.
+      The kernels' media (the rebuilt Earth's and the four absorbers', resampled) are held at every
+      fourth texel, a sixteenth of the cost.
+  - _The denominator_ (§9.3). `multiScattering.wgsl` and the twin accumulate the escape, and store
+    L₂ ÷ mean(escape), or L₂ alone where it is 0, with alpha the count of such channels, 0 to 3 (alpha
+    was 1, read by nothing). `multiScatteringSeriesTwin` gives the tests L₂, f_ms and the escape.
+    - The escape is 1 − f_ms to 10⁻¹² on R05's Earth at every texel and on the four absorbers' 81
+      measured texels; R05's table is L₂ ÷ (1 − f_ms) formed to 10⁻⁶.
+    - The Venus-class table is finite, not negative and under 65,504 at every texel in the twin
+      (largest 0.228). 160 of its channels have 1 − f_ms under 2⁻²⁴, where `f32` formed it as 0
+      (T6.c's 160 NaN), and none keeps L₂ alone in the twin. Its largest 1 ÷ mean(escape),
+      5.9 × 10¹¹, is at (0, 4) in blue, where L₂ = 0 (the sun down).
+  - _R05.T12.e's gate on the rebuilt Earth: missed, raised_ (not widened).
+    - At high's counts 85 rays miss: limb up to 21.3% (0.1 H), high limb 14.2% (99.999 km, tangent
+      2.5 km), disc 7.75% (ground zenith 87°), high band 5.70%, band 4.71% and past 3.21% (ordinary
+      rays, held to 2%). Inside (1.43%), near-level (0.41%) and sky (0.51%) hold. At low's, 79 rays
+      are over `LOW_TWIN_WORST`: band 61.4%, high limb 59.1%, high band 46.3%, limb 44.9%. The
+      reference converges on every ray.
+    - The cause is the layer. Without its ozone every missed ray holds outright (tested), and R05's
+      tent on the same column holds (limb 3.14%). The same layer absorbing linearly misses alike
+      (limb 20.5%, high limb 13.8%, disc 7.58%): it is the layer's shape under the marches' placed
+      steps, densest at its base with 78 m and 10 m ramps, not the curves (§9.2: "their absorber
+      columns cross the same edges").
+    - Pinned per family both ways, to 0.01 point (`RECORDED_LAYER_MISS`), so that a change shows,
+      a cure as well as a worsening. For main, with the lean:
+      the per-frame marches split at layer edges as the transmittance kernel does, or place their
+      steps by them, before R08.T7 adds suns to the same marches; R08.T13 then measures what remains.
+  - _Found, for main: the red curve's exit from Rec. 709, and thin layers._
+    - Under R06's Sun, ozone's red channel leaves Rec. 709 at about 99 vertical columns
+      (29,700 DU). The curve's last node above its 10⁻⁶ floor is at 94.4 columns: its read depth
+      climbs from 5.07 at 90 columns and 6.42 at 95 to the floor at 100, d ln τ ÷ d ln u = 15 node
+      to node at 95, against 4.3 for the spectral curve there. Under the 5,772 K Planck spectrum of
+      the four-absorber fixture it has no such leap.
+    - A ray tangent to a constant-mixing layer's base crosses about √(2πR ÷ H) ≈ 80 of its columns
+      (81.6 at this Earth's deepest texel), under the leap; a thinner slab, more.
+    - With plan 14's 30–10 hPa slab (23.9–30.9 km), tried first, rays tangent near its base crossed
+      95–145 columns. The table then missed its own 4,096-step value at grazing texels by 2.6 to 4.4
+      times the bound ((209, 47) red, τ 7.34, off by 0.033), its columns within 3 × 10⁻⁴: the
+      curve's slope amplifies any column error, and the stored column's own half-float rounding,
+      2⁻¹¹, would alone miss the bound there.
+    - So P14.T24.c's "layer near 10–30 mbar" puts an oxygen world's grazing ozone into the red
+      curve's leap. Lean: P14.T24.c spreads its ozone as Earth's is, and R08.T13 measures the
+      grazing beam there.
+  - _Found, for main: T5.b's size quadrature._ `sizeDistribution.ts`'s `sphereModeOptics` does not
+    converge by 65,536 nodes for `aerosol.test.ts`'s lossless TiO₂ stand-in (n 2.65, k 0, gamma r_eff
+    0.5 µm, v_eff 0.1) between 433.5 and 434 nm, the fitted blue channel's 433.625 among them (433 and
+    435 nm converge): a k = 0 sphere's resonances defeat the refinement's 10⁻⁴ test there. The test
+    keeps Bruneton's 680/550/440, where it was built; a generated lossless mode at that channel would
+    throw. Lean: a T5.b follow-up.
+  - _The differences from R05_, in the twin: the zenith from 2 m on R₁ at 4,096 placed steps, each
+    pipeline under its own photometry (R05's tables times `skyLuminanceScale()`, the rebuilt Earth's
+    times R06's Sun):
+
+    | Sun zenith                         | R05, cd m⁻² | Rebuilt | Luminance | u′v′, R05 → rebuilt                 | Δu′v′  |
+    | ---------------------------------- | ----------- | ------- | --------- | ----------------------------------- | ------ |
+    | 30°, R05's "noon" (the sun 60° up) | 4,582       | 4,709   | +2.8%     | (0.1922, 0.4399) → (0.1871, 0.4360) | 0.0064 |
+    | 85°                                | 547.1       | 547.4   | +0.06%    | (0.1934, 0.4307) → (0.1811, 0.4267) | 0.0129 |
+
+    Split at 30° and 85°: the tables alone, under R05's factors, +3.1% and −0.04%, Δu′v′ 0.0012 and
+    0.0068; the photometry alone (R05's tables under R06's Sun) −0.01% and −0.85%, Δu′v′ 0.0073 and
+    0.0072; the placed multiple-scattering steps alone +0.23% and −0.56%, Δu′v′ 1 × 10⁻⁴ and
+    4 × 10⁻⁴. T6.a's sky-view figures from 2 m (up to 9.5% with the sun on the horizon, 6.0% at 10°
+    and 2.8% at 30°) stand for the placement's change elsewhere in the picture.
+
+  - _The twin's cost_, for the smoke's 180 s watchdog and the 4,096-step tests.
+    - `medium.ts`'s `densityLookup` walks from the last level asked for in place of bisecting, to
+      the bit `densityAt`'s; the twin's tabulated media run several times faster.
+    - `tablesCpu.ts`'s inner calls (`sampleInto`, the curve reads, the tables' bilinear reads) take
+      indexed loops and arrays made once, each sum in its old order. The twins' tables and frames
+      are the same to the bit (compared against the code before, on the four absorbers, the rebuilt
+      Earth and the Venus-class medium), and about 35% faster.
+    - The smoke's Venus-class entry forms no multiple-scattering twin over the twin's own
+      transmittance: the end-to-end figure it reported beside the check is not formed.
+  - _The bundle._ `earth.ts` now imports `absorbers.ts`, with its cross-sections (437 KB), and builds
+    the ozone's curve at load. So `main.tsx` loads the descent spike lazily (`React.lazy`), and only
+    a `--descent-spike` launch takes them; the smoke's bundle takes them too. R08.T10.a's optics
+    worker is to build media off the render thread.
+  - _For T4.d._ The transmittance kernel's march now runs piece by piece (`rayToTop`); T4.d's
+    pressure-weighted columns accumulate in the same inner loop, and its twin in
+    `kernelOpticalDepthInto`.
+  - _For T7._ `SunState.illuminanceLx` is the per-channel illuminance T7's sources carry; the
+    per-frame marches' layer miss above is to be ruled before T7 multiplies their suns.
+  - _The gate and the smoke_ (2026-10-12). smart-ci's Prettier, tsc, oxlint, the client's build and
+    vitest (123 files, 3,607 tests) pass. `layerEdges.test.ts` takes 85 s and `tablesCpu.test.ts`
+    86 s at 4 workers, under shared load.
+    - The first smoke, before the twin's cost was cut, met the 180 s watchdog in both variants
+      (213.6 s from start to end each, at a load of 20 to 40 on 16 threads). T6.c's own runs took
+      150–169 s, and one of them met the watchdog too (201.8 s). The cut above and the heights group
+      on R05's Earth followed. Found, for main: the smoke stands near its watchdog, the CPU twins a
+      large part of it (by their cost in vitest; the groups are not timed); lean: time the groups,
+      and move the twins off the page's thread or give the watchdog room.
+    - The smoke on the final tree is integration's priority run's, by main's ruling (2026-10-12): its
+      Venus-class figures (both arms, the L₂-alone count; the twin keeps none) are to be recorded
+      from it.
+  - _By hand: R05's descent at Earth_ against `2026-10-07-effect-high` (atmosphere p50/p95/p99
+    3.19/4.07/4.28 ms, terrain 1.16/2.15/2.38 ms): not run in T6.d, for want of the locks; it
+    follows as a docs commit, under both locks, by R05's options with the window hidden:
+    `descentSpike.sh --hidden --setting high --seed 7 --workers 3 --ridged off --dawn-safety on`
+    and `--trace-profile off --vertex-path baked-offsets --normals double`.
 
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7).

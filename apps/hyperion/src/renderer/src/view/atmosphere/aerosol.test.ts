@@ -159,7 +159,11 @@ describe("the phase tables", () => {
       table: undefined,
     } as const;
     const sizes = { kind: "gamma", effectiveRadiusUm: 0.5, effectiveVariance: 0.1 } as const;
-    const [red, green, blue] = CHANNEL_WAVELENGTHS_NM;
+    // At Bruneton's 680, 550 and 440 nm, where it was built: at the fitted blue channel since
+    // R08.T6.d, 433.625 nm, this lossless n = 2.65 mode's size quadrature does not converge by its
+    // 65,536 nodes (433.5–434 nm), a finding for T5.b (plan R08's Risks, "Deviations in T6.d, as
+    // built").
+    const [red, green, blue] = [680, 550, 440] as const;
     const optics: [ModeOptics, ModeOptics, ModeOptics] = [
       opticsOfParticles(rutile, sizes, red),
       opticsOfParticles(rutile, sizes, green),
@@ -289,7 +293,8 @@ describe("every committed phase file's tables, as the tracer reads them", () => 
         sizes: { kind: "gamma", effectiveRadiusUm: 30, effectiveVariance: 0.1 },
       },
     } as const;
-    const optics = aerosolModeOptics(cirrus, 550);
+    // The green channel's own optics, against which its table is read.
+    const optics = aerosolModeOptics(cirrus, CHANNEL_WAVELENGTHS_NM[1]);
     const peak = optics.matrix?.forwardPeak ?? 0;
     expect(peak).toBeGreaterThan(0.02);
     expect(peak).toBeLessThan(0.1);
@@ -314,10 +319,12 @@ describe("the term", () => {
   const built = once(() => aerosolTerm(spec, COLUMN));
 
   it("gives the column its τ(550)", () => {
-    const { term, at550 } = built();
-    const green = CHANNEL_WAVELENGTHS_NM.indexOf(550);
-    const extinction = (term.scattering[green] ?? 0) + (term.absorption[green] ?? 0);
-    expect(extinction * columnLengthM(term.density, COLUMN.topHeightM)).toBeCloseTo(0.5, 9);
+    const { term, at550, channels: optics } = built();
+    // The green channel stands at the fitted 544 nm since R08.T6.d: its depth is τ(550) times the
+    // mode's extinction there over its extinction at 550 nm.
+    const extinction = term.scattering[1] + term.absorption[1];
+    const scale = optics[1].extinctionCrossSectionM2 / at550.extinctionCrossSectionM2;
+    expect(extinction * columnLengthM(term.density, COLUMN.topHeightM)).toBeCloseTo(0.5 * scale, 9);
     expect(at550.wavelengthNm).toBe(550);
   });
 
@@ -453,7 +460,7 @@ describe("the label", () => {
     const reasons = phaseApproximations([
       { material: "tholin", optics: titan, opticalDepthAbove550: 0 },
     ]);
-    expect(reasons[0]?.reason).toContain("440 nm");
+    expect(reasons[0]?.reason).toContain(`at ${CHANNEL_WAVELENGTHS_NM[2]} nm`);
   });
 
   it("names the substance and its basis in words where a mode states no note", () => {

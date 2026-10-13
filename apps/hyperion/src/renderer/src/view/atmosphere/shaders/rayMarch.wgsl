@@ -195,9 +195,8 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     let p = origin + ground.x * dir;
     let muSun = dot(view.sun.xyz, normalAt(p, a, c));
     let toSun = tableTransmittance(transmittance, view.tables.x, 0.0, muSun);
-    // Sunlight on the grey ground keeps the sun's spectrum: the sun's factors, not the sky's.
-    luminance += throughput * toSun * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW
-      * view.sunOverSky.rgb;
+    // Per unit of the sun's illuminance in each channel, as the sky is (R08.T6.d).
+    luminance += throughput * toSun * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;
   }
   // A sky pixel whose ray meets the ground sees nothing of space behind it: no sun's disc there.
   var meanTransmittance = (throughput.r + throughput.g + throughput.b) / 3.0;

@@ -1,11 +1,12 @@
 // The atmosphere's scattering source (plan R05, R05.T12.c, Design note 16): the medium at a sample,
-// the single- and multiple-scattering source there, read from the per-planet tables, and the steps
-// of the per-frame marches (R05.T12.e). Prepended, after `common.wgsl`, `medium.wgsl` and
-// `view.wgsl`, to the sky-view, aerial-perspective and ray-march kernels, each of which also
-// declares the phase tables as `var phaseTables : texture_2d_array<f32>;`, and the absorber-column
-// table and the lights' curves of growth as `var absorberColumns : texture_2d<f32>;` and
-// `var absorberCurves : texture_2d<f32>;` (R08.T6.c), in group 0; like `medium.wgsl`, it reads the
-// kernel's `medium`, `terms` and tables in place, so the composite does not take it.
+// and the single- and multiple-scattering source there, read from the per-planet tables; the steps
+// of the per-frame marches (R05.T12.e) are `common.wgsl`'s since plan R08's R08.T6.d. Prepended,
+// after `common.wgsl`, `medium.wgsl` and `view.wgsl`, to the sky-view, aerial-perspective and
+// ray-march kernels, each of which also declares the phase tables as
+// `var phaseTables : texture_2d_array<f32>;`, and the absorber-column table and the lights' curves
+// of growth as `var absorberColumns : texture_2d<f32>;` and `var absorberCurves : texture_2d<f32>;`
+// (R08.T6.c), in group 0; like `medium.wgsl`, it reads the kernel's `medium`, `terms` and tables in
+// place, so the composite does not take it.
 //
 // The source is ported from Bevy 0.19.1's functions.wgsl (`sample_local_inscattering`, MIT; the
 // notice is in common.wgsl) and checked against sebh's IntegrateScatteredLuminance (MIT; the
@@ -16,7 +17,8 @@
 // Design notes 18 and 19, R08.T6.g); the transmittance is read as optical depth with the sun's
 // curves of growth added, and each march's own path takes its absorbers by the path's column
 // (plan R08, Design notes 5 and 8, R08.T6.c). Added here (R05.T12.e): the steps' placement
-// (`marchSplit`, `marchStep`).
+// (`marchSplit`, `marchStep`), which R08.T6.d moved to `common.wgsl` for the multiple-scattering
+// kernel.
 
 // The angle a ray scatters the sun's light through towards the eye: its cosine, which the closed
 // forms take; u = sqrt(theta / pi), the phase tables' coordinate (`medium.ts`'s `PhaseTable`); and
@@ -143,86 +145,4 @@ fn sourceAt(
   let single = lit * toSun * local.phasedScattering;
   let multiple = tableMultiScattering(multiScattering, heightM, muSun);
   return single + multiple * local.scattering;
-}
-
-// A ray's segment [tStart, tEnd] split at its lowest point t*, the point nearest the centre of the
-// sphere the ray is marched about, with the steps each side takes (R05.T12.e, with addendum A of
-// decision-r05-high-atmosphere.md; `marchSteps.ts` is its TypeScript twin). Even steps
-// under-sample the dense air at that point (the camera, the ground or a limb's tangent point),
-// whose aerosol has a 1.2 km scale height (plan R05, Risks, "The per-frame marches under-sample the
-// dense air"), so each side is placed quadratically toward t*. The camera side of a two-sided
-// segment that starts at a camera inside the atmosphere is placed toward the camera instead: where
-// the camera's air is dense, on a ray that falls to a lowest point below the camera and climbs out,
-// the view's own attenuation puts that side's light at the camera end. From 60-100 km it is not,
-// and the high setting's 75 sky-view steps carry those rays (addendum B).
-struct MarchSplit {
-  startM : f32,
-  // t* = clamp(-o.d, tStart, tEnd), m.
-  lowestM : f32,
-  // The lengths of the segment before and after t*, m.
-  beforeM : f32,
-  afterM : f32,
-  stepsBefore : u32,
-  stepsAfter : u32,
-  // Whether the side before t* is placed toward the segment's start, the camera.
-  beforeTowardStart : bool,
-}
-
-// Splits the segment at `nearestM`, the distance -o.d to the ray's closest approach to the centre.
-// A two-sided segment shares its steps in proportion to the square root of each side's length,
-// which gives each side the same smallest step L / n^2, at the end it is placed toward (t*, or the
-// camera for a camera side), at least one a side; a one-sided segment gives all its steps to its
-// side. `fromCamera`: the segment starts at a camera inside the atmosphere.
-// `samples` is at least 2.
-fn marchSplit(
-  tStartM : f32,
-  tEndM : f32,
-  nearestM : f32,
-  samples : u32,
-  fromCamera : bool,
-) -> MarchSplit {
-  let lowest = clamp(nearestM, tStartM, tEndM);
-  let before = lowest - tStartM;
-  let after = tEndM - lowest;
-  let rootBefore = sqrt(before);
-  let total = rootBefore + sqrt(after);
-  let share = select(0.0, floor(f32(samples) * rootBefore / total + 0.5), total > 0.0);
-  let least = select(0u, 1u, before > 0.0);
-  let most = samples - select(0u, 1u, after > 0.0);
-  let stepsBefore = min(max(u32(share), least), most);
-  let towardStart = fromCamera && before > 0.0 && after > 0.0;
-  let stepsAfter = samples - stepsBefore;
-  return MarchSplit(tStartM, lowest, before, after, stepsBefore, stepsAfter, towardStart);
-}
-
-// One step of a march: its midpoint's distance along the ray, its length, and its midpoint's
-// signed distance from the split's lowest point t*, formed without the difference of the two
-// distances (plan R08, Design note 18: the ray march's closest-approach form), m.
-struct MarchStep {
-  tM : f32,
-  dtM : f32,
-  fromLowestM : f32,
-}
-
-// Step `i` of a split segment, counted from tStart. A side of length L and n steps placed toward
-// an end a has its boundaries at a -/+ L (k / n)^2, k = 0..n, so its step k from a has its midpoint
-// at a -/+ L (k^2 + k + 1/2) / n^2 and the length L (2k + 1) / n^2.
-fn marchStep(split : MarchSplit, i : u32) -> MarchStep {
-  if (i < split.stepsBefore) {
-    let n = f32(split.stepsBefore);
-    let unitM = split.beforeM / (n * n);
-    if (split.beforeTowardStart) {
-      let k = f32(i);
-      let fromStart = unitM * (k * k + k + 0.5);
-      return MarchStep(split.startM + fromStart, unitM * (2.0 * k + 1.0), fromStart - split.beforeM);
-    }
-    let k = f32(split.stepsBefore - 1u - i);
-    let fromLowest = unitM * (k * k + k + 0.5);
-    return MarchStep(split.lowestM - fromLowest, unitM * (2.0 * k + 1.0), -fromLowest);
-  }
-  let n = f32(split.stepsAfter);
-  let k = f32(i - split.stepsBefore);
-  let unitM = split.afterM / (n * n);
-  let fromLowest = unitM * (k * k + k + 0.5);
-  return MarchStep(split.lowestM + fromLowest, unitM * (2.0 * k + 1.0), fromLowest);
 }

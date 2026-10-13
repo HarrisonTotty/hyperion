@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { illuminanceLx } from "../photometry/magnitude";
+import { photopicIlluminance } from "../lighting/illuminance";
+import { SUN_ABSOLUTE_V } from "../lighting/hostDisc";
+import { illuminanceLx, PARSEC_M } from "../photometry/magnitude";
+import { AU_M } from "../scenes/kept";
+import { R06_SOLAR_LUX_PER_V0, referenceSunIlluminanceLx } from "./earth";
+import { deltaUv } from "./spectralColour";
 import {
   E490_ILLUMINANCE_LX,
   rec709Luminance,
@@ -26,6 +31,25 @@ describe("the Sun's light in three channels", () => {
     for (const c of rgb) {
       expect(Math.abs(c / y - 1)).toBeLessThan(0.1);
     }
+  });
+
+  // R08.T6.d draws the Sun from R07's `starIlluminance` through R06's colour; this file stays as the
+  // check of it (plan R08, R08.T6.d; the figures are recorded in R08's Risks).
+  it("agrees with R08.T6.d's Sun in luminance but for R06's photopic factor of the Sun's spectrum", () => {
+    const r06 = photopicIlluminance(referenceSunIlluminanceLx());
+    const r05 = rec709Luminance(sunIlluminanceRgb());
+    // R02's V photometry takes 2.54 µlx a V = 0 star whatever its spectrum, R06 1.0367 times that
+    // for the Sun's, which is E-490's own 133,318 lx; M_V 4.81 at 1 au is V −26.762 (−26.76 here).
+    const vOffset =
+      10 ** (-0.4 * (SUN_ABSOLUTE_V + 5 * Math.log10(AU_M / (10 * PARSEC_M)) - SUN_APPARENT_V));
+    expect(r06 / r05 / (R06_SOLAR_LUX_PER_V0 * vOffset) - 1).toBeCloseTo(0, 6);
+    expect(Math.abs(r06 / E490_ILLUMINANCE_LX - 1)).toBeLessThan(0.01);
+  });
+
+  it("differs from R08.T6.d's Sun in chromaticity by 0.0012 in u′v′", () => {
+    // Measured 2026-10-12: 0.00120, solar.ts's three spectral samples of E-490 against R06's colour
+    // of the ATLAS9 Sun (plan R08's Risks, "Deviations in T6.d, as built").
+    expect(deltaUv(sunIlluminanceRgb(), referenceSunIlluminanceLx())).toBeCloseTo(0.0012, 4);
   });
 
   it("weights the sky's red above the Sun's and its blue below, as the λ⁻³ shape does", () => {

@@ -5,7 +5,7 @@ import {
   fourAbsorberMedium,
   r05EarthWithOzoneAbsorber,
 } from "../../test/atmosphereFixtures";
-import { EARTH_REFERENCE } from "./earth";
+import { R05_EARTH_REFERENCE } from "./earth";
 import type { AtmosphereMedium } from "./medium";
 import {
   absorberAmounts,
@@ -82,7 +82,7 @@ describe("the oracle against closed forms", () => {
 
 describe("Earth's zenith optical depth", () => {
   it("is the sum of its terms' columns: about 0.22 at 550 nm", () => {
-    const [, green] = opticalDepth(EARTH_REFERENCE, R, R, 1);
+    const [, green] = opticalDepth(R05_EARTH_REFERENCE, R, R, 1);
     // Rayleigh 11.487e-6 × 8,434.5 m (1 − e^(−100 km ÷ H)), aerosol 0.1, ozone 1.881e-6 × 15 km.
     const expected =
       11.487e-6 * 8_434.5 * -Math.expm1(-100_000 / 8_434.5) + 0.1 + 1.881e-6 * 15_000;
@@ -203,7 +203,7 @@ describe("the absorbers' columns and curves (R08.T6.c)", () => {
 
   it("reads a linear curve as σ u, R05's ozone depth", () => {
     const depth = curvesOpticalDepth(curves[0] ?? [], absorberAmounts(medium, R, R, 1));
-    const r05 = opticalDepth(EARTH_REFERENCE, R, R, 1);
+    const r05 = opticalDepth(R05_EARTH_REFERENCE, R, R, 1);
     const others = opticalDepth(withoutOzone, R, R, 1);
     for (const c of [0, 1, 2] as const) {
       expect(depth[c] / (r05[c] - others[c])).toBeCloseTo(1, 6);

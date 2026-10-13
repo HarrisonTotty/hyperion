@@ -13,7 +13,7 @@ import {
   type AbsorberCurve,
 } from "./absorbers";
 import { hydrostaticColumn } from "./column";
-import { EARTH_REFERENCE, HILLAIRE_REFERENCE } from "./earth";
+import { R05_EARTH_REFERENCE, HILLAIRE_REFERENCE } from "./earth";
 import {
   type AtmosphereMedium,
   columnLengthM,
@@ -42,6 +42,7 @@ import {
   NO_ABSORBER_CURVES,
   packAbsorberCurves,
   packDensityTables,
+  packLayerEdges,
   packMedium,
   packMediumUniform,
   packPhaseTables,
@@ -131,7 +132,7 @@ function destroyedNames(events: readonly AllocationEvent[]): string[] {
 describe("AtmosphereTables", () => {
   it("builds both tables once, with two dispatches, under atmosphere-tables", async () => {
     const engine = await countingRenderEngine();
-    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, R);
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
     expect(tables.builds).toBe(1);
     expect(engine.dispatched.map((d) => d.kernel)).toEqual([
       "atmosphere transmittance",
@@ -165,11 +166,23 @@ describe("AtmosphereTables", () => {
     expect(multiScattering?.bindings.uniforms["medium"]?.[3]).toBe(MULTI_SCATTERING_SAMPLES);
   });
 
+  it("hands the transmittance kernel the medium's layer edges, as the kernels read its tables (R08.T6.d)", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, TABULATED, R);
+    expect(tables.builds).toBe(1);
+    const [transmittance, multiScattering] = engine.dispatched;
+    expect([...(transmittance?.bindings.uniforms["layerEdges"] ?? [])]).toEqual([
+      ...packLayerEdges(TABULATED),
+    ]);
+    expect(packLayerEdges(TABULATED).some((h) => h > 0)).toBe(true);
+    expect(multiScattering?.bindings.uniforms["layerEdges"]).toBeUndefined();
+  });
+
   it("makes a tabulated medium's tables at their shape and releases the placeholders", async () => {
     const engine = await countingRenderEngine();
     const events: AllocationEvent[] = [];
     engine.onAllocation((e) => events.push(e));
-    new AtmosphereTables(engine, EARTH_REFERENCE, R).setMedium(TABULATED, R);
+    new AtmosphereTables(engine, R05_EARTH_REFERENCE, R).setMedium(TABULATED, R);
     expect(destroyedNames(events)).toEqual([
       "atmosphere density tables",
       "atmosphere phase tables",
@@ -183,7 +196,7 @@ describe("AtmosphereTables", () => {
 
   it("uploads a tabulated medium's tables whole, and no placeholder", async () => {
     const engine = await countingRenderEngine();
-    new AtmosphereTables(engine, EARTH_REFERENCE, R).setMedium(TABULATED, R);
+    new AtmosphereTables(engine, R05_EARTH_REFERENCE, R).setMedium(TABULATED, R);
     const written = engine.textureWritten.map((w) => [w.texture, w.size]);
     expect(written).toEqual([
       ["atmosphere density tables", [DENSITY_TABLE_LEVELS, 1, 3]],
@@ -193,7 +206,7 @@ describe("AtmosphereTables", () => {
 
   it("uploads the packed terms at every build", async () => {
     const engine = await countingRenderEngine();
-    new AtmosphereTables(engine, EARTH_REFERENCE, R).setMedium(TABULATED, R);
+    new AtmosphereTables(engine, R05_EARTH_REFERENCE, R).setMedium(TABULATED, R);
     const terms = engine.writes.filter((w) => w.buffer === "atmosphere terms");
     expect(terms.map((w) => w.bytes)).toEqual([TERMS_BUFFER_BYTES, TERMS_BUFFER_BYTES]);
     expect(new Float32Array(terms[1]?.data.slice().buffer ?? new ArrayBuffer(0))).toEqual(
@@ -219,7 +232,7 @@ describe("AtmosphereTables", () => {
 
   it("follows a medium a lost device refused, and builds it at the restore", async () => {
     const engine = await countingRenderEngine();
-    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, R);
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
     const lost = vi.spyOn(engine, "createTexture").mockImplementationOnce(() => {
       throw new EngineUnavailable("createTexture");
     });
@@ -236,7 +249,7 @@ describe("AtmosphereTables", () => {
     const events: AllocationEvent[] = [];
     const tables = new AtmosphereTables(engine, TABULATED, R);
     engine.onAllocation((e) => events.push(e));
-    expect(tables.setMedium(EARTH_REFERENCE, R)).toBe(true);
+    expect(tables.setMedium(R05_EARTH_REFERENCE, R)).toBe(true);
     expect(destroyedNames(events)).toEqual([
       "atmosphere density tables",
       "atmosphere phase tables",
@@ -249,15 +262,15 @@ describe("AtmosphereTables", () => {
 
   it("does not rebuild for the same medium and radius", async () => {
     const engine = await countingRenderEngine();
-    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, R);
-    expect(tables.setMedium(EARTH_REFERENCE, R)).toBe(false);
-    expect(tables.setMedium({ ...EARTH_REFERENCE }, R)).toBe(false);
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    expect(tables.setMedium(R05_EARTH_REFERENCE, R)).toBe(false);
+    expect(tables.setMedium({ ...R05_EARTH_REFERENCE }, R)).toBe(false);
     expect(engine.counts.dispatches).toBe(2);
   });
 
   it("rebuilds in place when the medium or the radius changes", async () => {
     const engine = await countingRenderEngine();
-    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, R);
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
     expect(tables.setMedium(HILLAIRE_REFERENCE, R)).toBe(true);
     expect(tables.setMedium(HILLAIRE_REFERENCE, 6_360_000)).toBe(true);
     expect(tables.builds).toBe(3);
@@ -267,20 +280,20 @@ describe("AtmosphereTables", () => {
 
   it("keeps the old key when a build fails, so the same medium is tried again", async () => {
     const engine = await countingRenderEngine();
-    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, R);
-    const first = EARTH_REFERENCE.terms[0];
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    const first = R05_EARTH_REFERENCE.terms[0];
     if (first === undefined) {
       throw new Error("Earth's medium has no terms");
     }
     const tooMany: AtmosphereMedium = {
-      ...EARTH_REFERENCE,
+      ...R05_EARTH_REFERENCE,
       terms: Array.from({ length: MAX_TERMS + 1 }, () => first),
     };
     expect(() => tables.setMedium(tooMany, R)).toThrow(/at most 8/);
     expect(tables.builds).toBe(1);
     expect(engine.counts.bufferWrites).toBe(1);
-    expect(tables.medium).toBe(EARTH_REFERENCE);
-    expect(tables.setMedium(EARTH_REFERENCE, R)).toBe(false);
+    expect(tables.medium).toBe(R05_EARTH_REFERENCE);
+    expect(tables.setMedium(R05_EARTH_REFERENCE, R)).toBe(false);
   });
 
   it("releases what it made when its first medium is refused", async () => {
@@ -312,7 +325,7 @@ describe("AtmosphereTables", () => {
 
 describe("packMediumUniform", () => {
   it("lays out the ground's radius, the atmosphere's height, the term count, the samples and the albedo", () => {
-    const packed = packMediumUniform(EARTH_REFERENCE, 6_371_000, 128);
+    const packed = packMediumUniform(R05_EARTH_REFERENCE, 6_371_000, 128);
     expect([...packed]).toEqual(
       [6_371_000, 100_000, 3, 128, 0.1, 0.1, 0.1, 0, 0, 0, 0, 0].map(Math.fround),
     );
@@ -322,7 +335,11 @@ describe("packMediumUniform", () => {
     // In f32 the top's radius less the ground's would carry both radii's rounding: 4 m apart at
     // 6e7 m. The height is narrowed once, from f64.
     const bottomM = 60_268_001.5;
-    const packed = packMediumUniform({ ...EARTH_REFERENCE, topHeightM: 100_000.37 }, bottomM, 1);
+    const packed = packMediumUniform(
+      { ...R05_EARTH_REFERENCE, topHeightM: 100_000.37 },
+      bottomM,
+      1,
+    );
     expect(packed[1]).toBe(Math.fround(100_000.37));
     expect(Math.fround(bottomM + 100_000.37) - Math.fround(bottomM)).not.toBe(
       Math.fround(100_000.37),
@@ -337,7 +354,7 @@ function termOf(packed: Float32Array, i: number): Float32Array {
 
 describe("packMedium", () => {
   it("packs each term's scattering, absorption, profile and phase as four vec4f", () => {
-    const packed = packMedium(EARTH_REFERENCE);
+    const packed = packMedium(R05_EARTH_REFERENCE);
     // The ozone tent is the third term.
     const ozone = termOf(packed, 2);
     expect([...ozone.subarray(0, 4)]).toEqual([0, 0, 0, 0]);
@@ -347,7 +364,7 @@ describe("packMedium", () => {
   });
 
   it("packs each term's phase code in phase.w and its parameters in phase.xyz", () => {
-    const packed = packMedium(EARTH_REFERENCE);
+    const packed = packMedium(R05_EARTH_REFERENCE);
     const phase = (i: number): number[] => [...termOf(packed, i).subarray(12, 16)];
     // Rayleigh at R05's ρ = 0, then the Cornette–Shanks aerosol, then ozone with no phase.
     expect(phase(0)).toEqual([0, 0, 0, 1]);
@@ -357,17 +374,17 @@ describe("packMedium", () => {
   });
 
   it("leaves scattering.w and absorption.w 0, where R05 kept the phase", () => {
-    const packed = packMedium(EARTH_REFERENCE);
+    const packed = packMedium(R05_EARTH_REFERENCE);
     expect([termOf(packed, 1)[3], termOf(packed, 1)[7]]).toEqual([0, 0]);
   });
 
   it("packs a Rayleigh phase's depolarisation ratio per channel, which the kernels draw", () => {
-    const [first, ...rest] = EARTH_REFERENCE.terms;
+    const [first, ...rest] = R05_EARTH_REFERENCE.terms;
     if (first === undefined) {
-      throw new Error("EARTH_REFERENCE has no terms");
+      throw new Error("R05_EARTH_REFERENCE has no terms");
     }
     const depolarised: AtmosphereMedium = {
-      ...EARTH_REFERENCE,
+      ...R05_EARTH_REFERENCE,
       terms: [
         { ...first, phase: { kind: "rayleigh", depolarisation: [0.027, 0.027, 0.028] } },
         ...rest,
@@ -394,7 +411,7 @@ describe("packMedium", () => {
 
   it("packs a medium of eight terms and refuses one of nine", () => {
     const eight: AtmosphereMedium = {
-      ...EARTH_REFERENCE,
+      ...R05_EARTH_REFERENCE,
       terms: Array.from({ length: MAX_TERMS }, () => HAZE),
     };
     expect(termOf(packMedium(eight), 7)[15]).toBe(3);
@@ -480,7 +497,7 @@ describe("the density tables", () => {
   });
 
   it("pack a one-texel placeholder for a medium with no tabulated density", () => {
-    const none = packDensityTables(EARTH_REFERENCE);
+    const none = packDensityTables(R05_EARTH_REFERENCE);
     expect([none.widthTexels, none.layers, [...none.texels]]).toEqual([1, 1, [0]]);
   });
 });
@@ -560,7 +577,7 @@ describe("the phase tables", () => {
   });
 
   it("pack a one-texel placeholder for a medium with no tabulated phase", () => {
-    const none = packPhaseTables(EARTH_REFERENCE);
+    const none = packPhaseTables(R05_EARTH_REFERENCE);
     expect([none.widthTexels, none.layers, [...none.texels]]).toEqual([1, 1, [0, 0, 0, 0]]);
   });
 });
@@ -586,7 +603,7 @@ describe("kernelMedium", () => {
       DENSITY_TABLE_LEVELS,
     );
     expect(haze?.phase.kind === "tabulated" && haze.phase.table.u.length).toBe(PHASE_TABLE_ENTRIES);
-    expect(kernelMedium(EARTH_REFERENCE)).toEqual(EARTH_REFERENCE);
+    expect(kernelMedium(R05_EARTH_REFERENCE)).toEqual(R05_EARTH_REFERENCE);
   });
 });
 
@@ -646,7 +663,7 @@ describe("the kernel arm (R08.T6.g)", () => {
 
   it("builds both tables into rgba32float, the multiple scattering over the stored transmittance", async () => {
     const engine = await countingRenderEngine();
-    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, 6_371_000);
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6_371_000);
     engine.dispatched.length = 0;
     const arm = tables.buildKernelArm();
     expect(engine.dispatched.map((d) => d.kernel)).toEqual([
@@ -670,7 +687,7 @@ describe("the kernel arm (R08.T6.g)", () => {
 
   it("makes the arm's kernels once", async () => {
     const engine = await countingRenderEngine();
-    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, 6_371_000);
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, 6_371_000);
     tables.buildKernelArm();
     const kernels = engine.counts.kernels;
     tables.buildKernelArm();
@@ -825,7 +842,7 @@ describe("the lights' curves as the kernels read them", () => {
   });
 
   it("are a one-texel placeholder for a medium with no absorber", () => {
-    expect(packAbsorberCurves(EARTH_REFERENCE, NO_ABSORBER_CURVES).texels).toHaveLength(4);
+    expect(packAbsorberCurves(R05_EARTH_REFERENCE, NO_ABSORBER_CURVES).texels).toHaveLength(4);
   });
 
   it("are refused for a medium with absorbers given none", () => {
@@ -834,7 +851,7 @@ describe("the lights' curves as the kernels read them", () => {
 
   it("are refused where a light gives another count than the medium's absorbers", () => {
     expect(() => packAbsorberCurves(medium, [own.slice(1)])).toThrow(/gives 3 curves/u);
-    expect(() => packAbsorberCurves(EARTH_REFERENCE, [own])).toThrow(/gives 4 curves/u);
+    expect(() => packAbsorberCurves(R05_EARTH_REFERENCE, [own])).toThrow(/gives 4 curves/u);
   });
 
   it("are refused off the kernels' grid of 241 nodes", () => {
@@ -948,7 +965,7 @@ describe("AtmosphereTables with the lights' curves", () => {
     const tables = new AtmosphereTables(engine, medium, R, curves);
     engine.onAllocation((e) => events.push(e));
     engine.textureWritten.length = 0;
-    expect(tables.setMedium(EARTH_REFERENCE, R)).toBe(true);
+    expect(tables.setMedium(R05_EARTH_REFERENCE, R)).toBe(true);
     expect(destroyedNames(events)).toContain(tables.absorberCurves.name);
     const made = engine.textureSpecs.findLast((s) => s.name === tables.absorberCurves.name);
     expect(made?.size).toEqual([1, 1]);
@@ -976,7 +993,7 @@ describe("AtmosphereTables with the lights' curves", () => {
 
   it("follows curves a lost device refused, and builds them at the restore", async () => {
     const engine = await countingRenderEngine();
-    const tables = new AtmosphereTables(engine, EARTH_REFERENCE, R);
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
     const lost = vi.spyOn(engine, "createTexture").mockImplementationOnce(() => {
       throw new EngineUnavailable("createTexture");
     });

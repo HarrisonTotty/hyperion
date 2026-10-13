@@ -40,6 +40,7 @@ import {
   keptTime,
 } from "../scenes/kept";
 import type { SunState } from "../atmosphere/hillaire";
+import type { Rgb } from "../photometry/toneCurve";
 import type { Xyz } from "../terrain/cube";
 import {
   finestPatchSizeM,
@@ -218,8 +219,13 @@ export function sunDirectionBody(profile: DescentProfile): Vec3 {
   return normalise(vec3(site.x, site.y, 0));
 }
 
-/** The star seen from the planet, for the atmosphere (`HillaireAtmosphere.drawFrame`). */
-export function spikeSunState(sunBody: Vec3, rotation: Rotation3): SunState {
+/**
+ * The star seen from the planet, for the atmosphere (`HillaireAtmosphere.drawFrame`).
+ *
+ * @param illuminanceLx - The star's illuminance at the planet per channel, lx (plan R08, R08.T6.d:
+ *   `earth.ts`'s `referenceSunIlluminanceLx()`, R07's `starIlluminance` of R06's Sun at 1 au).
+ */
+export function spikeSunState(sunBody: Vec3, rotation: Rotation3, illuminanceLx: Rgb): SunState {
   const [r0, r1, r2] = rotation.rows;
   // Rᵀ · s: the body's axes into its body-fixed ones.
   return {
@@ -228,7 +234,7 @@ export function spikeSunState(sunBody: Vec3, rotation: Rotation3): SunState {
       r0.y * sunBody.x + r1.y * sunBody.y + r2.y * sunBody.z,
       r0.z * sunBody.x + r1.z * sunBody.y + r2.z * sunBody.z,
     ),
-    distanceAu: 1,
+    illuminanceLx,
     angularRadiusRad: SPIKE_SUN_ANGULAR_RADIUS_RAD,
   };
 }

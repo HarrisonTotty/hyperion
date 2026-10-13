@@ -15,6 +15,7 @@
 import type { HostDiscDto } from "@hyperion/protocol";
 
 import { PARSEC_M, V0_ILLUMINANCE_LX } from "../photometry/magnitude";
+import type { Rgb } from "../photometry/toneCurve";
 
 /** The Sun's absolute V magnitude, Willmer 2018, ApJS 236, 47, Table 3. */
 export const SUN_ABSOLUTE_V = 4.81;
@@ -23,25 +24,30 @@ export const SUN_ABSOLUTE_V = 4.81;
 export const SUN_RADIUS_M = 6.957e8;
 
 /** An illustrative warm white of unit Rec. 709 luminance (r, g, b), not R06's table's. */
-const SUN_COLOUR_RGB = [1.08, 0.99, 0.863_4] as const;
+const SUN_COLOUR_RGB: Rgb = [1.08, 0.99, 0.863_4];
 
 /** The Sun's V-band power-2 limb darkening at log g 4.5 (Claret and Southworth 2022, Table 3). */
 const SUN_LIMB = { c: 0.7837, alpha: 0.6893 } as const;
 
 /**
- * A host star's disc as R06 sends it, a Sun unless overridden; `absoluteV` sets the luminance.
+ * A host star's disc as R06 sends it, a Sun unless overridden; `absoluteV` sets the luminance, and
+ * `colourRgb`, a linear Rec. 709 colour of unit luminance, the channels' split of it and the chroma
+ * in place of the illustrative warm white (R08.T6.d's reference Sun takes R06's solar colour).
  */
 export function sunLikeHostDisc(
-  overrides: Partial<HostDiscDto> & { readonly absoluteV?: number } = {},
+  overrides: Partial<HostDiscDto> & {
+    readonly absoluteV?: number;
+    readonly colourRgb?: Rgb;
+  } = {},
 ): HostDiscDto {
-  const { absoluteV = SUN_ABSOLUTE_V, ...dto } = overrides;
+  const { absoluteV = SUN_ABSOLUTE_V, colourRgb = SUN_COLOUR_RGB, ...dto } = overrides;
   const radius = dto.radius_m ?? SUN_RADIUS_M;
   const luxPerV0 = dto.lux_per_v0 ?? 1;
   const tenParsecs = 10 * PARSEC_M;
   const mean =
     (V0_ILLUMINANCE_LX * luxPerV0 * 10 ** (-0.4 * absoluteV) * tenParsecs * tenParsecs) /
     (Math.PI * radius * radius);
-  const [r, g, b] = SUN_COLOUR_RGB;
+  const [r, g, b] = colourRgb;
   const disc = 1 - (SUN_LIMB.c * SUN_LIMB.alpha) / (SUN_LIMB.alpha + 2);
   return {
     star: 0,

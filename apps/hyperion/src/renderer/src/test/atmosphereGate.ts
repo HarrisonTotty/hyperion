@@ -13,7 +13,7 @@
  */
 
 import { add, cross, dot, normalise, scale, type Vec3 } from "../geometry/vec3";
-import { EARTH_REFERENCE, RAYLEIGH_SCALE_HEIGHT_M } from "../view/atmosphere/earth";
+import { R05_EARTH_REFERENCE, RAYLEIGH_SCALE_HEIGHT_M } from "../view/atmosphere/earth";
 import { TABLE_SIZES } from "../view/atmosphere/hillaire";
 import {
   grazingTwilight,
@@ -34,7 +34,7 @@ import {
 
 /** WGS 84's equatorial radius a, m (NIMA TR8350.2): the twin's sphere. */
 export const BOTTOM_M = 6_378_137;
-const TOP_M = BOTTOM_M + EARTH_REFERENCE.topHeightM;
+const TOP_M = BOTTOM_M + R05_EARTH_REFERENCE.topHeightM;
 const SHELL = { bottomRadiusM: BOTTOM_M, topRadiusM: TOP_M };
 
 /** The spike's terrain albedo (Design note 17), the twin's Lambertian ground. */
@@ -101,7 +101,7 @@ function phaseOf(term: MediumTerm, cosTheta: number): number {
   return phase;
 }
 
-const TERMS = EARTH_REFERENCE.terms.map((term) => ({ term, sigma: extinction(term) }));
+const TERMS = R05_EARTH_REFERENCE.terms.map((term) => ({ term, sigma: extinction(term) }));
 
 /** The sun's optical depth per channel at the grid's nodes, (u, v) = (i, j) ÷ (size − 1). */
 function sunOpticalDepthGrid(): Float64Array {
@@ -110,7 +110,7 @@ function sunOpticalDepthGrid(): Float64Array {
     for (let i = 0; i < SUN_GRID_U; i += 1) {
       const { rM, mu } = transmittanceUvToRMu(SHELL, i / (SUN_GRID_U - 1), j / (SUN_GRID_V - 1));
       grid.set(
-        opticalDepth(EARTH_REFERENCE, BOTTOM_M, rM, mu, SUN_STEPS),
+        opticalDepth(R05_EARTH_REFERENCE, BOTTOM_M, rM, mu, SUN_STEPS),
         (j * SUN_GRID_U + i) * 3,
       );
     }
@@ -425,7 +425,7 @@ const SKY_SUNS = [30, 80, 90].flatMap((zen) => [0, 180].map((az) => [zen, az] as
 const BAND_SUNS = [30, 80, 90, 95].flatMap((zen) => [0, 180].map((az) => [zen, az] as const));
 
 /** Addendum B's high cameras, m: the sky view serves cameras up to 1 m below the top. */
-const HIGH_CAMERAS_M = [60_000, 80_000, EARTH_REFERENCE.topHeightM - 1];
+const HIGH_CAMERAS_M = [60_000, 80_000, R05_EARTH_REFERENCE.topHeightM - 1];
 
 /**
  * The sky view's rays: from the decision's model, cameras at 2 m, 1 km, 10 km and 50 km at view

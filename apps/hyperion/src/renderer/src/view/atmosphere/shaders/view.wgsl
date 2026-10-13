@@ -16,9 +16,12 @@ struct AtmosphereView {
   up : vec4f,
   // xyz: the unit direction to the sun; w: the sun's angular radius, rad.
   sun : vec4f,
-  // rgb: a table radiance's factor to pre-exposed luminance (Rec. 709); w: the exposure scale.
+  // rgb: a table radiance's factor to luminance (Rec. 709), the sun's illuminance at the body in
+  // each channel, lx (plan R08, R08.T6.d: R07's starIlluminance, through R06's colour); w: the
+  // exposure scale, which the composite takes.
   skyScale : vec4f,
-  // rgb: the sun disc's pre-exposed luminance at the top of the atmosphere; w: unused.
+  // rgb: the sun disc's luminance at the top of the atmosphere, cd m^-2, its illuminance over its
+  // solid angle; w: unused.
   sunDisc : vec4f,
   // The camera's ray basis in the body-fixed frame: right x tan(fovX / 2), up x tan(fovY / 2),
   // forward.
@@ -33,9 +36,6 @@ struct AtmosphereView {
   // x, y: the output's size in pixels; z: the ray march's scale (1 or 0.5); w: the sky-view
   // samples.
   output : vec4f,
-  // rgb: the sun's spectral-to-luminance factors over the sky's, for sunlight the grey ground
-  // reflects (Bruneton 2017, model.cc, GetSunAndSkyIlluminance); w: unused.
-  sunOverSky : vec4f,
   // What f32 cannot form here, formed in f64 by `HillaireAtmosphere` and narrowed once (plan R08,
   // Design note 18): x and y, the ray march's ground and top-shell quadric constants,
   // q_g = |S P|^2 - a^2 and q_t = |S_t P|^2 - (a + H)^2, P the camera's position, S = diag(1, 1,

@@ -1,22 +1,55 @@
 import { describe, expect, it } from "vitest";
 
+import bakeSpectra from "../../../../../../../packages/protocol/fixtures/bake_spectra.json" with { type: "json" };
+import { photopicIlluminance } from "../lighting/illuminance";
+import { AU_M } from "../scenes/kept";
+import { absorberVerticalAmount } from "./absorbers";
 import {
   AEROSOL_ASYMMETRY,
   AEROSOL_OPTICAL_DEPTH_550,
+  DOBSON_UNIT_PER_M2,
+  EARTH_COLUMN,
+  EARTH_DRY_AIR,
+  EARTH_OZONE,
+  EARTH_OZONE_LAYER_PA,
   EARTH_REFERENCE,
+  EARTH_REFERENCE_CURVES,
+  EARTH_TOP_HEIGHT_M,
   HILLAIRE_REFERENCE,
   OZONE_ABSORPTION_PER_M,
   OZONE_COLUMN_DU,
+  R05_EARTH_REFERENCE,
+  R06_SOLAR_BAKE_SPECTRUM,
+  R06_SOLAR_COLOUR_RGB,
   RAYLEIGH_SCALE_HEIGHT_M,
   RAYLEIGH_SCATTERING_PER_M,
+  REFERENCE_SUN,
+  referenceSunIlluminanceLx,
 } from "./earth";
-import { CHANNEL_WAVELENGTHS_NM, densityAt, extinction, termNamed } from "./medium";
+import {
+  CHANNEL_WAVELENGTHS_NM,
+  columnLengthM,
+  densityAt,
+  extinction,
+  layerEdgesM,
+  termNamed,
+} from "./medium";
+import { molecularMixture } from "./rayleigh";
+import { E490_ILLUMINANCE_LX } from "./solar";
+import { deltaUv, luminanceOfRgb, sunWeights } from "./spectralColour";
+import { checkAbsorberCurves, packMedium } from "./tables";
 
 /** Boltzmann's constant, J K⁻¹ (SI 2019, exact). */
 const BOLTZMANN_J_PER_K = 1.380_649e-23;
 
+/** The atomic mass constant, kg (CODATA 2018). */
+const ATOMIC_MASS_KG = 1.660_539_066_6e-27;
+
 /** The US Standard Atmosphere 1976's sea level: 288.15 K and 101,325 Pa. */
 const SEA_LEVEL_N_PER_M3 = 101_325 / (BOLTZMANN_J_PER_K * 288.15);
+
+/** Bruneton's channel wavelengths, nm, at which R05's constants stand. */
+const BRUNETON_NM = [680, 550, 440] as const;
 
 /**
  * (n − 1) of standard air (15 °C, 101,325 Pa, 0.03% CO₂) at a vacuum wavelength: Peck and Reeder,
@@ -56,20 +89,14 @@ function rayleighCrossSectionM2(wavelengthNm: number): number {
 }
 
 /**
- * One Dobson unit, molecules m⁻²: WMO/UNEP 2018 (_Twenty Questions_, glossary), Bruneton 2017's
- * `kDobsonUnit`.
- */
-const DOBSON_UNIT_PER_M2 = 2.687e20;
-
-/**
  * Ozone's cross-sections at 680, 550 and 440 nm, m²: Serdyuchenko et al., Atmos. Meas. Tech. 7
  * (2014) 625, at 233 K, binned over 10 nm as Bruneton 2017's `kOzoneCrossSection` has them.
  */
 const OZONE_CROSS_SECTION_M2 = [1.209e-25, 3.5e-25, 1.582e-26] as const;
 
-describe("Earth's Rayleigh term", () => {
+describe("R05's Rayleigh term", () => {
   it("recomputes the coefficients from Peck and Reeder's refractivity and Bates's King factor to 0.5%", () => {
-    for (const [c, wavelength] of CHANNEL_WAVELENGTHS_NM.entries()) {
+    for (const [c, wavelength] of BRUNETON_NM.entries()) {
       const beta = rayleighCrossSectionM2(wavelength) * SEA_LEVEL_N_PER_M3;
       expect(Math.abs(beta / (RAYLEIGH_SCATTERING_PER_M[c] ?? 0) - 1)).toBeLessThan(0.005);
     }
@@ -80,12 +107,14 @@ describe("Earth's Rayleigh term", () => {
     expect(Math.abs(cm2 / 4.51e-27 - 1)).toBeLessThan(0.01);
   });
 
-  it("is the term the reference medium carries", () => {
-    expect(termNamed(EARTH_REFERENCE, "rayleigh").scattering).toEqual(RAYLEIGH_SCATTERING_PER_M);
+  it("is the term R05's medium carries", () => {
+    expect(termNamed(R05_EARTH_REFERENCE, "rayleigh").scattering).toEqual(
+      RAYLEIGH_SCATTERING_PER_M,
+    );
   });
 });
 
-describe("Earth's ozone term", () => {
+describe("R05's ozone term", () => {
   it("recomputes the peak absorption from 300 DU over the 15 km tent and the cross-sections", () => {
     const peakPerM3 = (OZONE_COLUMN_DU * DOBSON_UNIT_PER_M2) / 15_000;
     for (const [c, sigma] of OZONE_CROSS_SECTION_M2.entries()) {
@@ -95,23 +124,23 @@ describe("Earth's ozone term", () => {
   });
 
   it("absorbs only", () => {
-    expect(termNamed(EARTH_REFERENCE, "ozone").scattering).toEqual([0, 0, 0]);
+    expect(termNamed(R05_EARTH_REFERENCE, "ozone").scattering).toEqual([0, 0, 0]);
   });
 });
 
-describe("Earth's aerosol term", () => {
+describe("R05's aerosol term", () => {
   it("integrates back to an optical depth of 0.1 at 550 nm", () => {
-    const aerosol = termNamed(EARTH_REFERENCE, "aerosol");
+    const aerosol = termNamed(R05_EARTH_REFERENCE, "aerosol");
     const groundExtinction = extinction(aerosol)[1];
     let tau = 0;
-    for (let h = 0.5; h < EARTH_REFERENCE.topHeightM; h += 1) {
+    for (let h = 0.5; h < R05_EARTH_REFERENCE.topHeightM; h += 1) {
       tau += groundExtinction * densityAt(aerosol.density, h);
     }
     expect(tau).toBeCloseTo(AEROSOL_OPTICAL_DEPTH_550, 6);
   });
 
   it("follows the Ångström law with exponent 1.3 and scatters 92% of its extinction", () => {
-    const aerosol = termNamed(EARTH_REFERENCE, "aerosol");
+    const aerosol = termNamed(R05_EARTH_REFERENCE, "aerosol");
     const [red, green, blue] = extinction(aerosol);
     expect(Math.log(red / green) / Math.log(550 / 680)).toBeCloseTo(1.3, 10);
     expect(Math.log(blue / green) / Math.log(550 / 440)).toBeCloseTo(1.3, 10);
@@ -128,7 +157,7 @@ describe("Hillaire's reference medium", () => {
   });
 });
 
-describe("Earth's Rayleigh column (decisions-r05.md item 3)", () => {
+describe("R05's Rayleigh column (decisions-r05.md item 3)", () => {
   it("takes the US Standard Atmosphere's sea-level scale height, R*T₀ ÷ (M₀g₀), to 0.1 m", () => {
     const heightM = (8.314_32 * 288.15) / (0.028_964_4 * 9.806_65);
     expect(Math.abs(RAYLEIGH_SCALE_HEIGHT_M - heightM)).toBeLessThan(0.1);
@@ -148,14 +177,167 @@ describe("Earth's aerosol phase (decisions-r05.md item 1)", () => {
     expect(Math.abs(meanCosine - 0.65)).toBeLessThan(0.002);
   });
 
-  it("is the aerosol term's phase, while Hillaire's medium keeps his 0.8", () => {
-    expect(termNamed(EARTH_REFERENCE, "aerosol").phase).toEqual({
-      kind: "cornette-shanks",
-      asymmetry: AEROSOL_ASYMMETRY,
-    });
+  it("is both Earths' aerosol phase, while Hillaire's medium keeps his 0.8", () => {
+    for (const medium of [EARTH_REFERENCE, R05_EARTH_REFERENCE]) {
+      expect(termNamed(medium, "aerosol").phase).toEqual({
+        kind: "cornette-shanks",
+        asymmetry: AEROSOL_ASYMMETRY,
+      });
+    }
     expect(termNamed(HILLAIRE_REFERENCE, "aerosol").phase).toEqual({
       kind: "cornette-shanks",
       asymmetry: 0.8,
     });
+  });
+});
+
+// --- Earth rebuilt (plan R08, R08.T6.d) -----------------------------------------------------------
+
+describe("Earth's column, rebuilt", () => {
+  it("has a scale height of about 8.4 km at the ground, kT ÷ (μ m_u g_ref)", () => {
+    const scaleHeightM =
+      (BOLTZMANN_J_PER_K * 288.15) /
+      (EARTH_COLUMN.meanMolarMassGPerMol * ATOMIC_MASS_KG * EARTH_COLUMN.referenceGravityMS2);
+    expect(scaleHeightM).toBeGreaterThan(8_400);
+    expect(scaleHeightM).toBeLessThan(8_460);
+    // Its column length, ∫ρ dz, is the ground's scale height to the spherical excess's 2H ÷ R.
+    const lengthM = columnLengthM(EARTH_COLUMN.density, EARTH_COLUMN.topHeightM);
+    expect(lengthM / scaleHeightM - 1).toBeGreaterThan(0);
+    expect(lengthM / scaleHeightM - 1).toBeLessThan(0.004);
+  });
+
+  it("thins faster than R05's exponential in the stratosphere, its 214 K skin's", () => {
+    expect(densityAt(EARTH_COLUMN.density, 30_000)).toBeLessThan(
+      Math.exp(-30_000 / RAYLEIGH_SCALE_HEIGHT_M),
+    );
+    expect(
+      densityAt(EARTH_COLUMN.density, 60_000) / Math.exp(-60_000 / RAYLEIGH_SCALE_HEIGHT_M),
+    ).toBeLessThan(0.5);
+  });
+
+  it("stands above the medium's 100 km top, so that no density is held up to it", () => {
+    expect(EARTH_COLUMN.topHeightM).toBeGreaterThan(EARTH_TOP_HEIGHT_M);
+    expect(() => packMedium(EARTH_REFERENCE)).not.toThrow();
+  });
+
+  it("gives Bodhaine et al. 1999's τ_R(550 nm) = 0.097 to 1% through dry air, as R05's exponential does", () => {
+    const tau =
+      molecularMixture(EARTH_DRY_AIR).crossSectionM2(550) *
+      EARTH_COLUMN.surfaceNumberDensityPerM3 *
+      columnLengthM(EARTH_COLUMN.density, EARTH_TOP_HEIGHT_M);
+    expect(Math.abs(tau / 0.097 - 1)).toBeLessThan(0.01);
+  });
+});
+
+describe("Earth rebuilt", () => {
+  it("takes R08.T3.c's molecular term on its column, named rayleigh, with air's depolarisation", () => {
+    const rayleigh = termNamed(EARTH_REFERENCE, "rayleigh");
+    expect(rayleigh.density).toBe(EARTH_COLUMN.density);
+    if (rayleigh.phase.kind !== "rayleigh") {
+      throw new Error("the molecular term's phase is Rayleigh's");
+    }
+    for (const rho of rayleigh.phase.depolarisation) {
+      expect(rho).toBeGreaterThan(0.026);
+      expect(rho).toBeLessThan(0.03);
+    }
+  });
+
+  it("evaluates its molecular term at the fitted channels, its scattering λ⁻⁴ and a little steeper", () => {
+    const [red, green, blue] = termNamed(EARTH_REFERENCE, "rayleigh").scattering;
+    const [lr, lg, lb] = CHANNEL_WAVELENGTHS_NM;
+    expect(Math.log(red / green) / Math.log(lg / lr)).toBeGreaterThan(4);
+    expect(Math.log(blue / green) / Math.log(lg / lb)).toBeLessThan(4.3);
+    expect(Math.log(blue / green) / Math.log(lg / lb)).toBeGreaterThan(4);
+  });
+
+  it("keeps R05's aerosol, at the fitted channels: 0.1 at 550 nm under the Ångström law", () => {
+    const aerosol = termNamed(EARTH_REFERENCE, "aerosol");
+    const [, green] = extinction(aerosol);
+    const tau550 =
+      green * 1_200 * (CHANNEL_WAVELENGTHS_NM[1] / 550) ** 1.3 * -Math.expm1(-100_000 / 1_200);
+    expect(tau550).toBeCloseTo(AEROSOL_OPTICAL_DEPTH_550, 6);
+    expect(aerosol.scattering[1] / green).toBeCloseTo(0.92, 12);
+  });
+
+  it("carries its ozone as an absorber term, absorbing by its curves alone", () => {
+    const ozone = termNamed(EARTH_REFERENCE, "absorber:O3");
+    expect(ozone.absorber?.spec).toBe(EARTH_OZONE);
+    expect(extinction(ozone)).toEqual([0, 0, 0]);
+  });
+
+  it("gives its ozone 300 DU", () => {
+    const amount = absorberVerticalAmount(EARTH_OZONE);
+    expect(amount.kind === "column" ? amount.columnPerM2 : Number.NaN).toBeCloseTo(
+      OZONE_COLUMN_DU * DOBSON_UNIT_PER_M2,
+      -15,
+    );
+  });
+
+  it("lays its ozone between 70 and 3 hPa", () => {
+    expect([EARTH_OZONE.basePa, EARTH_OZONE.topPa]).toEqual(EARTH_OZONE_LAYER_PA);
+  });
+
+  it("gives its ozone one layer of four edges, between 18 and 39 km", () => {
+    const edges = layerEdgesM(termNamed(EARTH_REFERENCE, "absorber:O3").density);
+    expect(edges).toHaveLength(4);
+    expect(edges[0]).toBeGreaterThan(18_000);
+    expect(edges[3]).toBeLessThan(39_000);
+  });
+
+  it("takes its ozone's cross-sections at the skin's 214.4 K, within Serdyuchenko's 193–293 K", () => {
+    expect(EARTH_OZONE.temperatureK).toBeCloseTo(214.4, 6);
+  });
+
+  it("puts its ozone's column-weighted mean height within 1.5 km of R05's tent's 25 km", () => {
+    const ozone = termNamed(EARTH_REFERENCE, "absorber:O3");
+    let weight = 0;
+    let moment = 0;
+    for (let h = 0.5; h < EARTH_TOP_HEIGHT_M; h += 1) {
+      const d = densityAt(ozone.density, h);
+      weight += d;
+      moment += d * h;
+    }
+    expect(Math.abs(moment / weight - 25_000)).toBeLessThan(1_500);
+  });
+
+  it("is built with the reference Sun's curve of its ozone, which its tables accept", () => {
+    expect(EARTH_REFERENCE_CURVES).toHaveLength(1);
+    expect(() => {
+      checkAbsorberCurves(EARTH_REFERENCE, EARTH_REFERENCE_CURVES);
+    }).not.toThrow();
+  });
+
+  it("keeps R05's top and ground", () => {
+    expect(EARTH_REFERENCE.topHeightM).toBe(R05_EARTH_REFERENCE.topHeightM);
+    expect(EARTH_REFERENCE.groundAlbedo).toEqual(R05_EARTH_REFERENCE.groundAlbedo);
+  });
+});
+
+describe("the reference Sun (R06's, through R07's starIlluminance)", () => {
+  it("carries the bake spectrum R06's table gives the Sun, as the client's fixture holds it", () => {
+    const sun = bakeSpectra.suns.find((s) => s.teff_k === 5_772 && s.grid === "MainSequence");
+    expect(sun?.bake_spectrum).toEqual([...R06_SOLAR_BAKE_SPECTRUM]);
+    expect(REFERENCE_SUN.bake_spectrum).toEqual([...R06_SOLAR_BAKE_SPECTRUM]);
+  });
+
+  it("is R06's colour, of unit luminance, within 2 × 10⁻⁴ in u′v′ of its own bake spectrum's", () => {
+    expect(luminanceOfRgb(R06_SOLAR_COLOUR_RGB)).toBeCloseTo(1, 4);
+    expect(photopicIlluminance(R06_SOLAR_COLOUR_RGB)).toBeCloseTo(1, 12);
+    expect(R06_SOLAR_COLOUR_RGB[2]).toBeCloseTo(0.934_006_3, 6);
+    const bins = sunWeights(R06_SOLAR_BAKE_SPECTRUM).rgb;
+    expect(deltaUv(R06_SOLAR_COLOUR_RGB, bins)).toBeLessThan(2e-4);
+  });
+
+  it("lights a body at 1 au with E-490's own photopic illuminance to 1%", () => {
+    const lux = photopicIlluminance(referenceSunIlluminanceLx(AU_M));
+    expect(Math.abs(lux / E490_ILLUMINANCE_LX - 1)).toBeLessThan(0.01);
+  });
+
+  it("splits its illuminance over the channels by R06's colour", () => {
+    const [r, g, b] = referenceSunIlluminanceLx();
+    const lux = photopicIlluminance([r, g, b]);
+    expect(r / lux).toBeCloseTo(R06_SOLAR_COLOUR_RGB[0], 6);
+    expect(g / lux).toBeCloseTo(R06_SOLAR_COLOUR_RGB[1], 6);
+    expect(b / lux).toBeCloseTo(R06_SOLAR_COLOUR_RGB[2], 6);
   });
 });

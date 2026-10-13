@@ -78,9 +78,9 @@ import { marchSplit, marchStep, type MarchStep } from "./marchSteps";
 import {
   type AtmosphereMedium,
   checkTabulatedTops,
-  type DensityProfile,
-  densityAt,
+  densityLookup,
   extinction,
+  layerEdgesM,
   type PhaseFunction,
   phaseAt,
 } from "./medium";
@@ -95,7 +95,6 @@ import {
   transmittanceUvToRMu,
   unitFromTexelUv,
 } from "./opticalDepth";
-import { SKY_SPECTRAL_TO_LUMINANCE, SUN_SPECTRAL_TO_LUMINANCE } from "./solar";
 import {
   ABSORBER_SLOTS,
   type AbsorberCurveSlots,
@@ -108,6 +107,7 @@ import {
   type TableSize,
   TRANSMITTANCE_SAMPLES,
   TRANSMITTANCE_SIZE,
+  TRANSMITTANCE_STEPS_A_PIECE,
 } from "./tables";
 
 /** A radiance or transmittance per channel that a twin writes into. */
@@ -135,9 +135,13 @@ export interface TwinVolume extends TwinTable {
  * an absorber, its slot and n ÷ U (`tables.ts`'s `absorberSlots`, R08.T6.c).
  */
 interface TwinTerm {
-  readonly density: DensityProfile;
+  /** `medium.ts`'s `densityLookup` of its density: its value at a height, found from the last. */
+  readonly densityOf: (heightM: number) => number;
   readonly scattering: Rgb;
+  readonly absorption: Rgb;
   readonly extinction: Rgb;
+  /** Its layer edges, m (`medium.ts`'s `layerEdgesM`), where the transmittance march is split. */
+  readonly edgesM: ReadonlyArray<number>;
   readonly phase: PhaseFunction;
   /** Its absorber slot, 0 to `ABSORBER_SLOTS` − 1, or −1 for a term that is not an absorber. */
   readonly slot: number;
@@ -158,9 +162,11 @@ function termsOf(medium: AtmosphereMedium): readonly TwinTerm[] {
   checkTabulatedTops(medium);
   const slots = new Map(absorberSlots(medium).map((slot) => [slot.termIndex, slot]));
   return medium.terms.map((term, i) => ({
-    density: term.density,
+    densityOf: densityLookup(term.density),
     scattering: term.scattering,
+    absorption: term.absorption,
     extinction: extinction(term),
+    edgesM: layerEdgesM(term.density),
     phase: term.phase,
     slot: slots.get(i)?.slot ?? -1,
     columnPerM: slots.get(i)?.columnPerM ?? 0,
@@ -170,14 +176,24 @@ function termsOf(medium: AtmosphereMedium): readonly TwinTerm[] {
 /** Where a sample's absorber columns per metre stand in {@link sampleInto}'s output: 9 on. */
 const COLUMNS_AT = 9;
 
-/** The floats of one sample: three triples and the absorber slots' columns. */
-const SAMPLE_FLOATS = COLUMNS_AT + ABSORBER_SLOTS;
+/** Where a sample's absorption stands in {@link sampleInto}'s output, past the columns: 14 on. */
+const ABSORPTION_AT = COLUMNS_AT + ABSORBER_SLOTS;
+
+/** The floats of one sample: three triples, the absorber slots' columns and the absorption. */
+const SAMPLE_FLOATS = ABSORPTION_AT + 3;
 
 /**
  * The medium at a height into `out`, {@link SAMPLE_FLOATS} long: the scattering in 0–2 and the
  * extinction in 3–5, m⁻¹; given each term's phase per channel for the ray, the scattering towards
- * the eye in 6–8, m⁻¹ sr⁻¹; and each absorber slot's column per metre, its n ÷ U times its density,
- * in 9–13 (`medium.wgsl`'s `mediumAtHeight` and `source.wgsl`'s `sampleMediumAt`).
+ * the eye in 6–8, m⁻¹ sr⁻¹; each absorber slot's column per metre, its n ÷ U times its density,
+ * in 9–13; and the absorption in 14–16, m⁻¹, the terms' own coefficients summed, never the
+ * extinction less the scattering (`medium.wgsl`'s `mediumAtHeight` and `source.wgsl`'s
+ * `sampleMediumAt`; R08.T6.d).
+ *
+ * @remarks
+ * The twins' innermost call, a few million times a table: written with indexed loops and its sums
+ * in locals, each summed term by term in the terms' order as before, so that its values are the
+ * same to the bit (R08.T6.d, for the smoke's watchdog).
  */
 function sampleInto(
   terms: readonly TwinTerm[],
@@ -185,21 +201,59 @@ function sampleInto(
   heightM: number,
   out: Float64Array,
 ): void {
-  out.fill(0);
-  for (const [k, term] of terms.entries()) {
-    const d = densityAt(term.density, heightM);
-    for (const c of CHANNELS) {
-      const scattered = term.scattering[c] * d;
-      out[c] = (out[c] ?? 0) + scattered;
-      out[3 + c] = (out[3 + c] ?? 0) + term.extinction[c] * d;
-      if (phases !== null) {
-        out[6 + c] = (out[6 + c] ?? 0) + scattered * (phases[k * 3 + c] ?? Number.NaN);
-      }
+  out.fill(0, COLUMNS_AT, ABSORPTION_AT);
+  let s0 = 0;
+  let s1 = 0;
+  let s2 = 0;
+  let e0 = 0;
+  let e1 = 0;
+  let e2 = 0;
+  let p0 = 0;
+  let p1 = 0;
+  let p2 = 0;
+  let a0 = 0;
+  let a1 = 0;
+  let a2 = 0;
+  for (let k = 0; k < terms.length; k += 1) {
+    const term = terms[k];
+    if (term === undefined) {
+      continue;
+    }
+    const d = term.densityOf(heightM);
+    const { scattering, extinction: sigmaT, absorption } = term;
+    const r = scattering[0] * d;
+    const g = scattering[1] * d;
+    const b = scattering[2] * d;
+    s0 += r;
+    s1 += g;
+    s2 += b;
+    e0 += sigmaT[0] * d;
+    e1 += sigmaT[1] * d;
+    e2 += sigmaT[2] * d;
+    a0 += absorption[0] * d;
+    a1 += absorption[1] * d;
+    a2 += absorption[2] * d;
+    if (phases !== null) {
+      p0 += r * (phases[k * 3] ?? Number.NaN);
+      p1 += g * (phases[k * 3 + 1] ?? Number.NaN);
+      p2 += b * (phases[k * 3 + 2] ?? Number.NaN);
     }
     if (term.slot >= 0) {
       out[COLUMNS_AT + term.slot] = (out[COLUMNS_AT + term.slot] ?? 0) + term.columnPerM * d;
     }
   }
+  out[0] = s0;
+  out[1] = s1;
+  out[2] = s2;
+  out[3] = e0;
+  out[4] = e1;
+  out[5] = e2;
+  out[6] = p0;
+  out[7] = p1;
+  out[8] = p2;
+  out[ABSORPTION_AT] = a0;
+  out[ABSORPTION_AT + 1] = a1;
+  out[ABSORPTION_AT + 2] = a2;
 }
 
 /** Whether any of a medium's terms is an absorber. */
@@ -266,10 +320,14 @@ function bilinearChannelsInto(
   const fx = px - x0;
   const fy = py - y0;
   const texels = table.texels;
-  const at = (x: number, y: number, c: number): number => texels[(y * w + x) * 4 + c] ?? Number.NaN;
-  for (const c of channels) {
-    const a = at(x0, y0, c) * (1 - fx) + at(x1, y0, c) * fx;
-    const b = at(x0, y1, c) * (1 - fx) + at(x1, y1, c) * fx;
+  const i00 = (y0 * w + x0) * 4;
+  const i10 = (y0 * w + x1) * 4;
+  const i01 = (y1 * w + x0) * 4;
+  const i11 = (y1 * w + x1) * 4;
+  for (let j = 0; j < channels.length; j += 1) {
+    const c = channels[j] ?? 0;
+    const a = (texels[i00 + c] ?? Number.NaN) * (1 - fx) + (texels[i10 + c] ?? Number.NaN) * fx;
+    const b = (texels[i01 + c] ?? Number.NaN) * (1 - fx) + (texels[i11 + c] ?? Number.NaN) * fx;
     out[c] = a * (1 - fy) + b * fy;
   }
 }
@@ -285,8 +343,101 @@ export function exactStepFactor(x: number): number {
 // --- Transmittance -------------------------------------------------------------------------------
 
 /**
+ * Where the line of a ray from `heightM` above a sphere of radius `bottomRadiusM`, at zenith cosine
+ * `mu`, crosses the sphere `edgeM` above it: its two signed distances, m, nearer first (a caller
+ * keeps those ahead of the ray), or `null` where the line misses that sphere or starts on it tangent
+ * to it. `common.wgsl`'s `shellCrossings` in `f64`: the roots
+ * of t² + 2rμt + C = 0, C = (h − e)(2R + h + e), as q = −(rμ + sign(rμ)√((rμ)² − C)) and C ÷ q
+ * (Press et al., _Numerical Recipes_, 3rd ed., §5.6), neither of which cancels (plan R08,
+ * R08.T6.d).
+ */
+export function shellCrossingsM(
+  bottomRadiusM: number,
+  heightM: number,
+  mu: number,
+  edgeM: number,
+): readonly [number, number] | null {
+  const rMu = (bottomRadiusM + heightM) * mu;
+  const c = (heightM - edgeM) * (2 * bottomRadiusM + heightM + edgeM);
+  const disc = rMu * rMu - c;
+  if (disc < 0) {
+    return null;
+  }
+  const q = -(rMu + (rMu >= 0 ? 1 : -1) * Math.sqrt(disc));
+  if (q === 0) {
+    return null;
+  }
+  const other = c / q;
+  return [Math.min(q, other), Math.max(q, other)];
+}
+
+/** A transmittance ray's pieces between the places it crosses layer edges, and their steps. */
+export interface RayPieces {
+  /** Each piece's end along the ray, m, ascending, the ray's own end last. */
+  readonly endsM: ReadonlyArray<number>;
+  /** The steps each piece takes. */
+  readonly steps: ReadonlyArray<number>;
+}
+
+/**
+ * How `transmittance.wgsl`'s `rayToTop` splits a ray of length `tMaxM` from `heightM` at zenith
+ * cosine `mu` (plan R08, R08.T6.d; `decision-r08-t6b-floor.md` §9.2): at every distance within
+ * (0, t_max) where it crosses one of `edgesM` (each once; edges at or below the ground or at or
+ * above the top are crossed by no ray of the table's), into pieces. The `samples` steps are spread
+ * over them in proportion to their length, at least {@link TRANSMITTANCE_STEPS_A_PIECE} a piece (or
+ * the steps over the pieces, if fewer), piece p taking the least plus round(rest × end_p ÷ t_max)
+ * less its predecessors', the last the rest, so that they sum to `samples`.
+ *
+ * @param edgesM - The terms' layer edges, m, in any order.
+ */
+export function transmittancePieces(
+  edgesM: ReadonlyArray<number>,
+  shell: Shell,
+  heightM: number,
+  mu: number,
+  tMaxM: number,
+  samples: number,
+): RayPieces {
+  const atmosphereM = shell.topRadiusM - shell.bottomRadiusM;
+  const crossings: number[] = [];
+  for (const edgeM of edgesM) {
+    if (!(edgeM > 0 && edgeM < atmosphereM)) {
+      continue;
+    }
+    const roots = shellCrossingsM(shell.bottomRadiusM, heightM, mu, edgeM);
+    for (const t of roots ?? []) {
+      if (t > 0 && t < tMaxM) {
+        crossings.push(t);
+      }
+    }
+  }
+  crossings.sort((a, b) => a - b);
+  const endsM: number[] = [];
+  for (const t of crossings) {
+    const previous = endsM.at(-1);
+    if (previous === undefined || t > previous) {
+      endsM.push(t);
+    }
+  }
+  endsM.push(tMaxM);
+  const n = Math.max(Math.floor(samples), 1);
+  const pieces = endsM.length;
+  const least = Math.min(TRANSMITTANCE_STEPS_A_PIECE, Math.floor(n / pieces));
+  const rest = n - least * pieces;
+  let spent = 0;
+  const steps = endsM.map((end, p) => {
+    const share = p + 1 < pieces ? Math.floor(rest * (end / tMaxM) + 0.5) : rest;
+    const taken = least + share - spent;
+    spent = share;
+    return taken;
+  });
+  return { endsM, steps };
+}
+
+/**
  * The optical depth along a ray to the top by the transmittance kernel's midpoint rule, of every
- * term but the absorbers, into `out`, and each absorber slot's column u ÷ U into `columns`.
+ * term but the absorbers, into `out`, and each absorber slot's column u ÷ U into `columns`, the ray
+ * split at the terms' layer edges as {@link transmittancePieces} splits it (R08.T6.d).
  */
 function kernelOpticalDepthInto(
   terms: readonly TwinTerm[],
@@ -298,24 +449,41 @@ function kernelOpticalDepthInto(
   columns: Float64Array,
   scratch: Float64Array,
 ): void {
-  const n = Math.max(Math.floor(samples), 1);
-  const dt = distanceToTopM(shell, rM, mu) / n;
+  const tMaxM = distanceToTopM(shell, rM, mu);
+  const edgesM = terms.flatMap((term) => term.edgesM);
+  const { endsM, steps } = transmittancePieces(
+    edgesM,
+    shell,
+    rM - shell.bottomRadiusM,
+    mu,
+    tMaxM,
+    samples,
+  );
   out.fill(0);
   columns.fill(0);
-  for (let i = 0; i < n; i += 1) {
-    sampleInto(terms, null, localRadiusM(rM, mu, (i + 0.5) * dt) - shell.bottomRadiusM, scratch);
-    for (const c of CHANNELS) {
-      out[c] += (scratch[3 + c] ?? Number.NaN) * dt;
+  let start = 0;
+  for (const [p, end] of endsM.entries()) {
+    const n = steps[p] ?? 0;
+    const dt = n > 0 ? (end - start) / n : 0;
+    for (let i = 0; i < n; i += 1) {
+      const t = start + (i + 0.5) * dt;
+      sampleInto(terms, null, localRadiusM(rM, mu, t) - shell.bottomRadiusM, scratch);
+      for (const c of CHANNELS) {
+        out[c] += (scratch[3 + c] ?? Number.NaN) * dt;
+      }
+      for (let k = 0; k < ABSORBER_SLOTS; k += 1) {
+        columns[k] = (columns[k] ?? 0) + (scratch[COLUMNS_AT + k] ?? Number.NaN) * dt;
+      }
     }
-    for (let k = 0; k < ABSORBER_SLOTS; k += 1) {
-      columns[k] = (columns[k] ?? 0) + (scratch[COLUMNS_AT + k] ?? Number.NaN) * dt;
-    }
+    start = end;
   }
 }
 
 /**
  * The optical depth per channel from radius `rM` along zenith cosine `mu` to the top, by
- * `transmittance.wgsl`'s rule: `samples` equal steps, each sampled at its midpoint.
+ * `transmittance.wgsl`'s rule: `samples` steps, equal on each piece of the ray between the places it
+ * crosses a term's layer edges ({@link transmittancePieces}, R08.T6.d), each sampled at its
+ * midpoint.
  *
  * @remarks
  * The table's rays never pass below the ground's tangent (x_μ ≤ 1), and the tangent ray itself,
@@ -337,12 +505,36 @@ export function kernelOpticalDepth(
   mu: number,
   samples = TRANSMITTANCE_SAMPLES,
 ): Rgb {
+  return kernelRayToTop(medium, bottomRadiusM, rM, mu, samples).opticalDepth;
+}
+
+/** One transmittance ray to the top as the kernel integrates it (`transmittance.wgsl`'s `RayToTop`). */
+export interface TwinRayToTop {
+  /** The optical depth of every term but the absorbers. */
+  readonly opticalDepth: Rgb;
+  /** Each absorber slot's column u ÷ U, slot by slot, 0 past the medium's absorbers. */
+  readonly columns: Float64Array;
+}
+
+/**
+ * {@link kernelOpticalDepth} with the absorbers' columns beside it: one texel's ray, unheld to the
+ * half float's largest, which the table holds it to.
+ *
+ * @throws RangeError as {@link kernelOpticalDepth}.
+ */
+export function kernelRayToTop(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  rM: number,
+  mu: number,
+  samples = TRANSMITTANCE_SAMPLES,
+): TwinRayToTop {
   const out: TwinRgb = [0, 0, 0];
   const shell = { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM };
   const columns = new Float64Array(ABSORBER_SLOTS);
   const scratch = new Float64Array(SAMPLE_FLOATS);
   kernelOpticalDepthInto(termsOf(medium), shell, rM, mu, samples, out, columns, scratch);
-  return out;
+  return { opticalDepth: out, columns };
 }
 
 /** Both tables the transmittance kernel writes, in `f64`, as {@link transmittanceTables} gives them. */
@@ -449,6 +641,8 @@ export function transmittanceTablesTwin(
 interface TwinAbsorbers {
   /** One light slot's curve for each absorber slot; none for a medium with no absorber. */
   readonly curves: ReadonlyArray<AbsorberCurve>;
+  /** Each curve as the march reads it, slot by slot ({@link readerOf}). */
+  readonly readers: ReadonlyArray<CurveReader>;
 }
 
 /**
@@ -470,7 +664,8 @@ function twinAbsorbers(
       `medium ${medium.name}'s absorbers have no curves at light slot ${curveSlot} of ${curves.length}`,
     );
   }
-  return { curves: light ?? [] };
+  const taken = light ?? [];
+  return { curves: taken, readers: taken.map(readerOf) };
 }
 
 /** ln(u ÷ U) at a curve's node 0: 10⁻³ (`absorbers.ts`'s `ABSORBER_CURVE_DECADES`). */
@@ -495,31 +690,67 @@ const CURVE_DEPTH_MAX = -Math.log(ABSORBER_TRANSMITTANCE_FLOOR);
  */
 export function curveOpticalDepth(curve: AbsorberCurve, relativeColumn: number): Rgb {
   const out: TwinRgb = [0, 0, 0];
-  addCurveDepth(curve, relativeColumn, out);
+  addCurveDepth(readerOf(curve), relativeColumn, out);
   return out;
 }
 
+/**
+ * A curve as the march reads it: its nodes, and its node depths with their logarithms per
+ * channel, taken once a curve, since the march reads a curve at every step and its log–log rule
+ * takes the same two logarithms each time (R08.T6.d).
+ */
+interface CurveReader {
+  readonly nodes: number;
+  readonly depths: readonly [Float64Array, Float64Array, Float64Array];
+  readonly logs: readonly [Float64Array, Float64Array, Float64Array];
+}
+
+/** Each curve's {@link CurveReader}, made once. */
+const CURVE_READERS = new WeakMap<AbsorberCurve, CurveReader>();
+
+/** A curve's {@link CurveReader}, cached. */
+function readerOf(curve: AbsorberCurve): CurveReader {
+  let reader = CURVE_READERS.get(curve);
+  if (reader === undefined) {
+    const [r, g, b] = curve.opticalDepth;
+    reader = {
+      nodes: curve.logColumns.length,
+      depths: curve.opticalDepth,
+      logs: [r.map(Math.log), g.map(Math.log), b.map(Math.log)],
+    };
+    CURVE_READERS.set(curve, reader);
+  }
+  return reader;
+}
+
+/** u ÷ U at a curve's node 0, 10⁻³: exp of {@link CURVE_FIRST_LN}. */
+const CURVE_FIRST_COLUMN = Math.exp(CURVE_FIRST_LN);
+
 /** {@link curveOpticalDepth} added into `out`. */
-function addCurveDepth(curve: AbsorberCurve, x: number, out: TwinRgb): void {
+function addCurveDepth(reader: CurveReader, x: number, out: TwinRgb): void {
   if (!(x > 0)) {
     return;
   }
-  const nodes = curve.logColumns.length;
   const node = (Math.log(x) - CURVE_FIRST_LN) * CURVE_NODES_PER_LN;
-  const k = Math.min(Math.floor(node), nodes - 2);
+  if (node <= 0) {
+    // exp(ln u − ln u₀) = (u ÷ U) ÷ 10⁻³.
+    const proportion = x / CURVE_FIRST_COLUMN;
+    for (const c of CHANNELS) {
+      const depth = (reader.depths[c][0] ?? Number.NaN) * proportion;
+      out[c] += Math.min(Math.max(depth, 0), CURVE_DEPTH_MAX);
+    }
+    return;
+  }
+  const k = Math.min(Math.floor(node), reader.nodes - 2);
   const t = node - k;
   for (const c of CHANNELS) {
-    const depths = curve.opticalDepth[c];
-    let depth: number;
-    if (node <= 0) {
-      // exp(ln u − ln u₀) = (u ÷ U) ÷ 10⁻³.
-      depth = (depths[0] ?? Number.NaN) * (x / Math.exp(CURVE_FIRST_LN));
-    } else {
-      const a = depths[k] ?? Number.NaN;
-      const b = depths[k + 1] ?? Number.NaN;
-      depth =
-        a > 0 && b > 0 ? Math.exp(Math.log(a) + (Math.log(b) - Math.log(a)) * t) : a + (b - a) * t;
-    }
+    const depths = reader.depths[c];
+    const logs = reader.logs[c];
+    const a = depths[k] ?? Number.NaN;
+    const b = depths[k + 1] ?? Number.NaN;
+    const la = logs[k] ?? Number.NaN;
+    const lb = logs[k + 1] ?? Number.NaN;
+    const depth = a > 0 && b > 0 ? Math.exp(la + (lb - la) * t) : a + (b - a) * t;
     out[c] += Math.min(Math.max(depth, 0), CURVE_DEPTH_MAX);
   }
 }
@@ -531,8 +762,12 @@ function addCurveDepth(curve: AbsorberCurve, x: number, out: TwinRgb): void {
  */
 function absorberDepthInto(absorbers: TwinAbsorbers, relative: Float64Array, out: TwinRgb): void {
   out.fill(0);
-  for (const [k, curve] of absorbers.curves.entries()) {
-    addCurveDepth(curve, relative[k] ?? Number.NaN, out);
+  const { readers } = absorbers;
+  for (let k = 0; k < readers.length; k += 1) {
+    const reader = readers[k];
+    if (reader !== undefined) {
+      addCurveDepth(reader, relative[k] ?? Number.NaN, out);
+    }
   }
 }
 
@@ -548,17 +783,15 @@ function transmittanceThroughTablesInto(
   u: number,
   v: number,
   out: TwinRgb,
-  scratch: Float64Array,
+  scratch: ReadScratch,
 ): void {
   const ut = texelUvFromUnit(unitClamp(u), tables.transmittance.widthTexels);
   const vt = texelUvFromUnit(unitClamp(v), tables.transmittance.heightTexels);
-  const stored = scratch.subarray(0, 4);
+  const { stored, columns, more } = scratch;
   bilinearChannelsInto(tables.transmittance, ut, vt, RGBA, stored);
-  const columns = scratch.subarray(4, 4 + ABSORBER_SLOTS);
   columns.fill(0);
   columns[0] = stored[3] ?? Number.NaN;
   if (absorbers.curves.length > 1) {
-    const more = scratch.subarray(4 + ABSORBER_SLOTS, 8 + ABSORBER_SLOTS);
     bilinearChannelsInto(tables.absorberColumns, ut, vt, RGBA, more);
     columns.set(more, 1);
   }
@@ -568,8 +801,24 @@ function transmittanceThroughTablesInto(
   }
 }
 
-/** The floats {@link transmittanceThroughTablesInto} works in. */
-const READ_SCRATCH_FLOATS = 8 + ABSORBER_SLOTS;
+/**
+ * The arrays {@link transmittanceThroughTablesInto} works in, made once a march rather than as
+ * views at every read: the stored texel, the absorber slots' columns and slots 1 to 4's texel.
+ */
+interface ReadScratch {
+  readonly stored: Float64Array;
+  readonly columns: Float64Array;
+  readonly more: Float64Array;
+}
+
+/** A fresh {@link ReadScratch}. */
+function readScratch(): ReadScratch {
+  return {
+    stored: new Float64Array(4),
+    columns: new Float64Array(ABSORBER_SLOTS),
+    more: new Float64Array(4),
+  };
+}
 
 // --- Multiple scattering -------------------------------------------------------------------------
 
@@ -593,9 +842,10 @@ export interface MultiScatteringOptions {
   /** The steps along each ray, at least 1 for even steps and at least 2 for placed. */
   readonly samples: number;
   /**
-   * `even`: the kernel's equal steps sampled at their midpoints. `placed`: R05.T12.e's steps toward
-   * each ray's lowest point, or for the side before it toward the texel's point (`marchSplit` with
-   * `fromCamera`), against which the kernel's are measured.
+   * `placed`: R05.T12.e's steps toward each ray's lowest point, or for the side before it toward
+   * the texel's point (`marchSplit` with `fromCamera`), the kernel's since R08.T6.d. `even`: R05's
+   * equal steps sampled at their midpoints, the kernel's until then, against which the placed ones
+   * were measured (R08.T6.a).
    */
   readonly placement: "even" | "placed";
   /**
@@ -607,12 +857,12 @@ export interface MultiScatteringOptions {
 
 /**
  * The multiple-scattering kernel's own: Hillaire 2020's 32² (his Table 2, at 20 steps a ray) with
- * R05.T12.b's 32 even steps a ray.
+ * R05.T12.b's 32 steps a ray, placed by R05.T12.e's rule since R08.T6.d (`multiScattering.wgsl`).
  */
 export const MULTI_SCATTERING_KERNEL_OPTIONS: MultiScatteringOptions = {
   size: MULTI_SCATTERING_SIZE,
   samples: MULTI_SCATTERING_SAMPLES,
-  placement: "even",
+  placement: "placed",
   stepFactor: exactStepFactor,
 };
 
@@ -697,16 +947,24 @@ class TwinAbsorberPath {
 /** The arrays one multiple-scattering direction's integral works in. */
 interface DirectionScratch {
   readonly sample: Float64Array;
-  readonly read: Float64Array;
+  readonly read: ReadScratch;
   readonly toSun: TwinRgb;
   readonly absorbed: TwinRgb;
 }
 
+/** The floats {@link integrateDirectionInto} writes: three triples. */
+const DIRECTION_FLOATS = 9;
+
 /**
  * One direction's integral (`multiScattering.wgsl`'s `integrate`): the luminance it brings per
  * unit illuminance into 0–2 (single scattering under the isotropic phase, and the ground's
- * Lambertian bounce) and f_ms's integrand into 3–5. Its own path takes its absorbers by the path's
- * column under the curves the table is built with, as the sun's transmittance does (R08.T6.c).
+ * Lambertian bounce); f_ms's integrand into 3–5, Σ throughput σ_s Δt g(d), which the kernel no
+ * longer forms and the twin keeps for its tests; and its escape, 1 − f_ms accumulated, into 6–8
+ * (R08.T6.d; `decision-r08-t6b-floor.md` §9.3): the throughput at the ray's end plus
+ * Σ throughput (σ_a Δt + the step's absorber depth) g(d), equal to 1 − f_ms since
+ * Σ throughput (1 − e^(−d)) telescopes to one less the end's throughput. Its own path takes its
+ * absorbers by the path's column under the curves the table is built with, as the sun's
+ * transmittance does (R08.T6.c).
  */
 function integrateDirectionInto(
   inputs: MultiScatteringInputs,
@@ -739,12 +997,17 @@ function integrateDirectionInto(
     for (const c of CHANNELS) {
       const scattering = sample[c] ?? Number.NaN;
       const stepDepth = (sample[3 + c] ?? Number.NaN) * dtM + absorbed[c];
-      const factor = dtM * options.stepFactor(stepDepth);
+      const g = options.stepFactor(stepDepth);
       const source = (lit * toSun[c] * scattering) / (4 * Math.PI);
-      out[c] = (out[c] ?? 0) + throughput[c] * source * factor;
-      out[3 + c] = (out[3 + c] ?? 0) + throughput[c] * scattering * factor;
+      const absorbedHere = (sample[ABSORPTION_AT + c] ?? Number.NaN) * dtM + absorbed[c];
+      out[c] = (out[c] ?? 0) + throughput[c] * source * dtM * g;
+      out[3 + c] = (out[3 + c] ?? 0) + throughput[c] * scattering * dtM * g;
+      out[6 + c] = (out[6 + c] ?? 0) + throughput[c] * absorbedHere * g;
       throughput[c] *= Math.exp(-stepDepth);
     }
+  }
+  for (const c of CHANNELS) {
+    out[6 + c] = (out[6 + c] ?? 0) + throughput[c];
   }
   if (intersectsGround(shell, rM, mu)) {
     const gx = tMax * dir.x;
@@ -762,16 +1025,48 @@ function integrateDirectionInto(
 }
 
 /**
- * One multiple-scattering texel's value, per unit illuminance, into `out`: the second order's
- * mean over the 64 directions times F_ms = 1 ÷ (1 − f_ms), every further order as a geometric
- * series (Hillaire 2020, eqs. 9 and 10).
+ * One multiple-scattering texel's sums over its 64 directions, each their mean: the second order
+ * L₂, f_ms as Hillaire forms it, and the escape, 1 − f_ms accumulated (R08.T6.d).
  */
-function multiScatteringTexelInto(
+export interface MultiScatteringSeries {
+  readonly secondOrder: Rgb;
+  readonly fMs: Rgb;
+  readonly escape: Rgb;
+}
+
+/** What a multiple-scattering texel stores from its series: its colour and its alpha. */
+export interface MultiScatteringStored {
+  /** L₂ ÷ mean(escape) per channel, or L₂ alone where the escape is 0. */
+  readonly value: Rgb;
+  /** How many channels keep L₂ alone, 0 to 3: the texel's alpha. */
+  readonly alone: number;
+}
+
+/**
+ * The value a multiple-scattering texel stores from its series, as `multiScattering.wgsl` stores it
+ * (R08.T6.d; `decision-r08-t6b-floor.md` §9.3): Hillaire's L₂ ÷ (1 − f_ms) with 1 − f_ms the
+ * accumulated escape, or the second order L₂ alone, a lower bound of the term, in a channel whose
+ * escape is 0. No ε and no cap.
+ */
+export function multiScatteringStored(series: MultiScatteringSeries): MultiScatteringStored {
+  let alone = 0;
+  const value = CHANNELS.map((c) => {
+    const escape = series.escape[c];
+    if (escape > 0) {
+      return series.secondOrder[c] / escape;
+    }
+    alone += 1;
+    return series.secondOrder[c];
+  });
+  return { value: [value[0] ?? Number.NaN, value[1] ?? Number.NaN, value[2] ?? Number.NaN], alone };
+}
+
+/** One multiple-scattering texel's {@link MultiScatteringSeries}. */
+function multiScatteringSeriesAt(
   inputs: MultiScatteringInputs,
   x: number,
   y: number,
-  out: TwinRgb,
-): void {
+): MultiScatteringSeries {
   const { widthTexels: w, heightTexels: h } = inputs.options.size;
   const { bottomRadiusM: bottom, topRadiusM: top } = inputs.shell;
   const unitX = unitOfTexel(x, w);
@@ -782,11 +1077,11 @@ function multiScatteringTexelInto(
     unitY * (top - bottom - MULTI_SCATTERING_GROUND_OFFSET_M);
   const muSun = unitX * 2 - 1;
   const sun = { x: 0, y: Math.sqrt(Math.max(1 - muSun * muSun, 0)), z: muSun };
-  const sum = new Float64Array(6);
-  const one = new Float64Array(6);
+  const sum = new Float64Array(DIRECTION_FLOATS);
+  const one = new Float64Array(DIRECTION_FLOATS);
   const scratch: DirectionScratch = {
     sample: new Float64Array(SAMPLE_FLOATS),
-    read: new Float64Array(READ_SCRATCH_FLOATS),
+    read: readScratch(),
     toSun: [0, 0, 0],
     absorbed: [0, 0, 0],
   };
@@ -798,23 +1093,26 @@ function multiScatteringTexelInto(
     const sinPhi = Math.sqrt(Math.max(1 - cosPhi * cosPhi, 0));
     const dir = { x: Math.cos(theta) * sinPhi, y: Math.sin(theta) * sinPhi, z: cosPhi };
     integrateDirectionInto(inputs, rM, dir, sun, one, scratch);
-    for (let i = 0; i < 6; i += 1) {
+    for (let i = 0; i < DIRECTION_FLOATS; i += 1) {
       sum[i] = (sum[i] ?? 0) + (one[i] ?? Number.NaN);
     }
   }
-  for (const c of CHANNELS) {
-    const secondOrder = (sum[c] ?? Number.NaN) / MULTI_SCATTERING_DIRECTIONS;
-    const fMs = (sum[3 + c] ?? Number.NaN) / MULTI_SCATTERING_DIRECTIONS;
-    out[c] = secondOrder / (1 - fMs);
-  }
+  const mean = (at: number): Rgb => [
+    (sum[at] ?? Number.NaN) / MULTI_SCATTERING_DIRECTIONS,
+    (sum[at + 1] ?? Number.NaN) / MULTI_SCATTERING_DIRECTIONS,
+    (sum[at + 2] ?? Number.NaN) / MULTI_SCATTERING_DIRECTIONS,
+  ];
+  return { secondOrder: mean(0), fMs: mean(3), escape: mean(6) };
 }
 
 /**
  * The multiple-scattering table's twin: at each texel's height and sun zenith cosine (sebh's
  * mapping, its ground {@link MULTI_SCATTERING_GROUND_OFFSET_M} up), the luminance that every order
- * past the first adds per unit illuminance under an isotropic phase, alpha 1, as
- * `multiScattering.wgsl` stores it. It reads `transmittance` as the kernel reads its tables: the
- * optical depth and the absorber columns with light slot `curveSlot`'s curves (R08.T6.c).
+ * past the first adds per unit illuminance under an isotropic phase, as `multiScattering.wgsl`
+ * stores it: L₂ ÷ (1 − f_ms) with 1 − f_ms the accumulated escape (Hillaire 2020, eqs. 9 and 10;
+ * R08.T6.d), or L₂ alone in a channel whose escape is 0 in `f64`, with alpha the count of such
+ * channels, 0 to 3. It reads `transmittance` as the kernel reads its tables: the optical depth and
+ * the absorber columns with light slot `curveSlot`'s curves (R08.T6.c).
  *
  * @param bottomRadiusM - The tables' ground radius, m, the transmittance table's own.
  * @param texels - The texels to compute, each [x, y]; every texel by default. Texels not listed
@@ -844,14 +1142,38 @@ export function multiScatteringTwin(
   };
   const { widthTexels: w, heightTexels: h } = options.size;
   const out = new Float64Array(w * h * 4);
-  const value: TwinRgb = [0, 0, 0];
   const which =
     texels ?? Array.from({ length: w * h }, (_, i) => [i % w, Math.floor(i / w)] as const);
   for (const [x, y] of which) {
-    multiScatteringTexelInto(inputs, x, y, value);
-    out.set([value[0], value[1], value[2], 1], (y * w + x) * 4);
+    const { value, alone } = multiScatteringStored(multiScatteringSeriesAt(inputs, x, y));
+    out.set([value[0], value[1], value[2], alone], (y * w + x) * 4);
   }
   return { widthTexels: w, heightTexels: h, texels: out };
+}
+
+/**
+ * Each listed texel's {@link MultiScatteringSeries}, as {@link multiScatteringTwin} sums them: the
+ * tests' view of the escape beside the f_ms it replaces (R08.T6.d).
+ *
+ * @throws RangeError as {@link multiScatteringTwin}.
+ */
+export function multiScatteringSeriesTwin(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  transmittance: TwinTransmittance,
+  texels: ReadonlyArray<readonly [number, number]>,
+  options: MultiScatteringOptions = MULTI_SCATTERING_KERNEL_OPTIONS,
+  curveSlot = SHARED_TABLE_CURVE_SLOT,
+): MultiScatteringSeries[] {
+  const inputs: MultiScatteringInputs = {
+    terms: termsOf(medium),
+    shell: { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM },
+    groundAlbedo: medium.groundAlbedo,
+    transmittance,
+    absorbers: twinAbsorbers(medium, transmittance.curves, curveSlot),
+    options,
+  };
+  return texels.map(([x, y]) => multiScatteringSeriesAt(inputs, x, y));
 }
 
 // --- The per-planet tables and their reads -------------------------------------------------------
@@ -870,8 +1192,9 @@ export interface PlanetTwin extends TwinTransmittance {
 
 /**
  * The per-planet tables for a medium, as `AtmosphereTables` builds them: transmittance and the
- * absorber columns at 256 × 64 with 256 steps, then multiple scattering at 32² with 32 even steps
- * reading them with the curves of `tables.ts`'s `SHARED_TABLE_CURVE_SLOT`, light slot 0.
+ * absorber columns at 256 × 64 with 256 steps, split at the terms' layer edges, then multiple
+ * scattering at 32² with 32 placed steps (R08.T6.d) reading them with the curves of `tables.ts`'s
+ * `SHARED_TABLE_CURVE_SLOT`, light slot 0.
  *
  * @param bottomRadiusM - The tables' ground radius, m (`tableRadiusM(figure)` for a body).
  * @param curves - Each light's curves of growth for the medium's absorbers; none for a medium with
@@ -928,7 +1251,7 @@ export function tableSources(planet: PlanetTwin): TwinSources {
   const table = planet.multiScattering;
   // The one sun the per-frame kernels draw takes light slot 0 until R08.T7 (`source.wgsl`).
   const absorbers = twinAbsorbers(planet.medium, planet.curves, 0);
-  const scratch = new Float64Array(READ_SCRATCH_FLOATS);
+  const scratch = readScratch();
   return {
     bottomRadiusM: bottom,
     sunTransmittance: (heightM, muSun, out) => {
@@ -1134,8 +1457,6 @@ export interface TwinView {
   /** The projection's near plane, for distances from depth. */
   readonly nearM: number;
   readonly viewport: ViewSize;
-  /** The sun's spectral-to-luminance factors over the sky's, for the ground the march sees. */
-  readonly sunOverSky: Rgb;
 }
 
 /** A frame's view from its camera and sun, as `HillaireAtmosphere.drawFrame` fills its uniform. */
@@ -1160,11 +1481,6 @@ export function twinView(
     figure,
     nearM,
     viewport: camera.viewport,
-    sunOverSky: [
-      SUN_SPECTRAL_TO_LUMINANCE[0] / SKY_SPECTRAL_TO_LUMINANCE[0],
-      SUN_SPECTRAL_TO_LUMINANCE[1] / SKY_SPECTRAL_TO_LUMINANCE[1],
-      SUN_SPECTRAL_TO_LUMINANCE[2] / SKY_SPECTRAL_TO_LUMINANCE[2],
-    ],
   };
 }
 
@@ -1488,9 +1804,7 @@ function rayMarchTexelInto(
     const toSun: TwinRgb = [0, 0, 0];
     sources.sunTransmittance(0, muSun, toSun);
     for (const c of CHANNELS) {
-      luminance[c] +=
-        (t[c] * toSun[c] * Math.max(muSun, 0) * medium.groundAlbedo[c] * view.sunOverSky[c]) /
-        Math.PI;
+      luminance[c] += (t[c] * toSun[c] * Math.max(muSun, 0) * medium.groundAlbedo[c]) / Math.PI;
     }
     meanTransmittance = 0;
   }

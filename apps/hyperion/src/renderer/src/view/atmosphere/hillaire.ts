@@ -9,9 +9,11 @@
  * reads them at a point's height above the datum spheroid, with its sun and view cosines taken
  * against the spheroid's normal (Design note 16): the per-frame tables are built on the camera's
  * own sphere, of its Gaussian radius √(MN), and the ray march clips against the spheroid's shells.
- * The tables hold radiance per unit spectral solar irradiance at the channels' wavelengths; the
- * composite turns it into pre-exposed Rec. 709 luminance with `solar.ts`'s sky factors and clamps
- * the sun's disc after pre-exposure.
+ * The tables hold radiance per unit of the sun's illuminance in each channel, the smooth terms
+ * evaluated at the fitted channels' wavelengths (plan R08, Design note 5, R08.T6.d); the composite
+ * turns it into pre-exposed Rec. 709 luminance with the sun's per-channel illuminance, R07's
+ * `starIlluminance` through R06's colour ({@link SunState.illuminanceLx}), in place of R05's
+ * `solar.ts` factors, and clamps the sun's disc after pre-exposure.
  *
  * The kernels are `f32`. What they cannot form there without losing it, they are given formed in
  * `f64` and narrowed once (plan R08, Design note 18, R08.T6.g): the camera's height above the
@@ -35,6 +37,7 @@ import type {
   ViewSize,
   WgslMaterialSpec,
 } from "../engine/types";
+import type { Rgb } from "../photometry/toneCurve";
 import type { QualitySetting } from "../quality/qualitySetting";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import type { AtmosphereMedium } from "./medium";
@@ -46,12 +49,6 @@ import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
-import {
-  SKY_SPECTRAL_TO_LUMINANCE,
-  skyLuminanceScale,
-  SUN_SPECTRAL_TO_LUMINANCE,
-  sunIlluminanceRgb,
-} from "./solar";
 import {
   absorberCount,
   type AbsorberCurveSlots,
@@ -178,12 +175,18 @@ export interface AtmosphereCamera {
 export interface SunState {
   /** The unit direction to the sun in the body-fixed axes. */
   readonly directionBodyFixed: Vec3;
-  /** The sun's distance, au; its illuminance scales as its inverse square. */
-  readonly distanceAu: number;
+  /**
+   * The sun's illuminance at the body, face-on, per linear Rec. 709 channel, lx: R07's
+   * `starIlluminance(disc, distance)` (`view/lighting/illuminance.ts`), the star's photopic
+   * illuminance spread over the channels by R06's colour (plan R08, Design note 5, R08.T6.d). The
+   * tables hold light per unit of it, channel by channel, so it is what turns them into luminance.
+   */
+  readonly illuminanceLx: Rgb;
   /**
    * The disc's angular radius, rad: asin(R★ ÷ d), which the caller keeps consistent with
-   * `distanceAu`, so that the disc's luminance does not change with distance. 0 draws no disc (the
-   * comparison with Hillaire's images, which have none).
+   * `illuminanceLx`, the two from one disc at one distance, so that the disc's luminance is the
+   * star's mean luminance whatever the distance. 0 draws no disc (the comparison with Hillaire's
+   * images, which have none).
    */
   readonly angularRadiusRad: number;
 }
@@ -374,7 +377,6 @@ const VIEW_MEMBERS = [
   "tables",
   "figure",
   "output",
-  "sunOverSky",
   "exact",
 ] as const;
 
@@ -840,15 +842,11 @@ export class HillaireAtmosphere {
     const p = view.positionM;
     const n = inputs.normal;
     const s = sun.directionBodyFixed;
-    const distance2 = sun.distanceAu * sun.distanceAu;
-    const sky = skyLuminanceScale();
-    const sunRgb = sunIlluminanceRgb();
+    const sunRgb = sun.illuminanceLx;
     // The disc's solid angle 2π(1 − cos ρ), as 4π sin²(ρ ÷ 2), which keeps its digits for a small
     // disc where 1 − cos ρ would not even in f64 (a sun of 10⁻⁸ rad).
     const solidAngle = 4 * Math.PI * Math.sin(sun.angularRadiusRad / 2) ** 2;
-    const disc = solidAngle > 0 ? 1 / (distance2 * solidAngle) : 0;
-    const sunFactors = SUN_SPECTRAL_TO_LUMINANCE;
-    const skyFactors = SKY_SPECTRAL_TO_LUMINANCE;
+    const disc = solidAngle > 0 ? 1 / solidAngle : 0;
     const aspect = view.viewport.widthPx / view.viewport.heightPx;
     const tanX = Math.tan(view.fovXRad / 2);
     const tanY = tanX / aspect;
@@ -860,12 +858,9 @@ export class HillaireAtmosphere {
     set("camera", [p.x, p.y, p.z, inputs.heightM]);
     set("up", [n.x, n.y, n.z, inputs.radiusM - inputs.heightM]);
     set("sun", [s.x, s.y, s.z, sun.angularRadiusRad]);
-    set("skyScale", [
-      sky[0] / distance2,
-      sky[1] / distance2,
-      sky[2] / distance2,
-      scene.exposureScale,
-    ]);
+    // The tables hold light per unit of the sun's illuminance in each channel (R08.T6.d), so the
+    // sky, the ground the march sees and the disc all take the sun's own.
+    set("skyScale", [sunRgb[0], sunRgb[1], sunRgb[2], scene.exposureScale]);
     set("sunDisc", [sunRgb[0] * disc, sunRgb[1] * disc, sunRgb[2] * disc, 0]);
     set("right", [right.x * tanX, right.y * tanX, right.z * tanX, 0]);
     set("upRay", [up.x * tanY, up.y * tanY, up.z * tanY, 0]);
@@ -881,14 +876,6 @@ export class HillaireAtmosphere {
       this.#figure.polarRadiusM,
       scene.nearM,
       sizes.rayMarchSamples,
-    ]);
-    // Sunlight reflected by the grey ground keeps the sun's spectrum, so it takes the sun's
-    // factors, not the sky's (Bruneton 2017, model.cc, GetSunAndSkyIlluminance).
-    set("sunOverSky", [
-      sunFactors[0] / skyFactors[0],
-      sunFactors[1] / skyFactors[1],
-      sunFactors[2] / skyFactors[2],
-      0,
     ]);
     set("output", [
       view.viewport.widthPx,

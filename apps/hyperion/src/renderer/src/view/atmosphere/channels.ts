@@ -33,6 +33,8 @@ import {
   AEROSOL_OPTICAL_DEPTH_550,
   AEROSOL_SCALE_HEIGHT_M,
   AEROSOL_SINGLE_SCATTERING_ALBEDO,
+  EARTH_DRY_AIR,
+  WGS84_LEVEL_SPHEROID as WGS84,
 } from "./earth";
 import {
   BAKE_RANGE_NM,
@@ -42,7 +44,7 @@ import {
   type PhaseFunction,
   phaseAt,
 } from "./medium";
-import { type LevelSpheroid, referenceGravity } from "./oblate";
+import { referenceGravity } from "./oblate";
 import { distanceToTopM, intersectsGround, localRadiusM, type Shell } from "./opticalDepth";
 import { ESTIMATED_RAYLEIGH, type GasFractions, GASES, molecularMixture } from "./rayleigh";
 import type { AerosolMode } from "./sizeDistribution";
@@ -344,34 +346,6 @@ function earthAerosolExtinctionPerM(wavelengthNm: number): number {
     AEROSOL_SCALE_HEIGHT_M
   );
 }
-
-/**
- * Dry air by volume, as fractions: N₂ 78.084, O₂ 20.946 and Ar 0.934 percent (Bodhaine et al.
- * 1999, J. Atmos. Oceanic Technol. 16, 1854, eq. 23) and Peck and Reeder's 330 ppm of CO₂
- * (Bodhaine §1), over their sum of 99.997: `rayleigh.test.ts`'s dry air, which gives Earth's 4.85,
- * 11.5 and 28.7 × 10⁻⁶ m⁻¹ through R08.T3.c's molecular term.
- */
-export const EARTH_DRY_AIR: GasFractions = (() => {
-  const percent = [
-    ["N2", 78.084],
-    ["O2", 20.946],
-    ["Ar", 0.934],
-    ["CO2", 0.033],
-  ] as const;
-  const total = percent.reduce((sum, [, p]) => sum + p, 0);
-  return percent.map(([species, p]) => ({ species, moleFraction: p / total }));
-})();
-
-/**
- * WGS 84's level spheroid (NIMA TR8350.2, Third Edition, Amendment 1, Table 3.1), as R08.T3.d's
- * tests take it.
- */
-const WGS84: LevelSpheroid = {
-  equatorialRadiusM: 6_378_137,
-  polarRadiusM: 6_378_137 * (1 - 1 / 298.257_223_563),
-  gmM3S2: 3.986_004_418e14,
-  angularVelocityRadS: 7.292_115e-5,
-};
 
 /**
  * Earth's column for the fit: the U.S. Standard Atmosphere 1976's sea level, 101,325 Pa and

@@ -9,16 +9,20 @@
 //
 // Ported from Bevy 0.19.1's crates/bevy_pbr/src/atmosphere/multiscattering_lut.wgsl (MIT or
 // Apache-2.0; the notice is in common.wgsl) and checked against sebh's NewMultiScattCS and
-// IntegrateScatteredLuminance (UnrealEngineSkyAtmosphere, Resources/RenderSkyRayMarching.hlsl,
-// MIT, Copyright (c) 2020 Epic Games, Inc.). Where the two differ, sebh's reference is followed:
-// the sun's direction is (0, sqrt(1 - mu^2), mu) with z up (Bevy normalises (0, mu, -1), which is
-// not at zenith cosine mu); the ground's bounce is Lambertian, albedo / pi, with the sun's
+// IntegrateScatteredLuminance (UnrealEngineSkyAtmosphere, Resources/RenderSkyRayMarching.hlsl, MIT,
+// Copyright (c) 2020 Epic Games, Inc.). Where the two differ, sebh's reference is followed: the
+// sun's direction is (0, sqrt(1 - mu^2), mu) with z up (Bevy normalises (0, mu, -1), which is not
+// at zenith cosine mu); the ground's bounce is Lambertian, albedo / pi, with the sun's
 // transmittance read at the ground's radius (Bevy reads it at radius 0 and omits the 1 / pi); the
-// 64 directions are sebh's 8 x 8 stratified sphere, with its reduction. Each step is sampled at its
-// midpoint, and its in-scattering is taken without f32's cancellation (`stepFactor` in
-// common.wgsl, R05.T12.e's step factor, taken here in R08.T6.a). Each texel stands at its height,
-// 10 m + v (H - 10 m), and the ray's length, each sample's height, the ground's shadow and the
-// sun's transmittance are taken from heights, never as a radius less the ground's (plan R08,
+// 64 directions are sebh's 8 x 8 stratified sphere, with its reduction. Each ray's steps are placed
+// by R05.T12.e's rule (`marchSplit` with `fromCamera`, plan R08, R08.T6.d), where sebh and Bevy
+// take even ones, each sampled at its midpoint, and its in-scattering is taken without f32's
+// cancellation (`stepFactor` in common.wgsl, R05.T12.e's step factor, taken here in R08.T6.a).
+// Hillaire's 1 - f_ms is accumulated, not formed (R08.T6.d; `decision-r08-t6b-floor.md` section
+// 9.3): in nearly conservative air f_ms comes within f32's spacing of 1, so that one less it
+// rounded to 0, and a Venus-class table was NaN where the sun was down. Each texel stands at its
+// height, 10 m + v (H - 10 m), and the ray's length, each sample's height, the ground's shadow and
+// the sun's transmittance are taken from heights, never as a radius less the ground's (plan R08,
 // Design note 18, R08.T6.g); the transmittance table is read through Bruneton 2017's texel mapping
 // (Design note 19), whose write here is sebh's own, unchanged. sebh's code is used under its
 // licence (https://github.com/sebh/UnrealEngineSkyAtmosphere, master, fetched 2026-10-02):
@@ -76,7 +80,7 @@ fn azimuthOf(k : u32) -> vec2f {
 }
 
 var<workgroup> secondOrder : array<vec3f, DIRECTIONS>;
-var<workgroup> transfer : array<vec3f, DIRECTIONS>;
+var<workgroup> escape : array<vec3f, DIRECTIONS>;
 
 // The sun's transmittance from a height above the ground, read on the table's sphere: its stored
 // optical depth and absorber columns, with light slot `curveSlot()`'s curves of growth,
@@ -97,8 +101,12 @@ struct Integrated {
   // The luminance this direction brings, per unit illuminance: single scattering under the
   // isotropic phase, and the ground's bounce.
   luminance : vec3f,
-  // f_ms's integrand: the scattering along the ray, as if each point received unit luminance.
-  transfer : vec3f,
+  // This direction's 1 - f_ms (plan R08, R08.T6.d; `decision-r08-t6b-floor.md` section 9.3): the
+  // throughput at the ray's end, the light that leaves the medium, plus the light the medium
+  // absorbs along it, sum throughput (sigma_a dt + the step's absorber depth) stepFactor(d).
+  // Since sum throughput (1 - e^-d) telescopes to 1 - throughput at the end, it is Hillaire's
+  // 1 - f_ms exactly, positive by construction, and never formed as one less a sum near 1.
+  escape : vec3f,
 }
 
 fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
@@ -107,14 +115,19 @@ fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
   let mu = dir.z;
   let hitsGround = groundHitFromHeight(bottom, heightM, mu);
   let tMax = maxDistanceFromHeight(heightM, mu);
-  let samples = max(u32(medium.samples), 1u);
-  let dt = tMax / f32(samples);
+  let samples = max(u32(medium.samples), 2u);
+  // The steps placed toward the ray's lowest point and, before it, toward the texel's point
+  // (`marchSplit` with `fromCamera`, R05.T12.e's rule; plan R08, R08.T6.d), where R05 took even
+  // steps: they erred by up to 10.5% in the table, and placed steps by 2.6% (R08.T6.a).
+  let split = marchSplit(0.0, tMax, -(bottom + heightM) * mu, samples, true);
   var luminance = vec3f(0.0);
-  var transferSum = vec3f(0.0);
+  var escaped = vec3f(0.0);
   var throughput = vec3f(1.0);
   var path = absorberPathStart();
   for (var i = 0u; i < samples; i++) {
-    let t = (f32(i) + 0.5) * dt;
+    let stepAt = marchStep(split, i);
+    let t = stepAt.tM;
+    let dt = stepAt.dtM;
     let p = origin + t * dir;
     let rP = length(p);
     let muSun = dot(sun, p / rP);
@@ -122,13 +135,15 @@ fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
     let local = mediumAtHeight(sampleHeightM);
     // The direction's own path takes its absorbers by its column, under the sun's curves (R08.T6.c).
     let next = absorberStep(absorberCurves, absorberCount(), curveSlot(), path, local.columns, dt);
-    let stepDepth = local.extinction * dt + (next.depth - path.depth);
+    let stepAbsorbed = next.depth - path.depth;
+    let stepDepth = local.extinction * dt + stepAbsorbed;
     path = next;
     let stepTransmittance = exp(-stepDepth);
     let lit = select(1.0, 0.0, groundHitFromHeight(bottom, max(sampleHeightM, 0.0), muSun));
     let source = lit * transmittanceToSun(sampleHeightM, muSun) * local.scattering / (4.0 * PI);
-    luminance += throughput * source * dt * stepFactor(stepDepth);
-    transferSum += throughput * local.scattering * dt * stepFactor(stepDepth);
+    let factor = stepFactor(stepDepth);
+    luminance += throughput * source * dt * factor;
+    escaped += throughput * (local.absorption * dt + stepAbsorbed) * factor;
     throughput *= stepTransmittance;
   }
   if (hitsGround) {
@@ -138,7 +153,7 @@ fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
     luminance += transmittanceToSun(0.0, muSun) * throughput
       * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI;
   }
-  return Integrated(luminance, transferSum);
+  return Integrated(luminance, escaped + throughput);
 }
 
 @compute @workgroup_size(1, 1, 64)
@@ -163,12 +178,12 @@ fn main(
 
   let result = integrate(heightM, dir, sun);
   secondOrder[lid.z] = result.luminance;
-  transfer[lid.z] = result.transfer;
+  escape[lid.z] = result.escape;
   workgroupBarrier();
   for (var step = DIRECTIONS / 2u; step > 0u; step >>= 1u) {
     if (lid.z < step) {
       secondOrder[lid.z] += secondOrder[lid.z + step];
-      transfer[lid.z] += transfer[lid.z + step];
+      escape[lid.z] += escape[lid.z + step];
     }
     workgroupBarrier();
   }
@@ -177,7 +192,14 @@ fn main(
   }
   // Each direction stands for 4 pi / 64 sr, and the isotropic phase is 1 / (4 pi): the mean.
   let secondOrderLuminance = secondOrder[0] / f32(DIRECTIONS);
-  let fMs = transfer[0] / f32(DIRECTIONS);
-  // Equations 9 and 10: every further order as a geometric series.
-  textureStore(multiScatteringOut, id.xy, vec4f(secondOrderLuminance / (1.0 - fMs), 1.0));
+  let meanEscape = escape[0] / f32(DIRECTIONS);
+  // Equations 9 and 10: every further order as a geometric series, L2 / (1 - f_ms), with 1 - f_ms
+  // the mean escape (R08.T6.d). Where it is 0 in f32, every direction crossing some 100 optical
+  // depths with no absorption, the texel keeps L2 alone, the second order, a lower bound of the
+  // term; alpha counts its channels so stored, 0 to 3, for the smoke. No epsilon and no cap: a value past the half float's largest is the smoke's to refuse
+  // (`decision-r08-t6b-floor.md` section 9.3).
+  let alone = meanEscape <= vec3f(0.0);
+  let stored = select(secondOrderLuminance / meanEscape, secondOrderLuminance, alone);
+  let aloneCount = dot(select(vec3f(0.0), vec3f(1.0), alone), vec3f(1.0));
+  textureStore(multiScatteringOut, id.xy, vec4f(stored, aloneCount));
 }

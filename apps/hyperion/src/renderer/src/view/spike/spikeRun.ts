@@ -25,9 +25,12 @@ import {
 } from "../camera/projection";
 import { type CameraState, type CameraTarget, newCameraState, presetPose } from "../camera/state";
 import type { RenderEngine, RenderView, ViewSize } from "../engine/types";
-import { EARTH_REFERENCE } from "../atmosphere/earth";
+import {
+  EARTH_REFERENCE,
+  EARTH_REFERENCE_CURVES,
+  referenceSunIlluminanceLx,
+} from "../atmosphere/earth";
 import { HillaireAtmosphere, TABLE_SIZES } from "../atmosphere/hillaire";
-import { sunIlluminanceRgb } from "../atmosphere/solar";
 import { controlEv100 } from "../photometry/exposure";
 import {
   type QualitySetting,
@@ -82,6 +85,12 @@ export const SPIKE_FOV_X_RAD = (DEFAULT_FOV_DEG * Math.PI) / 180;
  * from their cameras' `fovDeg`.
  */
 const INSTRUMENT_FOV_X_RAD = (DEFAULT_FOV_DEG * Math.PI) / 180;
+
+/**
+ * The spike's Sun at its planet per channel, lx: R06's Sun at 1 au through R07's
+ * `starIlluminance` (plan R08, R08.T6.d), in place of R05's `solar.ts` factors.
+ */
+const SPIKE_SUN_ILLUMINANCE_LX = referenceSunIlluminanceLx();
 
 /** The `performance.measure` name of one frame's terrain work. */
 export const TERRAIN_FRAME_MEASURE = "terrain.frame";
@@ -425,6 +434,7 @@ export class SpikeRun {
         EARTH_REFERENCE,
         TABLE_SIZES[options.setting],
         TEST_PLANET_FIGURE,
+        EARTH_REFERENCE_CURVES,
       );
       undo.push(() => {
         atmosphere.dispose();
@@ -462,7 +472,7 @@ export class SpikeRun {
     this.#segmentSpan(tS < profile.durationS ? pose.segment : null, input.nowMs);
     const camera = spikeCameraAt(profile, tS);
     const contact = spikeContactAt(profile, this.#prepared.contact, tS);
-    const sun = spikeSunState(this.#sunBody, rotation);
+    const sun = spikeSunState(this.#sunBody, rotation, SPIKE_SUN_ILLUMINANCE_LX);
     const lit = this.#lit;
     const terrainStart = performance.now();
     const frame = this.#terrain.frame({
@@ -475,7 +485,8 @@ export class SpikeRun {
       },
       grounded: contact === null ? [] : [contact],
       sunDirectionBodyFixed: sun.directionBodyFixed,
-      sunIlluminanceLx: sunIlluminanceRgb(),
+      // The atmosphere's sun lights the terrain too, so that sky and ground share one light.
+      sunIlluminanceLx: sun.illuminanceLx,
       exposureScale: lit.exposureScale,
       nowMs: input.nowMs,
     });

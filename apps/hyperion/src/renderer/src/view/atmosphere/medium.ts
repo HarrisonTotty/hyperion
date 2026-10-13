@@ -5,24 +5,30 @@
  * @remarks
  * Each term is a density profile over height, scattering and absorption coefficients per channel at
  * unit density, and a phase function, as Bevy 0.19's `ScatteringMedium` is a list of terms. A new
- * gas or aerosol is a new term, never a new model. The three channels are spectral samples at
- * {@link CHANNEL_WAVELENGTHS_NM}, not RGB: `solar.ts` turns them into Rec. 709 luminance.
+ * gas or aerosol is a new term, never a new model. The three channels are the smooth terms
+ * evaluated at {@link CHANNEL_WAVELENGTHS_NM}, which the star's linear Rec. 709 colour multiplies
+ * (plan R08, Design note 5, R08.T6.d): a table holds light per unit of the star's illuminance in
+ * each channel.
  */
 
 import type { Rgb } from "../photometry/toneCurve";
 import type { ColumnAbsorberSpec, PairAbsorberSpec } from "./absorbers";
+import { FITTED_CHANNEL_WAVELENGTHS_NM } from "./fittedChannels";
 
 /**
- * The wavelengths of the three spectral channels, nm: 680, 550 and 440, red, green and blue.
+ * The wavelengths the smooth terms are evaluated at for the three render channels, nm, red, green
+ * and blue: R08.T4.a's fitted triple, `channels.json`'s (645, 544, 433.625) as built (plan R08,
+ * Design note 5; R08.T6.d).
  *
  * @remarks
- * Bruneton's `kLambdaR`, `kLambdaG` and `kLambdaB` (precomputed_atmospheric_scattering, 2017,
- * `atmosphere/model.h`), which Hillaire 2020 and sebh's reference code inherit, and the wavelengths
- * R05's Earth constants are evaluated at. R08.T4.a fits the triple the smooth terms are evaluated
- * at (`channels.ts`, recorded in `channels.json`; R08 Design note 5); R08.T6.d, which rebuilds Earth
- * at it, makes this constant read `fittedChannels.ts`'s `FITTED_CHANNEL_WAVELENGTHS_NM`.
+ * `fittedChannels.ts`'s {@link FITTED_CHANNEL_WAVELENGTHS_NM}, the minimax fit of Δu′v′ over
+ * R08.T4.a's family of twelve suns and 29 airs, which `channels.test.ts` records and holds. R05
+ * evaluated its Earth constants at Bruneton's `kLambdaR`, `kLambdaG` and `kLambdaB` (680, 550 and
+ * 440 nm; precomputed_atmospheric_scattering, 2017, `atmosphere/model.h`), which Hillaire 2020
+ * and sebh's reference code inherit; `earth.ts`'s `R05_EARTH_REFERENCE` keeps them as numbers of
+ * its own.
  */
-export const CHANNEL_WAVELENGTHS_NM: Rgb = [680, 550, 440];
+export const CHANNEL_WAVELENGTHS_NM: Rgb = FITTED_CHANNEL_WAVELENGTHS_NM;
 
 /** The span of the bake bins, nm: 380 to 760 (R08 Design note 5). */
 export const BAKE_RANGE_NM: readonly [number, number] = [380, 760];
@@ -68,6 +74,12 @@ export interface TabulatedDensity {
   readonly altitudesM: Float64Array;
   /** The relative density at each level. */
   readonly relative: Float64Array;
+  /**
+   * The heights of its layer's edges, m, ascending, where its levels do not show them: a table
+   * resampled onto other levels (`tables.ts`'s `resampledDensity`), whose ramps spread over the
+   * new levels about the old edges. Absent, {@link layerEdgesM} takes them from the levels.
+   */
+  readonly edgesM?: ReadonlyArray<number>;
 }
 
 /**
@@ -483,6 +495,39 @@ export function densityAt(profile: DensityProfile, heightM: number): number {
 }
 
 /**
+ * {@link densityAt} of one profile as a function of height, for a march that asks for it at
+ * nearby heights again and again (`tablesCpu.ts`'s twins): a tabulated profile's level is found by
+ * walking from the last one asked for, not by bisection, and its value is {@link densityAt}'s to the
+ * bit, by the same interpolation.
+ */
+export function densityLookup(profile: DensityProfile): (heightM: number) => number {
+  if (profile.kind !== "tabulated") {
+    return (heightM) => densityAt(profile, heightM);
+  }
+  const heights = profile.altitudesM;
+  const last = heights.length - 1;
+  const first = heights[0] ?? Number.NaN;
+  const final = heights[last] ?? Number.NaN;
+  let level = 0;
+  return (heightM) => {
+    const h = Math.max(heightM, 0);
+    if (h <= first) {
+      return profile.relative[0] ?? Number.NaN;
+    }
+    if (h >= final) {
+      return profile.relative[last] ?? Number.NaN;
+    }
+    while (level > 0 && (heights[level] ?? Number.NaN) > h) {
+      level -= 1;
+    }
+    while (level < last - 1 && (heights[level + 1] ?? Number.NaN) <= h) {
+      level += 1;
+    }
+    return withinLevel(profile, level, h);
+  };
+}
+
+/**
  * A profile's integral from the ground to a height, m: the vertical path length at unit density
  * that has the same optical depth.
  *
@@ -502,6 +547,52 @@ export function columnLengthM(profile: DensityProfile, topM: number): number {
       break;
   }
   return length;
+}
+
+/**
+ * The heights of a profile's layer edges, m, ascending, at most four (plan R08, R08.T6.d;
+ * `decision-r08-t6b-floor.md` §9.2): a tabulated density's, where it leaves 0 and where the ramp
+ * from 0 ends, at a layer's bottom above the first level, and where the ramp to 0 starts and where
+ * it reaches 0, at a top below the last level. The transmittance kernel and its twin split each ray
+ * where it crosses them.
+ *
+ * @remarks
+ * `absorbers.ts`'s `absorberTerm` ramps a layer to 0 over at most one interval of its column, where
+ * the density's slope jumps twice: about 115 m on the four-absorber fixture's 250 K column, and 78 m
+ * at the base and 10 m at the top of the rebuilt Earth's ozone (`earth.ts`). On a ray whose equal steps are longer than the ramp,
+ * the midpoint rule sees it as a step of the density, and errs to first order in the step: R08.T6.c
+ * measured 4.1% of a grazing ray's transmittance. Split there, the ramp is a piece of its own, on
+ * which the midpoint rule is exact, and every other piece is smooth.
+ *
+ * The edges are the levels themselves, unless the profile carries its own
+ * ({@link TabulatedDensity.edgesM}), as a resampled table does. A density that is above 0 at its
+ * first and last levels has none, as a column has. An `exponential` profile has none, and neither
+ * has a `tent`: its three kinks are a slope's change of 1 ÷ 15 km on R05's ozone, not a ramp, and
+ * R05's tables are kept as R05 measured them.
+ */
+export function layerEdgesM(profile: DensityProfile): ReadonlyArray<number> {
+  if (profile.kind !== "tabulated") {
+    return [];
+  }
+  if (profile.edgesM !== undefined) {
+    return profile.edgesM;
+  }
+  const { altitudesM, relative } = profile;
+  const last = relative.length - 1;
+  const first = relative.findIndex((d) => d > 0);
+  if (first < 0) {
+    return [];
+  }
+  const final = relative.findLastIndex((d) => d > 0);
+  const at = (i: number): number => altitudesM[i] ?? Number.NaN;
+  const edges: number[] = [];
+  if (first > 0) {
+    edges.push(at(first - 1), at(first));
+  }
+  if (final < last) {
+    edges.push(at(final), at(final + 1));
+  }
+  return edges;
 }
 
 /** A tent's integral from the ground to `upToM`: its rising side's area, then its falling side's. */

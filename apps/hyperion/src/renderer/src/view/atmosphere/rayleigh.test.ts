@@ -69,8 +69,14 @@ const DRY_AIR: GasFractions = DRY_AIR_PERCENT.map(([species, percent]) => ({
 /** Sea level's real number density, m⁻³: 288.15 K and 101,325 Pa (US Standard Atmosphere 1976). */
 const SEA_LEVEL_PER_M3 = referenceNumberDensityPerM3(DRY_AIR_DISPERSION);
 
-/** The channels with their index: 680, 550 and 440 nm. */
+/** The render channels with their index: the fitted triple since R08.T6.d (`medium.ts`). */
 const CHANNELS = [...CHANNEL_WAVELENGTHS_NM.entries()];
+
+/**
+ * Bruneton's channels with their index, 680, 550 and 440 nm, at which R05's Earth and the
+ * tutorials' coefficients stand: Design note 5 keeps those figures as tests of this module.
+ */
+const BRUNETON_CHANNELS = [...([680, 550, 440] as const).entries()];
 
 /** Earth's dry-air coefficients at 680, 550 and 440 nm, m⁻¹ (Design note 4; R05's `earth.ts`). */
 const EARTH_RAYLEIGH_PER_M = [4.848e-6, 11.487e-6, 28.71e-6] as const;
@@ -413,7 +419,7 @@ describe("dry air, the Earth check", () => {
     expect(relative(dryAirCrossSectionM2(550) * CM2_PER_M2, 4.510_5e-27)).toBeLessThan(2e-3);
   });
 
-  it.each(CHANNELS)(
+  it.each(BRUNETON_CHANNELS)(
     "gives Earth's coefficient at channel %i (4.85, 11.5, 28.7 × 10⁻⁶ m⁻¹) to 1%",
     (channel, nm) => {
       const reference = EARTH_RAYLEIGH_PER_M[channel] ?? Number.NaN;
@@ -544,7 +550,7 @@ describe("a Venus-class column (Design note 4)", () => {
 });
 
 describe("the tutorial set", () => {
-  it.each(CHANNELS)(
+  it.each(BRUNETON_CHANNELS)(
     "is 15–20% above Earth's coefficient from the formulas at channel %i",
     (channel, nm) => {
       const tutorial = TUTORIAL_RAYLEIGH_PER_M[channel] ?? Number.NaN;
@@ -555,7 +561,7 @@ describe("the tutorial set", () => {
   );
 
   it.each(GASES)("is equalled by %s at sea level's density in no channel, to 1%", (gas) => {
-    for (const [channel, nm] of CHANNELS) {
+    for (const [channel, nm] of BRUNETON_CHANNELS) {
       const tutorial = TUTORIAL_RAYLEIGH_PER_M[channel] ?? Number.NaN;
       const beta = rayleighCrossSectionM2(gas, nm) * SEA_LEVEL_PER_M3;
       expect(relative(beta, tutorial)).toBeGreaterThan(0.01);
@@ -952,11 +958,22 @@ describe("the molecular term", () => {
     expect(() => molecularMixture(fractions)).toThrow(RangeError);
   });
 
-  it.each(CHANNELS)(
-    "gives Earth's coefficient at channel %i (4.85, 11.5, 28.7 × 10⁻⁶ m⁻¹) to 1% from dry air's gases",
-    (channel) => {
+  it.each(BRUNETON_CHANNELS)(
+    "gives Earth's coefficient at Bruneton's channel %i (4.85, 11.5, 28.7 × 10⁻⁶ m⁻¹) to 1% from dry air's gases",
+    (channel, nm) => {
       const reference = EARTH_RAYLEIGH_PER_M[channel] ?? Number.NaN;
-      expect(relative(scatteringAt(DRY_AIR, channel), reference)).toBeLessThan(0.01);
+      const beta =
+        SEA_LEVEL_COLUMN.surfaceNumberDensityPerM3 * molecularMixture(DRY_AIR).crossSectionM2(nm);
+      expect(relative(beta, reference)).toBeLessThan(0.01);
+    },
+  );
+
+  it.each(CHANNELS)(
+    "evaluates dry air's mixture at the render channel %i, the fitted triple (R08.T6.d)",
+    (channel, nm) => {
+      const expected =
+        SEA_LEVEL_COLUMN.surfaceNumberDensityPerM3 * molecularMixture(DRY_AIR).crossSectionM2(nm);
+      expect(relative(scatteringAt(DRY_AIR, channel), expected)).toBeLessThan(1e-15);
     },
   );
 

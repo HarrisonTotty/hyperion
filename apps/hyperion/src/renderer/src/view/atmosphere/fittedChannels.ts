@@ -3,8 +3,8 @@
  * R08.T4.a): `channels.json`, which `channels.test.ts` fits and records.
  *
  * @remarks
- * A leaf module, importing nothing of the atmosphere's, so that `medium.ts` can read it when
- * R08.T6.d makes `CHANNEL_WAVELENGTHS_NM` the fitted triple, with no import cycle through
+ * A leaf module, importing nothing of the atmosphere's, so that `medium.ts` reads it for
+ * `CHANNEL_WAVELENGTHS_NM`, the fitted triple since R08.T6.d, with no import cycle through
  * `channels.ts` (which imports `medium.ts`) and without bundling the fit or the matching functions.
  */
 
@@ -41,7 +41,7 @@ export function fittedTriple(file: RecordedChannels): Rgb {
 
 /**
  * The fitted channel wavelengths, nm, red, green and blue: `channels.json`, which
- * `channels.test.ts` writes under a bless and otherwise checks unchanged (R08.T4.a). R08.T6.d makes
- * `CHANNEL_WAVELENGTHS_NM` read them when it rebuilds Earth at them.
+ * `channels.test.ts` writes under a bless and otherwise checks unchanged (R08.T4.a), which
+ * `medium.ts`'s `CHANNEL_WAVELENGTHS_NM` reads since R08.T6.d rebuilt Earth at them.
  */
 export const FITTED_CHANNEL_WAVELENGTHS_NM: Rgb = fittedTriple(recorded);

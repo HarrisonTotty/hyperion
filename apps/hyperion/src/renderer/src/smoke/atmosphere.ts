@@ -18,13 +18,23 @@
  * Since R08.T6.c the transmittance table stores optical depth and the absorbers' columns: the oracle
  * check compares optical depth, and R08.T6.b's check holds them, a medium of four absorbers (one a
  * molecule pair) under their curves of growth among its media, and reports the channels a stored
- * T had under 2⁻¹⁴ on Earth's table and a Venus-class one.
+ * T had under 2⁻¹⁴ on Earth's table and a Venus-class one. Since R08.T6.d Earth is the rebuilt
+ * one (`earth.ts`'s `EARTH_REFERENCE`, its ozone under the reference Sun's curve) in R08.T6.b's
+ * twins, the frames and the captures; R05.T12.b's oracle, R05.T12.e's steps and R08.T6.g's heights
+ * keep R05's Earth (`R05_EARTH_REFERENCE`), the medium they were measured on, whose kernels'
+ * geometry they hold. The Venus-class multiple-scattering table is held in both arms.
  */
 
 import { add, normalise, scale, type Vec3 } from "../geometry/vec3";
 import { quaternion, quaternionFromRows, rotate } from "../view/camera/quaternion";
 import { hydrostaticColumn } from "../view/atmosphere/column";
-import { EARTH_REFERENCE, HILLAIRE_REFERENCE } from "../view/atmosphere/earth";
+import {
+  EARTH_REFERENCE,
+  EARTH_REFERENCE_CURVES,
+  HILLAIRE_REFERENCE,
+  R05_EARTH_REFERENCE,
+  referenceSunIlluminanceLx,
+} from "../view/atmosphere/earth";
 import {
   type AtmosphereCamera,
   atmosphereInputs,
@@ -77,6 +87,7 @@ import {
   tableSources,
   type TwinTable,
   type TwinTransmittance,
+  transmittanceTablesTwin,
   transmittanceTwin,
   type TwinView,
   twinView,
@@ -116,9 +127,12 @@ const ORACLE_TEXELS: ReadonlyArray<readonly [number, number]> = [0, 64, 128, 192
   (x) => [0, 16, 40, 63].map((y) => [x, y] as const),
 );
 
-/** Builds Earth's tables and checks them against the oracle and their ranges. */
+/**
+ * Builds R05's Earth's tables and checks them against the oracle and their ranges: R05.T12.b's
+ * check, on the medium it was measured on (`R05_EARTH_REFERENCE`, plan R08, R08.T6.d).
+ */
 export async function checkAtmosphereTables(engine: RenderEngine, checks: Checks): Promise<void> {
-  const tables = new AtmosphereTables(engine, EARTH_REFERENCE, EARTH_MEAN_RADIUS_M);
+  const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, EARTH_MEAN_RADIUS_M);
 
   let refused = false;
   try {
@@ -137,7 +151,7 @@ export async function checkAtmosphereTables(engine: RenderEngine, checks: Checks
   );
   const shell = {
     bottomRadiusM: EARTH_MEAN_RADIUS_M,
-    topRadiusM: EARTH_MEAN_RADIUS_M + EARTH_REFERENCE.topHeightM,
+    topRadiusM: EARTH_MEAN_RADIUS_M + R05_EARTH_REFERENCE.topHeightM,
   };
   const width = TRANSMITTANCE_SIZE.widthTexels;
   for (const [x, y] of ORACLE_TEXELS) {
@@ -150,7 +164,7 @@ export async function checkAtmosphereTables(engine: RenderEngine, checks: Checks
     // The table holds every ray to the top, the tangent column's whole grazing path (R08.T6.g), as
     // optical depth since R08.T6.c: compared in optical depth, to 1% of it, or the half float's
     // step below its least normal, where the top row's τ near 0 stands.
-    const expected = opticalDepthToTop(EARTH_REFERENCE, EARTH_MEAN_RADIUS_M, rM, mu);
+    const expected = opticalDepthToTop(R05_EARTH_REFERENCE, EARTH_MEAN_RADIUS_M, rM, mu);
     const actual = texel(transmittance, width, x, y).slice(0, 3);
     const agrees = expected.every((e, c) => {
       const a = actual[c] ?? Number.NaN;
@@ -191,7 +205,7 @@ export async function checkAtmosphereTables(engine: RenderEngine, checks: Checks
   );
   checks.check(
     "R05.T12.b the tables are not rebuilt for the same medium",
-    !tables.setMedium(EARTH_REFERENCE, EARTH_MEAN_RADIUS_M) && tables.builds === 1,
+    !tables.setMedium(R05_EARTH_REFERENCE, EARTH_MEAN_RADIUS_M) && tables.builds === 1,
     `builds ${tables.builds}`,
   );
 }
@@ -234,12 +248,18 @@ function equatorCamera(
   };
 }
 
+/**
+ * The checks' Sun at 1 au per channel, lx: R07's `starIlluminance` of R06's Sun (plan R08,
+ * R08.T6.d, `earth.ts`'s `referenceSunIlluminanceLx`).
+ */
+const SUN_ILLUMINANCE_LX = referenceSunIlluminanceLx();
+
 /** The sun at an elevation above the camera's horizon, towards the north (body +x up, +z north). */
 function sunAt(elevationDeg: number): SunState {
   const e = (elevationDeg * Math.PI) / 180;
   return {
     directionBodyFixed: { x: Math.sin(e), y: 0, z: Math.cos(e) },
-    distanceAu: 1,
+    illuminanceLx: SUN_ILLUMINANCE_LX,
     angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
   };
 }
@@ -328,7 +348,13 @@ function meanRgb(texels: Float32Array): readonly [number, number, number] {
  */
 export async function checkAtmosphereFrames(engine: RenderEngine, checks: Checks): Promise<void> {
   for (const setting of ["high", "low"] as const) {
-    const atmosphere = new HillaireAtmosphere(engine, EARTH_REFERENCE, TABLE_SIZES[setting], WGS84);
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      EARTH_REFERENCE,
+      TABLE_SIZES[setting],
+      WGS84,
+      EARTH_REFERENCE_CURVES,
+    );
     try {
       const cases = [
         { name: "2 m, noon", heightM: 2, elevationDeg: 60, surfaceM: null },
@@ -420,8 +446,8 @@ function skyViewRay(
 ): CheckRay {
   const inputs = atmosphereInputs(camera, WGS84);
   const bottomM = inputs.radiusM - inputs.heightM;
-  const shell = { bottomRadiusM: bottomM, topRadiusM: bottomM + EARTH_REFERENCE.topHeightM };
-  const heightM = skyViewHeight(inputs.heightM, EARTH_REFERENCE.topHeightM);
+  const shell = { bottomRadiusM: bottomM, topRadiusM: bottomM + R05_EARTH_REFERENCE.topHeightM };
+  const heightM = skyViewHeight(inputs.heightM, R05_EARTH_REFERENCE.topHeightM);
   const rM = bottomM + heightM;
   const u = unitOfUv((x + 0.5) / size.widthTexels, size.widthTexels);
   const v = unitOfUv((y + 0.5) / size.heightTexels, size.heightTexels);
@@ -484,7 +510,7 @@ function rayMarchRay(
   const unnormalised = add(forward, add(scale(right, ndcX * tanX), scale(up, ndcY * tanY)));
   const direction = normalise(unnormalised);
   const a = WGS84.equatorialRadiusM;
-  const shell = sphereHits(camera.positionM, direction, a + EARTH_REFERENCE.topHeightM);
+  const shell = sphereHits(camera.positionM, direction, a + R05_EARTH_REFERENCE.topHeightM);
   if (shell === null || shell[1] <= 0) {
     return null;
   }
@@ -703,10 +729,11 @@ export async function checkAtmosphereSteps(engine: RenderEngine, checks: Checks)
   for (const setting of ["high", "low"] as const) {
     const sizes = TABLE_SIZES[setting];
     const reduced = reducedSizes(sizes);
-    const shipped = new HillaireAtmosphere(engine, EARTH_REFERENCE, reduced, WGS84);
+    // R05.T12.e's GPU agreement, on the medium its bounds were measured on (plan R08, R08.T6.d).
+    const shipped = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, reduced, WGS84);
     const converged = new HillaireAtmosphere(
       engine,
-      EARTH_REFERENCE,
+      R05_EARTH_REFERENCE,
       { ...reduced, skyViewSamples: CONVERGED_STEPS, rayMarchSamples: CONVERGED_STEPS },
       WGS84,
     );
@@ -1005,13 +1032,13 @@ function smokeTabulatedMedium(): AtmosphereMedium {
   const even = Float64Array.from({ length: PHASE_TABLE_ENTRIES }, (_, i) => i / 255);
   const uneven = Float64Array.from({ length: 181 }, (_, i) => (i / 180) ** 1.3);
   const dustLevels = Float64Array.from({ length: 201 }, (_, i) => i * 50);
-  const [, aerosol, ozone] = EARTH_REFERENCE.terms;
+  const [, aerosol, ozone] = R05_EARTH_REFERENCE.terms;
   if (aerosol === undefined || ozone === undefined) {
-    throw new Error("Earth's medium has its aerosol and ozone");
+    throw new Error("R05's Earth has its aerosol and ozone");
   }
   return {
     name: "R08.T6.b tabulated",
-    topHeightM: EARTH_REFERENCE.topHeightM,
+    topHeightM: R05_EARTH_REFERENCE.topHeightM,
     groundAlbedo: [0.25, 0.18, 0.12],
     terms: [
       {
@@ -1069,18 +1096,19 @@ interface TwinFrame {
 
 /**
  * R08.T6.b: every kernel's readback against the CPU twin (`tablesCpu.ts`) of the medium as the
- * kernels read it (`kernelMedium`), to 10⁻³ above 10⁻⁶ of the table's largest value, on R05's
- * Earth and on a medium of every profile and phase the kernels read; since R08.T6.c also on a
- * medium of four absorbers, one a molecule pair, under their curves of growth, and, for the
- * transmittance tables alone, on a Venus-class medium.
+ * kernels read it (`kernelMedium`), to 10⁻³ above 10⁻⁶ of the table's largest value, on Earth (R05's
+ * until R08.T6.d, the rebuilt one since) and on a medium of every profile and phase the kernels
+ * read; since R08.T6.c also on a medium of four absorbers, one a molecule pair, under their curves
+ * of growth, and, for the per-planet tables alone, on a Venus-class medium.
  *
  * @remarks
  * The transmittance table, its optical depth and absorber columns (R08.T6.c), is held to the twin
  * of the medium alone, as is the absorber-column table beside it. The Venus-class medium's
- * multiple-scattering table is not held: in its deep, nearly conservative air f_ms nears 1, where
- * Hillaire's series L₂ ÷ (1 − f_ms) diverges and `f32`'s 1 − f_ms rounds to 0 (0 ÷ 0 where the
- * sun is down), the thick worlds' source-function table's case (plan R08's Risks, "Deviations in
- * T6.c, as built"). Each later kernel is held to
+ * multiple-scattering table is held in both arms since R08.T6.d: in its deep, nearly conservative
+ * air f_ms nears 1, where `f32`'s 1 − f_ms rounded to 0 (0 ÷ 0 where the sun is down, NaN at 160
+ * channels in R08.T6.c), and the kernel now accumulates 1 − f_ms instead of forming it, storing
+ * L₂ alone where it is 0, which the check counts (`decision-r08-t6b-floor.md` §9.3). Each later
+ * kernel is held to
  * its twin given the GPU's own tables as its inputs (the transmittance for the multiple
  * scattering, both for the per-frame kernels), so that each is judged on its own arithmetic and
  * not on the `rgba16float` rounding of what it reads; the multiple-scattering table's agreement
@@ -1094,7 +1122,7 @@ export async function checkAtmosphereTwins(engine: RenderEngine, checks: Checks)
   const absorbing = fourAbsorberMedium();
   const venus = venusClassMedium();
   const media: ReadonlyArray<TwinMedium> = [
-    { ...EARTH_ONLY, scope: "everything" },
+    { ...EARTH_REBUILT, scope: "everything" },
     {
       medium: smokeTabulatedMedium(),
       curves: NO_ABSORBER_CURVES,
@@ -1106,7 +1134,7 @@ export async function checkAtmosphereTwins(engine: RenderEngine, checks: Checks)
       medium: venus.medium,
       curves: NO_ABSORBER_CURVES,
       radiusM: venus.radiusM,
-      scope: "transmittance",
+      scope: "tables",
     },
   ];
   for (const entry of media) {
@@ -1114,7 +1142,7 @@ export async function checkAtmosphereTwins(engine: RenderEngine, checks: Checks)
     // The harness's checks run in order: each medium's tables are read back before the next's.
     // oxlint-disable-next-line no-await-in-loop
     await checkPlanetTwins(engine, checks, entry, read);
-    if (entry.scope === "transmittance") {
+    if (entry.scope === "tables") {
       continue;
     }
     for (const setting of ["high", "low"] as const) {
@@ -1127,20 +1155,24 @@ export async function checkAtmosphereTwins(engine: RenderEngine, checks: Checks)
 
 /**
  * A medium R08.T6.b's and T6.c's checks build tables for: with its lights' curves of growth, the
- * radius of its tables' ground, and what is held: `everything`, its multiple-scattering table and
- * its per-frame kernels too, or `transmittance`, its transmittance tables alone.
+ * radius of its tables' ground, and what is held: `everything`, its per-planet tables and its
+ * per-frame kernels, or `tables`, its per-planet tables alone, the multiple scattering in both
+ * arms (R08.T6.d: the Venus-class medium's, whose term is no longer NaN).
  */
 interface TwinMedium {
   readonly medium: AtmosphereMedium;
   readonly curves: AbsorberCurveSlots;
   readonly radiusM: number;
-  readonly scope: "everything" | "transmittance";
+  readonly scope: "everything" | "tables";
 }
 
-/** R05's Earth, on WGS 84's mean radius, with no absorber. */
-const EARTH_ONLY = {
+/**
+ * The Earth R08.T6.d rebuilt, on WGS 84's mean radius, with its ozone under the reference Sun's
+ * curve, in place of R05's Earth, which R05.T12.b's and R05.T12.e's checks keep.
+ */
+const EARTH_REBUILT = {
   medium: EARTH_REFERENCE,
-  curves: NO_ABSORBER_CURVES,
+  curves: EARTH_REFERENCE_CURVES,
   radiusM: EARTH_MEAN_RADIUS_M,
 } as const;
 
@@ -1218,7 +1250,7 @@ function deepChannels(gpu: Float32Array, twin: TwinTable): DeepChannels {
  * R08.T6.c, and the absorber columns against the twin of the medium; the multiple scattering
  * against its twin over the GPU's transmittance tables, with its agreement with the twin's own
  * tables reported beside it. The channels whose twin T is under 2⁻¹⁴ are reported with their worst
- * |Δτ| ÷ τ (`decision-r08-t6b-floor.md` §5); on R05's Earth there are some.
+ * |Δτ| ÷ τ (`decision-r08-t6b-floor.md` §5); on Earth there are some.
  */
 async function checkPlanetTwins(
   engine: RenderEngine,
@@ -1230,7 +1262,12 @@ async function checkPlanetTwins(
   const tables = new AtmosphereTables(engine, medium, radiusM, curves);
   try {
     const gpu = await readPlanetTables(engine, tables);
-    const twin = planetTwin(read, radiusM, curves);
+    // The per-planet tables alone are held over the GPU's transmittance, in both arms: their own
+    // multiple-scattering twin, end to end, is not formed (R08.T6.d, for the smoke's watchdog).
+    const twin: TwinTransmittance & { readonly multiScattering: TwinTable | null } =
+      entry.scope === "tables"
+        ? { ...transmittanceTablesTwin(read, radiusM, curves), multiScattering: null }
+        : planetTwin(read, radiusM, curves);
     const absorbers = absorberCount(medium) > 0;
     checkTwin(
       checks,
@@ -1256,19 +1293,72 @@ async function checkPlanetTwins(
       deep.worst <= TWIN_TOLERANCE && (medium !== EARTH_REFERENCE || deep.count > 0),
       `${deep.count} channels with twin τ above ${SUBNORMAL_TRANSMITTANCE_DEPTH.toFixed(2)}; worst |Δτ| ÷ τ ${deep.worst.toExponential(2)} at ${deep.at}`,
     );
-    if (entry.scope === "transmittance") {
-      return;
-    }
     const overGpu = multiScatteringTwin(read, radiusM, storedTransmittance(gpu, curves));
     const own = twinAgreement(gpu.multiScattering, overGpu, false);
-    const endToEnd = twinAgreement(gpu.multiScattering, twin.multiScattering, false);
+    const endToEnd =
+      twin.multiScattering === null
+        ? "the twin's own not formed"
+        : describeEndToEnd(twinAgreement(gpu.multiScattering, twin.multiScattering, false));
+    const inRange = withinHalfRange(gpu.multiScattering);
     checks.check(
       `R08.T6.b ${medium.name}: the multiple-scattering table agrees with the CPU twin to 10⁻³`,
-      own.worst <= 1 && own.above > 0,
-      `over the GPU's transmittance, worst ${own.at}; ${own.above} channels above 10⁻⁶ of the largest, ${own.over} over the bound; over the twin's, worst ${endToEnd.at}, ${endToEnd.over} over`,
+      own.worst <= 1 && own.above > 0 && inRange,
+      `over the GPU's transmittance, worst ${own.at}; ${own.above} channels above 10⁻⁶ of the largest (${show([own.largest])}), ${own.over} over the bound, ${own.floorCarried} carried by the floor; ${inRange ? "finite and within rgba16float" : "a channel is not finite or is past rgba16float"}; L₂ alone in ${secondOrderAlone(gpu.multiScattering)} channels (the twin ${secondOrderAlone(overGpu.texels)}); ${endToEnd}`,
     );
+    if (entry.scope === "tables") {
+      await checkMultiScatteringArm(engine, checks, tables, medium, overGpu);
+    }
   } finally {
     tables.dispose();
+  }
+}
+
+/** The multiple-scattering table's agreement with the twin over the twin's own transmittance. */
+function describeEndToEnd(result: TwinAgreement): string {
+  return `over the twin's, worst ${result.at}, ${result.over} over`;
+}
+
+/**
+ * The channels of a multiple-scattering table stored as L₂ alone, where its mean escape was 0
+ * (`multiScattering.wgsl`, R08.T6.d): the sum of its alphas, each texel's count of them.
+ */
+function secondOrderAlone(texels: Float32Array | Float64Array): number {
+  let alone = 0;
+  for (let i = 3; i < texels.length; i += 4) {
+    alone += texels[i] ?? 0;
+  }
+  return alone;
+}
+
+/**
+ * A medium's multiple-scattering table in the kernel arm (`AtmosphereTables.buildKernelArm`), its
+ * kernel's own `rgba32float` output over the stored transmittance, against `twin`, the twin over
+ * the same: R08.T6.d's check of the Venus-class table, held to its twin in both arms
+ * (`decision-r08-t6b-floor.md` §9.3), with its channels stored as L₂ alone.
+ */
+async function checkMultiScatteringArm(
+  engine: RenderEngine,
+  checks: Checks,
+  tables: AtmosphereTables,
+  medium: AtmosphereMedium,
+  twin: TwinTable,
+): Promise<void> {
+  const arm = tables.buildKernelArm();
+  try {
+    const own = new Float32Array(
+      await engine.readTexture(arm.multiScattering, 0, undefined, "tolerance"),
+    );
+    const result = twinAgreement(own, twin, false, { arm: "kernel" });
+    const finite = own.every(Number.isFinite);
+    checks.check(
+      `R08.T6.d ${medium.name}: the multiple-scattering table, the kernel arm, agrees with the CPU twin to 10⁻³`,
+      result.worst <= 1 && result.above > 0 && finite,
+      `worst ${result.at}; largest ${show([result.largest])}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound; ${finite ? "finite" : "a channel is not finite"}; L₂ alone in ${secondOrderAlone(own)} channels (the twin ${secondOrderAlone(twin.texels)})`,
+    );
+  } finally {
+    engine.releaseTexture(arm.transmittance);
+    engine.releaseTexture(arm.absorberColumns);
+    engine.releaseTexture(arm.multiScattering);
   }
 }
 
@@ -1728,7 +1818,7 @@ function limbSun(distanceM: number, figure: SpheroidFigure, elevationDeg: number
       y: Math.cos(e) * sin + Math.sin(e) * cos,
       z: 0,
     },
-    distanceAu: 1,
+    illuminanceLx: SUN_ILLUMINANCE_LX,
     angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
   };
 }
@@ -2026,15 +2116,16 @@ async function checkViewArms(
  * kernel's own resolution of its ray passes if the GPU's value lies within the twin's envelope there,
  * widened by 10⁻³, at most 1% of a check's channels, each recorded (`decision-r08-f32.md` §10).
  * From inside the atmosphere, and in the per-planet tables, the bound holds outright. The sky view runs at half its width and height (`twinSizes`), each texel one ray of the
- * shipped kernel.
+ * shipped kernel. The medium is R05's Earth, which R08.T6.g measured these figures on: the group
+ * holds the kernels' geometry, and R08.T6.b's twins hold the rebuilt Earth (R08.T6.d).
  */
 export async function checkAtmosphereHeights(engine: RenderEngine, checks: Checks): Promise<void> {
-  const read = kernelMedium(EARTH_REFERENCE);
+  const read = kernelMedium(R05_EARTH_REFERENCE);
   for (const body of HEIGHTS_BODIES) {
     let planet: PlanetTwin | null = null;
     for (const setting of ["high", "low"] as const) {
       const sizes = twinSizes(TABLE_SIZES[setting]);
-      const atmosphere = new HillaireAtmosphere(engine, EARTH_REFERENCE, sizes, body.figure);
+      const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, sizes, body.figure);
       try {
         // The per-planet tables are the same on both settings: held, and twinned, once.
         // The harness's checks run in order: the tables are read back before the first frame.
@@ -2140,7 +2231,7 @@ function sunAhead(elevationDeg: number): SunState {
   const e = (elevationDeg * Math.PI) / 180;
   return {
     directionBodyFixed: { x: Math.cos(e), y: 0, z: Math.sin(e) },
-    distanceAu: 1,
+    illuminanceLx: SUN_ILLUMINANCE_LX,
     // Hillaire 2020's comparison images are drawn without the sun's disc (§6).
     angularRadiusRad: 0,
   };
@@ -2219,6 +2310,7 @@ async function captureSunsets(engine: RenderEngine): Promise<CapturedImage[]> {
       EARTH_REFERENCE,
       TABLE_SIZES.high,
       shot.figure,
+      EARTH_REFERENCE_CURVES,
     );
     try {
       // Above the pole, whose datum stands at the polar radius, looking along the horizon.

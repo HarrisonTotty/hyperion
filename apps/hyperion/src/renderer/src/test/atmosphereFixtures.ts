@@ -25,7 +25,12 @@ import {
   hydrostaticColumn,
   type AtmosphereColumn,
 } from "../view/atmosphere/column";
-import { EARTH_REFERENCE, OZONE_ABSORPTION_PER_M, OZONE_COLUMN_DU } from "../view/atmosphere/earth";
+import {
+  DOBSON_UNIT_PER_M2,
+  OZONE_ABSORPTION_PER_M,
+  OZONE_COLUMN_DU,
+  R05_EARTH_REFERENCE,
+} from "../view/atmosphere/earth";
 import {
   type AtmosphereMedium,
   BAKE_BIN_COUNT,
@@ -39,11 +44,8 @@ import { molecularTerm } from "../view/atmosphere/rayleigh";
 import { type BakeSpectrum, bakeSpectrumOf } from "../view/atmosphere/spectralColour";
 import type { AbsorberCurveSlots } from "../view/atmosphere/tables";
 
-/**
- * One Dobson unit, molecules m⁻²: WMO/UNEP 2018 (_Twenty Questions_, glossary), as `earth.ts`
- * takes it.
- */
-export const DOBSON_UNIT_PER_M2 = 2.687e20;
+/** One Dobson unit, molecules m⁻², `earth.ts`'s (WMO/UNEP 2018, _Twenty Questions_, glossary). */
+export { DOBSON_UNIT_PER_M2 };
 
 /**
  * One km-amagat, molecules m⁻²: Loschmidt's number at 273.15 K and 101.325 kPa,
@@ -130,7 +132,7 @@ export interface MediumWithCurves {
  * sit +10%, −6% and −19%.
  */
 export function r05EarthWithOzoneAbsorber(): MediumWithCurves {
-  const ozone = EARTH_REFERENCE.terms.find((term) => term.name === "ozone");
+  const ozone = R05_EARTH_REFERENCE.terms.find((term) => term.name === "ozone");
   if (ozone === undefined) {
     throw new Error("R05's Earth has its ozone");
   }
@@ -162,9 +164,9 @@ export function r05EarthWithOzoneAbsorber(): MediumWithCurves {
   ];
   return {
     medium: {
-      ...EARTH_REFERENCE,
+      ...R05_EARTH_REFERENCE,
       name: "earth, its ozone an absorber",
-      terms: EARTH_REFERENCE.terms.map((t) => (t === ozone ? term : t)),
+      terms: R05_EARTH_REFERENCE.terms.map((t) => (t === ozone ? term : t)),
     },
     curves: [[linearAbsorberCurve(spec, sigma)]],
   };
@@ -228,7 +230,7 @@ export function fourAbsorberMedium(): MediumWithCurves {
   };
   const all = [...specs, troposphere];
   const sun = planckBakeSpectrum(SUN_TEFF_K);
-  const [rayleigh, aerosol] = EARTH_REFERENCE.terms;
+  const [rayleigh, aerosol] = R05_EARTH_REFERENCE.terms;
   if (rayleigh === undefined || aerosol === undefined) {
     throw new Error("R05's Earth has its Rayleigh and aerosol terms");
   }

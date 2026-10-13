@@ -49,7 +49,7 @@ import {
 import recorded from "./absorbers/curves.json" with { type: "json" };
 import { hMinusBoundFreeM2, hMinusFreeFreeM5 } from "./absorbers/hMinus";
 import { type AtmosphereColumn, type ColumnInput, hydrostaticColumn } from "./column";
-import { EARTH_REFERENCE, OZONE_ABSORPTION_PER_M } from "./earth";
+import { R05_EARTH_REFERENCE, OZONE_ABSORPTION_PER_M } from "./earth";
 import {
   type AtmosphereMedium,
   BAKE_BIN_COUNT,
@@ -1433,8 +1433,8 @@ describe("an absorber's term", () => {
 
   /** R05's Earth with the absorber term added. */
   const withAbsorber: AtmosphereMedium = {
-    ...EARTH_REFERENCE,
-    terms: [...EARTH_REFERENCE.terms, term],
+    ...R05_EARTH_REFERENCE,
+    terms: [...R05_EARTH_REFERENCE.terms, term],
   };
 
   it("is packed by the kernels' packer in absorber slot 0, with its n ÷ U (R08.T6.c)", () => {
