@@ -1015,3 +1015,76 @@ mod small_craters {
         let _ = structure_function(&field, cell, Metres::new(1e3), Metres::new(-1.0));
     }
 }
+
+/// The coarse craters' rims' refusals (R09.T7.c).
+mod coarse_craters_rims {
+    use hyperion_base::units::Metres;
+    use hyperion_surface::craters::crater_shape;
+    use hyperion_surface::field::FieldView;
+    use hyperion_surface::synth::BandLevel;
+    use hyperion_surface::synth::craters::rims::{CoarseRims, RimSharpening};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    use super::{level_five_field, lunar_craters};
+
+    #[test]
+    #[should_panic(expected = "a crater's kept relief must lie in [0, 1]")]
+    fn a_sharpening_keeping_more_than_its_fresh_relief_is_refused() {
+        let shape = crater_shape(&lunar_craters(), Metres::new(100e3));
+        let _ = RimSharpening::new(shape, Metres::new(1.0), Metres::new(90e3), 1.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "a level's band and the coarse band must be finite and non-negative")]
+    fn a_sharpening_of_a_negative_band_is_refused() {
+        let shape = crater_shape(&lunar_craters(), Metres::new(100e3));
+        let _ = RimSharpening::new(shape, Metres::new(-1.0), Metres::new(90e3), 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a level's band and the coarse band must be finite and non-negative")]
+    fn a_sharpening_of_a_nan_coarse_band_is_refused() {
+        let shape = crater_shape(&lunar_craters(), Metres::new(100e3));
+        let _ = RimSharpening::new(shape, Metres::new(1.0), Metres::new(f64::NAN), 1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a distance from a crater's centre must be finite and non-negative")]
+    fn a_sharpening_that_adds_nothing_at_a_negative_distance_is_refused() {
+        let shape = crater_shape(&lunar_craters(), Metres::new(100e3));
+        let _ = RimSharpening::new(shape, Metres::new(90e3), Metres::new(90e3), 1.0).at(-1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a distance from a crater's centre must be finite and non-negative")]
+    fn a_sharpening_at_a_negative_distance_is_refused() {
+        let shape = crater_shape(&lunar_craters(), Metres::new(100e3));
+        let _ = RimSharpening::new(shape, Metres::new(1.0), Metres::new(90e3), 1.0).at(-1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a crater diameter must be finite and positive")]
+    fn a_coarse_profile_of_no_diameter_is_refused() {
+        let rims = CoarseRims::new(level_five_field().header());
+        let _ = rims.coarse_profile(Metres::ZERO);
+    }
+
+    #[test]
+    #[should_panic(expected = "a direction must be finite and non-zero")]
+    fn coarse_rims_at_no_direction_are_refused() {
+        let field = level_five_field();
+        let rims = CoarseRims::new(field.header());
+        let _ = rims.at(&field, [0.0; 3], BandLevel::new(10).unwrap());
+    }
+
+    #[test]
+    #[should_panic(expected = "coarse rims read the field whose header made them")]
+    fn coarse_rims_over_another_body_s_field_are_refused() {
+        let field = level_five_field();
+        let header = field.header();
+        // Another body's crater contract on the same figure and level.
+        let rims = CoarseRims::for_body(lunar_craters(), header.figure(), header.level());
+        let _ = rims.at(&field, [0.0, 0.0, 1.0], BandLevel::new(10).unwrap());
+    }
+}

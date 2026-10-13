@@ -93,12 +93,20 @@
 //! 2 σ² (1 − J₀(2π b ÷ `λ_k`)) for each, `λ_k` = √(D₀ D₁) their geometric mean, as R10's bands do
 //! ([`CraterOctaves::unresolved_variance`], [`CraterOctaves::structure_function`]).
 //!
+//! # The coarse craters
+//!
+//! The craters of `D_b` and wider are the coarse field's list, smoothed into the coarse elevation
+//! at the coarse cells' resolution; [`rims`] sharpens their rims at finer levels with the same
+//! profile (R09.T7.c).
+//!
 //! # Determinism
 //!
 //! Every value is a function of the field's header, the detail seed, the direction and the level:
 //! the craters of a cell come from its own stream, every sum runs in a fixed order (octaves from
 //! the largest, the 3 × 3 cells by key, a cell's craters in draw order), and every transcendental
 //! is `hyperion_base::math`'s. [`CraterCache`] is the caller's and moves no result.
+
+pub mod rims;
 
 use std::collections::BTreeMap;
 

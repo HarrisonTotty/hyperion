@@ -25,7 +25,7 @@ const SEED: DetailSeed = DetailSeed::new(0x7363_7261_7465_7273);
 
 /// The cratered synthetic worlds: airless and at the lunar reference, screened by a thin
 /// atmosphere and mapped, icy and oblate, and screened by a thick one.
-const WORLDS: [SyntheticWorld; 4] = [
+pub(super) const WORLDS: [SyntheticWorld; 4] = [
     SyntheticWorld::MoonLike,
     SyntheticWorld::MarsLike,
     SyntheticWorld::CeresLike,
@@ -33,7 +33,7 @@ const WORLDS: [SyntheticWorld; 4] = [
 ];
 
 /// Each cratered synthetic world, built once.
-fn world(kind: SyntheticWorld) -> &'static CoarseField {
+pub(super) fn world(kind: SyntheticWorld) -> &'static CoarseField {
     static FIELDS: OnceLock<Vec<CoarseField>> = OnceLock::new();
     let fields = FIELDS.get_or_init(|| WORLDS.iter().map(|&k| synthetic_field(k)).collect());
     let at = WORLDS
@@ -51,7 +51,7 @@ fn small(kind: SyntheticWorld) -> SmallCraters {
 /// Every octave, from the largest.
 const ALL: u8 = u8::MAX;
 
-fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
+pub(super) fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
@@ -64,7 +64,7 @@ fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
 }
 
 /// A unit tangent basis at the unit direction `d`.
-fn tangents(d: [f64; 3]) -> ([f64; 3], [f64; 3]) {
+pub(super) fn tangents(d: [f64; 3]) -> ([f64; 3], [f64; 3]) {
     let helper = if d[2].abs() < 0.9 {
         [0.0, 0.0, 1.0]
     } else {
@@ -75,7 +75,7 @@ fn tangents(d: [f64; 3]) -> ([f64; 3], [f64; 3]) {
 }
 
 /// The direction about `arc` radians from the unit direction `d` towards azimuth `azimuth`.
-fn towards(d: [f64; 3], arc: f64, azimuth: f64) -> [f64; 3] {
+pub(super) fn towards(d: [f64; 3], arc: f64, azimuth: f64) -> [f64; 3] {
     let (e1, e2) = tangents(d);
     let (s, c) = math::sin_cos(azimuth);
     let t = math::tan(arc);
@@ -567,7 +567,7 @@ const DIAMETERS_M: [f64; 13] = [
 /// The five-point Gauss–Legendre rule on [−1, 1], its nodes and weights (Abramowitz and Stegun,
 /// Table 25.4, n = 5): exact for polynomials to degree 9, and independent of the eight-point rule
 /// the code integrates with.
-const GAUSS_LEGENDRE_5: [(f64, f64); 5] = [
+pub(super) const GAUSS_LEGENDRE_5: [(f64, f64); 5] = [
     (-0.906_179_845_938_664, 0.236_926_885_056_189_1),
     (-0.538_469_310_105_683_1, 0.478_628_670_499_366_5),
     (0.0, 0.568_888_888_888_888_9),
@@ -578,7 +578,7 @@ const GAUSS_LEGENDRE_5: [(f64, f64); 5] = [
 /// ∫ f(x) 2x dx over [`lo`, `hi`] by the five-point Gauss–Legendre rule on each of 16 equal
 /// panels: exact to rounding where f x is a polynomial of degree at most 9, as every piece of a
 /// profile is.
-fn quadrature(lo: f64, hi: f64, f: impl Fn(f64) -> f64) -> f64 {
+pub(super) fn quadrature(lo: f64, hi: f64, f: impl Fn(f64) -> f64) -> f64 {
     let panels = 16;
     let width = (hi - lo) / f64::from(panels);
     let mut total = 0.0;

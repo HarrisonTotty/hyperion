@@ -42,19 +42,21 @@ pub struct CoarseCrater {
     pub morphology: Morphology,
     /// When it formed, thousands of millions of years before the present.
     pub age: Gigayears,
-    /// The share of its fresh rim relief that degradation has removed since, in steps of
-    /// 1 ÷ 255: 0 is fresh and 255 a rim worn away (Design note 10: degradation by age).
+    /// The share of its fresh relief, the whole profile, that degradation has removed since, in
+    /// steps of 1 ÷ 255: 0 is fresh and 255 a crater worn away (Design note 10: degradation by
+    /// age). The synthesis scales the crater's sharpening by one less it (R09.T7.c).
     pub degradation: u8,
     /// Every cell of the field's level that the crater's reach touches, its ejecta reaching
     /// (1 + a) rim radii from its centre, at most 2.54 rim radii, 1.27 D
     /// ([`CraterShape::reach`](crate::craters::CraterShape::reach); Design note 13), so that a
-    /// block carrying a cell carries every crater that reaches it. A cover of
+    /// block carrying a cell carries every crater that reaches it. The reach is the chord from the
+    /// centre's spheroid point, as the synthesis measures it (R09.T7.c). A cover of
     /// [`ResolutionCode::NONE`](super::ResolutionCode::NONE).
     pub reach: Cover,
 }
 
 impl CoarseCrater {
-    /// The share of the fresh rim relief that degradation has removed, 0 to 1.
+    /// The share of the fresh relief that degradation has removed, 0 to 1.
     #[must_use]
     pub fn degradation_fraction(&self) -> f64 {
         f64::from(self.degradation) / 255.0

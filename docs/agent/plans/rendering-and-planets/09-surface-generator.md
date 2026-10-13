@@ -5128,6 +5128,129 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     0.925 on the Ceres-like figure. A tighter bound would only save words.
   - _One density per body._ Small craters carry no regional ages (maria against highlands), no
     sedimentation under water and no ice cover (the earlier adjacent finding stands).
+- **Deviations in T7.c, as built** (2026-10-13; main's ruling on R09.T7.c of that day, options 2,
+  B and C).
+  - _Files and public items._ `synth/craters/rims.rs` is `synth::craters::rims`, with tests in
+    `synth/craters/rims/tests.rs` (10) and its refusals in `tests/panics.rs`'s
+    `coarse_craters_rims` (8), so that the acceptance filter `craters` runs them. T7.b's test
+    helpers become `pub(super)` for these tests. The items:
+    - `coarse_band_half_width(&Spheroid, CoarseLevel) -> Metres` and
+      `kept_relief(&CoarseCrater) -> f64`;
+    - `RimSharpening`: `new(shape, band, coarse_band, relief)`, `fine`, `coarse`, `relief`,
+      `is_zero` and `at -> ProfileSample`;
+    - `CoarseRims`: `new(header)`, `for_body(params, figure, level)`, `coarse_band`,
+      `coarse_profile(diameter)`, `sharpening(crater, level)` and
+      `at(field, dir, level) -> Result<HeightSample, QueryHeightError>`.
+
+    `CoarseRims::at` asserts that the field's header made the rims. `coarse_profile` and
+    `sharpening` refuse a diameter that is not finite and positive, as `crater_shape` does. The
+    refusals cover a kept relief outside [0, 1], a negative or NaN band, a negative distance
+    (with and without a sharpening), no diameter, no direction, and another body's rims.
+    `CoarseCrater`'s docs now say the reach is the chord from the centre's spheroid point, and
+    that the degradation byte is the share of the whole fresh relief removed (ruling B).
+
+  - _The sharpening_ at a level of band w is g × (F(min(w, w_c)) − F(w_c)), where F(w) is T7.b's
+    `CraterProfile::filleted` of the crater's `crater_shape`.
+    - It is zero to the bit wherever `band_half_width(level)` ≥ w_c. `CoarseRims::at` reads no
+      crater there. It is also zero when both fillets are held at min(1, a) rim radii, or when
+      g = 0.
+    - It is radial in the chord between spheroid points (T7.b's distance), so it is continuous
+      across every coarse cell edge and face edge. The tests check this bit for bit at cell-edge
+      vertices: through both cells' indexes, and against the whole list in list order.
+  - _Not zero per coarse cell (option 2)._ The task's premise that the difference "integrates to
+    zero over each coarse cell" is false.
+    - The compensation spreads over the reach, while the fillet's change sits on the rim.
+    - The probe took fresh bowls of depth d on planar cells D_b ÷ 2 wide, a fine band of 0.004
+      rim radii and the worst of three placements. Its worst cell mean is 0.28 d at D_b, 0.35 d
+      at 2 D_b, 0.15 d at 4 D_b and 0.085 d at 8 D_b. The coarse craters of the Moon-, Mars- and
+      Earth-like worlds are complex craters, which it did not take.
+    - Forcing each mean to zero (option 1) needs a bump in every cell of about 3.5 times that,
+      0.3–1.2 d, so it was not built.
+    - The per-cell test is therefore the whole-reach test: zero to 10⁻⁶ of the cavity volume at
+      levels 0–24. It covers every world's coarse craters and D_b × 1–32 at g 1 and 0.6, by an
+      independent five-point rule on both profiles' pieces.
+    - Verification's Consistency item asks that "every crater, and every coarse crater's
+      sharpening, integrates to zero at every level (T7.b, T7.c, T8)". The brainstorm asks that
+      "nothing may be added at a fine level that changes the mean at a coarse one", and that a
+      crater's "profile must integrate to the same displacement at every finer level". Main ruled
+      the rule met per crater, not per cell. T7.b's small craters keep no per-cell mean either.
+    - Coarse-cell means, if they are ever wanted, are for T12.d and T4: they need prefiltered
+      coarse values, since the B-spline base keeps no cell mean either.
+  - _The coarse band (C)._ w_c = ½ max(2 m, 4 × the coarse level's largest cell edge on the
+    equatorial radius).
+    - It equals `band_half_width(BandLevel(L − 6))` to the bit at L ≥ 6. At level 5 it is twice
+      level 0's band.
+    - On a sphere it is D_b to 10⁻¹²: 92.6 km on the Moon.
+  - _g (B)_ = 1 − degradation ÷ 255, the list's own byte. Minton's g of the age would keep 99.95%
+    of the Ceres-like world's narrowest coarse crater (R 25 km, 4.5 Gyr), and more of every wider
+    one. That is eq. 8 extrapolated: it is fitted to one simple crater, with κ calibrated on rim
+    radii of 0.4–2.5 km. Exact diffusion of a paraboloid's centre keeps 99.98%.
+  - _On the ground._ On a sphere the ground within a chord c is π c², so the profile balance is
+    the ground's. The test integrates `CoarseRims::at` over the single-crater sphere in polar
+    coordinates and finds zero to 10⁻⁶ at six levels. The isolated integral is zero to 10⁻¹²
+    (2 × 10⁻¹⁶ measured). On oblate figures the integral is pinned as it stands (deferred
+    findings, below).
+  - _The testing builder's reach_ took the angle reach ÷ volumetric radius. That falls short of
+    the widest angle a chord within the reach can span on every figure, by 2 asin(x ÷ 2) ÷ x
+    with x = reach ÷ radius (2–12% on the Moon-like world's basins), and on an oblate figure
+    also by (1 − f)^(−2/3). The continuity test found a crater missing from the Moon-like world's
+    index.
+    - It now takes 2 asin(reach ÷ (2 min(a, c))), plus the cell's circumradius as before.
+    - `tests/golden/wire/payloads.golden` is re-blessed at 21. The new angle is never smaller
+      than the old, so covers only grow, though a cover of more cells may take fewer ranges.
+      Every cratered world's payload moved: the whole payloads by −64 bytes (Moon-like), −12
+      (Mars-like), +8 (Earth-like), +128 (Ceres-like) and +32 (single crater); the Mars-like
+      region by −8; and the Moon-like world in 48 KiB blocks by +1,618. The flat world and the
+      margin lines did not move. The 2026-10-09 ruling lets a change to the testing worlds
+      re-bless with no bump, so `golden_diff.py`'s "not bumped" is that exception.
+  - _Generator version._ Untouched (21). No other golden moves, and nothing reaches `height_at`
+    before T8.
+  - _For T12.d (its contract)._
+    - Choose each crater's `degradation` byte first, and smooth it in as its `kept_relief` ×
+      `CoarseRims::coarse_profile(D)`, at the chord's rim radii. The coarse elevation and the
+      sharpening then use the same g to the bit, and are one profile. The byte carries the
+      crater's wear.
+    - Write each `reach` to hold every cell that has a point within the chord (1 + a) R of the
+      centre's spheroid point, as the builder now does.
+  - _For T8._
+    - Add `CoarseRims::at(field, dir, level)` at every level. It reads only the query's coarse
+      cell and that cell's crater index (`NotSurveyed` without the cell), so the margin does not
+      grow.
+    - Per crater and query it costs one `crater_shape` and two fillets. Cache per (crater,
+      level) if the bench asks for it, with an `assert_order_independent` test over a shared
+      cache, as `CraterCache` has.
+    - The testing builder's coarse elevation still adds each crater's fresh, unfilleted profile
+      at the arc distance, with its degradation recorded but not applied. It must follow T12.d's
+      contract before T8 sums `CoarseRims::at` on the synthetic worlds, or the rims sharpen
+      twice. That moves the worlds' goldens, which T8 and T9 coordinate with main.
+    - `level_bound_m`, `unresolved_rms` and `structure_function` must take the rims in. No closed
+      form for them exists yet, and g (F(w_n) − F(w_finest)) can reach the rim height on large
+      basins.
+  - _For T9._ Pin the coarse rims apart from `height_at`. For each cratered world, pin
+    `coarse_band_half_width`, and the bits of `CoarseRims::at` heights and gradients at levels
+    L − 4, L + 2 and the finest. Take points at about 0, 0.97, 1.0 and 1.04 rim radii and just
+    inside the reach, and the face-edge vertices the continuity test uses (the determinism
+    review).
+- **Deferred findings (2026-10-13 rule)** (R09.T7.c; recorded, not ruled; each for "main"'s list).
+  - _Oblate ground balance._ A profile balanced in the chord integrates over an oblate spheroid's
+    ground to a residual of about f² (c ÷ ρ)² + f (c ÷ ρ)⁴ (the science check). The test measures
+    it over every listed crater:
+    - within 10⁻⁶ of the cavity volume on the Moon-, Mars- and Earth-like figures (f 0.0012,
+      0.0059 and 0.0034): at most 2.5 × 10⁻⁷, for the Moon-like world's 2,500 km basin;
+    - up to 3.1 × 10⁻⁵ on the Ceres-like world (f 0.075), for its 280 km crater, whose reach
+      spans 0.76 of the radius, and pinned at 5 × 10⁻⁵.
+
+    T7.b's small craters share it, at smaller R ÷ ρ. A fix is a distance whose discs have area π r²
+    on the spheroid, which would change T7.b and T7.c alike.
+
+  - _The base's spline smooths further than F(w_c)._ The cubic B-spline approximant keeps two
+    thirds of a wave four cells long at its knots, (2 + cos(π ÷ 2)) ÷ 3. A sharpened crater is
+    g × F(w) only where the base reproduces g × F(w_c). T12.d could prefilter its coarse values.
+  - _The cone's kinks return unfiltered_ in the sharpening wherever the coarse fillet is held at
+    min(1, a) rim radii (D below about 2 D_b), which extends T7.b's finding to coarse craters.
+  - _Per-cell means and the brainstorm._ Main's option 2 rules the task. The brainstorm's
+    sentence "nothing may be added at a fine level that changes the mean at a coarse one" is
+    read per crater, and is not itself ruled on.
 - **Deviations in T6.b, as built** (2026-10-13; lane r09-channels).
   - _Files and public items._ `synth/channels/incision.rs`, a public module (tests in
     `incision/tests.rs`), re-exported through `synth::channels`:

@@ -566,9 +566,11 @@ impl FieldBuilder {
             .iter()
             .map(|sample| quantise_climate(&header, sample))
             .collect();
+        let figure = header.figure();
+        let smallest_radius_m = crate::num::min(figure.equatorial_radius_m, figure.polar_radius_m);
         let mut listed: Vec<(u32, CoarseCrater)> = craters
             .iter()
-            .map(|crater| crater.listed(&grid, level, r))
+            .map(|crater| crater.listed(&grid, level, smallest_radius_m))
             .collect();
         listed.sort_by(|(a, x), (b, y)| a.cmp(b).then_with(|| x.diameter.total_cmp(&y.diameter)));
         let craters = listed.into_iter().map(|(_, crater)| crater).collect();
@@ -828,9 +830,21 @@ impl PreparedCrater {
     /// cell whose nearest point may lie within the shape's [`reach`](CraterShape::reach), 1 + a rim
     /// radii, of the centre, by the angle to the cell's centre less the cell's circumradius, with
     /// the centre's own cell.
-    fn listed(&self, grid: &Grid, level: CoarseLevel, r: f64) -> (u32, CoarseCrater) {
+    ///
+    /// The reach is a chord between spheroid points, as the synthesis measures it (R09.T7.b and
+    /// T7.c). On a figure of smallest radius `smallest_radius_m` the chord between the points of
+    /// two directions an angle ψ apart is at least that radius times 2 sin(ψ ÷ 2), so every point
+    /// within the reach lies within 2 asin(reach ÷ (2 × that radius)) of the centre, the angle
+    /// taken.
+    fn listed(
+        &self,
+        grid: &Grid,
+        level: CoarseLevel,
+        smallest_radius_m: f64,
+    ) -> (u32, CoarseCrater) {
         let spec = &self.spec;
-        let reach_angle = self.shape.reach().value() / r;
+        let half_chord = 0.5 * self.shape.reach().value() / smallest_radius_m;
+        let reach_angle = 2.0 * math::asin(crate::num::min(half_chord, 1.0));
         let centre_cell = cell_index(
             PatchKey::containing(level.get(), spec.centre).expect("a coarse level is valid"),
         );
