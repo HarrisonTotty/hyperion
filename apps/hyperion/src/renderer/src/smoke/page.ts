@@ -6,7 +6,10 @@
  * @remarks
  * Its variant comes in the query string: `default` runs the device as the adapter offers it,
  * `no-subgroups` requests it with subgroups withheld (T9.c). A fixture adds a broken shader to the
- * catalogue or makes external requests, either of which must fail the run.
+ * catalogue or makes external requests, either of which must fail the run. The part does too: the
+ * groups are in three parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * 2026-10-13), parts 2 and 3 the atmosphere's CPU-twin groups (R08.T6) and part 1 every other, and
+ * with no part given the page runs them all, in its order. Each part checks its path (T9.c) itself.
  */
 
 import { WGSL_CATALOGUE } from "../view/engine/catalogue";
@@ -46,6 +49,7 @@ import { runSoak } from "./soak";
 import { captureSpike } from "./spike";
 import { captureTerrain, checkTerrainFrames, checkTerrainResources } from "./terrain";
 import { checkTonemap } from "./tonemap";
+import { TwinPool, twinWorkerCount } from "./twinPool";
 import { checkTwins } from "./twins";
 import { checkSpatialStrokeContrast } from "./spatial";
 import { checkStrokeContrast } from "./strokeContrast";
@@ -68,6 +72,30 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
   default: undefined,
   "no-subgroups": { withholdSubgroups: true, withholdShaderF16: false },
 };
+
+/**
+ * A part of the page's groups, each about a third of the page's CPU time: 2 and 3 the atmosphere's
+ * CPU-twin groups (R08.T6), whose twins outweigh their GPU work (2 R08.T6.b's, 3 R08.T6.g's and
+ * R08.T6.i's), and 1 every other group.
+ */
+type PagePart = 1 | 2 | 3;
+
+/** The part a run's query names, `all` for none, or `null` for one that is not a part. */
+function partOf(value: string | null): PagePart | "all" | null {
+  switch (value) {
+    case null:
+    case "all":
+      return "all";
+    case "1":
+      return 1;
+    case "2":
+      return 2;
+    case "3":
+      return 3;
+    default:
+      return null;
+  }
+}
 
 /** Whether `value` is a known fixture. */
 function isFixture(value: string): value is SmokeFixture {
@@ -105,7 +133,11 @@ function recordDevices(gpu: GPU): void {
   };
 }
 
-async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
+async function run(
+  variant: string,
+  fixture: SmokeFixture,
+  part: PagePart | "all" | null,
+): Promise<Report> {
   const failed = (setupError: string): Report => ({
     variant,
     adapter: null,
@@ -113,6 +145,9 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     checks: [],
     setupError,
   });
+  if (part === null) {
+    return failed("the part asked for is not 1, 2, 3 or all");
+  }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
     return failed("navigator.gpu is absent: no WebGPU");
@@ -163,77 +198,76 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     `targetRounding ${JSON.stringify(rounding)}`,
   );
 
+  // The atmosphere's CPU twins, computed beside the GPU's work; its workers start with its first job.
+  const twins = new TwinPool(twinWorkerCount(navigator.hardwareConcurrency, twinWorkersAsked));
+  /** Runs a group of `of`, the part of the page it belongs to, if this run runs that part. */
+  const group = async (of: PagePart, name: string, work: () => Promise<void>): Promise<void> => {
+    if (part === "all" || part === of) {
+      await checks.group(name, work);
+    }
+  };
+
   const entries = fixture === "broken-wgsl" ? [...WGSL_CATALOGUE, BROKEN_ENTRY] : WGSL_CATALOGUE;
-  await checks.group("T9.b catalogue", () => checkCatalogue(engine, status, entries, checks));
-  await checks.group("T9.a clear and triangle", () => checkClearAndTriangle(engine, checks));
-  await checks.group("T9.d three canvases", () => checkThreeCanvases(engine, checks));
-  await checks.group("T9.f depth, culling and bias", () => checkDepthCullBias(engine, checks));
-  await checks.group("T9.g blending, compute and the packed cube", () =>
+  await group(1, "T9.b catalogue", () => checkCatalogue(engine, status, entries, checks));
+  await group(1, "T9.a clear and triangle", () => checkClearAndTriangle(engine, checks));
+  await group(1, "T9.d three canvases", () => checkThreeCanvases(engine, checks));
+  await group(1, "T9.f depth, culling and bias", () => checkDepthCullBias(engine, checks));
+  await group(1, "T9.g blending, compute and the packed cube", () =>
     checkBlendComputeCube(engine, checks),
   );
-  await checks.group("T9.h targets, asynchronous pipelines, indirect work and timing", () =>
+  await group(1, "T9.h targets, asynchronous pipelines, indirect work and timing", () =>
     checkTargetsAsyncIndirectTiming(engine, checks),
   );
-  await checks.group("T9.i material state and the splat", () => checkMaterialState(engine, checks));
-  await checks.group("R08.T0 one-layer arrays in compute", () =>
-    checkOneLayerArrays(engine, checks),
-  );
+  await group(1, "T9.i material state and the splat", () => checkMaterialState(engine, checks));
+  await group(1, "R08.T0 one-layer arrays in compute", () => checkOneLayerArrays(engine, checks));
 
-  await checks.group("T10 subgroup twins", () => checkTwins(engine, checks));
+  await group(1, "T10 subgroup twins", () => checkTwins(engine, checks));
 
-  await checks.group("R02.T14.c the wireframe", () => checkWireframe(engine, checks));
-  await checks.group("R07.T16.d the view's strokes as drawn", () =>
+  await group(1, "R02.T14.c the wireframe", () => checkWireframe(engine, checks));
+  await group(1, "R07.T16.d the view's strokes as drawn", () =>
     checkStrokeContrast(engine, checks),
   );
   // A 2D canvas's, which draws and reads back at once.
-  await checks.group("R07.T16.f spatial strokes", () => {
+  await group(1, "R07.T16.f spatial strokes", () => {
     checkSpatialStrokeContrast(checks);
     return Promise.resolve();
   });
 
-  await checks.group("R05.T10.b the height worker", () => checkHeightWorker(checks));
+  await group(1, "R05.T10.b the height worker", () => checkHeightWorker(checks));
 
-  await checks.group("R05.T12.b the atmosphere's tables", () =>
-    checkAtmosphereTables(engine, checks),
-  );
-  await checks.group("R07.T12 the exposure histogram", () => checkHistogram(engine, checks));
-  await checks.group("R07.T14.b bloom and glare", () =>
+  await group(1, "R05.T12.b the atmosphere's tables", () => checkAtmosphereTables(engine, checks));
+  await group(1, "R07.T12 the exposure histogram", () => checkHistogram(engine, checks));
+  await group(1, "R07.T14.b bloom and glare", () =>
     checkBloom(engine, status.getSnapshot().targetRounding.rgba16float, checks),
   );
-  await checks.group("R07.T15 tone mapping and output", () => checkTonemap(engine, checks));
-  await checks.group("R07.T4.c the lit-body BRDF", () => checkLitBody(engine, checks));
-  await checks.group("R07.T7 the photorealistic style", () => checkPhotoreal(engine, checks));
-  await checks.group("R07.T8.a point and disc bodies", () => checkBodies(engine, checks));
-  await checks.group("R07.T8.a sprite depth", () => checkSpriteDepth(engine, checks));
-  await checks.group("R07.T8.b the class-map hook", () => checkClassMap(engine, checks));
-  await checks.group("R07.T9 mesh bodies", () => checkMeshBodies(engine, checks));
-  await checks.group("R07.T10.c the eclipse scene", () => checkEclipse(engine, checks));
-  await checks.group("R07.T8.a the photorealistic frame", () =>
-    checkPhotorealFrame(engine, checks),
+  await group(1, "R07.T15 tone mapping and output", () => checkTonemap(engine, checks));
+  await group(1, "R07.T4.c the lit-body BRDF", () => checkLitBody(engine, checks));
+  await group(1, "R07.T7 the photorealistic style", () => checkPhotoreal(engine, checks));
+  await group(1, "R07.T8.a point and disc bodies", () => checkBodies(engine, checks));
+  await group(1, "R07.T8.a sprite depth", () => checkSpriteDepth(engine, checks));
+  await group(1, "R07.T8.b the class-map hook", () => checkClassMap(engine, checks));
+  await group(1, "R07.T9 mesh bodies", () => checkMeshBodies(engine, checks));
+  await group(1, "R07.T10.c the eclipse scene", () => checkEclipse(engine, checks));
+  await group(1, "R07.T8.a the photorealistic frame", () => checkPhotorealFrame(engine, checks));
+  await group(1, "R05.T12.c the atmosphere's frames", () => checkAtmosphereFrames(engine, checks));
+  await group(1, "R05.T12.e the marches' steps", () => checkAtmosphereSteps(engine, checks));
+  await group(2, "R08.T6.b the kernels over N terms", () =>
+    checkAtmosphereTwins(engine, checks, twins),
   );
-  await checks.group("R05.T12.c the atmosphere's frames", () =>
-    checkAtmosphereFrames(engine, checks),
+  await group(3, "R08.T6.g heights and angles in f32", () =>
+    checkAtmosphereHeights(engine, checks, twins),
   );
-  await checks.group("R05.T12.e the marches' steps", () => checkAtmosphereSteps(engine, checks));
-  await checks.group("R08.T6.b the kernels over N terms", () =>
-    checkAtmosphereTwins(engine, checks),
+  await group(3, "R08.T6.i the marches cut at layer edges", () =>
+    checkAtmosphereLayerEdges(engine, checks, twins),
   );
-  await checks.group("R08.T6.g heights and angles in f32", () =>
-    checkAtmosphereHeights(engine, checks),
-  );
-  await checks.group("R08.T6.i the marches cut at layer edges", () =>
-    checkAtmosphereLayerEdges(engine, checks),
-  );
-  await checks.group("R05.T11.a the terrain's resources", () =>
-    checkTerrainResources(engine, checks),
-  );
-  await checks.group("R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
-  await checks.group("R06.T13.d the sky's band", () => checkSkyBand(engine, checks));
-  await checks.group("R06.T13.e the host discs", () => checkSkyDisc(engine, checks));
-  await checks.group("R06.T13.g the sky's bake", () => checkSkyBake(engine, checks));
+  await group(1, "R05.T11.a the terrain's resources", () => checkTerrainResources(engine, checks));
+  await group(1, "R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));
+  await group(1, "R06.T13.d the sky's band", () => checkSkyBand(engine, checks));
+  await group(1, "R06.T13.e the host discs", () => checkSkyDisc(engine, checks));
+  await group(1, "R06.T13.g the sky's bake", () => checkSkyBake(engine, checks));
   let images: CapturedImage[] = [];
   if (captures) {
-    await checks.group("R05.T12.c the comparison captures", async () => {
+    await group(1, "R05.T12.c the comparison captures", async () => {
       images = await captureAtmosphere(engine);
       checks.check(
         "R05.T12.c the comparison captures",
@@ -244,19 +278,19 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   }
 
   if (captures) {
-    await checks.group("R05.T11.c the terrain captures", async () => {
+    await group(1, "R05.T11.c the terrain captures", async () => {
       images = [...images, ...(await captureTerrain(engine, checks))];
     });
   }
 
   if (captures) {
-    await checks.group("R05.T13.b the spike captures", async () => {
+    await group(1, "R05.T13.b the spike captures", async () => {
       images = [...images, ...(await captureSpike(engine, checks))];
     });
   }
 
   if (captures) {
-    await checks.group("R07.T9 the occultation captures", async () => {
+    await group(1, "R07.T9 the occultation captures", async () => {
       const frames = await captureOccultation(engine);
       images = [...images, ...frames];
       checks.check(
@@ -268,7 +302,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   }
 
   if (captures) {
-    await checks.group("R07.T10.c the eclipse captures", async () => {
+    await group(1, "R07.T10.c the eclipse captures", async () => {
       const frames = await captureEclipse(engine);
       images = [...images, ...frames];
       checks.check(
@@ -280,7 +314,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   }
 
   // T9.i's refusal, on a second engine with float32-blendable withheld.
-  await checks.group("T9.i splat refused", async () => {
+  await group(1, "T9.i splat refused", async () => {
     const second = await requestAdapterOutcome(navigator.gpu);
     if (second.kind !== "adapter") {
       throw new Error(`no second adapter: ${second.kind}`);
@@ -301,12 +335,13 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   });
 
   // Last, since it rebuilds the engine: T9.f's forced loss.
-  await checks.group("T9.f forced loss", async () => {
+  await group(1, "T9.f forced loss", async () => {
     if (device === undefined) {
       throw new Error("the engine's device was not recorded");
     }
     await checkForcedLoss(engine, status, device, checks, addCanvas());
   });
+  twins.dispose();
   engine.dispose();
   checks.recordTimes();
   return {
@@ -338,6 +373,10 @@ const fixtureName = parameters.get("fixture") ?? "none";
 const gpuTiming = parameters.get("gpuTiming") === "1";
 /** Whether the run renders R05.T12.c's comparison frames for the main process to save. */
 const captures = parameters.get("captures") === "1";
+/** The twin workers the run asked for (`--smoke-twin-workers`), or `null` for the default. */
+const twinWorkersAsked = parameters.has("twinWorkers")
+  ? Number(parameters.get("twinWorkers"))
+  : null;
 const report = smokeReport();
 const fixture: SmokeFixture = isFixture(fixtureName) ? fixtureName : "none";
 /** The by-hand soak of T11 and T12 instead of the checks, for `seconds`. */
@@ -379,7 +418,13 @@ async function childWindow(): Promise<Report> {
   };
 }
 
-void (soakSeconds > 0 ? soak() : childSeconds > 0 ? childWindow() : run(variant, fixture))
+void (
+  soakSeconds > 0
+    ? soak()
+    : childSeconds > 0
+      ? childWindow()
+      : run(variant, fixture, partOf(parameters.get("part")))
+)
   .catch((error: unknown): Report => ({
     variant,
     adapter: null,

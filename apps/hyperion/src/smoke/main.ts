@@ -8,7 +8,10 @@
  * @remarks
  * Its switches come from the `just test-render` recipe's command line, never from the client's
  * `graphicsSwitches`, which a test keeps free of the unsafe flag and the adapter override. The
- * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`;
+ * page's variant and fixture arrive as `--smoke-variant=` and `--smoke-fixture=`, and the part of
+ * its groups to run as `--smoke-part=1`, `2` or `3` (every group without it), and
+ * `--smoke-twin-workers=<n>` the atmosphere twins' workers, at most 4 (a quarter of the hardware
+ * threads, at most 4, without it);
  * `--smoke-gpu-timing=1` says the run lifted timestamp quantization (the hardware runs of T11),
  * and `--smoke-soak=<seconds>` runs T11's and T12's soak scene instead of the checks, hidden and
  * offscreen unless `--smoke-show=1`. They reach the page in the query string. The main process
@@ -65,6 +68,10 @@ function argument(name: string, fallback: string): string {
 
 const variant = argument("smoke-variant", "default");
 const fixture = argument("smoke-fixture", "none");
+/** The part of the page's groups to run, each its own run under its own watchdog, or `all`. */
+const part = argument("smoke-part", "all");
+/** The twin workers the page starts, or "" for its default (`twinPool.ts`). */
+const twinWorkers = argument("smoke-twin-workers", "");
 const gpuTiming = argument("smoke-gpu-timing", "0");
 /** The soak's length in seconds (T11, T12); 0 runs the checks. */
 const soakSeconds = Number(argument("smoke-soak", "0"));
@@ -362,6 +369,8 @@ void app
       query: {
         variant,
         fixture,
+        part,
+        ...(twinWorkers === "" ? {} : { twinWorkers }),
         // The child-window run lifts the quantization with the client's own timing switch.
         gpuTiming: child === null ? gpuTiming : "1",
         soak: String(soakSeconds),

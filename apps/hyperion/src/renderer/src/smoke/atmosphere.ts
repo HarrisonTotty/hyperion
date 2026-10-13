@@ -77,24 +77,17 @@ import {
   TRANSMITTANCE_SIZE,
 } from "../view/atmosphere/tables";
 import {
-  aerialPerspectiveTwin,
-  multiScatteringTwin,
   type PlanetTwin,
-  planetTwin,
   marchTwin,
   mediumMarchEdgesM,
   piecedSteps,
   rayMarchRayAlongTwin,
   rayMarchRayTwin,
   rayMarchTexelTwin,
-  rayMarchTwin,
   skyViewRayTwin,
-  skyViewTwin,
   tableSources,
   type TwinTable,
   type TwinTransmittance,
-  transmittanceTablesTwin,
-  transmittanceTwin,
   type TwinView,
   twinView,
 } from "../view/atmosphere/tablesCpu";
@@ -120,6 +113,8 @@ import {
   show,
   texel,
 } from "./harness";
+import { attempt, handled, inOrder, type OrderedChecks } from "./ordered";
+import type { TwinPool } from "./twinPool";
 
 /** The ground's radius the check builds Earth's tables on, m: WGS 84's mean radius R₁. */
 const EARTH_MEAN_RADIUS_M = 6_371_008.8;
@@ -1123,8 +1118,17 @@ interface TwinFrame {
  * over two frames: from 2 km at a sun 20° up with a surface 60 km ahead (the ray march's beyond the
  * aerial reach), and from 400 km with the sun 5° up (the limb). The camera stands at 2 km, as
  * R08.T6.b left it: R08.T6.g's group (`checkAtmosphereHeights`) holds the kernels from 1 m.
+ *
+ * The twins run on the page's twin workers (`twins`) beside the GPU's work, and the checks are
+ * recorded in the order they were in sequence (`ordered.ts`): each medium's own twins, which read
+ * nothing of the GPU's, begin with the group, and each twin over the GPU's tables as soon as they
+ * are read back.
  */
-export async function checkAtmosphereTwins(engine: RenderEngine, checks: Checks): Promise<void> {
+export async function checkAtmosphereTwins(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
   const absorbing = fourAbsorberMedium();
   const venus = venusClassMedium();
   const media: ReadonlyArray<TwinMedium> = [
@@ -1143,20 +1147,52 @@ export async function checkAtmosphereTwins(engine: RenderEngine, checks: Checks)
       scope: "tables",
     },
   ];
-  for (const entry of media) {
-    const read = kernelMedium(entry.medium);
-    // The harness's checks run in order: each medium's tables are read back before the next's.
-    // oxlint-disable-next-line no-await-in-loop
-    await checkPlanetTwins(engine, checks, entry, read);
-    if (entry.scope === "tables") {
-      continue;
-    }
-    for (const setting of ["high", "low"] as const) {
-      // Each setting's frames are read back before the next setting's atmosphere draws.
+  const begun = media.map((entry) => {
+    const read = attempt(() => kernelMedium(entry.medium));
+    return { entry, read, own: handled(ownTwins(twins, entry, read)) };
+  });
+  await inOrder(checks, async (ordered) => {
+    for (const { entry, read: reading, own } of begun) {
+      // The medium as the kernels read it, in its turn: a medium they refuse fails the group here.
       // oxlint-disable-next-line no-await-in-loop
-      await checkFrameTwins(engine, checks, entry, read, setting);
+      const read = await reading;
+      // The harness's GPU work runs in order: each medium's tables are read back before the next's.
+      // oxlint-disable-next-line no-await-in-loop
+      await checkPlanetTwins(engine, ordered, entry, read, own, twins);
+      if (entry.scope === "tables") {
+        continue;
+      }
+      for (const setting of ["high", "low"] as const) {
+        // Each setting's frames are read back before the next setting's atmosphere draws.
+        // oxlint-disable-next-line no-await-in-loop
+        await checkFrameTwins(engine, ordered, entry, read, setting, twins);
+      }
     }
-  }
+  });
+}
+
+/** A medium's own per-planet twins, which read nothing of the GPU's. */
+interface OwnTwins extends TwinTransmittance {
+  readonly multiScattering: TwinTable | null;
+}
+
+/**
+ * A medium's own per-planet twins, as the medium's `scope` holds them: both tables, or, for the
+ * per-planet tables alone, the transmittance tables without their multiple-scattering twin
+ * (R08.T6.d, for the smoke's watchdog).
+ */
+async function ownTwins(
+  twins: TwinPool,
+  entry: TwinMedium,
+  read: Promise<AtmosphereMedium>,
+): Promise<OwnTwins> {
+  const medium = await read;
+  return entry.scope === "tables"
+    ? {
+        ...(await twins.transmittanceTables(medium, entry.radiusM, entry.curves)),
+        multiScattering: null,
+      }
+    : twins.planet(medium, entry.radiusM, entry.curves);
 }
 
 /**
@@ -1260,59 +1296,69 @@ function deepChannels(gpu: Float32Array, twin: TwinTable): DeepChannels {
  */
 async function checkPlanetTwins(
   engine: RenderEngine,
-  checks: Checks,
+  ordered: OrderedChecks,
   entry: TwinMedium,
   read: AtmosphereMedium,
+  ownTwin: Promise<OwnTwins>,
+  twins: TwinPool,
 ): Promise<void> {
   const { medium, curves, radiusM } = entry;
   const tables = new AtmosphereTables(engine, medium, radiusM, curves);
   try {
     const gpu = await readPlanetTables(engine, tables);
-    // The per-planet tables alone are held over the GPU's transmittance, in both arms: their own
-    // multiple-scattering twin, end to end, is not formed (R08.T6.d, for the smoke's watchdog).
-    const twin: TwinTransmittance & { readonly multiScattering: TwinTable | null } =
-      entry.scope === "tables"
-        ? { ...transmittanceTablesTwin(read, radiusM, curves), multiScattering: null }
-        : planetTwin(read, radiusM, curves);
-    const absorbers = absorberCount(medium) > 0;
-    checkTwin(
-      checks,
-      `${medium.name}: the transmittance table, as optical depth${absorbers ? " and absorber slot 0's column" : ""},`,
-      gpu.transmittance,
-      twin.transmittance,
-      absorbers,
-      { arm: "stored", amountChannels: [3] },
-    );
-    if (absorberCount(medium) > 1) {
+    const overGpuTwin = twins.multiScattering(read, radiusM, storedTransmittance(gpu, curves));
+    // The per-planet tables alone are held in both arms (R08.T6.d): the kernel arm is drawn and read
+    // back while the twin is computed, and its check reads it after the checks that came before it.
+    const kernelArm =
+      entry.scope === "tables" ? handled(readMultiScatteringArm(engine, tables)) : null;
+    ordered.later(async (checks) => {
+      // The per-planet tables alone are held over the GPU's transmittance, in both arms: their own
+      // multiple-scattering twin, end to end, is not formed (R08.T6.d, for the smoke's watchdog).
+      const twin = await ownTwin;
+      const absorbers = absorberCount(medium) > 0;
       checkTwin(
         checks,
-        `${medium.name}: the absorber-column table`,
-        gpu.absorberColumns,
-        twin.absorberColumns,
-        true,
-        { arm: "stored", amountChannels: [0, 1, 2, 3] },
+        `${medium.name}: the transmittance table, as optical depth${absorbers ? " and absorber slot 0's column" : ""},`,
+        gpu.transmittance,
+        twin.transmittance,
+        absorbers,
+        { arm: "stored", amountChannels: [3] },
       );
-    }
-    const deep = deepChannels(gpu.transmittance, twin.transmittance);
-    checks.check(
-      `R08.T6.c ${medium.name}: the channels whose transmittance was under 2⁻¹⁴ hold their optical depth to 10⁻³`,
-      deep.worst <= TWIN_TOLERANCE && (medium !== EARTH_REFERENCE || deep.count > 0),
-      `${deep.count} channels with twin τ above ${SUBNORMAL_TRANSMITTANCE_DEPTH.toFixed(2)}; worst |Δτ| ÷ τ ${deep.worst.toExponential(2)} at ${deep.at}`,
-    );
-    const overGpu = multiScatteringTwin(read, radiusM, storedTransmittance(gpu, curves));
-    const own = twinAgreement(gpu.multiScattering, overGpu, false);
-    const endToEnd =
-      twin.multiScattering === null
-        ? "the twin's own not formed"
-        : describeEndToEnd(twinAgreement(gpu.multiScattering, twin.multiScattering, false));
-    const inRange = withinHalfRange(gpu.multiScattering);
-    checks.check(
-      `R08.T6.b ${medium.name}: the multiple-scattering table agrees with the CPU twin to 10⁻³`,
-      own.worst <= 1 && own.above > 0 && inRange,
-      `over the GPU's transmittance, worst ${own.at}; ${own.above} channels above 10⁻⁶ of the largest (${show([own.largest])}), ${own.over} over the bound, ${own.floorCarried} carried by the floor; ${inRange ? "finite and within rgba16float" : "a channel is not finite or is past rgba16float"}; L₂ alone in ${secondOrderAlone(gpu.multiScattering)} channels (the twin ${secondOrderAlone(overGpu.texels)}); ${endToEnd}`,
-    );
-    if (entry.scope === "tables") {
-      await checkMultiScatteringArm(engine, checks, tables, medium, overGpu);
+      if (absorberCount(medium) > 1) {
+        checkTwin(
+          checks,
+          `${medium.name}: the absorber-column table`,
+          gpu.absorberColumns,
+          twin.absorberColumns,
+          true,
+          { arm: "stored", amountChannels: [0, 1, 2, 3] },
+        );
+      }
+      const deep = deepChannels(gpu.transmittance, twin.transmittance);
+      checks.check(
+        `R08.T6.c ${medium.name}: the channels whose transmittance was under 2⁻¹⁴ hold their optical depth to 10⁻³`,
+        deep.worst <= TWIN_TOLERANCE && (medium !== EARTH_REFERENCE || deep.count > 0),
+        `${deep.count} channels with twin τ above ${SUBNORMAL_TRANSMITTANCE_DEPTH.toFixed(2)}; worst |Δτ| ÷ τ ${deep.worst.toExponential(2)} at ${deep.at}`,
+      );
+      const overGpu = await overGpuTwin;
+      const own = twinAgreement(gpu.multiScattering, overGpu, false);
+      const endToEnd =
+        twin.multiScattering === null
+          ? "the twin's own not formed"
+          : describeEndToEnd(twinAgreement(gpu.multiScattering, twin.multiScattering, false));
+      const inRange = withinHalfRange(gpu.multiScattering);
+      checks.check(
+        `R08.T6.b ${medium.name}: the multiple-scattering table agrees with the CPU twin to 10⁻³`,
+        own.worst <= 1 && own.above > 0 && inRange,
+        `over the GPU's transmittance, worst ${own.at}; ${own.above} channels above 10⁻⁶ of the largest (${show([own.largest])}), ${own.over} over the bound, ${own.floorCarried} carried by the floor; ${inRange ? "finite and within rgba16float" : "a channel is not finite or is past rgba16float"}; L₂ alone in ${secondOrderAlone(gpu.multiScattering)} channels (the twin ${secondOrderAlone(overGpu.texels)}); ${endToEnd}`,
+      );
+      if (kernelArm !== null) {
+        checkMultiScatteringArm(checks, medium, await kernelArm, overGpu);
+      }
+    });
+    // The kernel arm is read back before the tables go and the next GPU work begins.
+    if (kernelArm !== null) {
+      await kernelArm;
     }
   } finally {
     tables.dispose();
@@ -1338,34 +1384,42 @@ function secondOrderAlone(texels: Float32Array | Float64Array): number {
 
 /**
  * A medium's multiple-scattering table in the kernel arm (`AtmosphereTables.buildKernelArm`), its
- * kernel's own `rgba32float` output over the stored transmittance, against `twin`, the twin over
- * the same: R08.T6.d's check of the Venus-class table, held to its twin in both arms
- * (`decision-r08-t6b-floor.md` §9.3), with its channels stored as L₂ alone.
+ * kernel's own `rgba32float` output over the stored transmittance, read back.
  */
-async function checkMultiScatteringArm(
+async function readMultiScatteringArm(
   engine: RenderEngine,
-  checks: Checks,
   tables: AtmosphereTables,
-  medium: AtmosphereMedium,
-  twin: TwinTable,
-): Promise<void> {
+): Promise<Float32Array> {
   const arm = tables.buildKernelArm();
   try {
-    const own = new Float32Array(
+    return new Float32Array(
       await engine.readTexture(arm.multiScattering, 0, undefined, "tolerance"),
-    );
-    const result = twinAgreement(own, twin, false, { arm: "kernel" });
-    const finite = own.every(Number.isFinite);
-    checks.check(
-      `R08.T6.d ${medium.name}: the multiple-scattering table, the kernel arm, agrees with the CPU twin to 10⁻³`,
-      result.worst <= 1 && result.above > 0 && finite,
-      `worst ${result.at}; largest ${show([result.largest])}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound; ${finite ? "finite" : "a channel is not finite"}; L₂ alone in ${secondOrderAlone(own)} channels (the twin ${secondOrderAlone(twin.texels)})`,
     );
   } finally {
     engine.releaseTexture(arm.transmittance);
     engine.releaseTexture(arm.absorberColumns);
     engine.releaseTexture(arm.multiScattering);
   }
+}
+
+/**
+ * The kernel arm's multiple-scattering table (`readMultiScatteringArm`) against `twin`, the twin
+ * over the same stored transmittance: R08.T6.d's check of the Venus-class table, held to its twin
+ * in both arms (`decision-r08-t6b-floor.md` §9.3), with its channels stored as L₂ alone.
+ */
+function checkMultiScatteringArm(
+  checks: Checks,
+  medium: AtmosphereMedium,
+  own: Float32Array,
+  twin: TwinTable,
+): void {
+  const result = twinAgreement(own, twin, false, { arm: "kernel" });
+  const finite = own.every(Number.isFinite);
+  checks.check(
+    `R08.T6.d ${medium.name}: the multiple-scattering table, the kernel arm, agrees with the CPU twin to 10⁻³`,
+    result.worst <= 1 && result.above > 0 && finite,
+    `worst ${result.at}; largest ${show([result.largest])}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound; ${finite ? "finite" : "a channel is not finite"}; L₂ alone in ${secondOrderAlone(own)} channels (the twin ${secondOrderAlone(twin.texels)})`,
+  );
 }
 
 /** A frame's three per-frame outputs, read back. */
@@ -1438,7 +1492,10 @@ async function planetOf(
   };
 }
 
-/** Draws one frame and holds its per-frame outputs to their twins over the GPU's tables. */
+/**
+ * Draws one frame, its twins begun on the twin workers first, and returns its per-frame outputs'
+ * agreements with them over the GPU's tables, once the twins are done.
+ */
 async function frameAgreements(
   engine: RenderEngine,
   atmosphere: HillaireAtmosphere,
@@ -1446,33 +1503,31 @@ async function frameAgreements(
   figure: SpheroidFigure,
   sizes: TableSizes,
   frame: TwinFrame,
-): Promise<FrameAgreements> {
+  twins: TwinPool,
+): Promise<() => Promise<FrameAgreements>> {
   const camera = equatorCamera(frame.heightM, FRAME_SIZE, figure);
   const sun = sunAt(frame.elevationDeg);
-  const composite = await compositeFrame(engine, atmosphere, camera, sun, frame.surfaceM);
-  const gpu = await readFrameOutputs(engine, atmosphere);
   const view = twinView(camera, sun, figure, NEAR_M);
-  const aerial = aerialPerspectiveTwin(
+  const aerialTwin = twins.aerialPerspective(
     planet,
     view,
     sizes.aerialPerspective,
     sizes.aerialPerspectiveSamplesPerSlice,
     sizes.aerialPerspectiveReachM,
   );
+  const skyViewTwin = twins.skyView(planet, view, sizes.skyView, sizes.skyViewSamples);
   const surfaceDepth = frame.surfaceM === null ? 0 : NEAR_M / frame.surfaceM;
-  return {
-    skyView: twinAgreement(
-      gpu.skyView,
-      skyViewTwin(planet, view, sizes.skyView, sizes.skyViewSamples),
-      false,
-    ),
-    aerial: twinAgreement(gpu.aerial, aerial, true),
-    rayMarch: twinAgreement(
-      gpu.rayMarch,
-      rayMarchTwin(planet, view, sizes, () => surfaceDepth),
-      true,
-    ),
-    compositeWithinRange: withinHalfRange(composite),
+  const rayMarchTwin = twins.rayMarch(planet, view, sizes, surfaceDepth);
+  const composite = await compositeFrame(engine, atmosphere, camera, sun, frame.surfaceM);
+  const gpu = await readFrameOutputs(engine, atmosphere);
+  return async () => {
+    const aerial = await aerialTwin;
+    return {
+      skyView: twinAgreement(gpu.skyView, await skyViewTwin, false),
+      aerial: twinAgreement(gpu.aerial, aerial, true),
+      rayMarch: twinAgreement(gpu.rayMarch, await rayMarchTwin, true),
+      compositeWithinRange: withinHalfRange(composite),
+    };
   };
 }
 
@@ -1492,10 +1547,11 @@ function recordAgreement(checks: Checks, name: string, result: TwinAgreement): v
  */
 async function checkFrameTwins(
   engine: RenderEngine,
-  checks: Checks,
+  ordered: OrderedChecks,
   entry: TwinMedium,
   read: AtmosphereMedium,
   setting: QualitySetting,
+  twins: TwinPool,
 ): Promise<void> {
   const frames: readonly TwinFrame[] = [
     { name: "2 km, a surface 60 km ahead", heightM: 2_000, elevationDeg: 20, surfaceM: 60_000 },
@@ -1507,18 +1563,29 @@ async function checkFrameTwins(
   try {
     const planet = await planetOf(engine, atmosphere, read, WGS84);
     for (const frame of frames) {
-      // The harness's checks run in order: each frame is read back before the next draws.
+      // The harness's GPU work runs in order: each frame is read back before the next draws.
       // oxlint-disable-next-line no-await-in-loop
-      const result = await frameAgreements(engine, atmosphere, planet, WGS84, sizes, frame);
-      const label = `${medium.name}, ${setting}, ${frame.name}`;
-      recordAgreement(checks, `${label}: the sky view`, result.skyView);
-      recordAgreement(checks, `${label}: the aerial perspective`, result.aerial);
-      recordAgreement(checks, `${label}: the ray march`, result.rayMarch);
-      checks.check(
-        `R08.T6.c ${label}: the composite, its read of the tables at the camera, is finite and within rgba16float's range`,
-        result.compositeWithinRange,
-        result.compositeWithinRange ? "every channel" : "a channel is not",
+      const agreements = await frameAgreements(
+        engine,
+        atmosphere,
+        planet,
+        WGS84,
+        sizes,
+        frame,
+        twins,
       );
+      ordered.later(async (checks) => {
+        const result = await agreements();
+        const label = `${medium.name}, ${setting}, ${frame.name}`;
+        recordAgreement(checks, `${label}: the sky view`, result.skyView);
+        recordAgreement(checks, `${label}: the aerial perspective`, result.aerial);
+        recordAgreement(checks, `${label}: the ray march`, result.rayMarch);
+        checks.check(
+          `R08.T6.c ${label}: the composite, its read of the tables at the camera, is finite and within rgba16float's range`,
+          result.compositeWithinRange,
+          result.compositeWithinRange ? "every channel" : "a channel is not",
+        );
+      });
     }
   } finally {
     atmosphere.dispose();
@@ -1976,6 +2043,28 @@ function recordHeights(
   );
 }
 
+/** The per-planet tables in the kernel arm (`AtmosphereTables.buildKernelArm`), read back. */
+async function readKernelArmTables(
+  engine: RenderEngine,
+  tables: AtmosphereTables,
+): Promise<{ readonly transmittance: Float32Array; readonly multiScattering: Float32Array }> {
+  const arm = tables.buildKernelArm();
+  try {
+    return {
+      transmittance: new Float32Array(
+        await engine.readTexture(arm.transmittance, 0, undefined, "tolerance"),
+      ),
+      multiScattering: new Float32Array(
+        await engine.readTexture(arm.multiScattering, 0, undefined, "tolerance"),
+      ),
+    };
+  } finally {
+    engine.releaseTexture(arm.transmittance);
+    engine.releaseTexture(arm.absorberColumns);
+    engine.releaseTexture(arm.multiScattering);
+  }
+}
+
 /**
  * The per-planet tables of `atmosphere` against their twins in both arms: the transmittance
  * against the twin of the medium, the multiple scattering against its twin over the GPU's stored
@@ -1985,24 +2074,25 @@ function recordHeights(
  */
 async function checkPlanetArms(
   engine: RenderEngine,
-  checks: Checks,
+  ordered: OrderedChecks,
   body: HeightsBody,
   atmosphere: HillaireAtmosphere,
   read: AtmosphereMedium,
+  transmittanceOfMedium: Promise<TwinTable>,
+  twins: TwinPool,
 ): Promise<PlanetTwin> {
   const bottomM = tableRadiusM(body.figure);
   const gpu = await readPlanetTables(engine, atmosphere.tables);
   const stored = storedTransmittance(gpu, atmosphere.tables.curves);
-  const transmittance = transmittanceTwin(read, bottomM);
-  const multiScattering = multiScatteringTwin(read, bottomM, stored);
-  const arm = atmosphere.tables.buildKernelArm();
-  try {
-    const armTransmittance = new Float32Array(
-      await engine.readTexture(arm.transmittance, 0, undefined, "tolerance"),
-    );
-    const armMultiScattering = new Float32Array(
-      await engine.readTexture(arm.multiScattering, 0, undefined, "tolerance"),
-    );
+  const multiScatteringOverGpu = twins.multiScattering(read, bottomM, stored);
+  // The kernel arm is drawn and read back while the twins are computed, and its checks read it
+  // after the twins, as they came in sequence.
+  const armReadback = handled(readKernelArmTables(engine, atmosphere.tables));
+  ordered.later(async (checks) => {
+    const transmittance = await transmittanceOfMedium;
+    const multiScattering = await multiScatteringOverGpu;
+    const { transmittance: armTransmittance, multiScattering: armMultiScattering } =
+      await armReadback;
     const label = `${body.name}: the per-planet`;
     recordHeights(
       checks,
@@ -2032,11 +2122,9 @@ async function checkPlanetArms(
       twinAgreement(armMultiScattering, multiScattering, false, { arm: "kernel" }),
       "kernel",
     );
-  } finally {
-    engine.releaseTexture(arm.transmittance);
-    engine.releaseTexture(arm.absorberColumns);
-    engine.releaseTexture(arm.multiScattering);
-  }
+  });
+  // The kernel arm is read back before the frames draw.
+  await armReadback;
   return {
     medium: read,
     bottomRadiusM: bottomM,
@@ -2048,77 +2136,84 @@ async function checkPlanetArms(
 /** One view's three per-frame kernels against their twins, in each arm the frame drew. */
 async function checkViewArms(
   engine: RenderEngine,
-  checks: Checks,
+  ordered: OrderedChecks,
   atmosphere: HillaireAtmosphere,
   planet: PlanetTwin,
   body: HeightsBody,
   sizes: TableSizes,
   setting: QualitySetting,
   view: HeightsView,
+  twins: TwinPool,
 ): Promise<void> {
-  const frame = await drawArms(engine, atmosphere, view, setting === "high");
-  const label = `${body.name}, ${setting}, ${view.name}`;
-  checks.check(
-    `${body.task} ${label}: the composite's frame is finite and within rgba16float`,
-    withinHalfRange(frame.composite),
-    `mean ${show(meanRgb(frame.composite))}`,
-  );
+  // The view's twins begin on the twin workers, and the frame draws while they run.
   const twin = twinView(view.camera, view.sun, body.figure, NEAR_M);
   const surfaceDepth = view.surfaceM === null ? 0 : NEAR_M / view.surfaceM;
-  const skyView = skyViewTwin(planet, twin, sizes.skyView, sizes.skyViewSamples);
-  const aerial = aerialPerspectiveTwin(
+  const skyViewOfView = twins.skyView(planet, twin, sizes.skyView, sizes.skyViewSamples);
+  const aerialOfView = twins.aerialPerspective(
     planet,
     twin,
     sizes.aerialPerspective,
     sizes.aerialPerspectiveSamplesPerSlice,
     sizes.aerialPerspectiveReachM,
   );
-  const rayMarch = rayMarchTwin(planet, twin, sizes, () => surfaceDepth);
-  // Only a view from above the atmosphere's top may pass a texel by the twin's envelope
-  // (`decision-r08-f32.md` §10.3); from inside it the bound holds outright. The aerial volume has
-  // none: from above the top it holds no air, and it passes outright everywhere.
-  const fromAbove = twin.heightM >= planet.medium.topHeightM;
-  const marchEnvelope = fromAbove ? rayMarchEnvelope(planet, twin, sizes, rayMarch) : undefined;
-  const skyEnvelope = fromAbove ? skyViewEnvelope(planet, twin, sizes, skyView) : undefined;
-  const arms: ReadonlyArray<readonly [TwinOptions["arm"], FrameReadback | null]> = [
-    ["stored", frame.stored],
-    ["kernel", frame.kernel],
-  ];
-  for (const [arm, floats] of arms) {
-    if (floats !== null) {
-      recordHeights(
-        checks,
-        body.task,
-        `${label}: the sky view`,
-        twinAgreement(
-          floats.skyView,
-          skyView,
-          false,
-          skyEnvelope === undefined ? { arm } : { arm, envelope: skyEnvelope },
-        ),
-        arm,
-      );
-      recordHeights(
-        checks,
-        body.task,
-        `${label}: the aerial perspective`,
-        twinAgreement(floats.aerial, aerial, true, { arm }),
-        arm,
-      );
-      recordHeights(
-        checks,
-        body.task,
-        `${label}: the ray march`,
-        twinAgreement(
-          floats.rayMarch,
-          rayMarch,
-          true,
-          marchEnvelope === undefined ? { arm } : { arm, envelope: marchEnvelope },
-        ),
-        arm,
-      );
+  const rayMarchOfView = twins.rayMarch(planet, twin, sizes, surfaceDepth);
+  const frame = await drawArms(engine, atmosphere, view, setting === "high");
+  ordered.later(async (checks) => {
+    const label = `${body.name}, ${setting}, ${view.name}`;
+    checks.check(
+      `${body.task} ${label}: the composite's frame is finite and within rgba16float`,
+      withinHalfRange(frame.composite),
+      `mean ${show(meanRgb(frame.composite))}`,
+    );
+    const skyView = await skyViewOfView;
+    const aerial = await aerialOfView;
+    const rayMarch = await rayMarchOfView;
+    // Only a view from above the atmosphere's top may pass a texel by the twin's envelope
+    // (`decision-r08-f32.md` §10.3); from inside it the bound holds outright. The aerial volume has
+    // none: from above the top it holds no air, and it passes outright everywhere.
+    const fromAbove = twin.heightM >= planet.medium.topHeightM;
+    const marchEnvelope = fromAbove ? rayMarchEnvelope(planet, twin, sizes, rayMarch) : undefined;
+    const skyEnvelope = fromAbove ? skyViewEnvelope(planet, twin, sizes, skyView) : undefined;
+    const arms: ReadonlyArray<readonly [TwinOptions["arm"], FrameReadback | null]> = [
+      ["stored", frame.stored],
+      ["kernel", frame.kernel],
+    ];
+    for (const [arm, floats] of arms) {
+      if (floats !== null) {
+        recordHeights(
+          checks,
+          body.task,
+          `${label}: the sky view`,
+          twinAgreement(
+            floats.skyView,
+            skyView,
+            false,
+            skyEnvelope === undefined ? { arm } : { arm, envelope: skyEnvelope },
+          ),
+          arm,
+        );
+        recordHeights(
+          checks,
+          body.task,
+          `${label}: the aerial perspective`,
+          twinAgreement(floats.aerial, aerial, true, { arm }),
+          arm,
+        );
+        recordHeights(
+          checks,
+          body.task,
+          `${label}: the ray march`,
+          twinAgreement(
+            floats.rayMarch,
+            rayMarch,
+            true,
+            marchEnvelope === undefined ? { arm } : { arm, envelope: marchEnvelope },
+          ),
+          arm,
+        );
+      }
     }
-  }
+  });
 }
 
 /**
@@ -2138,29 +2233,62 @@ async function checkViewArms(
  * From inside the atmosphere, and in the per-planet tables, the bound holds outright. The sky view runs at half its width and height (`twinSizes`), each texel one ray of the
  * shipped kernel. The medium is R05's Earth, which R08.T6.g measured these figures on: the group
  * holds the kernels' geometry, and R08.T6.b's twins hold the rebuilt Earth (R08.T6.d).
+ *
+ * The twins run on the page's twin workers (`twins`) beside the GPU's work, and the checks are
+ * recorded in the order they were in sequence (`ordered.ts`): each body's transmittance twin, which
+ * reads nothing of the GPU's, begins with the group, and each twin over the GPU's tables as soon as
+ * they are read back.
  */
-export async function checkAtmosphereHeights(engine: RenderEngine, checks: Checks): Promise<void> {
+export async function checkAtmosphereHeights(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
   const read = kernelMedium(R05_EARTH_REFERENCE);
-  for (const body of HEIGHTS_BODIES) {
-    let planet: PlanetTwin | null = null;
-    for (const setting of ["high", "low"] as const) {
-      const sizes = twinSizes(TABLE_SIZES[setting]);
-      const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, sizes, body.figure);
-      try {
-        // The per-planet tables are the same on both settings: held, and twinned, once.
-        // The harness's checks run in order: the tables are read back before the first frame.
-        // oxlint-disable-next-line no-await-in-loop
-        planet ??= await checkPlanetArms(engine, checks, body, atmosphere, read);
-        for (const view of heightsViews(body, setting)) {
-          // The harness's checks run in order: each frame is read back before the next draws.
+  const bodies = HEIGHTS_BODIES.map((body) => ({
+    body,
+    transmittance: twins.transmittance(read, tableRadiusM(body.figure)),
+  }));
+  await inOrder(checks, async (ordered) => {
+    for (const { body, transmittance } of bodies) {
+      let planet: PlanetTwin | null = null;
+      for (const setting of ["high", "low"] as const) {
+        const sizes = twinSizes(TABLE_SIZES[setting]);
+        const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, sizes, body.figure);
+        try {
+          // The per-planet tables are the same on both settings: held, and twinned, once.
+          // The harness's GPU work runs in order: the tables are read back before the first frame.
           // oxlint-disable-next-line no-await-in-loop
-          await checkViewArms(engine, checks, atmosphere, planet, body, sizes, setting, view);
+          planet ??= await checkPlanetArms(
+            engine,
+            ordered,
+            body,
+            atmosphere,
+            read,
+            transmittance,
+            twins,
+          );
+          for (const view of heightsViews(body, setting)) {
+            // The harness's GPU work runs in order: each frame is read back before the next draws.
+            // oxlint-disable-next-line no-await-in-loop
+            await checkViewArms(
+              engine,
+              ordered,
+              atmosphere,
+              planet,
+              body,
+              sizes,
+              setting,
+              view,
+              twins,
+            );
+          }
+        } finally {
+          atmosphere.dispose();
         }
-      } finally {
-        atmosphere.dispose();
       }
     }
-  }
+  });
 }
 
 // --- R08.T6.i: the marches cut at layer edges ---------------------------------------------------
@@ -2208,31 +2336,45 @@ function layerEdgeViews(): HeightsView[] {
  * for the smoke's watchdog: R08.T6.b's group holds the multiple-scattering kernel, which cuts its
  * steps too, on the four-absorber fixture, whose layers have edges, and that fixture's per-frame
  * kernels on both settings. The medium the kernels read is `kernelMedium`'s, whose edges are widened
- * to their levels; the twins take it as given.
+ * to their levels; the twins take it as given. The twins run on the page's twin workers (`twins`)
+ * beside the GPU's work, the checks recorded in the order they were in sequence (`ordered.ts`).
  */
 export async function checkAtmosphereLayerEdges(
   engine: RenderEngine,
   checks: Checks,
+  twins: TwinPool,
 ): Promise<void> {
   const read = kernelMedium(EARTH_SLAB_REFERENCE);
   const sizes = twinSizes(TABLE_SIZES.high);
-  const atmosphere = new HillaireAtmosphere(
-    engine,
-    EARTH_SLAB_REFERENCE,
-    sizes,
-    SLAB_EARTH.figure,
-    EARTH_SLAB_REFERENCE_CURVES,
-  );
-  try {
-    const planet = await planetOf(engine, atmosphere, read, SLAB_EARTH.figure);
-    for (const view of layerEdgeViews()) {
-      // The harness's checks run in order: each frame is read back before the next draws.
-      // oxlint-disable-next-line no-await-in-loop
-      await checkViewArms(engine, checks, atmosphere, planet, SLAB_EARTH, sizes, "high", view);
+  await inOrder(checks, async (ordered) => {
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      EARTH_SLAB_REFERENCE,
+      sizes,
+      SLAB_EARTH.figure,
+      EARTH_SLAB_REFERENCE_CURVES,
+    );
+    try {
+      const planet = await planetOf(engine, atmosphere, read, SLAB_EARTH.figure);
+      for (const view of layerEdgeViews()) {
+        // The harness's GPU work runs in order: each frame is read back before the next draws.
+        // oxlint-disable-next-line no-await-in-loop
+        await checkViewArms(
+          engine,
+          ordered,
+          atmosphere,
+          planet,
+          SLAB_EARTH,
+          sizes,
+          "high",
+          view,
+          twins,
+        );
+      }
+    } finally {
+      atmosphere.dispose();
     }
-  } finally {
-    atmosphere.dispose();
-  }
+  });
 }
 
 // --- R05.T12.c: the comparison captures ----------------------------------------------------------
