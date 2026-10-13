@@ -25,6 +25,7 @@ import {
   answerRequest,
   bakeKey,
   EXPECTED_TEST_PLANET_VERSION,
+  HeldFields,
   type HeightModule,
   packNormals,
   staleModuleMessage,
@@ -144,10 +145,8 @@ function goldenBakes(): GoldenBake[] {
 
 const module: HeightModule = { bakePatch, testPlanetVersion };
 
-/** A field holder for the bake tests, which post no field. */
-function ignoreField(): void {
-  // The bake tests post no field.
-}
+/** The fields of the bake tests, which post none; the field messages' own tests are `heightBake.test.ts`'s. */
+const noFields = new HeldFields();
 
 /** The settings of the answer tests. */
 const SETTINGS: BakeSettings = { vertexPath: "baked-offsets", normals: "double", ridges: "off" };
@@ -276,7 +275,7 @@ describe("the height worker's module", () => {
         generation: 2,
         settings: SETTINGS,
       },
-      ignoreField,
+      noFields,
     );
     if (reply.kind !== "baked") {
       throw new Error(`the bake failed: ${JSON.stringify(reply)}`);
@@ -302,7 +301,7 @@ describe("the height worker's module", () => {
         generation: 2,
         settings: SETTINGS,
       },
-      ignoreField,
+      noFields,
     );
     expect(failed.reply.kind).toBe("bake-failed");
     expect(failed.transfer).toEqual([]);
@@ -325,18 +324,8 @@ describe("the height worker's module", () => {
           generation: 1,
           settings: SETTINGS,
         },
-        ignoreField,
+        noFields,
       ),
     ).toThrow(WebAssembly.RuntimeError);
-  });
-
-  it("holds a field and acknowledges it", () => {
-    const bytes = new ArrayBuffer(8);
-    let held: ArrayBuffer | null = null;
-    const answer = answerRequest(module, { kind: "field", id: 9, bytes }, (b) => {
-      held = b;
-    });
-    expect(answer).toEqual({ reply: { kind: "field-loaded", id: 9 }, transfer: [] });
-    expect(held).toBe(bytes);
   });
 });

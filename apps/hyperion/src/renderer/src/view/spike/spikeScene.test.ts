@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { dot, normalise } from "../../geometry/vec3";
 import { rotateToBody } from "../coords/rotation";
+import { MAX_BLOCK_BYTES } from "../terrain/coarseFieldStore";
 import { isDescending } from "../terrain/grounded";
 import { spheroidNormal, spheroidPoint } from "../terrain/planet";
 import { datumDirection, DescentProfile, landingSiteOf } from "./descentProfile";
@@ -10,6 +11,7 @@ import {
   cameraElevationDeg,
   contactRule,
   GROUNDED_CLEARANCE_M,
+  postSyntheticField,
   siteDirection,
   SPIKE_CRAFT,
   SPIKE_CRAFT_RADIUS_M,
@@ -18,7 +20,7 @@ import {
   spikeScene,
   sunDirectionBody,
   SYNTHETIC_FIELD_BYTES,
-  syntheticField,
+  syntheticFieldBlocks,
   TEST_PLANET_FIGURE,
 } from "./spikeScene";
 
@@ -194,12 +196,38 @@ describe("the camera's elevation", () => {
 });
 
 describe("the synthetic field", () => {
-  it("is the brainstorm's 15 MB, every page written", () => {
-    const field = new Uint8Array(syntheticField());
-    expect(field.length).toBe(SYNTHETIC_FIELD_BYTES);
+  it("is the brainstorm's 15 MB in pieces of at most 1 MiB, every page written", () => {
+    const blocks = syntheticFieldBlocks();
+    expect(blocks.every((b) => b.byteLength <= MAX_BLOCK_BYTES)).toBe(true);
+    const field = new Uint8Array(SYNTHETIC_FIELD_BYTES);
+    let at = 0;
+    for (const block of blocks) {
+      field.set(new Uint8Array(block), at);
+      at += block.byteLength;
+    }
+    expect(at).toBe(SYNTHETIC_FIELD_BYTES);
     expect(SYNTHETIC_FIELD_BYTES).toBe(15_000_000);
     for (let page = 0; page < field.length; page += 4096) {
       expect(field.subarray(page, page + 4096).some((b) => b !== 0)).toBe(true);
     }
+  });
+
+  it("reaches the workers as the test planet's field: one field_init, then its chunks", () => {
+    const calls: string[] = [];
+    let bytes = 0;
+    postSyntheticField({
+      fieldInit: (body, block) => {
+        calls.push(`init ${body}`);
+        bytes += block.byteLength;
+      },
+      fieldChunk: (body, block) => {
+        calls.push(`chunk ${body}`);
+        bytes += block.byteLength;
+      },
+    });
+    expect(calls[0]).toBe(`init ${SPIKE_PLANET}`);
+    expect(calls.slice(1).every((c) => c === `chunk ${SPIKE_PLANET}`)).toBe(true);
+    expect(calls).toHaveLength(Math.ceil(SYNTHETIC_FIELD_BYTES / MAX_BLOCK_BYTES));
+    expect(bytes).toBe(SYNTHETIC_FIELD_BYTES);
   });
 });

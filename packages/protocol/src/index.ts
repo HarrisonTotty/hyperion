@@ -365,6 +365,7 @@ export {
   RequestChannel,
   RequestClient,
   type BinaryFrameReceipt,
+  type BulkChunk,
   type BulkOutcome,
   type BulkRequestOptions,
   type PartialBulkAnswer,

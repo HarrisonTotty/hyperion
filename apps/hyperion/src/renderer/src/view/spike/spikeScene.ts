@@ -41,7 +41,9 @@ import {
 } from "../scenes/kept";
 import type { SunState } from "../atmosphere/hillaire";
 import type { Rgb } from "../photometry/toneCurve";
+import { MAX_BLOCK_BYTES } from "../terrain/coarseFieldStore";
 import type { Xyz } from "../terrain/cube";
+import type { HeightWorkerPool } from "../terrain/workers/pool";
 import {
   finestPatchSizeM,
   type GroundContact,
@@ -78,15 +80,40 @@ export { TEST_PLANET_FIGURE } from "./testPlanetFigure";
 export const SYNTHETIC_FIELD_BYTES = 15_000_000;
 
 /**
- * The synthetic field, every byte written so that its pages are committed and count in the
- * workers' memory as a real field would; the test planet never reads it.
+ * The synthetic field in pieces of at most R09's largest block (`MAX_BLOCK_BYTES`, 1 MiB), every
+ * byte written so that its pages are committed and count in the workers' memory as a real field
+ * would.
+ *
+ * @remarks
+ * The test planet never reads it, and no piece is an R09 payload block: they stand in for a field's
+ * memory alone, posted as one would be (R10.T7).
  */
-export function syntheticField(): ArrayBuffer {
-  const bytes = new Uint8Array(SYNTHETIC_FIELD_BYTES);
-  for (let i = 0; i < bytes.length; i += 1) {
-    bytes[i] = (i * 151 + 7) & 0xff;
+export function syntheticFieldBlocks(): ArrayBuffer[] {
+  const blocks: ArrayBuffer[] = [];
+  for (let start = 0; start < SYNTHETIC_FIELD_BYTES; start += MAX_BLOCK_BYTES) {
+    const bytes = new Uint8Array(Math.min(MAX_BLOCK_BYTES, SYNTHETIC_FIELD_BYTES - start));
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = ((start + i) * 151 + 7) & 0xff;
+    }
+    blocks.push(bytes.buffer);
   }
-  return bytes.buffer;
+  return blocks;
+}
+
+/**
+ * Posts the synthetic field to the height workers as the test planet's ({@link SPIKE_PLANET}): its
+ * first piece as the body's `field_init`, the rest as its `field_chunk`s, as R10's store posts a
+ * real field's blocks, so that each worker holds its 15 MB.
+ */
+export function postSyntheticField(pool: Pick<HeightWorkerPool, "fieldInit" | "fieldChunk">): void {
+  const [first, ...rest] = syntheticFieldBlocks();
+  if (first === undefined) {
+    return;
+  }
+  pool.fieldInit(SPIKE_PLANET, first);
+  for (const block of rest) {
+    pool.fieldChunk(SPIKE_PLANET, block);
+  }
 }
 
 /**

@@ -2289,3 +2289,160 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   - _A peak's extended-source horizon._ R07's `sphere_irradiance` clamps a negative horizon at 0,
     so a peak's planetshine and wide-source term is the flat ground's; the sun's own lit fraction
     (Design note 10) keeps the signed horizon. Small; R07's file.
+- **Deviations in T7, as built** (2026-10-13, lane r10-store).
+  - _Files._ The new `view/terrain/coarseFieldStore.ts` and `coverage.ts`, with their tests; R05's
+    `workers/{pool,messages,heightBake,height.worker}.ts` and their tests, with a new
+    `heightBake.test.ts`; `view/spike/spikeScene.ts` and `spikeRun.ts`; R01's
+    `view/engine/memory.ts`; R03's `packages/protocol/src/{requests,index}.ts` and `bulk.test.ts`.
+    `pool.test.ts`'s scripted worker moved to `src/renderer/src/test/scriptedHeightWorker.ts`, so
+    that the store's tests share it; it answers field messages through the worker's own
+    `HeldFields`. The store's test renders R03's link hook over `FakeWebSocket`, so it joins
+    `vitest.config.mts`'s `DOM_TESTS`.
+  - _The per-chunk option._ `BulkRequestOptions.onChunk(chunk: BulkChunk)`, with `BulkChunk`
+    (`payload`, `index`, `count`) exported. It sees each chunk the request keeps, in order, before
+    its answer; a chunk that breaks the order fails the request unseen. The client still collects
+    the chunks and checks them against the manifest, so `outcome.chunks` is unchanged. Additive: no
+    other caller changes.
+  - _The pool's per-body calls._ `fieldInit(body, block)`, `fieldChunk(body, block)` and
+    `fieldRelease(body)` replace `postField`, with `onFieldRefused`, `fieldResidentBytes` (the
+    workers' copies, each as its worker last reported it) and `fieldBodies`.
+    - The messages are `field-init`, `field-chunk` and `field-release`, kebab-case as the file's
+      kinds are. Each is answered `field-held`, with the worker's `heldBytes`, or `field-refused`,
+      with its `body`, `message` and `heldBytes`.
+    - Each block goes to every worker at once. R05 posted its one 15 MB field to one worker at a
+      time, each acknowledged before the next, and held bakes until a worker had it. Now a
+      transient copy is one block, at most 1 MiB, a worker. A worker takes its messages in the
+      order sent, so a bake posted after a block is made with it, and the bake gate goes.
+    - A second `fieldInit` of a started body throws: release it first. A refusal is reported once
+      for each start of a body's field. A field's start re-bakes the bakes in flight, as
+      `postField` did.
+    - For T6.b: `field_init`'s answer is to carry the body's level bounds. T6.b adds them to
+      `field-held` for a `field-init`, or gives that answer a kind of its own.
+  - _The worker until T6.b._ `heightBake.ts`'s `HeldFields` keeps each body's blocks in JavaScript,
+    and `answerRequest(module, request, fields)` takes it in place of `holdField`. A block of a body
+    with no `field-init` before it is refused. T6.b moves the blocks into the module's
+    `PartialField` a body and keeps the replies.
+  - _The spike._ `syntheticField()` is now `syntheticFieldBlocks()`: the same 15 MB in 15 pieces of
+    at most `MAX_BLOCK_BYTES`. `postSyntheticField(pool)` posts them as the test planet's
+    (`SPIKE_PLANET`) `field_init` and `field_chunk`s, so each worker still holds 15 MB. The pieces
+    are no payload blocks, and the worker holds them undecoded. **For T6.b:** its worker decodes
+    every block, so it must either hold a test-planet body's blocks undecoded (the test planet reads
+    no field) or move the spike to a real payload of `synthetic_worlds()`'s, sized to 15 MB.
+  - _The store's API._
+    - Provides' `want(body, reason)` and `release(body)`, and `coverage(body)`, which is
+      `CoverageView | null`: `null` until a `ready` answer is held, and after the field is
+      dropped.
+    - `onRevision(cb)` is a listener for each new coverage, returning the unsubscribe, as
+      `onBaked` is. A listener may release the body; one that throws is reported on the console
+      and changes nothing else. The scene's input is `noteSurfaceRevisions(revisions)`, which takes
+      `SceneNotificationDto.surface_revisions` as it is.
+    - Also: `follow(candidates)` over the pure `fieldDemand`, `setLinkUp(up)`, `header(body)`,
+      `status(body)` (`pending`, `notModelled`, `failure`), `wanted` and `dispose()`.
+    - `FieldWantReason` is `local-body` or `in-range`. A `FieldCandidate` is one view's view of a
+      body: whether it is that view's local body, and its `rangeRatio`, the camera's distance over
+      the body's hand-over range in that view's style (Design note 13's τ is the style's, so each
+      view has its own range). `fieldDemand` folds a body's views, so a body is wanted once some
+      view is within its own range, and released once every view has left twice its own. The
+      caller works the range out (the question below).
+  - _Asking again._
+    - When the link returns, every body whose field is kept is asked again with the revision held,
+      since a rise made while the link was down is not replayed. Asked at the latest revision, the
+      server answers block 0 alone, which every worker gets as a `field_chunk`.
+    - The revisions announced for a body are forgotten when its field is dropped or the link goes
+      down, so that a server of another history (a refused `have_revision`) is not asked again
+      and again for a revision it has not reached.
+    - The server's busy answers (`queue_full`, `too_many_requests`, and `cancelled` from its side)
+      are asked again after `FIELD_RETRY_DELAY_MS`, 2 s, doubling to `FIELD_RETRY_MAX_DELAY_MS`,
+      32 s: the link's own reconnection delay to start, a choice and not a measured figure. Every
+      other refusal is held until the body is wanted afresh.
+    - A first payload that fails (a refused frame, a manifest it disagrees with, a level outside
+      5 to 8, a cover that is not a run of cells) drops its blocks from the workers too; a delta
+      that fails leaves the field held as it was.
+    - An `onChunk` that throws fails its request as `internal` (R03's package), so that the
+      socket's listener never sees it.
+  - _The coverage._ `CoverageView` is immutable for each revision. Its readings carry their unit in
+    their names, by `.claude/rules/typescript-dev.md`: Provides' `resolutionAt` and
+    `bestResolution` are `resolutionAtM` and `bestResolutionM`, and the code's twin is
+    `resolutionOfCodeM`.
+    - `resolutionAtM(cell)` gives metres or `null`, for a cell at the field's level or a patch
+      deeper (read at its coarse ancestor).
+    - `surveyedFraction()` is by solid angle from the centre, the gnomonic rectangle's closed form
+      for each cell, so the cube's small corner cells weigh what they cover. It is exactly 1 only
+      when every cell is surveyed, for T13's draft 4 (`100 %` only then).
+    - Also `bestResolutionM()`, `maskTexels()`, `withStale` and `merged`.
+    - `resolutionOfCodeM` is pinned to `codes.golden`'s 256 `resolution_m` rows, bit for bit. It
+      divides by 100, as the Rust does.
+    - `fieldCellIndex` and `fieldCellAt` are the client's twins of `cell_index` and
+      `cell_at_index`.
+    - Margin cells count as unsurveyed everywhere. `surveyEdges(face, level)` is T10.c's, by its
+      tests, and is not built here.
+  - _The GPU mask._ `CoverageMask` and `coverageMaskTextureSpec`. The mask is an `r8unorm` 2D array
+    of six 2ᴸ × 2ᴸ layers, one a face, 255 where a cell is surveyed and 0 elsewhere, under
+    `coarse-field-gpu`: 384 KiB at level 8. It is filterable, which the cell's code (`r8uint`) would
+    not be. No shader binds it yet (T10.c).
+  - _With R09.T19.b._ T19.b landed while this task ran (`7392c064`, merged before the commit).
+    - The store takes `SurfaceRevisionDto` for the revisions.
+    - As T19.b's record directs, a `bad_request` naming `have_revision` drops what is held, here
+      and in the workers, and asks for the field whole.
+    - Its deltas carry only cells new to the client or surveyed again more finely, so merging by
+      the finer code, as R09's `Cover` folds, is the same as the delta replacing the client's
+      copies.
+  - _Not wired yet._ No view makes a store yet. T7 builds it and tests it over the fake socket and
+    the scripted workers. Its first consumer (T10.c, T11 or T12) makes it, with these inputs:
+    - the terrain pass's pool;
+    - the scene's `surface_revisions`, passed to `noteSurfaceRevisions`. R03's scene model
+      (`sceneWire.ts`'s `applySceneNotification`, `useScene.ts`) does not keep them today, so the
+      consumer adds that path in R03's files;
+    - the link's status, passed to `setLinkUp`;
+    - the views' cameras, passed to `follow`.
+  - _Acceptance._ The task's two commands do not reach `view/spike/`, which this task changed, so
+    its tests ran by name as well: `pnpm --filter hyperion exec vitest run src/renderer/src/view/spike`
+    (20 files, 288 tests, all passing).
+  - _Tests_ (`coarseFieldStore.test.ts`, `coverage.test.ts`, `pool.test.ts`, `heightBake.test.ts`,
+    `spikeScene.test.ts`, and the protocol's `bulk.test.ts`): all of the task's list, and also:
+    - a link lost mid-delta keeps the posted block and marks the coverage stale; the return asks
+      with the revision held;
+    - a body wanted while the link is down is asked once it returns;
+    - a revision announced while a request was in flight asks again after it settles;
+    - `not_modelled` holds its section and posts nothing;
+    - a refusal is held until the body is wanted afresh;
+    - a refused `have_revision` asks again whole;
+    - a malformed frame, and a payload that ends inside a block, give the payload up;
+    - a worker's refusal drops the field;
+    - the frame constants are pinned to `wire.rs`'s source;
+    - each view is judged by its own style's range;
+    - busy answers are asked again after 2 s, then 4 s, up to 32 s, and not once released;
+    - a listener may release the body, and one that throws leaves the rest as they were;
+    - a level outside 5 to 8, a level that moved, and a cover that is not a run are refused;
+    - an `onChunk` that throws fails its request as `internal`.
+- **Question for "main" (R10.T7)**, touching Design note 16's want rule, not a contract.
+  - _The hand-over range of a body with no header._ Design note 16's want range is the relief's
+    hand-over range (Design note 13). The relief arrives only in the field's header, and plan 14's
+    surface section is not on the wire, so a body not yet held has no range: an approached moon,
+    say, that is no view's local body. The store takes each view's range ratio from its caller, so
+    no contract moves, and T7 is built either way. Lean: until a relief bound reaches the wire,
+    the first consumer wants such a body only as a local body, and states it; the alternative is a
+    stated stand-in relief from the body's radius until its first header.
+- **Deferred findings (2026-10-13 rule) (R10.T7)**, each leaving the algorithm and the contracts
+  as they are.
+  - _R12's Consumes names `postField`._ R12 (line 305) reads R05's `postField`, which T7 removed.
+    Its re-validation reads `fieldInit`, `fieldChunk`, `fieldRelease` and `fieldResidentBytes`,
+    the workers' copies for Design note 6's line.
+  - _The render thread's second copy._ `requestBulk` keeps a payload's frames until its answer while
+    the pool keeps its blocks, so the render thread holds a payload twice meanwhile, about 24 MB for
+    an Earth. An `onChunk` caller that drops the chunks from the collection, counting them for the
+    manifest, would halve it. Additive, in R03's package.
+  - _The pool's own copy._ As R05's did, the pool keeps each body's blocks on the render thread for
+    a worker that replaces a failed one. That is about 12 MB for an Earth's first whole payload,
+    and it grows until release: every delta, with its block 0, and every re-ask's block 0 is kept,
+    re-surveyed cells included. `fieldResidentBytes` counts the workers' copies alone. Lean: T14
+    states the kept total beside them, and T6.b may have a replacement worker fetch the field
+    whole instead.
+  - _Coverage lags the workers._ A payload's blocks reach the workers before its answer brings the
+    coverage. A payload cut off by the link leaves blocks in the workers that the coverage never
+    names, until the next answer covers them again. T10.c, which bakes the survey mask, should take
+    it from the store's coverage, or from a cover T6.b reports, and say which.
+  - _The fraction on a spheroid._ `surveyedFraction` is by solid angle from the centre; on a
+    spheroid the share of its area differs by about its flattening (Earth's 1 ÷ 298). Small.
+  - _The re-bake on a field's start._ Starting any body's field re-bakes every bake in flight, as
+    `postField` did. Once bakes name their body (T6.b), the epoch belongs to the body.

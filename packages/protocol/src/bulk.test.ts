@@ -249,6 +249,107 @@ describe("RequestClient with bulk answers", () => {
     );
   });
 
+  it("shows the per-chunk option every chunk in order before the outcome settles", async () => {
+    const { client } = recordingClient();
+    const seen: Array<{ bytes: number[]; index: number; count: number; settled: boolean }> = [];
+    let settled = false;
+    const pending = client.requestBulk(
+      { kind: "list_universes" },
+      () => ({ chunks: 3, bytes: 6 }),
+      {
+        onChunk: (chunk) => {
+          seen.push({ bytes: [...chunk.payload], index: chunk.index, count: chunk.count, settled });
+        },
+      },
+    );
+    const settling = pending.outcome.then((outcome) => {
+      settled = true;
+      return outcome;
+    });
+
+    client.handleBinaryFrame(frame(1, 0, 3, [1, 2]));
+    expect(seen).toHaveLength(1);
+    client.handleBinaryFrame(frame(1, 1, 3, [3]));
+    client.handleBinaryFrame(frame(1, 2, 3, [4, 5, 6]));
+    client.handleServerMessage({ type: "response", id: 1, body: ANSWER });
+
+    const outcome = await settling;
+    expect(settled).toBe(true);
+    expect(seen).toEqual([
+      { bytes: [1, 2], index: 0, count: 3, settled: false },
+      { bytes: [3], index: 1, count: 3, settled: false },
+      { bytes: [4, 5, 6], index: 2, count: 3, settled: false },
+    ]);
+    // The chunks are still collected and handed over with the answer.
+    expect(outcome.ok ? bytesOf(outcome.chunks) : outcome.error).toEqual([[1, 2], [3], [4, 5, 6]]);
+  });
+
+  it("fails the request as internal and cancels it when the per-chunk option throws", async () => {
+    const { client, sent } = recordingClient();
+    const pending = client.requestBulk(
+      { kind: "list_universes" },
+      () => ({ chunks: 2, bytes: 2 }),
+      {
+        onChunk: () => {
+          throw new Error("no room for the block");
+        },
+      },
+    );
+
+    expect(client.handleBinaryFrame(frame(1, 0, 2, [1]))).toEqual({ ok: true });
+    client.handleBinaryFrame(frame(1, 1, 2, [2]));
+
+    await expect(pending.outcome).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal", message: expect.stringMatching(/no room for the block/u) },
+    });
+    expect(sent).toContainEqual({ type: "cancel", id: 1 });
+  });
+
+  it("shows the per-chunk option no chunk that breaks its order, nor one after the request ended", async () => {
+    const { client } = recordingClient();
+    const seen: number[] = [];
+    const pending = client.requestBulk(
+      { kind: "list_universes" },
+      () => ({ chunks: 3, bytes: 3 }),
+      {
+        onChunk: (chunk) => {
+          seen.push(chunk.index);
+        },
+      },
+    );
+
+    client.handleBinaryFrame(frame(1, 0, 3, [1]));
+    client.handleBinaryFrame(frame(1, 2, 3, [3]));
+    client.handleBinaryFrame(frame(1, 1, 3, [2]));
+
+    await expect(pending.outcome).resolves.toMatchObject({
+      ok: false,
+      error: { code: "internal" },
+    });
+    expect(seen).toEqual([0]);
+  });
+
+  it("shows the per-chunk option each partial answer's chunks, numbered from 0 for each", () => {
+    const { client } = recordingClient();
+    const seen: Array<readonly [number, number]> = [];
+    client.requestBulk({ kind: "list_universes" }, () => ({ chunks: 1, bytes: 1 }), {
+      onPartial: () => undefined,
+      onChunk: (chunk) => {
+        seen.push([chunk.index, chunk.payload[0] ?? -1]);
+      },
+    });
+
+    client.handleBinaryFrame(frame(1, 0, 1, [7]));
+    client.handleServerMessage({ type: "partial_response", id: 1, body: ANSWER });
+    client.handleBinaryFrame(frame(1, 0, 1, [8]));
+
+    expect(seen).toEqual([
+      [0, 7],
+      [0, 8],
+    ]);
+  });
+
   it("resolves a response with no bulk and no chunks", async () => {
     const { client } = recordingClient();
     const pending = bulkRequest(client, null);

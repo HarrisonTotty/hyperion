@@ -1,117 +1,19 @@
 import { describe, expect, it } from "vitest";
 
-import { vec3 } from "../../../geometry/vec3";
+import { keptBody } from "../../scenes/kept";
+import { bakeOf, ScriptedHeightWorker } from "../../../test/scriptedHeightWorker";
 import { type PatchKey, patchKeyString } from "../patchKey";
 import type { PatchRequest } from "../select";
-import type { BakedPatch, HeightWorkerReply, HeightWorkerRequest } from "./messages";
 import {
+  type FieldRefusal,
   HeightWorkerPool,
   MAX_CONSECUTIVE_WORKER_FAILURES,
   MAX_IN_FLIGHT_PER_WORKER,
-  type WorkerLike,
 } from "./pool";
 
-/** A height worker driven by the test: it records what it is sent and answers when told. */
-class ScriptedWorker implements WorkerLike {
-  private readonly events = new EventTarget();
-  private readonly wrappers = new Map<unknown, EventListenerObject>();
-  /** Listeners added and not yet removed, by event type. */
-  readonly listening = { message: 0, error: 0 };
-  readonly received: HeightWorkerRequest[] = [];
-  terminated = false;
-
-  postMessage(message: HeightWorkerRequest): void {
-    this.received.push(message);
-  }
-
-  terminate(): void {
-    this.terminated = true;
-  }
-
-  addEventListener(
-    type: "message",
-    listener: (event: MessageEvent<HeightWorkerReply>) => void,
-  ): void;
-  addEventListener(type: "error", listener: (event: Event) => void): void;
-  addEventListener(
-    type: "message" | "error",
-    listener: ((event: MessageEvent<HeightWorkerReply>) => void) | ((event: Event) => void),
-  ): void {
-    this.listening[type] += 1;
-    const wrapper = { handleEvent: listener };
-    this.wrappers.set(listener, wrapper);
-    this.events.addEventListener(type, wrapper);
-  }
-
-  removeEventListener(
-    type: "message",
-    listener: (event: MessageEvent<HeightWorkerReply>) => void,
-  ): void;
-  removeEventListener(type: "error", listener: (event: Event) => void): void;
-  removeEventListener(
-    type: "message" | "error",
-    listener: ((event: MessageEvent<HeightWorkerReply>) => void) | ((event: Event) => void),
-  ): void {
-    const wrapper = this.wrappers.get(listener);
-    if (wrapper !== undefined) {
-      this.listening[type] -= 1;
-      this.wrappers.delete(listener);
-      this.events.removeEventListener(type, wrapper);
-    }
-  }
-
-  /** The bake requests still awaiting an answer, oldest first. */
-  get pendingBakes(): Extract<HeightWorkerRequest, { kind: "bake" }>[] {
-    const answered = new Set(this.answered);
-    return this.received.flatMap((m) => (m.kind === "bake" && !answered.has(m.id) ? [m] : []));
-  }
-
-  private readonly answered: number[] = [];
-
-  reply(message: HeightWorkerReply): void {
-    if ("id" in message) {
-      this.answered.push(message.id);
-    }
-    this.events.dispatchEvent(new MessageEvent("message", { data: message }));
-  }
-
-  /** Answers the oldest pending bake with a bake of its key. */
-  bakeOldest(): void {
-    const next = this.pendingBakes[0];
-    if (next === undefined) {
-      throw new Error("no bake is pending");
-    }
-    this.reply({ kind: "baked", id: next.id, bake: bakeOf(next.key, next.generation) });
-  }
-
-  fail(): void {
-    this.events.dispatchEvent(new Event("error"));
-  }
-
-  /** Acknowledges the last field it was sent. */
-  ackField(): void {
-    const field = this.received.findLast((m) => m.kind === "field");
-    if (field === undefined) {
-      throw new Error("no field was posted");
-    }
-    this.reply({ kind: "field-loaded", id: field.id });
-  }
-}
-
-function bakeOf(key: PatchKey, generation: number): BakedPatch {
-  return {
-    key,
-    generation,
-    originM: vec3(0, 0, 0),
-    heights: new Float32Array(2),
-    offsets: null,
-    normals: new Float16Array(2),
-    heightRangeM: [0, 0],
-    boundingRadiusM: 1,
-    originHeightM: 0,
-    skirtDepthM: 1,
-  };
-}
+/** Two bodies of the kept system, for the per-body field calls. */
+const MOON = keptBody(1);
+const PLANET = keptBody(2);
 
 function keyAt(i: number): PatchKey {
   return { face: 0, level: 10, i, j: 0 };
@@ -123,14 +25,14 @@ function req(i: number, priority: number, forced = false): PatchRequest {
 
 function poolOf(workers: number): {
   pool: HeightWorkerPool;
-  created: ScriptedWorker[];
+  created: ScriptedHeightWorker[];
   baked: string[];
 } {
-  const created: ScriptedWorker[] = [];
+  const created: ScriptedHeightWorker[] = [];
   const pool = new HeightWorkerPool({
     workers,
     createWorker: () => {
-      const worker = new ScriptedWorker();
+      const worker = new ScriptedHeightWorker();
       created.push(worker);
       return worker;
     },
@@ -141,11 +43,11 @@ function poolOf(workers: number): {
   return { pool, created, baked };
 }
 
-function bakedKeys(worker: ScriptedWorker): string[] {
+function bakedKeys(worker: ScriptedHeightWorker): string[] {
   return worker.received.flatMap((m) => (m.kind === "bake" ? [patchKeyString(m.key)] : []));
 }
 
-function workerAt(created: readonly ScriptedWorker[], n: number): ScriptedWorker {
+function workerAt(created: readonly ScriptedHeightWorker[], n: number): ScriptedHeightWorker {
   const w = created[n];
   if (w === undefined) {
     throw new Error(`no worker ${n}`);
@@ -153,8 +55,18 @@ function workerAt(created: readonly ScriptedWorker[], n: number): ScriptedWorker
   return w;
 }
 
-function fields(w: ScriptedWorker): HeightWorkerRequest[] {
-  return w.received.filter((m) => m.kind === "field");
+/** A block of `bytes` bytes, each `fill`. */
+function blockOf(bytes: number, fill: number): ArrayBuffer {
+  return new Uint8Array(bytes).fill(fill).buffer;
+}
+
+/** Each field message a worker received, as its kind, its body and its block's first byte. */
+function fieldLog(w: ScriptedHeightWorker): string[] {
+  return w.fieldMessages.map((m) =>
+    m.kind === "field-release"
+      ? `${m.kind} ${m.body}`
+      : `${m.kind} ${m.body} ${new Uint8Array(m.block)[0] ?? -1}`,
+  );
 }
 
 describe("the height-worker pool", () => {
@@ -215,33 +127,102 @@ describe("the height-worker pool", () => {
     expect(baked).toEqual([patchKeyString(keyAt(1))]);
   });
 
-  it("posts the field to the second worker only after the first acknowledges", () => {
-    const { pool, created } = poolOf(2);
-    pool.postField(new ArrayBuffer(16));
-    expect(fields(workerAt(created, 0))).toHaveLength(1);
-    expect(fields(workerAt(created, 1))).toHaveLength(0);
-    const first = fields(workerAt(created, 0))[0];
-    if (first === undefined) {
-      throw new Error("no field was posted");
+  it("posts each block of a body's field to every worker, its first block as field-init", () => {
+    const { pool, created } = poolOf(3);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    pool.fieldInit(PLANET, blockOf(2, 7));
+    pool.fieldChunk(MOON, blockOf(4, 2));
+    for (const w of created) {
+      expect(fieldLog(w)).toEqual([
+        `field-init ${MOON} 0`,
+        `field-chunk ${MOON} 1`,
+        `field-init ${PLANET} 7`,
+        `field-chunk ${MOON} 2`,
+      ]);
     }
-    workerAt(created, 0).reply({ kind: "field-loaded", id: first.id });
-    expect(fields(workerAt(created, 1))).toHaveLength(1);
+    expect(pool.fieldBodies).toEqual([MOON, PLANET]);
   });
 
-  it("replaces a worker that errors and re-queues its requests", () => {
+  it("releases a body's field from every worker and keeps no copy of it", () => {
+    const { pool, created } = poolOf(2);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    pool.fieldRelease(MOON);
+    pool.fieldRelease(MOON);
+    for (const w of created) {
+      expect(fieldLog(w).at(-1)).toBe(`field-release ${MOON}`);
+      expect(w.fieldMessages.filter((m) => m.kind === "field-release")).toHaveLength(1);
+      w.answerFields();
+      expect(w.fields.heldBytes).toBe(0);
+    }
+    expect(pool.fieldBodies).toEqual([]);
+    expect(pool.fieldResidentBytes).toBe(0);
+  });
+
+  it("refuses a block before its body's field is started, and a second start", () => {
+    const { pool } = poolOf(1);
+    expect(() => {
+      pool.fieldChunk(MOON, blockOf(1, 0));
+    }).toThrow(/before its field was started/u);
+    pool.fieldInit(MOON, blockOf(1, 0));
+    expect(() => {
+      pool.fieldInit(MOON, blockOf(1, 0));
+    }).toThrow(/already started/u);
+  });
+
+  it("reports the workers' copies of every field as each worker last held them", () => {
+    const { pool, created } = poolOf(3);
+    pool.fieldInit(MOON, blockOf(100, 0));
+    pool.fieldChunk(MOON, blockOf(50, 1));
+    pool.fieldInit(PLANET, blockOf(10, 2));
+    expect(pool.fieldResidentBytes).toBe(0);
+    workerAt(created, 0).answerFields();
+    expect(pool.fieldResidentBytes).toBe(160);
+    for (const w of created) {
+      w.answerFields();
+    }
+    expect(pool.fieldResidentBytes).toBe(3 * 160);
+    pool.fieldRelease(MOON);
+    for (const w of created) {
+      w.answerFields();
+    }
+    expect(pool.fieldResidentBytes).toBe(3 * 10);
+  });
+
+  it("posts a bake after the field's blocks, so that the worker makes it with them", () => {
+    const { pool, created } = poolOf(2);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9), req(2, 8)]);
+    for (const w of created) {
+      expect(w.received.map((m) => m.kind)).toEqual(["field-init", "bake"]);
+    }
+  });
+
+  it("replaces a worker that errors, re-posting every field before its re-queued requests", () => {
     const { pool, created, baked } = poolOf(1);
-    pool.postField(new ArrayBuffer(16));
-    workerAt(created, 0).ackField();
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    pool.fieldInit(PLANET, blockOf(4, 2));
+    pool.fieldChunk(MOON, blockOf(4, 3));
+    workerAt(created, 0).answerFields();
     pool.reprioritise([req(1, 9), req(2, 8)]);
     expect(bakedKeys(workerAt(created, 0))).toHaveLength(2);
     workerAt(created, 0).fail();
     expect(workerAt(created, 0).terminated).toBe(true);
     expect(workerAt(created, 0).listening).toEqual({ message: 0, error: 0 });
+    expect(pool.fieldResidentBytes).toBe(0);
     const replacement = workerAt(created, 1);
-    expect(fields(replacement)).toHaveLength(1);
-    expect(bakedKeys(replacement)).toEqual([]);
-    replacement.ackField();
-    expect(bakedKeys(replacement)).toEqual([patchKeyString(keyAt(1)), patchKeyString(keyAt(2))]);
+    // Each body's blocks in the order posted, a body after the body started before it.
+    expect(fieldLog(replacement)).toEqual([
+      `field-init ${MOON} 0`,
+      `field-chunk ${MOON} 1`,
+      `field-chunk ${MOON} 3`,
+      `field-init ${PLANET} 2`,
+    ]);
+    expect(replacement.received.slice(4).map((m) => m.kind)).toEqual(["bake", "bake"]);
+    replacement.answerFields();
+    expect(pool.fieldResidentBytes).toBe(16);
     replacement.bakeOldest();
     expect(baked).toEqual([patchKeyString(keyAt(1))]);
   });
@@ -264,30 +245,56 @@ describe("the height-worker pool", () => {
     expect(created.map((w) => w.pendingBakes.length)).toEqual([1, 1, 1]);
   });
 
-  it("sends no bake to a worker before it acknowledges the field", () => {
-    const { pool, created } = poolOf(2);
-    pool.postField(new ArrayBuffer(16));
-    pool.reprioritise([req(1, 9), req(2, 8)]);
-    expect(created.map((w) => bakedKeys(w).length)).toEqual([0, 0]);
-    workerAt(created, 0).ackField();
-    expect(created.map((w) => bakedKeys(w).length)).toEqual([2, 0]);
-  });
-
-  it("bakes again what was baked from an older field", () => {
+  it("bakes again what was baked before a field was started", () => {
     const { pool, created, baked } = poolOf(1);
-    pool.postField(new ArrayBuffer(16));
-    workerAt(created, 0).ackField();
+    pool.fieldInit(MOON, blockOf(4, 0));
     pool.reprioritise([req(1, 9)]);
-    pool.postField(new ArrayBuffer(16));
+    pool.fieldRelease(MOON);
+    pool.fieldInit(MOON, blockOf(4, 1));
     workerAt(created, 0).bakeOldest();
     expect(baked).toEqual([]);
-    workerAt(created, 0).ackField();
     workerAt(created, 0).bakeOldest();
     expect(baked).toEqual([patchKeyString(keyAt(1))]);
     expect(bakedKeys(workerAt(created, 0))).toEqual([
       patchKeyString(keyAt(1)),
       patchKeyString(keyAt(1)),
     ]);
+  });
+
+  it("reports a worker's refusal of a field once for each start of it", () => {
+    const { pool, created } = poolOf(2);
+    const refusals: FieldRefusal[] = [];
+    pool.onFieldRefused((r) => refusals.push(r));
+    pool.fieldInit(MOON, blockOf(4, 0));
+    const init = workerAt(created, 0).fieldMessages[0];
+    if (init === undefined) {
+      throw new Error("no field-init was posted");
+    }
+    for (const w of created) {
+      const message = w.fieldMessages[0];
+      if (message === undefined) {
+        throw new Error("no field-init was posted");
+      }
+      w.reply({
+        kind: "field-refused",
+        id: message.id,
+        body: MOON,
+        message: "unreadable",
+        heldBytes: 0,
+      });
+    }
+    expect(refusals).toEqual([{ body: MOON, message: "unreadable" }]);
+    // A refusal of the field's earlier start is not the new start's.
+    pool.fieldRelease(MOON);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    workerAt(created, 0).reply({
+      kind: "field-refused",
+      id: init.id,
+      body: MOON,
+      message: "late",
+      heldBytes: 0,
+    });
+    expect(refusals).toHaveLength(1);
   });
 
   it("reports a failed bake and gives the request up", () => {

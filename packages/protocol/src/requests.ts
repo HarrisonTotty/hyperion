@@ -83,6 +83,19 @@ export interface PartialBulkAnswer<K extends RequestKind> {
   readonly chunks: ReadonlyArray<Uint8Array>;
 }
 
+/**
+ * One binary chunk of a request answered in bulk, the moment it is taken (rendering plan R10,
+ * R10.T7).
+ */
+export interface BulkChunk {
+  /** A view of the frame's payload bytes, as {@link BulkOutcome}'s chunks are: not copied or parsed. */
+  readonly payload: Uint8Array;
+  /** The chunk's index within its answer, from 0. */
+  readonly index: number;
+  /** How many chunks its answer has, as the frame states it. */
+  readonly count: number;
+}
+
 /** How {@link RequestClient.requestBulk} hands over a request's answers before its last. */
 export interface BulkRequestOptions<K extends RequestKind> {
   /**
@@ -90,6 +103,21 @@ export interface BulkRequestOptions<K extends RequestKind> {
    * with the last answer. Without it, answers before the last are dropped.
    */
   readonly onPartial?: (answer: PartialBulkAnswer<K>) => void;
+  /**
+   * Sees each chunk as its frame is taken, in the order sent, before the answer it belongs to and
+   * so before the outcome settles: R09's coarse field forwards each payload block at its boundary
+   * without waiting for the whole payload (rendering plan R10, Design note 16).
+   *
+   * @remarks
+   * Only chunks the request keeps are seen: one that breaks its request's order fails the request
+   * instead, and one that arrives after the request ended is dropped unseen. Each chunk is still
+   * collected and handed over with its answer, through `onPartial` or the outcome, and checked
+   * there against the answer's manifest, so a payload the manifest disagrees with fails after its
+   * chunks were seen. A chunk is a view of its frame's buffer, so a caller that keeps it keeps the
+   * whole frame alive. A throw from it fails the request as `internal` and cancels it on the
+   * server, so that the socket's listener never sees it.
+   */
+  readonly onChunk?: (chunk: BulkChunk) => void;
 }
 
 /** A request answered in bulk, in flight. */
@@ -146,6 +174,8 @@ interface InFlight {
   readonly respond: (response: ResponseBody) => void;
   /** Takes an answer before the last, for a request answered in parts. */
   readonly partial: ((response: ResponseBody) => void) | undefined;
+  /** Sees each binary chunk the request keeps, for a request answered in bulk. */
+  readonly chunk: ((chunk: BulkChunk) => void) | undefined;
   /** Settles the outcome with a failure. */
   readonly fail: (failure: RequestFailure) => void;
   /** What to do with a response that arrives after the request was cancelled. */
@@ -160,6 +190,8 @@ interface StartOptions {
   readonly onLateAnswer?: (response: ResponseBody) => void;
   /** Sees each `partial_response` while the request is in flight. */
   readonly onPartial?: (response: ResponseBody) => void;
+  /** Sees each binary chunk the request keeps, for a request answered in bulk. */
+  readonly onChunk?: ((chunk: BulkChunk) => void) | undefined;
   /** Whether binary chunks answering the request are collected until its response. */
   readonly bulk?: boolean;
 }
@@ -286,6 +318,9 @@ export class RequestClient {
    * that disagrees with its chunks, or answers with another kind, fails the request as the last
    * would and cancels it on the server.
    *
+   * With `options.onChunk` each chunk is also seen as it arrives, before its answer (R09's coarse
+   * field, rendering plan R10, R10.T7).
+   *
    * @param manifestOf - Reads the manifest from the response, or `null` for a response that
    *   carries no bulk (such as R09's `not_modelled`), which must then have had no chunks.
    */
@@ -297,6 +332,7 @@ export class RequestClient {
     let assembled: AssembledBulk | undefined;
     const started: StartedRequest<K> = this[startRequest](body, {
       bulk: true,
+      onChunk: options.onChunk,
       onPartial: (response) => {
         if (!answers(body, response)) {
           this.#abandon(started.id, {
@@ -485,7 +521,8 @@ export class RequestClient {
    * The connection hands over every binary frame whole, as an `ArrayBuffer`, without reading it.
    * Only the header is read here. A chunk for a request that asked for no bulk, or that has ended,
    * is dropped; one that breaks its request's order fails that request (see
-   * {@link RequestClient.requestBulk}).
+   * {@link RequestClient.requestBulk}). A chunk its request keeps is handed to the request's
+   * `onChunk` at once, if it has one.
    *
    * @returns Whether the frame was consumed, or the reason a malformed one was refused, which the
    *   link reports as an error without closing.
@@ -495,9 +532,25 @@ export class RequestClient {
     if (!parsed.ok) {
       return parsed;
     }
-    const receipt = this.#bulk.add(parsed.header, parsed.payload);
-    if (!receipt.ok && receipt.reason === "broken") {
-      this.#abandon(parsed.header.request, {
+    const { header, payload } = parsed;
+    const receipt = this.#bulk.add(header, payload);
+    if (receipt.ok) {
+      try {
+        this.#inFlight.get(header.request)?.chunk?.({
+          payload,
+          index: header.index,
+          count: header.count,
+        });
+      } catch (error: unknown) {
+        // The request must still settle, and the socket's listener must not see the throw.
+        this.#abandon(header.request, {
+          code: "internal",
+          message: `chunk ${header.index} of request ${header.request} could not be taken: ${String(error)}`,
+          field: null,
+        });
+      }
+    } else if (receipt.reason === "broken") {
+      this.#abandon(header.request, {
         code: "internal",
         message: receipt.message,
         field: null,
@@ -528,7 +581,7 @@ export class RequestClient {
     body: RequestOf<K>,
     options: StartOptions = {},
   ): StartedRequest<K> {
-    const { onAnswer, onLateAnswer, onPartial, bulk = false } = options;
+    const { onAnswer, onLateAnswer, onPartial, onChunk, bulk = false } = options;
     const id = this.#allocateId();
     if (bulk) {
       this.#bulk.expect(id);
@@ -550,6 +603,7 @@ export class RequestClient {
           );
         },
         partial: onPartial,
+        chunk: onChunk,
         fail: (error) => {
           resolve({ ok: false, error });
         },

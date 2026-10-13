@@ -17,6 +17,8 @@
  * buffer the worker transfers; the module's own memory cannot be transferred.
  */
 
+import type { BodyIdHex } from "@hyperion/protocol";
+
 import { patchKeyString, type PatchKey, unreachable } from "../patchKey";
 import { vec3 } from "../../../geometry/vec3";
 import type {
@@ -132,6 +134,56 @@ export function bakeKey(
   }
 }
 
+/**
+ * The coarse fields a height worker holds: each body's payload blocks as the pool posted them,
+ * kept in JavaScript, as R05's one field was, until R10.T6.b's module decodes them into a
+ * `PartialField` a body.
+ *
+ * @remarks
+ * The test planet reads no field, so nothing here is decoded or checked beyond its order: a block
+ * of a body with no `field-init` before it is refused, which R10.T6.b's worker refuses too.
+ */
+export class HeldFields {
+  readonly #bodies = new Map<BodyIdHex, ArrayBuffer[]>();
+  #bytes = 0;
+
+  /** What is held of every body's field, bytes. */
+  get heldBytes(): number {
+    return this.#bytes;
+  }
+
+  /** The bodies held, in the order their fields were started. */
+  get bodies(): ReadonlyArray<BodyIdHex> {
+    return [...this.#bodies.keys()];
+  }
+
+  /** Starts `body`'s field from `block`, dropping any field of `body` held. */
+  init(body: BodyIdHex, block: ArrayBuffer): void {
+    this.release(body);
+    this.#bodies.set(body, [block]);
+    this.#bytes += block.byteLength;
+  }
+
+  /** Adds `block` to `body`'s field; `false`, holding nothing more, if `body` has none started. */
+  chunk(body: BodyIdHex, block: ArrayBuffer): boolean {
+    const blocks = this.#bodies.get(body);
+    if (blocks === undefined) {
+      return false;
+    }
+    blocks.push(block);
+    this.#bytes += block.byteLength;
+    return true;
+  }
+
+  /** Drops `body`'s field, if one is held. */
+  release(body: BodyIdHex): void {
+    for (const block of this.#bodies.get(body) ?? []) {
+      this.#bytes -= block.byteLength;
+    }
+    this.#bodies.delete(body);
+  }
+}
+
 /** A worker's answer and the buffers it transfers with it. */
 export interface HeightAnswer {
   readonly reply: HeightWorkerReply;
@@ -145,15 +197,16 @@ export interface HeightAnswer {
  * A bake the module refuses (a `JsError`, for a key out of range) is answered `bake-failed`, so
  * that the pool gives up that key alone. A trap (`WebAssembly.RuntimeError`, a Rust panic) is a
  * bug that may leave the instance broken, so it is rethrown: the worker raises it as its error and
- * the pool replaces the worker. A coarse field is handed to `holdField`, which keeps it for the
- * worker's life (the previous one replaced), and acknowledged: the test planet does not read it,
- * but each worker must hold its copy so that the spike's memory runs measure the field Design
- * notes 11 and 21 count. R09's height function copies it into the module instead.
+ * the pool replaces the worker. A body's field blocks go to `fields`, which keeps them for the
+ * worker's life or until the body is released, and each is answered with what the worker then
+ * holds: the test planet does not read them, but each worker must hold its copy so that the
+ * spike's memory runs measure the field Design notes 11 and 21 count. R10.T6.b's module decodes
+ * them instead (`wire::decode_block`, `PartialField::insert`).
  */
 export function answerRequest(
   module: HeightModule,
   request: HeightWorkerRequest,
-  holdField: (bytes: ArrayBuffer) => void,
+  fields: HeldFields,
 ): HeightAnswer {
   switch (request.kind) {
     case "bake": {
@@ -178,9 +231,31 @@ export function answerRequest(
         };
       }
     }
-    case "field":
-      holdField(request.bytes);
-      return { reply: { kind: "field-loaded", id: request.id }, transfer: [] };
+    case "field-init":
+      fields.init(request.body, request.block);
+      return fieldHeld(request.id, fields);
+    case "field-chunk":
+      if (!fields.chunk(request.body, request.block)) {
+        return {
+          reply: {
+            kind: "field-refused",
+            id: request.id,
+            body: request.body,
+            message: `a block of ${request.body} arrived before its field-init`,
+            heldBytes: fields.heldBytes,
+          },
+          transfer: [],
+        };
+      }
+      return fieldHeld(request.id, fields);
+    case "field-release":
+      fields.release(request.body);
+      return fieldHeld(request.id, fields);
   }
   return unreachable(request);
+}
+
+/** The answer to field message `id`: what the worker now holds. */
+function fieldHeld(id: number, fields: HeldFields): HeightAnswer {
+  return { reply: { kind: "field-held", id, heldBytes: fields.heldBytes }, transfer: [] };
 }

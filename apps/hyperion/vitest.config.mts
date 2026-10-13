@@ -21,6 +21,7 @@ const DOM_TESTS = [
   "src/renderer/src/view/camera/keys.test.ts",
   "src/renderer/src/view/engine/resilientEngine.test.ts",
   "src/renderer/src/view/spike/spikeRun.test.ts",
+  "src/renderer/src/view/terrain/coarseFieldStore.test.ts",
   "src/renderer/src/wasm/useSurfaceModuleCheck.test.ts",
 ];
 

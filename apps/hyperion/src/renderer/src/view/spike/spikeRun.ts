@@ -64,6 +64,7 @@ import {
   contactRule,
   type ContactRule,
   orbitInstrumentPose,
+  postSyntheticField,
   siteDirection,
   spikeCameraAt,
   SPIKE_CRAFT,
@@ -71,7 +72,6 @@ import {
   spikeScene,
   spikeSunState,
   sunDirectionBody,
-  syntheticField,
   TEST_PLANET_FIGURE,
 } from "./spikeScene";
 import type { SurfaceQuery, SurfaceQueryWorker } from "./surfaceQuery";
@@ -140,7 +140,7 @@ export const DEFAULT_SPIKE_WORKERS: SpikeWorkers = {
           type: "module",
         }),
     });
-    pool.postField(syntheticField());
+    postSyntheticField(pool);
     return pool;
   },
 };

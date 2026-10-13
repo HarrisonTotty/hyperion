@@ -24,7 +24,7 @@
 import init, { bakePatch, testPlanetVersion } from "../../../generated/surface/hyperion_surface";
 import wasmUrl from "../../../generated/surface/hyperion_surface_bg.wasm?url";
 import { describeLoadFailure } from "../../../wasm/handleRequest";
-import { answerRequest, type HeightModule, staleModuleMessage } from "./heightBake";
+import { answerRequest, HeldFields, type HeightModule, staleModuleMessage } from "./heightBake";
 import type { HeightWorkerRequest } from "./messages";
 
 const module: HeightModule = { bakePatch, testPlanetVersion };
@@ -46,14 +46,10 @@ async function load(): Promise<Error | null> {
 const loaded = load();
 
 /**
- * The coarse field the pool posted, held for the worker's life (Design note 11's 15 MB a worker
- * at rest); the test planet does not read it, R09 copies it into the module.
+ * The coarse fields the pool posted, each body's blocks held until it is released (Design note 11's
+ * 15 MB a worker at rest); the test planet does not read them, R10.T6.b's module decodes them.
  */
-const held: { field: ArrayBuffer | null } = { field: null };
-
-function holdField(bytes: ArrayBuffer): void {
-  held.field = bytes;
-}
+const fields = new HeldFields();
 
 /** Answers one request once the module's load has settled. */
 async function answer(request: HeightWorkerRequest): Promise<void> {
@@ -62,7 +58,7 @@ async function answer(request: HeightWorkerRequest): Promise<void> {
     reportError(failure);
     return;
   }
-  const { reply, transfer } = answerRequest(module, request, holdField);
+  const { reply, transfer } = answerRequest(module, request, fields);
   postMessage(reply, transfer);
 }
 
