@@ -1,6 +1,7 @@
 /**
  * The sky a view draws: asked of the server as the request rule says, decoded off the render
- * thread, and held, marked stale while the link is down (plan R06, T12; Design note 13).
+ * thread, and held, marked stale while the link is down, and kept through a request asked again
+ * until that request's replies hold as much (plan R06, T12 and T12.b; Design note 13).
  */
 
 import type { PartialBulkAnswer, RequestFailure, SkyRequest } from "@hyperion/protocol";
@@ -8,7 +9,13 @@ import { useEffect, useMemo, useState } from "react";
 
 import { useServerLink } from "../../lib/serverLink";
 import type { SkyDecodeReply, SkyDecodeRequest } from "./decodePayload";
-import { type SkyCamera, type SkyModel, skyRequestReason } from "./model";
+import {
+  keepsHeldSky,
+  type SkyCamera,
+  type SkyModel,
+  type SkyRequestReason,
+  skyRequestReason,
+} from "./model";
 
 /** A payload to decode: the worker's request without its number, which the decoder assigns. */
 export type SkyDecodeJob = Omit<SkyDecodeRequest, "id">;
@@ -108,8 +115,10 @@ export interface SkyView {
   /** Why the last request of this arrival failed, or `null`. */
   readonly failure: string | null;
   /**
-   * Whether a request is in flight and none of its replies is held yet: once its first reply is,
-   * the sky arriving nearest first is held, and its later replies replace it (R06.T11.d).
+   * Whether a request is in flight and no sky of its arrival is held: once the request's first
+   * reply is, the sky arriving nearest first is held, and its later replies replace it
+   * (R06.T11.d). A sky asked again within its arrival is never pending, since the sky before it
+   * stays held meanwhile (R06.T12.b).
    */
   readonly pending: boolean;
 }
@@ -121,7 +130,19 @@ export interface UseSkyOptions {
 }
 
 /** A decoded sky, before the link's state marks it stale. */
-type Held = Omit<SkyModel, "stale">;
+type Decoded = Omit<SkyModel, "stale">;
+
+/** A request asked, and why: the hold reads the reason (R06.T12.b). One per request sent. */
+interface Asked {
+  readonly request: SkyRequest;
+  readonly reason: SkyRequestReason;
+}
+
+/** A decoded reply and the request it answers, by which one request's replies are told apart. */
+interface Answer {
+  readonly sky: Decoded;
+  readonly asked: Asked;
+}
 
 /** A failed request and its reason. */
 interface Failure {
@@ -144,6 +165,24 @@ function sameArrival(a: SkyRequest, b: SkyRequest): boolean {
   return a.universe === b.universe && a.exclude_system === b.exclude_system;
 }
 
+/**
+ * Whether a request's newest reply takes the held sky's place now: with none held, for another
+ * arrival, once a reply of its request is held, or where the hold gives way ({@link keepsHeldSky},
+ * R06.T12.b).
+ */
+function takesHeldPlace(
+  held: Answer | null,
+  newest: Answer,
+  cameras: ReadonlyArray<SkyCamera>,
+): boolean {
+  return (
+    held === null ||
+    held.asked === newest.asked ||
+    !sameArrival(held.asked.request, newest.asked.request) ||
+    !keepsHeldSky(newest.asked.reason, held.sky, newest.sky.response, cameras)
+  );
+}
+
 /** What a settled request leaves. */
 type Settled =
   | { readonly kind: "held" }
@@ -154,11 +193,11 @@ type Settled =
 type Reply = PartialBulkAnswer<"sky">;
 
 /**
- * The view's sky (plan R06, T12; R06.T11.d).
+ * The view's sky (plan R06, T12; R06.T11.d; R06.T12.b).
  *
  * @param request - The request as it would be sent now (observer, time, limits, N_max), or `null`
  *   where none can be asked (no universe, or the system's position unknown): nothing is asked.
- * @param cameras - Every open view's camera, for the parallax rule.
+ * @param cameras - Every open view's camera, for the parallax rule and the hold's pixel.
  * @remarks
  * A request is sent when {@link skyRequestReason} names a reason and none is in flight; a request
  * for another arrival supersedes one in flight, which is cancelled. A refusal is held and not
@@ -171,6 +210,12 @@ type Reply = PartialBulkAnswer<"sky">;
  * sky, so the view bakes the new cube before it draws it. Replies are decoded one at a time; a
  * reply that is not final, still waiting when a later one arrives, is passed over for it, and the
  * final reply is always held.
+ *
+ * A sky asked again within its arrival for the held sky's own time (`partial`, `limits` or
+ * `parallax`) keeps the sky held: the request's newest decoded reply waits behind it until that
+ * reply is final or as complete in every layer, or until the held sky's parallax for an open
+ * camera reaches a pixel ({@link keepsHeldSky}), and then it and each later reply is held
+ * (R06.T12.b). The hold is judged at each render, for the cameras as they are then.
  */
 export function useSky(
   request: SkyRequest | null,
@@ -178,25 +223,35 @@ export function useSky(
   options: UseSkyOptions = {},
 ): SkyView {
   const { status, requests } = useServerLink();
-  const [held, setHeld] = useState<Held | null>(null);
-  const [asked, setAsked] = useState<SkyRequest | null>(null);
+  const [held, setHeld] = useState<Answer | null>(null);
+  // The newest decoded reply of the request last asked: held at once, or once the hold allows.
+  const [newest, setNewest] = useState<Answer | null>(null);
+  const [asked, setAsked] = useState<Asked | null>(null);
   const [failure, setFailure] = useState<Failure | null>(null);
   const stale = status !== "connected";
   const heldModel = useMemo<SkyModel | null>(
-    () => (held === null ? null : { ...held, stale }),
+    () => (held === null ? null : { ...held.sky, stale }),
     [held, stale],
   );
 
-  // Adjusted during render, as the request rule answers for what is held now.
-  if (request !== null && !stale) {
-    if (asked !== null && !sameArrival(asked, request)) {
-      setAsked(request);
-    } else if (
-      asked === null &&
-      !(failure !== null && sameArrival(failure.request, request)) &&
-      skyRequestReason(heldModel, { request, cameras }) !== null
-    ) {
-      setAsked(request);
+  // Adjusted during render: the newest reply takes the held sky's place where the hold allows, for
+  // the cameras now; else the request rule answers for what is held. A request asked drops any
+  // reply still waiting behind the hold, which it supersedes.
+  if (newest !== null && newest !== held && takesHeldPlace(held, newest, cameras)) {
+    setHeld(newest);
+  } else if (request !== null && !stale) {
+    if (asked !== null && !sameArrival(asked.request, request)) {
+      // Back in the held sky's arrival before another's first reply, the request rule answers for
+      // the sky held, as it does for any re-ask: often nothing, which ends the request in flight.
+      const reason = skyRequestReason(heldModel, { request, cameras });
+      setAsked(reason === null ? null : { request, reason });
+      setNewest(null);
+    } else if (asked === null && !(failure !== null && sameArrival(failure.request, request))) {
+      const reason = skyRequestReason(heldModel, { request, cameras });
+      if (reason !== null) {
+        setAsked({ request, reason });
+        setNewest(null);
+      }
     }
   }
 
@@ -229,10 +284,10 @@ export function useSky(
     };
     const failed = (error: unknown): void => {
       const message = error instanceof Error ? error.message : "the sky could not be read";
-      settle({ kind: "failed", failure: { request: asked, message } });
+      settle({ kind: "failed", failure: { request: asked.request, message } });
     };
-    // Decodes the reply waiting and holds it whole in place of the one before, then the next, until
-    // none waits, the final is held, or the request has ended.
+    // Decodes the reply waiting and offers it whole to take the place of the one held, then the
+    // next, until none waits, the final is decoded, or the request has ended.
     const drain = async (): Promise<void> => {
       const reply = waiting;
       if (reply === null) {
@@ -256,11 +311,14 @@ export function useSky(
         failed(new Error(decoded.message));
         return;
       }
-      setHeld({
-        request: asked,
-        response: reply.response,
-        stars: decoded.stars,
-        band: decoded.band,
+      setNewest({
+        sky: {
+          request: asked.request,
+          response: reply.response,
+          stars: decoded.stars,
+          band: decoded.band,
+        },
+        asked,
       });
       if (reply.response.final) {
         draining = false;
@@ -280,7 +338,7 @@ export function useSky(
         void drain().catch(failed);
       }
     };
-    const pending = requests.requestBulk<"sky">({ kind: "sky", ...asked }, (r) => r.bulk, {
+    const pending = requests.requestBulk<"sky">({ kind: "sky", ...asked.request }, (r) => r.bulk, {
       onPartial: offer,
     });
     const finish = async (): Promise<void> => {
@@ -290,7 +348,10 @@ export function useSky(
       } else if (isTransient(outcome.error)) {
         settle({ kind: "transient" });
       } else {
-        settle({ kind: "failed", failure: { request: asked, message: outcome.error.message } });
+        settle({
+          kind: "failed",
+          failure: { request: asked.request, message: outcome.error.message },
+        });
       }
     };
     void finish().catch(failed);
@@ -301,7 +362,7 @@ export function useSky(
     };
   }, [asked, requests, createDecoder]);
 
-  const current = request ?? asked;
+  const current = request ?? asked?.request ?? null;
   const model =
     heldModel !== null && current !== null && !sameArrival(heldModel.request, current)
       ? null
@@ -310,7 +371,9 @@ export function useSky(
     failure !== null && (current === null || sameArrival(failure.request, current))
       ? failure.message
       : null;
-  // Pending until a reply of the request in flight is held: a sky arriving nearest first is held
-  // from its first.
-  return { model, failure: failed, pending: asked !== null && held?.request !== asked };
+  // Pending until a sky of the arrival in flight is held: a sky arriving nearest first is held
+  // from its first reply, and one asked again keeps the sky before it meanwhile (R06.T12.b).
+  const pending =
+    asked !== null && (held === null || !sameArrival(held.asked.request, asked.request));
+  return { model, failure: failed, pending };
 }

@@ -3529,6 +3529,63 @@ requestFieldFactor }`, `fieldFactorOffsetMag`, `DEFAULT_FIELD_FACTOR`), `decodeP
   interim field and its label where the sky has arrived, and composing the request's observer
   from `barycentreAt` and the camera, so that the label never claims the sky while the view still
   draws the interim field.
+- **Deviations in T12.b, as built (2026-10-13).** A re-asked sky is held until its replies hold
+  as much (`decision-r06-t17-findings.md` §2 (a)). Client only: no golden, protocol, label or
+  generator change.
+  - **The rule** (`view/sky/model.ts`): `PARALLAX_HOLD_PX` (1); `parallaxShiftPx(sky, camera)`,
+    `skyRequestReason`'s parallax measure lifted out so that both rules read it;
+    `asCompleteAs(reply, held)`, true for a final reply, else layer by layer final, or complete at
+    least to the held layer's `complete_to_ly` where that is not final, a layer the held sky
+    states and the reply lacks counting as short; and `keepsHeldSky(reason, held, reply,
+cameras)`, true only through `partial`, `limits` or `parallax` (an exhaustive switch), with
+    the reply not as complete and every open camera's shift under 1 px.
+  - **The reasons' order.** `skyRequestReason` now names `partial` after `expired` and `jump`
+    (since T11.d it came first). A held reply that is not final and also stands for another time
+    is asked again for that time, and its replies are held as built: its time is what is wrong,
+    not its completeness. The request sent is the same; only the hold reads the reason.
+  - **The hook** (`useSky.ts`). Each request is kept with its reason. The newest decoded reply
+    waits apart from the held sky and takes its place during render: where `keepsHeldSky` allows,
+    once a reply of its request is held, with none held, or for another arrival. The hold is judged
+    at each render (the view's published run, 4 Hz), so a camera that passes 1 px between replies
+    lets the waiting reply in at once. Asking again drops a reply still waiting. A reply left
+    waiting when its request ended without its final (link lost, refused) stays behind the hold
+    until a re-ask drops it or 1 px lets it in. During a hold two decoded skies are in memory.
+    Coming back to the held sky's arrival before another arrival's first reply asks the request
+    rule of the held sky, not `arrival`: usually nothing, which cancels the other request and keeps
+    the sky (TypeScript review).
+  - **`pending`** is true while a request is asked and no sky of its arrival is held, so no re-ask
+    within an arrival is pending, `expired` and `jump` included. That replaces T11.d's "true until
+    the request's first reply is held" (also T11.f's `STARS: PENDING` bullet and Design note 13's
+    "replaces its sky with each": T12.b qualifies both). `ViewSky.pending`'s and `lightingState`'s
+    docs follow.
+  - **Tests:** `model.test.ts`, 16 (the reasons' order, `parallaxShiftPx`, `asCompleteAs` 5,
+    `keepsHeldSky` 9, held at 0.5 and 0.999 px, given way at 1.001 px for any camera);
+    `useSky.test.tsx`, 8 (the task's seven and the return to the held arrival; the parallax
+    re-asks are asked from the camera, so the final stands); and, beyond the file list,
+    `displays/view/useViewSky.test.tsx`, 3 (the `STARS` line through a `limits` re-ask, neither
+    `PENDING` nor `STREAMING`; a partial sky's edge kept through the re-ask after a lost link;
+    `PENDING` on every block on a new arrival), since the task's last test reads a label. Six of
+    the seven `useSky` tests of the task's list fail on the hook as it was (the new arrival's
+    passes, its behaviour unchanged). Acceptance: the vitest run over `view/sky` and
+    `displays/view`, tsc, oxlint, and `just smart-ci` (exit 0).
+  - **Open, for "main" (found here, not built):**
+    - **The view asks from the barycentre.** T12's text and as-built have the request's observer
+      `barycentreAt(place, t)` plus the camera's offset, but T13.c's `useViewSky` asks from
+      `barycentreAt` alone, while the parallax rule measures the camera from the held sky's
+      observer. A camera some 30 au or more from the barycentre (more where the nearest baked star
+      is farther) is asked again for `parallax` after every final reply, from the same place, so
+      the server runs the census without end. T12.b holds the sky through that until the 1 px cap,
+      about 310 au at 1080p and 60° for a nearest baked star at 9 ly; beyond it every re-ask gives
+      way at once and the sky falls to its first reply after each final. The fix is in
+      `useViewSky.ts`: ask from the camera's galactic position.
+    - **A `limits` hold with no note.** The ruling allows a deepened camera's hold since its line
+      carries no streaming note. Today a `limits` re-ask comes only from the setting's N_max (the
+      `PRIMARY` view asks the eye, whose request reads no field of view, and the instruments cull
+      its sky). Once a camera view asks a sky of its own, its narrower field of view (or a view
+      that changes role and asks the eye) would hold a final sky without the deeper stars (or
+      eye limits) for the whole census, with no note (UX review). For a decision agent then.
+    - **One camera.** `useViewSky` passes the primary's camera alone, so an instrument flown far
+      off neither re-asks nor ends a hold at 1 px, as before T12.b.
 - **Deviations in T13.c, as built (2026-10-03), with T12's view wiring.** `select.ts`
   (`selectSkySprites(stars, kept, spriteBudget, camera)` → `SkySelection { sprites, baked }`:
   the budget's brightest of the kept stars, and any star nearer than `bakedBeyondM`, about 9 ly at

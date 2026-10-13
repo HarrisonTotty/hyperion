@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { RECONNECT_DELAY_MS } from "../../lib/connection";
 import type { SystemPlace } from "../../lib/scene/model";
 import { binaryFrame } from "../../test/binaryFrames";
 import { autoAt, manualAt } from "../../test/exposureFixtures";
@@ -295,6 +296,144 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
         field: { text: "1000 ly", widthCh: 12, stale: false },
       },
       { value: "V 10.1 mag CAM · DISTANT STARS: DETAIL LIMITED" },
+    ]);
+  });
+});
+
+describe("a view's sky asked again within its arrival (R06.T12.b)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  interface ArrivalProps {
+    readonly system: string;
+    readonly setting: QualitySetting;
+  }
+
+  /** The view's sky for the camera run in `system` at `setting`, over a welcomed link. */
+  function renderArriving(initial: ArrivalProps) {
+    const hook = renderHook(
+      ({ system, setting }: ArrivalProps) =>
+        useViewSky({
+          universe: UNIVERSE,
+          place: { ...chartedPlace(), system },
+          run: RUN,
+          exposure: DEFAULT_EXPOSURE,
+          widthPx: 1_920,
+          setting,
+        }),
+      { initialProps: initial, wrapper: ServerLinkHarness },
+    );
+    const socket = FakeWebSocket.latest();
+    act(() => {
+      socket.serverWelcomes();
+    });
+    return { ...hook, socket };
+  }
+
+  /** Plays a reply to the latest sky request whose census has reached `edgesLy`. */
+  async function replyAt(
+    socket: FakeWebSocket,
+    edgesLy: readonly [number | null, number | null, number | null],
+  ): Promise<void> {
+    const sent = socket.requestsOfKind("sky").at(-1);
+    if (sent === undefined) {
+      throw new Error("no sky was asked");
+    }
+    const final = edgesLy.every((edge) => edge === null);
+    const payload = skyPayload(ONE_STAR, 2, null);
+    const body = {
+      kind: "sky" as const,
+      ...skyResponse(sent.body, payload, ONE_STAR.length, 2),
+      census: nearestFirstCensus(edgesLy),
+      final,
+    };
+    await act(async () => {
+      socket.serverSendsBinary(binaryFrame(sent.id, 0, 1, [...payload]));
+      if (final) {
+        socket.serverResponds(sent.id, body);
+      } else {
+        socket.serverAnswersInPart(sent.id, body);
+      }
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  }
+
+  const FINAL_LINE = { value: "V 10.1 mag CAM · CLUSTERS: NOT YET MODELLED" };
+
+  it("keeps the held sky's line, neither PENDING nor STREAMING, through a deeper re-ask", async () => {
+    const { rerender, result, socket } = renderArriving({ system: FIXTURE_SYSTEM, setting: "low" });
+    await replyAt(socket, [null, null, null]);
+    // A larger N_max asks for more stars than the held sky's request did.
+    rerender({ system: FIXTURE_SYSTEM, setting: "high" });
+    expect(socket.requestsOfKind("sky")).toHaveLength(2);
+    const asked = [result.current.awaiting, result.current.pending, result.current.label("alone")];
+    await replyAt(socket, [125, 125, 125]);
+    const partial = [
+      result.current.awaiting,
+      result.current.pending,
+      result.current.label("alone"),
+    ];
+    expect([asked, partial]).toEqual([
+      [false, false, FINAL_LINE],
+      [false, false, FINAL_LINE],
+    ]);
+  });
+
+  it("keeps a partial sky's edge, never moving it back, through the re-ask after a lost link", async () => {
+    const { result, socket } = renderArriving({ system: FIXTURE_SYSTEM, setting: "high" });
+    await replyAt(socket, [500, 500, 500]);
+    // The request the link cut off settles before the link returns.
+    await act(async () => {
+      socket.close();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    act(() => {
+      vi.advanceTimersByTime(RECONNECT_DELAY_MS);
+    });
+    const next = FakeWebSocket.latest();
+    act(() => {
+      next.serverWelcomes();
+    });
+    expect(next.requestsOfKind("sky")).toHaveLength(1);
+    await replyAt(next, [125, 125, 125]);
+    const behind = result.current.label("alone");
+    await replyAt(next, [1_000, 1_000, 1_000]);
+    expect([behind, result.current.label("alone")]).toEqual([
+      {
+        value: "V 10.1 mag CAM · BEYOND 500 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
+        field: { text: "500 ly", widthCh: 12, stale: false },
+      },
+      {
+        value: "V 10.1 mag CAM · BEYOND 1000 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
+        field: { text: "1000 ly", widthCh: 12, stale: false },
+      },
+    ]);
+  });
+
+  it("reads PENDING on every block on a new arrival until its first reply", async () => {
+    const { rerender, result, socket } = renderArriving({
+      system: FIXTURE_SYSTEM,
+      setting: "high",
+    });
+    await replyAt(socket, [null, null, null]);
+    rerender({ system: "0200080020000001", setting: "high" });
+    const before = [
+      result.current.awaiting,
+      result.current.label("alone"),
+      result.current.label("instrument"),
+    ];
+    await replyAt(socket, [125, 125, 125]);
+    expect([before, result.current.awaiting]).toEqual([
+      [true, { value: "PENDING" }, { value: "PENDING" }],
+      false,
     ]);
   });
 });

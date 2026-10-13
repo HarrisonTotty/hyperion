@@ -1,6 +1,7 @@
 /**
  * The client's sky: a `sky` response with its decoded stars and band, and the rules for asking
- * again (plan R06, Design notes 5, 13 and 20, T12).
+ * again and for holding a sky through a request asked again (plan R06, Design notes 5, 13 and 20,
+ * T12 and T12.b).
  *
  * @remarks
  * A sky is asked on arrival in a system, past its `valid_until`, on a jump of the display time
@@ -11,6 +12,11 @@
  * than the held sky's request (a deeper camera limit, a larger N_max, the eye, a cone) asks again,
  * and so does one holding a reply that is not final once no request is in flight: its request
  * ended before its last reply, as when the link dropped (R06.T11.d).
+ *
+ * A sky asked again within one arrival arrives nearest first, as the first did, so its first
+ * replies hold less than the sky held. Through a request asked for the held sky's own time, the
+ * held sky stays until a reply is as complete as it, or until its parallax reaches a pixel
+ * ({@link keepsHeldSky}, R06.T12.b).
  */
 
 import {
@@ -39,6 +45,14 @@ export const PARALLAX_BASELINE_M = 30 * AU_M;
 /** The shift, px, at which a star is a parallax sprite or the bake is redone: a tenth of a pixel. */
 export const PARALLAX_THRESHOLD_PX = 0.1;
 
+/**
+ * The shift, px, at which a sky held through a request asked again gives way to that request's
+ * newest reply, however incomplete: one pixel, ten times {@link PARALLAX_THRESHOLD_PX}, so that no
+ * camera carries a sky past a pixel of its nearest baked star's parallax (R06.T12.b; decided
+ * 2026-10-13, `decision-r06-t17-findings.md` §2).
+ */
+export const PARALLAX_HOLD_PX = 1;
+
 /** The sky one view draws from. */
 export interface SkyModel {
   /** The request it answers. */
@@ -60,7 +74,12 @@ export interface SkyCamera {
   readonly widthPx: number;
 }
 
-/** Why a sky is asked again, or `null` while the one held stands. */
+/**
+ * Why a sky is asked again, or `null` while the one held stands: `arrival`, no sky of this arrival
+ * held; `expired` and `jump`, the held sky stands for another time; `partial`, its request ended
+ * before its final reply; `limits`, a view asks for more than its request did; `parallax`, a camera
+ * has moved from its observer.
+ */
 export type SkyRequestReason = "arrival" | "partial" | "expired" | "jump" | "limits" | "parallax";
 
 /** One pixel's angle across a camera, rad: its field of view over its width. */
@@ -134,9 +153,25 @@ export interface SkyNow {
 }
 
 /**
+ * How far a camera's offset from a sky's observer shifts the sky's nearest baked star, px: the
+ * parallax rule's measure (Design note 13), the parallax sprites left out (Design note 20).
+ */
+export function parallaxShiftPx(
+  sky: Pick<SkyModel, "request" | "stars">,
+  camera: SkyCamera,
+): number {
+  const nearestM = nearestStarBeyondM(sky.stars, bakedBeyondM(camera));
+  const offsetM = norm(galacticDeltaM(sky.request.observer, camera.position));
+  return offsetM / nearestM / pixelAngleRad(camera);
+}
+
+/**
  * Why the sky should be asked again, or `null` while the one held stands (Design note 13).
  *
  * @param held - The sky held, or `null` with none.
+ * @remarks
+ * A held reply that is not final and stands for another time is asked again as `expired` or
+ * `jump`, not `partial`, so that the hold reads the time it stands for ({@link keepsHeldSky}).
  */
 export function skyRequestReason(held: SkyModel | null, now: SkyNow): SkyRequestReason | null {
   if (
@@ -146,10 +181,6 @@ export function skyRequestReason(held: SkyModel | null, now: SkyNow): SkyRequest
   ) {
     return "arrival";
   }
-  // A sky arriving nearest first whose request ended before its final reply (R06.T11.d).
-  if (!held.response.final) {
-    return "partial";
-  }
   const time = now.request.time;
   if (earlier(held.response.valid_until, time)) {
     return "expired";
@@ -157,16 +188,87 @@ export function skyRequestReason(held: SkyModel | null, now: SkyNow): SkyRequest
   if (earlier(time, held.request.time)) {
     return "jump";
   }
+  // A sky arriving nearest first whose request ended before its final reply (R06.T11.d).
+  if (!held.response.final) {
+    return "partial";
+  }
   if (asksMore(now.request, held.request)) {
     return "limits";
   }
-  for (const camera of now.cameras) {
-    const nearestM = nearestStarBeyondM(held.stars, bakedBeyondM(camera));
-    const offsetM = norm(galacticDeltaM(held.request.observer, camera.position));
-    const shiftPx = offsetM / nearestM / pixelAngleRad(camera);
-    if (shiftPx >= PARALLAX_THRESHOLD_PX) {
-      return "parallax";
-    }
+  if (now.cameras.some((camera) => parallaxShiftPx(held, camera) >= PARALLAX_THRESHOLD_PX)) {
+    return "parallax";
   }
   return null;
+}
+
+/**
+ * Whether a reply is at least as complete as a held sky in every layer (R06.T12.b): final, or,
+ * layer by layer, final, or complete at least as far (`complete_to_ly`) where the held sky's layer
+ * is not final.
+ *
+ * @remarks
+ * A layer the held sky states and the reply does not is not as complete. A layer of the reply's
+ * that the held sky does not state holds nothing back.
+ */
+export function asCompleteAs(reply: SkyResponse, held: SkyResponse): boolean {
+  if (reply.final) {
+    return true;
+  }
+  return held.census.every((was) => {
+    const now = reply.census.find((layer) => layer.layer === was.layer);
+    return (
+      now !== undefined && (now.final || (!was.final && now.complete_to_ly >= was.complete_to_ly))
+    );
+  });
+}
+
+/**
+ * Whether a re-ask is for the held sky's own time, through which it is held (R06.T12.b): not on
+ * `arrival`, with no sky of the arrival held, nor on `expired` or `jump`, whose held sky stands for
+ * another time.
+ */
+function holdsThrough(reason: SkyRequestReason): boolean {
+  let holds: boolean;
+  switch (reason) {
+    case "partial":
+    case "limits":
+    case "parallax":
+      holds = true;
+      break;
+    case "arrival":
+    case "expired":
+    case "jump":
+      holds = false;
+      break;
+  }
+  return holds;
+}
+
+/**
+ * Whether the held sky stays in place of a reply of a request asked again within its arrival
+ * (R06.T12.b; decided 2026-10-13, `decision-r06-t17-findings.md` §2), so that a re-asked sky never
+ * shows less than it held.
+ *
+ * @param reason - Why the request was asked ({@link skyRequestReason}).
+ * @param held - The sky held: one of an earlier request of the same arrival.
+ * @param reply - The newest reply of the request asked again.
+ * @param cameras - Every open view's camera, now.
+ * @remarks
+ * Through a re-ask for `partial`, `limits` or `parallax`, the held sky stays until a reply is
+ * final or {@link asCompleteAs} it, or until its parallax shift for any open camera
+ * ({@link parallaxShiftPx}) reaches {@link PARALLAX_HOLD_PX}. Through `expired` and `jump`, whose
+ * held sky stands for another time, and on `arrival`, each reply is held as it comes. Once a reply
+ * of the request is held, so is each later one, which this rule is not asked about.
+ */
+export function keepsHeldSky(
+  reason: SkyRequestReason,
+  held: Pick<SkyModel, "request" | "response" | "stars">,
+  reply: SkyResponse,
+  cameras: ReadonlyArray<SkyCamera>,
+): boolean {
+  return (
+    holdsThrough(reason) &&
+    !asCompleteAs(reply, held.response) &&
+    cameras.every((camera) => parallaxShiftPx(held, camera) < PARALLAX_HOLD_PX)
+  );
 }

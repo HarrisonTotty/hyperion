@@ -56,9 +56,10 @@ export function sceneHostDiscs(
 
 /**
  * The lighting state the label block reads: `lit` with any light; else `pending` while the sky is
- * asked and not answered, and `hosts-not-received` otherwise.
+ * asked and no sky of its arrival is held, and `hosts-not-received` otherwise.
  *
- * @param skyPending - Whether the view's sky has been asked for and not yet answered.
+ * @param skyPending - Whether the view's sky has been asked for and no sky of its arrival is held
+ *   (`useSky`'s `pending`; false through a re-ask within the arrival, R06.T12.b).
  */
 export function lightingState(
   lights: ReadonlyArray<HostLight>,

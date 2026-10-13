@@ -56,11 +56,14 @@ export interface ViewSky {
    */
   readonly label: (place: SkyLinePlace) => SkyLineReading | null;
   /**
-   * Whether the view's sky is asked and none of its replies is held yet, so that every view's
+   * Whether the view's sky is asked and no sky of its arrival is held yet, so that every view's
    * `STARS` line reads {@link SKY_PENDING} (R06.T11.f).
    */
   readonly awaiting: boolean;
-  /** Whether a sky has been asked and not yet answered (R07's lighting label reads it). */
+  /**
+   * Whether a sky is asked and no sky of its arrival is held (R07's lighting label reads it): never
+   * through a re-ask within the arrival, whose held sky stands meanwhile (R06.T12.b).
+   */
   readonly pending: boolean;
 }
 
