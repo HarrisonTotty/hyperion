@@ -1,0 +1,75 @@
+{
+  "//": "gh-collab configuration for this repository. Format and defaults: config.md beside this file. Machine-specific values (gate commands with local caps, worker id) go in <git common dir>/gh-collab/config.json, never here: this file is public.",
+  "base_branch": "rendering-and-planets",
+  "allowed_authors": ["HarrisonTotty"],
+  "task_id_pattern": "(?P<plan>[PR]\\d{2})\\.T\\d+(?:\\.[a-z]+)?",
+  "plan_label": "plan:{plan}",
+  "commit": {
+    "trailer": "Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>",
+    "trailer_pattern": "Co-Authored-By: Claude [^<>]+ <noreply@anthropic\\.com>",
+    "require_task_id": true,
+    "max_added_file_kb": 500
+  },
+  "brief": {
+    "required_sections": ["Base", "Task", "Gate", "Rules", "Report"],
+    "label_families": ["plan:", "area:"],
+    "require_milestone": true,
+    "setup": [
+      "`pnpm install --frozen-lockfile`",
+      "`just wasm-tools`, if wasm-bindgen-cli, wasmtime or cargo-nextest is missing",
+      "`just gen-surface`",
+      "read the Conventions section of the plan set's `README.md` once"
+    ],
+    "rules": [
+      "Follow the repository's `.claude/CLAUDE.md` and `.claude/rules/`. For a plan task, use the `implement-task` skill with its ID.",
+      "Before each commit and before the gate, run `git fetch origin`. If `origin/rendering-and-planets` moved, run `git merge --no-edit origin/rendering-and-planets`: never rebase, resolve conflicts keeping both sides' intent, and regenerate generated files rather than merging them by hand.",
+      "Accuracy first: every physical constant, model parameter and fitted figure carries its source in its doc comment, checked against that source when written. Never silently drop a species: label what is not modelled.",
+      "Record and defer: a finding that leaves the algorithm and every contract unchanged goes in the plan's Risks under \"Deferred findings (2026-10-13 rule)\" and one line of the report; then keep building. A question that would change the algorithm or a contract goes on this issue with your lean, through the work-issue skill's `comment` step; make the smallest reversible choice, record it, and build what doesn't depend on it.",
+      "Run the `review-changes` skill before committing. Fix must-fix and should-fix findings, or say why not.",
+      "One commit for the task, plus at most one for review fixes. Never `--no-verify` on a commit: the 500 kB added-file hook is the owner's rule.",
+      "Never use `git stash`: worktrees share one stash.",
+      "Cross-platform: the code builds and runs on Linux, macOS and Windows, or states its limit."
+    ],
+    "report": [
+      "the branch, its commit hashes, and the `origin/rendering-and-planets` commit it was last merged with",
+      "the gate's planned steps and its log's last line",
+      "deviations, as recorded in the plan",
+      "deferred findings, one line each, and any open question with your lean"
+    ]
+  },
+  "worker": {
+    "gate_command": "just smart-ci {remote}/{base}",
+    "max_parallel": 2,
+    "label_limits": {"heavy": 1},
+    "poll_minutes": 10,
+    "claim_settle_seconds": 5,
+    "push_no_verify_after_gate": true,
+    "deny_bash": ["(^|[\\s;&|(])git\\s+stash\\b"]
+  },
+  "land": {
+    "gate_command": "just smart-ci {remote}/{base}",
+    "push_args": ["--no-verify"]
+  },
+  "survey": {
+    "stale_claim_hours": 24
+  },
+  "coordination": {
+    "discussion": 7,
+    "tags": {"orchestrator": "[desktop]", "worker": "[laptop]"}
+  },
+  "project": {
+    "enabled": true,
+    "owner": "HarrisonTotty",
+    "number": 2,
+    "title": "HYPERION lanes",
+    "status_field": "Status",
+    "statuses": {
+      "queued": "Todo",
+      "claimed": "Claimed",
+      "started": "In progress",
+      "done": "In progress",
+      "blocked": "Blocked",
+      "landed": "Done"
+    }
+  }
+}
