@@ -3245,18 +3245,29 @@ photometry from R06's fixture.
       Atmosphere 1976's;
     - R05.T12.e's gate on `EARTH_REFERENCE` uses the marches as built:
       - at high's counts it passes within R05.T12.e's tolerances;
-      - at low's counts every family and class is within `LOW_TWIN_WORST`;
+      - at low's counts it meets R05.T12.e's low gate: its worst e over the gate's rays is no worse
+        than even steps' at the same counts. The families and classes where low is worse than even
+        steps are listed in Risks.
+      - `LOW_TWIN_WORST` (`marchSteps.ts`) is the twin's worst e at low's counts over the media it
+        holds, R05's Earth and `EARTH_REFERENCE`, each per kernel and class, rounded up to 0.1%. Its
+        doc says so (`decision-r08-t6d-findings.md` §10).
+      - Its sky view's twilight bound is 0.176, set by the band ray from 50,000 m at view zenith
+        97.008°, sun 90°/180° (17.59%, against 13.13% without ozone and 14.46% on R05's Earth). It
+        was 0.175, from R05's Earth;
       - a miss is recorded and raised.
 
       `RECORDED_LAYER_MISS` moves to `EARTH_SLAB_REFERENCE`, unchanged to 0.01 point;
 
     - T6.d's transmittance bound holds on both Earths, the four-absorber fixture and R05's Earth.
       The bound is max(0.005, 10⁻³ τ) in optical depth against the table's 4,096-step value.
-    - The bound is held in the column instead, to 10⁻³ of itself, at a texel where some channel's
-      curve rises faster than u² between the nodes about its column (d ln τ ÷ d ln u > 2, the leap
-      at a curve's gamut exit). Its τ there is recorded.
-    - Where every curve rises at most as u², the half float's rounding of the stored column (2⁻¹¹)
-      moves τ by at most 10⁻³ τ;
+    - τ is held to that bound at every texel but in a channel where the stored column's own
+      rounding, carried through the curve, would alone pass it. That is
+      (dτ_c ÷ d ln u) · 2⁻¹¹ > max(0.005, 10⁻³ τ), the slope taken between the curve's nodes about
+      the texel's column: the leap at a curve's gamut exit. There τ is recorded, not held;
+    - each absorber slot whose own curve rises faster than u² between the nodes about the texel's
+      column (d ln τ ÷ d ln u > 2) has its column held there too, to 10⁻³ of itself. This also takes
+      ozone's blue where it leaves its clip at T_c = 1, past 26.6 vertical columns, where τ rises
+      from 0 under the bound's floor. The texels each check takes are counted and recorded;
     - on both Earths, the greatest ozone column along a transmittance texel's ray is recorded in
       vertical columns: about 41 and 80 by this decision's estimate, against the red curve's exit
       from Rec. 709 at about 99 under R06's Sun.
@@ -3302,7 +3313,9 @@ photometry from R06's fixture.
     slab Earth from 2 m, 2 km, 20 km and 30 km. A miss over 2% is raised.
   - Tests (no GPU):
     - on `EARTH_SLAB_REFERENCE`, R05.T12.e's gate (its rays, metric and tolerances) passes at high's
-      counts. At low's, every family and class is within `LOW_TWIN_WORST`;
+      counts. At low's it meets R05.T12.e's low gate (no worse than even steps' at the same counts),
+      and its worst per family and class is recorded beside `LOW_TWIN_WORST`, which a test medium
+      does not re-pin;
     - a family that misses is recorded and raised with the count that would pass, not widened;
     - `RECORDED_LAYER_MISS` is removed, and its figures are recorded here as the before;
     - the four-absorber fixture's gate figures are recorded;
@@ -6122,33 +6135,52 @@ generator, and the reference's sampling needs no domain tag.
   - _R05.T12.e's gate on the measured Earth, the marches as built._
     - At high's counts every ray holds. Worst e by family: limb 1.88%, high limb 1.30%, high band
       1.09%, disc 0.55%, near-level 0.41%, band 0.30%, inside 0.27%, sky 0.26%, past 0.19%. The
-      decision's model gave 0.25% or less; the twin's limbs come to 1.9%, under the 2%.
-    - At low's counts one ray is over `LOW_TWIN_WORST`, raised, not widened: "band, 50000 m, view
-      zenith 97.008°, sun 90°/180°", 17.59% against the sky view's twilight 17.5% (1.005 of it).
-      The same ray is 13.13% without the ozone and 14.46% on R05's Earth. The test pins it. Every
-      other family and class holds, at worst 0.91 of its bound (the high sky view's twilight). So
-      "on which the marches hold as built" (the gate's ruling above) holds at high's counts, and at
-      low's but for this ray.
+      decision's model gave 0.25% or less (single scattering, linear ozone, none on the sun's
+      path); the limb's 1.88% (0.3 H, sun 90°/0°) is a thin margin of 0.12 point, recorded
+      (`decision-r08-t6d-findings.md` §10.2).
+    - At low's counts it meets R05.T12.e's low gate: its worst ray, 45.09% (high band, 99,999 m,
+      view zenith 99.879°, sun 90°/180°), against even steps' 72.62%.
+    - The families and classes where low is worse than even steps at the same counts (low's worst,
+      even's worst): limb, ordinary (4.15%, 2.50%); near-level, ordinary (1.26%, 0.36%) and
+      twilight (1.60%, 0.47%); past, twilight (4.78%, 1.19%); high limb, ordinary (7.93%, 2.48%)
+      and twilight (23.75%, 18.24%); high band, ordinary (6.82%, 2.80%) and twilight (45.09%,
+      22.79%). R05's Earth, through the same twin, has the same set but the high limb's twilight.
+    - `LOW_TWIN_WORST` re-pinned (§10.1): it is the twin's worst over R05's Earth and
+      `EARTH_REFERENCE`, a measurement, not a gate. Its sky view's twilight bound goes from 0.175 to
+      0.176, set by "band, 50000 m, view zenith 97.008°, sun 90°/180°" at 17.59% (13.13% without the
+      ozone, 14.46% on R05's Earth). The measured Earth's other worsts stand under their bounds
+      (rayMarch 4.15% and 5.95%, sky view 7.80%, the high sky view 7.93% and 45.09%). The ray's pin
+      of 7e37512d is removed, and the gate asserts the twin within the bounds. The smoke's GPU
+      agreement takes the bound, plus 1% for `f32`.
     - `RECORDED_LAYER_MISS` moved to `EARTH_SLAB_REFERENCE` and reproduces to the 0.01 point; T6.d's
       both-ways pins now hold only there, and the measured Earth's gate asserts the pass.
-  - _The bound in column_ (`decision-r08-t6d-findings.md` §2.2).
-    - d ln τ ÷ d ln u > 2 occurs, on these tables, only where ozone's blue leaves its clip at
+  - _The bound in column_ (`decision-r08-t6d-findings.md` §2.2 and §10.3).
+    - τ is held to max(0.005, 10⁻³ τ) at every texel but in a channel where the stored column's own
+      rounding, carried through a slot's curve, would alone pass it,
+      (dτ_c ÷ d ln u) · 2⁻¹¹ > max(0.005, 10⁻³ τ), the slope taken node to node about the column.
+      Exempt, recorded: none on either Earth (the slab's deepest ozone column is 81.6, the red
+      leap's node 94.4) or on R05's.
+    - Found, for main, against §10.1's "no texel reaches it today": 43 red channels of the
+      four-absorber fixture are exempt, slot 1's, its methane of 1 km-amagat, on the ground's
+      horizontal rays (255, 21–63) at τ 24.0–29.4. Their methane columns, 70.9–73.9 vertical
+      columns, lie between the red curve's nodes at 70.8 and 75.0, where it climbs from τ 6.36 to
+      the floor's 13.8 as its signed sum leaves Rec. 709 (dτ ÷ d ln u = 130, d ln τ ÷ d ln u = 13.5):
+      methane's red gamut exit, the case the exemption is for. τ meets the bound there all the
+      same, at 0.030 of it. Nothing changes in the code.
+    - Each slot whose own curve has d ln τ ÷ d ln u > 2 about the texel's column has its column held
+      there too, to 10⁻³ of itself. On these tables that is where ozone's blue leaves its clip at
       T_c = 1: its signed sum stays above 1 to 26.6 vertical columns, so τ rises from 0 there and
-      its exponent falls from infinite to 2 by about 60 columns. No texel reaches the red leap (the
-      slab's deepest is 81.6 columns, the leap's node 94.4).
-    - Such texels: 1,858 of the measured Earth, 1,596 of the slab, 2,504 of the four absorbers,
-      none of R05's, at τ 0.47–43.0. The column of each slot whose own curve is steep there is held
-      to 10⁻³ of itself, at worst 0.21, 0.36 and 0.20 of it. Holding every slot's column fails on
-      the four absorbers (slot 3's 0.01 columns off by 1.4%), whose curve is not the steep one.
-    - Their τ meets max(0.005, 10⁻³ τ) all the same, at worst 0.041, 0.101 and 0.080 of it. So τ
-      is held at every texel as well, not instead, and the column's hold stands in for τ only where
-      a later medium puts τ's bound out of reach. For main: the rule's trigger takes in a curve's
-      clip at 1 as well as its gamut exit.
+      its exponent falls from infinite to 2 by about 60 columns, under the bound's floor. Texels:
+      1,858 of the measured Earth, 1,596 of the slab, 2,504 of the four absorbers, none of R05's,
+      at τ 0.47–43.0; their columns at worst 0.21, 0.36 and 0.20 of 10⁻³, their τ at worst 0.041,
+      0.101 and 0.080 of the bound. Holding every slot's column is not asked (it fails on the four
+      absorbers, slot 3's 0.01 columns off by 1.4%, whose curve is not the steep one).
     - The kernels' read (`kernelMedium`, every fourth texel) is held on every medium with a
       tabulated term, the measured Earth's included, which has no edge.
-    - The half float: at every node interval's midpoint of the three ozone curves and the four
-      absorbers' where every channel's exponent is at most 2, 2⁻¹¹ of the column moves τ by at most
-      10⁻³ of itself. An interval rising from 0 counts as infinitely steep.
+    - The half float, the per-slot check's threshold: at every node interval's midpoint of the
+      three ozone curves and the four absorbers' where every channel's exponent is at most 2, 2⁻¹¹
+      of the column moves τ by at most 10⁻³ of itself. An interval rising from 0 counts as
+      infinitely steep.
   - _The zenith from 2 m_ on R₁, the twin at 4,096 placed steps under R06's Sun, beside T6.d's
     table (the slab Earth is T6.d's rebuilt Earth, and reproduces its 4,709 and 547.4):
 

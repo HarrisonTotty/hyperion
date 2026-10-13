@@ -39,16 +39,23 @@ export const MARCH_TOLERANCE = 0.02;
 export const TWILIGHT_TOLERANCE = 0.05;
 
 /**
- * The worst e of the twin at the low setting's 16 and 16 steps, per kernel and class, rounded up to
- * 0.1%: the bound the GPU agreement check holds low's outputs to, plus 1% for f32. Low's own gate is
- * only that its worst e over the gate's rays is no worse than even steps' at the same counts
- * (addendum A, 4(a)); `marchSteps.test.ts` holds the twin within these. The sky view's are split by
- * the camera's height, so that the limb from 60–100 km (addendum B), which 16 steps cannot resolve,
- * does not loosen the bound from below 50 km.
+ * The worst e of the twin at the low setting's 16 and 16 steps over the media it holds, R05's Earth
+ * and `earth.ts`'s `EARTH_REFERENCE`, each per kernel and class, rounded up to 0.1%: the bound the
+ * GPU agreement check holds low's outputs to, plus 1% for f32. It is a measurement, not an accuracy
+ * gate (`decision-r08-t6d-findings.md` §10): low's own gate is only that its worst e over the gate's
+ * rays is no worse than even steps' at the same counts (addendum A, 4(a)). `marchSteps.test.ts` and
+ * `tablesCpu.test.ts` hold the twins within these. The sky view's are split by the camera's height,
+ * so that the limb from 60–100 km (addendum B), which 16 steps cannot resolve, does not loosen the
+ * bound from below 50 km.
+ *
+ * @remarks
+ * The sky view's twilight bound is 0.176 since R08.T6.h, set by the measured Earth's band ray from
+ * 50,000 m at view zenith 97.008°, sun 90°/180° (17.59%, against 13.13% without its ozone and
+ * 14.46% on R05's Earth); it was 0.175, from R05's Earth.
  */
 export const LOW_TWIN_WORST = {
   /** The sky view from cameras up to 50 km. */
-  skyView: { ordinary: 0.091, twilight: 0.175 },
+  skyView: { ordinary: 0.091, twilight: 0.176 },
   /** The sky view from cameras at 60–100 km. */
   skyViewHigh: { ordinary: 0.116, twilight: 0.495 },
   rayMarch: { ordinary: 0.049, twilight: 0.182 },

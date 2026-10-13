@@ -130,8 +130,30 @@ function storedColumns(tables: TwinTransmittance, x: number, y: number): Readonl
   ];
 }
 
-/** The growth exponent past which the bound is held in column, not in τ: 2, τ ∝ u². */
+/** The growth exponent past which a slot's own column is held too: 2, τ ∝ u². */
 const STEEPEST_IN_DEPTH = 2;
+
+/** The stored column's half-float rounding, relative: 2⁻¹¹, rgba16float's unit roundoff. */
+const HALF_ROUNDING = 2 ** -11;
+
+/**
+ * A curve's node interval about a column u ÷ U, found from ln(u ÷ U) on its even grid: the
+ * interval's first node and its width in ln u.
+ */
+function intervalAbout(
+  curve: AbsorberCurve,
+  relativeColumn: number,
+): { readonly j: number; readonly dx: number } {
+  const { logColumns } = curve;
+  const nodes = logColumns.length;
+  const logU = 0.5 * ((logColumns[0] ?? Number.NaN) + (logColumns[nodes - 1] ?? Number.NaN));
+  const at = Math.log(relativeColumn) + logU;
+  let j = 0;
+  while (j < nodes - 2 && (logColumns[j + 1] ?? Number.NaN) <= at) {
+    j += 1;
+  }
+  return { j, dx: (logColumns[j + 1] ?? Number.NaN) - (logColumns[j] ?? Number.NaN) };
+}
 
 /**
  * The largest d ln τ ÷ d ln u of a curve's channels between the nodes about a column u ÷ U, from
@@ -142,15 +164,7 @@ const STEEPEST_IN_DEPTH = 2;
  * does not rise.
  */
 function growthExponent(curve: AbsorberCurve, relativeColumn: number): number {
-  const { logColumns } = curve;
-  const nodes = logColumns.length;
-  const logU = 0.5 * ((logColumns[0] ?? Number.NaN) + (logColumns[nodes - 1] ?? Number.NaN));
-  const at = Math.log(relativeColumn) + logU;
-  let j = 0;
-  while (j < nodes - 2 && (logColumns[j + 1] ?? Number.NaN) <= at) {
-    j += 1;
-  }
-  const dx = (logColumns[j + 1] ?? Number.NaN) - (logColumns[j] ?? Number.NaN);
+  const { j, dx } = intervalAbout(curve, relativeColumn);
   return Math.max(
     ...curve.opticalDepth.map((depth) => {
       const from = depth[j] ?? Number.NaN;
@@ -163,20 +177,41 @@ function growthExponent(curve: AbsorberCurve, relativeColumn: number): number {
   );
 }
 
+/** A curve's dτ ÷ d ln u in one channel between the nodes about a column u ÷ U, node to node. */
+function depthSlope(curve: AbsorberCurve, relativeColumn: number, c: 0 | 1 | 2): number {
+  const { j, dx } = intervalAbout(curve, relativeColumn);
+  const depth = curve.opticalDepth[c];
+  return ((depth[j + 1] ?? Number.NaN) - (depth[j] ?? Number.NaN)) / dx;
+}
+
 /**
- * A table's texels held to their converged values (`decision-r08-t6d-findings.md` §2.2): every
- * texel in optical depth, and the column of each slot whose curve rises faster than u² about it.
+ * A table's texels held to their converged values (`decision-r08-t6d-findings.md` §2.2 and §10.3):
+ * every texel's optical depth in each channel but where the stored column's own rounding, carried
+ * through a slot's curve, would alone pass the bound, (dτ_c ÷ d ln u) · 2⁻¹¹ > max(0.005, 10⁻³ τ);
+ * and the column of each slot whose own curve rises faster than u² about the texel's column.
  */
 interface Held {
-  /** The worst texel in optical depth, as a fraction of max(0.005, 10⁻³ τ). */
+  /** The worst held channel in optical depth, as a fraction of max(0.005, 10⁻³ τ). */
   readonly depth: Worst;
-  /** The worst column, as a fraction of 10⁻³ of itself, of a slot whose curve rises faster. */
+  /** The channels exempt from it, each with the slot whose curve exempts it: τ not held there. */
+  readonly exempt: ReadonlyArray<Exempt>;
+  /** The texels where some slot's curve rises faster than u², whose column is held there too. */
+  readonly steep: number;
+  /** The worst such column, as a fraction of 10⁻³ of itself. */
   readonly column: Worst;
+}
+
+/** A channel exempt from the bound in τ (`decision-r08-t6d-findings.md` §10.3), and its slot. */
+interface Exempt {
+  readonly c: 0 | 1 | 2;
+  readonly slot: number;
 }
 
 function heldAgainst(table: TwinTransmittance, converged: TwinTransmittance): Held {
   let depth: Worst = { ratio: 0, at: "none" };
   let column: Worst = { ratio: 0, at: "none" };
+  const exempt: Exempt[] = [];
+  let steep = 0;
   const curves = converged.curves[0] ?? [];
   const { widthTexels: w, heightTexels: h } = TRANSMITTANCE_SIZE;
   for (let y = 0; y < h; y += 1) {
@@ -188,6 +223,7 @@ function heldAgainst(table: TwinTransmittance, converged: TwinTransmittance): He
           : [],
       );
       if (steepSlots.length > 0) {
+        steep += 1;
         const stored = storedColumns(table, x, y);
         for (const k of steepSlots) {
           const u = columns[k] ?? 0;
@@ -200,6 +236,15 @@ function heldAgainst(table: TwinTransmittance, converged: TwinTransmittance): He
       const a = readDepth(table, x, y);
       const b = readDepth(converged, x, y);
       for (const c of [0, 1, 2] as const) {
+        const slot = curves.findIndex(
+          (curve, k) =>
+            (columns[k] ?? 0) > 0 &&
+            depthSlope(curve, columns[k] ?? 0, c) * HALF_ROUNDING > bound(b[c]),
+        );
+        if (slot >= 0) {
+          exempt.push({ c, slot });
+          continue;
+        }
         const ratio = Math.abs(a[c] - b[c]) / bound(b[c]);
         if (!(ratio <= depth.ratio)) {
           depth = { ratio, at: `(${x}, ${y}) c${c}: τ ${b[c]}, off by ${Math.abs(a[c] - b[c])}` };
@@ -207,7 +252,7 @@ function heldAgainst(table: TwinTransmittance, converged: TwinTransmittance): He
       }
     }
   }
-  return { depth, column };
+  return { depth, exempt, steep, column };
 }
 
 /** A table's greatest stored column of absorber slot 0 over its texels, u ÷ U. */
@@ -438,7 +483,7 @@ describe("the transmittance table against its own 4,096-step value (decision-r08
   }, 900_000);
 
   it.each(cases.map(({ name }) => [name]))(
-    "holds every texel of %s within max(0.005, 10⁻³ τ), curves included",
+    "holds every texel of %s within max(0.005, 10⁻³ τ), curves included, but where its column's own rounding alone would pass it",
     (name) => {
       const found = held.get(name)?.depth;
       expect(found).toBeDefined();
@@ -447,21 +492,43 @@ describe("the transmittance table against its own 4,096-step value (decision-r08
     },
   );
 
-  // Where some curve rises faster than u² between the nodes about a texel's column, the bound is
-  // held in that column, to 10⁻³ of itself, and τ is recorded (`decision-r08-t6d-findings.md`
-  // §2.2), which lets the column stand in for τ where a curve's slope puts τ's bound out of reach.
-  // These tables need no such stand-in, so τ is held at every texel all the same (above). No texel
-  // reaches the red leap (the slab's deepest is 81.6 columns, the leap's node 94.4); every such
-  // texel is where ozone's blue leaves its clip at T_c = 1, its τ rising from 0 past 26.6 vertical
-  // columns, d ln τ ÷ d ln u above 2 to about 60. Measured on 2026-10-13 (R08.T6.h): 2,504 texels of
-  // the four absorbers, 1,858 of the measured Earth, 1,596 of the slab Earth and none of R05's, at
-  // τ 0.47–43.0; their τ within max(0.005, 10⁻³ τ) at worst 0.080, 0.041 and 0.101 of it, and
-  // their columns within 0.20, 0.21 and 0.36 of 10⁻³.
+  // Where some curve rises faster than u² between the nodes about a texel's column, that slot's
+  // column is held too, to 10⁻³ of itself (`decision-r08-t6d-findings.md` §10.3). On these tables
+  // every such texel is where ozone's blue leaves its clip at T_c = 1, its τ rising from 0 past
+  // 26.6 vertical columns, d ln τ ÷ d ln u above 2 to about 60, under the bound's 0.005 floor:
+  // measured on 2026-10-13 at worst 0.20, 0.21 and 0.36 of 10⁻³ (the four absorbers, the measured
+  // Earth, the slab Earth), with their τ 0.47–43.0 within its bound at worst 0.080, 0.041 and 0.101.
   it.each(cases.map(({ name }) => [name]))(
     "holds %s's column to 10⁻³ of itself wherever its curve rises faster than u² about it",
     (name) => {
       const found = held.get(name)?.column;
       expect((found?.ratio ?? Number.POSITIVE_INFINITY) <= 1 ? "within" : found?.at).toBe("within");
+    },
+  );
+
+  // The texels each check takes, recorded (§10.4.2). τ is exempt, and recorded instead, only in a
+  // channel where (dτ_c ÷ d ln u) · 2⁻¹¹ > max(0.005, 10⁻³ τ), the leap at a curve's gamut exit.
+  // Measured on 2026-10-13: none on either Earth, ozone's deepest column there being 81.6 against
+  // the red leap's node 94.4; on the four absorbers, 43 red channels, slot 1's, the ground's
+  // horizontal rays (255, 21–63) at τ 24.0–29.4. Their methane columns, 70.9–73.9, lie between its
+  // red curve's nodes at 70.8 and 75.0, where it climbs from τ 6.36 to the floor's 13.8 as its signed
+  // sum leaves Rec. 709 (dτ ÷ d ln u = 130): methane's red gamut exit. τ meets its bound there all
+  // the same, at worst 0.030 of it.
+  it.each([
+    ["the four-absorber fixture", 2_504, 43, ["slot 1 c0"]],
+    ["the measured Earth", 1_858, 0, []],
+    ["the ozone-slab Earth", 1_596, 0, []],
+    ["R05's Earth", 0, 0, []],
+  ] as const)(
+    "counts the texels each check takes on %s: %i columns held, %i channels exempt",
+    (name, steep, count, slots) => {
+      const found = held.get(name);
+      const exempt = found?.exempt ?? [];
+      expect({
+        steep: found?.steep,
+        exempt: exempt.length,
+        slots: [...new Set(exempt.map((e) => `slot ${e.slot} c${e.c}`))],
+      }).toEqual({ steep, exempt: count, slots });
     },
   );
 
@@ -531,7 +598,8 @@ describe("the stored column's half-float rounding under the curves (decision-r08
   ];
 
   // rgba16float rounds a stored column to 2⁻¹¹ of itself; where d ln τ ÷ d ln u ≤ 2 that moves τ
-  // by at most 2 × 2⁻¹¹ < 10⁻³ of itself, so the bound in τ is reachable there.
+  // by at most 2 × 2⁻¹¹ < 10⁻³ of itself, so the bound in τ is reachable there whatever the column's
+  // rounding: the threshold of the per-slot column check (`decision-r08-t6d-findings.md` §10.3).
   it("moves τ by at most 10⁻³ of itself wherever every channel of a curve rises at most as u²", () => {
     const over: string[] = [];
     for (const [name, curve] of curves) {
@@ -544,7 +612,7 @@ describe("the stored column's half-float rounding under the curves (decision-r08
           continue;
         }
         const at = curveOpticalDepth(curve, u);
-        const rounded = curveOpticalDepth(curve, u * (1 + 2 ** -11));
+        const rounded = curveOpticalDepth(curve, u * (1 + HALF_ROUNDING));
         for (const c of [0, 1, 2] as const) {
           if (!(Math.abs(rounded[c] - at[c]) <= 1e-3 * at[c])) {
             over.push(`${name} c${c} at u ÷ U ${u.toPrecision(4)}`);

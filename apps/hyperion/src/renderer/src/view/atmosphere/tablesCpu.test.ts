@@ -1596,7 +1596,7 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
 
   beforeAll(() => {
     const sources = tableSources(planetTwin(EARTH_REFERENCE, BOTTOM_M, EARTH_REFERENCE_CURVES));
-    gate = runGate(gateRays(), twinPixel(EARTH_REFERENCE, sources), [HIGH, LOW]);
+    gate = runGate(gateRays(), twinPixel(EARTH_REFERENCE, sources), [HIGH, LOW, evenAt(LOW)]);
   }, 600_000);
 
   it("has a reference of 2,048, 4,096 or 8,192 placed steps within 0.05% of twice its steps", () => {
@@ -1609,18 +1609,25 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
     expect(describeFailures(unconverged)).toEqual([]);
   });
 
+  // The limb's 1.88% (0.3 H, sun 90°/0°) stands 0.12 point under the 2%: a thin margin, recorded
+  // (`decision-r08-t6d-findings.md` §10.2).
   it("holds every ray within 2%, and twilight rays within 5%, at high's counts", () => {
     expect(describeFailures(failures(gate, HIGH))).toEqual([]);
   });
 
-  // One twilight ray of the sky view from 50 km stands 0.09 point over `LOW_TWIN_WORST`'s 17.5% at
-  // low's 16 steps (R08.T6.h, 2026-10-13; recorded and raised with "main", not widened), against
-  // 13.13% without the ozone and 14.46% on R05's Earth, under its ozone tent. Pinned, so that a
-  // cure or a worsening shows; every other ray, family and class holds.
-  it("keeps low's counts within the bounds low's GPU agreement check holds them to, but one ray", () => {
-    expect(describeFailures(overLowBounds(gate, LOW))).toEqual([
-      "band, 50000 m, view zenith 97.008°, sun 90°/180°: 17.59%",
-    ]);
+  // R05.T12.e's low gate (addendum A, 4(a)): measured 45.09% (high band, 99,999 m, view zenith
+  // 99.879°, sun 90°/180°) against even steps' 72.62% (2026-10-13).
+  it("leaves low's worst ray over the whole set no worse than even steps' at low's counts", () => {
+    const worst = (scheme: typeof LOW): number =>
+      Math.max(...errors(gate, scheme).map(({ e }) => e));
+    expect(worst(LOW)).toBeLessThanOrEqual(worst(evenAt(LOW)));
+  });
+
+  // `LOW_TWIN_WORST` is the twin's worst over R05's Earth and this one (§10): its sky view's
+  // twilight bound, 0.176, is this medium's band ray from 50,000 m at view zenith 97.008°, sun
+  // 90°/180° (17.59%).
+  it("keeps low's counts within the bounds low's GPU agreement check holds them to", () => {
+    expect(describeFailures(overLowBounds(gate, LOW))).toEqual([]);
   });
 });
 
