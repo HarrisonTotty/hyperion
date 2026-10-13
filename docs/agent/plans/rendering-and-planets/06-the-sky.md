@@ -3887,101 +3887,122 @@ cube, peak, faceSizePx, path }`, and `bakeSkyCubeOnCpu`, `releaseBakedCube`, `pa
     instrument lines in a running client against a served band.
 - **Deviations in T13.j, as built (2026-10-13).** The `STARS` limit's stale mark
   (`decision-r06-camera-budget.md` §10.2), built to sign-off queue item 15's draft of the `EYE`,
-  `CAM` row and the "Views" clause, which stay out of the guide until signed off. Client only: no
-  protocol, golden or generator change. Three questions are open on issue #8 (Q1–Q3 below), and
-  the build stands on the lane's leans until they are answered.
-  - **The limit** (`view/sky/label.ts`). `skyLimitReading(limitV)` writes the field's text,
-    `V 9.5 mag`, and `skyLabelValue` composes the line from it. `SKY_LIMIT_FIELD_CH` is 13, the
-    widest reading with its mark, `V -20.2 mag S`: a camera at the program's triple for
-    `MAN_EV100_MAX` and the widest step of `FOV_STEPS_DEG` over a black sky, computed, with
-    `MAX_CUT_V`'s `V 11.0 mag S` (12) as the floor. The task's `V 11.0 mag S` is not the widest
-    reading: the `CAM` label reads below V -10 from about EV100 28 at 120° and 31.7 at 60°, and a
-    camera metering the Sun's disc from 1 au stands at about EV100 33.5. `AUTO` meters past EV100
-    42, with its ND pegged, only above the scene span, whose top (an O star's disc) meters at 41.1;
-    a three-digit limit would need about EV100 148. _Q2 (open): 13ch or the plan's 12ch. The width
-    is a trade-off, measured below; it is not a free correction._ The `@param limitV` comment
-    already read "over the sky" (T13.i's record), so the brief's edit had nothing left to change.
-  - **The fields** (`displays/view/viewRun.ts`, `ViewLabelBlock.tsx`). `LabelLine.field` becomes
-    `fields`, a list in the reading's order, and `LabelField.text` may be the start of a run
-    before a space. `unbrokenRuns` and `readingParts` take the list. A field that starts a run is
-    set inside that run as `.view-label__field` alone (inline-block, right-aligned, at its
-    `min-width`, its `S` inside it), and the run's rest, ` CAM`, follows it on the run's line, so
-    the limit never breaks from its kind. The edge's field is still a run of its own. _Q1 (open):
-    the contract change, a generic `fields` list against a sky-specific `limitField` beside
-    `field`._
-  - **The reading** (`displays/view/useViewSky.ts`). `viewSkyLabel` gives every held reply's line
-    the limit's field, stale with `SkyModel.stale`, before the edge's. `SkyLineReading` picks
-    `fields`. `CulledViewSky.labelValue` becomes `label`, and `Instrument.skyLabel` and
-    `primarySkyPlace`'s slots take a `SkyLineReading | null`, so that an instrument's line carries
-    its own limit's field (`InstrumentView` spreads it into the `STARS` line). `PENDING` stays a
-    bare `{ value }`: it takes no field and no mark. The notes and the interim note take no mark,
-    and the sky stays drawn.
+  `CAM` row as the desktop amended it ("…, `STARS V 10.1 mag S CAM`, in a field sized for
+  `V -20.2 mag S` (a camera's limit at `EV100 42` and 120°), and the sky stays drawn;
+  `STARS: PENDING` takes no mark") and the "Views" clause as drafted. Both stay out of the guide
+  until signed off. Client only: no protocol, golden or generator change. The lane's three
+  questions were ruled by the desktop on issue #8 the same day, and the rulings are built here.
+  - **The `fields` array** (Q1, ruled as built). `LabelLine.field` becomes
+    `fields?: ReadonlyArray<LabelField>`, in the reading's order, and `LabelField.text` may be the
+    start of a run before a space. `ViewLabelBlock`'s `unbrokenRuns` and `readingParts` take the
+    list and default to none. The fields are matched to runs in order, each once: a queue that the
+    runs of every part take from in turn. A field that starts a run is set inside it as
+    `.view-label__field` alone (inline-block, right-aligned at its `min-width`, its `S` inside),
+    with the run's rest, ` CAM`, after it on the run's line, so the limit and its kind stay in one
+    unbroken run. `viewSkyLabel` gives every held reply's line the limit's field, stale with
+    `SkyModel.stale`, before the edge's. `SkyLineReading` picks `fields` and `dotsLead`.
+    `CulledViewSky.labelValue` becomes `label`, and `Instrument.skyLabel` and `primarySkyPlace`'s
+    slots take a `SkyLineReading | null`, so an instrument's line carries its own fields.
+    `PENDING` stays a bare `{ value }`. Files beyond the task's list: `ViewLabelBlock.tsx` and its
+    test, `useInstruments.ts`, `InstrumentView.tsx` and its test, `ViewDisplay.tsx` (a doc
+    comment), and `viewLayout.ts` and its test.
+  - **The 13ch width** (Q2, ruled 13ch), against the task's `V 11.0 mag S`. `skyLimitReading`
+    writes the field's text, `V 9.5 mag`, and `skyLabelValue` composes the line from it.
+    `SKY_LIMIT_FIELD_CH` is computed as the longer of two readings with ` S`:
+    - a camera at the program's triple for `MAN_EV100_MAX` and the widest step of
+      `FOV_STEPS_DEG`, over a black sky: `V -20.2 mag S`;
+    - `MAX_CUT_V`'s `V 11.0 mag S` (12).
+
+    Above EV100 13.94 the camera holds 1/8,000 s and ISO 100 and adds ND, so its limit brightens
+    by 0.753 mag per EV. It passes V -10 near EV100 28 at 120°, and a body lit at 10⁸–10⁹ lx
+    meters at EV100 28–33. Two integer digits always suffice, since V -100 would need EV100 near 148. Every reading is shown, never clamped or reformatted. A test pins the field at 13 and
+    the widest text at `V -20.2 mag S`. The `@param limitV` comment already read "over the sky"
+    (T13.i's record), so the brief's edit had nothing left to change.
+
+  - **`FULL_MIN_WIDTH_REM` 99** (`displays/view/viewLayout.ts`), where it was 98.5. The full
+    layout now starts at a 51 rem stage: the 35 rem slot, three 0.5 rem insets, and the 14.5 rem
+    block the primary has at 1280 × 720 with the slots open. At 98.5 rem the primary's 14 rem
+    block beside the slots set the 13ch run 2.5 px past its plate. Boxes from 98.5 to 99 rem
+    (about 8 px of window width) are compact, which already serves every narrower box.
+    `PRIMARY_LABEL_MIN_REM` stays 14. Stated limit: below the guide's least size the limit's run
+    may pass its plate. R07's 98.5 rem is corrected by the desktop.
+  - **The leading dot on `STARS` readings** (Q3, ruled for this reading alone). `readingParts`
+    takes `ReadingOptions.dotsLead`, off by default. With it on, each middle dot is set at the
+    head of the part after it, inside that part's box, on one nowrap run with the part's first
+    word or run. The break is the space before it, so the dot never stands alone, and the text is
+    unchanged (`A · B`). `LabelLine.dotsLead?: true` carries the option, and `viewSkyLabel` sets
+    it on the primary's and each instrument's held reading. `STARS: PENDING`, R02's interim
+    `STARS` readings, every other label line, the exposure panel, the meter and the camera
+    readings keep today's form. This amends T11.f's lone-dot ruling for this reading alone; the
+    follow-up keeps every other reading.
   - **Tests.**
-    - `label.test.ts`, 5 new: the reading; the line composed from it; 13ch against `V 11.0 mag S`'s
-      12; V -20.2 at `MAN` 42 and 120°; and every camera limit fitting the field with its mark
-      over EV100 -14 to 60, every step of `FOV_STEPS_DEG` and backgrounds from black to 10,000
-      cd/m².
-    - `useViewSky.test.tsx`, 6 new, the field expectations of 9 more updated: an eye's and a
-      camera's limit stale at `alone` and at `instrument`, the sky still drawn; `PENDING` unmarked
-      before the first reply, and after a jump with the link down and the sky left stale; the mark
-      clearing with the edge's when the link returns; and, going stale, the same reading and
-      field widths, each field wide enough for its text with ` S`.
-    - `ViewLabelBlock.test.tsx`, 3 new: the field at the head of its run; muted with its `S`
-      before the kind; the same parts, runs and field widths when stale.
-    - `InstrumentView.test.tsx`: 2 new (on link loss the primary eye's and an instrument camera's
-      limits are muted, each `S` after its unit and before its kind; both sit in 13ch fields,
-      unmarked, while the link is up) and the edge's link-loss test updated.
-  - **Layout, measured hidden** (2026-10-13). R13.T2.b's harness was not on this machine, since its
-    `page/` scripts lived in another checkout's `.git/rm23-scratch`, so the run used a scratch
-    harness in `/tmp`, not committed. It ran the built client in an offscreen Electron window,
-    never shown, with the view emulated at the exact size. The scenes were `PRECISION TEST` and
-    `PHASE TEST`, in both styles, with none, one or two instruments open. The readings were the
-    block's own markup (rendered by `ViewLabelBlock`), set into the `STARS` lines at the worst
-    limit, `V 10.0 mag CAM`, and edge, `128,000 ly`, each state live and stale. Each was
-    compared with the reading before this task.
-    - Live and stale lay out alike in every case, so the line's breaks do not move.
-    - No instrument, 1280 × 720: `L · S · I · N` takes 2 lines and `L · N` 1, as before, with
-      194 px or more to spare.
-    - The instrument slots: 3 lines, as before, with nothing past the slot at 1280 × 720, at the
-      least box or at 1920 × 1080.
-    - **Not met:** the primary beside one or two instruments at 1280 × 720 gains a line.
-      - `L · N` and `L · S` go from 4 lines to 5, and `L · I` from 3 to 4. The run
-        `V 10.0 mag S CAM` (17ch) leaves its `·` on a line of its own in the column of about 17ch.
-      - The spare falls by 18 px: `PRECISION TEST` photorealistic from 14 to -4 px, 4 px past the
-        stage; wireframe from 130 to 112; `PHASE TEST` wireframe from 112 to 94, photorealistic
-        from 54 to 36.
-      - The plan's 12ch measures the same. Any honest mark must reserve its ` S`.
-      - _Q3 (open)._ (a) Set each middle dot at the head of the part after it in `readingParts`
-        (R07's break rule and T11.f's lone-`·` follow-up, so not this lane's to take): measured,
-        it restores every count and spare. (b) Keep the build as it is. Built: (b).
-    - The full layout's least box (1608 × 890), instruments open: the 13ch run passes the primary's
-      plate by 2.5 px and reaches no slot. At 12ch it passes by 0 px. 12ch with (a) measured 4
-      lines and no overflow.
-    - At 1920 × 1080 everything fits, live and stale.
-  - **Reviews** (TypeScript and UX rules checks; no must-fix or should-fix). Applied: `isRun`'s
-    two values documented, and `InstrumentView`'s doc comment reflowed. Not applied: moving
-    `skyOf` and the camera-sky builder into `test/skyFixtures.ts`, which would put shared fixtures
-    beyond this task's files; and naming the limit in `styles.css`'s `.view-label__field` comment,
-    which would widen the gate for one comment. Noted only: the figure moves 2ch left inside its
-    field when it goes stale, as the edge's does.
-  - **Acceptance:** vitest over `view/sky` and `displays/view` (48 files) passes 812 of 813 tests.
-    The one failure is `decoder.test.ts`, deferred below, which fails the same way at the base,
-    6c7ec2e0. tsc, oxlint, Prettier, ux_lint and glyphs are clean. `just smart-ci` against
-    `origin/rendering-and-planets` exits 0: Prettier, tsc, oxlint, and vitest over the 33 files
-    that read the change (725 tests).
+    - `label.test.ts`: the reading; the line composed from it; the pin (13, `V -20.2 mag S`); the
+      cut's reading narrower; every camera limit fitting the field with its mark, over EV100 -14
+      to 60, every step of `FOV_STEPS_DEG` and backgrounds from black to 10,000 cd/m².
+    - `useViewSky.test.tsx`: 6 new and 9 updated. An eye's and a camera's limit stale at `alone`
+      and at `instrument`, with the sky still drawn. `PENDING` unmarked before the first reply,
+      and after a jump with the link down and the sky left stale. The mark clearing with the
+      edge's when the link returns. Going stale: the same reading and field widths, each field
+      wide enough for its text with ` S`. Every held reading carries `dotsLead`.
+    - `ViewLabelBlock.test.tsx`, 8 new:
+      - the limit's field at the head of its run;
+      - muted with its `S` before the kind;
+      - the same parts, runs and widths when stale;
+      - every dot the first text of the part after it, with none between parts and the text
+        unchanged;
+      - each dot on one run with its part's first word, and the limit with its kind;
+      - a dot kept with a run that heads its part;
+      - other readings' dots kept between parts;
+      - each field taken once, in order.
+    - `InstrumentView.test.tsx`: 3 new, on the served scene's blocks. On link loss, the primary
+      eye's and an instrument camera's limits are muted, `S` after unit and before kind. Both sit
+      in 13ch fields, unmarked, while the link is up. Each note on both lines is led by its dot.
+      The edge's link-loss test is updated.
+    - `viewLayout.test.ts`: the full layout starts at 99 rem, and the 98.5 rem box is compact.
+
+    The exposure panel's, meter's and camera readings' tests pass unchanged.
+
+  - **The measures, hidden** (2026-10-13). R13.T2.b's harness was not on this machine (its `page/`
+    scripts lived in another checkout's `.git/rm23-scratch`), so a scratch harness in `/tmp`, not
+    committed, stood in for it.
+    - **Method.** The built client ran in an offscreen Electron window, never shown, with the view
+      emulated at the exact size. It covered `PRECISION TEST` and `PHASE TEST`, both styles, and
+      none, one or two slots open. Each `STARS` line got the block's own markup (rendered by
+      `ViewLabelBlock`) at the worst limit and edge, `V 10.0 mag CAM` and `128,000 ly`, in three
+      states: live, stale, and the reading from before this task. A case passed when no block
+      passed the stage or its plate and none scrolled.
+    - **The result.** Every case passed at every size, and live and stale lay out alike.
+    - **1280 × 720 (compact).** Every primary line keeps its line count and spare from before the
+      task. With slots open, `L · N` and `L · S` take 4 lines and `L · I` 3. The spare is 14 px at
+      worst (`PRECISION TEST`, photorealistic), then 54, 112 and 130. With none open, `L · S · I · N`
+      takes 2 lines. The instrument lines take 3 lines, as before.
+    - **The new least box (1616 × 890, `.view` 99 rem, full), one and two slots open.** The same
+      counts. The spare is 184 px or more, and the limit's run stays inside its plate.
+    - **1608 × 890.** Now compact, and it fits.
+    - **1920 × 1080.** Fits with 554 px or more to spare. Beside the slots, `L · S` takes 2 lines
+      where it took 1: the field's 3ch, not the dots.
+  - **Acceptance.**
+    - `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky src/renderer/src/displays/view`
+      ran 48 files and passed 819 of 820 tests. The one failure is `decoder.test.ts`'s, deferred
+      below.
+    - `just smart-ci` against `origin/rendering-and-planets` exits 0: Prettier, tsc, oxlint, and
+      vitest over the 34 files that read the change (742 tests).
+    - ux_lint and glyphs are clean.
+    - The TypeScript and UX rules checks found no must-fix or should-fix. Applied: `isRun`'s values
+      documented, `InstrumentView`'s comment reflowed.
 - **Deferred findings (2026-10-13 rule)** (R06.T13.j; recorded, not ruled; each for "main"'s list).
-  - _`decoder.test.ts` on Node 22._ "Settles a decode waiting when the worker fails" times out on
-    this machine's Node 22.23: its fake worker raises `new ErrorEvent`, which Node 22 does not
-    define as a global. The test is outside this change and not reached by it.
-  - _The `CAM` figure is live over a stale sky._ While the link is down the camera's limit is still
-    recomputed from the exposure shown and the field of view, which do not go stale, so under
-    `AUTO` or after a field step the muted `V 9.6 mag S CAM` can change. It reads as a live figure
-    over a held sky; whether it should freeze while stale, or the draft row should say so, is for
-    the sign-off (UX review's consider).
-  - _A link loss re-culls._ `useSky` gives the held model a new identity when `stale` flips, so
-    `useViewSky`'s and each slot's `cullViewSky` memo runs again (up to 3 × 10⁵ stars) when the
-    link drops and when it returns. `SkyCubeCache` matches the same stars and baked set, so the
-    cube is not baked again.
+  - The lone dot after any other reading's part that fills or wraps its line stays the views
+    lane's follow-up.
+  - The limit's `S` sits inside its right-aligned field, as the edge's does, so the value moves 2ch
+    left when it goes stale: the same as the edge's shift already deferred.
+  - The layout check ran on kept-scene stand-ins in a scratch hidden harness, so a served scene's
+    worst block is still unmeasured.
+  - `decoder.test.ts`'s worker-failure test times out on this machine's Node 22.23, which has no
+    global `ErrorEvent`. It fails the same way at 6c7ec2e0 and is not reached by this change.
+  - While stale, the `CAM` figure is still recomputed from the live exposure and field of view, so
+    a muted `V 9.6 mag S CAM` can change under `AUTO` (UX review's consider, for the sign-off).
+  - A link loss or return re-culls the held sky once (the model's identity follows `stale`). The
+    cube is shared, not baked again.
 - **Deviations in T14, as built (2026-10-03).** `view/sky/cache.ts` exports `SkyCubeCache`
   (`acquire(view, request)`, `release(view)`, `size`) over `CubeRequest { stars, baked,
 bakeInput }`, and `skyCubeCacheOf(engine)`, one cache per engine's device. A cube is shared by

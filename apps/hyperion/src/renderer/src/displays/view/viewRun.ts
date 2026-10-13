@@ -463,6 +463,11 @@ export interface LabelLine {
   readonly stale?: true;
   /** The values of the reading set in fields of their own, in the reading's order, or none. */
   readonly fields?: ReadonlyArray<LabelField>;
+  /**
+   * Set where each middle dot of the reading leads the part after it rather than standing between
+   * the parts (`readingParts`' `dotsLead`): on the sky's `STARS` readings alone (R06.T13.j).
+   */
+  readonly dotsLead?: true;
 }
 
 /**

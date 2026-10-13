@@ -41,6 +41,11 @@ describe("VIEW's layout (R07.T19.b)", () => {
     ]).toEqual(["compact", "compact", "compact"]);
   });
 
+  it("starts at a 99 rem box, so that the 98.5 rem box it began at is compact (R06.T13.j)", () => {
+    const heightPx = FULL_MIN_HEIGHT_REM * 16;
+    expect([FULL_MIN_WIDTH_REM, viewLayout(box(98.5 * 16, heightPx))]).toEqual([99, "compact"]);
+  });
+
   it("is full from its least width and height, and compact just below either", () => {
     const widthPx = FULL_MIN_WIDTH_REM * 16;
     const heightPx = FULL_MIN_HEIGHT_REM * 16;

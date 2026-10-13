@@ -120,16 +120,13 @@ describe("the limit's field (R06.T13.j)", () => {
     expect(skyLabelValue(10.12, "camera", [], at("alone"))).toBe(`${skyLimitReading(10.12)} CAM`);
   });
 
-  it("sizes the field for its widest reading with its stale mark, V -20.2 mag S, not the cut's V 11.0 mag S", () => {
-    expect([SKY_LIMIT_FIELD_CH, "V -20.2 mag S".length, "V 11.0 mag S".length]).toEqual([
-      13, 13, 12,
-    ]);
+  it("pins the field at 13ch, its widest text V -20.2 mag S: a camera at 120° and EV100 42, the darkest exposure MAN takes", () => {
+    const widest = `${skyLimitReading(viewSkyLabelV(cameraSkyOver(0, 120), "camera", manualAt(42), 120))} S`;
+    expect([SKY_LIMIT_FIELD_CH, widest, widest.length]).toEqual([13, "V -20.2 mag S", 13]);
   });
 
-  it("reads V -20.2 for a camera at 120° and EV100 42, the darkest exposure MAN takes", () => {
-    expect(skyLimitReading(viewSkyLabelV(cameraSkyOver(0, 120), "camera", manualAt(42), 120))).toBe(
-      "V -20.2 mag",
-    );
+  it("is wider than the deepest cut's reading with its mark, V 11.0 mag S", () => {
+    expect(`${skyLimitReading(11)} S`.length).toBeLessThan(SKY_LIMIT_FIELD_CH);
   });
 
   it("holds every limit a camera states with its mark: EV100 -14 to 60, every field, a black sky to daylight", () => {
