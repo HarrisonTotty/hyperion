@@ -767,7 +767,7 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
     ]);
   });
 
-  it("mutes the edge alone on the primary's line while the link is down, its S in the field", async () => {
+  it("mutes the limit and the edge on the primary's line while the link is down, each S in its field", async () => {
     vi.stubGlobal("Worker", InThreadSkyWorker);
     const view = await serverScene();
     await skyReplyAt(view, [2_000, 4_000, 4_000], false);
@@ -783,7 +783,13 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
       within(reading).getByText("2000 ly").classList.contains("stale"),
       field?.querySelector(".stale-mark")?.textContent,
       reading.classList.contains("stale"),
-    ]).toEqual([`${EYE} · BEYOND 2000 ly Sstale: STREAMING · ${LEFT_OUT}`, true, true, "S", false]);
+    ]).toEqual([
+      `V 7.4 mag Sstale EYE · BEYOND 2000 ly Sstale: STREAMING · ${LEFT_OUT}`,
+      true,
+      true,
+      "S",
+      false,
+    ]);
   });
 
   it.each([[["INSTRUMENT 1"]], [["INSTRUMENT 1", "INSTRUMENT 2"]]])(
@@ -828,6 +834,53 @@ describe("VIEW's STARS lines while the sky arrives nearest first (R06.T11.f)", (
     expect([unsized, starsLines(["INSTRUMENT 1"])]).toEqual([
       [`${EYE} · ${LEFT_OUT}`, STAR_SOURCE],
       [`${EYE} · BEYOND 2000 ly: STREAMING`, `${CAM} · ${LEFT_OUT}`],
+    ]);
+  });
+});
+
+describe("VIEW's star limits while the link is down (R06.T13.j)", () => {
+  it("mutes the primary eye's limit and an instrument camera's, each S after its unit and before its kind", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await openInstrument(view, "INSTRUMENT 1");
+    await skyReplyAt(view, [null, null, null], true);
+    act(() => {
+      view.socket.close();
+    });
+    await settle();
+    const limits = [primaryLabelBlock(), screen.getByRole("region", { name: "INSTRUMENT 1" })].map(
+      (block) => {
+        const reading = starsOutput(block);
+        const field = reading.querySelector(".view-label__field");
+        return [
+          reading.textContent,
+          field?.querySelector(".stale")?.textContent,
+          field?.querySelector(".stale-mark")?.textContent,
+          field?.nextSibling?.textContent,
+          reading.classList.contains("stale"),
+        ];
+      },
+    );
+    expect(limits).toEqual([
+      [`V 7.4 mag Sstale EYE · ${LEFT_OUT}`, "V 7.4 mag", "S", " EYE", false],
+      [`V 9.5 mag Sstale CAM · ${LEFT_OUT}`, "V 9.5 mag", "S", " CAM", false],
+    ]);
+  });
+
+  it("sets each limit in its field, unmarked, while the link is up", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await openInstrument(view, "INSTRUMENT 1");
+    await skyReplyAt(view, [null, null, null], true);
+    const limits = [primaryLabelBlock(), screen.getByRole("region", { name: "INSTRUMENT 1" })].map(
+      (block) => {
+        const field = starsOutput(block).querySelector<HTMLElement>(".view-label__field");
+        return [field?.textContent, field?.style.minWidth, field?.querySelector(".stale-mark")];
+      },
+    );
+    expect(limits).toEqual([
+      ["V 7.4 mag", "13ch", null],
+      ["V 9.5 mag", "13ch", null],
     ]);
   });
 });

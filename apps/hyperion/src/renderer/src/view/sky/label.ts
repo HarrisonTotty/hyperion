@@ -14,11 +14,17 @@
  * block as measured (four lines at most at 1280 × 720). Before the sky's first reply the line reads
  * {@link SKY_PENDING}; where no sky is asked it stays R02's (`STAR_SOURCE` and
  * `STARS_WITHOUT_POSITION` in `displays/view/viewRun.ts`), which the label block chooses between.
+ * While the link is down the limit is stale, `STARS V 10.1 mag S CAM` (R06.T13.j), as the edge is
+ * in its note, each in a field of its own ({@link SKY_LIMIT_FIELD_CH}, {@link SKY_EDGE_FIELD_CH})
+ * that the label block sets and marks; `PENDING` takes no mark.
  */
 
-import type { SkyGapDto, SkyResponse } from "@hyperion/protocol";
+import { MAX_CUT_V, type SkyGapDto, type SkyResponse } from "@hyperion/protocol";
 
 import { formatNumber } from "../../lib/format";
+import { FOV_STEPS_DEG } from "../camera/projection";
+import { MAN_EV100_MAX, programTriple, VIEW_CAMERA } from "../photometry/exposure";
+import { cameraLimitV, DEFAULT_VIEW_CAMERA } from "./cameraLimit";
 
 /** A view's role for its star limit: the eye's threshold or a camera's noise floor. */
 export type SkyLimitKind = "eye" | "camera";
@@ -41,6 +47,42 @@ export const SKY_PENDING = "PENDING";
  * the ceiling, the boundary's rule and the limit. R13.T8's synthetic note keeps its subject.
  */
 export const SKY_DETAIL_LIMITED_NOTE = "DISTANT STARS: DETAIL LIMITED";
+
+/**
+ * A limit as the `STARS` line reads it before its kind, the run its field holds: `V 9.5 mag`, a V
+ * magnitude to one decimal in `mag`.
+ */
+export function skyLimitReading(limitV: number): string {
+  return `V ${formatNumber(limitV, 1)} mag`;
+}
+
+/**
+ * The brightest limit a `STARS` line states at an exposure `MAN` takes, V: a camera's at the view
+ * camera's darkest such triple, EV100 42 ({@link MAN_EV100_MAX}, its ND's densest at its shortest
+ * shutter and base ISO), at its widest field, over a black sky: V -20.2.
+ *
+ * @remarks
+ * A camera metering a star's disc reads below V -10, so a limit may have two digits and a sign.
+ * `AUTO` meters past EV100 42, its ND pegged, only above the scene span, whose top, an O star's
+ * disc, meters at 41.1 ({@link MAN_EV100_MAX}'s remarks); a limit of three digits would need about
+ * EV100 148.
+ */
+const BRIGHTEST_LIMIT_V = cameraLimitV(
+  DEFAULT_VIEW_CAMERA,
+  programTriple(VIEW_CAMERA, MAN_EV100_MAX),
+  Math.max(...FOV_STEPS_DEG),
+  0,
+);
+
+/**
+ * The width of the limit's field, ch: its widest reading with its stale mark, `V -20.2 mag S`
+ * (wider than the deepest cut's `V 11.0 mag S`), so that the line keeps its breaks as the limit
+ * changes and when it goes stale (the guide's "Numbers": "a field has a fixed width sized for its
+ * longest possible value and its status marks"; R06.T13.j).
+ */
+export const SKY_LIMIT_FIELD_CH = Math.max(
+  ...[BRIGHTEST_LIMIT_V, MAX_CUT_V].map((limitV) => `${skyLimitReading(limitV)} S`.length),
+);
 
 /**
  * The largest fixed shell edge a reply that is not final can state, ly: the last of the sim's
@@ -222,10 +264,14 @@ export function skyLineNotes(
  * The `STARS` line's reading, after its label, once a reply of the sky is held: the limit, then
  * {@link skyLineNotes}, each after a middle dot.
  *
+ * @remarks
+ * The stale marks the limit and the edge take while the link is down are the label block's, which
+ * sets each in its field ({@link skyLimitReading}, {@link skyEdgeReading}); the reading's text is
+ * the same whether the sky is stale or not.
+ *
  * @param limitV - The view's limit, quoted at its deepest over the sky: a camera's or the eye's.
  * @param gaps - The response's `not_modelled`.
- * @param standing - Where the line stands and the edge reached. The stale mark the edge takes while
- *   the link is down is the label block's, which sets the edge in its field.
+ * @param standing - Where the line stands and the edge reached.
  */
 export function skyLabelValue(
   limitV: number,
@@ -233,6 +279,6 @@ export function skyLabelValue(
   gaps: ReadonlyArray<SkyGapDto>,
   standing: SkyLineStanding,
 ): string {
-  const limit = `V ${formatNumber(limitV, 1)} mag ${KIND_WORDS[limitKind]}`;
+  const limit = `${skyLimitReading(limitV)} ${KIND_WORDS[limitKind]}`;
   return [limit, ...skyLineNotes(gaps, standing).map(noteText)].join(" · ");
 }

@@ -17,9 +17,11 @@ import { starIlluminanceRgbLx } from "../../view/sky/photometry";
 import {
   detailLimited,
   SKY_EDGE_FIELD_CH,
+  SKY_LIMIT_FIELD_CH,
   SKY_PENDING,
   skyEdgeReading,
   skyLabelValue,
+  skyLimitReading,
   skyLineNotes,
   type SkyLinePlace,
   streamingEdgeLy,
@@ -28,7 +30,7 @@ import type { SkyCamera, SkyModel } from "../../view/sky/model";
 import { selectSkySprites, type SkySelection } from "../../view/sky/select";
 import { useSky } from "../../view/sky/useSky";
 import { viewSkyLabelV, viewSkyLimit, viewSkyRequest } from "../../view/sky/viewSky";
-import { type LabelLine, runPose, type ViewRun } from "./viewRun";
+import { type LabelField, type LabelLine, runPose, type ViewRun } from "./viewRun";
 
 /** The sky as the drawing loop draws it: the model and which of its stars are sprites. */
 export interface DrawnSky {
@@ -41,8 +43,11 @@ export interface DrawnSky {
   readonly bandIlluminanceLx: Float64Array;
 }
 
-/** A `STARS` line's reading of the sky: its value, and the edge's field while it streams. */
-export type SkyLineReading = Pick<LabelLine, "value" | "field">;
+/**
+ * A `STARS` line's reading of the sky: its value, and once a reply is held its fields, the limit's
+ * and, while the sky streams, the edge's.
+ */
+export type SkyLineReading = Pick<LabelLine, "value" | "fields">;
 
 /** The view's sky, or `null` while R02's interim field stands in. */
 export interface ViewSky {
@@ -92,7 +97,7 @@ export function bakeInputOf(sky: DrawnSky, faceSizePx: number): BakeInput {
 /** A view's culled sky: what its loop draws, and its label block's `STARS` reading. */
 export interface CulledViewSky {
   readonly drawn: DrawnSky;
-  readonly labelValue: string;
+  readonly label: SkyLineReading;
 }
 
 /**
@@ -111,7 +116,7 @@ export function primarySkyPlace(
   instruments: ReadonlyArray<{
     readonly open: boolean;
     readonly shown: object | null;
-    readonly skyLabel: string | null;
+    readonly skyLabel: SkyLineReading | null;
   }>,
 ): SkyLinePlace {
   const open = instruments.filter((instrument) => instrument.open);
@@ -158,10 +163,11 @@ export function cullViewSky(
 /**
  * A view's label block's `STARS` reading of a sky it holds: its role's limit quoted at its deepest
  * over the sky, a camera's at the exposure shown and never deeper than the reply's cut (R07.T13.e;
- * R06.T13.i), then the notes its place holds: while the reply held is not final,
- * the stars-arriving note, its edge in its field and stale with the sky (R06.T11.f); while it holds
- * the sky at a synthetic ceiling, the interim note (R13.T2.b), which names no figure and so takes
- * no field; and what the sky leaves out.
+ * R06.T13.i), in its field and stale with the sky, its `S` before its kind (R06.T13.j); then the
+ * notes its place holds: while the reply held is not final, the stars-arriving note, its edge in
+ * its field and stale with the sky (R06.T11.f); while it holds the sky at a synthetic ceiling, the
+ * interim note (R13.T2.b), which names no figure and so takes no field; and what the sky leaves
+ * out, which takes no mark either.
  *
  * @param exposure - The control as the readout shows it (4 Hz, EV100 to 0.1).
  */
@@ -178,18 +184,27 @@ export function viewSkyLabel(
     streamingEdgeLy: streamingEdgeLy(model.response),
     detailLimited: detailLimited(model.response),
   };
-  const value = skyLabelValue(viewSkyLabelV(model, role, exposure, fovDeg), role, gaps, standing);
+  const limitV = viewSkyLabelV(model, role, exposure, fovDeg);
+  const value = skyLabelValue(limitV, role, gaps, standing);
+  const limit: LabelField = {
+    text: skyLimitReading(limitV),
+    widthCh: SKY_LIMIT_FIELD_CH,
+    stale: model.stale,
+  };
   // The edge's field only where its note stands: a line holding one note may have given it up.
   const streaming = skyLineNotes(gaps, standing).find((note) => note.kind === "streaming");
   return streaming === undefined
-    ? { value }
+    ? { value, fields: [limit] }
     : {
         value,
-        field: {
-          text: skyEdgeReading(streaming.edgeLy),
-          widthCh: SKY_EDGE_FIELD_CH,
-          stale: model.stale,
-        },
+        fields: [
+          limit,
+          {
+            text: skyEdgeReading(streaming.edgeLy),
+            widthCh: SKY_EDGE_FIELD_CH,
+            stale: model.stale,
+          },
+        ],
       };
 }
 
@@ -291,6 +306,7 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
   const awaiting = (request !== null && pending) || following;
   return {
     drawn: null,
+    // `PENDING` holds no figure, so it takes no field and no mark.
     label: () => (awaiting ? { value: SKY_PENDING } : null),
     awaiting,
     pending: pending || following,

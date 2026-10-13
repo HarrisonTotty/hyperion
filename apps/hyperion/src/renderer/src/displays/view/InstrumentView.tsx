@@ -11,6 +11,7 @@ import { styleName } from "../../view/photoreal/style";
 import { cameraSceneOf } from "../../view/scene/model";
 import { SKY_PENDING } from "../../view/sky/label";
 import type { Instrument } from "./useInstruments";
+import type { SkyLineReading } from "./useViewSky";
 import type { DragKind } from "./useViewDrag";
 import { ViewCanvas } from "./ViewCanvas";
 import { ViewLabelBlock } from "./ViewLabelBlock";
@@ -93,14 +94,14 @@ const NOT_MADE = "GRAPHICS NOT AVAILABLE: views could not be made, relaunch to r
 function instrumentLines(
   lines: ReadonlyArray<LabelLine>,
   drawn: RenderStyle,
-  skyLabel: string | null,
+  skyLabel: SkyLineReading | null,
 ): ReadonlyArray<LabelLine> {
   const byLabel = new Map<string, LabelLine>(lines.map((line) => [line.label, line]));
   byLabel.set("SOURCE", { label: "SOURCE", value: PRIMARY_NAME });
   byLabel.set("STYLE", { label: "STYLE", value: styleName(drawn) });
   const stars = byLabel.get("STARS");
   if (skyLabel !== null && stars !== undefined) {
-    byLabel.set("STARS", { ...stars, value: skyLabel });
+    byLabel.set("STARS", { ...stars, ...skyLabel });
   }
   return INSTRUMENT_LINES.flatMap((label) => {
     const line = byLabel.get(label);
@@ -119,10 +120,11 @@ function instrumentLines(
  * order, since a plate over so small a picture would hide most of it. It states the drawn style,
  * the camera and field of view, the primary's exposure with its `SOURCE`, since an instrument
  * meters no image of its own (Design note 11), and the stars of its own cull of the sky, at its
- * camera's limit, with what the sky leaves out, or `PENDING` until the sky's first reply; never
- * the stars-arriving note, which stands on the primary's line alone, since the display's views
- * draw one sky (decision-r06-t11f-stars-line); and its graphics fault (decision-r07-t19, item
- * 2b). Its statements run the slot's width under its label block and canvas, while they hold:
+ * camera's limit, stale with the sky while the link is down (R06.T13.j), with what the sky leaves
+ * out, or `PENDING` until the sky's first reply; never the stars-arriving note, which stands on
+ * the primary's line alone, since the display's views draw one sky
+ * (decision-r06-t11f-stars-line); and its graphics fault (decision-r07-t19, item 2b). Its
+ * statements run the slot's width under its label block and canvas, while they hold:
  * `POSITIONS AS SEEN FROM SHIP`,
  * `PHOTOREALISTIC: PREPARING`, and each photorealistic statement that holds for its picture
  * (`LIGHTING: …`, `BODY PHOTOMETRY: NOT YET MODELLED`, `CRAFT PHOTOMETRY: NOT YET MODELLED` or the
@@ -218,7 +220,7 @@ export function InstrumentView({
               lines={instrumentLines(
                 labelLines(run, exposure, stale),
                 drawn,
-                instrument.skyLabel ?? (skyAwaiting ? SKY_PENDING : null),
+                instrument.skyLabel ?? (skyAwaiting ? { value: SKY_PENDING } : null),
               )}
               statements={[]}
               countLine={null}

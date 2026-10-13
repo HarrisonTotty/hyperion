@@ -1584,7 +1584,7 @@ function withQualityLine(
 
 /**
  * The label block's lines with the sky's `STARS` reading in place of R02's, once the sky is asked:
- * `PENDING`, then the held reply's, with the edge's field while its note stands.
+ * `PENDING`, then the held reply's, with the limit's field and the edge's while its note stands.
  */
 function withSkyLine(
   lines: ReadonlyArray<LabelLine>,
