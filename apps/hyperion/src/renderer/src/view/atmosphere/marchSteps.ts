@@ -19,6 +19,10 @@
  * side's length, which gives each side the same smallest step, L ÷ n², at the end it is placed
  * toward. Each step is sampled at its midpoint.
  *
+ * Since plan R08's R08.T6.i each side is cut into pieces where the ray crosses a term's layer edge
+ * ({@link marchPieces}, `common.wgsl`'s `MarchWalk`), each piece placed by the same rule toward its
+ * end nearer t*, at the same counts; a segment that crosses no edge keeps its steps to the bit.
+ *
  * sebh's reference code (UnrealEngineSkyAtmosphere, `RenderSkyRayMarching.hlsl`,
  * `IntegrateScatteredLuminance`) bounds its steps quadratically from the ray's start, at
  * t_max·(s ÷ N)² with N from 4 to 14, and samples each at 0.3 of its length; Bevy 0.19.1
@@ -179,4 +183,201 @@ export function marchStep(split: MarchSplit, i: number): MarchStep {
   const k = i - split.stepsBefore;
   const unitM = split.afterM / (n * n);
   return { tM: split.lowestM + unitM * (k * k + k + 0.5), dtM: unitM * (2 * k + 1) };
+}
+
+// --- Layer edges (plan R08, R08.T6.i) ------------------------------------------------------------
+
+/**
+ * The most edges the per-frame marches cut at, two a term of the kernels' `MAX_TERMS` (8):
+ * `common.wgsl`'s `MARCH_EDGES_MAX`.
+ */
+export const MARCH_EDGES_MAX = 16;
+
+/**
+ * A term's layer edges as the per-frame marches cut at them (plan R08, R08.T6.i;
+ * `decision-r08-t6d-findings.md` §1.3): each ramp of its density, a pair of `medium.ts`'s
+ * `layerEdgesM` (its lower and upper edge, as `tables.ts`'s `packLayerEdges` packs them), is one
+ * edge at its middle height, so at most two a term. A middle at or below the ground or at or above
+ * `topHeightM` is crossed by no ray inside the atmosphere and is left out, as is a pair of
+ * `packLayerEdges`' unused −1s.
+ *
+ * @remarks
+ * A ramp of 10–300 m (78 m at the ozone slab's base, `earth.ts`'s `EARTH_OZONE_SLAB`, resampled over
+ * one to three of the kernels' 1,024 levels) inside a step of tens of kilometres errs by about its
+ * half-width's column. Four edges a term would give each ramp a piece of its own, up to nine pieces
+ * on a low ray's eight-step side.
+ *
+ * @param edgesM - A term's layer edges, m, in `layerEdgesM`'s pairs.
+ */
+export function marchEdgesM(edgesM: ReadonlyArray<number>, topHeightM: number): number[] {
+  const middles: number[] = [];
+  for (let i = 0; i + 1 < edgesM.length; i += 2) {
+    const middle = 0.5 * ((edgesM[i] ?? Number.NaN) + (edgesM[i + 1] ?? Number.NaN));
+    if (middle > 0 && middle < topHeightM) {
+      middles.push(middle);
+    }
+  }
+  return middles;
+}
+
+/**
+ * A split segment cut into pieces where it crosses the marches' layer edges (plan R08, R08.T6.i):
+ * `common.wgsl`'s `MarchWalk` once made ready.
+ */
+export interface MarchPieces {
+  readonly split: MarchSplit;
+  /** Each crossing's signed distance from t*, m, ascending, each once: those before t* first. */
+  readonly fromLowestM: ReadonlyArray<number>;
+  /** How many of them lie before t*. */
+  readonly crossingsBefore: number;
+  /**
+   * The steps of each piece of the side before t*, in order along the ray, or `null` where the side
+   * keeps R05.T12.e's placement: it crosses no edge, or has more pieces than steps.
+   */
+  readonly before: ReadonlyArray<number> | null;
+  /** The same for the side after t*. */
+  readonly after: ReadonlyArray<number> | null;
+  /** How many of its sides cross an edge but have more pieces than steps, 0 to 2. */
+  readonly crowded: number;
+}
+
+/**
+ * One side's steps by piece (`common.wgsl`'s `marchSideShares`): `steps` among the pieces from
+ * `startM` to `endM` from t* that the crossings `first` to `first + count` cut, one a piece and the
+ * rest in proportion to the square root of each piece's length, each piece's count rounding its
+ * end's share of the rest, the last the rest; `null` for a side that crosses no edge or has more
+ * pieces than steps.
+ */
+function sideShares(
+  fromLowestM: ReadonlyArray<number>,
+  first: number,
+  count: number,
+  startM: number,
+  endM: number,
+  steps: number,
+): number[] | null {
+  const pieces = count + 1;
+  if (count === 0 || pieces > steps) {
+    return null;
+  }
+  const roots: number[] = [];
+  let total = 0;
+  let from = startM;
+  for (let p = 0; p < pieces; p += 1) {
+    const to = p < count ? (fromLowestM[first + p] ?? Number.NaN) : endM;
+    const root = Math.sqrt(to - from);
+    roots.push(root);
+    total += root;
+    from = to;
+  }
+  const rest = steps - pieces;
+  let spent = 0;
+  let cumulative = 0;
+  return roots.map((root, p) => {
+    cumulative += root;
+    // floor(x + 0.5), as the WGSL rounds.
+    const share = p + 1 < pieces ? Math.floor((rest * cumulative) / total + 0.5) : rest;
+    const taken = 1 + share - spent;
+    spent = share;
+    return taken;
+  });
+}
+
+/**
+ * Cuts each side of a split segment into pieces at the crossings inside it (plan R08, R08.T6.i;
+ * `decision-r08-t6d-findings.md` §1): the TypeScript twin of `common.wgsl`'s `marchWalkCross` and
+ * `marchWalkReady`.
+ *
+ * @remarks
+ * R05.T12.e's placed steps take a layer's edge to first order, as T6.d's slab Earth showed (limb
+ * 21.3%, high limb 14.2%): a step whose midpoint falls just below a dense base misses up to half a
+ * step of it, and one just above counts its density over the whole step. A side's steps are shared
+ * among its pieces in proportion to the square root of each piece's length, which gives each piece
+ * the same smallest step at the end it is placed toward, as {@link marchSplit} shares a segment's
+ * between its sides; at least one a piece, each piece's count rounding its end's share of the rest
+ * so that they sum to the side's, as `tablesCpu.ts`'s `transmittancePieces` rounds its pieces'. A
+ * side that crosses no edge, or has more pieces than steps, keeps R05.T12.e's placement. The twin
+ * forms the shares in `f64` where the kernel forms them in `f32`, so at a rounding boundary a piece
+ * may differ by a step.
+ *
+ * @param crossingsFromLowestM - Where the ray crosses the edges, as signed distances from t*, m, in
+ *   any order; those not strictly inside either side, and repeats, are left out.
+ */
+export function marchPieces(
+  split: MarchSplit,
+  crossingsFromLowestM: Iterable<number>,
+): MarchPieces {
+  const inside = [...crossingsFromLowestM]
+    .filter((t) => (t > -split.beforeM && t < 0) || (t > 0 && t < split.afterM))
+    .toSorted((a, b) => a - b);
+  const fromLowestM: number[] = [];
+  for (const t of inside) {
+    const previous = fromLowestM.at(-1);
+    if (previous === undefined || t > previous) {
+      fromLowestM.push(t);
+    }
+  }
+  const crossingsBefore = fromLowestM.filter((t) => t < 0).length;
+  const crossingsAfter = fromLowestM.length - crossingsBefore;
+  const before = sideShares(fromLowestM, 0, crossingsBefore, -split.beforeM, 0, split.stepsBefore);
+  const after = sideShares(
+    fromLowestM,
+    crossingsBefore,
+    crossingsAfter,
+    0,
+    split.afterM,
+    split.stepsAfter,
+  );
+  const crowded =
+    (crossingsBefore > 0 && before === null ? 1 : 0) +
+    (crossingsAfter > 0 && after === null ? 1 : 0);
+  return { split, fromLowestM, crossingsBefore, before, after, crowded };
+}
+
+/**
+ * The steps of a segment cut into pieces, counted from t_start (`common.wgsl`'s `marchWalkStep`):
+ * on a side not cut, {@link marchStep}'s; on one that is, step k of each piece of length L and n
+ * steps placed toward its end a, at a ∓ L (k² + k + ½) ÷ n², L (2k + 1) ÷ n² long. Each piece is
+ * placed toward its end nearer t*, or, on a camera side placed toward the camera, toward its end
+ * nearer the camera.
+ */
+export function marchPiecesSteps(pieces: MarchPieces): MarchStep[] {
+  const { split, fromLowestM, crossingsBefore } = pieces;
+  const steps: MarchStep[] = [];
+  const cut = (
+    shares: ReadonlyArray<number>,
+    first: number,
+    startM: number,
+    endM: number,
+    towardLow: boolean,
+  ): void => {
+    const count = shares.length - 1;
+    for (const [p, n] of shares.entries()) {
+      const lowM = p === 0 ? startM : (fromLowestM[first + p - 1] ?? Number.NaN);
+      const highM = p < count ? (fromLowestM[first + p] ?? Number.NaN) : endM;
+      const unitM = (highM - lowM) / (n * n);
+      for (let j = 0; j < n; j += 1) {
+        const k = towardLow ? j : n - 1 - j;
+        const fromLowest = towardLow
+          ? lowM + unitM * (k * k + k + 0.5)
+          : highM - unitM * (k * k + k + 0.5);
+        steps.push({ tM: split.lowestM + fromLowest, dtM: unitM * (2 * k + 1) });
+      }
+    }
+  };
+  if (pieces.before === null) {
+    for (let i = 0; i < split.stepsBefore; i += 1) {
+      steps.push(marchStep(split, i));
+    }
+  } else {
+    cut(pieces.before, 0, -split.beforeM, 0, split.beforeTowardStart);
+  }
+  if (pieces.after === null) {
+    for (let i = split.stepsBefore; i < split.stepsBefore + split.stepsAfter; i += 1) {
+      steps.push(marchStep(split, i));
+    }
+  } else {
+    cut(pieces.after, crossingsBefore, 0, split.afterM, true);
+  }
+  return steps;
 }

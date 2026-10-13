@@ -37,6 +37,7 @@ import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { KernelPair } from "../engine/kernels";
 import type { BufferHandle, ComputeHandle, RenderEngine, TextureHandle } from "../engine/types";
 import type { AbsorberAmount, AbsorberCurve } from "./absorbers";
+import { MARCH_EDGES_MAX, marchEdgesM } from "./marchSteps";
 import {
   type AtmosphereMedium,
   checkTabulatedTops,
@@ -105,7 +106,8 @@ export const TRANSMITTANCE_STEPS_A_PIECE = 4;
  * toward each ray's lowest point and, before it, toward the texel's point (`marchSplit` with
  * `fromCamera`, R05.T12.e's rule) since R08.T6.d, where R05 took 32 even midpoints (plan R08's
  * Risks, "Deviations in T6.a, as built": even steps erred by up to 10.5% in the table, placed ones
- * by 2.6%).
+ * by 2.6%). Since R08.T6.i each side is cut into pieces where the ray crosses a layer edge, as the
+ * per-frame marches' are (`marchSteps.ts`'s `marchPieces`).
  */
 export const MULTI_SCATTERING_SAMPLES = 32;
 
@@ -570,16 +572,30 @@ export function packMediumUniform(
 }
 
 /** A term's layer edges in {@link packLayerEdges}: at most four, `medium.ts`'s `layerEdgesM`. */
-const EDGES_PER_TERM = 4;
+export const EDGES_PER_TERM = 4;
 
 /** What stands in an unused edge's place: a height the kernel never crosses. */
 const NO_EDGE_M = -1;
 
+/** Where the per-frame marches' edges stand in {@link packLayerEdges}: after the terms' edges. */
+const MARCH_EDGES_AT = MAX_TERMS * EDGES_PER_TERM;
+
+/** Where their count stands in {@link packLayerEdges}: the `vec4f` after them, its x. */
+const MARCH_EDGE_COUNT_AT = MARCH_EDGES_AT + MARCH_EDGES_MAX;
+
+/** The floats of {@link packLayerEdges}: `common.wgsl`'s `LayerEdges`, 52. */
+export const LAYER_EDGES_FLOATS = MARCH_EDGE_COUNT_AT + 4;
+
 /**
- * The medium's layer edges as `transmittance.wgsl`'s `layerEdges` uniform reads them (plan R08,
- * R08.T6.d; `decision-r08-t6b-floor.md` §9.2): term i's in `vec4f` i, the heights where its density
- * table, as the kernels read it ({@link kernelMedium}), leaves 0 and where each ramp ends, and −1
- * in an unused place, for {@link MAX_TERMS} terms.
+ * The medium's layer edges as the kernels' `layerEdges` uniform reads them (`common.wgsl`'s
+ * `LayerEdges`; plan R08, R08.T6.d and R08.T6.i; `decision-r08-t6b-floor.md` §9.2 and
+ * `decision-r08-t6d-findings.md` §1), of its density tables as the kernels read them
+ * ({@link kernelMedium}):
+ * - for the transmittance kernel, term i's in `vec4f` i, the heights where its density table leaves
+ *   0 and where each ramp ends, and −1 in an unused place, for {@link MAX_TERMS} terms;
+ * - for the per-frame marches, each ramp as one edge at its middle height (`marchSteps.ts`'s
+ *   `marchEdgesM`), the terms' in order in the next {@link MARCH_EDGES_MAX} places, −1 past them,
+ *   formed in `f64` and narrowed once, and their count in the `vec4f` after them, (n, 0, 0, 0).
  *
  * @throws Error when the medium has more than {@link MAX_TERMS} terms, as {@link packMedium}.
  */
@@ -589,10 +605,15 @@ export function packLayerEdges(medium: AtmosphereMedium): Float32Array {
       `atmosphere medium ${medium.name} has ${medium.terms.length} terms; at most ${MAX_TERMS} fit`,
     );
   }
-  const packed = new Float32Array(MAX_TERMS * EDGES_PER_TERM).fill(NO_EDGE_M);
+  const packed = new Float32Array(LAYER_EDGES_FLOATS).fill(NO_EDGE_M);
+  const middles: number[] = [];
   for (const [i, term] of kernelMedium(medium).terms.entries()) {
-    packed.set(layerEdgesM(term.density).slice(0, EDGES_PER_TERM), i * EDGES_PER_TERM);
+    const edges = layerEdgesM(term.density);
+    packed.set(edges.slice(0, EDGES_PER_TERM), i * EDGES_PER_TERM);
+    middles.push(...marchEdgesM(edges.slice(0, EDGES_PER_TERM), medium.topHeightM));
   }
+  packed.set(middles, MARCH_EDGES_AT);
+  packed.set([middles.length, 0, 0, 0], MARCH_EDGE_COUNT_AT);
   return packed;
 }
 
@@ -1034,6 +1055,8 @@ export class AtmosphereTables {
   #medium: AtmosphereMedium;
   #bottomRadiusM: number;
   #curves: AbsorberCurveSlots;
+  /** The medium's layer edges, {@link packLayerEdges}'s, packed once a medium. */
+  #layerEdges: Float32Array = new Float32Array(LAYER_EDGES_FLOATS);
   #key: string | null = null;
   #builds = 0;
   /** The kernel arm's kernels ({@link AtmosphereTables.buildKernelArm}), made at its first call. */
@@ -1119,6 +1142,15 @@ export class AtmosphereTables {
   }
 
   /**
+   * The medium's layer edges, {@link packLayerEdges}'s, for the `layerEdges` uniform of the
+   * transmittance and multiple-scattering kernels and of the per-frame sky view and ray march
+   * (R08.T6.i). Read, never written.
+   */
+  get layerEdges(): Float32Array {
+    return this.#layerEdges;
+  }
+
+  /**
    * The medium the tables follow: the last one {@link AtmosphereTables.setMedium} took, which a
    * restore builds and the per-frame kernels read beside them.
    */
@@ -1155,9 +1187,11 @@ export class AtmosphereTables {
     const densityTables = packDensityTables(medium);
     const phaseTables = packPhaseTables(medium);
     const absorberCurves = packAbsorberCurves(medium, curves);
+    const layerEdges = packLayerEdges(medium);
     this.#medium = medium;
     this.#bottomRadiusM = bottomRadiusM;
     this.#curves = curves;
+    this.#layerEdges = layerEdges;
     this.#key = null;
     const engine = this.#engine;
     const r = this.#resources;
@@ -1230,7 +1264,7 @@ export class AtmosphereTables {
       {
         uniforms: {
           medium: packMediumUniform(medium, bottomRadiusM, TRANSMITTANCE_SAMPLES),
-          layerEdges: packLayerEdges(medium),
+          layerEdges: this.#layerEdges,
         },
         buffers: { terms: r.terms },
         sampled,
@@ -1252,6 +1286,7 @@ export class AtmosphereTables {
             MULTI_SCATTERING_SAMPLES,
             SHARED_TABLE_CURVE_SLOT,
           ),
+          layerEdges: this.#layerEdges,
         },
         buffers: { terms: r.terms },
         sampled: {

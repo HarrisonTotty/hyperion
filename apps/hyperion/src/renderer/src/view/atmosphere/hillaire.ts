@@ -20,6 +20,11 @@
  * datum and the datum's normal, the ray march's quadric constants, the sky view's horizon angle
  * and the sine of the sun's angular radius ({@link viewExactOf}). No kernel forms a height as a
  * difference of radii, and none takes WGSL's builtin trigonometry (`view/shaders/preciseTrig.wgsl`).
+ *
+ * The sky view and the ray march cut each side of their rays' split where the ray crosses one of
+ * the medium's layer edges, the tables' `layerEdges` (plan R08, R08.T6.i; `tables.ts`'s
+ * `packLayerEdges`), at the same counts; on a medium with none their steps are R05.T12.e's. The
+ * aerial perspective keeps its even steps.
  */
 
 import type { Vec3 } from "../../geometry/vec3";
@@ -752,7 +757,7 @@ export class HillaireAtmosphere {
       kernels.skyView,
       {
         ...common,
-        uniforms: { medium: perFrameMedium, view: viewUniforms },
+        uniforms: { medium: perFrameMedium, view: viewUniforms, layerEdges: tables.layerEdges },
         storage: { skyViewOut: { texture: outputs.skyView, level: 0 } },
       },
       groups8(sizes.skyView.widthTexels, sizes.skyView.heightTexels),
@@ -773,7 +778,7 @@ export class HillaireAtmosphere {
       {
         buffers: common.buffers,
         sampled: { ...common.sampled, sceneDepth: scene.depth },
-        uniforms: { medium: perFrameMedium, view: viewUniforms },
+        uniforms: { medium: perFrameMedium, view: viewUniforms, layerEdges: tables.layerEdges },
         storage: { rayMarchOut: { texture: outputs.rayMarch, level: 0 } },
       },
       groups8(

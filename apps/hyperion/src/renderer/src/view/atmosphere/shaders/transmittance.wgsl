@@ -44,12 +44,8 @@
 // rgba16float's largest finite value (IEEE 754-2008 binary16), to which every stored value is held.
 const HALF_MAX : f32 = 65504.0;
 
-// Each term's layer edges, heights above the ground, m (plan R08, R08.T6.d; `tables.ts`'s
-// packLayerEdges): term i's in heights[i], where its density table leaves 0 and where each ramp
-// ends, -1 where unused.
-struct LayerEdges {
-  heights : array<vec4f, MAX_TERMS>,
-}
+// The terms' layer edges are `layerEdges.heights` (`common.wgsl`'s LayerEdges, R08.T6.d): term i's
+// in heights[i], where its density table leaves 0 and where each ramp ends, -1 where unused.
 
 // The most places a ray may cross the terms' layer edges: four edges a term, each crossed at most
 // twice.

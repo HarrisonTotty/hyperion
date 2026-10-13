@@ -306,6 +306,14 @@ function rayDepth(
   return rayDepths(medium, curves, x, y, samples)[0];
 }
 
+/**
+ * The transmittance kernel's part of the packed edges, four a term (R08.T6.d); the per-frame
+ * marches' follows (R08.T6.i, `tables.test.ts`).
+ */
+function termEdges(medium: AtmosphereMedium): number[] {
+  return Array.from(packLayerEdges(medium).slice(0, 4 * MAX_TERMS));
+}
+
 describe("a term's layer edges", () => {
   it("are an absorber layer's four: where it leaves 0, its base, its top, where it reaches 0", () => {
     const { altitudesM } = tabulated(OZONE);
@@ -359,10 +367,10 @@ describe("a term's layer edges", () => {
   });
 
   it("travel to the transmittance kernel as the kernels' tables read them, −1 where unused", () => {
-    expect([...packLayerEdges(R05_EARTH_REFERENCE)]).toEqual(Array(4 * MAX_TERMS).fill(-1));
+    expect(termEdges(R05_EARTH_REFERENCE)).toEqual(Array(4 * MAX_TERMS).fill(-1));
     // Earth's measured ozone has none (R08.T6.h).
-    expect([...packLayerEdges(EARTH_REFERENCE)]).toEqual(Array(4 * MAX_TERMS).fill(-1));
-    const packed = [...packLayerEdges(EARTH_SLAB_REFERENCE)];
+    expect(termEdges(EARTH_REFERENCE)).toEqual(Array(4 * MAX_TERMS).fill(-1));
+    const packed = termEdges(EARTH_SLAB_REFERENCE);
     const ozone = EARTH_SLAB_REFERENCE.terms.indexOf(OZONE);
     const read = kernelMedium(EARTH_SLAB_REFERENCE).terms[ozone];
     expect(read).toBeDefined();

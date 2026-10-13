@@ -26,7 +26,16 @@ import {
   twilight,
 } from "../../test/atmosphereGate";
 import { RAY_MARCH_KERNEL, SKY_VIEW_KERNEL } from "./hillaire";
-import { grazingTwilight, marchSplit, marchStep, type MarchStep } from "./marchSteps";
+import {
+  grazingTwilight,
+  marchEdgesM,
+  marchPieces,
+  marchPiecesSteps,
+  marchSplit,
+  marchStep,
+  type MarchStep,
+} from "./marchSteps";
+import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
@@ -124,6 +133,136 @@ describe("marchSplit and marchStep", () => {
   });
 });
 
+/** The boundaries the steps of a march put between them, from its start: each step's two ends. */
+function boundariesOf(steps: readonly MarchStep[]): number[] {
+  return [
+    (steps[0]?.tM ?? Number.NaN) - (steps[0]?.dtM ?? Number.NaN) / 2,
+    ...steps.map(({ tM, dtM }) => tM + dtM / 2),
+  ];
+}
+
+/** Whether `t` stands at one of `boundaries` to 10⁻⁶ m. */
+const isBoundary = (boundaries: readonly number[], t: number): boolean =>
+  boundaries.some((b) => Math.abs(b - t) < 1e-6);
+
+describe("marchPieces and marchPiecesSteps: the marches cut at layer edges (R08.T6.i)", () => {
+  /** A two-sided segment from orbit, 12 steps before t* and 20 after. */
+  const orbit = marchSplit(300_000, 2_600_000, 1_450_000, 32, false);
+  /** A two-sided segment from a camera in the air, its camera side placed toward the camera. */
+  const camera = marchSplit(0, 1_200_000, 79_000, 30, true);
+  /** A one-sided segment, upward from the camera: 20 steps after t*, none before. */
+  const upward = marchSplit(0, 5_000, -1, 20, true);
+
+  it("take each ramp of a term's layer edges as one edge, at its middle height", () => {
+    expect(marchEdgesM([18_560, 18_640, 38_490, 38_500], 100_000)).toEqual([18_600, 38_495]);
+    expect(marchEdgesM([0, 120, 5_000, 5_100], 100_000)).toEqual([60, 5_050]);
+    expect(marchEdgesM([], 100_000)).toEqual([]);
+    // Unused places, and a middle at or above the top, are left out.
+    expect(marchEdgesM([-1, -1, -1, -1], 100_000)).toEqual([]);
+    expect(marchEdgesM([99_990, 100_020], 100_000)).toEqual([]);
+  });
+
+  it("keep R05.T12.e's steps to the bit on a segment that crosses no edge", () => {
+    for (const split of [orbit, camera, upward]) {
+      const placed = Array.from({ length: split.stepsBefore + split.stepsAfter }, (_, i) =>
+        marchStep(split, i),
+      );
+      expect(marchPiecesSteps(marchPieces(split, []))).toEqual(placed);
+      // Crossings outside the segment, at its ends or at t* are no crossings.
+      const outside = [-split.beforeM - 5, -split.beforeM, 0, split.afterM, split.afterM + 5];
+      const pieces = marchPieces(split, outside);
+      expect(pieces.fromLowestM).toEqual([]);
+      expect(marchPiecesSteps(pieces)).toEqual(placed);
+    }
+  });
+
+  it("keep R05.T12.e's steps on a side that crosses no edge, cutting the other", () => {
+    const pieces = marchPieces(orbit, [400_000]);
+    expect(pieces.before).toBeNull();
+    expect(pieces.after).not.toBeNull();
+    const steps = marchPiecesSteps(pieces);
+    for (let i = 0; i < orbit.stepsBefore; i += 1) {
+      expect(steps[i]).toEqual(marchStep(orbit, i));
+    }
+  });
+
+  it("take each crossing once, in order, whatever order it is given in", () => {
+    const pieces = marchPieces(orbit, [700_000, -200_000, 100_000, -600_000, 100_000]);
+    expect(pieces.fromLowestM).toEqual([-600_000, -200_000, 100_000, 700_000]);
+    expect(pieces.crossingsBefore).toBe(2);
+  });
+
+  it("tile the segment front to back, every crossing a boundary between steps", () => {
+    for (const [split, crossings] of [
+      [orbit, [-600_000, -200_000, 100_000, 700_000]],
+      [camera, [-40_000, 300_000]],
+      [upward, [1_000, 3_500]],
+    ] as const) {
+      const steps = marchPiecesSteps(marchPieces(split, crossings));
+      expect(steps).toHaveLength(split.stepsBefore + split.stepsAfter);
+      const boundaries = boundariesOf(steps);
+      for (const [k, { dtM }] of steps.entries()) {
+        expect(dtM).toBeGreaterThan(0);
+        expect(boundaries[k + 1] ?? Number.NaN).toBeCloseTo((boundaries[k] ?? Number.NaN) + dtM, 6);
+      }
+      expect(boundaries[0]).toBeCloseTo(split.startM, 6);
+      expect(boundaries.at(-1)).toBeCloseTo(split.startM + split.beforeM + split.afterM, 6);
+      for (const t of crossings) {
+        expect(isBoundary(boundaries, split.lowestM + t)).toBe(true);
+      }
+      expect(isBoundary(boundaries, split.lowestM)).toBe(true);
+    }
+  });
+
+  it("share a side's steps by the square roots of its pieces' lengths, at least one a piece", () => {
+    // Pieces of 1,000 and 4,000 m: √1,000 ÷ (√1,000 + √4,000) of the 18 left over is 6.
+    expect(marchPieces(upward, [1_000]).after).toEqual([7, 13]);
+    // A piece far shorter than the side still takes one.
+    const cut = marchPieces(upward, [0.01, 2_500]);
+    expect(cut.after?.[0]).toBe(1);
+    expect(cut.after?.reduce((a, b) => a + b, 0)).toBe(20);
+  });
+
+  it("place each piece toward its end nearer t*", () => {
+    const steps = marchPiecesSteps(marchPieces(upward, [1_000]));
+    // [0, 1,000] in 7 from t*, then [1,000, 5,000] in 13 from its crossing.
+    expect(steps[0]?.dtM).toBeCloseTo(1_000 / 7 ** 2, 9);
+    expect(steps[6]?.dtM).toBeCloseTo((13 * 1_000) / 7 ** 2, 9);
+    expect(steps[7]?.dtM).toBeCloseTo(4_000 / 13 ** 2, 9);
+    // Before t*, from orbit: the step before each crossing and before t* is its piece's smallest.
+    const before = marchPieces(orbit, [-600_000]);
+    const fromOrbit = marchPiecesSteps(before);
+    const [first, second] = before.before ?? [];
+    if (first === undefined || second === undefined) {
+      throw new Error("the side before t* is not cut");
+    }
+    expect(fromOrbit[first - 1]?.dtM).toBeCloseTo((orbit.beforeM - 600_000) / first ** 2, 6);
+    expect(fromOrbit[first + second - 1]?.dtM).toBeCloseTo(600_000 / second ** 2, 6);
+  });
+
+  it("place a camera side's pieces toward their ends nearer the camera", () => {
+    const pieces = marchPieces(camera, [-40_000]);
+    const [first, second] = pieces.before ?? [];
+    if (first === undefined || second === undefined) {
+      throw new Error("the camera side is not cut");
+    }
+    const steps = marchPiecesSteps(pieces);
+    expect(steps[0]?.dtM).toBeCloseTo((camera.beforeM - 40_000) / first ** 2, 6);
+    expect(steps[first]?.dtM).toBeCloseTo(40_000 / second ** 2, 6);
+  });
+
+  it("keep R05.T12.e's placement on a side with more pieces than steps, and count it", () => {
+    // One step before t*, 1 m long, which a crossing would cut in two.
+    const short = marchSplit(0, 1e12, 1, 32, false);
+    expect(short.stepsBefore).toBe(1);
+    const pieces = marchPieces(short, [-0.5, 1e9]);
+    expect(pieces.before).toBeNull();
+    expect(pieces.after).not.toBeNull();
+    expect(pieces.crowded).toBe(1);
+    expect(marchPiecesSteps(pieces)[0]).toEqual(marchStep(short, 0));
+  });
+});
+
 /** A unit vector `deg` from +z toward +x. */
 function tilted(deg: number): Vec3 {
   return { x: Math.sin((deg * Math.PI) / 180), y: 0, z: Math.cos((deg * Math.PI) / 180) };
@@ -170,6 +309,27 @@ describe("the kernels' WGSL", () => {
     for (const wgsl of [skyViewWgsl, rayMarchWgsl]) {
       expect(wgsl).not.toMatch(/\(f32\(i\) \+ 0\.5\) \* dt/);
     }
+  });
+
+  it("cuts the sky view's, the ray march's and the multiple-scattering kernel's steps at the medium's layer edges, and keeps R05.T12.e's where it has none (R08.T6.i)", () => {
+    for (const wgsl of [skyViewWgsl, rayMarchWgsl, multiScatteringWgsl]) {
+      expect(wgsl).toMatch(/var<uniform> layerEdges : LayerEdges;/);
+      expect(wgsl).toMatch(/let edgeCount = min\(u32\(layerEdges\.count\.x\), MARCH_EDGES_MAX\);/);
+      // No edge: R05.T12.e's steps, and no walk declared; edges: the walk, made ready first.
+      expect(wgsl).toMatch(
+        /if \(edgeCount == 0u\) \{\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, marchStep\(split, i\)\);/,
+      );
+      expect(wgsl).toMatch(/var walk : MarchWalk;\s*marchWalkStart\(&walk, split\);/);
+      expect(wgsl).toMatch(
+        /marchWalkReady\(&walk\);\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, marchWalkStep\(&walk, i\)\);/,
+      );
+    }
+    expect(skyViewWgsl).toMatch(/marchWalkCrossSphere\(/);
+    expect(multiScatteringWgsl).toMatch(/marchWalkCrossSphere\(/);
+    expect(rayMarchWgsl).toMatch(/marchWalkCrossShell\(/);
+    // The aerial perspective keeps its even steps (decision-r08-t6d-findings.md §1.3).
+    expect(aerialPerspectiveWgsl).not.toMatch(/layerEdges|marchWalk/);
+    expect(commonWgsl).toMatch(/const MARCH_EDGES_MAX : u32 = 2u \* MAX_TERMS;/);
   });
 
   it("evaluates each term's density once a sample in the per-frame kernels", () => {

@@ -7,7 +7,6 @@ import {
   describeFailures,
   errorOf,
   errors,
-  FAMILIES,
   failures,
   type Gate,
   gateRays,
@@ -85,8 +84,10 @@ import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
 import type { BakeSpectrum } from "./spectralColour";
 import {
   absorberSlots,
+  kernelMedium,
   MULTI_SCATTERING_SIZE,
   NO_ABSORBER_CURVES,
+  packLayerEdges,
   TRANSMITTANCE_SIZE,
 } from "./tables";
 import {
@@ -94,6 +95,7 @@ import {
   curveOpticalDepth,
   kernelOpticalDepth,
   marchTwin,
+  mediumMarchEdgesM,
   MULTI_SCATTERING_DIRECTIONS,
   MULTI_SCATTERING_GROUND_OFFSET_M,
   MULTI_SCATTERING_KERNEL_OPTIONS,
@@ -103,15 +105,19 @@ import {
   multiScatteringSeriesTwin,
   multiScatteringTwin,
   type MultiScatteringOptions,
+  piecedSteps,
   placedSteps,
   planetTwin,
   type PlanetTwin,
+  rayMarchRayAlongTwin,
   rayMarchRayTwin,
   rayMarchTwin,
+  rayPieces,
   skyViewRayTwin,
   skyViewTwin,
   tableSources,
   type TwinRay,
+  type TwinSegment,
   type TwinSources,
   type TwinTable,
   type TwinTransmittance,
@@ -175,21 +181,26 @@ function twinRayOf(ray: GateRay): TwinRay {
   };
 }
 
+/** The gate's sphere, which its rays and the twin's marches of them are taken on. */
+const GATE_SPHERE = { kind: "sphere", bottomRadiusM: BOTTOM_M } as const;
+
 /**
  * A gate ray's pixel through the twin: its march over `sources`, with the twin's own placement for
- * placed steps, plus the gate's lit ground through the ray's transmittance.
+ * placed steps, cut at the medium's layer edges as the kernels' are (R08.T6.i; on a medium with no
+ * edge, R05.T12.e's to the bit), plus the gate's lit ground through the ray's transmittance.
  */
 function twinPixel(medium: AtmosphereMedium, sources: TwinSources) {
+  const edges = mediumMarchEdgesM(medium);
   return (ray: GateRay, placement: Placement, n: number): Rgb3 => {
     const twinRay = twinRayOf(ray);
     const steps =
       placement === "placed"
-        ? placedSteps(twinRay, n)
+        ? piecedSteps(twinRay, n, edges, GATE_SPHERE)
         : stepsFor(placement, ray.o, ray.d, ray.tStartM, ray.tEndM, n);
     const { luminance: l, transmittance: t } = marchTwin(
       medium,
       sources,
-      { kind: "sphere", bottomRadiusM: BOTTOM_M },
+      GATE_SPHERE,
       twinRay,
       steps,
     );
@@ -445,12 +456,78 @@ describe("the multiple-scattering kernel's steps", () => {
   });
 
   it("measures the kernel's 32 placed steps against it: about 2% (R08.T6.d)", () => {
-    expect(MULTI_SCATTERING_KERNEL_OPTIONS.placement).toBe("placed");
+    // Cut at the medium's layer edges since R08.T6.i, of which R05's Earth has none.
+    expect(MULTI_SCATTERING_KERNEL_OPTIONS.placement).toBe("pieces");
     // The kernel places them as the twin does: from the texel's point, t* at the ray's lowest.
     expect(multiScatteringWgsl).toContain(
       "let split = marchSplit(0.0, tMax, -(bottom + heightM) * mu, samples, true);",
     );
     expect(worstOver(table("placed"), table("reference"))).toBeLessThan(0.025);
+  });
+});
+
+/** The texels the slab Earth's table is measured at: every eighth row and column, and the last. */
+const SLAB_MS_TEXELS = [0, 8, 16, 24, 31].flatMap((y) =>
+  [0, 8, 16, 24, 31].map((x) => [x, y] as const),
+);
+
+/** The worst e over `texels` (R05.T12.e's metric), L_max the reference's brightest there. */
+function worstAt(
+  table: TwinTable,
+  reference: TwinTable,
+  texels: ReadonlyArray<readonly [number, number]>,
+): number {
+  const lMax: Rgb3 = [0, 0, 0];
+  for (const [x, y] of texels) {
+    const ref = at(reference, x, y);
+    for (const c of CHANNELS) {
+      lMax[c] = Math.max(lMax[c], ref[c]);
+    }
+  }
+  return Math.max(...texels.map(([x, y]) => errorOf(at(table, x, y), at(reference, x, y), lMax)));
+}
+
+describe("the multiple-scattering kernel's steps on the slab Earth, cut at its layer edges (R08.T6.i)", () => {
+  const tables = new Map<string, TwinTable>();
+
+  beforeAll(() => {
+    const transmittance = transmittanceTablesTwin(
+      EARTH_SLAB_REFERENCE,
+      R1,
+      EARTH_SLAB_REFERENCE_CURVES,
+    );
+    const build = (placement: MultiScatteringOptions["placement"], samples: number): TwinTable =>
+      multiScatteringTwin(
+        EARTH_SLAB_REFERENCE,
+        R1,
+        transmittance,
+        { ...MULTI_SCATTERING_KERNEL_OPTIONS, placement, samples },
+        SLAB_MS_TEXELS,
+      );
+    tables.set("placed", build("placed", MULTI_SCATTERING_KERNEL_OPTIONS.samples));
+    tables.set("pieces", build("pieces", MULTI_SCATTERING_KERNEL_OPTIONS.samples));
+    tables.set("reference", build("pieces", 1_024));
+    tables.set("confirm", build("pieces", 2_048));
+  }, 600_000);
+
+  const table = (name: string): TwinTable => {
+    const found = tables.get(name);
+    if (found === undefined) {
+      throw new Error(`no ${name} table`);
+    }
+    return found;
+  };
+
+  it("has a reference of 1,024 steps cut at the edges within 0.05% of 2,048", () => {
+    expect(worstAt(table("reference"), table("confirm"), SLAB_MS_TEXELS)).toBeLessThan(CONVERGED);
+  });
+
+  // Recorded against 4,096 steps over the 81 texels of the steps' test (2026-10-13; plan R08's Risks,
+  // "Deviations in T6.i, as built"): R08.T6.d's placed steps 10.17% at (16, 16), the pieces 1.78%
+  // at (16, 0); the 4,096-step tables placed and cut agree to 5 × 10⁻⁵.
+  it("takes the kernel's 32 steps from about 10% to under 2.5% where the ray crosses the slab", () => {
+    expect(worstAt(table("placed"), table("reference"), SLAB_MS_TEXELS)).toBeGreaterThan(0.08);
+    expect(worstAt(table("pieces"), table("reference"), SLAB_MS_TEXELS)).toBeLessThan(0.025);
   });
 });
 
@@ -1631,74 +1708,45 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
   });
 });
 
+// --- R08.T6.i: the slab Earth's gate, the marches cut at its layer edges -------------------------
+
 /**
- * The miss R05.T12.e's gate records on T6.d's slab Earth (R08.T6.d, on `EARTH_REFERENCE` until
- * R08.T6.h gave Earth its measured ozone and kept the slab as `EARTH_SLAB_REFERENCE`; plan R08's
- * Risks, "Deviations in T6.d, as built"; raised with "main", not widened): the worst e of each
- * family, in percent, at high's counts and at low's, as measured on 2026-10-12. The marches' placed
- * steps under-resolve the ozone layer, which is densest at its base and ramps to 0 over 78 m there
- * and 10 m at its top, where their absorber columns cross it (`decision-r08-t6b-floor.md` §9.2);
- * the same layer absorbing linearly misses alike, and the Earth without its ozone holds. Pinned
- * both ways, to 0.01 point, so that a change to the miss is seen, a cure as well as a worsening:
- * R08.T6.i's pieces are to cure it, and remove this record.
+ * The one ray of R05.T12.e's gate that the slab Earth misses at high's counts with the marches cut
+ * at its ozone's edges (R08.T6.i, 2026-10-13; plan R08's Risks, "Deviations in T6.i, as built";
+ * raised, not widened, and ruled in `decision-r08-t6d-findings.md` §11 and §11.4: the march stays
+ * at 32 steps, and R08.T7 measures a floor on the piece next to t*): a twilight limb ray tangent at
+ * 0.1 H with the sun on its tangent point's horizon, over its 5%. Its error is the dense, optically thick air about t*
+ * (blue depth about 13.6 from the camera), not the layer's: the sun lies along the ray, which
+ * clears the ground by 843 m, and the piece from t* to the slab's base takes six steps over its
+ * 476 km where R05.T12.e's placement put about ten. The limb's worst converges with the count,
+ * 2.74% at 35 steps (the least at which every ray holds), 2.39% at 36 and 1.19% at 64, where
+ * R05.T12.e's placement on the slab stays 7–22%. Pinned to the 0.01 point both ways, so that a
+ * change shows.
+ *
+ * Before the pieces (R08.T6.d's `RECORDED_LAYER_MISS`), the slab's worst e at high's counts was:
+ * disc 7.75%, limb 21.28%, inside 1.43%, near-level 0.41%, sky 0.51%, band 4.71%, past 3.21%, high
+ * band 5.70% and high limb 14.21%; at low's, 8.33, 44.86, 9.88, 1.61, 9.58, 61.39, 11.78, 46.31 and
+ * 59.05%.
  */
-const RECORDED_LAYER_MISS: Readonly<
-  Record<string, { readonly high: number; readonly low: number }>
-> = {
-  disc: { high: 7.75, low: 8.33 },
-  limb: { high: 21.28, low: 44.86 },
-  inside: { high: 1.43, low: 9.88 },
-  "near-level": { high: 0.41, low: 1.61 },
-  sky: { high: 0.51, low: 9.58 },
-  band: { high: 4.71, low: 61.39 },
-  past: { high: 3.21, low: 11.78 },
-  "high band": { high: 5.7, low: 46.31 },
-  "high limb": { high: 14.21, low: 59.05 },
-};
+const SLAB_HIGH_MISS = ["limb, 0.1 H, sun 90°/0°: 5.63%"] as const;
 
-/** A gate's worst e of each family under a scheme, in percent. */
-function worstByFamily(gate: Gate, scheme: typeof HIGH): Map<string, number> {
-  const worst = new Map<string, number>();
-  for (const { ray, e } of errors(gate, scheme)) {
-    worst.set(ray.family, Math.max(worst.get(ray.family) ?? 0, 100 * e));
-  }
-  return worst;
-}
+/** The ray march's steps at which every ray of the slab Earth's gate holds, at high's 75 sky-view steps. */
+const SLAB_PASSING_MARCH_STEPS = 36;
 
-/** The families whose worst e under a scheme stands off its record by over 0.01 point, either way. */
-function offRecord(gate: Gate, scheme: typeof HIGH, level: "high" | "low"): string[] {
-  const worst = worstByFamily(gate, scheme);
-  return FAMILIES.filter((family) => {
-    const recorded = RECORDED_LAYER_MISS[family]?.[level] ?? Number.NaN;
-    return !(Math.abs((worst.get(family) ?? Number.NaN) - recorded) <= 0.01);
-  }).map(
-    (family) =>
-      `${family}: ${String(worst.get(family))}, recorded ${String(RECORDED_LAYER_MISS[family]?.[level])}`,
-  );
-}
-
-describe("R05.T12.e's quadrature gate on the slab Earth, its ozone a layer (R08.T6.d)", () => {
+describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its layer edges (R08.T6.i)", () => {
   let gate: Gate = { results: [], lMax: new Map() };
-  let withoutOzone: Gate = { results: [], lMax: new Map() };
+  const passing = { ...HIGH, marchSteps: SLAB_PASSING_MARCH_STEPS };
 
   beforeAll(() => {
     const sources = tableSources(
       planetTwin(EARTH_SLAB_REFERENCE, BOTTOM_M, EARTH_SLAB_REFERENCE_CURVES),
     );
-    gate = runGate(gateRays(), twinPixel(EARTH_SLAB_REFERENCE, sources), [HIGH, LOW]);
-    const clear = {
-      ...EARTH_SLAB_REFERENCE,
-      terms: EARTH_SLAB_REFERENCE.terms.filter((term) => term.absorber === undefined),
-    };
-    // The rays the layer's miss reaches, at high's counts or low's bounds, run again without it.
-    const missed = new Set(
-      [...failures(gate, HIGH), ...overLowBounds(gate, LOW)].map(({ ray }) => ray.name),
-    );
-    withoutOzone = runGate(
-      gateRays().filter((ray) => missed.has(ray.name)),
-      twinPixel(clear, tableSources(planetTwin(clear, BOTTOM_M))),
-      [HIGH, LOW],
-    );
+    gate = runGate(gateRays(), twinPixel(EARTH_SLAB_REFERENCE, sources), [
+      HIGH,
+      passing,
+      LOW,
+      evenAt(LOW),
+    ]);
   }, 600_000);
 
   it("has a reference of 2,048, 4,096 or 8,192 placed steps within 0.05% of twice its steps", () => {
@@ -1711,22 +1759,181 @@ describe("R05.T12.e's quadrature gate on the slab Earth, its ozone a layer (R08.
     expect(describeFailures(unconverged)).toEqual([]);
   });
 
-  it("misses at high's counts only where it recorded, by what it recorded", () => {
-    const missing = new Set(failures(gate, HIGH).map(({ ray }) => ray.family));
-    expect([...missing].toSorted()).toEqual(
-      ["band", "disc", "high band", "high limb", "limb", "past"].toSorted(),
+  it("holds every ray within 2%, and twilight rays within 5%, at high's counts but the one it raised", () => {
+    expect(describeFailures(failures(gate, HIGH))).toEqual([...SLAB_HIGH_MISS]);
+  });
+
+  it("holds every ray at 36 steps of the ray march, the count that would pass", () => {
+    expect(describeFailures(failures(gate, passing))).toEqual([]);
+  });
+
+  // Measured 38.64% (high band, 99,999 m, view zenith 99.879°, sun 90°/180°) against even steps'
+  // 73.07% (2026-10-13). Its worst by family and class is recorded beside `LOW_TWIN_WORST`, which a
+  // test medium does not re-pin (`decision-r08-t6d-findings.md` §10.4.3).
+  it("leaves low's worst ray over the whole set no worse than even steps' at low's counts", () => {
+    const worst = (scheme: typeof LOW): number =>
+      Math.max(...errors(gate, scheme).map(({ e }) => e));
+    expect(worst(LOW)).toBeLessThanOrEqual(worst(evenAt(LOW)));
+  });
+
+  it("cuts 856 sides of the 658 rays that cross its edges, and crowds none, at either setting's counts", () => {
+    const edges = mediumMarchEdgesM(EARTH_SLAB_REFERENCE);
+    expect(edges).toHaveLength(2);
+    for (const scheme of [HIGH, LOW]) {
+      let crossing = 0;
+      let cut = 0;
+      let crowded = 0;
+      for (const ray of gateRays()) {
+        const n = kernelOf(ray) === "skyView" ? scheme.skySteps : scheme.marchSteps;
+        const pieces = rayPieces(twinRayOf(ray), n, edges, GATE_SPHERE);
+        crossing += pieces.fromLowestM.length > 0 ? 1 : 0;
+        cut += (pieces.before === null ? 0 : 1) + (pieces.after === null ? 0 : 1);
+        crowded += pieces.crowded;
+      }
+      expect([crossing, cut, crowded]).toEqual([658, 856, 0]);
+    }
+  });
+});
+
+/** A point's radial height above the shell quadric (a + e, a + e, c + e) of a figure, m, in f64. */
+function offShellM(p: Vec3, figure: SpheroidFigure, edgeM: number): number {
+  const a = figure.equatorialRadiusM + edgeM;
+  const k = a / (figure.polarRadiusM + edgeM);
+  const q = (p.x * p.x + p.y * p.y + (p.z * k) ** 2 - a * a) / (a * a);
+  const root = Math.sqrt(1 + q);
+  return (Math.hypot(p.x, p.y, p.z) * q) / (root * (root + 1));
+}
+
+/**
+ * The rays a ray march takes at the equator from `heightM`: at elevations from −90° to 90° near the
+ * body, and at tangent heights from 0 to 60 km from far above it, along and across the meridian.
+ */
+function marchRaysFrom(heightM: number, figure: SpheroidFigure): TwinSegment[] {
+  const view = twinView(equatorCamera(figure, 2), sunAt(30), figure, 0.1);
+  const a = figure.equatorialRadiusM;
+  const r = a + heightM;
+  const origin = { x: r, y: 0, z: 0 };
+  const directions: Vec3[] = [];
+  for (const across of [
+    { x: 0, y: 0, z: 1 },
+    { x: 0, y: 1, z: 0 },
+  ]) {
+    if (heightM < 100_000) {
+      for (let deg = -90; deg <= 90; deg += 7.5) {
+        const e = (deg * Math.PI) / 180;
+        directions.push({
+          x: Math.sin(e),
+          y: Math.cos(e) * across.y,
+          z: Math.cos(e) * across.z,
+        });
+      }
+    } else {
+      for (let tangentM = 0; tangentM <= 60_000; tangentM += 2_500) {
+        const sin = (a + tangentM) / r;
+        const cos = Math.sqrt(1 - sin * sin);
+        directions.push({ x: -cos, y: sin * across.y, z: sin * across.z });
+      }
+    }
+  }
+  return directions.flatMap((d) => {
+    const marched = rayMarchRayAlongTwin(
+      EARTH_SLAB_REFERENCE,
+      view,
+      origin,
+      d,
+      Number.POSITIVE_INFINITY,
     );
-    expect(offRecord(gate, HIGH, "high")).toEqual([]);
+    return marched === null ? [] : [marched.ray];
+  });
+}
+
+describe("the twin's layer-edge crossings (R08.T6.i)", () => {
+  const edges = mediumMarchEdgesM(EARTH_SLAB_REFERENCE);
+
+  it("stand on each edge's shell quadric on WGS 84, from the ground, from 400 km and from far out", () => {
+    const spheroid = { kind: "spheroid", figure: WGS84 } as const;
+    let count = 0;
+    for (const heightM of [2, 2_000, 400_000, 4.2e7]) {
+      for (const ray of marchRaysFrom(heightM, WGS84)) {
+        const pieces = rayPieces(ray, 32, edges, spheroid);
+        for (const fromLowestM of pieces.fromLowestM) {
+          const t = pieces.split.lowestM + fromLowestM;
+          const p = {
+            x: ray.originM.x + t * ray.direction.x,
+            y: ray.originM.y + t * ray.direction.y,
+            z: ray.originM.z + t * ray.direction.z,
+          };
+          const off = Math.min(...edges.map((e) => Math.abs(offShellM(p, WGS84, e))));
+          expect(off).toBeLessThan(1e-6 * Math.max(Math.abs(t), 1_000));
+          count += 1;
+        }
+      }
+    }
+    expect(count).toBeGreaterThan(100);
   });
 
-  it("misses low's bounds by what it recorded", () => {
-    expect(offRecord(gate, LOW, "low")).toEqual([]);
+  it("give a figure with a = c the sphere's own crossings", () => {
+    const sphere: SpheroidFigure = { equatorialRadiusM: R1, polarRadiusM: R1 };
+    for (const heightM of [2, 2_000, 400_000]) {
+      for (const ray of marchRaysFrom(heightM, sphere)) {
+        const onSpheroid = rayPieces(ray, 32, edges, { kind: "spheroid", figure: sphere });
+        const onSphere = rayPieces(ray, 32, edges, { kind: "sphere", bottomRadiusM: R1 });
+        expect(onSpheroid.fromLowestM).toHaveLength(onSphere.fromLowestM.length);
+        for (const [i, t] of onSpheroid.fromLowestM.entries()) {
+          const scaleM = Math.max(Math.abs(ray.tEndM), 1);
+          expect(Math.abs(t - (onSphere.fromLowestM[i] ?? Number.NaN))).toBeLessThan(1e-9 * scaleM);
+        }
+      }
+    }
+  });
+});
+
+describe("the marches on a medium with no layer edge (R08.T6.i)", () => {
+  it("find none on R05's Earth or the measured Earth, as given or as the kernels read them", () => {
+    for (const drawn of [R05_EARTH_REFERENCE, EARTH_REFERENCE]) {
+      expect(mediumMarchEdgesM(drawn)).toEqual([]);
+      expect(mediumMarchEdgesM(kernelMedium(drawn))).toEqual([]);
+      // The kernels' count, the `vec4f` after the edges: they take R05.T12.e's loop.
+      expect(Array.from(packLayerEdges(drawn).slice(-4))).toEqual([0, 0, 0, 0]);
+    }
   });
 
-  it("holds every ray it misses outright without its ozone: the miss is the layer's", () => {
-    expect(withoutOzone.results.length).toBeGreaterThan(80);
-    expect(describeFailures(failures(withoutOzone, HIGH))).toEqual([]);
-    expect(describeFailures(overLowBounds(withoutOzone, LOW))).toEqual([]);
+  it("keep every per-frame march's steps R05.T12.e's to the bit there", () => {
+    const edges = mediumMarchEdgesM(EARTH_REFERENCE);
+    const spheroid = { kind: "spheroid", figure: WGS84 } as const;
+    for (const ray of gateRays()) {
+      const twinRay = twinRayOf(ray);
+      for (const n of [16, 32, 75]) {
+        const placed = placedSteps(twinRay, n);
+        expect(piecedSteps(twinRay, n, edges, GATE_SPHERE)).toEqual(placed);
+        expect(piecedSteps(twinRay, n, edges, spheroid)).toEqual(placed);
+      }
+    }
+  });
+
+  it("keep the multiple-scattering kernel's steps R05.T12.e's to the bit there", () => {
+    const tables = transmittanceTablesTwin(
+      EARTH_REFERENCE,
+      R1,
+      EARTH_REFERENCE_CURVES,
+      SMALL_TRANSMITTANCE,
+      64,
+    );
+    const texels = [
+      [0, 0],
+      [13, 3],
+      [20, 17],
+      [31, 31],
+    ] as const;
+    const build = (placement: MultiScatteringOptions["placement"]): TwinTable =>
+      multiScatteringTwin(
+        EARTH_REFERENCE,
+        R1,
+        tables,
+        { ...MULTI_SCATTERING_KERNEL_OPTIONS, placement },
+        texels,
+      );
+    expect(build("pieces").texels).toEqual(build("placed").texels);
   });
 });
 

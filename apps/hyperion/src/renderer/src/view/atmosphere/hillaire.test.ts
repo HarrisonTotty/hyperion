@@ -258,6 +258,20 @@ describe("HillaireAtmosphere", () => {
     }
   });
 
+  it("binds the medium's layer edges to the sky view and the ray march, which cut their steps at them (R08.T6.i)", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    engine.dispatched.length = 0;
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const edges = (kernel: string): unknown =>
+      engine.dispatched.find((d) => d.kernel === kernel)?.bindings.uniforms["layerEdges"];
+    expect(edges("atmosphere sky view")).toBe(atmosphere.tables.layerEdges);
+    expect(edges("atmosphere ray march")).toBe(atmosphere.tables.layerEdges);
+    // The aerial perspective keeps its even steps, and declares no edges.
+    expect(edges("atmosphere aerial perspective")).toBeUndefined();
+    expect(AERIAL_PERSPECTIVE_KERNEL.reference).not.toMatch(/var<uniform> layerEdges/);
+  });
+
   it("puts the per-frame medium's shell on the camera's own sphere", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);

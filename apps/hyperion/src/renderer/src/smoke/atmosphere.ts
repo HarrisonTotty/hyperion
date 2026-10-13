@@ -22,7 +22,10 @@
  * one (`earth.ts`'s `EARTH_REFERENCE`, its ozone under the reference Sun's curve) in R08.T6.b's
  * twins, the frames and the captures; R05.T12.b's oracle, R05.T12.e's steps and R08.T6.g's heights
  * keep R05's Earth (`R05_EARTH_REFERENCE`), the medium they were measured on, whose kernels'
- * geometry they hold. The Venus-class multiple-scattering table is held in both arms.
+ * geometry they hold. The Venus-class multiple-scattering table is held in both arms. R08.T6.i holds
+ * the kernels whose steps are cut at layer edges (the sky view, the ray march and the multiple
+ * scattering) in both arms on the slab Earth, `EARTH_SLAB_REFERENCE`, whose ozone has a base and a
+ * top (`checkAtmosphereLayerEdges`).
  */
 
 import { add, normalise, scale, type Vec3 } from "../geometry/vec3";
@@ -31,6 +34,8 @@ import { hydrostaticColumn } from "../view/atmosphere/column";
 import {
   EARTH_REFERENCE,
   EARTH_REFERENCE_CURVES,
+  EARTH_SLAB_REFERENCE,
+  EARTH_SLAB_REFERENCE_CURVES,
   HILLAIRE_REFERENCE,
   R05_EARTH_REFERENCE,
   referenceSunIlluminanceLx,
@@ -77,7 +82,8 @@ import {
   type PlanetTwin,
   planetTwin,
   marchTwin,
-  placedSteps,
+  mediumMarchEdgesM,
+  piecedSteps,
   rayMarchRayAlongTwin,
   rayMarchRayTwin,
   rayMarchTexelTwin,
@@ -1528,6 +1534,8 @@ function sphereFigure(radiusM: number): SpheroidFigure {
 
 /** One body of R08.T6.g's checks: its figure, its cameras' heights and its limb cameras. */
 interface HeightsBody {
+  /** The task whose check it is, which names the check: R08.T6.g's, or R08.T6.i's slab Earth. */
+  readonly task: string;
   readonly name: string;
   readonly figure: SpheroidFigure;
   /** The heights of the views on high, m: R08.T6.g's 2 m to 2 km, and 1 m on the 2 R⊕ body. */
@@ -1544,18 +1552,21 @@ interface HeightsBody {
  */
 const HEIGHTS_BODIES: readonly HeightsBody[] = [
   {
+    task: "R08.T6.g",
     name: "Earth",
     figure: WGS84,
     heightsM: [2, 20, 200, 2_000],
     limbsM: [WGS84.equatorialRadiusM + 400_000, 4.2e7],
   },
   {
+    task: "R08.T6.g",
     name: "the 2 R⊕ sphere",
     figure: sphereFigure(12_742_017.6),
     heightsM: [1, 2, 20, 200, 2_000],
     limbsM: [],
   },
   {
+    task: "R08.T6.g",
     name: "the Saturn-radius sphere",
     figure: sphereFigure(60_268_000),
     heightsM: [2, 20, 200, 2_000],
@@ -1746,6 +1757,9 @@ function skyViewEnvelope(
   const bottomM = view.cameraRadiusM;
   const shell = { bottomRadiusM: bottomM, topRadiusM: bottomM + medium.topHeightM };
   const samples = Math.max(Math.floor(sizes.skyViewSamples), 2);
+  // The turned rays take the kernel's steps, cut at the medium's layer edges (R08.T6.i).
+  const edgesM = mediumMarchEdgesM(medium);
+  const sphere = { kind: "sphere", bottomRadiusM: bottomM } as const;
   const w = twin.widthTexels;
   return memoised((index) => {
     const ray = skyViewRayTwin(medium, view, index % w, Math.floor(index / w), sizes.skyView);
@@ -1760,13 +1774,8 @@ function skyViewEnvelope(
           tEndM: maxDistanceM(shell, ray.originM.z, direction.z),
         };
         values.push(
-          marchTwin(
-            medium,
-            sources,
-            { kind: "sphere", bottomRadiusM: bottomM },
-            again,
-            placedSteps(again, samples),
-          ).luminance,
+          marchTwin(medium, sources, sphere, again, piecedSteps(again, samples, edgesM, sphere))
+            .luminance,
         );
       }
     }
@@ -1943,9 +1952,13 @@ async function drawArms(
   }
 }
 
-/** Records one arm's agreement as R08.T6.g's check, with its largest value and its floor's count. */
+/**
+ * Records one arm's agreement as `task`'s check (R08.T6.g's, or R08.T6.i's on the slab Earth), with
+ * its largest value and its floor's count.
+ */
 function recordHeights(
   checks: Checks,
+  task: string,
   name: string,
   result: TwinAgreement,
   arm: TwinOptions["arm"],
@@ -1957,7 +1970,7 @@ function recordHeights(
       ? "none by the envelope"
       : `${result.envelope.length} by the envelope (${(share * 100).toFixed(2)}% of ${result.channels}; worst at ${result.worstInEnvelope.toFixed(2)} of its half-width): ${result.envelope.join("; ")}`;
   checks.check(
-    `R08.T6.g ${name}, the ${arm} arm, agrees with the CPU twin to 10⁻³`,
+    `${task} ${name}, the ${arm} arm, agrees with the CPU twin to 10⁻³`,
     result.worst <= 1 && result.above > 0 && share <= ENVELOPE_SHARE_CAP,
     `worst ${result.at}; largest ${show([result.largest])}${limited}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound, ${result.floorCarried} carried by the floor; ${envelope}`,
   );
@@ -1993,24 +2006,28 @@ async function checkPlanetArms(
     const label = `${body.name}: the per-planet`;
     recordHeights(
       checks,
+      body.task,
       `${label} transmittance table, as optical depth`,
       twinAgreement(gpu.transmittance, transmittance, false),
       "stored",
     );
     recordHeights(
       checks,
+      body.task,
       `${label} transmittance table, as optical depth`,
       twinAgreement(armTransmittance, transmittance, false, { arm: "kernel" }),
       "kernel",
     );
     recordHeights(
       checks,
+      body.task,
       `${label} multiple-scattering table, over the GPU's transmittance`,
       twinAgreement(gpu.multiScattering, multiScattering, false),
       "stored",
     );
     recordHeights(
       checks,
+      body.task,
       `${label} multiple-scattering table, over the GPU's transmittance`,
       twinAgreement(armMultiScattering, multiScattering, false, { arm: "kernel" }),
       "kernel",
@@ -2042,7 +2059,7 @@ async function checkViewArms(
   const frame = await drawArms(engine, atmosphere, view, setting === "high");
   const label = `${body.name}, ${setting}, ${view.name}`;
   checks.check(
-    `R08.T6.g ${label}: the composite's frame is finite and within rgba16float`,
+    `${body.task} ${label}: the composite's frame is finite and within rgba16float`,
     withinHalfRange(frame.composite),
     `mean ${show(meanRgb(frame.composite))}`,
   );
@@ -2071,6 +2088,7 @@ async function checkViewArms(
     if (floats !== null) {
       recordHeights(
         checks,
+        body.task,
         `${label}: the sky view`,
         twinAgreement(
           floats.skyView,
@@ -2082,12 +2100,14 @@ async function checkViewArms(
       );
       recordHeights(
         checks,
+        body.task,
         `${label}: the aerial perspective`,
         twinAgreement(floats.aerial, aerial, true, { arm }),
         arm,
       );
       recordHeights(
         checks,
+        body.task,
         `${label}: the ray march`,
         twinAgreement(
           floats.rayMarch,
@@ -2140,6 +2160,78 @@ export async function checkAtmosphereHeights(engine: RenderEngine, checks: Check
         atmosphere.dispose();
       }
     }
+  }
+}
+
+// --- R08.T6.i: the marches cut at layer edges ---------------------------------------------------
+
+/** R08.T6.i's body: Earth (WGS 84) with T6.d's ozone slab, whose base and top are layer edges. */
+const SLAB_EARTH: HeightsBody = {
+  task: "R08.T6.i",
+  name: "the slab Earth",
+  figure: WGS84,
+  heightsM: [2, 2_000],
+  limbsM: [WGS84.equatorialRadiusM + 400_000],
+};
+
+/**
+ * R08.T6.i's three views: from 2 m and 2 km with the sun 20° up and a surface 60 km ahead, and the
+ * limb from 400 km with the sun 20° up at its tangent point, so that the group adds a bounded time
+ * to the smoke (`decision-r08-t6d-findings.md` §8).
+ */
+function layerEdgeViews(): HeightsView[] {
+  return [
+    ...SLAB_EARTH.heightsM.map((heightM) => ({
+      name: `${heightM} m, the sun 20°, a surface 60 km ahead`,
+      camera: equatorCamera(heightM, FRAME_SIZE, SLAB_EARTH.figure),
+      sun: sunAt(20),
+      surfaceM: 60_000,
+    })),
+    ...SLAB_EARTH.limbsM.map((distanceM) => ({
+      name: `the limb from ${(distanceM - SLAB_EARTH.figure.equatorialRadiusM).toExponential(2)} m, the sun 20° at its tangent point`,
+      camera: limbCamera(distanceM, SLAB_EARTH.figure),
+      sun: limbSun(distanceM, SLAB_EARTH.figure, 20),
+      surfaceM: null,
+    })),
+  ];
+}
+
+/**
+ * R08.T6.i: the sky view and the ray march cut each side of their rays' split at the medium's layer
+ * edges (`common.wgsl`'s `MarchWalk`), held against their twins on the slab Earth (`earth.ts`'s
+ * `EARTH_SLAB_REFERENCE`, its ozone a slab from 70 to 3 hPa with ramps of 78 and 10 m), in R08.T6.g's
+ * two arms, on high, over the GPU's own per-planet tables.
+ *
+ * @remarks
+ * Three views ({@link layerEdgeViews}): from the ground every ray that climbs out crosses the slab's
+ * base and top, and the limb's rays cross each twice. The per-planet tables are not twinned here,
+ * for the smoke's watchdog: R08.T6.b's group holds the multiple-scattering kernel, which cuts its
+ * steps too, on the four-absorber fixture, whose layers have edges, and that fixture's per-frame
+ * kernels on both settings. The medium the kernels read is `kernelMedium`'s, whose edges are widened
+ * to their levels; the twins take it as given.
+ */
+export async function checkAtmosphereLayerEdges(
+  engine: RenderEngine,
+  checks: Checks,
+): Promise<void> {
+  const read = kernelMedium(EARTH_SLAB_REFERENCE);
+  const sizes = twinSizes(TABLE_SIZES.high);
+  const atmosphere = new HillaireAtmosphere(
+    engine,
+    EARTH_SLAB_REFERENCE,
+    sizes,
+    SLAB_EARTH.figure,
+    EARTH_SLAB_REFERENCE_CURVES,
+  );
+  try {
+    const planet = await planetOf(engine, atmosphere, read, SLAB_EARTH.figure);
+    for (const view of layerEdgeViews()) {
+      // The harness's checks run in order: each frame is read back before the next draws.
+      // oxlint-disable-next-line no-await-in-loop
+      await checkViewArms(engine, checks, atmosphere, planet, SLAB_EARTH, sizes, "high", view);
+    }
+  } finally {
+    atmosphere.dispose();
   }
 }
 

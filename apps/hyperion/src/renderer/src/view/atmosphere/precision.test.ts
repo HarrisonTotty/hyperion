@@ -21,6 +21,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Vec3 } from "../../geometry/vec3";
 import { type SpheroidFigure, skyViewHeight, TABLE_SIZES, viewExactOf } from "./hillaire";
+import { marchPieces, marchPiecesSteps, marchSplit } from "./marchSteps";
 import { MULTI_SCATTERING_SIZE, TRANSMITTANCE_SIZE } from "./tables";
 
 const f = Math.fround;
@@ -510,6 +511,69 @@ describe.each(SPHERES_M)(
   },
 );
 
+/** A camera's heights about an edge, m: at it and a metre either side. */
+function nearEdgeM(edgeM: number): number[] {
+  return [edgeM - 1, edgeM, edgeM + 1];
+}
+
+/**
+ * The per-frame marches' piece boundaries at their crossings on a sphere (R08.T6.i): the sky view's
+ * and the multiple-scattering kernel's, `marchWalkCrossSphere` and `marchWalkStep` in `f32`. Each
+ * crossing ahead within the ray's segment, to the ground or the top, is taken as its offset from
+ * t* = clamp(−rμ, 0, t_end) and stands back on the ray at t* plus that offset. Returns the worst
+ * height off its edge there as a fraction of R08.T6.g's bound, 10⁻⁶ · max(t, e, 1 km), and the
+ * count.
+ */
+function marchCrossingReport(radiusM: number): { readonly worst: number; readonly count: number } {
+  const bottom = f(radiusM);
+  const top = f(ATMOSPHERE_M);
+  let worst = 0;
+  let count = 0;
+  // The cameras include each edge's own height, ±1 m, where a crossing's constant cancels most.
+  const heights = [...CAMERA_HEIGHTS_M, 30_000, 60_000, 99_000, ...EDGES_M.flatMap(nearEdgeM)];
+  for (const height of heights) {
+    const heightM = f(height);
+    for (const edge of EDGES_M) {
+      const edgeM = f(edge);
+      for (const mu of cosinesAboutEdge(bottom, heightM, edgeM)) {
+        const r = bottom + heightM;
+        const offEdge = (t: number): number =>
+          Math.sqrt(r * r + t * t + 2 * r * mu * t) - bottom - edgeM;
+        const tEnd = groundHit(bottom, heightM, mu)
+          ? distanceToGround(bottom, heightM, mu)
+          : distanceToTop(bottom, top, heightM, mu);
+        const lowest = Math.min(Math.max(-f(f(bottom + heightM) * mu), 0), tEnd);
+        const after = f(tEnd - lowest);
+        for (const t of shellCrossings(bottom, heightM, mu, edgeM) ?? []) {
+          const offset = f(t - lowest);
+          const inside = (offset > -lowest && offset < 0) || (offset > 0 && offset < after);
+          if (!(t > 0) || !inside) {
+            continue;
+          }
+          const boundary = f(lowest + offset);
+          count += 1;
+          const bound = 1e-6 * Math.max(boundary, edgeM, 1_000);
+          worst = Math.max(worst, Math.abs(offEdge(boundary)) / bound);
+        }
+      }
+    }
+  }
+  return { worst, count };
+}
+
+describe.each(SPHERES_M)(
+  "the per-frame marches' piece boundaries at layer edges (common.wgsl, R08.T6.i), on a sphere of %d m",
+  (radiusM) => {
+    const report = marchCrossingReport(radiusM);
+
+    it("stand within 10⁻⁶ · max(t, e, 1 km) of their edge in height, the ground's rays among them", () => {
+      // Measured 0.14–0.19 of the bound, over 9,062–9,444 crossings a sphere (2026-10-13).
+      expect(report.count).toBeGreaterThan(8_000);
+      expect(report.worst).toBeLessThanOrEqual(1);
+    });
+  },
+);
+
 // --- The ray march's quadric (rayMarch.wgsl) ---------------------------------------------------
 
 /** WGS 84 (NIMA TR8350.2). */
@@ -875,6 +939,450 @@ describe.each(FIGURES)(
     it("keeps the near form within the same bound at 1.5a, where h₀ = a ÷ 2 takes it", () => {
       expect(farReport(figure, 1.5 * figure.equatorialRadiusM, false)).toBeLessThanOrEqual(1);
     });
+  },
+);
+
+// --- The walk through a segment's pieces (common.wgsl's MarchWalk, R08.T6.i) ----------------------
+
+/** One step as `marchStep` and `marchWalkStep` return it, in f32: t, Δt and t − t*. */
+interface WalkStep {
+  readonly tM: number;
+  readonly dtM: number;
+  readonly fromLowestM: number;
+}
+
+/** `common.wgsl`'s `marchSplit`, emulated, as `marchSteps` above forms it. */
+function splitOf(tStart: number, tEnd: number, nearest: number, samples: number, camera: boolean) {
+  const lowest = Math.min(Math.max(nearest, tStart), tEnd);
+  const before = f(lowest - tStart);
+  const after = f(tEnd - lowest);
+  const rootBefore = f(Math.sqrt(before));
+  const total = f(rootBefore + f(Math.sqrt(after)));
+  const share = total > 0 ? Math.floor(f(f(f(samples * rootBefore) / total) + 0.5)) : 0;
+  const stepsBefore = Math.min(Math.max(share, before > 0 ? 1 : 0), samples - (after > 0 ? 1 : 0));
+  return {
+    start: tStart,
+    lowest,
+    before,
+    after,
+    stepsBefore,
+    stepsAfter: samples - stepsBefore,
+    towardStart: camera && before > 0 && after > 0,
+  };
+}
+
+type Split = ReturnType<typeof splitOf>;
+
+/** `common.wgsl`'s `marchStep`, emulated. */
+function stepOf(split: Split, i: number): WalkStep {
+  if (i < split.stepsBefore) {
+    const n = split.stepsBefore;
+    const unit = f(split.before / f(n * n));
+    if (split.towardStart) {
+      const fromStart = f(unit * f(f(f(i * i) + i) + 0.5));
+      return {
+        tM: f(split.start + fromStart),
+        dtM: f(unit * f(2 * i + 1)),
+        fromLowestM: f(fromStart - split.before),
+      };
+    }
+    const k = n - 1 - i;
+    const fromLowest = f(unit * f(f(f(k * k) + k) + 0.5));
+    return {
+      tM: f(split.lowest - fromLowest),
+      dtM: f(unit * f(2 * k + 1)),
+      fromLowestM: -fromLowest,
+    };
+  }
+  const n = split.stepsAfter;
+  const k = i - split.stepsBefore;
+  const unit = f(split.after / f(n * n));
+  const fromLowest = f(unit * f(f(f(k * k) + k) + 0.5));
+  return { tM: f(split.lowest + fromLowest), dtM: f(unit * f(2 * k + 1)), fromLowestM: fromLowest };
+}
+
+/**
+ * `common.wgsl`'s `marchWalkCross`, `marchWalkReady`, `marchSideShares`, `marchWalkEnter` and
+ * `marchWalkStep`, emulated in f32 in the WGSL's order, over the whole segment.
+ */
+function walkSteps(split: Split, crossings: readonly number[]): WalkStep[] {
+  const fromLowest: number[] = [];
+  for (const raw of crossings) {
+    const t = f(raw);
+    if ((t > -split.before && t < 0) || (t > 0 && t < split.after)) {
+      let at = fromLowest.length;
+      fromLowest.push(t);
+      while (at > 0 && (fromLowest[at - 1] ?? 0) > t) {
+        fromLowest[at] = fromLowest[at - 1] ?? 0;
+        at -= 1;
+      }
+      fromLowest[at] = t;
+    }
+  }
+  const ends = fromLowest.filter((t, j) => j === 0 || t > (fromLowest[j - 1] ?? 0));
+  const crossingsBefore = ends.filter((t) => t < 0).length;
+  const shares: number[] = [];
+  const sideShares = (
+    first: number,
+    count: number,
+    start: number,
+    end: number,
+    steps: number,
+    at: number,
+  ): boolean => {
+    const pieces = count + 1;
+    if (count === 0 || pieces > steps) {
+      return false;
+    }
+    let total = 0;
+    let from = start;
+    for (let p = 0; p < pieces; p += 1) {
+      const to = p < count ? (ends[first + p] ?? 0) : end;
+      const root = f(Math.sqrt(f(to - from)));
+      shares[at + p] = root;
+      total = f(total + root);
+      from = to;
+    }
+    const rest = steps - pieces;
+    let spent = 0;
+    let cumulative = 0;
+    for (let p = 0; p < pieces; p += 1) {
+      cumulative = f(cumulative + (shares[at + p] ?? 0));
+      const share = p + 1 < pieces ? Math.floor(f(f(f(rest * cumulative) / total) + 0.5)) : rest;
+      shares[at + p] = 1 + share - spent;
+      spent = share;
+    }
+    return true;
+  };
+  const firstAfter = crossingsBefore + 1;
+  const piecedBefore = sideShares(0, crossingsBefore, -split.before, 0, split.stepsBefore, 0);
+  const piecedAfter = sideShares(
+    crossingsBefore,
+    ends.length - crossingsBefore,
+    0,
+    split.after,
+    split.stepsAfter,
+    firstAfter,
+  );
+  // The walk's place, as `MarchWalk` holds it: its piece, the steps taken there, and the piece's
+  // count, unit and anchor (`marchWalkEnter`).
+  const walk = { piece: 0, taken: 0, n: 0, unit: 0, anchor: 0, towardLow: true };
+  const enter = (to: number, before: boolean): void => {
+    let low: number;
+    let high: number;
+    if (before) {
+      low = to > 0 ? (ends[to - 1] ?? 0) : -split.before;
+      high = to < crossingsBefore ? (ends[to] ?? 0) : 0;
+    } else {
+      const at = crossingsBefore + to - firstAfter;
+      low = at > crossingsBefore ? (ends[at - 1] ?? 0) : 0;
+      high = at < ends.length ? (ends[at] ?? 0) : split.after;
+    }
+    walk.n = shares[to] ?? 0;
+    walk.piece = to;
+    walk.taken = 0;
+    walk.towardLow = !before || split.towardStart;
+    walk.unit = f(f(high - low) / f(walk.n * walk.n));
+    walk.anchor = walk.towardLow ? low : high;
+  };
+  if (piecedBefore) {
+    enter(0, true);
+  }
+  const steps: WalkStep[] = [];
+  for (let i = 0; i < split.stepsBefore + split.stepsAfter; i += 1) {
+    const before = i < split.stepsBefore;
+    if ((before && !piecedBefore) || (!before && !piecedAfter)) {
+      steps.push(stepOf(split, i));
+      continue;
+    }
+    if (!before && walk.piece < firstAfter) {
+      enter(firstAfter, false);
+    } else if (walk.taken >= walk.n) {
+      enter(walk.piece + 1, before);
+    }
+    const j = walk.taken;
+    walk.taken += 1;
+    const k = walk.towardLow ? j : walk.n - 1 - j;
+    const q = f(f(f(k * k) + k) + 0.5);
+    const fromLowestM = walk.towardLow
+      ? f(walk.anchor + f(walk.unit * q))
+      : f(walk.anchor - f(walk.unit * q));
+    steps.push({
+      tM: f(split.lowest + fromLowestM),
+      dtM: f(walk.unit * f(2 * k + 1)),
+      fromLowestM,
+    });
+  }
+  return steps;
+}
+
+describe("the walk through a segment's pieces (common.wgsl's MarchWalk, R08.T6.i)", () => {
+  /** Segments of every kind: from orbit, from a camera in the air, upward, down to the ground. */
+  const SEGMENTS = [
+    [300_000, 2_600_000, 1_450_000, false],
+    [0, 1_200_000, 79_000, true],
+    [0, 400_000, -5, true],
+    [0, 90_000, 120_000, true],
+    [12, 4_000, 9_000, false],
+  ] as const;
+
+  it("places every step as marchPiecesSteps does, within f32's rounding of t", () => {
+    let compared = 0;
+    for (const [tStart, tEnd, nearest, camera] of SEGMENTS) {
+      for (const samples of [16, 32, 75]) {
+        const split = splitOf(f(tStart), f(tEnd), f(nearest), samples, camera);
+        const twinSplit = marchSplit(f(tStart), f(tEnd), f(nearest), samples, camera);
+        // Crossings on either side, near its ends and near t*, as offsets from t*.
+        const length = split.before + split.after;
+        for (const cut of [
+          [],
+          [0.3, 0.7],
+          [-0.2, 0.05, 0.6],
+          [-0.9, -0.5, -0.01, 0.01, 0.4, 0.95],
+          [0.001, 0.002, 0.003],
+        ]) {
+          const crossings = cut.map((x) => x * length);
+          const emulated = walkSteps(split, crossings);
+          const twin = marchPiecesSteps(marchPieces(twinSplit, crossings.map(f)));
+          expect(emulated).toHaveLength(twin.length);
+          for (const [i, step] of emulated.entries()) {
+            const expected = twin[i];
+            const scaleM = Math.max(Math.abs(tStart), Math.abs(tEnd), 1);
+            expect(Math.abs(step.tM - (expected?.tM ?? Number.NaN))).toBeLessThan(4e-7 * scaleM);
+            expect(Math.abs(step.dtM - (expected?.dtM ?? Number.NaN))).toBeLessThan(4e-7 * scaleM);
+            compared += 1;
+          }
+        }
+      }
+    }
+    expect(compared).toBeGreaterThan(2_000);
+  });
+
+  it("keeps R05.T12.e's marchStep to the bit on a segment that crosses no edge", () => {
+    for (const [tStart, tEnd, nearest, camera] of SEGMENTS) {
+      const split = splitOf(f(tStart), f(tEnd), f(nearest), 32, camera);
+      const placed = Array.from({ length: 32 }, (_, i) => stepOf(split, i));
+      expect(walkSteps(split, [])).toEqual(placed);
+    }
+  });
+});
+
+// --- The ray march's layer-edge crossings (rayMarch.wgsl, R08.T6.i) --------------------------------
+
+/** A point's radial height above the spheroid (a + e, a + e, c + e) in f64: the edge's shell. */
+function shellHeight64(p: Vec3, figure: SpheroidFigure, edgeM: number): number {
+  return radialHeight64(p, {
+    equatorialRadiusM: figure.equatorialRadiusM + edgeM,
+    polarRadiusM: figure.polarRadiusM + edgeM,
+  });
+}
+
+/**
+ * `rayMarch.wgsl`'s `marchWalkCrossShell` along one ray, emulated, with the split and the
+ * closest-approach terms as `main` forms them: each crossing of the edge's shell quadric inside the
+ * segment, where the walk puts its piece boundary (at t_low plus its offset within h₀ = a ÷ 2, and
+ * at t* plus its offset from it beyond), as its height off the shell in f64 and |t − t*|.
+ */
+function shellCrossingHeights(
+  camera: Vec3,
+  dir: Vec3,
+  figure: SpheroidFigure,
+  far: boolean,
+  edgeHeightM: number,
+): Array<{ readonly t: number; readonly h: number; readonly fromStar: number }> {
+  const exact = viewExactOf(
+    camera,
+    figure,
+    ATMOSPHERE_M,
+    { radiusM: figure.equatorialRadiusM, heightM: 0, normal: { x: 1, y: 0, z: 0 } },
+    0,
+  );
+  const origin = vec(camera.x, camera.y, camera.z);
+  const a = f(figure.equatorialRadiusM);
+  const c = f(figure.polarRadiusM);
+  const topM = f(ATMOSPHERE_M);
+  const k = f(a / c);
+  const shellQ = rayQuadric(
+    origin,
+    dir,
+    f(f(a + topM) / f(c + topM)),
+    f(a + topM),
+    f(exact.topQuadricM2),
+    far,
+  );
+  const groundQc = f(exact.groundQuadricM2);
+  const groundQ = rayQuadric(origin, dir, k, a, groundQc, far);
+  const shell = quadricHits(shellQ);
+  const ground = quadricHits(groundQ);
+  const tStart = Math.max(shell[0], 0);
+  let tEnd = shell[1];
+  if (ground[0] > 0) {
+    tEnd = Math.min(tEnd, ground[0]);
+  }
+  if (shell[1] <= 0 || tEnd <= tStart) {
+    return [];
+  }
+  const nearest = f(-dotV(origin, dir));
+  const lowest = Math.min(Math.max(nearest, tStart), tEnd);
+  const before = f(lowest - tStart);
+  const after = f(tEnd - lowest);
+  const acrossZ = crossV(dir, crossV(origin, dir)).z;
+  const nearestFromStar = f(f(f(f(f(k - 1) * f(k + 1)) * dir.z) * acrossZ) / groundQ.qa);
+  let lowestFromStar = f(f(lowest - nearest) + nearestFromStar);
+  if (ground[0] > 0 && lowest === ground[0]) {
+    lowestFromStar = f(-f(Math.sqrt(Math.max(groundQ.disc, 0))) / groundQ.qa);
+  }
+  const edgeM = f(edgeHeightM);
+  const kE = f(f(a + edgeM) / f(c + edgeM));
+  let offsets: number[];
+  if (far) {
+    const q = rayQuadric(origin, dir, kE, f(a + edgeM), 0, true);
+    if (q.disc < 0) {
+      return [];
+    }
+    const halfChord = f(f(Math.sqrt(q.disc)) / q.qa);
+    const edgeFromStar = f(f(f(f(f(kE - 1) * f(kE + 1)) * dir.z) * acrossZ) / q.qa);
+    const centre = f(f(nearestFromStar - edgeFromStar) - lowestFromStar);
+    offsets = [f(centre - halfChord), f(centre + halfChord)];
+  } else {
+    const kGap = f(f(edgeM * f(c - a)) / f(c * f(c + edgeM)));
+    const z2 = f(origin.z * origin.z);
+    const qc = f(f(groundQc + f(f(kGap * f(kE + k)) * z2)) - f(edgeM * f(f(2 * a) + edgeM)));
+    const q = rayQuadric(origin, dir, kE, f(a + edgeM), qc, false);
+    if (q.disc < 0) {
+      return [];
+    }
+    offsets = quadricHits(q).map((t) => f(t - lowest));
+  }
+  const kTrue = figure.equatorialRadiusM / figure.polarRadiusM;
+  const sdx = dir.z * kTrue;
+  const tStar =
+    -(camera.x * dir.x + camera.y * dir.y + camera.z * kTrue * sdx) /
+    (dir.x * dir.x + dir.y * dir.y + sdx * sdx);
+  return offsets
+    .filter((o) => (o > -before && o < 0) || (o > 0 && o < after))
+    .map((offset) => {
+      // Where the walk's boundary stands: the step's own t near the body, its offset from t*
+      // beyond it, where the step's height is taken from that offset alone.
+      const t = far ? tStar + f(offset + lowestFromStar) : f(lowest + offset);
+      const p = { x: camera.x + t * dir.x, y: camera.y + t * dir.y, z: camera.z + t * dir.z };
+      return { t, h: shellHeight64(p, figure, edgeHeightM), fromStar: Math.abs(t - tStar) };
+    });
+}
+
+/**
+ * The near form's worst crossing height as a fraction of 10⁻⁶ · max(t, e, 1 km), and the count,
+ * over `nearReport`'s cameras, zeniths and azimuths.
+ */
+function nearShellReport(figure: SpheroidFigure): {
+  readonly worst: number;
+  readonly count: number;
+} {
+  let worst = 0;
+  let count = 0;
+  const a = figure.equatorialRadiusM;
+  for (const latitudeDeg of [0, 35, 70, 89.5]) {
+    // The cameras include each edge's own height, ±1 m, where q_g − e(2a + e) cancels most: a
+    // descent through a layer's base.
+    const heights = [-400, 1, 2, 20, 200, 2_000, 20_000, 400_000, ...EDGES_M.flatMap(nearEdgeM)];
+    for (const heightM of heights) {
+      const frame = localFrame(figure, latitudeDeg, heightM);
+      const dip = Math.acos(a / (a + Math.max(heightM, 1)));
+      const zeniths = [0, 30, 60, 80, 85, 88, 89, 89.5, 90, 90.3, 91, 93, 100, 120, 150, 180].map(
+        (deg) => (deg * Math.PI) / 180,
+      );
+      for (const s of [0.5, 0.9, 0.99, 1.01, 1.1, 2]) {
+        zeniths.push(Math.PI / 2 + dip * s);
+      }
+      for (const zenith of zeniths) {
+        for (const azimuthDeg of [0, 45, 90]) {
+          const dir = directionOf(frame, zenith, (azimuthDeg * Math.PI) / 180);
+          for (const edgeM of EDGES_M) {
+            for (const crossing of shellCrossingHeights(frame.p, dir, figure, false, edgeM)) {
+              count += 1;
+              const bound = 1e-6 * Math.max(crossing.t, edgeM, 1_000);
+              worst = Math.max(worst, Math.abs(crossing.h) / bound);
+            }
+          }
+        }
+      }
+    }
+  }
+  return { worst, count };
+}
+
+/**
+ * The closest-approach form's worst crossing height as a fraction of
+ * 4ε max(a, |P|) + 10⁻⁶ max(|t − t*|, 1 km), and the count, from `distanceM`, over `farReport`'s
+ * rays and rays that graze each edge's shell.
+ */
+function farShellReport(
+  figure: SpheroidFigure,
+  distanceM: number,
+): { readonly worst: number; readonly count: number } {
+  const a = figure.equatorialRadiusM;
+  const k = a / figure.polarRadiusM;
+  let worst = 0;
+  let count = 0;
+  for (const latitudeDeg of [0, 40]) {
+    const phi = (latitudeDeg * Math.PI) / 180;
+    const p = { x: distanceM * Math.cos(phi), y: 0, z: distanceM * Math.sin(phi) };
+    const sp = { x: p.x, y: p.y, z: p.z * k };
+    const r = Math.hypot(sp.x, sp.y, sp.z);
+    const toward = { x: -sp.x / r, y: -sp.y / r, z: -sp.z / r };
+    const tangents = [-0.3 * a, -50_000, -2_000, 0, 500, 2_000, 10_000, 30_000, 60_000];
+    for (const e of EDGES_M) {
+      tangents.push(...[-100, -1, -0.01, 0.01, 1, 100].map((d) => e + d));
+    }
+    for (const w of [
+      { x: -Math.sin(phi), y: 0, z: Math.cos(phi) },
+      { x: 0, y: 1, z: 0 },
+    ]) {
+      for (const tangentM of tangents) {
+        const sinGamma = (a + tangentM) / r;
+        const cosGamma = Math.sqrt(1 - sinGamma * sinGamma);
+        const ds = {
+          x: cosGamma * toward.x + sinGamma * w.x,
+          y: cosGamma * toward.y + sinGamma * w.y,
+          z: cosGamma * toward.z + sinGamma * w.z,
+        };
+        const d = { x: ds.x, y: ds.y, z: ds.z / k };
+        const length = Math.hypot(d.x, d.y, d.z);
+        const dir = vec(d.x / length, d.y / length, d.z / length);
+        for (const edgeM of EDGES_M) {
+          for (const crossing of shellCrossingHeights(p, dir, figure, true, edgeM)) {
+            count += 1;
+            const bound =
+              4 * EPSILON * Math.max(a, distanceM) + 1e-6 * Math.max(crossing.fromStar, 1_000);
+            worst = Math.max(worst, Math.abs(crossing.h) / bound);
+          }
+        }
+      }
+    }
+  }
+  return { worst, count };
+}
+
+describe.each(FIGURES)(
+  "the ray march's layer-edge crossings on their shell quadrics (rayMarch.wgsl, R08.T6.i) on %s",
+  (_name, figure) => {
+    it("put each piece boundary within 10⁻⁶ · max(t, e, 1 km) of its shell from −400 m to 400 km", () => {
+      // Measured 0.26–0.41 of the bound, over 25,116–26,107 crossings a figure (2026-10-13).
+      const report = nearShellReport(figure);
+      expect(report.count).toBeGreaterThan(20_000);
+      expect(report.worst).toBeLessThanOrEqual(1);
+    });
+
+    it.each([1.5, 6.6, 60, 0])(
+      "put each piece boundary from %d a (0: 10⁹ m) within 4ε max(a, |P|) + 10⁻⁶ max(|t − t*|, 1 km) of its shell",
+      (multiple) => {
+        const distanceM = multiple > 0 ? multiple * figure.equatorialRadiusM : 1e9;
+        // Measured 0.10–0.59 of the bound, over 926–1,272 crossings each (2026-10-13).
+        const report = farShellReport(figure, distanceM);
+        expect(report.count).toBeGreaterThan(800);
+        expect(report.worst).toBeLessThanOrEqual(1);
+      },
+    );
   },
 );
 

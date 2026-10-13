@@ -12,7 +12,7 @@
 // spheroid's normal, and the tables are read at that height; the ground's bounce reads the sun's
 // transmittance at the ground (Bevy reads it at radius 0); the steps are placed toward the ray's
 // lowest point, the point nearest the body's centre, or, for the camera side of a two-sided ray
-// from inside the atmosphere, toward the camera (`marchSplit` in source.wgsl, R05.T12.e), where
+// from inside the atmosphere, toward the camera (`marchSplit` in common.wgsl, R05.T12.e), where
 // Bevy spaces them evenly, and each is sampled at its midpoint; each term's density is evaluated
 // once a sample; a step's in-scattering is taken without f32's cancellation (`stepFactor` in
 // common.wgsl). The placement takes the centre alone: it needs no spheroid.
@@ -31,6 +31,12 @@
 // Changes (plan R08, R08.T6.c, Design notes 5 and 8): the ray's own path takes its absorbers by
 // the path's column, under the sun's curves of growth (`viewAbsorberStep` in source.wgsl), and
 // the sun's transmittance, the bare ground's included, is the table's optical depth with them.
+//
+// Changes (plan R08, R08.T6.i; `decision-r08-t6d-findings.md` section 1): where the medium has
+// layer edges, each side of the ray's split is cut into pieces where the ray crosses them
+// (`MarchWalk` in common.wgsl), at the same count; a medium with none takes the steps as before.
+// Each edge e's shell is the quadric (a + e, c + e), as the top's is (a + H, c + H)
+// (`marchWalkCrossShell`).
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -43,6 +49,7 @@
 @group(0) @binding(8) var rayMarchOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(9) var absorberColumns : texture_2d<f32>;
 @group(0) @binding(10) var absorberCurves : texture_2d<f32>;
+@group(0) @binding(11) var<uniform> layerEdges : LayerEdges;
 
 // A ray's quadric about a shell of equatorial radius `radius`, in space scaled by
 // S = diag(1, 1, k) to a sphere of that radius: Q(t) = |S (P + t d)|^2 - radius^2 = qa t^2 +
@@ -101,6 +108,104 @@ fn normalAt(p : vec3f, a : f32, c : f32) -> vec3f {
   return normalize(vec3f(p.x / (a * a), p.y / (a * a), p.z / (c * c)));
 }
 
+// A pixel's ray and what its samples' heights are formed from (Design note 18): the camera's
+// position and the ray's direction, the datum's radii, whether the ground's quadric is taken about
+// the closest approach (`far`), that quadric, Q* = -disc / qa there, t_low - t* (the split's lowest
+// point from the quadric's own closest approach), a^2, and the scattering angle.
+struct MarchRay {
+  origin : vec3f,
+  dir : vec3f,
+  a : f32,
+  c : f32,
+  far : bool,
+  groundQ : RayQuadric,
+  qStar : f32,
+  lowestFromStar : f32,
+  a2 : f32,
+  angle : ScatteringAngle,
+}
+
+// A march along a pixel's ray so far: the light it has gathered, its throughput and its own
+// absorber path.
+struct PixelMarch {
+  luminance : vec3f,
+  throughput : vec3f,
+  path : AbsorberPath,
+}
+
+// One step of the march, at its midpoint: its height above the spheroid along the radius from the
+// ground's quadric, about t* beyond h0 = a / 2 and from the camera within it, then the medium
+// there, its source and its in-scattering.
+fn rayMarchStep(march : ptr<function, PixelMarch>, ray : MarchRay, stepAt : MarchStep) {
+  let dt = stepAt.dtM;
+  let p = ray.origin + stepAt.tM * ray.dir;
+  let groundQ = ray.groundQ;
+  var bigQ : f32;
+  if (ray.far) {
+    let fromStar = stepAt.fromLowestM + ray.lowestFromStar;
+    bigQ = groundQ.qa * fromStar * fromStar + ray.qStar;
+  } else {
+    bigQ = stepAt.tM * (groundQ.qa * stepAt.tM + 2.0 * groundQ.qb) + groundQ.qc;
+  }
+  let heightM = radialHeight(length(p), bigQ / ray.a2);
+  let muSun = dot(view.sun.xyz, normalAt(p, ray.a, ray.c));
+  let local = sampleMediumAt(heightM, ray.angle);
+  let next = viewAbsorberStep((*march).path, local, dt);
+  let stepDepth = local.extinction * dt + (next.depth - (*march).path.depth);
+  (*march).path = next;
+  let stepTransmittance = exp(-stepDepth);
+  let source = sourceAt(transmittance, multiScattering, view.tables.x, heightM, muSun, local);
+  (*march).luminance += (*march).throughput * source * dt * stepFactor(stepDepth);
+  (*march).throughput *= stepTransmittance;
+}
+
+// Adds to the walk where the ray crosses the shell of the march edge `edgeM` above the datum (plan
+// R08, R08.T6.i): the quadric (a + e, c + e), as the top's shell (a + H, c + H) stands for the top,
+// in space scaled by S_e = diag(1, 1, k_e), k_e = (a + e) / (c + e), crossed at most twice, each
+// crossing as its signed distance from t_low, the split's lowest point. Within h0 = a / 2 the
+// crossings are the quadric's roots (`quadricHits`), its constant |S_e P|^2 - (a + e)^2 formed
+// from the ground's q_g, which comes formed in f64, as q_g + (k_e - k)(k_e + k) P_z^2 - e (2a + e),
+// with k_e - k = e (c - a) / (c (c + e)): no difference of large values (Design note 18). Beyond it
+// they stand about the quadric's own closest approach t*_e, at -/+ sqrt(disc) / qa with disc from
+// Lagrange's identity, t*_e taken from the ground's t* as t_o - t* is (`nearestFromStar`, with
+// k_e), so that each lies from t_low without a difference of large distances, as the steps do.
+fn marchWalkCrossShell(
+  walk : ptr<function, MarchWalk>,
+  ray : MarchRay,
+  nearestFromStar : f32,
+  acrossZ : f32,
+  edgeM : f32,
+) {
+  let a = ray.a;
+  let c = ray.c;
+  let kE = (a + edgeM) / (c + edgeM);
+  if (ray.far) {
+    let q = rayQuadric(ray.origin, ray.dir, kE, a + edgeM, 0.0, true);
+    if (q.disc < 0.0) {
+      return;
+    }
+    let halfChord = sqrt(q.disc) / q.qa;
+    let edgeNearestFromStar = (kE - 1.0) * (kE + 1.0) * ray.dir.z * acrossZ / q.qa;
+    // t*_e from t_low: (t*_e - t_o) + (t_o - t*) - (t_low - t*).
+    let centre = (nearestFromStar - edgeNearestFromStar) - ray.lowestFromStar;
+    marchWalkCross(walk, centre - halfChord);
+    marchWalkCross(walk, centre + halfChord);
+    return;
+  }
+  let k = a / c;
+  let kGap = edgeM * (c - a) / (c * (c + edgeM));
+  let z2 = ray.origin.z * ray.origin.z;
+  let qc = (view.exact.x + kGap * (kE + k) * z2) - edgeM * (2.0 * a + edgeM);
+  let q = rayQuadric(ray.origin, ray.dir, kE, a + edgeM, qc, false);
+  if (q.disc < 0.0) {
+    return;
+  }
+  let hits = quadricHits(q);
+  let lowestM = (*walk).split.lowestM;
+  marchWalkCross(walk, hits.x - lowestM);
+  marchWalkCross(walk, hits.y - lowestM);
+}
+
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id : vec3u) {
   // The target may be larger than this frame's output (it grows and is never remade smaller).
@@ -157,39 +262,36 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   // t_o, or a segment's start), t_low - t_o is formed as a difference, which rounds to about
   // eps |P|, the depth's or the shell root's own precision there.
   let qStar = -groundQ.disc / groundQ.qa;
-  let nearestFromStar = (k - 1.0) * (k + 1.0) * dir.z * cross(dir, cross(origin, dir)).z
-    / groundQ.qa;
+  let acrossZ = cross(dir, cross(origin, dir)).z;
+  let nearestFromStar = (k - 1.0) * (k + 1.0) * dir.z * acrossZ / groundQ.qa;
   var lowestFromStar = (split.lowestM - nearest) + nearestFromStar;
   if (hitsGround && split.lowestM == ground.x) {
     lowestFromStar = -sqrt(max(groundQ.disc, 0.0)) / groundQ.qa;
   }
-  let a2 = a * a;
   let angle = scatteringAngle(dir, view.sun.xyz);
-  var luminance = vec3f(0.0);
-  var throughput = vec3f(1.0);
-  var path = absorberPathStart();
-  for (var i = 0u; i < samples; i++) {
-    let stepAt = marchStep(split, i);
-    let dt = stepAt.dtM;
-    let p = origin + stepAt.tM * dir;
-    var bigQ : f32;
-    if (far) {
-      let fromStar = stepAt.fromLowestM + lowestFromStar;
-      bigQ = groundQ.qa * fromStar * fromStar + qStar;
-    } else {
-      bigQ = stepAt.tM * (groundQ.qa * stepAt.tM + 2.0 * groundQ.qb) + groundQ.qc;
+  let ray = MarchRay(origin, dir, a, c, far, groundQ, qStar, lowestFromStar, a * a, angle);
+  var march = PixelMarch(vec3f(0.0), vec3f(1.0), absorberPathStart());
+  // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk; the
+  // edges are the same for every pixel, so the branch is uniform (R08.T6.i).
+  let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);
+  if (edgeCount == 0u) {
+    for (var i = 0u; i < samples; i++) {
+      rayMarchStep(&march, ray, marchStep(split, i));
     }
-    let heightM = radialHeight(length(p), bigQ / a2);
-    let muSun = dot(view.sun.xyz, normalAt(p, a, c));
-    let local = sampleMediumAt(heightM, angle);
-    let next = viewAbsorberStep(path, local, dt);
-    let stepDepth = local.extinction * dt + (next.depth - path.depth);
-    path = next;
-    let stepTransmittance = exp(-stepDepth);
-    let source = sourceAt(transmittance, multiScattering, view.tables.x, heightM, muSun, local);
-    luminance += throughput * source * dt * stepFactor(stepDepth);
-    throughput *= stepTransmittance;
+  } else {
+    var walk : MarchWalk;
+    marchWalkStart(&walk, split);
+    for (var e = 0u; e < edgeCount; e++) {
+      let edgeM = layerEdges.middles[e / 4u][e % 4u];
+      marchWalkCrossShell(&walk, ray, nearestFromStar, acrossZ, edgeM);
+    }
+    marchWalkReady(&walk);
+    for (var i = 0u; i < samples; i++) {
+      rayMarchStep(&march, ray, marchWalkStep(&walk, i));
+    }
   }
+  var luminance = march.luminance;
+  let throughput = march.throughput;
   // The bare ground under the atmosphere, seen from above it where nothing is drawn.
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     let p = origin + ground.x * dir;

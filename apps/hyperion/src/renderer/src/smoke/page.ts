@@ -23,6 +23,7 @@ import {
   type CapturedImage,
   checkAtmosphereFrames,
   checkAtmosphereHeights,
+  checkAtmosphereLayerEdges,
   checkAtmosphereSteps,
   checkAtmosphereTables,
   checkAtmosphereTwins,
@@ -219,6 +220,9 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
   );
   await checks.group("R08.T6.g heights and angles in f32", () =>
     checkAtmosphereHeights(engine, checks),
+  );
+  await checks.group("R08.T6.i the marches cut at layer edges", () =>
+    checkAtmosphereLayerEdges(engine, checks),
   );
   await checks.group("R05.T11.a the terrain's resources", () =>
     checkTerrainResources(engine, checks),

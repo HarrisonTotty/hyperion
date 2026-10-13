@@ -3317,6 +3317,14 @@ photometry from R06's fixture.
       and its worst per family and class is recorded beside `LOW_TWIN_WORST`, which a test medium
       does not re-pin;
     - a family that misses is recorded and raised with the count that would pass, not widened;
+    - the twilight ray "limb, 0.1 H, sun 90°/0°" on the slab Earth is pinned both ways at its
+      measured 5.63%, to 0.01 point, against its 5% tolerance (`decision-r08-t6d-findings.md`
+      §11.4).
+      - It has no shadow edge: its sun lies along its own line of sight at the tangent point.
+      - Its miss is the optically thick air about t\* (blue depth about 13.6 from the camera). There
+        the piece next to t\* takes 6 steps of up to depth 4, against R05.T12.e's placement's
+        about 10 over the same 476 km.
+      - The march stays at 32 steps on high;
     - `RECORDED_LAYER_MISS` is removed, and its figures are recorded here as the before;
     - the four-absorber fixture's gate figures are recorded;
     - on R05's Earth and the measured Earth (R08.T6.h), every march's steps are R05.T12.e's to the
@@ -3745,7 +3753,15 @@ Tests (no GPU, CPU twin):
   transmittance is recorded: beyond two or three Earth columns no three wavelengths hold (R08.T4.a
   measured 0.0106, 0.0151 and 0.100 in u′v′ for dry air at the fitted triple, all twelve suns), so
   a deep atmosphere's low sun is off by more than 0.01, and such a medium's scattered light is the
-  spectral bakes' (Design note 5).
+  spectral bakes' (Design note 5);
+- the slab Earth's pinned twilight limb ray (R08.T6.i; `decision-r08-t6d-findings.md` §11.4) is
+  measured in the twin at 32 march steps with the piece next to t\* keeping no fewer steps than
+  R05.T12.e's placement puts there.
+  - The floor is adopted only if the slab Earth's gate then holds every ray at high's counts, and
+    no ray of R05's Earth or the measured Earth moves past its tolerance. The figures are recorded
+    either way.
+  - If it is not adopted, the march count is raised with "main" before R08.T10.b draws a medium
+    with layer edges, with R08.T6.i's 36 steps as the measured fallback.
 
 Acceptance: `pnpm test` and `just test-render` pass, and by hand a binary sky on an Earth fixture
 shows both twilights, recorded here with the development machine's timings and, from the owner,
@@ -4063,7 +4079,16 @@ the budget ([Performance budget](../../brainstorming/rendering-and-planets.md#pe
   figures, against Design note 11's 0.57 and 0.72 MB, of an ice giant (2 and 2), and of a giant
   at plan 14's cap (f = 0.2, 9–10 slices and 6–7 bands, Design note 11's worst generated case),
   and any widening of `KAPPA_STEP` or `BAND_STEP`. If the capped giant stays over 2 MB after both
-  widenings, it is reported to "main" for a decision agent's ruling (Design note 11).
+  widenings, it is reported to "main" for a decision agent's ruling (Design note 11);
+- R08.T6.i's layer-edge setup, against the lane's count:
+  - about 0.7 step (4%) for a ground sky-view ray crossing each edge once;
+  - 1.5–2 steps (9–11%) for a two-sided ray-march ray crossing two edges twice;
+  - about 80 words of private memory on the edged branch.
+
+  Each pass is timed on an edged medium (the slab Earth) and on Earth. Earth's time is also set
+  beside the kernels of R08.T6.h, before T6.i, on both machines, so that the private array's cost
+  to occupancy on media with no edge is seen. A cost there beyond the run's noise is raised with
+  "main" (`decision-r08-t6d-findings.md` §11.4).
 
 R05's `just descent-spike` runs with the generalised atmosphere, and its percentiles are recorded
 against R05's. Where the low setting misses, `TABLE_SIZES` changes here. Acceptance: the record is
@@ -6286,6 +6311,209 @@ generator, and the reference's sampling needs no domain tag.
     draws R06's Sun in R07's bodies (`bodies.ts`, `meshBodies.ts`), whose checks hold the GPU
     against CPU twins under the same disc. `just test-render` was queued on the heavy-test lock at
     the commit, and its result is in `handoff-r08-sun.md` and was reported to main.
+
+- **Deviations in T6.i, as built** (2026-10-13). The WGSL (`common`, `transmittance`, `skyView`,
+  `rayMarch`, `multiScattering`), `marchSteps.ts`, `tables.ts`, `tablesCpu.ts`, `hillaire.ts` and
+  the smoke (`smoke/atmosphere.ts`, `smoke/harness.ts`, `smoke/page.ts`); tests in
+  `marchSteps.test.ts`, `tablesCpu.test.ts`, `tables.test.ts`, `hillaire.test.ts`,
+  `precision.test.ts`, `layerEdges.test.ts` and a new `smoke/harness.test.ts`.
+  - _Names beyond the text._ `marchSteps.ts`: `MARCH_EDGES_MAX`, `marchEdgesM`, `MarchPieces`,
+    `marchPieces` and `marchPiecesSteps`. `tablesCpu.ts`: `mediumMarchEdgesM`, `rayPieces` and
+    `piecedSteps`; `MultiScatteringOptions.placement` gains `pieces`, the kernel's. `tables.ts`:
+    `LAYER_EDGES_FLOATS` and `AtmosphereTables.layerEdges`. WGSL: `LayerEdges` (moved from
+    `transmittance.wgsl` to `common.wgsl`) gains `middles` and `count`; `common.wgsl` gains
+    `MARCH_EDGES_MAX`, `MARCH_CROSSINGS_MAX`, `MarchWalk` and `marchWalkStart`, `marchWalkCross`,
+    `marchSideShares`, `marchWalkReady`, `marchWalkEnter`, `marchWalkStep` and
+    `marchWalkCrossSphere`; `rayMarch.wgsl` `marchWalkCrossShell`. Each kernel's step moved into a
+    function (`skyViewStep`, `rayMarchStep`, `integrateStep`), called from both loops below. The
+    smoke: `checkAtmosphereLayerEdges`, and `Checks.times` with `recordTimes`.
+  - _The edges._ `packLayerEdges` forms each ramp's middle height in `f64` from its
+    `layerEdgesM` pair, as the kernels read the table (`kernelMedium`), and appends the middles
+    (`MARCH_EDGES_MAX`, 16) and their count after T6.d's pairs: 52 floats, one uniform, bound to the
+    transmittance, multiple-scattering, sky-view and ray-march kernels. The text has the kernels
+    take the pairs; forming the middles once lets each kernel decide by one uniform read.
+    - A medium with no edge (R05's Earth, the measured Earth) has a count of 0. Its kernels then run
+      R05.T12.e's loop and declare no walk: WGSL zero-initialises function variables, so the walk's
+      arrays are declared only in the branch that uses them. The branch is uniform.
+    - The aerial perspective declares no edges: its pipeline's `auto` layout holds only the
+      bindings its entry point uses, and the engine binds every declared one.
+  - _The crossings._ The sky view and the multiple-scattering kernel take `shellCrossings` on their
+    sphere. The ray march takes each edge e's shell quadric (a + e, c + e), as the top's.
+    - Within h₀ = a ÷ 2 its constant is q_g + (k_e − k)(k_e + k) P_z² − e(2a + e), from the
+      ground's `f64` q_g, with k_e − k = e(c − a) ÷ (c(c + e)), and its roots `quadricHits`'.
+    - Beyond it, each crossing stands about the quadric's own closest approach t\*_e, at
+      ∓√disc ÷ q_a from Lagrange's identity, with t\*_e taken from the ground's t\* as
+      `nearestFromStar` is, k_e for k. So each piece's ends lie from t_low as the steps' offsets do.
+    - The shell quadric stands off the surface at radial height e by up to 0.08–0.16 m on WGS 84
+      at 18.6–38.5 km. On a Saturn-class figure (f = 0.098) it is 74–154 m there and 398 m at
+      100 km, as the top's is (computed). On a giant a cut stands that far from its edge, until
+      T6.f finds the crossings on its slices (T6.f's text).
+  - _The pieces._ Each crossing is held as its signed offset from t\*, sorted on insertion
+    (`MARCH_CROSSINGS_MAX`, 32, never exceeded: two edges a term, each crossed twice).
+    - A side's pieces take one step each and share the rest by the square roots of their lengths,
+      rounded cumulatively in ascending t, one square root a piece.
+    - Each piece's count, unit L ÷ n² and placed end are held as the walk enters it
+      (`marchWalkEnter`). A step costs what `marchStep` does: a compare and the closed form.
+    - A side that crosses no edge calls `marchStep` itself, so the steps of a segment that crosses
+      none are R05.T12.e's to the bit.
+  - _R05.T12.e's gate on the slab Earth, the marches cut_ (`tablesCpu.test.ts`; worst e by family,
+    %):
+
+    | Family     | High, before (T6.d) | High, after | Low, before | Low, after |
+    | ---------- | ------------------- | ----------- | ----------- | ---------- |
+    | disc       | 7.75                | 1.27        | 8.33        | 6.70       |
+    | limb       | 21.28               | 5.63        | 44.86       | 20.86      |
+    | inside     | 1.43                | 0.79        | 9.88        | 3.27       |
+    | near-level | 0.41                | 0.41        | 1.61        | 1.61       |
+    | sky        | 0.51                | 0.79        | 9.58        | 19.14      |
+    | band       | 4.71                | 1.66        | 61.39       | 30.45      |
+    | past       | 3.21                | 0.21        | 11.78       | 9.74       |
+    | high band  | 5.70                | 1.61        | 46.31       | 38.64      |
+    | high limb  | 14.21               | 1.61        | 59.05       | 36.80      |
+    - The worst at high goes from 21.28% (limb) to 5.63%. The ruling's model gave 10.1% to 0.79%:
+      the twin's slab misses more as built and more once cut too, every family's after above the
+      model's pieces (limb 5.63% against 0.79%, high limb 1.61% against 0.26%).
+    - At low the pieces trade the sky family (9.58% to 19.14%, its twilight rays) for every other,
+      as the ruling's model traded its sky (1.17% to 2.35%) and disc for the limbs
+      (`decision-r08-t6d-findings.md` §1.3). The sky view's sides from the ground take fewer steps
+      about the camera once cut at the slab.
+    - Every reference converges at 2,048 steps. On 856 sides of the 658 rays that cross the edges
+      the pieces cut, at both settings' counts; no side has more pieces than steps.
+    - The gate's references are cut too: the twin's `twinPixel` places every placed march by the
+      kernels' rule, the references and their confirmations among them, so the slab's references
+      now split at the edges. The "before" columns are T6.d's, against its uncut references, which
+      converged as well. So the convergence table's 21.30% at 32 steps stands against another
+      reference than the limb's recorded 21.28%; both converge to 0.05%.
+    - _Raised, not widened: one ray at high's counts._ "limb, 0.1 H, sun 90°/0°" is 5.63% against
+      its twilight 5% (1.05% is the worst ordinary limb ray).
+      - Its error is the dense air about t\*, not the layer's. The sun is along the ray there
+        (s = d at the tangent point), so no sample is in the ground's shadow: the ray clears the
+        ground by 843 m.
+        - The air is optically thick: blue depth about 13.6 from the camera to t\*.
+        - The piece from t\* to the slab's base, 476 km, takes six of the side's 16 steps,
+          smallest 13.2 km, at optical depths of 1–4 a step. R05.T12.e's placement put about ten of
+          its 16 there (the side is 1,129 km), smallest 4.4 km (the science check).
+      - It converges with the ray march's count. The limb family's worst e, %, cut and under
+        R05.T12.e's placement on the slab (from 35 steps on, the cut limb's worst is the 0.3 H ray;
+        the 0.1 H ray is 2.25% at 35):
+
+        | Steps | 32    | 33   | 34   | 35   | 36    | 40    | 44    | 48    | 56   | 64    |
+        | ----- | ----- | ---- | ---- | ---- | ----- | ----- | ----- | ----- | ---- | ----- |
+        | Cut   | 5.63  | 5.16 | 5.16 | 2.74 | 2.39  | 2.21  | 2.44  | 2.49  | 1.11 | 1.19  |
+        | R05's | 21.30 |      |      |      | 22.03 | 14.25 | 12.95 | 17.53 | 7.35 | 10.47 |
+
+      - Every ray of the gate holds at 36 steps of the ray march (tested), and at 35, the least that
+        does (a scratch run; at 33 and 34 the ray is 5.16%). The measured Earth, which has no edge,
+        holds at 32. The test pins the ray, both ways, to the 0.01 point, and asserts the pass at
+        36, §11.4's measured fallback.
+      - Ruled 2026-10-13 (`decision-r08-t6d-findings.md` §11): high's ray march stays at 32 and the
+        ray stays pinned. 36 would cost +12.5% on every high ray-march pixel of every medium for
+        0.63 point on one twilight ray of a test medium, and no drawn medium has an edge until
+        P14.T24.c reaches R08.T10. R08.T7 measures a cure that adds no sample, a floor on the piece
+        next to t\* (its Tests, §11.4), with 36 as the measured fallback.
+    - _Low_ meets R05.T12.e's low gate: worst 38.64% (high band, 99,999 m, view zenith 99.879°, sun
+      90°/180°) against even steps' 73.07%.
+    - Beside `LOW_TWIN_WORST`, low's worst by class is: rayMarch 5.97% ordinary (disc) and 20.86%
+      twilight (limb), against 0.049 and 0.182; sky view 16.06% and 30.45% (band), against 0.091
+      and 0.176; the high sky view 13.35% and 38.64%, against 0.116 and 0.495. That puts 17 rays
+      over. The slab is a test medium and does not re-pin it (`decision-r08-t6d-findings.md` §10.4.3).
+    - `RECORDED_LAYER_MISS` is removed, and its figures are the "before" columns. So is the run
+      without the ozone, which no failure needs now.
+
+  - _The four-absorber fixture's gate_ (recorded by a scratch test, not reproducible from committed
+    code: `runGate(gateRays(), twinPixel(fourAbsorberMedium().medium, …), [HIGH, LOW, evenAt(LOW)])`
+    as `tablesCpu.test.ts` runs the slab's; its edges at 11.89, 11.95 and 42.89 km).
+    - At high every ray holds. Its worst is limb 4.03% (twilight; 1.72% ordinary), then high limb
+      1.23%; disc 1.65, inside 0.68, near-level 0.43, sky 0.85, band 0.91, past 0.45 and high band
+      0.93%.
+    - At low its worst is 42.14% against even steps' 67.91%, and 24 rays stand over
+      `LOW_TWIN_WORST`.
+    - The pieces cut 848 sides of 658 rays, and crowd none.
+  - _Bit for bit._ R05's Earth and the measured Earth have no march edge, as given and as the
+    kernels read them, and a kernels' count of 0. On them the twin's pieced steps equal
+    `placedSteps`' on every gate ray at 16, 32 and 75 steps, on the sphere and on WGS 84. The
+    multiple-scattering twin's `pieces` table equals its `placed` one (tested).
+  - _The multiple-scattering table on the slab Earth_, against its 4,096-step value over the 81
+    texels of T6.a's test (a scratch run of `multiScatteringTwin` at `placed` and `pieces`): R08.T6.d's
+    placed steps 10.17% at (16, 16), the pieces 1.78% at (16, 0).
+    The 4,096-step tables placed and pieced agree to 5 × 10⁻⁵, and pieced to 8,192 to 4 × 10⁻⁵.
+    The test holds 25 of those texels against 1,024 pieced steps: over 8% before, under 2.5% after.
+  - _The aerial perspective_, its even steps against a reference cut at the edges with 20 m steps
+    a piece, from the camera to every fourth slice's far face, on the slab Earth as the kernels
+    read it. It is a scratch test, not reproducible from committed code: `aerialPerspectiveTwin`
+    against `marchTwin` over steps cut at `shellCrossingsM`'s crossings, at every other froxel of
+    `tablesCpu.test.ts`'s `equatorCamera` views. Its worst e is under 2%, so nothing is raised:
+
+    | From  | High, sun 20° | High, sun 5° | Low, sun 20° | Low, sun 5° |
+    | ----- | ------------- | ------------ | ------------ | ----------- |
+    | 2 m   | 0.175%        | 0.162%       | 0.745%       | 0.443%      |
+    | 2 km  | 0.277%        | 0.132%       | 0.882%       | 0.468%      |
+    | 20 km | 0.188%        | 0.146%       | 0.424%       | 0.434%      |
+    | 30 km | 0.085%        | 0.082%       | 0.197%       | 0.187%      |
+
+  - _Precision_ (`precision.test.ts`, in `f32` emulation), each at the fraction of R08.T6.g's
+    height bound shown:
+    - the per-frame spheres' piece boundaries: 0.14–0.19, over 9,062–9,444 crossings a sphere,
+      the ground's rays among them;
+    - the ray march's near form: 0.26–0.41, over 25,116–26,107 crossings a figure, from −400 m to
+      400 km;
+    - its far form: 0.10–0.59, over 926–1,272 crossings each from 1.5a, 6.6a, 60a and 10⁹ m, rays
+      grazing each edge among them;
+    - the cameras include each edge's own height, ±1 m, where a crossing's constant cancels most
+      (a descent through a layer's base), and the edges are T6.d's ozone slab's four and 15 and
+      60 km;
+    - the walk itself places every step as `marchPiecesSteps` does within `f32`'s rounding of t,
+      and is `marchStep` to the bit with no crossing.
+  - _The smoke._ `checkAtmosphereLayerEdges` holds the slab Earth's sky view and ray march on high
+    in both arms, over the GPU's own per-planet tables, in three views: from 2 m and 2 km with the
+    sun 20° up and a surface 60 km ahead, and the limb from 400 km with the sun 20° at its tangent
+    point.
+    - Each view also holds the aerial perspective against its twin and checks that the composite
+      is finite and within range (`checkViewArms`, as R08.T6.g's group does). T6.i leaves the
+      aerial perspective as it was; its twin is about a sixth of a view's twins' samples.
+    - R08.T6.g's envelope for views from above the top re-marches a sky-view texel's turned rays
+      by the same cut steps (`piecedSteps`); the ray march's already went through its twin.
+    - _Not yet run to its end._ The gate's smoke (smart-ci, 2026-10-13, at a 1-minute load of
+      20–30) met the 180 s watchdog in both variants at 185.8 s. It was cut in R08.T6.g's group,
+      before this one, as T6.h's had been at 202.8 s, so no check's verdict reached the report.
+      - The page's group times (default variant): R08.T6.b's 73.0 s, R05.T12.e's 24.9 s,
+        R07.T9's 12.5 s, R05.T12.c's 11.9 s, R07.T8.a's point and disc bodies 10.6 s and the
+        photorealistic frame 8.4 s, R07.T10.c's 5.2 s and the catalogue 3.9 s; about 161 s to the
+        end of R08.T6.b's.
+      - A scratch run of the page cut to the catalogue, R05.T12.b, R08.T6.b and this group was
+        lost to the machine's freeze at 05:10, before it took the lock.
+      - So the GPU's walk is not yet held against its twin. The acceptance's `just test-render` is
+        integration's, after the perf lane's fix to the watchdog (main, 2026-10-13). The `f32`
+        emulation of the walk (`precision.test.ts`) and naga's validation of every assembled
+        kernel stand meanwhile.
+    - The per-planet tables are not twinned there, for the watchdog. R08.T6.b's group holds the
+      multiple-scattering kernel, which cuts its steps too, on the four-absorber fixture, whose
+      layers have edges, and that fixture's per-frame kernels on both settings.
+    - The page times its groups, beyond T6.i's text: `decision-r08-t6d-findings.md` §8 left that
+      to the perf lane, and main asked T6.i for it, for the watchdog question (T6.d's record).
+      Each group's time goes to the log as a console warning as it ends, so a run the watchdog
+      ends still shows where its time went. A completed run also records them as one closing check
+      (`Checks.recordTimes`). `smoke/harness.test.ts` (new) holds the times, the warning and the
+      check.
+  - _Cost_, by an operation count; the passes' times are not measured (pending, below).
+    - Per ray on a medium with edges:
+      - for each edge, its pair of roots: `shellCrossings`, a square root and about a dozen
+        operations; the ray march's quadric, about twenty and a square root;
+      - for each root, an insertion into the sorted list;
+      - for each piece, a square root and its share.
+    - The setup is about 0.7 step's ALU for a sky-view ray from the ground that crosses each edge
+      once (about 4% of a low 16-step ray). It is about 1.5–2 steps for a two-sided ray-march ray
+      that crosses two edges twice (9–11%), the shell quadric's near form taking four divisions and
+      a square root an edge. It loads no texel. This is the science check's count, above the
+      ruling's "under about 3%" (`decision-r08-t6d-findings.md` §1.4). §11.4 keeps T6.i as built and
+      gives R08.T11 the timing, Earth's beside the kernels before T6.i among it.
+    - The walk holds about 80 words of private memory, indexed by variable, on the branch for a
+      medium with edges. Most GPUs keep them in scratch.
+    - Per step, as `marchStep`.
+    - On a medium with no edge: one uniform read and a branch.
+    - The development machine was never quiet (the slow pass's B part held the heavy lock, at a
+      1-minute load of 20–40). So the passes' times beside T6.g's wait with T6.g's, by the same
+      run. R08.T11 holds them, and the UHD 620's are the owner's.
 
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7).

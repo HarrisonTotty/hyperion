@@ -18,6 +18,7 @@ import {
   type AtmosphereMedium,
   columnLengthM,
   densityAt,
+  layerEdgesM,
   type MediumTerm,
   type PhaseFunction,
   phaseAt,
@@ -36,6 +37,7 @@ import {
   densityTableLevelsM,
   KERNEL_ARM_FORMAT,
   kernelMedium,
+  LAYER_EDGES_FLOATS,
   MAX_TERMS,
   MULTI_SCATTERING_KERNEL,
   MULTI_SCATTERING_SAMPLES,
@@ -175,7 +177,35 @@ describe("AtmosphereTables", () => {
       ...packLayerEdges(TABULATED),
     ]);
     expect(packLayerEdges(TABULATED).some((h) => h > 0)).toBe(true);
-    expect(multiScattering?.bindings.uniforms["layerEdges"]).toBeUndefined();
+    // R08.T6.i: the multiple-scattering kernel cuts its directions' steps at the same edges.
+    expect([...(multiScattering?.bindings.uniforms["layerEdges"] ?? [])]).toEqual([
+      ...packLayerEdges(TABULATED),
+    ]);
+    expect(tables.layerEdges).toEqual(packLayerEdges(TABULATED));
+  });
+
+  it("packs each ramp's middle height for the per-frame marches, and their count (R08.T6.i)", () => {
+    const packed = packLayerEdges(TABULATED);
+    expect(packed).toHaveLength(LAYER_EDGES_FLOATS);
+    // The haze's two ramps, as the kernels read its table: from 0 to its peak and back to 0.
+    const haze = kernelMedium(TABULATED).terms[2];
+    if (haze === undefined) {
+      throw new Error("the medium has no haze");
+    }
+    const edges = layerEdgesM(haze.density);
+    expect(edges).toHaveLength(4);
+    const middles = [
+      0.5 * ((edges[0] ?? 0) + (edges[1] ?? 0)),
+      0.5 * ((edges[2] ?? 0) + (edges[3] ?? 0)),
+    ];
+    const at = MAX_TERMS * 4;
+    expect([...packed.subarray(at, at + 2)]).toEqual(middles.map(Math.fround));
+    expect([...packed.subarray(at + 2, at + 16)].every((h) => h === -1)).toBe(true);
+    expect([...packed.subarray(at + 16)]).toEqual([2, 0, 0, 0]);
+    // A medium with no tabulated layer has none, and its marches take R05.T12.e's steps.
+    const none = packLayerEdges(R05_EARTH_REFERENCE);
+    expect([...none.subarray(at + 16)]).toEqual([0, 0, 0, 0]);
+    expect([...none.subarray(0, at + 16)].every((h) => h === -1)).toBe(true);
   });
 
   it("makes a tabulated medium's tables at their shape and releases the placeholders", async () => {

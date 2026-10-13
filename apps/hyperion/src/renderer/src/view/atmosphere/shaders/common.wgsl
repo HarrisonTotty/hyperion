@@ -1,6 +1,7 @@
 // The atmosphere's shared WGSL (plan R05, Design note 16): the medium as a list of terms, the
 // spherical shell's geometry from a height, the tables' parameterisations on a sphere of given
-// radius (plan R08, Design notes 18 and 19) and the steps of a march (R05.T12.e). Prepended, after
+// radius (plan R08, Design notes 18 and 19), the steps of a march (R05.T12.e) and their cut at the
+// medium's layer edges (`MarchWalk`, plan R08, R08.T6.i). Prepended, after
 // `view/shaders/preciseTrig.wgsl`, to every kernel and to the composite (`tables.ts`,
 // `hillaire.ts`). The helpers that read a kernel's `medium` uniform are in `medium.wgsl` and
 // `source.wgsl`, which the composite does not take.
@@ -502,4 +503,264 @@ fn marchStep(split : MarchSplit, i : u32) -> MarchStep {
   let unitM = split.afterM / (n * n);
   let fromLowest = unitM * (k * k + k + 0.5);
   return MarchStep(split.lowestM + fromLowest, unitM * (2.0 * k + 1.0), fromLowest);
+}
+
+// --- The layer edges (plan R08, R08.T6.d and R08.T6.i) -------------------------------------------
+
+// The most edges the per-frame marches cut at: one a ramp, two a term (R08.T6.i).
+const MARCH_EDGES_MAX : u32 = 2u * MAX_TERMS;
+
+// The medium's layer edges, heights above the ground, m (`tables.ts`'s packLayerEdges; moved here
+// from `transmittance.wgsl` in plan R08's R08.T6.i, since the sky view, the ray march and the
+// multiple-scattering kernel read it too). `heights`, the transmittance kernel's (R08.T6.d): term
+// i's in heights[i], where its density table leaves 0 and where each ramp ends, -1 where unused.
+// `middles`, the per-frame marches' (R08.T6.i): each ramp as one edge at its middle height, at
+// most two a term, those strictly inside the atmosphere, the first `count.x` of MARCH_EDGES_MAX in
+// order and -1 past them. A ramp of 10-300 m inside a step of tens of kilometres errs by about its
+// half-width's column, so the marches cut at its middle alone (`decision-r08-t6d-findings.md`
+// section 1.3). `count.yzw` are unused.
+struct LayerEdges {
+  heights : array<vec4f, MAX_TERMS>,
+  middles : array<vec4f, MARCH_EDGES_MAX / 4u>,
+  count : vec4f,
+}
+
+// --- The steps of a march cut at layer edges (plan R08, R08.T6.i; `decision-r08-t6d-findings.md`
+// section 1) ------------------------------------------------------------------------------------
+// R05.T12.e's placed steps take a layer's edge to first order: a step whose midpoint falls just
+// below a deck's or a slab's sharp base misses up to half a step of its densest air, and one just
+// above counts that density over the whole step (T6.d's slab Earth missed by 21.3% at the limb).
+// So each side of R05.T12.e's split is cut into pieces where the ray crosses an edge, and each
+// piece is placed by R05.T12.e's rule on its own, at the same counts: no sample is added.
+
+// The most places a segment crosses the marches' edges: each edge's shell twice.
+const MARCH_CROSSINGS_MAX : u32 = 2u * MARCH_EDGES_MAX;
+
+// A split segment cut into pieces at its crossings, and the walk of its steps through them
+// (`marchSteps.ts`'s marchPieces and marchPiecesSteps are its twin). Each side of the split is cut
+// at the crossings inside it. Its steps are shared among its pieces in proportion to the square
+// root of each piece's length, which gives each piece the same smallest step at the end it is
+// placed toward, as R05.T12.e shares a segment's between its sides, at least one a piece; each
+// piece's count rounds its end's share of the rest, so that they sum to the side's, as
+// `transmittance.wgsl`'s rayToTop rounds its pieces'. Each piece is placed quadratically toward
+// its end nearer t*, which for a layer is its dense edge and for the air t*; on a camera side
+// placed toward the camera, toward its end nearer the camera. A side that crosses no edge, or has
+// more pieces than steps, keeps R05.T12.e's placement (`marchStep`), so that a segment that crosses
+// no edge is R05.T12.e's to the bit.
+struct MarchWalk {
+  split : MarchSplit,
+  // Each crossing's signed distance from t*, m, ascending, each once: those before t* first.
+  fromLowestM : array<f32, MARCH_CROSSINGS_MAX>,
+  crossings : u32,
+  crossingsBefore : u32,
+  // Each piece's steps, the side before t*'s from 0 and the side after it's from `firstAfter`
+  // (exact integers in f32); while the walk is made ready, each piece's root length.
+  shares : array<f32, MARCH_CROSSINGS_MAX + 2u>,
+  firstAfter : u32,
+  // Whether each side is cut into pieces.
+  piecedBefore : bool,
+  piecedAfter : bool,
+  // Where the walk stands: its piece and the steps it has taken there, and the piece's count, unit
+  // L / n^2, the end it is placed toward from t*, and whether that is its lower end
+  // (`marchWalkEnter`).
+  piece : u32,
+  taken : u32,
+  pieceSteps : f32,
+  unitM : f32,
+  anchorM : f32,
+  towardLow : bool,
+}
+
+// A walk over `split` with no crossings yet.
+fn marchWalkStart(walk : ptr<function, MarchWalk>, split : MarchSplit) {
+  (*walk).split = split;
+  (*walk).crossings = 0u;
+}
+
+// Adds a crossing at signed distance `fromLowestM` from t*, kept, in order, where it lies strictly
+// inside either side: neither at the segment's ends nor at t* itself.
+fn marchWalkCross(walk : ptr<function, MarchWalk>, fromLowestM : f32) {
+  let beforeM = (*walk).split.beforeM;
+  let afterM = (*walk).split.afterM;
+  let inside = (fromLowestM > -beforeM && fromLowestM < 0.0)
+    || (fromLowestM > 0.0 && fromLowestM < afterM);
+  let count = (*walk).crossings;
+  if (!inside || count >= MARCH_CROSSINGS_MAX) {
+    return;
+  }
+  var at = count;
+  while (at > 0u && (*walk).fromLowestM[at - 1u] > fromLowestM) {
+    (*walk).fromLowestM[at] = (*walk).fromLowestM[at - 1u];
+    at--;
+  }
+  (*walk).fromLowestM[at] = fromLowestM;
+  (*walk).crossings = count + 1u;
+}
+
+// One side's shares: its `steps` among the pieces between `startM` and `endM` from t* that the
+// walk's crossings `first` to `first + count` cut, piece p's into shares[at + p]. One a piece, and
+// the rest by the pieces' root lengths, rounded at each piece's end. False, leaving R05.T12.e's
+// placement, for a side that crosses no edge or has more pieces than steps.
+fn marchSideShares(
+  walk : ptr<function, MarchWalk>,
+  first : u32,
+  count : u32,
+  startM : f32,
+  endM : f32,
+  steps : u32,
+  at : u32,
+) -> bool {
+  let pieces = count + 1u;
+  if (count == 0u || pieces > steps) {
+    return false;
+  }
+  var total = 0.0;
+  var pieceStartM = startM;
+  for (var p = 0u; p < pieces; p++) {
+    var pieceEndM = endM;
+    if (p < count) {
+      pieceEndM = (*walk).fromLowestM[first + p];
+    }
+    let root = sqrt(pieceEndM - pieceStartM);
+    (*walk).shares[at + p] = root;
+    total += root;
+    pieceStartM = pieceEndM;
+  }
+  let rest = steps - pieces;
+  var spent = 0u;
+  var cumulative = 0.0;
+  for (var p = 0u; p < pieces; p++) {
+    cumulative += (*walk).shares[at + p];
+    var share = rest;
+    if (p + 1u < pieces) {
+      share = u32(floor(f32(rest) * cumulative / total + 0.5));
+    }
+    (*walk).shares[at + p] = f32(1u + share - spent);
+    spent = share;
+  }
+  return true;
+}
+
+// Makes the walk ready once its crossings are in: each distance once, and each side's shares.
+fn marchWalkReady(walk : ptr<function, MarchWalk>) {
+  var n = 0u;
+  for (var j = 0u; j < (*walk).crossings; j++) {
+    let t = (*walk).fromLowestM[j];
+    if (n == 0u || t > (*walk).fromLowestM[n - 1u]) {
+      (*walk).fromLowestM[n] = t;
+      n++;
+    }
+  }
+  (*walk).crossings = n;
+  var before = 0u;
+  while (before < n && (*walk).fromLowestM[before] < 0.0) {
+    before++;
+  }
+  let split = (*walk).split;
+  (*walk).crossingsBefore = before;
+  (*walk).firstAfter = before + 1u;
+  (*walk).piecedBefore = marchSideShares(
+    walk, 0u, before, -split.beforeM, 0.0, split.stepsBefore, 0u
+  );
+  (*walk).piecedAfter = marchSideShares(
+    walk, before, n - before, 0.0, split.afterM, split.stepsAfter, before + 1u
+  );
+  // The first piece: the side before t*'s first where it is cut, entered now; otherwise the side
+  // after it's, which its first step enters (`marchWalkStep`).
+  (*walk).piece = 0u;
+  (*walk).taken = 0u;
+  if ((*walk).piecedBefore) {
+    marchWalkEnter(walk, 0u, true);
+  }
+}
+
+// Enters piece `piece` of the walk, on the side before t* or after it, and holds what its steps
+// share: its count n, its unit L / n^2, and its end a from t*, the one it is placed toward, nearer
+// t* or, on a camera side placed toward the camera, nearer the camera. The side before t* runs from
+// -beforeM to 0 and the side after it from 0 to afterM, each cut at its crossings.
+fn marchWalkEnter(walk : ptr<function, MarchWalk>, piece : u32, before : bool) {
+  let split = (*walk).split;
+  var lowM : f32;
+  var highM : f32;
+  if (before) {
+    lowM = -split.beforeM;
+    if (piece > 0u) {
+      lowM = (*walk).fromLowestM[piece - 1u];
+    }
+    highM = 0.0;
+    if (piece < (*walk).crossingsBefore) {
+      highM = (*walk).fromLowestM[piece];
+    }
+  } else {
+    let at = (*walk).crossingsBefore + piece - (*walk).firstAfter;
+    lowM = 0.0;
+    if (at > (*walk).crossingsBefore) {
+      lowM = (*walk).fromLowestM[at - 1u];
+    }
+    highM = split.afterM;
+    if (at < (*walk).crossings) {
+      highM = (*walk).fromLowestM[at];
+    }
+  }
+  let n = (*walk).shares[piece];
+  let towardLow = !before || split.beforeTowardStart;
+  (*walk).piece = piece;
+  (*walk).taken = 0u;
+  (*walk).pieceSteps = n;
+  (*walk).unitM = (highM - lowM) / (n * n);
+  (*walk).towardLow = towardLow;
+  (*walk).anchorM = select(highM, lowM, towardLow);
+}
+
+// Step `i` of the walk's segment, counted from tStart, the steps taken in order from 0: on a side
+// not cut into pieces, R05.T12.e's `marchStep`; on one that is, step k of its piece of n steps
+// placed toward its end a, at a -/+ L (k^2 + k + 1/2) / n^2 and L (2k + 1) / n^2 long, as
+// `marchStep` places a side, its offset from t* formed from the end's. Per step, as `marchStep`, a
+// compare and the closed form; the piece's own terms are formed once, as the walk enters it.
+fn marchWalkStep(walk : ptr<function, MarchWalk>, i : u32) -> MarchStep {
+  let split = (*walk).split;
+  let before = i < split.stepsBefore;
+  if ((before && !(*walk).piecedBefore) || (!before && !(*walk).piecedAfter)) {
+    return marchStep(split, i);
+  }
+  if (!before && (*walk).piece < (*walk).firstAfter) {
+    marchWalkEnter(walk, (*walk).firstAfter, false);
+  } else if (f32((*walk).taken) >= (*walk).pieceSteps) {
+    marchWalkEnter(walk, (*walk).piece + 1u, before);
+  }
+  let j = f32((*walk).taken);
+  (*walk).taken++;
+  let unitM = (*walk).unitM;
+  var k = j;
+  var fromLowest : f32;
+  if ((*walk).towardLow) {
+    fromLowest = (*walk).anchorM + unitM * (k * k + k + 0.5);
+  } else {
+    k = (*walk).pieceSteps - 1.0 - j;
+    fromLowest = (*walk).anchorM - unitM * (k * k + k + 0.5);
+  }
+  return MarchStep(split.lowestM + fromLowest, unitM * (2.0 * k + 1.0), fromLowest);
+}
+
+// Adds to the walk where a ray from `heightM` above a sphere of radius `bottom`, at zenith cosine
+// mu, crosses the sphere `edgeM` above it (`shellCrossings`), as its signed distances from t*: the
+// sky view's and the multiple-scattering kernel's crossings, whose segments start at the ray's
+// origin. Each kernel reads its edges from its own `layerEdges` uniform, one at a time, never the
+// struct by value (plan R08, R08.T6.b: a value indexed by a loop variable is copied into each
+// invocation's memory).
+fn marchWalkCrossSphere(
+  walk : ptr<function, MarchWalk>,
+  bottom : f32,
+  heightM : f32,
+  mu : f32,
+  edgeM : f32,
+) {
+  let lowestM = (*walk).split.lowestM;
+  let roots = shellCrossings(bottom, heightM, mu, edgeM);
+  if (roots.x > 0.0) {
+    marchWalkCross(walk, roots.x - lowestM);
+  }
+  if (roots.y > 0.0) {
+    marchWalkCross(walk, roots.y - lowestM);
+  }
 }

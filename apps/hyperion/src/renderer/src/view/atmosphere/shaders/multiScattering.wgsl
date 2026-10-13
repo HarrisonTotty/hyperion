@@ -15,8 +15,9 @@
 // at zenith cosine mu); the ground's bounce is Lambertian, albedo / pi, with the sun's
 // transmittance read at the ground's radius (Bevy reads it at radius 0 and omits the 1 / pi); the
 // 64 directions are sebh's 8 x 8 stratified sphere, with its reduction. Each ray's steps are placed
-// by R05.T12.e's rule (`marchSplit` with `fromCamera`, plan R08, R08.T6.d), where sebh and Bevy
-// take even ones, each sampled at its midpoint, and its in-scattering is taken without f32's
+// by R05.T12.e's rule (`marchSplit` with `fromCamera`, plan R08, R08.T6.d), each side cut into
+// pieces at the medium's layer edges since R08.T6.i (`MarchWalk` in common.wgsl), where sebh and
+// Bevy take even ones, each sampled at its midpoint, and its in-scattering is taken without f32's
 // cancellation (`stepFactor` in common.wgsl, R05.T12.e's step factor, taken here in R08.T6.a).
 // Hillaire's 1 - f_ms is accumulated, not formed (R08.T6.d; `decision-r08-t6b-floor.md` section
 // 9.3): in nearly conservative air f_ms comes within f32's spacing of 1, so that one less it
@@ -53,6 +54,7 @@
 @group(0) @binding(4) var multiScatteringOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(5) var absorberColumns : texture_2d<f32>;
 @group(0) @binding(6) var absorberCurves : texture_2d<f32>;
+@group(0) @binding(7) var<uniform> layerEdges : LayerEdges;
 
 const PI : f32 = 3.14159265358979;
 const DIRECTIONS : u32 = 64u;
@@ -109,6 +111,51 @@ struct Integrated {
   escape : vec3f,
 }
 
+// A direction's ray from its texel's point: the point's height and position, the direction and
+// its zenith cosine, and the sun.
+struct DirectionRay {
+  heightM : f32,
+  mu : f32,
+  origin : vec3f,
+  dir : vec3f,
+  sun : vec3f,
+}
+
+// A direction's march so far: its luminance, its escape before the end's throughput, its
+// throughput and its own absorber path.
+struct DirectionMarch {
+  luminance : vec3f,
+  escaped : vec3f,
+  throughput : vec3f,
+  path : AbsorberPath,
+}
+
+// One step of a direction's march, at its midpoint.
+fn integrateStep(march : ptr<function, DirectionMarch>, ray : DirectionRay, stepAt : MarchStep) {
+  let t = stepAt.tM;
+  let dt = stepAt.dtM;
+  let p = ray.origin + t * ray.dir;
+  let rP = length(p);
+  let muSun = dot(ray.sun, p / rP);
+  let sampleHeightM = heightAlong(ray.heightM, ray.mu, t, rP);
+  let local = mediumAtHeight(sampleHeightM);
+  // The direction's own path takes its absorbers by its column, under the sun's curves (R08.T6.c).
+  let path = (*march).path;
+  let next = absorberStep(absorberCurves, absorberCount(), curveSlot(), path, local.columns, dt);
+  let stepAbsorbed = next.depth - path.depth;
+  let stepDepth = local.extinction * dt + stepAbsorbed;
+  (*march).path = next;
+  let stepTransmittance = exp(-stepDepth);
+  let bottom = medium.bottomRadiusM;
+  let lit = select(1.0, 0.0, groundHitFromHeight(bottom, max(sampleHeightM, 0.0), muSun));
+  let source = lit * transmittanceToSun(sampleHeightM, muSun) * local.scattering / (4.0 * PI);
+  let factor = stepFactor(stepDepth);
+  let throughput = (*march).throughput;
+  (*march).luminance += throughput * source * dt * factor;
+  (*march).escaped += throughput * (local.absorption * dt + stepAbsorbed) * factor;
+  (*march).throughput = throughput * stepTransmittance;
+}
+
 fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
   let bottom = medium.bottomRadiusM;
   let origin = vec3f(0.0, 0.0, bottom + heightM);
@@ -120,32 +167,28 @@ fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
   // (`marchSplit` with `fromCamera`, R05.T12.e's rule; plan R08, R08.T6.d), where R05 took even
   // steps: they erred by up to 10.5% in the table, and placed steps by 2.6% (R08.T6.a).
   let split = marchSplit(0.0, tMax, -(bottom + heightM) * mu, samples, true);
-  var luminance = vec3f(0.0);
-  var escaped = vec3f(0.0);
-  var throughput = vec3f(1.0);
-  var path = absorberPathStart();
-  for (var i = 0u; i < samples; i++) {
-    let stepAt = marchStep(split, i);
-    let t = stepAt.tM;
-    let dt = stepAt.dtM;
-    let p = origin + t * dir;
-    let rP = length(p);
-    let muSun = dot(sun, p / rP);
-    let sampleHeightM = heightAlong(heightM, mu, t, rP);
-    let local = mediumAtHeight(sampleHeightM);
-    // The direction's own path takes its absorbers by its column, under the sun's curves (R08.T6.c).
-    let next = absorberStep(absorberCurves, absorberCount(), curveSlot(), path, local.columns, dt);
-    let stepAbsorbed = next.depth - path.depth;
-    let stepDepth = local.extinction * dt + stepAbsorbed;
-    path = next;
-    let stepTransmittance = exp(-stepDepth);
-    let lit = select(1.0, 0.0, groundHitFromHeight(bottom, max(sampleHeightM, 0.0), muSun));
-    let source = lit * transmittanceToSun(sampleHeightM, muSun) * local.scattering / (4.0 * PI);
-    let factor = stepFactor(stepDepth);
-    luminance += throughput * source * dt * factor;
-    escaped += throughput * (local.absorption * dt + stepAbsorbed) * factor;
-    throughput *= stepTransmittance;
+  let ray = DirectionRay(heightM, mu, origin, dir, sun);
+  var march = DirectionMarch(vec3f(0.0), vec3f(0.0), vec3f(1.0), absorberPathStart());
+  // Where the medium has layer edges, each side of the split is cut into pieces at them (plan R08,
+  // R08.T6.i); a medium with none takes the steps as before, and declares no walk.
+  let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);
+  if (edgeCount == 0u) {
+    for (var i = 0u; i < samples; i++) {
+      integrateStep(&march, ray, marchStep(split, i));
+    }
+  } else {
+    var walk : MarchWalk;
+    marchWalkStart(&walk, split);
+    for (var e = 0u; e < edgeCount; e++) {
+      marchWalkCrossSphere(&walk, bottom, heightM, mu, layerEdges.middles[e / 4u][e % 4u]);
+    }
+    marchWalkReady(&walk);
+    for (var i = 0u; i < samples; i++) {
+      integrateStep(&march, ray, marchWalkStep(&walk, i));
+    }
   }
+  var luminance = march.luminance;
+  let throughput = march.throughput;
   if (hitsGround) {
     let ground = origin + tMax * dir;
     let up = normalize(ground);
@@ -153,7 +196,7 @@ fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
     luminance += transmittanceToSun(0.0, muSun) * throughput
       * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI;
   }
-  return Integrated(luminance, escaped + throughput);
+  return Integrated(luminance, march.escaped + throughput);
 }
 
 @compute @workgroup_size(1, 1, 64)

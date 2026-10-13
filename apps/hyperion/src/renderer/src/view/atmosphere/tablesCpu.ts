@@ -6,7 +6,7 @@
  * @remarks
  * Each twin follows its kernel's WGSL step for step, at the kernel's sizes and step counts unless
  * a caller asks for others: the same parameterisations, the same midpoints and placed steps
- * (`marchSteps.ts`, R05.T12.e), the same bilinear reads of the tables with their texel centres at
+ * (`marchSteps.ts`, R05.T12.e, cut at the medium's layer edges since R08.T6.i), the same bilinear reads of the tables with their texel centres at
  * (i + ½) ÷ size, through the same texel mapping (Bruneton 2017's exact pair, plan R08, Design
  * note 19, since R08.T6.g), and the same in-scattering per step, throughput · S · Δt · g(σ_t Δt) with
  * g(x) = (1 − e^(−x)) ÷ x. It differs only in arithmetic: `f64` throughout, g taken exactly where
@@ -74,7 +74,15 @@ import {
   ABSORBER_TRANSMITTANCE_FLOOR,
   type AbsorberCurve,
 } from "./absorbers";
-import { marchSplit, marchStep, type MarchStep } from "./marchSteps";
+import {
+  marchEdgesM,
+  type MarchPieces,
+  marchPieces,
+  marchPiecesSteps,
+  marchSplit,
+  marchStep,
+  type MarchStep,
+} from "./marchSteps";
 import {
   type AtmosphereMedium,
   checkTabulatedTops,
@@ -100,6 +108,7 @@ import {
   type AbsorberCurveSlots,
   absorberSlots,
   checkAbsorberCurves,
+  EDGES_PER_TERM,
   MULTI_SCATTERING_SAMPLES,
   MULTI_SCATTERING_SIZE,
   NO_ABSORBER_CURVES,
@@ -842,12 +851,14 @@ export interface MultiScatteringOptions {
   /** The steps along each ray, at least 1 for even steps and at least 2 for placed. */
   readonly samples: number;
   /**
-   * `placed`: R05.T12.e's steps toward each ray's lowest point, or for the side before it toward
-   * the texel's point (`marchSplit` with `fromCamera`), the kernel's since R08.T6.d. `even`: R05's
-   * equal steps sampled at their midpoints, the kernel's until then, against which the placed ones
-   * were measured (R08.T6.a).
+   * `pieces`: `placed`, each side cut into pieces where the ray crosses a layer edge
+   * ({@link rayPieces}), the kernel's since R08.T6.i, which on a medium with no edge is `placed` to
+   * the bit. `placed`: R05.T12.e's steps toward each ray's lowest point, or for the side before it
+   * toward the texel's point (`marchSplit` with `fromCamera`), the kernel's from R08.T6.d. `even`:
+   * R05's equal steps sampled at their midpoints, the kernel's until then, against which the placed
+   * ones were measured (R08.T6.a).
    */
-  readonly placement: "even" | "placed";
+  readonly placement: "even" | "placed" | "pieces";
   /**
    * The step factor g(x) = (1 − e^(−x)) ÷ x: {@link exactStepFactor} for the twin, or an `f32`
    * emulation of a kernel's form, through which a test measures what `f32` does to the table.
@@ -857,12 +868,13 @@ export interface MultiScatteringOptions {
 
 /**
  * The multiple-scattering kernel's own: Hillaire 2020's 32² (his Table 2, at 20 steps a ray) with
- * R05.T12.b's 32 steps a ray, placed by R05.T12.e's rule since R08.T6.d (`multiScattering.wgsl`).
+ * R05.T12.b's 32 steps a ray, placed by R05.T12.e's rule since R08.T6.d and cut at the layer edges
+ * since R08.T6.i (`multiScattering.wgsl`).
  */
 export const MULTI_SCATTERING_KERNEL_OPTIONS: MultiScatteringOptions = {
   size: MULTI_SCATTERING_SIZE,
   samples: MULTI_SCATTERING_SAMPLES,
-  placement: "placed",
+  placement: "pieces",
   stepFactor: exactStepFactor,
 };
 
@@ -872,6 +884,8 @@ export const MULTI_SCATTERING_KERNEL_OPTIONS: MultiScatteringOptions = {
  */
 interface MultiScatteringInputs {
   readonly terms: readonly TwinTerm[];
+  /** The marches' layer edges of the terms ({@link marchEdgesOf}), m. */
+  readonly edgesM: ReadonlyArray<number>;
   readonly shell: Shell;
   readonly groundAlbedo: Rgb;
   readonly transmittance: TwinTransmittance;
@@ -879,13 +893,18 @@ interface MultiScatteringInputs {
   readonly options: MultiScatteringOptions;
 }
 
-/** The steps of one multiple-scattering ray of length `tMaxM` from radius `rM` at cosine `mu`. */
+/**
+ * The steps of one multiple-scattering ray of length `tMaxM` from radius `rM` along `dir`, whose
+ * zenith cosine is `mu`.
+ */
 function multiScatteringSteps(
-  options: MultiScatteringOptions,
+  inputs: MultiScatteringInputs,
   rM: number,
+  dir: Vec3,
   mu: number,
   tMaxM: number,
 ): MarchStep[] {
+  const options = inputs.options;
   let steps: MarchStep[];
   switch (options.placement) {
     case "even": {
@@ -897,6 +916,19 @@ function multiScatteringSteps(
     case "placed": {
       const split = marchSplit(0, tMaxM, -rM * mu, options.samples, true);
       steps = Array.from({ length: options.samples }, (_, i) => marchStep(split, i));
+      break;
+    }
+    case "pieces": {
+      // From the texel's point, which `skyView.wgsl` marches the same way: t* at −r μ, as above.
+      const ray: TwinSegment = {
+        originM: { x: 0, y: 0, z: rM },
+        direction: dir,
+        tStartM: 0,
+        tEndM: tMaxM,
+        fromCamera: true,
+      };
+      const sphere: MarchGeometry = { kind: "sphere", bottomRadiusM: inputs.shell.bottomRadiusM };
+      steps = piecedSteps(ray, options.samples, inputs.edgesM, sphere);
       break;
     }
   }
@@ -983,7 +1015,7 @@ function integrateDirectionInto(
   const path = new TwinAbsorberPath(hasAbsorbers(terms), (columns, depth) => {
     absorberDepthInto(absorbers, columns, depth);
   });
-  for (const { tM, dtM } of multiScatteringSteps(options, rM, mu, tMax)) {
+  for (const { tM, dtM } of multiScatteringSteps(inputs, rM, dir, mu, tMax)) {
     const px = tM * dir.x;
     const py = tM * dir.y;
     const pz = rM + tM * dir.z;
@@ -1132,8 +1164,10 @@ export function multiScatteringTwin(
   texels?: ReadonlyArray<readonly [number, number]>,
   curveSlot = SHARED_TABLE_CURVE_SLOT,
 ): TwinTable {
+  const terms = termsOf(medium);
   const inputs: MultiScatteringInputs = {
-    terms: termsOf(medium),
+    terms,
+    edgesM: marchEdgesOf(terms, medium.topHeightM),
     shell: { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM },
     groundAlbedo: medium.groundAlbedo,
     transmittance,
@@ -1165,8 +1199,10 @@ export function multiScatteringSeriesTwin(
   options: MultiScatteringOptions = MULTI_SCATTERING_KERNEL_OPTIONS,
   curveSlot = SHARED_TABLE_CURVE_SLOT,
 ): MultiScatteringSeries[] {
+  const terms = termsOf(medium);
   const inputs: MultiScatteringInputs = {
-    terms: termsOf(medium),
+    terms,
+    edgesM: marchEdgesOf(terms, medium.topHeightM),
     shell: { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM },
     groundAlbedo: medium.groundAlbedo,
     transmittance,
@@ -1287,6 +1323,9 @@ export interface TwinRay {
   readonly fromCamera: boolean;
 }
 
+/** A per-frame march's segment, its ray without the sun: what its steps are placed on. */
+export type TwinSegment = Omit<TwinRay, "sun">;
+
 /**
  * What a march takes a sample's height and sun cosine against: a sphere about the centre (the
  * sky view's and aerial perspective's, of the camera's Gaussian radius √(MN)), or the datum
@@ -1317,6 +1356,129 @@ export function placedSteps(ray: TwinRay, samples: number): MarchStep[] {
   const nearestM = -(o.x * d.x + o.y * d.y + o.z * d.z);
   const split = marchSplit(ray.tStartM, ray.tEndM, nearestM, samples, ray.fromCamera);
   return Array.from({ length: samples }, (_, i) => marchStep(split, i));
+}
+
+/**
+ * The per-frame marches' layer edges of a medium's terms (plan R08, R08.T6.i): each ramp of a
+ * term's density as one edge at its middle height (`marchSteps.ts`'s `marchEdgesM`), the terms'
+ * in order, as `tables.ts`'s `packLayerEdges` packs them for the kernels.
+ */
+function marchEdgesOf(terms: readonly TwinTerm[], topHeightM: number): number[] {
+  return terms.flatMap((term) => marchEdgesM(term.edgesM.slice(0, EDGES_PER_TERM), topHeightM));
+}
+
+/**
+ * The per-frame marches' layer edges of a medium, m (plan R08, R08.T6.i): `tables.ts`'s
+ * `packLayerEdges`' middles, in `f64`, of the medium as given. A twin of the kernels takes
+ * `kernelMedium(medium)`, whose edges are widened to the kernels' levels.
+ *
+ * @throws RangeError as the twins, for a medium with a tabulated term that ends below its top at a
+ *   density other than 0 (the module's remarks).
+ */
+export function mediumMarchEdgesM(medium: AtmosphereMedium): number[] {
+  return marchEdgesOf(termsOf(medium), medium.topHeightM);
+}
+
+/**
+ * The two roots of a ray from `o` along unit `d` on the spheroid of radii (a, a, c), nearer first,
+ * or `null` where it misses it: as `rayMarch.wgsl`'s `quadricHits`, as
+ * s ÷ q_a and q_c ÷ s with s = −(q_b + sign(q_b)√disc), neither of which cancels.
+ */
+function quadricRootsM(o: Vec3, d: Vec3, a: number, c: number): readonly [number, number] | null {
+  const k = a / c;
+  const qa = d.x * d.x + d.y * d.y + d.z * k * (d.z * k);
+  const qb = o.x * d.x + o.y * d.y + o.z * k * (d.z * k);
+  const qc = o.x * o.x + o.y * o.y + o.z * k * (o.z * k) - a * a;
+  const disc = qb * qb - qa * qc;
+  if (disc < 0) {
+    return null;
+  }
+  const root = Math.sqrt(disc);
+  const s = -(qb + (qb >= 0 ? root : -root));
+  if (s === 0) {
+    return null;
+  }
+  const first = s / qa;
+  const second = qc / s;
+  return [Math.min(first, second), Math.max(first, second)];
+}
+
+/**
+ * Where a per-frame march's ray crosses the marches' layer edges `edgesM`, as signed distances from
+ * its lowest point at `lowestM` along it, m (plan R08, R08.T6.i): on a sphere about the centre,
+ * each edge's sphere (`shellCrossingsM`, as `skyView.wgsl` and `multiScattering.wgsl` find them,
+ * from the ray's height at its origin and zenith cosine there); on the datum spheroid, each edge
+ * e's shell quadric, the spheroid (a + e, c + e), as `rayMarch.wgsl` finds them, and as it clips the
+ * ray at the top's (a + H, c + H).
+ */
+function crossingsFromLowestM(
+  ray: TwinSegment,
+  lowestM: number,
+  edgesM: ReadonlyArray<number>,
+  geometry: MarchGeometry,
+): number[] {
+  const o = ray.originM;
+  const d = ray.direction;
+  const rM = Math.sqrt(o.x * o.x + o.y * o.y + o.z * o.z);
+  const mu = (o.x * d.x + o.y * d.y + o.z * d.z) / rM;
+  const out: number[] = [];
+  for (const edgeM of edgesM) {
+    let roots: readonly [number, number] | null;
+    switch (geometry.kind) {
+      case "sphere": {
+        roots = shellCrossingsM(geometry.bottomRadiusM, rM - geometry.bottomRadiusM, mu, edgeM);
+        break;
+      }
+      case "spheroid": {
+        const { equatorialRadiusM: a, polarRadiusM: c } = geometry.figure;
+        roots = quadricRootsM(o, d, a + edgeM, c + edgeM);
+        break;
+      }
+    }
+    for (const t of roots ?? []) {
+      out.push(t - lowestM);
+    }
+  }
+  return out;
+}
+
+/**
+ * A per-frame march's segment as the kernels cut it since R08.T6.i (plan R08;
+ * `decision-r08-t6d-findings.md` §1): R05.T12.e's split ({@link placedSteps}'), each side cut into
+ * pieces where the ray crosses one of `edgesM` (`marchSteps.ts`'s `marchPieces`), on the sphere or
+ * spheroid it is marched about. With no edge, or none crossed, its steps are
+ * {@link placedSteps}' to the bit.
+ *
+ * @param samples - The steps, an integer of at least 2.
+ * @param edgesM - The marches' layer edges, m ({@link mediumMarchEdgesM}).
+ * @throws RangeError from `marchSplit` for fewer than 2 steps.
+ */
+export function rayPieces(
+  ray: TwinSegment,
+  samples: number,
+  edgesM: ReadonlyArray<number>,
+  geometry: MarchGeometry,
+): MarchPieces {
+  const o = ray.originM;
+  const d = ray.direction;
+  const nearestM = -(o.x * d.x + o.y * d.y + o.z * d.z);
+  const split = marchSplit(ray.tStartM, ray.tEndM, nearestM, samples, ray.fromCamera);
+  return marchPieces(split, crossingsFromLowestM(ray, split.lowestM, edgesM, geometry));
+}
+
+/**
+ * A per-frame march's steps as the kernels place them since R08.T6.i: {@link rayPieces}' segment,
+ * stepped piece by piece (`marchSteps.ts`'s `marchPiecesSteps`).
+ *
+ * @throws RangeError as {@link rayPieces}.
+ */
+export function piecedSteps(
+  ray: TwinSegment,
+  samples: number,
+  edgesM: ReadonlyArray<number>,
+  geometry: MarchGeometry,
+): MarchStep[] {
+  return marchPiecesSteps(rayPieces(ray, samples, edgesM, geometry));
 }
 
 /**
@@ -1554,7 +1716,8 @@ export function skyViewRayTwin(
 
 /**
  * The sky-view table's twin: each texel's ray marched at `samples` placed steps (at least 2) on
- * the camera's own sphere, reading the planet's tables at each sample's height, alpha 1.
+ * the camera's own sphere, cut at the medium's layer edges ({@link piecedSteps}, R08.T6.i), reading
+ * the planet's tables at each sample's height, alpha 1.
  *
  * @throws RangeError for a medium with a tabulated term that ends below its top at a density
  *   other than 0 (the module's remarks).
@@ -1566,6 +1729,7 @@ export function skyViewTwin(
   samples: number,
 ): TwinTable {
   const terms = termsOf(planet.medium);
+  const edgesM = marchEdgesOf(terms, planet.medium.topHeightM);
   const sources = tableSources(planet);
   const geometry: MarchGeometry = { kind: "sphere", bottomRadiusM: view.cameraRadiusM };
   const n = Math.max(Math.floor(samples), 2);
@@ -1575,7 +1739,7 @@ export function skyViewTwin(
     for (let x = 0; x < w; x += 1) {
       const ray = skyViewRayTwin(planet.medium, view, x, y, size);
       const marcher = new Marcher(terms, sources, geometry, ray);
-      for (const { tM, dtM } of placedSteps(ray, n)) {
+      for (const { tM, dtM } of piecedSteps(ray, n, edgesM, geometry)) {
         marcher.step(tM, dtM);
       }
       texels.set([...marcher.luminance, 1], (y * w + x) * 4);
@@ -1730,8 +1894,9 @@ export type RayMarchSettings = Pick<
 /**
  * One ray-march texel's twin along a clipped ray (`rayMarchRayTwin`, `rayMarchRayAlongTwin`): its
  * in-scattered radiance per unit sun illuminance and mean transmittance, with the bare ground
- * seen from above lit by the sun, and (0, 0, 0, 1) where the kernel marches nothing (`null`).
- * The smoke marches a texel's ray again, turned or moved, through it (R08.T6.g).
+ * seen from above lit by the sun, and (0, 0, 0, 1) where the kernel marches nothing (`null`), its
+ * placed steps cut at the medium's layer edges on their shell quadrics ({@link piecedSteps},
+ * R08.T6.i). The smoke marches a texel's ray again, turned or moved, through it (R08.T6.g).
  *
  * @throws RangeError for a medium with a tabulated term that ends below its top at a density
  *   other than 0 (the module's remarks).
@@ -1751,6 +1916,8 @@ export function rayMarchTexelTwin(
 interface RayMarchContext {
   readonly medium: AtmosphereMedium;
   readonly terms: readonly TwinTerm[];
+  /** The marches' layer edges of the terms ({@link marchEdgesOf}), m. */
+  readonly edgesM: ReadonlyArray<number>;
   readonly sources: TwinSources;
   readonly geometry: MarchGeometry;
   readonly view: TwinView;
@@ -1762,9 +1929,11 @@ function rayMarchContext(
   view: TwinView,
   settings: RayMarchSettings,
 ): RayMarchContext {
+  const terms = termsOf(planet.medium);
   return {
     medium: planet.medium,
-    terms: termsOf(planet.medium),
+    terms,
+    edgesM: marchEdgesOf(terms, planet.medium.topHeightM),
     sources: tableSources(planet),
     geometry: { kind: "spheroid", figure: view.figure },
     view,
@@ -1778,14 +1947,14 @@ function rayMarchTexelInto(
   marched: RayMarchRay | null,
   out: Float64Array,
 ): void {
-  const { medium, terms, sources, geometry, view, samples } = context;
+  const { medium, terms, edgesM, sources, geometry, view, samples } = context;
   if (marched === null) {
     out.set([0, 0, 0, 1]);
     return;
   }
   const { ray, bareGroundM } = marched;
   const marcher = new Marcher(terms, sources, geometry, ray);
-  for (const { tM, dtM } of placedSteps(ray, samples)) {
+  for (const { tM, dtM } of piecedSteps(ray, samples, edgesM, geometry)) {
     marcher.step(tM, dtM);
   }
   const luminance = marcher.luminance;
