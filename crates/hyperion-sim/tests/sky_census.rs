@@ -13,8 +13,16 @@
 //! | fast | nuclear disc | A and B, 1.5 ly (the eight cells at the place) | 11 | 49,534 |
 //! | slow | near the Sun | A 300 ly, B 500 ly | 7.95 | 246,600 |
 //! | slow | near the Sun | C, D and E, 1,000 ly | 7.95 | 1.40 M |
-//! | slow | nuclear disc | D and E, 20 ly (the eight cells at the place) | 7.95 | 0.88 M |
+//! | 4 slow | nuclear disc | D and E, 20 ly (the eight cells at the place) | 7.95 | 0.88 M |
 //! | slow | near the Sun at +H, in motion | every layer, 150 ly | 11 | 39,600 |
+//!
+//! The nuclear disc's slow test is four, one for each quadrant about the place, each holding one
+//! of the four cells of D and one of E, so that nextest can run them side by side. A system there
+//! costs 7–17 ms to generate, so an E cell's census, which is one job, takes about half an hour on
+//! one thread, and its oracle as long again: each quadrant runs E's census, E's oracle, and D's
+//! census then D's oracle, a thread each, and asserts all that the one test asserted.
+//! `the_nuclear_discs_quadrants_hold_each_of_its_cells_once` checks, without a census, that the
+//! quadrants hold each of the plan's cells once.
 //!
 //! The fixture is built without kinematic tables, so its systems keep their epoch positions. The
 //! census pads its cells and its bound before the drift by each layer's pad speed, so the last row
@@ -57,8 +65,8 @@ use std::sync::OnceLock;
 
 use common::sky::{
     NUCLEAR_DISC_LY, Part, SUN_LY, assert_same_stars, brute_force_parts, brute_force_parts_of,
-    brute_force_sky, census_parts, census_parts_of, every_layer, observer_in_nuclear_disc,
-    observer_near_sun,
+    brute_force_sky, census_parts, census_parts_of, every_layer, forced_query,
+    observer_in_nuclear_disc, observer_near_sun, plan_cells,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::coords::GalacticPosition;
@@ -144,6 +152,18 @@ fn agree_in(
     let n_max = query.n_max();
     let census = census_parts(g, query.clone(), radii);
     let brute = brute_force_parts(g, query, radii);
+    agree_parts(what, n_max, census, brute, skips)
+}
+
+/// [`agree`]'s assertions on the census's parts and its oracle's, a part per cell in the same
+/// order, for a query of `n_max`.
+fn agree_parts(
+    what: &str,
+    n_max: NonZeroU32,
+    census: Vec<Part>,
+    brute: Vec<Part>,
+    skips: Skips,
+) -> Generated {
     assert_eq!(census.len(), brute.len(), "{what}: the cells opened");
     let (c, b) = (tallies(&census), tallies(&brute));
     let mut generated = Vec::new();
@@ -505,15 +525,203 @@ fn the_census_is_its_oracle_1000_ly_from_the_sun() {
     );
 }
 
+/// The layers of the nuclear disc's slow identity test, and their radii, ly: D and E within 20 ly
+/// of the place, whose plan opens four cells of each (the module's table).
+const DISC_D_AND_E: [(Layer, f64); 2] = [(Layer::D, 20.0), (Layer::E, 20.0)];
+
+/// A side of a plane through the place in the nuclear disc ([`NUCLEAR_DISC_LY`]): x or z below the
+/// place's, or at or above it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    /// Below the place's coordinate.
+    Minus,
+    /// At or above it.
+    Plus,
+}
+
+impl Side {
+    /// Both sides.
+    const BOTH: [Self; 2] = [Self::Minus, Self::Plus];
+
+    /// The side of the plane at `place_ly` that a cell whose low corner is at `origin_ly` starts
+    /// on, which it lies wholly on unless it straddles the plane: no cell of [`DISC_D_AND_E`]'s
+    /// plan does (`the_nuclear_discs_quadrants_hold_each_of_its_cells_once`).
+    fn of(origin_ly: i32, place_ly: f64) -> Self {
+        if f64::from(origin_ly) < place_ly {
+            Self::Minus
+        } else {
+            Self::Plus
+        }
+    }
+}
+
+/// A quadrant about the place in the nuclear disc, one of its slow identity tests: the cells of
+/// [`DISC_D_AND_E`]'s plan on side `x` of the plane x = 0 through the place and Sgr A*, and on
+/// side `z` of the galactic plane, z = 0, which holds the place too. Each layer's four cells meet
+/// on the line where the two planes cross, so a quadrant holds one cell of D and one of E.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Quadrant {
+    x: Side,
+    z: Side,
+}
+
+impl Quadrant {
+    /// The four quadrants.
+    fn all() -> impl Iterator<Item = Self> {
+        Side::BOTH
+            .into_iter()
+            .flat_map(|x| Side::BOTH.into_iter().map(move |z| Self { x, z }))
+    }
+
+    /// The quadrant's cells of `cells`, in their order.
+    fn cells(self, cells: &[CellKey]) -> Vec<CellKey> {
+        let [x, _, z] = NUCLEAR_DISC_LY;
+        cells
+            .iter()
+            .copied()
+            .filter(|key| {
+                let [cx, _, cz] = key.origin_ly();
+                Side::of(cx, x) == self.x && Side::of(cz, z) == self.z
+            })
+            .collect()
+    }
+
+    /// What the quadrant's assertions name it.
+    fn what(self) -> String {
+        let x = match self.x {
+            Side::Minus => "at −x",
+            Side::Plus => "at +x",
+        };
+        let z = match self.z {
+            Side::Minus => "below the plane",
+            Side::Plus => "above the plane",
+        };
+        format!("D and E within 20 ly in the nuclear disc, {x} {z}")
+    }
+}
+
+/// The nuclear disc's slow identity query, at the eye's cut, 7.95, with [`DISC_D_AND_E`]'s caps
+/// forced, and the cells of its plan.
+fn disc_d_and_e() -> (SkyQuery, Vec<CellKey>) {
+    let query = eye_query(observer_in_nuclear_disc(galaxy()), Magnitudes::new(7.95));
+    let forced = forced_query(query, &within_ly(&DISC_D_AND_E));
+    let cells = plan_cells(galaxy(), &forced);
+    (forced, cells)
+}
+
+/// [`agree`] for D and E within 20 ly in the nuclear disc, over `quadrant`'s cells alone, with
+/// every assertion of the whole, on three threads: E's census, E's oracle, and D's census then D's
+/// oracle, which together take about as long as E's oracle.
+///
+/// Each quadrant's census lists or overflows every star of its cells (`merge_census`), and its
+/// order is total, so the quadrants' identities star for star and bit for bit, over cells they
+/// partition (`the_nuclear_discs_quadrants_hold_each_of_its_cells_once`), are the whole's at any
+/// `n_max`, its third included; the accepted are summed. That no star is in two cells' parts,
+/// which `merge_census` asserted of the whole, holds as each part's stars are of its cell's
+/// systems. That the census lists stars, that a third overflows and that it skips systems are
+/// each asserted of every quadrant, not only of the whole.
+#[cfg(not(target_family = "wasm"))]
+fn agree_in_the_nuclear_disc(quadrant: Quadrant) {
+    let g = galaxy();
+    let what = quadrant.what();
+    let (forced, cells) = disc_d_and_e();
+    let keys = quadrant.cells(&cells);
+    let [d, e] = <[CellKey; 2]>::try_from(keys.as_slice()).expect("a cell of D and one of E");
+    assert_eq!((d.layer(), e.layer()), (Layer::D, Layer::E), "{what}");
+    let (census, brute) = std::thread::scope(|scope| {
+        let e_census = scope.spawn(|| census_parts_of(g, &forced, &[e]));
+        let e_oracle = scope.spawn(|| brute_force_parts_of(g, &forced, &[e]));
+        let mut census = census_parts_of(g, &forced, &[d]);
+        let mut brute = brute_force_parts_of(g, &forced, &[d]);
+        census.extend(e_census.join().expect("E's census panicked"));
+        brute.extend(e_oracle.join().expect("E's oracle panicked"));
+        (census, brute)
+    });
+    for parts in [&census, &brute] {
+        for (key, (stars, _)) in keys.iter().zip(parts) {
+            for star in stars {
+                let of = CellKey::of(star.system()).expect("a grid system");
+                assert_eq!(of, *key, "{what}: {:?} in {key:?}'s part", star.system());
+            }
+        }
+    }
+    agree_parts(&what, forced.n_max(), census, brute, Skips::Asserted);
+}
+
+/// The nuclear disc's slow identity quadrants partition its D and E within 20 ly: the plan's eight
+/// cells, four of each layer, lie each wholly on one side of the planes x = 0 and z = 0 through the
+/// place, and each is held by one quadrant alone, a cell of D and one of E a quadrant, as their
+/// times are budgeted. It builds the plan alone and runs no census.
+#[test]
+fn the_nuclear_discs_quadrants_hold_each_of_its_cells_once() {
+    let (_, cells) = disc_d_and_e();
+    let mut every = cells.clone();
+    every.sort_unstable();
+    every.dedup();
+    assert_eq!(every.len(), cells.len(), "the plan opens each cell once");
+    for layer in [Layer::D, Layer::E] {
+        let of_layer = cells.iter().filter(|key| key.layer() == layer).count();
+        assert_eq!(of_layer, 4, "{layer:?}: the four cells about the place");
+    }
+    assert_eq!(cells.len(), 8, "D's and E's cells alone");
+    let [x, _, z] = NUCLEAR_DISC_LY;
+    for key in &cells {
+        let size = f64::from(key.size_ly());
+        let [cx, _, cz] = key.origin_ly().map(f64::from);
+        for (low, place) in [(cx, x), (cz, z)] {
+            assert!(
+                low + size <= place || low >= place,
+                "{key:?} straddles a plane through the place"
+            );
+        }
+    }
+    let mut held = Vec::new();
+    for quadrant in Quadrant::all() {
+        let mine = quadrant.cells(&cells);
+        let layers: Vec<Layer> = mine.iter().map(CellKey::layer).collect();
+        assert_eq!(layers, [Layer::D, Layer::E], "{}", quadrant.what());
+        held.extend(mine);
+    }
+    held.sort_unstable();
+    assert_eq!(held, every, "the quadrants hold every cell once");
+}
+
 #[cfg(not(target_family = "wasm"))]
 #[test]
-#[ignore = "slow: generates every system of the D and E cells at a place in the nuclear disc"]
-fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc() {
-    let query = eye_query(observer_in_nuclear_disc(galaxy()), Magnitudes::new(7.95));
-    agree(
-        "D and E within 20 ly in the nuclear disc",
-        query,
-        &within_ly(&[(Layer::D, 20.0), (Layer::E, 20.0)]),
-        Skips::Asserted,
-    );
+#[ignore = "slow: generates every system of a D cell and an E cell at a place in the nuclear disc"]
+fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc_at_minus_x_below_the_plane() {
+    agree_in_the_nuclear_disc(Quadrant {
+        x: Side::Minus,
+        z: Side::Minus,
+    });
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: generates every system of a D cell and an E cell at a place in the nuclear disc"]
+fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc_at_minus_x_above_the_plane() {
+    agree_in_the_nuclear_disc(Quadrant {
+        x: Side::Minus,
+        z: Side::Plus,
+    });
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: generates every system of a D cell and an E cell at a place in the nuclear disc"]
+fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc_at_plus_x_below_the_plane() {
+    agree_in_the_nuclear_disc(Quadrant {
+        x: Side::Plus,
+        z: Side::Minus,
+    });
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[test]
+#[ignore = "slow: generates every system of a D cell and an E cell at a place in the nuclear disc"]
+fn the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc_at_plus_x_above_the_plane() {
+    agree_in_the_nuclear_disc(Quadrant {
+        x: Side::Plus,
+        z: Side::Plus,
+    });
 }
