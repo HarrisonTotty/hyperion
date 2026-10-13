@@ -74,7 +74,10 @@ function cameraViewLimitV(triple: ExposureTriple, fovDeg: number): number {
 /** What a view's request is made from. */
 export interface ViewSkyInput {
   readonly universe: UniverseIdHex;
-  /** The scene system's barycentre now, the sky's observer. */
+  /**
+   * The sky's observer: the camera's galactic position now, its system's barycentre plus its offset
+   * (R06.T12), from which the parallax rule measures the camera.
+   */
   readonly observer: GalacticPosition;
   readonly system: string;
   readonly time: UniverseTime;

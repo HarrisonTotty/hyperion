@@ -441,10 +441,12 @@ the call sites here change.
   The scene's host stars' drawn positions (light-time and aberration) for the discs. Chunks are
   assembled and decoded only once complete, off the main thread (R03's Design note 11). The sky
   request's `observer` is the scene system's barycentre, `barycentreAt(place, t)` over
-  `SceneSystem.place` (R03.T16), plus the ship's offset in the system's frame. As built: the
-  server's seam is `BulkPayload::new(bytes)` (`Result<_, BuildBulkPayloadError>`), carried as
-  `Answer { body, bulk: Some(payload) }`, whose `frames` use `chunk(payload: Bytes, request)`;
-  `BulkPayload::new` still carries `expect(dead_code)` "until R06 and R09", which T11.b removes.
+  `SceneSystem.place` (R03.T16), plus the ship's offset in the system's frame. _As built
+  (2026-10-13), the camera's offset, as T12 says (Risks, "The view asks from its camera")._ As
+  built: the server's seam is `BulkPayload::new(bytes)` (`Result<_, BuildBulkPayloadError>`),
+  carried as `Answer { body, bulk: Some(payload) }`, whose `frames` use
+  `chunk(payload: Bytes, request)`; `BulkPayload::new` still carries `expect(dead_code)` "until
+  R06 and R09", which T11.b removes.
   `BulkManifestDto.bytes` is a JSON number. The client's request is the method
   `RequestClient.requestBulk(body, manifestOf)`, and `BulkAssembler` refuses more than
   `MAX_BULK_CHUNKS` (257) or `MAX_BULK_PAYLOAD_BYTES` (64 MiB), which the sky's 7.5 MB at N_max
@@ -3577,7 +3579,8 @@ cameras)`, true only through `partial`, `limits` or `parallax` (an exhaustive sw
       the server runs the census without end. T12.b holds the sky through that until the 1 px cap,
       about 310 au at 1080p and 60° for a nearest baked star at 9 ly; beyond it every re-ask gives
       way at once and the sky falls to its first reply after each final. The fix is in
-      `useViewSky.ts`: ask from the camera's galactic position.
+      `useViewSky.ts`: ask from the camera's galactic position. **Fixed 2026-10-13:** see "The
+      view asks from its camera" below, a correction to T13.c.
     - **A `limits` hold with no note.** The ruling allows a deepened camera's hold since its line
       carries no streaming note. Today a `limits` re-ask comes only from the setting's N_max (the
       `PRIMARY` view asks the eye, whose request reads no field of view, and the instruments cull
@@ -3617,7 +3620,64 @@ cameras)`, true only through `partial`, `limits` or `parallax` (an exhaustive sw
   the effect still live), so that a request never answered starts no worker. A sky is drawn and
   labelled only for the system it was asked about while that system's position is known; otherwise
   the interim field and its labels stand. `just test-render` compiles `STAR SPRITES HDR`
-  (2026-10-03, exit 0).
+  (2026-10-03, exit 0). _Since 2026-10-13 the sky is asked from the camera's galactic position,
+  not the barycentre (the entry after this one)._
+- **The view asks from its camera (2026-10-13, a correction to T13.c; T12.b's open point 1).**
+  T13.c's `useViewSky` asked the sky from `barycentreAt(place, t)` alone, where T12 has the
+  observer the barycentre plus the camera's offset, while the parallax rule measures the camera
+  from the held sky's observer. A camera some 30 au or more from the barycentre was asked again for
+  `parallax` after every final reply, from the same place, so the server ran the census without
+  end; beyond T12.b's 1 px cap (about 310 au at 1080p and 60° for a nearest baked star at 9 ly)
+  the sky fell back to its first reply after each final. Client only: no protocol, golden, label
+  or generator change.
+  - **The fix** (`displays/view/useViewSky.ts`). The request's observer is
+    `cameraGalacticPosition(runPose(run), run.scene)`, the position the rule's `SkyCamera` already
+    read, so the rule measures the camera from the point actually asked. Its precision: it is the
+    protocol's own split form, `GalacticPosition` (a whole light-year cell and a metre offset in
+    [0, 1 ly), about 2 m anywhere in the galaxy), composed by `expressIn` and `galacticTranslated`
+    from the scene's barycentre (`barycentreAt(place, t)`, as `view/scene/fromServer.ts` sets it)
+    and the camera's `f64` metre offset, which carries into the next cell or borrows from the one
+    below. No single `f64` of light-years (65 km at 50,000 ly) is formed, so an offset in au keeps
+    its precision. `ViewSkyInput.observer`'s doc (`view/sky/viewSky.ts`) now says so. The
+    observer is the camera's, as T12 and `SkyRequest.observer`'s doc in `hyperion-protocol` have
+    it, not the ship's that the Consumes entry for R03 named (now noted there): the brainstorm's
+    "the observer is the ship" is the light-time and aberration observer of drawn bodies, while
+    the sky is asked from the camera, since the parallax rule measures cameras. A sky's sprites
+    are differenced against its own request's observer (`viewFrameDrawer.ts`), so they are
+    unchanged.
+  - **A jump.** A jump moves the place a readout or two before the published run (4 Hz, then
+    throttled) follows it, and until then the run's camera is in the system left. Asked from
+    there, the system arrived at would be asked from the old system's camera, the old host star a
+    few au away and not excluded. So the sky is asked only once the run's scene is the place's
+    system and carries its barycentre, and never for an `unknown` place, as before. Meanwhile, for
+    a place whose position is known, `ViewSky.awaiting` and `pending` are true, so
+    `STARS: PENDING` and `LIGHTING: PENDING` read from the jump as they did, and the request goes
+    out up to about 0.5 s later. `ViewSky.pending` is therefore also true with nothing asked,
+    which qualifies T12.b's "true while a request is asked"; `useSky`'s `pending` is unchanged. If
+    the run cannot follow (its scene cannot be drawn), the line reads `PENDING` until it can, or
+    until a kept scene stands in. No display state changes.
+  - **Tests** (`displays/view/useViewSky.test.tsx`, 7 new; the first six fail on the code before
+    the fix):
+    - a camera 100 au out, its nearest baked star at 10 ly (0.29 px), is asked once, holds its
+      final, and is not asked again over eight published runs at rest;
+    - a camera moving past the rule's 0.1 px (200 au, to 0.58 px) is asked again from its new
+      place and keeps its final through the re-ask's first reply;
+    - past the 1 px cap (400 au, to 1.16 px), the re-ask's first reply, asked from the new place,
+      is held at once;
+    - the observer is the barycentre plus an offset of (100, −37.25, 12.5) au to 2 m, from a
+      barycentre just short of a cell's edge along x and just past one along y (a carry and a
+      borrow);
+    - after a jump, nothing is asked and the view reads `PENDING` while the published run is in
+      the system left;
+    - the system arrived at is then asked from the camera there;
+    - an `unknown` place asks nothing though the run's scene still carries a barycentre (passes
+      before the fix too: it pins the new guard's clause);
+    - and, changed, T12.b's "PENDING on a new arrival" test now moves its run into the system
+      arrived at, as a jump does: it had left the run in the system left, which the guard reads as
+      waiting.
+  - **Acceptance:** vitest over `view/sky` and `displays/view` (48 files, 766 tests), and
+    `just smart-ci` (Prettier, tsc, oxlint, and vitest over the 116 files that reach the change,
+    2,739 tests; exit 0).
 - **Deviations in T13.d, as built (2026-10-03).** `view/sky/band.ts` exports `BAND_MATERIAL`
   (`STAR BAND`: a full-screen triangle at infinity whose fragment turns its view ray back to the
   galactic axes by the transpose of `frame.viewRotation` and samples the band cube, bilinear,

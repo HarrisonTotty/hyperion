@@ -1,6 +1,8 @@
+import { type GalacticPosition, galacticPositionFromLy } from "@hyperion/protocol";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { sub, type Vec3, vec3 } from "../../geometry/vec3";
 import { RECONNECT_DELAY_MS } from "../../lib/connection";
 import type { SystemPlace } from "../../lib/scene/model";
 import { binaryFrame } from "../../test/binaryFrames";
@@ -14,9 +16,11 @@ import {
   skyPayload,
   skyResponse,
 } from "../../test/skyFixtures";
-import { aViewScene, FIXTURE_SYSTEM } from "../../test/viewFixtures";
+import { AU_M, aViewScene, FIXTURE_SYSTEM } from "../../test/viewFixtures";
+import { galacticDeltaM } from "../../view/coords/position";
 import { DEFAULT_EXPOSURE, type ExposureControl } from "../../view/photometry/exposure";
 import type { QualitySetting } from "../../view/quality/qualitySetting";
+import type { ViewScene } from "../../view/scene/model";
 import { primarySkyPlace, useViewSky } from "./useViewSky";
 import { startInstrumentRun, startServerRun, type ViewRun } from "./viewRun";
 
@@ -24,17 +28,25 @@ const UNIVERSE = "000000000000002a";
 
 const SCENE = aViewScene();
 
-/** The scene's system where the chart puts it, so that its sky can be asked. */
-function chartedPlace(): SystemPlace {
-  if (SCENE.barycentre === null) {
-    throw new Error("the fixture scene has no barycentre");
+/** A system's place as a chart gives it. */
+type ChartedPlace = Extract<SystemPlace, { readonly kind: "charted" }>;
+
+/** `scene`'s system where the chart puts it, so that its sky can be asked. */
+function placeOf(scene: ViewScene): ChartedPlace {
+  if (scene.barycentre === null) {
+    throw new Error("the scene has no barycentre");
   }
   return {
     kind: "charted",
-    system: FIXTURE_SYSTEM,
+    system: scene.system,
     designation: "TEST SYSTEM",
-    barycentre: SCENE.barycentre,
+    barycentre: scene.barycentre,
   };
+}
+
+/** The fixture scene's system where the chart puts it. */
+function chartedPlace(): ChartedPlace {
+  return placeOf(SCENE);
 }
 
 /** A camera view of the server's scene (R02's `camera` role, as an instrument's) at 60°. */
@@ -44,6 +56,40 @@ function cameraRun(): ViewRun {
 }
 
 const RUN = cameraRun();
+
+/** A camera view of `scene` at 60°, its camera at rest `offsetM` from the barycentre. */
+function runAt(offsetM: Vec3, scene: ViewScene = SCENE): ViewRun {
+  const run = startInstrumentRun(startServerRun(scene));
+  return {
+    ...run,
+    camera: {
+      ...run.camera,
+      fovDeg: 60,
+      move: null,
+      pose: {
+        ...run.camera.pose,
+        frame: { kind: "system", system: scene.system },
+        positionM: offsetM,
+      },
+    },
+  };
+}
+
+/**
+ * The largest axis's difference, m, between `position`'s offset from `from` and `offsetM`; infinite
+ * where no position was asked.
+ */
+function offsetErrorM(
+  from: GalacticPosition,
+  position: GalacticPosition | undefined,
+  offsetM: Vec3,
+): number {
+  if (position === undefined) {
+    return Number.POSITIVE_INFINITY;
+  }
+  const error = sub(galacticDeltaM(from, position), offsetM);
+  return Math.max(Math.abs(error.x), Math.abs(error.y), Math.abs(error.z));
+}
 
 /** `AUTO` stepping from EV100 −10 to 15 by tenths, as the readout shows it, then `MAN` entries. */
 const EXPOSURES: ReadonlyArray<ExposureControl> = [
@@ -324,7 +370,8 @@ describe("a view's sky asked again within its arrival (R06.T12.b)", () => {
         useViewSky({
           universe: UNIVERSE,
           place: { ...chartedPlace(), system },
-          run: RUN,
+          // A jump's published run follows its place into the system arrived at.
+          run: system === FIXTURE_SYSTEM ? RUN : runAt(vec3(0, 1e8, 0), aViewScene({ system })),
           exposure: DEFAULT_EXPOSURE,
           widthPx: 1_920,
           setting,
@@ -435,6 +482,206 @@ describe("a view's sky asked again within its arrival (R06.T12.b)", () => {
       [true, { value: "PENDING" }, { value: "PENDING" }],
       false,
     ]);
+  });
+});
+
+describe("a view's sky asked from its camera's place (R06.T12; a correction to T13.c)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** `GalacticPosition`'s resolution anywhere in the galaxy, m: the protocol's precision. */
+  const GALACTIC_RESOLUTION_M = 2;
+
+  /**
+   * One star 10 ly away: the nearest baked star at 1080p and 60°, beyond the 8.7 ly of the parallax
+   * sprites, which a camera 100 au from the sky's observer shifts by 0.29 px, past the request
+   * rule's tenth of a pixel and short of the hold's 1 px.
+   */
+  const NEAR_BAKED: ReadonlyArray<FixtureStar> = [
+    { direction: [0, 0, -1], distanceLy: 10, vMag: 1 },
+  ];
+
+  interface PlacedProps {
+    readonly run: ViewRun;
+    readonly place: SystemPlace;
+  }
+
+  /** The view's sky for a run and a place, over a welcomed link. */
+  function renderPlaced(initial: PlacedProps) {
+    const hook = renderHook(
+      ({ run, place }: PlacedProps) =>
+        useViewSky({
+          universe: UNIVERSE,
+          place,
+          run,
+          exposure: DEFAULT_EXPOSURE,
+          widthPx: 1_920,
+          setting: "high",
+        }),
+      { initialProps: initial, wrapper: ServerLinkHarness },
+    );
+    const socket = FakeWebSocket.latest();
+    act(() => {
+      socket.serverWelcomes();
+    });
+    return { ...hook, socket };
+  }
+
+  /**
+   * Plays a reply of {@link NEAR_BAKED} to the latest sky request whose census has reached
+   * `edgesLy`, final where every edge is `null`.
+   */
+  async function replyAt(
+    socket: FakeWebSocket,
+    edgesLy: readonly [number | null, number | null, number | null],
+  ): Promise<void> {
+    const sent = socket.requestsOfKind("sky").at(-1);
+    if (sent === undefined) {
+      throw new Error("no sky was asked");
+    }
+    const final = edgesLy.every((edge) => edge === null);
+    const payload = skyPayload(NEAR_BAKED, 2, null);
+    const body = {
+      kind: "sky" as const,
+      ...skyResponse(sent.body, payload, NEAR_BAKED.length, 2),
+      census: nearestFirstCensus(edgesLy),
+      final,
+    };
+    await act(async () => {
+      socket.serverSendsBinary(binaryFrame(sent.id, 0, 1, [...payload]));
+      if (final) {
+        socket.serverResponds(sent.id, body);
+      } else {
+        socket.serverAnswersInPart(sent.id, body);
+      }
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  }
+
+  const BARYCENTRE = placeOf(SCENE).barycentre;
+
+  /** Where the camera starts: 100 au from the barycentre. */
+  const START_M = vec3(100 * AU_M, 0, 0);
+
+  it("asks a camera 100 au out once, holds its final, and asks nothing more while it stays", async () => {
+    const { rerender, result, socket } = renderPlaced({
+      run: runAt(START_M),
+      place: chartedPlace(),
+    });
+    await replyAt(socket, [null, null, null]);
+    // Each published run is a new one, at the same place.
+    for (let i = 0; i < 8; i += 1) {
+      rerender({ run: runAt(START_M), place: chartedPlace() });
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect([
+      socket.requestsOfKind("sky").length,
+      result.current.drawn?.model.response.final,
+    ]).toEqual([1, true]);
+  });
+
+  it("asks again from the camera's new place past the rule's tenth of a pixel, holding its final", async () => {
+    const { rerender, result, socket } = renderPlaced({
+      run: runAt(START_M),
+      place: chartedPlace(),
+    });
+    await replyAt(socket, [null, null, null]);
+    // 200 au from the held sky's observer: 0.58 px, short of the hold's 1 px.
+    const to = vec3(300 * AU_M, 0, 0);
+    rerender({ run: runAt(to), place: chartedPlace() });
+    const asked = socket.requestsOfKind("sky");
+    await replyAt(socket, [125, 125, 125]);
+    expect([
+      asked.length,
+      offsetErrorM(BARYCENTRE, asked.at(-1)?.body.observer, to) <= GALACTIC_RESOLUTION_M,
+      result.current.drawn?.model.response.final,
+    ]).toEqual([2, true, true]);
+  });
+
+  it("past the hold's 1 px cap, holds the first reply of the re-ask from the camera's new place", async () => {
+    const { rerender, result, socket } = renderPlaced({
+      run: runAt(START_M),
+      place: chartedPlace(),
+    });
+    await replyAt(socket, [null, null, null]);
+    // 400 au from the held sky's observer: 1.16 px.
+    const to = vec3(500 * AU_M, 0, 0);
+    rerender({ run: runAt(to), place: chartedPlace() });
+    await replyAt(socket, [125, 125, 125]);
+    const held = result.current.drawn?.model;
+    expect([
+      held?.response.final,
+      offsetErrorM(BARYCENTRE, held?.request.observer, to) <= GALACTIC_RESOLUTION_M,
+    ]).toEqual([false, true]);
+  });
+
+  it("asks from the barycentre plus the camera's offset, to the galactic frame's 2 m", () => {
+    // A barycentre just short of a cell's edge along x and just past one along y, so that the
+    // offset carries into the next cell along x and borrows from the one below along y.
+    const scene = aViewScene({
+      barycentre: galacticPositionFromLy([8_000.999_999_9, 26_000.000_000_1, 20.5]),
+    });
+    const offsetM = vec3(100 * AU_M, -37.25 * AU_M, 12.5 * AU_M);
+    const place = placeOf(scene);
+    const { socket } = renderPlaced({ run: runAt(offsetM, scene), place });
+    const observer = socket.requestsOfKind("sky").at(-1)?.body.observer;
+    expect(offsetErrorM(place.barycentre, observer, offsetM)).toBeLessThanOrEqual(
+      GALACTIC_RESOLUTION_M,
+    );
+  });
+
+  /** The system a jump arrives at, 4 ly from the fixture's. */
+  const ARRIVED = aViewScene({
+    system: "0200080020000001",
+    barycentre: galacticPositionFromLy([8_004, 26_000, 20]),
+  });
+
+  /** The view's sky held in the fixture's system, then the place moved to {@link ARRIVED}'s. */
+  async function renderJumped() {
+    const placed = renderPlaced({ run: runAt(START_M), place: chartedPlace() });
+    await replyAt(placed.socket, [null, null, null]);
+    // The place has moved to the system arrived at; the published run is still in the one left.
+    placed.rerender({ run: runAt(START_M), place: placeOf(ARRIVED) });
+    return placed;
+  }
+
+  it("asks nothing and reads PENDING while a jump's published run is still in the system left", async () => {
+    const { result, socket } = await renderJumped();
+    expect([
+      socket.requestsOfKind("sky").length,
+      result.current.awaiting,
+      result.current.pending,
+      result.current.label("alone"),
+    ]).toEqual([1, true, true, { value: "PENDING" }]);
+  });
+
+  it("asks nothing for a place whose position is unknown, though the run's scene still carries one", () => {
+    const { result, socket } = renderPlaced({
+      run: runAt(START_M),
+      place: { kind: "unknown", system: FIXTURE_SYSTEM, designation: "TEST SYSTEM" },
+    });
+    expect([socket.requestsOfKind("sky").length, result.current.awaiting]).toEqual([0, false]);
+  });
+
+  it("asks the system a jump arrives at from its camera once the published run reaches it", async () => {
+    const { rerender, socket } = await renderJumped();
+    const offsetM = vec3(0, 50 * AU_M, 0);
+    rerender({ run: runAt(offsetM, ARRIVED), place: placeOf(ARRIVED) });
+    const asked = socket.requestsOfKind("sky").at(-1)?.body;
+    expect([
+      asked?.exclude_system,
+      offsetErrorM(placeOf(ARRIVED).barycentre, asked?.observer, offsetM) <= GALACTIC_RESOLUTION_M,
+    ]).toEqual([ARRIVED.system, true]);
   });
 });
 

@@ -1,13 +1,12 @@
 /**
  * The `VIEW` display's sky (plan R06, T13.c, with T12's view wiring): asked about the scene's
- * system where its position is known, culled to the view's limit, and split between sprites and
- * the bake.
+ * system where its position is known, from the camera's place in it, culled to the view's limit,
+ * and split between sprites and the bake.
  */
 
 import type { UniverseIdHex } from "@hyperion/protocol";
 import { useMemo } from "react";
 
-import { barycentreAt } from "../../lib/scene/place";
 import type { SystemPlace } from "../../lib/scene/model";
 import type { ExposureControl } from "../../view/photometry/exposure";
 import { type QualitySetting, SETTINGS } from "../../view/quality/qualitySetting";
@@ -57,12 +56,15 @@ export interface ViewSky {
   readonly label: (place: SkyLinePlace) => SkyLineReading | null;
   /**
    * Whether the view's sky is asked and no sky of its arrival is held yet, so that every view's
-   * `STARS` line reads {@link SKY_PENDING} (R06.T11.f).
+   * `STARS` line reads {@link SKY_PENDING} (R06.T11.f); also while the place's position is known
+   * and the published run's scene does not yet carry it, from whose camera the sky is asked: after
+   * a jump, until the run reaches the system arrived at, or once a system's place is first known.
    */
   readonly awaiting: boolean;
   /**
-   * Whether a sky is asked and no sky of its arrival is held (R07's lighting label reads it): never
-   * through a re-ask within the arrival, whose held sky stands meanwhile (R06.T12.b).
+   * Whether a sky is asked, or waits for the published run as {@link ViewSky.awaiting} says, and no
+   * sky of its arrival is held (R07's lighting label reads it): never through a re-ask within the
+   * arrival, whose held sky stands meanwhile (R06.T12.b).
    */
   readonly pending: boolean;
 }
@@ -196,7 +198,10 @@ export interface ViewSkyInput {
   readonly universe: UniverseIdHex | null;
   /** The server scene's system place, or `null` for a kept scene: nothing is asked. */
   readonly place: SystemPlace | null;
-  /** The run as last published: its scene's time, its camera's pose, role and field of view. */
+  /**
+   * The run as last published: its scene's time, its camera's pose, role and field of view. The
+   * sky is asked from its camera's galactic position, once its scene is the place's system.
+   */
   readonly run: ViewRun;
   /**
    * The display's control as its readout shows it (4 Hz, EV100 to 0.1), at which a camera's label
@@ -218,16 +223,28 @@ const DEFAULT_WIDTH_PX = 1_920;
  * @remarks
  * Asked at the setting's N_max and culled to its sprite budget (R06 Design note 22; R07.T17), on
  * the published run (4 Hz), which is often enough: the request rule holds a sky for a year or until
- * a camera moves its nearest baked star by a tenth of a pixel. A sky arriving nearest first is
- * labelled as its replies are held (R06.T11.f): `PENDING` until the first, then the held reply's
- * limit and notes, which the display places among its instruments (`label`).
+ * a camera moves its nearest baked star by a tenth of a pixel. The sky is asked from the camera's
+ * galactic position, its system's barycentre plus its offset (R06.T12), the point the rule measures
+ * the camera from, so that a camera at rest is asked once however far it is from the barycentre;
+ * after a jump, once the published run has reached the system arrived at. A sky arriving nearest
+ * first is labelled as its replies are held (R06.T11.f): `PENDING` until the first, then the held
+ * reply's limit and notes, which the display places among its instruments (`label`).
  */
 export function useViewSky(input: ViewSkyInput): ViewSky {
   const { universe, place, run, exposure, setting } = input;
   const settings = SETTINGS[setting].sky;
   const widthPx = input.widthPx ?? DEFAULT_WIDTH_PX;
   const time = run.scene.time;
-  const observer = place === null ? null : barycentreAt(place, time);
+  // The camera's galactic position, its system's barycentre plus its offset, kept as a light-year
+  // cell and a metre offset (2 m anywhere in the galaxy): the sky's observer (R06.T12), from which
+  // the parallax rule measures the camera, so that a camera at rest is asked once.
+  const position = cameraGalacticPosition(runPose(run), run.scene);
+  // A place states where its system is unless it is `unknown`, which asks nothing (R03.T16).
+  const known = place !== null && place.kind !== "unknown";
+  // The place moves a readout or two before the published run follows it: after a jump the run's
+  // camera is in the system left until then, and the system arrived at is never asked from there;
+  // nor is a sky asked before the run's scene carries the place's barycentre.
+  const observer = known && place.system === run.scene.system ? position : null;
   const request =
     universe === null || place === null || observer === null
       ? null
@@ -240,7 +257,9 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
           fovDeg: run.camera.fovDeg,
           nMax: settings.nMax,
         });
-  const position = cameraGalacticPosition(runPose(run), run.scene);
+  // A place whose position is known, before the run has followed it: its sky is awaited, and is
+  // asked once the camera's place in it is.
+  const following = universe !== null && known && observer === null;
   const cameras: ReadonlyArray<SkyCamera> =
     position === null ? [] : [{ position, fovDeg: run.camera.fovDeg, widthPx }];
   const { model, pending } = useSky(request, cameras);
@@ -266,12 +285,13 @@ export function useViewSky(input: ViewSkyInput): ViewSky {
       pending,
     };
   }
-  // Asked and not yet answered, after a jump too: no reply of this arrival is held.
-  const awaiting = request !== null && pending;
+  // Asked and not yet answered, after a jump too, or awaiting the run there: no reply of this
+  // arrival is held.
+  const awaiting = (request !== null && pending) || following;
   return {
     drawn: null,
     label: () => (awaiting ? { value: SKY_PENDING } : null),
     awaiting,
-    pending,
+    pending: pending || following,
   };
 }
