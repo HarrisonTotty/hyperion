@@ -3977,7 +3977,8 @@ here, and `pnpm test` passes.
   Design note 17's ω_fig and ω²R). Next-event estimation to each sun marches the same geometry.
   Tests:
   - a = c with ω = 0 agrees with `Shells::Sphere` on the Earth case by Design note 10's agreement
-    test (4.0σ over its 8 values; no χ² below 10 values);
+    test (4.0σ over its 8 values; no χ² below 10 values); on independent draws a slow test since
+    R08.T12.g;
   - an absorbing-only Saturn-class medium gives Beer–Lambert against an `f64` quadrature of the
     density along the same chord to 10⁻⁶, grazing at the equator north and east and at the pole;
   - the normal gravity reproduces WGS 84's γ_e and γ_p to 10⁻⁹, as R08.T3.d's TypeScript does.
@@ -4083,15 +4084,21 @@ here, and `pnpm test` passes.
   output. The unit tests that hold a Monte Carlo value to a σ the run estimates take Design note
   10's check (σ at N within 25% of half its σ over the run's first quarter, asserted), and hold
   their values to z_N, with 4σ only where a test holds 8 values or fewer:
-  - in `atmosphere/mod.rs`, `atmosphere_spheroid_with_a_equal_to_c_agrees_with_the_sphere` (its
-    independent draws, 8 values) and `atmosphere_a_legendre_series_traces_as_a_table_of_the_same_function`
+  - in `atmosphere/mod.rs`, `atmosphere_spheroid_with_a_equal_to_c_agrees_with_the_sphere`'s
+    independent draws (8 values), moved into the slow
+    `atmosphere_spheroid_with_a_equal_to_c_follows_the_spheres_paths` at 40,000 samples while the
+    fast test keeps the same draws to 10⁻⁹ (`decision-r08-t12f.md` §5) and
+    `atmosphere_a_legendre_series_traces_as_a_table_of_the_same_function`
     (12; z_12 = 4.10), which VROOM runs since R08.T12.f;
   - `atmosphere_circular_polarisation_is_odd_in_azimuth_and_absent_without_b2` (12; 4.10),
     `atmosphere_conservative_layer_conserves_energy` (4),
     `atmosphere_spheroid_conservative_layer_conserves_energy` (4),
     `atmosphere_a_small_spheres_tabulated_matrix_traces_as_rayleigh` (24 beside its 10⁻⁴ of I;
     4.26) and `atmosphere_a_spheres_single_scattering_degree_of_polarisation_is_minus_b1_over_a1`
-    (48 beside its 2 × 10⁻⁴; 4.41);
+    (48 beside its 2 × 10⁻⁴; 4.41), both traced by first scattering alone: a crate-private test
+    option beside `Estimator`, every order by default and no pin moved, since a rare second
+    scattering's σ is no standard error and would widen their bounds far past their slack
+    (`decision-r08-t12f.md` §5);
   - in `atmosphere/optics.rs`, over their draws' first quarter,
     `atmosphere_cornette_shanks_sampling_has_its_mean_cosine` (4),
     `atmosphere_tabulated_sampling_follows_the_table` (4) and
@@ -7713,6 +7720,82 @@ generator, and the reference's sampling needs no domain tag.
     cited, less the view at the sun; their transmitted V at VZA 20°, 40°, 80° and 89° is negated
     in code as a cited erratum (`KOKHANOVSKY_CLOUD_ERRATA`, ruling 2). The level-4 matrix and
     the pilots' logs are not committed. Nothing of libRadtran was read for this task.
+- **Deviations in T12.g, as built** (2026-10-12; `crates/hyperion-fit/src/atmosphere/`: `mod.rs`,
+  `optics.rs`, `transport.rs`, `benchmarks.rs`; `decision-r08-t12f.md` ruling 4 and §5).
+  - _One tally._ The ten tests share `Agreement` in `mod.rs`'s tests, which `optics.rs`'s tests use
+    too. It does three things:
+    - it asserts every σ a test reads through `assert_sigma_scales` (`benchmarks::sigma_scales`,
+      25%);
+    - it holds each value to `benchmarks::bonferroni_bound` times its σ, or to 4σ at 8 values or
+      fewer, beside the test's own slack;
+    - it prints the σ ratios and the largest |z| past the slack.
+
+    `bonferroni_bound` is new. It is the rule that `assert_agreement` and the energy check wrote
+    inline, −Φ⁻¹(α ÷ 4N) by `math::normal_quantile` at the testkit's α, and both now call it. The
+    fast `the_bonferroni_bound_is_design_note_10s` pins it to the printed z_8, z_12, z_24, z_48,
+    z_78 and z_246. IPRT A2 and the energy check were traced again by name and give T12.f's figures
+    to the digit (largest |z| 2.69 and 1.34).
+
+    The tracer's tests trace again at N ÷ 4, which is the run's first quarter
+    (`trace_and_quarter`). `optics.rs`'s `sampled_mean` returns `Sampled`, which keeps the σ of the
+    same draws' first quarter.
+
+  - _The pilot_ (seeds 1000–1009, a = c's spheroid at 1010–1019; not committed). It gives the worst
+    scatter over the seeds of σ_N ÷ (σ_N/4 ÷ 2), at the σ the test reads.
+    - Counts kept:
+      - the Legendre test, 4.1% at 40,000;
+      - the energy test, 2.3% at 20,000, and its flattened twin, 3.6% at 10,000;
+      - Cornette–Shanks, 0.5%, the table, 1.1%, and the Legendre series, 1.6%, at 2 × 10⁵ draws.
+    - Raised:
+      - the circular polarisation test, from 20,000 to 256,000 samples (11.8% at 20,000, 5.3% at
+        160,000 and 4.0% at 256,000; about +6 s);
+      - a = c's independent draws, to 40,000 (13.3% at 1,500, where 3 of the 160 ratios stood past
+        25%; 6.3% at 16,000; 2.7% at 40,000).
+  - _The thin slabs trace first scattering alone_ (§5, Q1).
+    - At their 500 samples, a rare second scattering, some 5 × 10⁻⁵ of a geometry's paths at a
+      wavelength, was the σ wherever it fell. The ratio was then 0.5, or up to 8 × 10⁴. The check
+      failed at 3 and 2 of the 10 seeds at 500 samples, and at all 10 at 2 × 10⁵.
+    - `transport::Orders` is new. `Every` is the default; the test-only `First` ends a path after
+      its first vertex's estimates, and VROOM makes no clone there. It is passed to `Medium::new`
+      and taken by `trace_reference_with` beside the estimator; `trace_reference` passes `Every`,
+      and every pin is unchanged.
+    - By it, the worst scatter at 500 samples is 4.2%, so the count stays. V's σ is 0 at both
+      counts.
+    - A new `atmosphere_first_order_alone_is_single_scattering` tests the option:
+      - in the thin-layer test's slab at τₛ 0.5 and τₐ 0.25, where the orders past the first add
+        38–68%, `First` gives the single-scattering formulas to 2%, its σ held under 0.25% (at
+        most 0.214% at 40,000 samples in a pilot at 3 other seeds);
+      - in a Henyey–Greenstein g 0.9 slab, VROOM's first order equals R08.T12.c's estimator's to
+        the bit.
+
+      The thin-layer test's slab and formulas moved into `single_scattering_slab`, which both
+      tests read.
+  - _a = c_ (§5, Q2). The independent-draws half moved into the slow
+    `atmosphere_spheroid_with_a_equal_to_c_follows_the_spheres_paths`, with its own sphere and
+    spheroid traces (seed 1) at 40,000 and their quarters; `stochastic_values` lists its 8 values.
+    The fast test keeps the same draws at 1,500, to 10⁻⁹, and `assert_traces_agree` loses its
+    σ factor, which no caller now sets. So `cargo test -p hyperion-fit atmosphere` no longer runs
+    the independent draws: `just test-slow atmosphere_spheroid` does. The slow test took 189 s
+    by name (the test profile, at a load of 14–33); T12.d's record gave 104 s in the slow-test
+    profile for its first half alone.
+  - _Smaller helpers._ `assert_balances` holds both energy tests' balances, each keeping its own σ
+    cap (0.01 and 0.015 of F). `trace_by` and `trace_and_quarter_over` take the orders.
+  - _At the tests' seeds_ (the check's first run; all pass; times by name, on 4 threads at a load of
+    14–33). |z| is |difference| less the slack, over σ. In the σ column, n counts the σ checked,
+    those exactly 0 at both counts included.
+
+    | Test                                                         | Values | Bound | Largest \|z\|                | σ_N ÷ (σ_N/4 ÷ 2) (n)       | Samples    | Time   |
+    | ------------------------------------------------------------ | ------ | ----- | ---------------------------- | --------------------------- | ---------- | ------ |
+    | a = c, independent draws (slow)                              | 8      | 4.00  | 2.14 (orbit, 550 nm)         | 0.959–1.028 (16)            | 40,000     | 189 s  |
+    | `…_a_legendre_series_traces_as_a_table_of_the_same_function` | 12     | 4.10  | 1.04 (Rayleigh, down-near)   | 0.969–1.052 (24)            | 40,000     | 6.8 s  |
+    | `…_circular_polarisation_is_odd_in_azimuth_…`                | 12     | 4.10  | 2.34 (bottom, V at 440 nm)   | 0.962–1.026 (24)            | 256,000    | 7.0 s  |
+    | `…_conservative_layer_conserves_energy`                      | 4      | 4.00  | 2.32 (sun 60°, white ground) | 0.989–1.020 (6)             | 20,000     | 0.7 s  |
+    | `…_spheroid_conservative_layer_conserves_energy`             | 4      | 4.00  | 2.01 (pole, black ground)    | 0.965–1.076 (6)             | 10,000     | 0.6 s  |
+    | `…_a_small_spheres_tabulated_matrix_traces_as_rayleigh`      | 24     | 4.26  | 0 (all within 10⁻⁴ of I)     | 1.003–1.022 (48, 12 V at 0) | 500, first | 0.06 s |
+    | `…_degree_of_polarisation_is_minus_b1_over_a1`               | 48     | 4.41  | 0 (all within 2 × 10⁻⁴)      | 0.961–1.049 (48, 16 V at 0) | 500, first | 0.08 s |
+    | `…_cornette_shanks_sampling_has_its_mean_cosine`             | 4      | 4.00  | 0.88 (g −0.3)                | 1.001–1.005 (4)             | 2 × 10⁵    | 0.04 s |
+    | `…_tabulated_sampling_follows_the_table`                     | 4      | 4.00  | 1.41 (g −0.4, cos²)          | 0.997–1.010 (4)             | 2 × 10⁵    | 0.12 s |
+    | `…_legendre_series_is_followed_exactly`                      | 2      | 4.00  | 0.27 (the mean weight)       | 1.002–1.025 (2)             | 2 × 10⁵    | 1.0 s  |
 - **Deviations in T0, as built** (2026-10-09; in `view/engine/webgpu/`, `compute.ts`,
   `kernelResources.ts`, `resources.ts`, `drawing.ts` and their tests; `smoke/work.ts` and
   `smoke/page.ts`). R01's seam as the task gives it. What differs:

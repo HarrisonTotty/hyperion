@@ -695,6 +695,7 @@ pub(crate) fn henyey_greenstein_cos(asymmetry: f64, xi: f64) -> f64 {
 pub(crate) mod tests {
     use hyperion_sim::galaxy::quad::gl_panels;
 
+    use super::super::tests::Agreement;
     use super::*;
 
     /// ∫ p dΩ over the sphere, by panels in cos Θ fine enough for a forward peak.
@@ -764,39 +765,77 @@ pub(crate) mod tests {
         }
     }
 
-    /// The mean of `f(cos Θ)` and its standard error over `n` draws of `phase`, each weighted
-    /// by its draw's weight, and the mean weight.
-    fn sampled_mean(phase: &Phase, n: u32, f: impl Fn(f64) -> f64) -> (f64, f64, f64) {
+    /// The mean of `f(cos Θ)` over draws of a phase function, each weighted by its draw's weight.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    struct Sampled {
+        mean: f64,
+        /// Its standard error.
+        error: f64,
+        /// Its standard error over the first quarter of the draws, for Design note 10's check
+        /// that it falls as N^(−1/2) (R08.T12.g).
+        quarter_error: f64,
+        /// The mean weight.
+        weight: f64,
+    }
+
+    /// The mean and standard error of `sum` and `sum2`, the sum of `n` values and of their
+    /// squares.
+    #[must_use]
+    fn mean_and_error(sum: f64, sum2: f64, n: u32) -> (f64, f64) {
+        let n = f64::from(n);
+        let mean = sum / n;
+        (mean, ((sum2 / n - mean * mean) / n).sqrt())
+    }
+
+    /// `f(cos Θ)` over `n` draws of `phase`, a multiple of 4, and over their first quarter.
+    #[must_use]
+    fn sampled_mean(phase: &Phase, n: u32, f: impl Fn(f64) -> f64) -> Sampled {
+        assert_eq!(n % 4, 0, "the draws are a multiple of 4");
         let mut draws = Draws::new(3, 0, 0);
         let (mut sum, mut sum2, mut weights) = (0.0, 0.0, 0.0);
-        for _ in 0..n {
+        let mut quarter_error = f64::NAN;
+        for k in 1..=n {
             let draw = phase.sample(&mut draws);
             let x = draw.weight * f(draw.cos_theta);
             sum += x;
             sum2 += x * x;
             weights += draw.weight;
+            if k == n / 4 {
+                quarter_error = mean_and_error(sum, sum2, k).1;
+            }
         }
-        let n = f64::from(n);
-        let mean = sum / n;
-        (mean, ((sum2 / n - mean * mean) / n).sqrt(), weights / n)
+        let (mean, error) = mean_and_error(sum, sum2, n);
+        Sampled {
+            mean,
+            error,
+            quarter_error,
+            weight: weights / f64::from(n),
+        }
     }
 
     #[test]
     fn atmosphere_cornette_shanks_sampling_has_its_mean_cosine() {
+        // Each of the 4 means to 4σ, every σ falling as N^(−1/2) over the draws' first quarter
+        // (R08.T12.g).
+        let mut agreement = Agreement::new("Cornette and Shanks's mean cosine", 4);
         for g in [0.0, 0.5, 0.8, -0.3] {
             let phase = Phase::CornetteShanks { asymmetry: g };
-            let (mean, error, _) = sampled_mean(&phase, 200_000, |mu| mu);
+            let sampled = sampled_mean(&phase, 200_000, |mu| mu);
             // The mean cosine, derived from the function (module documentation) and checked
             // against its quadrature here: 3g(4 + g²) ÷ (5(2 + g²)).
             let expected = 3.0 * g * (4.0 + g * g) / (5.0 * (2.0 + g * g));
             let edges: Vec<f64> = (0..=64).map(|i| -1.0 + f64::from(i) / 32.0).collect();
             let quadrature = 2.0 * PI * gl_panels(|mu| mu * phase.value(mu), &edges);
             assert!((quadrature - expected).abs() < 1e-12, "{g}: {quadrature}");
-            assert!(
-                (mean - expected).abs() < 4.0 * error,
-                "{g}: {mean} {expected} ± {error}"
+            agreement.sigma_scales(sampled.error, sampled.quarter_error, format_args!("g {g}"));
+            agreement.hold(
+                sampled.mean - expected,
+                sampled.error,
+                0.0,
+                format_args!("g {g}"),
             );
         }
+        agreement.finish();
     }
 
     /// Henyey and Greenstein's phase function of asymmetry g, sr⁻¹.
@@ -852,7 +891,9 @@ pub(crate) mod tests {
     #[test]
     fn atmosphere_tabulated_sampling_follows_the_table() {
         // A strongly forward table (g = 0.9) and a backward one: the draws' mean cosine and second
-        // moment are the table's, by its own quadrature, to 4σ.
+        // moment are the table's, by its own quadrature, each of the 4 to 4σ, every σ falling as
+        // N^(−1/2) over the draws' first quarter (R08.T12.g).
+        let mut agreement = Agreement::new("a table's sampled moments", 4);
         for g in [0.9, -0.4] {
             let u = even_u(256);
             let a1: Vec<f64> = u
@@ -870,22 +911,23 @@ pub(crate) mod tests {
                 ("cos²", &|mu: f64| mu * mu),
             ] {
                 let expected = moment(f);
-                let (mean, error, weight) = sampled_mean(&phase, 200_000, f);
-                assert!((weight - 1.0).abs() < f64::EPSILON, "{g}");
-                assert!(
-                    (mean - expected).abs() < 4.0 * error,
-                    "{g} {name}: {mean} against {expected} ± {error}"
-                );
+                let sampled = sampled_mean(&phase, 200_000, f);
+                assert!((sampled.weight - 1.0).abs() < f64::EPSILON, "{g}");
+                let what = format!("g {g}, {name}");
+                agreement.sigma_scales(sampled.error, sampled.quarter_error, &what);
+                agreement.hold(sampled.mean - expected, sampled.error, 0.0, what);
             }
             assert!((moment(&|_| 1.0) - 1.0).abs() < 1e-6);
         }
+        agreement.finish();
     }
 
     #[test]
     fn atmosphere_legendre_series_is_followed_exactly() {
         // Henyey–Greenstein's series, βₗ = (2l + 1) gˡ, to 400 terms at g = 0.9: the series is the
         // function to 10⁻¹⁵, and weighted draws from its proposal have the mean cosine g and a
-        // mean weight of 1, each to 4σ.
+        // mean weight of 1, each to 4σ, every σ falling as N^(−1/2) over the draws' first quarter
+        // (R08.T12.g).
         let g: f64 = 0.9;
         let mut power = 1.0;
         let beta: Vec<f64> = (0..400)
@@ -905,13 +947,21 @@ pub(crate) mod tests {
             );
         }
         let phase = Phase::Legendre(Box::new(series));
-        let (mean, error, _) = sampled_mean(&phase, 200_000, |mu| mu);
-        assert!((mean - g).abs() < 4.0 * error, "{mean} ± {error}");
-        let (weight, weight_error, _) = sampled_mean(&phase, 200_000, |_| 1.0);
-        assert!(
-            (weight - 1.0).abs() < 4.0 * weight_error.max(1e-9),
-            "{weight}"
+        let mut agreement = Agreement::new("a Legendre series' draws", 2);
+        let cosine = sampled_mean(&phase, 200_000, |mu| mu);
+        agreement.sigma_scales(cosine.error, cosine.quarter_error, "the mean cosine");
+        agreement.hold(cosine.mean - g, cosine.error, 0.0, "the mean cosine");
+        // The proposal is close to the series, so the weights barely vary (the mean's σ is some
+        // 2 × 10⁻⁹ here); the floor of 10⁻⁹ on it guards against rounding.
+        let weight = sampled_mean(&phase, 200_000, |_| 1.0);
+        agreement.sigma_scales(weight.error, weight.quarter_error, "the mean weight");
+        agreement.hold(
+            weight.mean - 1.0,
+            weight.error.max(1e-9),
+            0.0,
+            "the mean weight",
         );
+        agreement.finish();
         // A series that goes negative is refused.
         assert!(matches!(
             LegendreSeries::new(&[1.0, 0.0, -3.0]),

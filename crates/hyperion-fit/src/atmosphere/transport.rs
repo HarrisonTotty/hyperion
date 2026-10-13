@@ -242,6 +242,8 @@ pub(crate) struct Medium<'a> {
     irradiance: Vec<f64>,
     /// Whether the samples run VROOM (module documentation), or R08.T12.c's estimator.
     vroom: bool,
+    /// The orders of scattering the samples follow.
+    orders: Orders,
 }
 
 /// Which estimator a medium's samples run (module documentation; R08.T12.f).
@@ -259,6 +261,31 @@ pub(crate) enum Estimator {
     /// VROOM everywhere.
     #[cfg(test)]
     Vroom,
+}
+
+/// Which orders of scattering a medium's samples follow (R08.T12.g; `decision-r08-t12f.md` §5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub(crate) enum Orders {
+    /// Every order: what every reference traces.
+    #[default]
+    Every,
+    /// The first alone: a path ends once it has made its first vertex's estimates, a scattering's
+    /// or a reflection's, so that a test of single scattering is not widened by a rare second
+    /// order, whose σ is not a standard error at any count a test can afford.
+    #[cfg(test)]
+    First,
+}
+
+impl Orders {
+    /// Whether a path ends after its first vertex.
+    #[must_use]
+    const fn first_alone(self) -> bool {
+        match self {
+            Self::Every => false,
+            #[cfg(test)]
+            Self::First => true,
+        }
+    }
 }
 
 /// How a sample is aimed.
@@ -651,13 +678,14 @@ enum Stage {
 
 impl<'a> Medium<'a> {
     /// The medium of `case` at wavelength index `wavelength`, on `grid`, its samples running
-    /// `estimator`.
+    /// `estimator` over `orders`.
     #[must_use]
     pub(crate) fn new(
         case: &'a AtmosphereCase,
         grid: &'a ShellGrid,
         wavelength: usize,
         estimator: Estimator,
+        orders: Orders,
     ) -> Self {
         let terms = case.terms();
         let profiles: Vec<&DensityProfile> = terms.iter().map(|t| &t.density).collect();
@@ -699,6 +727,7 @@ impl<'a> Medium<'a> {
             grid,
             forward_per_sr,
             vroom,
+            orders,
             phases,
             absorbs: absorption_per_m.iter().any(|&a| a > 0.0),
             profiles,
@@ -1206,6 +1235,7 @@ impl<'a> Medium<'a> {
         let order = branch.walker.order;
         let duty = if self.vroom {
             if branch.role == Role::Mother
+                && !self.orders.first_alone()
                 && let Some(clone) = Role::clone_made_at(order)
             {
                 // The mother's state at the vertex, before it scatters there.
@@ -1230,7 +1260,7 @@ impl<'a> Medium<'a> {
             }
             Vertex::Ground => self.reflect(walker, suns, duty, draws, out),
         }
-        if walker.weight <= 0.0 {
+        if walker.weight <= 0.0 || self.orders.first_alone() {
             return false;
         }
         if let Role::Clone { last, .. } = branch.role
@@ -1537,7 +1567,9 @@ pub(crate) mod tests {
         value["terms"][1]["scattering"] = json!([0.0, 4.4e-6]);
         let case = super::super::tests::case_of(&value);
         let grid = super::super::shell_grid(&case);
-        let vroom = |w: usize, estimator: Estimator| Medium::new(&case, &grid, w, estimator).vroom;
+        let vroom = |w: usize, estimator: Estimator| {
+            Medium::new(&case, &grid, w, estimator, Orders::Every).vroom
+        };
         assert!(
             !vroom(0, Estimator::ByMedium),
             "the aerosol does not scatter at 550 nm"
@@ -1551,7 +1583,11 @@ pub(crate) mod tests {
         value["terms"].as_array_mut().unwrap().remove(1);
         let rayleigh = super::super::tests::case_of(&value);
         let grid = super::super::shell_grid(&rayleigh);
-        assert!((0..2).all(|w| !Medium::new(&rayleigh, &grid, w, Estimator::ByMedium).vroom));
+        assert!(
+            (0..2).all(
+                |w| !Medium::new(&rayleigh, &grid, w, Estimator::ByMedium, Orders::Every).vroom
+            )
+        );
     }
 
     #[test]
@@ -1665,7 +1701,7 @@ pub(crate) mod tests {
         )
         .unwrap();
         let grid = super::super::shell_grid(&case);
-        let medium = Medium::new(&case, &grid, 0, Estimator::ByMedium);
+        let medium = Medium::new(&case, &grid, 0, Estimator::ByMedium, Orders::Every);
         let frame = LocalFrame::at_latitude(0.2);
         // The extinction, written out again.
         let extinction = |x: Vec3| {
@@ -1941,7 +1977,7 @@ pub(crate) mod tests {
                 top_height_m,
             );
             let grid = super::super::shell_grid(&case);
-            let medium = Medium::new(&case, &grid, 0, Estimator::ByMedium);
+            let medium = Medium::new(&case, &grid, 0, Estimator::ByMedium, Orders::Every);
             for (name, origin, dir) in saturn_grazing_rays(&grid) {
                 let depth = medium.optical_depth_to_space(origin, dir).unwrap();
                 let expected =
@@ -1984,7 +2020,7 @@ pub(crate) mod tests {
             40.0 * h,
         );
         let grid = super::super::shell_grid(&case);
-        let medium = Medium::new(&case, &grid, 0, Estimator::ByMedium);
+        let medium = Medium::new(&case, &grid, 0, Estimator::ByMedium, Orders::Every);
         let mut tightest = f64::INFINITY;
         for i in -90..=90 {
             let frame = LocalFrame::at_latitude(f64::from(i).to_radians());

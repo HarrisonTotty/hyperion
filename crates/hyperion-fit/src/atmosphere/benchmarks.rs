@@ -87,7 +87,7 @@ use hyperion_sim::math;
 use hyperion_testkit::stats::{ALPHA, assert_p_value, regularised_gamma_q};
 use serde_json::{Value, json};
 
-use super::transport::Estimator;
+use super::transport::{Estimator, Orders};
 use super::{AtmosphereCase, Polarisation, ReferenceRadiances, trace_reference_with};
 use crate::data::load_dataset;
 use Level::{Bottom, Top};
@@ -276,6 +276,7 @@ fn trace_with(case: &AtmosphereCase, samples: u64, estimator: Estimator) -> Trac
             NonZeroU64::new(n).expect("a benchmark traces samples"),
             NonZeroUsize::new(THREADS).expect("a benchmark traces on threads"),
             estimator,
+            Orders::Every,
         )
         .expect("a benchmark case traces")
     };
@@ -291,6 +292,14 @@ fn trace_with(case: &AtmosphereCase, samples: u64, estimator: Estimator) -> Trac
 pub(super) fn sigma_scales(full: f64, quarter: f64) -> bool {
     let expected = 0.5 * quarter;
     (full - expected).abs() <= SIGMA_SCALING_TOLERANCE * expected
+}
+
+/// The two-sided Bonferroni bound over N = `values` values, at the testkit's α ÷ 2: Φ⁻¹(1 − α ÷
+/// 4N), 4.0 at N = 8, 4.5 at 78 and 4.75 at 246 (Design note 10, _Statistics_). Every agreement
+/// test holds each of its values to it, the benchmarks and the unit tests alike.
+#[must_use]
+pub(super) fn bonferroni_bound(values: u32) -> f64 {
+    -math::normal_quantile(ALPHA / (4.0 * f64::from(values)))
 }
 
 /// How a benchmark's values stand to the tracer's: the scale into the benchmark's unit, and the
@@ -447,8 +456,7 @@ fn assert_agreement(name: &str, comparisons: &[Comparison]) {
     let (comparisons, left_out) = scaling_values(name, comparisons);
     let n = comparisons.len();
     let count = u32::try_from(n).expect("a benchmark asserts fewer than 2³² values");
-    // The Bonferroni bound: two-sided, at α ÷ 2 over the N values.
-    let bound = -math::normal_quantile(ALPHA / (4.0 * f64::from(count)));
+    let bound = bonferroni_bound(count);
     let mut summary = String::new();
     let mut largest = (0.0_f64, String::new());
     let mut past_three = 0;
@@ -2045,6 +2053,26 @@ fn a_standard_error_scales_only_within_a_quarter_of_n_to_the_minus_half() {
 }
 
 #[test]
+fn the_bonferroni_bound_is_design_note_10s() {
+    // Design note 10's figures at 8, 78 and 246 values, and R08.T12.g's at 12, 24 and 48
+    // (`decision-r08-t12f.md` ruling 4), each to its printed digits.
+    for (values, printed, unit) in [
+        (8, 4.0, 0.1),
+        (78, 4.5, 0.1),
+        (246, 4.75, 0.01),
+        (12, 4.10, 0.01),
+        (24, 4.26, 0.01),
+        (48, 4.41, 0.01),
+    ] {
+        let bound = bonferroni_bound(values);
+        assert!(
+            (bound - printed).abs() <= 0.5 * unit,
+            "z_{values} = {bound}, printed {printed}"
+        );
+    }
+}
+
+#[test]
 fn iprt_files_load_against_their_checksums_and_make_valid_cases() {
     // The fast half of the benchmarks: the IPRT files load against their recorded SHA-256s and
     // parse, and the spheroids' matrix makes a valid case (its integral and mean cosine within
@@ -2356,7 +2384,7 @@ fn vroom_conserves_energy_in_a_conservative_slab_of_the_a5_cloud() {
         "{ENERGY_CHECK}: no balance's σ falls as N^(−1/2)"
     );
     let count = u32::try_from(asserted.len()).expect("six balances at most");
-    let bound = -math::normal_quantile(ALPHA / (4.0 * f64::from(count)));
+    let bound = bonferroni_bound(count);
     for b in asserted {
         let z = (b.total - b.incident) / b.sigma;
         eprintln!(

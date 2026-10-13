@@ -58,7 +58,7 @@ pub use reference::{
 
 use geometry::ShellGrid;
 use reference::{Moments, REFERENCE_FORMAT};
-use transport::{COMPONENTS, Estimator, I, Level, Medium, SCALAR_I, Scratch, Source};
+use transport::{COMPONENTS, Estimator, I, Level, Medium, Orders, SCALAR_I, Scratch, Source};
 
 use crate::parallel::{BuildThreadPoolError, map_reduce_chunks};
 use crate::tasks::displaced_forms::births::Draws;
@@ -151,11 +151,19 @@ pub fn trace_reference(
     samples: NonZeroU64,
     threads: NonZeroUsize,
 ) -> Result<ReferenceRadiances, TraceReferenceError> {
-    trace_reference_with(case, polarisation, samples, threads, Estimator::ByMedium)
+    trace_reference_with(
+        case,
+        polarisation,
+        samples,
+        threads,
+        Estimator::ByMedium,
+        Orders::Every,
+    )
 }
 
-/// [`trace_reference`] with the estimator `estimator`, so that the tests can turn R08.T12.f's
-/// variance reduction on and off.
+/// [`trace_reference`] with the estimator `estimator` over the orders of scattering `orders`, so
+/// that the tests can turn R08.T12.f's variance reduction on and off, and trace single scattering
+/// alone (R08.T12.g).
 ///
 /// # Errors
 ///
@@ -170,6 +178,7 @@ pub(crate) fn trace_reference_with(
     samples: NonZeroU64,
     threads: NonZeroUsize,
     estimator: Estimator,
+    orders: Orders,
 ) -> Result<ReferenceRadiances, TraceReferenceError> {
     if polarisation == Polarisation::Stokes
         && let Some(term) = case
@@ -188,7 +197,7 @@ pub(crate) fn trace_reference_with(
     }
     let grid = shell_grid(case);
     let media: Vec<Medium<'_>> = (0..case.wavelengths_nm().len())
-        .map(|w| Medium::new(case, &grid, w, estimator))
+        .map(|w| Medium::new(case, &grid, w, estimator, orders))
         .collect();
     // Each source with its key: its kind (0 a geometry, 1 an aggregate's ground, 2 its top) above
     // its index within the kind, which the case keeps below 2³².
@@ -440,6 +449,7 @@ impl Run<'_> {
 #[cfg(test)]
 mod tests {
     use core::f64::consts::PI;
+    use core::fmt;
 
     use hyperion_sim::math;
     use serde_json::{Value, json};
@@ -466,12 +476,33 @@ mod tests {
         threads: usize,
         estimator: Estimator,
     ) -> ReferenceRadiances {
+        trace_by(
+            value,
+            polarisation,
+            samples,
+            threads,
+            estimator,
+            Orders::Every,
+        )
+    }
+
+    /// `value` traced by `estimator` over the orders of scattering `orders`.
+    #[must_use]
+    fn trace_by(
+        value: &Value,
+        polarisation: Polarisation,
+        samples: u64,
+        threads: usize,
+        estimator: Estimator,
+        orders: Orders,
+    ) -> ReferenceRadiances {
         trace_reference_with(
             &case_of(value),
             polarisation,
             NonZeroU64::new(samples).unwrap(),
             NonZeroUsize::new(threads).unwrap(),
             estimator,
+            orders,
         )
         .unwrap()
     }
@@ -764,6 +795,132 @@ mod tests {
             }
         }
         full
+    }
+
+    /// `value` traced at `samples` samples, a multiple of 4, and over their first quarter, which
+    /// is the trace at `samples ÷ 4`: every sample draws from its own counter-based stream.
+    #[must_use]
+    fn trace_and_quarter(
+        value: &Value,
+        polarisation: Polarisation,
+        samples: u64,
+        threads: usize,
+    ) -> [ReferenceRadiances; 2] {
+        trace_and_quarter_over(value, polarisation, samples, threads, Orders::Every)
+    }
+
+    /// [`trace_and_quarter`] over the orders of scattering `orders`.
+    #[must_use]
+    fn trace_and_quarter_over(
+        value: &Value,
+        polarisation: Polarisation,
+        samples: u64,
+        threads: usize,
+        orders: Orders,
+    ) -> [ReferenceRadiances; 2] {
+        assert_eq!(samples % 4, 0, "a test's samples are a multiple of 4");
+        [samples, samples / 4]
+            .map(|n| trace_by(value, polarisation, n, threads, Estimator::ByMedium, orders))
+    }
+
+    /// Design note 10's statistics in one of the tracer's unit tests (R08.T12.g;
+    /// `decision-r08-t12f.md` ruling 4). Every estimated σ the test reads must fall as N^(−1/2)
+    /// from its σ over the run's first quarter ([`assert_sigma_scales`]), and each of its values is
+    /// held to the Bonferroni bound over them ([`benchmarks::bonferroni_bound`]) times its σ, or
+    /// to 4σ where it holds 8 or fewer. It prints the σ ratios and the largest |z| when it is
+    /// finished.
+    #[derive(Debug, Clone, PartialEq)]
+    pub(crate) struct Agreement {
+        name: &'static str,
+        values: u32,
+        bound: f64,
+        held: u32,
+        /// The σ checked, the smallest and largest ratio among them of σ at N to half σ at N ÷ 4,
+        /// and how many were exactly 0 at both counts (a component the test's paths cannot make).
+        sigmas: u32,
+        ratios: (f64, f64),
+        exact: u32,
+        /// The largest |z| held, |difference| less the slack over σ, and what it was.
+        largest: (f64, String),
+    }
+
+    impl Agreement {
+        /// The statistics of test `name`, which holds `values` values.
+        #[must_use]
+        pub(crate) fn new(name: &'static str, values: u32) -> Self {
+            Self {
+                name,
+                values,
+                bound: if values <= 8 {
+                    4.0
+                } else {
+                    benchmarks::bonferroni_bound(values)
+                },
+                held: 0,
+                sigmas: 0,
+                ratios: (f64::INFINITY, 0.0),
+                exact: 0,
+                largest: (0.0, "none".to_owned()),
+            }
+        }
+
+        /// Asserts that `what`'s σ `full` at N falls as N^(−1/2) from `quarter`, its σ over the
+        /// run's first N ÷ 4 samples or draws.
+        pub(crate) fn sigma_scales(&mut self, full: f64, quarter: f64, what: impl fmt::Display) {
+            assert_sigma_scales(full, quarter, &format!("{}, {what}", self.name));
+            self.sigmas += 1;
+            if quarter > 0.0 {
+                let ratio = full / (0.5 * quarter);
+                self.ratios = (self.ratios.0.min(ratio), self.ratios.1.max(ratio));
+            } else {
+                self.exact += 1;
+            }
+        }
+
+        /// Asserts that `what`'s `difference` from its expected value is within `slack`, a
+        /// deterministic tolerance beside the statistical one (0 for most), and the bound times
+        /// its σ `sigma`.
+        pub(crate) fn hold(
+            &mut self,
+            difference: f64,
+            sigma: f64,
+            slack: f64,
+            what: impl fmt::Display,
+        ) {
+            assert!(
+                difference.abs() <= slack + self.bound * sigma,
+                "{}, {what}: {difference} off, past {slack} + {:.2} × σ {sigma}",
+                self.name,
+                self.bound
+            );
+            self.held += 1;
+            let z = (difference.abs() - slack).max(0.0) / sigma;
+            if sigma > 0.0 && z > self.largest.0 {
+                self.largest = (z, what.to_string());
+            }
+        }
+
+        /// Asserts that the test held as many values as it said, and prints its figures.
+        pub(crate) fn finish(self) {
+            assert_eq!(
+                self.held, self.values,
+                "{}: the values held, against those its bound is for",
+                self.name
+            );
+            let scaling = if self.sigmas == 0 {
+                "no σ held to N^(−1/2)".to_owned()
+            } else {
+                format!(
+                    "{} σ falling as N^(−1/2), σ_N ÷ (σ_N/4 ÷ 2) from {:.3} to {:.3}, {} of them 0 \
+                     at both counts",
+                    self.sigmas, self.ratios.0, self.ratios.1, self.exact
+                )
+            };
+            eprintln!(
+                "{}: {} values to {:.2}σ, the largest |z| past any slack {:.2} ({}); {scaling}",
+                self.name, self.values, self.bound, self.largest.0, self.largest.1
+            );
+        }
     }
 
     #[test]
@@ -1233,7 +1390,10 @@ mod tests {
         // dipole's, tabulated with its matrix: singly scattered light is polarised to −b₁ ÷ a₁ at
         // its scattering angle and carries no V. The degree is (|a|² − |b|²) sin²Θ ÷ (|S₁|² +
         // |S₂|²), so the electric dipole's lead polarises along the scattering plane's normal and
-        // the magnetic one's in the plane: both are traced.
+        // the magnetic one's in the plane: both are traced, by single scattering alone
+        // ([`THIN_SLAB_SAMPLES`]). Q ÷ I, U ÷ I and V ÷ I of each view and wavelength, 48 values,
+        // are each held to the table's interpolation, 2 × 10⁻⁴, and z_48 = 4.41σ, every σ falling
+        // as N^(−1/2) over the run's first quarter (R08.T12.g).
         let sun = (40.0, 0.0);
         let views = [(45.0, 180.0), (50.0, 90.0), (70.0, 300.0), (130.0, 20.0)];
         let geometries: Vec<Value> = views
@@ -1245,6 +1405,7 @@ mod tests {
             })
             .collect();
         let (electric, magnetic) = ((0.4, -0.9), (0.3, 0.5));
+        let mut agreement = Agreement::new("a sphere's single-scattering polarisation", 48);
         for (a, b, sign) in [(electric, magnetic, 1.0), (magnetic, electric, -1.0)] {
             let sphere = dipole_sphere(a, b);
             let terms = json!([{
@@ -1252,52 +1413,84 @@ mod tests {
                 "scattering": [1e-8, 1e-8], "absorption": [0.0, 0.0],
                 "phase": case::tests::tabulated_phase_json(512, 2, &sphere)
             }]);
-            let reference = trace(
+            let [reference, quarter] = trace_and_quarter_over(
                 &slab(&terms, &json!([0.0, 0.0]), &json!(geometries)),
                 Polarisation::Stokes,
-                500,
+                THIN_SLAB_SAMPLES,
                 2,
+                Orders::First,
             );
-            for (traced, &view) in reference.geometries().iter().zip(&views) {
+            for ((traced, first), &view) in reference
+                .geometries()
+                .iter()
+                .zip(quarter.geometries())
+                .zip(&views)
+            {
                 let (towards_sun, _) = direction_and_e1(sun);
                 let (look, _) = direction_and_e1(view);
                 let [a1, _, _, _, b1, _] = sphere(dot3(towards_sun, look));
                 let degree = -b1 / a1;
                 assert!(sign * degree > 0.05, "{}: {degree}", traced.name());
                 let (q_expected, u_expected) = single_scattering_polarisation(sun, view, degree);
-                let stokes = traced.stokes().unwrap();
+                let (stokes, first) = (traced.stokes().unwrap(), first.stokes().unwrap());
                 for w in 0..2 {
                     let intensity = traced.radiance()[w];
-                    let (q, u, v) = (
-                        stokes.q()[w] / intensity,
-                        stokes.u()[w] / intensity,
-                        stokes.v()[w] / intensity,
-                    );
-                    // The table's interpolation, 2 × 10⁻⁴, and 4σ for a rare second scattering.
-                    let sigma = |e: &[f64]| 2e-4 + 4.0 * e[w] / intensity;
-                    assert!(
-                        (q - q_expected).abs() < sigma(stokes.q_standard_error())
-                            && (u - u_expected).abs() < sigma(stokes.u_standard_error()),
-                        "{} at {w}: ({q}, {u}) against ({q_expected}, {u_expected})",
-                        traced.name()
-                    );
-                    assert!(
-                        v.abs() < sigma(stokes.v_standard_error()),
-                        "{}: V {v}",
-                        traced.name()
-                    );
+                    for (component, value, sigma, quarter_sigma, expected) in [
+                        (
+                            "Q",
+                            stokes.q(),
+                            stokes.q_standard_error(),
+                            first.q_standard_error(),
+                            q_expected,
+                        ),
+                        (
+                            "U",
+                            stokes.u(),
+                            stokes.u_standard_error(),
+                            first.u_standard_error(),
+                            u_expected,
+                        ),
+                        (
+                            "V",
+                            stokes.v(),
+                            stokes.v_standard_error(),
+                            first.v_standard_error(),
+                            0.0,
+                        ),
+                    ] {
+                        let what =
+                            format!("{}, {component} ÷ I at {w} (sign {sign})", traced.name());
+                        agreement.sigma_scales(sigma[w], quarter_sigma[w], &what);
+                        agreement.hold(
+                            value[w] / intensity - expected,
+                            sigma[w] / intensity,
+                            2e-4,
+                            what,
+                        );
+                    }
                 }
             }
         }
+        agreement.finish();
     }
+
+    /// The samples of the two thin-slab polarisation tests, which trace single scattering alone
+    /// ([`Orders::First`]; R08.T12.g, `decision-r08-t12f.md` §5). In a slab of τ 10⁻⁵ a rare
+    /// second scattering, some 5 × 10⁻⁵ of a geometry's paths at a wavelength (measured), scores
+    /// as much as a first, so that wherever one falls it is the σ: no standard error, and some
+    /// 2 × 10⁻³ of I, which the Bonferroni bound widens to 40–80 times the tests' slack. Single
+    /// scattering's σ, some 10⁻⁶ of I, is one: by it alone, the ratio of a σ at 500 samples to
+    /// half its σ at 125 scattered by 4.2% at worst over 10 pilot seeds (V's σ is 0 at both). The
+    /// second order, some 10⁻⁵ of I, was never resolved here.
+    const THIN_SLAB_SAMPLES: u64 = 500;
 
     #[test]
     fn atmosphere_a_small_spheres_tabulated_matrix_traces_as_rayleigh() {
         // R08.T12.c: a thin slab of small spheres, their matrix tabulated from the amplitudes'
-        // limit, against the built-in Rayleigh matrix at ρ = 0: the same I, Q, U and V to the
-        // table's interpolation, 10⁻⁴ of I, and 4σ of the two runs. The first scattering is the
-        // same in both, from the same draws; the paths part after it, and a rare second
-        // scattering (some 10⁻⁵ of the paths) scores as much as a first, which σ carries.
+        // limit, against the built-in Rayleigh matrix at ρ = 0, by single scattering alone
+        // ([`THIN_SLAB_SAMPLES`]): the same I, Q, U and V to the table's interpolation, 10⁻⁴ of I,
+        // and z_24 = 4.26σ of the two runs, every σ falling as N^(−1/2) over the run's first
+        // quarter (R08.T12.g). The scattering is the same in both, from the same draws.
         let views = [(45.0, 180.0), (60.0, 70.0), (120.0, 250.0)];
         let geometries: Vec<Value> = views
             .iter()
@@ -1312,53 +1505,73 @@ mod tests {
                 "name": "scatterers", "density": uniform(),
                 "scattering": [1e-8, 1e-8], "absorption": [0.0, 0.0], "phase": phase
             }]);
-            trace(
+            trace_and_quarter_over(
                 &slab(&terms, &json!([0.0, 0.0]), &json!(geometries)),
                 Polarisation::Stokes,
-                500,
+                THIN_SLAB_SAMPLES,
                 2,
+                Orders::First,
             )
         };
-        let built_in = slab_of(json!({ "kind": "rayleigh", "depolarisation": [0.0, 0.0] }));
-        let tabulated = slab_of(case::tests::tabulated_phase_json(
+        let [built_in, built_in_quarter] =
+            slab_of(json!({ "kind": "rayleigh", "depolarisation": [0.0, 0.0] }));
+        let [tabulated, tabulated_quarter] = slab_of(case::tests::tabulated_phase_json(
             256,
             2,
             case::tests::small_sphere,
         ));
-        for (a, b) in built_in.geometries().iter().zip(tabulated.geometries()) {
-            let (sa, sb) = (a.stokes().unwrap(), b.stokes().unwrap());
+        // A run's I, Q, U and V and their σ at w, with its first quarter's σ.
+        let components = |g: &GeometryRadiance, first: &GeometryRadiance, w: usize| {
+            let (s, t) = (g.stokes().unwrap(), first.stokes().unwrap());
+            [
+                (
+                    "I",
+                    g.radiance()[w],
+                    g.standard_error()[w],
+                    first.standard_error()[w],
+                ),
+                (
+                    "Q",
+                    s.q()[w],
+                    s.q_standard_error()[w],
+                    t.q_standard_error()[w],
+                ),
+                (
+                    "U",
+                    s.u()[w],
+                    s.u_standard_error()[w],
+                    t.u_standard_error()[w],
+                ),
+                (
+                    "V",
+                    s.v()[w],
+                    s.v_standard_error()[w],
+                    t.v_standard_error()[w],
+                ),
+            ]
+        };
+        let mut agreement = Agreement::new("a small sphere's tabulated matrix", 24);
+        for (((a, a_first), b), b_first) in built_in
+            .geometries()
+            .iter()
+            .zip(built_in_quarter.geometries())
+            .zip(tabulated.geometries())
+            .zip(tabulated_quarter.geometries())
+        {
             for w in 0..2 {
                 let i = a.radiance()[w];
-                for (x, y, sigma) in [
-                    (
-                        i,
-                        b.radiance()[w],
-                        math::hypot(a.standard_error()[w], b.standard_error()[w]),
-                    ),
-                    (
-                        sa.q()[w],
-                        sb.q()[w],
-                        math::hypot(sa.q_standard_error()[w], sb.q_standard_error()[w]),
-                    ),
-                    (
-                        sa.u()[w],
-                        sb.u()[w],
-                        math::hypot(sa.u_standard_error()[w], sb.u_standard_error()[w]),
-                    ),
-                    (
-                        sa.v()[w],
-                        sb.v()[w],
-                        math::hypot(sa.v_standard_error()[w], sb.v_standard_error()[w]),
-                    ),
-                ] {
-                    assert!(
-                        (x - y).abs() < 1e-4 * i + 4.0 * sigma,
-                        "{} at {w}: {x} {y} ± {sigma}",
-                        a.name()
-                    );
+                for ((component, x, sx, qx), (_, y, sy, qy)) in components(a, a_first, w)
+                    .into_iter()
+                    .zip(components(b, b_first, w))
+                {
+                    let what = format!("{}, {component} at {w}", a.name());
+                    agreement.sigma_scales(sx, qx, format_args!("{what}, Rayleigh's"));
+                    agreement.sigma_scales(sy, qy, format_args!("{what}, the table's"));
+                    agreement.hold(x - y, math::hypot(sx, sy), 1e-4 * i, what);
                 }
             }
         }
+        agreement.finish();
     }
 
     #[test]
@@ -1366,9 +1579,10 @@ mod tests {
         // V arises only from U through b₂ in multiple scattering (the coupling itself is
         // `transport`'s test). Over a plane-parallel slab lit by unpolarised light, V and U are odd
         // in the relative azimuth and I and Q even (the mirror symmetry of the principal plane,
-        // which turns e₂ = k × e₁ over): at ±60° they cancel to 4σ. V is small, some 10⁻³ of I
-        // here, as in Kokhanovsky et al. 2010's tables (10⁻⁴ to 10⁻³), and not resolved at this
-        // cost. Rayleigh, whose b₂ is 0, makes none at all.
+        // which turns e₂ = k × e₁ over): at ±60° they cancel, each of the 12 sums or differences
+        // to z_12 = 4.10σ, every σ falling as N^(−1/2) over the run's first quarter (R08.T12.g).
+        // V is small, some 10⁻³ of I here, as in Kokhanovsky et al. 2010's tables (10⁻⁴ to
+        // 10⁻³). Rayleigh, whose b₂ is 0, makes none at all.
         let sphere = dipole_sphere((0.4, -0.9), (0.3, 0.5));
         let terms = json!([{
             "name": "spheres", "density": uniform(),
@@ -1381,28 +1595,48 @@ mod tests {
             geometry("top-plus", 1000.0, (130.0, 60.0), (40.0, 0.0)),
             geometry("top-minus", 1000.0, (130.0, -60.0), (40.0, 0.0))
         ]);
-        let reference = trace(
+        // 256,000 samples, from a pilot at 10 other seeds (R08.T12.g): at R08.T12.c's 20,000 the
+        // ratio of V's σ at N to half its σ at N ÷ 4 scattered by 12% over them, by 5.3% at
+        // 160,000 and by 4.0% here.
+        let [reference, quarter] = trace_and_quarter(
             &slab(&terms, &json!([0.0, 0.0]), &geometries),
             Polarisation::Stokes,
-            20_000,
+            256_000,
             4,
         );
-        for pair in reference.geometries().chunks(2) {
-            let (plus, minus) = (pair[0].stokes().unwrap(), pair[1].stokes().unwrap());
+        let mut agreement = Agreement::new("circular polarisation's symmetry", 12);
+        for (pair, first) in reference
+            .geometries()
+            .chunks(2)
+            .zip(quarter.geometries().chunks(2))
+        {
+            let [plus, minus, first_plus, first_minus] =
+                [&pair[0], &pair[1], &first[0], &first[1]].map(|g| g.stokes().unwrap());
             for w in 0..2 {
-                let sigma = math::hypot(plus.v_standard_error()[w], minus.v_standard_error()[w]);
-                let (v_plus, v_minus) = (plus.v()[w], minus.v()[w]);
-                assert!(
-                    (v_plus + v_minus).abs() < 4.0 * sigma,
-                    "{}: V {v_plus} and {v_minus} ± {sigma}",
-                    pair[0].name()
-                );
-                let sigma = math::hypot(plus.u_standard_error()[w], minus.u_standard_error()[w]);
-                assert!((plus.u()[w] + minus.u()[w]).abs() < 4.0 * sigma);
-                let sigma = math::hypot(plus.q_standard_error()[w], minus.q_standard_error()[w]);
-                assert!((plus.q()[w] - minus.q()[w]).abs() < 4.0 * sigma);
+                // Each component's value and σ at w.
+                let components = |s: &StokesRadiance| {
+                    [
+                        (s.v()[w], s.v_standard_error()[w]),
+                        (s.u()[w], s.u_standard_error()[w]),
+                        (s.q()[w], s.q_standard_error()[w]),
+                    ]
+                };
+                // V and U odd in the azimuth, so that a pair's sum is 0, and Q even, its
+                // difference.
+                for (k, (component, sign)) in [("V", 1.0), ("U", 1.0), ("Q", -1.0)]
+                    .into_iter()
+                    .enumerate()
+                {
+                    let [(x, sx), (y, sy), (_, qx), (_, qy)] =
+                        [plus, minus, first_plus, first_minus].map(|s| components(s)[k]);
+                    let what = format!("{}, {component} at {w}", pair[0].name());
+                    agreement.sigma_scales(sx, qx, format_args!("{what}, at +60°"));
+                    agreement.sigma_scales(sy, qy, format_args!("{what}, at −60°"));
+                    agreement.hold(x + sign * y, math::hypot(sx, sy), 0.0, what);
+                }
             }
         }
+        agreement.finish();
         let rayleigh = json!([{
             "name": "gas", "density": uniform(),
             "scattering": [1e-3, 1e-3], "absorption": [0.0, 0.0],
@@ -1429,11 +1663,12 @@ mod tests {
     fn atmosphere_a_legendre_series_traces_as_a_table_of_the_same_function() {
         // Henyey–Greenstein at g = 0.8 as a Legendre series (βₗ = (2l + 1) gˡ, 300 terms), drawn
         // from its proposal and weighted, and as a table of 1,024 entries, drawn exactly: in a
-        // slab of τ = 1 the radiances agree to 4σ. (Both draw from tables, so their paths are
-        // close and the comparison is lenient; the forward peak leaves σ near 2% away from the
-        // sun at 40,000 samples.) Rayleigh's series, β = (1, 0, ½), against the built-in phase
+        // slab of τ = 1 the radiances agree. (Both draw from tables, so their paths are close and
+        // the comparison is lenient; the forward peak leaves σ near 2% away from the sun at
+        // 40,000 samples.) Rayleigh's series, β = (1, 0, ½), against the built-in phase
         // function's exact draws is the independent check: there the paths differ, and the two
-        // agree to 4σ at σ near 0.5%.
+        // agree at σ near 0.5%. Each of the 12 values is held to z_12 = 4.10σ, and every σ falls
+        // as N^(−1/2) over the run's first quarter (R08.T12.g).
         let g: f64 = 0.8;
         let mut power = 1.0;
         let beta: Vec<f64> = (0..300)
@@ -1463,7 +1698,7 @@ mod tests {
                 "name": "haze", "density": uniform(),
                 "scattering": [1e-3, 1e-3], "absorption": [0.0, 2e-4], "phase": phase
             }]);
-            trace(
+            trace_and_quarter(
                 &slab(&terms, &json!([0.0, 0.2]), &geometries),
                 Polarisation::Scalar,
                 40_000,
@@ -1476,28 +1711,44 @@ mod tests {
             "kind": "legendre", "coefficients": [[1.0, 0.0, 0.5], [1.0, 0.0, 0.5]]
         }));
         let rayleigh = slab_of(json!({ "kind": "rayleigh", "depolarisation": [0.0, 0.0] }));
-        for (a, b) in series
-            .geometries()
-            .iter()
-            .zip(tabulated.geometries())
-            .chain(
-                rayleigh_series
-                    .geometries()
-                    .iter()
-                    .zip(rayleigh.geometries()),
-            )
-        {
-            for w in 0..2 {
-                let (x, y) = (a.radiance()[w], b.radiance()[w]);
-                let sigma = math::hypot(a.standard_error()[w], b.standard_error()[w]);
-                assert!(sigma < 0.05 * x, "{}: {x} ± {sigma}", a.name());
-                assert!(
-                    (x - y).abs() < 4.0 * sigma,
-                    "{} at {w}: {x} against {y} ± {sigma}",
-                    a.name()
-                );
+        let mut agreement = Agreement::new("a Legendre series against its table", 12);
+        for (pair, other, [a, a_quarter], [b, b_quarter]) in [
+            ("Henyey–Greenstein", "the table", &series, &tabulated),
+            (
+                "Rayleigh",
+                "the built-in function",
+                &rayleigh_series,
+                &rayleigh,
+            ),
+        ] {
+            for (((ga, qa), gb), qb) in a
+                .geometries()
+                .iter()
+                .zip(a_quarter.geometries())
+                .zip(b.geometries())
+                .zip(b_quarter.geometries())
+            {
+                for w in 0..2 {
+                    let (x, y) = (ga.radiance()[w], gb.radiance()[w]);
+                    let (sa, sb) = (ga.standard_error()[w], gb.standard_error()[w]);
+                    let what = format!("{pair}, {} at {w}", ga.name());
+                    agreement.sigma_scales(
+                        sa,
+                        qa.standard_error()[w],
+                        format_args!("{what}, the series"),
+                    );
+                    agreement.sigma_scales(
+                        sb,
+                        qb.standard_error()[w],
+                        format_args!("{what}, {other}"),
+                    );
+                    let sigma = math::hypot(sa, sb);
+                    assert!(sigma < 0.05 * x, "{what}: {x} ± {sigma}");
+                    agreement.hold(x - y, sigma, 0.0, what);
+                }
             }
         }
+        agreement.finish();
     }
 
     /// cos Θ between the directions at `(zenith, azimuth)` and `(zenith, azimuth)`, degrees, by
@@ -1516,10 +1767,13 @@ mod tests {
             / (4.0 * PI)
     }
 
-    #[test]
-    fn atmosphere_thin_layer_matches_single_scattering() {
-        // τₛ = 10⁻⁵ and τₐ = 5 × 10⁻⁶: multiple scattering is some 10⁻⁵ of the radiance.
-        let (sigma_s, sigma_a, top) = (1e-8, 5e-9, 1000.0);
+    /// A uniform slab of Rayleigh scattering `sigma_s` and absorption `sigma_a` (m⁻¹, at both
+    /// wavelengths, ρ 0 and 0.03) over a black ground, seen up from the ground, down from the
+    /// top and horizontally from 500 m to a black target 1 km off, with each geometry's singly
+    /// scattered radiance per wavelength.
+    #[must_use]
+    fn single_scattering_slab(sigma_s: f64, sigma_a: f64) -> (Value, [[f64; 3]; 2]) {
+        let top = 1000.0;
         let rho = [0.0, 0.03];
         let terms = json!([{
             "name": "gas", "density": uniform(),
@@ -1537,18 +1791,12 @@ mod tests {
             geometry("up", top, up_view, up_sun),
             side
         ]);
-        let reference = trace(
-            &slab(&terms, &json!([0.0, 0.0]), &geometries),
-            Polarisation::Scalar,
-            2000,
-            4,
-        );
         let tau = (sigma_s + sigma_a) * top;
         let omega = sigma_s / (sigma_s + sigma_a);
         let irradiance = [PI, 2.0];
-        for (w, (&depolarisation, &irradiance)) in rho.iter().zip(&irradiance).enumerate() {
-            let f = irradiance * omega;
-            let phase = |view, sun| rayleigh(depolarisation, cos_between(view, sun));
+        let expected = [0, 1].map(|w| {
+            let f = irradiance[w] * omega;
+            let phase = |view, sun| rayleigh(rho[w], cos_between(view, sun));
             // Downwelling at the ground: F ω p μ₀ ÷ (μ₀ − μ) (e^(−τ/μ₀) − e^(−τ/μ)).
             let (mu, mu0) = (
                 math::cos(radians(down_view.0)),
@@ -1567,7 +1815,18 @@ mod tests {
                 * phase(side_view, side_sun)
                 * math::exp(-sun_depth)
                 * -math::exp_m1(-(sigma_s + sigma_a) * distance);
-            for (traced, expected) in reference.geometries().iter().zip([down, up, side]) {
+            [down, up, side]
+        });
+        (slab(&terms, &json!([0.0, 0.0]), &geometries), expected)
+    }
+
+    #[test]
+    fn atmosphere_thin_layer_matches_single_scattering() {
+        // τₛ = 10⁻⁵ and τₐ = 5 × 10⁻⁶: multiple scattering is some 10⁻⁵ of the radiance.
+        let (case, expected) = single_scattering_slab(1e-8, 5e-9);
+        let reference = trace(&case, Polarisation::Scalar, 2000, 4);
+        for (w, expected) in expected.iter().enumerate() {
+            for (traced, &expected) in reference.geometries().iter().zip(expected) {
                 let radiance = traced.radiance()[w];
                 assert!(
                     (radiance / expected - 1.0).abs() < 1e-4,
@@ -1577,6 +1836,77 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn atmosphere_first_order_alone_is_single_scattering() {
+        // R08.T12.g's `Orders::First` ends every path once it has made its first vertex's
+        // estimates. In the thin-layer test's slab at τₛ 0.5 and τₐ 0.25, where the orders past
+        // the first add 38–68% to the radiance (measured), single scattering's is left, to 2%,
+        // each σ held under 0.25% of it (a fixed tolerance, so its σ is a cap and no agreement;
+        // at most 0.214% at 40,000 samples in a pilot at 3 other seeds). In a slab of
+        // Henyey–Greenstein g 0.9, which turns VROOM on, the first order is R08.T12.c's
+        // estimator's to the bit: VROOM makes no clone, copy or later estimate there.
+        let (case, expected) = single_scattering_slab(5e-4, 2.5e-4);
+        let first = trace_by(
+            &case,
+            Polarisation::Scalar,
+            FIRST_ORDER_SAMPLES,
+            4,
+            Estimator::ByMedium,
+            Orders::First,
+        );
+        let every = trace(&case, Polarisation::Scalar, FIRST_ORDER_SAMPLES, 4);
+        for (w, expected) in expected.iter().enumerate() {
+            for ((traced, all), &expected) in first
+                .geometries()
+                .iter()
+                .zip(every.geometries())
+                .zip(expected)
+            {
+                let (radiance, sigma) = (traced.radiance()[w], traced.standard_error()[w]);
+                assert!(
+                    (radiance / expected - 1.0).abs() < 2e-2 && sigma < 2.5e-3 * expected,
+                    "{} at {w}: {radiance} ± {sigma} against {expected}",
+                    traced.name()
+                );
+                assert!(
+                    all.radiance()[w] > 1.2 * radiance,
+                    "{} at {w}: every order's {} against the first's {radiance}",
+                    traced.name(),
+                    all.radiance()[w]
+                );
+            }
+        }
+        let mut peaked = case;
+        peaked["terms"][0]["phase"] = case::tests::tabulated_phase_json(512, 2, |c| {
+            [
+                optics::tests::henyey_greenstein(0.9, c),
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ]
+        });
+        let first_by = |estimator| {
+            trace_by(
+                &peaked,
+                Polarisation::Scalar,
+                2000,
+                4,
+                estimator,
+                Orders::First,
+            )
+            .to_json()
+        };
+        assert_eq!(
+            first_by(Estimator::Vroom),
+            first_by(Estimator::SunwardDraws)
+        );
+    }
+
+    /// The samples of `atmosphere_first_order_alone_is_single_scattering`.
+    const FIRST_ORDER_SAMPLES: u64 = 40_000;
 
     #[test]
     fn atmosphere_single_scattering_polarisation_has_rayleighs_degree_and_plane() {
@@ -1672,34 +2002,68 @@ mod tests {
             { "name": "zenith", "sunDirections": [{ "zenithDeg": 0.0, "azimuthDeg": 0.0 }] },
             { "name": "low", "sunDirections": [{ "zenithDeg": 60.0, "azimuthDeg": 0.0 }] }
         ]);
-        let reference = trace(&case, Polarisation::Scalar, 20_000, 4);
-        for aggregate in reference.aggregates() {
-            let incident = aggregate.incident_top();
-            // Black ground: what is not reflected is transmitted.
-            let total = aggregate.upwelling_top()[0]
-                + aggregate.direct_ground()[0]
-                + aggregate.diffuse_ground()[0];
-            let sigma = math::hypot(
-                aggregate.upwelling_top_standard_error()[0],
-                aggregate.diffuse_ground_standard_error()[0],
-            );
-            assert!(
-                (total - incident[0]).abs() < 4.0 * sigma,
-                "{}: {total} against {} ± {sigma}",
-                aggregate.name(),
-                incident[0]
-            );
-            assert!(sigma < 0.01 * incident[0], "{sigma}");
-            // White ground: everything comes back up.
-            let up = aggregate.upwelling_top()[1];
-            let sigma = aggregate.upwelling_top_standard_error()[1];
-            assert!(
-                (up - incident[1]).abs() < 4.0 * sigma,
-                "{}: {up} against {} ± {sigma}",
-                aggregate.name(),
-                incident[1]
-            );
+        // Each of the 4 balances to 4σ, every σ falling as N^(−1/2) over the run's first quarter
+        // (R08.T12.g).
+        let [reference, quarter] = trace_and_quarter(&case, Polarisation::Scalar, 20_000, 4);
+        let mut agreement = Agreement::new("a conservative layer's energy", 4);
+        for (aggregate, first) in reference.aggregates().iter().zip(quarter.aggregates()) {
+            assert_balances(&mut agreement, aggregate, first, 0.01);
         }
+        agreement.finish();
+    }
+
+    /// Asserts that `aggregate`'s fluxes balance its incident flux, with `first` its run's first
+    /// quarter: over a black ground (the first wavelength) what is not reflected is transmitted,
+    /// diffusely or in the direct beam, and over a white one (the second) everything comes back
+    /// up. The first balance's σ must be under `sigma_limit` of the incident flux.
+    fn assert_balances(
+        agreement: &mut Agreement,
+        aggregate: &FluxAggregate,
+        first: &FluxAggregate,
+        sigma_limit: f64,
+    ) {
+        let name = aggregate.name();
+        let incident = aggregate.incident_top();
+        let (up, down) = (
+            aggregate.upwelling_top_standard_error(),
+            aggregate.diffuse_ground_standard_error(),
+        );
+        agreement.sigma_scales(
+            up[0],
+            first.upwelling_top_standard_error()[0],
+            format_args!("{name} up at 0"),
+        );
+        agreement.sigma_scales(
+            down[0],
+            first.diffuse_ground_standard_error()[0],
+            format_args!("{name} down at 0"),
+        );
+        agreement.sigma_scales(
+            up[1],
+            first.upwelling_top_standard_error()[1],
+            format_args!("{name} up at 1"),
+        );
+        let total = aggregate.upwelling_top()[0]
+            + aggregate.direct_ground()[0]
+            + aggregate.diffuse_ground()[0];
+        let sigma = math::hypot(up[0], down[0]);
+        assert!(
+            sigma < sigma_limit * incident[0],
+            "{name}: σ {sigma} of {}",
+            incident[0]
+        );
+        agreement.hold(
+            total - incident[0],
+            sigma,
+            0.0,
+            format_args!("{name}, the black ground"),
+        );
+        agreement.hold(
+            aggregate.upwelling_top()[1] - incident[1],
+            up[1],
+            0.0,
+            format_args!("{name}, the white ground"),
+        );
     }
 
     /// The Earth-like sample case over the spheroid a = c = its sphere's radius with ω = 0, at
@@ -1714,23 +2078,16 @@ mod tests {
         case
     }
 
-    /// Asserts that every radiance and flux of `a` and `b` agrees within `sigmas` of their
-    /// combined standard errors plus `relative` of the value, and that their direct beams agree.
-    fn assert_traces_agree(
-        a: &ReferenceRadiances,
-        b: &ReferenceRadiances,
-        sigmas: f64,
-        relative: f64,
-    ) {
-        let close = |x: f64, sx: f64, y: f64, sy: f64| {
-            (x - y).abs() <= sigmas * math::hypot(sx, sy) + relative * x.abs()
-        };
+    /// Asserts that every radiance and flux of `a` and `b`, traced on the same draws, agrees to
+    /// `relative` of the value, and that their direct beams agree.
+    fn assert_traces_agree(a: &ReferenceRadiances, b: &ReferenceRadiances, relative: f64) {
+        let close = |x: f64, y: f64| (x - y).abs() <= relative * x.abs();
         for (g, h) in a.geometries().iter().zip(b.geometries()) {
             for w in 0..g.radiance().len() {
                 let (x, y) = (g.radiance()[w], h.radiance()[w]);
                 let (sx, sy) = (g.standard_error()[w], h.standard_error()[w]);
                 assert!(
-                    close(x, sx, y, sy),
+                    close(x, y),
                     "{} at {w}: {x} ± {sx} against {y} ± {sy}",
                     g.name()
                 );
@@ -1754,14 +2111,14 @@ mod tests {
                 let (x, sx) = (f.diffuse_ground()[w], f.diffuse_ground_standard_error()[w]);
                 let (y, sy) = (k.diffuse_ground()[w], k.diffuse_ground_standard_error()[w]);
                 assert!(
-                    close(x, sx, y, sy),
+                    close(x, y),
                     "{} at {w}: {x} ± {sx} against {y} ± {sy}",
                     f.name()
                 );
                 let (x, sx) = (f.upwelling_top()[w], f.upwelling_top_standard_error()[w]);
                 let (y, sy) = (k.upwelling_top()[w], k.upwelling_top_standard_error()[w]);
                 assert!(
-                    close(x, sx, y, sy),
+                    close(x, y),
                     "{} at {w}: {x} ± {sx} against {y} ± {sy}",
                     f.name()
                 );
@@ -1769,29 +2126,49 @@ mod tests {
         }
     }
 
+    /// Every stochastic value of `reference` with its σ and what it is: each geometry's radiance
+    /// and each aggregate's diffuse and upwelling fluxes, per wavelength.
+    #[must_use]
+    fn stochastic_values(reference: &ReferenceRadiances) -> Vec<(String, f64, f64)> {
+        let mut values = Vec::new();
+        for g in reference.geometries() {
+            for (w, (&x, &sigma)) in g.radiance().iter().zip(g.standard_error()).enumerate() {
+                values.push((format!("{} at {w}", g.name()), x, sigma));
+            }
+        }
+        for f in reference.aggregates() {
+            for w in 0..f.incident_top().len() {
+                values.push((
+                    format!("{} down at {w}", f.name()),
+                    f.diffuse_ground()[w],
+                    f.diffuse_ground_standard_error()[w],
+                ));
+                values.push((
+                    format!("{} up at {w}", f.name()),
+                    f.upwelling_top()[w],
+                    f.upwelling_top_standard_error()[w],
+                ));
+            }
+        }
+        values
+    }
+
     #[test]
     fn atmosphere_spheroid_with_a_equal_to_c_agrees_with_the_sphere() {
         // R08.T12.d: a = c with ω = 0 on the Earth-like sample case, against `Shells::Sphere` of
         // the same radius. On the same draws the paths are the sphere's to rounding (measured
-        // 4 × 10⁻¹³), so they agree to 10⁻⁹, far inside the task's 3σ. On independent draws (seed
-        // 1) each of the 8 stochastic values is held to 4σ, a family-wise α of 5 × 10⁻⁴ (the
-        // sim-determinism rule's α = 10⁻³; 3σ over 8 values would be 2%). The slow test below
-        // repeats the first at 10⁵ samples.
+        // 4 × 10⁻¹³), so they agree to 10⁻⁹, far inside the task's 3σ. The slow test below
+        // repeats it at 10⁵ samples, and compares independent draws (R08.T12.g).
         let sphere = trace(&case::tests::sample_case(), Polarisation::Scalar, 1500, 4);
         let same = trace(&sample_case_as_a_spheroid(0), Polarisation::Scalar, 1500, 4);
-        assert_traces_agree(&sphere, &same, 0.0, 1e-9);
-        let independent = trace(&sample_case_as_a_spheroid(1), Polarisation::Scalar, 1500, 4);
-        assert_traces_agree(&sphere, &independent, 4.0, 0.0);
+        assert_traces_agree(&sphere, &same, 1e-9);
     }
 
     #[test]
-    #[ignore = "slow: 10⁵ samples of each source, over a sphere and a spheroid; about 2 minutes on 4 threads"]
+    #[ignore = "slow: 10⁵ samples of each source over a sphere and a spheroid, and 5 × 10⁴ over another two; about 3 minutes on 4 threads"]
     fn atmosphere_spheroid_with_a_equal_to_c_follows_the_spheres_paths() {
-        // The fast test's first comparison over 10⁵ paths a source, so that rare paths (grazing,
-        // reflected many times, rouletted) are held to the sphere's too. Independent draws are not
-        // compared here: their difference is the two runs' noise alone, since the paths are the
-        // same, and 3σ over these 8 values fails by chance about 2% of the time (at 10⁵ samples
-        // one stood at 3.2σ; R08's Risks).
+        // The fast test's comparison over 10⁵ paths a source, so that rare paths (grazing,
+        // reflected many times, rouletted) are held to the sphere's too.
         let sphere = trace(
             &case::tests::sample_case(),
             Polarisation::Scalar,
@@ -1812,7 +2189,37 @@ mod tests {
                 g.name()
             );
         }
-        assert_traces_agree(&sphere, &spheroid, 0.0, 1e-9);
+        assert_traces_agree(&sphere, &spheroid, 1e-9);
+        // On independent draws (the spheroid at seed 1), moved here from the fast test (R08.T12.g;
+        // `decision-r08-t12f.md` §5): each of the 8 stochastic values to 4σ, a family-wise α of
+        // 5 × 10⁻⁴ (the sim-determinism rule's α = 10⁻³; 3σ over 8 values would fail 2% of the
+        // time), and every σ on both sides falling as N^(−1/2) over the run's first quarter. At
+        // 40,000 samples, from a pilot at 10 other seeds: at R08.T12.d's 1,500 the ratio of a σ at
+        // N to half its σ at N ÷ 4 scattered by 13% over them at worst (the view from orbit at
+        // 550 nm), by 6.3% at 16,000 and by 2.7% here.
+        let [sphere, sphere_quarter] =
+            trace_and_quarter(&case::tests::sample_case(), Polarisation::Scalar, 40_000, 4);
+        let [independent, independent_quarter] = trace_and_quarter(
+            &sample_case_as_a_spheroid(1),
+            Polarisation::Scalar,
+            40_000,
+            4,
+        );
+        let mut agreement = Agreement::new("a = c on independent draws", 8);
+        for (((what, x, sx), (_, _, qx)), ((_, y, sy), (_, _, qy))) in stochastic_values(&sphere)
+            .into_iter()
+            .zip(stochastic_values(&sphere_quarter))
+            .zip(
+                stochastic_values(&independent)
+                    .into_iter()
+                    .zip(stochastic_values(&independent_quarter)),
+            )
+        {
+            agreement.sigma_scales(sx, qx, format_args!("the sphere's {what}"));
+            agreement.sigma_scales(sy, qy, format_args!("the spheroid's {what}"));
+            agreement.hold(x - y, math::hypot(sx, sy), 0.0, what);
+        }
+        agreement.finish();
     }
 
     #[test]
@@ -1984,37 +2391,13 @@ mod tests {
             { "name": "pole", "latitudeDeg": 90.0,
               "sunDirections": [{ "zenithDeg": 60.0, "azimuthDeg": 0.0 }] }
         ]);
-        let reference = trace(&case, Polarisation::Scalar, 10_000, 4);
-        for aggregate in reference.aggregates() {
-            let incident = aggregate.incident_top();
-            let total = aggregate.upwelling_top()[0]
-                + aggregate.direct_ground()[0]
-                + aggregate.diffuse_ground()[0];
-            let sigma = math::hypot(
-                aggregate.upwelling_top_standard_error()[0],
-                aggregate.diffuse_ground_standard_error()[0],
-            );
-            assert!(
-                (total - incident[0]).abs() < 4.0 * sigma,
-                "{}: {total} against {} ± {sigma}",
-                aggregate.name(),
-                incident[0]
-            );
-            assert!(
-                sigma < 0.015 * incident[0],
-                "{}: {sigma} of {}",
-                aggregate.name(),
-                incident[0]
-            );
-            let up = aggregate.upwelling_top()[1];
-            let sigma = aggregate.upwelling_top_standard_error()[1];
-            assert!(
-                (up - incident[1]).abs() < 4.0 * sigma,
-                "{}: {up} against {} ± {sigma}",
-                aggregate.name(),
-                incident[1]
-            );
+        // As the sphere's test: 4 balances to 4σ, every σ falling as N^(−1/2) (R08.T12.g).
+        let [reference, quarter] = trace_and_quarter(&case, Polarisation::Scalar, 10_000, 4);
+        let mut agreement = Agreement::new("a flattened conservative layer's energy", 4);
+        for (aggregate, first) in reference.aggregates().iter().zip(quarter.aggregates()) {
+            assert_balances(&mut agreement, aggregate, first, 0.015);
         }
+        agreement.finish();
         // The direct beam is e^(−τ ÷ s μ₀) of the incident flux: the layer is thinner where
         // gravity is stronger.
         let (_, [s_equator, s_pole]) = spheroid_slab(&terms, &json!([0.0, 0.0]), &json!([]));
