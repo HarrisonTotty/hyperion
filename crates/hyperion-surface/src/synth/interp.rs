@@ -302,7 +302,7 @@ struct FaceTerm {
 /// A face's normal and its u and v axes in body-fixed space, by S2's axes ([`face_uv_to_xyz`]:
 /// the point (u, v) of a face is n + u `e_u` + v `e_v`).
 #[must_use]
-const fn axes(face: Face) -> ([f64; 3], [f64; 3], [f64; 3]) {
+pub(crate) const fn axes(face: Face) -> ([f64; 3], [f64; 3], [f64; 3]) {
     match face {
         Face::PosX => ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
         Face::PosY => ([0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
@@ -364,7 +364,7 @@ fn face_term<V: CellValues + ?Sized>(
 /// ds/du of S2's inverse warp ([`uv_to_st`]): ¾ ÷ √(1 + 3u) for u ≥ 0 and ¾ ÷ √(1 − 3u) below,
 /// one expression in |u|.
 #[must_use]
-fn warp_slope(u: f64) -> f64 {
+pub(crate) fn warp_slope(u: f64) -> f64 {
     0.75 / (1.0 + 3.0 * u.abs()).sqrt()
 }
 

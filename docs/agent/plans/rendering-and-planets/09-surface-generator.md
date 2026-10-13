@@ -5014,3 +5014,144 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     0.925 on the Ceres-like figure. A tighter bound would only save words.
   - _One density per body._ Small craters carry no regional ages (maria against highlands), no
     sedimentation under water and no ice cover (the earlier adjacent finding stands).
+- **Deviations in T6.b, as built** (2026-10-13; lane r09-channels).
+  - _Files and public items._ `synth/channels/incision.rs`, a public module (tests in
+    `incision/tests.rs`), re-exported through `synth::channels`:
+    - `Channels::incision_at(field, dir, through, cache)`, the incision's height and body-fixed
+      gradient for levels L to `through`, and `Channels::network_in(field, cache)`, the network
+      memoised in the caller's `SynthCache`; `Channels::body()`;
+    - `ChannelBody { radius, level, gravity }` (`of(header)`), `valley_depth`, `deepest_level`,
+      `channel_head_area`, `channel_variance` and `channel_structure_function`;
+    - `CHANNEL_HEAD_AREA`, `DEBRIS_FLOW_SLOPE`, `CUT_WIDTH`, `VALLEY_WALL_SHARE`,
+      `VALLEY_WALL_GRADIENT`, `MEAN_SAMPLES`, `TRIBUTARY_SHARE`, `MEAN_TRIBUTARY_LENGTH`,
+      `MEAN_TRUNK_LENGTH`, `TRIBUTARY_VARIANCE_SHARE` and `WHOLE_VARIANCE_SHARE`.
+
+    `channels.rs` gains `mean_discharge_m3_s`, `channel_forming_discharge_m3_s`,
+    `bankfull_width` and `bankfull_depth` (both taking the body's gravity),
+    `tributary_steepness_m0_9`, `BANKFULL_RATIO`, `BANKFULL_RATIO_AREA`,
+    `BANKFULL_RATIO_EXPONENT`, the three `BANKFULL_*` Parker constants and `REFERENCE_GRAIN_SIZE`.
+    `Segment` gains `mean_discharge_m3_s`, `bankfull_width`, `bankfull_depth` and `below_top`
+    (176 bytes, was 136). `Channels` holds the header's body, gravity, sea level, realised `σ_h`
+    and relief, and `network` refuses a field whose header differs in any of them.
+    `UnresolvedVariance` gains `channels()`, and `total()` sums relief, channels and craters in
+    that order. `SynthCache` holds a crate-private `ChannelCache`. `interp::{axes, warp_slope}`
+    and `relief::as_function_of_direction` become `pub(crate)`. A new
+    `benches/synth.rs` (`required-features = ["testing"]`).
+
+  - _The incision model_ (Design note 13's "valley cross-profile from the distance to the
+    channel", the relief from the profiles). Each evaluated segment cuts a groove: a flat floor of
+    half its bankfull width, then a cubic-smoothstep wall over W, half the level's mean cell. Its
+    depth at the axis is G = min(max(β, d), `G_max`), with d the bankfull depth and `G_max` the
+    depth whose steepest wall, 1.5 G ÷ W, is 0.6.
+    - β is the bed's depth below its trunk's valley top. A trunk's valley is `valley_depth`: the
+      stream-power rise from the channel heads to one mean coarse cell's Hack length, at the
+      tributaries' `k_s` (r̄ ÷ r)^θ. Tributaries inherit the top where they join, so their grooves
+      shallow upstream as their beds rise.
+    - Levels combine by maximum into `E_k`, and level k's incision is −(`E_k` − `E_{k−1}`), so a
+      groove inside a deeper one cuts nothing and confluences have no pits.
+  - _The mean._ Level k's mean is over its parent cell, and the first level's over its own coarse
+    cell, not an L − 1 parent, so that the coarse cell's mean elevation is kept. It is the 8 × 8
+    midpoint sum weighted by solid angle. What is subtracted is a correction with that mean,
+    continuous across cells: bilinear between corner means (three or four cells, summed in
+    packed-key order) plus a bubble zero with its gradient on every edge. A constant per parent
+    would step at every edge. The correction is C⁰ across cells.
+    - The task's 10⁻⁹ m holds on the defining grid (a test, over 60 parent cells including face
+      edges). On an independent 24 × 24 grid the mean is up to 5.6% of the level's RMS over a
+      parent cell, and on 48 × 48 up to 2.2% over a coarse cell (tested at 8% and 4%).
+  - _The search._ The network's joins keep T6.a's 3 × 3, unpruned (the memo amortises them). The
+    groove lists, per cell and level, gather segments headed within two king moves (5 × 5), each
+    with a cached box, pruned exactly. A groove reaches half a cell beyond its segment and a trunk
+    ends at its receiver's key point, so from a 3 × 3, 22–48% of tributaries and 92–100% of trunks
+    (the share longer than 0.75 cells) could be cut off at the neighbourhood's edge. From the 5 × 5
+    only segments longer than 1.75 cells are: none at L to L + 2, 0.09–0.52% at L + 3 and L + 4,
+    where the height steps (the continuity test found under 1 cm on 13 cells).
+  - _The cut_ (per coarse cell). Level k > L is evaluated where a channel draining one mean cell
+    of the level at the cell's own runoff is at least 4 m wide (two band limits), and the level's
+    mean cell is at least the heads' drainage, max(10⁴ m², (`k_s` ÷ 0.1)^(1/θ)). The trunks are
+    always evaluated. Measured before fixing it (closed form, 40 cells a world):
+    - the deepest levels: Earth-like 9: 1, 10: 5, 11: 9, 12: 18, 13: 7; Mars-like 7: 1, 8: 1,
+      9: 4, 10: 5, 11: 29;
+    - an 8 m cut, Design note 13's four band limits, would remove a median 24 m RMS of valleys
+      (largest 206 m) on the Earth-like world and 26 m (44 m) on the Mars-like, resolvable relief
+      and within budget to keep, so the cost lever is not taken;
+    - the 4 m cut leaves out a median 18 m RMS (largest 54 m) below it down to the heads on the
+      Earth-like world and 14 m (21 m) on the Mars-like (deferred, below).
+  - _Hydraulic geometry._ Parker et al. 2007, eqs. 10a and 12, at D50 0.073 m and the body's own
+    gravity, from `header.craters().gravity()`. The channel-forming discharge is the bankfull flood,
+    55 (A ÷ 5 km²)^−0.25 times the mean, held outside 5.4 km² to 2.964 × 10⁶ km²: a least-squares
+    fit by this task's science check to the 1.5-year floods of seven USGS gauges, not published,
+    **drafted for sign-off**. The plan's other candidate, the mean over the 5% reference
+    intermittency (20×), was 2.5–8 times too high above 10⁴ km² (must-fix of that check).
+  - _Closed forms._ Per level, from measured densities and lengths (0.75, 0.65 and 1.0 cells), a
+    finer level's realised share of 0.46 and the whole's 0.52 of the levels' summed variance. The
+    levels anticorrelate: a finer level cuts most where the coarser cut least. Each level counts in
+    the band from its mean cell's width to twice it. The whole incision's realised variance is
+    within ×2 of the closed form on the median of eight cells a world (measured 0.45–2.3, with one
+    Mars-like cell at 35 where its neighbours' valleys dominate). The structure function scales
+    every level's term by the same 0.52, an approximation at small lags.
+  - _The cache_ is identified by body, seed, level, radius, figure, gravity, sea level and
+    realised `σ_h` and relief, not by the field's records. It serves views of one field whose held
+    cells only grow, and is never pruned; T8 sets the policy. Cells are built lazily as queries
+    reach them, not by a separate patch build. Hot-path state: per-level arrays on the stack, the
+    groove lists by index with the last per level, and the last correction per level.
+  - _The chord's sag_ is accepted, as T6.a allowed: it narrows only a floor narrower than its
+    25 m.
+  - _Read set._ The incision through L + 4 reads cells up to four king moves from the query's
+    coarse cell, one inside the margin's five, at face edges too (tested exactly).
+  - _Tests beyond the list._ The mean on a finer grid; a cache started afresh for another body
+    or seed; `network_in` equal to `network`; each segment's discharge, width, depth and depth
+    below the top; Parker's figures, the gravity scaling and the ratio; the cut; the trunk's
+    valley; continuity across cell and face edges; the gradient against a central difference (97%
+    of 640, off the C⁰ edges); the read set; the variance member; the structure function's
+    limits; the closed form against the whole. One ignored measurement. Seventeen `should_panic`
+    tests in `tests/panics.rs` (`mod incision`), which gains `level_five_field_of(body, flow)`.
+  - _Acceptance._ `cargo test -p hyperion-surface synth::channels` selects 33 unit tests (T6.a's
+    15 and T6.b's 18) and 1 ignored. The crate's whole suite, `--features testing`: 335 library
+    tests, 106 panics, every golden unchanged. No golden reaches the channels, and `height_at` does
+    not include them until T8, so `GENERATOR_VERSION` stays 21.
+  - _The bench_ (`surface/channels/through-<k>/{cached,bake}`, a 65 × 65 patch of the Earth-like
+    world's level 12), run under the heavy lock at a load of 2.0, schedutil, 1200% quota:
+    cached 0.36, 0.47, 0.57, 0.69 and 0.82 µs a point through L to L + 4, about 0.11 µs a level;
+    a cold bake 0.43, 0.88, 1.18, 1.53 and 2.09 µs. At WebAssembly's 1.2–1.5× that is 1.0–3.1 µs,
+    inside Design note 14's 3.5 µs. Provisional until a fully quiet run.
+  - _For T8._ `incision_at`'s `through` sets each band level's channel levels. The read set is
+    four king moves. The closed forms are ×2 estimates, against T8's 10% structure-function check.
+    Steep cells' valleys reach about 4 km (Mars-like `k_s` 609), which bears on T8's slope bands.
+    `height_at` must never treat a `ReadCellError` as zero incision, or the cache would leak into
+    heights.
+  - _For T12.e and T14.c._ `channel_variance` takes a `SynthesisCell` and a `ChannelBody`. No
+    closed-form incision volume is exposed: T14.c builds it from `valley_depth`, `deepest_level`
+    and the hydraulic geometry. A trunk's valley spans its whole coarse cell (2W).
+  - _For T9_ (the determinism review). No golden pins the channels yet: T9's points should include
+    channelled cells evaluated to L + 1 … L + 4, at face edges among them, and pin the bankfull
+    width and depth and `channel_variance`.
+- **Deferred findings (2026-10-13 rule)** (R09.T6.b; recorded, not ruled; each for "main"'s list).
+  - _The cut by channel width removes resolvable valleys:_ a median 18 m RMS (largest 54 m)
+    below the 4 m cut down to the heads on the Earth-like world, 14 m (21 m) on the Mars-like.
+    Evaluating to the heads alone would cost about 0.11 µs a level more (three or four levels on
+    an Earth). Lean: cut at the heads alone. That changes the task's rule, so it waits for a ruling.
+  - _The bankfull ratio is a drafted fit_ to seven humid US gauges, used on every world, a Mars's
+    episodic floods included. It needs the sign-off agent, and a published relation if one exists.
+  - _Parker's Q̂ range_: ¶12 gives four and a half decades, but the 62 parsed reaches span 3.7
+    (242 to 1.3 × 10⁶). Re-derive from all 72.
+  - _Bed and liquid_: Parker's fit is for quartz gravel in water (R ≈ 1.65), and no grain size
+    is on the field. Ice in methane is an extrapolation.
+  - _The mean's quadrature_: a level's mean over a coarser cell is off by up to 2.2% of its RMS
+    (metres on a trunk level of 150 m RMS). Whether that meets the brainstorm's "nothing may be
+    added at a fine level that changes the mean at a coarse one" is for a ruling; 16 × 16 would
+    quarter it at four times the means' cost.
+  - _The closed forms are ×2_ and use 0.46 and 0.52, measured on two synthetic worlds; the
+    structure function's small-lag slope is the levels' scaled alike. T8's 10% check needs a better
+    form, from the realised β and the levels' covariance.
+  - _Clipped grooves_: 0.09–0.52% of segments at L + 3 and L + 4 reach past the 5 × 5 and step
+    there.
+  - _No drawn channel_: the bankfull channel sets only the least valley depth and the floor's
+    width; it is not cut into the valley floor. Whether "resolvable, authoritative channels"
+    (Design note 13) need it drawn is for the science check.
+  - _The wall gradient_ 0.6 is a design cap (Godard et al. 2020's critical gradient), uniform on
+    every body and in every climate; low-relief valleys have gentler walls on real land.
+  - _The cache's identity_ is the header's marks, not the field's records: two coarse passes of a
+    body with the same sea level, `σ_h` and relief would share it.
+  - _T14.c's bound_ assumes a 10 km valley in a 38 km cell, but T6.b's trunk valleys span the
+    whole coarse cell (2W), and steep cells' valleys reach about 4 km (`k_s` 609 m^0.9 on the
+    Mars-like world), which may also push T12.e's local share. For the science check.

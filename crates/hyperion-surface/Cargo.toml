@@ -52,5 +52,12 @@ wasm-bindgen-test.workspace = true
 name = "test_planet"
 harness = false
 
+# The synthesis's costs per point (plan R09, T6.b; T8 extends it), on the synthetic worlds of the
+# `testing` feature.
+[[bench]]
+name = "synth"
+harness = false
+required-features = ["testing"]
+
 [lints]
 workspace = true

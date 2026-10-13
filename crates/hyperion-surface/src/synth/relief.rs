@@ -1045,7 +1045,11 @@ struct Term {
 /// `dir`, as the gradient of the same values as a function of direction alone, H(P) =
 /// h(M⁻¹P ÷ |M⁻¹P|): M⁻¹ (I − d dᵀ) M g, the convention of R09.T4's base elevation.
 #[must_use]
-fn as_function_of_direction(header: &FieldHeader, dir: [f64; 3], g: [f64; 3]) -> [f64; 3] {
+pub(crate) fn as_function_of_direction(
+    header: &FieldHeader,
+    dir: [f64; 3],
+    g: [f64; 3],
+) -> [f64; 3] {
     let figure = header.figure();
     let radii = [
         figure.equatorial_radius_m,

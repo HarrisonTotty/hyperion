@@ -1779,8 +1779,13 @@ fn unresolved_variance_falls_with_the_wavelength_to_zero_at_the_band_limit() {
         }
         assert_same_bits(at(2.0), 0.0);
         assert_same_bits(at(0.5), 0.0);
+        // The whole is the relief's share, the channels' (R09.T6.b) and the small craters'
+        // (R09.T7.b), in that order.
         let parts = unresolved_variance(field, cell, Metres::new(1e3)).unwrap();
-        assert_eq!(parts.total(), parts.relief() + parts.craters());
+        assert_eq!(
+            parts.total(),
+            parts.relief() + parts.channels() + parts.craters()
+        );
         checked += 1;
     }
     assert_eq!(checked, 90);

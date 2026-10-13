@@ -125,11 +125,19 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 ///
 /// It holds R05's lattice cache, generalised to the body's detail seed (R09.T5), for the
 /// structural octaves ([`relief`]): their octave table, built once per seed, and the lattice
-/// corners a bake covers. T6.b adds the channel network's cells, keyed by `u64`. No height depends
-/// on what it holds, only the time a query takes.
+/// corners a bake covers; and the channels' cells (R09.T6.b), keyed by packed cell key
+/// ([`PatchKey::to_u64`]): the network's key points and segments, each level's grooves by cell and
+/// each level's mean and its correction by parent cell ([`Channels::incision_at`]), kept for one
+/// body and seed at a time and started afresh for another's. No height depends on what it holds,
+/// only the time a query takes, so long as it is used with views of one field whose held cells
+/// only grow, as a worker's are: a result it holds answers a later query that a view lacking one
+/// of the cells it read would refuse. The channels' part grows with every cell a query builds and
+/// is never pruned, so a caller that moves across a body drops it between bakes (R09.T8's bake
+/// sets the policy).
 #[derive(Debug, Clone, Default)]
 pub struct SynthCache {
     lattice: LatticeCache,
+    channels: channels::ChannelCache,
 }
 
 impl SynthCache {
@@ -138,6 +146,7 @@ impl SynthCache {
     pub const fn new() -> Self {
         Self {
             lattice: LatticeCache::new(),
+            channels: channels::ChannelCache::new(),
         }
     }
 
@@ -146,17 +155,24 @@ impl SynthCache {
     pub(crate) fn lattice_mut(&mut self) -> &mut LatticeCache {
         &mut self.lattice
     }
+
+    /// The channels' cache.
+    #[must_use]
+    pub(crate) fn channels_mut(&mut self) -> &mut channels::ChannelCache {
+        &mut self.channels
+    }
 }
 
 /// The variance of a cell's ground in wavelengths shorter than a given one, per contribution:
 /// what R10's material weights and slope readouts read (Design note 18).
 ///
 /// Each is a closed form, of the cell's own fields or, for the small craters, of the body's header
-/// alone. The structural octaves' (R09.T5) and the small craters' (R09.T7.b) are built; the
-/// channels (T6.b) add theirs.
+/// alone: the structural octaves' (R09.T5), the channels' (R09.T6.b) and the small craters'
+/// (R09.T7.b).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct UnresolvedVariance {
     relief: SquareMetres,
+    channels: SquareMetres,
     craters: SquareMetres,
 }
 
@@ -169,6 +185,13 @@ impl UnresolvedVariance {
         self.relief
     }
 
+    /// The channels' share, square metres: the variance of their incision's levels in the band
+    /// asked for, from the cell's steepness, runoffs and drainage ([`channels::channel_variance`]).
+    #[must_use]
+    pub const fn channels(&self) -> SquareMetres {
+        self.channels
+    }
+
     /// The small craters' share, square metres: the body's, the same in every cell
     /// ([`craters::unresolved_variance`]).
     #[must_use]
@@ -176,11 +199,12 @@ impl UnresolvedVariance {
         self.craters
     }
 
-    /// The whole, square metres: the contributions are independent, so their variances add, in
-    /// the order the fields are listed.
+    /// The whole, square metres: the contributions are taken as independent, so their variances
+    /// add, in the order the fields are listed: the structural share, the channels', the small
+    /// craters'.
     #[must_use]
     pub fn total(&self) -> SquareMetres {
-        self.relief + self.craters
+        self.relief + self.channels + self.craters
     }
 }
 
@@ -198,6 +222,7 @@ pub fn unresolved_variance(
 ) -> Option<UnresolvedVariance> {
     Some(UnresolvedVariance {
         relief: relief::unresolved_relief_variance(field, cell, finer_than)?,
+        channels: channels::unresolved_channel_variance(field, cell, finer_than)?,
         craters: craters::unresolved_variance(field, cell, finer_than)?,
     })
 }

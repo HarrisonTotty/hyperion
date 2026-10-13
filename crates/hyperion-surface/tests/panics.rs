@@ -228,6 +228,11 @@ fn level_five_field() -> CoarseField {
 
 /// A level-5 field whose every cell's water goes `flow`, with a channel where it goes anywhere.
 fn level_five_field_flowing(flow: FlowDirection) -> CoarseField {
+    level_five_field_of(BodyRef::new(1, 2), flow)
+}
+
+/// [`level_five_field_flowing`] of the body `body`.
+fn level_five_field_of(body: BodyRef, flow: FlowDirection) -> CoarseField {
     let radius = 4.697e5;
     let craters = CraterParams::new(CraterParamsParts {
         n_1km: PerSquareKilometre::ZERO,
@@ -241,7 +246,7 @@ fn level_five_field_flowing(flow: FlowDirection) -> CoarseField {
     })
     .unwrap();
     let header = FieldHeader::new(FieldHeaderParts {
-        body: BodyRef::new(1, 2),
+        body,
         radius: Metres::new(radius),
         figure: Spheroid::from_volumetric(radius, 0.0).unwrap(),
         sea_level: Metres::ZERO,
@@ -564,6 +569,174 @@ fn a_head_length_past_the_deepest_level_is_refused() {
 )]
 fn a_tributary_rise_of_negative_steepness_is_refused() {
     let _ = tributary_rise(-1.0, Metres::new(10.0), Metres::new(10.0));
+}
+
+/// The incision's and the hydraulic geometry's refusals (plan R09, T6.b), in a module of their own
+/// so that their imports stay apart from the rest.
+mod incision {
+    use hyperion_base::rng::DetailSeed;
+    use hyperion_base::units::MetresPerSecondSquared;
+    use hyperion_base::units::{Metres, SquareMetres};
+    use hyperion_surface::cube::PatchKey;
+    use hyperion_surface::field::{BodyRef, FieldView};
+    use hyperion_surface::synth::SynthCache;
+    use hyperion_surface::synth::channels::{
+        ChannelBody, Channels, bankfull_depth, bankfull_width, channel_forming_discharge_m3_s,
+        channel_head_area, channel_structure_function, channel_variance, deepest_level,
+        mean_discharge_m3_s, tributary_steepness_m0_9, valley_depth,
+    };
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    /// Earth's standard gravity.
+    const G: MetresPerSecondSquared = MetresPerSecondSquared::new(9.806_65);
+
+    /// The level-5 test body as the closed forms read it.
+    fn body() -> ChannelBody {
+        ChannelBody::of(super::level_five_field().header())
+    }
+
+    #[test]
+    #[should_panic(expected = "a runoff and an area must be finite and non-negative")]
+    fn a_mean_discharge_of_a_negative_runoff_is_refused() {
+        let _ = mean_discharge_m3_s(-0.1, SquareMetres::new(1e6));
+    }
+
+    #[test]
+    #[should_panic(expected = "a discharge and an area must be finite and non-negative")]
+    fn a_channel_forming_discharge_of_a_nan_area_is_refused() {
+        let _ = channel_forming_discharge_m3_s(1.0, SquareMetres::new(f64::NAN));
+    }
+
+    #[test]
+    #[should_panic(expected = "a discharge must be finite and non-negative")]
+    fn a_bankfull_width_of_a_negative_discharge_is_refused() {
+        let _ = bankfull_width(-1.0, G);
+    }
+
+    #[test]
+    #[should_panic(expected = "a discharge must be finite and non-negative")]
+    fn a_bankfull_depth_of_an_infinite_discharge_is_refused() {
+        let _ = bankfull_depth(f64::INFINITY, G);
+    }
+
+    #[test]
+    #[should_panic(expected = "a gravity finite and positive")]
+    fn a_bankfull_width_without_gravity_is_refused() {
+        let _ = bankfull_width(1.0, MetresPerSecondSquared::new(0.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "a steepness and two runoffs must be finite and non-negative")]
+    fn a_tributary_steepness_of_a_negative_runoff_is_refused() {
+        let _ = tributary_steepness_m0_9(10.0, -0.1, 0.3);
+    }
+
+    #[test]
+    #[should_panic(expected = "a steepness index must be finite and non-negative")]
+    fn a_channel_head_of_a_negative_steepness_is_refused() {
+        let _ = channel_head_area(-1.0);
+    }
+
+    #[test]
+    #[should_panic(expected = "a steepness index must be finite and non-negative")]
+    fn a_valley_of_a_nan_steepness_is_refused() {
+        let _ = valley_depth(f64::NAN, Metres::new(6.371e6), 8);
+    }
+
+    #[test]
+    #[should_panic(expected = "a wavelength must be finite and positive and a lag finite")]
+    fn a_channel_structure_function_at_a_negative_lag_is_refused() {
+        let field = super::level_five_field();
+        let cell = PatchKey::containing(5, [0.0, 0.0, 1.0]).unwrap();
+        let _ = channel_structure_function(&field, cell, Metres::new(1e3), Metres::new(-1.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "a body's radius must be finite and positive")]
+    fn a_cut_on_no_body_is_refused() {
+        let field = super::level_five_field();
+        let cell = field
+            .cell(PatchKey::containing(5, [0.0, 0.0, 1.0]).unwrap())
+            .unwrap();
+        let body = ChannelBody {
+            radius: Metres::ZERO,
+            ..body()
+        };
+        let _ = deepest_level(cell, body);
+    }
+
+    #[test]
+    #[should_panic(expected = "a level is at most 24, got 25")]
+    fn a_cut_past_the_deepest_level_is_refused() {
+        let field = super::level_five_field();
+        let cell = field
+            .cell(PatchKey::containing(5, [0.0, 0.0, 1.0]).unwrap())
+            .unwrap();
+        let body = ChannelBody {
+            level: 25,
+            ..body()
+        };
+        let _ = deepest_level(cell, body);
+    }
+
+    #[test]
+    #[should_panic(expected = "a wavelength must be finite and positive, got 0")]
+    fn a_channel_variance_at_no_wavelength_is_refused() {
+        let field = super::level_five_field();
+        let cell = field
+            .cell(PatchKey::containing(5, [0.0, 0.0, 1.0]).unwrap())
+            .unwrap();
+        let _ = channel_variance(cell, body(), Metres::ZERO);
+    }
+
+    #[test]
+    #[should_panic(expected = "the cell is not of the field's level")]
+    fn a_channel_structure_function_at_another_level_is_refused() {
+        let field = super::level_five_field();
+        let cell = PatchKey::containing(6, [0.0, 0.0, 1.0]).unwrap();
+        let _ = channel_structure_function(&field, cell, Metres::new(1e3), Metres::new(1.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "a segment's parameter is in [0, 1], got 1.5")]
+    fn a_depth_below_the_top_beyond_the_outlet_is_refused() {
+        let field = super::level_five_field_flowing(super::FlowDirection::UMax);
+        let channels = Channels::new(field.header(), DetailSeed::new(1));
+        let trunk = channels
+            .network(&field)
+            .segment(PatchKey::containing(5, [0.0, 0.0, 1.0]).unwrap())
+            .unwrap()
+            .unwrap();
+        let _ = trunk.below_top(1.5);
+    }
+
+    #[test]
+    #[should_panic(expected = "a channel network reads the field whose header made its channels")]
+    fn an_incision_over_another_body_s_field_is_refused() {
+        let ours = super::level_five_field();
+        let theirs = super::level_five_field_of(BodyRef::new(3, 4), super::FlowDirection::Terminal);
+        let channels = Channels::new(ours.header(), DetailSeed::new(1));
+        let _ = channels.incision_at(&theirs, [0.0, 0.0, 1.0], 9, &mut SynthCache::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "a channel network reads the field whose header made its channels")]
+    fn a_cached_network_over_another_body_s_field_is_refused() {
+        let ours = super::level_five_field();
+        let theirs = super::level_five_field_of(BodyRef::new(3, 4), super::FlowDirection::Terminal);
+        let channels = Channels::new(ours.header(), DetailSeed::new(1));
+        let mut cache = SynthCache::new();
+        let _ = channels.network_in(&theirs, &mut cache);
+    }
+
+    #[test]
+    #[should_panic(expected = "a direction must be finite and non-zero")]
+    fn an_incision_whose_query_is_not_a_direction_is_refused() {
+        let field = super::level_five_field_flowing(super::FlowDirection::UMax);
+        let channels = Channels::new(field.header(), DetailSeed::new(1));
+        let _ = channels.incision_at(&field, [f64::NAN, 0.0, 1.0], 9, &mut SynthCache::new());
+    }
 }
 
 /// The cold-trap fraction's refusals (plan R09, T7.d), in a module of their own so that their

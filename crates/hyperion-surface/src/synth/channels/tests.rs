@@ -456,7 +456,7 @@ fn a_tributary_s_profile_is_stream_power_with_hack_s_areas() {
                 continue;
             };
             let k_s = segment.steepness_m0_9().unwrap();
-            assert_same_bits(k_s, field.cell(c).unwrap().steepness.index_m0_9());
+            assert_same_bits(k_s, tributary_steepness_of(field.cell(c).unwrap()).unwrap());
             let length = segment.length().value();
             for t in [0.1, 0.5, 0.9] {
                 let area = segment.area_at(t).value();
