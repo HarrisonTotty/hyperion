@@ -15,6 +15,7 @@
  */
 
 import { TABLE_SIZES, type TableSizes } from "../atmosphere/hillaire";
+import { ATMOSPHERE_VIEW_SETTINGS, type AtmosphereViewSettings } from "../atmosphere/settings";
 import { DISC_ANNULI_HIGH, DISC_ANNULI_LOW } from "../lighting/annuli";
 import { PLANETSHINE_SOURCES_HIGH, PLANETSHINE_SOURCES_LOW } from "../lighting/planetshine";
 import { BLOOM_LEVELS, type BloomLevels } from "../post/bloom";
@@ -74,6 +75,11 @@ export interface ViewSettings {
   readonly terrain: TerrainSettings;
   /** The atmosphere's table sizes and sample counts (R05.T12.c, Design note 16; R08 widens them). */
   readonly atmosphere: TableSizes;
+  /**
+   * The atmosphere's view: the sky's sources and the stated quality limits (plan R08, R08.T7;
+   * `view/atmosphere/settings.ts`).
+   */
+  readonly atmosphereView: AtmosphereViewSettings;
   /** The sky's cube, sprites, census size and re-bake cadence (R06.T13.f, Design note 22). */
   readonly sky: SkySettings;
   /**
@@ -166,6 +172,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       cacheBytes: HIGH_CACHE_BYTES,
     },
     atmosphere: TABLE_SIZES.high,
+    atmosphereView: ATMOSPHERE_VIEW_SETTINGS.high,
     sky: HIGH_SKY,
     internalScaleBounds: [0.5, 1],
     budget: { photorealisticRateHz: 60, photorealisticViews: null },
@@ -185,6 +192,7 @@ export const SETTINGS: Readonly<Record<QualitySetting, ViewSettings>> = {
       cacheBytes: LOW_CACHE_BYTES,
     },
     atmosphere: TABLE_SIZES.low,
+    atmosphereView: ATMOSPHERE_VIEW_SETTINGS.low,
     sky: LOW_SKY,
     internalScaleBounds: [0.5, 1],
     budget: { photorealisticRateHz: 30, photorealisticViews: 1 },

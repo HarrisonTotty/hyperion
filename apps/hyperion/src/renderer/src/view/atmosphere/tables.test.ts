@@ -45,12 +45,14 @@ import {
   densityTableLevelsM,
   KERNEL_ARM_FORMAT,
   kernelMedium,
+  type LayeredPlanes,
   lastPressureColumnSize,
   LAYER_EDGES_FLOATS,
   lineSlotMask,
   MAX_TERMS,
   MULTI_SCATTERING_KERNEL,
   MULTI_SCATTERING_SAMPLES,
+  multiScatteringLayersOf,
   NO_ABSORBER_CURVES,
   packAbsorberCurves,
   PRESSURE_CHANNELS_A_TABLE,
@@ -59,6 +61,7 @@ import {
   packDensityTables,
   packLayerEdges,
   packMedium,
+  packLobeTables,
   packMediumUniform,
   packPhaseTables,
   PHASE_TABLE_ENTRIES,
@@ -70,8 +73,16 @@ import {
   TRANSMITTANCE_SAMPLES,
   TRANSMITTANCE_SIZE,
   withKernelArmFormat,
+  withoutForwardDelta,
 } from "./tables";
 import { kernelOpticalDepth } from "./tablesCpu";
+import {
+  FORWARD_LOBE_MIN_SHARE,
+  FORWARD_LOBE_X_NODES,
+  FORWARD_ORDERS_ENTRIES,
+  forwardLobeOfTable,
+  lobeIsDrawn,
+} from "./forwardLobe";
 
 const R = 6_371_008.8;
 
@@ -155,9 +166,10 @@ describe("AtmosphereTables", () => {
       "atmosphere multiple scattering",
     ]);
     // The transmittance, absorber-column, pressure-column and multiple-scattering tables with the
-    // fifth pressure channel's one texel (R08.T4.d), the three placeholders of a medium with
-    // nothing tabulated and no absorber, and the terms buffer.
-    expect(engine.counts.textures).toBe(8);
+    // fifth pressure channel's one texel (R08.T4.d), the four placeholders of a medium with
+    // nothing tabulated and no absorber (the forward-lobe tables', R08.T7, among them), and the
+    // terms buffer.
+    expect(engine.counts.textures).toBe(9);
     expect(engine.counts.buffers).toBe(1);
     expect(engine.textureSpecs.every((s) => s.category === "atmosphere-tables")).toBe(true);
   });
@@ -235,11 +247,17 @@ describe("AtmosphereTables", () => {
     expect(destroyedNames(events)).toEqual([
       "atmosphere density tables",
       "atmosphere phase tables",
+      "atmosphere forward-lobe tables",
     ]);
-    const made = engine.textureSpecs.slice(-2).map((s) => [s.name, s.format, s.size]);
+    const made = engine.textureSpecs.slice(-3).map((s) => [s.name, s.format, s.size]);
     expect(made).toEqual([
       ["atmosphere density tables", "r32float", [DENSITY_TABLE_LEVELS, 1, 3]],
       ["atmosphere phase tables", "rgba32float", [PHASE_TABLE_ENTRIES, 1, 3]],
+      [
+        "atmosphere forward-lobe tables",
+        "rgba32float",
+        [FORWARD_ORDERS_ENTRIES, FORWARD_LOBE_X_NODES, 3],
+      ],
     ]);
   });
 
@@ -250,6 +268,7 @@ describe("AtmosphereTables", () => {
     expect(written).toEqual([
       ["atmosphere density tables", [DENSITY_TABLE_LEVELS, 1, 3]],
       ["atmosphere phase tables", [PHASE_TABLE_ENTRIES, 1, 3]],
+      ["atmosphere forward-lobe tables", [FORWARD_ORDERS_ENTRIES, FORWARD_LOBE_X_NODES, 3]],
     ]);
   });
 
@@ -260,6 +279,34 @@ describe("AtmosphereTables", () => {
     expect(terms.map((w) => w.bytes)).toEqual([TERMS_BUFFER_BYTES, TERMS_BUFFER_BYTES]);
     expect(new Float32Array(terms[1]?.data.slice().buffer ?? new ArrayBuffer(0))).toEqual(
       packMedium(TABULATED),
+    );
+  });
+
+  it("uploads a term with a forward delta as the kernels read it, the delta out (R08.T7)", async () => {
+    const engine = await countingRenderEngine();
+    const delta = phaseTable(
+      EVEN_U,
+      [
+        henyeyGreenstein(0.75, EVEN_U),
+        henyeyGreenstein(0.7, EVEN_U),
+        henyeyGreenstein(0.65, EVEN_U),
+      ],
+      undefined,
+      [0.2, 0.1, 0],
+    );
+    const peaked: AtmosphereMedium = {
+      ...TABULATED,
+      terms: [GAS, ABSORBER, { ...HAZE, phase: { kind: "tabulated", table: delta } }],
+    };
+    const tables = new AtmosphereTables(engine, peaked, R);
+    expect(tables.medium).toBe(peaked);
+    const terms = engine.writes.filter((w) => w.buffer === "atmosphere terms");
+    const uploaded = new Float32Array(terms.at(-1)?.data.slice().buffer ?? new ArrayBuffer(0));
+    const direct = { ...peaked, terms: peaked.terms.map(withoutForwardDelta) };
+    expect(uploaded).toEqual(packMedium(direct));
+    // The haze's scattering is its own times 1 − f: 0.8, 0.9 and 1 in its three channels.
+    expect([...termOf(uploaded, 2).subarray(0, 3)]).toEqual(
+      [0.8 * 3e-5, 0.9 * 3.5e-5, 4e-5].map(Math.fround),
     );
   });
 
@@ -276,6 +323,7 @@ describe("AtmosphereTables", () => {
     expect(engine.textureWritten.map((w) => w.size)).toEqual([
       [DENSITY_TABLE_LEVELS, 1, 3],
       [PHASE_TABLE_ENTRIES, 1, 3],
+      [FORWARD_ORDERS_ENTRIES, FORWARD_LOBE_X_NODES, 3],
     ]);
   });
 
@@ -290,7 +338,11 @@ describe("AtmosphereTables", () => {
     expect(tables.medium).toBe(TABULATED);
     engine.restore();
     expect(tables.builds).toBe(2);
-    expect(engine.textureSpecs.at(-1)?.size).toEqual([PHASE_TABLE_ENTRIES, 1, 3]);
+    expect(engine.textureSpecs.at(-1)?.size).toEqual([
+      FORWARD_ORDERS_ENTRIES,
+      FORWARD_LOBE_X_NODES,
+      3,
+    ]);
   });
 
   it("returns to the placeholders for a medium with nothing tabulated, releasing the tables", async () => {
@@ -302,8 +354,10 @@ describe("AtmosphereTables", () => {
     expect(destroyedNames(events)).toEqual([
       "atmosphere density tables",
       "atmosphere phase tables",
+      "atmosphere forward-lobe tables",
     ]);
-    expect(engine.textureSpecs.slice(-2).map((s) => s.size)).toEqual([
+    expect(engine.textureSpecs.slice(-3).map((s) => s.size)).toEqual([
+      [1, 1, 1],
       [1, 1, 1],
       [1, 1, 1],
     ]);
@@ -324,7 +378,7 @@ describe("AtmosphereTables", () => {
     expect(tables.setMedium(HILLAIRE_REFERENCE, 6_360_000)).toBe(true);
     expect(tables.builds).toBe(3);
     expect(engine.counts.dispatches).toBe(6);
-    expect(engine.counts.textures).toBe(8);
+    expect(engine.counts.textures).toBe(9);
   });
 
   /** The tables on the line-absorber medium, then set to the five-line-slot one, with the events. */
@@ -411,7 +465,7 @@ describe("AtmosphereTables", () => {
     engine.onAllocation((e) => events.push(e));
     const above: AtmosphereMedium = { ...TABULATED, topHeightM: COLUMN.topHeightM + 1 };
     expect(() => new AtmosphereTables(engine, above, R)).toThrow(RangeError);
-    expect(destroyedNames(events)).toHaveLength(9);
+    expect(destroyedNames(events)).toHaveLength(10);
     engine.restore();
     expect(engine.counts.dispatches).toBe(0);
   });
@@ -420,12 +474,16 @@ describe("AtmosphereTables", () => {
     const engine = await countingRenderEngine();
     const tables = new AtmosphereTables(engine, TABULATED, R);
     engine.restore();
-    expect(engine.counts.textures).toBe(20);
+    expect(engine.counts.textures).toBe(24);
     expect(engine.counts.buffers).toBe(2);
     expect(engine.counts.kernels).toBe(4);
     expect(tables.builds).toBe(2);
     expect(engine.dispatched.at(-1)?.bindings.uniforms["medium"]?.[0]).toBe(Math.fround(R));
-    expect(engine.textureSpecs.at(-1)?.size).toEqual([PHASE_TABLE_ENTRIES, 1, 3]);
+    expect(engine.textureSpecs.at(-1)?.size).toEqual([
+      FORWARD_ORDERS_ENTRIES,
+      FORWARD_LOBE_X_NODES,
+      3,
+    ]);
     tables.dispose();
     engine.restore();
     expect(tables.builds).toBe(2);
@@ -508,7 +566,10 @@ describe("packMedium", () => {
     const packed = packMedium(TABULATED);
     expect([...termOf(packed, 0).subarray(8, 12)]).toEqual([2, 100_000, 0, 0]);
     expect([...termOf(packed, 2).subarray(8, 12)]).toEqual([2, 100_000, 0, 0]);
-    expect([...termOf(packed, 2).subarray(12, 16)]).toEqual([0, 0, 0, 3]);
+    // Its forward lobe's share per channel in xyz (R08.T7), its lobe drawn.
+    const lobe = forwardLobeOfTable(EVEN_TABLE);
+    expect(lobeIsDrawn(lobe)).toBe(true);
+    expect([...termOf(packed, 2).subarray(12, 16)]).toEqual([...lobe.share, 3].map(Math.fround));
     expect(termOf(packed, 1)[8]).toBe(1);
   });
 
@@ -688,6 +749,66 @@ describe("the phase tables", () => {
   it("pack a one-texel placeholder for a medium with no tabulated phase", () => {
     const none = packPhaseTables(R05_EARTH_REFERENCE);
     expect([none.widthTexels, none.layers, [...none.texels]]).toEqual([1, 1, [0, 0, 0, 0]]);
+  });
+});
+
+/** Texel (k, j) of a layer of packed lobe tables, rgba. */
+function texelOf(tables: LayeredPlanes, layer: number, k: number, j: number): number[] {
+  const at = ((layer * tables.heightTexels + j) * tables.widthTexels + k) * 4;
+  return [...tables.texels.subarray(at, at + 4)];
+}
+
+describe("the forward-lobe tables (R08.T7)", () => {
+  it("pack a drawn lobe's Ẽ(x, θ) at its term's layer, the orders' entries across and x down", () => {
+    const tables = packLobeTables(TABULATED);
+    expect([tables.widthTexels, tables.heightTexels, tables.layers]).toEqual([
+      FORWARD_ORDERS_ENTRIES,
+      FORWARD_LOBE_X_NODES,
+      3,
+    ]);
+    const lobe = forwardLobeOfTable(EVEN_TABLE);
+    for (const [k, j] of [
+      [0, 0],
+      [10, 5],
+      [FORWARD_ORDERS_ENTRIES - 1, FORWARD_LOBE_X_NODES - 1],
+    ] as const) {
+      const [r, g, b] = lobe.table[j] ?? [];
+      expect(texelOf(tables, 2, k, j)).toEqual(
+        [r?.[k], g?.[k], b?.[k], 0].map((v) => Math.fround(v ?? Number.NaN)),
+      );
+      // The gas's Rayleigh phase and the absorber take no lobe.
+      expect([texelOf(tables, 0, k, j), texelOf(tables, 1, k, j)]).toEqual([
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+      ]);
+    }
+  });
+
+  it("pack a one-texel placeholder for a medium with no tabulated phase", () => {
+    const none = packLobeTables(R05_EARTH_REFERENCE);
+    expect([none.widthTexels, none.heightTexels, none.layers, [...none.texels]]).toEqual([
+      1,
+      1,
+      1,
+      [0, 0, 0, 0],
+    ]);
+  });
+
+  it("draw no lobe for a forward part under FORWARD_LOBE_MIN_SHARE: zeros and no share", () => {
+    const broad = phaseTable(EVEN_U, [
+      henyeyGreenstein(0.2, EVEN_U),
+      henyeyGreenstein(0.2, EVEN_U),
+      henyeyGreenstein(0.2, EVEN_U),
+    ]);
+    const lobe = forwardLobeOfTable(broad);
+    expect(Math.max(...lobe.share)).toBeLessThan(FORWARD_LOBE_MIN_SHARE);
+    const medium: AtmosphereMedium = {
+      ...TABULATED,
+      terms: [GAS, ABSORBER, { ...HAZE, phase: { kind: "tabulated", table: broad } }],
+    };
+    const tables = packLobeTables(medium);
+    expect(tables.texels.every((v) => v === 0)).toBe(true);
+    expect([...termOf(packMedium(medium), 2).subarray(12, 16)]).toEqual([0, 0, 0, 3]);
   });
 });
 
@@ -1092,7 +1213,8 @@ describe("AtmosphereTables with the lights' curves", () => {
     const engine = await countingRenderEngine();
     const tables = new AtmosphereTables(engine, medium, R, curves);
     expect(tables.setMedium(medium, R, [own, own])).toBe(true);
-    expect(engine.textureSpecs.at(-1)?.size).toEqual([ABSORBER_CURVE_NODES, 1 + 2 * 4]);
+    const made = engine.textureSpecs.findLast((spec) => spec.name === tables.absorberCurves.name);
+    expect(made?.size).toEqual([ABSORBER_CURVE_NODES, 1 + 2 * 4]);
   });
 
   it("returns to the curves' placeholder for a medium with no absorber, releasing the curves", async () => {
@@ -1114,7 +1236,11 @@ describe("AtmosphereTables with the lights' curves", () => {
     const tables = new AtmosphereTables(engine, medium, R, curves);
     engine.onAllocation((e) => events.push(e));
     tables.setMedium(medium, R, [own, own]);
-    expect(destroyedNames(events)).toEqual([tables.absorberCurves.name]);
+    // The multiple-scattering table takes a second layer for the second light (R08.T7).
+    expect(destroyedNames(events)).toEqual([
+      tables.absorberCurves.name,
+      tables.multiScattering.name,
+    ]);
   });
 
   it("uploads its curves again when the engine restores", async () => {
@@ -1143,12 +1269,37 @@ describe("AtmosphereTables with the lights' curves", () => {
     expect(written?.size).toEqual([ABSORBER_CURVE_NODES, 1 + 4, 1]);
   });
 
-  it("builds the multiple-scattering table with the shared table's curve slot", async () => {
+  it("builds the multiple-scattering table one layer a light slot, each with its own curves (R08.T7)", async () => {
     const engine = await countingRenderEngine();
     const tables = new AtmosphereTables(engine, medium, R, [own, own]);
-    const multiScattering = engine.dispatched.at(-1);
-    expect(multiScattering?.bindings.sampled["absorberCurves"]).toBe(tables.absorberCurves);
-    expect(multiScattering?.bindings.uniforms["medium"]?.[9]).toBe(SHARED_TABLE_CURVE_SLOT);
+    const multiScattering = engine.dispatched.filter(
+      (d) => d.kernel === "atmosphere multiple scattering",
+    );
+    expect(multiScattering.map((d) => d.bindings.uniforms["medium"]?.[9])).toEqual([
+      SHARED_TABLE_CURVE_SLOT,
+      1,
+    ]);
+    for (const dispatch of multiScattering) {
+      expect(dispatch.bindings.sampled["absorberCurves"]).toBe(tables.absorberCurves);
+      expect(dispatch.bindings.storage["multiScatteringOut"]?.texture).toBe(tables.multiScattering);
+    }
+    expect(tables.multiScatteringLayers).toBe(2);
+    const made = engine.textureSpecs.findLast((spec) => spec.name === tables.multiScattering.name);
+    expect(made?.size).toEqual([32, 32, 2]);
+  });
+
+  it("counts one multiple-scattering layer a light under an absorber (R08.T7)", () => {
+    expect(multiScatteringLayersOf(medium, [own, own, own])).toBe(3);
+  });
+
+  it("keeps one multiple-scattering layer for a medium with no absorber, whatever its lights (R08.T7)", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    expect(tables.multiScatteringLayers).toBe(1);
+    expect(multiScatteringLayersOf(R05_EARTH_REFERENCE, [[], []])).toBe(1);
+    expect(
+      engine.dispatched.filter((d) => d.kernel === "atmosphere multiple scattering"),
+    ).toHaveLength(1);
   });
 });
 

@@ -23,14 +23,20 @@
 // optical depth with the sun's curves of growth, exponentiated here. Changes (plan R08, R08.T9.a):
 // the volume's read moved, unchanged, to `aerialRead.wgsl`, which follows `view.wgsl` here and
 // which other readers of the volume take.
+// Changes (plan R08, R08.T7, Design note 7): the sky and the surfaces take the per-view tables
+// summed over the drawn sources, which hold pre-exposed luminance (`view.sky.w` the factor, 1); a
+// sky pixel's scene colour, R06's sprites, band, cube and host discs drawn beneath, is multiplied by
+// the transmittance from the camera along the pixel's ray, inside a source's disc that source's own
+// (its light slot's curves) and elsewhere light slot 0's; each source the composite draws a disc
+// for adds it through its own transmittance; the sky view is read at the ray's local azimuth; and
+// the output's alpha is the scene's, R07's METER_CLASS, which the pass keeps.
 
 struct Draw {
   offsetFromCameraM : vec3f,
   camera : vec4f,
   up : vec4f,
-  sun : vec4f,
-  skyScale : vec4f,
-  sunDisc : vec4f,
+  sky : vec4f,
+  skyAxis : vec4f,
   right : vec4f,
   upRay : vec4f,
   forward : vec4f,
@@ -38,6 +44,25 @@ struct Draw {
   figure : vec4f,
   output : vec4f,
   exact : vec4f,
+  // The sources, `AtmosphereView.sources` member by member (R08.T7).
+  sourceDirection0 : vec4f,
+  sourceWeight0 : vec4f,
+  sourceDisc0 : vec4f,
+  sourceDirection1 : vec4f,
+  sourceWeight1 : vec4f,
+  sourceDisc1 : vec4f,
+  sourceDirection2 : vec4f,
+  sourceWeight2 : vec4f,
+  sourceDisc2 : vec4f,
+  sourceDirection3 : vec4f,
+  sourceWeight3 : vec4f,
+  sourceDisc3 : vec4f,
+  sourceDirection4 : vec4f,
+  sourceWeight4 : vec4f,
+  sourceDisc4 : vec4f,
+  sourceDirection5 : vec4f,
+  sourceWeight5 : vec4f,
+  sourceDisc5 : vec4f,
   // x: the atmosphere's height H above the ground, m, formed in f64; y: how many of the medium's
   // terms are absorbers, 0 to ABSORBER_SLOTS (R08.T6.c); z: the medium's line slots, the bitmask
   // `common.wgsl`'s `pressureChannelOf` reads (R08.T4.d); w: unused.
@@ -73,9 +98,8 @@ fn viewOf() -> AtmosphereView {
   return AtmosphereView(
     draw.camera,
     draw.up,
-    draw.sun,
-    draw.skyScale,
-    draw.sunDisc,
+    draw.sky,
+    draw.skyAxis,
     draw.right,
     draw.upRay,
     draw.forward,
@@ -83,14 +107,23 @@ fn viewOf() -> AtmosphereView {
     draw.figure,
     draw.output,
     draw.exact,
+    array<SkySource, MAX_SKY_SOURCES>(
+      SkySource(draw.sourceDirection0, draw.sourceWeight0, draw.sourceDisc0),
+      SkySource(draw.sourceDirection1, draw.sourceWeight1, draw.sourceDisc1),
+      SkySource(draw.sourceDirection2, draw.sourceWeight2, draw.sourceDisc2),
+      SkySource(draw.sourceDirection3, draw.sourceWeight3, draw.sourceDisc3),
+      SkySource(draw.sourceDirection4, draw.sourceWeight4, draw.sourceDisc4),
+      SkySource(draw.sourceDirection5, draw.sourceWeight5, draw.sourceDisc5),
+    ),
   );
 }
 
-// The sun's transmittance from the camera along `dir` to space, per channel, on the tables'
-// sphere: the table's optical depth, absorber columns and pressure-weighted columns, with the sun's
-// curves of growth (light slot 0), exponentiated in f32 (`transmittanceThroughTables`, R08.T6.c,
-// R08.T4.d), so that the disc's light is never a stored half float.
-fn transmittanceToSpace(v : AtmosphereView, dir : vec3f) -> vec3f {
+// A light's transmittance from the camera along `dir` to space, per channel, on the tables'
+// sphere: the table's optical depth, absorber columns and pressure-weighted columns, with light
+// slot `slot`'s curves of growth (R08.T6.c, R08.T4.d; each light's own since R08.T7),
+// exponentiated in f32 (`transmittanceThroughTables`), so that a disc's light is never a stored
+// half float.
+fn transmittanceToSpace(v : AtmosphereView, dir : vec3f, slot : u32) -> vec3f {
   let bottom = v.tables.x;
   let topM = draw.shell.x;
   let mu = dot(dir, v.up.xyz);
@@ -102,8 +135,16 @@ fn transmittanceToSpace(v : AtmosphereView, dir : vec3f) -> vec3f {
   let count = min(u32(draw.shell.y), ABSORBER_SLOTS);
   return transmittanceThroughTables(
     transmittance, absorberColumns, absorberPressureColumns, lastAbsorberPressureColumn,
-    absorberCurves, count, 0u, u32(draw.shell.z), unit
+    absorberCurves, count, slot, u32(draw.shell.z), unit
   );
+}
+
+// Whether a ray falls within a source's disc: |d x s| <= sin(rho) with d . s > 0, sin(rho) formed
+// in f64 (Design note 18), and no disc where it is 0.
+fn withinDisc(dir : vec3f, source : SkySource) -> bool {
+  let s = source.direction.xyz;
+  let sinRadius = source.direction.w;
+  return sinRadius > 0.0 && dot(dir, s) > 0.0 && length(cross(dir, s)) <= sinRadius;
 }
 
 // The ray march's texel for this pixel: at full resolution its own; at half, of the four nearest,
@@ -139,19 +180,33 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   let pixel = vec2u(position.xy);
   let uv = position.xy / v.output.xy;
   let depth = textureLoad(sceneDepth, pixel, 0);
-  let colour = textureLoad(sceneColour, pixel, 0).rgb;
+  let scene = textureLoad(sceneColour, pixel, 0);
+  let colour = scene.rgb;
+  // R07's METER_CLASS, kept: the pass writes the scene's own alpha (R08.T7).
+  let meterClass = scene.a;
   let dir = rayThrough(v, uv);
-  let exposure = v.skyScale.w;
+  let factor = v.sky.w;
   let topM = draw.shell.x;
   let aboveTop = v.camera.w >= topM;
+  let count = skySourceCount(v);
 
   if (depth == 0.0) {
+    // The source whose disc the ray falls in, the last such, whose light slot dims what lies behind
+    // it; slot 0's elsewhere.
+    var slotHere = 0u;
+    for (var k = 0u; k < count; k++) {
+      if (withinDisc(dir, v.sources[k])) {
+        slotHere = skySlotOf(v.sources[k]);
+      }
+    }
     var inscattered : vec3f;
-    var toSpace : vec3f;
+    var behind : vec3f;
+    var marchedAlpha = 1.0;
     if (aboveTop) {
       let marched = rayMarched(pixel, depth);
       inscattered = marched.rgb;
-      toSpace = vec3f(marched.a);
+      marchedAlpha = marched.a;
+      behind = vec3f(marched.a);
     } else {
       // The sky view's sphere: the camera's Gaussian radius, and its height there.
       let bottom = v.up.w;
@@ -160,24 +215,27 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
       let viewZenithCos = dot(dir, up);
       let viewZenith = preciseAtan2(length(cross(dir, up)), viewZenithCos);
       let frame = skyFrame(v);
-      let horizontal = vec2f(dot(dir, frame.x), dot(dir, frame.y));
-      var azimuthHalfSine = 0.0;
-      if (dot(horizontal, horizontal) > 1e-12) {
-        azimuthHalfSine = 0.5 * length(normalize(horizontal) - vec2f(1.0, 0.0));
-      }
+      let azimuthUnit = skyViewAzimuthUnit(dot(dir, frame.x), dot(dir, frame.y));
       let ground = groundHitFromHeight(bottom, heightM, viewZenithCos);
       let size = vec2f(textureDimensions(skyView));
-      let skyUv = skyViewParamsToUv(ground, viewZenith, azimuthHalfSine, size, v.exact.z);
+      let skyUv = skyViewParamsToUv(ground, viewZenith, azimuthUnit, size, v.exact.z);
       inscattered = textureSampleLevel(skyView, linearClamp, skyUv, 0.0).rgb;
-      toSpace = transmittanceToSpace(v, dir);
+      behind = transmittanceToSpace(v, dir, slotHere);
     }
-    var luminance = inscattered * v.skyScale.rgb * exposure;
-    // The sun's disc, with its transmittance, clamped after pre-exposure: |d x s| <= sin(rho).
-    let cosToSun = dot(dir, v.sun.xyz);
-    if (cosToSun > 0.0 && length(cross(dir, v.sun.xyz)) <= v.exact.w) {
-      luminance += min(v.sunDisc.rgb * toSpace * exposure, vec3f(HALF_MAX));
+    var luminance = colour * behind + inscattered * factor;
+    // Each disc the composite draws, through its own light's transmittance, clamped after
+    // pre-exposure.
+    for (var k = 0u; k < count; k++) {
+      let source = v.sources[k];
+      if (withinDisc(dir, source) && dot(source.disc.rgb, vec3f(1.0)) > 0.0) {
+        var toSpace = vec3f(marchedAlpha);
+        if (!aboveTop) {
+          toSpace = transmittanceToSpace(v, dir, skySlotOf(source));
+        }
+        luminance += min(source.disc.rgb * toSpace * factor, vec3f(HALF_MAX));
+      }
     }
-    return vec4f(min(luminance, vec3f(HALF_MAX)), 1.0);
+    return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
   }
 
   let distance = distanceAtDepth(v, uv, depth);
@@ -186,10 +244,10 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
   // (`aerialRead.wgsl`, R08.T9.a); beyond it, and from above the air, the ray march.
   if (distance <= reach && !aboveTop) {
     let aerialAt = aerialPerspectiveAt(aerial, linearClamp, uv, distance, reach);
-    let luminance = colour * aerialAt.a + aerialAt.rgb * v.skyScale.rgb * exposure;
-    return vec4f(min(luminance, vec3f(HALF_MAX)), 1.0);
+    let luminance = colour * aerialAt.a + aerialAt.rgb * factor;
+    return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
   }
   let marched = rayMarched(pixel, depth);
-  let luminance = colour * marched.a + marched.rgb * v.skyScale.rgb * exposure;
-  return vec4f(min(luminance, vec3f(HALF_MAX)), 1.0);
+  let luminance = colour * marched.a + marched.rgb * factor;
+  return vec4f(min(luminance, vec3f(HALF_MAX)), meterClass);
 }

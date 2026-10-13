@@ -1,5 +1,6 @@
 // The per-pixel ray march (plan R05, Design note 16; Hillaire 2020, section 5.4): the light
-// scattered into a pixel's ray per unit sun illuminance (rgb) and the ray's mean transmittance (a),
+// scattered into a pixel's ray, summed over the view's drawn sources and weighted by each one's
+// illuminance times the frame's scale (plan R08, R08.T7) (rgb), and the ray's mean transmittance (a),
 // where the tables do not serve: the sky seen from above the atmosphere, and surfaces beyond the
 // aerial-perspective volume's reach. Elsewhere it writes nothing the composite reads. At
 // `view.output.z` of the output's resolution (1 high, 0.5 low, with the composite's depth-aware
@@ -37,6 +38,10 @@
 // (`MarchWalk` in common.wgsl), at the same count; a medium with none takes the steps as before.
 // Each edge e's shell is the quadric (a + e, c + e), as the top's is (a + H, c + H)
 // (`marchWalkCrossShell`).
+//
+// Changes (plan R08, R08.T7, Design note 7): one march sums every drawn source, each light slot's
+// share carried on its own path (`ViewMarch` in source.wgsl), alpha slot 0's mean transmittance;
+// the bare ground is lit by every source through its own slot's throughput.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
@@ -44,7 +49,7 @@
 @group(0) @binding(3) var phaseTables : texture_2d_array<f32>;
 @group(0) @binding(4) var<uniform> view : AtmosphereView;
 @group(0) @binding(5) var transmittance : texture_2d<f32>;
-@group(0) @binding(6) var multiScattering : texture_2d<f32>;
+@group(0) @binding(6) var multiScattering : texture_2d_array<f32>;
 @group(0) @binding(7) var sceneDepth : texture_depth_2d;
 @group(0) @binding(8) var rayMarchOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(9) var absorberColumns : texture_2d<f32>;
@@ -52,6 +57,7 @@
 @group(0) @binding(11) var<uniform> layerEdges : LayerEdges;
 @group(0) @binding(12) var absorberPressureColumns : texture_2d<f32>;
 @group(0) @binding(13) var lastAbsorberPressureColumn : texture_2d<f32>;
+@group(0) @binding(14) var lobeTables : texture_2d_array<f32>;
 
 // A ray's quadric about a shell of equatorial radius `radius`, in space scaled by
 // S = diag(1, 1, k) to a sphere of that radius: Q(t) = |S (P + t d)|^2 - radius^2 = qa t^2 +
@@ -113,7 +119,8 @@ fn normalAt(p : vec3f, a : f32, c : f32) -> vec3f {
 // A pixel's ray and what its samples' heights are formed from (Design note 18): the camera's
 // position and the ray's direction, the datum's radii, whether the ground's quadric is taken about
 // the closest approach (`far`), that quadric, Q* = -disc / qa there, t_low - t* (the split's lowest
-// point from the quadric's own closest approach), a^2, and the scattering angle.
+// point from the quadric's own closest approach), a^2, and the sources' directions with their
+// scattering angles (R08.T7).
 struct MarchRay {
   origin : vec3f,
   dir : vec3f,
@@ -124,22 +131,14 @@ struct MarchRay {
   qStar : f32,
   lowestFromStar : f32,
   a2 : f32,
-  angle : ScatteringAngle,
-}
-
-// A march along a pixel's ray so far: the light it has gathered, its throughput and its own
-// absorber path.
-struct PixelMarch {
-  luminance : vec3f,
-  throughput : vec3f,
-  path : AbsorberPath,
+  sources : array<vec3f, MAX_SKY_SOURCES>,
+  angles : array<ScatteringAngle, MAX_SKY_SOURCES>,
 }
 
 // One step of the march, at its midpoint: its height above the spheroid along the radius from the
 // ground's quadric, about t* beyond h0 = a / 2 and from the camera within it, then the medium
-// there, its source and its in-scattering.
-fn rayMarchStep(march : ptr<function, PixelMarch>, ray : MarchRay, stepAt : MarchStep) {
-  let dt = stepAt.dtM;
+// there, its sources and their in-scattering.
+fn rayMarchStep(march : ptr<function, ViewMarch>, ray : MarchRay, stepAt : MarchStep) {
   let p = ray.origin + stepAt.tM * ray.dir;
   let groundQ = ray.groundQ;
   var bigQ : f32;
@@ -150,15 +149,10 @@ fn rayMarchStep(march : ptr<function, PixelMarch>, ray : MarchRay, stepAt : Marc
     bigQ = stepAt.tM * (groundQ.qa * stepAt.tM + 2.0 * groundQ.qb) + groundQ.qc;
   }
   let heightM = radialHeight(length(p), bigQ / ray.a2);
-  let muSun = dot(view.sun.xyz, normalAt(p, ray.a, ray.c));
-  let local = sampleMediumAt(heightM, ray.angle);
-  let next = viewAbsorberStep((*march).path, local, dt);
-  let stepDepth = local.extinction * dt + (next.depth - (*march).path.depth);
-  (*march).path = next;
-  let stepTransmittance = exp(-stepDepth);
-  let source = sourceAt(transmittance, multiScattering, view.tables.x, heightM, muSun, local);
-  (*march).luminance += (*march).throughput * source * dt * stepFactor(stepDepth);
-  (*march).throughput *= stepTransmittance;
+  let local = sampleMediumAt(heightM);
+  let up = normalAt(p, ray.a, ray.c);
+  let shares = viewSourcesAt(heightM, up, ray.sources, ray.angles, local);
+  viewMarchStep(march, local, shares, stepAt.dtM);
 }
 
 // Adds to the walk where the ray crosses the shell of the march edge `edgeM` above the datum (plan
@@ -270,9 +264,14 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   if (hitsGround && split.lowestM == ground.x) {
     lowestFromStar = -sqrt(max(groundQ.disc, 0.0)) / groundQ.qa;
   }
-  let angle = scatteringAngle(dir, view.sun.xyz);
-  let ray = MarchRay(origin, dir, a, c, far, groundQ, qStar, lowestFromStar, a * a, angle);
-  var march = PixelMarch(vec3f(0.0), vec3f(1.0), absorberPathStart());
+  let count = skySourceCount(view);
+  var sources : array<vec3f, MAX_SKY_SOURCES>;
+  for (var k = 0u; k < count; k++) {
+    sources[k] = view.sources[k].direction.xyz;
+  }
+  let angles = sourceAngles(dir, sources, count);
+  let ray = MarchRay(origin, dir, a, c, far, groundQ, qStar, lowestFromStar, a * a, sources, angles);
+  var march = viewMarchStart();
   // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk; the
   // edges are the same for every pixel, so the branch is uniform (R08.T6.i).
   let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);
@@ -293,17 +292,22 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     }
   }
   var luminance = march.luminance;
-  let throughput = march.throughput;
-  // The bare ground under the atmosphere, seen from above it where nothing is drawn.
+  // The bare ground under the atmosphere, seen from above it where nothing is drawn: each source's
+  // light on it, weighted as the sky is, through its own slot's throughput (R08.T7).
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     let p = origin + ground.x * dir;
-    let muSun = dot(view.sun.xyz, normalAt(p, a, c));
-    let toSun = tableTransmittance(transmittance, view.tables.x, 0.0, muSun);
-    // Per unit of the sun's illuminance in each channel, as the sky is (R08.T6.d).
-    luminance += throughput * toSun * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI_VIEW;
+    let normal = normalAt(p, a, c);
+    for (var k = 0u; k < count; k++) {
+      let source = view.sources[k];
+      let slot = skySlotOf(source);
+      let muSun = dot(source.direction.xyz, normal);
+      let toSun = tableTransmittance(transmittance, view.tables.x, 0.0, muSun, slot);
+      luminance += march.throughput[slot] * source.weight.rgb * toSun * max(muSun, 0.0)
+        * medium.groundAlbedo.rgb / PI_VIEW;
+    }
   }
   // A sky pixel whose ray meets the ground sees nothing of space behind it: no sun's disc there.
-  var meanTransmittance = (throughput.r + throughput.g + throughput.b) / 3.0;
+  var meanTransmittance = viewMeanTransmittance(march);
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     meanTransmittance = 0.0;
   }

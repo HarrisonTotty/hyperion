@@ -62,6 +62,9 @@ import { HALF_MAX } from "../sky/half";
 import {
   type AtmosphereCamera,
   atmosphereInputs,
+  curveSlotOf,
+  frameSourcesOf,
+  skyAxisOf,
   skyViewHeight,
   type SpheroidFigure,
   type SunState,
@@ -74,6 +77,7 @@ import {
   ABSORBER_TRANSMITTANCE_FLOOR,
   type AbsorberCurve,
 } from "./absorbers";
+import { type ForwardLobe, forwardLobeAt, forwardLobeOfTable, lobeIsDrawn } from "./forwardLobe";
 import {
   marchEdgesM,
   type MarchPieces,
@@ -114,10 +118,12 @@ import {
   lineSlotMask,
   MULTI_SCATTERING_SAMPLES,
   MULTI_SCATTERING_SIZE,
+  multiScatteringLayersOf,
   NO_ABSORBER_CURVES,
   PRESSURE_CHANNELS_A_TABLE,
   pressureChannelCount,
   pressureChannelOf,
+  resampledPhase,
   SHARED_TABLE_CURVE_SLOT,
   type TableSize,
   TRANSMITTANCE_SAMPLES,
@@ -167,6 +173,11 @@ interface TwinTerm {
    * that is not a line slot.
    */
   readonly pressureChannel: number;
+  /**
+   * A tabulated term's forward lobe (`forwardLobe.ts`, R08.T7), of its table on the kernels' grid;
+   * null for every other term.
+   */
+  readonly lobe: ForwardLobe | null;
 }
 
 /**
@@ -194,8 +205,21 @@ function termsOf(medium: AtmosphereMedium): readonly TwinTerm[] {
       slot,
       columnPerM: slots.get(i)?.columnPerM ?? 0,
       pressureChannel: slot < 0 ? -1 : pressureChannelOf(lines, slot),
+      lobe: lobeOfPhase(term.phase),
     };
   });
+}
+
+/**
+ * A phase's forward lobe as the kernels draw it (`forwardLobe.ts`, R08.T7): a tabulated phase's, of
+ * its table on the kernels' grid, where it is drawn (`lobeIsDrawn`); null for every other phase.
+ */
+function lobeOfPhase(phase: PhaseFunction): ForwardLobe | null {
+  if (phase.kind !== "tabulated") {
+    return null;
+  }
+  const lobe = forwardLobeOfTable(resampledPhase(phase.table));
+  return lobeIsDrawn(lobe) ? lobe : null;
 }
 
 /**
@@ -223,7 +247,13 @@ const PRESSURE_COLUMNS_AT = ABSORPTION_AT + 3;
  * The floats of one sample: three triples, the absorber slots' columns, the absorption and the
  * slots' pressure-weighted columns.
  */
-const SAMPLE_FLOATS = PRESSURE_COLUMNS_AT + ABSORBER_SLOTS;
+/**
+ * Where a sample's in-lobe scattering stands in {@link sampleInto}'s output, past the pressure
+ * columns: Σ P σ_s of its tabulated terms (R08.T7; `medium.wgsl`'s `lobeScattering`).
+ */
+const LOBE_AT = PRESSURE_COLUMNS_AT + ABSORBER_SLOTS;
+
+const SAMPLE_FLOATS = LOBE_AT + 3;
 
 /**
  * The medium at a height into `out`, {@link SAMPLE_FLOATS} long: the scattering in 0–2 and the
@@ -233,7 +263,8 @@ const SAMPLE_FLOATS = PRESSURE_COLUMNS_AT + ABSORBER_SLOTS;
  * extinction less the scattering (`medium.wgsl`'s `mediumAtHeight` and `source.wgsl`'s
  * `sampleMediumAt`; R08.T6.d); and each line slot's column per metre times p ÷ 1 bar there, from
  * `pressureBarOf`, in its pressure channel at 17–21, 0 elsewhere and for a medium without a pressure
- * profile (R08.T4.d; `common.wgsl`'s `pressureColumnsOf`).
+ * profile (R08.T4.d; `common.wgsl`'s `pressureColumnsOf`). Given `densities`, each term's density
+ * there, term k's at k, for each source's own phases ({@link phasedInto}, R08.T7).
  *
  * @remarks
  * The twins' innermost call, a few million times a table: written with indexed loops and its sums
@@ -246,6 +277,7 @@ function sampleInto(
   phases: Float64Array | null,
   heightM: number,
   out: Float64Array,
+  densities?: Float64Array,
 ): void {
   out.fill(0, COLUMNS_AT, ABSORPTION_AT);
   let s0 = 0;
@@ -260,12 +292,18 @@ function sampleInto(
   let a0 = 0;
   let a1 = 0;
   let a2 = 0;
+  let l0 = 0;
+  let l1 = 0;
+  let l2 = 0;
   for (let k = 0; k < terms.length; k += 1) {
     const term = terms[k];
     if (term === undefined) {
       continue;
     }
     const d = term.densityOf(heightM);
+    if (densities !== undefined) {
+      densities[k] = d;
+    }
     const { scattering, extinction: sigmaT, absorption } = term;
     const r = scattering[0] * d;
     const g = scattering[1] * d;
@@ -279,6 +317,12 @@ function sampleInto(
     a0 += absorption[0] * d;
     a1 += absorption[1] * d;
     a2 += absorption[2] * d;
+    const lobe = term.lobe;
+    if (lobe !== null) {
+      l0 += lobe.share[0] * r;
+      l1 += lobe.share[1] * g;
+      l2 += lobe.share[2] * b;
+    }
     if (phases !== null) {
       p0 += r * (phases[k * 3] ?? Number.NaN);
       p1 += g * (phases[k * 3 + 1] ?? Number.NaN);
@@ -302,6 +346,9 @@ function sampleInto(
   out[ABSORPTION_AT + 2] = a2;
   const ratio = pressureBarOf === null ? 0 : pressureBarOf(heightM);
   out.fill(0, PRESSURE_COLUMNS_AT, SAMPLE_FLOATS);
+  out[LOBE_AT] = l0;
+  out[LOBE_AT + 1] = l1;
+  out[LOBE_AT + 2] = l2;
   for (let k = 0; k < terms.length; k += 1) {
     const term = terms[k];
     if (term !== undefined && term.pressureChannel >= 0) {
@@ -1293,10 +1340,14 @@ function integrateDirectionInto(
     transmittanceThroughTablesInto(transmittance, absorbers, u, v, toSun, read);
     path.stepInto(sample, dtM, absorbed);
     for (const c of CHANNELS) {
-      const scattering = sample[c] ?? Number.NaN;
-      const stepDepth = (sample[3 + c] ?? Number.NaN) * dtM + absorbed[c];
+      // The tabulated terms' in-lobe scattering truncated, the beam raised by e^(x P) (R08.T7).
+      const lobe = sample[LOBE_AT + c] ?? 0;
+      const fullExtinction = sample[3 + c] ?? Number.NaN;
+      const scattering = Math.max((sample[c] ?? Number.NaN) - lobe, 0);
+      const stepDepth = Math.max(fullExtinction - lobe, 0) * dtM + absorbed[c];
       const g = options.stepFactor(stepDepth);
-      const source = (lit * toSun[c] * scattering) / (4 * Math.PI);
+      const boost = lobeBoost(read.stored[c] ?? Number.NaN, lobe, fullExtinction);
+      const source = (lit * toSun[c] * boost * scattering) / (4 * Math.PI);
       const absorbedHere = (sample[ABSORPTION_AT + c] ?? Number.NaN) * dtM + absorbed[c];
       out[c] = (out[c] ?? 0) + throughput[c] * source * dtM * g;
       out[3 + c] = (out[3 + c] ?? 0) + throughput[c] * scattering * dtM * g;
@@ -1314,12 +1365,27 @@ function integrateDirectionInto(
     const muSun = (sun.x * gx + sun.y * gy + sun.z * gz) / Math.sqrt(gx * gx + gy * gy + gz * gz);
     const [u, v] = transmittanceRMuToUv(shell, shell.bottomRadiusM, muSun);
     transmittanceThroughTablesInto(transmittance, absorbers, u, v, toSun, read);
+    sampleInto(terms, pressureBarOf, null, 0, sample);
     for (const c of CHANNELS) {
+      const boost = lobeBoost(
+        read.stored[c] ?? Number.NaN,
+        sample[LOBE_AT + c] ?? 0,
+        sample[3 + c] ?? Number.NaN,
+      );
       out[c] =
         (out[c] ?? 0) +
-        (toSun[c] * throughput[c] * Math.max(muSun, 0) * inputs.groundAlbedo[c]) / Math.PI;
+        (toSun[c] * boost * throughput[c] * Math.max(muSun, 0) * inputs.groundAlbedo[c]) / Math.PI;
     }
   }
+}
+
+/**
+ * The forward-diffuse light a lobe's truncation keeps in the beam, e^(x P), x P the stored optical
+ * depth `depth` times the lobes' share `lobe` of the extinction (`multiScattering.wgsl`'s
+ * `transmittanceToSun`, R08.T7), the exponent held under 80; 1 where there is no lobe.
+ */
+function lobeBoost(depth: number, lobe: number, extinctionPerM: number): number {
+  return lobe > 0 ? Math.exp(Math.min((depth * lobe) / Math.max(extinctionPerM, 1e-30), 80)) : 1;
 }
 
 /**
@@ -1491,14 +1557,21 @@ export interface PlanetTwin extends TwinTransmittance {
   readonly medium: AtmosphereMedium;
   /** The tables' ground radius, m. */
   readonly bottomRadiusM: number;
+  /** The multiple-scattering table built with light slot 0's curves: its layer 0. */
   readonly multiScattering: TwinTable;
+  /**
+   * Each layer of the multiple-scattering table, layer k built with light slot k's curves
+   * (`tables.ts`'s `multiScatteringLayersOf`, R08.T7), layer 0 `multiScattering` itself; absent
+   * for a table of one layer.
+   */
+  readonly multiScatteringBySlot?: ReadonlyArray<TwinTable>;
 }
 
 /**
  * The per-planet tables for a medium, as `AtmosphereTables` builds them: transmittance and the
  * absorber columns at 256 × 64 with 256 steps, split at the terms' layer edges, then multiple
- * scattering at 32² with 32 placed steps (R08.T6.d) reading them with the curves of `tables.ts`'s
- * `SHARED_TABLE_CURVE_SLOT`, light slot 0.
+ * scattering at 32² with 32 placed steps (R08.T6.d) reading them, one layer a light slot under an
+ * absorber, each with its slot's curves, and one layer otherwise (R08.T7).
  *
  * @param bottomRadiusM - The tables' ground radius, m (`tableRadiusM(figure)` for a body).
  * @param curves - Each light's curves of growth for the medium's absorbers; none for a medium with
@@ -1512,69 +1585,112 @@ export function planetTwin(
   curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
 ): PlanetTwin {
   const tables = transmittanceTablesTwin(medium, bottomRadiusM, curves);
+  const layers = multiScatteringLayersOf(medium, curves);
+  const bySlot = Array.from({ length: layers }, (_, slot) =>
+    multiScatteringTwin(
+      medium,
+      bottomRadiusM,
+      tables,
+      MULTI_SCATTERING_KERNEL_OPTIONS,
+      undefined,
+      slot,
+    ),
+  );
+  const first = bySlot[0];
+  if (first === undefined) {
+    throw new Error("the multiple-scattering table has at least one layer");
+  }
   return {
     medium,
     bottomRadiusM,
     ...tables,
-    multiScattering: multiScatteringTwin(medium, bottomRadiusM, tables),
+    multiScattering: first,
+    ...(layers > 1 ? { multiScatteringBySlot: bySlot } : {}),
   };
 }
 
 /**
- * What a march reads the per-planet tables through, at a height above the datum: the twin's own
- * tables ({@link tableSources}), or a test's stand-in.
+ * What a march reads the per-planet tables through, at a height above the datum, for a light slot
+ * (R08.T7): the twin's own tables ({@link tableSources}), or a test's stand-in, which may take no
+ * slot.
  */
 export interface TwinSources {
   /** The tables' ground radius, m: the sphere the sun's ground shadow is tested on. */
   readonly bottomRadiusM: number;
-  /** The transmittance from a height to the top along the sun's zenith cosine, into `out`. */
-  readonly sunTransmittance: (heightM: number, muSun: number, out: TwinRgb) => void;
-  /** The multiple-scattering source per unit illuminance at a height, into `out`. */
-  readonly multiScattering: (heightM: number, muSun: number, out: TwinRgb) => void;
   /**
-   * The optical depth per channel the sun's curves of growth give a march's own path through the
-   * absorber columns u ÷ U, slot by slot, and the pressure-weighted columns, by pressure channel,
-   * into `out` (R08.T6.c, R08.T4.d). Asked only of a medium with an absorber.
+   * The transmittance from a height to the top along a source's zenith cosine, into `out`, under
+   * light slot `slot`'s curves.
+   */
+  readonly sunTransmittance: (heightM: number, muSun: number, out: TwinRgb, slot: number) => void;
+  /** The multiple-scattering source per unit illuminance at a height, into `out`, slot `slot`'s. */
+  readonly multiScattering: (heightM: number, muSun: number, out: TwinRgb, slot: number) => void;
+  /**
+   * The optical depth per channel light slot `slot`'s curves of growth give a march's own path
+   * through the absorber columns u ÷ U, slot by slot, and the pressure-weighted columns, by pressure
+   * channel, into `out` (R08.T6.c, R08.T4.d, R08.T7). Asked only of a medium with an absorber.
    */
   readonly absorberPathDepth: (
     columns: Float64Array,
     pressureColumns: Float64Array,
     out: TwinRgb,
+    slot: number,
   ) => void;
+  /**
+   * The stored optical depth per channel of every term but the absorbers from a height to the top
+   * along a source's zenith cosine, into `out`: the forward lobes' depth (R08.T7). A stand-in with
+   * no tabulated term may leave it out, and its marches then add no lobe.
+   */
+  readonly sunOpticalDepth?: (heightM: number, muSun: number, out: TwinRgb) => void;
 }
 
 /**
  * A planet's tables read as the per-frame kernels read them: `source.wgsl`'s `tableTransmittance`
- * (the height clamped into the shell; the optical depth and absorber columns with light slot 0's
- * curves, exponentiated, R08.T6.c) and `tableMultiScattering` (sebh's unit range, its 10 m
- * offset), each bilinear through Bruneton's texel mapping (plan R08, Design note 19).
+ * (the height clamped into the shell; the optical depth and absorber columns with the light slot's
+ * curves, exponentiated, R08.T6.c and R08.T7) and `tableMultiScattering` (sebh's unit range, its
+ * 10 m offset, the slot's layer, or the one layer), each bilinear through Bruneton's texel mapping
+ * (plan R08, Design note 19).
  *
  * @throws RangeError as `tables.ts`'s `checkAbsorberCurves`, for curves that do not fit the
- *   planet's absorbers.
+ *   planet's absorbers, or, at a read, for a slot the curves do not hold.
  */
 export function tableSources(planet: PlanetTwin): TwinSources {
   const bottom = planet.bottomRadiusM;
   const atmosphereM = planet.medium.topHeightM;
   const shell = { bottomRadiusM: bottom, topRadiusM: bottom + atmosphereM };
-  const table = planet.multiScattering;
-  // The one sun the per-frame kernels draw takes light slot 0 until R08.T7 (`source.wgsl`).
-  const absorbers = twinAbsorbers(planet.medium, planet.curves, 0);
+  const layers = planet.multiScatteringBySlot ?? [planet.multiScattering];
+  checkAbsorberCurves(planet.medium, planet.curves);
+  const bySlot = new Map<number, TwinAbsorbers>();
+  const absorbersAt = (slot: number): TwinAbsorbers => {
+    let absorbers = bySlot.get(slot);
+    if (absorbers === undefined) {
+      absorbers = twinAbsorbers(planet.medium, planet.curves, slot);
+      bySlot.set(slot, absorbers);
+    }
+    return absorbers;
+  };
+  absorbersAt(0);
   const scratch = readScratch();
   return {
     bottomRadiusM: bottom,
-    sunTransmittance: (heightM, muSun, out) => {
+    sunTransmittance: (heightM, muSun, out, slot) => {
       const rM = bottom + Math.min(Math.max(heightM, 0), atmosphereM);
       const [u, v] = transmittanceRMuToUv(shell, rM, muSun);
-      transmittanceThroughTablesInto(planet, absorbers, u, v, out, scratch);
+      transmittanceThroughTablesInto(planet, absorbersAt(slot), u, v, out, scratch);
     },
-    multiScattering: (heightM, muSun, out) => {
+    multiScattering: (heightM, muSun, out, slot) => {
       const v =
         (Math.max(heightM, 0) - MULTI_SCATTERING_GROUND_OFFSET_M) /
         (atmosphereM - MULTI_SCATTERING_GROUND_OFFSET_M);
+      const table = layers[Math.min(slot, layers.length - 1)] ?? planet.multiScattering;
       tableAtUnitInto(table, muSun * 0.5 + 0.5, v, out);
     },
-    absorberPathDepth: (columns, pressureColumns, out) => {
-      absorberDepthInto(absorbers, columns, pressureColumns, out);
+    absorberPathDepth: (columns, pressureColumns, out, slot) => {
+      absorberDepthInto(absorbersAt(slot), columns, pressureColumns, out);
+    },
+    sunOpticalDepth: (heightM, muSun, out) => {
+      const rM = bottom + Math.min(Math.max(heightM, 0), atmosphereM);
+      const [u, v] = transmittanceRMuToUv(shell, rM, muSun);
+      tableAtUnitInto(planet.transmittance, u, v, out);
     },
   };
 }
@@ -1586,17 +1702,38 @@ export interface TwinRay {
   readonly originM: Vec3;
   /** The unit direction of the ray. */
   readonly direction: Vec3;
-  /** The unit direction to the sun. */
+  /**
+   * The unit direction to the sun: the one source of a march per unit of its illuminance, at light
+   * slot 0, where {@link TwinRay.sources} is absent; the first source's otherwise, or the zenith.
+   */
   readonly sun: Vec3;
   /** The segment marched, m along the ray. */
   readonly tStartM: number;
   readonly tEndM: number;
   /** Whether the segment starts at a camera inside the atmosphere (`marchSplit`'s `fromCamera`). */
   readonly fromCamera: boolean;
+  /**
+   * The march's sources, summed in one march (Design note 7, R08.T7), in the frame of the ray;
+   * absent for the one source `sun` per unit of its illuminance.
+   */
+  readonly sources?: ReadonlyArray<TwinRaySource>;
+}
+
+/** One source of a per-frame march (`view.wgsl`'s `SkySource` as a march takes it, R08.T7). */
+export interface TwinRaySource {
+  /** Its unit direction, in the frame of the ray. */
+  readonly direction: Vec3;
+  /** Its light's weight per channel in what the march gathers: its illuminance times the scale. */
+  readonly weight: Rgb;
+  /**
+   * Its light slot: its absorber curves, its multiple-scattering layer and, under an absorber, its
+   * own path along the view; a medium with none takes every source on one path.
+   */
+  readonly slot: number;
 }
 
 /** A per-frame march's segment, its ray without the sun: what its steps are placed on. */
-export type TwinSegment = Omit<TwinRay, "sun">;
+export type TwinSegment = Omit<TwinRay, "sun" | "sources">;
 
 /**
  * What a march takes a sample's height and sun cosine against: a sphere about the centre (the
@@ -1608,7 +1745,10 @@ export type MarchGeometry =
   | { readonly kind: "sphere"; readonly bottomRadiusM: number }
   | { readonly kind: "spheroid"; readonly figure: SpheroidFigure };
 
-/** A march's result: the in-scattered radiance per unit sun illuminance and the transmittance. */
+/**
+ * A march's result: the in-scattered radiance in its sources' weights (per unit of the one sun's
+ * illuminance, or pre-exposed luminance, R08.T7) and the transmittance.
+ */
 export interface TwinMarch {
   readonly luminance: Rgb;
   readonly transmittance: Rgb;
@@ -1763,21 +1903,76 @@ function groundShadows(bottomRadiusM: number, heightM: number, muSun: number): b
   return muSun < 0 && rM * rM * (muSun * muSun - 1) + bottomRadiusM * bottomRadiusM >= 0;
 }
 
-/** A per-frame march in progress: the accumulated radiance and throughput along one ray. */
+/**
+ * Each term's scattering towards the eye for one source, summed per channel into `out`, from the
+ * terms' densities at a sample and their phases for the source (`source.wgsl`'s
+ * `phasedScatteringOf`): each term's scattering times its density, times its phase, in the terms'
+ * order, as {@link sampleInto} sums it for one sun, to the bit.
+ */
+function phasedInto(
+  terms: readonly TwinTerm[],
+  densities: Float64Array,
+  phases: Float64Array,
+  out: TwinRgb,
+): void {
+  let p0 = 0;
+  let p1 = 0;
+  let p2 = 0;
+  for (let k = 0; k < terms.length; k += 1) {
+    const term = terms[k];
+    if (term === undefined) {
+      continue;
+    }
+    const d = densities[k] ?? Number.NaN;
+    const scattering = term.scattering;
+    p0 += scattering[0] * d * (phases[k * 3] ?? Number.NaN);
+    p1 += scattering[1] * d * (phases[k * 3 + 1] ?? Number.NaN);
+    p2 += scattering[2] * d * (phases[k * 3 + 2] ?? Number.NaN);
+  }
+  out[0] = p0;
+  out[1] = p1;
+  out[2] = p2;
+}
+
+/** One source as a march takes it: its direction, weight and slot, and its terms' phases. */
+interface MarchSource extends TwinRaySource {
+  /** Each term's phase per channel for the angle between the ray and the source. */
+  readonly phases: Float64Array;
+  /** u = √(θ ÷ π) times 255, the place in the phase tables' entries of the angle (R08.T7). */
+  readonly entry: number;
+}
+
+/** A light slot's state along a march: its absorber path, its throughput and its share of a step. */
+interface SlotPath {
+  readonly path: TwinAbsorberPath;
+  readonly throughput: TwinRgb;
+  readonly share: TwinRgb;
+  readonly absorbed: TwinRgb;
+}
+
+/**
+ * A per-frame march in progress: the accumulated radiance along one ray, summed over its sources,
+ * and each light slot's throughput, slot 0's the march's transmittance (R08.T7).
+ */
 class Marcher {
   readonly luminance: TwinRgb = [0, 0, 0];
-  readonly throughput: TwinRgb = [1, 1, 1];
   readonly #terms: readonly TwinTerm[];
   readonly #pressureBarOf: ((heightM: number) => number) | null;
-  readonly #phases: Float64Array;
   readonly #sources: TwinSources;
   readonly #geometry: MarchGeometry;
   readonly #ray: TwinRay;
+  readonly #marchSources: readonly MarchSource[];
+  /** The light slots' paths in ascending order of slot, slot 0 first. */
+  readonly #paths: ReadonlyMap<number, SlotPath>;
+  readonly #absorbing: boolean;
   readonly #local = new Float64Array(SAMPLE_FLOATS);
+  readonly #densities: Float64Array;
   readonly #toSun: TwinRgb = [0, 0, 0];
   readonly #multiple: TwinRgb = [0, 0, 0];
-  readonly #absorbed: TwinRgb = [0, 0, 0];
-  readonly #path: TwinAbsorberPath;
+  readonly #phased: TwinRgb = [0, 0, 0];
+  readonly #depth: TwinRgb = [0, 0, 0];
+  /** Whether the march adds the forward lobes' higher orders: a tabulated term, and its depth read. */
+  readonly #lobes: boolean;
 
   constructor(
     terms: readonly TwinTerm[],
@@ -1791,31 +1986,85 @@ class Marcher {
     this.#sources = sources;
     this.#geometry = geometry;
     this.#ray = ray;
+    this.#densities = new Float64Array(terms.length);
     const d = ray.direction;
-    const s = ray.sun;
-    this.#phases = phasesAt(terms, d.x * s.x + d.y * s.y + d.z * s.z);
-    this.#path = new TwinAbsorberPath(hasAbsorbers(terms), sources.absorberPathDepth);
+    const given: ReadonlyArray<TwinRaySource> = ray.sources ?? [
+      { direction: ray.sun, weight: [1, 1, 1], slot: 0 },
+    ];
+    this.#absorbing = hasAbsorbers(terms);
+    this.#marchSources = given.map((source) => {
+      const s = source.direction;
+      const cosTheta = d.x * s.x + d.y * s.y + d.z * s.z;
+      const theta = Math.acos(Math.min(Math.max(cosTheta, -1), 1));
+      return {
+        direction: source.direction,
+        weight: source.weight,
+        slot: source.slot,
+        phases: phasesAt(terms, cosTheta),
+        entry: Math.sqrt(theta / Math.PI) * 255,
+      };
+    });
+    this.#lobes = terms.some((term) => term.lobe !== null) && sources.sunOpticalDepth !== undefined;
+    // A path a light slot under an absorber, slot 0's always (the views' mean transmittance), and
+    // one path for every source of a medium with none, as `hillaire.ts`'s `frameSourcesOf` sends
+    // them (`source.wgsl`'s `ViewMarch`).
+    const last = Math.max(0, ...this.#marchSources.map((source) => this.#pathOf(source)));
+    const paths = new Map<number, SlotPath>();
+    for (let slot = 0; slot <= last; slot += 1) {
+      paths.set(slot, {
+        path: new TwinAbsorberPath(this.#absorbing, (columns, pressureColumns, out) => {
+          sources.absorberPathDepth(columns, pressureColumns, out, slot);
+        }),
+        throughput: [1, 1, 1],
+        share: [0, 0, 0],
+        absorbed: [0, 0, 0],
+      });
+    }
+    this.#paths = paths;
+  }
+
+  /** The march's transmittance: light slot 0's throughput. */
+  get throughput(): TwinRgb {
+    return this.throughputOf(0);
+  }
+
+  /** A light slot's throughput, slot 0's for a slot with no path of its own. */
+  throughputOf(slot: number): TwinRgb {
+    const path = this.#paths.get(this.#absorbing ? slot : 0) ?? this.#paths.get(0);
+    if (path === undefined) {
+      throw new Error("a march has light slot 0's path");
+    }
+    return path.throughput;
   }
 
   /**
-   * One step at distance `tM` along the ray, `dtM` long: the medium there, its scattering source
-   * (`source.wgsl`'s `sourceAt`: single scattering of the sun's light shadowed by the ground on
-   * the tables' sphere, plus multiple scattering) and the step's in-scattering. The ray's own path
-   * takes its absorbers by its column under the sun's curves (`viewAbsorberStep`, R08.T6.c).
+   * One step at distance `tM` along the ray, `dtM` long: the medium there, each source's
+   * scattering source (`source.wgsl`'s `sourceAt`: single scattering of its light shadowed by the
+   * ground on the tables' sphere, plus multiple scattering, both at its slot) weighted into its
+   * slot's share, and each slot's share's in-scattering through its own path, which takes its
+   * absorbers by its column under its slot's curves (`viewMarchStep`; R08.T6.c, R08.T7).
    */
   step(tM: number, dtM: number): void {
-    const { originM: o, direction: d, sun: s } = this.#ray;
+    const { originM: o, direction: d } = this.#ray;
     const px = o.x + tM * d.x;
     const py = o.y + tM * d.y;
     const pz = o.z + tM * d.z;
     let heightM: number;
-    let muSun: number;
+    // The sample's normal, unnormalised, and its length, which the sun cosines are taken against
+    // as (s · g) ÷ |g|, the form R05's single sun took.
+    let gx: number;
+    let gy: number;
+    let gz: number;
+    let gLength: number;
     const geometry = this.#geometry;
     switch (geometry.kind) {
       case "sphere": {
         const rP = Math.sqrt(px * px + py * py + pz * pz);
         heightM = rP - geometry.bottomRadiusM;
-        muSun = (s.x * px + s.y * py + s.z * pz) / rP;
+        gx = px;
+        gy = py;
+        gz = pz;
+        gLength = rP;
         break;
       }
       case "spheroid": {
@@ -1825,28 +2074,86 @@ class Marcher {
         const surfaceM =
           1 / Math.sqrt((px * px + py * py) / (rP * rP * a2) + (pz * pz) / (rP * rP * c2));
         heightM = rP - surfaceM;
-        const nx = px / a2;
-        const ny = py / a2;
-        const nz = pz / c2;
-        muSun = (s.x * nx + s.y * ny + s.z * nz) / Math.sqrt(nx * nx + ny * ny + nz * nz);
+        gx = px / a2;
+        gy = py / a2;
+        gz = pz / c2;
+        gLength = Math.sqrt(gx * gx + gy * gy + gz * gz);
         break;
       }
     }
     const local = this.#local;
-    sampleInto(this.#terms, this.#pressureBarOf, this.#phases, heightM, local);
+    sampleInto(this.#terms, this.#pressureBarOf, null, heightM, local, this.#densities);
     const sources = this.#sources;
-    const lit = groundShadows(sources.bottomRadiusM, heightM, muSun) ? 0 : 1;
-    sources.sunTransmittance(heightM, muSun, this.#toSun);
-    sources.multiScattering(heightM, muSun, this.#multiple);
-    this.#path.stepInto(local, dtM, this.#absorbed);
-    for (const c of CHANNELS) {
-      const source =
-        lit * this.#toSun[c] * (local[6 + c] ?? Number.NaN) +
-        this.#multiple[c] * (local[c] ?? Number.NaN);
-      const stepDepth = (local[3 + c] ?? Number.NaN) * dtM + this.#absorbed[c];
-      this.luminance[c] += this.throughput[c] * source * dtM * exactStepFactor(stepDepth);
-      this.throughput[c] *= Math.exp(-stepDepth);
+    for (const path of this.#paths.values()) {
+      path.share.fill(0);
     }
+    for (const source of this.#marchSources) {
+      const s = source.direction;
+      const muSun = (s.x * gx + s.y * gy + s.z * gz) / gLength;
+      const slot = source.slot;
+      const lit = groundShadows(sources.bottomRadiusM, heightM, muSun) ? 0 : 1;
+      sources.sunTransmittance(heightM, muSun, this.#toSun, slot);
+      sources.multiScattering(heightM, muSun, this.#multiple, slot);
+      phasedInto(this.#terms, this.#densities, source.phases, this.#phased);
+      if (this.#lobes) {
+        sources.sunOpticalDepth?.(heightM, muSun, this.#depth);
+        this.#addLobeOrders(source.entry, local, source.phases);
+      }
+      const share = this.#paths.get(this.#pathOf(source))?.share;
+      if (share === undefined) {
+        throw new Error(`a march has no path for light slot ${slot}`);
+      }
+      for (const c of CHANNELS) {
+        const one =
+          lit * this.#toSun[c] * this.#phased[c] + this.#multiple[c] * (local[c] ?? Number.NaN);
+        share[c] += source.weight[c] * one;
+      }
+    }
+    for (const { path, throughput, share, absorbed } of this.#paths.values()) {
+      path.stepInto(local, dtM, absorbed);
+      for (const c of CHANNELS) {
+        const stepDepth = (local[3 + c] ?? Number.NaN) * dtM + absorbed[c];
+        this.luminance[c] += throughput[c] * share[c] * dtM * exactStepFactor(stepDepth);
+        throughput[c] *= Math.exp(-stepDepth);
+      }
+    }
+  }
+
+  /**
+   * Adds the tabulated terms' forward-lobe higher orders to the source's phased scattering
+   * (`source.wgsl`'s `lobeOrdersOf`, R08.T7): each term's scattering times e^(x P) Ẽ(x, θ), x the
+   * lobe terms' share of the sample's extinction times the stored optical depth along the source,
+   * and beyond the table (e^(x P) − 1) times the term's phase at the angle (`phases`).
+   */
+  #addLobeOrders(entry: number, local: Float64Array, phases: Float64Array): void {
+    const terms = this.#terms;
+    const densities = this.#densities;
+    for (const c of CHANNELS) {
+      let lobeScattering = 0;
+      for (let k = 0; k < terms.length; k += 1) {
+        const term = terms[k];
+        if (term !== undefined && term.lobe !== null) {
+          lobeScattering += term.scattering[c] * (densities[k] ?? Number.NaN);
+        }
+      }
+      const x = (this.#depth[c] * lobeScattering) / Math.max(local[3 + c] ?? Number.NaN, 1e-30);
+      for (let k = 0; k < terms.length; k += 1) {
+        const term = terms[k];
+        const lobe = term?.lobe;
+        if (term === undefined || lobe === null || lobe === undefined) {
+          continue;
+        }
+        const scattered = term.scattering[c] * (densities[k] ?? Number.NaN);
+        const boost = Math.exp(Math.min(x * lobe.share[c], 80));
+        const phase = phases[k * 3 + c] ?? Number.NaN;
+        this.#phased[c] += scattered * boost * forwardLobeAt(lobe, c, x, entry, phase);
+      }
+    }
+  }
+
+  /** The path a source's light takes: its slot under an absorber, slot 0 otherwise. */
+  #pathOf(source: TwinRaySource): number {
+    return this.#absorbing ? source.slot : 0;
   }
 }
 
@@ -1884,8 +2191,19 @@ export interface TwinView {
   readonly normal: Vec3;
   /** The camera's Gaussian radius √(MN): the ground of the sphere the sky view is built on. */
   readonly cameraRadiusM: number;
-  /** The unit direction to the sun. */
+  /**
+   * The unit direction to the first source, or the zenith where none is drawn: what a twilight
+   * ray's class is judged by (`marchSteps.ts`'s `grazingTwilight`).
+   */
   readonly sun: Vec3;
+  /**
+   * The drawn sources, body-fixed, each light weighted as the per-view tables hold it (R08.T7):
+   * by its illuminance times the frame's scale ({@link frameTwinView}), or by 1 for one sun's
+   * light per unit of its illuminance ({@link twinView}).
+   */
+  readonly sources: ReadonlyArray<TwinRaySource>;
+  /** The sky view's x axis, the first source's horizontal direction (`hillaire.ts`'s `skyAxisOf`). */
+  readonly skyAxis: Vec3;
   /** The ray basis: right × tan(fov_x ÷ 2), up × tan(fov_y ÷ 2), and forward. */
   readonly right: Vec3;
   readonly upRay: Vec3;
@@ -1896,13 +2214,12 @@ export interface TwinView {
   readonly viewport: ViewSize;
 }
 
-/** A frame's view from its camera and sun, as `HillaireAtmosphere.drawFrame` fills its uniform. */
-export function twinView(
+/** The view's camera and ray basis, which every {@link TwinView} shares. */
+function twinCamera(
   camera: AtmosphereCamera,
-  sun: SunState,
   figure: SpheroidFigure,
   nearM: number,
-): TwinView {
+): Omit<TwinView, "sun" | "sources" | "skyAxis"> {
   const inputs = atmosphereInputs(camera, figure);
   const tanX = Math.tan(camera.fovXRad / 2);
   const tanY = tanX / (camera.viewport.widthPx / camera.viewport.heightPx);
@@ -1911,13 +2228,66 @@ export function twinView(
     heightM: inputs.heightM,
     normal: inputs.normal,
     cameraRadiusM: inputs.radiusM - inputs.heightM,
-    sun: sun.directionBodyFixed,
     right: scale(rotate(camera.orientation, { x: 1, y: 0, z: 0 }), tanX),
     upRay: scale(rotate(camera.orientation, { x: 0, y: 1, z: 0 }), tanY),
     forward: rotate(camera.orientation, { x: 0, y: 0, z: -1 }),
     figure,
     nearM,
     viewport: camera.viewport,
+  };
+}
+
+/**
+ * A frame's view from its camera and one sun, its light per unit of its illuminance in each
+ * channel (weight 1) at its light slot: the tables R05 and R08.T6 stored, against which a test
+ * compares one source's sky.
+ */
+export function twinView(
+  camera: AtmosphereCamera,
+  sun: SunState,
+  figure: SpheroidFigure,
+  nearM: number,
+): TwinView {
+  const base = twinCamera(camera, figure, nearM);
+  return {
+    ...base,
+    sun: sun.directionBodyFixed,
+    sources: [{ direction: sun.directionBodyFixed, weight: [1, 1, 1], slot: curveSlotOf(sun) }],
+    skyAxis: skyAxisOf(base.normal, [sun]),
+  };
+}
+
+/**
+ * A frame's view as `HillaireAtmosphere.drawFrame` fills its uniform for `suns` (R08.T7): each
+ * source's light weighted by its illuminance times `exposureScale`, the frame's pre-exposure, as
+ * `hillaire.ts`'s `frameSourcesOf` forms it, so that the twins hold what the per-view tables hold.
+ *
+ * @param absorbers - Whether the medium has an absorber, and `lightSlots` its curves' lights.
+ * @throws RangeError as `frameSourcesOf`.
+ */
+export function frameTwinView(
+  camera: AtmosphereCamera,
+  suns: ReadonlyArray<SunState>,
+  figure: SpheroidFigure,
+  nearM: number,
+  exposureScale: number,
+  absorbers: boolean,
+  lightSlots: number,
+): TwinView {
+  const base = twinCamera(camera, figure, nearM);
+  const weighted = frameSourcesOf(suns, exposureScale, absorbers, lightSlots);
+  return {
+    ...base,
+    sun: suns[0]?.directionBodyFixed ?? base.normal,
+    sources: suns.map((sun, i) => {
+      const w = weighted[i]?.weight ?? [0, 0, 0, 0];
+      return {
+        direction: sun.directionBodyFixed,
+        weight: [w[0], w[1], w[2]],
+        slot: curveSlotOf(sun),
+      };
+    }),
+    skyAxis: skyAxisOf(base.normal, suns),
   };
 }
 
@@ -1940,9 +2310,11 @@ function unit(v: Vec3): Vec3 {
 }
 
 /**
- * The ray of the sky-view texel (x, y), as `skyView.wgsl` marches it: sebh's parameterisation
- * (`view.wgsl`'s `skyViewUvToParams`) on the camera's own sphere, the camera kept 1 m inside the
- * shell, in the frame whose z is the datum's normal and whose x points to the sun's azimuth.
+ * The ray of the sky-view texel (x, y), as `skyView.wgsl` marches it: sebh's zenith
+ * parameterisation (`view.wgsl`'s `skyViewUvToParams`) on the camera's own sphere, the camera kept
+ * 1 m inside the shell, and the local azimuth φ = 2π u from the view's sky axis over the whole
+ * circle (R08.T7), in the frame whose z is the datum's normal, x the sky axis and y = z × x, the
+ * view's sources taken into the same frame.
  */
 export function skyViewRayTwin(
   medium: AtmosphereMedium,
@@ -1969,20 +2341,34 @@ export function skyViewRayTwin(
     const c = unitY * 2 - 1;
     viewZenithCos = Math.cos(zenithHorizon + beta * c * c);
   }
-  const lightViewCos = -(unitX * unitX * 2 - 1);
+  const phi = 2 * Math.PI * unitX;
   const viewZenithSin = Math.sqrt(Math.max(1 - viewZenithCos * viewZenithCos, 0));
   const n = view.normal;
-  const s = view.sun;
-  const muSunCamera = n.x * s.x + n.y * s.y + n.z * s.z;
+  const ax = view.skyAxis;
+  const ay = {
+    x: n.y * ax.z - n.z * ax.y,
+    y: n.z * ax.x - n.x * ax.z,
+    z: n.x * ax.y - n.y * ax.x,
+  };
+  const inFrame = (s: Vec3): Vec3 => ({
+    x: s.x * ax.x + s.y * ax.y + s.z * ax.z,
+    y: s.x * ay.x + s.y * ay.y + s.z * ay.z,
+    z: s.x * n.x + s.y * n.y + s.z * n.z,
+  });
+  const sources = view.sources.map((source) => ({
+    ...source,
+    direction: inFrame(source.direction),
+  }));
   const shell = { bottomRadiusM: bottom, topRadiusM: bottom + atmosphereM };
   return {
     originM: { x: 0, y: 0, z: rM },
     direction: {
-      x: viewZenithSin * lightViewCos,
-      y: viewZenithSin * Math.sqrt(Math.max(1 - lightViewCos * lightViewCos, 0)),
+      x: viewZenithSin * Math.cos(phi),
+      y: viewZenithSin * Math.sin(phi),
       z: viewZenithCos,
     },
-    sun: { x: Math.sqrt(Math.max(1 - muSunCamera * muSunCamera, 0)), y: 0, z: muSunCamera },
+    sun: sources[0]?.direction ?? { x: 0, y: 0, z: 1 },
+    sources,
     tStartM: 0,
     tEndM: maxDistanceM(shell, rM, viewZenithCos),
     fromCamera: true,
@@ -2003,30 +2389,143 @@ export function skyViewTwin(
   size: TableSize,
   samples: number,
 ): TwinTable {
-  const terms = termsOf(planet.medium);
-  const edgesM = marchEdgesOf(terms, planet.medium.topHeightM);
-  const pressureBarOf = pressureBarLookup(planet.medium);
-  const sources = tableSources(planet);
-  const geometry: MarchGeometry = { kind: "sphere", bottomRadiusM: view.cameraRadiusM };
-  const n = Math.max(Math.floor(samples), 2);
+  const texelAt = skyViewTexelsTwin(planet, view, size, samples);
   const { widthTexels: w, heightTexels: h } = size;
   const texels = new Float64Array(w * h * 4);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
-      const ray = skyViewRayTwin(planet.medium, view, x, y, size);
-      const marcher = new Marcher(terms, pressureBarOf, sources, geometry, ray);
-      for (const { tM, dtM } of piecedSteps(ray, n, edgesM, geometry)) {
-        marcher.step(tM, dtM);
-      }
-      texels.set([...marcher.luminance, 1], (y * w + x) * 4);
+      texels.set([...texelAt(x, y), 1], (y * w + x) * 4);
     }
   }
   return { widthTexels: w, heightTexels: h, texels };
 }
 
 /**
+ * The sky-view table's twin texel by texel, each marched when first asked for and kept
+ * ({@link skyViewTwin}'s march): what a read of a few directions takes without the whole table.
+ *
+ * @throws RangeError as {@link skyViewTwin}.
+ */
+export function skyViewTexelsTwin(
+  planet: PlanetTwin,
+  view: TwinView,
+  size: TableSize,
+  samples: number,
+): (x: number, y: number) => Rgb {
+  const terms = termsOf(planet.medium);
+  const edgesM = marchEdgesOf(terms, planet.medium.topHeightM);
+  const pressureBarOf = pressureBarLookup(planet.medium);
+  const sources = tableSources(planet);
+  const geometry: MarchGeometry = { kind: "sphere", bottomRadiusM: view.cameraRadiusM };
+  const n = Math.max(Math.floor(samples), 2);
+  const kept = new Map<number, Rgb>();
+  return (x, y) => {
+    const key = y * size.widthTexels + x;
+    let texel = kept.get(key);
+    if (texel === undefined) {
+      const ray = skyViewRayTwin(planet.medium, view, x, y, size);
+      const marcher = new Marcher(terms, pressureBarOf, sources, geometry, ray);
+      for (const { tM, dtM } of piecedSteps(ray, n, edgesM, geometry)) {
+        marcher.step(tM, dtM);
+      }
+      const [r, g, b] = marcher.luminance;
+      texel = [r, g, b];
+      kept.set(key, texel);
+    }
+    return texel;
+  };
+}
+
+/**
+ * The sky view read in a direction as the composite reads it (`composite.wgsl`'s sky branch, R08.T7):
+ * the ray's zenith angle and local azimuth about the view's sky axis to the table's unit range
+ * (`view.wgsl`'s `skyViewParamsToUv`, its horizon split at the camera's sphere), through Bruneton's
+ * texel mapping, and the four texels about it filtered bilinearly as the composite's linear,
+ * clamped sampler does, texel centres at (i + ½) ÷ size.
+ *
+ * @param texelAt - The table's texel (x, y): a table's ({@link twinTableTexels}) or one computed on
+ *   demand ({@link skyViewTexelsTwin}).
+ * @param direction - A unit direction, body-fixed.
+ */
+export function skyViewReadTwin(
+  texelAt: (x: number, y: number) => Rgb,
+  size: TableSize,
+  medium: AtmosphereMedium,
+  view: TwinView,
+  direction: Vec3,
+): Rgb {
+  const bottom = view.cameraRadiusM;
+  const atmosphereM = medium.topHeightM;
+  const heightM = skyViewHeight(view.heightM, atmosphereM);
+  const rM = bottom + heightM;
+  const n = view.normal;
+  const ax = view.skyAxis;
+  const ay = {
+    x: n.y * ax.z - n.z * ax.y,
+    y: n.z * ax.x - n.x * ax.z,
+    z: n.x * ax.y - n.y * ax.x,
+  };
+  const d = direction;
+  const mu = d.x * n.x + d.y * n.y + d.z * n.z;
+  const across = {
+    x: d.y * n.z - d.z * n.y,
+    y: d.z * n.x - d.x * n.z,
+    z: d.x * n.y - d.y * n.x,
+  };
+  const zenith = Math.atan2(Math.hypot(across.x, across.y, across.z), mu);
+  const vHorizon = Math.sqrt(Math.max(heightM * (2 * bottom + heightM), 0));
+  const beta = Math.acos(Math.min(Math.max(vHorizon / rM, -1), 1));
+  const zenithHorizon = Math.PI - beta;
+  const shell = { bottomRadiusM: bottom, topRadiusM: bottom + atmosphereM };
+  let v: number;
+  if (!intersectsGround(shell, rM, mu)) {
+    v = (1 - Math.sqrt(Math.max(1 - zenith / zenithHorizon, 0))) * 0.5;
+  } else {
+    v = Math.sqrt(Math.max((zenith - zenithHorizon) / Math.max(beta, 1e-6), 0)) * 0.5 + 0.5;
+  }
+  const x = d.x * ax.x + d.y * ax.y + d.z * ax.z;
+  const y = d.x * ay.x + d.y * ay.y + d.z * ay.z;
+  let phi = x === 0 && y === 0 ? 0 : Math.atan2(y, x);
+  if (phi < 0) {
+    phi += 2 * Math.PI;
+  }
+  const { widthTexels: w, heightTexels: h } = size;
+  const px = Math.min(
+    Math.max(texelUvFromUnit(unitClamp(phi / (2 * Math.PI)), w) * w - 0.5, 0),
+    w - 1,
+  );
+  const py = Math.min(Math.max(texelUvFromUnit(unitClamp(v), h) * h - 0.5, 0), h - 1);
+  const x0 = Math.floor(px);
+  const y0 = Math.floor(py);
+  const x1 = Math.min(x0 + 1, w - 1);
+  const y1 = Math.min(y0 + 1, h - 1);
+  const fx = px - x0;
+  const fy = py - y0;
+  const a = texelAt(x0, y0);
+  const b = texelAt(x1, y0);
+  const c = texelAt(x0, y1);
+  const e = texelAt(x1, y1);
+  const out: TwinRgb = [0, 0, 0];
+  for (const k of CHANNELS) {
+    const top = a[k] * (1 - fx) + b[k] * fx;
+    const below = c[k] * (1 - fx) + e[k] * fx;
+    out[k] = top * (1 - fy) + below * fy;
+  }
+  return out;
+}
+
+/** A table's texel (x, y)'s RGB, for {@link skyViewReadTwin}. */
+export function twinTableTexels(table: TwinTable): (x: number, y: number) => Rgb {
+  return (x, y) => {
+    const at = (y * table.widthTexels + x) * 4;
+    const t = table.texels;
+    return [t[at] ?? Number.NaN, t[at + 1] ?? Number.NaN, t[at + 2] ?? Number.NaN];
+  };
+}
+
+/**
  * The aerial-perspective volume's twin: for each froxel column, the running in-scattered radiance
- * per unit sun illuminance (rgb) and the mean transmittance (a) at each slice's far face, out to
+ * in the view's sources' weights (rgb; R08.T7) and the mean transmittance (a) at each slice's far face, out to
  * `reachM` in slices of equal depth with `samplesPerSlice` even steps each (at least 1), on the
  * camera's own sphere, as `aerialPerspective.wgsl` stores them, froxel (x, y) along the ray through
  * the screen at (x, y) ÷ (size − 1), Bruneton's texel mapping (plan R08, Design note 19).
@@ -2061,6 +2560,7 @@ export function aerialPerspectiveTwin(
         originM,
         direction,
         sun: view.sun,
+        sources: view.sources,
         tStartM: 0,
         tEndM: reachM,
         fromCamera: true,
@@ -2156,7 +2656,15 @@ export function rayMarchRayAlongTwin(
     return null;
   }
   return {
-    ray: { originM: o, direction, sun: view.sun, tStartM, tEndM, fromCamera: shellNear <= 0 },
+    ray: {
+      originM: o,
+      direction,
+      sun: view.sun,
+      sources: view.sources,
+      tStartM,
+      tEndM,
+      fromCamera: shellNear <= 0,
+    },
     bareGroundM:
       !Number.isFinite(tSurfaceM) && hitsGround && groundNear <= tEndM ? groundNear : null,
   };
@@ -2170,7 +2678,7 @@ export type RayMarchSettings = Pick<
 
 /**
  * One ray-march texel's twin along a clipped ray (`rayMarchRayTwin`, `rayMarchRayAlongTwin`): its
- * in-scattered radiance per unit sun illuminance and mean transmittance, with the bare ground
+ * in-scattered radiance in the view's sources' weights (R08.T7) and mean transmittance, with the bare ground
  * seen from above lit by the sun, and (0, 0, 0, 1) where the kernel marches nothing (`null`), its
  * placed steps cut at the medium's layer edges on their shell quadrics ({@link piecedSteps},
  * R08.T6.i). The smoke marches a texel's ray again, turned or moved, through it (R08.T6.g).
@@ -2244,15 +2752,23 @@ function rayMarchTexelInto(
     const c2 = view.figure.polarRadiusM ** 2;
     const o = ray.originM;
     const d = ray.direction;
-    const s = ray.sun;
     const nx = (o.x + bareGroundM * d.x) / a2;
     const ny = (o.y + bareGroundM * d.y) / a2;
     const nz = (o.z + bareGroundM * d.z) / c2;
-    const muSun = (s.x * nx + s.y * ny + s.z * nz) / Math.sqrt(nx * nx + ny * ny + nz * nz);
+    const length = Math.sqrt(nx * nx + ny * ny + nz * nz);
     const toSun: TwinRgb = [0, 0, 0];
-    sources.sunTransmittance(0, muSun, toSun);
-    for (const c of CHANNELS) {
-      luminance[c] += (t[c] * toSun[c] * Math.max(muSun, 0) * medium.groundAlbedo[c]) / Math.PI;
+    // Each source's light on it, weighted as the sky is, through its own slot's throughput (R08.T7).
+    const lights = ray.sources ?? [{ direction: ray.sun, weight: [1, 1, 1], slot: 0 }];
+    for (const light of lights) {
+      const s = light.direction;
+      const muSun = (s.x * nx + s.y * ny + s.z * nz) / length;
+      sources.sunTransmittance(0, muSun, toSun, light.slot);
+      const through = marcher.throughputOf(light.slot);
+      for (const c of CHANNELS) {
+        luminance[c] +=
+          (through[c] * light.weight[c] * toSun[c] * Math.max(muSun, 0) * medium.groundAlbedo[c]) /
+          Math.PI;
+      }
     }
     meanTransmittance = 0;
   }
@@ -2261,7 +2777,7 @@ function rayMarchTexelInto(
 
 /**
  * The ray-march target's twin at the setting's scale of the viewport: each texel's in-scattered
- * radiance per unit sun illuminance (rgb) and mean transmittance (a), with the bare ground seen
+ * radiance in the view's sources' weights (rgb; R08.T7) and mean transmittance (a), with the bare ground seen
  * from above lit by the sun, and (0, 0, 0, 1) where the kernel marches nothing.
  *
  * @param depthAt - The scene's reversed-Z depth at a full-resolution pixel, 0 where nothing is

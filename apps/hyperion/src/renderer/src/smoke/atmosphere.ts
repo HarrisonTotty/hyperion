@@ -25,7 +25,11 @@
  * geometry they hold. The Venus-class multiple-scattering table is held in both arms. R08.T6.i holds
  * the kernels whose steps are cut at layer edges (the sky view, the ray march and the multiple
  * scattering) in both arms on the slab Earth, `EARTH_SLAB_REFERENCE`, whose ozone has a base and a
- * top (`checkAtmosphereLayerEdges`).
+ * top (`checkAtmosphereLayerEdges`). R08.T7 holds the per-view tables summed over several sources
+ * to their twins under a K5 and M3 binary, each light on its own curves and multiple-scattering
+ * layer, and the composite's pass-through of the scene's `METER_CLASS` (`checkSeveralSuns`); its
+ * captures add the binary's sky (`captureAtmosphere`). Since R08.T7 the per-frame twins add the
+ * tabulated terms' forward-lobe orders, so R08.T6.b's tabulated medium holds them too.
  */
 
 import { add, normalise, scale, type Vec3 } from "../geometry/vec3";
@@ -78,6 +82,7 @@ import {
   TRANSMITTANCE_SIZE,
 } from "../view/atmosphere/tables";
 import {
+  frameTwinView,
   type PlanetTwin,
   marchTwin,
   mediumMarchEdgesM,
@@ -90,7 +95,6 @@ import {
   type TwinTable,
   type TwinTransmittance,
   type TwinView,
-  twinView,
 } from "../view/atmosphere/tablesCpu";
 import {
   fourAbsorberMedium,
@@ -105,6 +109,7 @@ import {
   type ViewSize,
 } from "../view/engine/types";
 import { exposureScale } from "../view/photometry/exposure";
+import { METER_CLASS } from "../view/post/meter";
 import type { QualitySetting } from "../view/quality/qualitySetting";
 import { HALF_FLOAT_MAX, toneCurve } from "../view/photometry/toneCurve";
 import {
@@ -117,6 +122,7 @@ import {
   NEAR_M,
   show,
   texel,
+  triangleMesh,
 } from "./harness";
 import { attempt, handled, inOrder, type OrderedChecks } from "./ordered";
 import type { TwinPool } from "./twinPool";
@@ -273,12 +279,41 @@ function sunAt(elevationDeg: number): SunState {
 /** The grey a check surface is drawn in, pre-exposed. */
 const SURFACE_GREY = 0.02;
 
-/** Renders one composite frame over a scene whose surface, if any, stands `surfaceM` ahead. */
+/** The pre-exposure the smoke's frames are drawn at, EV100 15. */
+const SMOKE_EXPOSURE_SCALE = exposureScale(15);
+
+/**
+ * The twins' view of a frame `atmosphere` draws for `suns` at {@link SMOKE_EXPOSURE_SCALE}: each
+ * source's light weighted as the per-view tables hold it since R08.T7, by its illuminance times the
+ * pre-exposure (`tablesCpu.ts`'s `frameTwinView`).
+ */
+function frameViewOf(
+  atmosphere: HillaireAtmosphere,
+  camera: AtmosphereCamera,
+  suns: ReadonlyArray<SunState>,
+  figure: SpheroidFigure,
+): TwinView {
+  const tables = atmosphere.tables;
+  return frameTwinView(
+    camera,
+    suns,
+    figure,
+    NEAR_M,
+    SMOKE_EXPOSURE_SCALE,
+    absorberCount(tables.medium) > 0,
+    tables.curves.length,
+  );
+}
+
+/**
+ * Renders one composite frame for `suns` (R08.T7's sky sources) over a scene whose surface, if any,
+ * stands `surfaceM` ahead.
+ */
 async function compositeFrame(
   engine: RenderEngine,
   atmosphere: HillaireAtmosphere,
   camera: AtmosphereCamera,
-  sun: SunState,
+  suns: ReadonlyArray<SunState>,
   surfaceM: number | null,
 ): Promise<Float32Array> {
   const size = camera.viewport;
@@ -306,11 +341,11 @@ async function compositeFrame(
             ),
           ];
     scene.render(frameOf("atmosphere scene", draws, aspect));
-    const composite = atmosphere.drawFrame(camera, sun, {
+    const composite = atmosphere.drawFrame(camera, suns, {
       colour: scene.colour,
       depth: requireDepth(scene.depth),
       nearM: NEAR_M,
-      exposureScale: exposureScale(15),
+      exposureScale: SMOKE_EXPOSURE_SCALE,
     });
     output.render(frameOf("atmosphere composite", [composite], aspect));
     return halfTexels(await engine.readTexture(output.colour));
@@ -379,7 +414,7 @@ export async function checkAtmosphereFrames(engine: RenderEngine, checks: Checks
           engine,
           atmosphere,
           equatorCamera(c.heightM, FRAME_SIZE),
-          sunAt(c.elevationDeg),
+          [sunAt(c.elevationDeg)],
           c.surfaceM,
         );
         const mean = meanRgb(texels);
@@ -441,7 +476,8 @@ function unitOfUv(uv: number, size: number): number {
 
 /**
  * The ray of the sky-view texel (x, y), as `skyView.wgsl` marches it: `skyViewUvToParams` in
- * `view.wgsl`, on the camera's own sphere, in the frame whose x points to the sun's azimuth.
+ * `view.wgsl`, on the camera's own sphere, in the frame whose x points to the sun's azimuth, the
+ * view's one source, and the local azimuth φ = 2π u from it (R08.T7).
  */
 function skyViewRay(
   x: number,
@@ -461,11 +497,11 @@ function skyViewRay(
   const zenithHorizon = Math.PI - beta;
   const zenith =
     v < 0.5 ? zenithHorizon * (1 - (1 - 2 * v) ** 2) : zenithHorizon + beta * (2 * v - 1) ** 2;
-  const lightViewCos = -(u * u * 2 - 1);
+  const phi = 2 * Math.PI * u;
   const sinZenith = Math.sin(zenith);
   const direction = {
-    x: sinZenith * lightViewCos,
-    y: sinZenith * Math.sqrt(Math.max(1 - lightViewCos * lightViewCos, 0)),
+    x: sinZenith * Math.cos(phi),
+    y: sinZenith * Math.sin(phi),
     z: Math.cos(zenith),
   };
   const n = inputs.normal;
@@ -627,7 +663,7 @@ async function readFrameTables(
   for (const atmosphere of atmospheres) {
     // Each atmosphere's frame is read back before the next draws: they share the device.
     // oxlint-disable-next-line no-await-in-loop
-    await compositeFrame(engine, atmosphere, camera, sun, surfaceM);
+    await compositeFrame(engine, atmosphere, camera, [sun], surfaceM);
     const { skyView, rayMarch } = atmosphere.frameTables;
     if (rayMarch === null) {
       throw new Error("the ray march drew no target");
@@ -1092,11 +1128,11 @@ function smokeTabulatedMedium(): AtmosphereMedium {
   };
 }
 
-/** One frame R08.T6.b's per-frame check draws. */
+/** One frame R08.T6.b's and R08.T7's per-frame checks draw, with its sky's sources. */
 interface TwinFrame {
   readonly name: string;
   readonly heightM: number;
-  readonly elevationDeg: number;
+  readonly suns: ReadonlyArray<SunState>;
   readonly surfaceM: number | null;
 }
 
@@ -1528,12 +1564,32 @@ async function planetOf(
   figure: SpheroidFigure,
 ): Promise<PlanetTwin> {
   const tables = await readPlanetTables(engine, atmosphere.tables);
+  // One layer a light slot under an absorber (R08.T7), read back together.
+  const bySlot = layersOf(tables.multiScattering, atmosphere.tables.multiScatteringLayers).map(
+    (layer) => asTwinTable(layer, MULTI_SCATTERING_SIZE),
+  );
+  const [first] = bySlot;
+  if (first === undefined) {
+    throw new Error("the multiple-scattering table has a layer");
+  }
   return {
     medium: read,
     bottomRadiusM: tableRadiusM(figure),
     ...storedTransmittance(tables, read, atmosphere.tables.curves),
-    multiScattering: asTwinTable(tables.multiScattering, MULTI_SCATTERING_SIZE),
+    multiScattering: first,
+    ...(bySlot.length > 1 ? { multiScatteringBySlot: bySlot } : {}),
   };
+}
+
+/** A multiple-scattering readback's layers, each {@link MULTI_SCATTERING_SIZE}'s texels. */
+function layersOf(texels: Float32Array, layers: number): Float32Array[] {
+  const perLayer = MULTI_SCATTERING_SIZE.widthTexels * MULTI_SCATTERING_SIZE.heightTexels * 4;
+  if (texels.length !== perLayer * layers) {
+    throw new Error(`${texels.length / 4} texels read back for ${layers} layers`);
+  }
+  return Array.from({ length: layers }, (_, k) =>
+    texels.subarray(k * perLayer, (k + 1) * perLayer),
+  );
 }
 
 /**
@@ -1550,8 +1606,7 @@ async function frameAgreements(
   twins: TwinPool,
 ): Promise<() => Promise<FrameAgreements>> {
   const camera = equatorCamera(frame.heightM, FRAME_SIZE, figure);
-  const sun = sunAt(frame.elevationDeg);
-  const view = twinView(camera, sun, figure, NEAR_M);
+  const view = frameViewOf(atmosphere, camera, frame.suns, figure);
   const aerialTwin = twins.aerialPerspective(
     planet,
     view,
@@ -1562,7 +1617,7 @@ async function frameAgreements(
   const skyViewTwin = twins.skyView(planet, view, sizes.skyView, sizes.skyViewSamples);
   const surfaceDepth = frame.surfaceM === null ? 0 : NEAR_M / frame.surfaceM;
   const rayMarchTwin = twins.rayMarch(planet, view, sizes, surfaceDepth);
-  const composite = await compositeFrame(engine, atmosphere, camera, sun, frame.surfaceM);
+  const composite = await compositeFrame(engine, atmosphere, camera, frame.suns, frame.surfaceM);
   const gpu = await readFrameOutputs(engine, atmosphere);
   return async () => {
     const aerial = await aerialTwin;
@@ -1598,8 +1653,8 @@ async function checkFrameTwins(
   twins: TwinPool,
 ): Promise<void> {
   const frames: readonly TwinFrame[] = [
-    { name: "2 km, a surface 60 km ahead", heightM: 2_000, elevationDeg: 20, surfaceM: 60_000 },
-    { name: "400 km, the limb", heightM: 400_000, elevationDeg: 5, surfaceM: null },
+    { name: "2 km, a surface 60 km ahead", heightM: 2_000, suns: [sunAt(20)], surfaceM: 60_000 },
+    { name: "400 km, the limb", heightM: 400_000, suns: [sunAt(5)], surfaceM: null },
   ];
   const medium = entry.medium;
   const sizes = twinSizes(TABLE_SIZES[setting]);
@@ -1633,6 +1688,329 @@ async function checkFrameTwins(
     }
   } finally {
     atmosphere.dispose();
+  }
+}
+
+// --- R08.T7: several suns, and the sky through the air -------------------------------------------
+
+/**
+ * R08.T7's binary, a K5 (4,450 K) primary on light slot 0 and an M3 (3,300 K) companion on slot 1,
+ * under the four-absorber medium with each light's own curves of growth (`fourAbsorberMedium`).
+ */
+const BINARY_LIGHTS_K = [4_450, 3_300] as const;
+
+/** One degree, rad. */
+const DEGREE_RAD = Math.PI / 180;
+
+/**
+ * A sky source at an elevation and an azimuth east of north at the equatorial camera (normal +x,
+ * north +z, east +y), with its illuminance per channel, lx, and its light slot.
+ */
+function skySourceAt(
+  elevationDeg: number,
+  azimuthDeg: number,
+  illuminanceLx: readonly [number, number, number],
+  curveSlot: number,
+  drawsDisc = true,
+): SunState {
+  const e = elevationDeg * DEGREE_RAD;
+  const a = azimuthDeg * DEGREE_RAD;
+  return {
+    directionBodyFixed: {
+      x: Math.sin(e),
+      y: Math.cos(e) * Math.sin(a),
+      z: Math.cos(e) * Math.cos(a),
+    },
+    illuminanceLx,
+    angularRadiusRad: drawsDisc ? SUN_ANGULAR_RADIUS_RAD : 0.004_5,
+    curveSlot,
+    drawsDisc,
+  };
+}
+
+/** The K5 primary at an elevation, north: `severalSuns.test.ts`'s illuminance. */
+function primaryAt(elevationDeg: number): SunState {
+  return skySourceAt(elevationDeg, 0, [9.1e4, 8.0e4, 5.9e4], 0);
+}
+
+/** The M3 companion at an elevation, 140° east of north. */
+function companionAt(elevationDeg: number): SunState {
+  return skySourceAt(elevationDeg, 140, [2.9e3, 1.8e3, 0.8e3], 1);
+}
+
+/** A full Moon's planetshine at 45°, 250° east of north, on slot 0, drawing no disc. */
+const BINARY_PLANETSHINE = skySourceAt(45, 250, [0.3, 0.32, 0.33], 0, false);
+
+/**
+ * The binary's frames from 2 m over a surface 60 km ahead (the ray march's): by day, the primary
+ * 20° up, the companion 5° and a planetshine source; and at twilight, the primary 8° and the
+ * companion 3° below the horizon, feeding the sky through the planet's shadow in the tables.
+ */
+const BINARY_FRAMES: readonly TwinFrame[] = [
+  {
+    name: "2 m, the binary and planetshine up, a surface 60 km ahead",
+    heightM: 2,
+    suns: [primaryAt(20), companionAt(5), BINARY_PLANETSHINE],
+    surfaceM: 60_000,
+  },
+  {
+    name: "2 m, the binary set, a surface 60 km ahead",
+    heightM: 2,
+    suns: [primaryAt(-8), companionAt(-3)],
+    surfaceM: 60_000,
+  },
+];
+
+/**
+ * R08.T7: the per-view tables summed over several suns in one march, held to their twins. Under
+ * the binary's absorbers the multiple-scattering table has one layer a light, each against its
+ * twin built with that light's curves over the GPU's transmittance; the binary's frames, each
+ * source on its own light slot's curves and layer, agree with the twins to 10⁻³ on both settings;
+ * and the composite keeps the scene's `METER_CLASS` in its output's alpha on all three of its paths.
+ */
+export async function checkSeveralSuns(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  const binary = fourAbsorberMedium(BINARY_LIGHTS_K);
+  const reading = attempt(() => kernelMedium(binary.medium));
+  await inOrder(checks, async (ordered) => {
+    const read = await reading;
+    await checkLightLayers(engine, ordered, binary.medium, binary.curves, read, twins);
+    for (const setting of ["high", "low"] as const) {
+      // Each setting's frames are read back before the next setting's atmosphere draws.
+      // oxlint-disable-next-line no-await-in-loop
+      await checkBinaryFrames(engine, ordered, binary.medium, binary.curves, read, setting, twins);
+    }
+  });
+}
+
+/** The binary's per-planet multiple-scattering layers, each against its light's twin. */
+async function checkLightLayers(
+  engine: RenderEngine,
+  ordered: OrderedChecks,
+  medium: AtmosphereMedium,
+  curves: AbsorberCurveSlots,
+  read: AtmosphereMedium,
+  twins: TwinPool,
+): Promise<void> {
+  const tables = new AtmosphereTables(engine, medium, EARTH_MEAN_RADIUS_M, curves);
+  try {
+    const gpu = await readPlanetTables(engine, tables);
+    const stored = storedTransmittance(gpu, read, curves);
+    const layers = tables.multiScatteringLayers;
+    const layerTwins = Array.from({ length: layers }, (_, slot) =>
+      twins.multiScattering(read, EARTH_MEAN_RADIUS_M, stored, slot),
+    );
+    ordered.later(async (checks) => {
+      const texels = layersOf(gpu.multiScattering, layers);
+      checks.check(
+        `R08.T7 ${medium.name}: the multiple-scattering table has one layer a light`,
+        layers === BINARY_LIGHTS_K.length,
+        `${layers} layers for ${BINARY_LIGHTS_K.length} lights`,
+      );
+      for (const [slot, twin] of layerTwins.entries()) {
+        // The layers' twins are awaited in order, each after the one before it.
+        // oxlint-disable-next-line no-await-in-loop
+        const result = twinAgreement(texels[slot] ?? new Float32Array(0), await twin, false);
+        checks.check(
+          `R08.T7 ${medium.name}: the multiple-scattering layer of light slot ${slot}, built with its light's curves, agrees with the CPU twin to 10⁻³`,
+          result.worst <= 1 &&
+            result.above > 0 &&
+            withinHalfRange(texels[slot] ?? new Float32Array(0)),
+          `worst ${result.at}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound`,
+        );
+      }
+      const [first, second] = texels;
+      const apart = first !== undefined && second !== undefined ? largestApart(first, second) : 0;
+      checks.check(
+        `R08.T7 ${medium.name}: the two lights' layers differ by their curves`,
+        apart > 1e-3,
+        `largest relative difference ${apart.toExponential(2)}`,
+      );
+    });
+  } finally {
+    tables.dispose();
+  }
+}
+
+/** The largest |a − b| ÷ |b| over the colour channels where b is above 10⁻⁶ of its largest. */
+function largestApart(a: Float32Array, b: Float32Array): number {
+  let most = 0;
+  for (let i = 0; i < b.length; i += 4) {
+    for (const c of [0, 1, 2]) {
+      most = Math.max(most, Math.abs(b[i + c] ?? 0));
+    }
+  }
+  let apart = 0;
+  for (let i = 0; i < b.length; i += 4) {
+    for (const c of [0, 1, 2]) {
+      const y = b[i + c] ?? 0;
+      if (Math.abs(y) > 1e-6 * most) {
+        apart = Math.max(apart, Math.abs((a[i + c] ?? Number.NaN) - y) / Math.abs(y));
+      }
+    }
+  }
+  return apart;
+}
+
+/**
+ * The binary's frames on a setting's counts against their twins over the GPU's tables, and the
+ * composite's alpha over a scene of three meter classes.
+ */
+async function checkBinaryFrames(
+  engine: RenderEngine,
+  ordered: OrderedChecks,
+  medium: AtmosphereMedium,
+  curves: AbsorberCurveSlots,
+  read: AtmosphereMedium,
+  setting: QualitySetting,
+  twins: TwinPool,
+): Promise<void> {
+  const sizes = twinSizes(TABLE_SIZES[setting]);
+  const atmosphere = new HillaireAtmosphere(engine, medium, sizes, WGS84, curves);
+  try {
+    const planet = await planetOf(engine, atmosphere, read, WGS84);
+    for (const frame of BINARY_FRAMES) {
+      // The harness's GPU work runs in order: each frame is read back before the next draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const agreements = await frameAgreements(
+        engine,
+        atmosphere,
+        planet,
+        WGS84,
+        sizes,
+        frame,
+        twins,
+      );
+      ordered.later(async (checks) => {
+        const result = await agreements();
+        const label = `${medium.name}, ${setting}, ${frame.name}`;
+        const record = (what: string, held: TwinAgreement): void => {
+          checks.check(
+            `R08.T7 ${label}: the ${what}, summed over ${frame.suns.length} sources, agrees with the CPU twin to 10⁻³`,
+            held.worst <= 1 && held.above > 0,
+            `worst ${held.at}; ${held.above} channels above 10⁻⁶ of the largest, ${held.over} over the bound`,
+          );
+        };
+        record("sky view", result.skyView);
+        record("aerial perspective", result.aerial);
+        record("ray march", result.rayMarch);
+        checks.check(
+          `R08.T7 ${label}: the composite is finite and within rgba16float's range`,
+          result.compositeWithinRange,
+          result.compositeWithinRange ? "every channel" : "a channel is not",
+        );
+      });
+    }
+    const [first] = BINARY_FRAMES;
+    const classes = await compositeMeterClasses(
+      engine,
+      atmosphere,
+      equatorCamera(2, FRAME_SIZE),
+      first?.suns ?? [],
+    );
+    ordered.now((checks) => {
+      checks.check(
+        `R08.T7 ${medium.name}, ${setting}: the composite keeps each pixel's METER_CLASS in its output's alpha, over the sky, the aerial volume and the ray march`,
+        classes.kept === classes.pixels && classes.classes.length === 3,
+        `${classes.kept} of ${classes.pixels} pixels kept; the scene's classes ${classes.classes.join(", ")}`,
+      );
+    });
+  } finally {
+    atmosphere.dispose();
+  }
+}
+
+/** What {@link compositeMeterClasses} found: the pixels whose alpha the composite kept. */
+interface MeterClassesKept {
+  readonly pixels: number;
+  readonly kept: number;
+  /** The distinct alphas the scene held, ascending. */
+  readonly classes: readonly number[];
+}
+
+/**
+ * Composites a frame over a scene of three meter classes in its alpha: a lit body 5 km ahead (the
+ * aerial volume's path), an unlit one 60 km ahead (the ray march's) and the sky (nothing drawn, the
+ * scene's clear), and compares the output's alpha with the scene's, pixel for pixel.
+ */
+async function compositeMeterClasses(
+  engine: RenderEngine,
+  atmosphere: HillaireAtmosphere,
+  camera: AtmosphereCamera,
+  suns: ReadonlyArray<SunState>,
+): Promise<MeterClassesKept> {
+  const size = camera.viewport;
+  const aspect = size.widthPx / size.heightPx;
+  const target = (name: string): RenderTarget =>
+    engine.createRenderTarget({
+      name,
+      size,
+      format: "rgba16float",
+      mips: 1,
+      depth: true,
+      category: "render-targets",
+    });
+  const scene = target("atmosphere meter-class scene");
+  const output = target("atmosphere meter-class output");
+  try {
+    const material = engine.createMaterial(flatSpec("atmosphere meter-class body"));
+    // Below the horizon, a wedge on the left and one on the right, each its own distance.
+    const wedge = (name: string, side: -1 | 1, distanceM: number) =>
+      triangleMesh(
+        engine,
+        name,
+        [
+          side * 0.05 * distanceM,
+          -0.05 * distanceM,
+          side * 10 * distanceM,
+          -10 * distanceM,
+          side * 0.05 * distanceM,
+          -10 * distanceM,
+        ],
+        -distanceM,
+      );
+    scene.render(
+      frameOf(
+        "atmosphere meter-class scene",
+        [
+          drawOf(wedge("atmosphere lit body", -1, 5_000), material, [
+            SURFACE_GREY,
+            SURFACE_GREY,
+            SURFACE_GREY,
+            METER_CLASS.litBody,
+          ]),
+          drawOf(wedge("atmosphere unlit body", 1, 60_000), material, [
+            SURFACE_GREY,
+            SURFACE_GREY,
+            SURFACE_GREY,
+            METER_CLASS.unlitBody,
+          ]),
+        ],
+        aspect,
+      ),
+    );
+    const composite = atmosphere.drawFrame(camera, suns, {
+      colour: scene.colour,
+      depth: requireDepth(scene.depth),
+      nearM: NEAR_M,
+      exposureScale: SMOKE_EXPOSURE_SCALE,
+    });
+    output.render(frameOf("atmosphere meter-class composite", [composite], aspect));
+    const before = halfTexels(await engine.readTexture(scene.colour));
+    const after = halfTexels(await engine.readTexture(output.colour));
+    let kept = 0;
+    const classes = new Set<number>();
+    for (let i = 3; i < before.length; i += 4) {
+      classes.add(before[i] ?? Number.NaN);
+      kept += before[i] === after[i] ? 1 : 0;
+    }
+    return { pixels: before.length / 4, kept, classes: [...classes].toSorted((a, b) => a - b) };
+  } finally {
+    scene.dispose();
+    output.dispose();
   }
 }
 
@@ -2044,16 +2422,16 @@ async function drawArms(
       colour: scene.colour,
       depth: requireDepth(scene.depth),
       nearM: NEAR_M,
-      exposureScale: exposureScale(15),
+      exposureScale: SMOKE_EXPOSURE_SCALE,
     };
-    const composite = atmosphere.drawFrame(view.camera, view.sun, atmosphereScene);
+    const composite = atmosphere.drawFrame(view.camera, [view.sun], atmosphereScene);
     output.render(frameOf("atmosphere composite", [composite], aspect));
     const compositeTexels = halfTexels(await engine.readTexture(output.colour));
     const stored = await readFrameOutputs(engine, atmosphere);
     const kernel = kernelArm
       ? await readKernelArm(
           engine,
-          atmosphere.drawKernelArm(view.camera, view.sun, atmosphereScene),
+          atmosphere.drawKernelArm(view.camera, [view.sun], atmosphereScene),
         )
       : null;
     return { stored, kernel, composite: compositeTexels };
@@ -2192,7 +2570,7 @@ async function checkViewArms(
   twins: TwinPool,
 ): Promise<void> {
   // The view's twins begin on the twin workers, and the frame draws while they run.
-  const twin = twinView(view.camera, view.sun, body.figure, NEAR_M);
+  const twin = frameViewOf(atmosphere, view.camera, [view.sun], body.figure);
   const surfaceDepth = view.surfaceM === null ? 0 : NEAR_M / view.surfaceM;
   const skyViewOfView = twins.skyView(planet, twin, sizes.skyView, sizes.skyViewSamples);
   const aerialOfView = twins.aerialPerspective(
@@ -2539,7 +2917,7 @@ export async function captureAtmosphere(engine: RenderEngine): Promise<CapturedI
     for (const shot of shots) {
       // Each capture reads the GPU back before the next frame draws.
       // oxlint-disable-next-line no-await-in-loop
-      const texels = await compositeFrame(engine, atmosphere, shot.camera, shot.sun, null);
+      const texels = await compositeFrame(engine, atmosphere, shot.camera, [shot.sun], null);
       images.push({
         name: shot.name,
         width: CAPTURE_SIZE.widthPx,
@@ -2550,7 +2928,118 @@ export async function captureAtmosphere(engine: RenderEngine): Promise<CapturedI
   } finally {
     atmosphere.dispose();
   }
-  return [...images, ...(await captureSunsets(engine))];
+  return [...images, ...(await captureSunsets(engine)), ...(await captureBinarySky(engine))];
+}
+
+/** A source at an elevation and an azimuth to the right of a {@link horizonCamera}'s view. */
+function sourceAhead(
+  elevationDeg: number,
+  azimuthDeg: number,
+  illuminanceLx: readonly [number, number, number],
+  curveSlot: number,
+): SunState {
+  const e = elevationDeg * DEGREE_RAD;
+  const a = azimuthDeg * DEGREE_RAD;
+  // The camera's right is −y (`horizonCamera`).
+  return {
+    directionBodyFixed: {
+      x: Math.cos(e) * Math.cos(a),
+      y: -Math.cos(e) * Math.sin(a),
+      z: Math.sin(e),
+    },
+    illuminanceLx,
+    angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
+    curveSlot,
+  };
+}
+
+/**
+ * R08.T7's by-hand captures of a binary sky on an Earth fixture (the four-absorber Earth-like
+ * medium, `fourAbsorberMedium`, under the K5 and M3 pair's own curves): from 2 m across 90°, both
+ * twilights (the primary 5° and the companion 3° below the horizon, 55° apart), the companion's
+ * day after the primary's dusk, and both up; for a person to look for two glows, each its own
+ * star's colour, and their timings to be taken with R08.T11's.
+ */
+async function captureBinarySky(engine: RenderEngine): Promise<CapturedImage[]> {
+  const binary = fourAbsorberMedium(BINARY_LIGHTS_K);
+  const atmosphere = new HillaireAtmosphere(
+    engine,
+    binary.medium,
+    TABLE_SIZES.high,
+    WGS84,
+    binary.curves,
+  );
+  const primary = (e: number): SunState => sourceAhead(e, -25, [9.1e4, 8.0e4, 5.9e4], 0);
+  const companion = (e: number): SunState => sourceAhead(e, 30, [2.9e3, 1.8e3, 0.8e3], 1);
+  const shots = [
+    { name: "r08-binary-both-twilights", suns: [primary(-5), companion(-3)] },
+    { name: "r08-binary-companion-day", suns: [primary(-9), companion(4)] },
+    { name: "r08-binary-both-up", suns: [primary(12), companion(4)] },
+  ];
+  const images: CapturedImage[] = [...(await captureMoonlitNight(engine))];
+  try {
+    for (const shot of shots) {
+      // Each capture reads the GPU back before the next frame draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const texels = await compositeFrame(
+        engine,
+        atmosphere,
+        horizonCamera(2, WGS84.polarRadiusM, 5),
+        shot.suns,
+        null,
+      );
+      images.push({
+        name: shot.name,
+        width: CAPTURE_SIZE.widthPx,
+        height: CAPTURE_SIZE.heightPx,
+        rgba: base64Of(toRgba8(texels)),
+      });
+    }
+  } finally {
+    atmosphere.dispose();
+  }
+  return images;
+}
+
+/**
+ * R08.T7's moonlit night on the rebuilt Earth from 2 m: the Sun beyond the twilight limit, which
+ * the sky's sources skip (`sources.ts`), and a full Moon 45° up ahead as planetshine, 0.32 lx,
+ * drawing no disc; across 90°, auto-exposed as every capture is, for a person to compare the sky
+ * with the moonlit ground. The stars, which it should wash out, are R06's layer, not drawn here
+ * (R08.T10.b's view draws both).
+ */
+async function captureMoonlitNight(engine: RenderEngine): Promise<CapturedImage[]> {
+  const atmosphere = new HillaireAtmosphere(
+    engine,
+    EARTH_REFERENCE,
+    TABLE_SIZES.high,
+    WGS84,
+    EARTH_REFERENCE_CURVES,
+  );
+  try {
+    const moon: SunState = {
+      ...sourceAhead(45, 0, [0.3, 0.32, 0.33], 0),
+      angularRadiusRad: 0.004_5,
+      drawsDisc: false,
+    };
+    const texels = await compositeFrame(
+      engine,
+      atmosphere,
+      horizonCamera(2, WGS84.polarRadiusM, 5),
+      [moon],
+      null,
+    );
+    return [
+      {
+        name: "r08-moonlit-night",
+        width: CAPTURE_SIZE.widthPx,
+        height: CAPTURE_SIZE.heightPx,
+        rgba: base64Of(toRgba8(texels)),
+      },
+    ];
+  } finally {
+    atmosphere.dispose();
+  }
 }
 
 /** The sunset captures' narrow field, rad: 12° high, so that the sun's 0.53° disc spans 8 rows. */
@@ -2601,7 +3090,7 @@ async function captureSunsets(engine: RenderEngine): Promise<CapturedImage[]> {
       const sun = { ...sunAhead(0.5), angularRadiusRad: SUN_ANGULAR_RADIUS_RAD };
       // Each capture reads the GPU back before the next frame draws.
       // oxlint-disable-next-line no-await-in-loop
-      const texels = await compositeFrame(engine, atmosphere, camera, sun, null);
+      const texels = await compositeFrame(engine, atmosphere, camera, [sun], null);
       images.push({
         name: shot.name,
         width: CAPTURE_SIZE.widthPx,

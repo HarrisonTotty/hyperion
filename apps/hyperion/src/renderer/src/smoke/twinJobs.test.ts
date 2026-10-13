@@ -116,6 +116,7 @@ describe("the twins as jobs for the twin workers", () => {
       medium: read,
       bottomRadiusM: RADIUS_M,
       transmittance,
+      curveSlot: 0,
     };
     const cloned = structuredClone(job);
     expect(cloned).toStrictEqual(job);

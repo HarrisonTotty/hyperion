@@ -342,8 +342,13 @@ describe("the kernels' WGSL", () => {
 
   it("takes each step's in-scattering through common.wgsl's stepFactor", () => {
     expect(commonWgsl).toMatch(/fn stepFactor\(x : vec3f\) -> vec3f/);
+    // Since R08.T7 every per-frame kernel steps through source.wgsl's `viewMarchStep`, each light
+    // slot's share through its own throughput.
+    expect(sourceWgsl).toMatch(
+      /\(\*march\)\.throughput\[p\] \* shares\[p\] \* dtM \* stepFactor\(stepDepth\)/,
+    );
     for (const wgsl of [skyViewWgsl, aerialPerspectiveWgsl, rayMarchWgsl]) {
-      expect(wgsl).toMatch(/throughput \* source \* dt \* stepFactor\(stepDepth\)/);
+      expect(wgsl).toMatch(/viewMarchStep\(/);
       expect(wgsl).not.toMatch(/source - source \* stepTransmittance/);
     }
   });

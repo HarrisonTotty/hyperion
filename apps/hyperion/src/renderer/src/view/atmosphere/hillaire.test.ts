@@ -13,12 +13,14 @@ import {
   R05_EARTH_REFERENCE,
   referenceSunIlluminanceLx,
 } from "./earth";
+import { MAX_SKY_LIGHT_SLOTS, MAX_SKY_SOURCES } from "./settings";
 import {
   AERIAL_PERSPECTIVE_KERNEL,
   atmosphereInputs,
   type AtmosphereCamera,
   type AtmosphereScene,
   COMPOSITE_MATERIAL,
+  frameSourcesOf,
   geodeticOf,
   HillaireAtmosphere,
   RAY_MARCH_KERNEL,
@@ -26,6 +28,7 @@ import {
   skyAzimuthOrigin,
   skyViewHeight,
   type SpheroidFigure,
+  skyAxisOf,
   type SunState,
   TABLE_SIZES,
   tableRadiusM,
@@ -190,11 +193,11 @@ describe("HillaireAtmosphere", () => {
   it("rebuilds the per-planet tables when the medium changes and not when the sun moves", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
-    atmosphere.drawFrame(CAMERA, DUSK, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+    atmosphere.drawFrame(CAMERA, [DUSK], SCENE);
     expect(atmosphere.tables.builds).toBe(1);
     atmosphere.setMedium(HILLAIRE_REFERENCE);
-    atmosphere.drawFrame(CAMERA, DUSK, SCENE);
+    atmosphere.drawFrame(CAMERA, [DUSK], SCENE);
     expect(atmosphere.tables.builds).toBe(2);
   });
 
@@ -202,7 +205,7 @@ describe("HillaireAtmosphere", () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
     engine.dispatched.length = 0;
-    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect(engine.dispatched.map((d) => d.kernel)).toEqual([
       "atmosphere sky view",
       "atmosphere aerial perspective",
@@ -219,13 +222,13 @@ describe("HillaireAtmosphere", () => {
       ...CAMERA,
       viewport: { widthPx, heightPx },
     });
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const textures = engine.counts.textures;
-    atmosphere.drawFrame(CAMERA, DUSK, SCENE);
-    atmosphere.drawFrame(at(32, 16), DUSK, SCENE);
+    atmosphere.drawFrame(CAMERA, [DUSK], SCENE);
+    atmosphere.drawFrame(at(32, 16), [DUSK], SCENE);
     expect(engine.counts.textures).toBe(textures);
-    atmosphere.drawFrame(at(128, 64), DUSK, SCENE);
-    atmosphere.drawFrame(at(64, 32), DUSK, SCENE);
+    atmosphere.drawFrame(at(128, 64), [DUSK], SCENE);
+    atmosphere.drawFrame(at(64, 32), [DUSK], SCENE);
     expect(engine.counts.textures).toBe(textures + 1);
     expect(engine.textureSpecs.at(-1)?.size).toEqual([128, 64]);
   });
@@ -234,7 +237,7 @@ describe("HillaireAtmosphere", () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.low, WGS84);
     expect(atmosphere.frameTables.rayMarch).toBeNull();
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const { skyView, aerial, rayMarch } = atmosphere.frameTables;
     expect(skyView.name).toBe("atmosphere sky view");
     // On low too, where no other pass samples the volume.
@@ -246,7 +249,7 @@ describe("HillaireAtmosphere", () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
     engine.dispatched.length = 0;
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const tables = atmosphere.tables;
     expect(engine.dispatched).toHaveLength(3);
     for (const { bindings } of engine.dispatched) {
@@ -264,7 +267,7 @@ describe("HillaireAtmosphere", () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
     engine.dispatched.length = 0;
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const edges = (kernel: string): unknown =>
       engine.dispatched.find((d) => d.kernel === kernel)?.bindings.uniforms["layerEdges"];
     expect(edges("atmosphere sky view")).toBe(atmosphere.tables.layerEdges);
@@ -278,7 +281,7 @@ describe("HillaireAtmosphere", () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
     engine.dispatched.length = 0;
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     // √(MN) at the equator, 100 km of air, three terms.
     for (const { bindings } of engine.dispatched) {
       expect([...(bindings.uniforms["medium"] ?? [])].slice(0, 3)).toEqual(
@@ -297,14 +300,14 @@ describe("HillaireAtmosphere", () => {
     const tooMany = { ...R05_EARTH_REFERENCE, terms: Array.from({ length: 9 }, () => first) };
     expect(() => atmosphere.setMedium(tooMany)).toThrow(/at most 8/);
     engine.dispatched.length = 0;
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect(engine.dispatched[0]?.bindings.uniforms["medium"]?.[2]).toBe(3);
   });
 
   it("allocates the low setting's sizes under atmosphere-view and keeps its aerial perspective to the terrain", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.low, WGS84);
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const views = engine.textureSpecs.filter((s) => s.category === "atmosphere-view");
     const sizeOf = (name: string): unknown => views.find((s) => s.name === name)?.size;
     expect(sizeOf("atmosphere sky view")).toEqual([128, 64]);
@@ -312,7 +315,7 @@ describe("HillaireAtmosphere", () => {
     expect(sizeOf("atmosphere ray march")).toEqual([32, 16]);
     expect(atmosphere.aerialPerspective(CAMERA)).toBeNull();
     const high = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    high.drawFrame(CAMERA, NOON, SCENE);
+    high.drawFrame(CAMERA, [NOON], SCENE);
     const volume: TextureHandle | undefined = high.aerialPerspective(CAMERA)?.volume;
     expect(volume?.name).toBe("atmosphere aerial perspective");
   });
@@ -322,28 +325,101 @@ describe("HillaireAtmosphere", () => {
     expect(SETTINGS.low.atmosphere).toBe(TABLE_SIZES.low);
   });
 
-  it("scales the sky by the sun's own illuminance in each channel, and its disc by it over its solid angle (R08.T6.d)", async () => {
+  it("weights each source by its illuminance times the pre-exposure, its disc by it over its solid angle (R08.T7)", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const [r, g, b] = NOON.illuminanceLx;
-    expect([...(draw.uniforms["skyScale"] ?? [])]).toEqual(
-      [r, g, b, SCENE.exposureScale].map(Math.fround),
+    const k = SCENE.exposureScale;
+    // One source, no absorber: path 0; the composite's factor 1, the tables pre-exposed.
+    expect([...(draw.uniforms["sky"] ?? [])]).toEqual([1, 1, 1, 1]);
+    expect([...(draw.uniforms["sourceWeight0"] ?? [])]).toEqual(
+      [r * k, g * k, b * k, 0].map(Math.fround),
+    );
+    const s = NOON.directionBodyFixed;
+    expect([...(draw.uniforms["sourceDirection0"] ?? [])]).toEqual(
+      [s.x, s.y, s.z, Math.sin(NOON.angularRadiusRad)].map(Math.fround),
     );
     const solidAngle = 2 * Math.PI * (1 - Math.cos(NOON.angularRadiusRad));
-    const disc = [...(draw.uniforms["sunDisc"] ?? [])];
+    const disc = [...(draw.uniforms["sourceDisc0"] ?? [])];
     for (const [c, e] of NOON.illuminanceLx.entries()) {
-      expect((disc[c] ?? Number.NaN) / (e / solidAngle) - 1).toBeCloseTo(0, 6);
+      expect((disc[c] ?? Number.NaN) / ((e * k) / solidAngle) - 1).toBeCloseTo(0, 6);
     }
-    // Twice the illuminance, twice the sky: the tables hold light per unit of it.
+    // The sources past the drawn ones weigh nothing.
+    expect([...(draw.uniforms["sourceWeight1"] ?? [])]).toEqual([0, 0, 0, 0]);
+    // Twice the illuminance, twice the weight.
     const brighter = atmosphere.drawFrame(
       CAMERA,
-      { ...NOON, illuminanceLx: [2 * r, 2 * g, 2 * b] },
+      [{ ...NOON, illuminanceLx: [2 * r, 2 * g, 2 * b] }],
       SCENE,
     );
-    expect([...(brighter.uniforms["skyScale"] ?? [])].slice(0, 3)).toEqual(
-      [2 * r, 2 * g, 2 * b].map(Math.fround),
+    expect([...(brighter.uniforms["sourceWeight0"] ?? [])].slice(0, 3)).toEqual(
+      [2 * r * k, 2 * g * k, 2 * b * k].map(Math.fround),
     );
+  });
+
+  it("draws no disc for a source that asks for none, keeping its disc's extent (R08.T7)", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    const draw = atmosphere.drawFrame(CAMERA, [{ ...NOON, drawsDisc: false }, DUSK], SCENE);
+    expect([...(draw.uniforms["sourceDisc0"] ?? [])]).toEqual([0, 0, 0, 0]);
+    // Its disc's extent stays, for the transmittance of what R06 draws there.
+    expect(draw.uniforms["sourceDirection0"]?.[3]).toBe(
+      Math.fround(Math.sin(NOON.angularRadiusRad)),
+    );
+    expect(draw.uniforms["sky"]?.[0]).toBe(2);
+  });
+
+  it("refuses more sources than the kernels hold (R08.T7)", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    const seven = Array.from({ length: MAX_SKY_SOURCES + 1 }, () => NOON);
+    expect(() => atmosphere.drawFrame(CAMERA, seven, SCENE)).toThrow(/hold 6 sources/u);
+  });
+
+  it("refuses a frame scale that is not finite and above 0 (R08.T7)", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    expect(() => atmosphere.drawFrame(CAMERA, [NOON], { ...SCENE, exposureScale: 0 })).toThrow(
+      /finite and above 0/u,
+    );
+  });
+
+  it.each([4, 1.5, -1])(
+    "refuses a source on light slot %d, outside the kernels' four (R08.T7)",
+    async (curveSlot) => {
+      const engine = await countingRenderEngine();
+      const atmosphere = new HillaireAtmosphere(
+        engine,
+        R05_EARTH_REFERENCE,
+        TABLE_SIZES.high,
+        WGS84,
+      );
+      expect(() => atmosphere.drawFrame(CAMERA, [{ ...NOON, curveSlot }], SCENE)).toThrow(
+        /light slot must be an integer in \[0, 4\)/u,
+      );
+    },
+  );
+
+  it("refuses, under an absorber, a source on a light slot its curves do not hold (R08.T7)", () => {
+    const { curves } = fourAbsorberMedium();
+    expect(() => frameSourcesOf([{ ...NOON, curveSlot: 1 }], 1, true, curves.length)).toThrow(
+      /curves for 1 lights/u,
+    );
+    expect(frameSourcesOf([{ ...NOON, curveSlot: 1 }], 1, false, 1)[0]?.weight[3]).toBe(0);
+  });
+
+  it("puts the sky view's axis on the first source's azimuth (R08.T7)", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    const tilted: SunState = {
+      ...NOON,
+      directionBodyFixed: { x: Math.SQRT1_2, y: 0, z: Math.SQRT1_2 },
+    };
+    const draw = atmosphere.drawFrame(CAMERA, [tilted, DUSK], SCENE);
+    // The camera's normal is +x at the equator: the axis is the first source's horizontal, +z.
+    expect([...(draw.uniforms["skyAxis"] ?? [])]).toEqual([0, 0, 1, 0]);
+    expect(skyAxisOf({ x: 1, y: 0, z: 0 }, [])).toEqual({ x: 0, y: 1, z: 0 });
   });
 
   it("draws the rebuilt Earth with its ozone's curves, and refuses it without them", async () => {
@@ -359,7 +435,7 @@ describe("HillaireAtmosphere", () => {
       EARTH_REFERENCE_CURVES,
     );
     engine.dispatched.length = 0;
-    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect(engine.dispatched).toHaveLength(3);
     // One absorber, the ozone, whose columns the composite's transmittance to space reads.
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 1, 0, 0]);
@@ -371,7 +447,7 @@ describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.low, WGS84);
     engine.dispatched.length = 0;
-    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const { aerial } = atmosphere.frameTables;
     expect(atmosphere.aerialPerspective(CAMERA)).toBeNull();
     // The frame's kernels write the volume and read none of it; the composite reads it over the
@@ -393,7 +469,7 @@ describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T
       WGS84,
       EARTH_REFERENCE_CURVES,
     );
-    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const published = atmosphere.aerialPerspective(CAMERA);
     expect(published?.volume).toBe(draw.textures["aerial"]);
     expect(published?.transmittance).toBe(draw.textures["transmittance"]);
@@ -406,7 +482,9 @@ describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T
     expect(draw.uniforms["shell"]?.[1]).toBe(1);
     expect(published?.bottomRadiusM).toBe(tableRadiusM(WGS84));
     expect(published?.topHeightM).toBe(EARTH_REFERENCE.topHeightM);
-    expect(published?.scaleLx).toEqual(NOON.illuminanceLx);
+    // The tables hold pre-exposed luminance since R08.T7: the factor back is 1 ÷ the pre-exposure.
+    const unit = 1 / SCENE.exposureScale;
+    expect(published?.scaleCdPerM2).toEqual([unit, unit, unit]);
     expect(published?.lineSlots).toBe(0);
   });
 
@@ -414,7 +492,7 @@ describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T
     const engine = await countingRenderEngine();
     const { medium, curves } = lineAbsorberMedium();
     const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
-    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const published = atmosphere.aerialPerspective(CAMERA);
     expect(published?.absorberPressureColumns).toBe(draw.textures["absorberPressureColumns"]);
     expect(published?.lastAbsorberPressureColumn).toBe(draw.textures["lastAbsorberPressureColumn"]);
@@ -432,26 +510,22 @@ describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T
         TABLE_SIZES[setting],
         WGS84,
       );
-      atmosphere.drawFrame(CAMERA, NOON, SCENE);
-      const draw = atmosphere.drawFrame(CAMERA, DUSK, SCENE);
+      atmosphere.drawFrame(CAMERA, [NOON], SCENE);
+      const draw = atmosphere.drawFrame(CAMERA, [DUSK], SCENE);
       const sky = atmosphere.skyView(CAMERA);
       expect(sky.texture).toBe(draw.textures["skyView"]);
       expect(sky.texture).toBe(atmosphere.frameTables.skyView);
       expect(sky.size).toEqual(TABLE_SIZES[setting].skyView);
-      // This frame's sun: its illuminance, and azimuth 0 towards it (dusk, along +y).
-      expect(sky.scaleLx).toEqual(DUSK.illuminanceLx);
+      // The frame's scale, 1 ÷ its pre-exposure (R08.T7), and azimuth 0 towards this frame's first
+      // source (dusk, along +y).
+      const unit = 1 / SCENE.exposureScale;
+      expect(sky.scaleCdPerM2).toEqual([unit, unit, unit]);
       expect(sky.azimuthOrigin.y).toBeCloseTo(1, 12);
       const inputs = atmosphereInputs(CAMERA, WGS84);
       expect(sky.zenith).toEqual(inputs.normal);
       expect(sky.bottomRadiusM).toBeCloseTo(GAUSSIAN_RADIUS_M[0], 3);
       expect(sky.heightM).toBe(skyViewHeight(inputs.heightM, R05_EARTH_REFERENCE.topHeightM));
-      const exact = viewExactOf(
-        CAMERA.positionM,
-        WGS84,
-        R05_EARTH_REFERENCE.topHeightM,
-        inputs,
-        DUSK.angularRadiusRad,
-      );
+      const exact = viewExactOf(CAMERA.positionM, WGS84, R05_EARTH_REFERENCE.topHeightM, inputs);
       expect(sky.horizonAngleRad).toBe(exact.horizonAngleRad);
       expect(draw.uniforms["exact"]?.[2]).toBe(Math.fround(sky.horizonAngleRad));
     },
@@ -460,7 +534,7 @@ describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T
   it("takes another object for the view drawFrame drew", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const copy: AtmosphereCamera = {
       ...CAMERA,
       positionM: { ...CAMERA.positionM },
@@ -486,7 +560,7 @@ describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T
   ] as const)("refuses both for a view drawFrame did not draw: %s", async (_name, other) => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect(() => atmosphere.skyView(other)).toThrow(/another view/);
     expect(() => atmosphere.aerialPerspective(other)).toThrow(/another view/);
   });
@@ -494,23 +568,23 @@ describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T
   it("refuses both after a device restore until the next frame", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     engine.restore();
     expect(() => atmosphere.skyView(CAMERA)).toThrow(/no atmosphere frame/);
     expect(() => atmosphere.aerialPerspective(CAMERA)).toThrow(/no atmosphere frame/);
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect(atmosphere.aerialPerspective(CAMERA)?.volume).toBe(atmosphere.frameTables.aerial);
   });
 
   it("refuses both after a new medium until the next frame, whose tables it may have remade", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const { medium, curves } = lineAbsorberMedium();
     atmosphere.setMedium(medium, curves);
     expect(() => atmosphere.skyView(CAMERA)).toThrow(/no atmosphere frame/);
     expect(() => atmosphere.aerialPerspective(CAMERA)).toThrow(/no atmosphere frame/);
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect(atmosphere.aerialPerspective(CAMERA)?.lineSlots).toBe(2);
   });
 
@@ -526,9 +600,10 @@ describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T
       y: 0,
       z: 0,
     });
-    expect(viewWgsl).toMatch(
-      /select\(vec3f\(1\.0, 0\.0, 0\.0\), vec3f\(0\.0, 1\.0, 0\.0\), abs\(z\.x\) > 0\.9\)/u,
-    );
+    // Since R08.T7 the kernels take the axis formed here, `AtmosphereView.skyAxis`, at the first
+    // source (`skyAxisOf`), in place of forming it in f32.
+    expect(viewWgsl).toMatch(/let x = v\.skyAxis\.xyz;/u);
+    expect(skyAxisOf(zenith, [])).toEqual(skyAzimuthOrigin(zenith, zenith));
   });
 
   it("reads the volume in the composite through the one read other passes take", () => {
@@ -570,7 +645,7 @@ describe("the atmosphere's WGSL", () => {
     expect(source).toMatch(/var<storage, read> terms : array<Term, MAX_TERMS>;/);
     expect(source).toMatch(/var densityTables : texture_2d_array<f32>;/);
     expect(source).toMatch(/var phaseTables : texture_2d_array<f32>;/);
-    expect(source).toMatch(/let angle = scatteringAngle\(dir, /);
+    expect(source).toMatch(/let angles = sourceAngles\(dir, sources, count\);/);
   });
 
   it("keeps the composite's code clear of the medium, which it does not declare", () => {
@@ -592,8 +667,13 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
       const code = source.replaceAll(/\/\/[^\n]*/gu, "");
       // The one bilinear read of the stored optical depth is transmittanceThroughTables's own, which
       // adds the curves and exponentiates; every read site calls it with the module's two tables.
+      // The forward lobes alone read the stored depth itself, as their x (R08.T7), in these two
+      // forms and no other.
+      const lobeReads = code
+        .replaceAll("lobeOrdersOf(local, angles[k], tableAtUnit(transmittance, unit).rgb)", "")
+        .replaceAll("exp(min(tableAtUnit(transmittance, unit).rgb * share,", "");
       expect([
-        /tableAtUnit\(transmittance,/u.test(code),
+        /tableAtUnit\(transmittance,/u.test(lobeReads),
         code.match(/tableAtUnit\(depthTable, unit\)/gu)?.length,
         /return exp\(-\(stored\.rgb \+ absorberDepth\(/u.test(code),
         /transmittanceThroughTables\(\s*\w+,\s*absorberColumns,\s*absorberPressureColumns,\s*lastAbsorberPressureColumn,\s*absorberCurves,/u.test(
@@ -651,7 +731,7 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     const { medium, curves } = absorbing;
     const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
     engine.dispatched.length = 0;
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const { absorberColumns, absorberCurves, absorberPressureColumns, lastAbsorberPressureColumn } =
       atmosphere.tables;
     expect(engine.dispatched.map(({ bindings }) => bindings.sampled)).toEqual(
@@ -671,7 +751,7 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     const { medium, curves } = absorbing;
     const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
     engine.dispatched.length = 0;
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect(
       engine.dispatched.map(({ bindings }) => [...(bindings.uniforms["medium"] ?? [])].slice(8)),
     ).toEqual([
@@ -685,7 +765,7 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     const engine = await countingRenderEngine();
     const { medium, curves } = absorbing;
     const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
-    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const { absorberColumns, absorberCurves } = atmosphere.tables;
     expect(draw.textures).toMatchObject({ absorberColumns, absorberCurves });
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 4, 0, 0]);
@@ -695,7 +775,7 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     const engine = await countingRenderEngine();
     const { medium, curves } = lineAbsorberMedium();
     const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
-    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const { absorberPressureColumns, lastAbsorberPressureColumn } = atmosphere.tables;
     expect(draw.textures).toMatchObject({ absorberPressureColumns, lastAbsorberPressureColumn });
   });
@@ -704,7 +784,7 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     const engine = await countingRenderEngine();
     const { medium, curves } = lineAbsorberMedium();
     const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
-    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 2, 2, 0]);
   });
 
@@ -755,23 +835,31 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
     expect(forbiddenIn(source)).toEqual([]);
   });
 
-  it("gives the view's members in one order to the kernels and the composite, `exact` last", () => {
+  it("gives the view's members in one order to the kernels and the composite, the sources last (R08.T7)", () => {
     const view = vec4Members(viewWgsl, "AtmosphereView");
     expect(view.at(-1)).toBe("exact");
-    expect(COMPOSITE_MATERIAL.uniforms.map((u) => u.name)).toEqual([...view, "shell"]);
+    expect(vec4Members(viewWgsl, "SkySource")).toEqual(["direction", "weight", "disc"]);
+    expect(viewWgsl).toMatch(/sources : array<SkySource, MAX_SKY_SOURCES>,\s*\}/u);
+    const sources = Array.from({ length: MAX_SKY_SOURCES }, (_, i) =>
+      ["sourceDirection", "sourceWeight", "sourceDisc"].map((name) => name + String(i)),
+    ).flat();
+    expect(COMPOSITE_MATERIAL.uniforms.map((u) => u.name)).toEqual([...view, ...sources, "shell"]);
     // The composite's Draw: the offset (a vec3f), then the view's members in order, then shell.
-    expect(vec4Members(compositeWgsl, "Draw")).toEqual([...view, "shell"]);
+    expect(vec4Members(compositeWgsl, "Draw")).toEqual([...view, ...sources, "shell"]);
+    expect(viewWgsl).toContain(`const MAX_SKY_SOURCES : u32 = ${String(MAX_SKY_SOURCES)}u;`);
+    expect(viewWgsl).toContain(
+      `const MAX_SKY_LIGHT_SLOTS : u32 = ${String(MAX_SKY_LIGHT_SLOTS)}u;`,
+    );
   });
 
   it("forms the ray march's quadric constants in f64 from the camera's position", () => {
     const sphere = { equatorialRadiusM: 6_371_000, polarRadiusM: 6_371_000 };
     const position = { x: 0, y: 0, z: 6_371_002 };
     const inputs = atmosphereInputs({ positionM: position }, sphere);
-    const exact = viewExactOf(position, sphere, 100_000, inputs, 0.004_65);
+    const exact = viewExactOf(position, sphere, 100_000, inputs);
     // q_g = h (2a + h) and q_t = (h − H)(2a + h + H) on a sphere, 2 m up.
     expect(exact.groundQuadricM2 / (2 * (2 * 6_371_000 + 2)) - 1).toBeCloseTo(0, 9);
     expect(exact.topQuadricM2 / ((2 - 100_000) * (2 * 6_371_000 + 100_002)) - 1).toBeCloseTo(0, 12);
-    expect(exact.sinSunRadius).toBe(Math.sin(0.004_65));
     // β = acos(√(h(2R + h)) ÷ (R + h)), the angle from the nadir to the horizon, from 2 m.
     const rho = Math.sqrt(2 * (2 * 6_371_000 + 2));
     expect(exact.horizonAngleRad).toBeCloseTo(Math.acos(rho / 6_371_002), 12);
@@ -779,7 +867,7 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
 
   it("forms the spheroid's constants with its own z scale, the top shell's with (a + H) ÷ (c + H)", () => {
     const at = pointAt(45, 3);
-    const exact = viewExactOf(at, WGS84, 100_000, atmosphereInputs({ positionM: at }, WGS84), 0);
+    const exact = viewExactOf(at, WGS84, 100_000, atmosphereInputs({ positionM: at }, WGS84));
     const a = WGS84.equatorialRadiusM;
     const c = WGS84.polarRadiusM;
     const ground = at.x ** 2 + at.y ** 2 + ((at.z * a) / c) ** 2 - a * a;
@@ -795,20 +883,19 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
   it("fills the view's exact member and the composite's atmosphere height each frame", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const inputs = atmosphereInputs(CAMERA, WGS84);
-    const exact = viewExactOf(CAMERA.positionM, WGS84, 100_000, inputs, NOON.angularRadiusRad);
-    const expected = [
-      exact.groundQuadricM2,
-      exact.topQuadricM2,
-      exact.horizonAngleRad,
-      exact.sinSunRadius,
-    ].map(Math.fround);
+    const exact = viewExactOf(CAMERA.positionM, WGS84, 100_000, inputs);
+    const expected = [exact.groundQuadricM2, exact.topQuadricM2, exact.horizonAngleRad, 0].map(
+      Math.fround,
+    );
     expect([...(draw.uniforms["exact"] ?? [])]).toEqual(expected);
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 0, 0, 0]);
+    // The kernels' view block: the members in order, `exact` the eleventh, the sources after it.
     const block = engine.dispatched.find((d) => d.kernel === "atmosphere sky view")?.bindings
       .uniforms["view"];
-    expect(Array.from(block ?? []).slice(-4)).toEqual(expected);
+    expect(Array.from(block ?? []).slice(40, 44)).toEqual(expected);
+    expect(block).toHaveLength((11 + 3 * 6) * 4);
   });
 
   it("keeps skyViewHeight to view.wgsl's clamp", () => {
@@ -834,10 +921,10 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
   it("dispatches the three per-frame kernels again into rgba32float, over the same tables", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const shipped = engine.dispatched.slice(-3);
     engine.dispatched.length = 0;
-    const arm = atmosphere.drawKernelArm(CAMERA, NOON, SCENE);
+    const arm = atmosphere.drawKernelArm(CAMERA, [NOON], SCENE);
     expect(engine.dispatched.map((d) => d.kernel)).toEqual([
       `atmosphere sky view (${KERNEL_ARM_FORMAT})`,
       `atmosphere aerial perspective (${KERNEL_ARM_FORMAT})`,
@@ -862,10 +949,10 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
   it("makes nothing new for a second frame of the same size", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    atmosphere.drawKernelArm(CAMERA, NOON, SCENE);
+    atmosphere.drawKernelArm(CAMERA, [NOON], SCENE);
     const textures = engine.counts.textures;
     const kernels = engine.counts.kernels;
-    atmosphere.drawKernelArm(CAMERA, DUSK, SCENE);
+    atmosphere.drawKernelArm(CAMERA, [DUSK], SCENE);
     expect([engine.counts.textures, engine.counts.kernels]).toEqual([textures, kernels]);
   });
 
@@ -878,9 +965,9 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
         destroyed.push(event.name);
       }
     });
-    const first = atmosphere.drawKernelArm(CAMERA, NOON, SCENE).rayMarch;
+    const first = atmosphere.drawKernelArm(CAMERA, [NOON], SCENE).rayMarch;
     const wider = { ...CAMERA, viewport: { widthPx: 96, heightPx: 32 } };
-    const second = atmosphere.drawKernelArm(wider, NOON, SCENE).rayMarch;
+    const second = atmosphere.drawKernelArm(wider, [NOON], SCENE).rayMarch;
     expect(second).not.toBe(first);
     expect(destroyed).toEqual(["atmosphere ray march (kernel arm)"]);
     expect(engine.textureSpecs.at(-1)?.size).toEqual([96, 32]);
@@ -889,9 +976,9 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
   it("makes its kernels and targets anew after a device restore", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    const before = atmosphere.drawKernelArm(CAMERA, NOON, SCENE);
+    const before = atmosphere.drawKernelArm(CAMERA, [NOON], SCENE);
     engine.restore();
-    const after = atmosphere.drawKernelArm(CAMERA, NOON, SCENE);
+    const after = atmosphere.drawKernelArm(CAMERA, [NOON], SCENE);
     expect(after.skyView).not.toBe(before.skyView);
     expect(after.rayMarch).not.toBe(before.rayMarch);
   });
@@ -899,7 +986,7 @@ describe("HillaireAtmosphere's kernel arm (R08.T6.g)", () => {
   it("releases its three targets when the atmosphere is disposed", async () => {
     const engine = await countingRenderEngine();
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    atmosphere.drawKernelArm(CAMERA, NOON, SCENE);
+    atmosphere.drawKernelArm(CAMERA, [NOON], SCENE);
     const destroyed: string[] = [];
     engine.onAllocation((event) => {
       if (event.kind === "destroyed") {

@@ -156,14 +156,21 @@ export class TwinPool {
     );
   }
 
-  /** `multiScatteringTwin` over the transmittance tables given. */
+  /**
+   * `multiScatteringTwin` over the transmittance tables given.
+   *
+   * @param curveSlot - The light slot whose layer the twin is (R08.T7): 0, the shared table's,
+   *   unless given.
+   */
   multiScattering(
     medium: AtmosphereMedium,
     bottomRadiusM: number,
     transmittance: TwinTransmittance,
+    curveSlot = 0,
   ): Promise<TwinTable> {
-    return this.#run({ kind: "multiScattering", medium, bottomRadiusM, transmittance }, (answer) =>
-      answer.kind === "multiScattering" ? answer.twin : null,
+    return this.#run(
+      { kind: "multiScattering", medium, bottomRadiusM, transmittance, curveSlot },
+      (answer) => (answer.kind === "multiScattering" ? answer.twin : null),
     );
   }
 

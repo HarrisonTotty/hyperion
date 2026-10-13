@@ -133,6 +133,11 @@ struct MediumSample {
   absorption : vec3f,
   columns : AbsorberColumns,
   pressureColumns : AbsorberColumns,
+  // The scattering in the tabulated terms' forward lobes, sum P sigma_s, P each lobe's forward
+  // share in its term's phase.xyz (plan R08, R08.T7; `forwardLobe.ts`): what the
+  // multiple-scattering table truncates, as delta-M does, so that the lobe's higher orders are not
+  // counted twice.
+  lobeScattering : vec3f,
 }
 
 // The pressure the pressure-weighted columns are taken over, Pa (R08.T4.d): a path's
@@ -526,6 +531,26 @@ fn bilinear(table : texture_2d<f32>, uv : vec2f) -> vec4f {
 fn tableAtUnit(table : texture_2d<f32>, unit : vec2f) -> vec4f {
   let size = vec2f(textureDimensions(table));
   return bilinear(table, texelUvFromUnit(clamp(unit, vec2f(0.0), vec2f(1.0)), size));
+}
+
+// `bilinear` within one layer of a 2D array table (plan R08, R08.T7: the multiple-scattering
+// table's layer a light slot), the layer clamped to the table's.
+fn bilinearLayer(table : texture_2d_array<f32>, layer : u32, uv : vec2f) -> vec4f {
+  let size = vec2f(textureDimensions(table));
+  let l = min(layer, textureNumLayers(table) - 1u);
+  let p = clamp(uv * size - 0.5, vec2f(0.0), size - 1.0);
+  let p0 = vec2u(floor(p));
+  let p1 = min(p0 + 1u, vec2u(size) - 1u);
+  let f = p - floor(p);
+  let a = mix(textureLoad(table, p0, l, 0), textureLoad(table, vec2u(p1.x, p0.y), l, 0), f.x);
+  let b = mix(textureLoad(table, vec2u(p0.x, p1.y), l, 0), textureLoad(table, p1, l, 0), f.x);
+  return mix(a, b, f.y);
+}
+
+// `tableAtUnit` within one layer of a 2D array table.
+fn tableAtUnitLayer(table : texture_2d_array<f32>, layer : u32, unit : vec2f) -> vec4f {
+  let size = vec2f(textureDimensions(table));
+  return bilinearLayer(table, layer, texelUvFromUnit(clamp(unit, vec2f(0.0), vec2f(1.0)), size));
 }
 
 // The transmittance at the transmittance table's unit range (`transmittanceUnitAt`) for light slot

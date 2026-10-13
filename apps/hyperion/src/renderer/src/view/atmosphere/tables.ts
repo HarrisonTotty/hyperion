@@ -19,7 +19,8 @@
  * light's curves of growth (Design note 5), uploaded with the medium ({@link packAbsorberCurves}),
  * turn the columns into optical depth on read, and every read site exponentiates in `f32`. Stored
  * as T, a slant path through a Venus-class atmosphere fell below the half float's least value.
- * The multiple-scattering table is built with light slot 0's curves.
+ * The multiple-scattering table has one layer a light slot under an absorber, each built with that
+ * light's curves, and one layer otherwise ({@link multiScatteringLayersOf}, R08.T7).
  *
  * The medium reaches every kernel in three parts (plan R08, R08.T6.b): its shell, term count,
  * steps and ground albedo in the `Medium` uniform ({@link packMediumUniform}), its terms in a
@@ -31,12 +32,28 @@
  * binds a one-layer, one-texel placeholder, which the kernels never read. The tables hold the
  * medium resampled onto the kernels' own grids, the medium {@link kernelMedium} gives, which the
  * CPU twin (`tablesCpu.ts`) takes as the kernels' oracle.
+ *
+ * Since R08.T7 that medium also has each tabulated phase's forward delta taken out
+ * ({@link withoutForwardDelta}, Design note 6): the delta's light is the direct beam's. A tabulated
+ * phase whose forward part is a lobe (`forwardLobe.ts`'s `lobeIsDrawn`) carries its lobe's share P
+ * per channel in its phase code, and its higher orders' effective phase Ẽ(x, θ) in a third 2D
+ * array texture, one layer a term ({@link packLobeTables}). The per-frame marches add the orders
+ * at each sample; the multiple-scattering kernel takes the lobes' scattering P σ_s out of the
+ * medium it integrates, as delta-M does, and raises the beam by e^(x P), so the orders' light is
+ * not counted again in Hillaire's isotropic term.
  */
 
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../engine/gpuFlags";
 import type { KernelPair } from "../engine/kernels";
 import type { BufferHandle, ComputeHandle, RenderEngine, TextureHandle } from "../engine/types";
 import type { AbsorberAmount, AbsorberCurve } from "./absorbers";
+import {
+  FORWARD_LOBE_X_NODES,
+  FORWARD_ORDERS_ENTRIES,
+  forwardLobeOfTable,
+  lobeIsDrawn,
+} from "./forwardLobe";
+import { forwardPeakEntry } from "./forwardPeak";
 import { MARCH_EDGES_MAX, marchEdgesM } from "./marchSteps";
 import {
   type AtmosphereMedium,
@@ -147,10 +164,10 @@ export const ABSORBER_CURVE_DEPTH_MAX = -Math.log(1e-6);
  * for that light's spectrum.
  *
  * @remarks
- * Slot 0 is the body's brightest star. The one sun the per-frame kernels draw takes it until
- * R08.T7 gives each source its slot, and the per-planet multiple-scattering table, shared by
- * every sun, is built with it (plan R08's Risks, "Which star's absorber curve the shared tables
- * are built with"), as a planetshine source takes it (Design note 7).
+ * Slot 0 is the body's brightest star, whose curves a planetshine source takes (Design note 7).
+ * Since R08.T7 each source of the per-frame kernels takes its own slot's, and the per-planet
+ * multiple-scattering table has one layer a slot, each built with that slot's curves (plan R08's
+ * Risks, "Which star's absorber curve the shared tables are built with").
  */
 export type AbsorberCurveSlots = ReadonlyArray<ReadonlyArray<AbsorberCurve>>;
 
@@ -527,7 +544,9 @@ export const KERNEL_ARM_FORMAT = "rgba32float";
 /**
  * A planet's tables' textures: the stored `rgba16float` ones, or the kernel arm's `rgba32float`
  * ones ({@link KERNEL_ARM_FORMAT}). The transmittance kernel writes the transmittance table and the
- * absorber-column table beside it (R08.T6.c), and the pressure-weighted column tables (R08.T4.d).
+ * absorber-column table beside it (R08.T6.c), and the pressure-weighted column tables (R08.T4.d);
+ * the multiple-scattering kernel one layer of its 2D array a light slot
+ * ({@link multiScatteringLayersOf}, R08.T7).
  */
 export interface PlanetTableTextures {
   readonly transmittance: TextureHandle;
@@ -539,6 +558,21 @@ export interface PlanetTableTextures {
   readonly multiScattering: TextureHandle;
 }
 
+/**
+ * The multiple-scattering table's layers for a medium and its lights' curves (plan R08, R08.T7;
+ * `decision-r08-t6b-floor.md` §8): under an absorber, one a light slot, each built with that
+ * light's curves through the kernel's `curveSlot`, so that each sun's source reads its own; with
+ * none, one, since without an absorber the table is the same for every star (the smooth terms
+ * stand at the fitted wavelengths and the star's colour multiplies after). With R08.T6.f's bands
+ * they become band × slot. A layer is 8 KB.
+ */
+export function multiScatteringLayersOf(
+  medium: AtmosphereMedium,
+  curves: AbsorberCurveSlots,
+): number {
+  return absorberCount(medium) > 0 ? Math.max(1, curves.length) : 1;
+}
+
 /** The two per-planet kernels, as built or as the kernel arm assembles them. */
 interface PlanetTableKernels {
   readonly transmittance: ComputeHandle;
@@ -546,7 +580,7 @@ interface PlanetTableKernels {
 }
 
 /** A kernel's `rgba16float` storage-texture declaration, its format between the two groups. */
-const STORED_DECLARATION = /(texture_storage_[23]d<)rgba16float(, write>)/gu;
+const STORED_DECLARATION = /(texture_storage_(?:2d_array|[23]d)<)rgba16float(, write>)/gu;
 
 /**
  * `pair` assembled a second time with its storage textures' format `rgba32float` in place of
@@ -626,7 +660,8 @@ function densityCodeOf(
 /**
  * `Term.phase` for each phase function (`source.wgsl`'s `phaseOf`): its parameters in xyz and its
  * code in w, 0 none, 1 Rayleigh with its depolarisation ratio ρ per channel, 2 Cornette–Shanks
- * with its g in x, 3 tabulated.
+ * with its g in x, 3 tabulated with its forward lobe's share P per channel in xyz, the lobe's
+ * higher orders' and the multiple-scattering table's truncation's (`forwardLobe.ts`, R08.T7).
  */
 function phaseCodeOf(phase: PhaseFunction): readonly [number, number, number, number] {
   let packed: readonly [number, number, number, number];
@@ -640,9 +675,13 @@ function phaseCodeOf(phase: PhaseFunction): readonly [number, number, number, nu
     case "cornette-shanks":
       packed = [phase.asymmetry, 0, 0, 2];
       break;
-    case "tabulated":
-      packed = [0, 0, 0, 3];
+    case "tabulated": {
+      // A lobe that is not drawn takes no share: the kernels then add no orders and truncate none.
+      const lobe = forwardLobeOfTable(resampledPhase(phase.table));
+      const share = lobeIsDrawn(lobe) ? lobe.share : ([0, 0, 0] as const);
+      packed = [share[0], share[1], share[2], 3];
       break;
+    }
   }
   return packed;
 }
@@ -692,7 +731,8 @@ export function packMedium(medium: AtmosphereMedium): Float32Array {
  * @param bottomRadiusM - The ground's radius, m.
  * @param samples - The kernel's steps along each ray.
  * @param curveSlot - The light slot whose curves of growth a per-planet table is built with,
- *   `medium.wgsl`'s `curveSlot()`: {@link SHARED_TABLE_CURVE_SLOT} until R08.T7.
+ *   `medium.wgsl`'s `curveSlot()`, and the multiple-scattering layer it writes: one dispatch a
+ *   slot since R08.T7; {@link SHARED_TABLE_CURVE_SLOT} by default.
  */
 export function packMediumUniform(
   medium: AtmosphereMedium,
@@ -762,10 +802,10 @@ export function packLayerEdges(medium: AtmosphereMedium): Float32Array {
 }
 
 /**
- * The light slot whose curves of growth the shared multiple-scattering table is built with: 0,
- * the body's brightest star's, which planetshine's transmittance takes too (Design note 7; ruled
- * 2026-10-10, `decision-r08-t6b-floor.md` §8). Exact while one sun is drawn, as until R08.T7,
- * which builds one table a light slot through the kernel's and the twin's `curveSlot`.
+ * The light slot of the brightest star, 0: the slot planetshine takes (Design note 7), and the
+ * default of the multiple-scattering table's `curveSlot` (ruled 2026-10-10,
+ * `decision-r08-t6b-floor.md` §8). Since R08.T7 the table has one layer a light slot, each built
+ * through the kernel's and the twin's `curveSlot` ({@link multiScatteringLayersOf}).
  */
 export const SHARED_TABLE_CURVE_SLOT = 0;
 
@@ -937,17 +977,95 @@ export function resampledPhase(table: PhaseTable): PhaseTable {
           b1: element(matrix.b1),
           b2: element(matrix.b2),
         },
+    table.forwardPeak,
   );
 }
 
 /**
- * The medium as the kernels read it: each tabulated density resampled onto its table's levels
+ * A term with its phase table's forward delta taken out (plan R08, Design note 6; R08.T7;
+ * `decision-r08-aerosol-labels.md` item 3), or the term itself where its table holds none.
+ *
+ * @remarks
+ * In each channel c with a delta of share f_c (`PhaseTable.forwardPeak`, laid on the table's first
+ * entries by `aerosol.ts`'s `aerosolPhaseTable`, `forwardPeak.ts`'s shape), the delta's entries
+ * are taken from a₁, a₂, a₃ and a₄, which carry the identity's matrix, every element of what remains
+ * is divided by 1 − f_c, and the term's scattering is multiplied by 1 − f_c, so that its extinction
+ * falls by f_c times its scattering and its table integrates to 1 again, with mean cosine
+ * (g − f_c μ_δ) ÷ (1 − f_c), μ_δ the delta's own (`FORWARD_PEAK_COSINE`). That is exact for a
+ * forward delta (Potter 1970, J. Atmos. Sci. 27, 943): the delta's light is the direct beam's, which
+ * the shared transmittance then carries to the star's image, its glare, the light at every
+ * scattering point and on the ground, and which no per-view table could sample.
+ *
+ * @throws RangeError for a delta on a table that is not on the kernels' grid, where its entries
+ *   do not stand.
+ */
+export function withoutForwardDelta(term: MediumTerm): MediumTerm {
+  if (term.phase.kind !== "tabulated") {
+    return term;
+  }
+  const table = term.phase.table;
+  const shares = table.forwardPeak;
+  if (shares.every((share) => share === 0)) {
+    return term;
+  }
+  if (!onTableGrid(table.u)) {
+    throw new RangeError(
+      `term ${term.name}'s forward delta stands on a table of ${table.u.length} entries, not the kernels' ${PHASE_TABLE_ENTRIES}`,
+    );
+  }
+  // a₁ is a phase, never negative, and its rounding at the delta's entries is held at 0; the other
+  // elements take their signs.
+  const remaining = (
+    channels: PhaseMatrixElement,
+    delta: boolean,
+    phase: boolean,
+  ): PhaseMatrixElement => {
+    const [r, g, b] = channels.map((channel, c) => {
+      const share = shares[c] ?? 0;
+      const keep = 1 - share;
+      return channel.map((v, k) => {
+        const left = delta ? v - forwardPeakEntry(share, k) : v;
+        return (phase ? Math.max(0, left) : left) / keep;
+      });
+    });
+    if (r === undefined || g === undefined || b === undefined) {
+      throw new Error("a phase table has three channels");
+    }
+    return [r, g, b];
+  };
+  const matrix = table.matrix;
+  const kept = phaseTable(
+    table.u,
+    remaining(table.values, true, true),
+    matrix === undefined
+      ? undefined
+      : {
+          a2: remaining(matrix.a2, true, false),
+          a3: remaining(matrix.a3, true, false),
+          a4: remaining(matrix.a4, true, false),
+          b1: remaining(matrix.b1, false, false),
+          b2: remaining(matrix.b2, false, false),
+        },
+  );
+  const [r, g, b] = term.scattering;
+  return {
+    ...term,
+    scattering: [r * (1 - shares[0]), g * (1 - shares[1]), b * (1 - shares[2])],
+    phase: { kind: "tabulated", table: kept },
+  };
+}
+
+/**
+ * The medium as the kernels read it: each term's forward delta taken out
+ * ({@link withoutForwardDelta}, R08.T7), each tabulated density resampled onto its table's levels
  * ({@link resampledDensity}) and each tabulated phase onto the kernels' grid
  * ({@link resampledPhase}); every other term as it is.
  *
  * @remarks
  * The CPU twin of this medium is the kernels' oracle (R08.T6.b's smoke); how far it lies from the
  * twin of `medium` itself is the resampling's error, which `tables.test.ts` bounds.
+ *
+ * @throws RangeError as {@link withoutForwardDelta}.
  */
 export function kernelMedium(medium: AtmosphereMedium): AtmosphereMedium {
   const pressure = medium.pressureBar;
@@ -956,17 +1074,20 @@ export function kernelMedium(medium: AtmosphereMedium): AtmosphereMedium {
     ...(pressure === undefined
       ? {}
       : { pressureBar: resampledDensity(pressure, medium.topHeightM) }),
-    terms: medium.terms.map((term) => ({
-      ...term,
-      density:
-        term.density.kind === "tabulated"
-          ? resampledDensity(term.density, medium.topHeightM)
-          : term.density,
-      phase:
-        term.phase.kind === "tabulated"
-          ? { kind: "tabulated", table: resampledPhase(term.phase.table) }
-          : term.phase,
-    })),
+    terms: medium.terms.map((given) => {
+      const term = withoutForwardDelta(given);
+      return {
+        ...term,
+        density:
+          term.density.kind === "tabulated"
+            ? resampledDensity(term.density, medium.topHeightM)
+            : term.density,
+        phase:
+          term.phase.kind === "tabulated"
+            ? { kind: "tabulated", table: resampledPhase(term.phase.table) }
+            : term.phase,
+      };
+    }),
   };
 }
 
@@ -1044,6 +1165,51 @@ export function packPhaseTables(medium: AtmosphereMedium): LayeredTable {
   return { widthTexels: PHASE_TABLE_ENTRIES, layers: terms.length, texels };
 }
 
+/**
+ * A 2D array texture's contents of 2D layers: `widthTexels` × `heightTexels` texels a layer, layer
+ * after layer, row by row, each texel's four channels in turn.
+ */
+export interface LayeredPlanes {
+  readonly widthTexels: number;
+  readonly heightTexels: number;
+  readonly layers: number;
+  readonly texels: Float32Array;
+}
+
+/**
+ * The medium's forward-lobe tables as `source.wgsl`'s `lobeOrdersOf` reads them, `rgba32float`
+ * (plan R08, R08.T7; `forwardLobe.ts`): one layer a term, term i's at layer i, Ẽ(x, θ) of its
+ * tabulated phase per channel in rgb, the {@link FORWARD_ORDERS_ENTRIES} entries of the phase
+ * table's u across and the {@link FORWARD_LOBE_X_NODES} nodes of x down, zeros for a term that is
+ * not tabulated or whose forward part is no lobe (`forwardLobe.ts`'s `lobeIsDrawn`); a one-texel
+ * placeholder where no term is tabulated.
+ */
+export function packLobeTables(medium: AtmosphereMedium): LayeredPlanes {
+  const terms = medium.terms;
+  if (!terms.some((term) => term.phase.kind === "tabulated")) {
+    return { widthTexels: 1, heightTexels: 1, layers: 1, texels: new Float32Array(4) };
+  }
+  const w = FORWARD_ORDERS_ENTRIES;
+  const h = FORWARD_LOBE_X_NODES;
+  const texels = new Float32Array(w * h * terms.length * 4);
+  for (const [i, term] of terms.entries()) {
+    if (term.phase.kind !== "tabulated") {
+      continue;
+    }
+    const lobe = forwardLobeOfTable(resampledPhase(term.phase.table));
+    if (!lobeIsDrawn(lobe)) {
+      continue;
+    }
+    for (let j = 0; j < h; j += 1) {
+      const [r, g, b] = lobe.table[j] ?? [];
+      for (let k = 0; k < w; k += 1) {
+        texels.set([r?.[k] ?? 0, g?.[k] ?? 0, b?.[k] ?? 0, 0], ((i * h + j) * w + k) * 4);
+      }
+    }
+  }
+  return { widthTexels: w, heightTexels: h, layers: terms.length, texels };
+}
+
 /** Workgroups covering a table with 8 × 8 groups: the transmittance kernel's. */
 function groupsOf(size: TableSize): readonly [number, number, number] {
   return [Math.ceil(size.widthTexels / 8), Math.ceil(size.heightTexels / 8), 1];
@@ -1083,10 +1249,13 @@ interface TableResources {
   /** The fifth pressure channel's table, resized as the medium's line slots need it. */
   lastAbsorberPressureColumn: TextureHandle;
   lastPressureColumnSize: TableSize;
-  readonly multiScattering: TextureHandle;
+  /** One layer a light slot under an absorber ({@link multiScatteringLayersOf}). */
+  multiScattering: LayeredTexture;
   readonly terms: BufferHandle;
   densityTables: LayeredTexture;
   phaseTables: LayeredTexture;
+  /** The terms' forward-lobe tables ({@link packLobeTables}), with their shape. */
+  lobeTables: PlanesTexture;
   absorberCurves: UploadedTexture;
   readonly transmittanceKernel: ComputeHandle;
   readonly multiScatteringKernel: ComputeHandle;
@@ -1096,6 +1265,39 @@ interface TableResources {
 const DENSITY_FORMAT: GPUTextureFormat = "r32float";
 /** The phase tables' texture format: the three channels and an unused alpha. */
 const PHASE_FORMAT: GPUTextureFormat = "rgba32float";
+/** The forward-lobe tables' texture format: the three channels and an unused alpha (R08.T7). */
+const LOBE_FORMAT: GPUTextureFormat = "rgba32float";
+
+/** A 2D array texture of 2D layers the tables made and upload, with the shape it was made at. */
+interface PlanesTexture {
+  readonly texture: TextureHandle;
+  readonly widthTexels: number;
+  readonly heightTexels: number;
+  readonly layers: number;
+}
+
+/** Makes a texture for {@link packLobeTables}'s contents, uploaded. */
+function createPlanes(
+  engine: RenderEngine,
+  name: string,
+  table: Pick<LayeredPlanes, "widthTexels" | "heightTexels" | "layers">,
+): PlanesTexture {
+  const texture = engine.createTexture({
+    name,
+    size: [table.widthTexels, table.heightTexels, table.layers],
+    dimension: "2d",
+    format: LOBE_FORMAT,
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "atmosphere-tables",
+  });
+  return {
+    texture,
+    widthTexels: table.widthTexels,
+    heightTexels: table.heightTexels,
+    layers: table.layers,
+  };
+}
 /**
  * The lights' curves' texture format: an optical depth a channel and an unused alpha, in `f32`,
  * since a curve's 10⁻³ U node in the linear regime holds a depth far under rgba16float's least
@@ -1141,6 +1343,28 @@ function createLayered(
   return { texture, widthTexels: table.widthTexels, layers: table.layers };
 }
 
+/**
+ * Makes the multiple-scattering table's 2D array texture of `layers` layers, one a light slot
+ * ({@link multiScatteringLayersOf}), written by its kernel and read by the per-frame kernels.
+ */
+function createMultiScattering(
+  engine: RenderEngine,
+  name: string,
+  layers: number,
+  format: GPUTextureFormat,
+): LayeredTexture {
+  const texture = engine.createTexture({
+    name,
+    size: [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels, layers],
+    dimension: "2d",
+    format,
+    mips: 1,
+    usage: TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_SRC,
+    category: "atmosphere-tables",
+  });
+  return { texture, widthTexels: MULTI_SCATTERING_SIZE.widthTexels, layers };
+}
+
 /** Releases the buffer and textures of `resources`; the kernels have no release. */
 function releaseResources(engine: RenderEngine, resources: TableResources): void {
   engine.releaseBuffer(resources.terms);
@@ -1149,9 +1373,10 @@ function releaseResources(engine: RenderEngine, resources: TableResources): void
     resources.absorberColumns,
     resources.absorberPressureColumns,
     resources.lastAbsorberPressureColumn,
-    resources.multiScattering,
+    resources.multiScattering.texture,
     resources.densityTables.texture,
     resources.phaseTables.texture,
+    resources.lobeTables.texture,
     resources.absorberCurves.texture,
   ]) {
     engine.releaseTexture(texture);
@@ -1175,8 +1400,6 @@ function storedTable(engine: RenderEngine, name: string, size: TableSize): Textu
 const LAST_PRESSURE_COLUMN_NAME = "atmosphere last absorber pressure column";
 
 function createResources(engine: RenderEngine): TableResources {
-  const usage =
-    TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_SRC;
   const one = { widthTexels: 1, layers: 1 };
   const transmittanceTable = (name: string): TextureHandle =>
     storedTable(engine, name, TRANSMITTANCE_SIZE);
@@ -1187,15 +1410,12 @@ function createResources(engine: RenderEngine): TableResources {
     absorberPressureColumns: transmittanceTable("atmosphere absorber pressure columns"),
     lastAbsorberPressureColumn: storedTable(engine, LAST_PRESSURE_COLUMN_NAME, oneTexel),
     lastPressureColumnSize: oneTexel,
-    multiScattering: engine.createTexture({
-      name: "atmosphere multiple scattering",
-      size: [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels],
-      dimension: "2d",
-      format: "rgba16float",
-      mips: 1,
-      usage,
-      category: "atmosphere-tables",
-    }),
+    multiScattering: createMultiScattering(
+      engine,
+      "atmosphere multiple scattering",
+      1,
+      "rgba16float",
+    ),
     terms: engine.createBuffer({
       name: "atmosphere terms",
       bytes: TERMS_BUFFER_BYTES,
@@ -1204,6 +1424,11 @@ function createResources(engine: RenderEngine): TableResources {
     }),
     densityTables: createLayered(engine, "atmosphere density tables", DENSITY_FORMAT, one),
     phaseTables: createLayered(engine, "atmosphere phase tables", PHASE_FORMAT, one),
+    lobeTables: createPlanes(engine, "atmosphere forward-lobe tables", {
+      widthTexels: 1,
+      heightTexels: 1,
+      layers: 1,
+    }),
     absorberCurves: createUploaded(engine, "atmosphere absorber curves", CURVES_FORMAT, {
       widthTexels: 1,
       heightTexels: 1,
@@ -1314,9 +1539,18 @@ export class AtmosphereTables {
     return this.#curves;
   }
 
-  /** Multiple scattering per (r, μ_sun), per unit illuminance, `rgba16float`. */
+  /**
+   * Multiple scattering per (r, μ_sun), per unit illuminance, `rgba16float`: a 2D array of one layer
+   * a light slot under an absorber, each built with that light's curves, and one layer otherwise
+   * ({@link multiScatteringLayersOf}, R08.T7).
+   */
   get multiScattering(): TextureHandle {
-    return this.#resources.multiScattering;
+    return this.#resources.multiScattering.texture;
+  }
+
+  /** The multiple-scattering table's layers ({@link multiScatteringLayersOf}). */
+  get multiScatteringLayers(): number {
+    return this.#resources.multiScattering.layers;
   }
 
   /** The medium's terms, {@link packMedium}'s, for the kernels' `terms` binding. */
@@ -1332,6 +1566,14 @@ export class AtmosphereTables {
   /** The medium's phase tables, {@link packPhaseTables}'s, for `phaseTables`. */
   get phaseTables(): TextureHandle {
     return this.#resources.phaseTables.texture;
+  }
+
+  /**
+   * The medium's forward-lobe tables, {@link packLobeTables}'s, for the per-frame kernels'
+   * `lobeTables` (R08.T7).
+   */
+  get lobeTables(): TextureHandle {
+    return this.#resources.lobeTables.texture;
   }
 
   /**
@@ -1361,7 +1603,8 @@ export class AtmosphereTables {
    * for.
    *
    * @param curves - Each light's curves of growth for the medium's absorbers; none for a medium
-   *   with no absorber. The multiple-scattering table is built with light slot 0's.
+   *   with no absorber. The multiple-scattering table has one layer a light slot under an absorber,
+   *   each built with that slot's curves ({@link multiScatteringLayersOf}, R08.T7).
    * @returns Whether they were rebuilt.
    * @throws Error or RangeError as {@link packMedium} and {@link packAbsorberCurves}, and the
    *   tables keep what they held and follow; or `EngineUnavailable` while the engine has no device
@@ -1376,9 +1619,13 @@ export class AtmosphereTables {
     if (key === this.#key) {
       return false;
     }
-    const terms = packMedium(medium);
-    const densityTables = packDensityTables(medium);
-    const phaseTables = packPhaseTables(medium);
+    // The kernels read the medium with its terms' forward deltas taken out, as their twin reads
+    // `kernelMedium(medium)` (R08.T7).
+    const direct = { ...medium, terms: medium.terms.map(withoutForwardDelta) };
+    const terms = packMedium(direct);
+    const densityTables = packDensityTables(direct);
+    const phaseTables = packPhaseTables(direct);
+    const lobeTables = packLobeTables(direct);
     const absorberCurves = packAbsorberCurves(medium, curves);
     const layerEdges = packLayerEdges(medium);
     this.#medium = medium;
@@ -1391,6 +1638,7 @@ export class AtmosphereTables {
     engine.writeBuffer(r.terms, 0, terms);
     r.densityTables = this.#upload(r.densityTables, densityTables, DENSITY_FORMAT);
     r.phaseTables = this.#upload(r.phaseTables, phaseTables, PHASE_FORMAT);
+    r.lobeTables = this.#uploadPlanes(r.lobeTables, lobeTables);
     r.absorberCurves = this.#uploadCurves(r.absorberCurves, absorberCurves);
     const lastSize = lastPressureColumnSize(medium);
     const held = r.lastPressureColumnSize;
@@ -1401,6 +1649,17 @@ export class AtmosphereTables {
       r.lastAbsorberPressureColumn = resized;
       r.lastPressureColumnSize = lastSize;
     }
+    const layers = multiScatteringLayersOf(medium, curves);
+    if (r.multiScattering.layers !== layers) {
+      const made = createMultiScattering(
+        engine,
+        r.multiScattering.texture.name,
+        layers,
+        "rgba16float",
+      );
+      engine.releaseTexture(r.multiScattering.texture);
+      r.multiScattering = made;
+    }
     this.#dispatchTables(
       { transmittance: r.transmittanceKernel, multiScattering: r.multiScatteringKernel },
       {
@@ -1408,7 +1667,7 @@ export class AtmosphereTables {
         absorberColumns: r.absorberColumns,
         absorberPressureColumns: r.absorberPressureColumns,
         lastAbsorberPressureColumn: r.lastAbsorberPressureColumn,
-        multiScattering: r.multiScattering,
+        multiScattering: r.multiScattering.texture,
       },
     );
     this.#key = key;
@@ -1455,7 +1714,19 @@ export class AtmosphereTables {
         "atmosphere last absorber pressure column (kernel arm)",
         lastPressureColumnSize(this.#medium),
       ),
-      multiScattering: output("atmosphere multiple scattering (kernel arm)", MULTI_SCATTERING_SIZE),
+      multiScattering: engine.createTexture({
+        name: "atmosphere multiple scattering (kernel arm)",
+        size: [
+          MULTI_SCATTERING_SIZE.widthTexels,
+          MULTI_SCATTERING_SIZE.heightTexels,
+          this.#resources.multiScattering.layers,
+        ],
+        dimension: "2d",
+        format: KERNEL_ARM_FORMAT,
+        mips: 1,
+        usage,
+        category: "atmosphere-tables",
+      }),
     };
     this.#dispatchTables(this.#armKernels, tables);
     return tables;
@@ -1465,7 +1736,8 @@ export class AtmosphereTables {
    * Builds the tables for the medium and ground the tables follow: the transmittance kernel into
    * `outputs.transmittance`, `outputs.absorberColumns`, `outputs.absorberPressureColumns` and
    * `outputs.lastAbsorberPressureColumn`, then the multiple-scattering kernel, reading the stored
-   * tables and the lights' curves, into `outputs.multiScattering`.
+   * tables and the lights' curves, into `outputs.multiScattering`, once a layer, layer k with
+   * light slot k's curves (R08.T7).
    */
   #dispatchTables(kernels: PlanetTableKernels, outputs: PlanetTableTextures): void {
     const engine = this.#engine;
@@ -1492,32 +1764,29 @@ export class AtmosphereTables {
       groupsOf(TRANSMITTANCE_SIZE),
       "atmosphere tables",
     );
-    engine.dispatch(
-      kernels.multiScattering,
-      {
-        uniforms: {
-          medium: packMediumUniform(
-            medium,
-            bottomRadiusM,
-            MULTI_SCATTERING_SAMPLES,
-            SHARED_TABLE_CURVE_SLOT,
-          ),
-          layerEdges: this.#layerEdges,
+    for (let slot = 0; slot < r.multiScattering.layers; slot += 1) {
+      engine.dispatch(
+        kernels.multiScattering,
+        {
+          uniforms: {
+            medium: packMediumUniform(medium, bottomRadiusM, MULTI_SCATTERING_SAMPLES, slot),
+            layerEdges: this.#layerEdges,
+          },
+          buffers: { terms: r.terms },
+          sampled: {
+            ...sampled,
+            transmittance: r.transmittance,
+            absorberColumns: r.absorberColumns,
+            absorberPressureColumns: r.absorberPressureColumns,
+            lastAbsorberPressureColumn: r.lastAbsorberPressureColumn,
+            absorberCurves: r.absorberCurves.texture,
+          },
+          storage: { multiScatteringOut: { texture: outputs.multiScattering, level: 0 } },
         },
-        buffers: { terms: r.terms },
-        sampled: {
-          ...sampled,
-          transmittance: r.transmittance,
-          absorberColumns: r.absorberColumns,
-          absorberPressureColumns: r.absorberPressureColumns,
-          lastAbsorberPressureColumn: r.lastAbsorberPressureColumn,
-          absorberCurves: r.absorberCurves.texture,
-        },
-        storage: { multiScatteringOut: { texture: outputs.multiScattering, level: 0 } },
-      },
-      [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels, 1],
-      "atmosphere tables",
-    );
+        [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels, 1],
+        "atmosphere tables",
+      );
+    }
   }
 
   /**
@@ -1543,6 +1812,31 @@ export class AtmosphereTables {
         target.texture,
         [0, 0, 0],
         [table.widthTexels, 1, table.layers],
+        table.texels,
+      );
+    }
+    return target;
+  }
+
+  /**
+   * Writes the forward-lobe tables into `current`, or into a texture made at their shape,
+   * releasing `current`, when their shape differs; a placeholder is left as it was made, zero.
+   */
+  #uploadPlanes(current: PlanesTexture, table: LayeredPlanes): PlanesTexture {
+    let target = current;
+    if (
+      current.widthTexels !== table.widthTexels ||
+      current.heightTexels !== table.heightTexels ||
+      current.layers !== table.layers
+    ) {
+      target = createPlanes(this.#engine, current.texture.name, table);
+      this.#engine.releaseTexture(current.texture);
+    }
+    if (table.widthTexels > 1) {
+      this.#engine.writeTexture(
+        target.texture,
+        [0, 0, 0],
+        [table.widthTexels, table.heightTexels, table.layers],
         table.texels,
       );
     }

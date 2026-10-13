@@ -230,6 +230,14 @@ export interface PhaseTable {
    * makes the term a total depolariser in the reference and the polarisation correction.
    */
   readonly matrix: PhaseMatrixTable | undefined;
+  /**
+   * Each channel's share of the scattering in the table's forward delta, the unresolved diffraction
+   * peak R08.T5.c lays on its first entries (`forwardPeak.ts`), 0 where it has none (plan R08,
+   * Design note 6; R08.T7). The delta is direct light: the kernels' medium takes it out of the table
+   * and the term's extinction (`tables.ts`'s `withoutForwardDelta`); the table itself keeps it, for
+   * R08.T12's reference and the thick bakes' delta-M.
+   */
+  readonly forwardPeak: Rgb;
 }
 
 /** One element of a scattering matrix per channel, on a {@link PhaseTable}'s u. */
@@ -277,15 +285,23 @@ export type PhaseFunction =
  * @remarks
  * The arrays are kept, not copied; the caller does not change them afterwards.
  *
+ * @param forwardPeak - Each channel's share of the scattering in the table's forward delta, which
+ *   its first entries hold (`aerosol.ts`'s `aerosolPhaseTable`); none by default.
  * @throws RangeError for fewer than two entries, channels of another length, a u that is not
  *   finite and strictly ascending from exactly 0 to exactly 1, a value that is not finite and at
- *   least 0, or a matrix element of another length or not finite.
+ *   least 0, a matrix element of another length or not finite, or a delta's share outside [0, 1).
  */
 export function phaseTable(
   u: Float64Array,
   values: readonly [Float64Array, Float64Array, Float64Array],
   matrix?: PhaseMatrixTable,
+  forwardPeak: Rgb = [0, 0, 0],
 ): PhaseTable {
+  if (!forwardPeak.every((share) => Number.isFinite(share) && share >= 0 && share < 1)) {
+    throw new RangeError(
+      `a phase table's forward delta takes a share in [0, 1) a channel, not ${forwardPeak.join(", ")}`,
+    );
+  }
   const last = u.length - 1;
   if (u.length < 2 || values.some((channel) => channel.length !== u.length)) {
     throw new RangeError(
@@ -328,7 +344,7 @@ export function phaseTable(
       }
     }
   }
-  return { u, values, matrix };
+  return { u, values, matrix, forwardPeak };
 }
 
 /** A phase table per channel at u, linear between the entries that bracket it. */

@@ -9,17 +9,26 @@
  * reads them at a point's height above the datum spheroid, with its sun and view cosines taken
  * against the spheroid's normal (Design note 16): the per-frame tables are built on the camera's
  * own sphere, of its Gaussian radius √(MN), and the ray march clips against the spheroid's shells.
- * The tables hold radiance per unit of the sun's illuminance in each channel, the smooth terms
- * evaluated at the fitted channels' wavelengths (plan R08, Design note 5, R08.T6.d); the composite
- * turns it into pre-exposed Rec. 709 luminance with the sun's per-channel illuminance, R07's
- * `starIlluminance` through R06's colour ({@link SunState.illuminanceLx}), in place of R05's
- * `solar.ts` factors, and clamps the sun's disc after pre-exposure.
+ * The per-planet tables hold radiance per unit of illuminance in each channel, the smooth terms
+ * evaluated at the fitted channels' wavelengths (plan R08, Design note 5, R08.T6.d). Since R08.T7
+ * the per-frame tables are summed over the frame's sky sources in one march (Design note 7): up to
+ * {@link MAX_SKY_SOURCES}, each weighted by its per-channel illuminance (R07's `starIlluminance`
+ * through R06's colour, {@link SunState.illuminanceLx}) times the frame's pre-exposure, formed in
+ * `f64` ({@link frameSourcesOf}). So they hold pre-exposed Rec. 709 luminance, as the composite's
+ * output does, and the half float's range follows the exposure into twilight and moonlight
+ * (`decision-r08-t6b-floor.md` §6). Each source takes its own light slot's absorber curves: its
+ * transmittance, its multiple-scattering layer, its absorber depth along every view path and its
+ * disc (`decision-r08-t6b-floor.md` §8). The sky view is indexed by the local azimuth about the
+ * first source's horizontal ({@link skyAxisOf}). The composite multiplies what the scene holds
+ * behind the sky by its transmittance to space, a disc's own light's inside it, draws the discs of
+ * the sources that draw one, and keeps the scene's alpha, R07's `METER_CLASS`.
  *
  * The kernels are `f32`. What they cannot form there without losing it, they are given formed in
  * `f64` and narrowed once (plan R08, Design note 18, R08.T6.g): the camera's height above the
  * datum and the datum's normal, the ray march's quadric constants, the sky view's horizon angle
- * and the sine of the sun's angular radius ({@link viewExactOf}). No kernel forms a height as a
- * difference of radii, and none takes WGSL's builtin trigonometry (`view/shaders/preciseTrig.wgsl`).
+ * and each source's direction with the sine of its angular radius ({@link viewExactOf},
+ * {@link frameSourcesOf}). No kernel forms a height as a difference of radii, and none takes WGSL's
+ * builtin trigonometry (`view/shaders/preciseTrig.wgsl`).
  *
  * The sky view and the ray march cut each side of their rays' split where the ray crosses one of
  * the medium's layer edges, the tables' `layerEdges` (plan R08, R08.T6.i; `tables.ts`'s
@@ -125,7 +134,7 @@ export interface TableSizes {
  * @remarks
  * High, Hillaire's code: sky-view 192 × 108 (sebh's table) with 75 steps, the aerial-perspective volume
  * 32³ reaching 32 km (Hillaire 2020, Table 2 and §5.4, and Bevy), the ray march at full resolution
- * with 32 steps. Low: sky-view 128 × 64 with 16 steps, the volume 32 × 32 × 16, the ray march at
+ * with 36 steps. Low: sky-view 128 × 64 with 16 steps, the volume 32 × 32 × 16, the ray march at
  * half resolution with 16 steps, aerial perspective on the terrain alone. The per-planet tables are
  * full size on both (128 KB, rarely built).
  *
@@ -140,6 +149,14 @@ export interface TableSizes {
  * included. Two
  * steps a slice of the aerial-perspective volume is this module's choice; T18 revisits it with the
  * spike's measurements.
+ *
+ * The high ray march takes 36 steps since plan R08's R08.T7, where R05.T12.e set 32: on a medium with
+ * layer edges the twilight limb ray "limb, 0.1 H, sun 90°/0°" of the slab Earth missed its 5% at 32
+ * (5.63%), from the optically thick air about its lowest point, and 36 is the measured fallback that
+ * holds every ray of the slab Earth's gate (`decision-r08-t6d-findings.md` §11.4). The cure that
+ * adds no step, a floor on the piece next to t*, cured that ray (2.76%) but put five others over
+ * (the disc at 2.80%, against 2%), and was not adopted (plan R08's Risks, "Deviations in T7, as
+ * built"). It costs 12.5% more on every high ray-march pixel.
  */
 export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
   high: {
@@ -151,7 +168,7 @@ export const TABLE_SIZES: Readonly<Record<QualitySetting, TableSizes>> = {
     aerialPerspectiveSamplesPerSlice: 2,
     aerialPerspectiveReachM: 32_000,
     rayMarchScale: 1,
-    rayMarchSamples: 32,
+    rayMarchSamples: 36,
     aerialPerspectiveScope: "scene",
   },
   low: {
@@ -192,24 +209,68 @@ export interface AtmosphereCamera {
   readonly viewport: ViewSize;
 }
 
-/** The sun, seen from the body. */
+/**
+ * The sources the sky's kernels hold (plan R08, Design note 7; R08.T7): four stars, this plan's
+ * first high figure, kept for R07's deferred raise of `MAX_BODY_LIGHTS`, and two planetshine
+ * sources. The per-frame bound is 2 + 2 sources on high and 2 + 1 on low, so a raise of R07's count
+ * changes no kernel. `settings.ts` exports it, which takes `TABLE_SIZES` from here; `view.wgsl`
+ * holds the same number.
+ */
+export const MAX_SKY_SOURCES = 6;
+
+/**
+ * The stars among {@link MAX_SKY_SOURCES}, and so the light slots a march tracks a path for: each
+ * star's own absorber curves, a planetshine source taking slot 0's (Design note 7).
+ * `settings.ts` exports it; `view.wgsl` holds the same number.
+ */
+export const MAX_SKY_LIGHT_SLOTS = 4;
+
+/**
+ * One of the sky's sources seen from the body: a star of the body's list or a planetshine source
+ * (plan R08, Design note 7; R08.T7's `sources.ts` makes them from R07's arrays).
+ */
 export interface SunState {
-  /** The unit direction to the sun in the body-fixed axes. */
+  /** The unit direction to the source in the body-fixed axes. */
   readonly directionBodyFixed: Vec3;
   /**
-   * The sun's illuminance at the body, face-on, per linear Rec. 709 channel, lx: R07's
+   * The source's illuminance face-on, per linear Rec. 709 channel, lx: for a star R07's
    * `starIlluminance(disc, distance)` (`view/lighting/illuminance.ts`), the star's photopic
-   * illuminance spread over the channels by R06's colour (plan R08, Design note 5, R08.T6.d). The
-   * tables hold light per unit of it, channel by channel, so it is what turns them into luminance.
+   * illuminance spread over the channels by R06's colour (plan R08, Design note 5, R08.T6.d); for a
+   * planetshine source R07's `SecondarySource.illuminance`, carried to the camera by the inverse
+   * square. The per-view tables hold each source's light per unit of the frame's scale
+   * ({@link HillaireAtmosphere.drawFrame}), weighted by it channel by channel.
    */
   readonly illuminanceLx: Rgb;
   /**
-   * The disc's angular radius, rad: asin(R★ ÷ d), which the caller keeps consistent with
+   * The disc's angular radius, rad: asin(R ÷ d), which the caller keeps consistent with
    * `illuminanceLx`, the two from one disc at one distance, so that the disc's luminance is the
-   * star's mean luminance whatever the distance. 0 draws no disc (the comparison with Hillaire's
+   * source's mean luminance whatever the distance. Inside it the composite takes the source's own
+   * transmittance to space for what lies behind (R08.T7). 0 for none (the comparison with Hillaire's
    * images, which have none).
    */
   readonly angularRadiusRad: number;
+  /**
+   * The light slot whose absorber curves of growth its light takes (Design note 5;
+   * `decision-r08-t6b-floor.md` §8): a star's rank in the body's list, 0 the brightest, and 0 for a
+   * planetshine source, which takes the body's brightest star's. Absent: 0.
+   */
+  readonly curveSlot?: number;
+  /**
+   * Whether the composite draws the disc itself, a uniform disc of the source's mean luminance.
+   * `false` where R06's host-disc layer draws it into the scene beneath (Design note 7), and for a
+   * planetshine source, which R07 draws. Absent: drawn when `angularRadiusRad` is above 0.
+   */
+  readonly drawsDisc?: boolean;
+}
+
+/** A source's light slot ({@link SunState.curveSlot}), 0 when absent. */
+export function curveSlotOf(sun: SunState): number {
+  return sun.curveSlot ?? 0;
+}
+
+/** Whether the composite draws a source's disc ({@link SunState.drawsDisc}). */
+export function drawsDiscOf(sun: SunState): boolean {
+  return sun.drawsDisc ?? sun.angularRadiusRad > 0;
 }
 
 /** DN 16's lookup inputs at the camera: R08.T6.f adds the latitude and the gravity scale. */
@@ -325,15 +386,12 @@ export interface ViewExact {
    * table's write and read share it.
    */
   readonly horizonAngleRad: number;
-  /**
-   * sin ρ of the sun's angular radius, which the composite's disc test |d × s| ≤ sin ρ takes, since
-   * `f32` cannot resolve 1 − cos ρ for ρ under 3.5 × 10⁻⁴ rad.
-   */
-  readonly sinSunRadius: number;
 }
 
 /**
- * The view's {@link ViewExact} for a camera at `positionM` with its {@link atmosphereInputs}.
+ * The view's {@link ViewExact} for a camera at `positionM` with its {@link atmosphereInputs}. Each
+ * source's sin ρ, which the composite's disc test |d × s| ≤ sin ρ takes since `f32` cannot resolve
+ * 1 − cos ρ for ρ under 3.5 × 10⁻⁴ rad, is formed beside it ({@link frameSourcesOf}, R08.T7).
  *
  * @param topHeightM - The atmosphere's height above the datum, m.
  */
@@ -342,7 +400,6 @@ export function viewExactOf(
   figure: SpheroidFigure,
   topHeightM: number,
   inputs: AtmosphereInputs,
-  sunAngularRadiusRad: number,
 ): ViewExact {
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
@@ -356,8 +413,94 @@ export function viewExactOf(
     groundQuadricM2: quadric(a, c),
     topQuadricM2: quadric(a + topHeightM, c + topHeightM),
     horizonAngleRad: Math.atan2(gaussianM, Math.sqrt(skyHeightM * (2 * gaussianM + skyHeightM))),
-    sinSunRadius: Math.sin(sunAngularRadiusRad),
   };
+}
+
+/**
+ * The sky view's x axis at a camera (plan R08, R08.T7): its azimuth origin
+ * ({@link skyAzimuthOrigin}) at the first source, about which the table's local azimuth is
+ * measured, so that the brightest star's vertical falls on the table's first and last columns,
+ * formed in `f64`; with no source, at the zenith's own fallback.
+ *
+ * @param normal - The datum's unit outward normal under the camera.
+ */
+export function skyAxisOf(normal: Vec3, suns: ReadonlyArray<SunState>): Vec3 {
+  return skyAzimuthOrigin(normal, suns[0]?.directionBodyFixed ?? normal);
+}
+
+/**
+ * One of the frame's sources as the per-frame kernels and the composite take it (`view.wgsl`'s
+ * `SkySource`), formed in `f64` and narrowed once (plan R08, R08.T7).
+ */
+export interface FrameSource {
+  /** xyz its unit direction, body-fixed; w sin ρ of its angular radius, 0 for none. */
+  readonly direction: readonly [number, number, number, number];
+  /**
+   * rgb its illuminance per channel times the frame's scale (`drawFrame`'s), the weight of its light
+   * in the per-view tables; w its light slot, the path, absorber curves and multiple-scattering
+   * layer its light takes (0 for every source of a medium with no absorber).
+   */
+  readonly weight: readonly [number, number, number, number];
+  /** rgb its disc's luminance at the top of the air times the frame's scale, 0 where not drawn. */
+  readonly disc: readonly [number, number, number, number];
+}
+
+/**
+ * The frame's sources as the kernels take them, each light weighted by `frameScale`, the
+ * per-view tables' unit (plan R08, R08.T7; `decision-r08-t6b-floor.md` §6): the frame's
+ * pre-exposure, so that the tables hold pre-exposed luminance, as the composite's output is, and a
+ * twilight or moonlit sky stays in the half float's normal range wherever the exposure follows it.
+ *
+ * @param absorbers - Whether the medium has an absorber: without one every source takes path 0,
+ *   since without one the tables are the same for every light.
+ * @throws RangeError for more sources than {@link MAX_SKY_SOURCES}, a light slot outside
+ *   [0, {@link MAX_SKY_LIGHT_SLOTS}) or, under an absorber, one past the curves' `lightSlots`, or a
+ *   frame scale that is not finite and above 0.
+ */
+export function frameSourcesOf(
+  suns: ReadonlyArray<SunState>,
+  frameScale: number,
+  absorbers: boolean,
+  lightSlots: number,
+): FrameSource[] {
+  if (suns.length > MAX_SKY_SOURCES) {
+    throw new RangeError(`the sky's kernels hold ${MAX_SKY_SOURCES} sources, not ${suns.length}`);
+  }
+  if (!(Number.isFinite(frameScale) && frameScale > 0)) {
+    throw new RangeError(`a frame's scale must be finite and above 0, not ${frameScale}`);
+  }
+  return suns.map((sun) => {
+    const slot = curveSlotOf(sun);
+    if (!(Number.isInteger(slot) && slot >= 0 && slot < MAX_SKY_LIGHT_SLOTS)) {
+      throw new RangeError(
+        `a source's light slot must be an integer in [0, ${MAX_SKY_LIGHT_SLOTS}), not ${slot}`,
+      );
+    }
+    if (absorbers && slot >= lightSlots) {
+      throw new RangeError(
+        `a source takes light slot ${slot}, but the medium's absorbers have curves for ${lightSlots} lights`,
+      );
+    }
+    const s = sun.directionBodyFixed;
+    const e = sun.illuminanceLx;
+    // The disc's solid angle 2π(1 − cos ρ), as 4π sin²(ρ ÷ 2), which keeps its digits for a small
+    // disc where 1 − cos ρ would not even in f64 (a sun of 10⁻⁸ rad).
+    const solidAngle = 4 * Math.PI * Math.sin(sun.angularRadiusRad / 2) ** 2;
+    const disc = drawsDiscOf(sun) && solidAngle > 0 ? frameScale / solidAngle : 0;
+    return {
+      direction: [s.x, s.y, s.z, Math.sin(sun.angularRadiusRad)],
+      weight: [e[0] * frameScale, e[1] * frameScale, e[2] * frameScale, absorbers ? slot : 0],
+      disc: [e[0] * disc, e[1] * disc, e[2] * disc, 0],
+    };
+  });
+}
+
+/**
+ * The light slots a frame's marches track a path for: one past the largest source's, at least 1
+ * (slot 0, whose path gives the views' mean transmittance); 1 for a medium with no absorber.
+ */
+export function pathSlotsOf(sources: ReadonlyArray<FrameSource>): number {
+  return Math.max(1, ...sources.map((source) => source.weight[3] + 1));
 }
 
 /**
@@ -385,13 +528,22 @@ export const AERIAL_PERSPECTIVE_KERNEL = kernel(
 /** The per-pixel ray-march kernel. */
 export const RAY_MARCH_KERNEL = kernel("atmosphere ray march", rayMarchWgsl);
 
+/**
+ * The sources' members, `view.wgsl`'s `AtmosphereView.sources`: each source's direction, weight
+ * and disc ({@link FrameSource}), source by source, as the composite's `Draw` names them.
+ */
+const SOURCE_MEMBERS = Array.from({ length: MAX_SKY_SOURCES }, (_, i) => [
+  `sourceDirection${i}`,
+  `sourceWeight${i}`,
+  `sourceDisc${i}`,
+]).flat();
+
 /** The view's members, in `view.wgsl`'s `AtmosphereView` and the composite's `Draw` order. */
 const VIEW_MEMBERS = [
   "camera",
   "up",
-  "sun",
-  "skyScale",
-  "sunDisc",
+  "sky",
+  "skyAxis",
   "right",
   "upRay",
   "forward",
@@ -399,6 +551,7 @@ const VIEW_MEMBERS = [
   "figure",
   "output",
   "exact",
+  ...SOURCE_MEMBERS,
 ] as const;
 
 /**
@@ -476,8 +629,8 @@ export interface FrameOutputs {
  * @remarks
  * The volume is read through `shaders/aerialRead.wgsl`'s `aerialPerspectiveAt(volume, sampler,
  * uv, distanceM, reachM)` at a surface within `reachM`. That gives the light in front of the surface
- * per unit of {@link AerialPerspective.scaleLx} and its mean transmittance, so that a pass lays
- * `colour × a + rgb × scaleLx × exposure` over its own colour as the composite does; beyond the
+ * per unit of {@link AerialPerspective.scaleCdPerM2} and its mean transmittance, so that a pass lays
+ * `colour × a + rgb × scaleCdPerM2 × exposure` over its own colour as the composite does; beyond the
  * reach the composite's ray march serves the scene's own depth. The transmittance tables are read
  * together, through `common.wgsl`'s `transmittanceUnitAt` and `transmittanceThroughTables` at the
  * light's curve slot (R08.T6.c) with the line slots' pressure columns (R08.T4.d), every lookup at a
@@ -492,7 +645,7 @@ export interface FrameOutputs {
 export interface AerialPerspective {
   /**
    * The volume, `rgba16float`, 3D: at each froxel's slice the light scattered into the ray from the
-   * camera to the slice's far face (rgb, per unit of {@link AerialPerspective.scaleLx}) and the
+   * camera to the slice's far face (rgb, per unit of {@link AerialPerspective.scaleCdPerM2}) and the
    * ray's mean transmittance over the channels (a), froxel (i, j) on the ray through the screen at
    * (i, j) ÷ (size − 1), slice k reaching (k + 1) reach ÷ slices.
    */
@@ -501,11 +654,12 @@ export interface AerialPerspective {
   /** The volume's reach, m. */
   readonly reachM: number;
   /**
-   * The factor per linear Rec. 709 channel, lx, that turns the volume's rgb into luminance,
-   * cd m⁻², before pre-exposure: the drawn sun's illuminance at the body (R08.T6.d), which R08.T7
-   * makes the frame's scale.
+   * The factor per linear Rec. 709 channel that turns the volume's rgb into luminance, cd m⁻²,
+   * before pre-exposure: the frame's scale, 1 ÷ its pre-exposure since R08.T7 (R08.T9.a's
+   * `scaleLx`, renamed for its unit), the tables holding pre-exposed luminance summed over the drawn
+   * sources.
    */
-  readonly scaleLx: Rgb;
+  readonly scaleCdPerM2: Rgb;
   /**
    * The per-planet transmittance table (`tables.ts`): the optical depth of every term but the
    * absorbers in rgb, and absorber slot 0's column u ÷ U in alpha (R08.T6.c).
@@ -543,25 +697,30 @@ export interface AerialPerspective {
  * {@link HillaireAtmosphere.skyView} publishes, for R11's sky reflected in the ocean.
  *
  * @remarks
- * The table holds the sky's radiance per unit of {@link SkyViewTable.scaleLx} by sebh's
- * parameterisation on the camera's own sphere. A direction d is read at `view.wgsl`'s
- * `skyViewParamsToUv(groundHitFromHeight(bottomRadiusM, heightM, d · zenith),
- * preciseAtan2(|d × zenith|, d · zenith), |ĥ − azimuthOrigin| ÷ 2, size, horizonAngleRad)`, ĥ its
- * unit horizontal direction, through Bruneton's texel mapping (Design note 19). It is the one sun's
- * table until R08.T7, which sums the drawn suns (Design note 7) and, should its check force the
- * per-sun fallback, gives this type the per-sun tables with their suns.
+ * The table holds the sky's radiance per unit of {@link SkyViewTable.scaleCdPerM2}, summed over the
+ * frame's drawn sources (Design note 7, R08.T7), by sebh's zenith parameterisation on the camera's
+ * own sphere and the local azimuth about {@link SkyViewTable.azimuthOrigin} over the whole circle.
+ * A direction d is read at `view.wgsl`'s `skyViewParamsToUv(groundHitFromHeight(bottomRadiusM,
+ * heightM, d · zenith), preciseAtan2(|d × zenith|, d · zenith), skyViewAzimuthUnit(d · x, d · y),
+ * size, horizonAngleRad)`, x the azimuth origin and y = zenith × x, through Bruneton's texel mapping
+ * (Design note 19). R08.T7's check holds the one table within 2% of per-source tables near each
+ * source, so the per-sun fallback is not built.
  */
 export interface SkyViewTable {
-  /** The table, `rgba16float`, 2D, rgb the radiance per unit of {@link SkyViewTable.scaleLx}. */
+  /** The table, `rgba16float`, 2D, rgb the radiance per unit of {@link SkyViewTable.scaleCdPerM2}. */
   readonly texture: TextureHandle;
   readonly size: TableSize;
-  /** The factor per channel, lx, that turns the table's rgb into luminance, cd m⁻². */
-  readonly scaleLx: Rgb;
+  /**
+   * The factor per linear Rec. 709 channel that turns the table's rgb into luminance, cd m⁻²,
+   * before pre-exposure: 1 ÷ the frame's pre-exposure since R08.T7 (R08.T9.a's `scaleLx`, renamed
+   * for its unit), the table holding pre-exposed luminance.
+   */
+  readonly scaleCdPerM2: Rgb;
   /** The table's zenith: the datum's outward normal under the camera, body-fixed. */
   readonly zenith: Vec3;
   /**
-   * The unit horizontal direction, body-fixed, of azimuth 0: towards the sun's azimuth, as
-   * `view.wgsl`'s `skyFrame` takes it ({@link skyAzimuthOrigin}).
+   * The unit horizontal direction, body-fixed, of azimuth 0: towards the first source's azimuth,
+   * the view's sky axis, as `view.wgsl`'s `skyFrame` takes it ({@link skyAxisOf}).
    */
   readonly azimuthOrigin: Vec3;
   /** The sphere the table is built on: the camera's Gaussian radius √(MN), m. */
@@ -855,20 +1014,39 @@ export class HillaireAtmosphere {
   }
 
   /**
-   * Builds the frame's sky view, aerial perspective and ray march, and returns the composite draw
-   * for the caller to submit, with no depth test, into a target other than the scene's.
+   * Builds the frame's sky view, aerial perspective and ray march, summed over the drawn sources
+   * in one march along each ray (Design note 7, R08.T7), and returns the composite draw for the
+   * caller to submit, with no depth test, into a target other than the scene's.
+   *
+   * @remarks
+   * The per-view tables hold each source's light weighted by its illuminance times the frame's
+   * pre-exposure, `scene.exposureScale` ({@link frameSourcesOf}): pre-exposed luminance, as the
+   * composite's output is (`decision-r08-t6b-floor.md` §6), so that a twilight or moonlit sky
+   * stays in the half float's normal range wherever the exposure follows it. Their bytes do not
+   * grow with the sources. Each source's light takes its own light slot's absorber curves along
+   * its path to each scattering point and along the view's own path, and its own
+   * multiple-scattering layer under a medium with an absorber (`decision-r08-t6b-floor.md` §8).
+   *
+   * @param suns - The drawn sources, at most {@link MAX_SKY_SOURCES}: `sources.ts`'s `skySources`
+   *   for a body, or a caller's own; none draws a sky of nothing but what lies behind it.
+   * @throws RangeError as {@link frameSourcesOf}: too many sources, a light slot the medium's
+   *   curves do not hold, or a pre-exposure that is not finite and above 0.
    */
-  drawFrame(view: AtmosphereCamera, sun: SunState, scene: AtmosphereScene): DrawItem {
+  drawFrame(
+    view: AtmosphereCamera,
+    suns: ReadonlyArray<SunState>,
+    scene: AtmosphereScene,
+  ): DrawItem {
     const frame = this.#frame;
     const rayMarch = this.#rayMarchTexture(view.viewport);
     const { inputs, exact } = this.#dispatchFrame(
       frame.kernels,
       { skyView: frame.skyView, aerial: frame.aerial, rayMarch },
       view,
-      sun,
+      suns,
       scene,
     );
-    this.#drawn = this.#published(view, sun, inputs, exact);
+    this.#drawn = this.#published(view, suns, scene, inputs, exact);
     return {
       mesh: frame.triangle,
       material: frame.composite,
@@ -898,8 +1076,13 @@ export class HillaireAtmosphere {
    * the first call, and the ray march's anew when the viewport changes.
    *
    * @returns The arm's three `rgba32float` targets, for a tolerance read-back.
+   * @throws RangeError as {@link HillaireAtmosphere.drawFrame}.
    */
-  drawKernelArm(view: AtmosphereCamera, sun: SunState, scene: AtmosphereScene): FrameOutputs {
+  drawKernelArm(
+    view: AtmosphereCamera,
+    suns: ReadonlyArray<SunState>,
+    scene: AtmosphereScene,
+  ): FrameOutputs {
     const engine = this.#engine;
     this.#arm ??= createKernelArmResources(engine, this.#sizes);
     const arm = this.#arm;
@@ -926,7 +1109,7 @@ export class HillaireAtmosphere {
       arm.rayMarchSize = view.viewport;
     }
     const outputs = { skyView: arm.skyView, aerial: arm.aerial, rayMarch: arm.rayMarch };
-    this.#dispatchFrame(arm.kernels, outputs, view, sun, scene);
+    this.#dispatchFrame(arm.kernels, outputs, view, suns, scene);
     return outputs;
   }
 
@@ -948,10 +1131,15 @@ export class HillaireAtmosphere {
     }
   }
 
-  /** What a frame publishes for `view` (R08.T9.a): its volume, its sky view and their tables. */
+  /**
+   * What a frame publishes for `view` (R08.T9.a): its volume, its sky view and their tables, each
+   * per unit of the frame's scale (R08.T7): the tables hold pre-exposed luminance, so the factor
+   * to luminance is 1 ÷ the pre-exposure in each channel.
+   */
   #published(
     view: AtmosphereCamera,
-    sun: SunState,
+    suns: ReadonlyArray<SunState>,
+    scene: AtmosphereScene,
     inputs: AtmosphereInputs,
     exact: ViewExact,
   ): DrawnFrame {
@@ -959,13 +1147,15 @@ export class HillaireAtmosphere {
     const sizes = this.#sizes;
     const tables = this.#tables;
     const medium = tables.medium;
+    const unit = 1 / scene.exposureScale;
+    const scaleCdPerM2: Rgb = [unit, unit, unit];
     return {
       view,
       aerial: {
         volume: frame.aerial,
         size: sizes.aerialPerspective,
         reachM: sizes.aerialPerspectiveReachM,
-        scaleLx: sun.illuminanceLx,
+        scaleCdPerM2,
         transmittance: tables.transmittance,
         absorberColumns: tables.absorberColumns,
         absorberPressureColumns: tables.absorberPressureColumns,
@@ -979,9 +1169,9 @@ export class HillaireAtmosphere {
       skyView: {
         texture: frame.skyView,
         size: sizes.skyView,
-        scaleLx: sun.illuminanceLx,
+        scaleCdPerM2,
         zenith: inputs.normal,
-        azimuthOrigin: skyAzimuthOrigin(inputs.normal, sun.directionBodyFixed),
+        azimuthOrigin: skyAxisOf(inputs.normal, suns),
         bottomRadiusM: inputs.radiusM - inputs.heightM,
         heightM: skyViewHeight(inputs.heightM, medium.topHeightM),
         horizonAngleRad: exact.horizonAngleRad,
@@ -998,7 +1188,7 @@ export class HillaireAtmosphere {
     kernels: FrameKernels,
     outputs: FrameOutputs,
     view: AtmosphereCamera,
-    sun: SunState,
+    suns: ReadonlyArray<SunState>,
     scene: AtmosphereScene,
   ): { readonly inputs: AtmosphereInputs; readonly exact: ViewExact } {
     const engine = this.#engine;
@@ -1006,13 +1196,14 @@ export class HillaireAtmosphere {
     const inputs = atmosphereInputs(view, this.#figure);
     const tables = this.#tables;
     const medium = tables.medium;
-    const exact = this.#fillView(view, sun, scene, inputs, medium);
+    const exact = this.#fillView(view, suns, scene, inputs, medium);
     const perFrameMedium = packMediumUniform(medium, inputs.radiusM - inputs.heightM, 1);
     const common = {
       buffers: { terms: tables.terms },
       sampled: {
         densityTables: tables.densityTables,
         phaseTables: tables.phaseTables,
+        lobeTables: tables.lobeTables,
         transmittance: tables.transmittance,
         multiScattering: tables.multiScattering,
         absorberColumns: tables.absorberColumns,
@@ -1105,7 +1296,7 @@ export class HillaireAtmosphere {
 
   #fillView(
     view: AtmosphereCamera,
-    sun: SunState,
+    suns: ReadonlyArray<SunState>,
     scene: AtmosphereScene,
     inputs: AtmosphereInputs,
     medium: AtmosphereMedium,
@@ -1116,12 +1307,17 @@ export class HillaireAtmosphere {
     const topHeightM = medium.topHeightM;
     const p = view.positionM;
     const n = inputs.normal;
-    const s = sun.directionBodyFixed;
-    const sunRgb = sun.illuminanceLx;
-    // The disc's solid angle 2π(1 − cos ρ), as 4π sin²(ρ ÷ 2), which keeps its digits for a small
-    // disc where 1 − cos ρ would not even in f64 (a sun of 10⁻⁸ rad).
-    const solidAngle = 4 * Math.PI * Math.sin(sun.angularRadiusRad / 2) ** 2;
-    const disc = solidAngle > 0 ? 1 / solidAngle : 0;
+    const absorbers = absorberCount(medium) > 0;
+    // The per-view tables' unit is the frame's pre-exposure (`decision-r08-t6b-floor.md` §6): each
+    // source's weight is its illuminance times it, so the tables hold pre-exposed luminance and the
+    // composite's factor from them, the scale F = 1 ÷ exposureScale times the exposure, is 1.
+    const sources = frameSourcesOf(
+      suns,
+      scene.exposureScale,
+      absorbers,
+      this.#tables.curves.length,
+    );
+    const axis = skyAxisOf(n, suns);
     const aspect = view.viewport.widthPx / view.viewport.heightPx;
     const tanX = Math.tan(view.fovXRad / 2);
     const tanY = tanX / aspect;
@@ -1129,14 +1325,17 @@ export class HillaireAtmosphere {
     const up = rotate(view.orientation, { x: 0, y: 1, z: 0 });
     const forward = rotate(view.orientation, { x: 0, y: 0, z: -1 });
     const sizes = this.#sizes;
-    const exact = viewExactOf(p, this.#figure, topHeightM, inputs, sun.angularRadiusRad);
+    const exact = viewExactOf(p, this.#figure, topHeightM, inputs);
     set("camera", [p.x, p.y, p.z, inputs.heightM]);
     set("up", [n.x, n.y, n.z, inputs.radiusM - inputs.heightM]);
-    set("sun", [s.x, s.y, s.z, sun.angularRadiusRad]);
-    // The tables hold light per unit of the sun's illuminance in each channel (R08.T6.d), so the
-    // sky, the ground the march sees and the disc all take the sun's own.
-    set("skyScale", [sunRgb[0], sunRgb[1], sunRgb[2], scene.exposureScale]);
-    set("sunDisc", [sunRgb[0] * disc, sunRgb[1] * disc, sunRgb[2] * disc, 0]);
+    set("sky", [sources.length, pathSlotsOf(sources), this.#tables.multiScatteringLayers, 1]);
+    set("skyAxis", [axis.x, axis.y, axis.z, 0]);
+    for (let i = 0; i < MAX_SKY_SOURCES; i += 1) {
+      const source = sources[i];
+      set(`sourceDirection${i}`, source?.direction ?? [0, 0, 1, 0]);
+      set(`sourceWeight${i}`, source?.weight ?? [0, 0, 0, 0]);
+      set(`sourceDisc${i}`, source?.disc ?? [0, 0, 0, 0]);
+    }
     set("right", [right.x * tanX, right.y * tanX, right.z * tanX, 0]);
     set("upRay", [up.x * tanY, up.y * tanY, up.z * tanY, 0]);
     set("forward", [forward.x, forward.y, forward.z, 0]);
@@ -1158,12 +1357,7 @@ export class HillaireAtmosphere {
       sizes.rayMarchScale,
       sizes.skyViewSamples,
     ]);
-    set("exact", [
-      exact.groundQuadricM2,
-      exact.topQuadricM2,
-      exact.horizonAngleRad,
-      exact.sinSunRadius,
-    ]);
+    set("exact", [exact.groundQuadricM2, exact.topQuadricM2, exact.horizonAngleRad, 0]);
     // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g), how many of the
     // medium's terms are absorbers, whose columns its transmittance to space reads (R08.T6.c), and
     // its line slots, whose pressure channels the read takes (R08.T4.d).

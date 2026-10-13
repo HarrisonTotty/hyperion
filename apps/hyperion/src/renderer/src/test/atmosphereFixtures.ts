@@ -206,8 +206,13 @@ export const EARTH_OXYGEN_FRACTION = 0.209_476;
  * bands have no cross-sections yet, so add nothing to the curve), the O₂–O₂ pair that O₂ forms,
  * and 30 DU of tropospheric ozone below 200 hPa, a layer of its own; with R05's Rayleigh
  * scattering on the column and R05's aerosol.
+ *
+ * @param lightsK - Each light slot's Planck temperature, K, slot 0 first: the curves are one set a
+ *   light (R08.T7's K5 and M3 pair takes [4,450, 3,300]).
  */
-export function fourAbsorberMedium(): MediumWithCurves {
+export function fourAbsorberMedium(
+  lightsK: ReadonlyArray<number> = [SUN_TEFF_K],
+): MediumWithCurves {
   const column = earthLikeColumn();
   const oxygenPerM2 =
     EARTH_OXYGEN_FRACTION *
@@ -237,7 +242,6 @@ export function fourAbsorberMedium(): MediumWithCurves {
     temperatureK: 250,
   };
   const all = [...specs, troposphere];
-  const sun = planckBakeSpectrum(SUN_TEFF_K);
   const [rayleigh, aerosol] = R05_EARTH_REFERENCE.terms;
   if (rayleigh === undefined || aerosol === undefined) {
     throw new Error("R05's Earth has its Rayleigh and aerosol terms");
@@ -253,7 +257,10 @@ export function fourAbsorberMedium(): MediumWithCurves {
         ...all.map((spec) => absorberTerm(spec, column)),
       ],
     },
-    curves: [all.map((spec) => absorberCurve(spec, sun))],
+    curves: lightsK.map((temperatureK) => {
+      const spectrum = planckBakeSpectrum(temperatureK);
+      return all.map((spec) => absorberCurve(spec, spectrum));
+    }),
   };
 }
 

@@ -30,6 +30,7 @@ import {
   checkAtmosphereSteps,
   checkAtmosphereTables,
   checkAtmosphereTwins,
+  checkSeveralSuns,
 } from "./atmosphere";
 import { checkBlendComputeCube, checkMaterialState, checkSplatRefused } from "./blending";
 import { checkBloom } from "./bloom";
@@ -75,8 +76,8 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
 
 /**
  * A part of the page's groups, each about a third of the page's CPU time: 2 and 3 the atmosphere's
- * CPU-twin groups (R08.T6), whose twins outweigh their GPU work (2 R08.T6.b's, 3 R08.T6.g's and
- * R08.T6.i's), and 1 every other group.
+ * CPU-twin groups (R08.T6, R08.T7), whose twins outweigh their GPU work (2 R08.T6.b's, 3
+ * R08.T6.g's, R08.T6.i's and R08.T7's), and 1 every other group.
  */
 type PagePart = 1 | 2 | 3;
 
@@ -259,6 +260,9 @@ async function run(
   );
   await group(3, "R08.T6.i the marches cut at layer edges", () =>
     checkAtmosphereLayerEdges(engine, checks, twins),
+  );
+  await group(3, "R08.T7 several suns, and the sky through the air", () =>
+    checkSeveralSuns(engine, checks, twins),
   );
   await group(1, "R05.T11.a the terrain's resources", () => checkTerrainResources(engine, checks));
   await group(1, "R05.T11.b the terrain's frames", () => checkTerrainFrames(engine, checks));

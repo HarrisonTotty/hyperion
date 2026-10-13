@@ -27,9 +27,14 @@
  */
 
 import { substanceName } from "../../lib/substances";
-import { gaussLegendre } from "../lighting/quadrature";
 import { type AggregateMode, aggregateOptics } from "./aggregate";
 import type { AtmosphereColumn } from "./column";
+import {
+  FORWARD_PEAK_COSINE,
+  FORWARD_PEAK_INTEGRAL,
+  FORWARD_PEAK_SHAPE,
+  phaseTableMoment,
+} from "./forwardPeak";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "./thick/regime";
 import type { AtmosphereLabel } from "./labels";
 import {
@@ -113,55 +118,14 @@ function distributionOptics(mode: AerosolMode, wavelengthNm: number, mu: Float64
 // ---------------------------------------------------------------------------------------------
 // The phase tables.
 
-/** The Gauss–Legendre rule on each interval of a table's integrals (order 8), as (node, weight). */
-const TABLE_GL: ReadonlyArray<readonly [number, number]> = (() => {
-  const rule = gaussLegendre(8);
-  return Array.from(rule.x, (x, i) => [x, rule.w[i] ?? Number.NaN] as const);
-})();
-
-/**
- * ∫ p P(μ) dΩ of a function linear in u between a table's entries, with P a weight in μ = cos πu²:
- * 2π ∫₀¹ p(u) P(μ(u)) sin(πu²) 2πu du, by Gauss–Legendre on each interval (exact to rounding for
- * the interpolant the table is read with).
- */
-function tableIntegral(
-  u: Float64Array,
-  values: Float64Array,
-  weight: (mu: number) => number,
-): number {
-  let sum = 0;
-  for (let i = 0; i + 1 < u.length; i += 1) {
-    const u0 = u[i] ?? Number.NaN;
-    const u1 = u[i + 1] ?? Number.NaN;
-    const v0 = values[i] ?? Number.NaN;
-    const v1 = values[i + 1] ?? Number.NaN;
-    const half = 0.5 * (u1 - u0);
-    for (const [x, w] of TABLE_GL) {
-      const t = 0.5 * (1 + x);
-      const uu = u0 + t * (u1 - u0);
-      const angle = Math.PI * uu * uu;
-      sum +=
-        half *
-        w *
-        (v0 + t * (v1 - v0)) *
-        weight(Math.cos(angle)) *
-        Math.sin(angle) *
-        2 *
-        Math.PI *
-        uu;
-    }
-  }
-  return 2 * Math.PI * sum;
-}
-
 /** The integral of a table channel over the sphere, as `phaseAt` reads it, sr⁻¹ × sr. */
 export function phaseTableIntegral(table: PhaseTable, channel: 0 | 1 | 2): number {
-  return tableIntegral(table.u, table.values[channel], () => 1);
+  return phaseTableMoment(table.u, table.values[channel], () => 1);
 }
 
 /** The asymmetry of a table channel as read: ∫ p cos θ dΩ. */
 export function phaseTableAsymmetry(table: PhaseTable, channel: 0 | 1 | 2): number {
-  return tableIntegral(table.u, table.values[channel], (mu) => mu);
+  return phaseTableMoment(table.u, table.values[channel], (mu) => mu);
 }
 
 /**
@@ -173,16 +137,10 @@ export function henyeyGreenstein(asymmetry: number, mu: number): number {
 }
 
 /**
- * The table entries an unresolved forward peak is laid on: a triangle in u over the first 4
- * intervals, θ < 0.044°, inside both phase files' first angle beyond 0° (0.05° for Yang et al.,
- * 0.08° for TAMUdust2020), so it adds nothing where the files have values.
+ * The table entries an unresolved forward peak is laid on, and its shape (`forwardPeak.ts`, where
+ * `tables.ts` takes them to take the delta out of the kernels' medium, R08.T7).
  */
-export const FORWARD_PEAK_ENTRIES = 4;
-
-/** The forward peak's shape on {@link PHASE_TABLE_U}: 1 − k ÷ {@link FORWARD_PEAK_ENTRIES}, then 0. */
-const FORWARD_PEAK_SHAPE: Float64Array = PHASE_TABLE_U.map((_, k) =>
-  Math.max(0, 1 - k / FORWARD_PEAK_ENTRIES),
-);
+export { FORWARD_PEAK_ENTRIES, FORWARD_PEAK_SHAPE, forwardPeakEntry } from "./forwardPeak";
 
 /** One channel's entries on {@link PHASE_TABLE_U}, before the integral's factor. */
 interface ChannelEntries {
@@ -236,7 +194,8 @@ function channelEntries(optics: ModeOptics): ChannelEntries {
  * A channel whose matrix has a forward peak (a phase file's unresolved diffraction peak) has it
  * laid on the first {@link FORWARD_PEAK_ENTRIES} entries, with the identity's matrix, and sized
  * again on the table as read so that the table integrates to 1 and its mean cosine is the mode's
- * g ({@link forwardPeakSplit}); the other channels are only normalised.
+ * g ({@link forwardPeakSplit}); the other channels are only normalised. The table records each
+ * channel's share of the delta in `forwardPeak` (R08.T7).
  *
  * @throws RangeError for optics whose matrix is not at {@link PHASE_TABLE_MU}.
  */
@@ -244,22 +203,24 @@ export function aerosolPhaseTable(
   optics: readonly [ModeOptics, ModeOptics, ModeOptics],
 ): PhaseTable {
   const channels = optics.map(channelEntries);
-  const peakIntegral = tableIntegral(PHASE_TABLE_U, FORWARD_PEAK_SHAPE, () => 1);
-  const peakCosine = tableIntegral(PHASE_TABLE_U, FORWARD_PEAK_SHAPE, (mu) => mu) / peakIntegral;
+  const peakIntegral = FORWARD_PEAK_INTEGRAL;
+  const peakCosine = FORWARD_PEAK_COSINE;
   const values: Float64Array[] = [];
+  const shares: number[] = [];
   const elements: Float64Array[][] = [[], [], [], [], []];
   for (const [c, entries] of channels.entries()) {
-    const integral = tableIntegral(PHASE_TABLE_U, entries.a1, () => 1);
+    const integral = phaseTableMoment(PHASE_TABLE_U, entries.a1, () => 1);
     const split =
       entries.forwardPeak > 0
         ? forwardPeakSplit(
             integral,
-            tableIntegral(PHASE_TABLE_U, entries.a1, (mu) => mu),
+            phaseTableMoment(PHASE_TABLE_U, entries.a1, (mu) => mu),
             optics[c]?.asymmetry ?? Number.NaN,
             peakCosine,
           )
         : { scale: 1 / integral, forwardPeak: 0 };
     const factor = split.scale;
+    shares.push(split.forwardPeak);
     const peak = split.forwardPeak / peakIntegral;
     const withPeak = (v: number, k: number): number =>
       v * factor + peak * (FORWARD_PEAK_SHAPE[k] ?? 0);
@@ -290,7 +251,13 @@ export function aerosolPhaseTable(
   const matrix: PhaseMatrixTable | undefined = kept
     ? { a2: element(0), a3: element(1), a4: element(2), b1: element(3), b2: element(4) }
     : undefined;
-  return phaseTable(PHASE_TABLE_U, [red, green, blue], matrix);
+  // Each channel's delta's share, which the kernels' medium takes out (`tables.ts`'s
+  // `withoutForwardDelta`, R08.T7); the table keeps it, for R08.T12's cases and the bakes' delta-M.
+  return phaseTable(PHASE_TABLE_U, [red, green, blue], matrix, [
+    shares[0] ?? 0,
+    shares[1] ?? 0,
+    shares[2] ?? 0,
+  ]);
 }
 
 /** The streams the bakes' delta-M truncation assumes by default: 2M = 32 moments kept (R08.T14.b sets its own). */
@@ -324,7 +291,7 @@ export function deltaMTruncation(
   const order = 2 * streams;
   const full = new Float64Array(order + 1);
   for (let l = 0; l <= order; l += 1) {
-    full[l] = tableIntegral(table.u, table.values[channel], (mu) => legendre(l, mu));
+    full[l] = phaseTableMoment(table.u, table.values[channel], (mu) => legendre(l, mu));
   }
   const fraction = full[order] ?? Number.NaN;
   const moments = Float64Array.from(

@@ -4,8 +4,16 @@
 // own phase functions: Hillaire's isotropic table for `thin` worlds (plan R08, R08.T6.b). Follows
 // `common.wgsl` and `medium.wgsl`; reads the medium's terms, their density tables and the
 // transmittance table, as optical depth with its absorber columns, and one light slot's curves of
-// growth (`curveSlot`, 0 in R08.T6.c), which the sun's transmittance and each direction's own path
-// take (plan R08, Design notes 5 and 8, R08.T6.c).
+// growth (`curveSlot`), which the sun's transmittance and each direction's own path take (plan R08,
+// Design notes 5 and 8, R08.T6.c). Since R08.T7 the tabulated terms' forward lobes are truncated
+// out of the medium it is built from, as delta-M does (`forwardLobe.ts`): their in-lobe scattering
+// P sigma_s is taken from the scattering and the extinction, and the sun's light at each sample is
+// raised by e^(x P), the forward-diffuse light the truncation leaves in the beam, x the lobe's
+// scattering depth to the top, its share of the sample's extinction times the stored optical
+// depth; the per-frame kernels add the lobe's higher orders about each source. Since R08.T7 the
+// table is a 2D array of one layer a light slot
+// under a medium with an absorber, each built with that light's curves by its own dispatch, which
+// writes layer `curveSlot()` (`decision-r08-t6b-floor.md` section 8); a medium with none has one.
 //
 // Ported from Bevy 0.19.1's crates/bevy_pbr/src/atmosphere/multiscattering_lut.wgsl (MIT or
 // Apache-2.0; the notice is in common.wgsl) and checked against sebh's NewMultiScattCS and
@@ -51,7 +59,7 @@
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
 @group(0) @binding(2) var densityTables : texture_2d_array<f32>;
 @group(0) @binding(3) var transmittance : texture_2d<f32>;
-@group(0) @binding(4) var multiScatteringOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(4) var multiScatteringOut : texture_storage_2d_array<rgba16float, write>;
 @group(0) @binding(5) var absorberColumns : texture_2d<f32>;
 @group(0) @binding(6) var absorberCurves : texture_2d<f32>;
 @group(0) @binding(7) var<uniform> layerEdges : LayerEdges;
@@ -88,18 +96,22 @@ var<workgroup> escape : array<vec3f, DIRECTIONS>;
 
 // The sun's transmittance from a height above the ground, read on the table's sphere: its stored
 // optical depth and absorber columns, with light slot `curveSlot()`'s curves of growth,
-// exponentiated in f32 (R08.T6.c). The one table R08.T6.c builds is shared by every sun and built
-// with slot 0's curves, the body's brightest star's (plan R08's Risks, "Which star's absorber
-// curve the shared tables are built with"); R08.T7 builds one a light slot through `curveSlot`.
-fn transmittanceToSun(heightM : f32, muSun : f32) -> vec3f {
+// exponentiated in f32 (R08.T6.c). Each layer is built with its own light's curves (R08.T7; plan
+// R08's Risks, "Which star's absorber curve the shared tables are built with").
+fn transmittanceToSun(heightM : f32, muSun : f32, local : MediumSample) -> vec3f {
   let h = clamp(heightM, 0.0, medium.topHeightM);
   let unit = transmittanceUnitAt(medium.bottomRadiusM, medium.topHeightM, h, muSun);
   let count = absorberCount();
   let slot = curveSlot();
-  return transmittanceThroughTables(
+  let toSun = transmittanceThroughTables(
     transmittance, absorberColumns, absorberPressureColumns, lastAbsorberPressureColumn,
     absorberCurves, count, slot, lineSlots(), unit
   );
+  // The forward-diffuse light the lobes' truncation keeps in the beam (R08.T7): e^(x P), x P the
+  // stored optical depth times the lobes' share of the extinction, held under e^80.
+  let share = local.lobeScattering / max(local.extinction, vec3f(1e-30));
+  let boost = exp(min(tableAtUnit(transmittance, unit).rgb * share, vec3f(80.0)));
+  return toSun * select(vec3f(1.0), boost, local.lobeScattering > vec3f(0.0));
 }
 
 struct Integrated {
@@ -149,12 +161,15 @@ fn integrateStep(march : ptr<function, DirectionMarch>, ray : DirectionRay, step
     local.pressureColumns, dt
   );
   let stepAbsorbed = next.depth - path.depth;
-  let stepDepth = local.extinction * dt + stepAbsorbed;
+  // The lobes' in-lobe scattering truncated (R08.T7): neither scattered nor lost here.
+  let scattering = max(local.scattering - local.lobeScattering, vec3f(0.0));
+  let extinction = max(local.extinction - local.lobeScattering, vec3f(0.0));
+  let stepDepth = extinction * dt + stepAbsorbed;
   (*march).path = next;
   let stepTransmittance = exp(-stepDepth);
   let bottom = medium.bottomRadiusM;
   let lit = select(1.0, 0.0, groundHitFromHeight(bottom, max(sampleHeightM, 0.0), muSun));
-  let source = lit * transmittanceToSun(sampleHeightM, muSun) * local.scattering / (4.0 * PI);
+  let source = lit * transmittanceToSun(sampleHeightM, muSun, local) * scattering / (4.0 * PI);
   let factor = stepFactor(stepDepth);
   let throughput = (*march).throughput;
   (*march).luminance += throughput * source * dt * factor;
@@ -199,7 +214,7 @@ fn integrate(heightM : f32, dir : vec3f, sun : vec3f) -> Integrated {
     let ground = origin + tMax * dir;
     let up = normalize(ground);
     let muSun = dot(sun, up);
-    luminance += transmittanceToSun(0.0, muSun) * throughput
+    luminance += transmittanceToSun(0.0, muSun, mediumAtHeight(0.0)) * throughput
       * max(muSun, 0.0) * medium.groundAlbedo.rgb / PI;
   }
   return Integrated(luminance, march.escaped + throughput);
@@ -210,7 +225,7 @@ fn main(
   @builtin(global_invocation_id) id : vec3u,
   @builtin(local_invocation_id) lid : vec3u,
 ) {
-  let size = vec2f(textureDimensions(multiScatteringOut));
+  let size = vec2f(textureDimensions(multiScatteringOut).xy);
   // The texel's unit range (Bruneton's mapping, sebh's write): x the sun's zenith cosine, y the
   // height from GROUND_OFFSET_M to the top.
   let unit = clamp(unitFromTexelUv((vec2f(id.xy) + 0.5) / size, size), vec2f(0.0), vec2f(1.0));
@@ -250,5 +265,5 @@ fn main(
   let alone = meanEscape <= vec3f(0.0);
   let stored = select(secondOrderLuminance / meanEscape, secondOrderLuminance, alone);
   let aloneCount = dot(select(vec3f(0.0), vec3f(1.0), alone), vec3f(1.0));
-  textureStore(multiScatteringOut, id.xy, vec4f(stored, aloneCount));
+  textureStore(multiScatteringOut, id.xy, curveSlot(), vec4f(stored, aloneCount));
 }

@@ -361,7 +361,7 @@ R05's `TABLE_SIZES` (`hillaire.ts`), which is `SETTINGS[s].atmosphere`, stays in
 gains the thick table's size (R08.T14.c). As built it holds the transmittance (256 × 64) and
 multiple-scattering (32²) sizes, the sky view (192 × 108 at 75 steps on high, 128 × 64 at 16 on
 low), the aerial-perspective volume (32³ and 32 × 32 × 16, 2 steps a slice, to 32 km), the march
-(full resolution at 32 steps, half at 16) and `aerialPerspectiveScope`. `ViewSettings` also holds
+(full resolution at 36 steps since R08.T7, 32 before; half at 16) and `aerialPerspectiveScope`. `ViewSettings` also holds
 R06's `sky` and R07's `internalScaleBounds`, `budget` and `photoreal` today. `settings.ts` is the
 module R12 reads for this plan's ladder entries.
 
@@ -6955,8 +6955,367 @@ generator, and the reference's sampling needs no domain tag.
     note 11 says the 32 km comes from "Hillaire's code" and Table 2; his code spans 128 km in
     squared slices, Table 2 gives no range, and the 32 km is §5.4's. A docs pass corrects them.
 
+- **Deviations in T7, as built** (2026-10-13). `sources.ts`, `forwardPeak.ts` and
+  `forwardLobe.ts` (new), `settings.ts`, `hillaire.ts`, `tables.ts`, `tablesCpu.ts`, `medium.ts`,
+  `aerosol.ts`, `view/quality/qualitySetting.ts` and `view/spike/spikeRun.ts`; the WGSL (`view`,
+  `source`, `skyView`, `aerialPerspective`, `rayMarch`, `composite`, `multiScattering`, `medium` and
+  `common`); `smoke/atmosphere.ts`, `smoke/page.ts`, `smoke/twinJobs.ts` and `smoke/twinPool.ts`;
+  tests in `sources.test.ts`, `severalSuns.test.ts`, `forwardPeak.test.ts` and
+  `forwardLobe.test.ts` (new) and in the `hillaire`, `tables`, `tablesCpu`, `tablesCpuLines`,
+  `precision`, `marchSteps` and `twinJobs` tests.
+  - _Names beyond the text._
+    - `sources.ts`: `SkySource`, `SkySkip`, `skySourcesWithSkips` and `twilightLimitRad`.
+    - `hillaire.ts`: `MAX_SKY_LIGHT_SLOTS` (4), `FrameSource`, `frameSourcesOf`, `skyAxisOf`,
+      `curveSlotOf` and `drawsDiscOf`. `SunState` gains `curveSlot?` and `drawsDisc?`.
+    - `forwardPeak.ts`: `FORWARD_PEAK_GRID_ENTRIES`, `FORWARD_PEAK_U`, `FORWARD_PEAK_INTEGRAL`,
+      `FORWARD_PEAK_COSINE` and `phaseTableMoment` (moved from `aerosol.ts`, which re-exports
+      `FORWARD_PEAK_ENTRIES`, `FORWARD_PEAK_SHAPE` and `forwardPeakEntry`).
+    - `forwardLobe.ts`: `FORWARD_LOBE_RAD`, `FORWARD_LOBE_MIN_SHARE`, `lobeIsDrawn`,
+      `FORWARD_LOBE_ENTRIES`, `FORWARD_ORDERS_ENTRIES`, `FORWARD_LOBE_X_NODES`,
+      `FORWARD_LOBE_X_MAX`, `forwardLobeX`, `besselJ0`, `ForwardLobe`, `forwardLobeOf`,
+      `forwardLobeOfTable`, `slabOrders` and `forwardLobeAt`.
+    - `tables.ts`: `withoutForwardDelta`, `multiScatteringLayersOf`, `packLobeTables` and
+      `LayeredPlanes`, and the getters `multiScatteringLayers` and `lobeTables`.
+    - `tablesCpu.ts`: `frameTwinView`, `skyViewTexelsTwin`, `skyViewReadTwin`, `twinTableTexels`,
+      `TwinRaySource`, `TwinRay.sources`, `TwinSources.sunOpticalDepth` and
+      `PlanetTwin.multiScatteringBySlot`.
+    - WGSL: `SkySource`, `ViewMarch`, `withinDisc`, `skyViewAzimuthUnit`, `hasLobe` and
+      `lobeOrdersOf`.
+  - _`MAX_SKY_SOURCES` is declared in `hillaire.ts`_ and re-exported by `settings.ts`, with
+    `MAX_SKY_LIGHT_SLOTS`. T9.a's `settings.ts` reads `TABLE_SIZES` from `hillaire.ts`, so
+    `hillaire.ts` importing `settings.ts` would be a cycle.
+  - _`skySources` takes a sixth argument_, `toBodyFixed`. R07's arrays are in the frame of the
+    lights' centres and the camera is body-fixed, so each source is rotated into the body-fixed
+    axes. Each is carried to the camera: its direction from the camera, its illuminance there by
+    the inverse square, and its angular radius asin(R ÷ d). The Moon's parallax from Earth's ground
+    is about 1°.
+  - _The two skips._ Below the twilight limit e = −[acos(R ÷ r_c) + 2 acos(R ÷ R_top)], R = c² ÷ a,
+    a source's upper limb skips it: 20.23° on Earth's ground (20.27° from 2 m) under a 100 km top. A source under
+    `STAR_CUT_RELATIVE` of the brightest source above the horizon (photopic) is negligible. Both
+    apply only inside the air.
+  - _Stars draw no disc in the composite._ A `SkySource` has `drawsDisc: false`, since R06's
+    host-disc layer draws a star's disc into the scene beneath. The composite multiplies what the
+    scene holds behind the sky by the transmittance to space along each pixel's ray: under a
+    source's disc (`withinDisc`, |d × s| ≤ sin ρ with d·s > 0, sin ρ formed in `f64`) it uses that
+    source's light slot, and slot 0's elsewhere. A `SunState` that leaves `drawsDisc` out, as R05's
+    callers and the smoke do, is drawn with its disc as R05 drew it, at its own slot's
+    transmittance. `curveSlot` and `drawsDisc` are optional, so R05's callers are unchanged.
+  - _The per-frame scale_ is the pre-exposure, `AtmosphereScene.exposureScale`.
+    - Each source's weight is its illuminance times the scale, formed in `f64` by
+      `frameSourcesOf`. So the per-view tables hold pre-exposed luminance, and the composite's
+      factor is 1 (`sky.w`).
+    - T9.a's `scaleLx` is now 1 ÷ `exposureScale` in each channel, for both `AerialPerspective` and
+      `SkyViewTable`.
+    - A disc's factor is the illuminance over its solid angle, times the scale.
+  - _The composite's alpha._ The composite passes the scene's alpha, R07's `METER_CLASS`, through
+    on every path. The task asks the sky-view, aerial-perspective and composite passes to blend
+    alpha with source zero and destination one. The first two are compute passes that never write
+    the HDR target. The composite reads `AtmosphereScene.colour` and draws into another target,
+    where there is no destination alpha to keep. A blend state would need the composite to draw in
+    place, which R05's `drawFrame` contract does not do.
+    - Checked statically in `severalSuns.test.ts`: every return of the fragment carries
+      `meterClass`.
+    - Checked on the GPU in the smoke, over the sky, the aerial volume and the ray march.
+  - _The sky view's azimuth_ is the local azimuth φ = 2π u about the sky axis, the first source's
+    horizontal (`skyAxisOf`, T9.a's `skyAzimuthOrigin`), over the whole circle, since several
+    sources break R05's mirror symmetry. It is built with `preciseSinCos` and mirrored on [π, 2π].
+    Every source is taken into the same frame. R05's 192 × 108 and 128 × 64 are unchanged.
+  - _One path a light slot._ Every march (sky view, aerial volume, ray march) carries one
+    throughput and one absorber column a light slot, up to `MAX_SKY_LIGHT_SLOTS` (`ViewMarch`).
+    Each source's in-scattered light is dimmed along the view by its own slot's curves of growth.
+    A medium with no absorber keeps one path for every source. The stored mean transmittance (the
+    tables' alpha) is slot 0's.
+  - _The multiple-scattering layers._ `multiScatteringLayersOf(medium, curves)` is max(1, the
+    lights) under an absorber, and 1 otherwise. There is one dispatch a layer, each at its
+    `curveSlot()`. The table's key holds the curves, so a change of the light list or of a star's
+    curves rebuilds it. The texture is a 2D array whose layer i is slot i's (8 KB a layer). A
+    planetshine source reads slot 0's.
+  - _The forward delta._ `PhaseTable.forwardPeak` is each channel's share, validated in [0, 1);
+    `aerosolPhaseTable` sets it. `withoutForwardDelta(term)` takes the delta's entries from a₁–a₄
+    (`forwardPeakEntry`), divides by 1 − f_c and scales the scattering by 1 − f_c. a₁ is held at
+    0 or more where the delta's last entry overshoots; b₁ and b₂ are signed and are not held.
+    - A term with no delta is returned as itself.
+    - A delta on a table off the kernels' 256-entry grid throws, since the delta's shape is
+      defined on that grid.
+    - `kernelMedium` and `setMedium` both apply it, so the kernels and the twin read one medium.
+  - _The forward lobe's higher orders: a per-sample effective phase_ (the task's choice). The
+    model is in `forwardLobe.ts`'s remarks.
+    - **The tables.** A tabulated phase's forward part p_f is entries 0–104 (to 29.94°). Its
+      transform p̂(k) uses `besselJ0` (Numerical Recipes' `bessj0`), on k in steps of 1/8 to 64
+      and then of 1/2 to 2,048, by the trapezoid rule. P = p̂(0) is its share. The forward-diffuse
+      light at a scattering depth x is D = Σ_{n≥1} xⁿ ÷ n! p_f^{*n}, whose total is e^(xP) − 1.
+      Scattered once more at the sample by the whole phase p_w (all 256 entries, on the same
+      plane), it gives E = D * p_w. Ẽ = E e^(−xP) = (1 ÷ 2π) ∫ p̂_w (e^(x(p̂ − P)) − e^(−xP))
+      J₀(kθ) k dk is tabulated on all 256 entries and 48 nodes x_j = 64 (j ÷ 47)².
+      - Within the lobe E is the forward part's own orders, but for the light the last
+        scattering's wide part adds.
+      - Far from it E tends to (e^(xP) − 1) p(θ), smoothed over D's spread. That is the beam δ-M
+        leaves, e^(−τ + xP) (Wiscombe 1977, J. Atmos. Sci. 34, 1408), scattered by p.
+      - The science check found the first build's E, of p_f alone and tabulated to 59.8°, lost
+        that light: Hillaire's truncated term no longer carried it, and nothing else did. On the
+        twin's dusty Mars it was an estimated 30–35% of the dust's wide-angle single scattering at a
+        30° Sun, and 1.2–1.7 times it at a 5° Sun. A first fix, tabulated to 59.8° with
+        (1 − e^(−xP)) p beyond, stepped by 8% there at x 4.4. So the table takes every entry.
+    - **The kernels.** They upload Ẽ as a third 2D array texture, one layer a term,
+      256 × 48 `rgba32float` (196 KB a term; a one-texel placeholder where nothing is tabulated).
+      P goes in the term's phase code (`phase.xyz`, code 3). At each sample and source the marches
+      add σ_s e^(xP) Ẽ(x, θ) to that source's phased scattering. x is the stored optical depth to
+      the top along the source, times the lobe terms' scattering over the sample's extinction. At
+      θ's last entry the kernels take (1 − e^(−xP)) p(θ), the same there.
+    - **Not counted twice.** The multiple-scattering kernel takes Σ P σ_s out of the scattering and
+      the extinction it integrates, as delta-M does. It raises the beam by e^(τ Σ P σ_s ÷ σ_t),
+      the ground's bounce included. For one well-mixed term that is exactly the term truncated by
+      hand (`tablesCpu.test.ts`, to 10⁻⁹). With the orders' whole-phase scattering, the light the
+      truncation takes out is the light the marches put back: on the Mars slab, the phase and the
+      orders integrate over the sphere to e^(xP), δ-M's beam, to 2.6% at x 4.4 (the plane's
+      geometry standing in for the sphere's far from the source).
+    - **Where it is drawn.** A lobe is drawn where its brightest channel's P is at least
+      `FORWARD_LOBE_MIN_SHARE`, 0.2. Below that a term takes no orders and no truncation. A Rayleigh
+      shape holds 0.094 within 30° and the Mars mode over 0.3. Analytic phases (Cornette–Shanks,
+      Rayleigh) take none.
+    - **The tests** (`forwardLobe.test.ts`), on the Mars mode's homogeneous slab at τ_s 1, 2.5 and
+      4.5 (ω 0.97, red and blue):
+      - the forward part's orders match a direct numerical convolution (0.1° grid, 25 orders) to
+        1% at 3°, 5°, 8°, 12° and 20°;
+      - the kernels' effective phase, e^(xP) Ẽ, matches D * p_w by direct convolution to 1% at
+        3–55°;
+      - integrated through the slab, the table gives the forward part's orders within −1% and +3%
+        at 3–12° (0.998 to 1.024: the wide part's light);
+      - the slab's forward light, 1 + xP + the forward orders' flux, is e^(xP) to 1%;
+      - far from the lobe (90°, 120° and 150°) e^(xP) Ẽ lies within 0.9 and 1.2 of
+        (e^(xP) − 1) p(θ);
+      - the phase and the orders integrate to e^(xP) over the sphere to 3% (2.6% measured).
+    - The series identity is derived and checked numerically. The citations are given in full in
+      `forwardLobe.ts` (Wells 1973, AGARD Lecture Series 61, from memory; Zege, Ivanov and Katsev
+      1991, Springer, doi:10.1007/978-3-642-75286-5); neither was re-read.
+    - **In the twin's Mars sky** (τ(550) 0.45, slant τ about 4.0 at a 5° Sun, an airmass of 8.96 on
+      the test's shell; `forwardLobe.test.ts`):
+      - the orders carry 0.36, 0.43, 0.53 and 0.60 of the red radiance 3°, 5°, 8° and 12° above
+        the Sun, and 0.39–0.66 of the blue. `science-r08-mmf.md` §3's slab estimate, at slant τ
+        4.5, was 0.47–0.81;
+      - blue over red at 8° rises from 0.80 to 0.95, so the blue aureole widens;
+      - 90° from the Sun the orders' wide part carries 0.27 of the sky (0.09–0.10 at a 30° Sun),
+        the light the truncated multiple scattering gave up.
+  - _The march count_ (`decision-r08-t6d-findings.md` §11.4, measured as its ruling asks). Cure (a)
+    keeps 32 steps and gives the piece next to t\* no fewer steps than R05.T12.e's placement puts
+    there.
+    - On the slab Earth it cures the pinned ray, "limb, 0.1 H, sun 90°/0°", from 5.63% to 2.76%.
+    - It puts five ordinary rays over their 2%: "disc, ground zenith 80°, sun 95°/180°" at 2.80%,
+      and four limb rays at 2.03–2.16%.
+    - It puts the four-absorber fixture's "limb, 0.3 H, sun 90°/0°" at 5.04%, over its 5%.
+    - R05's Earth and the measured Earth have no layer edges, so neither moves.
+    - How it was measured: a scratch floor in `marchSteps.ts`'s pieces (each side's piece next to
+      t\* takes at least the steps R05.T12.e's placement puts there, the others share the rest),
+      through the twin's gate tests at 32 steps on the slab Earth, the four-absorber fixture and
+      the measured Earth. It is not committed, since §11.4 adopts it only if it holds; the patch
+      and its run are kept in the lane's scratch (`.git/rm45-scratch/r08-tables/t7/floor.patch`,
+      `floor-gate.out`).
+
+    So the floor was not adopted, and cure (b) is dropped. High's ray march takes §11.4's measured
+    fallback, **36 steps** (`TABLE_SIZES.high.rayMarchSamples`). That costs 12.5% more on each high
+    ray-march pixel. At 36 every ray of the slab Earth's gate holds (the limb 2.39%), and so do R05's
+    gate and the four-absorber fixture's. **For "main", before R08.T10.b** draws a medium with
+    layer edges: the count is raised. Provides' "the march (full resolution at 32 steps)" now
+    reads 36. The 32-step miss stays pinned in `tablesCpu.test.ts`, so a change shows.
+
+  - _The summed sky view near each source_ (Design note 7's check). The summed table's azimuth is
+    even over the whole circle, 1.885° a column at 192 (2.83° at 128). R05's sun-relative
+    u = sin(φ ÷ 2) gave 0.60° (0.90°) next to the sun, about three times finer there.
+    - In the twin, within 10° of each of three sources (30°, 15° and 4° up, 117° and 238° apart),
+      the summed table is held against the sum of R05's per-source tables, each in R05's layout on
+      its own source's azimuth, as the per-sun fallback would build them.
+    - On high they agree to 6.4 × 10⁻⁵ (Rayleigh) and 9.2 × 10⁻⁴ (R05's aerosol); on low to
+      1.4 × 10⁻⁴ and 2.0 × 10⁻³.
+    - Against the march along each direction both err alike: 1.1% on high and 5.4% on low, where
+      the 7° and 10° rings about the 4° source cross the horizon's coarse rows. That is sebh's
+      zenith parameterisation, which both share.
+    - So the coarser azimuth costs nothing within 10° of a source on these skies, the per-sun
+      fallback is not built, and `SkyViewTable` is unchanged. A forward peak narrower than a few
+      degrees (a Mars-like dust's aureole) is the forward lobe's orders' case, not the table's.
+  - _The binary_ (`fourAbsorberMedium([4,450, 3,300])`, Planck spectra, each light its own curves
+    for ozone, methane with O₂, the O₂ pair and tropospheric ozone). The sky equals the sum of each
+    star's single-sun sky, on its own curves and layer, to 10⁻⁶. With the companion on slot 0's
+    layer and curves instead, and the primary set beyond the twilight limit, the sky's worst
+    relative difference is 5.85% with the companion 5° up and 12.06% 3° below the horizon. With the
+    primary 25° up and the companion 12° up it is 3.59%.
+  - _The Sun and a full Moon on the rebuilt Earth._ With the Sun 1° beyond the twilight limit, the
+    Sun is skipped, and the sky equals the noon sky's twin at the Moon's direction, scaled per
+    channel, to 10⁻⁶. By day the Moon is skipped, and the sky changes by under 10⁻⁴. The kept Sun
+    changes the moonlit sky by 2.42 × 10⁻⁵ of the Moon's against the task's 10⁻⁶ (deferred below).
+  - _The per-view tables' range at twilight and by moonlight_ (`decision-r08-t6b-floor.md` §6;
+    `severalSuns.test.ts`, from 2 m on high's steps). Each value is the sky view's largest stored
+    value in units of 2⁻¹⁴ (6.1 × 10⁻⁵), the half float's least normal. It is given per unit of the
+    Sun's illuminance (R05's storage), at EV100 15, and at the metered exposure: EV100 = log₂(8 L̄),
+    with L̄ the sky's mean over the upper hemisphere.
+
+    | Scene         | Per unit Sun | EV100 15 | Metered (EV100)  |
+    | ------------- | ------------ | -------- | ---------------- |
+    | Sun at −6°    | 1.33         | 4.44     | 1.8 × 10⁴ (3.0)  |
+    | Sun at −8°    | 0.22         | 0.72     | 1.5 × 10⁴ (0.65) |
+    | Sun at −10°   | 0.026        | 0.085    | 5.4 × 10⁴ (−4.3) |
+    | Sun at −12°   | 0.0032       | 0.011    | 3.5 × 10⁴ (−6.7) |
+    | Moonlit night | 0.0061       | 0.020    | 6.4 × 10³ (−3.3) |
+
+    The sky view was measured at 48 × 27 on high's 75 steps, within 5% of high's 192 × 108 (a
+    scratch run at both). The aerial volume's and the ray march's largest, the march over a surface
+    60 km ahead in the frame's lower half:
+
+    | Scene         | Aerial: per unit Sun | Aerial: metered | Ray march: per unit Sun | Ray march: metered |
+    | ------------- | -------------------- | --------------- | ----------------------- | ------------------ |
+    | Sun at −6°    | 0.124                | 1.7 × 10³       | 1.1 × 10⁻³              | 15                 |
+    | Sun at −8°    | 0.051                | 3.6 × 10³       | 4.4 × 10⁻⁴              | 31                 |
+    | Sun at −10°   | 8.7 × 10⁻⁴           | 1.8 × 10³       | 5.4 × 10⁻⁶              | 11                 |
+    | Sun at −12°   | 3.2 × 10⁻⁴           | 3.5 × 10³       | 1.8 × 10⁻⁶              | 20                 |
+    | Moonlit night | 5.6 × 10⁻³           | 5.9 × 10³       | 3.6 × 10⁻⁵              | 38                 |
+    - Per unit of the Sun, 99.5% of the sky view's channels are subnormal at −6°, and every one
+      from −8°. That is the risk as found.
+    - At the metered exposure:
+      - the aerial volume's largest is 1.7–5.9 × 10³ × 2⁻¹⁴;
+      - the ray march's, over a surface 60 km ahead, is 11–38 × 2⁻¹⁴;
+      - the sky's least above the horizon is 149–329 × 2⁻¹⁴, so every sky channel there is normal;
+      - nothing comes near the half's 65,504.
+    - The moonlit sky's mean over the upper hemisphere, 1.30 × 10⁻² cd/m², is 1.0 stop above the
+      moonlit ground's 6.6 × 10⁻³ cd/m²: the Moon's 5.3 × 10⁻³ and the sky's own light on the
+      ground 1.3 × 10⁻³ (albedo 0.1, the rebuilt Earth's; the Moon a test's 0.32 lx at 45°, about
+      Krisciunas and Schaefer 1991's 0.313 without the opposition surge).
+      That is the twin's form of the acceptance's "within about two stops". Design note 7's figures
+      (a sky of 3–7 × 10⁻³ cd/m² against a ground of about 0.01) put the sky below the ground. The
+      twin's mean takes the bright sky near the Moon and the horizon at sea level under R05's
+      aerosol, and its ground is darker (0.1, not about 0.2), so it falls above. Both lie within
+      two stops; the by-hand look decides.
+
+  - _The multiple-scattering table's night side_ (its answer is for "main"; deferred below). It is
+    per unit illuminance, so the frame's scale cannot reach it. On the rebuilt Earth 90% of the
+    night side's channels lie under 2⁻¹⁴, the largest 5.1 × 10⁻³ at −1.8°.
+    - At the ground Ψ falls from 2.5 × 10⁻⁴ at −3° to 6.0 × 10⁻⁶ at −6°, 5.5 × 10⁻⁷ at −9° and
+      1.2 × 10⁻⁸ at −12°. That last is under half of 2⁻²⁴, so it is stored as 0. At 60 km Ψ is
+      1.7 × 10⁻⁵ at −12°.
+    - Through the half float the sky's mean moves by −0.02%, +0.73% and +8.9% at −6°, −9° and
+      −12°. Each subnormal texel rounds to a step of 2⁻²⁴, either way.
+  - _The colour error of a source's three-channel transmittance_ (`severalSuns.test.ts`; the worst
+    of R06's twelve suns at the fitted triple).
+
+    | Air                     | 2 columns | 3 columns | 10 columns |
+    | ----------------------- | --------- | --------- | ---------- |
+    | Dry air, sun zenith 85° | 0.0106    | 0.0151    | 0.1000     |
+    | With R05's aerosol, 85° | 0.0146    | 0.0293    | 0.141      |
+    | Dry air, overhead       | 0.0025    | 0.0036    | 0.0073     |
+
+    The first row reproduces R08.T4.a's figures. So beyond two or three Earth columns a low sun's
+    beam is off by more than 0.01, and such a medium's scattered light is the spectral bakes'
+    (Design note 5).
+
+  - _The source loop_ is exercised at `MAX_SKY_SOURCES` (six sources, each light where it is,
+    against the sum of six single-source tables, to 10⁻¹²). Two views with one camera give equal
+    tables, and the per-view tables' bytes do not grow with the number of suns. A star at the
+    zenith from Earth's ground is dimmed by e^(−τ) of the column, its ozone by its curve.
+  - _Beyond the task's files._
+    - `multiScattering.wgsl`: the layers and the lobes' truncation.
+    - `medium.wgsl` and `common.wgsl`: the lobes' scattering and the layered reads.
+    - `forwardPeak.ts`: the delta's shape, out of `aerosol.ts`, which `tables.ts` reads.
+    - `forwardLobe.ts`.
+    - `spikeRun.ts`: `drawFrame` takes an array.
+    - The smoke's twin jobs: a multiple-scattering job's `curveSlot`.
+    - `test/atmosphereFixtures.ts`'s `fourAbsorberMedium` takes the lights' temperatures.
+  - _The smoke_ (`smoke/atmosphere.ts`'s `checkSeveralSuns`, a new group in part 3, "R08.T7 several
+    suns, and the sky through the air", run through `inOrder` on the twin pool). Under the binary
+    it holds:
+    - each multiple-scattering layer against its own light's twin, and the two layers apart;
+    - two frames on both settings against their twins to 10⁻³, each over a surface 60 km ahead:
+      the primary 20° up, the companion 5° and a planetshine source; and both stars set (−8° and
+      −3°);
+    - the composite's output alpha against the scene's, pixel for pixel, over the sky, a lit body
+      5 km ahead and an unlit one 60 km ahead.
+
+    R08.T6.b's frames now take an array of sources, and its tabulated medium holds the lobes'
+    orders and truncation against the twins. `planetOf` reads every layer. `captureAtmosphere`
+    adds three captures of the binary's sky from 2 m: both twilights, the companion's day after
+    the primary's dusk, and both up.
+
+  - _By hand, pending._
+    - The binary's captures, for a person to look for two glows, each its own star's colour, and the
+      moonlit night's (`r08-moonlit-night`: the Sun beyond the twilight limit and a full Moon 45° up,
+      for the sky against the moonlit ground). Run `just test-render --captures=DIR`.
+    - The development machine's and the UHD 620's timings, with R08.T11's.
+    - The moonlit night's "fainter stars washed out" waits on a view that draws R06's star layer
+      under the atmosphere, which the smoke's frames do not. R08.T10.b's acceptance does not yet
+      name it: for "main", to add there.
+    - GPU timings are provisional, for R08.T11's quiet run.
+  - _The gate_ (smart-ci at merge-base a6e73a08): exit 0.
+    - Prettier, tsc from a clean cache, oxlint, the smoke build, and vitest's 128 files that reach
+      the change (3,896 tests, 163 s at 4 workers; 1-minute load 3.1 before, 8.8 after).
+    - `just test-render` under the lock, held 345 s: every one of its 1,342 checks passes on both
+      variants, with no uncaptured GPU error.
+    - The parts, default and `no-subgroups`: part 1 117.5 and 117.1 s, part 2 86.7 and 85.1 s,
+      part 3 140.0 and 140.0 s. R08.T7's group takes 31.2 and 30.4 s of part 3, which holds it
+      beside R08.T6.g and T6.i; in part 2 beside R08.T6.b it took that part to 156 s, too near the
+      180 s watchdog.
+    - An earlier run under more load gave part 1 119 s, part 2 (with R08.T7) 157 and 152 s and
+      part 3 104 s.
+    - Reviewed by the TypeScript, plan-conformance and science reviewers. Their fixes are in,
+      among them the forward-diffuse light's wide-angle scattering (the science check's must-fix)
+      and Design note 7's check against R05's own layout.
+
+- **Deferred findings (2026-10-13 rule)** (R08.T7). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The multiple-scattering table's night side in `rgba16float`_ (the task's "states its answer,
+    for main"). The figures are above. **Answer:** store the per-planet multiple-scattering table
+    as `rgba32float`, 16 KB a layer in place of 8 KB, 64 KB at four lights. Its kernel's storage
+    format changes, and its reads already go through `textureLoad`, so no filtering feature is
+    needed. That is a contract change, the table's format and its memory line, so it is for
+    "main". Until then deep twilight's multiple scattering is quantised: +8.9% in the sky's mean at
+    −12°, and 0 at the ground beyond about −11°.
+  - _The kept Sun beyond the twilight limit._ It changes the moonlit sky by 2.42 × 10⁻⁵ of the
+    Moon's against the task's 10⁻⁶. All of that is Hillaire's isotropic term at the samples' own
+    sun elevations (0 with the table zeroed), and the skip removes it. Lean: the 10⁻⁶ assumed
+    single scattering; R08.T11 weighs it with the night side's answer.
+  - _The lobes' x is a local ratio._ x is the stored depth along the source times the lobe terms'
+    share of the sample's extinction. That is exact for well-mixed terms and approximate for a
+    layer. Under an elevated haze it is too small, and the ground's bounce takes no forward-diffuse
+    raise. For an ordinary boundary-layer aerosol it is too large (the science check): Earth's (τ
+    0.1, ω 0.9, 1.2 km scale height) under Rayleigh (8 km) gives x 1.72 times the true depth at
+    the ground, 2.29 times at 1 km and 3.1 times at 2 km. R08.T13's Mars case is well mixed and
+    cannot see it. Lean, for "main" before R08.T10 draws tabulated aerosols: store the lobe terms'
+    own scattering depth along the source (a contract change to the transmittance tables), or hold
+    Earth's case against the tracer.
+  - _The view leg of the same effect_ (the science check; it predates T7). Light scattered towards
+    the eye at a wide angle is dimmed on its way by the full extinction, where δ-M's scaling would
+    take σ_t − P σ_s, the forward-scattered light staying on the line of sight. With both legs, the
+    single scattering outside the lobe would be an estimated 1.5–1.9 times the kernels' at a 30°
+    Sun on dusty Mars and 2.6–4.1 times at a 5° Sun. The scene's own transmittance stays the true
+    e^(−τ), its sharp image. Lean: R08.T13's tracer decides, with the local-ratio finding.
+  - _Deep twilight is darker than observed_ (the science check). The sky's mean falls 31 times from
+    −8° to −10°, and at −10° and −12° (6.5 × 10⁻³ and 1.2 × 10⁻³ cd/m², the brightest arch
+    included) it is no brighter than Paranal's zenith (Patat et al. 2006, A&A 455, 385, Table 1's V
+    fit: 0.52, 0.048, 0.0068 and 0.0015 cd/m² at −6°, −8°, −10° and −12°). That fits Hillaire's
+    isotropic term carrying deep twilight weakly. Lean: R08.T11 and R08.T13, with the night side's
+    answer above.
+  - _Mixed lobe shapes_ share one x, the lobe terms' summed scattering. That is exact for terms of
+    one shape, and an approximation for two different lobes in one sample.
+  - _The lobe threshold is a step._ A tabulated term just under P 0.2 takes no orders, and one
+    just over takes them all. Lean: none needed until a medium sits near it.
+  - _Analytic phases take no lobe._ R05's Earth aerosol (Cornette–Shanks, g 0.76) keeps
+    Hillaire's isotropic spreading of its forward orders, until R08.T10's tabulated aerosols
+    replace it.
+  - _The lobe tables are built on the render thread_, 0.5 s a term (measured at a load of 5), the
+    J₀ of the transforms shared across channels. They are kept per table object and, for the
+    latest 16, by the table's values, so `withoutForwardDelta`'s new table at each `setMedium` and a
+    twin job's structured clone find them. Lean: R08.T10.a's optics worker builds them with the
+    medium.
+  - _The marches' private arrays._ Every per-frame march now carries, on every medium, four light
+    slots' throughputs and absorber columns, six sources' directions and angles, and a density a
+    term. A GPU's private allocation is per kernel, not per branch (`decision-r08-t6d-findings.md`
+    §11.4's risk), so this may cut occupancy where one sun is drawn. For R08.T11's timings.
+  - _The slab's flux with both halves._ The lobe's own light is held to δ-M's beam over the sphere
+    (2.6%), and the truncated multiple scattering to the term truncated by hand (10⁻⁹). A twin
+    slab's whole flux, the two together through the multiple-scattering series, is not checked;
+    R08.T13's aureole points against the tracer cover it.
+  - _`testRender.sh`'s comment_ still names part 3 as R08.T6.g's and T6.i's, without R08.T7's
+    group. It was left so that smart-ci does not plan the full `ci` for a comment.
+
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
-  `decision-r08-t6b-floor.md` §6; scheduled in T7).
+  `decision-r08-t6b-floor.md` §6; scheduled in T7; built and recorded by R08.T7, "Deviations in T7,
+  as built").
   - _The finding._ R05's sky view, aerial volume and ray march store radiance per unit of the
     sun's illuminance in `rgba16float`, with no scale.
     - From typical clear-sky illuminances (estimated, not measured), Earth's mean twilight sky is
@@ -6976,6 +7335,10 @@ generator, and the reference's sampling needs no domain tag.
     - R08.T7 records its twilight and moonlit tables' largest values against 2⁻¹⁴.
     - The per-planet multiple-scattering table needs its own answer.
     - R08.T6.g's kernel arm already holds the kernels at every scale.
+  - _Built by R08.T7_ (2026-10-13): the per-view tables are written per unit of the pre-exposure.
+    At the metered exposure every table's largest lies far above 2⁻¹⁴, and the sky's least above
+    the horizon at 149–329 × 2⁻¹⁴. The multiple-scattering table's answer is with "main" ("Deferred
+    findings (2026-10-13 rule)", R08.T7).
 
 - **Plan 14 produces no CH₄, O₂ or giant composition** (Design note 16). Titan-class haze, ozone and
   giants are fixture-only until P14.T24.c, d and f land. Biotic O₂ has no owner.
@@ -7136,6 +7499,8 @@ generator, and the reference's sampling needs no domain tag.
     This matters where it lights the sky alone: a circumbinary world's companion after the primary
     sets, or an S-type companion at night.
   - Cost: 8 KB and under 0.1 ms a layer, per planet, never per frame.
+  - _Built by R08.T7_ (2026-10-13) for the multiple-scattering table, the transmittances, the view
+    paths and the discs; the irradiance table's layers are R08.T9.b's.
 - **`atmosphere_sun_transmittance`'s fifth argument** (`decision-r08-design.md` item 2 and
   adjacent finding 1). R08.T9.b gives it `curve : u32`, the light's absorber-curve slot, and adds
   `atmosphere_source_transmittance` for planetshine (Provides, "Tables and passes"). R10's plan
@@ -7280,7 +7645,8 @@ generator, and the reference's sampling needs no domain tag.
   of the snowball's albedo moves it, and P14.T24.e's test says so.
 - **The summed sky-view** (Design note 7) is a research lean of medium confidence, not checked
   against Hillaire's parameterisation. R08.T7 tests it, and the per-sun fallback costs 0.43 MB a
-  sun a view.
+  sun a view. _Checked by R08.T7_ (2026-10-13) against R05's sun-relative per-source tables
+  within 10° of each source: within 2.0 × 10⁻³ on both settings ("Deviations in T7, as built").
 - **The forward delta in the direct beam** (decided 2026-10-10, `decision-r08-aerosol-labels.md`
   item 3; Design note 6). The client draws the light of a table's forward delta at the source.
   - Its total is the delta's scattering depth f_c τ_sca, sized to the source's g by R08.T5.c:

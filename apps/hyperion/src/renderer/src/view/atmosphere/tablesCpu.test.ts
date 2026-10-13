@@ -36,6 +36,7 @@ import {
   venusClassMedium,
 } from "../../test/atmosphereFixtures";
 import { quaternion } from "../camera/quaternion";
+import type { Rgb } from "../photometry/toneCurve";
 import { fromHalfBits, HALF_MAX, toHalfBits } from "../sky/half";
 import {
   type AbsorberCurve,
@@ -59,6 +60,7 @@ import {
   TABLE_SIZES,
   tableRadiusM,
 } from "./hillaire";
+import { type ForwardLobe, forwardLobeOfTable, lobeIsDrawn } from "./forwardLobe";
 import { marchSplit, marchStep, TWILIGHT_TOLERANCE } from "./marchSteps";
 import {
   type AtmosphereMedium,
@@ -216,7 +218,7 @@ function twinPixel(medium: AtmosphereMedium, sources: TwinSources) {
     });
     const mu = dot(end, ray.s);
     const toSun: Rgb3 = [0, 0, 0];
-    sources.sunTransmittance(0, mu, toSun);
+    sources.sunTransmittance(0, mu, toSun, 0);
     const lit = (c: 0 | 1 | 2): number => (mu > 0 ? (GROUND_ALBEDO / Math.PI) * mu * toSun[c] : 0);
     return [l[0] + t[0] * lit(0), l[1] + t[1] * lit(1), l[2] + t[2] * lit(2)];
   };
@@ -809,6 +811,99 @@ describe("tabulated densities and phases", () => {
   });
 });
 
+// --- The forward lobes ---------------------------------------------------------------------------
+
+describe("the forward lobes in the twin (R08.T7)", () => {
+  /** A dust from the ground under a tabulated phase whose forward part is a drawn lobe. */
+  const DUST: MediumTerm = {
+    name: "dust",
+    density: { kind: "exponential", scaleHeightM: 2_000 },
+    scattering: [2e-5, 2.4e-5, 2.8e-5],
+    absorption: [2e-6, 1.5e-6, 1e-6],
+    phase: henyeyGreensteinTable(0.75),
+  };
+  const lobe = (): ForwardLobe => {
+    if (DUST.phase.kind !== "tabulated") {
+      throw new Error("the dust's phase is tabulated");
+    }
+    return forwardLobeOfTable(DUST.phase.table);
+  };
+  const small = {
+    ...MULTI_SCATTERING_KERNEL_OPTIONS,
+    size: { widthTexels: 8, heightTexels: 8 },
+    samples: 16,
+  };
+  const multiScatteringOf = (m: AtmosphereMedium): TwinTable =>
+    multiScatteringTwin(
+      m,
+      R1,
+      transmittanceTablesTwin(m, R1, NO_ABSORBER_CURVES, SMALL_TRANSMITTANCE, 64),
+      small,
+    );
+
+  it("builds multiple scattering from the medium with its lobes truncated, the beam raised by e^(x P)", () => {
+    // One term alone holds its lobe's share of the extinction at every height, so the truncation
+    // is the term with its in-lobe scattering taken out by hand: the light the orders carry is not
+    // counted again in Hillaire's isotropic term.
+    const { share } = lobe();
+    expect(lobeIsDrawn(lobe())).toBe(true);
+    const truncated: MediumTerm = {
+      ...DUST,
+      scattering: [
+        DUST.scattering[0] * (1 - share[0]),
+        DUST.scattering[1] * (1 - share[1]),
+        DUST.scattering[2] * (1 - share[2]),
+      ],
+      phase: { kind: "cornette-shanks", asymmetry: 0 },
+    };
+    const lobed = multiScatteringOf(medium([DUST]));
+    const byHand = multiScatteringOf(medium([truncated]));
+    expect(worstRelative(lobed.texels, byHand.texels)).toBeLessThan(1e-9);
+    // And the truncation moves the table: the lobe's light is not Hillaire's.
+    const untruncated = multiScatteringOf(
+      medium([{ ...DUST, phase: { kind: "cornette-shanks", asymmetry: 0.75 } }]),
+    );
+    expect(worstRelative(lobed.texels, untruncated.texels)).toBeGreaterThan(0.05);
+  }, 60_000);
+
+  it("adds the orders to a march, near the source and far from it, only where the stored depth along the source is read", () => {
+    const m = medium([GAS, DUST]);
+    const planet = planetTwin(m, R1);
+    const full = tableSources(planet);
+    const withoutOrders: TwinSources = {
+      bottomRadiusM: full.bottomRadiusM,
+      sunTransmittance: full.sunTransmittance,
+      multiScattering: full.multiScattering,
+      absorberPathDepth: full.absorberPathDepth,
+    };
+    const e = (10 * Math.PI) / 180;
+    const sun = { x: Math.cos(e), y: 0, z: Math.sin(e) };
+    const geometry = { kind: "sphere", bottomRadiusM: R1 } as const;
+    const skyAt = (deg: number, sources: TwinSources): Rgb => {
+      const a = e + (deg * Math.PI) / 180;
+      const ray: TwinRay = {
+        originM: { x: 0, y: 0, z: R1 + 2 },
+        direction: { x: Math.cos(a), y: 0, z: Math.sin(a) },
+        sun,
+        tStartM: 0,
+        tEndM: maxDistanceM({ bottomRadiusM: R1, topRadiusM: R1 + 100_000 }, R1 + 2, Math.sin(a)),
+        fromCamera: true,
+      };
+      return marchTwin(m, sources, geometry, ray, placedSteps(ray, 64)).luminance;
+    };
+    // 5° from the source the orders brighten every channel; 70° from it the forward-diffuse light
+    // scattered out of the lobe does, which the truncated multiple scattering no longer carries.
+    const near = skyAt(5, full);
+    const nearAlone = skyAt(5, withoutOrders);
+    const far = skyAt(70, full);
+    const farAlone = skyAt(70, withoutOrders);
+    for (const c of CHANNELS) {
+      expect(near[c] / nearAlone[c]).toBeGreaterThan(1.05);
+      expect(far[c] / farAlone[c]).toBeGreaterThan(1);
+    }
+  }, 60_000);
+});
+
 // --- The steps the twins place -------------------------------------------------------------------
 
 describe("the per-frame twins' steps", () => {
@@ -1139,7 +1234,7 @@ describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
           unitFromTexelUv((x + 0.5) / w, w),
           unitFromTexelUv((y + 0.5) / h, h),
         );
-        sources.sunTransmittance(rM - R1, mu, out);
+        sources.sunTransmittance(rM - R1, mu, out, 0);
         for (const c of CHANNELS) {
           const stored = Math.exp(-texelOf(earth.transmittance, x, y, c));
           worst = Math.max(worst, Math.abs(out[c] - stored) / Math.max(stored, floor));
@@ -1162,7 +1257,7 @@ describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
           MULTI_SCATTERING_GROUND_OFFSET_M +
           unitFromTexelUv((y + 0.5) / h, h) * (top - MULTI_SCATTERING_GROUND_OFFSET_M);
         const muSun = unitFromTexelUv((x + 0.5) / w, w) * 2 - 1;
-        sources.multiScattering(heightM, muSun, out);
+        sources.multiScattering(heightM, muSun, out, 0);
         for (const c of CHANNELS) {
           const stored = texelOf(earth.multiScattering, x, y, c);
           worst = Math.max(worst, Math.abs(out[c] - stored) / Math.max(stored, floor));
@@ -1182,7 +1277,7 @@ describe("Bruneton's texel mapping in the twin (Design note 19)", () => {
     const sources = tableSources(earth);
     const stored = (heightM: number, mu: number): Rgb3 => {
       const out: Rgb3 = [0, 0, 0];
-      sources.sunTransmittance(heightM, mu, out);
+      sources.sunTransmittance(heightM, mu, out, 0);
       return out;
     };
     const off: string[] = [];
@@ -1473,7 +1568,7 @@ describe("four absorbers, one a molecule pair, under their curves of growth", ()
           unitFromTexelUv((x + 0.5) / size.widthTexels, size.widthTexels),
           unitFromTexelUv((y + 0.5) / size.heightTexels, size.heightTexels),
         );
-        sources.sunTransmittance(rM - R1, mu, out);
+        sources.sunTransmittance(rM - R1, mu, out, 0);
         const tau = opticalDepthToTop(four, R1, rM, mu);
         const absorbed = curvesOpticalDepth(
           curves[0] ?? [],
@@ -1717,31 +1812,36 @@ describe("R05.T12.e's quadrature gate on the measured Earth, the marches as buil
 // --- R08.T6.i: the slab Earth's gate, the marches cut at its layer edges -------------------------
 
 /**
- * The one ray of R05.T12.e's gate that the slab Earth misses at high's counts with the marches cut
- * at its ozone's edges (R08.T6.i, 2026-10-13; plan R08's Risks, "Deviations in T6.i, as built";
- * raised, not widened, and ruled in `decision-r08-t6d-findings.md` §11 and §11.4: the march stays
- * at 32 steps, and R08.T7 measures a floor on the piece next to t*): a twilight limb ray tangent at
- * 0.1 H with the sun on its tangent point's horizon, over its 5%. Its error is the dense, optically thick air about t*
- * (blue depth about 13.6 from the camera), not the layer's: the sun lies along the ray, which
- * clears the ground by 843 m, and the piece from t* to the slab's base takes six steps over its
- * 476 km where R05.T12.e's placement put about ten. The limb's worst converges with the count,
- * 2.74% at 35 steps (the least at which every ray holds), 2.39% at 36 and 1.19% at 64, where
- * R05.T12.e's placement on the slab stays 7–22%. Pinned to the 0.01 point both ways, so that a
- * change shows.
+ * The one ray of R05.T12.e's gate that the slab Earth misses at R05.T12.e's 32 ray-march steps with
+ * the marches cut at its ozone's edges (R08.T6.i, 2026-10-13; plan R08's Risks, "Deviations in T6.i,
+ * as built"; ruled in `decision-r08-t6d-findings.md` §11 and §11.4): a twilight limb ray tangent at
+ * 0.1 H with the sun on its tangent point's horizon, over its 5%. Its error is the dense, optically
+ * thick air about t* (blue depth about 13.6 from the camera), not the layer's: the sun lies along
+ * the ray, which clears the ground by 843 m, and the piece from t* to the slab's base takes six
+ * steps over its 476 km where R05.T12.e's placement put about ten. The limb's worst converges with
+ * the count, 2.74% at 35 steps, 2.39% at 36 and 1.19% at 64, where R05.T12.e's placement on the
+ * slab stays 7–22%. Pinned to the 0.01 point both ways at 32, so that a change shows.
+ *
+ * R08.T7 measured §11.4's cure that adds no step, the piece next to t* keeping no fewer steps than
+ * R05.T12.e's placement puts there: it cured this ray (2.76%) but put five others over at 32 (the
+ * disc, ground zenith 80°, sun 95°/180°, at 2.80% against 2%, and four limb rays at 2.03–2.16%), and
+ * the four-absorber fixture's limb at 0.3 H to 5.04%. So it was not adopted, and the high setting's
+ * ray march takes §11.4's measured fallback, 36 steps, at which every ray holds (plan R08's Risks,
+ * "Deviations in T7, as built").
  *
  * Before the pieces (R08.T6.d's `RECORDED_LAYER_MISS`), the slab's worst e at high's counts was:
  * disc 7.75%, limb 21.28%, inside 1.43%, near-level 0.41%, sky 0.51%, band 4.71%, past 3.21%, high
  * band 5.70% and high limb 14.21%; at low's, 8.33, 44.86, 9.88, 1.61, 9.58, 61.39, 11.78, 46.31 and
  * 59.05%.
  */
-const SLAB_HIGH_MISS = ["limb, 0.1 H, sun 90°/0°: 5.63%"] as const;
+const SLAB_R05_MISS = ["limb, 0.1 H, sun 90°/0°: 5.63%"] as const;
 
-/** The ray march's steps at which every ray of the slab Earth's gate holds, at high's 75 sky-view steps. */
-const SLAB_PASSING_MARCH_STEPS = 36;
+/** R05.T12.e's ray-march steps on high, before R08.T7 raised them to 36. */
+const R05_HIGH_MARCH_STEPS = 32;
 
 describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its layer edges (R08.T6.i)", () => {
   let gate: Gate = { results: [], lMax: new Map() };
-  const passing = { ...HIGH, marchSteps: SLAB_PASSING_MARCH_STEPS };
+  const r05High = { ...HIGH, marchSteps: R05_HIGH_MARCH_STEPS };
 
   beforeAll(() => {
     const sources = tableSources(
@@ -1749,7 +1849,7 @@ describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its 
     );
     gate = runGate(gateRays(), twinPixel(EARTH_SLAB_REFERENCE, sources), [
       HIGH,
-      passing,
+      r05High,
       LOW,
       evenAt(LOW),
     ]);
@@ -1765,12 +1865,13 @@ describe("R05.T12.e's quadrature gate on the slab Earth, the marches cut at its 
     expect(describeFailures(unconverged)).toEqual([]);
   });
 
-  it("holds every ray within 2%, and twilight rays within 5%, at high's counts but the one it raised", () => {
-    expect(describeFailures(failures(gate, HIGH))).toEqual([...SLAB_HIGH_MISS]);
+  it("holds every ray within 2%, and twilight rays within 5%, at high's counts (R08.T7)", () => {
+    expect(HIGH.marchSteps).toBe(36);
+    expect(describeFailures(failures(gate, HIGH))).toEqual([]);
   });
 
-  it("holds every ray at 36 steps of the ray march, the count that would pass", () => {
-    expect(describeFailures(failures(gate, passing))).toEqual([]);
+  it("misses one twilight ray at R05.T12.e's 32 ray-march steps, the one T6.i raised", () => {
+    expect(describeFailures(failures(gate, r05High))).toEqual([...SLAB_R05_MISS]);
   });
 
   // Measured 38.64% (high band, 99,999 m, view zenith 99.879°, sun 90°/180°) against even steps'

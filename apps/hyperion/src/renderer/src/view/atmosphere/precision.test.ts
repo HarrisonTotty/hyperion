@@ -710,13 +710,11 @@ function marchHeights(
   /** The sample's height in f64, m. */
   readonly height64: number;
 }> {
-  const exact = viewExactOf(
-    camera,
-    figure,
-    ATMOSPHERE_M,
-    { radiusM: figure.equatorialRadiusM, heightM: 0, normal: { x: 1, y: 0, z: 0 } },
-    0,
-  );
+  const exact = viewExactOf(camera, figure, ATMOSPHERE_M, {
+    radiusM: figure.equatorialRadiusM,
+    heightM: 0,
+    normal: { x: 1, y: 0, z: 0 },
+  });
   const origin = vec(camera.x, camera.y, camera.z);
   const a = f(figure.equatorialRadiusM);
   const c = f(figure.polarRadiusM);
@@ -1190,13 +1188,11 @@ function shellCrossingHeights(
   far: boolean,
   edgeHeightM: number,
 ): Array<{ readonly t: number; readonly h: number; readonly fromStar: number }> {
-  const exact = viewExactOf(
-    camera,
-    figure,
-    ATMOSPHERE_M,
-    { radiusM: figure.equatorialRadiusM, heightM: 0, normal: { x: 1, y: 0, z: 0 } },
-    0,
-  );
+  const exact = viewExactOf(camera, figure, ATMOSPHERE_M, {
+    radiusM: figure.equatorialRadiusM,
+    heightM: 0,
+    normal: { x: 1, y: 0, z: 0 },
+  });
   const origin = vec(camera.x, camera.y, camera.z);
   const a = f(figure.equatorialRadiusM);
   const c = f(figure.polarRadiusM);
@@ -1543,7 +1539,10 @@ describe("Bruneton's texel mapping (common.wgsl, Design note 19)", () => {
 
 const PI_VIEW = f(Math.PI);
 
-/** `skyViewUvToParams`: the ray's zenith cosine and sine and its azimuth's, in the sky frame. */
+/**
+ * `skyViewUvToParams`: the ray in the sky frame, its zenith's sine and cosine and its local
+ * azimuth's, φ = 2π u over the whole circle (R08.T7).
+ */
 function skyViewUvToParams(
   uv: readonly [number, number],
   size: readonly [number, number],
@@ -1562,9 +1561,17 @@ function skyViewUvToParams(
     zenith = f(zenithHorizon + f(f(beta * c) * c));
   }
   const [sin, cos] = preciseSinCos(zenith);
-  const lightViewCos = f(1 - f(f(2 * ux) * ux));
-  const lightViewSin = f(f(2 * ux) * f(Math.sqrt(Math.max(f(1 - f(ux * ux)), 0))));
-  return { x: f(sin * lightViewCos), y: f(sin * lightViewSin), z: cos };
+  const phi = f(f(2 * PI_VIEW) * ux);
+  let azimuthSin: number;
+  let azimuthCos: number;
+  if (phi <= PI_VIEW) {
+    [azimuthSin, azimuthCos] = preciseSinCos(phi);
+  } else {
+    const [mirroredSin, mirroredCos] = preciseSinCos(f(f(2 * PI_VIEW) - phi));
+    azimuthSin = -mirroredSin;
+    azimuthCos = mirroredCos;
+  }
+  return { x: f(sin * azimuthCos), y: f(sin * azimuthSin), z: cos };
 }
 
 /** The composite's read of a ray in the sky frame, as `fragmentMain` and `skyViewParamsToUv`. */
@@ -1582,10 +1589,9 @@ function skyViewRead(
   if (!(h2 > 1e-12)) {
     return null;
   }
-  const length = f(Math.sqrt(h2));
-  const chordX = f(f(dir.x / length) - 1);
-  const chordY = f(dir.y / length);
-  const azimuthHalfSine = f(0.5 * f(Math.sqrt(f(f(chordX * chordX) + f(chordY * chordY)))));
+  // `skyViewAzimuthUnit`: preciseAtan2(|y|, x), mirrored where y < 0, over 2π.
+  const a = preciseAtan2(Math.abs(dir.y), dir.x);
+  const azimuthUnit = f((dir.y < 0 ? f(f(2 * PI_VIEW) - a) : a) / f(2 * PI_VIEW));
   const ground = groundHit(bottom, heightM, viewZenithCos);
   const zenithHorizon = f(PI_VIEW - beta);
   let v: number;
@@ -1597,7 +1603,7 @@ function skyViewRead(
     v = f(c * 0.5);
   }
   return [
-    filterPosition(texelUvFromUnit(unitClamp(azimuthHalfSine), size[0]), size[0]),
+    filterPosition(texelUvFromUnit(unitClamp(azimuthUnit), size[0]), size[0]),
     filterPosition(texelUvFromUnit(unitClamp(v), size[1]), size[1]),
   ];
 }
@@ -1633,7 +1639,9 @@ describe("the sky view's read inverts its write (view.wgsl, Design notes 18 and 
             unread.push(vertical ? "" : `(${String(i)}, ${String(j)})`);
           } else {
             const [x, y] = read;
-            worst = Math.max(worst, Math.abs(y - j), vertical ? 0 : Math.abs(x - i));
+            // The first and last columns are the one azimuth, the sky axis, read at either.
+            const column = i === w - 1 && x < 0.5 ? x + (w - 1) : x;
+            worst = Math.max(worst, Math.abs(y - j), vertical ? 0 : Math.abs(column - i));
           }
         }
       }

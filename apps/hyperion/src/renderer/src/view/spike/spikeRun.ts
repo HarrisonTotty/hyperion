@@ -505,7 +505,7 @@ export class SpikeRun {
             fovXRad: SPIKE_FOV_X_RAD,
             viewport: render,
           },
-          sun,
+          [sun],
           {
             colour: scene.colour,
             depth: scene.depth,

@@ -74,6 +74,7 @@ fn mediumAtHeight(h : f32) -> MediumSample {
   var extinction = vec3f(0.0);
   var absorption = vec3f(0.0);
   var columns = AbsorberColumns(0.0, vec4f(0.0));
+  var lobe = vec3f(0.0);
   let count = min(u32(medium.termCount), MAX_TERMS);
   for (var i = 0u; i < count; i++) {
     let term = terms[i];
@@ -82,9 +83,13 @@ fn mediumAtHeight(h : f32) -> MediumSample {
     extinction += (term.scattering.rgb + term.absorption.rgb) * d;
     absorption += term.absorption.rgb * d;
     columns = addColumns(columns, termColumns(term, d), 1.0);
+    if (term.phase.w > 2.5) {
+      // A tabulated phase's forward share, 0 where its forward part is no lobe (R08.T7).
+      lobe += term.phase.xyz * term.scattering.rgb * d;
+    }
   }
   let pressureColumns = pressureColumnsOf(columns, lineSlots(), pressureBarAt(h));
-  return MediumSample(scattering, extinction, absorption, columns, pressureColumns);
+  return MediumSample(scattering, extinction, absorption, columns, pressureColumns, lobe);
 }
 
 // The medium's line slots, the bitmask of its absorber slots whose curves have pressure rows
@@ -98,8 +103,8 @@ fn absorberCount() -> u32 {
   return min(u32(medium.absorbers.x), ABSORBER_SLOTS);
 }
 
-// The light slot whose curves of growth a per-planet table is built with (R08.T6.c): 0, the body's
-// brightest star, until R08.T7 builds a table a light slot.
+// The light slot whose curves of growth a per-planet table is built with (R08.T6.c), and the
+// multiple-scattering layer it writes: one dispatch a light slot since R08.T7.
 fn curveSlot() -> u32 {
   return u32(medium.absorbers.y);
 }

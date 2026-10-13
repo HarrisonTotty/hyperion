@@ -16,6 +16,7 @@ import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import type { AbsorberCurveSlots, TableSize } from "../view/atmosphere/tables";
 import {
   aerialPerspectiveTwin,
+  MULTI_SCATTERING_KERNEL_OPTIONS,
   multiScatteringTwin,
   type PlanetTwin,
   planetTwin,
@@ -53,11 +54,15 @@ export type TwinJob =
       readonly bottomRadiusM: number;
     }
   | {
-      /** `multiScatteringTwin` over the transmittance tables given, the GPU's or the twin's. */
+      /**
+       * `multiScatteringTwin` over the transmittance tables given, the GPU's or the twin's, its
+       * layer of light slot `curveSlot` (R08.T7).
+       */
       readonly kind: "multiScattering";
       readonly medium: AtmosphereMedium;
       readonly bottomRadiusM: number;
       readonly transmittance: TwinTransmittance;
+      readonly curveSlot: number;
     }
   | {
       readonly kind: "skyView";
@@ -132,7 +137,14 @@ export function runTwinJob(job: TwinJob): TwinAnswer {
     case "multiScattering":
       answer = {
         kind: job.kind,
-        twin: multiScatteringTwin(job.medium, job.bottomRadiusM, job.transmittance),
+        twin: multiScatteringTwin(
+          job.medium,
+          job.bottomRadiusM,
+          job.transmittance,
+          MULTI_SCATTERING_KERNEL_OPTIONS,
+          undefined,
+          job.curveSlot,
+        ),
       };
       break;
     case "skyView":

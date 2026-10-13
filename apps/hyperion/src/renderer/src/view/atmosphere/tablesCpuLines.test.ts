@@ -142,7 +142,7 @@ describe("a line absorber through the transmittance tables (R08.T4.d)", () => {
     const columns = new Float64Array(5);
     columns[LINE_SLOT] = x;
     const out: [number, number, number] = [0, 0, 0];
-    sources.absorberPathDepth(columns, new Float64Array(5), out);
+    sources.absorberPathDepth(columns, new Float64Array(5), out, 0);
     const first = curveOpticalDepth(lines, x, Math.exp(lines.logPressures[0] ?? Number.NaN));
     expect(Math.max(...CHANNELS.map((c) => Math.abs(out[c] - first[c])))).toBeLessThan(1e-12);
   });
@@ -175,7 +175,7 @@ describe("a line absorber through the transmittance tables (R08.T4.d)", () => {
     const out: [number, number, number] = [0, 0, 0];
     let worst = 0;
     for (const { rM, mu } of texels) {
-      sources.sunTransmittance(rM - R1, mu, out);
+      sources.sunTransmittance(rM - R1, mu, out, 0);
       const { tau, absorbed } = ownAbsorbed(rM, mu);
       for (const c of CHANNELS) {
         const own = Math.exp(-(tau[c] + absorbed[c]));
@@ -300,7 +300,7 @@ describe("a medium of five line slots through the transmittance tables (R08.T4.d
       ),
     );
     const out: [number, number, number] = [0, 0, 0];
-    sources.sunTransmittance(rM - R1, mu, out);
+    sources.sunTransmittance(rM - R1, mu, out, 0);
     for (const c of CHANNELS) {
       expect(Math.abs(out[c] / Math.exp(-(ray.opticalDepth[c] + absorbed[c])) - 1)).toBeLessThan(
         1e-9,
