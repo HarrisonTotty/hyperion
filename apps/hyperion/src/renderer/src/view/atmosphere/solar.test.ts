@@ -46,6 +46,16 @@ describe("the Sun's light in three channels", () => {
     expect(Math.abs(r06 / E490_ILLUMINANCE_LX - 1)).toBeLessThan(0.01);
   });
 
+  // R02's 2.54 µlx for V = 0 takes no account of the spectrum, a hot star's lux per unit of V flux
+  // (the ruling's "Vega's"; R06's table gives an A0 spectrum 1.006 of it); R06's photometry of the
+  // Sun's own spectrum is right (plan R08, R08.T6.j).
+  it("takes R02's spectrum-blind zero point: 3.7% under R06's Sun and 3.6% under E-490's", () => {
+    const r05 = rec709Luminance(sunIlluminanceRgb());
+    expect(r05).toBeCloseTo(128_479, -1);
+    expect(1 - r05 / photopicIlluminance(referenceSunIlluminanceLx())).toBeCloseTo(0.037, 3);
+    expect(1 - r05 / E490_ILLUMINANCE_LX).toBeCloseTo(0.036, 3);
+  });
+
   it("differs from R08.T6.d's Sun in chromaticity by 0.0012 in u′v′", () => {
     // Measured 2026-10-12: 0.00120, solar.ts's three spectral samples of E-490 against R06's colour
     // of the ATLAS9 Sun (plan R08's Risks, "Deviations in T6.d, as built").

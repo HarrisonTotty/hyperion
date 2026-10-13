@@ -18,6 +18,14 @@
  * 1 au, V −26.762) and {@link SUN_APPARENT_V}; their chromaticity difference is recorded in plan
  * R08's Risks.
  *
+ * Its V-scaled factors take R02's zero point, 2.54 µlx for a V = 0 star whatever its spectrum
+ * (Allen's, Cox 2000; Crumey 2014, §2), which `decision-r08-t6d-findings.md` §5 calls Vega's: a hot
+ * star's lux per unit of V flux, within 0.6% of an A0 spectrum's by R06's table (`lux_per_v0`
+ * 1.006 at 9,500–9,750 K), not the Sun's. Its Sun, 128,479 lx at 1 au, is so 3.7% under R06's
+ * (133,462 lx) and 3.6% under E-490's own (plan R08, R08.T6.j). R06's is right, and the reference
+ * Sun takes it; R05's terrain smoke check (`smoke/terrain.ts`), which draws no atmosphere, keeps
+ * this one, as R08.T6.d left it.
+ *
  * Under R05 the tables held radiance per unit solar spectral irradiance at each channel's
  * wavelength (680, 550 and 440 nm): a table value T_c became Rec. 709 luminance as T_c ×
  * {@link skyLuminanceScale}()_c, and the Sun's own disc {@link sunIlluminanceRgb}()_c ÷ its solid
@@ -52,9 +60,10 @@ export const SKY_SPECTRAL_TO_LUMINANCE: Rgb = [114_566.5, 70_725.83, 69_767.03];
  * E-490's photopic illuminance at 1 au, lx: 683 lm W⁻¹ × ∫ ȳ E dλ over 360–830 nm (generated).
  *
  * @remarks
- * 4% above the 1.28 × 10⁵ lx that R02's V-magnitude photometry gives for V = −26.76;
- * {@link sunIlluminanceRgb} is scaled to the latter, so that the Sun in the atmosphere and the Sun
- * as a star agree.
+ * 3.8% above the 1.28 × 10⁵ lx that R02's V-magnitude photometry gives for V = −26.76 at its
+ * spectrum-blind zero point; {@link sunIlluminanceRgb} is scaled to the latter, so that under R05
+ * the Sun in the atmosphere and the Sun as a star agreed. R06's Sun, which R07's
+ * `sunLikeHostDisc` takes since R08.T6.j, is this to 0.11%.
  */
 export const E490_ILLUMINANCE_LX = 133_318.3;
 

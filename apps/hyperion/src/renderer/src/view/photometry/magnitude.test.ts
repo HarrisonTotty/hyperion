@@ -48,7 +48,7 @@ describe("magnitude to illuminance", () => {
     expect(illuminanceLx(0)).toBeCloseTo(2.54e-6, 12);
   });
 
-  it("gives the Sun's 1.28 × 10⁵ lx for V = −26.76 within 1%", () => {
+  it("gives 1.28 × 10⁵ lx for the Sun's V = −26.76 at its spectrum-blind zero point, within 1%", () => {
     expect(illuminanceLx(-26.76) / 1.28e5).toBeCloseTo(1, 2);
   });
 

@@ -6206,6 +6206,87 @@ generator, and the reference's sampling needs no domain tag.
     it drew T6.d's (R05.T12.c's frames, R08.T6.b's twins, the sunset captures) and adds no check, so
     no group's cost changes but by the medium's.
 
+- **Deviations in T6.j, as built** (2026-10-13). `packages/protocol/fixtures/bake_spectra.json`,
+  `crates/hyperion-fit/tests/star_colour.rs`'s fixture test, `hostDisc.ts`, `earth.ts`, and the docs
+  of `solar.ts` and `photometry/magnitude.ts`; tests in `hostDisc.test.ts`, `earth.test.ts`,
+  `solar.test.ts`, `illuminance.test.ts` and `planetshine.test.ts`, with `test/litFixtures.ts` and a
+  test's title in `magnitude.test.ts`. No Rust golden and nothing on
+  the wire moved: `StarColour`, `HostDiscDto` and `tables/star_colour.rs` are unchanged, and only
+  the fixture test reads the new fields.
+  - _Names beyond the text._ `hostDisc.ts` exports its defaults, `SUN_COLOUR_RGB` (private before,
+    the warm white), `SUN_LUX_PER_V0` and `SUN_BAKE_SPECTRUM` (frozen; each disc takes a copy).
+    `earth.ts`'s `R06_SOLAR_COLOUR_RGB`, `R06_SOLAR_LUX_PER_V0` and `R06_SOLAR_BAKE_SPECTRUM` are
+    defined from them, so that the client holds each number once: `earth.ts` imports `hostDisc.ts`,
+    so the defaults cannot live in `earth.ts`. Both tests hold both names to the Sun's row.
+    `REFERENCE_SUN` is `frozenHostDisc(sunLikeHostDisc())`, and `sunLikeHostDisc` keeps its
+    `colourRgb` override for other stars. `test/litFixtures.ts` gains `solarFixtureRow()` (and its
+    `BakeSpectraRow` type), the Sun's row, which `hostDisc.test.ts` and `earth.test.ts` share.
+  - _The chroma is the wire's._ Each row's `chroma` is `StarColour::chroma()`, the `f32`s
+    `HostDiscDto.chroma` carries, in the shortest decimal form serde_json writes; `lux_per_v0` is the
+    `f64`'s, held to 10⁻¹² relative as the bake spectrum is. The fixture test reads the chroma as
+    doubles, as the client does, and holds it exactly: the doubles written back by serde_json must be
+    the wire's text, which is stricter than 10⁻¹². So a decimal that rounds to the same `f32` but is
+    another double fails: checked by hand with T6.d's 1.0844255, which is the same `f32` as the
+    wire's 1.0844254 and passed an `f32` comparison (reverted). The 2,300 K and white-dwarf rows have
+    seven figures, as the table stores those rows.
+    - So the client's copies move: red 1.0844255 → 1.0844254 and green 0.98155972 → 0.9815597
+      (T6.d's eight-figure roundings of the unrounded `f64`s; −9.2 × 10⁻⁸ and −2.0 × 10⁻⁸
+      relative), the blue from the luminance row 0.93400622 → 0.93400671, which is R06's `blue()`
+      (0.93400627, from the unrounded red and green) to 4.4 × 10⁻⁷ (tested to 5 × 10⁻⁷), and
+      `lux_per_v0` 1.036747 → 1.0367468662789598 (−1.3 × 10⁻⁷). `REFERENCE_SUN` moves by these alone,
+      which no pinned figure sees.
+  - _Figures re-pinned_ (old values R07's, under its warm white (1.08, 0.99, 0.8634), `lux_per_v0` 1
+    and a bake spectrum of ones; new under R06's Sun):
+
+    | Figure                               | Test                  | Before                                     | After                                                     |
+    | ------------------------------------ | --------------------- | ------------------------------------------ | --------------------------------------------------------- |
+    | The Sun at 1 au, photopic            | `illuminance.test.ts` | 128,731 lx (1.287 × 10⁵; 1.28 × 10⁵ to 1%) | 133,462 lx (to 0.5 lx), E-490's 133,318 lx to 0.11%       |
+    | Earthshine on the Moon at full Earth | `planetshine.test.ts` | 7.668 lx (7.67 to 0.005)                   | 7.959 lx (7.96 to 0.005), +3.79%; in the task's 7.7 ± 15% |
+
+  - _Figures that moved inside their tests' bounds_ (recorded, not re-pinned):
+    - the full Moon at Earth, 0.3140 → 0.3255 lx: against V = −12.74's 0.3168 at R02's zero point,
+      −0.91% → +2.73% (`planetshine.test.ts` holds 5%). Moonlight is reflected sunlight, slightly
+      redder, so with the Sun's own correction (× 1.037) V = −12.74 is about 0.328 lx, which the new
+      figure is about 0.9% under;
+    - Jupiter-shine on Io at inferior conjunction, 66.62 → 69.00 lx (the test's 70 lx ± 10%; clear
+      of Io's shadow 66.69 → 69.07 lx), 6.158 → 6.160 stops under the sunlight at Io, which moves
+      4,759 → 4,934 lx;
+    - the kept scenes (eclipse, phase, occultation), the lit fixtures (`aHostDisc`) and the smoke's
+      bodies (`bodies.ts`, `meshBodies.ts`) take the defaults: their luminance rises by 3.67% and
+      their colour moves by 0.0053 in u′v′, (0.2029, 0.4779) → (0.2031, 0.4726). Their tests hold
+      them against their twins, closed forms and relative bounds, and pass unchanged. The disc's
+      bake spectrum, ones before, is R06's; no R07 code reads it.
+  - _Recorded._ R06's Sun against E-490 scaled to the IAU 2015 nominal TSI: 133,318 × 1,361 ÷
+    1,366.1 = 132,821 lx, which R06's is 0.48% above (`earth.test.ts`). Nothing is rescaled for it.
+  - _`solar.ts` stays a check._ Its doc states that its V-scaled factors take R02's zero point (the
+    ruling's "Vega's", below), its Sun 128,479 lx at 1 au, 3.7% under R06's and 3.6% under E-490's
+    (`solar.test.ts`); R05's terrain smoke check keeps it. `magnitude.ts`'s `V0_ILLUMINANCE_LX`,
+    whose doc called its 1.28 × 10⁵ lx "the solar illuminance at 1 au", now says the zero point takes
+    no account of the spectrum and gives the Sun's own.
+  - _The zero point's wording._ The ruling and T6.j's text call 2.54 µlx "Vega's". No source says so:
+    Crumey 2014 (§2) takes it from Allen's (Cox 1999) for any spectrum, and R06's table gives an A0
+    spectrum 1.006 of it (`lux_per_v0` at 9,500–9,750 K), so it lies nearer a hot star's than an
+    A0's (science check). The docs say so: "a hot star's lux per unit of V flux, within 0.6% of an
+    A0 spectrum's", the ruling's "Vega's" named beside it. The Sun's 3.67% is then about 3.0% for
+    its spectrum against an A0's and 0.6% for the zero point below an A0's. No figure moves.
+  - _For main: the brainstorm's solar illuminance._ Its reference list ("The illuminance of a
+    magnitude-0 star") calls 1.28 × 10⁵ lx "the measured" illuminance above the atmosphere, which is
+    the Sun's V at R02's spectrum-blind zero point. E-490's photopic integral is 1.333 × 10⁵ lx, on
+    its 1,366.1 W m⁻² scale, and 1.328 × 10⁵ at the IAU 2015 nominal 1,361 W m⁻²; neither is a
+    measured illuminance. A brainstorm edit, the owner's, drafted: "which it turns into 1.28 × 10⁵ lx
+    above the atmosphere at a zero point that takes no account of the spectrum, 3.6% under ASTM
+    E-490's photopic 1.333 × 10⁵ lx (1.328 × 10⁵ at the IAU 2015 nominal TSI of 1,361 W m⁻²; Kopp
+    and Lean 2011 measured 1,360.8 ± 0.5); the Sun's own spectrum gives it 1.037 times as much
+    (R06's `lux_per_v0`)".
+  - _The gate and the smoke._ `just smart-ci` passes on the tree merged with T6.h's follow-up
+    (3d8eda8c) and `rendering-and-planets` (ea127bc5): every vitest file (375 files, 10,202 tests,
+    307 s at 4 workers, so `pnpm test`), `star_colour`'s fixture test with the fixture's other
+    readers in `hyperion-protocol`, `hyperion-server` and `hyperion-sim`, and their wasip1 runs.
+    smart-ci plans no `test-render`, since T6.j touches no kernel, engine or smoke file. The smoke
+    draws R06's Sun in R07's bodies (`bodies.ts`, `meshBodies.ts`), whose checks hold the GPU
+    against CPU twins under the same disc. `just test-render` was queued on the heavy-test lock at
+    the commit, and its result is in `handoff-r08-sun.md` and was reported to main.
+
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7).
   - _The finding._ R05's sky view, aerial volume and ray march store radiance per unit of the

@@ -118,9 +118,10 @@ describe("planetshine's illuminance", () => {
     expect(rest).toHaveLength(0);
     const lux = photopicIlluminance(source?.illuminance ?? [0, 0, 0]);
     expect(Math.abs(lux / fullPhaseLx(EARTH, 6.371e6, EARTH_MOON_M) - 1)).toBeLessThan(1e-9);
-    // 7.668 lx at the fixture's p to three places; the ruling's 7.66 (7.664) is at the unrounded
-    // split, under the same warm white of `sunLikeHostDisc`.
-    expect(lux).toBeCloseTo(7.67, 2);
+    // 7.959 lx at the fixture's p to three places, under R06's Sun (`sunLikeHostDisc` since
+    // R08.T6.j). It was 7.668 under R07's warm white and `lux_per_v0` 1, where the ruling's 7.66
+    // (7.664) is at the unrounded split.
+    expect(lux).toBeCloseTo(7.96, 2);
     // The task's band, 7.7 lx ± 15%: p_V 0.23 ± 0.02 and the weather.
     expect(lux).toBeGreaterThan(7.7 * 0.85);
     expect(lux).toBeLessThan(7.7 * 1.15);

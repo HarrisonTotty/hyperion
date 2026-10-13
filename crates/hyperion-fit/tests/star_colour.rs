@@ -302,9 +302,13 @@ fn star_colour_the_bake_bins_are_the_sims() {
 
 /// The client's bake-spectra fixture (`packages/protocol/fixtures/bake_spectra.json`, the suns of
 /// rendering plan R08.T4.a's channel fit) is the sim's colour table read at each sun, as
-/// `HostDiscDto.bake_spectrum` carries it: [`star_colour`] on each row's grid, and
-/// [`solar_colour`] at the Sun's 5,772 K and log g 4.438. A refit of the table that moves them
-/// fails here, and the fixture and the client's fit are updated with it.
+/// `HostDiscDto`'s `chroma`, `lux_per_v0` and `bake_spectrum` carry it: [`star_colour`] on each
+/// row's grid, and [`solar_colour`] at the Sun's 5,772 K and log g 4.438, each value to 10⁻¹² of
+/// the table's. The chroma is held exactly as the client reads it from the wire: the `f32`s'
+/// shortest decimals, as `serde_json` writes them, so that a decimal that rounds to the same `f32`
+/// but is another double fails. The Sun's row holds the client's copies of R06's solar photometry
+/// (`earth.test.ts`, `hostDisc.test.ts`; R08.T6.j). A refit of the table that moves them fails
+/// here, and the fixture and the client's fit are updated with it.
 #[test]
 fn star_colour_the_clients_bake_spectra_are_the_tables() {
     /// The fixture's names for [`AtmosphereGrid`]'s variants.
@@ -319,9 +323,21 @@ fn star_colour_the_clients_bake_spectra_are_the_tables() {
         teff_k: f64,
         log_g: f64,
         grid: Grid,
+        // As the client reads `HostDiscDto.chroma`: doubles.
+        chroma: [f64; 2],
+        lux_per_v0: f64,
         // The sim's count, so that serde refuses a fixture row of another length.
         bake_spectrum: [f64; hyperion_sim::sky::colour::BAKE_WAVELENGTH_COUNT],
     }
+    /// Whether `a` is `b` to 10⁻¹² of `b`.
+    fn agrees(a: f64, b: f64) -> bool {
+        (a - b).abs() <= 1e-12 * b.abs()
+    }
+    /// How to correct a row that fails.
+    const UPDATE: &str = "update the row in packages/protocol/fixtures/bake_spectra.json to the \
+                          table's, then bless the client's channel fit: HYPERION_BLESS=1 pnpm \
+                          --filter hyperion exec vitest run \
+                          src/renderer/src/view/atmosphere/channels.test.ts";
     #[derive(serde::Deserialize)]
     struct Fixture {
         suns: Vec<Sun>,
@@ -345,6 +361,30 @@ fn star_colour_the_clients_bake_spectra_are_the_tables() {
             };
             star_colour(Kelvin::new(sun.teff_k), sun.log_g, grid)
         };
+        // The Sun's row is also the client's copies, `hostDisc.ts`'s `SUN_*` constants.
+        let copies = if solar {
+            ", and the Sun's copies in apps/hyperion/src/renderer/src/view/lighting/hostDisc.ts"
+        } else {
+            ""
+        };
+        // The chroma exactly as the wire writes it, `HostDiscDto.chroma`'s `f32`s in serde_json's
+        // shortest decimals, against the fixture's doubles written back the same way: a double's
+        // shortest decimal is its own, so the texts are equal only if the doubles are.
+        let wire = serde_json::to_string(&colour.chroma()).expect("serde_json writes any f32");
+        let fixture = serde_json::to_string(&sun.chroma).expect("serde_json writes any f64");
+        assert_eq!(
+            fixture, wire,
+            "{} K, log g {}, chroma: fixture {fixture}, the wire's {wire}; {UPDATE}{copies}",
+            sun.teff_k, sun.log_g
+        );
+        assert!(
+            agrees(sun.lux_per_v0, colour.lux_per_v0()),
+            "{} K, log g {}, lux_per_v0: fixture {}, table {}; {UPDATE}{copies}",
+            sun.teff_k,
+            sun.log_g,
+            sun.lux_per_v0,
+            colour.lux_per_v0()
+        );
         for (k, (a, b)) in sun
             .bake_spectrum
             .iter()
@@ -352,11 +392,8 @@ fn star_colour_the_clients_bake_spectra_are_the_tables() {
             .enumerate()
         {
             assert!(
-                (a - b).abs() <= 1e-12 * b.abs(),
-                "{} K, log g {}, bin {k}: fixture {a}, table {b}; update the row in \
-                 packages/protocol/fixtures/bake_spectra.json to the table's, then bless the \
-                 client's channel fit: HYPERION_BLESS=1 pnpm --filter hyperion exec vitest run \
-                 src/renderer/src/view/atmosphere/channels.test.ts",
+                agrees(*a, b),
+                "{} K, log g {}, bin {k}: fixture {a}, table {b}; {UPDATE}{copies}",
                 sun.teff_k,
                 sun.log_g
             );

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { aHostDisc, SUN_ABSOLUTE_V } from "../../test/litFixtures";
+import { E490_ILLUMINANCE_LX } from "../atmosphere/solar";
 import { apparentV, illuminanceLx } from "../photometry/magnitude";
 import {
   photopicIlluminance,
@@ -21,12 +22,14 @@ const C_M_S = 299_792_458;
 describe("starIlluminance", () => {
   const sun = aHostDisc();
 
-  it("gives 1.28 × 10⁵ lx from the Sun at 1 au", () => {
-    // V = −26.76 at 1 au (Willmer 2018) and V = 0 at 2.54 µlx (Cox 2000, §15).
-    // 1.287 × 10⁵ lx, the 1.28 of the brainstorm's rounding.
-    expect(Math.abs(photopicIlluminance(starIlluminance(sun, AU_M)) / 1.28e5 - 1)).toBeLessThan(
-      0.01,
-    );
+  it("gives 1.335 × 10⁵ lx from the Sun at 1 au, ASTM E-490's own to 0.11%", () => {
+    // M_V 4.81 at 1 au, V −26.762 (Willmer 2018), V = 0 at 2.54 µlx (Cox 2000, §15), a zero point
+    // that takes no account of the spectrum, and R06's lux_per_v0 of the Sun's spectrum, 1.0367
+    // (plan R08, R08.T6.j): 133,462 lx, against E-490's photopic 133,318 lx (`solar.ts`). It was
+    // 1.287 × 10⁵ lx, the brainstorm's 1.28, under R07's stand-in `lux_per_v0` of 1.
+    const lux = photopicIlluminance(starIlluminance(sun, AU_M));
+    expect(lux).toBeCloseTo(133_461.7, 0);
+    expect(Math.abs(lux / E490_ILLUMINANCE_LX - 1)).toBeLessThan(0.0011);
   });
 
   it("agrees with the magnitude form to 1%", () => {

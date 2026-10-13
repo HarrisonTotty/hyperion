@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import bakeSpectra from "../../../../../../../packages/protocol/fixtures/bake_spectra.json" with { type: "json" };
+import { solarFixtureRow } from "../../test/litFixtures";
+import { sunLikeHostDisc } from "../lighting/hostDisc";
 import { photopicIlluminance } from "../lighting/illuminance";
 import { AU_M } from "../scenes/kept";
 import { absorberVerticalAmount, profileMixingRatio } from "./absorbers";
@@ -27,6 +28,7 @@ import {
   R05_EARTH_REFERENCE,
   R06_SOLAR_BAKE_SPECTRUM,
   R06_SOLAR_COLOUR_RGB,
+  R06_SOLAR_LUX_PER_V0,
   RAYLEIGH_SCALE_HEIGHT_M,
   RAYLEIGH_SCATTERING_PER_M,
   REFERENCE_SUN,
@@ -614,22 +616,47 @@ describe("T6.d's ozone slab, kept as a test medium of layer edges (R08.T6.h)", (
 
 describe("the reference Sun (R06's, through R07's starIlluminance)", () => {
   it("carries the bake spectrum R06's table gives the Sun, as the client's fixture holds it", () => {
-    const sun = bakeSpectra.suns.find((s) => s.teff_k === 5_772 && s.grid === "MainSequence");
-    expect(sun?.bake_spectrum).toEqual([...R06_SOLAR_BAKE_SPECTRUM]);
+    expect(solarFixtureRow().bake_spectrum).toEqual([...R06_SOLAR_BAKE_SPECTRUM]);
     expect(REFERENCE_SUN.bake_spectrum).toEqual([...R06_SOLAR_BAKE_SPECTRUM]);
+  });
+
+  it("carries the chroma and lux_per_v0 R06's table gives the Sun, as the fixture holds them", () => {
+    const row = solarFixtureRow();
+    expect([R06_SOLAR_COLOUR_RGB[0], R06_SOLAR_COLOUR_RGB[1]]).toEqual(row.chroma);
+    expect(R06_SOLAR_LUX_PER_V0).toBe(row.lux_per_v0);
+    expect(REFERENCE_SUN.chroma).toEqual(row.chroma);
+    expect(REFERENCE_SUN.lux_per_v0).toBe(row.lux_per_v0);
+  });
+
+  it("is R07's sunLikeHostDisc as it stands, frozen", () => {
+    expect(REFERENCE_SUN).toEqual(sunLikeHostDisc());
+    expect(Object.isFrozen(REFERENCE_SUN)).toBe(true);
   });
 
   it("is R06's colour, of unit luminance, within 2 × 10⁻⁴ in u′v′ of its own bake spectrum's", () => {
     expect(luminanceOfRgb(R06_SOLAR_COLOUR_RGB)).toBeCloseTo(1, 4);
     expect(photopicIlluminance(R06_SOLAR_COLOUR_RGB)).toBeCloseTo(1, 12);
-    expect(R06_SOLAR_COLOUR_RGB[2]).toBeCloseTo(0.934_006_3, 6);
+    // R06's blue() is 0.9340062696 from the unrounded red and green; the wire's f32 chroma moves
+    // it by 4.4 × 10⁻⁷.
+    expect(Math.abs(R06_SOLAR_COLOUR_RGB[2] - 0.934_006_269_558_386_1)).toBeLessThan(5e-7);
     const bins = sunWeights(R06_SOLAR_BAKE_SPECTRUM).rgb;
     expect(deltaUv(R06_SOLAR_COLOUR_RGB, bins)).toBeLessThan(2e-4);
   });
 
-  it("lights a body at 1 au with E-490's own photopic illuminance to 1%", () => {
+  it("lights a body at 1 au with 133,462 lx, E-490's own photopic illuminance to 0.11%", () => {
     const lux = photopicIlluminance(referenceSunIlluminanceLx(AU_M));
-    expect(Math.abs(lux / E490_ILLUMINANCE_LX - 1)).toBeLessThan(0.01);
+    expect(lux).toBeCloseTo(133_461.7, 0);
+    expect(lux / E490_ILLUMINANCE_LX - 1).toBeCloseTo(0.001_076, 6);
+  });
+
+  it("is 0.48% above E-490 scaled to the IAU 2015 nominal total solar irradiance", () => {
+    // Recorded, not rescaled for (decision-r08-t6d-findings.md §5): E-490 is scaled to
+    // 1,366.1 W m⁻² (ASTM E490-00a), and IAU 2015 Resolution B3's nominal TSI is 1,361 W m⁻²
+    // (Prša et al. 2016, AJ 152, 41), the solar cycle 23 mean; Kopp and Lean 2011 (GRL 38, L01706)
+    // measured 1,360.8 ± 0.5 at the 2008 minimum.
+    const nominal = (E490_ILLUMINANCE_LX * 1_361) / 1_366.1;
+    const lux = photopicIlluminance(referenceSunIlluminanceLx(AU_M));
+    expect(lux / nominal - 1).toBeCloseTo(0.004_83, 4);
   });
 
   it("splits its illuminance over the channels by R06's colour", () => {

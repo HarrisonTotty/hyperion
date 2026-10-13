@@ -19,8 +19,14 @@
 
 import type { HostDiscDto } from "@hyperion/protocol";
 
-import { CHANNEL_LUMINANCE, starIlluminance } from "../lighting/illuminance";
-import { frozenHostDisc, sunLikeHostDisc } from "../lighting/hostDisc";
+import { starIlluminance } from "../lighting/illuminance";
+import {
+  frozenHostDisc,
+  SUN_BAKE_SPECTRUM,
+  SUN_COLOUR_RGB,
+  SUN_LUX_PER_V0,
+  sunLikeHostDisc,
+} from "../lighting/hostDisc";
 import type { Rgb } from "../photometry/toneCurve";
 import { AU_M } from "../scenes/kept";
 import {
@@ -560,55 +566,42 @@ export const EARTH_SLAB_REFERENCE: AtmosphereMedium = {
 /**
  * R06's solar colour, linear Rec. 709 at unit luminance: `hyperion_sim::sky::colour::solar_colour()`,
  * the colour table (`tables/star_colour.rs`, ATLAS9, Castelli and Kurucz 2003) at 5,772 K and
- * log g 4.438 by `star_colour`'s bilinear rule, its red and green 1.0844255 and 0.98155972, and its
- * blue from the luminance row R06 builds the channels with (R07's `CHANNEL_LUMINANCE`), 0.934006,
- * as R06's `blue()` gives it.
+ * log g 4.438 by `star_colour`'s bilinear rule, its red and green the wire's chroma, 1.0844254 and
+ * 0.9815597, and its blue from the luminance row R06 builds the channels with (R07's
+ * `CHANNEL_LUMINANCE`), 0.9340067, as R06's `blue()` gives it: R07's {@link SUN_COLOUR_RGB}, the
+ * default of `sunLikeHostDisc` since R08.T6.j, held to the Sun's row of
+ * `packages/protocol/fixtures/bake_spectra.json` by `earth.test.ts` and `hostDisc.test.ts`.
  *
  * @remarks
  * The same spectrum through the bake bins, {@link R06_SOLAR_BAKE_SPECTRUM} under the matching
  * functions (`spectralColour.ts`'s `sunWeights`), lies 1.2 × 10⁻⁴ from it in u′v′ (`earth.test.ts`),
  * the bins' interpolation of a spectrum R06 integrates at 1 nm.
  */
-export const R06_SOLAR_COLOUR_RGB: Rgb = ((): Rgb => {
-  const red = 1.084_425_5;
-  const green = 0.981_559_72;
-  const [yr, yg, yb] = CHANNEL_LUMINANCE;
-  return [red, green, (1 - yr * red - yg * green) / yb];
-})();
+export const R06_SOLAR_COLOUR_RGB: Rgb = SUN_COLOUR_RGB;
 
 /**
- * R06's photopic illuminance of a V = 0 star of the Sun's spectrum over 2.54 µlx: 1.036747,
- * `solar_colour().lux_per_v0()` to seven figures, which puts the Sun at 1.3346 × 10⁵ lx (133,462 lx)
- * at 1 au, E-490's own 133,318 lx to 0.11%, where R07's stand-in takes 1 (`hostDisc.ts`).
+ * R06's photopic illuminance of a V = 0 star of the Sun's spectrum over 2.54 µlx,
+ * `solar_colour().lux_per_v0()`, 1.0367469: R07's {@link SUN_LUX_PER_V0}, held to the Sun's row of
+ * `bake_spectra.json`. It puts the Sun at 133,462 lx at 1 au, E-490's own 133,318 lx to 0.11%.
  */
-export const R06_SOLAR_LUX_PER_V0 = 1.036_747;
+export const R06_SOLAR_LUX_PER_V0 = SUN_LUX_PER_V0;
 
 /**
  * R06's solar bake spectrum: `solar_colour().bake_spectrum()`, the Sun's mean spectral irradiance
- * over the 15 bake bins per lux, W m⁻² nm⁻¹, as `packages/protocol/fixtures/bake_spectra.json`
- * holds it (held there by `hyperion-fit`'s `star_colour` test, and here by `earth.test.ts`).
+ * over the 15 bake bins per lux, W m⁻² nm⁻¹: R07's {@link SUN_BAKE_SPECTRUM}, as
+ * `packages/protocol/fixtures/bake_spectra.json` holds it (held there by `hyperion-fit`'s
+ * `star_colour` test, and here by `earth.test.ts`).
  */
-export const R06_SOLAR_BAKE_SPECTRUM = bakeSpectrumOf([
-  8.960915207343157e-6, 1.2362490278026274e-5, 1.3612987280831015e-5, 1.5485020042778694e-5,
-  1.4690473858970552e-5, 1.3958072723148161e-5, 1.4076616230965863e-5, 1.381707381874496e-5,
-  1.3363324889932911e-5, 1.2474684459518065e-5, 1.1775456367565396e-5, 1.1371777803239652e-5,
-  1.0711433533074792e-5, 1.001879082420593e-5, 9.483862860417408e-6,
-]);
+export const R06_SOLAR_BAKE_SPECTRUM = bakeSpectrumOf(SUN_BAKE_SPECTRUM);
 
 /**
- * The reference Sun's disc as R06's `host_discs` would send it (plan R08, R08.T6.d): R07's
- * `sunLikeHostDisc` (M_V 4.81, R☉ 6.957 × 10⁸ m, the V-band limb darkening) with R06's solar
- * colour, photopic factor and bake spectrum in place of its stand-ins. The descent spike, the smoke
- * and the tests light the reference Earth with it; generated bodies take their stars' own from
- * the wire.
+ * The reference Sun's disc as R06's `host_discs` would send it (plan R08, R08.T6.d and T6.j): R07's
+ * `sunLikeHostDisc()` as it stands, frozen (M_V 4.81, R☉ 6.957 × 10⁸ m, the V-band limb darkening,
+ * and R06's solar colour, photopic factor and bake spectrum, its defaults since R08.T6.j). The
+ * descent spike, the smoke and the tests light the reference Earth with it; generated bodies take
+ * their stars' own from the wire.
  */
-export const REFERENCE_SUN: HostDiscDto = frozenHostDisc(
-  sunLikeHostDisc({
-    colourRgb: R06_SOLAR_COLOUR_RGB,
-    lux_per_v0: R06_SOLAR_LUX_PER_V0,
-    bake_spectrum: [...R06_SOLAR_BAKE_SPECTRUM],
-  }),
-);
+export const REFERENCE_SUN: HostDiscDto = frozenHostDisc(sunLikeHostDisc());
 
 /**
  * The reference Sun's illuminance per channel at a distance, lx: R07's `starIlluminance` of

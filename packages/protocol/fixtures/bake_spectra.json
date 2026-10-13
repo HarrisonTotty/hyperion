@@ -1,10 +1,12 @@
 {
-  "description": "Host stars' bake spectra from R06's colour table (crates/hyperion-sim/src/tables/star_colour.rs, read through hyperion_sim::sky::colour::star_colour on the named grid, R06.T3.c, as HostDiscDto.bake_spectrum carries them): each star's mean spectral irradiance over the fifteen bins of bake_wavelengths_nm.json, W m^-2 nm^-1 per lux. The Sun is solar_colour() (5,772 K, log g 4.438); the dwarfs take the node nearest the main sequence's gravity (Pecaut and Mamajek 2013, ApJS 208, 9, as E. Mamajek's table of 2022.04.16 gives M and R), the red-clump giant Bovy et al. 2014's (ApJ 790, 127: log g 2.5 at 4,600–4,850 K), the M giant Arroyo-Torres et al. 2014's (A&A 566, A88, Table 5: log g 0.2–0.6 at 3,516–3,705 K), and the white dwarf a DA of log g 8 (Kepler et al. 2007, MNRAS 375, 1315: mean DA mass 0.593 solar masses). They are the suns of rendering plan R08.T4.a's channel fit (view/atmosphere/channels.test.ts reads them). hyperion-fit's star_colour test holds every row to the table, so a refit of star_colour that moves them updates this file, and the channel fit is then blessed again.",
+  "description": "Host stars' bake spectra and photometry from R06's colour table (crates/hyperion-sim/src/tables/star_colour.rs, read through hyperion_sim::sky::colour::star_colour on the named grid, R06.T3.c), as HostDiscDto carries them: chroma, the linear Rec. 709 red and green of the star's light at unit luminance (StarColour::chroma, f32 on the wire; blue follows from the table's luminance row as StarColour::blue gives it); lux_per_v0, the photopic illuminance of a V = 0 star of the spectrum over 2.54 µlx (StarColour::lux_per_v0); and bake_spectrum, the star's mean spectral irradiance over the fifteen bins of bake_wavelengths_nm.json, W m^-2 nm^-1 per lux (R08.T6.j added chroma and lux_per_v0). The Sun is solar_colour() (5,772 K, log g 4.438); the dwarfs take the node nearest the main sequence's gravity (Pecaut and Mamajek 2013, ApJS 208, 9, as E. Mamajek's table of 2022.04.16 gives M and R), the red-clump giant Bovy et al. 2014's (ApJ 790, 127: log g 2.5 at 4,600–4,850 K), the M giant Arroyo-Torres et al. 2014's (A&A 566, A88, Table 5: log g 0.2–0.6 at 3,516–3,705 K), and the white dwarf a DA of log g 8 (Kepler et al. 2007, MNRAS 375, 1315: mean DA mass 0.593 solar masses). They are the suns of rendering plan R08.T4.a's channel fit (view/atmosphere/channels.test.ts reads them), and the Sun's row holds the client's copies of R06's solar photometry (view/atmosphere/earth.test.ts and view/lighting/hostDisc.test.ts, R08.T6.j). hyperion-fit's star_colour test holds every row to the table, so a refit of star_colour that moves them updates this file, and the channel fit is then blessed again.",
   "suns": [
     {
       "teff_k": 2300,
       "log_g": 5.5,
       "grid": "MainSequence",
+      "chroma": [2.143942, 0.7484761],
+      "lux_per_v0": 1.134528,
       "bake_spectrum": [
         1.702287e-7, 1.658097e-6, 2.952269e-6, 3.837392e-6, 5.963341e-6, 7.973633e-6, 1.235524e-5,
         1.650135e-5, 1.193613e-5, 2.208844e-5, 3.589175e-5, 3.035545e-5, 5.614657e-5, 7.471585e-5,
@@ -15,6 +17,8 @@
       "teff_k": 3200,
       "log_g": 5.0,
       "grid": "MainSequence",
+      "chroma": [1.578103, 0.8896295],
+      "lux_per_v0": 1.0848329956444835,
       "bake_spectrum": [
         2.7157279388435174e-6, 4.808046133412457e-6, 7.357364910570398e-6, 7.160402482283188e-6,
         7.915112681871192e-6, 1.0366270249050633e-5, 1.4359350318644552e-5, 1.5587829879366346e-5,
@@ -26,6 +30,8 @@
       "teff_k": 4000,
       "log_g": 4.5,
       "grid": "MainSequence",
+      "chroma": [1.560804, 0.8835464],
+      "lux_per_v0": 1.1002039983889793,
       "bake_spectrum": [
         2.7169280826518268e-6, 4.611889119527709e-6, 8.227943023573437e-6, 9.934886739548358e-6,
         9.393768842483204e-6, 9.317653101651166e-6, 1.3951580086352194e-5, 1.5475119942675265e-5,
@@ -37,6 +43,8 @@
       "teff_k": 5772,
       "log_g": 4.438,
       "grid": "MainSequence",
+      "chroma": [1.0844254, 0.9815597],
+      "lux_per_v0": 1.0367468662789598,
       "bake_spectrum": [
         8.960915207343157e-6, 1.2362490278026274e-5, 1.3612987280831015e-5, 1.5485020042778694e-5,
         1.4690473858970552e-5, 1.3958072723148161e-5, 1.4076616230965863e-5, 1.381707381874496e-5,
@@ -48,6 +56,8 @@
       "teff_k": 7000,
       "log_g": 4.0,
       "grid": "MainSequence",
+      "chroma": [0.94657046, 0.9906198],
+      "lux_per_v0": 1.0218969937458033,
       "bake_spectrum": [
         1.6772623113707816e-5, 1.9140702907886454e-5, 1.829295194399972e-5, 1.8263931451462023e-5,
         1.6058210555788572e-5, 1.5259470547701702e-5, 1.4276770108385072e-5, 1.3358299807884307e-5,
@@ -59,6 +69,8 @@
       "teff_k": 9000,
       "log_g": 4.0,
       "grid": "MainSequence",
+      "chroma": [0.7944821, 0.9963346],
+      "lux_per_v0": 1.0076590350028174,
       "bake_spectrum": [
         2.6084452160811637e-5, 2.763500860331489e-5, 2.3700240338680977e-5, 2.2220989347195274e-5,
         1.7678022434098947e-5, 1.656767665648919e-5, 1.4515259496007546e-5, 1.280145203401251e-5,
@@ -70,6 +82,8 @@
       "teff_k": 15000,
       "log_g": 4.0,
       "grid": "MainSequence",
+      "chroma": [0.73829424, 0.9891838],
+      "lux_per_v0": 1.0046999969130328,
       "bake_spectrum": [
         3.6871097685900804e-5, 3.3233704252897764e-5, 2.7456852697768835e-5, 2.3827171333495793e-5,
         1.9318751086076316e-5, 1.6943710382820873e-5, 1.450128999824394e-5, 1.247486974278356e-5,
@@ -81,6 +95,8 @@
       "teff_k": 30000,
       "log_g": 4.0,
       "grid": "MainSequence",
+      "chroma": [0.6901409, 0.9845642],
+      "lux_per_v0": 1.0013119987909571,
       "bake_spectrum": [
         4.600341311749842e-5, 3.786510093169567e-5, 3.0387080523698704e-5, 2.5161679863854455e-5,
         2.0445250505306594e-5, 1.732891010002081e-5, 1.4495569888768067e-5, 1.2221929966513179e-5,
@@ -92,6 +108,8 @@
       "teff_k": 45000,
       "log_g": 4.0,
       "grid": "MainSequence",
+      "chroma": [0.6910082, 0.9822697],
+      "lux_per_v0": 1.0016449990990035,
       "bake_spectrum": [
         4.72071586925759e-5, 3.829070999157764e-5, 3.079158989501433e-5, 2.5235639942610447e-5,
         2.063318000156695e-5, 1.7316310152581777e-5, 1.4441949931250059e-5, 1.2208690006659539e-5,
@@ -103,6 +121,8 @@
       "teff_k": 3500,
       "log_g": 0.5,
       "grid": "Giant",
+      "chroma": [1.5550201, 0.9034455],
+      "lux_per_v0": 1.080890025401164,
       "bake_spectrum": [
         1.1527384572541976e-6, 2.7931749049627912e-6, 5.686646824853136e-6, 7.136114813139203e-6,
         8.159853004739557e-6, 1.0516488389056136e-5, 1.4554088474686817e-5, 1.4960420545826772e-5,
@@ -114,6 +134,8 @@
       "teff_k": 4750,
       "log_g": 2.5,
       "grid": "Giant",
+      "chroma": [1.2619392, 0.95902544],
+      "lux_per_v0": 1.0554511681966365,
       "bake_spectrum": [
         3.592166671487446e-6, 6.402387085351377e-6, 9.274583737783066e-6, 1.2285737523490366e-5,
         1.2745908873951252e-5, 1.242607684518427e-5, 1.382727937472813e-5, 1.4329813953626784e-5,
@@ -125,6 +147,8 @@
       "teff_k": 10000,
       "log_g": 8.0,
       "grid": "WhiteDwarf",
+      "chroma": [0.8287938, 1.007363],
+      "lux_per_v0": 1.007322,
       "bake_spectrum": [
         2.164922e-5, 2.263203e-5, 2.071034e-5, 2.042867e-5, 1.609752e-5, 1.644418e-5, 1.463976e-5,
         1.304178e-5, 1.163434e-5, 1.037875e-5, 8.355269e-6, 8.028624e-6, 7.544688e-6, 6.820371e-6,
