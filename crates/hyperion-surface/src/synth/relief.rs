@@ -637,6 +637,14 @@ fn octave_table(seed: DetailSeed) -> Vec<Octave> {
     (0..OCTAVES).map(|m| octave(seed, m)).collect()
 }
 
+/// The lattice offsets of the octaves of [`octave_table`], octaves 0 to 31 in turn, which the
+/// height goldens pin (R09.T9).
+#[cfg(test)]
+#[must_use]
+pub(crate) fn octave_offsets(seed: DetailSeed) -> Vec<[f64; 3]> {
+    octave_table(seed).iter().map(Octave::offset).collect()
+}
+
 /// The relief's amplitude factor in a mountain belt: 2.5 times the reference.
 ///
 /// The reference style, amplitude 1, is a body's typical ground: Earth's global mean relief in

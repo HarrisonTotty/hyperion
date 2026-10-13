@@ -2448,7 +2448,10 @@ answers `not_modelled` and no client asks. T1.b, whose filled hooks section move
 systems, makes no bump of its own: it is built in galaxy plan 14's 21 → 22 batch and lands under
 that batch's one bump (plan 14's bump plan, under its Tasks' order). This plan's own first bump is
 made by whichever of T9 and T16 lands first, through the orchestrator, which coordinates bumps one
-lane at a time; later tasks that change a committed golden bump again. R05's `FINEST_SPACING_M`,
+lane at a time; later tasks that change a committed golden bump again. As built, T9 landed at 21
+with no bump of its own, and that batch's bump is this plan's first: it re-blesses
+`tests/golden/height/` with the rest, since no synthesis output has reached a save or the wire
+(main's ruling, 2026-10-13; Risks, "Deviations in T9, as built"). R05's `FINEST_SPACING_M`,
 `BAND_LIMIT_M`
 and `finest_level` join the version when T9 reads them, as R05 notes. Nothing upstream moves but
 the hooks section T1.b fills: every draw is on a new tag, plan 14's `body.surface` seed is
@@ -5879,3 +5882,134 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _The heavy cost of a coarse patch's range_: `height_range_m` of a level-0 patch walks the
     65,536 coarse cells under it and the margin about the face (the rings now grow from the
     block's border only).
+- **Deviations in T9, as built** (2026-10-13; lane r09-assembly, after T8; main's ruling of that
+  day on the bump).
+  - _Where the goldens are written._ A module of the crate, `src/synth/height_golden.rs`
+    (`cfg(test)`, declared in `synth.rs`), not `tests/height_golden.rs`. The synthetic worlds are
+    `cfg(any(test, feature = "testing"))`, and the browser target's test build (`just _browser`)
+    passes no features, so an integration test could not see them there. Making it see them takes
+    the crate's dev-dependency on itself with `testing`, which changes `Cargo.lock` and makes
+    smart-ci plan the full `ci`. R09's other goldens are written from the crate the same way
+    (`craters/golden.rs`, `wire/tests.rs`, the months'), and the module also reads crate-private
+    items (`synth::test_support`, `Segment::slope_at`, the rims' and the relief's structure
+    functions). The acceptance is `cargo test -p hyperion-surface --lib height_golden` natively,
+    nextest's `-E 'test(height_golden)'` on `wasm32-wasip1`, and the browser target's `--lib` run,
+    all of which `just test-wasm-fast` and smart-ci's suites include.
+  - _The files._ 16 goldens in `tests/golden/height/`, 887 KB in all (the largest 111 KB, under the
+    500 kB hook). Each world has two:
+    - `<world>_points`: 64 sites × 8 levels, 512 `height_at` samples (heights and gradients). The
+      levels are 0, L − 1 to L + 4, and the complete level, the shallowest at the band limit. The
+      sites are the cube's eight corners; eight face-edge vertices; 16 about four coarse craters
+      (0.97, 1.0 and 1.04 rim radii, and 0.98 of the reach); 12 in three cells whose channels reach
+      L + 4 (the key point, the trunk's midpoint, two at random), the first on a face edge; eight
+      in cells of belt weight 0 < b < 1; and 12 at random. A world lacking a group takes random
+      sites in its place. Beside the pinned eight, every site's complete-level height is asserted
+      equal, to the bit, to its height one level finer, at `finest_level` and at level 24.
+    - `<world>_parts`.
+
+    Four more cover every world: `common`, `levels`, `closed_forms` and `bakes`. The module
+    documentation describes each file. R05's `BAND_LIMIT_M`, `FINEST_SPACING_M` and `finest_level`
+    are pinned there (`common`, and the levels of the points), so they joined the version at 21,
+    as Generator version expects.
+
+  - _The parts, as the earlier records asked._
+    - T4: the base elevation at all 64 sites, and `interpolate` at level 2 over a closed form at
+      the cube's corners, face edges and random points.
+    - T5:
+      - each octave's spacing, RMS, ridged share, belt factor and bound;
+      - `point_variance` at four styles;
+      - `nyquist_degree` at every level;
+      - `Relief::at` through L + 3 (before the warp) and through the finest, at 16 sites;
+      - the 32 octaves' offsets of the tests' seed, read through a new public
+        `noise::Octave::offset` getter and a `cfg(test)` `relief::octave_offsets`.
+    - T6.a and T6.b, below six cells with channels (the first on a face edge):
+      - the key points (s, t, inherited) and segments of 13 cells, L to L + 3;
+      - each cell's `deepest_level` and `channel_variance` at 100 km to 100 m;
+      - the first cell of each case T6.a's review named, searched for in cell-index order: a trunk
+        into another face, into the sea, and held at its crossing (it leaves the great circle
+        through its key points, as T6.a's test tells it, within 4,096 trunks); and a tributary
+        joining on another face, clamped at its parent's end, and on the slope floor at its outlet
+        (within the cells at L + 1 and L + 2 below the first 64 coarse cells with tributaries);
+      - the incision through L to L + 4, at the 16 corner and edge sites and the 12 channel sites;
+      - the closed forms: Hack's law both ways, `head_length` from L to 24, `tributary_rise` about
+        the slope floor's crossover, `channel_head_area`, `valley_depth`, `bankfull_width` and
+        `bankfull_depth`.
+    - T7.b:
+      - the octave table;
+      - for the first, middle and last octaves, `craters_in` at a cube corner's, a face edge's and
+        a random site's cells, and at the first cell from the corner's (within 4,096) that holds a
+        crater: each cell's count and digest, and its first three craters;
+      - `SmallCraters::at` at the 16 corner and edge sites at the first, middle and last levels that
+        evaluate craters, and at that crater's centre and rim, at the shallowest level evaluating its
+        octave and at the complete level.
+    - T7.c:
+      - `coarse_band_half_width`;
+      - for four craters, the kept relief, and `CoarseRims::at` at L − 4, L + 2 and the finest
+        level, at 0, 0.97, 1.0 and 1.04 rim radii and just inside the reach;
+      - the same at face-edge vertices, sampled as T7.c's continuity test samples them (every eighth
+        vertex of each face-edge cell a reach holds). It takes the first three a crater where the
+        rims stand more than a metre high at the finest level, for the first four craters in list
+        order that have any.
+    - T8:
+      - every level's `LevelSet`, `bound_m` and `contribution_range_m`, with `LevelBounds::new` and
+        the synthesiser's asserted equal;
+      - at up to five cells a world, `unresolved_variance` by contribution at five wavelengths;
+        `structure_function` by contribution (relief, channels, small craters, rims) and whole, at
+        two wavelengths and at lags of 1, 2, 5, 10, 100 and 1,000 m (2 and 5 m for R10.T5's slope
+        baselines); and `unresolved_rms`;
+      - one `bake_patch` at L + 3 a world: the digests of its 4,225 samples and 1,089 parent
+        heights, six samples and four parent heights.
+  - _What the worlds do not give._ The searches write `none` where a world has no case, and these are
+    the gaps:
+    - No tributary on the slope floor at its outlet on either channelled world: the floor binds
+      beyond a 1 km main stream only at the smallest steepness codes. The floor's arithmetic is
+      pinned through `tributary_rise` about the crossover.
+    - No trunk into the sea on the Mars-like world, which has none.
+    - The Earth-like world's last octave holds no crater within 4,096 cells: screened, about
+      4 × 10⁻⁸ a cell. Its first and middle octaves do.
+    - No Earth-like rim reaches a face edge.
+    - T7.b's "cell of the last octave that draws a crater under 2 m" is not singled out, since
+      `craters_in` drops such a draw. The last octave's kept craters are pinned, so a target that
+      cut at 2 m differently would show.
+    - The octaves' rotations (`noise::rotation`, constants) are pinned only through the heights.
+  - _Across targets._ The goldens agreed to the bit on all three targets each time they were
+    compared: native, `wasm32-wasip1` under wasmtime 49.0.1, and `wasm32-unknown-unknown` on
+    Electron 44.4.3's V8 through the shim. No mismatch was found, so nothing was fixed.
+  - _A change to any synthesis constant fails it._ Checked by hand by nudging one constant at a
+    time, each reverted:
+    - `WARP_SCALE` by 2 × 10⁻⁷ fails the Earth-like world's two files, the only world whose cells
+      shear;
+    - `BANKFULL_WIDTH_COEFFICIENT` fails 10 files;
+    - `DIFFUSIVITY_M2_PER_MYR` fails 10 files.
+  - _The narrowing._ T3 already narrowed `golden_diff.py`'s test-planet rule to the files directly in
+    `tests/golden/` (`is_test_planet`), and `cube_golden.rs`'s check was already a flat `read_dir`.
+    So T9 adds only `native_only::every_height_golden_carries_the_generator_version` (16 files).
+    `golden_diff.py` reports the 16 as new at the generator's version, finds no inconsistency, and
+    still checks R05's goldens against `TEST_PLANET_VERSION`.
+  - _Generator version._ No bump: the goldens carry 21. R09's first bump rides plan 14's held 21 → 22
+    batch at P14.T48.e, which re-blesses `height/` with the rest (main, 2026-10-13; Generator
+    version). T16's "if T9 has not already" now reads: the batch's bump is the first.
+  - _The bench under the shim._ `benches/synth.rs` gains `surface/point` for the browser target, as
+    `wasm-bindgen-test` 0.3.79's `#[wasm_bindgen_bench]` (20 samples a part). It covers the same
+    parts and patches through a `shared` module that both targets' benches read; the native IDs are
+    unchanged. It builds, and the runner lists it.
+  - _For R10's re-validation._ R10's goldens of the synthesis can follow `height/`'s pattern:
+    - a subdirectory each, since the files directly in `tests/golden/` are held to
+      `TEST_PLANET_VERSION`;
+    - a `cfg(test)` module in the crate, where the synthetic worlds are;
+    - a `--lib` acceptance filter, and a `native_only` header check.
+
+    R10.T1.b's text still names `tests/material_golden.rs` and its `--test material_golden`
+    acceptance. R10's Consumes' "provisional until R09.T9 lands" can go.
+- **Deferred findings (2026-10-13 rule)** (R09.T9; recorded, not ruled; each for "main"'s list).
+  - _The bench's timed run is pending._ The heavy lock was held throughout. The command, in
+    `benches/synth.rs`'s documentation, runs with the shim first on `PATH`:
+    `cargo bench --target wasm32-unknown-unknown -p hyperion-surface --features testing --bench synth`.
+    It is to be run with the lock free and recorded as provisional, with its load, against Design
+    note 14's WebAssembly targets and the brainstorm's 10 µs a point. Until then T8's 1.2–1.5 ×
+    native stays an estimate for R10.T6.a's budget, and T20 can take the run if no one does sooner.
+  - _Goldens moved before the batch._ A synthesis change landing before P14.T48.e (the T6.c
+    channel structure-function follow-up, the fused interpolant pass) moves `height/` at 21. The
+    Generator version rule says it bumps, and the sim-determinism skill's re-bless exception covers
+    `wire/` alone. Whether such a change instead re-blesses at 21, with the batch's one bump
+    covering it, is main's to rule when the first one lands; the skill then needs its line.

@@ -229,6 +229,13 @@ impl Octave {
         self.key
     }
 
+    /// The lattice offset o, in lattice spacings, added after the rotation and the scaling
+    /// ([`Octave::new`]).
+    #[must_use]
+    pub const fn offset(&self) -> [f64; 3] {
+        self.offset
+    }
+
     /// The point `point` (body-fixed, in the octave's unit) in the octave's lattice coordinates:
     /// R · p ÷ λ + o, each row's products summed in axis order.
     #[must_use]

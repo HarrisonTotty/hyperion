@@ -1095,4 +1095,7 @@ fn anchor_degree(circumference: f64) -> u64 {
 pub(crate) mod test_support;
 
 #[cfg(test)]
+mod height_golden;
+
+#[cfg(test)]
 mod tests;
