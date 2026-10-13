@@ -95,8 +95,11 @@ is named. R09's types (`FieldView`, `PartialField`, `CoarseField`, `Synthesiser`
 `BakeOptions`, `PatchBake`, `finest_surface_height`, `NormalScale`), R09's `height::HeightSample`
 (moved there by R09.T4, re-exported by `test_planet`) and R11's `scatter::ExtraLayer` are theirs.
 Positions and directions in the surface crate are body-fixed `[f64; 3]` in metres, as R05's are,
-since the crate depends on base alone (R11 aliases the type `BodyFixed`); the client wraps them as
-R02's `BodyFixedPosition` and `BodyFixedVector`.
+since the crate depends on base alone (R11 aliases the type `BodyFixed`); the client holds them as
+R05's `BodyFixedVec3` (`view/terrain/planet.ts`, an alias of `geometry/vec3.ts`'s `Vec3`) and, at
+R02's boundary, as a `ViewPosition` of kind `body_fixed`. `BodyFixedPosition` and
+`BodyFixedVector` are the sim's Rust types (`coords/body_fixed.rs`), not the client's (re-validated
+at `c6d77cac`).
 
 ### `material`
 
@@ -109,18 +112,24 @@ pub enum MaterialClass {
     WaterIce = 7, Snow = 8, SeaIce = 9, VolatileFrost = 10, OrganicSediment = 11, Seabed = 12,
     Evaporite = 13, Dust = 14,
 }
-pub enum FrostSpecies { CarbonDioxide, Nitrogen, Methane }   // carried beside VolatileFrost
-pub struct Material { /* class: MaterialClass, frost: Option<FrostSpecies> */ }
+/// The form and the substance: `entry` is the index of R09's header palette entry the ground is
+/// made of (`field::MaterialPalette`, R09.T2's follow-up B). `FrostSpecies` is gone: the ice
+/// entry names the species (decision-composition §1.8, folded in at the re-validation).
+pub struct Material { /* class: MaterialClass, entry: u8 */ }
 
 pub struct MohrCoulomb { /* cohesion: Pascals, friction_angle: Radians */ }
 pub enum FrictionModel { Constant(f64), ByTemperature(&'static [(Kelvin, f64)]) }  // tan δ, pad
 pub struct MaterialProperties {
-    /* normal_albedo: Option<(f64, f64)> (A_N range, visible), phase: PhaseLaw (f(α)),
-       shear: &'static [(Metres, MohrCoulomb, KgPerCubicMetre)] (by depth, empty where unknown),
+    /* the class's table: shear: &'static [(Metres, MohrCoulomb, porosity)] (by depth, empty
+       where unknown; each layer's bulk density from the entry's grain density),
        interface_friction: Option<FrictionModel>, compressive_strength: Option<Pascals> (ice),
-       sources: &'static [&'static str] */
+       by the entry's mechanics family where the class's rows are per family,
+       sources: &'static [&'static str];
+       the entry's resolved values (R09's `PaletteEntry`, as built): normal_albedo_bvr: [f64; 3]
+       (A_N in B, V and R), phase_row: u8, grain_density_kg_m3: f64, transition: Kelvin,
+       mechanics: MechanicsFamily */
 }
-pub fn properties(material: Material) -> &'static MaterialProperties;
+pub fn properties(material: Material, palette: &MaterialPalette) -> MaterialProperties;
 /// L(0) of the lunar-Lambert law from the normal albedo (Design note 8).
 pub fn limb_parameter(normal_albedo: f64) -> f64;
 /// Ultimate bearing capacity under a footing (Design note 2); `None` where the table has no data.
@@ -129,13 +138,14 @@ pub fn bearing_capacity(p: &MaterialProperties, gravity: MetresPerSecondSquared,
 pub fn interface_friction(p: &MaterialProperties, temperature: Kelvin) -> Option<f64>;
 
 /// The authoritative class at a point, from the finest level's slope, altitude, R09's climate and
-/// surface-state classes, and the ice field.
+/// surface-state classes, the ice field, and the cell's substance byte and the header's palette.
 pub fn material_at<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
     at: FaceUv) -> Result<Material, QueryHeightError>;
 pub const CLIFF_SLOPE: Radians;            // 40°, Design note 1
 pub const TRANSITION_HALF_WIDTH: Radians;  // 5°, the visual blend band either side
 pub const SNOW_SHED_SLOPE: Radians;        // provisional, T1.a finds a source or removes it
-/// Presentation weights over a per-patch palette of up to eight classes (Design note 3).
+/// Presentation weights over a per-patch palette of up to eight materials, each a (form, entry)
+/// pair (Design note 3).
 pub struct ClassWeights { /* palette: [Option<Material>; 8], weights: [u8; 8] summing to 255 */ }
 pub fn weights_at<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
     at: FaceUv, level: BandLevel) -> Result<ClassWeights, QueryHeightError>;
@@ -148,7 +158,9 @@ pub fn albedo_scale(field: &CoarseField, geometric_albedo: f64) -> AlbedoScale;
 
 ```rust
 /// The authoritative ground: R05's `finest_surface_height` over R09's synthesis, with the
-/// triangle it came from. Collision reads this and nothing else.
+/// triangle it came from. Collision reads this and nothing else. As built R05's interpolant
+/// returns the height alone (its lattice and split are private), so T3 adds the triangle's query
+/// beside it in `patch::collision`.
 pub fn ground_at<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
     p: &[f64; 3]) -> Result<GroundPoint, QueryHeightError>;            // body-fixed, metres
 pub struct GroundPoint { /* height: Metres (above R07's reference spheroid, along its normal),
@@ -199,6 +211,9 @@ The worker's WebAssembly entry points, on R05's binding, gain `field_init`, `fie
 `field_init` with the body's `LevelBounds` (below). They replace R05's single `postField(bytes)`
 with these per-body calls. For the readouts they also gain `reading`, `slant_range` and `material`,
 the wasm faces of `surveyed_reading`, `slant_range` and `material_at` with `properties` (T6.b).
+As built, R05's module (`src/wasm.rs`) serves the test planet alone: `bakePatch`, `levelTable`,
+`surfaceHeightM` and `omittedSigmaM`, each taking `Ridges`, which the spike keeps (R09 Design note
+18); the per-body exports go beside them, under the same camel-case `js_name` rule.
 
 ### Client (`apps/hyperion/src/renderer/src/view/terrain/`)
 
@@ -208,7 +223,10 @@ the wasm faces of `surveyed_reading`, `slant_range` and `material_at` with `prop
 - `coverage.ts`: `CoverageView` (`resolutionAt(cell)`, `surveyedFraction()`, `bestResolution()`),
   `surveyEdges(face, level)` for the edge mark, and the GPU coverage mask per face.
 - `levelBounds.ts`: `LevelBounds { hard: Float64Array; sigma: Float64Array }` per body, and
-  `selectionBound(bounds, level, rule)`, which R05's `screenSpaceErrorPx` reads.
+  `selectionBound(bounds, level, rule)`. As built, R05's selection reads its bound from the body's
+  level table (`PlanetGeometry.levels`, four values a level: bound, lowest and highest height,
+  spacing; `planet.ts`'s `levelBoundM`), and `select.ts`'s `selectionErrorM` adds the chord
+  sagitta before `screenSpaceErrorPx`; so `selectionBound` fills that table's bound column.
 - `classMap.ts`: the per-body coarse class-weights map R07's disc samples.
 - `shaders/terrainLit.wgsl` (the file R07 names) with `terrainMaterial.ts`: palette and weights to
   `body_brdf`'s per-class law, the survey mask, skirts at the survey edge, and the hooks R11 fills:
@@ -227,8 +245,10 @@ the wasm faces of `surveyed_reading`, `slant_range` and `material_at` with `prop
 - `readouts.ts`: `formatWithUncertainty`, `formatElevationReading`, `formatSlopeReading`,
   `formatSlantRange`, and the `SurveyLine` and `TerrainReadout` components in the view's label
   block.
-- `cacheBudget.ts`: `PATCH_CACHE_BYTES` per setting, `bytesPerPatch(options)`, and
-  `patchCountModel(camera, tau, viewport)`, the pure count model of Design note 15.
+- `cacheBudget.ts`: `bytesPerPatch(options)` and `patchCountModel(camera, tau, viewport)`, the
+  pure count model of Design note 15. The budgets themselves are R05's `TerrainSettings.cacheBytes`
+  in `view/quality/qualitySetting.ts`'s `SETTINGS` (400,000,000 B high, 64 MiB low, as built),
+  the one list of R05's Design note 26, not a second `PATCH_CACHE_BYTES`.
 
 ### Test helpers
 
@@ -238,36 +258,61 @@ alone and never on the sim, by R04's entry in `.claude/rules/rust-dev.md`):
 - `crates/hyperion-surface/tests/common/worlds.rs`: `synthetic_worlds()`, R09's
   `testing::synthetic_field` worlds, fast enough for the goldens on all three targets; and
   `flat_field(height)`, `cliff_field(height, strike)` built with R09's `FieldBuilder` for the
-  horizon and classifier tests.
+  horizon and classifier tests. As built, `testing` is a feature that the surface crate's own
+  integration tests do not see, so their commands pass `--features testing` (the browser recipes
+  already do). `FieldBuilder::elevation` sets one value a coarse cell, which R09's approximating
+  spline blends over about two cells (R09's "Deviations in T4, as built"), so a `cliff_field`
+  steeper than 40° needs a body small enough for two cells to span less than the cliff's run.
 - `crates/hyperion-sim/tests/common/surface_worlds.rs`: `sample_worlds()`, R09's reference worlds
   (`planetary::surface::reference::{earth_like, mars_like, moon_like, ceres_like}`) plus an icy
   moon and a locked world built with `CoarseInputs::builder()`, each run through the coarse pass
   once per test binary. The sim depends on the surface crate, so these tests call this plan's
   functions directly. Tests on the reference Earth and Mars are slow, as R09.T16's are; the Moon,
   Ceres and the two built worlds are fast. They run natively; the cross-target goldens use
-  `synthetic_worlds()`.
+  `synthetic_worlds()`. As built, `reference::*` is behind the sim's `testing` feature
+  (`coarse_pass(seed, &inputs)`), so `cargo test -p hyperion-sim` needs `--features testing`; the
+  file is R09.T16's to create, and until R09.T11–T15 fill the coarse pass's steps the reference
+  worlds come out as T10's no-op pass leaves them, a smooth dry sphere with no fine relief (R09's
+  "Deviations in T10, as built"). The order of tasks says what waits on it.
 
 ## Consumes
 
 Names are the owning plans' as they stand on disk; the owner is authoritative, and where a name has
-changed by the time this plan runs only the call sites here change.
+changed by the time this plan runs only the call sites here change. Re-validated at `c6d77cac`
+against R05, R07, R08 and R09 as built (Risks, "Re-validated at `c6d77cac`"). What R09.T8, T9 and
+T19.b provide is not built yet: those names are R09's Provides, **provisional until R09.T8/T9/T19.b
+land**, and each is marked so below.
 
 - **R01:** the engine adapter, its WGSL-only material path, its adapter feature report
-  (`GpuCapabilities`, with `depthClipControl` and `timestampQuery`) and the headless SwiftShader
-  smoke harness, with its no-f16 and no-subgroup runs.
-- **R02:** the client's `BodyFixedPosition` and `BodyFixedVector`, which wrap the surface crate's
-  body-fixed `[f64; 3]`; the view's camera, per-patch origin convention and rotation-only view
-  matrix; the wireframe style's line tokens, casing and label block; the DOM list; the graticule;
-  the nine drafted guide items, of which this plan extends items 1, 3, 5 and 7.
+  (`GpuCapabilities` in `view/engine/platform.ts`, with `depthClipControl`, commented as for R10's
+  cascades, and `timestampQuery`) and the headless SwiftShader smoke harness, with its no-f16 and
+  no-subgroup runs; `MemoryCategory` (`view/engine/memory.ts`), which has neither
+  `coarse-field-gpu` nor `shadows` yet (T7 and T9.a add them).
+- **R02:** the view's camera, per-patch origin convention and rotation-only view matrix; the
+  wireframe style's line tokens, casing and label block (`displays/view/viewRun.ts`'s
+  `labelStatements(run, terrain)` and `labelLines`, drawn by `ViewLabelBlock.tsx`); the DOM list
+  (`ViewMarkList.tsx`, a windowed `listbox` of `viewRun.ts`'s `MarkRow`); the graticule; the nine
+  drafted guide items, of which this plan extends items 1, 3, 5 and 7. Body-fixed vectors reach the
+  view as a `ViewPosition` of kind `body_fixed` (`view/coords/position.ts`); the client has no
+  `BodyFixedPosition` or `BodyFixedVector`, which are the sim's Rust types.
 - **R03:** the binary frames the chunks ride, their backpressure, and the scene topic carrying R09's
-  `surface_revisions`.
+  `surface_revisions` (provisional until R09.T19.b lands: no `surface_revisions` exists yet). As
+  built, `packages/protocol/src/requests.ts`'s `RequestClient.requestBulk`, taking
+  `(body, manifestOf, options)`, hands over whole answers only, each `partial_response` with its
+  chunks through `options.onPartial` and the last through `outcome`, so forwarding a block as its
+  frames arrive
+  (Design note 16) takes a per-chunk option there, which T7 adds; `MAX_BULK_CHUNKS` (257) and
+  `MAX_BULK_PAYLOAD_BYTES` (64 MiB) are in `packages/protocol/src/bulk.ts`. The client's scene
+  model is `lib/scene/useScene.ts` and `sceneWire.ts`'s `applySceneNotification`; the fake socket
+  is `renderer/src/test/FakeWebSocket.ts` (with `binaryFrames.ts`'s `binaryFrame`).
 - **R04:** the `hyperion-surface` crate with its `clippy.toml` and relaxed-SIMD `compile_error!`;
   the base crate's `math`, with R04.T4.c's `math::j0` for Design note 7, `rng` and `units`; both
-  wasm targets' fast goldens in `just ci`; the testkit's `include_str!` arm and its `.golden` files;
-  and R04 Design note 12's conventions for every test in `hyperion-surface`: the
-  `wasm_bindgen_test as test` import, a `native_only` module for a test that cannot run on
-  `wasm32-unknown-unknown` (one that reads files), and every `should_panic` test stating `expected`
-  in the crate's own `tests/panics.rs`.
+  wasm targets' fast goldens (`just test-wasm-fast`, which `just ci` runs); the testkit's
+  `include_str!` arm (`golden!`, `check_embedded`), `GoldenWriter`, `f32_digest` and `f64_digest`,
+  and `order::assert_order_independent(keys, f)`; and R04 Design note 12's conventions for every
+  test in `hyperion-surface`: the `wasm_bindgen_test as test` import, a `native_only` module for a
+  test that cannot run on `wasm32-unknown-unknown` (one that reads files), and every
+  `should_panic` test stating `expected` in the crate's own `tests/panics.rs`.
 - **R05:** `cube` and `geometry` (`Face`, `FaceUv`, `PatchKey`, `finest_level`, `MAX_LEVEL`,
   `FINEST_SPACING_M`); `patch::{HeightSource, bake_patch, BakeOptions, PatchBake}`,
   `patch::{VertexPath, NormalScale, finest_surface_height}`, generic over `HeightSource` (R05.T4.a,
@@ -275,38 +320,99 @@ changed by the time this plan runs only the call sites here change.
   in selection (its Design note 15) and `screenSpaceErrorPx`; `selectPatches`, `morphHold`,
   `GroundContact` and the grounded-body rule; `PatchCache` and `resolveDrawSet`; `HeightWorkerPool`,
   whose single `postField(bytes)` this plan replaces with per-body `field_init`, `field_chunk` and
-  `field_release` (T6.b); `normals` packed as `rg16float` (its Design note 5) and `PatchCache` built
-  on a `SlotLayout` of this plan's (its Design note 10); `terrainPass.ts`; `terrainAnnunciation`;
-  the scripted descent, `descentProfile.ts`, `metrics.ts` and the results files under
-  `docs/measurements/descent-spike/`.
+  `field_release` (T7 on the render thread, T6.b in the worker); `normals` packed as `rg16float`
+  (its Design note 5) and `PatchCache` built on a `SlotLayout` of this plan's (its Design note 10);
+  `terrainPass.ts`; `terrainAnnunciation`; the scripted descent, `descentProfile.ts`, `metrics.ts`
+  and the results files under `docs/measurements/descent-spike/`. As built:
+  - `HeightSource` (`patch.rs`) is `type Cache`, an `Error` bounded by
+    `std::error::Error + Send + Sync + 'static`, `figure()`, `height(cache, dir, level: u8)`,
+    `level_bound_m(level: u8)` (documented as "the level's hard error bound"),
+    `height_range_m(key: PatchKey)` and a default `prepare_cache(cache, key)`; only `TestPlanet`
+    and a test fixture implement it.
+  - `PatchBake` also carries `origin_height_m` and `skirt_depth_m` (`level_bound_m` plus the `f32`
+    step plus `skirt_m`), and `height_range_m: (f32, f32)`.
+  - `collision::finest_surface_height` and `collision::mesh_height(source, dir, level, cache)`
+    return the height alone; no query returns the triangle (T3 adds one).
+  - Selection reads the bound from `PlanetGeometry.levels` (`planet.ts`, `LEVEL_TABLE_STRIDE` 4:
+    bound, lowest and highest height, spacing; `levelBoundM`, `levelHeightRangeM`), and
+    `selectionErrorM` adds the chord sagitta; the wasm module's `levelTable(ridges)` fills it for
+    the test planet.
+  - `slotLayout.ts`: `slotLayout(fields, budgetBytes)`, `terrainSlotFields(terrain)`,
+    `terrainSlotLayout(terrain)`, `MIN_SLOTS` (6); `SlotFieldName` is `heights`, `offsets`,
+    `normals` and `horizon-map` (0 B until sized), with R10's class weights and survey mask still
+    to add. Normals are stored with the atlas's one-texel gutter, 17,956 B a patch at the mesh's
+    resolution and 68,644 B doubled (R05's "Deviations in T8, as built").
+  - The pool (`workers/pool.ts`) takes `{ workers, createWorker, bake: BakeSettings }`;
+    `BakeSettings` and `TerrainPassOptions` carry the test planet's `ridges`; `postField` sends one
+    whole buffer, which the worker (`heightBake.ts`'s `answerRequest`, `height.worker.ts`) holds in
+    JavaScript; the spike calls it (`view/spike/spikeRun.ts`). The scripted fake worker is in
+    `pool.test.ts`.
+  - The settings: `view/quality/qualitySetting.ts`'s `TerrainSettings` (`tauPx`, `renderHeightPx`,
+    `normals`, `vertexPath`, `cacheBytes`); high is τ 1, double normals, `BakedOffsets`,
+    400,000,000 B; low is τ 2 at 720 px, mesh normals, `FaceDifferences`, 64 MiB.
+  - `gpu/vertexEmulation.ts` (`faceDifferencePositionF32`, `faceDifferenceMorphF32`) forms the
+    vertices in `Math.fround`, for T15.
 - **R07:** in `shaders/litBody.wgsl`,
   `struct LunarLambert { a: vec3f, l: f32, s: vec3f, table_row: u32 }` (`table_row`, not `template`, a
   WGSL reserved word: the row of `phase_factor_table` holding the law's f, R07.T4.c as built),
   `body_brdf(law: LunarLambert, mu0, mu, alpha) -> vec3f` (R07.T4.c),
   `sphere_irradiance(h, phi, horizon) -> f32` with its local-horizon argument (R07.T6.a, T6.c) and
   `eclipse_visible`; `DiscSurface` and its `class-map` case
-  `{ weights: TextureHandle; laws: PhotometricLaw[]; elsewhere: PhotometricLaw }` in `bodyDisc.wgsl`
-  and `bodies/discSurface.ts` (R07.T8.b), as built: the map's layout (a 2D array of `rgba8unorm`,
+  `{ weights: TextureHandle; laws: ReadonlyArray<PhotometricLaw>; elsewhere: PhotometricLaw }`,
+  the type in `appearance/bodyAppearance.ts` and its builders in `bodies/discSurface.ts`, read by
+  `bodyDisc.wgsl` (R07.T8.b), as built: the map's layout (a 2D array of `rgba8unorm`,
   N × N texels a face of R05's cube sphere under `uvToSt`, class k in channel k mod 4 of layer f +
-  6⌊k ÷ 4⌋, at most 16 classes), `packClassMap`, `classMapSurface` and `classMapTextureSpec`, and
+  6⌊k ÷ 4⌋, at most 16 classes, `MAX_DISC_CLASSES`), `packClassMap`, `classMapSurface` and
+  `classMapTextureSpec`, and
   `LitBodyInput`'s optional `surface` and `rotation`, which the view's `litBodiesOf` passes (T10.d);
   `BodyFigure`, the reference spheroid every height here is
   measured from, along its normal (R07's Design note 19); `BodyAppearance`, `LitRegime`
   (`"point" | "disc" | "mesh"`) and `lawFor(p: Rgb, q: Rgb, template: PhaseTemplateId)`; the star's
   angular radius per view. R07 creates those signatures with default inputs; this plan's T8.b (the
   horizon from the horizon map), T10.b (a `LunarLambert` per class, their `body_brdf` summed per
-  texel by weight) and T10.d (the class map) supply the inputs through them unchanged.
+  texel by weight) and T10.d (the class map) supply the inputs through them unchanged. As built:
+  - `phase_factor_table` is an `rgba32float` texture (`bodyDisc.wgsl` binding 1, `DISC_TEXTURES` in
+    `bodies/draw.ts`), one row a law of 361 texels from 0° to 180°, f in r, g and b and alpha unused
+    (written 0), filled by `appearance/litBodyProbe.ts`'s `packPhaseFactorRows`; `PhotometricLaw`
+    (`appearance/law.ts`) has `lommelSeeligerShare` and no curve. The L(α) channel is T10.b's.
+  - `sphere_irradiance` clamps `horizon` at 0, and `litBody.wgsl` takes WGSL's built-in
+    trigonometry, which stays on main's deferred list (`decision-r08-f32.md` §9).
+  - `classMapTextureSpec` files the map under `MemoryCategory` `"other"`; `litBodiesOf`
+    (`displays/view/photorealFrame.ts`) sets `rotation` where known and never `surface`, and
+    `discSurfaceOf(appearance)` is always uniform. `PhotorealInputs` is built in
+    `displays/view/viewFrameDrawer.ts`, which `ViewDisplay.tsx` makes; `photorealFrame` passes
+    `depthWriters: []`, "R10's terrain and lit craft add their footprints".
+  - The `mesh` regime is `bodies/smoothMesh.ts` with `shaders/smoothMesh.wgsl` and
+    `SMOOTH_MESH_MATERIAL` (`bodies/draw.ts`), which already include R05's
+    `terrain/shaders/patchVertex.wgsl`; `discEclipseVisible` is in `view/lighting/discEclipse.ts`;
+    `pointFlux` and `oblateAlbedoScale(share, cOverA)` in `bodies/draw.ts` and `bodies/oblate.ts`.
 - **R08:** aerial perspective applied to the terrain pass's output; R08.T9.b's
   `surfaceLighting.wgsl` with
-  `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` and
-  `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f`, the terrain's direct and
-  diffuse light where the body has an atmosphere, taking the texel's geodetic height and latitude
-  and the sun's azimuth from local north (R08 Design note 17); and the sun's refracted apparent
-  elevation where it draws one (Design note 10).
+  `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad, curve) -> vec3f`,
+  `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad, curve) -> vec3f` and, for
+  planetshine, `atmosphere_source_transmittance`, which takes the source's angular radius before
+  its `curve`, the terrain's direct and diffuse light where the body has
+  an atmosphere, taking the texel's geodetic height and latitude, the sun's azimuth from local north
+  (R08 Design note 17) and `curve : u32`, the light's absorber-curve slot (0 for a planetshine
+  source; R08's Risks, "`atmosphere_sun_transmittance`'s fifth argument"); and the sun's refracted
+  apparent elevation where it draws one (Design note 10).
   Every argument is a height above the datum (the patch's baked height, R05 Design note 5) and a
   cosine against the datum normal, never a radius or |P| − R. This plan's own WGSL follows R08
   Design note 18's rule for angles, through R08's `view/shaders/preciseTrig.wgsl`
-  (`decision-r08-f32.md`).
+  (`decision-r08-f32.md`). As built:
+  - R08.T9.b is not built: the two names are R07's stubs in `litBody.wgsl`, four and three
+    arguments, returning 1 and 0, which R08.T9.b replaces.
+  - R08.T9.a's aerial perspective (`5264a413`): on the low setting (`AERIAL_PERSPECTIVE_SCOPE`
+    `"terrain"`, `view/atmosphere/settings.ts`) lit terrain is drawn into an `AtmosphereScene`
+    (`{ colour, depth, nearM, exposureScale }`) and
+    `HillaireAtmosphere.drawFrame(view, suns, scene)` composites it; on the high (`"scene"`) the
+    composite covers every opaque pass drawn
+    before it. `aerialPerspective(view)` (null on low) and `aerialRead.wgsl`'s
+    `aerialPerspectiveAt` serve only passes the composite does not cover.
+  - `preciseTrig.wgsl` has `preciseAtan2(y, x)` for y ≥ 0 (a result in [0, π]), `preciseAtan`,
+    `preciseSinCos` and `preciseCos`, and no `asin` or `acos`.
+  - Refraction is not drawn: until it is, this plan reads the geometric elevation (R08's Risks).
+  - R08.T18's thermal emission, which T10.b calls on terrain (decision-composition), is not built.
 - **R09:** `field`'s `FieldView`, `PartialField`, `CoarseField`, `FieldHeader`, `SynthesisCell`,
   `ClimateCell`, `CoarseCrater`, `Cover` and `SYNTHESIS_MARGIN_CELLS`; `wire::decode_payload`;
   `PartialField::{is_surveyed, resolution}`, its `insert(&wire::DecodedBlock)`, and
@@ -321,6 +427,54 @@ changed by the time this plan runs only the call sites here change.
   the reference worlds (`hyperion_sim::planetary::surface::reference`, in the sim's tests only);
   heights, elevations and sea level along the normal of R07's reference spheroid, with a and c in
   the header, and block 0 of every payload carrying the whole `FieldHeader` (its Design note 17).
+  As built (R09's "Deviations … as built" records):
+  - _Built._ `PartialField` implements `FieldView`; its `resolution` is `Some(ResolutionCode::NONE)`
+    on a margin cell (held, not surveyed) and `None` on a cell not held, and
+    `ResolutionCode::resolution()` gives metres (`finer()` orders codes, not `Ord`). The header is
+    read through getters (`figure()`, `sea_level()`, `realised_relief()`, `albedo_scale()`,
+    `palette()`, `crust_entry(crust)`, `main_liquid()`, `surface_age()`), and
+    `CoarseField::with_albedo_scale(Option<f64>)` sets the scale without rebuilding the field. The
+    palette is `MaterialPalette` of at most 15 `PaletteEntry`s, whose members are `substance`,
+    `role`, `normal_albedo_bvr`, `phase_row`, `grain_density_kg_m3`, `transition` and `mechanics`
+    (`PaletteRole`, `MechanicsFamily`),
+    every `phase_row` 0 until this plan assigns its codes; `SynthesisCell::substances` packs the
+    cell's ice and liquid entries (`ice_entry()`, `liquid_entry()`; the nibble names the species,
+    the share its presence). A worker decodes one block at a time with `wire::decode_block`; a
+    block's first 10 bytes are its frame (`BLOCK_MAGIC` `HYSF`, the format, its length as a `u32`
+    at offset 6, `BLOCK_HEADER_BYTES` 33), so the render thread splits blocks without decoding.
+    `Synthesiser::{new, height_at, field, seed, cell_at}`, `SynthCache::new`, `BandLevel::new` (a
+    `Result`), `QueryHeightError::NotSurveyed(PatchKey)` alone, `unresolved_variance` with
+    `UnresolvedVariance`'s getters `relief()`, `channels()`, `craters()` and `total()`, and the
+    per-contribution structure functions `synth::channels::channel_structure_function` and
+    `synth::craters::structure_function` (the relief has only its unit tables, `UnitStructure`);
+    the slope R09 computes is a body-fixed gradient whose tangential part is the surface gradient,
+    so a slope reader projects it first, as `patch::normals::surface_normal` does (R09's
+    "Deviations in T4, as built"). `coarse_pass(seed, &inputs)`. On the wire (R09.T19.a):
+    `SurfaceFieldRequest { universe, body, have_revision: Option<u32> }` (`null`, not absent),
+    `SurfaceFieldDto` tagged by `state`, its `ready` arm holding `header` (a `SurfaceHeaderDto`),
+    `revision`, `coverage` (a `CoverDto`) and `bulk`, or `not_modelled { section }`,
+    `CoverRangeDto { start, end, resolution }`,
+    and `SurfaceHeaderDto`'s scalars with `albedo_scale` (`null` until T10.a) and the palette as
+    `PaletteEntryDto { substance, role }` alone (the optical and mechanical values ride block 0).
+    The server's call site for the albedo scale is `surface/service.rs`'s `compute`, after
+    `coarse_pass`, where the body's record (and so its photometry) is in hand (R09's "Deviations in
+    T17, as built").
+  - _Provisional until R09.T8 lands_ (`synth/mod.rs` is `synth.rs`): the full `height_at` (until
+    then the base elevation alone, `cache` and `level` unread), `Synthesiser::bake_patch` and
+    `height_range_m`, `level_bound_m`, the whole `structure_function` and `unresolved_rms`, and
+    `QueryHeightError::NonFinite`. `Synthesiser` implements no `HeightSource` until T3. Main has
+    accepted three as-built changes for T8 (Risks, "Re-validated at `c6d77cac`"): the bound is hard
+    in its octaves and channels and a 1 − 10⁻⁹ per-point Chernoff quantile in its crater and rim
+    terms; the structure function holds within 5% on belt cells only, channelled plains running
+    15–37% high; and the bench is provisional at 14 µs a point and 77–82 ms a patch at L + 4.
+  - _Provisional until R09.T9 lands:_ the golden heights in `tests/golden/height/`, which this
+    plan's material and ground goldens follow.
+  - _Provisional until R09.T19.b lands:_ the `surface_field` payload (the handler answers
+    `unsupported` until then), its revisions and deltas since `have_revision`, and
+    `surface_revisions` on the scene topic.
+  - _Not built, and not R09.T8–T9's:_ the coarse pass's steps (R09.T11–T15) and R09.T16's
+    `crates/hyperion-sim/tests/common/surface_worlds.rs`; until they land the reference worlds are
+    T10's no-op pass, a smooth dry sphere with no fine relief.
 - **R11:** nothing consumed; it fills this plan's `BakeHook` and shader hooks (`terrain_decoration`,
   `terrain_shadow_factor` with its cloud shadows, `terrain_ring_shadow` with R11's
   `ring_shadow_on_body`, and `terrain_sky_factor` with a cloud deck's diffuse transmittance).
@@ -328,7 +482,12 @@ changed by the time this plan runs only the call sites here change.
   with `SurfaceMaterial`, surface age, tectonic regime and volcanism level, `body_fixed_at`
   (P14.T14.c), and the rotation section on the wire (P14.T46.f), which the scene body carries as
   `rotation` once R07.T2.b reads it; without it a class map cannot be oriented and the disc shades
-  with `elsewhere`, and the visual geometric albedo p that R07 asks of it.
+  with `elsewhere`, and the visual geometric albedo p that R07 asks of it. As built:
+  `frames::body_fixed_at(frame, t) -> FrameRotation`; the rotation on the wire is
+  `BodyRotationDto` on `BodySummaryDto.rotation` (built, read by R07.T2.b); the record's
+  photometry has `geometric_albedo()` and `phase_integral()` (`Bands`), the wire's
+  `BodyPhotometryDto` the albedo and no q; and the record's `Surface` is still an empty enum, so
+  this plan reads the surface's figures through R09's field header, never the record.
 - **Galaxy plan 12:** nothing directly; R09 gates coverage on P12.T7's store.
 
 ## Design notes
@@ -355,7 +514,13 @@ changed by the time this plan runs only the call sites here change.
    threshold does not scale with it. The Lunar Sourcebook (§9.1.10) gives dumped lunar soil nearly
    40° and compacted soil about 45°. `SNOW_SHED_SLOPE`, about 50–60°, is from memory; T1.a finds a
    source or removes the rule and records the gap. Nothing is drawn from a stream, so the classifier
-   needs no domain tag.
+   needs no domain tag. _Folded in at the re-validation (decision-composition §1.8; R09's "Cold
+   traps" ruling): each rule names its substance through R09's palette, frost or glacier of the
+   cell's ice entry, `Seabed` under its liquid entry, `Melt` where R09's cell temperature exceeds
+   the lithology's transition, and `Regolith`, `Sand` and `Dust` of the crust's entry or of a
+   `Deposit` or `Cover` entry; and a cell's cold-trapped share, which is exposed ice and not the
+   cold-trap area, lies on its shadowed ground (crater floors and pole-facing slopes), not evenly
+   over the cell._
 2. **Physical properties are data with sources, and bearing capacity is a function** (researched
    2026-09-29). Ultimate bearing capacity is not a constant of the ground: it grows with footing
    width and gravity, q_ult = c N_c ξ_c + ½ ρ g B N_γq ξ_γq (Lunar Sourcebook §9.1.9, after
@@ -440,7 +605,11 @@ changed by the time this plan runs only the call sites here change.
    which reads the finest level, and the readouts, which state 1σ, are untouched. Until the ruling,
    selection uses the hard bound. A per-patch bound, each bake computing its children's bounds from
    the amplitudes over their footprints as chunked level of detail stores δ per chunk, is adopted
-   only if T4.a shows body-wide and per-patch bounds differing by more than 1.5 times.
+   only if T4.a shows body-wide and per-patch bounds differing by more than 1.5 times. _As accepted
+   by main for R09.T8 (provisional until it lands): `level_bound_m` is hard in its octaves and
+   channels, and its crater and rim terms are a 1 − 10⁻⁹ per-point Chernoff quantile, so "the hard
+   bound" here reads as that stated bound; the finding is in Risks ("Re-validated at
+   `c6d77cac`")._
 6. **Knowledge gates coverage for the image, and coverage and resolution for every number**
    (researched 2026-09-29). The client holds exact cells wherever it holds any, so the image of
    surveyed ground is the ground at whatever detail the camera resolves; the survey's resolution
@@ -548,7 +717,13 @@ changed by the time this plan runs only the call sites here change.
    band); carbon dioxide frost 0.4–0.8; organic sediment 0.05–0.2; evaporite 0.5–0.8. A range is the
    class's physical span; the class's value before scaling is its midpoint, which the scale c
    multiplies and the range then clamps. `Melt` is emissive, which is R07's or R11's, and `Seabed`
-   lies under the ocean pass.
+   lies under the ocean pass. _Folded in at the re-validation (decision-composition §1.8 and §1.9):
+   a texel's A_N in B, V and R and its phase row are its material's palette entry's, which the
+   server resolves (R09's `PaletteEntry::normal_albedo_bvr` and `phase_row`, every row 0 until T1.a
+   assigns the codes), in place of the per-class figures above, which stay the classes' physical
+   spans and T1.a's check on the entries; the ground's thermal emission, `Melt`'s and any cell's
+   above R08.T18's visibility cut, is R08.T18's shared function, called by T10.b. How a form
+   changes its entry's A_N (fresh snow and glacier ice of one H₂O entry) is a question in Risks._
 9. **No textures in this plan.** The Materials section lists triplanar projection of rock and detail
    textures and two-scale repetition hiding. Anything a texture adds below the band limit is detail
    the simulation did not compute, which the brainstorm defines as decoration, and R11 owns it,
@@ -601,9 +776,10 @@ changed by the time this plan runs only the call sites here change.
     oracle as its test oracle; T8.b fills it. Where R08 draws the sun at its refracted elevation (on
     an Earth about 0.57° at the horizon, more than the Sun's disc, and 0.16° at 5°; Bennett 1982),
     the shadow test uses the same apparent elevation, or shadows and the drawn sunset disagree by
-    more than a solar diameter. Max, Sloan and Cohen, Stewart 1998, Timonen and Westerholm and
-    Bennett are from memory in the research; T8.a's bench and the by-hand sunset settle what they
-    support.
+    more than a solar diameter (as built R08 draws no refraction, so the test takes the geometric
+    elevation until it does, R08's Risks). Max, Sloan and Cohen, Stewart 1998, Timonen and
+    Westerholm and Bennett are from memory in the research; T8.a's bench and the by-hand sunset
+    settle what they support.
 11. **Terrain shadows are this plan's on both settings, and combine by minimum** (researched
     2026-09-29). The brainstorm's ladder gives the high setting cascaded shadows "with cloud shadows
     on terrain" and the low one the horizon map, and its budget's third rule builds the low setting
@@ -745,7 +921,12 @@ changed by the time this plan runs only the call sites here change.
     normals as core, filterable `rg16float` (its Design note 5; the `rg16snorm` alternative would
     need `texture-formats-tier1`) and already builds `PatchCache` on this layout's fixed slots (its
     Design note 10); this plan supplies the `SlotLayout` and the budget, and the eviction rule stays
-    R05's.
+    R05's. _As built (R05's "Deviations in T8, as built" and T18): normals are stored with the
+    atlas's one-texel gutter, 17,956 B at mesh resolution and 68,644 B at twice it, so a low slot
+    is about 157 kB (160 kB with gutters on the class weights too) and 64 MiB holds 420–426 slots,
+    under the rule's 430; and R05.T18 kept `BakedOffsets` on the high setting, so a high slot is
+    about 310 kB and 400,000,000 B holds about 1,290 slots, against the rule's 1,900. T14 decides,
+    as Risks' "The low setting's cache is at its edge" already has it for the low setting._
 
 16. **The client fetches what the camera can resolve, and nothing more.** A body's field is wanted
     once it is the camera's local body or within the hand-over range of Design note 13 of any view's
@@ -760,7 +941,11 @@ changed by the time this plan runs only the call sites here change.
     after it, and no block waits for the terminal `SurfaceFieldDto`. Cells arrive exact and whole
     with their margins, so a new chunk never changes a baked height, and only patches whose survey
     mask it changes are rebaked. Patches waiting on a chunk of a surveyed region count toward R05's
-    `TERRAIN: STREAMING`; unsurveyed ground does not, because it is not coming.
+    `TERRAIN: STREAMING`; unsurveyed ground does not, because it is not coming. _As built: R03's
+    `requestBulk` hands over whole answers (`onPartial`, then `outcome`), so T7 adds a per-chunk
+    option there to forward a block at its boundary; a block's length is the `u32` at offset 6 of
+    its 10-byte frame, so the render thread splits blocks without decoding them, and each worker
+    decodes one with `wire::decode_block` (R09's "Deviations in T3, as built")._
 
 ## Tasks
 
@@ -774,6 +959,32 @@ only, can be written at any time, and lands before T11 and T12, which are built 
 keeps its number because the roadmap cites `R10.T13`. T14 (cache sizes) follows T10 and T11. T15
 closes. There is no interface-reconciliation task: this plan is re-validated against R05 and R09 as
 built when its turn comes.
+
+As re-validated at `c6d77cac` (Risks), with the critical path's order (R09's synthesis, then this
+plan, then R09's server and coarse pass):
+
+- **Startable now.** T13 (docs). T7, against R09.T19.a's types, R03's `FakeWebSocket` and the pool's
+  scripted fake worker: T7 builds the render thread's half of the per-body calls (the pool's
+  methods in place of `postField` and their messages in `workers/messages.ts`), and the height
+  worker holds the blocks in JavaScript, as it holds R05's field today, until T6.b's module takes
+  them; its live path waits on R09.T19.b. T1.a, whose tables read nothing of the synthesis (R09's
+  palette types are built); its albedo rows wait on the ruling asked in Risks.
+- **After R09.T8, and R09.T9 for goldens.** T1.b, T2 and T3, then T5 and T6.a; T6.b after T6.a, T5
+  and T1.b. Each is built on `synthetic_worlds()` and `FieldBuilder` fields.
+- **After R09.T16.** The coarse pass follows this plan, so until R09.T11–T16 land the reference
+  worlds are a smooth dry sphere and `tests/common/surface_worlds.rs` does not exist. T4.a, which
+  measures the real coarse pass's output, waits on R09.T16 whole; and the `sample_worlds()` cases
+  of T1.b, T2, T5 and T10.a (their `crates/hyperion-sim/tests/` binaries) follow R09.T16 under the
+  same task IDs, after each task's `synthetic_worlds()` part lands (a follow-up, as R09's T5 had).
+  T3's `surface_ground_worlds` asserts finiteness, which the no-op worlds already exercise.
+- **T4.b** builds `levelBounds.ts` and the selection rule after T6.b, on a fixture from
+  `synthetic_worlds()`, and records the owner's counts after T4.a's `level-bounds.json`.
+- **T6.a's bench** waits on R09's follow-up after T8, the fused interpolant pass that main has
+  queued before this plan's quiet bake timing; meanwhile its figure is recorded provisional.
+- **New T1.c** (decision-composition) follows T1.b; its cover term waits on P14.T51.d.
+- **T10.a** follows T1.b; its server test of `surface_field`'s answer waits on R09.T19.b. **T10.b**
+  draws the atmosphere through R07's stubs until R08.T9.b lands, and the ground's thermal emission
+  waits on R08.T18.
 
 Rust files are under `crates/hyperion-surface/src/` and client files under
 `apps/hyperion/src/renderer/src/view/terrain/` unless a path says otherwise. Every test in
@@ -792,8 +1003,14 @@ that own them measure them.
 ### R10.T1 Material classes
 
 - **R10.T1.a The class set and its properties.** `MaterialClass` (with `Evaporite` and `Dust`),
-  `FrostSpecies`, `MohrCoulomb`, `FrictionModel`, `MaterialProperties`, `properties`,
-  `limb_parameter`, `bearing_capacity`, `interface_friction` (Design notes 2 and 8). Each figure is
+  `Material { class, entry }`, `MohrCoulomb`, `FrictionModel`, `MaterialProperties`,
+  `properties(material, &palette)`, `limb_parameter`, `bearing_capacity`, `interface_friction`
+  (Design notes 2 and 8; decision-composition §1.8: `FrostSpecies` is gone, and `properties` joins
+  the class's table to the entry's resolved values in R09's `PaletteEntry`, by its `mechanics`
+  family where the class's rows are per family). It also assigns the codes of R09's
+  `PaletteEntry::phase_row`, 0 in every field until then, each naming a law's phase row and its
+  L(α) (Design note 8), which T10.b builds and the server's palette sources fill; the codes are
+  generated output, under the table's version. Each figure is
   re-checked in its primary (the Lunar Sourcebook's Table 9.12 page, USGS PP 1389 Table 7, NAVFAC
   DM-7.02 Table 1, Kietzig et al. 2010's Fig. 2, the albedo sources of Design note 8) and cited in
   the doc comment; a figure without a source leaves its field `None`. `CLIFF_SLOPE` 40° and
@@ -811,30 +1028,53 @@ that own them measure them.
   interpolates between its points and is `None` outside them. Acceptance:
   `cargo test -p hyperion-surface material`.
 - **R10.T1.b The classifier.** `material_at` with the decision order of Design note 1, over R09's
-  `Synthesiser` and the finest level's gradient. Files: `material/classify.rs`, both helper modules
+  `Synthesiser` and the finest level's gradient, projected into the tangent plane first (R09's
+  "Deviations in T4, as built"), reading the cell's substance byte (`SynthesisCell::ice_entry`,
+  `liquid_entry`) and the header's palette (`crust_entry`, the `Deposit` and `Cover` roles) as
+  Design note 1's folded-in rules have it, with the cold-trapped share on the cell's shadowed
+  ground. Files: `material/classify.rs`, both helper modules
   of Test helpers, `tests/material_golden.rs` with its `golden/material_*.golden` (a thousand points
   on each of `synthetic_worlds()`), and `crates/hyperion-sim/tests/surface_material_worlds.rs`.
   Tests: a `cliff_field` is `Bedrock` above 40° and not below; on `sample_worlds()`, a warm pole
   has no ice cap and a locked world's ice lies where R09's field puts it (the brainstorm's two
   examples under Materials); `Seabed` exactly below the water surface; an arid filled basin is
-  `Evaporite`; the order of rules is total; the goldens match on native, `wasm32-wasip1` and
-  `wasm32-unknown-unknown` through R04's checks. Bumps `GENERATOR_VERSION` (see Generator version).
-  Acceptance: `cargo test -p hyperion-surface material`,
-  `cargo test -p hyperion-sim --test surface_material_worlds`, and `just ci` runs the goldens on
-  both wasm targets.
+  `Evaporite`; the Pluto-like and lava-world `FieldBuilder` worlds of decision-composition take
+  their frost and `Melt`; the order of rules is total; the goldens match on native,
+  `wasm32-wasip1` and `wasm32-unknown-unknown` through R04's checks. The `sample_worlds()` cases
+  follow R09.T16 (the order of tasks). Bumps `GENERATOR_VERSION` (see Generator version).
+  Acceptance: `cargo test -p hyperion-surface material` and
+  `cargo test -p hyperion-surface --features testing --test material_golden`,
+  `cargo test -p hyperion-sim --features testing --test surface_material_worlds`, and
+  `just test-wasm-fast` runs the goldens on both wasm targets (the orchestrator's `just ci` runs
+  all three).
+- **R10.T1.c Maturity and cover.** New at the re-validation (decision-composition §1.8 and
+  §7.5). Regolith's A_N and colour are modulated by exposure (crater and surface ages, from R09's
+  header and cells) and by plan 14's P14.T51.d cover. Files: `material/maturity.rs`. Tests: a
+  fresh crater's ejecta is
+  brighter than mature regolith by the Moon's measured contrast; zero cover gives the substance's
+  own albedo. The cover term waits on P14.T51.d (the 23 → 24 batch); until then the exposure term
+  lands alone. The contrast is checked against its primary before it is a constant. Acceptance:
+  `cargo test -p hyperion-surface material::maturity`.
 
 ### R10.T2 Class weights for coarser levels
 
 `ClassWeights`, `weights_at` (Design note 3), with the slope-exceedance probability from R09's
 `unresolved_variance` and `structure_function`, and the palette of up to eight classes a patch
-keeps. Files: `material/weights.rs`, `crates/hyperion-sim/tests/surface_weights_worlds.rs`. Tests:
+keeps. As built, `unresolved_variance` and the channels' and craters' own structure functions
+exist, and the whole `structure_function` is R09.T8's (provisional until it lands); the closed
+forms are held once per body, since R09's crater octaves cost about a millisecond to build and the
+per-cell forms rebuild them (R09's "Deviations in T7.b, as built"). Files: `material/weights.rs`,
+`crates/hyperion-sim/tests/surface_weights_worlds.rs`. Tests:
 at the finest level the largest weight is `material_at`'s class at every sampled point, ties
 included; weights sum to 255; on `sample_worlds()` the weights at levels n − 1 to n − 6 from the
 finest, and at the class map's level (level 4, Design note 8), agree with brute-force class
 fractions over each texel's footprint (sixty-four finest points a texel at n − 1 to n − 6, 4,096
 sampled points a texel at the class map's level) to within ten percentage points in the mean over
 a thousand texels a level (slow); a patch never needs more than eight classes on `sample_worlds()`,
-and if one does the test names it. Acceptance: `cargo test -p hyperion-surface material::weights`,
+and if one does the test names it. The same agreement is first held on `synthetic_worlds()`, whose
+full belts put about a third of their area above 40° at 2 m and plain styles none (R09's
+"Deviations in T5's second follow-up"); the `sample_worlds()` binary follows R09.T16. Acceptance:
+`cargo test -p hyperion-surface material::weights`,
 and the slow case under `just test-slow -E 'binary(surface_weights_worlds)'`.
 
 ### R10.T3 The authoritative ground on real terrain
@@ -842,7 +1082,12 @@ and the slow case under `just test-slow -E 'binary(surface_weights_worlds)'`.
 R05's `finest_surface_height`, pointed at R09's `Synthesiser` through R05's `HeightSource` trait
 (R05.T4.a, T4.c), which this task implements for it (R09's `BandLevel` from the `u8` level,
 `SynthCache` as the cache, `QueryHeightError` as the error), and wrapped as `ground_at` with
-`GroundPoint` and `FinestTriangle` (Design note 4), on R05's diagonal and `xyz_to_face_uv`. Files:
+`GroundPoint` and `FinestTriangle` (Design note 4), on R05's diagonal and `xyz_to_face_uv`. The
+trait's `level_bound_m` and `height_range_m(key)` forward R09.T8's `level_bound_m(header, level)`
+and `Synthesiser::height_range_m(patch)`, and `figure()` the header's (provisional until R09.T8
+lands). R05's interpolant returns the height alone, so this task adds beside it, in
+`patch::collision`, the query that also gives the triangle, with `finest_surface_height` its
+height. Files:
 `ground.rs`, R05's `patch` module, `tests/ground_golden.rs` with `golden/ground_*.golden`. Tests: at
 a vertex `ground_at` equals R09's `height_at` there bit for bit; on an analytic plane field it is
 exact; points on a shared edge get the same height from either triangle; points either side of a
@@ -852,8 +1097,10 @@ interpolants within 1 µm; `ground_at` is finite at every sampled point of `synt
 of `sample_worlds()` (the latter in `crates/hyperion-sim/tests/surface_ground_worlds.rs`), and
 asserts finiteness before it returns (the brainstorm's NaN hazard). The goldens, on
 `synthetic_worlds()`, are asserted on native and both wasm targets. No bump: the ground reads
-heights that R09's goldens already pin. Acceptance: `cargo test -p hyperion-surface ground` and
-`cargo test -p hyperion-sim --test surface_ground_worlds`.
+heights that R09's goldens already pin (R09.T9's, provisional until it lands). Acceptance:
+`cargo test -p hyperion-surface ground`,
+`cargo test -p hyperion-surface --features testing --test ground_golden`, and
+`cargo test -p hyperion-sim --features testing --test surface_ground_worlds`.
 
 ### R10.T4 The level bound on generated worlds
 
@@ -865,15 +1112,25 @@ heights that R09's goldens already pin. Acceptance: `cargo test -p hyperion-surf
   k), |h_n − h_(n+k)| stays under `level_bound_m(n)` (slow). Recorded per world and level in this
   task's plan entry: the observed 99.9th percentile over the bound (expected 0.3–0.5), the
   per-patch maximum over 4,225 vertices over the bound, and the spread between the body-wide and a
-  per-patch bound. Acceptance: `just test-slow -E 'binary(level_bound_worlds)'` passes, and the
+  per-patch bound. _Re-validated at `c6d77cac`: this task waits on R09.T16 (the reference worlds
+  through the whole coarse pass, and `tests/common/surface_worlds.rs`) and on R09.T8, whose bound as
+  accepted is hard in its octaves and channels and a 1 − 10⁻⁹ per-point quantile in its crater and
+  rim terms, so the test holds that stated bound and records which term each worst case came
+  from._ Acceptance: `just test-slow -E 'binary(level_bound_worlds)'` passes, and the
   figures are recorded.
 - **R10.T4.b Selection by the real bound.** The worker answers `field_init` with the body's
   `LevelBounds` (hard and σ per level); `levelBounds.ts` holds them per body and `selectionBound`
   gives R05's `screenSpaceErrorPx` its ε_n under the rule in force (the hard bound until the owner's
   ruling), for each style's τ: 1 px high and 2 px low (the brainstorm's lean; CesiumJS's default
   `maximumScreenSpaceError` is 2 px, though its error is a spacing heuristic), and 4 px wireframe.
-  Files: `levelBounds.ts`, R05's `select.ts`. Tests (Vitest, pure): a level is selected exactly
-  where its bound subtends at most τ, under either rule, taken as a parameter; R05's
+  As built, selection reads the bound column of the body's level table (`PlanetGeometry.levels`,
+  stride 4), and its error is that bound plus R05's chord sagitta (`selectionErrorM`), so
+  `selectionBound` fills that column and `field_init`'s answer carries the rest of the table, the
+  lowest and highest height by level that culling reads before a patch is baked (lean: the union of
+  the six root patches' `height_range_m`, R09.T8's). The test planet keeps its own `levelTable`.
+  Files: `levelBounds.ts`, R05's `planet.ts` and `select.ts`. Tests (Vitest, pure): a level is
+  selected exactly where its selection error subtends at most τ, under either rule, taken as a
+  parameter; R05's
   history-independence test passes with real bounds; the grounded-body rule still yields the finest
   level. Recorded in this task's plan entry, from T4.a's `level-bounds.json` fixture through
   `selectPatches` over R05's scripted descent (`descentProfile.ts`): the patches selected at τ = 1
@@ -886,8 +1143,14 @@ heights that R09's goldens already pin. Acceptance: `cargo test -p hyperion-surf
 `SurveyedReading`, `surveyed_reading`, `SlantRange`, `slant_range`, `SLOPE_BASELINES` (Design notes
 6 and 7), over R09's `unresolved_rms`, its `structure_function` at lag b and the coverage
 resolution per cell (`PartialField::resolution`), with J₀ through base's `math::j0` (R04.T4.c).
-Files: `reading.rs`, `crates/hyperion-sim/tests/surface_reading_worlds.rs`. Tests: at a band-limit
-survey the elevation is `ground_at`'s, the uncertainty zero and `resolved` set; at an orbital
+As built: `unresolved_rms` and the whole `structure_function` are R09.T8's (provisional until it
+lands), held once per body as T2's are; `PartialField::resolution` is `Some(ResolutionCode::NONE)`
+on a margin cell, so "unsurveyed" is `!is_surveyed(cell)`, and `ResolutionCode::resolution()`
+gives the metres; the resolved slope is the gradient's tangential part (R09's "Deviations in T4,
+as built"). The pooled case on `sample_worlds()` follows R09.T16; it is first held on
+`synthetic_worlds()`. Files: `reading.rs`, `crates/hyperion-sim/tests/surface_reading_worlds.rs`.
+Tests: at a band-limit survey the elevation is `ground_at`'s, the uncertainty zero and `resolved`
+set; at an orbital
 survey, pooled over about 200 cells × 100 points a world on `sample_worlds()`, the RMS of
 `ground_at` less the quoted value is within 10% of the pooled predicted σ, and the per-cell z-scores
 have unit variance within 15% (slow); per band, the slope uncertainty tends to √2 σ_k ÷ b for b
@@ -916,8 +1179,14 @@ pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`.
   (about 10 µs a point with its gradient, Performance budget), recorded with and without the class
   weights on the development machine (a Ryzen 7 3700X) and, by the owner, on the UHD 620 laptop's
   i7-8665U, whose cores the brainstorm's figure budgets. The 40 ms stays the laptop's figure: the
-  desktop records its own and fails only if over it (decided 2026-09-30, Risks). Acceptance:
-  `cargo test -p hyperion-surface bake`, and the bench's figure in this task's entry.
+  desktop records its own and fails only if over it (decided 2026-09-30, Risks). _Re-validated at
+  `c6d77cac`: `Synthesiser::bake_patch` is R09.T8's (provisional until it lands), whose own bench
+  is provisional at 77–82 ms a patch and 14 µs a point at L + 4, so this bench's quiet figure
+  follows R09's fused-interpolant follow-up, which main queued before it; meanwhile the figure is
+  recorded provisional. The bench is a `[[bench]]` of its own (`benches/bake.rs`, on the synthetic
+  worlds, so `required-features = ["testing"]` as R09's `synth` bench has it)._ Acceptance:
+  `cargo test -p hyperion-surface bake`, and the bench's figure in this task's entry
+  (`just bench -- bake/patch`, on a quiet machine, under the heavy lock, or recorded provisional).
 - **R10.T6.b The worker binding.** The worker's entry points on R05's binding:
   `field_init(body, header)`, `field_chunk(body, block)` (one R09 payload block, Design note 16),
   `field_release(body)`, holding one `PartialField` per body; `bake`, taking R05's `BakeOptions`
@@ -926,11 +1195,19 @@ pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`.
   `MaterialProperties`), each answering `NotSurveyed` where the field has no cell. `field_init`
   answers with the body's `LevelBounds`. R05's provisional height function leaves the client path
   (R09's Design note 18); `hyperion_surface::height`, where R09.T4 moved `HeightSample`, stays, as
-  does `LatticeCache` in `noise`, which R09.T4 did not move (it already lived there). Files: R05's
-  binding, R05's `view/terrain/workers/*.ts`. Tests: in the worker test, init, two blocks and a
-  release leave no field held; a block posted before its `field_init` is refused; each reading
-  entry point equals the native function on a fixture field.
-  Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/workers`.
+  does `LatticeCache` in `noise`, which R09.T4 did not move (it already lived there). As built,
+  R05's module serves the test planet (`bakePatch`, `levelTable`, `surfaceHeightM`,
+  `omittedSigmaM`, each with `Ridges`), which the spike keeps: the per-body exports go beside them,
+  `BakeSettings` and `TerrainPassOptions` name the height source (the test planet with its
+  `ridges`, or a body) in place of `ridges` alone, and `heightBake.ts`'s `HeightModule` gains the
+  new exports. T7 has built the render thread's half (the pool's per-body calls and their
+  messages), so this task builds the worker's: `answerRequest` takes the blocks into the module,
+  each through `wire::decode_block` and `PartialField::insert`, and answers `field_init` with the
+  level table. Files: R05's binding, R05's `view/terrain/workers/*.ts`. Tests: in the worker test,
+  init, two blocks and a release leave no field held; a block posted before its `field_init` is
+  refused; each reading entry point equals the native function on a fixture field.
+  Acceptance: `just gen-surface`, then
+  `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain/workers`.
 
 ### R10.T7 The client's coarse-field store
 
@@ -940,12 +1217,31 @@ cameras with hysteresis, R09's `surface_field` with `have_revision`, re-requests
 the GPU coverage mask per face (Design note 12), allocated under the `MemoryCategory`
 `coarse-field-gpu`, which this task adds to R01's union under R12's name (R12 Design note 6), and
 the link's loss keeping what was received and
-marking the coverage stale. Files: `coarseFieldStore.ts`, `coverage.ts`. Tests (Vitest with the fake
-socket): a body within range is requested once and its chunks reach every worker in arrival order; a
-revision rise fetches only new cells; leaving and returning inside the hysteresis band fetches
-nothing; every worker gets `field_init` once and every chunk; releasing a body frees it in every
-worker; the resident total of worker copies is reported, for T14. Acceptance:
-`pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`.
+marking the coverage stale. As built (R09.T19.a; Consumes): the request is
+`SurfaceFieldRequest { universe, body, have_revision }` (`null` for none) and the answer
+`SurfaceFieldDto`'s `ready` arm (`header`, `revision`, `coverage`, `bulk`) or `not_modelled`;
+`requestBulk` gains a per-chunk option beside `onPartial`, through which the store splits blocks
+at each block's length (offset 6 of its frame) and posts each as it completes; `CoverDto`'s ranges
+carry codes, which a TypeScript twin of `ResolutionCode::resolution` turns into metres, pinned to
+R09's `tests/golden/wire/codes.golden` `resolution_m` rows. This task builds the render thread's
+half of the per-body calls: `HeightWorkerPool`'s calls for `field_init`, `field_chunk` and
+`field_release` in place of `postField` (the pool keeping a body's blocks for a replacement worker,
+as it keeps R05's field now) and their messages in `messages.ts`, keeping the spike's call working
+(`view/spike/spikeRun.ts`, whose 15 MB `syntheticField()` stands in for a field's memory and is no
+payload; T7 records how); until T6.b the height worker holds the blocks in JavaScript, as it
+holds R05's field today. The payload's bytes, its deltas and
+`surface_revisions` are provisional until R09.T19.b lands (the server answers `surface_field`
+`unsupported` until then): the tests drive them through the fake socket in R09's Provides' shapes.
+Files: `coarseFieldStore.ts`, `coverage.ts`; R05's `workers/{pool,messages,heightBake}.ts` and
+`view/spike/spikeRun.ts`; R01's `view/engine/memory.ts`; R03's
+`packages/protocol/src/requests.ts`. Tests (Vitest with R03's `FakeWebSocket` and
+`pool.test.ts`'s scripted worker): a body within range is requested once and its chunks reach
+every worker in arrival order; a revision rise fetches only new cells; leaving and returning
+inside the hysteresis band fetches nothing; every worker gets `field_init` once and every chunk;
+releasing a body frees it in every worker; the resident total of worker copies is reported, for
+T14; the per-chunk option sees every chunk in order before the outcome settles. Acceptance:
+`pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and
+`pnpm --filter @hyperion/protocol test`.
 
 ### R10.T8 Horizon-map shadows
 
@@ -962,17 +1258,23 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   patches and across levels; the far field is independent of the cache's state, with bakes in any
   order; the march stops at √(2 R Δh). Bench `bake/horizon`: at most a quarter of the patch's 40 ms,
   recorded; over it, the near field moves to the line sweep. Presentation-only: no golden across
-  targets, though the bake is deterministic. Acceptance:
-  `cargo test -p hyperion-surface bake::horizon` and the bench's figure recorded.
+  targets, though the bake is deterministic. The far field's level-m heights cost R09.T8's
+  per-point figure (provisional at 14 µs, against the 2–4 µs Design note 10's estimates assumed),
+  which the bench records. Acceptance: `cargo test -p hyperion-surface bake::horizon` and the
+  bench's figure recorded (`just bench -- bake/horizon`, in T6.a's `benches/bake.rs`).
 - **R10.T8.b The shadow lookup.** `shadows/horizon.wgsl`: the sun's apparent direction in each
   patch's local frame from `body_fixed_at`, R07's star and R08's refraction where drawn; the compare
   against the interpolated horizon, passed as the `horizon` argument of R07's
   `sphere_irradiance(h, phi, horizon)` (the signature and its default of 0 on the smooth figure are
   R07.T6.a's and T6.c's, used unchanged); the soft lit fraction of Design note 10. The sun's
-  elevation is `preciseAtan2(s·ν, |s × ν|)`, and the lit fraction's arccos x is
-  `preciseAtan2(√(1 − x²), x)` (R08 Design note 18). WGSL's `asin` inherits atan2's 4,096 ULP, about
-  50″ at 30°. That is five of the map's steps, and 3.3% of the Sun's lit fraction at mid-transit,
-  against this plan's 1/255. Files: `shadows/horizon.wgsl`, `shadows/litFraction.ts`, and the call
+  elevation is π ÷ 2 less its zenith angle `preciseAtan2(|s × ν|, s·ν)`, since as built
+  `preciseAtan2(y, x)` takes y ≥ 0 and returns [0, π], and the lit fraction's arccos x is
+  `preciseAtan2(√(1 − x²), x)` (R08 Design note 18). R08 draws no refraction yet, so the sun's
+  direction is the geometric one. R07's `sphere_irradiance` clamps a negative horizon (a peak's)
+  to 0, so a peak's extended-source term is the flat ground's (Risks). WGSL's `asin` inherits
+  atan2's 4,096 ULP, about 50″ at 30°. That is five of the map's steps, and 3.3% of the Sun's lit
+  fraction at mid-transit, against this plan's 1/255. Files: `shadows/horizon.wgsl`,
+  `shadows/litFraction.ts`, and the call
   sites in R07's `shaders/litBody.wgsl`. Tests: with a horizon of 0 the terrain's
   `sphere_irradiance` equals R07's smooth-figure value bit for bit, and with the horizon map's value
   it equals R07.T6.a's oracle for that local horizon to 10⁻⁶; the lit-fraction formula as a pure
@@ -1009,15 +1311,23 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   residual; called by R09's `SurfaceService` once the field is built, with plan 14's visual
   geometric albedo p (the photometry section R07.T1 asks of plan 14), so that c ships in
   `FieldHeader.albedo_scale`. Filling the header changes the payload, which R09's Design note 17
-  puts under `GENERATOR_VERSION`, so this task bumps it (see Generator version). Files:
+  puts under `GENERATOR_VERSION`, so this task bumps it (see Generator version). As built
+  (R09's "Deviations in T17, as built"): the call site is `surface/service.rs`'s `compute`, after
+  `coarse_pass`, where the body's record is in hand, its p the photometry's `geometric_albedo()`
+  (by band); the tests that compare the served field with `coarse_pass` bit for bit
+  (`tests/surface_service.rs` and two in `surface::service`) apply the same `with_albedo_scale`.
+  Per band or one c with its residual per band (decision-composition §1.8) is asked in Risks,
+  since the header holds one `Option<f64>`. Files:
   `material/albedo.rs`, R09's `hyperion_server::surface` service,
   `crates/hyperion-sim/tests/surface_albedo_worlds.rs`, a server test. Tests: on each of
   `sample_worlds()` the area-weighted p of the scaled classes equals the body's p to 1% where the
   ranges allow, and the residual is stated where they do not; the clamped solve equals a bisection
   reference; the solve depends on the class fractions only; the server's `surface_field` answer
   carries `albedo_scale` as `Some(c)` equal to `albedo_scale(field, p)`, and `None` while plan 14's
-  p is `not_modelled`. Acceptance: `cargo test -p hyperion-surface material::albedo`,
-  `cargo test -p hyperion-sim --test surface_albedo_worlds` and
+  p is `not_modelled` (the `surface_field` answer's half provisional until R09.T19.b lands; until
+  then the server test reads `SurfaceService::field`'s header; the `sample_worlds()` binary follows
+  R09.T16). Acceptance: `cargo test -p hyperion-surface material::albedo`,
+  `cargo test -p hyperion-sim --features testing --test surface_albedo_worlds` and
   `cargo test -p hyperion-server surface`.
 - **R10.T10.b The terrain shader.** `terrainMaterial.ts` and `shaders/terrainLit.wgsl`: the palette
   and weights to one lunar-Lambert law per class (A_N × c, L(0), and f(α) and L(α) from the class's
@@ -1028,7 +1338,16 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   aerial perspective on the output. Each call passes the texel's geodetic height above
   `BodyFigure`'s spheroid, its geodetic latitude (from the spheroid normal against the pole) and,
   for the transmittance, each sun's azimuth from local north, as R08 Design note 17's signatures
-  require. Each class of the patch's palette has its own
+  require. As built (Consumes, R08): each call also passes the light's `curve` slot (0 for a
+  planetshine source), and planetshine's direct term goes through
+  `atmosphere_source_transmittance`; until R08.T9.b lands the two names are R07's four- and
+  three-argument stubs in `litBody.wgsl`, which this task calls as R07's discs do. The aerial
+  perspective comes from drawing the lit terrain into the `AtmosphereScene` that
+  `HillaireAtmosphere.drawFrame` composites on the low setting (scope `"terrain"`), and before that
+  composite on the high (`"scene"`). The terrain's footprint joins `photorealFrame`'s
+  `depthWriters`. The ground's thermal emission, `Melt`'s and any texel's above R08.T18's
+  visibility cut, goes through R08.T18's shared function once it lands (decision-composition).
+  Each class of the patch's palette has its own
   `struct LunarLambert { a, l, s, table_row }` (a = A_N × c, l = L(0), the class's s and row),
   passed to R07's `body_brdf(law: LunarLambert, mu0, mu, alpha)`, whose signature R07.T4.c creates
   and this task uses unchanged. The texel reflects the classes' `body_brdf` radiances summed by its
@@ -1045,7 +1364,9 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   templates (`moon`, `mercury`, `airless-ice`, `snowball`, `magma`) to McEwen 1996's L(α), which
   changes no q, p or point flux. Files: `terrainMaterial.ts`, `shaders/terrainLit.wgsl`; R07's
   `appearance/law.ts`, `shapes.ts`, `phase.ts`, `brdf.ts` and `templates.ts`, `bodies/oblate.ts` and
-  `bodies/draw.ts`, `shaders/litBody.wgsl` and `shaders/bodyDisc.wgsl`. Tests: a pure test that a
+  `bodies/draw.ts`, `shaders/litBody.wgsl` and `shaders/bodyDisc.wgsl`, with
+  `appearance/litBodyProbe.ts`'s `packPhaseFactorRows`, which writes the rows' alpha (0 as built);
+  `displays/view/photorealFrame.ts` for the footprint. Tests: a pure test that a
   texel of two classes in weights w and 1 − w reflects w r₁ + (1 − w) r₂ to 10⁻⁶, r₁ and r₂ being
   the classes' own `body_brdf` radiances in R07.T4.c's twin, that for an even blend of regolith
   (A_N 0.12, L 1) and snow (A_N 0.9, L 0) sharing one f(α), at μ₀ = 0.5, μ = 0.1 it is that sum and
@@ -1062,7 +1383,8 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
 - **R10.T10.c The survey edge.** The survey mask's discard, the skirts at the survey edge, and the
   reference surface drawn beneath with the inverse mask from the GPU coverage mask (Design note 12),
   in `terrainLit.wgsl` and the `mesh`-regime body's material; the edge mark over the image from
-  `surveyEdges`. Files: `shaders/terrainLit.wgsl`, `coverage.ts`, R07's `mesh`-regime material.
+  `surveyEdges`. Files: `shaders/terrainLit.wgsl`, `coverage.ts`, R07's `mesh`-regime material
+  (`bodies/smoothMesh.ts`, `shaders/smoothMesh.wgsl`, `SMOOTH_MESH_MATERIAL` in `bodies/draw.ts`).
   Tests: `surveyEdges` returns exactly the boundary between surveyed and unsurveyed cells on a
   fixture coverage, margin cells counted unsurveyed; the smoke harness renders a half-surveyed patch
   set with no fragment where both terrain and the reference surface write. By hand, recorded: the
@@ -1080,7 +1402,11 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
 
     `laws` are one per class, from Design note 8's parameters and T10.a's scale (at most 16,
     `MAX_DISC_CLASSES`). `elsewhere` is R07's uniform `lawFor(p, q, template)`. `classMap.ts`
-    owns the texture: it remakes it after a device loss and releases it with the map.
+    owns the texture: it remakes it after a device loss and releases it with the map. Folded in
+    at the re-validation (decision-composition §1.8): the map's classes are the body's (form,
+    entry) pairs, at most 16, which retires R07's "a body carrying all three `FrostSpecies` would
+    need 17". As built, `classMapTextureSpec` files the map under `"other"`; this task gives it
+    `coarse-field-gpu`.
 
   - **The reconstruction.** The disc and `rasteriseDisc` read the map by a survey-masked bilinear
     reconstruction, which replaces T8.b's nearest read (decision-r07-t8b):
@@ -1096,12 +1422,16 @@ worker; the resident total of worker copies is reported, for T14. Acceptance:
   - **The view.** `litBodiesOf` (`displays/view/photorealFrame.ts`) passes each body's `surface`
     from the class-map store and its `rotation` from the scene body's `rotation` (body-fixed to
     the body frame, whose axes are the galactic ones), taken at the body's drawn time (R07.T10.a).
-    `ViewDisplay.tsx` passes the store in `PhotorealInputs`.
+    `viewFrameDrawer.ts`, which `ViewDisplay.tsx` makes and which builds `PhotorealInputs`, passes
+    the store. As built, `litBodiesOf` never sets `surface`, and `discSurfaceOf(appearance)`
+    (`appearance/bodyAppearance.ts`, where `DiscSurface` is declared) is always uniform.
   - **Until the rotation arrives.** The scene body's rotation comes from P14.T46.f's rotation
     section, which R07.T2.b reads. Until then `rotation` is absent, and a live class map shades
-    with `elsewhere`, as R07 built it.
+    with `elsewhere`, as R07 built it. _As built, both are built (`BodyRotationDto` on
+    `BodySummaryDto.rotation`), so a body has a rotation wherever its record's section is `ok`._
   - **Files.** `classMap.ts`; R07's `bodies/discSurface.ts`, `bodies/discShading.ts` and
-    `shaders/bodyDisc.wgsl`; `displays/view/photorealFrame.ts` and `displays/view/ViewDisplay.tsx`.
+    `shaders/bodyDisc.wgsl`; `displays/view/photorealFrame.ts`, `displays/view/viewFrameDrawer.ts`
+    and `displays/view/ViewDisplay.tsx`.
   - **Tests:**
     - The class map holds no texel for an unsurveyed cell.
     - R07's disc under a class map of one uniform class equals its `lawFor` disc to 10⁻⁴.
@@ -1153,7 +1483,8 @@ src/renderer/src/view/bodies src/renderer/src/displays/view` and `just test-rend
 
 Depth-only terrain in the wireframe style at τ = 4 px from the same bounds and bakes (heights and
 mask only), as one instanced draw, with the contours of Design note 14 evaluated in the same pass,
-the interval, index and datum stated in the label block through R02's label API, analytic line
+the interval, index and datum stated in the label block through R02's label API (as built
+`displays/view/viewRun.ts`'s `labelStatements`, drawn by `ViewLabelBlock.tsx`), analytic line
 antialiasing and no MSAA, and the patches under every grounded body in view at the finest level with
 morph held at zero, as in the lit style (Performance budget, the second rule). Unsurveyed ground has
 no contours, and the survey edge is drawn. Files: `terrainWire.ts`, `shaders/terrainWire.wgsl`.
@@ -1180,8 +1511,12 @@ beneath its centre", after the star chart's census line), stale with its `S` whe
 their `--surface-0` plates, with `~` and `± …` until resolved, rounded by Design note 6's rule, the
 em dash with `NOT SURVEYED` over unsurveyed ground, `GRAZING` where it applies, and the material
 class's name with its properties as a reading; the datum stated once. The DOM list gains the survey
-edge as an item when it is in view. Files: `readouts.ts`, `SurveyLine.tsx`, `TerrainReadout.tsx` and
-their tests. Tests (Vitest and Testing Library): the formats of T13's drafts for each state,
+edge as an item when it is in view. As built, the label block is `viewRun.ts`'s `labelStatements`
+and `ViewLabelBlock.tsx`, and the DOM list `ViewMarkList.tsx` over `viewRun.ts`'s `MarkRow`; the
+material is named by its form and its entry's substance through P14.T49.f's `substanceName`
+(`lib/substances.ts`; the roadmap's Conventions), never by a registry key. Files: `readouts.ts`,
+`SurveyLine.tsx`, `TerrainReadout.tsx` and their tests; `displays/view/viewRun.ts` and
+`ViewMarkList.tsx`. Tests (Vitest and Testing Library): the formats of T13's drafts for each state,
 `~2140 m ± 180 m` among them; the PDG rounding at its breakpoints (354, 355, 949, 950); no value is
 shown finer than its uncertainty; the field keeps its fixed width; stale on link loss; keyboard
 reach of the readout's target through the DOM list; the console-ux skill's lint, contrast and glyph
@@ -1199,7 +1534,8 @@ uncertainty, its field keeping its fixed width; the readout names `ELEVATION` (s
 `ELV` means a spatial display camera's elevation, an angle, and the brainstorm's `ELEV` would be a
 second abbreviation of the word), `SLOPE` with its `· 2 m BASELINE` part, `SLANT RANGE` (`RANGE` is
 taken by the chart's drive range), `DATUM`, `GRAZING` and `NOT SURVEYED`, after ICAO's distinction
-of elevation, altitude and height; the survey line's wording; the survey edge as a mark in both
+of elevation, altitude and height; the survey line's wording; the material reading's wording (its
+form and its substance, named by P14.T49.f's `substanceName`); the survey edge as a mark in both
 styles; the contour widths and tokens, `CONTOUR INTERVAL`, `INDEX`, and the statement that minor
 contours are omitted where closer than 4 px, as guide item 5's substitute for a scale bar. The
 client is built to the drafts, as the galaxy plans' slice was. Files: a draft section in this task's
@@ -1210,20 +1546,25 @@ the guide edit is made as the owner directs.
 
 - **R10.T14.a The count model and the slot layout.** `patchCountModel` as a pure function of camera,
   τ and viewport (Design note 15, after the research model's rule); `bytesPerPatch`;
-  `PATCH_CACHE_BYTES` per setting, provisionally 64 MiB low and about 400 MB high (Design note 15),
-  as fixed slots in the layout of Design note 15 (storage buffers for unfiltered data, arrays or
-  atlases for filtered data), handed to R05's `PatchCache` as its `SlotLayout`. Files:
-  `cacheBudget.ts`, R05's `cache.ts`. Tests (pure): `bytesPerPatch` matches Design note 15's formats
+  the budget per setting, provisionally 64 MiB low and about 400 MB high (Design note 15), in R05's
+  `TerrainSettings.cacheBytes` (`view/quality/qualitySetting.ts`, the one list), as fixed slots in
+  the layout of Design note 15 (storage buffers for unfiltered data, arrays or atlases for filtered
+  data), handed to R05's `PatchCache` as its `SlotLayout`. As built, `slotLayout.ts`'s
+  `SlotFieldName` holds `horizon-map` at 0 B and no class-weights or survey-mask field: each is
+  added by the task that first uploads it (T8.b, T10.b, T10.c), and this task sizes them. Files:
+  `cacheBudget.ts`, R05's `cache.ts`, `slotLayout.ts` and `view/quality/qualitySetting.ts`. Tests
+  (pure): `bytesPerPatch` matches Design note 15's formats
   for each setting and vertex path; `patchCountModel` reproduces the table of Design note 15 within
   10%; the cache never evicts a patch under a grounded body at the chosen size during a replay of
   the descent's selections. Acceptance:
   `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain`.
 - **R10.T14.b The measured sizes.** Measure the all-round and frustum peaks per view on R05's
   scripted descent over a generated world, on both settings and in both styles, with a second view
-  open; set `PATCH_CACHE_BYTES` per setting from max(1.3 × all-round peak, 3 × frustum peak) summed
+  open; set each setting's `cacheBytes` from max(1.3 × all-round peak, 3 × frustum peak) summed
   over the streaming views plus the forced region, or the frustum rule on the high setting if the
   all-round peak is never resident (Design note 15), recording which, whether R05 chose
-  `BakedOffsets`, and whether 64 MiB and about 400 MB hold, or the finding; and record the resident
+  `BakedOffsets` (as built R05.T18 keeps it on the high setting), and whether 64 MiB and about
+  400 MB hold, or the finding; and record the resident
   total (the cache, the coverage mask, the class map, the cascades, each worker's field copy)
   against the ceilings of 1 GB low and 2–3 GB discrete, from driver-reported GPU memory as well as
   computed bytes. By hand, recorded, on a quiet machine: the peaks and totals on the development
@@ -1234,14 +1575,17 @@ the guide edit is made as the owner directs.
 ### R10.T15 Verification pass
 
 The collision-agrees test end to end: a TypeScript test that forms the finest patch's vertices with
-R05's vertex formation in `Math.fround`, from a bake of a real patch committed as a fixture, and
+R05's vertex formation in `Math.fround` (`gpu/vertexEmulation.ts`), from a bake of a real patch
+committed as a fixture, and
 interpolates on R05's diagonal, agrees with `ground_at` from the same fixture to 2 mm plus the
 formation's stated error (the height texture's `f32` step at ±20 km is 2⁻⁹ m, 1.95 mm: the
 brainstorm's "about 2 mm", under The geometry); R05's descent run on a generated world at both
 settings with its metrics harness, recording patches a second sustained against the brainstorm's
 demand of (200 · v + 290 · |ḣ|) ÷ h, the level bound per level from T4.a, and pops or cracks seen;
-every golden of this plan asserted on the three targets. Acceptance: `just ci`, `just test-slow` and
-`just bench` complete, and the descent's figures are recorded.
+every golden of this plan asserted on the three targets. Acceptance: the lane's `just smart-ci`
+and `just test-wasm-fast`, this plan's slow binaries by name (`just test-slow -E 'binary(…)'`) and
+`just bench -- bake/` complete, and the descent's figures are recorded; `just ci` and the slow
+pass are the orchestrator's.
 
 ## Verification
 
@@ -1271,7 +1615,9 @@ every golden of this plan asserted on the three targets. Acceptance: `just ci`, 
 T1.b bumps `GENERATOR_VERSION` once: the material class is new authoritative output, read by landing
 and the consoles, and its goldens pin it. The class discriminants, the property table, the
 classifier's thresholds and its order of rules are generator-versioned from then on; a new class
-appends a discriminant. `ground_at` reads only heights R09's goldens pin, so T3 adds goldens without
+appends a discriminant. So are T1.a's codes for R09's `PaletteEntry::phase_row`, which the payload
+carries (the re-validation; the layout's freeze at R09.T19's first send is R09's Generator
+version). `ground_at` reads only heights R09's goldens pin, so T3 adds goldens without
 a bump. T10.a bumps it a second time: the albedo scale ships in R09's payload header, whose format
 and contents R09's Design note 17 puts under `GENERATOR_VERSION`, and R09's payload and coarse
 goldens re-bless in the same commit; from then on the solve and the class albedo ranges are
@@ -1338,7 +1684,9 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   Ar, and its Titan has no methane (R08's Design notes 13 and 16). They stay reachable only through
   R09's surface-state classes, and on no generated world until P14.T24.f's carbon speciation
   (R08.T1's draft) lands; T1.b's tests build them on a `FieldBuilder` field and record that no
-  sample world has them.
+  sample world has them. _P14.T24.f landed on 2026-10-10 (`4cb28c0b`, `324fbe34`); what now keeps
+  them off generated worlds is R09's coarse pass (T11–T16) and plan 14's surface section
+  (P14.T48.e), which `for_body` reads (the re-validation of `c6d77cac`)._
 - **Vegetation** is absent until a biosphere exists; a living world's land is drawn bare, which is
   wrong for it and says nothing false about what the generator computed.
 - **The hardware decisions, decided 2026-09-30 by a delegated decision**, as they fall on this
@@ -1354,7 +1702,9 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   serial chain T8.d removes from uniform discs (about 2.0 M cycles under 4 px). T10.d is to bring
   such discs into the pass: the frame's maps as one array texture with each record's layer in its
   record, or one dispatch a map. Open, for the orchestrator (R07's "Deviations in T8.d, as built").
-- **Composition, for the re-validation (decision-composition, 2026-10-09).**
+- **Composition, for the re-validation (decision-composition, 2026-10-09).** _Folded in at the
+  re-validation of `c6d77cac`: Provides' `material`, Design notes 1 and 8, T1.a, T1.b, the new
+  T1.c, T10.a, T10.b and T10.d; two questions it leaves are in that record._
   - `MaterialClass` stays the form, and `Material` becomes `{ class, entry }`, the entry being
     R09's palette index. `FrostSpecies` goes.
   - `properties(material, &palette)` takes the class's table with the entry's resolved A_N in B,
@@ -1371,3 +1721,83 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     brighter than mature regolith by the Moon's measured contrast, and that zero cover gives the
     substance's own albedo.
   - The Pluto-like and lava-world `FieldBuilder` worlds join T1.b's tests.
+- **Re-validated at `c6d77cac`** (2026-10-13, lane r10-revalidate, the `revalidate-plan` skill),
+  against R05, R07, R08's T9.a (`5264a413`) and R09 as built: R09.T1.a, T2 with its follow-ups A–D,
+  T3, T4, T5 with its two follow-ups, T6.a, T6.b, T7.a–f, T10.a–d, T17, T18 and T19.a, with their
+  "as built" records (unchanged at `888c6f8b`, whose two commits touch none of it). No brainstorm
+  drift on this plan's topics since the plans were last brought in line with it
+  (`git diff 3138e393 -- docs/agent/brainstorming/rendering-and-planets.md`: the wet
+  epoch's years, the base spline's name, the crater map's and Venus's taper's figures, R08's
+  adiabat and channels, and the sky's counts, none of them this plan's). What changed here:
+  - _Names, paths and signatures_ (Provides, Consumes, the tasks). R09's palette entry's members
+    (`substance`, `normal_albedo_bvr`, `phase_row`, `grain_density_kg_m3`, `transition`,
+    `mechanics`), the header's getters, `decode_block` and the block's frame, `PartialField`'s
+    margin code, `UnresolvedVariance`'s getters and the per-contribution structure functions,
+    `coarse_pass(seed, &inputs)`, and R09.T19.a's wire types; R05's `HeightSource` as built, the
+    triangle query T3 adds, selection's level table and chord sagitta, `slotLayout.ts`'s fields,
+    the pool, worker and spike, and the settings' `cacheBytes` (no second `PATCH_CACHE_BYTES`);
+    R07's `DiscSurface` file, `phase_factor_table`'s channels, `viewFrameDrawer.ts`, the mesh
+    regime's files and `depthWriters`; R08's `curve` argument and `atmosphere_source_transmittance`,
+    the aerial perspective's two paths, `preciseAtan2`'s range (T8.b's elevation now takes the
+    zenith angle) and the geometric sun; R03's `requestBulk`, `FakeWebSocket` and the scene model;
+    R02's label block and DOM list, and the client's body-fixed types; plan 14's rotation and
+    photometry on the wire.
+  - _Folded in, as their rulings direct:_ decision-composition §1.8 (`Material { class, entry }`,
+    no `FrostSpecies`, `properties(material, &palette)`, the classifier's palette rules, the class
+    map's (form, entry) pairs, the new T1.c, T10.a's bands and T10.b's thermal emission); R09's
+    cold-trap rule for the classifier (Design note 1, T1.b); T1.a's codes for R09's `phase_row`
+    (R09's "Deviations in T2", follow-up B); and the slope's projection into the tangent plane
+    (R09's "Deviations in T4, as built").
+  - _Commands._ The surface crate's integration tests and the sim's take `--features testing`;
+    the wasm goldens run under `just test-wasm-fast`; T6.a's and T8.a's benches are named
+    (`just bench -- bake/patch`, `bake/horizon`, in a new `benches/bake.rs`); T6.b runs
+    `just gen-surface` first; T7 adds `pnpm --filter @hyperion/protocol test`; T15's acceptance
+    names the lane's checks, `just ci` and the slow pass being the orchestrator's.
+  - _Order._ The Tasks' opening paragraph now gives the order as built: T7, T13 and T1.a startable;
+    T1.b, T2, T3, T5 and T6 after R09.T8 (and T9 for goldens); T4.a whole, and the
+    `sample_worlds()` cases of T1.b, T2, T5 and T10.a, after R09.T16, since the coarse pass follows
+    this plan on the critical path; T7 building the pool's half of the per-body calls and T6.b the
+    worker's.
+  - _Provisional until R09.T8/T9/T19.b land_ (Consumes, R09): the full `height_at`,
+    `Synthesiser::bake_patch` and `height_range_m`, `level_bound_m`, the whole `structure_function`
+    and `unresolved_rms`, `QueryHeightError::NonFinite`; the golden heights; and the `surface_field`
+    payload, its revisions and `surface_revisions`. Their names are R09's Provides, not guessed.
+  - _Pending re-validation:_ none beyond those names. T1.c's cover term waits on P14.T51.d.
+- **Questions for "main" from the re-validation** (each touches a contract, the payload R09.T19.b
+  is about to send for the first time, so each is cheapest ruled before that send):
+  - _A form's albedo on one entry._ Snow and glacier ice are two forms of one H₂O entry, and
+    `VolatileFrost` a frost grain of its ice's, but R09's `PaletteEntry` carries one A_N a band, at
+    the one grain class the server resolves (decision-composition: "A_N in B, V and R at grain
+    classes"). Either the entry carries A_N per grain class (a payload member), or the class table
+    holds a per-form factor on the entry's A_N. Lean: the per-form factor, in T1.a's table under its
+    generator version, from Design note 8's spans; no wire change.
+  - _The albedo scale by band._ decision-composition §1.8 lets T10.a solve per band or keep one c
+    with the residual per band stated; the header holds one `albedo_scale: Option<f64>`, and per
+    band would be three. Lean: one c, fitted in V, with the B and R residuals stated; no wire
+    change.
+  - _The `sample_worlds()` cases as follow-ups._ T1.b, T2, T5 and T10.a land their synthetic-world
+    parts first and their reference-world binaries after R09.T16, under the same task IDs, as R09's
+    T5 had follow-ups. Lean: so; the alternative is new subtask letters.
+- **Deferred findings (2026-10-13 rule)** (the re-validation of `c6d77cac`; each leaves this plan's
+  algorithm and contracts as they are, for "main"'s list).
+  - _The bound's wording._ Main's acceptance for R09.T8 makes `level_bound_m` a 1 − 10⁻⁹ per-point
+    quantile in its crater and rim terms, while R05's `HeightSource::level_bound_m` is documented
+    as "the level's hard error bound", and T3 implements that trait over it. Lean: T3 rewords the
+    trait's doc comment to the stated bound in its own commit (R05's file; no code moves). Design
+    note 5, T4.a and T4.b carry a pointer here.
+  - _Channelled plains' structure function._ R09.T8's closed form runs 15–37% high there, so T5's
+    slope uncertainty and T2's cliff exceedance overstate channelled plains: the safe direction for
+    a readout, but T2's ten-point check may fail on channelled cells, and the test names them. The
+    fix is R09's channel follow-up.
+  - _The bake's budget._ R09.T8's provisional 77–82 ms a patch at L + 4 (14 µs a point) already
+    exceeds T6.a's 40 ms before the class weights; T6.a's quiet figure follows R09's
+    fused-interpolant follow-up. T8.a's far field pays the same per-point cost.
+  - _The cache's slots._ With R05's as-built normal gutter, a low slot is about 157–160 kB and
+    64 MiB holds 420–426 slots against Design note 15's 430; with `BakedOffsets` kept on the high
+    setting (R05.T18), a high slot is about 310 kB and 400 MB holds about 1,290 against 1,900.
+    T14 decides, as planned.
+  - _R03's client API._ `requestBulk` has no per-chunk delivery, so T7 adds an option beside
+    `onPartial` in `@hyperion/protocol`: additive, and the first R10 change in R03's package.
+  - _A peak's extended-source horizon._ R07's `sphere_irradiance` clamps a negative horizon at 0,
+    so a peak's planetshine and wide-source term is the flat ground's; the sun's own lit fraction
+    (Design note 10) keeps the signed horizon. Small; R07's file.
