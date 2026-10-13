@@ -7359,7 +7359,11 @@ gpuBudgetMs }`) is set only for a photorealistic primary while instruments are o
     (about EV100 3.3 after `ENABLE`) is an artefact of its fixed histogram, and its cull's identity
     is not observable through the fake engine. `InThreadSkyWorker` moves from
     `ViewDisplay.test.tsx` to `test/skyFixtures.ts`, and `autoAt` and `manualAt` are a new
-    `test/exposureFixtures.ts`.
+    `test/exposureFixtures.ts`. _Since R06.T13.i (2026-10-13) a camera view culls by its band
+    texel's limit and asks the black-sky limit, V 10.15 at 60°, so the request's 10.06 and the
+    cull's μ 24 figures here and in "The limits, before and after" are superseded, the 13° cases
+    are gone, and the default exposure's `V 10.1 mag CAM` lines read V 9.6 in the hook's test and
+    V 9.5, the eye's cut, in the instrument's (R06's "Deviations in T13.i, as built")._
   - **Off the frame's centre (science check, 2026-10-05).** The ruling's 3.4–5.0 and 1.4–3.0 EV
     below AgX's floor are for a Sun-coloured star at the frame's centre, whose pixel has the largest
     solid angle. At a 16:9 corner at 60° (cos³θ = 0.579) a star is 0.79 EV brighter. As a bound,

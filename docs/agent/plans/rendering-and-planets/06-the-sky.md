@@ -932,7 +932,9 @@ M☉)` (mass comes only from the pair, m₁ + m₂ ≤ 2 m₁) and the age range
     t_ref = +H, which serves the whole ±H window (Design note 7; decided 2026-10-03). From R06.T8.i
     and T11.d a sky may arrive as several replies, nearest first. Each states each layer's
     complete-to radius and whether it is final, the band carries the rest, and the client replaces
-    its sky with each (decided 2026-10-05; Design note 11).
+    its sky with each (decided 2026-10-05; Design note 11). _Since R06.T12.b a sky re-asked within
+    an arrival for `partial`, `limits` or `parallax` is held until a reply is as complete, or until
+    an open camera's shift reaches 1 px (T12.b's record, "Deviations in T12.b, as built")._
 14. **The band's rays and the extinction profile.** The band map is a cube map on the galactic
     axes of `face_texels` (64) a face, one ray per texel centre, 24,576 rays, marched outward to the
     root cube's edge on distance nodes spaced geometrically from 0.01 ly (twelve a decade). Along
@@ -1187,7 +1189,8 @@ After T17 (decided 2026-10-13, `decision-r06-t17-findings.md`): T12.b, then T11.
 lane, neither waiting on R13; T11.i after RM4/RM5's close, or before it if the owner's laptop run
 finds the session's start objectionable (T17's trigger for T11.e). Then T13.i and T11.j, in either
 order, on the sky lane, before any bridge play-test (decided 2026-10-13,
-`decision-r06-camera-budget.md`). Neither waits on R13, and neither holds T17.
+`decision-r06-camera-budget.md`). Neither waits on R13, and neither holds T17. T13.j follows
+T13.i on the sky lane, before any bridge play-test.
 
 Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise.
 
@@ -2610,7 +2613,10 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
     (decision-r06-t11f-stars-line).
   - **Before the first reply** the line reads `STARS: PENDING`, as `LIGHTING: PENDING` does, in
     place of R02's interim reading, including after a jump. `useSky`'s `pending` (true until the
-    request's first reply is held, since T11.d) says when.
+    request's first reply is held, since T11.d) says when. _Since R06.T12.b `pending` is true only
+    while no sky of the arrival is held: a re-ask within an arrival reads no `STARS: PENDING`, and
+    a `partial`, `limits` or `parallax` re-ask keeps the held sky until a reply is as complete
+    (T12.b's record, "Deviations in T12.b, as built")._
   - **On loss of the link** the radius takes its `S` (the model's `stale`) and the note holds until
     a final reply; T11.d's request rule asks again for a sky held at a reply that is not final
     (`SkyRequestReason` `"partial"`).
@@ -2961,6 +2967,21 @@ run src/renderer/src/view/sky`, `just test-render`. _Since 2026-10-06 the disc l
       wherever the camera points, and at most `cut_v`, including on a reply that overflows.
   - **Files:** `apps/hyperion/src/renderer/src/view/sky/{viewSky,cull}.ts` and their tests,
     `displays/view/useViewSky.ts` if the label's path moves, this plan.
+  - **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky
+src/renderer/src/displays/view`, `just smart-ci`.
+- **R06.T13.j The star limit's stale mark (new; after T13.i; decided 2026-10-13,
+  `decision-r06-camera-budget.md` §10.2).** While a view's sky is stale (the link down,
+  `SkyModel.stale`), the `STARS` line's limit, `EYE` or `CAM`, is stale in the guide's form:
+  muted, with its trailing `S`, after its unit and before its kind, in a field of its own sized
+  for its widest reading with the mark (`V 11.0 mag S`). The edge's field and every note are
+  unchanged. Build to sign-off queue item 15's draft of the `EYE`, `CAM` row.
+  - **Tests:** with the link down, the primary's line and an instrument's line each read the
+    limit muted with its `S`, for an eye and for a camera; `STARS: PENDING` takes none; the
+    mark clears when the link returns; the line's breaks do not move when it goes stale.
+  - **Layout:** the composed line fits at 1280 × 720 and in the instrument slots when stale,
+    with the edge's note beside it (the hidden layout harness R13.T2.b used).
+  - **Files:** `apps/hyperion/src/renderer/src/view/sky/label.ts`,
+    `displays/view/{useViewSky,viewRun}.ts` and their tests, this plan.
   - **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky
 src/renderer/src/displays/view`, `just smart-ci`.
 
@@ -3810,7 +3831,10 @@ cube, peak, faceSizePx, path }`, and `bakeSkyCubeOnCpu`, `releaseBakedCube`, `pa
     star with a positive band term (to A0V's +0.14) whose V + c lies past `cut_v` goes to the band,
     its light kept, even where its texel's limit is deeper. That happens only where the cut is
     shallower than the texel's limit: at about 43° and narrower (cut 11.0), and for an instrument's
-    camera culling the primary eye's sky. Open for "main": the ruling's §2.1 caps only the label.
+    camera culling the primary eye's sky. Kept, as ruled 2026-10-13
+    (`decision-r06-camera-budget.md` §10.1): the sky is complete past the cut in V plus band term
+    only for hot stars, so without the cap a blue-only sliver would be drawn past the label's
+    figure.
   - **The request** asks `min(MAX_CUT_V, cameraLimitV(deepest, fov, 0))`: 11.0 at 10°–30°, 10.87
     at 45°, 10.15 (10.1533) at 60°, 8.96 at 90°, 7.77 at 120°. Today no running view asks it: the
     `PRIMARY` view is the eye, and the instruments cull its sky (R07.T19).
@@ -9439,10 +9463,12 @@ CensusCost)`.
   - **N_max and the sprite budget per setting** (open question 16; drafted for the owner, through
     "main"'s decision agent): kept, high 3 × 10⁵ and 4,096 sprites, low 10⁵ and 2,048. The eye's
     sky the server serves near the Sun lists 66,614 stars at its final reply (the server's galaxy,
-    run whole, above), under both N_max; a camera's at 10.06 some 2–4 × 10⁵, past both, whose
-    overflow the band holds as points with its light; the nuclear disc's eye at the stand-in 7.95
-    some 2.4 × 10⁵. 3 × 10⁵ is the protocol's own cap (`MAX_SKY_STARS`, 7.2 MB). The sprite budgets
-    need the frame times by hand (below). `view/sky/setting.ts`' remark says so.
+    run whole, above), under both N_max; a camera's at 10.06 some 4.0 × 10⁵ on the server's
+    galaxy, past high's N_max, and 2.3 × 10⁵ on the fixture, past low's only (corrected
+    2026-10-13, `decision-r06-camera-budget.md` §7), whose overflow the band holds as points with
+    its light; the nuclear disc's eye at the stand-in 7.95 some 2.4 × 10⁵. 3 × 10⁵ is the
+    protocol's own cap (`MAX_SKY_STARS`, 7.2 MB). The sprite budgets need the frame times by hand
+    (below). `view/sky/setting.ts`' remark says so.
   - **Further records, from the benches' logs.**
     - `layer_caps`' CPU per call (the plan's counts of the caps, on one thread): 11.7–11.8 s for
       the exact census near the Sun (at 7.95 and at the eye's 8.18), 12.4 s on the fixture and

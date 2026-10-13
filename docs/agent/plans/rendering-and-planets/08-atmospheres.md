@@ -3776,6 +3776,8 @@ By the composition ruling (decision-composition):
       are negligible;
     - a Uranus-class H₂ column's quadrupole lines are negligible;
     - a Venus-class body's CO₂ is not, until R08.T4.d;
+    - an Earth-class body's H₂O continuum below 567 nm is not negligible at k = 100, and a
+      Mars-class body's is;
     - a hot giant's K wing grows with its perturber density, and is negligible only where the
       pair column allows;
     - a species whose column is raised past its bound labels the body;

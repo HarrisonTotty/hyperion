@@ -874,12 +874,15 @@ ignores `layer`; the fitted values are kept for the record, and `kinematics`, `i
     an orbit whose specific angular momentum |x × p| is below 4GM•/c (c = 1 ly per Julian year) falls
     into the black hole at its next pericentre (Shapiro and Teukolsky 1983, _Black Holes, White Dwarfs
     and Neutron Stars_, §12.4; the marginally bound orbit at 4GM/c², Bardeen, Press and Teukolsky
-    1972, ApJ 178, 347). Its integration stops, and its class's record counts it as captured, with its
-    time; it takes no histogram cell, and every share keeps it in its denominator, so the class table
-    counts it as gone. No other relativistic term: the first post-Newtonian corrections are of order
-    r_s ÷ r, under 10⁻³ outside 10⁻³ ly, and the histograms begin at 16 ly. No tidal disruption: the
-    table's objects are compact remnants, and even a white dwarf's tidal radius about Sgr A* (about
-    1.4 × 10⁹ m) lies inside the horizon (1.27 × 10¹⁰ m).
+    1972, ApJ 178, 347, eqs. 2.13 and 2.19). Its integration stops, and its class's record counts
+    it as captured, with its time; it takes no histogram cell, and every share keeps it in its
+    denominator, so the class table counts it as gone. No other relativistic term: the first
+    post-Newtonian corrections are of order GM• ÷ (c² r), under 10⁻³ outside 10⁻³ ly, and the
+    histograms begin at 16 ly. No tidal disruption: the table's objects are compact remnants, and
+    even a white dwarf's tidal radius about Sgr A* (about 1.7 × 10⁹ m for 0.6 M☉) lies inside the
+    horizon (1.27 × 10¹⁰ m). (Corrected 2026-10-13 from P15.T6.g's science check, with the
+    equations cited: the order read r_s ÷ r, which is 1.3 × 10⁻³ at 10⁻³ ly, and the radius
+    1.4 × 10⁹ m.)
   - **Unresolved orbits.** An orbit still over `drift_tolerance` after its last halving is not
     classified: it takes no histogram cell, no bound or unbound count and no place in any share's
     numerator or denominator, and its class's record counts it as unresolved, with its drift and its
