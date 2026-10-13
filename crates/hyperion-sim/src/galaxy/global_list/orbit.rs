@@ -23,17 +23,21 @@
 //!
 //! Beyond the grid's edge at 2¹⁸ ly (80 kpc), where dwarfs and some orphans have their
 //! apocentres, the tables continue the Gaussian components by scaling the edge's value as `1 ÷ h`
-//! from the clamped point, and their force there is not the gradient of their potential: it
-//! departs from the potential's central differences by up to 3 × 10⁻⁴ of itself outside the grid's
-//! box, against 10⁻¹⁰ inside (measured on the Milky Way fixture, 2026-09-29). So the integrator
-//! continues the galaxy on its own, as Design note 3 asks: the spherical components in closed
-//! form (the NFW halo among them) and the Gaussian components, the stars and gas, as a point mass
-//! plus the axisymmetric quadrupole of the discs, `A ÷ h + B P₂(z ÷ h) ÷ h³`, with `A` and `B`
-//! matched to the tables' Gaussian part in the plane and on the axis at 2¹⁸ ly. Between spherical
-//! radii of 2¹⁷·⁵ and 2¹⁸ ly the two potentials are blended by a smooth step in radius, and the
-//! force is the blend's exact gradient, so the whole field is the gradient of one continuously
-//! differentiable potential. Inside 100 ly no tube progenitor comes, and the tables serve there
-//! as everywhere inside the blend.
+//! from the clamped point. Their force there is that continuation's exact gradient (plan 02,
+//! P02.T6.f, 2026-10-12); before it, where only one coordinate passed the edge, the force departed
+//! from the potential's central differences by up to 5 × 10⁻⁴ of itself, against 10⁻¹⁰ inside the
+//! grid's box (measured on the Milky Way fixture, 2026-09-29 and 2026-10-12). The
+//! continuation's slope is still not the grid's, so the force jumps at the box's faces.
+//!
+//! This integrator continues the galaxy on its own, as Design note 3 asks. It keeps doing so,
+//! since moving it onto the tables' continuation would move its output. Its far field holds the
+//! spherical components in closed form (the NFW halo among them) and the Gaussian components, the
+//! stars and gas, as a point mass plus the axisymmetric quadrupole of the discs,
+//! `A ÷ h + B P₂(z ÷ h) ÷ h³`, with `A` and `B` matched to the tables' Gaussian part in the plane
+//! and on the axis at 2¹⁸ ly. Between spherical radii of 2¹⁷·⁵ and 2¹⁸ ly the two potentials are
+//! blended by a smooth step in radius, and the force is the blend's exact gradient, so the whole
+//! field is the gradient of one continuously differentiable potential. Inside 100 ly no tube
+//! progenitor comes, and the tables serve there as everywhere inside the blend.
 //!
 //! # The step
 //!

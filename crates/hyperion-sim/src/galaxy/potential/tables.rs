@@ -239,8 +239,10 @@ fn hermite_slope(t: f64) -> [f64; 4] {
 /// the (R, z) grid) from exact derivatives. The dark halo, the nuclear cluster and the black hole
 /// are added at lookup, in closed form or from the cluster's shared table. Below 2⁻⁴ ly the
 /// Gaussians' part is taken as solid-body, where the black hole dominates anyway; beyond 2¹⁸ ly as
-/// a point mass; on the (R, z) grid, below 2⁻⁴ ly in R it is taken at 2⁻⁴ ly, and below 2⁻⁴ ly in
-/// |z| it is blended quadratically into the plane's value.
+/// a point mass in the plane, and beyond the (R, z) grid's box as its value at the clamped point
+/// `(min(R, 2¹⁸ ly), min(|z|, 2¹⁸ ly))`, scaled by that point's spherical radius over the true one,
+/// whose exact gradient the force is (P02.T6.f); on the (R, z) grid, below 2⁻⁴ ly in R it is taken
+/// at 2⁻⁴ ly, and below 2⁻⁴ ly in |z| it is blended quadratically into the plane's value.
 ///
 /// Ω and κ are in radians per year, speeds in km/s, potentials in (km/s)² with zero at infinity.
 ///
@@ -519,16 +521,61 @@ impl PotentialTables {
     /// They are the derivatives of what [`potential`](Self::potential) interpolates, so they agree
     /// with it to the interpolation's accuracy and are exact at the grid points. `K_z` is odd in z.
     /// Below 2⁻⁴ ly in R the Gaussians' radial term is continued as solid-body, as in the plane.
+    ///
+    /// Beyond the grid's box, where R or |z| exceeds 2¹⁸ ly, they are the exact gradient of the
+    /// potential's continuation there, `Φ_G = A(R_c, z_c) ÷ h` with `A = g h_c` (plan 02, P02.T6.f;
+    /// decision-p15-t6g-orbits §2):
+    ///
+    /// ```text
+    /// R ∂Φ_G/∂R = R [𝟙(R < L) A_R ÷ h − A R ÷ h³]     A_R = h_c (∂g/∂ln R) ÷ R_c + g R_c ÷ h_c
+    /// ∂Φ_G/∂|z| =    𝟙(|z| < L) A_z ÷ h − A |z| ÷ h³   A_z = h_c (∂g/∂ln z) ÷ z_c + g z_c ÷ h_c
+    /// ```
+    ///
+    /// with `L` = 2¹⁸ ly, `R_c = min(R, L)`, `z_c = min(|z|, L)`, `h = √(R² + z²)`,
+    /// `h_c = √(R_c² + z_c²)`, `g` the grid's value at `(R_c, z_c)` and its derivatives the
+    /// interpolant's own; `∂g/∂ln z` is zero below 2⁻⁴ ly, where `g` is constant in z. Where
+    /// both coordinates are at or beyond `L`, `A` is constant and the force is a point mass's. The
+    /// force still jumps where an orbit crosses a face of the box, since the continuation's slope
+    /// there is not the grid's: a kink of a continuous potential, which conserves energy.
     pub(crate) fn forces(&self, r_cyl: f64, z: f64) -> Option<[f64; 2]> {
         let grid = self.grid.as_ref()?;
         let height = z.abs();
         let r = r_cyl.max(FIRST);
-        let [mut radial, mut vertical] = if r > LAST || height > LAST {
-            // A point mass beyond the grid: Φ = Φ_edge h_edge ÷ h.
+        let beyond = r > LAST || height > LAST;
+        let [mut radial, mut vertical] = if beyond {
+            // Beyond the grid's box: Φ_G = A ÷ h, A = g h_c from the clamped point (`potential`).
             let (rc, zc) = (r.min(LAST), height.min(LAST));
             let h = math::hypot(r, height);
-            let phi = grid.at(rc, zc) * math::hypot(rc, zc) / h;
-            [-phi * r * r / (h * h), -phi * height / (h * h)]
+            let hc = math::hypot(rc, zc);
+            let g = grid.at(rc, zc);
+            let phi = g * hc / h;
+            if r >= LAST && height >= LAST {
+                // Neither clamped coordinate moves, so A is constant: the arithmetic from before
+                // P02.T6.f, bit for bit.
+                [-phi * r * r / (h * h), -phi * height / (h * h)]
+            } else {
+                // One coordinate is clamped at L, and A changes along the other (P02.T6.f).
+                let [g_by_ln_r, g_by_ln_z] = grid.log_derivatives(rc, zc);
+                let amplitude = g * hc;
+                let a_by_r = if r < LAST {
+                    hc * g_by_ln_r / rc + g * rc / hc
+                } else {
+                    0.0
+                };
+                let a_by_z = if height < LAST {
+                    // `cell` clamps below the grid's first point, so `Grid::at` is constant in z
+                    // there and `log_derivatives` returns the first point's slope instead.
+                    let g_by_z = if zc < FIRST { 0.0 } else { g_by_ln_z / zc };
+                    hc * g_by_z + g * zc / hc
+                } else {
+                    0.0
+                };
+                let h3 = h * h * h;
+                [
+                    r * (a_by_r / h - amplitude * r / h3),
+                    a_by_z / h - amplitude * height / h3,
+                ]
+            }
         } else if height < FIRST {
             let plane = self.in_plane.at(r);
             let edge = grid.at(r, FIRST);
@@ -554,7 +601,16 @@ impl PotentialTables {
                 vertical += v2 * height / (h * h);
             }
         }
-        Some([radial, vertical.copysign(z)])
+        // K_z is ∂Φ ÷ ∂|z| carrying z's sign. Beyond the box ∂Φ ÷ ∂|z| can be negative: for
+        // R > L and |z| below the grid's first point the continuation's Gaussian part pushes away
+        // from the plane, and past R ≈ 1.45 × 10⁶ ly it outweighs the spherical pull (P02.T6.f).
+        // Inside the box `copysign` stays as before, so that no output moves.
+        let k_z = if beyond && vertical < 0.0 {
+            -vertical.copysign(z)
+        } else {
+            vertical.copysign(z)
+        };
+        Some([radial, k_z])
     }
 
     /// The Gaussians' total mass, for tests of the far field.

@@ -13,9 +13,15 @@
 //!   integrator holds its energy, [`PotentialTables::potential`] plus the kinetic energy, to the
 //!   step's own accuracy: bilinear interpolation of tabulated forces would not be a gradient, and
 //!   drifts (ruling 101.4). It costs about as much as one interpolation, a few hundred nanoseconds.
+//!   That holds inside the grid's box. Beyond it, where R or |z| exceeds 2¹⁸ ly, the force is the
+//!   exact gradient of the potential's continuation from the box's edge (plan 02, P02.T6.f). That
+//!   continuation is continuous but has kinks, at the box's faces and 2⁻⁴ ly from the plane; they
+//!   conserve energy, and a leapfrog pays a first-order error at each crossing.
 //!
 //! Both give `∂Φ ÷ ∂R` and `∂Φ ÷ ∂z` in (km/s)² per light-year, the acceleration's negative: at a
-//! point above the plane and off the axis, both are positive, pulling inward and down.
+//! point above the plane and off the axis, both are positive, pulling inward and down. One exception
+//! is the tables' continuation beyond 1.45 × 10⁶ ly in R, within 2⁻⁴ ly of the plane, which pushes
+//! away from the plane, faintly (P02.T6.f).
 
 use super::{MassModel, PotentialTables};
 use crate::galaxy::consts::LIGHT_YEARS_PER_YEAR_PER_KM_S;
@@ -105,7 +111,10 @@ impl PotentialTables {
     /// The potential's gradient at `(R, z)` from the tables, the exact derivative of
     /// [`potential`](Self::potential) (module documentation); `None` without the (R, z) grid
     /// ([`full`](Self::full)). Below 2⁻⁴ ly in R the Gaussians' radial part is continued as
-    /// solid-body, as in the plane, so it falls to zero on the axis.
+    /// solid-body, as in the plane, so it falls to zero on the axis. Beyond the grid's box, where R
+    /// or |z| exceeds 2¹⁸ ly, it is the exact gradient of the potential's continuation there too
+    /// (plan 02, P02.T6.f); it jumps where a path crosses one of the box's faces, at a kink of the
+    /// continuous potential.
     ///
     /// # Examples
     ///

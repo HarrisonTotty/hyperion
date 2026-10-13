@@ -2466,3 +2466,72 @@ GL4_WEIGHTS}`, whose inner pair is `±√((3 − 2√(6 ÷ 5)) ÷ 7)` with weigh
     at the nearest corner stands 0 to 3.4 × 10⁷ units below the bound. In one (seed 0,
     3.9 × 10⁻³²²) the bound's exponential underflows to 0, and so does the envelope at every probe.
   - Both seeds pass by name (`--cargo-profile slow-test --run-ignored only`).
+
+- **P02.T6.f as built (lane p02-farfield, 2026-10-12, at version 21; decision-p15-t6g-orbits §2).**
+  No generated output moves: every sim golden is bit-identical, and nothing is bumped.
+  - `forces` keeps its old point-mass arithmetic wherever both coordinates are **at or beyond** L,
+    not only beyond it. On a face (R or |z| exactly 2¹⁸ ly) with the other coordinate beyond, the
+    indicator term vanishes, so that arithmetic is already the gradient, and those bits stay
+    unchanged too. `potential` is untouched. In the new branch `A` is named `amplitude`, since a
+    fifth single-letter binding trips Clippy's `many_single_char_names`.
+  - The test is `the_far_field_is_conservative_and_pinned` (`tests/galaxy_potential.rs`). It is in
+    the fast tier and builds the fixture's full tables once, in about 4 s. It runs three checks:
+    - **The gradient.** At the plan's 30 points, central differences of `potential` match `force`
+      to at most 8.4 × 10⁻⁹ of |∇Φ|; the bound is 10⁻⁷. The step is 10⁻⁴ of the coordinate, or a
+      third of it below 1 ly. A step of 10⁻⁵ of the spherical radius had missed by 1.0 × 10⁻⁷ at
+      (2 × 10⁶, 400) ly, from the differences' own truncation. The old force missed by up to
+      **5.0 × 10⁻⁴** at these points, at (2 × 10⁶, 1.2 × 10⁵) ly. That is more than the plan's
+      3.6 × 10⁻⁴, which was measured at the decision's points.
+    - **The sign of K_z (the science review's finding).** `forces` returned K_z as
+      `vertical.copysign(z)`, which assumes ∂Φ ÷ ∂|z| ≥ 0. The exact continuation breaks that: for
+      R > L and |z| below 2⁻⁴ ly, `g` is constant in z while `h_c ÷ h` rises, so the Gaussian part
+      pushes away from the plane, at (R² − L²) ÷ L² times a point mass's pull. Past
+      R ≈ 1.45 × 10⁶ ly that outweighs the spherical components. Beyond the box a negative
+      ∂Φ ÷ ∂|z| now keeps its sign. Inside the box `copysign` is unchanged, so no output can move
+      there, whether or not the interpolant's ∂Φ ÷ ∂|z| is ever negative. The flip had been
+      2.9 × 10⁻⁸ of |∇Φ| at (2 × 10⁶, 0.04) ly, under the bound, and most of what was first
+      measured there (3.5 × 10⁻⁸). Only the golden sees it, since Φ changes by under an ulp across
+      that difference.
+    - **The convergence (the lane brief's addition).** A fixed-step KDK leapfrog in the meridional
+      plane follows two orbits, each with exactly one coordinate beyond L throughout, over
+      1,000 ly per km/s at 40 to 640 steps. The largest energy error falls from 0.72 to
+      0.0028 (km/s)², 3.92 to 4.13 fold per halving, asserted within [3, 5]. With the old force the
+      first orbit's error levels off from 4.13 to 3.42 (km/s)²: falls of 1.15, 1.04, 1.01 and 1.00.
+    - **The golden (the determinism review's request).** A new golden,
+      `galaxy_potential_far_field`, pins `force` and `potential` at eight points, one in each
+      branch: R or |z| beyond, each above and below 2⁻⁴ ly in the other coordinate; both beyond; and
+      each face. It is an extension, not a move: no generated output reads these values. It holds
+      the far field's bits on wasip1 too, and against later rewrites, since plan 15's
+      displaced-form orbits integrate in this field.
+  - `global_list/orbit.rs`'s "The far field" is corrected as the task says. The global list keeps its
+    own far field. `PotentialTables::force`'s documentation (`force.rs`) now names the face's jump.
+  - **The fit's smoke orbits do move.** They integrate in `PotentialTables::force` with no far
+    field of their own, and their escapers leave the box through one face. So the slow test
+    `the_smoke_fit_runs_end_to_end_on_fresh_smoke_histograms`, which already fails at version 21
+    (slow-pass triage F1), gets a different fresh digest. P15.T6.g's re-emission absorbs it, as
+    the decision rules.
+  - The determinism review's check of the "no output moves" premise found it stronger than the
+    ruling states. No disc Jeans node reaches L at all: the thin disc's length is clamped to
+    7,000–11,500 ly, so radii reach at most 168,700 ly and tail heights 242,880 ly. The ruling's
+    17,830 ly threshold is 17,867 ly. Because of `dispersion_slope`, the radius read is from about
+    220,400 ly, not 240,000. The farthest system lies at R = 92,682 ly.
+  - The spheroid tables' last node, `exp(LN_FIRST + 63 STEP)`, is 262,143.999 999 999 94 ly, about
+    2 ulp below the edge. A node exactly at 2¹⁸ ly would still take the unchanged branch, but one
+    rounded above it would take the new one and move the bulge, bar and nuclear tables. No test
+    guards either premise. Candidates for a guard test are that the node is at most 2¹⁸ ly, and that
+    the disc tables' largest radius and tail height are at most 2¹⁸ ly over the parameter ranges.
+  - **Remaining for the Risks, as ruled.** The force still jumps at the box's faces, where the
+    continuation's slope is not the grid's. `InPlaneTable::at` still scales `v_c²` and Φ
+    separately beyond L. Smoothing either would change `potential` where the Jeans tables integrate,
+    and so would move output. The science review adds three oddities of the unchanged box-shaped
+    continuation, all physically negligible:
+    - The push away from the plane, above, gives the field a kink at |z| = 2⁻⁴ ly beyond R = L,
+      which lies on no face.
+    - At R = L with |z| below 2⁻⁴ ly, Φ jumps by about 10⁻¹⁰ (km/s)², where the box's blend into
+      the plane meets the constant `g`.
+    - Along the faces A's angular variation is frozen, so the non-monopole part falls as 1 ÷ h, not
+      1 ÷ h³. Near the axis the Gaussian part's radial force points outward beyond h ≈ 2.4 × 10⁶ ly,
+      though with the halo the total stays inward to about 2 × 10⁷ ly.
+
+    The solid-body patch below 2⁻⁴ ly in R is not the gradient of `potential`, which is flat in R
+    there. It predates this task, and its work is at most about 10⁻⁹ (km/s)².

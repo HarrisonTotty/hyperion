@@ -1,9 +1,11 @@
 //! The potential (plan 02, P02.T6): the fitted expansions, the Gaussian components against closed
-//! forms, the mass model's tables against direct evaluation, the black hole and the golden file.
+//! forms, the mass model's tables against direct evaluation, the black hole, the far field beyond
+//! the (R, z) grid's box and the golden file.
 //!
 //! The checks over many seeds run here on 32 seeds, and over 10³ in `galaxy_sweeps.rs` under
-//! `just test-slow` (plan 02, P02.T11). The (R, z) grid costs seconds to build, so its test is
-//! slow too.
+//! `just test-slow` (plan 02, P02.T11). The (R, z) grid costs seconds to build, so its comparison
+//! with direct evaluation, which also evaluates the model at 300 points, is slow too; the far
+//! field's one test (P02.T6.f) builds the fixture's grid once and runs in about 5 s.
 
 #[expect(
     dead_code,
@@ -648,4 +650,197 @@ fn the_grid_matches_direct_evaluation() {
         1e-3,
     );
     assert!(tables.escape_speed(ly(8.0 * kpc), ly(0.0)).unwrap().value() > 400.0);
+}
+
+// P02.T6.f: beyond the (R, z) grid's box the force is the potential's gradient.
+
+/// The grid's outer edge on both axes, 2¹⁸ ly.
+///
+/// Beyond it the tables continue the Gaussian components from the clamped point.
+const GRID_EDGE_LY: f64 = 262_144.0;
+
+/// 30 points `(R, z)`, ly, beyond the grid's box with exactly one coordinate beyond its edge.
+///
+/// There the force before P02.T6.f dropped the continuation's change along the other coordinate.
+/// 15 have R beyond (to 2 × 10⁶ ly) and 15 have |z| beyond (to 10⁶ ly), each from near the plane or
+/// the axis to near the box's face, above and below the plane.
+fn one_coordinate_beyond_the_box() -> Vec<(f64, f64)> {
+    let mut points = Vec::with_capacity(30);
+    for r in [270_000.0, 600_000.0, 2_000_000.0] {
+        for z in [0.04, 400.0, -20_000.0, 120_000.0, 250_000.0] {
+            points.push((r, z));
+        }
+    }
+    for z in [300_000.0, -600_000.0, 1_000_000.0] {
+        for r in [0.5, 400.0, 20_000.0, 120_000.0, 250_000.0] {
+            points.push((r, z));
+        }
+    }
+    points
+}
+
+/// The far field's force is the gradient of the far field's potential, as it is inside the box.
+///
+/// At the 30 points with one coordinate beyond the box, both components match central differences
+/// of [`PotentialTables::potential`] to 10⁻⁷ of |∇Φ|. Measured 2026-10-12: at most 8.4 × 10⁻⁹,
+/// the differences' own error; the force before P02.T6.f missed by up to 5.0 × 10⁻⁴ here, at
+/// (2 × 10⁶, 1.2 × 10⁵) ly (3.6 × 10⁻⁴ at decision-p15-t6g-orbits §2's points).
+///
+/// The step along each coordinate is 10⁻⁴ of it, where the grid's interpolant, cubic within cells
+/// a quarter wide in the logarithm, puts the differences' truncation near 10⁻⁹ of the component.
+/// Below 1 ly it is a third of it: there the component along that coordinate is under 10⁻⁵ of
+/// |∇Φ| (near the plane, or near the axis), so its truncation does not count, while 10⁻⁴ of it
+/// would leave Φ's rounding at 10⁻⁶–10⁻⁴ of |∇Φ|, far above the bound. No difference straddles the
+/// plane, the axis, the grid's first point at 2⁻⁴ ly or the box's face. Near the plane at
+/// 2 × 10⁶ ly, Φ changes by less than an ulp across the difference, so the vertical component
+/// there (negative: the continuation pushes away from the plane) is held by the golden instead
+/// ([`the_far_field_is_pinned`]).
+///
+/// Run by [`the_far_field_is_conservative_and_pinned`] on its one build of the fixture's full tables.
+fn the_far_field_force_is_the_far_field_potentials_gradient(tables: &PotentialTables) {
+    let phi = |r: f64, z: f64| tables.potential(ly(r), ly(z)).expect("the full tables");
+    let step = |c: f64| if c < 1.0 { c / 3.0 } else { 1e-4 * c };
+    let mut worst: f64 = 0.0;
+    for (r, z) in one_coordinate_beyond_the_box() {
+        assert_ne!(
+            r > GRID_EDGE_LY,
+            z.abs() > GRID_EDGE_LY,
+            "({r}, {z}) has exactly one coordinate beyond the box"
+        );
+        let (dr, dz) = (step(r), step(z.abs()));
+        let by_r = (phi(r + dr, z) - phi(r - dr, z)) / (2.0 * dr);
+        let by_z = (phi(r, z + dz) - phi(r, z - dz)) / (2.0 * dz);
+        let f = tables.force(ly(r), ly(z)).expect("the full tables");
+        let size = math::hypot(f.radial, f.vertical);
+        let miss = math::hypot(f.radial - by_r, f.vertical - by_z) / size;
+        worst = worst.max(miss);
+        assert!(
+            miss < 1e-7,
+            "∇Φ at ({r}, {z}): ({}, {}) against ({by_r}, {by_z}), {miss:.2e} of |∇Φ|",
+            f.radial,
+            f.vertical
+        );
+    }
+    println!("far field: worst miss {worst:.2e} of |∇Φ|");
+}
+
+/// The largest change of the energy `½ v² + Φ`, (km/s)², along a leapfrog orbit beyond the box.
+///
+/// The orbit lies in the meridional plane (no angular momentum about the axis, R > 0 throughout)
+/// and is integrated by a kick–drift–kick leapfrog in the tables' force, from `(R, z)` =
+/// `start_ly` at `(v_R, v_z)` = `velocity_km_s`, over `span_ly_per_km_s` in `steps` equal steps.
+/// Time is in ly per km/s (about 0.3 Myr). Every point of the orbit has exactly one coordinate
+/// beyond the grid's box, so no crossing of a face enters the drift.
+fn far_field_drift(
+    tables: &PotentialTables,
+    start_ly: [f64; 2],
+    velocity_km_s: [f64; 2],
+    span_ly_per_km_s: f64,
+    steps: u32,
+) -> f64 {
+    let potential = |[r, z]: [f64; 2]| tables.potential(ly(r), ly(z)).expect("the full tables");
+    let acceleration = |[r, z]: [f64; 2]| {
+        let f = tables.force(ly(r), ly(z)).expect("the full tables");
+        [-f.radial, -f.vertical]
+    };
+    let energy = |x: [f64; 2], v: [f64; 2]| {
+        let speed_sq = v[0] * v[0] + v[1] * v[1];
+        0.5 * speed_sq + potential(x)
+    };
+    let dt = span_ly_per_km_s / f64::from(steps);
+    let (mut x, mut v) = (start_ly, velocity_km_s);
+    let e0 = energy(x, v);
+    let mut a = acceleration(x);
+    let mut worst: f64 = 0.0;
+    for _ in 0..steps {
+        for k in 0..2 {
+            v[k] += 0.5 * dt * a[k];
+            x[k] += dt * v[k];
+        }
+        assert!(
+            x[0] > 0.0 && (x[0] > GRID_EDGE_LY) != (x[1].abs() > GRID_EDGE_LY),
+            "the orbit left the region with one coordinate beyond the box at {x:?}"
+        );
+        a = acceleration(x);
+        for k in 0..2 {
+            v[k] += 0.5 * dt * a[k];
+        }
+        worst = worst.max((energy(x, v) - e0).abs());
+    }
+    worst
+}
+
+/// The leapfrog's energy error beyond the box falls about fourfold per halving of the step.
+///
+/// So does a second-order integrator's in the gradient of one potential. The force before
+/// P02.T6.f did a work of its own, independent of the step, on which the drift levelled off
+/// (decision-p15-t6g-orbits §2: 2.8 (km/s)² on an escaper from 26,000 ly at 558 km/s). Two orbits,
+/// one beyond the box in R and climbing out of the plane, one beyond it in |z| and moving out from
+/// the axis, each over 1,000 ly per km/s (some 300 Myr), at 40 to 640 steps. Measured 2026-10-12:
+/// both drifts fall from 0.72 to 0.0028 (km/s)², 3.92–4.13 fold per halving; before P02.T6.f the
+/// first fell from 4.13 to 3.42 (km/s)², 1.15 fold and then 1.04, 1.01 and 1.00.
+///
+/// Run by [`the_far_field_is_conservative_and_pinned`] on its one build of the fixture's full tables.
+fn the_far_field_conserves_energy(tables: &PotentialTables) {
+    for (start, velocity) in [
+        ([300_000.0, 1_000.0], [100.0, 250.0]),
+        ([1_000.0, 300_000.0], [250.0, 100.0]),
+    ] {
+        let drifts = [40, 80, 160, 320, 640]
+            .map(|steps| far_field_drift(tables, start, velocity, 1_000.0, steps));
+        println!("far field: drifts from {start:?} at {velocity:?} km/s: {drifts:?} (km/s)²");
+        for pair in drifts.windows(2) {
+            assert_within(
+                &format!("the drift's fall per halving from {start:?} ({drifts:?})"),
+                pair[0] / pair[1],
+                3.0,
+                5.0,
+            );
+        }
+    }
+}
+
+/// The far field's force and potential at eight points beyond the box, bit for bit.
+///
+/// No generated output reads the far field's force today, but plan 15's displaced-form orbits
+/// integrate in it, so a rewrite that moves its bits must show here, on every target the sim's
+/// tests run on. The points cover each branch: R beyond, with |z| above and below the grid's first
+/// point at 2⁻⁴ ly; |z| beyond, with R above and below it; both beyond; and each face of the box
+/// with the other coordinate beyond, where the force keeps its arithmetic from before P02.T6.f.
+///
+/// Run by [`the_far_field_is_conservative_and_pinned`] on its one build of the fixture's full
+/// tables.
+fn the_far_field_is_pinned(tables: &PotentialTables) {
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    for (r, z) in [
+        (300_000.0, 1_000.0),
+        (2_000_000.0, 0.04),
+        (20_000.0, -600_000.0),
+        (0.03, 300_000.0),
+        (300_000.0, 400_000.0),
+        (GRID_EDGE_LY, 300_000.0),
+        (300_000.0, -GRID_EDGE_LY),
+        (1_000_000.0, 250_000.0),
+    ] {
+        let f = tables.force(ly(r), ly(z)).expect("the full tables");
+        let phi = tables.potential(ly(r), ly(z)).expect("the full tables");
+        w.f64(&format!("force({r}, {z}).radial"), f.radial);
+        w.f64(&format!("force({r}, {z}).vertical"), f.vertical);
+        w.f64(&format!("potential({r}, {z})"), phi);
+    }
+    golden!("galaxy_potential_far_field", w.as_str());
+}
+
+/// The far field beyond the (R, z) grid's box is conservative and pinned (plan 02, P02.T6.f).
+///
+/// It builds the fixture's full tables once, some seconds in a test build, for the far field's
+/// three checks: [`the_far_field_force_is_the_far_field_potentials_gradient`],
+/// [`the_far_field_conserves_energy`] and [`the_far_field_is_pinned`].
+#[test]
+fn the_far_field_is_conservative_and_pinned() {
+    let tables = PotentialTables::full(&MassModel::new(&GalaxyParams::milky_way_like()));
+    the_far_field_force_is_the_far_field_potentials_gradient(&tables);
+    the_far_field_conserves_energy(&tables);
+    the_far_field_is_pinned(&tables);
 }
