@@ -3,17 +3,23 @@ import { describe, expect, it } from "vitest";
 import bakeSpectra from "../../../../../../../packages/protocol/fixtures/bake_spectra.json" with { type: "json" };
 import { photopicIlluminance } from "../lighting/illuminance";
 import { AU_M } from "../scenes/kept";
-import { absorberVerticalAmount } from "./absorbers";
+import { absorberVerticalAmount, profileMixingRatio } from "./absorbers";
 import {
   AEROSOL_ASYMMETRY,
   AEROSOL_OPTICAL_DEPTH_550,
+  AFGL_US_STANDARD_OZONE_MB_PPMV,
   DOBSON_UNIT_PER_M2,
   EARTH_COLUMN,
   EARTH_DRY_AIR,
   EARTH_OZONE,
   EARTH_OZONE_LAYER_PA,
+  EARTH_OZONE_PROFILE,
+  EARTH_OZONE_SLAB,
   EARTH_REFERENCE,
   EARTH_REFERENCE_CURVES,
+  EARTH_SLAB_REFERENCE,
+  EARTH_SLAB_REFERENCE_CURVES,
+  EARTH_SKIN_K,
   EARTH_TOP_HEIGHT_M,
   HILLAIRE_REFERENCE,
   OZONE_ABSORPTION_PER_M,
@@ -27,11 +33,13 @@ import {
   referenceSunIlluminanceLx,
 } from "./earth";
 import {
+  type AtmosphereMedium,
   CHANNEL_WAVELENGTHS_NM,
   columnLengthM,
   densityAt,
   extinction,
   layerEdgesM,
+  type MediumTerm,
   termNamed,
 } from "./medium";
 import { molecularMixture } from "./rayleigh";
@@ -273,33 +281,6 @@ describe("Earth rebuilt", () => {
     );
   });
 
-  it("lays its ozone between 70 and 3 hPa", () => {
-    expect([EARTH_OZONE.basePa, EARTH_OZONE.topPa]).toEqual(EARTH_OZONE_LAYER_PA);
-  });
-
-  it("gives its ozone one layer of four edges, between 18 and 39 km", () => {
-    const edges = layerEdgesM(termNamed(EARTH_REFERENCE, "absorber:O3").density);
-    expect(edges).toHaveLength(4);
-    expect(edges[0]).toBeGreaterThan(18_000);
-    expect(edges[3]).toBeLessThan(39_000);
-  });
-
-  it("takes its ozone's cross-sections at the skin's 214.4 K, within Serdyuchenko's 193–293 K", () => {
-    expect(EARTH_OZONE.temperatureK).toBeCloseTo(214.4, 6);
-  });
-
-  it("puts its ozone's column-weighted mean height within 1.5 km of R05's tent's 25 km", () => {
-    const ozone = termNamed(EARTH_REFERENCE, "absorber:O3");
-    let weight = 0;
-    let moment = 0;
-    for (let h = 0.5; h < EARTH_TOP_HEIGHT_M; h += 1) {
-      const d = densityAt(ozone.density, h);
-      weight += d;
-      moment += d * h;
-    }
-    expect(Math.abs(moment / weight - 25_000)).toBeLessThan(1_500);
-  });
-
   it("is built with the reference Sun's curve of its ozone, which its tables accept", () => {
     expect(EARTH_REFERENCE_CURVES).toHaveLength(1);
     expect(() => {
@@ -310,6 +291,324 @@ describe("Earth rebuilt", () => {
   it("keeps R05's top and ground", () => {
     expect(EARTH_REFERENCE.topHeightM).toBe(R05_EARTH_REFERENCE.topHeightM);
     expect(EARTH_REFERENCE.groundAlbedo).toEqual(R05_EARTH_REFERENCE.groundAlbedo);
+  });
+});
+
+// --- Earth's measured ozone (plan R08, R08.T6.h) ------------------------------------------------
+
+/**
+ * The U.S. Standard Atmosphere 1976 (NOAA-S/T 76-1562), Table 4: the base geopotential heights,
+ * m′, of its layers to 84.852 km′, and their lapse rates, K m′⁻¹.
+ */
+const US76_BASE_HEIGHTS_M = [0, 11_000, 20_000, 32_000, 47_000, 51_000, 71_000, 84_852] as const;
+const US76_LAPSE_K_PER_M = [-6.5e-3, 0, 1e-3, 2.8e-3, 0, -2.8e-3, -2e-3] as const;
+
+/** g₀ M₀ ÷ R\*, K m⁻¹: the 1976 standard's 9.80665 m s⁻², 28.9644 g mol⁻¹ and 8.31432 J mol⁻¹ K⁻¹. */
+const US76_GM_OVER_R = (9.806_65 * 0.028_964_4) / 8.314_32;
+
+/** The 1976 standard's effective Earth radius r₀ for geopotential height, m: 6,356,766. */
+const US76_RADIUS_M = 6_356_766;
+
+/** T and p at each layer's base, from 288.15 K and 101,325 Pa at sea level. */
+const US76_BASES: ReadonlyArray<{ readonly temperatureK: number; readonly pressurePa: number }> =
+  US76_LAPSE_K_PER_M.reduce<{ temperatureK: number; pressurePa: number }[]>(
+    (bases, lapse, b) => {
+      const { temperatureK: t, pressurePa: p } = bases[b] ?? { temperatureK: NaN, pressurePa: NaN };
+      const dh = (US76_BASE_HEIGHTS_M[b + 1] ?? NaN) - (US76_BASE_HEIGHTS_M[b] ?? NaN);
+      bases.push({
+        temperatureK: t + lapse * dh,
+        pressurePa:
+          lapse === 0
+            ? p * Math.exp((-US76_GM_OVER_R * dh) / t)
+            : p * (t / (t + lapse * dh)) ** (US76_GM_OVER_R / lapse),
+      });
+      return bases;
+    },
+    [{ temperatureK: 288.15, pressurePa: 101_325 }],
+  );
+
+/** The 1976 standard's T and p at a geometric height up to 86 km, by its eqs. 18, 23 and 33a–b. */
+function us76At(heightM: number): { readonly temperatureK: number; readonly pressurePa: number } {
+  const h = (US76_RADIUS_M * heightM) / (US76_RADIUS_M + heightM);
+  const b = Math.max(
+    0,
+    US76_BASE_HEIGHTS_M.findLastIndex((base, i) => i < US76_LAPSE_K_PER_M.length && base <= h),
+  );
+  const { temperatureK: t, pressurePa: p } = US76_BASES[b] ?? {
+    temperatureK: NaN,
+    pressurePa: NaN,
+  };
+  const lapse = US76_LAPSE_K_PER_M[b] ?? NaN;
+  const dh = h - (US76_BASE_HEIGHTS_M[b] ?? NaN);
+  return {
+    temperatureK: t + lapse * dh,
+    pressurePa:
+      lapse === 0
+        ? p * Math.exp((-US76_GM_OVER_R * dh) / t)
+        : p * (t / (t + lapse * dh)) ** (US76_GM_OVER_R / lapse),
+  };
+}
+
+/** The 1976 standard's geometric height at a pressure, m, by bisection to 86 km. */
+function us76HeightM(pressurePa: number): number {
+  let low = 0;
+  let high = 86_000;
+  for (let i = 0; i < 80; i += 1) {
+    const mid = 0.5 * (low + high);
+    if (us76At(mid).pressurePa > pressurePa) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+  return 0.5 * (low + high);
+}
+
+/** {@link EARTH_COLUMN}'s height at a pressure, m: linear in ln p between its levels. */
+function columnHeightM(pressurePa: number): number {
+  const { pressuresPa, altitudesM } = EARTH_COLUMN;
+  const i = Math.max(
+    0,
+    pressuresPa.findLastIndex((p) => p >= pressurePa),
+  );
+  const p0 = pressuresPa[i] ?? NaN;
+  const p1 = pressuresPa[i + 1] ?? NaN;
+  const z0 = altitudesM[i] ?? NaN;
+  const z1 = altitudesM[i + 1] ?? NaN;
+  return z0 + ((z1 - z0) * Math.log(p0 / pressurePa)) / Math.log(p0 / p1);
+}
+
+/** The report's 50 levels, km: 1 km apart to 25 km, 2.5 km to 50 km, 5 km to 120 km. */
+const AFGL_LEVELS_KM = [
+  ...Array.from({ length: 26 }, (_, i) => i),
+  ...Array.from({ length: 10 }, (_, i) => 27.5 + 2.5 * i),
+  ...Array.from({ length: 14 }, (_, i) => 55 + 5 * i),
+];
+
+/** The tropopause of {@link EARTH_COLUMN}, m: its first level at the skin's temperature. */
+const EARTH_TROPOPAUSE_M =
+  EARTH_COLUMN.altitudesM[EARTH_COLUMN.temperaturesK.findIndex((t) => t <= EARTH_SKIN_K)] ?? NaN;
+
+/** An ozone's figures on its column, from 1 m midpoint sums to the medium's top. */
+interface OzoneFigures {
+  /** Its vertical column, molecules m⁻². */
+  readonly columnPerM2: number;
+  /** Its column-weighted mean height, m. */
+  readonly meanHeightM: number;
+  /** The shares of its column below 18.6 km and below {@link EARTH_TROPOPAUSE_M}. */
+  readonly belowBase: number;
+  readonly belowTropopause: number;
+  /** Its peak number density, m⁻³, and the peak's height, m. */
+  readonly peakPerM3: number;
+  readonly peakHeightM: number;
+}
+
+function ozoneFigures(medium: AtmosphereMedium): OzoneFigures {
+  const ozone: MediumTerm = termNamed(medium, "absorber:O3");
+  const n = ozone.absorber?.kind === "column" ? ozone.absorber.numberDensityPerM3 : Number.NaN;
+  let column = 0;
+  let moment = 0;
+  let belowBase = 0;
+  let belowTropopause = 0;
+  let peakPerM3 = 0;
+  let peakHeightM = 0;
+  for (let h = 0.5; h < medium.topHeightM; h += 1) {
+    const d = n * densityAt(ozone.density, h);
+    column += d;
+    moment += d * h;
+    belowBase += h < 18_600 ? d : 0;
+    belowTropopause += h < EARTH_TROPOPAUSE_M ? d : 0;
+    if (d > peakPerM3) {
+      peakPerM3 = d;
+      peakHeightM = h;
+    }
+  }
+  return {
+    columnPerM2: column,
+    meanHeightM: moment / column,
+    belowBase: belowBase / column,
+    belowTropopause: belowTropopause / column,
+    peakPerM3,
+    peakHeightM,
+  };
+}
+
+/** Boltzmann's constant, J K⁻¹, as the 1976 standard takes it: 1.380622 × 10⁻²³. */
+const US76_BOLTZMANN_J_PER_K = 1.380_622e-23;
+
+describe("the AFGL U.S. Standard ozone, as read from AFGL-TR-86-0110's Table 1f", () => {
+  it("has the report's 50 levels, from the 1976 standard's sea level, descending in pressure", () => {
+    expect(AFGL_US_STANDARD_OZONE_MB_PPMV).toHaveLength(AFGL_LEVELS_KM.length);
+    expect(AFGL_US_STANDARD_OZONE_MB_PPMV[0]).toEqual([1_013.25, 2.66e-2]);
+    for (const [i, [pressureMb]] of AFGL_US_STANDARD_OZONE_MB_PPMV.entries()) {
+      expect(pressureMb).toBeLessThan(AFGL_US_STANDARD_OZONE_MB_PPMV[i - 1]?.[0] ?? Infinity);
+    }
+  });
+
+  it("prints the 1976 model's pressure at each level to 0.5%, but 32.5 and 37.5 km's, 3% off", () => {
+    const off: string[] = [];
+    for (const [i, [pressureMb]] of AFGL_US_STANDARD_OZONE_MB_PPMV.entries()) {
+      const heightM = (AFGL_LEVELS_KM[i] ?? NaN) * 1_000;
+      if (heightM <= 86_000) {
+        const e = (pressureMb * 100) / us76At(heightM).pressurePa - 1;
+        off.push(...(Math.abs(e) < 5e-3 ? [] : [`${heightM / 1_000} km ${e.toFixed(4)}`]));
+      }
+    }
+    expect(off).toEqual(["32.5 km -0.0300", "37.5 km 0.0269"]);
+  });
+
+  it("holds 345.6 DU on the report's own heights, the 1976 standard's about 345", () => {
+    // n = p ÷ (kT) at the 1976 model's T, trapezoids to 85 km, above which lies under 10⁻⁵ of it.
+    let column = 0;
+    let moment = 0;
+    let below11 = 0;
+    let below186 = 0;
+    const atLevel = (i: number): { readonly z: number; readonly n: number } => {
+      const z = (AFGL_LEVELS_KM[i] ?? NaN) * 1_000;
+      const [pressureMb = NaN, ppmv = NaN] = AFGL_US_STANDARD_OZONE_MB_PPMV[i] ?? [];
+      return {
+        z,
+        n: ((pressureMb * 100) / (US76_BOLTZMANN_J_PER_K * us76At(z).temperatureK)) * ppmv * 1e-6,
+      };
+    };
+    for (let i = 1; AFGL_LEVELS_KM[i] !== undefined && (AFGL_LEVELS_KM[i] ?? NaN) <= 85; i += 1) {
+      const a = atLevel(i - 1);
+      const b = atLevel(i);
+      for (let k = 0; k < 1_000; k += 1) {
+        const f = (k + 0.5) / 1_000;
+        const z = a.z + f * (b.z - a.z);
+        const d = (a.n + f * (b.n - a.n)) * ((b.z - a.z) / 1_000);
+        column += d;
+        moment += d * z;
+        below11 += z < 11_000 ? d : 0;
+        below186 += z < 18_600 ? d : 0;
+      }
+    }
+    expect(column / DOBSON_UNIT_PER_M2).toBeCloseTo(345.6, 1);
+    // Recorded beside the measured Earth's: its mean height, and its shares below 18.6 km and the
+    // 1976 standard's 11 km tropopause (`decision-r08-t6d-findings.md` §3: 22.4 km, 31% and 9%).
+    expect(moment / column / 1_000).toBeCloseTo(22.55, 2);
+    expect(below186 / column).toBeCloseTo(0.314, 3);
+    expect(below11 / column).toBeCloseTo(0.088, 3);
+  });
+});
+
+describe("Earth's measured ozone (R08.T6.h)", () => {
+  const ozone = termNamed(EARTH_REFERENCE, "absorber:O3");
+  const measured = ozoneFigures(EARTH_REFERENCE);
+
+  it("is the AFGL template laid on Earth's column from the datum to the column's top", () => {
+    expect(EARTH_OZONE.kind === "column" ? EARTH_OZONE.profile : undefined).toBe(
+      EARTH_OZONE_PROFILE,
+    );
+    expect(EARTH_OZONE.basePa).toBe(EARTH_COLUMN.pressuresPa[0]);
+    expect(EARTH_OZONE.topPa).toBe(EARTH_COLUMN.pressuresPa.at(-1));
+    // x(p) n(p) at a level inside, against the template's mixing ratio there.
+    const i = 300;
+    const ratio = (h: number, p: number): number =>
+      densityAt(ozone.density, h) /
+      densityAt(EARTH_COLUMN.density, h) /
+      profileMixingRatio(EARTH_OZONE_PROFILE, p);
+    const reference = ratio(EARTH_COLUMN.altitudesM[i] ?? NaN, EARTH_COLUMN.pressuresPa[i] ?? NaN);
+    for (const j of [10, 150, 500, 800]) {
+      expect(
+        ratio(EARTH_COLUMN.altitudesM[j] ?? NaN, EARTH_COLUMN.pressuresPa[j] ?? NaN) / reference,
+      ).toBeCloseTo(1, 12);
+    }
+  });
+
+  it("holds 300 DU to 10⁻⁶ up to the medium's top", () => {
+    expect(
+      Math.abs(measured.columnPerM2 / (OZONE_COLUMN_DU * DOBSON_UNIT_PER_M2) - 1),
+    ).toBeLessThan(1e-6);
+  });
+
+  it("peaks in number density between 20 and 25 km, at 4.35 × 10¹² cm⁻³", () => {
+    expect(measured.peakHeightM).toBeGreaterThan(20_000);
+    expect(measured.peakHeightM).toBeLessThan(25_000);
+    expect(measured.peakPerM3 / 1e18).toBeCloseTo(4.35, 2);
+  });
+
+  it("has no layer edge", () => {
+    expect(layerEdgesM(ozone.density)).toEqual([]);
+  });
+
+  it("takes its cross-sections at its column-weighted 217.8 K, within Serdyuchenko's 193–293 K", () => {
+    expect(EARTH_OZONE.temperatureK).toBeCloseTo(217.79, 2);
+  });
+
+  it("records its mean height and its shares below 18.6 km and the tropopause, beside the slab's", () => {
+    const slab = ozoneFigures(EARTH_SLAB_REFERENCE);
+    expect(EARTH_TROPOPAUSE_M / 1_000).toBeCloseTo(12.585, 3);
+    expect(measured.meanHeightM / 1_000).toBeCloseTo(22.39, 2);
+    expect(measured.belowBase).toBeCloseTo(0.31, 3);
+    expect(measured.belowTropopause).toBeCloseTo(0.117, 3);
+    // The slab's: its base at 18.59 km, so its 78 m ramp and the 9 m above it lie below 18.6 km.
+    expect(slab.meanHeightM / 1_000).toBeCloseTo(23.99, 2);
+    expect(slab.belowBase).toBeCloseTo(0.0078, 4);
+    expect(slab.belowTropopause).toBe(0);
+  });
+
+  it("records its column's heights at 100, 30, 10, 3 and 1 hPa beside the 1976 standard's", () => {
+    const heightsKm = [100, 30, 10, 3, 1].map((hPa) => [
+      Number((columnHeightM(hPa * 100) / 1_000).toFixed(2)),
+      Number((us76HeightM(hPa * 100) / 1_000).toFixed(2)),
+    ]);
+    // Design note 3's skin has no ozone heating, so the column runs low above 30 km
+    // (`decision-r08-t6d-findings.md` §7).
+    expect(heightsKm).toEqual([
+      [16.34, 16.22],
+      [23.94, 23.94],
+      [30.9, 31.21],
+      [38.54, 39.68],
+      [45.52, 48.18],
+    ]);
+  });
+});
+
+describe("T6.d's ozone slab, kept as a test medium of layer edges (R08.T6.h)", () => {
+  const slab = termNamed(EARTH_SLAB_REFERENCE, "absorber:O3");
+
+  it("lays 300 DU between 70 and 3 hPa, of constant mixing ratio", () => {
+    expect([EARTH_OZONE_SLAB.basePa, EARTH_OZONE_SLAB.topPa]).toEqual(EARTH_OZONE_LAYER_PA);
+    expect(EARTH_OZONE_SLAB.kind === "column" ? EARTH_OZONE_SLAB.profile : "none").toBeUndefined();
+    const amount = absorberVerticalAmount(EARTH_OZONE_SLAB);
+    expect(amount.kind === "column" ? amount.columnPerM2 : Number.NaN).toBeCloseTo(
+      OZONE_COLUMN_DU * DOBSON_UNIT_PER_M2,
+      -15,
+    );
+  });
+
+  it("has one layer of four edges, between 18 and 39 km", () => {
+    const edges = layerEdgesM(slab.density);
+    expect(edges).toHaveLength(4);
+    expect(edges[0]).toBeGreaterThan(18_000);
+    expect(edges[3]).toBeLessThan(39_000);
+  });
+
+  it("takes its cross-sections at the skin's 214.4 K", () => {
+    expect(EARTH_OZONE_SLAB.temperatureK).toBeCloseTo(214.4, 6);
+  });
+
+  it("puts its column-weighted mean height within 1.5 km of R05's tent's 25 km", () => {
+    expect(Math.abs(ozoneFigures(EARTH_SLAB_REFERENCE).meanHeightM - 25_000)).toBeLessThan(1_500);
+  });
+
+  it("is the measured Earth, its name and top and ground, term for term but its ozone", () => {
+    expect(EARTH_SLAB_REFERENCE.name).toBe("earth (ozone slab)");
+    expect({ ...EARTH_SLAB_REFERENCE, name: "earth", terms: [] }).toEqual({
+      ...EARTH_REFERENCE,
+      terms: [],
+    });
+    expect(EARTH_SLAB_REFERENCE.terms.slice(0, 2)).toEqual(EARTH_REFERENCE.terms.slice(0, 2));
+    expect(slab.absorber?.spec).toBe(EARTH_OZONE_SLAB);
+  });
+
+  it("is built with its own curve of the slab's ozone, which its tables accept", () => {
+    expect(EARTH_SLAB_REFERENCE_CURVES[0]?.[0]).not.toEqual(EARTH_REFERENCE_CURVES[0]?.[0]);
+    expect(() => {
+      checkAbsorberCurves(EARTH_SLAB_REFERENCE, EARTH_SLAB_REFERENCE_CURVES);
+    }).not.toThrow();
   });
 });
 

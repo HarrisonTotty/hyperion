@@ -6071,6 +6071,109 @@ generator, and the reference's sampling needs no domain tag.
     `descentSpike.sh --hidden --setting high --seed 7 --workers 3 --ridged off --dawn-safety on`
     and `--trace-profile off --vertex-path baked-offsets --normals double`.
 
+- **Deviations in T6.h, as built** (2026-10-13). `absorbers.ts`, `earth.ts` and `NOTICE`; tests in
+  `absorbers.test.ts`, `earth.test.ts`, `layerEdges.test.ts` and `tablesCpu.test.ts`; comments in
+  `medium.ts` and `precision.test.ts` name the slab.
+  - _Names beyond the text._ `absorbers.ts`: `AbsorberProfileNode`, `profileMixingRatio` and
+    `ColumnAbsorberSpec.profile`. `earth.ts`: `AFGL_US_STANDARD_OZONE_MB_PPMV`, `EARTH_OZONE_PROFILE`
+    and `EARTH_SLAB_REFERENCE_CURVES`; `EARTH_OZONE_LAYER_PA` stays, the slab's. `thomsonTerm` takes
+    its layer's profile and refuses one `absorberSpecs` refuses, since `AbsorberLayer` carries it;
+    no record gives e⁻ a profile today.
+  - _The template, as read._ AFGL-TR-86-0110's Table 1f, the U.S. Standard model, 50 levels as
+    (mb, ppmv), read from the report's scan (DTIC ADA175173):
+    - the ground's printed 1.013E+03 mb is the 1976 standard's sea level, 1,013.25 mb, so that the
+      first node is a datum's;
+    - the report's pressures at 32.5 and 37.5 km, 8.010 and 4.150 mb, are 3.0% under and 2.7% over
+      the 1976 model's, its densities with them, and are kept as printed (tested). libRadtran's
+      `afglus.dat` takes the model's there as errata, which moves the two nodes by about 0.2 km and
+      the column by under 0.3 DU;
+    - Table 2a, which repeats the profile, reads 7.60 ppmv at 37.5 km in the scan, against Table
+      1f's 7.80, which is kept (0.2 DU of the column), as `afglus.dat` has it;
+    - the printed air densities, not committed, were checked when transcribed (p ÷ (kT) to 10⁻³,
+      345.7 DU to 120 km); on the report's own heights, n = p ÷ (kT) at the 1976 model's T to 85 km,
+      the column is 345.6 DU (tested), beside the 1976 standard's 0.345 atm-cm (NOAA-S/T 76-1562,
+      Table 18);
+    - the report adapts its ozone from satellite data and does not cite Krueger and Minzner 1976,
+      whom the text names: the profile follows their 1976 model to 2% in number density from 2 to
+      50 km, by the science check, and the doc and `NOTICE` say so.
+
+    P14.T24.c's copy in the sim takes this table as committed.
+
+  - _Placement._ From the datum, 101,325 Pa, to the column's top, where `absorberSpecs` clamps the
+    template's 120 km. The mixing ratio is above 0 at both ends, so the term has no ramp and no edge.
+    The column's levels, 0.0157 apart in ln p, carry the profile; its nodes are not added as levels.
+    The cross-sections are taken at the column-weighted 217.8 K (the slab's 214.4 K).
+  - _Figures_ (tested):
+
+    | Ozone at 300 DU                 | Mean height | Below 18.6 km | Below the tropopause | Peak, cm⁻³           |
+    | ------------------------------- | ----------- | ------------- | -------------------- | -------------------- |
+    | Measured, on `EARTH_COLUMN`     | 22.39 km    | 31.0%         | 11.7% (12.59 km)     | 4.35 × 10¹², 22.1 km |
+    | The report, on the 1976 heights | 22.55 km    | 31.4%         | 8.8% (11 km)         |                      |
+    | The slab, `EARTH_OZONE_SLAB`    | 23.99 km    | 0.78%         | 0                    | 1.32 × 10¹³, 18.6 km |
+
+    The decision estimated 22.4 km, 31% and 9%, and a peak of 4.2 × 10¹²; the slab's 0.78% is its
+    78 m ramp and the 9 m from its base, 18.59 km, to 18.6 km.
+    - Heights at 100, 30, 10, 3 and 1 hPa: on `EARTH_COLUMN` 16.34, 23.94, 30.90, 38.54 and
+      45.52 km; the 1976 standard's 16.22, 23.94, 31.21, 39.68 and 48.18 km. Design note 3's skin
+      has no ozone heating (`decision-r08-t6d-findings.md` §7), so the column runs low above 30 km.
+    - The greatest ozone column on a transmittance texel's ray: 41.2 vertical columns on the
+      measured Earth, 81.6 on the slab (the decision's 40.8 and 80.5 on the 1976 heights).
+
+  - _R05.T12.e's gate on the measured Earth, the marches as built._
+    - At high's counts every ray holds. Worst e by family: limb 1.88%, high limb 1.30%, high band
+      1.09%, disc 0.55%, near-level 0.41%, band 0.30%, inside 0.27%, sky 0.26%, past 0.19%. The
+      decision's model gave 0.25% or less; the twin's limbs come to 1.9%, under the 2%.
+    - At low's counts one ray is over `LOW_TWIN_WORST`, raised, not widened: "band, 50000 m, view
+      zenith 97.008°, sun 90°/180°", 17.59% against the sky view's twilight 17.5% (1.005 of it).
+      The same ray is 13.13% without the ozone and 14.46% on R05's Earth. The test pins it. Every
+      other family and class holds, at worst 0.91 of its bound (the high sky view's twilight). So
+      "on which the marches hold as built" (the gate's ruling above) holds at high's counts, and at
+      low's but for this ray.
+    - `RECORDED_LAYER_MISS` moved to `EARTH_SLAB_REFERENCE` and reproduces to the 0.01 point; T6.d's
+      both-ways pins now hold only there, and the measured Earth's gate asserts the pass.
+  - _The bound in column_ (`decision-r08-t6d-findings.md` §2.2).
+    - d ln τ ÷ d ln u > 2 occurs, on these tables, only where ozone's blue leaves its clip at
+      T_c = 1: its signed sum stays above 1 to 26.6 vertical columns, so τ rises from 0 there and
+      its exponent falls from infinite to 2 by about 60 columns. No texel reaches the red leap (the
+      slab's deepest is 81.6 columns, the leap's node 94.4).
+    - Such texels: 1,858 of the measured Earth, 1,596 of the slab, 2,504 of the four absorbers,
+      none of R05's, at τ 0.47–43.0. The column of each slot whose own curve is steep there is held
+      to 10⁻³ of itself, at worst 0.21, 0.36 and 0.20 of it. Holding every slot's column fails on
+      the four absorbers (slot 3's 0.01 columns off by 1.4%), whose curve is not the steep one.
+    - Their τ meets max(0.005, 10⁻³ τ) all the same, at worst 0.041, 0.101 and 0.080 of it. So τ
+      is held at every texel as well, not instead, and the column's hold stands in for τ only where
+      a later medium puts τ's bound out of reach. For main: the rule's trigger takes in a curve's
+      clip at 1 as well as its gamut exit.
+    - The kernels' read (`kernelMedium`, every fourth texel) is held on every medium with a
+      tabulated term, the measured Earth's included, which has no edge.
+    - The half float: at every node interval's midpoint of the three ozone curves and the four
+      absorbers' where every channel's exponent is at most 2, 2⁻¹¹ of the column moves τ by at most
+      10⁻³ of itself. An interval rising from 0 counts as infinitely steep.
+  - _The zenith from 2 m_ on R₁, the twin at 4,096 placed steps under R06's Sun, beside T6.d's
+    table (the slab Earth is T6.d's rebuilt Earth, and reproduces its 4,709 and 547.4):
+
+    | Sun zenith | Measured, cd m⁻² | u′v′, measured   | Slab, cd m⁻² | u′v′, slab       | Measured ÷ slab | Δu′v′  |
+    | ---------- | ---------------- | ---------------- | ------------ | ---------------- | --------------- | ------ |
+    | 30°        | 4,706.9          | (0.1871, 0.4360) | 4,708.9      | (0.1871, 0.4360) | 0.9996          | 0.0000 |
+    | 85°        | 551.19           | (0.1811, 0.4274) | 547.44       | (0.1811, 0.4267) | 1.0068          | 0.0007 |
+    | 92°        | 41.334           | (0.1827, 0.4234) | 41.794       | (0.1859, 0.4249) | 0.9890          | 0.0036 |
+    | 94°        | 8.7199           | (0.1766, 0.3968) | 8.6216       | (0.1788, 0.3962) | 1.0114          | 0.0023 |
+    | 96°        | 0.33667          | (0.1731, 0.3796) | 0.31793      | (0.1742, 0.3737) | 1.0589          | 0.0061 |
+
+    The measured ozone's lower third, nearer the ground and in the troposphere, changes the day sky
+    by under 1%; at twilight, where the zenith's light has crossed the layer near grazing, it moves
+    the colour by up to 0.006.
+
+  - _The tests' cost._ Measured alone at two cores under shared load: `tablesCpu.test.ts` 120 s,
+    two full gate runs now; `layerEdges.test.ts` 114 s, four 4,096-step tables and the measured
+    Earth's kernels' read. smart-ci's vitest (114 files, 3,420 tests) took 200 s at 4 workers.
+  - _The smoke._ `just test-render` had not run at the commit: it waited on the heavy-test lock
+    behind integration's priority run and four lanes' heavy runs (smart-ci plans no `test-render`
+    for this change, which touches no kernel, engine or smoke file). Its result and times are in
+    `handoff-r08-tables-h.md` and were reported to main. The smoke draws the measured Earth where
+    it drew T6.d's (R05.T12.c's frames, R08.T6.b's twins, the sunset captures) and adds no check, so
+    no group's cost changes but by the medium's.
+
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7).
   - _The finding._ R05's sky view, aerial volume and ray march store radiance per unit of the

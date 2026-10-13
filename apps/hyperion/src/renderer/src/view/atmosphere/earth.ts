@@ -1,7 +1,8 @@
 /**
  * Earth's reference atmospheres: R08.T6.d's Earth rebuilt (plan R08, R08.T6.d), from R08.T3's
  * column and molecular term, R05's aerosol, R08.T4.b's ozone curve of growth and R08.T4.a's fitted
- * channels, under R06's Sun; R05's constants (plan R05, Design note 16, R05.T12.a), Rayleigh,
+ * channels, under R06's Sun, its ozone Earth's measured profile since R08.T6.h, with T6.d's ozone
+ * slab kept beside it as a test medium of layer edges; R05's constants (plan R05, Design note 16, R05.T12.a), Rayleigh,
  * aerosol and ozone terms at Earth's measured values, each cited, kept as a second medium for
  * comparison; and Hillaire 2020's reference medium beside them for comparison against his
  * published images.
@@ -22,7 +23,14 @@ import { CHANNEL_LUMINANCE, starIlluminance } from "../lighting/illuminance";
 import { frozenHostDisc, sunLikeHostDisc } from "../lighting/hostDisc";
 import type { Rgb } from "../photometry/toneCurve";
 import { AU_M } from "../scenes/kept";
-import { type AbsorberSpec, absorberCurve, absorberSpecs, absorberTerm } from "./absorbers";
+import {
+  type AbsorberLayer,
+  type AbsorberProfileNode,
+  type AbsorberSpec,
+  absorberCurve,
+  absorberSpecs,
+  absorberTerm,
+} from "./absorbers";
 import {
   type AtmosphereColumn,
   dryAdiabatExponent,
@@ -347,38 +355,162 @@ export const EARTH_COLUMN: AtmosphereColumn = hydrostaticColumn({
 export const DOBSON_UNIT_PER_M2 = 2.687e20;
 
 /**
- * The ozone layer's base and top, Pa: 70 and 3 hPa, 18.6–38.5 km on {@link EARTH_COLUMN}, where
- * Earth's measured ozone mostly lies (about 15–35 km; WMO/UNEP 2018, _Twenty Questions_, Q1). Its
- * column-weighted mean height is 24.0 km, beside R05's tent's 25 km (`earth.test.ts`).
+ * The AFGL U.S. Standard ozone (plan R08, R08.T6.h; `decision-r08-t6d-findings.md` §2–§3), as
+ * (pressure, mb; mixing ratio, ppmv) at its 50 levels, 0–120 km: Anderson, Clough, Kneizys,
+ * Chetwynd and Shettle, _AFGL Atmospheric Constituent Profiles (0–120 km)_, AFGL-TR-86-0110 (Air
+ * Force Geophysics Laboratory, 15 May 1986), Table 1f. It follows the U.S. Standard Atmosphere
+ * 1976's mid-latitude ozone model (Krueger and Minzner, J. Geophys. Res. 81(24) (1976) 4477–4481;
+ * NOAA-S/T 76-1562, Table 18, 0.345 atm-cm) to 2% in number density from 2 to 50 km.
+ *
+ * @remarks
+ * Read from the report's Table 1f (DTIC ADA175173), a U.S. Government work, and cited in `NOTICE`;
+ * not taken from a redistribution. The report adapts its ozone from satellite data and does not
+ * itself cite Krueger and Minzner; the agreement above is the science check's (2026-10-13). Its
+ * levels are 1 km apart to 25 km, 2.5 km to 50 km and 5 km to 120 km. The ground's pressure,
+ * printed 1.013E+03 mb to four figures, is the U.S. Standard Atmosphere 1976's sea level,
+ * 1,013.25 mb, so that the profile starts at a datum's pressure.
+ *
+ * The reading was checked when it was transcribed: each printed air density, not committed, is
+ * p ÷ (kT) of its row to 10⁻³, and the ozone column from them is 345.7 DU to 120 km. `earth.test.ts`
+ * checks the rest: each pressure is the 1976 model's at its height to 0.5% but at 32.5 and 37.5 km,
+ * where the report prints 8.010 and 4.150 mb, 3.0% under and 2.7% over the model's 8.258 and
+ * 4.041 mb with its densities alike; and the column on the report's own heights, n = p ÷ (kT) at
+ * the model's T to 85 km, is 345.6 DU, beside the 1976 standard's 0.345 atm-cm (345 DU). The two
+ * pressures are kept as printed, since the report's densities agree with them; libRadtran's
+ * `afglus.dat` takes the 1976 model's there instead, which moves those two nodes by about 0.2 km
+ * and the column by under 0.3 DU. Table 2a, which repeats the profile, prints 7.60 ppmv at 37.5 km
+ * in the scanned copy, against Table 1f's 7.80, which is kept (0.2 DU), as `afglus.dat` has it.
+ */
+export const AFGL_US_STANDARD_OZONE_MB_PPMV: ReadonlyArray<readonly [number, number]> = [
+  [1_013.25, 2.66e-2],
+  [898.8, 2.93e-2],
+  [795.0, 3.24e-2],
+  [701.2, 3.32e-2],
+  [616.6, 3.39e-2],
+  [540.5, 3.77e-2],
+  [472.2, 4.11e-2],
+  [411.1, 5.01e-2],
+  [356.5, 5.97e-2],
+  [308.0, 9.17e-2],
+  [265.0, 1.31e-1],
+  [227.0, 2.15e-1],
+  [194.0, 3.1e-1],
+  [165.8, 3.85e-1],
+  [141.7, 5.03e-1],
+  [121.1, 6.51e-1],
+  [103.5, 8.7e-1],
+  [88.5, 1.19],
+  [75.65, 1.59],
+  [64.67, 2.03],
+  [55.29, 2.58],
+  [47.29, 3.03],
+  [40.47, 3.65],
+  [34.67, 4.17],
+  [29.72, 4.63],
+  [25.49, 5.12],
+  [17.43, 5.8],
+  [11.97, 6.55],
+  [8.01, 7.37],
+  [5.746, 7.84],
+  [4.15, 7.8],
+  [2.871, 7.3],
+  [2.06, 6.2],
+  [1.491, 5.25],
+  [1.09, 4.1],
+  [7.978e-1, 3.1],
+  [4.25e-1, 1.8],
+  [2.19e-1, 1.1],
+  [1.09e-1, 7.0e-1],
+  [5.22e-2, 3.0e-1],
+  [2.4e-2, 2.5e-1],
+  [1.05e-2, 3.0e-1],
+  [4.46e-3, 5.0e-1],
+  [1.84e-3, 7.0e-1],
+  [7.6e-4, 7.0e-1],
+  [3.2e-4, 4.0e-1],
+  [1.45e-4, 2.0e-1],
+  [7.1e-5, 5.0e-2],
+  [4.01e-5, 5.0e-3],
+  [2.54e-5, 5.0e-4],
+];
+
+/**
+ * Earth's measured ozone profile (plan R08, R08.T6.h): {@link AFGL_US_STANDARD_OZONE_MB_PPMV} as an
+ * absorber profile, its pressures in Pa, its mixing ratios in ppmv (relative: the column scales
+ * them). P14.T24.c places the same template on a generated column by its overhead O₂ column.
+ */
+export const EARTH_OZONE_PROFILE: ReadonlyArray<AbsorberProfileNode> =
+  AFGL_US_STANDARD_OZONE_MB_PPMV.map(([pressureMb, mixingRatio]) => ({
+    pressurePa: pressureMb * 100,
+    mixingRatio,
+  }));
+
+/** One absorber layer's spec on {@link EARTH_COLUMN}, which `absorberSpecs` gives alone. */
+function earthAbsorber(layer: AbsorberLayer): AbsorberSpec {
+  const { specs } = absorberSpecs([layer], EARTH_COLUMN);
+  const [spec] = specs;
+  if (specs.length !== 1 || spec === undefined) {
+    throw new Error(`Earth's ${layer.species} is one absorber profile, not ${specs.length}`);
+  }
+  return spec;
+}
+
+/**
+ * Earth's ozone (plan R08, R08.T6.h): {@link OZONE_COLUMN_DU} on {@link EARTH_OZONE_PROFILE}, placed
+ * on {@link EARTH_COLUMN} by pressure from the datum to the column's top, where `absorberSpecs`
+ * clamps the template's 120 km top, x(p) n(p) scaled to the column.
+ *
+ * @remarks
+ * Its number density peaks at 4.35 × 10¹² cm⁻³ near 22 km on the column, and has no layer edge
+ * (`earth.test.ts`; `decision-r08-t6d-findings.md` §3 estimated 4.2 × 10¹² on the 1976 standard's
+ * heights): it is above
+ * 0 at the datum and at the column's top, so `absorberTerm` ramps it nowhere (`layerEdgesM` gives
+ * none), and R05.T12.e's per-frame marches take it as built (`decision-r08-t6d-findings.md` §1). A
+ * grazing ray crosses about 41 of its vertical columns, against about 80 for T6.d's slab
+ * ({@link EARTH_OZONE_SLAB}), so it stays far from where the red curve of growth leaves Rec. 709
+ * under R06's Sun, about 99 (`earth.test.ts`, `layerEdges.test.ts`).
+ */
+export const EARTH_OZONE: AbsorberSpec = earthAbsorber({
+  species: "O3",
+  columnPerM2: OZONE_COLUMN_DU * DOBSON_UNIT_PER_M2,
+  basePa: EARTH_OZONE_PROFILE[0]?.pressurePa ?? Number.NaN,
+  topPa: EARTH_OZONE_PROFILE.at(-1)?.pressurePa ?? Number.NaN,
+  profile: EARTH_OZONE_PROFILE,
+});
+
+/**
+ * T6.d's ozone slab's base and top, Pa (plan R08, R08.T6.d; kept as a test medium by R08.T6.h): 70
+ * and 3 hPa, 18.6–38.5 km on {@link EARTH_COLUMN}. Its column-weighted mean height is 24.0 km.
  *
  * @remarks
  * A layer of constant mixing ratio (`absorbers.ts`'s `absorberSpecs`), its number density the air's
- * times a constant, so densest at its base. A ray tangent to its base crosses about √(2πR ÷ H) ≈ 80
+ * times a constant, so densest at its base, 18.6 km, at 1.32 × 10¹³ cm⁻³, three times the measured
+ * peak, with none of the 31% of the measured column that lies below it, and ramped to 0 over 78 m
+ * there and 10 m at its top: the edges R05.T12.e's per-frame marches miss to first order (limb
+ * 21.3%) and R08.T6.i places its pieces by. A ray tangent to its base crosses about √(2πR ÷ H) ≈ 80
  * of its vertical columns (Chapman's grazing incidence; 81.6 at the transmittance table's deepest
  * texel), under where the red curve of growth leaves its last node above the 10⁻⁶ floor under
  * R06's Sun, 94.4 columns: the red channel leaves Rec. 709 at about 99 columns (29,700 DU), and the
  * read depth climbs from that node to the floor at d ln τ ÷ d ln u = 15, against 4.3 for the
- * spectral curve at 95 columns. A thin slab would not keep under it: galaxy plan 14's "layer near
- * 10–30 mbar" for an oxygen-bearing world's ozone (P14.T24.c) gives rays tangent near its base
- * 95–145 columns, where the table's own 4,096-step value cannot be met
- * to `decision-r08-t6b-floor.md` §9.2's bound, nor the stored column's half-float rounding (plan
- * R08's Risks, "Deviations in T6.d, as built", for "main").
+ * spectral curve at 95 columns. A thinner slab would not keep under it: a "layer near 10–30 mbar"
+ * gives rays tangent near its base 95–145 columns, where the table's own 4,096-step value cannot be
+ * met to `decision-r08-t6b-floor.md` §9.2's bound, nor the stored column's half-float rounding
+ * (`decision-r08-t6d-findings.md` §2–§3).
  */
 export const EARTH_OZONE_LAYER_PA: readonly [number, number] = [7_000, 300];
 
-/** Earth's ozone, {@link OZONE_COLUMN_DU} in {@link EARTH_OZONE_LAYER_PA} on its column. */
-export const EARTH_OZONE: AbsorberSpec = ((): AbsorberSpec => {
-  const [basePa, topPa] = EARTH_OZONE_LAYER_PA;
-  const { specs } = absorberSpecs(
-    [{ species: "O3", columnPerM2: OZONE_COLUMN_DU * DOBSON_UNIT_PER_M2, basePa, topPa }],
-    EARTH_COLUMN,
-  );
-  const [ozone] = specs;
-  if (specs.length !== 1 || ozone === undefined) {
-    throw new Error(`Earth's ozone is one absorber profile, not ${specs.length}`);
-  }
-  return ozone;
-})();
+/**
+ * T6.d's ozone slab, {@link OZONE_COLUMN_DU} of constant mixing ratio in
+ * {@link EARTH_OZONE_LAYER_PA} on {@link EARTH_COLUMN}: a test medium of layer edges (R08.T6.h), for
+ * T6.d's layer-edge test, R08.T6.i's gate and R08.T12.b's `earth-ozone-slab` case. Not Earth's
+ * ozone (`decision-r08-t6d-findings.md` §3).
+ */
+export const EARTH_OZONE_SLAB: AbsorberSpec = earthAbsorber({
+  species: "O3",
+  columnPerM2: OZONE_COLUMN_DU * DOBSON_UNIT_PER_M2,
+  basePa: EARTH_OZONE_LAYER_PA[0],
+  topPa: EARTH_OZONE_LAYER_PA[1],
+});
 
 /** R05's aerosol at {@link CHANNEL_WAVELENGTHS_NM}, the fitted channels. */
 const EARTH_AEROSOL_EXTINCTION_PER_M: Rgb = [
@@ -387,29 +519,42 @@ const EARTH_AEROSOL_EXTINCTION_PER_M: Rgb = [
   aerosolExtinctionPerM(CHANNEL_WAVELENGTHS_NM[2]),
 ];
 
+/** The rebuilt Earth's molecular term, R08.T3.c's of {@link EARTH_DRY_AIR} on its column. */
+const EARTH_MOLECULAR_TERM: MediumTerm = molecularTerm(EARTH_COLUMN, EARTH_DRY_AIR).term;
+
+/** The rebuilt Earth's aerosol: R05's, at {@link CHANNEL_WAVELENGTHS_NM}. */
+const EARTH_AEROSOL_TERM: MediumTerm = {
+  name: "aerosol",
+  density: { kind: "exponential", scaleHeightM: AEROSOL_SCALE_HEIGHT_M },
+  scattering: scaled(EARTH_AEROSOL_EXTINCTION_PER_M, AEROSOL_SINGLE_SCATTERING_ALBEDO),
+  absorption: scaled(EARTH_AEROSOL_EXTINCTION_PER_M, 1 - AEROSOL_SINGLE_SCATTERING_ALBEDO),
+  phase: { kind: "cornette-shanks", asymmetry: AEROSOL_ASYMMETRY },
+};
+
 /**
- * Earth's reference atmosphere, rebuilt (plan R08, R08.T6.d): R08.T3.c's molecular term of
- * {@link EARTH_DRY_AIR} on {@link EARTH_COLUMN} (`rayleigh`, tabulated, with air's depolarisation
- * per channel), R05's continental aerosol, and {@link EARTH_OZONE} as an absorber term
- * (`absorber:O3`), whose absorption is each sun's curve of growth (R08.T4.b), every smooth term at
- * the fitted channels, {@link CHANNEL_WAVELENGTHS_NM}. The top and the ground's albedo are R05's.
- * Its tables are built with {@link EARTH_REFERENCE_CURVES}.
+ * Earth's reference atmosphere, rebuilt (plan R08, R08.T6.d; its ozone measured since R08.T6.h):
+ * R08.T3.c's molecular term of {@link EARTH_DRY_AIR} on {@link EARTH_COLUMN} (`rayleigh`, tabulated,
+ * with air's depolarisation per channel), R05's continental aerosol, and {@link EARTH_OZONE} as an
+ * absorber term (`absorber:O3`), whose absorption is each sun's curve of growth (R08.T4.b), every
+ * smooth term at the fitted channels, {@link CHANNEL_WAVELENGTHS_NM}. The top and the ground's
+ * albedo are R05's. Its tables are built with {@link EARTH_REFERENCE_CURVES}.
  */
 export const EARTH_REFERENCE: AtmosphereMedium = {
   name: "earth",
   topHeightM: EARTH_TOP_HEIGHT_M,
   groundAlbedo: [EARTH_GROUND_ALBEDO, EARTH_GROUND_ALBEDO, EARTH_GROUND_ALBEDO],
-  terms: [
-    molecularTerm(EARTH_COLUMN, EARTH_DRY_AIR).term,
-    {
-      name: "aerosol",
-      density: { kind: "exponential", scaleHeightM: AEROSOL_SCALE_HEIGHT_M },
-      scattering: scaled(EARTH_AEROSOL_EXTINCTION_PER_M, AEROSOL_SINGLE_SCATTERING_ALBEDO),
-      absorption: scaled(EARTH_AEROSOL_EXTINCTION_PER_M, 1 - AEROSOL_SINGLE_SCATTERING_ALBEDO),
-      phase: { kind: "cornette-shanks", asymmetry: AEROSOL_ASYMMETRY },
-    },
-    absorberTerm(EARTH_OZONE, EARTH_COLUMN),
-  ],
+  terms: [EARTH_MOLECULAR_TERM, EARTH_AEROSOL_TERM, absorberTerm(EARTH_OZONE, EARTH_COLUMN)],
+};
+
+/**
+ * T6.d's rebuilt Earth, its ozone {@link EARTH_OZONE_SLAB} (plan R08, R08.T6.h): a test medium of
+ * layer edges, otherwise {@link EARTH_REFERENCE}, term for term. Its tables are built with
+ * {@link EARTH_SLAB_REFERENCE_CURVES}.
+ */
+export const EARTH_SLAB_REFERENCE: AtmosphereMedium = {
+  ...EARTH_REFERENCE,
+  name: "earth (ozone slab)",
+  terms: [EARTH_MOLECULAR_TERM, EARTH_AEROSOL_TERM, absorberTerm(EARTH_OZONE_SLAB, EARTH_COLUMN)],
 };
 
 /**
@@ -484,4 +629,12 @@ export function referenceSunIlluminanceLx(distanceM: number = AU_M): Rgb {
  */
 export const EARTH_REFERENCE_CURVES: AbsorberCurveSlots = [
   [absorberCurve(EARTH_OZONE, R06_SOLAR_BAKE_SPECTRUM)],
+];
+
+/**
+ * {@link EARTH_SLAB_REFERENCE}'s curves of growth: light slot 0 the reference Sun's, of
+ * {@link EARTH_OZONE_SLAB} under {@link R06_SOLAR_BAKE_SPECTRUM}, T6.d's Earth's.
+ */
+export const EARTH_SLAB_REFERENCE_CURVES: AbsorberCurveSlots = [
+  [absorberCurve(EARTH_OZONE_SLAB, R06_SOLAR_BAKE_SPECTRUM)],
 ];

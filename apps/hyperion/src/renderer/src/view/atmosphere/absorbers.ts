@@ -732,19 +732,134 @@ function lnQuadraticInTemperature(table: TemperatureGrid, temperatureK: number):
 }
 
 /**
+ * One node of an absorber's vertical profile (plan R08, R08.T6.h; P14.T24.c as amended,
+ * `decision-r08-t6d-findings.md` §2): a pressure and the species' mixing ratio there, relative, in
+ * any unit, since the layer's column scales it.
+ */
+export interface AbsorberProfileNode {
+  /** p, Pa, finite and above 0. */
+  readonly pressurePa: number;
+  /** The relative mixing ratio, finite and at least 0. */
+  readonly mixingRatio: number;
+}
+
+/**
  * One absorbing species on its layer, as a body's record gives it (decision-composition §1.9 and
- * §2: P14.T24.c's `absorbers[]`, `{ species, column_m2, base_pa, top_pa }`, or a gas of T24.a's
- * fractions that absorbs, such as methane, from the datum to the top).
+ * §2: P14.T24.c's `absorbers[]`, `{ species, column_m2, base_pa, top_pa }`, with ozone's profile
+ * since R08.T6.h, or a gas of T24.a's fractions that absorbs, such as methane, from the datum to the
+ * top).
  */
 export interface AbsorberLayer {
   /** The registry key. */
   readonly species: string;
   /** The species' vertical column, molecules m⁻², at least 0. */
   readonly columnPerM2: number;
-  /** The layer's base, Pa: the mixing ratio is constant from here up to the top, 0 outside. */
+  /**
+   * The layer's base, Pa: without a profile, the mixing ratio is constant from here up to the top,
+   * and 0 outside.
+   */
   readonly basePa: number;
   /** The layer's top, Pa, below the base; 0 or less than the column's top for no top. */
   readonly topPa: number;
+  /**
+   * The mixing ratio's shape through the layer (R08.T6.h): at least two nodes, their pressures
+   * descending from {@link AbsorberLayer.basePa} at the first to {@link AbsorberLayer.topPa} at the
+   * last, read by {@link profileMixingRatio}. Absent, the mixing ratio is constant.
+   */
+  readonly profile?: ReadonlyArray<AbsorberProfileNode>;
+}
+
+/**
+ * An absorber profile's mixing ratio at a pressure (plan R08, R08.T6.h; P14.T24.c as amended):
+ * linear in ln x against ln p between the nodes about it, linear in x where either node's is 0, and
+ * 0 outside the first and last nodes.
+ *
+ * @remarks
+ * Between two nodes the mixing ratio goes as a power of pressure, so exponentially in height on an
+ * isothermal stretch of column, which suits a profile spanning decades (Earth's ozone spans four,
+ * `earth.ts`'s `EARTH_OZONE_PROFILE`); a node of 0, where the log fails, takes the linear rule. The
+ * profile is assumed checked ({@link absorberSpecs}).
+ *
+ * @param profile - Nodes whose pressures descend.
+ */
+export function profileMixingRatio(
+  profile: ReadonlyArray<AbsorberProfileNode>,
+  pressurePa: number,
+): number {
+  const first = profile[0];
+  const last = profile.at(-1);
+  if (
+    first === undefined ||
+    last === undefined ||
+    !(pressurePa <= first.pressurePa && pressurePa >= last.pressurePa)
+  ) {
+    return 0;
+  }
+  let i = 0;
+  while (i < profile.length - 2 && (profile[i + 1]?.pressurePa ?? Number.NaN) > pressurePa) {
+    i += 1;
+  }
+  const a = profile[i] ?? first;
+  const b = profile[i + 1] ?? last;
+  if (pressurePa === a.pressurePa) {
+    return a.mixingRatio;
+  }
+  if (pressurePa === b.pressurePa) {
+    return b.mixingRatio;
+  }
+  const t = Math.log(a.pressurePa / pressurePa) / Math.log(a.pressurePa / b.pressurePa);
+  return a.mixingRatio > 0 && b.mixingRatio > 0
+    ? Math.exp(Math.log(a.mixingRatio) + t * Math.log(b.mixingRatio / a.mixingRatio))
+    : a.mixingRatio + t * (b.mixingRatio - a.mixingRatio);
+}
+
+/**
+ * A layer's profile checked against the layer: at least two nodes, finite, their pressures
+ * descending from its base to its top, their mixing ratios at least 0 and some above 0.
+ *
+ * @throws RangeError for a profile that breaks any of these.
+ */
+function checkProfile(layer: AbsorberLayer): void {
+  const { profile, species } = layer;
+  if (profile === undefined) {
+    return;
+  }
+  if (profile.length < 2) {
+    throw new RangeError(
+      `absorber ${species}'s profile has at least two nodes, not ${profile.length}`,
+    );
+  }
+  for (const [i, { pressurePa, mixingRatio }] of profile.entries()) {
+    const above = i === 0 ? Number.POSITIVE_INFINITY : (profile[i - 1]?.pressurePa ?? Number.NaN);
+    if (!(Number.isFinite(pressurePa) && pressurePa > 0 && pressurePa < above)) {
+      throw new RangeError(
+        `absorber ${species}'s profile descends in pressure, finite and above 0: ${pressurePa} Pa at node ${i}`,
+      );
+    }
+    if (!(Number.isFinite(mixingRatio) && mixingRatio >= 0)) {
+      throw new RangeError(
+        `absorber ${species}'s profile's mixing ratio is finite and at least 0: ${mixingRatio} at node ${i}`,
+      );
+    }
+  }
+  if (profile[0]?.pressurePa !== layer.basePa || profile.at(-1)?.pressurePa !== layer.topPa) {
+    throw new RangeError(
+      `absorber ${species}'s profile runs from its base, ${layer.basePa} Pa, to its top, ${layer.topPa} Pa`,
+    );
+  }
+  if (!profile.some(({ mixingRatio }) => mixingRatio > 0)) {
+    throw new RangeError(`absorber ${species}'s profile has a mixing ratio above 0`);
+  }
+}
+
+/**
+ * A key equal for two profiles exactly when they are equal node for node, or both absent: each
+ * number's shortest round-trip form, which tells every two doubles apart.
+ */
+function profileKey(profile: ReadonlyArray<AbsorberProfileNode> | undefined): string {
+  return profile === undefined
+    ? "constant"
+    : profile.map(({ pressurePa, mixingRatio }) => `${pressurePa}/${mixingRatio}`).join(",");
 }
 
 /** One species of an absorber spec. */
@@ -774,6 +889,11 @@ export interface ColumnAbsorberSpec {
   readonly basePa: number;
   /** The layer's top on its column, Pa. */
   readonly topPa: number;
+  /**
+   * Its species' shared mixing-ratio profile (R08.T6.h), as their layers give it, read only between
+   * {@link ColumnAbsorberSpec.basePa} and {@link ColumnAbsorberSpec.topPa}; absent, constant.
+   */
+  readonly profile?: ReadonlyArray<AbsorberProfileNode>;
   /** The temperature the cross-sections are taken at, K: the layer's column-weighted mean. */
   readonly temperatureK: number;
 }
@@ -987,12 +1107,28 @@ function atPressure(
   return { heightM: z0 + (z1 - z0) * t, temperatureK: k0 + (k1 - k0) * t };
 }
 
-/** A layer between two pressures, clamped to the column, laid on the column's levels. */
-function layerOnColumn(column: AtmosphereColumn, basePa: number, topPa: number): LayerOnColumn {
+/**
+ * A layer between two pressures, clamped to the column, laid on the column's levels: its relative
+ * density the column's, times the profile's mixing ratio at each level's pressure where it has one
+ * (R08.T6.h).
+ *
+ * @remarks
+ * A profile is read at the column's levels alone, 0.0157 apart in ln p (`column.ts`'s
+ * `COLUMN_INTERVALS`), a tenth of the AFGL template's 1 km spacing in the stratosphere, so that its
+ * nodes' kinks fall between levels and are taken linearly there.
+ */
+function layerOnColumn(
+  column: AtmosphereColumn,
+  basePa: number,
+  topPa: number,
+  profile?: ReadonlyArray<AbsorberProfileNode>,
+): LayerOnColumn {
+  const mixing = (pressurePa: number): number =>
+    profile === undefined ? 1 : profileMixingRatio(profile, pressurePa);
   const base = atPressure(column, basePa);
   const top = atPressure(column, topPa);
   const altitudesM = [base.heightM];
-  const relative = [densityAt(column.density, base.heightM)];
+  const relative = [densityAt(column.density, base.heightM) * mixing(basePa)];
   const temperaturesK = [base.temperatureK];
   let belowM: number | undefined;
   let aboveM: number | undefined;
@@ -1001,14 +1137,16 @@ function layerOnColumn(column: AtmosphereColumn, basePa: number, topPa: number):
       belowM = h;
     } else if (h > base.heightM && h < top.heightM) {
       altitudesM.push(h);
-      relative.push(column.density.relative[i] ?? Number.NaN);
+      relative.push(
+        (column.density.relative[i] ?? Number.NaN) * mixing(column.pressuresPa[i] ?? Number.NaN),
+      );
       temperaturesK.push(column.temperaturesK[i] ?? Number.NaN);
     } else if (h > top.heightM && aboveM === undefined) {
       aboveM = h;
     }
   }
   altitudesM.push(top.heightM);
-  relative.push(densityAt(column.density, top.heightM));
+  relative.push(densityAt(column.density, top.heightM) * mixing(topPa));
   temperaturesK.push(top.temperatureK);
   return {
     baseM: base.heightM,
@@ -1094,9 +1232,11 @@ function formablePairs(
  * layers form (R08.T4.c).
  *
  * @remarks
- * Layers merge when their base and top, clamped to the column's datum and top, are equal: their
- * mixing ratios are then constant in the same air, so σ_mix = Σ xᵢσᵢ, xᵢ = Uᵢ ÷ U, is exact for
- * every path. A layer of column 0 has nothing to draw and is left out. A spec's temperature is the
+ * Layers merge when their base and top, clamped to the column's datum and top, are equal, and
+ * their profiles too (R08.T6.h), node for node or both constant: their mixing ratios are then in a
+ * constant ratio in the same air, so σ_mix = Σ xᵢσᵢ, xᵢ = Uᵢ ÷ U, is exact for every path. A layer
+ * with a profile is laid on the column as x(p) n(p) between its base and top, clamped; its nodes
+ * outside the column are not read. A layer of column 0 has nothing to draw and is left out. A spec's temperature is the
  * layer's column-weighted mean, ∫ n T dz ÷ ∫ n dz, which gives the vertical column's mean σ exactly
  * where σ is linear in T (ozone) and nearly so for methane's Eq. 8; a slant path through part of
  * the layer reads the same σ, a stated approximation. A species `absorbers/transparency.ts` states
@@ -1110,7 +1250,8 @@ function formablePairs(
  * overlaps are equal, and their spec takes the overlap's pair-weighted mean temperature,
  * ∫ ρ² T dz ÷ ∫ ρ² dz. A pair profile takes a stored
  * column as a column profile does, and is ranked with them; it comes after the later listed of
- * its members.
+ * its members. A member whose layer carries a profile forms no pair (R08.T6.h): no pair the client
+ * forms has such a member today, ozone's being the one profile the record carries.
  *
  * Past {@link ABSORBER_COLUMNS} profiles, the five of greatest optical depth are kept
  * ({@link absorberRankingDepth}; `decision-r08-cmf-licence.md` §2). Equal depths keep the earlier
@@ -1125,7 +1266,9 @@ function formablePairs(
  * @param tables - The cross-sections to take; the committed ones unless a test gives its own.
  * @param pairTables - The pairs' cross-sections to take, likewise.
  * @throws RangeError for a species listed twice, a column that is not finite and at least 0, a
- *   layer whose base does not lie below its top, or a layer outside its column.
+ *   layer whose base does not lie below its top, a layer outside its column, or a profile that
+ *   does not descend from the layer's base to its top in finite nodes of mixing ratio at least 0,
+ *   or whose mixing ratio is 0 throughout the column.
  */
 export function absorberSpecs(
   layers: ReadonlyArray<AbsorberLayer>,
@@ -1137,7 +1280,13 @@ export function absorberSpecs(
   const listed = new Map<string, ListedLayer>();
   const profiles = new Map<
     string,
-    { basePa: number; topPa: number; order: number; layers: AbsorberLayer[] }
+    {
+      readonly basePa: number;
+      readonly topPa: number;
+      readonly profile: ReadonlyArray<AbsorberProfileNode> | undefined;
+      readonly order: number;
+      readonly layers: AbsorberLayer[];
+    }
   >();
   for (const [index, layer] of layers.entries()) {
     if (seen.has(layer.species)) {
@@ -1149,22 +1298,31 @@ export function absorberSpecs(
         `absorber ${layer.species}'s column is finite and at least 0, not ${layer.columnPerM2} m⁻²`,
       );
     }
+    checkProfile(layer);
     const clamped = clampedLayer(column, layer.basePa, layer.topPa);
     if (layer.columnPerM2 === 0) {
       continue;
     }
+    const onColumn = layerOnColumn(column, clamped.basePa, clamped.topPa, layer.profile);
+    if (!(layerIntegralM(onColumn, 1) > 0)) {
+      throw new RangeError(
+        `absorber ${layer.species}'s profile has a mixing ratio above 0 within its column`,
+      );
+    }
     listed.set(layer.species, { index, layer, ...clamped });
     if (
       !tables.some((t) => t.species === layer.species) &&
-      isTransparent(
-        layer.species,
-        layerTemperatureK(layerOnColumn(column, clamped.basePa, clamped.topPa), 1),
-      )
+      isTransparent(layer.species, layerTemperatureK(onColumn, 1))
     ) {
       continue;
     }
-    const key = `${clamped.basePa}:${clamped.topPa}`;
-    const profile = profiles.get(key) ?? { ...clamped, order: index, layers: [] };
+    const key = `${clamped.basePa}:${clamped.topPa}:${profileKey(layer.profile)}`;
+    const profile = profiles.get(key) ?? {
+      ...clamped,
+      profile: layer.profile,
+      order: index,
+      layers: [],
+    };
     profile.layers.push(layer);
     profiles.set(key, profile);
   }
@@ -1204,13 +1362,17 @@ function columnProfile(
   profile: {
     readonly basePa: number;
     readonly topPa: number;
+    readonly profile: ReadonlyArray<AbsorberProfileNode> | undefined;
     readonly order: number;
     readonly layers: ReadonlyArray<AbsorberLayer>;
   },
   column: AtmosphereColumn,
   tables: ReadonlyArray<CrossSectionTable>,
 ): BuiltProfile {
-  const temperatureK = layerTemperatureK(layerOnColumn(column, profile.basePa, profile.topPa), 1);
+  const temperatureK = layerTemperatureK(
+    layerOnColumn(column, profile.basePa, profile.topPa, profile.profile),
+    1,
+  );
   const species = profile.layers.map((layer): AbsorberSpecies => ({
     species: layer.species,
     columnPerM2: layer.columnPerM2,
@@ -1224,6 +1386,7 @@ function columnProfile(
         columnPerM2: species.reduce((sum, s) => sum + s.columnPerM2, 0),
         basePa: profile.basePa,
         topPa: profile.topPa,
+        ...(profile.profile === undefined ? {} : { profile: profile.profile }),
         temperatureK,
       }
     : undefined;
@@ -1258,7 +1421,14 @@ function pairProfiles(
   for (const { pair, members } of formablePairs(pairTables)) {
     const a = listed.get(members[0]);
     const b = listed.get(members[1]);
-    if (a === undefined || b === undefined) {
+    // A member with a profile forms no pair (R08.T6.h): its density is no constant multiple of the
+    // column's, so the pair's would be no constant multiple of n² over the overlap.
+    if (
+      a === undefined ||
+      b === undefined ||
+      a.layer.profile !== undefined ||
+      b.layer.profile !== undefined
+    ) {
       continue;
     }
     const basePa = Math.min(a.basePa, b.basePa);
@@ -1357,16 +1527,18 @@ export function absorberRankingDepth(spec: AbsorberSpec): number {
 /**
  * A layer's density on its column, ρᵖ of the column's relative density (p = 1 for a species, 2
  * for a pair) from its base to its top, with a level at each edge, and 0 at the column's next level
- * outside each edge, which the `tabulated` rule ramps to over that one interval.
+ * outside each edge, which the `tabulated` rule ramps to over that one interval; a species' times
+ * its profile's mixing ratio where it has one (R08.T6.h).
  */
 function layerDensity(
   column: AtmosphereColumn,
   basePa: number,
   topPa: number,
   power: 1 | 2,
+  profile?: ReadonlyArray<AbsorberProfileNode>,
 ): TabulatedDensity {
   const clamped = clampedLayer(column, basePa, topPa);
-  const layer = layerOnColumn(column, clamped.basePa, clamped.topPa);
+  const layer = layerOnColumn(column, clamped.basePa, clamped.topPa, profile);
   const altitudes = [...layer.altitudesM];
   const relative = layer.relative.map((rho) => rho ** power);
   if (layer.belowM !== undefined) {
@@ -1387,8 +1559,11 @@ function layerDensity(
  * @remarks
  * A column spec's density is the column's relative density from the layer's base to its top, with a
  * level at each edge, and 0 at the column's next level outside each edge, which the `tabulated`
- * rule ramps to over that one interval. Its number density at relative density 1 is U ÷ ∫ ρ dz, so
- * that the vertical column is the spec's whatever the ramps hold. A pair spec's (R08.T4.c) is the
+ * rule ramps to over that one interval; with a profile (R08.T6.h), x(p) times it, x the profile's
+ * mixing ratio at each level's pressure ({@link profileMixingRatio}), so that a profile that is
+ * above 0 at the datum and the column's top has no ramp and no layer edge. Its number density at
+ * relative density 1 is U ÷ ∫ ρ dz, so that the vertical column is the spec's whatever the ramps
+ * and the profile hold. A pair spec's (R08.T4.c) is the
  * square of the column's relative density over its overlap, ramped alike, and its pair density at
  * relative density 1, n_A n_B there, is U ÷ ∫ ρ² dz, so that u = n ∫ ρ² ds along any path is its
  * pair column. Scattering and `absorption` are 0 and the phase `none`: the term's absorption is
@@ -1412,7 +1587,7 @@ export function absorberTerm(absorber: AbsorberSpec, column: AtmosphereColumn): 
   let term: MediumTerm;
   switch (absorber.kind) {
     case "column": {
-      const density = layerDensity(column, absorber.basePa, absorber.topPa, 1);
+      const density = layerDensity(column, absorber.basePa, absorber.topPa, 1, absorber.profile);
       const lengthM = columnLengthM(density, column.topHeightM);
       term = {
         ...common,
@@ -1448,13 +1623,14 @@ export const THOMSON_CROSS_SECTION_M2 = 6.652_458_7321e-29;
  * cross-section has.
  *
  * @remarks
- * The density is the layer's, as {@link absorberTerm} lays a column spec's, and the electrons'
+ * The density is the layer's, its profile's too where it has one, as {@link absorberTerm} lays a
+ * column spec's, and the electrons'
  * number density at relative density 1 is U ÷ ∫ ρ dz. The term is named `thomson`. R08.T10.a builds
  * it from the record's e⁻ (`decision-r08-t4b-t12c.md`, follow-up 2), whose `rayleigh` flag stays
  * false: this term is its scattering.
  *
- * @throws RangeError for a layer that is not e⁻'s, whose column is not finite and above 0, or that
- *   lies outside the column.
+ * @throws RangeError for a layer that is not e⁻'s, whose column is not finite and above 0, that
+ *   lies outside the column, or whose profile is not one {@link absorberSpecs} accepts.
  */
 export function thomsonTerm(electrons: AbsorberLayer, column: AtmosphereColumn): MediumTerm {
   if (electrons.species !== "e-") {
@@ -1465,8 +1641,13 @@ export function thomsonTerm(electrons: AbsorberLayer, column: AtmosphereColumn):
       `the electrons' column is finite and above 0, not ${electrons.columnPerM2} m⁻²`,
     );
   }
-  const density = layerDensity(column, electrons.basePa, electrons.topPa, 1);
-  const numberDensityPerM3 = electrons.columnPerM2 / columnLengthM(density, column.topHeightM);
+  checkProfile(electrons);
+  const density = layerDensity(column, electrons.basePa, electrons.topPa, 1, electrons.profile);
+  const lengthM = columnLengthM(density, column.topHeightM);
+  if (!(lengthM > 0)) {
+    throw new RangeError(`e-'s profile has a mixing ratio above 0 within its column`);
+  }
+  const numberDensityPerM3 = electrons.columnPerM2 / lengthM;
   const scattering = numberDensityPerM3 * THOMSON_CROSS_SECTION_M2;
   return {
     name: "thomson",

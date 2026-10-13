@@ -48,6 +48,8 @@ import { hydrostaticColumn } from "./column";
 import {
   EARTH_REFERENCE,
   EARTH_REFERENCE_CURVES,
+  EARTH_SLAB_REFERENCE,
+  EARTH_SLAB_REFERENCE_CURVES,
   R05_EARTH_REFERENCE,
   referenceSunIlluminanceLx,
 } from "./earth";
@@ -1587,16 +1589,51 @@ describe("the multiple-scattering table's 1 − f_ms, accumulated (decision-r08-
   });
 });
 
-// --- R08.T6.d: R05.T12.e's quadrature gate on the rebuilt Earth ----------------------------------
+// --- R08.T6.h: R05.T12.e's quadrature gate on the measured Earth and on the slab Earth -----------
+
+describe("R05.T12.e's quadrature gate on the measured Earth, the marches as built (R08.T6.h)", () => {
+  let gate: Gate = { results: [], lMax: new Map() };
+
+  beforeAll(() => {
+    const sources = tableSources(planetTwin(EARTH_REFERENCE, BOTTOM_M, EARTH_REFERENCE_CURVES));
+    gate = runGate(gateRays(), twinPixel(EARTH_REFERENCE, sources), [HIGH, LOW]);
+  }, 600_000);
+
+  it("has a reference of 2,048, 4,096 or 8,192 placed steps within 0.05% of twice its steps", () => {
+    const unconverged = gate.results
+      .map(({ ray, reference, confirm }) => ({
+        ray,
+        e: errorOf(reference, confirm, gate.lMax.get(kernelOf(ray)) ?? [0, 0, 0]),
+      }))
+      .filter(({ e }) => !(e < CONVERGED));
+    expect(describeFailures(unconverged)).toEqual([]);
+  });
+
+  it("holds every ray within 2%, and twilight rays within 5%, at high's counts", () => {
+    expect(describeFailures(failures(gate, HIGH))).toEqual([]);
+  });
+
+  // One twilight ray of the sky view from 50 km stands 0.09 point over `LOW_TWIN_WORST`'s 17.5% at
+  // low's 16 steps (R08.T6.h, 2026-10-13; recorded and raised with "main", not widened), against
+  // 13.13% without the ozone and 14.46% on R05's Earth, under its ozone tent. Pinned, so that a
+  // cure or a worsening shows; every other ray, family and class holds.
+  it("keeps low's counts within the bounds low's GPU agreement check holds them to, but one ray", () => {
+    expect(describeFailures(overLowBounds(gate, LOW))).toEqual([
+      "band, 50000 m, view zenith 97.008°, sun 90°/180°: 17.59%",
+    ]);
+  });
+});
 
 /**
- * The miss R05.T12.e's gate records on the rebuilt Earth (R08.T6.d; plan R08's Risks, "Deviations
- * in T6.d, as built"; raised with "main", not widened): the worst e of each family, in percent,
- * at high's counts and at low's, as measured on 2026-10-12. The marches' placed steps
- * under-resolve the ozone layer, which is densest at its base and ramps to 0 over 78 m there and
- * 10 m at its top, where their absorber columns cross it (`decision-r08-t6b-floor.md` §9.2); the
- * same layer absorbing linearly misses alike, and the Earth without its ozone holds. Pinned both
- * ways, to 0.01 point, so that a change to the miss is seen, a cure as well as a worsening.
+ * The miss R05.T12.e's gate records on T6.d's slab Earth (R08.T6.d, on `EARTH_REFERENCE` until
+ * R08.T6.h gave Earth its measured ozone and kept the slab as `EARTH_SLAB_REFERENCE`; plan R08's
+ * Risks, "Deviations in T6.d, as built"; raised with "main", not widened): the worst e of each
+ * family, in percent, at high's counts and at low's, as measured on 2026-10-12. The marches' placed
+ * steps under-resolve the ozone layer, which is densest at its base and ramps to 0 over 78 m there
+ * and 10 m at its top, where their absorber columns cross it (`decision-r08-t6b-floor.md` §9.2);
+ * the same layer absorbing linearly misses alike, and the Earth without its ozone holds. Pinned
+ * both ways, to 0.01 point, so that a change to the miss is seen, a cure as well as a worsening:
+ * R08.T6.i's pieces are to cure it, and remove this record.
  */
 const RECORDED_LAYER_MISS: Readonly<
   Record<string, { readonly high: number; readonly low: number }>
@@ -1633,16 +1670,18 @@ function offRecord(gate: Gate, scheme: typeof HIGH, level: "high" | "low"): stri
   );
 }
 
-describe("R05.T12.e's quadrature gate on the rebuilt Earth, its ozone a layer (R08.T6.d)", () => {
+describe("R05.T12.e's quadrature gate on the slab Earth, its ozone a layer (R08.T6.d)", () => {
   let gate: Gate = { results: [], lMax: new Map() };
   let withoutOzone: Gate = { results: [], lMax: new Map() };
 
   beforeAll(() => {
-    const sources = tableSources(planetTwin(EARTH_REFERENCE, BOTTOM_M, EARTH_REFERENCE_CURVES));
-    gate = runGate(gateRays(), twinPixel(EARTH_REFERENCE, sources), [HIGH, LOW]);
+    const sources = tableSources(
+      planetTwin(EARTH_SLAB_REFERENCE, BOTTOM_M, EARTH_SLAB_REFERENCE_CURVES),
+    );
+    gate = runGate(gateRays(), twinPixel(EARTH_SLAB_REFERENCE, sources), [HIGH, LOW]);
     const clear = {
-      ...EARTH_REFERENCE,
-      terms: EARTH_REFERENCE.terms.filter((term) => term.absorber === undefined),
+      ...EARTH_SLAB_REFERENCE,
+      terms: EARTH_SLAB_REFERENCE.terms.filter((term) => term.absorber === undefined),
     };
     // The rays the layer's miss reaches, at high's counts or low's bounds, run again without it.
     const missed = new Set(

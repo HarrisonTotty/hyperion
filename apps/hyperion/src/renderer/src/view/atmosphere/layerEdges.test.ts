@@ -1,10 +1,13 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { fourAbsorberMedium } from "../../test/atmosphereFixtures";
+import type { AbsorberCurve } from "./absorbers";
 import {
   EARTH_COLUMN,
   EARTH_REFERENCE,
   EARTH_REFERENCE_CURVES,
+  EARTH_SLAB_REFERENCE,
+  EARTH_SLAB_REFERENCE_CURVES,
   R05_EARTH_REFERENCE,
   WGS84_LEVEL_SPHEROID,
 } from "./earth";
@@ -51,13 +54,23 @@ const R1 = tableRadiusM(WGS84_LEVEL_SPHEROID);
 /** The steps of the table's own converged value (`decision-r08-t6b-floor.md` §9.2). */
 const CONVERGED_STEPS = 4_096;
 
+/**
+ * The greatest ozone column a transmittance texel's ray crosses on the measured Earth and on the
+ * slab Earth, in vertical columns (R08.T6.h), as measured on 2026-10-13.
+ */
+const MEASURED_GREATEST_COLUMNS = 41.2;
+const SLAB_GREATEST_COLUMNS = 81.6;
+
 /** The bound in optical depth the table is held to: max(0.005, 10⁻³ τ) (§9.2). */
 function bound(tau: number): number {
   return Math.max(0.005, 1e-3 * tau);
 }
 
-/** The ozone of the rebuilt Earth, a layer between 70 and 3 hPa (`earth.ts`). */
-const OZONE = termNamed(EARTH_REFERENCE, "absorber:O3");
+/**
+ * T6.d's ozone slab, a layer between 70 and 3 hPa (`earth.ts`'s `EARTH_OZONE_SLAB`), the test
+ * medium of layer edges since R08.T6.h gave Earth its measured ozone, which has none.
+ */
+const OZONE = termNamed(EARTH_SLAB_REFERENCE, "absorber:O3");
 
 /** A term's tabulated density. */
 function tabulated(term: MediumTerm): TabulatedDensity {
@@ -108,22 +121,102 @@ interface Worst {
   readonly at: string;
 }
 
-function worstAgainst(table: TwinTransmittance, converged: TwinTransmittance): Worst {
-  let worst: Worst = { ratio: 0, at: "none" };
+/** A texel's stored columns, u ÷ U a slot: slot 0's in alpha, slots 1–4's in the second table. */
+function storedColumns(tables: TwinTransmittance, x: number, y: number): ReadonlyArray<number> {
+  const at = (y * tables.transmittance.widthTexels + x) * 4;
+  return [
+    tables.transmittance.texels[at + 3] ?? 0,
+    ...[0, 1, 2, 3].map((k) => tables.absorberColumns.texels[at + k] ?? 0),
+  ];
+}
+
+/** The growth exponent past which the bound is held in column, not in τ: 2, τ ∝ u². */
+const STEEPEST_IN_DEPTH = 2;
+
+/**
+ * The largest d ln τ ÷ d ln u of a curve's channels between the nodes about a column u ÷ U, from
+ * node to node (`decision-r08-t6d-findings.md` §2.2): 1 in a channel's linear regime, falling as
+ * its band saturates; 15 in the red curve's leap where it leaves Rec. 709 under R06's Sun; and
+ * infinite where a channel leaves its clip at T_c = 1, its τ rising from 0, as ozone's blue does
+ * past about 27 vertical columns, its signed sum above 1 until then. A channel at 0 at both nodes
+ * does not rise.
+ */
+function growthExponent(curve: AbsorberCurve, relativeColumn: number): number {
+  const { logColumns } = curve;
+  const nodes = logColumns.length;
+  const logU = 0.5 * ((logColumns[0] ?? Number.NaN) + (logColumns[nodes - 1] ?? Number.NaN));
+  const at = Math.log(relativeColumn) + logU;
+  let j = 0;
+  while (j < nodes - 2 && (logColumns[j + 1] ?? Number.NaN) <= at) {
+    j += 1;
+  }
+  const dx = (logColumns[j + 1] ?? Number.NaN) - (logColumns[j] ?? Number.NaN);
+  return Math.max(
+    ...curve.opticalDepth.map((depth) => {
+      const from = depth[j] ?? Number.NaN;
+      const to = depth[j + 1] ?? Number.NaN;
+      if (!(to > 0)) {
+        return 0;
+      }
+      return from > 0 ? Math.log(to / from) / dx : Number.POSITIVE_INFINITY;
+    }),
+  );
+}
+
+/**
+ * A table's texels held to their converged values (`decision-r08-t6d-findings.md` §2.2): every
+ * texel in optical depth, and the column of each slot whose curve rises faster than u² about it.
+ */
+interface Held {
+  /** The worst texel in optical depth, as a fraction of max(0.005, 10⁻³ τ). */
+  readonly depth: Worst;
+  /** The worst column, as a fraction of 10⁻³ of itself, of a slot whose curve rises faster. */
+  readonly column: Worst;
+}
+
+function heldAgainst(table: TwinTransmittance, converged: TwinTransmittance): Held {
+  let depth: Worst = { ratio: 0, at: "none" };
+  let column: Worst = { ratio: 0, at: "none" };
+  const curves = converged.curves[0] ?? [];
   const { widthTexels: w, heightTexels: h } = TRANSMITTANCE_SIZE;
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
+      const columns = storedColumns(converged, x, y);
+      const steepSlots = curves.flatMap((curve, k) =>
+        (columns[k] ?? 0) > 0 && growthExponent(curve, columns[k] ?? 0) > STEEPEST_IN_DEPTH
+          ? [k]
+          : [],
+      );
+      if (steepSlots.length > 0) {
+        const stored = storedColumns(table, x, y);
+        for (const k of steepSlots) {
+          const u = columns[k] ?? 0;
+          const ratio = Math.abs((stored[k] ?? 0) - u) / (1e-3 * u);
+          if (!(ratio <= column.ratio)) {
+            column = { ratio, at: `(${x}, ${y}) slot ${k}: u ÷ U ${u}` };
+          }
+        }
+      }
       const a = readDepth(table, x, y);
       const b = readDepth(converged, x, y);
       for (const c of [0, 1, 2] as const) {
         const ratio = Math.abs(a[c] - b[c]) / bound(b[c]);
-        if (!(ratio <= worst.ratio)) {
-          worst = { ratio, at: `(${x}, ${y}) c${c}: τ ${b[c]}, off by ${Math.abs(a[c] - b[c])}` };
+        if (!(ratio <= depth.ratio)) {
+          depth = { ratio, at: `(${x}, ${y}) c${c}: τ ${b[c]}, off by ${Math.abs(a[c] - b[c])}` };
         }
       }
     }
   }
-  return worst;
+  return { depth, column };
+}
+
+/** A table's greatest stored column of absorber slot 0 over its texels, u ÷ U. */
+function greatestColumn(table: TwinTransmittance): number {
+  let greatest = 0;
+  for (let i = 3; i < table.transmittance.texels.length; i += 4) {
+    greatest = Math.max(greatest, table.transmittance.texels[i] ?? 0);
+  }
+  return greatest;
 }
 
 /** The (r, μ) of transmittance texel (x, y), Bruneton's mapping on R₁. */
@@ -200,7 +293,7 @@ describe("a term's layer edges", () => {
 
   it("widen outward to a resampled table's levels, so that its whole ramp lies between them", () => {
     const original = layerEdgesM(OZONE.density);
-    const top = EARTH_REFERENCE.topHeightM;
+    const top = EARTH_SLAB_REFERENCE.topHeightM;
     const resampled = resampledDensity(tabulated(OZONE), top);
     const edges = resampled.edgesM ?? [];
     const levels = [...densityTableLevelsM(top)];
@@ -222,9 +315,11 @@ describe("a term's layer edges", () => {
 
   it("travel to the transmittance kernel as the kernels' tables read them, −1 where unused", () => {
     expect([...packLayerEdges(R05_EARTH_REFERENCE)]).toEqual(Array(4 * MAX_TERMS).fill(-1));
-    const packed = [...packLayerEdges(EARTH_REFERENCE)];
-    const ozone = EARTH_REFERENCE.terms.indexOf(OZONE);
-    const read = kernelMedium(EARTH_REFERENCE).terms[ozone];
+    // Earth's measured ozone has none (R08.T6.h).
+    expect([...packLayerEdges(EARTH_REFERENCE)]).toEqual(Array(4 * MAX_TERMS).fill(-1));
+    const packed = [...packLayerEdges(EARTH_SLAB_REFERENCE)];
+    const ozone = EARTH_SLAB_REFERENCE.terms.indexOf(OZONE);
+    const read = kernelMedium(EARTH_SLAB_REFERENCE).terms[ozone];
     expect(read).toBeDefined();
     expect(packed.slice(4 * ozone, 4 * ozone + 4)).toEqual(
       layerEdgesM(read?.density ?? OZONE.density).map(Math.fround),
@@ -234,7 +329,7 @@ describe("a term's layer edges", () => {
 
   it("are refused past the kernels' terms, as the terms are", () => {
     const tooMany = {
-      ...EARTH_REFERENCE,
+      ...EARTH_SLAB_REFERENCE,
       terms: Array.from({ length: MAX_TERMS + 1 }, () => OZONE),
     };
     expect(() => packLayerEdges(tooMany)).toThrow(`at most ${MAX_TERMS} fit`);
@@ -249,7 +344,7 @@ describe("a term's layer edges", () => {
 });
 
 describe("a transmittance ray split at its layer edges", () => {
-  const shell = { bottomRadiusM: R1, topRadiusM: R1 + EARTH_REFERENCE.topHeightM };
+  const shell = { bottomRadiusM: R1, topRadiusM: R1 + EARTH_SLAB_REFERENCE.topHeightM };
   const edges = layerEdgesM(OZONE.density);
 
   it("crosses an edge's sphere where the ray stands at that height, from heights alone", () => {
@@ -316,10 +411,16 @@ describe("the transmittance table against its own 4,096-step value (decision-r08
     readonly curves: AbsorberCurveSlots;
   }> = [
     { name: "the four-absorber fixture", medium: four.medium, curves: four.curves },
-    { name: "the rebuilt Earth", medium: EARTH_REFERENCE, curves: EARTH_REFERENCE_CURVES },
+    { name: "the measured Earth", medium: EARTH_REFERENCE, curves: EARTH_REFERENCE_CURVES },
+    {
+      name: "the ozone-slab Earth",
+      medium: EARTH_SLAB_REFERENCE,
+      curves: EARTH_SLAB_REFERENCE_CURVES,
+    },
     { name: "R05's Earth", medium: R05_EARTH_REFERENCE, curves: NO_ABSORBER_CURVES },
   ];
-  const worst = new Map<string, Worst>();
+  const held = new Map<string, Held>();
+  const greatest = new Map<string, number>();
 
   beforeAll(() => {
     for (const { name, medium, curves } of cases) {
@@ -331,25 +432,55 @@ describe("the transmittance table against its own 4,096-step value (decision-r08
         TRANSMITTANCE_SIZE,
         CONVERGED_STEPS,
       );
-      worst.set(name, worstAgainst(table, converged));
+      held.set(name, heldAgainst(table, converged));
+      greatest.set(name, greatestColumn(converged));
     }
   }, 900_000);
 
   it.each(cases.map(({ name }) => [name]))(
     "holds every texel of %s within max(0.005, 10⁻³ τ), curves included",
     (name) => {
-      const found = worst.get(name);
+      const found = held.get(name)?.depth;
       expect(found).toBeDefined();
       // The worst texel, named where it is over the bound.
       expect((found?.ratio ?? Number.POSITIVE_INFINITY) <= 1 ? "within" : found?.at).toBe("within");
     },
   );
 
+  // Where some curve rises faster than u² between the nodes about a texel's column, the bound is
+  // held in that column, to 10⁻³ of itself, and τ is recorded (`decision-r08-t6d-findings.md`
+  // §2.2), which lets the column stand in for τ where a curve's slope puts τ's bound out of reach.
+  // These tables need no such stand-in, so τ is held at every texel all the same (above). No texel
+  // reaches the red leap (the slab's deepest is 81.6 columns, the leap's node 94.4); every such
+  // texel is where ozone's blue leaves its clip at T_c = 1, its τ rising from 0 past 26.6 vertical
+  // columns, d ln τ ÷ d ln u above 2 to about 60. Measured on 2026-10-13 (R08.T6.h): 2,504 texels of
+  // the four absorbers, 1,858 of the measured Earth, 1,596 of the slab Earth and none of R05's, at
+  // τ 0.47–43.0; their τ within max(0.005, 10⁻³ τ) at worst 0.080, 0.041 and 0.101 of it, and
+  // their columns within 0.20, 0.21 and 0.36 of 10⁻³.
+  it.each(cases.map(({ name }) => [name]))(
+    "holds %s's column to 10⁻³ of itself wherever its curve rises faster than u² about it",
+    (name) => {
+      const found = held.get(name)?.column;
+      expect((found?.ratio ?? Number.POSITIVE_INFINITY) <= 1 ? "within" : found?.at).toBe("within");
+    },
+  );
+
+  it("records the greatest ozone column on a texel's ray: about 41 vertical columns, against 80", () => {
+    // `decision-r08-t6d-findings.md` §2.1 estimated 40.8 and 80.5 on the 1976 standard's heights;
+    // the red curve leaves Rec. 709 at about 99 under R06's Sun.
+    expect([
+      Number((greatest.get("the measured Earth") ?? Number.NaN).toFixed(1)),
+      Number((greatest.get("the ozone-slab Earth") ?? Number.NaN).toFixed(1)),
+    ]).toEqual([MEASURED_GREATEST_COLUMNS, SLAB_GREATEST_COLUMNS]);
+  });
+
   // The table the kernels build reads the medium resampled (`kernelMedium`), its ramps spread over
   // the density table's levels within the edges `resampledDensity` widens to them: held at every
   // fourth texel of each axis, which costs a sixteenth of the whole table. R05's Earth has no
-  // tabulated density to resample.
-  const layered = cases.filter(({ medium }) => packLayerEdges(medium).some((h) => h !== -1));
+  // tabulated density to resample; the measured Earth's are resampled though they carry no edge.
+  const layered = cases.filter(({ medium }) =>
+    medium.terms.some((term) => term.density.kind === "tabulated"),
+  );
   it.each(layered.map(({ name, medium, curves }) => [name, medium, curves] as const))(
     "holds %s as the kernels read it within the bound at every fourth texel",
     (_name, medium, curves) => {
@@ -388,5 +519,39 @@ describe("the transmittance table against its own 4,096-step value (decision-r08
     expect(before).toBeGreaterThan(0.04);
     expect(before).toBeGreaterThan(bound(converged));
     expect(after).toBeLessThan(bound(converged));
+  });
+});
+
+describe("the stored column's half-float rounding under the curves (decision-r08-t6d-findings.md §2.2)", () => {
+  const four = fourAbsorberMedium();
+  const curves: ReadonlyArray<readonly [string, AbsorberCurve]> = [
+    ...(EARTH_REFERENCE_CURVES[0] ?? []).map((c) => ["the measured Earth's ozone", c] as const),
+    ...(EARTH_SLAB_REFERENCE_CURVES[0] ?? []).map((c) => ["the slab's ozone", c] as const),
+    ...(four.curves[0] ?? []).map((c, k) => [`the four absorbers' slot ${k}`, c] as const),
+  ];
+
+  // rgba16float rounds a stored column to 2⁻¹¹ of itself; where d ln τ ÷ d ln u ≤ 2 that moves τ
+  // by at most 2 × 2⁻¹¹ < 10⁻³ of itself, so the bound in τ is reachable there.
+  it("moves τ by at most 10⁻³ of itself wherever every channel of a curve rises at most as u²", () => {
+    const over: string[] = [];
+    for (const [name, curve] of curves) {
+      const { logColumns } = curve;
+      const logU = 0.5 * ((logColumns[0] ?? Number.NaN) + (logColumns.at(-1) ?? Number.NaN));
+      for (let j = 0; j + 1 < logColumns.length; j += 1) {
+        const mid = 0.5 * ((logColumns[j] ?? Number.NaN) + (logColumns[j + 1] ?? Number.NaN));
+        const u = Math.exp(mid - logU);
+        if (growthExponent(curve, u) > STEEPEST_IN_DEPTH) {
+          continue;
+        }
+        const at = curveOpticalDepth(curve, u);
+        const rounded = curveOpticalDepth(curve, u * (1 + 2 ** -11));
+        for (const c of [0, 1, 2] as const) {
+          if (!(Math.abs(rounded[c] - at[c]) <= 1e-3 * at[c])) {
+            over.push(`${name} c${c} at u ÷ U ${u.toPrecision(4)}`);
+          }
+        }
+      }
+    }
+    expect(over).toEqual([]);
   });
 });

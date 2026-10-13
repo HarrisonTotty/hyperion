@@ -25,6 +25,7 @@ import {
   type AbsorberLayer,
   absorberOptics,
   type AbsorberOptics,
+  type AbsorberProfileNode,
   absorberRankingDepth,
   type AbsorberSpec,
   absorberSpecs,
@@ -39,6 +40,7 @@ import {
   type PairAbsorberSpec,
   pairCrossSectionAt,
   type PairCrossSectionsFile,
+  profileMixingRatio,
   readCrossSections,
   readPairCrossSections,
   scaledAmount,
@@ -58,6 +60,7 @@ import {
   columnLengthM,
   densityAt,
   extinction,
+  layerEdgesM,
 } from "./medium";
 import { type BakeSpectrum, bakeSpectrumOf, deltaUv } from "./spectralColour";
 import { packMedium } from "./tables";
@@ -2128,5 +2131,196 @@ describe("reading a file's pairs", () => {
     expect(() =>
       readPairCrossSections({ pairs: [...TOY_PAIRS.pairs, ...TOY_PAIRS.pairs] }),
     ).toThrow(/listed twice/u);
+  });
+});
+
+// --- An absorber's profile (plan R08, R08.T6.h) -------------------------------------------------
+
+/** A three-node profile, 3 ppm at 20 kPa, 12 at 2 kPa and 3 at 200 Pa. */
+const TENT_PROFILE: ReadonlyArray<AbsorberProfileNode> = [
+  { pressurePa: 20_000, mixingRatio: 3 },
+  { pressurePa: 2_000, mixingRatio: 12 },
+  { pressurePa: 200, mixingRatio: 3 },
+];
+
+/** A layer of `species` on {@link TENT_PROFILE}. */
+function onTent(species: string, columnPerM2: number): AbsorberLayer {
+  return { species, columnPerM2, basePa: 20_000, topPa: 200, profile: TENT_PROFILE };
+}
+
+describe("an absorber's profile (R08.T6.h)", () => {
+  it("is linear in ln x against ln p between its nodes, and its nodes' own at them", () => {
+    // Midway in ln p between 20 and 2 kPa: the geometric mean of 3 and 12.
+    expect(profileMixingRatio(TENT_PROFILE, Math.sqrt(20_000 * 2_000))).toBeCloseTo(6, 12);
+    expect(TENT_PROFILE.map((n) => profileMixingRatio(TENT_PROFILE, n.pressurePa))).toEqual([
+      3, 12, 3,
+    ]);
+  });
+
+  it("is linear in x where either node's is 0, and 0 outside its first and last nodes", () => {
+    const toZero: ReadonlyArray<AbsorberProfileNode> = [
+      { pressurePa: 1_000, mixingRatio: 4 },
+      { pressurePa: 10, mixingRatio: 0 },
+    ];
+    expect(profileMixingRatio(toZero, 100)).toBeCloseTo(2, 12);
+    expect([profileMixingRatio(toZero, 1_001), profileMixingRatio(toZero, 9.99)]).toEqual([0, 0]);
+  });
+
+  it("lays x(p) n(p) on the column, scaled to the layer's column, with no ramp inside it", () => {
+    const [spec] = absorberSpecs([onTent("O3", 8e22)], EARTH_COLUMN).specs;
+    if (spec?.kind !== "column") {
+      throw new Error("the profile gave no column spec");
+    }
+    expect(spec.profile).toBe(TENT_PROFILE);
+    const term = absorberTerm(spec, EARTH_COLUMN);
+    const n = term.absorber?.kind === "column" ? term.absorber.numberDensityPerM3 : Number.NaN;
+    expect(n * columnLengthM(term.density, EARTH_COLUMN.topHeightM)).toBeCloseTo(8e22, -10);
+    // Every level inside the layer stands in one ratio to x(p) n(p): the layer's own number density.
+    const ratios = [120, 200, 280, 380].map((i) => {
+      const h = EARTH_COLUMN.altitudesM[i] ?? Number.NaN;
+      const p = EARTH_COLUMN.pressuresPa[i] ?? Number.NaN;
+      expect(p < 20_000 && p > 200).toBe(true);
+      return (
+        densityAt(term.density, h) /
+        (densityAt(EARTH_COLUMN.density, h) * profileMixingRatio(TENT_PROFILE, p))
+      );
+    });
+    for (const ratio of ratios) {
+      expect(ratio / (ratios[0] ?? Number.NaN)).toBeCloseTo(1, 12);
+    }
+  });
+
+  it("takes its cross-sections at the profile's column-weighted temperature", () => {
+    const [flat] = absorberSpecs(
+      [{ species: "O3", columnPerM2: 8e22, basePa: 20_000, topPa: 200 }],
+      EARTH_COLUMN,
+    ).specs;
+    const [shaped] = absorberSpecs([onTent("O3", 8e22)], EARTH_COLUMN).specs;
+    // The tent weighs the skin above the tropopause more than the slab's densest air below it.
+    expect(shaped?.temperatureK).toBeLessThan(flat?.temperatureK ?? Number.NaN);
+    expect(shaped?.temperatureK).toBeGreaterThan(214.4);
+  });
+
+  it("merges species into one spec only where their profiles are equal", () => {
+    const tables = flatTables(["A", "B", "C"]);
+    const same = absorberSpecs([onTent("A", 1e22), onTent("B", 2e22)], EARTH_COLUMN, tables);
+    expect(same.specs.map((s) => s.name)).toEqual(["absorber:A+B"]);
+    const other = absorberSpecs(
+      [
+        onTent("A", 1e22),
+        { ...onTent("B", 2e22), profile: TENT_PROFILE.map((n) => ({ ...n })) },
+        { species: "C", columnPerM2: 1e22, basePa: 20_000, topPa: 200 },
+      ],
+      EARTH_COLUMN,
+      tables,
+    );
+    // A copy node for node is the same profile; a constant layer of the same base and top is not.
+    expect(other.specs.map((s) => s.name)).toEqual(["absorber:A+B", "absorber:C"]);
+    const scaled = absorberSpecs(
+      [
+        onTent("A", 1e22),
+        {
+          ...onTent("B", 2e22),
+          profile: TENT_PROFILE.map(({ pressurePa }) => ({ pressurePa, mixingRatio: 2 })),
+        },
+      ],
+      EARTH_COLUMN,
+      tables,
+    );
+    expect(scaled.specs.map((s) => s.name)).toEqual(["absorber:A", "absorber:B"]);
+  });
+
+  it("forms no pair from a member with a profile", () => {
+    const oxygen = wellMixed("O2", EARTH_OXYGEN_FRACTION, EARTH_COLUMN);
+    const shaped: AbsorberLayer = {
+      ...oxygen,
+      basePa: EARTH_COLUMN.pressuresPa[0] ?? Number.NaN,
+      topPa: TOP_PA,
+      profile: [
+        { pressurePa: EARTH_COLUMN.pressuresPa[0] ?? Number.NaN, mixingRatio: 1 },
+        { pressurePa: TOP_PA, mixingRatio: 1 },
+      ],
+    };
+    expect(pairSpecs(absorberSpecs([oxygen], EARTH_COLUMN).specs)).toHaveLength(1);
+    expect(pairSpecs(absorberSpecs([shaped], EARTH_COLUMN).specs)).toEqual([]);
+  });
+
+  it("gives Thomson scattering its layer's profile", () => {
+    const electrons = onTent("e-", 1e15);
+    const term = thomsonTerm(electrons, EARTH_COLUMN);
+    expect(layerEdgesM(term.density)).toHaveLength(4);
+    const n = term.scattering[0] / THOMSON_CROSS_SECTION_M2;
+    expect(n * columnLengthM(term.density, EARTH_COLUMN.topHeightM)).toBeCloseTo(1e15, 0);
+  });
+
+  it("refuses Thomson scattering on a profile absorberSpecs refuses", () => {
+    const ascending: AbsorberLayer = {
+      ...onTent("e-", 1e15),
+      profile: TENT_PROFILE.toReversed(),
+    };
+    expect(() => thomsonTerm(ascending, EARTH_COLUMN)).toThrow(RangeError);
+    const aloft: AbsorberLayer = {
+      species: "e-",
+      columnPerM2: 1e15,
+      basePa: 1e6,
+      topPa: 1e-6,
+      profile: [
+        { pressurePa: 1e6, mixingRatio: 0 },
+        { pressurePa: TOP_PA / 10, mixingRatio: 0 },
+        { pressurePa: 1e-6, mixingRatio: 1 },
+      ],
+    };
+    expect(() => thomsonTerm(aloft, EARTH_COLUMN)).toThrow(/within its column/u);
+  });
+
+  it.each([
+    ["one node", [{ pressurePa: 20_000, mixingRatio: 1 }]],
+    [
+      "pressures ascending",
+      [
+        { pressurePa: 200, mixingRatio: 1 },
+        { pressurePa: 20_000, mixingRatio: 1 },
+      ],
+    ],
+    [
+      "a negative mixing ratio",
+      [
+        { pressurePa: 20_000, mixingRatio: 1 },
+        { pressurePa: 200, mixingRatio: -1 },
+      ],
+    ],
+    [
+      "a top not the layer's",
+      [
+        { pressurePa: 20_000, mixingRatio: 1 },
+        { pressurePa: 300, mixingRatio: 1 },
+      ],
+    ],
+    [
+      "nothing above 0",
+      [
+        { pressurePa: 20_000, mixingRatio: 0 },
+        { pressurePa: 200, mixingRatio: 0 },
+      ],
+    ],
+  ])("refuses a profile with %s", (_, profile: AbsorberProfileNode[]) => {
+    expect(() => absorberSpecs([{ ...onTent("O3", 1e22), profile }], EARTH_COLUMN)).toThrow(
+      RangeError,
+    );
+  });
+
+  it("refuses a profile whose mixing ratio is 0 throughout the column", () => {
+    const aloft: AbsorberLayer = {
+      species: "O3",
+      columnPerM2: 1e22,
+      basePa: 1e6,
+      topPa: 1e-6,
+      profile: [
+        { pressurePa: 1e6, mixingRatio: 0 },
+        { pressurePa: TOP_PA / 10, mixingRatio: 0 },
+        { pressurePa: 1e-6, mixingRatio: 1 },
+      ],
+    };
+    expect(() => absorberSpecs([aloft], EARTH_COLUMN)).toThrow(/within its column/u);
   });
 });

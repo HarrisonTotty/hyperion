@@ -559,7 +559,8 @@ export function columnLengthM(profile: DensityProfile, topM: number): number {
  * @remarks
  * `absorbers.ts`'s `absorberTerm` ramps a layer to 0 over at most one interval of its column, where
  * the density's slope jumps twice: about 115 m on the four-absorber fixture's 250 K column, and 78 m
- * at the base and 10 m at the top of the rebuilt Earth's ozone (`earth.ts`). On a ray whose equal steps are longer than the ramp,
+ * at the base and 10 m at the top of T6.d's ozone slab (`earth.ts`'s `EARTH_OZONE_SLAB`; Earth's
+ * measured ozone, R08.T6.h, has none). On a ray whose equal steps are longer than the ramp,
  * the midpoint rule sees it as a step of the density, and errs to first order in the step: R08.T6.c
  * measured 4.1% of a grazing ray's transmittance. Split there, the ramp is a piece of its own, on
  * which the midpoint rule is exact, and every other piece is smooth.

@@ -429,7 +429,7 @@ function shellCrossings(
   return [Math.min(q, other), Math.max(q, other)];
 }
 
-/** The layer edges the check takes, m: the rebuilt Earth's ozone's four and two more. */
+/** The layer edges the check takes, m: T6.d's ozone slab's four (`EARTH_OZONE_SLAB`) and two more. */
 const EDGES_M = [15_000, 18_596, 18_674, 38_491, 38_501, 60_000] as const;
 
 /** The zenith cosines about the ray tangent to an edge's sphere from a height, and every 0.05. */
@@ -500,7 +500,7 @@ describe.each(SPHERES_M)(
   (radiusM) => {
     const report = crossingReport(radiusM);
 
-    // The rebuilt Earth's narrowest ramp is 10 m, its ozone's top (`earth.ts`): the split's own
+    // The ozone slab's narrowest ramp is 10 m, at its top (`earth.ts`'s `EARTH_OZONE_SLAB`): the split's own
     // error, measured 0.012–0.017 m on these spheres, is a few hundredths of a metre in height.
     it("puts every crossing ahead within 0.05 m of its edge in height, and misses only grazes", () => {
       expect(report.crossings).toBeGreaterThan(2_500);
