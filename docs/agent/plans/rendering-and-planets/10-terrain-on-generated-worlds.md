@@ -1542,6 +1542,466 @@ client is built to the drafts, as the galaxy plans' slice was. Files: a draft se
 entry, not the guide. Acceptance: the drafts are written and **the owner signs off**, after which
 the guide edit is made as the owner directs.
 
+#### The drafts, for the owner
+
+_Drafted for the owner (lane 5, 2026-10-13); not signed off._ Each draft gives its wording for the
+guide, where it goes, and the guide rows it extends or excepts, by section heading and line in
+`docs/frontend/ux-guidelines.md` as it stands at `be8f8a6f`. Each ends in its own marker. The guide
+is not edited here: once the owner signs a draft off, it is applied as the owner directs, and T11
+and T12 are built to it. The drafts extend R02's item 1 (Views), item 3 (outlines for symbology),
+item 5 (scale without a scale bar) and item 7 (limited detail). They also fill item 2's honesty
+rule, whose "survey coverage" Draft 4 supplies. Every string proposed here passes the console-ux
+skill's glyph and lint scripts ("Checks", below). Over a surveyed plain, a label block would show
+them as below, the substance as `substanceName` names it today (Draft 5), and the contour line in
+the wireframe style alone:
+
+```text
+SURVEY COVERAGE  12.4 % · FINEST 2.0 m
+DATUM            REFERENCE SPHERE 6371.0 km · SEA LEVEL -2.4 m
+CONTOUR INTERVAL 200 m · INDEX 1 km
+GROUND AT LINE OF SIGHT
+ELEVATION        ~2140 m ± 180 m
+SLOPE            ~12° ± 4° · 2 m BASELINE
+SLANT RANGE      ~41.2 km ± 0.3 km
+MATERIAL         REGOLITH · UNLISTED MATERIAL
+RESOLUTION       410 m
+```
+
+- **Draft 1. `±`, one standard deviation of an Estimated value** (a nomenclature row).
+  - _Row._ `±`, kind `Notation`: "After an Estimated value, its uncertainty: one standard
+    deviation of it, the unit written on both numbers and a space either side of the sign,
+    `~2140 m ± 180 m`. The figure after `±` is a standard deviation and not a confidence interval;
+    it is never to be read as a 68 % interval, a tolerance or a limit, and never as LE90 or a 95 %
+    figure. It stands only with the `~`, and both go when the value is resolved. The spaces in the
+    reading are no-break, U+00A0, so that it never breaks across a line. Both numbers are rounded
+    as the Estimated value's exception gives. `σ` is never shown, nor `≈` or `Δ`, since neither
+    B612 face has them; `±`, from Latin-1, is in both."
+  - _Sources._ The form is NIST SP 811 (2008) §7.7, "Clarity in writing values of quantities":
+    "63.2 m ± 0.1 m or (63.2 ± 0.1) m but not: 63.2 ± 0.1 m or 63.2 m ± 0.1". SP 811 does not say
+    what the figure after `±` means. The meaning, and the caveat the row states, are the GUM's
+    (JCGM 100:2008 §7.2.2, item 4): "where the number following the symbol ± is the numerical value
+    of (the combined standard uncertainty) uc and not a confidence interval". Its NOTE adds that
+    "The ± format should be avoided whenever possible", since it "may be confused with expanded
+    uncertainty". The console keeps `±` because B612 has no `σ`. The GUM's concise form,
+    `2140(18) m`, would set parentheses, which the guide keeps for a symbol's subscript and a
+    formula's group (lines 141, 213–216, 752–754). The nomenclature list defines the figure once,
+    as §7.2.2 allows ("if uc is defined elsewhere in the document"). The figure is a 1σ RMS, not
+    LE90, by Design note 6; and since the unresolved heights are not Gaussian, a 68 % reading would
+    be wrong too. The uncertainty is a quantity of its own, not the far end of a span (line
+    227–229), so it carries its own unit.
+  - _Glyphs._ `glyphs.py "± σ ≈ Δ"`, run 2026-10-13 in this worktree (exit 1, for the three
+    missing):
+
+    ```text
+    char  code     B612   Mono   name
+    ±     U+00B1   yes    yes    PLUS-MINUS SIGN
+    σ     U+03C3   no     no     GREEK SMALL LETTER SIGMA
+    ≈     U+2248   no     no     ALMOST EQUAL TO
+    Δ     U+0394   no     no     GREEK CAPITAL LETTER DELTA
+    ```
+
+  - _Goes in_ the nomenclature list (from line 776), before the readout names of Draft 3.
+  - _Extends_ "Data states", the Estimated row (line 347, "Prefixed with `~`"), which gains its
+    uncertainty; "Numbers, units and time", line 187–188 (a unit on every value, with a space) and
+    line 227–229 (a span takes one unit; an uncertainty is no span); "Typography", lines 127–137
+    (`±` among Latin-1's signs; Greek letters, `≈` and `∆` among what neither face holds).
+  - _Drafted for the owner (plan R10, R10.T13, draft 1): the owner signs off._
+
+- **Draft 2. The Estimated value rounded to its uncertainty** (an exception).
+  - _Wording,_ after "The same quantity uses the same unit and precision everywhere on the ship":
+    "The one exception is an Estimated value stated with its uncertainty (`±`). It is rounded to
+    the uncertainty, not to the quantity's precision, so that it shows no digit the measurement
+    does not hold. The uncertainty's three leading digits decide: 100 to 354 keep two significant
+    figures, 355 to 949 keep one, and 950 to 999 round up to 1000 and keep two. The value is
+    rounded to the same decimal place: `~2140 m ± 180 m`, `~2100 m ± 500 m`, `~2100 m ± 1000 m`.
+    Neither number is shown finer than the quantity's own precision. An uncertainty that would
+    round below one step of it is shown as one step: `~2143.7 m ± 0.1 m`, at an elevation's 0.1 m.
+    The field keeps its fixed width, sized for the longest Estimated form with its `~`, sign,
+    digits, `±` and uncertainty. The reading stands right-aligned in it, so that the value does not
+    move as the survey resolves it. Once resolved, the value takes the quantity's own precision,
+    and the `~` and the `± …` go."
+  - _Source._ The rule is the Particle Data Group's (Review of Particle Physics 2024, Introduction,
+    §5.3 "Rounding"; Design note 6): "if the three highest order digits of the error lie between
+    100 and 354, we round to two significant digits. If they lie between 355 and 949, we round to
+    one significant digit. Finally, if they lie between 950 and 999, we round up to 1000 and keep
+    two significant digits. In all cases, the central value is given with a precision that matches
+    that of the error." The floor of one step is this draft's own.
+  - _Goes in_ "Numbers, units and time", as the bullet after line 217–218.
+  - _Excepts_ "Numbers, units and time", line 217–218 ("The same quantity uses the same unit and
+    precision everywhere on the ship"). _Keeps_ line 238 ("A field has a fixed width sized for its
+    longest possible value and its status marks") and "Typography", line 183 (numbers
+    right-aligned).
+  - _Drafted for the owner (plan R10, R10.T13, draft 2): the owner signs off._
+
+- **Draft 3. The readout names.**
+  - _The vertical distances._ The names follow ICAO's distinction of three vertical distances. It
+    is ICAO Doc 4444, PANS-ATM, 16th edition (2016), Chapter 1, "Definitions", which carries all
+    three; Annex 2, 10th edition (2005), Chapter 1, defines altitude and height but not elevation.
+    The definitions are as follows.
+    - An altitude is "The vertical distance of a level, a point or an object considered as a
+      point, measured from mean sea level (MSL)."
+    - An elevation is "The vertical distance of a point or a level, on or affixed to the surface of
+      the earth, measured from mean sea level."
+    - A height is "The vertical distance of a level, a point or an object considered as a point,
+      measured from a specified datum."
+
+    A body has a stated `DATUM` and often no sea. So the ground's distance above the datum is its
+    `ELEVATION`: ICAO's elevation, with the datum in place of mean sea level. Planetary cartography
+    measures the same way. The IAU's working group uses a reference surface "for measuring
+    geometric height (elevation)" (Archinal et al. 2018, Celest. Mech. Dyn. Astron. 130:22, §7).
+    LRO LOLA's gridded topography reads "HEIGHT, i.e. elevation in meters" above a reference sphere
+    (`LDEM_4.LBL`). A craft's or camera's distance above the ground, or above the datum, is a
+    height (`HEIGHT ABOVE SITE`, line 976). No reading here is an altitude, which ICAO keeps for
+    mean sea level.
+
+  - _The point._ A view's terrain readout reads the ground where the view's line of sight first
+    meets it. It reads no pointer cursor, since nothing may depend on hover. The camera's own keys
+    and drag move the point, and `PREVIOUS TARGET` and `NEXT TARGET` aim it. On the label block,
+    the readings stand under the heading `GROUND AT LINE OF SIGHT`, in the order `ELEVATION`,
+    `SLOPE`, `SLANT RANGE`, `MATERIAL` (Draft 5) and `RESOLUTION` (Draft 4), at the guide's 4 Hz.
+  - _Rows_ (kind `Label`, but `GRAZING`, `NOT SURVEYED` and `NO GROUND`, which are kind `Status`):
+    - `GROUND AT LINE OF SIGHT`: the heading of a view's terrain readout. It reads the ground where
+      the view's line of sight first meets it. Stated while the view's `FRAME` is a body's and the
+      body has a surface.
+    - `ELEVATION`: the ground's height above the body's `DATUM`, along its normal, at that point.
+      It is in metres at every value, to 0.1 m, with `-` below the datum and no `+` above it, as a
+      map's elevations are (`2143.7 m`, `-410.0 m`). It is Estimated, with its uncertainty, until a
+      close survey resolves the point (`~2140 m ± 180 m`). Spelled out: `ELV` is a spatial display
+      camera's elevation, an angle, and `ELEV` would be a second abbreviation of one word. Never
+      `ALTITUDE` or `HEIGHT`, which ICAO gives to other distances; `HEIGHT` is also the `GALACTIC`
+      frame's +z reading.
+    - `SLOPE`: the ground's slope at that point over a stated baseline. It is the adirectional
+      slope that tilts a lander: the gradient's magnitude from central differences along local
+      east and north (Design note 7). In whole degrees, with its baseline after a middle dot:
+      `SLOPE 7° · 2 m BASELINE`. While the point is not resolved, it is the RMS slope, Estimated,
+      with its uncertainty: `SLOPE ~12° ± 4° · 2 m BASELINE`.
+    - `BASELINE`: the horizontal distance a `SLOPE` is taken over: `2 m` by default (the band limit
+      and a pad's scale), `5 m` or `100 m` (Design note 7). Also the readout's selector of it, a
+      display control.
+    - `SLANT RANGE`: the distance from the camera, along its line of sight, to the ground it first
+      meets. It is in `m` below 1 km, then in `km` and `Mm` as a view's ranges are, to three
+      figures, with hysteresis (`SLANT RANGE 412 m`). It is Estimated, with its uncertainty, while
+      the survey has not resolved the ground there (`~41.2 km ± 0.3 km`), or carries `GRAZING` in
+      the uncertainty's place. It is measured from the camera, so whenever the camera is off the
+      hull it reads `SLANT RANGE FROM CAMERA`. Never `RANGE`: the chart's curve labels take it for
+      the drive range, and a view's list heads its own column with it. Nor `DIST`.
+    - `GRAZING`: after a `SLANT RANGE` and a middle dot, where the line of sight meets the ground so
+      obliquely that relief finer than the survey could stand in front of the point. That is where
+      the grazing angle's sine is under twice the unresolved slope's standard deviation over the
+      survey's cell (Design note 7). The range is Estimated and stands without an uncertainty,
+      since the true range may be shorter by more than one: `SLANT RANGE ~41.2 km · GRAZING`.
+      Never on a resolved range.
+    - `DATUM`: the surface every terrain height on a view is measured from, along its normal. It is
+      the body's rotational spheroid, with its equatorial and polar radii to 0.1 km and the unit on
+      both (`DATUM REFERENCE SPHEROID 6378.1 km × 6356.8 km`). Until the body's flattening is sent
+      it is a sphere, with its radius (`DATUM REFERENCE SPHERE 6371.0 km`). It is stated once, on
+      the label block, in either style, while the readout stands. On a world with a sea it is
+      followed, after a middle dot, by its `SEA LEVEL`, a height above the datum in `ELEVATION`'s
+      form (`· SEA LEVEL -2.4 m`).
+    - `NOT SURVEYED`: where the ground at the point has not been surveyed, `NOT SURVEYED` stands
+      once in place of the readout's readings, under its heading. It is steady, in `--text`, as
+      `NOT RESOLVED` stands in place of a section the granted detail withholds. Never "unknown" or
+      "no data". The view draws no terrain and no contours there, and the body's reference surface
+      stands in its place (Draft 6).
+    - `NO GROUND`: where the line of sight meets no ground within the readout's reach, `NO GROUND`
+      stands once in place of the readings, as `NO LIGHT` does for a lightless object.
+  - _Amends_ "Data states", "Limited detail is an annunciation" (lines 375–377). Its "since the
+    view's readouts come from the server" becomes "since the view's readouts come from the server's
+    data and the height function, not from pixels", as the brainstorm's item 7 has it: these
+    readouts are computed in the client's worker from the server's field.
+  - _Goes in_ the nomenclature list, after `FROM CAMERA` (line 935).
+  - _Extends:_
+    - the `ELV` row (line 784), which these leave as it is;
+    - `DRIVE RANGE` (line 796) and `FROM CAMERA` (line 935, "where there is no own ship to measure
+      from"). The second gains a slant range, always measured from the camera;
+    - `NO BODIES`, `NO SYSTEMS IN MAP`, `NO LIGHT` (line 1012), and `GALACTIC` (line 1017,
+      whose `HEIGHT` these do not reuse);
+    - "Data states": the Missing row (line 345), the Estimated row (line 347), the section states
+      (lines 379–399) and staleness (lines 351–352);
+    - "Numbers, units and time": lines 225–226 (units scaled with hysteresis), 230–236 (`-` always,
+      `+` only where direction matters), 237 (digits grouped from five) and 239 (angles in degrees);
+    - "Controls and commanding": lines 477–480 (the keyboard; nothing on hover alone);
+    - "Motion and sound": lines 707–709 (readouts at about 4 Hz);
+    - "Voice and nomenclature": line 729–730 (an abbreviation only from the list) and line 765 (a
+      reading of parts joined by `·`).
+  - _Leaves_ the descent spike's `SITE HEIGHT` (line 977) as R05 has it, although by this
+    distinction it is an elevation (a question below).
+  - _Drafted for the owner (plan R10, R10.T13, draft 3): the owner signs off._
+
+- **Draft 4. The survey line.**
+  - _Wording,_ a bullet of "Views": "While a view's `FRAME` is a body's and the body has a
+    surface, its label block carries the ship's survey of that body, as the star chart carries its
+    census line: `SURVEY COVERAGE 12.4 % · FINEST 2.0 m`.
+    - `COVERAGE` is the share of the body's surface surveyed. It is in per cent to three
+      significant figures, in E notation below 0.001 % (`2.00E-5 %`). From 99.95 % until the whole
+      body is surveyed it is `ABOVE 99.9 %`, and only then `100 %`. Where no cell is surveyed it is
+      `NONE`, with no `FINEST` part, since none is a value: `SURVEY COVERAGE NONE`.
+    - `FINEST` is the finest resolution surveyed anywhere on the body. It is a length to two
+      significant figures, in `m` below 1 km and in `km` above, with hysteresis.
+    - Until the body's survey first arrives the line reads `SURVEY COVERAGE: PENDING`. Where this
+      generator version computes no surface for the body, it reads
+      `SURVEY COVERAGE: NOT YET MODELLED`.
+    - On loss of the link its values go stale, in `--text-muted` with one trailing `S`.
+    - `DECORATION ON`, where it stands, follows it.
+    - The survey's resolution at the line of sight sets every reading's uncertainty, so it stands
+      with those readings, in `FINEST`'s form, as `RESOLUTION 410 m` under
+      `GROUND AT LINE OF SIGHT`."
+  - _Rows._
+    - `SURVEY COVERAGE`, kind `Label`: the share of a body's surface the ship has surveyed, on a
+      view's label block, with its `FINEST` after a middle dot.
+    - `FINEST`, kind `Label`: after `SURVEY COVERAGE` alone, the finest survey resolution held
+      anywhere on the body. A literal word, where "best" would be a judgement.
+    - `RESOLUTION`, kind `Label`: in a view's terrain readout, the survey's resolution at the
+      point it reads, or `NOT SURVEYED`.
+  - _Goes in_ "Graphs, schematics and spatial displays", "Views", after the star limit's bullet
+    (lines 611–627); the rows after `DECORATION ON` (line 934).
+  - _Extends_ "Colour", "The rendered image is data" (lines 92–104). Its `DECORATION ON` stands
+    "beside its survey coverage", which this line is. It also extends:
+    - the `DECORATION ON` row (line 934);
+    - "Views", lines 611–627 (the label block's notes on what has not arrived);
+    - "Data states": staleness (lines 344 and 351–352), and none as a value (line 395, with the
+      `NONE` of lines 831 and 888);
+    - the `STARS: PENDING` row (line 922) and `NOT YET MODELLED` (line 815);
+    - "Numbers, units and time", lines 208–211 (ladders with hysteresis; E notation off the
+      ladder);
+    - "Voice and nomenclature", line 755–758 (a fraction named in words, a space before `%`).
+  - _Drafted for the owner (plan R10, R10.T13, draft 4): the owner signs off._
+
+- **Draft 5. The material reading.**
+  - _Wording,_ a bullet of "Voice and nomenclature", after the phase bullet (lines 750–754): "The
+    ground's material at a point is one reading of two parts, joined by a middle dot: first its
+    form, then its substance (`MATERIAL REGOLITH · Fe-RICH BASALT`, `MATERIAL SNOW · H2O`,
+    `MATERIAL FROST · CO2`).
+    - The form is how the substance lies, a word from a fixed list: `BEDROCK`, `REGOLITH`, `SOIL`,
+      `SAND`, `SEDIMENT`, `VOLCANIC ROCK`, `MELT`, `ICE`, `SNOW`, `SEA ICE`, `FROST`,
+      `ORGANIC SEDIMENT`, `SEABED`, `EVAPORITE` and `DUST`. It is the form the view draws most of at
+      that point, which is also the authoritative one there.
+    - The form is the ground's class, not a substance or a phase, and keeps its word, as a
+      structure layer does. A form word holds no common name of a formula: `ICE · H2O`, never
+      `WATER ICE`. `MELT` is ground above its lithology's solidus, which petrology calls melt; it is
+      not `liquid`, a word that would claim it is above its liquidus.
+    - The substance is the ground's palette entry's. It is named only by the console's list of
+      substance names, in a label's case. A formula keeps its case (`H2O`, `CO2`, `Na2CO3`), a name
+      in words is upper-cased (`MARS-TYPE DUST`), and a substance the list does not name reads
+      `UNLISTED MATERIAL`, never its key.
+    - Where the body's composition is not modelled (its palette is empty) the reading is
+      `MATERIAL NOT YET MODELLED`.
+    - Prose and other readings still name a molecular ice as `CO2 ice`, by its phase. The form's
+      reading is the ground's, and the two are not rivals."
+  - _Real outputs_ of `substanceName(key, "upper")` today (`lib/substances.ts`, P14.T49.f, run
+    2026-10-13):
+    - formula keys name themselves: `H2O`, `CO2` and `Na2CO3`;
+    - name keys take their names: `mars_dust` gives `MARS-TYPE DUST` and `tholin` gives `THOLIN`;
+    - the lithology keys the reference and generated palettes use today give `UNLISTED MATERIAL`:
+      `basalt`, `basalt_fe`, `granite`, `feldspathic` and `phyllosilicate`. Their names land with
+      plan 14's T49.b rows, and plan 14 drafts `basalt_fe` as `Fe-rich basalt` (`Fe-RICH BASALT`)
+      by signoff-5.
+
+    So today a basaltic plain reads `MATERIAL REGOLITH · UNLISTED MATERIAL`.
+
+  - _Rows._ `MATERIAL`, kind `Label`: the ground's form and substance at the point a view's terrain
+    readout reads, joined by a middle dot. Beside it, one row, kind `Material form`, lists the
+    fifteen form words with their meanings, the classes of this plan's `MaterialClass` (Design
+    note 1):
+    - `BEDROCK`, rock exposed, as on ground steeper than loose material can rest on;
+    - `REGOLITH`, an airless body's loose, impact-broken layer;
+    - `SOIL` and `SAND`, loose ground by aridity;
+    - `SEDIMENT`, the fill of channels and basins;
+    - `VOLCANIC ROCK`, an older volcanic province's;
+    - `MELT`, ground above its lithology's solidus;
+    - `ICE`, a glacier's or an ice cap's;
+    - `SNOW`;
+    - `SEA ICE`, ice over a sea;
+    - `FROST`, a frost of the ice entry's species;
+    - `ORGANIC SEDIMENT`, the fallout of an organic haze;
+    - `SEABED`, the ground under a sea;
+    - `EVAPORITE`, the salts of a dried basin;
+    - `DUST`, the fines that wind lays.
+  - _Goes in_ "Voice and nomenclature", after lines 750–754; the rows after `UNLISTED MATERIAL`
+    (line 933).
+  - _Extends:_
+    - "Voice and nomenclature": lines 731–745 (a substance named by the console's list,
+      `UNLISTED MATERIAL` where it names none, never a key); 746–749 (no common name for a formula,
+      inside another name too); 750–754 (a phase is a word beside the name, `CO2 ice`); 762–764 (a
+      structure layer keeps its word); 765 (a reading of parts joined by `·`);
+    - "Typography", lines 143–145 (a formula keeps its case in an upper-case label);
+    - the `UNLISTED MATERIAL` row (line 933), and a ring's `COMPOSITION` (`POROUS ICE`, `ROCK`;
+      line 883), the precedent for a form word.
+  - _Drafted for the owner (plan R10, R10.T13, draft 5): the owner signs off._
+
+- **Draft 6. The survey edge, a mark in both styles.**
+  - _Wording,_ a bullet of "Views": "Where a body's surveyed terrain meets ground the ship has not
+    surveyed, the view marks the survey's edge, in both styles. Unsurveyed ground then never looks
+    surveyed, and the step between the two is never read as a cliff.
+    - Unsurveyed ground shows the body's reference surface, the `DATUM`, with no terrain, contours
+      or reading claimed there. A skirt in the reference surface's appearance joins the two where
+      their heights differ.
+    - The edge is drawn along the surveyed terrain's border, as the chart's query edge marks where
+      fetched data ends: a solid `--text` line `1px` wide with short ticks pointing into the
+      unsurveyed side. Each tick is `0.25rem` long, one every `1rem` of the drawn line. The line is
+      never dashed.
+    - It is symbology. Over the photorealistic image it carries its `--surface-0` casing, as every
+      mark does, and in the wireframe it is cased as the wireframe's lines are. Nearer ground in
+      front of it hides it, as a limb hides a graticule.
+    - While any of it is in view, the view's list notes it as `SURVEY EDGE`. The note gives the
+      range to the edge's nearest point in the picture, measured and labelled as the list's ranges
+      are (from the own ship, else `FROM CAMERA`), to three figures. It is a note outside the
+      list's options, like `INTEGRATED STARLIGHT`: not a contact, and it cannot be selected."
+  - _Row._ `SURVEY EDGE`, kind `Label`: the mark where a body's surveyed terrain ends, in both
+    styles. It is a ticked `--text` line, its ticks towards the unsurveyed side, and the view's list
+    notes it with its nearest range (`SURVEY EDGE 4.21 km`).
+  - _Goes in_ "Graphs, schematics and spatial displays", "Views", after the bullet on what a view
+    keeps (lines 597–610); the row after `SURVEY COVERAGE`.
+  - _Extends:_
+    - "Colour", "Outlines for symbology, and only for symbology" (lines 105–110, R02's item 3: a
+      mark over the image is cased);
+    - "Graphs, schematics and spatial displays", lines 552–554 ("The edge of the fetched data is
+      drawn, so that unfetched space never looks empty"), as a principle. A view is not a spatial
+      display (lines 593–596), so the mark is taken over from plan 05's D13 query edge ("a solid
+      `--text` hairline with short outward ticks every 10°, the look of a chart boundary"), its
+      ticks spaced along the drawn line instead of by angle;
+    - line 503 (dashes are predictions);
+    - "Views": lines 597–610 (what a view keeps), lines 644–658 (both styles, the black ground, the
+      casings), lines 660–664 and the `INTEGRATED STARLIGHT` row (line 947), a list note that is
+      not a contact;
+    - lines 666–669 (every list entry carries a range) and 671–672 (the list names every kind in
+      words).
+  - _Drafted for the owner (plan R10, R10.T13, draft 6): the owner signs off._
+
+- **Draft 7. Contours, their interval and index.**
+  - _Wording,_ a bullet of "Views", after the paragraph on both styles (lines 644–658): "In the
+    wireframe style a view draws surveyed terrain as its contours, lines of equal `ELEVATION` above
+    the `DATUM`. It draws nothing else of the ground, which is depth only and hides every line and
+    star behind it.
+    - _The lines._ Minor contours are solid `--text-muted` lines `1px` wide. Every fifth is an index
+      contour, solid `--text-muted` `1.5px`, a step heavier, as a graticule's equator is. On a world
+      with a sea, the coastline lies at the sea level, whether or not that falls on the interval,
+      and is solid `--text` `2px`. So each kind differs from the others by width, not by colour
+      alone.
+    - _How they are drawn._ Each is drawn at its width as "Layout" gives it, constant across the
+      picture. None is ever dashed, since dashes are predictions, or labelled in the picture, since
+      the readout's `ELEVATION` and the `DATUM` carry the values. A contour in `--text-muted` is not
+      stale, as an orbit is not. On the wireframe's black ground a contour is the ground's own line,
+      and uncased; drawn over the photorealistic image, it is cased as any mark is.
+    - _The interval._ The label block states the interval and the index once, in the form of a
+      map's margin: `CONTOUR INTERVAL 200 m · INDEX 1 km`, each in `m`, and from 1 km in `km`, with
+      hysteresis. The interval is a step of 1, 2 and 5 times a power of ten, never below 1 m. It is
+      set by the camera's height above the ground beneath it, so that every view in one pose states
+      the same one.
+    - _Where contours are left out._ Where a family's lines would stand closer than `4px` (in CSS
+      pixels, scaled as line widths are), the family is left out. It fades out between `6px` and
+      `3px` of spacing, the minor contours first and then the index. The coastline is always drawn.
+      A contour is scored as drawn in full; it is not scored in its fade, as a stroke is not scored
+      near an open end. So surveyed ground without contours is steeper than the interval can show
+      there, never flat, and ground with no contours at all is not surveyed.
+    - _Scale._ With the field of view, the interval is the wireframe's statement of scale in place
+      of the 1-2-5 scale bar. The field of view gives the picture's angular scale, and the interval
+      its vertical one.
+    - _The graticule._ The graticule is still drawn over surveyed terrain, and is told from the
+      contours by its geometry: it crosses contours, which never cross one another."
+  - _Rows._
+    - `CONTOUR INTERVAL`, kind `Label`: on a wireframe view's label block, the height between
+      adjacent contours, a 1-2-5 step (`CONTOUR INTERVAL 200 m`), with its `INDEX` after a middle
+      dot.
+    - `INDEX`, kind `Label`: after `CONTOUR INTERVAL` alone, the height between index contours,
+      five intervals (`INDEX 1 km`). Not a belt's `SIZE INDEX`.
+  - _Contrast._ `contrast.py text-muted surface-0` gives 7.22:1 and `contrast.py text surface-0`
+    13.57:1, each above the 6:1 a stroke that carries meaning needs. The view's ground is black,
+    darker than `--surface-0`, so either pairing is higher there.
+  - _Goes in_ "Views", after lines 644–658; the rows after `FOV` (line 907).
+  - _Extends:_
+    - "Views": lines 644–647 ("its marks, graticules and contours included, follow this guide's
+      ordinary rules for colour, stroke and contrast"), and lines 666–669 ("A view cannot carry the
+      1-2-5 scale bar ... In its place the view states its horizontal field of view", R02's item 5),
+      to which the interval is added;
+    - the `FOV` row (line 907, "a view's statement of scale in place of a scale bar");
+    - "Colour", lines 62–82 (a stroke meets its ratio as drawn; not scored near an open end);
+    - "Graphs, schematics and spatial displays": line 486 (lines told apart by style first), lines
+      503 and 512 (dashes are predictions), and lines 571–576 (a selected orbit wider, since colour
+      alone must not carry it; `--text-muted` is not stale);
+    - "Layout", lines 286–294 (widths times the larger of the device-pixel ratio and 2).
+  - _Excepts_ nothing. It departs from Design note 14 in three places, each a question below: the
+    index contour's width, the fade's scoring, and the datum on a line of its own (Draft 3).
+  - _Drafted for the owner (plan R10, R10.T13, draft 7): the owner signs off._
+
+- **Questions for the sign-off**, each with this draft's lean.
+  - _Unsurveyed readings._ Design note 6, and the life-and-planet-content brainstorm in two places,
+    write the em dash with `NOT SURVEYED`. Draft 3 sets `NOT SURVEYED` once in place of the
+    readings, as `NOT RESOLVED` stands for a section, since the em dash means "not computed". Lean:
+    Draft 3's form, with Design note 6 and those brainstorm sentences brought in line.
+  - _The index contour._ Design note 14 makes it `2px` `--text-muted` beside a `2px` `--text`
+    coastline, so the two would differ by colour alone (lines 573–574). Lean: index `1.5px`, as
+    drafted. The alternative is a `3px` coastline.
+  - _The contours' fade._ A fading contour is drawn below its 6:1. Lean: exempt it in its fade, as
+    drafted, since T11 fades it. The alternative is a cut at `4px`.
+  - _The graticule over contours._ Minor contours and the graticule's lines are both `1px`
+    `--text-muted`. Lean: keep the graticule, told apart by geometry as drafted, and add to T11's
+    recorded legibility check that the graticule is told from the contours, on a small body too.
+    The fallback is leaving the graticule out over surveyed terrain.
+  - _The datum's line._ Design note 14 states `CONTOUR INTERVAL 200 m · INDEX 1 km · DATUM …` as
+    one line. T12 wants the datum stated once, in both styles. Lean: `DATUM` on its own line, as
+    the USGS margin puts its datum under its interval.
+  - _The datum's radii._ Design note 14 writes `6378.1 × 6356.8 km`, which NIST SP 811 §7.7 rules
+    out ("51 mm × 51 mm × 25 mm but not: 51 × 51 × 25 mm"). Lean: `6378.1 km × 6356.8 km`, as
+    drafted.
+  - _The resolution at the line of sight._ T12 puts it on the survey line. Lean: in the readout
+    group as `RESOLUTION`, beside the uncertainties it sets, since a bare figure on the survey line
+    would read as a distance.
+  - _A slant range off the hull._ It is measured from the camera. Lean: `SLANT RANGE FROM CAMERA`
+    whenever the camera is off the hull, widening `FROM CAMERA`'s meaning from "no own ship".
+  - _A mark at the line of sight._ The view draws none today, so the readout's point is unmarked.
+    Lean: T12 draws one, of a shape no other mark uses (not the selection's bracket, nor the
+    galaxy cursor's or chart centre's cross), drafted with T12 for the owner.
+  - _The material under a coarse survey._ The class comes from the finest level, so it can name
+    `BEDROCK` on a cliff the survey has not resolved. Lean: name the class drawn, as Verification
+    has the readout do, gating it by coverage but not by resolution, since it is not a number.
+  - _`SEABED`'s substance._ Design note 1 puts `Seabed` "under its liquid entry". If that entry is
+    the material's, the reading says `SEABED · H2O`, a floor made of H2O. Lean: the seabed's entry
+    is the floor's own, the crust's or a deposit's, and the sea is named by its coastline and its
+    `SEA LEVEL`.
+  - _The material's properties._ T12 shows "its properties as a reading", whose names are not
+    drafted here: bearing capacity and pad friction, with their footing width and temperature.
+    Lean: T12 drafts them for the owner before it builds them.
+  - _Precision._ `ELEVATION` 0.1 m (Design note 6); `SLOPE` whole degrees; `SLANT RANGE` three
+    figures; resolutions two. Lean: as drafted.
+  - _`ELEVATION`'s sign._ The issue's form, `~2140 m ± 180 m`, sets no `+`, while the spike's
+    `SITE HEIGHT` (line 977) is signed. Lean: no `+`, as maps write it.
+  - _`SITE HEIGHT`._ By ICAO's distinction it is an elevation. Lean: rename it `SITE ELEVATION` in
+    `ELEVATION`'s form when the spike next changes (R05's row; `DescentSpike.tsx`). It is not this
+    task's to change.
+  - _NIST and the guide's spans._ The same §7.7 also rules out "0 – 5 V", the form of the guide's
+    spans (`66.0 – 137 Mm`, line 227–229). The drafts do not touch the span rule. Lean: leave it,
+    a separate question for the owner.
+
+- **If signed off, these follow** (other tasks' text, not changed here): Design note 6 (the
+  unsurveyed form); Design note 14 (the index width, the fade's scoring, the datum's line and its
+  radii's units); T11 (its fade test's thresholds in CSS pixels, its legibility check);
+  T12 (`RESOLUTION` in the readout group, `SLANT RANGE FROM CAMERA`, the point's mark, the
+  properties' names); the life-and-planet-content brainstorm's sentences on `NOT SURVEYED`; R05's
+  `SITE HEIGHT`; and the roadmap README's "Still awaiting" entry for R10.T13.
+
+- **Checks** (2026-10-13, this worktree).
+  - `glyphs.py "± · × ° — ~" '\u00a0'`: every character outside ASCII that the drafts put on
+    screen, with the tilde and the no-break space (exit 0):
+
+    ```text
+    char  code     B612   Mono   name
+    ±     U+00B1   yes    yes    PLUS-MINUS SIGN
+    ·     U+00B7   yes    yes    MIDDLE DOT
+    ×     U+00D7   yes    yes    MULTIPLICATION SIGN
+    °     U+00B0   yes    yes    DEGREE SIGN
+    —     U+2014   yes    yes    EM DASH
+    ~     U+007E   yes    yes    TILDE
+          U+00A0   yes    yes    NO-BREAK SPACE
+    ```
+
+  - `ux_lint.py` on a scratch `.ts` file, outside the worktree and not committed, that holds every
+    string the drafts propose as a string literal (exit 0):
+
+    ```text
+    0 error(s), 0 check(s) in 1 file(s) scanned. Heuristic: confirm each line against the guide.
+    ```
+
 ### R10.T14 Cache sizes
 
 - **R10.T14.a The count model and the slot layout.** `patchCountModel` as a pure function of camera,
