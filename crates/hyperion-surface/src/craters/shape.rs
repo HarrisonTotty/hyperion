@@ -92,6 +92,7 @@ use hyperion_base::units::{Metres, MetresPerSecondSquared};
 
 use super::{CraterParams, MOON_GRAVITY_M_PER_S2, TargetClass, crater_cutoff, transition_diameter};
 use crate::field::Morphology;
+use crate::num;
 
 /// A fresh bowl's depth over its diameter, d ÷ D: 0.20 (the module documentation).
 const BOWL_DEPTH: f64 = 0.20;
@@ -259,28 +260,135 @@ impl CraterShape {
             dist.is_finite() && dist >= 0.0,
             "a distance from a crater's centre must be finite and non-negative, got {dist}"
         );
+        Metres::new(self.relief_and_slope(dist).0)
+    }
+
+    /// The volume of the fresh interior's net cavity below the surrounding surface, which its
+    /// exterior balances: π R² h (0.8 a + 0.2 a²) with R the rim radius, cubic metres (Design note
+    /// 13). The unit in which the synthesis states a crater's volume balance (R09.T7.b).
+    #[must_use]
+    pub fn cavity_volume_m3(&self) -> f64 {
+        let rim_radius_m = self.rim_radius().value();
+        let a = self.exterior_width;
+        core::f64::consts::PI
+            * rim_radius_m
+            * rim_radius_m
+            * self.rim_height.value()
+            * (0.8 * a + 0.2 * a * a)
+    }
+
+    /// The flat floor's radius in rim radii.
+    #[must_use]
+    pub(crate) const fn floor_fraction(&self) -> f64 {
+        self.floor_fraction
+    }
+
+    /// The central peak's base radius in rim radii: zero where it has no peak.
+    #[must_use]
+    pub(crate) const fn peak_fraction(&self) -> f64 {
+        self.peak_fraction
+    }
+
+    /// The fresh profile's height, metres, and its slope along the radius, metres per rim radius,
+    /// at `dist` rim radii from the centre (`dist` finite and non-negative): the pieces of
+    /// [`relief`](Self::relief), whose height this is to the bit, with each piece's derivative.
+    ///
+    /// The slope is the piece's own at a boundary between pieces: the wall's at the rim crest,
+    /// where the exterior's is zero, and the floor's at the cone's base.
+    #[must_use]
+    pub(crate) fn relief_and_slope(&self, dist: f64) -> (f64, f64) {
         let rim_m = self.rim_height.value();
         let floor_m = self.floor_depth().value();
         let width = self.exterior_width;
-        let height_m = if dist <= 1.0 {
-            let mut inside = if dist <= self.floor_fraction {
-                -floor_m
+        if dist <= 1.0 {
+            let (mut inside, mut slope) = if dist <= self.floor_fraction {
+                (-floor_m, 0.0)
             } else {
-                let u = (dist - self.floor_fraction) / (1.0 - self.floor_fraction);
-                -floor_m + (rim_m + floor_m) * u * u
+                let span = 1.0 - self.floor_fraction;
+                let u = (dist - self.floor_fraction) / span;
+                (
+                    -floor_m + (rim_m + floor_m) * u * u,
+                    2.0 * (rim_m + floor_m) * u / span,
+                )
             };
             if dist < self.peak_fraction {
                 inside += self.peak_relief.value() * (1.0 - dist / self.peak_fraction);
+                slope -= self.peak_relief.value() / self.peak_fraction;
             }
-            inside
+            (inside, slope)
         } else if dist < 1.0 + width {
             let s = (dist - 1.0) / width;
             let t = 1.0 - s;
-            rim_m * t * t * t * (1.0 + 3.0 * s)
+            (
+                rim_m * t * t * t * (1.0 + 3.0 * s),
+                -12.0 * rim_m * s * t * t / width,
+            )
         } else {
-            0.0
-        };
-        Metres::new(height_m)
+            (0.0, 0.0)
+        }
+    }
+
+    /// ∫ f(x) 2x dx from `x0` to `x1` rim radii (0 ≤ `x0` ≤ `x1`) of the fresh profile f, metres:
+    /// the volume between those radii over π R², in closed form piece by piece (the module
+    /// documentation's profile; Design note 13's balance makes it zero from the centre to the
+    /// reach).
+    ///
+    /// The interior is −d₀ everywhere inside the rim, plus the wall's (h + d₀) u² beyond the floor
+    /// and the cone inside its base, and the exterior h (1 − s)³ (1 + 3s) = h (1 − 6s² + 8s³ − 3s⁴)
+    /// beyond the rim, each integrated in closed form and summed in that order.
+    #[must_use]
+    pub(crate) fn moment(&self, x0: f64, x1: f64) -> f64 {
+        debug_assert!(
+            0.0 <= x0 && x0 <= x1,
+            "a profile moment runs outwards from the centre, not from {x0} to {x1}"
+        );
+        let rim_m = self.rim_height.value();
+        let floor_m = self.floor_depth().value();
+        let (q, p, a) = (self.floor_fraction, self.peak_fraction, self.exterior_width);
+        let square = |x: f64| x * x;
+        let mut total = 0.0;
+        // The floor's −d₀, inside the rim.
+        let inner_end = num::min(x1, 1.0);
+        if x0 < inner_end {
+            total += -floor_m * (square(inner_end) - square(x0));
+        }
+        // The wall's (h + d₀) u², u = (x − q) ÷ (1 − q): with y = x − q, ∫ y² 2(y + q) dy =
+        // y⁴ ÷ 2 + 2q y³ ÷ 3.
+        let wall_start = num::max(x0, q);
+        if wall_start < inner_end {
+            let span = 1.0 - q;
+            let antiderivative = |x: f64| {
+                let y = x - q;
+                let y3 = y * y * y;
+                0.5 * y3 * y + 2.0 * q * y3 / 3.0
+            };
+            total += (rim_m + floor_m) / (span * span)
+                * (antiderivative(inner_end) - antiderivative(wall_start));
+        }
+        // The cone's P (1 − x ÷ p): ∫ = P (x² − 2x³ ÷ (3p)).
+        let cone_end = num::min(x1, p);
+        if x0 < cone_end {
+            let antiderivative = |x: f64| x * x - 2.0 * x * x * x / (3.0 * p);
+            total += self.peak_relief.value() * (antiderivative(cone_end) - antiderivative(x0));
+        }
+        // The exterior, with x = 1 + a s: ∫ h g(s) 2(1 + a s) a ds = 2 a h (G₁ + a G₂), G₁ = s −
+        // 2s³ + 2s⁴ − 3s⁵ ÷ 5 and G₂ = s² ÷ 2 − 3s⁴ ÷ 2 + 8s⁵ ÷ 5 − s⁶ ÷ 2.
+        let outer_start = num::max(x0, 1.0);
+        let outer_end = num::min(x1, 1.0 + a);
+        if a > 0.0 && outer_start < outer_end {
+            let antiderivative = |x: f64| {
+                let s = (x - 1.0) / a;
+                let s2 = s * s;
+                let s3 = s2 * s;
+                let s4 = s2 * s2;
+                let s5 = s4 * s;
+                let first = s - 2.0 * s3 + 2.0 * s4 - 0.6 * s5;
+                let second = 0.5 * s2 - 1.5 * s4 + 1.6 * s5 - 0.5 * s4 * s2;
+                first + a * second
+            };
+            total += 2.0 * a * rim_m * (antiderivative(outer_end) - antiderivative(outer_start));
+        }
+        total
     }
 }
 

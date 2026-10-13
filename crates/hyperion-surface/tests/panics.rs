@@ -723,3 +723,122 @@ fn a_chronology_age_in_an_infinite_system_is_refused() {
 fn a_chronology_age_of_a_nan_density_is_refused() {
     let _ = craters::chronology_age(PerSquareKilometre::new(f64::NAN), craters::SOLAR_SYSTEM_AGE);
 }
+
+/// The small craters' refusals (R09.T7.b).
+mod small_craters {
+    use hyperion_base::rng::DetailSeed;
+    use hyperion_base::units::{Gigayears, Metres};
+    use hyperion_surface::craters::crater_shape;
+    use hyperion_surface::cube::PatchKey;
+    use hyperion_surface::field::FieldView;
+    use hyperion_surface::synth::BandLevel;
+    use hyperion_surface::synth::craters::{
+        CraterCache, CraterOctaves, CraterProfile, SmallCraters, diffusion_length, profile,
+        relief_factor, structure_function, unresolved_variance,
+    };
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    use super::{level_five_field, lunar_craters};
+
+    fn small() -> SmallCraters {
+        SmallCraters::new(level_five_field().header(), DetailSeed::new(5))
+    }
+
+    #[test]
+    #[should_panic(expected = "a crater's age must be finite and non-negative")]
+    fn a_diffusion_length_of_a_negative_age_is_refused() {
+        let _ = diffusion_length(Gigayears::new(-1.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "a rim radius must be finite and positive and a diffusion length")]
+    fn a_relief_factor_of_a_negative_diffusion_is_refused() {
+        let _ = relief_factor(Metres::new(10.0), Metres::new(-1.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "a fillet's half-width must be finite and non-negative")]
+    fn a_profile_of_a_negative_band_is_refused() {
+        let shape = crater_shape(&lunar_craters(), Metres::new(100.0));
+        let _ = CraterProfile::new(shape, Metres::new(-1.0), Metres::ZERO);
+    }
+
+    #[test]
+    #[should_panic(expected = "a fillet's half-width must be finite and non-negative")]
+    fn a_profile_of_a_nan_fillet_is_refused() {
+        let shape = crater_shape(&lunar_craters(), Metres::new(100.0));
+        let _ = CraterProfile::filleted(shape, Metres::new(f64::NAN));
+    }
+
+    #[test]
+    #[should_panic(expected = "a distance from a crater's centre must be finite and non-negative")]
+    fn a_profile_at_a_negative_distance_is_refused() {
+        let shape = crater_shape(&lunar_craters(), Metres::new(100.0));
+        let _ = profile(-0.5, &shape, Metres::new(1.0), Metres::ZERO);
+    }
+
+    #[test]
+    #[should_panic(expected = "a boundary diameter must be finite and positive")]
+    fn octaves_of_no_boundary_diameter_are_refused() {
+        let field = level_five_field();
+        let header = field.header();
+        let _ = CraterOctaves::for_body(
+            *header.craters(),
+            header.figure(),
+            Metres::ZERO,
+            header.surface_age(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "the body has no crater octave 99")]
+    fn craters_of_an_octave_the_body_lacks_are_refused() {
+        let cell = PatchKey::containing(10, [0.0, 0.0, 1.0]).unwrap();
+        let _ = small().craters_in(99, cell, &mut CraterCache::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "the cell is not at the octave's level")]
+    fn craters_of_a_cell_at_another_level_are_refused() {
+        let craters = small();
+        let octave = craters.octaves().octaves()[0];
+        let cell = PatchKey::containing(octave.level() + 1, [0.0, 0.0, 1.0]).unwrap();
+        let _ = craters.craters_in(0, cell, &mut CraterCache::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "a direction must be finite and non-zero")]
+    fn small_craters_at_no_direction_are_refused() {
+        let _ = small().at(
+            [0.0; 3],
+            BandLevel::new(10).unwrap(),
+            0,
+            &mut CraterCache::new(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a wavelength must be finite and positive")]
+    fn a_crater_variance_below_no_wavelength_is_refused() {
+        let field = level_five_field();
+        let cell = PatchKey::containing(5, [0.0, 0.0, 1.0]).unwrap();
+        let _ = unresolved_variance(&field, cell, Metres::ZERO);
+    }
+
+    #[test]
+    #[should_panic(expected = "the cell is not of the field's level")]
+    fn a_crater_variance_of_another_level_s_cell_is_refused() {
+        let field = level_five_field();
+        let cell = PatchKey::containing(6, [0.0, 0.0, 1.0]).unwrap();
+        let _ = unresolved_variance(&field, cell, Metres::new(1e3));
+    }
+
+    #[test]
+    #[should_panic(expected = "a lag must be finite and non-negative")]
+    fn a_crater_structure_function_at_a_negative_lag_is_refused() {
+        let field = level_five_field();
+        let cell = PatchKey::containing(5, [0.0, 0.0, 1.0]).unwrap();
+        let _ = structure_function(&field, cell, Metres::new(1e3), Metres::new(-1.0));
+    }
+}

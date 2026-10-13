@@ -80,7 +80,11 @@ hyperion_base::domain_tags! {
     SURFACE_CHANNEL: SurfaceDetail = "surface.channel";
 
     /// The synthesis's craters below the boundary diameter (R09, Design note 13), keyed by
-    /// `surface_cell` of an octave's quadtree cells: each cell's count, places and diameters.
+    /// `surface_cell` of an octave's quadtree cells, instance 0, the level naming the octave
+    /// (R09.T7.b): each cell's count, a Poisson draw (no word at a mean of 0, one below a mean of
+    /// 10, two an attempt above), then each crater's words in turn, three for each candidate of
+    /// its placement (s, t and the acceptance's mark, at most 64 candidates), one for its diameter
+    /// and one for its age.
     SURFACE_CRATER: SurfaceDetail = "surface.crater";
 }
 

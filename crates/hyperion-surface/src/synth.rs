@@ -5,16 +5,17 @@
 //! client's part of one alike, through [`FieldView`]. Today it returns the base elevation, the
 //! coarse cells interpolated over the sphere ([`interp`], R09.T4), at every level; the structural
 //! octaves ([`relief`], R09.T5), the channels ([`channels`], whose network R09.T6.a builds and
-//! whose incision T6.b adds) and the small craters (T7.b) add the bands below the coarse cell, and
-//! the assembly (T8) fixes each level's set. The module also holds the two types a coarse field's
-//! header carries: [`BandLevel`], the quadtree level a height is asked at, and [`BandSpectrum`],
-//! the law of the structural relief finer than the coarse cells, from which the relief derives
-//! each level's amplitude and the closed-form variance below a cell ([`local_variance`]), with the
-//! crust classes' shapes and anchors that make a body's law ([`SpectrumShape`],
-//! [`BandSpectrum::anchored`]); and the per-contribution variance below a wavelength that R10
-//! reads ([`unresolved_variance`]).
+//! whose incision T6.b adds) and the small craters ([`craters`], R09.T7.b) add the bands below the
+//! coarse cell, and the assembly (T8) fixes each level's set. The module also holds the two types
+//! a coarse field's header carries: [`BandLevel`], the quadtree level a height is asked at, and
+//! [`BandSpectrum`], the law of the structural relief finer than the coarse cells, from which the
+//! relief derives each level's amplitude and the closed-form variance below a cell
+//! ([`local_variance`]), with the crust classes' shapes and anchors that make a body's law
+//! ([`SpectrumShape`], [`BandSpectrum::anchored`]); and the per-contribution variance below a
+//! wavelength that R10 reads ([`unresolved_variance`]).
 
 pub mod channels;
+pub mod craters;
 pub mod interp;
 pub mod relief;
 
@@ -28,6 +29,7 @@ use crate::height::HeightSample;
 use crate::noise::LatticeCache;
 use crate::num;
 pub use channels::Channels;
+pub use craters::SmallCraters;
 use interp::ReadCellError;
 pub use relief::{Relief, local_variance};
 
@@ -149,11 +151,13 @@ impl SynthCache {
 /// The variance of a cell's ground in wavelengths shorter than a given one, per contribution:
 /// what R10's material weights and slope readouts read (Design note 18).
 ///
-/// Each is a closed form of the cell's own fields. The structural octaves' is built (R09.T5); the
-/// channels (T6.b) and the small craters (T7.b) add theirs.
+/// Each is a closed form, of the cell's own fields or, for the small craters, of the body's header
+/// alone. The structural octaves' (R09.T5) and the small craters' (R09.T7.b) are built; the
+/// channels (T6.b) add theirs.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct UnresolvedVariance {
     relief: SquareMetres,
+    craters: SquareMetres,
 }
 
 impl UnresolvedVariance {
@@ -165,10 +169,18 @@ impl UnresolvedVariance {
         self.relief
     }
 
-    /// The whole, square metres: the contributions are independent, so their variances add.
+    /// The small craters' share, square metres: the body's, the same in every cell
+    /// ([`craters::unresolved_variance`]).
     #[must_use]
-    pub const fn total(&self) -> SquareMetres {
-        self.relief
+    pub const fn craters(&self) -> SquareMetres {
+        self.craters
+    }
+
+    /// The whole, square metres: the contributions are independent, so their variances add, in
+    /// the order the fields are listed.
+    #[must_use]
+    pub fn total(&self) -> SquareMetres {
+        self.relief + self.craters
     }
 }
 
@@ -186,6 +198,7 @@ pub fn unresolved_variance(
 ) -> Option<UnresolvedVariance> {
     Some(UnresolvedVariance {
         relief: relief::unresolved_relief_variance(field, cell, finer_than)?,
+        craters: craters::unresolved_variance(field, cell, finer_than)?,
     })
 }
 

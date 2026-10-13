@@ -1779,14 +1779,8 @@ fn unresolved_variance_falls_with_the_wavelength_to_zero_at_the_band_limit() {
         }
         assert_same_bits(at(2.0), 0.0);
         assert_same_bits(at(0.5), 0.0);
-        assert_eq!(
-            unresolved_variance(field, cell, Metres::new(1e3))
-                .unwrap()
-                .total(),
-            unresolved_variance(field, cell, Metres::new(1e3))
-                .unwrap()
-                .relief()
-        );
+        let parts = unresolved_variance(field, cell, Metres::new(1e3)).unwrap();
+        assert_eq!(parts.total(), parts.relief() + parts.craters());
         checked += 1;
     }
     assert_eq!(checked, 90);

@@ -25,14 +25,14 @@ pub const SOLAR_SYSTEM_AGE: Gigayears = Gigayears::new(4.567);
 
 /// The exponential term's coefficient, km⁻²: 5.44 × 10⁻¹⁴ (Neukum, Ivanov and Hartmann 2001, eq. 5,
 /// as Craterstats' "Moon" chronology lists it).
-const EXPONENTIAL_COEFFICIENT: f64 = 5.44e-14;
+pub(crate) const EXPONENTIAL_COEFFICIENT: f64 = 5.44e-14;
 
 /// The exponential term's rate, Gyr⁻¹: 6.93 (as [`EXPONENTIAL_COEFFICIENT`]).
-const EXPONENTIAL_RATE: f64 = 6.93;
+pub(crate) const EXPONENTIAL_RATE: f64 = 6.93;
 
 /// The constant flux, km⁻² Gyr⁻¹: 8.38 × 10⁻⁴, the published coefficient (as
 /// [`EXPONENTIAL_COEFFICIENT`]; Cratermaker's 10^a0 = 8.17 × 10⁻⁴ is not adopted).
-const LINEAR_RATE: f64 = 8.38e-4;
+pub(crate) const LINEAR_RATE: f64 = 8.38e-4;
 
 /// The bisection steps of [`chronology_age`]: 64 halvings of [0, A], below an f64's resolution of
 /// any age.

@@ -199,7 +199,7 @@ const PANEL_WIDTH: f64 = core::f64::consts::LN_10 / 4.0;
 
 /// The eight-point Gauss–Legendre rule on [−1, 1]: its nodes, ascending, and weights (Abramowitz
 /// and Stegun, Table 25.4, n = 8, as the sim's `tables::gauss_legendre` rounds them).
-pub(super) const GAUSS_LEGENDRE_8: [(f64, f64); 8] = [
+pub(crate) const GAUSS_LEGENDRE_8: [(f64, f64); 8] = [
     (-0.960_289_856_497_536_3, 0.101_228_536_290_376_26),
     (-0.796_666_477_413_626_7, 0.222_381_034_453_374_48),
     (-0.525_532_409_916_329, 0.313_706_645_877_887_27),
