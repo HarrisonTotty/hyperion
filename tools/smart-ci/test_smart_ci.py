@@ -110,6 +110,7 @@ FILES: Dict[str, str] = {
     ".prettierrc.json": "",
     ".prettierignore": "",
     ".gitignore": "",
+    ".gitattributes": "",
     ".editorconfig": "",
     ".pre-commit-config.yaml": "",
     ".config/nextest.toml": "",
@@ -516,6 +517,17 @@ class TheRules(unittest.TestCase):
         hooks = plan(".pre-commit-config.yaml")
         self.assertEqual(calls(hooks), ["_prettier-check"])
         self.assertTrue(hooks.notes)
+
+    def test_gits_attributes_run_nothing(self) -> None:
+        # How git diffs, merges and normalises files: no build, lint or test reads it, so not the full ci.
+        self.assertNotIn(".gitattributes", smart_ci.FULL_CI_ROOT)
+        attributes = plan(".gitattributes")
+        self.assertFalse(attributes.is_full)
+        self.assertEqual(calls(attributes), [])
+        self.assertIn(".gitattributes", attributes.why)
+        # Beside another change it adds nothing to that change's plan.
+        self.assertEqual(calls(plan(".gitattributes", "README.md")), ["_prettier-check"])
+        self.assertEqual(args(plan(".gitattributes", "README.md"), "_prettier-check"), ["README.md"])
 
     def test_measurements_run_the_clients_suite(self) -> None:
         p = plan("docs/measurements/descent-spike/2026-10-07-effect-low.json")

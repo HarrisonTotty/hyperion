@@ -1184,6 +1184,14 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
             needs.oxlint.add(path)
             needs.say(path, "Prettier and oxlint skip what git ignores")
             return
+        if name == ".gitattributes":
+            # How git diffs, merges and normalises files. No step of `just ci` reads it, nor Prettier,
+            # rustfmt or oxlint, and smart-ci's listing of the change (`git diff --name-status`) names a
+            # binary file as it names any other. A `text`, `eol` or `filter` attribute changes a file's
+            # bytes only at its next checkout or `git add`, and a file so changed and committed plans
+            # its own checks.
+            needs.say(path, "git's attributes for diffs, merges and line endings: nothing in `just ci` reads it")
+            return
         if name == "rustfmt.toml":
             for crate in ws.crates:
                 needs.add(needs.fmt, crate, path)
