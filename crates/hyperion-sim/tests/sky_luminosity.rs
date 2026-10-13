@@ -112,22 +112,30 @@ fn realise_cell(galaxy: &Galaxy, key: CellKey) -> Realised {
     out
 }
 
-/// Every cell of `keys` realised, on eight threads, summed in the cells' order.
+/// Every cell of `keys` realised, on eight threads (in turn on wasm32-wasip1, which has none),
+/// summed in the cells' order.
+///
+/// Each cell's part is its own and the parts are summed in the cells' order however they were
+/// realised, so both ways give the same bits.
 fn realise(galaxy: &Galaxy, keys: &[CellKey]) -> Realised {
-    const THREADS: usize = 8;
     let mut parts = vec![Realised::default(); keys.len()];
+    let fill = |chunk_keys: &[CellKey], chunk_parts: &mut [Realised]| {
+        for (&key, part) in chunk_keys.iter().zip(chunk_parts) {
+            *part = realise_cell(galaxy, key);
+        }
+    };
+    #[cfg(not(target_family = "wasm"))]
     std::thread::scope(|scope| {
-        for (chunk_keys, chunk_parts) in keys
-            .chunks(keys.len().div_ceil(THREADS))
-            .zip(parts.chunks_mut(keys.len().div_ceil(THREADS)))
-        {
-            scope.spawn(move || {
-                for (&key, part) in chunk_keys.iter().zip(chunk_parts) {
-                    *part = realise_cell(galaxy, key);
-                }
-            });
+        const THREADS: usize = 8;
+        let chunk = keys.len().div_ceil(THREADS);
+        for (chunk_keys, chunk_parts) in keys.chunks(chunk).zip(parts.chunks_mut(chunk)) {
+            let fill = &fill;
+            scope.spawn(move || fill(chunk_keys, chunk_parts));
         }
     });
+    // wasm32-wasip1 has no threads: the cells are realised one after another on this one.
+    #[cfg(target_family = "wasm")]
+    fill(keys, &mut parts);
     parts.iter().fold(Realised::default(), |a, b| Realised {
         systems: a.systems + b.systems,
         light: a.light + b.light,
