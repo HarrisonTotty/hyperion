@@ -100,7 +100,10 @@ struct Term {
 // ground's. absorbers.x is how many of its terms are absorbers, 0 to ABSORBER_SLOTS, and
 // absorbers.y the light slot whose curves of growth a per-planet table is built with, its
 // `curveSlot` (R08.T6.c; 0 until R08.T7 builds one multiple-scattering table a light slot,
-// `decision-r08-t6b-floor.md` section 8); z and w are unused.
+// `decision-r08-t6b-floor.md` section 8); z is 1 where `densityTables` holds the column's pressure
+// profile at the layer past the terms' (R08.T4.d; `medium.wgsl`'s `pressureBarAt`), 0 otherwise;
+// w is the medium's line slots, a bitmask of the absorber slots whose curves have pressure rows
+// (bit k for slot k; `pressureChannelOf`).
 struct Medium {
   bottomRadiusM : f32,
   topHeightM : f32,
@@ -119,8 +122,9 @@ struct AbsorberColumns {
   more : vec4f,
 }
 
-// The medium at a height: its scattering, its extinction and its absorption, m^-1, and its
-// absorbers' columns per metre. The absorption is the terms' own absorption coefficients summed,
+// The medium at a height: its scattering, its extinction and its absorption, m^-1, its absorbers'
+// columns per metre, and the same times p / ABSORBER_PRESSURE_REFERENCE_PA, their pressure-weighted
+// columns per metre (R08.T4.d). The absorption is the terms' own absorption coefficients summed,
 // never the extinction less the scattering, so that it is never negative by rounding (plan R08,
 // R08.T6.d; `decision-r08-t6b-floor.md` section 9.3).
 struct MediumSample {
@@ -128,7 +132,21 @@ struct MediumSample {
   extinction : vec3f,
   absorption : vec3f,
   columns : AbsorberColumns,
+  pressureColumns : AbsorberColumns,
 }
+
+// The pressure the pressure-weighted columns are taken over, Pa (R08.T4.d): a path's
+// Curtis-Godson pressure (Curtis 1952, QJRMS 78, 638; Godson 1953, QJRMS 79, 367) is
+// p-bar = ABSORBER_PRESSURE_REFERENCE_PA * w / x, w its pressure-weighted column and x its column,
+// both over the absorber's vertical column. A Venus-class grazing chord's w, about 3e3, stays under
+// rgba16float's 65504; a high, thin path's is subnormal or 0 (`medium.ts`'s
+// ABSORBER_PRESSURE_REFERENCE_PA, held equal by a test).
+const ABSORBER_PRESSURE_REFERENCE_PA : f32 = 100000.0;
+
+// The least p-bar a path is read at, Pa, far under any curve's first row, so that a
+// pressure-weighted column stored as 0 reads at that row rather than at log(0) (`medium.ts`'s
+// ABSORBER_PRESSURE_FLOOR_PA, held equal by a test).
+const ABSORBER_PRESSURE_FLOOR_PA : f32 = 0.001;
 
 // A term's absorber columns per metre at relative density d: its n / U times d in its slot, and
 // nothing for a term that is not an absorber.
@@ -147,12 +165,51 @@ fn addColumns(a : AbsorberColumns, b : AbsorberColumns, k : f32) -> AbsorberColu
   return AbsorberColumns(a.first + k * b.first, a.more + k * b.more);
 }
 
-// --- Curves of growth (plan R08, Design notes 5 and 8, R08.T6.c) ----------------------------------
-// A light's curves of growth stand in `absorberCurves` (rgba32float, `tables.ts`): row
-// slot * ABSORBER_SLOTS + k is light slot `slot`'s curve for absorber slot k, its texel j the
-// optical depth -ln T_c per channel (rgb) at node j, u / U = 10^(-3 + j / 40), the grid of
-// `absorbers.ts`'s ABSORBER_CURVE_DECADES and ABSORBER_CURVE_NODES_PER_DECADE. `tables.ts` holds
-// the same constants and refuses a curve on another grid.
+// Slot or pressure channel k of a set of columns: `first` for 0, `more` for 1 to 4.
+fn columnAt(c : AbsorberColumns, k : u32) -> f32 {
+  if (k == 0u) {
+    return c.first;
+  }
+  return c.more[k - 1u];
+}
+
+// The pressure channel of absorber slot k among the line slots `lines`, the bitmask of the slots
+// whose curves have pressure rows (R08.T4.d; `decision-r08-t4d-kdist-chain.md` section 15): its
+// rank among them, in slot order, or -1 for a slot without lines, which reads no pressure. The
+// channels stand in AbsorberColumns as the slots do: 0 in `first`, 1 to 4 in `more`.
+fn pressureChannelOf(lines : u32, k : u32) -> i32 {
+  if (((lines >> k) & 1u) == 0u) {
+    return -1;
+  }
+  return i32(countOneBits(lines & ((1u << k) - 1u)));
+}
+
+// A sample's pressure-weighted columns per metre by channel: each line slot's column per metre
+// times p / ABSORBER_PRESSURE_REFERENCE_PA (`pressureBar`) in its channel, 0 in the rest.
+fn pressureColumnsOf(columns : AbsorberColumns, lines : u32, pressureBar : f32) -> AbsorberColumns {
+  var out = AbsorberColumns(0.0, vec4f(0.0));
+  for (var k = 0u; k < ABSORBER_SLOTS; k++) {
+    let c = pressureChannelOf(lines, k);
+    if (c == 0) {
+      out.first = columnAt(columns, k) * pressureBar;
+    } else if (c > 0) {
+      out.more[u32(c) - 1u] = columnAt(columns, k) * pressureBar;
+    }
+  }
+  return out;
+}
+
+// --- Curves of growth (plan R08, Design notes 5 and 8, R08.T6.c; pressure rows, R08.T4.d) --------
+// A light's curves of growth stand in `absorberCurves` (rgba32float, `tables.ts`'s
+// packAbsorberCurves), each a block of pressure rows, one row for an absorber without lines:
+// - row 0 is a header: its texel k, k < ABSORBER_SLOTS, absorber slot k's first row within a
+//   light's block (r), its rows (g) and its read's top, ln(p / 1 Pa) (b); its texel ABSORBER_SLOTS
+//   the rows one light's block takes (r);
+// - light slot s's curve for absorber slot k at pressure row q is row 1 + s * block + first + q,
+//   its texel j the optical depth -ln T_c per channel (rgb) at node j, u / U = 10^(-3 + j / 40),
+//   the grid of `absorbers.ts`'s ABSORBER_CURVE_DECADES and ABSORBER_CURVE_NODES_PER_DECADE, and
+//   its alpha the row's ln(p / 1 Pa).
+// `tables.ts` holds the same constants and refuses a curve on another grid.
 
 // ln(u / U) at node 0: ln 10^-3.
 const CURVE_FIRST_LN : f32 = -6.907755278982137;
@@ -162,49 +219,113 @@ const CURVE_NODES_PER_LN : f32 = 17.37177927613007;
 // an optical depth: -ln 10^-6.
 const CURVE_DEPTH_MAX : f32 = 13.815510557964274;
 
-// -ln T_c per channel through a path's column `x`, as u / U, from row `row` of `curves`: the read
-// rule of `absorbers.ts`'s absorberTransmittance. Linear in ln u on a log-log scale between the
-// nodes about it, linear between them where either is 0; proportional to u below the first node,
-// the linear regime; the last interval's power law beyond the last node; clamped to
-// [0, -ln 10^-6] as the curve is. 0 for no column.
-fn curveDepth(curves : texture_2d<f32>, row : u32, x : f32) -> vec3f {
-  if (x <= 0.0) {
-    return vec3f(0.0);
-  }
+// -ln T_c per channel through a path's column `x`, as u / U, from row `row` of `curves`, unclamped:
+// `absorbers.ts`'s depthAt. Linear in ln u on a log-log scale between the nodes about it, linear
+// between them where either is 0; proportional to u below the first node, the linear regime; the
+// last interval's power law beyond the last node.
+fn curveRowDepth(curves : texture_2d<f32>, row : u32, x : f32) -> vec3f {
   let nodes = textureDimensions(curves).x;
   // The column's place on the grid, in nodes from node 0.
   let node = (log(x) - CURVE_FIRST_LN) * CURVE_NODES_PER_LN;
-  var depth : vec3f;
   if (node <= 0.0) {
     // exp(ln u - ln u_0) = (u / U) / 10^-3.
-    depth = textureLoad(curves, vec2u(0u, row), 0).rgb * (x * 1000.0);
+    return textureLoad(curves, vec2u(0u, row), 0).rgb * (x * 1000.0);
+  }
+  let k = min(u32(node), nodes - 2u);
+  let t = node - f32(k);
+  let a = textureLoad(curves, vec2u(k, row), 0).rgb;
+  let b = textureLoad(curves, vec2u(k + 1u, row), 0).rgb;
+  let logLog = exp(log(a) + (log(b) - log(a)) * t);
+  return select(a + (b - a) * t, logLog, (a > vec3f(0.0)) & (b > vec3f(0.0)));
+}
+
+// A row's ln(p / 1 Pa), in its first texel's alpha.
+fn curveRowLogPressure(curves : texture_2d<f32>, row : u32) -> f32 {
+  return textureLoad(curves, vec2u(0u, row), 0).a;
+}
+
+// -ln T_c per channel through a path's column `x`, as u / U, at its absorber-weighted pressure
+// ln(p-bar / 1 Pa) `lnP`, from light slot `light`'s curve for absorber slot `k`: the read rule of
+// `absorbers.ts`'s absorberTransmittance (its depthAtPressure, `decision-r08-t4d-kdist-chain.md`
+// ruling 3 and section 8). Each row's depth (`curveRowDepth`), then 4-point Lagrange in ln p-bar
+// on the depth over the four rows nearest, its weights from the rows' own ln p-bar, unclamped
+// between them; linear between the two rows about p-bar on a curve of under four rows; p-bar held
+// at the first row below and at the read's top above; then clamped to [0, -ln 10^-6] as the curve
+// is. One row, for an absorber without lines, is read alone. 0 for no column.
+fn curveDepth(curves : texture_2d<f32>, light : u32, k : u32, x : f32, lnP : f32) -> vec3f {
+  if (x <= 0.0) {
+    return vec3f(0.0);
+  }
+  let header = textureLoad(curves, vec2u(k, 0u), 0);
+  let block = u32(textureLoad(curves, vec2u(ABSORBER_SLOTS, 0u), 0).r);
+  let first = 1u + light * block + u32(header.r);
+  let rows = u32(header.g);
+  var depth : vec3f;
+  if (rows <= 1u) {
+    depth = curveRowDepth(curves, first, x);
   } else {
-    let k = min(u32(node), nodes - 2u);
-    let t = node - f32(k);
-    let a = textureLoad(curves, vec2u(k, row), 0).rgb;
-    let b = textureLoad(curves, vec2u(k + 1u, row), 0).rgb;
-    let logLog = exp(log(a) + (log(b) - log(a)) * t);
-    depth = select(a + (b - a) * t, logLog, (a > vec3f(0.0)) & (b > vec3f(0.0)));
+    let lowest = curveRowLogPressure(curves, first);
+    let top = min(curveRowLogPressure(curves, first + rows - 1u), header.b);
+    let y = clamp(lnP, lowest, top);
+    var r = 0u;
+    while (r < rows - 2u && curveRowLogPressure(curves, first + r + 1u) < y) {
+      r++;
+    }
+    if (rows < 4u) {
+      let lo = curveRowLogPressure(curves, first + r);
+      let hi = curveRowLogPressure(curves, first + r + 1u);
+      let a = curveRowDepth(curves, first + r, x);
+      let b = curveRowDepth(curves, first + r + 1u, x);
+      depth = a + (b - a) * ((y - lo) / (hi - lo));
+    } else {
+      let s0 = min(max(r, 1u) - 1u, rows - 4u);
+      var ys : array<f32, 4>;
+      for (var m = 0u; m < 4u; m++) {
+        ys[m] = curveRowLogPressure(curves, first + s0 + m);
+      }
+      depth = vec3f(0.0);
+      for (var m = 0u; m < 4u; m++) {
+        var w = 1.0;
+        for (var n = 0u; n < 4u; n++) {
+          if (n != m) {
+            w *= (y - ys[n]) / (ys[m] - ys[n]);
+          }
+        }
+        depth += w * curveRowDepth(curves, first + s0 + m, x);
+      }
+    }
   }
   return clamp(depth, vec3f(0.0), vec3f(CURVE_DEPTH_MAX));
 }
 
-// The absorbers' optical depth per channel through a path's columns under light slot `slot`'s
-// curves, summed over the medium's `count` absorber slots.
+// ln(p-bar / 1 Pa) of a path's slot from its column `x` and pressure-weighted column `w`, both
+// over the absorber's vertical column (ABSORBER_PRESSURE_REFERENCE_PA), p-bar at least
+// ABSORBER_PRESSURE_FLOOR_PA; read only where x > 0.
+fn pathLogPressure(x : f32, w : f32) -> f32 {
+  return log(max(ABSORBER_PRESSURE_REFERENCE_PA * w / x, ABSORBER_PRESSURE_FLOOR_PA));
+}
+
+// The absorbers' optical depth per channel through a path's columns, slot by slot, and its
+// pressure-weighted columns, channel by channel among the line slots `lines`
+// (`pressureChannelOf`), under light slot `slot`'s curves, summed over the medium's `count`
+// absorber slots. A slot without lines reads no pressure.
 fn absorberDepth(
   curves : texture_2d<f32>,
   count : u32,
   slot : u32,
+  lines : u32,
   columns : AbsorberColumns,
+  pressureColumns : AbsorberColumns,
 ) -> vec3f {
   var depth = vec3f(0.0);
-  if (count == 0u) {
-    return depth;
-  }
-  let base = slot * ABSORBER_SLOTS;
-  depth += curveDepth(curves, base, columns.first);
-  for (var k = 1u; k < min(count, ABSORBER_SLOTS); k++) {
-    depth += curveDepth(curves, base + k, columns.more[k - 1u]);
+  for (var k = 0u; k < min(count, ABSORBER_SLOTS); k++) {
+    let x = columnAt(columns, k);
+    let c = pressureChannelOf(lines, k);
+    var lnP = 0.0;
+    if (c >= 0) {
+      lnP = pathLogPressure(x, columnAt(pressureColumns, u32(c)));
+    }
+    depth += curveDepth(curves, slot, k, x, lnP);
   }
   return depth;
 }
@@ -215,30 +336,39 @@ fn absorberDepth(
 // applied to the path's column.
 struct AbsorberPath {
   columns : AbsorberColumns,
+  pressureColumns : AbsorberColumns,
   depth : vec3f,
 }
 
 fn absorberPathStart() -> AbsorberPath {
-  return AbsorberPath(AbsorberColumns(0.0, vec4f(0.0)), vec3f(0.0));
+  let none = AbsorberColumns(0.0, vec4f(0.0));
+  return AbsorberPath(none, none, vec3f(0.0));
 }
 
-// The path one step longer: its columns grown by `local`, per metre, over `dtM`, and its depth
-// under light slot `slot`'s curves there. The step's optical depth is the new depth less the
-// path's, never negative since every curve is non-decreasing in u. A medium with no absorber keeps
-// the path as it was.
+// The path one step longer: its columns and pressure-weighted columns grown by `local` and
+// `localPressureColumns`, per metre, over `dtM`, and its depth under light slot `slot`'s curves
+// there, the line slots `lines` reading their channels' pressures. The step's optical depth is the
+// new depth less the path's, never negative for a curve without pressure rows, which is
+// non-decreasing in u; one with lines may fall a little where the path's p-bar moves (R08.T4.d's
+// record). A medium with no absorber keeps the path as it was.
 fn absorberStep(
   curves : texture_2d<f32>,
   count : u32,
   slot : u32,
+  lines : u32,
   path : AbsorberPath,
   local : AbsorberColumns,
+  localPressureColumns : AbsorberColumns,
   dtM : f32,
 ) -> AbsorberPath {
   if (count == 0u) {
     return path;
   }
   let columns = addColumns(path.columns, local, dtM);
-  return AbsorberPath(columns, absorberDepth(curves, count, slot, columns));
+  let pressureColumns = addColumns(path.pressureColumns, localPressureColumns, dtM);
+  return AbsorberPath(
+    columns, pressureColumns, absorberDepth(curves, count, slot, lines, columns, pressureColumns)
+  );
 }
 
 // A march step's in-scattering factor g(x) = (1 - e^-x) / x per channel, x = sigma_t dt the step's
@@ -401,23 +531,37 @@ fn tableAtUnit(table : texture_2d<f32>, unit : vec2f) -> vec4f {
 // The transmittance at the transmittance table's unit range (`transmittanceUnitAt`) for light slot
 // `slot` (plan R08, Design notes 5 and 8, R08.T6.c): the stored optical depth (rgb) and slot 0's
 // column (alpha) read bilinearly, the absorber-column table's slots 1 to 4 likewise where the
-// medium has them, the light's curves of growth added to the optical depth, and the sum
-// exponentiated in f32, so that no light's transmittance is ever stored in rgba16float on its way
-// to a lit point or the disc. The read sites keep R08.T6.g's height forms and its texel mapping.
+// medium has them, and the line slots' pressure-weighted columns beside them by pressure channel
+// (R08.T4.d, `pressureChannelOf` of `lines`: channels 0 to 3 in `pressureColumnTable`'s rgba,
+// channel 4 in `lastPressureColumnTable`'s r), the light's curves of growth added to the optical
+// depth at each slot's p-bar, and the sum exponentiated in f32, so
+// that no light's transmittance is ever stored in rgba16float on its way to a lit point or the
+// disc. The read sites keep R08.T6.g's height forms and its texel mapping.
 fn transmittanceThroughTables(
   depthTable : texture_2d<f32>,
   columnTable : texture_2d<f32>,
+  pressureColumnTable : texture_2d<f32>,
+  lastPressureColumnTable : texture_2d<f32>,
   curves : texture_2d<f32>,
   count : u32,
   slot : u32,
+  lines : u32,
   unit : vec2f,
 ) -> vec3f {
   let stored = tableAtUnit(depthTable, unit);
   var columns = AbsorberColumns(stored.a, vec4f(0.0));
+  var pressureColumns = AbsorberColumns(0.0, vec4f(0.0));
+  if (count > 0u) {
+    let firstFour = tableAtUnit(pressureColumnTable, unit);
+    pressureColumns = AbsorberColumns(
+      firstFour.x,
+      vec4f(firstFour.yzw, tableAtUnit(lastPressureColumnTable, unit).x),
+    );
+  }
   if (count > 1u) {
     columns.more = tableAtUnit(columnTable, unit);
   }
-  return exp(-(stored.rgb + absorberDepth(curves, count, slot, columns)));
+  return exp(-(stored.rgb + absorberDepth(curves, count, slot, lines, columns, pressureColumns)));
 }
 
 // --- The steps of a march (R05.T12.e; moved here from `source.wgsl` in plan R08, R08.T6.d, so that

@@ -50,6 +50,8 @@
 @group(0) @binding(9) var absorberColumns : texture_2d<f32>;
 @group(0) @binding(10) var absorberCurves : texture_2d<f32>;
 @group(0) @binding(11) var<uniform> layerEdges : LayerEdges;
+@group(0) @binding(12) var absorberPressureColumns : texture_2d<f32>;
+@group(0) @binding(13) var lastAbsorberPressureColumn : texture_2d<f32>;
 
 // A ray's quadric about a shell of equatorial radius `radius`, in space scaled by
 // S = diag(1, 1, k) to a sphere of that radius: Q(t) = |S (P + t d)|^2 - radius^2 = qa t^2 +

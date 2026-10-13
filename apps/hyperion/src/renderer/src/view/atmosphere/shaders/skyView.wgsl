@@ -39,6 +39,8 @@
 @group(0) @binding(8) var absorberColumns : texture_2d<f32>;
 @group(0) @binding(9) var absorberCurves : texture_2d<f32>;
 @group(0) @binding(10) var<uniform> layerEdges : LayerEdges;
+@group(0) @binding(11) var absorberPressureColumns : texture_2d<f32>;
+@group(0) @binding(12) var lastAbsorberPressureColumn : texture_2d<f32>;
 
 // A texel's ray: the camera's height on the sky view's sphere and its point there, the ray's
 // direction and its zenith cosine, the sun in the sky frame, and the scattering angle.

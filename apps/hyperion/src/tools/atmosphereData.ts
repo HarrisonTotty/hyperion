@@ -50,6 +50,11 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
+import { broadeningRatios } from "./kDistributions";
+import { LINE_SOURCES, runKDistributions, runKDistributionsMerge } from "./kDistributionsCli";
+import { runBackgroundError, runCellReferences, runEarthReference } from "./lineReferences";
+import { parseHitranLines } from "./molecularLines";
+import { LOWTRAN_SOURCE, parseLowtranContinuum, reduceWaterContinuum } from "./waterContinuum";
 import { CIE_CSV_SHA256, type MatchingSample, parseCie, XYZ_TO_REC709 } from "./solarFactors";
 
 /** The matching functions' file, relative to `apps/hyperion`. */
@@ -151,6 +156,9 @@ export function readChecked(path: string, sha256: string): string {
 /** The absorbers' cross-sections' file, relative to `apps/hyperion`. */
 export const CROSS_SECTIONS_OUTPUT =
   "src/renderer/src/view/atmosphere/absorbers/crossSections.json";
+
+/** O₂'s collision-induced pairs' file (R08.T4.d), relative to `apps/hyperion`. */
+export const OXYGEN_PAIRS_OUTPUT = "src/renderer/src/view/atmosphere/absorbers/oxygenPairs.json";
 
 /** Where a fetched data file came from, and how it is checked. */
 export interface FetchedSource {
@@ -895,10 +903,23 @@ export interface ReducedPairCrossSections {
   readonly stepNm: number;
   /** The temperatures of the columns after the wavelength, K, ascending. */
   readonly temperaturesK: readonly number[];
-  /** `linear` in T between the temperatures, or `lnLinear`, ln σ linear in T. */
-  readonly temperatureLaw: "linear" | "lnLinear";
+  /**
+   * `linear` in T between the temperatures, `lnLinear` (ln σ linear in T), `lnLnLinear` (a power
+   * law in T) or `constant` (one temperature's σ at every T).
+   */
+  readonly temperatureLaw: "linear" | "lnLinear" | "lnLnLinear" | "constant";
   /** The temperatures over which the table gives a measured σ, K. */
   readonly measuredRangeK: readonly [number, number];
+  /** The temperatures over which the law is applied, held beyond, K: the measured range if absent. */
+  readonly lawRangeK?: readonly [number, number];
+  /** The wavelength below which every bin is `estimated`, nm (H₂O's continuum, R08.T4.d). */
+  readonly estimatedBelowNm?: number;
+  /**
+   * For a pair whose second member is `air`, every other gas: each gas's weight in the partner's
+   * column, 1 for a gas not listed, and the gases with which σ is `measured`.
+   */
+  readonly partners?: Readonly<Record<string, number>>;
+  readonly measuredPartners?: readonly string[];
   /** Each row: the vacuum wavelength, nm, then σ at each temperature, m⁵ a molecule pair. */
   readonly rows: readonly (readonly number[])[];
 }
@@ -1057,45 +1078,132 @@ function linearOrHeld(
 }
 
 /**
- * O₂–O₂'s reduction ({@link OXYGEN_PAIR_SOURCE}): Finkenzeller and Volkamer's 297–500 nm sets
- * first, extended below their 223 K by Thalman and Volkamer's 203 K set, then Thalman and
- * Volkamer's, then the B band's and the A band's.
+ * Karman et al. 2018's citation, the computed A- and B-band collision-induced absorption of HITRAN's
+ * `theory_temp_2018` alternate files (reference 27 of HITRAN's CIA references, CIA_References_2024.pdf,
+ * SHA-256 `081b6452…0053`).
+ */
+const KARMAN_2018 =
+  "T. Karman, M. A. J. Koenis, A. Banerjee, D. H. Parker, I. E. Gordon, A. van der Avoird, W. J. " +
+  "van der Zande and G. C. Groenenboom, O2-O2 and O2-N2 collision-induced absorption mechanisms " +
+  "unravelled, Nature Chem. 10 (2018) 549-554, DOI 10.1038/s41557-018-0015-x";
+
+/**
+ * The label {@link labelledSets} gives the sets of HITRAN's `theory_temp_2018` alternate files, so
+ * that their reference 27 is not the main O₂–O₂ file's own reference 27 (an infrared set at 293 K,
+ * outside the range).
+ */
+export const THEORY_2018_LABEL = "2018:";
+
+/** A file's sets with a label before each set's reference, to keep two files' references apart. */
+export function labelledSets(sets: ReadonlyArray<CiaSet>, label: string): CiaSet[] {
+  return sets.map((set) => ({ ...set, reference: `${label}${set.reference}` }));
+}
+
+/**
+ * HITRAN's O₂–O₂ alternate file `O2-O2_theory_temp_2018.cia`: Karman et al. 2018's computed sets
+ * (headed "Theory fit to expt.", reference 27) at 15 temperatures, 206–346 K every 10 K, for the
+ * A band's b¹Σg⁺ ← X³Σg⁻ (0, 0) over 12,802–13,402 cm⁻¹ (746.2–781.1 nm) and the B band's (1, 0)
+ * over 14,206–14,806 cm⁻¹ (675.4–703.9 nm), beside the a¹Δg bands in the infrared.
  *
  * @remarks
- * The table's temperatures are the union of the visible double transitions' sets' (203–293 K).
- * It is measured over 203–287 K, where every double-transition bin lies between two of the
- * measurements' own sets (`decision-r08-t4b-t12c.md`, follow-up 3, ruling 7: the range widens to
- * Thalman and Volkamer's 203 K); above 287 K the 630 nm band's bins are held at 287 K. The B band's
- * and the A band's, each measured at one temperature, are held at every temperature, a stated
- * approximation: they reach a fiftieth (B) and a fifth (A, 724–760 nm) of the double transitions'
- * 577 nm peak.
+ * HITRAN's CIA readme (CIA_Readme_2024.pdf, SHA-256 `694bd796…9830`, its Table 1) lists the set
+ * among its Alternate files, which "could have a clear advantage over the recommended set for
+ * specific applications, e.g. extended temperature ranges"; they replace the B and A bands' single
+ * temperatures here (`decision-r08-t4b-t12c.md`, follow-up 5, ruling 7, `measured` over 206–346 K).
+ */
+export const OXYGEN_PAIR_THEORY_SOURCE: FetchedSource = {
+  citation: `${KARMAN_2018}, as HITRAN's collision-induced absorption section gives it (alternate file O2-O2_theory_temp_2018.cia; J. Terragni et al., J. Quant. Spectrosc. Radiat. Transfer 347 (2025) 109631, DOI 10.1016/j.jqsrt.2025.109631)`,
+  url: "https://hitran.org/data/CIA/alternate/O2-O2_theory_temp_2018.cia",
+  sha256: "0330b4ae088acf7a392be34b0206ddcd4fe40700f40eebc99312c060b9f559d4",
+  fetched: "2026-10-12",
+  terms: HITRAN_TERMS,
+};
+
+/**
+ * HITRAN's O₂–N₂ alternate file `O2-N2_theory_temp_2018.cia`: Karman et al. 2018's computed sets
+ * (reference 27) at 206–346 K every 10 K for the A band over 12,802–13,402 cm⁻¹ (746.2–781.1 nm)
+ * and the a¹Δg band in the infrared; it holds no B-band set.
+ */
+export const OXYGEN_NITROGEN_PAIR_THEORY_SOURCE: FetchedSource = {
+  citation: `${KARMAN_2018}, as HITRAN's collision-induced absorption section gives it (alternate file O2-N2_theory_temp_2018.cia; J. Terragni et al., J. Quant. Spectrosc. Radiat. Transfer 347 (2025) 109631, DOI 10.1016/j.jqsrt.2025.109631)`,
+  url: "https://hitran.org/data/CIA/alternate/O2-N2_theory_temp_2018.cia",
+  sha256: "ddc92262115bd348d7199b8cf6f0074f38c07c4873329263b657120db7bab329",
+  fetched: "2026-10-12",
+  terms: HITRAN_TERMS,
+};
+
+/** A fetched file's name, the last part of its URL. */
+function fileName(source: FetchedSource): string {
+  return source.url.split("/").at(-1) ?? source.url;
+}
+
+/** Two fetched files as one source: both citations, URLs and checksums, each after its file's name. */
+function bothSources(primary: FetchedSource, theory: FetchedSource): FetchedSource {
+  return {
+    citation: `${primary.citation}; with ${theory.citation}`,
+    url: `${primary.url} and ${theory.url}`,
+    sha256: `${fileName(primary)} ${primary.sha256}; ${fileName(theory)} ${theory.sha256}`,
+    fetched: `${primary.fetched} and ${theory.fetched}`,
+    terms: primary.terms,
+  };
+}
+
+/** Karman et al. 2018's temperatures, K: 206–346 K every 10 K. */
+export const KARMAN_TEMPERATURES_K: readonly number[] = Array.from(
+  { length: 15 },
+  (_, i) => 206 + 10 * i,
+);
+
+/** A sorted union of temperature lists, each once. */
+function unionK(...lists: ReadonlyArray<ReadonlyArray<number>>): number[] {
+  return [...new Set(lists.flat())].toSorted((a, b) => a - b);
+}
+
+/**
+ * O₂–O₂'s reduction ({@link OXYGEN_PAIR_SOURCE} and {@link OXYGEN_PAIR_THEORY_SOURCE}):
+ * Finkenzeller and Volkamer's 297–500 nm sets first, extended below their 223 K by Thalman and
+ * Volkamer's 203 K set, then Thalman and Volkamer's, then Karman et al. 2018's B and A bands, then
+ * the B band's and the A band's single temperatures where Karman's sets do not cover a bin whole.
+ *
+ * @remarks
+ * The table's temperatures are the union of the visible double transitions' sets' (203–293 K) and
+ * Karman's (206–346 K), so that each region's own piecewise-linear law in T is kept exactly. It is
+ * measured over 206–287 K, where every double-transition bin lies between two of the measurements'
+ * own sets (`decision-r08-t4b-t12c.md`, follow-up 3, ruling 7) and every B- and A-band bin lies
+ * within Karman's computed range (follow-up 5, ruling 7); outside it a bin's nearest set is held.
+ * Karman's B band covers 676–703 nm whole and their A band 747–760 nm, so Spiering et al.'s B band
+ * keeps 672–675 nm and Tran et al.'s A band 733–746 nm (up to 15% of the 760 nm bin), each at its
+ * one temperature, held at every other: a stated approximation, recorded.
  */
 export const OXYGEN_PAIR_REDUCTION: PairReduction = {
   pair: "O2+O2",
   members: ["O2", "O2"],
-  source: OXYGEN_PAIR_SOURCE,
+  source: bothSources(OXYGEN_PAIR_SOURCE, OXYGEN_PAIR_THEORY_SOURCE),
   regions: [
     { reference: "54", colderFrom: "32" },
     { reference: "32", colderFrom: undefined },
+    { reference: `${THEORY_2018_LABEL}27`, colderFrom: undefined },
     { reference: "30", colderFrom: undefined },
     { reference: "4", colderFrom: undefined },
   ],
   setTemperaturesK: undefined,
-  temperaturesK: [203, 223, 233, 253, 263, 273, 287, 293],
+  temperaturesK: unionK([203, 223, 233, 253, 263, 273, 287, 293], KARMAN_TEMPERATURES_K),
   temperatureLaw: "linear",
-  measuredRangeK: [203, 287],
+  measuredRangeK: [206, 287],
   reduction:
-    "The file's sets on vacuum wavelengths 1e7/nu. Each 1 nm bin, [nm - 0.5, nm + 0.5), takes " +
-    "the first of references 54 (Finkenzeller and Volkamer 2022, 297-500 nm at 223, 263 and 293 " +
-    "K, with reference 32's 203 K set below them), 32 (Thalman and Volkamer 2013, 335-654 nm at " +
-    "203-293 K), 30 (Spiering et al. 2011, the B band's, 671-704 nm at 293 K) and 4 (Tran et al. " +
-    "2006, the A band's, 723-794 nm at 296 K) with a set covering it whole: at each of those " +
-    "sets' temperatures the mean of its points in the bin, linear in T between them and held " +
-    "beyond, converted from cm5 to m5 and written to 6 significant figures. A bin no set covers " +
-    "(654-671, 704-723 and 794-800 nm) is 0, and a mean below zero, the measurements' noise, is " +
-    "written as 0. Measured over 203-287 K, where every double-transition bin lies between two " +
-    "of the measurements' sets; the B and A bands' single temperatures are held at every " +
-    "temperature.",
+    "The main file's sets and the theory file's (labelled 2018:), on vacuum wavelengths 1e7/nu. " +
+    "Each 1 nm bin, [nm - 0.5, nm + 0.5), takes the first of references 54 (Finkenzeller and " +
+    "Volkamer 2022, 297-500 nm at 223, 263 and 293 K, with reference 32's 203 K set below them), " +
+    "32 (Thalman and Volkamer 2013, 335-654 nm at 203-293 K), 2018:27 (Karman et al. 2018, the B " +
+    "band 675.4-703.9 nm and the A band 746.2-781.1 nm at 206-346 K), 30 (Spiering et al. 2011, the " +
+    "B band's, 671-704 nm at 293 K) and 4 (Tran et al. 2006, the A band's, 723-794 nm at 296 K) " +
+    "with a set covering it whole: at each of those sets' temperatures the mean of its points in " +
+    "the bin, linear in T between them and held beyond, converted from cm5 to m5 and written to 6 " +
+    "significant figures. A bin no set covers (654-671, 704-723 and 794-800 nm) is 0, and a mean " +
+    "below zero, the measurements' noise, is written as 0. Measured over 206-287 K, where every " +
+    "double-transition bin lies between two of the measurements' sets and every B- and A-band bin " +
+    "within Karman et al.'s; Spiering et al.'s 672-675 nm and Tran et al.'s 733-746 nm, which " +
+    "Karman et al.'s sets do not cover whole, are held at their one temperature.",
 };
 
 /**
@@ -1165,23 +1273,34 @@ export const OXYGEN_CARBON_DIOXIDE_PAIR_REDUCTION: PairReduction = {
 };
 
 /**
- * O₂–N₂'s reduction ({@link OXYGEN_NITROGEN_PAIR_SOURCE}): the A band's set, nonzero over
- * 733–760 nm of the bake range, at its one temperature, 296 K, and measured there alone.
+ * O₂–N₂'s reduction ({@link OXYGEN_NITROGEN_PAIR_SOURCE} and
+ * {@link OXYGEN_NITROGEN_PAIR_THEORY_SOURCE}): Karman et al. 2018's A band over 747–760 nm, then
+ * Tran et al.'s A-band set, nonzero from 733 nm, where Karman's do not cover a bin whole.
+ *
+ * @remarks
+ * Measured over Karman's 206–346 K. Tran et al.'s 733–746 nm bins, at 296 K alone, are held at
+ * every other temperature: a stated approximation, as O₂–O₂'s are.
  */
 export const OXYGEN_NITROGEN_PAIR_REDUCTION: PairReduction = {
   pair: "O2+N2",
   members: ["O2", "N2"],
-  source: OXYGEN_NITROGEN_PAIR_SOURCE,
-  regions: [{ reference: "4", colderFrom: undefined }],
+  source: bothSources(OXYGEN_NITROGEN_PAIR_SOURCE, OXYGEN_NITROGEN_PAIR_THEORY_SOURCE),
+  regions: [
+    { reference: `${THEORY_2018_LABEL}27`, colderFrom: undefined },
+    { reference: "4", colderFrom: undefined },
+  ],
   setTemperaturesK: undefined,
-  temperaturesK: [296],
+  temperaturesK: unionK([296], KARMAN_TEMPERATURES_K),
   temperatureLaw: "linear",
-  measuredRangeK: [296, 296],
+  measuredRangeK: [206, 346],
   reduction:
-    "The file's A-band set (reference 4, Tran et al. 2006, 12600-13840 cm-1 at 296 K) on vacuum " +
-    "wavelengths 1e7/nu: each 1 nm bin, [nm - 0.5, nm + 0.5), that the set covers whole, the mean " +
-    "of its points in the bin, converted from cm5 to m5 and written to 6 significant figures; " +
-    "every other bin is 0. Measured at 296 K alone; held, estimated, at every other temperature.",
+    "The theory file's A-band sets (labelled 2018:27, Karman et al. 2018, 12802-13402 cm-1, " +
+    "746.2-781.1 nm, at 206-346 K) and then the main file's (reference 4, Tran et al. 2006, " +
+    "12600-13840 cm-1 at 296 K), on vacuum wavelengths 1e7/nu: each 1 nm bin, [nm - 0.5, nm + " +
+    "0.5), takes the first with a set that covers it whole, at each of its sets' temperatures the " +
+    "mean of its points in the bin, linear in T between them and held beyond, converted from cm5 " +
+    "to m5 and written to 6 significant figures; every other bin is 0. Measured over 206-346 K; " +
+    "Tran et al.'s 733-746 nm, which Karman et al.'s sets do not cover whole, are held at 296 K.",
 };
 
 /**
@@ -1480,22 +1599,31 @@ export function reduceHydrogenPair(
   };
 }
 
-/** The file's text: JSON, one wavelength's row a line, every number in its shortest round-trip form. */
-export function crossSectionsText(
-  tables: readonly ReducedCrossSections[],
-  pairs: readonly ReducedPairCrossSections[],
-): string {
-  const description =
-    "Absorption cross-sections of the absorbers the client draws, on vacuum wavelengths " +
-    "(rendering plan R08, R08.T4.b and R08.T4.c), written by apps/hyperion/scripts/" +
-    "atmosphereData.mjs cross-sections from the fetched sources named here, which are not " +
-    "committed. Each table's rows are [nm, sigma at each of temperaturesK]: m2 a molecule in " +
-    "tables, and m5 a molecule pair in pairs, whose absorption coefficient is sigma n_A n_B. " +
-    "Reduced values; the citations are in NOTICE's Data section.";
-  const common = (
-    table: ReducedCrossSections | ReducedPairCrossSections,
-    s: FetchedSource,
-  ): string[] => [
+/** A reduced table's fields after its key, as the cross-sections files write them. */
+function tableFields(table: ReducedCrossSections | ReducedPairCrossSections): string[] {
+  const s = table.source;
+  const pairFields =
+    "pair" in table
+      ? [
+          ...(table.lawRangeK === undefined ? [] : [`      "lawRangeK": ${line(table.lawRangeK)}`]),
+          ...(table.estimatedBelowNm === undefined
+            ? []
+            : [`      "estimatedBelowNm": ${table.estimatedBelowNm}`]),
+          ...(table.partners === undefined
+            ? []
+            : [
+                `      "partners": {${Object.entries(table.partners)
+                  .map(([gas, w]) => `${JSON.stringify(gas)}: ${Number(w.toPrecision(4))}`)
+                  .join(", ")}}`,
+              ]),
+          ...(table.measuredPartners === undefined
+            ? []
+            : [
+                `      "measuredPartners": [${table.measuredPartners.map((g) => JSON.stringify(g)).join(", ")}]`,
+              ]),
+        ]
+      : [];
+  return [
     `      "source": ${JSON.stringify(s.citation)}`,
     `      "url": ${JSON.stringify(s.url)}`,
     `      "sha256": ${JSON.stringify(s.sha256)}`,
@@ -1507,27 +1635,60 @@ export function crossSectionsText(
     `      "temperaturesK": ${line(table.temperaturesK)}`,
     `      "temperatureLaw": ${JSON.stringify(table.temperatureLaw)}`,
     `      "measuredRangeK": ${line(table.measuredRangeK)}`,
+    ...pairFields,
     `      "rows": [\n${table.rows.map((r) => `        ${line(r)}`).join(",\n")}\n      ]`,
   ];
+}
+
+/** A pair table as the cross-sections files write it. */
+function pairEntry(table: ReducedPairCrossSections): string {
+  const fields = [
+    `      "pair": ${JSON.stringify(table.pair)}`,
+    `      "members": [${table.members.map((m) => JSON.stringify(m)).join(", ")}]`,
+    ...tableFields(table),
+  ];
+  return `    {\n${fields.join(",\n")}\n    }`;
+}
+
+/** The text of `crossSections.json`: its species tables and its pairs. */
+export function crossSectionsText(
+  tables: readonly ReducedCrossSections[],
+  pairs: readonly ReducedPairCrossSections[],
+): string {
+  const description =
+    "Absorption cross-sections of the absorbers the client draws, on vacuum wavelengths " +
+    "(rendering plan R08, R08.T4.b and R08.T4.c), written by apps/hyperion/scripts/" +
+    "atmosphereData.mjs cross-sections from the fetched sources named here, which are not " +
+    "committed. Each table's rows are [nm, sigma at each of temperaturesK]: m2 a molecule in " +
+    "tables, and m5 a molecule pair in pairs, whose absorption coefficient is sigma n_A n_B. " +
+    "Reduced values; the citations are in NOTICE's Data section.";
   const entries = tables.map((table) => {
-    const fields = [
-      `      "species": ${JSON.stringify(table.species)}`,
-      ...common(table, table.source),
-    ];
-    return `    {\n${fields.join(",\n")}\n    }`;
-  });
-  const pairEntries = pairs.map((table) => {
-    const fields = [
-      `      "pair": ${JSON.stringify(table.pair)}`,
-      `      "members": [${table.members.map((m) => JSON.stringify(m)).join(", ")}]`,
-      ...common(table, table.source),
-    ];
+    const fields = [`      "species": ${JSON.stringify(table.species)}`, ...tableFields(table)];
     return `    {\n${fields.join(",\n")}\n    }`;
   });
   return (
     `{\n  "description": ${JSON.stringify(description)},\n` +
     `  "tables": [\n${entries.join(",\n")}\n  ],\n` +
-    `  "pairs": [\n${pairEntries.join(",\n")}\n  ]\n}\n`
+    `  "pairs": [\n${pairs.map(pairEntry).join(",\n")}\n  ]\n}\n`
+  );
+}
+
+/**
+ * The text of `oxygenPairs.json` (R08.T4.d): O₂'s collision-induced pairs, kept apart from
+ * `crossSections.json`, which the 500 kB file hook no longer leaves room in for their widened
+ * temperatures.
+ */
+export function oxygenPairsText(pairs: readonly ReducedPairCrossSections[]): string {
+  const description =
+    "Collision-induced absorption cross-sections of O2's pairs, on vacuum wavelengths (rendering " +
+    "plan R08, R08.T4.c and R08.T4.d, Karman et al. 2018's A and B bands), written by " +
+    "apps/hyperion/scripts/atmosphereData.mjs cross-sections from the fetched sources named " +
+    "here, which are not committed. Each table's rows are [nm, sigma at each of temperaturesK], " +
+    "m5 a molecule pair, whose absorption coefficient is sigma n_A n_B. Reduced values; the " +
+    "citations are in NOTICE's Data section.";
+  return (
+    `{\n  "description": ${JSON.stringify(description)},\n` +
+    `  "pairs": [\n${pairs.map(pairEntry).join(",\n")}\n  ]\n}\n`
   );
 }
 
@@ -1536,7 +1697,19 @@ const USAGE =
   "       atmosphereData cross-sections --ozone <serdyuchenkogorshelev5digits.dat> " +
   "--methane <ch4.txt> --so2 <file> (each of the snapshot's four) --o2o2 <O2-O2_2024.cia> " +
   "--h2he <H2-He_2011.cia> --o2n2 <O2-N2_2024.cia> --o2co2 <O2-CO2_2024.cia> --h2h2 <file> " +
-  "(each of Borysow's three) [--out <json>]";
+  "(each of Borysow's three) --o2o2-theory <O2-O2_theory_temp_2018.cia> " +
+  "--o2n2-theory <O2-N2_theory_temp_2018.cia> --lowtran <lowtran7.f> --h2o-lines " +
+  "<h2o-13100-26400-broad.csv> [--out <json>] [--pairs-out <json>]\n" +
+  "       atmosphereData k-distributions --species <key> --lines <file> --tips <dir> " +
+  "[--cells a-b] [--stride n:k] [--temperatures t,...] --out <partial.json>\n" +
+  "       atmosphereData k-distributions-merge --species <key> --out-dir <dir> [--lines <file>] " +
+  "<partial.json>...\n" +
+  "       atmosphereData earth-reference --paths <earthLinePaths.json> --o2-lines <csv> " +
+  "--h2o-lines <csv> --tips <dir> --out <json>\n" +
+  "       atmosphereData cell-references --species <key> --lines <file> --tips <dir> " +
+  "--table <sidecar.json> --cells <nm,...> --out <json>\n" +
+  "       atmosphereData background-error --species <key> --lines <file> --tips <dir> " +
+  "--cells <nm,...> --gas CO2|H2|He|H2O [--pressures <Pa,...>]";
 
 /** `matching`: writes `colourMatching.json`. */
 function runMatching(rest: readonly string[]): void {
@@ -1566,10 +1739,19 @@ function runCrossSections(rest: readonly string[]): void {
       o2n2: { type: "string" },
       o2co2: { type: "string" },
       h2h2: { type: "string", multiple: true },
+      "o2o2-theory": { type: "string" },
+      "o2n2-theory": { type: "string" },
+      lowtran: { type: "string" },
+      "h2o-lines": { type: "string" },
       out: { type: "string" },
+      "pairs-out": { type: "string" },
     },
   });
   const { ozone: ozonePath, methane: methanePath, so2, o2o2, h2he, o2n2, o2co2, h2h2 } = values;
+  const o2o2Theory = values["o2o2-theory"];
+  const o2n2Theory = values["o2n2-theory"];
+  const lowtran = values.lowtran;
+  const waterLines = values["h2o-lines"];
   if (
     ozonePath === undefined ||
     methanePath === undefined ||
@@ -1578,19 +1760,31 @@ function runCrossSections(rest: readonly string[]): void {
     h2he === undefined ||
     o2n2 === undefined ||
     o2co2 === undefined ||
-    h2h2 === undefined
+    h2h2 === undefined ||
+    o2o2Theory === undefined ||
+    o2n2Theory === undefined ||
+    lowtran === undefined ||
+    waterLines === undefined
   ) {
     throw new Error(USAGE);
   }
   const ozone = binOzone(parseOzone(readChecked(ozonePath, OZONE_SOURCE.sha256)));
   const methane = resampleMethane(parseMethane(readChecked(methanePath, METHANE_SOURCE.sha256)));
   const sulphurDioxide = binSulphurDioxide(readSulphurDioxide(so2));
+  const theorySets = (path: string, sha256: string): CiaSet[] =>
+    labelledSets(parseCia(readChecked(path, sha256)), THEORY_2018_LABEL);
   const oxygen = reducePair(
-    parseCia(readChecked(o2o2, OXYGEN_PAIR_SOURCE.sha256)),
+    [
+      ...parseCia(readChecked(o2o2, OXYGEN_PAIR_SOURCE.sha256)),
+      ...theorySets(o2o2Theory, OXYGEN_PAIR_THEORY_SOURCE.sha256),
+    ],
     OXYGEN_PAIR_REDUCTION,
   );
   const oxygenNitrogen = reducePair(
-    parseCia(readChecked(o2n2, OXYGEN_NITROGEN_PAIR_SOURCE.sha256)),
+    [
+      ...parseCia(readChecked(o2n2, OXYGEN_NITROGEN_PAIR_SOURCE.sha256)),
+      ...theorySets(o2n2Theory, OXYGEN_NITROGEN_PAIR_THEORY_SOURCE.sha256),
+    ],
     OXYGEN_NITROGEN_PAIR_REDUCTION,
   );
   const oxygenCarbonDioxide = reducePair(
@@ -1602,19 +1796,31 @@ function runCrossSections(rest: readonly string[]): void {
     HYDROGEN_HELIUM_PAIR_REDUCTION,
   );
   const hydrogen = reduceHydrogenPair(readHydrogenPair(h2h2));
+  const waterSource = LINE_SOURCES["H2O"];
+  if (waterSource === undefined) {
+    throw new Error("the k-distribution tool lists no H2O lines");
+  }
+  const h2oLines = parseHitranLines(readChecked(waterLines, waterSource.lines.sha256));
+  const h2oPartners = Object.fromEntries(
+    Object.entries(broadeningRatios(h2oLines)).filter(([gas]) => gas !== "self" && gas !== "H2O"),
+  );
+  const water = reduceWaterContinuum(
+    parseLowtranContinuum(readChecked(lowtran, LOWTRAN_SOURCE.sha256)),
+    h2oLines,
+    h2oPartners,
+  );
   const out = values.out ?? CROSS_SECTIONS_OUTPUT;
+  const pairsOut = values["pairs-out"] ?? OXYGEN_PAIRS_OUTPUT;
   writeFileSync(
     out,
     crossSectionsText(
       [ozone.reduced, methane, sulphurDioxide.reduced],
-      [
-        oxygen.reduced,
-        oxygenNitrogen.reduced,
-        oxygenCarbonDioxide.reduced,
-        hydrogenHelium.reduced,
-        hydrogen,
-      ],
+      [hydrogenHelium.reduced, hydrogen, water.self, water.foreign],
     ),
+  );
+  writeFileSync(
+    pairsOut,
+    oxygenPairsText([oxygen.reduced, oxygenNitrogen.reduced, oxygenCarbonDioxide.reduced]),
   );
   process.stdout.write(
     `atmosphere-data: wrote ${ozone.reduced.rows.length} ozone rows (${ozone.negatives} negative ` +
@@ -1622,8 +1828,10 @@ function runCrossSections(rest: readonly string[]): void {
       `sulphur dioxide rows (${sulphurDioxide.negatives} as 0), ${oxygen.reduced.rows.length} ` +
       `O2-O2 rows (${oxygen.negatives} as 0), ${oxygenNitrogen.reduced.rows.length} O2-N2 rows, ` +
       `${oxygenCarbonDioxide.reduced.rows.length} O2-CO2 rows, ` +
-      `${hydrogenHelium.reduced.rows.length} H2-He rows (${hydrogenHelium.negatives} as 0) ` +
-      `and ${hydrogen.rows.length} H2-H2 rows to ${out}\n`,
+      `${hydrogenHelium.reduced.rows.length} H2-He rows (${hydrogenHelium.negatives} as 0), ` +
+      `${hydrogen.rows.length} H2-H2 rows and H2O's continuum (CKD over the lines below 567 nm: ` +
+      `foreign ${water.foreignRatio.toPrecision(4)}, self ${water.selfRatio.toPrecision(4)}, ` +
+      `self 260 K / 296 K ${water.selfColdRatio.toPrecision(4)}) to ${out}, and O2's pairs to ${pairsOut}\n`,
   );
 }
 
@@ -1693,6 +1901,16 @@ export function main(args: readonly string[]): number {
       runMatching(rest);
     } else if (command === "cross-sections") {
       runCrossSections(rest);
+    } else if (command === "k-distributions") {
+      runKDistributions(rest);
+    } else if (command === "k-distributions-merge") {
+      return runKDistributionsMerge(rest);
+    } else if (command === "earth-reference") {
+      runEarthReference(rest);
+    } else if (command === "cell-references") {
+      runCellReferences(rest);
+    } else if (command === "background-error") {
+      runBackgroundError(rest);
     } else {
       throw new Error(USAGE);
     }

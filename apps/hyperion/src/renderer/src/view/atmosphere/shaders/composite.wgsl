@@ -37,7 +37,8 @@ struct Draw {
   output : vec4f,
   exact : vec4f,
   // x: the atmosphere's height H above the ground, m, formed in f64; y: how many of the medium's
-  // terms are absorbers, 0 to ABSORBER_SLOTS (R08.T6.c); z, w: unused.
+  // terms are absorbers, 0 to ABSORBER_SLOTS (R08.T6.c); z: the medium's line slots, the bitmask
+  // `common.wgsl`'s `pressureChannelOf` reads (R08.T4.d); w: unused.
   shell : vec4f,
 }
 
@@ -51,6 +52,8 @@ struct Draw {
 @group(2) @binding(6) var linearClamp : sampler;
 @group(2) @binding(7) var absorberColumns : texture_2d<f32>;
 @group(2) @binding(8) var absorberCurves : texture_2d<f32>;
+@group(2) @binding(9) var absorberPressureColumns : texture_2d<f32>;
+@group(2) @binding(10) var lastAbsorberPressureColumn : texture_2d<f32>;
 
 const HALF_MAX : f32 = 65504.0;
 
@@ -82,9 +85,9 @@ fn viewOf() -> AtmosphereView {
 }
 
 // The sun's transmittance from the camera along `dir` to space, per channel, on the tables'
-// sphere: the table's optical depth and absorber columns, with the sun's curves of growth (light
-// slot 0), exponentiated in f32 (`transmittanceThroughTables`, R08.T6.c), so that the disc's light
-// is never a stored half float.
+// sphere: the table's optical depth, absorber columns and pressure-weighted columns, with the sun's
+// curves of growth (light slot 0), exponentiated in f32 (`transmittanceThroughTables`, R08.T6.c,
+// R08.T4.d), so that the disc's light is never a stored half float.
 fn transmittanceToSpace(v : AtmosphereView, dir : vec3f) -> vec3f {
   let bottom = v.tables.x;
   let topM = draw.shell.x;
@@ -96,7 +99,8 @@ fn transmittanceToSpace(v : AtmosphereView, dir : vec3f) -> vec3f {
   let unit = transmittanceUnitAt(bottom, topM, heightM, mu);
   let count = min(u32(draw.shell.y), ABSORBER_SLOTS);
   return transmittanceThroughTables(
-    transmittance, absorberColumns, absorberCurves, count, 0u, unit
+    transmittance, absorberColumns, absorberPressureColumns, lastAbsorberPressureColumn,
+    absorberCurves, count, 0u, u32(draw.shell.z), unit
   );
 }
 

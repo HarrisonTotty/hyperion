@@ -1,15 +1,18 @@
 import { describe, expect, it } from "vitest";
 
+import { lineAbsorberMedium } from "../test/atmosphereFixtures";
 import { quaternion } from "../view/camera/quaternion";
 import { R05_EARTH_REFERENCE } from "../view/atmosphere/earth";
 import { type AtmosphereMedium, tabulatedDensity } from "../view/atmosphere/medium";
-import { NO_ABSORBER_CURVES } from "../view/atmosphere/tables";
+import { kernelMedium, NO_ABSORBER_CURVES } from "../view/atmosphere/tables";
 import {
+  multiScatteringTwin,
   type PlanetTwin,
   type RayMarchSettings,
   rayMarchTwin,
   skyViewTwin,
   type TwinTable,
+  type TwinTransmittance,
   twinView,
 } from "../view/atmosphere/tablesCpu";
 import { replyTo, runTwinJob, type TwinJob } from "./twinJobs";
@@ -34,6 +37,8 @@ const PLANET: PlanetTwin = {
   bottomRadiusM: RADIUS_M,
   transmittance: table(16, 8, 0.05),
   absorberColumns: { ...table(16, 8, 0), texels: new Float64Array(16 * 8 * 4) },
+  absorberPressureColumns: { ...table(16, 8, 0), texels: new Float64Array(16 * 8 * 4) },
+  lastAbsorberPressureColumn: { ...table(1, 1, 0), texels: new Float64Array(4) },
   curves: NO_ABSORBER_CURVES,
   multiScattering: table(8, 8, 1e-3),
 };
@@ -92,6 +97,39 @@ describe("the twins as jobs for the twin workers", () => {
     );
     const direct = rayMarchTwin(PLANET, VIEW, settings, () => depth);
     expect(answer.kind === "rayMarch" && identical(answer.twin, direct)).toBe(true);
+  });
+
+  it("carries a line absorber's medium, curves and pressure columns to a worker intact", () => {
+    // R08.T4.d's medium crosses as the smoke's R08.T6.b group sends it: its curves' pressure rows,
+    // its line species' k-distributions and its pressure profile, with the pressure-column tables.
+    const { medium, curves } = lineAbsorberMedium();
+    const read = kernelMedium(medium);
+    const transmittance: TwinTransmittance = {
+      transmittance: table(16, 8, 0.05),
+      absorberColumns: table(16, 8, 0.01),
+      absorberPressureColumns: table(16, 8, 0.005),
+      lastAbsorberPressureColumn: { ...table(1, 1, 0), texels: new Float64Array(4) },
+      curves,
+    };
+    const job: TwinJob = {
+      kind: "multiScattering",
+      medium: read,
+      bottomRadiusM: RADIUS_M,
+      transmittance,
+    };
+    const cloned = structuredClone(job);
+    expect(cloned).toStrictEqual(job);
+    // One texel of the twin over the clone, as a worker forms it, against the page's own.
+    const texel = [[16, 16]] as const;
+    const across = multiScatteringTwin(
+      cloned.medium,
+      RADIUS_M,
+      cloned.transmittance,
+      undefined,
+      texel,
+    );
+    const direct = multiScatteringTwin(read, RADIUS_M, transmittance, undefined, texel);
+    expect(identical(across, direct)).toBe(true);
   });
 
   it("replies with the name and message of what the twin throws", () => {

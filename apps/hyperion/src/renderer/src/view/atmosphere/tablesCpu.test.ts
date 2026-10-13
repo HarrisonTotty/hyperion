@@ -140,6 +140,8 @@ let earth: PlanetTwin = {
   bottomRadiusM: R1,
   transmittance: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
   absorberColumns: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
+  absorberPressureColumns: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
+  lastAbsorberPressureColumn: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
   curves: [],
   multiScattering: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
 };
@@ -1241,7 +1243,7 @@ function texelTransmittance(tables: TwinTransmittance, of: AtmosphereMedium, i: 
   const amounts = slots.map((slot, k) =>
     scaledAmount(slot.verticalAmount, relativeAmounts[k] ?? 0),
   );
-  const depth: Rgb3 = slots.length === 0 ? [0, 0, 0] : [...curvesOpticalDepth(curves, amounts)];
+  const depth: Rgb3 = slots.length === 0 ? [0, 0, 0] : [...curvesOpticalDepth(curves, amounts, [])];
   const tau = (c: number): number => tables.transmittance.texels[i * 4 + c] ?? Number.NaN;
   return [
     Math.exp(-(tau(0) + depth[0])),
@@ -1409,6 +1411,7 @@ describe("four absorbers, one a molecule pair, under their curves of growth", ()
         const absorbed = curvesOpticalDepth(
           curves[0] ?? [],
           absorberAmountsToTop(four, R1, rM, mu),
+          [],
         );
         const t = texelTransmittance(tables, four, y * size.widthTexels + x);
         for (const c of CHANNELS) {
@@ -1441,7 +1444,7 @@ describe("four absorbers, one a molecule pair, under their curves of growth", ()
     const mu = ray.direction.z;
     const tau = opticalDepth(four, view.cameraRadiusM, rM, mu);
     const columns = absorberAmounts(four, view.cameraRadiusM, rM, mu);
-    const absorbed = curvesOpticalDepth(curves[0] ?? [], columns);
+    const absorbed = curvesOpticalDepth(curves[0] ?? [], columns, []);
     for (const c of CHANNELS) {
       expect(relative(marched.transmittance[c], Math.exp(-(tau[c] + absorbed[c])))).toBeLessThan(
         1e-3,
@@ -1475,6 +1478,7 @@ describe("four absorbers, one a molecule pair, under their curves of growth", ()
         const absorbed = curvesOpticalDepth(
           curves[0] ?? [],
           absorberAmountsToTop(four, R1, rM, mu),
+          [],
         );
         for (const c of CHANNELS) {
           const oracle = Math.exp(-(tau[c] + absorbed[c]));
@@ -1496,8 +1500,8 @@ describe("four absorbers, one a molecule pair, under their curves of growth", ()
       // Below the first node, on and between nodes, and past the last, 10⁻⁵ to 10⁴ of U.
       for (let i = 0; i <= 900; i += 1) {
         const x = 10 ** (-5 + i / 100);
-        const rule = absorberTransmittance(curve, scaledAmount(vertical, x));
-        const read = curveOpticalDepth(curve, x);
+        const rule = absorberTransmittance(curve, scaledAmount(vertical, x), undefined);
+        const read = curveOpticalDepth(curve, x, undefined);
         for (const c of CHANNELS) {
           worst = Math.max(worst, Math.abs(read[c] + Math.log(rule[c])));
         }
@@ -1609,6 +1613,8 @@ describe("the multiple-scattering table's 1 − f_ms, accumulated (decision-r08-
     let transmittance: TwinTransmittance = {
       transmittance: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
       absorberColumns: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
+      absorberPressureColumns: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
+      lastAbsorberPressureColumn: { widthTexels: 0, heightTexels: 0, texels: new Float64Array(0) },
       curves: [],
     };
     let series: MultiScatteringSeries[] = [];

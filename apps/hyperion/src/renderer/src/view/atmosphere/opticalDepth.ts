@@ -21,7 +21,13 @@
 
 import type { Rgb } from "../photometry/toneCurve";
 import { type AbsorberAmount, type AbsorberCurve, absorberTransmittance } from "./absorbers";
-import { type AtmosphereMedium, densityAt, extinction, type TermAbsorber } from "./medium";
+import {
+  ABSORBER_PRESSURE_REFERENCE_PA,
+  type AtmosphereMedium,
+  densityAt,
+  extinction,
+  type TermAbsorber,
+} from "./medium";
 
 /** The spherical shell an atmosphere's tables are built on, radii from the centre, m. */
 export interface Shell {
@@ -195,6 +201,31 @@ export function absorberAmounts(
 }
 
 /**
+ * Each absorber term's absorber-weighted (Curtis–Godson; A. R. Curtis 1952, QJRMS 78, 638; W. L.
+ * Godson 1953, QJRMS 79, 367) pressure along the ray, Pa (R08.T4.d): ∫ p ρ ds ÷ ∫ ρ ds, weighted by
+ * the term's own density, by the same Simpson rule, p the medium's pressure profile, as the tables' and
+ * the twin's pressure-weighted columns take it; undefined for each where the medium has no
+ * pressure profile or the path no column.
+ *
+ * @param bottomRadiusM - The ground's radius, m; the top is `medium.topHeightM` above it.
+ * @param toTop - Whether the path runs to the top, as {@link absorberAmountsToTop}'s, or to the
+ *   ground or the top, as {@link absorberAmounts}'.
+ * @param steps - Simpson intervals, even.
+ */
+export function absorberPressuresPa(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  rM: number,
+  mu: number,
+  toTop: boolean,
+  steps = ORACLE_STEPS,
+): ReadonlyArray<number | undefined> {
+  const shell: Shell = { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM };
+  const tMax = toTop ? distanceToTopM(shell, rM, mu) : maxDistanceM(shell, rM, mu);
+  return alongRay(medium, bottomRadiusM, rM, mu, tMax, steps).pressuresPa;
+}
+
+/**
  * {@link absorberAmounts} to the top of the atmosphere, as the tables hold them, along the grazing
  * ray too ({@link opticalDepthToTop}).
  *
@@ -219,13 +250,17 @@ export function absorberAmountsToTop(
  *
  * @param curves - The light's curves, one an absorber term in the medium's order of them.
  * @param amounts - Each absorber's amount u, of its curve's kind, as {@link absorberAmounts} gives.
+ * @param pressuresPa - Each absorber's absorber-weighted pressure along the path, Pa, as
+ *   {@link absorberPressuresPa} gives it, read by a curve with pressure rows (R08.T4.d); undefined
+ *   for one without.
  * @throws RangeError when the counts differ, or as `absorberTransmittance` for an amount that is
- *   not finite and at least 0.
+ *   not finite and at least 0, or a curve with lines and no pressure.
  * @throws Error as `absorberTransmittance` for an amount of the other kind than its curve's.
  */
 export function curvesOpticalDepth(
   curves: ReadonlyArray<AbsorberCurve>,
   amounts: ReadonlyArray<AbsorberAmount>,
+  pressuresPa: ReadonlyArray<number | undefined>,
 ): Rgb {
   if (curves.length !== amounts.length) {
     throw new RangeError(`${curves.length} curves for ${amounts.length} absorber amounts`);
@@ -236,7 +271,7 @@ export function curvesOpticalDepth(
     if (amount === undefined) {
       throw new RangeError(`no amount for absorber ${k}`);
     }
-    const t = absorberTransmittance(curve, amount);
+    const t = absorberTransmittance(curve, amount, pressuresPa[k]);
     depth[0] -= Math.log(t[0]);
     depth[1] -= Math.log(t[1]);
     depth[2] -= Math.log(t[2]);
@@ -272,7 +307,11 @@ function alongRay(
   mu: number,
   tMax: number,
   steps: number,
-): { readonly depth: Rgb; readonly amounts: ReadonlyArray<AbsorberAmount> } {
+): {
+  readonly depth: Rgb;
+  readonly amounts: ReadonlyArray<AbsorberAmount>;
+  readonly pressuresPa: ReadonlyArray<number | undefined>;
+} {
   const n = steps + (steps % 2);
   const dt = tMax / n;
   const coefficients = medium.terms.map((term) => ({ term, sigma: extinction(term) }));
@@ -281,6 +320,8 @@ function alongRay(
   );
   const sum = [0, 0, 0];
   const paths = new Float64Array(absorbers.length);
+  const weighted = new Float64Array(absorbers.length);
+  const pressure = medium.pressureBar;
   for (let i = 0; i <= n; i += 1) {
     let weight = 2;
     if (i === 0 || i === n) {
@@ -295,13 +336,21 @@ function alongRay(
       sum[1] = (sum[1] ?? 0) + sigma[1] * d;
       sum[2] = (sum[2] ?? 0) + sigma[2] * d;
     }
+    const ratio = pressure === undefined ? 0 : densityAt(pressure, h);
     for (const [k, { term }] of absorbers.entries()) {
-      paths[k] = (paths[k] ?? 0) + densityAt(term.density, h) * weight;
+      const d = densityAt(term.density, h) * weight;
+      paths[k] = (paths[k] ?? 0) + d;
+      weighted[k] = (weighted[k] ?? 0) + d * ratio;
     }
   }
   const k = dt / 3;
   return {
     depth: [(sum[0] ?? 0) * k, (sum[1] ?? 0) * k, (sum[2] ?? 0) * k],
     amounts: absorbers.map(({ absorber }, i) => amountAlong(absorber, (paths[i] ?? 0) * k)),
+    pressuresPa: absorbers.map((_, i) =>
+      pressure === undefined || !((paths[i] ?? 0) > 0)
+        ? undefined
+        : (ABSORBER_PRESSURE_REFERENCE_PA * (weighted[i] ?? 0)) / (paths[i] ?? Number.NaN),
+    ),
   };
 }

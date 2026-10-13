@@ -55,6 +55,8 @@
 @group(0) @binding(5) var absorberColumns : texture_2d<f32>;
 @group(0) @binding(6) var absorberCurves : texture_2d<f32>;
 @group(0) @binding(7) var<uniform> layerEdges : LayerEdges;
+@group(0) @binding(8) var absorberPressureColumns : texture_2d<f32>;
+@group(0) @binding(9) var lastAbsorberPressureColumn : texture_2d<f32>;
 
 const PI : f32 = 3.14159265358979;
 const DIRECTIONS : u32 = 64u;
@@ -95,7 +97,8 @@ fn transmittanceToSun(heightM : f32, muSun : f32) -> vec3f {
   let count = absorberCount();
   let slot = curveSlot();
   return transmittanceThroughTables(
-    transmittance, absorberColumns, absorberCurves, count, slot, unit
+    transmittance, absorberColumns, absorberPressureColumns, lastAbsorberPressureColumn,
+    absorberCurves, count, slot, lineSlots(), unit
   );
 }
 
@@ -141,7 +144,10 @@ fn integrateStep(march : ptr<function, DirectionMarch>, ray : DirectionRay, step
   let local = mediumAtHeight(sampleHeightM);
   // The direction's own path takes its absorbers by its column, under the sun's curves (R08.T6.c).
   let path = (*march).path;
-  let next = absorberStep(absorberCurves, absorberCount(), curveSlot(), path, local.columns, dt);
+  let next = absorberStep(
+    absorberCurves, absorberCount(), curveSlot(), lineSlots(), path, local.columns,
+    local.pressureColumns, dt
+  );
   let stepAbsorbed = next.depth - path.depth;
   let stepDepth = local.extinction * dt + stepAbsorbed;
   (*march).path = next;

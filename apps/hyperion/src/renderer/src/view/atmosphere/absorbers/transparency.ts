@@ -5,9 +5,10 @@
  * each with its 1 nm cell-mean cross-sections.
  *
  * @remarks
- * Every row the substance registry flags `absorber` has cross-sections, an entry of
- * {@link PENDING_ABSORBERS} with its cell means while R08.T4.d–f are unbuilt, or an entry of
- * {@link NO_VISIBLE_ABSORPTION} (R08.T19 holds the client to it).
+ * Every row the substance registry flags `absorber` has cross-sections, a committed line table
+ * (R08.T4.d's k-distributions, `kDistribution.ts`), an entry of {@link PENDING_ABSORBERS} with its
+ * cell means while R08.T4.d–g are unbuilt, or an entry of {@link NO_VISIBLE_ABSORPTION} (R08.T19
+ * holds the client to it). A species leaves R08.T4.d's pending list when its table is committed.
  * - A transparent species takes no column and no label.
  * - A pending one draws nothing and is labelled `ATMOSPHERE: APPROXIMATE` meanwhile, under Design
  *   note 12's τ rule, as any species without cross-sections is, unless R08.T10.a finds it
@@ -55,7 +56,7 @@ export interface TransparentSpecies {
 }
 
 /** The plan task that draws a pending species' absorption. */
-export type PendingTask = "R08.T4.d" | "R08.T4.e" | "R08.T4.f";
+export type PendingTask = "R08.T4.d" | "R08.T4.e" | "R08.T4.f" | "R08.T4.g";
 
 /** Whether values rest on measured data or on a stated estimate (follow-up 3, ruling 4). */
 export type BoundBasis = "measured" | "estimated";
@@ -75,6 +76,11 @@ export interface AbsorberBoundBase {
   readonly key: string;
   /** The task that draws its absorption. */
   readonly task: PendingTask;
+  /**
+   * The part of the key's absorption it bounds, where one task holds two entries for a key (CO's
+   * overtones from 8–0, beside its hot list in R08.T4.f), or `undefined`.
+   */
+  readonly part: string | undefined;
   /** Whether the values are measured or a stated estimate, which takes the hundredfold margin. */
   readonly basis: BoundBasis;
   /** The source's temperature nodes, K, ascending. */
@@ -115,6 +121,7 @@ export interface AbsorberBoundsFile {
     readonly key: string;
     readonly kind: string;
     readonly task: string;
+    readonly part?: string;
     readonly basis: string;
     readonly temperaturesK: ReadonlyArray<number>;
     readonly cellMeansM2?: ReadonlyArray<ReadonlyArray<number>>;
@@ -126,7 +133,9 @@ export interface AbsorberBoundsFile {
 
 /** Whether a file's string is a {@link PendingTask}. */
 function isPendingTask(value: string): value is PendingTask {
-  return value === "R08.T4.d" || value === "R08.T4.e" || value === "R08.T4.f";
+  return (
+    value === "R08.T4.d" || value === "R08.T4.e" || value === "R08.T4.f" || value === "R08.T4.g"
+  );
 }
 
 /** Whether a file's string is a {@link BoundBasis}. */
@@ -137,7 +146,7 @@ function isBoundBasis(value: string): value is BoundBasis {
 /**
  * A bounds file's entries, checked: a known kind, task and basis; temperatures finite, above 0 K
  * and ascending; at each node {@link PENDING_CELL_COUNT} cell means, finite, at least 0 and one
- * above 0; a key and task listed once.
+ * above 0; a key, task and part listed once.
  *
  * @throws Error naming the entry and the check it fails.
  */
@@ -147,11 +156,12 @@ export function readAbsorberBounds(
 ): ReadonlyArray<AbsorberBound> {
   const seen = new Set<string>();
   return file.bounds.map((entry) => {
-    const label = `${where}'s ${entry.key} (${entry.task})`;
-    if (seen.has(`${entry.key} ${entry.task}`)) {
+    const identity = `${entry.key} (${entry.task}${entry.part === undefined ? "" : `, ${entry.part}`})`;
+    const label = `${where}'s ${identity}`;
+    if (seen.has(identity)) {
       throw new Error(`${label} is listed twice`);
     }
-    seen.add(`${entry.key} ${entry.task}`);
+    seen.add(identity);
     const { task, basis, temperaturesK } = entry;
     if (!isPendingTask(task) || !isBoundBasis(basis)) {
       throw new Error(`${label}'s task or basis is not one of the plan's`);
@@ -180,6 +190,7 @@ export function readAbsorberBounds(
     const base = {
       key: entry.key,
       task,
+      part: entry.part,
       basis,
       temperaturesK,
       source: entry.source,
@@ -210,8 +221,9 @@ export const ABSORBER_BOUNDS: ReadonlyArray<AbsorberBound> = [
  * The species with no visible absorption to draw (`decision-r08-t4b-t12c.md`, follow-up 3,
  * ruling 1, and follow-up 4, ruling 2). Follow-up 2's other expected entries (CO, N₂O, HCN, H₂S,
  * SiO, O, C₂H₂, C₂H₄, C₂H₆, PH₃, CH₃OH) all have catalogued bands or lines in the range above the
- * bound, or no catalogued data and an overtone ladder above it, and are {@link PENDING_ABSORBERS}.
- * So is CO₂, whose HITRAN2024 lines reach 565–737 nm (follow-up 4's check).
+ * bound, or no catalogued data and an overtone ladder above it, and have R08.T4.d's line tables or
+ * are {@link PENDING_ABSORBERS}. So does CO₂, whose HITRAN2024 lines reach 565–737 nm (follow-up
+ * 4's check).
  */
 export const NO_VISIBLE_ABSORPTION: ReadonlyArray<TransparentSpecies> = [
   {
@@ -267,12 +279,14 @@ interface PendingListing {
   readonly key: string;
   /** The task that draws its absorption. */
   readonly task: PendingTask;
+  /** The part of the key's absorption, as its bound's ({@link AbsorberBoundBase.part}). */
+  readonly part?: string;
   /** What the task draws. */
   readonly what: string;
 }
 
 /**
- * The species and pairs whose absorption over the bake range R08.T4.d–f draw
+ * The species and pairs whose absorption over the bake range R08.T4.d–g draw
  * (`decision-r08-t4b-t12c.md`, follow-ups 2 to 5). The ions are listed for when P14.T49.b adds
  * their rows. A resonance line's far wing, which grows with its perturbers' density, is a pair of
  * the atom and each perturber (`K+H2`, `K+He`; follow-up 5, ruling 2), beside the atom's own
@@ -280,49 +294,14 @@ interface PendingListing {
  */
 const PENDING: ReadonlyArray<PendingListing> = [
   {
-    key: "O2",
-    task: "R08.T4.d",
-    what: "the B (686-695 nm) and gamma (628-634 nm) bands and the A band's head",
+    key: "NH3",
+    task: "R08.T4.g",
+    what: "the 552 and 648 nm bands (ExoMol's C2018), split from R08.T4.d",
   },
   {
-    key: "H2O",
-    task: "R08.T4.d",
-    what: "the visible bands near 590, 650 and 700-735 nm, to 500 K",
-  },
-  { key: "NH3", task: "R08.T4.d", what: "the 552 and 648 nm bands (ExoMol's C2018)" },
-  { key: "CO", task: "R08.T4.d", what: "the 7-0 band (691-700 nm, HITRAN2024)" },
-  { key: "N2O", task: "R08.T4.d", what: "HITRAN2024's bands to 714 nm and ExoMol's TYM below" },
-  { key: "HCN", task: "R08.T4.d", what: "HITRAN2024's bands to 568.6 nm" },
-  {
-    key: "H2",
-    task: "R08.T4.d",
-    what: "the electric-quadrupole lines (4-0 S(1) at 636.95 nm among them)",
-  },
-  { key: "C2H2", task: "R08.T4.d", what: "the visible overtones, measured first, else the ladder" },
-  {
-    key: "C2H4",
-    task: "R08.T4.d",
-    what: "the visible CH-stretch overtones, measured first, else the ladder",
-  },
-  {
-    key: "C2H6",
-    task: "R08.T4.d",
-    what: "the visible CH-stretch overtones, measured first, else the ladder",
-  },
-  {
-    key: "PH3",
-    task: "R08.T4.d",
-    what: "the visible PH-stretch overtones, measured first, else the ladder",
-  },
-  {
-    key: "CH3OH",
-    task: "R08.T4.d",
-    what: "the OH- and CH-stretch overtones, measured first, else the ladder",
-  },
-  {
-    key: "CO2",
-    task: "R08.T4.d",
-    what: "HITRAN2024's bands over 565-737 nm, the (20052)-(00001) band near 716 nm the strongest",
+    key: "N2O",
+    task: "R08.T4.g",
+    what: "ExoMol's TYM lines below 714 nm and its bands HITRAN2024 lacks over 714-760 nm",
   },
   { key: "Na", task: "R08.T4.e", what: "Na D (589.0 and 589.6 nm), pressure-broadened" },
   { key: "K", task: "R08.T4.e", what: "K I's lines in the range, per atom (404.5 and 404.8 nm)" },
@@ -368,7 +347,18 @@ const PENDING: ReadonlyArray<PendingListing> = [
     what: "its A-X hot bands (SiOUVenIR), which reach the range above about 1000 K",
   },
   { key: "CO", task: "R08.T4.f", what: "hot CO (Li2015, its 8-0 bands and up dropped)" },
+  {
+    key: "CO",
+    task: "R08.T4.f",
+    part: "overtones",
+    what: "the 8-0 to 13-0 bands, which HITRAN2024 lacks and Li2015 holds only to 11-0, dropped, by the overtone ladder below 7-0 (estimated)",
+  },
   { key: "N2O", task: "R08.T4.f", what: "hot N2O (TYM)" },
+  {
+    key: "CO2",
+    task: "R08.T4.f",
+    what: "hot CO2 above HITRAN's 500 K, to which R08.T4.d's table is held (ExoMol's UCL-4000 considered)",
+  },
   { key: "HCN", task: "R08.T4.f", what: "hot HCN (Harris)" },
   { key: "H2O", task: "R08.T4.f", what: "hot H2O (POKAZATEL)" },
   {
@@ -385,20 +375,25 @@ export interface PendingAbsorber extends PendingListing {
 }
 
 /**
- * The species and pairs whose absorption over the bake range R08.T4.d–f draw, each with its 1 nm
+ * The species and pairs whose absorption over the bake range R08.T4.d–g draw, each with its 1 nm
  * cell-mean cross-sections (`decision-r08-t4b-t12c.md`, follow-up 3, ruling 2, and follow-up 4,
  * ruling 3). A species may be listed under two tasks (a temperate list in T4.d and a hot one in
- * T4.f), each with its own values.
+ * T4.f), each with its own values, or twice under one task by part (CO's `overtones`, from 8–0,
+ * beside its hot list in T4.f).
  *
  * @throws Error at load for a listing whose values are in neither bounds file, a broken invariant
  *   of the committed data.
  */
 export const PENDING_ABSORBERS: ReadonlyArray<PendingAbsorber> = PENDING.map((listing) => {
-  const bound = ABSORBER_BOUNDS.find((b) => b.key === listing.key && b.task === listing.task);
+  const bound = ABSORBER_BOUNDS.find(
+    (b) => b.key === listing.key && b.task === listing.task && b.part === listing.part,
+  );
   if (bound === undefined) {
-    throw new Error(`pending absorber ${listing.key} (${listing.task}) has no cell means`);
+    const which = listing.part === undefined ? listing.task : `${listing.task}, ${listing.part}`;
+    throw new Error(`pending absorber ${listing.key} (${which}) has no cell means`);
   }
-  return { key: listing.key, task: listing.task, what: listing.what, bound };
+  const { key, task, part, what } = listing;
+  return part === undefined ? { key, task, what, bound } : { key, task, part, what, bound };
 });
 
 /**

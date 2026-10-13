@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import registry from "../../../../../../../../packages/protocol/fixtures/substances.json" with { type: "json" };
 import { ABSORBER_CROSS_SECTIONS, crossSectionAt } from "../absorbers";
 import exomolBounds from "./exomol/bounds.json" with { type: "json" };
+import { committedLineSpecies } from "./kDistribution";
 import {
   ABSORBER_BOUNDS,
   type AbsorberBound,
@@ -25,11 +26,13 @@ function pendingBound(key: string): AbsorberBound | undefined {
 }
 
 describe("the registry's absorbers", () => {
-  it("each have cross-sections, a pending entry with its cell means, or a stated none", () => {
+  it("each have cross-sections, a line table, a pending entry with its cell means, or a stated none", () => {
     const flagged = registry.substances.filter((row) => row.absorber).map((row) => row.key);
+    const tables = committedLineSpecies();
     const unaccounted = flagged.filter(
       (key) =>
         crossSectionAt(key, 250) === undefined &&
+        !tables.includes(key) &&
         !PENDING_ABSORBERS.some((p) => p.key === key) &&
         !NO_VISIBLE_ABSORPTION.some((n) => n.species === key),
     );
@@ -80,14 +83,27 @@ describe("the stated transparency", () => {
 });
 
 describe("the pending absorbers", () => {
-  it("each carry cell means for their own key and task", () => {
+  it("leave R08.T4.d's list once a species' line table is committed", () => {
+    const tables = committedLineSpecies();
+    expect(
+      PENDING_ABSORBERS.filter((p) => p.task === "R08.T4.d" && tables.includes(p.key)).map(
+        (p) => p.key,
+      ),
+    ).toEqual([]);
+  });
+
+  it("each carry cell means for their own key, task and part", () => {
     for (const pending of PENDING_ABSORBERS) {
-      expect([pending.bound.key, pending.bound.task]).toEqual([pending.key, pending.task]);
+      expect([pending.bound.key, pending.bound.task, pending.bound.part]).toEqual([
+        pending.key,
+        pending.task,
+        pending.part,
+      ]);
     }
   });
 
-  it("list each key once a task", () => {
-    const listings = PENDING_ABSORBERS.map((p) => `${p.key} ${p.task}`);
+  it("list each key once a task and part", () => {
+    const listings = PENDING_ABSORBERS.map((p) => `${p.key} ${p.task} ${p.part ?? ""}`);
     expect(new Set(listings).size).toBe(listings.length);
   });
 
@@ -226,5 +242,13 @@ describe("reading a bounds file", () => {
     expect(() => readAbsorberBounds({ bounds: [...TOY.bounds, ...TOY.bounds] }, "toy")).toThrow(
       /listed twice/u,
     );
+  });
+
+  it("keeps two parts of one key and task apart, each read with its part", () => {
+    const parts = readAbsorberBounds(
+      { bounds: [...TOY.bounds, ...toyWith({ part: "overtones" }).bounds] },
+      "toy",
+    );
+    expect(parts.map((b) => b.part)).toEqual([undefined, "overtones"]);
   });
 });

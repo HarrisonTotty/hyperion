@@ -268,14 +268,19 @@ ruled 2026-10-09 and 2026-10-10).
   Spectrosc. Radiat. Transfer 347 (2025) 109631, DOI: 10.1016/j.jqsrt.2025.109631; T. Karman et
   al., Icarus 328 (2019) 160-175, DOI: 10.1016/j.icarus.2019.02.034; https://hitran.org/cia/,
   files O2-O2_2024.cia, O2-N2_2024.cia, O2-CO2_2024.cia and H2-He_2011.cia, fetched 2026-10-10
-  and 2026-10-11), from the measurements and calculations of H. Finkenzeller and R. Volkamer, J.
+  and 2026-10-11, and the alternate files O2-O2_theory_temp_2018.cia and
+  O2-N2_theory_temp_2018.cia, fetched 2026-10-12, the computed A- and B-band sets of T. Karman et
+  al., Nature Chem. 10 (2018) 549-554, DOI: 10.1038/s41557-018-0015-x), from the measurements and
+  calculations of H. Finkenzeller and R. Volkamer, J.
   Quant. Spectrosc. Radiat. Transfer 279 (2022) 108063; R. Thalman and R. Volkamer, Phys. Chem.
   Chem. Phys. 15 (2013) 15371; F. R. Spiering et al., Phys. Chem. Chem. Phys. 13 (2011) 9616; H.
   Tran, C. Boulet and J.-M. Hartmann, J. Geophys. Res. 111 (2006) D15210; M. Vangvichith, H. Tran
   and J.-M. Hartmann, J. Quant. Spectrosc. Radiat. Transfer 110 (2009) 2212-2216, DOI:
   10.1016/j.jqsrt.2009.06.002; and M. Abel, L. Frommhold, X. Li and K. L. C. Hunt, J. Chem. Phys.
   136 (2012) 044319. Binned to 1 nm in
-  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json.
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json (H2-He) and
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/oxygenPairs.json (O2's pairs; plan R08,
+  R08.T4.d).
 
 - The negative hydrogen and helium ions' continuous absorption: T. L. John, "Continuous absorption
   by the negative hydrogen ion reconsidered", Astron. Astrophys. 193 (1988) 189-192, his fits'
@@ -307,6 +312,33 @@ ruled 2026-10-09 and 2026-10-10).
   Radiat. Transfer 68 (2001) 235-255, from the same page. Reduced to 1 nm cell means in
   apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json (plan R08,
   R08.T4.c); the tables themselves are not committed.
+
+- Water vapour continuum: the Clough-Kneizys-Davies continuum as tabulated in LOWTRAN 7
+  (F. X. Kneizys et al., "Users Guide to LOWTRAN 7", AFGL-TR-88-0177, Air Force Geophysics
+  Laboratory, 1988; formulation in "Atmospheric Transmittance/Radiance: Computer Code LOWTRAN 6",
+  AFGL-TR-83-0187, 1983), from lowtran7.f at https://github.com/space-physics/lowtran (fetched
+  2026-10-12). Reduced to 1 nm cell means in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json (plan R08,
+  R08.T4.d); the tables themselves are not committed.
+
+- Molecular lines' k-distributions, reduced from the HITRAN2024 line lists (I. E. Gordon et al.,
+  as above; https://hitran.org/lbl/, fetched 2026-10-12) of O2, H2O, CO2, CO, N2O, HCN and H2, and
+  from the anchor bands of the stated overtone-ladder estimates of C2H2, C2H4, C2H6, CH3OH and PH3,
+  with HITRAN's partition sums (TIPS; R. R. Gamache et al., J. Quant. Spectrosc. Radiat. Transfer
+  271 (2021) 107713, DOI: 10.1016/j.jqsrt.2021.107713), to 16-bit k-distributions per 1 nm cell in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/kDistributions/ (plan R08, R08.T4.d);
+  the line lists themselves are not committed. CO2's far wings take the CO2-CO2 and CO2-N2 chi
+  factors and line shape of SpeCT: G. Chaverot, M. Turbet, H. Tran, J.-M. Hartmann, A. Campargue,
+  D. Mondelain and E. Bolmont, Astron. Astrophys. 702 (2025) A137, DOI:
+  10.1051/0004-6361/202555762, licensed under CC BY 4.0 (Tables 2 and 3, Eq. 11), as reduced
+  values with their citation; CO2-N2's B2 alpha is taken as 0.00167, correcting the table's
+  printed 0.0167 from the authors' own code (gitlab.com/ChaverotG/spect-public commit
+  e7c4579c08, which states no licence: one number read as evidence, no code used). That set
+  adapts M. Y. Perrin and J. M. Hartmann, J. Quant. Spectrosc. Radiat. Transfer 42 (1989)
+  311-317, DOI: 10.1016/0022-4073(89)90077-0. The check against SpeCT's laboratory compilation
+  (Zenodo, DOI: 10.5281/zenodo.15564294, CC BY 4.0) used it as data only. The line-by-line reference
+  curves in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/earthLineReference.json,
+  lineReferencesO2.json and lineReferencesH2O.json are computed from the same lines.
 
 - Cross-sections of the pending molecules (1 nm cell means), derived from the HITRAN2024 line
   lists (I. E. Gordon et al., as above; https://hitran.org), with the stated overtone-ladder and
@@ -435,6 +467,10 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
   database's request of citation. The enstatite test's index, 1.594 + 4.5e-4i at 520 nm, is
   interpolated to the sample's iron from J. Dorschner et al., Astron. Astrophys. 300 (1995)
   503-520's pyroxene glasses (two values, cited).
+
+- RRTMG_SW, Atmospheric and Environmental Research (https://github.com/AER-RC/RRTMG_SW,
+  BSD 3-Clause License, Copyright (c) 2020): two band-24 water vapour continuum means computed from
+  data/rrtmg_sw.nc are asserted in a test (plan R08, R08.T4.d).
 
 - H. Chen-Chen, S. Pérez-Hoyos and A. Sánchez-Lavega, Icarus 330 (2019) 16-29; E. Järvinen et
   al., Atmos. Chem. Phys. 18 (2018) 15767-15781.

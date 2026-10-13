@@ -17,6 +17,7 @@ import {
   ABSORBER_CURVE_DECADES,
   ABSORBER_CURVE_NODES_PER_DECADE,
   ABSORBER_TRANSMITTANCE_FLOOR,
+  AIR_TRACE_SHARE,
   type AbsorberAmount,
   absorberBinCurves,
   absorberBinTransmittance,
@@ -324,7 +325,7 @@ function channelColourError(spec: AbsorberSpec, spectrum: BakeSpectrum, multiple
   const curve = absorberCurve(spec, spectrum);
   const amount = scaledAmount(absorberVerticalAmount(spec), multiple);
   const { star, through } = spectralColours(optics, amountValue(amount));
-  const t = absorberTransmittance(curve, amount);
+  const t = absorberTransmittance(curve, amount, undefined);
   return deltaUv([star[0] * t[0], star[1] * t[1], star[2] * t[2]], through);
 }
 
@@ -337,7 +338,7 @@ function binColourError(spec: AbsorberSpec, spectrum: BakeSpectrum, multiple: nu
   const optics = absorberOptics(spec, spectrum);
   const curves = absorberBinCurves(spec, spectrum);
   const amount = scaledAmount(absorberVerticalAmount(spec), multiple);
-  const bins = absorberBinTransmittance(curves, amount);
+  const bins = absorberBinTransmittance(curves, amount, undefined);
   const colour = [0, 0, 0];
   for (const [c, weights] of optics.weights.entries()) {
     for (const [i, w] of weights.entries()) {
@@ -476,9 +477,11 @@ function curvesTable() {
         return {
           sun: sun.name,
           opticalDepth: recordedMultiples.map((m) =>
-            absorberTransmittance(curve, scaledAmount(absorberVerticalAmount(spec), m)).map((t) =>
-              roundMicro(-Math.log(t)),
-            ),
+            absorberTransmittance(
+              curve,
+              scaledAmount(absorberVerticalAmount(spec), m),
+              undefined,
+            ).map((t) => roundMicro(-Math.log(t))),
           ),
           deltaUv: recordedMultiples.map((m) =>
             ceilMicro(channelColourError(spec, sun.spectrum, m)),
@@ -603,7 +606,7 @@ describe("a curve of growth", () => {
     const optics = absorberOptics(spec, PLANCK_2500);
     const amount = scaledAmount(absorberVerticalAmount(spec), 10);
     expect(signedRatio(optics, 2, amountValue(amount))).toBeGreaterThan(1.1);
-    expect(channelTransmittance(optics, amount)[2]).toBe(1);
+    expect(channelTransmittance(optics, amount, undefined)[2]).toBe(1);
   });
 
   it("clamps methane's red at the floor once its light leaves Rec. 709", () => {
@@ -611,7 +614,7 @@ describe("a curve of growth", () => {
     const optics = absorberOptics(spec, THE_SUN);
     const amount = scaledAmount(absorberVerticalAmount(spec), 100);
     expect(signedRatio(optics, 0, amountValue(amount))).toBeLessThan(0);
-    expect(channelTransmittance(optics, amount)[0]).toBe(ABSORBER_TRANSMITTANCE_FLOOR);
+    expect(channelTransmittance(optics, amount, undefined)[0]).toBe(ABSORBER_TRANSMITTANCE_FLOOR);
   });
 
   it("reaches the floor only past the gamut exit for ozone and methane: every node at the floor has a negative sum", () => {
@@ -650,7 +653,7 @@ describe("a curve of growth", () => {
       passed += clipped * Math.exp(-(sigmaOf(optics)[i] ?? Number.NaN) * amountValue(amount));
       total += clipped;
     }
-    expect(channelTransmittance(optics, amount)[2]).toBeCloseTo(passed / total, 12);
+    expect(channelTransmittance(optics, amount, undefined)[2]).toBeCloseTo(passed / total, 12);
   });
 
   it("is the same for the same sun", () => {
@@ -681,7 +684,7 @@ describe("a curve of growth", () => {
         const curve = absorberCurve(spec, sun.spectrum);
         // Each node's exact transmittance, once: an interval reads both of its ends.
         const atNodes: ReadonlyArray<Rgb> = Array.from(curve.logColumns, (logColumn) =>
-          channelTransmittance(optics, amountLike(spec, Math.exp(logColumn))),
+          channelTransmittance(optics, amountLike(spec, Math.exp(logColumn)), undefined),
         );
         const atNode = (j: number): Rgb => {
           const node = atNodes[j];
@@ -695,8 +698,8 @@ describe("a curve of growth", () => {
             spec,
             Math.exp(0.5 * ((curve.logColumns[k] ?? 0) + (curve.logColumns[k + 1] ?? 0))),
           );
-          const exact = channelTransmittance(optics, u);
-          const read = absorberTransmittance(curve, u);
+          const exact = channelTransmittance(optics, u, undefined);
+          const read = absorberTransmittance(curve, u, undefined);
           const [here, next] = [atNode(k), atNode(k + 1)];
           for (const c of [0, 1, 2] as const) {
             // Above the floor at both nodes, and neither lowered by the running minimum.
@@ -718,8 +721,8 @@ describe("a curve of growth", () => {
     const optics = absorberOptics(spec, THE_SUN);
     const curve = absorberCurve(spec, THE_SUN);
     const u = scaledAmount(absorberVerticalAmount(spec), 1e-5);
-    const exact = channelTransmittance(optics, u);
-    const read = absorberTransmittance(curve, u);
+    const exact = channelTransmittance(optics, u, undefined);
+    const read = absorberTransmittance(curve, u, undefined);
     // Red and green; blue is clamped at 1 there under the Sun.
     expect(
       [0, 1].map((c) => Math.abs(Math.log(read[c] ?? 1) / Math.log(exact[c] ?? 1) - 1)),
@@ -728,37 +731,53 @@ describe("a curve of growth", () => {
 
   it("reads nothing at no column", () => {
     expect(
-      absorberTransmittance(absorberCurve(absorberAt(0), THE_SUN), {
-        kind: "column",
-        columnPerM2: 0,
-      }),
+      absorberTransmittance(
+        absorberCurve(absorberAt(0), THE_SUN),
+        {
+          kind: "column",
+          columnPerM2: 0,
+        },
+        undefined,
+      ),
     ).toEqual([1, 1, 1]);
   });
 
   it("refuses a negative column", () => {
     expect(() =>
-      absorberTransmittance(absorberCurve(absorberAt(0), THE_SUN), {
-        kind: "column",
-        columnPerM2: -1,
-      }),
+      absorberTransmittance(
+        absorberCurve(absorberAt(0), THE_SUN),
+        {
+          kind: "column",
+          columnPerM2: -1,
+        },
+        undefined,
+      ),
     ).toThrow(RangeError);
   });
 
   it("refuses a pair column on a column absorber's curve", () => {
     expect(() =>
-      absorberTransmittance(absorberCurve(absorberAt(0), THE_SUN), {
-        kind: "pair",
-        pairColumnPerM5: 1e40,
-      }),
+      absorberTransmittance(
+        absorberCurve(absorberAt(0), THE_SUN),
+        {
+          kind: "pair",
+          pairColumnPerM5: 1e40,
+        },
+        undefined,
+      ),
     ).toThrow(/pair amount is read on a column absorber's/u);
   });
 
   it("refuses a pair amount on a column absorber's optics", () => {
     expect(() =>
-      channelTransmittance(absorberOptics(absorberAt(0), THE_SUN), {
-        kind: "pair",
-        pairColumnPerM5: 1e40,
-      }),
+      channelTransmittance(
+        absorberOptics(absorberAt(0), THE_SUN),
+        {
+          kind: "pair",
+          pairColumnPerM5: 1e40,
+        },
+        undefined,
+      ),
     ).toThrow(/pair amount is read on a column absorber's/u);
   });
 
@@ -768,10 +787,14 @@ describe("a curve of growth", () => {
       throw new Error("the absorbers list holds a pair");
     }
     expect(() =>
-      absorberBinTransmittance(absorberBinCurves(pair, THE_SUN), {
-        kind: "column",
-        columnPerM2: 1e20,
-      }),
+      absorberBinTransmittance(
+        absorberBinCurves(pair, THE_SUN),
+        {
+          kind: "column",
+          columnPerM2: 1e20,
+        },
+        undefined,
+      ),
     ).toThrow(/column amount is read on a pair absorber's/u);
   });
 
@@ -807,20 +830,28 @@ describe("a curve of growth", () => {
 
   it("gives 300 DU of ozone a green Chappuis optical depth of 0.02–0.04 under the Sun", () => {
     const spec = absorberAt(0);
-    const [, green] = channelTransmittance(absorberOptics(spec, THE_SUN), {
-      kind: "column",
-      columnPerM2: OZONE_COLUMN_PER_M2,
-    });
+    const [, green] = channelTransmittance(
+      absorberOptics(spec, THE_SUN),
+      {
+        kind: "column",
+        columnPerM2: OZONE_COLUMN_PER_M2,
+      },
+      undefined,
+    );
     expect(-Math.log(green)).toBeGreaterThanOrEqual(0.02);
     expect(-Math.log(green)).toBeLessThanOrEqual(0.04);
   });
 
   it("holds the floor where every point a channel weighs is saturated", () => {
     const spec = testSpec(flatCrossSection("flat", 1e-25), 1e28);
-    const t = channelTransmittance(absorberOptics(spec, THE_SUN), {
-      kind: "column",
-      columnPerM2: 1e28,
-    });
+    const t = channelTransmittance(
+      absorberOptics(spec, THE_SUN),
+      {
+        kind: "column",
+        columnPerM2: 1e28,
+      },
+      undefined,
+    );
     expect(t).toEqual([
       ABSORBER_TRANSMITTANCE_FLOOR,
       ABSORBER_TRANSMITTANCE_FLOOR,
@@ -1058,10 +1089,26 @@ describe("absorbers on one profile", () => {
       mixed("CH4", 1e25),
       mixed("NH3", 1e24),
     ];
-    const { specs, approximations } = absorberSpecs(layers, EARTH_COLUMN);
-    expect(specs.map((s) => s.name)).toEqual(["absorber:O3", "absorber:CH4+NH3"]);
+    const { specs, approximations } = absorberSpecs(
+      layers,
+      EARTH_COLUMN,
+      ABSORBER_CROSS_SECTIONS,
+      ABSORBER_PAIR_CROSS_SECTIONS,
+      {
+        kDistributions: [],
+      },
+    );
+    // H₂O's lines take no column without their table; its continuum's two pairs share one, after
+    // H₂O, estimated below 567 nm (R08.T4.d).
+    expect(specs.map((s) => s.name)).toEqual([
+      "absorber:O3",
+      "pair:H2O+H2O,H2O+air",
+      "absorber:CH4+NH3",
+    ]);
     expect(approximations).toEqual([
       { species: "H2O", provenance: "none", reason: "noCrossSections" },
+      { species: "H2O+H2O", provenance: "estimated", reason: "estimatedOptics" },
+      { species: "H2O+air", provenance: "estimated", reason: "estimatedOptics" },
       { species: "NH3", provenance: "none", reason: "noCrossSections" },
     ]);
   });
@@ -1662,16 +1709,48 @@ function committedPair(pair: string) {
   return found;
 }
 
+/** Karman et al. 2018's temperatures, K: 206–346 K every 10 K (HITRAN's theory_temp_2018 files). */
+const KARMAN_K = Array.from({ length: 15 }, (_, i) => 206 + 10 * i);
+
 describe("the committed pairs", () => {
-  it("hold O₂–O₂ at 203–293 K, measured over 203–287 K", () => {
+  it("hold O₂–O₂ at the visible sets' and Karman et al. 2018's temperatures, measured over 206–287 K", () => {
     const pair = committedPair("O2+O2");
     expect([pair.members, pair.temperaturesK, pair.measuredRangeK, pair.temperatureLaw]).toEqual([
       ["O2", "O2"],
-      [203, 223, 233, 253, 263, 273, 287, 293],
-      [203, 287],
+      [...new Set([203, 223, 233, 253, 263, 273, 287, 293, ...KARMAN_K])].toSorted((a, b) => a - b),
+      [206, 287],
       "linear",
     ]);
   });
+
+  // R08.T4.d: Karman et al.'s computed B band (675.4–703.9 nm) and A band (746.2–781.1 nm) at
+  // 206–346 K replace R08.T4.c's single temperatures in the bins they cover whole (follow-up 5,
+  // ruling 7); the rest of each band keeps its one temperature, held.
+  it.each([
+    ["O2+O2", 690],
+    ["O2+O2", 755],
+    ["O2+N2", 755],
+  ])("take %s at %s nm from Karman et al. 2018, rising with temperature", (pair, nm) => {
+    const at = (t: number): number =>
+      pairCrossSectionAt(pair, t)?.crossSectionsM5[nm - 380] ?? Number.NaN;
+    expect(at(206)).toBeGreaterThan(0);
+    expect(at(346)).toBeGreaterThan(at(276));
+    expect(at(276)).toBeGreaterThan(at(206));
+  });
+
+  it.each([
+    ["O2+O2", 673],
+    ["O2+O2", 740],
+    ["O2+N2", 740],
+  ])(
+    "hold %s at %s nm, where Karman et al.'s sets do not reach, at its one temperature",
+    (pair, nm) => {
+      const at = (t: number): number =>
+        pairCrossSectionAt(pair, t)?.crossSectionsM5[nm - 380] ?? Number.NaN;
+      expect(at(206)).toBeGreaterThan(0);
+      expect(at(346)).toBe(at(206));
+    },
+  );
 
   // The sets' own peaks (HITRAN2024's file, at 1 cm-1): 380.3, 446.5, 477.0, 532.8, 577.7 and
   // 630.1 nm; the plan's "near 380, 446, 477, 532, 577 and 630 nm".
@@ -1694,9 +1773,9 @@ describe("the committed pairs", () => {
     },
   );
 
-  it("hold O₂–N₂'s A band at 296 K alone, measured there", () => {
+  it("hold O₂–N₂'s A band at Karman et al.'s temperatures, measured over 206–346 K", () => {
     const pair = committedPair("O2+N2");
-    expect([pair.temperaturesK, pair.measuredRangeK]).toEqual([[296], [296, 296]]);
+    expect([pair.temperaturesK, pair.measuredRangeK]).toEqual([KARMAN_K, [206, 346]]);
   });
 
   it("hold O₂–N₂ at 0 to 723 nm, before its set starts at 722.6 nm (13,839.6 cm⁻¹)", () => {
@@ -1710,8 +1789,12 @@ describe("the committed pairs", () => {
     expect(inRange.indexOf(Math.max(...inRange)) + 380).toBe(760);
   });
 
-  it("label O₂–N₂ off its one temperature estimated", () => {
-    expect(pairCrossSectionAt("O2+N2", 280)?.provenance).toBe("estimated");
+  it("label O₂–N₂ measured within Karman et al.'s 206–346 K and estimated beyond", () => {
+    expect([200, 280, 350].map((t) => pairCrossSectionAt("O2+N2", t)?.provenance)).toEqual([
+      "estimated",
+      "measured",
+      "estimated",
+    ]);
   });
 
   it("hold H₂–He at 26 temperatures, ln σ linear in T, measured over 200–9,900 K", () => {
@@ -2322,5 +2405,190 @@ describe("an absorber's profile (R08.T6.h)", () => {
       ],
     };
     expect(() => absorberSpecs([aloft], EARTH_COLUMN)).toThrow(/within its column/u);
+  });
+});
+
+/** A toy continuum's pair file: W with every other gas (`W+air`), or a named pair, as changed. */
+function toyContinuum(
+  change: Partial<PairCrossSectionsFile["pairs"][number]> = {},
+  withPartners = true,
+): PairCrossSectionsFile {
+  return {
+    pairs: [
+      {
+        pair: "W+air",
+        members: ["W", "air"],
+        source: "a test",
+        reduction: "none",
+        firstNm: 380,
+        stepNm: 190,
+        temperaturesK: [260, 296],
+        temperatureLaw: "lnLnLinear",
+        measuredRangeK: [260, 296],
+        lawRangeK: [150, 500],
+        ...(withPartners ? { partners: { N2: 2 }, measuredPartners: ["N2"] } : {}),
+        rows: [
+          [380, 0, 0],
+          [570, 4e-60, 2e-60],
+          [760, 3e-60, 0],
+        ],
+        ...change,
+      },
+    ],
+  };
+}
+
+describe("a continuum pair's file (R08.T4.d)", () => {
+  it("reads an air pair's partner weights and measured partners", () => {
+    const [table] = readPairCrossSections(toyContinuum());
+    expect([table?.members, table?.lawRangeK, table?.air]).toEqual([
+      ["W", "air"],
+      [150, 500],
+      { weights: new Map([["N2", 2]]), measured: new Set(["N2"]) },
+    ]);
+  });
+
+  it.each([
+    ["partners on a pair not with air", { pair: "W+N2", members: ["W", "N2"] }, /partners unless/u],
+    ["a partner weight of 0", { partners: { N2: 0 } }, /partner weights/u],
+    ["a law range inside the measured one", { lawRangeK: [270, 500] }, /law range/u],
+    [
+      "a power law on one temperature",
+      { temperaturesK: [296], rows: [[380, 0]] },
+      /temperature law/u,
+    ],
+    ["a constant law on two temperatures", { temperatureLaw: "constant" }, /temperature law/u],
+  ])("refuses %s", (_, change, message) => {
+    expect(() => readPairCrossSections(toyContinuum(change))).toThrow(message);
+  });
+  it("refuses an air pair with no partners", () => {
+    expect(() => readPairCrossSections(toyContinuum({}, false))).toThrow(/partners unless/u);
+  });
+});
+
+describe("a continuum pair's temperature laws (R08.T4.d)", () => {
+  const tables = readPairCrossSections(toyContinuum());
+  const at = (t: number) => pairCrossSectionAt("W+air", t, tables);
+
+  it("take a power law in T through the two temperatures, measured between them", () => {
+    const cross = at(278);
+    const f = Math.log(278 / 260) / Math.log(296 / 260);
+    expect([cross?.provenance, (cross?.crossSectionsM5[1] ?? 0) / (4e-60 * 0.5 ** f)]).toEqual([
+      "measured",
+      expect.closeTo(1, 12),
+    ]);
+  });
+
+  it("extrapolate the power law within the law's range, estimated, and hold it beyond", () => {
+    const f = Math.log(200 / 260) / Math.log(296 / 260);
+    expect([at(200)?.provenance, (at(200)?.crossSectionsM5[1] ?? 0) / (4e-60 * 0.5 ** f)]).toEqual([
+      "estimated",
+      expect.closeTo(1, 12),
+    ]);
+    expect(at(900)?.crossSectionsM5[1]).toBe(at(500)?.crossSectionsM5[1]);
+  });
+
+  it("take a point with a 0 at either temperature linear in σ, floored at 0", () => {
+    // 3e-60 at 260 K and 0 at 296 K: halfway in T is half, and past 296 K it is floored at 0.
+    expect([at(278)?.crossSectionsM5[2], at(400)?.crossSectionsM5[2]]).toEqual([
+      expect.closeTo(1.5e-60, 72),
+      0,
+    ]);
+  });
+
+  it("hold a constant law's one temperature at every temperature", () => {
+    const [table] = readPairCrossSections(
+      toyContinuum({
+        temperaturesK: [296],
+        temperatureLaw: "constant",
+        measuredRangeK: [296, 296],
+        lawRangeK: [150, 500],
+        rows: [
+          [380, 0],
+          [570, 2e-60],
+          [760, 1e-60],
+        ],
+      }),
+    );
+    const sigma = (t: number) =>
+      Array.from(
+        pairCrossSectionAt("W+air", t, table === undefined ? [] : [table])?.crossSectionsM5 ?? [],
+      );
+    expect([sigma(150), sigma(400)]).toEqual([
+      [0, 2e-60, 1e-60],
+      [0, 2e-60, 1e-60],
+    ]);
+  });
+
+  it("are estimated by their optics at every temperature where σ is above 0 below estimatedBelowNm", () => {
+    const below = readPairCrossSections(toyContinuum({ estimatedBelowNm: 600 }));
+    const above = readPairCrossSections(toyContinuum({ estimatedBelowNm: 500 }));
+    expect([
+      pairCrossSectionAt("W+air", 278, below),
+      pairCrossSectionAt("W+air", 278, above)?.provenance,
+    ]).toEqual([
+      expect.objectContaining({ provenance: "estimated", estimatedBy: "optics" }),
+      "measured",
+    ]);
+  });
+});
+
+describe("a pair with every other gas (R08.T4.d)", () => {
+  // Isothermal at 280 K, inside the toy's measured 260–296 K.
+  const column = hydrostaticColumn({
+    ...EARTH_COLUMN_INPUT,
+    temperature: { kind: "isothermal", temperatureK: 280 },
+  });
+  const ns = column.surfaceNumberDensityPerM3;
+  const last = column.altitudesM.length - 1;
+  const tables = readPairCrossSections(toyContinuum());
+  /** The `W+air` pair the layers form, or `undefined`. */
+  const formed = (layers: ReadonlyArray<AbsorberLayer>) =>
+    pairSpecs(absorberSpecs(layers, column, [], tables).specs)
+      .flatMap((s) => s.pairs)
+      .find((p) => p.pair === "W+air");
+
+  it("weights each partner's pair column by the table's weight, 1 for a gas it does not list", () => {
+    const pair = formed([
+      wellMixed("W", 0.01, column),
+      wellMixed("N2", 0.7, column),
+      wellMixed("Ar", 0.29, column),
+    ]);
+    const expected = pairQuadrature(column, 0.01 * ns, (2 * 0.7 + 0.29) * ns, last);
+    expect(Math.abs((pair?.pairColumnPerM5 ?? Number.NaN) / expected - 1)).toBeLessThan(1e-9);
+  });
+
+  it("is measured with its measured partners alone", () => {
+    const measured = formed([wellMixed("W", 0.01, column), wellMixed("N2", 0.99, column)]);
+    expect(measured?.crossSection.provenance).toBe("measured");
+  });
+
+  it("is measured as air with other gases up to 2% of its partners, Earth's 0.93% Ar among them", () => {
+    // Ar is 0.934 ÷ 99 of W's partners here, under AIR_TRACE_SHARE.
+    const earthAir = formed([
+      wellMixed("W", 0.01, column),
+      wellMixed("N2", 0.98066, column),
+      wellMixed("Ar", 0.00934, column),
+    ]);
+    expect(earthAir?.crossSection.provenance).toBe("measured");
+  });
+
+  it("takes 2% for the share, §15's", () => {
+    expect(AIR_TRACE_SHARE).toBe(0.02);
+  });
+
+  it("is estimated by its optics where other gases pass 2% of its partners", () => {
+    const other = formed([
+      wellMixed("W", 0.01, column),
+      wellMixed("N2", 0.7, column),
+      wellMixed("Ar", 0.29, column),
+    ]);
+    expect(other?.crossSection).toEqual(
+      expect.objectContaining({ provenance: "estimated", estimatedBy: "optics" }),
+    );
+  });
+
+  it("forms nothing on a gas alone", () => {
+    expect(formed([wellMixed("W", 1, column)])).toBeUndefined();
   });
 });

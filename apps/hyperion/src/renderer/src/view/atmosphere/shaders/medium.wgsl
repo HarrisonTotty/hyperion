@@ -54,9 +54,21 @@ fn densityOf(i : u32, profile : vec4f, heightM : f32) -> f32 {
   return tabulatedDensityOf(i, profile.y, h);
 }
 
+// The pressure at a height above the ground over ABSORBER_PRESSURE_REFERENCE_PA (R08.T4.d): the
+// layer of `densityTables` past the terms', read as a tabulated profile (`tables.ts`'s
+// packDensityTables), where `medium.absorbers.z` is 1; 0 for a medium without it, whose absorbers'
+// curves have no pressure rows.
+fn pressureBarAt(h : f32) -> f32 {
+  if (medium.absorbers.z < 0.5) {
+    return 0.0;
+  }
+  return tabulatedDensityOf(u32(medium.termCount), medium.topHeightM, max(h, 0.0));
+}
+
 // The medium at a height above the ground: its scattering, extinction and absorption, m^-1, the
-// last the terms' own absorption coefficients summed (R08.T6.d), and its absorbers' columns per
-// metre (R08.T6.c), which an absorber adds in place of an extinction.
+// last the terms' own absorption coefficients summed (R08.T6.d), its absorbers' columns per metre
+// (R08.T6.c), which an absorber adds in place of an extinction, and the same times the pressure
+// ratio there (R08.T4.d).
 fn mediumAtHeight(h : f32) -> MediumSample {
   var scattering = vec3f(0.0);
   var extinction = vec3f(0.0);
@@ -71,7 +83,14 @@ fn mediumAtHeight(h : f32) -> MediumSample {
     absorption += term.absorption.rgb * d;
     columns = addColumns(columns, termColumns(term, d), 1.0);
   }
-  return MediumSample(scattering, extinction, absorption, columns);
+  let pressureColumns = pressureColumnsOf(columns, lineSlots(), pressureBarAt(h));
+  return MediumSample(scattering, extinction, absorption, columns, pressureColumns);
+}
+
+// The medium's line slots, the bitmask of its absorber slots whose curves have pressure rows
+// (`common.wgsl`'s `pressureChannelOf`; R08.T4.d).
+fn lineSlots() -> u32 {
+  return u32(medium.absorbers.w);
 }
 
 // How many of the medium's terms are absorbers, each a slot of the absorber columns (R08.T6.c).

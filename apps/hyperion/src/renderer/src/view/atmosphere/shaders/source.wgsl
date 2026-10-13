@@ -5,8 +5,10 @@
 // ray-march kernels, each of which also declares the phase tables as
 // `var phaseTables : texture_2d_array<f32>;`, and the absorber-column table and the lights' curves
 // of growth as `var absorberColumns : texture_2d<f32>;` and `var absorberCurves : texture_2d<f32>;`
-// (R08.T6.c), in group 0; like `medium.wgsl`, it reads the kernel's `medium`, `terms` and tables in
-// place, so the composite does not take it.
+// (R08.T6.c), and the pressure-weighted columns as
+// `var absorberPressureColumns : texture_2d<f32>;` and
+// `var lastAbsorberPressureColumn : texture_2d<f32>;` (R08.T4.d), in group 0; like `medium.wgsl`,
+// it reads the kernel's `medium`, `terms` and tables in place, so the composite does not take it.
 //
 // The source is ported from Bevy 0.19.1's functions.wgsl (`sample_local_inscattering`, MIT; the
 // notice is in common.wgsl) and checked against sebh's IntegrateScatteredLuminance (MIT; the
@@ -77,12 +79,14 @@ fn phaseOf(i : u32, term : Term, angle : ScatteringAngle) -> vec3f {
 
 // The medium at a sample, each term's density evaluated once (R05.T12.e): the scattering and the
 // extinction, m^-1, the scattering towards the eye, each term's scattering times its phase,
-// per channel, m^-1 sr^-1, and the absorbers' columns per metre (R08.T6.c).
+// per channel, m^-1 sr^-1, the absorbers' columns per metre (R08.T6.c), and the same times the
+// pressure ratio there (R08.T4.d).
 struct SampleMedium {
   scattering : vec3f,
   extinction : vec3f,
   phasedScattering : vec3f,
   columns : AbsorberColumns,
+  pressureColumns : AbsorberColumns,
 }
 
 // The medium at a height above the datum, for the angle between the view direction and the
@@ -102,26 +106,32 @@ fn sampleMediumAt(heightM : f32, angle : ScatteringAngle) -> SampleMedium {
     phased += scattered * phaseOf(i, term, angle);
     columns = addColumns(columns, termColumns(term, d), 1.0);
   }
-  return SampleMedium(scattering, extinction, phased, columns);
+  let pressureColumns = pressureColumnsOf(columns, lineSlots(), pressureBarAt(heightM));
+  return SampleMedium(scattering, extinction, phased, columns, pressureColumns);
 }
 
 // The sun's transmittance from a height above the datum along a zenith cosine to the top, read from
 // the table on the tables' own sphere, of ground radius `tableBottomM` and the medium's height:
 // its stored optical depth and absorber columns, with the sun's curves of growth (light slot 0,
 // the one sun the kernels draw until R08.T7), exponentiated in f32 (`transmittanceThroughTables`,
-// R08.T6.c). Each kernel that takes this declares `absorberColumns` and `absorberCurves`.
+// R08.T6.c). Each kernel that takes this declares `absorberColumns`, `absorberCurves`,
+// `absorberPressureColumns` and `lastAbsorberPressureColumn`.
 fn tableTransmittance(table : texture_2d<f32>, tableBottomM : f32, heightM : f32, mu : f32) -> vec3f {
   let h = clamp(heightM, 0.0, medium.topHeightM);
   let unit = transmittanceUnitAt(tableBottomM, medium.topHeightM, h, mu);
   return transmittanceThroughTables(
-    table, absorberColumns, absorberCurves, absorberCount(), 0u, unit
+    table, absorberColumns, absorberPressureColumns, lastAbsorberPressureColumn, absorberCurves,
+    absorberCount(), 0u, lineSlots(), unit
   );
 }
 
 // A march's absorber path one step `dtM` on, through the sample `local` (`absorberStep`): the
 // view's own path, under the sun's curves, since what it carries is the sun's light (R08.T6.c).
 fn viewAbsorberStep(path : AbsorberPath, local : SampleMedium, dtM : f32) -> AbsorberPath {
-  return absorberStep(absorberCurves, absorberCount(), 0u, path, local.columns, dtM);
+  return absorberStep(
+    absorberCurves, absorberCount(), 0u, lineSlots(), path, local.columns, local.pressureColumns,
+    dtM
+  );
 }
 
 // The multiple-scattering source per unit illuminance at a height, for the sun's zenith cosine.

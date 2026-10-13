@@ -84,6 +84,8 @@ import {
   type MarchStep,
 } from "./marchSteps";
 import {
+  ABSORBER_PRESSURE_FLOOR_PA,
+  ABSORBER_PRESSURE_REFERENCE_PA,
   type AtmosphereMedium,
   checkTabulatedTops,
   densityLookup,
@@ -109,9 +111,13 @@ import {
   absorberSlots,
   checkAbsorberCurves,
   EDGES_PER_TERM,
+  lineSlotMask,
   MULTI_SCATTERING_SAMPLES,
   MULTI_SCATTERING_SIZE,
   NO_ABSORBER_CURVES,
+  PRESSURE_CHANNELS_A_TABLE,
+  pressureChannelCount,
+  pressureChannelOf,
   SHARED_TABLE_CURVE_SLOT,
   type TableSize,
   TRANSMITTANCE_SAMPLES,
@@ -156,6 +162,11 @@ interface TwinTerm {
   readonly slot: number;
   /** n ÷ U, m⁻¹, for an absorber; 0 otherwise. */
   readonly columnPerM: number;
+  /**
+   * Its slot's pressure channel (`tables.ts`'s `pressureChannelOf`; R08.T4.d), or −1 for a term
+   * that is not a line slot.
+   */
+  readonly pressureChannel: number;
 }
 
 /**
@@ -170,16 +181,30 @@ interface TwinTerm {
 function termsOf(medium: AtmosphereMedium): readonly TwinTerm[] {
   checkTabulatedTops(medium);
   const slots = new Map(absorberSlots(medium).map((slot) => [slot.termIndex, slot]));
-  return medium.terms.map((term, i) => ({
-    densityOf: densityLookup(term.density),
-    scattering: term.scattering,
-    absorption: term.absorption,
-    extinction: extinction(term),
-    edgesM: layerEdgesM(term.density),
-    phase: term.phase,
-    slot: slots.get(i)?.slot ?? -1,
-    columnPerM: slots.get(i)?.columnPerM ?? 0,
-  }));
+  const lines = lineSlotMask(medium);
+  return medium.terms.map((term, i) => {
+    const slot = slots.get(i)?.slot ?? -1;
+    return {
+      densityOf: densityLookup(term.density),
+      scattering: term.scattering,
+      absorption: term.absorption,
+      extinction: extinction(term),
+      edgesM: layerEdgesM(term.density),
+      phase: term.phase,
+      slot,
+      columnPerM: slots.get(i)?.columnPerM ?? 0,
+      pressureChannel: slot < 0 ? -1 : pressureChannelOf(lines, slot),
+    };
+  });
+}
+
+/**
+ * The medium's pressure over `tables.ts`'s `ABSORBER_PRESSURE_REFERENCE_PA` at a height above the
+ * ground, as `medium.wgsl`'s `pressureBarAt` reads it (R08.T4.d), or null for a medium without a
+ * pressure profile, whose absorbers' curves have no pressure rows.
+ */
+function pressureBarLookup(medium: AtmosphereMedium): ((heightM: number) => number) | null {
+  return medium.pressureBar === undefined ? null : densityLookup(medium.pressureBar);
 }
 
 /** Where a sample's absorber columns per metre stand in {@link sampleInto}'s output: 9 on. */
@@ -188,8 +213,17 @@ const COLUMNS_AT = 9;
 /** Where a sample's absorption stands in {@link sampleInto}'s output, past the columns: 14 on. */
 const ABSORPTION_AT = COLUMNS_AT + ABSORBER_SLOTS;
 
-/** The floats of one sample: three triples, the absorber slots' columns and the absorption. */
-const SAMPLE_FLOATS = ABSORPTION_AT + 3;
+/**
+ * Where a sample's pressure-weighted columns per metre stand in {@link sampleInto}'s output, past
+ * the absorption, by pressure channel: 17 on (R08.T4.d).
+ */
+const PRESSURE_COLUMNS_AT = ABSORPTION_AT + 3;
+
+/**
+ * The floats of one sample: three triples, the absorber slots' columns, the absorption and the
+ * slots' pressure-weighted columns.
+ */
+const SAMPLE_FLOATS = PRESSURE_COLUMNS_AT + ABSORBER_SLOTS;
 
 /**
  * The medium at a height into `out`, {@link SAMPLE_FLOATS} long: the scattering in 0–2 and the
@@ -197,7 +231,9 @@ const SAMPLE_FLOATS = ABSORPTION_AT + 3;
  * the eye in 6–8, m⁻¹ sr⁻¹; each absorber slot's column per metre, its n ÷ U times its density,
  * in 9–13; and the absorption in 14–16, m⁻¹, the terms' own coefficients summed, never the
  * extinction less the scattering (`medium.wgsl`'s `mediumAtHeight` and `source.wgsl`'s
- * `sampleMediumAt`; R08.T6.d).
+ * `sampleMediumAt`; R08.T6.d); and each line slot's column per metre times p ÷ 1 bar there, from
+ * `pressureBarOf`, in its pressure channel at 17–21, 0 elsewhere and for a medium without a pressure
+ * profile (R08.T4.d; `common.wgsl`'s `pressureColumnsOf`).
  *
  * @remarks
  * The twins' innermost call, a few million times a table: written with indexed loops and its sums
@@ -206,6 +242,7 @@ const SAMPLE_FLOATS = ABSORPTION_AT + 3;
  */
 function sampleInto(
   terms: readonly TwinTerm[],
+  pressureBarOf: ((heightM: number) => number) | null,
   phases: Float64Array | null,
   heightM: number,
   out: Float64Array,
@@ -263,6 +300,14 @@ function sampleInto(
   out[ABSORPTION_AT] = a0;
   out[ABSORPTION_AT + 1] = a1;
   out[ABSORPTION_AT + 2] = a2;
+  const ratio = pressureBarOf === null ? 0 : pressureBarOf(heightM);
+  out.fill(0, PRESSURE_COLUMNS_AT, SAMPLE_FLOATS);
+  for (let k = 0; k < terms.length; k += 1) {
+    const term = terms[k];
+    if (term !== undefined && term.pressureChannel >= 0) {
+      out[PRESSURE_COLUMNS_AT + term.pressureChannel] = (out[COLUMNS_AT + term.slot] ?? 0) * ratio;
+    }
+  }
 }
 
 /** Whether any of a medium's terms is an absorber. */
@@ -445,17 +490,21 @@ export function transmittancePieces(
 
 /**
  * The optical depth along a ray to the top by the transmittance kernel's midpoint rule, of every
- * term but the absorbers, into `out`, and each absorber slot's column u ÷ U into `columns`, the ray
- * split at the terms' layer edges as {@link transmittancePieces} splits it (R08.T6.d).
+ * term but the absorbers, into `out`, each absorber slot's column u ÷ U into `columns` and each
+ * line slot's pressure-weighted column into `pressureColumns` by pressure channel (`tables.ts`'s
+ * `pressureChannelOf`; R08.T4.d), the ray split at the terms' layer edges as
+ * {@link transmittancePieces} splits it (R08.T6.d).
  */
 function kernelOpticalDepthInto(
   terms: readonly TwinTerm[],
+  pressureBarOf: ((heightM: number) => number) | null,
   shell: Shell,
   rM: number,
   mu: number,
   samples: number,
   out: TwinRgb,
   columns: Float64Array,
+  pressureColumns: Float64Array,
   scratch: Float64Array,
 ): void {
   const tMaxM = distanceToTopM(shell, rM, mu);
@@ -470,18 +519,27 @@ function kernelOpticalDepthInto(
   );
   out.fill(0);
   columns.fill(0);
+  pressureColumns.fill(0);
   let start = 0;
   for (const [p, end] of endsM.entries()) {
     const n = steps[p] ?? 0;
     const dt = n > 0 ? (end - start) / n : 0;
     for (let i = 0; i < n; i += 1) {
       const t = start + (i + 0.5) * dt;
-      sampleInto(terms, null, localRadiusM(rM, mu, t) - shell.bottomRadiusM, scratch);
+      sampleInto(
+        terms,
+        pressureBarOf,
+        null,
+        localRadiusM(rM, mu, t) - shell.bottomRadiusM,
+        scratch,
+      );
       for (const c of CHANNELS) {
         out[c] += (scratch[3 + c] ?? Number.NaN) * dt;
       }
       for (let k = 0; k < ABSORBER_SLOTS; k += 1) {
         columns[k] = (columns[k] ?? 0) + (scratch[COLUMNS_AT + k] ?? Number.NaN) * dt;
+        pressureColumns[k] =
+          (pressureColumns[k] ?? 0) + (scratch[PRESSURE_COLUMNS_AT + k] ?? Number.NaN) * dt;
       }
     }
     start = end;
@@ -523,6 +581,11 @@ export interface TwinRayToTop {
   readonly opticalDepth: Rgb;
   /** Each absorber slot's column u ÷ U, slot by slot, 0 past the medium's absorbers. */
   readonly columns: Float64Array;
+  /**
+   * Each line slot's pressure-weighted column, (p ÷ 10⁵ Pa)(u ÷ U) summed, by pressure channel
+   * (`tables.ts`'s `pressureChannelOf`; R08.T4.d).
+   */
+  readonly pressureColumns: Float64Array;
 }
 
 /**
@@ -541,18 +604,37 @@ export function kernelRayToTop(
   const out: TwinRgb = [0, 0, 0];
   const shell = { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM };
   const columns = new Float64Array(ABSORBER_SLOTS);
+  const pressureColumns = new Float64Array(ABSORBER_SLOTS);
   const scratch = new Float64Array(SAMPLE_FLOATS);
-  kernelOpticalDepthInto(termsOf(medium), shell, rM, mu, samples, out, columns, scratch);
-  return { opticalDepth: out, columns };
+  kernelOpticalDepthInto(
+    termsOf(medium),
+    pressureBarLookup(medium),
+    shell,
+    rM,
+    mu,
+    samples,
+    out,
+    columns,
+    pressureColumns,
+    scratch,
+  );
+  return { opticalDepth: out, columns, pressureColumns };
 }
 
-/** Both tables the transmittance kernel writes, in `f64`, as {@link transmittanceTables} gives them. */
+/** The tables the transmittance kernel writes, in `f64`, as {@link transmittanceTables} gives them. */
 interface TransmittancePair {
   readonly transmittance: TwinTable;
   readonly absorberColumns: TwinTable;
+  readonly absorberPressureColumns: TwinTable;
+  readonly lastAbsorberPressureColumn: TwinTable;
 }
 
-/** The transmittance kernel's two tables at each texel's (r, μ), as `transmittance.wgsl` stores them. */
+/**
+ * The transmittance kernel's four tables at each texel's (r, μ), as `transmittance.wgsl` stores
+ * them: the optical depth with slot 0's column, slots 1 to 4's columns, and the pressure-weighted
+ * columns of pressure channels 0 to 3 and of channel 4 (R08.T4.d), the last one texel of 0 unless
+ * the medium has five line slots (`tables.ts`'s `lastPressureColumnSize`).
+ */
 function transmittanceTables(
   medium: AtmosphereMedium,
   bottomRadiusM: number,
@@ -560,17 +642,33 @@ function transmittanceTables(
   samples: number,
 ): TransmittancePair {
   const terms = termsOf(medium);
+  const pressureBarOf = pressureBarLookup(medium);
   const shell = { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM };
   const { widthTexels: w, heightTexels: h } = size;
   const first = new Float64Array(w * h * 4);
   const more = new Float64Array(w * h * 4);
+  const pressureColumnFour = new Float64Array(w * h * 4);
+  const fifthChannel = pressureChannelCount(lineSlotMask(medium)) > PRESSURE_CHANNELS_A_TABLE;
+  const pressureColumnLast = new Float64Array(fifthChannel ? w * h * 4 : 4);
   const depth: TwinRgb = [0, 0, 0];
   const columns = new Float64Array(ABSORBER_SLOTS);
+  const pressureColumns = new Float64Array(ABSORBER_SLOTS);
   const scratch = new Float64Array(SAMPLE_FLOATS);
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
       const { rM, mu } = transmittanceUvToRMu(shell, unitOfTexel(x, w), unitOfTexel(y, h));
-      kernelOpticalDepthInto(terms, shell, rM, mu, samples, depth, columns, scratch);
+      kernelOpticalDepthInto(
+        terms,
+        pressureBarOf,
+        shell,
+        rM,
+        mu,
+        samples,
+        depth,
+        columns,
+        pressureColumns,
+        scratch,
+      );
       // Held to the half float's largest, as the kernel stores them.
       first.set(
         [depth[0], depth[1], depth[2], columns[0] ?? Number.NaN].map((v) => Math.min(v, HALF_MAX)),
@@ -580,11 +678,22 @@ function transmittanceTables(
         columns.subarray(1, 5).map((v) => Math.min(v, HALF_MAX)),
         (y * w + x) * 4,
       );
+      pressureColumnFour.set(
+        pressureColumns.subarray(0, 4).map((v) => Math.min(v, HALF_MAX)),
+        (y * w + x) * 4,
+      );
+      if (fifthChannel) {
+        pressureColumnLast[(y * w + x) * 4] = Math.min(pressureColumns[4] ?? Number.NaN, HALF_MAX);
+      }
     }
   }
   return {
     transmittance: { widthTexels: w, heightTexels: h, texels: first },
     absorberColumns: { widthTexels: w, heightTexels: h, texels: more },
+    absorberPressureColumns: { widthTexels: w, heightTexels: h, texels: pressureColumnFour },
+    lastAbsorberPressureColumn: fifthChannel
+      ? { widthTexels: w, heightTexels: h, texels: pressureColumnLast }
+      : { widthTexels: 1, heightTexels: 1, texels: pressureColumnLast },
   };
 }
 
@@ -621,6 +730,16 @@ export interface TwinTransmittance {
    * transmittance table's texels, 0 where the medium has no such slot.
    */
   readonly absorberColumns: TwinTable;
+  /**
+   * The pressure-weighted columns (R08.T4.d), (p ÷ 10⁵ Pa)(u ÷ U) summed, by pressure channel
+   * (`tables.ts`'s `pressureChannelOf`): channels 0 to 3 in rgba here.
+   */
+  readonly absorberPressureColumns: TwinTable;
+  /**
+   * Pressure channel 4's in r, at the transmittance's texels for a medium of five line slots and
+   * one texel of 0 otherwise (`tables.ts`'s `lastPressureColumnSize`).
+   */
+  readonly lastAbsorberPressureColumn: TwinTable;
   /** Each light's curves, one an absorber slot (`tables.ts`'s `AbsorberCurveSlots`). */
   readonly curves: AbsorberCurveSlots;
 }
@@ -652,6 +771,10 @@ interface TwinAbsorbers {
   readonly curves: ReadonlyArray<AbsorberCurve>;
   /** Each curve as the march reads it, slot by slot ({@link readerOf}). */
   readonly readers: ReadonlyArray<CurveReader>;
+  /** Each slot's pressure channel, −1 for a slot without lines (`tables.ts`'s `pressureChannelOf`). */
+  readonly channels: Int8Array;
+  /** Whether the medium's line slots take a fifth channel, `lastAbsorberPressureColumn`'s. */
+  readonly fifthChannel: boolean;
 }
 
 /**
@@ -674,7 +797,13 @@ function twinAbsorbers(
     );
   }
   const taken = light ?? [];
-  return { curves: taken, readers: taken.map(readerOf) };
+  const lines = lineSlotMask(medium);
+  return {
+    curves: taken,
+    readers: taken.map(readerOf),
+    channels: Int8Array.from(slots, ({ slot }) => pressureChannelOf(lines, slot)),
+    fifthChannel: pressureChannelCount(lines) > PRESSURE_CHANNELS_A_TABLE,
+  };
 }
 
 /** ln(u ÷ U) at a curve's node 0: 10⁻³ (`absorbers.ts`'s `ABSORBER_CURVE_DECADES`). */
@@ -692,14 +821,32 @@ const CURVE_DEPTH_MAX = -Math.log(ABSORBER_TRANSMITTANCE_FLOOR);
  * clamp included (log–log between the nodes about the column, linear where either is 0,
  * proportional to u below node 0, the last interval's power law beyond the last node), with the
  * node found from ln(u ÷ U) on the curve's even grid, as the kernels find it, rather than by a
- * search. A test holds the two equal.
+ * search; on a curve with pressure rows (R08.T4.d), 4-point Lagrange in ln p̄ between its rows, as
+ * `absorbers.ts`'s `depthAtPressure` and `common.wgsl`'s `curveDepth` take it. A test holds the
+ * two equal.
  *
  * @param relativeColumn - u ÷ U, the column over the curve's absorber's vertical column; 0 or less
  *   for none.
+ * @param pressurePa - The path's absorber-weighted pressure, Pa: read on a curve of several rows,
+ *   ignored on one of a single row.
+ * @throws RangeError for a curve of several rows read with no pressure, or one not finite and above
+ *   0, as `absorberTransmittance` refuses it.
  */
-export function curveOpticalDepth(curve: AbsorberCurve, relativeColumn: number): Rgb {
+export function curveOpticalDepth(
+  curve: AbsorberCurve,
+  relativeColumn: number,
+  pressurePa: number | undefined,
+): Rgb {
+  if (
+    curve.logPressures.length > 1 &&
+    (pressurePa === undefined || !(Number.isFinite(pressurePa) && pressurePa > 0))
+  ) {
+    throw new RangeError(
+      `a curve with lines is read at a path's pressure above 0, not ${String(pressurePa)}`,
+    );
+  }
   const out: TwinRgb = [0, 0, 0];
-  addCurveDepth(readerOf(curve), relativeColumn, out);
+  addCurveDepth(readerOf(curve), relativeColumn, Math.log(pressurePa ?? 1), out);
   return out;
 }
 
@@ -710,8 +857,17 @@ export function curveOpticalDepth(curve: AbsorberCurve, relativeColumn: number):
  */
 interface CurveReader {
   readonly nodes: number;
+  /** Its pressure rows, 1 for an absorber without lines (R08.T4.d). */
+  readonly rows: number;
+  /** Each row's ln(p ÷ 1 Pa), ascending. */
+  readonly logPressures: Float64Array;
+  /** The read's top, ln(p ÷ 1 Pa): above it p̄ is held. */
+  readonly readTopLogPressure: number;
+  /** Row-major, `[r × nodes + j]`. */
   readonly depths: readonly [Float64Array, Float64Array, Float64Array];
   readonly logs: readonly [Float64Array, Float64Array, Float64Array];
+  /** A row's depth per channel, the read's scratch. */
+  readonly row: TwinRgb;
 }
 
 /** Each curve's {@link CurveReader}, made once. */
@@ -724,8 +880,12 @@ function readerOf(curve: AbsorberCurve): CurveReader {
     const [r, g, b] = curve.opticalDepth;
     reader = {
       nodes: curve.logColumns.length,
+      rows: curve.logPressures.length,
+      logPressures: curve.logPressures,
+      readTopLogPressure: curve.readTopLogPressure,
       depths: curve.opticalDepth,
       logs: [r.map(Math.log), g.map(Math.log), b.map(Math.log)],
+      row: [0, 0, 0],
     };
     CURVE_READERS.set(curve, reader);
   }
@@ -735,18 +895,16 @@ function readerOf(curve: AbsorberCurve): CurveReader {
 /** u ÷ U at a curve's node 0, 10⁻³: exp of {@link CURVE_FIRST_LN}. */
 const CURVE_FIRST_COLUMN = Math.exp(CURVE_FIRST_LN);
 
-/** {@link curveOpticalDepth} added into `out`. */
-function addCurveDepth(reader: CurveReader, x: number, out: TwinRgb): void {
-  if (!(x > 0)) {
-    return;
-  }
-  const node = (Math.log(x) - CURVE_FIRST_LN) * CURVE_NODES_PER_LN;
+/**
+ * Row `r`'s depth per channel at `node`, the column's place on the grid, unclamped
+ * (`common.wgsl`'s `curveRowDepth`), into the reader's `row`.
+ */
+function rowDepthInto(reader: CurveReader, r: number, node: number, proportion: number): void {
+  const offset = r * reader.nodes;
+  const out = reader.row;
   if (node <= 0) {
-    // exp(ln u − ln u₀) = (u ÷ U) ÷ 10⁻³.
-    const proportion = x / CURVE_FIRST_COLUMN;
     for (const c of CHANNELS) {
-      const depth = (reader.depths[c][0] ?? Number.NaN) * proportion;
-      out[c] += Math.min(Math.max(depth, 0), CURVE_DEPTH_MAX);
+      out[c] = (reader.depths[c][offset] ?? Number.NaN) * proportion;
     }
     return;
   }
@@ -755,27 +913,107 @@ function addCurveDepth(reader: CurveReader, x: number, out: TwinRgb): void {
   for (const c of CHANNELS) {
     const depths = reader.depths[c];
     const logs = reader.logs[c];
-    const a = depths[k] ?? Number.NaN;
-    const b = depths[k + 1] ?? Number.NaN;
-    const la = logs[k] ?? Number.NaN;
-    const lb = logs[k + 1] ?? Number.NaN;
-    const depth = a > 0 && b > 0 ? Math.exp(la + (lb - la) * t) : a + (b - a) * t;
-    out[c] += Math.min(Math.max(depth, 0), CURVE_DEPTH_MAX);
+    const a = depths[offset + k] ?? Number.NaN;
+    const b = depths[offset + k + 1] ?? Number.NaN;
+    const la = logs[offset + k] ?? Number.NaN;
+    const lb = logs[offset + k + 1] ?? Number.NaN;
+    out[c] = a > 0 && b > 0 ? Math.exp(la + (lb - la) * t) : a + (b - a) * t;
   }
 }
 
 /**
- * The absorbers' optical depth per channel through a path's columns u ÷ U, slot by slot, under
- * one light slot's curves, into `out`: `common.wgsl`'s `absorberDepth`, each curve read by
- * {@link curveOpticalDepth}.
+ * {@link curveOpticalDepth} added into `out`, at ln(p̄ ÷ 1 Pa) `lnP`: each row's depth, then
+ * 4-point Lagrange in ln p̄ on the depth over the four rows nearest, weighted by the rows' own ln p̄;
+ * linear on a curve of two or three rows; p̄ held at the first row and at the read's top; the sum
+ * clamped to [0, −ln 10⁻⁶] (`common.wgsl`'s `curveDepth`).
  */
-function absorberDepthInto(absorbers: TwinAbsorbers, relative: Float64Array, out: TwinRgb): void {
+function addCurveDepth(reader: CurveReader, x: number, lnP: number, out: TwinRgb): void {
+  if (!(x > 0)) {
+    return;
+  }
+  const node = (Math.log(x) - CURVE_FIRST_LN) * CURVE_NODES_PER_LN;
+  // exp(ln u − ln u₀) = (u ÷ U) ÷ 10⁻³, below node 0.
+  const proportion = x / CURVE_FIRST_COLUMN;
+  const rows = reader.rows;
+  const row = reader.row;
+  if (rows <= 1) {
+    rowDepthInto(reader, 0, node, proportion);
+    for (const c of CHANNELS) {
+      out[c] += Math.min(Math.max(row[c], 0), CURVE_DEPTH_MAX);
+    }
+    return;
+  }
+  const lnPs = reader.logPressures;
+  const lowest = lnPs[0] ?? Number.NaN;
+  const top = Math.min(lnPs[rows - 1] ?? Number.NaN, reader.readTopLogPressure);
+  const y = Math.min(Math.max(lnP, lowest), top);
+  let r = 0;
+  while (r < rows - 2 && (lnPs[r + 1] ?? Number.NaN) < y) {
+    r += 1;
+  }
+  let d0 = 0;
+  let d1 = 0;
+  let d2 = 0;
+  if (rows < 4) {
+    const lo = lnPs[r] ?? Number.NaN;
+    const hi = lnPs[r + 1] ?? Number.NaN;
+    const f = (y - lo) / (hi - lo);
+    rowDepthInto(reader, r, node, proportion);
+    const [a0, a1, a2] = row;
+    rowDepthInto(reader, r + 1, node, proportion);
+    d0 = a0 + (row[0] - a0) * f;
+    d1 = a1 + (row[1] - a1) * f;
+    d2 = a2 + (row[2] - a2) * f;
+  } else {
+    const s0 = Math.min(Math.max(r - 1, 0), rows - 4);
+    for (let m = s0; m < s0 + 4; m += 1) {
+      const xm = lnPs[m] ?? Number.NaN;
+      let w = 1;
+      for (let n = s0; n < s0 + 4; n += 1) {
+        if (n !== m) {
+          w *= (y - (lnPs[n] ?? Number.NaN)) / (xm - (lnPs[n] ?? Number.NaN));
+        }
+      }
+      rowDepthInto(reader, m, node, proportion);
+      d0 += w * row[0];
+      d1 += w * row[1];
+      d2 += w * row[2];
+    }
+  }
+  out[0] += Math.min(Math.max(d0, 0), CURVE_DEPTH_MAX);
+  out[1] += Math.min(Math.max(d1, 0), CURVE_DEPTH_MAX);
+  out[2] += Math.min(Math.max(d2, 0), CURVE_DEPTH_MAX);
+}
+
+/**
+ * ln(p̄ ÷ 1 Pa) of a path's slot from its column and pressure-weighted column (R08.T4.d), p̄ at
+ * least {@link ABSORBER_PRESSURE_FLOOR_PA}, as `common.wgsl`'s `pathLogPressure` takes it.
+ */
+function pathLogPressure(x: number, w: number): number {
+  return Math.log(Math.max((ABSORBER_PRESSURE_REFERENCE_PA * w) / x, ABSORBER_PRESSURE_FLOOR_PA));
+}
+
+/**
+ * The absorbers' optical depth per channel through a path's columns u ÷ U, slot by slot, and its
+ * pressure-weighted columns, by pressure channel, under one light slot's curves, into `out`:
+ * `common.wgsl`'s `absorberDepth`, each curve read by {@link curveOpticalDepth} at its slot's p̄, a
+ * slot without lines at none.
+ */
+function absorberDepthInto(
+  absorbers: TwinAbsorbers,
+  relative: Float64Array,
+  pressureColumns: Float64Array,
+  out: TwinRgb,
+): void {
   out.fill(0);
-  const { readers } = absorbers;
+  const { readers, channels } = absorbers;
   for (let k = 0; k < readers.length; k += 1) {
     const reader = readers[k];
     if (reader !== undefined) {
-      addCurveDepth(reader, relative[k] ?? Number.NaN, out);
+      const x = relative[k] ?? Number.NaN;
+      const c = channels[k] ?? -1;
+      const lnP = c < 0 ? 0 : pathLogPressure(x, pressureColumns[c] ?? Number.NaN);
+      addCurveDepth(reader, x, lnP, out);
     }
   }
 }
@@ -783,8 +1021,8 @@ function absorberDepthInto(absorbers: TwinAbsorbers, relative: Float64Array, out
 /**
  * The sun's transmittance at the transmittance table's unit range (u, v) into `out`:
  * `common.wgsl`'s `transmittanceThroughTables` for the light slot `absorbers` holds, the optical
- * depth and the absorber columns read bilinearly through Bruneton's texel mapping, the curves added and
- * the sum exponentiated.
+ * depth, the absorber columns and their pressure-weighted columns read bilinearly through
+ * Bruneton's texel mapping, the curves added at each slot's p̄ and the sum exponentiated.
  */
 function transmittanceThroughTablesInto(
   tables: TwinTransmittance,
@@ -796,15 +1034,25 @@ function transmittanceThroughTablesInto(
 ): void {
   const ut = texelUvFromUnit(unitClamp(u), tables.transmittance.widthTexels);
   const vt = texelUvFromUnit(unitClamp(v), tables.transmittance.heightTexels);
-  const { stored, columns, more } = scratch;
+  const { stored, columns, more, pressureColumns, pressureColumnFour, pressureColumnLast } =
+    scratch;
   bilinearChannelsInto(tables.transmittance, ut, vt, RGBA, stored);
   columns.fill(0);
+  pressureColumns.fill(0);
   columns[0] = stored[3] ?? Number.NaN;
+  if (absorbers.curves.length > 0) {
+    bilinearChannelsInto(tables.absorberPressureColumns, ut, vt, RGBA, pressureColumnFour);
+    pressureColumns.set(pressureColumnFour, 0);
+    if (absorbers.fifthChannel) {
+      bilinearChannelsInto(tables.lastAbsorberPressureColumn, ut, vt, RGBA, pressureColumnLast);
+      pressureColumns[4] = pressureColumnLast[0] ?? Number.NaN;
+    }
+  }
   if (absorbers.curves.length > 1) {
     bilinearChannelsInto(tables.absorberColumns, ut, vt, RGBA, more);
     columns.set(more, 1);
   }
-  absorberDepthInto(absorbers, columns, out);
+  absorberDepthInto(absorbers, columns, pressureColumns, out);
   for (const c of CHANNELS) {
     out[c] = Math.exp(-((stored[c] ?? Number.NaN) + out[c]));
   }
@@ -812,12 +1060,16 @@ function transmittanceThroughTablesInto(
 
 /**
  * The arrays {@link transmittanceThroughTablesInto} works in, made once a march rather than as
- * views at every read: the stored texel, the absorber slots' columns and slots 1 to 4's texel.
+ * views at every read: the stored texel, the absorber slots' columns and slots 1 to 4's texel, and
+ * the pressure-weighted columns with their two texels (R08.T4.d).
  */
 interface ReadScratch {
   readonly stored: Float64Array;
   readonly columns: Float64Array;
   readonly more: Float64Array;
+  readonly pressureColumns: Float64Array;
+  readonly pressureColumnFour: Float64Array;
+  readonly pressureColumnLast: Float64Array;
 }
 
 /** A fresh {@link ReadScratch}. */
@@ -826,6 +1078,9 @@ function readScratch(): ReadScratch {
     stored: new Float64Array(4),
     columns: new Float64Array(ABSORBER_SLOTS),
     more: new Float64Array(4),
+    pressureColumns: new Float64Array(ABSORBER_SLOTS),
+    pressureColumnFour: new Float64Array(4),
+    pressureColumnLast: new Float64Array(4),
   };
 }
 
@@ -886,6 +1141,8 @@ interface MultiScatteringInputs {
   readonly terms: readonly TwinTerm[];
   /** The marches' layer edges of the terms ({@link marchEdgesOf}), m. */
   readonly edgesM: ReadonlyArray<number>;
+  /** The medium's pressure ratio at a height ({@link pressureBarLookup}), or null. */
+  readonly pressureBarOf: ((heightM: number) => number) | null;
   readonly shell: Shell;
   readonly groundAlbedo: Rgb;
   readonly transmittance: TwinTransmittance;
@@ -937,28 +1194,35 @@ function multiScatteringSteps(
 
 /**
  * A march's absorber path in `f64` (`common.wgsl`'s `AbsorberPath`): the columns u ÷ U crossed
- * from the ray's start, slot by slot, and the optical depth one light slot's curves give them.
+ * from the ray's start, slot by slot, their pressure-weighted columns (R08.T4.d), and the optical
+ * depth one light slot's curves give them.
  */
 class TwinAbsorberPath {
   readonly columns = new Float64Array(ABSORBER_SLOTS);
+  readonly pressureColumns = new Float64Array(ABSORBER_SLOTS);
   readonly depth: TwinRgb = [0, 0, 0];
   readonly #next: TwinRgb = [0, 0, 0];
   readonly #active: boolean;
-  readonly #depthOf: (columns: Float64Array, out: TwinRgb) => void;
+  readonly #depthOf: (columns: Float64Array, pressureColumns: Float64Array, out: TwinRgb) => void;
 
   /**
    * @param active - Whether the medium has an absorber; a path through none stays empty.
-   * @param depthOf - The optical depth the light's curves give a path's columns, into `out`.
+   * @param depthOf - The optical depth the light's curves give a path's columns and
+   *   pressure-weighted columns, into `out`.
    */
-  constructor(active: boolean, depthOf: (columns: Float64Array, out: TwinRgb) => void) {
+  constructor(
+    active: boolean,
+    depthOf: (columns: Float64Array, pressureColumns: Float64Array, out: TwinRgb) => void,
+  ) {
     this.#active = active;
     this.#depthOf = depthOf;
   }
 
   /**
-   * The path one step `dtM` longer through a sample's columns per metre (`local`, from
-   * `COLUMNS_AT`), into `stepDepth`: how much the step deepens the whole path's optical depth
-   * (`absorberStep`). Nothing for a medium with no absorber.
+   * The path one step `dtM` longer through a sample's columns and pressure-weighted columns per
+   * metre (`local`, from `COLUMNS_AT` and `PRESSURE_COLUMNS_AT`), into `stepDepth`: how much the
+   * step deepens the whole path's optical depth (`absorberStep`), which may fall a little below 0
+   * where the path's p̄ moves on a curve with pressure rows. Nothing for a medium with no absorber.
    */
   stepInto(local: Float64Array, dtM: number, stepDepth: TwinRgb): void {
     stepDepth.fill(0);
@@ -967,8 +1231,10 @@ class TwinAbsorberPath {
     }
     for (let k = 0; k < ABSORBER_SLOTS; k += 1) {
       this.columns[k] = (this.columns[k] ?? 0) + (local[COLUMNS_AT + k] ?? Number.NaN) * dtM;
+      this.pressureColumns[k] =
+        (this.pressureColumns[k] ?? 0) + (local[PRESSURE_COLUMNS_AT + k] ?? Number.NaN) * dtM;
     }
-    this.#depthOf(this.columns, this.#next);
+    this.#depthOf(this.columns, this.pressureColumns, this.#next);
     for (const c of CHANNELS) {
       stepDepth[c] = this.#next[c] - this.depth[c];
       this.depth[c] = this.#next[c];
@@ -1006,14 +1272,14 @@ function integrateDirectionInto(
   out: Float64Array,
   scratch: DirectionScratch,
 ): void {
-  const { terms, shell, transmittance, absorbers, options } = inputs;
+  const { terms, pressureBarOf, shell, transmittance, absorbers, options } = inputs;
   const { sample, read, toSun, absorbed } = scratch;
   const mu = dir.z;
   const tMax = maxDistanceM(shell, rM, mu);
   out.fill(0);
   const throughput: TwinRgb = [1, 1, 1];
-  const path = new TwinAbsorberPath(hasAbsorbers(terms), (columns, depth) => {
-    absorberDepthInto(absorbers, columns, depth);
+  const path = new TwinAbsorberPath(hasAbsorbers(terms), (columns, pressureColumns, depth) => {
+    absorberDepthInto(absorbers, columns, pressureColumns, depth);
   });
   for (const { tM, dtM } of multiScatteringSteps(inputs, rM, dir, mu, tMax)) {
     const px = tM * dir.x;
@@ -1021,7 +1287,7 @@ function integrateDirectionInto(
     const pz = rM + tM * dir.z;
     const rP = Math.sqrt(px * px + py * py + pz * pz);
     const muSun = (sun.x * px + sun.y * py + sun.z * pz) / rP;
-    sampleInto(terms, null, rP - shell.bottomRadiusM, sample);
+    sampleInto(terms, pressureBarOf, null, rP - shell.bottomRadiusM, sample);
     const lit = intersectsGround(shell, rP, muSun) ? 0 : 1;
     const [u, v] = transmittanceRMuToUv(shell, rP, muSun);
     transmittanceThroughTablesInto(transmittance, absorbers, u, v, toSun, read);
@@ -1168,6 +1434,7 @@ export function multiScatteringTwin(
   const inputs: MultiScatteringInputs = {
     terms,
     edgesM: marchEdgesOf(terms, medium.topHeightM),
+    pressureBarOf: pressureBarLookup(medium),
     shell: { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM },
     groundAlbedo: medium.groundAlbedo,
     transmittance,
@@ -1203,6 +1470,7 @@ export function multiScatteringSeriesTwin(
   const inputs: MultiScatteringInputs = {
     terms,
     edgesM: marchEdgesOf(terms, medium.topHeightM),
+    pressureBarOf: pressureBarLookup(medium),
     shell: { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM },
     groundAlbedo: medium.groundAlbedo,
     transmittance,
@@ -1265,10 +1533,14 @@ export interface TwinSources {
   readonly multiScattering: (heightM: number, muSun: number, out: TwinRgb) => void;
   /**
    * The optical depth per channel the sun's curves of growth give a march's own path through the
-   * absorber columns u ÷ U, slot by slot, into `out` (R08.T6.c). Asked only of a medium with an
-   * absorber.
+   * absorber columns u ÷ U, slot by slot, and the pressure-weighted columns, by pressure channel,
+   * into `out` (R08.T6.c, R08.T4.d). Asked only of a medium with an absorber.
    */
-  readonly absorberPathDepth: (columns: Float64Array, out: TwinRgb) => void;
+  readonly absorberPathDepth: (
+    columns: Float64Array,
+    pressureColumns: Float64Array,
+    out: TwinRgb,
+  ) => void;
 }
 
 /**
@@ -1301,8 +1573,8 @@ export function tableSources(planet: PlanetTwin): TwinSources {
         (atmosphereM - MULTI_SCATTERING_GROUND_OFFSET_M);
       tableAtUnitInto(table, muSun * 0.5 + 0.5, v, out);
     },
-    absorberPathDepth: (columns, out) => {
-      absorberDepthInto(absorbers, columns, out);
+    absorberPathDepth: (columns, pressureColumns, out) => {
+      absorberDepthInto(absorbers, columns, pressureColumns, out);
     },
   };
 }
@@ -1496,6 +1768,7 @@ class Marcher {
   readonly luminance: TwinRgb = [0, 0, 0];
   readonly throughput: TwinRgb = [1, 1, 1];
   readonly #terms: readonly TwinTerm[];
+  readonly #pressureBarOf: ((heightM: number) => number) | null;
   readonly #phases: Float64Array;
   readonly #sources: TwinSources;
   readonly #geometry: MarchGeometry;
@@ -1508,11 +1781,13 @@ class Marcher {
 
   constructor(
     terms: readonly TwinTerm[],
+    pressureBarOf: ((heightM: number) => number) | null,
     sources: TwinSources,
     geometry: MarchGeometry,
     ray: TwinRay,
   ) {
     this.#terms = terms;
+    this.#pressureBarOf = pressureBarOf;
     this.#sources = sources;
     this.#geometry = geometry;
     this.#ray = ray;
@@ -1558,7 +1833,7 @@ class Marcher {
       }
     }
     const local = this.#local;
-    sampleInto(this.#terms, this.#phases, heightM, local);
+    sampleInto(this.#terms, this.#pressureBarOf, this.#phases, heightM, local);
     const sources = this.#sources;
     const lit = groundShadows(sources.bottomRadiusM, heightM, muSun) ? 0 : 1;
     sources.sunTransmittance(heightM, muSun, this.#toSun);
@@ -1589,7 +1864,7 @@ export function marchTwin(
   ray: TwinRay,
   steps: readonly MarchStep[],
 ): TwinMarch {
-  const marcher = new Marcher(termsOf(medium), sources, geometry, ray);
+  const marcher = new Marcher(termsOf(medium), pressureBarLookup(medium), sources, geometry, ray);
   for (const { tM, dtM } of steps) {
     marcher.step(tM, dtM);
   }
@@ -1730,6 +2005,7 @@ export function skyViewTwin(
 ): TwinTable {
   const terms = termsOf(planet.medium);
   const edgesM = marchEdgesOf(terms, planet.medium.topHeightM);
+  const pressureBarOf = pressureBarLookup(planet.medium);
   const sources = tableSources(planet);
   const geometry: MarchGeometry = { kind: "sphere", bottomRadiusM: view.cameraRadiusM };
   const n = Math.max(Math.floor(samples), 2);
@@ -1738,7 +2014,7 @@ export function skyViewTwin(
   for (let y = 0; y < h; y += 1) {
     for (let x = 0; x < w; x += 1) {
       const ray = skyViewRayTwin(planet.medium, view, x, y, size);
-      const marcher = new Marcher(terms, sources, geometry, ray);
+      const marcher = new Marcher(terms, pressureBarOf, sources, geometry, ray);
       for (const { tM, dtM } of piecedSteps(ray, n, edgesM, geometry)) {
         marcher.step(tM, dtM);
       }
@@ -1766,6 +2042,7 @@ export function aerialPerspectiveTwin(
   reachM: number,
 ): TwinVolume {
   const terms = termsOf(planet.medium);
+  const pressureBarOf = pressureBarLookup(planet.medium);
   const sources = tableSources(planet);
   const bottom = view.cameraRadiusM;
   const geometry: MarchGeometry = { kind: "sphere", bottomRadiusM: bottom };
@@ -1788,7 +2065,7 @@ export function aerialPerspectiveTwin(
         tEndM: reachM,
         fromCamera: true,
       };
-      const marcher = new Marcher(terms, sources, geometry, ray);
+      const marcher = new Marcher(terms, pressureBarOf, sources, geometry, ray);
       for (let slice = 0; slice < slices; slice += 1) {
         for (let step = 0; step < perSlice; step += 1) {
           marcher.step((slice * perSlice + step + 0.5) * dtM, dtM);
@@ -1918,6 +2195,7 @@ interface RayMarchContext {
   readonly terms: readonly TwinTerm[];
   /** The marches' layer edges of the terms ({@link marchEdgesOf}), m. */
   readonly edgesM: ReadonlyArray<number>;
+  readonly pressureBarOf: ((heightM: number) => number) | null;
   readonly sources: TwinSources;
   readonly geometry: MarchGeometry;
   readonly view: TwinView;
@@ -1934,6 +2212,7 @@ function rayMarchContext(
     medium: planet.medium,
     terms,
     edgesM: marchEdgesOf(terms, planet.medium.topHeightM),
+    pressureBarOf: pressureBarLookup(planet.medium),
     sources: tableSources(planet),
     geometry: { kind: "spheroid", figure: view.figure },
     view,
@@ -1947,13 +2226,13 @@ function rayMarchTexelInto(
   marched: RayMarchRay | null,
   out: Float64Array,
 ): void {
-  const { medium, terms, edgesM, sources, geometry, view, samples } = context;
+  const { medium, terms, edgesM, pressureBarOf, sources, geometry, view, samples } = context;
   if (marched === null) {
     out.set([0, 0, 0, 1]);
     return;
   }
   const { ray, bareGroundM } = marched;
-  const marcher = new Marcher(terms, sources, geometry, ray);
+  const marcher = new Marcher(terms, pressureBarOf, sources, geometry, ray);
   for (const { tM, dtM } of piecedSteps(ray, samples, edgesM, geometry)) {
     marcher.step(tM, dtM);
   }

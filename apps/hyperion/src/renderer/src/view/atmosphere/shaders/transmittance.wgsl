@@ -40,6 +40,14 @@
 @group(0) @binding(3) var transmittanceOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(4) var absorberColumnsOut : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(5) var<uniform> layerEdges : LayerEdges;
+// The line slots' pressure-weighted columns by pressure channel (R08.T4.d; `common.wgsl`'s
+// `pressureChannelOf`): channels 0 to 3 in rgba, channel 4 in the second table's r, each
+// (p / ABSORBER_PRESSURE_REFERENCE_PA) (u / U) summed along the ray.
+@group(0) @binding(6) var absorberPressureColumnsOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(7) var lastAbsorberPressureColumnOut : texture_storage_2d<rgba16float, write>;
+
+// The pressure channels one table holds, in its rgba (`tables.ts`'s PRESSURE_CHANNELS_A_TABLE).
+const PRESSURE_CHANNELS_A_TABLE : u32 = 4u;
 
 // rgba16float's largest finite value (IEEE 754-2008 binary16), to which every stored value is held.
 const HALF_MAX : f32 = 65504.0;
@@ -56,10 +64,12 @@ const MAX_CROSSINGS : u32 = 8u * MAX_TERMS;
 const STEPS_A_PIECE : u32 = 4u;
 
 // What the table keeps of a ray from a texel's point to the top: the optical depth of every term
-// but the absorbers, and each absorber slot's column over its vertical one (R08.T6.c).
+// but the absorbers, each absorber slot's column over its vertical one (R08.T6.c), and each line
+// slot's pressure-weighted column by pressure channel (R08.T4.d), summed in the same inner loop.
 struct RayToTop {
   depth : vec3f,
   columns : AbsorberColumns,
+  pressureColumns : AbsorberColumns,
 }
 
 // The optical depth and the absorber columns from a texel's point along its zenith cosine to the
@@ -119,6 +129,7 @@ fn rayToTop(texel : TransmittanceTexel) -> RayToTop {
   let rest = samples - least * pieces;
   var depth = vec3f(0.0);
   var columns = AbsorberColumns(0.0, vec4f(0.0));
+  var pressureColumns = AbsorberColumns(0.0, vec4f(0.0));
   var start = 0.0;
   var spent = 0u;
   for (var p = 0u; p < pieces; p++) {
@@ -137,11 +148,12 @@ fn rayToTop(texel : TransmittanceTexel) -> RayToTop {
         let local = mediumAtHeight(heightM);
         depth += local.extinction * dt;
         columns = addColumns(columns, local.columns, dt);
+        pressureColumns = addColumns(pressureColumns, local.pressureColumns, dt);
       }
     }
     start = end;
   }
-  return RayToTop(depth, columns);
+  return RayToTop(depth, columns, pressureColumns);
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -156,4 +168,12 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let stored = min(vec4f(ray.depth, ray.columns.first), vec4f(HALF_MAX));
   textureStore(transmittanceOut, id.xy, stored);
   textureStore(absorberColumnsOut, id.xy, min(ray.columns.more, vec4f(HALF_MAX)));
+  let firstFour = vec4f(ray.pressureColumns.first, ray.pressureColumns.more.xyz);
+  textureStore(absorberPressureColumnsOut, id.xy, min(firstFour, vec4f(HALF_MAX)));
+  // A fifth pressure channel, and its table at the transmittance's size, only for five line slots
+  // (`tables.ts`'s lastPressureColumnSize); the table is otherwise one texel, never read.
+  if (countOneBits(lineSlots()) > PRESSURE_CHANNELS_A_TABLE) {
+    let last = min(ray.pressureColumns.more.w, HALF_MAX);
+    textureStore(lastAbsorberPressureColumnOut, id.xy, vec4f(last, 0.0, 0.0, 0.0));
+  }
 }

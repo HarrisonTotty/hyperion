@@ -270,6 +270,66 @@ function amountValue(amount: AbsorberAmount): number {
   return value;
 }
 
+/**
+ * The medium's line slots (R08.T4.d; `decision-r08-t4d-kdist-chain.md` §15, ruling 2): a bitmask
+ * of its absorber slots whose curves have pressure rows, bit k for slot k, the column absorbers one
+ * of whose species has lines (`absorbers.ts`'s `absorberCurvePressures`). The kernels read it from
+ * `Medium.absorbers.w` and the composite from `Draw.shell.z` (`common.wgsl`'s `pressureChannelOf`).
+ *
+ * @remarks
+ * `absorbers.ts`'s `absorberSpecs` puts every species mixed through one layer in one profile, so
+ * the well-mixed line species, the bulk gas's, are one slot, and its channel holds the bulk's
+ * pressure-weighted column. Each other line slot, H₂O's among them, takes a channel of its own.
+ */
+export function lineSlotMask(medium: AtmosphereMedium): number {
+  let mask = 0;
+  for (const { slot, absorber } of absorberSlots(medium)) {
+    if (absorber.kind === "column" && absorber.spec.species.some((s) => s.lines !== undefined)) {
+      mask |= 1 << slot;
+    }
+  }
+  return mask;
+}
+
+/**
+ * Absorber slot `slot`'s pressure channel among the line slots `mask` ({@link lineSlotMask}): its
+ * rank among them in slot order, or −1 for a slot without lines, which reads no pressure. Channels
+ * 0 to 3 stand in `absorberPressureColumns`' rgba and channel 4 in `lastAbsorberPressureColumn`'s r.
+ */
+export function pressureChannelOf(mask: number, slot: number): number {
+  if ((mask & (1 << slot)) === 0) {
+    return -1;
+  }
+  let below = 0;
+  for (let k = 0; k < slot; k += 1) {
+    below += (mask >> k) & 1;
+  }
+  return below;
+}
+
+/** How many pressure channels the line slots `mask` take: one a line slot. */
+export function pressureChannelCount(mask: number): number {
+  let count = 0;
+  for (let k = 0; k < ABSORBER_SLOTS; k += 1) {
+    count += (mask >> k) & 1;
+  }
+  return count;
+}
+
+/** The pressure channels one table holds, in its rgba: four. */
+export const PRESSURE_CHANNELS_A_TABLE = 4;
+
+/**
+ * The size of `lastAbsorberPressureColumn`, the fifth pressure channel's table: the
+ * transmittance's for a medium of five line slots, one texel, never read, for any other
+ * (`decision-r08-t4d-kdist-chain.md` §15, ruling 2: a second table only past four line slots).
+ */
+export function lastPressureColumnSize(medium: AtmosphereMedium): TableSize {
+  return pressureChannelCount(lineSlotMask(medium)) > PRESSURE_CHANNELS_A_TABLE
+    ? TRANSMITTANCE_SIZE
+    : { widthTexels: 1, heightTexels: 1 };
+}
+
 /** The relative tolerance a curve's node columns are held to on the kernels' grid. */
 const CURVE_GRID_TOLERANCE = 1e-9;
 
@@ -281,7 +341,11 @@ const CURVE_GRID_TOLERANCE = 1e-9;
  *   curves, or a curve of the other kind (a pair curve on a column absorber or the reverse), whose
  *   nodes are not {@link ABSORBER_CURVE_NODES}, at u ÷ U = 10^(−3 + j ÷ 40) about its own
  *   absorber's U to 10⁻⁹ of ln u, or whose optical depths are not finite and in [0, −ln 10⁻⁶]
- *   (`absorbers.ts`'s floor).
+ *   (`absorbers.ts`'s floor); or, for a curve's pressure rows (R08.T4.d), rows whose ln p is
+ *   not finite and ascending, rows or a read's top that differ from light slot 0's, several rows
+ *   on a slot without lines or one row on a slot with them ({@link lineSlotMask}), or several
+ *   rows on a medium with no pressure profile ({@link AtmosphereMedium.pressureBar}) to read
+ *   them by.
  */
 export function checkAbsorberCurves(medium: AtmosphereMedium, curves: AbsorberCurveSlots): void {
   const slots = absorberSlots(medium);
@@ -291,6 +355,7 @@ export function checkAbsorberCurves(medium: AtmosphereMedium, curves: AbsorberCu
     );
   }
   const deepest = ABSORBER_CURVE_DEPTH_MAX;
+  const lines = lineSlotMask(medium);
   for (const [light, perAbsorber] of curves.entries()) {
     if (perAbsorber.length !== slots.length) {
       throw new RangeError(
@@ -313,9 +378,10 @@ export function checkAbsorberCurves(medium: AtmosphereMedium, curves: AbsorberCu
             Math.log(vertical) + (CURVE_FIRST_DECADE + j / CURVE_NODES_PER_DECADE) * Math.LN10;
           return Math.abs(x - expected) <= CURVE_GRID_TOLERANCE * Math.max(Math.abs(expected), 1);
         });
+      const rows = curve.logPressures.length;
       const depthsHeld = curve.opticalDepth.every(
         (depths) =>
-          depths.length === ABSORBER_CURVE_NODES &&
+          depths.length === ABSORBER_CURVE_NODES * rows &&
           depths.every((d) => Number.isFinite(d) && d >= 0 && d <= deepest * (1 + 1e-12)),
       );
       if (!(onGrid && depthsHeld)) {
@@ -323,8 +389,53 @@ export function checkAbsorberCurves(medium: AtmosphereMedium, curves: AbsorberCu
           `light slot ${light}'s curve for absorber ${slot.term.name} is not on the tables' grid of ${ABSORBER_CURVE_NODES} nodes about its vertical amount, or its optical depths leave [0, ${deepest}]`,
         );
       }
+      const refusal = rowsRefusal(medium, curve, curves[0]?.[k], pressureChannelOf(lines, k) >= 0);
+      if (refusal !== undefined) {
+        throw new RangeError(
+          `light slot ${light}'s curve for absorber ${slot.term.name} has pressure rows ${refusal}`,
+        );
+      }
     }
   }
+}
+
+/**
+ * Why a curve's pressure rows cannot be packed (R08.T4.d), or undefined where they can: rows whose
+ * ln p is not finite and ascending, rows or a read's top that differ from light slot 0's curve for
+ * the same absorber, several rows on a slot without lines or one on a slot with them (which reads
+ * a pressure channel, {@link lineSlotMask}), or several rows on a medium with no pressure profile
+ * to read them by.
+ */
+function rowsRefusal(
+  medium: AtmosphereMedium,
+  curve: AbsorberCurve,
+  firstLight: AbsorberCurve | undefined,
+  lineSlot: boolean,
+): string | undefined {
+  const rows = curve.logPressures.length;
+  const ascending =
+    rows >= 1 &&
+    Number.isFinite(curve.readTopLogPressure) &&
+    curve.logPressures.every(
+      (y, i) => Number.isFinite(y) && y > (curve.logPressures[i - 1] ?? -Infinity),
+    );
+  if (!ascending) {
+    return "that are not finite and ascending";
+  }
+  const asFirst =
+    firstLight !== undefined &&
+    firstLight.logPressures.length === rows &&
+    firstLight.logPressures.every((y, i) => y === curve.logPressures[i]) &&
+    firstLight.readTopLogPressure === curve.readTopLogPressure;
+  if (!asFirst) {
+    return "or a read's top that differ from light slot 0's";
+  }
+  if (rows > 1 !== lineSlot) {
+    return lineSlot ? "of one row on a slot with lines" : "on a slot without lines";
+  }
+  return rows > 1 && medium.pressureBar === undefined
+    ? `and medium ${medium.name} has no pressure profile to read them by`
+    : undefined;
 }
 
 /** A 2D table's contents: RGBA per texel, row by row from texel (0, 0). */
@@ -335,10 +446,18 @@ export interface PackedTable {
 }
 
 /**
- * The lights' curves of growth as `common.wgsl`'s `curveDepth` reads them, `rgba32float`: row
- * light × {@link ABSORBER_SLOTS} + k holds light slot `light`'s curve for absorber slot k, texel j
- * its optical depth −ln T_c per channel at node j in rgb and 0 in alpha; rows past the medium's
- * absorbers are 0. A one-texel placeholder for a medium with no absorber, whose kernels read none.
+ * The lights' curves of growth as `common.wgsl`'s `curveDepth` reads them, `rgba32float`, each a
+ * block of its pressure rows (R08.T4.d), one row for an absorber without lines:
+ *
+ * - row 0, a header: texel k for absorber slot k, its first row within a light's block, its rows
+ *   and its read's top ln(p ÷ 1 Pa) in rgb; texel {@link ABSORBER_SLOTS} the rows a light's block
+ *   takes in r;
+ * - light slot s's curve for absorber slot k at pressure row q in row 1 + s × block + first + q,
+ *   texel j its optical depth −ln T_c per channel at node j in rgb and the row's ln(p ÷ 1 Pa) in
+ *   alpha.
+ *
+ * Every light's curve for a slot has the same rows, its absorber's ({@link checkAbsorberCurves}).
+ * A one-texel placeholder for a medium with no absorber, whose kernels read none.
  *
  * @throws RangeError as {@link checkAbsorberCurves}.
  */
@@ -347,21 +466,33 @@ export function packAbsorberCurves(
   curves: AbsorberCurveSlots,
 ): PackedTable {
   checkAbsorberCurves(medium, curves);
-  if (absorberSlots(medium).length === 0) {
+  const slots = absorberSlots(medium);
+  if (slots.length === 0) {
     return { widthTexels: 1, heightTexels: 1, texels: new Float32Array(4) };
   }
   const width = ABSORBER_CURVE_NODES;
-  const height = curves.length * ABSORBER_SLOTS;
+  const lead = curves[0] ?? [];
+  const rowsOf = slots.map((_, k) => lead[k]?.logPressures.length ?? 1);
+  const firsts = rowsOf.map((_, k) => rowsOf.slice(0, k).reduce((sum, n) => sum + n, 0));
+  const block = rowsOf.reduce((sum, n) => sum + n, 0);
+  const height = 1 + curves.length * block;
   const texels = new Float32Array(width * height * 4);
+  for (const [k, rows] of rowsOf.entries()) {
+    texels.set([firsts[k] ?? 0, rows, lead[k]?.readTopLogPressure ?? 0, 0], k * 4);
+  }
+  texels.set([block, 0, 0, 0], ABSORBER_SLOTS * 4);
   for (const [light, perAbsorber] of curves.entries()) {
     for (const [k, curve] of perAbsorber.entries()) {
-      const row = light * ABSORBER_SLOTS + k;
       const [r, g, b] = curve.opticalDepth;
-      for (let j = 0; j < width; j += 1) {
-        texels.set(
-          [r[j] ?? Number.NaN, g[j] ?? Number.NaN, b[j] ?? Number.NaN, 0],
-          (row * width + j) * 4,
-        );
+      for (const [q, lnP] of curve.logPressures.entries()) {
+        const row = 1 + light * block + (firsts[k] ?? 0) + q;
+        for (let j = 0; j < width; j += 1) {
+          const at = q * width + j;
+          texels.set(
+            [r[at] ?? Number.NaN, g[at] ?? Number.NaN, b[at] ?? Number.NaN, lnP],
+            (row * width + j) * 4,
+          );
+        }
       }
     }
   }
@@ -396,11 +527,15 @@ export const KERNEL_ARM_FORMAT = "rgba32float";
 /**
  * A planet's tables' textures: the stored `rgba16float` ones, or the kernel arm's `rgba32float`
  * ones ({@link KERNEL_ARM_FORMAT}). The transmittance kernel writes the transmittance table and the
- * absorber-column table beside it (R08.T6.c).
+ * absorber-column table beside it (R08.T6.c), and the pressure-weighted column tables (R08.T4.d).
  */
 export interface PlanetTableTextures {
   readonly transmittance: TextureHandle;
   readonly absorberColumns: TextureHandle;
+  /** The pressure-weighted columns of pressure channels 0 to 3, in rgba (R08.T4.d). */
+  readonly absorberPressureColumns: TextureHandle;
+  /** The pressure-weighted column of pressure channel 4, in r ({@link lastPressureColumnSize}). */
+  readonly lastAbsorberPressureColumn: TextureHandle;
   readonly multiScattering: TextureHandle;
 }
 
@@ -548,10 +683,11 @@ export function packMedium(medium: AtmosphereMedium): Float32Array {
 
 /**
  * The medium's shell, term count and a kernel's steps as `common.wgsl`'s `Medium` uniform, with the
- * ground's albedo and the count of its absorber slots (R08.T6.c). The shell is the ground's radius
- * and the atmosphere's height above it, H itself, so that no kernel forms H as the top's radius
- * less the ground's, which in `f32` would carry both radii's rounding (plan R08, Design note 18,
- * R08.T6.g).
+ * ground's albedo and the count of its absorber slots (R08.T6.c), and in `absorbers.z` 1 where the
+ * density tables hold the pressure profile past the terms' layers and in `absorbers.w` the line
+ * slots' bitmask, {@link lineSlotMask} (R08.T4.d). The shell is the ground's radius and the
+ * atmosphere's height above it, H itself, so that no kernel forms H as the top's radius less the
+ * ground's, which in `f32` would carry both radii's rounding (plan R08, Design note 18, R08.T6.g).
  *
  * @param bottomRadiusM - The ground's radius, m.
  * @param samples - The kernel's steps along each ray.
@@ -567,7 +703,15 @@ export function packMediumUniform(
   const packed = new Float32Array(MEDIUM_UNIFORM_FLOATS);
   packed.set([bottomRadiusM, medium.topHeightM, medium.terms.length, samples], 0);
   packed.set([...medium.groundAlbedo, 0], 4);
-  packed.set([absorberCount(medium), curveSlot, 0, 0], 8);
+  packed.set(
+    [
+      absorberCount(medium),
+      curveSlot,
+      medium.pressureBar === undefined ? 0 : 1,
+      lineSlotMask(medium),
+    ],
+    8,
+  );
   return packed;
 }
 
@@ -806,8 +950,12 @@ export function resampledPhase(table: PhaseTable): PhaseTable {
  * twin of `medium` itself is the resampling's error, which `tables.test.ts` bounds.
  */
 export function kernelMedium(medium: AtmosphereMedium): AtmosphereMedium {
+  const pressure = medium.pressureBar;
   return {
     ...medium,
+    ...(pressure === undefined
+      ? {}
+      : { pressureBar: resampledDensity(pressure, medium.topHeightM) }),
     terms: medium.terms.map((term) => ({
       ...term,
       density:
@@ -840,14 +988,18 @@ function placeholder(channels: number): LayeredTable {
 /**
  * The medium's density tables as `medium.wgsl` reads them, `r32float`: one layer a term, term i's
  * at layer i, its {@link resampledDensity} on {@link DENSITY_TABLE_LEVELS} levels where its
- * density is tabulated and zeros where it is not; the placeholder where no term's is.
+ * density is tabulated and zeros where it is not, and, for a medium with a pressure profile
+ * (R08.T4.d), the profile resampled likewise at the layer past the terms', which `medium.wgsl`'s
+ * `pressureBarAt` reads; the placeholder where no term's is tabulated and there is none.
  */
 export function packDensityTables(medium: AtmosphereMedium): LayeredTable {
   const terms = medium.terms;
-  if (!terms.some((term) => term.density.kind === "tabulated")) {
+  const pressure = medium.pressureBar;
+  if (!terms.some((term) => term.density.kind === "tabulated") && pressure === undefined) {
     return placeholder(1);
   }
-  const texels = new Float32Array(DENSITY_TABLE_LEVELS * terms.length);
+  const layers = terms.length + (pressure === undefined ? 0 : 1);
+  const texels = new Float32Array(DENSITY_TABLE_LEVELS * layers);
   for (const [i, term] of terms.entries()) {
     if (term.density.kind === "tabulated") {
       texels.set(
@@ -856,7 +1008,13 @@ export function packDensityTables(medium: AtmosphereMedium): LayeredTable {
       );
     }
   }
-  return { widthTexels: DENSITY_TABLE_LEVELS, layers: terms.length, texels };
+  if (pressure !== undefined) {
+    texels.set(
+      resampledDensity(pressure, medium.topHeightM).relative,
+      terms.length * DENSITY_TABLE_LEVELS,
+    );
+  }
+  return { widthTexels: DENSITY_TABLE_LEVELS, layers, texels };
 }
 
 /**
@@ -921,6 +1079,10 @@ interface UploadedTexture {
 interface TableResources {
   readonly transmittance: TextureHandle;
   readonly absorberColumns: TextureHandle;
+  readonly absorberPressureColumns: TextureHandle;
+  /** The fifth pressure channel's table, resized as the medium's line slots need it. */
+  lastAbsorberPressureColumn: TextureHandle;
+  lastPressureColumnSize: TableSize;
   readonly multiScattering: TextureHandle;
   readonly terms: BufferHandle;
   densityTables: LayeredTexture;
@@ -985,6 +1147,8 @@ function releaseResources(engine: RenderEngine, resources: TableResources): void
   for (const texture of [
     resources.transmittance,
     resources.absorberColumns,
+    resources.absorberPressureColumns,
+    resources.lastAbsorberPressureColumn,
     resources.multiScattering,
     resources.densityTables.texture,
     resources.phaseTables.texture,
@@ -994,23 +1158,35 @@ function releaseResources(engine: RenderEngine, resources: TableResources): void
   }
 }
 
+/** A stored table the kernels write and the per-frame kernels read, `rgba16float`. */
+function storedTable(engine: RenderEngine, name: string, size: TableSize): TextureHandle {
+  return engine.createTexture({
+    name,
+    size: [size.widthTexels, size.heightTexels],
+    dimension: "2d",
+    format: "rgba16float",
+    mips: 1,
+    usage: TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_SRC,
+    category: "atmosphere-tables",
+  });
+}
+
+/** The name of the fifth pressure channel's table. */
+const LAST_PRESSURE_COLUMN_NAME = "atmosphere last absorber pressure column";
+
 function createResources(engine: RenderEngine): TableResources {
   const usage =
     TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_SRC;
   const one = { widthTexels: 1, layers: 1 };
   const transmittanceTable = (name: string): TextureHandle =>
-    engine.createTexture({
-      name,
-      size: [TRANSMITTANCE_SIZE.widthTexels, TRANSMITTANCE_SIZE.heightTexels],
-      dimension: "2d",
-      format: "rgba16float",
-      mips: 1,
-      usage,
-      category: "atmosphere-tables",
-    });
+    storedTable(engine, name, TRANSMITTANCE_SIZE);
+  const oneTexel = { widthTexels: 1, heightTexels: 1 };
   return {
     transmittance: transmittanceTable("atmosphere transmittance"),
     absorberColumns: transmittanceTable("atmosphere absorber columns"),
+    absorberPressureColumns: transmittanceTable("atmosphere absorber pressure columns"),
+    lastAbsorberPressureColumn: storedTable(engine, LAST_PRESSURE_COLUMN_NAME, oneTexel),
+    lastPressureColumnSize: oneTexel,
     multiScattering: engine.createTexture({
       name: "atmosphere multiple scattering",
       size: [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels],
@@ -1111,6 +1287,23 @@ export class AtmosphereTables {
     return this.#resources.absorberColumns;
   }
 
+  /**
+   * Pressure channels 0 to 3's pressure-weighted columns per (r, μ) to the top, rgba,
+   * `rgba16float`: one channel a line slot ({@link pressureChannelOf}; R08.T4.d).
+   */
+  get absorberPressureColumns(): TextureHandle {
+    return this.#resources.absorberPressureColumns;
+  }
+
+  /**
+   * Pressure channel 4's pressure-weighted column per (r, μ) to the top, in r, `rgba16float`:
+   * the transmittance's size for a medium of five line slots, one texel otherwise
+   * ({@link lastPressureColumnSize}); a new handle after a medium or a restore that resizes it.
+   */
+  get lastAbsorberPressureColumn(): TextureHandle {
+    return this.#resources.lastAbsorberPressureColumn;
+  }
+
   /** The lights' curves of growth, {@link packAbsorberCurves}'s, `rgba32float`. */
   get absorberCurves(): TextureHandle {
     return this.#resources.absorberCurves.texture;
@@ -1199,11 +1392,22 @@ export class AtmosphereTables {
     r.densityTables = this.#upload(r.densityTables, densityTables, DENSITY_FORMAT);
     r.phaseTables = this.#upload(r.phaseTables, phaseTables, PHASE_FORMAT);
     r.absorberCurves = this.#uploadCurves(r.absorberCurves, absorberCurves);
+    const lastSize = lastPressureColumnSize(medium);
+    const held = r.lastPressureColumnSize;
+    if (lastSize.widthTexels !== held.widthTexels || lastSize.heightTexels !== held.heightTexels) {
+      // Made before the old one goes, so that a loss while making it leaves no released handle.
+      const resized = storedTable(engine, LAST_PRESSURE_COLUMN_NAME, lastSize);
+      engine.releaseTexture(r.lastAbsorberPressureColumn);
+      r.lastAbsorberPressureColumn = resized;
+      r.lastPressureColumnSize = lastSize;
+    }
     this.#dispatchTables(
       { transmittance: r.transmittanceKernel, multiScattering: r.multiScatteringKernel },
       {
         transmittance: r.transmittance,
         absorberColumns: r.absorberColumns,
+        absorberPressureColumns: r.absorberPressureColumns,
+        lastAbsorberPressureColumn: r.lastAbsorberPressureColumn,
         multiScattering: r.multiScattering,
       },
     );
@@ -1214,12 +1418,13 @@ export class AtmosphereTables {
 
   /**
    * The tables built once more by their kernels assembled to write `rgba32float`
-   * ({@link withKernelArmFormat}), into three textures made for the call: the smoke's kernel arm
-   * (plan R08, R08.T6.g; `decision-r08-t6b-floor.md` §4). The transmittance and absorber-column
-   * tables are built from the medium and the multiple scattering over the stored `rgba16float`
-   * ones, as the stored table's twin takes them, so that each holds its kernel's own `f32` output.
+   * ({@link withKernelArmFormat}), into five textures made for the call: the smoke's kernel arm
+   * (plan R08, R08.T6.g; `decision-r08-t6b-floor.md` §4). The transmittance, absorber-column and
+   * pressure-weighted column tables are built from the medium and the multiple scattering over the
+   * stored `rgba16float` ones, as the stored table's twin takes them, so that each holds its
+   * kernel's own `f32` output.
    *
-   * @returns The three textures, which the caller releases.
+   * @returns The five textures, which the caller releases.
    * @throws `EngineUnavailable` while the engine has no device (a loss).
    */
   buildKernelArm(): PlanetTableTextures {
@@ -1242,6 +1447,14 @@ export class AtmosphereTables {
     const tables: PlanetTableTextures = {
       transmittance: output("atmosphere transmittance (kernel arm)", TRANSMITTANCE_SIZE),
       absorberColumns: output("atmosphere absorber columns (kernel arm)", TRANSMITTANCE_SIZE),
+      absorberPressureColumns: output(
+        "atmosphere absorber pressure columns (kernel arm)",
+        TRANSMITTANCE_SIZE,
+      ),
+      lastAbsorberPressureColumn: output(
+        "atmosphere last absorber pressure column (kernel arm)",
+        lastPressureColumnSize(this.#medium),
+      ),
       multiScattering: output("atmosphere multiple scattering (kernel arm)", MULTI_SCATTERING_SIZE),
     };
     this.#dispatchTables(this.#armKernels, tables);
@@ -1250,8 +1463,9 @@ export class AtmosphereTables {
 
   /**
    * Builds the tables for the medium and ground the tables follow: the transmittance kernel into
-   * `outputs.transmittance` and `outputs.absorberColumns`, then the multiple-scattering kernel,
-   * reading the stored pair and the lights' curves, into `outputs.multiScattering`.
+   * `outputs.transmittance`, `outputs.absorberColumns`, `outputs.absorberPressureColumns` and
+   * `outputs.lastAbsorberPressureColumn`, then the multiple-scattering kernel, reading the stored
+   * tables and the lights' curves, into `outputs.multiScattering`.
    */
   #dispatchTables(kernels: PlanetTableKernels, outputs: PlanetTableTextures): void {
     const engine = this.#engine;
@@ -1271,6 +1485,8 @@ export class AtmosphereTables {
         storage: {
           transmittanceOut: { texture: outputs.transmittance, level: 0 },
           absorberColumnsOut: { texture: outputs.absorberColumns, level: 0 },
+          absorberPressureColumnsOut: { texture: outputs.absorberPressureColumns, level: 0 },
+          lastAbsorberPressureColumnOut: { texture: outputs.lastAbsorberPressureColumn, level: 0 },
         },
       },
       groupsOf(TRANSMITTANCE_SIZE),
@@ -1293,6 +1509,8 @@ export class AtmosphereTables {
           ...sampled,
           transmittance: r.transmittance,
           absorberColumns: r.absorberColumns,
+          absorberPressureColumns: r.absorberPressureColumns,
+          lastAbsorberPressureColumn: r.lastAbsorberPressureColumn,
           absorberCurves: r.absorberCurves.texture,
         },
         storage: { multiScatteringOut: { texture: outputs.multiScattering, level: 0 } },

@@ -107,7 +107,7 @@ function readDepth(tables: TwinTransmittance, x: number, y: number): [number, nu
   ];
   const columns = [stored[at + 3] ?? 0, ...[0, 1, 2, 3].map((k) => more[at + k] ?? 0)];
   for (const [k, curve] of (tables.curves[0] ?? []).entries()) {
-    const absorbed = curveOpticalDepth(curve, columns[k] ?? 0);
+    const absorbed = curveOpticalDepth(curve, columns[k] ?? 0, undefined);
     for (const c of [0, 1, 2] as const) {
       depth[c] += absorbed[c];
     }
@@ -287,7 +287,7 @@ function rayDepths(
   const ray = kernelRayToTop(medium, R1, rM, mu, samples);
   const depth: [number, number, number] = [...ray.opticalDepth];
   for (const [k, curve] of (curves[0] ?? []).entries()) {
-    const absorbed = curveOpticalDepth(curve, ray.columns[k] ?? 0);
+    const absorbed = curveOpticalDepth(curve, ray.columns[k] ?? 0, undefined);
     for (const c of [0, 1, 2] as const) {
       depth[c] += absorbed[c];
     }
@@ -619,8 +619,8 @@ describe("the stored column's half-float rounding under the curves (decision-r08
         if (growthExponent(curve, u) > STEEPEST_IN_DEPTH) {
           continue;
         }
-        const at = curveOpticalDepth(curve, u);
-        const rounded = curveOpticalDepth(curve, u * (1 + HALF_ROUNDING));
+        const at = curveOpticalDepth(curve, u, undefined);
+        const rounded = curveOpticalDepth(curve, u * (1 + HALF_ROUNDING), undefined);
         for (const c of [0, 1, 2] as const) {
           if (!(Math.abs(rounded[c] - at[c]) <= 1e-3 * at[c])) {
             over.push(`${name} c${c} at u ÷ U ${u.toPrecision(4)}`);

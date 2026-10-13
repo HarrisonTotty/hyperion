@@ -70,6 +70,7 @@ import {
   type AbsorberCurveSlots,
   AtmosphereTables,
   kernelMedium,
+  lastPressureColumnSize,
   MULTI_SCATTERING_SIZE,
   NO_ABSORBER_CURVES,
   PHASE_TABLE_ENTRIES,
@@ -91,7 +92,11 @@ import {
   type TwinView,
   twinView,
 } from "../view/atmosphere/tablesCpu";
-import { fourAbsorberMedium, venusClassMedium } from "../test/atmosphereFixtures";
+import {
+  fourAbsorberMedium,
+  lineAbsorberMedium,
+  venusClassMedium,
+} from "../test/atmosphereFixtures";
 import {
   PresentationOnlyReadback,
   type RenderEngine,
@@ -1100,7 +1105,9 @@ interface TwinFrame {
  * kernels read it (`kernelMedium`), to 10⁻³ above 10⁻⁶ of the table's largest value, on Earth (R05's
  * until R08.T6.d, the rebuilt one since) and on a medium of every profile and phase the kernels
  * read; since R08.T6.c also on a medium of four absorbers, one a molecule pair, under their curves
- * of growth, and, for the per-planet tables alone, on a Venus-class medium.
+ * of growth, and, for the per-planet tables alone, on a Venus-class medium and, since R08.T4.d, on a
+ * medium with a line absorber, whose curve has pressure rows and whose tables carry the
+ * pressure-weighted columns.
  *
  * @remarks
  * The transmittance table, its optical depth and absorber columns (R08.T6.c), is held to the twin
@@ -1131,6 +1138,7 @@ export async function checkAtmosphereTwins(
 ): Promise<void> {
   const absorbing = fourAbsorberMedium();
   const venus = venusClassMedium();
+  const lines = lineAbsorberMedium();
   const media: ReadonlyArray<TwinMedium> = [
     { ...EARTH_REBUILT, scope: "everything" },
     {
@@ -1146,6 +1154,9 @@ export async function checkAtmosphereTwins(
       radiusM: venus.radiusM,
       scope: "tables",
     },
+    // The per-planet tables alone, for the smoke's watchdog: the multiple-scattering kernel reads
+    // the pressure-weighted columns and the curve's rows as the per-frame kernels do (R08.T4.d).
+    { ...lines, radiusM: EARTH_MEAN_RADIUS_M, scope: "tables" },
   ];
   const begun = media.map((entry) => {
     const read = attempt(() => kernelMedium(entry.medium));
@@ -1224,6 +1235,9 @@ interface PlanetReadback {
   readonly transmittance: Float32Array;
   /** Absorber slots 1 to 4's columns (R08.T6.c). */
   readonly absorberColumns: Float32Array;
+  /** The pressure-weighted columns, pressure channels 0 to 3 and channel 4 (R08.T4.d). */
+  readonly absorberPressureColumns: Float32Array;
+  readonly lastAbsorberPressureColumn: Float32Array;
   readonly multiScattering: Float32Array;
 }
 
@@ -1237,15 +1251,29 @@ async function readPlanetTables(
   return {
     transmittance: await read(tables.transmittance),
     absorberColumns: await read(tables.absorberColumns),
+    absorberPressureColumns: await read(tables.absorberPressureColumns),
+    lastAbsorberPressureColumn: await read(tables.lastAbsorberPressureColumn),
     multiScattering: await read(tables.multiScattering),
   };
 }
 
-/** The GPU's stored transmittance tables as the twins read them, with the lights' curves. */
-function storedTransmittance(gpu: PlanetReadback, curves: AbsorberCurveSlots): TwinTransmittance {
+/**
+ * The GPU's stored transmittance tables as the twins read them, with the lights' curves, the fifth
+ * pressure channel's table at its size for the medium (`lastPressureColumnSize`).
+ */
+function storedTransmittance(
+  gpu: PlanetReadback,
+  medium: AtmosphereMedium,
+  curves: AbsorberCurveSlots,
+): TwinTransmittance {
   return {
     transmittance: asTwinTable(gpu.transmittance, TRANSMITTANCE_SIZE),
     absorberColumns: asTwinTable(gpu.absorberColumns, TRANSMITTANCE_SIZE),
+    absorberPressureColumns: asTwinTable(gpu.absorberPressureColumns, TRANSMITTANCE_SIZE),
+    lastAbsorberPressureColumn: asTwinTable(
+      gpu.lastAbsorberPressureColumn,
+      lastPressureColumnSize(medium),
+    ),
     curves,
   };
 }
@@ -1306,7 +1334,11 @@ async function checkPlanetTwins(
   const tables = new AtmosphereTables(engine, medium, radiusM, curves);
   try {
     const gpu = await readPlanetTables(engine, tables);
-    const overGpuTwin = twins.multiScattering(read, radiusM, storedTransmittance(gpu, curves));
+    const overGpuTwin = twins.multiScattering(
+      read,
+      radiusM,
+      storedTransmittance(gpu, read, curves),
+    );
     // The per-planet tables alone are held in both arms (R08.T6.d): the kernel arm is drawn and read
     // back while the twin is computed, and its check reads it after the checks that came before it.
     const kernelArm =
@@ -1330,6 +1362,16 @@ async function checkPlanetTwins(
           `${medium.name}: the absorber-column table`,
           gpu.absorberColumns,
           twin.absorberColumns,
+          true,
+          { arm: "stored", amountChannels: [0, 1, 2, 3] },
+        );
+      }
+      if (medium.pressureBar !== undefined) {
+        checkTwin(
+          checks,
+          `${medium.name}: the pressure-column table (R08.T4.d)`,
+          gpu.absorberPressureColumns,
+          twin.absorberPressureColumns,
           true,
           { arm: "stored", amountChannels: [0, 1, 2, 3] },
         );
@@ -1398,6 +1440,8 @@ async function readMultiScatteringArm(
   } finally {
     engine.releaseTexture(arm.transmittance);
     engine.releaseTexture(arm.absorberColumns);
+    engine.releaseTexture(arm.absorberPressureColumns);
+    engine.releaseTexture(arm.lastAbsorberPressureColumn);
     engine.releaseTexture(arm.multiScattering);
   }
 }
@@ -1487,7 +1531,7 @@ async function planetOf(
   return {
     medium: read,
     bottomRadiusM: tableRadiusM(figure),
-    ...storedTransmittance(tables, atmosphere.tables.curves),
+    ...storedTransmittance(tables, read, atmosphere.tables.curves),
     multiScattering: asTwinTable(tables.multiScattering, MULTI_SCATTERING_SIZE),
   };
 }
@@ -2061,6 +2105,8 @@ async function readKernelArmTables(
   } finally {
     engine.releaseTexture(arm.transmittance);
     engine.releaseTexture(arm.absorberColumns);
+    engine.releaseTexture(arm.absorberPressureColumns);
+    engine.releaseTexture(arm.lastAbsorberPressureColumn);
     engine.releaseTexture(arm.multiScattering);
   }
 }
@@ -2083,7 +2129,7 @@ async function checkPlanetArms(
 ): Promise<PlanetTwin> {
   const bottomM = tableRadiusM(body.figure);
   const gpu = await readPlanetTables(engine, atmosphere.tables);
-  const stored = storedTransmittance(gpu, atmosphere.tables.curves);
+  const stored = storedTransmittance(gpu, read, atmosphere.tables.curves);
   const multiScatteringOverGpu = twins.multiScattering(read, bottomM, stored);
   // The kernel arm is drawn and read back while the twins are computed, and its checks read it
   // after the twins, as they came in sequence.

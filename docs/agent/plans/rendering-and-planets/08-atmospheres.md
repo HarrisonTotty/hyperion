@@ -436,8 +436,9 @@ module R12 reads for this plan's ladder entries.
     sun's per-channel illuminance, R07's `starIlluminance` (R08.T6.d);
   - `aerialPerspective(view)`, widening R05's `aerialPerspectiveVolume()`, exposes the volume and
     the transmittance table to R11, the table as its 2D array texture of κ slices, read through
-    `oblate.wgsl`'s slice lookup, with `absorberColumns` and `absorberCurves` beside it, which
-    `transmittanceThroughTables` reads with it;
+    `oblate.wgsl`'s slice lookup, with `absorberColumns` and `absorberCurves` beside it and,
+    since R08.T4.d, `absorberPressureColumns` and `lastAbsorberPressureColumn` and the medium's
+    line-slot bitmask, which `transmittanceThroughTables` reads with it;
   - `skyView(view): SkyViewTable` exposes the view's sky-view table (R05's `frameTables.skyView`),
     the sky's radiance by local azimuth and elevation summed over the drawn suns, for R11's sky
     reflection in the ocean. If R08.T7's check forces the per-sun fallback, it returns the per-sun
@@ -1874,9 +1875,9 @@ The order:
   gravity its spheroid test reads. T3.c (the molecular term) follows T3.a and T3.b.
 - T4.a follows T3, since its Earth cases need the molecular term, and builds `bless.ts`; T4.b
   follows T4.a. T4.c (continua, pairs and Thomson scattering) follows T4.b. T4.d (temperate
-  lines) follows T4.c and T6.c, whose read it widens. T4.e (atomic and ionic lines) and T4.f
-  (ExoMol's hot molecules) follow T4.d, on its machinery, in either order. T4.e's ions also wait
-  on P14.T49.b's rows for R08.T19.
+  lines) follows T4.c and T6.c, whose read it widens. T4.e (atomic and ionic lines), T4.f
+  (ExoMol's hot molecules) and T4.g (ExoMol's temperate lines, split from T4.d) follow T4.d, on
+  its machinery, in any order. T4.e's ions also wait on P14.T49.b's rows for R08.T19.
 - T5.a (Mie) needs nothing of T3 or T4 and can start at once; T5.b follows it, and T5.c follows
   T5.b. T5.d follows T5.b, and precedes galaxy plan 14's P14.T49.e. T5.e follows T5.d and
   R08.T12.e. It moves no generated output, so its place relative to P14.T49.e is free. T5.f (the
@@ -2432,9 +2433,37 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   - **The species:**
     - O₂'s B band (686–695 nm), its γ band (628–634 nm), the head of its A band (759–760 nm;
       the rest lies outside the range), and the weaker bands HITRAN holds in the range;
-    - H₂O's visible bands (near 590, 650 and 700–735 nm), from HITRAN, to 500 K;
-    - NH₃'s 552 and 648 nm bands, from ExoMol's C2018 list (Coles et al. 2018), in
-      `absorbers/exomol/` under its CC BY-SA terms;
+    - H₂O's visible bands (near 590, 650 and 700–735 nm), from HITRAN, over 150–500 K;
+    - H₂O's continuum over 380–760 nm, as T4.c's pairs in `crossSections.json`: the self part as
+      `H2O+H2O`, and the foreign part as H₂O with each other gas (`decision-r08-t4d-kdist.md`
+      §6). MT_CKD is not an input in any form: AER grants it "for scientific and research
+      purposes only".
+      - From 567 nm it is the Clough–Kneizys–Davies (CKD) continuum as LOWTRAN 7 tabulates it
+        (Kneizys et al. 1988, AFGL-TR-88-0177; the formulation in LOWTRAN 6's AFGL-TR-83-0187,
+        Eqs. 22–24), from `lowtran7.f`'s `SF296`, `SF260` and `BFH2O`:
+        <https://raw.githubusercontent.com/space-physics/lowtran/5b8d38714b204eaa12595f5f15e2babec1dbdfb5/src/lowtran/fortran/lowtran7.f>,
+        SHA-256 `25e83d94e24bb8acc3242dfd3b97e0bd8ca8ffceff9ec6dce1f5a37c9c5459ac`.
+      - Its 10 cm⁻¹ values are reduced to 1 nm cell means with the radiation term
+        ν tanh(hcν/2kT). With N₂ and O₂ over 260–296 K it is `measured`: a published model
+        within its range, checked against the visible measurements (Risks).
+      - Below 567 nm, where CKD's line list ends, the continuum is CKD's ratio to HITRAN2024's
+        lines, `estimated`. Each line contributes its Lorentz wing beyond 25 cm⁻¹ plus its
+        pedestal, summed over lines within 1,000 cm⁻¹, with γ_air for the foreign part and γ_self
+        for the self part. The ratio is taken over CKD's 567–600 nm cells (about 5.9 foreign and
+        9.9 self), and is recorded.
+      - The self part is a power law in T through CKD's 260 and 296 K values in each cell. The
+        foreign part is held at 296 K, as CKD prescribes. Outside 260–296 K both are
+        `estimated`, and beyond 150–500 K they are held.
+      - With N₂ and O₂, and with any other gases together up to 2% of the foreign molecules
+        (Earth's Ar 0.93% among them), the foreign part is `measured` as air. Beyond that, the
+        excess share is `estimated`, the air value scaled by each gas's broadening ratio r
+        (below) (`decision-r08-t4d-kdist-chain.md` §15).
+      - The source is LOWTRAN, a US Air Force program "approved for public release; distribution
+        unlimited" whose code states no terms. The values are reduced, with citation, and the raw
+        file is not committed;
+    - NH₃'s 552 and 648 nm bands: R08.T4.g, split out (its 243.7M transitions need their own
+      reduction). Until then NH₃ is a `PENDING_ABSORBERS` entry naming R08.T4.g, so that
+      R08.T10.a's margin labels any body that needs it;
     - CO₂'s bands over 565–737 nm (HITRAN2024, 1,204 lines; measured at 200, 296 and 500 K;
       τ ≈ 0.7 at 716 nm through Venus's vertical column);
     - Karman et al. 2018's computed A- and B-band collision-induced sets at 206–346 K (Nature
@@ -2442,8 +2471,10 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       and B bands, for each pair they cover: `measured` over 206–346 K, held and `estimated`
       beyond.
     - CO's 7–0 band (691–700 nm, HITRAN2024), its higher overtones bounded by the ladder;
-    - N₂O from HITRAN2024 (to 714 nm) and ExoMol's TYM list below it (to 500 nm), the latter in
-      `absorbers/exomol/`;
+    - N₂O's HITRAN2024 bands (713–754 nm). Its TYM part is R08.T4.g's, split out with NH₃: below
+      714 nm, and TYM's bands that HITRAN2024 lacks over 714–760 nm. Until then it is a
+      `PENDING_ABSORBERS` entry naming R08.T4.g, bounded by TYM's 296 K cell means below
+      714 nm, and by their excess over HITRAN2024's, cell by cell, over 714–760 nm;
     - HCN from HITRAN2024 (to 568.6 nm), with ExoMol's list beyond if it reaches the range;
     - H₂'s quadrupole lines (HITRAN2024; 4–0 S(1) at 636.95 nm among them);
     - C₂H₂, C₂H₄, C₂H₆, PH₃ and CH₃OH:
@@ -2455,23 +2486,202 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
   - **The machinery:**
     - A k-distribution per 1 nm cell on a grid of pressure and temperature, reduced offline from
       the line lists with Voigt profiles (by R08.T4.a's tool, or a `hyperion-fit` task if its
-      cost needs one).
+      cost needs one). The line-by-line grid is a quarter of the cell's narrowest Voigt
+      half-width or finer (`decision-r08-t4d-kdist.md`).
+      - **g-points** are shared by all of a cell's nodes (2-point Gauss–Legendre intervals by
+        bisection), so that k is interpolated at fixed g.
+      - **Pressure** runs on the broadening-equivalent pressure (below) at 4 nodes a decade from
+        10 Pa to 1 MPa and 8 a decade from 1 to 10 MPa, with one more node at 13.3 MPa, only to
+        centre the read's stencil (`estimated`). Alternate nodes below 1 MPa may be dropped
+        wherever the between-node test still passes with the rows at 4 a decade, recorded.
+      - **Temperature** runs at nodes 50 K apart over each species' range, refined to 25 K and
+        then 12.5 K in any interval where the between-node test fails. An interval still failing
+        at 12.5 K is recorded (cell, T, p, u, error), and the species is `estimated` between
+        those two nodes.
+      - **Interpolation** is cubic (4-point Lagrange) in T on ln k at fixed g, once per body at
+        the profile's temperature. Linear interpolation is not used: it is 4–8 times worse at
+        these nodes.
+      - **Storage** is 16-bit ln k, code 0 for k = 0, with a per-file offset and step, in
+        little-endian binary files with a short header, committed as binary, each under the
+        500 kB hook. The optics worker loads each species' files lazily through Vite's `?url`
+        (as the height worker loads its wasm), never the render thread's bundle. Tests read them
+        as `?inline` assets (`assetsInclude`). Failing either path, base64 JSON, recorded.
+      - A cell whose largest k times the gated column is ≤ 0.02 at every node is stored as its
+        mean σ alone (G = 1). No cell is dropped.
+      - T4.d's committed binary is recorded. Past 40 MB, alternate nodes below 1 MPa are dropped
+        where the between-node test still passes on rows at 4 a decade (rows there then cubic in
+        ln p from the stored nodes), and this is recorded.
+    - **Each species' range.**
+      - Its temperatures run from where its saturated column is negligible to its line list's
+        limit (HITRAN's 500 K, C2018's 300 K). Negligible means R08.T10.a's Δ_c under 10⁻³ at
+        k = 100, for a pure gas at saturation over 40 p_sat ÷ (m g) at g = 0.5 m s⁻²: H₂O from
+        150 K. A gas that does not condense there runs to the coldest atmosphere it can be a gas
+        in.
+      - Its pressures are not cut per species, since the axis is the broadening pressure, which
+        any trace gas can see.
+      - Below 10 Pa the 10 Pa table is held. It stays `measured` by a recorded check at 1 Pa,
+        over columns to 40 p ÷ (m g) at g = 0.5 m s⁻².
+      - Above 10 MPa, and outside a species' temperatures, the nearest node is held and
+        `estimated` (`decision-r08-t4b-t12c.md`, follow-up 5). R08.T10.a decides the label.
+    - **The line shape.**
+      - One shape at every pressure, so that the tables are smooth in p
+        (`decision-r08-t4d-kdist-chain.md`). No cut-off grows with p, since a reach that grows
+        switches on a distant band's wing between two nodes.
+      - Every species without a published far-wing shape takes Voigt within 25 cm⁻¹ of each
+        line centre, with no pedestal.
+      - CO₂ takes Voigt × χ(|ν − ν₀|), each line's wing being Σ_j x_j r_j χ_j ÷ Σ_j x_j r_j over
+        its broadeners.
+        - The two sets are SpeCT's ν3-band CO₂–CO₂ and CO₂–N₂ χ (Chaverot et al. 2025, A&A 702,
+          A137; CC BY 4.0), applied to the visible bands as SpeCT applies them beyond
+          4,300 cm⁻¹ (`decision-r08-t4d-kdist-chain.md` §§12–13). N₂, O₂, Ar and air take
+          CO₂–N₂'s χ, and so does any other broadener, `estimated`.
+          - Wherever χ ≠ 1 they take SpeCT's Eq. 11 shape: the profile times the quantum
+            asymmetry factor x ÷ (1 − e^(−x)), x = c₂(ν − ν₀) ÷ T, with its detailed-balance
+            term, against which χ is defined.
+          - CO₂–CO₂: σ 3, 50 and 220 cm⁻¹; B₁ = 0.055 − 0.11 e^(−0.008 T),
+            B₂ = 0.021 + 0.08 e^(−0.0095 T), B₃ = 0.01. It is held outside 218–751 K, SpeCT's fit
+            temperatures.
+          - CO₂–N₂: σ 3, 10 and 70 cm⁻¹; B₁ = 0.416 − 0.354 e^(−0.00386 T),
+            B₂ = 0.00167 + 0.0421 e^(−0.00248 T), B₃ = 0.019. Table 2 prints 0.0167, a misprint
+            corrected from SpeCT's own code (spect-public commit e7c4579c08, `fcts.f90`),
+            recorded. It is held below 295 K and above 773 K, unless a test against Cousin et
+            al. 1985's 193–238 K measurements moves the low hold.
+          - The table flags each node whose χ is held. R08.T10.a decides on the body's own column
+            whether the hold is visible (`decision-r08-t4d-kdist-chain.md` §14). The reduction
+            itself marks no held node `estimated`.
+          - The science check's residuals against SpeCT's lab compilation
+            (10.5281/zenodo.15564294) are recorded both ways: CO₂–CO₂ +0.04 (rms 0.11) against
+            PH89's −0.71 (rms 1.10), and CO₂–N₂ tied within the lab sets' own 0.15–0.45
+            disagreement.
+        - Each cell stores the two sets on shared g-points, mixed at arrival as
+          σ(g) = w σ_self(g) + (1 − w) σ_N₂(g), with w = x_CO₂ r_self ÷ Σ_j x_j r_j.
+        - The reach is fixed where χ < 10⁻³ at every temperature the tables use, 293 cm⁻¹ over
+          100–500 K as the reduction computes it, the coefficients being held beyond.
+        - Outside its source's stated temperatures each set's coefficients are held and
+          `estimated` (outside the temperatures of the measurements each set is fitted to, as
+          the science check records them). None is clamped.
+        - The coefficients are reduced values with citation, read from carriers that are
+          finding aids (decision-composition item 17). Failing a lawful source, CO₂ takes the
+          25 cm⁻¹ cut-off, recorded.
+      - A node is `estimated` where the cell's S-weighted Lorentz half-width γ_L exceeds
+        0.25 cm⁻¹, since the far wing's shape is not measured in the visible. Each node records
+        two shares of a Lorentz line: beyond 25 cm⁻¹, 2 γ_L ÷ (25π), the most a far wing would
+        add; and 3–25 cm⁻¹ from the centre, (2/π)[arctan(25/γ_L) − arctan(3/γ_L)], which a
+        sub-Lorentzian wing would reduce. A species whose own χ is published, found at fetch,
+        takes it as CO₂ does.
+      - H₂O instead takes its continuum's convention at every pressure: Voigt within 25 cm⁻¹ less
+        the line's pedestal (its Lorentz value at 25 cm⁻¹), with no widening, the continuum
+        carrying the rest. CKD's continuum, like MT_CKD's, contains the pedestal, since FASCODE's
+        line function subtracts each line's value at its 25 cm⁻¹ bound. H₂O's nodes are
+        `estimated` where γ_L > 2.5 cm⁻¹.
+      - Line mixing in O₂'s A-band head and Dicke narrowing of H₂'s lines are recorded, not
+        modelled.
+    - **The broadener.** The tables are air-broadened. A body's broadening-equivalent pressure
+      is p_eff = p Σ_j x_j r_j, with r_j = Σ S γ_j ÷ Σ S γ_air over the species' lines that
+      HITRAN2024 gives γ_j for. r_self comes from γ_self, and N₂, O₂ and Ar are taken as air. A
+      gas with no HITRAN width is taken as air and `estimated`. Each broadener takes its own
+      HITRAN2024 temperature exponent where given (n_air otherwise), through
+      p_eff = p Σ_j x_j r_j (296 ÷ T)^(n_j − n_air) at the profile's temperature.
     - Each sun's curve is Σ_cells c̄ S Σ_g w_g e^(−k_g u): signed by cell and positive within
       it (correlated-k; Lacis and Oinas 1991, JGR 96, 9027).
     - An absorber-weighted (Curtis–Godson) pressure per path sits beside the profile's
       temperature. It is carried as a stored pressure-weighted column, or derived from the bulk
-      column for a well-mixed gas. The curves become T_c(u, p̄).
-    - T4.d states Design note 8's column budget for Earth (O₃, O₂'s lines, O₂–O₂, H₂O), and
-      widens T6.c's read sites in the twin and the kernels.
+      column for a well-mixed gas, packed as one `rgba16float` table a κ slice, whose channel 0
+      holds the bulk's pressure-weighted column (serving every well-mixed line slot) and whose
+      channels 1–3 hold up to three other line slots' own, with a second table only past three
+      (§15). The curves become T_c(u, p̄), p̄ weighted by the local p_eff:
+      - one row a stored pressure node over the pressures the body's tables see (to the surface,
+        or to the deck's for a `cloudDeck` body), and one more each side for the read. Each row
+        is computed at arrival at the profile's temperature, its exponentials shared by every
+        sun, channel and bake bin, and the arrival time is recorded beside `BAKE_CEILING_S`.
+        Line arrival (line specs and every sun's curves) is a budget line of its own in R08.T11,
+        held to 5 s a world on the UHD 620 host, not sharing `BAKE_CEILING_S`. A thick world's
+        arrival latency, curves plus bake, is recorded. The curves are split by cell across the
+        optics workers, the brightest sun's first. A cell whose largest k times 10³ U is ≤ 0.02
+        may take its mean (§15);
+      - read in the kernels and the twin by 4-point Lagrange in ln p̄, its weights from the rows'
+        own ln p̄ (the spacing halves at 1 MPa), on the stored depth τ = −ln T_c, with p̄ held at
+        10 MPa above it, linear in u, unclamped between rows (at high pressure T at fixed u is not
+        monotone in p), then with τ clamped to [0, −ln 10⁻⁶]. If R08.T11's benchmark finds this
+        read over the low setting's per-frame figure, the fallback is a linear read of τ on rows
+        at twice the stored density, made by the same cubic;
+      - the curves texture's bytes are counted in Design note 11's per-planet row: about 0.59 MB
+        for Earth in `rgba32float` at four suns. It may move to `rgba16float` (Design note 8's
+        10⁻³τ) where a body would pass 2 MB.
+    - T4.d states Design note 8's column budget for Earth: O₃, O₂'s lines, O₂–O₂, H₂O's lines
+      and H₂O's continuum, five.
+      - H₂O's self and foreign continua are two pair profiles. Where a body's profiles would
+        exceed five, they share one column before T4.b's ranking applies. The lesser by T4.b's
+        depth adds its σ to the greater's at the ratio of their vertical pair columns. This is
+        exact vertically, and its slant-path error is recorded. On Earth the self part folds into
+        the foreign part, about 20% low at grazing incidence from the ground (about 5 × 10⁻⁴ of
+        red).
+      - T4.d also widens T6.c's read sites in the twin and the kernels.
   - Tests:
-    - against an `f64` line-by-line reference from the same lines, Earth's O₂ B band and H₂O
-      720 nm band through 1–38 air masses: channel T within 2 × 10⁻³ and the colour within
-      Δu′v′ 0.0005;
+    - against an `f64` line-by-line reference from the same lines and continuum, with O₂ and
+      H₂O in one spectrum: Earth's O₂ B band and H₂O's 590, 650 and 720 nm bands, through 1–38
+      air masses, from the ground and from 3 km. Channel T within 2 × 10⁻³, and the colour
+      within Δu′v′ 0.0005;
     - the Curtis–Godson error on slant paths is recorded;
     - each cell's k-distribution reproduces its line-by-line curve of growth to 10⁻³ in T at
-      three pressures;
-    - with T4.c's O₂–O₂, an Earth-like body draws O₂ and H₂O and clears
-      `ATMOSPHERE: APPROXIMATE` for them;
+      every stored node. Through the client's whole chain (the cubic in T at arrival, the rows,
+      the kernels' read of τ in ln p̄) it does so to 2 × 10⁻³ midway between rows, midway
+      between temperature nodes, and at both at once, at `measured` and `estimated` nodes
+      alike.
+      - The columns stop at 400 p_eff ÷ (m g) at g = 0.5 m s⁻², m the species' molecular mass.
+        That is the most a tangent path on any generated body holds, about 57 s² m⁻¹ at worst
+        against the cap's 80, times 2.5 for the broadening axis (He's least ratio, 0.40) and a
+        fourfold spare.
+        They stop too at u_R(λ) = −ln 10⁻⁶ ÷ σ_R,He(λ), helium's Rayleigh cross-section at the
+        cell (5.1 × 10²⁸ cm⁻² at 380 nm, 8.3 × 10²⁹ at 760 nm) (Mansfield and Peck 1969,
+        extrapolated below 480 nm and checked there against Kurucz 1970's helium after Dalgarno
+        1962, to 0.33%). Any straight path holding more
+        lies under the curves' 10⁻⁶ floor by Rayleigh scattering alone, since helium scatters
+        least of any bulk gas.
+      - For a condensing species at a temperature where it condenses, they stop at
+        400 p_sat(T) ÷ (m g) where that is lower: ten times its saturated column, for
+        supersaturation. p_sat is cited per species: Murphy and Koop 2005 for H₂O, Span and
+        Wagner 1996 for CO₂, Fray and Schmitt 2009 (PSS 57, 2053) for the other ices, or a
+        derivation from the triple point, recorded.
+      - Errors beyond either cap are recorded, not gated.
+      - The reduction tests every cell and records each species' worst node and worst midpoint.
+      - Vitest repeats the test for O₂'s 687 and 760 nm cells and H₂O's 500, 592, 650 and
+        719 nm cells, at three node pressures and three midpoints, against committed
+        line-by-line curves;
+    - the 16-bit tables' curves equal the reduction's `f64` curves within 2 × 10⁻⁴;
+    - every G = 1 cell's curve equals its line-by-line curve within the node tier at every node,
+      and the bytes of each species are recorded beside the projection;
+    - outside a species' range the nearest node is held and `estimated`. Below 10 Pa the hold
+      stays `measured`, by its recorded 1 Pa check;
+    - H₂O's curve on a CO₂ background, from HITRAN2024's γ_CO2 line by line, against the same
+      curve at p_eff: the error is recorded;
+    - the continuum's cell means equal LOWTRAN 7's tables, with the radiation term, at three
+      wavenumbers and both of the self part's temperatures;
+    - their 12,850–16,000 cm⁻¹ mean equals RRTMG_SW's band-24 CKD_2.4 coefficients, weighted by
+      its 16 g-weights, within 1%: self 1.178 × 10⁻²⁵ and foreign 1.388 × 10⁻²⁶ cm² at 296 K
+      and the reference density (`data/rrtmg_sw.nc` at `286e84ed`, SHA-256
+      `6bbdcaf3339d98b6da64980677b8f72332d128cc9576fae301cca852c97de717`; AER, BSD-3);
+    - below 567 nm the continuum equals the recorded ratio times the lines' Lorentz wing and
+      pedestal, and is `estimated`;
+    - the lines' pedestal is removed exactly where the continuum is drawn;
+    - Earth's six profiles fold the self continuum into the foreign's column, exactly for the
+      vertical column, and the grazing error is recorded;
+    - every read of the curves texture has τ in [0, −ln 10⁻⁶], so T in [10⁻⁶, 1], and the
+      largest fall of a read's τ along u is recorded;
+    - a band-edge cell (O₂'s 633, 692 and 749 nm) passes the between-node test at 0.13–7.5 MPa,
+      and CO₂'s 716 nm cell does so with its χ;
+    - CO₂'s fixed-g mix against line by line, through the client chain at 0.1, 1 and 9 MPa and
+      every temperature node and midpoint, at w = 0.05, 0.25, 0.5, 0.75 and 0.95. Each cell's
+      sidecar records u_mix(w, T), the least column over the tested pressures at which the mix
+      errs past 2 × 10⁻³ ("none" within the cap), at each tested temperature, nodes and midpoints
+      alike. Samples inside the table's `estimated` temperature intervals set none (§17). The mix
+      is recorded, not gated (`decision-r08-t4d-kdist-chain.md` §16). Each χ set's coefficients
+      reproduce the source record's values;
+    - with T4.c's O₂–O₂, an Earth-like body draws O₂, H₂O's lines and H₂O's continuum, and
+      clears `ATMOSPHERE: APPROXIMATE` for O₂, H₂O's lines and H₂O's continuum from 567 nm.
+      H₂O's continuum below 567 nm, `estimated`, keeps the label on Earth under R08.T10.a, and
+      is negligible on a Mars-class body. Earth's real air (0.93% Ar) clears the H₂O
+      continuum's label (§15);
     - every T_c lies in [10⁻⁶, 1] and is non-increasing in u.
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers` and
     `just test-render`.
@@ -2565,6 +2775,11 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
 
 - **R08.T4.f ExoMol's hot molecules** (follow-ups 2 and 3; decision-composition §5). After T4.d, on
   its machinery, for 500–4,000 K, and for H₂S at every temperature its list covers, from 296 K.
+  - **Its bytes, before its reductions run** (`decision-r08-t4d-kdist-chain.md` §9). T4.f states
+    its projected bytes, by species, on T4.d's binary format and caps, before any of its
+    reductions runs. Hot species (TiO, VO, FeH, POKAZATEL H₂O, CoYuTe NH₃) will be larger than
+    T4.d's. If T4.d's and T4.f's tables together would pass 100 MB, "main" asks for a decision:
+    Git LFS, or tables fetched with checksums.
   - **Where the data go.** `absorbers/exomol/<species>.json`, under CC BY-SA 4.0, with a sibling
     licence note and a `NOTICE` entry offering the adapted files under CC BY-SA 4.0. Never inside
     `crossSections.json` or code.
@@ -2582,11 +2797,15 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     - SiO's A–X hot bands (ExoMol's SiOUVenIR), which reach the range above about 1,000 K;
     - N₂'s first positive (B–A) bands above 1,800 K, from its metastable A state 6.17 eV up, as
       an LTE band model (Huber and Herzberg's constants), `estimated`;
-    - hot CO, N₂O and HCN (HITEMP or ExoMol, checked at fetch), handing over from R08.T4.d's
-      HITRAN at recorded temperatures;
+    - hot CO and HCN (HITEMP or ExoMol, checked at fetch), handing over from R08.T4.d's HITRAN
+      at recorded temperatures;
+    - hot N₂O from TYM, over its stated temperatures. It hands over from R08.T4.g's merged table
+      (HITRAN2024's bands with TYM's others), not HITRAN's alone, at a recorded temperature at
+      or above 296 K, and the hand-over node passes T4.d's between-node test;
     - CO₂ above HITRAN's 500 K, considering ExoMol's UCL-4000 list (Yurchenko et al. 2020,
-      MNRAS 496, 5282, to 20,000 cm⁻¹), checked at fetch. Venus's lower 40 km is held and
-      `estimated` until then;
+      MNRAS 496, 5282, to 20,000 cm⁻¹), checked at fetch. Venus's lowest 30 km or so, above
+      500 K in VIRA (Seiff et al. 1985), is held at HITRAN's 500 K node and `estimated` until
+      then;
     - any molecule P14.T52.a lists with a visible band system (AlO's B–X near 450–540 nm, CaH's,
       MgH's), from ExoMol or MoLLIST, checked at fetch. T52.a's other molecules are T4.c's stated
       none (science-r08-unowned-absorbers).
@@ -2594,6 +2813,41 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
     - each reduced k-distribution passes R08.T4.d's node and between-node tests;
     - every T_c lies in [10⁻⁶, 1] and is non-increasing in u, for a 2,500 K and a 30,000 K sun;
     - the M-dwarf limitation (TiO in both the star and the planet) is recorded.
+  - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers`.
+
+- **R08.T4.g ExoMol's temperate lines: NH₃ (C2018) and N₂O (TYM)** (split from
+  R08.T4.d, 2026-10-12). After T4.d, on its machinery.
+  - **NH₃.** Its 552 and 648 nm bands from ExoMol's C2018 list (Coles et al. 2018, CC BY-SA 4.0),
+    in `absorbers/exomol/` with a sibling licence note and a `NOTICE` entry, over C2018's
+    temperatures (to 300 K), from where NH₃'s saturated column is negligible.
+    - Its 243.7M transitions over 13,000–20,000 cm⁻¹ are reduced by super-lines: each node's line
+      intensities binned on a grid finer than a tenth of the narrowest Voigt half-width, and the
+      bins convolved with the Voigt profile by FFT, within 25 cm⁻¹ of each line as T4.d's shape.
+    - Q(T) is summed from the states file, since ExoMol's `.pf` fetch returns 404.
+    - C2018 gives no air widths. They are estimated from ExoMol's defaults (0.053 cm⁻¹ bar⁻¹,
+      0.0537 cm⁻¹ atm⁻¹, n = 0.5) and its H₂ and He `.broad` files, by J where those give them, and the lines'
+      broadening is `estimated`.
+  - **N₂O from TYM.** ExoMol's TYM list (Yurchenko et al. 2024, Mon. Not. R. Astron. Soc.,
+    DOI 10.1093/mnras/stae2201; CC BY-SA 4.0), whose 1.36 billion transitions reach 20,000 cm⁻¹,
+    by the same super-line/FFT reduction, in `absorbers/exomol/`
+    (`decision-r08-t4d-kdist-chain.md` §11).
+    - Below 714 nm, every TYM band.
+    - Over 714–760 nm, each cell takes HITRAN2024's bands (T4.d's) and TYM's bands that
+      HITRAN2024 lacks, each band from one list only.
+    - Bands match by vibrational assignment and isotopologue (upper and lower v₁ v₂ l₂ v₃),
+      checked by band centre and by 296 K band strength within a factor of 3, with the
+      tolerances recorded. A matched TYM band is filtered from the states file before binning,
+      and a doubtful match keeps HITRAN's, recorded.
+    - Every cell holding TYM-derived lines moves to `absorbers/exomol/`.
+    - TYM's lines inside HITRAN-held bands under HITRAN's intensity cut-off are left out. At
+      296 K that cut-off bounds them, and above it follow-up 5's k = 100 does, until R08.T4.f.
+    - Tests: over 714–760 nm, each cell's mean equals HITRAN2024's plus its added TYM bands', to
+      10⁻⁹. No band appears from both lists.
+  - **The machinery and tests** are T4.d's: the same nodes, refinement, interpolation, storage,
+    chain, column caps and read (`decision-r08-t4d-kdist.md`, `decision-r08-t4d-kdist-chain.md`),
+    and T4.d's node and between-node tests, the 16-bit test and the 1 Pa check.
+  - **The pending entries.** NH₃'s and N₂O's `PENDING_ABSORBERS` entries (R08.T4.g) go, and
+    their bounds with them, once the tables are committed.
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers`.
 
 Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers view/atmosphere/channels`.
@@ -3981,6 +4235,17 @@ By the composition ruling (decision-composition):
       HITRAN's 500 K nodes above 296 K, which lack hot lines;
     - where a species has a temperate and a hot entry (CO, N₂O, HCN, H₂O), the larger k⟨σ⟩ is
       taken cell by cell at the profile's temperature.
+    - a held χ (R08.T4.d's CO₂). Over the cells whose nodes hold χ at the profile's
+      temperature, Δ_c,χ = Σ_cells w_c,cell min(1, f₃ ⟨σ⟩_cell u_max) ÷ Σ_cells c̄_c S, with k = 1.
+      - f₃ = 1 − (2/π) arctan(σ₁ ÷ γ_L) at the body's largest p_eff.
+      - w_c,cell is the largest |c̄_c| S within χ's reach of the cell.
+      - The true χ lies in [0, 1], so this bounds any held χ's effect from above.
+      - The hold takes no label where Δ_c,χ ≤ 10⁻³ in every channel.
+    - CO₂'s fixed-g mix (R08.T4.d). At the body's self share w = x_CO₂ r_self ÷ Σ_j x_j r_j,
+      interpolated between the recorded w and held at the end values beyond them, CO₂ is
+      `estimated` where the body's u_max reaches a cell's u_mix(w, T), the least over the samples
+      bracketing the profile's temperature (at its hold, where held; §17). Elsewhere the mix takes
+      no label.
   - **Negligible** means Δ_c ≤ 10⁻³ in every channel. Δ_c bounds the change of the channel's
     light from above, since 1 − e^(−x) ≤ min(1, x).
     - A negligible pending species takes no column and no curve.
@@ -3999,7 +4264,11 @@ By the composition ruling (decision-composition):
     - an estimated entry needs its hundredfold margin;
     - for a line from a single lower level, the interpolation between nodes equals the
       Boltzmann law to 10⁻⁹;
-    - Δ_c bounds the channel change of an `f64` spectral reference from above.
+    - Δ_c bounds the channel change of an `f64` spectral reference from above;
+    - an Earth-class body's CO₂ below 295 K takes no label from CO₂–N₂'s held χ (about
+      3 × 10⁻⁶ in its strongest cell), and a body whose bound passes 10⁻³ does;
+    - a snowball-class body with CO₂ and N₂ near an even share, at a few bar, takes no label
+      from the mix, and a column raised past a cell's u_mix does.
 - A body in the `Tenuous` state with a drawable haze is drawn in the `thin` regime. One whose gas
   is only an exosphere takes no medium, since its scattering is negligible (vertical τ about
   10⁻¹⁵), but it is labelled `exosphereNotYetModelled` while the generator computes no exosphere
@@ -6623,6 +6892,22 @@ generator, and the reference's sampling needs no domain tag.
     above 1,000 K.
   - Below each table's end (607 nm to 350 K, 589 nm to 1,000 K and 501 nm above) the pair is 0,
     as a stated approximation.
+- **H₂O's visible continuum: decided 2026-10-12** (`decision-r08-t4d-kdist.md` §6).
+  - MT_CKD's netCDF and code are granted "for scientific and research purposes only", and "may
+    not be incorporated into … commercial software or data offered for sale without the express
+    written consent of AER". That is a non-commercial licence reaching modified versions, so
+    MT_CKD is not an input in any form.
+  - The continuum is CKD's, from LOWTRAN 7's tables. It is `measured` from 567 nm with air over
+    260–296 K. Its residuals against the visible measurements:
+    - 1.25 times Tikhomirov et al. 2006's (2.2 ± 0.7) × 10⁻²⁶ cm² at 694 nm, inside 1σ;
+    - "good agreement" in the 720 nm band (Sierk et al. 2004, as Daniel et al. 2004 report it);
+    - "same order of magnitude" at 590 and 650 nm (Lotter 2006).
+  - No visible window has been measured.
+  - Below 567 nm the continuum is CKD's ratio carried onto HITRAN2024's lines, `estimated`. Earth
+    therefore carries `ATMOSPHERE: APPROXIMATE` under R08.T10.a until a measurement or a published
+    model covers 380–567 nm.
+  - CKD_2.4.1 (Sierk's comparison) is taken to equal CKD_2.4 in the visible. RRTMG_SW confirms
+    CKD_2.4's equality with LOWTRAN's tables over 12,850–16,000 cm⁻¹.
 - **Venus's ultraviolet absorber is an empirical stand-in** (science-r08-unowned-absorbers).
   - Its identity is unknown: FeCl₃, S₂O/OSSO, Sₓ and organics each fail a constraint. So every
     case-1 deck's mode 2 carries `acid_uv_absorber`, Venus's absorption fitted to its 365 nm
@@ -8885,7 +9170,8 @@ generator, and the reference's sampling needs no domain tag.
       where its torsion and bends lift c_p to 52.49, so the value is out of range above about
       120 K. `column.test.ts` compares ethane at 100 K. _Ruled 2026-10-10_
       (`science-r08-gases-2.md` §1): neither. No fixed N holds over the galaxy's 30–1,500 K.
-      Equipartition serves only the noble gases, and N₂, O₂ and CO only below about 400 K.
+      Equipartition serves only the noble gases, and N₂ and CO only below about 400 K and O₂
+      below about 300 K.
       P14.T49.b builds one c_p(T) for every registry gas row, a statistical sum over its molecular
       constants (a rigid rotor, harmonic fundamentals from Shimanouchi 1972, hydrogen's levels at
       3:1 ortho to para, hindered torsions and low electronic states), held to NASA Glenn within
@@ -9688,6 +9974,340 @@ generator, and the reference's sampling needs no domain tag.
   - _Closed set, for the composition audit:_ none. The pair tables are keyed by their members'
     registry keys and formed from whatever the file holds; a pair the client holds no table for
     is not formed and not reported, a stated limit (any two gases absorb a little in collision).
+- **Deviations in T4.d, as built** (2026-10-13). New `src/tools/kDistributions.ts`,
+  `kDistributionsCli.ts`, `molecularLines.ts`, `waterContinuum.ts` and `lineReferences.ts`, with
+  `kDistributions.test.ts`, `kDistributionsReduce.test.ts`, `molecularLines.test.ts` and
+  `waterContinuum.test.ts`; `atmosphereData.ts`'s new subcommands (`k-distributions`,
+  `k-distributions-merge`, `earth-reference`, `cell-references`, `background-error`) and its
+  continuum and Karman 2018 inputs; new `absorbers/kDistribution.ts` and `lineAbsorbers.ts`;
+  `absorbers.ts`'s lines, laws, air partner, pressure rows, `absorberCurvesBySun` and the curve
+  shares; `absorbers/transparency.ts`'s parts; tests `kDistribution.test.ts`,
+  `lineCurves.test.ts`, `lineReferences.test.ts`, `earthLines.test.ts` and
+  `tablesCpuLines.test.ts`, with `test/kDistributionToys.ts`, `test/kDistributionFixtures.ts`,
+  `test/earthLinePaths.ts` and `test/atmosphereFixtures.ts`'s `lineAbsorberMedium` and
+  `fiveLineSlotMedium`; the read sites in `medium.ts`, `column.ts`, `tables.ts`, `hillaire.ts`,
+  `tablesCpu.ts`, `opticalDepth.ts`, nine shaders and `smoke/atmosphere.ts`; the data
+  `absorbers/kDistributions/<species>.json` and `<species>-<n>.bin`, `oxygenPairs.json`,
+  `earthLinePaths.json`, `earthLineReference.json`, `lineReferencesO2.json` and
+  `lineReferencesH2O.json`, `crossSections.json` and `curves.json` rewritten, both bounds files;
+  `vitest.config.mts`'s `assetsInclude`, `.prettierignore`, `NOTICE`. The
+  scope is `decision-r08-t4d-kdist.md` and `decision-r08-t4d-kdist-chain.md` §§1–17.
+  - _Split out._ NH₃ (C2018's 243.7M transitions need a super-line reduction) and N₂O's TYM part
+    went to the new R08.T4.g (chain §§9–11). Both are `PENDING_ABSORBERS` entries naming it.
+    N₂O's bound (§11, ruling 3) is TYM's 296 K cells over 380–712 nm, 2.21 × 10⁻³² m² at 713 nm
+    (T4.c's 1.29 × 10⁻³² bound for TYM's part below 713.4 nm plus its excess there), and TYM's
+    excess over HITRAN2024's cells from 714 nm, taken in decimal arithmetic so that no cell rounds
+    a step high. At the helium Rayleigh caps TYM's cells over 380–712 nm reach τ 72 (706 nm) and
+    64 (669 nm), and 0.48 at 600 nm (the 713 nm cell's bound, τ 142), which is why the part stays
+    pending rather than dropped. The "τ ≈ 26 at 600 nm" first reported was wrong.
+  - _Pending entries._ A species leaves R08.T4.d's list when its table is committed, a test
+    holding the two together, and every T4.d species has. Two entries are new:
+    - Hot CO₂ in R08.T4.f, at HITRAN's 500 K row and `estimated`, since T4.d's table is held at
+      500 K.
+    - A gap found and closed: CO's 8–0 to 13–0 bands. HITRAN2024 holds none; Li et al. 2015
+      (ApJS 216, 15) list them to Δv = 11, but those are dropped (its 9–0 exceeds its 8–0); 12–0
+      and 13–0 are in no list. They are an overtone-ladder estimate below HITRAN2024's 7–0, owned
+      by R08.T4.f. The largest cell is 3.03 × 10⁻³⁵ m² at 609 nm (the 8–0 R head, 608.5 nm), and
+      a window anywhere holds at most 4.45 × 10⁻³⁵, under T4.c's 5.1 × 10⁻³⁵.
+
+    Bounds and listings gain an optional `part`, so that one task holds two entries for a key
+    (CO's `overtones` beside its hot list), keyed by key, task and part.
+
+  - _The species, as fetched._
+    - The ladder species, C₂H₂, C₂H₄, C₂H₆, CH₃OH and PH₃, all take the overtone-ladder estimate:
+      no measured visible band intensity was read, the papers found being closed (the plan's first
+      route). Their anchors are HITRAN2024's: C₂H₂'s 3ν₃ moved to 15,600 cm⁻¹ at 10⁻², C₂H₄'s ν₉ to
+      14,300 cm⁻¹ and C₂H₆'s ν₇ to 13,800 cm⁻¹ at 10⁻⁴, CH₃OH's ν₈ to 13,600 cm⁻¹ at 10⁻³, and
+      PH₃'s ν₁ + ν₃ to 13,700 cm⁻¹ at 10⁻⁵. Each table's basis is `estimated` at every node.
+    - HCN: HITRAN2024's 1,918 lines reach 568.6 nm (17,585.79 cm⁻¹). ExoMol's Harris list,
+      T4.f's hot entry, reaches no further (its first cell 569 nm), so T4.d takes HITRAN2024
+      alone.
+    - Karman et al. 2018's sets replace T4.c's single temperatures in the 1 nm bins they cover
+      whole: O₂–O₂'s B (675.4–703.9 nm) and A (746.2–781.1 nm) bands and O₂–N₂'s A band. A pair
+      table has one measured range, so O₂–O₂ is `measured` over 206–287 K and its A and B bands
+      `estimated` at 287–346 K, while 203–206 K, `measured` in T4.c, is now `estimated`. O₂–N₂ is
+      `measured` over 206–346 K. The bins outside Karman's coverage keep their one temperature,
+      held.
+    - Ranges: H₂O runs from 150 K; CO₂, N₂O and HCN from 100 K; O₂, CO, H₂ and the five ladder
+      species from 50 K. All run to 500 K and are `measured` only to 296 K, HITRAN's 500 K values
+      lacking hot lines (follow-up 5). The ladder species are not cut at their own saturation, so
+      their estimated intervals at 50–75 K lie where none can be a gas.
+    - Caps: only O₂ (§4.1's derivation) and CO₂ (Span and Wagner 1996) take the saturation cap.
+      Every other species is gated to the 400 p_eff ÷ (m g) and Rayleigh caps, which gates more
+      columns, not fewer.
+  - _Storage._ Binary as ruled (§9): "HYKD" parts under 500 kB, and a JSON sidecar per species
+    listing them with their SHA-256; `?url` in the worker, `?inline` in tests. O₂–O₂'s widened
+    sets moved to `oxygenPairs.json` (165 kB), since `crossSections.json` (405 kB with H₂O's
+    continuum) has no room left under the hook. Neither the loader nor a test checks a part's
+    recorded bytes and SHA-256; the sidecars list them. Bytes are under _Figures_.
+  - _CO₂'s χ_ (§§12–13, superseding §10's Perrin and Hartmann 1989 sets and their 193 K hold).
+    - The sets are SpeCT's (Chaverot et al. 2025, A&A 702, A137; CC BY 4.0) under its Eq. 11
+      shape, `wingShape: "quantumAsymmetric"` (`chiWingFactor`): beyond σ₁, x ÷ (1 − e^(−x)) with
+      x = c₂(ν − ν₀) ÷ T, times ν(1 − e^(−c₂ν/T)) ÷ (ν₀(1 − e^(−c₂ν₀/T))). The wing is therefore
+      signed in ν − ν₀, and `lineShape` and the cell spectrum take the offset and the centre. The
+      beyond-cut-off share averages the two sides at the cell's centre.
+    - CO₂–N₂'s B₂ α is the coded 0.00167, not Table 2's printed 0.0167 (option (a)). The source
+      record names the misprint and its evidence: SpeCT's `fcts.f90` (commit e7c4579c08) is a
+      finding aid, one number read and nothing copied or run.
+    - Holds: CO₂–CO₂ outside 218–751 K, CO₂–N₂ outside 295–773 K. Cousin et al. 1985 is not in
+      SpeCT's compilation, so the 295 K hold stays. `CHI_HELD_BELOW_K` is gone; `chiSlopes`
+      clamps to each set's own `measuredRangeK`.
+    - The reach is 293 cm⁻¹ by the rule (χ < 10⁻³ at every temperature over 100–500 K), tested;
+      §10's 247 cm⁻¹ (itself not §8's 246) is superseded.
+    - The science check against SpeCT's lab compilation (Zenodo 15564294) with HITRAN2024's lines:
+      CO₂–CO₂ +0.04 in mean ln(model ÷ lab) (rms 0.11) at 295 K against Perrin and Hartmann's
+      −0.71 (rms 1.10), and SpeCT's set without the Eq. 11 shape −0.42 (rms 0.50). CO₂–N₂'s
+      coded set ties with Perrin and Hartmann's, rms 0.417 against 0.375 over Perrin et al.
+      1989's six temperatures and Burch et al.'s ν3 (the printed set's 0.526), within the lab
+      sets' own 0.15–0.45 disagreement. At 296 K the printed 0.0167 errs −0.70 on Perrin et al.'s
+      data and −0.43 on Burch et al.'s, the coded +0.04 and +0.33.
+    - The fixed-g mix (§16). The first passes' 50/50 test failed the tier, 1.0 × 10⁻² at 715 nm, 250
+      K and 1 MPa, at a node, so no refinement could cure it, and the merge refused. As ruled, the
+      reduction now tests the mix at w = 0.05, 0.25, 0.5, 0.75 and 0.95 and records each cell's
+      u_mix(w, T) in the sidecar's `mixing`, by share and by each of the 29 tested temperatures,
+      beside each share's worst error, and the merge no longer refuses on it. A sample inside an
+      `estimated` interval sets none (§17): there the chain's own interpolation erred, not the mix,
+      and the least over every node had judged Venus by a 218.75 K state it never has.
+      `kDistribution.ts`'s `mixLimitColumnM2(table, cell, w, T)` gives u_mix at a body's w and
+      temperature for R08.T10.a: at each share the least over the samples bracketing T (the end
+      sample's where held), then ln u linear in w between the shares, the end values held beyond,
+      and the recorded column where a neighbour records none. CO₂'s record:
+      three of its 187 cells hold a u_mix within the cap, none at w = 0.95, so that Venus (w ≈ 0.97,
+      read at its 500 K hold) takes no label from the mix. 715 nm: from 2.8 × 10²⁸ cm⁻² at w = 0.5
+      and 500 K (3.48 × 10²⁸ at 0.25, 4.15 × 10²⁸ at 0.75, 9.16 × 10²⁸ at 0.05), 7–9 × 10²⁸ at
+      244–262 K. 660 nm: 1.96–4.7 × 10²⁹ over 287.5–450 K at w = 0.25–0.75. 722 nm: 1.86–4.9 ×
+      10²⁹ over 212.5–300 K at w = 0.25–0.75. Each share's worst error over every tested state:
+      5.2, 12.2, 10.3, 5.45 and 3.95 × 10⁻³. The sidecar is 180 kB with the record.
+    - How the record was made. The full per-temperature rerun was killed by the machine's freeze
+      at 05:10. The seven cells to which §16's first run (all 187 cells, the least over every node)
+      gave a finite u_mix, 654, 660, 708, 709, 714, 715 and 722 nm, were rerun alone with the
+      per-temperature record: their 16-bit codes, weights, offset and step are the first run's
+      byte for byte (`cmp`, all seven identical; memory peak 1.20 GB). They were spliced into the
+      first run's partials, and the other 180 cells, none at every share there, took none at every
+      tested temperature, since the first run's record is the least over them. The merged parts
+      are the first run's byte for byte.
+  - _Held χ_ (§14). The sidecar stores `chiHeld[t][v]`, whether node t's variant v holds its
+    set's coefficients, and `kDistributionAt` returns it for the variants the mix takes. The
+    reduction marks no held node `estimated`: whether a hold is visible is R08.T10.a's test on
+    the body's own column (T10.a's text carries it). T4.d's `chiVisible` rule, which had labelled
+    Earth's CO₂ `estimated` over the gated columns, was removed.
+  - _Width exponents_ (§13, ruling 4). HITRAN2024's n_self, n_H2, n_He, n_CO2 and n_H2O are
+    parsed (fields 9–17). Each sidecar's `broadeningExponents` holds n̄_j − n̄_air, each n̄ the
+    S γ-weighted mean over the lines that give γ_j, with n_air standing in where a line gives no
+    n_j. An offset under 10⁻⁶ (`EXPONENT_OFFSET_FLOOR`) is 0: it moves (296 ÷ T)^Δn by under
+    2 × 10⁻⁶ over 50–500 K, and H₂'s γ_H2 and n_H2, HITRAN2024's γ_air and n_air to their printed
+    digits, leave −7.5 × 10⁻¹². `broadeningFactor(table, mixture, T)` folds them in as
+    p_eff = p Σ_j x_j r_j (296 ÷ T)^(n̄_j − n̄_air), the first-order form; the second-order
+    remainder, ½(σ²_j − σ²_air) ln²(296 ÷ T) with σ² the S γ-weighted variance of n, is not
+    taken. The merge's `--lines` recomputes the ratios and exponents from the line list
+    (`withLineBroadening`), and the merge refuses partials whose records are missing or differ.
+  - _The 16-bit test_ is gated within each node's cap and recorded beyond it
+    (`worstQuantisationBeyondCapError`). Run past the cap, it had refused H₂'s first merge, where
+    112 G = 1 cells quantised at 2–5 × 10⁻⁴ only on columns no path holds; H₂ was rerun.
+  - _The continuum._ CKD from LOWTRAN 7 (§6): ratios 5.884 foreign and 9.891 self below 567 nm, and
+    the self ratio 1.522 of 260 to 296 K. The RRTMG band-24 check gives 1.1781 × 10⁻²⁵ and 1.3876 ×
+    10⁻²⁶ cm². Its foreign part is `H2O+air`, an air partner standing for every other listed gas
+    weighted by its broadening ratio. It is `measured` as air with N₂ and O₂ and with other gases up
+    to 2% of its partner molecules (`AIR_TRACE_SHARE`, §15, ruling 1; Earth's 0.93% Ar among them).
+    Beyond that the pair is `estimated` as a whole, a pair's provenance being one label, where the
+    ruling's text marks the excess share. The basis holds on the drawn CKD: 2% of its foreign part's
+    9.1 × 10⁻³ in red through 38 air masses is 1.8 × 10⁻⁴, about 4 × 10⁻⁴ along a horizontal ray
+    (the ruling's 5.7 × 10⁻³ is MT_CKD's, §6.5). The limit is a relative one, stated: it scales with
+    the foreign τ, so a humid world whose foreign part passes τ 0.05 in a channel passes 10⁻³ at 2%.
+    The continuum's source record says so. A test pins the lines' pedestal to exactly the species
+    with a CKD pair, H₂O. Ar itself reports `noCrossSections`: it is in neither the cross-sections
+    nor `NO_VISIBLE_ABSORPTION`, for the transparency list (to "main").
+  - _Earth's column budget._ Five: O₃, O₂'s lines, O₂–O₂ with O₂–N₂, H₂O's lines, and H₂O's
+    continuum. An `AbsorberLayer` is one constant-mixing layer, and the self and foreign pairs'
+    overlaps coincide wherever the listed partners span H₂O's layer, so they form one pair
+    profile from the start; both pair densities go as ρ² there, and the fold is exact on every
+    path, with no fold step coded. The plan's 20% at grazing incidence is that of a water profile
+    with its own scale height, which the layer model does not represent until plan 14 publishes
+    structure (for R08.T10.a).
+  - _The end-to-end test._ Paths run from 1 air mass to the horizon, which is 35 air masses
+    without refraction (35.2 by the science check's integration; Kasten and Young 1989's 38.09
+    includes refraction), from the ground and from 3 km: 16 paths. The worst channel is
+    9.77 × 10⁻⁴ and the worst Δu′v′ 5.13 × 10⁻⁵. The Curtis–Godson error (the path homogeneous at
+    its absorber-weighted p and T) is 6.75 × 10⁻⁴.
+  - _The rows._
+    - A curve's rows run from its table's first node, 10 Pa ÷ f, to the second node past the
+      layer's base, so that a p̄ at the base reads a centred stencil. None is cut at the layer's
+      top: H₂O's 300 hPa top keeps 12 rows it never reads (10 Pa to 5.6 kPa), which the
+      bytes below count. No row is
+      cut at a deck: a `cloudDeck` body's rows stop there once its layers are clamped to the deck
+      (R08.T10.a, R08.T14).
+    - A profile's rows are the nodes of its line species with the largest column
+      (`dominantLines`). Another line species on the profile reads its σ between its own nodes at
+      each row, then τ between the rows: on O₂'s and H₂O's committed reference cells with the rows
+      half a node off their own, the chain errs at most 5.7 × 10⁻⁴ (`lineReferences.test.ts`),
+      under the chain's 2 × 10⁻³.
+  - _The read between rows._ Earth's O₂ and H₂O curves read at their rows and midway between them,
+    at each column node and midway between nodes, keep τ in [0, −ln 10⁻⁶]. The largest fall of τ
+    along u at a fixed p̄ is 1.62 × 10⁻⁵ (H₂O; O₂'s 6.4 × 10⁻⁸), gated under the chain's 2 × 10⁻³: a
+    fall δ raises T by at most T δ ≤ δ. It is measured on Earth's rows, to 0.32 MPa; the deep rows
+    (1–13.3 MPa), where T at fixed u is not monotone in p, are measured on a Venus-class body's CO₂
+    (`deepLines.test.ts`, rows to 9.9 MPa, 13.3 MPa of broadening pressure): τ stays in [0, −ln
+    10⁻⁶] and never falls along u at the samples.
+  - _Arrival_ (§15, ruling 3: a budget line of its own in R08.T11, 5 s a world on the UHD 620
+    host, not sharing `BAKE_CEILING_S`).
+    - `absorberCurvesBySun` takes the lines' cell exponentials, and each grid point's, once for
+      every sun, channel and bin; `absorberCurve` and `absorberCurves` stay one sun's.
+    - The curves split by cell across the optics workers: `absorberCurveSums` sums a share's line
+      cells (index modulo the share count; share 0 also the points without lines), each share
+      carrying its bins' logarithms where its sums underflow, and `absorberCurvesFromSums` joins
+      them, equal to the whole within 10⁻¹² in τ (relative where τ passes 1); it refuses a split
+      missing a share, or none at all. The workers take the brightest sun's curves first, alone, and
+      the others' after; the pool itself is R08.T10.a's.
+    - A cell whose largest σ times the curve's top column, 10³ U, is at most 0.02
+      (`LINEAR_CELL_DEPTH`) takes its mean σ̄ in that row, one exponential a column: within (σ_max
+      u)² ÷ 8, under 4.95 × 10⁻⁵, of its own sum per species (Popoviciu's inequality), so inside the
+      ruling's 2 × 10⁻⁴ for a cell of up to four species. Earth's figures above are unchanged by it
+      to three figures.
+    - A bin whose every cell's sum underflows takes the cells' sums as logarithms
+      (`lineCellLog`), so that its depth stays finite and its read is not NaN, as the bins' were
+      before lines (the science check's second round; a regression test holds it).
+    - Measured on the development machine (Ryzen 7 3700X, 16 threads) at a load average of 15–25
+      from other lanes' runs, in a vitest worker, three runs each: Earth's specs 0.66–0.80 s; the
+      curves of its four profiles under four suns, channels and bins, 2.2–2.8 s on one worker; split
+      four ways, the slowest share 1.0–1.4 s and the join 0.13–0.23 s; the brightest sun's alone
+      first 1.5–2.0 s. H₂O's lines are about three quarters of it. §2.4 estimated 0.6 s, about four
+      times low for the whole (about three times, H₂O like for like). The four-way split ran 2.0–2.2
+      times faster here, against §15's projected 3–4 times, each share also reading every row's σ
+      and its suns' optics. R08.T11 times line arrival on the UHD 620 host, and a thick world's
+      curves plus bake.
+  - _Not measurable._ H₂O's curve on a CO₂ background: HITRAN2024 gives no γ_CO2, γ_H2 or γ_He
+    for H₂O's visible lines, so the background error is 0 by construction, recorded. O₂, CO and
+    N₂O do have γ_CO2, and a `background-error` run on one of them would give the p_eff mapping's
+    spread once; not run.
+  - _The Rayleigh cap._ 5.1 × 10²⁸ cm⁻² at 380 nm from helium's dispersion (§10, ruling 4),
+    after Mansfield and Peck 1969, checked below 480 nm against Kurucz 1970's helium after
+    Dalgarno 1962 to 0.33%, and tested to half the figure's last digit.
+  - _The GPU read_ (T6.c's read sites, widened after T6.d).
+    - The pressure profile is `AtmosphereMedium.pressureBar`, p(h) in bar, over 10⁵ Pa
+      (`ABSORBER_PRESSURE_REFERENCE_PA`, `medium.ts`), from `column.ts`'s `columnPressureBar`.
+      It is one more density-table layer, after the terms', and the medium uniform's `z` flags
+      it. A path's p̄ is the Curtis–Godson one (Curtis 1952, QJRMS 78, 638; Godson 1953, QJRMS 79,
+      367), each slot's own: 10⁵ Pa × w ÷ x, w = Σ (p ÷ 10⁵ Pa)(u ÷ U).
+    - The line slots (`lineSlotMask`, a bitmask in the medium uniform's `w` and the composite's
+      `Draw.shell.z`) each take one pressure channel, in slot order (§15, ruling 2): `absorberSpecs`
+      puts every species mixed through one layer in one profile, so the well-mixed line species, the
+      bulk's, are one slot, and on Earth channel 0 is O₂'s, its pressure-weighted column the bulk's.
+      Channels 0–3 stand in `absorberPressureColumns`, one `rgba16float` table of the
+      transmittance's size; channel 4, for a medium of five line slots alone, in
+      `lastAbsorberPressureColumn`, which is one texel otherwise and is written only then
+      (`lastPressureColumnSize`, the kernels' `PRESSURE_CHANNELS_A_TABLE`); the tables make it anew,
+      before releasing the old, when a medium's line slots change its size. The twin and the kernels
+      name them `pressureColumns` (the TypeScript review: a unit in each name, since the read path
+      also carries pressures in Pa and their logarithms). They are bound in every kernel that reads
+      the absorber columns (transmittance's outputs 6 and 7, multiple scattering's 7 and 8, the
+      sky-view's and aerial perspective's 10 and 11, the march's 11 and 12, and the composite's
+      group 2, 9 and 10).
+    - Bytes: one 131 kB table where Design note 11 counted one (its "128 KB" was KiB). Earth's
+      per-planet tables come to about 1.17 MB on Design note 11's 0.40 MB, with the curves texture's
+      0.64 MB at four suns (19 rows a line slot, 1 + 4 × 41 rows of 241 texels), or 1.31 MB counting
+      the absorber-column and irradiance tables that 0.40 MB leaves out. A thin Saturn-class world's
+      five slices take about 655 kB of pressure columns with up to four line slots (1.31 MB with
+      five).
+    - `rgba16float` holds a Venus-class grazing chord's w, about 3 × 10³, under its 65,504; a
+      high, thin path's w is subnormal where x p̄ is under 6.1 Pa (on Earth's vertical rays above
+      about 31 km) and rounds to 0 under about 3 × 10⁻³ Pa, at pressures where a visible line's
+      Lorentz width no longer matters. The read floors p̄ at 10⁻³ Pa
+      (`ABSORBER_PRESSURE_FLOOR_PA`), so that a 0 reads at the first row rather than at ln 0.
+    - The curves texture's row 0 is a header: texel k is [first row, rows, the read's top ln p, 0]
+      for absorber slot k, and texel `ABSORBER_SLOTS` holds the block of rows a light. Light s's
+      row q for slot k sits at row 1 + s·block + first + q, each texel τ in `rgb` and the row's
+      ln p in `a`. `curveDepth` is `absorbers.ts`'s read: 4-point Lagrange in ln p̄ on τ, linear
+      on 2–3 rows, then clamped; it finds its row by a scan of the rows' ln p, one load a row,
+      which R08.T11's low-setting figure may replace by computing it from the fixed spacing.
+      `tablesCpuLines.test.ts` holds the twin to it within 10⁻¹², and the table and a marched ray
+      to the `f64` oracle (`opticalDepth.ts`'s `absorberPressuresPa`) within 10⁻³, on a medium
+      whose line slot (slot 1, its pair in slot 0) reads channel 0 and on one of five line slots.
+    - With pressure rows a march step's absorber depth, the whole path's new depth less its old,
+      may fall a little below 0 where the path's p̄ moves. It is not clamped, so that the path's
+      sum stays the curve's own depth.
+    - The smoke (`smoke/atmosphere.ts`) adds `lineAbsorberMedium` and `fiveLineSlotMedium` at
+      the "tables" scope alone, for the 180 s watchdog, with checks of their pressure-column
+      tables. Every check passes on both variants: the pressure-column table at 0.49 × 10⁻³ and
+      multiple scattering in both arms. The group takes 13.6 s; the whole page took 243 and 234 s
+      under a load of 17–21, in a run with `src/smoke/main.ts`'s watchdog raised to 285 s for the
+      timing and its source reverted, past the 180 s watchdog with or without the group, which
+      the perf-smoke lane fixes centrally ("main").
+  - _Readers._ `absorberTransmittance`, `absorberBinTransmittance`, `channelTransmittance` and
+    the twin's `curveOpticalDepth` take a required `pressurePa: number | undefined` (the
+    TypeScript review), and refuse an absorber with lines read with none. `packAbsorberCurves`
+    refuses rows that are not ascending, differ between light slots, stand on a slot without
+    lines (or one row on a slot with them), or lack a pressure profile, each in its own words.
+    Units are named throughout: `intensitiesCm`, `airHalfWidthsPerCmAtm`,
+    `selfHalfWidthsPerCmAtm`, `foreignHalfWidthsPerCmAtm`, `MOLAR_GAS_CONSTANT_J_PER_MOL_K`, and
+    the continuum's `self296Cm3`, `self260Cm3` and `foreign296Cm3`.
+  - _Figures_ (node tier 10⁻³, chain tier 2 × 10⁻³; "beyond cap" recorded, not gated):
+
+    | Species | Cells | Worst node (16-bit)       | Worst chain | 1 Pa        | Bytes, parts  | Estimated                         |
+    | ------- | ----- | ------------------------- | ----------- | ----------- | ------------- | --------------------------------- |
+    | O₂      | 54    | 8.81 × 10⁻⁴ (1.73 × 10⁻⁴) | 1.45 × 10⁻³ | 6.96 × 10⁻⁴ | 1,473,208, 4  | none                              |
+    | H₂O     | 381   | 8.22 × 10⁻⁴ (2.84 × 10⁻⁵) | 1.55 × 10⁻³ | 8.82 × 10⁻⁴ | 5,761,940, 13 | none                              |
+    | CO      | 13    | 7.90 × 10⁻⁴ (1.20 × 10⁻⁴) | 1.36 × 10⁻³ | 0           | 119,264, 1    | none                              |
+    | N₂O     | 19    | 8.31 × 10⁻⁴ (3.88 × 10⁻⁵) | 2.00 × 10⁻³ | 0           | 268,300, 1    | none                              |
+    | HCN     | 84    | 8.59 × 10⁻⁴ (7.33 × 10⁻⁵) | 1.81 × 10⁻³ | 5.79 × 10⁻⁴ | 2,314,760, 5  | none                              |
+    | H₂      | 381   | 7.83 × 10⁻⁴ (9.82 × 10⁻⁵) | 7.82 × 10⁻⁴ | 0           | 669,940, 2    | none                              |
+    | C₂H₂    | 12    | 8.24 × 10⁻⁴ (8.37 × 10⁻⁵) | 1.56 × 10⁻³ | 8.80 × 10⁻⁴ | 456,688, 1    | all (ladder)                      |
+    | C₂H₄    | 18    | 8.28 × 10⁻⁴ (3.97 × 10⁻⁵) | 2.57 × 10⁻³ | 1.91 × 10⁻³ | 580,184, 2    | all; fails 50–75 K                |
+    | C₂H₆    | 13    | 8.16 × 10⁻⁴ (3.61 × 10⁻⁵) | 2.42 × 10⁻³ | 3.93 × 10⁻³ | 399,092, 1    | all; fails 50–62.5 K, below 10 Pa |
+    | CH₃OH   | 15    | 8.05 × 10⁻⁴ (5.69 × 10⁻⁵) | 2.58 × 10⁻³ | 3.45 × 10⁻² | 528,412, 2    | all; fails 50–62.5 K, below 10 Pa |
+    | PH₃     | 22    | 8.08 × 10⁻⁴ (6.31 × 10⁻⁵) | 2.30 × 10⁻³ | 1.02 × 10⁻⁵ | 502,136, 2    | all; fails 50–62.5 K              |
+    | CO₂     | 187   | 8.13 × 10⁻⁴ (3.64 × 10⁻⁵) | 4.04 × 10⁻³ | 0           | 2,265,628, 5  | 212.5–225 K                       |
+
+    A worst chain over 2 × 10⁻³ lies in the species' failing intervals, which still failed at
+    12.5 K and are `estimated` between their nodes. A 1 Pa error over the chain tier leaves the
+    held 10 Pa table `estimated` below it (`measuredBelowGrid`). O₂ has 18 temperatures (12.5 K
+    below 125 K), H₂ 14 (12.5 K over 50–100 K, where its rerun's chain failures at 62.5 K
+    cleared), and CO and O₂ one G = 1 cell each, H₂ 291 of its 381. The committed binary comes to
+    15,339,552 bytes in 39 parts beside 312 kB of sidecars, under the 40 MB at which alternate
+    nodes would be dropped; §9 projected 30–36 MB,
+    H₂ at 1–2.5 MB.
+
+  - _Acceptance._ The command selects `absorbers.test.ts` and
+    `absorbers/{earthLines,kDistribution,lineCurves,lineReferences,transparency,hMinus,heliumMinus}.test.ts`.
+    `tablesCpuLines.test.ts`, `tables.test.ts`, `tablesCpu.test.ts`, `hillaire.test.ts` and
+    `src/tools/{kDistributions,kDistributionsReduce,molecularLines,waterContinuum,atmosphereData}.test.ts`
+    run under `pnpm test`.
+  - _For R08.T10.a._
+    - CO₂'s fixed-g mix labels by `mixLimitColumnM2` at the body's w, `Broadening.selfShare`,
+      and its profile's temperature (§§16–17).
+    - The optics worker passes `loadKDistributions`' tables and `bulkMoleFractions` to
+      `absorberSpecs`; without the tables a line species reports `noCrossSections`. The bulk
+      gases are listed as layers spanning the column, since `H2O+air`'s partners are the other
+      listed gases. It runs the curve shares on its pool (`absorberCurveSums`).
+    - `PairCrossSection` does not carry `estimatedBelowNm`, so the k = 100 margin applies below
+      567 nm only if T10.a reads the table's field.
+    - f₃ needs γ_L at the body's largest p_eff. The sidecars give it only through
+      `beyondCutoffShare` (γ_L = 12.5π × share, to two figures, the largest over the cells),
+      which `readKDistribution` does not read.
+    - The Mars-class half of T4.d's Earth-like test is T10.a's (`decision-r08-t4d-kdist.md`
+      §6.7), with its line in T10.a's Tests from "main".
+  - _For "main"_ (§6.7 and §15): R08.T4.b's ranking bullet gains "after H₂O's two continuum pairs
+    share one column (R08.T4.d)"; R08.T10.a's Tests gain "an Earth-class body's H₂O continuum
+    below 567 nm is not negligible at k = 100, and a Mars-class body's is"; R11's Consumes binds
+    the five textures and the line-slot bitmask; Ar wants a `NO_VISIBLE_ABSORPTION` entry, or
+    every body listing it reports `noCrossSections`.
+  - _The plan's text, as built:_ R08.T4.f gains its bytes bullet (chain §9, ruling 6) and TYM's N₂O
+    hand-over (§11), and "Venus's lower 40 km" reads "lowest 30 km or so, above 500 K in VIRA", the
+    orchestrator's correction. R08.T4.g is new (chain §§9–11), and the Order line names it.
+    R08.T10.a gains the held-χ bound and its test (§14). Risks gains "H₂O's visible continuum:
+    decided 2026-10-12" (§6.7). T3.b's follow-up reads "N₂ and CO below about 400 K and O₂ below
+    about 300 K" (`science-r08-gases-2.md` §1.7.1). T4.d's continuum partners, its Curtis–Godson
+    packing, its arrival budget and its Earth test take §15's text, its mixing test and R08.T10.a's
+    bound and test §16's, and the Provides' `aerialPerspective(view)` names the pressure-column
+    tables.
+  - _Re-applied on 809424c5_ (after R08.T6.h, T6.j, T6.i and perf-smoke). No recorded figure moved:
+    Earth's worst channel 9.77 × 10⁻⁴ and Δu′v′ 5.13 × 10⁻⁵, T6.i's slab gate 5.63% at high and
+    38.64% at low. A layer with T6.h's profile is no `air` pair's partner either, and a line
+    species' self share takes the air's number column, without the profile. Deferred (2026-10-13
+    rule): no check yet runs line slots on a pieced march, since the smoke's line medium has no
+    march edge and the four-absorber medium no line slot; Earth's H₂O layer, its top at 300 hPa,
+    brings the two together once R08.T10.a draws it.
+  - `.gitattributes` (marking the k-distribution parts binary) deferred until smart-ci has a rule
+    for it; git detects them as binary already.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client

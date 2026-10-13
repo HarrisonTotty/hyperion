@@ -56,6 +56,7 @@ import sourceWgsl from "./shaders/source.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import {
   absorberCount,
+  lineSlotMask,
   type AbsorberCurveSlots,
   AtmosphereTables,
   KERNEL_ARM_FORMAT,
@@ -407,6 +408,9 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
     // read by `textureLoad` (R08.T6.c).
     { name: "absorberColumns", binding: 7 },
     { name: "absorberCurves", binding: 8, sampleType: "unfilterable-float" },
+    // The pressure-weighted columns beside them (R08.T4.d).
+    { name: "absorberPressureColumns", binding: 9 },
+    { name: "lastAbsorberPressureColumn", binding: 10 },
   ],
   cullMode: "none",
   depthWrite: false,
@@ -663,6 +667,8 @@ export class HillaireAtmosphere {
         transmittance: this.#tables.transmittance,
         absorberColumns: this.#tables.absorberColumns,
         absorberCurves: this.#tables.absorberCurves,
+        absorberPressureColumns: this.#tables.absorberPressureColumns,
+        lastAbsorberPressureColumn: this.#tables.lastAbsorberPressureColumn,
       },
     };
   }
@@ -750,6 +756,8 @@ export class HillaireAtmosphere {
         multiScattering: tables.multiScattering,
         absorberColumns: tables.absorberColumns,
         absorberCurves: tables.absorberCurves,
+        absorberPressureColumns: tables.absorberPressureColumns,
+        lastAbsorberPressureColumn: tables.lastAbsorberPressureColumn,
       },
     };
     const viewUniforms = this.#viewBlock();
@@ -894,8 +902,9 @@ export class HillaireAtmosphere {
       exact.horizonAngleRad,
       exact.sinSunRadius,
     ]);
-    // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g), and how many of the
-    // medium's terms are absorbers, whose columns its transmittance to space reads (R08.T6.c).
-    set("shell", [topHeightM, absorberCount(medium), 0, 0]);
+    // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g), how many of the
+    // medium's terms are absorbers, whose columns its transmittance to space reads (R08.T6.c), and
+    // its line slots, whose pressure channels the read takes (R08.T4.d).
+    set("shell", [topHeightM, absorberCount(medium), lineSlotMask(medium), 0]);
   }
 }

@@ -23,7 +23,7 @@
  */
 
 import { ATOMIC_MASS_CONSTANT_KG } from "../../lib/system/constants";
-import { type TabulatedDensity, tabulatedDensity } from "./medium";
+import { ABSORBER_PRESSURE_REFERENCE_PA, type TabulatedDensity, tabulatedDensity } from "./medium";
 import {
   BOLTZMANN_J_PER_K,
   type Gas,
@@ -549,4 +549,16 @@ export function hydrostaticColumn(input: ColumnInput): AtmosphereColumn {
     referenceRadiusM,
     topHeightM: heightM(topPhiM),
   };
+}
+
+/**
+ * A column's pressure as a medium carries it (`medium.ts`'s `AtmosphereMedium.pressureBar`; R08.T4.d):
+ * p ÷ {@link ABSORBER_PRESSURE_REFERENCE_PA} at each of its levels, over their heights, from which
+ * the tables and the twin take each path's absorber-weighted pressure for line absorbers' curves.
+ */
+export function columnPressureBar(column: AtmosphereColumn): TabulatedDensity {
+  return tabulatedDensity(
+    column.altitudesM,
+    column.pressuresPa.map((p) => p / ABSORBER_PRESSURE_REFERENCE_PA),
+  );
 }

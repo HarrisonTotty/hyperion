@@ -35,9 +35,10 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
-  // The surface module's test reads the built `.wasm` as an inlined asset (`?inline`), since
-  // renderer code, tests included, reads no files through `node:fs` (R04.T10.c).
-  assetsInclude: ["**/*.wasm"],
+  // The surface module's test reads the built `.wasm` as an inlined asset (`?inline`), and the
+  // line absorbers' tests their binary k-distribution parts (R08.T4.d), since renderer code, tests
+  // included, reads no files through `node:fs` (R04.T10.c).
+  assetsInclude: ["**/*.wasm", "**/*.bin"],
   test: {
     update: BLESSING ? "all" : "none",
     restoreMocks: true,

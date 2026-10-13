@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { fourAbsorberMedium } from "../../test/atmosphereFixtures";
+import { fourAbsorberMedium, lineAbsorberMedium } from "../../test/atmosphereFixtures";
 import { forbiddenIn } from "../../test/atmosphereWgsl";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { quaternion } from "../camera/quaternion";
@@ -415,10 +415,23 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
         /tableAtUnit\(transmittance,/u.test(code),
         code.match(/tableAtUnit\(depthTable, unit\)/gu)?.length,
         /return exp\(-\(stored\.rgb \+ absorberDepth\(/u.test(code),
-        /transmittanceThroughTables\(\s*\w+, absorberColumns, absorberCurves,/u.test(code),
+        /transmittanceThroughTables\(\s*\w+,\s*absorberColumns,\s*absorberPressureColumns,\s*lastAbsorberPressureColumn,\s*absorberCurves,/u.test(
+          code,
+        ),
       ]).toEqual([false, 1, true, true]);
     },
   );
+
+  it("writes the absorbers' pressure-weighted columns beside their columns (R08.T4.d)", () => {
+    const code = TRANSMITTANCE_KERNEL.reference.replaceAll(/\/\/[^\n]*/gu, "");
+    expect([
+      /pressureColumns = addColumns\(pressureColumns, local\.pressureColumns, dt\);/u.test(code),
+      /textureStore\(absorberPressureColumnsOut, id\.xy, min\(firstFour, vec4f\(HALF_MAX\)\)\);/u.test(
+        code,
+      ),
+      /textureStore\(\s*lastAbsorberPressureColumnOut, id\.xy,/u.test(code),
+    ]).toEqual([true, true, true]);
+  });
 
   it("writes the optical depth and the absorber columns, never e^(−τ), in the transmittance kernel", () => {
     const code = TRANSMITTANCE_KERNEL.reference.replaceAll(/\/\/[^\n]*/gu, "");
@@ -438,12 +451,17 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
     ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
     ["the composite", COMPOSITE_MATERIAL.fragmentWgsl],
-  ])("%s declares the absorber-column table and the lights' curves", (_n, source) => {
-    expect([
-      /var absorberColumns : texture_2d<f32>;/u.test(source),
-      /var absorberCurves : texture_2d<f32>;/u.test(source),
-    ]).toEqual([true, true]);
-  });
+  ])(
+    "%s declares the absorber-column table, its pressure tables and the lights' curves",
+    (_n, source) => {
+      expect([
+        /var absorberColumns : texture_2d<f32>;/u.test(source),
+        /var absorberCurves : texture_2d<f32>;/u.test(source),
+        /var absorberPressureColumns : texture_2d<f32>;/u.test(source),
+        /var lastAbsorberPressureColumn : texture_2d<f32>;/u.test(source),
+      ]).toEqual([true, true, true, true]);
+    },
+  );
 
   const absorbing = fourAbsorberMedium();
 
@@ -453,9 +471,17 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
     engine.dispatched.length = 0;
     atmosphere.drawFrame(CAMERA, NOON, SCENE);
-    const { absorberColumns, absorberCurves } = atmosphere.tables;
+    const { absorberColumns, absorberCurves, absorberPressureColumns, lastAbsorberPressureColumn } =
+      atmosphere.tables;
     expect(engine.dispatched.map(({ bindings }) => bindings.sampled)).toEqual(
-      Array.from({ length: 3 }, () => expect.objectContaining({ absorberColumns, absorberCurves })),
+      Array.from({ length: 3 }, () =>
+        expect.objectContaining({
+          absorberColumns,
+          absorberCurves,
+          absorberPressureColumns,
+          lastAbsorberPressureColumn,
+        }),
+      ),
     );
   });
 
@@ -482,6 +508,23 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     const { absorberColumns, absorberCurves } = atmosphere.tables;
     expect(draw.textures).toMatchObject({ absorberColumns, absorberCurves });
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 4, 0, 0]);
+  });
+
+  it("binds the pressure-column tables to the composite (R08.T4.d)", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = lineAbsorberMedium();
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const { absorberPressureColumns, lastAbsorberPressureColumn } = atmosphere.tables;
+    expect(draw.textures).toMatchObject({ absorberPressureColumns, lastAbsorberPressureColumn });
+  });
+
+  it("gives the composite the medium's line slots, slot 1's bit, in shell.z (R08.T4.d)", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = lineAbsorberMedium();
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 2, 2, 0]);
   });
 
   it("declares the curves to the composite as unfilterable rgba32float", () => {

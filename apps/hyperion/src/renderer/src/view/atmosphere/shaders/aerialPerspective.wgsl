@@ -30,6 +30,8 @@
 @group(0) @binding(7) var aerialOut : texture_storage_3d<rgba16float, write>;
 @group(0) @binding(8) var absorberColumns : texture_2d<f32>;
 @group(0) @binding(9) var absorberCurves : texture_2d<f32>;
+@group(0) @binding(10) var absorberPressureColumns : texture_2d<f32>;
+@group(0) @binding(11) var lastAbsorberPressureColumn : texture_2d<f32>;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id : vec3u) {

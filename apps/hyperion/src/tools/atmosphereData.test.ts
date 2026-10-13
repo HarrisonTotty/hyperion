@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 
 import crossSections from "../renderer/src/view/atmosphere/absorbers/crossSections.json" with { type: "json" };
+import oxygenPairs from "../renderer/src/view/atmosphere/absorbers/oxygenPairs.json" with { type: "json" };
 import committed from "../renderer/src/view/atmosphere/colourMatching.json" with { type: "json" };
 import {
   binOzone,
@@ -18,6 +19,7 @@ import {
   HYDROGEN_HELIUM_TEMPERATURES_K,
   HYDROGEN_PAIR_FILES,
   HYDROGEN_PAIR_SOURCE,
+  labelledSets,
   main,
   MATCHING_OUTPUT,
   matchingText,
@@ -26,7 +28,9 @@ import {
   methaneWavenumberPerCm,
   OXYGEN_CARBON_DIOXIDE_PAIR_SOURCE,
   OXYGEN_NITROGEN_PAIR_SOURCE,
+  OXYGEN_NITROGEN_PAIR_THEORY_SOURCE,
   OXYGEN_PAIR_SOURCE,
+  OXYGEN_PAIR_THEORY_SOURCE,
   OZONE_SOURCE,
   type PairReduction,
   parseBorysow,
@@ -42,7 +46,9 @@ import {
   standardAirIndex,
   SULPHUR_DIOXIDE_MEMBERS,
   SULPHUR_DIOXIDE_SOURCE,
+  THEORY_2018_LABEL,
 } from "./atmosphereData";
+import { LOWTRAN_SOURCE } from "./waterContinuum";
 import { CIE_CSV_SHA256, parseCie, XYZ_TO_REC709 } from "./solarFactors";
 
 /** Three rows of a toy observer, 1 nm apart. */
@@ -703,17 +709,42 @@ describe("the cross-sections' file", () => {
       ["SO2", SULPHUR_DIOXIDE_SOURCE.url, SULPHUR_DIOXIDE_SOURCE.sha256],
     ]);
     expect(crossSections.pairs.map((p) => [p.pair, p.members, p.url, p.sha256])).toEqual([
-      ["O2+O2", ["O2", "O2"], OXYGEN_PAIR_SOURCE.url, OXYGEN_PAIR_SOURCE.sha256],
-      ["O2+N2", ["O2", "N2"], OXYGEN_NITROGEN_PAIR_SOURCE.url, OXYGEN_NITROGEN_PAIR_SOURCE.sha256],
+      ["H2+He", ["H2", "He"], HYDROGEN_HELIUM_PAIR_SOURCE.url, HYDROGEN_HELIUM_PAIR_SOURCE.sha256],
+      ["H2+H2", ["H2", "H2"], HYDROGEN_PAIR_SOURCE.url, HYDROGEN_PAIR_SOURCE.sha256],
+      ["H2O+H2O", ["H2O", "H2O"], LOWTRAN_SOURCE.url, LOWTRAN_SOURCE.sha256],
+      ["H2O+air", ["H2O", "air"], LOWTRAN_SOURCE.url, LOWTRAN_SOURCE.sha256],
+    ]);
+  });
+
+  it("names both files' URLs and checksums for O₂'s pairs that take Karman et al. 2018's sets", () => {
+    expect(oxygenPairs.pairs.map((p) => [p.pair, p.members, p.url, p.sha256])).toEqual([
+      [
+        "O2+O2",
+        ["O2", "O2"],
+        `${OXYGEN_PAIR_SOURCE.url} and ${OXYGEN_PAIR_THEORY_SOURCE.url}`,
+        `O2-O2_2024.cia ${OXYGEN_PAIR_SOURCE.sha256}; O2-O2_theory_temp_2018.cia ${OXYGEN_PAIR_THEORY_SOURCE.sha256}`,
+      ],
+      [
+        "O2+N2",
+        ["O2", "N2"],
+        `${OXYGEN_NITROGEN_PAIR_SOURCE.url} and ${OXYGEN_NITROGEN_PAIR_THEORY_SOURCE.url}`,
+        `O2-N2_2024.cia ${OXYGEN_NITROGEN_PAIR_SOURCE.sha256}; O2-N2_theory_temp_2018.cia ${OXYGEN_NITROGEN_PAIR_THEORY_SOURCE.sha256}`,
+      ],
       [
         "O2+CO2",
         ["O2", "CO2"],
         OXYGEN_CARBON_DIOXIDE_PAIR_SOURCE.url,
         OXYGEN_CARBON_DIOXIDE_PAIR_SOURCE.sha256,
       ],
-      ["H2+He", ["H2", "He"], HYDROGEN_HELIUM_PAIR_SOURCE.url, HYDROGEN_HELIUM_PAIR_SOURCE.sha256],
-      ["H2+H2", ["H2", "H2"], HYDROGEN_PAIR_SOURCE.url, HYDROGEN_PAIR_SOURCE.sha256],
     ]);
+  });
+
+  it("keeps a theory file's references apart from the main file's", () => {
+    const sets = labelledSets(
+      parseCia(toyCia(12_802, 12_810, 296, "27", () => 1e-46)),
+      THEORY_2018_LABEL,
+    );
+    expect(sets.map((s) => s.reference)).toEqual(["2018:27"]);
   });
 
   it("holds the tables' rows from 380 nm: ozone and SO₂ at 1 nm, methane at 0.25 nm, the pairs at 1 nm", () => {
@@ -722,7 +753,15 @@ describe("the cross-sections' file", () => {
       [380, 0.25, 1_681],
       [380, 1, 421],
     ]);
-    expect(crossSections.pairs.map((t) => [t.firstNm, t.stepNm, t.rows.length])).toEqual([
+    expect(
+      [...oxygenPairs.pairs, ...crossSections.pairs].map((t) => [
+        t.firstNm,
+        t.stepNm,
+        t.rows.length,
+      ]),
+    ).toEqual([
+      [380, 1, 421],
+      [380, 1, 421],
       [380, 1, 421],
       [380, 1, 421],
       [380, 1, 421],

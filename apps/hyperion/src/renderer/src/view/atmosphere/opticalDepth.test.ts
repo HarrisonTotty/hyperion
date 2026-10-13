@@ -196,13 +196,13 @@ describe("the absorbers' columns and curves (R08.T6.c)", () => {
     if (curve === undefined) {
       throw new Error("the medium has its ozone's curve");
     }
-    expect(() => curvesOpticalDepth([curve], [{ kind: "pair", pairColumnPerM5: 1 }])).toThrow(
+    expect(() => curvesOpticalDepth([curve], [{ kind: "pair", pairColumnPerM5: 1 }], [])).toThrow(
       Error,
     );
   });
 
   it("reads a linear curve as σ u, R05's ozone depth", () => {
-    const depth = curvesOpticalDepth(curves[0] ?? [], absorberAmounts(medium, R, R, 1));
+    const depth = curvesOpticalDepth(curves[0] ?? [], absorberAmounts(medium, R, R, 1), []);
     const r05 = opticalDepth(R05_EARTH_REFERENCE, R, R, 1);
     const others = opticalDepth(withoutOzone, R, R, 1);
     for (const c of [0, 1, 2] as const) {
@@ -211,6 +211,8 @@ describe("the absorbers' columns and curves (R08.T6.c)", () => {
   });
 
   it("refuses curves that do not match the columns one to one", () => {
-    expect(() => curvesOpticalDepth([], [{ kind: "column", columnPerM2: 1 }])).toThrow(RangeError);
+    expect(() => curvesOpticalDepth([], [{ kind: "column", columnPerM2: 1 }], [])).toThrow(
+      RangeError,
+    );
   });
 });

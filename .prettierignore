@@ -27,6 +27,16 @@ crates/hyperion-fit/src/atmosphere/sphere_matrices/
 
 # Reduced data a tool writes one row a line (`apps/hyperion/scripts/atmosphereData.mjs cross-sections`)
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/crossSections.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/oxygenPairs.json
 # The pending absorbers' cell means, one temperature's 381 cells a line (plan R08, R08.T4.c)
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/bounds.json
+# The line absorbers' k-distribution sidecars (`atmosphereData.mjs k-distributions-merge`), the
+# line-by-line references (`earth-reference`, `cell-references`) and the Earth paths' bless (plan
+# R08, R08.T4.d)
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/kDistributions/
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/kDistributions/
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/earthLinePaths.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/earthLineReference.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesO2.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesH2O.json

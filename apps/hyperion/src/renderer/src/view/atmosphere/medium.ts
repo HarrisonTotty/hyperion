@@ -450,6 +450,30 @@ export interface MediumTerm {
 }
 
 /**
+ * The pressure the pressure-weighted columns are taken over, Pa (R08.T4.d; `common.wgsl`'s
+ * `ABSORBER_PRESSURE_REFERENCE_PA`): 1 bar, the unit of {@link AtmosphereMedium.pressureBar}.
+ *
+ * @remarks
+ * A path's absorber-weighted pressure is the Curtis–Godson one (A. R. Curtis 1952, QJRMS 78, 638;
+ * W. L. Godson 1953, QJRMS 79, 367), p̄ = ∫p du ÷ ∫du over the absorber's own amount: here
+ * p̄ = 10⁵ Pa × w ÷ x, w its pressure-weighted column Σ (p ÷ 10⁵ Pa)(u ÷ U) and x its column u ÷ U.
+ * At 10⁵ Pa a Venus-class grazing chord's w, about 3 × 10³, stays under `rgba16float`'s largest
+ * value, 65,504 (IEEE 754-2008's binary16). A high, thin path's w is subnormal where x p̄ is under
+ * 6.1 Pa and rounds to 0 under about 3 × 10⁻³ Pa: pressures at which a visible line's Lorentz width
+ * no longer matters, and below every curve's first row, at which the read holds p̄
+ * ({@link ABSORBER_PRESSURE_FLOOR_PA}).
+ */
+export const ABSORBER_PRESSURE_REFERENCE_PA = 1e5;
+
+/**
+ * The least absorber-weighted pressure a path is read at, Pa (R08.T4.d; `common.wgsl`'s
+ * `ABSORBER_PRESSURE_FLOOR_PA`): 10⁻³ Pa, far under any curve's first row, 10 Pa ÷ f, so that a
+ * pressure-weighted column stored as 0 ({@link ABSORBER_PRESSURE_REFERENCE_PA}) reads at that row
+ * rather than at ln 0.
+ */
+export const ABSORBER_PRESSURE_FLOOR_PA = 1e-3;
+
+/**
  * An atmosphere's medium above a body's ground, independent of the body's size and figure.
  *
  * @remarks
@@ -464,6 +488,13 @@ export interface AtmosphereMedium {
   /** The ground's albedo per channel, Lambertian, in [0, 1]. */
   readonly groundAlbedo: Rgb;
   readonly terms: readonly MediumTerm[];
+  /**
+   * The column's pressure at each level in bar, over {@link ABSORBER_PRESSURE_REFERENCE_PA}, as a
+   * profile over the heights (`column.ts`'s `columnPressureBar`; R08.T4.d): where given, the
+   * kernels and the twin carry each path's pressure-weighted columns beside its columns, which an
+   * absorber whose curves have pressure rows (one with lines) needs. Absent for a medium with none.
+   */
+  readonly pressureBar?: TabulatedDensity;
 }
 
 /**

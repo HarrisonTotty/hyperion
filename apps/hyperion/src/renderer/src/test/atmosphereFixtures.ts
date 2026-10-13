@@ -20,6 +20,11 @@ import {
   crossSectionAt,
 } from "../view/atmosphere/absorbers";
 import {
+  type KDistributionTable,
+  readKDistribution,
+} from "../view/atmosphere/absorbers/kDistribution";
+import {
+  columnPressureBar,
   dryAdiabatExponent,
   gasProperties,
   hydrostaticColumn,
@@ -43,6 +48,7 @@ import {
 import { molecularTerm } from "../view/atmosphere/rayleigh";
 import { type BakeSpectrum, bakeSpectrumOf } from "../view/atmosphere/spectralColour";
 import type { AbsorberCurveSlots } from "../view/atmosphere/tables";
+import { toyPart, toySidecar } from "./kDistributionToys";
 
 /** One Dobson unit, molecules m⁻², `earth.ts`'s (WMO/UNEP 2018, _Twenty Questions_, glossary). */
 export { DOBSON_UNIT_PER_M2 };
@@ -105,6 +111,8 @@ export function linearAbsorberCurve(spec: ColumnAbsorberSpec, crossSectionM2: Rg
   return {
     kind: "column",
     logColumns: columns.map(Math.log),
+    logPressures: Float64Array.of(Math.log(spec.basePa)),
+    readTopLogPressure: Math.log(spec.basePa),
     transmittance: [red, green, blue],
     opticalDepth: [
       red.map((t) => -Math.log(t)),
@@ -249,11 +257,159 @@ export function fourAbsorberMedium(): MediumWithCurves {
   };
 }
 
+/** The toy line species' broadening pressures, Pa: 4 a decade from 10 Pa to 10 MPa. */
+const LINE_TOY_PRESSURES_PA = Array.from({ length: 25 }, (_, k) => 10 * 10 ** (k / 4));
+
+/** The toy line species' temperatures, K. */
+const LINE_TOY_TEMPERATURES_K = [150, 200, 250, 300, 350];
+
+/** The toy line species' σ at a node and g-point, m²: its strong core narrowing as 1 ÷ √p past 1 kPa. */
+function lineToySigma(t: number, p: number, g: number): number {
+  return (g === 0 ? 2e-30 : 6e-27) * (t / 250) * (g === 0 ? 1 : 1 / Math.sqrt(1 + p / 1e3));
+}
+
+/**
+ * The toy line species as a k-distribution table keyed `species`: three cells at 690–692 nm, each
+ * a strong and a weak g-point ({@link lineToySigma}).
+ */
+function lineToyTable(species: string): KDistributionTable {
+  const sigmasM2 = LINE_TOY_TEMPERATURES_K.flatMap((t) =>
+    LINE_TOY_PRESSURES_PA.flatMap((p) => [lineToySigma(t, p, 0), lineToySigma(t, p, 1)]),
+  );
+  const cells = [690, 691, 692].map((nm) => ({ nm, weights: [0.8, 0.2], sigmasM2 }));
+  return readKDistribution(
+    toySidecar(LINE_TOY_TEMPERATURES_K, LINE_TOY_PRESSURES_PA, cells.length, {
+      species,
+      measuredRangeK: [150, 296],
+      measuredShapeTo: LINE_TOY_TEMPERATURES_K.map(() => LINE_TOY_PRESSURES_PA.length - 1),
+    }),
+    [
+      toyPart(cells, {
+        variants: 1,
+        temperatures: LINE_TOY_TEMPERATURES_K.length,
+        pressures: LINE_TOY_PRESSURES_PA.length,
+      }),
+    ],
+    `the toy line species as ${species}`,
+  );
+}
+
+/**
+ * A medium of five line slots, the tables' most (R08.T4.d): the toy line species keyed as five
+ * gases, each on a layer of its own of the Earth-like column, so that the fifth line slot takes
+ * pressure channel 4 and the tables `lastAbsorberPressureColumn` at the transmittance's size; with
+ * Rayleigh scattering on the column and the column's pressure profile, under a 5,772 K Planck sun.
+ */
+export function fiveLineSlotMedium(): MediumWithCurves {
+  const column = earthLikeColumn();
+  const gases = ["O2", "H2O", "CO", "CH4", "N2O"];
+  const { specs } = absorberSpecs(
+    gases.map((species, k) => ({
+      species,
+      columnPerM2: 1e25,
+      basePa: 101_325 - k * 15_000,
+      topPa: k * 1_000,
+    })),
+    column,
+    [],
+    [],
+    { kDistributions: gases.map(lineToyTable) },
+  );
+  const sun = planckBakeSpectrum(SUN_TEFF_K);
+  const [rayleigh] = R05_EARTH_REFERENCE.terms;
+  if (rayleigh === undefined) {
+    throw new Error("R05's Earth has its Rayleigh term");
+  }
+  return {
+    medium: {
+      name: "R08.T4.d five line slots",
+      topHeightM: 100_000,
+      groundAlbedo: [0.2, 0.15, 0.1],
+      terms: [
+        { ...rayleigh, density: column.density },
+        ...specs.map((spec) => absorberTerm(spec, column)),
+      ],
+      pressureBar: columnPressureBar(column),
+    },
+    curves: [specs.map((spec) => absorberCurve(spec, sun))],
+  };
+}
+
+/**
+ * A medium with a line absorber on an Earth-like column, under a 5,772 K Planck sun (R08.T4.d's
+ * GPU read): a toy line species standing as O₂, well mixed in the whole column, three cells at
+ * 690–692 nm each with a strong and a weak g-point, the strong one narrowing as 1 ÷ √p past 1 kPa
+ * (`lineCurves.test.ts`'s toy), so that its curve has a row a stored pressure up to the ground and
+ * one more; the O₂–O₂ pair it forms, put in the first absorber slot so that the line slot, slot 1,
+ * reads pressure channel 0 (`tables.ts`'s `pressureChannelOf`); R05's Rayleigh scattering on the
+ * column and R05's aerosol; and the column's pressure profile (`columnPressureBar`), from which the
+ * tables carry each line slot's pressure-weighted columns.
+ */
+export function lineAbsorberMedium(): MediumWithCurves {
+  const column = earthLikeColumn();
+  const table = lineToyTable("O2");
+  const oxygenPerM2 =
+    EARTH_OXYGEN_FRACTION *
+    column.surfaceNumberDensityPerM3 *
+    columnLengthM(column.density, column.topHeightM);
+  const { specs } = absorberSpecs(
+    [{ species: "O2", columnPerM2: oxygenPerM2, basePa: 101_325, topPa: 0 }],
+    column,
+    undefined,
+    undefined,
+    { kDistributions: [table] },
+  );
+  const sun = planckBakeSpectrum(SUN_TEFF_K);
+  const [rayleigh, aerosol] = R05_EARTH_REFERENCE.terms;
+  if (rayleigh === undefined || aerosol === undefined) {
+    throw new Error("R05's Earth has its Rayleigh and aerosol terms");
+  }
+  const ordered = specs.toReversed();
+  return {
+    medium: {
+      name: "R08.T4.d a line absorber",
+      topHeightM: 100_000,
+      groundAlbedo: [0.2, 0.15, 0.1],
+      terms: [
+        { ...rayleigh, density: column.density },
+        aerosol,
+        ...ordered.map((spec) => absorberTerm(spec, column)),
+      ],
+      pressureBar: columnPressureBar(column),
+    },
+    curves: [ordered.map((spec) => absorberCurve(spec, sun))],
+  };
+}
+
 /** A medium with the radius of the ground its tables stand on. */
 export interface MediumOnRadius {
   readonly medium: AtmosphereMedium;
   /** The tables' ground radius, m. */
   readonly radiusM: number;
+}
+
+/** The Venus-class column's radius, m: Venus's 6,051.8 km. */
+export const VENUS_CLASS_RADIUS_M = 6_051_800;
+
+/**
+ * The Venus-class column of {@link venusClassMedium}: 92 bar of CO₂ on `column.test.ts`'s
+ * radiative-convective profile at 8.87 m s⁻².
+ */
+export function venusClassColumn(): AtmosphereColumn {
+  const co2 = gasProperties("CO2");
+  return hydrostaticColumn({
+    surfacePa: 92e5,
+    temperature: {
+      kind: "radiativeConvective",
+      surfaceK: 730,
+      surfacePa: 92e5,
+      beta: 0.8 * dryAdiabatExponent([{ properties: co2, moleFraction: 1 }]),
+      skinK: 2 ** -0.25 * 226.6,
+    },
+    meanMolarMassGPerMol: co2.molarMassGPerMol,
+    referenceGravityMS2: 8.87,
+    referenceRadiusM: VENUS_CLASS_RADIUS_M,
+  });
 }
 
 /**
@@ -270,21 +426,8 @@ export interface MediumOnRadius {
  * `column.test.ts`'s 730 K (the NSSDCA fact sheet's mean surface temperature is 737 K).
  */
 export function venusClassMedium(): MediumOnRadius {
-  const radiusM = 6_051_800;
-  const co2 = gasProperties("CO2");
-  const column = hydrostaticColumn({
-    surfacePa: 92e5,
-    temperature: {
-      kind: "radiativeConvective",
-      surfaceK: 730,
-      surfacePa: 92e5,
-      beta: 0.8 * dryAdiabatExponent([{ properties: co2, moleFraction: 1 }]),
-      skinK: 2 ** -0.25 * 226.6,
-    },
-    meanMolarMassGPerMol: co2.molarMassGPerMol,
-    referenceGravityMS2: 8.87,
-    referenceRadiusM: radiusM,
-  });
+  const radiusM = VENUS_CLASS_RADIUS_M;
+  const column = venusClassColumn();
   const { term: molecular } = molecularTerm(column, [{ species: "CO2", moleFraction: 1 }]);
   const deck = tabulatedDensity(
     Float64Array.of(45_000, 48_000, 70_000, 73_000),
