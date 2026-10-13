@@ -18,7 +18,7 @@
 //!   drops there, and Eddington's formula takes a term `−J ÷ √(E − Ψ_b)` that is minus infinity
 //!   just above the break's energy: no isotropic cluster has a sharp broken power law. The break
 //!   here is the 3D Nuker law's, `(1 + (r ÷ r_b)^α)^(−Δγ ÷ α)`, with the sharpness α =
-//!   [`BREAK_SHARPNESS`] = 10, the value Gallego-Cano et al. (2018, A&A 609, A26, §5.3) and Schödel
+//!   [`BREAK_SHARPNESS`] = 10, the value Gallego-Cano et al. (2018, A&A 609, A26, §5.4) and Schödel
 //!   et al. (2018, A&A 609, A27, §4.4) fix in their fits. The inversion stays positive at α = 10
 //!   for black holes over ±4σ of the M–σ scatter, and goes negative near α = 20–25.
 //! - **The r^−½ core is the distribution function's, not the profile's.** A sharp turn to r^−½ at

@@ -245,10 +245,15 @@ impl NuclearDiscParams {
 /// [`mass_cap`](Self::mass_cap) (ruling 144.5b). The law is the 3D Nuker law `ρ ∝ r^−γ (1 + (r ÷
 /// r_b)^α)^(−(β − γ) ÷ α)` with inner slope γ = 1.3, break `r_b` = 10 ly, sharpness α = 10 and
 /// outer slope β = 3.5 (brainstorm, "Dense features"; α is the value Gallego-Cano et al. 2018, A&A
-/// 609, A26, §5.3, and Schödel et al. 2018, A&A 609, A27, §4.4, fix in their fits), times a taper
+/// 609, A26, §5.4, and Schödel et al. 2018, A&A 609, A27, §4.4, fix in their fits), times a taper
 /// `(1 + (r ÷ 100 ly)⁴)^(−½)` that steepens the slope to 5.5 near the centre's reach (ruling
-/// 144.3). The slope lies between Gallego-Cano et al.'s 1.43 ± 0.1 for the faint stars and Schödel
-/// et al.'s 1.13 ± 0.05 for the diffuse light.
+/// 144.3). The slope lies between the two published measurements of the cusp inside the black
+/// hole's radius of influence: Gallego-Cano et al.'s γ = 1.43 ± 0.02 ± 0.1 (systematic) from the
+/// counts of `K_s` ≈ 18 stars (abstract; §5.4 and its Table 4, whose fits give 1.41–1.46, and 1.29 ±
+/// 0.05 with pre-main-sequence stars allowed for), and Schödel et al.'s γ = 1.13 ± 0.03 (model) ±
+/// 0.05 (systematic) from the diffuse light of sub-giants and dwarfs (abstract; §4.4). It is inside
+/// the range γ = 1.1–1.4 that Schödel et al. (§5) call robust from the two. The arXiv listings of
+/// both papers still show the submitted versions' joint 1.23 ± 0.05.
 ///
 /// **The mass is the mass inside the reach**, [`NORMALISATION_RADIUS`](Self::NORMALISATION_RADIUS)
 /// = 128 ly, not the whole law's: Schödel et al. 2014's 2.5 × 10⁷ M☉ is a Sérsic component's total
