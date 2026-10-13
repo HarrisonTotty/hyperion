@@ -70,7 +70,14 @@ pub trait HeightSource {
         level: u8,
     ) -> Result<HeightSample, Self::Error>;
 
-    /// The level's hard error bound against the finest level's mesh, metres (Design note 15).
+    /// The level's stated error bound against the finest level's mesh, metres (Design note 15): a
+    /// bound on how far the level's height at a point lies from any finer level's.
+    ///
+    /// The test planet's is hard. R09's synthesiser's (R10.T3, R09.T8's
+    /// [`level_bound_m`](crate::synth::level_bound_m)) is hard in its structural octaves and
+    /// channels, and a 1 − 10⁻⁹ per-point quantile in its small craters and coarse rims, whose
+    /// Poisson counts have no largest value ([`crate::synth::levels::CRATER_BOUND_TAIL`]). The
+    /// bake's skirts hang by it and selection reads it as the level's error.
     fn level_bound_m(&self, level: u8) -> f64;
 
     /// The lowest and highest heights the patch can reach, metres (Design note 8).
