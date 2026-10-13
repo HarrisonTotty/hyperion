@@ -3,24 +3,27 @@
 //!
 //! Built so far:
 //!
-//! - [`GlobalFigures`] (P14.T24.b, its interior): the body's heat flow, its tectonic regime, its
-//!   magnetic field, its present volcanic outgassing and its subsurface ocean, from its
-//!   [`interior`] (science-p14-t24b-laws Part 1). Its relief and
-//!   continents (P14.T48.a), its wet epoch (P14.T48.b), its surface age and crater contract
-//!   (P14.T48.c), its oceans, ices and clouds and its volcanism level join it with their tasks in
-//!   the 21 → 22 batch.
-//! - [`impactors`] (P14.T48.f): what strikes a body and what it strikes, which P14.T48.c's crater
-//!   contract carries beside the crater density
-//!   ([`CraterParams`](hyperion_surface::craters::CraterParams)).
+//! - [`GlobalFigures`] (P14.T24.b, its interior and its craters): the body's heat flow, its
+//!   tectonic regime, its magnetic field, its present volcanic outgassing and its subsurface
+//!   ocean, from its [`interior`] (science-p14-t24b-laws Part 1); and its surface age and crater
+//!   contract (P14.T48.c), from its [`surface_age`] and its impactors (Part 2). Its relief and
+//!   continents (P14.T48.a), its wet epoch (P14.T48.b), its oceans, ices and clouds and its
+//!   volcanism level join it with their tasks in the 21 → 22 batch.
+//! - [`impactors`] (P14.T48.f): what strikes a body and what it strikes, and how often over the
+//!   Moon ([`Impactors::rate`]), which P14.T48.c's crater contract carries beside the crater
+//!   density ([`CraterParams`](hyperion_surface::craters::CraterParams)).
 //!
 //! # The global figures (P14.T24.b)
 //!
 //! [`GlobalFigures::derive`] reads plain values ([`FiguresInputs`]): the body's mass, radius,
 //! gravity, class and mass fractions (its bulk section's), its atmosphere and water, its host's
-//! \[Fe/H\], its age, its rotation and the tidal heat its parent raises in it. A body in the
-//! gas-envelope state has none, as it has no surface. The heat flow, the regime, the field and the
-//! outgassing are [`interior`]'s; the subsurface ocean is the rule's that computes it, so far a
-//! regular moon's alone ([`Subsurface`]).
+//! \[Fe/H\], its age, its rotation, the tidal heat its parent raises in it, and its crater inputs
+//! ([`CraterInputs`]: where it goes round, its density, its host's sources and the dates of its
+//! magma ocean's end and its last giant impact). A body in the gas-envelope state has none, as it
+//! has no surface. The heat flow, the regime, the field and the outgassing are [`interior`]'s;
+//! the subsurface ocean is the rule's that computes it, so far a regular moon's alone
+//! ([`Subsurface`]); the surface age is [`surface_age`]'s, at that heat flow, and the crater
+//! contract the lunar chronology at it times the impactors' rate.
 //!
 //! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes them with
 //! the surface conditions, under the same hold until the batch's bump, and passes their heat
@@ -37,8 +40,8 @@
 //!   `v_esc,s` its own escape speed. Two of the three `v_K,s`² are the square of the parent's
 //!   escape speed at the moon's orbit, 2 `v_K`² = `v_esc`² (Brasser, Wong and Werner 2025, A&A
 //!   695, A276, arXiv 2501.17509, §2.2, after its eq. 2), and the moon's own motion makes the
-//!   mean encounter speed about √3 `v_K` (its §2.3, after Zahnle et al. 2003, Icarus 163, 263, not
-//!   read); science-r09-craters.md item 4 assembles the sum. The escape speed is √(2 g R), the
+//!   mean encounter speed about √3 `v_K` (its §2.3, after Zahnle et al. 2003, Icarus 163, 263,
+//!   eq. (1)); science-r09-craters.md item 4 assembles the sum. The escape speed is √(2 g R), the
 //!   bulk section's gravity and radius.
 //! - **The encounter speed** is v∞ = U `v_K`(a), with `v_K` = √(G M ÷ a) the circular speed about
 //!   the host at the body's (or its parent's) semi-major axis, and U² = `U_src`² + e² + sin² i,
@@ -81,16 +84,30 @@
 //! their crater-forming impacts (Ivanov et al. 2002 conclude main-belt asteroids made most of
 //! them), and the velocity's spread: the diameter map takes the mean.
 //!
+//! With them, for P14.T48.c's crater contract (science-p14-t24b-laws Part 2):
+//!
+//! - **The rate** `R_b` = Ψ × V ÷ V☾ ([`Impactors::rate`]; science-p14-t24b-laws §2.2, with its
+//!   §2.7 re-rule against Zahnle et al. 2003): the projectiles' abundance over the Moon's, by the
+//!   same source rule from the belts' masses at [`SOURCE_MASS_AGE`], times the encounter factor
+//!   over the Moon's [`LUNAR_ENCOUNTER_SPEED`]. It gives the Moon 1, Earth 1.42, Mars 1.96 (Ivanov
+//!   2001's 1.92), Venus 1.17, Mercury 1.25, Ceres 134, Ganymede 3.71 and Pluto 30.1.
+//! - **A moon's birthplace** ([`MoonBirth::formed`]; §2.4): a regular moon's by its ice, a
+//!   giant-impact moon's its parent's, a giant's capture beyond the ice line, and a rocky planet's
+//!   capture its neighbouring belt's side.
+//!
 //! # Not on the record yet
 //!
-//! Nothing on a body's record calls [`impactors`] until P14.T48.c's crater contract, built after
-//! it in the 21 → 22 batch, whose goldens move once, at the batch's bump. It draws nothing and
-//! moves no generated output, so it needs no hold.
+//! Nothing on a body's record calls [`impactors`]: P14.T48.c's crater contract reads them inside
+//! [`GlobalFigures`], published under the surface conditions' hold until the 21 → 22 batch's
+//! bump, whose goldens move once. It draws nothing.
 
 use core::fmt;
 use std::error::Error;
 
-use hyperion_surface::craters::{self, CraterTarget, TargetClass};
+use hyperion_surface::craters::{
+    self, BuildCraterParamsError, CraterParams, CraterParamsParts, CraterTarget, Screening,
+    TargetClass,
+};
 
 use crate::math;
 use crate::planetary::belts::{
@@ -99,15 +116,19 @@ use crate::planetary::belts::{
 };
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
+use crate::planetary::moons::CaptureKind;
 use crate::planetary::moons::regular::{ICE_MELTING_POINT, ocean_layers};
 use crate::planetary::record::BeltKind;
 use crate::substance::{self, SubstanceId};
+use crate::units::consts::METRES_PER_AU;
 use crate::units::{
-    Dex, EarthMasses, GravitationalParameter, Kelvin, Kilograms, KilogramsPerCubicMetre, Metres,
-    MetresPerSecond, MetresPerSecondSquared, Radians, Seconds, WattsPerSquareMetre, Years,
+    Dex, EarthMasses, Gigayears, GravitationalParameter, Kelvin, Kilograms, KilogramsPerCubicMetre,
+    KilogramsPerSquareMetre, Metres, MetresPerSecond, MetresPerSecondSquared, PerSquareKilometre,
+    Radians, Seconds, WattsPerSquareMetre, Years,
 };
 
 pub mod interior;
+pub mod surface_age;
 
 pub use interior::{
     Interior, MagneticField, RadiogenicIsotope, TectonicRegime, conductive_lag,
@@ -187,6 +208,102 @@ pub const ICE_RICH_LAYER_DEPTH: Metres = Metres::new(10e3);
 /// water's, as a global equivalent layer is stated (this module's choice: ice's 917–934 would
 /// deepen the layer by 7–9%).
 pub const WATER_LAYER_DENSITY: KilogramsPerCubicMetre = KilogramsPerCubicMetre::new(1_000.0);
+
+/// The age at which a source belt's mass is taken, yr: 4.567 Gyr, the Solar System's, the lunar
+/// chronology's clock ([`craters::SOLAR_SYSTEM_AGE`]; science-p14-t24b-laws §2.2).
+///
+/// The chronology already carries the bombardment's time profile, counted from each system's
+/// formation, so the masses compare like with like and the rate is constant in time: a crater
+/// density cannot fall as a belt grinds down.
+pub const SOURCE_MASS_AGE: Years = Years::new(4.567e9);
+
+/// The Solar main belt's mass, M⊕: 4.0 × 10⁻⁴, Pitjeva and Pitjev's (4.008 ± 0.029) × 10⁻⁴ (3σ;
+/// Astronomy Letters 44, 554, 2018), the unit of an asteroid belt's projectile abundance
+/// (science-p14-t24b-laws §2.2, after P14.T19's normalisation of the captures). It is the whole
+/// belt's, Ceres, Vesta, Pallas and Hygiea included, where a generated belt's abundance reads its
+/// cascade alone ([`SourceBelt::from`]), which is recorded.
+pub const SOLAR_MAIN_BELT_MASS: EarthMasses = EarthMasses::new(4.0e-4);
+
+/// The Solar main belt's inner and outer edges, au: 2.065 and 3.278, Jupiter's 4:1 and 2:1
+/// resonances at its 5.2029 au (P14.T21.a's rule), the reference torus of the abundance
+/// (science-p14-t24b-laws §2.2).
+pub const SOLAR_MAIN_BELT_EDGES_AU: (f64, f64) = (2.065, 3.278);
+
+/// The Solar Kuiper belt's mass, M⊕: 0.02, Pitjeva and Pitjev's (1.97 ± 0.30) × 10⁻² rounded (3σ;
+/// Celestial Mechanics and Dynamical Astronomy 130, 57, 2018), the largest bodies included: the
+/// unit of the comets' abundance (science-p14-t24b-laws §2.2).
+pub const KUIPER_BELT_MASS: EarthMasses = EarthMasses::new(0.02);
+
+/// `K_in` of a rocky belt, the projectile abundance inside a belt with the Solar main belt's
+/// density, over the Moon's: 400, a low-confidence estimate (science-p14-t24b-laws §2.2; an icy
+/// belt's is [`ICY_IN_BELT_DENSITY`], §2.7).
+///
+/// The ruling builds it from the main belt's 1.36 × 10⁶ bodies above 1 km (Bottke et al. 2005,
+/// Icarus 175, 111), their intrinsic collision probability 2.86 × 10⁻¹⁸ km⁻² yr⁻¹ (Bottke et al.
+/// 1994, Icarus 107, 255) and Earth's interval of about 0.6 Myr between impacts of 1 km bodies
+/// (Stuart and Binzel 2004, Icarus 170, 295): Ceres is struck at 3.1 × 10⁻¹³ km⁻² yr⁻¹ against the
+/// Moon's 2.3 × 10⁻¹⁵, an `R_b` of about 134 at its encounter factor of 0.332, so `K_in` ≈ 400.
+pub const IN_BELT_DENSITY: f64 = 400.0;
+
+/// `K_in` of an icy belt: 6,700, fitted on Pluto (science-p14-t24b-laws §2.7 (b)).
+///
+/// Zahnle et al. 2003 (Icarus 163, 263, §5.5, Case A) give Pluto Ṅ(d > 1.5 km) = 10⁻⁶ yr⁻¹, Table
+/// 1's 2.0 × 10⁻⁴ of Jupiter's rate: per unit area 8.17 times Ganymede's, an `R_b` of 30.3, and so
+/// `K_in` = 30.3 ÷ 0.1679 (its V ÷ V☾) ÷ 0.02678 (its torus density over the Solar main belt's) =
+/// 6,748, rounded (Pluto 30.1). Case A, not Case B's 2.6 times more, as Zahnle reads the survival
+/// of Uranus's and Neptune's inner moons (§5.4). Per unit mass an icy belt holds more impactors of
+/// one size: bulk density alone gives 3,000 ÷ 500 = 6, and the rest of the 16.75 lumps the Kuiper
+/// belt's size distribution with the torus proxy's misfit to its structure (low confidence).
+pub const ICY_IN_BELT_DENSITY: f64 = 6_700.0;
+
+/// `K_c`, the giants' comets' abundance at 5.2 au about the Sun with the Solar Kuiper belt's mass,
+/// over the Moon's projectiles': 0.80 (science-p14-t24b-laws §2.7 (a2)).
+///
+/// It keeps Ganymede's `R_b` at the earlier calibration's 3.7 (exactly 0.794; 0.80 gives 3.71).
+/// That carries the ecliptic comets' impact rate on Jupiter, 0.005 (+0.006 −0.003) yr⁻¹ above
+/// 1.5 km (Zahnle, Schenk, Levison and Dones 2003, Icarus 163, 263, abstract), to Ganymede, struck
+/// at 1.2 × 10⁻⁴ of it (their Table 1).
+pub const COMET_DENSITY: f64 = 0.80;
+
+/// The distance at which the comets' abundance about the Sun is [`COMET_DENSITY`] × `μ_ic`, au:
+/// 5.2, Jupiter's.
+pub const COMET_REFERENCE_DISTANCE_AU: f64 = 5.2;
+
+/// The exponent k of the comets' abundance, Ψ ∝ a^k: 1.15, the log-least-squares fit (1.149) of
+/// Saturn's, Uranus's and Neptune's whole-planet impact rates over Jupiter's against Zahnle et al.
+/// 2003's Table 1, 0.42, 0.25 and 0.27 (Neptune's Levison et al. 2000 value halved, as Zahnle
+/// does), with T48.f's own encounter factors (science-p14-t24b-laws §2.7 (a2)). Empirical: it
+/// absorbs the comets' density and the change of v∞ between the planets that a fixed `U_c` cannot
+/// carry. The residuals, model over Table 1, are 1.60, 0.58 and 1.29, inside Zahnle's stated
+/// factors of 4, 6 and 10.
+pub const COMET_DISTANCE_EXPONENT: f64 = 1.15;
+
+/// The Solar Kuiper belt proper's inner edge, au: 39.4027, Neptune's 3:2 at its 30.0699 au
+/// (P14.T21.b's rule), which scales the comets' abundance to a host's own Kuiper-like belt
+/// (science-p14-t24b-laws §2.7 (a2)).
+pub const SOLAR_KUIPER_BELT_INNER_EDGE_AU: f64 = 39.402_7;
+
+/// The exponent of the asteroids' abundance inside a belt's inner edge, Ψ ∝ (1 − a ÷ `a_i`)^−1.5:
+/// 1.5, fitted on Mars's `R_b` = 1.92, Ivanov 2001's Mars-to-Moon impact rate through the diameter
+/// map (science-r09-craters.md F1 and F4.1; science-p14-t24b-laws §2.2, its replica's 1.956).
+pub const APPROACH_EXPONENT: f64 = 1.5;
+
+/// The least projectile abundance over the Moon's: 0.01, the leftover planetesimals every system
+/// has, so that no surface is uncratered for want of a belt (the plan's own, provisional;
+/// science-p14-t24b-laws §2.2).
+pub const LEFTOVER_DENSITY: f64 = 0.01;
+
+/// The Moon's encounter factor V☾, m/s: 16,922, the moon formula of [`Impactors::rate`] for the
+/// Moon about an Earth at 1 au with the Sun's belts, so that the Moon's `R_b` is 1
+/// (science-p14-t24b-laws §2.2, with §2.7's parent focusing; the re-rule's replica gives
+/// 16,921.79). `Fitted`: a test refits it.
+///
+/// The configuration: the Sun's nominal GM; an Earth of 1 M⊕ at 1 au, eccentricity 0.016 710 22
+/// (NASA's Earth fact sheet) and no inclination, inside the Solar main belt
+/// ([`SOLAR_MAIN_BELT_EDGES_AU`], [`SOLAR_MAIN_BELT_MASS`]); the Moon at 384,400 km, of GM
+/// 4,902.800 km³ s⁻² and mean radius 1,737.4 km (JPL's mean elements and physical parameters,
+/// DE440).
+pub const LUNAR_ENCOUNTER_SPEED: MetresPerSecond = MetresPerSecond::new(16_921.789_060_825_588);
 
 /// A body's orbit about its host as its impactors read it.
 ///
@@ -274,7 +391,7 @@ impl SourceAnnulus {
     }
 }
 
-/// A belt as the impactors read it: its kind, its composition and its annuli.
+/// A belt as the impactors read it: its kind, its composition, its annuli and their masses.
 ///
 /// Plain data with public fields: [`ImpactorSources::new`] validates them.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -287,13 +404,30 @@ pub struct SourceBelt {
     pub main: SourceAnnulus,
     /// Its scattered component, if it has one.
     pub scattered: Option<SourceAnnulus>,
+    /// The belt proper's mass at [`SOURCE_MASS_AGE`], its collisional cascade's without its named
+    /// members, finite and non-negative: what sets its projectiles' abundance (P14.T48.c's rate).
+    pub main_mass: EarthMasses,
+    /// The scattered component's mass at [`SOURCE_MASS_AGE`], finite and non-negative; zero for a
+    /// belt with none.
+    pub scattered_mass: EarthMasses,
 }
 
 impl From<&Belt> for SourceBelt {
+    /// The belt `belt` as its impactors read it: its edges, and each component's cascade worn down
+    /// to [`SOURCE_MASS_AGE`] about its host by P14.T21's collisional decay
+    /// ([`BeltComponent::mass_at`](crate::planetary::belts::BeltComponent::mass_at)).
+    ///
+    /// The named members are left out: they are single large bodies, not projectiles of one size,
+    /// and with them the sample's greatest abundance in a belt rises from 2.2 × 10³ to 1.5 × 10⁸.
+    /// The Solar belts' masses the abundance is normalised by include their largest bodies, which
+    /// is recorded (plan 14's Risks).
     fn from(belt: &Belt) -> Self {
         let annulus = |inner_edge, outer_edge| SourceAnnulus {
             inner_edge,
             outer_edge,
+        };
+        let mass_of = |part: &crate::planetary::belts::BeltComponent| {
+            part.mass_at(SOURCE_MASS_AGE, belt.host_mass())
         };
         Self {
             kind: belt.kind(),
@@ -302,6 +436,8 @@ impl From<&Belt> for SourceBelt {
             scattered: belt
                 .scattered()
                 .map(|part| annulus(part.inner_edge(), part.outer_edge())),
+            main_mass: mass_of(belt.main()),
+            scattered_mass: belt.scattered().map_or(EarthMasses::ZERO, mass_of),
         }
     }
 }
@@ -315,6 +451,8 @@ pub struct ImpactorSources {
     host: GravitationalParameter,
     belts: Vec<SourceBelt>,
     innermost_giant: Option<Metres>,
+    icy_mass: EarthMasses,
+    comet_edge: Option<Metres>,
 }
 
 impl ImpactorSources {
@@ -328,6 +466,8 @@ impl ImpactorSources {
     ///   positive;
     /// - [`BuildImpactorSourcesError::BeltEdges`] for an annulus whose edges are not finite,
     ///   positive and ordered;
+    /// - [`BuildImpactorSourcesError::BeltMass`] for a component's mass that is not finite and
+    ///   non-negative, or a scattered mass other than zero on a belt with no scattered component;
     /// - [`BuildImpactorSourcesError::Planet`] for a planet whose mass is not finite and
     ///   non-negative, or whose semi-major axis is not finite and positive.
     pub fn new(
@@ -338,12 +478,32 @@ impl ImpactorSources {
         if !positive(host.value()) {
             return Err(BuildImpactorSourcesError::HostParameter(host));
         }
+        let mut icy_mass = EarthMasses::ZERO;
+        let mut comet_edge: Option<Metres> = None;
         for belt in &belts {
             for annulus in core::iter::once(belt.main).chain(belt.scattered) {
                 let (inner, outer) = (annulus.inner_edge, annulus.outer_edge);
                 if !(positive(inner.value()) && outer.value().is_finite() && inner <= outer) {
                     return Err(BuildImpactorSourcesError::BeltEdges(inner, outer));
                 }
+            }
+            for mass in [belt.main_mass, belt.scattered_mass] {
+                if !non_negative(mass.value()) {
+                    return Err(BuildImpactorSourcesError::BeltMass(mass));
+                }
+            }
+            if belt.scattered.is_none() && belt.scattered_mass.value() > 0.0 {
+                return Err(BuildImpactorSourcesError::BeltMass(belt.scattered_mass));
+            }
+            match belt.composition {
+                BeltComposition::Icy => {
+                    icy_mass = icy_mass + belt.main_mass + belt.scattered_mass;
+                    let edge = belt.main.inner_edge;
+                    if comet_edge.is_none_or(|outermost| edge > outermost) {
+                        comet_edge = Some(edge);
+                    }
+                }
+                BeltComposition::Rocky => {}
             }
         }
         let mut innermost_giant: Option<Metres> = None;
@@ -359,6 +519,8 @@ impl ImpactorSources {
             host,
             belts,
             innermost_giant,
+            icy_mass,
+            comet_edge,
         })
     }
 
@@ -381,6 +543,22 @@ impl ImpactorSources {
     pub const fn innermost_giant(&self) -> Option<Metres> {
         self.innermost_giant
     }
+
+    /// The host's icy belts' mass over the Solar Kuiper belt's, `μ_ic`, dimensionless: every
+    /// component of each belt of [`BeltComposition::Icy`] at [`SOURCE_MASS_AGE`], over
+    /// [`KUIPER_BELT_MASS`]; the comets' abundance scales as it (science-p14-t24b-laws §2.2).
+    #[must_use]
+    pub fn icy_belt_ratio(&self) -> f64 {
+        self.icy_mass / KUIPER_BELT_MASS
+    }
+
+    /// `a_K`, the inner edge of the belt proper of the host's outermost icy belt (the greatest
+    /// inner edge among them), from which the comets' abundance is scaled (science-p14-t24b-laws
+    /// §2.7 (a2)); `None` for a host with no icy belt.
+    #[must_use]
+    pub const fn comet_edge(&self) -> Option<Metres> {
+        self.comet_edge
+    }
 }
 
 /// Why [`ImpactorSources::new`] refused its parts, with the value it refused.
@@ -390,6 +568,9 @@ pub enum BuildImpactorSourcesError {
     HostParameter(GravitationalParameter),
     /// A belt's annulus, its inner and outer edges, is not finite, positive and ordered.
     BeltEdges(Metres, Metres),
+    /// A belt component's mass is not finite and non-negative, or a belt with no scattered
+    /// component has a scattered mass.
+    BeltMass(EarthMasses),
     /// A planet's mass is not finite and non-negative, or its semi-major axis is not finite and
     /// positive.
     Planet(EarthMasses, Metres),
@@ -408,6 +589,11 @@ impl fmt::Display for BuildImpactorSourcesError {
                 "belt edges {} m to {} m are not finite, positive and ordered",
                 inner.value(),
                 outer.value()
+            ),
+            Self::BeltMass(mass) => write!(
+                f,
+                "belt mass {} M⊕ is out of range or has no component",
+                mass.value()
             ),
             Self::Planet(mass, a) => write!(
                 f,
@@ -519,6 +705,102 @@ impl Crust {
     }
 }
 
+/// How a moon came to orbit its parent, as its birthplace reads it ([`MoonBirth::formed`]).
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+pub enum MoonBirth {
+    /// A regular moon, formed in its parent's nursery (P14.T17), with its ice fraction by mass
+    /// ([`DerivedMoon::ice_fraction`](crate::planetary::moons::DerivedMoon::ice_fraction)).
+    Regular {
+        /// Its ice fraction by mass, 0 to 1: above zero beyond its parent's ice line.
+        ice_fraction: f64,
+    },
+    /// A giant-impact moon (P14.T18), formed from its parent's mantle and the impactor's.
+    GiantImpact,
+    /// A captured moon of its kind (P14.T19).
+    Captured(CaptureKind),
+}
+
+impl MoonBirth {
+    /// The side of its parent's ice line a moon of this birth formed on, as its crust reads it
+    /// ([`ImpactorOrbit::Moon`], [`Crust::of`]; science-p14-t24b-laws §2.4), about the parent
+    /// `parent`, next to a belt of composition `neighbouring_belt` (`None` with no belt next to
+    /// it).
+    ///
+    /// - A regular moon formed beyond the ice line when it holds ice.
+    /// - A giant-impact moon takes its parent's birthplace: beyond for an icy belt's member, and
+    ///   inside for any other parent, as [`Crust::of`]'s [`Birthplace`] reads a host orbiter. The
+    ///   Moon's isotopes match Earth's mantle (Zhang et al. 2012, Nature Geoscience 5, 251; Young
+    ///   et al. 2016, Science 351, 493). Charon formed in a giant impact on Pluto, probably as the
+    ///   intact impactor, between bodies of the early Kuiper belt (Canup 2005, Science 307, 546).
+    /// - A giant's capture, an irregular or a Triton-like one, formed beyond: irregulars come from
+    ///   the outer planetesimal disc (Nesvorný, Vokrouhlický and Morbidelli 2007, AJ 133, 1962),
+    ///   and Triton from the Kuiper belt (Agnor and Hamilton 2006, Nature 441, 192).
+    /// - A rocky planet's capture comes from the belt it needs next to it (P14.T19): beyond for an
+    ///   icy belt and inside otherwise, so Phobos and Deimos, beside the rocky main belt, formed
+    ///   inside.
+    ///
+    /// `neighbouring_belt` is the composition of the belt next to the parent, with no planet
+    /// between them
+    /// ([`PlanetarySystem::nearest_belt`](crate::planetary::PlanetarySystem::nearest_belt) with
+    /// [`BeltAdjacency::Neighbouring`](crate::planetary::moons::BeltAdjacency::Neighbouring)), and
+    /// `None` with no belt next to it; only a rocky planet's capture reads it.
+    ///
+    /// # Examples
+    ///
+    /// Mars's small captures, beside the rocky main belt, formed inside the ice line, and would
+    /// have formed beyond it beside an icy belt; a giant's irregulars formed beyond it whatever
+    /// lies beside the giant.
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::belts::BeltComposition;
+    /// use hyperion_sim::planetary::derive::SnowLineSide;
+    /// use hyperion_sim::planetary::hooks::figures::{HostOrbit, HostOrbiter, MoonBirth};
+    /// use hyperion_sim::planetary::moons::CaptureKind;
+    /// use hyperion_sim::units::consts::METRES_PER_AU;
+    /// use hyperion_sim::units::{EarthMasses, Metres, Radians};
+    ///
+    /// let orbiter = |a_au: f64, mass: f64| HostOrbiter {
+    ///     orbit: HostOrbit {
+    ///         semi_major_axis: Metres::new(a_au * METRES_PER_AU),
+    ///         eccentricity: 0.05,
+    ///         inclination: Radians::ZERO,
+    ///     },
+    ///     mass: EarthMasses::new(mass),
+    ///     belt: None,
+    /// };
+    /// let (mars, jupiter) = (orbiter(1.524, 0.107), orbiter(5.2, 317.8));
+    /// let small = MoonBirth::Captured(CaptureKind::Small);
+    /// assert_eq!(small.formed(&mars, Some(BeltComposition::Rocky)), SnowLineSide::Inside);
+    /// assert_eq!(small.formed(&mars, Some(BeltComposition::Icy)), SnowLineSide::Beyond);
+    /// let irregular = MoonBirth::Captured(CaptureKind::Irregular);
+    /// assert_eq!(irregular.formed(&jupiter, None), SnowLineSide::Beyond);
+    /// ```
+    #[must_use]
+    pub fn formed(
+        self,
+        parent: &HostOrbiter,
+        neighbouring_belt: Option<BeltComposition>,
+    ) -> SnowLineSide {
+        let icy = match self {
+            Self::Regular { ice_fraction } => ice_fraction > 0.0,
+            Self::GiantImpact => matches!(
+                parent.belt,
+                Some(BeltMembership {
+                    composition: BeltComposition::Icy,
+                    ..
+                })
+            ),
+            Self::Captured(CaptureKind::Irregular | CaptureKind::Large) => true,
+            Self::Captured(CaptureKind::Small) => neighbouring_belt == Some(BeltComposition::Icy),
+        };
+        if icy {
+            SnowLineSide::Beyond
+        } else {
+            SnowLineSide::Inside
+        }
+    }
+}
+
 /// Which rule gave a body's impactors (the [module](self) documentation's three).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ImpactorSource {
@@ -575,36 +857,59 @@ impl ImpactorSource {
     }
 
     /// The source of the impactors striking `orbiter`, or a moon of it, under `sources`.
+    #[cfg(test)]
     #[must_use]
     fn of(orbiter: &HostOrbiter, sources: &ImpactorSources) -> Self {
+        Self::with_abundance(orbiter, sources).0
+    }
+
+    /// The source of the impactors striking `orbiter`, or a moon of it, under `sources`, with
+    /// their abundance Ψ over the Moon's by the same rule, before the floor
+    /// ([`floored_abundance`]): the rate and the velocity read one population.
+    #[must_use]
+    fn with_abundance(orbiter: &HostOrbiter, sources: &ImpactorSources) -> (Self, f64) {
         let a = orbiter.orbit.semi_major_axis;
         // Rule 1: a member shares its part's excitation; any body orbiting in an annulus, that
         // annulus's.
         if let Some(membership) = orbiter.belt {
-            return Self::InBelt {
+            let source = Self::InBelt {
                 excitation: belt_excitation(membership.part),
                 composition: membership.composition,
             };
+            let abundance =
+                member_component(sources, membership, a).map_or(0.0, |(annulus, mass)| {
+                    in_belt_abundance(annulus, mass, membership.part, membership.composition)
+                });
+            return (source, abundance);
         }
         for belt in &sources.belts {
             let parts = [
-                (BeltPart::Main, Some(belt.main)),
-                (BeltPart::Scattered, belt.scattered),
+                (BeltPart::Main, Some(belt.main), belt.main_mass),
+                (BeltPart::Scattered, belt.scattered, belt.scattered_mass),
             ];
-            for (part, annulus) in parts {
-                if annulus.is_some_and(|annulus| annulus.holds(a)) {
-                    return Self::InBelt {
+            for (part, annulus, mass) in parts {
+                if let Some(annulus) = annulus.filter(|annulus| annulus.holds(a)) {
+                    let source = Self::InBelt {
                         excitation: belt_excitation(part),
                         composition: belt.composition,
                     };
+                    let abundance = in_belt_abundance(annulus, mass, part, belt.composition);
+                    return (source, abundance);
                 }
             }
         }
         // Rule 2.
         if orbiter.mass >= IMPACTOR_GIANT_MASS || sources.innermost_giant.is_some_and(|g| a >= g) {
-            return Self::Comets;
+            return (Self::Comets, comet_abundance(sources, a));
         }
-        // Rule 3: an asteroid belt first, then any belt, then the innermost giant.
+        // Rule 3: an asteroid belt first, then any belt, then the innermost giant. The
+        // abundance reads an asteroid belt alone (science-p14-t24b-laws §2.2): with none, the
+        // giants' comets at the giant thin inward as (a ÷ a_g)², rule 2 having taken every body at
+        // or beyond it (§2.7), and with no giant either it is the floor's.
+        let inner_comets = sources.innermost_giant.map_or(0.0, |a_g| {
+            let inward = a.value() / a_g.value();
+            comet_abundance(sources, a_g) * inward * inward
+        });
         let asteroid = nearest_belt(
             sources
                 .belts
@@ -614,20 +919,174 @@ impl ImpactorSource {
         );
         if let Some(belt) = asteroid.or_else(|| nearest_belt(sources.belts.iter(), a)) {
             let a_b = belt.main.mid_radius();
-            return Self::NearestBelt {
+            let source = Self::NearestBelt {
                 excitation: belt_excitation(BeltPart::Main) + approach(a, a_b),
                 composition: belt.composition,
             };
+            let abundance = match belt.kind {
+                BeltKind::Asteroid => approach_abundance(belt, a),
+                BeltKind::Kuiper => inner_comets,
+            };
+            return (source, abundance);
         }
-        let comets = COMET_EXCITATION * COMET_EXCITATION;
-        Self::InnerComets {
-            excitation: match sources.innermost_giant {
-                // Rule 2 has taken every body at or beyond the giant, so a < a_g here.
-                Some(a_g) => comets + approach(a, a_g),
-                None => comets,
-            },
-        }
+        let excitation = COMET_EXCITATION * COMET_EXCITATION;
+        let source = Self::InnerComets {
+            excitation: sources
+                .innermost_giant
+                .map_or(excitation, |a_g| excitation + approach(a, a_g)),
+        };
+        (source, inner_comets)
     }
+}
+
+/// The giants' comets' abundance `Ψ_c` at a semi-major axis `a` about the host of `sources`
+/// (science-p14-t24b-laws §2.7 (a2)): [`COMET_DENSITY`] × `μ_ic` × s³ (s · min(a, `a_K`) ÷ 5.2
+/// au)^k, with `a_K` the inner edge of the belt proper of the host's outermost icy belt
+/// ([`ImpactorSources::comet_edge`]), s = 39.4027 au ÷ `a_K` ([`SOLAR_KUIPER_BELT_INNER_EDGE_AU`])
+/// and k [`COMET_DISTANCE_EXPONENT`]; zero with no icy belt, where `μ_ic` is zero too.
+///
+/// The s³ keeps a scaled copy of the Solar System at its number density, as rule 3's cube and rule
+/// 1's torus do; about the Sun s is 1. It rises outward to its value at `a_K`, which it holds
+/// beyond. It is calibrated from 5.2 to 30.1 au about the Sun, and inward of 5.2 au the same power
+/// goes on falling, an extrapolation.
+#[must_use]
+fn comet_abundance(sources: &ImpactorSources, a: Metres) -> f64 {
+    let Some(a_k) = sources.comet_edge else {
+        return 0.0;
+    };
+    let s = SOLAR_KUIPER_BELT_INNER_EDGE_AU * METRES_PER_AU / a_k.value();
+    let reach = if a < a_k { a } else { a_k };
+    let x = s * reach.value() / (COMET_REFERENCE_DISTANCE_AU * METRES_PER_AU);
+    COMET_DENSITY * sources.icy_belt_ratio() * s * s * s * math::powf(x, COMET_DISTANCE_EXPONENT)
+}
+
+/// The projectile abundance Ψ, the impactors' number density at a body over the Moon's for
+/// projectiles of one size, from its source rule's `abundance`: at least [`LEFTOVER_DENSITY`]
+/// (science-p14-t24b-laws §2.2; the [module](self) documentation).
+#[must_use]
+fn floored_abundance(abundance: f64) -> f64 {
+    // By comparison, so that a NaN, which validated inputs never make, takes the floor.
+    if abundance > LEFTOVER_DENSITY {
+        abundance
+    } else {
+        LEFTOVER_DENSITY
+    }
+}
+
+/// The component a belt's member belongs to, with its mass: of the belts of the member's
+/// composition that have its part, the first whose annulus holds the member's semi-major axis
+/// `a`, as P14.T21.c places every member, or failing one the nearest of them by
+/// [`nearest_belt`]'s ratio; `None` with no such belt.
+#[must_use]
+fn member_component(
+    sources: &ImpactorSources,
+    membership: BeltMembership,
+    a: Metres,
+) -> Option<(SourceAnnulus, EarthMasses)> {
+    let component = |belt: &SourceBelt| match membership.part {
+        BeltPart::Main => Some((belt.main, belt.main_mass)),
+        BeltPart::Scattered => belt.scattered.map(|annulus| (annulus, belt.scattered_mass)),
+    };
+    let candidates = || {
+        sources
+            .belts
+            .iter()
+            .filter(|belt| belt.composition == membership.composition)
+            .filter_map(component)
+    };
+    candidates()
+        .find(|(annulus, _)| annulus.holds(a))
+        .or_else(|| {
+            candidates()
+                .fold(
+                    None,
+                    |best: Option<((SourceAnnulus, EarthMasses), f64)>, c| {
+                        let (r, x) = (c.0.mid_radius().value(), a.value());
+                        let closeness = r.min(x) / r.max(x);
+                        match best {
+                            Some((_, b)) if closeness <= b => best,
+                            Some(_) | None => Some((c, closeness)),
+                        }
+                    },
+                )
+                .map(|(c, _)| c)
+        })
+}
+
+/// The density proxy of a component of mass `mass` between `inner_au` and `outer_au` of the part
+/// `part`, M⊕ au⁻³: its mass over a torus of its annulus and its inclination width,
+/// M ÷ ((`a_o`² − `a_i`²) √(`a_i` `a_o`) sin σᵢ), with σᵢ [`MEMBER_INCLINATION_WIDTH_DEG`] or
+/// [`SCATTERED_INCLINATION_WIDTH_DEG`]; zero for an annulus of no width.
+#[must_use]
+fn torus_density_earth_masses_per_au3(
+    mass: EarthMasses,
+    (inner_au, outer_au): (f64, f64),
+    part: BeltPart,
+) -> f64 {
+    let width_deg = match part {
+        BeltPart::Main => MEMBER_INCLINATION_WIDTH_DEG,
+        BeltPart::Scattered => SCATTERED_INCLINATION_WIDTH_DEG,
+    };
+    let volume = (outer_au * outer_au - inner_au * inner_au)
+        * (inner_au * outer_au).sqrt()
+        * math::sin(width_deg.to_radians());
+    if volume > 0.0 {
+        mass.value() / volume
+    } else {
+        0.0
+    }
+}
+
+/// Rule 1's abundance in the annulus `annulus` of part `part` holding `mass`, of a belt of
+/// composition `composition`: `K_in` × its torus's density over the Solar main belt's
+/// ([`torus_density_earth_masses_per_au3`]), with `K_in` [`IN_BELT_DENSITY`] for a rocky belt and
+/// [`ICY_IN_BELT_DENSITY`] for an icy one (science-p14-t24b-laws §2.7 (b)).
+#[must_use]
+fn in_belt_abundance(
+    annulus: SourceAnnulus,
+    mass: EarthMasses,
+    part: BeltPart,
+    composition: BeltComposition,
+) -> f64 {
+    let au = |m: Metres| m.value() / METRES_PER_AU;
+    let edges = (au(annulus.inner_edge), au(annulus.outer_edge));
+    let own = torus_density_earth_masses_per_au3(mass, edges, part);
+    let solar = torus_density_earth_masses_per_au3(
+        SOLAR_MAIN_BELT_MASS,
+        SOLAR_MAIN_BELT_EDGES_AU,
+        BeltPart::Main,
+    );
+    let k_in = match composition {
+        BeltComposition::Rocky => IN_BELT_DENSITY,
+        BeltComposition::Icy => ICY_IN_BELT_DENSITY,
+    };
+    k_in * own / solar
+}
+
+/// Rule 3's abundance at a semi-major axis `a` outside the belt proper of the asteroid belt `belt`:
+/// `μ_b` (`a_i☉` ÷ `a_i`)³ ((1 − 1 au ÷ `a_i☉`) ÷ (1 − a ÷ `a_i`))^1.5 inside its inner edge `a_i`,
+/// with (1 − `a_o` ÷ a) in place of (1 − a ÷ `a_i`) beyond its outer edge `a_o`; `μ_b` its mass over
+/// [`SOLAR_MAIN_BELT_MASS`] and `a_i☉` the Solar main belt's inner edge. The cube keeps a scaled
+/// copy of the Solar System at its density; the power is [`APPROACH_EXPONENT`]. It is 1 at 1 au
+/// inside the Solar main belt.
+#[must_use]
+fn approach_abundance(belt: &SourceBelt, a: Metres) -> f64 {
+    let solar_inner = SOLAR_MAIN_BELT_EDGES_AU.0 * METRES_PER_AU;
+    let (a, inner, outer) = (
+        a.value(),
+        belt.main.inner_edge.value(),
+        belt.main.outer_edge.value(),
+    );
+    let distance = if a < inner {
+        1.0 - a / inner
+    } else {
+        1.0 - outer / a
+    };
+    let scale = solar_inner / inner;
+    let reference = 1.0 - METRES_PER_AU / solar_inner;
+    belt.main_mass / SOLAR_MAIN_BELT_MASS
+        * (scale * scale * scale)
+        * math::powf(reference / distance, APPROACH_EXPONENT)
 }
 
 /// A belt component's own excitation `U_b`² = ⟨e²⟩ + ⟨sin² i⟩ = 2σₑ² + 2 sin² σᵢ, dimensionless,
@@ -706,6 +1165,8 @@ pub struct Impactors {
     source: ImpactorSource,
     target: CraterTarget,
     crust: Crust,
+    abundance: f64,
+    encounter: MetresPerSecond,
 }
 
 impl Impactors {
@@ -713,6 +1174,52 @@ impl Impactors {
     #[must_use]
     pub const fn velocity(&self) -> MetresPerSecond {
         self.velocity
+    }
+
+    /// `R_b`, the impact rate per unit area on the body over the Moon's for projectiles of one
+    /// size (P14.T48.c; science-p14-t24b-laws §2.2), dimensionless and positive: the projectile
+    /// abundance Ψ over the Moon's times the encounter factor V over the Moon's
+    /// [`LUNAR_ENCOUNTER_SPEED`], in particle-in-a-box form (Öpik 1951).
+    ///
+    /// - V is v∞ (1 + `v_esc`² ÷ v∞²) for a body that goes round the host, the encounter speed
+    ///   with the escape speed's focusing; and for a moon `v_enc` √(1 + 2 `v_K,s`² ÷ v∞,P²)
+    ///   (1 + `v_esc,s`² ÷ `v_enc`²), with `v_enc`² = v∞,P² + 3 `v_K,s`². The middle factor is its
+    ///   parent's focusing at its orbit as the impactors' number-density gain, n∞ v ÷ v∞ (Liouville;
+    ///   §2.7 (a1)), since `v_enc` already holds the speed's gain: the regular moons' rates over
+    ///   their planets' then match Zahnle et al. 2003's Table 1 within 11%.
+    /// - Ψ follows the source rule ([`ImpactorSource`]): in a belt, [`IN_BELT_DENSITY`] (rocky) or
+    ///   [`ICY_IN_BELT_DENSITY`] (icy) × the component's density over the Solar main belt's; the
+    ///   giants' comets, [`COMET_DENSITY`] × `μ_ic` ([`ImpactorSources::icy_belt_ratio`]) × s³
+    ///   (s · min(a, `a_K`) ÷ 5.2 au)^1.15 ([`comet_abundance`], §2.7), with a the body's or its
+    ///   parent's semi-major axis; toward the nearest asteroid belt, its mass over
+    ///   [`SOLAR_MAIN_BELT_MASS`] × (2.065 au ÷ `a_i`)³ × ((1 − 1 au ÷ 2.065 au) ÷ (1 − a ÷
+    ///   `a_i`))^1.5 inside its inner edge, or (1 − `a_o` ÷ a) beyond its outer edge; with no
+    ///   asteroid belt, the comets at the innermost giant thinned by (a ÷ `a_g`)² inside it,
+    ///   whatever belt the velocity reads, and with no giant either none; and at least
+    ///   [`LEFTOVER_DENSITY`].
+    /// - The belts' masses are at [`SOURCE_MASS_AGE`], so it is constant in time: the lunar
+    ///   chronology it multiplies carries the time profile.
+    ///
+    /// The Moon's is 1, Mars's 1.96, Ganymede's 3.71 and Pluto's 30.1. It multiplies the lunar
+    /// chronology into the crater contract's
+    /// lunar-equivalent N☾(>1 km), as R09's reference worlds read it.
+    #[must_use]
+    pub fn rate(&self) -> f64 {
+        self.abundance * (self.encounter / LUNAR_ENCOUNTER_SPEED)
+    }
+
+    /// The projectile abundance Ψ over the Moon's, dimensionless, at least [`LEFTOVER_DENSITY`]:
+    /// the first factor of [`rate`](Self::rate).
+    #[must_use]
+    pub const fn abundance(&self) -> f64 {
+        self.abundance
+    }
+
+    /// The encounter factor V, m/s, finite and positive: the second factor of
+    /// [`rate`](Self::rate), over [`LUNAR_ENCOUNTER_SPEED`].
+    #[must_use]
+    pub const fn encounter_speed(&self) -> MetresPerSecond {
+        self.encounter
     }
 
     /// The projectiles' density, kg m⁻³: [`ROCKY_PROJECTILE_DENSITY`] or
@@ -847,6 +1354,58 @@ fn check_orbiter(orbiter: &HostOrbiter) -> Result<(), DeriveImpactorsError> {
     Ok(())
 }
 
+/// A body's two impact speeds ([`speeds`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Speeds {
+    /// The square of the mean impact velocity, m² s⁻².
+    velocity_squared_m2_s2: f64,
+    /// The encounter factor V of the rate ([`Impactors::rate`]).
+    encounter: MetresPerSecond,
+}
+
+/// The impact speeds of a body struck from `source` that goes round its host as `orbiter` does,
+/// or a moon of it at `moon` from it, of escape speed squared `escape_squared` m² s⁻², about a
+/// host of parameter `host` (the [module](self) documentation, and [`Impactors::rate`]).
+#[must_use]
+fn speeds(
+    source: ImpactorSource,
+    orbiter: &HostOrbiter,
+    moon: Option<Metres>,
+    host: GravitationalParameter,
+    escape_squared: f64,
+) -> Speeds {
+    let HostOrbit {
+        semi_major_axis: a,
+        eccentricity: e,
+        inclination: i,
+    } = orbiter.orbit;
+    let sin_i = math::sin(i.value());
+    let encounter = source.excitation() + e * e + sin_i * sin_i;
+    let circular_squared = host.value() / a.value();
+    let v_infinity_squared = encounter * circular_squared;
+    let (velocity_squared_m2_s2, encounter) = match moon {
+        None => (
+            v_infinity_squared + escape_squared,
+            v_infinity_squared.sqrt() * (1.0 + escape_squared / v_infinity_squared),
+        ),
+        Some(a_s) => {
+            let parent = GravitationalParameter::from_earth_masses(orbiter.mass);
+            let orbital_squared = parent.value() / a_s.value();
+            let meeting_squared = v_infinity_squared + 3.0 * orbital_squared;
+            (
+                meeting_squared + escape_squared,
+                meeting_squared.sqrt()
+                    * (1.0 + 2.0 * orbital_squared / v_infinity_squared).sqrt()
+                    * (1.0 + escape_squared / meeting_squared),
+            )
+        }
+    };
+    Speeds {
+        velocity_squared_m2_s2,
+        encounter: MetresPerSecond::new(encounter),
+    }
+}
+
 /// The impactors of the body `body` describes (P14.T48.f): their mean impact velocity, their
 /// density and the crater target, by the [module](self) documentation's closed form, with no
 /// draw.
@@ -876,8 +1435,8 @@ fn check_orbiter(orbiter: &HostOrbiter) -> Result<(), DeriveImpactorsError> {
 /// use hyperion_sim::planetary::belts::BeltComposition;
 /// use hyperion_sim::planetary::derive::SnowLineSide;
 /// use hyperion_sim::planetary::hooks::figures::{
-///     HostOrbit, HostOrbiter, ImpactorBody, ImpactorOrbit, ImpactorSources, SourceAnnulus,
-///     SourceBelt, impactors,
+///     HostOrbit, HostOrbiter, ImpactorBody, ImpactorOrbit, ImpactorSources, SOLAR_MAIN_BELT_MASS,
+///     SourceAnnulus, SourceBelt, impactors,
 /// };
 /// use hyperion_sim::planetary::record::BeltKind;
 /// use hyperion_sim::units::consts::METRES_PER_AU;
@@ -898,6 +1457,8 @@ fn check_orbiter(orbiter: &HostOrbiter) -> Result<(), DeriveImpactorsError> {
 ///         outer_edge: au(jupiter * math::powf(0.5, 2.0 / 3.0)),
 ///     },
 ///     scattered: None,
+///     main_mass: SOLAR_MAIN_BELT_MASS,
+///     scattered_mass: EarthMasses::ZERO,
 /// };
 /// let sun = ImpactorSources::new(
 ///     GravitationalParameter::from_solar_masses(SolarMasses::new(1.0)),
@@ -922,6 +1483,8 @@ fn check_orbiter(orbiter: &HostOrbiter) -> Result<(), DeriveImpactorsError> {
 /// assert!((v - LUNAR_IMPACT_VELOCITY.value()).abs() < 100.0);
 /// assert_eq!(moon.target().class, TargetClass::NonPorous);
 /// assert!((moon.k_target() - 1.0).abs() < 1e-12);
+/// // Its impact rate per unit area is about the Moon's own.
+/// assert!((moon.rate() - 1.0).abs() < 0.01);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 pub fn impactors(body: &ImpactorBody<'_>) -> Result<Impactors, DeriveImpactorsError> {
@@ -964,25 +1527,15 @@ pub fn impactors(body: &ImpactorBody<'_>) -> Result<Impactors, DeriveImpactorsEr
         return Err(DeriveImpactorsError::Water(body.water));
     }
 
-    let source = ImpactorSource::of(&orbiter, body.sources);
-    let HostOrbit {
-        semi_major_axis: a,
-        eccentricity: e,
-        inclination: i,
-    } = orbiter.orbit;
-    let sin_i = math::sin(i.value());
-    let encounter = source.excitation() + e * e + sin_i * sin_i;
-    let circular_squared = body.sources.host.value() / a.value();
-    let v_infinity_squared = encounter * circular_squared;
+    let (source, abundance) = ImpactorSource::with_abundance(&orbiter, body.sources);
     let escape_squared = 2.0 * gravity.value() * radius.value();
-    let velocity_squared = match moon {
-        None => v_infinity_squared + escape_squared,
-        Some((a_s, _)) => {
-            let parent = GravitationalParameter::from_earth_masses(orbiter.mass);
-            let orbital_squared = parent.value() / a_s.value();
-            v_infinity_squared + 3.0 * orbital_squared + escape_squared
-        }
-    };
+    let speeds = speeds(
+        source,
+        &orbiter,
+        moon.map(|(a_s, _)| a_s),
+        body.sources.host,
+        escape_squared,
+    );
 
     let birthplace = match (moon, orbiter.belt) {
         (Some((_, SnowLineSide::Beyond)), _)
@@ -1016,10 +1569,12 @@ pub fn impactors(body: &ImpactorBody<'_>) -> Result<Impactors, DeriveImpactorsEr
         }
     };
     Ok(Impactors {
-        velocity: MetresPerSecond::new(velocity_squared.sqrt()),
+        velocity: MetresPerSecond::new(speeds.velocity_squared_m2_s2.sqrt()),
         source,
         target,
         crust,
+        abundance: floored_abundance(abundance),
+        encounter: speeds.encounter,
     })
 }
 
@@ -1170,12 +1725,13 @@ impl Subsurface {
 
 /// What [`GlobalFigures::derive`] reads of a body at a time, as plain values: its mass, its bulk
 /// section's radius, gravity, class and mass fractions, its atmosphere and its water, its host's
-/// \[Fe/H\], its age, its rotation, the tidal heat raised in it, and its subsurface ocean as its
-/// rule computes it.
+/// \[Fe/H\], its age, its rotation, the tidal heat raised in it, its subsurface ocean as its rule
+/// computes it, and what its crater contract reads ([`CraterInputs`]).
 ///
-/// The fields carry no invariant the derivation relies on, so they are public: a radius that is
-/// not positive gives no radiogenic heat, and the mass, age and fractions are read as given (at
-/// an age of 0 the rock makes its birth's production, 4.95 times today's).
+/// The fields are public: [`GlobalFigures::derive`] refuses, for a body with a surface, an age
+/// that is not finite and non-negative, and the radius, gravity, air temperature, water and crater
+/// inputs that [`impactors`] refuses; it reads the rest as given. At an age of 0 the rock makes
+/// its birth's production, 4.95 times today's.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FiguresInputs<'a> {
     /// The body's atmosphere at the time (P14.T13), whose state says whether it has a surface and
@@ -1210,11 +1766,69 @@ pub struct FiguresInputs<'a> {
     pub tidal_heat_flow: WattsPerSquareMetre,
     /// Its ocean under the surface, as its rule computes it.
     pub subsurface_ocean: Subsurface,
+    /// What its crater contract reads beyond these.
+    pub craters: CraterInputs<'a>,
 }
 
-/// A body's global figures at a time (P14.T24.b, its interior so far): its heat flow, its
-/// interior, its tectonic regime, its magnetic field, its present outgassing and its subsurface
-/// ocean.
+/// What a body's surface age and crater contract read beyond its bulk section, its air and its
+/// heat flow ([`GlobalFigures::derive`]; P14.T24.b, T48.c and T48.f), as plain values.
+///
+/// Plain data with public fields: [`impactors`] validates the orbit, the density and the
+/// sources' use.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CraterInputs<'a> {
+    /// Where it goes round, a moon with its birthplace ([`MoonBirth::formed`]).
+    pub orbit: ImpactorOrbit,
+    /// Its bulk density, the bulk section's: a porous target's.
+    pub density: KilogramsPerCubicMetre,
+    /// Its host's impactor sources.
+    pub sources: &'a ImpactorSources,
+    /// The system age at which its young magma ocean ended (P14.T28.a's `molten_until`); `None`
+    /// for a body with no magma-ocean draw, whose surface age then reads its own age.
+    pub molten_until: Option<Years>,
+    /// The system age of its last giant impact (P14.T18), its parent's for a giant-impact moon;
+    /// `None` for a body that had none.
+    pub last_giant_impact: Option<Years>,
+}
+
+/// Why [`GlobalFigures::derive`] refused a body, with what it refused.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DeriveFiguresError {
+    /// The age is not finite and non-negative.
+    Age(Years),
+    /// The impactors' inputs are out of range ([`impactors`]): the radius, the gravity, the air
+    /// temperature, the water or the crater inputs.
+    Impactors(DeriveImpactorsError),
+    /// The crater contract's parts are out of the shared density's range ([`CraterParams::new`]).
+    Craters(BuildCraterParamsError),
+}
+
+impl fmt::Display for DeriveFiguresError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Age(age) => write!(f, "age {} yr is not finite and non-negative", age.value()),
+            Self::Impactors(error) => write!(f, "impactors: {error}"),
+            Self::Craters(error) => write!(f, "crater contract: {error}"),
+        }
+    }
+}
+
+impl Error for DeriveFiguresError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            Self::Age(_) => None,
+            Self::Impactors(error) => Some(error),
+            Self::Craters(error) => Some(error),
+        }
+    }
+}
+
+/// Julian years in a thousand million, the chronology's unit.
+const YEARS_PER_GIGAYEAR: f64 = 1e9;
+
+/// A body's global figures at a time (P14.T24.b so far): its heat flow, its interior, its
+/// tectonic regime, its magnetic field, its present outgassing, its subsurface ocean, its surface
+/// age and its crater contract (P14.T48.c) with its impactors (P14.T48.f).
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalFigures {
     radiogenic_heat_flow: WattsPerSquareMetre,
@@ -1225,6 +1839,9 @@ pub struct GlobalFigures {
     magnetic_field: MagneticField,
     outgassing: f64,
     subsurface_ocean: Subsurface,
+    surface_age: Years,
+    impactors: Impactors,
+    craters: CraterParams,
 }
 
 impl GlobalFigures {
@@ -1237,18 +1854,40 @@ impl GlobalFigures {
     /// residual, the tide, the state, the water's depth, the gravity and the ocean's shell, and the
     /// field the regime, the iron's share, the heat, the age and the rotation.
     ///
+    /// The crater contract reads the impactors ([`impactors`]) of the body at its air's mean
+    /// surface temperature, P14.T13's, which is the surface conditions' mean, with the water its
+    /// regime reads; the surface age ([`surface_age::surface_age`]) its heat flow and their crust;
+    /// and the lunar chronology the surface age in the system's age, times their rate
+    /// ([`GlobalFigures::craters`]).
+    ///
+    /// # Errors
+    ///
+    /// For a body with a surface (a gas envelope or a class with none is `Ok(None)` first):
+    /// - [`DeriveFiguresError::Age`] for an age that is not finite and non-negative;
+    /// - [`DeriveFiguresError::Impactors`] for what [`impactors`] refuses: a radius or gravity that
+    ///   is not finite and positive, an air temperature or water that is not finite and
+    ///   non-negative, or crater inputs out of range;
+    /// - [`DeriveFiguresError::Craters`] for a contract [`CraterParams::new`] refuses, which
+    ///   inputs in range never make.
+    ///
     /// # Examples
     ///
     /// Earth, as [`derive_body`](crate::planetary::derive::derive_body)'s example derives it, a
-    /// wet mobile lid that outgasses at about Earth's rate:
+    /// wet mobile lid that outgasses at about Earth's rate, under the Sun's asteroid belt and
+    /// Jupiter, renews its ocean floor in some 64 Myr and keeps few craters:
     ///
     /// ```
+    /// use hyperion_sim::math;
     /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+    /// use hyperion_sim::planetary::belts::BeltComposition;
     /// use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
     /// use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
     /// use hyperion_sim::planetary::hooks::figures::{
-    ///     FiguresInputs, GlobalFigures, MagneticField, Subsurface, TectonicRegime,
+    ///     CraterInputs, FiguresInputs, GlobalFigures, HostOrbit, HostOrbiter, ImpactorOrbit,
+    ///     ImpactorSources, MagneticField, SOLAR_MAIN_BELT_MASS, SourceAnnulus, SourceBelt,
+    ///     Subsurface, TectonicRegime,
     /// };
+    /// use hyperion_sim::planetary::record::BeltKind;
     /// use hyperion_sim::stellar::Composition;
     /// use hyperion_sim::stellar::draws::UnitUniform;
     /// use hyperion_sim::time::UniverseTime;
@@ -1271,6 +1910,25 @@ impl GlobalFigures {
     /// let hosts = BodyHosts::new(Kilograms::new(SOLAR_MASS_KG), Composition::SOLAR, &sun, &[])?;
     /// let age = Years::new(4.57e9);
     /// let derived = derive_body(&earth, &hosts, disc, age, UniverseTime::EPOCH)?;
+    /// // The Sun's asteroid belt, between Jupiter's 4:1 and 2:1 resonances, and Jupiter.
+    /// let au = |x: f64| Metres::new(x * METRES_PER_AU);
+    /// let belt = SourceBelt {
+    ///     kind: BeltKind::Asteroid,
+    ///     composition: BeltComposition::Rocky,
+    ///     main: SourceAnnulus {
+    ///         inner_edge: au(5.2029 * math::powf(0.25, 2.0 / 3.0)),
+    ///         outer_edge: au(5.2029 * math::powf(0.5, 2.0 / 3.0)),
+    ///     },
+    ///     scattered: None,
+    ///     main_mass: SOLAR_MAIN_BELT_MASS,
+    ///     scattered_mass: EarthMasses::ZERO,
+    /// };
+    /// let sources = ImpactorSources::new(mu, vec![belt], [(EarthMasses::new(317.8), au(5.2029))])?;
+    /// let orbit = ImpactorOrbit::Host(HostOrbiter {
+    ///     orbit: HostOrbit { semi_major_axis: a, eccentricity: 0.0167, inclination: Radians::ZERO },
+    ///     mass: EarthMasses::new(1.0),
+    ///     belt: None,
+    /// });
     /// let figures = GlobalFigures::derive(&FiguresInputs {
     ///     atmosphere: derived.atmosphere(),
     ///     mass: derived.mass(),
@@ -1284,19 +1942,27 @@ impl GlobalFigures {
     ///     age,
     ///     tidal_heat_flow: WattsPerSquareMetre::new(0.0),
     ///     subsurface_ocean: Subsurface::NotComputed,
-    /// })
+    ///     craters: CraterInputs {
+    ///         orbit,
+    ///         density: derived.density(),
+    ///         sources: &sources,
+    ///         molten_until: Some(Years::new(3.2e7)),
+    ///         last_giant_impact: Some(Years::ZERO),
+    ///     },
+    /// })?
     /// .expect("an Earth has a surface");
     /// assert_eq!(figures.tectonic_regime(), TectonicRegime::MobileLid);
     /// assert_eq!(figures.magnetic_field(), MagneticField::Strong);
     /// assert!((figures.heat_flow().value() / 0.092 - 1.0).abs() < 0.05);
     /// assert!((figures.outgassing() - 1.0).abs() < 0.1);
+    /// assert!((figures.surface_age().value() / 64.2e6 - 1.0).abs() < 0.05);
+    /// assert!(figures.crater_density().value() < 1e-4);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
-    #[must_use]
-    pub fn derive(inputs: &FiguresInputs<'_>) -> Option<Self> {
+    pub fn derive(inputs: &FiguresInputs<'_>) -> Result<Option<Self>, DeriveFiguresError> {
         let air = inputs.atmosphere;
         if matches!(air.state(), SurfaceState::GasEnvelope) {
-            return None;
+            return Ok(None);
         }
         let FiguresInputs {
             mass,
@@ -1312,7 +1978,12 @@ impl GlobalFigures {
         } = *inputs;
         let kilograms = Kilograms::from(mass).value();
         let rock_core = rock_core_radius(kilograms * (1.0 - fractions.water()));
-        let interior = Interior::of(class, rock_core)?;
+        let Some(interior) = Interior::of(class, rock_core) else {
+            return Ok(None);
+        };
+        if !non_negative(age.value()) {
+            return Err(DeriveFiguresError::Age(age));
+        }
         let radiogenic = radiogenic_heat_flow(
             Kilograms::new(kilograms * fractions.rock()),
             radius,
@@ -1373,7 +2044,9 @@ impl GlobalFigures {
             age,
             rotation_period,
         });
-        Some(Self {
+        let (surface_age, impactors, craters) =
+            crater_contract(inputs, Kilograms::new(water), heat_flow)?;
+        Ok(Some(Self {
             radiogenic_heat_flow: radiogenic,
             non_tidal_heat_flow: non_tidal,
             heat_flow,
@@ -1382,7 +2055,10 @@ impl GlobalFigures {
             magnetic_field: field,
             outgassing: outgassing(heat_flow),
             subsurface_ocean: inputs.subsurface_ocean,
-        })
+            surface_age,
+            impactors,
+            craters,
+        }))
     }
 
     /// The heat flow at the surface F, W m⁻²: the non-tidal part with the tidal heat added
@@ -1440,6 +2116,86 @@ impl GlobalFigures {
     pub const fn subsurface_ocean(&self) -> &Subsurface {
         &self.subsurface_ocean
     }
+
+    /// The surface age S, the time since the last global resurfacing, yr, in [0, age]
+    /// ([`surface_age::surface_age`]): the least of the time since the magma ocean's end, the
+    /// resurfacing time at the heat flow, and the time since a giant impact.
+    #[must_use]
+    pub const fn surface_age(&self) -> Years {
+        self.surface_age
+    }
+
+    /// The lunar-equivalent crater density N☾(>1 km), per km²: the lunar chronology at the surface
+    /// age in the system's age, times the impactors' rate `R_b` ([`Impactors::rate`]), before
+    /// any screening or diameter map (P14.T48.c), the contract's
+    /// [`n_1km`](CraterParams::n_1km).
+    #[must_use]
+    pub const fn crater_density(&self) -> PerSquareKilometre {
+        self.craters.n_1km()
+    }
+
+    /// What strikes the body and what it strikes (P14.T48.f), with their rate.
+    #[must_use]
+    pub const fn impactors(&self) -> &Impactors {
+        &self.impactors
+    }
+
+    /// The crater contract (P14.T48.c; R09's Design note 12): N☾(>1 km), the screening of the
+    /// air's column mass p ÷ g (none for an airless body), the gravity, the system's age, and the
+    /// impactors' velocity, density, target and `k_target`. The shared density
+    /// ([`cumulative_density`](hyperion_surface::craters::cumulative_density)) derives the rest.
+    #[must_use]
+    pub const fn craters(&self) -> &CraterParams {
+        &self.craters
+    }
+}
+
+/// The surface age, the impactors and the crater contract of the body `inputs` describe, holding
+/// `water` and of heat flow `heat_flow` ([`GlobalFigures::derive`]'s, whose age is checked).
+fn crater_contract(
+    inputs: &FiguresInputs<'_>,
+    water: Kilograms,
+    heat_flow: WattsPerSquareMetre,
+) -> Result<(Years, Impactors, CraterParams), DeriveFiguresError> {
+    let (air, crater_inputs, gravity) = (inputs.atmosphere, inputs.craters, inputs.surface_gravity);
+    let impactors = impactors(&ImpactorBody {
+        orbit: crater_inputs.orbit,
+        radius: inputs.radius,
+        density: crater_inputs.density,
+        surface_gravity: gravity,
+        surface_temperature: air.surface_temperature(),
+        water,
+        sources: crater_inputs.sources,
+    })
+    .map_err(DeriveFiguresError::Impactors)?;
+    let surface_age = surface_age::surface_age(&surface_age::SurfaceAgeInputs {
+        age: inputs.age,
+        molten_until: crater_inputs.molten_until,
+        last_giant_impact: crater_inputs.last_giant_impact,
+        heat_flow,
+        crust: impactors.crust(),
+    });
+    let gyr = |years: Years| Gigayears::new(years.value() / YEARS_PER_GIGAYEAR);
+    let system_age = gyr(inputs.age);
+    let n_1km = craters::lunar_chronology(gyr(surface_age), system_age) * impactors.rate();
+    let screening = match air.surface_pressure() {
+        Some(pressure) if pressure.value() > 0.0 => Screening::Atmosphere {
+            column_mass: KilogramsPerSquareMetre::new(pressure.value() / gravity.value()),
+        },
+        Some(_) | None => Screening::None,
+    };
+    let craters = CraterParams::new(CraterParamsParts {
+        n_1km,
+        screening,
+        gravity,
+        k_target: impactors.k_target(),
+        impact_velocity: Some(impactors.velocity()),
+        projectile_density: impactors.projectile_density(),
+        target: impactors.target(),
+        system_age,
+    })
+    .map_err(DeriveFiguresError::Craters)?;
+    Ok((surface_age, impactors, craters))
 }
 
 /// The radius of a sphere of `kilograms` of rock at [`interior::ROCK_CORE_DENSITY`]: an icy
@@ -1455,20 +2211,21 @@ fn rock_core_radius(kilograms: f64) -> Metres {
 /// The figures of a body of the Solar System table (`derive::solar`), derived about the present
 /// Sun: its own mass, radius, gravity, class, fractions and water at the Sun's age and \[Fe/H\],
 /// turning in Earth's sidereal day, with no tide and no rule for an ocean under it; `None` for a
-/// gas envelope. Its heat flow reads no rotation.
+/// gas envelope. Its heat flow reads no rotation, and its crater contract is a planet's on a
+/// circular orbit at 1 au under the Solar System's sources, with no magma ocean: tests of the
+/// contract give each body its own.
 #[cfg(test)]
 #[must_use]
 pub(crate) fn table_figures(body: &crate::planetary::derive::DerivedBody) -> Option<GlobalFigures> {
-    table_figures_spun(body, Seconds::new(86_164.1))
-}
-
-/// [`table_figures`] with the sidereal rotation period `rotation_period`.
-#[cfg(test)]
-#[must_use]
-pub(crate) fn table_figures_spun(
-    body: &crate::planetary::derive::DerivedBody,
-    rotation_period: Seconds,
-) -> Option<GlobalFigures> {
+    let orbit = ImpactorOrbit::Host(HostOrbiter {
+        orbit: HostOrbit {
+            semi_major_axis: Metres::new(METRES_PER_AU),
+            eccentricity: 0.0,
+            inclination: Radians::ZERO,
+        },
+        mass: body.mass(),
+        belt: None,
+    });
     GlobalFigures::derive(&FiguresInputs {
         atmosphere: body.atmosphere(),
         mass: body.mass(),
@@ -1477,10 +2234,18 @@ pub(crate) fn table_figures_spun(
         class: body.class(),
         fractions: body.fractions(),
         inventory_water: body.inventory().water(),
-        rotation_period,
+        rotation_period: Seconds::new(86_164.1),
         fe_h: Dex::new(0.0),
         age: crate::planetary::derive::solar::SOLAR_AGE,
         tidal_heat_flow: WattsPerSquareMetre::new(0.0),
         subsurface_ocean: Subsurface::NotComputed,
+        craters: CraterInputs {
+            orbit,
+            density: body.density(),
+            sources: tests::solar_sources(),
+            molten_until: None,
+            last_giant_impact: None,
+        },
     })
+    .expect("the table's bodies are in range")
 }

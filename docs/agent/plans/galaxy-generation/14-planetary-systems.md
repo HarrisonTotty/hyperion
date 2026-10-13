@@ -10968,7 +10968,8 @@ a_moon_s_published, the_published}`.
   θ in T24.a's contrasts. The laws the task text leaves to the builder are ruled in
   `science-p14-t24b-laws.md` Part 1 (§1.1–1.6, 2026-10-13), built as written; its plan text for
   P14.T24.b, T48.a, T48.d, T24.d and R09 is the docs lane's.
-  - _Where it lives._ `GlobalFigures::derive(&FiguresInputs) -> Option<GlobalFigures>` in
+  - _Where it lives._ `GlobalFigures::derive(&FiguresInputs) -> Option<GlobalFigures>` (part 2:
+    `Result<Option<GlobalFigures>, DeriveFiguresError>`) in
     `planetary/hooks/figures.rs`, a pure function of plain values: the atmosphere, the mass at t,
     the bulk section's radius, gravity, class and fractions, the volatile inventory's water, the
     sidereal rotation period, the system's \[Fe/H\] and age, the tide and the subsurface ocean.
@@ -11066,6 +11067,128 @@ planetary::system::tests::a_moon_s_published planetary::moons::regular`: the tas
   - _Left to parts 2–4_: the figures are derived before the conditions and give them only F. θ
     (from f_o) must precede the conditions, while the ice fraction and T48.c's `ImpactorBody`
     (which reads T_s) need them, so `derive` gains a second stage, and `FiguresInputs` fields.
+    (Part 2: T48.c reads T13's mean surface temperature, the conditions' own, and needs no second
+    stage; the ice fraction still does.)
+- **Deviations in P14.T24.b, as built: part 2, the craters (`p14-batch`, 2026-10-13).**
+  `GENERATOR_VERSION` stays 21, and nothing on the record moves: the surface age and the crater
+  contract are published with part 1's figures, under T24.a's hold. Built: T24.b's surface age and
+  crater density with P14.T48.c's contract, P14.T48.f's rate `R_b` and `Crust::of`'s birthplace
+  for moons with no regular nursery, by `science-p14-t24b-laws.md` Part 2 (§2.1–2.6, 2026-10-13),
+  as written but where stated, with its §2.7 re-rule of Ψ against Zahnle et al. 2003 (adopted by
+  main the same day) folded in. Its plan text (§2.5, as §2.7 amends it) for P14.T24.b, T48.f and
+  R09 is the docs lane's.
+  - _Where it lives._ The new `planetary/hooks/figures/surface_age.rs`: `resurfacing_time`,
+    `SurfaceAgeInputs`, `surface_age` and the ruling's constants. In `hooks/figures.rs`: the rate,
+    `MoonBirth`, `CraterInputs` and `DeriveFiguresError`. `GlobalFigures` gains `surface_age()`,
+    `crater_density()` (N☾(>1 km)), `impactors()` and `craters()`, the contract as a
+    `hyperion_surface::craters::CraterParams`.
+    - _One stage._ The crust reads the atmosphere's mean surface temperature (P14.T13's), which is
+      the conditions' mean, so T48.c needs no second stage after the conditions.
+    - `GlobalFigures::derive` returns `Result<Option<_>, DeriveFiguresError>` (`Age`, `Impactors`,
+      `Craters`), since the contract validates its parts. `FiguresInputs` gains `craters`.
+      `published_surface` maps a refusal to `NotModelled`, which a debug assertion catches; none
+      occurs in the sample. `hooks_at` builds the crater inputs only under the open hold.
+  - _The surface age_ (§2.1). S = min(age − `t_MO`, τ, `t_GI`), held to [0, age], so it is zero
+    while the magma ocean lasts.
+    - `RESURFACING_EXPONENT` = 2.907 695 (`Fitted`; a test refits it to 10⁻⁹). It is the ruling's
+      own fit on Mars's 3.9 Gyr, at the generator's Earth of 92.55 mW m⁻² and Mars of 22.54. The
+      ruling's 2.86 was the same fit at its replica's 92.4 and 22.0.
+    - The silicate τ₀ is 64.2 Myr at `GENERATED_EARTH_HEAT_FLOW`. A heat flow that is not
+      positive gives an infinite τ.
+    - `t_MO` is a planet's P14.T28.a `molten_until`. Members and moons have no draw and take their
+      age, the generated giant-impact Moon included (main, 2026-10-13: the ruling's "no draw takes
+      its age" stands; §2.1's table gives the Moon age − `t_MO`). The table's tests give every
+      body the median `t_MO`, 10^1.5 Myr. `t_GI` is the system's birth for a planet or member with
+      a giant-impact moon, and for that moon.
+  - _The rate_ (§2.2). `Impactors::rate()` = Ψ × V ÷ V☾, with `abundance()` and
+    `encounter_speed()`.
+    - _§2.7's re-rule, folded in._ (a1) A moon's V takes its parent's focusing as the
+      number-density gain, √(1 + 2 `v_K,s`² ÷ v∞,P²). (a2) The comets are `COMET_DENSITY` (0.80) ×
+      μ_ic × s³ (s · min(a, `a_K`) ÷ 5.2 au)^`COMET_DISTANCE_EXPONENT` (1.15), with `a_K`
+      `ImpactorSources::comet_edge` (the outermost icy belt's inner edge) and s =
+      `SOLAR_KUIPER_BELT_INNER_EDGE_AU` (39.4027) ÷ `a_K`; rule 3's comets are that at the giant
+      times (a ÷ `a_g`)². (b) An icy component's `K_in` is `ICY_IN_BELT_DENSITY` (6,700), a rocky
+      one's stays 400.
+    - `LUNAR_ENCOUNTER_SPEED` = 16,921.789 m/s (`Fitted`; §2.7's replica 16,921.79): the reference
+      Moon's V. It is the Moon about an Earth at exactly 1 au (NASA's e of 0.016 710 22, i 0),
+      inside the Solar main belt at 2.065–3.278 au with 4.0 × 10⁻⁴ M⊕. Its `R_b` is 1 to 10⁻¹².
+    - _Rule 3 reads §2.2's text_ (main, 2026-10-13). §2.2 gives the approach formula to the
+      nearest asteroid belt, the comets thinned inward with no asteroid belt but a giant, and the
+      floor with neither. §2.5's plan text and T48.f's source rule would instead apply the
+      approach to whatever belt the velocity picked, a Kuiper belt too, which leaves the comets'
+      branch dead (μ_ic is zero whenever there is no belt). As built, Ψ reads asteroid belts only,
+      and the velocity keeps T48.f's fallback to any belt. In the sample, the nearest-belt rule's
+      greatest Ψ moves from 5.96 (approach to any belt) to 80.8 under the ruled a⁻² comets, and is
+      35.5 under §2.7's.
+    - A member's component is the one of its composition and part whose annulus holds it, or
+      failing one the nearest by mid-radius ratio. With none, Ψ takes the floor.
+    - The belts' masses are their cascades' (`BeltComponent::mass_at` at 4.567 Gyr about the
+      host), without the named members: with them, the sample's greatest Ψ in a belt rises from
+      2.2 × 10³ to 1.5 × 10⁸. `ImpactorSources::new` refuses a scattered mass with no scattered
+      component. μ_ic sums both components of each icy belt of the host. An annulus of no width
+      has no density.
+  - _The birthplace_ (§2.4): `MoonBirth::formed(&parent, neighbouring_belt)`.
+    - A giant's capture is read off `CaptureKind::{Irregular, Large}` and a rocky planet's off
+      `Small`, which T19 gives exactly those parents.
+    - `NearestBelt::new` gains the belt's `BeltComposition`, a public signature change. The
+      captures' draws do not read it.
+  - _The impactor orbit._ It is the primordial one, with the zone's initial host mass and the
+    primordial belts and planets, so a planet's or member's Ψ holds to the bit in time and V moves
+    only with its escape speed. Its inclination to the host's plane is atan2(|p × n|, p · n) of
+    the two normals. A moon's parent mass is its `MoonParent`'s, and its semi-major axis the one
+    at t.
+  - _The contract_ (§2.3). The screening is the air's p ÷ g, or `None` at no pressure. The impact
+    velocity is always given.
+  - _Figures_ (JPL's elements, T48.f's test sources), as §2.7's table has them:
+    - `R_b`: the Moon 1.000, Earth 1.421, Mars 1.959, Venus 1.173, Mercury 1.245, Ceres 134.3,
+      Ganymede 3.712 and Pluto 30.1 (Zahnle's Case A 30.3).
+    - Against Zahnle et al.'s Table 1: Saturn, Uranus and Neptune 0.672, 0.144 and 0.347 of
+      Jupiter (0.42, 0.25, 0.27); the regular moons and Triton over their planets within 11% (Mimas
+      1.11); per area over Ganymede, Titan 1.66, Titania 0.62, Oberon 0.62 and Triton 1.28 of his.
+    - Surface ages on the table: Earth 64.2 Myr; Mars 3.900 Gyr; Venus 0.395 Gyr, with N☾(>1 km)
+      3.87 × 10⁻⁴ km⁻² (+15% on the Gazetteer fit); Mercury and the Moon the age less the median
+      `t_MO`. Io 3.4 kyr. The measured Europa at 22 is 0.31 Myr old, at an `R_b` of 5.73.
+    - The Moon's N☾ is 3.2 × 10⁴ times Earth's. Venus's screened N(>1 km) is 2% of its production.
+  - _Tests read differently._
+    - "Europa's at its measured elements under P14.T56.d (23) is 60 Myr ± 10%": T56.d's membrane
+      is unbuilt (22 → 23), so the measured Europa is run through the figures with its tide set so
+      that its heat flow is T56.d's 0.0386 W m⁻² (60.0 Myr, ice-rich). T56.d's own test carries it.
+    - "Constant in t" is Ψ to the bit over 500 yr, on every planet and member of the sample.
+    - "Venus's screened density far below its production" is tested as under 5% (it is 2%).
+    - §2.7's tests are built: Pluto within 5% of 30.3; the giants within a factor 2 of Table 1;
+      the moons over their planets within 15%; the four per-area moons within a factor 2. Neptune
+      and Triton (JPL's GM 1,428.495 km³ s⁻² and radius 1,352.6 km) join the fixtures.
+  - _Over the sample_ (60 systems, 877 bodies): 386 silicate and 491 ice-rich crusts; `R_b` from
+    7.5 × 10⁻⁴ to 1.02 × 10⁴; 223 surfaces under 1 Gyr. Ψ by source: in a belt 584 bodies (at
+    most 3.65 × 10⁴, icy members of massive Kuiper-like belts), the comets 123 (at most 1,226),
+    the nearest belt 169 (at most 35.5), and one body by the inner comets, at the floor.
+  - _Pins._ `planetary/global_figures` gains each table body's crust, rate, surface age and crater
+    density and the reference Moon's V (45 lines). `planetary/surface_conditions_published` gains
+    each body's impactor rule, crust, abundance, rate, impact velocity, projectile and target
+    densities, target class, `k_target`, screening, surface age and crater density (1,332 lines).
+    Both are re-blessed at header 21, with lines added only.
+    - **Held for the bump:** `planetary/impactors` does not move. Its rate column is written only
+      under `ConditionsHold::Published`, so it joins at the 21 → 22 bump, which blesses it (§2.6).
+      P14.T48.e's fold removes that gate in `the_solar_system_s_impactors_are_pinned` with the
+      hold.
+  - _Added public items_: `MoonBirth`, `CraterInputs`, `DeriveFiguresError`,
+    `ImpactorSources::icy_belt_ratio`, `Impactors::{rate, abundance, encounter_speed}`,
+    `BuildImpactorSourcesError::BeltMass`, `NearestBelt::composition`, the constants
+    `SOURCE_MASS_AGE`, `SOLAR_MAIN_BELT_MASS`, `SOLAR_MAIN_BELT_EDGES_AU`, `KUIPER_BELT_MASS`,
+    `IN_BELT_DENSITY`, `COMET_DENSITY`, `COMET_REFERENCE_DISTANCE_AU`, `APPROACH_EXPONENT`,
+    `LEFTOVER_DENSITY` and `LUNAR_ENCOUNTER_SPEED`, and `surface_age`'s.
+  - _Files beyond the task's_: `hooks/figures/surface_age.rs`, `system.rs`, `system/tests.rs`,
+    `moons/irregular.rs` and `tests/planetary_moons_golden.rs`.
+  - _Accepted by_ `cargo test -p hyperion-sim --features testing --lib -- planetary::hooks
+planetary::system::tests::the_hooks planetary::system::tests::the_published
+planetary::system::tests::a_moon_s_published planetary::moons`, as for part 1.
+- **The rate's re-rule, folded into part 2** (main, 2026-10-13). Part 2's science review found the
+  ruled comets' (5.2 au ÷ a)² fall-off and `K_in` for icy belts at odds with Zahnle, Schenk,
+  Levison and Dones 2003 (Icarus 163, 263): Saturn, Uranus and Neptune at 0.10, 0.0024 and 0.0014
+  of Jupiter against Table 1's 0.42, 0.25 and 0.27, the outer moons 5–200 times low, and Pluto's
+  `R_b` 1.79 against §5.5's 30.3 (Case A). The figures are in
+  `.git/rm45-scratch/p14-batch/zahnle-rates-part2.md`. A science agent re-ruled Ψ
+  (`science-p14-t24b-laws.md` §2.7), and part 2 builds it, as recorded above.
 - **Deferred findings (2026-10-13 rule)**, from part 1's reviews (P14.T24.b's interior):
   - The floor lies above the mean surface temperature on 16 of the 111 published bodies (cold belt
     members, a free-floating brown dwarf's bodies, a heat-pipe moon at 58.6 K under a 95.9 K
@@ -11089,6 +11212,39 @@ planetary::system::tests::a_moon_s_published planetary::moons::regular`: the tas
   - Sources not read at the build (paywalled): McDonough and Sun 1995, Turcotte and Schubert's
     table at first hand, Nimmo and Pappalardo 2016, Wienbruch and Spohn 1995, Paige et al. 2010's
     25 K.
+
+- **Deferred findings (2026-10-13 rule)**, from part 2's reviews (P14.T24.b's craters):
+  - `K_in` and every rate relative to the Moon rest on Stuart and Binzel 2004's 0.6 Myr between
+    1 km impacts on Earth, which could not be read (closed access).
+  - The normalising masses are whole belts': Ceres, Vesta, Pallas and Hygiea are some 62% of the
+    main belt's 4.0 × 10⁻⁴ M⊕, and the 31 largest TNOs 44% of the Kuiper belt's 0.0197. The
+    generated abundances read cascades alone, so like with like would raise every asteroid Ψ some
+    2.6 times and μ_ic some 1.8 times.
+  - The generated belts are their own: the T48.f test host's Kuiper belt holds 1.58 M⊕ at 4.567
+    Gyr (μ_ic ≈ 79) and its asteroid belt 8.6 × 10⁻⁵ M⊕, so the comets' Ψ reaches 1,226 in the
+    sample, an icy member's 3.65 × 10⁴, and `R_b` 1.02 × 10⁴.
+  - Scattered components are massless (ruling 84.1), so a scattered member's Ψ is the floor and
+    its `R_b` about 10⁻³: an Eris-like body is nearly uncratered.
+  - Rule 3's (1 − a ÷ `a_i`)^−1.5 diverges at an asteroid belt's inner edge, where rule 1 takes
+    over discontinuously. No sample body comes near it: the approach's greatest Ψ was 5.96 when it
+    still read every belt. Its approach to an icy asteroid belt reads the mass as a rocky belt's
+    (§2.7's own deferral).
+  - The ruling's figures that do not reproduce as built: n 2.86 (2.908); before §2.7, V☾ 17.07
+    km/s (16.99) and Pluto's about 1.6 (1.79); Io's 7 kyr (3.4 kyr); the measured Europa at 22
+    0.35 Myr (0.31). §2.7's own reproduce: V☾ 16,921.79 m/s, Mars 1.959, Ganymede 3.71, Pluto
+    30.1.
+  - §2.7's deferrals: the anchor compares comets above 1.5 km with the Moon's impactors above
+    1 km (a factor of about 2); nearly isotropic comets and the apex–antapex asymmetry are not
+    modelled; Phoebe stays twice Table 1's.
+  - The table's Ceres holds no water, so its crust is silicate, unlike T48.f's tested Ceres at
+    17% water.
+  - Venus's "0.3–0.8 Gyr published" (§2.1) is uncited; Bierhaus et al. 2009's 40–90 Myr was read
+    only as Pappalardo 2010 quotes it.
+  - §2.1 asks Mars's 3.9 Gyr surface to be older than the wet epoch's start, but Part 3's epoch
+    starts at 4.02 Ga: the surface then forms inside the epoch (for part 3 and R09).
+  - A generated giant-impact moon has no magma-ocean draw, so its surface age is its age, where
+    §2.1's table gives the Moon age − `t_MO`; its N☾ is some 25% higher (main: the ruling's "no
+    draw takes its age" stands).
 
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might

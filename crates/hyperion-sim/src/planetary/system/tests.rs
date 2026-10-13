@@ -18,7 +18,7 @@ use crate::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
 use crate::planetary::derive::atmosphere::{SurfaceState, optical_depth_terms};
 use crate::planetary::derive::{PlanetClass, habitable_zone};
 use crate::planetary::fate::DestructionCause;
-use crate::planetary::hooks::figures::TectonicRegime;
+use crate::planetary::hooks::figures::{Crust, LEFTOVER_DENSITY, TectonicRegime};
 use crate::planetary::index::{BodySlot, BodySub};
 use crate::planetary::params::{FLATTENING_CAP, HILL_STABLE_GAP};
 use crate::planetary::placement::mutual_hill_radius;
@@ -2196,6 +2196,7 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
     let (mut planets, mut moons, mut envelopes) = (0_u32, 0_u32, 0_u32);
     let mut regimes = std::collections::BTreeMap::new();
     let mut fields = std::collections::BTreeMap::new();
+    let mut craters = CraterTally::default();
     for (ctx, system) in whole().iter().take(60) {
         for index in system.indices() {
             let Some(held) = system.hooks_at(ctx, index, t).unwrap() else {
@@ -2233,8 +2234,13 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
                         panic!("{index:?} has conditions but no figures");
                     };
                     check_published_figures(index, conditions, figures);
+                    assert_same_bits(
+                        figures.craters().system_age().value(),
+                        ctx.age_at(t).value() / 1e9,
+                    );
                     *regimes.entry(figures.tectonic_regime()).or_insert(0_u32) += 1;
                     *fields.entry(figures.magnetic_field()).or_insert(0_u32) += 1;
+                    craters.count(figures);
                     match record.identity().kind() {
                         BodyKind::Moon(_) => moons += 1,
                         BodyKind::Planet | BodyKind::DwarfPlanet => planets += 1,
@@ -2275,13 +2281,58 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
     }
     eprintln!("{planets} planets and {moons} moons with conditions, {envelopes} envelopes");
     eprintln!("regimes {regimes:?}; fields {fields:?}");
+    craters.report();
     assert!(planets > 20 && moons > 5 && envelopes > 20);
 }
 
-/// What every published body's figures hold with its conditions (P14.T24.b): its climate never
-/// reaches below the night's floor that its heat flow sets; its heat flow is positive and its
-/// outgassing not negative; an ice shell lies over a computed ocean; and a conducting body's lid is
-/// stagnant unless it is one.
+/// The published crater contracts' spread over a sample, for the record (P14.T24.b, T48.c): the
+/// crusts, the least and greatest rate, the surfaces under 1 Gyr old, and each source rule's
+/// bodies and greatest abundance.
+#[derive(Debug, Default)]
+struct CraterTally {
+    crusts: std::collections::BTreeMap<Crust, u32>,
+    abundances: std::collections::BTreeMap<&'static str, (u32, f64)>,
+    rates: Option<(f64, f64)>,
+    young: u32,
+}
+
+impl CraterTally {
+    /// Counts `figures`' contract.
+    fn count(&mut self, figures: &GlobalFigures) {
+        let impactors = figures.impactors();
+        *self.crusts.entry(impactors.crust()).or_insert(0) += 1;
+        let rule = match impactors.source() {
+            hooks::figures::ImpactorSource::InBelt { .. } => "in belt",
+            hooks::figures::ImpactorSource::Comets => "comets",
+            hooks::figures::ImpactorSource::NearestBelt { .. } => "nearest belt",
+            hooks::figures::ImpactorSource::InnerComets { .. } => "inner comets",
+        };
+        let (bodies, most) = self.abundances.entry(rule).or_insert((0, 0.0));
+        *bodies += 1;
+        *most = most.max(impactors.abundance());
+        let rate = impactors.rate();
+        self.rates = Some(self.rates.map_or((rate, rate), |(least, most)| {
+            (least.min(rate), most.max(rate))
+        }));
+        self.young += u32::from(figures.surface_age().value() < 1e9);
+    }
+
+    /// Prints the tally.
+    fn report(&self) {
+        eprintln!(
+            "crusts {:?}; R_b from {:?}; {} surfaces under 1 Gyr; bodies and greatest Ψ by \
+             source {:?}",
+            self.crusts, self.rates, self.young, self.abundances
+        );
+    }
+}
+
+/// What every published body's figures hold with its conditions (P14.T24.b, T48.c): its climate
+/// never reaches below the night's floor that its heat flow sets; its heat flow is positive and
+/// its outgassing not negative; an ice shell lies over a computed ocean; a conducting body's lid is
+/// stagnant unless it is one; its surface age lies within its system's; its crater density is the
+/// lunar chronology times its rate, which is at least the floor's share; and an ice-rich crust lies
+/// under 273 K by its conditions' mean.
 fn check_published_figures(
     index: BodyIndex,
     conditions: &SurfaceConditions,
@@ -2310,6 +2361,30 @@ fn check_published_figures(
                 );
             }
         }
+    }
+    let craters = figures.craters();
+    let (age, system_age) = (figures.surface_age().value() / 1e9, craters.system_age());
+    assert!(
+        (0.0..=system_age.value()).contains(&age),
+        "{index:?}: {age} Gyr"
+    );
+    let chronology =
+        hyperion_surface::craters::lunar_chronology(crate::units::Gigayears::new(age), system_age);
+    assert_same_bits(
+        figures.crater_density().value(),
+        (chronology * figures.impactors().rate()).value(),
+    );
+    let rate = figures.impactors().rate();
+    assert!(rate.is_finite() && rate > 0.0, "{index:?}: R_b {rate}");
+    assert!(
+        figures.impactors().abundance() >= LEFTOVER_DENSITY,
+        "{index:?}"
+    );
+    if figures.impactors().crust() == Crust::IceRich {
+        assert!(
+            conditions.mean_surface_temperature().value() < 273.0,
+            "{index:?}"
+        );
     }
 }
 
@@ -2475,11 +2550,64 @@ fn the_published_surface_conditions_are_pinned() {
                     w.line(&format!("{name}_subsurface_ocean = {other:?}"));
                 }
             }
+            pin_crater_contract(&mut w, &name, f);
             pinned += 1;
         }
     }
     assert!(pinned > 20, "{pinned}");
     golden!("planetary/surface_conditions_published", w.as_str());
+}
+
+/// Pins the crater contract of the published figures `f` under `name`: its source rule, crust,
+/// abundance and rate, the parts the shared density reads beside them, its surface age and its
+/// N☾(>1 km) (P14.T48.c, T48.f).
+fn pin_crater_contract(
+    w: &mut hyperion_testkit::golden::GoldenWriter,
+    name: &str,
+    f: &GlobalFigures,
+) {
+    let (impactors, craters) = (f.impactors(), f.craters());
+    let rule = match impactors.source() {
+        hooks::figures::ImpactorSource::InBelt { .. } => "in_belt",
+        hooks::figures::ImpactorSource::Comets => "comets",
+        hooks::figures::ImpactorSource::NearestBelt { .. } => "nearest_belt",
+        hooks::figures::ImpactorSource::InnerComets { .. } => "inner_comets",
+    };
+    w.line(&format!("{name}_impactor_rule = {rule}"));
+    w.line(&format!("{name}_crust = {:?}", impactors.crust()));
+    w.f64(&format!("{name}_abundance"), impactors.abundance());
+    w.f64(&format!("{name}_rate"), impactors.rate());
+    w.f64(
+        &format!("{name}_impact_velocity"),
+        impactors.velocity().value(),
+    );
+    w.f64(
+        &format!("{name}_projectile_density"),
+        impactors.projectile_density().value(),
+    );
+    w.line(&format!(
+        "{name}_target_class = {:?}",
+        impactors.target().class
+    ));
+    w.f64(
+        &format!("{name}_target_density"),
+        impactors.target().density.value(),
+    );
+    w.f64(&format!("{name}_k_target"), impactors.k_target());
+    match craters.screening() {
+        hyperion_surface::craters::Screening::Atmosphere { column_mass } => {
+            w.f64(&format!("{name}_column_mass"), column_mass.value());
+        }
+        other @ (hyperion_surface::craters::Screening::None
+        | hyperion_surface::craters::Screening::Cutoff { .. }) => {
+            w.line(&format!("{name}_screening = {other:?}"));
+        }
+    }
+    w.f64(&format!("{name}_surface_age"), f.surface_age().value());
+    w.f64(
+        &format!("{name}_crater_density"),
+        f.crater_density().value(),
+    );
 }
 
 /// The published hooks are the same whatever order the bodies are asked in, a moon before its
@@ -2578,4 +2706,157 @@ fn the_published_figures_read_each_body_s_interior() {
     }
     eprintln!("{regular} regular moons, {oceans} with oceans; {other_moons} other moons");
     assert!(regular > 5 && other_moons > 0, "{regular}, {other_moons}");
+}
+
+/// How a moon came to orbit its parent, as the published crater contract's test reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MoonBirthKind {
+    Regular,
+    GiantImpact,
+    GiantsCapture,
+    RockyCapture,
+}
+
+/// The birth of the moon `body` (part `part`) of `system` and the birthplace its crust reads by
+/// science-p14-t24b-laws §2.4, from its published bulk composition `composition`: a regular moon
+/// is icy when it holds water; a giant-impact moon takes its parent's, icy for an icy belt's
+/// member; a giant's capture is icy; a rocky planet's capture takes its neighbouring belt's.
+fn moon_birth_of(
+    system: &PlanetarySystem,
+    body: &Body,
+    part: &MoonPart,
+    composition: &BulkComposition,
+) -> (MoonBirthKind, hooks::figures::Birthplace) {
+    use crate::planetary::belts::BeltComposition;
+    use crate::planetary::moons::CaptureKind;
+    let OrbitHost::Body(parent) = body.host else {
+        panic!("{:?}: a moon goes round a body", body.index());
+    };
+    let (kind, icy) = match part.satellite.moon() {
+        SatelliteMoon::Regular(_) => (
+            MoonBirthKind::Regular,
+            composition.fractions().water() > 0.0,
+        ),
+        SatelliteMoon::GiantImpact(_) => (
+            MoonBirthKind::GiantImpact,
+            system
+                .body(parent)
+                .and_then(Body::member_of)
+                .is_some_and(|member| member.composition() == BeltComposition::Icy),
+        ),
+        SatelliteMoon::Captured(captured) => match captured.kind() {
+            CaptureKind::Irregular | CaptureKind::Large => (MoonBirthKind::GiantsCapture, true),
+            CaptureKind::Small => (
+                MoonBirthKind::RockyCapture,
+                system.nearest_belt(parent).is_some_and(|belt| {
+                    belt.adjacency() == BeltAdjacency::Neighbouring
+                        && belt.composition() == BeltComposition::Icy
+                }),
+            ),
+        },
+    };
+    let birthplace = if icy {
+        hooks::figures::Birthplace::Icy
+    } else {
+        hooks::figures::Birthplace::Other
+    };
+    (kind, birthplace)
+}
+
+/// P14.T48.c's published crater contract over the sample (science-p14-t24b-laws §2.1–2.4): the
+/// projectile abundance of a body that goes round its host holds from one time to another, its
+/// belts' masses taken at 4.567 Gyr, and its rate moves only with its escape speed; a planet's
+/// surface is no older than the time since its magma ocean's end (P14.T28.a); and every moon's
+/// crust is `Crust::of` at the birthplace its birth gives ([`moon_birth_of`]), its water and its
+/// radius, so that a cold regular moon holding ice and a cold giant's capture are ice-rich, and a
+/// giant-impact moon of a planet or a capture beside a rocky belt is ice-rich by its water alone.
+#[test]
+fn the_published_crater_contract_reads_each_body_s_history() {
+    let later = UniverseTime::from_julian_years(500).expect("in the window");
+    let t = UniverseTime::EPOCH;
+    let (mut held, mut cold_captures, mut impacts) = (0_u32, 0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let published_at = |time: UniverseTime| {
+                let hooks = system
+                    .hooks_at_under(ctx, body.index(), time, ConditionsHold::Published)
+                    .unwrap()?;
+                let (Section::Ok(conditions), Section::Ok(figures), Section::Ok(bulk)) =
+                    (hooks.surface(), hooks.figures(), hooks.bulk())
+                else {
+                    return None;
+                };
+                Some((
+                    conditions.mean_surface_temperature(),
+                    figures.clone(),
+                    *bulk,
+                ))
+            };
+            let Some((mean, figures, composition)) = published_at(t) else {
+                continue;
+            };
+            let index = body.index();
+            match &body.part {
+                Part::Planet(planet) => {
+                    let melt = Years::from(planet.fate.formation().molten_until()).value();
+                    let since = ctx.age_at(t).value() - melt;
+                    assert!(figures.surface_age().value() <= since.max(0.0), "{index:?}");
+                }
+                Part::Member(_) => {}
+                Part::Moon(part) => {
+                    let record = system.body_at(ctx, index, t).unwrap();
+                    let Section::Ok(bulk) = record.bulk() else {
+                        panic!("{index:?} has figures but no bulk section");
+                    };
+                    let birth = moon_birth_of(system, body, part, &composition);
+                    impacts += u32::from(matches!(birth.0, MoonBirthKind::GiantImpact));
+                    let cold = mean.value() < 273.0;
+                    cold_captures +=
+                        u32::from(matches!(birth.0, MoonBirthKind::GiantsCapture) && cold);
+                    let kg = Kilograms::from(body.mass()).value();
+                    let water = composition
+                        .inventory()
+                        .water()
+                        .value()
+                        .max(composition.fractions().water() * kg);
+                    let expected = hooks::figures::Crust::of(
+                        birth.1,
+                        mean,
+                        Kilograms::new(water),
+                        Metres::from(bulk.radius()),
+                    );
+                    assert_eq!(
+                        figures.impactors().crust(),
+                        expected,
+                        "{index:?}: {birth:?}"
+                    );
+                }
+                Part::Ring(_) => panic!("{index:?}: a ring has no hooks"),
+            }
+            if matches!(body.part, Part::Planet(_) | Part::Member(_))
+                && let Some((_, after, _)) = published_at(later)
+            {
+                let (now, then) = (figures.impactors(), after.impactors());
+                assert_same_bits(now.abundance(), then.abundance());
+                assert!((now.rate() / then.rate() - 1.0).abs() < 1e-6, "{index:?}");
+                held += 1;
+                if now.rate() > 300.0 || now.rate() < 1e-3 {
+                    eprintln!(
+                        "{index:?}: {:?}, Ψ {:.3e}, V {:.3e} m/s, R_b {:.3e}",
+                        now.source(),
+                        now.abundance(),
+                        now.encounter_speed().value(),
+                        now.rate()
+                    );
+                }
+            }
+        }
+    }
+    eprintln!(
+        "{held} rates held in time; {cold_captures} cold giants' captures; {impacts} impact moons"
+    );
+    assert!(
+        held > 20 && cold_captures > 0 && impacts > 0,
+        "{held}, {cold_captures}, {impacts}"
+    );
 }

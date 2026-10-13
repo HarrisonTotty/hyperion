@@ -116,7 +116,10 @@ use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
 };
-use crate::planetary::hooks::figures::FiguresInputs;
+use crate::planetary::hooks::figures::{
+    BeltMembership, CraterInputs, FiguresInputs, HostOrbit, HostOrbiter, ImpactorOrbit,
+    ImpactorSources, MoonBirth, SourceBelt,
+};
 use crate::planetary::hooks::surface::{ConditionsHold, SeasonalSpin, SeasonsFrom, SurfaceInputs};
 use crate::planetary::hooks::{
     self, BodyHooks, BulkComposition, GlobalFigures, Subsurface, SurfaceConditions, SurfaceSeed,
@@ -1523,8 +1526,9 @@ impl PlanetarySystem {
     }
 
     /// The belt nearest the planet `planet` among its host's, as its captures read it (P14.T19,
-    /// P14.T22.a): its primordial mass, and whether another of the host's planets lies between
-    /// them. `None` for a body that is not a planet, or a host with no belt.
+    /// P14.T22.a): its primordial mass, whether another of the host's planets lies between them,
+    /// and its composition, which a rocky planet's captures are born of (science-p14-t24b-laws
+    /// §2.4). `None` for a body that is not a planet, or a host with no belt.
     #[must_use]
     pub fn nearest_belt(&self, planet: BodyIndex) -> Option<NearestBelt> {
         let body = self
@@ -1554,7 +1558,7 @@ impl PlanetarySystem {
         } else {
             BeltAdjacency::Neighbouring
         };
-        NearestBelt::new(belt.initial_mass(), adjacency)
+        NearestBelt::new(belt.initial_mass(), adjacency, belt.composition())
     }
 
     /// Every body's record at `t`, at [`DetailLevel::Full`](crate::planetary::record::DetailLevel::Full),
@@ -1944,6 +1948,12 @@ impl PlanetarySystem {
                 ctx.alpha_fe(),
             ))
         };
+        // The impactors' sources about the primary's host (P14.T48.f), as generated, and each
+        // body's crater inputs, built only where the hold lets the figures be read.
+        let publish = hold == ConditionsHold::Published;
+        let sources = publish
+            .then(|| self.impactor_sources(primary.host))
+            .flatten();
         let time = SurfaceTime {
             hold,
             rotation: body.rotation.as_ref(),
@@ -1962,6 +1972,8 @@ impl PlanetarySystem {
                         bulk: &properties,
                         whose: SeasonsFrom::Own,
                         interior: SurfaceInterior::of_body(&d),
+                        craters: publish.then(|| self.body_craters(body)).flatten(),
+                        sources: sources.as_ref(),
                     };
                     (
                         composition(properties.fractions(), *d.inventory()),
@@ -1985,6 +1997,10 @@ impl PlanetarySystem {
                                 bulk: &properties,
                                 whose: SeasonsFrom::Planet,
                                 interior: SurfaceInterior::of_moon(moon, &derived),
+                                craters: publish
+                                    .then(|| self.moon_craters(primary, moon, &derived, &orbit))
+                                    .flatten(),
+                                sources: sources.as_ref(),
                             };
                             (
                                 composition(properties.fractions(), *derived.inventory()),
@@ -2105,6 +2121,134 @@ impl PlanetarySystem {
     fn had_giant_impact(&self, index: BodyIndex) -> bool {
         self.children(index)
             .any(|child| child.kind() == BodyKind::Moon(MoonOrigin::GiantImpact))
+    }
+
+    /// The impactors' sources about the orbit host `host` (P14.T48.f, with P14.T48.c's masses):
+    /// its zone's initial host mass, its belts in their generated order with their components'
+    /// masses at 4.567 Gyr ([`SourceBelt::from`]), and its planets' masses and primordial
+    /// semi-major axes, as the belts read them. `None` for a host with no zone, which no body goes
+    /// round.
+    #[must_use]
+    fn impactor_sources(&self, host: OrbitHost) -> Option<ImpactorSources> {
+        let zone = self.zone(host)?;
+        let belts = self
+            .belts
+            .iter()
+            .filter(|belt| belt.host() == host)
+            .map(SourceBelt::from)
+            .collect();
+        let planets = self
+            .planets()
+            .filter(|planet| planet.host == host)
+            .filter_map(|planet| Some((planet.mass(), planet.orbit()?.semi_major_axis())));
+        // The parts are the generator's own, which the sources never refuse; a refusal is a bug,
+        // which the tests' debug builds catch, and leaves the figures not modelled.
+        let sources = ImpactorSources::new(
+            GravitationalParameter::from_solar_masses(zone.host_mass()),
+            belts,
+            planets,
+        );
+        debug_assert!(sources.is_ok(), "{host:?}: {sources:?}");
+        sources.ok()
+    }
+
+    /// The planet or member `body` as its impactors read it (P14.T48.f): its primordial
+    /// semi-major axis, eccentricity and inclination to its host's plane, its mass, and a
+    /// member's part and composition; `None` for a moon or a ring.
+    ///
+    /// The orbit is the primordial one, as the sources' belts and planets are, so that the impact
+    /// rate holds through the host's evolution with them.
+    #[must_use]
+    fn host_orbiter(&self, body: &Body) -> Option<HostOrbiter> {
+        let belt = match &body.part {
+            Part::Planet(_) => None,
+            Part::Member(member) => Some(BeltMembership {
+                part: member.member.part(),
+                composition: member.member.composition(),
+            }),
+            Part::Moon(_) | Part::Ring(_) => return None,
+        };
+        let orbit = body.orbit()?;
+        let plane = self.host(body.host)?.plane();
+        let p = Orientation::new(plane.inclination(), plane.node(), Radians::ZERO)
+            .expect("a host's plane is a valid orientation")
+            .normal();
+        let n = orbit.orientation().normal();
+        // The angle between the normals as atan2(|p × n|, p · n), which keeps a coplanar orbit's
+        // inclination accurate where an arccosine of the dot product would not.
+        let cross = [
+            p[1] * n[2] - p[2] * n[1],
+            p[2] * n[0] - p[0] * n[2],
+            p[0] * n[1] - p[1] * n[0],
+        ];
+        let sine = (cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2]).sqrt();
+        let cosine = p[0] * n[0] + p[1] * n[1] + p[2] * n[2];
+        Some(HostOrbiter {
+            orbit: HostOrbit {
+                semi_major_axis: orbit.semi_major_axis(),
+                eccentricity: orbit.eccentricity().value(),
+                inclination: Radians::new(math::atan2(sine, cosine)),
+            },
+            mass: body.mass(),
+            belt,
+        })
+    }
+
+    /// What the crater contract of the planet or member `body` reads beyond its bulk and its
+    /// sources (P14.T24.b, T48.c): where it goes round, a planet's magma ocean's end
+    /// (P14.T28.a's `molten_until`; a member has no draw), and a giant impact at the system's
+    /// birth if it has a giant-impact moon (P14.T18).
+    #[must_use]
+    fn body_craters(&self, body: &Body) -> Option<SurfaceCraters> {
+        let molten_until = match &body.part {
+            Part::Planet(planet) => Some(Years::from(planet.fate.formation().molten_until())),
+            Part::Member(_) | Part::Moon(_) | Part::Ring(_) => None,
+        };
+        Some(SurfaceCraters {
+            orbit: ImpactorOrbit::Host(self.host_orbiter(body)?),
+            molten_until,
+            last_giant_impact: self.had_giant_impact(body.index).then_some(Years::ZERO),
+        })
+    }
+
+    /// What the crater contract of the moon `moon` of `parent`, derived as `derived` on `orbit`,
+    /// reads beyond its bulk and its sources (P14.T24.b, T48.c): its parent as its impactors
+    /// read it (with the parent's mass the moon goes round), its semi-major axis then, the side
+    /// of its parent's ice line it formed on ([`MoonBirth::formed`]; science-p14-t24b-laws §2.4),
+    /// and for a giant-impact moon its birth in the impact at the system's birth. No moon has a
+    /// magma-ocean draw.
+    #[must_use]
+    fn moon_craters(
+        &self,
+        parent: &Body,
+        moon: &MoonPart,
+        derived: &DerivedMoon,
+        orbit: &KeplerElements,
+    ) -> Option<SurfaceCraters> {
+        let parent_orbiter = HostOrbiter {
+            mass: moon.parent.mass(),
+            ..self.host_orbiter(parent)?
+        };
+        let birth = match moon.satellite.moon() {
+            SatelliteMoon::Regular(_) => MoonBirth::Regular {
+                ice_fraction: derived.ice_fraction(),
+            },
+            SatelliteMoon::GiantImpact(_) => MoonBirth::GiantImpact,
+            SatelliteMoon::Captured(captured) => MoonBirth::Captured(captured.kind()),
+        };
+        let neighbouring = self
+            .nearest_belt(parent.index)
+            .filter(|belt| belt.adjacency() == BeltAdjacency::Neighbouring)
+            .map(|belt| belt.composition());
+        Some(SurfaceCraters {
+            orbit: ImpactorOrbit::Moon {
+                parent: parent_orbiter,
+                semi_major_axis: orbit.semi_major_axis(),
+                formed: birth.formed(&parent_orbiter, neighbouring),
+            },
+            molten_until: None,
+            last_giant_impact: matches!(birth, MoonBirth::GiantImpact).then_some(Years::ZERO),
+        })
     }
 
     /// The zone of `body`'s host: a planet's or a member's own, a satellite's parent's.
@@ -2747,19 +2891,34 @@ struct SurfaceTime<'a> {
 }
 
 /// What a body's surface conditions and global figures read of the body ([`published_surface`]):
-/// its sky, its bulk section, whose orbit sets its seasons, and its interior.
+/// its sky, its bulk section, whose orbit sets its seasons, its interior, and what its crater
+/// contract reads with its host's impactor sources (`None` where this version does not compute
+/// them).
 #[derive(Debug, Clone, Copy)]
 struct SurfaceCase<'a> {
     sky: SurfaceSky<'a>,
     bulk: &'a BulkProperties,
     whose: SeasonsFrom,
     interior: SurfaceInterior,
+    craters: Option<SurfaceCraters>,
+    sources: Option<&'a ImpactorSources>,
+}
+
+/// What a body's crater contract reads beyond its bulk section and its host's sources
+/// (P14.T24.b's surface age, P14.T48.c): where it goes round, and the dates of its magma ocean's
+/// end and its last giant impact ([`CraterInputs`]).
+#[derive(Debug, Clone, Copy)]
+struct SurfaceCraters {
+    orbit: ImpactorOrbit,
+    molten_until: Option<Years>,
+    last_giant_impact: Option<Years>,
 }
 
 /// The surface conditions and global figures of the body `case` describes at `time` (P14.T24.a,
-/// T24.b): both [`Section::NotModelled`] under the hold, or with no rotation law or seasonal
-/// orbit; both [`Section::NotApplicable`] for a body with no surface; and otherwise both
-/// [`Section::Ok`], the conditions' night floor raised by the figures' heat flow.
+/// T24.b): both [`Section::NotModelled`] under the hold, or with no rotation law, seasonal orbit
+/// or crater inputs, or inputs the figures refuse; both [`Section::NotApplicable`] for a body with
+/// no surface; and otherwise both [`Section::Ok`], the conditions' night floor raised by the
+/// figures' heat flow.
 #[must_use]
 fn published_surface(
     time: &SurfaceTime<'_>,
@@ -2772,9 +2931,12 @@ fn published_surface(
     let (Some(rotation), Some(seasonal)) = (time.rotation, time.seasonal) else {
         return (Section::NotModelled, Section::NotModelled);
     };
+    let (Some(craters), Some(sources)) = (case.craters, case.sources) else {
+        return (Section::NotModelled, Section::NotModelled);
+    };
     let (sky, bulk, interior) = (&case.sky, case.bulk, &case.interior);
     let spin = SeasonalSpin::of(rotation.frame(), time.t, seasonal, case.whose);
-    let Some(figures) = GlobalFigures::derive(&FiguresInputs {
+    let derived = GlobalFigures::derive(&FiguresInputs {
         atmosphere: sky.atmosphere,
         mass: interior.mass,
         radius: Metres::from(bulk.radius()),
@@ -2787,8 +2949,22 @@ fn published_surface(
         age: time.age,
         tidal_heat_flow: interior.tidal_heat_flow,
         subsurface_ocean: interior.subsurface_ocean,
-    }) else {
-        return (Section::NotApplicable, Section::NotApplicable);
+        craters: CraterInputs {
+            orbit: craters.orbit,
+            density: bulk.density(),
+            sources,
+            molten_until: craters.molten_until,
+            last_giant_impact: craters.last_giant_impact,
+        },
+    });
+    // The generator's bodies are in the figures' range: a refusal is a bug, which the tests'
+    // debug builds catch, and it carries nothing a caller could act on, so the body's figures are
+    // not modelled, as an uncomputed derivation's.
+    debug_assert!(derived.is_ok(), "{derived:?}");
+    let figures = match derived {
+        Ok(Some(figures)) => figures,
+        Ok(None) => return (Section::NotApplicable, Section::NotApplicable),
+        Err(_) => return (Section::NotModelled, Section::NotModelled),
     };
     let inputs = SurfaceInputs {
         atmosphere: sky.atmosphere,

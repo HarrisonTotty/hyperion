@@ -64,6 +64,7 @@
 use crate::Seed;
 use crate::math;
 use crate::orbit::KeplerElements;
+use crate::planetary::belts::BeltComposition;
 use crate::planetary::derive::{OrbitSense, PlanetClass};
 use crate::planetary::moons::regular::RegularMoons;
 use crate::planetary::moons::{MoonParent, decide, draw_rank, log_uniform, moon_orbit};
@@ -179,21 +180,37 @@ pub enum BeltAdjacency {
     Separated,
 }
 
-/// The belt nearest a planet, as the captures read it: its mass and whether the planet is next to
-/// it (P14.T22.a passes these from P14.T21's belts).
+/// The belt nearest a planet, as the captures read it: its mass, whether the planet is next to
+/// it, and its composition (P14.T22.a passes these from P14.T21's belts).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NearestBelt {
     mass: EarthMasses,
     adjacency: BeltAdjacency,
+    composition: BeltComposition,
 }
 
 impl NearestBelt {
-    /// A belt of mass `mass`, next to the planet or not.
+    /// A belt of mass `mass` and composition `composition`, next to the planet or not.
     ///
     /// Returns `None` for a mass that is negative or not finite.
     #[must_use]
-    pub fn new(mass: EarthMasses, adjacency: BeltAdjacency) -> Option<Self> {
-        (mass.value().is_finite() && mass.value() >= 0.0).then_some(Self { mass, adjacency })
+    pub fn new(
+        mass: EarthMasses,
+        adjacency: BeltAdjacency,
+        composition: BeltComposition,
+    ) -> Option<Self> {
+        (mass.value().is_finite() && mass.value() >= 0.0).then_some(Self {
+            mass,
+            adjacency,
+            composition,
+        })
+    }
+
+    /// The belt's composition class: a rocky planet's captures come from it, and are born on its
+    /// side of the snow line (science-p14-t24b-laws §2.4). The captures' draws do not read it.
+    #[must_use]
+    pub const fn composition(&self) -> BeltComposition {
+        self.composition
     }
 
     /// The belt's mass.
@@ -433,6 +450,7 @@ impl Captures {
 /// use hyperion_sim::coords::{CellSize, GenCell};
 /// use hyperion_sim::id::{Layer, SystemId};
 /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+/// use hyperion_sim::planetary::belts::BeltComposition;
 /// use hyperion_sim::planetary::derive::{OrbitSense, PlanetClass};
 /// use hyperion_sim::planetary::moons::{
 ///     BeltAdjacency, MoonParent, MoonParentParts, NearestBelt, ParentKind, captures,
@@ -460,7 +478,7 @@ impl Captures {
 ///     host_mass: Kilograms::new(SOLAR_MASS_KG),
 ///     maximum_moon_mass: EarthMasses::new(1.0),
 /// })?;
-/// let belt = NearestBelt::new(EarthMasses::new(4e-4), BeltAdjacency::Neighbouring);
+/// let belt = NearestBelt::new(EarthMasses::new(4e-4), BeltAdjacency::Neighbouring, BeltComposition::Rocky);
 /// let caught = captures(Seed::new(3), &neptune, belt);
 /// assert!(caught.population().is_some());
 /// for moon in caught.moons() {
@@ -797,7 +815,11 @@ mod tests {
 
     /// The asteroid belt beside a planet.
     fn belt(mass: f64) -> Option<NearestBelt> {
-        NearestBelt::new(EarthMasses::new(mass), BeltAdjacency::Neighbouring)
+        NearestBelt::new(
+            EarthMasses::new(mass),
+            BeltAdjacency::Neighbouring,
+            BeltComposition::Rocky,
+        )
     }
 
     /// Giants of every kind: the Solar System's three, and a Jupiter on an eccentric and on a warm
@@ -1074,7 +1096,11 @@ mod tests {
                 assert!((1e3..15e3).contains(&moon.radius().value()));
             }
         }
-        let separated = NearestBelt::new(EarthMasses::new(4e-4), BeltAdjacency::Separated);
+        let separated = NearestBelt::new(
+            EarthMasses::new(4e-4),
+            BeltAdjacency::Separated,
+            BeltComposition::Rocky,
+        );
         assert!(
             parents
                 .iter()
@@ -1095,7 +1121,14 @@ mod tests {
                 captures(Seed::new(2), &p, belt(1e-3))
             );
         }
-        assert!(NearestBelt::new(EarthMasses::new(-1.0), BeltAdjacency::Neighbouring).is_none());
+        assert!(
+            NearestBelt::new(
+                EarthMasses::new(-1.0),
+                BeltAdjacency::Neighbouring,
+                BeltComposition::Rocky
+            )
+            .is_none()
+        );
     }
 
     /// Ruling 112.4: irregulars survive by orbit. A giant that formed where it is keeps ruling
