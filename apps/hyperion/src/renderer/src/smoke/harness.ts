@@ -25,23 +25,63 @@ export interface Check {
   readonly detail: string;
 }
 
+/** One group's wall time on the page, ms, by `performance.now()`. */
+export interface GroupTime {
+  readonly name: string;
+  readonly ms: number;
+}
+
 /** The checks of one run, in order. */
 export class Checks {
   readonly list: Check[] = [];
+  /**
+   * Each group's wall time, in order: the smoke stands near its 180 s watchdog (plan R08's Risks,
+   * "Deviations in T6.d, as built"), and these say where the time goes (R08.T6.i).
+   */
+  readonly times: GroupTime[] = [];
 
   /** Records one property. */
   check(name: string, pass: boolean, detail: string): void {
     this.list.push({ name, pass, detail });
   }
 
-  /** Runs a group of checks, recording a throw as a failure of the group. */
+  /**
+   * Runs a group of checks, recording a throw as a failure of the group, and timing it.
+   *
+   * @remarks
+   * Each group's time also goes to the console as a warning as the group ends, which the
+   * harness's main process writes to its log: a run the watchdog ends sends no report, and the
+   * times say which group it ended in.
+   */
   async group(name: string, run: () => Promise<void>): Promise<void> {
+    const start = performance.now();
     try {
       await run();
     } catch (error: unknown) {
       const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       this.check(name, false, `threw ${message}`);
+    } finally {
+      const ms = performance.now() - start;
+      this.times.push({ name, ms });
+      console.warn(`smoke group ${name}: ${(ms / 1_000).toFixed(1)} s`);
     }
+  }
+
+  /**
+   * Records the groups' times as one check that always passes: each group's in seconds, slowest
+   * first, and their sum.
+   */
+  recordTimes(): void {
+    const total = this.times.reduce((sum, { ms }) => sum + ms, 0);
+    const each = this.times
+      .toSorted((a, b) => b.ms - a.ms)
+      .map(({ name, ms }) => `${name} ${(ms / 1_000).toFixed(1)} s`)
+      .join("; ");
+    this.check(
+      "the page's groups' wall times",
+      true,
+      `${(total / 1_000).toFixed(1)} s in all: ${each}`,
+    );
   }
 }
 

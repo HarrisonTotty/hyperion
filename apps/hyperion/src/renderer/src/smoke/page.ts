@@ -304,6 +304,7 @@ async function run(variant: string, fixture: SmokeFixture): Promise<Report> {
     await checkForcedLoss(engine, status, device, checks, addCanvas());
   });
   engine.dispose();
+  checks.recordTimes();
   return {
     variant,
     adapter: `${summary.vendor}/${summary.architecture}, fallback ${String(summary.fallback)}`,
