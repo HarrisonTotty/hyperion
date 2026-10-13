@@ -859,6 +859,27 @@ impl<'a> BodyFate<'a> {
         }
     }
 
+    /// The body's orbit at `t`, [`BodyFate::at`]'s bit for bit, without the trajectory and the
+    /// validity it also finds; `None` where the body is not present then. P14.T48.b's water window
+    /// reads it at past ages.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, as [`BodyFate::at`].
+    #[must_use]
+    pub(crate) fn orbit_at(&self, t: UniverseTime) -> Option<KeplerElements> {
+        let formed = self.formed_at?;
+        let ended = self
+            .ending
+            .and_then(|ending| ending.ended_at())
+            .is_some_and(|at| t >= at);
+        if t < formed || ended {
+            return None;
+        }
+        let (segment, _) = self.segment_at(t);
+        Some(self.orbit_in(segment, t, self.host_mass(t)))
+    }
+
     /// The segment holding `t`, a time at or after the body's formation, and the segment's next
     /// change: the next segment's start, or the body's ending.
     #[must_use]

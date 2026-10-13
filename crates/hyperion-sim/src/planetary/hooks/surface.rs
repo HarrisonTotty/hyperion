@@ -130,7 +130,7 @@ use crate::units::{
 use crate::{GENERATOR_VERSION, GeneratorVersion, math};
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// The generator version from which
 /// [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes a body's

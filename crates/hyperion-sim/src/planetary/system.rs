@@ -102,6 +102,7 @@ use crate::planetary::derive::atmosphere::{
     Atmosphere, SurfaceMaterial, VolatileDraws, VolatileInventory,
 };
 use crate::planetary::derive::figure::{BodyFigure, FigureInputs};
+use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::photometry::{BodyPhotometry, PhotometryInputs};
 use crate::planetary::derive::rotation::{BodyRotation, ObliquityLaw, SpinDraws, SpinInputs};
 use crate::planetary::derive::{
@@ -118,7 +119,8 @@ use crate::planetary::halo::{
 };
 use crate::planetary::hooks::figures::{
     BeltMembership, CraterInputs, FiguresInputs, HostOrbit, HostOrbiter, ImpactorOrbit,
-    ImpactorSources, MoonBirth, SourceBelt,
+    ImpactorSources, MoonBirth, SourceBelt, VolatileHistory, VolatileHistoryInputs, WindowAt,
+    past_outgassing,
 };
 use crate::planetary::hooks::surface::{ConditionsHold, SeasonalSpin, SeasonsFrom, SurfaceInputs};
 use crate::planetary::hooks::{
@@ -1329,6 +1331,31 @@ fn members_of(zone: &OrbitZone) -> u32 {
     zone.members().fold(0, |bits, member| bits | 1 << member)
 }
 
+/// The orbit of the lowest pair of `h` that holds both the stars `members` and the star `star`,
+/// with `under` each node's stars: the separation along which `star`'s light reaches the bodies
+/// that go round `members` (design note 10, P14.T12.a).
+///
+/// # Panics
+///
+/// If no pair holds both, which the root pair of a multiple system always does.
+#[must_use]
+fn companion_separation<'h>(
+    h: &'h SystemHierarchy,
+    under: &[u32],
+    members: u32,
+    star: usize,
+) -> &'h KeplerElements {
+    let both = members | 1 << star;
+    h.pairs()
+        .filter(|(node, _)| {
+            let under = under[usize::from(node.get())];
+            (under & both) == both
+        })
+        .min_by_key(|(node, _)| under[usize::from(node.get())].count_ones())
+        .map(|(_, orbit)| orbit)
+        .expect("the root pair holds every star of a multiple system")
+}
+
 /// The orbit of the pair of `h` whose members are exactly `members`, if one is.
 #[must_use]
 fn pair_orbit<'h>(
@@ -1903,7 +1930,10 @@ impl PlanetarySystem {
     /// its bulk section's radius, gravity, class and fractions, its atmosphere and its volatile
     /// inventory's water, its sidereal rotation period at `t`, the system's \[Fe/H\] and age at
     /// `t`, and for a moon the tide its planet raises in it, its derivation's (P14.T17.b), with a
-    /// regular moon's subsurface ocean ([`Subsurface::of_regular_moon`], P14.T17.b's flag). Both
+    /// regular moon's subsurface ocean ([`Subsurface::of_regular_moon`], P14.T17.b's flag). Their
+    /// volatile history (P14.T48.b) reads the conditions' liquid-water flag, the hosts' light over
+    /// the primary's past (each star at its state then, along the primary's orbit then for a star
+    /// of its zone and the pair's for a companion), and the body's outgassing then. Both
     /// are [`Section::NotApplicable`] for a body in the gas-envelope state or not present, and
     /// [`Section::NotModelled`] for one with no rotation law (every body [`generate_planets`]
     /// makes) or whose derivation this version does not compute.
@@ -1940,22 +1970,16 @@ impl PlanetarySystem {
         // The primary's orbit at the time sets the seasons: a planet's or a member's own, and its
         // moons'.
         let seasonal = fate.at(t).orbit().copied();
-        let composition = |fractions: MassFractions, inventory: VolatileInventory| {
-            Section::Ok(BulkComposition::new(
-                fractions,
-                inventory,
-                ctx.fe_h(),
-                ctx.alpha_fe(),
-            ))
-        };
         // The impactors' sources about the primary's host (P14.T48.f), as generated, and each
         // body's crater inputs, built only where the hold lets the figures be read.
         let publish = hold == ConditionsHold::Published;
         let sources = publish
             .then(|| self.impactor_sources(primary.host))
             .flatten();
+        let past = publish.then(|| PastSky::new(ctx, self.zone_of(primary), &fate, t));
         let time = SurfaceTime {
             hold,
+            past: past.as_ref(),
             rotation: body.rotation.as_ref(),
             seasonal: seasonal.as_ref(),
             t,
@@ -1976,7 +2000,7 @@ impl PlanetarySystem {
                         sources: sources.as_ref(),
                     };
                     (
-                        composition(properties.fractions(), *d.inventory()),
+                        bulk_composition(ctx, properties.fractions(), *d.inventory()),
                         published_surface(&time, &case),
                     )
                 }
@@ -2003,7 +2027,7 @@ impl PlanetarySystem {
                                 sources: sources.as_ref(),
                             };
                             (
-                                composition(properties.fractions(), *derived.inventory()),
+                                bulk_composition(ctx, properties.fractions(), *derived.inventory()),
                                 published_surface(&time, &case),
                             )
                         }
@@ -2796,6 +2820,22 @@ struct ParentNow {
     nursery: Option<MoonNursery>,
 }
 
+/// The bulk composition hook of a body of mass fractions `fractions` and volatile inventory
+/// `inventory` in the system of `ctx`, at its \[Fe/H\] and \[α/Fe\] (P14.T23).
+#[must_use]
+fn bulk_composition(
+    ctx: &SystemContext,
+    fractions: MassFractions,
+    inventory: VolatileInventory,
+) -> Section<BulkComposition> {
+    Section::Ok(BulkComposition::new(
+        fractions,
+        inventory,
+        ctx.fe_h(),
+        ctx.alpha_fe(),
+    ))
+}
+
 /// What a body's surface conditions read of its derivation at a time (P14.T24.a).
 #[derive(Debug, Clone, Copy)]
 struct SurfaceSky<'a> {
@@ -2878,11 +2918,14 @@ impl SurfaceInterior {
 }
 
 /// What a body's surface conditions and global figures read of the time they are asked at
-/// ([`published_surface`]): the hold, the body's rotation, its seasonal orbit then, and the
+/// ([`published_surface`]): the hold, the hosts' light over the past up to it as the primary's
+/// orbit sees it, which the volatile history reads (P14.T48.b; `None` where this version does not
+/// compute it, and a moon's its planet's), the body's rotation, its seasonal orbit then, and the
 /// system's \[Fe/H\] and age.
 #[derive(Debug, Clone, Copy)]
 struct SurfaceTime<'a> {
     hold: ConditionsHold,
+    past: Option<&'a PastSky<'a>>,
     rotation: Option<&'a BodyRotation>,
     seasonal: Option<&'a KeplerElements>,
     t: UniverseTime,
@@ -2904,6 +2947,87 @@ struct SurfaceCase<'a> {
     sources: Option<&'a ImpactorSources>,
 }
 
+/// What a body's water window reads of its hosts over its past (P14.T48.b; science-p14-t24b-laws
+/// §3.3): the system's stars, each with the orbit its light reaches the body along, and the
+/// history of the orbit the body goes round them on, a moon's its planet's.
+#[derive(Debug, Clone)]
+struct PastSky<'a> {
+    ctx: &'a SystemContext,
+    fate: &'a BodyFate<'a>,
+    /// The present, as the system's age and the time it is asked at: the window at that age reads
+    /// the time itself, which the round trip through the age would miss by up to some 30 s.
+    now: (Years, UniverseTime),
+    /// Each star of the system, with the separation its light is seen along: `None` for a star of
+    /// the zone, seen along the body's own orbit then ([`Epoch::lights`]), and the lowest pair's
+    /// orbit for a companion ([`companion_separation`]).
+    stars: Vec<(usize, Option<(Metres, f64)>)>,
+}
+
+impl<'a> PastSky<'a> {
+    /// The past light of `ctx`'s stars on the bodies of `zone`, one of which goes round them as
+    /// `fate` tells, up to the present `t`.
+    #[must_use]
+    fn new(
+        ctx: &'a SystemContext,
+        zone: &OrbitZone,
+        fate: &'a BodyFate<'a>,
+        t: UniverseTime,
+    ) -> Self {
+        let h = ctx.hierarchy();
+        let under = members_under(h);
+        let members = members_of(zone);
+        let stars = (0..ctx.stars().len())
+            .map(|star| {
+                let seen = ((members & (1 << star)) == 0).then(|| {
+                    let separation = companion_separation(h, &under, members, star);
+                    (
+                        separation.semi_major_axis(),
+                        separation.eccentricity().value(),
+                    )
+                });
+                (star, seen)
+            })
+            .collect();
+        Self {
+            ctx,
+            fate,
+            now: (ctx.age_at(t), t),
+            stars,
+        }
+    }
+
+    /// Where the body lay against its hosts' water window at the system age `age`: each star's
+    /// flux then, at its state then, along the body's orbit then for a star of its zone and along
+    /// the pair's for a companion, as [`Epoch::lights`] and [`Epoch::companions`] see them now.
+    /// [`WindowAt::DARK`] at an age the clock cannot hold or at which the body is not present, and
+    /// nothing from a star not yet formed. At the present's own age it reads the present's time.
+    #[must_use]
+    fn window_at(&self, age: Years) -> WindowAt {
+        let (now, at) = self.now;
+        let time = if age.value().total_cmp(&now.value()).is_eq() {
+            Some(at)
+        } else {
+            time_at_age(age, self.ctx.age_at_epoch())
+        };
+        let Some(t) = time else {
+            return WindowAt::DARK;
+        };
+        let Some(orbit) = self.fate.orbit_at(t) else {
+            return WindowAt::DARK;
+        };
+        let own = (orbit.semi_major_axis(), orbit.eccentricity().value());
+        let stars = self.ctx.stars();
+        WindowAt::of(self.stars.iter().filter_map(|&(star, seen)| {
+            let state = stars[star].state_at(t)?;
+            let (a, e) = seen.unwrap_or(own);
+            Some((
+                luminosity_flux(state.luminosity(), a, e),
+                state.effective_temperature(),
+            ))
+        }))
+    }
+}
+
 /// What a body's crater contract reads beyond its bulk section and its host's sources
 /// (P14.T24.b's surface age, P14.T48.c): where it goes round, and the dates of its magma ocean's
 /// end and its last giant impact ([`CraterInputs`]).
@@ -2915,10 +3039,11 @@ struct SurfaceCraters {
 }
 
 /// The surface conditions and global figures of the body `case` describes at `time` (P14.T24.a,
-/// T24.b): both [`Section::NotModelled`] under the hold, or with no rotation law, seasonal orbit
-/// or crater inputs, or inputs the figures refuse; both [`Section::NotApplicable`] for a body with
-/// no surface; and otherwise both [`Section::Ok`], the conditions' night floor raised by the
-/// figures' heat flow.
+/// T24.b): both [`Section::NotModelled`] under the hold, or with no rotation law, seasonal orbit,
+/// crater inputs or past sky, or inputs the figures refuse; both [`Section::NotApplicable`] for a
+/// body with no surface; and otherwise both [`Section::Ok`], the conditions' night floor raised by
+/// the figures' heat flow, and the figures' volatile history read from the conditions'
+/// liquid-water flag (P14.T48.b).
 #[must_use]
 fn published_surface(
     time: &SurfaceTime<'_>,
@@ -2931,12 +3056,12 @@ fn published_surface(
     let (Some(rotation), Some(seasonal)) = (time.rotation, time.seasonal) else {
         return (Section::NotModelled, Section::NotModelled);
     };
-    let (Some(craters), Some(sources)) = (case.craters, case.sources) else {
+    let (Some(craters), Some(sources), Some(past)) = (case.craters, case.sources, time.past) else {
         return (Section::NotModelled, Section::NotModelled);
     };
     let (sky, bulk, interior) = (&case.sky, case.bulk, &case.interior);
     let spin = SeasonalSpin::of(rotation.frame(), time.t, seasonal, case.whose);
-    let derived = GlobalFigures::derive(&FiguresInputs {
+    let figure_inputs = FiguresInputs {
         atmosphere: sky.atmosphere,
         mass: interior.mass,
         radius: Metres::from(bulk.radius()),
@@ -2956,7 +3081,8 @@ fn published_surface(
             molten_until: craters.molten_until,
             last_giant_impact: craters.last_giant_impact,
         },
-    });
+    };
+    let derived = GlobalFigures::derive(&figure_inputs);
     // The generator's bodies are in the figures' range: a refusal is a bug, which the tests'
     // debug builds catch, and it carries nothing a caller could act on, so the body's figures are
     // not modelled, as an uncomputed derivation's.
@@ -2977,10 +3103,25 @@ fn published_surface(
         spin,
         heat_flow: figures.heat_flow(),
     };
-    match SurfaceConditions::derive(&inputs) {
-        Some(conditions) => (Section::Ok(conditions), Section::Ok(figures)),
-        None => (Section::NotApplicable, Section::NotApplicable),
-    }
+    let Some(conditions) = SurfaceConditions::derive(&inputs) else {
+        return (Section::NotApplicable, Section::NotApplicable);
+    };
+    // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
+    // light over the body's past and its outgassing then (P14.T48.b).
+    let history = VolatileHistory::derive(&VolatileHistoryInputs {
+        atmosphere: sky.atmosphere,
+        water: interior.inventory_water,
+        radius: Metres::from(bulk.radius()),
+        liquid_water: conditions.liquid_water(),
+        molten_until: craters.molten_until,
+        age: time.age,
+        window: |age: Years| past.window_at(age),
+        outgassing: |age: Years| past_outgassing(&figure_inputs, age),
+    });
+    (
+        Section::Ok(conditions),
+        Section::Ok(figures.with_volatile_history(history)),
+    )
 }
 
 /// The state at `t` of the moon `satellite`, in a system aged `age_at_epoch` at the epoch, whose
@@ -3261,16 +3402,7 @@ impl<'c> Epoch<'c> {
         (0..self.states.len())
             .filter(|&star| (members & (1 << star)) == 0)
             .map(|star| {
-                let both = members | 1 << star;
-                let separation = h
-                    .pairs()
-                    .filter(|(node, _)| {
-                        let under = self.under[usize::from(node.get())];
-                        (under & both) == both
-                    })
-                    .min_by_key(|(node, _)| self.under[usize::from(node.get())].count_ones())
-                    .map(|(_, orbit)| orbit)
-                    .expect("the root pair holds every star of a multiple system");
+                let separation = companion_separation(h, &self.under, members, star);
                 let light = self.light(star)?;
                 Some(
                     Illumination::new(

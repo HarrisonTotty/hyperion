@@ -37,7 +37,7 @@ const SPINS: [(&str, f64, f64, f64); 8] = [
 
 /// The spin of the table's body `name`, its mean solar day 2π ÷ |ω ∓ n| as
 /// [`SeasonalSpin::of`] takes it.
-fn spin_of(name: &str) -> SeasonalSpin {
+pub(crate) fn spin_of(name: &str) -> SeasonalSpin {
     let &(_, degrees, rotation, year) = SPINS.iter().find(|(n, ..)| *n == name).unwrap();
     let obliquity = Radians::from(Degrees::new(degrees));
     let tau = 2.0 * core::f64::consts::PI;
@@ -77,7 +77,7 @@ fn heat_flow_of(body: &DerivedBody) -> WattsPerSquareMetre {
 }
 
 /// The conditions of the derived body `body` under the spin `spin`.
-fn conditions_of(body: &DerivedBody, spin: SeasonalSpin) -> Option<SurfaceConditions> {
+pub(crate) fn conditions_of(body: &DerivedBody, spin: SeasonalSpin) -> Option<SurfaceConditions> {
     SurfaceConditions::derive(&inputs_of(body, spin))
 }
 
@@ -100,7 +100,7 @@ fn day_and_night_of(body: &DerivedBody, spin: SeasonalSpin) -> (Kelvin, Kelvin) 
 }
 
 /// Every body of the table under P14.T24.f's rules, the batch's (held), with its own spin.
-fn table() -> Vec<(&'static str, DerivedBody, SurfaceConditions)> {
+pub(crate) fn table() -> Vec<(&'static str, DerivedBody, SurfaceConditions)> {
     table_under(Speciation::CarbonAndOxygen)
         .into_iter()
         .map(|(name, body)| {

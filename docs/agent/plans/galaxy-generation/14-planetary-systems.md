@@ -11246,6 +11246,133 @@ planetary::system::tests::a_moon_s_published planetary::moons`, as for part 1.
     §2.1's table gives the Moon age − `t_MO`; its N☾ is some 25% higher (main: the ruling's "no
     draw takes its age" stands).
 
+- **Deviations in P14.T24.b, as built: part 3, the wet epoch (P14.T48.b; `p14-batch`,
+  2026-10-13).** `GENERATOR_VERSION` stays 21, and nothing on the record moves: the volatile
+  history is published with the figures, under T24.a's hold. Built: P14.T48.b's wet epoch and
+  `from_colder`, by `science-p14-t24b-laws.md` Part 3 (§3.1–3.7, 2026-10-13), as written but where
+  stated. Its plan text (§3.6) for P14.T48.b, T48.a and R09 is the docs lane's.
+  - _Where it lives._ The new `planetary/hooks/figures/wet_epoch.rs`: `WindowAt` (Σ Sᵢ ÷ `S_eff`
+    at each host's `T_eff` for the runaway, maximum-greenhouse and early-Mars limits),
+    `WetEpoch` (getters for the plan's six members), `VolatileHistoryInputs` (the present air,
+    water, radius, T24.a's flag, `molten_until`, the age, and two pure functions of a system age:
+    the window and the outgassing then), `VolatileHistory::derive` and the ruling's constants. In
+    `hooks/figures.rs`: `past_outgassing` and `GlobalFigures::{wet_epoch, from_colder,
+with_volatile_history}`. `derive`'s interior is factored into `interior_of` and `heat_at`, bit
+    for bit (no golden value moves).
+    - _A second stage._ The history reads the conditions' liquid-water flag, which reads the
+      figures' heat flow, so `published_surface` derives the figures, then the conditions, then
+      the history, and publishes `figures.with_volatile_history(history)`. `derive` alone gives the
+      first stage, with no epoch and `from_colder` false. Part 4's ice fraction can take the same
+      stage.
+    - _The window over the past_ (`system.rs`, `PastSky`). At each age every star's state then
+      (`StarModel::state_at` at `time_at_age`, and at the present the time asked itself, which the
+      round trip through the age misses by up to some 30 s), seen along the primary's orbit then
+      for a star of its zone (`BodyFate::orbit_at`, new: `at`'s orbit bit for bit, without the
+      trajectory), and along the lowest pair's orbit for a companion (`companion_separation`,
+      factored out of `Epoch::companions` bit for bit). A moon's is its planet's. The sum over hosts
+      is Kaltenegger and Haghighipour 2013's (ApJ 777, 165, eqs. 1 and 6), each limit Kopparapu's
+      at the state then, where T13.c's runaway reads the largest luminosity since the main sequence
+      at today's `T_eff`.
+    - _The outgassing then_ (a deviation from §3.3's "the regime then … and the tidal heat then").
+      `past_outgassing(&FiguresInputs, age)` is T24.g's O of `heat_at` at that age, with the water
+      and ocean shell as given, and two readings. The regime is a temperate surface's
+      (`SurfaceState::Temperate`): O is read only inside the window, where the surface is a
+      temperate or snowball one, which the regime's wet test reads alike. The tide is the moon's
+      tide now: its orbit then is at hand (`Satellite::orbit_at`), but its tide is P14.T17.b's
+      derivation at t, which is not re-run at each past age.
+  - _Readings of the ruling._
+    - A body with no magma-ocean draw (a member, a moon) starts at `UNDRAWN_HISTORY_START`, 10^1.5
+      Myr, the median of P14.T28.a's draw (the lane's lean, for "main"). Its surface age starts at
+      the system's birth (part 2), but no star shines at age 0: reading the window there made
+      `from_colder` true for every such body inside the maximum-greenhouse limit now (10 of the
+      published pin's 11 before the change), and hid a runaway in the grid's first step.
+    - "A solid surface" is a present state other than `GasEnvelope` and `MagmaOcean`.
+    - A world wet now whose window shows a runaway after its start ends there, as a past epoch
+      (the runaway loses the water, T13.c): the flag alone does not carry it to the present.
+    - A body not wet now that is dry at its first age in the window ends between its start and
+      that age if its greenhouse held at the start, and has none otherwise.
+    - The runoff is `runoff_m_per_year: f64` (`PAST_EPOCH_RUNOFF_M_PER_YEAR`,
+      `WET_WORLD_RUNOFF_M_PER_YEAR`), the R09 code's convention, since `hyperion-base` has no unit
+      of m a⁻¹. `MARS_EFFECTIVE_FLOW` (2.2 × 10⁵ yr) is added, and `REFERENCE_FLOOD_INTERMITTENCY`
+      (0.05) is defined here, since nothing held it.
+  - _Fitted on the generator's own Mars_ (the table's, under plan 06's Sun at median draws):
+    `VOLCANIC_GREENHOUSE_OUTGASSING` = 0.634 741 900 903 (`Fitted`), Mars's O at 3.60 Ga (the
+    ruling's replica 0.612, ruled as 0.61); `PAST_EPOCH_FLOW_FRACTION` = 6.564 × 10⁻⁴ (`Fitted`),
+    2.2 × 10⁵ yr over Mars's 0.3352 Gyr (the ruling's 5.2 × 10⁻⁴ over 0.42 Gyr).
+  - _Figures_ (the table, median `t_MO`):
+    - Earth: 4.538 Ga to the present, runoff 0.29 m a⁻¹, 2.69 × 10⁶ kg m⁻².
+    - Mars: 3.935 to 3.600 Ga (the ruling's 4.02 to 3.60), 2.2 × 10⁵ yr at 0.1 m a⁻¹ (flow ×
+      runoff^0.45 = 7.8 × 10⁴ yr), 1.02 × 10⁶ kg m⁻², a 1,022 m layer. ±10% in the edge ends it at
+      3.456 and 3.731 Ga.
+    - None for Venus (inside the runaway limit from its magma ocean's end), Mercury, the Moon,
+      Ganymede and Ceres (airless) and Titan (H₂O not retained). `from_colder`: Mars true, Earth
+      false.
+    - A 0.2 M☉ star's planet at 0.8 S⊕ now lay at 2.96 times the runaway's flux at its magma
+      ocean's end, and has none; from 0.2 Gyr it would be wet to the present.
+  - _Tests read differently._
+    - "A Mars twin at 1 au": the generated twin at 1 au keeps no H₂O (T13.b at a 1,278 K exobase)
+      and has none, which the test pins; the 0.8–1.2 Gyr check reads the table's Mars on the
+      twin's orbit, which dries 0.97 Gyr after its formation.
+    - "Continuous in t": over presents 1 yr, 1 kyr and 1 Myr later, Earth's and Mars's start and
+      end move under a year since formation. A further test counts the window's reads, two for
+      `from_colder`, the 64 ages once and 48 halvings per crossing, and the outgassing's, from the
+      window's opening to the first dry age and at the end's halvings.
+    - Beyond the plan: `past_outgassing` at the present is the figures' O bit for bit on the
+      table's temperate bodies, and zero for an envelope and an age out of range; the past sky at
+      the present matches the derivation's lights and companions on the sample's single and
+      multiple systems, at the epoch and 500 years after.
+  - _Over the sample_ (60 systems, 877 published bodies): 13 wet epochs, 7 to the present and 6
+    past (the longest 3.41 Gyr); none from a colder state, since the sample's hosts near that
+    edge are M dwarfs, brighter in their pre-main sequence than now; 21 liquid by T24.a's flag
+    with none (deferred below).
+  - _Pins._ `planetary/global_figures` gains the table's histories (26 lines) and
+    `planetary/surface_conditions_published` each body's (247 lines), re-blessed at header 21
+    with lines added only.
+  - _Added public items_: `wet_epoch::{WindowAt, WetEpoch, VolatileHistoryInputs,
+VolatileHistory}` (re-exported from `figures`) and its constants `MARS_EFFECTIVE_FLOW`,
+    `WINDOW_AGES`, `CROSSING_HALVINGS` and `UNDRAWN_HISTORY_START` beside the ruling's,
+    `past_outgassing`, and `GlobalFigures::{wet_epoch, from_colder, with_volatile_history}`.
+    `figures::WetEpoch` shares its name with R09's `planetary::surface::WetEpoch`, which has no
+    `liquid` or `runoff` yet: T48.e maps one onto the other (§3.6's R09 note).
+  - _Files beyond the task's_: `hooks/figures/wet_epoch{,/tests}.rs`, `hooks/mod.rs`,
+    `hooks/surface{,/tests}.rs` (the test module's helpers shared), `fate.rs`, `system.rs` and
+    `system/tests.rs`.
+  - _Accepted by_ `cargo test -p hyperion-sim --features testing --lib -- planetary::hooks
+planetary::fate planetary::system planetary::moons planetary::surface`, as for parts 1 and 2.
+- **Deferred findings (2026-10-13 rule)**, from part 3 (P14.T48.b's wet epoch):
+  - Mars's 3.900 Gyr surface (part 2) forms inside its epoch (3.935 to 3.600 Ga as built; part
+    2's entry gives the ruling's 4.02 Ga start), where §2.1 asks it to be older than the epoch's
+    start. Part 3 builds both as ruled and does not re-rule it. R09's erosion runs where the
+    surface is older than the epoch's end, which it is.
+  - Pre-main-sequence runaways disagree with T13. T13.c judges the runaway at the hosts' largest
+    luminosity since the main sequence (design note 11), so a planet inside the runaway limit
+    only in its host's pre-main sequence keeps its water in T13 and is liquid by T24.a's flag. The
+    window, at the hosts' state then, gives it no epoch (the ruling's Luger and Barnes clause): 13
+    sample bodies, in the window now, at 1.3–8.7 times the runaway's flux at their magma oceans'
+    end. Part 4's continental fraction (zero with no epoch) and ocean fraction would disagree on
+    them. Luger and Barnes's loss is conditional ("can" be several oceans, depending on the XUV,
+    the runaway's length and the initial water), where the rule takes all of it.
+  - Liquid beyond the window: 8 sample bodies, liquid by the flag at 303–635 K under 0.05–3.3 GPa
+    of air, lie beyond the early-Mars limit now (0.10–0.87 of its flux), so have no epoch.
+  - The generated Mars twin at 1 au keeps no H₂O (above), so the ruling's check runs on the
+    table's Mars there.
+  - The ruling's figures that do not reproduce on plan 06's Sun: Mars's start 3.935 Ga (4.02, from
+    Gough's L(t) in its replica), the edge 0.635 (0.612) and the flow fraction 6.56 × 10⁻⁴
+    (5.2 × 10⁻⁴).
+  - A moon's tide at a past age is its tide now, where the ruling reads "the tidal heat then"
+    (above).
+  - A single epoch ending at 3.60 Ga sits against Kite 2019's constraints (Space Sci. Rev. 215,
+    10): precipitation-fed runoff after 3.4 Ga exceeding a 1 km column in places, and at least two
+    river-forming periods.
+  - Sources not read in full at the build: Fassett and Head 2008 (its subject read as Hoke et al.
+    2011 quote it), Fekete, Vörösmarty and Grabs 2002 (the 39,300 km³ a⁻¹ total), Kite 2019 beyond
+    its abstract, and Black et al. 2017's supplement (R09's reading). The science check read
+    Kopparapu et al.'s erratum, Kaltenegger and Haghighipour 2013, Kleinhans 2005 ¶62 and the
+    abstracts of Hoke and Hynek 2009, Luger and Barnes 2015, Ramirez et al. 2014, Wordsworth et
+    al. 2017, Kilic et al. 2018, Way et al. 2016, Turbet et al. 2021 and Scheller et al. 2021.
+    Hoke and Hynek's phrase "within a few hundred million years around 3.7 Ga", which the ruling
+    and the plan quote, is not theirs; their abstract has "∼3.6–3.8 billion years ago".
+
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might
   expect to exist"; noted by "main"). The drafted surface-section tasks define closed sets that

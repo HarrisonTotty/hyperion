@@ -2197,6 +2197,7 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
     let mut regimes = std::collections::BTreeMap::new();
     let mut fields = std::collections::BTreeMap::new();
     let mut craters = CraterTally::default();
+    let mut histories = HistoryTally::default();
     for (ctx, system) in whole().iter().take(60) {
         for index in system.indices() {
             let Some(held) = system.hooks_at(ctx, index, t).unwrap() else {
@@ -2241,6 +2242,7 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
                     *regimes.entry(figures.tectonic_regime()).or_insert(0_u32) += 1;
                     *fields.entry(figures.magnetic_field()).or_insert(0_u32) += 1;
                     craters.count(figures);
+                    histories.count(conditions, figures);
                     match record.identity().kind() {
                         BodyKind::Moon(_) => moons += 1,
                         BodyKind::Planet | BodyKind::DwarfPlanet => planets += 1,
@@ -2282,7 +2284,45 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
     eprintln!("{planets} planets and {moons} moons with conditions, {envelopes} envelopes");
     eprintln!("regimes {regimes:?}; fields {fields:?}");
     craters.report();
+    histories.report();
     assert!(planets > 20 && moons > 5 && envelopes > 20);
+}
+
+/// The published volatile histories' spread over a sample, for the record (P14.T48.b): the bodies
+/// wet now, those with a past epoch and their longest span, those wet now by their flag with no
+/// epoch, and those from a colder state.
+#[derive(Debug, Default)]
+struct HistoryTally {
+    wet_now: u32,
+    past: u32,
+    longest_past_gyr: f64,
+    flagged_without: u32,
+    from_colder: u32,
+}
+
+impl HistoryTally {
+    /// Counts `figures`' history, published with `conditions`.
+    fn count(&mut self, conditions: &SurfaceConditions, figures: &GlobalFigures) {
+        match figures.wet_epoch() {
+            Some(epoch) if epoch.end().value() <= 0.0 => self.wet_now += 1,
+            Some(epoch) => {
+                self.past += 1;
+                let span = epoch.start().value() - epoch.end().value();
+                self.longest_past_gyr = self.longest_past_gyr.max(span);
+            }
+            None => self.flagged_without += u32::from(conditions.liquid_water()),
+        }
+        self.from_colder += u32::from(figures.from_colder());
+    }
+
+    /// Prints the tally.
+    fn report(&self) {
+        eprintln!(
+            "wet epochs: {} to the present, {} past (longest {:.3} Gyr); {} liquid by the flag \
+             with none; {} from a colder state",
+            self.wet_now, self.past, self.longest_past_gyr, self.flagged_without, self.from_colder
+        );
+    }
 }
 
 /// The published crater contracts' spread over a sample, for the record (P14.T24.b, T48.c): the
@@ -2385,6 +2425,30 @@ fn check_published_figures(
             conditions.mean_surface_temperature().value() < 273.0,
             "{index:?}"
         );
+    }
+    // P14.T48.b: the epoch lies inside the system's age, and only a world wet now has one to the
+    // present at Earth's runoff.
+    if let Some(epoch) = figures.wet_epoch() {
+        let (start, end) = (epoch.start().value(), epoch.end().value());
+        assert!(
+            0.0 <= end && end <= start && start <= system_age.value(),
+            "{index:?}: {epoch:?}"
+        );
+        assert!(epoch.effective_flow().value() >= 0.0, "{index:?}");
+        assert!(epoch.paleo_inventory().value() > 0.0, "{index:?}");
+        assert_eq!(
+            epoch.liquid(),
+            crate::planetary::derive::atmosphere::Gas::Water.substance()
+        );
+        let wet_now = (epoch.runoff_m_per_year()
+            - hooks::figures::wet_epoch::WET_WORLD_RUNOFF_M_PER_YEAR)
+            .abs()
+            < 1e-15;
+        if wet_now {
+            assert!(conditions.liquid_water(), "{index:?}");
+            assert_same_bits(end, 0.0);
+            assert_same_bits(epoch.effective_flow().value() / 1e9, start);
+        }
     }
 }
 
@@ -2551,6 +2615,12 @@ fn the_published_surface_conditions_are_pinned() {
                 }
             }
             pin_crater_contract(&mut w, &name, f);
+            hooks::figures::wet_epoch::tests::pin_history(
+                &mut w,
+                &name,
+                f.wet_epoch(),
+                f.from_colder(),
+            );
             pinned += 1;
         }
     }
@@ -2859,4 +2929,168 @@ fn the_published_crater_contract_reads_each_body_s_history() {
         held > 20 && cold_captures > 0 && impacts > 0,
         "{held}, {cold_captures}, {impacts}"
     );
+}
+
+/// P14.T48.b's past sky reads the hosts and orbits the derivation reads now: at the present its
+/// window is each light's flux over Kopparapu's runaway limit at the stars' states now, the zone's
+/// along the orbit now and each companion's along its pair's, as `Epoch::lights` and
+/// `Epoch::companions` give them, and a single star's planet's is its derivation's flux over the
+/// limit. The orbit it reads at any time is the fate's, bit for bit. Checked at the epoch and 500
+/// years after it, where the round trip through the age is not exact.
+#[test]
+fn the_past_sky_is_the_derivation_s_at_the_present() {
+    use crate::planetary::derive::habitable_zone::HabitableLimit;
+
+    let later = UniverseTime::from_julian_years(500).expect("in the window");
+    let (mut planets, mut multiple, mut orbits) = (0_u32, 0_u32, 0_u32);
+    for t in [UniverseTime::EPOCH, later] {
+        for (ctx, system) in whole().iter().take(60) {
+            let epoch = Epoch::new(system, ctx, t);
+            for body in system.bodies() {
+                let (Part::Planet(_) | Part::Member(_)) = body.part else {
+                    continue;
+                };
+                let zone = system.zone_of(body);
+                let host = fate_host(ctx, zone);
+                let fate = system.fate_of(body, &host);
+                let past = PastSky::new(ctx, zone, &fate, t);
+                // The orbit at past ages and at the present is the fate's.
+                for share in [0.01, 0.3, 0.9] {
+                    let age = Years::new(share * ctx.age_at(t).value());
+                    let Some(then) = time_at_age(age, ctx.age_at_epoch()) else {
+                        continue;
+                    };
+                    let (fast, full) = (fate.orbit_at(then), fate.at(then).orbit().copied());
+                    assert_eq!(fast, full, "{:?} at {age:?}", body.index());
+                    orbits += u32::from(fast.is_some());
+                }
+                let Some(orbit) = fate.at(t).orbit().copied() else {
+                    continue;
+                };
+                assert_eq!(fate.orbit_at(t), Some(orbit));
+                let window = past.window_at(ctx.age_at(t));
+                let runaway = |flux: f64, t_eff: Kelvin| {
+                    flux / HabitableLimit::RunawayGreenhouse.flux(t_eff).value()
+                };
+                let (a, e) = (orbit.semi_major_axis(), orbit.eccentricity().value());
+                let lights = epoch.lights(zone).unwrap();
+                let companions = epoch.companions(zone).unwrap();
+                let expected = lights
+                    .iter()
+                    .filter(|light| light.luminosity().value() > 0.0)
+                    .map(|light| {
+                        runaway(
+                            luminosity_flux(light.luminosity(), a, e).value(),
+                            light.effective_temperature(),
+                        )
+                    })
+                    .chain(
+                        companions
+                            .iter()
+                            .filter(|c| c.host().luminosity().value() > 0.0)
+                            .map(|c| runaway(c.flux().value(), c.host().effective_temperature())),
+                    )
+                    .fold(0.0, |sum, x| sum + x);
+                assert!(
+                    (window.runaway() / expected - 1.0).abs() < 1e-12,
+                    "{:?}: {} against {expected}",
+                    body.index(),
+                    window.runaway()
+                );
+                multiple += u32::from(ctx.stars().len() > 1);
+                if ctx.stars().len() == 1 {
+                    let label = label::label(system, body.index).unwrap();
+                    let (_, now) = system.primary_record(&epoch, body, label, &fate);
+                    if let Some(derived) = now.derived {
+                        let star = ctx.stars()[0].state_at(t).unwrap();
+                        let alone = runaway(derived.flux().value(), star.effective_temperature());
+                        assert!(
+                            (window.runaway() / alone - 1.0).abs() < 1e-9,
+                            "{:?}",
+                            body.index()
+                        );
+                        planets += 1;
+                    }
+                }
+            }
+        }
+    }
+    eprintln!(
+        "{planets} single-star bodies' windows, {multiple} in multiple systems; {orbits} past orbits"
+    );
+    assert!(
+        planets > 50 && multiple > 10 && orbits > 100,
+        "{planets}, {multiple}, {orbits}"
+    );
+}
+
+/// The published volatile history reads the body's own past: the window of its primary's past
+/// sky from its magma ocean's end, a moon's its planet's, its outgassing then, and its conditions'
+/// liquid-water flag (P14.T48.b), as rebuilt here from the parts.
+#[test]
+fn the_published_volatile_history_reads_each_body_s_past() {
+    let t = UniverseTime::EPOCH;
+    let (mut checked, mut moons, mut epochs) = (0_u32, 0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let Some(hooks) = system
+                .hooks_at_under(ctx, body.index(), t, ConditionsHold::Published)
+                .unwrap()
+            else {
+                continue;
+            };
+            let (Section::Ok(conditions), Section::Ok(figures)) =
+                (hooks.surface(), hooks.figures())
+            else {
+                continue;
+            };
+            let primary = match body.host {
+                OrbitHost::Body(parent) => system.body(parent).unwrap(),
+                OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => body,
+            };
+            let zone = system.zone_of(primary);
+            let host = fate_host(ctx, zone);
+            let fate = system.fate_of(primary, &host);
+            let past = PastSky::new(ctx, zone, &fate, t);
+            let molten_until = match &body.part {
+                Part::Planet(planet) => Some(Years::from(planet.fate.formation().molten_until())),
+                Part::Member(_) | Part::Moon(_) | Part::Ring(_) => None,
+            };
+            let age = ctx.age_at(t);
+            let start = molten_until
+                .unwrap_or(hooks::figures::wet_epoch::UNDRAWN_HISTORY_START)
+                .value();
+            let window = |age: Years| past.window_at(age);
+            if start < age.value() {
+                let expected = !window(Years::new(start)).inside_maximum_greenhouse()
+                    && window(age).inside_maximum_greenhouse();
+                assert_eq!(figures.from_colder(), expected, "{:?}", body.index());
+            }
+            if let Some(epoch) = figures.wet_epoch() {
+                epochs += 1;
+                // It opened inside the window, after the magma ocean.
+                let opened = age.value() - epoch.start().value() * 1e9;
+                assert!(opened >= start - 1.0, "{:?}", body.index());
+                assert!(
+                    window(Years::new(opened + 1.0)).in_window(),
+                    "{:?}",
+                    body.index()
+                );
+                if epoch.end().value() > 0.0 {
+                    assert!(
+                        (epoch.runoff_m_per_year()
+                            - hooks::figures::wet_epoch::PAST_EPOCH_RUNOFF_M_PER_YEAR)
+                            .abs()
+                            < 1e-15
+                    );
+                } else {
+                    assert!(conditions.liquid_water(), "{:?}", body.index());
+                }
+            }
+            moons += u32::from(matches!(body.part, Part::Moon(_)));
+            checked += 1;
+        }
+    }
+    eprintln!("{checked} published histories, {moons} moons'; {epochs} wet epochs");
+    assert!(checked > 100 && moons > 5, "{checked}, {moons}");
 }

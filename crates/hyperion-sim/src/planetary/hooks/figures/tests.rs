@@ -1116,7 +1116,7 @@ fn figures_from(inputs: &FiguresInputs<'_>) -> Option<GlobalFigures> {
 
 /// The median end of a young magma ocean, yr: 10^1.5 Myr, the middle of P14.T28.a's log-uniform
 /// 10–100 Myr.
-const MEDIAN_MAGMA_OCEAN_END: Years = Years::new(31_622_776.601_683_795);
+pub(super) const MEDIAN_MAGMA_OCEAN_END: Years = Years::new(31_622_776.601_683_795);
 
 /// Jupiter's moon at `a_km` from it, formed on `formed`.
 fn jovian_orbit(a_km: f64, formed: SnowLineSide) -> ImpactorOrbit {
@@ -1184,7 +1184,7 @@ fn body_of<'a>(
 }
 
 /// The figures' inputs of the derived body `body` about the present Sun, turning in `name`'s day.
-fn inputs_of<'a>(body: &'a DerivedBody, name: &str) -> FiguresInputs<'a> {
+pub(super) fn inputs_of<'a>(body: &'a DerivedBody, name: &str) -> FiguresInputs<'a> {
     FiguresInputs {
         atmosphere: body.atmosphere(),
         mass: body.mass(),
@@ -2501,7 +2501,8 @@ fn the_figures_refuse_inputs_out_of_range() {
 }
 
 /// The table's figures, Io's and the measured Europa's, with their surface ages and crater
-/// densities, pinned to the bit (P14.T24.b, T48.c), with the reference Moon's encounter factor.
+/// densities, pinned to the bit (P14.T24.b, T48.c), with the reference Moon's encounter factor and
+/// the table's volatile histories about plan 06's Sun (P14.T48.b).
 /// Nothing published reads them before the 21 → 22 bump, so it moves only their header, unless the
 /// batch changes them.
 #[test]
@@ -2574,6 +2575,15 @@ fn the_table_s_figures_are_pinned() {
                 Years::new(4.5e9),
                 interior::ROCK_THERMAL_DIFFUSIVITY_M2_PER_S,
             ),
+        );
+    }
+    // P14.T48.b: the table's volatile histories about plan 06's Sun.
+    for (name, _, history) in &super::wet_epoch::tests::table_histories() {
+        super::wet_epoch::tests::pin_history(
+            &mut w,
+            &name.to_lowercase(),
+            history.wet_epoch(),
+            history.from_colder(),
         );
     }
     golden!("planetary/global_figures", w.as_str());

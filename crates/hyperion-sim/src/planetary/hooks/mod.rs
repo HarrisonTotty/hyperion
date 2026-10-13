@@ -13,10 +13,10 @@
 //!   contrasts, its surface pressure and gases as mole fractions, the light and radiation it
 //!   receives and whether water can be liquid on it; held until the 21 → 22 batch's bump.
 //! - [`figures`]: the body's [`GlobalFigures`] (P14.T24.b), so far its heat flow, tectonic
-//!   regime, magnetic field, present outgassing and subsurface ocean, held with the surface
-//!   conditions; and its
-//!   [`Impactors`] (P14.T48.f): the mean impact velocity and density of what strikes it, and the
-//!   crater target it is, which P14.T48.c's crater contract will carry.
+//!   regime, magnetic field, present outgassing and subsurface ocean, its surface age and crater
+//!   contract (P14.T48.c) with its [`Impactors`] (P14.T48.f), and its volatile history
+//!   (P14.T48.b), its wet epoch and whether it came from a colder state, read from the
+//!   conditions' liquid-water flag; held with the surface conditions.
 //!
 //! [`BodyHooks`] holds them, from
 //! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at). The habitability

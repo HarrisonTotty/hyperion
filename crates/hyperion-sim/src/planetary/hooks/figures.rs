@@ -6,9 +6,10 @@
 //! - [`GlobalFigures`] (P14.T24.b, its interior and its craters): the body's heat flow, its
 //!   tectonic regime, its magnetic field, its present volcanic outgassing and its subsurface
 //!   ocean, from its [`interior`] (science-p14-t24b-laws Part 1); and its surface age and crater
-//!   contract (P14.T48.c), from its [`surface_age`] and its impactors (Part 2). Its relief and
-//!   continents (P14.T48.a), its wet epoch (P14.T48.b), its oceans, ices and clouds and its
-//!   volcanism level join it with their tasks in the 21 → 22 batch.
+//!   contract (P14.T48.c), from its [`surface_age`] and its impactors (Part 2); and its volatile
+//!   history (P14.T48.b), its wet epoch and whether it came from a colder state, from its
+//!   [`wet_epoch`] law (Part 3). Its relief and continents (P14.T48.a), its oceans, ices and clouds
+//!   and its volcanism level join it with their tasks in the 21 → 22 batch.
 //! - [`impactors`] (P14.T48.f): what strikes a body and what it strikes, and how often over the
 //!   Moon ([`Impactors::rate`]), which P14.T48.c's crater contract carries beside the crater
 //!   density ([`CraterParams`](hyperion_surface::craters::CraterParams)).
@@ -24,6 +25,11 @@
 //! the subsurface ocean is the rule's that computes it, so far a regular moon's alone
 //! ([`Subsurface`]); the surface age is [`surface_age`]'s, at that heat flow, and the crater
 //! contract the lunar chronology at it times the impactors' rate.
+//!
+//! The volatile history is a second stage, [`GlobalFigures::with_volatile_history`], since it reads
+//! the surface conditions' liquid-water flag, which reads the first stage's heat flow: it is
+//! [`VolatileHistory::derive`] of the hosts' window over the body's past and of its outgassing
+//! then ([`past_outgassing`]).
 //!
 //! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes them with
 //! the surface conditions, under the same hold until the batch's bump, and passes their heat
@@ -129,11 +135,13 @@ use crate::units::{
 
 pub mod interior;
 pub mod surface_age;
+pub mod wet_epoch;
 
 pub use interior::{
     Interior, MagneticField, RadiogenicIsotope, TectonicRegime, conductive_lag,
     convecting_heat_flow, magnetic_field, outgassing, radiogenic_heat_flow, tectonic_regime,
 };
+pub use wet_epoch::{VolatileHistory, VolatileHistoryInputs, WetEpoch, WindowAt};
 
 #[cfg(test)]
 mod tests;
@@ -1828,7 +1836,8 @@ const YEARS_PER_GIGAYEAR: f64 = 1e9;
 
 /// A body's global figures at a time (P14.T24.b so far): its heat flow, its interior, its
 /// tectonic regime, its magnetic field, its present outgassing, its subsurface ocean, its surface
-/// age and its crater contract (P14.T48.c) with its impactors (P14.T48.f).
+/// age and its crater contract (P14.T48.c) with its impactors (P14.T48.f), and its volatile
+/// history (P14.T48.b): its wet epoch and whether it came from a colder state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalFigures {
     radiogenic_heat_flow: WattsPerSquareMetre,
@@ -1842,6 +1851,8 @@ pub struct GlobalFigures {
     surface_age: Years,
     impactors: Impactors,
     craters: CraterParams,
+    wet_epoch: Option<WetEpoch>,
+    from_colder: bool,
 }
 
 impl GlobalFigures {
@@ -1964,101 +1975,58 @@ impl GlobalFigures {
         if matches!(air.state(), SurfaceState::GasEnvelope) {
             return Ok(None);
         }
-        let FiguresInputs {
-            mass,
-            radius,
-            surface_gravity,
-            class,
-            fractions,
-            inventory_water,
-            rotation_period,
-            fe_h,
-            age,
-            ..
-        } = *inputs;
-        let kilograms = Kilograms::from(mass).value();
-        let rock_core = rock_core_radius(kilograms * (1.0 - fractions.water()));
-        let Some(interior) = Interior::of(class, rock_core) else {
+        let Some((interior, rock_core)) = interior_of(inputs) else {
             return Ok(None);
         };
+        let age = inputs.age;
         if !non_negative(age.value()) {
             return Err(DeriveFiguresError::Age(age));
         }
-        let radiogenic = radiogenic_heat_flow(
-            Kilograms::new(kilograms * fractions.rock()),
-            radius,
-            fe_h,
-            age,
-        );
-        let solids = fractions.iron() + fractions.rock();
-        let iron_share = if solids > 0.0 {
-            fractions.iron() / solids
-        } else {
-            0.0
-        };
-        // Clamped by comparison, not `max`, which may return either zero at a tie of signs.
-        let tide = inputs.tidal_heat_flow.value();
-        let tidal = WattsPerSquareMetre::new(if tide > 0.0 { tide } else { 0.0 });
-        let r = radius.value();
-        let (held, bulk_water) = (inventory_water.value(), fractions.water() * kilograms);
-        let water = if held > bulk_water { held } else { bulk_water };
-        let water_depth = if r > 0.0 {
-            water / (interior::REGIME_WATER_DENSITY.value() * 4.0 * core::f64::consts::PI * r * r)
-        } else {
-            0.0
-        };
-        let ocean_shell = match inputs.subsurface_ocean {
-            Subsurface::Ocean(ocean) => Some(ocean.shell_thickness()),
-            Subsurface::NoOcean | Subsurface::NotComputed => None,
-        };
-        let regime = tectonic_regime(&interior::RegimeInputs {
-            interior,
-            mass,
-            radiogenic,
-            tidal,
-            state: air.state(),
-            water_depth: Metres::new(water_depth),
-            surface_gravity,
-            ocean_shell,
-        });
-        let non_tidal = match interior {
-            Interior::Conducting => WattsPerSquareMetre::new(
-                radiogenic.value()
-                    * conductive_lag(rock_core, age, interior::ROCK_THERMAL_DIFFUSIVITY_M2_PER_S),
-            ),
-            Interior::Convecting => convecting_heat_flow(
-                radiogenic_heat_flow(Kilograms::new(kilograms * solids), radius, fe_h, age),
-                iron_share,
-                regime,
-            ),
-        };
-        let heat_flow = WattsPerSquareMetre::new(non_tidal.value() + tidal.value());
+        let heat = heat_at(inputs, (interior, rock_core), age, air.state());
         let field = magnetic_field(&interior::FieldInputs {
-            class,
+            class: inputs.class,
             interior,
-            mass,
-            iron_share,
-            regime,
-            radiogenic,
-            tidal,
+            mass: inputs.mass,
+            iron_share: heat.iron_share,
+            regime: heat.regime,
+            radiogenic: heat.radiogenic,
+            tidal: heat.tidal,
             age,
-            rotation_period,
+            rotation_period: inputs.rotation_period,
         });
         let (surface_age, impactors, craters) =
-            crater_contract(inputs, Kilograms::new(water), heat_flow)?;
+            crater_contract(inputs, heat.water, heat.heat_flow)?;
         Ok(Some(Self {
-            radiogenic_heat_flow: radiogenic,
-            non_tidal_heat_flow: non_tidal,
-            heat_flow,
+            radiogenic_heat_flow: heat.radiogenic,
+            non_tidal_heat_flow: heat.non_tidal,
+            heat_flow: heat.heat_flow,
             interior,
-            tectonic_regime: regime,
+            tectonic_regime: heat.regime,
             magnetic_field: field,
-            outgassing: outgassing(heat_flow),
+            outgassing: outgassing(heat.heat_flow),
             subsurface_ocean: inputs.subsurface_ocean,
             surface_age,
             impactors,
             craters,
+            wet_epoch: None,
+            from_colder: false,
         }))
+    }
+
+    /// The figures with their volatile history `history` (P14.T48.b), the second stage, which
+    /// reads the surface conditions' liquid-water flag ([`VolatileHistory::derive`]).
+    ///
+    /// [`derive`](Self::derive) alone gives the first stage, with no wet epoch and
+    /// [`from_colder`](Self::from_colder) false: the figures
+    /// [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes always
+    /// carry their history.
+    #[must_use]
+    pub fn with_volatile_history(self, history: VolatileHistory) -> Self {
+        Self {
+            wet_epoch: history.wet_epoch().copied(),
+            from_colder: history.from_colder(),
+            ..self
+        }
     }
 
     /// The heat flow at the surface F, W m⁻²: the non-tidal part with the tidal heat added
@@ -2148,6 +2116,231 @@ impl GlobalFigures {
     pub const fn craters(&self) -> &CraterParams {
         &self.craters
     }
+
+    /// The wet epoch (P14.T48.b; [`wet_epoch`](mod@wet_epoch)): the span over which the surface
+    /// held liquid water, with what R09's erosion reads of it; `None` for a body with none, and
+    /// before the second stage ([`with_volatile_history`](Self::with_volatile_history)).
+    #[must_use]
+    pub const fn wet_epoch(&self) -> Option<&WetEpoch> {
+        self.wet_epoch.as_ref()
+    }
+
+    /// Whether the body reached its present state from a colder one (P14.T48.b), which P14.T48.d's
+    /// ice belt reads: its flux lay beyond the maximum-greenhouse limit when its magma ocean ended
+    /// and lies inside it now. False before the second stage.
+    #[must_use]
+    pub const fn from_colder(&self) -> bool {
+        self.from_colder
+    }
+}
+
+/// How a body's interior loses its heat, with its rock's radius ([`Interior::of`]); `None` for a
+/// class with no solid surface.
+#[must_use]
+fn interior_of(inputs: &FiguresInputs<'_>) -> Option<(Interior, Metres)> {
+    let kilograms = Kilograms::from(inputs.mass).value();
+    let rock_core = rock_core_radius(kilograms * (1.0 - inputs.fractions.water()));
+    Interior::of(inputs.class, rock_core).map(|interior| (interior, rock_core))
+}
+
+/// A body's heat at a system age ([`heat_at`]): its radiogenic and non-tidal heat flows, its heat
+/// flow, its regime, its iron's share of the solids, its tide and its water.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct HeatAt {
+    radiogenic: WattsPerSquareMetre,
+    non_tidal: WattsPerSquareMetre,
+    heat_flow: WattsPerSquareMetre,
+    regime: TectonicRegime,
+    iron_share: f64,
+    tidal: WattsPerSquareMetre,
+    water: Kilograms,
+}
+
+/// The heat of the body `inputs` describe, whose interior and rock radius are `interior`, at the
+/// system age `age` under the surface state `state` ([`GlobalFigures::derive`]'s, at its own age
+/// and state): the regime from the radiogenic term then, and the heat flow from it with the
+/// interior's residual then and the tide as given.
+#[must_use]
+fn heat_at(
+    inputs: &FiguresInputs<'_>,
+    (interior, rock_core): (Interior, Metres),
+    age: Years,
+    state: SurfaceState,
+) -> HeatAt {
+    let FiguresInputs {
+        mass,
+        radius,
+        surface_gravity,
+        fractions,
+        inventory_water,
+        fe_h,
+        ..
+    } = *inputs;
+    let kilograms = Kilograms::from(mass).value();
+    let radiogenic = radiogenic_heat_flow(
+        Kilograms::new(kilograms * fractions.rock()),
+        radius,
+        fe_h,
+        age,
+    );
+    let solids = fractions.iron() + fractions.rock();
+    let iron_share = if solids > 0.0 {
+        fractions.iron() / solids
+    } else {
+        0.0
+    };
+    // Clamped by comparison, not `max`, which may return either zero at a tie of signs.
+    let tide = inputs.tidal_heat_flow.value();
+    let tidal = WattsPerSquareMetre::new(if tide > 0.0 { tide } else { 0.0 });
+    let r = radius.value();
+    let (held, bulk_water) = (inventory_water.value(), fractions.water() * kilograms);
+    let water = if held > bulk_water { held } else { bulk_water };
+    let water_depth = if r > 0.0 {
+        water / (interior::REGIME_WATER_DENSITY.value() * 4.0 * core::f64::consts::PI * r * r)
+    } else {
+        0.0
+    };
+    let ocean_shell = match inputs.subsurface_ocean {
+        Subsurface::Ocean(ocean) => Some(ocean.shell_thickness()),
+        Subsurface::NoOcean | Subsurface::NotComputed => None,
+    };
+    let regime = tectonic_regime(&interior::RegimeInputs {
+        interior,
+        mass,
+        radiogenic,
+        tidal,
+        state,
+        water_depth: Metres::new(water_depth),
+        surface_gravity,
+        ocean_shell,
+    });
+    let non_tidal = match interior {
+        Interior::Conducting => WattsPerSquareMetre::new(
+            radiogenic.value()
+                * conductive_lag(rock_core, age, interior::ROCK_THERMAL_DIFFUSIVITY_M2_PER_S),
+        ),
+        Interior::Convecting => convecting_heat_flow(
+            radiogenic_heat_flow(Kilograms::new(kilograms * solids), radius, fe_h, age),
+            iron_share,
+            regime,
+        ),
+    };
+    HeatAt {
+        radiogenic,
+        non_tidal,
+        heat_flow: WattsPerSquareMetre::new(non_tidal.value() + tidal.value()),
+        regime,
+        iron_share,
+        tidal,
+        water: Kilograms::new(water),
+    }
+}
+
+/// The present outgassing O the body `inputs` describe had at the system age `age`.
+///
+/// O is relative to Earth's now, [`outgassing`] of the heat flow then (P14.T48.b;
+/// science-p14-t24b-laws §3.3), by [`GlobalFigures::derive`]'s pure functions at that age: the
+/// radiogenic term then, the interior's residual then, and the regime then of a surface inside the
+/// water window ([`SurfaceState::Temperate`]), with the tide, the water and the ocean's shell as
+/// `inputs` give them, today's. `inputs.age` is not read. At the inputs' own age, on a temperate
+/// surface, it is [`GlobalFigures::outgassing`] bit for bit. Zero for a body with no solid surface,
+/// and for an age that is not finite and non-negative.
+///
+/// It is the outgassing a [`VolatileHistoryInputs`] reads at each past age.
+///
+/// # Examples
+///
+/// Earth, as [`GlobalFigures::derive`]'s example derives it, outgassed about twice today's rate
+/// 3.5 Gyr ago, when its rock made more heat:
+///
+/// ```
+/// # use hyperion_sim::math;
+/// # use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+/// # use hyperion_sim::planetary::belts::BeltComposition;
+/// # use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
+/// # use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
+/// # use hyperion_sim::planetary::hooks::figures::{
+/// #     CraterInputs, FiguresInputs, GlobalFigures, HostOrbit, HostOrbiter, ImpactorOrbit,
+/// #     ImpactorSources, SOLAR_MAIN_BELT_MASS, SourceAnnulus, SourceBelt, Subsurface,
+/// # };
+/// # use hyperion_sim::planetary::record::BeltKind;
+/// # use hyperion_sim::stellar::Composition;
+/// # use hyperion_sim::stellar::draws::UnitUniform;
+/// # use hyperion_sim::time::UniverseTime;
+/// # use hyperion_sim::units::consts::{METRES_PER_AU, SOLAR_MASS_KG};
+/// # use hyperion_sim::units::{
+/// #     Dex, EarthMasses, GravitationalParameter, Kelvin, Kilograms, Megayears, Metres, Radians,
+/// #     Seconds, SolarLuminosities, SolarMasses, SolarRadii, WattsPerSquareMetre,
+/// # };
+/// use hyperion_sim::planetary::hooks::figures::past_outgassing;
+/// use hyperion_sim::units::Years;
+/// # let host = DiscHost::new(SolarMasses::new(1.0), Dex::new(0.0), SolarLuminosities::new(0.7), SolarRadii::new(0.89))?;
+/// # let disc = disc::derive(&host, Megayears::new(3.0), &DiscDraws::MEDIAN, Truncation::NONE);
+/// # let disc = disc.profile().expect("a median disc exists");
+/// # let a = Metres::new(METRES_PER_AU);
+/// # let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(1.0));
+/// # let orientation = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)?;
+/// # let orbit = KeplerElements::from_semi_major_axis(a, mu, Eccentricity::new(0.0167)?, orientation, Radians::ZERO)?;
+/// # let earth = PlacedBody::new(EarthMasses::new(1.0), orbit, a, UnitUniform::new(0.384).expect("inside (0, 1)"))?;
+/// # let sun = [HostLight::new(SolarLuminosities::new(1.0), Kelvin::new(5_772.0), SolarRadii::new(1.0))?];
+/// # let hosts = BodyHosts::new(Kilograms::new(SOLAR_MASS_KG), Composition::SOLAR, &sun, &[])?;
+/// # let age = Years::new(4.57e9);
+/// # let derived = derive_body(&earth, &hosts, disc, age, UniverseTime::EPOCH)?;
+/// # let au = |x: f64| Metres::new(x * METRES_PER_AU);
+/// # let belt = SourceBelt {
+/// #     kind: BeltKind::Asteroid,
+/// #     composition: BeltComposition::Rocky,
+/// #     main: SourceAnnulus {
+/// #         inner_edge: au(5.2029 * math::powf(0.25, 2.0 / 3.0)),
+/// #         outer_edge: au(5.2029 * math::powf(0.5, 2.0 / 3.0)),
+/// #     },
+/// #     scattered: None,
+/// #     main_mass: SOLAR_MAIN_BELT_MASS,
+/// #     scattered_mass: EarthMasses::ZERO,
+/// # };
+/// # let sources = ImpactorSources::new(mu, vec![belt], [(EarthMasses::new(317.8), au(5.2029))])?;
+/// # let inputs = FiguresInputs {
+/// #     atmosphere: derived.atmosphere(),
+/// #     mass: derived.mass(),
+/// #     radius: Metres::from(derived.radius()),
+/// #     surface_gravity: derived.surface_gravity(),
+/// #     class: derived.class(),
+/// #     fractions: derived.fractions(),
+/// #     inventory_water: derived.inventory().water(),
+/// #     rotation_period: Seconds::new(86_164.1),
+/// #     fe_h: Dex::new(0.0),
+/// #     age,
+/// #     tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+/// #     subsurface_ocean: Subsurface::NotComputed,
+/// #     craters: CraterInputs {
+/// #         orbit: ImpactorOrbit::Host(HostOrbiter {
+/// #             orbit: HostOrbit { semi_major_axis: a, eccentricity: 0.0167, inclination: Radians::ZERO },
+/// #             mass: EarthMasses::new(1.0),
+/// #             belt: None,
+/// #         }),
+/// #         density: derived.density(),
+/// #         sources: &sources,
+/// #         molten_until: Some(Years::new(3.2e7)),
+/// #         last_giant_impact: Some(Years::ZERO),
+/// #     },
+/// # };
+/// let figures = GlobalFigures::derive(&inputs)?.expect("an Earth has a surface");
+/// // Today's, at its own age on its temperate surface.
+/// assert_eq!(past_outgassing(&inputs, age).to_bits(), figures.outgassing().to_bits());
+/// // Higher in its youth.
+/// let young = past_outgassing(&inputs, Years::new(1.07e9));
+/// assert!(young > 1.5 * figures.outgassing(), "{young}");
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn past_outgassing(inputs: &FiguresInputs<'_>, age: Years) -> f64 {
+    if matches!(inputs.atmosphere.state(), SurfaceState::GasEnvelope) || !non_negative(age.value())
+    {
+        return 0.0;
+    }
+    interior_of(inputs).map_or(0.0, |interior| {
+        outgassing(heat_at(inputs, interior, age, SurfaceState::Temperate).heat_flow)
+    })
 }
 
 /// The surface age, the impactors and the crater contract of the body `inputs` describe, holding
