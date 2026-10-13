@@ -1869,16 +1869,15 @@ planets, reach the sky only from a few hundredths of a light-year: an old brown 
 shows at V 5.9 from 0.05 ly, which is an ordinary distance in the nuclear cluster, so there the
 parallax sprites' nearby query includes the substellar layers. To naked-eye magnitude 6.5 the
 brightest stars of the heavier layers — supergiants and O stars from E, and yellow post-AGB stars
-and giants from C and D — are visible thousands of light-years away. Near the Sun the spheres that
-reach them, at the caps of [open question 13](#open-questions), hold some 2.6 × 10⁷ systems — 5.8 ×
-10⁶ in C, 7.4 × 10⁶ in D and 1.3 × 10⁷ in E — and at the brightness rule's own radii upwards of
-2.5 × 10⁸. At the Galactic Centre the same caps take in most of the bulge and the nuclear disc,
-about 2 × 10⁹ systems in layers C to E. Either is far past the server's census limit of 20,000
-systems a query, and placing every system, at a few microseconds each, would take minutes of one
-core per arrival near the Sun and hours at the centre. That and the section's other counts are
-orders of magnitude, the Milky Way fixture's at generator version 14, before plan 06's track fates
-(P06.T30) and the Chabrier refit of version 15, and before layer C's cap is re-derived for its
-post-AGB stars; they are to be re-derived. The sky therefore needs a request of its own.
+and giants from C and D — are visible thousands of light-years away. Near the Sun at generator
+version 21 the caps of [open question 13](#open-questions), a radius for each layer in each
+direction at V 7.95, hold some 2.7 × 10⁸ systems — 1.85 × 10⁸ in C, 4.8 × 10⁷ in D and
+4.1 × 10⁷ in E — and the spheres at the same count some 4.5 × 10⁸. In the nuclear disc, where dust
+holds the caps to a few hundred light-years, they hold about 10⁷. Either is far past the server's
+census limit of 20,000 systems a query, and placing every system near the Sun, at a few microseconds
+each, would take some 10–20 minutes of one core per arrival. These counts are R06.T17's, on the
+Milky Way fixture; layer C's cap rests on post-AGB crossings and the products of pair evolution
+(open question 13). The sky therefore needs a request of its own.
 
 With it, the sky is **generated from the same model the charts read**, at a different time. Every
 star is placed and described at its retarded time t − d/c and its apparent position
@@ -3201,31 +3200,47 @@ and the rest — and their answers are leans in the body, listed under [Decision
     sufficient: one radius for every layer is still volume-limited. Each mass layer's radius is
     bounded by the brightest absolute magnitude plan 06's tracks reach in any phase of its life,
     dimmed by the least extinction in any direction. For layer C that phase is the post-AGB crossing,
-    M_V ≈ −5.3 for a 2.5 M☉ progenitor and −3.8 to −4 for the long crossings near 1 M☉, which gives
-    about 7,400 ly; for D, post-AGB to −7.1, about 17,000 ly; and for E the whole galaxy, where a
-    150 M☉ star reaches M_V ≈ −10.95 and 101,000 ly. That is brighter than any observed star: the
-    tracks hold their most massive stars cooler than 10,000 K above log L 5.8 for 1.8–2.4 × 10⁵
-    years, beyond the Humphreys–Davidson limit, which is a finding for plan 06
+    M_V ≈ −5.3 for a 2.5 M☉ progenitor and −3.8 to −4 for the long crossings near 1 M☉, which gives,
+    unextinguished at V 6.5, about 7,400 ly; for D, post-AGB to −7.1, about 17,000 ly; and for E the
+    whole galaxy, where a 150 M☉ star reaches M_V ≈ −10.95 and 101,000 ly. That is brighter than any
+    observed star: the tracks hold their most massive stars cooler than 10,000 K above log L 5.8 for
+    1.8–2.4 × 10⁵ years, beyond the Humphreys–Davidson limit, which is a finding for plan 06
     ([open question 17](#open-questions)); the rule follows the tracks while they stand. The dwarfs'
     bolometric corrections (`crates/hyperion-sim/src/stellar/photometry.rs`) also make late M giants
     up to 1.7 mag too bright, inflating the AGB peaks. The rule is the ceiling; the caps are derived,
     not chosen. Each is the smallest radius beyond which the layer's expected number of stars brighter
     than the limit falls below one, computed at the census from the layer's cumulative luminosity
     function (the quadrature the band needs), the density field and the extinction along some 48 rays.
-    Near the Sun that gives about 3,000 ly for C, set by some tens of yellow post-AGB stars within
-    reach; about 4,300 for D, whose bright giants and Cepheids at about −4.5 reach some 2,600 ly in the
-    plane at its mean extinction of about 0.55 mag per 1,000 ly, and whose post-AGB stars have yet to
-    be counted; and about 10,000 for E, whose supergiants at −8 to −9.5 reach 6,000–14,000 ly through
-    low-extinction windows, so that 10,000 misses only a handful. The C and D caps are estimates for
-    the census benchmark to confirm. In the nuclear disc dust holds even E to about 1,000 ly, so the
-    caps shrink to a few hundred to about 1,000 ly and the census's cost with them; above the disc they
-    grow towards the rule's bounds, since the disc's supergiants 10,000–30,000 ly away are then
-    naked-eye stars. Layers A and B never leave the main sequence within the galaxy's age. Their
-    brightest visible phase is the contraction onto it, a T Tauri star of M_V ≈ 4.8 at 0.5 Myr for
-    0.75 M☉ (Baraffe et al. 2015, which plan 06's tracks match to 0.1 mag), which reaches V 6.5 at
-    about 70 ly before its birth cloud's extinction. The earlier protostar, M_V ≈ 2.2 with its
-    accretion light, is buried in its envelope, so the sky treats plan 06's Class 0/I phase
-    (`protostar_class`) as dark in V; without that, the rule would stay at about 250 ly.
+    Near the Sun at generator version 21 and V 7.95, the spheres at the caps' count, beyond which
+    fewer than one star of the layer is expected over the whole sky, are about 8,200 ly for C, 9,900
+    for D and 23,500 for E (R06.T17, on the Milky Way fixture at 1,536 rays; each is the count's
+    node just beyond the crossing, the nodes 10% apart). C's is set by post-AGB crossings and the
+    products of pair evolution, merged helium giants akin to the R CrB stars, brighter than M_V
+    about −4; the AGB tips, at −2 to −4, count only nearer in. The pair products' fitted rate rests
+    on a few of the fit's systems, and without them C's sphere is about 6,800 ly (R06.T5.d). Nine
+    post-AGB and R CrB stars brighter than V 7.95 lie 4,300–6,500 ly from the real Sun by their
+    inverted Gaia DR3 parallaxes (89 Her, HR 4049, XX Cam, AC Her, RY Sgr, HD 133656, HD 101584,
+    HD 52961 and HD 161796), so a C cap under about 6,500 ly would not be Milky Way-like, and one of
+    7–8 thousand light-years is consistent with them. D's, its rays' median 6,800 ly, is set by
+    post-AGB stars and bright giants brighter than M_V about −4.5, off the plane and through its
+    clearest windows: in the plane, at the mean extinction of about 0.55 mag per 1,000 ly, a giant
+    or Cepheid of −4.5 reaches only about 3,800 ly. D's post-AGB stars have yet to be counted, since
+    the census tallies no phase. E's, its rays' median 4,600 ly and 16,000 within 10° of the plane,
+    is set by supergiants brighter than M_V about −6.3, and its longest ray, 61,000 ly, runs along
+    the outer disc towards the anticentre; its reach in the plane stands until question 17 rules on
+    the cool supergiants above the Humphreys–Davidson limit. These are the exact census's caps;
+    since R13's real limit the census the server serves stops C to E at 2,000 ly
+    ([The hybrid sky](#the-hybrid-sky-the-census-near-synthetic-stars-far)). In the nuclear disc,
+    (0, 150, 0) ly, dust holds even E to a few hundred light-years: the rays' medians are 74 ly for
+    C, 99 for D and 235 for E (spheres 132, 235 and 379 ly), and the census's cost shrinks with
+    them; above the disc they grow towards the rule's bounds, since the disc's supergiants
+    10,000–30,000 ly away are then naked-eye stars. Layers A and B never leave the main sequence
+    within the galaxy's age. Their brightest visible phase is the contraction onto it, a T Tauri
+    star of M_V ≈ 4.8 at 0.5 Myr for 0.75 M☉ (Baraffe et al. 2015, which plan 06's tracks match to
+    0.1 mag), which reaches V 6.5 at about 70 ly before its birth cloud's extinction. The earlier
+    protostar, M_V ≈ 2.2 with its accretion light, is buried in its envelope, so the sky treats plan
+    06's Class 0/I phase (`protostar_class`) as dark in V; without that, the rule would stay at
+    about 250 ly.
 
     The sky also needs what the grid does not place — feature members such as open clusters like the
     Pleiades and Hyades, globular clusters and the nuclear cluster, the catalogue classes and the
@@ -3247,14 +3262,16 @@ and the rest — and their answers are leans in the body, listed under [Decision
     cell's mass words in sorted order, so that the census skips light candidates without opening
     their streams. Each cell's bright subset is cached, so that a jump of up to 1,000 ly reuses most of
     the cells; systems move, and a cell is chosen by its systems' epoch positions and tested at the
-    time asked, so the cache keeps the range query's padding rule. Under the near-Sun caps the census
-    visits about 4 million cells of 32, 64 and 128 ly, some 3 s at 0.7 µs each, but the candidate
-    streams opened for the mass skip scale with the systems enclosed: some 6 × 10⁷ near the Sun, 5–10
-    CPU-seconds on first arrival, and some 5 × 10⁹ in the inner bulge, 400–800 CPU-seconds under
-    fixed caps. The pool (`crates/hyperion-server/src/compute/pool.rs`) has two priorities,
-    interactive jobs that fail fast with `queue_full` and bulk jobs that wait, so the census runs at
-    bulk priority, never as interactive chunks, and never holds the charts' queries behind it. The
-    cost needs a benchmark, and the counts re-deriving ([open question 19](#open-questions)).
+    time asked, so the cache keeps the range query's padding rule. Under the near-Sun caps at V 7.95
+    the exact census plans some 10⁸ cells of 32, 64 and 128 ly and opens some 3.3 × 10⁸ candidate
+    streams for the mass skip, against the 2.7 × 10⁸ systems its caps by direction hold, since a
+    cell is opened whole: about 1.1 × 10⁶ CPU-seconds cold (R06.T17, sampled). In the nuclear disc
+    it opens 5.6 × 10⁷ against 1.0 × 10⁷ systems, some 6 × 10⁴ CPU-seconds. The census the server
+    serves, stopped at 2,000 ly, takes 1.4 × 10⁴ CPU-seconds near the fixture's Sun. The pool
+    (`crates/hyperion-server/src/compute/pool.rs`) has two priorities, interactive jobs that fail
+    fast with `queue_full` and bulk jobs that wait, so the census runs at bulk priority, never as
+    interactive chunks, and never holds the charts' queries behind it. R06.T17 benchmarked the cost
+    and re-derived the counts ([open question 19](#open-questions)).
 
 14. **Whether Vulkan compositing is stable on the UHD 620.** **Open,** on the UHD 620 alone. The
     probe's runs lasted seconds. A 30-minute soak with the chosen switch set — the photorealistic
@@ -3308,12 +3325,20 @@ and the rest — and their answers are leans in the body, listed under [Decision
     arrives with pads or wheels under about 1 m on legs spaced under 2 m, if a hazard console must
     show the ground below 2 m, or if a fresh-crater class is placed at landing sites
     ([The line between truth and decoration](#the-line-between-truth-and-decoration)).
-19. **The sky's counts at generator version 15.** **Open.** The counts of [The sky](#the-sky) and of
-    question 13 are the Milky Way fixture's at generator version 14, before plan 06's track fates
-    (P06.T30) and the Chabrier refit, and C's cap is estimated. The census benchmark re-derives them at
-    version 15, explains why the candidates opened (6 × 10⁷ near the Sun, 5 × 10⁹ in the inner bulge)
-    exceed the systems that layers C to E hold (2.6 × 10⁷ and 2 × 10⁹), and checks the per-layer counts
-    against the range query's benchmark `range_500ly_floor_d`, which returns 37,675 systems at version 15.
+19. **The sky's counts, re-derived.** **Closed** at generator version 21 (R06.T17, on the Milky Way
+    fixture at V 7.95 and 1,536 rays). Near the Sun the caps by direction hold some 2.7 × 10⁸
+    systems of layers C to E (1.85 × 10⁸ in C, 4.8 × 10⁷ in D and 4.1 × 10⁷ in E), against 2.6 × 10⁷
+    at version 14, and the exact census opens 3.3 × 10⁸ candidates (2.05 × 10⁸, 4.7 × 10⁷ and
+    7.6 × 10⁷); in the nuclear disc the caps hold 1.0 × 10⁷ systems and the census opens 5.6 × 10⁷
+    candidates. The candidates, the records past the mass floor, exceed the systems because a cell
+    is opened whole wherever a ray's cone, padded by the offset bound, meets it: near the Sun by a
+    fifth, C's by a tenth and E's, 128 ly cubes on rays widened to their neighbours', by 1.9 times,
+    while D's are 3% fewer, since a record under its cell's mass floor is no candidate; in the
+    nuclear disc, whose caps are a few cells across, by 5.6 times. The 5 × 10⁹ candidates once given
+    for the inner bulge held the near-Sun caps fixed there. `range_500ly_floor_d` walks 37,668
+    systems (29,412 of D and 8,256 of E), 0.13% under the range query's own expectation. What
+    remains is question 13's: D's post-AGB count, and E's reach in the plane, which waits on
+    question 17.
 20. **Plan 14's relief and its gravity scaling.** **Closed** (ruled 2026-10-09, on the surface
     plan's research). Plan 14's greatest relief, 20 km × (g⊕ ÷ g) × a lithosphere factor, is Johnson
     and McGetchin 1973's 1/g envelope, not a prediction: about 53 km for Mars and 121 km for the
