@@ -2791,6 +2791,40 @@ until T13.f. Tests: the re-request rules; a field factor of 2 lowers every eye l
 mag; stale on link loss; the worker's decode equals the main-thread decoder's. Acceptance: `pnpm
 --filter hyperion exec vitest run src/renderer/src/view/sky`, `just ci`.
 
+- **R06.T12.b A re-asked sky never shows less than it held (new; after T17; decided 2026-10-13,
+  `decision-r06-t17-findings.md` §2).** T17 found that a sky asked again within one arrival is
+  held from the new request's first reply. Near the Sun on the server's galaxy a final sky of
+  66,614 stars falls back to the 3,192 within 125 ly, the rest to the band, and climbs back over
+  some 33 minutes on 15 workers (about 1.85 h on four).
+  - **The hold.** Through a re-ask for `parallax`, `limits` or `partial`, `useSky` keeps the held
+    sky until a reply of the new request is final, or is at least as complete as the held one in
+    every layer: each layer final, or its `complete_to_ly` at least the held one's where the held
+    one is not final. It then holds that reply and each later one, as T11.d does.
+  - **Where the hold ends at once.** The held sky gives way to the newest reply when its parallax
+    shift for an open camera, by `skyRequestReason`'s measure, reaches `PARALLAX_HOLD_PX`, 1 px
+    (ten times `PARALLAX_THRESHOLD_PX`). For `expired` and `jump`, whose held sky stands for
+    another time, each reply is held as built. A new arrival is unchanged: `STARS: PENDING`, then
+    each reply.
+  - **The rule and the flags.** The rule is a pure function in `model.ts`, beside
+    `skyRequestReason`. `pending` is true only while no sky of the arrival is held, so neither
+    `STARS: PENDING` nor `LIGHTING: PENDING` returns during a hold. The labels are unchanged: the
+    held reply sets the `STARS` line, as signed off (R06.T11.f).
+  - **Tests** (`FakeWebSocket`, the fake worker):
+    - a final sky re-asked for parallax, and for a deeper camera limit, stays held through the
+      new request's partial replies and gives way to its final; no reply of fewer stars is ever
+      held;
+    - a reply as complete as the held one in every layer is held before the final;
+    - at a shift of 1 px the newest reply is held;
+    - `expired` and a time `jump` hold each reply;
+    - a partial sky left by a lost link gives way once a new reply reaches it;
+    - `pending` stays false through a hold;
+    - a new arrival reads `STARS: PENDING` before its first reply.
+  - **Files:** `apps/hyperion/src/renderer/src/view/sky/{model,useSky}.ts`, `model.test.ts`,
+    `useSky.test.tsx`.
+  - **Acceptance:**
+    `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky src/renderer/src/displays/view`,
+    `just smart-ci`.
+
 ### R06.T13 Drawing the sky
 
 - **R06.T13.a Per-view limits and culling.** `cameraLimitV` over R02's `ExposureTriple` and
