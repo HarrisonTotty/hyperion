@@ -718,8 +718,8 @@ Order and parallelism:
     then T54.a, which wires them onto the record and bumps. Compute subtasks are pure modules,
     called by nothing on the record until T54.a, so each keeps `just ci` green and moves no golden.
     Lanes: T49.b → T49.c; T49.d; T49.e (after R08.T5.b and T5.d); T50.a → T50.c → T51.a → T51.b
-    (one lane: all four edit `derive/atmosphere.rs`); T51.c after T50.a; T24.e (after T49.b's
-    heat-capacity step, science-r08-gases-2.md §1.4) → T50.b → T52.a → T52.b →
+    (one lane: all four edit `derive/atmosphere.rs`); T51.c after T50.a and T49.c; T24.e (after
+    T49.b's heat-capacity step, science-r08-gases-2.md §1.4) → T50.b → T52.a → T52.b →
     T52.c → T24.c with T24.g (after T51.a) → T24.d with T52.d; T56.a → T56.c →
     T56.d (lane `p14-moons`; T56.c after T50.a and T50.c), with T56.b in the client after T56.a;
     T57.a after T51.b in the T50.a lane; then T54.a.
@@ -4650,17 +4650,20 @@ its source when it becomes a constant. Their order with T24 and with rendering p
     (T24.a's mole fraction), with ties by registry order; or none. The loop runs over T49.a's
     condensable rows in registry order: water, methane, nitrogen, carbon dioxide and argon today,
     and any later row joins as data. The climate's range is T24.a's `climate_range`
-    (science-p14-t24a-climate §3). It runs from
+    (science-p14-t24a-climate §3 and §6, item 1), the span of the orbit-mean climate. Every term is
+    on the orbit-averaged flux, and each end is a half-day mean, not the noon peak, the predawn
+    minimum or a perihelion's, which R09's field resolves. It runs from
 
-    T_cold = max(T_floor, min(T₀, T₉₀) − (T_mean − T_night))
+    T_cold = max(T_floor, min(T₀, T₉₀, T_mean) − (T_mean − T_night))
 
     to
 
     T_warm = max(T₀, T₉₀) + (T_day − T_mean),
 
     where:
-    - T₀ = T_mean + ⅓ΔT_ep and T₉₀ = T_mean − ⅔ΔT_ep are the zonal profile T_mean + T₂ P₂(sin φ),
-      T₂ = −⅔ΔT_ep (R09's), at the equator and a pole;
+    - T₀ and T₉₀ are T24.a's zonal ends (`zonal_ends_k`, science-p14-t24a-climate §7): the annual
+      insolation's Legendre modes, each damped at its own rate in the emitted flux, whose
+      difference is ΔT_ep. With no transport they are the radiative ends, T_mean q^¼;
     - T_day and T_night are T24.a's dayside and nightside temperatures, whose difference is ΔT_dn;
     - T_floor = (T_CMB⁴ + F ÷ ε_r σ)^¼ is the night floor from T24.b's heat flow F.
 
@@ -5371,6 +5374,15 @@ Snapshot path, `planetary/chem/`.
       That cloud fraction comes from the state and the condensable's availability (a runaway world
       with sulphur keeps 1; a dry, thin-aired world falls to the condensable's), never from the
       Surface path's decks.
+  - **The passes take the record's composition** (science-p14-t24a-climate.md §6, item 3): the
+    material and the crust that a body's bulk section states, not its placement's.
+    - That composition is fixed before the passes for an icy belt member (`icy_member_bulk`), a
+      regular moon (`DerivedMoon::fractions`, its ice fraction), a giant-impact moon and a capture
+      (`moon_bulk_of`). It depends on the mass, the radius rank, the circumplanetary ice line, a
+      capture's radius or the parent's derivation, so `derive_body` takes it as an input.
+    - `DerivedBody::albedo` then equals the photometry section's Bond albedo for every body. That
+      retires P14.T47's exception (Risks, "Deviations in P14.T47.a–c", _The Bond albedo_).
+    - T24.a's regolith inertia then sits over the same material's albedo.
   - **A gas envelope's Bond albedo** comes from its class by T_eq, closed form: Sudarsky, Burrows
     and Pinto 2000's Table 1a gives class I 0.57, II 0.81, III 0.12, IV 0.03 and V 0.55 about a
     G2V star. They are host-dependent: class I runs from 0.63 about an A8V star to 0.38 about an
@@ -5385,10 +5397,15 @@ Snapshot path, `planetary/chem/`.
     - an Enceladus near 0.8 (Howett et al. 2010, from memory);
     - a 1,200 K giant between class IV's and V's albedos, and Jupiter's within 0.05 of its table
       value;
+    - an icy belt member whose placement holds under 10% water, a capture whose density makes it
+      icy, and a giant-impact moon of a rocky planet each take the albedo, and so the T_eq, of their
+      bulk section's material;
+    - over the sample, `DerivedBody::albedo` equals the photometry section's Bond albedo to the
+      bit;
     - the passes converge to 10⁻⁹ in T_eq.
   - _Files:_ `planetary/derive/{atmosphere, photometry}.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive`.
-- **P14.T51.c Crust composition, redox class and melt area** (22 → 23; after T50.a).
+- **P14.T51.c Crust composition, redox class and melt area** (22 → 23; after T50.a and T49.c).
   - `hooks/crust.rs`:
     `CrustComposition { primary: Option<SubstanceId>, secondary: Option<SubstanceId>, tertiary: Option<SubstanceId>, bulk: Option<SubstanceId>, lid: LidCrust, provinces: SubstanceId, redox: RedoxClass, melt_area_fraction: f64 }`
     and `LidCrust { Primary, Secondary, Bulk }`. The inputs are:
@@ -5489,6 +5506,12 @@ Snapshot path, `planetary/chem/`.
     lava world has a dayside pool and a solid nightside (Léger et al. 2011; Kite et al. 2016).
     `MagmaOcean` stays the global state. R09.T13.c applies each cell's own entry's solidus.
   - **The provinces** are the lid's own substance on a body with no constructional volcanism.
+  - **The regolith's thermal inertia** (science-p14-t24a-climate.md §6, item 2): a pure function
+    of the lid, the inertia √(k ρ c) of its regolith layer. It is computed from T49.c's row (the
+    solid's specific heat and conductivity, and its grain density) at the regolith form's
+    porosity and grain size (science-r09-drainage.md §3, by the law T49.c settles with R09.T13.c's
+    airless model). A body's dark, hydrated or icy regolith follows from its lid, with no class of
+    its own. P14.T54.a passes it to T24.a.
   - _Tests:_
     - the Moon a `feldspathic` primary lid with `basalt_fe` provinces;
     - Mercury reduced and low-FeO: a `basalt_reduced` lid over a graphite primary crust;
@@ -5513,6 +5536,11 @@ Snapshot path, `planetary/chem/`.
       - a 10 km icy body at 1 Myr or later, and a 200 km Kuiper-belt body at 5 Myr, are
         `cometary`;
       - a `Reduced` dry body that never melted is `chondrite_e`;
+    - the lid's regolith inertia, in J m⁻² K⁻¹ s^−½:
+      - a Ceres-like body's within 15–60 (Spencer 1990 to Rognini et al. 2020, via Li et al.
+        2020);
+      - the Moon's `feldspathic` lid's within 45–65 (Hayne et al. 2017's 55 ± 2);
+      - an icy satellite's `H2O` lid's within 5–70 (Howett et al. 2010);
     - `bulk` excludes every crust; `lid` names a present member;
     - the series within 1% of 400 terms;
     - the formation time's draw is deterministic, and no existing value moves.
@@ -5938,6 +5966,10 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - `record::Surface` fills `vertical_structure` (T24.e), `aerosols` (T24.c with T24.g),
     `condensates` (T51.a) and `crust` (T51.c), and `surface_liquids` and `surface_ices` gain T51.a's
     entries.
+  - T24.a's `SurfaceInputs` takes the lid's regolith inertia (T51.c) in place of `SurfaceMaterial`.
+    That retires `ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` and
+    `ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` (science-p14-t24a-climate.md §6, item 2). The
+    bless note accounts for the airless nights it moves.
   - `record::Envelope` is filled by T24.d with T52.d.
   - `MOONS_VERSION` and its tripwire are deleted (T56.a, T56.c, T56.d), so that the moons' Laplace
     planes, own ranks and tides, and the rings' normals, take effect with the batch. The bless note
@@ -5960,7 +5992,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - a Jupiter's envelope `Ok` with an NH₃ deck;
     - the protocol fixture gains a Titan with its lakes and a hot Jupiter's envelope;
     - `golden_diff.py` accounts for every change.
-  - _Files:_ `planetary/{record, hooks/mod}.rs`, `crates/hyperion-server/src/convert/planetary.rs`,
+  - _Files:_ `planetary/{record, hooks/mod}.rs`, `planetary/hooks/surface.rs`,
+    `crates/hyperion-server/src/convert/planetary.rs`,
     `packages/protocol/fixtures/planetary.json`, `planetary/surface/inputs.rs`,
     `planetary/moons/mod.rs`, `planetary/derive/atmosphere.rs`,
     `crates/hyperion-base/src/version.rs`, and the goldens.
