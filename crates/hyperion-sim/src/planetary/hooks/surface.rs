@@ -86,9 +86,11 @@
 //! An airless body's equator–pole contrast is the radiative one. Its night is its regolith's: the
 //! diurnal storage enters Cowan and Agol's ε as x ÷ (1 + x), x = 0.635 Θ^0.905, Θ the thermal
 //! parameter at the material's inertia, above a floor set by the internal heat and the cosmic
-//! background (science-p14-t24a-climate §2). The Moon's night is 106 K (Diviner, ~95 K before
-//! dawn) and Mercury's 102 K (Mariner 10, 100–130 K). Until P14.T24.b supplies the heat flow the
-//! floor is the cosmic background's, [`COSMIC_BACKGROUND_TEMPERATURE`].
+//! background (science-p14-t24a-climate §2). The Moon's night is 106 K (Diviner, ~95 K before dawn)
+//! and Mercury's 102 K (Mariner 10, 100–130 K). The floor is [`night_floor`]: the cosmic
+//! background's [`COSMIC_BACKGROUND_TEMPERATURE`], raised by the body's internal heat flow
+//! (P14.T24.b's, [`SurfaceInputs::heat_flow`]) to about 21 K on a Mercury, 22 K on a Moon and 36 K
+//! on an Earth.
 //!
 //! Koll's scaling is valid for dry, tidally locked rocky planets with a high mean molecular
 //! weight, at `T_eq` of 391–805 K, 0.01–100 bar and `τ_LW` of 0.1–5, to a factor of two in his χ
@@ -394,8 +396,44 @@ pub const REGOLITH_REDISTRIBUTION_FIT: (f64, f64) = (0.635, 0.905);
 /// The cosmic microwave background's temperature, the floor of a night with no internal heat:
 /// 2.725 48 K (Fixsen 2009, ApJ 707, 916: 2.725 48 ± 0.000 57 K).
 ///
-/// P14.T24.b's heat flow F raises the floor to (`T_CMB`⁴ + F ÷ `ε_r` σ)^¼.
+/// P14.T24.b's heat flow F raises the floor to (`T_CMB`⁴ + F ÷ `ε_r` σ)^¼ ([`night_floor`]).
 pub const COSMIC_BACKGROUND_TEMPERATURE: Kelvin = Kelvin::new(2.725_48);
+
+/// The floor of a night on a body of internal heat flow `heat_flow`: (`T_CMB`⁴ + F ÷ `ε_r` σ)^¼,
+/// at which its regolith radiates its internal heat and the cosmic background's
+/// ([`COSMIC_BACKGROUND_TEMPERATURE`], [`REGOLITH_EMISSIVITY`]; science-p14-t24a-climate.md §2).
+///
+/// A world locked 1:1 to its seasonal host has no solar day, so its night is the floor: about 21 K
+/// at a Mercury's heat flow, 22 K at a Moon's and 36 K at an Earth's (science-p14-t24b-laws §1.5).
+/// The floor is weak in F, a factor of 2 in F being 19% in T. Diviner's permanently shadowed
+/// craters, 25–40 K (Paige et al. 2010, Science 330, 479; not re-read), are not heat-flow floors:
+/// scattered light and the crater walls' infrared hold them above it. It is the cosmic
+/// background's for a heat flow that is not positive.
+///
+/// # Examples
+///
+/// The Moon's 11.9 mW m⁻² hold its dark at 21.7 K:
+///
+/// ```
+/// use hyperion_sim::planetary::hooks::surface::{COSMIC_BACKGROUND_TEMPERATURE, night_floor};
+/// use hyperion_sim::units::WattsPerSquareMetre;
+///
+/// let floor = night_floor(WattsPerSquareMetre::new(0.0119));
+/// assert!((floor.value() - 21.7).abs() < 0.05);
+/// assert_eq!(night_floor(WattsPerSquareMetre::new(0.0)), COSMIC_BACKGROUND_TEMPERATURE);
+/// ```
+#[must_use]
+pub fn night_floor(heat_flow: WattsPerSquareMetre) -> Kelvin {
+    let f = heat_flow.value();
+    if f.is_nan() || f <= 0.0 {
+        return COSMIC_BACKGROUND_TEMPERATURE;
+    }
+    let background = math::powi(COSMIC_BACKGROUND_TEMPERATURE.value(), 4);
+    Kelvin::new(math::powf(
+        background + f / (REGOLITH_EMISSIVITY * STEFAN_BOLTZMANN),
+        0.25,
+    ))
+}
 
 /// What [`SurfaceConditions::derive`] reads of a body at a time, as plain values.
 ///
@@ -428,6 +466,10 @@ pub struct SurfaceInputs<'a> {
     pub xuv_flux: WattsPerSquareMetre,
     /// How it turns under its seasonal host.
     pub spin: SeasonalSpin,
+    /// Its internal heat flow at the surface at the time, P14.T24.b's F
+    /// ([`GlobalFigures::heat_flow`](crate::planetary::hooks::figures::GlobalFigures::heat_flow)),
+    /// which raises its night's floor above the cosmic background's ([`night_floor`]).
+    pub heat_flow: WattsPerSquareMetre,
 }
 
 /// How a body turns under the host that sets its seasons, as its contrasts read it: its
@@ -682,6 +724,7 @@ impl SurfaceConditions {
     ///         rotation_period: Seconds::new(86_164.1),
     ///         solar_day: Some(Seconds::new(86_400.0)),
     ///     },
+    ///     heat_flow: WattsPerSquareMetre::new(0.0925),
     /// })
     /// .expect("an Earth has a surface");
     /// // Its fractions are by number and sum to 1, its equator is the warmer, its poles stay
@@ -703,8 +746,7 @@ impl SurfaceConditions {
             mean_molar_mass_g_per_mol,
             heat_capacity_over_r,
         } = Surface::of(inputs)?;
-        // P14.T24.b's heat flow raises it.
-        let floor = COSMIC_BACKGROUND_TEMPERATURE;
+        let floor = night_floor(inputs.heat_flow);
         let ends = zonal_ends_k(&column, &inputs.spin, moisture);
         let equator_pole = ends.0 - ends.1;
         let (day, night) = day_and_night(&column, &inputs.spin, inputs.material, floor);
@@ -763,7 +805,7 @@ impl SurfaceConditions {
     /// - The warmest is the warmer end plus the dayside's excess over `T_s`, `T_day` − `T_s`.
     /// - The coldest is the colder end, at most `T_s`, less the nightside's deficit,
     ///   `T_s` − `T_night`. It never lies below the night's floor, the cosmic background's
-    ///   ([`COSMIC_BACKGROUND_TEMPERATURE`]) until P14.T24.b's heat flow raises it.
+    ///   raised by the body's heat flow ([`night_floor`]).
     ///
     /// Cowan and Agol's day and night are not symmetric about `T_s`: with no redistribution the
     /// day stands 0.278 `T_s` above it and the night `T_s` below. An airless body's warmest lies

@@ -18,6 +18,7 @@ use crate::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
 use crate::planetary::derive::atmosphere::{SurfaceState, optical_depth_terms};
 use crate::planetary::derive::{PlanetClass, habitable_zone};
 use crate::planetary::fate::DestructionCause;
+use crate::planetary::hooks::figures::TectonicRegime;
 use crate::planetary::index::{BodySlot, BodySub};
 use crate::planetary::params::{FLATTENING_CAP, HILL_STABLE_GAP};
 use crate::planetary::placement::mutual_hill_radius;
@@ -2185,25 +2186,30 @@ fn the_flattening_is_continuous_in_time() {
     assert!(checked > 1_000, "{checked}");
 }
 
-/// P14.T24.a's surface conditions, held until the 21 → 22 batch's bump: `hooks_at` publishes none
-/// before it, and under the open hold every present body with a solid surface has its conditions,
-/// a moon's read under its planet's orbit, and every gas-envelope body none.
+/// P14.T24.a's surface conditions and P14.T24.b's global figures, held until the 21 → 22 batch's
+/// bump: `hooks_at` publishes neither before it, and under the open hold every present body with a
+/// solid surface has both, a moon's read under its planet's orbit, and every gas-envelope body
+/// neither.
 #[test]
 fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
     let t = UniverseTime::EPOCH;
     let (mut planets, mut moons, mut envelopes) = (0_u32, 0_u32, 0_u32);
+    let mut regimes = std::collections::BTreeMap::new();
+    let mut fields = std::collections::BTreeMap::new();
     for (ctx, system) in whole().iter().take(60) {
         for index in system.indices() {
             let Some(held) = system.hooks_at(ctx, index, t).unwrap() else {
                 continue;
             };
             assert_eq!(held.surface(), &Section::NotModelled, "{index:?}");
+            assert_eq!(held.figures(), &Section::NotModelled, "{index:?}");
             let open = system
                 .hooks_at_under(ctx, index, t, ConditionsHold::Published)
                 .unwrap()
                 .expect("a body with a surface seed has hooks under either hold");
             assert_eq!(open.surface_seed(), held.surface_seed());
             assert_eq!(open.bulk(), held.bulk());
+            assert_eq!(open.figures().state(), open.surface().state(), "{index:?}");
             let record = system.body_at(ctx, index, t).unwrap();
             let present = record.identity().state() == BodyState::Present;
             match open.surface() {
@@ -2223,13 +2229,12 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
                         "{index:?}: {sum}"
                     );
                     assert!(conditions.day_night_contrast_k() >= 0.0);
-                    // The climate's range never reaches below the night's floor.
-                    let (coldest, warmest) = conditions.climate_range();
-                    assert!(
-                        coldest >= hooks::surface::COSMIC_BACKGROUND_TEMPERATURE
-                            && warmest >= coldest,
-                        "{index:?}: {coldest:?} to {warmest:?}"
-                    );
+                    let Section::Ok(figures) = open.figures() else {
+                        panic!("{index:?} has conditions but no figures");
+                    };
+                    check_published_figures(index, conditions, figures);
+                    *regimes.entry(figures.tectonic_regime()).or_insert(0_u32) += 1;
+                    *fields.entry(figures.magnetic_field()).or_insert(0_u32) += 1;
                     match record.identity().kind() {
                         BodyKind::Moon(_) => moons += 1,
                         BodyKind::Planet | BodyKind::DwarfPlanet => planets += 1,
@@ -2269,7 +2274,43 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
         }
     }
     eprintln!("{planets} planets and {moons} moons with conditions, {envelopes} envelopes");
+    eprintln!("regimes {regimes:?}; fields {fields:?}");
     assert!(planets > 20 && moons > 5 && envelopes > 20);
+}
+
+/// What every published body's figures hold with its conditions (P14.T24.b): its climate never
+/// reaches below the night's floor that its heat flow sets; its heat flow is positive and its
+/// outgassing not negative; an ice shell lies over a computed ocean; and a conducting body's lid is
+/// stagnant unless it is one.
+fn check_published_figures(
+    index: BodyIndex,
+    conditions: &SurfaceConditions,
+    figures: &GlobalFigures,
+) {
+    let floor = hooks::surface::night_floor(figures.heat_flow());
+    let (coldest, warmest) = conditions.climate_range();
+    assert!(
+        coldest >= floor && warmest >= coldest,
+        "{index:?}: {coldest:?} to {warmest:?} over {floor:?}"
+    );
+    assert!(figures.heat_flow().value() > 0.0, "{index:?}");
+    assert!(figures.outgassing() >= 0.0, "{index:?}");
+    let ocean = matches!(figures.subsurface_ocean(), Subsurface::Ocean(_));
+    match figures.tectonic_regime() {
+        TectonicRegime::IceShell => assert!(ocean, "{index:?}"),
+        TectonicRegime::MobileLid
+        | TectonicRegime::Episodic
+        | TectonicRegime::HeatPipe
+        | TectonicRegime::StagnantLid => {
+            if figures.interior() == hooks::figures::Interior::Conducting {
+                assert_eq!(
+                    figures.tectonic_regime(),
+                    TectonicRegime::StagnantLid,
+                    "{index:?}"
+                );
+            }
+        }
+    }
 }
 
 /// A moon's surface conditions are read under its planet's orbit at the time, not its own
@@ -2323,6 +2364,10 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
                 stellar_flux: WattsPerSquareMetre::from(derived.flux()),
                 xuv_flux: derived.xuv_flux(),
                 spin,
+                heat_flow: match hooks.figures() {
+                    Section::Ok(figures) => figures.heat_flow(),
+                    other => panic!("{:?} has conditions but figures {other:?}", moon.index()),
+                },
             };
             let frame = rotation.frame();
             let under_planet = SeasonalSpin::of(frame, t, &seasonal, SeasonsFrom::Planet);
@@ -2346,11 +2391,11 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
     assert!(checked > 0);
 }
 
-/// The surface conditions `hooks_at` publishes from the 21 → 22 batch's bump, pinned over the
-/// sample's first systems (P14.T24.a): what `SeasonalSpin::of` and the bulk sections feed the
-/// derivation reaches every contrast's bits. The pin reads the hold open on version 21's
-/// derivation, so it moves at the bump with the batch's held gases and tides, which the bless
-/// re-measures.
+/// The surface conditions and global figures `hooks_at` publishes from the 21 → 22 batch's bump,
+/// pinned over the sample's first systems (P14.T24.a, T24.b): what `SeasonalSpin::of` and the bulk
+/// sections feed the derivation reaches every contrast's bits, and the heat flow the night's floor.
+/// The pin reads the hold open on version 21's derivation, so it moves at the bump with the batch's
+/// held gases and tides, which the bless re-measures.
 #[test]
 fn the_published_surface_conditions_are_pinned() {
     use hyperion_testkit::golden;
@@ -2400,6 +2445,36 @@ fn the_published_surface_conditions_are_pinned() {
             w.f64(&format!("{name}_stellar_flux"), c.stellar_flux().value());
             w.line(&format!("{name}_radiation = {:?}", c.radiation()));
             w.line(&format!("{name}_liquid_water = {}", c.liquid_water()));
+            let Section::Ok(f) = hooks.figures() else {
+                panic!("{name} has conditions but no figures");
+            };
+            w.f64(&format!("{name}_heat_flow"), f.heat_flow().value());
+            w.f64(
+                &format!("{name}_non_tidal_heat_flow"),
+                f.non_tidal_heat_flow().value(),
+            );
+            w.line(&format!("{name}_interior = {:?}", f.interior()));
+            w.line(&format!(
+                "{name}_tectonic_regime = {:?}",
+                f.tectonic_regime()
+            ));
+            w.line(&format!("{name}_magnetic_field = {:?}", f.magnetic_field()));
+            w.f64(&format!("{name}_outgassing"), f.outgassing());
+            match f.subsurface_ocean() {
+                Subsurface::Ocean(ocean) => {
+                    w.f64(
+                        &format!("{name}_shell_thickness"),
+                        ocean.shell_thickness().value(),
+                    );
+                    w.f64(
+                        &format!("{name}_ocean_thickness"),
+                        ocean.thickness().value(),
+                    );
+                }
+                other @ (Subsurface::NoOcean | Subsurface::NotComputed) => {
+                    w.line(&format!("{name}_subsurface_ocean = {other:?}"));
+                }
+            }
             pinned += 1;
         }
     }
@@ -2429,4 +2504,78 @@ fn the_published_hooks_are_order_independent() {
                 .unwrap()
         });
     }
+}
+
+/// P14.T24.b's published figures read each body's interior: a planet's or a member's ocean is
+/// not computed and it feels no tide; a moon's tide is its derivation's, P14.T17.b's, added to its
+/// own heat flow; and a regular moon's ocean is its flag's, another moon's not computed.
+#[test]
+fn the_published_figures_read_each_body_s_interior() {
+    let t = UniverseTime::EPOCH;
+    let (mut regular, mut oceans, mut other_moons) = (0_u32, 0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let Some(hooks) = system
+                .hooks_at_under(ctx, body.index(), t, ConditionsHold::Published)
+                .unwrap()
+            else {
+                continue;
+            };
+            let Section::Ok(figures) = hooks.figures() else {
+                continue;
+            };
+            let index = body.index();
+            match &body.part {
+                Part::Planet(_) | Part::Member(_) => {
+                    assert_eq!(
+                        figures.subsurface_ocean(),
+                        &Subsurface::NotComputed,
+                        "{index:?}"
+                    );
+                    assert_same_bits(
+                        figures.heat_flow().value(),
+                        figures.non_tidal_heat_flow().value(),
+                    );
+                }
+                Part::Moon(part) => {
+                    let OrbitHost::Body(parent) = body.host else {
+                        panic!("{index:?}: a moon goes round a body");
+                    };
+                    let planet = system.body(parent).unwrap();
+                    let epoch = Epoch::new(system, ctx, t);
+                    let host = fate_host(ctx, system.zone_of(planet));
+                    let fate = system.fate_of(planet, &host);
+                    let label = label::label(system, planet.index).unwrap();
+                    let (_, now) = system.primary_record(&epoch, planet, label, &fate);
+                    let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
+                    let derived =
+                        PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
+                    // Every moon's tide is its derivation's, P14.T17.b's.
+                    assert_same_bits(
+                        figures.heat_flow().value(),
+                        figures.non_tidal_heat_flow().value() + derived.heat_flux().value(),
+                    );
+                    match part.satellite.moon() {
+                        SatelliteMoon::Regular(_) => {
+                            regular += 1;
+                            let ocean = matches!(figures.subsurface_ocean(), Subsurface::Ocean(_));
+                            assert_eq!(ocean, derived.subsurface_ocean(), "{index:?}");
+                            oceans += u32::from(ocean);
+                        }
+                        SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => {
+                            other_moons += 1;
+                            assert_eq!(
+                                figures.subsurface_ocean(),
+                                &Subsurface::NotComputed,
+                                "{index:?}"
+                            );
+                        }
+                    }
+                }
+                Part::Ring(_) => panic!("{index:?}: a ring has no hooks"),
+            }
+        }
+    }
+    eprintln!("{regular} regular moons, {oceans} with oceans; {other_moons} other moons");
+    assert!(regular > 5 && other_moons > 0, "{regular}, {other_moons}");
 }

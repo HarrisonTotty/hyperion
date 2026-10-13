@@ -116,8 +116,11 @@ use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
 };
+use crate::planetary::hooks::figures::FiguresInputs;
 use crate::planetary::hooks::surface::{ConditionsHold, SeasonalSpin, SeasonsFrom, SurfaceInputs};
-use crate::planetary::hooks::{self, BodyHooks, BulkComposition, SurfaceConditions, SurfaceSeed};
+use crate::planetary::hooks::{
+    self, BodyHooks, BulkComposition, GlobalFigures, Subsurface, SurfaceConditions, SurfaceSeed,
+};
 use crate::planetary::hosts::evolved::{Circularisation, EccentricityFloor};
 use crate::planetary::hosts::young::{Formation, FormationDraws};
 use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
@@ -157,7 +160,7 @@ use crate::units::consts::{
     GM_EARTH, GRAVITATIONAL_CONSTANT, METRES_PER_AU, SECONDS_PER_JULIAN_YEAR,
 };
 use crate::units::{
-    EarthFluxes, EarthMasses, EarthRadii, GravitationalParameter, Kelvin, Kilograms,
+    Dex, EarthFluxes, EarthMasses, EarthRadii, GravitationalParameter, Kelvin, Kilograms,
     KilogramsPerCubicMetre, Megayears, Metres, MetresPerSecondSquared, Radians, SolarLuminosities,
     SolarMasses, SolarMassesPerYear, WattsPerSquareMetre, Years,
 };
@@ -1860,14 +1863,15 @@ impl PlanetarySystem {
         })
     }
 
-    /// The hooks of body `index` at `t` (P14.T23, T24.a): its surface seed, its bulk composition,
-    /// the mass fractions its record gives with the volatile inventory of its derivation at `t`
-    /// and the system's \[Fe/H\] and \[α/Fe\], and its surface conditions; `None` for a ring, a
-    /// belt or the halo. Server-only, and not part of the body's record (the [`hooks`] module
-    /// documentation).
+    /// The hooks of body `index` at `t` (P14.T23, T24.a, T24.b): its surface seed, its bulk
+    /// composition, the mass fractions its record gives with the volatile inventory of its
+    /// derivation at `t` and the system's \[Fe/H\] and \[α/Fe\], its surface conditions and its
+    /// global figures; `None` for a ring, a belt or the halo. Server-only, and not part of the
+    /// body's record (the [`hooks`] module documentation).
     ///
-    /// The surface conditions are held until the 21 → 22 batch's bump: until then every body's is
-    /// [`Section::NotModelled`], as version 21's was ([`hooks::surface`]'s documentation).
+    /// The surface conditions and the global figures are held until the 21 → 22 batch's bump:
+    /// until then every body's are [`Section::NotModelled`], as version 21's were
+    /// ([`hooks::surface`]'s documentation).
     ///
     /// # Errors
     ///
@@ -1886,15 +1890,19 @@ impl PlanetarySystem {
     }
 
     /// [`hooks_at`](Self::hooks_at) under the surface conditions' hold `hold`, which tests read
-    /// from before the 21 → 22 batch's bump publishes them (P14.T24.a, held).
+    /// from before the 21 → 22 batch's bump publishes them (P14.T24.a and T24.b, held).
     ///
     /// A present body's conditions read its derivation at `t`, its bulk section's gravity, radius
-    /// and surface material (of its mass fractions, [`SurfaceMaterial::of`]), and its spin under
-    /// its seasonal orbit at `t`: its own for a planet or a member, its
-    /// planet's for a moon ([`SeasonalSpin::of`]). They are [`Section::NotApplicable`] for a body
-    /// in the gas-envelope state or not present, and [`Section::NotModelled`] for one with no
-    /// rotation law (every body [`generate_planets`] makes) or whose derivation this version does
-    /// not compute.
+    /// and surface material (of its mass fractions, [`SurfaceMaterial::of`]), its spin under its
+    /// seasonal orbit at `t` (its own for a planet or a member, its planet's for a moon,
+    /// [`SeasonalSpin::of`]) and its global figures' heat flow. The figures read its mass at `t`,
+    /// its bulk section's radius, gravity, class and fractions, its atmosphere and its volatile
+    /// inventory's water, its sidereal rotation period at `t`, the system's \[Fe/H\] and age at
+    /// `t`, and for a moon the tide its planet raises in it, its derivation's (P14.T17.b), with a
+    /// regular moon's subsurface ocean ([`Subsurface::of_regular_moon`], P14.T17.b's flag). Both
+    /// are [`Section::NotApplicable`] for a body in the gas-envelope state or not present, and
+    /// [`Section::NotModelled`] for one with no rotation law (every body [`generate_planets`]
+    /// makes) or whose derivation this version does not compute.
     ///
     /// # Errors
     ///
@@ -1936,44 +1944,34 @@ impl PlanetarySystem {
                 ctx.alpha_fe(),
             ))
         };
-        let conditions = |sky: SurfaceSky<'_>, bulk: &BulkProperties, whose: SeasonsFrom| {
-            match hold {
-                ConditionsHold::Held => return Section::NotModelled,
-                ConditionsHold::Published => {}
-            }
-            let (Some(rotation), Some(seasonal)) = (body.rotation.as_ref(), seasonal.as_ref())
-            else {
-                return Section::NotModelled;
-            };
-            let inputs = SurfaceInputs {
-                atmosphere: sky.atmosphere,
-                equilibrium_temperature: sky.equilibrium_temperature,
-                surface_gravity: bulk.surface_gravity(),
-                radius: Metres::from(bulk.radius()),
-                material: SurfaceMaterial::of(&bulk.fractions()),
-                stellar_flux: WattsPerSquareMetre::from(sky.flux),
-                xuv_flux: sky.xuv_flux,
-                spin: SeasonalSpin::of(rotation.frame(), t, seasonal, whose),
-            };
-            SurfaceConditions::derive(&inputs).map_or(Section::NotApplicable, Section::Ok)
+        let time = SurfaceTime {
+            hold,
+            rotation: body.rotation.as_ref(),
+            seasonal: seasonal.as_ref(),
+            t,
+            fe_h: ctx.fe_h(),
+            age: ctx.age_at(t),
         };
-        let (bulk, surface) = match &body.part {
+        let (bulk, (surface, figures)) = match &body.part {
             Part::Planet(_) | Part::Member(_) => match now.derived {
                 Some(d) => {
                     let properties =
                         icy_member_bulk(body, &d).unwrap_or_else(|| BulkProperties::from(&d));
-                    let sky = SurfaceSky {
-                        atmosphere: d.atmosphere(),
-                        equilibrium_temperature: d.equilibrium_temperature(),
-                        flux: d.flux(),
-                        xuv_flux: d.xuv_flux(),
+                    let case = SurfaceCase {
+                        sky: SurfaceSky::of_body(&d),
+                        bulk: &properties,
+                        whose: SeasonsFrom::Own,
+                        interior: SurfaceInterior::of_body(&d),
                     };
                     (
                         composition(properties.fractions(), *d.inventory()),
-                        conditions(sky, &properties, SeasonsFrom::Own),
+                        published_surface(&time, &case),
                     )
                 }
-                None => (Section::NotApplicable, Section::NotApplicable),
+                None => (
+                    Section::NotApplicable,
+                    (Section::NotApplicable, Section::NotApplicable),
+                ),
             },
             Part::Moon(moon) => {
                 let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), t);
@@ -1982,30 +1980,36 @@ impl PlanetarySystem {
                     match Self::moon_derived(&epoch, moon, &orbit, &now) {
                         Some(derived) => {
                             let properties = Self::moon_bulk_of(moon, &derived, &now);
-                            let sky = SurfaceSky {
-                                atmosphere: derived.atmosphere(),
-                                equilibrium_temperature: derived.equilibrium_temperature(),
-                                flux: derived.flux(),
-                                xuv_flux: derived.xuv_flux(),
+                            let case = SurfaceCase {
+                                sky: SurfaceSky::of_moon(&derived),
+                                bulk: &properties,
+                                whose: SeasonsFrom::Planet,
+                                interior: SurfaceInterior::of_moon(moon, &derived),
                             };
                             (
                                 composition(properties.fractions(), *derived.inventory()),
-                                conditions(sky, &properties, SeasonsFrom::Planet),
+                                published_surface(&time, &case),
                             )
                         }
-                        None => (Section::NotModelled, Section::NotModelled),
+                        None => (
+                            Section::NotModelled,
+                            (Section::NotModelled, Section::NotModelled),
+                        ),
                     }
                 } else {
-                    (Section::NotApplicable, Section::NotApplicable)
+                    (
+                        Section::NotApplicable,
+                        (Section::NotApplicable, Section::NotApplicable),
+                    )
                 }
             }
             Part::Ring(_) => unreachable!("a ring has no surface seed"),
         };
-        let surface = match hold {
-            ConditionsHold::Held => Section::NotModelled,
-            ConditionsHold::Published => surface,
+        let (surface, figures) = match hold {
+            ConditionsHold::Held => (Section::NotModelled, Section::NotModelled),
+            ConditionsHold::Published => (surface, figures),
         };
-        Ok(Some(BodyHooks::new(seed, bulk, surface)))
+        Ok(Some(BodyHooks::new(seed, bulk, surface, figures)))
     }
 
     /// The rotation of body `index` (P14.T14), as [`generate`] derived and holds it (P14.T46.b):
@@ -2655,6 +2659,152 @@ struct SurfaceSky<'a> {
     equilibrium_temperature: Kelvin,
     flux: EarthFluxes,
     xuv_flux: WattsPerSquareMetre,
+}
+
+/// What a body's global figures read at a time beyond its bulk section, its sky and its spin
+/// (P14.T24.b): its mass, its volatile inventory's water, the tide its parent raises in it, and
+/// its subsurface ocean as its rule computes it.
+#[derive(Debug, Clone, Copy)]
+struct SurfaceInterior {
+    mass: EarthMasses,
+    inventory_water: Kilograms,
+    tidal_heat_flow: WattsPerSquareMetre,
+    subsurface_ocean: Subsurface,
+}
+
+impl SurfaceSky<'_> {
+    /// The sky of a planet or a member derived as `derived`.
+    #[must_use]
+    fn of_body(derived: &DerivedBody) -> SurfaceSky<'_> {
+        SurfaceSky {
+            atmosphere: derived.atmosphere(),
+            equilibrium_temperature: derived.equilibrium_temperature(),
+            flux: derived.flux(),
+            xuv_flux: derived.xuv_flux(),
+        }
+    }
+
+    /// The sky of a moon derived as `derived`.
+    #[must_use]
+    fn of_moon(derived: &DerivedMoon) -> SurfaceSky<'_> {
+        SurfaceSky {
+            atmosphere: derived.atmosphere(),
+            equilibrium_temperature: derived.equilibrium_temperature(),
+            flux: derived.flux(),
+            xuv_flux: derived.xuv_flux(),
+        }
+    }
+}
+
+impl SurfaceInterior {
+    /// The interior of a planet or a member derived as `derived`: no tide, and no rule for an
+    /// ocean under its surface.
+    #[must_use]
+    fn of_body(derived: &DerivedBody) -> Self {
+        Self {
+            mass: derived.mass(),
+            inventory_water: derived.inventory().water(),
+            tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+            subsurface_ocean: Subsurface::NotComputed,
+        }
+    }
+
+    /// The interior of the moon `moon`, derived as `derived`: its tide is its derivation's,
+    /// P14.T17.b's (science-p14-t24b-laws §1.1's `q_tid`, P14.T56.d's from 22 → 23), and a regular
+    /// moon's ocean is its flag's; no rule computes another moon's ocean.
+    #[must_use]
+    fn of_moon(moon: &MoonPart, derived: &DerivedMoon) -> Self {
+        let subsurface_ocean = match moon.satellite.moon() {
+            SatelliteMoon::Regular(_) => Subsurface::of_regular_moon(
+                derived.radius(),
+                derived.density(),
+                derived.ice_fraction(),
+                derived.equilibrium_temperature(),
+                derived.heat_flux(),
+            ),
+            SatelliteMoon::GiantImpact(_) | SatelliteMoon::Captured(_) => Subsurface::NotComputed,
+        };
+        Self {
+            mass: moon.satellite.mass(),
+            inventory_water: derived.inventory().water(),
+            tidal_heat_flow: derived.heat_flux(),
+            subsurface_ocean,
+        }
+    }
+}
+
+/// What a body's surface conditions and global figures read of the time they are asked at
+/// ([`published_surface`]): the hold, the body's rotation, its seasonal orbit then, and the
+/// system's \[Fe/H\] and age.
+#[derive(Debug, Clone, Copy)]
+struct SurfaceTime<'a> {
+    hold: ConditionsHold,
+    rotation: Option<&'a BodyRotation>,
+    seasonal: Option<&'a KeplerElements>,
+    t: UniverseTime,
+    fe_h: Dex,
+    age: Years,
+}
+
+/// What a body's surface conditions and global figures read of the body ([`published_surface`]):
+/// its sky, its bulk section, whose orbit sets its seasons, and its interior.
+#[derive(Debug, Clone, Copy)]
+struct SurfaceCase<'a> {
+    sky: SurfaceSky<'a>,
+    bulk: &'a BulkProperties,
+    whose: SeasonsFrom,
+    interior: SurfaceInterior,
+}
+
+/// The surface conditions and global figures of the body `case` describes at `time` (P14.T24.a,
+/// T24.b): both [`Section::NotModelled`] under the hold, or with no rotation law or seasonal
+/// orbit; both [`Section::NotApplicable`] for a body with no surface; and otherwise both
+/// [`Section::Ok`], the conditions' night floor raised by the figures' heat flow.
+#[must_use]
+fn published_surface(
+    time: &SurfaceTime<'_>,
+    case: &SurfaceCase<'_>,
+) -> (Section<SurfaceConditions>, Section<GlobalFigures>) {
+    match time.hold {
+        ConditionsHold::Held => return (Section::NotModelled, Section::NotModelled),
+        ConditionsHold::Published => {}
+    }
+    let (Some(rotation), Some(seasonal)) = (time.rotation, time.seasonal) else {
+        return (Section::NotModelled, Section::NotModelled);
+    };
+    let (sky, bulk, interior) = (&case.sky, case.bulk, &case.interior);
+    let spin = SeasonalSpin::of(rotation.frame(), time.t, seasonal, case.whose);
+    let Some(figures) = GlobalFigures::derive(&FiguresInputs {
+        atmosphere: sky.atmosphere,
+        mass: interior.mass,
+        radius: Metres::from(bulk.radius()),
+        surface_gravity: bulk.surface_gravity(),
+        class: bulk.class(),
+        fractions: bulk.fractions(),
+        inventory_water: interior.inventory_water,
+        rotation_period: spin.rotation_period,
+        fe_h: time.fe_h,
+        age: time.age,
+        tidal_heat_flow: interior.tidal_heat_flow,
+        subsurface_ocean: interior.subsurface_ocean,
+    }) else {
+        return (Section::NotApplicable, Section::NotApplicable);
+    };
+    let inputs = SurfaceInputs {
+        atmosphere: sky.atmosphere,
+        equilibrium_temperature: sky.equilibrium_temperature,
+        surface_gravity: bulk.surface_gravity(),
+        radius: Metres::from(bulk.radius()),
+        material: SurfaceMaterial::of(&bulk.fractions()),
+        stellar_flux: WattsPerSquareMetre::from(sky.flux),
+        xuv_flux: sky.xuv_flux,
+        spin,
+        heat_flow: figures.heat_flow(),
+    };
+    match SurfaceConditions::derive(&inputs) {
+        Some(conditions) => (Section::Ok(conditions), Section::Ok(figures)),
+        None => (Section::NotApplicable, Section::NotApplicable),
+    }
 }
 
 /// The state at `t` of the moon `satellite`, in a system aged `age_at_epoch` at the epoch, whose

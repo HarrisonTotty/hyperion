@@ -1,15 +1,18 @@
-//! P14.T48.f's impactors against the Solar System, on JPL's elements and masses.
+//! P14.T48.f's impactors against the Solar System, on JPL's elements and masses, and P14.T24.b's
+//! global figures on the Solar System table.
 
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::planetary::belts::{BeltHost, FIRST_BELT_SLOT, host_belts};
-use crate::planetary::derive::solar::solar_disc;
+use crate::planetary::derive::DerivedBody;
+use crate::planetary::derive::solar::{SOLAR_AGE, solar_disc};
+use crate::planetary::moons::regular::DerivedMoon;
 use crate::planetary::placement::OrbitHost;
 use crate::planetary::placement::classes::orbits::SystemPlane;
 use crate::planetary::placement::spacing::Neighbour;
 use crate::substance;
-use crate::units::consts::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT, METRES_PER_AU};
+use crate::units::consts::{EARTH_MASS_KG, GRAVITATIONAL_CONSTANT, METRES_PER_AU, SECONDS_PER_DAY};
 use crate::units::{Degrees, SolarMasses};
 use crate::{GENERATOR_VERSION, Seed, id::SystemId};
 use hyperion_surface::craters::LUNAR_IMPACT_VELOCITY;
@@ -1035,4 +1038,710 @@ fn the_solar_system_s_impactors_are_pinned() {
     );
     pin(&mut w, "hyperion", &hyperion);
     golden!("planetary/impactors", w.as_str());
+}
+
+// P14.T24.b: the global figures' interior on the Solar System table (`derive::solar`), under
+// P14.T24.f's rules, the batch's, with science-p14-t24b-laws Part 1's checks.
+
+/// The table's bodies' sidereal rotation periods, days (NASA's fact sheets; Mercury's is the
+/// IAU's), as the surface conditions' tests take them.
+const SIDEREAL_DAYS: [(&str, f64); 8] = [
+    ("Mercury", 58.646),
+    ("Venus", 243.025),
+    ("Earth", 0.997_27),
+    ("Mars", 1.025_96),
+    ("Moon", 27.321_7),
+    ("Ganymede", 7.154_6),
+    ("Titan", 15.945),
+    ("Ceres", 9.074_17 / 24.0),
+];
+
+fn sidereal_period(name: &str) -> Seconds {
+    let &(_, days) = SIDEREAL_DAYS.iter().find(|(n, _)| *n == name).unwrap();
+    Seconds::new(days * SECONDS_PER_DAY)
+}
+
+/// The table's bodies with their figures about the present Sun, each turning in its own day.
+fn figures_table() -> Vec<(&'static str, DerivedBody, GlobalFigures)> {
+    crate::planetary::derive::solar::table_under(
+        crate::planetary::derive::atmosphere::Speciation::CarbonAndOxygen,
+    )
+    .into_iter()
+    .map(|(name, body)| {
+        let figures = table_figures_spun(&body, sidereal_period(name))
+            .expect("the table's bodies have surfaces");
+        (name, body, figures)
+    })
+    .collect()
+}
+
+fn figures_of<'a>(
+    table: &'a [(&'static str, DerivedBody, GlobalFigures)],
+    name: &str,
+) -> &'a GlobalFigures {
+    &table.iter().find(|(n, ..)| *n == name).unwrap().2
+}
+
+fn body_of<'a>(
+    table: &'a [(&'static str, DerivedBody, GlobalFigures)],
+    name: &str,
+) -> &'a DerivedBody {
+    &table.iter().find(|(n, ..)| *n == name).unwrap().1
+}
+
+/// The figures' inputs of the derived body `body` about the present Sun, turning in `name`'s day.
+fn inputs_of<'a>(body: &'a DerivedBody, name: &str) -> FiguresInputs<'a> {
+    FiguresInputs {
+        atmosphere: body.atmosphere(),
+        mass: body.mass(),
+        radius: Metres::from(body.radius()),
+        surface_gravity: body.surface_gravity(),
+        class: body.class(),
+        fractions: body.fractions(),
+        inventory_water: body.inventory().water(),
+        rotation_period: sidereal_period(name),
+        fe_h: Dex::new(0.0),
+        age: SOLAR_AGE,
+        tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+        subsurface_ocean: Subsurface::NotComputed,
+    }
+}
+
+/// The Moon as the generator makes it, a giant-impact moon of a rocky planet: its measured mass
+/// and radius (NASA's fact sheet), its bulk rock alone (`moon_bulk_of`), under the table's airless
+/// sky, locked to its planet's orbit of 27.32 d.
+fn the_giant_impact_moon() -> GlobalFigures {
+    let table = figures_table();
+    let moon = body_of(&table, "Moon");
+    let r = 1.737_4e6;
+    let mass = EarthMasses::new(7.342e22 / EARTH_MASS_KG);
+    GlobalFigures::derive(&FiguresInputs {
+        mass,
+        radius: Metres::new(r),
+        surface_gravity: MetresPerSecondSquared::new(GRAVITATIONAL_CONSTANT * 7.342e22 / (r * r)),
+        class: PlanetClass::Rocky,
+        fractions: MassFractions::solid(0.0, 1.0, 0.0),
+        ..inputs_of(moon, "Moon")
+    })
+    .unwrap()
+}
+
+#[test]
+fn the_table_s_heat_flows_are_their_calibrations() {
+    let table = figures_table();
+    for (name, body, figures) in &table {
+        eprintln!(
+            "{name}: {:?}, iron {:.3}, rock {:.3}, F {:.2} mW m⁻² (radiogenic {:.2}), {:?}, {:?}, \
+             {:?}, O {:.3}",
+            body.class(),
+            body.fractions().iron(),
+            body.fractions().rock(),
+            figures.heat_flow().value() * 1e3,
+            figures.radiogenic_heat_flow().value() * 1e3,
+            figures.interior(),
+            figures.tectonic_regime(),
+            figures.magnetic_field(),
+            figures.outgassing()
+        );
+    }
+    // Earth: within a factor 1.5 of Davies and Davies 2010's 0.092 W m⁻², and within 3% (its
+    // mobile lid's calibration); Mars: 22 mW m⁻² within 10% (its stagnant lid's); Mercury in
+    // 9–15 mW m⁻², its core's heat (8.0 without it); the Moon, as the generator makes it, in
+    // 9–21 mW m⁻² (Siegler and Smrekar 2014's mantle 9–13; science-p14-t24b-laws §1.4).
+    let earth = figures_of(&table, "Earth").heat_flow().value();
+    assert!((earth / 0.092 - 1.0).abs() < 0.03, "{earth}");
+    assert!(earth > 0.092 / 1.5 && earth < 0.092 * 1.5);
+    let mars = figures_of(&table, "Mars").heat_flow().value();
+    assert!((mars / 0.022 - 1.0).abs() < 0.10, "{mars}");
+    let mercury = figures_of(&table, "Mercury").heat_flow().value();
+    assert!((0.009..0.015).contains(&mercury), "{mercury}");
+    let moon = the_giant_impact_moon().heat_flow().value();
+    eprintln!("the giant-impact Moon: {:.2} mW m⁻²", moon * 1e3);
+    assert!((0.009..0.021).contains(&moon), "{moon}");
+    // A body round a star has no tide, so its whole heat flow is its non-tidal part; the table's
+    // Ganymede and Titan conduct, and the rest convect.
+    for (name, _, figures) in &table {
+        assert_same_bits(
+            figures.heat_flow().value(),
+            figures.non_tidal_heat_flow().value(),
+        );
+        assert_eq!(
+            figures.subsurface_ocean(),
+            &Subsurface::NotComputed,
+            "{name}"
+        );
+        let interior = if matches!(*name, "Ganymede" | "Titan") {
+            Interior::Conducting
+        } else {
+            Interior::Convecting
+        };
+        assert_eq!(figures.interior(), interior, "{name}");
+    }
+}
+
+#[test]
+fn the_table_s_regimes_and_fields_are_the_ruling_s() {
+    let table = figures_table();
+    for (name, regime, field) in [
+        ("Earth", TectonicRegime::MobileLid, MagneticField::Strong),
+        ("Venus", TectonicRegime::Episodic, MagneticField::None),
+        ("Mars", TectonicRegime::StagnantLid, MagneticField::None),
+        ("Mercury", TectonicRegime::StagnantLid, MagneticField::Weak),
+        ("Moon", TectonicRegime::StagnantLid, MagneticField::None),
+        ("Ganymede", TectonicRegime::StagnantLid, MagneticField::None),
+        ("Titan", TectonicRegime::StagnantLid, MagneticField::None),
+        ("Ceres", TectonicRegime::StagnantLid, MagneticField::None),
+    ] {
+        let figures = figures_of(&table, name);
+        assert_eq!(figures.tectonic_regime(), regime, "{name}");
+        assert_eq!(figures.magnetic_field(), field, "{name}");
+    }
+    let moon = the_giant_impact_moon();
+    assert_eq!(moon.tectonic_regime(), TectonicRegime::StagnantLid);
+    assert_eq!(moon.magnetic_field(), MagneticField::None);
+    // Before 0.6 Gyr Mars's dynamo is strong and Venus's weak, its day being long.
+    for (name, field) in [
+        ("Mars", MagneticField::Strong),
+        ("Venus", MagneticField::Weak),
+    ] {
+        let young = GlobalFigures::derive(&FiguresInputs {
+            age: Years::new(0.5e9),
+            ..inputs_of(body_of(&table, name), name)
+        })
+        .unwrap();
+        assert_eq!(young.magnetic_field(), field, "{name}");
+    }
+    // An Earth twin locked in a 10-day orbit keeps a multipolar field.
+    let locked = GlobalFigures::derive(&FiguresInputs {
+        rotation_period: Seconds::new(10.0 * SECONDS_PER_DAY),
+        ..inputs_of(body_of(&table, "Earth"), "Earth")
+    })
+    .unwrap();
+    assert_eq!(locked.magnetic_field(), MagneticField::Weak);
+}
+
+#[test]
+fn the_regime_reads_nothing_of_the_residual() {
+    // Each body's regime is the rule's on inputs that hold no heat flow but the radiogenic term
+    // before its residual, so that no Urey ratio moves it (science-p14-t24b-laws §1.1).
+    let table = figures_table();
+    for (name, body, figures) in &table {
+        let inputs = inputs_of(body, name);
+        let kg = Kilograms::from(body.mass()).value();
+        let r = Metres::from(body.radius()).value();
+        let water = inputs
+            .inventory_water
+            .value()
+            .max(body.fractions().water() * kg);
+        let rock = rock_core_radius(kg * (1.0 - body.fractions().water()));
+        let regime = tectonic_regime(&interior::RegimeInputs {
+            interior: Interior::of(body.class(), rock).unwrap(),
+            mass: body.mass(),
+            radiogenic: figures.radiogenic_heat_flow(),
+            tidal: WattsPerSquareMetre::new(0.0),
+            state: body.atmosphere().state(),
+            water_depth: Metres::new(water / (1_000.0 * 4.0 * core::f64::consts::PI * r * r)),
+            surface_gravity: body.surface_gravity(),
+            ocean_shell: None,
+        });
+        assert_eq!(regime, figures.tectonic_regime(), "{name}");
+    }
+}
+
+#[test]
+fn an_earth_twin_s_plates_end_at_ten_gyr() {
+    let table = figures_table();
+    let earth = body_of(&table, "Earth");
+    let at = |age: f64| {
+        GlobalFigures::derive(&FiguresInputs {
+            age: Years::new(age),
+            ..inputs_of(earth, "Earth")
+        })
+        .unwrap()
+    };
+    let end = (0..=1_330)
+        .map(|step| 0.5e9 + 1e7 * f64::from(step))
+        .find(|&age| at(age).tectonic_regime() != TectonicRegime::MobileLid)
+        .expect("the plates end");
+    eprintln!("an Earth twin's plates end at {:.2} Gyr", end / 1e9);
+    assert!((end / 1e9 - 10.0).abs() < 0.5, "{end}");
+    assert_eq!(at(end).tectonic_regime(), TectonicRegime::StagnantLid);
+}
+
+#[test]
+fn a_water_world_s_rock_convects_under_its_high_pressure_ice() {
+    let table = figures_table();
+    let earth = body_of(&table, "Earth");
+    let fractions = MassFractions::solid(0.15, 0.35, 0.5);
+    let world = GlobalFigures::derive(&FiguresInputs {
+        class: PlanetClass::Icy,
+        fractions,
+        radius: Metres::new(1.25 * 6.371e6),
+        ..inputs_of(earth, "Earth")
+    })
+    .unwrap();
+    assert_eq!(world.interior(), Interior::Convecting);
+    assert_eq!(world.tectonic_regime(), TectonicRegime::StagnantLid);
+    let x = 0.15 / 0.5;
+    let form = 1.0
+        + (1.0 / interior::STAGNANT_LID_UREY_RATIO - 1.0)
+            * (1.0 + interior::CORE_TO_MANTLE_HEAT_CAPACITY * x / (1.0 - x));
+    let ratio = world.heat_flow().value() / world.radiogenic_heat_flow().value();
+    assert!((ratio / form - 1.0).abs() < 1e-12, "{ratio} against {form}");
+}
+
+#[test]
+fn the_generated_earth_s_heat_flow_is_the_outgassing_s_unit() {
+    // `GENERATED_EARTH_HEAT_FLOW` is the table's Earth's, refitted here.
+    let table = figures_table();
+    let earth = figures_of(&table, "Earth").heat_flow().value();
+    eprintln!("the table's Earth: {earth:.12} W m⁻²");
+    assert!(
+        (earth / interior::GENERATED_EARTH_HEAT_FLOW.value() - 1.0).abs() < 1e-9,
+        "{earth}"
+    );
+}
+
+#[test]
+fn the_present_outgassing_is_earth_s_and_none_on_the_moon_mercury_and_mars() {
+    let table = figures_table();
+    assert!((figures_of(&table, "Earth").outgassing() - 1.0).abs() < 1e-8);
+    for name in ["Moon", "Mercury", "Mars"] {
+        assert_same_bits(figures_of(&table, name).outgassing(), 0.0);
+    }
+    assert_same_bits(the_giant_impact_moon().outgassing(), 0.0);
+    let venus = figures_of(&table, "Venus").outgassing();
+    eprintln!("Venus's outgassing: {venus}");
+    assert!((0.3..3.0).contains(&venus), "{venus}");
+}
+
+#[test]
+fn the_heat_flow_is_continuous_in_time_but_at_a_regime_change() {
+    let table = figures_table();
+    let earth = body_of(&table, "Earth");
+    let at = |age: f64, fe_h: f64| {
+        GlobalFigures::derive(&FiguresInputs {
+            age: Years::new(age),
+            fe_h: Dex::new(fe_h),
+            ..inputs_of(earth, "Earth")
+        })
+        .unwrap()
+    };
+    // From 0.5 to 13.8 Gyr in steps of 10 Myr: the heat flow and the outgassing fall smoothly, and
+    // step once, where the falling production stagnates the lid and the mobile lid's Urey ratio
+    // gives way to the stagnant one's.
+    let fractions = earth.fractions();
+    let x = fractions.iron() / (fractions.iron() + fractions.rock());
+    let unit = WattsPerSquareMetre::new(1.0);
+    let step_ratio = convecting_heat_flow(unit, x, TectonicRegime::StagnantLid).value()
+        / convecting_heat_flow(unit, x, TectonicRegime::MobileLid).value();
+    let mut last = at(0.5e9, 0.0);
+    let mut changes = 0;
+    for step in 1..=1_330 {
+        let age = 0.5e9 + 1e7 * f64::from(step);
+        let now = at(age, 0.0);
+        let ratio = now.heat_flow().value() / last.heat_flow().value();
+        assert!(now.outgassing() <= last.outgassing(), "{age}");
+        assert!(ratio < 1.0, "{age}: {ratio}");
+        if now.tectonic_regime() == last.tectonic_regime() {
+            assert!(ratio > 0.99, "{age}: {ratio}");
+        } else {
+            changes += 1;
+            eprintln!(
+                "Earth's lid stagnates at {:.2} Gyr, its heat flow stepping by {ratio:.4}",
+                age / 1e9
+            );
+            assert_eq!(now.tectonic_regime(), TectonicRegime::StagnantLid);
+            assert!((ratio / step_ratio - 1.0).abs() < 0.005, "{ratio}");
+        }
+        last = now;
+    }
+    assert_eq!(changes, 1);
+    // At fixed composition and age it scales as 10^[Fe/H], at a fixed regime.
+    let base = at(SOLAR_AGE.value(), 0.0);
+    for fe_h in [-0.2, 0.1, 0.3] {
+        let scaled = at(SOLAR_AGE.value(), fe_h);
+        assert_eq!(scaled.tectonic_regime(), TectonicRegime::MobileLid);
+        let ratio = scaled.heat_flow().value() / base.heat_flow().value();
+        assert!(
+            (ratio / math::exp10(fe_h) - 1.0).abs() < 1e-12,
+            "{fe_h}: {ratio}"
+        );
+    }
+}
+
+#[test]
+fn an_icy_body_s_heat_flow_carries_its_rock_s_lag() {
+    let table = figures_table();
+    let ganymede = body_of(&table, "Ganymede");
+    let figures = figures_of(&table, "Ganymede");
+    assert_eq!(ganymede.class(), PlanetClass::Icy);
+    let mass = Kilograms::from(ganymede.mass()).value();
+    let core = rock_core_radius(mass * (1.0 - ganymede.fractions().water()));
+    let lag = conductive_lag(core, SOLAR_AGE, interior::ROCK_THERMAL_DIFFUSIVITY_M2_PER_S);
+    eprintln!(
+        "Ganymede: rock core {:.0} km, lag {lag:.4}",
+        core.value() / 1e3
+    );
+    assert_eq!(figures.interior(), Interior::Conducting);
+    assert!(
+        (figures.heat_flow().value() / figures.radiogenic_heat_flow().value() - lag).abs() < 1e-12
+    );
+    assert_eq!(figures.tectonic_regime(), TectonicRegime::StagnantLid);
+}
+
+#[test]
+fn a_moon_s_tide_adds_to_its_heat_flow() {
+    let table = figures_table();
+    let moon = body_of(&table, "Moon");
+    let figures = figures_of(&table, "Moon");
+    let heated = |tide: f64| {
+        GlobalFigures::derive(&FiguresInputs {
+            tidal_heat_flow: WattsPerSquareMetre::new(tide),
+            ..inputs_of(moon, "Moon")
+        })
+        .unwrap()
+    };
+    let warm = heated(0.1);
+    assert_same_bits(
+        warm.non_tidal_heat_flow().value(),
+        figures.non_tidal_heat_flow().value(),
+    );
+    assert_same_bits(
+        warm.heat_flow().value(),
+        figures.non_tidal_heat_flow().value() + 0.1,
+    );
+    assert!(warm.outgassing() > 0.0);
+    // Below the heat pipe's edge its regime is its own; at it the tide's heat leaves through
+    // eruptions, and a mantle heated by its tides keeps no dynamo.
+    assert_eq!(warm.tectonic_regime(), figures.tectonic_regime());
+    let io_like = heated(0.25);
+    assert_eq!(io_like.tectonic_regime(), TectonicRegime::HeatPipe);
+    assert_eq!(io_like.magnetic_field(), MagneticField::None);
+    // A heat pipe shares the stagnant lid's ratio, so its residual is continuous at the edge.
+    assert_same_bits(
+        io_like.non_tidal_heat_flow().value(),
+        figures.non_tidal_heat_flow().value(),
+    );
+}
+
+#[test]
+fn a_gas_envelope_has_no_figures_and_a_strong_field() {
+    use crate::planetary::derive::solar::{PLANETS, derive, placed, solar_disc};
+    let &(_, kg, _, a, e) = PLANETS.iter().find(|(n, ..)| *n == "Jupiter").unwrap();
+    let jupiter = derive(&placed(kg, a, e, 0.5), &solar_disc()).unwrap();
+    assert_eq!(table_figures(&jupiter), None);
+    for class in [
+        PlanetClass::SubNeptune,
+        PlanetClass::IceGiant,
+        PlanetClass::GasGiant,
+    ] {
+        let field = magnetic_field(&interior::FieldInputs {
+            class,
+            interior: Interior::Conducting,
+            mass: EarthMasses::new(300.0),
+            iron_share: 0.0,
+            regime: TectonicRegime::StagnantLid,
+            radiogenic: WattsPerSquareMetre::new(0.0),
+            tidal: WattsPerSquareMetre::new(0.0),
+            age: SOLAR_AGE,
+            rotation_period: Seconds::new(0.41 * SECONDS_PER_DAY),
+        });
+        assert_eq!(field, MagneticField::Strong, "{class:?}");
+    }
+}
+
+/// A moon at its measured mass and mean elements about the table's Jupiter, derived as P14.T17's
+/// regular moons are: mass (kg), semi-major axis (km) and eccentricity (JPL's satellite mean
+/// elements and physical parameters, read 2026-10-12 for P14.T48.f).
+fn jovian(kg: f64, a_km: f64, e: f64) -> DerivedMoon {
+    use crate::orbit::{Eccentricity, KeplerElements, Orientation};
+    use crate::planetary::derive::BodyHosts;
+    use crate::planetary::derive::solar::{self, PLANETS};
+    use crate::planetary::moons::regular::{MoonNursery, MoonSky, derive_moon};
+    use crate::planetary::moons::testing::planet_id;
+    use crate::planetary::moons::{MoonParent, ParentKind};
+    use crate::stellar::Composition;
+    use crate::stellar::draws::UnitUniform;
+    use crate::time::UniverseTime;
+    use crate::units::consts::SOLAR_MASS_KG;
+
+    let planets = solar::solar_system();
+    let jupiter = *solar::found(&planets, "Jupiter");
+    let &(_, _, _, a, e_j) = PLANETS.iter().find(|p| p.0 == "Jupiter").unwrap();
+    let orbit = solar::orbit(a, e_j);
+    let host = Kilograms::new(SOLAR_MASS_KG);
+    let parent =
+        MoonParent::from_derived(planet_id(0, 5), ParentKind::Planet, &jupiter, orbit, host)
+            .unwrap();
+    let lights = [solar::sun()];
+    let hosts = BodyHosts::new(host, Composition::SOLAR, &lights, &[]).unwrap();
+    let nursery = MoonNursery::new(
+        &parent,
+        &Composition::SOLAR,
+        &solar_disc(),
+        orbit.semi_major_axis(),
+    )
+    .unwrap();
+    let sky = MoonSky::new(&jupiter, &orbit, &hosts).unwrap();
+    eprintln!(
+        "Jupiter's ice line: {:?} km",
+        nursery.ice_line().map(|line| line.value() / 1e3)
+    );
+    let flat = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO).unwrap();
+    let moon_orbit = KeplerElements::from_semi_major_axis(
+        Metres::new(a_km * 1e3),
+        GravitationalParameter::from_earth_masses(parent.mass()),
+        Eccentricity::new(e).unwrap(),
+        flat,
+        Radians::ZERO,
+    )
+    .unwrap();
+    derive_moon(
+        EarthMasses::new(kg / EARTH_MASS_KG),
+        &moon_orbit,
+        &parent,
+        &nursery,
+        &sky,
+        UnitUniform::HALF,
+        SOLAR_AGE,
+        UniverseTime::EPOCH,
+    )
+    .unwrap()
+}
+
+/// Europa at its measured mass and elements: 4.7998 × 10²² kg at 671,034 km, e = 0.0094.
+fn europa() -> DerivedMoon {
+    jovian(4.7998e22, 671_034.0, 0.0094)
+}
+
+/// The figures of the derived regular moon `moon`, its tide and ocean its derivation's, locked to
+/// its orbit of `days`.
+fn moon_figures(moon: &DerivedMoon, days: f64) -> GlobalFigures {
+    GlobalFigures::derive(&FiguresInputs {
+        atmosphere: moon.atmosphere(),
+        mass: EarthMasses::new(
+            moon.density().value() * 4.0 / 3.0
+                * core::f64::consts::PI
+                * math::powi(moon.radius().value(), 3)
+                / EARTH_MASS_KG,
+        ),
+        radius: moon.radius(),
+        surface_gravity: MetresPerSecondSquared::new(
+            GRAVITATIONAL_CONSTANT * moon.density().value() * 4.0 / 3.0
+                * core::f64::consts::PI
+                * moon.radius().value(),
+        ),
+        class: moon.class(),
+        fractions: moon.fractions(),
+        inventory_water: moon.inventory().water(),
+        rotation_period: Seconds::new(days * SECONDS_PER_DAY),
+        fe_h: Dex::new(0.0),
+        age: SOLAR_AGE,
+        tidal_heat_flow: moon.heat_flux(),
+        subsurface_ocean: Subsurface::of_regular_moon(
+            moon.radius(),
+            moon.density(),
+            moon.ice_fraction(),
+            moon.equilibrium_temperature(),
+            moon.heat_flux(),
+        ),
+    })
+    .unwrap()
+}
+
+#[test]
+fn io_at_its_measured_elements_is_a_heat_pipe_with_no_field() {
+    // 8.931 9 × 10²² kg at 421,700 km, e = 0.0041 (JPL), locked in 1.769 d.
+    let io = jovian(8.931_9e22, 421_700.0, 0.0041);
+    let figures = moon_figures(&io, 1.769);
+    eprintln!(
+        "Io: tide {:.3} W m⁻², {:?}, {:?}, {:?}",
+        io.heat_flux().value(),
+        figures.interior(),
+        figures.tectonic_regime(),
+        figures.magnetic_field()
+    );
+    assert_eq!(figures.tectonic_regime(), TectonicRegime::HeatPipe);
+    assert_eq!(figures.magnetic_field(), MagneticField::None);
+}
+
+/// Europa's measured bulk: radius 1,560.8 km and density 3,013 kg m⁻³ (NASA's Jovian satellite
+/// fact sheet), 8% water by mass (the water layer some 120–150 km deep, as science-p14-subsurface-
+/// ocean §3 takes it; Schubert et al. 2004, from memory), and a mean surface of 102 K (the same).
+const EUROPA_MEASURED: (f64, f64, f64, f64) = (1.560_8e6, 3_013.0, 0.08, 102.0);
+
+/// Europa's measured bulk with its subsurface ocean under the tide P14.T17.b's rule raises at its
+/// measured elements about the table's Jupiter, at its own radius.
+fn measured_europa() -> (GlobalFigures, Subsurface, WattsPerSquareMetre) {
+    let derived = europa();
+    let (radius, density, water, surface) = EUROPA_MEASURED;
+    let tide = WattsPerSquareMetre::new(
+        derived.heat_flux().value() * math::powi(radius / derived.radius().value(), 3),
+    );
+    let ocean = Subsurface::of_regular_moon(
+        Metres::new(radius),
+        KilogramsPerCubicMetre::new(density),
+        water,
+        Kelvin::new(surface),
+        tide,
+    );
+    let volume = 4.0 / 3.0 * core::f64::consts::PI * math::powi(radius, 3);
+    let kg = density * volume;
+    let figures = GlobalFigures::derive(&FiguresInputs {
+        atmosphere: derived.atmosphere(),
+        mass: EarthMasses::new(kg / EARTH_MASS_KG),
+        radius: Metres::new(radius),
+        surface_gravity: MetresPerSecondSquared::new(
+            GRAVITATIONAL_CONSTANT * kg / (radius * radius),
+        ),
+        class: PlanetClass::Rocky,
+        fractions: MassFractions::solid(0.1, 0.82, water),
+        inventory_water: Kilograms::new(water * kg),
+        rotation_period: Seconds::new(3.551 * SECONDS_PER_DAY),
+        fe_h: Dex::new(0.0),
+        age: SOLAR_AGE,
+        tidal_heat_flow: tide,
+        subsurface_ocean: ocean,
+    })
+    .unwrap();
+    (figures, ocean, tide)
+}
+
+#[test]
+fn europa_holds_a_subsurface_ocean_of_water_on_rock_under_an_ice_shell() {
+    let (figures, ocean, tide) = measured_europa();
+    let (radius, density, water, surface) = EUROPA_MEASURED;
+    let (radius, density, surface) = (
+        Metres::new(radius),
+        KilogramsPerCubicMetre::new(density),
+        Kelvin::new(surface),
+    );
+    eprintln!(
+        "the measured Europa under a tide of {:.3} W m⁻²: {ocean:?}",
+        tide.value()
+    );
+    let Subsurface::Ocean(ocean) = ocean else {
+        panic!("Europa holds an ocean: {ocean:?}");
+    };
+    assert_eq!(ocean.floor(), OceanFloor::Rock);
+    assert_eq!(ocean.liquid(), Gas::Water.substance());
+    assert_same_bits(ocean.solute_mass_fraction(), 0.0);
+    assert_eq!(ocean.base_temperature(), ICE_MELTING_POINT);
+    let layers = ocean_layers(radius, density, water, surface, tide).unwrap();
+    assert_same_bits(
+        ocean.shell_thickness().value(),
+        layers.shell_thickness.value(),
+    );
+    assert!(
+        (ocean.thickness().value() + ocean.shell_thickness().value() - layers.water_depth.value())
+            .abs()
+            < 1e-6
+    );
+    // Its regime is an ice shell's, whatever its tides, and its tidally heated mantle keeps no
+    // dynamo.
+    assert_eq!(figures.subsurface_ocean(), &Subsurface::Ocean(ocean));
+    assert_eq!(figures.tectonic_regime(), TectonicRegime::IceShell);
+    assert_eq!(figures.magnetic_field(), MagneticField::None);
+    // A thinner tide than the water layer's keeps none, by the same rule.
+    assert_eq!(
+        Subsurface::of_regular_moon(
+            radius,
+            density,
+            water,
+            surface,
+            WattsPerSquareMetre::new(1e-4)
+        ),
+        Subsurface::NoOcean
+    );
+    // The generator's own Europa at its measured elements formed inside Jupiter's ice line, so it
+    // holds no water and its flag no ocean (P14.T17.b's two classes of moon: plan 14's Risks,
+    // "Deviations in P14.T24.b, as built"); its figures say so.
+    let derived = europa();
+    eprintln!(
+        "the generated Europa: ice {:.3}, {:.1} K, tide {:.3} W m⁻², flag {}",
+        derived.ice_fraction(),
+        derived.equilibrium_temperature().value(),
+        derived.heat_flux().value(),
+        derived.subsurface_ocean()
+    );
+    let generated = moon_figures(&derived, 3.551);
+    assert_same_bits(derived.ice_fraction(), 0.0);
+    assert!(!derived.subsurface_ocean());
+    assert_eq!(generated.subsurface_ocean(), &Subsurface::NoOcean);
+}
+
+#[test]
+fn the_figures_are_the_same_twice() {
+    let first = figures_table();
+    let second = figures_table();
+    for ((name, _, a), (_, _, b)) in first.iter().zip(&second) {
+        assert_eq!(a, b, "{name}");
+    }
+}
+
+/// The table's figures, Io's and the measured Europa's, pinned to the bit (P14.T24.b). Nothing
+/// published reads them before the 21 → 22 bump, so it moves only their header, unless the batch
+/// changes them.
+#[test]
+fn the_table_s_figures_are_pinned() {
+    use hyperion_testkit::golden;
+    use hyperion_testkit::golden::GoldenWriter;
+
+    let mut w = GoldenWriter::new();
+    w.header(GENERATOR_VERSION.get());
+    let pin = |w: &mut GoldenWriter, name: &str, figures: &GlobalFigures| {
+        w.f64(&format!("{name}_heat_flow"), figures.heat_flow().value());
+        w.f64(
+            &format!("{name}_radiogenic_heat_flow"),
+            figures.radiogenic_heat_flow().value(),
+        );
+        w.line(&format!("{name}_interior = {:?}", figures.interior()));
+        w.line(&format!(
+            "{name}_tectonic_regime = {:?}",
+            figures.tectonic_regime()
+        ));
+        w.line(&format!(
+            "{name}_magnetic_field = {:?}",
+            figures.magnetic_field()
+        ));
+        w.f64(&format!("{name}_outgassing"), figures.outgassing());
+        match figures.subsurface_ocean() {
+            Subsurface::Ocean(ocean) => {
+                w.f64(
+                    &format!("{name}_shell_thickness"),
+                    ocean.shell_thickness().value(),
+                );
+                w.f64(
+                    &format!("{name}_ocean_thickness"),
+                    ocean.thickness().value(),
+                );
+            }
+            other @ (Subsurface::NoOcean | Subsurface::NotComputed) => {
+                w.line(&format!("{name}_subsurface_ocean = {other:?}"));
+            }
+        }
+    };
+    for (name, _, figures) in &figures_table() {
+        pin(&mut w, &name.to_lowercase(), figures);
+    }
+    pin(&mut w, "giant_impact_moon", &the_giant_impact_moon());
+    let io = jovian(8.931_9e22, 421_700.0, 0.0041);
+    pin(&mut w, "io", &moon_figures(&io, 1.769));
+    pin(&mut w, "measured_europa", &measured_europa().0);
+    for (name, radius) in [
+        ("pluto", 850e3),
+        ("enceladus", 190e3),
+        ("ganymede", 1_800e3),
+    ] {
+        w.f64(
+            &format!("{name}_lag_at_4_5_gyr"),
+            conductive_lag(
+                Metres::new(radius),
+                Years::new(4.5e9),
+                interior::ROCK_THERMAL_DIFFUSIVITY_M2_PER_S,
+            ),
+        );
+    }
+    golden!("planetary/global_figures", w.as_str());
 }

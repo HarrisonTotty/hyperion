@@ -12,7 +12,7 @@ use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::disc::{ROCK_MASS_FRACTION, WATER_ICE_MASS_FRACTION};
 use crate::units::{
     Degrees, EarthMasses, Gigayears, JupiterMasses, JupiterRadii, Kelvin, Megayears, Metres,
-    Seconds,
+    Seconds, WattsPerSquareMetre,
 };
 
 /// How far out a prograde satellite on a circular orbit about a planet on a circular orbit stays
@@ -440,3 +440,17 @@ pub const SYNCHRONOUS_TIDAL_FACTOR: f64 = 2.5;
 /// The largest flattening a figure takes: 0.2 (P14.T46.c, as R07 asks), beyond which first-order
 /// theory fails.
 pub const FLATTENING_CAP: f64 = 0.2;
+
+/// The heat flow below which no melt reaches the surface, `F_c`: 0.025 W m⁻² (P14.T24.b's present
+/// outgassing, after P14.T24.g; science-p14-t24b-laws §1.3).
+///
+/// The window it is ruled in: above the table's Mars at its 10% test bound, 24.2 mW m⁻², so that
+/// Mars outgasses nothing, and below the edge at which Venus's outgassing would fall under 0.3 of
+/// Earth's, (`F_Venus` − 0.3 F⊕) ÷ 0.7: 27.7 mW m⁻² at decision-p14-moons F1's 47 and 92, where the
+/// plan's "of order 0.03" gave Venus 0.27, and 31.1 mW m⁻² at the generator's own Venus and Earth,
+/// 49.6 and 92.5 mW m⁻² (P14.T24.b), where Mars lies at 22.5. Read physically, Mars, whose youngest
+/// flows are a few Myr old, sits at the threshold, while Venus erupts today and the Moon (12) and
+/// Mercury (11) have not for some 1 and 3.5 Gyr (from memory, the ruling's). For comparison,
+/// Earth's measured mean is 0.0916 W m⁻² (Davies and Davies 2010, Solid Earth 1, 5). P14.T56.d's
+/// heated rocky branch reads it too (decision-p14-moons, item 3).
+pub const SURFACE_MELT_HEAT_FLOW: WattsPerSquareMetre = WattsPerSquareMetre::new(0.025);

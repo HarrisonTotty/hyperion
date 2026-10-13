@@ -1,7 +1,7 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23, T24.a, T48.f):
+//! Built so far (P14.T23, T24.a, T24.b's interior, T48.f):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
@@ -12,14 +12,15 @@
 //! - [`surface`]: the body's [`SurfaceConditions`] (P14.T24.a): its mean temperature and signed
 //!   contrasts, its surface pressure and gases as mole fractions, the light and radiation it
 //!   receives and whether water can be liquid on it; held until the 21 → 22 batch's bump.
-//! - [`figures`]: the body's global figures, so far its [`Impactors`] (P14.T48.f): the mean
-//!   impact velocity and density of what strikes it, and the crater target it is, which
-//!   P14.T48.c's crater contract will carry; nothing on the record reads them yet.
+//! - [`figures`]: the body's [`GlobalFigures`] (P14.T24.b), so far its heat flow, tectonic
+//!   regime, magnetic field, present outgassing and subsurface ocean, held with the surface
+//!   conditions; and its
+//!   [`Impactors`] (P14.T48.f): the mean impact velocity and density of what strikes it, and the
+//!   crater target it is, which P14.T48.c's crater contract will carry.
 //!
 //! [`BodyHooks`] holds them, from
-//! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at). The global
-//! figures (P14.T24.b), the habitability assessment (T25) and the resource abundances (T26) join
-//! it with their tasks.
+//! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at). The habitability
+//! assessment (T25) and the resource abundances (T26) join it with their tasks.
 //!
 //! # The surface seed stays on the server
 //!
@@ -34,7 +35,10 @@ pub mod figures;
 pub mod seed;
 pub mod surface;
 
-pub use figures::{Impactors, impactors};
+pub use figures::{
+    GlobalFigures, Impactors, MagneticField, OceanFloor, Subsurface, SubsurfaceOcean,
+    TectonicRegime, impactors,
+};
 pub use seed::{SurfaceSeed, surface_seed};
 pub use surface::{RadiationClass, SurfaceConditions};
 
@@ -100,28 +104,32 @@ impl BulkComposition {
     }
 }
 
-/// What the layers above read of a body at a time (P14.T23, T24.a): its surface seed, its bulk
-/// composition and its surface conditions. Server-only (see the [module](self) documentation).
+/// What the layers above read of a body at a time (P14.T23, T24.a, T24.b): its surface seed, its
+/// bulk composition, its surface conditions and its global figures. Server-only (see the
+/// [module](self) documentation).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BodyHooks {
     surface_seed: SurfaceSeed,
     bulk: Section<BulkComposition>,
     surface: Section<SurfaceConditions>,
+    figures: Section<GlobalFigures>,
 }
 
 impl BodyHooks {
-    /// The hooks of a body of surface seed `surface_seed`, bulk composition `bulk` and surface
-    /// conditions `surface`.
+    /// The hooks of a body of surface seed `surface_seed`, bulk composition `bulk`, surface
+    /// conditions `surface` and global figures `figures`.
     #[must_use]
     pub const fn new(
         surface_seed: SurfaceSeed,
         bulk: Section<BulkComposition>,
         surface: Section<SurfaceConditions>,
+        figures: Section<GlobalFigures>,
     ) -> Self {
         Self {
             surface_seed,
             bulk,
             surface,
+            figures,
         }
     }
 
@@ -147,5 +155,13 @@ impl BodyHooks {
     #[must_use]
     pub const fn surface(&self) -> &Section<SurfaceConditions> {
         &self.surface
+    }
+
+    /// The global figures (P14.T24.b): in the same state as [`surface`](Self::surface), since the
+    /// conditions read their heat flow and the figures of later tasks read the conditions. Every
+    /// body's is [`Section::NotModelled`] until the 21 → 22 batch's bump, as its conditions are.
+    #[must_use]
+    pub const fn figures(&self) -> &Section<GlobalFigures> {
+        &self.figures
     }
 }

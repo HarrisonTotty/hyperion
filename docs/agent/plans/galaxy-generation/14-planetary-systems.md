@@ -10960,6 +10960,136 @@ a_moon_s_published, the_published}`.
     volatile inventory or a moon's ice. The contract's impact velocity is then
     `Some(velocity())`, beside `projectile_density()`, `target()` and `k_target()`.
 
+- **Deviations in P14.T24.b, as built: part 1, the interior (`p14-batch`, 2026-10-13).**
+  `GENERATOR_VERSION` stays 21, and nothing on the record moves: the figures are published only
+  under T24.a's hold. "Main" split step 4 of the 21 → 22 batch into four agents, in the order the
+  dependencies set: (1) this part, the interior; (2) the surface age and crater density with
+  P14.T48.c; (3) P14.T48.b's wet epoch; (4) P14.T48.a with the ocean, ice and cloud fractions and
+  θ in T24.a's contrasts. The laws the task text leaves to the builder are ruled in
+  `science-p14-t24b-laws.md` Part 1 (§1.1–1.6, 2026-10-13), built as written; its plan text for
+  P14.T24.b, T48.a, T48.d, T24.d and R09 is the docs lane's.
+  - _Where it lives._ `GlobalFigures::derive(&FiguresInputs) -> Option<GlobalFigures>` in
+    `planetary/hooks/figures.rs`, a pure function of plain values: the atmosphere, the mass at t,
+    the bulk section's radius, gravity, class and fractions, the volatile inventory's water, the
+    sidereal rotation period, the system's \[Fe/H\] and age, the tide and the subsurface ocean.
+    `None` for the gas-envelope state or an envelope class. The laws are the new
+    `planetary/hooks/figures/interior.rs`.
+    - Published as Provides' `BodyHooks::figures`, a `Section<GlobalFigures>`, fourth in
+      `BodyHooks::new`, always in the conditions' state: both `NotModelled` under the hold or with
+      no rotation law or seasonal orbit (though F reads no rotation), both `NotApplicable` where
+      either derivation gives none. `published_surface(&SurfaceTime, &SurfaceCase)` in `system.rs`
+      (`hooks_at_under`'s closure, extracted for Clippy's line count) derives the figures first and
+      passes F to `SurfaceInputs::heat_flow`.
+    - _The hold._ It shares `ConditionsHold`, with no `*_VERSION` of its own, so P14.T48.e's fold
+      (as listed under T24.a) removes both, and also deletes `held.figures()`'s assertion with the
+      held half of `the_hooks_publish_surface_conditions_only_from_the_batch_s_bump` and the hold's
+      wording from `BodyHooks::figures` and the docs of `hooks`, `hooks::figures` and `hooks_at`.
+  - _The heat flow_ (decision-p14-moons §F-ocean F1, as corrected by §1.4).
+    - `RadiogenicIsotope` (`Uranium238`, `Uranium235`, `Thorium232`, `Potassium40`) carries
+      Turcotte and Schubert 2002's rates and half-lives and McDonough and Sun 1995's concentrations
+      with Turcotte and Schubert's isotope shares: 4.9213 × 10⁻¹² W kg⁻¹ today, in shares of
+      0.3874, 0.0167, 0.4265 and 0.1695. Today is the generator's Earth's age,
+      `RADIOGENIC_REFERENCE_AGE` = `EARTH_REFERENCE_AGE` (4.57 Gyr), not 4.567, so that the table's
+      Earth reads it bit for bit.
+    - `radiogenic_heat_flow`, `conductive_lag` (n ≤ `LAG_MODES` = 400, the shares the production's
+      at the age, via the crate-private `lag_of`), `Interior::of` and `convecting_heat_flow` in the
+      ruling's guarded form, evaluated on the production of the solids taken as rock. x is iron ÷
+      (iron + rock) of the bulk section; `R_c` the non-water mass at 3,300 kg m⁻³
+      (`ROCK_CORE_DENSITY`). `ROCK_THERMAL_DIFFUSIVITY` is `ROCK_THERMAL_DIFFUSIVITY_M2_PER_S`.
+    - The lag at 4.5 Gyr: Pluto's 850 km 1.2850 (0.672 at 1 Gyr, 1.2015 at 12 Gyr), Enceladus's
+      190 km 1.0140, Ganymede's 1,800 km 0.9174; the remembered shares give 1.2631, 1.0136 and
+      0.8960 (tested). "Tends to 1 as κ grows" is tested as the truncated sum, 0.9985, to 10⁻¹⁵.
+    - `MOBILE_LID_UREY_RATIO` = 0.49 and `STAGNANT_LID_UREY_RATIO` = 0.79, the ruled roundings: the
+      table's Earth is 92.55 mW m⁻² (+1.0% on Davies and Davies's 91.6), Mars 22.54, Venus 49.55
+      and Mercury 10.76.
+    - The tide is every moon's derivation's `heat_flux()`, P14.T17.b's (the ruling's `q_tid`), a
+      giant-impact moon's and a capture's included, at the derivation's radius; planets and
+      members take none. A negative or NaN tide reads as 0.
+  - _The regime_ (§1.1). `TectonicRegime` moved from `planetary/surface/inputs.rs` into
+    `hooks/figures/interior.rs`, re-exported at its old path, with the ruling's variant notes.
+    `tectonic_regime(&RegimeInputs)` is the ruling's code, its wet test an exhaustive `match`. The
+    water's depth `d_w` is the larger of the inventory's water and the bulk water (a moon's or an
+    icy member's ice) over 4πR² at `REGIME_WATER_DENSITY` = 1,000 kg m⁻³, the union T48.f's
+    `ImpactorBody::water` names. Its ocean shell is `Subsurface::Ocean`'s.
+  - _The field_ (§1.2). `MagneticField` by `magnetic_field(&FieldInputs)`; the class alone decides
+    a gas envelope's `Strong`, unpublished until P14.T24.d's envelope section. Clause 3 reads "a
+    mantle heated by its tides" as a positive tide at least the radiogenic, so that a body with
+    neither rock nor tide reaches clause 5.
+  - _The outgassing_ (§1.3). `SURFACE_MELT_HEAT_FLOW` = 0.025 W m⁻² in `params.rs`. F⊕ is the
+    `Fitted` `GENERATED_EARTH_HEAT_FLOW` = 0.092 547 910 476 W m⁻² (a test holds it to the table's
+    Earth to 10⁻⁹), so Earth's O is 1 to 10⁻¹². Venus's O is 0.3635. At the generator's own Venus
+    and Earth the window's upper edge is 31.1 mW m⁻², not the ruling's 27.7.
+  - _The subsurface ocean._ `SubsurfaceOcean` (getters for the plan's six fields), `OceanFloor`
+    (`Rock`, `IceIii`, `IceV`, `IceVi`, `IceVii`) and `Subsurface` (`NotComputed`, `NoOcean`,
+    `Ocean`), the plan's "absent", "none" and an ocean: the sim's form of T51.g's
+    `Modelled<Option<SubsurfaceOcean>>`, since Clippy's `option_option` forbids
+    `Option<Option<_>>` and `Section::NotApplicable` means something else. A regular moon's is
+    `Subsurface::of_regular_moon` on the flag's own inputs, through the crate-private
+    `ocean_layers` (`OceanLayers`), factored out of `has_subsurface_ocean` bit for bit.
+  - _The night floor_ (§1.5). `SurfaceInputs` gains `heat_flow`, and the public `night_floor(F)`
+    replaces the constant floor in `SurfaceConditions::derive`, for `day_and_night` and
+    `climate_range` alike. The table's Mercury's floor is 21.14 K, its Moon's 20.03 K.
+  - _The tests' bodies._
+    - The table derives its Moon as a planet with Earth's core fraction (iron 0.326, 8.67
+      mW m⁻²). The 9–21 mW m⁻² test, and the Moon's regime, field and O, read the Moon as the
+      generator makes it, a giant-impact moon of rock alone at its measured mass and radius:
+      12.06 mW m⁻².
+    - The generated Europa at its measured elements forms dry, inside the table's Jupiter's
+      848,000 km ice line, and the test pins that. "`subsurface_ocean` is `Some` for the table's
+      Europa" reads Europa's measured bulk (1,560.8 km, 3,013 kg m⁻³, 8% water, 102 K) under its
+      generated tide scaled to that radius, 0.235 W m⁻²: a 2.82 km shell over 134.3 km of water,
+      `IceShell`.
+    - Io at its measured elements is `HeatPipe` with no field, at 2.73 W m⁻². An Earth twin's
+      plates end at 9.77 Gyr. "The regime does not change when either Urey ratio does" is met by
+      `RegimeInputs`, which carries no residual, and tested against the published regime.
+  - _Over the sample_ (60 systems): of 877 bodies with figures, 26 `MobileLid`, 775 `StagnantLid`,
+    46 `Episodic`, 20 `HeatPipe` and 10 `IceShell`; 813 with no field, 54 weak and 10 strong.
+  - _Pins._ `planetary/global_figures` is new at header 21: the table's figures, the giant-impact
+    Moon's, Io's, the measured Europa's and the three lags. The held pins are re-blessed at header
+    21 (`golden_diff.py` reports the expected "not bumped"): `planetary/surface_conditions` moves
+    33 values and `planetary/surface_conditions_published` 315 (coldest, warmest and day–night
+    contrasts: the floor's (`T_floor` ÷ `T_eq`)⁴ enters every body's ε, so Titan's day–night
+    contrast falls 14.6% and locked Venus's 5.1%), and the latter gains each body's figures (778
+    labels). No liquid-water flag moves.
+  - _What the bump moves_: to be measured with the gate open, as T24.a's was.
+  - _Added public items_, beyond those above: `radiogenic_heat_production_w_per_kg`,
+    `RegimeInputs`, `FieldInputs`, `FiguresInputs`, and the constants
+    `BULK_SILICATE_EARTH_*_MASS_FRACTION`, `RADIOGENIC_REFERENCE_AGE`, `ROCK_CORE_DENSITY`,
+    `LAG_MODES`, `REGIME_WATER_DENSITY`, `GENERATED_EARTH_HEAT_FLOW` and the ruling's.
+  - _Files beyond the task's_: `hooks/figures/interior{,/tests}.rs`, `hooks/mod.rs`,
+    `moons/regular.rs`, `params.rs`, `surface/inputs.rs`, `system.rs`, `system/tests.rs`.
+  - _Accepted by_ `cargo test -p hyperion-sim --features testing --lib -- planetary::hooks
+planetary::system::tests::the_hooks planetary::system::tests::the_published
+planetary::system::tests::a_moon_s_published planetary::moons::regular`: the task's
+    `_Accept_` passes two positional filters, which cargo refuses, and reaches none of the
+    publication's tests in `system/tests.rs`.
+  - _Left to parts 2–4_: the figures are derived before the conditions and give them only F. θ
+    (from f_o) must precede the conditions, while the ice fraction and T48.c's `ImpactorBody`
+    (which reads T_s) need them, so `derive` gains a second stage, and `FiguresInputs` fields.
+- **Deferred findings (2026-10-13 rule)**, from part 1's reviews (P14.T24.b's interior):
+  - The floor lies above the mean surface temperature on 16 of the 111 published bodies (cold belt
+    members, a free-floating brown dwarf's bodies, a heat-pipe moon at 58.6 K under a 95.9 K
+    floor): F raises the floor but not T_s, so their range excludes their mean. D13 would put F
+    into T_s, which moves T13 and T24.a.
+  - O reads the whole F, tides included: the measured Europa outgasses 3.1 times Earth's through
+    its 2.8 km shell, Io 40 times. Under an ice shell no silicate melt reaches the surface (F_c's
+    own definition); cryovolcanism is another flux.
+  - The regime's wetness reads the inventory's water before escape, so a temperate world that lost
+    its ocean still counts as wet.
+  - The table's Moon is derived as a planet with Earth's core fraction; `derive::solar` could
+    derive it as rock alone.
+  - Mars's calibration target: the ruling's 22 mW m⁻² lies under Plesa et al. 2018's best fits,
+    22.5–24.3 (reference 23.6, Table S3); 23.6 would give `STAGNANT_LID_UREY_RATIO` ≈ 0.77.
+  - The ruling's own figures that do not reproduce from its rates (the Earth twin's 10.0 Gyr is
+    9.7–9.8; Mars's and Venus's radiogenic 16.6 and 36.4 are 17.1 and 37.0 as built), and its
+    citations corrected in the code's docs (Korenaga 2008's Urey ratio, the Moon's and Mars's
+    dynamo dates, Williams, Kasting and Wade's 0.23 M⊕ dropped, Plesa et al.'s pre-InSight fits).
+  - Ganymede's intrinsic field is a recorded miss (the ruling's), and Earth's Rossby number of 0.09
+    is the top of a published range down to 4.7 × 10⁻⁵ (Tassin, Gastine and Fournier 2021).
+  - Sources not read at the build (paywalled): McDonough and Sun 1995, Turcotte and Schubert's
+    table at first hand, Nimmo and Pappalardo 2016, Wienbruch and Spohn 1995, Paige et al. 2010's
+    25 K.
+
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might
   expect to exist"; noted by "main"). The drafted surface-section tasks define closed sets that

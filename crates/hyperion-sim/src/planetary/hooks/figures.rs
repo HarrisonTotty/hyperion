@@ -1,10 +1,30 @@
 //! A body's global figures (plan 14, P14.T24.b, with P14.T48's inputs to the coarse surface):
 //! what the surface generator reads of a body's whole surface.
 //!
-//! Built so far (P14.T48.f): [`impactors`], what strikes a body and what it strikes, which
-//! P14.T48.c's crater contract carries beside the crater density
-//! ([`CraterParams`](hyperion_surface::craters::CraterParams)). T24.b's `GlobalFigures` and T48's
-//! other figures join this module with their tasks.
+//! Built so far:
+//!
+//! - [`GlobalFigures`] (P14.T24.b, its interior): the body's heat flow, its tectonic regime, its
+//!   magnetic field, its present volcanic outgassing and its subsurface ocean, from its
+//!   [`interior`] (science-p14-t24b-laws Part 1). Its relief and
+//!   continents (P14.T48.a), its wet epoch (P14.T48.b), its surface age and crater contract
+//!   (P14.T48.c), its oceans, ices and clouds and its volcanism level join it with their tasks in
+//!   the 21 → 22 batch.
+//! - [`impactors`] (P14.T48.f): what strikes a body and what it strikes, which P14.T48.c's crater
+//!   contract carries beside the crater density
+//!   ([`CraterParams`](hyperion_surface::craters::CraterParams)).
+//!
+//! # The global figures (P14.T24.b)
+//!
+//! [`GlobalFigures::derive`] reads plain values ([`FiguresInputs`]): the body's mass, radius,
+//! gravity, class and mass fractions (its bulk section's), its atmosphere and water, its host's
+//! \[Fe/H\], its age, its rotation and the tidal heat its parent raises in it. A body in the
+//! gas-envelope state has none, as it has no surface. The heat flow, the regime, the field and the
+//! outgassing are [`interior`]'s; the subsurface ocean is the rule's that computes it, so far a
+//! regular moon's alone ([`Subsurface`]).
+//!
+//! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes them with
+//! the surface conditions, under the same hold until the batch's bump, and passes their heat
+//! flow to the conditions' night floor.
 //!
 //! # The impactors (P14.T48.f)
 //!
@@ -77,12 +97,21 @@ use crate::planetary::belts::{
     BELT_GIANT_MASS, Belt, BeltComposition, BeltPart, MEMBER_ECCENTRICITY_WIDTH,
     MEMBER_INCLINATION_WIDTH_DEG, SCATTERED_ECCENTRICITY_WIDTH, SCATTERED_INCLINATION_WIDTH_DEG,
 };
-use crate::planetary::derive::SnowLineSide;
+use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
+use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
+use crate::planetary::moons::regular::{ICE_MELTING_POINT, ocean_layers};
 use crate::planetary::record::BeltKind;
-use crate::substance;
+use crate::substance::{self, SubstanceId};
 use crate::units::{
-    EarthMasses, GravitationalParameter, Kelvin, Kilograms, KilogramsPerCubicMetre, Metres,
-    MetresPerSecond, MetresPerSecondSquared, Radians,
+    Dex, EarthMasses, GravitationalParameter, Kelvin, Kilograms, KilogramsPerCubicMetre, Metres,
+    MetresPerSecond, MetresPerSecondSquared, Radians, Seconds, WattsPerSquareMetre, Years,
+};
+
+pub mod interior;
+
+pub use interior::{
+    Interior, MagneticField, RadiogenicIsotope, TectonicRegime, conductive_lag,
+    convecting_heat_flow, magnetic_field, outgassing, radiogenic_heat_flow, tectonic_regime,
 };
 
 #[cfg(test)]
@@ -991,5 +1020,467 @@ pub fn impactors(body: &ImpactorBody<'_>) -> Result<Impactors, DeriveImpactorsEr
         source,
         target,
         crust,
+    })
+}
+
+/// What a subsurface ocean rests on (P14.T24.b's `subsurface_ocean`): rock, or the high-pressure
+/// ice whose liquidus meets the ocean's temperature (P14.T51.g, 23 → 24).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum OceanFloor {
+    /// The rock core or mantle.
+    Rock,
+    /// Ice III.
+    IceIii,
+    /// Ice V.
+    IceV,
+    /// Ice VI.
+    IceVi,
+    /// Ice VII.
+    IceVii,
+}
+
+/// A body's ocean under its surface (P14.T24.b, P14.T51.g): its ice shell, its liquid's depth,
+/// its floor, the liquid and its solutes, and its temperature at its base.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SubsurfaceOcean {
+    shell_thickness: Metres,
+    thickness: Metres,
+    floor: OceanFloor,
+    liquid: SubstanceId,
+    solute_mass_fraction: f64,
+    base_temperature: Kelvin,
+}
+
+impl SubsurfaceOcean {
+    /// The ocean of a regular moon of radius `radius`, density `density` and water mass fraction
+    /// `water`, with a surface at `surface` and a tidal heat flux `flux` (P14.T17.b's flag,
+    /// [`has_subsurface_ocean`](crate::planetary::moons::regular::has_subsurface_ocean), with the
+    /// inputs its derivation gives it); `None` where the flag says there is none.
+    ///
+    /// Its shell is the flag's own, 651 ln(273 K ÷ `T_s`) ÷ F, and its depth the moon's water layer
+    /// less that shell. It is pure water on rock, at 273 K at its base
+    /// ([`ICE_MELTING_POINT`]): the flag's model, until P14.T51.g's liquidus, solutes and floor
+    /// (23 → 24).
+    ///
+    /// # Examples
+    ///
+    /// Europa, 8% water under a surface at 102 K, with 50 mW m⁻² from below, keeps an ocean about
+    /// 13 km under its ice and some 124 km deep to its rock:
+    ///
+    /// ```
+    /// use hyperion_sim::planetary::hooks::figures::{OceanFloor, SubsurfaceOcean};
+    /// use hyperion_sim::units::{Kelvin, KilogramsPerCubicMetre, Metres, WattsPerSquareMetre};
+    ///
+    /// let europa = SubsurfaceOcean::of_regular_moon(
+    ///     Metres::new(1.5608e6),
+    ///     KilogramsPerCubicMetre::new(3_013.0),
+    ///     0.08,
+    ///     Kelvin::new(102.0),
+    ///     WattsPerSquareMetre::new(0.05),
+    /// )
+    /// .expect("an ocean");
+    /// assert!((europa.shell_thickness().value() / 1e3 - 12.8).abs() < 0.1);
+    /// assert!((europa.thickness().value() / 1e3 - 124.2).abs() < 0.5);
+    /// assert_eq!(europa.floor(), OceanFloor::Rock);
+    /// ```
+    #[must_use]
+    pub fn of_regular_moon(
+        radius: Metres,
+        density: KilogramsPerCubicMetre,
+        water: f64,
+        surface: Kelvin,
+        flux: WattsPerSquareMetre,
+    ) -> Option<Self> {
+        let layers = ocean_layers(radius, density, water, surface, flux)?;
+        (layers.shell_thickness < layers.water_depth).then(|| Self {
+            shell_thickness: layers.shell_thickness,
+            thickness: Metres::new(layers.water_depth.value() - layers.shell_thickness.value()),
+            floor: OceanFloor::Rock,
+            liquid: Gas::Water.substance(),
+            solute_mass_fraction: 0.0,
+            base_temperature: ICE_MELTING_POINT,
+        })
+    }
+
+    /// The ice shell over it, m.
+    #[must_use]
+    pub const fn shell_thickness(&self) -> Metres {
+        self.shell_thickness
+    }
+
+    /// Its liquid's depth, from the shell's base to its floor, m.
+    #[must_use]
+    pub const fn thickness(&self) -> Metres {
+        self.thickness
+    }
+
+    /// What it rests on.
+    #[must_use]
+    pub const fn floor(&self) -> OceanFloor {
+        self.floor
+    }
+
+    /// Its liquid, a registry row: water, `H2O`, for every rule so far.
+    #[must_use]
+    pub const fn liquid(&self) -> SubstanceId {
+        self.liquid
+    }
+
+    /// The mass fraction of solutes in its liquid, 0 to 1: none for every rule so far.
+    #[must_use]
+    pub const fn solute_mass_fraction(&self) -> f64 {
+        self.solute_mass_fraction
+    }
+
+    /// Its temperature at its base, where the shell meets it.
+    #[must_use]
+    pub const fn base_temperature(&self) -> Kelvin {
+        self.base_temperature
+    }
+}
+
+/// Whether a body holds an ocean under its surface, as far as a rule computes it (P14.T24.b's
+/// `subsurface_ocean`: none for a body computed to have none, and absent for one no rule computes).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Subsurface {
+    /// No rule computes it for this body: until P14.T51.g's bump (23 → 24), every body but a
+    /// regular moon. It must never be read as "no ocean".
+    NotComputed,
+    /// A rule computes that the body holds none.
+    NoOcean,
+    /// The body holds this ocean.
+    Ocean(SubsurfaceOcean),
+}
+
+impl Subsurface {
+    /// A regular moon's, by P14.T17.b's flag ([`SubsurfaceOcean::of_regular_moon`], with its
+    /// inputs).
+    #[must_use]
+    pub fn of_regular_moon(
+        radius: Metres,
+        density: KilogramsPerCubicMetre,
+        water: f64,
+        surface: Kelvin,
+        flux: WattsPerSquareMetre,
+    ) -> Self {
+        SubsurfaceOcean::of_regular_moon(radius, density, water, surface, flux)
+            .map_or(Self::NoOcean, Self::Ocean)
+    }
+}
+
+/// What [`GlobalFigures::derive`] reads of a body at a time, as plain values: its mass, its bulk
+/// section's radius, gravity, class and mass fractions, its atmosphere and its water, its host's
+/// \[Fe/H\], its age, its rotation, the tidal heat raised in it, and its subsurface ocean as its
+/// rule computes it.
+///
+/// The fields carry no invariant the derivation relies on, so they are public: a radius that is
+/// not positive gives no radiogenic heat, and the mass, age and fractions are read as given (at
+/// an age of 0 the rock makes its birth's production, 4.95 times today's).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FiguresInputs<'a> {
+    /// The body's atmosphere at the time (P14.T13), whose state says whether it has a surface and
+    /// whose water whether a rocky lid can move.
+    pub atmosphere: &'a Atmosphere,
+    /// Its mass at the time.
+    pub mass: EarthMasses,
+    /// Its mean radius, the bulk section's.
+    pub radius: Metres,
+    /// Its mean surface gravity, the bulk section's: its water's floor pressure is ρ g `d_w`.
+    pub surface_gravity: MetresPerSecondSquared,
+    /// Its class, the bulk section's: a `Rocky` mantle convects, and so does an `Icy` body's rock
+    /// from [`CONVECTING_ROCK_RADIUS`](interior::CONVECTING_ROCK_RADIUS) ([`Interior::of`]).
+    pub class: PlanetClass,
+    /// Its mass fractions, the bulk section's: the rock holds the radiogenic isotopes, and the
+    /// iron the core whose heat the mantle carries.
+    pub fractions: MassFractions,
+    /// The water of its volatile inventory (P14.T13.a), before escape and the climate divide it.
+    /// Its water's global-equivalent depth is the larger of this and its bulk water, a moon's or
+    /// an icy member's ice, over its surface at
+    /// [`REGIME_WATER_DENSITY`](interior::REGIME_WATER_DENSITY).
+    pub inventory_water: Kilograms,
+    /// Its sidereal rotation period at the time, s, positive, infinite for a body that does not
+    /// turn (P14.T14's; the orbital period for a 1:1 lock), which sets a thermal dynamo's geometry.
+    pub rotation_period: Seconds,
+    /// Its host's \[Fe/H\], which scales its isotopes.
+    pub fe_h: Dex,
+    /// Its age, the system's at the time: its isotopes decay from its birth.
+    pub age: Years,
+    /// The tidal heat its parent raises in it, over its surface, W m⁻², at least 0 (a negative or
+    /// NaN value is read as 0): a moon's, and zero for a body that goes round a star.
+    pub tidal_heat_flow: WattsPerSquareMetre,
+    /// Its ocean under the surface, as its rule computes it.
+    pub subsurface_ocean: Subsurface,
+}
+
+/// A body's global figures at a time (P14.T24.b, its interior so far): its heat flow, its
+/// interior, its tectonic regime, its magnetic field, its present outgassing and its subsurface
+/// ocean.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlobalFigures {
+    radiogenic_heat_flow: WattsPerSquareMetre,
+    non_tidal_heat_flow: WattsPerSquareMetre,
+    heat_flow: WattsPerSquareMetre,
+    interior: Interior,
+    tectonic_regime: TectonicRegime,
+    magnetic_field: MagneticField,
+    outgassing: f64,
+    subsurface_ocean: Subsurface,
+}
+
+impl GlobalFigures {
+    /// The figures of the body `inputs` describe; `None` for a body in the gas-envelope state or
+    /// of a class with no solid surface, which takes no solid heat flow.
+    ///
+    /// The heat flow is [`interior`]'s: the rock's radiogenic heat, with the residual of its
+    /// interior (a conducting rock's lag, or a convecting mantle's Urey ratio by its regime with
+    /// its core's heat), and the tidal heat added. The regime reads the radiogenic term before the
+    /// residual, the tide, the state, the water's depth, the gravity and the ocean's shell, and the
+    /// field the regime, the iron's share, the heat, the age and the rotation.
+    ///
+    /// # Examples
+    ///
+    /// Earth, as [`derive_body`](crate::planetary::derive::derive_body)'s example derives it, a
+    /// wet mobile lid that outgasses at about Earth's rate:
+    ///
+    /// ```
+    /// use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+    /// use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
+    /// use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
+    /// use hyperion_sim::planetary::hooks::figures::{
+    ///     FiguresInputs, GlobalFigures, MagneticField, Subsurface, TectonicRegime,
+    /// };
+    /// use hyperion_sim::stellar::Composition;
+    /// use hyperion_sim::stellar::draws::UnitUniform;
+    /// use hyperion_sim::time::UniverseTime;
+    /// use hyperion_sim::units::consts::{METRES_PER_AU, SOLAR_MASS_KG};
+    /// use hyperion_sim::units::{
+    ///     Dex, EarthMasses, GravitationalParameter, Kelvin, Kilograms, Megayears, Metres, Radians,
+    ///     Seconds, SolarLuminosities, SolarMasses, SolarRadii, WattsPerSquareMetre, Years,
+    /// };
+    ///
+    /// let host = DiscHost::new(SolarMasses::new(1.0), Dex::new(0.0), SolarLuminosities::new(0.7), SolarRadii::new(0.89))?;
+    /// let disc = disc::derive(&host, Megayears::new(3.0), &DiscDraws::MEDIAN, Truncation::NONE);
+    /// let disc = disc.profile().expect("a median disc exists");
+    /// let a = Metres::new(METRES_PER_AU);
+    /// let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(1.0));
+    /// let orientation = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)?;
+    /// let orbit = KeplerElements::from_semi_major_axis(a, mu, Eccentricity::new(0.0167)?, orientation, Radians::ZERO)?;
+    /// let rank = UnitUniform::new(0.384).expect("inside (0, 1)");
+    /// let earth = PlacedBody::new(EarthMasses::new(1.0), orbit, a, rank)?;
+    /// let sun = [HostLight::new(SolarLuminosities::new(1.0), Kelvin::new(5_772.0), SolarRadii::new(1.0))?];
+    /// let hosts = BodyHosts::new(Kilograms::new(SOLAR_MASS_KG), Composition::SOLAR, &sun, &[])?;
+    /// let age = Years::new(4.57e9);
+    /// let derived = derive_body(&earth, &hosts, disc, age, UniverseTime::EPOCH)?;
+    /// let figures = GlobalFigures::derive(&FiguresInputs {
+    ///     atmosphere: derived.atmosphere(),
+    ///     mass: derived.mass(),
+    ///     radius: Metres::from(derived.radius()),
+    ///     surface_gravity: derived.surface_gravity(),
+    ///     class: derived.class(),
+    ///     fractions: derived.fractions(),
+    ///     inventory_water: derived.inventory().water(),
+    ///     rotation_period: Seconds::new(86_164.1),
+    ///     fe_h: Dex::new(0.0),
+    ///     age,
+    ///     tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+    ///     subsurface_ocean: Subsurface::NotComputed,
+    /// })
+    /// .expect("an Earth has a surface");
+    /// assert_eq!(figures.tectonic_regime(), TectonicRegime::MobileLid);
+    /// assert_eq!(figures.magnetic_field(), MagneticField::Strong);
+    /// assert!((figures.heat_flow().value() / 0.092 - 1.0).abs() < 0.05);
+    /// assert!((figures.outgassing() - 1.0).abs() < 0.1);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn derive(inputs: &FiguresInputs<'_>) -> Option<Self> {
+        let air = inputs.atmosphere;
+        if matches!(air.state(), SurfaceState::GasEnvelope) {
+            return None;
+        }
+        let FiguresInputs {
+            mass,
+            radius,
+            surface_gravity,
+            class,
+            fractions,
+            inventory_water,
+            rotation_period,
+            fe_h,
+            age,
+            ..
+        } = *inputs;
+        let kilograms = Kilograms::from(mass).value();
+        let rock_core = rock_core_radius(kilograms * (1.0 - fractions.water()));
+        let interior = Interior::of(class, rock_core)?;
+        let radiogenic = radiogenic_heat_flow(
+            Kilograms::new(kilograms * fractions.rock()),
+            radius,
+            fe_h,
+            age,
+        );
+        let solids = fractions.iron() + fractions.rock();
+        let iron_share = if solids > 0.0 {
+            fractions.iron() / solids
+        } else {
+            0.0
+        };
+        // Clamped by comparison, not `max`, which may return either zero at a tie of signs.
+        let tide = inputs.tidal_heat_flow.value();
+        let tidal = WattsPerSquareMetre::new(if tide > 0.0 { tide } else { 0.0 });
+        let r = radius.value();
+        let (held, bulk_water) = (inventory_water.value(), fractions.water() * kilograms);
+        let water = if held > bulk_water { held } else { bulk_water };
+        let water_depth = if r > 0.0 {
+            water / (interior::REGIME_WATER_DENSITY.value() * 4.0 * core::f64::consts::PI * r * r)
+        } else {
+            0.0
+        };
+        let ocean_shell = match inputs.subsurface_ocean {
+            Subsurface::Ocean(ocean) => Some(ocean.shell_thickness()),
+            Subsurface::NoOcean | Subsurface::NotComputed => None,
+        };
+        let regime = tectonic_regime(&interior::RegimeInputs {
+            interior,
+            mass,
+            radiogenic,
+            tidal,
+            state: air.state(),
+            water_depth: Metres::new(water_depth),
+            surface_gravity,
+            ocean_shell,
+        });
+        let non_tidal = match interior {
+            Interior::Conducting => WattsPerSquareMetre::new(
+                radiogenic.value()
+                    * conductive_lag(rock_core, age, interior::ROCK_THERMAL_DIFFUSIVITY_M2_PER_S),
+            ),
+            Interior::Convecting => convecting_heat_flow(
+                radiogenic_heat_flow(Kilograms::new(kilograms * solids), radius, fe_h, age),
+                iron_share,
+                regime,
+            ),
+        };
+        let heat_flow = WattsPerSquareMetre::new(non_tidal.value() + tidal.value());
+        let field = magnetic_field(&interior::FieldInputs {
+            class,
+            interior,
+            mass,
+            iron_share,
+            regime,
+            radiogenic,
+            tidal,
+            age,
+            rotation_period,
+        });
+        Some(Self {
+            radiogenic_heat_flow: radiogenic,
+            non_tidal_heat_flow: non_tidal,
+            heat_flow,
+            interior,
+            tectonic_regime: regime,
+            magnetic_field: field,
+            outgassing: outgassing(heat_flow),
+            subsurface_ocean: inputs.subsurface_ocean,
+        })
+    }
+
+    /// The heat flow at the surface F, W m⁻²: the non-tidal part with the tidal heat added
+    /// ([`interior`]). The generated Earth's is 0.0925 W m⁻², against Davies and Davies 2010's
+    /// measured 0.0916.
+    #[must_use]
+    pub const fn heat_flow(&self) -> WattsPerSquareMetre {
+        self.heat_flow
+    }
+
+    /// The non-tidal heat flow `F_nt`, W m⁻²: the radiogenic term with its interior's residual,
+    /// which P14.T56.d's tidal branches add their own heat to (decision-p14-moons §F-ocean).
+    #[must_use]
+    pub const fn non_tidal_heat_flow(&self) -> WattsPerSquareMetre {
+        self.non_tidal_heat_flow
+    }
+
+    /// The radiogenic heat flow `F_rad`, W m⁻²: the rock's present production over the surface,
+    /// before the residual ([`radiogenic_heat_flow`]), which decides the regime.
+    #[must_use]
+    pub const fn radiogenic_heat_flow(&self) -> WattsPerSquareMetre {
+        self.radiogenic_heat_flow
+    }
+
+    /// How the interior loses its heat ([`Interior::of`]): a conducting icy body's rock, or a
+    /// convecting mantle.
+    #[must_use]
+    pub const fn interior(&self) -> Interior {
+        self.interior
+    }
+
+    /// The tectonic regime, one of five by [`tectonic_regime`]'s rule.
+    #[must_use]
+    pub const fn tectonic_regime(&self) -> TectonicRegime {
+        self.tectonic_regime
+    }
+
+    /// The global intrinsic magnetic field, by [`magnetic_field`]'s rule.
+    #[must_use]
+    pub const fn magnetic_field(&self) -> MagneticField {
+        self.magnetic_field
+    }
+
+    /// The present volcanic outgassing O, dimensionless, relative to Earth's rate, at least 0
+    /// ([`outgassing`]; the plan's member `outgassing`): 1 on the generated Earth, 0 where the heat
+    /// flow is under
+    /// [`SURFACE_MELT_HEAT_FLOW`](crate::planetary::params::SURFACE_MELT_HEAT_FLOW).
+    #[must_use]
+    pub const fn outgassing(&self) -> f64 {
+        self.outgassing
+    }
+
+    /// The ocean under the surface, as its rule computes it ([`Subsurface`]).
+    #[must_use]
+    pub const fn subsurface_ocean(&self) -> &Subsurface {
+        &self.subsurface_ocean
+    }
+}
+
+/// The radius of a sphere of `kilograms` of rock at [`interior::ROCK_CORE_DENSITY`]: an icy
+/// body's non-water mass, whose conductive lag it sets.
+#[must_use]
+fn rock_core_radius(kilograms: f64) -> Metres {
+    let density = interior::ROCK_CORE_DENSITY.value();
+    Metres::new(math::cbrt(
+        3.0 * kilograms / (4.0 * core::f64::consts::PI * density),
+    ))
+}
+
+/// The figures of a body of the Solar System table (`derive::solar`), derived about the present
+/// Sun: its own mass, radius, gravity, class, fractions and water at the Sun's age and \[Fe/H\],
+/// turning in Earth's sidereal day, with no tide and no rule for an ocean under it; `None` for a
+/// gas envelope. Its heat flow reads no rotation.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn table_figures(body: &crate::planetary::derive::DerivedBody) -> Option<GlobalFigures> {
+    table_figures_spun(body, Seconds::new(86_164.1))
+}
+
+/// [`table_figures`] with the sidereal rotation period `rotation_period`.
+#[cfg(test)]
+#[must_use]
+pub(crate) fn table_figures_spun(
+    body: &crate::planetary::derive::DerivedBody,
+    rotation_period: Seconds,
+) -> Option<GlobalFigures> {
+    GlobalFigures::derive(&FiguresInputs {
+        atmosphere: body.atmosphere(),
+        mass: body.mass(),
+        radius: Metres::from(body.radius()),
+        surface_gravity: body.surface_gravity(),
+        class: body.class(),
+        fractions: body.fractions(),
+        inventory_water: body.inventory().water(),
+        rotation_period,
+        fe_h: Dex::new(0.0),
+        age: crate::planetary::derive::solar::SOLAR_AGE,
+        tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+        subsurface_ocean: Subsurface::NotComputed,
     })
 }

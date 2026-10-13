@@ -112,26 +112,9 @@ pub struct SeasonalOrbit {
     pub period: Seconds,
 }
 
-/// A body's tectonic regime, plan 14's (P14.T24.b, with every variant the wire pins,
-/// decision-composition §1.10).
-///
-/// A closed physics class. Heat-pipe, episodic and ice-shell worlds are produced by no rule of
-/// plan 14 yet, and their morphologies are recorded for a later R09.T11–T12 (R09's Risks,
-/// "Composition"); the pass names each so that none is silently treated as another.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum TectonicRegime {
-    /// Plates in relative motion, as on Earth: the pass draws plates (R09.T11).
-    MobileLid,
-    /// One lid, as on Mars, Venus as usually modelled, the Moon and Mercury: volcanic provinces
-    /// and their flexure, no plate boundaries (Design note 6).
-    StagnantLid,
-    /// Heat lost through volcanic conduits, as on Io.
-    HeatPipe,
-    /// A lid that overturns in episodes.
-    Episodic,
-    /// An ice shell over a subsurface ocean, as on Europa.
-    IceShell,
-}
+/// A body's tectonic regime: plan 14's, P14.T24.b's (science-p14-t24b-laws §1.1), with every
+/// variant the wire pins (decision-composition §1.10), re-exported here for the pass.
+pub use crate::planetary::hooks::figures::TectonicRegime;
 
 /// The span over which the surface held liquid, plan 14's volatile history (P14.T48.b), as times
 /// before the present.

@@ -11,6 +11,7 @@ use crate::planetary::derive::solar::{
 };
 use crate::planetary::derive::{DerivedBody, PlacedBody};
 use crate::planetary::frames::FrameSpin;
+use crate::planetary::hooks::figures::table_figures;
 use crate::stellar::draws::UnitUniform;
 use crate::units::consts::SECONDS_PER_DAY;
 use crate::units::{Degrees, EarthMasses, GravitationalParameter, Years};
@@ -54,7 +55,7 @@ fn spin_of(name: &str) -> SeasonalSpin {
 }
 
 /// The inputs of the derived body `body` under the spin `spin`, its material of its own mass
-/// fractions.
+/// fractions and its heat flow its own about the present Sun ([`heat_flow_of`]).
 fn inputs_of(body: &DerivedBody, spin: SeasonalSpin) -> SurfaceInputs<'_> {
     SurfaceInputs {
         atmosphere: body.atmosphere(),
@@ -65,7 +66,14 @@ fn inputs_of(body: &DerivedBody, spin: SeasonalSpin) -> SurfaceInputs<'_> {
         stellar_flux: WattsPerSquareMetre::from(body.flux()),
         xuv_flux: body.xuv_flux(),
         spin,
+        heat_flow: heat_flow_of(body),
     }
+}
+
+/// The heat flow of the derived body `body` about the present Sun at its age (P14.T24.b), zero for
+/// a gas envelope, which has none.
+fn heat_flow_of(body: &DerivedBody) -> WattsPerSquareMetre {
+    table_figures(body).map_or(WattsPerSquareMetre::new(0.0), |f| f.heat_flow())
 }
 
 /// The conditions of the derived body `body` under the spin `spin`.
@@ -80,14 +88,14 @@ fn column_of(body: &DerivedBody, spin: SeasonalSpin) -> (Column, Moisture) {
 }
 
 /// The dayside's and nightside's temperatures of the derived body `body` under the spin `spin`,
-/// over the cosmic background's floor, as `SurfaceConditions::derive` takes them.
+/// over the floor of its own heat flow, as `SurfaceConditions::derive` takes them.
 fn day_and_night_of(body: &DerivedBody, spin: SeasonalSpin) -> (Kelvin, Kelvin) {
     let (column, _) = column_of(body, spin);
     day_and_night(
         &column,
         &spin,
         SurfaceMaterial::of(&body.fractions()),
-        COSMIC_BACKGROUND_TEMPERATURE,
+        night_floor(heat_flow_of(body)),
     )
 }
 
@@ -1458,23 +1466,72 @@ fn a_locked_airless_body_s_night_is_its_floor() {
         ground_redistribution(&column, &locked, SurfaceMaterial::Rock),
         0.0,
     );
+    // Its night is its heat flow's floor (P14.T24.b; science-p14-t24b-laws §1.5): about 21 K at
+    // Mercury's 10.8 mW m⁻², to 10⁻¹².
+    let floor = night_floor(heat_flow_of(mercury));
+    eprintln!("the locked Mercury's night: {} K", floor.value());
+    assert!((20.0..23.0).contains(&floor.value()), "{floor:?}");
     let (_, night) = day_and_night_of(mercury, locked);
     assert!(
-        (night.value() / COSMIC_BACKGROUND_TEMPERATURE.value() - 1.0).abs() < 1e-12,
+        (night.value() / floor.value() - 1.0).abs() < 1e-12,
         "{night:?}"
     );
-    // A warmer floor, as P14.T24.b's heat flow gives one, is its night too.
-    let floor = Kelvin::new(26.1);
-    let (_, warmer) = day_and_night(&column, &locked, SurfaceMaterial::Rock, floor);
-    assert!(
-        (warmer.value() / floor.value() - 1.0).abs() < 1e-12,
-        "{warmer:?}"
-    );
+    // With no internal heat it is the cosmic background's, and a warmer floor is its night too.
+    for floor in [COSMIC_BACKGROUND_TEMPERATURE, Kelvin::new(30.0)] {
+        let (_, dark) = day_and_night(&column, &locked, SurfaceMaterial::Rock, floor);
+        assert!(
+            (dark.value() / floor.value() - 1.0).abs() < 1e-12,
+            "{dark:?}"
+        );
+    }
     let conditions = conditions_of(mercury, locked).unwrap();
-    assert_same_bits(
-        conditions.climate_range().0.value(),
-        COSMIC_BACKGROUND_TEMPERATURE.value(),
+    assert_same_bits(conditions.climate_range().0.value(), floor.value());
+}
+
+#[test]
+fn the_night_floor_is_the_heat_flow_s() {
+    // Science-p14-t24a-climate.md §2: (T_CMB⁴ + F ÷ ε_r σ)^¼, the cosmic background's with no
+    // heat. Its §6's 26.1 K and 24.0 K are withdrawn (science-p14-t24b-laws §1.5): the floors
+    // follow from each body's own F, the Moon's 11.9 mW m⁻² at 21.7 K and Mercury's 11.0 at
+    // 21.2 K. The table's Moon and Mercury lie in 20–23 K.
+    assert_eq!(
+        night_floor(WattsPerSquareMetre::new(0.0)),
+        COSMIC_BACKGROUND_TEMPERATURE
     );
+    for f in [-1.0, f64::NAN] {
+        assert_eq!(
+            night_floor(WattsPerSquareMetre::new(f)),
+            COSMIC_BACKGROUND_TEMPERATURE
+        );
+    }
+    for (flow, kelvin) in [(0.0119, 21.7), (0.0110, 21.2)] {
+        let floor = night_floor(WattsPerSquareMetre::new(flow)).value();
+        assert!((floor - kelvin).abs() < 0.1, "{flow}: {floor}");
+    }
+    let table = table();
+    for name in ["Moon", "Mercury"] {
+        let floor = night_floor(heat_flow_of(&found(&table, name).1)).value();
+        eprintln!("the table's {name}'s floor: {floor} K");
+        assert!((20.0..23.0).contains(&floor), "{name}: {floor}");
+    }
+    let by_hand = math::powf(
+        math::powi(COSMIC_BACKGROUND_TEMPERATURE.value(), 4)
+            + 0.0926 / (REGOLITH_EMISSIVITY * STEFAN_BOLTZMANN),
+        0.25,
+    );
+    assert_same_bits(
+        night_floor(WattsPerSquareMetre::new(0.0926)).value(),
+        by_hand,
+    );
+    // Continuous as the heat goes, and rising with it.
+    let tiny = night_floor(WattsPerSquareMetre::new(1e-30)).value();
+    assert!((tiny - COSMIC_BACKGROUND_TEMPERATURE.value()).abs() < 1e-12);
+    let mut last = COSMIC_BACKGROUND_TEMPERATURE.value();
+    for step in 1..=100 {
+        let floor = night_floor(WattsPerSquareMetre::new(0.001 * f64::from(step))).value();
+        assert!(floor > last, "{step}");
+        last = floor;
+    }
 }
 
 #[test]
@@ -1595,14 +1652,21 @@ fn no_light_gives_no_contrast() {
 #[test]
 fn the_table_s_climate_ranges_are_the_ruling_s() {
     // Science-p14-t24a-climate.md §6's ranges (item 1's zonal ends; the table's Ceres is rock,
-    // item 2's erratum), the bodies with air at §7's modal ends, with the airless floors at the
-    // cosmic background's until P14.T24.b's heat flow raises them (to 26.1 K on Mercury and
-    // 24.0 K on the Moon).
+    // item 2's erratum), the bodies with air at §7's modal ends, with the airless floors at their
+    // own heat flows' (P14.T24.b; science-p14-t24b-laws §1.5): 21.1 K on Mercury and 20.0 K on the
+    // table's Moon, which the table derives as a planet with Earth's core fraction.
     let table = table();
+    for name in ["Mercury", "Moon"] {
+        let (_, body, conditions) = found(&table, name);
+        assert_same_bits(
+            conditions.climate_range().0.value(),
+            night_floor(heat_flow_of(body)).value(),
+        );
+    }
     for (name, coldest, warmest) in [
         ("Earth", 261.7, 305.1),
-        ("Mercury", 2.7255, 585.2),
-        ("Moon", 2.7255, 361.0),
+        ("Mercury", 21.1, 585.2),
+        ("Moon", 20.0, 361.0),
         ("Venus", 733.5, 736.1),
         ("Mars", 203.3, 221.2),
         ("Ceres", 56.7, 202.9),
@@ -1630,8 +1694,7 @@ fn the_table_s_climate_ranges_are_the_ruling_s() {
             material
         );
     }
-    // No body's coldest lies below the floor, and none is negative: the table's, locked, and
-    // tilted to 90°.
+    // No body's coldest lies below its heat flow's floor: the table's, locked, and tilted to 90°.
     for (name, body, conditions) in &table {
         let base = spin_of(name);
         let locked = conditions_of(
@@ -1650,9 +1713,10 @@ fn the_table_s_climate_ranges_are_the_ruling_s() {
             },
         )
         .unwrap();
+        let floor = night_floor(heat_flow_of(body));
         for c in [conditions, &locked, &tilted] {
             let (cold, warm) = c.climate_range();
-            assert!(cold >= COSMIC_BACKGROUND_TEMPERATURE, "{name}: {cold:?}");
+            assert!(cold >= floor, "{name}: {cold:?}");
             assert!(warm >= cold, "{name}: {cold:?} to {warm:?}");
             assert!(
                 cold <= c.mean_surface_temperature() && warm >= c.mean_surface_temperature(),

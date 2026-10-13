@@ -1127,15 +1127,47 @@ pub fn has_subsurface_ocean(
     surface: Kelvin,
     flux: WattsPerSquareMetre,
 ) -> bool {
+    ocean_layers(radius, density, water, surface, flux)
+        .is_some_and(|layers| layers.shell_thickness < layers.water_depth)
+}
+
+/// The two depths [`has_subsurface_ocean`] compares for a moon of radius `radius`, density
+/// `density` and water mass fraction `water`, with a surface at `surface` and a heat flux `flux`
+/// from below (P14.T17.b): the ice shell that conducts the flux, 651 ln(273 K ÷ `T_s`) ÷ F, and
+/// the water layer, R (1 − (1 − x ρ ÷ `ρ_w`)^⅓). The moon holds an ocean where the shell is the
+/// thinner, `water − shell` deep.
+///
+/// `None` where no ocean can be: a moon without water, with no flux from below, or with a surface
+/// at or above the melting point.
+#[must_use]
+pub(crate) fn ocean_layers(
+    radius: Metres,
+    density: KilogramsPerCubicMetre,
+    water: f64,
+    surface: Kelvin,
+    flux: WattsPerSquareMetre,
+) -> Option<OceanLayers> {
     let (t_s, f) = (surface.value(), flux.value());
     if water <= 0.0 || f <= 0.0 || t_s >= ICE_MELTING_POINT.value() {
-        return false;
+        return None;
     }
     let volume_share = (water * density.value() / WATER_DENSITY.value()).min(1.0);
     let layer = radius.value() * (1.0 - math::cbrt(1.0 - volume_share));
     let shell =
         ICE_CONDUCTIVITY_COEFFICIENT * math::ln(ICE_MELTING_POINT.value() / t_s.max(1.0)) / f;
-    shell < layer
+    Some(OceanLayers {
+        shell_thickness: Metres::new(shell),
+        water_depth: Metres::new(layer),
+    })
+}
+
+/// The depths of a moon's ice shell and of its water ([`ocean_layers`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct OceanLayers {
+    /// The ice shell that conducts the heat flux from the melting point to the surface.
+    pub(crate) shell_thickness: Metres,
+    /// The moon's water spread into a layer at [`WATER_DENSITY`] over its outer part.
+    pub(crate) water_depth: Metres,
 }
 
 /// The time a planet of mass `planet_mass` takes to lock the spin of a moon of mass `mass`,
