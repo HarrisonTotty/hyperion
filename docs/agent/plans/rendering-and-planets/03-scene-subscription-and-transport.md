@@ -1758,6 +1758,21 @@ FetchSystemError>`, `set_cameras(cameras, t, world) -> Result<(), RequestError>`
   Run 20 times in a row at load averages of 4.8–12.7, 16–19 s each: no failure. Its scope held to
   10% of a CPU (5 runs) or frozen for 2 s five times a run (3 runs): no failure either, but the old
   test passed those too, so they do not reproduce the loaded machine's stall.
+- **T9 after review: each return waits for its departure (lane fix-scene-knowledge,
+  2026-10-12).** `scene_knowledge.rs` failed under heavy load with three arrivals of the four. The
+  universe's scene setting is a watch that keeps only the latest, and the test set the move back
+  as soon as the move out was answered. A subscription's task still in a pool job (a heartbeat's
+  advance) when both settings landed took only the move back, a move within the system, which
+  brings no arrival. The test then gave up after its 1,000 reads, about 15.6 s of 64 Hz craft
+  pushes. Raising the count would not have helped: the arrival never comes. An instrumented copy
+  heard no departure in any of its 7 failures. The move back is now set only once the departure
+  has been heard, which the task pushes after it has taken the move out. Each wait reads until
+  what it waits for has come, bounded only by the harness's patience, so a server that never sends
+  one now fails after that patience rather than after the count. The test counts the whole
+  systems it checks and holds that there are at least four (a body that no longer resolved at its
+  grant could bring one more). No server change. With 16 copies at once on four CPUs beside four
+  busy loops, the old test failed 6 of 192 runs (round-start load averages 25–34; the instrumented
+  copy 7 of 128) and the new one 0 of 416 (13.6–270). Run alone in turn, both took 5.2–5.6 s.
 - **Deviations in T14, as built.** `useScene(universe, { detail, designate })` reads the request
   client and the link's status from `useServerLink()`, as the app's other server hooks do, rather
   than taking `requests`; `detail` is the level asked of the topic. **The designation (T12's open

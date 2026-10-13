@@ -6,18 +6,22 @@
 //! Asserted on the JSON as it arrives, as plan 12 asserts that no bearing contact has a `host`
 //! key: every body's `level` is the knowledge's grant, a contact carries no orbit and no mass (a
 //! Hill radius's inputs), and no section above a body's level is `ok`.
+//!
+//! Nothing here depends on how quickly the machine runs: each move of the stand-in waits for the
+//! client to hear what the move before it brought, not for a time or a number of notifications.
 
 mod common;
 
 use std::collections::BTreeMap;
 
-use common::TestServer;
 use common::scene::{
     SEED, TIME, TenCraft, craft_offset, in_system, in_the_halo, subscribe, systems,
 };
+use common::{TestServer, patiently};
 use hyperion_protocol::{
-    BodyIdHex, CameraReportDto, DetailLevelDto, FramePositionDto, KinematicsDto, RequestBody,
-    ResponseBody, SceneCamerasRequest, SceneShipRequest, ServerMessage, SystemIdHex,
+    BodyIdHex, CameraReportDto, DetailLevelDto, FramePositionDto, KinematicsDto, NotificationBody,
+    RequestBody, ResponseBody, SceneArrivalDto, SceneCamerasRequest, SceneShipRequest,
+    ServerMessage, SystemIdHex,
 };
 use hyperion_server::scene::{CraftState, SceneKnowledge};
 use hyperion_sim::id::BodyId;
@@ -108,11 +112,23 @@ fn check_record(record: &Value, level: &str) {
     }
 }
 
-/// Checks a scene state's or notification's JSON; returns the body records it checked.
-fn check(scene: &Value, checked: &mut usize) {
+/// What the test has checked so far.
+#[derive(Debug, Default)]
+struct Checked {
+    /// Body records, of the state, of the systems that arrived and of the bodies re-sent.
+    records: usize,
+    /// Whole systems that arrived in a notification.
+    arrivals: usize,
+}
+
+/// Checks a scene state's or notification's JSON, counting what it checked in `checked`.
+fn check(scene: &Value, checked: &mut Checked) {
     for craft in scene["craft"].as_array().into_iter().flatten() {
         let id = craft["craft"].as_str().expect("a craft's ID");
         assert!(CONTACTS.contains(&id), "{id} is not a contact");
+    }
+    if scene["arrival"]["system"].is_object() {
+        checked.arrivals += 1;
     }
     let systems = [&scene["system"], &scene["arrival"]["system"]];
     for system in systems.into_iter().filter(|system| system.is_object()) {
@@ -129,17 +145,23 @@ fn check(scene: &Value, checked: &mut usize) {
         for record in system["system"]["bodies"].as_array().expect("the bodies") {
             let id = record["id"].as_str().expect("a body's ID");
             check_record(record, grants[id]);
-            *checked += 1;
+            checked.records += 1;
         }
     }
     for body in scene["bodies"].as_array().into_iter().flatten() {
         check_record(&body["record"], body["level"].as_str().expect("a level"));
-        *checked += 1;
+        checked.records += 1;
     }
 }
 
+/// A notification as the client reads it: its subscription and its body.
+type Notification = (u32, NotificationBody);
+
+/// Whether a notification is the one a wait is for.
+type Wanted = fn(&Notification) -> bool;
+
 /// Checks every notification among `messages`.
-fn check_all(messages: &[(u32, hyperion_protocol::NotificationBody)], checked: &mut usize) {
+fn check_all(messages: &[Notification], checked: &mut Checked) {
     for (_, body) in messages {
         let message = ServerMessage::Notification {
             subscription: 1,
@@ -156,40 +178,66 @@ fn pick<'a, T>(lcg: &mut Lcg, items: &'a [T]) -> &'a T {
     &items[usize::try_from(lcg.next_below(n)).expect("an index of the list")]
 }
 
-/// Whether a notification brings a whole system.
-fn is_arrival((_, body): &(u32, hyperion_protocol::NotificationBody)) -> bool {
+/// The arrival or departure a notification brings, if it brings one.
+fn arrival_of((_, body): &Notification) -> Option<&SceneArrivalDto> {
     match body {
-        hyperion_protocol::NotificationBody::Scene(notification) => matches!(
-            notification.arrival,
-            Some(hyperion_protocol::SceneArrivalDto::System { .. })
-        ),
+        NotificationBody::Scene(notification) => notification.arrival.as_ref(),
     }
 }
 
-/// Reads and checks notifications until one brings a whole system; whether one did within a
-/// bounded number of reads.
-async fn next_arrival(client: &mut common::TestClient, checked: &mut usize) -> bool {
-    for _ in 0..1_000 {
-        let notification = client.next_notification().await;
-        let arrived = is_arrival(&notification);
-        check_all(&[notification], checked);
-        if arrived {
-            return true;
+/// Whether a notification brings a whole system.
+fn is_arrival(notification: &Notification) -> bool {
+    matches!(
+        arrival_of(notification),
+        Some(SceneArrivalDto::System { .. })
+    )
+}
+
+/// Whether a notification tells of leaving the system.
+fn is_departure(notification: &Notification) -> bool {
+    matches!(arrival_of(notification), Some(SceneArrivalDto::NoSystem))
+}
+
+/// Reads and checks notifications until one is `wanted`, for at most the harness's patience;
+/// `what` names it for the failure.
+async fn read_until(
+    client: &mut common::TestClient,
+    checked: &mut Checked,
+    what: &str,
+    wanted: Wanted,
+) {
+    patiently(&format!("waiting for {what}"), async {
+        loop {
+            let notification = client.next_notification().await;
+            let found = wanted(&notification);
+            check_all(&[notification], checked);
+            if found {
+                return;
+            }
         }
-    }
-    false
+    })
+    .await;
 }
 
 /// Moves the stand-in to interstellar space and back to `back`, checking everything pushed, until
-/// the system arrives again; whether it did within a bounded number of reads.
+/// the whole system has arrived again.
+///
+/// The move back is made only once the departure has been heard. The universe's scene setting
+/// keeps only the latest, so a subscription's task still on the pool, at a heartbeat say, when
+/// both moves are set would take only the move back: a move within the system, which brings no
+/// arrival. The task pushes the departure after it has taken the move out, so once the departure
+/// is heard the move back is a setting the task has yet to take, and taking it brings the system.
 async fn leave_and_return(
     client: &mut common::TestClient,
     universe: &hyperion_protocol::UniverseIdHex,
     back: KinematicsDto,
-    checked: &mut usize,
-) -> bool {
-    let mut last = Vec::new();
-    for pose in [in_the_halo(), back] {
+    checked: &mut Checked,
+) {
+    let stages: [(KinematicsDto, &str, Wanted); 2] = [
+        (in_the_halo(), "the departure for the halo", is_departure),
+        (back, "the system's arrival on the return", is_arrival),
+    ];
+    for (pose, what, wanted) in stages {
         let (answer, notifications) = client
             .request_among_notifications(RequestBody::SceneShip(SceneShipRequest {
                 universe: universe.clone(),
@@ -198,11 +246,13 @@ async fn leave_and_return(
             }))
             .await;
         assert!(answer.is_ok(), "{answer:?}");
+        // The task's push and the answer race, so what the move brings may be among these.
+        let heard = notifications.iter().any(wanted);
         check_all(&notifications, checked);
-        last = notifications;
+        if !heard {
+            read_until(client, checked, what, wanted).await;
+        }
     }
-    // The arrival, if it did not come before the answer.
-    last.iter().any(is_arrival) || next_arrival(client, checked).await
 }
 
 /// A uniform draw in `[-1, 1)`.
@@ -286,7 +336,7 @@ async fn no_scene_holds_what_the_ship_does_not_know_wherever_the_cameras_are() {
         .await;
     assert!(answer.is_ok(), "{answer:?}");
     let (subscription, state) = subscribe(&mut client, &universe, DetailLevelDto::Full).await;
-    let mut checked = 0;
+    let mut checked = Checked::default();
     let state = serde_json::to_value(&state).expect("the state serialises");
     check(&state, &mut checked);
     let bodies: Vec<String> = state["system"]["grants"]
@@ -306,7 +356,6 @@ async fn no_scene_holds_what_the_ship_does_not_know_wherever_the_cameras_are() {
         Some(CONTACTS.len())
     );
 
-    let mut arrivals = 0;
     let mut lcg = Lcg::new(0x0003_9000_0000_0009);
     let au = 1.496e11;
     for placement in 0..200_u32 {
@@ -331,12 +380,11 @@ async fn no_scene_holds_what_the_ship_does_not_know_wherever_the_cameras_are() {
         );
         check_all(&notifications, &mut checked);
         // Now and then the stand-in leaves the system for interstellar space and comes back to
-        // somewhere else in it, so that the whole system arrives again.
+        // somewhere else in it, so that the whole system arrives again, four times in all, each
+        // arrival checked before the next placement.
         if placement % 50 == 49 {
             let offset = [0, 1, 2].map(|_| 20.0 * au * unit(&mut lcg));
-            arrivals += usize::from(
-                leave_and_return(&mut client, &universe, ship_at(offset), &mut checked).await,
-            );
+            leave_and_return(&mut client, &universe, ship_at(offset), &mut checked).await;
         }
     }
     // A last heartbeat or two, with the contacts the server places.
@@ -349,12 +397,15 @@ async fn no_scene_holds_what_the_ship_does_not_know_wherever_the_cameras_are() {
         let (_, body) = client.next_notification().await;
         check_all(&[(1, body)], &mut checked);
     }
-    assert_eq!(
-        arrivals, 4,
-        "four arrivals of the whole system, each checked"
+    // At least: a body that no longer resolved at its grant would bring the whole system again.
+    assert!(
+        checked.arrivals >= 4,
+        "{} arrivals of the whole system checked, where each of the four returns brings one",
+        checked.arrivals
     );
     assert!(
-        checked >= 5 * bodies.len(),
-        "{checked} records checked: the state's and four arrivals'"
+        checked.records >= 5 * bodies.len(),
+        "{} records checked: the state's and four arrivals'",
+        checked.records
     );
 }
