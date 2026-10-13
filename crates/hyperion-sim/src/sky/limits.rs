@@ -4435,6 +4435,371 @@ mod tests {
         );
     }
 
+    /// Writes `sky/eye_cut.golden`: the eye's cut, pinned for every target (R06.T17).
+    ///
+    /// For the determinism audit of R06.T9.d it holds the largest colour offset; near the Sun,
+    /// where the pre-pass repeats, each pass's darkest limit;
+    /// in the nuclear disc, where it does not, its darkest limit, its cut and the eye's cut, each
+    /// place lit by its own illumination; and, near the Sun, the caps an eye-only request at the
+    /// eye's cut is planned to as the server serves it (its eye's visibility, RM3's synthetic
+    /// ceiling of V 5.0, `census_plan`), each layer's radius, rule bound and counts beyond, and its
+    /// rays' radii by digest. Those bits set every eye reply's census (R06.T11.g's review: the
+    /// near-Sun eye cut and caps, against T11.d's, which the server's tests hold to the sim's).
+    /// The near-Sun passes' cuts and the eye's cut there are `sky/near_sun.golden`'s
+    /// (`sky::pins`), so they are not written again. `just test-wasm-fast` compares it on
+    /// wasm32-wasip1.
+    fn write_eye_cut_golden() {
+        use hyperion_testkit::golden;
+        use hyperion_testkit::golden::GoldenWriter;
+
+        use crate::sky::caps::SYNTHETIC_CEILING_V;
+
+        let eye = EyeObserver::default();
+        let mut w = GoldenWriter::new();
+        w.header(crate::GENERATOR_VERSION.get());
+        w.f64("largest colour offset", largest_colour_offset().value());
+        let (nuclear, nuclear_light) = nuclear_disc();
+        let near_the_sun = *eye_cut_near_the_sun();
+        let in_the_disc = eye_cut_passes(
+            milky_way_galaxy(),
+            &mut context(),
+            nuclear,
+            &eye,
+            Some(nuclear_light),
+        );
+        let repeat = near_the_sun
+            .repeat
+            .expect("near the Sun the first cut is deeper than 7.85, so the pre-pass repeats");
+        w.line("near the Sun (0, 26,000, 68) ly, the default eye, lit");
+        w.f64(
+            "  first pass darkest limit",
+            near_the_sun.first.darkest.value(),
+        );
+        w.f64("  repeat darkest limit", repeat.darkest.value());
+        assert!(in_the_disc.repeat.is_none(), "{in_the_disc:?}");
+        w.line("in the nuclear disc (0, 150, 0) ly, the default eye, lit");
+        w.f64(
+            "  first pass darkest limit",
+            in_the_disc.first.darkest.value(),
+        );
+        w.f64("  first pass cut", in_the_disc.first.cut.value());
+        w.line("  repeat: none");
+        w.f64("  the eye's cut", in_the_disc.cut().value());
+
+        let (sun, light) = (observer(), sun_illumination());
+        let cut = near_the_sun.cut();
+        let mut ctx = context();
+        let visibility = eye_visibility(milky_way_galaxy(), &mut ctx, &sun, &eye, cut, Some(light));
+        let query = SkyQuery::builder(sun, cut)
+            .eye(eye)
+            .illumination(std::sync::Arc::clone(light))
+            .eye_visibility(visibility)
+            .synthetic_ceiling(Magnitudes::new(SYNTHETIC_CEILING_V))
+            .build()
+            .expect("the served eye-only request");
+        let plan = census_plan(
+            milky_way_galaxy(),
+            ctx.tables,
+            ctx.envelope,
+            &query,
+            &mut ctx.noise,
+        );
+        w.line(&format!(
+            "near the Sun, the eye-only request at its cut by its visibility, ceiling V \
+             {SYNTHETIC_CEILING_V}: its plan's caps"
+        ));
+        for cap in plan.caps() {
+            let label = format!("  {:?}", cap.layer());
+            w.f64(&format!("{label} radius"), cap.radius().value());
+            w.f64(&format!("{label} rule bound"), cap.rule_bound().value());
+            w.f64(&format!("{label} expected beyond"), cap.expected_beyond());
+            match cap.bright_beyond() {
+                Some(bright) => w.f64(&format!("{label} bright beyond"), bright),
+                None => w.line(&format!("{label} bright beyond: none")),
+            }
+            match cap.rays() {
+                Some(rays) => {
+                    let radii = rays.radii_ly();
+                    w.line(&format!("{label} rays: {}", radii.len()));
+                    w.u64_hex(&format!("{label} rays' digest"), f64_digest(radii));
+                }
+                None => w.line(&format!("{label} rays: none")),
+            }
+        }
+        w.line(&format!("  cells: {}", plan.cell_count()));
+        golden!("sky/eye_cut", w.as_str());
+    }
+
+    /// The radii of [`band_face_row_replies`]' reply by ray, ly: even in ln r between these, ray by
+    /// ray, from a fixed stream, so that every ray of each layer reads its own radius node.
+    const BY_RAY_LY: (f64, f64) = (100.0, 400.0);
+
+    /// The stars [`write_band_face_row_golden`]'s census holds past its `n_max`: the overflow,
+    /// whose points its band sums.
+    const ROW_OVERFLOW: usize = 24;
+
+    /// The replies [`write_band_face_row_golden`]'s march keeps: complete nowhere; to 100 ly in
+    /// every layer; to caps of one radius a ray, each layer's rays drawn within [`BY_RAY_LY`]; and
+    /// everywhere.
+    fn band_face_row_replies() -> [CompleteTo; 4] {
+        use crate::sky::caps::{CAP_RAYS, CapLattice, RayRadii};
+
+        let forced: Vec<LayerCap> = CAPPED_LAYERS
+            .iter()
+            .map(|&layer| LayerCap::forced(layer, LightYears::new(GLARE_RADIUS_LY)))
+            .collect();
+        let lattice = std::sync::Arc::new(CapLattice::new(CAP_RAYS));
+        let (low, high) = BY_RAY_LY;
+        let by_ray: Vec<LayerCap> = CAPPED_LAYERS
+            .iter()
+            .zip(0_u64..)
+            .map(|(&layer, k)| {
+                let radii = uniforms(0x0017_0b0f + k)
+                    .take(CAP_RAYS)
+                    .map(|u| low * math::exp(u * math::ln(high / low)))
+                    .collect();
+                LayerCap::forced_by_ray(
+                    layer,
+                    RayRadii::new(std::sync::Arc::clone(&lattice), radii),
+                )
+            })
+            .collect();
+        [
+            CompleteTo::nowhere(),
+            CompleteTo::of_caps(&forced),
+            CompleteTo::of_caps(&by_ray),
+            CompleteTo::everywhere(),
+        ]
+    }
+
+    /// Writes `sky/band_face_row.golden`: one band face row near the Sun with its eye limits and
+    /// the eye offsets of its listed stars, pinned for every target (R06.T17).
+    ///
+    /// For the determinism audits of R06.T9.c, T9.i and T9.j it pins the band's march, sum and
+    /// overflow points, the glare's pyramid and the limit map's bits, which no other golden pins.
+    ///
+    /// The request is a camera's at V 10.06 with the eye at 8.15 beside it, lit by its illumination
+    /// (R06.T9.g), so that the march keeps the eye's light beside the band's own (R06.T9.j). Its
+    /// six faces at 16² are marched through `march_rows` for the replies the golden lists
+    /// ([`band_face_row_replies`]), then summed by `sum_rows` for the reply of caps by ray, whose
+    /// radius nodes lie inside the rays, with the census of the stars within 100 ly brighter than
+    /// 10.06, every cap forced to 100 ly, merged so that [`ROW_OVERFLOW`] of them overflow as
+    /// points. Every face's limits are then set by `limit_rows` against the glare of the census's
+    /// listed stars at the eye's cut, and the listed stars' eye offsets taken. The census need not
+    /// be complete to the reply's radii: the golden pins the arithmetic, not the light's
+    /// conservation, which the band's own tests hold.
+    ///
+    /// The row is the first, faces in [`CubeFace::ALL`]'s order and rows from the top, with a
+    /// glaring star (at or brighter than the eye's cut) within 1° of one of its texels' centres
+    /// and one between 89° and 91° from another: the pyramid's exact near field and the veil's
+    /// hemisphere edge. Each texel's every value is written, then each listed star in the row with
+    /// its eye offset, then digests of the whole band's limits and veils and of every offset.
+    fn write_band_face_row_golden() {
+        use hyperion_testkit::golden;
+        use hyperion_testkit::golden::GoldenWriter;
+
+        let spec = spec(16);
+        let side = spec.face_texels();
+        let replies = band_face_row_replies();
+        let (census, band, offsets) = band_face_row_sky(&replies);
+        let origin = *observer().position();
+        let direction = |star: &SkyStar| {
+            UnitVector::from_components(origin.displacement_to(star.apparent()).metres())
+                .expect("a star away from the observer")
+        };
+        let glaring: Vec<UnitVector> = census
+            .listed()
+            .iter()
+            .filter(|s| s.v().value() <= EYE_CUT)
+            .map(direction)
+            .collect();
+        let (face, row) = row_glared_near_and_far(&glaring, spec);
+
+        let mut w = GoldenWriter::new();
+        w.header(crate::GENERATOR_VERSION.get());
+        w.line(&format!(
+            "near the Sun (0, 26,000, 68) ly: a camera's request at V {CAMERA_CUT} with the eye at \
+             {EYE_CUT}, lit; {side}² texels a face, {} nodes a decade",
+            spec.nodes_per_decade()
+        ));
+        for (k, reply) in replies.iter().enumerate() {
+            let summed = if k == 2 { ", summed" } else { "" };
+            w.line(&format!("reply {k}{summed}"));
+            for &layer in &CAPPED_LAYERS {
+                let label = format!("  {layer:?}");
+                w.f64(&format!("{label} radius"), reply.radius(layer).value());
+                if let Some(rays) = reply.rays_ly(layer) {
+                    w.u64_hex(&format!("{label} rays' digest"), f64_digest(rays));
+                }
+            }
+        }
+        w.line(&format!(
+            "the census within {GLARE_RADIUS_LY} ly: {} listed, {} overflowing; {} glaring",
+            census.listed().len(),
+            census.overflow().len(),
+            glaring.len()
+        ));
+        w.line(&format!("face {face:?}, row {row}"));
+        let per_face = usize::from(side) * usize::from(side);
+        let first = usize::from(face.layer()) * per_face + usize::from(row) * usize::from(side);
+        for (column, texel) in band[first..first + usize::from(side)].iter().enumerate() {
+            write_texel(&mut w, &format!("  texel {column:02}"), texel);
+        }
+        for (star, offset) in census.listed().iter().zip(&offsets) {
+            let toward = direction(star).components();
+            if spec.texel_of(toward).map(|(f, r, _)| (f, r)) == Some((face, row)) {
+                w.line(&format!(
+                    "  star {:#018x}/{} ({:?})",
+                    star.system().raw(),
+                    star.star().get(),
+                    star.layer()
+                ));
+                w.f64("    V", star.v().value());
+                w.f64("    eye offset", offset.value());
+            }
+        }
+        let limits: Vec<f64> = band
+            .iter()
+            .flat_map(|t| {
+                let [photopic, scotopic] = t.eye_veil().expect("the map's veil");
+                [
+                    t.eye_limit().expect("the map's limit").value(),
+                    photopic,
+                    scotopic,
+                ]
+            })
+            .collect();
+        let offsets: Vec<f64> = offsets.iter().map(|o| o.value()).collect();
+        // A digest hashes the bits as they are, so a NaN, whose bits no target need share, is
+        // refused first, as the writer refuses one.
+        assert!(
+            limits.iter().chain(&offsets).all(|v| v.is_finite()),
+            "every limit, veil and eye offset is finite"
+        );
+        w.line("the whole band");
+        w.u64_hex(
+            "  every texel's limit and veils' digest",
+            f64_digest(&limits),
+        );
+        w.u64_hex(
+            "  every listed star's eye offset digest",
+            f64_digest(&offsets),
+        );
+        golden!("sky/band_face_row", w.as_str());
+    }
+
+    /// [`write_band_face_row_golden`]'s sky: the census of the camera's stars within 100 ly,
+    /// merged so that [`ROW_OVERFLOW`] of them overflow; the band of the camera's lit request at
+    /// 16², its six faces marched for `replies` and summed for the reply by ray, with every face's
+    /// limits set by `limit_rows` against the census's glare at the eye's cut; and the listed
+    /// stars' eye offsets.
+    fn band_face_row_sky(
+        replies: &[CompleteTo; 4],
+    ) -> (SkyCensus, Vec<BandTexel>, Vec<Magnitudes>) {
+        let (galaxy, spec, eye) = (milky_way_galaxy(), spec(16), EyeObserver::default());
+        let sun = observer();
+        let query = SkyQuery::builder(sun, Magnitudes::new(CAMERA_CUT))
+            .eye(eye)
+            .eye_cut(Magnitudes::new(EYE_CUT))
+            .illumination(std::sync::Arc::clone(sun_illumination()))
+            .build()
+            .expect("a camera's request lit");
+        let side = spec.face_texels();
+        let mut ctx = context();
+        let marches: Vec<BandMarch> = CubeFace::ALL
+            .iter()
+            .map(|&face| {
+                march_rows(
+                    galaxy,
+                    &mut ctx,
+                    &query,
+                    replies.clone(),
+                    &spec,
+                    face,
+                    0..side,
+                )
+            })
+            .collect();
+        let stars = camera_stars();
+        let n_max = u32::try_from(stars.len() - ROW_OVERFLOW).expect("a count");
+        let census = merge_census(
+            [(stars.to_vec(), CensusTallies::default())],
+            NonZeroU32::new(n_max).expect("stars listed"),
+        );
+        assert_eq!(census.overflow().len(), ROW_OVERFLOW);
+        let summed_reply = &replies[2];
+        let mut band = summed(&marches, &census, summed_reply);
+        let glare = Glare::of_listed(&sun, census.listed(), &spec, Magnitudes::new(EYE_CUT));
+        let per_face = usize::from(side) * usize::from(side);
+        for (face, texels) in CubeFace::ALL.iter().zip(band.chunks_exact_mut(per_face)) {
+            limit_rows(&eye, &spec, &glare, *face, 0..side, texels);
+        }
+        let offsets = eye_offsets(&eye, &spec, &glare, &band);
+        (census, band, offsets)
+    }
+
+    /// The first row, faces in [`CubeFace::ALL`]'s order and rows from the top, of a band of
+    /// `spec` with a star of `glaring` within 1° of one of its texels' centres and one between 89°
+    /// and 91° from another: the pyramid's exact near field and the veil's hemisphere edge.
+    fn row_glared_near_and_far(glaring: &[UnitVector], spec: BandSpec) -> (CubeFace, u16) {
+        let side = spec.face_texels();
+        // Whether some glaring star lies at an angle `within` from some texel centre of the row.
+        let meets = |face: CubeFace, row: u16, within: &dyn Fn(f64) -> bool| {
+            (0..side).any(|column| {
+                let centre = spec.texel_direction(face, row, column);
+                glaring.iter().any(|u| within(angle_deg(&centre, u)))
+            })
+        };
+        CubeFace::ALL
+            .iter()
+            .flat_map(|&face| (0..side).map(move |row| (face, row)))
+            .find(|&(face, row)| {
+                meets(face, row, &|a| a < 1.0) && meets(face, row, &|a| (89.0..=91.0).contains(&a))
+            })
+            .expect("a row with a glaring star within 1° and one near 90°")
+    }
+
+    /// Writes every value of `texel` under `label`: its light, chroma, ρ and diffuse light, the
+    /// eye's background and ρ, and its eye limit and the veils it was taken against.
+    fn write_texel(w: &mut hyperion_testkit::golden::GoldenWriter, label: &str, texel: &BandTexel) {
+        w.f64(&format!("{label} luminance"), texel.luminance().value());
+        for (c, chroma) in ["red", "green"].iter().zip(texel.chroma()) {
+            w.u64_hex(
+                &format!("{label} {c} chroma (f32)"),
+                u64::from(bits_f32(chroma)),
+            );
+        }
+        w.f64(&format!("{label} S/P ratio"), texel.sp_ratio());
+        w.f64(
+            &format!("{label} diffuse luminance"),
+            texel.diffuse_luminance().value(),
+        );
+        let (background, background_ratio) = texel.eye_background();
+        w.f64(&format!("{label} eye background"), background.value());
+        w.f64(&format!("{label} eye background S/P"), background_ratio);
+        w.f64(
+            &format!("{label} eye limit"),
+            texel.eye_limit().expect("the map's limit").value(),
+        );
+        let [photopic, scotopic] = texel.eye_veil().expect("the map's veil");
+        w.f64(&format!("{label} photopic veil"), photopic);
+        w.f64(&format!("{label} scotopic veil"), scotopic);
+    }
+
+    /// R06.T17's two goldens of the eye: `sky/eye_cut.golden` ([`write_eye_cut_golden`]) and
+    /// `sky/band_face_row.golden` ([`write_band_face_row_golden`]), in one test so that they share
+    /// one build of the luminosity tables, most of either's minute natively (each alone took 62–67
+    /// s on 2026-10-11 at a load of 8–10, provisional), on every target the fast suite runs.
+    ///
+    /// Its name holds "pinned" on purpose: the filter that leaves the sky table modules' tests to
+    /// the daily wasip1 pass excepts the golden and pinned ones (`decision-test-coverage.md`,
+    /// W-R1), so `ci` keeps comparing these bits on wasm32-wasip1.
+    #[test]
+    fn the_eye_cut_and_a_band_face_row_are_pinned() {
+        write_eye_cut_golden();
+        write_band_face_row_golden();
+    }
+
     /// An eye keen enough that its cut would pass V 11, the deepest a sky is asked to, is held
     /// there, in the first pass and the repeat: a field factor of 0.1, beyond any observer's,
     /// deepens every limit by 2.87 mag.

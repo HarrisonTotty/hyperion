@@ -2216,29 +2216,60 @@ fn widen(lattice: &CapLattice, radii: &[f64], spacings: f64) -> Vec<f64> {
 /// [`LuminosityTables::age_for`]; `cache` is the caller's noise cache for the rays.
 ///
 /// Measured at cut 7.95 (the eye's near the Sun), version 21, with v☉, 1,536 rays and three
-/// sub-rays a ray (R06.T7.b): each layer's rays' median radius, with the 10th and 90th
-/// percentiles and the largest, against R06.T7's sphere at v☉ (one radius a layer, 768 rays,
-/// one profile a ray). They stand against the brainstorm's version-14 estimates (C 3,000, D 4,300
-/// and E 10,000 ly near the Sun; a few hundred to about 1,000 in the nuclear disc), which the tests
-/// do not pin (decided 2026-10-03 and 2026-10-04; the slow test `caps_converge_in_rays`, whose six
-/// points R06's Risks record, "Deviations in T7.b, as built"; T17 re-derives them). Radii in ly:
+/// sub-rays a ray, by R06.T17 (2026-10-11, the slow test `caps_converge_in_rays`, which prints
+/// these): at each of its six points, each layer's rays' median radius, with the 10th and 90th
+/// percentiles, the largest and its direction, the median of the rays within 10° of the plane,
+/// and the sphere at the same count ([`CapCount::spheres`]: the least radius beyond which the
+/// layer's count summed over the rays falls below one, the radius the brainstorm's figures
+/// describe). Since each ray is widened to its neighbours', the largest radius is held by a patch
+/// of rays, and its direction is the patch's centre, to the degree; a patch wider than about 10°
+/// spans several windows. l runs, seen from each point, from the direction to the galactic centre
+/// towards spinward, as the IAU's does, and b towards the frame's +z, the IAU's south galactic
+/// pole (the frame's galaxy turns counter-clockwise seen from +z, the Milky Way clockwise seen from
+/// the north galactic pole; Blaauw, Gum, Pawsey and Westerhout 1960, MNRAS 121, 123), so the
+/// IAU's b is −b. They stand against the brainstorm's version-14 estimates (C 3,000, D 4,300 and E
+/// 10,000 ly near the Sun; a few hundred to about 1,000 in the nuclear disc), which the tests do
+/// not pin (decided 2026-10-03 and 2026-10-04; R06's Risks, "Deviations in T7.b, as built" and
+/// "Deviations in T17, as built"). Radii in ly:
 ///
-/// | Point (ly) | Layer | Rays: median (10th–90th), largest | Sphere |
-/// | ---------- | ----- | --------------------------------- | ------ |
-/// | Near the Sun (0, 26,000, 68) | A | 10 (10–10), 11 | 11 |
-/// | | B | 68 (62–68), 68 | 68 |
-/// | | C | 8,193 (6,764–9,018), 14,563 | 8,193 |
-/// | | D | 6,764 (6,146–9,925), 13,232 | 9,925 |
-/// | | E | 4,610 (4,188–14,563), 61,341 | 21,369 |
-/// | Nuclear disc (0, 150, 0) | A | 12 (12–13), 13 | 13 |
-/// | | B | 18 (16–18), 18 | 18 |
-/// | | C | 74 (61–120), 213 | 131 |
-/// | | D | 99 (82–213), 344 | 232 |
-/// | | E | 235 (145–417), 555 | 374 |
+/// | Point (ly) | Layer | Rays: median (10th–90th) | Largest, at (l, b) | In the plane | Sphere |
+/// | ---------- | ----- | ------------------------ | ------------------ | ------------ | ------ |
+/// | Near the Sun (0, 26,000, 68) | A | 10 (10–10) | 11 | 10 | 11 |
+/// | | B | 68 (62–68) | 68 | 68 | 68 |
+/// | | C | 8,193 (6,764–9,018) | 14,563 (167°, +1°) | 8,193 | 8,193 |
+/// | | D | 6,764 (6,146–9,925) | 13,232 (192°, +3°; several windows) | 9,925 | 9,925 |
+/// | | E | 4,610 (4,188–14,563) | 61,341 (164°, +1°) | 16,029 | 23,519 |
+/// | Nuclear disc (0, 150, 0) | A | 12 (12–13) | 13 | 12 | 13 |
+/// | | B | 18 (16–18) | 18 | 16 | 18 |
+/// | | C | 74 (61–120) | 213 (178°, +51°) | 68 | 132 |
+/// | | D | 99 (82–213) | 344 (179°, +45°) | 90 | 235 |
+/// | | E | 235 (145–417) | 555 (175°, +31°) | 160 | 379 |
+/// | Solar circle, a quarter turn (26,000, 0, 68) | C | 8,193 (6,146–8,193) | 14,563 (179°, +1°) | 6,764 | 7,444 |
+/// | | D | 6,146 (5,584–9,018) | 13,232 (189°, +1°) | 9,018 | 9,018 |
+/// | | E | 4,610 (4,188–14,563) | 67,513 (192°, 0°) | 14,563 | 19,416 |
+/// | Solar circle, far side (−18,385, −18,385, 68) | C | 8,193 (6,764–9,018) | 16,029 (146°, +1°; several) | 8,193 | 8,193 |
+/// | | D | 6,764 (5,584–9,925) | 14,563 (139°, −1°; several) | 9,925 | 10,924 |
+/// | | E | 4,610 (4,188–16,029) | 50,639 (174°, 0°) | 17,641 | 21,369 |
+/// | Inner disc (0, 8,000, 0) | C | 7,444 (5,584–8,193) | 14,563 (17°, 0°) | 7,444 | 9,018 |
+/// | | D | 6,764 (5,584–9,018) | 16,029 (17°, 0°) | 9,018 | 13,232 |
+/// | | E | 6,146 (5,073–12,023) | 21,369 (11°, −3°) | 12,023 | 17,641 |
+/// | 2,000 ly above the Sun (0, 26,000, 2,000) | C | 9,018 (8,193–14,563) | 25,886 (194°, −4°) | 9,018 | 14,563 |
+/// | | D | 8,193 (7,444–14,563) | 23,519 (206°, −5°) | 13,232 | 16,029 |
+/// | | E | 7,444 (6,764–31,356) | 120,000 (199°, −1°; several) | 37,983 | 41,804 |
 ///
-/// The brown dwarfs' are 1 ly. Near the Sun the rays open 74% of the spheres' systems, and E's
-/// 33% of its sphere's. C's cap rests on rare bright phases of pair channels whose fitted rate rests
-/// on a few of the fit's systems (R06 Risks, "T5.d's pair-evolved light, as built").
+/// Away from the Sun and the nuclear disc, A, B and the brown dwarfs are within a few light-years
+/// of the Sun's (A 10–26, 1 ly 2,000 ly above the Sun; B 56–100; brown dwarfs 1 ly). C's, D's and
+/// E's largest rays all lie within 5° of the plane but the nuclear disc's, which are hundreds of
+/// light-years long and leave its dense central dust upwards: the far rays run through the dust's
+/// clear windows along the disc, not towards the poles (2,000 ly above the Sun, a few degrees below
+/// the horizon, back through the disc). On the solar circle they run out along the outer disc,
+/// within 41° of the anticentre (l 139°–206°), and in the inner disc towards the centre (l
+/// 11°–17°). Near the Sun the rays open 61% of the systems of the spheres at the same count (C
+/// 94%, D 77%, E 21%; [`CapCount::systems_within`], whose trapezoid in ln r over-counts a sphere
+/// by about 1%). C's cap rests on post-AGB crossings and rare bright phases of pair channels whose
+/// fitted rate rests on a few of the fit's systems; the AGB tips, M<sub>V</sub> −2 to −4, count
+/// only nearer in (R06 Risks, "T5.d's pair-evolved light, as built" and "Deviations in T17, as
+/// built").
 ///
 /// # Panics
 ///
@@ -2971,7 +3002,8 @@ mod tests {
         // plan 11's fixes move, so it keeps only its floor; the rule's bound, asserted above, is
         // its ceiling (decided 2026-10-04, "T5.d caps after the pair correction"), on every ray. D
         // and E keep the brainstorm's brackets on their median ray: their largest rays reach far
-        // past them through the clear windows (E's to 61,341 ly towards the poles).
+        // past them through the clear windows (E's to 61,341 ly at l 164°, b +1° in the frame,
+        // along the outer disc towards the anticentre; R06.T17's record).
         let c = quantile(cap(&sun, Layer::C), 0.0);
         assert!(c >= 1_000.0, "C's least ray: {c} ly");
         for (layer, brainstorm) in [(Layer::D, 4_300.0), (Layer::E, 10_000.0)] {

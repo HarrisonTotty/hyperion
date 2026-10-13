@@ -16,12 +16,21 @@
 //! cut and visibility, the caps and plan, the band's march, the first step of shells (every
 //! layer's first shell: C, D and E to 125 ly), and that reply's merge, band, limit map, eye
 //! offsets, payload and transfer. It then times the replies complete to 250 and 500 ly, and the
-//! sky is cancelled: its full census near the Sun is of the order of 10⁴ CPU-s (R06.T17), beyond
-//! any bench.
+//! sky is cancelled, unless `HYPERION_SKY_BENCH_UNTIL_LY` asks more (below): its full census near
+//! the Sun is some 2.8 × 10⁴ CPU-s (R06.T17).
 //!
 //! `sky_near_sun_cold/session_first_reply` is a session's first sky: the sky is sent as soon as
 //! the open is answered, with the tables' build still running, and timed from the open's answer
 //! to the sky's first reply.
+//!
+//! For R06.T17, `HYPERION_SKY_BENCH_UNTIL_LY` sets the radius the last timed reply is complete to,
+//! or `final` to time every reply to the last, the full census (some 2–3 × 10⁴ CPU-s near the
+//! Sun, half an hour or more on 15 workers); and `HYPERION_WORKERS`, the server's own variable,
+//! sets its pool's workers, as for the laptop's proxy of four. Each reply's stars are read from its
+//! payload, and each states how many are brighter than V 3.0; a run to the last reply then times
+//! the delivery of the final reply's stars brighter than V 3.0, the first reply that lists them
+//! all, against a quarter of the full census's wall time (R13.T2's real boundary, decided
+//! 2026-10-09).
 //!
 //! Each iteration prints what each timed reply states and the process's CPU time to it where
 //! `/proc/self/stat` gives it (Linux, at 100 ticks a second). The handler logs, to stderr, when
@@ -36,19 +45,34 @@
 //! sky in at most 150 CPU-s and 10 s wall on the development machine's default workers. Figures
 //! are recorded in R06's Risks ("Deviations in T11.d, as built" and "Deviations in T11.g, as
 //! built"), each with its load.
+//!
+//! R06.T17 measured it on 2026-10-11 and 2026-10-12, each run under the heavy-test lock on a shared
+//! machine, so every figure is provisional (R06's Risks, "Deviations in T17, as built"):
+//!
+//! - on 15 workers at load 6–14, the first reply in 6.95 s wall and 93.9 CPU-s (met), 3,192 stars;
+//!   the session's first reply 18.0 s after the open's answer; the tables 11.6 s and 47.0 CPU-s
+//!   (over their 30 CPU-s);
+//! - on four workers (`HYPERION_WORKERS=4`, load 14–22), the first reply in 17.9 s and 64.9 CPU-s;
+//! - run whole (`final`, 15 workers, load 10–47), the final reply after 1,987 s and 25,286 CPU-s,
+//!   66,614 stars listed and none overflowing. Its 805 stars brighter than V 3.0 are all listed only
+//!   by the final reply, against a quarter of its wall, 497 s: missed.
 
 #[path = "../tests/common/mod.rs"]
 mod common;
 
+use std::collections::HashSet;
+use std::env::VarError;
+use std::num::NonZeroUsize;
 use std::time::{Duration, Instant};
 
 use common::{Frame, TestClient, TestServer};
 use criterion::{Criterion, criterion_group, criterion_main};
 use hyperion_protocol::{
     EyeDto, GalacticPosition, OpenUniverseRequest, RequestBody, RequestId, ResponseBody,
-    ServerMessage, SkyRequest, SkyResponse, UniverseIdHex, UniverseTime,
+    SKY_STAR_BYTES, ServerMessage, SkyRequest, SkyResponse, UniverseIdHex, UniverseTime,
 };
 use hyperion_server::SkyService;
+use hyperion_server::config::ENV_WORKERS;
 use hyperion_sim::sky::EyeObserver;
 use tokio::runtime::Runtime;
 use tracing_subscriber::EnvFilter;
@@ -60,8 +84,93 @@ const SEED: u64 = 0x4d2;
 const SUN_LY: [i32; 3] = [0, 26_000, 68];
 
 /// The radius, ly, that the last reply timed is complete to in every layer: the third shell's
-/// edge.
+/// edge, unless `HYPERION_SKY_BENCH_UNTIL_LY` sets another ([`until_ly`]).
 const LAST_TIMED_LY: f64 = 500.0;
+
+/// The variable that sets the radius the last timed reply is complete to, ly, or `final`.
+const ENV_UNTIL_LY: &str = "HYPERION_SKY_BENCH_UNTIL_LY";
+
+/// The apparent V brighter than which the final reply's stars are timed to their delivery, the
+/// V 3.0 gate's (R06.T17).
+const BRIGHT_V: f64 = 3.0;
+
+/// The radius, ly, the last timed reply is complete to: [`ENV_UNTIL_LY`]'s, infinite for `final`,
+/// or [`LAST_TIMED_LY`].
+///
+/// # Panics
+///
+/// If the variable is set to neither `final` nor a positive radius, or is not Unicode.
+fn until_ly() -> f64 {
+    match std::env::var(ENV_UNTIL_LY) {
+        Ok(text) if text == "final" => f64::INFINITY,
+        Ok(text) => match text.parse::<f64>() {
+            Ok(ly) if ly > 0.0 => ly,
+            Ok(ly) => panic!("{ENV_UNTIL_LY}={text}: a radius of {ly} ly is not positive"),
+            Err(error) => panic!("{ENV_UNTIL_LY}={text}: neither `final` nor a radius ({error})"),
+        },
+        Err(VarError::NotPresent) => LAST_TIMED_LY,
+        Err(VarError::NotUnicode(text)) => {
+            panic!("{ENV_UNTIL_LY}={} is not Unicode", text.display())
+        }
+    }
+}
+
+/// The pool's workers that `HYPERION_WORKERS` sets, the server's own variable, or `None` for the
+/// server's default.
+///
+/// # Panics
+///
+/// If the variable is set to anything but a positive count, or is not Unicode.
+fn workers() -> Option<NonZeroUsize> {
+    match std::env::var(ENV_WORKERS) {
+        Ok(text) => Some(text.parse().unwrap_or_else(|error| {
+            panic!("{ENV_WORKERS}={text}: not a positive count ({error})")
+        })),
+        Err(VarError::NotPresent) => None,
+        Err(VarError::NotUnicode(text)) => {
+            panic!("{ENV_WORKERS}={} is not Unicode", text.display())
+        }
+    }
+}
+
+/// A listed star as the wire carries it (Design note 17): its direction's and distance's bits,
+/// which tell one star from another across replies, and its apparent V in millimagnitudes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct WireStar {
+    place: [u32; 4],
+    v_mmag: i16,
+}
+
+/// The stars of a reply's `payload`, whose response is `response`.
+///
+/// # Panics
+///
+/// If the payload is shorter than the response's star bytes, or holds a part of a star.
+fn wire_stars(response: &SkyResponse, payload: &[u8]) -> Vec<WireStar> {
+    let stars_bytes = usize::try_from(response.stars_bytes).expect("a payload in memory");
+    assert!(
+        payload.len() >= stars_bytes,
+        "a payload of {} bytes for {stars_bytes} bytes of stars",
+        payload.len()
+    );
+    let (stars, rest) = payload[..stars_bytes].as_chunks::<SKY_STAR_BYTES>();
+    assert!(rest.is_empty(), "whole stars");
+    let word = |star: &[u8; SKY_STAR_BYTES], at: usize| {
+        u32::from_le_bytes(star[at..at + 4].try_into().expect("4 bytes"))
+    };
+    stars
+        .iter()
+        .map(|star| WireStar {
+            place: [word(star, 0), word(star, 4), word(star, 8), word(star, 12)],
+            v_mmag: i16::from_le_bytes([star[16], star[17]]),
+        })
+        .collect()
+}
+
+/// Whether `star` is brighter than [`BRIGHT_V`].
+fn bright(star: &WireStar) -> bool {
+    f64::from(star.v_mmag) < BRIGHT_V * 1_000.0
+}
 
 /// The process's CPU time so far, s, from `/proc/self/stat`'s user and system ticks at Linux's
 /// usual 100 a second, or `None` where there is no such file.
@@ -104,12 +213,15 @@ fn sky(universe: UniverseIdHex) -> SkyRequest {
     }
 }
 
-/// A fresh server serving the sky, a client of it and a universe of [`SEED`] created, not opened.
+/// A fresh server serving the sky, a client of it and a universe of [`SEED`] created, not opened;
+/// its pool [`workers`]' where the variable sets them.
 async fn fresh() -> (tempfile::TempDir, TestServer, TestClient, UniverseIdHex) {
     let data_dir = tempfile::tempdir().expect("a temporary directory");
-    let config = TestServer::config(data_dir.path())
-        .sky_service(SkyService::Served)
-        .build();
+    let mut config = TestServer::config(data_dir.path()).sky_service(SkyService::Served);
+    if let Some(workers) = workers() {
+        config = config.workers(workers);
+    }
+    let config = config.build();
     let server = TestServer::start_with(config).await;
     let mut client = server.connected().await;
     let universe = client.create_universe("Sky", SEED).await.id;
@@ -138,11 +250,13 @@ fn least_edge(response: &SkyResponse) -> Option<f64> {
         .reduce(f64::min)
 }
 
-/// One timed reply: its time from the clock's start, the process's CPU time to it, and the reply.
+/// One timed reply: its time from the clock's start, the process's CPU time to it, the reply, and
+/// its listed stars, read from its payload.
 struct Timed {
     elapsed: Duration,
     cpu: Option<f64>,
     response: SkyResponse,
+    stars: Vec<WireStar>,
 }
 
 /// The replies to the sky `id`, each timed from `started` and `cpu_before`, until one is complete
@@ -154,9 +268,11 @@ async fn replies_until(
     until_ly: f64,
 ) -> Vec<Timed> {
     let mut timed = Vec::new();
+    // Each reply's chunks arrive in order before its response (R03.T15).
+    let mut payload = Vec::new();
     loop {
         match client.next_frame().await {
-            Frame::Binary(..) => {}
+            Frame::Binary(_, chunk) => payload.extend_from_slice(&chunk),
             Frame::Message(
                 ServerMessage::PartialResponse {
                     id: answered,
@@ -169,10 +285,14 @@ async fn replies_until(
             ) if answered == id => {
                 let reached = least_edge(&response).is_none_or(|edge| edge >= until_ly);
                 let last = response.is_final;
+                let (elapsed, cpu) = (started.elapsed(), cpu_since(cpu_before));
+                let stars = wire_stars(&response, &payload);
+                payload.clear();
                 timed.push(Timed {
-                    elapsed: started.elapsed(),
-                    cpu: cpu_since(cpu_before),
+                    elapsed,
+                    cpu,
                     response: *response,
+                    stars,
                 });
                 if last {
                     return timed;
@@ -212,7 +332,7 @@ async fn first_reply() -> (Duration, Option<f64>, Vec<Timed>) {
     let (tables_wall, tables_cpu) = (opened.elapsed(), cpu_since(cpu_opened));
     let clock = (Instant::now(), cpu_seconds());
     let id = client.send_request(RequestBody::Sky(sky(universe))).await;
-    let replies = replies_until(&mut client, id, clock, LAST_TIMED_LY).await;
+    let replies = replies_until(&mut client, id, clock, until_ly()).await;
     client.close().await;
     server.stop().await;
     drop(data_dir);
@@ -252,17 +372,48 @@ fn describe(what: &str, timed: &Timed) {
         })
         .collect();
     eprintln!(
-        "{what} in {:.2} s wall, {} CPU-s: cut V {:.3}, {} listed, {} overflow, final {}; {}",
+        "{what} in {:.2} s wall, {} CPU-s: cut V {:.3}, {} listed ({} brighter than V {BRIGHT_V}), \
+         {} overflow, final {}; {}",
         timed.elapsed.as_secs_f64(),
         timed
             .cpu
             .map_or_else(|| "?".to_owned(), |cpu| format!("{cpu:.1}")),
         response.cut_v,
         response.listed,
+        timed.stars.iter().filter(|star| bright(star)).count(),
         response.overflow,
         response.is_final,
         layers.join(", ")
     );
+}
+
+/// Prints, for a run to the final reply, when the final reply's stars brighter than V 3.0 were
+/// all delivered: the first reply listing every one of them, against a quarter of the final
+/// reply's time, the gate (R06.T17; decided 2026-10-09 against the capped census's wall time).
+fn report_bright_delivery(replies: &[Timed]) {
+    let Some(last) = replies.last().filter(|timed| timed.response.is_final) else {
+        return;
+    };
+    let wanted: HashSet<WireStar> = last.stars.iter().copied().filter(bright).collect();
+    let delivered = replies.iter().position(|timed| {
+        let listed: HashSet<WireStar> = timed.stars.iter().copied().collect();
+        wanted.is_subset(&listed)
+    });
+    let quarter = last.elapsed.as_secs_f64() / 4.0;
+    match delivered {
+        Some(k) => {
+            let at = replies[k].elapsed.as_secs_f64();
+            eprintln!(
+                "the final reply's {} stars brighter than V {BRIGHT_V} were all delivered by reply \
+                 {k}, {at:.2} s after the request, against a quarter of the final's {:.2} s, \
+                 {quarter:.2} s: {}",
+                wanted.len(),
+                last.elapsed.as_secs_f64(),
+                if at <= quarter { "met" } else { "missed" }
+            );
+        }
+        None => eprintln!("the final reply's stars brighter than V {BRIGHT_V}: not all delivered"),
+    }
 }
 
 fn sky_near_sun_cold(c: &mut Criterion) {
@@ -303,6 +454,7 @@ fn sky_near_sun_cold(c: &mut Criterion) {
                         };
                         describe(&what, timed);
                     }
+                    report_bright_delivery(&replies);
                     total += replies.first().expect("a first reply").elapsed;
                 }
                 total

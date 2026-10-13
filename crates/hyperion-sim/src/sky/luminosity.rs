@@ -4361,6 +4361,87 @@ mod tests {
         assert!(failures.is_empty(), "{failures:#?}");
     }
 
+    /// Prints R06.T17's record of the band's pair correction and its 1σ at [`BAND_POINTS`].
+    ///
+    /// At each point ("T5.d gate reading", decided 2026-10-04), the sky's light from `tables`
+    /// along 768 Fibonacci rays to 120,000 ly, with no cut and no extinction, as the band's radial
+    /// quadrature reads it ([`band_nodes`]), each component and layer by its systems there; and of
+    /// it the pair-evolved correction (`pair_light`), relative to the single-star light, and its
+    /// standard error (`pair_light_sigma`), relative to the corrected light, whose errors add
+    /// linearly (the fit's error is shared), per layer and over the layers. A 1σ over 2% of the
+    /// light at any point is a finding, printed so.
+    fn band_pair_record(galaxy: &Galaxy, tables: &LuminosityTables) {
+        use crate::galaxy::fields::MAX_COMPONENTS;
+        use crate::sky::caps::CapLattice;
+        let fields = galaxy.fields();
+        let (nodes, _) = band_nodes();
+        let lattice = CapLattice::new(768);
+        let mut densities = [0.0; MAX_COMPONENTS];
+        for point in BAND_POINTS {
+            // Per layer: the light, its correction and the correction's 1σ.
+            let mut sums = [[0.0; 3]; LIT_LAYERS.len()];
+            for direction in lattice.directions() {
+                let d = direction.components();
+                for &(r, w) in &nodes {
+                    let p = PointLy::new(
+                        point[0] + r * d[0],
+                        point[1] + r * d[1],
+                        point[2] + r * d[2],
+                    );
+                    fields.densities(&p, &mut densities);
+                    let ago =
+                        Span::from_seconds_f64(r * crate::units::consts::SECONDS_PER_JULIAN_YEAR)
+                            .unwrap_or(Span::ZERO);
+                    let age = tables.age_for(UniverseTime::EPOCH, ago);
+                    for id in fields.component_ids() {
+                        let rho = densities[id.index()];
+                        if rho <= 0.0 {
+                            continue;
+                        }
+                        let component = fields.component(id);
+                        for (l, &layer) in LIT_LAYERS.iter().enumerate() {
+                            let share = galaxy
+                                .shares()
+                                .component_share(MassBand::from(layer), component);
+                            let n = rho * share * w * r;
+                            let function = tables.get_at(id, layer, &p);
+                            sums[l][0] += n * function.total_light(age).value();
+                            sums[l][1] += n * function.pair_light(age).value();
+                            sums[l][2] += n * function.pair_light_sigma(age).value();
+                        }
+                    }
+                }
+            }
+            let mut all = [0.0; 3];
+            for (layer, [light, pair, sigma]) in LIT_LAYERS.iter().zip(sums) {
+                for (sum, x) in all.iter_mut().zip([light, pair, sigma]) {
+                    *sum += x;
+                }
+                if pair.abs() > 0.0 || sigma > 0.0 {
+                    eprintln!(
+                        "the band at {point:?} {layer:?}: pair {:+.3}% ± {:.3}% of {:.2}% of the \
+                         light",
+                        100.0 * pair / (light - pair),
+                        100.0 * sigma / light,
+                        100.0 * light / sums.iter().map(|s| s[0]).sum::<f64>()
+                    );
+                }
+            }
+            let [light, pair, sigma] = all;
+            let finding = if sigma > 0.02 * light {
+                "; A FINDING: 1σ over 2%"
+            } else {
+                ""
+            };
+            eprintln!(
+                "the band at {point:?}: pair-evolved correction {:+.3}% ± {:.3}% (1σ) of its \
+                 light{finding}",
+                100.0 * pair / (light - pair),
+                100.0 * sigma / light
+            );
+        }
+    }
+
     #[test]
     #[ignore = "slow: builds the full and the standard tables"]
     fn standard_nodes_match_the_full_build_where_the_tables_are_read() {
@@ -4373,6 +4454,7 @@ mod tests {
         let all: Vec<ComponentId> = galaxy.fields().component_ids().collect();
         let full = LuminosityTables::build_with(galaxy, REFERENCE_TIME, &all, BuildOptions::FULL);
         let standard = crate::sky::testing::milky_way_tables();
+        band_pair_record(galaxy, standard);
         let mut failures = component_light_gate(galaxy, &full, standard, 0.01);
         failures.extend(band_gate(galaxy, &full, standard, 0.01, Walls::Gated));
         failures.extend(caps_gate(galaxy, &full, standard));

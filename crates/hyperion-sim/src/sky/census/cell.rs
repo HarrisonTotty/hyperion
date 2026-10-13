@@ -344,6 +344,9 @@ pub struct LayerCost {
     held: u64,
     prefiltered: u64,
     star_bounded: u64,
+    star_bounded_multiple: u64,
+    passed_single: u64,
+    passed_multiple: u64,
     unbounded: u64,
     pairs: PairTally,
     generated_listable: u64,
@@ -379,6 +382,35 @@ impl LayerCost {
     #[must_use]
     pub const fn star_bounded(&self) -> u64 {
         self.star_bounded
+    }
+
+    /// Of the records bounded star by star, those whose hierarchy bound lists a companion at some
+    /// attempt ([`StarBounds::companions`]): the multiple systems, as the bound sees them before
+    /// the system is generated.
+    ///
+    /// The rest are single (R06.T17, for T16.b's 25% trigger).
+    #[must_use]
+    pub const fn star_bounded_multiple(&self) -> u64 {
+        self.star_bounded_multiple
+    }
+
+    /// Of the single records bounded star by star, those the census generated: their bounds passed
+    /// before their drift and after it (R06.T17).
+    ///
+    /// The others were skipped.
+    #[must_use]
+    pub const fn passed_single(&self) -> u64 {
+        self.passed_single
+    }
+
+    /// Of the multiple records bounded star by star ([`star_bounded_multiple`]), those the census
+    /// generated, as [`passed_single`] counts the single ones (R06.T17).
+    ///
+    /// [`star_bounded_multiple`]: Self::star_bounded_multiple
+    /// [`passed_single`]: Self::passed_single
+    #[must_use]
+    pub const fn passed_multiple(&self) -> u64 {
+        self.passed_multiple
     }
 
     /// Of the records bounded star by star, those holding a pair that plan 11 cannot bound, which
@@ -441,6 +473,9 @@ impl LayerCost {
         self.held += other.held;
         self.prefiltered += other.prefiltered;
         self.star_bounded += other.star_bounded;
+        self.star_bounded_multiple += other.star_bounded_multiple;
+        self.passed_single += other.passed_single;
+        self.passed_multiple += other.passed_multiple;
         self.unbounded += other.unbounded;
         self.pairs.add(&other.pairs);
         self.generated_listable += other.generated_listable;
@@ -1497,6 +1532,7 @@ fn star_bounds_before_drift(
     }
     let bounds = drawn.star_bounds(galaxy, record, before.ages);
     cost.star_bounded += 1;
+    cost.star_bounded_multiple += u64::from(!bounds.companions().is_empty());
     cost.pairs.add(bounds.pairs());
     let light = bounds.brightest(PhaseEnvelope::shared(), before.ages);
     if light == RecordLight::Unbounded {
@@ -1799,6 +1835,13 @@ fn bright_retarded(
         )
     {
         return None;
+    }
+    if let Some(bounds) = &star_bounds {
+        if bounds.companions().is_empty() {
+            cost.passed_single += 1;
+        } else {
+            cost.passed_multiple += 1;
+        }
     }
     Some(r)
 }
@@ -2748,6 +2791,9 @@ mod tests {
         b.layer_mut(Layer::E).prefiltered = 2;
         b.layer_mut(Layer::E).generated_listable = 1;
         b.layer_mut(Layer::E).star_bounded = 6;
+        b.layer_mut(Layer::E).star_bounded_multiple = 4;
+        b.layer_mut(Layer::E).passed_single = 1;
+        b.layer_mut(Layer::E).passed_multiple = 3;
         b.layer_mut(Layer::E).unbounded = 2;
         b.layer_mut(Layer::E).pairs.count(Some(PairLight::Detached));
         b.layer_mut(Layer::E).pairs.count(None);
@@ -2792,6 +2838,14 @@ mod tests {
             (7, 9, 2, 1)
         );
         assert_eq!((e.star_bounded(), e.unbounded_records()), (6, 2));
+        assert_eq!(
+            (
+                e.star_bounded_multiple(),
+                e.passed_single(),
+                e.passed_multiple()
+            ),
+            (4, 1, 3)
+        );
         let pairs = e.pairs();
         assert_eq!(
             (
@@ -3780,6 +3834,20 @@ mod tests {
             assert!(c.unbounded_records() <= c.star_bounded(), "{layer:?}");
             assert!(t.generated() <= c.star_bounded(), "{layer:?}");
             assert!(c.generated_listable() <= t.generated(), "{layer:?}");
+            // The pass counts by multiplicity (R06.T17): of the bounded, the multiple; of each,
+            // those generated, every generated record of C to E among them, since by the Sun each
+            // is grid-placed and so bounded star by star.
+            let multiple = c.star_bounded_multiple();
+            assert!(multiple <= c.star_bounded(), "{layer:?}");
+            assert!(c.passed_multiple() <= multiple, "{layer:?}");
+            assert!(
+                c.passed_single() <= c.star_bounded() - multiple,
+                "{layer:?}"
+            );
+            assert!(
+                t.generated() <= c.passed_single() + c.passed_multiple(),
+                "{layer:?}"
+            );
             bounded += c.star_bounded();
             generated += t.generated();
             pairs.add(c.pairs());

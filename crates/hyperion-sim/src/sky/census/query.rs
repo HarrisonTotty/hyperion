@@ -3836,4 +3836,173 @@ mod tests {
         assert!(at_limit > 50 && varying > 50, "{at_limit}, {varying}");
         assert!(gap > 0, "the test meets R06.T7.b's gap");
     }
+
+    /// The cut of the pinned census near the Sun, V (R06.T17's `sky/census_near_sun.golden`).
+    const PINNED_CUT_V: f64 = 7.0;
+
+    /// How far the pinned census near the Sun looks, ly: every cap forced to it, past the first
+    /// shell edge of [`SHELL_EDGES_LY`], 125 ly, so that C, D and E have a second shell and the
+    /// first reply is partial; and near enough that a test affords its census on one thread (150 ly
+    /// took 26 s natively on 2026-10-11, provisional; the cost goes as the volume).
+    const PINNED_RADIUS_LY: f64 = 130.0;
+
+    /// The census of a pinned observer near the Sun to V 7, pinned for every target (R06.T17).
+    ///
+    /// The fixture's Sun at the epoch, every cap forced to [`PINNED_RADIUS_LY`], each of its plan's
+    /// shells censused cell by cell in the plan's order on one thread. The golden holds each
+    /// layer's tallies; its first reply's complete-to radii (R06.T8.i's determinism audit), every
+    /// layer's first shell merged by `merge_shells`; and every listed star, its system's ID, its
+    /// star index, its layer, whether the first reply lists it and its V. The census of every
+    /// shell is the one-shot census, star for star, and the first reply lists those of its stars
+    /// within its radii. `just test-wasm-fast` compares it on wasm32-wasip1.
+    ///
+    /// The census's own caps near the Sun at V 7 reach thousands of light-years, some 10⁵ CPU-s
+    /// (R06's Risks), so its caps are forced; `sky/eye_cut.golden` pins the plan's caps there.
+    /// `sky/near_sun.golden` (`sky::pins`) pins the served census at the eye's cut to 30 ly at the
+    /// synthetic ceiling, whose 34 stars at or brighter than V 7 are among these; this one is
+    /// R06's one-shot census with no ceiling, its shells and tallies, and the stars beyond 30 ly,
+    /// every E star and most D stars among them.
+    ///
+    /// Its name holds "pinned" on purpose: the filter that leaves the sky table modules' tests to
+    /// the daily wasip1 pass excepts the golden and pinned ones (`decision-test-coverage.md`,
+    /// W-R1), so `ci` keeps comparing these bits on wasm32-wasip1.
+    #[test]
+    fn the_census_near_the_sun_is_pinned() {
+        let (plan, parts) = pinned_census_parts();
+        let shells: Vec<Shell> = parts.iter().map(|&(shell, _)| shell).collect();
+        let all = NonZeroU32::new(MAX_N_MAX).expect("not zero");
+        let census = merge_census(parts.iter().map(|(_, part)| part.clone()), all);
+        let shelled = merge_shells(
+            parts.iter().map(|(_, part)| part.clone()),
+            all,
+            plan.complete(),
+        );
+        assert_eq!(star_bits(shelled.listed()), star_bits(census.listed()));
+        assert!(census.overflow().is_empty());
+        let first: Vec<Shell> = shells.iter().copied().filter(|s| s.index() == 0).collect();
+        let reached = plan.completeness(first.iter().copied());
+        assert!(!reached.is_final(), "C, D and E have a second shell");
+        let partial = merge_shells(
+            parts
+                .iter()
+                .filter(|(shell, _)| first.contains(shell))
+                .map(|(_, part)| part.clone()),
+            all,
+            reached.clone(),
+        );
+        let within: Vec<SkyStar> = census
+            .listed()
+            .iter()
+            .filter(|star| reached.lists(star))
+            .copied()
+            .collect();
+        assert_eq!(star_bits(partial.listed()), star_bits(&within));
+        write_pinned_census(&plan, &census, &reached, partial.listed().len());
+    }
+
+    /// The pinned census's plan near the Sun ([`PINNED_CUT_V`], every cap forced to
+    /// [`PINNED_RADIUS_LY`]) and its every shell's part, each censused cell by cell in the plan's
+    /// order on one thread.
+    fn pinned_census_parts() -> (CensusPlan, Vec<(Shell, Part)>) {
+        let galaxy = milky_way_galaxy();
+        let query = SkyQuery::builder(
+            crate::sky::testing::sun_observer(),
+            Magnitudes::new(PINNED_CUT_V),
+        )
+        .build()
+        .expect("a valid query")
+        .with_caps_forced(LightYears::new(PINNED_RADIUS_LY))
+        .expect("a forced cap");
+        let caps = query.forced_caps().expect("forced caps").to_vec();
+        let plan = census_plan_of(&query, caps);
+        let mut ctx = SkyContext {
+            tables: milky_way_dark_tables(),
+            envelope: milky_way_envelope(),
+            offsets: milky_way_offsets(),
+            noise: NoiseCache::with_capacity(1 << 16),
+            cells: &NoSkyCellCache,
+            sources: &[],
+            modifiers: &NoModifiers,
+        };
+        let parts = plan
+            .shells()
+            .map(|shell| {
+                let mut stars = Vec::new();
+                let mut tallies = crate::sky::census::CensusTallies::default();
+                for key in plan.shell_slabs(shell).flat_map(|slab| slab.cells()) {
+                    tallies.add(&census_cell(galaxy, &mut ctx, key, &query, &mut stars));
+                }
+                (shell, (stars, tallies))
+            })
+            .collect();
+        (plan, parts)
+    }
+
+    /// Writes `sky/census_near_sun.golden` of the pinned census `census` of `plan`, whose first
+    /// reply, complete as `reached` states, lists `first_listed` of its stars.
+    ///
+    /// Every count is a labelled line and every heading fixed, so that `golden_diff.py`, which keys
+    /// each line on its label under the heading above it, still matches a star's line when a count
+    /// moves; each star's line is labelled by its ID, star index and layer alone, with its V's
+    /// bits, its V to 10⁻⁶ and whether the first reply lists it after the `=`.
+    fn write_pinned_census(
+        plan: &CensusPlan,
+        census: &SkyCensus,
+        reached: &Completeness,
+        first_listed: usize,
+    ) {
+        use hyperion_testkit::golden;
+        use hyperion_testkit::golden::GoldenWriter;
+
+        let mut w = GoldenWriter::new();
+        w.header(crate::GENERATOR_VERSION.get());
+        w.line(&format!(
+            "near the Sun (0, 26,000, 68) ly at the epoch, cut V {PINNED_CUT_V}, every cap forced \
+             to {PINNED_RADIUS_LY} ly"
+        ));
+        w.line(&format!("  cells = {}", plan.cell_count()));
+        w.line(&format!("  shells = {}", plan.shells().count()));
+        w.line("the tallies, each layer's");
+        for &layer in &CAPPED_LAYERS {
+            let t = census.tallies().layer(layer);
+            for (what, n) in [
+                ("cells", t.cells()),
+                ("generated", t.generated()),
+                ("accepted", t.accepted()),
+                ("listed", t.listed()),
+                ("without photometry", t.without_photometry()),
+                ("centre members", t.centre_members()),
+            ] {
+                w.line(&format!("  {layer:?} {what} = {n}"));
+            }
+        }
+        w.line("the first reply, every layer's first shell, complete to");
+        for &layer in &CAPPED_LAYERS {
+            let label = format!("  {layer:?}");
+            w.f64(&label, reached.complete_to().radius(layer).value());
+        }
+        w.line("the listing");
+        w.line(&format!("  stars listed = {}", census.listed().len()));
+        w.line(&format!("  in the first reply = {first_listed}"));
+        w.line(
+            "the listed stars, in the census's order: ID/star layer = V's bits, V to 10⁻⁶, and \
+             whether the first reply lists it",
+        );
+        for star in census.listed() {
+            let v = star.v().value();
+            w.line(&format!(
+                "  {:#018x}/{} {:?} = 0x{:016x} V {v:.6} {}",
+                star.system().raw(),
+                star.star().get(),
+                star.layer(),
+                bits(v),
+                if reached.lists(star) {
+                    "first"
+                } else {
+                    "later"
+                }
+            ));
+        }
+        golden!("sky/census_near_sun", w.as_str());
+    }
 }

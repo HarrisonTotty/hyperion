@@ -1562,4 +1562,68 @@ mod tests {
         // 0.6 M☉ in 0.0125 R☉, a typical white dwarf: 10^8.022 cm s⁻².
         assert!((g - 8.0224).abs() < 0.001, "{g}");
     }
+
+    /// Every field of [`StarColour::reddened`], pinned for every target (R06.T17).
+    ///
+    /// It is the determinism audit's of R06.T9.e and of the band ruling's addendum
+    /// (`decision-r06-t9b-band.md`): the per-star reddening that the band, the glare and the
+    /// server's wire read, which no other golden pins. `just test-wasm-fast` compares it on
+    /// wasm32-wasip1.
+    ///
+    /// The points lie off the grids' nodes on both grids, with one clamped at each grid's edge. The
+    /// extinctions are A<sub>V</sub> 2 and 5, on the nodes, and 0.5, between the moment and the
+    /// first node; off the nodes at 1, 7, 17 and 25; and 40, beyond the last node, where the
+    /// photopic light is held as a band of its own.
+    #[test]
+    fn the_reddened_light_is_pinned() {
+        use hyperion_testkit::golden;
+        use hyperion_testkit::golden::GoldenWriter;
+
+        use AtmosphereGrid::{Giant, MainSequence, WhiteDwarf};
+
+        let points = [
+            ("the Sun", 5_772.0, 4.438, MainSequence),
+            ("an M dwarf", 3_250.0, 4.9, MainSequence),
+            ("an A dwarf", 9_600.0, 4.1, MainSequence),
+            ("a B star", 21_000.0, 3.9, MainSequence),
+            ("an O star", 38_000.0, 4.0, MainSequence),
+            ("a K giant", 4_400.0, 2.2, Giant),
+            ("a red supergiant", 3_600.0, 0.3, Giant),
+            ("past the grid's cool edge", 1_500.0, 6.5, MainSequence),
+            ("a cool white dwarf", 7_500.0, 8.0, WhiteDwarf),
+            ("a DA white dwarf", 16_000.0, 7.9, WhiteDwarf),
+            ("a hot white dwarf", 45_000.0, 8.3, WhiteDwarf),
+            ("past the dwarfs' gravity", 12_000.0, 9.9, WhiteDwarf),
+        ];
+        let extinctions = [0.5, 1.0, 2.0, 5.0, 7.0, 17.0, 25.0, 40.0];
+        let mut w = GoldenWriter::new();
+        w.header(crate::GENERATOR_VERSION.get());
+        for (name, teff, log_g, atmosphere) in points {
+            let own = colour(teff, log_g, atmosphere);
+            w.line(&format!("{name}: {teff} K, log g {log_g}, {atmosphere:?}"));
+            for a_v in extinctions {
+                let r = own.reddened(Magnitudes::new(a_v));
+                let label = format!("  A_V {a_v}");
+                let [red, green, blue] = r.transmission();
+                w.f64(&format!("{label} red transmission"), red);
+                w.f64(&format!("{label} green transmission"), green);
+                w.f64(&format!("{label} blue transmission"), blue);
+                w.f64(
+                    &format!("{label} photopic transmission"),
+                    r.photopic_transmission(),
+                );
+                w.f64(
+                    &format!("{label} scotopic transmission"),
+                    r.scotopic_transmission(),
+                );
+                let [r_unit, g_unit] = r.red_green();
+                w.f64(&format!("{label} red at unit luminance"), r_unit);
+                w.f64(&format!("{label} green at unit luminance"), g_unit);
+                w.f64(&format!("{label} S/P ratio"), r.sp_ratio());
+                w.f64(&format!("{label} camera band term"), r.camera_band_mag());
+                w.f64(&format!("{label} V extinction"), r.v_extinction().value());
+            }
+        }
+        golden!("sky/colour_reddened", w.as_str());
+    }
 }

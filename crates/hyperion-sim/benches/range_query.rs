@@ -74,7 +74,7 @@
 //!   costs only its 500 ly quadrature: 22.8 ms measured at load 20, all of it `expected_counts`. The
 //!   bench therefore sets the limit to 65,536 (`LONG_RANGE_LIMIT`), which admits E and D and measures
 //!   the long walk the plan asks for: 41,925 systems over 3,008 cells then, 37,675 at generator
-//!   version 15 (see "The long-range pin" below). That the default limit stops a
+//!   version 15 and 37,668 at 21 (see "The long-range pin" below). That the default limit stops a
 //!   500 ly disc query before layer E is a finding about the census rule at long range, not a change
 //!   to it — Design note 9's limit is on expected counts, and a 500 ly sphere in the disc is simply
 //!   past it.
@@ -94,6 +94,14 @@
 //!   systems to 71).
 //! - Version 15's refit of Chabrier's high-mass scale, 0.68 to 0.92 (P15.T4.b, ruling 138), raised
 //!   bands D and E's share of systems by 30%, 0.0335 to 0.0437, and the walk's count by 23%.
+//!
+//! Rendering plan R06.T17 re-measured it at generator version 21 (2026-10-11, criterion's `--test`;
+//! the pin had gone stale again): **37,668 systems (29,412 in D, 8,256 in E) over the same 3,008
+//! cells**, 7 fewer than at version 15, against the same expected counts, which the realised count
+//! now matches to 0.13% (0.24σ of Poisson), in 72.7 ms (criterion's median of 20 samples, under the
+//! heavy-test lock at a load of 5–10, so provisional). The sky's caps' count, which integrates the
+//! same field by the trapezoid in ln r, gives 1.1% more (R06's Risks, "Deviations in T17, as
+//! built").
 //!
 //! # Observed mode (plan 12, P12.T3)
 //!
@@ -246,8 +254,24 @@ fn long_range(c: &mut Criterion) {
     // What the query answers, recorded in the module docs so that the figure says what work it
     // covers.
     let walked = range_query(&galaxy, &mut NoCache::new(), &[], &query);
+    let in_layer = |layer: Layer| {
+        walked
+            .systems()
+            .iter()
+            .filter(|hit| hit.record().layer() == layer)
+            .count()
+    };
+    eprintln!(
+        "range_500ly_floor_d: {} systems ({} in D, {} in E) over {} cells",
+        walked.systems().len(),
+        in_layer(Layer::D),
+        in_layer(Layer::E),
+        walked.stats().cells_visited()
+    );
     assert_eq!(walked.census().complete_down_to(), Some(Layer::D));
-    assert_eq!(walked.systems().len(), 37_675);
+    // The sky's caps test holds the same count, `tests/sky_caps.rs`' `RANGE_REALISED`: a re-pin
+    // moves both.
+    assert_eq!(walked.systems().len(), 37_668);
     assert_eq!(walked.stats().cells_visited(), 3_008);
     let mut group = c.benchmark_group("query");
     group.sample_size(20);

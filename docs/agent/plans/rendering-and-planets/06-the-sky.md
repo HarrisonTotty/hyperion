@@ -8721,3 +8721,356 @@ CensusCost)`.
     the behaviour name, since the plan's acceptance names the test.
   - **Logs**: `.git/rm23-scratch/r06-census/t5f/record2/` (the record's binary, its tree's diff,
     `record.log` and memory samples), `record.log` (the first record) and `pilot.log`.
+- **Deviations in T17, as built (2026-10-10 to 2026-10-12).** The verification pass. Every timing
+  below is provisional: the machine was shared and busy (loads stated with each run), whatever lock
+  a run held. Logs: `.git/rm23-scratch/r06-t17/`.
+  - **The goldens** (header 21; `golden_diff.py`: four new goldens, no previously pinned value
+    changed, no inconsistency; GENERATOR_VERSION 21, no bump). A new fast golden landed during the
+    pass, `sky::pins::near_the_sun_golden` (`sky/near_sun.golden`, decision-test-coverage.md W-R1),
+    which pins the eye's two pre-pass band cuts and its cut near the Sun, a 30 ly census at the
+    eye's cut at the synthetic ceiling and every texel of a 16² band. By the owner's rule for the
+    test-speed push, T17's goldens were de-duplicated against it
+    (`.git/rm45-orchestration/handoff/handoff-wasm-coverage.md`):
+    - `sky/colour_reddened.golden` (`sky::colour::tests::the_reddened_light_is_pinned`): every
+      field of `reddened` at twelve points, off the nodes on both grids and clamped at each grid's
+      edge, at A<sub>V</sub> 0.5, 1, 2, 5, 7, 17, 25 and 40. No overlap.
+    - `sky/eye_cut.golden`: the largest colour offset (0.4526); near the Sun each pass's darkest
+      limit (7.5987, then 7.6261); in the nuclear disc (0, 150, 0) its darkest limit 5.2546, cut
+      and eye's cut 5.8072, with no repeat; and near the Sun the caps the served eye-only request
+      is planned to (its visibility, the ceiling V 5.0, `census_plan`): each layer's radius, rule
+      bound, expected and bright beyond (C 0.854, D 8.601, E 162.43, R13.T2.b's) and rays' digest,
+      and its 994,423 cells. That closes T11.g's review leftover (the near-Sun cut and caps against
+      T11.d's). The near-Sun passes' cuts and the eye's cut (8.1787) are `near_sun.golden`'s and are
+      not written again.
+    - `sky/band_face_row.golden`: a camera's request at V 10.06 with the eye at 8.15 beside it, lit
+      by its illumination, its six faces at 16² marched by `march_rows` for four stated replies
+      (nowhere; 100 ly; caps of one radius a ray drawn in 100–400 ly; everywhere), summed by
+      `sum_rows` for the reply by ray with the census of the stars within 100 ly (1,514 listed, 24
+      overflowing as points), every face's limits set by `limit_rows` against the glare of its
+      listed stars at the eye's cut (922 glaring), and the listed stars' eye offsets. It writes
+      every value of the first face row with a glaring star within 1° of a texel centre and one at
+      89–91° (+X, row 0), the row's listed stars with their eye offsets, and digests of the whole
+      map and of every offset (each value asserted finite first). Its band is at 16², not 64²: the
+      eye offsets read a whole band. No overlap (`near_sun.golden` sets no limit map).
+    - `sky/census_near_sun.golden`: the census of the fixture's Sun at the epoch to V 7, every cap
+      forced to 130 ly (the census's own caps there reach thousands of light-years, some 10⁵
+      CPU-s), each shell's cells censused in the plan's order on one thread: the tallies, the first
+      reply's complete-to radii (C to E 125 ly; T8.i's partial-reply golden, folded in) and its
+      1,320 stars (ID, star index, layer, V's bits and to 10⁻⁶, and whether the first reply's 914
+      list it). It is R06's one-shot census with no ceiling; 34 of its stars, those within 30 ly at
+      V ≤ 7, are also in `near_sun.golden`, and the determinism audit agreed to keep them. 150 ly
+      first (26 s natively, 131 kB), cut to 130 ly (18–21 s, 85 kB) for the push.
+    - The eye cut's and the band row's goldens are one test,
+      `sky::limits::tests::the_eye_cut_and_a_band_face_row_are_pinned`, so that they share one
+      tables build (80–92 s against 62–67 s each alone). The names keep "pinned" so that W-R1's
+      filter leaves them in `ci`'s wasip1 run. Costs natively, at load 5–22: 0 s, 18–21 s and
+      80–92 s.
+  - **Instrumentation** (no output moves): `LayerCost`'s `star_bounded_multiple`, `passed_single`
+    and `passed_multiple` (`sky/census/cell.rs`), for the pass rates by multiplicity; the sim bench
+    prints them, each census's A<sub>V</sub> shares and each band march's final μ distribution, and
+    gains `census_near_sun/cold_eye_cut`, `band_near_sun/march_camera_lit` and
+    `census_near_sun_served/{,served_}camera_fill_5.0`; the server bench takes
+    `HYPERION_SKY_BENCH_UNTIL_LY` and `HYPERION_WORKERS` and times the V 3.0 delivery;
+    `caps_converge_in_rays` prints the caps record, the camera's black-sky record and the range
+    check; `standard_nodes_match_the_full_build_where_the_tables_are_read` prints the band's pair
+    correction. Files beyond T17's list: `benches/sky.rs` of both crates, `tests/sky_caps.rs`,
+    `sky/{caps,luminosity,colour,limits}.rs`, `sky/census/{cell,query}.rs`.
+  - **The twelve slow tests** (`just test-slow`, by name; 2026-10-11, the heavy lock 5,098 s with
+    the fit check, load 5–50): all pass. `the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc`
+    2,400 s, `_1000_ly_from_the_sun` 760 s, `the_star_bound_holds_for_realised_systems` 863 s,
+    `standard_nodes_match…` 861 s, `the_full_build_matches…` 624 s, `caps_converge_in_rays` 724 s
+    (alone at a 400% quota, 759 s again for the high-latitude count and 777 s on 2026-10-12 for
+    the longitudes seen from each point), `luminosity_matches…` 475 s, the rest under 45 s. `hyperion-fit check --rerun-fast`: 26 fresh, 8 warnings (provisional or
+    unfetched fits outside the sky), 0 failures; `sky_binary_light_{c,d,e}`, `sky_envelope` and
+    `sky_phase_envelope` are on its list and fresh.
+  - **The caps** (version 21, cut 7.95, 1,536 rays of three sub-rays; `layer_caps`' doc table holds
+    all six points). Near the Sun the spheres at the same count are A 11, B 68, C 8,193, D 9,925 and
+    E 23,519 ly against the brainstorm's version-14 C 3,000, D 4,300 and E 10,000; the rays'
+    medians C 8,193, D 6,764, E 4,610 (10th–90th 6,764–9,018, 6,146–9,925, 4,188–14,563), within
+    10° of the plane 8,193, 9,925 and 16,029. In the nuclear disc the medians are C 74, D 99, E 235
+    ly (spheres 132, 235, 379) against "a few hundred to about 1,000". What sets each: the moduli
+    put the faintest M<sub>V</sub> counted at about −4.05 for C (at 8,193 ly), −4.47 for D and −6.3
+    for E, so C rests on post-AGB crossings and the rare pair-channel phases (not the AGB tips,
+    below; T5.d's record: some 3 stars of C's 2.6 × 10⁷ fitted systems brighter than −4.05), D on
+    post-AGB stars and bright giants through the clear windows, and E on supergiants. C's sphere
+    sits 2.7 times the brainstorm's 3,000 ly: the version-14 estimate predates plan 06's track
+    fates, and T5.d's pair-evolved excess moved C from 6,764 to 8,193 ly ("T5.d caps after the pair
+    correction" above). Since each ray is widened to its neighbours', a layer's largest radius is
+    held by a patch of rays; its direction is the patch's centre (the science check: the first
+    record printed the patch's last ray, some 6–8° towards −z). C's, D's and E's largest rays all
+    lie within 5° of the plane but the nuclear disc's, which leave its central dust upwards (b +31°
+    to +51°): E's 61,341 ly near the Sun runs at l 164°, b +1°, along the outer disc towards the
+    anticentre, not "towards the poles" (corrected in `caps.rs`'s test comment). Seen from each
+    point, the largest rays on the solar circle all run out along the outer disc, within 41° of the
+    anticentre (l 139°–206°), and those of the inner disc towards the centre (l 11°–17°). b is
+    towards the frame's +z, the IAU's south galactic pole, so the IAU's b is −b. Near the Sun the
+    rays open 61% of the systems of the spheres at the same count (C 94%, D 77%, E 21%), the
+    count's trapezoid over-counting a sphere by about 1%.
+  - **What sets C's cap, corrected (the science check).** At 8,193 ly only stars brighter than
+    M<sub>V</sub> −4.05 count (about −6.5 in the plane behind the dust), so the AGB tips, −2 to −4,
+    cannot set C's cap, as T17's own text says: they count only nearer in. C's cap rests on
+    post-AGB crossings and pair-channel products (R CrB-like), as the brainstorm's "some tens of
+    yellow post-AGB stars within reach" already has it. The real sky agrees: nine post-AGB and R CrB
+    stars of 0.75–2.5 M☉ progenitors brighter than V 7.95 lie at 4,290–6,500 ly (89 Her, HR 4049,
+    XX Cam, AC Her, RY Sgr, HD 133656, HD 101584, HD 52961, HD 161796; SIMBAD V, Gaia DR3
+    parallaxes), which a 3,000 ly cap would leave out, so a C sphere of 7–8 kly is Milky Way-like.
+    T17's wording is "main"'s to correct. **For the owner (drafted):** the brainstorm's sky table
+    and open question 19 at version 21: the spheres near the Sun C 8,193, D 9,925 and E 23,519 ly
+    against 3,000, 4,300 and 10,000; the candidates and systems held below; the range check's
+    37,668; D's post-AGB count still unmeasured (below). E's in-plane reach stands pending plan 06's
+    open question 17 (the cool supergiants above the Humphreys–Davidson limit).
+  - **A finding (deferred, as `decision-r06-t7b-brackets.md` rules it: for the discs' vertical
+    profiles or the tables, not the caps).** No D or E ray reaches beyond 10,000 ly at |b| over 30°
+    at 7.95 or at any point's eye cut. At 8.54, 63 of D's and 7 of E's 768 such rays do 2,000 ly
+    above the Sun, and 12 of D's in the inner disc. At the camera's 10.06 nearly all do at five of
+    the six points (768 of 768 near the Sun; none in the nuclear disc). A ray's length is its yield
+    per system, not a count, so the count was taken too: the expected stars of D and E brighter
+    than the cut beyond 10,000 ly at |b| over 30° are 0 at 7.95 and under 0.006 at 8.54 everywhere;
+    at 10.06 D 0.56–0.91 and E 0.04–0.07 on the solar circle and above it, and D 3.18 and E 0.28 in
+    the inner disc. So the long high-latitude rays are mostly the selection rule letting sparse,
+    dust-free intervals pass at a deep cut, nothing to fix, but the inner disc's D at the camera's
+    cut expects three such stars, more than one: old components' evolved D systems (a D primary
+    with a giant companion at the old turnoff), or a profile or table error, which the counts by
+    component would tell apart (not printed). Deferred to the tables lane with this figure.
+  - **The camera's black-sky limit** (for the camera-budget ruling), near the Sun from the caps'
+    count alone: at 10.06 the caps by ray open 9.49 × 10⁸ systems (rays' medians A 46, B 260, C
+    21,369, D 17,641, E 13,232 ly; E's largest 109,031 at l 197°, b 0°), at the black-sky 10.15
+    9.94 × 10⁸ (+4.8%; C 23,519, D 19,416, E 13,232).
+  - **Open question 19's range check.** `range_500ly_floor_d`'s pin had gone stale: at version 21
+    it walks 37,668 systems (29,412 of D, 8,256 of E) over the same 3,008 cells, not 37,675 (its
+    assertion panicked; re-pinned, with its module docs, in 72.7 ms under the lock at load 5–10).
+    That is 0.13% under the range query's own expected 37,715 (29,545 and 8,170), 0.24σ of
+    Poisson. The caps' count gives 38,147 within 500 ly of the same point (29,884 and 8,264),
+    1.15% over the range query's expectation in both layers alike: its trapezoid in ln r and its
+    even split of the boundary's interval over-count a sphere by about 1% (the science check), so
+    every `systems_within` figure above carries that bias, harmless as a cost estimate.
+  - **Open question 19's counts.** Near the Sun at 7.95 the exact census opens 3.28 × 10⁸
+    candidates in C to E (records past the floor: C 2.05 × 10⁸, D 4.67 × 10⁷, E 7.60 × 10⁷) and
+    generates 1.29 × 10⁸, against 2.74 × 10⁸ systems the caps by ray hold (C 1.85 × 10⁸, D 4.82 ×
+    10⁷, E 4.08 × 10⁷; the brainstorm's version-14 6 × 10⁷ and 2.6 × 10⁷). The candidates exceed
+    the systems by a fifth, E's by 1.9 times: a cell is opened whole when it meets a ray's cone
+    padded by the offset bound, and E's cells are 128 ly cubes on rays widened to their
+    neighbours'. In the nuclear disc (0, 150, 0) at the stand-in 7.95 (its eye's own cut is 5.81)
+    the census opens 5.6 × 10⁷ candidates in C to E and lists some 2.4 × 10⁵ stars (sampled 1 in
+    10); the brainstorm's 5 × 10⁹ in the inner bulge was under the near-Sun caps held fixed.
+  - **T5.d's residuals** (`luminosity_matches_realised_cells`), realised light against the
+    single-star tables then the corrected: solar circle C −6.4% → −4.4%, D −28.7% → −20.2%, E
+    +16.2% → +49.2% (7,089 systems, 6 brighter than M<sub>V</sub> −3); bulge C −6.5% → −3.3%, D
+    −9.8% → +0.3%, E −17.6% → −4.0%: T5.d's record to its rounding.
+  - **The band's pair correction and its 1σ** (`pair_light`, `pair_light_sigma`; along 768 rays to
+    120,000 ly, no cut, no extinction): near the Sun −6.64% ± 0.53% of the band's light (C −2.97%,
+    D −12.46%, E −17.94%), the inner disc −6.27% ± 0.51%, the bulge (0, 3,000, 0) −6.25% ± 0.47%,
+    the halo (0, 26,000, 15,000) −6.45% ± 0.53%. No 1σ is over 2%: no finding.
+  - **The census oracles' tallies**: A within 300 ly and B within 500 ly, 2,720 of 249,096 systems
+    generated; C to E within 1,000 ly, 453,269 of 1,411,018 (C 251,638 of 1,097,274, D 137,061 of
+    238,967, E 64,570 of 74,777); D and E within 20 ly in the nuclear disc, 655,382 of 878,168.
+  - **The benches** (the sim's `sky` bench and the server's `sky_near_sun_cold`, each under the
+    heavy lock, criterion's `--test` but where it timed them, by name, not `just bench -- sky`
+    whole: its warm and ceiling benches would hold the lock for days; logs
+    `.git/rm23-scratch/r06-t17/bench/`, each with its load beside it). The sim bench's table holds
+    every figure; the budgets, against their targets:
+    - **The first sky** (the dev machine's default 15 workers, no quota, at the eye's cut V 7.766
+      of the server's galaxy, timed from the request with the tables held; load 6–14): **6.95 s
+      wall and 93.9 CPU-s, within 10 s and 150 CPU-s: met** (provisional). 3,192 stars, 183 of them
+      brighter than V 3.0; complete to 250 ly at 16.6 s (238.6 CPU-s, 11,129 stars) and to 500 ly
+      at 69.1 s (1,020.9 CPU-s, 28,549 stars). The session's first sky, asked as the open
+      answered: 18.0 s and 140.3 CPU-s from the open's answer.
+    - **The laptop's proxy, `HYPERION_WORKERS` 4**, the cache at its default of 0 (no quota, under
+      the lock, load 14–22): the first reply 17.9 s and 64.9 CPU-s, complete to 250 ly at 50.2 s
+      and to 500 ly at 223.8 s (849 CPU-s); the tables at the open 17.9 s and 45.8 CPU-s. The full
+      census on four workers is the whole run's 25,286 CPU-s ÷ 4, about 1.8 h (an estimate; not
+      run; R13.T2.b's 2.0 h). The warm jump at four workers and 1,280 MiB is the warm gate's, below.
+    - **The served sky's census whole** (the server bench to its final reply,
+      `HYPERION_SKY_BENCH_UNTIL_LY=final`, the server's galaxy, 15 workers, no quota, under the lock
+      on 2026-10-12, load 10–47 with the run's own 15 workers in it): complete to 125, 250, 500 and
+      1,000 ly at 7.94, 19.19, 92.29 and 485.75 s (95.4, 242.7, 1,030.7 and 5,671.9 CPU-s; 3,192,
+      11,129, 28,549 and 56,708 stars listed), and final at **1,987 s, 33.1 minutes, and 25,286
+      CPU-s**, 0.92 times the sampled 2.75 × 10⁴ and R13.T2.b's 31 minutes. It lists 66,614 stars,
+      none overflowing: C 38,338 to 1,893 ly (its cap), D 22,903 and E 5,299 to the
+      limit, A 10, B 64; over 691,965, 108,303 and 16,908 cells of C, D and E, generating 1.90 ×
+      10⁶, 1.47 × 10⁶ and 7.0 × 10⁵ systems. The first run of it timed out at the test client's
+      180 s wait for a frame; the bench now takes `HYPERION_TEST_PATIENCE_SECS`.
+    - **The V 3.0 delivery: missed.** The final reply's 805 stars brighter than V 3.0 are all
+      listed only by the final reply, at 1,987 s, against 25% of the census's wall, 497 s: 183 of
+      them by the first reply, 355, 600 and 773 by 250, 500 and 1,000 ly, so 32 lie in the last
+      step, the 1,000–2,000 ly shells. Its lever is the per-layer order, E's 1,000–2,000 ly shell
+      first (T11.d allows any order that passes), not pulled here: for "main". The wire carries no
+      star's layer, so whether E's shell first is enough, or D's must come with it, the sim's
+      served census would tell (not run).
+    - **A moving ship's sky never finishes** (`decision-r06-t8n.md` §8, watched for, found). A
+      superseded census starts again and generates every system again (warm ≈ cold at version 21),
+      so a ship whose sky is asked again within 33 minutes on the dev machine (a jump, an arrival or
+      Design note 13's parallax rule), or within some 1.8 h on four workers, never has its final
+      reply. It has the 1,000 ly reply after 8.1 minutes: 85% of the final's stars and 96% of those
+      brighter than V 3.0. A finding for "main" and the census levers; nothing changed.
+    - **A finding for the galaxy plans (not chased): the server's galaxy's bright end.** Near the
+      Sun on the server's galaxy (`Galaxy::new`'s, its parameters drawn from its seed, not the
+      fixture's `milky_way_like`) the final reply is about 1.9 times the real sky at its cut V 7.766
+      (66,614 stars against about 3.55 × 10⁴, Tycho-2: Høg et al. 2000, A&A 355, L27; VizieR I/259)
+      and 4.7 times at V 3.0 (805 against the Hipparcos Catalogue's 172: ESA 1997, VizieR I/239).
+      The ratio rises with distance, against Hipparcos's parallaxes: about 2.9 times within 125 ly
+      (183 against 64), 3.6 within 250 ly, 4.4 within 500 ly and 4.8 by 1,000 ly, each an upper
+      bound, since a reply lists stars past the radius it is complete to. The fixture's own counts
+      are near the real (R13's record of its boundary, at the eye's 8.179: 138 brighter than V 3.0
+      against 172, 9,430 to V 6.5 against 8,874; its census within 130 ly, `census_near_sun.golden`,
+      74 brighter than V 3.0 against 66), so the excess belongs to the server's galaxy, whose sky
+      near the Sun lists some 2.3–2.5 times the fixture's at the same cut. The census lists
+      unresolved pairs' components singly, a few per cent at V 3.0. The check is the server galaxy's
+      caps count against its census by magnitude, distance and layer, for plans 02 and 06's light
+      row (the "calibration finding" above): whether the drawn galaxy's disc near its Sun is denser
+      or brighter than the Milky Way's, as its draw allows, or its parameters over-produce bright
+      stars. Not taken.
+    - **The tables** at the open on 15 workers: 11.6 s wall and 47.0 CPU-s, 68 MiB, against their
+      30 CPU-s and the tables ruling's 2–4 s wall: missed, as T11.g found; serially
+      (`sky/luminosity_tables`, criterion's ten builds, load 4–15) 34.3 s (32.4–37.6), over the
+      30 CPU-s by about 14% (T5.e's 31.3–31.7 on a quiet machine). Above 5 s the stage chain's
+      schedule is to be measured before any cut (T11.g's ruling §2); it is not, here: the server
+      logs only the build's end, so its stages need their timings logged first (not instrumented;
+      pending). **A proposal, as T17 asks of a miss (drafted for "main"'s decision agent):** first
+      the stage chain's schedule, logged and measured; then either the disk cache of the tables,
+      keyed by `GalaxyKey` and a sim fingerprint (the fit-check fingerprints of the tables they
+      read, and a `SKY_CACHE_VERSION`), which takes the build off every open after a galaxy's first,
+      or deeper node cuts of `BuildOptions::STANDARD`, which must pass T5.e's two slow tests (they
+      pass at today's nodes, above). The first sky meets its own budget with the tables held, and
+      the session's first sky, which waits on them, does not (18.0 s).
+    - **The full cold census at the real boundary** (`census_near_sun_served/{,served_}eye_5.0`,
+      sampled 1 in 20, 15 workers, load 6–14, by the threads' CPU time): 2.75 × 10⁴ CPU-s on the
+      server's galaxy (C 5,823, D 11,302, E 10,356 for the census) and 1.41 × 10⁴ on the fixture,
+      R13.T1.b's capped tier again (0.97–1.12 times it). Recorded beside it: the exact census at
+      7.95 1.08 × 10⁶ CPU-s (T7.b's caps by ray), at the eye's own cut 8.18 by its visibility 7.19 ×
+      10⁵, the camera's at 10.06 2.62 × 10⁶; the real tier at the ceiling's caps without the limit
+      stays R13.T1's 1.43–1.45 × 10⁵ (not re-run); the nuclear disc at 7.95, sampled 1 in 10, 6.27 ×
+      10⁴ (its 935 cells; the sample 1 in 1,000 opened none). The 4,000 CPU-s target stays for the
+      version that lands the census levers (lever 13): at version 21 it is not a gate, and its step
+      1 is the deferral already listed.
+    - **The warm gate**, on the served sky's ruled jump at 1,280 MiB set explicitly
+      (`census_near_sun_served/{,served_}warm_jump_5.0`, 1 in 20, 4 workers at `CPUQuota=400%`,
+      load 3–123): **S1 met** (none rebuilt: 24,711 of the server galaxy's sampled cells served and
+      20,004 new, 30,055 and 16,957 on the fixture; none evicted), **S2 met** (the destination's
+      reply, 246,556 and 134,955 systems generated warm and cold), **S3 met** (949 MB held after the
+      Sun's sky and the jump on the server's galaxy, 525 MB on the fixture, within 1,342 MB). The
+      eye's cut moves −0.040 and −0.169 mag over the jump, within the slack of 0.2. Warm ÷ cold by
+      the threads' CPU time: the repeat 95.4% and 98.9%, the jump 97.3% and 101.7%, over 50% as
+      R06.T8.n found and ruled (`decision-r06-t8n.md` §3; the cache stays off by default). The
+      exact census against the 25% target (`census_near_sun/{warm,warm_jump}`, 1 in 1,000, 15
+      workers, 65,536 MiB, no shippable size): the repeat 115.9% and the jump 99.7%, 9.6% of its
+      cells new, none rebuilt, the same reply, entries of 13.2 and 14.0 GB: **missed, deferred**
+      (`deferred-corrections.md`, "Census cost": the realised window bound, then the kept attempt),
+      which does not hold T17.
+    - **The camera's served entries at 10.06** (still open from T8.n; `…/{,served_}camera_fill_5.0`,
+      one camera sky with the eye at its own cut, 1 in 20, 65,536 MiB): 862 MB on the server's
+      galaxy and 465 MB on the fixture, against the eye's 705 and 379 MB, so a camera's sky and a
+      jump would be about 1.2 GB, near the 1,280 MiB budget, for the camera-budget ruling. Its
+      served census costs 2.75 × 10⁴ CPU-s too and lists some 4.0 × 10⁵ stars on the server's
+      galaxy (2.3 × 10⁵ on the fixture; sampled), past N_max.
+    - **The pass rates by multiplicity** (T16.b's 25% trigger; generated ÷ skipped of the records
+      bounded star by star, the served sky on the server's galaxy): single C 0.063, D 0.018, E
+      0.024; multiple C 0.60, D 7.4, E 266. Multiple systems are 86%, 99% and 99.6% of the systems
+      C, D and E generate, and so most of the census's time: **the trigger is met.** T16.b's
+      remedy, a public period-and-mass interaction test asked of plan 11, joins lever 13's asks
+      (plan 11's hierarchy draw and pair evolution); for "main". The exact census and the nuclear
+      disc read alike (multiple E 35–302, single 0.025).
+    - **A<sub>V</sub> of the listed stars** (`decision-r06-t9b-band.md`, addendum item 2): near the
+      Sun none of the served sky's stars lies behind A<sub>V</sub> 2 on the fixture (largest 0.79)
+      and 0.11% on the server's galaxy (largest 2.60), none at the exact census's 7.95 or 8.18
+      (largest 0.69), none for the camera's 10.06 on the fixture and 0.27% on the server's galaxy
+      (largest 3.08); in the nuclear disc 90.1% above 2, 15.1% above 5, none above 10 (largest
+      9.63). The node tables to A<sub>V</sub> 30 cover every listed star with room.
+    - **The band and the limit map per reply** (`band_near_sun/*`, `limit_map/*`, 15 workers):
+      the march 30.2 CPU-s (2.04 s wall) over ten replies, 30.2 MB, and 0.009 CPU-s a reply's sum;
+      the camera's 37.3 CPU-s, 63.7 MB; the limit map 0.33 CPU-s near the Sun and 1.22 CPU-s at
+      300,000 stars (met, ≤ 3). The illumination 1.26 CPU-s, the light and the march's increase
+      10.4% of the unlit march's 28.5 CPU-s: over R06.T9.g's 10% by 0.4 point, within one run's
+      ±2 CPU-s of the march; provisional, a finding for T9.g to re-take on a quiet machine. Per
+      reply in the first sky (the server's phases): the illumination 0.25 s, the eye's cut 0.12 s
+      and visibility 0.12 s, the caps and plan 1.37 s, the march 2.17 s, the first step of shells
+      2.5 s, then the band, limit map and eye offsets 0.26 s and the payload 0.15 s, all within its
+      6.95 s.
+    - **`sky/star_bound`** (criterion's medians, load 4–15; µs a record in A–E):
+      `hierarchy_bound` 4.45, 6.88, 15.9, 51.9 and 138; the whole 5.1, 7.8, 17.2, 53.9 and 142,
+      T8.g's figures again.
+  - **Design note 18's camera limit over the final 64² band** (for the camera-budget ruling): the
+    camera's lit request at 10.06 (`band_near_sun/march_camera_lit`), its final band with no census
+    at the caps, μ 21.26–25.25 mag arcsec⁻² (10th–90th 22.17–24.59, median 23.72); 36.5% of the
+    texels are darker than μ 24 (65.7% without the diffuse light). `cameraLimit.ts`' limit at 60°
+    (f/1.4, 1/30 s, high gain) over that range: V 9.55 in the brightest texel to 10.12 in the
+    darkest (10th–90th 9.79–10.10, median 10.03), against the request's 10.06 (μ 24) and the black
+    sky's 10.15; T7.b measured 9.68–10.13 over the 16² pre-pass without the light (a one-off vitest
+    probe of `cameraLimitV`, not committed).
+  - **N_max and the sprite budget per setting** (open question 16; drafted for the owner, through
+    "main"'s decision agent): kept, high 3 × 10⁵ and 4,096 sprites, low 10⁵ and 2,048. The eye's
+    sky the server serves near the Sun lists 66,614 stars at its final reply (the server's galaxy,
+    run whole, above), under both N_max; a camera's at 10.06 some 2–4 × 10⁵, past both, whose
+    overflow the band holds as points with its light; the nuclear disc's eye at the stand-in 7.95
+    some 2.4 × 10⁵. 3 × 10⁵ is the protocol's own cap (`MAX_SKY_STARS`, 7.2 MB). The sprite budgets
+    need the frame times by hand (below). `view/sky/setting.ts`' remark says so.
+  - **Further records, from the benches' logs.**
+    - `layer_caps`' CPU per call (the plan's counts of the caps, on one thread): 11.7–11.8 s for
+      the exact census near the Sun (at 7.95 and at the eye's 8.18), 12.4 s on the fixture and
+      13.1 s on the server's galaxy for the served sky's two counts and its plan, 29.0 s in the
+      nuclear disc (load 25), 1.37 s wall on the server's pool in the first sky. Under 0.1% of
+      each census, far under the 10% trigger: no change proposed. T7's "about 2.5 CPU-s a call"
+      was the 768-ray count before T7.b's 1,536 rays of three sub-rays.
+    - Per layer, the served sky on the server's galaxy at its eye's cut V 7.766 (sampled 1 in
+      20, the sky's estimate): C 7.24 × 10⁵ cells, 9.20 × 10⁶ records past the floor, 1.97 × 10⁶
+      generated (21.4%), 3.40 × 10⁴ accepted and listed; D 1.00 × 10⁵, 2.55 × 10⁶, 1.44 × 10⁶
+      (56.7%), 2.55 × 10⁴; E 2.12 × 10⁴, 1.09 × 10⁶, 9.35 × 10⁵ (86.2%), 1.29 × 10⁴; A and B a few
+      hundred. The pairs in T8.g's cases (detached / unchanged / remnants / bright / none): C 72.5 /
+      0.0 / 0.2 / 25.1 / 2.2%, D 21.8 / 0.0 / 2.0 / 72.5 / 3.7%, E 0.8 / 0.0 / 0.0 / 96.9 / 2.4%.
+      The fixture's, the camera's, the exact census's and the nuclear disc's are in the logs and
+      read alike.
+    - The listed stars (sampled, so ±1/√n): the served sky near the Sun some 7.3 × 10⁴ on the
+      server's galaxy and 4.6 × 10⁴ on the fixture; the exact census some 5.1 × 10⁴ at 7.95 and
+      5.7 × 10⁴ at 8.18, and 4.9 × 10⁵ for the camera's 10.06.
+    - In the nuclear disc the caps by ray hold 1.0 × 10⁷ systems of C to E (C 5.0, D 2.3, E 2.7 ×
+      10⁶) against 5.6 × 10⁷ candidates opened, 5.6 times: its caps (74–235 ly on the median ray)
+      are a few cells across, and a cell is opened whole.
+    - The candidates T16.b's binary rule costs: since R06.T8.g its widened bound (n × F_env at
+      max_star_mass(m₁) over ages from zero) only passes records to the bound star by star, which
+      draws each one's hierarchy before anything is generated: on the served sky near the Sun 5.5
+      × 10⁶ C, 1.3 × 10⁶ D and 5.3 × 10⁵ E records at `hierarchy_bound`'s 15.9, 51.9 and 138 µs,
+      some 230 CPU-s of 2.75 × 10⁴ (0.8%). The rest of what binaries cost is the multiples the star
+      bound passes, above.
+    - The expected count of stars brighter than the eye's cut between the eye-only caps and a
+      camera's near the Sun (`decision-r06-t9c-glare.md`, addendum 2), per layer: at most each
+      eye-only cap's own count beyond it, since a camera's caps reach farther on every ray. At
+      7.95 by ray: A 0.995, B 0.968, C 0.421, D 0.334, E 0.293 (3.0 in all); by the eye's
+      visibility at its cut, 8.28 without the light: A 0.909, B 0.855, C 0.547, D 0.350, E 0.359
+      (3.0). The realised count needs a whole camera census (not run).
+  - **Deviations.**
+    - The benches ran by name (above), the sim's sampled and the server's whole, not `just bench
+-- sky` whole.
+    - The exact census's and the nuclear disc's benches ran on the static fixture, as before
+      (no kinematic tables: its records stand still and the drift costs 0.05–0.08 µs against some
+      0.72 µs drawn, under 0.03% of 1.08 × 10⁶ CPU-s); the served sky's on the server's galaxy with
+      its full potential, as T17 asks. The 1,000 ly identity test ran once in motion, a one-off
+      variant on the fixture built with its kinematic tables (not committed), and passed: the
+      census is its oracle, generating 453,260 of 1,411,018 systems (C 251,630, D 137,060, E 64,570,
+      9 fewer than at rest) and accepting C 20,100, D 7,111 and E 1,158 (1,710 s at a 400% quota,
+      load 30–45, 2026-10-12).
+    - The first sky was benched at the served eye's cut alone (the server bench asks the eye); a
+      camera's first sky at 10.06 is not benched.
+    - Files beyond T17's list also `benches/range_query.rs` (the re-pin) and
+      `apps/hyperion/src/renderer/src/view/sky/setting.ts` (open question 16's remark).
+  - **Pending, with the reasons.**
+    - The sky's total light (listed, overflow and band) in the first reply against the final's,
+      within 1% (T9.b's amendment, a gate): neither the wire nor the benches carry a reply's light,
+      and it needs the sim's whole served census summed at both completenesses, some half an hour
+      of the machine. The band's own tests hold its light independent of the complete-to radius to
+      within 1% out to 400 ly. Pending a quiet machine.
+    - D's post-AGB count (the brainstorm's "yet to be counted"): the census tallies no phase.
+    - The photorealistic view's frame time, p95 and p99, while a census runs: by hand, the owner,
+      on the dev machine and on the laptop.
+    - R03.T15's transfer check at N_max: a camera's served sky near the Sun lists some 4 × 10⁵
+      stars, so a camera sky at 10.06 run to its final reply in the hidden real renderer reaches
+      N_max (7,494,912 bytes, 29 chunks); its harness is not built.
+    - The camera-budget ruling, a decision agent's from the 10.06 figures above, before T17 closes
+      and before any bridge play-test: for "main".
+    - The tables' stage chain's schedule (above).
+    - T9.f's largest per-texel difference at 64² between the march's sum and `band_rows`
+      (Deviations in T9.f), T7.b's dropped and gained stars on the final census (Deviations in
+      T7.b) and the CPU splat bake at 3,072² (T13's record): not taken.
+    - The fixture's and the camera's served censuses whole (each under an hour, so owed once):
+      not run; the server's galaxy's eye census ran whole (the server bench, above).
+    - The brainstorm's globular-core row (47 Tuc): pending R06.T16.a, as T17 rules.
+    - `just ci`: integration's.

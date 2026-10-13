@@ -51,31 +51,34 @@
 //! budget is set from their bytes after the jump. A pool's width is `HYPERION_WORKERS` where it is
 //! set, the server's variable, so that a run can take a given width inside a CPU quota.
 //!
-//! | Bench | Target | Figure |
+//! | Bench | Target | Figure (R06.T17, 2026-10-11, provisional; earlier runs below) |
 //! | ----- | ------ | ------ |
-//! | `sky/luminosity_tables` | ≤ 30 CPU-s (T17) | pending a quiet machine |
-//! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17); recorded, not gated (T8.g) | 9.46 × 10⁵ CPU-s on 15 workers, 7.43 × 10⁵ on 3, at P11.T17.c (below) |
-//! | `sky/census_near_sun/cold_eye_visibility` | none: recorded (T8.g) | 7.16 × 10⁵ CPU-s on 15 workers, at P11.T17.c |
-//! | `sky/census_near_sun/cold_spheres` | none: recorded (T8.g; the first gate's 6 × 10⁴) | 1.45 × 10⁶ CPU-s on 15 workers, 1.13 × 10⁶ on 3, at P11.T17.c |
-//! | `sky/census_near_sun/cold_camera` | none: recorded beside the eye's (T8.g) | 2.80 × 10⁶ CPU-s on 15 workers, at P11.T17.c |
-//! | `sky/census_near_sun/warm` | target ≤ 25% of cold, recorded (T17, T8.n): the exact census, which no server serves since R13.T2.b | 99.9% on 4 workers, at P11.T17.c (below) |
-//! | `sky/census_near_sun/warm_jump` | target ≤ 25% of cold, recorded (T17, T8.n): the exact census, as `/warm` | 95.2%, none rebuilt, the same reply; 14.0 GB held, at P11.T17.c (below) |
-//! | `sky/census_near_sun_served/*warm_5.0` | gate: none rebuilt, the same reply (T17); target ≤ 25% of cold | 96.4% on the server's galaxy, 108.2% on the fixture, on 4 workers (below) |
-//! | `sky/census_near_sun_served/*warm_jump_5.0` | gate: none rebuilt, the same reply, within the sized budget (T17, T8.n); target ≤ 25% of cold | 101.9% and 98.1%, none rebuilt, the same reply; 949 MB held on the server's galaxy, within 1,280 MiB (below) |
-//! | `sky/star_bound/*` | about 6 µs a record but `hierarchy_bound` (T8.g) | at most 2.7 µs a step, at P11.T17.c (below) |
-//! | `sky/census_nuclear_disc` | none like for like (below) | not yet run |
-//! | `sky/caps_by_ray_near_sun` | none: a record (R06.T7.b) | 1,475 CPU-s, sampled 1 in 1,000 |
-//! | `sky/census_near_sun_ceiling/*` | under twice the feasibility study's estimate, or to the owner (R13.T1) | R13's Risks |
-//! | `sky/census_near_sun_limit/*` | under twice `decision-r13-guard-trip.md` §2.3's estimate, or to the owner (R13.T1.b) | R13's Risks |
-//! | `sky/census_near_sun_served/*` | none: recorded beside R13.T1.b's capped tier, for R06.T17's full-cold figure (R13.T2.b) | R13's Risks |
-//! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 0.947 CPU-s, provisional |
-//! | `sky/band_near_sun/march` | within the first sky's (T17) | 16.11 CPU-s with the diffuse light, provisional |
-//! | `sky/band_near_sun/march_no_dgl` | none (the lit march's reference, R06.T9.g) | 15.73 CPU-s, provisional |
-//! | `sky/band_near_sun/sum` | within each reply's (T17) | 0.002 CPU-s, provisional |
-//! | `sky/band_near_sun/march_camera` | within the first sky's (T17) | 29.5 CPU-s, provisional |
-//! | `sky/band_near_sun/march_camera_no_eye` | none (the camera's march's reference) | 22.5 CPU-s, provisional |
-//! | `sky/limit_map/near_sun` | within the first sky's (T17) | 0.32 CPU-s, provisional |
-//! | `sky/limit_map/synthetic_300k` | ≤ 3 CPU-s (R06.T9.i) | 1.03 CPU-s, provisional |
+//! | `sky/luminosity_tables` | ≤ 30 CPU-s (T17) | 34.3 s (32.4–37.6), one thread, criterion's 10 samples at load 4–15: over by about 14% |
+//! | `sky/census_near_sun/cold` | ≤ 4,000 CPU-s (T17); recorded, not gated (T8.g) | 1.08 × 10⁶ CPU-s on 15 workers, sampled 1 in 1,000 (9.46 × 10⁵ at P11.T17.c) |
+//! | `sky/census_near_sun/cold_eye_cut` | none: recorded (T17), the exact census at the eye's own cut, V 8.18 | 7.19 × 10⁵ CPU-s on 15 workers, 8.03 × 10⁷ cells |
+//! | `sky/census_near_sun/cold_eye_visibility` | none: recorded (T8.g) | 7.16 × 10⁵ CPU-s on 15 workers, at P11.T17.c (not re-run) |
+//! | `sky/census_near_sun/cold_spheres` | none: recorded (T8.g; the first gate's 6 × 10⁴) | 1.45 × 10⁶ CPU-s on 15 workers, at P11.T17.c (not re-run) |
+//! | `sky/census_near_sun/cold_camera` | none: recorded beside the eye's (T8.g) | 2.62 × 10⁶ CPU-s on 15 workers, 1.46 × 10⁹ cells |
+//! | `sky/census_near_sun/warm` | target ≤ 25% of cold, recorded (T17, T8.n): the exact census, which no server serves since R13.T2.b | 115.9% on 15 workers, sampled 1 in 1,000 at 65,536 MiB (no shippable size): missed, deferred |
+//! | `sky/census_near_sun/warm_jump` | target ≤ 25% of cold, recorded (T17, T8.n): the exact census, as `/warm` | 99.7%, 9.6% of its cells new, none rebuilt, the same reply; 13.2 GB held after the Sun's sky, 14.0 GB after the jump: missed, deferred |
+//! | `sky/census_near_sun_served/*warm_5.0` | gate: none rebuilt, the same reply (T17); target ≤ 25% of cold | 95.4% on the server's galaxy, 98.9% on the fixture, by the threads' CPU time, on 4 workers at 1,280 MiB; none rebuilt, the same reply |
+//! | `sky/census_near_sun_served/*warm_jump_5.0` | gate: none rebuilt, the same reply, within the sized budget (T17, T8.n); target ≤ 25% of cold | 97.3% and 101.7%; none rebuilt, the same reply; 949 MB held on the server's galaxy within 1,280 MiB set explicitly, none evicted: S1–S3 met |
+//! | `sky/census_near_sun_served/*camera_fill_5.0` | none: recorded for the camera-budget ruling (T17) | 862 MB of entries on the server's galaxy, 465 MB on the fixture, after one camera sky at 10.06 |
+//! | `sky/star_bound/*` | about 6 µs a record but `hierarchy_bound` (T8.g) | the whole 5.1, 7.8, 17.2, 53.9 and 142 µs a record in A–E, all but 2.8 µs of it `hierarchy_bound` |
+//! | `sky/census_nuclear_disc` | none: recorded (T17) | 6.27 × 10⁴ CPU-s on 15 workers at V 7.95, sampled 1 in 10 |
+//! | `sky/caps_by_ray_near_sun` | none: a record (R06.T7.b) | 1,475 CPU-s, sampled 1 in 1,000 (not re-run) |
+//! | `sky/census_near_sun_ceiling/*` | under twice the feasibility study's estimate, or to the owner (R13.T1) | R13's Risks (not re-run) |
+//! | `sky/census_near_sun_limit/*` | under twice `decision-r13-guard-trip.md` §2.3's estimate, or to the owner (R13.T1.b) | R13's Risks (not re-run) |
+//! | `sky/census_near_sun_served/*eye_5.0` | none: the full cold census at the real boundary, recorded (T17) | 2.75 × 10⁴ CPU-s on the server's galaxy, 1.41 × 10⁴ on the fixture, by the threads' CPU time on 15 workers, sampled 1 in 20 |
+//! | `sky/illumination` | with the march's increase, ≤ 10% of `/march_no_dgl` (R06.T9.g) | 1.26 CPU-s (rays 1.12, field 0.14), 0.22 s wall |
+//! | `sky/band_near_sun/march` | within the first sky's (T17) | 30.2 CPU-s, 2.04 s wall, ten replies, 30.2 MB |
+//! | `sky/band_near_sun/march_no_dgl` | none (the lit march's reference, R06.T9.g) | 28.5 CPU-s: the light and the march's increase 2.96 CPU-s, 10.4%, over the 10% by 0.4 point, within a single run's ±2 CPU-s: a finding for T9.g, to re-take on a quiet machine |
+//! | `sky/band_near_sun/sum` | within each reply's (T17) | 0.009 CPU-s |
+//! | `sky/band_near_sun/march_camera` | within the first sky's (T17) | 37.3 CPU-s, 63.7 MB |
+//! | `sky/band_near_sun/march_camera_no_eye` | none (the camera's march's reference) | 29.7 CPU-s, 32.2 MB |
+//! | `sky/band_near_sun/march_camera_lit` | none: the camera's band for Design note 18's limit (T17) | 38.0 CPU-s; its final band μ 21.26–25.25 (median 23.72), 36.5% darker than μ 24 |
+//! | `sky/limit_map/near_sun` | within the first sky's (T17) | 0.33 CPU-s |
+//! | `sky/limit_map/synthetic_300k` | ≤ 3 CPU-s (R06.T9.i) | 1.22 CPU-s, 0.13 s wall: met |
 //!
 //! The cold near-Sun figure is R06.T8.f's sampled run (2026-10-05, `HYPERION_SKY_BENCH_SAMPLE`
 //! 1,000, criterion's `--test`, 15 workers, load about 15, so provisional): 1.83 × 10⁶ CPU-s
@@ -228,6 +231,22 @@
 //! 99.9%; the destination cold 8.74 × 10⁵ and the jump 95.2%, 9.6% of its cells new, none
 //! rebuilt, the same reply; entries of 13.2 GB after the Sun's sky and 14.0 GB after the jump.
 //!
+//! R06.T17's runs (2026-10-11, criterion's `--test` but for `luminosity_tables` and `star_bound`,
+//! which criterion timed; each run under the heavy-test lock, the load logged beside it, 1–25 at
+//! the starts, so provisional; logs `.git/rm23-scratch/r06-t17/bench/`) are the table's figures.
+//! The served sky's census (`census_near_sun_served/{,served_}eye_5.0`) was sampled 1 in 20 on 15
+//! workers; its warm gate, the same benches' `*warm*_5.0`, 1 in 20 on `HYPERION_WORKERS` 4 at
+//! `CPUQuota=400%` with `HYPERION_SKY_CACHE_MB` 1,280 set explicitly (the gate's budget,
+//! `decision-r06-t8n.md` §1), so that the sampled cache held 64 MiB; the camera's fill, 1 in 20 at
+//! 65,536 MiB, so that it held every entry; the exact census, 1 in 1,000 on 15 workers, its warm
+//! benches at 65,536 MiB; the nuclear disc, 1 in 10 (1 in 1,000 opened none of its 935 cells'
+//! blocks). Since R06.T17 each census prints, beside its tallies, the bound star by star's pass
+//! rates (records generated ÷ records skipped) for the single and the multiple records it bounds
+//! (`LayerCost::{star_bounded_multiple, passed_single, passed_multiple}`; T16.b's 25% trigger) and
+//! the A<sub>V</sub> shares of its listed stars above 2, 5, 10 and 20; and each band march its
+//! final reply's surface brightness, least to greatest, and the share darker than μ 24, the sky a
+//! camera's limit reads. R06's Risks, "Deviations in T17, as built", records them.
+//!
 //! The band benches (R06.T9.f) split the band of a near-Sun request at the eye's cut as the server
 //! runs it (R06.T11.c, T11.d), one face row a job over all six faces of `BandSpec::STANDARD` (64²
 //! texels a face, 24,576 rays). `band_near_sun/march` marches the rays once, keeping every reply of
@@ -319,7 +338,7 @@ use hyperion_sim::sky::census::{
 };
 use hyperion_sim::sky::dgl::{ILLUMINATION_SPEC, Illumination, IlluminationRows};
 use hyperion_sim::sky::envelope::BrightnessEnvelope;
-use hyperion_sim::sky::eye::{SpRatio, illuminance_of_magnitude};
+use hyperion_sim::sky::eye::{SpRatio, illuminance_of_magnitude, surface_brightness};
 use hyperion_sim::sky::limits::{Glare, eye_cut, eye_visibility, limit_rows};
 use hyperion_sim::sky::luminosity::{BinSums, LuminosityTables};
 use hyperion_sim::sky::phase::PhaseEnvelope;
@@ -328,7 +347,7 @@ use hyperion_sim::stellar::multiplicity::{HierarchyBound, hierarchy_bound};
 use hyperion_sim::stellar::system::draw_metallicity;
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::consts::RADIANS_PER_DEGREE;
-use hyperion_sim::units::{LightYears, Lux, Magnitudes, Years};
+use hyperion_sim::units::{LightYears, Lux, Magnitudes, MagnitudesPerArcsec2, Years};
 use hyperion_testkit::golden::f64_digest;
 
 /// The fixture's seed, the sim's sky tests' own.
@@ -355,6 +374,9 @@ const JUMP_LY: [f64; 3] = [0.0, 25_000.0, 68.0];
 /// In the nuclear disc, ly: 150 ly from Sgr A* in the plane.
 const NUCLEAR_DISC_LY: [f64; 3] = [0.0, 150.0, 0.0];
 
+/// In the inner disc, ly: 8,000 ly from the centre in the plane, `caps_converge_in_rays`' point.
+const INNER_DISC_LY: [f64; 3] = [0.0, 8_000.0, 0.0];
+
 /// Noise-cache slots per job: 1 MiB of the sightlines' lattice words.
 const NOISE_SLOTS: usize = 1 << 16;
 
@@ -367,6 +389,7 @@ const DEFAULT_CACHE_MB: usize = 1_280;
 static PRINTED_COLD: AtomicBool = AtomicBool::new(false);
 static PRINTED_COLD_SEEN: AtomicBool = AtomicBool::new(false);
 static PRINTED_COLD_SPHERES: AtomicBool = AtomicBool::new(false);
+static PRINTED_COLD_EYE_CUT: AtomicBool = AtomicBool::new(false);
 static PRINTED_COLD_CAMERA: AtomicBool = AtomicBool::new(false);
 static PRINTED_FILL: AtomicBool = AtomicBool::new(false);
 static PRINTED_WARM: AtomicBool = AtomicBool::new(false);
@@ -380,6 +403,7 @@ static PRINTED_BAND: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND_SUM: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND_CAMERA: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND_CAMERA_NO_EYE: AtomicBool = AtomicBool::new(false);
+static PRINTED_BAND_CAMERA_LIT: AtomicBool = AtomicBool::new(false);
 static PRINTED_BAND_NO_DGL: AtomicBool = AtomicBool::new(false);
 static PRINTED_ILLUMINATION: AtomicBool = AtomicBool::new(false);
 static PRINTED_LIMIT_MAP_NEAR_SUN: AtomicBool = AtomicBool::new(false);
@@ -978,9 +1002,34 @@ fn report_once(printed: &AtomicBool, name: &str, run: &Run, cache: Option<&Bench
         "  cells: {served} served, {missed} missed, rebuilt {key} for the key, {window} for the \
          window, {parameters} for the parameters (sampled)",
     );
+    report_extinction(run);
     if let Some(cache) = cache {
         report_cache(cache, scale);
     }
+}
+
+/// The extinctions of R06.T17's record of the listed stars' A<sub>V</sub>, mag
+/// (`decision-r06-t9b-band.md`, addendum item 2).
+const RECORDED_A_V: [f64; 4] = [2.0, 5.0, 10.0, 20.0];
+
+/// Prints the A<sub>V</sub> distribution of `run`'s listed stars: the share behind more than each
+/// of [`RECORDED_A_V`], and the largest (R06.T17).
+fn report_extinction(run: &Run) {
+    let listed = run.census.listed();
+    let n = u64::try_from(listed.len()).expect("a count");
+    let shares: Vec<String> = RECORDED_A_V
+        .iter()
+        .map(|&a| {
+            let behind = listed.iter().filter(|s| s.a_v().value() > a).count();
+            let behind = u64::try_from(behind).expect("a count");
+            format!("above {a}: {:.3}%", percent(behind, n))
+        })
+        .collect();
+    let largest = listed.iter().map(|s| s.a_v().value()).fold(0.0, f64::max);
+    eprintln!(
+        "  A_V of the {n} stars listed (sampled): {}; the largest {largest:.2}",
+        shares.join(", ")
+    );
 }
 
 /// Prints one layer's tallies and cost, scaled by `scale`.
@@ -1013,6 +1062,35 @@ fn report_layer(layer: Layer, cap: LightYears, tally: &LayerTally, cost: &LayerC
         share(pairs.remnants()),
         share(pairs.bright()),
         share(pairs.unbounded()),
+    );
+    // R06.T17's pass rates of the bound star by star, records generated ÷ records skipped, for
+    // the single and the multiple systems it bounds, beside T16.b's 25% trigger.
+    let multiple = cost.star_bounded_multiple();
+    let single = cost.star_bounded() - multiple;
+    let rate = |passed: u64, of: u64| {
+        let skipped = of - passed;
+        if skipped == 0 {
+            "all passed".to_owned()
+        } else {
+            #[expect(
+                clippy::cast_precision_loss,
+                reason = "a ratio of counts under 2⁵³, for printing"
+            )]
+            let ratio = passed as f64 / skipped as f64;
+            format!("{ratio:.4}")
+        }
+    };
+    eprintln!(
+        "    pass rates: single {} of {} generated ({}, {:.2}%), multiple {} of {} ({}, {:.2}%), \
+         generated ÷ skipped",
+        cost.passed_single() * scale,
+        single * scale,
+        rate(cost.passed_single(), single),
+        percent(cost.passed_single(), single),
+        cost.passed_multiple() * scale,
+        multiple * scale,
+        rate(cost.passed_multiple(), multiple),
+        percent(cost.passed_multiple(), multiple),
     );
     // R06.T8.h's cache: the records its entries hold of the cells read or built, and those the
     // pre-filter skipped.
@@ -1227,7 +1305,9 @@ impl SkyCellCache for BenchCellCache<'_> {
 ///
 /// It runs on R06.T7.b's caps by ray at the uniform cut, on its caps by the eye's visibility,
 /// which the server asks of an eye-only request, and on R06.T7's spheres, at which the gate was
-/// first set (`decision-p11-t17c-bright.md`). The warm benches' fills ([`census_near_sun`]) are
+/// first set (`decision-p11-t17c-bright.md`); and, as `/cold_eye_cut` (R06.T17), on the eye-only
+/// request at the eye's own lit cut by its visibility, with no ceiling: the exact census at the
+/// eye's real cut (`decision-r06-t9b-band.md`). The warm benches' fills ([`census_near_sun`]) are
 /// the cold census through an empty cache, which also builds each entry (R06.T8.h).
 fn census_near_sun_cold(c: &mut Criterion) {
     // The tables and each plan's caps are made only when a bench that reads them is run, so that
@@ -1248,6 +1328,11 @@ fn census_near_sun_cold(c: &mut Criterion) {
             "census_near_sun/cold_spheres",
             &PRINTED_COLD_SPHERES,
             Caps::Spheres,
+        ),
+        (
+            "census_near_sun/cold_eye_cut",
+            &PRINTED_COLD_EYE_CUT,
+            Caps::AtTheEyesCut,
         ),
     ];
     for (name, printed, caps) in cold {
@@ -1924,6 +2009,16 @@ const fn capped_tier_measured(galaxy: BenchGalaxy) -> (f64, f64) {
     }
 }
 
+/// The two figures, CPU-s, a place's census is judged beside on a galaxy ([`Judged`]'s estimate).
+type Estimate = fn(BenchGalaxy) -> (f64, f64);
+
+/// `decision-r13-guard-trip.md`'s estimate of the capped tier in the inner disc at the real
+/// limit, CPU-s: some 2–3 × 10⁵ on either galaxy, unbenched before R06.T17.
+#[must_use]
+const fn inner_disc_estimate(_galaxy: BenchGalaxy) -> (f64, f64) {
+    (2.0e5, 3.0e5)
+}
+
 /// Prints each layer's expected count brighter than the ceiling beyond its boundary in `caps`, a
 /// real boundary's (`LayerCap::bright_beyond`), and C to E's sum: the reply's `bright_beyond`.
 fn report_bright_beyond(name: &str, caps: &[LayerCap]) {
@@ -1956,23 +2051,40 @@ fn report_bright_beyond(name: &str, caps: &[LayerCap]) {
 /// (`census_near_sun_served/served_eye_5.0`; [`SERVED_SEED`]). Its CPU time, plan included, is
 /// recorded beside R13.T1.b's measured capped tier ([`capped_tier_measured`]), not gated. The
 /// count at the ceiling the report reads for its systems within each boundary is taken once,
-/// outside the timing.
+/// outside the timing. The same served sky in the inner disc at [`INNER_DISC_LY`],
+/// `census_inner_disc_served/{,served_}eye_5.0`, is R06.T17's "sampled, the inner disc at the
+/// limit", beside `decision-r13-guard-trip.md`'s estimate ([`inner_disc_estimate`]).
 fn census_near_sun_served(c: &mut Criterion) {
     let workers = workers();
     let sample = sample();
     let mut group = c.benchmark_group("sky");
     group.sample_size(10);
-    for galaxy in BenchGalaxy::ALL {
+    // Each place: its bench, its observer, and the estimate its census is judged beside.
+    let places: [(&str, [f64; 3], &str, Estimate); 2] = [
+        (
+            "census_near_sun_served",
+            SUN_LY,
+            "R13.T1.b's capped tier, without and with fix (i),",
+            capped_tier_measured,
+        ),
+        (
+            "census_inner_disc_served",
+            INNER_DISC_LY,
+            "decision-r13-guard-trip.md's estimate for the inner disc,",
+            inner_disc_estimate,
+        ),
+    ];
+    for ((bench, ly, against, estimate), galaxy) in places
+        .into_iter()
+        .flat_map(|place| BenchGalaxy::ALL.map(|galaxy| (place, galaxy)))
+    {
         let (which, sky_of) = (galaxy.prefix(), galaxy.sky_of());
         let request = CeilingRequest::Eye;
-        let name = format!(
-            "census_near_sun_served/{which}{}_{SYNTHETIC_CEILING_V:.1}",
-            request.name()
-        );
+        let name = format!("{bench}/{which}{}_{SYNTHETIC_CEILING_V:.1}", request.name());
         let printed = AtomicBool::new(false);
         let judged = Judged {
-            against: "R13.T1.b's capped tier, without and with fix (i),",
-            estimate_cpu_s: capped_tier_measured(galaxy),
+            against,
+            estimate_cpu_s: estimate(galaxy),
             limit_ly: Some(REAL_LIMIT_LY),
             fix_i: None,
             guards: false,
@@ -1981,7 +2093,7 @@ fn census_near_sun_served(c: &mut Criterion) {
         let count: OnceCell<CapCount> = OnceCell::new();
         group.bench_function(&name, |b| {
             let sky = sky_of();
-            let query = query.get_or_init(|| served_query(sky, SUN_LY));
+            let query = query.get_or_init(|| served_query(sky, ly));
             let count = count.get_or_init(|| {
                 CapCount::measure(
                     &sky.galaxy,
@@ -2179,6 +2291,49 @@ fn census_near_sun_served_warm(c: &mut Criterion) {
     group.finish();
 }
 
+/// R06.T17's record of the camera's served entries, still open from R06.T8.n: on each galaxy, a
+/// camera's sky near the Sun at V 10.06 with the eye at its own cut, at RM3's ceiling, filling an
+/// empty cache, whose bytes after it are the camera's entries (a camera's cell holds more records
+/// than an eye's), for the camera-budget ruling. `HYPERION_SKY_CACHE_MB` must hold them, as for the
+/// exact census's warm benches.
+fn census_near_sun_served_camera(c: &mut Criterion) {
+    let workers = workers();
+    let sample = sample();
+    let mut group = c.benchmark_group("sky");
+    group.sample_size(10);
+    for galaxy in BenchGalaxy::ALL {
+        let (which, sky_of) = (galaxy.prefix(), galaxy.sky_of());
+        let name = format!("census_near_sun_served/{which}camera_fill_{SYNTHETIC_CEILING_V:.1}");
+        let printed = AtomicBool::new(false);
+        let camera: OnceCell<SkyQuery> = OnceCell::new();
+        group.bench_function(&name, |b| {
+            let sky = sky_of();
+            let query = camera.get_or_init(|| {
+                ceiling_query(sky, CeilingRequest::Camera, SUN_LY)
+                    .with_synthetic_ceiling(Magnitudes::new(SYNTHETIC_CEILING_V))
+                    .expect("the camera's cut is deeper than the ceiling")
+            });
+            b.iter_custom(|iters| {
+                let mut cpu = Duration::ZERO;
+                for _ in 0..iters {
+                    let cache = BenchCellCache::new(&sky.galaxy, sample);
+                    let run = census_with(
+                        sky,
+                        black_box(query),
+                        &cache,
+                        (workers, sample),
+                        CpuTime::Measured,
+                    );
+                    report_once(&printed, &name, &run, Some(&cache));
+                    cpu += run.cpu();
+                }
+                cpu
+            });
+        });
+    }
+    group.finish();
+}
+
 /// The first `n` records of `layer` in the cells nearest the Sun, shell by shell of cells about
 /// the cell holding it: a neighbourhood's systems as placement makes them (plan 11's P11.T16
 /// bench's sample).
@@ -2358,7 +2513,8 @@ fn caps_by_ray_near_sun(c: &mut Criterion) {
     group.finish();
 }
 
-/// The caps a cold census near the Sun is planned on (R06.T8.g's record).
+/// The caps a cold census near the Sun is planned on (R06.T8.g's record), or, for R06.T17's
+/// [`AtTheEyesCut`](Self::AtTheEyesCut), the request it is planned for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Caps {
     /// R06.T7.b's caps by ray at the uniform cut: the query's own.
@@ -2367,10 +2523,16 @@ enum Caps {
     ByEyeVisibility,
     /// R06.T7's spheres ([`with_spheres`]).
     Spheres,
+    /// The eye-only request near the Sun at its own cut, `eye_cut` with the request's illumination
+    /// as R06.T9.d and T9.g compute it, by its eye's visibility, with no synthetic ceiling: the
+    /// exact census at the eye's real cut (R06.T17, `decision-r06-t9b-band.md`), which no server
+    /// serves since R13.T2.b. It replaces the query.
+    AtTheEyesCut,
 }
 
 impl Caps {
-    /// `query` planned on these caps.
+    /// `query` planned on these caps, or, [`AtTheEyesCut`](Self::AtTheEyesCut), in its place the
+    /// eye-only request near the Sun at the eye's own cut by its visibility, cut and all.
     ///
     /// The caps are counted here, outside the census's time.
     #[must_use]
@@ -2380,6 +2542,14 @@ impl Caps {
             Self::ByEyeVisibility => by_eye_visibility(sky, &query),
             Self::Spheres => {
                 with_spheres(sky, query, &mut NoiseCache::with_capacity(NOISE_SLOTS)).0
+            }
+            Self::AtTheEyesCut => {
+                let at_the_cut = ceiling_query(sky, CeilingRequest::Eye, SUN_LY);
+                eprintln!(
+                    "census_near_sun/cold_eye_cut: the eye's own cut near the Sun, V {:.4}",
+                    at_the_cut.cut().value()
+                );
+                at_the_cut
             }
         }
     }
@@ -2653,6 +2823,52 @@ fn march_all(
     })
 }
 
+/// Prints the surface brightness of the final reply's band of `marches`, summed with no census at
+/// `caps`, over its texels: the least, 10th, 50th and 90th percentiles and greatest μ, mag
+/// arcsec⁻², and the share of the texels darker than μ 24, the dark sky a camera's limit reads
+/// until it reads each texel's (R06.T17's record for the camera-budget ruling: Design note 18's
+/// limit over the final 64² band, read from these by `cameraLimit.ts`, is monotone in μ).
+fn report_final_band(name: &str, marches: &[(usize, BandMarch)], caps: &[LayerCap]) {
+    let last = CompleteTo::of_caps(caps);
+    let mut mu: Vec<f64> = Vec::new();
+    for (_, march) in marches {
+        let mut row = Vec::new();
+        sum_rows(march, &SkyCensus::empty(), &last, &mut row);
+        mu.extend(
+            row.iter()
+                .filter_map(|texel| surface_brightness(texel.luminance()))
+                .map(MagnitudesPerArcsec2::value),
+        );
+    }
+    mu.sort_by(f64::total_cmp);
+    let at = |q: f64| {
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss,
+            reason = "a rank of some 24,576 texels, from a fraction in [0, 1]"
+        )]
+        let rank = ((mu.len() - 1) as f64 * q).round() as usize;
+        mu[rank]
+    };
+    let darker = mu.iter().filter(|&&m| m > 24.0).count();
+    println!(
+        "sky/band_near_sun/{name}: the final reply's band with no census, {} lit texels: μ {:.3} \
+         (least), {:.3}, {:.3}, {:.3} (10th, 50th, 90th), {:.3} (greatest); {:.1}% darker than \
+         μ 24",
+        mu.len(),
+        at(0.0),
+        at(0.1),
+        at(0.5),
+        at(0.9),
+        at(1.0),
+        percent(
+            u64::try_from(darker).expect("a count"),
+            u64::try_from(mu.len()).expect("a count")
+        )
+    );
+}
+
 /// The march's bench `name` (`sky/band_near_sun/<name>`) for `query`: all six faces of
 /// `BandSpec::STANDARD`, one face row a job, keeping the replies of its shell plan. Prints once
 /// (`printed`) the rows, the replies and caps, the heap, the CPU time and the wall time.
@@ -2697,6 +2913,7 @@ fn bench_march(
                         busy.as_secs_f64(),
                         began.elapsed().as_secs_f64()
                     );
+                    report_final_band(name, &marches, caps);
                 }
                 cpu += busy;
             }
@@ -2776,6 +2993,24 @@ fn band_near_sun(c: &mut Criterion) {
         "march_camera_no_eye",
         &camera_query(SUN_LY, false),
         &PRINTED_BAND_CAMERA_NO_EYE,
+    );
+    // The camera's request lit by its illumination (R06.T9.g), as the server marches it: the
+    // final band whose texels Design note 18's limit reads (R06.T17,
+    // `decision-r06-t7b-brackets.md`).
+    let lit_camera = SkyQuery::builder(
+        *camera_query(SUN_LY, true).observer(),
+        Magnitudes::new(CAMERA_CUT_V),
+    )
+    .eye(EyeObserver::default())
+    .eye_cut(Magnitudes::new(EYE_CUT_V))
+    .illumination(Arc::clone(sun_illumination()))
+    .build()
+    .expect("a camera's request lit");
+    bench_march(
+        &mut group,
+        "march_camera_lit",
+        &lit_camera,
+        &PRINTED_BAND_CAMERA_LIT,
     );
     group.finish();
 }
@@ -2979,6 +3214,7 @@ criterion_group!(
     census_near_sun_limit,
     census_near_sun_served,
     census_near_sun_served_warm,
+    census_near_sun_served_camera,
     star_bound,
     illumination,
     caps_by_ray_near_sun,
