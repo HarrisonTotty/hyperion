@@ -202,31 +202,58 @@ pub struct ClimateRegime {
     pub model: ClimateModelKind,
 }
 
+/// Which of a body's crusts, or its bulk material, is at its surface, the lid's (P14.T51.c's `lid`;
+/// science-composition-crusts.md §5 and §10.1 item 3d).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum LidCrust {
+    /// The primary crust, where nothing has resurfaced it (the Moon's highlands, a Ceres).
+    Primary,
+    /// The secondary crust, over any buried primary one (Mars, Mercury, Venus, Earth's oceans).
+    Secondary,
+    /// The undifferentiated body's own material.
+    Bulk,
+}
+
 /// A body's crust by substance, P14.T51.c's crust composition as the pass reads it (its redox
-/// class is not read here).
+/// class is not read here): a differentiated body's crusts, or an undifferentiated body's own
+/// material alone, and which of them the surface shows.
 ///
 /// The classes are by mode of origin (Taylor and McLennan 2009, Planetary Crusts, Cambridge
 /// University Press, its chapters' titles and summaries read; science-r09-drainage.md §5, whose
 /// reading of a frozen ocean's shell as primary is an analogy, of medium confidence): a crust
-/// crystallised from the body's first global liquid is
-/// primary, whatever the liquid, and a solid mantle's partial melt is secondary. A body has at
-/// least one of the two, and may lack either: the reference Earth and Mars name no primary crust,
-/// and a Ceres, whose rock "avoided igneous differentiation" (Fu et al. 2017, EPSL 476, 153), has
-/// no secondary.
+/// crystallised from the body's first global liquid is primary, whatever the liquid, and a solid
+/// mantle's partial melt is secondary. The inputs take one of two forms
+/// (science-composition-crusts.md §1):
+///
+/// - **a differentiated body's crusts:** at least one of the primary and the secondary, and it may
+///   lack either: the reference Earth and Mars name no primary crust, and a Ceres, whose rock
+///   "avoided igneous differentiation" (Fu et al. 2017, EPSL 476, 153), has no secondary;
+/// - **an undifferentiated body's bulk material alone:** its accreted, never-melted rock or
+///   ice–dust (a chondrite, a comet's dust mantle; or, on a fragment of a differentiated body, its
+///   exposed mantle or core, which no rule produces yet), with no primary, secondary or tertiary
+///   crust beside it. It is not a crust in Taylor's sense.
+///
+/// The lid ([`lid`](Self::lid)) names which of them is at the surface: the primary crust where
+/// nothing has resurfaced it, the secondary over any buried primary one, or the bulk material
+/// (science-composition-crusts.md §5). A buried primary crust stays in the inputs, being what
+/// large craters excavate.
 ///
 /// The lithologies name the palette entries of the field's [`Crust`] variants
 /// (decision-composition §1.7), as [`CoarseInputs::crust_palette`] states: `Continental` the
-/// tertiary crust's, `Oceanic` the secondary's (R09.T12.a), or none without one, `Lid` the
-/// primary's where the body has one and the secondary's otherwise, and `Province` the provinces'.
+/// tertiary crust's, `Oceanic` the secondary's (R09.T12.a), or none without one, `Lid` the entry of
+/// the crust or bulk material `lid` names, and `Province` the provinces'.
 ///
-/// Plain data with public fields: [`CoarseInputsBuilder::build`] validates them, refuses a crust
-/// with neither a primary nor a secondary ([`BuildCoarseInputsError::NoCrust`]), and refuses a
-/// lithology the palette has no entry for.
+/// Plain data with public fields: [`CoarseInputsBuilder::build`] validates them, refusing a crust
+/// with neither a primary nor a secondary crust nor a bulk material
+/// ([`BuildCoarseInputsError::NoCrust`]), a bulk material beside a crust
+/// ([`BuildCoarseInputsError::BulkBesideCrust`]), a lid naming a crust or bulk material the body
+/// does not have ([`BuildCoarseInputsError::LidAbsent`]), and a lithology the palette has no entry
+/// for.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CrustInputs {
-    /// The primary crust, crystallised from the body's first global liquid: a magma ocean's
-    /// flotation crust (`anorthosite` on the Moon), or a frozen ocean's shell (`phyllosilicate` on
-    /// a Ceres, `H2O` on an icy body); or `None`.
+    /// The primary crust, crystallised from the body's first global liquid, buried or at the
+    /// surface, as `lid` says: a magma ocean's flotation crust (`feldspathic` on the Moon), or a
+    /// frozen ocean's shell (`phyllosilicate` on a Ceres, `H2O` on an icy body); or `None`.
     pub primary: Option<SubstanceKey>,
     /// The secondary crust, a solid mantle's partial melt (`basalt` by default), or `None` on a
     /// body whose mantle never melted (a Ceres).
@@ -234,14 +261,21 @@ pub struct CrustInputs {
     /// The tertiary crust, from remelting of the secondary (`granite`, only where the continental
     /// fraction is above zero), or `None`.
     pub tertiary: Option<SubstanceKey>,
+    /// An undifferentiated body's own material at its surface (`chondrite_h`, `cometary`), with no
+    /// crust beside it, or `None`: not a crust in Taylor's sense
+    /// (science-composition-crusts.md §1).
+    pub bulk: Option<SubstanceKey>,
+    /// Which crust or bulk material the surface shows: [`Lid`](Crust::Lid) takes its entry, and
+    /// the melt test its solidus.
+    pub lid: LidCrust,
     /// The volcanic provinces' lithology.
     pub provinces: SubstanceKey,
-    /// The share of the surface above the solidus of the crust at the surface (the secondary's,
-    /// or the primary's where there is none; science-r09-drainage.md §5.2 item 4), 0 to 1 (a
-    /// locked lava world's dayside pool); R09.T13.c applies the solidus per cell. As written, a
-    /// Moon's melt test reads its maria's basalt solidus although its lid is anorthosite;
-    /// science-composition-crusts.md §5 amends the crust to the lid's, which the crust's `lid`
-    /// member, R09.T10.d's, will name.
+    /// The share of the surface above the solidus of the lid's crust or bulk material, 0 to 1 (a
+    /// locked lava world's dayside pool).
+    ///
+    /// R09.T13.c applies the solidus per cell. The lid's solidus amends science-r09-drainage.md
+    /// §5.2 item 4's "the secondary's, or the primary's where there is none", which on a Moon
+    /// tested its maria's solidus against its highland surface (science-composition-crusts.md §5).
     pub melt_area_fraction: f64,
 }
 
@@ -329,6 +363,7 @@ pub struct CoarseInputs {
     condensates: Vec<Condensate>,
     palette: MaterialPalette,
     crust_palette: [Option<u8>; 4],
+    lid_entry: u8,
     main_liquid: Option<u8>,
 }
 
@@ -620,21 +655,37 @@ impl CoarseInputs {
     /// The palette entry of each [`Crust`] variant's lithology, in its code order (continental,
     /// oceanic, lid, province), as the field's header carries it: `Continental` the tertiary
     /// crust in [`PaletteRole::TertiaryCrust`], or `None` without one; `Oceanic` the secondary
-    /// crust, or `None` without one (a Ceres); `Lid` the primary crust in
-    /// [`PaletteRole::PrimaryCrust`] where the body has one (a Moon's anorthosite, a Ceres's
-    /// phyllosilicate), the secondary crust otherwise; and `Province` the provinces' lithology.
+    /// crust, or `None` without one (a Ceres, an undifferentiated body); `Lid` the entry of the
+    /// crust or bulk material [`CrustInputs::lid`] names, [`lid_entry`](Self::lid_entry): the
+    /// primary crust's in [`PaletteRole::PrimaryCrust`] (a Moon's feldspathic highlands, a Ceres's
+    /// phyllosilicate), the secondary crust's (a Mars's basalt, over any buried primary crust;
+    /// Earth's), or the bulk material's in [`PaletteRole::Bulk`] (a chondritic asteroid's); and
+    /// `Province` the provinces' lithology.
     ///
     /// The secondary crust's entry is its [`PaletteRole::SecondaryCrust`] one and the provinces'
     /// their [`PaletteRole::Province`] one, but where the two are one substance either entry names
     /// both, the variant's own role tried first: a Mars's basaltic provinces take its lid's
     /// `SecondaryCrust` basalt, and a Moon's maria, basaltic provinces that are its secondary
-    /// crust, its `Province` basalt. Where the provinces are the primary crust's substance and have
-    /// no entry of their own, they take its `PrimaryCrust` entry, after the secondary's where both
-    /// crusts are that substance: a Ceres's provinces would be its phyllosilicate lid's
-    /// (science-r09-drainage.md §5). The primary crust's entry is its `PrimaryCrust` one alone.
+    /// crust, its `Province` basalt. Where the provinces are the primary crust's or the bulk
+    /// material's substance and have no entry of their own, they take its `PrimaryCrust` or `Bulk`
+    /// entry, after the secondary's where both crusts are that substance: a Ceres's provinces would
+    /// be its phyllosilicate lid's (science-r09-drainage.md §5), and an undifferentiated body's its
+    /// bulk material's (science-composition-crusts.md §1). The primary crust's entry is its
+    /// `PrimaryCrust` one alone, and the bulk material's its `Bulk` one.
     #[must_use]
     pub const fn crust_palette(&self) -> [Option<u8>; 4] {
         self.crust_palette
+    }
+
+    /// The palette entry of the crust or bulk material [`CrustInputs::lid`] names, which
+    /// [`crust_palette`](Self::crust_palette)'s [`Lid`](Crust::Lid) holds.
+    ///
+    /// The builder resolves it once, so that no step matches or unwraps the crust's options. Its
+    /// transition is the solidus of the body's melt test ([`CrustInputs::melt_area_fraction`],
+    /// P14.T51.c's) and of R09.T13.c's on the lid's cells (science-composition-crusts.md §5).
+    #[must_use]
+    pub const fn lid_entry(&self) -> u8 {
+        self.lid_entry
     }
 
     /// The palette entry of the body's main liquid, its sea's: the [`PaletteRole::Liquid`] entry of
@@ -702,7 +753,7 @@ pub enum BuildCoarseInputsError {
     /// The surface state is a gas envelope: the body has no solid surface.
     NoSolidSurface,
     /// The palette has no entry for a substance the inputs name where it lies: an ice, a liquid,
-    /// a condensate on the ground as one, or a lithology of the crust.
+    /// a condensate on the ground as one, or a lithology of the crust or its bulk material.
     NotInPalette {
         /// The part that names it.
         part: &'static str,
@@ -711,9 +762,13 @@ pub enum BuildCoarseInputsError {
         /// The role its entry would take.
         role: PaletteRole,
     },
-    /// The crust has neither a primary nor a secondary crust, one of which the lid takes
-    /// (science-r09-drainage.md §5; P14.T51.c states at least one).
+    /// The crust names neither a primary nor a secondary crust, nor an undifferentiated body's
+    /// bulk material (science-composition-crusts.md §1).
     NoCrust,
+    /// The crust names an undifferentiated body's bulk material beside a crust.
+    BulkBesideCrust,
+    /// The lid names a crust or bulk material the body does not have.
+    LidAbsent(LidCrust),
     /// A list names a substance twice (a condensate twice in one phase).
     Duplicate {
         /// The list's name.
@@ -775,7 +830,13 @@ impl fmt::Display for BuildCoarseInputsError {
                 f,
                 "the palette has no {role:?} entry for {substance}, named by the {part}"
             ),
-            Self::NoCrust => f.write_str("the crust has neither a primary nor a secondary crust"),
+            Self::NoCrust => f.write_str(
+                "the crust has neither a primary nor a secondary crust nor a bulk material",
+            ),
+            Self::BulkBesideCrust => f.write_str("the crust names a bulk material beside a crust"),
+            Self::LidAbsent(_) => {
+                f.write_str("the lid names a crust or bulk material the body does not have")
+            }
             Self::Duplicate { part, substance } => {
                 write!(f, "the {part} name {substance} twice")
             }
@@ -1103,8 +1164,9 @@ impl CoarseInputsBuilder {
     /// Its entries' values are the registry rows' (P14.T49.b–c; a builder argument until
     /// P14.T54.a reads them from the record). It must hold an [`PaletteRole::Ice`] entry for every
     /// ice and solid condensate, a [`PaletteRole::Liquid`] entry for every liquid and liquid
-    /// condensate, and an entry for every lithology of the crust, as
-    /// [`CoarseInputs::crust_palette`] finds them; it may hold more, such as a deposit's
+    /// condensate, and an entry for every lithology of the crust, a buried primary crust's and the
+    /// bulk material's among them, as [`CoarseInputs::crust_palette`] finds them; it may hold
+    /// more, such as a deposit's
     /// ([`PaletteRole::Deposit`], the sand and dust source where it is not the crust's: a Mars's
     /// `mars_dust`, a Ceres's `Na2CO3`).
     #[must_use]
@@ -1123,8 +1185,10 @@ impl CoarseInputsBuilder {
     /// above the whole, too many condensates, a wet epoch that ends before it starts, a crater
     /// contract of another gravity or of a system younger than the surface
     /// ([`BuildCoarseInputsError::SurfaceOlderThanSystem`]), a crust with neither a primary nor a
-    /// secondary crust
-    /// ([`BuildCoarseInputsError::NoCrust`]), or a substance the palette has no entry for.
+    /// secondary crust nor a bulk material ([`BuildCoarseInputsError::NoCrust`]), with a bulk
+    /// material beside a crust ([`BuildCoarseInputsError::BulkBesideCrust`]) or with a lid naming
+    /// a crust or bulk material it does not have ([`BuildCoarseInputsError::LidAbsent`]), or a
+    /// substance the palette has no entry for.
     pub fn build(self) -> Result<CoarseInputs, BuildCoarseInputsError> {
         let figure = required(self.figure, "figure")?;
         let Spheroid {
@@ -1185,11 +1249,11 @@ impl CoarseInputsBuilder {
         }
         let climate = required(self.climate, "climate regime")?;
         let crust = required(self.crust, "crust")?;
-        check_crust(&crust)?;
+        let lid = check_crust(&crust)?;
         let condensates = condensates(self.condensates)?;
         let palette = required(self.palette, "palette")?;
         let main_liquid = check_on_the_ground(&palette, &liquids, &ices, &condensates)?;
-        let crust_palette = crust_palette(&palette, &crust)?;
+        let (crust_palette, lid_entry) = crust_palette(&palette, &crust, lid)?;
         Ok(CoarseInputs {
             body: self.body,
             figure,
@@ -1219,6 +1283,7 @@ impl CoarseInputsBuilder {
             condensates,
             palette,
             crust_palette,
+            lid_entry,
             main_liquid,
         })
     }
@@ -1244,13 +1309,25 @@ fn check_spin(spin: &Spin) -> Result<(), BuildCoarseInputsError> {
     )
 }
 
-/// Refuses a crust with neither a primary nor a secondary crust, or with a melt share outside 0
-/// to 1.
-fn check_crust(crust: &CrustInputs) -> Result<(), BuildCoarseInputsError> {
-    if crust.primary.is_none() && crust.secondary.is_none() {
+/// The substance of the crust or bulk material `crust.lid` names, refusing, in this order, a crust
+/// with neither a primary nor a secondary crust nor a bulk material, a bulk material beside a
+/// crust, a lid naming a crust or bulk material it does not have, and a melt share outside 0 to 1.
+fn check_crust(crust: &CrustInputs) -> Result<SubstanceKey, BuildCoarseInputsError> {
+    if crust.primary.is_none() && crust.secondary.is_none() && crust.bulk.is_none() {
         return Err(BuildCoarseInputsError::NoCrust);
     }
-    check_fraction("melt area fraction", crust.melt_area_fraction)
+    let crusts = [crust.primary, crust.secondary, crust.tertiary];
+    if crust.bulk.is_some() && crusts.iter().any(Option::is_some) {
+        return Err(BuildCoarseInputsError::BulkBesideCrust);
+    }
+    let lid = match crust.lid {
+        LidCrust::Primary => crust.primary,
+        LidCrust::Secondary => crust.secondary,
+        LidCrust::Bulk => crust.bulk,
+    }
+    .ok_or(BuildCoarseInputsError::LidAbsent(crust.lid))?;
+    check_fraction("melt area fraction", crust.melt_area_fraction)?;
+    Ok(lid)
 }
 
 /// Refuses a wet epoch outside its ranges or ending before it starts.
@@ -1322,33 +1399,50 @@ fn check_on_the_ground(
     Ok(main_liquid)
 }
 
-/// The palette entry of each [`Crust`] variant's lithology, in its code order, by the rule
-/// [`CoarseInputs::crust_palette`] states, refusing a lithology of `crust` that `palette` has no
-/// entry for.
+/// The palette entry of each [`Crust`] variant's lithology, in its code order, and the lid's,
+/// by the rule [`CoarseInputs::crust_palette`] states, refusing a lithology of `crust` that
+/// `palette` has no entry for. `lid` is the lid's substance, which [`check_crust`] resolved from
+/// `crust.lid`.
 fn crust_palette(
     palette: &MaterialPalette,
     crust: &CrustInputs,
-) -> Result<[Option<u8>; 4], BuildCoarseInputsError> {
-    // Where a crust and the provinces are one substance, the crust's entry names the provinces
-    // too, and the secondary crust may take the provinces' own.
+    lid: SubstanceKey,
+) -> Result<([Option<u8>; 4], u8), BuildCoarseInputsError> {
+    // Where a crust or the bulk material and the provinces are one substance, its entry names the
+    // provinces too, and the secondary crust may take the provinces' own.
     let secondary_shared = crust.secondary == Some(crust.provinces);
     let primary_shared = crust.primary == Some(crust.provinces);
+    let bulk_shared = crust.bulk == Some(crust.provinces);
+    // The entry of `substance` as the primary crust, the secondary or the bulk material, whichever
+    // `member` names: the lid takes its entry by the same rule as that member's own.
+    let entry_of = |member: LidCrust, substance| match member {
+        LidCrust::Primary => entry(
+            palette,
+            "primary crust",
+            substance,
+            PaletteRole::PrimaryCrust,
+            None,
+        ),
+        LidCrust::Secondary => entry(
+            palette,
+            "secondary crust",
+            substance,
+            PaletteRole::SecondaryCrust,
+            secondary_shared.then_some(PaletteRole::Province),
+        ),
+        LidCrust::Bulk => entry(palette, "bulk material", substance, PaletteRole::Bulk, None),
+    };
     let secondary = crust
         .secondary
-        .map(|s| {
-            entry(
-                palette,
-                "secondary crust",
-                s,
-                PaletteRole::SecondaryCrust,
-                secondary_shared.then_some(PaletteRole::Province),
-            )
-        })
+        .map(|s| entry_of(LidCrust::Secondary, s))
         .transpose()?;
-    let primary = crust
-        .primary
-        .map(|p| entry(palette, "primary crust", p, PaletteRole::PrimaryCrust, None))
-        .transpose()?;
+    // A buried primary crust names no variant's entry but keeps its own, which large craters
+    // excavate (science-composition-crusts.md §5.1).
+    if let Some(primary) = crust.primary {
+        entry_of(LidCrust::Primary, primary)?;
+    }
+    // A bulk material stands alone, so it is the lid's, and its entry is the lid's.
+    let lid = entry_of(crust.lid, lid)?;
     let tertiary = crust
         .tertiary
         .map(|t| {
@@ -1369,6 +1463,7 @@ fn crust_palette(
         [
             (secondary_shared, PaletteRole::SecondaryCrust),
             (primary_shared, PaletteRole::PrimaryCrust),
+            (bulk_shared, PaletteRole::Bulk),
         ]
         .into_iter()
         .filter_map(|(shared, role)| shared.then_some(role)),
@@ -1378,11 +1473,11 @@ fn crust_palette(
         *slot = match crust {
             Crust::Continental => tertiary,
             Crust::Oceanic => secondary,
-            Crust::Lid => primary.or(secondary),
+            Crust::Lid => Some(lid),
             Crust::Province => Some(provinces),
         };
     }
-    Ok(entries)
+    Ok((entries, lid))
 }
 
 /// Validates the gases and sorts them largest first, ties by key.
@@ -1449,7 +1544,7 @@ mod tests {
     use crate::planetary::testing::synthetic_star;
     use crate::time::UniverseTime;
     use crate::units::{Dex, SolarMasses};
-    use hyperion_surface::field::{MechanicsFamily, PaletteEntry};
+    use hyperion_surface::field::{FieldView, MechanicsFamily, PaletteEntry};
 
     /// The key `key`, which a test knows to be valid.
     fn key(key: &str) -> SubstanceKey {
@@ -1853,21 +1948,14 @@ mod tests {
         assert!(earth.main_liquid().is_some());
 
         let moon = reference::moon_like();
-        let maria = at(&moon, "basalt", PaletteRole::Province);
-        assert_eq!(
-            moon.crust_palette(),
-            [
-                None,
-                maria,
-                at(&moon, "anorthosite", PaletteRole::PrimaryCrust),
-                maria
-            ]
-        );
-        assert!(maria.is_some());
+        let maria = at(&moon, "basalt_fe", PaletteRole::Province);
+        let highlands = at(&moon, "feldspathic", PaletteRole::PrimaryCrust);
+        assert_eq!(moon.crust_palette(), [None, maria, highlands, maria]);
+        assert!(maria.is_some() && highlands.is_some());
         assert_eq!(moon.main_liquid(), None);
 
         let mars = reference::mars_like();
-        let lid = at(&mars, "basalt", PaletteRole::SecondaryCrust);
+        let lid = at(&mars, "basalt_fe", PaletteRole::SecondaryCrust);
         assert_eq!(mars.crust_palette(), [None, lid, lid, lid]);
         assert!(lid.is_some());
         assert_eq!(mars.main_liquid(), None);
@@ -1879,6 +1967,11 @@ mod tests {
         assert_eq!(ceres.crust_palette(), [None, None, shell, shell]);
         assert!(shell.is_some());
         assert_eq!(ceres.main_liquid(), None);
+
+        // The lid's entry, resolved once, is the `Lid` variant's.
+        for world in [&earth, &moon, &mars, &ceres] {
+            assert_eq!(Some(world.lid_entry()), world.crust_palette()[2]);
+        }
 
         // Of two seas, the larger's liquid is the main one, whichever order they were given in.
         let mut entries = earth.palette().entries().to_vec();
@@ -1906,25 +1999,212 @@ mod tests {
         assert_eq!(tied([share_of("CH4", 0.3), share_of("H2O", 0.3)]), methane);
     }
 
-    /// A crust needs a primary or a secondary crust for its lid, and may lack either one: Ceres
-    /// has no secondary, and Earth no primary.
+    /// A crust needs a primary or a secondary crust, or an undifferentiated body's bulk material,
+    /// for its lid, and may lack either crust: Ceres has no secondary, and Earth no primary. A
+    /// tertiary crust alone is none, and the refusal comes before the lid's.
     #[test]
-    fn a_crust_with_neither_primary_nor_secondary_is_refused() {
+    fn a_crust_with_neither_crust_nor_bulk_material_is_refused() {
         let mut crust = *reference::earth_like().crust();
-        assert_eq!(crust.primary, None);
+        assert_eq!((crust.primary, crust.bulk), (None, None));
+        assert!(crust.tertiary.is_some());
         crust.secondary = None;
         assert_eq!(
             earth_builder().crust(crust).build(),
             Err(BuildCoarseInputsError::NoCrust)
         );
         let ceres = reference::ceres_like();
-        assert_eq!(ceres.crust().secondary, None);
+        assert_eq!((ceres.crust().secondary, ceres.crust().bulk), (None, None));
         let mut crust = *ceres.crust();
         crust.primary = None;
         assert_eq!(
             builder_of(&ceres).crust(crust).build(),
             Err(BuildCoarseInputsError::NoCrust)
         );
+    }
+
+    /// An undifferentiated chondritic body: Ceres's figures with an ordinary chondrite as its bulk
+    /// material, at its surface, and no crust; its palette Ceres's with the chondrite's `Bulk`
+    /// entry in place of the phyllosilicate's.
+    fn chondritic() -> CoarseInputsBuilder {
+        let ceres = reference::ceres_like();
+        let chondrite = key("chondrite_h");
+        let entries = ceres
+            .palette()
+            .entries()
+            .iter()
+            .copied()
+            .filter(|e| e.role != PaletteRole::PrimaryCrust)
+            .chain([entry("chondrite_h", PaletteRole::Bulk)])
+            .collect();
+        builder_of(&ceres)
+            .crust(CrustInputs {
+                primary: None,
+                secondary: None,
+                tertiary: None,
+                bulk: Some(chondrite),
+                lid: LidCrust::Bulk,
+                provinces: chondrite,
+                melt_area_fraction: 0.0,
+            })
+            .palette(palette(entries))
+    }
+
+    /// An undifferentiated body's bulk material stands alone: beside a primary, a secondary or a
+    /// tertiary crust it is refused, before its lid is looked at (science-composition-crusts.md
+    /// §1).
+    #[test]
+    fn a_bulk_material_beside_a_crust_is_refused() {
+        let alone = chondritic().build().unwrap();
+        let bulk = *alone.crust();
+        let beside = [
+            CrustInputs {
+                primary: Some(key("phyllosilicate")),
+                ..bulk
+            },
+            CrustInputs {
+                secondary: Some(key("basalt")),
+                ..bulk
+            },
+            CrustInputs {
+                tertiary: Some(key("granite")),
+                ..bulk
+            },
+            // A lid naming the crust beside it is refused for the bulk material all the same.
+            CrustInputs {
+                secondary: Some(key("basalt")),
+                lid: LidCrust::Secondary,
+                ..bulk
+            },
+            // A lid naming a crust the body does not have is refused for the bulk material beside
+            // a crust first, the lid's refusal coming after.
+            CrustInputs {
+                tertiary: Some(key("granite")),
+                lid: LidCrust::Primary,
+                ..bulk
+            },
+        ];
+        for crust in beside {
+            assert_eq!(
+                chondritic().crust(crust).build(),
+                Err(BuildCoarseInputsError::BulkBesideCrust),
+                "{crust:?}"
+            );
+        }
+    }
+
+    /// The lid names a crust or bulk material the body has (science-composition-crusts.md §5):
+    /// Earth has no primary crust and no bulk material, Ceres no secondary crust, and a chondritic
+    /// body no crust; and a lid that names one is refused before a melt share out of range.
+    #[test]
+    fn a_lid_naming_an_absent_crust_is_refused() {
+        let ceres = reference::ceres_like();
+        let cases = [
+            (
+                earth_builder(),
+                *reference::earth_like().crust(),
+                LidCrust::Primary,
+            ),
+            (
+                earth_builder(),
+                *reference::earth_like().crust(),
+                LidCrust::Bulk,
+            ),
+            (builder_of(&ceres), *ceres.crust(), LidCrust::Secondary),
+            (
+                chondritic(),
+                *chondritic().build().unwrap().crust(),
+                LidCrust::Primary,
+            ),
+        ];
+        for (builder, crust, lid) in cases {
+            let absent = CrustInputs {
+                lid,
+                melt_area_fraction: -0.1,
+                ..crust
+            };
+            assert_eq!(
+                builder.crust(absent).build(),
+                Err(BuildCoarseInputsError::LidAbsent(lid)),
+                "{absent:?}"
+            );
+        }
+    }
+
+    /// An undifferentiated body's lid and provinces take its bulk material's `Bulk` entry, and its
+    /// oceanic and continental crusts none, having no crust; the bulk material's entry is its
+    /// `Bulk` one alone (science-composition-crusts.md §1).
+    #[test]
+    fn a_chondritic_body_s_lid_and_provinces_take_its_bulk_entry() {
+        let body = chondritic().build().unwrap();
+        let bulk = body.palette().find(PaletteRole::Bulk, key("chondrite_h"));
+        assert!(bulk.is_some());
+        assert_eq!(body.crust_palette(), [None, None, bulk, bulk]);
+        assert_eq!(Some(body.lid_entry()), bulk);
+        // The pass builds its field, whose header takes a `Bulk` entry for the lid.
+        let field = super::super::coarse_pass(reference::SEED, &body);
+        assert_eq!(field.header().crust_palette(), body.crust_palette());
+        // A chondrite's entry in a crust's role does not stand for its bulk material's.
+        let as_a_crust: Vec<PaletteEntry> = body
+            .palette()
+            .entries()
+            .iter()
+            .copied()
+            .filter(|e| e.role != PaletteRole::Bulk)
+            .chain([entry("chondrite_h", PaletteRole::PrimaryCrust)])
+            .collect();
+        assert_eq!(
+            chondritic().palette(palette(as_a_crust)).build(),
+            Err(BuildCoarseInputsError::NotInPalette {
+                part: "bulk material",
+                substance: key("chondrite_h"),
+                role: PaletteRole::Bulk
+            })
+        );
+    }
+
+    /// A Mars given a buried primary crust under its secondary lid takes the secondary's entry for
+    /// its lid, as science-composition-crusts.md §5 rules, and the primary keeps an entry of its
+    /// own, which large craters excavate; naming the primary as the lid instead takes that.
+    #[test]
+    fn a_lid_takes_the_crust_it_names_over_a_buried_primary() {
+        let mars = reference::mars_like();
+        let at = |inputs: &CoarseInputs, k, role| inputs.palette().find(role, key(k));
+        let mut crust = *mars.crust();
+        assert_eq!(crust.lid, LidCrust::Secondary);
+        crust.primary = Some(key("ultramafic"));
+        let mut entries = mars.palette().entries().to_vec();
+        entries.push(entry("ultramafic", PaletteRole::PrimaryCrust));
+        let with_primary = palette(entries);
+        let buried = builder_of(&mars)
+            .crust(crust)
+            .palette(with_primary.clone())
+            .build()
+            .unwrap();
+        let basalt = at(&buried, "basalt_fe", PaletteRole::SecondaryCrust);
+        assert!(basalt.is_some());
+        assert_eq!(buried.crust_palette(), [None, basalt, basalt, basalt]);
+        assert_eq!(Some(buried.lid_entry()), basalt);
+        // The buried primary crust needs its entry all the same.
+        assert_eq!(
+            builder_of(&mars).crust(crust).build(),
+            Err(BuildCoarseInputsError::NotInPalette {
+                part: "primary crust",
+                substance: key("ultramafic"),
+                role: PaletteRole::PrimaryCrust
+            })
+        );
+        let exposed = builder_of(&mars)
+            .crust(CrustInputs {
+                lid: LidCrust::Primary,
+                ..crust
+            })
+            .palette(with_primary)
+            .build()
+            .unwrap();
+        let ultramafic = at(&exposed, "ultramafic", PaletteRole::PrimaryCrust);
+        assert!(ultramafic.is_some());
+        assert_eq!(exposed.crust_palette(), [None, basalt, ultramafic, basalt]);
+        assert_eq!(Some(exposed.lid_entry()), ultramafic);
     }
 
     /// The provinces take their own `Province` entry first, then the entry of a crust of their
@@ -2050,7 +2330,15 @@ mod tests {
         );
         assert_eq!(
             BuildCoarseInputsError::NoCrust.to_string(),
-            "the crust has neither a primary nor a secondary crust"
+            "the crust has neither a primary nor a secondary crust nor a bulk material"
+        );
+        assert_eq!(
+            BuildCoarseInputsError::BulkBesideCrust.to_string(),
+            "the crust names a bulk material beside a crust"
+        );
+        assert_eq!(
+            BuildCoarseInputsError::LidAbsent(LidCrust::Primary).to_string(),
+            "the lid names a crust or bulk material the body does not have"
         );
         assert_eq!(
             BuildCoarseInputsError::Duplicate {

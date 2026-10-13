@@ -3659,6 +3659,100 @@ re-blessing this plan's payload and coarse goldens in that commit.
     apart from its `Ice` entry, and each ice entry ρ_s at the temperature where the ice lies
     (science-composition-crusts.md §3). T10.d's `lid` and `bulk` follow T51.c's members of the
     same names.
+- **Deviations in T10.d, as built** (R09.T10.d, an undifferentiated body's bulk, the lid, and the
+  highland and iron-rich rows, 2026-10-13; after T2's follow-up D, `0e931a8b` and `27db4cad`, and
+  T10.c, `2f63eb3a`; science-composition-crusts.md §1, §2, §5 and §7, with §10.1's code text for
+  the rows; builder arguments, revisable until P14.T54.a reads them from the record).
+  - _The lid, resolved once_ (T10.c's "For R09.T10.d and T13.c", discharged). `check_crust`
+    returns the lid's `SubstanceKey`, and `crust_palette` looks up its entry by the rule of the
+    crust `lid` names: `Primary` its `PrimaryCrust` entry alone, `Secondary` its `SecondaryCrust`
+    entry or, where the secondary and the provinces are one substance, the `Province` one, and
+    `Bulk` its `Bulk` entry alone. `Lid` is that entry, the same as §1.6's
+    `match crust.lid { … }` with no `Option` to unwrap. `CoarseInputs` keeps it as a private
+    `lid_entry: u8`, read by `lid_entry()`, a public getter beyond the task's text, so that a step
+    reads the lid's entry (and through the palette its substance and solidus) without matching the
+    crust's options or unwrapping `crust_palette()[2]`; a test holds `Some(lid_entry())` equal to
+    `crust_palette()[2]` on the four reference worlds. The getter returns the index, as
+    `crust_palette` and `main_liquid` do, not a `&PaletteEntry` (the Rust review's nit, not taken:
+    a step still goes through `palette().get`).
+  - _A buried primary crust keeps its entry._ T10.c's rule stands: a primary crust, at the surface
+    or buried under a `Secondary` lid, needs its own `PrimaryCrust` entry, though while buried no
+    `Crust` variant names it (§5.1: large craters excavate it). The bulk material is looked up only
+    as the lid's, since `BulkBesideCrust` and `LidAbsent` leave it under no other lid, and only in
+    its `Bulk` role, so a chondrite with only a crust's entry is refused (`NotInPalette`, "bulk
+    material"; §1.2, "nothing calls it one").
+  - _Members and order._ `CrustInputs` is `primary`, `secondary`, `tertiary`, `bulk`, `lid`,
+    `provinces`, `melt_area_fraction`: P14.T51.c's `CrustComposition` in its order, less its redox
+    class. `LidCrust` derives as §1.6 has it and is re-exported at `planetary::surface`.
+    `check_crust` refuses `NoCrust`, `BulkBesideCrust` and `LidAbsent` in §1.6's order, then
+    T10.c's melt share; a tertiary crust alone is `NoCrust`. The three `Display` texts are §1.6's.
+  - _§10.1's code text._ `CHONDRITIC_SOLIDUS_K` (the must-fix: LPSC 25's volatile loss),
+    `BASALT_FE` and `FELDSPATHIC` take `testing/worlds.rs`'s docs word for word; the two keys keep
+    §2.3's and §7.3's one-line docs, and `BASALT_FE_SOLIDUS_K` and `BASALT` take §2.3's text. The
+    figures are §2.3's and §7.3's, unchanged.
+  - _Documentation beyond the task's._
+    - `CrustInputs::primary`'s Moon example reads `feldspathic` for `anorthosite` (§7.2), and the
+      type's two forms name §1.2's fragment of a differentiated body, which no rule produces yet.
+    - Each table's crust row adds its world's lid, citing §5; the Moon's palette row drops T10.c's
+      forward note. The `Substance` struct's albedo exception names the feldspathic crust for the
+      anorthosite, and `PLAGIOCLASE_ROCK_SOLIDUS_K`'s doc is reflowed with the same words.
+    - `mod.rs`'s and `reference.rs`'s module documentation say what T10.d added.
+    - `coarse_pass`'s example gains `bulk: None, lid: LidCrust::Primary`, and its phyllosilicate
+      takes the reference row's 1,423.15 K (`CHONDRITIC_SOLIDUS_K` since T10.c) for the basalt
+      solidus's 1,253.15 K, which T10.c left in it.
+    - _The bulk material is never called a crust_ (§1.2's "nothing calls it one", which §10.1
+      item 3d, ruled 2026-10-12, binds on developer documentation and error messages too; "main"
+      applied it here, 2026-10-13). What this task wrote says "a crust or bulk material", and so
+      do the places where §1.6's own text called it a crust: `LidAbsent`'s documentation and
+      `Display`, "the lid names a crust or bulk material the body does not have" (§1.6's "a crust
+      the body does not have"); `LidCrust`'s summary, "Which of a body's crusts, or its bulk
+      material, is at its surface"; `lid`'s "Which crust or bulk material the surface shows"; and
+      `melt_area_fraction`'s "the lid's crust or bulk material". No figure, golden or test moves
+      but the message's string, which `errors_say_what_was_refused` pins.
+  - _Tests._
+    - `a_crust_with_neither_primary_nor_secondary_is_refused` is renamed
+      `a_crust_with_neither_crust_nor_bulk_material_is_refused`, a tertiary crust alone among its
+      cases.
+    - New in `inputs.rs`: `a_bulk_material_beside_a_crust_is_refused` (beside each crust, and
+      before a lid naming a crust the body lacks, which pins the order);
+      `a_lid_naming_an_absent_crust_is_refused` (Earth's `Primary` and `Bulk`, Ceres's
+      `Secondary`, a chondritic body's `Primary`, each before a melt share out of range);
+      `a_chondritic_body_s_lid_and_provinces_take_its_bulk_entry` (`[None, None, bulk, bulk]` on
+      Ceres's figures with a `chondrite_h` bulk, its no-op field's header taking the same, and a
+      chondrite with only a crust's entry refused); and
+      `a_lid_takes_the_crust_it_names_over_a_buried_primary` (a Mars with an `ultramafic` primary:
+      `Secondary` takes the `basalt_fe`, the primary is refused without its own entry, `Primary`
+      takes the ultramafic).
+    - New in `reference.rs`: `each_reference_world_shows_the_lid_the_ruling_gives_it` (§5.2's
+      lids, beyond the task's list).
+    - Added to `the_grain_densities_follow_their_sources`: `FELDSPATHIC` within Kiefer et al.'s
+      2,840–2,910 (§10.1, which says T10.d's _Tests_ gain it; the task's list does not yet);
+      `bulk(&FELDSPATHIC, 0.12)` within 5 kg m⁻³ of the highlands' 2,550, a tolerance of this
+      task's (2,550 ÷ 0.88 is 2,898, which the row rounds; Wieczorek et al.'s 12 per cent is their
+      own average, so this checks the arithmetic); `BASALT_FE` within 3,270–3,460; and the Moon's
+      lid and maria entries and Mars's lid carrying 2,900 and 3,310.
+    - `cargo test -p hyperion-sim --lib planetary::surface` runs 41 unit tests, five of them new;
+      `--doc planetary::surface` its two doctests.
+  - _Moves:_ no pinned output. No reference golden exists before T16, no stream or tag is added,
+    and the synthetic worlds and the wire goldens are untouched (`golden_diff.py`: nothing to
+    reconcile; `GENERATOR_VERSION` stays 21). The reference worlds' unpinned fields change at
+    version 21: the Moon's entry 0 becomes `feldspathic` at 2,900 kg m⁻³ (the anorthosite's 2,790;
+    its transition unchanged), its entry 1 and Mars's entry 0 `basalt_fe` at 3,310 kg m⁻³ and
+    1,323.15 K (basalt's 3,010 and 1,253.15 K). Every index and every `crust_palette` stays, each
+    changed key being alone in its role. T16's first blessing pins them.
+  - _For R09.T12.a._ An undifferentiated body's `Oceanic` and `Continental` name no entry, as
+    Ceres's `Oceanic` has not since T10.c, so the step that first writes a cell's crust writes only
+    `Lid` and `Province` there.
+  - _For R09.T13.c._ The lid's entry is `CoarseInputs::lid_entry()`, its transition the lid's
+    solidus.
+  - _For P14.T51.c and P14.T54.a._ `planetary::surface::LidCrust` is R09's; T51.c's
+    `hooks/crust.rs` declares its own with the same variants, which `for_body` maps one to one (or
+    T51.c's replaces this one). The palette's sources must give a buried primary crust (a generated
+    Mars's ultramafic) its own `PrimaryCrust` entry, one of the palette's 15, and a bulk material
+    its `Bulk` entry.
+  - _For the docs lane._ The task's _Tests_ list does not carry §10.1's `FELDSPATHIC` assertion
+    against Kiefer et al.'s 2,840–2,910 kg m⁻³, which §10.1 says T10.d's _Tests_ gain; it is
+    built, and the line waits for the docs queue.
 - **Drainage semantics (ruled 2026-10-10, science-r09-drainage.md §1).** T6.a found that a k_s
   stored on Hergarten's runoff-weighted area and read with Hack's geometric area makes tributaries
   2.8 times too gentle at 0.1 m a⁻¹, and trunks' Hack lengths 4 times too short.

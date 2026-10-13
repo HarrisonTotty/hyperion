@@ -32,8 +32,11 @@
 //! body's palette, whose entries' values the server resolves from plan 14's registry, and the
 //! header and the cells' substance bytes carry it. R09.T10.c made the secondary crust optional
 //! (a Ceres's crust is primary, and its rock never melted), and the reference rows' densities
-//! grain densities (science-r09-drainage.md §3 and §5). Run on any inputs, the pass so far yields
-//! its initial state: a smooth, dry sphere at the datum under a still climate at the body's mean
+//! grain densities (science-r09-drainage.md §3 and §5). R09.T10.d added an undifferentiated body's
+//! bulk material and the lid, which crust or bulk material the surface shows, and the reference
+//! Moon's and Mars's own rows, the feldspathic highlands and the iron-rich basalt
+//! (science-composition-crusts.md §1, §2, §5 and §7). Run on any inputs, the pass so far yields its
+//! initial state: a smooth, dry sphere at the datum under a still climate at the body's mean
 //! surface temperature, with the inputs' palette. R09.T11–T15 fill the steps and R09.T16 pins the
 //! reference worlds' fields.
 //!
@@ -60,8 +63,8 @@ pub mod steps;
 pub use grid::{BuildCellGraphError, CellGraph};
 pub use inputs::{
     AreaShare, BuildCoarseInputsError, ClimateRegime, CoarseInputs, CoarseInputsBuilder,
-    Condensate, CondensatePhase, CrustInputs, Forcing, GasShare, MAX_CONDENSATES, Persistence,
-    SeasonalOrbit, Spin, SurfaceInputsError, TectonicRegime, ThermalRegime, WetEpoch,
+    Condensate, CondensatePhase, CrustInputs, Forcing, GasShare, LidCrust, MAX_CONDENSATES,
+    Persistence, SeasonalOrbit, Spin, SurfaceInputsError, TectonicRegime, ThermalRegime, WetEpoch,
 };
 pub use quantise::{QuantiseFieldError, quantise};
 
@@ -88,8 +91,8 @@ use steps::{Pass, Working};
 /// ```
 /// use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 /// use hyperion_sim::planetary::surface::{
-///     ClimateRegime, CoarseInputs, CrustInputs, Forcing, SeasonalOrbit, Spin, SurfaceSeed,
-///     TectonicRegime, ThermalRegime, coarse_pass,
+///     ClimateRegime, CoarseInputs, CrustInputs, Forcing, LidCrust, SeasonalOrbit, Spin,
+///     SurfaceSeed, TectonicRegime, ThermalRegime, coarse_pass,
 /// };
 /// use hyperion_sim::units::{
 ///     Gigayears, Kelvin, KilogramsPerCubicMetre, Metres, MetresPerSecond, MetresPerSecondSquared,
@@ -106,9 +109,9 @@ use steps::{Pass, Working};
 /// use hyperion_surface::substance_key::SubstanceKey;
 ///
 /// // Its one lithology, with the values the server will resolve from plan 14's registry: Ceres's
-/// // normal albedo, a phyllosilicate's grain density and a basalt's solidus (`reference`'s rows).
-/// // It is a primary crust, the shell of Ceres's frozen ocean, and Ceres has no secondary crust,
-/// // its rock having never melted.
+/// // normal albedo, a phyllosilicate's grain density and the chondritic solidus of its dehydrated
+/// // residue (`reference`'s rows). It is a primary crust, the shell of Ceres's frozen ocean, and
+/// // its lid; Ceres has no secondary crust, its rock having never melted.
 /// let phyllosilicate = SubstanceKey::new("phyllosilicate")?;
 /// let palette = MaterialPalette::new(vec![PaletteEntry {
 ///     substance: phyllosilicate,
@@ -116,7 +119,7 @@ use steps::{Pass, Working};
 ///     normal_albedo_bvr: [0.094; 3],
 ///     phase_row: 0,
 ///     grain_density_kg_m3: 2_500.0,
-///     transition: Kelvin::new(1_253.15),
+///     transition: Kelvin::new(1_423.15),
 ///     mechanics: MechanicsFamily::Silicate,
 /// }])?;
 ///
@@ -166,6 +169,8 @@ use steps::{Pass, Working};
 ///         primary: Some(phyllosilicate),
 ///         secondary: None,
 ///         tertiary: None,
+///         bulk: None,
+///         lid: LidCrust::Primary,
 ///         provinces: phyllosilicate,
 ///         melt_area_fraction: 0.0,
 ///     })
