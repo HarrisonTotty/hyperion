@@ -870,6 +870,14 @@ ignores `layer`; the fitted values are kept for the record, and `kinematics`, `i
     `max_halvings` times. Production keeps 10⁻³ and three (ruling 120.3: δ ln r ≈ (|E| ÷ v_c²) δE ÷ E,
     3–8 times the relative drift, so 10⁻³ moves an apocentre by a few thousandths in ln r against
     cells 0.20 wide); the smoke manifest 10⁻² and one; T6.a's tests 10⁻⁴ and six.
+  - **The drift's scale** (decision-p15-t6g-orbits §2). Every drift (the check's, the tests',
+    the record's worst and the unresolved count's) is |J − J₀| ÷ max(|J₀|, |Φ(x₀)|), Φ(x₀) the
+    full potential at the start. An energy error moves a bound orbit by δ ln r ≈ δJ ÷ v_c² and a
+    free one by δr ÷ r ≈ δJ ÷ 2T, neither of which involves J itself; dividing by |J₀| measured
+    a cancellation for the marginally bound and unbound (the five diagnosed of the reduced run's
+    13 "unresolved" fast kicks, J₀ from −541 to +947 (km/s)², off by 1–2 (km/s)²). For bound orbits the scale is
+    |Φ₀| (|Φ₀| ÷ v_c² ≈ 3–9 at the fixture's radii, so 10⁻³ bounds δ ln r by about 0.009); for
+    fast kicks it is |J₀| ≈ T₀.
   - **Capture.** Within 1 ly of the centre, where the black hole holds about 96% of the enclosed mass,
     an orbit whose specific angular momentum |x × p| is below 4GM•/c (c = 1 ly per Julian year) falls
     into the black hole at its next pericentre (Shapiro and Teukolsky 1983, _Black Holes, White Dwarfs
@@ -895,17 +903,22 @@ ignores `layer`; the fitted values are kept for the record, and `kinematics`, `i
   - **Acceptance.** T6.a's, on the new method: the energy without the bar to 10⁻⁴ relative over
     10 Gyr for its 1,000 test orbits on the first pass, and the Jacobi integral with the bar to 10⁻⁴
     for its 1,000 on the checked integration (1 ÷ 200, 10⁻⁴, six halvings), at most 20 refined, with
-    the first pass's worst reported; orbits 368 and 740 of the barred set asserted by number; circular
+    the first pass's worst reported; (all on the drift's scale above; the figures are restated under it); orbits 368 and 740 of the barred set asserted by number; circular
     orbits at 3,000–50,000 ly to 10⁻³ in radius; one and four threads the same bytes. New: 16 in-plane
     orbits, released at zero radial speed from 300 and 3,000 ly with a tangential speed of 10⁻², 10⁻³,
     10⁻⁴ and 10⁻⁵ of v_c, in the plain and the barred potential, each hold 10⁻⁴ over 10 Gyr on the
     checked integration or are captured; an orbit released at 0.5 ly with |x × p| 0.9 of 4GM•/c is
-    reported captured, and one with 1.1 of it is not; the barred set's worst first-pass drift falls
-    3–6 fold per halving of the step fraction from 1 ÷ 50 to 1 ÷ 400. Re-time the 4,950-orbit
+    reported captured, and one with 1.1 of it is not; the barred set's median first-pass drift, on the drift's scale, falls 3–5 fold per halving of the
+    step fraction from 1 ÷ 50 to 1 ÷ 400, a leapfrog's second order predicting 4
+    (decision-p15-t6g-orbits §3: 4.11, 3.81 and 4.11, each at least 3.4 bootstrap standard deviations
+    inside the bracket); the worst orbit's falls are reported, not asserted, since a different orbit is
+    worst at each step. Re-time the 4,950-orbit
     reduced run and restate the production run's hours in T6.b's record. (The decision's scratch
     measurement, at version 21's potential: on the barred set the checked integration kept at most
     8.6 × 10⁻⁵ with 3 refined, orbits 368 and 740 at 3.5 and 5.5 × 10⁻⁵ on the first pass, the plain
     set's worst 6.5 × 10⁻⁵, and 0.59 of the fixed step's steps at about 1.6 times the time a step.)
+    Before the production run, rerun the 4,950-orbit reduced run on the drift's scale and with
+    P02.T6.f; it must leave at most 10⁻⁴ of each class unresolved.
   - **Then re-emit the provisional table** (the triage's F1; the smoke pin c07edb86 left stale). Run
     `cargo run --profile slow-test -p hyperion-fit -- orbits --smoke --out
 crates/hyperion-fit/data/cache/displaced_smoke`; update `data/displaced_smoke/PROVENANCE.toml`'s
@@ -1008,7 +1021,10 @@ orbits --threads 3` (writes `crates/hyperion-fit/data/cache/displaced/displaced_
   kept, so that T6.c–e can judge the histograms by them (**for T6.c**: the nuclear disc's classes
   refine most); 10⁻³ is acceptable for production (decision-p15-t6g-orbits: it moves an apocentre
   by a few thousandths in ln r, against histogram cells 0.20 wide). A lever, for the owner: the
-  nuclear disc's classes at a tenth of the count (still 2 × 10⁴ a class) would cut it to about 37 hours.
+  nuclear disc's classes at a tenth of the count (still 2 × 10⁴ a class) would cut it to about 37 hours. The production run starts only from a commit holding P15.T6.g and P02.T6.f
+  (decision-p15-t6g-orbits §2), so that its committed histograms can be regenerated from committed
+  code. P15.T6.g restates the run's hours (about 23 on three threads) under ruling 120.3–4's
+  estimate below.
 
 **Ruling 120.3–4 as built (lane `disp08`, 2026-09-27; the production run not started).**
 
@@ -1034,7 +1050,8 @@ orbits --threads 3` (writes `crates/hyperion-fit/data/cache/displaced/displaced_
   `nice -n 19 cargo run --profile slow-test -p hyperion-fit -- orbits --threads 3`; add
   `--max-parts N` to stop after N parts, and run the same command again to resume. It writes
   `crates/hyperion-fit/data/cache/displaced/displaced_orbits.txt` and prints its SHA-256 for
-  `tables.lock`.
+  `tables.lock`. **Restated by P15.T6.g** (below): about 23 hours on three threads, 3.2 × 10¹¹
+  steps.
 
 **T6.c–f as built (lane `disp08b`, 2026-09-27, at `GENERATOR_VERSION` 13; the table is
 provisional, fitted to the smoke histograms; no output moves).**
@@ -1121,6 +1138,101 @@ provisional, fitted to the smoke histograms; no output moves).**
   (copy the file, add `data/displaced/PROVENANCE.toml`, point the manifest's three lines at
   production, `just fit displaced_forms`, rerun plan 08's form, bound and class-table tests and
   re-bless the class table's golden).
+
+**T6.g as built (lane `p15-orbits`, 2026-10-12, at `GENERATOR_VERSION` 21; held for the 21 → 22
+batch with its re-emission, which waits for P02.T6.f).**
+
+- **The integrator** (`orbits.rs`).
+  - `OrbitPotential::new(tables, black_hole, bar)` takes the black hole's mass for the capture
+    rule, since `PotentialTables` does not expose it.
+  - `CircularFrequency` is the ln Ω table: 512 knots, 40.5 a decade, from ln 10⁻⁶ to ln (4 × 10⁶)
+    ly. Its `Ω′` is the interpolant's own derivative.
+  - `integrate(state, duration_years, fraction) -> Pass` and `integrate_checked(state,
+duration_years, fraction, tolerance, refinements) -> Checked` take the step fraction, not a
+    step. `step_for`, its pericentre bisection and `RunParams::min_step_years` are gone.
+    `RunParams::from_manifest` refuses a step fraction or tolerance that is not positive and
+    finite.
+  - A pass ends `Ending::{Aged, Captured { after_years }, Broken}`. `Broken` comes from a step
+    that is not positive, or at once from a duration that is not finite. It has never been seen
+    in a run, and its drift counts as infinite, so that no pass can loop.
+  - A step shorter than half the clock's last digit loses its time to rounding. This happens late
+    in a run, at pericentres near 5 × 10⁻⁶ ly. It is harmless, and it is not treated as `Broken`:
+    a guard that did so broke a legitimate stress-orbit pass.
+  - The capture rule is checked at the start and after every step but the plain one of the time
+    left.
+  - A captured pass's drift is its drift at the capture, so a capture is kept only from a pass
+    within the tolerance. Both stress orbits from 300 ly at 10⁻⁵ `v_c` take one halving for this:
+    2.1 × 10⁻⁴ mid-plunge at 1 ÷ 200.
+  - `OrbitPotential::{drift, drift_scale}` measure every drift on §2's scale. `Checked` reports
+    the first pass's drift and the kept pass's closest approach.
+- **The record** (`histogram.rs`).
+  - `over_tolerance` becomes `unresolved`, with `unresolved_drift` and `unresolved_closest_ly`
+    (the class's worst and closest, aggregated), beside `captured` and `captured_years` (the sum
+    of the times from birth to capture).
+  - `ClassHistogram::resolved()` is the share denominator. Each class line has 34 tokens, and the
+    reader refuses a record whose outcomes do not add up to its orbits.
+  - `kinematics::in_cube` and `fit_disc`'s class weights divide by `resolved()`; `fit_old` reads
+    no share.
+  - `table::check_unresolved` and `UNRESOLVED_LIMIT` (one in 10⁴, `orbits / 10_000`, rounded down)
+    refuse every histogram but the smoke run's. The 1% run (2,143, 2,000 and 1,000 a class) and a
+    50-a-class reduced run therefore allow none.
+  - The table's notes name each class with a capture or an unresolved orbit, and its acceptance
+    line gives the totals. Its source line cites Mikkola and Aarseth, and Bardeen, Press and
+    Teukolsky with Shapiro and Teukolsky for the capture.
+- **Tests.**
+  - The one-and-four-threads test runs the barred potential, so it also covers the rotation and
+    the Ω table.
+  - The capture test's orbit at 0.9 of 4GM•/c from 0.5 ly is captured at its start. A third orbit,
+    at 0.9 from 1.5 ly, is captured on its way in.
+  - The stress test holds every kept pass to 10⁻⁴, captured or not.
+  - New fast tests: the drift's scale, a pass that cannot step, the manifest's positive fractions
+    and the unresolved limit.
+- **Measured on the drift's scale** (the slow tests, at version 21's potential, before P02.T6.f).
+  - Plain: worst 6.08 × 10⁻⁵.
+  - Barred: first pass 1.29 × 10⁻⁴, kept 8.55 × 10⁻⁵, 3 refined, 7.161 × 10⁷ steps, closest
+    approach 3.9 ly. Orbits 368 and 740 at 3.44 and 5.48 × 10⁻⁵ on their first pass (closest 19.8
+    and 14.1 ly).
+  - The median first-pass drift is 6.33 × 10⁻⁵, 1.54 × 10⁻⁵, 4.04 × 10⁻⁶ and 9.84 × 10⁻⁷ at 1 ÷ 50
+    to 1 ÷ 400: falls of 4.11, 3.81 and 4.11 (§3's figures). The worst orbit's falls are 3.70,
+    6.06 and 3.63.
+  - The 16 stress orbits all hold. The two from 300 ly at 10⁻⁵ `v_c` are captured on their first
+    infall (after 0.97 Myr). Four need one halving, those two among them.
+  - The capture test's orbit at 1.1 of 4GM•/c passes 6.5 × 10⁻⁶ ly a thousand times in 10⁶ years,
+    with a drift of 2.6 × 10⁻⁵.
+  - On the old |J₀| scale, the decision's §1 figures were reproduced bit for bit: 6.495 × 10⁻⁵,
+    1.308 × 10⁻⁴, 8.552 × 10⁻⁵, 3 refined, 3.47 and 5.53 × 10⁻⁵. The exception is 1 ÷ 400's worst,
+    3.60 × 10⁻⁵ from the table against the decision's 3.65 × 10⁻⁵ from Ω directly.
+  - Fast-suite cost, provisional (dev profile, one test alone, load about 33): the smoke-run test
+    39 s, the 20-orbit test 11 s. Integration's last record of T6.a's versions was 92 s and 35 s.
+- **The reduced run re-timed** (4,950 orbits: the production manifest at 50 a class, three threads,
+  niced, at the lock-held setting; provisional, before P02.T6.f).
+  - On the drift's scale: 38 s at load 12; 1.453 × 10⁸ steps (T6.b's run took 5.6 × 10⁸); 785 ns
+    a step and thread; 54 refined, none unresolved, none captured.
+  - Scaled by class to the production counts: 3.17 × 10¹¹ steps. The nuclear disc takes 58%, the
+    bulge 15%, the bar 9%, the thick disc 8%, the halo 6% and the thin disc 4%.
+  - **About 23 hours on three threads** at that rate, against ruling 120.3–4's 61. A timed rerun
+    under the heavy lock, and §2(c)'s rerun on a base holding P02.T6.f, are pending.
+- **The unresolved limit, ruled** (decision-p15-t6g-orbits §2, 2026-10-12).
+  - On the old |J₀| scale the same run left 13 orbits unresolved and 456 refined. All 13 were fast
+    kicks (speed bins 4–7) with closest approaches of 190–26,000 ly, 1–4 of 50 in the bin-6
+    classes; with six halvings 5 remained.
+  - Five were diagnosed. They were marginally bound or unbound, with J₀ of −541, −24, +947, +252
+    and −348 (km/s)² against |Φ| ≈ 1.6 × 10⁵ at the Sun, and their absolute drift was 1–2 (km/s)².
+  - The escapers' drift stopped falling where `PotentialTables::forces` leaves its grid at 2¹⁸ ly
+    in one coordinate, where it is not its potential's gradient. P02.T6.f corrects that.
+  - §2 ruled the drift's scale above, P02.T6.f for the far field, and a production run only from a
+    commit holding both.
+- **For main, not ruled.**
+  - §2's text and the manifests' first draft gave `|Φ₀| ÷ v_c²` as 3–9, so that 10⁻³ bounds
+    δ ln r by about 0.009. The fixture's `galaxy_potential` golden gives 3 at the Sun, 9 at
+    3,260 ly, 14 at 1,000 ly and 30 at 100 ly, so the bound is 0.003–0.03, still under a seventh
+    of a cell. The code and the manifests now say so.
+  - The P15.T6.g bullet's "r_s ÷ r, under 10⁻³ outside 10⁻³ ly" holds for GM•/(c² r); r_s ÷ r is
+    1.3 × 10⁻³ at 10⁻³ ly.
+  - Its white dwarf's tidal radius, 1.4 × 10⁹ m, is about 1.7 × 10⁹ m for 0.6 M☉. That is still
+    inside the horizon.
+  - The science check could not see Shapiro and Teukolsky's §12.4, so Bardeen, Press and Teukolsky
+    (1972, eqs. 2.13 and 2.19) is now cited beside it.
 
 ### P15.T7 Helium correction
 
@@ -1415,3 +1527,9 @@ plans 09 and 11 feed it; and the domain-tag prefix `"fit."`, which no generator 
     (measured 1,299, all NGC 5694, Γ 334 × 47 Tuc from its 0.02 pc catalogue core; provisional).
   - **Not done:** T7.b; a reproduction/smoke test for the three T8 blocks beyond `just
 fit-check`; review-changes on this lane's diff.
+- **P15.T6.g's drift scale and far field** (lane `p15-orbits`, 2026-10-12; decision-p15-t6g-orbits
+  §2 and §3). The reduced run's unresolved fast kicks were marginally bound orbits measured on |J₀|,
+  and escapers crossing a far field that was not conservative. Every drift is now measured on
+  max(|J₀|, |Φ(x₀)|). P02.T6.f makes the far field conservative. The production run starts only
+  from a commit holding both, after the reduced run is repeated there. The convergence check is
+  the median's fall, 3–5 fold. Details are in "T6.g as built".

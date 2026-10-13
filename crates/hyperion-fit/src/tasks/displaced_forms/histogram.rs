@@ -12,11 +12,21 @@
 //! - for the barred sources, the bound members on a 24 × 24 × 20 logarithmic histogram of `|x|`,
 //!   `|y|` and `|z|` in the bar's frame (the galaxy's at the epoch), for T6.d's own-form fit;
 //! - the leapfrog steps its orbits took, for the cost of a larger run, how many were integrated
-//!   again at a smaller step, how many were kept with their Jacobi integral still over the run's
-//!   tolerance, and the worst drift kept, for T6.c–e to judge the histograms by.
+//!   again at a smaller step, and the worst drift kept, for T6.c–e to judge the histograms by;
+//! - how many the black hole captured, with the sum of their times from birth to capture, and how
+//!   many were unresolved (P15.T6.g), with their worst drift and their closest approach to the
+//!   centre.
 //!
-//! Counts are integers, so merging two histograms is exact in any order; the moments are summed
-//! in the run's chunk order, which the thread count cannot change.
+//! A captured orbit is counted as gone: it takes no cell and no bound or unbound count, but stays
+//! among the class's resolved orbits, of which every share is taken ([`resolved`]). An unresolved
+//! orbit, one still over the run's drift tolerance after its last halving, is not classified at
+//! all: it is in no share's numerator or denominator, so its bias is bounded by its own count,
+//! which the fit limits (P15.T6.g).
+//!
+//! Counts are integers, so merging two histograms is exact in any order; the moments and the
+//! capture times are summed in the run's chunk order, which the thread count cannot change.
+//!
+//! [`resolved`]: ClassHistogram::resolved
 
 use std::fmt::Write as _;
 
@@ -106,17 +116,16 @@ pub fn bar_cell(x: [f64; 3]) -> usize {
     (i * BAR_CELLS[1] + j) * BAR_CELLS[2] + k
 }
 
-/// How an orbit's integration went: its steps over every pass, whether it was refined, whether it
-/// was kept over the tolerance, and the drift of its Jacobi integral kept.
+/// How an orbit's integration went: its steps over every pass, whether it was refined, and the
+/// drift of its Jacobi integral kept.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Integration {
     /// Leapfrog steps over every pass.
     pub steps: u64,
     /// Whether the step was halved at least once.
     pub refined: bool,
-    /// Whether the drift kept is still over the run's tolerance.
-    pub over_tolerance: bool,
-    /// The relative drift of the Jacobi integral kept.
+    /// The drift of the Jacobi integral kept, on its scale
+    /// ([`OrbitPotential::drift`](super::orbits::OrbitPotential::drift)).
     pub drift: f64,
 }
 
@@ -129,11 +138,19 @@ pub struct ClassHistogram {
     pub steps: u64,
     /// Orbits integrated again at a smaller step.
     pub refined: u64,
-    /// Orbits kept with their Jacobi integral still over the run's tolerance after the last
-    /// halving.
-    pub over_tolerance: u64,
-    /// The largest relative drift of the Jacobi integral kept.
+    /// The largest drift of the Jacobi integral, on its scale, kept by a resolved orbit.
     pub worst_drift: f64,
+    /// Orbits captured by the black hole, counted as gone.
+    pub captured: u64,
+    /// The sum of the captured orbits' times from birth to capture, years.
+    pub captured_years: f64,
+    /// Orbits still over the run's drift tolerance after the last halving, not classified.
+    pub unresolved: u64,
+    /// The largest drift on its scale of an unresolved orbit's Jacobi integral; infinite if a pass
+    /// broke off.
+    pub unresolved_drift: f64,
+    /// The closest approach to the centre of an unresolved orbit, ly; infinite if there is none.
+    pub unresolved_closest_ly: f64,
     /// Bound and inside the cube.
     pub in_cube_bound: u64,
     /// Unbound and inside the cube.
@@ -161,8 +178,12 @@ impl ClassHistogram {
             orbits: 0,
             steps: 0,
             refined: 0,
-            over_tolerance: 0,
             worst_drift: 0.0,
+            captured: 0,
+            captured_years: 0.0,
+            unresolved: 0,
+            unresolved_drift: 0.0,
+            unresolved_closest_ly: f64::INFINITY,
             in_cube_bound: 0,
             in_cube_unbound: 0,
             outside: 0,
@@ -174,13 +195,30 @@ impl ClassHistogram {
         }
     }
 
-    /// Records an orbit at the epoch at `x` (ly) with cylindrical velocity `[v_R, v_φ, v_z]` in
-    /// the class's speed scale, bound or not, after `integration`.
-    pub fn record(&mut self, x: [f64; 3], v: [f64; 3], bound: bool, integration: Integration) {
+    /// The orbits every share is taken of: all but the unresolved, the captured among them.
+    ///
+    /// # Panics
+    ///
+    /// If the record counts more unresolved orbits than orbits, which neither the recording
+    /// methods nor [`read`](Self::read) let happen.
+    #[must_use]
+    pub fn resolved(&self) -> u64 {
+        self.orbits
+            .checked_sub(self.unresolved)
+            .expect("every unresolved orbit is counted among the orbits")
+    }
+
+    /// Counts an orbit and its integration's cost.
+    fn count(&mut self, integration: Integration) {
         self.orbits += 1;
         self.steps += integration.steps;
         self.refined += u64::from(integration.refined);
-        self.over_tolerance += u64::from(integration.over_tolerance);
+    }
+
+    /// Records a resolved orbit at the epoch at `x` (ly) with cylindrical velocity `[v_R, v_φ,
+    /// v_z]` in the class's speed scale, bound or not, after `integration`.
+    pub fn record(&mut self, x: [f64; 3], v: [f64; 3], bound: bool, integration: Integration) {
+        self.count(integration);
         self.worst_drift = self.worst_drift.max(integration.drift);
         let half = f64::from(hyperion_sim::coords::ROOT_HALF_WIDTH_LY);
         if x.iter().any(|c| c.abs() > half) {
@@ -211,13 +249,35 @@ impl ClassHistogram {
         }
     }
 
+    /// Records an orbit the black hole captured `after_years` after its birth, resolved by
+    /// `integration`: counted as gone.
+    pub fn record_captured(&mut self, after_years: f64, integration: Integration) {
+        self.count(integration);
+        self.worst_drift = self.worst_drift.max(integration.drift);
+        self.captured += 1;
+        self.captured_years += after_years;
+    }
+
+    /// Records an orbit still over the run's tolerance after `integration`'s last halving, whose
+    /// closest approach to the centre was `closest_ly`: counted, not classified.
+    pub fn record_unresolved(&mut self, closest_ly: f64, integration: Integration) {
+        self.count(integration);
+        self.unresolved += 1;
+        self.unresolved_drift = self.unresolved_drift.max(integration.drift);
+        self.unresolved_closest_ly = self.unresolved_closest_ly.min(closest_ly);
+    }
+
     /// Adds `other`'s record to this one.
     pub fn merge(&mut self, other: &Self) {
         self.orbits += other.orbits;
         self.steps += other.steps;
         self.refined += other.refined;
-        self.over_tolerance += other.over_tolerance;
         self.worst_drift = self.worst_drift.max(other.worst_drift);
+        self.captured += other.captured;
+        self.captured_years += other.captured_years;
+        self.unresolved += other.unresolved;
+        self.unresolved_drift = self.unresolved_drift.max(other.unresolved_drift);
+        self.unresolved_closest_ly = self.unresolved_closest_ly.min(other.unresolved_closest_ly);
         self.in_cube_bound += other.in_cube_bound;
         self.in_cube_unbound += other.in_cube_unbound;
         self.outside += other.outside;
@@ -253,14 +313,19 @@ impl ClassHistogram {
         };
         writeln!(
             out,
-            "class {name} orbits {} steps {} refined {} over_tolerance {} worst_drift {:?} \
+            "class {name} orbits {} steps {} refined {} worst_drift {:?} captured {} \
+             captured_years {:?} unresolved {} unresolved_drift {:?} unresolved_closest_ly {:?} \
              in_cube_bound {} in_cube_unbound {} outside {} outbound {} moments {:?} {:?} {:?} \
              {:?} {:?}",
             self.orbits,
             self.steps,
             self.refined,
-            self.over_tolerance,
             self.worst_drift,
+            self.captured,
+            self.captured_years,
+            self.unresolved,
+            self.unresolved_drift,
+            self.unresolved_closest_ly,
             self.in_cube_bound,
             self.in_cube_unbound,
             self.outside,
@@ -299,7 +364,7 @@ impl ClassHistogram {
         let bad = |what: &str| ReadRecordError(what.to_owned());
         let head = lines.next().ok_or_else(|| bad("no class line"))?;
         let tokens: Vec<&str> = head.split_whitespace().collect();
-        if tokens.first() != Some(&"class") || tokens.len() != 26 {
+        if tokens.first() != Some(&"class") || tokens.len() != 34 {
             return Err(bad(head));
         }
         let int = |key: &str, at: usize| -> Result<u64, ReadRecordError> {
@@ -308,26 +373,45 @@ impl ClassHistogram {
             }
             tokens[at + 1].parse().map_err(|_| bad(key))
         };
-        let float =
-            |text: &str| -> Result<f64, ReadRecordError> { text.parse().map_err(|_| bad(text)) };
+        let float = |key: &str, at: usize| -> Result<f64, ReadRecordError> {
+            if tokens[at] != key {
+                return Err(bad(key));
+            }
+            tokens[at + 1].parse().map_err(|_| bad(key))
+        };
         let mut record = Self::new(barred);
         record.orbits = int("orbits", 2)?;
         record.steps = int("steps", 4)?;
         record.refined = int("refined", 6)?;
-        record.over_tolerance = int("over_tolerance", 8)?;
-        if tokens[10] != "worst_drift" {
-            return Err(bad("worst_drift"));
-        }
-        record.worst_drift = float(tokens[11])?;
-        record.in_cube_bound = int("in_cube_bound", 12)?;
-        record.in_cube_unbound = int("in_cube_unbound", 14)?;
-        record.outside = int("outside", 16)?;
-        record.outbound = int("outbound", 18)?;
-        if tokens[20] != "moments" {
+        record.worst_drift = float("worst_drift", 8)?;
+        record.captured = int("captured", 10)?;
+        record.captured_years = float("captured_years", 12)?;
+        record.unresolved = int("unresolved", 14)?;
+        record.unresolved_drift = float("unresolved_drift", 16)?;
+        record.unresolved_closest_ly = float("unresolved_closest_ly", 18)?;
+        record.in_cube_bound = int("in_cube_bound", 20)?;
+        record.in_cube_unbound = int("in_cube_unbound", 22)?;
+        record.outside = int("outside", 24)?;
+        record.outbound = int("outbound", 26)?;
+        if tokens[28] != "moments" {
             return Err(bad("moments"));
         }
-        for (m, text) in record.moments.iter_mut().zip(&tokens[21..]) {
-            *m = float(text)?;
+        for (m, text) in record.moments.iter_mut().zip(&tokens[29..]) {
+            *m = text.parse().map_err(|_| bad(text))?;
+        }
+        let outcomes = [
+            record.in_cube_bound,
+            record.in_cube_unbound,
+            record.outside,
+            record.captured,
+            record.unresolved,
+        ];
+        if outcomes
+            .iter()
+            .try_fold(0_u64, |sum, &n| sum.checked_add(n))
+            != Some(record.orbits)
+        {
+            return Err(bad("the orbits are not the sum of their outcomes"));
         }
         let mut counts = |key: &str, into: &mut Vec<u64>| -> Result<(), ReadRecordError> {
             let line = lines.next().ok_or_else(|| bad(key))?;
@@ -387,8 +471,16 @@ mod tests {
             [0.0; 3],
             true,
             Integration {
-                over_tolerance: true,
                 drift: 0.01,
+                ..five
+            },
+        );
+        a.record_captured(2.5e9, five);
+        a.record_unresolved(
+            3.5,
+            Integration {
+                refined: true,
+                drift: 0.2,
                 ..five
             },
         );
@@ -397,11 +489,18 @@ mod tests {
         b.merge(&a);
         assert_eq!(
             (b.orbits, b.in_cube_bound, b.in_cube_unbound, b.outside),
-            (6, 2, 2, 2)
+            (10, 2, 2, 2)
         );
+        assert_eq!(
+            (b.captured, b.unresolved, b.refined, b.resolved()),
+            (2, 2, 2, 8)
+        );
+        assert!((b.captured_years - 5e9).abs() < 1e-6);
+        assert!((b.unresolved_drift - 0.2).abs() < 1e-15);
+        assert!((b.unresolved_closest_ly - 3.5).abs() < 1e-15);
         assert_eq!(b.outbound, 2);
-        assert_eq!(b.steps, 30);
-        assert_eq!(b.over_tolerance, 2);
+        assert_eq!(b.steps, 50);
+        // The unresolved orbit's drift is not a drift kept.
         assert!((b.worst_drift - 0.01).abs() < 1e-15);
         assert_eq!(b.bar_frame.as_ref().unwrap().iter().sum::<u64>(), 2);
         let mut text = String::new();
@@ -409,7 +508,19 @@ mod tests {
         let (name, back) = ClassHistogram::read(&mut text.lines(), true).unwrap();
         assert_eq!(name, "toy");
         assert_eq!(back, b);
-        assert!(text.starts_with("class toy orbits 6 "));
+        assert!(text.starts_with("class toy orbits 10 "));
         assert_eq!(text.lines().count(), 4);
+        // An empty record's closest approach is infinite, and reads back so.
+        let mut empty = String::new();
+        ClassHistogram::new(false).write("none", &mut empty);
+        assert!(empty.contains(" unresolved_closest_ly inf "), "{empty}");
+        let (_, back) = ClassHistogram::read(&mut empty.lines(), false).unwrap();
+        assert_eq!(back, ClassHistogram::new(false));
+        // A record whose outcomes do not add up to its orbits is refused.
+        let wrong = text.replacen("orbits 10 ", "orbits 11 ", 1);
+        assert_eq!(
+            ClassHistogram::read(&mut wrong.lines(), true).unwrap_err(),
+            ReadRecordError("the orbits are not the sum of their outcomes".to_owned())
+        );
     }
 }

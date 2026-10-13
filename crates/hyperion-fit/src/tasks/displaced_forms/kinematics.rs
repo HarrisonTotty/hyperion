@@ -2,8 +2,9 @@
 //!
 //! The mean rotation, the three dispersions and the outbound share are the moments of the class's
 //! bound members inside the cube ([`ClassHistogram::moments`]), in its speed scale; `in_cube` is
-//! the share of the class's orbits bound and inside, `unbound_in_cube` the share unbound but
-//! inside. The run is at the fixture's one halo mass, so the value measured at its escape ratio
+//! the share of the class's resolved orbits bound and inside, `unbound_in_cube` the share unbound
+//! but inside (P15.T6.g: the captured are among the resolved, as gone, and the unresolved are in
+//! no share). The run is at the fixture's one halo mass, so the value measured at its escape ratio
 //! fills all three of `ESCAPE_RATIO_NODES` until the runs at other halo masses exist (the table's
 //! notes say so).
 
@@ -37,14 +38,16 @@ pub fn kinematics(record: &ClassHistogram) -> ClassKinematics {
     }
 }
 
-/// The class's bound and unbound shares inside the cube, `(in_cube, unbound_in_cube)`.
+/// The class's bound and unbound shares inside the cube, `(in_cube, unbound_in_cube)`, of its
+/// resolved orbits: the captured count as gone, and the unresolved are in no share (P15.T6.g).
 #[must_use]
 pub fn in_cube(record: &ClassHistogram) -> (f64, f64) {
-    if record.orbits == 0 {
+    let resolved = record.resolved();
+    if resolved == 0 {
         return (0.0, 0.0);
     }
     #[expect(clippy::cast_precision_loss, reason = "counts far below 2⁵³")]
-    let n = record.orbits as f64;
+    let n = resolved as f64;
     #[expect(clippy::cast_precision_loss, reason = "counts far below 2⁵³")]
     let shares = (
         record.in_cube_bound as f64 / n,
@@ -82,5 +85,12 @@ mod tests {
         assert!((k.outbound - 0.5).abs() < 1e-15, "{k:?}");
         let (bound, unbound) = in_cube(&r);
         assert!((bound - 2.0 / 3.0).abs() < 1e-15 && unbound.abs() < 1e-15);
+        // P15.T6.g: a captured orbit stays in the denominator, as gone; an unresolved one leaves
+        // it; neither moves the kinematics.
+        r.record_captured(1e9, Integration::default());
+        r.record_unresolved(2.0, Integration::default());
+        let (bound, _) = in_cube(&r);
+        assert!((bound - 0.5).abs() < 1e-15, "{bound}");
+        assert_eq!(kinematics(&r), k);
     }
 }

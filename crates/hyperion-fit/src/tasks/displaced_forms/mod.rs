@@ -20,7 +20,10 @@
 //! potential and plan 08's velocity laws. Speeds are in units of its `v_c`, or of the nuclear
 //! disc's own circular speed for that source, and times in `R_d ÷ v_c` (plan 08, Design note 12).
 //! An orbit is bound if its energy at the epoch, bar included, cannot carry it to the sim's
-//! escape boundary, twice the dark halo's `r₂₀₀` (ruling 91).
+//! escape boundary, twice the dark halo's `r₂₀₀` (ruling 91). An orbit the central black hole
+//! captures is counted as gone, and one whose Jacobi integral is still over the run's tolerance
+//! after its last halving is counted as unresolved and not classified (P15.T6.g; [`orbits`],
+//! [`histogram`]).
 //!
 //! The orbit manifests are `manifests/displaced_orbits.toml` (the production run, about 1.9 × 10⁷
 //! orbits: plan 15's 1.2 × 10⁷ disc-born, 1.6 × 10⁶ for each old population but the nuclear disc,
@@ -57,7 +60,7 @@ use sha2::{Digest, Sha256};
 
 use births::{CellSampler, Draws, ThinBirths, ThinHistory, ellipsoid_velocity};
 use histogram::{ClassHistogram, Integration};
-use orbits::{Bar, OrbitPotential, OrbitState};
+use orbits::{Bar, Ending, OrbitPotential, OrbitState};
 
 use crate::manifest::{Manifest, ManifestParamError};
 use crate::parallel::{BuildThreadPoolError, map_reduce_chunks};
@@ -218,16 +221,16 @@ pub struct RunParams {
     pub nuclear_orbits: u64,
     /// Orbits per control.
     pub control_orbits: u64,
-    /// The step, as a fraction of the circular period at the pericentre: 1 ÷ 200.
+    /// The step, as a fraction of the local circular period (P15.T6.g): 1 ÷ 200.
     pub step_fraction: f64,
     /// The nuclear disc's step fraction (ruling 120.3: 1 ÷ 100 only if the reduced run shows at
     /// most 10% more refinement).
     pub nuclear_step_fraction: f64,
-    /// The least step, years.
-    pub min_step_years: f64,
-    /// The Jacobi integral's largest relative drift an orbit may keep: 10⁻⁴.
+    /// The largest drift of the Jacobi integral on its scale, `max(|J₀|, |Φ(x₀)|)`, that a resolved
+    /// orbit may keep: 10⁻³ in production.
     pub drift_tolerance: f64,
-    /// How many times an orbit's step may be halved to meet it.
+    /// How many times an orbit's step fraction may be halved to meet it; an orbit still over it
+    /// after the last is unresolved (P15.T6.g).
     pub max_halvings: u32,
     /// The bar's quadrupole amplitude over the circular speed squared at its radius.
     pub bar_strength: f64,
@@ -244,8 +247,19 @@ impl RunParams {
     ///
     /// # Errors
     ///
-    /// [`ManifestParamError`] if a parameter is missing or of the wrong type.
+    /// [`ManifestParamError`] if a parameter is missing or of the wrong type, or a step fraction
+    /// or the drift tolerance is not positive and finite (with no step floor, a step fraction of
+    /// zero would leave every orbit unresolved, and a tolerance that is not a number would keep
+    /// every pass).
     pub fn from_manifest(manifest: &Manifest) -> Result<Self, ManifestParamError> {
+        let positive = |key: &str| -> Result<f64, ManifestParamError> {
+            let value = manifest.f64(key)?;
+            if value.is_finite() && value > 0.0 {
+                Ok(value)
+            } else {
+                Err(ManifestParamError::new(key, "a positive, finite number"))
+            }
+        };
         Ok(Self {
             seed: manifest.u64("seed")?,
             galaxy_seed: manifest.u64("galaxy_seed")?,
@@ -253,10 +267,9 @@ impl RunParams {
             old_orbits: manifest.u64("old_orbits_per_class")?,
             nuclear_orbits: manifest.u64("nuclear_orbits_per_class")?,
             control_orbits: manifest.u64("control_orbits")?,
-            step_fraction: manifest.f64("step_fraction")?,
-            nuclear_step_fraction: manifest.f64("nuclear_step_fraction")?,
-            min_step_years: manifest.f64("min_step_years")?,
-            drift_tolerance: manifest.f64("drift_tolerance")?,
+            step_fraction: positive("step_fraction")?,
+            nuclear_step_fraction: positive("nuclear_step_fraction")?,
+            drift_tolerance: positive("drift_tolerance")?,
             max_halvings: u32::try_from(manifest.u64("max_halvings")?)
                 .map_err(|_| ManifestParamError::new("max_halvings", "a small integer"))?,
             bar_strength: manifest.f64("bar_strength")?,
@@ -351,9 +364,10 @@ impl Setup {
         };
         let bar = Bar::new(&tables, half_length, params.bar_strength, omega);
         let escape_potential = tables.potential_in_plane(tables.escape_boundary());
-        let plain = OrbitPotential::new(tables.clone(), None)
+        let black_hole = galaxy.mass_model().black_hole().mass();
+        let plain = OrbitPotential::new(tables.clone(), black_hole, None)
             .expect("a galaxy with its full potential has the grid");
-        let barred = OrbitPotential::new(tables, Some(bar))
+        let barred = OrbitPotential::new(tables, black_hole, Some(bar))
             .expect("a galaxy with its full potential has the grid");
         let fields: &Fields = galaxy.fields();
         let thin = ThinBirths::new(fields, scales.r_d().value());
@@ -395,6 +409,16 @@ impl Setup {
         }
     }
 
+    /// The potential `source`'s orbits move in.
+    #[must_use]
+    fn potential_of(&self, source: Source) -> &OrbitPotential {
+        if source.is_barred() {
+            &self.barred
+        } else {
+            &self.plain
+        }
+    }
+
     /// Orbit `k` of class `class` (number `index` in [`classes`]), recorded into `record`.
     fn orbit(
         &self,
@@ -404,6 +428,61 @@ impl Setup {
         k: u64,
         record: &mut ClassHistogram,
     ) {
+        let (start, tau) = self.birth(params, index, class, k);
+        let potential = self.potential_of(class.source);
+        let (end, integration) = if tau > 0.0 {
+            let checked = potential.integrate_checked(
+                start,
+                tau,
+                params.step_fraction_of(class.source),
+                params.drift_tolerance,
+                params.max_halvings,
+            );
+            let integration = Integration {
+                steps: checked.steps,
+                refined: checked.halvings > 0,
+                drift: checked.drift,
+            };
+            // P15.T6.g: an orbit still over the tolerance is counted and not classified, and a
+            // captured one is counted as gone.
+            if checked.drift > params.drift_tolerance {
+                record.record_unresolved(checked.closest_ly, integration);
+                return;
+            }
+            if let Ending::Captured { after_years } = checked.ending {
+                record.record_captured(after_years, integration);
+                return;
+            }
+            (checked.end, integration)
+        } else {
+            (start, Integration::default())
+        };
+        let bound = potential.energy(&end) < self.escape_potential;
+        let r = math::hypot(end.x[0], end.x[1]);
+        let (cos, sin) = if r > 0.0 {
+            (end.x[0] / r, end.x[1] / r)
+        } else {
+            (1.0, 0.0)
+        };
+        let scale = 1.0 / (C * self.v_ref(class.source));
+        let v = [
+            (end.v[0] * cos + end.v[1] * sin) * scale,
+            (-end.v[0] * sin + end.v[1] * cos) * scale,
+            end.v[2] * scale,
+        ];
+        record.record(end.x, v, bound, integration);
+    }
+
+    /// Orbit `k` of class `class` (number `index` in [`classes`]) at its birth, and its time since
+    /// then at the epoch, years.
+    #[must_use]
+    fn birth(
+        &self,
+        params: &RunParams,
+        index: usize,
+        class: &OrbitClass,
+        k: u64,
+    ) -> (OrbitState, f64) {
         let mut draws = Draws::new(params.seed, u64::try_from(index).expect("99 classes"), k);
         let fields = self.galaxy.fields();
         let v_ref = self.v_ref(class.source);
@@ -449,54 +528,7 @@ impl Setup {
             x: [p.x, p.y, p.z],
             v: core::array::from_fn(|i| v0[i] + kick[i]),
         };
-        let potential = if class.source.is_barred() {
-            &self.barred
-        } else {
-            &self.plain
-        };
-        let step = potential.step_for(
-            &start,
-            params.step_fraction_of(class.source),
-            params.min_step_years,
-        );
-        let (end, integration) = if tau > 0.0 {
-            let checked = potential.integrate_checked(
-                start,
-                tau,
-                step,
-                params.drift_tolerance,
-                params.max_halvings,
-            );
-            #[expect(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                reason = "a whole, non-negative number of steps below 2⁵³"
-            )]
-            let steps = checked.steps as u64;
-            let integration = Integration {
-                steps,
-                refined: checked.halvings > 0,
-                over_tolerance: checked.drift > params.drift_tolerance,
-                drift: checked.drift,
-            };
-            (checked.end, integration)
-        } else {
-            (start, Integration::default())
-        };
-        let bound = potential.energy(&end) < self.escape_potential;
-        let r = math::hypot(end.x[0], end.x[1]);
-        let (cos, sin) = if r > 0.0 {
-            (end.x[0] / r, end.x[1] / r)
-        } else {
-            (1.0, 0.0)
-        };
-        let scale = 1.0 / (C * v_ref);
-        let v = [
-            (end.v[0] * cos + end.v[1] * sin) * scale,
-            (-end.v[0] * sin + end.v[1] * cos) * scale,
-            end.v[2] * scale,
-        ];
-        record.record(end.x, v, bound, integration);
+        (start, tau)
     }
 
     /// The circular velocity at `p`, spinward in the plane, ly/yr.
@@ -800,6 +832,40 @@ mod tests {
         assert_eq!(all[98].name(), "nuclear_control");
     }
 
+    /// P15.T6.g: with no step floor, a step fraction or drift tolerance that is not positive and
+    /// finite is refused.
+    #[test]
+    fn a_step_fraction_or_tolerance_must_be_positive() {
+        let manifest = smoke();
+        let text = std::str::from_utf8(manifest.bytes()).unwrap();
+        for (name, good, bad) in [
+            (
+                "step_fraction",
+                "\nstep_fraction = 0.02",
+                "\nstep_fraction = 0.0",
+            ),
+            (
+                "nuclear_step_fraction",
+                "\nnuclear_step_fraction = 0.02",
+                "\nnuclear_step_fraction = -0.02",
+            ),
+            (
+                "drift_tolerance",
+                "\ndrift_tolerance = 1e-2",
+                "\ndrift_tolerance = nan",
+            ),
+        ] {
+            assert_eq!(text.matches(good).count(), 1, "{name}");
+            let changed = text.replacen(good, bad, 1);
+            let manifest = Manifest::from_bytes(manifest.path(), changed.into_bytes()).unwrap();
+            assert_eq!(
+                RunParams::from_manifest(&manifest).unwrap_err(),
+                ManifestParamError::new(name, "a positive, finite number"),
+            );
+        }
+        assert!(RunParams::from_manifest(&manifest).is_ok());
+    }
+
     /// P15.T6.b: the smoke run twice gives identical bytes, and on one and on three threads.
     #[test]
     fn the_smoke_run_is_reproducible_and_thread_independent() {
@@ -821,10 +887,20 @@ mod tests {
         for (class, record) in classes().iter().zip(&records) {
             assert_eq!(record.orbits, params.orbits_of(class), "{}", class.name());
             assert_eq!(
-                record.in_cube_bound + record.in_cube_unbound + record.outside,
+                record.in_cube_bound
+                    + record.in_cube_unbound
+                    + record.outside
+                    + record.captured
+                    + record.unresolved,
                 record.orbits
             );
-            assert!(record.over_tolerance <= record.refined, "{}", class.name());
+            // The smoke manifest allows one halving, so an unresolved orbit was refined.
+            assert!(record.unresolved <= record.refined, "{}", class.name());
+            assert!(
+                record.worst_drift <= params.drift_tolerance,
+                "{}",
+                class.name()
+            );
         }
         // Ruling 120.4: stopped after one part, then after two more, then finished, the run gives
         // the uninterrupted run's bytes; a part of another manifest is refused.
