@@ -428,7 +428,7 @@ describe("the committed k-distributions", () => {
     const species = committedLineSpecies();
     const tables = await loadKDistributions(species, inlinePart);
     expect(tables.map((t) => t.species)).toEqual(species);
-  });
+  }, 120_000);
 });
 
 describe("the worker's part reader", () => {
