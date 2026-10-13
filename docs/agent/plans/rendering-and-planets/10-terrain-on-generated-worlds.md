@@ -161,12 +161,16 @@ pub fn albedo_scale(field: &CoarseField, geometric_albedo: f64) -> AlbedoScale;
 /// The authoritative ground: R05's `finest_surface_height` over R09's synthesis, with the
 /// triangle it came from. Collision reads this and nothing else. As built R05's interpolant
 /// returns the height alone (its lattice and split are private), so T3 adds the triangle's query
-/// beside it in `patch::collision`.
+/// beside it in `patch::collision` (as built: the crate's `mesh_point` and `finest_surface_point`,
+/// returning `MeshPoint`). The ground is at p's foot on the datum, along its normal (T3's
+/// deviations).
 pub fn ground_at<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
     p: &[f64; 3]) -> Result<GroundPoint, QueryHeightError>;            // body-fixed, metres
 pub struct GroundPoint { /* height: Metres (above R07's reference spheroid, along its normal),
     normal: [f64; 3] (body-fixed, unit),
-    triangle: FinestTriangle */ }
+    triangle: FinestTriangle,
+    as built also dir: [f64; 3] (p's foot) and point_height: Metres (p's own); getters */ }
+/// As built, a type alias of R05's `patch::collision::MeshTriangle`, with getters and `vertices()`.
 pub struct FinestTriangle { /* key: PatchKey (finest level), x: u8, y: u8, upper: bool */ }
 
 /// What a readout may quote at a point, given the survey resolution the ship holds there.
@@ -983,7 +987,8 @@ plan, then R09's server and coarse pass):
   measures the real coarse pass's output, waits on R09.T16 whole; and the `sample_worlds()` cases
   of T1.b, T2, T5 and T10.a (their `crates/hyperion-sim/tests/` binaries) follow R09.T16 under the
   same task IDs, after each task's `synthetic_worlds()` part lands (a follow-up, as R09's T5 had).
-  T3's `surface_ground_worlds` asserts finiteness, which the no-op worlds already exercise.
+  T3's `surface_ground_worlds` asserts finiteness, which the no-op worlds already exercise (as
+  built, on the reference worlds through `coarse_pass`, moving onto `sample_worlds()` when it lands).
 - **T4.b** builds `levelBounds.ts` and the selection rule after T6.b, on a fixture from
   `synthetic_worlds()`, and records the owner's counts after T4.a's `level-bounds.json`.
 - **T6.a's bench** waits on R09's follow-up after T8, the fused interpolant pass that main has
@@ -2446,3 +2451,138 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     spheroid the share of its area differs by about its flattening (Earth's 1 ÷ 298). Small.
   - _The re-bake on a field's start._ Starting any body's field re-bakes every bake in flight, as
     `postField` did. Once bakes name their body (T6.b), the epoch belongs to the body.
+- **Deviations in T3, as built** (2026-10-13; lane r10-ground, on R09.T8 at `c280f604`, merged to
+  `59af0b6b` before the commit).
+  - _A point, not a direction._ `ground_at` takes the body-fixed point p in metres, and the ground
+    under it is the one along the datum's normal through it: p's foot, the unit direction d with
+    p = M·d + h·ν(d), which `ground::datum_foot` (crate-private) finds by Newton's method in p's
+    meridian plane, with no trigonometric function, from the datum's own direction M⁻¹p ÷ |M⁻¹p|.
+    It is tested on WGS 84, a sphere and a body flattened by 0.2, from −0.3 c to +a; the science
+    check ran the same iteration on 10⁵ points of each, at most five steps, worst 3 × 10⁻¹⁶ rad.
+    - Passing p to R05's interpolant as a direction would put the query at p's geocentric
+      direction, some f sin 2φ ÷ 2 of arc away (10.7 km of an Earth's ground at 45°), and M⁻¹p
+      alone is off by about |h| f sin 2φ ÷ a (about 34 m at 10 km and 45°): the hazard the
+      client's `datumDirection` records.
+    - The foot is unique on p's side of the axis (the datum's nearest point) outside the
+      spheroid's evolute, which lies within (a² − c²) ÷ c of the centre (42.8 km on WGS 84). The
+      second normal through p, from across the axis, is never the one returned.
+    - `ground_at` also panics for a point beyond about 10¹⁵⁴ m, where ρ² overflows.
+  - _`GroundPoint`_ has private fields and getters. Beside `height()`, `normal()` and `triangle()`
+    it gains `dir()`, the foot, and `point_height()`, p's own height along the same normal. With
+    them a caller has the ground point, `figure.surface_point(dir, height)`, and p's clearance.
+    `FinestTriangle` is a type alias of R05's new `patch::collision::MeshTriangle` (`key`, `x`, `y`,
+    `upper` and `vertices()`; `Copy`, `Eq`, `Ord` and `Hash`), because the triangle query serves
+    every level.
+  - _The triangle query is the crate's._ `patch::collision::mesh_point` and `finest_surface_point`
+    return `MeshPoint` (`height_m`, `triangle` and `normal`), all `pub(crate)`: `ground_at` is
+    their one public face, and no later plan names them. They sit beside R05's `mesh_height` and
+    `finest_surface_height` and share their location (the snap, the split and the vertex reads)
+    and their interpolation (`Quad::interpolate`, R05's exact operations). So the height is theirs
+    bit for bit (tested), and `collision.golden` is unchanged.
+    - At a vertex, `mesh_height` still reads that vertex alone, while `mesh_point` reads its
+      triangle's three. So at a vertex whose neighbours read a cell the view lacks, `mesh_point`
+      can refuse where `mesh_height` answers.
+    - The normal is the flat triangle's, through its vertices' surface points. It points outward
+      because every face's (u, v, outward) is right-handed. Its form is pinned output now, as is
+      the foot's: a later precision change to either is a bump.
+    - A query belongs to the quad whose lattice cell holds it (the face's far edge to the last
+      quad), and to the lower half where fa ≥ fb, R05's split. So a vertex has one triangle, and
+      that triangle holds it.
+  - _`HeightSource` for `Synthesiser`_, in `ground.rs`:
+    - `Cache` is `SynthCache` and `Error` is `QueryHeightError`; `figure()` is the header's.
+    - `height` is `height_at` at `BandLevel::new(level)`, and panics above 24.
+    - `level_bound_m` reads the bounds the synthesiser holds, bit for bit the free
+      `level_bound_m(header, level)` (tested). `height_range_m` is `Synthesiser::height_range_m`.
+    - `prepare_cache` keeps R05's default, nothing. R09's lattice cover is `synth::bake`'s private
+      `cover`, which T6.a's bake reaches, and no value depends on it.
+    - R09.T8 built no `QueryHeightError::NonFinite` (R09's "Deviations in T8, as built"), so
+      `NotSurveyed` is the ground's only error. Every part asserts its values finite, and
+      `ground_at` asserts the normal and the foot again before it returns.
+  - _The goldens are in the library_ (main, 2026-10-13). `tests/ground_golden.rs` became
+    `src/ground/golden.rs` under `cfg(test)`, with six goldens at
+    `tests/golden/ground/<world>.golden`, header 21.
+    - `ci`'s wasip1 selection builds the crate without `testing`, so an integration test that needs
+      the synthetic worlds would not run there. R09's wire, crater and month goldens live in the
+      library for that reason, and main has R09.T9's heights do the same (`synth::height_golden`).
+    - They sit in a subdirectory because `cube_golden.rs` holds every flat golden to
+      `TEST_PLANET_VERSION`, and a `native_only` test holds `ground/` to `GENERATOR_VERSION`.
+    - Each cratered world pins 28 points: 16 at random, two in each of `random_cells`' three seam
+      patches (a cube corner's and two on face edges), one under each of up to three coarse
+      craters' rims, a finest vertex, a cube corner and a pole, at −500 m to 5 km. The flat world
+      pins 25 and the one-crater world 26.
+    - Until R09.T9 lands they are the only goldens over `height_at` on the synthetic worlds, so the
+      bump that re-blesses R09's goldens re-blesses these too.
+  - _No shared world helper._ There is no `tests/common/worlds.rs` or `synthetic_worlds()`: with
+    the goldens in the library, the tests take `testing::SyntheticWorld::ALL` through R09.T8's
+    crate-private `synth::test_support` (`world`, `SEED`, `random_cells`, `rim_cells`, `Held`),
+    and the analytic fields go through the crate-private `ground::ground_over`, `ground_at` over
+    any `HeightSource`.
+  - _The sim's binary._ `crates/hyperion-sim/tests/surface_ground_worlds.rs`
+    (`#![cfg(feature = "testing")]`) runs the four reference worlds through `coarse_pass` itself,
+    once each per binary, in 2 s. It asserts finiteness, an outward unit normal and the vertex's
+    bit equality. When R09.T16's `sample_worlds()` lands, that list takes this one's place, a small
+    follow-up under T3's ID.
+  - _Acceptance_, as built:
+    - `cargo test -p hyperion-surface --lib ground` (the goldens alone: `--lib ground::golden`);
+    - `cargo test -p hyperion-surface --lib patch::collision`;
+    - `cargo test -p hyperion-surface --features testing --test panics ground`;
+    - `cargo test -p hyperion-surface --test collision_golden` (R05's, unchanged);
+    - `cargo test -p hyperion-sim --features testing --test surface_ground_worlds`;
+    - the wasm targets under `just test-wasm-fast`.
+  - _Tests_ (`ground::tests`, `patch::collision::tests`, `tests/panics.rs`'s `ground`):
+    - at a vertex the ground is `height_at` there, bit for bit, at three altitudes;
+    - a plane linear in the finest lattice's (s, t), the interpolant's own form, is held within
+      10⁻⁹ m, not bit for bit: it is evaluated at the vertices' directions, whose lattice
+      coordinates come back up to about 10⁻⁸ of a quad off whole, 5 × 10⁻¹⁰ m at its 0.05 m a
+      quad. A level ground, the datum shell at a height, is held bit for bit;
+    - either triangle gives a shared edge (diagonal, right and top edges) the same height: within
+      10⁻⁹ m on the synthetic worlds, and within 10⁻¹¹ m on R05's relief fixture, across a
+      patch's edge too. Either side of the diagonal through `ground_at` agrees within 1 µm;
+    - either side of every cube-face edge, and at every cube corner, the ground agrees within 1 µm;
+    - the normal is the triangle's: unit, perpendicular to both edges and outward;
+    - the face-coordinate and spatial interpolants agree within 1 µm;
+    - the drawn mesh, its vertex heights narrowed to `f32`, agrees within half the `f32` step;
+    - the ground is the same bits whatever the cache holds and in whatever order points are asked
+      (`assert_order_independent`, and each point from an empty cache);
+    - the ground is finite at every sampled point, and a `Held` view refuses cells it lacks;
+    - the `HeightSource` methods forward R09's values;
+    - the foot inverts `surface_point`;
+    - three `should_panic` tests: the centre, a NaN point and level 25.
+  - _The agreement figures_ come from the `#[ignore]` measurement
+    `ground::tests::the_agreement_figures`, 400 points a world, dev profile:
+    - the drawn `f32` mesh against the ground, at most:
+
+      | World            | Gap      | Share of the `f32` step |
+      | ---------------- | -------- | ----------------------- |
+      | Earth-like       | 0.205 mm | 0.397                   |
+      | Mars-like        | 0.110 mm | 0.395                   |
+      | Moon-like        | 0.120 mm | 0.391                   |
+      | Ceres-like       | 0.229 mm | 0.384                   |
+      | Flat, one-crater | 0        | 0                       |
+
+      The `f32` step is |h| 2⁻²³ of the patch's largest height. Every share is inside the half step
+      of rounding to nearest; the plan's "about 2 mm at ±20 km" is the full step.
+
+    - the face-coordinate interpolant against the spatial one: 15.3 nm Earth-like, 13.9 nm
+      Mars-like, 26.1 nm Moon-like, 21.2 nm Ceres-like, 18.0 nm flat and 17.3 nm one-crater.
+      - Most of it is Design note 4's sagitta, D² ÷ 8R on each world's finest diagonal D: about
+        5 nm on an Earth, 9 nm on a Mars, 18 nm at the Moon's radius and about 20 nm on Ceres.
+        Design note 4's 5 nm is an Earth's figure.
+      - On the flat world, with no heights, the gap is the sagitta alone.
+      - The rest is weighted by slope: the rounding of the lattice coordinates and the warp's
+        curvature.
+    - either side of face edges and at corners: 14.2 nm Earth-like, 12.3 nm Mars-like, 22.5 nm
+      Moon-like, 4.6 nm Ceres-like, 0 flat and 0.09 nm one-crater. Most of it is the nudge across
+      the edge leaking into the other face's edge coordinate.
+  - _Generator version._ Untouched (21): the goldens pin only what R09's heights already fix.
+  - _R05's trait doc_ is reworded in its own commit (Deferred findings, "The bound's wording").
+- **Deferred findings (2026-10-13 rule)** (R10.T3; recorded, not ruled).
+  - _Skirts on a quantile._ R05's skirt depth adds `level_bound_m`, which is now a 1 − 10⁻⁹
+    per-point quantile in its crater terms, so a vertex may, at that rate, step past its skirt.
+    The selection and skirt contracts are unchanged.
+  - _The cost of a contact._ `ground_at` is three `height_at` at the finest level, about 80 µs
+    natively by R09.T8's provisional 26 µs a point at level 19. The fused-interpolant follow-up
+    that main queued is the lever; a server collision cache of R09's policy shares the vertices
+    between contacts.
+  - _A vertex's reads._ At a vertex `mesh_point` reads three vertices where `mesh_height` reads
+    one, so near a survey margin's edge the ground can refuse where the height answers (above).

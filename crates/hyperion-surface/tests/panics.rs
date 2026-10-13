@@ -1136,3 +1136,44 @@ mod synth_assembly {
         let _ = unresolved_rms(&field, cell(), Metres::ZERO);
     }
 }
+
+mod ground {
+    use hyperion_base::rng::DetailSeed;
+    use hyperion_surface::ground::ground_at;
+    use hyperion_surface::patch::HeightSource;
+    use hyperion_surface::synth::{SynthCache, Synthesiser};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    use super::level_five_field;
+
+    #[test]
+    #[should_panic(
+        expected = "a point must be finite and not the body's centre, got [0.0, 0.0, 0.0]"
+    )]
+    fn the_ground_under_the_body_s_centre_is_refused() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let _ = ground_at(&synth, &mut SynthCache::new(), &[0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "a point must be finite and not the body's centre, got [NaN, 1.0, 0.0]"
+    )]
+    fn the_ground_under_a_point_that_is_not_finite_is_refused() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let _ = ground_at(&synth, &mut SynthCache::new(), &[f64::NAN, 1.0, 0.0]);
+    }
+
+    #[test]
+    #[should_panic(
+        expected = "band level 25 is above the maximum 24: R05's levels are band levels"
+    )]
+    fn the_synthesiser_as_a_height_source_refuses_a_level_past_the_deepest() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let _ = HeightSource::height(&synth, &mut SynthCache::new(), [0.0, 0.0, 1.0], 25);
+    }
+}
