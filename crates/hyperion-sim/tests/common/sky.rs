@@ -256,23 +256,62 @@ fn over_cells(
     radii: &[(Layer, LightYears)],
     each: &CellJob<'_>,
 ) -> Vec<Part> {
-    let forced = query
-        .with_caps_forced_per_layer(radii)
-        .expect("a valid forced cap");
+    let forced = forced_query(query, radii);
     let tables = LuminosityTables::dark(galaxy);
     let envelope = BrightnessEnvelope::build(galaxy);
     let offsets = CellOffsets::build(galaxy);
+    let keys = forced_cells(galaxy, (&tables, &envelope), &forced);
+    over_keys((&tables, &envelope, &offsets), &forced, &keys, each)
+}
+
+/// `query` with each listed layer's cap forced to its radius and no other layer opened, as
+/// [`census_parts`] and [`brute_force_parts`] census it.
+///
+/// # Panics
+///
+/// If a radius is not a valid forced cap.
+#[must_use]
+pub fn forced_query(query: SkyQuery, radii: &[(Layer, LightYears)]) -> SkyQuery {
+    query
+        .with_caps_forced_per_layer(radii)
+        .expect("a valid forced cap")
+}
+
+/// The cells of the census's plan for `forced`, a query with forced caps ([`forced_query`]), in
+/// the plan's order: those that [`census_parts`] and [`brute_force_parts`] open for the same
+/// radii, one part each. It builds the plan alone and runs no census.
+///
+/// A slow identity test may be split into tests of disjoint sets of these cells, each censused by
+/// [`census_parts_of`] and [`brute_force_parts_of`] for `forced`, which measure each cell bit for
+/// bit as the whole does.
+///
+/// # Panics
+///
+/// If `forced`'s caps are not forced.
+#[must_use]
+pub fn plan_cells(galaxy: &Galaxy, forced: &SkyQuery) -> Vec<CellKey> {
+    let tables = LuminosityTables::dark(galaxy);
+    let envelope = BrightnessEnvelope::build(galaxy);
+    forced_cells(galaxy, (&tables, &envelope), forced)
+}
+
+/// The cells of the plan of `forced`, a query with forced caps, in the plan's order.
+fn forced_cells(
+    galaxy: &Galaxy,
+    (tables, envelope): (&LuminosityTables, &BrightnessEnvelope),
+    forced: &SkyQuery,
+) -> Vec<CellKey> {
+    assert!(forced.forced_caps().is_some(), "a query with forced caps");
     // A forced plan reads neither the tables nor the noise. Its cells are few enough to hold, so
     // that the threads can take them one at a time.
     let plan = census_plan(
         galaxy,
-        &tables,
-        &envelope,
-        &forced,
+        tables,
+        envelope,
+        forced,
         &mut NoiseCache::with_capacity(0),
     );
-    let keys: Vec<CellKey> = plan.cells().collect();
-    over_keys((&tables, &envelope, &offsets), &forced, &keys, each)
+    plan.cells().collect()
 }
 
 /// What every job of a census reads: the tables, the envelope and the cells' offset bounds.
