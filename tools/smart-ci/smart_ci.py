@@ -243,7 +243,11 @@ TIMESTAMP_VAR = "JUST_TIMESTAMP"
 # test or a suite with no recorded time counts as large, as do tests that read a fixture built once a
 # run (`RUN_SHARED`), and `just test-render`'s run and `--full` always take the lock. The suites run capped all the same, in a scope of their own as vitest's is
 # (`UNLOCKED_SCOPE`: 5 GB, no swap, 4 cores, where systemd allows it) at 4 test threads
-# (`UNLOCKED_ENV`), and hold no build slot.
+# (`UNLOCKED_ENV`). Inside that scope they take a build slot of their own through the command that
+# `SMART_CI_SLOT` names, where one is named, so that its gates apply to them as to a build: the
+# orchestration's `build-slot` waits while I/O pressure, memory or the load is high, and lets one
+# build run while the heavy-test lock is held (the freeze of 2026-10-13: small suites without the
+# lock count as a start for the gates). Their doctests build too.
 SMALL_TESTS = 300
 SMALL_SECONDS = 300.0
 UNLOCKED_SCOPE = ("-p", "MemoryMax=5G", "-p", "MemorySwapMax=0", "-p", "CPUQuota=400%")
@@ -2117,8 +2121,9 @@ def describe(plan: Plan, changes: Sequence[Tuple[str, bool]], what: str, depende
                          "phases, which build, and released before the locked phase.")
         if phases["locked"] and plan.unlocked:
             lines.append(f"The suites run without the heavy-test lock: {plan.weight}. They run capped all the same, "
-                         "at 4 test threads, in a scope of 5 GB and 4 cores where systemd allows it, and hold no "
-                         "build slot.")
+                         "at 4 test threads, in a scope of 5 GB and 4 cores where systemd allows it, "
+                         + (f"in a build slot of their own ({' '.join(slot)})." if slot is not None
+                            else "and hold no build slot."))
             if env.get(PRIORITY_VAR) == "1":
                 lines.append(f"{PRIORITY_VAR}=1 has nothing to do: the suites take no heavy-test lock.")
         elif phases["locked"]:
@@ -2300,9 +2305,11 @@ def execute(plan: Plan, root: Path, just: str, env: Mapping[str, str] = os.envir
     When `SMART_CI_SLOT` names the command that takes a build slot (`slot_command`), each group of
     phases that builds (`SLOT_GROUPS`, `BUILDS`) runs in a child of that command, which releases the
     slot when the group ends: no slot is held while the suites wait for the heavy-test lock or hold
-    it, or run without it, nor for a group that builds nothing. A full plan runs `ci`'s own phases
-    (`CI_PHASES`) the same way, rather than `just ci`, whose recipe would keep a slot to its end. What
-    the suites print times their tests, for `timings` to record.
+    it, nor for a group that builds nothing. Suites that run without the lock take a slot of their
+    own through the same command, inside their capped scope, so that the slot's gates apply to
+    them. A full plan runs `ci`'s own phases (`CI_PHASES`) the same way, rather than `just ci`, whose
+    recipe would keep a slot to its end. What the suites print times their tests, for `timings` to
+    record.
     """
     runner = runner or Runner(root, just)
     phases = phases_of(plan)
@@ -2332,7 +2339,8 @@ def execute(plan: Plan, root: Path, just: str, env: Mapping[str, str] = os.envir
     locked = flat(phases["locked"])
     record = RunRecord(nextest_kinds(phases["locked"]), browser_binaries(root, env))
     if plan.unlocked:
-        status = runner.run(locked, env=dict(UNLOCKED_ENV), watch=record.line, scope=runner.suite_scope(env))
+        status = runner.run(locked, env=dict(UNLOCKED_ENV), watch=record.line,
+                            scope=[*runner.suite_scope(env), *(slot or [])])
     else:
         status = runner.run(["_locked", just, *locked], env=lock_priority(env), watch=record.line)
     if timings is not None:
@@ -2771,7 +2779,8 @@ builds where `build-slot just ci` holds one through the wait for the lock and th
 The heavy-test lock is for full suites: a plan's suites run without it when they are small by the
 timings recorded from earlier runs (target/smart-ci/{timings}), at most {tests} of nextest's tests
 and at most {seconds:.0f} s of test time, doctests and browser suites included; capped all the same,
-at 4 test threads in a scope of 5 GB and 4 cores where systemd allows it, holding no build slot.
+at 4 test threads in a scope of 5 GB and 4 cores where systemd allows it, and inside it in a build
+slot of their own when {slot} names the command, so that its gates apply to them.
 A test with no recorded time counts as large, as does one that reads a fixture built once a run
 (the sky's luminosity tables), and `--full` and the smoke harness always take the lock. With
 {priority}=1 (integration's runs: `{slot}=<the build-slot command> just smart-ci <its base>`, or

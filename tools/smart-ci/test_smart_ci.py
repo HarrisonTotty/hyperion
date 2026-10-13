@@ -21,6 +21,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -1079,7 +1080,7 @@ class SmallSuites(unittest.TestCase):
         smart_ci.weigh(p, timings)
         return p
 
-    def test_a_small_plan_runs_without_the_lock_capped_and_holding_no_slot(self) -> None:
+    def test_a_small_plan_runs_without_the_lock_capped_and_in_a_slot_of_its_own(self) -> None:
         p = self.weighed(self.plan(), self.timings())
         self.assertEqual([s.kind for s in p.suites], ["native", "wasip1"])
         self.assertTrue(p.unlocked, p.weight)
@@ -1090,19 +1091,28 @@ class SmallSuites(unittest.TestCase):
         runner = FakeRunner()
         self.assertEqual(smart_ci.execute(p, ROOT, "just", env=self.SLOT, runner=runner), 0)
         # The builds in the slot's command; the suites after it, in the parent, in their own capped
-        # scope at 4 test threads, and no `_locked`.
+        # scope at 4 test threads, inside it in a slot of their own (so that build-slot's gates
+        # apply to them: the freeze of 2026-10-13), and no `_locked`.
         self.assertEqual([kind for kind, _ in runner.calls][-2:], ["command", "run"])
         self.assertNotIn("_nextest-run", smart_ci.flat(runner.handoffs[-1].get("main", [])))
         kind, suites = runner.calls[-1]
         self.assertEqual(suites, smart_ci.flat(smart_ci.phases_of(p)["locked"]))
         self.assertEqual([suites[0], suites[3]], ["_nextest-run", "_wasm-run"])
-        self.assertEqual(runner.scopes[-1], FakeRunner.SCOPE)
+        self.assertEqual(runner.scopes[-1], [*FakeRunner.SCOPE, "/opt/build-slot"])
         self.assertEqual(runner.envs[-1], {"NEXTEST_TEST_THREADS": "4", "RUST_TEST_THREADS": "4", "CARGO_BUILD_JOBS": "4"})
         self.assertFalse(any(args[:1] == ["_locked"] for _, args in runner.calls))
+        self.assertIn("in a build slot of their own (/opt/build-slot)", smart_ci.describe(p, [], "x", False, env=self.SLOT))
         text = smart_ci.describe(p, [], "x", False, env={"SMART_CI_PRIORITY": "1"})
         self.assertIn("The suites run without the heavy-test lock: 3 test(s) and 5 s of test time", text)
         self.assertIn(f"within {smart_ci.SMALL_TESTS} tests and {smart_ci.SMALL_SECONDS:.0f} s", text)
         self.assertIn("SMART_CI_PRIORITY=1 has nothing to do", text)
+        self.assertIn("and hold no build slot", text)
+        # With no slot command, or inside a slot already (BUILD_SLOT_HELD), the scope alone.
+        for env in ({}, {**self.SLOT, "BUILD_SLOT_HELD": "1"}):
+            with self.subTest(env=env):
+                bare = FakeRunner()
+                self.assertEqual(smart_ci.execute(p, ROOT, "just", env=env, runner=bare), 0)
+                self.assertEqual(bare.scopes[-1], FakeRunner.SCOPE)
 
     def test_the_scope_is_vitests_where_systemd_allows_it(self) -> None:
         # The caps of `_vitest-run`'s scope, which R1 ruled no heavy run.
@@ -1612,14 +1622,17 @@ class AgreesWithCi(unittest.TestCase):
             priority = os.path.join(directory, "heavy.priority")
             env = {**os.environ, "HYPERION_HEAVY_LOCK": lock}
             env.pop("HYPERION_HEAVY_PRIORITY", None)
+            env.pop("HYPERION_HEAVY_HELD", None)
 
             def locked(*command: str, priority_run: bool = False) -> "subprocess.Popen[str]":
                 return subprocess.Popen([just(), "_locked", *command], cwd=str(ROOT), text=True,
                                         env={**env, "HYPERION_HEAVY_PRIORITY": "1"} if priority_run else env,
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                         start_new_session=os.name != "nt")
-            # With priority: the file names it while it waits, and is gone, as is the variable, once it holds the lock.
-            check = f'test ! -e "{priority}" && test -z "${{HYPERION_HEAVY_PRIORITY:-}}"'
+            # With priority: the file names it while it waits, and is gone, as is the variable, once it holds the lock;
+            # and the command is told that it holds the lock (HYPERION_HEAVY_HELD, which build-slot reads).
+            check = (f'test ! -e "{priority}" && test -z "${{HYPERION_HEAVY_PRIORITY:-}}"'
+                     ' && test "${HYPERION_HEAVY_HELD:-}" = 1')
             run = locked("bash", "-c", check, priority_run=True)
             self.assertEqual(run.wait(timeout=60), 0, run.stdout.read() if run.stdout else "")
             self.assertFalse(os.path.exists(priority))
@@ -1682,6 +1695,27 @@ class AgreesWithCi(unittest.TestCase):
                 os.killpg(run.pid, signal.SIGKILL)
                 output = run.communicate()[0]
             self.assertIn(f"stepping aside for the run with priority ({os.getpid()})", output)
+
+    def test_the_heavy_runs_scope_caps_its_cpu(self) -> None:
+        # `_locked`'s scope has 12 cores by default and `HEAVY_CPU_QUOTA`'s share when it is set, so
+        # that a heavy run leaves the desktop and I/O completion some (the freeze of 2026-10-13); on
+        # a lock file of its own, never the real one. Where systemd cannot make a user scope (macOS,
+        # Windows) the run is uncapped, and there is nothing to read.
+        if shutil.which("systemd-run") is None or subprocess.run(
+                ["systemd-run", "--user", "--scope", "--quiet", "true"], capture_output=True).returncode != 0:
+            self.skipTest("no systemd user scopes here")
+        show = 'cat "/sys/fs/cgroup$(sed -n "s/^0:://p" /proc/self/cgroup)/cpu.max"'
+        with tempfile.TemporaryDirectory() as directory:
+            env = {**os.environ, "HYPERION_HEAVY_LOCK": os.path.join(directory, "heavy.lock")}
+            for name in ("HYPERION_HEAVY_PRIORITY", "HYPERION_HEAVY_HELD", "HEAVY_CPU_QUOTA"):
+                env.pop(name, None)
+            for quota, wanted in ((None, "1200000 100000"), ("300%", "300000 100000")):
+                with self.subTest(quota=quota):
+                    run = subprocess.run([just(), "_locked", "bash", "-c", show], cwd=str(ROOT), capture_output=True,
+                                         text=True, timeout=60,
+                                         env={**env, "HEAVY_CPU_QUOTA": quota} if quota else env)
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    self.assertEqual(run.stdout.strip(), wanted)
 
     def test_the_narrower_prettier_runs_the_check_format_check_runs(self) -> None:
         script = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["scripts"]["format:check"]

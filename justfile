@@ -554,15 +554,23 @@ _locked +cmd:
     fi
     held=$SECONDS
     status=0
+    # The command, and everything it runs, can tell that it holds the lock: a machine's build-slot
+    # command runs a holder's builds without a slot, since a holder that waited for one could
+    # deadlock against a slot's holder waiting for this lock.
+    export HYPERION_HEAVY_HELD=1
     # Run in its own memory-capped cgroup where systemd allows it, so that a runaway heavy run is
     # stopped (by the cap, or by systemd-oomd watching the user manager) instead of freezing the
     # machine or taking the login session with it, as happened on 2026-10-03. `HEAVY_MEMORY_MAX`
     # overrides the cap, and `HEAVY_SLICE` names a user slice to run it in (such as one that bounds
-    # all of a session's agent work together). With no systemd (macOS) it runs uncapped.
+    # all of a session's agent work together). Its CPU is capped too, at 12 cores by default
+    # (`HEAVY_CPU_QUOTA` overrides it), so that on a 16-thread machine the desktop, the other
+    # processes and I/O completion keep at least 4 (the freeze of 2026-10-13, whose bench ran 15
+    # workers and a 16-thread runtime uncapped). With no systemd (macOS) it runs uncapped.
     if command -v systemd-run >/dev/null && systemd-run --user --scope --quiet true 2>/dev/null; then
         slice=()
         if [ -n "${HEAVY_SLICE:-}" ]; then slice=(--slice="$HEAVY_SLICE"); fi
-        systemd-run --user --scope --quiet ${slice[@]+"${slice[@]}"} -p MemoryMax="${HEAVY_MEMORY_MAX:-22G}" -p MemorySwapMax=2G "$@" || status=$?
+        systemd-run --user --scope --quiet ${slice[@]+"${slice[@]}"} -p MemoryMax="${HEAVY_MEMORY_MAX:-22G}" -p MemorySwapMax=2G \
+            -p CPUQuota="${HEAVY_CPU_QUOTA:-1200%}" "$@" || status=$?
     else
         "$@" || status=$?
     fi
@@ -1233,10 +1241,11 @@ ci: gen-surface (_wasm-preflight "wasip1" "browser")
 # Run it capped, with `SMART_CI_SLOT` naming the machine's build-slot command where there is one,
 # never inside it: smart-ci holds a slot only while it builds. Its suites take the heavy-test lock as
 # `ci`'s do, unless they are small by the timings recorded from earlier runs (at most 300 of
-# nextest's tests and 300 s), which run capped without it; `--full` and test-render's run always
-# take it. `SMART_CI_PRIORITY=1` (integration's runs, over its unpushed commits or with `--full`)
-# gives any plan that takes the lock priority on it, and integration's runs timestamp every recipe
-# line (`JUST_TIMESTAMP=true`).
+# nextest's tests and 300 s), which run capped without it, in a build slot of their own where
+# `SMART_CI_SLOT` names the command; `--full` and test-render's run always take it.
+# `SMART_CI_PRIORITY=1` (integration's runs, over its unpushed commits or with `--full`) gives any
+# plan that takes the lock priority on it, and integration's runs timestamp every recipe line
+# (`JUST_TIMESTAMP=true`).
 # The gate a change needs, chosen from its diff: `ci`'s steps, only those the change reaches.
 [positional-arguments]
 smart-ci *args:
