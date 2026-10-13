@@ -30,7 +30,8 @@
 //! payload, and each states how many are brighter than V 3.0; a run to the last reply then times
 //! the delivery of the final reply's stars brighter than V 3.0, the first reply that lists them
 //! all, against a quarter of the full census's wall time (R13.T2's real boundary, decided
-//! 2026-10-09).
+//! 2026-10-09; recorded, not gated, at version 21, `decision-r06-t17-findings.md` §1). Beside it
+//! the run prints how many of them each reply lists, at what share of the final's wall (R06.T11.h).
 //!
 //! Each iteration prints what each timed reply states and the process's CPU time to it where
 //! `/proc/self/stat` gives it (Linux, at 100 ticks a second). The handler logs, to stderr, when
@@ -43,8 +44,8 @@
 //! potential, not the sim benches' `milky_way_like` fixture, which no server builds. The budget is
 //! T17's (decided 2026-10-03 and 2026-10-05, read with the tables held on 2026-10-08): the first
 //! sky in at most 150 CPU-s and 10 s wall on the development machine's default workers. Figures
-//! are recorded in R06's Risks ("Deviations in T11.d, as built" and "Deviations in T11.g, as
-//! built"), each with its load.
+//! are recorded in R06's Risks ("Deviations in T11.d, as built", "Deviations in T11.g, as built"
+//! and "Deviations in T11.h, as built"), each with its load.
 //!
 //! R06.T17 measured it on 2026-10-11 and 2026-10-12, each run under the heavy-test lock on a shared
 //! machine, so every figure is provisional (R06's Risks, "Deviations in T17, as built"):
@@ -56,6 +57,14 @@
 //! - run whole (`final`, 15 workers, load 10–47), the final reply after 1,987 s and 25,286 CPU-s,
 //!   66,614 stars listed and none overflowing. Its 805 stars brighter than V 3.0 are all listed only
 //!   by the final reply, against a quarter of its wall, 497 s: missed.
+//!
+//! R06.T11.h ran it whole again on 2026-10-13, with E's shells from 1,000 ly a step ahead of C's
+//! and D's (`final`, 15 workers, under the heavy-test lock, load 11–42; provisional). E's
+//! 1,000–2,000 ly reply came after 1,160 s, 45.2% of the final reply's 2,567 s and 25,425 CPU-s,
+//! listing 804 of the final reply's 805 stars brighter than V 3.0, where T17's replies held 773
+//! until the final. The last of them lies in C's or D's last shell, so the delivery of all 805 is
+//! still the final reply's: missed, against 642 s, and recorded, not gated, at version 21. The
+//! final reply lists the same 66,614 stars, layer by layer, as T17's.
 
 #[path = "../tests/common/mod.rs"]
 mod common;
@@ -387,14 +396,29 @@ fn describe(what: &str, timed: &Timed) {
     );
 }
 
-/// Prints, for a run to the final reply, when the final reply's stars brighter than V 3.0 were
-/// all delivered: the first reply listing every one of them, against a quarter of the final
-/// reply's time, the gate (R06.T17; decided 2026-10-09 against the capped census's wall time).
+/// Prints, for a run to the final reply, how many of the final reply's stars brighter than V 3.0
+/// each reply lists, at what share of the final reply's time (R06.T11.h: E's far shell's reply,
+/// against T17's), and when they were all delivered: the first reply listing every one of them,
+/// against a quarter of the final reply's time, the gate (R06.T17; decided 2026-10-09 against the
+/// capped census's wall time; recorded, not gated, at version 21, `decision-r06-t17-findings.md`
+/// §1).
 fn report_bright_delivery(replies: &[Timed]) {
     let Some(last) = replies.last().filter(|timed| timed.response.is_final) else {
         return;
     };
     let wanted: HashSet<WireStar> = last.stars.iter().copied().filter(bright).collect();
+    let wall = last.elapsed.as_secs_f64();
+    for (k, timed) in replies.iter().enumerate() {
+        let listed: HashSet<WireStar> = timed.stars.iter().copied().collect();
+        let held = wanted.intersection(&listed).count();
+        let at = timed.elapsed.as_secs_f64();
+        eprintln!(
+            "reply {k}, {at:.2} s after the request, {:.1}% of the final's {wall:.2} s, lists \
+             {held} of the final reply's {} stars brighter than V {BRIGHT_V}",
+            100.0 * at / wall,
+            wanted.len()
+        );
+    }
     let delivered = replies.iter().position(|timed| {
         let listed: HashSet<WireStar> = timed.stars.iter().copied().collect();
         wanted.is_subset(&listed)

@@ -25,7 +25,8 @@
 //!   C's, D's and E's real boundary from the two (`real_boundary`); one more job makes the
 //!   census's plan (decided 2026-10-03, `decision-r06-tables.md`, item B.4);
 //! - the census runs its plan's shells nearest first, step by step ([`delivery_steps`]; R06.T11.d),
-//!   each shell's slabs as jobs of about [`CENSUS_JOB_SLICE`] ([`census_in_steps`]);
+//!   E's beyond 1,000 ly a step ahead of C's and D's (R06.T11.h), each shell's slabs as jobs of
+//!   about [`CENSUS_JOB_SLICE`] ([`census_in_steps`]);
 //! - while it runs, the band's rays are marched [`BAND_JOB_ROWS`] rows of a face to a job (R06.T9.f's
 //!   `march_rows`), once a request for every reply its shells can state, which reads no census;
 //! - after each step, its census is merged ([`merge_step`]), and each march is summed with that
@@ -60,6 +61,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
 use std::iter::Peekable;
+use std::num::NonZeroU32;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -182,7 +184,10 @@ pub struct SkyCaps {
     shell_edges_ly: Option<&'static [u32]>,
     /// A test's edge, ly, from which layer C's shells come a step late, in place of
     /// [`C_DEFERRED_BEYOND_LY`].
-    c_deferred_beyond_ly: Option<u32>,
+    c_deferred_beyond_ly: Option<NonZeroU32>,
+    /// A test's edge, ly, from which [`FAR_FIRST_LAYERS`]' shells come a step ahead of the other
+    /// layers', in place of [`FAR_FIRST_FROM_LY`].
+    far_first_from_ly: Option<NonZeroU32>,
     /// A test's band, in place of [`BandSpec::STANDARD`].
     band: Option<BandSpec>,
 }
@@ -205,6 +210,7 @@ impl SkyCaps {
         tables: SkyTablesSource::Galaxy,
         shell_edges_ly: None,
         c_deferred_beyond_ly: None,
+        far_first_from_ly: None,
         band: None,
     };
 
@@ -238,6 +244,7 @@ impl SkyCaps {
                 tables: SkyTablesSource::Dark,
                 shell_edges_ly: None,
                 c_deferred_beyond_ly: None,
+                far_first_from_ly: None,
                 band: None,
             })
         } else {
@@ -282,21 +289,45 @@ impl SkyCaps {
     /// step late ([`delivery_steps`]), in place of [`C_DEFERRED_BEYOND_LY`]: for a test whose
     /// nearer shell edges ([`with_shell_edges`](Self::with_shell_edges)) never reach 2,000 ly, so
     /// that its sky still has a step in which C's edge stays where it was (R06.T11.g). No sky a
-    /// client asks is delivered so.
+    /// client asks is delivered so. The edge is above nought, so that every layer's first shell
+    /// stays in the first step.
     #[must_use]
-    pub const fn with_c_deferred_beyond(self, edge_ly: u32) -> Self {
+    pub const fn with_c_deferred_beyond(self, edge_ly: NonZeroU32) -> Self {
         Self {
             c_deferred_beyond_ly: Some(edge_ly),
             ..self
         }
     }
 
-    /// The edge, ly, from which layer C's shells come a step late: [`C_DEFERRED_BEYOND_LY`] unless
-    /// a test's ([`with_c_deferred_beyond`](Self::with_c_deferred_beyond)).
+    /// The same caps with E's shells from `edge_ly` censused a step ahead of C's and D's of the
+    /// same edge, in place of [`FAR_FIRST_FROM_LY`] ([`delivery_steps`]; R06.T11.h).
+    ///
+    /// For a test whose nearer shell edges ([`with_shell_edges`](Self::with_shell_edges)) never
+    /// reach 1,000 ly, so that its sky still has a step in which E's shell runs ahead of C's and
+    /// D's. No sky a client asks is delivered so. The edge is above nought, so that every layer's
+    /// first shell stays in the first step.
     #[must_use]
-    pub fn c_deferred_beyond_ly(&self) -> f64 {
-        self.c_deferred_beyond_ly
-            .map_or(C_DEFERRED_BEYOND_LY, f64::from)
+    pub const fn with_far_first_from(self, edge_ly: NonZeroU32) -> Self {
+        Self {
+            far_first_from_ly: Some(edge_ly),
+            ..self
+        }
+    }
+
+    /// Where the sky's delivery defers shells by their inner edge ([`delivery_steps`]): from
+    /// [`FAR_FIRST_FROM_LY`] and [`C_DEFERRED_BEYOND_LY`], unless a test's
+    /// ([`with_far_first_from`](Self::with_far_first_from),
+    /// [`with_c_deferred_beyond`](Self::with_c_deferred_beyond)).
+    #[must_use]
+    pub(crate) fn delivery_order(&self) -> DeliveryOrder {
+        let served = DeliveryOrder::SERVED;
+        let edge = |edge_ly: NonZeroU32| LightYears::new(f64::from(edge_ly.get()));
+        DeliveryOrder {
+            far_first_from: self.far_first_from_ly.map_or(served.far_first_from, edge),
+            c_deferred_beyond: self
+                .c_deferred_beyond_ly
+                .map_or(served.c_deferred_beyond, edge),
+        }
     }
 
     /// The same caps with the sky's band marched at `spec`, in place of [`BandSpec::STANDARD`].
@@ -936,37 +967,49 @@ fn add_tallies(sum: &mut Option<CensusTallies>, tallies: &CensusTallies) {
 /// `decision-r06-census-cost-signoff.md`).
 ///
 /// Step k holds each layer's k-th shell, nearest first within each layer, as
-/// [`CensusPlan::shells`] ranks them, except that layer C's shells beyond `c_deferred_beyond_ly`
-/// ([`C_DEFERRED_BEYOND_LY`] for every sky a client asks, [`SkyCaps::c_deferred_beyond_ly`]),
-/// those whose inner edge is at or beyond it, come one step later: D's and E's shells to 4,000 ly
-/// then run before C's beyond 2,000 ly, whose cells are mostly walk and hold few of the brightest
-/// distant stars. C's shells are deferred by their edge, not by their place, so that the shells
-/// R06.T11.g put inside 500 ly move none of C's nearer ones (decided 2026-10-08,
-/// `decision-r06-t11d-first-sky.md` §1.4). Within a step the shells keep [`CensusPlan::shells`]'
-/// order. The first step holds every layer's first shell, so A, B and the brown dwarfs, one shell
-/// each, are final from the first reply, and every layer states a radius in it. Near the Sun the
-/// steps are 125, 250, 500, 1,000 and 2,000 ly for every layer, then D's and E's 4,000 ly before
-/// C's. The order is a function of the plan alone: every machine and worker count censuses the same
-/// steps and sends the same replies, only at its own pace. A plan of no shell, every cap of no
-/// radius, is one step of none, its one reply final.
+/// [`CensusPlan::shells`] ranks them, except for two deferrals, each by the shell's inner edge, the
+/// edge of the layer's shell before it, and not by its place, so that the shells R06.T11.g put
+/// inside 500 ly move none of the nearer ones (decided 2026-10-08, `decision-r06-t11d-first-sky.md`
+/// §1.4):
+///
+/// - every layer's shell but [`FAR_FIRST_LAYERS`]' whose inner edge is at or beyond `order`'s
+///   first edge ([`FAR_FIRST_FROM_LY`], 1,000 ly, for every sky a client asks)
+///   comes one step later, so that E's shells from there run a step ahead of C's and D's of the
+///   same edge (R06.T11.h; decided 2026-10-13, `decision-r06-t17-findings.md` §1). Near the Sun
+///   E's 1,000–2,000 ly shell, the real boundary's last, holds nearly all of the stars brighter
+///   than V 3.0 that the census's last step lists, and C's and D's of the same edge more than
+///   twice its job-seconds (R06.T17), so the far bright stars arrive about half the census's wall
+///   time sooner;
+/// - layer C's shells whose inner edge is at or beyond `order`'s second
+///   ([`C_DEFERRED_BEYOND_LY`], 2,000 ly) come one step later again: D's and E's shells to
+///   4,000 ly then run before C's beyond 2,000 ly, whose cells are mostly walk and hold few of the
+///   brightest distant stars (`decision-r06-census-cost-signoff.md`, condition 3).
+///
+/// Within a step the shells keep [`CensusPlan::shells`]' order. The first step holds every layer's
+/// first shell, so A, B and the brown dwarfs, one shell each, are final from the first reply, and
+/// every layer states a radius in it. Near the Sun, at the real boundary of 2,000 ly (rendering
+/// plan R13), the steps are 125, 250, 500 and 1,000 ly for every layer, then E's 2,000 ly, then
+/// C's and D's. The order is a function of the plan and `order` alone, never of the pool or its
+/// timing: every machine and worker count censuses the same steps and sends the same replies, only
+/// at its own pace. A plan of no shell, every cap of no radius, is one step of none, its one reply
+/// final.
 #[must_use]
-pub(crate) fn delivery_steps(plan: &CensusPlan, c_deferred_beyond_ly: f64) -> Vec<Vec<Shell>> {
+pub(crate) fn delivery_steps(plan: &CensusPlan, order: DeliveryOrder) -> Vec<Vec<Shell>> {
     let mut steps: Vec<Vec<Shell>> = Vec::new();
     // Each layer's edge before the shell at hand: its shells come nearest first within a layer.
     let mut inner: BTreeMap<Layer, LightYears> = BTreeMap::new();
     for shell in plan.shells() {
-        let from = inner
-            .get(&shell.layer())
-            .copied()
-            .unwrap_or(LightYears::ZERO);
-        let deferred = shell.layer() == Layer::C && from.value() >= c_deferred_beyond_ly;
-        let step = usize::from(shell.index()) + usize::from(deferred);
+        let layer = shell.layer();
+        let from = inner.get(&layer).copied().unwrap_or(LightYears::ZERO);
+        let behind = !FAR_FIRST_LAYERS.contains(&layer) && from >= order.far_first_from;
+        let deferred = layer == Layer::C && from >= order.c_deferred_beyond;
+        let step = usize::from(shell.index()) + usize::from(behind) + usize::from(deferred);
         if steps.len() <= step {
             steps.resize_with(step + 1, Vec::new);
         }
         steps[step].push(shell);
         if let Some(edge) = shell.edge() {
-            inner.insert(shell.layer(), edge);
+            inner.insert(layer, edge);
         }
     }
     steps.retain(|step| !step.is_empty());
@@ -976,9 +1019,50 @@ pub(crate) fn delivery_steps(plan: &CensusPlan, c_deferred_beyond_ly: f64) -> Ve
     steps
 }
 
+/// Where a sky's delivery defers shells by their inner edge ([`delivery_steps`]): from
+/// [`FAR_FIRST_FROM_LY`] and [`C_DEFERRED_BEYOND_LY`] for every sky a client asks, or a test's
+/// nearer edges ([`SkyCaps::delivery_order`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DeliveryOrder {
+    /// The inner edge from which [`FAR_FIRST_LAYERS`]' shells run a step ahead of the other
+    /// layers' of the same edge.
+    far_first_from: LightYears,
+    /// The inner edge from which layer C's shells come one step later again.
+    c_deferred_beyond: LightYears,
+}
+
+impl DeliveryOrder {
+    /// The order of every sky a client asks: [`FAR_FIRST_FROM_LY`] and [`C_DEFERRED_BEYOND_LY`].
+    pub(crate) const SERVED: Self = Self {
+        far_first_from: LightYears::new(FAR_FIRST_FROM_LY),
+        c_deferred_beyond: LightYears::new(C_DEFERRED_BEYOND_LY),
+    };
+}
+
 /// The edge, ly, beyond which layer C's shells are censused a step late ([`delivery_steps`]):
 /// 2,000 ly (`decision-r06-census-cost-signoff.md`, condition 3).
 pub(crate) const C_DEFERRED_BEYOND_LY: f64 = 2_000.0;
+
+/// The inner edge, ly, from which [`FAR_FIRST_LAYERS`]' shells are censused a step ahead of the
+/// other layers' of the same edge ([`delivery_steps`]; R06.T11.h, decided 2026-10-13,
+/// `decision-r06-t17-findings.md` §1): 1,000 ly, one of the fixed shell edges
+/// ([`SHELL_EDGES_LY`]).
+///
+/// Between 1,000 and 2,000 ly, distance moduli of 7.4–8.9 before the plane's dust, a star brighter
+/// than V 3.0 needs M<sub>V</sub> of about −4.4 to −6: supergiants and the brightest B stars, E's.
+pub(crate) const FAR_FIRST_FROM_LY: f64 = 1_000.0;
+
+/// The layers whose shells from [`FAR_FIRST_FROM_LY`] are censused a step ahead of the other
+/// layers' of the same edge ([`delivery_steps`]; R06.T11.h): E alone.
+///
+/// D would join E only if the caps' count gave D more than a third of C's, D's and E's expected
+/// stars brighter than V 3.0 between 1,000 ly and the real boundary (decided 2026-10-13,
+/// `decision-r06-t17-findings.md` §1). Near the Sun at the served eye's cut and ceiling it gives D
+/// 12.0% of them on the test fixture (1.07 of 8.93, E 7.80) and 4.3% on the server's galaxy for
+/// the sky tests' seed (2.52 of 58.6, E 56.0), so D's shells stay with C's (the sim's slow test
+/// `far_bright::beyond_1000_ly_d_holds_at_most_a_third_of_the_far_stars_brighter_than_v_3`, in
+/// `tests/sky_caps.rs`, which holds the rule; R06's Risks, "Deviations in T11.h, as built").
+pub(crate) const FAR_FIRST_LAYERS: [Layer; 1] = [Layer::E];
 
 /// One census job's share of a shell: cells of one of its slabs not yet censused, in order, the
 /// slab still to walk or some of its cells walked already, all of one layer.
@@ -1761,7 +1845,7 @@ mod tests {
             "one shell a layer to 30 ly"
         );
         assert_eq!(
-            delivery_steps(&plan, C_DEFERRED_BEYOND_LY),
+            delivery_steps(&plan, DeliveryOrder::SERVED),
             vec![shells.clone()]
         );
         let steps: Vec<Vec<Shell>> = shells.chunks(2).map(<[Shell]>::to_vec).collect();
@@ -1876,7 +1960,7 @@ mod tests {
         };
         let (off, sized) = (inputs(0), inputs(1_280 << 20));
         assert!(off.cells.is_off() && !sized.cells.is_off());
-        let steps = delivery_steps(&plan, C_DEFERRED_BEYOND_LY);
+        let steps = delivery_steps(&plan, DeliveryOrder::SERVED);
 
         for asked in ["first", "again"] {
             let without = steps_censused(&pool, &off, &plan, &steps, CENSUS_JOB_SLICE).await;
@@ -1920,57 +2004,98 @@ mod tests {
         census_plan_of(&query, caps)
     }
 
-    /// The delivery runs every shell once, nearest first within each layer, every layer's first in
-    /// the first step, and D's and E's shells to 4,000 ly before C's beyond 2,000 ly (R06.T11.d),
-    /// C's deferred by its edge: near the Sun the steps are 125, 250, 500, 1,000 and 2,000 ly for
-    /// every layer, then D's and E's 4,000 ly before C's (R06.T11.g).
-    #[test]
-    fn the_delivery_is_nearest_first_with_d_and_e_to_4000_ly_before_c_beyond_2000() {
-        use Layer::{A, B, BrownDwarf, C, D, E};
-        let plan = near_sun_plan();
-        let steps = delivery_steps(&plan, C_DEFERRED_BEYOND_LY);
-        let shape: Vec<Vec<(Layer, u8)>> = steps
+    /// Each step's shells as (layer, place in its layer).
+    fn shape(steps: &[Vec<Shell>]) -> Vec<Vec<(Layer, u8)>> {
+        steps
             .iter()
             .map(|step| step.iter().map(|s| (s.layer(), s.index())).collect())
-            .collect();
+            .collect()
+    }
+
+    /// The least edge each reply of `steps` reaches over its layers not yet final, ly, or `None`
+    /// for the final reply.
+    fn least_edges(plan: &CensusPlan, steps: &[Vec<Shell>]) -> Vec<Option<f64>> {
+        (1..=steps.len())
+            .map(|k| {
+                plan.completeness(steps[..k].concat())
+                    .least_edge()
+                    .map(LightYears::value)
+            })
+            .collect()
+    }
+
+    /// The delivery runs every shell once, nearest first within each layer, every layer's first in
+    /// the first step (R06.T11.d), E's shells from 1,000 ly a step ahead of C's and D's of the same
+    /// edge (R06.T11.h), and D's and E's shells to 4,000 ly before C's beyond 2,000 ly, C's
+    /// deferred by its inner edge (R06.T11.g): near the Sun the steps are 125, 250, 500 and
+    /// 1,000 ly for every layer, then E's 2,000 ly, then C's and D's with E's 4,000 ly, then D's
+    /// 4,000 ly before C's.
+    #[test]
+    fn the_delivery_is_nearest_first_e_ahead_from_1000_ly_c_beyond_2000_after_d_and_e_to_4000() {
+        use Layer::{A, B, BrownDwarf, C, D, E};
+        let plan = near_sun_plan();
+        let steps = delivery_steps(&plan, DeliveryOrder::SERVED);
         assert_eq!(
-            shape,
+            shape(&steps),
             vec![
                 vec![(A, 0), (B, 0), (C, 0), (D, 0), (E, 0), (BrownDwarf, 0)],
                 vec![(C, 1), (D, 1), (E, 1)],
                 vec![(C, 2), (D, 2), (E, 2)],
                 vec![(C, 3), (D, 3), (E, 3)],
-                vec![(C, 4), (D, 4), (E, 4)],
-                vec![(D, 5), (E, 5)],
-                vec![(C, 5), (D, 6), (E, 6)],
-                vec![(C, 6), (D, 7), (E, 7)],
-                vec![(C, 7), (E, 8)],
-                vec![(E, 9)],
+                vec![(E, 4)],
+                vec![(C, 4), (D, 4), (E, 5)],
+                vec![(D, 5), (E, 6)],
+                vec![(C, 5), (D, 6), (E, 7)],
+                vec![(C, 6), (D, 7), (E, 8)],
+                vec![(C, 7), (E, 9)],
             ]
         );
-        // Each step's edges, nearest first: C's first beyond 2,000 ly, its 4,000 ly shell, comes a
-        // step after D's and E's.
+        // Each step's edges, nearest first: E's first shell beyond 1,000 ly is its 2,000 ly shell,
+        // and C's first beyond 2,000 ly its 4,000 ly shell.
         let edge_of = |layer: Layer, index: u8| {
             plan.shells()
                 .find(|s| s.layer() == layer && s.index() == index)
                 .and_then(|s| s.edge())
                 .map(LightYears::value)
         };
-        assert_eq!(edge_of(C, 4), Some(2_000.0));
-        assert_eq!(edge_of(C, 5), Some(4_000.0));
-        assert_eq!(edge_of(D, 5), Some(4_000.0));
+        for layer in [C, D, E] {
+            assert_eq!(edge_of(layer, 3), Some(1_000.0), "{layer:?}");
+            assert_eq!(edge_of(layer, 4), Some(2_000.0), "{layer:?}");
+            assert_eq!(edge_of(layer, 5), Some(4_000.0), "{layer:?}");
+        }
         let mut all: Vec<Shell> = steps.concat();
         let mut planned: Vec<Shell> = plan.shells().collect();
         all.sort_unstable();
         planned.sort_unstable();
         assert_eq!(all, planned, "every shell once");
+        let step_of = |layer: Layer, index: u8| {
+            steps.iter().position(|step| {
+                step.iter()
+                    .any(|s| s.layer() == layer && s.index() == index)
+            })
+        };
+        // The shells to 1,000 ly come by their place; E's from 1,000 ly a step ahead of C's and D's
+        // of the same edge, and D's a step ahead of C's from 2,000 ly.
+        for index in 0..8 {
+            let at = (step_of(C, index), step_of(D, index), step_of(E, index));
+            let k = usize::from(index);
+            let expected = match index {
+                0..=3 => (Some(k), Some(k), Some(k)),
+                4 => (Some(k + 1), Some(k + 1), Some(k)),
+                _ => (Some(k + 2), Some(k + 1), Some(k)),
+            };
+            assert_eq!(
+                at, expected,
+                "the shells of place {index}: C's, D's and E's steps"
+            );
+        }
         let edge = |shell: &Shell| shell.edge().map_or(f64::INFINITY, LightYears::value);
         // D's and E's shells to 4,000 ly all come before C's first beyond 2,000 ly.
         let c_beyond = steps
             .iter()
             .position(|step| step.iter().any(|s| s.layer() == C && edge(s) > 2_000.0))
             .unwrap();
-        assert_eq!(c_beyond, 6);
+        assert_eq!(c_beyond, 7);
         for (k, step) in steps.iter().enumerate() {
             for shell in step {
                 if matches!(shell.layer(), D | E) && edge(shell) <= 4_000.0 {
@@ -1981,25 +2106,18 @@ mod tests {
         // The first reply has every layer's first shell: A, B and the brown dwarfs are final.
         let first = plan.completeness(steps[0].iter().copied());
         assert_eq!(first.least_edge(), Some(LightYears::new(125.0)));
-        let reached: Vec<Option<f64>> = (1..=steps.len())
-            .map(|k| {
-                plan.completeness(steps[..k].concat())
-                    .least_edge()
-                    .map(LightYears::value)
-            })
-            .collect();
         assert_eq!(
-            reached,
+            least_edges(&plan, &steps),
             [
                 Some(125.0),
                 Some(250.0),
                 Some(500.0),
                 Some(1_000.0),
+                Some(1_000.0),
                 Some(2_000.0),
                 Some(2_000.0),
                 Some(4_000.0),
                 Some(8_000.0),
-                Some(32_000.0),
                 None
             ]
         );
@@ -2010,36 +2128,135 @@ mod tests {
         assert!(last.is_final());
     }
 
+    /// Caps as the served sky near the Sun puts them on the server's galaxy at the eye's cut and
+    /// RM3's ceiling, uniform here (R06.T17's final reply): C to 1,893 ly, D and E to the real
+    /// limit of 2,000 ly, each with shells to 125–1,000 ly and its last, and A, B and the brown
+    /// dwarfs one each.
+    fn near_sun_served_plan() -> CensusPlan {
+        let query = SkyQuery::builder(sun(), Magnitudes::new(7.766))
+            .synthetic_ceiling(SYNTHETIC_CEILING)
+            .build()
+            .unwrap();
+        let caps = [11.0, 56.0, 1_893.0, 2_000.0, 2_000.0, 1.0]
+            .iter()
+            .zip(CAPPED_LAYERS)
+            .map(|(&r, layer)| LayerCap::forced(layer, LightYears::new(r)))
+            .collect();
+        census_plan_of(&query, caps)
+    }
+
+    /// Near the Sun at the real boundary of 2,000 ly (rendering plan R13; R06.T17's served caps,
+    /// C's to 1,893 ly), each layer's 1,000–2,000 ly shell its last, E's comes a step before C's
+    /// and D's, the steps to 1,000 ly as before, and its reply holds E final with C and D still
+    /// complete to 1,000 ly (R06.T11.h; decided 2026-10-13, `decision-r06-t17-findings.md` §1).
+    #[test]
+    fn near_the_sun_es_last_shell_comes_a_step_before_cs_and_ds() {
+        use Layer::{A, B, BrownDwarf, C, D, E};
+        let plan = near_sun_served_plan();
+        let steps = delivery_steps(&plan, DeliveryOrder::SERVED);
+        assert_eq!(
+            shape(&steps),
+            vec![
+                vec![(A, 0), (B, 0), (C, 0), (D, 0), (E, 0), (BrownDwarf, 0)],
+                vec![(C, 1), (D, 1), (E, 1)],
+                vec![(C, 2), (D, 2), (E, 2)],
+                vec![(C, 3), (D, 3), (E, 3)],
+                vec![(E, 4)],
+                vec![(C, 4), (D, 4)],
+            ]
+        );
+        assert!(steps[4..].concat().iter().all(Shell::is_last));
+        assert_eq!(
+            least_edges(&plan, &steps),
+            [
+                Some(125.0),
+                Some(250.0),
+                Some(500.0),
+                Some(1_000.0),
+                Some(1_000.0),
+                None
+            ]
+        );
+        let e_first = plan.completeness(steps[..5].concat());
+        assert_eq!(
+            [C, D, E].map(|layer| e_first.edge(layer).map(LightYears::value)),
+            [Some(1_000.0), Some(1_000.0), None]
+        );
+    }
+
     /// One march of the plan's replies holds every step's radii, whatever the delivery's order
-    /// (R06.T9.f: one march a request; R06.T11.d).
+    /// (R06.T9.f: one march a request; R06.T11.d), at the derived caps and at the served ones,
+    /// whose E shell runs alone ahead of C's and D's (R06.T11.h).
     #[test]
     fn one_march_of_the_plans_replies_holds_every_steps_radii() {
         let galaxy = Galaxy::new(Seed::new(0x4d2));
         let tables = SkyTables::new(LuminosityTables::dark(&galaxy), &galaxy);
-        let plan = near_sun_plan();
         let query = SkyQuery::builder(sun(), Magnitudes::new(7.95))
             .build()
             .unwrap();
         let spec = BandSpec::new(2, 12).unwrap();
-        let march = march_rows(
-            &galaxy,
-            &mut tables.march_context(),
-            &query,
-            plan.replies(),
-            &spec,
-            CubeFace::PosZ,
-            0..1,
-        );
-        let mut done = Vec::new();
-        for step in delivery_steps(&plan, C_DEFERRED_BEYOND_LY) {
-            done.extend(step);
-            let completeness = plan.completeness(done.iter().copied());
-            assert!(
-                march.holds(completeness.complete_to()),
-                "after {} shells",
-                done.len()
+        for (what, plan) in [
+            ("derived", near_sun_plan()),
+            ("served", near_sun_served_plan()),
+        ] {
+            let march = march_rows(
+                &galaxy,
+                &mut tables.march_context(),
+                &query,
+                plan.replies(),
+                &spec,
+                CubeFace::PosZ,
+                0..1,
             );
+            let mut done = Vec::new();
+            for step in delivery_steps(&plan, DeliveryOrder::SERVED) {
+                done.extend(step);
+                let completeness = plan.completeness(done.iter().copied());
+                assert!(
+                    march.holds(completeness.complete_to()),
+                    "{what} caps, after {} shells",
+                    done.len()
+                );
+            }
         }
+    }
+
+    /// A sky a client asks is delivered in the served order, from 1,000 and 2,000 ly (R06.T11.h,
+    /// R06.T11.g), and each test seam moves only its own edge.
+    #[test]
+    fn a_served_sky_takes_the_served_delivery_order_and_each_seam_its_own_edge() {
+        let edge = |ly| NonZeroU32::new(ly).unwrap();
+        let ly = LightYears::new;
+        assert_eq!(SkyCaps::DERIVED.delivery_order(), DeliveryOrder::SERVED);
+        assert_eq!(
+            SkyCaps::forced(ly(30.0)).unwrap().delivery_order(),
+            DeliveryOrder::SERVED
+        );
+        assert_eq!(
+            (
+                DeliveryOrder::SERVED.far_first_from,
+                DeliveryOrder::SERVED.c_deferred_beyond
+            ),
+            (ly(1_000.0), ly(2_000.0))
+        );
+        assert_eq!(
+            SkyCaps::DERIVED
+                .with_far_first_from(edge(15))
+                .delivery_order(),
+            DeliveryOrder {
+                far_first_from: ly(15.0),
+                ..DeliveryOrder::SERVED
+            }
+        );
+        assert_eq!(
+            SkyCaps::DERIVED
+                .with_c_deferred_beyond(edge(20))
+                .delivery_order(),
+            DeliveryOrder {
+                c_deferred_beyond: ly(20.0),
+                ..DeliveryOrder::SERVED
+            }
+        );
     }
 
     /// The derived caps, their rays measured in jobs and counted in ray order, are `layer_caps`'

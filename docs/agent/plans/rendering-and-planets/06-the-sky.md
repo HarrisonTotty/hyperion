@@ -2705,6 +2705,11 @@ sky`, `cargo test -p hyperion-server bulk::sky`, `pnpm --filter @hyperion/protoc
   - **Acceptance:** `cargo test -p hyperion-server compute::sky`,
     `cargo test -p hyperion-server --test sky`, the bench recorded, `just smart-ci`.
 
+  As built (Risks, "Deviations in T11.h, as built"): E alone runs a step ahead from 1,000 ly.
+  D's share of the far stars brighter than V 3.0 is 12.0% on the fixture and 4.3% on the server's
+  galaxy, so D stays with C. E's far reply came at 1,160 s, 45.2% of the 2,567 s wall, with 804 of
+  the 805 stars brighter than V 3.0.
+
 - **R06.T11.i The tables' schedule (new; after T17; decided 2026-10-13,
   `decision-r06-t17-findings.md` §4).** T17 measured the per-galaxy tables at the open:
   - 11.6 s wall and 47.0 CPU-s on 15 workers, and 17.9 s and 45.8 CPU-s on four;
@@ -8502,7 +8507,9 @@ CensusCost)`.
     first shell, so A, B and the brown dwarfs are final from the first reply, and the march needs
     no `nowhere()`. A plan of no shell is one step of none. The order is the plan's alone. Later
     steps' jobs may run while an earlier step's last ones do; the replies go out in order. T17's
-    V 3.0 gate is not measured (T17's).
+    V 3.0 gate is not measured (T17's). _Since R06.T11.h (2026-10-13) E's shells from 1,000 ly
+    also run a step ahead of C's and D's of the same edge: Risks, "Deviations in T11.h, as
+    built"._
   - **The census in steps** (`census_in_steps`).
     - **Jobs by time, not by expected work (deviation).** A cell's cost is unknown until its
       records' bounds are read: most are skipped in microseconds, a few generated for seconds. So
@@ -8777,7 +8784,10 @@ CensusCost)`.
     none. T8.i's identity tests keep the test's 40 and 80 ly; the fixed edges are held by
     `the_shells_take_the_fixed_edges_below_each_cap` and the sphere and completeness tests.
     `--test sky`'s 10–25 ly defer C from 20 ly (`SkyCaps::with_c_deferred_beyond`, a test seam
-    beyond the plan), so its 6 replies keep a step whose least edge stays at 20 ly.
+    beyond the plan), so its 6 replies keep a step whose least edge stays at 20 ly. _Since
+    R06.T11.h (2026-10-13) the steps near the Sun keep their 10, with E's 2,000 ly shell a step
+    ahead of C's and D's, and `--test sky` has 7 replies: Risks, "Deviations in T11.h, as
+    built"._
   - **Every reply's band moves (determinism audit; not in the ruling's "Nothing generated
     moves").** The request's march keeps every radius a reply can state as a node of each ray, so
     125 and 250 ly are two new nodes: each reply's texels, the final one's too, and so their eye
@@ -9490,3 +9500,108 @@ CensusCost)`.
     R06.T11.j measures the server's sky share, and R12's resident-memory run measures both.
   - **N_max** binds a dense sky's camera before its sensor does: on the server's galaxy at high, the
     points end near V 9.7 (_estimate_). That is for the N_max ruling.
+- **Deviations in T11.h, as built (2026-10-13).** E's far shell first, as the ruling
+  (`decision-r06-t17-findings.md` §1 and §10.3) sets it out. Built, benched and recorded on
+  `rendering-and-planets` 13c4be40 with docs-batch-11's 2f273e59 and fd650d54 merged by name, then
+  ea127bc5 merged by name before the commit (c9138be2). The merge's conflicts, all in this plan,
+  took integration's side, which holds docs-batch-11 as cherry-picks; this record follows the
+  camera budget's ruling at the Risks' end. No golden moves and no bump
+  (determinism audit; `golden_diff` against `rendering-and-planets`: no golden file changed;
+  GENERATOR_VERSION 21). `PROTOCOL_VERSION` stays 2, and no wire type changes.
+  - **The order.** `delivery_steps(plan, DeliveryOrder)` defers by the shell's inner edge, as
+    T11.g's deferral does. A shell of any layer but `FAR_FIRST_LAYERS`' (E alone) whose inner edge
+    is at or beyond `FAR_FIRST_FROM_LY` (1,000 ly) comes a step later. C's shells from
+    `C_DEFERRED_BEYOND_LY` (2,000 ly) come a step later again.
+    - Near the Sun at the served caps (C 1,893, D and E 2,000 ly) there are six steps. The first
+      four take every layer to 125, 250, 500 and 1,000 ly. Then E's 1,000–2,000 ly shell comes
+      alone: E is final, C and D stay complete to 1,000 ly, and the note's least edge stays at
+      1,000 ly. Then C's and D's last shells. That is one reply more than T17's five.
+    - At T11.g's test caps (C 14,563, D 13,232, E 61,341 ly) there are still ten steps. Their
+      least edges are 125, 250, 500, 1,000, 1,000, 2,000, 2,000, 4,000 and 8,000 ly, then none.
+      From 1,000 ly E runs a step ahead of D, and from 2,000 ly two ahead of C. D's and E's shells
+      to 4,000 ly still come before C's beyond 2,000 ly.
+    - No reply states a radius that a layer could not state before. So the request's one march
+      (`CensusPlan::replies`, which keeps each layer's radii) holds every step's radii, tested at
+      both caps. Every earlier reply is as it was, bit for bit, the final reply included, and the
+      new reply is the exact census to its stated radii.
+  - **The record first (deviation: a slow test of its own).** It is
+    `far_bright::beyond_1000_ly_d_holds_at_most_a_third_of_the_far_stars_brighter_than_v_3`, in
+    `crates/hyperion-sim/tests/sky_caps.rs`, beside `caps_converge_in_rays` rather than inside its
+    12-minute run. Near the Sun at the epoch, it takes the default eye's cut with the request's
+    illumination, the caps by the eye's visibility, the served ceiling of V 5.0 and
+    `real_boundary`, all over one set of rays. It then counts the same rays at V 3.0. Each layer's
+    expected stars brighter than V 3.0:
+
+    | Galaxy                                  | Cut     | C, 1,000 ly to R(u) | D     | E      | D's share | C, D and E within 1,000 ly |
+    | --------------------------------------- | ------- | ------------------- | ----- | ------ | --------- | -------------------------- |
+    | Fixture (`milky_way_like`, 0x0926_0000) | V 8.179 | 0.056               | 1.071 | 7.803  | 12.0%     | 45.5, 55.7, 21.9           |
+    | Server's galaxy (0x4d2, full potential) | V 7.766 | 0.050               | 2.518 | 55.997 | 4.3%      | 108.7, 334.3, 366.3        |
+    - So D stays with C. The test asserts D's share is at most a third on both galaxies, so that a
+      later version that breaks the rule fails it.
+    - It counts the two galaxies on two threads, one each, and prints both records after, in
+      order. It runs natively only: it pins no bit, and wasm32-wasip1 has no threads. It took
+      97–106 s in the slow profile, at a load of about 17.
+    - The fixture's 8.93 matches the ruling's "some 8.8" (R13.T1.b). The server galaxy's 58.6 is
+      high beside the 32 that T17 realised in the last step: the caps' count reads each ray through
+      the clearest of its three sub-rays (R06.T7.b), an upper count, most of all far out. Only the
+      share decides here, so it is not a finding against the caps.
+
+  - **Seams and names beyond the plan.**
+    - `SkyCaps::with_far_first_from(NonZeroU32)` is a test seam like `with_c_deferred_beyond`,
+      which now takes a `NonZeroU32` too: an edge of 0 would move every layer's first shell out of
+      the first step (both reviews). `--test sky`'s 10–25 ly edges put E first from 15 ly. Its sky
+      arrives in 7 replies (6 before), the third E's 15–20 ly shell alone, with least edges 10, 15,
+      15, 20, 20 and 25 ly, then none.
+    - `SkyCaps::c_deferred_beyond_ly()` (pub) gives way to `pub(crate) SkyCaps::delivery_order()`
+      and `DeliveryOrder` (`SERVED`). A test holds that a sky a client asks takes `SERVED`, and
+      that each seam moves only its own edge.
+    - The order's unit test is renamed
+      `the_delivery_is_nearest_first_e_ahead_from_1000_ly_c_beyond_2000_after_d_and_e_to_4000`.
+      `near_the_sun_es_last_shell_comes_a_step_before_cs_and_ds` is new, at the served caps, and
+      `one_march_of_the_plans_replies_holds_every_steps_radii` now runs at both caps.
+  - **The bench.** For a run to the final reply, `report_bright_delivery` also prints each reply's
+    time, its share of the final's wall, and how many of the final reply's stars brighter than
+    V 3.0 it lists.
+    - **Measured** (2026-10-13, `sky_near_sun_cold/first_reply`, one iteration,
+      `HYPERION_SKY_BENCH_UNTIL_LY=final`, release, 15 workers, under the heavy lock, held
+      2,585 s after 4,783 s of waiting; the 1-minute load 10.9–42.3 during the run, the bench's
+      own workers and other lanes' builds; provisional). Log:
+      `.git/rm45-scratch/r06-census/bench/full-15.log`.
+
+      | Reply | Complete to                  | Wall       | Share of the final's wall | CPU-s    | Listed | Of the final's 805 brighter than V 3.0 |
+      | ----- | ---------------------------- | ---------- | ------------------------- | -------- | ------ | -------------------------------------- |
+      | 0     | 125 ly                       | 7.01 s     | 0.3%                      | 95.7     | 3,192  | 183                                    |
+      | 1     | 250 ly                       | 17.06 s    | 0.7%                      | 244.2    | 11,129 | 355                                    |
+      | 2     | 500 ly                       | 75.18 s    | 2.9%                      | 1,038.6  | 28,549 | 600                                    |
+      | 3     | 1,000 ly                     | 563.63 s   | 22.0%                     | 5,758.3  | 56,708 | 773                                    |
+      | 4     | E final, C and D to 1,000 ly | 1,159.70 s | 45.2%                     | 12,086.1 | 58,608 | 804                                    |
+      | 5     | final                        | 2,566.81 s | 100%                      | 25,424.6 | 66,614 | 805                                    |
+
+    - **E's far stars by 45.2% of the wall** (the ruling's estimate: about 48%), 19.3 minutes into
+      this run. At T17's 1,987 s wall that share would be some 15 minutes, against T17's 33 for
+      them. 31 of the 32 stars brighter than V 3.0 beyond 1,000 ly came with E's reply. The last
+      lies in C's or D's last shell (the wire carries no layer), as the count's 2.57 expected
+      there allows.
+    - **The V 3.0 delivery:** all 805 come only with the final reply, so the delivery is still
+      missed against a quarter of the wall (642 s). It is recorded, not gated, at version 21.
+    - Each step's census job-seconds were 34, 145, 865, 7,262, 8,994 (E's shell) and 21,034 (C
+      5,813, D 15,221), 38,333 in all, against T17's 29,700. The process's CPU (25,425 s against
+      25,286) and the final reply's every layer (C 38,338 listed in 691,965 cells, D 22,903 in
+      108,303, E 5,299 in 16,908) are T17's, so the work is the same. The wall and the jobs'
+      times are longer at this run's heavier load. E's share of the job-seconds to its reply,
+      45.1%, is its share of the wall.
+    - The tables were held 11.70 s after the open's answer, at 47.8 CPU-s (T17: 11.6 s and
+      47.0).
+  - **Not taken (a consider):** a nextest `threads-required = 2` for the two-thread slow test.
+    Editing `.config/nextest.toml` makes smart-ci run every crate's tests, so the reviewer's
+    advice is left for the orchestrator's next change there. The bench's second pass over each
+    reply's stars (the Rust review's consider) is kept, at milliseconds a reply.
+  - **Files beyond T11.h's list:** the server's `requests/sky.rs` (the call) and `tests/sky.rs`
+    (T11.d's test, at the seam).
+  - **Gates.** `just smart-ci` passed before the merge and again after it: rustfmt, Prettier,
+    Clippy for the other platforms, Clippy on the server and the sim with `testing`, the fitted
+    tables fresh, and under the heavy lock 430 (then 431) native tests, the doctests and 114
+    (then 115) wasip1 tests. The server's `compute::sky` and
+    `--test sky` (28 tests) and the slow test above passed by name. Reviews: Rust (no must-fix;
+    three should-fixes and two considers applied), determinism (no must-fix or should-fix; its
+    three considers applied) and plan conformance (the record and the bench, done here).

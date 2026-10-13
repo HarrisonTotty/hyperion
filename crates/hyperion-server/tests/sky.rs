@@ -33,7 +33,7 @@
 mod common;
 
 use std::collections::BTreeMap;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::Path;
 use std::sync::{Arc, OnceLock};
 
@@ -1501,20 +1501,30 @@ const TEST_SHELL_EDGES_LY: [u32; 4] = [10, 15, 20, 25];
 
 /// The edge, ly, from which the nearest-first test's C shells come a step late, as C's beyond
 /// 2,000 ly do near the Sun: its fourth and fifth, from 20 and 25 ly.
-const TEST_C_DEFERRED_BEYOND_LY: u32 = 20;
+const TEST_C_DEFERRED_BEYOND_LY: NonZeroU32 = NonZeroU32::new(20).unwrap();
+
+/// The edge, ly, from which the nearest-first test's E shells come a step ahead of C's and D's of
+/// the same edge, as E's beyond 1,000 ly do near the Sun (R06.T11.h): its third to fifth, from 15,
+/// 20 and 25 ly.
+const TEST_FAR_FIRST_FROM_LY: NonZeroU32 = NonZeroU32::new(15).unwrap();
 
 /// The steps a sky of `plan` arrives in (R06.T11.d): each layer's shells rank by rank, nearest
-/// first, but C's from [`TEST_C_DEFERRED_BEYOND_LY`] on, by their inner edge, a step late
-/// (R06.T11.g).
+/// first, but C's and D's from [`TEST_FAR_FIRST_FROM_LY`] on, by their inner edge, a step late
+/// (R06.T11.h), and C's from [`TEST_C_DEFERRED_BEYOND_LY`] on a step later again (R06.T11.g).
 fn delivery(plan: &CensusPlan) -> Vec<Vec<Shell>> {
     let mut steps: Vec<Vec<Shell>> = Vec::new();
-    let mut c_inner_ly = 0.0;
+    // Each layer's edge before the shell at hand, ly.
+    let mut inner_ly: BTreeMap<Layer, f64> = BTreeMap::new();
     for shell in plan.shells() {
-        let late = shell.layer() == Layer::C && c_inner_ly >= f64::from(TEST_C_DEFERRED_BEYOND_LY);
-        if shell.layer() == Layer::C {
-            c_inner_ly = shell.edge().map_or(c_inner_ly, LightYears::value);
+        let layer = shell.layer();
+        let from = inner_ly.get(&layer).copied().unwrap_or(0.0);
+        let behind =
+            matches!(layer, Layer::C | Layer::D) && from >= f64::from(TEST_FAR_FIRST_FROM_LY.get());
+        let late = layer == Layer::C && from >= f64::from(TEST_C_DEFERRED_BEYOND_LY.get());
+        if let Some(edge) = shell.edge() {
+            inner_ly.insert(layer, edge.value());
         }
-        let step = usize::from(shell.index()) + usize::from(late);
+        let step = usize::from(shell.index()) + usize::from(behind) + usize::from(late);
         if steps.len() <= step {
             steps.resize_with(step + 1, Vec::new);
         }
@@ -1647,13 +1657,16 @@ fn stars_sent(response: &SkyResponse, payload: &[u8]) -> Vec<Vec<u8>> {
 ///
 /// The caps are forced to 30 ly with nearer shell edges than the fixed ones (the server's test
 /// seam), so that the census takes seconds: a census of the fixed edges' first shell, C, D and E
-/// to 125 ly, is a minute or more of a worker in a test build.
+/// to 125 ly, is a minute or more of a worker in a test build. The seam's nearer deferrals keep
+/// both of the delivery's: E's shells from 15 ly a step ahead of C's and D's (R06.T11.h), so that
+/// one reply holds E's 20 ly shell before C's and D's, and C's from 20 ly a step later again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii() {
     let caps = SkyCaps::forced(LightYears::new(SMALL_CAP_LY))
         .expect("a small forced cap")
         .with_shell_edges(&TEST_SHELL_EDGES_LY)
-        .with_c_deferred_beyond(TEST_C_DEFERRED_BEYOND_LY);
+        .with_c_deferred_beyond(TEST_C_DEFERRED_BEYOND_LY)
+        .with_far_first_from(TEST_FAR_FIRST_FROM_LY);
     let (server, _data_dir) = sky_server_with(caps, 3).await;
     let (mut client, universe) = opened(&server).await;
     let n_max = std::num::NonZeroU32::new(24).expect("not zero");
@@ -1676,7 +1689,12 @@ async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii()
     let forced = query.forced_caps().expect("forced caps").to_vec();
     let plan = census_plan_with_edges(&query, forced, &TEST_SHELL_EDGES_LY);
     let steps = delivery(&plan);
-    assert_eq!(steps.len(), 6, "{steps:?}");
+    assert_eq!(steps.len(), 7, "{steps:?}");
+    assert_eq!(
+        steps[2].iter().map(Shell::layer).collect::<Vec<_>>(),
+        [Layer::E],
+        "E's shell to 20 ly a step ahead of C's and D's: {steps:?}"
+    );
     assert_eq!(replies.len(), steps.len(), "a reply a step");
     let marches = sim_marches(dark_tables(), &query, &plan);
     // Every reply's census folds the cells of the shells done so far, each cell censused once.
@@ -1722,6 +1740,7 @@ async fn a_sky_arrives_nearest_first_each_reply_the_census_to_its_stated_radii()
         least_edges,
         [
             Some(10.0),
+            Some(15.0),
             Some(15.0),
             Some(20.0),
             Some(20.0),

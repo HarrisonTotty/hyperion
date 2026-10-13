@@ -24,10 +24,16 @@
 //! and E's stars beyond 10,000 ly more than 30° from the plane, the brackets ruling's finding read
 //! as a count; near the Sun the camera's caps at its black-sky limit; and the range query's check
 //! (open question 19).
+//!
+//! For R06.T11.h's order (decided 2026-10-13, `decision-r06-t17-findings.md` §1), a second slow
+//! test counts, near the Sun on the test fixture and on the server's galaxy, each of C's, D's and
+//! E's expected stars brighter than V 3.0 between 1,000 ly and its real boundary at the served
+//! eye's cut and ceiling, from the caps' count alone with no census, and holds D's to at most a
+//! third of the three's, the rule by which the server's delivery leaves D's far shells with C's.
 
 #[expect(
     dead_code,
-    reason = "the convergence test uses the sky helpers of tests/common alone"
+    reason = "the caps' slow tests use the sky helpers of tests/common alone"
 )]
 mod common;
 
@@ -379,4 +385,230 @@ fn range_query_record(galaxy: &Galaxy, tables: &LuminosityTables, envelope: &Bri
         100.0 * (RANGE_REALISED / expected - 1.0),
         100.0 / expected.sqrt()
     );
+}
+
+/// R06.T11.h's record of the far stars brighter than V 3.0, layer by layer.
+///
+/// It is left out on wasm32-wasip1, which has no threads: it pins no bit, and its native run is the
+/// record.
+#[cfg(not(target_family = "wasm"))]
+mod far_bright {
+    use std::sync::Arc;
+
+    use hyperion_sim::Seed;
+    use hyperion_sim::coords::GalacticPosition;
+    use hyperion_sim::galaxy::Galaxy;
+    use hyperion_sim::galaxy::gas::modifiers::NoModifiers;
+    use hyperion_sim::galaxy::gas::noise::NoiseCache;
+    use hyperion_sim::galaxy::params::GalaxyParams;
+    use hyperion_sim::id::Layer;
+    use hyperion_sim::observe::Observer;
+    use hyperion_sim::sky::EyeObserver;
+    use hyperion_sim::sky::caps::{
+        CAP_RAYS, CapCount, CapCountPlan, CapLattice, RayExtinctions, SUB_RAYS,
+        SYNTHETIC_CEILING_V, real_boundary, served_ceiling,
+    };
+    use hyperion_sim::sky::census::{CellOffsets, NoSkyCellCache, SkyContext};
+    use hyperion_sim::sky::dgl::Illumination;
+    use hyperion_sim::sky::envelope::BrightnessEnvelope;
+    use hyperion_sim::sky::limits::{eye_cut, eye_visibility};
+    use hyperion_sim::sky::luminosity::LuminosityTables;
+    use hyperion_sim::time::UniverseTime;
+    use hyperion_sim::units::{LightYears, Magnitudes};
+
+    use crate::common::sky::SUN_LY;
+
+    /// The apparent V brighter than which R06.T11.h counts the far stars: the V 3.0 delivery's
+    /// (R06.T17).
+    const BRIGHT_V: f64 = 3.0;
+
+    /// The inner edge, ly, from which the server censuses E's shells a step ahead of C's and D's of
+    /// the same edge (R06.T11.h): the fixed shell edge of 1,000 ly.
+    const FAR_FROM_LY: f64 = 1_000.0;
+
+    /// The seed of the server's sky tests and bench (`hyperion-server`'s `tests/sky.rs` and
+    /// `benches/sky.rs`), whose galaxy the server builds as `Galaxy::new(seed)` with its full
+    /// potential.
+    const SERVER_SEED: u64 = 0x4d2;
+
+    /// One galaxy's expected stars brighter than [`BRIGHT_V`] near the Sun for C, D and E, in that
+    /// order, from the caps' count: within both [`FAR_FROM_LY`] and the real boundary R(u), between
+    /// the two, and within R(u); and the record's line, printed once both galaxies are counted.
+    struct FarBright {
+        near: [f64; 3],
+        between: [f64; 3],
+        within: [f64; 3],
+        line: String,
+    }
+
+    /// R06.T11.h's record for `galaxy`, named `name`.
+    ///
+    /// Near the Sun at the epoch, at the eye's cut as the server computes it for the default eye
+    /// (`eye_cut` with the request's illumination, `Illumination::march` at the point), with its
+    /// caps by the eye's visibility, the ceiling the server states (`served_ceiling` of
+    /// [`SYNTHETIC_CEILING_V`]) and the real boundary of the two counts over the same rays
+    /// (`real_boundary`): each of C's, D's and E's expected stars brighter than [`BRIGHT_V`],
+    /// counted over the same rays at that cut, within both 1,000 ly and R(u), between them, and
+    /// within R(u). The server's census reads these caps bit for bit (its `compute::sky` tests of
+    /// the plan), so the count between is that of the served census's shells beyond 1,000 ly, the
+    /// cells' edges aside.
+    fn far_bright_record(name: &str, galaxy: &Galaxy) -> FarBright {
+        let tables = LuminosityTables::build(galaxy);
+        let envelope = BrightnessEnvelope::build(galaxy);
+        let offsets = CellOffsets::build(galaxy);
+        let observer = Observer::new(
+            GalacticPosition::from_light_years(SUN_LY).expect("in the cube"),
+            UniverseTime::EPOCH,
+        )
+        .expect("an observer");
+        let mut ctx = SkyContext {
+            tables: &tables,
+            envelope: &envelope,
+            offsets: &offsets,
+            noise: NoiseCache::with_capacity(1 << 16),
+            cells: &NoSkyCellCache,
+            sources: &[],
+            modifiers: &NoModifiers,
+        };
+        let eye = EyeObserver::default();
+        let light = Illumination::march(galaxy, &mut ctx, &observer);
+        let cut = eye_cut(galaxy, &mut ctx, &observer, &eye, Some(&light));
+        let visibility = eye_visibility(galaxy, &mut ctx, &observer, &eye, cut, Some(&light));
+        let rays = RayExtinctions::measure_clearest(
+            galaxy,
+            observer.position(),
+            Arc::new(CapLattice::new(CAP_RAYS)),
+            SUB_RAYS,
+            &mut ctx.noise,
+        );
+        let count = |plan: CapCountPlan| {
+            let part = plan.count_rays(galaxy, &tables, &rays, 0..plan.rays());
+            plan.join([part])
+        };
+        let at_cut = count(CapCount::plan_by_visibility_over(
+            galaxy,
+            &tables,
+            &envelope,
+            &observer,
+            &visibility,
+            &rays,
+        ));
+        let caps = at_cut.caps();
+        let ceiling = served_ceiling(cut, Magnitudes::new(SYNTHETIC_CEILING_V), &caps)
+            .expect("near the Sun the eye's cut is deeper than the ceiling");
+        let at_ceiling = count(CapCount::plan_over(
+            galaxy, &tables, &envelope, &observer, ceiling, &rays,
+        ));
+        let real = real_boundary(&at_ceiling, &at_cut, &caps);
+        let bright = count(CapCount::plan_over(
+            galaxy,
+            &tables,
+            &envelope,
+            &observer,
+            Magnitudes::new(BRIGHT_V),
+            &rays,
+        ));
+        let far = LightYears::new(FAR_FROM_LY);
+        let mut record = FarBright {
+            near: [0.0; 3],
+            between: [0.0; 3],
+            within: [0.0; 3],
+            line: String::new(),
+        };
+        let mut lines = Vec::new();
+        for (k, layer) in [Layer::C, Layer::D, Layer::E].into_iter().enumerate() {
+            let boundary = real
+                .iter()
+                .find(|cap| cap.layer() == layer)
+                .expect("a real boundary a layer");
+            let r = |u| boundary.radius_toward(u);
+            record.near[k] = bright.stars_within_and_beyond_toward(
+                layer,
+                |u| LightYears::new(r(u).value().min(FAR_FROM_LY)),
+                |_| LightYears::ZERO,
+            );
+            record.between[k] = bright.stars_within_and_beyond_toward(layer, r, |_| far);
+            record.within[k] =
+                bright.stars_within_and_beyond_toward(layer, r, |_| LightYears::ZERO);
+            lines.push(format!(
+                "{layer:?} {:.3} within 1,000 ly, {:.3} between 1,000 ly and R(u), {:.3} within \
+                 R(u) (R(u) largest {:.0} ly)",
+                record.near[k],
+                record.between[k],
+                record.within[k],
+                boundary.radius().value()
+            ));
+        }
+        let [c, d, e] = record.between;
+        record.line = format!(
+            "{name} near the Sun, at the served eye's cut V {:.3} and ceiling V {:.1}, the \
+             expected stars brighter than V {BRIGHT_V:.1} by the caps' count: {}; between \
+             1,000 ly and R(u), C to E {:.3}, D's share {:.3} and E's {:.3}",
+            cut.value(),
+            ceiling.value(),
+            lines.join("; "),
+            c + d + e,
+            d / (c + d + e),
+            e / (c + d + e)
+        );
+        record
+    }
+
+    /// Near the Sun, on the test fixture and on the server's galaxy, D's expected stars brighter
+    /// than V 3.0 between 1,000 ly and its real boundary are at most a third of C's, D's and E's
+    /// together, by the caps' count alone with no census (R06.T11.h; decided 2026-10-13,
+    /// `decision-r06-t17-findings.md` §1).
+    ///
+    /// It is the rule by which the server's delivery censuses E's shells beyond 1,000 ly a step
+    /// ahead of C's and D's, D's left with C's (`hyperion-server`'s
+    /// `compute::sky::delivery_steps`): were D's share over a third, D's shells would move with
+    /// E's. The figures are in R06's Risks ("Deviations in T11.h, as built"). The two galaxies are
+    /// counted on two threads, one each, and their records printed after, the fixture's first.
+    #[test]
+    #[ignore = "slow: builds two galaxies' luminosity tables and counts the caps near the Sun \
+                three times on each"]
+    fn beyond_1000_ly_d_holds_at_most_a_third_of_the_far_stars_brighter_than_v_3() {
+        let records = std::thread::scope(|scope| {
+            let fixture = scope.spawn(|| {
+                let galaxy =
+                    Galaxy::from_params(Seed::new(0x0926_0000), GalaxyParams::milky_way_like())
+                        .expect("the Milky Way-like parameters are valid");
+                far_bright_record("the test fixture", &galaxy)
+            });
+            let server = scope.spawn(|| {
+                let galaxy = Galaxy::new(Seed::new(SERVER_SEED)).with_full_potential();
+                far_bright_record("the server's galaxy", &galaxy)
+            });
+            [
+                (
+                    "the test fixture",
+                    fixture.join().expect("the fixture's record"),
+                ),
+                (
+                    "the server's galaxy",
+                    server.join().expect("the server galaxy's record"),
+                ),
+            ]
+        });
+        for (_, record) in &records {
+            eprintln!("{}", record.line);
+        }
+        for (name, record) in records {
+            let [c, d, e] = record.between;
+            assert!(
+                c >= 0.0 && d >= 0.0 && e >= 0.0 && c + d + e > 0.0,
+                "{name}: counts {:?}",
+                record.between
+            );
+            assert!(
+                d <= (c + d + e) / 3.0,
+                "{name}: D's {d:.3} of the {:.3} stars brighter than V {BRIGHT_V} between \
+                 1,000 ly and R(u) is over a third, so D's shells move with E's (R06.T11.h); \
+                 within both {:?}, within R(u) {:?}",
+                c + d + e,
+                record.near,
+                record.within
+            );
+        }
+    }
 }

@@ -191,7 +191,7 @@ pub(crate) async fn answer(
         }
         None => Vec::new(),
     };
-    let steps = compute::sky::delivery_steps(&plan, state.sky_caps.c_deferred_beyond_ly());
+    let steps = compute::sky::delivery_steps(&plan, state.sky_caps.delivery_order());
     // Every step's progress fits, so the census never waits for a reply to be made.
     let (sink, mut censused) = mpsc::channel(steps.len());
     let census =
