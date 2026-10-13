@@ -283,7 +283,8 @@ pub mod synth {
     }
     pub struct SynthCache;                                 // caller-owned, u64 keys, with R05's
                                                            // LatticeCache inside
-    pub fn level_bound_m(header: &FieldHeader, level: BandLevel) -> f64;   // hard bound
+    pub fn level_bound_m(header: &FieldHeader, level: BandLevel) -> f64;   // hard for the
+        // structural and channel terms; the crater terms a 1 − 10⁻⁹ per-point quantile (T8)
     pub fn local_variance(spectrum: &BandSpectrum, level: CoarseLevel) -> SquareMetres;
     // Per-cell closed forms: they read the cell's crust, boundary, k_s, drainage and crater
     // state through the view, so `None` where the view does not hold the cell.
@@ -5534,3 +5535,197 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _T14.c's bound_ assumes a 10 km valley in a 38 km cell, but T6.b's trunk valleys span the
     whole coarse cell (2W), and steep cells' valleys reach about 4 km (`k_s` 609 m^0.9 on the
     Mars-like world), which may also push T12.e's local share. For the science check.
+- **Deviations in T8, as built** (2026-10-13; lane r09-assembly, after T6.b, T7.b and T7.c; main's
+  acceptance of that day of the bound's quantile, the structure function's reading and the bench's
+  miss).
+  - _Files and public items._ Provides' `synth/mod.rs` is `synth.rs`, with two new public modules
+    and a crate-private one:
+    - `synth::levels`: `LevelSet` (`level`, `shortest_wavelength`, `relief_through`,
+      `channels_through`, `craters_through`), `LevelBounds` (`new`, `set`, `bound_m`,
+      `contribution_range_m`), `level_bound_m`, `shortest_wavelength` and `CRATER_BOUND_TAIL`;
+    - `synth::bake`: `PatchHeights` (`key`, `samples`, `sample`, `parent_heights_m`,
+      `parent_height_m`) and `PARENT_VERTICES`;
+    - `synth::craters::bound` (crate-private): each crater octave's and coarse-crater octave's
+      shares in the bound, and Chernoff's bound on a sum of Poisson counts.
+
+    `Synthesiser` gains `relief`, `channels`, `craters`, `rims`, `bounds`, `level_set`,
+    `level_bound_m`, `bake_patch`, `height_range_m`, and `unresolved_variance`,
+    `structure_function` and `unresolved_rms` from the octaves it holds. The free
+    `structure_function` and `unresolved_rms` are Provides'; each free closed form builds the body's
+    `CraterOctaves` (1–10 ms) per call, which the methods do not. `SynthCache` holds T7.b's
+    `CraterCache`. `UnresolvedVariance` gains `rims()`, and `total()` sums relief, channels, small
+    craters and rims in that order. Beside them: `relief::relief_structure_function`, the
+    incision's `groove_cap_m`, `deepest_possible_level` and `BUBBLE_MEAN_FLOOR` (0.284), the rims'
+    `unresolved_rims`, `rims_structure_function` and `kept_relief_of`, all crate-private;
+    `CraterOctave` stores its craters' mean reach area from the variance's own nodes, which move no
+    variance bit.
+
+  - _`Synthesiser`_ is `Clone`, not `Copy`, and `new` is not `const`: it holds the body's
+    `Relief`, `Channels`, `SmallCraters` (one `CraterOctaves` a body, as T7.b's handoff asks),
+    `CoarseRims` and `LevelBounds`. Building one costs about 1–10 ms, so a caller builds one per
+    body and view. T4's `Copy` test is a `Clone` test.
+  - _No `QueryHeightError::NonFinite`_ (Provides' comment): every part asserts its own heights
+    finite and `height_at` asserts the sum, a non-finite height being a bug, as the brainstorm's
+    "asserted finite before they are … emitted" has it. No later plan names the variant.
+  - _The sets._ A band level n resolves wavelengths down to λ_n = max(2 m, 4 × its largest vertex
+    spacing on the equatorial radius), R05's rule held at the band limit. Octave m is evaluated
+    where its lattice spacing is at least λ_n (through n + 4), channel level k where its key
+    points' spacing, a mean cell of level k, is (through n + 3, T6.b's band for that level), and
+    a small-crater octave where the smallest diameter it keeps is. The coarse rims sharpen at every
+    level. From the shallowest level whose λ_n is the band limit (19 Earth-like, 18 Mars-like,
+    17 Moon-like, 15 Ceres-like, each at or above R05's `finest_level`) every level evaluates the
+    same set with the same band, so its heights are the finest's to the bit (tested).
+  - _`height_at`_ sums the base elevation, the octaves, the incision, the small craters and the
+    coarse rims, in that order, height and gradient alike. The base elevation reads first, so
+    T4's `a_cell_not_held_is_not_surveyed` holds for the whole function.
+  - _The level bound, as built and accepted._ Hard for the structural and channel terms; the
+    crater terms, the small craters' and the coarse rims', a 1 − 10⁻⁹ per-point quantile.
+    - The octaves: Σ `octave_bound` over those n leaves out.
+    - The channels: (1 + 1 ÷ B) Σ `G_j` over the levels n leaves out to the deepest a body's
+      cells can reach, `G_j` the groove cap 0.2 of the level's mean cell and B the bubble's mean
+      floor, since the raw incision of the levels from k on lies in [−`G_k`, 0] and each level's
+      correction is bilinear in [−`G_j`, 0] plus a bubble within ±`G_j` ÷ B (the science check
+      confirmed the derivation, and the tighter form without a separate `G_k`).
+    - The craters: a cell's count is a Poisson draw, so their overlap has no largest value. Per
+      octave, one crater's share (its fresh height plus its fillet's change where the octave is
+      new; its fillet's changes at both bands where both levels evaluate it, by the triangle
+      inequality; nothing where the bands are equal) with its expected count reaching a point, the
+      octave's density times its craters' mean reach area by its own inversion, summed by
+      Chernoff's bound to 10⁻⁹. The rims add each coarse octave from `D_b` to π R at Trask's
+      saturation over the widest reach of its largest crater, with their sharpening's change
+      between the bands held to the coarse band.
+    - `height_range_m` inherits the quantile through `contribution_range_m`, and adds the base
+      elevation's range over the held cells within five king moves of the coarse cells the patch
+      covers (any encodable elevation where none is held).
+    - It is zero from the band limit's level, and holds on every synthetic world at 10³ points
+      (fast) and 10⁴ points (slow, `#[ignore = "slow: …"]`) for every pair of levels. It is very
+      loose: the worst |h(n) − h(m)| ÷ `level_bound_m(n)` over 10⁴ points is 0.016–0.063
+      Earth-like, 0.002–0.064 Mars-like, 0.005–0.066 Moon-like, 0.006–0.058 Ceres-like and
+      0–0.014 on the one-crater world (R10's expected 99.9th percentile is 0.3–0.5). The bound at
+      L + 4 is 542 m Earth-like (relief 125, channels 127, craters 290), 884 m Mars-like, 1.08 km
+      Moon-like (898 m of it craters) and 319 m Ceres-like (deferred, below).
+  - _The bake._ `PatchHeights` is what R05's bake reads of a source, not `PatchBake`: the 65 × 65
+    vertices' height and gradient at the patch's level and the parent level's height at the
+    33 × 33 even vertices (none at level 0), each `height_at`'s to the bit, the lattice covered
+    once about the patch first. The double-resolution normals' gradients are R10.T6.a's to ask of
+    the source. For R10.T3 and T6.a.
+  - _The closed forms._ `structure_function` sums the relief's per-octave form (item 7.3: Σ (a
+    `g_m`^b)² `V_m` [cos² `θ_m` `D̂_p` + sin² `θ_m` `D̂_r`], an octave partly finer than the band at
+    its share of the variance), T6.b's channels', T7.b's small craters' and the rims'. The rims'
+    variance is each listed crater's crater-wide mean square, g² ∫ (F(w₂) − F(w))² dA over its
+    reach's disc, w = ½ λ held to the coarse band and w₂ the band limit's, and its structure
+    function 2V (1 − exp(−s Δ² ÷ 2V)) with s its slopes' mean square for a random direction.
+    Sampled over every cell the one-crater world's crater reaches, the variance is the closed
+    form's to 0.03% and the structure function within 0.81–0.98 of it at 1, 10 and 50 km (tested
+    at 10% and 25%). `unresolved_rms` is the square root of the total, zero at 2 m and below and
+    non-increasing as the resolution refines, on every world (tested).
+  - _The structure function's 10%, as read and accepted._ Asserted on the relief per octave on
+    belt and plain cells of the Earth-like world (sampled ÷ closed 1.011, 1.025, 0.998 on belts and
+    0.971, 1.012, 1.046 on plains, at 10 m, 100 m and 1 km) and on the whole function on belt
+    cells (1.038, 1.052, 1.039). On channelled plain land the whole is 1.155, 1.293 and 1.370,
+    from T6.b's channel form, 3–25 times low per cell (deferred, below).
+  - _A full belt's slopes_ (12 cells of the Earth-like world whose 5 × 5 is full belt, 2,000
+    points a baseline, the whole function at the band limit's level): RMS 37.5° at 10 m, 36.7° at
+    100 m and 26.6° at 1 km, mean 31.0° at 100 m, 0.286 of the area above 40° at 10 m; all inside
+    the task's bands.
+  - _The read set_ of the whole function, at every sampled level (0, L, L + 4 and the band
+    limit's) from a fresh cache per cell, on every world, face edges, a cube corner and coarse
+    rims included: at most 4 king moves at the sampled points, within the margin's 5 (T4's 5 lies
+    near the ends of face edges, which T4's own test sweeps). T6.b's clipped grooves (0.09–0.52% of
+    segments at L + 3 and L + 4 reaching past the 5 × 5) step between neighbouring points, not
+    between levels, so neither this test nor the level bound's sees them; they read nothing more.
+  - _The testing builder_ holds each coarse crater as T12.d's contract has the coarse pass smooth
+    it in: its kept relief, `rims::kept_relief_of` of its degradation (one expression with
+    `kept_relief`), times `CoarseRims::coarse_profile(D)` at the chord between spheroid points in
+    rim radii. So the synthetic worlds' rims sharpen once. `tests/golden/wire/payloads.golden` is
+    re-blessed at 21 under the 2026-10-09 testing-world rule, with no bump: the digests of every
+    cratered world (Earth-, Mars-, Moon- and Ceres-like, the one-crater world, the Mars-like region
+    and its delta, the Moon-like world in 48 KiB blocks) moved, no byte count or held range did,
+    and the flat world's did not.
+  - _Tests changed._ T4's `the_base_elevation_is_the_same_at_every_level` becomes
+    `with_nothing_finer_than_its_cells_the_height_is_the_base_elevation_at_every_level` (the rough
+    field); T4's order test keeps the base elevation, and the whole function's moves to
+    `synth::tests`; T6.b's `segments_carry_…`'s bit equality of the groove's top, the top less the
+    bed plus the bed, is 4 ulps relative (an ulp apart once the builder moved the worlds); T5's
+    and T6.b's total-variance checks add the rims. The synthesis's inline tests move to
+    `synth/tests.rs`. The bubble floor's test holds every cell at levels 5 and 6 and sampled cells
+    to 24 (a one-off sweep of every cell to level 8 gave 0.284 565 to 0.284 713).
+  - _Tests added._ In `synth::tests`: the sum in order; order and cache independence; the read set;
+    a cell with its margin held answers as the whole field, bit for bit; the bake against point
+    queries and over patch build orders (`assert_order_independent`); the range holds every baked
+    height; `unresolved_rms`; the free closed forms and bounds are the synthesiser's, bit for bit;
+    the rims' closed forms; the structure functions; the belt's slopes. In `synth::levels::tests`:
+    the sets, the bound's zero and monotonicity, the 10³-point bound and its slow 10⁴. In
+    `synth::craters::bound::tests`: Chernoff against exact Poisson tails and the octaves' and
+    coarse octaves' marks. Four `should_panic` tests in `tests/panics.rs`'s `synth_assembly`. Three
+    `#[ignore]` measurements run by hand (the bound's terms, the structure function by
+    contribution, the Moon-like world's slopes).
+  - _Acceptance._ `cargo test -p hyperion-surface synth` and the crate's whole suite with
+    `--features testing`: 366 library tests (20 ignored), 118 panics and the goldens pass; the
+    slow bound test passes by name in 177 s (dev profile, with the measurements).
+  - _The cache's policy._ Each bake sets the lattice cover afresh and the craters' part is bounded
+    at 16,384 cells, but the channels' part is never pruned, so a caller drops the cache when it
+    moves on (a worker between descents; the server's collision cache by the same rule).
+  - _The bench_ (`benches/synth.rs`; provisional: load 9–12, schedutil, a 400% quota, single
+    thread, release): on the Earth-like world, per point at L + 4 (level 12) base elevation
+    1.66 µs, relief 8.41, channels 0.90, small craters 2.78, the whole 14.0 µs, and a patch
+    (4,225 points and 1,089 parent heights) 76.8 ms warm, 81.8 ms cold; at level 19 base 2.87,
+    relief 14.6, channels 0.81, small craters 5.77, the whole 26.4 µs, a patch 128 ms warm and
+    169 ms cold. Against Design note 14's WebAssembly targets (0.2, 1.5, 3.5 and 2 µs) and the
+    brainstorm's 10 µs and 40 ms, at WebAssembly's 1.2–1.5× native, the point and the patch miss:
+    the interpolation is the cost (the base elevation and the relief's three style interpolants),
+    not the hash, which the bake's cached lattice already spares, so Design note 14's hash levers
+    are not tried. A finding for open question 5; main logs a fused interpolant pass for the
+    elevation and the three style values, before R10.T6's bake timing on a quiet machine. The
+    rims, the uncached crater draw and the Moon-like world's figures (`surface/point/moon/…`,
+    `…/rims-…`, `…/craters-uncached-…`) wait for a run with the heavy lock free.
+  - _Generator version._ Untouched (21). No golden pins `height_at` before T9; the payloads golden
+    moves under the testing-world rule.
+  - _For R10's re-validation_ (Design note 5, T4.a, T4.b) _and R05's `HeightSource` trait doc:_
+    `level_bound_m` is hard for the structural and channel terms and a 1 − 10⁻⁹ per-point quantile
+    for the crater terms, and it is 15–500 times the realised worst difference. R10.T4's min(hard,
+    4σ) is the lever; `LevelBounds::new(header)` builds every level at once. `PatchHeights` is the
+    source's view, not R05's `PatchBake`.
+  - _For R09.T12.d (its contract):_ draw each coarse octave, [`D_b` 2^k, `D_b` 2^(k+1)], at most at
+    Trask's saturation on its own, as Design note 10 has it; the rims' term of the bound counts on
+    it (the science check: a cap on the cumulative N(>D) or on another grid could exceed it by up
+    to 1.24 in the octave that straddles the crossover).
+  - _For T9 (what to pin)._ Heights and gradients through `height_at` at pinned points and levels
+    of each world, among them points near coarse rims (at about 0.97, 1.0 and 1.04 rim radii), in
+    channelled cells at L + 1 to L + 4, belts with 0 < b < 1, face-edge and cube-corner vertices,
+    and the band limit's level beside a finer one (to the bit); one `bake_patch` a world; each
+    world's `LevelSet`s, `LevelBounds::bound_m` and `contribution_range_m` at every level (R10
+    reads them); `unresolved_variance` per contribution and `structure_function` at a few cells,
+    wavelengths and lags; and the parts apart from `height_at` as the earlier records ask (T4's
+    base elevation, T5's relief, T6's channels, T7.b's small craters, T7.c's rims).
+- **Deferred findings (2026-10-13 rule)** (R09.T8; recorded, not ruled; each for "main"'s list).
+  - _The level bound is loose_, 15–500 times the realised worst at 10⁴ points: header-only caps
+    (the belt's amplitude 2.5 everywhere, a groove cap of 0.2 cell and a correction factor of 4.5
+    on bodies whose cells cut far less, fresh craters where most are worn). Levers: R10.T4's min(hard,
+    4σ); a header field of the field's largest amplitude and steepness; the craters' age
+    distribution in their marks. Accepted as it stands for now (main, 2026-10-13).
+  - _The channel term applies on bodies without channels_ (71 km at level 0 on the Moon-like and
+    flat worlds): the header does not say whether any cell drains.
+  - _The coarse levels' crater terms are tens to hundreds of kilometres_ (rims of craters up to π R
+    at saturation): valid, and irrelevant to selection from afar, but not physical.
+  - _The channels' structure function closed form is 3–25 times low per land cell_ at 10 m to
+    1 km (median about 5× at 10–100 m), so the whole function is 15–37% above it pooled over
+    channelled plains. A T6.b follow-up builds a form from the realised β and the neighbours'
+    grooves (main logs it).
+  - _The point and the patch miss the budget_ (above): the interpolation, not the hash. A fused
+    interpolant pass (main logs it).
+  - _An octave partly finer than a band_ takes its whole unit structure function at its share; its
+    slice's gradient variance is up to about twice the octave's (the science check), so its
+    small-lag share is up to 2× low.
+  - _The rims' share is crater-wide, not per cell:_ a cell on a basin's rim has more of it, and one
+    on its floor less.
+  - _The Moon-like world's slopes_ against T7.b's calibration targets (T7.b's deferred κ): the
+    lid's median slope at 17 m is 5.43° (Rosenburg et al. 2011: highlands 7.5°, maria 2.0°), its
+    RMS height difference 248 m at 1.9 km and 670 m at 7.6 km (LOLA: 171 and 546 m), the province
+    3.59°, 271 m and 828 m. The calibration of κ stays deferred.
+  - _The crater closed forms on a sparse field_: on the Earth-like world's young, screened surface
+    the sampled craters' structure function is far below the ensemble closed form at a few cells,
+    a realisation's sparseness, not a bias.
+  - _The heavy cost of a coarse patch's range_: `height_range_m` of a level-0 patch walks the
+    65,536 coarse cells under it and the margin about the face (the rings now grow from the
+    block's border only).

@@ -13,10 +13,13 @@
 //! 14's P14.T46.e); and the first of R09's: the coarse field's types ([`field`]) with the header's
 //! crater contract ([`craters`]), which R09's later tasks give their behaviour, and the key of plan
 //! 14's substances, which the header's palette carries ([`substance_key`]); the codec of the
-//! field's bulk payload ([`wire`]); the synthesis over a field ([`synth`]), today its
-//! `Synthesiser` returning the base elevation, the coarse cells interpolated over the sphere
-//! (`synth::interp`), with the header's spectrum, and beside it the structural octaves
-//! (`synth::relief`) and the channel network (`synth::channels`) that the assembly will add to it;
+//! field's bulk payload ([`wire`]); the synthesis over a field ([`synth`]): its `Synthesiser`,
+//! the whole height function, the coarse cells interpolated over the sphere (`synth::interp`) with
+//! the bands below them that each level evaluates, the structural octaves (`synth::relief`), the
+//! channels' incision (`synth::channels`), the small craters and the coarse craters' rims
+//! (`synth::craters`); its patch bake (`synth::bake`), its level sets and bound
+//! (`synth::levels`) and the closed forms of the unresolved ground (`synth`), with the header's
+//! spectrum;
 //! the cold-trap fraction that plan 14 and R09.T13.f share ([`cold_trap`]), with the fitted table
 //! of a bowl's permanent shadow it reads ([`tables`]); and, for tests, synthetic fields
 //! (`testing`, feature `testing`).

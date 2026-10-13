@@ -179,6 +179,44 @@ fn mean_cell_area(radius_m: f64, level: u8) -> f64 {
     4.0 * core::f64::consts::PI * radius_m * radius_m / (6.0 * side * side)
 }
 
+/// The deepest a groove of `level` may be on a body of mean radius `radius_m`, metres: `G_max`,
+/// the depth whose steepest wall, 1.5 G ÷ W, is [`VALLEY_WALL_GRADIENT`], W being the level's
+/// wall width, [`VALLEY_WALL_SHARE`] of its mean cell. Every groove of the level is capped at it,
+/// a trunk's and a tributary's alike ([`Groove`]'s depth), so the level's raw incision lies in
+/// [−`G_max`, 0] whatever the cell: the level bound's channel term (R09.T8).
+#[must_use]
+pub(crate) fn groove_cap_m(radius_m: f64, level: u8) -> f64 {
+    let wall_m = VALLEY_WALL_SHARE * mean_cell_width(radius_m, level);
+    VALLEY_WALL_GRADIENT * wall_m / STEEPEST_WALL
+}
+
+/// The deepest level the network can evaluate below any coarse cell of a body of mean radius
+/// `radius_m` whose coarse level is `level`: the deepest whose mean cell is at least
+/// [`CHANNEL_HEAD_AREA`], which [`deepest_level`] never passes whatever the cell's steepness and
+/// runoff, and never above the coarse level itself, which every network has.
+#[must_use]
+pub(crate) fn deepest_possible_level(radius_m: f64, level: u8) -> u8 {
+    let mut deepest = level;
+    for k in level + 1..=MAX_LEVEL {
+        if mean_cell_area(radius_m, k) < CHANNEL_HEAD_AREA.value() {
+            break;
+        }
+        deepest = k;
+    }
+    deepest
+}
+
+/// A floor under the solid-angle-weighted mean of the bubble 256 x²(1 − x)² y²(1 − y)² over a
+/// parent cell's mean grid ([`mean_grid`]) at every level a parent cell may have, the coarse
+/// levels 5 and deeper: 0.284. On the 8 × 8 grid alone the mean is 0.284 566; the weights, the
+/// warp's rates and the gnomonic face's solid angle, keep every cell's from level 5 down within
+/// 0.284 565 to 0.284 713 (R09.T8's one-off sweep of every cell to level 8, and of sampled cells
+/// to 11; `the_bubble_s_weighted_mean_stays_above_its_floor` holds every cell at levels 5 and 6
+/// and sampled cells to 24). A level's correction scales its bubble by
+/// the cell's mean less the bilinear part's, divided by this mean ([`Correction`]), so the floor
+/// bounds the correction, and with it the level bound's channel term (R09.T8).
+pub(crate) const BUBBLE_MEAN_FLOOR: f64 = 0.284;
+
 /// The depth of a trunk's valley, metres: the relief a coarse cell's tributaries of steepness index
 /// `steepness_m0_9` (m^0.9, [`super::tributary_steepness_m0_9`]) cut between its channel heads and its
 /// trunk, on a body of mean radius `radius` whose coarse cells are of `level`.
@@ -383,7 +421,7 @@ impl Groove {
     #[must_use]
     fn of(segment: &Segment, radius_m: f64) -> Option<Self> {
         let wall_m = VALLEY_WALL_SHARE * mean_cell_width(radius_m, segment.level());
-        let cap_m = VALLEY_WALL_GRADIENT * wall_m / STEEPEST_WALL;
+        let cap_m = groove_cap_m(radius_m, segment.level());
         let floor_depth = segment.depth_m;
         let (chords, chord_count, depth) = match segment.kind {
             Kind::Trunk { valley_m, .. } => {

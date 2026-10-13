@@ -545,11 +545,11 @@ fn stencil(s: f64, grid: &Grid) -> (i64, f64) {
     (index, x - first)
 }
 
-// The tests of `Synthesiser::height_at`, `cell_at` and `QueryHeightError` live here rather than in
-// `synth.rs`, since today they are the interpolant's, and the task's acceptance filter is
-// `synth::interp`. Two of them hold only while the height is the base elevation alone and R09.T8
-// retires or moves them: `the_base_elevation_is_the_same_at_every_level`, and
-// `a_cell_not_held_is_not_surveyed`'s check of the missing cell against the interpolant's reads.
+// The tests of `cell_at`, `QueryHeightError` and the base elevation's part of
+// `Synthesiser::height_at` live here, since they are the interpolant's. The whole height function's
+// own (its sum, its order and cache independence and its read set) are R09.T8's, in `synth::tests`;
+// `a_cell_not_held_is_not_surveyed` still holds for the whole function, because its base elevation
+// reads first.
 #[cfg(test)]
 mod tests {
     use std::cell::RefCell;
@@ -974,33 +974,29 @@ mod tests {
     }
 
     #[test]
-    fn the_height_does_not_depend_on_the_order_of_queries_or_the_cache() {
+    fn the_base_elevation_does_not_depend_on_the_order_of_queries() {
+        // The whole height function's order and cache independence is R09.T8's
+        // (`synth::tests`), with the bands that fill the cache.
         for field in [earth(), rough()] {
             let level = field.header().level().get();
-            let synth = synthesiser(field);
             let mut points = random_points(0x6f72_6465, 300);
             points.extend(band_points(level).into_iter().step_by(7));
-            for band in [0, level, 19] {
-                let band = BandLevel::new(band).unwrap();
-                let warm = RefCell::new(SynthCache::new());
-                let query = |cache: &mut SynthCache, dir: [f64; 3]| {
-                    sample_bits(synth.height_at(cache, dir, band).unwrap())
-                };
-                assert_order_independent(&points, |&d| query(&mut warm.borrow_mut(), d));
-                assert_order_independent(&points, |&d| query(&mut SynthCache::new(), d));
-            }
+            assert_order_independent(&points, |&d| sample_bits(height(field, d)));
         }
     }
 
     #[test]
-    fn a_synthesiser_is_copy_over_any_view() {
-        fn copy<T: Copy>(_: T) {}
-        copy(synthesiser(ceres()));
+    fn a_synthesiser_is_clone_over_any_view() {
+        fn clone<T: Clone>(t: &T) -> T {
+            t.clone()
+        }
+        let synth = synthesiser(ceres());
+        assert_eq!(clone(&synth).seed(), synth.seed());
         let held = Held {
             inner: ceres(),
             held: BTreeMap::new(),
         };
-        copy(synthesiser_of(&held));
+        let _ = clone(&synthesiser_of(&held));
     }
 
     /// The finite difference of H(P) = h(M⁻¹P ÷ |M⁻¹P|) along each body-fixed axis at the
@@ -1326,8 +1322,10 @@ mod tests {
     }
 
     #[test]
-    fn the_base_elevation_is_the_same_at_every_level() {
-        let field = earth();
+    fn with_nothing_finer_than_its_cells_the_height_is_the_base_elevation_at_every_level() {
+        // The rough field has no fine relief, no craters and no drainage, so every level's bands
+        // are zero; on the synthetic worlds the bands join it (R09.T8).
+        let field = rough();
         let synth = synthesiser(field);
         let mut cache = SynthCache::new();
         for dir in random_points(0x6c65_7665, 200) {

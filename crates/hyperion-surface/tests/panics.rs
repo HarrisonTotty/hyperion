@@ -1088,3 +1088,51 @@ mod coarse_craters_rims {
         let _ = rims.at(&field, [0.0, 0.0, 1.0], BandLevel::new(10).unwrap());
     }
 }
+
+mod synth_assembly {
+    use hyperion_base::rng::DetailSeed;
+    use hyperion_base::units::Metres;
+    use hyperion_surface::cube::{Face, PatchKey};
+    use hyperion_surface::synth::{SynthCache, Synthesiser, structure_function, unresolved_rms};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    use super::level_five_field;
+
+    /// A cell of the level-5 field.
+    fn cell() -> PatchKey {
+        PatchKey::new(Face::PosX, 5, 3, 4).unwrap()
+    }
+
+    #[test]
+    #[should_panic(expected = "vertex (65, 0) is outside a grid of 65 a side")]
+    fn a_baked_patch_s_vertex_past_its_side_is_refused() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let bake = synth.bake_patch(&mut SynthCache::new(), cell()).unwrap();
+        let _ = bake.sample(65, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "the parent level's heights are at even vertices, not (3, 4)")]
+    fn a_parent_height_at_an_odd_vertex_is_refused() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let bake = synth.bake_patch(&mut SynthCache::new(), cell()).unwrap();
+        let _ = bake.parent_height_m(3, 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "a lag must be finite and non-negative, got -1 m")]
+    fn the_ground_s_structure_function_at_a_negative_lag_is_refused() {
+        let field = level_five_field();
+        let _ = structure_function(&field, cell(), Metres::new(1e3), Metres::new(-1.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "a wavelength must be finite and positive, got 0")]
+    fn the_unresolved_rms_at_no_resolution_is_refused() {
+        let field = level_five_field();
+        let _ = unresolved_rms(&field, cell(), Metres::ZERO);
+    }
+}

@@ -63,9 +63,11 @@
 //! Every value is a function of the crater, the field's header and the level: the craters are
 //! summed in the field's list order, and every transcendental is `hyperion_base::math`'s.
 
-use hyperion_base::units::Metres;
+use hyperion_base::math;
+use hyperion_base::units::{Metres, SquareMetres};
 
 use super::{CraterProfile, ProfileSample, band_half_width, direction_gradient};
+use crate::craters::density::GAUSS_LEGENDRE_8;
 use crate::craters::{CraterParams, CraterShape, crater_shape};
 use crate::cube::PatchKey;
 use crate::field::{CoarseCrater, CoarseLevel, FieldHeader, FieldView};
@@ -96,7 +98,16 @@ pub fn coarse_band_half_width(figure: &Spheroid, level: CoarseLevel) -> Metres {
 /// sharpening (the module documentation).
 #[must_use]
 pub fn kept_relief(crater: &CoarseCrater) -> f64 {
-    1.0 - crater.degradation_fraction()
+    kept_relief_of(crater.degradation)
+}
+
+/// The share of its fresh relief a coarse crater of degradation code `degradation` keeps,
+/// 1 − `degradation` ÷ 255 ([`kept_relief`]), the one expression for it: what the coarse pass, and
+/// the testing builder that stands in for it, smooth into the coarse elevation, so that the
+/// elevation and the sharpening are one profile (R09.T12.d's contract; R09.T8).
+#[must_use]
+pub(crate) fn kept_relief_of(degradation: u8) -> f64 {
+    1.0 - f64::from(degradation) / 255.0
 }
 
 /// A coarse crater's sharpening at one level: g × (F(w′) − F(`w_c`)), its rim filleted over the
@@ -365,6 +376,166 @@ impl CoarseRims {
             gradient: gradient.map(num::assert_finite),
         }
     }
+}
+
+/// One coarse crater's share of the ground finer than a wavelength (R09.T8): its variance and its
+/// slopes' mean square along a random direction, from which [`unresolved_rims`] and
+/// [`rims_structure_function`] are made.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct RimShare {
+    /// The variance, square metres.
+    variance: f64,
+    /// The slopes' mean square along a random direction, metres² a metre².
+    slope2: f64,
+}
+
+impl CoarseRims {
+    /// The half-widths a sharpening finer than `finer_than` is taken between: the band limit's
+    /// and ½ `finer_than`, held to [the band limit's, the coarse band], or `None` where they are
+    /// one (at the band limit and below).
+    ///
+    /// # Panics
+    ///
+    /// If `finer_than` is not finite and positive.
+    #[must_use]
+    fn unresolved_bands(&self, finer_than: Metres) -> Option<(f64, f64)> {
+        let lambda = finer_than.value();
+        assert!(
+            lambda.is_finite() && lambda > 0.0,
+            "a wavelength must be finite and positive, got {lambda} m"
+        );
+        let w_c = self.coarse_band.value();
+        let finest = num::min(0.5 * BAND_LIMIT_M, w_c);
+        let band = num::min(num::max(0.5 * lambda, 0.5 * BAND_LIMIT_M), w_c);
+        (band > finest).then_some((finest, band))
+    }
+
+    /// `crater`'s share of the ground finer than a level of band `band` metres, against the band
+    /// limit's `finest` (the [`unresolved_rims`] model).
+    #[must_use]
+    fn share(&self, crater: &CoarseCrater, finest: f64, band: f64) -> RimShare {
+        let g = kept_relief(crater);
+        if g <= 0.0 {
+            return RimShare::default();
+        }
+        let shape = crater_shape(&self.params, crater.diameter);
+        let fine = CraterProfile::filleted(shape, Metres::new(finest));
+        let coarse = CraterProfile::filleted(shape, Metres::new(band));
+        let (square, slope) = difference_moments(&fine, &coarse);
+        let reach = 1.0 + shape.exterior_width();
+        let rim_m = 0.5 * shape.diameter().value();
+        // The mean over the reach's disc, π r₁² R²: ∫ f² 2x dx ÷ r₁², the slopes per metre, halved
+        // for a random direction.
+        RimShare {
+            variance: g * g * square / (reach * reach),
+            slope2: 0.5 * g * g * slope / (reach * reach * rim_m * rim_m),
+        }
+    }
+}
+
+/// ∫ (f − s)² 2x dx and ∫ (f′ − s′)² 2x dx over the reach of two profiles of one shape, f
+/// `first` and s `second`, in rim radii (heights in metres, slopes in metres per rim radius):
+/// eight-point Gauss–Legendre on each piece between both profiles' breakpoints, exact to rounding,
+/// each piece being a polynomial of degree at most 4 in both.
+#[must_use]
+fn difference_moments(first: &CraterProfile, second: &CraterProfile) -> (f64, f64) {
+    let mut points: Vec<f64> = first
+        .breakpoints()
+        .into_iter()
+        .chain(second.breakpoints())
+        .collect();
+    points.sort_by(f64::total_cmp);
+    let (mut square, mut slope) = (0.0, 0.0);
+    for pair in points.windows(2) {
+        let (lo, hi) = (pair[0], pair[1]);
+        if hi <= lo {
+            continue;
+        }
+        let half = 0.5 * (hi - lo);
+        let mid = f64::midpoint(lo, hi);
+        let (mut squares, mut slopes) = (0.0, 0.0);
+        for (node, weight) in GAUSS_LEGENDRE_8 {
+            let x = mid + half * node;
+            let (h1, s1) = first.height_and_slope(x);
+            let (h2, s2) = second.height_and_slope(x);
+            squares += weight * (h1 - h2) * (h1 - h2) * 2.0 * x;
+            slopes += weight * (s1 - s2) * (s1 - s2) * 2.0 * x;
+        }
+        square += half * squares;
+        slope += half * slopes;
+    }
+    (square, slope)
+}
+
+/// The coarse craters' variance at `cell` in wavelengths shorter than `finer_than`, square metres;
+/// `None` where `field` does not hold the cell (R09.T8, for `unresolved_variance`).
+///
+/// The part of a crater's sharpening finer than a wavelength λ is what a level of band ½ λ leaves
+/// out of the finest level's: g (F(w₂) − F(w)), with w = ½ λ and w₂ the band limit's half-width,
+/// both held to the coarse band as the sharpening is ([`RimSharpening`]). Its share is its mean
+/// square over the crater's reach, a disc of (1 + a) rim radii, g² ∫ (F(w₂) − F(w))² dA ÷ the
+/// disc's area, summed over the craters `field`'s index holds for the cell in list order, taken as
+/// independent. It is a crater-wide estimate, not the cell's own: a cell on a basin's rim holds
+/// more of it and one on its floor less (the plan's Risks). It is zero at the band limit and
+/// below, and on a cell no crater reaches.
+///
+/// # Panics
+///
+/// If `finer_than` is not finite and positive.
+#[must_use]
+pub(crate) fn unresolved_rims(
+    field: &impl FieldView,
+    cell: PatchKey,
+    finer_than: Metres,
+) -> Option<SquareMetres> {
+    let rims = CoarseRims::new(field.header());
+    let bands = rims.unresolved_bands(finer_than);
+    field.cell(cell)?;
+    let Some((finest, band)) = bands else {
+        return Some(SquareMetres::ZERO);
+    };
+    let mut variance = 0.0;
+    for crater in field.craters_reaching(cell) {
+        variance += rims.share(crater, finest, band).variance;
+    }
+    Some(SquareMetres::new(variance))
+}
+
+/// The coarse craters' structure function at `cell` in wavelengths shorter than `finer_than` at a
+/// lag of `lag`, square metres: each crater's 2V (1 − exp(−s Δ² ÷ 2V)), with V its share's variance
+/// and s its slopes' mean square along a random direction ([`unresolved_rims`]'s model), as the
+/// channels' closed form takes each level's; `None` where `field` does not hold the cell.
+///
+/// # Panics
+///
+/// If `finer_than` is not finite and positive, or `lag` is not finite and non-negative.
+#[must_use]
+pub(crate) fn rims_structure_function(
+    field: &impl FieldView,
+    cell: PatchKey,
+    finer_than: Metres,
+    lag: Metres,
+) -> Option<SquareMetres> {
+    let b = lag.value();
+    assert!(
+        b.is_finite() && b >= 0.0,
+        "a lag must be finite and non-negative, got {b} m"
+    );
+    let rims = CoarseRims::new(field.header());
+    let bands = rims.unresolved_bands(finer_than);
+    field.cell(cell)?;
+    let Some((finest, band)) = bands else {
+        return Some(SquareMetres::ZERO);
+    };
+    let mut d = 0.0;
+    for crater in field.craters_reaching(cell) {
+        let share = rims.share(crater, finest, band);
+        if share.variance > 0.0 {
+            let saturation = 2.0 * share.variance;
+            d += saturation * -math::exp_m1(-share.slope2 * b * b / saturation);
+        }
+    }
+    Some(SquareMetres::new(d))
 }
 
 #[cfg(test)]

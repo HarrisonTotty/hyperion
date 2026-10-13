@@ -498,9 +498,15 @@ fn segments_carry_their_discharge_width_depth_and_depth_below_the_top() {
                 "{own} against {inherited}"
             );
             for t in [0.0, 0.3, 0.7] {
+                // The top less the bed, plus the bed: the same to its rounding, a few ulps (the
+                // assembly's builder change, R09.T8, found one an ulp apart where the bits were
+                // compared).
                 let top = s.below_top(t).value() + s.bed_at(t).value();
                 let at_join = s.below_top(1.0).value() + s.bed_at(1.0).value();
-                assert_eq!(bits(top), bits(at_join), "the top is the same all along it");
+                assert!(
+                    (top - at_join).abs() <= 4.0 * f64::EPSILON * top.abs().max(1.0),
+                    "the top is the same all along it: {top} against {at_join}"
+                );
                 assert!(s.below_top(t) <= s.below_top(1.0));
             }
             tributaries += 1;
@@ -903,7 +909,10 @@ fn unresolved_variance_carries_the_channels_share() {
         for finer_than in [Metres::new(500.0), Metres::new(5e4)] {
             let v = crate::synth::unresolved_variance(field, c, finer_than).unwrap();
             assert_eq!(v.channels(), channel_variance(cell, body, finer_than));
-            assert_eq!(v.total(), v.relief() + v.channels() + v.craters());
+            assert_eq!(
+                v.total(),
+                v.relief() + v.channels() + v.craters() + v.rims()
+            );
         }
         // Wider bands hold more.
         let narrow = channel_variance(cell, body, Metres::new(1e3));
@@ -1119,6 +1128,74 @@ fn measure_the_network_and_the_incision() {
                 width / n,
                 depth / n
             );
+        }
+    }
+}
+
+#[test]
+fn the_bubble_s_weighted_mean_stays_above_its_floor() {
+    // Every cell at the coarse levels 5 and 6, and at each level to the deepest the cells nearest a
+    // face's corners, edges and centre, where the warp's rates and the gnomonic face's solid
+    // angle are most uneven: the floor is what R09.T8's level bound divides by.
+    let weighted_mean = |cell: PatchKey| {
+        let (mut bump, mut weights) = (0.0, 0.0);
+        for sample in mean_grid(cell) {
+            bump += sample.weight * bubble(sample.x).0 * bubble(sample.y).0;
+            weights += sample.weight;
+        }
+        bump / weights
+    };
+    let mut lowest = f64::INFINITY;
+    for level in 5..=MAX_LEVEL {
+        let last = (1_u32 << level) - 1;
+        let cells: Vec<PatchKey> = if level <= 6 {
+            (0..=last)
+                .flat_map(|i| (0..=last).map(move |j| (i, j)))
+                .map(|(i, j)| PatchKey::new(crate::cube::Face::PosZ, level, i, j).unwrap())
+                .collect()
+        } else {
+            let along = [0, 1, last / 4, last / 2, last / 2 + 1, last - 1, last];
+            along
+                .iter()
+                .flat_map(|&i| {
+                    along.map(|j| PatchKey::new(crate::cube::Face::NegX, level, i, j).unwrap())
+                })
+                .collect()
+        };
+        for cell in cells {
+            let mean = weighted_mean(cell);
+            assert!(mean >= BUBBLE_MEAN_FLOOR, "{cell:?}: {mean}");
+            lowest = lowest.min(mean);
+        }
+    }
+    assert!(
+        lowest < BUBBLE_MEAN_FLOOR + 1e-3,
+        "the floor is within a per mille: {lowest}"
+    );
+}
+
+#[test]
+fn every_groove_is_within_its_level_s_cap() {
+    for field in [earth(), mars()] {
+        let channels = Channels::new(field.header(), SEED);
+        let radius_m = channels.body().radius.value();
+        let deepest = deepest_possible_level(radius_m, channels.first_level());
+        let mut network = channels.network(field);
+        for coarse in with_tributaries(field, 4) {
+            assert!(deepest_level(field.cell(coarse).unwrap(), channels.body()) <= deepest);
+            for level in channels.first_level()..=channels.first_level() + 3 {
+                for cell in below(coarse, level) {
+                    if let Some(segment) = network.segment(cell).unwrap()
+                        && let Some(groove) = Groove::of(&segment, radius_m)
+                    {
+                        let deepest_groove = match groove.depth {
+                            Depth::Constant(d) => d,
+                            Depth::Tributary { floor_m, cap_m, .. } => floor_m.max(cap_m),
+                        };
+                        assert!(deepest_groove <= groove_cap_m(radius_m, level));
+                    }
+                }
+            }
         }
     }
 }

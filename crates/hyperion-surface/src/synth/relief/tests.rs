@@ -1779,12 +1779,12 @@ fn unresolved_variance_falls_with_the_wavelength_to_zero_at_the_band_limit() {
         }
         assert_same_bits(at(2.0), 0.0);
         assert_same_bits(at(0.5), 0.0);
-        // The whole is the relief's share, the channels' (R09.T6.b) and the small craters'
-        // (R09.T7.b), in that order.
+        // The whole is the relief's share, the channels' (R09.T6.b), the small craters'
+        // (R09.T7.b) and the coarse craters' rims' (R09.T8), in that order.
         let parts = unresolved_variance(field, cell, Metres::new(1e3)).unwrap();
         assert_eq!(
             parts.total(),
-            parts.relief() + parts.channels() + parts.craters()
+            parts.relief() + parts.channels() + parts.craters() + parts.rims()
         );
         checked += 1;
     }

@@ -2,21 +2,29 @@
 //! (plan R09, Design notes 13 and 14).
 //!
 //! [`Synthesiser`] is the height function over a coarse field, on the server's whole field and a
-//! client's part of one alike, through [`FieldView`]. Today it returns the base elevation, the
-//! coarse cells interpolated over the sphere ([`interp`], R09.T4), at every level; the structural
-//! octaves ([`relief`], R09.T5), the channels ([`channels`], whose network R09.T6.a builds and
-//! whose incision T6.b adds) and the small craters ([`craters`], R09.T7.b) add the bands below the
-//! coarse cell, and the assembly (T8) fixes each level's set. The module also holds the two types
-//! a coarse field's header carries: [`BandLevel`], the quadtree level a height is asked at, and
-//! [`BandSpectrum`], the law of the structural relief finer than the coarse cells, from which the
-//! relief derives each level's amplitude and the closed-form variance below a cell
-//! ([`local_variance`]), with the crust classes' shapes and anchors that make a body's law
-//! ([`SpectrumShape`], [`BandSpectrum::anchored`]); and the per-contribution variance below a
-//! wavelength that R10 reads ([`unresolved_variance`]).
+//! client's part of one alike, through [`FieldView`]. A height at a band level is the sum, in a
+//! fixed order, of the base elevation, the coarse cells interpolated over the sphere ([`interp`],
+//! R09.T4), and the bands below the coarse cell that the level evaluates ([`levels`], R09.T8): the
+//! structural octaves ([`relief`], R09.T5), the channels' incision ([`channels`], R09.T6), the
+//! small craters ([`craters`], R09.T7.b) and the coarse craters' rims, sharpened from the coarse
+//! band ([`craters::rims`], R09.T7.c). [`Synthesiser::bake_patch`] makes a patch's heights,
+//! parent-band heights and gradients from the same function ([`bake`]), and [`levels`] bounds how
+//! much a level's heights differ from any finer level's ([`level_bound_m`]) and how far they can
+//! reach ([`Synthesiser::height_range_m`]).
+//!
+//! The module also holds the two types a coarse field's header carries: [`BandLevel`], the quadtree
+//! level a height is asked at, and [`BandSpectrum`], the law of the structural relief finer than the
+//! coarse cells, from which the relief derives each level's amplitude and the closed-form variance
+//! below a cell ([`local_variance`]), with the crust classes' shapes and anchors that make a body's
+//! law ([`SpectrumShape`], [`BandSpectrum::anchored`]); and the closed forms of the ground finer
+//! than a wavelength that R10 reads, per cell and per contribution ([`unresolved_variance`],
+//! [`structure_function`], [`unresolved_rms`]).
 
+pub mod bake;
 pub mod channels;
 pub mod craters;
 pub mod interp;
+pub mod levels;
 pub mod relief;
 
 use hyperion_base::math;
@@ -28,39 +36,93 @@ use crate::field::{FieldView, SynthesisCell};
 use crate::height::HeightSample;
 use crate::noise::LatticeCache;
 use crate::num;
+pub use bake::PatchHeights;
 pub use channels::Channels;
 pub use craters::SmallCraters;
+use craters::rims::CoarseRims;
+use craters::{CraterCache, CraterOctaves};
 use interp::ReadCellError;
+pub use levels::{LevelBounds, LevelSet, level_bound_m};
 pub use relief::{Relief, local_variance};
+
+/// The number of band levels, 0 to [`MAX_LEVEL`]: 25.
+pub(crate) const BAND_LEVELS: usize = MAX_LEVEL as usize + 1;
 
 /// The height function over a coarse field: what the server's collision and the client's patches
 /// read (Design note 13).
 ///
 /// It is a pure function of the field the view holds, the body's detail seed, the direction and
 /// the level: the same on the server and in the client's WebAssembly workers, bit for bit, and in
-/// any order of queries, any cache the caller passes being the caller's. It borrows the view, so
-/// it is `Copy` whatever the view is.
+/// any order of queries, any cache the caller passes being the caller's. It borrows the view and
+/// holds the body's contributions, prepared once from the field's header and the seed: the
+/// structural octaves, the channels, the small craters' octaves, the coarse craters' rims and each
+/// level's set and bounds.
+/// Building one takes about 1 to 10 ms (the craters' octaves and the bounds' sampled profiles,
+/// most on a screened body), so a caller builds one per body and view, not per query.
 #[derive(Debug)]
 pub struct Synthesiser<'a, F> {
     field: &'a F,
     seed: DetailSeed,
+    relief: Relief,
+    channels: Channels,
+    craters: SmallCraters,
+    rims: CoarseRims,
+    bounds: LevelBounds,
 }
 
-// By hand, since a derive would bound them on `F: Clone` and `F: Copy`, which no view is.
+// By hand, since a derive would bound it on `F: Clone`, which no view need be.
 impl<F> Clone for Synthesiser<'_, F> {
     fn clone(&self) -> Self {
-        *self
+        Self {
+            field: self.field,
+            seed: self.seed,
+            relief: self.relief.clone(),
+            channels: self.channels,
+            craters: self.craters.clone(),
+            rims: self.rims,
+            bounds: self.bounds.clone(),
+        }
     }
 }
 
-impl<F> Copy for Synthesiser<'_, F> {}
+/// One height's contributions at a point and level, each with its gradient, in the order a height
+/// sums them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Contributions {
+    pub(crate) base: HeightSample,
+    pub(crate) relief: HeightSample,
+    pub(crate) channels: HeightSample,
+    pub(crate) craters: HeightSample,
+    pub(crate) rims: HeightSample,
+}
+
+/// A contribution of nothing.
+const NOTHING: HeightSample = HeightSample {
+    height_m: 0.0,
+    gradient: [0.0; 3],
+};
 
 impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// The synthesis over `field` with the body's detail seed `seed` (plan 14's
     /// `body.surface.detail`, R09.T1.b), from which the bands below the coarse cell draw.
+    ///
+    /// # Panics
+    ///
+    /// As [`CraterOctaves::new`], which no header a field holds reaches.
     #[must_use]
-    pub const fn new(field: &'a F, seed: DetailSeed) -> Self {
-        Self { field, seed }
+    pub fn new(field: &'a F, seed: DetailSeed) -> Self {
+        let header = field.header();
+        let craters = SmallCraters::new(header, seed);
+        let bounds = LevelBounds::of(header, craters.octaves());
+        Self {
+            field,
+            seed,
+            relief: Relief::new(header, seed),
+            channels: Channels::new(header, seed),
+            craters,
+            rims: CoarseRims::new(header),
+            bounds,
+        }
     }
 
     /// The field it reads.
@@ -75,31 +137,190 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         self.seed
     }
 
+    /// The body's structural octaves.
+    #[must_use]
+    pub const fn relief(&self) -> &Relief {
+        &self.relief
+    }
+
+    /// The body's channels.
+    #[must_use]
+    pub const fn channels(&self) -> &Channels {
+        &self.channels
+    }
+
+    /// The body's small craters.
+    #[must_use]
+    pub const fn craters(&self) -> &SmallCraters {
+        &self.craters
+    }
+
+    /// The body's coarse craters' rims, which sharpen the field's listed craters.
+    #[must_use]
+    pub const fn rims(&self) -> &CoarseRims {
+        &self.rims
+    }
+
+    /// The body's level sets and bounds.
+    #[must_use]
+    pub const fn bounds(&self) -> &LevelBounds {
+        &self.bounds
+    }
+
+    /// The contributions `level` evaluates ([`LevelBounds::set`]).
+    #[must_use]
+    pub fn level_set(&self, level: BandLevel) -> &LevelSet {
+        self.bounds.set(level)
+    }
+
+    /// The level bound at `level`, metres ([`level_bound_m`], from the bounds it holds).
+    #[must_use]
+    pub fn level_bound_m(&self, level: BandLevel) -> f64 {
+        self.bounds.bound_m(level)
+    }
+
     /// The height at the unit direction `dir` (body-fixed) at `level`, above the field's spheroid
     /// along its normal, metres, and its gradient in body-fixed space at the spheroid point, metres
     /// per metre.
     ///
-    /// Today it is the base elevation ([`interp::base_elevation`]), the same at every level; the
-    /// bands below the coarse cell join it in R09.T5–T8. `cache` is the caller's, and no result
-    /// depends on what it holds.
+    /// It is the base elevation ([`interp::base_elevation`]) plus the level's contributions
+    /// ([`level_set`](Self::level_set)): the structural octaves ([`Relief::at`]), the channels'
+    /// incision ([`Channels::incision_at`]), the small craters ([`SmallCraters::at`]) and the
+    /// coarse craters' rims ([`CoarseRims::at`], at every level), summed in that order, height and
+    /// gradient alike, and the sum asserted finite. `cache` is the caller's, and no result depends
+    /// on what it holds.
     ///
     /// # Errors
     ///
-    /// [`QueryHeightError::NotSurveyed`] naming the first cell read that the view does not hold.
+    /// [`QueryHeightError::NotSurveyed`] naming the first cell read that the view does not hold:
+    /// the base elevation's reads come first, then the octaves', then the channels'.
     ///
     /// # Panics
     ///
-    /// If `dir` is zero or has a component that is not finite.
+    /// If `dir` is zero or has a component that is not finite, or a height is not finite (a bug).
     pub fn height_at(
         &self,
         cache: &mut SynthCache,
         dir: [f64; 3],
         level: BandLevel,
     ) -> Result<HeightSample, QueryHeightError> {
-        // The base elevation reads no cache and is the same at every level; the octaves (T5) and
-        // the channels (T6.b) read and fill `cache` per level.
-        let _ = (cache, level);
-        Ok(interp::base_elevation(self.field, dir)?)
+        let parts = self.contributions(cache, dir, level)?;
+        let mut sample = parts.base;
+        for part in [parts.relief, parts.channels, parts.craters, parts.rims] {
+            sample.height_m += part.height_m;
+            for (g, d) in sample.gradient.iter_mut().zip(part.gradient) {
+                *g += d;
+            }
+        }
+        Ok(HeightSample {
+            height_m: num::assert_finite(sample.height_m),
+            gradient: sample.gradient.map(num::assert_finite),
+        })
+    }
+
+    /// Each of `level`'s contributions at `dir`, the base elevation first (see
+    /// [`height_at`](Self::height_at)).
+    pub(crate) fn contributions(
+        &self,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        level: BandLevel,
+    ) -> Result<Contributions, QueryHeightError> {
+        let field = self.field;
+        let set = self.bounds.set(level);
+        let base = interp::base_elevation(field, dir)?;
+        let relief = match set.relief_through() {
+            Some(through) => self.relief.at(field, dir, through, cache)?,
+            None => NOTHING,
+        };
+        let channels = match set.channels_through() {
+            Some(through) => self.channels.incision_at(field, dir, through, cache)?,
+            None => NOTHING,
+        };
+        let craters = match set.craters_through() {
+            Some(through) => self.craters.at(dir, level, through, &mut cache.craters),
+            None => NOTHING,
+        };
+        let rims = self.rims.at(field, dir, level)?;
+        Ok(Contributions {
+            base,
+            relief,
+            channels,
+            craters,
+            rims,
+        })
+    }
+
+    /// The heights, parent-band heights and gradients of `patch`'s 65 × 65 vertices, in R05's bake
+    /// layout ([`PatchHeights`]): each vertex's [`height_at`](Self::height_at) at the patch's
+    /// level, and at its parent's at the even vertices, bit for bit, the structural octaves'
+    /// lattice covered once for the patch first.
+    ///
+    /// # Errors
+    ///
+    /// The first [`QueryHeightError`] of its queries, in row order, own levels first.
+    ///
+    /// # Panics
+    ///
+    /// If a height is not finite (a bug).
+    pub fn bake_patch(
+        &self,
+        cache: &mut SynthCache,
+        patch: PatchKey,
+    ) -> Result<PatchHeights, QueryHeightError> {
+        bake::bake(self, cache, patch)
+    }
+
+    /// The lowest and highest heights `patch`'s vertices can have at its level and its parent's,
+    /// metres, for R05's culling: the base elevation's range over the held cells its points read,
+    /// which the approximating spline never leaves, widened by each level's
+    /// [`LevelBounds::contribution_range_m`]. Where the view holds none of those cells, any
+    /// elevation a cell can encode.
+    #[must_use]
+    pub fn height_range_m(&self, patch: PatchKey) -> (f64, f64) {
+        bake::height_range(self, patch)
+    }
+
+    /// The variance of `cell`'s ground in wavelengths shorter than `finer_than`, per contribution
+    /// ([`unresolved_variance`], from the small craters' octaves it holds).
+    ///
+    /// # Panics
+    ///
+    /// As [`unresolved_variance`].
+    #[must_use]
+    pub fn unresolved_variance(
+        &self,
+        cell: PatchKey,
+        finer_than: Metres,
+    ) -> Option<UnresolvedVariance> {
+        unresolved_with(self.field, self.craters.octaves(), cell, finer_than)
+    }
+
+    /// The structure function of `cell`'s ground in wavelengths shorter than `finer_than` at a
+    /// lag of `lag` ([`structure_function`], from the small craters' octaves it holds).
+    ///
+    /// # Panics
+    ///
+    /// As [`structure_function`].
+    #[must_use]
+    pub fn structure_function(
+        &self,
+        cell: PatchKey,
+        finer_than: Metres,
+        lag: Metres,
+    ) -> Option<SquareMetres> {
+        structure_with(self.field, self.craters.octaves(), cell, finer_than, lag)
+    }
+
+    /// The RMS of `cell`'s ground unresolved at `resolution` ([`unresolved_rms`], from the small
+    /// craters' octaves it holds).
+    ///
+    /// # Panics
+    ///
+    /// As [`unresolved_rms`].
+    #[must_use]
+    pub fn unresolved_rms(&self, cell: PatchKey, resolution: Metres) -> Option<Metres> {
+        self.unresolved_variance(cell, resolution).map(rms_of)
     }
 
     /// The cell that contains the unit direction `dir`, and its record, from which the categorical
@@ -125,19 +346,25 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 ///
 /// It holds R05's lattice cache, generalised to the body's detail seed (R09.T5), for the
 /// structural octaves ([`relief`]): their octave table, built once per seed, and the lattice
-/// corners a bake covers; and the channels' cells (R09.T6.b), keyed by packed cell key
+/// corners a bake covers; the channels' cells (R09.T6.b), keyed by packed cell key
 /// ([`PatchKey::to_u64`]): the network's key points and segments, each level's grooves by cell and
 /// each level's mean and its correction by parent cell ([`Channels::incision_at`]), kept for one
-/// body and seed at a time and started afresh for another's. No height depends on what it holds,
-/// only the time a query takes, so long as it is used with views of one field whose held cells
-/// only grow, as a worker's are: a result it holds answers a later query that a view lacking one
-/// of the cells it read would refuse. The channels' part grows with every cell a query builds and
-/// is never pruned, so a caller that moves across a body drops it between bakes (R09.T8's bake
-/// sets the policy).
+/// body and seed at a time and started afresh for another's; and the small craters drawn in each
+/// octave's cells ([`CraterCache`], R09.T7.b), which starts afresh at 16,384 cells. No height
+/// depends on what it holds, only the time a query takes, so long as it is used with views of one
+/// field whose held cells only grow, as a worker's are: a result it holds answers a later query
+/// that a view lacking one of the cells it read would refuse.
+///
+/// The policy (R09.T8): the lattice cover is set afresh by each bake, and the craters' part is
+/// bounded, but the channels' part grows with every cell a query builds and is never pruned, so a
+/// caller that moves across a body drops the cache when it moves on, as a worker does between
+/// descents; one cache serves a patch and its neighbours and children, which share their coarser
+/// cells.
 #[derive(Debug, Clone, Default)]
 pub struct SynthCache {
     lattice: LatticeCache,
     channels: channels::ChannelCache,
+    craters: CraterCache,
 }
 
 impl SynthCache {
@@ -147,6 +374,7 @@ impl SynthCache {
         Self {
             lattice: LatticeCache::new(),
             channels: channels::ChannelCache::new(),
+            craters: CraterCache::new(),
         }
     }
 
@@ -167,13 +395,15 @@ impl SynthCache {
 /// what R10's material weights and slope readouts read (Design note 18).
 ///
 /// Each is a closed form, of the cell's own fields or, for the small craters, of the body's header
-/// alone: the structural octaves' (R09.T5), the channels' (R09.T6.b) and the small craters'
-/// (R09.T7.b).
+/// alone: the structural octaves' (R09.T5), the channels' (R09.T6.b), the small craters'
+/// (R09.T7.b), and the coarse craters' rims' (R09.T7.c) from the craters the cell's index holds
+/// (R09.T8).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct UnresolvedVariance {
     relief: SquareMetres,
     channels: SquareMetres,
     craters: SquareMetres,
+    rims: SquareMetres,
 }
 
 impl UnresolvedVariance {
@@ -199,32 +429,142 @@ impl UnresolvedVariance {
         self.craters
     }
 
+    /// The coarse craters' rims' share, square metres: the part of each listed crater's sharpening
+    /// finer than the wavelength, its mean square over the crater's reach summed over the craters
+    /// that reach the cell, a crater-wide estimate (R09.T7.c's rims; R09.T8).
+    #[must_use]
+    pub const fn rims(&self) -> SquareMetres {
+        self.rims
+    }
+
     /// The whole, square metres: the contributions are taken as independent, so their variances
     /// add, in the order the fields are listed: the structural share, the channels', the small
-    /// craters'.
+    /// craters', the coarse craters' rims'.
     #[must_use]
     pub fn total(&self) -> SquareMetres {
-        self.relief + self.channels + self.craters
+        self.relief + self.channels + self.craters + self.rims
     }
 }
 
 /// The variance of `cell`'s ground in wavelengths shorter than `finer_than`, per contribution, or
 /// `None` where `field` does not hold the cell (Design note 18).
 ///
+/// It builds the body's small-crater octaves, about 1 to 10 ms; a [`Synthesiser`] holds them
+/// ([`Synthesiser::unresolved_variance`]).
+///
 /// # Panics
 ///
-/// If `finer_than` is not finite and positive, or `cell` is not of the field's level.
+/// If `finer_than` is not finite and positive, or `cell` is not of the field's level; and as
+/// [`CraterOctaves::new`], which no header a field holds reaches.
 #[must_use]
 pub fn unresolved_variance(
     field: &impl FieldView,
     cell: PatchKey,
     finer_than: Metres,
 ) -> Option<UnresolvedVariance> {
+    unresolved_with(field, &CraterOctaves::new(field.header()), cell, finer_than)
+}
+
+/// [`unresolved_variance`] with the body's small-crater octaves `octaves`.
+#[must_use]
+fn unresolved_with(
+    field: &impl FieldView,
+    octaves: &CraterOctaves,
+    cell: PatchKey,
+    finer_than: Metres,
+) -> Option<UnresolvedVariance> {
+    let relief = relief::unresolved_relief_variance(field, cell, finer_than)?;
+    let channels = channels::unresolved_channel_variance(field, cell, finer_than)?;
     Some(UnresolvedVariance {
-        relief: relief::unresolved_relief_variance(field, cell, finer_than)?,
-        channels: channels::unresolved_channel_variance(field, cell, finer_than)?,
-        craters: craters::unresolved_variance(field, cell, finer_than)?,
+        relief,
+        channels,
+        craters: octaves.unresolved_variance(finer_than),
+        rims: craters::rims::unresolved_rims(field, cell, finer_than)?,
     })
+}
+
+/// The structure function of `cell`'s ground in wavelengths shorter than `finer_than`, at a lag of
+/// `lag`: E[(h(p + Δ e) − h(p))²] along a tangent e, square metres, the sum of its contributions'
+/// closed forms, taken as independent; `None` where `field` does not hold the cell (Design note
+/// 18; R10's slope readouts).
+///
+/// The contributions are the structural octaves', octave by octave from their pinned unit
+/// structure functions at the cell's style (`decision-r09-t5.md` item 7.3), the channels'
+/// ([`channels::channel_structure_function`]), the small craters'
+/// ([`CraterOctaves::structure_function`]) and the coarse craters' rims', each crater's
+/// 2V (1 − exp(−s Δ² ÷ 2V)) from its sharpening's crater-wide mean square and slopes. Each tends
+/// to twice its share of
+/// [`unresolved_variance`] at lags long against its wavelengths and to its slopes' variance times
+/// the lag squared at short ones.
+///
+/// It builds the body's small-crater octaves, about 1 to 10 ms; a [`Synthesiser`] holds them
+/// ([`Synthesiser::structure_function`]).
+///
+/// # Panics
+///
+/// If `finer_than` is not finite and positive, `lag` is not finite and non-negative, or `cell` is
+/// not of the field's level; and as [`CraterOctaves::new`], which no header a field holds
+/// reaches.
+#[must_use]
+pub fn structure_function(
+    field: &impl FieldView,
+    cell: PatchKey,
+    finer_than: Metres,
+    lag: Metres,
+) -> Option<SquareMetres> {
+    structure_with(
+        field,
+        &CraterOctaves::new(field.header()),
+        cell,
+        finer_than,
+        lag,
+    )
+}
+
+/// [`structure_function`] with the body's small-crater octaves `octaves`.
+#[must_use]
+fn structure_with(
+    field: &impl FieldView,
+    octaves: &CraterOctaves,
+    cell: PatchKey,
+    finer_than: Metres,
+    lag: Metres,
+) -> Option<SquareMetres> {
+    let relief = relief::relief_structure_function(field, cell, finer_than, lag)?;
+    let channels = channels::channel_structure_function(field, cell, finer_than, lag)?;
+    let craters = octaves.structure_function(finer_than, lag);
+    let rims = craters::rims::rims_structure_function(field, cell, finer_than, lag)?;
+    Some(relief + channels + craters + rims)
+}
+
+/// The RMS of `cell`'s ground in wavelengths shorter than `resolution`: the square root of
+/// [`unresolved_variance`]'s total, one standard deviation of every contribution a survey at that
+/// resolution does not resolve, which R10's readings quote as their uncertainty (its Design note
+/// 6); `None` where `field` does not hold the cell.
+///
+/// It falls as the resolution refines and is zero at the 2 m band limit and below, where the
+/// synthesis has nothing finer.
+///
+/// It builds the body's small-crater octaves, about 1 to 10 ms; a [`Synthesiser`] holds them
+/// ([`Synthesiser::unresolved_rms`]).
+///
+/// # Panics
+///
+/// If `resolution` is not finite and positive, or `cell` is not of the field's level; and as
+/// [`CraterOctaves::new`], which no header a field holds reaches.
+#[must_use]
+pub fn unresolved_rms(
+    field: &impl FieldView,
+    cell: PatchKey,
+    resolution: Metres,
+) -> Option<Metres> {
+    unresolved_variance(field, cell, resolution).map(rms_of)
+}
+
+/// The square root of `variance`'s total, metres.
+#[must_use]
+fn rms_of(variance: UnresolvedVariance) -> Metres {
+    Metres::new(variance.total().value().sqrt())
 }
 
 /// Why a [`Synthesiser`] could not answer a query.
@@ -752,130 +1092,7 @@ fn anchor_degree(circumference: f64) -> u64 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use hyperion_testkit::float::assert_same_bits;
-    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-    use wasm_bindgen_test::wasm_bindgen_test as test;
+pub(crate) mod test_support;
 
-    #[test]
-    fn a_band_level_is_a_quadtree_level() {
-        assert_eq!(BandLevel::new(19).map(BandLevel::get), Ok(19));
-        assert_eq!(
-            BandLevel::try_from(MAX_LEVEL + 1),
-            Err(NewBandLevelError(25))
-        );
-    }
-
-    /// Parts of a silicate crust's law at an Earth's break, with V₁ `v1` m².
-    fn parts(v1: f64) -> BandSpectrumParts {
-        BandSpectrumParts {
-            exponent: BandSpectrum::DEFAULT_EXPONENT,
-            unit_degree_variance: SquareMetres::new(v1),
-            break_degree: 20_015.1,
-            small_scale_exponent: 3.0,
-        }
-    }
-
-    #[test]
-    fn a_band_spectrum_needs_a_summable_law_and_a_break() {
-        let v = SquareMetres::new(2.253e7);
-        let spectrum = BandSpectrum::new(parts(v.value())).unwrap();
-        assert_eq!(spectrum.unit_degree_variance(), v);
-        assert_same_bits(spectrum.break_degree(), 20_015.1);
-        assert_same_bits(spectrum.small_scale_exponent(), 3.0);
-        let refused = |p: BandSpectrumParts| BandSpectrum::new(p).unwrap_err();
-        assert_eq!(
-            refused(BandSpectrumParts {
-                exponent: 1.0,
-                ..parts(1.0)
-            }),
-            BuildBandSpectrumError::Exponent(1.0)
-        );
-        assert_eq!(refused(parts(-1.0)), BuildBandSpectrumError::Variance(-1.0));
-        for l in [0.5, 0.0, -3.0, f64::INFINITY] {
-            assert_eq!(
-                refused(BandSpectrumParts {
-                    break_degree: l,
-                    ..parts(1.0)
-                }),
-                BuildBandSpectrumError::BreakDegree(l)
-            );
-        }
-        assert!(matches!(
-            refused(BandSpectrumParts {
-                break_degree: f64::NAN,
-                ..parts(1.0)
-            }),
-            BuildBandSpectrumError::BreakDegree(l) if l.is_nan()
-        ));
-        for b in [1.0, 0.7, f64::INFINITY] {
-            assert_eq!(
-                refused(BandSpectrumParts {
-                    small_scale_exponent: b,
-                    ..parts(1.0)
-                }),
-                BuildBandSpectrumError::SmallScaleExponent(b)
-            );
-        }
-        // A break at degree 1 is a law of β₂ alone, and is accepted.
-        assert!(
-            BandSpectrum::new(BandSpectrumParts {
-                break_degree: 1.0,
-                ..parts(1.0)
-            })
-            .is_ok()
-        );
-        // Parts each in range whose closed forms overflow are refused, so that no variance the
-        // relief reads is infinite or NaN: a break far beyond every degree under a far steeper
-        // β₂ (its factor l_b^(β₂−β₁) overflows), with V₁ above zero and at zero, and a V₁ near
-        // the largest f64.
-        let overflowing = BandSpectrumParts {
-            break_degree: 1e200,
-            small_scale_exponent: 4.0,
-            ..parts(1.0)
-        };
-        assert!(matches!(
-            refused(overflowing),
-            BuildBandSpectrumError::Total(v) if !v.is_finite()
-        ));
-        assert!(matches!(
-            refused(BandSpectrumParts {
-                unit_degree_variance: SquareMetres::ZERO,
-                ..overflowing
-            }),
-            BuildBandSpectrumError::Total(v) if v.is_nan()
-        ));
-        assert!(matches!(
-            refused(parts(1.5e308)),
-            BuildBandSpectrumError::Total(v) if v.is_infinite() && v > 0.0
-        ));
-    }
-
-    #[test]
-    fn a_spectrum_shape_needs_summable_exponents_and_a_break_wavelength() {
-        let shape = SpectrumShape::new(1.8, Metres::new(1_000.0), 2.6).unwrap();
-        assert_eq!(shape, SpectrumShape::ICE_RICH);
-        assert_same_bits(SpectrumShape::SILICATE.exponent(), 2.0);
-        assert_eq!(
-            SpectrumShape::SILICATE.break_wavelength(),
-            Metres::new(2_000.0)
-        );
-        assert_same_bits(SpectrumShape::SILICATE.small_scale_exponent(), 3.0);
-        let new = |b: f64, w: f64, s: f64| SpectrumShape::new(b, Metres::new(w), s);
-        assert_eq!(
-            new(1.0, 1e3, 2.6),
-            Err(BuildSpectrumShapeError::Exponent(1.0))
-        );
-        for w in [0.0, -1.0, f64::INFINITY] {
-            assert_eq!(
-                new(2.0, w, 3.0),
-                Err(BuildSpectrumShapeError::BreakWavelength(w))
-            );
-        }
-        assert_eq!(
-            new(2.0, 2e3, 0.5),
-            Err(BuildSpectrumShapeError::SmallScaleExponent(0.5))
-        );
-    }
-}
+#[cfg(test)]
+mod tests;

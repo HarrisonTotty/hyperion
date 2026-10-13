@@ -358,6 +358,84 @@ pub(crate) fn unresolved_relief_variance(
     cell: PatchKey,
     finer_than: Metres,
 ) -> Option<SquareMetres> {
+    let mut variance = 0.0;
+    each_unresolved_octave(field, cell, finer_than, |octave| {
+        let a = octave.amplitude;
+        variance += a * a * octave.band_variance;
+    })?;
+    Some(SquareMetres::new(variance))
+}
+
+/// The relief's structure function at `cell` in wavelengths shorter than `finer_than`, at a lag of
+/// `lag`, square metres: E[(h(p + Δ e) − h(p))²] along a tangent e, from the cell's own style, the
+/// per-octave sum Σ (a `g_m`^b)² `V_m` [cos² `θ_m` `D̂_p`(Δ ÷ `λ_m`) + sin² `θ_m` `D̂_r`(Δ ÷ `λ_m`)]
+/// over the octaves of [`unresolved_relief_variance`], `V_m` the variance of octave m's degrees
+/// whose wavelength is shorter, `θ_m` = (π ÷ 2) b `ρ_m` its ridged mix and `λ_m` its lattice
+/// spacing ([`PLAIN_STRUCTURE`], [`RIDGED_STRUCTURE`]; `decision-r09-t5.md` item 7.3); `None`
+/// where `field` does not hold the cell.
+///
+/// The octaves are independent and each one's two terms uncorrelated, so their structure functions
+/// add. An octave only partly finer than `finer_than` takes its whole unit structure function at
+/// its share of the variance. The warp shears an octave without changing its variance, which the
+/// tables, measured unwarped, leave out; and the first octave's ridged term is unweighted, so the
+/// weighted table is a few per cent off for it (R09.T5's second follow-up).
+///
+/// # Panics
+///
+/// If `finer_than` is not finite and positive, `lag` is not finite and non-negative, or `cell` is
+/// not of the field's level.
+#[must_use]
+pub(crate) fn relief_structure_function(
+    field: &impl FieldView,
+    cell: PatchKey,
+    finer_than: Metres,
+    lag: Metres,
+) -> Option<SquareMetres> {
+    let lag_m = lag.value();
+    assert!(
+        lag_m.is_finite() && lag_m >= 0.0,
+        "a lag must be finite and non-negative, got {lag_m} m"
+    );
+    let radius = field.header().radius();
+    let mut d = 0.0;
+    each_unresolved_octave(field, cell, finer_than, |octave| {
+        let (sin, cos) = math::sin_cos(octave.mix);
+        let x = lag_m / octave_spacing(radius, octave.index).value();
+        let unit = cos * cos * PLAIN_STRUCTURE.at(x) + sin * sin * RIDGED_STRUCTURE.at(x);
+        let a = octave.amplitude;
+        d += a * a * octave.band_variance * unit;
+    })?;
+    Some(SquareMetres::new(d))
+}
+
+/// One octave's part of the relief's unresolved band at a cell ([`each_unresolved_octave`]).
+struct UnresolvedOctave {
+    /// The octave's index m.
+    index: u8,
+    /// The cell's amplitude times the octave's belt lift, a `g_m`^b.
+    amplitude: f64,
+    /// The octave's ridged mix `θ_m` = (π ÷ 2) b `ρ_m`, radians.
+    mix: f64,
+    /// The reference style's variance of the octave's degrees whose wavelength is shorter than the
+    /// band's, square metres.
+    band_variance: f64,
+}
+
+/// Each of the relief's octaves with degrees whose wavelength 2πR ÷ l is shorter than
+/// `finer_than` at `cell`, from the coarse level's Nyquist degree to the finest octave's, in octave
+/// order, handed to `emit` with the cell's own style; `None`, with nothing handed, where `field`
+/// does not hold the cell. A body too small for any octave (its finest coarser than its coarse
+/// cells) has none.
+///
+/// # Panics
+///
+/// If `finer_than` is not finite and positive, or `cell` is not of the field's level.
+fn each_unresolved_octave(
+    field: &impl FieldView,
+    cell: PatchKey,
+    finer_than: Metres,
+    mut emit: impl FnMut(UnresolvedOctave),
+) -> Option<()> {
     let w = finer_than.value();
     assert!(
         w.is_finite() && w > 0.0,
@@ -383,7 +461,7 @@ pub(crate) fn unresolved_relief_variance(
     )]
     let end_degree = end as f64;
     if shorter >= end_degree {
-        return Some(SquareMetres::ZERO);
+        return Some(());
     }
     #[expect(
         clippy::cast_possible_truncation,
@@ -391,20 +469,22 @@ pub(crate) fn unresolved_relief_variance(
         reason = "a positive integer below the finest Nyquist degree, under 2^42"
     )]
     let shorter = shorter as u64;
-    // Octave by octave, in octave order, each band times its own (a g^b)²; a body too small for
-    // any octave (its finest coarser than its coarse cells) has none.
-    let mut variance = 0.0;
     for m in first..=finest {
         let from = nyquist_degree(m - 1).max(shorter);
         let to = nyquist_degree(m);
         if from >= to {
             continue;
         }
-        let lift = math::exp(style.belt * belt_log_factor(break_ratio(spectrum, m)));
-        let a = style.amplitude * lift;
-        variance += a * a * spectrum.band_variance(from, to).value();
+        let ratio = break_ratio(spectrum, m);
+        let lift = math::exp(style.belt * belt_log_factor(ratio));
+        emit(UnresolvedOctave {
+            index: m,
+            amplitude: style.amplitude * lift,
+            mix: FRAC_PI_2 * style.belt * ridged_share(ratio),
+            band_variance: spectrum.band_variance(from, to).value(),
+        });
     }
-    Some(SquareMetres::new(variance))
+    Some(())
 }
 
 /// The RMS of the ridged multifractal's weight w over space, `√E[w²]`: 0.719 88 measured over 10⁷

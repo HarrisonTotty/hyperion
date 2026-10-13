@@ -515,6 +515,9 @@ pub struct CraterOctave {
     window: Gigayears,
     window_density: PerSquareKilometre,
     variance: SquareMetres,
+    /// The mean area its kept craters' reaches cover, π ((1 + a) R)², square metres, by the same
+    /// nodes as the variance (R09.T8's level bound).
+    reach_area_m2: f64,
 }
 
 impl CraterOctave {
@@ -712,8 +715,9 @@ impl CraterOctaves {
                 window,
                 window_density,
                 variance: SquareMetres::ZERO,
+                reach_area_m2: 0.0,
             };
-            octave.variance = octave_variance(&params, &octave);
+            (octave.variance, octave.reach_area_m2) = octave_moments(&params, &octave);
             octaves.push(octave);
         }
         Self { inputs, octaves }
@@ -823,14 +827,20 @@ fn octave_wavelength(octave: &CraterOctave) -> f64 {
 /// [`mean_square_relief`]'s, in closed form where the production is linear: g² falls by orders
 /// of magnitude across a window, so a few young craters carry an octave's variance, which nodes in
 /// the age's share would miss (R09.T7.b's build found them 120 times short).
+///
+/// Beside it, at the same nodes, the mean area its kept craters' reaches cover, π ((1 + a) R)²
+/// with each node's own exterior width a, square metres: what R09.T8's level bound counts the
+/// craters reaching a point by (a marked Poisson field covers a point a Poisson number of times,
+/// of mean the density times that area). Both are zero for an octave of no density.
 #[must_use]
-fn octave_variance(params: &CraterParams, octave: &CraterOctave) -> SquareMetres {
+fn octave_moments(params: &CraterParams, octave: &CraterOctave) -> (SquareMetres, f64) {
     let density_per_m2 = octave.density().value() * 1e-6;
     if density_per_m2 <= 0.0 {
-        return SquareMetres::ZERO;
+        return (SquareMetres::ZERO, 0.0);
     }
     let dropped = 1.0 - octave.kept;
     let mut mean = 0.0;
+    let mut reach_area = 0.0;
     for (node, weight) in GAUSS_LEGENDRE_8 {
         let node_share = dropped + octave.kept * f64::midpoint(1.0, node);
         let size = UnitUniform::new(node_share).expect("a node's share lies in [0, 1)");
@@ -840,8 +850,10 @@ fn octave_variance(params: &CraterParams, octave: &CraterOctave) -> SquareMetres
         let fresh = CraterProfile::filleted(shape, Metres::ZERO).square_moment();
         let relief = mean_square_relief(rim_m, octave, params.system_age());
         mean += 0.5 * weight * core::f64::consts::PI * rim_m * rim_m * fresh * relief;
+        let reach_m = shape.reach().value();
+        reach_area += 0.5 * weight * core::f64::consts::PI * reach_m * reach_m;
     }
-    SquareMetres::new(density_per_m2 * mean)
+    (SquareMetres::new(density_per_m2 * mean), reach_area)
 }
 
 /// The mean of g² ([`relief_factor`]) over `octave`'s window of ages for craters of rim radius
@@ -1428,6 +1440,8 @@ pub fn structure_function(
     field.cell(cell)?;
     Some(CraterOctaves::new(header).structure_function(finer_than, lag))
 }
+
+pub(crate) mod bound;
 
 #[cfg(test)]
 mod tests;

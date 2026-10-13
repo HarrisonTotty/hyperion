@@ -1173,7 +1173,7 @@ fn ceres_like() -> CoarseField {
     spiral_craters(builder, 25, (55e3, 150e3), (1.0, 4.0)).build()
 }
 
-fn flat_builder(body_index: u16) -> FieldBuilder {
+pub(super) fn flat_builder(body_index: u16) -> FieldBuilder {
     FieldBuilder::new(Metres::new(MOON_RADIUS_M)).body(BodyRef::new(SYSTEM, body_index))
 }
 

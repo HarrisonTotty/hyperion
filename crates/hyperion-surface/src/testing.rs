@@ -17,9 +17,10 @@
 //! the builder says so: the header's realised `σ_h` and relief are the cells' (their area-weighted
 //! RMS about the mean, and their range), not the reconstructed field's, which needs R09.T4's
 //! interpolant; the reference temperature is the climate layer's area-weighted mean; flow follows
-//! steepest descent with no depression filling; and a crater's relief is its fresh profile
-//! ([`crater_shape`](crate::craters::crater_shape), R09.T7.a) sampled at each cell's centre, not
-//! smoothed to the cell nor degraded.
+//! steepest descent with no depression filling; and a crater's relief is held as R09.T12.d's
+//! contract has the coarse pass smooth it in, its kept relief times its rim filleted over the
+//! coarse band (`synth::craters::rims::CoarseRims::coarse_profile`, R09.T7.c), but sampled at each
+//! cell's centre rather than smoothed to the cell.
 
 mod worlds;
 
@@ -43,6 +44,8 @@ use crate::field::{
     SynthesisCell, Wind, boundary_diameter, cell_at_index, cell_index, coarse_level,
 };
 use crate::spheroid::Spheroid;
+use crate::synth::craters::CraterProfile;
+use crate::synth::craters::rims::CoarseRims;
 use crate::synth::relief::H_REF;
 use crate::synth::{BandSpectrum, SpectrumShape};
 
@@ -432,10 +435,13 @@ impl FieldBuilder {
     }
 
     /// A crater of `diameter` (at least the field's boundary diameter) centred on the unit vector
-    /// `centre`, formed `age` ago, of degradation code `degradation` (255ths of its rim lost). Its
-    /// morphology and fresh profile are [`crater_shape`]'s for its diameter on the builder's crater
-    /// contract, and that profile, sampled at each cell's centre, is added to the elevation; the
-    /// degradation code is recorded, not applied.
+    /// `centre`, formed `age` ago, of degradation code `degradation` (255ths of its relief lost).
+    /// Its morphology and fresh shape are [`crater_shape`]'s for its diameter on the builder's
+    /// crater contract, and the elevation holds it as R09.T12.d's contract has the coarse pass
+    /// smooth it in: its kept relief times its rim filleted over the coarse band
+    /// ([`CoarseRims::coarse_profile`]), sampled at each cell's centre at the chord between the
+    /// spheroid points in rim radii, so that the synthesis's sharpening (R09.T7.c) refines that
+    /// one profile.
     #[must_use]
     pub fn crater(
         mut self,
@@ -496,17 +502,14 @@ impl FieldBuilder {
         let d_b = boundary_diameter(level, self.radius);
         let grid = Grid::new(level.get());
         let sites: Vec<CellSite> = grid.centres.iter().map(|&dir| self.site(dir, r)).collect();
-        let craters: Vec<PreparedCrater> = self
-            .craters
-            .iter()
-            .map(|spec| self.prepare(spec, d_b))
-            .collect();
+        let figure = self.figure.unwrap_or_else(|| Spheroid::sphere(r));
+        let craters = self.prepare_all(level, d_b, figure);
         let elevation_mm: Vec<i32> = sites
             .iter()
             .map(|site| {
                 let mut h = (self.elevation)(site).value();
                 for crater in &craters {
-                    h += crater.relief(site.dir, r);
+                    h += crater.relief(&figure, site.dir);
                 }
                 SynthesisCell::quantise_height(Metres::new(h))
                     .expect("a synthetic elevation is within ±2,147 km")
@@ -540,7 +543,7 @@ impl FieldBuilder {
         let header = FieldHeader::new(FieldHeaderParts {
             body: self.body,
             radius: self.radius,
-            figure: self.figure.unwrap_or_else(|| Spheroid::sphere(r)),
+            figure,
             sea_level,
             lapse_rate_k_per_m: self.lapse_rate_k_per_m,
             spectrum: self.header_spectrum(),
@@ -797,8 +800,24 @@ impl FieldBuilder {
         }
     }
 
-    /// `spec` with its fresh shape on the builder's crater contract (Design notes 12 and 13).
-    fn prepare(&self, spec: &CraterSpec, d_b: Metres) -> PreparedCrater {
+    /// Every crater prepared ([`prepare`](Self::prepare)) on a field of `level` and boundary
+    /// diameter `d_b` on `figure`.
+    fn prepare_all(
+        &self,
+        level: CoarseLevel,
+        d_b: Metres,
+        figure: Spheroid,
+    ) -> Vec<PreparedCrater> {
+        let rims = CoarseRims::for_body(self.crater_params, figure, level);
+        self.craters
+            .iter()
+            .map(|spec| self.prepare(spec, d_b, &rims))
+            .collect()
+    }
+
+    /// `spec` with its fresh shape on the builder's crater contract (Design notes 12 and 13), and
+    /// the profile the coarse elevation holds of it (R09.T12.d's contract, through `rims`).
+    fn prepare(&self, spec: &CraterSpec, d_b: Metres, rims: &CoarseRims) -> PreparedCrater {
         let d = spec.diameter.value();
         assert!(
             d.is_finite() && d >= d_b.value(),
@@ -808,22 +827,34 @@ impl FieldBuilder {
         PreparedCrater {
             spec: *spec,
             shape: crater_shape(&self.crater_params, spec.diameter),
+            coarse: rims.coarse_profile(spec.diameter),
         }
     }
 }
 
-/// A crater with its fresh shape.
+/// A crater with its fresh shape and the profile the coarse elevation holds of it.
 struct PreparedCrater {
     spec: CraterSpec,
     shape: CraterShape,
+    coarse: CraterProfile,
 }
 
 impl PreparedCrater {
-    /// The crater's relief at the unit vector `dir` on a body of radius `r` metres: its fresh
-    /// profile ([`CraterShape::relief`]) at the arc's distance from its centre in rim radii.
-    fn relief(&self, dir: [f64; 3], r: f64) -> f64 {
-        let x = arc(self.spec.centre, dir) * r / (self.spec.diameter.value() / 2.0);
-        self.shape.relief(x).value()
+    /// The share of its fresh relief the crater keeps, g = 1 − degradation ÷ 255: R09.T7.c's
+    /// `kept_relief` of the listed crater, through the one expression for it.
+    fn kept_relief(&self) -> f64 {
+        crate::synth::craters::rims::kept_relief_of(self.spec.degradation)
+    }
+
+    /// The crater's relief in the coarse elevation at the unit vector `dir` on `figure`: its kept
+    /// relief times its coarse profile ([`CoarseRims::coarse_profile`]) at the chord from its
+    /// centre's spheroid point in rim radii (R09.T12.d's contract).
+    fn relief(&self, figure: &Spheroid, dir: [f64; 3]) -> f64 {
+        let (p, c) = (figure.point(dir), figure.point(self.spec.centre));
+        let gap = [0, 1, 2].map(|k| p[k] - c[k]);
+        let chord = (gap[0] * gap[0] + gap[1] * gap[1] + gap[2] * gap[2]).sqrt();
+        let x = chord / (0.5 * self.spec.diameter.value());
+        self.kept_relief() * self.coarse.at(x).height_m
     }
 
     /// The crater as the field lists it, with the index of its centre's cell: its reach is every
@@ -1156,11 +1187,12 @@ mod tests {
         );
     }
 
-    /// The builder's craters are [`crater_shape`]'s (R09.T7.a): every listed crater's morphology
-    /// is its shape's, and every cell of the flat `OneCrater` world holds the shape's fresh relief
-    /// at the cell's centre, to the millimetre.
+    /// The builder's craters are [`crater_shape`]'s (R09.T7.a) held as R09.T12.d's contract has the
+    /// coarse pass smooth them in: every listed crater's morphology is its shape's, and every cell
+    /// of the flat `OneCrater` world holds the crater's kept relief times its coarse profile at the
+    /// chord from its centre, to the millimetre (R09.T8, after T7.c's rims).
     #[test]
-    fn a_built_crater_is_its_crater_shape() {
+    fn a_built_crater_is_its_crater_shape_at_the_coarse_band() {
         for &world in SyntheticWorld::ALL {
             let field = synthetic_field(world);
             for crater in field.craters() {
@@ -1169,20 +1201,48 @@ mod tests {
             }
         }
         let one = synthetic_field(SyntheticWorld::OneCrater);
+        let header = one.header();
         let crater = &one.craters()[0];
-        let shape = crater_shape(one.header().craters(), crater.diameter);
-        let r = one.header().radius().value();
-        let grid = Grid::new(one.header().level().get());
+        let rims = CoarseRims::new(header);
+        let profile = rims.coarse_profile(crater.diameter);
+        let kept = crate::synth::craters::rims::kept_relief(crater);
+        let figure = header.figure();
+        let centre = figure.point(crater.centre);
+        let grid = Grid::new(header.level().get());
         let mut inside = 0_u32;
         for (cell, &dir) in one.synthesis().iter().zip(&grid.centres) {
-            let x = arc(crater.centre, dir) * r / (crater.diameter.value() / 2.0);
-            let expected = SynthesisCell::quantise_height(shape.relief(x)).unwrap();
+            let p = figure.point(dir);
+            let chord = norm([0, 1, 2].map(|k| p[k] - centre[k]));
+            let x = chord / (crater.diameter.value() / 2.0);
+            let height = Metres::new(kept * profile.at(x).height_m);
+            let expected = SynthesisCell::quantise_height(height).unwrap();
             assert_eq!(cell.elevation_mm, expected, "at {x} rim radii");
             if x < 1.0 {
                 inside += 1;
             }
         }
         assert!(inside > 10, "only {inside} cells lie inside the crater");
+        // The coarse band fillets the rim: the crest is below the fresh shape's.
+        let shape = crater_shape(header.craters(), crater.diameter);
+        assert!(profile.at(1.0).height_m < shape.relief(1.0).value());
+        // A degraded crater keeps its share of the relief, as the sharpening reads it: the crater
+        // alone on the flat field, at half its relief.
+        let worn = worlds::flat_builder(6)
+            .crater(crater.centre, crater.diameter, crater.age, 128)
+            .build();
+        let listed = &worn.craters()[0];
+        let kept = crate::synth::craters::rims::kept_relief(listed);
+        assert!((kept - 127.0 / 255.0).abs() < 1e-15);
+        for (cell, &dir) in worn.synthesis().iter().zip(&grid.centres) {
+            let p = figure.point(dir);
+            let chord = norm([0, 1, 2].map(|k| p[k] - centre[k]));
+            let x = chord / (crater.diameter.value() / 2.0);
+            let height = Metres::new(kept * profile.at(x).height_m);
+            assert_eq!(
+                cell.elevation_mm,
+                SynthesisCell::quantise_height(height).unwrap()
+            );
+        }
     }
 
     /// A field built twice is the same to the bit: its header, every record and every crater.
