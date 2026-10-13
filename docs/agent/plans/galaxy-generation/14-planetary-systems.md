@@ -2200,6 +2200,11 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   - An `Airless` body's list is empty, whatever residue its partial pressures hold, so that the
     list agrees with the state (P14.T53.c's test). Its μ and c_p ÷ R are none, as T49.a's
     functions give for an empty mixture.
+  - _Follow-up_ (science-p14-t24a-climate.md, 2026-10-11; built inside
+    `SURFACE_CONDITIONS_VERSION` = 22, so it costs no bump): the contrasts' partition and
+    transport (§1), the airless night (§2), the climate's range (§3, with §6's zonal ends;
+    science-p14-t24a-climate.md §6, 2026-10-12), Koll's scaling at the body's own k (§4), and
+    the zonal ends from the insolation's Legendre modes (§7), with their tests. `SurfaceInputs` gains the body's `SurfaceMaterial`.
 - **P14.T24.b `GlobalFigures`.** Ocean fraction: a logistic function of the liquid's volume, its
   mass ÷ ρ_l from T49.a's row (`PhaseColumns::triple_liquid_density`, which T49.b's ρ_l(T)
   supersedes), over the basin capacity, where capacity ∝ surface area × σ_h (P14.T48.a's, built in
@@ -2289,6 +2294,11 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     in time but at a regime change. `subsurface_ocean` is `Some` for the table's Europa at its
     measured elements, with `H2O` on a `Rock` floor, and absent for every planet until P14.T51.g.
     The basin capacity reads σ_h.
+  - _T24.a's contrasts_ (science-p14-t24a-climate.md §1–2). With the ocean fraction f_o,
+    T24.a's contrasts weight the moist share and the albedo gradient by θ = min(1, f_o ÷ 0.708):
+    w = ½ + ½θ and Φ = 1 + (Φ⊕ − 1)θ. The heat flow F sets the night floor: `SurfaceInputs`
+    gains the body's heat flow F, which raises T24.a's night floor to (T_CMB⁴ + F ÷ ε_r σ)^¼ with
+    ε_r = 0.95.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface planetary::hooks::figures`.
 - **P14.T24.c The aerosol and absorber inventory** (R08.T1's draft, accepted with amendments,
   signoff-3.md; in the 22 → 23 batch, after T24.e, T52.c and T51.a, decision-composition).
@@ -10470,9 +10480,12 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
         1997 could not be confirmed to hold it. Siler et al.'s split, by R09, gives 0.43.
       - D grows linearly with the column's mass, where R09 takes Kaspi and Showman's
         (p ÷ p⊕)^0.2 from their Fig. 15c. The linear law gives Venus its near-isothermal surface,
-        and the GCM's runs stop at 50 bar.
+        and the GCM's runs stop at 50 bar. **Ruled** (science-p14-t24a-climate.md §1): KS15's
+        saturating column-mass law with a linear taper below 0.2 m⊕. Venus's near-isothermal
+        surface then comes from Koll's weak-gradient transport (2.8 K).
       - The sign changes at 53.90° and 126.10°, where the equator's and the poles' light are
-        equal.
+        equal. Under §7's modal ends that holds on an airless body, and the zero moves toward
+        54.7° as the transport grows (the measured Earth's near 54.45°).
     - **Day–night**, Cowan and Agol 2011 (eqs. 4–5) at Koll 2022's ε = X ÷ (k + X), with
       X = τ^⅓ (p_s ÷ 1 bar)^⅔ (T_eq ÷ 600 K)^−4/3 (his eqs. 9–10) and k = 2 adopted from the
       1.2–2.3 of his three test planets: T_s ((8/3 − 5ε/3)^¼ − ε^¼). On a rotating body it is
@@ -10480,41 +10493,71 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
       radiative time (Showman and Guillot 2002, eq. 10). A world locked 1:1 to its seasonal host
       takes it undamped, about its substellar axis.
     - **The table's values** (the generated bodies under P14.T24.f's rules, each with its own
-      spin), equator–pole / day–night, K:
+      spin), re-measured with P14.T24.a's follow-up (science-p14-t24a-climate.md): equator–pole /
+      day–night, K, and the climate's range with the floor at the cosmic background's:
 
-      | Body     | Model         | For comparison                                                                    |
-      | -------- | ------------- | --------------------------------------------------------------------------------- |
-      | Mercury  | 391.6 / 558.3 | 590–725 K sunward (NASA's fact sheet), about 100 K at night (not seen)            |
-      | Venus    | 3.85 / 0.009  | a near-isothermal surface                                                         |
-      | Earth    | 44.6 / 0.45   | 42 K (the fit's); about 3 K area-weighted (R09's placeholder)                     |
-      | Mars     | 29.7 / 1.05   | the generated Mars holds 0.11 bar of N₂, not the real 6 mbar of CO₂               |
-      | Moon     | 170.8 / 345.5 | Diviner's equator, about 387–397 K at noon and 95 K before dawn (Williams et al.) |
-      | Ganymede | 60.1 / 140.0  | 152 K at most (Orton et al. 1996) and about 70 K (secondary, not checked)         |
-      | Titan    | 0.01 / 0.0007 | 1–4 K equator to pole, by season and hemisphere (Jennings et al. 2019)            |
-      | Ceres    | 83.8 / 207.8  |                                                                                   |
+      | Body     | Model                       | First built   | For comparison                                                                                                       |
+      | -------- | --------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
+      | Mercury  | 391.6 / 456.0, [2.7, 585.2] | 391.6 / 558.3 | 590–725 K sunward (NASA's fact sheet); 100–130 K nights (Mariner 10, Bandfield et al. 2019); the model's night 102 K |
+      | Venus    | 1.42 / 1.16, [733.5, 736.1] | 3.85 / 0.009  | a near-isothermal surface                                                                                            |
+      | Earth    | 42.4 / 1.02, [261.7, 305.1] | 44.6 / 0.45   | 42 K (the fit's); North, Cahalan and Coakley's P₂ fit, 260 K at the poles to 302 K at the equator                    |
+      | Mars     | 16.7 / 1.24, [203.3, 221.2] | 29.7 / 1.05   | the generated Mars holds 0.11 bar of N₂, not the real 6 mbar of CO₂                                                  |
+      | Moon     | 170.8 / 237.7, [2.7, 361.0] | 170.8 / 345.5 | Diviner's equator, about 387–397 K at noon and 95 K before dawn (Williams et al.); the model's night 106 K           |
+      | Ganymede | 60.1 / 64.7, [17.9, 142.8]  | 60.1 / 140.0  | 152 K at most (Orton et al. 1996) and about 70 K at night (secondary, not checked); the model's night 71 K           |
+      | Titan    | 0.068 / 0.009, [93.9, 94.0] | 0.01 / 0.0007 | 1–4 K equator to pole, by season and hemisphere (Jennings et al. 2019)                                               |
+      | Ceres    | 83.8 / 62.5, [56.7, 202.9]  | 83.8 / 207.8  | about 235 K at most (Dawn, not checked); the model's night 130 K, as rock                                            |
 
-      The model's dayside is Cowan and Agol's hemispheric temperature, (8/3)^¼ T_eq, 0.90 of
-      the subsolar point's, so a noon-to-night comparison flatters it: like for like, the Moon's
-      is about a third over its measured swing.
+      The model's dayside is Cowan and Agol's observer-weighted brightness temperature,
+      (8/3)^¼ T_eq at ε = 0: an airless body's subsolar point is 1.107 times hotter and its
+      hemispheric mean 0.885 times, so a noon-to-night comparison of the contrast flatters it
+      (the Moon's 237.7 K against a measured swing of some 295 K). The range is the orbit-mean
+      climate's, each end a half-day mean (science-p14-t24a-climate.md §6, item 1). The Moon's
+      warmest, 361 K, is its equator's dayside in the model's convention, under Diviner's noon of
+      387–397 K. Mercury's, 585 K, lies under its orbit-mean subsolar temperature, 590–620 K.
 
     - **Limitations**, each for "main":
       - an airless night is the radiative limit, 0 K, since the regolith's inertia and the
         internal heat are not modelled, so an airless rotator's day–night contrast is an upper
-        bound;
+        bound. **Ruled** (science-p14-t24a-climate.md §2; P14.T24.a's follow-up, held): the
+        regolith's ε(Θ) at the material's inertia (Rock 55, Ice 20 J m⁻² K⁻¹ s^−½), above the
+        floor (T_CMB⁴ + F ÷ ε_r σ)^¼. P14.T24.b supplies F;
       - the rotating column's damping takes the whole column, so it under-reads land and thin
         air, whose diurnal swing the surface skin and the boundary layer set;
       - Titan's model contrast is far under its measured one, which its seasons and surface
         coupling set;
-      - the grey restoring lacks water vapour's feedback, and the uniform albedo the poles'
-        brightening, so Earth sits nearer its radiative limit than in North, Cahalan and
-        Coakley's fit. The transport's factors then move its contrast less than an idealised
-        GCM's: an Earth spans 31–53 K over Ω⊕ ÷ 24 to 12 Ω⊕, against Kaspi and Showman's
-        23–77 K, and the dry halving raises it 17%. Fixing that needs a fitted forcing factor
-        or a feedback in B, which the lane left for a ruling;
+      - the grey restoring lacked water vapour's feedback and the uniform albedo the poles'
+        brightening, so Earth sat near its radiative limit (6D ÷ B 0.42 against North, Cahalan
+        and Coakley's 1.86) and an Earth spanned 31–53 K over Ω⊕ ÷ 24 to 12 Ω⊕ against Kaspi and
+        Showman's 23–77 K. **Ruled** (science-p14-t24a-climate.md §1; P14.T24.a's follow-up,
+        held):
+        - B_eff = B_P (1 − g), the grey column's own gain from the gases T13.c holds at
+          saturation;
+        - one wet-world albedo factor Φ and Earth's conductance D⊕, fitted on NCC's measured
+          D ÷ B = 0.310;
+        - D following Kaspi and Showman in rotation, column mass (linear below 0.2 m⊕), gravity
+          (−0.43) and radius (none);
+        - Koll's weak-gradient transport for slow rotators;
+        - the contrast itself (science-p14-t24a-climate.md §7). §1's form damped the whole
+          radiative contrast at `P₂`'s rate, which at low obliquity overstated a nonlinear
+          diffusive balance 1.4–4.3 times: a narrow polar cap that any transport erases.
+          **Ruled:** the zonal ends from the annual insolation's Legendre modes, each damped at
+          its own rate in the emitted flux at each end's own restoring.
+          - It is within 5.7% of the balance at 0–98° and 6D ÷ B 0.001–50, and exact at no
+            transport.
+          - Φ multiplies the `P₂` forcing alone. It refits to about 1.495, within 3% of the Earth
+            Radiation Budget's gradient. D⊕ is unchanged.
+          - The measured Earth's ends are 302.4 and 260.4 K, against NCC's 302.1 and 260.1 K.
       - Koll's scaling was fitted on dry, tidally locked GCMs at T_eq of 391–805 K, and is
         applied here to rotating and colder worlds too. His k scales as L g ÷ c_p, about 0.1–0.3
         for a Mars- or Titan-sized body, and his τ_LW is a flux-transmission depth, about 1.5
-        times the grey τ, which would raise X by 1.14;
+        times the grey τ, which would raise X by 1.14. **Ruled** (science-p14-t24a-climate.md
+        §4; P14.T24.a's follow-up, held):
+        - k is the body's own, his eq. 9's, which reproduces his three planets;
+        - τ_LW = (3/2)τ;
+        - a rotator is damped by C (1 − ε) ÷ B;
+        - a slow rotator's equator–pole takes his weak-gradient transport;
+        - colder worlds are extrapolated, and cut where the bulk gas condenses (T48.d's thin
+          end);
       - an ocean enters only as the whole latent-heat share of the equator–pole transport, where
         water is liquid at the mean surface temperature. The day–night contrast has no ocean term
         and no ocean heat capacity is modelled: P14.T24.b's ocean fraction comes after this task;
@@ -10522,7 +10565,11 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
         T_s ± (½|ΔT_ep| + ½|ΔT_dn|). The P₂ profile runs from T_s − ⅔ΔT_ep at a pole to
         T_s + ⅓ΔT_ep at the equator, so the range overstates the equator by ΔT_ep ÷ 6 (7 K on
         Earth), and on an airless world it reaches below 0 K (Mercury's to −38 K). For P14.T48.d,
-        and for the owner's ruling.
+        and for the owner's ruling. **Ruled** (science-p14-t24a-climate.md §3): T24.a's
+        `climate_range`, as P14.T48.d now states it. Mercury's runs over [26, 585] K and Earth's
+        over [258, 301] K, from §6 item 1's zonal ends, which replace §3's `P₂` ends. Before
+        P14.T24.b's heat flow, Mercury's coldest is the cosmic background's 2.7 K (as built,
+        below).
   - _The seasonal spin._ `SeasonalSpin::of(frame, t, seasonal orbit, SeasonalOrbit)`.
     - The obliquity is the frame's for `SeasonsFrom::Own`. For a moon (`SeasonsFrom::Planet`) it
       is the angle between its pole and its planet's orbital normal at `t`. In the sample's first
@@ -10542,7 +10589,8 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     `XuvHistory` reads none.
   - _The liquid-water flag_ is water's `phase_at` at p_s over T_s ± (½|ΔT_ep| + ½|ΔT_dn|), a
     condition of the surface, whether or not water is held. Earth has it. The generated Mars
-    (215 K, up to 231 K) and Venus do not.
+    (215 K, up to 231 K) and Venus do not. The follow-up reads it over `climate_range` (below):
+    the generated Mars then reaches 222 K.
   - _The stellar flux_ is the derivation's, orbit-averaged; a moon's includes its planet's glow.
   - _Added public items._ In `hooks::surface`:
     - `SurfaceConditions`, `SurfaceInputs`, `SeasonalSpin`, `SeasonsFrom`, `RadiationClass` and
@@ -10571,8 +10619,156 @@ ResolveBodyError>` in `planetary/system.rs`: `position_at`'s position bit for bi
     `planetary::context` and `planetary::system::tests::{the_hooks_publish,
 a_moon_s_published, the_published}`.
 
-  - _Not applied:_ science-r08-gases-2.md §1.7.5's wording of T24.a's mixed c_p ÷ R, queued for
-    the docs batch. The code already states it: the class value at 21 → 22, T49.b's function at
+  - _The follow-up, as built_ (`p14-batch`, 2026-10-12; science-p14-t24a-climate.md §1–4, built
+    inside `SURFACE_CONDITIONS_VERSION` = 22, so it costs no bump; `GENERATOR_VERSION` stays 21).
+    - _The partition_ (§1). `Column` carries the air's column mass (`air_mass_kg_per_m2`, the
+      ruling's `column_mass_kg_per_m2`, renamed for Clippy's `struct_field_names`), specific
+      heat, μ and the gravity, and the greenhouse gain g; its heat capacity is their product, a
+      method.
+      `greenhouse_gain(air, gases, T_eq)` sums T13.c's terms over the gases held at their
+      saturation pressure at T_s. The terms come from the new crate-private
+      `derive::atmosphere::optical_depth_terms`, whose sum a test holds to `optical_depth` bit
+      for bit over the table. `optical_depth` is untouched.
+      - The two `Fitted` values are refitted on the registry's curve, whose water (43.5 kJ mol⁻¹,
+        1,641 Pa at 288 K) sits under the ruling's Murphy and Koop: g⊕ = 0.378,
+        B_eff⊕ = 2.075 W m⁻² K⁻¹, **D⊕ = 0.643 338 15 W m⁻² K⁻¹** (the ruling's 0.6288) and
+        **Φ⊕ = 1.494 818 98**, refitted under §7 by bisection on the zonal ends (the ruling's
+        1.2212 under §1, and 1.249 330 58 as first refitted here under §1).
+      - The measured Earth's column takes the grey τ that holds 288 K, 0.832 (0.8 as first
+        built), p_s = m⊕ g₀, and water's mole fraction among that pressure of dry air.
+      - `STANDARD_GRAVITY` is this module's: the units crate has none.
+      - Validation (with §7's modal ends): Earth 42.0 K at 6D ÷ B_eff = 1.86 (the fit), its
+        peak transport 5.30 PW, its ends 302.39 and 260.39 K, and 28.6 K at Φ = 1; dry, 42.8 K.
+        Kaspi and Showman's Fig. 8a is met within 3.1%, except −12.3% at Ω⊕ ÷ 4 (the GCM's
+        plateau); Fig. 15c within 9.0%, Fig. 18a within 4.5% and Fig. 20b within 7.3%. The
+        generated Venus is 1.42 K, governed by W (W B_P 127.8 against 6D 8.0 W m⁻² K⁻¹, at
+        X 321 and k 2.11), and Titan 0.068 K. The Mars by hand is 36.8 K, at 6D ÷ B 0.069. The
+        generated Earth is 42.4 K (B_eff 2.04), 56.2 K at 0° and 55.9 K at 3° of obliquity, and
+        −28.5 K at 90°; the generated Mars is 16.7 K. A wet world's gain peaks at 0.565, near
+        320 K. The airless bodies keep their radiative ends, bit for bit.
+    - _Airless nights_ (§2). `SurfaceInputs` gains `material`. `hooks_at_under` passes
+      `SurfaceMaterial::of` of the bulk section's mass fractions, as the ruling says, which for an
+      icy belt member, a giant-impact or captured moon, and a regular moon whose placement's water
+      falls on the other side of 10% from its ice fraction are the bulk section's own. The
+      derivation's albedo reads the derivation's fractions, so the two can disagree there.
+      **Ruled** (science-p14-t24a-climate.md §6, item 3):
+      - The record's composition is the source of both, as the photometry's Bond albedo already
+        reads it (P14.T47).
+      - T49.c's rows do not settle it: they give a substance's properties, not the composition a
+        surface takes.
+      - P14.T51.b's passes take the record's composition. Until then the conditions keep the
+        bulk section's material.
+      - Such a body's equilibrium temperature sits at its placement's albedo, up to 8.2% off
+        where the two classes differ. 15 of the published sample's 111 bodies are so (measured,
+        2026-10-12: 11 icy belt members and 4 moons, each ice over a rock albedo). Over the 60
+        systems of `the_hooks_publish_surface_conditions_only_from_the_batch_s_bump`, 117 of 877
+        are: 80 members and 32 moons ice over rock, and 5 moons rock over ice. A body counts
+        where the derivation's last albedo differs from its state's albedo on the bulk
+        section's material.
+      - `ground_redistribution`, at the material's inertia, enters `day_and_night` in series
+        with the air's ε.
+      - The Moon's night is 106.5 K (Θ 0.0276), Mercury's 102.0 K and Ganymede's 71.2 K (ice).
+      - The table's Ceres is **rock**: its derived water fraction is under the icy threshold, as
+        its airless albedo of 0.11 shows. Its night is 130.4 K, not the ruling's 111.4 K, which
+        took it as ice. The science check agrees: Ceres's surface is dark phyllosilicates and
+        carbonates, and its measured inertia brackets 55. **Confirmed**
+        (science-p14-t24a-climate.md §6, item 2). Ceres's measured inertia runs from 15 (Spencer 1990) and 38 ± 14 (Saint-Pé et al. 1993) in the infrared, to some 60 over Dawn's VIR maps
+        (130–140 at Haulani; Rognini et al. 2020), and 40–160 at 1.1 mm (Li et al. 2020). Rock's
+        55 stands, and its night lies within 106–132 K over 15–60. Its dark hydrated regolith is
+        its lid's, P14.T51.c's, at P14.T49.c's layer inertia, wired by P14.T54.a, not a third
+        `SurfaceMaterial`.
+      - A locked airless body's night is its floor: the cosmic background's 2.725 48 K (Fixsen
+        2009, unrounded) at T24.a, before T24.b's heat flow.
+      - The regolith fit holds over Θ of 0.0051–1.52 and is extrapolated beyond. Mercury's Θ,
+        0.0027, lies below it, and its 102 K night lies under the 117 K night mean of the
+        ruling's 1-D lunar regolith on Mercury's flux, within Mariner 10's 100–130 K.
+      - A solar day that is not positive (the fields are public) is taken as none, so that the
+        damping and the ground agree and the conditions stay finite.
+    - _The range_ (§3, with §6 item 1's zonal ends). `SurfaceConditions::climate_range()`,
+      coldest then warmest, from the crate-private `climate_range` over `zonal_ends_k`, whose
+      difference is the contrast (§7's `insolation_modes`, `ZonalTransport` and
+      `zonal_ends_under`, which replace §6's `zonal_response`, with a bisection of 64 fixed
+      steps per end). `derive` solves the ends once and takes their difference, so the
+      crate-private `equator_pole_contrast_k` is the tests' (`#[cfg(test)]`). `liquid_water` now
+      takes `(range, pressure)`, a change to a public signature. Its only caller is `derive`.
+      - The table: Earth [261.7, 305.1], Mercury [2.7, 585.2] (26.1 K at the cold end with
+        T24.b's F), the Moon [2.7, 361.0] (24.0 K), Venus [733.5, 736.1], Mars [203.3, 221.2],
+        Ceres [56.7, 202.9], Ganymede [17.9, 142.8] and Titan [93.9, 94.0] K. Earth locked 1:1
+        runs over [235.9, 336.8], Venus locked over [732.8, 737.4] and Earth at 90° over
+        [279.8, 309.3] K.
+      - The liquid-water flags are unchanged: Earth's is true, and Mars's, Venus's and the airless
+        bodies' are false.
+      - **Ruled** (science-p14-t24a-climate.md §6, item 1). The science check of 2026-10-12 found
+        §3's warm end above the orbit-mean subsolar temperature on airless bodies, the Moon's
+        401 K against 387 K, because `T_s` + ⅓ΔT_ep stands above a flat-topped radiative
+        equator. The ruling:
+        - The range is the orbit-mean climate's, each end a half-day mean.
+        - Its zonal ends are the radiative ends, drawn toward `T_s` by the contrast's own
+          response: `T_s` + d `T_s` (q^¼ − 1), d = Φ `B_P` ÷ (`B_eff` + max(6D w, W `B_P`)). They
+          are exact on an airless body, and lie within 0.005 `T_s` of a nonlinear diffusive
+          balance's equator at any obliquity and transport, where `P₂`'s was up to 0.15 `T_s` off.
+        - The colder end is bounded by `T_s`, which matters from 52° to 59° of obliquity.
+        - There is no switch, which would leave a seam, and no cap, which fails under a
+          greenhouse.
+        - The pole carries the contrast's own overstatement at low obliquity, recorded for
+          "main", and resolved by §7's modal ends.
+      - As built, the ruling's continuity test in the transport (the generated Mars's column
+        scaled from 10⁻⁶ to 50 times) compares its smallest column with the no-transport ends,
+        the radiative ones amplified by its own feedback, `B_P` ÷ `B_eff`: Mars holds its water at
+        saturation (g = 0.025), so d tends to 1.026 there, not 1. A column with no gain checks the
+        radiative ends themselves.
+    - _Koll_ (§4). The crate-private `redistribution_parameter` (X at τ_LW = 1.5τ),
+      `redistribution_scale` (k, his eq. 9), `heat_redistribution`, `weak_gradient_transport` and
+      `day_and_night` replace `day_night_contrast_k`, so the contrast is the day less the night.
+      - k is 1.230, 1.891 and 2.353 at his three planets, against his 1.2, 1.9 and 2.3. The test
+        holds each within 3% of his, not within the ruling's absolute 0.05: LHS 3844b's 2.353 is
+        0.053 from his printed 2.3 and would round to 2.4, so his own evaluation sits some 2%
+        lower, far inside χ's factor of two (the ruling's own reproduction is 2.35).
+      - No condensation cutoff is applied ("main", 2026-10-12): the validity bound is stated in
+        the module documentation, and the cutoff is P14.T48.d's thin end.
+    - _Constants._ `MERIDIONAL_DIFFUSIVITY_M2_S` and `REDISTRIBUTION_SCALE` are gone. Added:
+      - for the partition, `EARTH_TRANSPORT_PARTITION`,
+        `EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`, `WET_ALBEDO_GRADIENT`,
+        `EARTH_COLUMN_MASS_KG_PER_M2`, `EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K`,
+        `EARTH_AIR_MOLAR_MASS_G_PER_MOL` (28.9644 g mol⁻¹, the US Standard Atmosphere 1976's M₀,
+        where T24.a first took an unsourced 28.9647) and `STANDARD_GRAVITY`;
+      - for the transport, `COLUMN_TRANSPORT_EXPONENT`, `COLUMN_TRANSPORT_RANGE`,
+        `GRAVITY_TRANSPORT_EXPONENT`, `GRAVITY_TRANSPORT_RANGE` and
+        `WEAK_GRADIENT_DEFORMATION_RADII`;
+      - for Koll, `REDISTRIBUTION_INEFFICIENCY` (his χ, named so rather than the ruling's
+        `REDISTRIBUTION_EFFICIENCY`, which reads as ε), `REDISTRIBUTION_DRAG_COEFFICIENT`,
+        `REDISTRIBUTION_BROADENING` and `FLUX_OPTICAL_DEPTH_PER_GREY`;
+      - for the ground, `REGOLITH_EMISSIVITY`, `ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S`
+        and `ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` (the ruling's names with their unit),
+        `REGOLITH_REDISTRIBUTION_FIT` and `COSMIC_BACKGROUND_TEMPERATURE`.
+    - _Pins._ The two held pins are re-blessed at header 21, and no other golden moves.
+      `planetary/surface_conditions` moves every contrast and gains each body's coldest and
+      warmest, with its flags unchanged. `planetary/surface_conditions_published` moves the same
+      over the sample, and one flag, re-measured with §6's and §7's ends: body
+      01fffb2c9fff0000.0300 (213 K, 0.69 bar of N₂) loses its liquid water, its warm end falling
+      from 273.9 K to 254.8 K as the stronger transport flattens its contrast (72.4 to 18.3 K).
+      No other flag moves. The airless bodies' contrasts move in their last bits, as the
+      difference of two ends.
+    - _What the bump moves_ (measured with the gate open, 2026-10-12): **no golden**.
+      - Method: the held state was written as a dangling commit and `SURFACE_CONDITIONS_VERSION`
+        set to 21. `just smart-ci --plan` over that one-line diff selected the tests that reach
+        the hold: 313 of the server's, 82 of the sim's and the testkit's. They ran blessed under
+        the heavy lock with `--no-fail-fast`.
+      - Result: 463 tests ran; 461 passed, and the 2 that failed are the hold's own tripwire and
+        the held half of `the_hooks_publish_surface_conditions_only_from_the_batch_s_bump`.
+        `golden_diff.py` against the held commit reports "No golden files changed".
+      - The gate is closed again (22), so the bump moves nothing beyond the batch's planned
+        bless: `planetary/surface_conditions` moves its header only, and
+        `planetary/surface_conditions_published` moves with T24.f's and T14.d's holds.
+    - _Left to P14.T24.b_ (§1–2, its task text above): the heat flow F, which `derive` passes as
+      the floor where it now passes `COSMIC_BACKGROUND_TEMPERATURE`, to `day_and_night` and
+      `climate_range` alike; and the ocean fraction's θ, which weights `Moisture::Wet`'s share
+      and Φ.
+    - _Left to P14.T48.d_: its text (the docs lane's), and its regime and its thin end, which
+      read `climate_range`, `day_and_night`, `heat_redistribution` and `redistribution_scale`.
+
+  - _Applied by the docs batch_ (f0422b17): science-r08-gases-2.md §1.7.5's wording of T24.a's
+    mixed c_p ÷ R. The code already states it: the class value at 21 → 22, T49.b's function at
     the mean surface temperature from 22 → 23.
 
 - **Deviations in P14.T49.f, as built (`r08-mmf-contrast`, 2026-10-12).** No output moves: no Rust

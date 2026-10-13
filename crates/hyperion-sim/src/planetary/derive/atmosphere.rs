@@ -627,6 +627,37 @@ pub fn optical_depth(partials: &PartialPressures, equilibrium: Kelvin) -> f64 {
         + GREENHOUSE_NITROGEN * collisions * root(Gas::Nitrogen)
 }
 
+/// The terms of [`optical_depth`] one by one, each with its gas, in its order (carbon dioxide,
+/// water, nitrogen), so that their sum in that order is its τ to the bit (tested). Each term goes
+/// as the square root of its gas's partial pressure, so that ∂τᵢ ÷ ∂ln pᵢ = ½τᵢ, which P14.T24.a's
+/// greenhouse gain reads (science-p14-t24a-climate.md §1). [`optical_depth`]'s own arithmetic is
+/// T13.c's output, and stays as it is.
+#[must_use]
+pub(crate) fn optical_depth_terms(
+    partials: &PartialPressures,
+    equilibrium: Kelvin,
+) -> [(Gas, f64); 3] {
+    let root = |gas: Gas| (partials.of(gas).value().max(0.0) / PASCALS_PER_BAR).sqrt();
+    let t = equilibrium.value();
+    let collisions = if t > 0.0 {
+        let ratio = NITROGEN_REFERENCE_TEMPERATURE.value() / t;
+        ratio * ratio
+    } else {
+        0.0
+    };
+    [
+        (
+            Gas::CarbonDioxide,
+            GREENHOUSE_CARBON_DIOXIDE * root(Gas::CarbonDioxide),
+        ),
+        (Gas::Water, GREENHOUSE_WATER * root(Gas::Water)),
+        (
+            Gas::Nitrogen,
+            GREENHOUSE_NITROGEN * collisions * root(Gas::Nitrogen),
+        ),
+    ]
+}
+
 /// The surface temperature of a grey atmosphere of optical depth `tau` over a surface in
 /// equilibrium at `equilibrium`: `T_s` = `T_eq` (1 + ¾τ)^¼ (P14.T13.c).
 #[must_use]

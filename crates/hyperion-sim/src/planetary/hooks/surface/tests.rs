@@ -2,7 +2,10 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::orbit::{Eccentricity, Orientation};
-use crate::planetary::derive::atmosphere::{Speciation, VolatileDraws};
+use crate::planetary::derive::atmosphere::{
+    GREENHOUSE_CARBON_DIOXIDE, GREENHOUSE_NITROGEN, GREENHOUSE_WATER,
+    NITROGEN_REFERENCE_TEMPERATURE, Speciation, VolatileDraws,
+};
 use crate::planetary::derive::solar::{
     PLANETS, SMALL_BODIES, SOLAR_AGE, derive_under, orbit, solar_disc, table_under,
 };
@@ -50,17 +53,42 @@ fn spin_of(name: &str) -> SeasonalSpin {
     }
 }
 
-/// The conditions of the derived body `body` under the spin `spin`.
-fn conditions_of(body: &DerivedBody, spin: SeasonalSpin) -> Option<SurfaceConditions> {
-    SurfaceConditions::derive(&SurfaceInputs {
+/// The inputs of the derived body `body` under the spin `spin`, its material of its own mass
+/// fractions.
+fn inputs_of(body: &DerivedBody, spin: SeasonalSpin) -> SurfaceInputs<'_> {
+    SurfaceInputs {
         atmosphere: body.atmosphere(),
         equilibrium_temperature: body.equilibrium_temperature(),
         surface_gravity: body.surface_gravity(),
         radius: Metres::from(body.radius()),
+        material: SurfaceMaterial::of(&body.fractions()),
         stellar_flux: WattsPerSquareMetre::from(body.flux()),
         xuv_flux: body.xuv_flux(),
         spin,
-    })
+    }
+}
+
+/// The conditions of the derived body `body` under the spin `spin`.
+fn conditions_of(body: &DerivedBody, spin: SeasonalSpin) -> Option<SurfaceConditions> {
+    SurfaceConditions::derive(&inputs_of(body, spin))
+}
+
+/// The column and moisture the conditions of the derived body `body` read, under the spin `spin`.
+fn column_of(body: &DerivedBody, spin: SeasonalSpin) -> (Column, Moisture) {
+    let surface = Surface::of(&inputs_of(body, spin)).unwrap();
+    (surface.column, surface.moisture)
+}
+
+/// The dayside's and nightside's temperatures of the derived body `body` under the spin `spin`,
+/// over the cosmic background's floor, as `SurfaceConditions::derive` takes them.
+fn day_and_night_of(body: &DerivedBody, spin: SeasonalSpin) -> (Kelvin, Kelvin) {
+    let (column, _) = column_of(body, spin);
+    day_and_night(
+        &column,
+        &spin,
+        SurfaceMaterial::of(&body.fractions()),
+        COSMIC_BACKGROUND_TEMPERATURE,
+    )
 }
 
 /// Every body of the table under P14.T24.f's rules, the batch's (held), with its own spin.
@@ -108,13 +136,20 @@ fn the_surface_conditions_are_held_only_until_the_batch_s_bump() {
 fn earth_has_liquid_water_and_mars_and_venus_do_not() {
     let table = table();
     for (name, body, conditions) in &table {
+        let (coldest, warmest) = conditions.climate_range();
+        let (day, night) = day_and_night_of(body, spin_of(name));
         eprintln!(
-            "{name}: {:?}, {:.2} K, ep {:.2} K, dn {:.3} K, {:.4e} Pa, mu {:?}, cp/R {:?}, \
-             liquid {}, {:?}, flux {:.1} W/m2, xuv {:.3e} W/m2",
+            "{name}: {:?}, {:.2} K, ep {:.2} K, dn {:.3} K (day {:.2} K, night {:.2} K), range \
+             [{:.1}, {:.1}] K, {:.4e} Pa, mu {:?}, cp/R {:?}, liquid {}, {:?}, flux {:.1} W/m2, \
+             xuv {:.3e} W/m2",
             body.atmosphere().state(),
             conditions.mean_surface_temperature().value(),
             conditions.equator_pole_contrast_k(),
             conditions.day_night_contrast_k(),
+            day.value(),
+            night.value(),
+            coldest.value(),
+            warmest.value(),
             conditions.surface_pressure().value(),
             conditions.mean_molar_mass_g_per_mol(),
             conditions.heat_capacity_over_r(),
@@ -135,18 +170,10 @@ fn earth_has_liquid_water_and_mars_and_venus_do_not() {
 #[test]
 fn a_locked_airless_body_s_day_night_contrast_exceeds_300_k_and_venus_s_is_under_10_k() {
     let table = table();
-    let (_, moon, moon_conditions) = found(&table, "Moon");
-    assert_eq!(moon.atmosphere().state(), SurfaceState::Airless);
-    // The Moon, locked to Earth, turns under the Sun once in 29.5 days; Mercury, locked 3:2, once
-    // in 176 days.
-    let moon_dn = moon_conditions.day_night_contrast_k();
-    assert!(
-        moon_dn > 300.0,
-        "the Moon's day–night contrast is {moon_dn} K"
-    );
     let (_, mercury, _) = found(&table, "Mercury");
     assert_eq!(mercury.atmosphere().state(), SurfaceState::Airless);
-    // Mercury locked 1:1 to the Sun, its day–night contrast about its substellar axis.
+    // Mercury locked 1:1 to the Sun, its day–night contrast about its substellar axis: its night
+    // is the floor.
     let locked = conditions_of(
         mercury,
         SeasonalSpin {
@@ -155,7 +182,20 @@ fn a_locked_airless_body_s_day_night_contrast_exceeds_300_k_and_venus_s_is_under
         },
     )
     .unwrap();
-    assert!(locked.day_night_contrast_k() > 300.0);
+    assert!(
+        locked.day_night_contrast_k() > 300.0,
+        "{}",
+        locked.day_night_contrast_k()
+    );
+    // The Moon, locked to Earth, turns under the Sun once in 29.5 days, and its regolith carries
+    // some of the day into the night (science-p14-t24a-climate.md §2: 237.6 K).
+    let (_, moon, moon_conditions) = found(&table, "Moon");
+    assert_eq!(moon.atmosphere().state(), SurfaceState::Airless);
+    let moon_dn = moon_conditions.day_night_contrast_k();
+    assert!(
+        (225.0..250.0).contains(&moon_dn),
+        "the Moon's day–night contrast is {moon_dn} K"
+    );
     let venus = found(&table, "Venus").2.day_night_contrast_k();
     assert!(
         (0.0..10.0).contains(&venus),
@@ -172,6 +212,9 @@ fn a_locked_airless_body_s_day_night_contrast_exceeds_300_k_and_venus_s_is_under
     )
     .unwrap();
     assert!(locked_venus.day_night_contrast_k() < 10.0);
+    // Titan's air, at ε near 1, leaves under a kelvin.
+    let titan = found(&table, "Titan").2.day_night_contrast_k();
+    assert!((0.0..1.0).contains(&titan), "Titan's is {titan} K");
 }
 
 #[test]
@@ -357,17 +400,26 @@ fn methane_and_oxygen_reach_the_fractions_through_the_speciated_derivation() {
     }
 }
 
-/// Earth's measured state as [`MERIDIONAL_DIFFUSIVITY_M2_S`] is fitted to: its column, mean
-/// surface temperature, absorbed flux, radius and obliquity.
+/// Earth's measured state as [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] and
+/// [`WET_ALBEDO_GRADIENT`] are fitted to: 288 K over 240.25 W m⁻² absorbed, the grey τ that holds
+/// it, Earth's column of dry air under g₀, water vapour at its saturation pressure on the
+/// registry's curve, its radius, obliquity and sidereal day.
 fn earth_column() -> (Column, SeasonalSpin) {
     let absorbed = (1.0 - 0.294) * crate::units::consts::SOLAR_CONSTANT_W_PER_M2 / 4.0;
-    let column_mass = 5.1480e18 / 5.100e14;
+    let surface = Kelvin::new(288.0);
+    let equilibrium = math::powf(absorbed / STEFAN_BOLTZMANN, 0.25);
+    let tau = (math::powi(surface.value() / equilibrium, 4) - 1.0) / 0.75;
+    let pressure = EARTH_COLUMN_MASS_KG_PER_M2 * STANDARD_GRAVITY.value();
     let column = Column {
-        surface_temperature: Kelvin::new(288.0),
-        equilibrium_temperature: Kelvin::new(math::powf(absorbed / STEFAN_BOLTZMANN, 0.25)),
-        surface_pressure: Pascals::new(column_mass * 9.80),
-        heat_capacity_j_per_m2_k: specific_heat_j_per_kg_k(3.5, 28.964_7) * column_mass,
-        optical_depth: 0.8,
+        surface_temperature: surface,
+        equilibrium_temperature: Kelvin::new(equilibrium),
+        surface_pressure: Pascals::new(pressure),
+        air_mass_kg_per_m2: EARTH_COLUMN_MASS_KG_PER_M2,
+        specific_heat_j_per_kg_k: EARTH_AIR_SPECIFIC_HEAT_J_PER_KG_K,
+        molar_mass_g_per_mol: EARTH_AIR_MOLAR_MASS_G_PER_MOL,
+        surface_gravity: STANDARD_GRAVITY,
+        optical_depth: tau,
+        greenhouse_gain: earth_gain(surface, tau, pressure),
         radius: Metres::new(6_371.0e3),
     };
     let spin = SeasonalSpin {
@@ -378,34 +430,457 @@ fn earth_column() -> (Column, SeasonalSpin) {
     (column, spin)
 }
 
+/// The greenhouse gain of Earth's measured state, by hand: water at its saturation pressure on
+/// the registry's curve at `surface`, its mole fraction among `pressure` of dry air, in a column of
+/// grey optical depth `tau`.
+fn earth_gain(surface: Kelvin, tau: f64, pressure: f64) -> f64 {
+    let water = Gas::Water;
+    let phase = water.substance().substance().phase().unwrap();
+    let p_w = phase.saturation_pressure(surface).value();
+    let moles_w = p_w / water.molar_mass_g_per_mol();
+    let x_w = moles_w / ((pressure - p_w) / EARTH_AIR_MOLAR_MASS_G_PER_MOL + moles_w);
+    let tau_w = GREENHOUSE_WATER * (p_w / 1e5).sqrt();
+    let t = surface.value();
+    let slope = (1.0 - x_w) * 0.5 * tau_w * phase.vaporisation_enthalpy_j_per_mol()
+        / (MOLAR_GAS_CONSTANT * t * t);
+    t / 4.0 * 0.75 * slope / (1.0 + 0.75 * tau)
+}
+
 #[test]
-fn the_meridional_diffusivity_gives_earth_its_measured_contrast() {
+fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
     let (column, spin) = earth_column();
-    // The fit, by hand: 6D ÷ B is the radiative contrast over the measured one, less 1.
-    let restoring = column.restoring_w_per_m2_k();
-    let (equator, pole) = annual_insolation(spin.obliquity);
-    let radiative = 288.0 * (math::powf(equator, 0.25) - math::powf(pole, 0.25));
-    let ratio = radiative / EARTH_EQUATOR_POLE_CONTRAST_K - 1.0;
-    let fitted = ratio * restoring * math::powi(column.radius.value(), 2)
-        / (6.0 * column.heat_capacity_j_per_m2_k);
-    eprintln!("radiative {radiative} K, 6D/B {ratio}, K {fitted} m2/s");
+    // D⊕ in closed form: 0.310 B_eff⊕, with every scaling of the conductance 1 on the measured
+    // Earth. Then Φ by bisection on the zonal ends, until the measured Earth's contrast is 42 K
+    // (science-p14-t24a-climate.md §7).
+    let planck = column.restoring_w_per_m2_k();
+    let effective = column.effective_restoring_w_per_m2_k();
+    let conductance = EARTH_TRANSPORT_PARTITION * effective;
     assert!(
-        (fitted / MERIDIONAL_DIFFUSIVITY_M2_S - 1.0).abs() < 1e-7,
-        "{fitted}"
+        (conductance / EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K - 1.0).abs() < 1e-7,
+        "{conductance}"
     );
+    assert!(
+        (meridional_conductance_w_per_m2_k(&column, &spin)
+            - EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K)
+            .abs()
+            < 1e-15
+    );
+    let weak = weak_gradient_transport(&column, &spin) * planck;
+    let transport = |albedo: f64| ZonalTransport {
+        planck,
+        effective,
+        conductance: EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K,
+        weak,
+        albedo,
+    };
+    let contrast_at = |albedo: f64| {
+        let (equator, pole) = zonal_ends_under(
+            column.surface_temperature.value(),
+            &transport(albedo),
+            spin.obliquity,
+        );
+        equator - pole
+    };
+    let (mut low, mut high) = (1.0, 3.0);
+    for _ in 0..200 {
+        let middle = f64::midpoint(low, high);
+        if contrast_at(middle) > EARTH_EQUATOR_POLE_CONTRAST_K {
+            high = middle;
+        } else {
+            low = middle;
+        }
+    }
+    let albedo = f64::midpoint(low, high);
+    eprintln!(
+        "B_P {planck} W/m2/K, gain {}, B_eff {effective} W/m2/K, D {conductance} W/m2/K, Phi \
+         {albedo}, tau {}, at Phi 1: {} K",
+        column.greenhouse_gain,
+        column.optical_depth,
+        contrast_at(1.0)
+    );
+    assert!(
+        (contrast_at(albedo) - EARTH_EQUATOR_POLE_CONTRAST_K).abs() < 1e-9,
+        "{}",
+        contrast_at(albedo)
+    );
+    assert!(
+        (albedo / WET_ALBEDO_GRADIENT - 1.0).abs() < 1e-7,
+        "{albedo}"
+    );
+    // Φ is the Earth Radiation Budget's gradient, 1.52–1.54, within 3%.
+    assert!((1.40..1.60).contains(&albedo), "{albedo}");
+    // Kaspi and Showman's law governs Earth, not Koll's weak gradient.
+    eprintln!("W B_P {weak} against 6D {}", 6.0 * conductance);
+    assert!(weak < 6.0 * EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K);
     let contrast = equator_pole_contrast_k(&column, &spin, Moisture::Wet);
     assert!(
         (contrast - EARTH_EQUATOR_POLE_CONTRAST_K).abs() < 1e-5,
         "Earth's contrast is {contrast} K"
     );
-    // Dry, the same Earth keeps half its transport and a larger contrast.
-    assert!(equator_pole_contrast_k(&column, &spin, Moisture::Dry) > contrast);
+    // Its ends lie within 1 K of North, Cahalan and Coakley's P₂ fit, 302.1 and 260.1 K.
+    let (equator, pole) = zonal_ends_k(&column, &spin, Moisture::Wet);
+    eprintln!("the measured Earth's ends: {equator} and {pole} K");
+    assert!((equator - 302.1).abs() < 1.0 && (pole - 260.1).abs() < 1.0);
+    // Dry, the same Earth keeps half its transport under a uniform albedo, and a larger contrast:
+    // 42.8 K against 42.0.
+    let dry = equator_pole_contrast_k(&column, &spin, Moisture::Dry);
+    eprintln!("dry: {dry} K");
+    assert!(dry > contrast, "{dry}");
     // The annual insolation, by quadrature of its definitions at 23.44°: 1.2213 at the equator and
     // 0.5065 at a pole, each over S ÷ 4.
+    let (equator, pole) = annual_insolation(spin.obliquity);
     assert!((equator - 1.221_269).abs() < 1e-6, "{equator}");
     assert!((pole - 0.506_480).abs() < 1e-6, "{pole}");
 }
 
+#[test]
+fn earth_s_restoring_and_transport_are_the_measured_ones() {
+    let (column, _) = earth_column();
+    // North, Cahalan and Coakley's B, 2.09, and the ~2.2 of clear-sky OLR at fixed relative
+    // humidity (Koll and Cronin 2018).
+    let effective = column.effective_restoring_w_per_m2_k();
+    assert!((1.9..2.3).contains(&effective), "{effective}");
+    // The peak diffusive transport, 2πR² D (2 ÷ √3) |T₂| at T₂ = −28 K: 5.5–6 PW measured.
+    let r = column.radius.value();
+    let peak = 2.0
+        * core::f64::consts::PI
+        * r
+        * r
+        * EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K
+        * (2.0 / 3.0_f64.sqrt())
+        * 28.0
+        / 1e15;
+    eprintln!("B_eff {effective} W/m2/K, peak transport {peak} PW");
+    assert!((4.5..6.5).contains(&peak), "{peak} PW");
+}
+
+#[test]
+fn the_greenhouse_gain_is_the_held_gases_feedback() {
+    let table = table();
+    for (name, body, _) in &table {
+        let (column, _) = column_of(body, spin_of(name));
+        let air = body.atmosphere();
+        if air.state() == SurfaceState::Airless {
+            assert_same_bits(column.greenhouse_gain, 0.0);
+            continue;
+        }
+        // T13.c's terms sum to its τ to the bit, at the derivation's equilibrium temperature.
+        let terms = optical_depth_terms(air.partial_pressures(), body.equilibrium_temperature());
+        let sum = terms.iter().fold(0.0, |sum, &(_, term)| sum + term);
+        assert_same_bits(sum, air.optical_depth());
+        eprintln!(
+            "{name}: gain {:.4}, B_P {:.4}, B_eff {:.4} W/m2/K",
+            column.greenhouse_gain,
+            column.restoring_w_per_m2_k(),
+            column.effective_restoring_w_per_m2_k()
+        );
+    }
+    // The generated Earth holds its water at saturation: by hand, as `earth_gain` takes the
+    // measured state, at its own temperature, depth and water fraction.
+    let (_, earth, conditions) = found(&table, "Earth");
+    let (column, _) = column_of(earth, spin_of("Earth"));
+    let air = earth.atmosphere();
+    let t_s = air.surface_temperature();
+    let water = Gas::Water;
+    let phase = water.substance().substance().phase().unwrap();
+    assert!(air.partial_pressures().of(water) >= phase.saturation_pressure(t_s));
+    let t = t_s.value();
+    let tau_w = GREENHOUSE_WATER * (air.partial_pressures().of(water).value() / 1e5).sqrt();
+    let slope =
+        (1.0 - fraction(conditions, water)) * 0.5 * tau_w * phase.vaporisation_enthalpy_j_per_mol()
+            / (MOLAR_GAS_CONSTANT * t * t);
+    let by_hand = t / 4.0 * 0.75 * slope / (1.0 + 0.75 * air.optical_depth());
+    assert!(
+        (column.greenhouse_gain - by_hand).abs() < 1e-12,
+        "{} against {by_hand}",
+        column.greenhouse_gain
+    );
+    // Science-p14-t24a-climate.md §1: the generated Earth's B_eff is 2.01 W m⁻² K⁻¹.
+    let effective = column.effective_restoring_w_per_m2_k();
+    assert!((1.9..2.1).contains(&effective), "{effective}");
+    // No gas of Venus's or Titan's bulk is held at saturation: neither feeds back.
+    for name in ["Venus", "Titan"] {
+        let (_, body, _) = found(&table, name);
+        let (column, _) = column_of(body, spin_of(name));
+        assert!(
+            column.greenhouse_gain.abs() < 1e-3,
+            "{name}: {}",
+            column.greenhouse_gain
+        );
+    }
+    // A wet world's gain stays under 0.57 from 260 to 360 K, bounded by its water's share: 0.75
+    // bar of N₂ and 42 Pa of CO₂ over a surface in equilibrium at 255 K, its water at saturation
+    // (science-p14-t24a-climate.md §1).
+    let n2 = Gas::Nitrogen.molar_mass_g_per_mol();
+    let dry_depth = GREENHOUSE_CARBON_DIOXIDE * (42.0_f64 / 1e5).sqrt()
+        + GREENHOUSE_NITROGEN
+            * math::powi(NITROGEN_REFERENCE_TEMPERATURE.value() / 255.0, 2)
+            * 0.75_f64.sqrt();
+    for t in [260.0, 273.17, 288.0, 300.0, 320.0, 340.0, 360.0] {
+        let surface = Kelvin::new(t);
+        let p_w = phase.saturation_pressure(surface).value();
+        let moles_w = p_w / water.molar_mass_g_per_mol();
+        let x_w = moles_w / (75_000.0 / n2 + moles_w);
+        let tau_w = GREENHOUSE_WATER * (p_w / 1e5).sqrt();
+        let enthalpy = if t < phase.triple_temperature().value() {
+            phase.sublimation_enthalpy_j_per_mol()
+        } else {
+            phase.vaporisation_enthalpy_j_per_mol()
+        };
+        let slope = (1.0 - x_w) * 0.5 * tau_w * enthalpy / (MOLAR_GAS_CONSTANT * t * t);
+        let gain = grey_gain(surface, tau_w + dry_depth, slope);
+        eprintln!("{t} K: gain {gain:.3}");
+        assert!((0.0..0.57).contains(&gain), "{t} K: {gain}");
+    }
+}
+
+/// Asserts that the model's contrast relative to Earth's, `model`, lies within `tolerance` of the
+/// GCM's, `gcm`, at the point `at` of Kaspi and Showman's figure `figure`.
+fn against_gcm(figure: &str, at: f64, model: f64, gcm: f64, tolerance: f64) {
+    eprintln!(
+        "{figure} {at}: GCM {gcm:.3}, model {model:.3} ({:+.1}%)",
+        (model / gcm - 1.0) * 100.0
+    );
+    assert!(
+        (model / gcm - 1.0).abs() < tolerance,
+        "{figure} at {at}: {model} against {gcm}"
+    );
+}
+
+#[test]
+fn the_transport_follows_kaspi_and_showman_s_sweeps() {
+    // Kaspi and Showman 2015 (ApJ 804, 60), their contrasts read off the rendered figures to
+    // ±1 K by science-p14-t24a-climate.md, each sweep from an Earth with τ held. Each ratio to
+    // Earth's lies within 15% of Fig. 8a's (40 K at Earth's rate; its plateau at Ω⊕ ÷ 4 is the
+    // GCM's) and within 10% of Figs. 15c's, 18a's and 20b's.
+    let (earth, spin) = earth_column();
+    let contrast =
+        |column: &Column, spin: &SeasonalSpin| equator_pole_contrast_k(column, spin, Moisture::Wet);
+    let base = contrast(&earth, &spin);
+    // Fig. 8a, the rotation rate over Earth's.
+    for (rate, gcm) in [
+        (1.0 / 24.0, 23.0),
+        (1.0 / 8.0, 28.0),
+        (1.0 / 4.0, 36.0),
+        (1.0 / 2.0, 36.0),
+        (2.0, 48.0),
+        (4.0, 58.0),
+        (8.0, 70.0),
+        (12.0, 77.0),
+    ] {
+        let turned = SeasonalSpin {
+            rotation_period: Seconds::new(EARTH_SIDEREAL_DAY.value() / rate),
+            ..spin
+        };
+        against_gcm(
+            "8a",
+            rate,
+            contrast(&earth, &turned) / base,
+            gcm / 40.0,
+            0.15,
+        );
+    }
+    // Fig. 15c, the column's mass in Earth's (bar), at Earth's gravity: 42 K at 1 bar.
+    for (bar, gcm) in [
+        (0.2, 47.0),
+        (0.5, 44.0),
+        (2.0, 40.0),
+        (3.0, 37.0),
+        (5.0, 35.0),
+        (10.0, 30.5),
+        (20.0, 26.5),
+        (30.0, 24.0),
+        (50.0, 22.0),
+    ] {
+        let massive = Column {
+            air_mass_kg_per_m2: earth.air_mass_kg_per_m2 * bar,
+            surface_pressure: Pascals::new(earth.surface_pressure.value() * bar),
+            ..earth
+        };
+        against_gcm(
+            "15c",
+            bar,
+            contrast(&massive, &spin) / base,
+            gcm / 42.0,
+            0.10,
+        );
+    }
+    // Fig. 18a, the mean density (kg m⁻³) at Earth's radius and column mass, g ∝ ρ: 42.5 K at
+    // 5,520.
+    for (density, gcm) in [
+        (500.0, 20.0),
+        (1_000.0, 24.0),
+        (2_000.0, 31.0),
+        (3_000.0, 35.5),
+        (4_000.0, 39.5),
+        (5_500.0, 42.5),
+        (6_500.0, 45.0),
+        (8_000.0, 47.5),
+        (9_000.0, 49.5),
+        (10_000.0, 50.5),
+        (11_200.0, 52.0),
+    ] {
+        let g = STANDARD_GRAVITY.value() * density / 5_520.0;
+        let dense = Column {
+            surface_gravity: MetresPerSecondSquared::new(g),
+            surface_pressure: Pascals::new(earth.air_mass_kg_per_m2 * g),
+            ..earth
+        };
+        against_gcm(
+            "18a",
+            density,
+            contrast(&dense, &spin) / base,
+            gcm / 42.5,
+            0.10,
+        );
+    }
+    // Fig. 20b, the radius (km) at Earth's density and column mass, g ∝ R: 42.5 K at 6,371 km.
+    for (km, gcm) in [
+        (1_000.0, 22.0),
+        (2_000.0, 28.0),
+        (3_000.0, 33.0),
+        (5_000.0, 40.0),
+        (8_000.0, 46.0),
+        (10_000.0, 49.0),
+        (20_000.0, 58.0),
+        (30_000.0, 63.0),
+        (50_000.0, 67.0),
+    ] {
+        let g = STANDARD_GRAVITY.value() * km / 6_371.0;
+        let sized = Column {
+            radius: Metres::new(km * 1e3),
+            surface_gravity: MetresPerSecondSquared::new(g),
+            surface_pressure: Pascals::new(earth.air_mass_kg_per_m2 * g),
+            ..earth
+        };
+        against_gcm("20b", km, contrast(&sized, &spin) / base, gcm / 42.5, 0.10);
+    }
+}
+
+#[test]
+fn the_generated_venus_and_titan_are_near_isothermal() {
+    let table = table();
+    // Venus's slow spin leaves Koll's weak gradient to govern its transport (science-p14-t24a-
+    // climate.md §1: 2.8 K).
+    let (_, venus, conditions) = found(&table, "Venus");
+    let (column, moisture) = column_of(venus, spin_of("Venus"));
+    assert_eq!(moisture, Moisture::Dry);
+    let spin = spin_of("Venus");
+    let weak = weak_gradient_transport(&column, &spin) * column.restoring_w_per_m2_k();
+    let diffusive = 6.0 * meridional_conductance_w_per_m2_k(&column, &spin) * DRY_TRANSPORT_SHARE;
+    eprintln!(
+        "Venus: {} K, W B_P {weak} against 6D {diffusive}, X {}, k {}",
+        conditions.equator_pole_contrast_k(),
+        redistribution_parameter(&column),
+        redistribution_scale(&column)
+    );
+    assert!(weak > diffusive);
+    assert!(
+        (0.0..5.0).contains(&conditions.equator_pole_contrast_k()),
+        "{}",
+        conditions.equator_pole_contrast_k()
+    );
+    // Titan's is far under its measured 1–4 K, which its seasons and methane set; any annual law
+    // keeps it under 4 K.
+    let titan = found(&table, "Titan").2.equator_pole_contrast_k();
+    assert!((0.0..4.0).contains(&titan), "{titan}");
+}
+
+#[test]
+fn a_mars_given_its_measured_state_lies_within_30_to_70_k() {
+    // The measured Mars, by hand: 6.1 mbar of CO₂ at 210 K, 586.2 W m⁻² at a Bond albedo of 0.25,
+    // 3.71 m s⁻², 3,389.5 km and 43.34 g mol⁻¹ (NASA's Mars fact sheet), the registry's c_p ÷ R
+    // for CO₂, 25.19° and 24.62 h. Its measured annual contrast is some 50–65 K, short by its CO₂
+    // caps' brightening, which is P14.T51.a's.
+    let co2 = Gas::CarbonDioxide.substance();
+    let mu = 43.34;
+    let cp = heat_capacity_over_r(&[(co2, 1.0)]).unwrap();
+    let equilibrium = math::powf(0.75 * 586.2 / 4.0 / STEFAN_BOLTZMANN, 0.25);
+    let (pressure, gravity) = (610.0, 3.71);
+    let mars = Column {
+        surface_temperature: Kelvin::new(210.0),
+        equilibrium_temperature: Kelvin::new(equilibrium),
+        surface_pressure: Pascals::new(pressure),
+        air_mass_kg_per_m2: pressure / gravity,
+        specific_heat_j_per_kg_k: specific_heat_j_per_kg_k(cp, mu),
+        molar_mass_g_per_mol: mu,
+        surface_gravity: MetresPerSecondSquared::new(gravity),
+        optical_depth: (math::powi(210.0 / equilibrium, 4) - 1.0) / 0.75,
+        greenhouse_gain: 0.0,
+        radius: Metres::new(3_389.5e3),
+    };
+    let spin = spin_of("Mars");
+    let contrast = equator_pole_contrast_k(&mars, &spin, Moisture::Dry);
+    let six_d_over_b = 6.0 * meridional_conductance_w_per_m2_k(&mars, &spin) * DRY_TRANSPORT_SHARE
+        / mars.restoring_w_per_m2_k();
+    eprintln!("the measured Mars: {contrast} K, 6D/B {six_d_over_b}");
+    assert!((30.0..70.0).contains(&contrast), "{contrast}");
+    // Its thin air's transport is weak, from the taper below 0.2 of Earth's column.
+    assert!(six_d_over_b < 0.15, "{six_d_over_b}");
+}
+
+#[test]
+fn the_transport_is_continuous_across_its_ends() {
+    let (earth, spin) = earth_column();
+    let conductance = |mass: f64, g: f64| {
+        meridional_conductance_w_per_m2_k(
+            &Column {
+                air_mass_kg_per_m2: mass * EARTH_COLUMN_MASS_KG_PER_M2,
+                surface_gravity: MetresPerSecondSquared::new(g * STANDARD_GRAVITY.value()),
+                ..earth
+            },
+            &spin,
+        )
+    };
+    let close = |a: f64, b: f64| (a / b - 1.0).abs() < 1e-8;
+    // The taper at a fifth of Earth's column, and the ends of the column's and the gravity's
+    // ranges.
+    let (low, high) = COLUMN_TRANSPORT_RANGE;
+    for mass in [low, high] {
+        assert!(close(
+            conductance(mass * (1.0 - 1e-10), 1.0),
+            conductance(mass * (1.0 + 1e-10), 1.0)
+        ));
+    }
+    assert_same_bits(conductance(high * 2.0, 1.0), conductance(high, 1.0));
+    assert!(conductance(1e-6, 1.0) < 1e-5 * conductance(1.0, 1.0));
+    assert_same_bits(conductance(0.0, 1.0), 0.0);
+    let (g_low, g_high) = GRAVITY_TRANSPORT_RANGE;
+    for g in [g_low, g_high] {
+        assert!(close(
+            conductance(1.0, g * (1.0 - 1e-10)),
+            conductance(1.0, g * (1.0 + 1e-10))
+        ));
+    }
+    assert_same_bits(conductance(1.0, g_low / 2.0), conductance(1.0, g_low));
+    assert_same_bits(conductance(1.0, g_high * 2.0), conductance(1.0, g_high));
+    // Through the weak gradient's weight and the rotation law's ends: a dry Earth, its period
+    // swept from an hour to ten thousand days in steps of 0.1%, moves its contrast by under
+    // 0.25% a step (the weak gradient's weight goes as the period squared), and a body that does
+    // not turn takes the slowest one's.
+    let dry = |period: f64| {
+        equator_pole_contrast_k(
+            &earth,
+            &SeasonalSpin {
+                rotation_period: Seconds::new(period),
+                ..spin
+            },
+            Moisture::Dry,
+        )
+    };
+    let mut period = 3_600.0;
+    let mut last = dry(period);
+    while period < 1e4 * SECONDS_PER_DAY {
+        period *= 1.001;
+        let next = dry(period);
+        assert!(
+            (next / last - 1.0).abs() < 2.5e-3,
+            "{period} s: {last} to {next}"
+        );
+        last = next;
+    }
+    assert!((dry(f64::INFINITY) / dry(1e15) - 1.0).abs() < 1e-6);
+}
 #[test]
 fn the_annual_insolation_is_its_definitions_mean() {
     // The year's mean of the daily-mean insolation at the equator, (4 ÷ π) cos δ over S ÷ 4, and
@@ -440,36 +915,54 @@ fn the_annual_insolation_is_its_definitions_mean() {
 #[test]
 fn a_ninety_degree_obliquity_world_s_equator_pole_contrast_is_negative() {
     let (column, spin) = earth_column();
-    let at = |degrees: f64| {
+    let tilted = |column: &Column, moisture: Moisture, degrees: f64| {
         let spin = SeasonalSpin {
             obliquity: Radians::from(Degrees::new(degrees)),
             ..spin
         };
-        equator_pole_contrast_k(&column, &spin, Moisture::Wet)
+        equator_pole_contrast_k(column, &spin, moisture)
     };
+    let at = |degrees: f64| tilted(&column, Moisture::Wet, degrees);
     assert!(at(90.0) < 0.0);
-    // At 90° a pole takes 4 ÷ π of the mean light and the equator 8 ÷ π², so the warm pole's
-    // contrast is (8 ÷ π²)^¼ − (4 ÷ π)^¼ over the cold pole's (4 ÷ π)^¼ at 0°, by hand.
+    // On an airless body (the table's Moon) the contrast is the radiative one. At 90° a pole takes
+    // 4 ÷ π of the mean light and the equator 8 ÷ π², so the warm pole's contrast is
+    // (8 ÷ π²)^¼ − (4 ÷ π)^¼ over the cold pole's (4 ÷ π)^¼ at 0°, by hand; it changes sign
+    // where the equator's and the poles' light are equal, at 53.90° and 126.10°.
+    let table = table();
+    let (_, moon, _) = found(&table, "Moon");
+    let (bare, dry) = column_of(moon, spin_of("Moon"));
+    let airless = |degrees: f64| tilted(&bare, dry, degrees);
     let pi = core::f64::consts::PI;
     let by_hand = (math::powf(8.0 / (pi * pi), 0.25) - math::powf(4.0 / pi, 0.25))
         / math::powf(4.0 / pi, 0.25);
     assert!(
-        (at(90.0) / at(0.0) - by_hand).abs() < 1e-12,
+        (airless(90.0) / airless(0.0) - by_hand).abs() < 1e-12,
         "{}",
-        at(90.0) / at(0.0)
+        airless(90.0) / airless(0.0)
     );
-    // The sign changes where the equator's and the poles' light are equal, at 53.90°, and the
-    // contrast is symmetric about 90°.
     assert!(
-        at(53.8) > 0.0 && at(54.0) < 0.0,
+        airless(53.8) > 0.0 && airless(54.0) < 0.0,
         "{} {}",
-        at(53.8),
-        at(54.0)
+        airless(53.8),
+        airless(54.0)
     );
-    assert!(at(126.0) < 0.0 && at(126.2) > 0.0);
+    assert!(airless(126.0) < 0.0 && airless(126.2) > 0.0);
+    // Under transport the zero moves toward 54.7°, where P₂(cos β) vanishes: the measured Earth's
+    // lies near 54.45° (science-p14-t24a-climate.md §7). The contrast is symmetric about 90°.
+    assert!(
+        at(54.0) > 0.0 && at(54.8) < 0.0,
+        "{} {}",
+        at(54.0),
+        at(54.8)
+    );
+    assert!(
+        at(125.2) < 0.0 && at(126.0) > 0.0,
+        "{} {}",
+        at(125.2),
+        at(126.0)
+    );
     assert!((at(30.0) - at(150.0)).abs() < 1e-9);
     // Through the derivation: the table's Earth tilted to 90°.
-    let table = table();
     let (_, earth, conditions) = found(&table, "Earth");
     assert!(conditions.equator_pole_contrast_k() > 0.0);
     let tilted = conditions_of(
@@ -481,6 +974,144 @@ fn a_ninety_degree_obliquity_world_s_equator_pole_contrast_is_negative() {
     )
     .unwrap();
     assert!(tilted.equator_pole_contrast_k() < 0.0);
+}
+
+#[test]
+fn a_low_obliquity_world_s_contrast_is_its_transport_s() {
+    // The table's Earth at 0° and at 3° of obliquity: its contrast within 45–70 K, where damping
+    // the whole radiative contrast at P₂'s rate gave 217 and 113 K (science-p14-t24a-climate.md
+    // §7: its narrow polar cap lies in modes that any transport erases).
+    let table = table();
+    let (_, earth, _) = found(&table, "Earth");
+    for degrees in [0.0, 3.0] {
+        let conditions = conditions_of(
+            earth,
+            SeasonalSpin {
+                obliquity: Radians::from(Degrees::new(degrees)),
+                ..spin_of("Earth")
+            },
+        )
+        .unwrap();
+        let contrast = conditions.equator_pole_contrast_k();
+        eprintln!("Earth at {degrees}°: {contrast} K");
+        assert!((45.0..70.0).contains(&contrast), "{degrees}°: {contrast} K");
+    }
+}
+
+#[test]
+fn the_zonal_ends_follow_a_nonlinear_diffusive_balance() {
+    // Science-p14-t24a-climate.md §7's nonlinear one-dimensional diffusive balance, T_s = 1,
+    // B = 4, dry and at fixed τ (`sweep7.json`): (obliquity in degrees, 6D ÷ B, T₀, T₉₀).
+    const BALANCE: [(f64, f64, f64, f64); 24] = [
+        (0.5, 0.01, 1.0619, 0.6183),
+        (0.5, 0.1, 1.0585, 0.7577),
+        (0.5, 1.0, 1.0351, 0.9053),
+        (0.5, 15.0, 1.0046, 0.9893),
+        (4.0, 0.01, 1.0616, 0.6396),
+        (4.0, 0.1, 1.0582, 0.7633),
+        (4.0, 1.0, 1.0349, 0.9064),
+        (4.0, 15.0, 1.0046, 0.9894),
+        (10.0, 0.01, 1.0599, 0.7088),
+        (10.0, 0.1, 1.0566, 0.7873),
+        (10.0, 1.0, 1.0337, 0.9121),
+        (10.0, 15.0, 1.0044, 0.9899),
+        (23.44, 0.01, 1.0509, 0.8461),
+        (23.44, 0.1, 1.0478, 0.8661),
+        (23.44, 1.0, 1.0279, 0.9358),
+        (23.44, 15.0, 1.0036, 0.9924),
+        (45.0, 0.01, 1.0227, 0.9741),
+        (45.0, 0.1, 1.0206, 0.9745),
+        (45.0, 1.0, 1.0108, 0.9836),
+        (45.0, 15.0, 1.0013, 0.9978),
+        (90.0, 0.01, 0.9503, 1.0619),
+        (90.0, 0.1, 0.9571, 1.0586),
+        (90.0, 1.0, 0.9786, 1.0356),
+        (90.0, 15.0, 0.9974, 1.0047),
+    ];
+    let transport = |six_d_over_b: f64| ZonalTransport {
+        planck: 4.0,
+        effective: 4.0,
+        conductance: six_d_over_b * 4.0 / 6.0,
+        weak: 0.0,
+        albedo: 1.0,
+    };
+    for (degrees, six_d_over_b, equator, pole) in BALANCE {
+        let obliquity = Radians::from(Degrees::new(degrees));
+        let (modal_equator, modal_pole) =
+            zonal_ends_under(1.0, &transport(six_d_over_b), obliquity);
+        let contrast = (modal_equator - modal_pole) / (equator - pole) - 1.0;
+        assert!(
+            contrast.abs() < 0.06
+                && (modal_equator - equator).abs() < 0.002
+                && (modal_pole - pole).abs() < 0.02,
+            "{degrees}° at {six_d_over_b}: ({modal_equator}, {modal_pole}) against ({equator}, \
+             {pole})"
+        );
+        // With no transport the ends are the radiative ones, to the bit.
+        let (q_eq, q_pole) = annual_insolation(obliquity);
+        let (bare_equator, bare_pole) = zonal_ends_under(1.0, &transport(0.0), obliquity);
+        assert_same_bits(bare_equator, math::powf(q_eq, 0.25));
+        assert_same_bits(bare_pole, math::powf(q_pole, 0.25));
+    }
+    // The adopted values at two of the rows (the ruling's `zonal7.py`).
+    let at = |degrees: f64, six_d_over_b: f64| {
+        zonal_ends_under(
+            1.0,
+            &transport(six_d_over_b),
+            Radians::from(Degrees::new(degrees)),
+        )
+    };
+    for (degrees, six_d_over_b, adopted_equator, adopted_pole) in
+        [(0.5, 0.1, 1.0587, 0.7732), (23.44, 1.0, 1.0287, 0.9390)]
+    {
+        let (equator, pole) = at(degrees, six_d_over_b);
+        assert!(
+            (equator - adopted_equator).abs() < 1e-4 && (pole - adopted_pole).abs() < 1e-4,
+            "{degrees}° at {six_d_over_b}: {equator} {pole}"
+        );
+    }
+}
+
+#[test]
+fn the_insolation_modes_are_the_annual_insolation_s() {
+    // The modes: q₂ = −(5/8) P₂(cos β) and q₄ = −(9/64) P₄(cos β), and their partial sums approach
+    // the ends' insolation, within 10⁻³ at 23.44°, while the pole's tail at 0.5° is some −0.028,
+    // which the tail term carries.
+    for degrees in [0.5, 23.44, 60.0, 90.0] {
+        let obliquity = Radians::from(Degrees::new(degrees));
+        let c = math::cos(obliquity.value());
+        let modes = insolation_modes(obliquity);
+        let p_2 = (3.0 * c * c - 1.0) / 2.0;
+        let p_4 = (35.0 * math::powi(c, 4) - 30.0 * c * c + 3.0) / 8.0;
+        assert!(
+            (modes[0].coefficient + 5.0 / 8.0 * p_2).abs() < 1e-15,
+            "{degrees}°"
+        );
+        assert!(
+            (modes[1].coefficient + 9.0 / 64.0 * p_4).abs() < 1e-15,
+            "{degrees}°"
+        );
+        assert_same_bits(modes[0].degree, 2.0);
+        assert_same_bits(modes[ZONAL_MODES - 1].degree, 32.0);
+    }
+    let tails = |degrees: f64| {
+        let obliquity = Radians::from(Degrees::new(degrees));
+        let modes = insolation_modes(obliquity);
+        let (q_eq, q_pole) = annual_insolation(obliquity);
+        let sum = |end: ZonalEnd| {
+            modes
+                .iter()
+                .fold(1.0, |sum, mode| sum + mode.coefficient * end.legendre(mode))
+        };
+        (q_eq - sum(ZonalEnd::Equator), q_pole - sum(ZonalEnd::Pole))
+    };
+    let (equator, pole) = tails(23.44);
+    assert!(
+        equator.abs() < 1e-3 && pole.abs() < 1e-3,
+        "{equator} {pole}"
+    );
+    let (_, pole) = tails(0.5);
+    assert!((-0.035..-0.02).contains(&pole), "{pole}");
 }
 
 #[test]
@@ -625,14 +1256,37 @@ fn the_rotation_factor_follows_kaspi_and_showman() {
 
 #[test]
 fn the_redistribution_is_koll_s() {
+    // His eq. 9's k at his three planets (Koll 2022, Table 1: radius in R⊕, gravity in m s⁻²),
+    // under N₂ at the registry's molar mass: 1.23, 1.89 and 2.35 (science-p14-t24a-climate.md
+    // §4) against his 1.2, 1.9 and 2.3. LHS 3844b's 2.353 would round to 2.4, so his own
+    // evaluation sits some 2% lower, far inside χ's factor of two: within 3% of each.
     let (earth, _) = earth_column();
-    // By hand: X = τ^⅓ (p ÷ 1 bar)^⅔ (T_eq ÷ 600 K)^−4/3, ε = X ÷ (2 + X).
-    let x = math::cbrt(earth.optical_depth)
+    let n2 = Gas::Nitrogen.molar_mass_g_per_mol();
+    for (planet, radius, g, k) in [
+        ("TRAPPIST-1b", 1.12, 7.95, 1.2),
+        ("GJ1132b", 1.16, 11.8, 1.9),
+        ("LHS3844b", 1.32, 12.9, 2.3),
+    ] {
+        let column = Column {
+            radius: Metres::new(radius * 6.371e6),
+            surface_gravity: MetresPerSecondSquared::new(g),
+            molar_mass_g_per_mol: n2,
+            ..earth
+        };
+        let scale = redistribution_scale(&column);
+        eprintln!("{planet}: k {scale}");
+        assert!((scale / k - 1.0).abs() < 0.03, "{planet}: {scale}");
+    }
+    // By hand: X = (1.5τ)^⅓ (p ÷ 1 bar)^⅔ (T_eq ÷ 600 K)^−4/3, and ε = X ÷ (k + X).
+    let x = math::cbrt(1.5 * earth.optical_depth)
         * math::powf(earth.surface_pressure.value() / 1e5, 2.0 / 3.0)
         * math::powf(earth.equilibrium_temperature.value() / 600.0, -4.0 / 3.0);
+    assert!((redistribution_parameter(&earth) - x).abs() < 1e-15);
+    let k = redistribution_scale(&earth);
     let epsilon = heat_redistribution(&earth);
-    assert!((epsilon - x / (2.0 + x)).abs() < 1e-15);
-    assert!(epsilon > 0.5 && epsilon < 0.7, "{epsilon}");
+    assert!((epsilon - x / (k + x)).abs() < 1e-15);
+    eprintln!("Earth: X {x}, k {k}, eps {epsilon}");
+    assert!((1.2..1.5).contains(&k), "{k}");
     // No air or no greenhouse redistributes nothing; a deep air nearly all.
     let bare = Column {
         surface_pressure: Pascals::ZERO,
@@ -650,27 +1304,78 @@ fn the_redistribution_is_koll_s() {
         ..earth
     };
     assert!(heat_redistribution(&deep) > 0.99);
+    // A lighter air redistributes more: k goes as μ^4/3.
+    let light = Column {
+        molar_mass_g_per_mol: 2.016,
+        ..earth
+    };
+    let ratio = redistribution_scale(&light) / k;
+    assert!(
+        (ratio - math::powf(2.016 / EARTH_AIR_MOLAR_MASS_G_PER_MOL, 4.0 / 3.0)).abs() < 1e-12,
+        "{ratio}"
+    );
+    // The generated bodies' own k (science-p14-t24a-climate.md §4): Earth 1.34, Venus 2.11 and
+    // Titan 0.073.
+    let table = table();
+    for (name, k) in [("Earth", 1.34), ("Venus", 2.11), ("Titan", 0.073)] {
+        let (_, body, _) = found(&table, name);
+        let (column, _) = column_of(body, spin_of(name));
+        let scale = redistribution_scale(&column);
+        eprintln!("{name}: k {scale}, X {}", redistribution_parameter(&column));
+        assert!(((scale - k) / k).abs() < 0.05, "{name}: {scale}");
+    }
 }
 
 #[test]
 fn a_rotating_column_damps_the_day_night_contrast() {
     let (earth, spin) = earth_column();
+    let floor = COSMIC_BACKGROUND_TEMPERATURE;
     let at = |days: Option<f64>| {
-        day_night_contrast_k(
+        let (day, night) = day_and_night(
             &earth,
             &SeasonalSpin {
                 solar_day: days.map(|d| Seconds::new(d * SECONDS_PER_DAY)),
                 ..spin
             },
-        )
+            SurfaceMaterial::Rock,
+            floor,
+        );
+        day.value() - night.value()
     };
     let locked = at(None);
-    // Cowan and Agol's contrast at Koll's ε, by hand.
-    let epsilon = heat_redistribution(&earth);
+    // Cowan and Agol's contrast at Koll's ε and the floor's, by hand: a locked world's ground
+    // stores nothing.
+    let epsilon = heat_redistribution(&earth)
+        + math::powi(floor.value() / earth.equilibrium_temperature.value(), 4);
     let by_hand =
         288.0 * (math::powf(8.0 / 3.0 - 5.0 / 3.0 * epsilon, 0.25) - math::powf(epsilon, 0.25));
-    assert!((locked - by_hand).abs() < 1e-9);
-    // Longer days damp less, and the locked contrast is the limit of an ever longer day.
+    assert!(
+        (locked - by_hand).abs() < 1e-9,
+        "{locked} against {by_hand}"
+    );
+    // On a rotator each departure is damped by 1 ÷ √(1 + (ω C (1 − ε) ÷ B_P)²), at the ε of the
+    // air's and the ground's in series.
+    let rotating = Some(Seconds::new(SECONDS_PER_DAY));
+    let daily = SeasonalSpin {
+        solar_day: rotating,
+        ..spin
+    };
+    let ground = ground_redistribution(&earth, &daily, SurfaceMaterial::Rock);
+    let series = 1.0 - (1.0 - heat_redistribution(&earth)) * (1.0 - ground)
+        + math::powi(floor.value() / earth.equilibrium_temperature.value(), 4);
+    let omega_tau = core::f64::consts::TAU / SECONDS_PER_DAY
+        * earth.heat_capacity_j_per_m2_k()
+        * (1.0 - series)
+        / earth.restoring_w_per_m2_k();
+    let undamped =
+        288.0 * (math::powf(8.0 / 3.0 - 5.0 / 3.0 * series, 0.25) - math::powf(series, 0.25));
+    assert!((at(Some(1.0)) - undamped / math::hypot(1.0, omega_tau)).abs() < 1e-9);
+    eprintln!(
+        "Earth: locked {locked} K, a day's {} K, ground eps {ground}",
+        at(Some(1.0))
+    );
+    // Longer days damp less, and the locked contrast is the limit of an ever longer day, whose
+    // ground stores ever less.
     let mut last = 0.0;
     for days in [0.1, 1.0, 10.0, 100.0, 1e4, 1e8] {
         let contrast = at(Some(days));
@@ -680,26 +1385,185 @@ fn a_rotating_column_damps_the_day_night_contrast() {
         );
         last = contrast;
     }
-    assert!((at(Some(1e12)) / locked - 1.0).abs() < 1e-9);
-    // An airless body's is its dayside's radiative temperature over a 0 K night, whatever its day.
-    let airless = Column {
-        surface_pressure: Pascals::ZERO,
-        heat_capacity_j_per_m2_k: 0.0,
-        optical_depth: 0.0,
+    assert!((at(Some(1e14)) / locked - 1.0).abs() < 1e-6);
+    // Venus's and Titan's thick airs leave under 10 K and under 1 K.
+    let table = table();
+    for (name, limit) in [("Venus", 10.0), ("Titan", 1.0)] {
+        let contrast = found(&table, name).2.day_night_contrast_k();
+        assert!((0.0..limit).contains(&contrast), "{name}: {contrast} K");
+    }
+}
+
+#[test]
+fn an_airless_night_is_its_regolith_s() {
+    // The ruling's five pairs of its constant-inertia model (science-p14-t24a-climate.md §2),
+    // within 3%.
+    for (theta, epsilon) in [
+        (0.0051, 0.0053),
+        (0.028, 0.0246),
+        (0.152, 0.103),
+        (0.506, 0.254),
+        (1.52, 0.480),
+    ] {
+        let fitted = regolith_redistribution(theta);
+        assert!(
+            (fitted / epsilon - 1.0).abs() < 0.03,
+            "Θ {theta}: {fitted} against {epsilon}"
+        );
+    }
+    // The thermal parameter by hand, Γ √ω ÷ (ε_r σ T_ss³), on the table's Moon.
+    let table = table();
+    let (_, moon, _) = found(&table, "Moon");
+    let spin = spin_of("Moon");
+    let (column, _) = column_of(moon, spin);
+    assert_eq!(
+        SurfaceMaterial::of(&moon.fractions()),
+        SurfaceMaterial::Rock
+    );
+    let subsolar = column.equilibrium_temperature.value() * math::powf(4.0 / 0.95, 0.25);
+    let omega = core::f64::consts::TAU / spin.solar_day.unwrap().value();
+    let theta = 55.0 * omega.sqrt() / (0.95 * STEFAN_BOLTZMANN * math::powi(subsolar, 3));
+    eprintln!("the Moon's Θ {theta}");
+    assert!((theta - 0.028).abs() < 0.002, "{theta}");
+    assert!(
+        (ground_redistribution(&column, &spin, SurfaceMaterial::Rock)
+            - regolith_redistribution(theta))
+        .abs()
+            < 1e-15
+    );
+    // The Moon's night (Diviner: about 95 K before dawn, a night mean of some 100–110 K) and
+    // Mercury's (Mariner 10: 100–130 K), each the hemisphere's.
+    for (name, low, high) in [("Moon", 90.0, 125.0), ("Mercury", 90.0, 130.0)] {
+        let (_, body, _) = found(&table, name);
+        let (_, night) = day_and_night_of(body, spin_of(name));
+        eprintln!("{name}'s night: {} K", night.value());
+        assert!((low..high).contains(&night.value()), "{name}: {night:?}");
+    }
+    // An icy body stores less at its lower inertia.
+    let ice = ground_redistribution(&column, &spin, SurfaceMaterial::Ice);
+    assert!(ice < ground_redistribution(&column, &spin, SurfaceMaterial::Rock));
+    assert!((ice - regolith_redistribution(theta * 20.0 / 55.0)).abs() < 1e-15);
+}
+
+#[test]
+fn a_locked_airless_body_s_night_is_its_floor() {
+    let table = table();
+    let (_, mercury, _) = found(&table, "Mercury");
+    let locked = SeasonalSpin {
+        solar_day: None,
+        ..spin_of("Mercury")
+    };
+    let (column, _) = column_of(mercury, locked);
+    assert_same_bits(
+        ground_redistribution(&column, &locked, SurfaceMaterial::Rock),
+        0.0,
+    );
+    let (_, night) = day_and_night_of(mercury, locked);
+    assert!(
+        (night.value() / COSMIC_BACKGROUND_TEMPERATURE.value() - 1.0).abs() < 1e-12,
+        "{night:?}"
+    );
+    // A warmer floor, as P14.T24.b's heat flow gives one, is its night too.
+    let floor = Kelvin::new(26.1);
+    let (_, warmer) = day_and_night(&column, &locked, SurfaceMaterial::Rock, floor);
+    assert!(
+        (warmer.value() / floor.value() - 1.0).abs() < 1e-12,
+        "{warmer:?}"
+    );
+    let conditions = conditions_of(mercury, locked).unwrap();
+    assert_same_bits(
+        conditions.climate_range().0.value(),
+        COSMIC_BACKGROUND_TEMPERATURE.value(),
+    );
+}
+
+#[test]
+fn the_night_is_continuous_across_the_airless_threshold() {
+    // An Earth whose air thins to nothing joins the bare rock's day and night: the air's ε and
+    // its storage vanish with its pressure.
+    let (earth, spin) = earth_column();
+    let floor = COSMIC_BACKGROUND_TEMPERATURE;
+    let thinned = |scale: f64| Column {
+        surface_pressure: Pascals::new(earth.surface_pressure.value() * scale),
+        air_mass_kg_per_m2: earth.air_mass_kg_per_m2 * scale,
         ..earth
     };
-    let bare = day_night_contrast_k(&airless, &spin);
-    assert!((bare - 288.0 * math::powf(8.0 / 3.0, 0.25)).abs() < 1e-9);
-    assert_same_bits(
-        bare,
-        day_night_contrast_k(
-            &airless,
-            &SeasonalSpin {
+    let (bare_day, bare_night) = day_and_night(&thinned(0.0), &spin, SurfaceMaterial::Rock, floor);
+    let mut last = f64::INFINITY;
+    for scale in [1e-2, 1e-4, 1e-6, 1e-8, 1e-10] {
+        let (day, night) = day_and_night(&thinned(scale), &spin, SurfaceMaterial::Rock, floor);
+        let apart =
+            (day.value() - bare_day.value()).abs() + (night.value() - bare_night.value()).abs();
+        assert!(apart < last, "{scale}: {apart} K");
+        last = apart;
+    }
+    assert!(last < 1e-3, "{last} K");
+}
+
+#[test]
+fn a_solar_day_that_is_not_positive_is_none() {
+    // The fields are public: a day of zero, less or not a number is taken as no solar day, as a
+    // world locked 1:1 to its seasonal host has, and gives finite conditions.
+    let table = table();
+    for (name, body, _) in &table {
+        let base = spin_of(name);
+        let locked = conditions_of(
+            body,
+            SeasonalSpin {
                 solar_day: None,
-                ..spin
+                ..base
             },
-        ),
-    );
+        )
+        .unwrap();
+        for day in [0.0, -1.0, f64::NAN] {
+            let odd = conditions_of(
+                body,
+                SeasonalSpin {
+                    solar_day: Some(Seconds::new(day)),
+                    ..base
+                },
+            )
+            .unwrap();
+            assert!(odd.day_night_contrast_k().is_finite(), "{name} at {day} s");
+            assert_eq!(odd, locked, "{name} at {day} s");
+        }
+    }
+}
+
+#[test]
+fn every_wet_world_s_water_feeds_back() {
+    // T13.c holds a wet world's water at its saturation pressure at its surface temperature, so
+    // its gain is positive: Earth-like bodies of 0.5 to 4 M⊕ from 0.90 to 1.30 au of the Sun.
+    let disc = solar_disc();
+    let mut wet = 0_u32;
+    for mass in [0.5, 1.0, 2.0, 4.0] {
+        for step in 0..=40 {
+            let a = 0.9 + 0.01 * f64::from(step);
+            let o = orbit(a, 0.0);
+            let placed = PlacedBody::new(
+                EarthMasses::new(mass),
+                o,
+                o.semi_major_axis(),
+                UnitUniform::HALF,
+            )
+            .unwrap();
+            let body = derive_under(&placed, &disc, SOLAR_AGE, Speciation::CarbonAndOxygen);
+            if body.atmosphere().state() == SurfaceState::GasEnvelope {
+                continue;
+            }
+            let (column, moisture) = column_of(&body, spin_of("Earth"));
+            if moisture == Moisture::Wet {
+                wet += 1;
+                assert!(
+                    column.greenhouse_gain > 0.0,
+                    "{mass} M⊕ at {a} au: {:?}",
+                    body.atmosphere().state()
+                );
+            }
+        }
+    }
+    eprintln!("{wet} wet worlds");
+    assert!(wet > 5, "{wet}");
 }
 
 #[test]
@@ -710,8 +1574,229 @@ fn no_light_gives_no_contrast() {
         ..earth
     };
     assert_same_bits(equator_pole_contrast_k(&dark, &spin, Moisture::Wet), 0.0);
-    assert_same_bits(day_night_contrast_k(&dark, &spin), 0.0);
-    assert_same_bits(heat_redistribution(&dark), 1.0);
+    let (day, night) = day_and_night(
+        &dark,
+        &spin,
+        SurfaceMaterial::Rock,
+        COSMIC_BACKGROUND_TEMPERATURE,
+    );
+    assert_eq!(
+        (day, night),
+        (dark.surface_temperature, dark.surface_temperature)
+    );
+    assert_same_bits(heat_redistribution(&dark), 0.0);
+    assert_same_bits(
+        ground_redistribution(&dark, &spin, SurfaceMaterial::Rock),
+        0.0,
+    );
+    assert_same_bits(weak_gradient_transport(&dark, &spin), 0.0);
+}
+
+#[test]
+fn the_table_s_climate_ranges_are_the_ruling_s() {
+    // Science-p14-t24a-climate.md §6's ranges (item 1's zonal ends; the table's Ceres is rock,
+    // item 2's erratum), the bodies with air at §7's modal ends, with the airless floors at the
+    // cosmic background's until P14.T24.b's heat flow raises them (to 26.1 K on Mercury and
+    // 24.0 K on the Moon).
+    let table = table();
+    for (name, coldest, warmest) in [
+        ("Earth", 261.7, 305.1),
+        ("Mercury", 2.7255, 585.2),
+        ("Moon", 2.7255, 361.0),
+        ("Venus", 733.5, 736.1),
+        ("Mars", 203.3, 221.2),
+        ("Ceres", 56.7, 202.9),
+        ("Ganymede", 17.9, 142.8),
+    ] {
+        let (cold, warm) = found(&table, name).2.climate_range();
+        eprintln!("{name}: [{:.2}, {:.2}] K", cold.value(), warm.value());
+        assert!(
+            (cold.value() - coldest).abs() < 1.5,
+            "{name}'s coldest: {cold:?}"
+        );
+        assert!(
+            (warm.value() - warmest).abs() < 1.5,
+            "{name}'s warmest: {warm:?}"
+        );
+    }
+    let (cold, warm) = found(&table, "Earth").2.climate_range();
+    assert!((255.0..265.0).contains(&cold.value()) && (300.0..310.0).contains(&warm.value()));
+    for (name, material) in [
+        ("Ceres", SurfaceMaterial::Rock),
+        ("Ganymede", SurfaceMaterial::Ice),
+    ] {
+        assert_eq!(
+            SurfaceMaterial::of(&found(&table, name).1.fractions()),
+            material
+        );
+    }
+    // No body's coldest lies below the floor, and none is negative: the table's, locked, and
+    // tilted to 90°.
+    for (name, body, conditions) in &table {
+        let base = spin_of(name);
+        let locked = conditions_of(
+            body,
+            SeasonalSpin {
+                solar_day: None,
+                ..base
+            },
+        )
+        .unwrap();
+        let tilted = conditions_of(
+            body,
+            SeasonalSpin {
+                obliquity: Radians::from(Degrees::new(90.0)),
+                ..base
+            },
+        )
+        .unwrap();
+        for c in [conditions, &locked, &tilted] {
+            let (cold, warm) = c.climate_range();
+            assert!(cold >= COSMIC_BACKGROUND_TEMPERATURE, "{name}: {cold:?}");
+            assert!(warm >= cold, "{name}: {cold:?} to {warm:?}");
+            assert!(
+                cold <= c.mean_surface_temperature() && warm >= c.mean_surface_temperature(),
+                "{name}"
+            );
+        }
+    }
+    // By hand: the zonal profile's ends, with the day's excess and the night's deficit.
+    let (_, earth, conditions) = found(&table, "Earth");
+    let spin = spin_of("Earth");
+    let (day, night) = day_and_night_of(earth, spin);
+    let (column, moisture) = column_of(earth, spin);
+    let t_s = conditions.mean_surface_temperature().value();
+    let (equator, pole) = zonal_ends_k(&column, &spin, moisture);
+    assert_same_bits(equator - pole, conditions.equator_pole_contrast_k());
+    let (cold, warm) = conditions.climate_range();
+    assert!((cold.value() - (pole - (t_s - night.value()))).abs() < 1e-9);
+    assert!((warm.value() - (equator + (day.value() - t_s))).abs() < 1e-9);
+    // A warm-pole world's coldest is its equator and its warmest a pole; a colder end above the
+    // mean is held at the mean.
+    let t = Kelvin::new(300.0);
+    let (cold, warm) = climate_range(t, (290.0, 320.0), t, t, COSMIC_BACKGROUND_TEMPERATURE);
+    assert!((cold.value() - 290.0).abs() < 1e-12 && (warm.value() - 320.0).abs() < 1e-12);
+    let (cold, _) = climate_range(t, (301.0, 302.0), t, t, COSMIC_BACKGROUND_TEMPERATURE);
+    assert!((cold.value() - 300.0).abs() < 1e-12, "{cold:?}");
+}
+
+#[test]
+fn an_airless_body_s_warmest_lies_between_its_dayside_and_its_subsolar_point() {
+    // Science-p14-t24a-climate.md §6, item 1: the range is the orbit-mean climate's, so an
+    // airless body's warmest is a dayside, never above its orbit-mean subsolar temperature,
+    // T_eq (4 ÷ ε_r)^¼: at its own spin, locked, tilted to 90° and turning in an hour. Its zonal
+    // ends are its radiative ones, and every body's differ by its contrast.
+    let table = table();
+    for name in ["Mercury", "Moon", "Ganymede", "Ceres"] {
+        let (_, body, _) = found(&table, name);
+        let base = spin_of(name);
+        for spin in [
+            base,
+            SeasonalSpin {
+                solar_day: None,
+                ..base
+            },
+            SeasonalSpin {
+                obliquity: Radians::from(Degrees::new(90.0)),
+                ..base
+            },
+            SeasonalSpin {
+                solar_day: Some(Seconds::new(3_600.0)),
+                ..base
+            },
+        ] {
+            let conditions = conditions_of(body, spin).unwrap();
+            let (column, moisture) = column_of(body, spin);
+            let (day, _) = day_and_night_of(body, spin);
+            let subsolar = column.equilibrium_temperature.value()
+                * math::powf(4.0 / REGOLITH_EMISSIVITY, 0.25);
+            let (_, warm) = conditions.climate_range();
+            assert!(
+                warm >= day && warm.value() < subsolar,
+                "{name}: {warm:?}, {day:?}, {subsolar} K"
+            );
+            let t_s = column.surface_temperature.value();
+            let (q_eq, q_pole) = annual_insolation(spin.obliquity);
+            let (equator, pole) = zonal_ends_k(&column, &spin, moisture);
+            assert!(
+                (equator - t_s * math::powf(q_eq, 0.25)).abs() < 1e-9 * t_s,
+                "{name}"
+            );
+            assert!(
+                (pole - t_s * math::powf(q_pole, 0.25)).abs() < 1e-9 * t_s,
+                "{name}"
+            );
+        }
+    }
+    for (name, body, conditions) in &table {
+        let spin = spin_of(name);
+        let (column, moisture) = column_of(body, spin);
+        let (equator, pole) = zonal_ends_k(&column, &spin, moisture);
+        assert!(
+            (equator - pole - conditions.equator_pole_contrast_k()).abs() < 1e-9,
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn the_zonal_ends_are_continuous_in_the_transport() {
+    // The generated Mars's column, its mass and surface pressure scaled together from 10⁻⁶ to 50
+    // times its own in steps of 1% (science-p14-t24a-climate.md §6, item 1): at the smallest its
+    // ends are its no-transport ones to 10⁻⁴ T_s (the weak gradient falls only as p^⅔), no step
+    // moves either end by more than 0.002 T_s, and each end's distance from T_s falls
+    // monotonically. The no-transport ends are the radiative ones with the emitted flux's
+    // departures amplified by the column's own vapour feedback, `B_P` ÷ `B_eff` (Mars's water is
+    // held at saturation, g = 0.025), and are the radiative ones exactly where there is none.
+    let table = table();
+    let (_, mars, _) = found(&table, "Mars");
+    let spin = spin_of("Mars");
+    let (column, moisture) = column_of(mars, spin);
+    assert_eq!(moisture, Moisture::Dry);
+    assert!(column.greenhouse_gain > 0.0);
+    let t_s = column.surface_temperature.value();
+    let scaled = |scale: f64| Column {
+        air_mass_kg_per_m2: column.air_mass_kg_per_m2 * scale,
+        surface_pressure: Pascals::new(column.surface_pressure.value() * scale),
+        ..column
+    };
+    let (q_eq, q_pole) = annual_insolation(spin.obliquity);
+    let feedback = column.restoring_w_per_m2_k() / column.effective_restoring_w_per_m2_k();
+    let unmoved = |q: f64| t_s * math::powf(1.0 + feedback * (q - 1.0), 0.25);
+    let (equator, pole) = zonal_ends_k(&scaled(1e-6), &spin, moisture);
+    assert!(
+        (equator - unmoved(q_eq)).abs() < 1e-4 * t_s,
+        "{equator} K against {}",
+        unmoved(q_eq)
+    );
+    assert!(
+        (pole - unmoved(q_pole)).abs() < 1e-4 * t_s,
+        "{pole} K against {}",
+        unmoved(q_pole)
+    );
+    let bare = Column {
+        greenhouse_gain: 0.0,
+        ..scaled(1e-6)
+    };
+    let (equator, _) = zonal_ends_k(&bare, &spin, moisture);
+    assert!((equator - t_s * math::powf(q_eq, 0.25)).abs() < 1e-4 * t_s);
+    let (equator, pole) = zonal_ends_k(&scaled(1e-6), &spin, moisture);
+    let (mut last_equator, mut last_pole) = (equator, pole);
+    let mut scale = 1e-6;
+    while scale < 50.0 {
+        scale *= 1.01;
+        let (equator, pole) = zonal_ends_k(&scaled(scale), &spin, moisture);
+        assert!(
+            (equator - last_equator).abs() < 0.002 * t_s && (pole - last_pole).abs() < 0.002 * t_s,
+            "{scale}: {last_equator} to {equator} K, {last_pole} to {pole} K"
+        );
+        assert!(
+            (equator - t_s).abs() <= (last_equator - t_s).abs()
+                && (pole - t_s).abs() <= (last_pole - t_s).abs(),
+            "{scale}: {equator} and {pole} K"
+        );
+        (last_equator, last_pole) = (equator, pole);
+    }
 }
 
 #[test]
@@ -786,6 +1871,17 @@ fn the_conditions_are_continuous_in_obliquity() {
                     conditions.day_night_contrast_k(),
                     previous.day_night_contrast_k(),
                 );
+                // The range's ends follow the contrast, through 53.9° too.
+                let (cold, warm) = conditions.climate_range();
+                let (last_cold, last_warm) = previous.climate_range();
+                if (2.0..=178.0).contains(&degrees) {
+                    let mean = conditions.mean_surface_temperature().value();
+                    assert!(
+                        (cold.value() - last_cold.value()).abs() < 0.01 * mean
+                            && (warm.value() - last_warm.value()).abs() < 0.01 * mean,
+                        "{name} at {degrees}°: {cold:?} to {warm:?}"
+                    );
+                }
             }
             last = Some(conditions);
         }
@@ -851,6 +1947,9 @@ fn the_conditions_are_pinned() {
             &format!("{name}_day_night_contrast_k"),
             c.day_night_contrast_k(),
         );
+        let (coldest, warmest) = c.climate_range();
+        w.f64(&format!("{name}_coldest"), coldest.value());
+        w.f64(&format!("{name}_warmest"), warmest.value());
         w.f64(
             &format!("{name}_surface_pressure"),
             c.surface_pressure().value(),
@@ -880,7 +1979,7 @@ fn the_conditions_are_pinned() {
         pin(&mut w, &name, conditions);
         w.f64(&format!("{name}_xuv_flux"), body.xuv_flux().value());
     }
-    // Locked 1:1, an airless body's contrast is its rotating one; an aired one's is undamped.
+    // Locked 1:1, a world keeps only its air's redistribution, undamped, over the floor.
     for name in ["Earth", "Venus"] {
         let (_, body, _) = found(&table, name);
         let locked = conditions_of(

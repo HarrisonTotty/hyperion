@@ -15,6 +15,7 @@ use crate::id::Layer;
 use crate::orbit::Eccentricity;
 use crate::planetary::architecture::HostMultiplicity;
 use crate::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
+use crate::planetary::derive::atmosphere::{SurfaceState, optical_depth_terms};
 use crate::planetary::derive::{PlanetClass, habitable_zone};
 use crate::planetary::fate::DestructionCause;
 use crate::planetary::index::{BodySlot, BodySub};
@@ -2222,6 +2223,13 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
                         "{index:?}: {sum}"
                     );
                     assert!(conditions.day_night_contrast_k() >= 0.0);
+                    // The climate's range never reaches below the night's floor.
+                    let (coldest, warmest) = conditions.climate_range();
+                    assert!(
+                        coldest >= hooks::surface::COSMIC_BACKGROUND_TEMPERATURE
+                            && warmest >= coldest,
+                        "{index:?}: {coldest:?} to {warmest:?}"
+                    );
                     match record.identity().kind() {
                         BodyKind::Moon(_) => moons += 1,
                         BodyKind::Planet | BodyKind::DwarfPlanet => planets += 1,
@@ -2297,11 +2305,21 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
             let orbit = part.satellite.orbit_at(&part.parent, ctx.age_at(t));
             let derived = PlanetarySystem::moon_derived(&epoch, part, &orbit, &now).unwrap();
             let bulk = PlanetarySystem::moon_bulk_of(part, &derived, &now);
+            // The greenhouse gain reads T13.c's terms at the published equilibrium temperature,
+            // which is the one the moon's τ was computed at.
+            let air = derived.atmosphere();
+            if air.state() != SurfaceState::Airless {
+                let terms =
+                    optical_depth_terms(air.partial_pressures(), derived.equilibrium_temperature());
+                let sum = terms.iter().fold(0.0, |sum, &(_, term)| sum + term);
+                assert_same_bits(sum, air.optical_depth());
+            }
             let inputs = |spin: SeasonalSpin| SurfaceInputs {
                 atmosphere: derived.atmosphere(),
                 equilibrium_temperature: derived.equilibrium_temperature(),
                 surface_gravity: bulk.surface_gravity(),
                 radius: Metres::from(bulk.radius()),
+                material: SurfaceMaterial::of(&bulk.fractions()),
                 stellar_flux: WattsPerSquareMetre::from(derived.flux()),
                 xuv_flux: derived.xuv_flux(),
                 spin,
@@ -2366,6 +2384,9 @@ fn the_published_surface_conditions_are_pinned() {
                 &format!("{name}_day_night_contrast_k"),
                 c.day_night_contrast_k(),
             );
+            let (coldest, warmest) = c.climate_range();
+            w.f64(&format!("{name}_coldest"), coldest.value());
+            w.f64(&format!("{name}_warmest"), warmest.value());
             w.f64(
                 &format!("{name}_surface_pressure"),
                 c.surface_pressure().value(),

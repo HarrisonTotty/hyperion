@@ -1888,8 +1888,9 @@ impl PlanetarySystem {
     /// [`hooks_at`](Self::hooks_at) under the surface conditions' hold `hold`, which tests read
     /// from before the 21 → 22 batch's bump publishes them (P14.T24.a, held).
     ///
-    /// A present body's conditions read its derivation at `t`, its bulk section's gravity and
-    /// radius, and its spin under its seasonal orbit at `t`: its own for a planet or a member, its
+    /// A present body's conditions read its derivation at `t`, its bulk section's gravity, radius
+    /// and surface material (of its mass fractions, [`SurfaceMaterial::of`]), and its spin under
+    /// its seasonal orbit at `t`: its own for a planet or a member, its
     /// planet's for a moon ([`SeasonalSpin::of`]). They are [`Section::NotApplicable`] for a body
     /// in the gas-envelope state or not present, and [`Section::NotModelled`] for one with no
     /// rotation law (every body [`generate_planets`] makes) or whose derivation this version does
@@ -1949,6 +1950,7 @@ impl PlanetarySystem {
                 equilibrium_temperature: sky.equilibrium_temperature,
                 surface_gravity: bulk.surface_gravity(),
                 radius: Metres::from(bulk.radius()),
+                material: SurfaceMaterial::of(&bulk.fractions()),
                 stellar_flux: WattsPerSquareMetre::from(sky.flux),
                 xuv_flux: sky.xuv_flux,
                 spin: SeasonalSpin::of(rotation.frame(), t, seasonal, whose),
