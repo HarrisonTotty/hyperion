@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { fourAbsorberMedium, lineAbsorberMedium } from "../../test/atmosphereFixtures";
-import { forbiddenIn } from "../../test/atmosphereWgsl";
+import { forbiddenIn, wgslCode } from "../../test/atmosphereWgsl";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { quaternion } from "../camera/quaternion";
 import type { TextureHandle } from "../engine/types";
@@ -23,6 +23,7 @@ import {
   HillaireAtmosphere,
   RAY_MARCH_KERNEL,
   SKY_VIEW_KERNEL,
+  skyAzimuthOrigin,
   skyViewHeight,
   type SpheroidFigure,
   type SunState,
@@ -32,6 +33,7 @@ import {
 } from "./hillaire";
 import { densityAt, extinction } from "./medium";
 import { opticalDepth } from "./opticalDepth";
+import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
 import compositeWgsl from "./shaders/composite.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
 import { KERNEL_ARM_FORMAT, MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "./tables";
@@ -308,9 +310,10 @@ describe("HillaireAtmosphere", () => {
     expect(sizeOf("atmosphere sky view")).toEqual([128, 64]);
     expect(sizeOf("atmosphere aerial perspective")).toEqual([32, 32, 16]);
     expect(sizeOf("atmosphere ray march")).toEqual([32, 16]);
-    expect(atmosphere.aerialPerspectiveVolume()).toBeNull();
+    expect(atmosphere.aerialPerspective(CAMERA)).toBeNull();
     const high = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
-    const volume: TextureHandle | null = high.aerialPerspectiveVolume();
+    high.drawFrame(CAMERA, NOON, SCENE);
+    const volume: TextureHandle | undefined = high.aerialPerspective(CAMERA)?.volume;
     expect(volume?.name).toBe("atmosphere aerial perspective");
   });
 
@@ -360,6 +363,184 @@ describe("HillaireAtmosphere", () => {
     expect(engine.dispatched).toHaveLength(3);
     // One absorber, the ozone, whose columns the composite's transmittance to space reads.
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 1, 0, 0]);
+  });
+});
+
+describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T9.a)", () => {
+  it("touches the terrain alone on the low setting: no volume is published, and only the composite over the given scene reads it", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.low, WGS84);
+    engine.dispatched.length = 0;
+    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const { aerial } = atmosphere.frameTables;
+    expect(atmosphere.aerialPerspective(CAMERA)).toBeNull();
+    // The frame's kernels write the volume and read none of it; the composite reads it over the
+    // scene it was given, the terrain's colour and depth, and nothing else.
+    for (const { bindings } of engine.dispatched) {
+      expect(Object.values(bindings.sampled)).not.toContain(aerial);
+    }
+    expect(draw.textures["aerial"]).toBe(aerial);
+    expect(draw.textures["sceneColour"]).toBe(SCENE.colour);
+    expect(draw.textures["sceneDepth"]).toBe(SCENE.depth);
+  });
+
+  it("publishes on the high setting the volume and the transmittance tables the frame's composite reads", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      EARTH_REFERENCE,
+      TABLE_SIZES.high,
+      WGS84,
+      EARTH_REFERENCE_CURVES,
+    );
+    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const published = atmosphere.aerialPerspective(CAMERA);
+    expect(published?.volume).toBe(draw.textures["aerial"]);
+    expect(published?.transmittance).toBe(draw.textures["transmittance"]);
+    expect(published?.absorberColumns).toBe(draw.textures["absorberColumns"]);
+    expect(published?.absorberCurves).toBe(draw.textures["absorberCurves"]);
+    expect(published?.size).toEqual({ widthTexels: 32, heightTexels: 32, slices: 32 });
+    expect(published?.reachM).toBe(32_000);
+    // The rebuilt Earth's ozone is its one absorber; the composite's own count agrees.
+    expect(published?.absorberCount).toBe(1);
+    expect(draw.uniforms["shell"]?.[1]).toBe(1);
+    expect(published?.bottomRadiusM).toBe(tableRadiusM(WGS84));
+    expect(published?.topHeightM).toBe(EARTH_REFERENCE.topHeightM);
+    expect(published?.scaleLx).toEqual(NOON.illuminanceLx);
+    expect(published?.lineSlots).toBe(0);
+  });
+
+  it("publishes the line slots' pressure columns and bitmask the composite reads (R08.T4.d)", async () => {
+    const engine = await countingRenderEngine();
+    const { medium, curves } = lineAbsorberMedium();
+    const atmosphere = new HillaireAtmosphere(engine, medium, TABLE_SIZES.high, WGS84, curves);
+    const draw = atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const published = atmosphere.aerialPerspective(CAMERA);
+    expect(published?.absorberPressureColumns).toBe(draw.textures["absorberPressureColumns"]);
+    expect(published?.lastAbsorberPressureColumn).toBe(draw.textures["lastAbsorberPressureColumn"]);
+    expect(published?.lineSlots).toBe(draw.uniforms["shell"]?.[2]);
+    expect(published?.lineSlots).toBe(2);
+  });
+
+  it.each(["high", "low"] as const)(
+    "gives skyView(view) the table drawFrame built this frame, with its read, on %s",
+    async (setting) => {
+      const engine = await countingRenderEngine();
+      const atmosphere = new HillaireAtmosphere(
+        engine,
+        R05_EARTH_REFERENCE,
+        TABLE_SIZES[setting],
+        WGS84,
+      );
+      atmosphere.drawFrame(CAMERA, NOON, SCENE);
+      const draw = atmosphere.drawFrame(CAMERA, DUSK, SCENE);
+      const sky = atmosphere.skyView(CAMERA);
+      expect(sky.texture).toBe(draw.textures["skyView"]);
+      expect(sky.texture).toBe(atmosphere.frameTables.skyView);
+      expect(sky.size).toEqual(TABLE_SIZES[setting].skyView);
+      // This frame's sun: its illuminance, and azimuth 0 towards it (dusk, along +y).
+      expect(sky.scaleLx).toEqual(DUSK.illuminanceLx);
+      expect(sky.azimuthOrigin.y).toBeCloseTo(1, 12);
+      const inputs = atmosphereInputs(CAMERA, WGS84);
+      expect(sky.zenith).toEqual(inputs.normal);
+      expect(sky.bottomRadiusM).toBeCloseTo(GAUSSIAN_RADIUS_M[0], 3);
+      expect(sky.heightM).toBe(skyViewHeight(inputs.heightM, R05_EARTH_REFERENCE.topHeightM));
+      const exact = viewExactOf(
+        CAMERA.positionM,
+        WGS84,
+        R05_EARTH_REFERENCE.topHeightM,
+        inputs,
+        DUSK.angularRadiusRad,
+      );
+      expect(sky.horizonAngleRad).toBe(exact.horizonAngleRad);
+      expect(draw.uniforms["exact"]?.[2]).toBe(Math.fround(sky.horizonAngleRad));
+    },
+  );
+
+  it("takes another object for the view drawFrame drew", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const copy: AtmosphereCamera = {
+      ...CAMERA,
+      positionM: { ...CAMERA.positionM },
+      orientation: { ...CAMERA.orientation },
+      viewport: { ...CAMERA.viewport },
+    };
+    expect(atmosphere.skyView(copy).texture).toBe(atmosphere.frameTables.skyView);
+    expect(atmosphere.aerialPerspective(copy)?.volume).toBe(atmosphere.frameTables.aerial);
+  });
+
+  it("refuses both before the first frame", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    expect(() => atmosphere.skyView(CAMERA)).toThrow(/no atmosphere frame/);
+    expect(() => atmosphere.aerialPerspective(CAMERA)).toThrow(/no atmosphere frame/);
+  });
+
+  it.each([
+    ["moved", { ...CAMERA, positionM: pointAt(0, 3) }],
+    ["turned", { ...CAMERA, orientation: quaternion(0, 0, 1, 0) }],
+    ["zoomed", { ...CAMERA, fovXRad: Math.PI / 3 }],
+    ["resized", { ...CAMERA, viewport: { widthPx: 64, heightPx: 33 } }],
+  ] as const)("refuses both for a view drawFrame did not draw: %s", async (_name, other) => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    expect(() => atmosphere.skyView(other)).toThrow(/another view/);
+    expect(() => atmosphere.aerialPerspective(other)).toThrow(/another view/);
+  });
+
+  it("refuses both after a device restore until the next frame", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    engine.restore();
+    expect(() => atmosphere.skyView(CAMERA)).toThrow(/no atmosphere frame/);
+    expect(() => atmosphere.aerialPerspective(CAMERA)).toThrow(/no atmosphere frame/);
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    expect(atmosphere.aerialPerspective(CAMERA)?.volume).toBe(atmosphere.frameTables.aerial);
+  });
+
+  it("refuses both after a new medium until the next frame, whose tables it may have remade", async () => {
+    const engine = await countingRenderEngine();
+    const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    const { medium, curves } = lineAbsorberMedium();
+    atmosphere.setMedium(medium, curves);
+    expect(() => atmosphere.skyView(CAMERA)).toThrow(/no atmosphere frame/);
+    expect(() => atmosphere.aerialPerspective(CAMERA)).toThrow(/no atmosphere frame/);
+    atmosphere.drawFrame(CAMERA, NOON, SCENE);
+    expect(atmosphere.aerialPerspective(CAMERA)?.lineSlots).toBe(2);
+  });
+
+  it("puts the sky view's azimuth 0 along the sun's horizontal direction, as view.wgsl's skyFrame", () => {
+    const zenith = { x: 1, y: 0, z: 0 };
+    const along = skyAzimuthOrigin(zenith, { x: 0.6, y: 0, z: 0.8 });
+    expect(along.x).toBeCloseTo(0, 15);
+    expect(along.z).toBeCloseTo(1, 15);
+    // The sun at the zenith: skyFrame's fallback axis, y where the zenith lies near x.
+    expect(skyAzimuthOrigin(zenith, zenith)).toEqual({ x: 0, y: 1, z: 0 });
+    expect(skyAzimuthOrigin({ x: 0, y: 0, z: 1 }, { x: 0, y: 0, z: -1 })).toEqual({
+      x: 1,
+      y: 0,
+      z: 0,
+    });
+    expect(viewWgsl).toMatch(
+      /select\(vec3f\(1\.0, 0\.0, 0\.0\), vec3f\(0\.0, 1\.0, 0\.0\), abs\(z\.x\) > 0\.9\)/u,
+    );
+  });
+
+  it("reads the volume in the composite through the one read other passes take", () => {
+    const code = wgslCode(COMPOSITE_MATERIAL.fragmentWgsl);
+    expect(code).toContain(wgslCode(aerialReadWgsl));
+    expect(wgslCode(compositeWgsl)).toMatch(
+      /aerialPerspectiveAt\(aerial, linearClamp, uv, distance, reach\)/u,
+    );
+    // The composite no longer forms its own slice coordinate: the read alone maps the volume.
+    expect(wgslCode(compositeWgsl)).not.toMatch(/0\.5 \/ slices/u);
+    expect(wgslCode(aerialReadWgsl)).toMatch(/distanceM \/ reachM - 0\.5 \/ slices/u);
+    expect(wgslCode(aerialReadWgsl)).toMatch(/texelUvFromUnit\(uv, vec2f\(size\.xy\)\)/u);
   });
 });
 

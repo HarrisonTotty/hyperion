@@ -20,7 +20,9 @@
 // (the Sun beyond about 13 au) and whose builtin cos WGSL bounds only to 2^-11; every table is read
 // through Bruneton's texel mapping (Design note 19), the aerial volume's screen axes included.
 // Changes (plan R08, R08.T6.c, Design notes 5 and 8): the transmittance to space is the table's
-// optical depth with the sun's curves of growth, exponentiated here.
+// optical depth with the sun's curves of growth, exponentiated here. Changes (plan R08, R08.T9.a):
+// the volume's read moved, unchanged, to `aerialRead.wgsl`, which follows `view.wgsl` here and
+// which other readers of the volume take.
 
 struct Draw {
   offsetFromCameraM : vec3f,
@@ -180,20 +182,11 @@ fn fragmentMain(@builtin(position) position : vec4f) -> @location(0) vec4f {
 
   let distance = distanceAtDepth(v, uv, depth);
   let reach = v.tables.y;
+  // Within the volume's reach, the volume, through the read every reader of it takes
+  // (`aerialRead.wgsl`, R08.T9.a); beyond it, and from above the air, the ray march.
   if (distance <= reach && !aboveTop) {
-    let slices = v.tables.z;
-    // The slice axis is Bruneton's mapping already: slice k holds the march to (k + 1) reach /
-    // slices, so the unit (slices distance / reach - 1) / (slices - 1) reads at this w. The
-    // screen axes take it here, the froxels standing at (i, j) / (size - 1) of the screen.
-    let w = clamp(distance / reach - 0.5 / slices, 0.0, 1.0);
-    let aerialSize = vec2f(textureDimensions(aerial).xy);
-    let screen = texelUvFromUnit(uv, aerialSize);
-    let sampled = textureSampleLevel(aerial, linearClamp, vec3f(screen, w), 0.0);
-    // Within the first slice, fade from the camera, where nothing has scattered yet.
-    let fade = clamp(distance / (reach / slices), 0.0, 1.0);
-    let inscattered = sampled.rgb * fade;
-    let meanTransmittance = mix(1.0, sampled.a, fade);
-    let luminance = colour * meanTransmittance + inscattered * v.skyScale.rgb * exposure;
+    let aerialAt = aerialPerspectiveAt(aerial, linearClamp, uv, distance, reach);
+    let luminance = colour * aerialAt.a + aerialAt.rgb * v.skyScale.rgb * exposure;
     return vec4f(min(luminance, vec3f(HALF_MAX)), 1.0);
   }
   let marched = rayMarched(pixel, depth);

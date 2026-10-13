@@ -438,11 +438,14 @@ module R12 reads for this plan's ladder entries.
     the transmittance table to R11, the table as its 2D array texture of κ slices, read through
     `oblate.wgsl`'s slice lookup, with `absorberColumns` and `absorberCurves` beside it and,
     since R08.T4.d, `absorberPressureColumns` and `lastAbsorberPressureColumn` and the medium's
-    line-slot bitmask, which `transmittanceThroughTables` reads with it;
+    line-slot bitmask, which `transmittanceThroughTables` reads with it. As built (R08.T9.a) it
+    returns `AerialPerspective | null`, `null` on the `terrain` scope, and the volume is read
+    through `shaders/aerialRead.wgsl`'s `aerialPerspectiveAt`, the composite's own read;
   - `skyView(view): SkyViewTable` exposes the view's sky-view table (R05's `frameTables.skyView`),
     the sky's radiance by local azimuth and elevation summed over the drawn suns, for R11's sky
-    reflection in the ocean. If R08.T7's check forces the per-sun fallback, it returns the per-sun
-    tables with their suns instead, in a field of the same type.
+    reflection in the ocean, with what its read takes (R08.T9.a). If R08.T7's check forces the
+    per-sun fallback, it returns the per-sun tables with their suns instead, in a field of the same
+    type.
 - `TABLE_SIZES: Record<QualitySetting, TableSizes>` is R05's, kept. The thick table's size is
   added.
 
@@ -6783,6 +6786,174 @@ generator, and the reference's sampling needs no domain tag.
     - The development machine was never quiet (the slow pass's B part held the heavy lock, at a
       1-minute load of 20–40). So the passes' times beside T6.g's wait with T6.g's, by the same
       run. R08.T11 holds them, and the UHD 620's are the owner's.
+
+- **Deviations in T9.a, as built** (2026-10-13). `settings.ts` (new), `hillaire.ts`,
+  `shaders/aerialRead.wgsl` (new) and `shaders/composite.wgsl`; tests in `settings.test.ts` and
+  `aerialPerspective.test.ts` (new) and `hillaire.test.ts`.
+  - _Names beyond the text._ `settings.ts`: `AerialPerspectiveScope`. `hillaire.ts`:
+    `AerialPerspective`, `SkyViewTable` and `skyAzimuthOrigin`. WGSL: `aerialPerspectiveAt`
+    (`aerialRead.wgsl`). R05's `aerialPerspectiveVolume()` is removed; nothing called it but its
+    test.
+  - _`settings.ts`_ is new here and holds `AERIAL_PERSPECTIVE_SCOPE` alone. It reads `TABLE_SIZES`
+    from `hillaire.ts`, which is `SETTINGS[s].atmosphere` (tested), and imports only a type from
+    `qualitySetting.ts`. So `qualitySetting.ts` can import it for R08.T7's `atmosphereView` without
+    a cycle. R08.T7, built in parallel, adds the rest of the module's Provides; the two lanes'
+    files meet as an add/add merge.
+  - _The scope, as built._ The composite is the same on both settings. It lays aerial perspective
+    over every opaque surface of the `AtmosphereScene` it is given: through the volume within the
+    reach and the ray march beyond it, as R05 built it. The scope decides what that scene holds and
+    who else takes it:
+    - `terrain` (low): the scene is the terrain alone, as R05's spike draws it and R10.T10.b's lit
+      terrain is drawn. `aerialPerspective(view)` is `null`, so no other pass can take it.
+    - `scene` (high): every opaque pass drawn into the scene's target before the composite takes it
+      there. `aerialPerspective(view)` publishes the volume and the tables for the passes the
+      composite does not cover (R11's, drawn after it).
+    - _For R08.T10.b_ (the photorealistic view's passes; a specification question, raised with
+      "main" for a decision agent). R07's mesh bodies and R10's terrain share the scene target's
+      depth. On low the composite would also lay the march over a mesh body there, which is the sky
+      in front of it. That reads the brainstorm's low row, "aerial perspective on terrain only", as
+      the passes after the composite taking none. Lean: keep it, since a body seen through the air
+      without it would stand undimmed against the sky.
+    - _For R11_ (raised with R11's re-validation, as T6.c's note is). A pass drawn after the
+      composite takes the volume within its reach only. Beyond the reach the march serves the
+      scene's own depth alone: `aerialPerspectiveAt` holds the last slice there, about T 0.6 in
+      blue where a cloud deck 100 km away from 10 km sees about 0.22 (the science check). So an
+      opaque surface past the reach, R11's far ocean among them, is drawn into the scene before the
+      composite, or a later task publishes more: a per-sample march, a segment read of the
+      published transmittance tables, or a stated limit. On low `aerialPerspective(view)` is
+      `null`.
+  - _`view`._ `aerialPerspective(view)` and `skyView(view)` take the `AtmosphereCamera` that
+    `drawFrame` takes. They return what the latest `drawFrame` built for an equal camera (the same
+    position, orientation, field of view and viewport; another object for it serves).
+    - They throw before the first frame, after a device restore or a `setMedium` until the next
+      frame, and for another view: each is a caller's bug that would read another view's tables,
+      released ones (a new medium may remake them) or none.
+    - `HillaireAtmosphere` is one view's, holding one set of per-frame tables. R08.T10.a's
+      `AtmosphereCache` moves the per-planet tables out and keeps it so. The kernel arm publishes
+      nothing.
+  - _`AerialPerspective`_ carries:
+    - the volume, its size and reach;
+    - `scaleLx`, the per-channel factor that turns its rgb into luminance. It is the sun's
+      illuminance (R08.T6.d) until R08.T7 makes it the frame's scale (`decision-r08-t6b-floor.md`
+      §6).
+    - the transmittance table, with `absorberColumns` and `absorberCurves` beside it, as T6.c's
+      note for T9.a and R11 asks, and R08.T4.d's `absorberPressureColumns` and
+      `lastAbsorberPressureColumn` (merged in after T4.d landed);
+    - `absorberCount`, `lineSlots` (T4.d's `lineSlotMask`), `bottomRadiusM` (R₁) and
+      `topHeightM`, which `transmittanceUnitAt` and `transmittanceThroughTables` take, as the
+      composite's `transmittanceToSpace` does.
+
+    The table is one κ slice until R08.T6.f, which widens this type with what `oblate.wgsl`'s
+    slice lookup takes.
+
+  - _`SkyViewTable`_ carries:
+    - the table, its size and `scaleLx`;
+    - what sebh's read takes: the zenith (the datum's normal under the camera) and the azimuth's
+      origin (`view.wgsl`'s `skyFrame` x, the sun's horizontal direction, with its fallback at
+      the zenith; `skyAzimuthOrigin`);
+    - the sphere's √(MN), the camera's `skyViewHeight` on it, and β (`ViewExact.horizonAngleRad`).
+
+    R08.T7's summed table, indexed by local azimuth, moves the origin; its per-sun fallback widens
+    this type.
+
+  - _The read._ `aerialRead.wgsl`'s `aerialPerspectiveAt(volume, sampler, uv, distanceM, reachM)`
+    is the composite's read of the volume, moved unchanged. It follows `common.wgsl`
+    (`texelUvFromUnit`); the composite takes it after `view.wgsl`, and any pass that reads the
+    published volume takes it, as R11's Consumes asks ("through R08's lookups"). It returns the
+    in-scattered rgb per unit of the scale and the mean transmittance, faded in the first slice
+    (Bevy's fade, its `sample_aerial_view_lut`, by the science check; not sebh's, which fades over
+    half of his 4 km slices). One difference: `slices` is now the texture's depth, not
+    `view.tables.z`. The two are equal, since the texture is made at
+    `sizes.aerialPerspective.slices`.
+  - _The far edge_ (`aerialPerspective.test.ts`, the twin). The volume's last slice, which the
+    composite reads at a surface at the reach (its centre, w = 1 − ½ ÷ slices), is held against
+    `rayMarchTexelTwin` along the same froxel's ray to a surface at 32 km. The cases:
+    - the measured Earth and the slab Earth (layer edges, which the march cuts and the volume does
+      not);
+    - both settings;
+    - cameras at 2 m, 2 km and 20 km over the equator, at 60° and 16:9;
+    - the sun 20° up ahead and 5° up behind;
+    - every froxel whose ray reaches 32 km clear of the ground, 512–1,024 a view.
+
+    Worst relative differences, in-scattering (L) and mean transmittance (T), asserted under 2%:
+
+    | Medium             | High, L | High, T | Low, L | Low, T |
+    | ------------------ | ------- | ------- | ------ | ------ |
+    | The measured Earth | 0.059%  | 0.030%  | 0.251% | 0.117% |
+    | The slab Earth     | 0.069%  | 0.059%  | 0.251% | 0.130% |
+
+    A scratch run at 127° × 90° (the twin tests' `equatorCamera`), from 2 m to 30 km and four suns,
+    found at most 0.86% (the slab, low, 2 m).
+
+    - _The reading._ The test reads the task's "a point at the volume's far edge" as a froxel's
+      ray, where volume and march sample one ray. Between froxels the composite's bilinear read of
+      the volume misses 2%: up to 3.0% at 60° and 16:9, and 10.4% at 127° × 90° (the scratch run,
+      not asserted; "Deferred findings (2026-10-13 rule)" below). Whether the task means every
+      pixel is raised with "main"; if it does, the volume needs more rows or a horizon-aware row
+      mapping, and the by-hand descent shows whether the seam is seen.
+
+  - _Not done._ No smoke group is added: the composite's read is moved, not changed, and the
+    smoke's composite checks and captures hold it (`just test-render`, in the gate). No GPU object
+    is added, and nothing is allocated per frame on the GPU. `TABLE_SIZES` and every count are
+    unchanged.
+  - _By hand, pending_ (the acceptance's). The task asks for R05's descent to show fog continuous
+    through 32 km, recorded with the pass's time. That is a timed Electron run under both locks,
+    which a lane may not start while the heavy lock's rules hold (common.md, 2026-10-13). It is
+    left to "main" or the owner, by T6.d's options with the window hidden, then again with
+    `--setting low`:
+
+    ```sh
+    descentSpike.sh --hidden --setting high --seed 7 --workers 3 --ridged off --dawn-safety on \
+      --trace-profile off --vertex-path baked-offsets --normals double
+    ```
+
+    Compare against `2026-10-07-effect-high`, and look for a seam at the 32 km contour near the
+    horizon (see the deferred finding).
+
+  - _The gate_ (smart-ci at merge-base e62bf99e). Prettier; tsc from a clean cache; oxlint; the
+    smoke build; vitest's 114 files that reach the change (2,819 tests, 200 s at 4 workers); and
+    `just test-render` under the lock, held 214 s. Every one of its 1,298 checks passes on both
+    variants, with no uncaptured GPU error. The parts, default and `no-subgroups`, at a 1-minute
+    load of about 16 to 17: part 1 84.1 and 83.3 s, part 2 61.4 and 61.2 s, part 3 65.6 and
+    65.4 s. Reviewed by the TypeScript, plan-conformance and science reviewers; their fixes are in.
+
+- **Deferred findings (2026-10-13 rule)** (R08.T9.a). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The volume's screen-space read near the horizon._ Midway between four froxels at the far
+    edge, the composite's bilinear read of the volume's last slice differs from the march along that
+    pixel's ray.
+    - At 60° and 16:9 it differs by up to 3.0%: the horizon row from 2 m, the sun 5° up ahead,
+      blue. From 2 km it is up to 1.0%, and from 10 km up to 0.7%.
+    - At 127° × 90° it differs by up to 10.4%.
+    - The volume's 32 rows sample the in-scattering's steep change with elevation at the horizon
+      coarsely. Rays below it march on through the ground at the ground's density, since heights
+      clamp at 0.
+    - So the switch at 32 km may show a seam along the 32 km contour near the horizon, at wide
+      fields of view. A blend over the last slice would not hide it: at grazing angles 1 km of
+      distance spans under a pixel.
+    - Lean: the by-hand descent decides whether it shows. If it does, R08.T11 (which runs the
+      descent and changes `TABLE_SIZES` where a setting misses) weighs more volume rows or a
+      horizon-aware row mapping.
+  - _The volume's transmittance is grey._ The volume and the march store the channels' mean
+    transmittance (Hillaire 2020, §5.4: "the mean of the wavelength dependent RGB transmittance";
+    sebh's code alike), and the composite dims the surface by it.
+    - On the measured Earth 2 m above the ground, 5 km of air passes 0.691, 0.617 and 0.487 in red,
+      green and blue (the twin, 4,096 steps), against a mean of 0.599. The surface's own light is
+      then 13% too dim in red and 23% too bright in blue. At 32 km (0.099, 0.048 and 0.011) the
+      in-scattering dominates.
+    - That is R05's choice, kept. A chromatic transmittance needs a second volume (262 KB) or
+      Bevy's read of the transmittance table.
+    - Lean: R08.T11, with the descent's pictures.
+  - _A fixed 32 km reach on dense atmospheres_ (the science check). Hillaire 2020, §5.4, shortens
+    the volume's range for a dense atmosphere. At a Venus-class surface blue τ is about 2.6 a km,
+    so the first slice's linear fade gives T ≈ 0.72 at 300 m where the true value is about 0.46.
+    Lean: a per-medium reach, weighed by R08.T11 or with the thick path (R08.T14).
+  - _R05's citations of Hillaire 2020_ (the science check; outside T9.a's diff). The kernels'
+    headers number his sections one low: `skyView.wgsl` cites §5.2 (the sky view is §5.3),
+    `aerialPerspective.wgsl` §5.3 (§5.4), `transmittance.wgsl` §4 (§5.2), and `rayMarch.wgsl` §5.4,
+    while his march is the from-space one of §7 and nothing of his marches past the reach. Design
+    note 11 says the 32 km comes from "Hillaire's code" and Table 2; his code spans 128 km in
+    squared slices, Table 2 gives no range, and the 32 km is §5.4's. A docs pass corrects them.
 
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7).

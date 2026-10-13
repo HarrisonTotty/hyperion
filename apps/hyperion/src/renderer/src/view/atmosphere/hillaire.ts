@@ -25,9 +25,21 @@
  * the medium's layer edges, the tables' `layerEdges` (plan R08, R08.T6.i; `tables.ts`'s
  * `packLayerEdges`), at the same counts; on a medium with none their steps are R05.T12.e's. The
  * aerial perspective keeps its even steps.
+ *
+ * Aerial perspective (plan R08, R08.T9.a). The composite lays it over every opaque surface of the
+ * scene it is given, through the volume within its 32 km reach and the ray march beyond it. Along
+ * the froxels' own rays the march's in-scattering agrees with the volume's to 2% at the volume's
+ * far edge (`aerialPerspective.test.ts`); between froxels the volume's bilinear read near the
+ * horizon misses it by up to 3.0% at 60° across, and 10.4% at 127° (plan R08's Risks, deferred).
+ * Where it applies is the setting's `aerialPerspectiveScope` (`settings.ts`'s
+ * `AERIAL_PERSPECTIVE_SCOPE`): on `terrain` (low) the scene is the terrain alone and nothing else
+ * takes it; on `scene` (high) every opaque pass drawn into the scene before the composite takes it
+ * there, and {@link HillaireAtmosphere.aerialPerspective} publishes the volume and the
+ * transmittance tables for the passes the composite does not cover. {@link HillaireAtmosphere.skyView}
+ * publishes the frame's sky-view table on both.
  */
 
-import type { Vec3 } from "../../geometry/vec3";
+import { dot, normalise, scale as scaled, sub, type Vec3 } from "../../geometry/vec3";
 import type { Quaternion } from "../camera/pose";
 import { rotate } from "../camera/quaternion";
 import { TEXTURE_USAGE } from "../engine/gpuFlags";
@@ -48,6 +60,7 @@ import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import type { AtmosphereMedium } from "./medium";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
+import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
 import compositeWgsl from "./shaders/composite.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
@@ -97,9 +110,11 @@ export interface TableSizes {
   /** Steps along each ray of the per-pixel ray march. */
   readonly rayMarchSamples: number;
   /**
-   * Where aerial perspective applies: `scene`, whose volume other passes may sample
-   * ({@link HillaireAtmosphere.aerialPerspectiveVolume}); or `terrain`, the low setting's, applied in
-   * the one deferred pass to the terrain alone (the budget's "aerial perspective on terrain only").
+   * Where aerial perspective applies (plan R08, Design note 11, R08.T9.a; projected as `settings.ts`'s
+   * `AERIAL_PERSPECTIVE_SCOPE`): `scene`, the high setting's, over everything opaque, the composite
+   * over the opaque passes drawn before it and the volume published to the rest
+   * ({@link HillaireAtmosphere.aerialPerspective}); or `terrain`, the low setting's, applied in the
+   * one deferred composite to the terrain alone (the budget's "aerial perspective on terrain only").
    */
   readonly aerialPerspectiveScope: "scene" | "terrain";
 }
@@ -386,8 +401,11 @@ const VIEW_MEMBERS = [
   "exact",
 ] as const;
 
-/** The composite's WGSL: `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `view.wgsl`, then its own. */
-const COMPOSITE_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${compositeWgsl}`;
+/**
+ * The composite's WGSL: `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `view.wgsl`, the volume's
+ * read (`aerialRead.wgsl`, R08.T9.a), then its own.
+ */
+const COMPOSITE_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${aerialReadWgsl}\n${compositeWgsl}`;
 
 /** The composite: a full-screen draw of pre-exposed luminance over the terrain target. */
 export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
@@ -418,7 +436,13 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
   blend: "none",
 };
 
-/** What the atmosphere is laid over: the terrain target's colour and reversed-Z depth. */
+/**
+ * What the atmosphere is laid over: the colour and reversed-Z depth of the opaque surfaces aerial
+ * perspective applies to (R08.T9.a). On the `terrain` scope that is the terrain alone, as R05's
+ * spike draws it and R10's lit terrain is drawn (R10.T10.b); on `scene`, every opaque pass drawn
+ * into the target before the composite, with its depth. Where the depth is 0 the composite draws
+ * the sky.
+ */
 export interface AtmosphereScene {
   readonly colour: TextureHandle;
   readonly depth: TextureHandle;
@@ -443,6 +467,153 @@ export interface FrameOutputs {
   readonly skyView: TextureHandle;
   readonly aerial: TextureHandle;
   readonly rayMarch: TextureHandle;
+}
+
+/**
+ * A view's aerial perspective as a pass other than the composite reads it (plan R08, R08.T9.a): what
+ * {@link HillaireAtmosphere.aerialPerspective} publishes on the `scene` scope.
+ *
+ * @remarks
+ * The volume is read through `shaders/aerialRead.wgsl`'s `aerialPerspectiveAt(volume, sampler,
+ * uv, distanceM, reachM)` at a surface within `reachM`. That gives the light in front of the surface
+ * per unit of {@link AerialPerspective.scaleLx} and its mean transmittance, so that a pass lays
+ * `colour × a + rgb × scaleLx × exposure` over its own colour as the composite does; beyond the
+ * reach the composite's ray march serves the scene's own depth. The transmittance tables are read
+ * together, through `common.wgsl`'s `transmittanceUnitAt` and `transmittanceThroughTables` at the
+ * light's curve slot (R08.T6.c) with the line slots' pressure columns (R08.T4.d), every lookup at a
+ * height above the datum and a cosine against its normal (Design note 18), as the composite's
+ * `transmittanceToSpace` reads them. Until R08.T6.f the transmittance table is one κ slice; T6.f
+ * widens this type with what `oblate.wgsl`'s slice lookup takes.
+ *
+ * The volume serves a reader within its reach only. A pass drawn after the composite has no march
+ * beyond it, so an opaque surface past the reach is drawn into the scene before the composite, or
+ * a later task publishes more (plan R08's Risks, "For R11").
+ */
+export interface AerialPerspective {
+  /**
+   * The volume, `rgba16float`, 3D: at each froxel's slice the light scattered into the ray from the
+   * camera to the slice's far face (rgb, per unit of {@link AerialPerspective.scaleLx}) and the
+   * ray's mean transmittance over the channels (a), froxel (i, j) on the ray through the screen at
+   * (i, j) ÷ (size − 1), slice k reaching (k + 1) reach ÷ slices.
+   */
+  readonly volume: TextureHandle;
+  readonly size: VolumeSize;
+  /** The volume's reach, m. */
+  readonly reachM: number;
+  /**
+   * The factor per linear Rec. 709 channel, lx, that turns the volume's rgb into luminance,
+   * cd m⁻², before pre-exposure: the drawn sun's illuminance at the body (R08.T6.d), which R08.T7
+   * makes the frame's scale.
+   */
+  readonly scaleLx: Rgb;
+  /**
+   * The per-planet transmittance table (`tables.ts`): the optical depth of every term but the
+   * absorbers in rgb, and absorber slot 0's column u ÷ U in alpha (R08.T6.c).
+   */
+  readonly transmittance: TextureHandle;
+  /** Absorber slots 1–4's columns u ÷ U, beside the transmittance table. */
+  readonly absorberColumns: TextureHandle;
+  /**
+   * The line slots' pressure-weighted columns per (r, μ) to the top, pressure channels 0 to 3 in
+   * rgba (R08.T4.d).
+   */
+  readonly absorberPressureColumns: TextureHandle;
+  /** Pressure channel 4's pressure-weighted column in r, one texel for a medium with fewer slots. */
+  readonly lastAbsorberPressureColumn: TextureHandle;
+  /**
+   * The lights' curves of growth, `rgba32float`, read by `textureLoad`; light slot 0 is the drawn
+   * sun's.
+   */
+  readonly absorberCurves: TextureHandle;
+  /** How many of the medium's terms are absorbers: `transmittanceThroughTables`'s `count`. */
+  readonly absorberCount: number;
+  /**
+   * The medium's line slots, bit k for absorber slot k (`tables.ts`'s `lineSlotMask`):
+   * `transmittanceThroughTables`'s `lines`, from which it takes each slot's pressure channel.
+   */
+  readonly lineSlots: number;
+  /** The per-planet tables' ground, R₁ = (2a + c) ÷ 3 ({@link tableRadiusM}), m. */
+  readonly bottomRadiusM: number;
+  /** The atmosphere's height above the datum, m. */
+  readonly topHeightM: number;
+}
+
+/**
+ * A view's sky-view table with what reads it (plan R08, R08.T9.a): what
+ * {@link HillaireAtmosphere.skyView} publishes, for R11's sky reflected in the ocean.
+ *
+ * @remarks
+ * The table holds the sky's radiance per unit of {@link SkyViewTable.scaleLx} by sebh's
+ * parameterisation on the camera's own sphere. A direction d is read at `view.wgsl`'s
+ * `skyViewParamsToUv(groundHitFromHeight(bottomRadiusM, heightM, d · zenith),
+ * preciseAtan2(|d × zenith|, d · zenith), |ĥ − azimuthOrigin| ÷ 2, size, horizonAngleRad)`, ĥ its
+ * unit horizontal direction, through Bruneton's texel mapping (Design note 19). It is the one sun's
+ * table until R08.T7, which sums the drawn suns (Design note 7) and, should its check force the
+ * per-sun fallback, gives this type the per-sun tables with their suns.
+ */
+export interface SkyViewTable {
+  /** The table, `rgba16float`, 2D, rgb the radiance per unit of {@link SkyViewTable.scaleLx}. */
+  readonly texture: TextureHandle;
+  readonly size: TableSize;
+  /** The factor per channel, lx, that turns the table's rgb into luminance, cd m⁻². */
+  readonly scaleLx: Rgb;
+  /** The table's zenith: the datum's outward normal under the camera, body-fixed. */
+  readonly zenith: Vec3;
+  /**
+   * The unit horizontal direction, body-fixed, of azimuth 0: towards the sun's azimuth, as
+   * `view.wgsl`'s `skyFrame` takes it ({@link skyAzimuthOrigin}).
+   */
+  readonly azimuthOrigin: Vec3;
+  /** The sphere the table is built on: the camera's Gaussian radius √(MN), m. */
+  readonly bottomRadiusM: number;
+  /** The camera's height on that sphere, m, kept 1 m inside the shell ({@link skyViewHeight}). */
+  readonly heightM: number;
+  /** β, the angle from the nadir to the horizon there, rad ({@link ViewExact.horizonAngleRad}). */
+  readonly horizonAngleRad: number;
+}
+
+/**
+ * What the latest frame published: its view, and the tables {@link HillaireAtmosphere.drawFrame}
+ * built for it.
+ */
+interface DrawnFrame {
+  readonly view: AtmosphereCamera;
+  readonly aerial: AerialPerspective;
+  readonly skyView: SkyViewTable;
+}
+
+/** Whether two cameras are one view: the same position, orientation, field of view and size. */
+function sameView(a: AtmosphereCamera, b: AtmosphereCamera): boolean {
+  const p = a.positionM;
+  const q = b.positionM;
+  const r = a.orientation;
+  const s = b.orientation;
+  return (
+    p.x === q.x &&
+    p.y === q.y &&
+    p.z === q.z &&
+    r.w === s.w &&
+    r.x === s.x &&
+    r.y === s.y &&
+    r.z === s.z &&
+    a.fovXRad === b.fovXRad &&
+    a.viewport.widthPx === b.viewport.widthPx &&
+    a.viewport.heightPx === b.viewport.heightPx
+  );
+}
+
+/**
+ * The sky view's azimuth 0, `view.wgsl`'s `skyFrame` x: the sun's direction made horizontal
+ * against `zenith` and normalised, or, with the sun at the zenith or the nadir, the body-fixed x
+ * axis (y where the zenith lies near x) made so.
+ */
+export function skyAzimuthOrigin(zenith: Vec3, sun: Vec3): Vec3 {
+  let x = sub(sun, scaled(zenith, dot(sun, zenith)));
+  if (dot(x, x) < 1e-12) {
+    const axis: Vec3 = Math.abs(zenith.x) > 0.9 ? { x: 0, y: 1, z: 0 } : { x: 1, y: 0, z: 0 };
+    x = sub(axis, scaled(zenith, dot(axis, zenith)));
+  }
+  return normalise(x);
 }
 
 /** The per-frame GPU objects of one device. */
@@ -567,6 +738,11 @@ export class HillaireAtmosphere {
   #arm: KernelArmResources | null = null;
   /** Each view member's four floats, reused every frame. */
   readonly #uniforms: Record<string, Float32Array>;
+  /**
+   * What the latest frame published: `null` before it, and once a restore remakes the frame or a
+   * medium is set, until the next.
+   */
+  #drawn: DrawnFrame | null = null;
 
   /**
    * Makes the tables and the per-frame resources for `medium` on `figure`.
@@ -593,6 +769,7 @@ export class HillaireAtmosphere {
     this.#offRestored = engine.onRestored(() => {
       this.#frame = createFrameResources(engine, tables);
       this.#arm = null;
+      this.#drawn = null;
     });
   }
 
@@ -620,22 +797,60 @@ export class HillaireAtmosphere {
   }
 
   /**
-   * The aerial-perspective volume for other passes to sample, or `null` on a setting that applies
-   * aerial perspective to the terrain alone.
+   * The aerial perspective {@link HillaireAtmosphere.drawFrame} built for `view` this frame, for the
+   * passes the composite does not cover (R08.T9.a): on the `scene` scope (high) the volume and the
+   * transmittance tables; on `terrain` (low) `null`, the one deferred composite applying it to the
+   * terrain alone. Widens R05's `aerialPerspectiveVolume()`.
+   *
+   * @throws Error, on the `scene` scope, if the latest frame was not drawn for `view` (the same
+   *   position, orientation, field of view and size), or none has been since the frame's resources
+   *   were made or the medium was set: a caller's bug, which would read another view's tables,
+   *   released ones or none.
    */
-  aerialPerspectiveVolume(): TextureHandle | null {
-    return this.#sizes.aerialPerspectiveScope === "scene" ? this.#frame.aerial : null;
+  aerialPerspective(view: AtmosphereCamera): AerialPerspective | null {
+    if (this.#sizes.aerialPerspectiveScope === "terrain") {
+      return null;
+    }
+    return this.#drawnFor(view).aerial;
+  }
+
+  /**
+   * The sky-view table {@link HillaireAtmosphere.drawFrame} built for `view` this frame, with what
+   * reads it (R08.T9.a), on both settings: for R11's sky reflected in the ocean.
+   *
+   * @throws Error if the latest frame was not drawn for `view`, as
+   *   {@link HillaireAtmosphere.aerialPerspective} does.
+   */
+  skyView(view: AtmosphereCamera): SkyViewTable {
+    return this.#drawnFor(view).skyView;
+  }
+
+  /** The latest frame's publication, if it was drawn for `view`. */
+  #drawnFor(view: AtmosphereCamera): DrawnFrame {
+    const drawn = this.#drawn;
+    if (drawn === null) {
+      throw new Error(
+        "no atmosphere frame has been drawn since its tables were made or its medium was set",
+      );
+    }
+    if (!sameView(drawn.view, view)) {
+      throw new Error("the latest atmosphere frame was drawn for another view");
+    }
+    return drawn;
   }
 
   /**
    * Rebuilds the per-planet tables for a new medium, or new curves of growth for its absorbers; the
    * sun's moving never does. The frames draw the medium the tables follow
-   * ({@link AtmosphereTables.medium}), so a medium they refuse is not drawn.
+   * ({@link AtmosphereTables.medium}), so a medium they refuse is not drawn. The latest frame's
+   * publication ({@link HillaireAtmosphere.aerialPerspective}, {@link HillaireAtmosphere.skyView})
+   * is withdrawn until the next frame, since its tables may have been remade.
    *
    * @param curves - Each light's curves for the medium's absorbers, light slot 0 the drawn sun's.
    * @throws Error, RangeError or `EngineUnavailable` as {@link AtmosphereTables.setMedium}.
    */
   setMedium(medium: AtmosphereMedium, curves: AbsorberCurveSlots = NO_ABSORBER_CURVES): void {
+    this.#drawn = null;
     this.#tables.setMedium(medium, tableRadiusM(this.#figure), curves);
   }
 
@@ -646,13 +861,14 @@ export class HillaireAtmosphere {
   drawFrame(view: AtmosphereCamera, sun: SunState, scene: AtmosphereScene): DrawItem {
     const frame = this.#frame;
     const rayMarch = this.#rayMarchTexture(view.viewport);
-    this.#dispatchFrame(
+    const { inputs, exact } = this.#dispatchFrame(
       frame.kernels,
       { skyView: frame.skyView, aerial: frame.aerial, rayMarch },
       view,
       sun,
       scene,
     );
+    this.#drawn = this.#published(view, sun, inputs, exact);
     return {
       mesh: frame.triangle,
       material: frame.composite,
@@ -732,20 +948,65 @@ export class HillaireAtmosphere {
     }
   }
 
-  /** Fills the view's uniform for this frame and dispatches the three per-frame kernels. */
+  /** What a frame publishes for `view` (R08.T9.a): its volume, its sky view and their tables. */
+  #published(
+    view: AtmosphereCamera,
+    sun: SunState,
+    inputs: AtmosphereInputs,
+    exact: ViewExact,
+  ): DrawnFrame {
+    const frame = this.#frame;
+    const sizes = this.#sizes;
+    const tables = this.#tables;
+    const medium = tables.medium;
+    return {
+      view,
+      aerial: {
+        volume: frame.aerial,
+        size: sizes.aerialPerspective,
+        reachM: sizes.aerialPerspectiveReachM,
+        scaleLx: sun.illuminanceLx,
+        transmittance: tables.transmittance,
+        absorberColumns: tables.absorberColumns,
+        absorberPressureColumns: tables.absorberPressureColumns,
+        lastAbsorberPressureColumn: tables.lastAbsorberPressureColumn,
+        absorberCurves: tables.absorberCurves,
+        absorberCount: absorberCount(medium),
+        lineSlots: lineSlotMask(medium),
+        bottomRadiusM: tableRadiusM(this.#figure),
+        topHeightM: medium.topHeightM,
+      },
+      skyView: {
+        texture: frame.skyView,
+        size: sizes.skyView,
+        scaleLx: sun.illuminanceLx,
+        zenith: inputs.normal,
+        azimuthOrigin: skyAzimuthOrigin(inputs.normal, sun.directionBodyFixed),
+        bottomRadiusM: inputs.radiusM - inputs.heightM,
+        heightM: skyViewHeight(inputs.heightM, medium.topHeightM),
+        horizonAngleRad: exact.horizonAngleRad,
+      },
+    };
+  }
+
+  /**
+   * Fills the view's uniform for this frame and dispatches the three per-frame kernels.
+   *
+   * @returns The camera's lookup inputs, and what was formed for it in `f64`.
+   */
   #dispatchFrame(
     kernels: FrameKernels,
     outputs: FrameOutputs,
     view: AtmosphereCamera,
     sun: SunState,
     scene: AtmosphereScene,
-  ): void {
+  ): { readonly inputs: AtmosphereInputs; readonly exact: ViewExact } {
     const engine = this.#engine;
     const sizes = this.#sizes;
     const inputs = atmosphereInputs(view, this.#figure);
     const tables = this.#tables;
     const medium = tables.medium;
-    this.#fillView(view, sun, scene, inputs, medium);
+    const exact = this.#fillView(view, sun, scene, inputs, medium);
     const perFrameMedium = packMediumUniform(medium, inputs.radiusM - inputs.heightM, 1);
     const common = {
       buffers: { terms: tables.terms },
@@ -795,6 +1056,7 @@ export class HillaireAtmosphere {
       ),
       "atmosphere view",
     );
+    return { inputs, exact };
   }
 
   /**
@@ -847,7 +1109,7 @@ export class HillaireAtmosphere {
     scene: AtmosphereScene,
     inputs: AtmosphereInputs,
     medium: AtmosphereMedium,
-  ): void {
+  ): ViewExact {
     const set = (name: string, values: readonly [number, number, number, number]): void => {
       this.#uniforms[name]?.set(values);
     };
@@ -906,5 +1168,6 @@ export class HillaireAtmosphere {
     // medium's terms are absorbers, whose columns its transmittance to space reads (R08.T6.c), and
     // its line slots, whose pressure channels the read takes (R08.T4.d).
     set("shell", [topHeightM, absorberCount(medium), lineSlotMask(medium), 0]);
+    return exact;
   }
 }
