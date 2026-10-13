@@ -343,8 +343,13 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
       {
         value: "V 9.6 mag CAM · BEYOND 500 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
         fields: [limitField(false), edgeField("500 ly", false)],
+        dotsLead: true,
       },
-      { value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED", fields: [limitField(false)] },
+      {
+        value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED",
+        fields: [limitField(false)],
+        dotsLead: true,
+      },
     ]);
   });
 
@@ -355,8 +360,13 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
       {
         value: "V 9.6 mag CAM · BEYOND 2000 ly: STREAMING",
         fields: [limitField(false), edgeField("2000 ly", false)],
+        dotsLead: true,
       },
-      { value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED", fields: [limitField(false)] },
+      {
+        value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED",
+        fields: [limitField(false)],
+        dotsLead: true,
+      },
     ]);
   });
 
@@ -369,6 +379,7 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
     expect(result.current.label("alone")).toEqual({
       value: "V 9.6 mag CAM · BEYOND 2000 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
       fields: [limitField(true), edgeField("2000 ly", true)],
+      dotsLead: true,
     });
   });
 
@@ -382,9 +393,13 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
     const value =
       "V 9.6 mag CAM · BEYOND 1000 ly: STREAMING · DISTANT STARS: DETAIL LIMITED · CLUSTERS: NOT YET MODELLED";
     expect([live, result.current.label("alone"), result.current.label("instrument")]).toEqual([
-      { value, fields: [limitField(false), edgeField("1000 ly", false)] },
-      { value, fields: [limitField(true), edgeField("1000 ly", true)] },
-      { value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED", fields: [limitField(true)] },
+      { value, fields: [limitField(false), edgeField("1000 ly", false)], dotsLead: true },
+      { value, fields: [limitField(true), edgeField("1000 ly", true)], dotsLead: true },
+      {
+        value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED",
+        fields: [limitField(true)],
+        dotsLead: true,
+      },
     ]);
   });
 
@@ -397,8 +412,13 @@ describe("a view's sky arriving nearest first (R06.T11.f)", () => {
       {
         value: "V 9.6 mag CAM · BEYOND 1000 ly: STREAMING",
         fields: [limitField(false), edgeField("1000 ly", false)],
+        dotsLead: true,
       },
-      { value: "V 9.6 mag CAM · DISTANT STARS: DETAIL LIMITED", fields: [limitField(false)] },
+      {
+        value: "V 9.6 mag CAM · DISTANT STARS: DETAIL LIMITED",
+        fields: [limitField(false)],
+        dotsLead: true,
+      },
     ]);
   });
 });
@@ -502,8 +522,8 @@ describe("a view's star limit while the link is down (R06.T13.j)", () => {
         result.current.label("instrument"),
       ]).toEqual([
         false,
-        { value, fields: [limitField(true, limit)] },
-        { value, fields: [limitField(true, limit)] },
+        { value, fields: [limitField(true, limit)], dotsLead: true },
+        { value, fields: [limitField(true, limit)], dotsLead: true },
       ]);
     },
   );
@@ -560,8 +580,16 @@ describe("a view's star limit while the link is down (R06.T13.j)", () => {
     });
     const value = "V 7.4 mag EYE · BEYOND 2000 ly: STREAMING · CLUSTERS: NOT YET MODELLED";
     expect([down, result.current.label("alone")]).toEqual([
-      { value, fields: [limitField(true, "V 7.4 mag"), edgeField("2000 ly", true)] },
-      { value, fields: [limitField(false, "V 7.4 mag"), edgeField("2000 ly", false)] },
+      {
+        value,
+        fields: [limitField(true, "V 7.4 mag"), edgeField("2000 ly", true)],
+        dotsLead: true,
+      },
+      {
+        value,
+        fields: [limitField(false, "V 7.4 mag"), edgeField("2000 ly", false)],
+        dotsLead: true,
+      },
     ]);
   });
 
@@ -648,6 +676,7 @@ describe("a view's sky asked again within its arrival (R06.T12.b)", () => {
   const FINAL_LINE = {
     value: "V 9.6 mag CAM · CLUSTERS: NOT YET MODELLED",
     fields: [limitField(false)],
+    dotsLead: true,
   };
 
   it("keeps the held sky's line, neither PENDING nor STREAMING, through a deeper re-ask", async () => {
@@ -692,10 +721,12 @@ describe("a view's sky asked again within its arrival (R06.T12.b)", () => {
       {
         value: "V 9.6 mag CAM · BEYOND 500 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
         fields: [limitField(false), edgeField("500 ly", false)],
+        dotsLead: true,
       },
       {
         value: "V 9.6 mag CAM · BEYOND 1000 ly: STREAMING · CLUSTERS: NOT YET MODELLED",
         fields: [limitField(false), edgeField("1000 ly", false)],
+        dotsLead: true,
       },
     ]);
   });

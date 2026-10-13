@@ -16,11 +16,18 @@ import type { ElementSize } from "../../lib/useElementSize";
 export type ViewLayout = "full" | "compact";
 
 /**
- * The least width of the `.view` box for the full layout, rem: a 50.5 rem stage (a 35 rem
- * instrument slot, three 0.5 rem insets and the primary's least 14 rem label block), then the
- * 26 rem and 20 rem columns, each after a 1 rem gap.
+ * The least width of the `.view` box for the full layout, rem: a 51 rem stage (a 35 rem instrument
+ * slot, three 0.5 rem insets and the 14.5 rem label block the primary has at 1280 × 720 with the
+ * slots open), then the 26 rem and 20 rem columns, each after a 1 rem gap.
+ *
+ * @remarks
+ * 99 rem, where it was 98.5 (R06.T13.j, as the desktop ruled): at 98.5 the primary's block was
+ * 14 rem beside the slots, and the `STARS` limit's run with its field, `V 10.0 mag S CAM`, passed
+ * its plate by 2.5 px. The boxes from 98.5 to 99 rem, about 8 px of window width, are compact, as
+ * every narrower box already is. A stated limit: the room rule still opens a slot beside a 14 rem
+ * primary block, so below the guide's least size, 1280 × 720, the limit's run may pass its plate.
  */
-export const FULL_MIN_WIDTH_REM = 98.5;
+export const FULL_MIN_WIDTH_REM = 99;
 
 /**
  * The least height of the `.view` box for the full layout, rem: the taller column's tallest state

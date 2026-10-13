@@ -36,20 +36,37 @@ const UNBREAKABLE =
   /UT [+-]?\d[\d,.]* yr|V -?\d[\d.]* mag (?:EYE|CAM)|EV100 -?\d[\d.]*|(?:\d{3}°|—) [+-]\d{2,}°(?: FROM \+X)?|\d{3}\/\d{2}:\d{2}:\d{2}|[+-]?\d[\d,.]*(?:E[+-]?\d+)? (?:km\/s|m\/s|s\/s|kyr|Myr|Gyr|yr|mag|AU|Gm|Mm|km|m|ly|s)(?![\w/])/g;
 
 /**
+ * A reading's fields as its runs take them: in the reading's order, each once (R06.T13.j). `next`
+ * is the index of the field the next run may take.
+ */
+interface FieldQueue {
+  readonly fields: ReadonlyArray<LabelField>;
+  next: number;
+}
+
+/**
  * A text with each of its runs set on one line, so that it breaks only at the spaces between them
  * (decision-r07-t19-layout, item 2): a reading's quantities, or the exposure's status phrases in
  * its notes (decision-r07-owner-ux-signoff, item 1). Its text is unchanged.
  *
  * @param runs - The runs that never break, a global pattern.
- * @param fields - Values of the text set in fields of their own: each the run that reads its text,
- *   the sky's edge, or the start of one before a space, the sky's limit before its kind, whose rest
- *   stays on the run's line after the field (R06.T13.j).
+ * @param fields - Values of the text set in fields of their own, in the text's order, each taken
+ *   once: each the run that reads its text, the sky's edge, or the start of one before a space, the
+ *   sky's limit before its kind, whose rest stays on the run's line after the field (R06.T13.j).
  */
 export function unbrokenRuns(
   text: string,
   runs: RegExp,
   fields: ReadonlyArray<LabelField> = [],
 ): ReactNode {
+  return setRuns(text, runs, { fields, next: 0 });
+}
+
+/**
+ * {@link unbrokenRuns} with the reading's fields as a queue, which the runs of every part of one
+ * reading take from in turn.
+ */
+function setRuns(text: string, runs: RegExp, queue: FieldQueue): ReactNode {
   const nodes: ReactNode[] = [];
   let from = 0;
   for (const match of text.matchAll(runs)) {
@@ -57,22 +74,25 @@ export function unbrokenRuns(
       nodes.push(withMissing(text.slice(from, match.index), `t${String(from)}`));
     }
     const run = match[0];
-    const whole = fields.find((field) => field.text === run);
-    const leading = fields.find((field) => run.startsWith(`${field.text} `));
+    const field = queue.fields[queue.next];
+    const whole = field !== undefined && field.text === run;
+    const leading = field !== undefined && run.startsWith(`${field.text} `);
     let node: ReactNode;
-    if (whole !== undefined) {
-      node = <FieldRun field={whole} isRun key={match.index} />;
-    } else if (leading === undefined) {
+    if (field !== undefined && whole) {
+      queue.next += 1;
+      node = <FieldRun field={field} isRun key={match.index} />;
+    } else if (field !== undefined && leading) {
+      queue.next += 1;
       node = (
         <span className="view-label__run" key={match.index}>
-          {withMissing(run, `r${String(match.index)}`)}
+          <FieldRun field={field} isRun={false} />
+          {withMissing(run.slice(field.text.length), `r${String(match.index)}`)}
         </span>
       );
     } else {
       node = (
         <span className="view-label__run" key={match.index}>
-          <FieldRun field={leading} isRun={false} />
-          {withMissing(run.slice(leading.text.length), `r${String(match.index)}`)}
+          {withMissing(run, `r${String(match.index)}`)}
         </span>
       );
     }
@@ -150,6 +170,37 @@ function withMissing(text: string, key: string): ReactNode {
   return nodes;
 }
 
+/** How a reading's parts are set. */
+export interface ReadingOptions {
+  /**
+   * Whether each middle dot leads the part after it (R06.T13.j): set at the head of that part's
+   * box, on one line with its first word or run, the break at the space before it, so that no dot
+   * stands alone at a line's end. Off unless asked: the sky's `STARS` readings ask it
+   * (`LabelLine.dotsLead`), and every other reading keeps its dots between its parts.
+   */
+  readonly dotsLead?: boolean;
+}
+
+/** A run of {@link UNBREAKABLE} at the head of a text, matched once (neither global nor sticky). */
+const UNBREAKABLE_AT_HEAD = new RegExp(`^(?:${UNBREAKABLE.source})`);
+
+/**
+ * A part after a middle dot that leads it ({@link ReadingOptions.dotsLead}): the dot, its space
+ * and the part's first run or word on one line, then the rest of the part's runs.
+ */
+function ledRuns(part: string, queue: FieldQueue): ReactNode {
+  const head = UNBREAKABLE_AT_HEAD.exec(part)?.[0] ?? /^\S*/u.exec(part)?.[0] ?? "";
+  return (
+    <>
+      <span className="view-label__run">
+        {"· "}
+        {setRuns(head, UNBREAKABLE, queue)}
+      </span>
+      {setRuns(part.slice(head.length), UNBREAKABLE, queue)}
+    </>
+  );
+}
+
 /**
  * A reading's parts, each kept on one line where it fits, so that a narrow block breaks it at its
  * middle dots first (decision-r07-t19, item 2a) and then at a space between its unbreakable runs
@@ -160,23 +211,31 @@ function withMissing(text: string, key: string): ReactNode {
  * The exposure panel's and the meter's readings are set through it too, so that the same reading
  * breaks by the same rules wherever it stands: `EV100 11.7 INHIBITED ·` | `NO IMAGE TO METER`,
  * never inside a status phrase (decision-r07-t19b-exposure-fit, item 1(c)). Its text is the
- * reading's, unchanged.
+ * reading's, unchanged, whether its dots stand between its parts or lead them.
  *
  * @param fields - The values of the reading set in fields of their own (`LabelLine.fields`), or
  *   none.
  */
-export function readingParts(value: string, fields: ReadonlyArray<LabelField> = []): ReactNode {
+export function readingParts(
+  value: string,
+  fields: ReadonlyArray<LabelField> = [],
+  options: ReadingOptions = {},
+): ReactNode {
+  const queue: FieldQueue = { fields, next: 0 };
+  const lead = options.dotsLead === true;
   const seen = new Map<string, number>();
   const nodes: ReactNode[] = [];
   for (const part of value.split(PART_SEPARATOR)) {
-    if (nodes.length > 0) {
-      nodes.push(PART_SEPARATOR);
+    const after = nodes.length > 0;
+    if (after) {
+      // A leading dot goes inside the next part, and the space before it is the break.
+      nodes.push(lead ? " " : PART_SEPARATOR);
     }
     const count = seen.get(part) ?? 0;
     seen.set(part, count + 1);
     nodes.push(
       <span className="view-label__part" key={`${part}:${String(count)}`}>
-        {unbrokenRuns(part, UNBREAKABLE, fields)}
+        {after && lead ? ledRuns(part, queue) : setRuns(part, UNBREAKABLE, queue)}
       </span>,
     );
   }
@@ -194,8 +253,9 @@ export function readingParts(value: string, fields: ReadonlyArray<LabelField> = 
  * under the value (decision-r07-t19-layout, item 2).
  * Each reading is an `output`; none is announced as it changes, since they change continuously. A
  * reading of a stale server scene is muted with its trailing `S` (the guide's "Data states"); a
- * line's fields, the sky's limit and edge, are each set in a fixed width and go stale alone
- * (R06.T11.f, R06.T13.j). A graphics fault is set as `StatusLine`'s fault, in `--status-caution`,
+ * line's fields, the sky's limit and edge, are each set in a fixed width and go stale alone, and
+ * the sky's `STARS` reading sets each middle dot at the head of the part after it (R06.T11.f,
+ * R06.T13.j). A graphics fault is set as `StatusLine`'s fault, in `--status-caution`,
  * apart from the steady statements (the guide's "Alerts": a console's report on its own graphics
  * is never an alert). The stars' count line is a reading of numbers, so an `output` in B612 Mono
  * (the guide's "Typography"), not a statement.
@@ -210,7 +270,7 @@ export function ViewLabelBlock({ lines, statements, countLine, fault, id }: View
             <dt className="field__label">{line.label}</dt>
             <dd>
               <output aria-live="off" className={line.stale === true ? "stale" : undefined}>
-                {readingParts(line.value, line.fields)}
+                {readingParts(line.value, line.fields, { dotsLead: line.dotsLead === true })}
               </output>
               {line.stale === true ? <StaleMark /> : null}
             </dd>

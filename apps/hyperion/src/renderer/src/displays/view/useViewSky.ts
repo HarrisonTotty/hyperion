@@ -45,9 +45,9 @@ export interface DrawnSky {
 
 /**
  * A `STARS` line's reading of the sky: its value, and once a reply is held its fields, the limit's
- * and, while the sky streams, the edge's.
+ * and, while the sky streams, the edge's, with its dots leading its notes.
  */
-export type SkyLineReading = Pick<LabelLine, "value" | "fields">;
+export type SkyLineReading = Pick<LabelLine, "value" | "fields" | "dotsLead">;
 
 /** The view's sky, or `null` while R02's interim field stands in. */
 export interface ViewSky {
@@ -167,7 +167,7 @@ export function cullViewSky(
  * notes its place holds: while the reply held is not final, the stars-arriving note, its edge in
  * its field and stale with the sky (R06.T11.f); while it holds the sky at a synthetic ceiling, the
  * interim note (R13.T2.b), which names no figure and so takes no field; and what the sky leaves
- * out, which takes no mark either.
+ * out, which takes no mark either. Each note's dot leads it (`dotsLead`, R06.T13.j).
  *
  * @param exposure - The control as the readout shows it (4 Hz, EV100 to 0.1).
  */
@@ -193,8 +193,10 @@ export function viewSkyLabel(
   };
   // The edge's field only where its note stands: a line holding one note may have given it up.
   const streaming = skyLineNotes(gaps, standing).find((note) => note.kind === "streaming");
+  // Each note's dot leads it, so that beside the slots, where the limit's run fills the column, no
+  // dot ends a line alone (R06.T13.j).
   return streaming === undefined
-    ? { value, fields: [limit] }
+    ? { value, fields: [limit], dotsLead: true }
     : {
         value,
         fields: [
@@ -205,6 +207,7 @@ export function viewSkyLabel(
             stale: model.stale,
           },
         ],
+        dotsLead: true,
       };
 }
 

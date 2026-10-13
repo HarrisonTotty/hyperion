@@ -883,6 +883,23 @@ describe("VIEW's star limits while the link is down (R06.T13.j)", () => {
       ["V 9.5 mag", "13ch", null],
     ]);
   });
+
+  it("leads each note with its dot on the primary's and an instrument's STARS line", async () => {
+    vi.stubGlobal("Worker", InThreadSkyWorker);
+    const view = await serverScene();
+    await openInstrument(view, "INSTRUMENT 1");
+    await skyReplyAt(view, [2_000, 4_000, 4_000], false);
+    const parts = [primaryLabelBlock(), screen.getByRole("region", { name: "INSTRUMENT 1" })].map(
+      (block) =>
+        [...starsOutput(block).querySelectorAll(".view-label__part")].map(
+          (part) => part.textContent,
+        ),
+    );
+    expect(parts).toEqual([
+      [EYE, "· BEYOND 2000 ly: STREAMING"],
+      [CAM, `· ${LEFT_OUT}`],
+    ]);
+  });
 });
 
 /** INSTRUMENT 1's CAMERA line in CHASE, as its block reads it. */

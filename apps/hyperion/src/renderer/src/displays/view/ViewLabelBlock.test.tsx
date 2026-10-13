@@ -202,3 +202,98 @@ describe("the view's label block's limit field (R06.T13.j)", () => {
     expect(shapeOf(blockOf(true))).toEqual(live);
   });
 });
+
+/** The text standing directly in the reading shown, between its parts. */
+function textBetweenParts(): ReadonlyArray<string | null> {
+  return [...screen.getByRole("status").childNodes]
+    .filter((node) => node.nodeType === Node.TEXT_NODE)
+    .map((node) => node.textContent);
+}
+
+describe("the sky's STARS reading's leading dots (R06.T13.j)", () => {
+  const VALUE = "V 9.5 mag CAM · BEYOND 2000 ly: STREAMING · CLUSTERS: NOT YET MODELLED";
+  const FIELDS = [
+    { text: "V 9.5 mag", widthCh: 13, stale: false },
+    { text: "2000 ly", widthCh: 12, stale: false },
+  ];
+
+  /** The block with one `STARS` line of `value`, its dots leading or not. */
+  function linesOf(value: string, dotsLead: boolean): HTMLElement {
+    const { container } = render(
+      <ViewLabelBlock
+        lines={[
+          dotsLead
+            ? { label: "STARS", value, fields: FIELDS, dotsLead: true }
+            : { label: "STARS", value, fields: FIELDS },
+        ]}
+        statements={[]}
+        countLine={null}
+        fault={null}
+      />,
+    );
+    return container;
+  }
+
+  it("sets every dot at the head of the part after it, none between the parts, the text unchanged", () => {
+    const block = linesOf(VALUE, true);
+    expect([
+      [...block.querySelectorAll(".view-label__part")].map((part) => part.textContent),
+      textBetweenParts(),
+      screen.getByRole("status").textContent,
+    ]).toEqual([
+      ["V 9.5 mag CAM", "· BEYOND 2000 ly: STREAMING", "· CLUSTERS: NOT YET MODELLED"],
+      [" ", " "],
+      VALUE,
+    ]);
+  });
+
+  it("keeps each dot on one line with its part's first word, and the limit with its kind", () => {
+    const block = linesOf(VALUE, true);
+    const parts = [...block.querySelectorAll(".view-label__part")];
+    expect([
+      parts.slice(1).map((part) => part.firstElementChild?.className),
+      parts.slice(1).map((part) => part.firstElementChild?.textContent),
+      parts[0]?.querySelector(".view-label__run")?.textContent,
+    ]).toEqual([
+      ["view-label__run", "view-label__run"],
+      ["· BEYOND", "· CLUSTERS:"],
+      "V 9.5 mag CAM",
+    ]);
+  });
+
+  it("keeps a dot with a part's first run where one heads it", () => {
+    linesOf("V 9.5 mag CAM · 2000 ly AWAY", true);
+    const field = screen.getByText("2000 ly");
+    expect([field.parentElement?.textContent, field.parentElement?.className]).toEqual([
+      "· 2000 ly",
+      "view-label__run",
+    ]);
+  });
+
+  it("keeps every other reading's dots between its parts", () => {
+    linesOf(VALUE, false);
+    expect(textBetweenParts()).toEqual([" · ", " · "]);
+  });
+
+  it("sets each field once, in the reading's order", () => {
+    const { container } = render(
+      <ViewLabelBlock
+        lines={[
+          {
+            label: "STARS",
+            value: "2000 ly · 2000 ly",
+            fields: [{ text: "2000 ly", widthCh: 12, stale: true }],
+          },
+        ]}
+        statements={[]}
+        countLine={null}
+        fault={null}
+      />,
+    );
+    expect(
+      [...container.querySelectorAll(".view-label__part")].map(
+        (part) => part.querySelector(".view-label__field") !== null,
+      ),
+    ).toEqual([true, false]);
+  });
+});
