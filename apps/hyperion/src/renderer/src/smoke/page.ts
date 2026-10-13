@@ -7,9 +7,10 @@
  * Its variant comes in the query string: `default` runs the device as the adapter offers it,
  * `no-subgroups` requests it with subgroups withheld (T9.c). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in three parts, each a run of its own under the harness's watchdog (perf-smoke,
- * 2026-10-13), parts 2 and 3 the atmosphere's CPU-twin groups (R08.T6) and part 1 every other, and
- * with no part given the page runs them all, in its order. Each part checks its path (T9.c) itself.
+ * groups are in four parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * 2026-10-13), parts 2 to 4 the atmosphere's CPU-twin groups (R08.T6, R08.T7), part 4 with
+ * R05.T12.e's marches beside them, and part 1 every other; with no part given the page runs them
+ * all, in its order. Each part checks its path (T9.c) itself.
  */
 
 import { WGSL_CATALOGUE } from "../view/engine/catalogue";
@@ -75,11 +76,12 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
 };
 
 /**
- * A part of the page's groups, each about a third of the page's CPU time: 2 and 3 the atmosphere's
+ * A part of the page's groups, each about a quarter of the page's time: 2 to 4 the atmosphere's
  * CPU-twin groups (R08.T6, R08.T7), whose twins outweigh their GPU work (2 R08.T6.b's, 3
- * R08.T6.g's, R08.T6.i's and R08.T7's), and 1 every other group.
+ * R08.T6.g's, 4 R08.T6.i's and R08.T7's), and 1 every other group but R05.T12.e's, which part 4
+ * runs first, before its twins start, to even the parts out.
  */
-type PagePart = 1 | 2 | 3;
+type PagePart = 1 | 2 | 3 | 4;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -93,6 +95,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 2;
     case "3":
       return 3;
+    case "4":
+      return 4;
     default:
       return null;
   }
@@ -147,7 +151,7 @@ async function run(
     setupError,
   });
   if (part === null) {
-    return failed("the part asked for is not 1, 2, 3 or all");
+    return failed("the part asked for is not 1, 2, 3, 4 or all");
   }
   const gpu: unknown = Reflect.get(navigator, "gpu");
   if (gpu === undefined) {
@@ -251,17 +255,17 @@ async function run(
   await group(1, "R07.T10.c the eclipse scene", () => checkEclipse(engine, checks));
   await group(1, "R07.T8.a the photorealistic frame", () => checkPhotorealFrame(engine, checks));
   await group(1, "R05.T12.c the atmosphere's frames", () => checkAtmosphereFrames(engine, checks));
-  await group(1, "R05.T12.e the marches' steps", () => checkAtmosphereSteps(engine, checks));
+  await group(4, "R05.T12.e the marches' steps", () => checkAtmosphereSteps(engine, checks));
   await group(2, "R08.T6.b the kernels over N terms", () =>
     checkAtmosphereTwins(engine, checks, twins),
   );
   await group(3, "R08.T6.g heights and angles in f32", () =>
     checkAtmosphereHeights(engine, checks, twins),
   );
-  await group(3, "R08.T6.i the marches cut at layer edges", () =>
+  await group(4, "R08.T6.i the marches cut at layer edges", () =>
     checkAtmosphereLayerEdges(engine, checks, twins),
   );
-  await group(3, "R08.T7 several suns, and the sky through the air", () =>
+  await group(4, "R08.T7 several suns, and the sky through the air", () =>
     checkSeveralSuns(engine, checks, twins),
   );
   await group(1, "R05.T11.a the terrain's resources", () => checkTerrainResources(engine, checks));

@@ -8,13 +8,15 @@
 #   testRender.sh [--variant=NAME]... [--part=N]... [--fixture=broken-wgsl|external-fetch]
 #                 [--drop-adapter-switches] [--captures=DIR]
 #
-# The page's groups are in three parts (`src/renderer/src/smoke/page.ts`), each a run of its own
-# under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 and 3 hold
-# the atmosphere's CPU-twin groups (R08.T6.b, then R08.T6.g and T6.i), part 1 every other group.
-# SwiftShader's GPU process and the twins together took some 940 CPU-seconds for the two variants
-# (measured 2026-10-13), so on a machine busy with other work, with about 4 cores left to the
-# smoke, a run of the whole page outlasted the 180 s watchdog however its work overlapped; each part
-# is about a third of it. --part=N runs that part alone (every part by default).
+# The page's groups are in four parts (`src/renderer/src/smoke/page.ts`), each a run of its own
+# under its own watchdog, the harness's hang detector (perf-smoke, 2026-10-13): parts 2 to 4 hold
+# the atmosphere's CPU-twin groups (2 R08.T6.b, 3 R08.T6.g, 4 R08.T6.i and R08.T7), part 4 also
+# R05.T12.e's marches, first, and part 1 every other group. SwiftShader's GPU process and the twins
+# together took some 940 CPU-seconds for the two variants (measured 2026-10-13), so on a machine
+# busy with other work, with about 4 cores left to the smoke, a run of the whole page outlasted the
+# 180 s watchdog however its work overlapped. Three parts left the third 140 s once R08.T7 had
+# joined it (load 3 to 9), so there are four, each about a quarter of the page. --part=N runs that
+# part alone (every part by default).
 #
 # --captures=DIR also renders the capture frames (R05.T12.c's atmosphere comparison, R05.T11.c's
 # terrain, R05.T13.b's spike, R07.T9's occultation, R07.T10.c's eclipse scene) and saves them in
@@ -50,7 +52,7 @@ captures=()
 for arg in "$@"; do
     case "$arg" in
         --variant=*) variants+=("${arg#--variant=}") ;;
-        --part=1 | --part=2 | --part=3) parts+=("${arg#--part=}") ;;
+        --part=1 | --part=2 | --part=3 | --part=4) parts+=("${arg#--part=}") ;;
         --fixture=*) fixture="${arg#--fixture=}" ;;
         --drop-adapter-switches) adapter_switches=() ;;
         --captures=*) captures=("--smoke-captures=${arg#--captures=}") ;;
@@ -61,7 +63,7 @@ if [[ ${#variants[@]} -eq 0 ]]; then
     variants=(default no-subgroups)
 fi
 if [[ ${#parts[@]} -eq 0 ]]; then
-    parts=(1 2 3)
+    parts=(1 2 3 4)
 fi
 
 # Milliseconds since the epoch: GNU date's `%3N`, or Perl's clock where date has no `%N` (macOS).

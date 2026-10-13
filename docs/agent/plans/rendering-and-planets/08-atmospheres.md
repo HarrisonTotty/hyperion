@@ -7218,7 +7218,8 @@ generator, and the reference's sampling needs no domain tag.
     - The smoke's twin jobs: a multiple-scattering job's `curveSlot`.
     - `test/atmosphereFixtures.ts`'s `fourAbsorberMedium` takes the lights' temperatures.
   - _The smoke_ (`smoke/atmosphere.ts`'s `checkSeveralSuns`, a new group in part 3, "R08.T7 several
-    suns, and the sky through the air", run through `inOrder` on the twin pool). Under the binary
+    suns, and the sky through the air", run through `inOrder` on the twin pool; in part 4, with
+    R08.T6.i, since perf-smoke split the page into four runs). Under the binary
     it holds:
     - each multiple-scattering layer against its own light's twin, and the two layers apart;
     - two frames on both settings against their twins to 10⁻³, each over a surface 60 km ahead:
@@ -7310,8 +7311,9 @@ generator, and the reference's sampling needs no domain tag.
     (2.6%), and the truncated multiple scattering to the term truncated by hand (10⁻⁹). A twin
     slab's whole flux, the two together through the multiple-scattering series, is not checked;
     R08.T13's aureole points against the tracer cover it.
-  - _`testRender.sh`'s comment_ still names part 3 as R08.T6.g's and T6.i's, without R08.T7's
-    group. It was left so that smart-ci does not plan the full `ci` for a comment.
+  - _`testRender.sh`'s comment_ still named part 3 as R08.T6.g's and T6.i's, without R08.T7's
+    group. It was left so that smart-ci does not plan the full `ci` for a comment. Done by
+    perf-smoke's four-run split, which rewrote it.
 
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7; built and recorded by R08.T7, "Deviations in T7,
