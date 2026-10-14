@@ -23,6 +23,7 @@ use crate::synth::{
     BandSpectrumParts, BuildBandSpectrumError, STRUCTURAL_RMS_ICE_RICH, STRUCTURAL_RMS_MOBILE_LID,
     STRUCTURAL_RMS_STAGNANT_LID, SpectrumShape, unresolved_variance,
 };
+use crate::test_sizes::per_target;
 use crate::testing::{FieldBuilder, SyntheticWorld, synthetic_field};
 
 /// The detail seed the tests draw from.
@@ -1747,8 +1748,11 @@ fn unresolved_variance_falls_with_the_wavelength_to_zero_at_the_band_limit() {
     let level = header.level().get();
     let mut checked = 0;
     let mut belts = 0;
-    let mut points = uniform_points(0x756e_7265, 60);
-    points.extend(belt_points(0x756e_7262, 0.05, 30));
+    // 60 points over the sphere and 30 on belts, and 20 and 10 on the browser target, where each
+    // check still runs on belt and plain cells alike (`crate::test_sizes`).
+    let (spread, on_belts) = (per_target(60, 20), per_target(30, 10));
+    let mut points = uniform_points(0x756e_7265, spread);
+    points.extend(belt_points(0x756e_7262, 0.05, on_belts));
     for dir in points {
         let cell = PatchKey::containing(level, dir).unwrap();
         let style = ReliefStyle::of(field.cell(cell).unwrap());
@@ -1788,8 +1792,8 @@ fn unresolved_variance_falls_with_the_wavelength_to_zero_at_the_band_limit() {
         );
         checked += 1;
     }
-    assert_eq!(checked, 90);
-    assert!(belts >= 20, "{belts} belt cells");
+    assert_eq!(checked, spread + on_belts);
+    assert!(3 * belts >= 2 * on_belts, "{belts} belt cells");
     // A cell the view does not hold has none.
     let held = Holding {
         inner: field,

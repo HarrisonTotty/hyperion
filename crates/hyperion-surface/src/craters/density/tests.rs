@@ -7,6 +7,7 @@ use super::*;
 use crate::craters::{
     CraterParamsParts, CraterTarget, SOLAR_SYSTEM_AGE, Screening, TargetClass, lunar_chronology,
 };
+use crate::test_sizes::per_target;
 use hyperion_base::units::{
     Gigayears, KilogramsPerCubicMetre, KilogramsPerSquareMetre, MetresPerSecond,
     MetresPerSecondSquared,
@@ -819,11 +820,13 @@ fn assert_octave_draws_follow_the_density(
 #[test]
 fn the_inversion_lands_in_its_octave_and_follows_the_density() {
     // 10⁵ draws on the unscreened Moon at 1–2 km and on mapped, screened Mars at 2–4 m, where its
-    // 1.7 m cutoff tapers the octave.
+    // 1.7 m cutoff tapers the octave; 2 × 10⁴ on the browser target, still four times the brief
+    // Venus test's (`crate::test_sizes`).
+    let draws = per_target(100_000, 20_000);
     let one_km = DiameterOctave::new(km(1.0)).unwrap();
-    assert_octave_draws_follow_the_density("moon", &moon(), one_km, 100_000, 7);
+    assert_octave_draws_follow_the_density("moon", &moon(), one_km, draws, 7);
     let small = DiameterOctave::new(Metres::new(2.0)).unwrap();
-    assert_octave_draws_follow_the_density("mars", &mars(), small, 100_000, 11);
+    assert_octave_draws_follow_the_density("mars", &mars(), small, draws, 11);
     // The ends: u = 0 gives the lower diameter, and the largest u stays below the upper.
     for (_, p) in every_body() {
         let d = diameter_in_octave(&p, small, UnitUniform::new(0.0).unwrap());

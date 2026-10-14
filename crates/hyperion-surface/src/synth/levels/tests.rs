@@ -11,6 +11,7 @@ use super::*;
 use crate::field::{CoarseField, FieldView};
 use crate::synth::test_support::{SEED, random_cells, random_points_in, rim_cells, world};
 use crate::synth::{SynthCache, Synthesiser};
+use crate::test_sizes::per_target;
 use crate::testing::SyntheticWorld;
 
 /// Every band level, 0 to the deepest.
@@ -236,11 +237,12 @@ fn measure_the_bound_s_terms() {
 
 #[test]
 fn the_level_bound_holds_between_every_pair_of_levels() {
-    // 10³ points a world, 25 in each of 40 cells (the slow test below takes 10⁴).
+    // 10³ points a world, 25 in each of 40 cells, and 250 in 10 on the browser target, one of
+    // them on a rim (`crate::test_sizes`); the slow test below takes 10⁴.
     for (k, &kind) in SyntheticWorld::ALL.iter().enumerate() {
         let worst = worst_ratios(
             world(kind),
-            40,
+            per_target(40, 10),
             25,
             0x626f_756e_6400 + u64::try_from(k).unwrap(),
         );

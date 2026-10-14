@@ -81,6 +81,8 @@ pub mod synth;
 pub mod tables;
 pub mod tags;
 pub mod test_planet;
+#[cfg(test)]
+mod test_sizes;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod wire;

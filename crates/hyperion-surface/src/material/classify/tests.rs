@@ -28,6 +28,7 @@ use crate::synth::test_support::{Held, SEED, king_distances, random_points_in, w
 use crate::synth::{
     BandSpectrum, STRUCTURAL_RMS_ICE_RICH, STRUCTURAL_RMS_STAGNANT_LID, SpectrumShape,
 };
+use crate::test_sizes::per_target;
 use crate::testing::{CellSite, ClimateSample, FieldBuilder, Routing, SyntheticWorld};
 
 /// A palette entry of `key` in `role`, illustrative values: a normal albedo of 0.5 in every band,
@@ -1423,9 +1424,12 @@ fn material_is_order_and_cache_independent_on_partial_ice_and_channel_beds() {
     let coarse = icy.header().level().get();
     let cell = PatchKey::containing(coarse, lat_lon(87.0, 40.0)).expect("a cell");
     let mut rng = Lcg::new(0x6f72_6465_7200_0001);
-    let mut dirs = random_points_in(cell, 12, &mut rng);
+    // A fresh cache's query of partial ice costs its cell's cut, 256 heights: 12 points in one
+    // polar cell and 6 in the other, 4 and 2 on the browser target, where both cells and both
+    // caches are still asked (`crate::test_sizes`).
+    let mut dirs = random_points_in(cell, per_target(12, 4), &mut rng);
     let other = PatchKey::containing(coarse, lat_lon(-88.0, -100.0)).expect("a cell");
-    dirs.extend(random_points_in(other, 6, &mut rng));
+    dirs.extend(random_points_in(other, per_target(6, 2), &mut rng));
     let shared = std::cell::RefCell::new(SynthCache::new());
     assert_order_independent(&dirs, |&d| {
         material_at(&synth, &mut shared.borrow_mut(), xyz_to_face_uv(d)).expect("whole")
@@ -1460,7 +1464,9 @@ fn material_a_cache_kept_across_fields_answers_as_a_fresh_one() {
     let coarse = thin.header().level().get();
     let cell = PatchKey::containing(coarse, lat_lon(87.0, 40.0)).expect("a cell");
     let mut rng = Lcg::new(0x6669_656c_6400_0001);
-    let dirs = random_points_in(cell, 8, &mut rng);
+    // Eight points, three on the browser target, each asked of the four pairs of field and seed
+    // in turn (`crate::test_sizes`).
+    let dirs = random_points_in(cell, per_target(8, 3), &mut rng);
     let mut cache = SynthCache::new();
     for (field, seed) in [(&thin, 17), (&thick, 17), (&thin, 18), (&thin, 17)] {
         let synth = Synthesiser::new(field, DetailSeed::new(seed));
@@ -1490,7 +1496,9 @@ fn material_a_partial_ice_cell_answers_within_its_margin() {
     let synth = Synthesiser::new(&view, DetailSeed::new(17));
     let whole = Synthesiser::new(&field, DetailSeed::new(17));
     let mut rng = Lcg::new(0x6d61_7267_696e_0001);
-    for d in random_points_in(cell, 6, &mut rng) {
+    // Six points, two on the browser target, each from a fresh cache: its own cut, 256 heights
+    // (`crate::test_sizes`).
+    for d in random_points_in(cell, per_target(6, 2), &mut rng) {
         let held = material_at(&synth, &mut SynthCache::new(), xyz_to_face_uv(d)).expect("held");
         assert_eq!(held, ground(&whole, d), "{d:?}");
     }

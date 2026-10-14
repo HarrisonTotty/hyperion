@@ -17,6 +17,7 @@ use crate::field::{
     cell_index,
 };
 use crate::synth::test_support::{SEED, king_distances, point_in, random_cells, world};
+use crate::test_sizes::per_target;
 use crate::testing::SyntheticWorld;
 use crate::wire::{decode_payload, encode_payload};
 
@@ -895,7 +896,9 @@ fn an_orbital_survey_s_quoted_sigma_holds_its_ground() {
     let synth = Synthesiser::new(&view, SEED);
     let mut cache = SynthCache::new();
     let (mut residual2, mut predicted2, mut z2, mut count) = (0.0, 0.0, 0.0, 0.0);
-    for dir in sample_points(w, 24, 24, &mut rng) {
+    // 24 points in each of 24 cells, and 6 on the browser target, where the pooled ratios stay
+    // within their bounds over the same cells (`crate::test_sizes`).
+    for dir in sample_points(w, 24, per_target(24, 6), &mut rng) {
         let reading = surveyed_reading(&synth, &mut cache, at(dir), SLOPE_BASELINES[0])
             .unwrap()
             .unwrap();

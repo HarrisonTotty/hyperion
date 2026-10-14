@@ -31,6 +31,7 @@ use crate::substance_key::SubstanceKey;
 use crate::synth::relief::ReliefStyle;
 use crate::synth::test_support::{Held, SEED, random_cells, random_points_in, rim_cells, world};
 use crate::synth::{BandSpectrum, STRUCTURAL_RMS_STAGNANT_LID, SpectrumShape};
+use crate::test_sizes::per_target;
 use crate::testing::{ClimateSample, FieldBuilder, SyntheticWorld};
 
 /// The cold-trapped field's latitude, poleward of which its cells hold their partial ice: 85°.
@@ -173,9 +174,17 @@ fn material_weights_the_rayleigh_tail_at_a_zero_mean() {
 
 #[test]
 fn material_weights_the_exceedance_matches_an_independent_polar_sum() {
+    // Each case's reference sums 4 × 10⁶ exponentials. The browser target takes 24 of the 70
+    // cases: the means either side of the cliff's tangent and the grid's ends, at the variances'
+    // ends and middle (`crate::test_sizes`).
+    let means: &[f64] = per_target(
+        &[0.05, 0.3, 0.8, 0.839, 0.85, 1.2, 2.0],
+        &[0.05, 0.839, 0.85, 2.0],
+    );
+    let variances: &[f64] = per_target(&[1e-4, 1e-3, 0.01, 0.1, 1.0], &[1e-4, 0.01, 1.0]);
     let mut worst: f64 = 0.0;
-    for mean in [0.05, 0.3, 0.8, 0.839, 0.85, 1.2, 2.0] {
-        for variance in [1e-4, 1e-3, 0.01, 0.1, 1.0] {
+    for &mean in means {
+        for &variance in variances {
             for threshold in [
                 math::tan(CLIFF_SLOPE.value()),
                 math::tan(SNOW_SHED_SLOPE.value()),
@@ -616,21 +625,22 @@ const WORST_KEPT: usize = 5;
 
 /// The agreement of `world`'s weights with its classes at the levels n − 1 to n − 6 from its finest
 /// level n, over `per_level` texels of 8 × 8 points each, and at the class map's level over
-/// `class_map` texels of 64 × 64 points, each level given to `report` as it is measured.
+/// `class_map` texels of `map_side` × `map_side` points, each level given to `report` as it is
+/// measured.
 fn agreements(
     world_: SyntheticWorld,
     per_level: usize,
-    class_map: usize,
+    (class_map, map_side): (usize, u32),
     mut report: impl FnMut(&Agreement),
 ) {
     let field = world(world_);
     let synth = Synthesiser::new(field, SEED);
     let finest = finest_band(field.header()).get();
     let mut rng = Lcg::new(0x7765_6967_6874_7300 ^ u64::from(finest));
-    let levels =
-        (1..=6_u8)
-            .map(|k| (finest - k, per_level, 8))
-            .chain([(CLASS_MAP_LEVEL, class_map, 64)]);
+    let class_map_level = (CLASS_MAP_LEVEL, class_map, map_side);
+    let levels = (1..=6_u8)
+        .map(|k| (finest - k, per_level, 8))
+        .chain([class_map_level]);
     for (level, count, side) in levels {
         let (mut sum, mut mixed_sum, mut mixed) = (0.0, 0.0, 0_u32);
         let mut worst: f64 = 0.0;
@@ -682,7 +692,7 @@ fn agreements(
 
 /// Holds `world_`'s agreement to [`AGREEMENT`] at every level, and prints each as it is measured;
 /// a failure names the level's worst texels and their cells.
-fn assert_agreement(world_: SyntheticWorld, per_level: usize, class_map: usize) {
+fn assert_agreement(world_: SyntheticWorld, per_level: usize, class_map: (usize, u32)) {
     agreements(world_, per_level, class_map, |a| {
         println!(
             "{world_:?} level {}: mean {:.4}, worst {:.4} over {} texels; mean {:.4} over the {} \
@@ -700,24 +710,29 @@ fn assert_agreement(world_: SyntheticWorld, per_level: usize, class_map: usize) 
     });
 }
 
+/// The class map's texels in `ci`'s agreement on each world, and their points a side: 64, and 32 on
+/// the browser target, where those points were most of the Mars-like world's time and both of its
+/// texels are still mixed (`crate::test_sizes`).
+const CLASS_MAP: (usize, u32) = (2, per_target(64, 32));
+
 #[test]
 fn material_weights_agree_with_the_classes_counted_on_the_earth_like_world() {
-    assert_agreement(SyntheticWorld::EarthLike, 24, 2);
+    assert_agreement(SyntheticWorld::EarthLike, 24, CLASS_MAP);
 }
 
 #[test]
 fn material_weights_agree_with_the_classes_counted_on_the_mars_like_world() {
-    assert_agreement(SyntheticWorld::MarsLike, 24, 2);
+    assert_agreement(SyntheticWorld::MarsLike, 24, CLASS_MAP);
 }
 
 #[test]
 fn material_weights_agree_with_the_classes_counted_on_the_moon_like_world() {
-    assert_agreement(SyntheticWorld::MoonLike, 24, 2);
+    assert_agreement(SyntheticWorld::MoonLike, 24, CLASS_MAP);
 }
 
 #[test]
 fn material_weights_agree_with_the_classes_counted_on_the_ceres_like_world() {
-    assert_agreement(SyntheticWorld::CeresLike, 24, 2);
+    assert_agreement(SyntheticWorld::CeresLike, 24, CLASS_MAP);
 }
 
 /// The plan's measure: a thousand texels a level, sixty-four points a texel at n − 1 to n − 6 and
@@ -725,25 +740,25 @@ fn material_weights_agree_with_the_classes_counted_on_the_ceres_like_world() {
 #[test]
 #[ignore = "slow: 10^3 texels a level, 4 x 10^6 finest points at the class map's level"]
 fn material_weights_agree_with_the_classes_counted_over_a_thousand_texels_earth_like() {
-    assert_agreement(SyntheticWorld::EarthLike, 1_000, 1_000);
+    assert_agreement(SyntheticWorld::EarthLike, 1_000, (1_000, 64));
 }
 
 #[test]
 #[ignore = "slow: 10^3 texels a level, 4 x 10^6 finest points at the class map's level"]
 fn material_weights_agree_with_the_classes_counted_over_a_thousand_texels_mars_like() {
-    assert_agreement(SyntheticWorld::MarsLike, 1_000, 1_000);
+    assert_agreement(SyntheticWorld::MarsLike, 1_000, (1_000, 64));
 }
 
 #[test]
 #[ignore = "slow: 10^3 texels a level, 4 x 10^6 finest points at the class map's level"]
 fn material_weights_agree_with_the_classes_counted_over_a_thousand_texels_moon_like() {
-    assert_agreement(SyntheticWorld::MoonLike, 1_000, 1_000);
+    assert_agreement(SyntheticWorld::MoonLike, 1_000, (1_000, 64));
 }
 
 #[test]
 #[ignore = "slow: 10^3 texels a level, 4 x 10^6 finest points at the class map's level"]
 fn material_weights_agree_with_the_classes_counted_over_a_thousand_texels_ceres_like() {
-    assert_agreement(SyntheticWorld::CeresLike, 1_000, 1_000);
+    assert_agreement(SyntheticWorld::CeresLike, 1_000, (1_000, 64));
 }
 
 /// Points of `field` for the finest level: random points in its hard cells and over the sphere.
@@ -776,7 +791,9 @@ fn material_weights_at_the_finest_level_the_largest_is_the_class() {
         let mut cache = SynthCache::new();
         let finest = finest_band(field.header());
         let deeper = BandLevel::new(finest.get() + 1).expect("a band level");
-        for at in finest_points(field, &synth, 400, &mut rng) {
+        // Two points in each of up to 50 hard cells of each kind, then random ones to 400 a world;
+        // on the browser target up to 12 of each kind, to 100 (`crate::test_sizes`).
+        for at in finest_points(field, &synth, per_target(400, 100), &mut rng) {
             let class = material_at(&synth, &mut cache, at).expect("a whole field holds it");
             for level in [finest, deeper] {
                 let weights = weights_at(&synth, &mut cache, at, level).expect("held");
@@ -882,9 +899,11 @@ fn material_weights_and_the_class_share_the_cut_in_any_order() {
     let mut rng = Lcg::new(0x0063_7574_7300);
     let cells = cold_trap_cells(&field);
     assert!(!cells.is_empty(), "the pole holds partial ice");
+    // Three points in each of four cells, or of two on the browser target, where the six still
+    // take every kind of query in the cycle, in both cells (`crate::test_sizes`).
     let queries: Vec<(FaceUv, Option<BandLevel>)> = cells
         .iter()
-        .take(4)
+        .take(per_target(4, 2))
         .flat_map(|&cell| random_points_in(cell, 3, &mut rng))
         .map(xyz_to_face_uv)
         .zip(
@@ -924,11 +943,16 @@ fn material_weights_agree_with_the_classes_counted_on_a_cold_trapped_pole() {
         let finest = finest_band(field.header()).get();
         let cells = cold_trap_cells(&field);
         let mut rng = Lcg::new(0x0070_6f6c_6500);
+        // A texel costs its cell's cut, 256 heights once a cell, the cell's omitted index at the
+        // level, 512, and two heights at each of its points: 16 texels a level and 24 at the class
+        // map's, of 16 × 16 points, and 8 and 12 of 8 × 8 on the browser target, where 8 at the
+        // class map's left the thick ice's weight 0.105 from its count (`crate::test_sizes`).
+        let (level_texels, class_map_texels) = (per_target(16, 8), per_target(24, 12));
         for (level, count, side) in [
-            (finest - 1, 16, 8),
-            (finest - 3, 16, 8),
-            (finest - 6, 16, 8),
-            (CLASS_MAP_LEVEL, 24, 16),
+            (finest - 1, level_texels, 8),
+            (finest - 3, level_texels, 8),
+            (finest - 6, level_texels, 8),
+            (CLASS_MAP_LEVEL, class_map_texels, per_target(16, 8)),
         ] {
             let (mut tv, mut weight, mut counted) = (0.0, 0.0, 0.0);
             let mut iced = 0;
