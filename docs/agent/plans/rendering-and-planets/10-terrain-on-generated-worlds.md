@@ -3726,6 +3726,30 @@ Ground(SlantRange), NoGround, NotSurveyed }` in place of `Option`, so that T12 c
     too high still fails. The bounds are in one place (`CRATER_GAP`, `GAP_RMS`, `GAP_Z`), and a
     commit under T5's ID removes them after R09.T7.h, so that every world is held at the plan's.
 
+  - _After R09.T7.h_ (2026-10-14; lane r09-crater-sharpening; main's ruling of that day). With the
+    kept craters' sharpening in R09's closed forms, the same case gives, by name in 577 s:
+
+    | World      | Survey | RMS ÷ σ | var z  |
+    | ---------- | ------ | ------- | ------ |
+    | Earth-like | 100 m  | 0.9831  | 0.9318 |
+    | Earth-like | 1 km   | 0.9869  | 0.9697 |
+    | Mars-like  | 100 m  | 0.9941  | 0.9620 |
+    | Mars-like  | 1 km   | 1.0244  | 1.0230 |
+    | Moon-like  | 100 m  | 0.9883  | 0.9748 |
+    | Moon-like  | 1 km   | 0.9828  | 0.9653 |
+    | Ceres-like | 100 m  | 0.9942  | 0.9882 |
+    | Ceres-like | 1 km   | 1.0858  | 1.1762 |
+
+    Every case is held at the plan's 10% in RMS ÷ σ, and all but one at its 15% in var z. The
+    exception, as main ruled, is the Ceres-like world at the 1 km survey alone: its var z is held in
+    [0.85, 1.25], 1.176 measured with headroom for a change of seed, at the plan's tolerance from
+    below. `CRATER_GAP` is now that one case (a world and a survey's index) and `GAP_Z` its bound;
+    `GAP_RMS` is gone. The cause is the ruling's heavy-tailed crater sampling: an octave's E[g²] is
+    carried by its youngest few tenths of a per cent of craters, so 200 × 100 points sample a few
+    dozen. The closed form agrees with R09.T7.h's 10⁴-point measurement within sampling there (kept
+    sharpening 15.0 ± 3.5 against 15.4 m², octaves left out 116 ± 26 against 108 m²). Deferred,
+    below.
+
   - _Acceptance_, as built:
     - `cargo test -p hyperion-surface --lib reading` (21 tests, and the `#[ignore]` measurement
       `reading::tests::the_ground_a_level_leaves_out_by_contribution`);
@@ -3809,7 +3833,10 @@ Ground(SlantRange), NoGround, NotSurveyed }` in place of `Option`, so that T12 c
     squares on a few hundred points differ from the closed forms by 3–9 times, and from each other
     by as much: an octave's E[g²] is carried by its youngest few tenths of a per cent of craters,
     of which a 200 × 100 pooled check samples a few dozen. If T7.h's acceptance misses for that
-    reason, main rules on a larger sample or a check weighted by crater count.
+    reason, main rules on a larger sample or a check weighted by crater count. It did, once: the
+    Ceres-like world at 1 km, var z 1.176 (2026-10-14). Main ruled that case alone held in
+    [0.85, 1.25] (`CRATER_GAP`, above). A check weighted by crater count, or a larger cratered
+    sample, would retire it: for R10.T15's verification pass, not before.
   - _The whole octaves' J₀ structure function_ (the ruling's) places each octave at √(D₀ D₁). Its
     small-lag slope, σ² k² b² ÷ 2, is not the craters' slope variance, ρ E[g² ∫ |∇f|² dA], so
     slopes at 2 m from octaves left out may be off. T7.h leaves that form as it is.
