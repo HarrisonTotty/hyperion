@@ -2697,6 +2697,15 @@ re-blessing this plan's payload and coarse goldens in that commit.
   Moore neighbour, a 3 × 3 search not 5 × 5, one extended network not stacked instances), and
   Design note 15's crater reach is 1.27 D, not "about twice its radius"; all four are now in the
   roadmap's brainstorm corrections ("Terrain, the surface and Knowledge"), awaiting the revision.
+  R09.T11 adds a fifth, drafted for the owner (its "Deviations in T11, as built"): the brainstorm's
+  "Each coarse cell takes the nearest plate seed, by the largest dot product … in milliseconds"
+  and its Decisions' "rasterises plates as a Voronoi diagram" become a power diagram, x′ · p + w
+  with a weight fitted per plate, since an unweighted diagram of uniform seeds has near-equal
+  cells and cannot follow Design note 6's tail law; the fit costs some 0.2–0.4 s at level 8. The
+  roadmap's row (for "main" to add): The coarse global pass (step 1) | "Each coarse cell takes the
+  nearest plate seed, by the largest dot product … in milliseconds" | The largest dot product
+  plus a weight fitted per plate (a power diagram), so that the plates' areas follow Bird 2003's
+  tail law; some 0.2–0.4 s at level 8 | R09 Design note 6; R09.T11.
 - **Asked by R11, not yet designed here** (the roadmap's asks table carries it). The height datum is
   settled as the rotational spheroid (Design note 17, after R07's Design note 19), with the sea
   level a height above it, so R10's datum ask is met. R11 asks for the terrain-independent zonal
@@ -6325,3 +6334,185 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _Per call._ If R10.T2 or T4 read the level-keyed forms per vertex rather than per cell and
     level, a table of `Φ_k` and `S_k` by band level, built once per body, would replace the 50–150
     µs a call.
+- **Deviations in T11, as built** (2026-10-14; lane r09-plates, on `a1f1b61a`; the inputs are
+  builder arguments until P14.T48.e and P14.T54.a put them on the record).
+  - _Files and the frame._ `steps/plates.rs`, its tests in the child `steps/plates/tests.rs` (as
+    `synth/relief/tests.rs`). The frame in `steps/mod.rs`, shared by T12–T15, gains
+    `CellState::seafloor_origin: Option<SeafloorOrigin>` and the plain-data `SeafloorOrigin`
+    (`ridge_distance: Option<Metres>`, `half_rate: MetresPerSecond`, `age: Seconds`),
+    `decision-r09-t5.md` item 5's d_r, u_h and τ on oceanic cells, `None` elsewhere; and
+    `Working::plates: Vec<plates::Plate>` (seed, angular velocity in rad s⁻¹, drawn and realised
+    areas, weight). The quantiser is unchanged: age and rate do not travel. Public: `run`,
+    `Plate`, `MEAN_HALF_RATE` and `OLDEST_FLOOR`; the law's constants, the speed scale and the
+    warp's are `pub(crate)`.
+  - _What it reads_ (all from `CoarseInputs`, builder arguments, no record section being
+    inhabited): `tectonics()` (P14.T24.b's `TectonicRegime`), `continental_fraction()`
+    (P14.T48.a's f_c), `heat_flow()` (P14.T24.b's `GlobalFigures::heat_flow`), `radius()` and
+    `crust_palette()`. Plan 14 gives no plate count: the count is the tail law's draw.
+  - _Regimes._ Only `MobileLid` draws plates. `StagnantLid`, `HeatPipe`, `Episodic` and
+    `IceShell` take the stagnant lid's: the step leaves the initial state's one lid, for T12.c's
+    provinces (T10's "T11 decides what each gets"; the morphologies stay in Composition). So does
+    a mobile lid with no secondary crust (no `Oceanic` palette entry), whose plates could form no
+    floor. A world with no tertiary crust has no continental crust, whatever its f_c (finding
+    below).
+  - _The draws._ Plate k on `surface_item(k)`: its seed (two words, z and longitude uniform), its
+    angular velocity (two Box–Muller pairs, three components used), its area (one word: a tail
+    plate's from `PowerLaw` of density A^−1.31 on [A_min, 1 sr); a large plate's an exponential),
+    then its continental nucleus (centre, two words; size u², one). The tail's count is
+    Poisson(7 (A_min^−0.31 − 1)), 41.06 from 0.002 sr, drawn from word 2⁴⁰ of item 0 so that it
+    and plate 0 share no word; A_min is 0.002 sr or the mean cell's solid angle where larger (a
+    level-5 field's 2.05 × 10⁻³ sr). The seven large plates take 1 sr each plus shares of the
+    excess, uniformly Dirichlet (the exponentials normalised). Where the tail would overflow the
+    4π − 7 sr they leave it (11 of 500 seeds), it ends at the plate that would; at most 256
+    plates. The tag table's "crust type per plate" is the continental nucleus.
+  - _The raster is a fitted power diagram._ Design note 6's "largest dot product" gains a weight
+    per plate, score x′ · p + w, ties to the lower index, since an unweighted diagram of uniform
+    seeds has near-equal cells and its areas would fail the tail-law test. The weights are fitted
+    (the semi-discrete transport problem) by damped Newton steps on the Laplacian of the plates'
+    shared boundaries, ℓ_kj ÷ |∇(s_k − s_j)| with ℓ from the edges crossed (π ÷ 4 a cell side
+    each), an empty plate coupled to its seed's host and stepped by its deficit there, halving
+    until Σ (error ÷ tolerance)² falls, at levels 6, 7, … up to the field's, then single-plate
+    sweeps; the tolerance is 1% or two mean cells. `assign` sets aside, per level-4 block, every
+    plate whose chordal upper bound falls short of the best lower bound by 10⁻⁹, so its result
+    is the full scan's bit for bit (a test compares them on the reference Earth). A part of a
+    plate cut off from its largest part joins the neighbouring plate it shares most edges with
+    (`join_parts`), and the field's level is fitted with its parts joined, so every plate is one
+    region and its area its drawn one. This departs from the brainstorm's Voronoi diagram "in
+    milliseconds" as well as from Design note 6, drafted for the owner under "Brainstorm
+    departures for its revision".
+  - _The warp._ A vector of three uniforms in [−1, 1) at each cell of a level-4 lattice on
+    `surface.coarse.warp` (`surface_cell` keys), their Shepard mean under the compact kernel
+    (1 − r² ÷ h²)³ within the chord h = 0.21, C² across face edges; a cell's centre moves by 0.12
+    times it for the plates and 0.25 for the continental nuclei, both illustrations chosen by eye.
+    T4's interpolant was tried first: three interpolations a cell took 1.6 s at level 8, the
+    kernel 0.06 s.
+  - _The crust._ Continental where |x′ − c| ÷ ρ is least over the plates' nuclei, cells taken in
+    (score, index) order while they bring the area nearer f_c × 4π (to half a cell); the rest
+    oceanic. The nuclei are not confined to their plates, so continents straddle boundaries
+    (collisions, continental rifts and transforms), and plates are mixed, with passive margins
+    inside them for T12.a's turbidites (`decision-r09-t5.md` item 5), which the testing world's
+    one-crust plates could not give.
+  - _The motion._ Each component of ω is a standard normal times Ω = Ω⊕ (F ÷ F⊕)², with
+    Ω⊕ = 4√π u_h ÷ (3√3 R⊕) = 1.56 × 10⁻¹⁶ rad s⁻¹ in closed form, so that a ridge's mean
+    half-rate is Bird's 23 mm a⁻¹ (measured: 23.4 mm a⁻¹ over 32 reference Earths), and F⊕ =
+    0.0916 W m⁻²; the square follows the half-space cooling model's q̄ ∝ √(u ÷ L) with L ∝ R
+    (medium-low confidence). A world of no heat flow has plates that do not move, which meet at
+    transforms.
+  - _The boundaries._ A boundary cell takes, of its edge neighbours' plates, the one whose
+    boundary is nearest by the score difference over its gradient; the normal is that gradient's,
+    by least squares over the four edge neighbours (within some 10⁻⁵ rad of the plane's on
+    hand-placed plates). Classes by the relative motion against it, the testing worlds' equal
+    thirds (convergent within 60° of head-on, divergent within 60° of opening); no relative motion
+    at all is a transform of obliquity π ÷ 2. A convergent boundary between continents is a
+    collision; an oceanic side subducts beneath a continent, and of two oceanic plates the one
+    whose floor along their oceanic convergent boundary is older on average, the higher index at
+    a tie. T2's sign lean is kept: the distance is negative on the subducting plate, per nearest
+    boundary. So on a plate that subducts at one boundary and spreads at another the sign flips
+    from −d to +d where the nearest boundary changes, and the test bounds |d| a step, not d (for
+    T12.b, which reads the sign). A plate's ridge whose half-rate rounds to zero (a subnormal
+    opening, from a heat flow below some 10⁻¹⁵⁰ W m⁻²) is a transform.
+  - _The transforms._ Multi-source shortest paths over each plate's own cells, through edge and
+    vertex neighbours with great-circle lengths, settled in (distance, cell, source) order. The
+    nearest-boundary transform starts from every boundary cell (zero there, +0); the ridge
+    transform from the cells whose nearest boundary is divergent, each settled cell inheriting
+    its source's half-rate, so d_r is never taken from a trench; τ = min(d_r ÷ u_h, 200 Myr).
+    Oceanic cells no ridge of their plate reaches take 200 Myr and 23 mm a⁻¹, with no d_r.
+  - _The interim sea floor._ Oceanic cells get `hill_relief = Some(H_REF)`, the reference style's
+    95 m, so that the field keeps its rule (hills exactly on oceanic crust) until T12.a writes its
+    law; `CellState::hill_relief`'s documentation says so.
+  - _Tests and acceptance._ `cargo test -p hyperion-sim planetary::surface::steps::plates`: 18
+    fast tests and one slow one. The fast ones: ties to the lower index, and the pruned scan the
+    full one's; every plate one region; boundaries exactly the adjacencies; signed distances +0 on
+    boundaries, negative only by subduction, stepping by at most a link's length; kinds,
+    obliquities and polarity on hand-placed hemispheres (opening, closing and sliding); the older
+    oceanic side; half-rates |ω × r| ÷ 2 normal to the ridge to 10⁻⁴, inherited bit for bit; d_r
+    zero on ridges and from no trench; τ = d_r ÷ u_h capped; 200 Myr and 23 mm a⁻¹ without a
+    ridge; the drawn areas' tail law (KS D = 0.0033 over 20,409 tail plates of 500 seeds,
+    p = 0.98), the drawn count (mean 47.82, spread 6.29; the plan's 48 ± 7), the Poisson count
+    within 3.29 SE of 41.06, early tails; the areas summing to 4π and each plate within its
+    tolerance; f_c to half a cell (0, 0.2, 0.7, 1 and the reference Earth), a collision and a
+    passive margin; no plates on the stagnant lid, the other three regimes and a mobile Ceres;
+    the same seed twice; levels 5–7 mobile lids at f_c 0.2–1 and heat flows 0–0.3 W m⁻²
+    through the whole pass; the reference Earth's mean half-rate (22.45 mm a⁻¹). The slow one
+    (`#[ignore = "slow: 32 reference Earths' plates at level 8"]`, 46 s under load): the realised
+    tail areas (KS D = 0.024 over 1,379 plates, p = 0.40), the realised count (49.94 ± 7.08) and
+    the mean half-rate (23.43 mm a⁻¹ within 20%). So the acceptance filter runs the drawn areas'
+    KS test, and the task's "over many seeds" on the realised areas runs by name, with
+    `cargo test -p hyperion-sim --features testing --lib planetary::surface::steps::plates -- --ignored`, or in the slow pass; the fast tier holds the
+    realised areas to the drawn ones on the reference Earth. "48 ± 7" is read as a bound on the
+    mean; the spread (6.29 drawn, 7.08 realised) is measured, not asserted.
+  - _Plan text superseded_ (for the docs batch): the tag table's `surface.coarse.plates` draws
+    each plate's continental nucleus (centre and size), not a "crust type", and the count from
+    word 2⁴⁰ of item 0; `surface.coarse.warp` also warps the nuclei; Design note 6's "Euler poles
+    and crust types" are Euler poles and nuclei, the crust per cell, plates mixed; its
+    "(distance, cell index)" order is (distance, cell, source), over each plate's own cells. The
+    surface crate's registry docs (`tags.rs`) say the same, which T11 left alone to keep its
+    files the sim's.
+  - _The working state grew_ by `seafloor_origin`, about 40 B a cell (16 MB at level 8), and the
+    step holds some 70 MB more while it runs (two warped centres, the contacts, two transforms'
+    reaches), beside R09.T17's deferred estimate of about 100 MB a pass ("Concurrent passes").
+  - _Cost_ (provisional, at `opt-level = 2` under shared load): the step takes some 0.6–0.9 s on
+    the reference Earth at level 8: the warp 0.06 s, the fit 0.2–0.4 s, the crust 0.08 s, the
+    layout 0.33 s (two transforms of 0.15 s each). The pass's own tests on the reference Earth
+    carry it.
+  - _Moves._ No golden pins the coarse field (T16's), none moved (`golden_diff.py`), and
+    `GENERATOR_VERSION` stays 21. The reference Earth's unpinned field now has 40–55 plates,
+    mixed crust and boundaries cell by cell, so T19.c's lean (re-run it when T11 first varies the
+    records) is due.
+  - _Review._ The Rust review's findings are applied (the fit passed by value, units in names,
+    `#[must_use]`, `pub(crate)`, sourced constants, the warp taken whole, the pair map's
+    `expect`); the determinism audit found nothing to fix (its three hardening items: the draw
+    golden and the registry's docs are deferred below, and a subnormal opening is no ridge); the
+    science check's documentation corrections are applied (Bird's −1/3 against the design note's
+    0.31, π ÷ 4's derivation, the 9.5 m margin at 200 Myr, NNR-MORVEL56's speeds, Bird's classes
+    and the cooling law's sources), and its figures are deferred below.
+- **Deferred findings (2026-10-13 rule)** (R09.T11; recorded, not ruled; each for "main"'s list).
+  - _The sea floor is old_ (the science check's one large finding; it would change the ruled
+    algorithm, so it is "main"'s to route). On four reference Earths the area-weighted mean age is
+    110–125 Myr and 25–37% of the floor sits at the 200 Myr cap, against Earth's 63.8 Myr
+    (Müller et al. 2008's grid, as Seton et al. 2020, G³ 21, e2020GC009214, §3.1, quote it; the
+    check's own area weighting of that grid gives 64.3 Myr, with 15.2%, 4.7% and 0.22% older than
+    120, 150 and 180 Myr). τ = d_r ÷ u_h ages the far side of every plate from its ridge, where
+    Earth's trenches consumed it; slow openings near Euler poles and on oblique ridges age whole
+    plates; and plates with no ridge take the cap. GDH1 saturates past 100 Myr, so T12.a's ocean
+    mean and mode carry it. Lean: T12.a calibrates against the hypsometry, and a ruling chooses
+    between bounding τ by the plate's own trench and mapping ages by area rank onto Earth's
+    distribution.
+  - _Bird's figures, like for like_ (the science check). The 23 mm a⁻¹ is half Bird's mean
+    relative speed on oceanic ridges (46.6); their mean opening is 44.7 mm a⁻¹, 22.3 halved, so a
+    like-for-like Ω⊕ would be 3% lower. Bird's ridge class spans motion within 70° of opening
+    head-on (¶127's ±20° strike-slip rule), the step's 60°; adopting it would raise Ω⊕ by 7.5%.
+    Continental rifts open at 17.6 mm a⁻¹ in full against the ridges' 46.6 (Table 3), where the
+    step gives them ridge rates. Lean: record; the ruling's 23 and the equal thirds stand.
+  - _Slivers._ A small plate between two large ones rasterises as a thin strip along their
+    bisector, since a power cell is the intersection of caps about (p_k − p_j) ÷ |p_k − p_j|, not
+    about its seed. An additively weighted score, w − θ(x′, p), keeps every cell star-shaped about
+    its seed and connected, at an angle per score. Lean: T12.b's re-validation decides, as it reads
+    the boundaries.
+  - _Small plates are not in orogens._ Seeds are uniform; Bird 2003 places most small plates in
+    the orogens about the large ones' boundaries. Lean: with the slivers.
+  - _No speed–size or slab-pull relation._ Each plate's ω is drawn alone; on Earth small plates
+    turn fastest and plates attached to slabs move fastest. Lean: for a geodynamics pass.
+  - _Transforms are long._ A boundary is classed cell by cell from smooth geometry, so transforms
+    are long arcs, not the short faults offsetting ridge segments (no fracture zones). Lean: T12's
+    re-validation.
+  - _The classes' thresholds_ (60° and 120°) are the testing worlds' convention (labelled):
+    a third of boundaries to each class under random motion, against Earth's 35.2% convergent,
+    36.4% divergent and 28.4% transform by length (Bird 2003, Table 3), where Bird's own ±20°
+    would give some 22% transforms. Lean: keep them.
+  - _Distances run 8-connected._ Shortest paths over edge and vertex links overstate great-circle
+    distance by up to about 8% at some bearings, which T12.b's 190 and 260 km fronts read. Lean:
+    T12.b measures it against its 15 km medians.
+  - _The inputs accept two contradictions,_ for P14.T54.a, which owns `inputs.rs`: a mobile lid
+    with no secondary crust, and f_c above zero with no tertiary crust. The step gives the first
+    no plates and the second no continents. Lean: `build` refuses both.
+  - _The speed law rests on boundary-layer scaling_ (the half-space cooling model's q̄ ∝ u^½;
+    q ∝ t^−½ is Davies and Davies 2010's eq. 1, the plate average Turcotte and Schubert's, not
+    read), which is contested for hotter mantles (Korenaga 2006 and 2008, from memory, argues
+    for slower plates). Lean: a geodynamics pass; the label stays medium-low.
+  - _Rifts age floor._ The ridge transform starts from every divergent boundary cell, continental
+    rifts included, and its paths cross a plate's continental cells, so some floor takes its age
+    and half-rate from a rift that made none. Lean: T12.a's science check.
+  - _The draws are unpinned._ Nothing pins the plates' and the warp's word layout until T16's
+    field golden; a reordered draw would pass every test. Lean: T16, or a draw golden when "main"
+    rules its header (21 or 22).
