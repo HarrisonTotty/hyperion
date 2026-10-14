@@ -11,16 +11,16 @@
 //!   later generators read.
 //! - [`surface`]: the body's [`SurfaceConditions`] (P14.T24.a): its mean temperature and signed
 //!   contrasts, its surface pressure and gases as mole fractions, the light and radiation it
-//!   receives, whether water can be liquid on it, and its [`ClimateRegime`] (P14.T48.d); held
-//!   until the 21 → 22 batch's bump.
+//!   receives, whether water can be liquid on it, and its [`ClimateRegime`] (P14.T48.d).
 //! - [`figures`]: the body's [`GlobalFigures`] (P14.T24.b), so far its heat flow, tectonic
 //!   regime, magnetic field, present outgassing and subsurface ocean, its surface age and crater
 //!   contract (P14.T48.c) with its [`Impactors`] (P14.T48.f), its volcanism level, continents and
 //!   relief (P14.T48.a), its surface water and the ocean weight θ the conditions read, and,
-//!   read from the conditions, its volatile history (P14.T48.b), ocean, ice and cloud; held with
-//!   the surface conditions.
+//!   read from the conditions, its volatile history (P14.T48.b), ocean, ice and cloud.
 //!
-//! [`BodyHooks`] holds them, from
+//! The conditions and figures are a body's record's surface section
+//! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), from the 21 → 22 batch's
+//! bump. [`BodyHooks`] holds them with the seed and the composition, from
 //! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at). The habitability
 //! assessment (T25) and the resource abundances (T26) join it with their tasks.
 //!
@@ -149,19 +149,17 @@ impl BodyHooks {
         &self.bulk
     }
 
-    /// The surface conditions (P14.T24.a): [`Section::Ok`] for a present body with a surface,
+    /// The surface conditions (P14.T24.a), the body's record's surface section's, in its state
+    /// (P14.T48.e): [`Section::Ok`] for a present body with a solid surface,
     /// [`Section::NotApplicable`] for one in the gas-envelope state or not present, and
     /// [`Section::NotModelled`] for a body whose spin or derivation this version does not compute.
-    /// Every body's is [`Section::NotModelled`] until the 21 → 22 batch's bump
-    /// ([`surface`](mod@surface)'s documentation, "Held until the batch's bump").
     #[must_use]
     pub const fn surface(&self) -> &Section<SurfaceConditions> {
         &self.surface
     }
 
     /// The global figures (P14.T24.b): in the same state as [`surface`](Self::surface), since the
-    /// conditions read their heat flow and the figures of later tasks read the conditions. Every
-    /// body's is [`Section::NotModelled`] until the 21 → 22 batch's bump, as its conditions are.
+    /// conditions read their heat flow and the figures of later tasks read the conditions.
     #[must_use]
     pub const fn figures(&self) -> &Section<GlobalFigures> {
         &self.figures

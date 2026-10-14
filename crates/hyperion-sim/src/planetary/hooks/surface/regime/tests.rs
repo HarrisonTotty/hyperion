@@ -4,10 +4,9 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::planetary::derive::DerivedBody;
-use crate::planetary::derive::atmosphere::Speciation;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::solar::{
-    PLANETS, SOLAR_AGE, derive_under, placed_about_the_sun, solar_disc,
+    PLANETS, SOLAR_AGE, derive_historic, placed_about_the_sun, solar_disc,
 };
 use crate::planetary::hooks::figures::cover::PERENNIAL_ICE_TEMPERATURE;
 use crate::planetary::hooks::figures::{VolatileHistory, table_figures};
@@ -222,7 +221,7 @@ fn earth_at(a_au: f64) -> DerivedBody {
     let disc = solar_disc();
     let &(_, kg, km, _, e) = PLANETS.iter().find(|(n, ..)| *n == "Earth").unwrap();
     let placed = placed_about_the_sun(&disc, (kg, km, a_au, e));
-    derive_under(&placed, &disc, SOLAR_AGE, Speciation::CarbonAndOxygen)
+    derive_historic(&placed, &disc, SOLAR_AGE)
 }
 
 #[test]

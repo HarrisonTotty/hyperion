@@ -640,7 +640,7 @@ fn body_record(record: &BodyRecord) -> BodyRecordDto {
         rotation: Some(section(record.rotation(), rotation)),
         figure: Some(section(record.figure(), figure)),
         photometry: Some(section(record.photometry(), photometry)),
-        surface: section(record.surface(), |&value| surface(value)),
+        surface: surface(record.surface()),
         hooks: section(record.hooks(), |&value| hooks(value)),
     }
 }
@@ -871,10 +871,18 @@ fn phase_template(template: PhaseTemplate) -> PhaseTemplateDto {
     }
 }
 
-/// A surface section's value, which no record of this generator version holds.
+/// A surface section as the wire carries it until P14.T35.e gives `BodySurfaceDto` its form.
+///
+/// An [`Section::Ok`] surface (P14.T48.e) is sent as `not_modelled`, as an older server sent
+/// every surface, and the other states as they are (decision-p14-t35e-wire §2.5, finding F1). The
+/// record's envelope section is not on the wire before T35.e.
 #[must_use]
-fn surface(surface: Surface) -> BodySurfaceDto {
-    match surface {}
+fn surface(surface: &Section<Surface>) -> SectionDto<BodySurfaceDto> {
+    match surface {
+        Section::Ok(_) | Section::NotModelled => SectionDto::NotModelled,
+        Section::NotResolved => SectionDto::NotResolved,
+        Section::NotApplicable => SectionDto::NotApplicable,
+    }
 }
 
 /// A hooks section's value, which no record of this generator version holds.

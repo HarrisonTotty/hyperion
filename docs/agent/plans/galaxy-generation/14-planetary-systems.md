@@ -11731,6 +11731,138 @@ tables::gauss_legendre`.
     the Yang fluxes in W m⁻² (1,900 and 2,615), and R09's Design note 3 ("Koll's factor … at k =
     2", now the body's own k).
 
+- **Deviations in P14.T48.e, as built (`p14-bump`, 2026-10-14).** The record's surface section,
+  the gas-envelope split and the batch's three holds folded, in T48.e's own commit, ahead of the
+  batch's bump commit.
+  - _The order._ The plan puts the folds in "the batch's bump commit, this subtask's". As built
+    they are T48.e's commit, a checkpoint blessed at header 21, and the bump commit after it bumps
+    and blesses alone ("main"'s batch order of 2026-10-14: T48.e; R09.T1.b; P15.T6.g's F2 and F1;
+    the bump; decision-p14-d10-bd-companions §1–2). No commit of the batch reaches
+    `rendering-and-planets` alone, so (seed, 21) still names one output, version 21's as pushed
+    (decision-displaced-since's rule for checkpoints).
+  - _The folds_, step by step as "A sub-Neptune's tides, as built", "Deviations in P14.T24.f, as
+    built" and "Deviations in P14.T24.a, as built" list them:
+    - `ENVELOPED_TIDES_VERSION`, `tides_in_force` and its tripwire are gone; `of_class` and
+      `tidal_planet` call `tides`. `a_sub_neptune_locks_only_close_in` goes through `of_class`,
+      and `with_its_tides` is gone. The tripwire's place is taken by
+      `every_class_s_spinning_body_takes_its_tides` (`of_class` carries `tides`' pair bit for bit
+      at the mass and radius it rounds through). The named `Tides { love_number, tidal_q }` the
+      rust-reviewer suggested is not built: `tides` keeps its `(f64, f64)`.
+    - `CARBON_SPECIATION_VERSION`, `Speciation`, `atmosphere_under`, `derive_body_under` and the
+      tripwire are gone; `Airborne::kept` and `divide` lose their parameter. The tests' held
+      readings are deleted as listed; `earth_venus_and_mars_keep_their_carbon_as_carbon_dioxide`
+      checks instead that methane's retention follows nitrogen's on the inner bodies. `derive::solar`'s
+      `derive_under` and `table_under` become `derive_historic` and `historic_table`, with no
+      parameter; the atmosphere's tests keep their own `derive` and `table`, which are the same.
+    - `SURFACE_CONDITIONS_VERSION`, `ConditionsHold`, `hooks_at_under` and the tripwire are gone,
+      with the held loop of `methane_and_oxygen_reach_the_fractions_through_the_speciated_derivation`.
+      `planetary/impactors`' rate column is written unconditionally.
+  - _`record::Surface`._ A struct of the surface state (the atmosphere's), the material
+    (`SurfaceMaterial::of` the bulk fractions), the climate regime, the conditions and the global
+    figures, built by the crate-private `Surface::new`, which refuses the gas-envelope state and
+    conditions without a regime, so that `climate_regime()` returns `&ClimateRegime`. T48.a–d's
+    figures are the conditions' and the figures' own getters, every substance a `SubstanceId`.
+    The later members are getters returning `record::Modelled<&T>`, a new two-state enum (`Ok`,
+    `NotModelled`), over uninhabited placeholders `VerticalStructure`, `AerosolInventory`,
+    `Condensates`, `CrustComposition`, `SurfaceModifiers` and `Biosphere`, each named for its
+    task; their tasks give the types their contents and may reshape them (decision-composition
+    §1.10; no build has sent a value). `Surface` loses `Copy`, `Eq`, `Hash` and `Ord`.
+  - _Where it is computed._ `primary_record` and `satellite_record` build it through
+    `PlanetarySystem::surface_section` and `published_surface` (now returning
+    `Section<record::Surface>`), for a present body whose bulk class `has_solid_surface()`.
+    `surface_section` returns `NotModelled` at once for a body with no rotation law, so that
+    `generate`'s own snapshot at `parent_time`, whose bodies have no law yet, computes no surface.
+    `satellite_record` takes its parent's `BodyFate`, which `snapshot_at` keeps beside each
+    parent's `ParentNow`. `hooks_at` reads the record's section (one computation, so the hooks and
+    the record cannot part): `BodyHooks::surface` and `figures` are its conditions and figures in
+    its state (`Surface::into_parts`). A giant of a `generate_planets` system, which has no law,
+    has its hooks' sections `NotApplicable` now, the record's tag, where they were `NotModelled`.
+  - _The split._ `PlanetClass::has_surface` is gone; `is_giant` takes `SpinFamily::of`, and
+    `has_solid_surface` the record's tags and `Datum::of`.
+    `the_class_predicates_split_at_the_sub_neptune` pins both against version 21's predicate and
+    the datum. `BodyRecordBuilder::derived` tags the surface `NotModelled` and the envelope
+    `NotApplicable` for a solid class, and the surface `NotApplicable` and the envelope
+    `NotModelled` otherwise; populations and absent bodies take both `NotApplicable`, every moon
+    its envelope `NotApplicable`.
+  - _The envelope._ `RecordSection::Envelope`, the thirteenth, at `DetailLevel::Surface`, with
+    `BodyRecord::envelope`, the builder's `envelope` and `record::Envelope` uninhabited. The
+    protocol's `RecordSectionDto` gains `Envelope` ("envelope"), so that the server's
+    `record_section` stays total and its test (every section by its wire name) holds; the surface
+    field never names it. That is one additive variant of R09.T19's wire type in this subtask
+    rather than in T35.e, with `PROTOCOL_VERSION` 2.
+  - _The wire's stopgap._ `convert/planetary.rs`'s `surface` sends an `Ok` surface as
+    `not_modelled`; the envelope is not on the wire before T35.e.
+  - _R09's `for_body`._ The tag mapping stands. An `Ok` section answers
+    `NotModelled(RecordSection::Surface)` from its crust, `Modelled::NotModelled` until P14.T54.a,
+    which also gives the reading the record's time and a moon's planet's orbit ("main"'s ruling of
+    2026-10-10). So the coarse pass still runs on builder inputs for every generated world. The
+    test pins a generated rocky planet's `Ok` section and its answer, the regime's
+    `From<&hooks::surface::ClimateRegime>` reading on it (the condensable by key), and
+    `NoSolidSurface` on a generated gas giant and, new, a generated sub-Neptune.
+  - _Pins._ `planetary/systems/*` gain each `Ok` surface's summary (its state, material and
+    regime, the mean temperature, both contrasts, the pressure, σ_h, f_c, the heat flow, the
+    surface age and the ocean and ice fractions) and every record's `envelope` state, after every
+    older line; `planetary/surface_conditions_published` stays the sample's whole pin.
+    `the_golden_systems_split_surfaces_from_envelopes` checks the split on the golden systems.
+  - _Tests kept from T24.a_: the 90°-obliquity world's negative equator–pole contrast, the locked
+    airless body's day–night contrast over 300 K and Venus's under 10 K.
+  - _Tests added or renamed_: `the_class_predicates_split_at_the_sub_neptune` (derive);
+    `a_derivation_tags_the_surface_and_the_envelope_by_the_gas_envelope_split` (record, with
+    `degrade`); `the_hooks_publish_the_record_s_surface_conditions_and_figures` (was
+    `…_only_from_the_batch_s_bump`: the hooks equal the record's section);
+    `a_surface_holds_a_solid_state_and_its_conditions_regime` (`Surface::new`'s refusals);
+    `a_record_tags_what_the_generator_does_not_compute` checks planets, dwarf planets and moons
+    through `assert_surface_or_envelope`; `a_snapshot_is_body_at_body_by_body` also compares the
+    records' `Debug` forms, bit for bit with signed zeros; R09's
+    `a_generated_rocky_body_is_not_modelled_and_a_giant_or_sub_neptune_has_no_solid_surface`;
+    `the_enveloped_love_numbers_are_pinned_bit_for_bit` (was `the_held_…`). The server's
+    `system_bodies` test holds an `Ok` surface to the stopgap's `not_modelled`.
+  - _Accepted_, besides the task's commands, by `cargo test -p hyperion-sim planetary::system`,
+    `cargo test -p hyperion-sim --test planetary_golden` and
+    `cargo test -p hyperion-server --test system_bodies`.
+  - _Files beyond the task's_: `system.rs`, `hooks/{mod, figures, surface}.rs` and their tests,
+    `hooks/figures/wet_epoch/tests.rs`, `hooks/surface/regime/tests.rs`,
+    `tests/planetary_golden.rs`, `hyperion-protocol/src/surface.rs` with the generated
+    `RecordSectionDto.ts`, `convert/surface.rs` and `hyperion-server/tests/system_bodies.rs`.
+  - _The placeholders' future._ Each later task replaces its `record::` placeholder with its own
+    type (Provides' `hooks::VerticalStructure`, T24.c's and T51.c's `hooks/aerosols.rs` and
+    `hooks/crust.rs`), or makes the placeholder its type; T24.d's envelope is the `Envelope`
+    section's content, not a `VerticalStructure` variant of the surface. T35.e maps
+    `record::Modelled` onto the wire's three states: `NotModelled` absent, `Ok` a value or `null`.
+  - _What the checkpoint moves_ (blessed at header 21; `golden_diff.py` against 28e9aad4, whose
+    "not bumped" problem is expected here):
+    - `planetary/derive_body`: 28 values, T14.d's three moon limits (Uranus ×0.431, Neptune
+      ×0.345, `hot_sub_neptune` ×514, as its entry measured) and T24.f's on `icy`, `beyond_dry`,
+      `beyond_watery`, `titan` and `wet_runaway` (methane and oxygen, as its entry measured);
+    - `frame/body_rotations`: 8 values, two bodies' poles and angles (T14.d's);
+    - `planetary/impactors`: the rate column, 26 values added;
+    - `planetary/surface_conditions_published`: 138 values changed and 9 CO₂ mole fractions
+      become CH₄, the cold beyond-limit bodies under T24.f's rules (`02000b2ca0000001.0400`'s
+      crust Silicate → IceRich, its condensable none → H₂O and its pressure 1.05 Mbar → 27 kbar;
+      belt members' column masses by some 5 × 10⁻⁵);
+    - `planetary/systems/*`: T14.d's tides in the five systems its entry names and in no other
+      (`close_binary` 12 values, `filler_c` 406, `hierarchical_triple` 78, `subgiant` 6,
+      `wide_binary` relabelled only), each sub-Neptune's surface `NotModelled` → `NotApplicable`,
+      every other present body's `Ok`, with the summary lines and every record's envelope added.
+  - _R09's `WetEpoch`_ is not mapped from `figures::WetEpoch` here (T48.b as built names T48.e):
+    it is `for_body`'s reading, which P14.T54.a writes ("main", 2026-10-10); R09's struct still
+    lacks `runoff` and `from_colder`.
+- **Deferred findings (2026-10-13 rule)**, from P14.T48.e:
+  - _The section's cost._ `snapshot_at` over the sample's first 60 systems (1,137 records, 877
+    surfaces) went from 31 ms to 207 ms, about 0.2 ms a surface (a test build at the sim's
+    `opt-level = 2`, at loads of 5–17: provisional). T33.a's target, `generate` plus
+    `snapshot_at` under 1 ms a field system, is missed by about three times, and
+    decision-composition §1.3's estimate of 10–25 µs a section is about ten times low. Not
+    profiled; the volatile history's past-sky integration is the likely share. For T33.a's
+    benchmark on a quiet machine.
+  - The server builds whole snapshots for `system_bodies` at every level and for the scene's
+    list of indices (`scene/core.rs`), so it computes surfaces it then withholds or drops; and
+    `body_at` of a moon computes its planet's surface as well. A record built to a level, or a
+    cheaper index list, would save them.
+  - `hooks_at` derives a moon twice, for its record and for its bulk composition.
+  - R09's coarse pass still cannot read a generated world: `for_body` waits on P14.T54.a's crust,
+    condensates and palette, and on the record's time.
+
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might
   expect to exist"; noted by "main"). The drafted surface-section tasks define closed sets that

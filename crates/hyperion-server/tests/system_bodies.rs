@@ -1152,7 +1152,13 @@ async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
             &record.bulk,
         );
         assert_bulk_level_is_the_sims(&sim, record);
-        assert_same_state(record.id.as_str(), &record.surface, sim.surface());
+        // Until P14.T35.e gives the wire its form, an `Ok` surface (P14.T48.e) is sent as
+        // `not_modelled`.
+        if matches!(sim.surface(), Section::Ok(_)) {
+            assert_eq!(record.surface, SectionDto::NotModelled, "{}", record.id);
+        } else {
+            assert_same_state(record.id.as_str(), &record.surface, sim.surface());
+        }
         assert_same_state(record.id.as_str(), &record.hooks, sim.hooks());
         // Every hooks section is not modelled; a population's is not applicable.
         assert!(matches!(

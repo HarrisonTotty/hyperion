@@ -10,7 +10,6 @@ use super::*;
 use crate::planetary::belts::{BeltHost, FIRST_BELT_SLOT, host_belts};
 use crate::planetary::derive::DerivedBody;
 use crate::planetary::derive::solar::{SOLAR_AGE, solar_disc};
-use crate::planetary::hooks::surface::ConditionsHold;
 use crate::planetary::moons::regular::DerivedMoon;
 use crate::planetary::placement::OrbitHost;
 use crate::planetary::placement::classes::orbits::SystemPlane;
@@ -1012,12 +1011,9 @@ fn rule(source: ImpactorSource) -> &'static str {
 }
 
 /// The Solar System's impactors, pinned to the bit: every planet's, the Moon's, Ceres's and
-/// Pluto's, the 15 regular moons' and Hyperion's. Nothing on the record reads them yet, so the
-/// 21 → 22 bump moves only the header, unless the batch changes the model.
-///
-/// Their rate (P14.T48.c's `R_b`) is held with the surface conditions: its column joins from the
-/// batch's bump, which blesses it (science-p14-t24b-laws §2.6), and until then this golden is
-/// version 21's.
+/// Pluto's, the 15 regular moons' and Hyperion's, with their rate (P14.T48.c's `R_b`), whose
+/// column joined with the surface conditions at the 21 → 22 batch's bump (science-p14-t24b-laws
+/// §2.6).
 #[test]
 fn the_solar_system_s_impactors_are_pinned() {
     use hyperion_testkit::golden;
@@ -1041,9 +1037,7 @@ fn the_solar_system_s_impactors_are_pinned() {
         );
         w.f64(&format!("{name}_k_target"), i.k_target());
         w.line(&format!("{name}_crust = {:?}", i.crust()));
-        if ConditionsHold::in_force() == ConditionsHold::Published {
-            w.f64(&format!("{name}_rate"), i.rate());
-        }
+        w.f64(&format!("{name}_rate"), i.rate());
     };
     for (name, ..) in PLANETS {
         pin(&mut w, &name.to_lowercase(), &planet_impactors(name, sun));
@@ -1098,16 +1092,14 @@ pub(in crate::planetary::hooks::figures) fn sidereal_period(name: &str) -> Secon
 /// with its crater inputs ([`table_craters`]).
 pub(in crate::planetary::hooks::figures) fn figures_table()
 -> Vec<(&'static str, DerivedBody, GlobalFigures)> {
-    crate::planetary::derive::solar::table_under(
-        crate::planetary::derive::atmosphere::Speciation::CarbonAndOxygen,
-    )
-    .into_iter()
-    .map(|(name, body)| {
-        let figures =
-            figures_from(&inputs_of(&body, name)).expect("the table's bodies have surfaces");
-        (name, body, figures)
-    })
-    .collect()
+    crate::planetary::derive::solar::historic_table()
+        .into_iter()
+        .map(|(name, body)| {
+            let figures =
+                figures_from(&inputs_of(&body, name)).expect("the table's bodies have surfaces");
+            (name, body, figures)
+        })
+        .collect()
 }
 
 /// The figures `inputs` describe, which are in range.
@@ -2523,8 +2515,6 @@ fn the_figures_refuse_inputs_out_of_range() {
 /// The table's figures, Io's and the measured Europa's, with their surface ages and crater
 /// densities, pinned to the bit (P14.T24.b, T48.c), with the reference Moon's encounter factor and
 /// the table's volatile histories about plan 06's Sun (P14.T48.b).
-/// Nothing published reads them before the 21 → 22 bump, so it moves only their header, unless the
-/// batch changes them.
 #[test]
 fn the_table_s_figures_are_pinned() {
     use hyperion_testkit::golden;

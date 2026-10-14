@@ -109,11 +109,10 @@
 //!   giant-impact moon's its parent's, a giant's capture beyond the ice line, and a rocky planet's
 //!   capture its neighbouring belt's side.
 //!
-//! # Not on the record yet
+//! # On the record
 //!
-//! Nothing on a body's record calls [`impactors`]: P14.T48.c's crater contract reads them inside
-//! [`GlobalFigures`], published under the surface conditions' hold until the 21 → 22 batch's
-//! bump, whose goldens move once. It draws nothing.
+//! P14.T48.c's crater contract reads [`impactors`] inside [`GlobalFigures`], which a body's
+//! record's surface section carries from the 21 → 22 batch's bump (P14.T48.e). It draws nothing.
 
 use core::fmt;
 use std::error::Error;
