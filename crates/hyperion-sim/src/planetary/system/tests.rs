@@ -1454,8 +1454,8 @@ fn a_query_does_not_depend_on_the_queries_before_it() {
 }
 
 /// Design note 10's close-binary flag is Kraus et al.'s (2016) 47 au cut: a component of a pair
-/// inside it has its planets suppressed and its circumbinary zone takes the pair's plane, and one
-/// of a pair outside it neither.
+/// inside it is flagged and its circumbinary zone takes the pair's plane, and one of a pair outside
+/// it neither.
 #[test]
 fn the_close_binary_flag_and_the_aligned_plane_are_kraus_s_cut() {
     let e = Eccentricity::new(0.3).unwrap();

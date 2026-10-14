@@ -16,8 +16,9 @@
 //!    sphere of influence (design note 14). A field system's strip radius lies far beyond its
 //!    discs, where the cut changes no bit of the disc, the class draw or the placement.
 //! 3. **The class** (P14.T4) of each zone, drawn at its host number under the constraints of its
-//!    disc, its reach and design note 10's close-binary flag
-//!    ([`OrbitZone::host_multiplicity`]).
+//!    disc and its reach. A close binary acts through the reach alone: design note 10's flag
+//!    ([`OrbitZone::host_multiplicity`]) moves no class weight (decision-p14-d10-bd-companions
+//!    §2).
 //! 4. **Placement** (P14.T8), with D5's second fallback, in planet slots that continue from the
 //!    host before (design note 3): a host's slots are reserved by its drawn counts, so a planet's
 //!    index never depends on anything placed after it. A circumbinary zone of a pair closer than
@@ -1029,7 +1030,7 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         let reach = limits
             .outer()
             .map_or(ZoneLimit::Unbounded, ZoneLimit::Outer);
-        let constraints = ClassConstraints::new(&disc, reach, zone.host_multiplicity());
+        let constraints = ClassConstraints::new(&disc, reach);
         let weights = class_weights(zone.host_mass(), ctx.fe_h());
         let drawn = draw_class(seed, id, zone.host_number(), &weights, &constraints);
         let plane = plane_of(hierarchy, &under, zone);

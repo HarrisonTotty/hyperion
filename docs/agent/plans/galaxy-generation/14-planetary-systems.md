@@ -524,13 +524,22 @@ of a host by the same factor), so the property tests hold at all times.
 every level of plan 11's hierarchy: around a single component out to the S-type limit set by its
 nearest companion at that level, and around a pair from the P-type limit outward, itself bounded by
 the next level up. Each zone is an independent orbit host with its own disc share and class draw. A
-disc truncated inside its snow line cannot make giants (D5), and hosts in binaries closer than about
-50 au draw `Barren` with an added probability so that the occurrence is about a third of a single
-star's (Kraus et al. 2016). For a binary that plan 11 has evolved, the zone is the intersection of
-the zones at birth and at the evaluated state. A brown-dwarf companion is one of plan 11's
-components: it bounds zones through the same fits (clamped at μ = 0.1), and its own zone, if wide
-enough, is a host on the `SubstellarCompact` row of D13. Re-check: Holman and Wiegert (1999) for the
-coefficients; Kraus et al. (2016) for the 50 au and the factor of three.
+disc truncated inside its snow line cannot make giants (D5), and a close binary suppresses its
+hosts' planets through those zones alone. The truncated disc and the budgets built from it give the
+deficit Kraus et al. (2016) and Moe and Kratter (2021) observe, which is the observed total,
+truncation included, so no factor is applied on top (decision-p14-d10-bd-companions §2). Hosts in
+binaries closer than about 50 au are flagged, for the orbit map's plane and the statistics: those
+whose companion is a star, or a brown dwarf of at least a tenth of the host's mass (§1). For a
+binary that plan 11 has evolved, the zone is the intersection of the zones at birth and at the
+evaluated state. A brown-dwarf companion is one of plan 11's components: it bounds zones through
+the same fits (clamped at μ = 0.1), and its own zone, if wide enough, is a host on the
+`SubstellarCompact` row of D13. It flags its host only when it is at least a tenth of the host's
+mass, which only a host under 0.8 M☉ can have, while a star always does
+(decision-p14-d10-bd-companions): Kraus et al. fit their factor to stellar companions of q > 0.4,
+and Moe and Kratter (2021) find that close brown dwarfs suppress no planets measurably. Re-check:
+Holman and Wiegert (1999) for the coefficients; Kraus et al. (2016) for the 50 au and the factor of
+three, which the zones must reproduce; Moe and Kratter (2021, §2.2) for its fall with separation and
+for brown dwarfs.
 
 **D11. Evolved stars and remnants: what survives.** The most realistic treatment that stays
 closed-form:
@@ -1152,13 +1161,15 @@ it lands. T30.a adapts T9's zones and T1.d's context to them.
 - **P14.T9.c Host assignment.** The disc of T3 is derived per zone: a circumstellar disc from its
   star, with the star's own disc lifetime (P06.T15.c's law on `StarDraws::disc_lifetime()`), a
   circumbinary one from the pair's total mass and summed luminosity, with a lifetime from a rank
-  drawn on `planet.disc` under the same law at the total mass (ruling 33, D12). Apply D10's
-  suppression for binaries inside 50 au (Kraus et al. 2016; Moe and Kratter 2021) by moving class
-  weight to `Barren`.
+  drawn on `planet.disc` under the same law at the total mass (ruling 33, D12). Flag hosts in
+  binaries inside 50 au whose companion is a star or a brown dwarf of a tenth of the host's mass or
+  more (Kraus et al. 2016; Moe and Kratter 2021). The flag moves no class weight: D10's suppression
+  is the zones' truncation (decision-p14-d10-bd-companions).
   - _Tests:_ (a) for μ = 0.5, e = 0: S-type limit 0.274 and P-type 2.39 binary separations; α
     Centauri AB (23.5 au, e = 0.52) gives about 2.8 au around A. (b) Zones of a hierarchical triple
     never overlap; a single star has exactly one zone; a brown-dwarf companion of plan 11 bounds
-    zones like any other component. (c) No planet of 10⁴ sampled binaries lies outside its zone, and
+    zones like any other component, and flags its host only at a tenth of its mass or more. (c) No
+    planet of 10⁴ sampled binaries lies outside its zone, and
     hosts in binaries inside 50 au have planets a quarter to a half as often as single stars of the
     same mass.
   - _Accept:_ `cargo test -p hyperion-sim planetary::placement::zones`.
@@ -7045,6 +7056,14 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     its host is a member of such a pair at any level above it, and never for its own circumbinary
     zone, since that disc is cleared from inside and not truncated from outside. The weight moved
     to `Barren` is `arch`'s, to give S_bin = 0.34 (+0.14/−0.15).
+  - _T9.c, brown-dwarf companions (decision-p14-d10-bd-companions, 2026-10-12)._ A pair inside
+    the cut flags a member only when its other member `is_close_binary_companion(host, companion)`:
+    a star, `SUBSTELLAR_LIMIT` or more, or at least `CLOSE_BINARY_MIN_MASS_RATIO` = 0.1 of the
+    member's mass, each at its total initial mass. Kraus et al.'s `S_bin` is fitted to 0.4 < q < 1
+    (§5, Fig. 7). Moe and Kratter (2021, §2.1–2.2) apply it down to 0.08 M☉ and find that close
+    brown dwarfs "do not significantly suppress planet formation". The zone limits are unchanged.
+    (As adopted the predicate was `is_suppressing_companion`; §2 renamed it with the class factor's
+    removal.)
   - _T9 tests._ (a) and (b) run on hand-built hierarchies. Overlap is checked at the worst phases on
     3,000 random hierarchies of three to six components. Of (c), "every zone's disc lies inside its
     zone" runs on 10⁴ random binaries and triples. "No planet outside its zone" waits for T8's
@@ -7107,6 +7126,8 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
   - _D10._ A close binary keeps 0.34 of every planet-bearing class (Kraus et al. 2016's
     `S_bin`); the cut-off is theirs, 47 (+59 −23) au, as `CLOSE_BINARY_CUTOFF_AU`, which the
     caller (T9.c) compares, where plan 14 says "about 50 au". Ruled (ruling 48, g): Kraus's 47 au stands.
+    Superseded (decision-p14-d10-bd-companions §2): no class factor. `CLOSE_BINARY_SUPPRESSION`
+    is removed and `ClassConstraints::new` takes the disc and the zone alone.
   - _T5._ `ClassTemplate` (groups inside out, `quiet_inside`, the two `BeltRule`s) of
     `PlanetGroup`s (role, presence, `CountLaw`, `MassRange` with `MassLaw`, `Location`, `Reach`,
     `SpacingFamily`, `EccentricityLaw`, `Origin`, an optional `HotVariant`), `TEMPLATES` and
@@ -11916,3 +11937,54 @@ tables::gauss_legendre`.
   Earth after it. The generated Venus keeps 57.8 bar and reaches about 695 K. A stagnant-lid
   world's exchangeable carbon above Earth's present surface reservoir is P14.T55.a's, with T50.a's
   `Mantle` reservoir.
+
+- **Close binaries: the brown-dwarf flag and no class factor, as built
+  (decision-p14-d10-bd-companions §1–2, 2026-10-12; in the 21 → 22 batch, lane `p14-bump`,
+  2026-10-14).**
+  - **The rule.**
+    - A pair closer than 47 au flags a member only when its other member
+      `is_close_binary_companion`: a star, or at least 0.1 of the member's mass.
+    - The flag moves no class weight. `CLOSE_BINARY_SUPPRESSION` is removed and
+      `ClassConstraints::new(disc, zone)` takes no `HostMultiplicity`.
+    - `S_bin` is the observed deficit, truncation included. With the factor off, the zones'
+      truncation gives close planets by stellar-companion separation inside Wang et al.'s 1σ in
+      every bin from 1 to 320 au (Moe and Kratter 2021, §2.2).
+    - With the factor on, the bins inside 47 au were about 3× low, and close-binary hosts kept
+      0.11 of single stars' planets against 0.34.
+  - **What moves, under `GENERATOR_VERSION` 22:**
+    - the class weights and planets of every host in a stellar close binary, and of none with a
+      light brown dwarf only;
+    - body IDs after a flagged host's reserved slots;
+    - `planetary/architecture`'s close-binary case, renamed "zone inside the snow line";
+    - `planetary/systems/close_binary`;
+    - `planetary/zones`' "star and brown dwarf" `close true` → `false`;
+    - the server's orbit-map plane for a star whose only close companion is a light brown dwarf.
+  - **As blessed at 22** (lane `p14-bump`, 2026-10-14; `golden_diff.py` against the bump commit,
+    whose "not bumped" problem is expected, the change landing in the same push after it): beyond
+    the three goldens the decision named (`planetary/architecture` 18 lines renamed,
+    `planetary/zones` 2, `planetary/systems/close_binary` 5,131 values with 1,279 lines added), every
+    move is `close_binary`'s, whose A now draws `TerrestrialOnly` and places nothing and whose AB's
+    planets move from slots 0100–0700 to 0500–0b00 (82 bodies, from 80), so that their streams and
+    every value derived from them move: `frame/body_rotations` (610 values, 21 lines added),
+    `observe/in_system` (2,970 values, 420 added), `orbit/drifting_states` (8, its receding moons)
+    and the server's `scene_systems` (its two `system_bodies` answers). The receding moon of the RM1
+    fixture, `AB c I`, is `.0601` (it was `.0201`): `tests/planetary_drift.rs` and the client's
+    `apparent.test.ts` name it so. The slow statistics (`the_statistics_of_architecture_meet_their_surveys`,
+    with `no_overlapping_orbits_on_a_million_hosts`) pass by name at the slow-test profile.
+  - **T10.b's figures, version 21 → 22.**
+    - Re-pinned: ruling 87.3's blend 1.0681 → 1.1119, re-pinned 1.07–1.13 → 1.08–1.14, between FGK
+      0.666 and early M 2.132. It was 1.0942 before P11.T2.d.
+    - The close-binary figure 0.1095 → 0.3193 is now a check against 0.25–0.5, beside five checks
+      by separation: 0.040, 0.154, 0.312, 0.600 and 0.728 at 1–3.2, 3.2–10, 10–32, 32–100 and
+      100–320 au.
+    - Pascucci's slope −0.379 → −0.388, pin −0.42 to −0.33, holds.
+    - FGK small planets inside 100 days 0.570 → 0.593.
+    - Every M dwarf inside 200 days 2.036 → 2.132, and at 0.5–10 days 0.499 → 0.529.
+    - Ment and Charbonneau's 0.5–2 R⊕ 0.472 → 0.507.
+    - The 0.4–0.6 M☉ primaries' 0.5–1.5 R⊕ at 0.5–7 days 0.339 → 0.367 (window 0.19–0.39).
+    - Hardegree-Ullman 0.721 → 0.775.
+    - η⊕ 0.169 → 0.173.
+    - Ruling 87.2's singles unchanged, 2.700.
+  - **Open.** Brown-dwarf hosts keep their truncation, 0.09–0.61 of single stars' close planets by
+    separation. Moe and Kratter's "no significant suppression" rests on three hot-Jupiter systems;
+    revisit if a measured rate appears.

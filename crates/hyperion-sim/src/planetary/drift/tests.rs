@@ -100,7 +100,8 @@ fn years(y: f64) -> UniverseTime {
         .unwrap()
 }
 
-/// A moon like `close_binary`'s `.0201`, receding 8 cm a year, and a young one at 13 m a year.
+/// A moon like `close_binary`'s receding `AB c I`, about 8 cm a year, and a young one at 13 m a
+/// year.
 fn moons() -> [Linear; 2] {
     let year = 31_557_600.0;
     [

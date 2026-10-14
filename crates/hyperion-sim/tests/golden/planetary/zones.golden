@@ -243,7 +243,7 @@ barycentre disc_luminosity = 0x3ff1973069efab2c  # 1.0994114053853066
 barycentre disc none
 
 star and brown dwarf: 2 components, 3 zones
-star 0: host 0 members 0 close true
+star 0: host 0 members 0 close false
 star 0 mass = 0x3ff0000000000000  # 1.0
 star 0 inner none
 star 0 outer_m = 0x425b94718a79ac8d  # 473818343910.6961

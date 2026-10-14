@@ -27,8 +27,7 @@ use hyperion_sim::planetary::architecture::template::{
 };
 use hyperion_sim::planetary::architecture::template::{EARTH_MASSES_PER_JUPITER_MASS, GroupRole};
 use hyperion_sim::planetary::architecture::{
-    ArchitectureClass, ClassConstraints, ClassDraw, HostMultiplicity, ZoneLimit, class_weights,
-    first_period_share,
+    ArchitectureClass, ClassConstraints, ClassDraw, ZoneLimit, class_weights, first_period_share,
 };
 use hyperion_sim::planetary::derive::atmosphere::SurfaceState;
 use hyperion_sim::planetary::derive::figure::BodyFigure;
@@ -220,12 +219,8 @@ fn class_probabilities_draws_and_templates_are_pinned() {
     let constraints = [
         ("none", ClassConstraints::NONE),
         (
-            "zone inside the snow line, close binary",
-            ClassConstraints::new(
-                &disc,
-                ZoneLimit::Outer(au(2.0)),
-                HostMultiplicity::CloseBinary,
-            ),
+            "zone inside the snow line",
+            ClassConstraints::new(&disc, ZoneLimit::Outer(au(2.0))),
         ),
     ];
     for (name, c) in constraints {
