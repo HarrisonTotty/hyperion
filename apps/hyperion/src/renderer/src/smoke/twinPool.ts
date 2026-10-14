@@ -244,6 +244,35 @@ export class TwinPool {
     );
   }
 
+  /**
+   * `irradianceTwin` at the texels listed, over the transmittance tables and multiple-scattering
+   * layers given (R08.T9.b): light slot `curveSlot`'s layer in the frame of `coefficientFactor`,
+   * 1 ÷ s_b for a latitude band's.
+   */
+  irradiance(
+    medium: AtmosphereMedium,
+    bottomRadiusM: number,
+    transmittance: TwinTransmittance,
+    multiScatteringBySlot: ReadonlyArray<TwinTable>,
+    curveSlot: number,
+    coefficientFactor: number,
+    texels: ReadonlyArray<readonly [number, number]>,
+  ): Promise<TwinTable> {
+    return this.#run(
+      {
+        kind: "irradiance",
+        medium,
+        bottomRadiusM,
+        transmittance,
+        multiScatteringBySlot,
+        curveSlot,
+        coefficientFactor,
+        texels,
+      },
+      (answer) => (answer.kind === "irradiance" ? answer.twin : null),
+    );
+  }
+
   /** `oblateSkyViewTwin` (R08.T6.f). */
   oblateSkyView(
     planet: OblatePlanetTwin,

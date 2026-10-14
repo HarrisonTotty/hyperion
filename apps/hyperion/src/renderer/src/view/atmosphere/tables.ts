@@ -62,6 +62,7 @@ import {
   type DensityProfile,
   densityAt,
   layerEdgesM,
+  localScaleHeightM,
   type MediumTerm,
   type PhaseFunction,
   type PhaseMatrixElement,
@@ -80,8 +81,10 @@ import {
 } from "./oblate";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
+import irradianceWgsl from "./shaders/irradiance.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
 import multiScatteringWgsl from "./shaders/multiScattering.wgsl?raw";
+import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import transmittanceWgsl from "./shaders/transmittance.wgsl?raw";
 
 /**
@@ -103,6 +106,15 @@ export const TRANSMITTANCE_SIZE: TableSize = { widthTexels: 256, heightTexels: 6
 export const MULTI_SCATTERING_SIZE: TableSize = { widthTexels: 32, heightTexels: 32 };
 
 /**
+ * The sky-irradiance table's size (plan R08, R08.T9.b; Design note 7): Bruneton 2017's irradiance
+ * texture, 64 in the sun's μ by 16 in height (`IRRADIANCE_TEXTURE_WIDTH` and `_HEIGHT` in
+ * precomputed_atmospheric_scattering's `constants.h`), the same on both settings. Its rows stand at
+ * x_r = √(h ÷ H) where Bruneton's stand at h ÷ H (`irradiance.wgsl`): Earth's at 0, 0.44, 1.8, 4 km
+ * and on, so that a haze's kilometre-scale falloff lies across rows rather than within the first.
+ */
+export const IRRADIANCE_SIZE: TableSize = { widthTexels: 64, heightTexels: 16 };
+
+/**
  * The most κ slices a body's transmittance tables hold, one layer each (plan R08, Design note 17;
  * R08.T6.f): `oblate.wgsl`'s `MAX_SLICES`.
  *
@@ -119,10 +131,25 @@ export const MAX_SLICES = 16;
 export const MAX_BANDS = 16;
 
 /**
- * The texels of a body's table ({@link packOblateBody}): four of its header, then
- * {@link MAX_SLICES} slices and {@link MAX_BANDS} bands, `oblate.wgsl`'s layout.
+ * The heights at which a body's table holds the medium's local scale height for the lit passes
+ * (plan R08, R08.T9.b; {@link packOblateBody}): 64, h\*_i = H i ÷ 63 from the datum to the top,
+ * `oblate.wgsl`'s `OBLATE_SCALE_HEIGHTS`.
  */
-export const OBLATE_BODY_TEXELS = 4 + MAX_SLICES + MAX_BANDS;
+export const OBLATE_SCALE_HEIGHTS = 64;
+
+/**
+ * The texel of a body's table that opens what the lit passes read of the medium (R08.T9.b), past
+ * its header, slices and bands: `oblate.wgsl`'s `OBLATE_SURFACE_TEXEL`.
+ */
+export const OBLATE_SURFACE_TEXEL = 4 + MAX_SLICES + MAX_BANDS;
+
+/**
+ * The texels of a body's table ({@link packOblateBody}): four of its header, then
+ * {@link MAX_SLICES} slices and {@link MAX_BANDS} bands, `oblate.wgsl`'s layout (R08.T6.f); since
+ * R08.T9.b one more of the medium's absorbers and the local scale height at
+ * {@link OBLATE_SCALE_HEIGHTS} heights, four a texel.
+ */
+export const OBLATE_BODY_TEXELS = OBLATE_SURFACE_TEXEL + 1 + OBLATE_SCALE_HEIGHTS / 4;
 
 /**
  * The body a planet's tables are sliced for (plan R08, Design note 17; R08.T6.f): its datum and
@@ -225,9 +252,15 @@ export function tablesPlanOf(body: AtmosphereBody | null, referenceRadiusM: numb
  * give A = s_e − O and B = (s_p − O) c ÷ a, O the added gravity over g_ref, and K = (c ÷ a)², and
  * A = B = 0, O = 1 for a body with no spheroid; texel 2 (slices, bands, layers a band, the medium's
  * top); texel 3 (k = a ÷ c, k², 1 ÷ s_e, 1 ÷ s_p); then each slice's (κ_k R_ref, √κ_k, ln κ_k, 0)
- * and each band's (s_b, ln s_b, 0, 0).
+ * and each band's (s_b, ln s_b, 0, 0). Since R08.T9.b, for the lit passes, which declare no medium
+ * (`surfaceLighting.wgsl`): texel {@link OBLATE_SURFACE_TEXEL} the medium's absorber slots and its
+ * line slots' bitmask ({@link absorberCount}, {@link lineSlotMask}), then the medium's local scale
+ * height (`medium.ts`'s `localScaleHeightM`) at {@link OBLATE_SCALE_HEIGHTS} heights h\* evenly
+ * from the datum to the top, four a texel, which the fitted lookup of a body of several bands
+ * places its second point by.
  *
  * @param figure - The datum: a body's, or a sphere of R_ref for tables with no body.
+ * @param medium - The medium the tables are built for: its top, its absorbers and its column.
  * @param layersPerBand - The multiple-scattering layers a band takes: its light slots.
  */
 export function packOblateBody(
@@ -235,9 +268,10 @@ export function packOblateBody(
   gravity: BodyGravity | null,
   plan: TablesPlan,
   referenceRadiusM: number,
-  topHeightM: number,
+  medium: AtmosphereMedium,
   layersPerBand: number,
 ): Float32Array {
+  const topHeightM = medium.topHeightM;
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
   const texels = new Float32Array(OBLATE_BODY_TEXELS * 4);
@@ -263,7 +297,21 @@ export function packOblateBody(
   for (const [b, band] of plan.bands.entries()) {
     texels.set([band.gravityRatio, Math.log(band.gravityRatio), 0, 0], (4 + MAX_SLICES + b) * 4);
   }
+  texels.set([absorberCount(medium), lineSlotMask(medium), 0, 0], OBLATE_SURFACE_TEXEL * 4);
+  texels.set(packedScaleHeightsM(medium), (OBLATE_SURFACE_TEXEL + 1) * 4);
   return texels;
+}
+
+/**
+ * The medium's local scale height in h\* as a body's table holds it for the lit passes (plan R08,
+ * R08.T9.b; {@link packOblateBody}): `medium.ts`'s `localScaleHeightM` at
+ * {@link OBLATE_SCALE_HEIGHTS} heights evenly from the datum to the top, m, in `f32`, which
+ * `oblate.wgsl`'s `oblateScaleHeightAt` interpolates linearly and the twin reads the same way.
+ */
+export function packedScaleHeightsM(medium: AtmosphereMedium): Float32Array {
+  return Float32Array.from({ length: OBLATE_SCALE_HEIGHTS }, (_, i) =>
+    localScaleHeightM(medium, (medium.topHeightM * i) / (OBLATE_SCALE_HEIGHTS - 1)),
+  );
 }
 
 /**
@@ -299,6 +347,13 @@ export const TRANSMITTANCE_STEPS_A_PIECE = 4;
  * per-frame marches' are (`marchSteps.ts`'s `marchPieces`).
  */
 export const MULTI_SCATTERING_SAMPLES = 32;
+
+/**
+ * Steps along each of the sky-irradiance table's rays (plan R08, R08.T9.b): placed toward the
+ * texel's point and cut at the layer edges, as the multiple-scattering table's are; 32, by the
+ * convergence measurement in plan R08's Risks ("Deviations in T9.b, as built").
+ */
+export const IRRADIANCE_SAMPLES = 32;
 
 /**
  * The absorber slots the per-planet tables hold: 5, the transmittance table's alpha and the
@@ -706,6 +761,17 @@ export const TRANSMITTANCE_KERNEL: KernelPair = {
 export const MULTI_SCATTERING_KERNEL: KernelPair = {
   name: "atmosphere multiple scattering",
   reference: `${preciseTrigWgsl}\n${commonWgsl}\n${mediumWgsl}\n${multiScatteringWgsl}`,
+  subgroup: null,
+  readback: "presentation-only",
+};
+
+/**
+ * The sky-irradiance kernel (plan R08, R08.T9.b): `view/shaders/preciseTrig.wgsl`, `common.wgsl`,
+ * `medium.wgsl`, `scattering.wgsl`, then `irradiance.wgsl`.
+ */
+export const IRRADIANCE_KERNEL: KernelPair = {
+  name: "atmosphere irradiance",
+  reference: `${preciseTrigWgsl}\n${commonWgsl}\n${mediumWgsl}\n${scatteringWgsl}\n${irradianceWgsl}`,
   subgroup: null,
   readback: "presentation-only",
 };
@@ -1462,6 +1528,8 @@ interface TableResources {
   slices: SliceTextures;
   /** One layer a latitude band and light slot ({@link multiScatteringLayersOf}, R08.T7, R08.T6.f). */
   multiScattering: LayeredTexture;
+  /** The sky's irradiance, the multiple scattering's layers, built on demand (R08.T9.b). */
+  irradiance: LayeredTexture;
   /** The body's table ({@link packOblateBody}, R08.T6.f). */
   readonly oblateBody: TextureHandle;
   readonly terms: BufferHandle;
@@ -1482,6 +1550,12 @@ const PHASE_FORMAT: GPUTextureFormat = "rgba32float";
 const LOBE_FORMAT: GPUTextureFormat = "rgba32float";
 /** The body's table's format: its figure's and gravity's constants in `f32` (R08.T6.f). */
 const OBLATE_BODY_FORMAT: GPUTextureFormat = "rgba32float";
+/**
+ * The sky-irradiance table's format, `f32` (R08.T9.b), so that the twilight ground keeps its light:
+ * per unit of the Sun's illuminance Earth's sky gives some 6 × 10⁻⁸ at −12°, the half float's 2⁻²⁴.
+ * A layer is 16 KB.
+ */
+const IRRADIANCE_FORMAT: GPUTextureFormat = "rgba32float";
 
 /** A 2D array texture of 2D layers the tables made and upload, with the shape it was made at. */
 interface PlanesTexture {
@@ -1559,25 +1633,28 @@ function createLayered(
 }
 
 /**
- * Makes the multiple-scattering table's 2D array texture of `layers` layers, one a band and light
- * slot ({@link multiScatteringLayersOf}), written by its kernel and read by the per-frame kernels.
+ * Makes a band table's 2D array texture of `layers` layers at `size`, one a band and light slot
+ * ({@link multiScatteringLayersOf}): the multiple-scattering table, written by its kernel and read
+ * by the per-frame kernels and the sky-irradiance kernel, or the sky-irradiance table (R08.T9.b),
+ * read by the lit passes.
  */
-function createMultiScattering(
+function createBandLayers(
   engine: RenderEngine,
   name: string,
+  size: TableSize,
   layers: number,
   format: GPUTextureFormat,
 ): LayeredTexture {
   const texture = engine.createTexture({
     name,
-    size: [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels, layers],
+    size: [size.widthTexels, size.heightTexels, layers],
     dimension: "2d",
     format,
     mips: 1,
     usage: TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_SRC,
     category: "atmosphere-tables",
   });
-  return { texture, widthTexels: MULTI_SCATTERING_SIZE.widthTexels, layers };
+  return { texture, widthTexels: size.widthTexels, layers };
 }
 
 /** Releases the transmittance kernel's four tables. */
@@ -1598,6 +1675,7 @@ function releaseResources(engine: RenderEngine, resources: TableResources): void
   releaseTransmittance(engine, resources.slices);
   for (const texture of [
     resources.multiScattering.texture,
+    resources.irradiance.texture,
     resources.oblateBody,
     resources.densityTables.texture,
     resources.phaseTables.texture,
@@ -1679,11 +1757,19 @@ function createResources(engine: RenderEngine): TableResources {
   const one = { widthTexels: 1, layers: 1 };
   return {
     slices: { ...createTransmittance(engine, "", 1, ONE_TEXEL), layers: 1, lastSize: ONE_TEXEL },
-    multiScattering: createMultiScattering(
+    multiScattering: createBandLayers(
       engine,
       "atmosphere multiple scattering",
+      MULTI_SCATTERING_SIZE,
       1,
       "rgba16float",
+    ),
+    irradiance: createBandLayers(
+      engine,
+      "atmosphere irradiance",
+      IRRADIANCE_SIZE,
+      1,
+      IRRADIANCE_FORMAT,
     ),
     oblateBody: engine.createTexture({
       name: "atmosphere oblate body",
@@ -1735,6 +1821,12 @@ function createResources(engine: RenderEngine): TableResources {
  * band reads the slice's, as R05's). Earth and every body under `ONE_SLICE_BELOW` and
  * `ONE_BAND_BELOW` keep one of each, R05's tables (Design note 11). The body's table
  * ({@link AtmosphereTables.oblateBody}) carries its figure, gravity and slicing to the kernels.
+ *
+ * Since R08.T9.b the tables also hold the sky's diffuse irradiance on a horizontal surface
+ * ({@link AtmosphereTables.irradiance}, Bruneton 2017's 64 × 16), one layer a band and light slot
+ * as the multiple scattering, built in the same frame from the same tables at its first read after
+ * each build, which the lit passes of R07, R10 and R11 read with the transmittance tables and the
+ * body's table through `surfaceLighting.wgsl`.
  */
 export class AtmosphereTables {
   readonly #engine: RenderEngine;
@@ -1751,6 +1843,10 @@ export class AtmosphereTables {
   #builds = 0;
   /** The kernel arm's kernels ({@link AtmosphereTables.buildKernelArm}), made at its first call. */
   #armKernels: PlanetTableKernels | null = null;
+  /** Whether the sky's irradiance holds the last build's ({@link AtmosphereTables.irradiance}). */
+  #irradianceBuilt = false;
+  /** The sky-irradiance kernel, made at the irradiance's first build on a device. */
+  #irradianceKernel: ComputeHandle | null = null;
 
   /**
    * Makes the tables and builds them for `medium`.
@@ -1787,6 +1883,7 @@ export class AtmosphereTables {
     this.#offRestored = engine.onRestored(() => {
       this.#resources = createResources(engine);
       this.#armKernels = null;
+      this.#irradianceKernel = null;
       this.#key = null;
       this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves, this.#body);
     });
@@ -1850,6 +1947,29 @@ export class AtmosphereTables {
   /** The multiple-scattering layers a band takes, one a light slot ({@link multiScatteringLayersOf}). */
   get layersPerBand(): number {
     return multiScatteringLayersOf(this.#medium, this.#curves);
+  }
+
+  /**
+   * The sky's diffuse irradiance on a horizontal surface per (h, μ_sun), per unit illuminance,
+   * `rgba32float`, {@link IRRADIANCE_SIZE} (plan R08, R08.T9.b; Bruneton 2017's layout): a 2D array
+   * of the multiple-scattering table's layers, band b's light slot k at layer
+   * b × {@link AtmosphereTables.layersPerBand} + k, which the lit passes read through
+   * `surfaceLighting.wgsl`.
+   *
+   * @remarks
+   * Built at the first call after each build of the tables, from them, so that tables whose air
+   * lights no surface (the smoke's, a body seen only as a point) never pay for it; a new handle
+   * after a restore or a medium of another layer count.
+   *
+   * @throws `EngineUnavailable` when it has to build while the engine has no device (a loss); the
+   *   first call after the restore builds it.
+   */
+  irradiance(): TextureHandle {
+    if (!this.#irradianceBuilt) {
+      this.#dispatchIrradiance();
+      this.#irradianceBuilt = true;
+    }
+    return this.#resources.irradiance.texture;
   }
 
   /** The body's table ({@link packOblateBody}), `rgba32float`, which the per-frame kernels read. */
@@ -1953,7 +2073,7 @@ export class AtmosphereTables {
       body?.gravity ?? null,
       plan,
       bottomRadiusM,
-      medium.topHeightM,
+      medium,
       layersPerBand,
     );
     this.#medium = medium;
@@ -1963,6 +2083,7 @@ export class AtmosphereTables {
     this.#plan = plan;
     this.#layerEdges = layerEdges;
     this.#key = null;
+    this.#irradianceBuilt = false;
     const engine = this.#engine;
     const r = this.#resources;
     engine.writeBuffer(r.terms, 0, terms);
@@ -1986,14 +2107,26 @@ export class AtmosphereTables {
     }
     const layers = plan.bands.length * layersPerBand;
     if (r.multiScattering.layers !== layers) {
-      const made = createMultiScattering(
+      const made = createBandLayers(
         engine,
         r.multiScattering.texture.name,
+        MULTI_SCATTERING_SIZE,
         layers,
         "rgba16float",
       );
       engine.releaseTexture(r.multiScattering.texture);
       r.multiScattering = made;
+    }
+    if (r.irradiance.layers !== layers) {
+      const made = createBandLayers(
+        engine,
+        r.irradiance.texture.name,
+        IRRADIANCE_SIZE,
+        layers,
+        IRRADIANCE_FORMAT,
+      );
+      engine.releaseTexture(r.irradiance.texture);
+      r.irradiance = made;
     }
     this.#dispatchTables(
       { transmittance: r.transmittanceKernel, multiScattering: r.multiScatteringKernel },
@@ -2011,7 +2144,7 @@ export class AtmosphereTables {
    * pressure-weighted column tables are built from the medium, one layer a slice, and the multiple
    * scattering over the stored `rgba16float` ones, a band's own built anew where it has them
    * (R08.T6.f), as the stored table's twin takes them, so that each holds its kernel's own `f32`
-   * output.
+   * output. The sky's irradiance needs no arm: its stored table is its kernel's `f32` (R08.T9.b).
    *
    * @returns The five textures, which the caller releases.
    * @throws `EngineUnavailable` while the engine has no device (a loss).
@@ -2173,6 +2306,74 @@ export class AtmosphereTables {
               storage: { multiScatteringOut: { texture: outputs.multiScattering, level: 0 } },
             },
             [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels, 1],
+            "atmosphere tables",
+          );
+        }
+      }
+    } finally {
+      if (own !== null) {
+        releaseTransmittance(engine, own);
+      }
+    }
+  }
+
+  /**
+   * Builds the sky's irradiance for the medium, ground and body the tables follow (R08.T9.b): band by
+   * band, the sky-irradiance kernel into layer band × light slots + k of the stored table, over the
+   * band's transmittance tables (the slice's where the one band shares it, or its own, built into
+   * textures made for the build and released after it, as {@link AtmosphereTables.setMedium} builds
+   * them) and that layer of the stored multiple scattering, with light slot k's curves.
+   */
+  #dispatchIrradiance(): void {
+    const engine = this.#engine;
+    const r = this.#resources;
+    const medium = this.#medium;
+    const plan = this.#plan;
+    const slots = multiScatteringLayersOf(medium, this.#curves);
+    const kernel = (this.#irradianceKernel ??= engine.createCompute(IRRADIANCE_KERNEL));
+    let own: TransmittanceTextures | null = null;
+    try {
+      for (const [b, band] of plan.bands.entries()) {
+        let read: TransmittanceTextures = r.slices;
+        if (!plan.shared) {
+          own ??= createTransmittance(engine, " (band)", 1, lastPressureColumnSize(medium));
+          this.#dispatchTransmittance(
+            r.transmittanceKernel,
+            own,
+            band.bottomRadiusM,
+            band.coefficientFactor,
+            0,
+          );
+          read = own;
+        }
+        for (let slot = 0; slot < slots; slot += 1) {
+          // One workgroup a texel (`irradiance.wgsl`).
+          engine.dispatch(
+            kernel,
+            {
+              uniforms: {
+                medium: packMediumUniform(medium, band.bottomRadiusM, IRRADIANCE_SAMPLES, slot, {
+                  coefficientFactor: band.coefficientFactor,
+                  transmittanceLayer: 0,
+                  multiScatteringLayer: b * slots + slot,
+                }),
+                layerEdges: this.#layerEdges,
+              },
+              buffers: { terms: r.terms },
+              sampled: {
+                densityTables: r.densityTables.texture,
+                transmittance: read.transmittance,
+                absorberColumns: read.absorberColumns,
+                absorberPressureColumns: read.absorberPressureColumns,
+                lastAbsorberPressureColumn: read.lastAbsorberPressureColumn,
+                absorberCurves: r.absorberCurves.texture,
+                multiScattering: r.multiScattering.texture,
+                phaseTables: r.phaseTables.texture,
+                lobeTables: r.lobeTables.texture,
+              },
+              storage: { irradianceOut: { texture: r.irradiance.texture, level: 0 } },
+            },
+            [IRRADIANCE_SIZE.widthTexels, IRRADIANCE_SIZE.heightTexels, 1],
             "atmosphere tables",
           );
         }

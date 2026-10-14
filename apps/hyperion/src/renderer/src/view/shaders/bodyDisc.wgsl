@@ -5,8 +5,9 @@
 // or under R10's class map each class's law by its weight at the hit and the uniform law by what
 // the weights leave. The TypeScript twin is `view/bodies/discShading.ts`.
 //
-// A library composed by concatenation after frame.wgsl and litBody.wgsl, with no entry point of its
-// own: its includer declares `draw`, a `Draw` whose `disc` is the body's record in `discs`, and
+// A library composed by concatenation after frame.wgsl, preciseTrig.wgsl, R08's common.wgsl,
+// oblate.wgsl and surfaceLighting.wgsl (plan R08, R08.T9.b) and litBody.wgsl, with no entry point of
+// its own: its includer declares `draw`, a `Draw` whose `disc` is the body's record in `discs`, and
 // `cell_sums` at `@group(2) @binding(5)`, the pixels' sums of the `disc cells` pass (R07.T8.d),
 // which a disc under 32 px reads in place of summing its own cells (`pixel_cells`). Two includers
 // draw it (`disc_pixel`), each with `draw` at `@group(1) @binding(0)` and `cell_sums` read-only:
@@ -57,6 +58,18 @@
 // weight in channel k mod 4 of layer face + 6 ⌊k ÷ 4⌋, read unfiltered; any one texture where the
 // surface is uniform, unread.
 @group(2) @binding(2) var class_weights : texture_2d_array<f32>;
+
+// The body's atmosphere, which `surfaceLighting.wgsl` reads (plan R08, R08.T9.b; `draw.ts`'s
+// DISC_TEXTURES), each by textureLoad: the body's table, the transmittance tables (one layer a κ
+// slice), the lights' curves of growth and the sky's irradiance (one layer a band and light slot);
+// one-texel tables of zeros for a body without one, which read as no air.
+@group(2) @binding(6) var atmosphere_body : texture_2d<f32>;
+@group(2) @binding(7) var atmosphere_transmittance : texture_2d_array<f32>;
+@group(2) @binding(8) var atmosphere_absorber_columns : texture_2d_array<f32>;
+@group(2) @binding(9) var atmosphere_absorber_pressure_columns : texture_2d_array<f32>;
+@group(2) @binding(10) var atmosphere_last_absorber_pressure_column : texture_2d_array<f32>;
+@group(2) @binding(11) var atmosphere_absorber_curves : texture_2d<f32>;
+@group(2) @binding(12) var atmosphere_irradiance : texture_2d_array<f32>;
 
 const DISC_ROWS : u32 = 52u;
 const FIRST_LIGHT_ROW : u32 = 6u;
@@ -289,6 +302,48 @@ struct Shaded {
   lit : bool,
 }
 
+// A lit point's frame for R08's lookups (plan R08, R08.T9.b; Design note 17): its geodetic latitude,
+// rad, from its spheroid normal against the pole, and its north and east, unit and horizontal, in
+// the view's axes. At a pole, where every azimuth is the same, east is any horizontal direction.
+struct LocalFrame {
+  latitude : f32,
+  north : vec3f,
+  east : vec3f,
+}
+
+// Below this cosine of its latitude a point is taken as at a pole.
+const AT_POLE : f32 = 1e-6;
+
+// The frame at the point of unit spheroid normal `normal` on a body of unit pole `pole`: sin φ is
+// n · p and cos φ |p × n|, φ by `preciseAtan2` (R08's `preciseTrig.wgsl`), east p × n ÷ cos φ and
+// north n × east.
+fn local_frame(normal : vec3f, pole : vec3f) -> LocalFrame {
+  let sin_latitude = clamp(dot(normal, pole), -1.0, 1.0);
+  let towards_east = cross(pole, normal);
+  let cos_latitude = length(towards_east);
+  var east : vec3f;
+  if (cos_latitude > AT_POLE) {
+    east = towards_east / cos_latitude;
+  } else {
+    let other = select(vec3f(1.0, 0.0, 0.0), vec3f(0.0, 1.0, 0.0), abs(normal.x) > 0.9);
+    east = normalize(cross(other, normal));
+  }
+  let latitude = preciseAtan2(abs(sin_latitude), cos_latitude);
+  return LocalFrame(select(latitude, -latitude, sin_latitude < 0.0), cross(normal, east), east);
+}
+
+// A unit direction's azimuth at the frame, rad, from north towards east, in [−π, π]; 0 at the
+// zenith or the nadir.
+fn local_azimuth(frame : LocalFrame, d : vec3f) -> f32 {
+  let towards_north = dot(d, frame.north);
+  let towards_east = dot(d, frame.east);
+  if (!(towards_north * towards_north + towards_east * towards_east > 0.0)) {
+    return 0.0;
+  }
+  let azimuth = preciseAtan2(abs(towards_east), towards_north);
+  return select(azimuth, -azimuth, towards_east < 0.0);
+}
+
 // The radiance of the point `q` (from the body's centre ÷ a) seen along `ray`, pre-exposed.
 fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
   let stretch2 = body.stretch * body.stretch;
@@ -312,9 +367,11 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
       mean_a = mean_a + shares[m] * surface_law(m).a;
     }
   }
+  // R08's lookups (R08.T9.b): the point's geodetic latitude and its north, its geodetic height 0 on
+  // the figure at zero height.
+  let local = local_frame(normal, body.pole);
   let lights = min(u32(counts.z), MAX_DISC_LIGHTS);
   let occluders = min(u32(counts.w), MAX_DISC_OCCLUDERS);
-  var first_mu0 = 0.0;
   for (var j = 0u; j < lights; j = j + 1u) {
     let place = disc_row(FIRST_LIGHT_ROW + j * LIGHT_ROWS);
     let light = disc_row(FIRST_LIGHT_ROW + j * LIGHT_ROWS + 1u);
@@ -322,19 +379,16 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
     let distance = length(to_star);
     let towards = to_star / distance;
     let mu0 = dot(normal, towards);
-    if (j == 0u) {
-      first_mu0 = mu0;
-    }
+    // R08's sky light (R08.T9.b): the star's illuminance times the sky's irradiance at its own μ₀,
+    // its light slot j's, on the Lambert share's flat term of the surface's mean A; added before
+    // the horizon's `continue`, so that a star just set still lights the twilight ground.
+    let sky = atmosphere_sky_irradiance(0.0, mu0, local.latitude, j);
     // The horizon term: the star's whole disc over the element's tangent plane (Design note 6).
     let horizon = sphere_irradiance(distance / light.w, acos(clamp(mu0, -1.0, 1.0)), 0.0);
-    if (horizon <= 0.0) {
+    if (horizon <= 0.0 && !any(sky > vec3f(0.0))) {
       continue;
     }
-    let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
     let star_radius = asin(min(1.0, light.w / distance));
-    // `body_brdf` with the disc's μ₀ factor replaced by the horizon term (`lit_disc_term`), each of
-    // the surface's laws by its share.
-    let reflectance = surface_reflectance(shares, laws, horizon, mu0, mu, alpha, star_radius);
     // The eclipse term, each occluder's hidden fraction added (`eclipseVisible`).
     var visible = vec3f(1.0);
     for (var k = 0u; k < occluders; k = k + 1u) {
@@ -364,36 +418,56 @@ fn shade(body : Body, q : vec3f, ray : vec3f) -> Shaded {
       }
     }
     visible = max(visible, vec3f(0.0));
-    let transmitted = atmosphere_sun_transmittance(0.0, mu0, 0.0, 0.0);
     let ring = ring_shadow_on_body(q, towards);
+    // The sky light shares the point's eclipse and ring shadow: the air above the point is taken to
+    // lie in the shadow with it, as an umbra's air does.
+    out.radiance = out.radiance + light.xyz * misc.z * mean_a * sky * visible * ring;
+    if (horizon <= 0.0) {
+      continue;
+    }
+    let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
+    // `body_brdf` with the disc's μ₀ factor replaced by the horizon term (`lit_disc_term`), each of
+    // the surface's laws by its share.
+    let reflectance = surface_reflectance(shares, laws, horizon, mu0, mu, alpha, star_radius);
+    // R08's transmittance to the star's centre (R08.T9.b; Design note 7: a star's disc is under
+    // about 1°), its light slot j's, 0 where the ground hides it.
+    let transmitted = atmosphere_sun_transmittance(
+      0.0, mu0, local.latitude, local_azimuth(local, towards), j
+    );
     out.radiance = out.radiance + light.xyz * misc.z * reflectance * visible * transmitted * ring;
     // Lit directly: the horizon and eclipse terms leave more than LIT_IRRADIANCE of face-on.
     out.lit = out.lit || (horizon > LIT_IRRADIANCE && any(visible > vec3f(LIT_IRRADIANCE)));
   }
   // Planetshine (Design note 7): each lit neighbour a uniform sphere, never shadow-tested against a
-  // third body nor by R11's ring shadow, through R08's transmittance along its own direction. It
-  // lights the night side, which stays unlit for the meter.
+  // third body nor by R11's ring shadow. It crosses the air as starlight does (R08.T9.b): its direct
+  // term through R08's three-node rule over its disc, its sky term its illuminance at the point (its
+  // face-on illuminance at the centre carried by the inverse square, as `planetshine_irradiance`
+  // carries it) times the sky's irradiance at its own μ₀, both at light slot 0, the brightest star's
+  // curves, and the sky's added before the horizon's `continue`, as a star's. It lights the night
+  // side, which stays unlit for the meter.
   let secondaries = min(u32(disc_row(SECONDARY_COUNT_ROW).x), MAX_DISC_SECONDARIES);
   for (var j = 0u; j < secondaries; j = j + 1u) {
     let place = disc_row(FIRST_SECONDARY_ROW + j * SECONDARY_ROWS);
     let source = disc_row(FIRST_SECONDARY_ROW + j * SECONDARY_ROWS + 1u);
     let to_source = to_view(place.xyz) * place.w - q;
+    let distance = length(to_source);
+    let towards = to_source / distance;
+    let mu0 = dot(normal, towards);
+    let near = place.w / distance;
+    let sky = atmosphere_sky_irradiance(0.0, mu0, local.latitude, 0u);
+    out.radiance = out.radiance + source.xyz * (near * near) * misc.z * mean_a * sky;
     let irradiance = planetshine_irradiance(to_source, source.w, place.w, normal, 0.0);
     if (irradiance <= 0.0) {
       continue;
     }
-    let distance = length(to_source);
-    let towards = to_source / distance;
-    let mu0 = dot(normal, towards);
     let alpha = acos(clamp(dot(towards, -ray), -1.0, 1.0));
     let source_radius = asin(min(1.0, source.w / distance));
     let reflectance = surface_reflectance(shares, laws, irradiance, mu0, mu, alpha, source_radius);
-    let transmitted = atmosphere_sun_transmittance(0.0, mu0, 0.0, 0.0);
+    let transmitted = atmosphere_source_transmittance(
+      0.0, mu0, local.latitude, local_azimuth(local, towards), source_radius, 0u
+    );
     out.radiance = out.radiance + source.xyz * misc.z * reflectance * transmitted;
   }
-  // R08's sky light, 0 until it lands, on the Lambert share's flat term.
-  out.radiance = out.radiance
-    + mean_a * atmosphere_sky_irradiance(0.0, first_mu0, 0.0) * misc.z;
   return out;
 }
 
@@ -443,34 +517,47 @@ fn add_sample(sum : ptr<function, CellSum>, body : Body, px : vec2f, weight : f3
   (*sum).shaded = (*sum).shaded + 1u;
 }
 
+// The points a cell is shaded at, in order, at most three Gauss points in each of its profile's
+// three pieces: each a distance `t` along the limb's local normal `normal` from the cell's centre and
+// a weight; and the cell's covered share. Gathered before any is shaded, so that `cell_sum` calls
+// `add_sample`, and so `shade`, from one place: a compiler that inlines every call (SwiftShader's)
+// then takes one copy of the shading, which R08.T9.b's lookups through the air made too large to
+// take six (plan R08, R08.T9.b; the arithmetic and the order of the sums are R07's).
+struct CellSamples {
+  normal : vec2f,
+  offsets : array<f32, 9>,
+  weights : array<f32, 9>,
+  count : u32,
+  coverage : f32,
+}
+
 // A cell of side h = 1 ÷ n about `px`: deep inside, its centre's light; near the limb, the
 // integral over its profile across the limb's local normal (a trapezoid, the convolution of boxes
 // of widths h|n_x| and h|n_y|) inside the limb, by three Gauss points in u = √δ in each linear
 // piece, exact where the light goes as A + B√δ + Cδ with the depth δ (`discShading.ts`).
-fn cell_sum(body : Body, px : vec2f, n : u32) -> CellSum {
-  var sum : CellSum;
-  sum.radiance = vec3f(0.0);
-  sum.coverage = 0.0;
-  sum.lit = 0u;
-  sum.shaded = 0u;
+fn cell_samples(body : Body, px : vec2f, n : u32) -> CellSamples {
+  var samples : CellSamples;
+  samples.normal = vec2f(0.0);
+  samples.offsets[0] = 0.0;
+  samples.weights[0] = 1.0;
+  samples.count = 1u;
+  samples.coverage = 1.0;
   let angle = angle_at(body, px);
   let sx = (angle_at(body, px + vec2f(GRADIENT_STEP_PX, 0.0)) - angle) / GRADIENT_STEP_PX;
   let sy = (angle_at(body, px + vec2f(0.0, GRADIENT_STEP_PX)) - angle) / GRADIENT_STEP_PX;
   let slope = length(vec2f(sx, sy));
   let h = 1.0 / f32(n);
   if (!(slope > 0.0)) {
-    add_sample(&sum, body, px, 1.0);
-    sum.coverage = 1.0;
-    return sum;
+    return samples;
   }
   let normal = vec2f(sx, sy) / slope;
   let half_extent = h * (abs(normal.x) + abs(normal.y)) * 0.5;
   let depth = -angle / slope;
   if (depth - half_extent > NEAR_LIMB_CELLS * h) {
-    add_sample(&sum, body, px, 1.0);
-    sum.coverage = 1.0;
-    return sum;
+    return samples;
   }
+  samples.normal = normal;
+  samples.count = 0u;
   let a = h * max(abs(normal.x), abs(normal.y));
   let b = h * min(abs(normal.x), abs(normal.y));
   let top = h * h / a;
@@ -500,11 +587,26 @@ fn cell_sum(body : Body, px : vec2f, n : u32) -> CellSum {
       let u = ua + GAUSS_NODES[g] * (ub - ua);
       let t = depth - u * u;
       let profile = piece.z + (piece.w - piece.z) * (t - t0) / (t1 - t0);
-      let weight = GAUSS_WEIGHTS[g] * (ub - ua) * 2.0 * u * profile / (h * h);
-      add_sample(&sum, body, px + t * normal, weight);
+      samples.offsets[samples.count] = t;
+      samples.weights[samples.count] = GAUSS_WEIGHTS[g] * (ub - ua) * 2.0 * u * profile / (h * h);
+      samples.count = samples.count + 1u;
     }
   }
-  sum.coverage = min(1.0, covered / (h * h));
+  samples.coverage = min(1.0, covered / (h * h));
+  return samples;
+}
+
+fn cell_sum(body : Body, px : vec2f, n : u32) -> CellSum {
+  var sum : CellSum;
+  sum.radiance = vec3f(0.0);
+  sum.coverage = 0.0;
+  sum.lit = 0u;
+  sum.shaded = 0u;
+  let samples = cell_samples(body, px, n);
+  for (var k = 0u; k < samples.count; k = k + 1u) {
+    add_sample(&sum, body, px + samples.offsets[k] * samples.normal, samples.weights[k]);
+  }
+  sum.coverage = samples.coverage;
   return sum;
 }
 
@@ -587,11 +689,12 @@ fn disc_pixel(position : vec2f, edge_pass : u32) -> DiscPixel {
   let limb = !all(corners / gradient < vec4f(-LIMB_OVERLAP_PX));
   var out : DiscPixel;
   out.drawn = true;
+  if ((edge_pass == 0u && !interior) || (edge_pass != 0u && !limb)) {
+    return none;
+  }
+  // One call of the shading for either draw, its cells the draw's own (`CellSamples`' note).
+  let sum = pixel_cells(body, position, select(u32(counts.y), u32(counts.x), edge_pass == 0u));
   if (edge_pass == 0u) {
-    if (!interior) {
-      return none;
-    }
-    let sum = pixel_cells(body, position, u32(counts.x));
     let light = select(vec3f(0.0), sum.radiance / sum.coverage, sum.coverage > 0.0);
     // The pure-pixel class: lit where every shaded point is, unlit where none is, `other` where
     // they are mixed or no star lights the body.
@@ -606,10 +709,6 @@ fn disc_pixel(position : vec2f, edge_pass : u32) -> DiscPixel {
     out.colour = vec4f(min(light, vec3f(HDR_MAX)), meter);
     return out;
   }
-  if (!limb) {
-    return none;
-  }
-  let sum = pixel_cells(body, position, u32(counts.y));
   if (sum.coverage <= 0.0) {
     return none;
   }

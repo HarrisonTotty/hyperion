@@ -3,8 +3,11 @@
  * catalogue's probe kernel on the run's adapter. `body_brdf` equals `view/appearance/brdf.ts` at
  * five pinned geometries to 10⁻⁵ relative, one of them with a law built per texel;
  * `sphere_irradiance` and `eclipse_visible` equal their TypeScript twins (themselves checked
- * against the `f64` oracles) at five points each; the R08 and R11 stubs return 1, 1 and 0; and
- * `planetshine_irradiance` equals `planetshineIrradiance` at four points (T11).
+ * against the `f64` oracles) at five points each; R11's stub and R08's lookups (plan R08's
+ * `surfaceLighting.wgsl` since R08.T9.b) return 1, 1 and 0 on a body without an atmosphere, its
+ * one-texel tables bound; and `planetshine_irradiance` equals `planetshineIrradiance` at four
+ * points (T11). R08.T9.b's own group holds the lookups against a body's tables' twin
+ * ({@link probeSurfaceLighting}, `smoke/atmosphere.ts`).
  */
 
 import {
@@ -18,6 +21,12 @@ import {
   packPhaseFactorRows,
 } from "../view/appearance/litBodyProbe";
 import { type Vec3, vec3 } from "../geometry/vec3";
+import {
+  AIRLESS_LIGHTING,
+  createAirlessTables,
+  surfaceLightingKernelTextures,
+  type SurfaceLightingTables,
+} from "../view/atmosphere/surfaceLighting";
 import { PHASE_TABLE_SAMPLES, type PhotometricLaw } from "../view/appearance/law";
 import { lawFor } from "../view/appearance/phase";
 import { BUFFER_USAGE, TEXTURE_USAGE } from "../view/engine/gpuFlags";
@@ -100,8 +109,11 @@ function lightingTermName(probe: LightingProbeCase): string {
     case "eclipse":
       name = "T6.c eclipse_visible";
       break;
-    case "stubs":
-      name = "T6.c the stubs";
+    case "hooks":
+      name = "T6.c the hooks";
+      break;
+    case "atmosphere":
+      name = `R08.T9.b the ${probe.lookup} lookup`;
       break;
     case "planetshine":
       name = "T11 planetshine_irradiance";
@@ -133,36 +145,142 @@ const LIGHTING_CASES: ReadonlyArray<LightingProbeCase> = [
     occluderRadiusRad: ratio * 4.65e-3,
     separationRad: separation * 4.65e-3,
   })),
-  { kind: "stubs" },
+  { kind: "hooks" },
   // T11: a neighbour 30 of its radii off, wholly up, then cut by the horizon, then at Earth from the
   // Moon's scale (in lunar radii) in its soft band, then behind a local horizon of 3°.
   planetshineCase(vec3(30, 0.5, 0), 1, 30, 40, 0),
   planetshineCase(vec3(30, 0.5, 0), 1, 30, 91, 0),
   planetshineCase(vec3(221.25, 0.6, 0), 3.667, 221.25, 90.5, 0),
   planetshineCase(vec3(30, 0.5, 0), 1, 30, 80, 3),
+  // R08.T9.b: R08's three lookups on a body without an atmosphere, a source below the horizon
+  // among them, read through the one-texel defaults as R07's stubs: 1, 0 and 1.
+  ...(["sun", "sky", "source"] as const).flatMap((lookup) =>
+    [0.4, -0.2].map((mu): LightingProbeCase => ({
+      kind: "atmosphere",
+      lookup,
+      altitudeM: 3_000,
+      mu,
+      latitudeRad: 0.7,
+      azimuthRad: -2.1,
+      angularRadiusRad: 0.1,
+      curve: 1,
+    })),
+  ),
 ];
 
-/** T6.c: `sphere_irradiance`, `eclipse_visible` and the stubs; T11: `planetshine_irradiance`. */
+/**
+ * T6.c: `sphere_irradiance`, `eclipse_visible` and the hooks; T11: `planetshine_irradiance`;
+ * R08.T9.b: R08's lookups on a body without an atmosphere, which return R07's stubs' values to the
+ * bit, as the hooks do.
+ */
 function checkLighting(checks: Checks, gpu: Float32Array): void {
-  const expected = expectedLighting(LIGHTING_CASES);
+  const expected = expectedLighting(LIGHTING_CASES, AIRLESS_LIGHTING);
   LIGHTING_CASES.forEach((probe, index) => {
     const reference = expected[index] ?? [];
     const read = reference.map((_, c) => gpu[4 * index + c] ?? Number.NaN);
     const worst = Math.max(
       ...reference.map((value, c) => Math.abs((read[c] ?? Number.NaN) - value)),
     );
-    const exact = probe.kind === "stubs";
+    const exact = probe.kind === "hooks" || probe.kind === "atmosphere";
+    let name = `${lightingTermName(probe)} equals its reference to ${LIGHTING_TOLERANCE} at point ${index + 1}`;
+    if (probe.kind === "hooks") {
+      name = "T6.c the hooks on a body without an atmosphere return 1, 1 and 0";
+    } else if (probe.kind === "atmosphere") {
+      name = `R08.T9.b the ${probe.lookup} lookup on a body without an atmosphere returns R07's stub at point ${index + 1}`;
+    }
     checks.check(
-      exact
-        ? "T6.c the stubs return 1, 1 and 0"
-        : `${lightingTermName(probe)} equals its reference to ${LIGHTING_TOLERANCE} at point ${index + 1}`,
+      name,
       exact ? worst === 0 : worst <= LIGHTING_TOLERANCE,
       `GPU ${read.map((value) => value.toPrecision(7)).join(", ")} against ${reference.map((value) => value.toPrecision(7)).join(", ")}, off by ${worst.toExponential(2)}`,
     );
   });
 }
 
-/** T4.c: `body_brdf` against `brdf`; T6.c: the lighting terms and stubs. */
+/**
+ * R08.T9.b: the probe's lighting `cases` run with a body's atmosphere `tables` bound, their results
+ * read back, one `vec4f` a case (r, g, b of an R08 lookup), for `smoke/atmosphere.ts` to hold
+ * against the tables' twin. It makes and releases its own buffers and phase table.
+ */
+export async function probeSurfaceLighting(
+  engine: RenderEngine,
+  cases: ReadonlyArray<LightingProbeCase>,
+  tables: SurfaceLightingTables,
+): Promise<Float32Array> {
+  const kernel = await engine.createComputeAsync(LIT_BODY_PROBE);
+  // One BRDF case and one law: the kernel's other half, which this run does not read.
+  const brdfBytes = packBrdfProbeCases(probeCases().slice(0, 1));
+  const brdf = engine.createBuffer({
+    name: "surface lighting probe brdf case",
+    bytes: brdfBytes.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeBuffer(brdf, 0, new Uint8Array(brdfBytes));
+  const brdfResults = engine.createBuffer({
+    name: "surface lighting probe brdf result",
+    bytes: 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+  const table = engine.createTexture({
+    name: "surface lighting probe phase table",
+    size: { width: PHASE_TABLE_SAMPLES, height: LAWS.length },
+    dimension: "2d",
+    format: "rgba32float",
+    mips: 1,
+    usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeTexture(
+    table,
+    { x: 0, y: 0 },
+    { width: PHASE_TABLE_SAMPLES, height: LAWS.length },
+    packPhaseFactorRows(LAWS),
+  );
+  const bytes = packLightingProbeCases(cases);
+  const input = engine.createBuffer({
+    name: "surface lighting probe cases",
+    bytes: bytes.byteLength,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_DST,
+    category: "other",
+  });
+  engine.writeBuffer(input, 0, new Uint8Array(bytes));
+  const results = engine.createBuffer({
+    name: "surface lighting probe results",
+    bytes: cases.length * 16,
+    usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
+    category: "other",
+  });
+  try {
+    engine.dispatch(
+      kernel,
+      {
+        uniforms: {},
+        buffers: {
+          cases: brdf,
+          results: brdfResults,
+          lighting_cases: input,
+          lighting_results: results,
+        },
+        sampled: { phase_factor_table: table, ...surfaceLightingKernelTextures(tables) },
+        storage: {},
+      },
+      [Math.ceil(cases.length / 8), 1, 1],
+      LIT_BODY_PROBE.name,
+    );
+    return new Float32Array(await engine.readBuffer(results));
+  } finally {
+    for (const buffer of [brdf, brdfResults, input, results]) {
+      engine.releaseBuffer(buffer);
+    }
+    engine.releaseTexture(table);
+  }
+}
+
+/**
+ * T4.c: `body_brdf` against `brdf`; T6.c: the lighting terms and hooks; R08.T9.b: R08's lookups on a
+ * body without an atmosphere.
+ */
 export async function checkLitBody(engine: RenderEngine, checks: Checks): Promise<void> {
   const cases = probeCases();
   const kernel = await engine.createComputeAsync(LIT_BODY_PROBE);
@@ -208,6 +326,8 @@ export async function checkLitBody(engine: RenderEngine, checks: Checks): Promis
     usage: BUFFER_USAGE.STORAGE | BUFFER_USAGE.COPY_SRC,
     category: "other",
   });
+  // R08's tables of a body without an atmosphere (R08.T9.b), which the hooks read through.
+  const airless = createAirlessTables(engine, "lit body probe: no atmosphere");
   engine.dispatch(
     kernel,
     {
@@ -218,13 +338,17 @@ export async function checkLitBody(engine: RenderEngine, checks: Checks): Promis
         lighting_cases: lightingInput,
         lighting_results: lightingResults,
       },
-      sampled: { phase_factor_table: table },
+      sampled: { phase_factor_table: table, ...surfaceLightingKernelTextures(airless) },
       storage: {},
     },
     [Math.ceil(Math.max(cases.length, LIGHTING_CASES.length) / 8), 1, 1],
     LIT_BODY_PROBE.name,
   );
-  checkLighting(checks, new Float32Array(await engine.readBuffer(lightingResults)));
+  try {
+    checkLighting(checks, new Float32Array(await engine.readBuffer(lightingResults)));
+  } finally {
+    engine.releaseTexture(airless.body);
+  }
   const gpu = new Float32Array(await engine.readBuffer(results));
   const expected = expectedBrdf(cases);
   expected.forEach((reference, index) => {

@@ -40,6 +40,8 @@ import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
+import irradianceWgsl from "./shaders/irradiance.wgsl?raw";
+import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
 
 /** The steps of a placed march of `n` steps over [tStartM, tEndM]. */
@@ -333,11 +335,22 @@ describe("the kernels' WGSL", () => {
   });
 
   it("evaluates each term's density once a sample in the per-frame kernels", () => {
-    for (const wgsl of [skyViewWgsl, aerialPerspectiveWgsl, rayMarchWgsl, sourceWgsl]) {
+    for (const wgsl of [
+      skyViewWgsl,
+      aerialPerspectiveWgsl,
+      rayMarchWgsl,
+      sourceWgsl,
+      scatteringWgsl,
+      irradianceWgsl,
+    ]) {
       expect(wgsl).not.toMatch(/\bmediumAt\(/);
       expect(wgsl).not.toMatch(/\bphasedScatteringAt\(/);
     }
     expect(sourceWgsl).toMatch(/fn sourceAt\([^)]*local : SampleMedium/);
+    // Since R08.T9.b the sample's medium and its phases are scattering.wgsl's, which the sky's
+    // irradiance takes too.
+    expect(scatteringWgsl).toMatch(/fn sampleMediumAt\(heightM : f32\) -> SampleMedium/);
+    expect(irradianceWgsl).toMatch(/let local = sampleMediumAt\(sampleHeightM\);/);
   });
 
   it("takes each step's in-scattering through common.wgsl's stepFactor", () => {

@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { add, scale, vec3 } from "../../geometry/vec3";
+import { add, scale, type Vec3, vec3 } from "../../geometry/vec3";
 import { aHostDisc, aLitBody } from "../../test/litFixtures";
 import { memoised } from "../../test/memo";
+import { lawFor } from "../appearance/phase";
+import type { SurfaceLightingReader } from "../atmosphere/surfaceLighting";
 import { IDENTITY_QUATERNION } from "../camera/quaternion";
 import { pixelSolidAngle, type ProjectionCamera, type Viewport } from "../camera/projection";
+import { annulusEdges } from "../lighting/annuli";
 import type { PlacedLight } from "../lighting/hostLights";
 import { PLANETSHINE_SOURCES_HIGH } from "../lighting/planetshine";
 import type { Rgb } from "../photometry/toneCurve";
@@ -18,6 +21,7 @@ import {
   FINE_DISC_PX,
   pointSampleDisc,
   rasteriseDisc,
+  shadeDiscPoint,
   viewRay,
 } from "./discShading";
 import { type LitBodyInput, planLitBodies } from "./draw";
@@ -308,5 +312,65 @@ describe("the brute force", () => {
   it("refuses a sample count that is not a positive whole number", () => {
     const record = recordAt(4, 0, SPHERE);
     expect(() => pointSampleDisc(record, CAMERA, VIEWPORT, 0)).toThrow(/positive whole number/u);
+  });
+});
+
+/** An air whose sky gives every point the same light, and whose ground hides a set sun. */
+const AIR: SurfaceLightingReader = {
+  sunTransmittance: (_altitudeM, muSun) => (muSun > 0 ? [0.8, 0.8, 0.8] : [0, 0, 0]),
+  skyIrradiance: () => [0.05, 0.08, 0.12],
+  sourceTransmittance: () => [1, 1, 1],
+};
+
+/** A sphere's record straight ahead of the camera, lit by one far star in direction `towards`. */
+function litBy(towards: Vec3): DiscRecord {
+  const set = annulusEdges(0.6, 0.6, 4);
+  return {
+    body: "body",
+    rect: { leftPx: 0, topPx: 0, rightPx: 1, bottomPx: 1 },
+    direction: vec3(0, 0, -1),
+    radiusOverDistance: 1e-3,
+    pole: vec3(0, 0, 1),
+    polarOverEquatorial: 1,
+    interiorSamples: 1,
+    limbSamples: 4,
+    surface: { kind: "uniform", law: lawFor([0.3, 0.25, 0.2], [1.1, 1.1, 1.1], "mars") },
+    tableRows: [0],
+    exposureOverPi: 1e-4 / Math.PI,
+    lights: [
+      {
+        direction: towards,
+        distance: 1e6,
+        radius: 1,
+        illuminance: [1.1e5, 1e5, 0.9e5],
+        annuli: [set, set, set],
+      },
+    ],
+    occluders: [],
+    secondaries: [],
+  };
+}
+
+describe("a star's sky light through an atmosphere (R08.T9.b)", () => {
+  it("puts a star's sky light in its eclipse, the air above the point in the shadow with it", () => {
+    const latitude = 40 * RAD;
+    const q = vec3(Math.cos(latitude), 0, Math.sin(latitude));
+    const north = vec3(-Math.sin(latitude), 0, Math.cos(latitude));
+    // A star 2° below the point's horizon, its sky light alone, and one 30° up.
+    for (const mu of [-Math.sin(2 * RAD), 0.5]) {
+      const towards = add(scale(q, mu), scale(north, Math.sqrt(1 - mu * mu)));
+      const open = litBy(towards);
+      // A body ten radii off along the star's direction, its 11.5° hiding the star's whole disc.
+      const umbra: DiscRecord = {
+        ...open,
+        occluders: [{ centre: add(q, scale(towards, 10)), radius: 2 }],
+      };
+      const lit = shadeDiscPoint(open, CAMERA, q, scale(q, -1), AIR);
+      const hidden = shadeDiscPoint(umbra, CAMERA, q, scale(q, -1), AIR);
+      for (const c of [0, 1, 2] as const) {
+        expect(lit.radiance[c]).toBeGreaterThan(0);
+        expect(hidden.radiance[c]).toBe(0);
+      }
+    }
   });
 });

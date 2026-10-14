@@ -408,8 +408,14 @@ module R12 reads for this plan's ladder entries.
   (planetshine). `curve : u32` is the light's slot among the body's per-sun absorber curves
   (Design note 5), and a planetshine source passes slot 0. They serve the lit passes of R07, R10
   and R11 (R08.T9.b). The latitude and azimuth arguments are Design note 17's;
-  `altitude_m` is the geodetic height, scaled inside. `oblate.wgsl` holds the shared WGSL: normal
-  gravity, R_α, κ and the slice and band reads. Since R08.T6.g (Design notes 18 and 19),
+  `altitude_m` is the geodetic height, scaled inside. As built (R08.T9.b; Risks, "Deviations in
+  T9.b, as built") a lit pass composes `surfaceLighting.ts`'s `SURFACE_LIGHTING_WGSL` and declares
+  seven tables by `surfaceLighting.wgsl`'s names (the body's table, the four transmittance tables,
+  the curves, the irradiance; `surfaceLightingTextures` for a material's layout), bound from
+  `surfaceLightingTablesOf(tables)` (which builds the irradiance at its first read after a build),
+  or `createAirlessTables`' one-texel defaults, through which the lookups read 1 and 0; the body's
+  table carries what the lit passes need of the medium. `oblate.wgsl` holds the shared WGSL:
+  normal gravity, R_α, κ and the slice and band reads. Since R08.T6.g (Design notes 18 and 19),
   `view/shaders/preciseTrig.wgsl` holds `preciseSinCos`, `preciseCos`, `preciseAtan` and
   `preciseAtan2`, prepended to every atmosphere module and offered to R07's, R10's and R11's lit
   passes; and `common.wgsl` holds the shell's forms from a height (`groundHitFromHeight`,
@@ -722,7 +728,8 @@ Names are those the owning plans give; the owning plan is authoritative.
     latitude 0 and azimuth 0, call the sky term once at the first light's μ₀ times the shares'
     mean A, and send planetshine through `atmosphere_sun_transmittance` too (R07's; kept and
     widened by this plan, Design note 7); `view/appearance/litBodyProbe.ts` and its smoke check
-    pin the stubs' 1, 1 and 0;
+    pin the stubs' 1, 1 and 0. _Done by R08.T9.b_: the stubs are gone, `surfaceLighting.wgsl`'s
+    lookups in their place ("Deviations in T9.b, as built");
   - `METER_CLASS` (R07 Design note 10; `view/post/meter.ts`): every translucent pass of this plan
     into the HDR target blends its alpha with source factor zero and destination factor one, so
     that R07's meter class survives, through R01's `blend` modes `"premultiplied"` and
@@ -4167,6 +4174,14 @@ to 10⁸ m shows no step at the switch, recorded here.
 
   Smoke: the readbacks agree with the twin to 10⁻³. Acceptance: `pnpm test` and
   `just test-render` pass.
+
+  _Built 2026-10-14_ (Risks, "Deviations in T9.b, as built"): the irradiance integrated in the sun's
+  frame (two pieces at the horizon, 96 directions, within 0.95% of a dense reference), its rows at
+  the root of the height and stored in `f32`, built at its first read after each build; the fit's
+  local scale height and the medium's absorbers carried in the body's table for the lit passes;
+  seven tables bound to the disc (one-texel defaults where there is no air), a star's sky light
+  under its eclipse; and the readbacks within 3 × 10⁻⁶ (the table) and 6.3 × 10⁻⁵ (the lookups) of
+  the twin.
 
 ### R08.T10 The medium of a body
 
@@ -7737,8 +7752,9 @@ generator, and the reference's sampling needs no domain tag.
     pressure-column tables, which `AtmosphereTables` makes at every slice whatever the medium's
     absorbers (T6.c's and T4.d's), so 1.97 MB; with the four bands' multiple scattering (32 KB a
     light slot) and the body's table (576 B), 1,999,424 B at one light slot: at the 2 MB row, and
-    over it with a second light slot or T9.b's irradiance bands (33 KB each). Deferred to R08.T11
-    (below).
+    over it with a second light slot or T9.b's irradiance bands (as built 16 KB a band and light
+    slot, and the body's table 848 B: 2,065,232 B, "Deferred findings (2026-10-13 rule)
+    (R08.T9.b)"). Deferred to R08.T11 (below).
   - _Cost per transmittance read_, by an operation count (the passes' times wait for R08.T11's
     quiet run): one slice and one band, Earth's, adds a datum point (two square roots and a
     normalisation), s (a square root) and the division by s to R05's read; one band adds a vertical
@@ -7842,6 +7858,242 @@ generator, and the reference's sampling needs no domain tag.
   - _`SkyViewTable.sphere`_ keeps the sphere's scalar reading nested, not as top-level fields, as
     ruling 2's "a scalar reading for them if that keeps callers simple" allows; "main" may settle
     it with R11's re-validation.
+
+- **Deviations in T9.b, as built** (2026-10-14). New: `irradianceQuadrature.ts`, `surfaceLighting.ts`,
+  `shaders/irradiance.wgsl`, `shaders/surfaceLighting.wgsl` and `shaders/scattering.wgsl`; changed:
+  `tables.ts`, `tablesCpu.ts`, `medium.ts`, `hillaire.ts`, `oblate.wgsl`, `source.wgsl`, R07's
+  `view/shaders/litBody.wgsl` and `bodyDisc.wgsl`, `view/bodies/draw.ts` and `discShading.ts`,
+  `view/appearance/litBodyProbe.ts`, `view/engine/catalogue.ts`, the smoke (`smoke/atmosphere.ts`,
+  `smoke/litBody.ts`, `smoke/twinJobs.ts`, `smoke/twinPool.ts`, `smoke/page.ts`,
+  `scripts/testRender.sh`, `src/smoke/main.ts`); tests in a new `surfaceLighting.test.ts` and in
+  `tables.test.ts`, `draw.test.ts`, `litBodyProbe.test.ts` and `marchSteps.test.ts`. No version
+  moves.
+  - _Names beyond the text._
+    - `irradianceQuadrature.ts`: `gaussLegendre` and `UnitGaussRule`, `IRRADIANCE_RING_NODES` (8),
+      `IRRADIANCE_ARC_NODES` (6), `irradianceDirections` and `IrradianceDirection`.
+    - `surfaceLighting.ts`: `SURFACE_LIGHTING_WGSL` (`preciseTrig`, `common`, `oblate` and
+      `surfaceLighting.wgsl`, which a lit pass composes), `SurfaceLightingTables` and
+      `surfaceLightingTablesOf`, `surfaceLightingTextures` (a material's layout entries),
+      `surfaceLightingDrawTextures` and `surfaceLightingKernelTextures` (the bindings by a
+      material's names and by the WGSL's), `SURFACE_LIGHTING_BINDINGS`, `createAirlessTables`,
+      `SurfaceLightingReader` and `AIRLESS_LIGHTING`.
+    - `tables.ts`: `IRRADIANCE_SIZE`, `IRRADIANCE_SAMPLES`, `IRRADIANCE_KERNEL`,
+      `OBLATE_SURFACE_TEXEL`, `OBLATE_SCALE_HEIGHTS`, `packedScaleHeightsM` and
+      `AtmosphereTables.irradiance()`, a method, since it may build; `packOblateBody` takes the
+      medium in place of its top.
+    - `tablesCpu.ts`: `IrradianceOptions`, `IRRADIANCE_KERNEL_OPTIONS`, `irradianceTwin`,
+      `oblateIrradianceTwin` and `surfaceLightingTwin`; `OblateReader.rayOf` takes a local scale
+      height from outside.
+    - WGSL: `irradiance.wgsl`'s `hemisphereDirection`, `SkyRay`, `SkyMarch`, `skyStep` and
+      `skyAlong`; `surfaceLighting.wgsl`'s `atmosphereHasAir`, `atmosphereSinCos`, `SurfacePlace`,
+      `atmosphereSurfacePlace`, `atmosphereDirection`, `atmosphereSlot` and
+      `atmosphereTransmittanceAlong`; `oblate.wgsl`'s `OBLATE_SURFACE_TEXEL`, `OBLATE_SCALE_HEIGHTS`,
+      `oblateAbsorbersOf`, `oblateScaleHeightAt` and `bandTableAt` (the band read
+      `bandMultiScatteringAt` now calls); `bodyDisc.wgsl`'s `LocalFrame`, `local_frame`,
+      `local_azimuth`, `AT_POLE` and `CellSamples`/`cell_samples`.
+    - R07's side: `LitBodyInput.atmosphere` and `DiscRecord.atmosphere` (absent for a body
+      without one); `discShading.ts`'s `shadeDiscPoint`, and a `lighting` argument to
+      `rasteriseDisc` and `pointSampleDisc`; the probe's `AtmosphereLookup`, its `hooks` case (was
+      `stubs`) and its `atmosphere` case.
+    - The smoke: `checkSurfaceLightingEarth`, `checkSurfaceLightingSaturn`, `probeSurfaceLighting`
+      and the twin pool's `irradiance` job.
+  - _The irradiance's quadrature_ (`irradianceQuadrature.ts`; the task named Bruneton's layout and
+    mapping, not how to integrate when each direction is a march). E = ∫ L μ_v dω over the sky above
+    the horizon, L each direction's per-frame march (each term's phase, shadowed by the ground, the
+    forward lobes' higher orders, Hillaire's multiple scattering), in the band's frame over its own
+    tables. The directions stand in the sun's frame, γ from the sun integrated in u = √(γ ÷ π), the
+    phase tables' coordinate, so that a forward peak is resolved, on two pieces split where the
+    rings meet the horizon (γ_a = |π ÷ 2 − θ_s|, wholly lit rings and cut ones), Gauss–Legendre on
+    each, and each cut ring only over its arc above the horizon, so that no node straddles μ_v's
+    kink; ψ counts twice by the symmetry about the sun's vertical plane. 2 × 8 × 6 = 96 directions,
+    32 steps each, placed and cut at the layer edges as the multiple-scattering kernel's; one
+    workgroup a texel, one invocation a direction, summed in order by the first. Measured against
+    24 × 24 nodes and 128 steps at ten texels (the ground to 2/3 of the top, suns from the zenith
+    to 6° down): worst 0.82% on Earth's medium, 0.95% on Earth's with a Henyey–Greenstein g = 0.85
+    aerosol, 0.63% on the Saturn-class air; 4 arc nodes left 1.0% and 6 matched 8; the steps carry
+    most of what is left near the ground (48 steps take Earth's zenith sun from −0.82% to −0.35%).
+    Σ w is π to 2 × 10⁻³ for every sun (`surfaceLighting.test.ts`). On the Mars mode's tabulated
+    dust with its lobes' higher orders (`forwardLobe.test.ts`'s dusty Mars at τ(550) 0.45 and 2,
+    against 32 × 32 nodes and 128 steps, the science check's ask) the worst is 0.87%, a sun 1° up in
+    blue; 16 ring nodes would take the zenith sun's 0.55% to 0.1%.
+  - _The sky alone._ The table holds the sky's diffuse irradiance, Bruneton's irradiance texture's
+    content: the sun's direct beam is each pass's own term through `atmosphere_sun_transmittance`,
+    and the ground's light reaches a horizontal surface only as Hillaire's multiple scattering
+    carries it (the lower hemisphere is the ground itself). In the thin limit it is a spherical
+    single-scattering integral, held to an independent quadrature to 1%: 0.968 of the
+    plane-parallel τ ÷ 2 for a Rayleigh air of τ = 10⁻⁴ on Earth's radius, the horizon's slant
+    column being bounded (Chapman's grazing √(πR ÷ 2H)).
+  - _The height axis_ (the science check's finding). The rows stand at x_r = √(h\* ÷ H), not
+    Bruneton's (r − R) ÷ (R_top − R): his rows are 6.7 km apart on Earth, where the aerosol's scale
+    height is 1.2 km, and a read between the first two came out 28%, 58% and 116% high at 0.5, 1 and
+    2 km (680 nm, thin). Earth's rows now stand at 0, 0.44, 1.8, 4 and 7.1 km and on; a 1.2 km
+    haze's sky reads within −7% to +8% of its falloff from 100 m to 2 km (`surfaceLighting.test.ts`
+    holds 10% at 0.5, 1 and 2 km). The rows' heights come from heights alone, as Design note 18
+    asks; R07's disc reads row 0 and is unchanged by it. The texel mapping is Design note 19's.
+  - _Stored in `rgba32float`, so no kernel arm_ (the science check's finding). Per unit of the Sun's
+    illuminance Earth's sky gives about 2.7 × 10⁻⁵, 3.1 × 10⁻⁶ and 6 × 10⁻⁸ at −6°, −8° and −12°
+    (horizontal illuminances of 3.4, 0.4 and 0.008 lx over 1.27 × 10⁵ lx: the estimates from
+    typical clear-sky illuminances of `decision-r08-t6b-floor.md` §6 and "The per-view tables'
+    range at twilight", below, not measured), some 450, 53 and 1 of the half float's 2⁻²⁴ steps, so
+    the twilight ground the sky term lights turned coarse past −9°, one step at −12° and black just
+    beyond. In `f32` a layer is 16 KB; it is written as a storage texture (core in WebGPU) and read
+    by `textureLoad`, as before. The stored table is the kernel's own output, so the smoke holds it
+    to its twin with no floor, and `buildKernelArm` builds the transmittance and multiple
+    scattering alone, as at T6.f.
+  - _Built at its first read after each build_ (`AtmosphereTables.irradiance()`, which
+    `surfaceLightingTablesOf` calls). The task's "rebuilt with them" is kept as rebuilt from them:
+    a build leaves the irradiance to be built, and the first read builds it (a band's own
+    transmittance made again for it on a body of several bands), its kernel made at the first.
+    Tables whose air lights no surface, a body seen only as a point and every smoke group before
+    T9.b's, never pay for it: built with the tables, it took part 2 of the smoke from T6.f's
+    103 s to 145 s (at a load of 16), over the ~130 s the parts are held to.
+  - _The local scale height on a body of several bands_ (T6.f's "For T9.b": the lit passes declare no
+    medium). The body's table carries `medium.ts`'s `localScaleHeightM` (the composite's form, from
+    each term's column) at 64 heights h\* evenly from the datum to the top, read linearly
+    (`oblateScaleHeightAt`), and the medium's absorber count and line-slot mask, which the lookups'
+    curves need: one texel past the bands and 16 more, `OBLATE_BODY_TEXELS` 36 → 53. The layout
+    only grows at its end, so the per-frame kernels and the composite read it as before. The
+    tabulation is the medium as given, with its forward deltas (the composite's own); the fit only
+    places its second point by it. `localScaleHeightM` and `FIT_SCALE_FLOOR_M` moved from
+    `hillaire.ts` to `medium.ts` so that `tables.ts` packs it with no cycle of imports;
+    `hillaire.ts` re-exports both.
+  - _`scattering.wgsl`_ holds `source.wgsl`'s medium at a sample, phases and forward lobes, moved
+    unchanged but for π (`preciseTrig.wgsl`'s `TRIG_PI`, the same `f32` as `view.wgsl`'s
+    `PI_VIEW`), so that the irradiance kernel, which declares no view, takes them; the per-frame
+    kernels compose it before `source.wgsl`.
+  - _Seven tables, not two._ The task's "transmittance and irradiance tables" are, as built since
+    T6.c, T4.d and T6.f, the body's table, the four transmittance tables (slices), the lights'
+    curves and the irradiance: `bodyDisc.wgsl` declares them at group 2 bindings 6 to 12, read by
+    `textureLoad` (`unfilterable-float`), and `surfaceLighting.wgsl` reads them by name. A body
+    without an atmosphere binds one one-texel `rgba32float` texture of zeros in all seven
+    (`createAirlessTables`): the body table's a of 0 makes the lookups return 1, 0 and 1 before any
+    other read, so R07's light is unchanged to the bit (R07's disc smoke, and the probe's exact
+    checks).
+  - _The angles in the signatures._ The Provides' latitude and azimuth arguments are kept as
+    angles: `bodyDisc.wgsl` forms them with `preciseAtan2` from the spheroid normal, the pole and the
+    source's direction, and `surfaceLighting.wgsl` turns them back into direction cosines with
+    `preciseSinCos`, about 5 × 10⁻⁷ each way. The lit point stands at longitude 0, its foot
+    (N cos φ, 0, N (1 − e²) sin φ), its quadric 2hN + h²(cos²φ + k² sin²φ) from the height.
+  - _Light slots._ Star j of a disc takes light slot j's curves and irradiance layer, a planetshine
+    source slot 0, each held to the medium's slots; R08.T10.a builds a body's curves in
+    `lightsAt`'s order.
+  - _The three-node rule's value_ is the irradiance-weighted mean transmittance of the disc's part
+    above the horizon, Σ w μ T ÷ Σ w μ, which multiplies the caller's own irradiance factor
+    (`planetshine_irradiance`'s): the centre's lookup as ρ → 0 (10⁻⁶), within 2% of a 200 × 200
+    quadrature over a 9.8° disc 10° up on Earth's medium, and 0 for a source wholly below the local
+    horizon, even from a height whose ground does not hide its centre.
+  - _The sky term_ is the source's illuminance (a planetshine source's carried to the point by the
+    inverse square, as its direct term is) times the sky's irradiance at its own μ₀, on the
+    surface's mean A, R07's "Lambert share's flat term". A star's shares the point's eclipse and
+    ring shadow (the science check's finding, where this was first deferred): the air above the
+    point is taken to lie in the shadow with it, as an umbra's air does, so that a moon in its
+    planet's shadow keeps no daylight sky. The eclipse is formed before the horizon's `continue`,
+    and skipped where the star is down and the sky gives nothing (every airless disc), so R07's
+    light is unchanged to the bit. A planetshine source's sky is not shadowed, as its direct term
+    is not (Design note 7).
+  - _The disc's height is 0_, the datum: R07's disc is the figure at zero height, with no terrain.
+  - _Catalogued_: `irradiance.wgsl` as `IRRADIANCE_KERNEL` among the atmosphere's table kernels;
+    `surfaceLighting.wgsl`, a library with no entry point, through every module that composes it
+    (the disc materials, the smooth mesh, the `disc cells` kernel and the lit-body probe).
+  - _The disc cells pass_ binds the one-texel defaults: a disc with an atmosphere sums its own cells
+    in its draws (`drawnThroughCells`), as a class map's disc does.
+  - _R07's shading called from one place_ (found by the smoke). With the lookups in it, SwiftShader,
+    which inlines every call, lost its device compiling the disc's materials, whose `shade` was
+    inlined six times (two `pixel_cells` sites in `disc_pixel`, three `add_sample` sites in
+    `cell_sum`), and the disc-cells kernel took 4.7 s to compile with three. `cell_sum` now gathers
+    its points first (`cell_samples`) and `disc_pixel` calls `pixel_cells` once, each draw's own
+    count, the arithmetic and the order of every sum R07's; the kernel compiles in 1.7 s and R07's
+    disc checks pass unchanged.
+  - _The probe_ (`litBodyProbe.ts`): its `stubs` case is `hooks` (R11's ring-shadow stub, 1, and R08's
+    two lookups at fixed arguments), and an `atmosphere` case evaluates any of the three lookups;
+    the kernel composes `SURFACE_LIGHTING_WGSL` and declares the tables at group 0 bindings 5 to 11.
+    `smoke/litBody.ts` binds the defaults and holds them to R07's 1, 1 and 0 exactly; R08.T9.b's
+    group binds a body's stored tables (`probeSurfaceLighting`).
+  - _The twin on demand._ T6.e's note had T9.b add the irradiance to `TwinBand`; it is built apart
+    (`oblateIrradianceTwin`, `irradianceTwin`), since a table costs 4–9 s in the twin and the tests
+    and groups that never read it should not pay for it.
+  - _The tests' Saturn-class ratio._ The pole's diffuse irradiance at the datum under a zenith sun
+    is 0.786, 0.813 and 0.900 of the equator's (r, g, b; ground albedo 0.3), against the bands'
+    vertical columns' 0.754 (s_e ÷ s_p): thin, the sky's light goes as the column, and it saturates
+    towards 1 as τ grows (0.16, 0.33, 0.84 at the equator). The test holds each between the
+    columns' ratio and 1, in order of depth, red within 5% of the columns'. The task's "by the band
+    tables' column ratio" is read as the thin limit the ratio tends to; the twin's reads above
+    are the figure's.
+  - _The unit tests' twin_ runs on small tables beneath (transmittance 64 × 16 at 128 steps,
+    multiple scattering 16 × 16), so its figures are the quadrature's and the lookups', not the
+    kernel sizes' (the smoke's twin is at the kernels' sizes).
+  - _The smoke_ (`just test-render`, both variants): part 6 (new) holds `R08.T9.b surface lighting
+on Earth` and `… on a Saturn-class figure`: every band and light slot's irradiance layer, as
+    stored, against its twin over the GPU's own band tables and multiple scattering, and the three
+    lookups at 216, 144 and 216 points (heights to 30 km on Earth and 300 km on the Saturn-class
+    figure, latitudes 0°, 35°, 60° and 89°, sources from the zenith to 2° down, radii to 9.8°)
+    through the probe with the stored tables bound, against `surfaceLightingTwin` over the GPU's
+    slices and irradiance. Worst, against the twin: the irradiance 3 × 10⁻⁶ on Earth and in each
+    of the Saturn-class figure's four bands; the lookups, sun, sky and wide source, 7 × 10⁻⁶,
+    2 × 10⁻⁶ and 8 × 10⁻⁶ on Earth, 6.3 × 10⁻⁵ (the sun's, its fitted lookup), 2 × 10⁻⁶ and
+    1.0 × 10⁻⁵ on the Saturn-class figure.
+  - _The parts' times_ (2026-10-14, before the gate, at a load of 4 to 10; default / no
+    subgroups): parts 2 to 5 took 97.6/98.2, 101.0/100.0, 92.5/95.1 and 104.0/105.0 s (T6.f's
+    gate: 101–112 s at a load of 9–17). The lit materials, larger with `surfaceLighting.wgsl`, cost
+    part 1 some 13 s of SwiftShader's compiling (its catalogue, R07.T9's meshes, R07.T8.b's class
+    map), and a first gate at a load of 34 took it to 157 s against the 180 s watchdog, so
+    R05.T12.c's frames (32–36 s) moved to part 6: part 1 then took 65.3/64.9 s and part 6 59.8/62.0 s (at a
+    load of 5), R08.T9.b's groups 8.6–9.3 s (Earth) and 19.1–19.6 s (the Saturn-class figure).
+    With the irradiance built with every set of tables, part 2 had taken 145 s at a load of 16
+    (above).
+
+- **Deferred findings (2026-10-13 rule)** (R08.T9.b). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The irradiance's quadrature_ leaves up to 0.95% against a dense reference (8 × 6 nodes, 32
+    steps), most of it the steps near the ground; R08.T13 checks the surface's irradiance against
+    the reference, and 48 steps would take it to about 0.5% at 1.5 times the kernel's cost.
+  - _A lobe narrower than the dust's._ The science check's Gaussian stand-ins for a phase peaked
+    within a few degrees (2°, 3.5°, 5° wide) erred by −21% to +12% with the sun's height, the nodes
+    aliasing on the peak, and Henyey–Greenstein g = 0.95 by −2.5%; the fixtures' tabulated phases
+    are within 0.95%. If a medium brings such a lobe (large ice crystals), splitting the whole
+    rings' piece at the lobe's reach, u = √(1 ÷ 6), took the 3.5° and 5° lobes to 0.6% and 0.5%.
+  - _The sky between μ_s texels near the horizon_ (Bruneton's layout, which the task names): with
+    2 ÷ 63 in μ_s a texel (1.8° there) and the twilight sky falling about 8 times in 2°, a linear
+    read is up to about 50% high between texels; a column axis dense near μ_s = 0 would answer it.
+  - _The rows above a haze._ The root axis leaves a pure 1.2 km haze's sky up to 39% high between
+    the 1.8 and 4 km rows (at 3.2 km) and up to 100% between the 4 and 7.1 km rows (at 6.1 km),
+    where it is 7% and 0.6% of the ground's (the science check, interpolating e^(−h ÷ 1.2 km) as the
+    rows do, which matches the measured 37%, 55% and 61% at 3, 5 and 8 km); a Rayleigh air's sky
+    dilutes it. R10's and R11's re-validation may ask more rows.
+  - _Design note 7's figures for the rule_ hold along the vertical diameter. On the whole disc (the
+    science check) the three nodes are +0.5% at 10° (the test's case, within its 2%), −3.5% at 5°
+    (within the note's 4%) and +0.8% at 20° and τ = 1, where the note's "under 0.1%" is the
+    diameter's.
+  - _A partly set wide source._ The rule's top node is (√2 ÷ 2) ρ above the centre, so a source
+    whose upper 0.29 ρ alone is up returns 0: about 2.9° of Jupiter's disc from Io.
+  - _The ground's light under the sky_: Hillaire's multiple scattering takes the ground's one
+    Lambertian bounce of the direct sun, so the light the ground and sky pass between them is
+    missing: the sky's irradiance would be its one bounce's E₀ ÷ (1 − A S̄), S̄ the air's spherical
+    albedo seen from below (the science check's estimate, about 0.18 at 440 nm on Earth's medium:
+    some 2% at A = 0.1 in blue, 10–20% over snow); R08.T13 should hold a bright-ground case.
+  - _A narrow umbra's sky._ A star's sky light takes the point's eclipse, right where the shadow is
+    much wider than the air's reach (a moon in its planet's shadow, a ring's shadow). Under an umbra
+    a few hundred kilometres wide (the Moon's on Earth, at most about 270 km), the air outside it
+    lights the sky in totality to about twilight's levels, and the model gives none.
+  - _A disc with an atmosphere skips the cells pass_, so a small disc with air shades its cells
+    serially in its draws, as before R07.T8.d; one cells dispatch per set of tables is R08.T10.b's
+    to add when bodies are drawn with air.
+  - _The sky on a lunar-Lambert surface_ reflects on the mean A as a flat (Lambertian) term, R07's
+    choice; the Lommel–Seeliger share's diffuse response is not modelled.
+  - _The memory._ Each band's irradiance layer adds 16 KB a light slot, and the body's table
+    272 B (36 → 53 texels): the Saturn-class figure's tables are 2,065,232 B at one slot, over
+    R08.T6.f's 1,999,424 B; R08.T11's budget item.
+  - _No disc is drawn with a body's tables yet._ No caller passes `LitBodyInput.atmosphere`: the
+    smoke draws airless discs and holds the lookups through the probe. R08.T10.b passes
+    `surfaceLightingTablesOf(tables)` each frame, adds one cells dispatch per set of tables, and
+    is where a disc with air is first drawn and checked.
+  - _A tilted surface._ The lookups take the datum normal's μ; Bruneton's (1 + n · up) ÷ 2 for a
+    tilted normal, and R10's horizon, are the callers' (R10's `terrain_sky_factor`).
+  - _The scale heights from the medium as given_ (with its forward deltas, the composite's), where
+    the kernels read slice 0's delta-free column; the two part by under 10⁻³ of H on a medium with
+    no forward delta.
+  - _The cost on SwiftShader_: the irradiance's build is about 1.4 s a layer there, paid now only
+    by the tables a lit pass reads (the parts' times above).
 
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7; built and recorded by R08.T7, "Deviations in T7,

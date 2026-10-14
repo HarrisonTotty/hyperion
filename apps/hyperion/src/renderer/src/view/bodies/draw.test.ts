@@ -30,6 +30,7 @@ import { METER_CLASS } from "../post/meter";
 import {
   compositeDiscPixels,
   DISC_ROWS,
+  drawnThroughCells,
   packDiscRecords,
   rasteriseDisc,
   viewRay,
@@ -44,7 +45,11 @@ import {
 } from "./draw";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { WIREFRAME_MATERIALS } from "../wireframe/submit";
-import type { DrawItem } from "../engine/types";
+import type { DrawItem, TextureHandle } from "../engine/types";
+import {
+  surfaceLightingDrawTextures,
+  type SurfaceLightingTables,
+} from "../atmosphere/surfaceLighting";
 import { sphereFootprint } from "./regime";
 import { DISC_LIMB_DEPTHS, rotationColumns } from "./smoothMesh";
 
@@ -1136,6 +1141,11 @@ describe("planetshine", () => {
   });
 });
 
+/** A stand-in for one of a body's atmosphere tables (R08.T9.b). */
+function air(name: string): TextureHandle {
+  return { kind: "texture", name: `air ${name}` };
+}
+
 describe("the renderer", () => {
   /** A plan of two discs and a point between them, and another point after. */
   function planOf(count = 2): ReturnType<typeof planLitBodies> {
@@ -1209,6 +1219,73 @@ describe("the renderer", () => {
     renderer.dispose();
   });
 
+  it("binds a body's atmosphere tables to its disc draws, and the defaults to a body without one (R08.T9.b)", async () => {
+    const engine = await countingRenderEngine();
+    const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
+    const tables: SurfaceLightingTables = {
+      body: air("body"),
+      transmittance: air("transmittance"),
+      absorberColumns: air("columns"),
+      absorberPressureColumns: air("pressure columns"),
+      lastAbsorberPressureColumn: air("last pressure column"),
+      absorberCurves: air("curves"),
+      irradiance: air("irradiance"),
+    };
+    const plain = planOf();
+    const first = plain.discs[0];
+    if (first === undefined) {
+      throw new Error("the plan has discs");
+    }
+    // The first disc's body has an atmosphere, the second none.
+    const plan = { ...plain, discs: [{ ...first, atmosphere: tables }, ...plain.discs.slice(1)] };
+    const discDraws = renderer.draws(plan).filter((d) => d.material.name.startsWith("bodies:disc"));
+    const withAir = discDraws.filter((d) => d.uniforms["disc"]?.[0] === 0);
+    const without = discDraws.filter((d) => d.uniforms["disc"]?.[0] === 1);
+    expect(withAir).toHaveLength(2);
+    expect(without).toHaveLength(2);
+    for (const draw of withAir) {
+      expect(draw.textures).toMatchObject(surfaceLightingDrawTextures(tables));
+    }
+    const defaults = without[0]?.textures["atmosphereBody"];
+    expect(defaults?.name).toBe("bodies:no atmosphere");
+    for (const draw of without) {
+      for (const name of Object.keys(surfaceLightingDrawTextures(tables))) {
+        expect(draw.textures[name]).toBe(defaults);
+      }
+    }
+    renderer.dispose();
+  });
+
+  it("carries a body's atmosphere into its record and sums such a disc's own cells (R08.T9.b)", () => {
+    const { body, hosts } = scene(6.371e6 / Math.sin(10 / PX_PER_RAD), 30);
+    const table = air("any");
+    const tables: SurfaceLightingTables = {
+      body: table,
+      transmittance: table,
+      absorberColumns: table,
+      absorberPressureColumns: table,
+      lastAbsorberPressureColumn: table,
+      absorberCurves: table,
+      irradiance: table,
+    };
+    const regimes = new Map([[body.id, "disc" as const]]);
+    const [withAir] = planLitBodies(
+      [{ ...body, atmosphere: tables }],
+      hosts,
+      OPTIONS,
+      regimes,
+    ).discs;
+    const [without] = planLitBodies([body], hosts, OPTIONS, regimes).discs;
+    if (withAir === undefined || without === undefined) {
+      throw new Error("each plan has its disc");
+    }
+    expect(withAir.atmosphere).toBe(tables);
+    expect("atmosphere" in without).toBe(false);
+    // A disc under 32 px: its cells through the pass without an atmosphere, its own with one.
+    expect(drawnThroughCells(without)).toBe(true);
+    expect(drawnThroughCells(withAir)).toBe(false);
+  });
+
   it("writes the phase table once for the same laws, and grows the disc buffer by doubling", async () => {
     const engine = await countingRenderEngine();
     const renderer = new LitBodyRenderer(engine, WIREFRAME_MATERIALS.starSprite);
@@ -1251,6 +1328,7 @@ describe("the renderer", () => {
         "bodies:disc cell sums",
         "bodies:phase table",
         "bodies:no class map",
+        "bodies:no atmosphere",
       ].toSorted(),
     );
   });

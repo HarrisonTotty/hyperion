@@ -66,7 +66,7 @@ import type {
 import type { Rgb } from "../photometry/toneCurve";
 import type { QualitySetting } from "../quality/qualitySetting";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
-import { type AtmosphereMedium, columnLengthM, densityAt, extinction } from "./medium";
+import { type AtmosphereMedium, localScaleHeightM } from "./medium";
 import { type BodyGravity, bodyGravity, gravityRatio, principalRadiiM } from "./oblate";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
@@ -75,6 +75,7 @@ import compositeWgsl from "./shaders/composite.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
 import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
+import scatteringWgsl from "./shaders/scattering.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
@@ -474,43 +475,11 @@ export interface ViewExact {
 }
 
 /**
- * The least local scale height the fitted lookup takes, m of h\*: 1 km (plan R08, R08.T6.f).
- *
- * @remarks
- * The fit's second point stands one local scale height up the ray, and its deep-dip parabola
- * √(2 R_α H ÷ s) either side of the lowest point, so that the fit's differences of h\* are about
- * H. Near the top, or where the stored vertical depth above a point is under the half float's
- * least step (2⁻²⁴; within a few tens of kilometres of a Saturn-class top), the column gives a
- * height of metres, whose differences `f32` cannot take from heights of hundreds of kilometres
- * (0.06 m a step at 800 km): the smoke's kernel arm parted from the twin by 2% there. A kilometre
- * keeps them to about 10⁻⁴, and lies under the least scale height drawn so far (R05's Earth
- * aerosol, 1.2 km); a body of one band takes no fit.
- * `oblate.wgsl`'s `OBLATE_SCALE_FLOOR_M` is the same.
+ * The fitted lookup's least local scale height and the medium's local scale height (plan R08,
+ * R08.T6.f): `medium.ts`'s since R08.T9.b, where `tables.ts` tabulates the latter into the body's
+ * table for the lit passes without a cycle of imports.
  */
-export const FIT_SCALE_FLOOR_M = 1_000;
-
-/**
- * The local scale height in h\* at `scaledHeightM` (plan R08, R08.T6.f): the medium's vertical
- * optical depth above it in green over its extinction there in green, held to the room left to the
- * top, all of it where nothing extinguishes, and to at least {@link FIT_SCALE_FLOOR_M}; one scale
- * height for an exponential, the column's own e-folding for any profile. `tablesCpu.ts`'s
- * `OblateReader` takes the optical depth from slice 0's stored table, the kernels likewise; this
- * takes it from each term's column (`medium.ts`'s `columnLengthM`), within the table's 10⁻³.
- */
-export function localScaleHeightM(medium: AtmosphereMedium, scaledHeightM: number): number {
-  const top = medium.topHeightM;
-  const room = Math.max(top - scaledHeightM, 1);
-  const height = Math.min(Math.max(scaledHeightM, 0), top);
-  let column = 0;
-  let extinctionPerM = 0;
-  for (const term of medium.terms) {
-    const green = extinction(term)[1];
-    column += green * (columnLengthM(term.density, top) - columnLengthM(term.density, height));
-    extinctionPerM += green * densityAt(term.density, height);
-  }
-  const held = extinctionPerM > 0 ? Math.min(column / extinctionPerM, room) : room;
-  return Math.max(held, FIT_SCALE_FLOOR_M);
-}
+export { FIT_SCALE_FLOOR_M, localScaleHeightM } from "./medium";
 
 /**
  * The view's {@link ViewExact} for a camera at `positionM` with its {@link atmosphereInputs}. Each
@@ -661,14 +630,15 @@ export function pathSlotsOf(sources: ReadonlyArray<FrameSource>): number {
 
 /**
  * The per-frame kernels: `view/shaders/preciseTrig.wgsl` (R08.T6.g), `common.wgsl`, `medium.wgsl`,
- * `view.wgsl`, `oblate.wgsl` (R08.T6.f), `source.wgsl`, then each kernel, which declares the
- * `medium` uniform, the `terms` buffer and the `densityTables` and `phaseTables` that `medium.wgsl`
- * and `source.wgsl` read in place (R08.T6.b), and the body's table `oblateBody` (R08.T6.f).
+ * `view.wgsl`, `oblate.wgsl` (R08.T6.f), `scattering.wgsl` (R08.T9.b), `source.wgsl`, then each
+ * kernel, which declares the `medium` uniform, the `terms` buffer and the `densityTables` and
+ * `phaseTables` that `medium.wgsl` and `scattering.wgsl` read in place (R08.T6.b), and the body's
+ * table `oblateBody` (R08.T6.f).
  */
 function kernel(name: string, wgsl: string): KernelPair {
   return {
     name,
-    reference: `${preciseTrigWgsl}\n${commonWgsl}\n${mediumWgsl}\n${viewWgsl}\n${oblateWgsl}\n${sourceWgsl}\n${wgsl}`,
+    reference: `${preciseTrigWgsl}\n${commonWgsl}\n${mediumWgsl}\n${viewWgsl}\n${oblateWgsl}\n${scatteringWgsl}\n${sourceWgsl}\n${wgsl}`,
     subgroup: null,
     readback: "presentation-only",
   };

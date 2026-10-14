@@ -1,7 +1,7 @@
 // The shading of a lit body's surface (plan R07, Design notes 5, 6, 7 and 24): the body BRDF, a
 // lunar-Lambert disc term times a phase factor f read from a table, as reflectance I/F; the horizon
-// and eclipse terms of a lit point; planetshine's irradiance; and the hooks R08 and R11 fill, as
-// stubs.
+// and eclipse terms of a lit point; planetshine's irradiance; and R11's hook, as a stub (R08's are
+// `surfaceLighting.wgsl`'s since plan R08's R08.T9.b).
 //
 // A library composed by concatenation: it declares no binding of its own. Its includer declares
 // `phase_factor_table : texture_2d<f32>` at the includer's own group and binding (an
@@ -175,18 +175,9 @@ fn ring_shadow_on_body(p : vec3f, sun : vec3f) -> vec3f {
   return vec3f(1.0);
 }
 
-// R08's hooks (R08.T9.b, its Design note 17), with their full signatures: each sun's
-// transmittance through the atmosphere, 1, and the sky's irradiance, 0, until
-// `surfaceLighting.wgsl` replaces them; a body without an atmosphere keeps these.
-fn atmosphere_sun_transmittance(
-  altitude_m : f32,
-  mu_sun : f32,
-  latitude_rad : f32,
-  sun_azimuth_rad : f32,
-) -> vec3f {
-  return vec3f(1.0);
-}
-
-fn atmosphere_sky_irradiance(altitude_m : f32, mu_sun : f32, latitude_rad : f32) -> vec3f {
-  return vec3f(0.0);
-}
+// R08's hooks, each source's transmittance through the atmosphere and the sky's irradiance, were
+// stubs of 1 and 0 here until plan R08's R08.T9.b: `atmosphere_sun_transmittance`,
+// `atmosphere_sky_irradiance` and `atmosphere_source_transmittance` are now
+// `view/atmosphere/shaders/surfaceLighting.wgsl`'s, which every module that includes this one
+// joins (WGSL resolves every name in a module), with the tables it reads; a body without an
+// atmosphere binds one-texel defaults, and reads 1 and 0 as the stubs did.

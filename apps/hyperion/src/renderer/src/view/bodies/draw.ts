@@ -51,10 +51,19 @@ import type {
   MaterialHandle,
   MeshHandle,
   RenderEngine,
+  TextureBindingSpec,
   TextureHandle,
   ViewSize,
   WgslMaterialSpec,
 } from "../engine/types";
+import {
+  createAirlessTables,
+  SURFACE_LIGHTING_WGSL,
+  surfaceLightingDrawTextures,
+  surfaceLightingKernelTextures,
+  type SurfaceLightingTables,
+  surfaceLightingTextures,
+} from "../atmosphere/surfaceLighting";
 import { type ProjectionCamera, project, type Viewport } from "../camera/projection";
 import { type Rotation3, rotateToBody } from "../coords/rotation";
 import { discEclipseVisible } from "../lighting/discEclipse";
@@ -134,6 +143,13 @@ export interface LitBodyInput {
    * geometry: the frame's hosts and the other bodies where they are drawn.
    */
   readonly lighting: LightingFrame | undefined;
+  /**
+   * Its atmosphere's tables, through which its disc's light crosses the air (plan R08, R08.T9.b;
+   * `surfaceLighting.wgsl`): each star's and planetshine source's transmittance and the sky's
+   * irradiance. Absent, a body without one, whose draws bind the one-texel defaults. Until R08.T10.b
+   * draws a body's atmosphere in the view, no caller gives one.
+   */
+  readonly atmosphere?: SurfaceLightingTables;
 }
 
 /** What the plan needs of the view. */
@@ -372,6 +388,7 @@ function discRecordOf(
     lights,
     occluders: blockers,
     secondaries: shine,
+    ...(body.atmosphere === undefined ? {} : { atmosphere: body.atmosphere }),
   };
 }
 
@@ -548,13 +565,28 @@ export function planLitBodies(
   return { regimes, order, discs, meshes, laws, steps };
 }
 
-const DISC_SOURCE = frameWgsl + litBodyWgsl + bodyDiscWgsl + bodyDiscDrawWgsl;
+/**
+ * What every lit-body module composes before its own: R01's frame, R08's surface lighting (plan
+ * R08, R08.T9.b: `preciseTrig.wgsl`, `common.wgsl`, `oblate.wgsl` and `surfaceLighting.wgsl`, in
+ * place of `litBody.wgsl`'s stubs), the lit-body library and the disc's shading.
+ */
+const LIT_SOURCE = frameWgsl + SURFACE_LIGHTING_WGSL + litBodyWgsl + bodyDiscWgsl;
 
-/** The disc's textures: the frame's phase table, and its class map (any texture where uniform). */
-const DISC_TEXTURES = [
+const DISC_SOURCE = LIT_SOURCE + bodyDiscDrawWgsl;
+
+/** The group 2 binding of the first of the body's atmosphere tables (`bodyDisc.wgsl`), past 0–5. */
+const ATMOSPHERE_FIRST_BINDING = 6;
+
+/**
+ * The disc's textures: the frame's phase table, its class map (any texture where uniform), and its
+ * body's atmosphere tables at bindings 6 to 12 (plan R08, R08.T9.b), the one-texel defaults for a
+ * body without one.
+ */
+const DISC_TEXTURES: ReadonlyArray<TextureBindingSpec> = [
   { name: "phaseFactorTable", binding: 1, sampleType: "unfilterable-float" },
   { name: "classWeights", binding: 2, viewDimension: "2d-array" },
-] as const;
+  ...surfaceLightingTextures(ATMOSPHERE_FIRST_BINDING),
+];
 
 /**
  * The disc draws' uniforms: the record, the draw (0 its wholly covered pixels, 1 its limb), and its
@@ -607,8 +639,7 @@ export const BODY_DISC_MATERIALS: Readonly<Record<"interior" | "limb", WgslMater
   },
 };
 
-const SMOOTH_MESH_SOURCE =
-  frameWgsl + litBodyWgsl + bodyDiscWgsl + patchVertexWgsl + smoothMeshWgsl;
+const SMOOTH_MESH_SOURCE = LIT_SOURCE + patchVertexWgsl + smoothMeshWgsl;
 
 /**
  * The mesh regime's material (T9): R05's patches of a body's spheroid at zero height, one
@@ -652,11 +683,13 @@ export const DISC_CELLS_PASS = "disc cells";
  *
  * @remarks
  * Its one source serves both capability paths: it has no subgroup variant. Its sums are a pure
- * function of its inputs, so its readback is `bit-exact`, though nothing reads them back.
+ * function of its inputs, so its readback is `bit-exact`, though nothing reads them back. It binds
+ * the one-texel atmosphere defaults (plan R08, R08.T9.b): a disc with an atmosphere sums its own
+ * cells in its draws ({@link drawnThroughCells}), since one dispatch binds one set of tables.
  */
 export const BODY_DISC_CELLS_KERNEL: KernelPair = {
   name: "BODY DISC CELLS",
-  reference: frameWgsl + litBodyWgsl + bodyDiscWgsl + bodyDiscCellsWgsl,
+  reference: LIT_SOURCE + bodyDiscCellsWgsl,
   subgroup: null,
   readback: "bit-exact",
 };
@@ -733,6 +766,11 @@ interface DeviceResources {
   tableRows: number;
   /** A texel of no weight, bound where a disc's surface is uniform and never read. */
   readonly noClassMap: TextureHandle;
+  /**
+   * The one-texel atmosphere tables of a body without one (plan R08, R08.T9.b), and the `disc
+   * cells` pass's always: the lookups read 1 and 0 through them.
+   */
+  readonly noAtmosphere: SurfaceLightingTables;
   /** The mesh regime's material and R05's 65 × 65 patch with skirts (T9). */
   readonly mesh: MaterialHandle;
   readonly patch: MeshHandle;
@@ -803,6 +841,7 @@ export class LitBodyRenderer {
         usage: TEXTURE_USAGE.TEXTURE_BINDING,
         category: "other",
       }),
+      noAtmosphere: createAirlessTables(engine, "bodies:no atmosphere"),
       mesh: engine.createMaterial(SMOOTH_MESH_MATERIAL),
       patch: engine.createMesh({
         name: "bodies:smooth patch",
@@ -890,13 +929,21 @@ export class LitBodyRenderer {
     return surface.kind === "class-map" ? surface.weights : this.#resources.noClassMap;
   }
 
+  /**
+   * The textures a record's draws bind: the frame's phase table, its class map and its body's
+   * atmosphere tables, or the defaults of a body without one (R08.T9.b).
+   */
+  #recordTextures(record: DiscRecord): Readonly<Record<string, TextureHandle>> {
+    const resources = this.#resources;
+    return {
+      phaseFactorTable: resources.table,
+      classWeights: this.#classWeights(record.surface),
+      ...surfaceLightingDrawTextures(record.atmosphere ?? resources.noAtmosphere),
+    };
+  }
+
   /** One of a disc's two draws: 0 its wholly covered pixels, 1 its limb, at `depths`. */
-  #discDraw(
-    index: number,
-    surface: DrawnDiscSurface,
-    edgePass: 0 | 1,
-    depths: LimbDepths,
-  ): DrawItem {
+  #discDraw(index: number, record: DiscRecord, edgePass: 0 | 1, depths: LimbDepths): DrawItem {
     const resources = this.#resources;
     return {
       mesh: resources.quad,
@@ -907,7 +954,7 @@ export class LitBodyRenderer {
         edgePass: new Float32Array([edgePass]),
         depths: new Float32Array(depths),
       },
-      textures: { phaseFactorTable: resources.table, classWeights: this.#classWeights(surface) },
+      textures: this.#recordTextures(record),
       storageBuffers: { discs: resources.discs, cellSums: resources.cellSums },
     };
   }
@@ -976,7 +1023,11 @@ export class LitBodyRenderer {
           cell_jobs: resources.cellJobs,
           cell_sums: resources.cellSums,
         },
-        sampled: { phase_factor_table: resources.table, class_weights: resources.noClassMap },
+        sampled: {
+          phase_factor_table: resources.table,
+          class_weights: resources.noClassMap,
+          ...surfaceLightingKernelTextures(resources.noAtmosphere),
+        },
         storage: {},
       },
       cellWorkgroups(cells.count),
@@ -1014,10 +1065,7 @@ export class LitBodyRenderer {
             firstInstance: new Float32Array([first]),
             bodyRotation: rotationColumns(body.mesh.axes),
           },
-          textures: {
-            phaseFactorTable: resources.table,
-            classWeights: this.#classWeights(record.surface),
-          },
+          textures: this.#recordTextures(record),
           storageBuffers: {
             discs: resources.discs,
             slots: resources.slots,
@@ -1078,8 +1126,8 @@ export class LitBodyRenderer {
             throw new Error(`the plan's disc step ${step.index} has no record`);
           }
           draws.push(
-            this.#discDraw(step.index, record.surface, 0, DISC_LIMB_DEPTHS),
-            this.#discDraw(step.index, record.surface, 1, DISC_LIMB_DEPTHS),
+            this.#discDraw(step.index, record, 0, DISC_LIMB_DEPTHS),
+            this.#discDraw(step.index, record, 1, DISC_LIMB_DEPTHS),
           );
           break;
         }
@@ -1089,7 +1137,7 @@ export class LitBodyRenderer {
           if (body === undefined || record === undefined) {
             throw new Error(`the plan's limb step ${step.mesh} has no mesh or record`);
           }
-          draws.push(this.#discDraw(body.index, record.surface, 1, body.limbDepths));
+          draws.push(this.#discDraw(body.index, record, 1, body.limbDepths));
           break;
         }
         case "points":
@@ -1122,5 +1170,6 @@ export class LitBodyRenderer {
     }
     this.#engine.releaseTexture(resources.table);
     this.#engine.releaseTexture(resources.noClassMap);
+    this.#engine.releaseTexture(resources.noAtmosphere.body);
   }
 }
