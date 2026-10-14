@@ -33,8 +33,8 @@ mod golden;
 mod properties;
 
 pub use bearing::{
-    BearingFactors, SlopeFactors, bearing_capacity, bearing_capacity_on_slope,
-    ultimate_bearing_capacity, ultimate_bearing_capacity_on_slope,
+    BearingFactors, bearing_capacity, bearing_capacity_on_slope, ultimate_bearing_capacity,
+    ultimate_bearing_capacity_on_slope,
 };
 pub use class::{Material, MaterialClass, PhotometricForm};
 pub(crate) use classify::IceCuts;
