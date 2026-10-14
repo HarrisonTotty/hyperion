@@ -5,18 +5,28 @@ import enstatitePhase from "./fixtures/enstatite-sample-phase.json" with { type:
 import ga from "./fixtures/granada-amsterdam.json" with { type: "json" };
 import mgsPhase from "./fixtures/mgs1m-phase.json" with { type: "json" };
 import excerpt from "./fixtures/tamudust-excerpt.json" with { type: "json" };
-import { MATERIAL_FILES, refractiveIndex } from "./materials/materials";
+import { MATERIAL_FILES, refractiveIndex, resolveMaterial } from "./materials/materials";
 import { type ComplexIndex, mieSphere } from "./mie";
 import {
   FLOOR_ALBEDO_MIN,
   forwardPeakSplit,
+  ICE_ANALOGUE_ASYMMETRY_BIAS,
+  ICE_KEYS,
+  isIce,
+  KERNEL_EDGE_MODEL_EXCESS,
+  KERNEL_EDGE_N,
+  KERNEL_EDGE_REFLECTANCE_TOLERANCE,
+  KERNEL_K_MAX,
+  kernelEdgeRule,
   type NonSphericalParticles,
   nonSphericalModeOptics,
   opticsOfParticles,
+  particlesOf,
   PHASE_FILES,
   parsePhaseFile,
   type PhaseFileTable,
   phaseFileOf,
+  radiusDistribution,
   type RadiusDistribution,
   SMALL_GRAIN_SIZE_PARAMETER,
   tableModeOptics,
@@ -727,5 +737,275 @@ describe("the distributions and files the tables read", () => {
     const [node] = mgsPhase.nodes;
     const reversed = { ...node, volumes: (node?.volumes ?? []).toReversed() };
     expect(() => parsePhaseFile({ ...mgsPhase, nodes: [reversed] }, "bad.json")).toThrow(/ascend/u);
+  });
+
+  it("read a node's nTable as its n where the file leaves it out", () => {
+    const table = parsePhaseFile(mgsPhase, "fixtures/mgs1m-phase.json");
+    expect(table.nodes.every((n) => n.nTable === n.n)).toBe(true);
+  });
+
+  it.each([
+    ["an nTable outside the longwave kernel's n range", { n: 3.5, nTable: 3.3 }],
+    ["an nTable on a node whose own n lies inside it", { n: 1.5, nTable: 3.2 }],
+    ["an nTable inside the range but not at its nearer edge", { n: 3.5, nTable: 3 }],
+    ["an nTable at the farther edge", { n: 3.5, nTable: 0.4 }],
+  ])("refuse %s (decision-r08-t5d ruling 2)", (_, change) => {
+    const [node] = mgsPhase.nodes;
+    expect(() =>
+      parsePhaseFile({ ...mgsPhase, nodes: [{ ...node, ...change }] }, "bad.json"),
+    ).toThrow(/nTable/u);
+  });
+});
+
+/** An ice's real index at 550 nm. */
+function n550(key: string): number {
+  return refractiveIndex(key, 550, { phase: "solid" }).index.n;
+}
+
+/** A gamma distribution of r_eff (µm) at v_eff 0.1. */
+function gamma(effectiveRadiusUm: number) {
+  return { kind: "gamma", effectiveRadiusUm, effectiveVariance: 0.1 } as const;
+}
+
+/** MnS's phase table (decision-r08-t5d ruling 2's test material). */
+function mnsTable(): PhaseFileTable {
+  const file = resolveMaterial("MnS").file;
+  const table = file === undefined ? undefined : phaseFileOf(file);
+  if (table === undefined) {
+    throw new Error("MnS has no phase table");
+  }
+  return table;
+}
+
+/** A material's own particles, as a non-spherical mode of it resolves them. */
+function particlesOfKey(material: string, index?: ComplexIndex): NonSphericalParticles {
+  const resolved = resolveMaterial(material, { phase: "solid" });
+  const shape = resolved.file?.shape === "crystal" ? "crystal" : "nonSphericalMineral";
+  const own = particlesOf({ material, sizes: gamma(1) }, resolved, shape);
+  return index === undefined ? own : { ...own, index: () => index };
+}
+
+describe("every non-spherical file's phase basis (R08.T5.d)", () => {
+  it("gives every non-spherical mineral its own reduced TAMUdust2020 table over 380–780 nm", () => {
+    const minerals = MATERIAL_FILES.filter((file) => file.shape === "nonSphericalMineral");
+    expect(minerals.length).toBeGreaterThan(15);
+    for (const file of minerals) {
+      const table = phaseFileOf(file);
+      expect([file.key, table?.model]).toEqual([file.key, "tamudust2020"]);
+      expect(table?.nodes[0]?.wavelengthNm).toBe(380);
+      expect(table?.nodes.at(-1)?.wavelengthNm).toBe(780);
+    }
+  });
+
+  it("serves each mineral's own index at every wavelength by a kernel or its edge, never past", () => {
+    // Where the kernel-edge rule gives a model or a named analogue the table serves; the floor rule
+    // decides beyond that, from the mode.
+    for (const file of MATERIAL_FILES.filter((f) => f.shape === "nonSphericalMineral")) {
+      for (const [i, nm] of file.wavelengthsNm.entries()) {
+        const basis = kernelEdgeRule({ n: file.n[i] ?? Number.NaN, k: file.k[i] ?? Number.NaN });
+        expect([file.key, nm, basis.basis === "fallback"]).toEqual([file.key, nm, false]);
+      }
+    }
+  });
+
+  it("draws every crystal on water ice's table, as the model for H2O and a named analogue otherwise", () => {
+    expect(waterIceTable()).toBeDefined();
+    const crystals = MATERIAL_FILES.filter((file) => file.shape === "crystal");
+    expect(crystals.filter((file) => !isIce(file.key)).map((file) => file.key)).toEqual([]);
+    for (const file of crystals) {
+      const optics = opticsOfParticles(particlesOfKey(file.key), gamma(10), 550);
+      expect([file.key, optics.phaseModel, optics.phaseBasis]).toEqual([
+        file.key,
+        "yang2013",
+        file.key === "H2O" ? "model" : "analogue",
+      ]);
+    }
+  });
+
+  it("holds O2 and Ar among the ices (decision-r08-t5d ruling 3)", () => {
+    for (const key of ["O2", "Ar", "H2S", "N2", "CO"]) {
+      expect(ICE_KEYS.has(key)).toBe(true);
+    }
+  });
+});
+
+describe("the ices' expected g bias, by van Diedenhoven et al. 2014's eq. (16)", () => {
+  // eq. (16): g_RT(m₂) ÷ g_RT(m₁) = ((m₁ − ε)(m₂ + ε)) ÷ ((m₁ + ε)(m₂ − ε)), ε = 0.960251 for compact
+  // crystals (their §2c), with g_tot = (1 + g_RT) ÷ 2, water ice at 550 nm the base: Δg =
+  // (2g_water − 1)(C − 1) ÷ 2, g_water a cirrus mode's on Yang et al.'s table (r_eff 30 µm).
+  const epsilon = 0.960_251;
+  const water = once(
+    () =>
+      nonSphericalModeOptics(
+        { material: "H2O", form: { phase: "solid" }, sizes: gamma(30) },
+        550,
+        new Float64Array(0),
+      ).asymmetry,
+  );
+  it.each(Object.entries(ICE_ANALOGUE_ASYMMETRY_BIAS))(
+    "gives %s ice its recorded %f to 0.001",
+    (key, bias) => {
+      const m1 = n550("H2O");
+      const m2 = n550(key);
+      const ratio = ((m1 - epsilon) * (m2 + epsilon)) / ((m1 + epsilon) * (m2 - epsilon));
+      expect(Math.abs(((2 * water() - 1) * (ratio - 1)) / 2 - bias)).toBeLessThan(0.001);
+    },
+  );
+
+  it("finds the new ices' n at 550 nm inside the fit's 1.18–1.43", () => {
+    const outside = ["N2", "CO", "O2", "Ar"].filter((key) => n550(key) < 1.18 || n550(key) > 1.43);
+    expect(outside).toEqual([]);
+  });
+
+  it("records a bias for each new ice", () => {
+    const unrecorded = ["N2", "CO", "O2", "Ar"].filter(
+      (key) => ICE_ANALOGUE_ASYMMETRY_BIAS[key] === undefined,
+    );
+    expect(unrecorded).toEqual([]);
+  });
+
+  it("finds H2S's and NH4SH's n at 550 nm past the fit's 1.43", () => {
+    expect(["H2S", "NH4SH"].filter((key) => n550(key) <= 1.43)).toEqual([]);
+  });
+
+  it("records no bias for H2S or NH4SH, past the fit", () => {
+    expect(["H2S", "NH4SH"].filter((key) => key in ICE_ANALOGUE_ASYMMETRY_BIAS)).toEqual([]);
+  });
+
+  it("names O2 ice's analogue and its expected g, signed, in its note", () => {
+    const optics = opticsOfParticles(particlesOfKey("O2"), gamma(10), 550);
+    expect(optics.phaseNote).toBe(
+      "O2 ice drawn on H2O ice's roughened 8-column table, a named analogue; its g expected +0.024 from H2O ice's (van Diedenhoven et al. 2014)",
+    );
+  });
+
+  it("names argon, an atomic solid, as solid Ar in its note", () => {
+    const optics = opticsOfParticles(particlesOfKey("Ar"), gamma(10), 550);
+    expect(optics.phaseNote).toBe(
+      "solid Ar drawn on H2O ice's roughened 8-column table, a named analogue; its g expected +0.028 from H2O ice's (van Diedenhoven et al. 2014)",
+    );
+  });
+});
+
+describe("the kernel-edge rule (decision-r08-t5d ruling 2)", () => {
+  const small = gamma(0.3);
+  // On the longwave floor at 600 nm a 0.3 µm mode of n 2.8 already absorbs past the floor rule's
+  // ω 0.99; a 0.1 µm mode keeps it, and a 3 µm mode, within the table's reach, leaves it.
+  const tiny = gamma(0.1);
+  const coarse = gamma(3);
+
+  it("holds the ruling's constants", () => {
+    expect(KERNEL_EDGE_N).toEqual([0.4, 3.2]);
+    expect(KERNEL_K_MAX).toBe(4);
+    expect(KERNEL_EDGE_MODEL_EXCESS).toBe(0.05);
+    expect(KERNEL_EDGE_REFLECTANCE_TOLERANCE).toBe(0.2);
+  });
+
+  it("makes Cr a model at 582 nm, where its n of 3.22 lies within 0.05 of the edge", () => {
+    expect(refractiveIndex("Cr", 582).index.n).toBeGreaterThan(3.2);
+    const optics = opticsOfParticles(particlesOfKey("Cr"), small, 582);
+    expect([optics.phaseModel, optics.phaseBasis]).toEqual(["tamudust2020", "model"]);
+  });
+
+  it.each([380, 410])("makes MnS a named analogue at %i nm, naming its n and 3.2", (nm) => {
+    const { n } = refractiveIndex("MnS", nm).index;
+    const optics = opticsOfParticles(particlesOfKey("MnS"), small, nm);
+    expect([optics.phaseModel, optics.phaseBasis]).toEqual(["tamudust2020", "analogue"]);
+    expect(optics.phaseNote).toBe(
+      `MnS: n ${n.toFixed(3)} above the longwave kernel's 3.2, the hexahedra at n 3.2 stand in, a named analogue`,
+    );
+  });
+
+  it("names MnS's 3.513 at 380 nm", () => {
+    expect(opticsOfParticles(particlesOfKey("MnS"), small, 380).phaseNote).toContain("n 3.513");
+  });
+
+  it.each([420, 450])("makes MnS a model at %i nm", (nm) => {
+    const optics = opticsOfParticles(particlesOfKey("MnS"), small, nm);
+    expect([optics.phaseModel, optics.phaseBasis]).toEqual(["tamudust2020", "model"]);
+  });
+
+  it("draws MnS at 600 nm on the floor's table, below the longwave kernel's k floor", () => {
+    const index = refractiveIndex("MnS", 600).index;
+    expect(index.k).toBeLessThan(1e-3);
+    const optics = tableModeOptics(mnsTable(), radiusDistribution(tiny), index, 600);
+    expect(optics.floored).toBe(true);
+    expect(optics.tableAlbedo).toBeGreaterThanOrEqual(FLOOR_ALBEDO_MIN);
+  });
+
+  it("follows T5.c's floor rule for small MnS grains at 600 nm: a model", () => {
+    expect(opticsOfParticles(particlesOfKey("MnS"), tiny, 600).phaseBasis).toBe("model");
+  });
+
+  it("follows T5.c's floor rule for coarse MnS grains at 600 nm: the fallback, above n 1.70", () => {
+    const optics = opticsOfParticles(particlesOfKey("MnS"), coarse, 600);
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.phaseNote).toMatch(/the k-floor rule exceeded .* at n 2\.8\d\d above 1\.7/u);
+  });
+
+  it("gives MnS's table the fallback under a test index of 4.5 + 0.01i, naming n and the edge", () => {
+    const optics = opticsOfParticles(particlesOfKey("MnS", { n: 4.5, k: 0.01 }), small, 450);
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.phaseNote).toMatch(
+      /^MnS: n 4\.500 above the longwave kernel's 3\.2, its normal-incidence reflectance 32 % from the edge's; /u,
+    );
+  });
+
+  // Both rules on one mode: the worse basis wins, and both notes are kept.
+  it("keeps both notes in the fallback where the edge's analogue meets the floor's exit above 1.70", () => {
+    const optics = opticsOfParticles(particlesOfKey("MnS", { n: 3.4, k: 1e-5 }), coarse, 600);
+    expect(optics.phaseBasis).toBe("fallback");
+    expect(optics.phaseNote).toMatch(
+      /^MnS: n 3\.400 above the longwave kernel's 3\.2; the k-floor rule exceeded \(the floor's single-scattering albedo 0\.\d{4} < 0\.99\) at n 3\.400 above 1\.7; a Henyey–Greenstein /u,
+    );
+  });
+
+  it("keeps the edge's note alone for a small grain the floor rule keeps", () => {
+    const optics = opticsOfParticles(particlesOfKey("MnS", { n: 3.4, k: 1e-5 }), tiny, 600);
+    expect(optics.phaseBasis).toBe("analogue");
+    expect(optics.phaseNote).toBe(
+      "MnS: n 3.400 above the longwave kernel's 3.2, the hexahedra at n 3.2 stand in, a named analogue",
+    );
+  });
+
+  // The two analogues cannot meet: an edge analogue above the kernel lies past n 1.70, where the
+  // floor's exit is the fallback, and below it a floored index (k under 1E-3) moves the reflectance
+  // by more than 20% wherever n lies more than 0.05 under 0.4.
+  it("leaves a floored index below the edge no analogue tier: the fallback past 0.05", () => {
+    expect(kernelEdgeRule({ n: 0.345, k: 1e-4 }).basis).toBe("fallback");
+    expect(kernelEdgeRule({ n: 0.355, k: 1e-4 }).basis).toBe("model");
+  });
+
+  it("gives the fallback to a k above the longwave kernel's 4", () => {
+    expect(kernelEdgeRule({ n: 3, k: 4.46 })).toEqual({
+      basis: "fallback",
+      clause: "k 4.460 above the longwave kernel's 4",
+    });
+  });
+
+  it("makes an index within 0.05 of the edge a model", () => {
+    expect(kernelEdgeRule({ n: 3.21, k: 3.3 })).toEqual({ basis: "model" });
+  });
+
+  it("holds an index below the kernel at its lower edge, 0.4", () => {
+    expect(kernelEdgeRule({ n: 0.3, k: 2 })).toEqual({
+      basis: "analogue",
+      nEdge: 0.4,
+      clause: "n 0.300 below the longwave kernel's 0.4",
+    });
+  });
+
+  it("states the renderer's own constants in each table held at the edge, as the tool writes them", () => {
+    // The tool keeps its own copies (its KERNEL_EDGE); this catches drift.
+    const held = PHASE_FILES.filter((table) => table.nodes.some((node) => node.nTable !== node.n));
+    expect(held.map((table) => table.key)).toContain("MnS");
+    for (const table of held) {
+      expect(table.reduction).toContain(
+        `Where n lies past the longwave kernel's ${KERNEL_EDGE_N[0]}–${KERNEL_EDGE_N[1]}, the table is made at the nearer edge (nTable), a model within ${KERNEL_EDGE_MODEL_EXCESS} of it and a named analogue while the normal-incidence reflectance moves by at most ${100 * KERNEL_EDGE_REFLECTANCE_TOLERANCE}%`,
+      );
+      for (const node of table.nodes.filter((n) => n.nTable !== n.n)) {
+        expect(node.nTable).toBe(node.n > KERNEL_EDGE_N[1] ? KERNEL_EDGE_N[1] : KERNEL_EDGE_N[0]);
+      }
+    }
   });
 });

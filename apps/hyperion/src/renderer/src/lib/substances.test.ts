@@ -85,6 +85,13 @@ describe("SUBSTANCE_NAMES", () => {
       mars_dust: "MARS-TYPE DUST",
       soot: "SOOT",
       tholin: "THOLIN",
+      graphite: "GRAPHITE",
+      chromophore: "JOVIAN CHROMOPHORE",
+      ice_giant_haze: "ICE-GIANT HAZE",
+      acid_uv_absorber: "ULTRAVIOLET-ABSORBING H2SO4",
+      basalt: "BASALT",
+      basalt_fe: "Fe-RICH BASALT",
+      lava_glass: "VOLCANIC GLASS",
     });
   });
 

@@ -49,6 +49,14 @@ export const SUBSTANCE_NAMES: Readonly<Record<string, string>> = {
   mars_dust: "Mars-type dust",
   soot: "soot",
   tholin: "tholin",
+  // R08.T5.d's name keys (decision-substance-names; decision-r08-t5d).
+  graphite: "graphite",
+  chromophore: "Jovian chromophore",
+  ice_giant_haze: "ice-giant haze",
+  acid_uv_absorber: "ultraviolet-absorbing H2SO4",
+  basalt: "basalt",
+  basalt_fe: "Fe-rich basalt",
+  lava_glass: "volcanic glass",
 };
 
 /** The case a name is shown in: as written, inside a sentence, or in an upper-case label. */

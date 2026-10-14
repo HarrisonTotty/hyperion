@@ -9295,6 +9295,287 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     the matrix adds the delta, as `aerosolPhaseTable` does.
   - _Closed set, for the composition audit:_ `ICE_KEYS` (H₂O, NH₃, CH₄, CO₂, NH₄SH, H₂S, N₂, CO)
     decides which crystals take water ice's table; any other `crystal` takes the hexahedra.
+    _Since T5.d_ O₂ and Ar too (decision-r08-t5d ruling 3).
+- **Deviations in T5.d, as built** (2026-10-14; `view/atmosphere/materials/` (24 new index files,
+  `sulphuric-acid-75.json`, `materials.ts` and its test), `materials/phase/` (16 new files),
+  `nonSpherical.ts`, `sizeDistribution.ts` (TSDoc) and their tests, `aerosol.test.ts`;
+  `lib/substances.ts` and its test; `apps/hyperion/src/tools/materials.ts`, `nonSpherical.ts` and
+  their tests, `scripts/materials.mjs`; `NOTICE`).
+  - _The files._ 24 index files, 92,995 B in all (2.7–5.0 kB each), and 16 phase files,
+    2,930,303 B, each under 400 kB: `chromium.json` 397,078 B (16 nodes), `manganese-sulphide.json`
+    341,774 B (9), `zinc-sulphide.json` 300,655 B (9), `titanium-dioxide.json` 285,443 B (8),
+    `calcium-titanate.json` 236,598 B (7), `sodium-sulphide.json` 225,528 B (8),
+    `basaltic-glass.json` 179,530 B (6), `potassium-chloride.json` 155,658 B (5),
+    `sodium-chloride.json` 153,396 B (5), `iron-sulphide.json` 142,667 B (6),
+    `silicon-dioxide.json` 124,402 B (4), `graphite.json` 103,723 B (4), `basalt.json` 89,427 B (3),
+    `sulphur.json` 68,942 B (2), `mars-regolith-simulant.json` 64,947 B (2) and
+    `aluminium-oxide.json` 60,535 B (2). The phase directory grows from 1.27 MB to 4.20 MB. Each
+    material, its source, its reduction, its provenance and its basis:
+    - _Measured, from refractiveindex.info (CC0):_ KCl and NaCl (H. H. Li 1976's Sellmeier formulas
+      at 297 K, k = 0 stated against Palik's 4 × 10⁻¹⁰ or less), trigonal SiO₂ (Ghosh 1999's two
+      rays, averaged),
+      Al₂O₃ (Malitson and Dodge 1972's two rays at 293 K, averaged), Cr (Johnson and Christy 1974,
+      iron's source), TiO₂ (Siefke et al. 2016's ALD film, Kitzmann and Heng's own visible source)
+      and Ar ice (Sinnock and Smith 1969 at 80 K). Each formula is evaluated at the grid's
+      wavelengths, not interpolated.
+    - _Measured, through Kitzmann and Heng 2018's compilation_ (the only machine-readable copy;
+      cited to the primary and to K&H, decision-r08-t5d ruling 5): FeS (Pollack et al. 1994;
+      the source's visible rows are 300, 460, 610 and 1,000 nm), CaTiO₃ (Ueda et al. 1998), ZnS
+      (Palik and Addamiano 1985) and MnS (Huffman and Wild 1967). Na₂S (Khachai et al. 2009's
+      FP-APW+lo calculation) is a `standIn`, "a computed index".
+    - _Measured, elsewhere:_ graphite, Draine 2003's two dielectric functions from his site (the
+      0.01 µm, 20 K tables), averaged, which reproduces K&H's `C.dat` (n 2.567, k 1.189 at 550 nm);
+      basalt and basaltic glass (`lava_glass`), Pollack, Toon and Khare 1973 through ARIA.
+    - _Stand-ins:_ S₈ (a constant index), the H₂S, N₂, CO and O₂ ices (Lorentz–Lorenz estimates),
+      `chromophore` (Braude et al. 2020), `ice_giant_haze` (Irwin et al. 2022), `acid_uv_absorber`
+      and `basalt_fe` (MGS-1, Martikainen et al. 2023's Table 6), each with its `standIn` text.
+    - _Shapes and phases as filed:_ the salts, sulphides, oxides, Cr, graphite, S₈ and the three
+      lithologies are `solid` `nonSphericalMineral`s; the five ices `solid` `crystal`s;
+      `chromophore` and `ice_giant_haze` `solid` spheres; `acid_uv_absorber` a `liquid` sphere.
+    - _Bases_ (from each file's own index, by the code's path; `kernelEdgeRule` by wavelength, then
+      the floor rule by mode):
+      - the shortwave kernel: KCl, NaCl and SiO₂ on its floor throughout (k = 0), a `model` while
+        the mode's ω on the floor's table is at least 0.99 (to about r_eff 2 µm) and an `analogue`
+        past it; basalt, `lava_glass` and `basalt_fe` inside it at their own k;
+      - the longwave kernel, inside it: Cr, FeS, graphite and Na₂S at their own k throughout (Cr's n
+        passes 3.2 at 570–595 nm by at most 0.018, a `model`, the reflectance 0.03% off); ZnS at its
+        own k to 425 nm and floored from 430 nm, TiO₂ to 395 nm and from 400 nm, CaTiO₃ to 645 nm
+        and from 650 nm; Al₂O₃ and S₈ floored throughout. On the floor these transparent high-index
+        grains leave the floor rule for the fallback early (n above 1.70): every channel stays a
+        table up to r_eff 0.1 µm for TiO₂, ZnS and MnS, 0.15 µm for S₈, 0.2 µm for Al₂O₃ and CaTiO₃;
+      - MnS at the edge: an `analogue` at 380–415 nm (n 3.513 to 3.264; the reflectance off by
+        11.28% at 380 nm, 10.30% at 385, 8.82% at 390, 7.44% at 395, 6.05% at 400, 4.75% at 405,
+        3.73% at 410 and 2.67% at 415), a `model` from 420 nm (n 3.237, 1.58%; 425 nm 3.211,
+        0.45%), inside the kernel from about 427 nm, at its own k to 550 nm and floored from
+        555 nm;
+      - the ices on water ice's table: H₂S, N₂, CO, O₂ and Ar ices as named analogues.
+  - _T5.b's items for T5.d._ MgSiO₃ (Dorschner et al. 1995's glass) and Mg₂SiO₄ (Jäger et al.'s
+    amorphous sol-gel) are taken as T5.b built them, byte for byte, with no crystalline-forsterite
+    primary; the forsterite test reads Jäger's file (ω 0.99277 for a 1 µm sphere at 550 nm). Soot,
+    tholin and iron are unchanged, and Bond and Bergstrom 2006, Ramirez et al. 2002 and Krishnan,
+    Yugawa and Nordine 1997 stay leads.
+  - _The acceptance._ The plan's command selects `materials/materials.test.ts` and
+    `nonSpherical.test.ts` only. The rulings' tool tests (`src/tools/materials.test.ts`,
+    `src/tools/nonSpherical.test.ts`), `aerosol.test.ts` and `lib/substances.test.ts` run under the
+    brief's wider command (`view/atmosphere/aerosol`, `aggregate` and `sizeDistribution`,
+    `src/tools/materials`, `src/tools/nonSpherical`, `lib/substances`) and under `pnpm test`.
+  - _The tracer's read of every phase file._ `aerosol.test.ts` reads all 21: T5.c's five at their
+    own pairs, the floored high-index minerals at smaller ones (TiO₂, ZnS and MnS 0.05 and 0.1 µm,
+    S₈ 0.1 and 0.15 µm, Al₂O₃ and CaTiO₃ 0.1 and 0.2 µm), since their larger modes fall back, and
+    the rest at their kernel's pair.
+  - _Ruling 1, as built_ (the grid per file). `MaterialIndexFile` gains `wavelengthsNm`;
+    `parseMaterialFile` takes λ₀, λ₀ + 5, …, 780 nm with λ₀ a positive multiple of 5 nm at or
+    below 380 nm, with the ruled message; `indexAt` reads a file on its own grid and keeps the
+    generic stand-in at 380–780 nm; `MATERIAL_WAVELENGTHS_NM` is unchanged, documented as the span
+    every file covers and the renderer draws at. The tool's `resample` and `usedRows` take the grid
+    as an option (`ResampleOptions.grid`, `ACID_GRID_NM` 360–780 nm); the phase tool's
+    `readMaterialFile` refuses any grid but 380–780 nm. Only `sulphuric-acid-75.json` and
+    `acid_uv_absorber` start at 360 nm.
+  - _Ruling 2, as built_ (the kernel edge). The tool's `kernelFor` returns `nTable` beside `kTable`
+    and holds n at the longwave kernel's nearer edge within 0.05 of it or while the normal-incidence
+    reflectance moves by at most 20% (the renderer's model and analogue tiers; `KERNEL_EDGE`, its
+    copies), and throws past both or for k above 4. Just under 0.4 the two differ: 0.351 + 0i moves
+    the reflectance by 20.4% and is the model's (the review's finding). The node rule
+    reads each grid point's (`nTable`, `kTable`), so `wavelengthNodes` takes no k floor of its own;
+    a node writes `nTable` only where it differs from `n`, and a held file's `reduction` states the
+    rule and each held node's excess and reflectance error (`kernelEdgeText`), its `licence` the
+    change. The renderer's `kernelEdgeRule` takes the basis from the particles' own index at the
+    wavelength (`KERNEL_EDGE_N`, `KERNEL_K_MAX`, `KERNEL_EDGE_MODEL_EXCESS`,
+    `KERNEL_EDGE_REFLECTANCE_TOLERANCE`, `normalReflectance`), before the floor rule, the worse basis
+    winning and both notes kept; `parsePhaseFile` reads `nTable` as optional and refuses any but
+    the nearer edge of a node whose own n lies past it. The two halves' constants are held equal
+    through the held files' `reduction` (each side's test). Only MnS's file holds nodes at the
+    edge, at 380 and 415 nm (n 3.51256 and 3.2641, 0.313 and 0.064 past 3.2). Cr's peak falls
+    between its nodes
+    (540 and 780 nm, where n is 3.103 and 3.124), so no Cr node is held; `kernelFor` is still
+    called at its 570–595 nm grid points by the node rule, which needed the rule. The two analogues
+    cannot meet on one mode: an edge analogue above the kernel lies past n 1.70, where the floor's
+    exit is the fallback, and below it a floored index moves the reflectance by more than 20%
+    wherever n lies 0.05 under 0.4. The joined notes (an edge analogue with the floor's fallback)
+    are tested on a test index, 3.4 + 10⁻⁵i on MnS's table.
+  - _The node rule past the cap_ (posted on the issue as a `[laptop]` question; ruled 2026-10-14,
+    the lean kept as built; no contract changes). At T5.c's 1.26, MnS takes 30 nodes (1,114,300 B;
+    its k falls by 245 over 380–550 nm, faster than 1.26 per 10 nm) and CaTiO₃ 13 (433,395 B). The
+    phase tool keeps 1.26 wherever it keeps a file under 400 kB (`PHASE_FILE_CAP_BYTES`, judged by
+    `phaseFileBytes`: the compact JSON's UTF-8 bytes times `PRETTIER_GROWTH` 1.04, since Prettier's
+    layout runs 1.028–1.036 of it; chromium is judged at 399,312 B) and otherwise widens in whole
+    steps of 10^0.1 (`NODE_K_FACTORS`; `reduceTamudust`'s `capBytes`) to the finest that fits,
+    stated in the file's `reduction`: CaTiO₃ 10^0.2 = 1.58 (the longwave kernel's own k step; 7
+    nodes, 236,598 B) and MnS 10^0.4 = 2.51 (9 nodes, 341,774 B). MnS's held nodes keep ruling 2's
+    tiers. The four T5.c files and the other fourteen keep 1.26. The measured cost: between MnS's
+    nodes the linear blend puts weak absorption up to about 11% high at a midpoint, less where the
+    absorption saturates. Both are hot-giant condensates. The better cure is deferred (below).
+  - _Ruling 3, as built._ Ar ice is Sinnock and Smith's 80 K table, n held from 643.9 nm (1.2693)
+    to 780 nm (`holdNm` 137), k = 0 stated. O₂ ice is a Lorentz–Lorenz estimate at γ-O₂'s cell
+    (Cox, Samuelsen and Beckurts 1973, a = 6.78 Å at 46 K, eight molecules; COD 9011647), k = 0,
+    its weak visible bands stated as not drawn. Both join `ICE_KEYS`. Eq. (16)'s biases, on water
+    ice's 1.311 at 550 nm and a cirrus mode's g_tot 0.7513 there (r_eff 30 µm, v_eff 0.1), with
+    ε = 0.960 251 (van Diedenhoven et al. 2014 §2c, read from NASA NTRS 20140013050): N₂ +0.044
+    (n 1.250), CO +0.007 (1.300), O₂ +0.024 (1.275), Ar +0.028 (1.271); T5.c's three recompute to
+    their recorded −0.056, −0.048 and −0.007. H₂S's estimate, 1.570, lies past 1.43 and is left
+    out. The ices' phase note signs a positive bias ("+0.044", the UX review) and names argon, an
+    atomic solid, "solid Ar" as its file does, not "Ar ice".
+  - _Rulings 4 and 5, as built._ `acid_uv_absorber` is the 75 wt% entry's own reduction on
+    360–780 nm (n to the bit) with k = rounded(k_H₂SO₄ + k_UA), k_UA in the tool
+    (`acidUvAbsorberK`, `ACID_UV_K365`, `ACID_UV_DECAY_NM`), 0 from 550 nm. Its k at 360, 365, 450,
+    500, 525 and 550 nm: 1.44514 × 10⁻³, 1.20002 × 10⁻³, 5.09392 × 10⁻⁵, 7.95734 × 10⁻⁶,
+    1.5874 × 10⁻⁶ and 2.07 × 10⁻⁸, against the 75 wt% file's 2.07 × 10⁻⁸ at each. Its `standIn` is
+    the ruled text with formulas written as the console writes them (digits on the line: H2SO4,
+    FeCl3, S2O, Sx). The stand-ins follow ruling 5: S₈ a constant index (Palache, Berman and
+    Frondel 1944's principal indices at the sodium D lines, n_α 1.9579, n_β 2.0377, n_γ 2.2452, as
+    the Handbook of Mineralogy gives them, averaged in ε: 2.0838, k = 0); the H₂S, N₂, CO and O₂
+    ices Lorentz–Lorenz estimates (`molecularIceIndex`) at β-N₂ (Schuch and Mills 1970, 46 K),
+    α-CO (Vegard 1930) and H₂S phase I (Vegard and Sinding-Oserød 1942), each from the
+    Crystallography Open Database (two entries public domain, β-N₂'s and γ-O₂'s from the American
+    Mineralogist Crystal Structure Database, used with attribution), with no increment for a
+    molecular solid. The method's checks: Ar at Dobbs et al. 1956's cell gives 1.284 against the
+    measured 1.2708 (546.1 nm); NH₃ ice 1.465 against 1.436; amorphous H₂S at its film's density
+    (0.944 g cm⁻³, 19 K) 1.439 against Yarnall and Hudson 2022's 1.407 at 670 nm (Astrophys. J.
+    Lett. 931, L4, CC BY 4.0, found by the science check), all high. The estimates at 550 nm: H₂S
+    1.570, N₂ 1.250, CO 1.300, O₂ 1.275.
+  - _§2.2's choices._
+    - _Birefringent crystals_ (item 4): the dielectric functions averaged, ε = (2ε_o + ε_e) ÷ 3, for
+      graphite, α-quartz and corundum; S₈, biaxial, takes (ε_α + ε_β + ε_γ) ÷ 3. TiO₂'s source is a
+      film, read as one index.
+    - _Provenance_ (item 5): `chromophore` and `ice_giant_haze` are `standIn` (retrieved effective
+      indices of unidentified materials), Na₂S `standIn` (a computed index); Mars-type retrievals of
+      known materials stay `measured`.
+    - _Gaps_ (item 6): the chromophore's k below 450 nm is extrapolated linearly in log k from its
+      450 and 500 nm rows (0.0547 at 380 nm), and basaltic glass's below 400 nm from its 400 and
+      420 nm rows (`ResampleOptions.endK`), since both absorb more towards the blue; Ar's n is held
+      (ruling 3); FeS is interpolated across its rows; the two retrievals' n is held at their 1.4.
+      Basalt and basaltic glass give n at a few wavelengths only, so n and k are read from their own
+      rows (`ResampleOptions.separateNK`).
+    - _Lithologies_ (item 7): `basalt` and `lava_glass` (Pollack et al. 1973) and `basalt_fe` (MGS-1,
+      a `standIn`) have files. _Closed set, for the composition audit:_ `anorthosite`,
+      `feldspathic`, `komatiite`, `basalt_reduced`, `granite`, `ultramafic`, `ferric`,
+      `phyllosilicate`, `ca_al_residue`, `iron_nickel` and `SiC` stay on the generic stand-in until
+      P14.T49.b adds their rows, with their leads: ARIA's andesite and obsidians beside the basalts
+      (Pollack et al. 1973) for the feldspathic and silicic rocks; ARIA's granite (Toon et al. 1977)
+      is infrared only; Martikainen et al. 2023's JSC Mars-1 and MMS-2 columns for `ferric` and
+      `phyllosilicate`-bearing dusts; the MgSiO₃ and Mg₂SiO₄ files for `ultramafic`; iron's file for
+      `iron_nickel`; K&H's `SiC.dat` (Laor and Draine 1993) and refractiveindex.info's SiC entries
+      (Wang et al. 2013's 4H and 6H, from 405 and 436 nm; Shaffer 1971's β-SiC, 467–691 nm, none
+      reaching 380 nm) for `SiC`; none found for `ca_al_residue`, `komatiite`, `anorthosite` or
+      `basalt_reduced`. A file that only copied another's index would need its own phase table,
+      which keys cannot share today, so none is written.
+    - _Shapes of the hazes_ (item 8): as the leans, above.
+  - _Names beyond the sketch._ The tool: `parseRefractiveIndexInfoN`,
+    `parseRefractiveIndexInfoFormula`, `formulaIndex` and `DispersionFormula`, `parseKitzmannHeng`,
+    `parseDraineDielectric`, `DielectricSample`, `indexOfDielectric`, `averagedUniaxial`,
+    `parseMartikainenK`, `parseBraudeChromophore`, `irwinAerosol3`, `parseIrwinAerosol3`,
+    `CombinedSpec`, `SourceInput`, `COMBINED_MATERIALS`, `formulaOnGrid`, `uniaxialFormulasOnGrid`,
+    `sourceOptions`, `GasDispersionCopy` and its five copies, `molecularIceIndex`, `IceCell` and its
+    five cells, `iceIndex`, `ICE_ESTIMATES`, `S8_PRINCIPAL_INDICES`, `S8_STAND_IN_INDEX`,
+    `FETCHED_T5D`, `LX_MIE_COMMIT`; `parseAria` reads `#FORMAT=WAVL N K` too, and
+    `FetchedSpec.adjust` adds a stated change after the reduction; and `ReducedIndex`,
+    `ACID_GRID_NM`, `MARTIKAINEN_FIXED_N`, `CHROMOPHORE_REAL_INDEX`, `ICE_GIANT_HAZE_REAL_INDEX`,
+    `H2S_FILM`, `H2S_MOLAR_MASS_G_PER_MOL`, `h2sFilmEstimate` and `AR_ICE_MEASURED_546`. The phase
+    tool: `KERNEL_EDGE`, `normalReflectance`, `kernelEdgeText`, `PhaseNode.nTable`,
+    `PHASE_FILE_CAP_BYTES`, `PRETTIER_GROWTH`, `NODE_K_FACTORS`, `phaseFileBytes` and
+    `heldAtEdgeLicence`; its changed signatures: `kernelFor` returns `nTable`,
+    `wavelengthNodes(file, nStep, kFactor)` takes the k factor in place of a k floor,
+    `nodeRuleText(nStep, kFactor)`, `reduceTamudust(…, capBytes)` and `checkTamudust(…, nodes)`,
+    which checks a file's own nodes. The renderer: `PhaseTableNode.nTable`, `KernelEdgeBasis`,
+    `kernelEdgeRule`, `normalReflectance`, `KERNEL_EDGE_N`, `KERNEL_K_MAX`,
+    `KERNEL_EDGE_MODEL_EXCESS` and `KERNEL_EDGE_REFLECTANCE_TOLERANCE`.
+  - _The setup check._ Before the change, T5.b's thirteen sources (every SHA-256 as the tool
+    records it, HITRAN2024's tar included) and TAMUdust2020's archive (7,939,243,504 bytes, its MD5
+    and SHA-256 as T5.c recorded them) regenerated the 15 committed index files and the four
+    TAMUdust2020 phase files byte for byte after Prettier, through the base commit's own tools.
+    After it, through `scripts/materials.mjs` and `scripts/nonSpherical.mjs`, 14 of the 15 index
+    files and the four phase files are still byte-identical; `sulphuric-acid-75.json`'s diff is its
+    four rows at 360–375 nm (n 1.45192, 1.45047, 1.44903, 1.44758; k 2.07 × 10⁻⁸) and its
+    `reduction`, every other field and its 380–780 nm values unchanged. `water-ice.json`'s phase file
+    was left alone (no `--yang`).
+  - _The tool's reduction check_ (`--check`: gamma modes of r_eff 0.3–10 µm at v_eff 0.1 and 0.3,
+    at each file's own nodes, the widened rule's for MnS and CaTiO₃, against every kernel size),
+    new files: worst |Δa₁| ÷ a₁ 1.34% (Cr), 0.998% (FeS), the rest 0.35–0.90%; |Δg| at most
+    8.2 × 10⁻⁴ and |Δω| at most 2.4 × 10⁻⁴. The check thins sizes at a node; the blend between
+    nodes is the node rule's, measured above for MnS. Cr's 1.34%
+    passes the plan's 1% for its reduction test (that test is on the shortwave excerpt, which
+    passes); recorded below.
+  - _Costs_ (the laptop, 8 threads, load average under 2 during each run; provisional):
+    - TAMUdust2020's archive: 9,119 s wall (2 h 32 min) over four byte ranges in 256 MiB chunks
+      resumed after drops, 0.87 MB s⁻¹ on average (0.4–1.1 MB s⁻¹); its digests 27 s; the
+      extraction of `tables/SW/` and `tables/LW/` 58 s (niced, capped at 4 GB), 9,435,083,472
+      bytes, with 7.94 GB of archive beside it. The small sources were under 10 MB together (the two
+      e-prints' archives, 7.9 and 1.8 MB, the largest); HITRAN2024's tar, 207 MB, 40 s.
+    - The materials tool: 0.4 s wall, 0.5 s CPU, 163 MB peak RSS (load 0.75). The phase tool: 4.9 s
+      wall, 4.2 s CPU, 338 MB peak (load 0.15–0.22), and 29.5 s with `--check` at each file's own
+      nodes (20.8 s CPU, 340 MB, load 0.20–0.71). The base commit's phase tool on its four files:
+      3.7 s wall, 223 MB.
+  - _For plan 14_ (P14.T49.b and T49.e): each key's shape class and phase as filed (above); the
+    `ICE_KEYS` additions, O₂ and Ar; and each index file's own grid: P14.T49.e finds 550 nm by
+    wavelength, since `acid_uv_absorber` and `sulphuric-acid-75.json` start at 360 nm.
+- **Deferred findings (2026-10-13 rule)** (R08.T5.d). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _ZnS's ultraviolet k is suspect._ The compilation's k is 0.06 at 382 nm and 0.04 at 413 nm,
+    then 7.4 × 10⁻⁶ at 451 nm: a fall by four decades, longward of cubic ZnS's band gap near
+    340 nm, where Debenham 1984 measured the crystal's n from 405 nm (Appl. Opt. 23, 2238), so it
+    must transmit. At that k a 1 µm grain's ω is about 0.6 at 380 nm, and a ZnS cloud draws
+    yellow, not white. Kept as ruling 5 takes the compilation; the lean, for the owner: hold k
+    from 451 nm below (`ignoreBelowUm` 0.45), or take an open primary (refractiveindex.info's
+    Debenham 1984 or Ozaki and Adachi 1993, CC0). CaTiO₃'s visible k (1.8 × 10⁻³ at 550 nm, from
+    reflectance) may share the problem, unchecked (the science check).
+  - _The retrievals' real index is held._ `chromophore` (n 1.4, fixed at 700 nm; Braude et al. do
+    not say how it varies elsewhere) and `ice_giant_haze` (1.4 at 800 nm, Kramers–Kronig elsewhere
+    in Irwin et al.) take n constant. A Kramers–Kronig n from each k spectrum is for a later task.
+  - _The chromophore below 450 nm_ is an extrapolation of a retrieval's edge (k 0.0547 at 380 nm
+    against the 450 nm row's 0.033).
+  - _One key serves every ice giant's haze._ Uranus's and Neptune's Aerosol-3 k differ by up to a
+    factor of 29 over 300–800 nm (1.91 × 10⁻⁴ against 5.47 × 10⁻³ at 500 nm); the geometric mean
+    stands for both.
+  - _Ar's hold and temperature._ The held n runs at most 0.0011 high at 780 nm (a Cauchy line's
+    1.2682); the source's 83.81 K table lies 0.0020 lower, its 40 K table 0.016 higher, and no
+    temperature dependence is drawn.
+  - _O₂ ice's colour._ Its weak visible absorption bands (pale blue) are not drawn; k = 0.
+  - _S₈ draws too white in the blue._ k = 0 misses sulphur's blue absorption edge, and the constant
+    2.084 its dispersion (r < v); the label covers it.
+  - _The Lorentz–Lorenz method runs high_ on the three measured checks: Ar +0.013 at Dobbs et al.'s
+    two-figure, unstated-temperature cell; NH₃ ice +0.029; amorphous H₂S at its film's density
+    +0.032 (Yarnall and Hudson 2022's 1.407 at 670 nm, 0.944 g cm⁻³, 19 K). The H₂S, N₂, CO and O₂
+    estimates are presumably as high; calibrating on a measurement would depart from ruling 5's "no
+    increment", the owner's call. The α-CO and H₂S cells predate 1947 (possibly kX units) and state
+    no temperature.
+  - _Spacek et al.'s units._ Their coefficients are decadic (a = α ÷ ln 10, §2.1), so k at 375 nm
+    is 8.8 × 10⁻³, not 3.8 × 10⁻³; ln 10 cancels in the ratio, so L ≤ 26.9 nm stands. The
+    ruling's shorthand 80 nm ÷ ln(1278 ÷ 54) gives 25.3 nm: 26.9 nm needs k's λ factor,
+    ln((1278 × 375) ÷ (54 × 455)). k₃₆₅ = 1.2 × 10⁻³ is the ruling's value, not traced here; Spacek
+    et al.'s §2.1 asks about 0.003 of mode-2 droplets at 365 nm. For R08.T5.e. Their journal
+    version (Astrobiology 26, 727) is CC BY-NC 4.0, so the two values are read from the CC BY 4.0
+    preprint.
+  - _NH₃ ice's bias is an extrapolation too._ Its n at 550 nm, 1.436, lies 0.005 past van
+    Diedenhoven et al.'s largest m_r (1.4310, their Table 1), yet T5.c gave it −0.056; kept.
+  - _The alternatives recorded:_ fused silica for SiO₂ (n 1.460 at 550 nm, against the crystal's
+    1.549); amorphous Al₂O₃ (n 1.58, k 0.04); rutile for TiO₂ (2.753 at 550 nm averaged, against
+    the film's 2.436, reflectance 0.218 against 0.175). Which form a condensate takes is not
+    modelled.
+  - _Na₂S, FeS and CaTiO₃_ rest on weak visible data: a computed index (a stand-in), four rows
+    interpolated across the visible, and a closed primary read through the compilation.
+  - _MnS's and CaTiO₃'s widened node rule_ (above; ruled on the issue 2026-10-14). The better
+    cure scales a TAMUdust2020 node's absorption by the particles' own k between nodes, as the
+    renderer already does on a floor's table and on Yang et al.'s; it would give 1.26's accuracy
+    with fewer nodes. It goes to R08.T11, or to the next task that touches the kernels' phase
+    reads, with a cap raised per key as its alternative.
+  - _The longwave kernel's largest k is 3.981 (10^0.6), not 4._ `LONGWAVE.kMax` and `KERNEL_K_MAX`
+    take 4, so an index with 3.981 < k ≤ 4 would pass both and be refused by the kernel's
+    interpolation. None on file does (Cr's largest is 3.44).
+  - _Cr's reduction check_ reaches 1.34% in a₁ (FeS 0.998%), past the 1% the thinning met for T5.c's
+    files; the thinning tolerances are unchanged.
+  - _Chromium's phase file_ is 397,078 B, 2.9 kB under the cap.
+  - _"MGS-1" is not on the guide's list of abbreviations_ (the UX review). It is the simulant's own
+    name in the literature, kept in `basalt_fe`'s name and `standIn`; the owner may rule. A phase
+    note writes the kernel's edge as "3.2", a bound's own digits, beside the particles' n to three
+    places ("n 3.513 above the longwave kernel's 3.2"), as T5.c writes "above 1.7".
+  - _The renderer parses every phase file at load._ `PHASE_FILES` grows from five files (1.27 MB)
+    to 21 (4.20 MB), each imported and decoded when `nonSpherical.ts` loads. Loading a key's table
+    when a mode first needs it is for the perf lane.
+  - _Transparent high-index condensates draw on the fallback early._ On the longwave floor (k
+    10⁻³) a mode of TiO₂, ZnS or MnS past r_eff 0.1 µm, S₈ past 0.15 µm, or Al₂O₃ and CaTiO₃
+    past 0.2 µm leaves the floor rule in some channel, so most cloud modes of them are
+    Henyey–Greenstein with no matrix, labelled (T5.c's design; no kernel reaches below k 10⁻³ at
+    n above 1.70).
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the

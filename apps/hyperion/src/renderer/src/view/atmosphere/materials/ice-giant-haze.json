@@ -1,0 +1,42 @@
+{
+  "key": "ice_giant_haze",
+  "phase": "solid",
+  "variant": null,
+  "name": "ice-giant haze, an effective index retrieved from Uranus's and Neptune's spectra",
+  "temperatureK": null,
+  "shape": "sphere",
+  "provenance": "standIn",
+  "paper": "P. G. J. Irwin, N. A. Teanby, L. N. Fletcher, D. Toledo, G. S. Orton, M. H. Wong, M. T. Roman, S. Pérez-Hoyos, A. James and J. Dobinson, \"Hazy blue worlds: A holistic aerosol model for Uranus and Neptune, including dark spots\", J. Geophys. Res. Planets 127 (2022) e2022JE007189, DOI 10.1029/2022JE007189, its values read from the preprint, arXiv:2201.04516v2",
+  "source": "the preprint's source, https://arxiv.org/e-print/2201.04516v2, SHA-256 9aac82980dd91c5dacc34d5552629e113cdb8e3fb7c6d39c3dd8f324fa045259, fetched 2026-10-14, its file Neptune_Uranus_Haze.tex, SHA-256 7061326a906a8d284d40bd0d2bf0b0991e7f4a1e398de9adf6d4bd3947b8aad9, the tables \"Estimated n_imag spectra for Uranus aerosols\" and \"… for Neptune aerosols\", the Aerosol-3 (extended haze) \"Mean 1\" columns; read as data",
+  "licence": "Adapted from CC BY 4.0 material (https://creativecommons.org/licenses/by/4.0/): P. G. J. Irwin et al., J. Geophys. Res. Planets 127 (2022) e2022JE007189 (arXiv:2201.04516v2). Changed: the geometric mean of the two planets' Aerosol-3 k, reduced onto this grid, with n held at the paper's 1.4; this file is offered under CC BY 4.0",
+  "reduction": "at each of the tables' wavelengths, every 100 nm over 300–1,900 nm, k is the geometric mean of Uranus's and Neptune's Aerosol-3 \"Mean 1\", since one key serves every ice giant; then n linear and k linear in log k in wavelength between the source's rows, onto 380–780 nm every 5 nm, to six significant figures. The two planets differ by up to a factor of 29 over 300–800 nm (Uranus 1.50 × 10⁻³ and Neptune 1.01 × 10⁻² at 400 nm, 1.91 × 10⁻⁴ and 5.47 × 10⁻³ at 500 nm). n is the paper's 1.4, which its retrieval fixes at 800 nm and carries elsewhere by Kramers–Kronig (its §3.4 and §3.6); that shape is not reproduced, and n is 1.4 throughout",
+  "standIn": "an effective index retrieved from Uranus's and Neptune's spectra for their unidentified photochemical haze (Irwin et al. 2022), not a laboratory measurement",
+  "fit": null,
+  "wavelengthsNm": [
+    380, 385, 390, 395, 400, 405, 410, 415, 420, 425, 430, 435, 440, 445, 450, 455, 460, 465, 470,
+    475, 480, 485, 490, 495, 500, 505, 510, 515, 520, 525, 530, 535, 540, 545, 550, 555, 560, 565,
+    570, 575, 580, 585, 590, 595, 600, 605, 610, 615, 620, 625, 630, 635, 640, 645, 650, 655, 660,
+    665, 670, 675, 680, 685, 690, 695, 700, 705, 710, 715, 720, 725, 730, 735, 740, 745, 750, 755,
+    760, 765, 770, 775, 780
+  ],
+  "n": [
+    1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4,
+    1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4,
+    1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4,
+    1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4, 1.4,
+    1.4, 1.4, 1.4, 1.4, 1.4
+  ],
+  "k": [
+    0.00399419, 0.00396847, 0.00394292, 0.00391753, 0.0038923, 0.00364059, 0.00340515, 0.00318494,
+    0.00297898, 0.00278633, 0.00260614, 0.0024376, 0.00227996, 0.00213252, 0.00199461, 0.00186562,
+    0.00174497, 0.00163213, 0.00152658, 0.00142786, 0.00133552, 0.00124915, 0.00116837, 0.00109281,
+    0.00102214, 0.00100828, 0.000994613, 0.000981129, 0.000967828, 0.000954707, 0.000941764,
+    0.000928996, 0.000916402, 0.000903978, 0.000891723, 0.000879634, 0.000867708, 0.000855945,
+    0.000844341, 0.000832894, 0.000821602, 0.000810464, 0.000799476, 0.000788638, 0.000777946,
+    0.000852558, 0.000934326, 0.00102394, 0.00112214, 0.00122976, 0.00134771, 0.00147697,
+    0.00161862, 0.00177386, 0.00194399, 0.00213043, 0.00233476, 0.00255868, 0.00280408, 0.00307302,
+    0.00336775, 0.00369075, 0.00404472, 0.00443265, 0.00485778, 0.0051674, 0.00549675, 0.0058471,
+    0.00621978, 0.00661621, 0.00703791, 0.00748648, 0.00796365, 0.00847123, 0.00901116, 0.00958551,
+    0.0101965, 0.0108464, 0.0115377, 0.012273, 0.0130553
+  ]
+}

@@ -10,19 +10,29 @@ import {
   ENSTATITE_SAMPLE,
   excerptSizeValues,
   gammaNumberDensity,
+  heldAtEdgeLicence,
   iceAbsorptionText,
   type KernelExcerpt,
   type KernelSource,
+  KERNEL_EDGE,
+  kernelEdgeText,
   kernelReachText,
   kernelFor,
   LONGWAVE,
   MATERIAL_GRID_NM,
+  type MaterialIndexFile,
   NODE_K_FACTOR,
+  NODE_K_FACTORS,
   NODE_N_STEP,
   nodeRuleText,
+  normalReflectance,
   parseAngles,
   parseYangIsca,
+  PHASE_FILE_CAP_BYTES,
   phaseAngleIndices,
+  phaseFileBytes,
+  PRETTIER_GROWTH,
+  readMaterialFile,
   reduceTamudust,
   reductionError,
   SHORTWAVE,
@@ -62,6 +72,48 @@ function arrayField(value: unknown, field: string): unknown[] {
     throw new TypeError(`no array field ${field}`);
   }
   return v;
+}
+
+/** A number field of a parsed JSON object, or NaN where it has none. */
+function numberField(value: unknown, field: string): number {
+  const v: unknown =
+    typeof value === "object" && value !== null && field in value
+      ? Reflect.get(value, field)
+      : undefined;
+  return typeof v === "number" ? v : Number.NaN;
+}
+
+/** A committed phase file's nodes as {@link kernelEdgeText} reads them. */
+function edgeNodes(
+  phase: unknown,
+): Array<{ wavelengthNm: number; n: number; k: number; nTable?: number }> {
+  return arrayField(phase, "nodes").map((node) => {
+    const nTable = numberField(node, "nTable");
+    const wavelengthNm = numberField(node, "wavelengthNm");
+    const n = numberField(node, "n");
+    const k = numberField(node, "k");
+    return Number.isNaN(nTable) ? { wavelengthNm, n, k } : { wavelengthNm, n, k, nTable };
+  });
+}
+
+/** The k factor a phase file's `reduction` states its nodes by: one of {@link NODE_K_FACTORS}. */
+function statedKFactor(reduction: string): number {
+  const stated = /k by under a factor of ([0-9.]+)/u.exec(reduction)?.[1];
+  const factor = NODE_K_FACTORS.find(
+    (f) => (f === NODE_K_FACTOR ? String(f) : f.toPrecision(3)) === stated,
+  );
+  if (factor === undefined) {
+    throw new Error(`the reduction states no k factor of the ladder: ${stated}`);
+  }
+  return factor;
+}
+
+/** The phase files with a node made at the longwave kernel's edge (decision-r08-t5d ruling 2). */
+const HELD_AT_EDGE = ["manganese-sulphide.json"];
+
+/** |R(n, k) − R(edge, k)| ÷ R(n, k), R the normal-incidence reflectance; the upper edge by default. */
+function edgeReflectanceError(n: number, k: number, edge = 3.2): number {
+  return Math.abs(normalReflectance(n, k) - normalReflectance(edge, k)) / normalReflectance(n, k);
 }
 
 function isExcerpt(value: unknown): value is KernelExcerpt {
@@ -168,6 +220,106 @@ describe("the reduction's sphericity, on a fake kernel", () => {
   });
 });
 
+/** {@link fakeIsca}'s kernel, counting its pmat reads: one per node, size and corner. */
+function countingKernel(): { readonly source: KernelSource; readonly reads: () => number } {
+  let reads = 0;
+  const source: KernelSource = {
+    layout: { ...SHORTWAVE, sizes: 3, reals: 2, imaginaries: 2, sphericities: 2 },
+    isca: fakeIsca,
+    pmat: (s, r, i, p, angleIndices) => {
+      reads += 1;
+      const out = new Float64Array(6 * angleIndices.length);
+      out.fill(fakeIsca(s, r, i, p)[4] ?? Number.NaN, 0, angleIndices.length);
+      return out;
+    },
+  };
+  return { source, reads: () => reads };
+}
+
+/** A test material inside the fake kernel at n 1.5, its k falling by 750 over the grid. */
+const FALLING_K: MaterialIndexFile = {
+  key: "(test)",
+  phase: "solid",
+  variant: null,
+  name: "(test) a falling k",
+  wavelengthsNm: MATERIAL_GRID_NM,
+  n: MATERIAL_GRID_NM.map(() => 1.5),
+  k: MATERIAL_GRID_NM.map((_, i) => 0.09 * (1.2e-4 / 0.09) ** (i / 80)),
+};
+
+const FAKE_ANGLES = Array.from({ length: 181 }, (_, i) => i);
+
+/** {@link FALLING_K}'s phase file under a cap, on a kernel given or a fresh counting one. */
+function fallingKTable(
+  capBytes: number,
+  source: KernelSource = countingKernel().source,
+): ReturnType<typeof reduceTamudust> {
+  return reduceTamudust(
+    FALLING_K,
+    "(test)",
+    { shortwave: source, longwave: source },
+    FAKE_ANGLES,
+    undefined,
+    SPHERICITY,
+    capBytes,
+  );
+}
+
+/** {@link FALLING_K}'s grid wavelengths of its nodes at a k factor. */
+function fallingKNodesNm(kFactor: number | undefined): number[] {
+  return wavelengthNodes(FALLING_K, NODE_N_STEP.shortwave, kFactor ?? Number.NaN).map(
+    (g) => MATERIAL_GRID_NM[g] ?? Number.NaN,
+  );
+}
+
+/** One under the size of {@link FALLING_K}'s file at the finest factor. */
+function underFinestBytes(): number {
+  return phaseFileBytes(fallingKTable(Number.POSITIVE_INFINITY)) - 1;
+}
+
+describe("the node rule's cap (decision-r08-t5d), on a fake kernel", () => {
+  it("keeps the finest factor where the file fits", () => {
+    const nodes = fallingKTable(Number.POSITIVE_INFINITY).nodes.map((n) => n.wavelengthNm);
+    expect(nodes).toEqual(fallingKNodesNm(NODE_K_FACTOR));
+  });
+
+  it("widens to the next factor where the finest would pass the cap", () => {
+    const nodes = fallingKTable(underFinestBytes()).nodes.map((n) => n.wavelengthNm);
+    expect(nodes).toEqual(fallingKNodesNm(NODE_K_FACTORS[1]));
+  });
+
+  it("states the factor it widened to", () => {
+    expect(statedKFactor(fallingKTable(underFinestBytes()).reduction)).toBe(NODE_K_FACTORS[1]);
+  });
+
+  it("refuses a file that no factor keeps under the cap", () => {
+    expect(() => fallingKTable(1)).toThrow(/no node rule keeps the phase file under 1 bytes/u);
+  });
+
+  it("makes each node once across the factors it tries", () => {
+    const perNode = countingKernel();
+    reduceTamudust(
+      FALLING_K,
+      "(test)",
+      { shortwave: perNode.source, longwave: perNode.source },
+      FAKE_ANGLES,
+      [0],
+    );
+    const both = countingKernel();
+    fallingKTable(underFinestBytes(), both.source);
+    const union = new Set([
+      ...fallingKNodesNm(NODE_K_FACTOR),
+      ...fallingKNodesNm(NODE_K_FACTORS[1]),
+    ]);
+    expect(both.reads()).toBe(perNode.reads() * union.size);
+  });
+
+  it("judges a file by its UTF-8 bytes", () => {
+    const table = fallingKTable(Number.POSITIVE_INFINITY);
+    expect(phaseFileBytes(table)).toBeGreaterThan(JSON.stringify(table).length * PRETTIER_GROWTH);
+  });
+});
+
 describe("the reduction's headers, against fixed values", () => {
   it("give the kernels' reach in maximum dimension", () => {
     expect(kernelReachText(11_810)).toContain(
@@ -203,7 +355,7 @@ describe("the choices", () => {
   it("chooses wavelength nodes inside the n and k rule", () => {
     const n = MATERIAL_GRID_NM.map((nm) => 1.5 + 0.0001 * (nm - 380));
     const k = MATERIAL_GRID_NM.map((nm) => 0.01 * Math.exp(-(nm - 380) / 150));
-    const nodes = wavelengthNodes({ n, k }, 0.01, 1e-4);
+    const nodes = wavelengthNodes({ n, k }, 0.01);
     expect(nodes[0]).toBe(0);
     expect(nodes.at(-1)).toBe(80);
     for (let i = 1; i < nodes.length; i += 1) {
@@ -214,12 +366,79 @@ describe("the choices", () => {
     }
   });
 
-  it("picks the kernel, and its floor beneath it", () => {
-    expect(kernelFor(1.5, 3e-3)).toEqual({ layout: SHORTWAVE, kTable: 3e-3 });
-    expect(kernelFor(1.58, 2e-5)).toEqual({ layout: SHORTWAVE, kTable: 1e-4 });
-    expect(kernelFor(2.9, 3)).toEqual({ layout: LONGWAVE, kTable: 3 });
-    expect(kernelFor(2.65, 0)).toEqual({ layout: LONGWAVE, kTable: 1e-3 });
-    expect(() => kernelFor(3.5, 0)).toThrow(RangeError);
+  it("picks the kernel, and its floor beneath it, at the material's own n inside a kernel", () => {
+    expect(kernelFor(1.5, 3e-3)).toEqual({ layout: SHORTWAVE, nTable: 1.5, kTable: 3e-3 });
+    expect(kernelFor(1.58, 2e-5)).toEqual({ layout: SHORTWAVE, nTable: 1.58, kTable: 1e-4 });
+    expect(kernelFor(2.9, 3)).toEqual({ layout: LONGWAVE, nTable: 2.9, kTable: 3 });
+    expect(kernelFor(2.65, 0)).toEqual({ layout: LONGWAVE, nTable: 2.65, kTable: 1e-3 });
+  });
+
+  // decision-r08-t5d ruling 2: past the longwave kernel's n range, n is held at the nearer edge
+  // while the normal-incidence reflectance moves by at most 20%.
+  it("holds n at the longwave kernel's edge for Cr's peak and MnS at 380 nm", () => {
+    expect(kernelFor(3.22, 3.3)).toEqual({ layout: LONGWAVE, nTable: 3.2, kTable: 3.3 });
+    expect(kernelFor(3.513, 0.245)).toEqual({ layout: LONGWAVE, nTable: 3.2, kTable: 0.245 });
+  });
+
+  it("holds n at the edge and k at the floor for a transparent index past the kernel", () => {
+    expect(kernelFor(3.5, 0)).toEqual({ layout: LONGWAVE, nTable: 3.2, kTable: 1e-3 });
+  });
+
+  it("finds 0.351 + 0i's reflectance 20.4% off the lower edge's, past the tolerance", () => {
+    expect(edgeReflectanceError(0.351, 0, 0.4)).toBeCloseTo(0.204, 3);
+  });
+
+  it("holds n at the lower edge within the model's 0.05, past the reflectance's tolerance", () => {
+    // 0.351 + 0i, the renderer's model.
+    expect(kernelFor(0.351, 0)).toEqual({ layout: LONGWAVE, nTable: 0.4, kTable: 1e-3 });
+  });
+
+  it("refuses an index past the reflectance's tolerance, and any k above 4", () => {
+    expect(() => kernelFor(4.5, 0.01)).toThrow(RangeError);
+    expect(() => kernelFor(2.5, 4.01)).toThrow(RangeError);
+    expect(() => kernelFor(3.21, 4.46)).toThrow(RangeError);
+  });
+
+  it("measures the reflectance error as the ruling's cases give it", () => {
+    // MnS at 380 nm, 11.3%; 4.5 + 0.01i, 32%.
+    expect(edgeReflectanceError(3.513, 0.245)).toBeCloseTo(0.113, 3);
+    expect(edgeReflectanceError(4.5, 0.01)).toBeCloseTo(0.322, 3);
+  });
+
+  it("holds the ruling's constants, the renderer's copied", () => {
+    expect(KERNEL_EDGE).toEqual({ modelExcess: 0.05, reflectanceTolerance: 0.2 });
+  });
+
+  it("ladders the k rule's factor from 1.26 in whole steps of 10^0.1 to 10", () => {
+    expect(NODE_K_FACTORS[0]).toBe(NODE_K_FACTOR);
+    expect(NODE_K_FACTORS[1]).toBeCloseTo(10 ** 0.2, 12);
+    expect(NODE_K_FACTORS.at(-1)).toBeCloseTo(10, 12);
+  });
+
+  it("states a widened k factor and why", () => {
+    expect(nodeRuleText(0.1, 10 ** 0.4)).toContain(
+      "k by under a factor of 2.51 (widened from 1.26 in whole steps of 10^0.1, the shortwave kernel's own k step, since the finer rule would take the file past 400 kB)",
+    );
+  });
+
+  it("places a held stretch's nodes by k alone", () => {
+    // n past the edge throughout, falling by 0.27 (the rule's 0.1 thrice over), and k by under
+    // 1.26: held at 3.2, the stretch needs no node between its ends.
+    const n = Array.from({ length: 10 }, (_, i) => 3.6 - 0.03 * i);
+    const k = Array.from({ length: 10 }, (_, i) => 0.3 / 1.02 ** i);
+    expect(wavelengthNodes({ n, k }, NODE_N_STEP.longwave)).toEqual([0, 9]);
+  });
+});
+
+describe("the material files the phase tool reads (decision-r08-t5d ruling 1)", () => {
+  const materials = fileURLToPath(new URL("materials/", ATMOSPHERE));
+
+  it("reads a file on 380–780 nm", () => {
+    expect(readMaterialFile(materials, "iron.json").wavelengthsNm).toEqual([...MATERIAL_GRID_NM]);
+  });
+
+  it("refuses a file whose grid starts at 360 nm, since phase tables are made on 380–780 nm", () => {
+    expect(() => readMaterialFile(materials, "sulphuric-acid-75.json")).toThrow(/380–780 nm/u);
   });
 });
 
@@ -283,8 +502,44 @@ describe("the committed phase files", () => {
       expect(reduction).toContain(thinningText());
       expect(reduction).toContain(kernelReachText(reach));
       expect(reduction).toContain(
-        nodeRuleText(kernel === "longwave" ? NODE_N_STEP.longwave : NODE_N_STEP.shortwave),
+        nodeRuleText(
+          kernel === "longwave" ? NODE_N_STEP.longwave : NODE_N_STEP.shortwave,
+          statedKFactor(reduction),
+        ),
       );
+    }
+  });
+
+  it("widen the k rule only where the finer would pass the cap: CaTiO3 to 10^0.2, MnS to 10^0.4", () => {
+    const widened = TAMUDUST_MATERIALS.map((m) => m.file)
+      .map(
+        (file) =>
+          [
+            file,
+            statedKFactor(textField(readJson(`materials/phase/${file}`), "reduction")),
+          ] as const,
+      )
+      .filter(([, factor]) => factor !== NODE_K_FACTOR);
+    expect(widened).toEqual([
+      ["calcium-titanate.json", NODE_K_FACTORS[1]],
+      ["manganese-sulphide.json", NODE_K_FACTORS[3]],
+    ]);
+  });
+
+  it("state the kernel-edge rule and each held node's excess where a table holds n at an edge", () => {
+    const held = TAMUDUST_MATERIALS.map((m) => m.file)
+      .map((file) => [file, readJson(`materials/phase/${file}`)] as const)
+      .filter(([, phase]) => edgeNodes(phase).some((node) => node.nTable !== undefined));
+    // MnS's ultraviolet (decision-r08-t5d ruling 2).
+    expect(held.map(([file]) => file)).toEqual(HELD_AT_EDGE);
+    for (const [, phase] of held) {
+      expect(textField(phase, "reduction")).toContain(kernelEdgeText(edgeNodes(phase)));
+    }
+  });
+
+  it("state the change in their licence where a table holds n at an edge", () => {
+    for (const file of HELD_AT_EDGE) {
+      expect(textField(readJson(`materials/phase/${file}`), "licence")).toBe(heldAtEdgeLicence());
     }
   });
 
@@ -304,7 +559,7 @@ describe("the committed phase files", () => {
     const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
     expect(files.length).toBeGreaterThan(0);
     for (const file of files) {
-      expect(statSync(`${dir}/${file}`).size).toBeLessThan(400_000);
+      expect(statSync(`${dir}/${file}`).size).toBeLessThan(PHASE_FILE_CAP_BYTES);
     }
   });
 });

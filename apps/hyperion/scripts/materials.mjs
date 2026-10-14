@@ -8,8 +8,22 @@
 //     --h2so4-75 <H2SO4_75%_300K_R_Palmer_1975.ri> --h2so4-84 <H2SO4_84.5%_300K_R_Palmer_1975.ri> \
 //     --iron <Johnson.yml> --soot <Dalzell.yml> --tholin <khare_tholins.dat> \
 //     --mars-dust <Dust_Refractive_Indicies.txt> --enstatite <pyr-mg100-Dorschner1995.lnk> \
-//     --forsterite <jager_mg2sio4.dat>
+//     --forsterite <jager_mg2sio4.dat> \
+//     --chromium <Cr/nk/Johnson.yml> --iron-sulphide <FeS.dat> --calcium-titanate <CaTiO3.dat> \
+//     --zinc-sulphide <ZnS.dat> --manganese-sulphide <MnS.dat> --sodium-sulphide <Na2S.dat> \
+//     --titanium-dioxide <TiO2/nk/Siefke.yml> --argon <Ar/nk/Sinnock-solid-80K.yml> \
+//     --chromophore <jupiter_muse_paper4.tex> --ice-giant-haze <Neptune_Uranus_Haze.tex> \
+//     --basalt <basalt_R_Pollack_1973.ri> --basaltic-glass <basaltic_glass_R_Pollack_1973.ri> \
+//     --mgs1 <apjsacf0bet6_ascii.txt> --potassium-chloride <KCl/nk/Li.yml> \
+//     --sodium-chloride <NaCl/nk/Li.yml> --silicon-dioxide-ordinary <SiO2/nk/Ghosh-o.yml> \
+//     --silicon-dioxide-extraordinary <SiO2/nk/Ghosh-e.yml> \
+//     --aluminium-oxide-ordinary <Al2O3/nk/Malitson-o.yml> \
+//     --aluminium-oxide-extraordinary <Al2O3/nk/Malitson-e.yml> \
+//     --graphite-perpendicular <callindex.out_CpeD03_0.01> \
+//     --graphite-parallel <callindex.out_CpaD03_0.01>
 //   pnpm exec prettier --write src/renderer/src/view/atmosphere/materials/*.json
+// The two .tex files are the e-prints' members, extracted from their archives as data; the .dat
+// files are Kitzmann and Heng 2018's compilation's (R08.T5.d).
 import { fileURLToPath } from "node:url";
 
 import { runnerImport } from "vite";

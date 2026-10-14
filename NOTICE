@@ -366,9 +366,60 @@ ruled 2026-10-09 and 2026-10-10).
 - Refractive indices of 75 and 84.5 wt% sulphuric acid at 300 K: K. F. Palmer and D. Williams,
   "Optical constants of sulfuric acid; application to the clouds of Venus?", Appl. Opt. 14
   (1975) 208-219, DOI: 10.1364/AO.14.000208, as distributed by the Aerosol Refractive Index
-  Archive (ARIA), University of Oxford, https://eodg.atm.ox.ac.uk/ARIA/. Reduced to the visible
-  in apps/hyperion/src/renderer/src/view/atmosphere/materials/sulphuric-acid-75.json and
-  sulphuric-acid-84.json.
+  Archive (ARIA), University of Oxford, https://eodg.atm.ox.ac.uk/ARIA/. Reduced to 360-780 nm
+  in apps/hyperion/src/renderer/src/view/atmosphere/materials/sulphuric-acid-75.json and to the
+  visible in sulphuric-acid-84.json. The 75 wt% values, with an added ultraviolet absorber whose
+  a-priori decay length is the bound from J. Spacek, P. B. Rimmer, J. J. Petkowski and Y. J. Lee,
+  Astrobiology 26 (2026) 727-739, DOI: 10.1177/15311074261477502 (two values read from the
+  preprint, arXiv:2505.00880v3, licensed under CC BY 4.0), in sulphuric-acid-uv-absorber.json
+  (plan R08, R08.T5.d).
+
+- Refractive indices of basalt and basaltic glass: J. B. Pollack, O. B. Toon and B. N. Khare,
+  "Optical properties of some terrestrial rocks and glasses", Icarus 19 (1973) 372-389, DOI:
+  10.1016/0019-1035(73)90115-2, as distributed by ARIA (as above). Reduced to the visible in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/basalt.json and basaltic-glass.json
+  (plan R08, R08.T5.d).
+
+- Refractive indices of FeS, CaTiO3, ZnS, MnS and Na2S, from the compilation of D. Kitzmann and
+  K. Heng, "Optical properties of potential condensates in exoplanetary atmospheres", Mon. Not. R.
+  Astron. Soc. 475 (2018) 94-107, DOI: 10.1093/mnras/stx3141 (the LX-MIE repository,
+  https://github.com/NewStrangeWorlds/LX-MIE, commit 38cc6d97, compilation/), the only
+  machine-readable copy found of each primary: J. B. Pollack, D. Hollenbach, S. Beckwith,
+  D. P. Simonelli, T. Roush and W. Fong, Astrophys. J. 421 (1994) 615, DOI: 10.1086/173677 (FeS);
+  K. Ueda, H. Yanagi, R. Noshiro, H. Hosono and H. Kawazoe, J. Phys.: Condens. Matter 10 (1998)
+  3669-3677, DOI: 10.1088/0953-8984/10/16/018 (CaTiO3); E. D. Palik and A. Addamiano, "Zinc
+  sulfide (ZnS)", in E. D. Palik (ed.), Handbook of Optical Constants of Solids, Academic Press
+  (1985) (ZnS); D. R. Huffman and R. L. Wild, Phys. Rev. 156 (1967) 989-997, DOI:
+  10.1103/PhysRev.156.989 (MnS); H. Khachai et al., J. Phys.: Condens. Matter 21 (2009) 095404,
+  DOI: 10.1088/0953-8984/21/9/095404 (Na2S, a computed index). The repository's GPL-3.0 covers
+  its code and arrangement; only reduced visible values of each material are committed, cited to
+  their primary and to Kitzmann and Heng, in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/iron-sulphide.json,
+  calcium-titanate.json, zinc-sulphide.json, manganese-sulphide.json and sodium-sulphide.json. No
+  compilation file and none of LX-MIE's code is included (plan R08, R08.T5.d).
+
+- The dielectric functions of graphite: B. T. Draine, "Scattering by interstellar dust grains.
+  II. X-rays", Astrophys. J. 598 (2003) 1026-1037, DOI: 10.1086/379123, from
+  https://www.astro.princeton.edu/~draine/dust/diel/ (callindex.out_CpaD03_0.01 and
+  callindex.out_CpeD03_0.01, fetched 2026-10-14). Averaged for randomly oriented grains and
+  reduced to the visible in apps/hyperion/src/renderer/src/view/atmosphere/materials/graphite.json
+  (plan R08, R08.T5.d).
+
+- Retrieved refractive indices, licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/): A. S. Braude, P. G. J. Irwin, G. S. Orton and
+  L. N. Fletcher, "Colour and tropospheric cloud structure of Jupiter from MUSE/VLT: Retrieving a
+  universal chromophore", Icarus 338 (2020) 113589, DOI: 10.1016/j.icarus.2019.113589 (preprint
+  arXiv:1912.00918v1); P. G. J. Irwin, N. A. Teanby, L. N. Fletcher et al., "Hazy blue worlds: A
+  holistic aerosol model for Uranus and Neptune, including dark spots", J. Geophys. Res. Planets
+  127 (2022) e2022JE007189, DOI: 10.1029/2022JE007189 (preprint arXiv:2201.04516v2); J.
+  Martikainen, O. Muñoz, T. Jardiel et al., "Optical constants of Martian dust analogs at
+  UV-visible-near-infrared wavelengths", Astrophys. J. Suppl. 268 (2023) 47, DOI:
+  10.3847/1538-4365/acf0be. Reduced to the visible, a modification (the first solution of Braude
+  et al., extrapolated below 450 nm; the geometric mean of Irwin et al.'s two planets' extended
+  haze; Martikainen et al.'s MGS-1 sample from their Table 6), in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/jovian-chromophore.json,
+  ice-giant-haze.json and mars-regolith-simulant.json; these files are offered under CC BY 4.0
+  (plan R08, R08.T5.d).
 
 - Refractive indices of Martian dust: M. J. Wolff et al., "Wavelength dependence of dust
   aerosol single scattering albedo as observed by the Compact Reconnaissance Imaging
@@ -410,7 +461,16 @@ ruled 2026-10-09 and 2026-10-10).
   (1974) 5056-5070, DOI: 10.1103/PhysRevB.9.5056; W. H. Dalzell and A. F. Sarofim, J. Heat
   Transfer 91 (1969) 100-104, DOI: 10.1115/1.3580063. Reduced to the visible in
   apps/hyperion/src/renderer/src/view/atmosphere/materials/water.json, water-ice.json,
-  methane-liquid.json, methane-ice.json, iron.json and soot.json.
+  methane-liquid.json, methane-ice.json, iron.json and soot.json. From the same database (plan
+  R08, R08.T5.d): chromium, Johnson and Christy (as above); KCl and NaCl, H. H. Li, J. Phys. Chem.
+  Ref. Data 5 (1976) 329-528, DOI: 10.1063/1.555536; crystalline SiO2, G. Ghosh, Opt. Commun. 163
+  (1999) 95-102, DOI: 10.1016/S0030-4018(99)00091-7; crystalline Al2O3, I. H. Malitson and
+  M. J. Dodge, J. Opt. Soc. Am. 62 (1972) 1405, with M. J. Dodge's formula in the Handbook of Laser
+  Science and Technology, vol. IV (CRC Press, 1986); TiO2, T. Siefke et al., Adv. Opt. Mater. 4
+  (2016) 1780-1786, DOI: 10.1002/adom.201600250; solid argon, A. C. Sinnock and B. L. Smith,
+  Phys. Rev. 181 (1969) 1297-1307, DOI: 10.1103/PhysRev.181.1297. Reduced to the visible in
+  chromium.json, potassium-chloride.json, sodium-chloride.json, silicon-dioxide.json,
+  aluminium-oxide.json, titanium-dioxide.json and argon-ice.json.
 
 - The refractive index of CO2 ice: a two-term Cauchy fit to S. G. Warren, "Optical constants of
   carbon dioxide ice", Appl. Opt. 25 (1986) 2650-2674, DOI: 10.1364/AO.25.002650, Table I, with
@@ -419,13 +479,30 @@ ruled 2026-10-09 and 2026-10-10).
   DOI: 10.1029/2005JE002531. Derived values in
   apps/hyperion/src/renderer/src/view/atmosphere/materials/carbon-dioxide-ice.json.
 
+- Constants of the stated stand-ins (plan R08, R08.T5.d): crystalline S8's principal refractive
+  indices, from C. Palache, H. Berman and C. Frondel, Dana's System of Mineralogy, 7th edition,
+  vol. I (1944) 140-144, as the Handbook of Mineralogy (J. W. Anthony, R. A. Bideaux,
+  K. W. Bladh and M. C. Nichols, Mineral Data Publishing) gives them, in
+  apps/hyperion/src/renderer/src/view/atmosphere/materials/sulphur.json; and the crystal cells of
+  beta-N2 (A. F. Schuch and R. L. Mills, J. Chem. Phys. 52 (1970) 6000-6008), gamma-O2 (D. E.
+  Cox, E. J. Samuelsen and K. H. Beckurts, Phys. Rev. B 7 (1973) 3102-3111), alpha-CO (L. Vegard,
+  Z. Phys. 61 (1930) 185-190), H2S phase I (L. Vegard and L. Sinding-Oseroed, Avh. Nor.
+  Vidensk.-Akad. Oslo, 1942) and solid argon (E. R. Dobbs et al., Nature 178 (1956) 483), from
+  the Crystallography Open Database (https://www.crystallography.net/cod/; the alpha-CO, H2S and
+  argon entries placed in the public domain by their contributors, the beta-N2 and gamma-O2
+  entries from the American Mineralogist Crystal Structure Database, used with attribution to
+  their journal articles), with the gas dispersions view/atmosphere/rayleigh.ts cites, for the
+  Lorentz-Lorenz estimates in hydrogen-sulphide-ice.json, nitrogen-ice.json,
+  carbon-monoxide-ice.json and oxygen-ice.json.
+
 - Single-scattering properties of irregular hexahedral particles: M. Saito, TAMUdust2020
   Database, version 1.0.0, Zenodo, DOI 10.5281/zenodo.4711247, licensed under CC BY 4.0
   (https://creativecommons.org/licenses/by/4.0/), described in M. Saito, P. Yang, J. Ding and
   X. Liu, "A comprehensive database of the optical properties of irregular aerosol particles for
   radiative transfer simulations", J. Atmos. Sci. 78 (2021) 2089-2111, DOI
   10.1175/JAS-D-20-0338.1. The scattering properties are obtained from TAMUdust2020. Interpolated
-  to each material's refractive index and resampled in size and angle in
+  to each material's refractive index (past the longwave kernel's range in n, to its nearer edge)
+  and resampled in size and angle in
   apps/hyperion/src/renderer/src/view/atmosphere/materials/phase/; these reduced tables are
   offered under CC BY 4.0. Three test fixtures are adapted from the same data and offered under
   CC BY 4.0: raw records, quantised, in
@@ -490,3 +567,9 @@ Geophys. Res. 109, D06303) join this list when their values are quoted; neither 
 - A Titan-like aggregate's optical properties computed offline with optool 1.9.14 (C. Dominik,
   M. Min and R. Tazaki, ascl:2104.010; MIT licence, above), in
   apps/hyperion/src/renderer/src/view/atmosphere/fixtures/optool-titan.json.
+
+- The molecular ices' Lorentz-Lorenz checks (plan R08, R08.T5.d): A. C. Sinnock and B. L. Smith,
+  Phys. Rev. 181 (1969) 1297 (solid argon, as above); and Y. Y. Yarnall and R. L. Hudson,
+  Astrophys. J. Lett. 931 (2022) L4, DOI: 10.3847/2041-8213/ac6b32, licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/), Table 1's index and density of amorphous H2S
+  ice at 19 K (two values, cited).

@@ -16,6 +16,12 @@
  *   floor's, with its absorption scaled by k ÷ k_floor, a `model` while the mode's own ω on the
  *   floor's table is at least {@link FLOOR_ALBEDO_MIN}; past that an `analogue`, or a `fallback`
  *   above n 1.70, where no kernel reaches.
+ * - **The kernel-edge rule** (R08.T5.d; decision-r08-t5d ruling 2). Past the longwave kernel's n
+ *   range ({@link KERNEL_EDGE_N}), with k at most {@link KERNEL_K_MAX}, the table is made at the
+ *   nearer edge: a `model` within {@link KERNEL_EDGE_MODEL_EXCESS} of it, a named `analogue` while
+ *   the normal-incidence reflectance moves by at most {@link KERNEL_EDGE_REFLECTANCE_TOLERANCE}, and
+ *   the `fallback` beyond ({@link kernelEdgeRule}). The floor rule applies after it, the worse basis
+ *   winning.
  * - **Water ice** takes Yang et al. 2013's severely roughened aggregate of eight columns (version 2),
  *   the habit that best fits in-situ cirrus scattering (Järvinen et al. 2018). Crystals below the
  *   table's smallest maximum dimension, 2 µm, are each a collection of independent spheres of their
@@ -40,11 +46,27 @@
  * spheres of the same volume-to-area radius (ice) by Mie.
  */
 
+import aluminiumOxidePhase from "./materials/phase/aluminium-oxide.json" with { type: "json" };
+import basaltPhase from "./materials/phase/basalt.json" with { type: "json" };
+import basalticGlassPhase from "./materials/phase/basaltic-glass.json" with { type: "json" };
+import calciumTitanatePhase from "./materials/phase/calcium-titanate.json" with { type: "json" };
+import chromiumPhase from "./materials/phase/chromium.json" with { type: "json" };
 import enstatiteGlassPhase from "./materials/phase/enstatite-glass.json" with { type: "json" };
 import forsteriteAmorphousPhase from "./materials/phase/forsterite-amorphous.json" with { type: "json" };
+import graphitePhase from "./materials/phase/graphite.json" with { type: "json" };
+import ironSulphidePhase from "./materials/phase/iron-sulphide.json" with { type: "json" };
 import ironPhase from "./materials/phase/iron.json" with { type: "json" };
+import manganeseSulphidePhase from "./materials/phase/manganese-sulphide.json" with { type: "json" };
 import marsDustPhase from "./materials/phase/mars-dust.json" with { type: "json" };
+import marsRegolithSimulantPhase from "./materials/phase/mars-regolith-simulant.json" with { type: "json" };
+import potassiumChloridePhase from "./materials/phase/potassium-chloride.json" with { type: "json" };
+import siliconDioxidePhase from "./materials/phase/silicon-dioxide.json" with { type: "json" };
+import sodiumChloridePhase from "./materials/phase/sodium-chloride.json" with { type: "json" };
+import sodiumSulphidePhase from "./materials/phase/sodium-sulphide.json" with { type: "json" };
+import sulphurPhase from "./materials/phase/sulphur.json" with { type: "json" };
+import titaniumDioxidePhase from "./materials/phase/titanium-dioxide.json" with { type: "json" };
 import waterIcePhase from "./materials/phase/water-ice.json" with { type: "json" };
+import zincSulphidePhase from "./materials/phase/zinc-sulphide.json" with { type: "json" };
 import {
   type MaterialIndexFile,
   type MaterialProvenance,
@@ -80,6 +102,12 @@ export interface PhaseTableNode {
   readonly k: number;
   /** The TAMUdust2020 kernel read, or undefined for Yang et al.'s table. */
   readonly kernel: "shortwave" | "longwave" | undefined;
+  /**
+   * The n the table was made at: the material's, or the longwave kernel's nearer edge past its n
+   * range ({@link KERNEL_EDGE_N}; decision-r08-t5d ruling 2). A file writes it only where it
+   * differs from `n`.
+   */
+  readonly nTable: number;
   /** The k the table was made at: the material's, or the kernel's floor beneath it. */
   readonly kTable: number;
   /** Per size node: x = 2πD ÷ λ, and Ṽ, Ã, C̃_ext, C̃_sca, C̃_sca·g in powers of 2π ÷ λ. */
@@ -116,6 +144,29 @@ export interface PhaseFileTable {
 /** The files' quantisation of a₁, round(1000 ln a₁), and of the ratios, round(30,000 × ratio). */
 const A1_SCALE = 1000;
 const RATIO_SCALE = 30_000;
+
+/**
+ * The longwave kernel's range in n, the widest of TAMUdust2020's (Saito et al. 2021, its `LW`
+ * tables): past it a table is made at the nearer edge (decision-r08-t5d ruling 2).
+ */
+export const KERNEL_EDGE_N: readonly [number, number] = [0.4, 3.2];
+
+/** The longwave kernel's largest k, 4: past it an index lies outside both kernels. */
+export const KERNEL_K_MAX = 4;
+
+/**
+ * The largest |n − n_edge| that is the model's, unlabelled: half the longwave kernel's n step of
+ * 0.1 (decision-r08-t5d ruling 2).
+ */
+export const KERNEL_EDGE_MODEL_EXCESS = 0.05;
+
+/**
+ * The largest |R(n, k) − R(n_edge, k)| ÷ R(n, k), R the normal-incidence reflectance, for which the
+ * edge's table stands in as a named analogue (decision-r08-t5d ruling 2): a stated convention, the
+ * lower end of the hexahedra's own 20–37% residual at side and back angles against a Martian
+ * analogue (Martikainen et al. 2025), so the hold adds no error past the model's own.
+ */
+export const KERNEL_EDGE_REFLECTANCE_TOLERANCE = 0.2;
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -172,6 +223,23 @@ function nodeOf(
   if (kernel !== null && kernel !== "shortwave" && kernel !== "longwave") {
     throw new Error(`${file}: a node's kernel must be shortwave, longwave or null`);
   }
+  const n = number("n");
+  const [edgeLow, edgeHigh] = KERNEL_EDGE_N;
+  let nTable = n;
+  if (raw["nTable"] !== undefined) {
+    nTable = number("nTable");
+    let nearer: number | undefined;
+    if (n < edgeLow) {
+      nearer = edgeLow;
+    } else if (n > edgeHigh) {
+      nearer = edgeHigh;
+    }
+    if (nTable !== nearer) {
+      throw new Error(
+        `${file}: a node's nTable must be the nearer of the longwave kernel's edges, ${edgeLow} and ${edgeHigh}, on a node whose own n lies past it`,
+      );
+    }
+  }
   const sizeParameters = numbersOf(raw, "sizeParameters", file);
   const sizes = sizeParameters.length;
   const perSize = [
@@ -211,9 +279,10 @@ function nodeOf(
   };
   return {
     wavelengthNm: number("wavelengthNm"),
-    n: number("n"),
+    n,
     k: number("k"),
     kernel: kernel === null ? undefined : kernel,
+    nTable,
     kTable: number("kTable"),
     sizeParameters,
     volumes,
@@ -292,6 +361,23 @@ export const PHASE_FILES: ReadonlyArray<PhaseFileTable> = [
   parsePhaseFile(forsteriteAmorphousPhase, "phase/forsterite-amorphous.json"),
   parsePhaseFile(ironPhase, "phase/iron.json"),
   parsePhaseFile(waterIcePhase, "phase/water-ice.json"),
+  // R08.T5.d's minerals, in the tool's order (TAMUDUST_MATERIALS).
+  parsePhaseFile(potassiumChloridePhase, "phase/potassium-chloride.json"),
+  parsePhaseFile(sodiumChloridePhase, "phase/sodium-chloride.json"),
+  parsePhaseFile(siliconDioxidePhase, "phase/silicon-dioxide.json"),
+  parsePhaseFile(chromiumPhase, "phase/chromium.json"),
+  parsePhaseFile(ironSulphidePhase, "phase/iron-sulphide.json"),
+  parsePhaseFile(graphitePhase, "phase/graphite.json"),
+  parsePhaseFile(aluminiumOxidePhase, "phase/aluminium-oxide.json"),
+  parsePhaseFile(titaniumDioxidePhase, "phase/titanium-dioxide.json"),
+  parsePhaseFile(calciumTitanatePhase, "phase/calcium-titanate.json"),
+  parsePhaseFile(zincSulphidePhase, "phase/zinc-sulphide.json"),
+  parsePhaseFile(manganeseSulphidePhase, "phase/manganese-sulphide.json"),
+  parsePhaseFile(sodiumSulphidePhase, "phase/sodium-sulphide.json"),
+  parsePhaseFile(sulphurPhase, "phase/sulphur.json"),
+  parsePhaseFile(basaltPhase, "phase/basalt.json"),
+  parsePhaseFile(basalticGlassPhase, "phase/basaltic-glass.json"),
+  parsePhaseFile(marsRegolithSimulantPhase, "phase/mars-regolith-simulant.json"),
 ];
 
 /** The phase file made for a material index file, if any. */
@@ -332,7 +418,8 @@ export const SMALL_GRAIN_SIZE_PARAMETER = 0.22;
  *
  * @remarks
  * Closed set, for the composition audit: the volatile ices R08 and T5.d hold files for or name
- * (science-r08-nonspherical.md §2.3). A new ice the registry adds belongs here.
+ * (science-r08-nonspherical.md §2.3), with O₂ and Ar since T5.d (decision-r08-t5d ruling 3). A new
+ * ice the registry adds belongs here.
  */
 export const ICE_KEYS: ReadonlySet<string> = new Set([
   "H2O",
@@ -343,6 +430,8 @@ export const ICE_KEYS: ReadonlySet<string> = new Set([
   "H2S",
   "N2",
   "CO",
+  "O2",
+  "Ar",
 ]);
 
 /**
@@ -351,12 +440,38 @@ export const ICE_KEYS: ReadonlySet<string> = new Set([
  * 1763; science-r08-nonspherical.md §2.3): estimates of the bias, not corrections. Ices not listed
  * have none estimated. NH₄SH's n of 1.638 lies past the fit's 1.18–1.43, where eq. (16) would give
  * about −0.10, the largest of all; it is left out as an extrapolation (R08.T5.c's science check).
+ *
+ * @remarks
+ * R08.T5.d adds the ices whose n at 550 nm lies in the fit's range (decision-r08-t5d ruling 3),
+ * each from its own file: N₂ (1.250), CO (1.300), O₂ (1.275) and Ar (1.271), all below water ice's
+ * 1.311, so their g is expected above water's. H₂S's estimated 1.570 lies past the range and is left
+ * out, as NH₄SH is. Eq. (16) is C = ((m₁ − ε)(m₂ + ε)) ÷ ((m₁ + ε)(m₂ − ε)), the ratio of g_RT at
+ * m₂ to g_RT at m₁, with ε = 0.960 251 for compact crystals (aspect ratio 1, the paper's §2c, as
+ * T5.c's three took it; its eq. (17) gives columns ε = 0.941 791, which would make N₂'s +0.041), and
+ * water ice's base g_tot is a cirrus mode's on Yang et al.'s table at 550 nm (r_eff 30 µm, v_eff
+ * 0.1: 0.7513).
  */
 export const ICE_ANALOGUE_ASYMMETRY_BIAS: Readonly<Record<string, number>> = {
   NH3: -0.056,
   CO2: -0.048,
   CH4: -0.007,
+  N2: 0.044,
+  CO: 0.007,
+  O2: 0.024,
+  Ar: 0.028,
 };
+
+/**
+ * The ices of {@link ICE_KEYS} that are atomic solids: a phase note names them "solid Ar", since
+ * planetary science's "ice" names a molecular solid (docs/frontend/ux-guidelines.md, Voice and
+ * nomenclature).
+ */
+const ATOMIC_SOLID_KEYS: ReadonlySet<string> = new Set(["Ar"]);
+
+/** An ice's name with its phase word, as the phase notes write it: "CO2 ice", "solid Ar". */
+function iceName(key: string): string {
+  return ATOMIC_SOLID_KEYS.has(key) ? `solid ${substanceName(key)}` : `${substanceName(key)} ice`;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Distributions.
@@ -1154,17 +1269,19 @@ export function opticsOfParticles(
       extinctionCrossSectionM2: mie.extinctionCrossSectionM2,
       scatteringCrossSectionM2: mie.scatteringCrossSectionM2,
       volumeM3: mie.volumeM3,
-      phaseNote: `${substanceName(particles.material)} ice drawn on H2O ice's roughened 8-column table, a named analogue${
+      phaseNote: `${iceName(particles.material)} drawn on H2O ice's roughened 8-column table, a named analogue${
         bias === undefined
           ? ""
-          : `; its g expected ${bias.toFixed(3)} from H2O ice's (van Diedenhoven et al. 2014)`
+          : `; its g expected ${bias > 0 ? "+" : ""}${bias.toFixed(3)} from H2O ice's (van Diedenhoven et al. 2014)`
       }${tailNote === undefined ? "" : `; ${tailNote}`}`,
       sizeConvergence: mie.sizeConvergence,
     };
   }
   const table = particles.table;
   if (table === undefined || table.model !== "tamudust2020") {
-    // R08.T5.d adds the floor tables and the other minerals' reduced tables.
+    // Every non-spherical mineral on file has its reduced table since R08.T5.d, the floor's
+    // included, so this serves a particle with none: a key with no file (the generic stand-in) or a
+    // test's index.
     const outside = index.n > KERNEL_TRANSPARENT_N_MAX && index.k < 1e-3;
     return fallbackOptics(
       particles,
@@ -1176,26 +1293,91 @@ export function opticsOfParticles(
         : "no reduced TAMUdust2020 table on file",
     );
   }
+  // The kernel-edge rule, from the particles' own index at the wavelength; the floor rule after it,
+  // the worse basis winning and both notes kept (decision-r08-t5d ruling 2).
+  const edge = kernelEdgeRule(index);
+  if (edge.basis === "fallback") {
+    return fallbackOptics(particles, sizes, wavelengthNm, mu, edge.clause);
+  }
   const optics = tableModeOptics(table, distribution, index, wavelengthNm, mu);
-  if (optics.floored && optics.tableAlbedo < FLOOR_ALBEDO_MIN) {
-    if (index.n > KERNEL_TRANSPARENT_N_MAX) {
-      return fallbackOptics(
-        particles,
-        sizes,
-        wavelengthNm,
-        mu,
-        `the k-floor rule exceeded (the floor's single-scattering albedo ${optics.tableAlbedo.toFixed(4)} < ${FLOOR_ALBEDO_MIN}) at n ${index.n.toFixed(3)} above ${KERNEL_TRANSPARENT_N_MAX}`,
-      );
-    }
+  const floorExceeded = optics.floored && optics.tableAlbedo < FLOOR_ALBEDO_MIN;
+  const floorClause = `the k-floor rule exceeded (the floor's single-scattering albedo ${optics.tableAlbedo.toFixed(4)} < ${FLOOR_ALBEDO_MIN})`;
+  if (floorExceeded && index.n > KERNEL_TRANSPARENT_N_MAX) {
+    const floorReason = `${floorClause} at n ${index.n.toFixed(3)} above ${KERNEL_TRANSPARENT_N_MAX}`;
+    return fallbackOptics(
+      particles,
+      sizes,
+      wavelengthNm,
+      mu,
+      edge.basis === "analogue" ? `${edge.clause}; ${floorReason}` : floorReason,
+    );
+  }
+  const notes = [
+    ...(edge.basis === "analogue"
+      ? [`${edge.clause}, the hexahedra at n ${edge.nEdge} stand in`]
+      : []),
+    ...(floorExceeded ? [`${floorClause}, the floor's table stands in`] : []),
+  ];
+  if (notes.length > 0) {
     return fromTable(
       optics,
       particles,
       "analogue",
       "tamudust2020",
-      `${substanceName(particles.material)}: the k-floor rule exceeded (the floor's single-scattering albedo ${optics.tableAlbedo.toFixed(4)} < ${FLOOR_ALBEDO_MIN}), the floor's table stands in, a named analogue`,
+      `${substanceName(particles.material)}: ${notes.join("; ")}, a named analogue`,
     );
   }
   return fromTable(optics, particles, "model", "tamudust2020", undefined);
+}
+
+/**
+ * What the kernel-edge rule makes of an index (decision-r08-t5d ruling 2): the table's `model`; a
+ * named `analogue` on the table made at the longwave kernel's nearer edge in n, `nEdge`; or the
+ * `fallback`. An analogue or a fallback says what lies past the kernel, in words.
+ */
+export type KernelEdgeBasis =
+  | { readonly basis: "model" }
+  | { readonly basis: "analogue"; readonly nEdge: number; readonly clause: string }
+  | { readonly basis: "fallback"; readonly clause: string };
+
+/** The normal-incidence reflectance of an index, ((n − 1)² + k²) ÷ ((n + 1)² + k²). */
+export function normalReflectance(index: ComplexIndex): number {
+  const { n, k } = index;
+  return ((n - 1) ** 2 + k * k) / ((n + 1) ** 2 + k * k);
+}
+
+/**
+ * The basis the hexahedra's tables give an index by the kernel-edge rule (decision-r08-t5d ruling
+ * 2): inside {@link KERNEL_EDGE_N} a `model`; past it, a table made at the nearer edge is a `model`
+ * within {@link KERNEL_EDGE_MODEL_EXCESS} of the edge, a named `analogue` while the normal-incidence
+ * reflectance moves by at most {@link KERNEL_EDGE_REFLECTANCE_TOLERANCE}, and a `fallback` beyond,
+ * as is any k above {@link KERNEL_K_MAX}. The floor rule applies after it.
+ */
+export function kernelEdgeRule(index: ComplexIndex): KernelEdgeBasis {
+  const [low, high] = KERNEL_EDGE_N;
+  if (index.k > KERNEL_K_MAX) {
+    return {
+      basis: "fallback",
+      clause: `k ${index.k.toFixed(3)} above the longwave kernel's ${KERNEL_K_MAX}`,
+    };
+  }
+  if (index.n >= low && index.n <= high) {
+    return { basis: "model" };
+  }
+  const nEdge = index.n > high ? high : low;
+  if (Math.abs(index.n - nEdge) <= KERNEL_EDGE_MODEL_EXCESS) {
+    return { basis: "model" };
+  }
+  const past = `n ${index.n.toFixed(3)} ${index.n > high ? "above" : "below"} the longwave kernel's ${nEdge}`;
+  const reflectance = normalReflectance(index);
+  const error = Math.abs(reflectance - normalReflectance({ n: nEdge, k: index.k })) / reflectance;
+  if (error <= KERNEL_EDGE_REFLECTANCE_TOLERANCE) {
+    return { basis: "analogue", nEdge, clause: past };
+  }
+  return {
+    basis: "fallback",
+    clause: `${past}, its normal-incidence reflectance ${(100 * error).toFixed(0)} % from the edge's`,
+  };
 }
 
 /** The particles a non-spherical mode's material resolves to. */
