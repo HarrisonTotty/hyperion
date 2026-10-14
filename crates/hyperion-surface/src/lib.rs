@@ -23,7 +23,8 @@
 //! spectrum;
 //! the cold-trap fraction that plan 14 and R09.T13.f share ([`cold_trap`]), with the fitted table
 //! of a bowl's permanent shadow it reads ([`tables`]); and, for tests, synthetic fields
-//! (`testing`, feature `testing`).
+//! (`testing`, feature `testing`). Of R10's it holds the material classes and their physical
+//! properties ([`material`]), which the classifier will decide at every point.
 //!
 //! # The contract of the height function
 //!
@@ -64,6 +65,7 @@ pub mod field;
 pub mod geometry;
 pub mod ground;
 pub mod height;
+pub mod material;
 pub mod noise;
 pub mod num;
 pub mod patch;
