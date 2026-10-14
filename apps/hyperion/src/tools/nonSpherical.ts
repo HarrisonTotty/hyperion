@@ -32,7 +32,10 @@
  * a₃ ÷ a₁, a₄ ÷ a₁, b₁ ÷ a₁ and b₂ ÷ a₁ at {@link MATRIX_ANGLES_DEG}, with a₂ = P₂₂, a₃ = P₃₃,
  * a₄ = P₄₄, b₁ = P₁₂ and b₂ = {@link B2_SIGN} × P₄₃. The node's table is the kernel interpolated
  * at the node's index and the sphericity {@link SPHERICITY}: the extensive quantities (the
- * cross-sections, V, A and C_sca·Pᵢⱼ) linear in n, ln k and ln S between the kernel's nodes.
+ * cross-sections, V, A and C_sca·Pᵢⱼ) linear in n, ln k and ln S between the kernel's nodes. Below
+ * a kernel's k floor the table is the floor's, and past the longwave kernel's n range n is held at
+ * its nearer edge ({@link kernelFor}, R08.T5.d's kernel-edge rule), each node recording the index
+ * its table was made at.
  */
 
 import { createHash } from "node:crypto";
@@ -154,6 +157,38 @@ export const NODE_N_STEP: Readonly<Record<KernelLayout["name"] | "yang", number>
 
 /** The node rule's largest factor in k between wavelength nodes: the shortwave kernel's own k step, 10^0.1. */
 export const NODE_K_FACTOR = 1.26;
+
+/**
+ * The largest a phase file may be, bytes: the plan's 400 kB, under the repository's 500 kB hook
+ * on an added file.
+ */
+export const PHASE_FILE_CAP_BYTES = 400_000;
+
+/**
+ * How much larger than its compact JSON a phase file is once Prettier lays it out: 1.028–1.036 on
+ * the committed files, so 1.04 bounds it.
+ */
+export const PRETTIER_GROWTH = 1.04;
+
+/**
+ * The node rule's k factors, finest first: {@link NODE_K_FACTOR}, then whole steps of 10^0.1 (the
+ * shortwave kernel's own k step) to 10. A table that {@link NODE_K_FACTOR} would take past
+ * {@link PHASE_FILE_CAP_BYTES} takes the finest factor that keeps it under, stated in its
+ * `reduction` (R08.T5.d: MnS's k falls by 245 over 380–550 nm, which the finest rule meets with 30
+ * nodes, 1.1 MB).
+ */
+export const NODE_K_FACTORS: ReadonlyArray<number> = [
+  NODE_K_FACTOR,
+  ...Array.from({ length: 9 }, (_, i) => 10 ** (0.1 * (i + 2))),
+];
+
+/**
+ * A phase file's size as the cap judges it, bytes: its compact JSON's UTF-8 length times
+ * {@link PRETTIER_GROWTH}.
+ */
+export function phaseFileBytes(table: PhaseFile): number {
+  return Buffer.byteLength(JSON.stringify(table), "utf8") * PRETTIER_GROWTH;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Reading the kernels.
@@ -530,9 +565,13 @@ export function kernelReachText(xMax: number): string {
   return `every size node of the kernel to its largest, x = ${Math.round(xMax).toLocaleString("en-US")} (D = ${dAt(380)} µm at 380 nm, ${dAt(780)} µm at 780 nm)`;
 }
 
-/** The wavelength-node rule for an n step, as the phase files' `reduction` states it. */
-export function nodeRuleText(nStep: number): string {
-  return `the nodes chosen so that n moves by under ${nStep} and k by under a factor of ${NODE_K_FACTOR} between them, or neighbours on the index file's 5 nm grid where it steps faster`;
+/** The wavelength-node rule for an n step and a k factor, as the phase files' `reduction` states it. */
+export function nodeRuleText(nStep: number, kFactor: number = NODE_K_FACTOR): string {
+  const widened =
+    kFactor === NODE_K_FACTOR
+      ? ""
+      : ` (widened from ${NODE_K_FACTOR} in whole steps of 10^0.1, the shortwave kernel's own k step, since the finer rule would take the file past ${PHASE_FILE_CAP_BYTES / 1000} kB)`;
+  return `the nodes chosen so that n moves by under ${nStep} and k by under a factor of ${kFactor === NODE_K_FACTOR ? kFactor : kFactor.toPrecision(3)}${widened} between them, or neighbours on the index file's 5 nm grid where it steps faster`;
 }
 
 /**
@@ -593,23 +632,31 @@ export interface MaterialIndexFile {
 }
 
 /**
- * The wavelength nodes of a material: 380 nm, then each next grid wavelength as far as n stays
- * within `nStep` and k (taken at no less than `kFloor`) within {@link NODE_K_FACTOR} of the last
- * node's, and 780 nm. Returns grid indices.
+ * The wavelength nodes of a material: 380 nm, then each next grid wavelength as far as the index
+ * its table is made at ({@link kernelFor}'s `nTable` and `kTable`) stays within `nStep` in n and
+ * `kFactor` in k of the last node's, and 780 nm, so that a stretch held at a kernel's edge in n
+ * takes its nodes by k alone (decision-r08-t5d ruling 2). Returns grid indices.
+ *
+ * @throws RangeError for an index at any grid wavelength outside both kernels, as
+ *   {@link kernelFor}.
  */
 export function wavelengthNodes(
   file: Pick<MaterialIndexFile, "n" | "k">,
   nStep: number,
-  kFloor: number,
+  kFactor: number = NODE_K_FACTOR,
 ): number[] {
   const nodes = [0];
   const last = file.n.length - 1;
   let from = 0;
-  const kAt = (i: number): number => Math.max(file.k[i] ?? 0, kFloor);
+  const tables = Array.from({ length: last + 1 }, (_, i) =>
+    kernelFor(file.n[i] ?? Number.NaN, file.k[i] ?? Number.NaN),
+  );
+  const nAt = (i: number): number => tables[i]?.nTable ?? Number.NaN;
+  const kAt = (i: number): number => tables[i]?.kTable ?? Number.NaN;
   for (let i = 1; i <= last; i += 1) {
-    const nMoved = Math.abs((file.n[i] ?? Number.NaN) - (file.n[from] ?? Number.NaN));
+    const nMoved = Math.abs(nAt(i) - nAt(from));
     const kRatio = Math.abs(Math.log(kAt(i) / kAt(from)));
-    if (nMoved >= nStep || kRatio >= Math.log(NODE_K_FACTOR)) {
+    if (nMoved >= nStep || kRatio >= Math.log(kFactor)) {
       // The previous grid point is the last one inside the rule.
       const node = Math.max(i - 1, from + 1);
       nodes.push(node);
@@ -624,20 +671,75 @@ export function wavelengthNodes(
 }
 
 /**
- * The kernel that covers an index, and the k it is read at (the floor below the kernel's range).
+ * The tool's copies of the renderer's kernel-edge constants (`view/atmosphere/nonSpherical.ts`,
+ * decision-r08-t5d ruling 2), which the phase files' `reduction` states through
+ * {@link kernelEdgeText} and the renderer's test holds to its own.
+ */
+export const KERNEL_EDGE = {
+  /** The largest |n − n_edge| that is the model's, half the longwave kernel's n step. */
+  modelExcess: 0.05,
+  /**
+   * The largest |R(n, k) − R(n_edge, k)| ÷ R(n, k), with R the normal-incidence reflectance, that
+   * a named analogue may take: the lower end of the hexahedra's own 20–37% residual.
+   */
+  reflectanceTolerance: 0.2,
+} as const;
+
+/** The normal-incidence reflectance of an index: ((n − 1)² + k²) ÷ ((n + 1)² + k²). */
+export function normalReflectance(n: number, k: number): number {
+  return ((n - 1) ** 2 + k * k) / ((n + 1) ** 2 + k * k);
+}
+
+/**
+ * The kernel that covers an index, the n and k its table is made at: the index itself inside a
+ * kernel, with k at the kernel's floor beneath its range; past the longwave kernel's n range, n
+ * held at the nearer edge within {@link KERNEL_EDGE}'s model excess, or while the normal-incidence
+ * reflectance moves by at most its tolerance (decision-r08-t5d ruling 2): the renderer's model and
+ * analogue tiers.
  *
- * @throws RangeError for an index outside both kernels.
+ * @throws RangeError for an index outside both kernels and past both, or with k above the longwave
+ *   kernel's 4.
  */
 export function kernelFor(
   n: number,
   k: number,
-): { readonly layout: KernelLayout; readonly kTable: number } {
+): { readonly layout: KernelLayout; readonly nTable: number; readonly kTable: number } {
   for (const layout of [SHORTWAVE, LONGWAVE]) {
     if (n >= layout.nMin && n <= layout.nMax && k <= layout.kMax) {
-      return { layout, kTable: Math.max(k, layout.kFloor) };
+      return { layout, nTable: n, kTable: Math.max(k, layout.kFloor) };
+    }
+  }
+  if (k <= LONGWAVE.kMax && Number.isFinite(n) && n > 0) {
+    const edge = n > LONGWAVE.nMax ? LONGWAVE.nMax : LONGWAVE.nMin;
+    const reflectance = normalReflectance(n, k);
+    const error = Math.abs(reflectance - normalReflectance(edge, k)) / reflectance;
+    if (
+      Math.abs(n - edge) <= KERNEL_EDGE.modelExcess ||
+      error <= KERNEL_EDGE.reflectanceTolerance
+    ) {
+      return { layout: LONGWAVE, nTable: edge, kTable: Math.max(k, LONGWAVE.kFloor) };
     }
   }
   throw new RangeError(`index ${n} + ${k}i lies outside both kernels`);
+}
+
+/**
+ * The kernel-edge rule as a phase file's `reduction` states it, with the excess over the edge at
+ * each node made at the edge (decision-r08-t5d ruling 2).
+ */
+export function kernelEdgeText(
+  nodes: ReadonlyArray<Pick<PhaseNode, "wavelengthNm" | "n" | "k" | "nTable">>,
+): string {
+  const held = nodes.filter((node) => node.nTable !== undefined);
+  const each = held
+    .map((node) => {
+      const edge = node.nTable ?? Number.NaN;
+      const reflectance = normalReflectance(node.n, node.k);
+      const error = Math.abs(reflectance - normalReflectance(edge, node.k)) / reflectance;
+      return `${node.wavelengthNm} nm (n ${node.n} past ${edge} by ${Math.abs(node.n - edge).toFixed(3)}, the reflectance ${percent(error)} off)`;
+    })
+    .join(", ");
+  return `Where n lies past the longwave kernel's ${LONGWAVE.nMin}–${LONGWAVE.nMax}, the table is made at the nearer edge (nTable), a model within ${KERNEL_EDGE.modelExcess} of it and a named analogue while the normal-incidence reflectance moves by at most ${percent(KERNEL_EDGE.reflectanceTolerance)}: ${each}`;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -651,6 +753,11 @@ export interface PhaseNode {
   readonly k: number;
   /** The kernel read, or `null` for Yang et al.'s table. */
   readonly kernel: KernelLayout["name"] | null;
+  /**
+   * The n the table was made at, written only where it differs from `n`: the longwave kernel's
+   * nearer edge, past its n range (decision-r08-t5d ruling 2).
+   */
+  readonly nTable?: number;
   /** The k the table was made at: the material's, or the kernel's floor beneath it. */
   readonly kTable: number;
   /** The size parameters x = 2πD ÷ λ of the size nodes. */
@@ -743,7 +850,7 @@ export interface NodeSizeValues {
  *   difference, the absorption, keeps its own: six for the kernels' float32, nine for ice.
  */
 export function encodeNode(
-  head: Pick<PhaseNode, "wavelengthNm" | "n" | "k" | "kernel" | "kTable">,
+  head: Pick<PhaseNode, "wavelengthNm" | "n" | "k" | "kernel" | "nTable" | "kTable">,
   sizes: ReadonlyArray<NodeSizeValues>,
   crossSectionFigures = 6,
 ): PhaseNode {
@@ -815,12 +922,31 @@ export interface TamudustMaterial {
   readonly file: string;
 }
 
-/** The materials T5.c's kernels cover: Mars dust, the two silicates and solid iron. */
+/**
+ * The materials the kernels cover: T5.c's Mars dust, two silicates and solid iron, then R08.T5.d's
+ * condensates and dusts, every `nonSphericalMineral` file with an index a kernel covers.
+ */
 export const TAMUDUST_MATERIALS: ReadonlyArray<TamudustMaterial> = [
   { file: "mars-dust.json" },
   { file: "enstatite-glass.json" },
   { file: "forsterite-amorphous.json" },
   { file: "iron.json" },
+  { file: "potassium-chloride.json" },
+  { file: "sodium-chloride.json" },
+  { file: "silicon-dioxide.json" },
+  { file: "chromium.json" },
+  { file: "iron-sulphide.json" },
+  { file: "graphite.json" },
+  { file: "aluminium-oxide.json" },
+  { file: "titanium-dioxide.json" },
+  { file: "calcium-titanate.json" },
+  { file: "zinc-sulphide.json" },
+  { file: "manganese-sulphide.json" },
+  { file: "sodium-sulphide.json" },
+  { file: "sulphur.json" },
+  { file: "basalt.json" },
+  { file: "basaltic-glass.json" },
+  { file: "mars-regolith-simulant.json" },
 ];
 
 /** The fetched archives' identities, recorded at the fetch. */
@@ -879,12 +1005,21 @@ export function readMaterialFile(dir: string, file: string): MaterialIndexFile {
     return v;
   };
   const variant = get("variant");
+  const wavelengthsNm = numbers("wavelengthsNm");
+  if (
+    wavelengthsNm.length !== MATERIAL_GRID_NM.length ||
+    wavelengthsNm.some((nm, i) => nm !== MATERIAL_GRID_NM[i])
+  ) {
+    // Phase tables are made on 380–780 nm (decision-r08-t5d ruling 1): no non-spherical file
+    // starts below 380 nm.
+    throw new Error(`${file}: "wavelengthsNm" must be 380–780 nm every 5 nm for a phase table`);
+  }
   return {
     key: text("key"),
     phase: text("phase"),
     variant: typeof variant === "string" ? variant : null,
     name: text("name"),
-    wavelengthsNm: numbers("wavelengthsNm"),
+    wavelengthsNm,
     n: numbers("n"),
     k: numbers("k"),
   };
@@ -893,11 +1028,19 @@ export function readMaterialFile(dir: string, file: string): MaterialIndexFile {
 /**
  * Reduces one material from the kernels.
  *
+ * @remarks
+ * The nodes follow the rule at {@link NODE_K_FACTOR} unless that takes the file past the cap (by
+ * {@link phaseFileBytes}), where the next of {@link NODE_K_FACTORS} that keeps it under is taken,
+ * stated in the file's `reduction`. A node made at one factor is reused at the next.
+ *
  * @param only - Indices on {@link MATERIAL_GRID_NM} to make nodes at, in place of the node rule:
  *   the one-node test fixtures'.
  * @param sphericity - The sphericity to interpolate the kernel at, within its grid (0.695–0.785);
  *   {@link SPHERICITY} for every committed file, another value only for a diagnostic.
- * @throws RangeError for an index or sphericity outside the kernels, as {@link interpolateKernel}.
+ * @param capBytes - The cap: {@link PHASE_FILE_CAP_BYTES} for every committed file, another value
+ *   only for a test.
+ * @throws RangeError for an index or sphericity outside the kernels, as {@link interpolateKernel};
+ *   Error if no factor keeps the file under the cap.
  */
 export function reduceTamudust(
   material: MaterialIndexFile,
@@ -906,19 +1049,83 @@ export function reduceTamudust(
   anglesDeg: ReadonlyArray<number>,
   only?: ReadonlyArray<number>,
   sphericity: number = SPHERICITY,
+  capBytes: number = PHASE_FILE_CAP_BYTES,
+): PhaseFile {
+  const first = kernelFor(material.n[0] ?? Number.NaN, material.k[0] ?? Number.NaN);
+  const nStep = NODE_N_STEP[first.layout.name];
+  // A node's table depends on its grid wavelength alone, so a wider rule reuses the finer one's.
+  const made = new Map<number, PhaseNode>();
+  if (only !== undefined) {
+    return tamudustTable(material, file, kernels, anglesDeg, only, NODE_K_FACTOR, sphericity, made);
+  }
+  for (const kFactor of NODE_K_FACTORS) {
+    const nodes = wavelengthNodes(material, nStep, kFactor);
+    const table = tamudustTable(
+      material,
+      file,
+      kernels,
+      anglesDeg,
+      nodes,
+      kFactor,
+      sphericity,
+      made,
+    );
+    if (phaseFileBytes(table) <= capBytes) {
+      return table;
+    }
+  }
+  throw new Error(`${file}: no node rule keeps the phase file under ${capBytes} bytes`);
+}
+
+/** The phrase of {@link TAMUDUST_LICENCE} that a table held at the kernel's edge extends. */
+const INTERPOLATED_CLAUSE = "interpolated to this material's refractive index";
+
+/**
+ * {@link TAMUDUST_LICENCE}, stating the change a table held at the kernel's edge makes (CC BY 4.0's
+ * "indicate changes"; decision-r08-t5d ruling 2).
+ *
+ * @throws Error if the licence no longer holds the phrase the clause extends.
+ */
+export function heldAtEdgeLicence(): string {
+  if (!TAMUDUST_LICENCE.includes(INTERPOLATED_CLAUSE)) {
+    throw new Error(`TAMUDUST_LICENCE no longer says "${INTERPOLATED_CLAUSE}"`);
+  }
+  return TAMUDUST_LICENCE.replace(
+    INTERPOLATED_CLAUSE,
+    `${INTERPOLATED_CLAUSE} (past the longwave kernel's range in n, to its nearer edge)`,
+  );
+}
+
+/** {@link reduceTamudust}'s table at the nodes given, made at the k factor stated. */
+function tamudustTable(
+  material: MaterialIndexFile,
+  file: string,
+  kernels: Readonly<Record<KernelLayout["name"], KernelSource>>,
+  anglesDeg: ReadonlyArray<number>,
+  nodes: ReadonlyArray<number>,
+  kFactor: number,
+  sphericity: number,
+  made: Map<number, PhaseNode>,
 ): PhaseFile {
   const phaseIndices = phaseAngleIndices(anglesDeg, TAMUDUST_PHASE_ANGLES);
   const matrixIndices = exactAngleIndices(anglesDeg, MATRIX_ANGLES_DEG);
   const angleIndices = [...phaseIndices, ...matrixIndices];
   const first = kernelFor(material.n[0] ?? Number.NaN, material.k[0] ?? Number.NaN);
-  const nodes =
-    only ?? wavelengthNodes(material, NODE_N_STEP[first.layout.name], first.layout.kFloor);
   const grids: Partial<Record<KernelLayout["name"], KernelGrid>> = {};
-  const phaseNodes = nodes.map((g) => {
+  const nodeAt = (g: number): PhaseNode => {
+    const known = made.get(g);
+    if (known !== undefined) {
+      return known;
+    }
+    const node = makeNode(g);
+    made.set(g, node);
+    return node;
+  };
+  const makeNode = (g: number): PhaseNode => {
     const wavelengthNm = material.wavelengthsNm[g] ?? Number.NaN;
     const n = material.n[g] ?? Number.NaN;
     const k = material.k[g] ?? Number.NaN;
-    const { layout, kTable } = kernelFor(n, k);
+    const { layout, nTable, kTable } = kernelFor(n, k);
     const source = kernels[layout.name];
     const grid = (grids[layout.name] ??= kernelGrid(source));
     const xMax = (2 * Math.PI * TAMUDUST_D_MAX_UM) / 0.38;
@@ -926,7 +1133,7 @@ export function reduceTamudust(
     const interpolated = interpolateKernel(
       source,
       grid,
-      n,
+      nTable,
       kTable,
       sphericity,
       every,
@@ -936,13 +1143,18 @@ export function reduceTamudust(
     const kept = thinSizes(values)
       .map((i) => values[i])
       .filter((v) => v !== undefined);
-    return encodeNode(
-      { wavelengthNm, n, k, kernel: layout.name, kTable: roundTo(kTable, 6) },
-      kept,
-    );
-  });
+    // nTable is written only where it differs from n, so that a table made at the material's own
+    // index keeps T5.c's layout to the byte.
+    const head =
+      nTable === n
+        ? { wavelengthNm, n, k, kernel: layout.name, kTable: roundTo(kTable, 6) }
+        : { wavelengthNm, n, k, kernel: layout.name, nTable, kTable: roundTo(kTable, 6) };
+    return encodeNode(head, kept);
+  };
+  const phaseNodes = nodes.map(nodeAt);
   const kernelsUsed = [...new Set(phaseNodes.map((p) => p.kernel))].join(" and ");
   const floored = phaseNodes.some((p) => p.kTable > p.k);
+  const atEdge = phaseNodes.some((p) => p.nTable !== undefined);
   return {
     material: file,
     key: material.key,
@@ -953,8 +1165,9 @@ export function reduceTamudust(
     sphericity,
     paper: TAMUDUST_PAPER,
     source: `${TAMUDUST_ARCHIVE.name}, ${TAMUDUST_ARCHIVE.url}, ${TAMUDUST_ARCHIVE.bytes} bytes, MD5 ${TAMUDUST_ARCHIVE.md5}, SHA-256 ${TAMUDUST_ARCHIVE.sha256}, fetched ${TAMUDUST_ARCHIVE.fetched}; the angles from ${TAMUDUST_SOURCE_ARCHIVE.name}, MD5 ${TAMUDUST_SOURCE_ARCHIVE.md5}`,
-    licence: TAMUDUST_LICENCE,
-    reduction: `The ${kernelsUsed} kernel at this material's index (${file}) at each wavelength node, ${nodeRuleText(NODE_N_STEP[first.layout.name])}; each extensive quantity linear in n, ln k and ln S between the kernel's records${sphericity === SPHERICITY ? "" : `, at sphericity ${sphericity}`}; ${kernelReachText(Math.max(...phaseNodes.map((p) => p.sizeParameters.at(-1) ?? 0)))}, ${thinningText()}; a₁ at ${phaseIndices.length} of the kernel's 498 angles, nearest to even steps in √θ, and the other elements every 10°.${floored ? ` Where k lies below the kernel's floor, the table is the floor's (kTable), and the renderer scales its absorption by k ÷ kTable (the floor rule).` : ""}`,
+    // A table held at the kernel's edge states that change too (CC BY 4.0's "indicate changes").
+    licence: atEdge ? heldAtEdgeLicence() : TAMUDUST_LICENCE,
+    reduction: `The ${kernelsUsed} kernel at this material's index (${file}) at each wavelength node, ${nodeRuleText(NODE_N_STEP[first.layout.name], kFactor)}; each extensive quantity linear in n, ln k and ln S between the kernel's records${sphericity === SPHERICITY ? "" : `, at sphericity ${sphericity}`}; ${kernelReachText(Math.max(...phaseNodes.map((p) => p.sizeParameters.at(-1) ?? 0)))}, ${thinningText()}; a₁ at ${phaseIndices.length} of the kernel's 498 angles, nearest to even steps in √θ, and the other elements every 10°.${floored ? ` Where k lies below the kernel's floor, the table is the floor's (kTable), and the renderer scales its absorption by k ÷ kTable (the floor rule).` : ""}${atEdge ? ` ${kernelEdgeText(phaseNodes)}.` : ""}`,
     encoding: ENCODING,
     phaseAnglesDeg: phaseIndices.map((j) => anglesDeg[j] ?? Number.NaN),
     matrixAnglesDeg: MATRIX_ANGLES_DEG,
@@ -1454,25 +1667,30 @@ export function excerptSizeValues(excerpt: KernelExcerpt, record: number): NodeS
 /**
  * The reduction's worst errors over a material's nodes for gamma distributions of r_eff 0.3, 1, 3
  * and 10 µm and v_eff 0.1 and 0.3: a check run while the kernels are at hand.
+ *
+ * @param nodes - Indices on the material's grid to check at: its phase file's nodes, at whichever
+ *   k factor {@link reduceTamudust} took.
  */
 export function checkTamudust(
   material: MaterialIndexFile,
   kernels: Readonly<Record<KernelLayout["name"], KernelSource>>,
   anglesDeg: ReadonlyArray<number>,
+  nodes: ReadonlyArray<number>,
 ): ReductionError {
   const phaseIndices = phaseAngleIndices(anglesDeg, TAMUDUST_PHASE_ANGLES);
   const matrixIndices = exactAngleIndices(anglesDeg, MATRIX_ANGLES_DEG);
-  const first = kernelFor(material.n[0] ?? Number.NaN, material.k[0] ?? Number.NaN);
-  const nodes = wavelengthNodes(material, NODE_N_STEP[first.layout.name], first.layout.kFloor);
   let worst = { a1: 0, g: 0, omega: 0 };
   for (const g of nodes) {
     const wavelengthNm = material.wavelengthsNm[g] ?? Number.NaN;
-    const { layout, kTable } = kernelFor(material.n[g] ?? Number.NaN, material.k[g] ?? Number.NaN);
+    const { layout, nTable, kTable } = kernelFor(
+      material.n[g] ?? Number.NaN,
+      material.k[g] ?? Number.NaN,
+    );
     const source = kernels[layout.name];
     const grid = kernelGrid(source);
     const every = sizesUpTo(grid.x, (2 * Math.PI * TAMUDUST_D_MAX_UM) / 0.38);
     const values = kernelSizeValues(
-      interpolateKernel(source, grid, material.n[g] ?? Number.NaN, kTable, SPHERICITY, every, [
+      interpolateKernel(source, grid, nTable, kTable, SPHERICITY, every, [
         ...phaseIndices,
         ...matrixIndices,
       ]),
@@ -1560,13 +1778,16 @@ export async function main(args: readonly string[]): Promise<number> {
       try {
         for (const { file } of TAMUDUST_MATERIALS) {
           const material = readMaterialFile(materials, file);
+          const phase = reduceTamudust(material, file, { shortwave: sw, longwave: lw }, angles);
           if (values.check === true) {
-            const e = checkTamudust(material, { shortwave: sw, longwave: lw }, angles);
+            const nodes = phase.nodes.map((node) =>
+              material.wavelengthsNm.indexOf(node.wavelengthNm),
+            );
+            const e = checkTamudust(material, { shortwave: sw, longwave: lw }, angles, nodes);
             console.warn(
               `${file}: reduction check, worst |Δa₁|/a₁ ${e.a1.toExponential(2)}, |Δg| ${e.g.toExponential(2)}, |Δω| ${e.omega.toExponential(2)}`,
             );
           }
-          const phase = reduceTamudust(material, file, { shortwave: sw, longwave: lw }, angles);
           writeFileSync(join(out, file), `${JSON.stringify(phase, null, 2)}\n`);
           console.warn(
             `${file}: ${phase.nodes.length} nodes, ${phase.nodes[0]?.sizeParameters.length} sizes`,

@@ -253,12 +253,13 @@ export interface AerosolMode {
  * - `model`: a published model inside its range: Mie for spheres, the MMF for an aggregate inside
  *   its phase-shift gate with |m − 1| < 2, a TAMUdust2020 kernel for a non-spherical mineral, Yang
  *   et al. 2013 for water ice;
- * - `analogue`: a table stands in past its validated range: the k-floor rule exceeded, another ice
+ * - `analogue`: a table stands in past its validated range: the k-floor rule exceeded, a mineral
+ *   whose n lies past the longwave kernel's edge drawn on the edge's table (R08.T5.d), another ice
  *   on water ice's table, water ice's crystals below the table's smallest size, or an aggregate
  *   whose own term 2kR_c|m_MG − 1| is below 1 past Tazaki and Tanaka's (9) or their (7),
  *   |m − 1| ≥ 2 (the MMF table kept, science-r08-mmf.md);
  * - `fallback`: the Henyey–Greenstein phase from Mie's or the MMF's g, or, for a small grain of a
- *   mineral no kernel covers, the sphere's own Mie table.
+ *   mineral no kernel covers (or one past the kernel-edge rule), the sphere's own Mie table.
  *
  * An `analogue` or `fallback` mode with less than `CLOUD_DECK_SPLIT_OPTICAL_DEPTH` above it at
  * 550 nm gives `atmosphereApproximate` (Design note 12; `aerosol.ts`).

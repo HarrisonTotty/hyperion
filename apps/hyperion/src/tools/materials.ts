@@ -1,31 +1,46 @@
 /**
  * `node scripts/materials.mjs`: reduces the aerosol materials' refractive indices to the files of
- * `view/atmosphere/materials/` (plan R08, R08.T5.b; decision-r08-licences.md rows 2–5,
- * decision-composition §1.9 and §5).
+ * `view/atmosphere/materials/` (plan R08, R08.T5.b and R08.T5.d; decision-r08-licences.md rows 2–5,
+ * decision-composition §1.9 and §5, decision-r08-t5d).
  *
  * @remarks
  * Each fetched source is read from a path given on the command line, checked against the SHA-256
- * recorded here, and never committed. Only its values reduced onto {@link MATERIAL_GRID_NM} are
- * written: the real index n interpolated linearly in wavelength between the source's points, and
- * the imaginary index k linearly in log k (linearly where either end is 0), with each file's own
- * exceptions stated in its `reduction`. Two files are made from no fetched table: CO₂ ice, a
- * derived fit (`science-r08-sulphur-co2ice.md`), and NH₄SH, a stated stand-in (row 5) whose index
- * is a Lorentz–Lorenz estimate (`science-r08-nonspherical.md` §3.1, {@link nh4shIndex}). The files
- * are JSON so that the client imports them and `hyperion-fit` reads them as one source of truth
- * (P14.T49.e). Prettier formats them after they are written (`apps/hyperion/scripts/materials.mjs`).
+ * recorded here, and never committed. Only its values reduced onto the file's grid are written
+ * ({@link MATERIAL_GRID_NM}, or {@link ACID_GRID_NM} for the two files Venus's ultraviolet fit
+ * reads): the real index n interpolated linearly in wavelength between the source's points, and the
+ * imaginary index k linearly in log k (linearly where either end is 0), with each file's own
+ * exceptions stated in its `reduction`. A dispersion formula is evaluated on the grid, and a
+ * uniaxial crystal's two axes are averaged in the dielectric function ({@link COMBINED_MATERIALS}).
+ * The files made from no fetched table ({@link DERIVED_MATERIALS}): CO₂ ice, a derived fit
+ * (`science-r08-sulphur-co2ice.md`); NH₄SH, a stated stand-in (row 5) whose index is a
+ * Lorentz–Lorenz estimate (`science-r08-nonspherical.md` §3.1, {@link nh4shIndex}); since R08.T5.d
+ * S₈'s constant index and the molecular ices' Lorentz–Lorenz estimates ({@link ICE_ESTIMATES}). The
+ * files are JSON so that the client imports them and `hyperion-fit` reads them as one source of
+ * truth (P14.T49.e). Prettier formats them after they are written
+ * (`apps/hyperion/scripts/materials.mjs`).
  *
- * Inputs, each downloaded on 2026-10-09 into its own directory and read as data only:
+ * Inputs, each downloaded into its own directory and read as data only (T5.b's on 2026-10-09,
+ * T5.d's on {@link FETCHED_T5D}):
  *
  * - refractiveindex.info's database (M. N. Polyanskiy, Sci. Data 11, 94 (2024); CC0 1.0), commit
  *   {@link RI_COMMIT}, files under `database/data/`;
  * - optool's `lnk_data/` (C. Dominik, M. Min and R. Tazaki 2021, ascl:2104.010), commit
  *   {@link OPTOOL_COMMIT}; its MIT licence covers its software, and its data files state no terms;
- * - ARIA's Palmer and Williams files (https://eodg.atm.ox.ac.uk/ARIA/; no terms stated);
+ * - ARIA's Palmer and Williams files and Pollack, Toon and Khare's rocks
+ *   (https://eodg.atm.ox.ac.uk/ARIA/; no terms stated);
  * - NASA Ames's Mars dust file as kept in S. Ranjan's repository at commit 1e67a481 (no terms
  *   stated for the data);
  * - HITRAN2024's aerosol archive, `hitran_ri.tar` (https://hitran.org/aerosols/; "free", no
  *   licence stated), SHA-256 {@link HITRAN_TAR_SHA256}, from which only the named ASCII files were
- *   extracted (none of its code was run).
+ *   extracted (none of its code was run);
+ * - Kitzmann and Heng 2018's compilation, LX-MIE's `compilation/` at commit {@link LX_MIE_COMMIT}
+ *   (a GPL-3.0 repository whose data carry no separate terms), as a finding aid and, for FeS,
+ *   CaTiO₃, ZnS, MnS and Na₂S, the only machine-readable copy of each primary;
+ * - B. T. Draine's graphite dielectric functions (his site; citation asked);
+ * - the arXiv e-print sources of Braude et al. 2020 and Irwin et al. 2022 (CC BY 4.0), read for one
+ *   table each, and Martikainen et al. 2023's machine-readable Table 6 (CC BY 4.0);
+ * - the Handbook of Mineralogy's sulphur sheet, for S₈'s three principal indices, and the
+ *   Crystallography Open Database's cells (CC0), for the ices' densities.
  */
 
 import { createHash } from "node:crypto";
@@ -33,7 +48,10 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
-/** The wavelengths every material file is given at, nm: 380 to 780 in steps of 5. */
+/**
+ * The grid material files are written on by default, nm: 380 to 780 in steps of 5. The two files
+ * Venus's ultraviolet fit reads start at 360 nm ({@link ACID_GRID_NM}).
+ */
 export const MATERIAL_GRID_NM: ReadonlyArray<number> = Array.from(
   { length: 81 },
   (_, i) => 380 + 5 * i,
@@ -133,13 +151,19 @@ function numeric(field: string): number {
  * to the first at or above its last, so that a source's rows elsewhere (an infrared band printed
  * with rounded wavelengths) cannot stop it. Exact duplicate rows are dropped, and two values at one
  * wavelength inside the window are refused.
+ *
+ * @param grid - The grid the rows are read for, nm, ascending.
  */
-function usedRows(samples: ReadonlyArray<IndexSample>, ignoreBelowUm: number): IndexSample[] {
+function usedRows(
+  samples: ReadonlyArray<IndexSample>,
+  ignoreBelowUm: number,
+  grid: ReadonlyArray<number> = MATERIAL_GRID_NM,
+): IndexSample[] {
   const sorted = samples
     .filter((s) => s.wavelengthUm >= ignoreBelowUm)
     .toSorted((a, b) => a.wavelengthUm - b.wavelengthUm);
-  const lowUm = (MATERIAL_GRID_NM[0] ?? Number.NaN) / 1000;
-  const highUm = (MATERIAL_GRID_NM.at(-1) ?? Number.NaN) / 1000;
+  const lowUm = (grid[0] ?? Number.NaN) / 1000;
+  const highUm = (grid.at(-1) ?? Number.NaN) / 1000;
   const start = Math.max(
     0,
     sorted.findLastIndex((s) => s.wavelengthUm <= lowUm),
@@ -190,14 +214,127 @@ export function parseRefractiveIndexInfo(text: string): IndexSample[] {
 }
 
 /**
- * The rows of an ARIA `.ri` file in `#FORMAT=WAVN N K`: wavenumber (cm⁻¹), n, k (k may be NaN).
+ * The rows of a refractiveindex.info database file with one `tabulated n` block: λ (µm) and n, with
+ * k = 0, which the material file states (the source gives no k).
+ *
+ * @throws Error if the file has no such block, or more than one data block.
+ */
+export function parseRefractiveIndexInfoN(text: string): IndexSample[] {
+  const lines = text.split(/\r?\n/u);
+  const start = lines.findIndex((line) => line.trim() === "- type: tabulated n");
+  if (start < 0 || lines.filter((line) => line.includes("type:")).length !== 1) {
+    throw new Error("refractiveindex.info: expected exactly one `tabulated n` block");
+  }
+  const rows: IndexSample[] = [];
+  for (const line of lines.slice(start + 2)) {
+    const fields = line.trim().split(/\s+/u);
+    if (fields.length !== 2 || !NUMBER.test(fields[0] ?? "")) {
+      break;
+    }
+    rows.push({ wavelengthUm: numeric(fields[0] ?? ""), n: numeric(fields[1] ?? ""), k: 0 });
+  }
+  return rows;
+}
+
+/**
+ * A refractiveindex.info `formula` entry (the database's `doc/Dispersion formulas.pdf`), λ in µm:
+ *
+ * - type 1: n² − 1 = C₁ + Σ C₂ᵢ λ² ÷ (λ² − C₂ᵢ₊₁²);
+ * - type 2: n² − 1 = C₁ + Σ C₂ᵢ λ² ÷ (λ² − C₂ᵢ₊₁);
+ * - type 4: n² = C₁ + C₂ λ^C₃ ÷ (λ² − C₄^C₅) + C₆ λ^C₇ ÷ (λ² − C₈^C₉) + Σ C₂ⱼ λ^C₂ⱼ₊₁ (j ≥ 5).
+ */
+export interface DispersionFormula {
+  readonly type: 1 | 2 | 4;
+  /** The range the entry states the formula for, µm. */
+  readonly rangeUm: readonly [number, number];
+  readonly coefficients: ReadonlyArray<number>;
+}
+
+/**
+ * The formula of a refractiveindex.info database file with one `formula 1`, `formula 2` or
+ * `formula 4` block.
+ *
+ * @throws Error if the file has no such block, more than one data block, or no range or
+ *   coefficients.
+ */
+export function parseRefractiveIndexInfoFormula(text: string): DispersionFormula {
+  const lines = text.split(/\r?\n/u).map((line) => line.trim());
+  const typed = lines.filter((line) => line.includes("type:"));
+  const type = /^- type: formula ([124])$/u.exec(typed[0] ?? "")?.[1];
+  if (typed.length !== 1 || type === undefined) {
+    throw new Error("refractiveindex.info: expected exactly one `formula 1`, `2` or `4` block");
+  }
+  const field = (name: string): number[] => {
+    const line = lines.find((l) => l.startsWith(`${name}:`));
+    if (line === undefined) {
+      throw new Error(`refractiveindex.info: the formula has no ${name}`);
+    }
+    return line
+      .slice(name.length + 1)
+      .trim()
+      .split(/\s+/u)
+      .map(numeric);
+  };
+  const [from, to] = field("wavelength_range");
+  if (from === undefined || to === undefined) {
+    throw new Error("refractiveindex.info: the formula's range needs two numbers");
+  }
+  return {
+    type: type === "1" ? 1 : type === "2" ? 2 : 4,
+    rangeUm: [from, to],
+    coefficients: field("coefficients"),
+  };
+}
+
+/**
+ * A {@link DispersionFormula}'s real index at a wavelength, µm.
+ *
+ * @throws RangeError for a wavelength outside the formula's stated range.
+ */
+export function formulaIndex(formula: DispersionFormula, wavelengthUm: number): number {
+  const [from, to] = formula.rangeUm;
+  if (!(wavelengthUm >= from && wavelengthUm <= to)) {
+    throw new RangeError(`${wavelengthUm} µm lies outside the formula's ${from}–${to} µm`);
+  }
+  const c = (i: number): number => formula.coefficients[i] ?? 0;
+  const l2 = wavelengthUm * wavelengthUm;
+  let nSquared: number;
+  switch (formula.type) {
+    case 1:
+    case 2: {
+      let sum = c(0);
+      for (let i = 1; i + 1 < formula.coefficients.length; i += 2) {
+        const pole = formula.type === 1 ? c(i + 1) * c(i + 1) : c(i + 1);
+        sum += (c(i) * l2) / (l2 - pole);
+      }
+      nSquared = 1 + sum;
+      break;
+    }
+    case 4: {
+      nSquared =
+        c(0) +
+        (c(1) * wavelengthUm ** c(2)) / (l2 - c(3) ** c(4)) +
+        (c(5) * wavelengthUm ** c(6)) / (l2 - c(7) ** c(8));
+      for (let i = 9; i + 1 < formula.coefficients.length; i += 2) {
+        nSquared += c(i) * wavelengthUm ** c(i + 1);
+      }
+      break;
+    }
+  }
+  return Math.sqrt(nSquared);
+}
+
+/**
+ * The rows of an ARIA `.ri` file: `#FORMAT=WAVN N K`, wavenumber (cm⁻¹), n, k, or `#FORMAT=WAVL N
+ * K`, wavelength (µm), n, k; either n or k may be NaN.
  *
  * @throws Error if the format line is missing, or a data line is not three numbers.
  */
 export function parseAria(text: string): IndexSample[] {
   const lines = text.split(/\r?\n/u);
-  if (!lines.some((line) => line.trim() === "#FORMAT=WAVN N K")) {
-    throw new Error("ARIA: expected #FORMAT=WAVN N K");
+  const wavenumber = lines.some((line) => line.trim() === "#FORMAT=WAVN N K");
+  if (!wavenumber && !lines.some((line) => line.trim() === "#FORMAT=WAVL N K")) {
+    throw new Error("ARIA: expected #FORMAT=WAVN N K or #FORMAT=WAVL N K");
   }
   const rows: IndexSample[] = [];
   for (const [i, line] of lines.entries()) {
@@ -208,13 +345,271 @@ export function parseAria(text: string): IndexSample[] {
     if (fields.length !== 3) {
       throw new Error(`ARIA: line ${i + 1} has ${fields.length} fields`);
     }
+    const first = numeric(fields[0] ?? "");
     rows.push({
-      wavelengthUm: 1e4 / numeric(fields[0] ?? ""),
+      wavelengthUm: wavenumber ? 1e4 / first : first,
       n: numeric(fields[1] ?? ""),
       k: numeric(fields[2] ?? ""),
     });
   }
   return rows;
+}
+
+/**
+ * The rows of a file of Kitzmann and Heng 2018's compilation (LX-MIE's `compilation/`): three
+ * header lines (the material and its references, `#Data points: N`, the columns), then λ (µm), n
+ * and k. Read as data, for its values only.
+ *
+ * @throws Error if the count disagrees with the rows, or a row is not three numbers.
+ */
+export function parseKitzmannHeng(text: string): IndexSample[] {
+  const lines = text.split(/\r?\n/u).filter((line) => line.trim().length > 0);
+  const count = /^#Data points:\s*(\d+)\s*$/u.exec(lines[1] ?? "")?.[1];
+  if (
+    count === undefined ||
+    !(lines[0] ?? "").startsWith("#") ||
+    !(lines[2] ?? "").startsWith("#")
+  ) {
+    throw new Error("Kitzmann and Heng: expected three header lines");
+  }
+  const rows = lines.slice(3).map((line, i) => {
+    const fields = line.trim().split(/\s+/u);
+    if (fields.length !== 3) {
+      throw new Error(`Kitzmann and Heng: row ${i + 1} has ${fields.length} fields`);
+    }
+    return {
+      wavelengthUm: numeric(fields[0] ?? ""),
+      n: numeric(fields[1] ?? ""),
+      k: numeric(fields[2] ?? ""),
+    };
+  });
+  if (rows.length !== Number(count)) {
+    throw new Error(`Kitzmann and Heng: the header says ${count} rows, found ${rows.length}`);
+  }
+  return rows;
+}
+
+/** One row of a dielectric function: the wavelength, µm, and ε = ε₁ + iε₂. */
+export interface DielectricSample {
+  readonly wavelengthUm: number;
+  readonly epsilonRe: number;
+  readonly epsilonIm: number;
+}
+
+/**
+ * The rows of B. T. Draine's `callindex.out_*` files: header lines, then a column line (`wave(um)
+ * eps_1-1 eps_2 Re(n)-1 Im(n)`) and rows of λ (µm), ε₁ − 1, ε₂, Re(n) − 1 and Im(n); ε is read.
+ *
+ * @throws Error if the column line is missing, or a row is not five numbers.
+ */
+export function parseDraineDielectric(text: string): DielectricSample[] {
+  const lines = text.split(/\r?\n/u);
+  const head = lines.findIndex((line) => /^\s*wave\(um\)\s+eps_1-1\s+eps_2\s/u.test(line));
+  if (head < 0) {
+    throw new Error("Draine: expected the column line wave(um) eps_1-1 eps_2 Re(n)-1 Im(n)");
+  }
+  const rows: DielectricSample[] = [];
+  for (const [i, line] of lines.slice(head + 1).entries()) {
+    if (line.trim().length === 0) {
+      continue;
+    }
+    const fields = line.trim().split(/\s+/u);
+    if (fields.length !== 5 || !fields.every((f) => NUMBER.test(f))) {
+      throw new Error(`Draine: row ${i + 1} is not five numbers`);
+    }
+    rows.push({
+      wavelengthUm: numeric(fields[0] ?? ""),
+      epsilonRe: 1 + numeric(fields[1] ?? ""),
+      epsilonIm: numeric(fields[2] ?? ""),
+    });
+  }
+  return rows;
+}
+
+/** The index n + ik of a dielectric function ε (n = √ε with n, k ≥ 0). */
+export function indexOfDielectric(
+  epsilonRe: number,
+  epsilonIm: number,
+): {
+  readonly n: number;
+  readonly k: number;
+} {
+  const modulus = Math.hypot(epsilonRe, epsilonIm);
+  const n = Math.sqrt((modulus + epsilonRe) / 2);
+  return { n, k: epsilonIm / (2 * n) };
+}
+
+/**
+ * A uniaxial crystal's two dielectric functions averaged for randomly oriented grains, ε = (2ε_⊥ +
+ * ε_∥) ÷ 3 (2ε_o + ε_e), at the wavelengths both sources give, as the index rows of the average.
+ *
+ * @throws Error if the two sources' wavelengths differ inside the grid's window.
+ */
+export function averagedUniaxial(
+  perpendicular: ReadonlyArray<DielectricSample>,
+  parallel: ReadonlyArray<DielectricSample>,
+  grid: ReadonlyArray<number> = MATERIAL_GRID_NM,
+): IndexSample[] {
+  const window = (rows: ReadonlyArray<DielectricSample>): DielectricSample[] => {
+    const sorted = rows.toSorted((a, b) => a.wavelengthUm - b.wavelengthUm);
+    const low = (grid[0] ?? Number.NaN) / 1000;
+    const high = (grid.at(-1) ?? Number.NaN) / 1000;
+    const start = Math.max(
+      0,
+      sorted.findLastIndex((s) => s.wavelengthUm <= low),
+    );
+    const after = sorted.findIndex((s) => s.wavelengthUm >= high);
+    return sorted.slice(start, after < 0 ? sorted.length : after + 1);
+  };
+  const perp = window(perpendicular);
+  const para = window(parallel);
+  if (
+    perp.length !== para.length ||
+    perp.some((p, i) => p.wavelengthUm !== para[i]?.wavelengthUm)
+  ) {
+    throw new Error("averagedUniaxial: the two sources' wavelengths differ near the grid");
+  }
+  return perp.map((p, i) => {
+    const q = para[i] ?? p;
+    const { n, k } = indexOfDielectric(
+      (2 * p.epsilonRe + q.epsilonRe) / 3,
+      (2 * p.epsilonIm + q.epsilonIm) / 3,
+    );
+    return { wavelengthUm: p.wavelengthUm, n, k };
+  });
+}
+
+/**
+ * The column of Martikainen et al. 2023's ASCII Tables 3 and 6 (ApJS 268, 47): λ (nm), then one
+ * column per sample of `k +or- σ`, read for the sample named, with n the paper's fixed 1.5.
+ *
+ * @throws Error if the column line lacks the sample, or a row is not one wavelength and a k per
+ *   sample.
+ */
+export function parseMartikainenK(text: string, sample: string): IndexSample[] {
+  const lines = text.split(/\r?\n/u).map((line) => line.trim());
+  const head = lines.findIndex((line) => line.startsWith("lambda (nm)"));
+  const columns = (lines[head] ?? "").split("\t").map((c) => c.trim());
+  const column = columns.findIndex((c) => c.startsWith(`k _${sample} `));
+  if (head < 0 || column < 1) {
+    throw new Error(`Martikainen: no column for ${sample}`);
+  }
+  const rows: IndexSample[] = [];
+  for (const line of lines.slice(head + 1)) {
+    if (line.length === 0) {
+      continue;
+    }
+    const cells = line.split("\t").map((c) => c.trim());
+    const k = /^([0-9.]+) \+or- [0-9.]+$/u.exec(cells[column] ?? "")?.[1];
+    if (cells.length < columns.length - 1 || k === undefined) {
+      throw new Error(`Martikainen: the row "${line}" is not a k per sample`);
+    }
+    rows.push({
+      wavelengthUm: numeric(cells[0] ?? "") / 1000,
+      n: MARTIKAINEN_FIXED_N,
+      k: numeric(k),
+    });
+  }
+  return rows;
+}
+
+/** The real index Martikainen et al. 2023 fix for their k retrievals (their Table 5's note). */
+export const MARTIKAINEN_FIXED_N = 1.5;
+
+/** One cell of a LaTeX table, without its uncertainty: `$0.033\pm0.003$` → 0.033, `1.95$\times 10^{-3}$` → 1.95e-3. */
+function texNumber(cell: string): number {
+  const bare = cell
+    .replaceAll("$", "")
+    .replace(/\\pm.*$/u, "")
+    .trim();
+  const power = /^([0-9.]+)\\times\s*10\^\{(-?\d+)\}$/u.exec(bare);
+  return power === null ? numeric(bare) : numeric(`${power[1]}e${power[2]}`);
+}
+
+/** The data rows of the LaTeX table whose `\label{…}` is given: each `&`-separated row of numbers. */
+function texTableRows(text: string, label: string): number[][] {
+  const lines = text.split(/\r?\n/u);
+  const at = lines.findIndex((line) => line.includes(`\\label{${label}}`));
+  if (at < 0) {
+    throw new Error(`LaTeX: no table labelled ${label}`);
+  }
+  let start = at;
+  while (start > 0 && !(lines[start] ?? "").includes("\\begin{table")) {
+    start -= 1;
+  }
+  let end = at;
+  while (end < lines.length && !(lines[end] ?? "").includes("\\end{table")) {
+    end += 1;
+  }
+  const rows: number[][] = [];
+  for (const line of lines.slice(start, end)) {
+    const cells = line
+      .replace(/\\(?:tabularnewline|\\).*$/u, "")
+      .split("&")
+      .map((c) => c.trim());
+    if (cells.length > 1 && /^[0-9.]+$/u.test(cells[0] ?? "")) {
+      rows.push(cells.map(texNumber));
+    }
+  }
+  return rows;
+}
+
+/** The real index Braude et al. 2020 fix for the chromophore at 700 nm (the preprint's §4.1). */
+export const CHROMOPHORE_REAL_INDEX = 1.4;
+
+/**
+ * Braude et al. 2020's retrieved chromophore k (their table "Tabulated retrieved imaginary
+ * refractive index spectra", label `imagritable`): λ every 50 nm over 450–950 nm, of which the
+ * first k column is the adopted "universal chromophore" (r_c 0.05 µm, r_n 1 µm, n_n 1.42), with n
+ * the paper's fixed {@link CHROMOPHORE_REAL_INDEX}.
+ *
+ * @throws Error if the table is missing or a row lacks its four solutions.
+ */
+export function parseBraudeChromophore(text: string): IndexSample[] {
+  return texTableRows(text, "imagritable").map((row) => {
+    const [nm, k] = row;
+    if (row.length !== 5 || nm === undefined || k === undefined) {
+      throw new Error("Braude: a row lacks its four solutions");
+    }
+    return { wavelengthUm: nm / 1000, n: CHROMOPHORE_REAL_INDEX, k };
+  });
+}
+
+/** The real index Irwin et al. 2022 assume for every aerosol at 0.8 µm (the preprint's §3.4 and §3.6). */
+export const ICE_GIANT_HAZE_REAL_INDEX = 1.4;
+
+/** Aerosol-3's "Mean 1" column in Irwin et al. 2022's n_imag tables: the seventh after λ. */
+const IRWIN_AEROSOL3_MEAN1 = 7;
+
+/** Irwin et al. 2022's Aerosol-3 "Mean 1" n_imag, per planet, every 0.1 µm (λ µm, k). */
+export function irwinAerosol3(text: string, planet: "uranus" | "neptune"): IndexSample[] {
+  return texTableRows(text, planet === "uranus" ? "tab:refuranus" : "tab:refneptune").map((row) => {
+    const um = row[0];
+    const k = row[IRWIN_AEROSOL3_MEAN1];
+    if (row.length !== 10 || um === undefined || k === undefined) {
+      throw new Error(`Irwin: a ${planet} row lacks its nine columns`);
+    }
+    return { wavelengthUm: um, n: ICE_GIANT_HAZE_REAL_INDEX, k };
+  });
+}
+
+/**
+ * The ice giants' haze as one material: at each wavelength both of Irwin et al. 2022's tables give
+ * (0.3–1.9 µm), the geometric mean of Uranus's and Neptune's Aerosol-3 "Mean 1" k, with n the
+ * paper's {@link ICE_GIANT_HAZE_REAL_INDEX}.
+ *
+ * @throws Error if either table is missing, or the two disagree in wavelength.
+ */
+export function parseIrwinAerosol3(text: string): IndexSample[] {
+  const uranus = irwinAerosol3(text, "uranus");
+  const neptune = irwinAerosol3(text, "neptune");
+  return uranus.map((u) => {
+    const v = neptune.find((row) => row.wavelengthUm === u.wavelengthUm);
+    if (v === undefined) {
+      throw new Error(`Irwin: Neptune's table has no row at ${u.wavelengthUm} µm`);
+    }
+    return { wavelengthUm: u.wavelengthUm, n: ICE_GIANT_HAZE_REAL_INDEX, k: Math.sqrt(u.k * v.k) };
+  });
 }
 
 /**
@@ -282,6 +677,12 @@ export function parseWavelengthTable(text: string): IndexSample[] {
   return rows;
 }
 
+/** A material's index on a file's grid: n and k at each wavelength. */
+export interface ReducedIndex {
+  readonly n: ReadonlyArray<number>;
+  readonly k: ReadonlyArray<number>;
+}
+
 /** How one source is brought onto the grid. */
 export interface ResampleOptions {
   /**
@@ -299,6 +700,19 @@ export interface ResampleOptions {
    * that has one. Every NaN must lie at shorter wavelengths than that row.
    */
   readonly unmeasuredK?: "shortestMeasured";
+  /**
+   * Where the source gives n at some rows and k at others (NaN elsewhere), n is read from the rows
+   * that give n and k from the rows that give k, each by the same rule.
+   */
+  readonly separateNK?: true;
+  /**
+   * Beyond the source's first or last used row, within `holdNm`, k is extrapolated linearly in
+   * log k from the two rows at that end, where both are positive, and n is held; otherwise both
+   * are held.
+   */
+  readonly endK?: "hold" | "extrapolate";
+  /** The grid, nm: {@link MATERIAL_GRID_NM} unless a file is written on another (ruling 1). */
+  readonly grid?: ReadonlyArray<number>;
 }
 
 function interpolateK(k0: number, k1: number, t: number): number {
@@ -311,7 +725,8 @@ function rounded(value: number): number {
 }
 
 /**
- * A source reduced onto {@link MATERIAL_GRID_NM}: n linear and k log-linear in wavelength.
+ * A source reduced onto its grid ({@link MATERIAL_GRID_NM} unless `options.grid` names another): n
+ * linear and k log-linear in wavelength.
  *
  * @throws Error if two rows near the grid disagree at one wavelength, a grid point lies farther
  *   beyond the source than `holdNm`, a row has no finite n > 0 and k ≥ 0, or an unmeasured k
@@ -320,8 +735,24 @@ function rounded(value: number): number {
 export function resample(
   samples: ReadonlyArray<IndexSample>,
   options: ResampleOptions,
-): { readonly n: number[]; readonly k: number[] } {
-  let rows = usedRows(samples, options.ignoreBelowUm ?? 0);
+): ReducedIndex {
+  if (options.separateNK === true) {
+    // Each part's placeholder (k 0, n 1) is never read: the part keeps only its own column.
+    const nRows = samples
+      .filter((s) => Number.isFinite(s.n))
+      .map((s) => ({ wavelengthUm: s.wavelengthUm, n: s.n, k: 0 }));
+    const kRows = samples
+      .filter((s) => Number.isFinite(s.k))
+      .map((s) => ({ wavelengthUm: s.wavelengthUm, n: 1, k: s.k }));
+    return { n: resampleRows(nRows, options).n, k: resampleRows(kRows, options).k };
+  }
+  return resampleRows(samples, options);
+}
+
+/** {@link resample} of rows that each give n and k. */
+function resampleRows(samples: ReadonlyArray<IndexSample>, options: ResampleOptions): ReducedIndex {
+  const grid = options.grid ?? MATERIAL_GRID_NM;
+  let rows = usedRows(samples, options.ignoreBelowUm ?? 0, grid);
   if (options.unmeasuredK === "shortestMeasured") {
     const first = rows.find((s) => Number.isFinite(s.k));
     if (first === undefined) {
@@ -347,16 +778,30 @@ export function resample(
   }
   const n: number[] = [];
   const k: number[] = [];
-  for (const nm of MATERIAL_GRID_NM) {
+  for (const nm of grid) {
     const um = nm / 1000;
     if (um <= first.wavelengthUm || um >= last.wavelengthUm) {
-      const end = um <= first.wavelengthUm ? first : last;
+      const below = um <= first.wavelengthUm;
+      const end = below ? first : last;
       const gapNm = Math.abs(end.wavelengthUm - um) * 1000;
       if (gapNm > options.holdNm + 1e-9) {
         throw new Error(`resample: ${nm} nm lies ${gapNm.toFixed(1)} nm beyond the source`);
       }
       n.push(rounded(end.n));
-      k.push(rounded(end.k));
+      const next = below ? rows[1] : rows.at(-2);
+      const extrapolate =
+        options.endK === "extrapolate" && next !== undefined && end.k > 0 && next.k > 0;
+      k.push(
+        rounded(
+          extrapolate
+            ? interpolateK(
+                end.k,
+                next.k,
+                (um - end.wavelengthUm) / (next.wavelengthUm - end.wavelengthUm),
+              )
+            : end.k,
+        ),
+      );
       continue;
     }
     const upper = rows.findIndex((s) => s.wavelengthUm >= um);
@@ -382,6 +827,20 @@ const OPTOOL_TERMS =
 const STANDARD_REDUCTION =
   "n linear and k linear in log k in wavelength between the source's rows, onto 380–780 nm every 5 nm, to six significant figures";
 
+/**
+ * The grid of the two files Venus's ultraviolet fit reads at 365 nm, nm: 360 to 780 every 5
+ * (decision-r08-t5d ruling 1), the 75 wt% sulphuric acid's and `acid_uv_absorber`'s.
+ */
+export const ACID_GRID_NM: ReadonlyArray<number> = Array.from(
+  { length: 85 },
+  (_, i) => 360 + 5 * i,
+);
+
+/** {@link STANDARD_REDUCTION} onto another grid. */
+function standardReductionOnto(grid: ReadonlyArray<number>): string {
+  return `n linear and k linear in log k in wavelength between the source's rows, onto ${grid[0] ?? Number.NaN}–${grid.at(-1) ?? Number.NaN} nm every 5 nm, to six significant figures`;
+}
+
 /** A material file reduced from one fetched source. */
 interface FetchedSpec {
   readonly file: string;
@@ -391,11 +850,97 @@ interface FetchedSpec {
   readonly parse: (text: string) => IndexSample[];
   readonly resample: ResampleOptions;
   readonly header: MaterialHeader;
+  /**
+   * A stated change made to the reduced index, on the file's grid: `acid_uv_absorber`'s added
+   * k_UA. Absent for a file that is the reduction alone.
+   */
+  readonly adjust?: (index: ReducedIndex, grid: ReadonlyArray<number>) => ReducedIndex;
 }
 
-function fetchedSource(what: string, url: string, sha256: string): string {
-  return `${what}, ${url}, SHA-256 ${sha256}, fetched ${FETCHED}`;
+function fetchedSource(what: string, url: string, sha256: string, fetched = FETCHED): string {
+  return `${what}, ${url}, SHA-256 ${sha256}, fetched ${fetched}`;
 }
+
+/** The day R08.T5.d's sources were fetched. */
+export const FETCHED_T5D = "2026-10-14";
+
+/**
+ * The a-priori k of Venus's ultraviolet absorber at 365 nm, k₃₆₅: the ruled value
+ * (science-r08-unowned-absorbers, adopted; decision-r08-t5d), not derived here. R08.T5.e refits it
+ * to Venus's 365 nm albedo. For scale, Spacek et al.'s §2.1 asks k ≈ 0.003 of mode-2 droplets at
+ * 365 nm (the preprint below), 2.5 times this.
+ */
+export const ACID_UV_K365 = 1.2e-3;
+
+/**
+ * The a-priori decay length of Venus's ultraviolet absorber, L, nm (science-r08-unowned-absorbers,
+ * ruled): the bound from J. Spacek, P. B. Rimmer, J. J. Petkowski and Y. J. Lee, Astrobiology 26
+ * (2026) 727–739, DOI 10.1177/15311074261477502, its values read from the preprint,
+ * arXiv:2505.00880v3 (CC BY 4.0), whose decadic absorption coefficients (a = α ÷ ln 10, its §2.1)
+ * are 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm. In k = ln(10) aλ ÷ 4π that is a fall by
+ * (1278 × 375) ÷ (54 × 455) = 19.51 over 80 nm, ln 10 cancelling, so L ≤ 80 nm ÷ ln 19.51 =
+ * 26.9 nm (the ruling's shorthand 80 nm ÷ ln(1278 ÷ 54), 25.3 nm, leaves out λ). R08.T5.e refits
+ * it to Venus's g′ ÷ r′ colour.
+ */
+export const ACID_UV_DECAY_NM = 26.9;
+
+/**
+ * The absorber's k, k_UA, at a wavelength, nm: k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times
+ * (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that the material's κ_ext and ω
+ * at 550 nm are H₂SO₄'s (decision-r08-t5d ruling 4).
+ */
+export function acidUvAbsorberK(wavelengthNm: number): number {
+  if (wavelengthNm >= 550) {
+    return 0;
+  }
+  const decay = ACID_UV_K365 * Math.exp(-(wavelengthNm - 365) / ACID_UV_DECAY_NM);
+  return wavelengthNm > 500 ? (decay * (550 - wavelengthNm)) / 50 : decay;
+}
+
+/** `acid_uv_absorber`'s index from the 75 wt% acid's: n unchanged, k = rounded(k_H₂SO₄ + k_UA). */
+function addAcidUvAbsorber(acid: ReducedIndex, grid: ReadonlyArray<number>): ReducedIndex {
+  return {
+    n: acid.n,
+    k: acid.k.map((k, i) => rounded(k + acidUvAbsorberK(grid[i] ?? Number.NaN))),
+  };
+}
+
+/** The LX-MIE commit Kitzmann and Heng 2018's compilation was fetched at (master, 2026-10-06). */
+export const LX_MIE_COMMIT = "38cc6d97c2268d58c41ccfc3955283ab6ee2ca44";
+
+const LX_MIE_URL = `https://raw.githubusercontent.com/NewStrangeWorlds/LX-MIE/${LX_MIE_COMMIT}/compilation`;
+
+const KITZMANN_HENG =
+  'D. Kitzmann and K. Heng, "Optical properties of potential condensates in exoplanetary atmospheres", Mon. Not. R. Astron. Soc. 475 (2018) 94–107, DOI 10.1093/mnras/stx3141';
+
+const COMPILATION_TERMS =
+  "reduced values from Kitzmann and Heng 2018's compilation, the only machine-readable copy found, cited to the primary and to Kitzmann and Heng as the compiler: the measured values are the authors' facts, and the repository's GPL-3.0 covers its code and arrangement, not a reduced visible subset of one material; its compilation/readme.txt sets no separate terms for the data. No compilation file and none of LX-MIE's code is committed (decision-composition §5; decision-r08-licences.md)";
+
+/** The source of a file reduced from one of Kitzmann and Heng 2018's compilation files. */
+function compilationSource(file: string, sha256: string): string {
+  return `Kitzmann and Heng 2018's compilation (${KITZMANN_HENG}), LX-MIE's compilation/${file} at commit ${LX_MIE_COMMIT}, ${LX_MIE_URL}/${file}, SHA-256 ${sha256}, fetched ${FETCHED_T5D}; read as data, as the only machine-readable copy of its primary`;
+}
+
+const CC_BY = "https://creativecommons.org/licenses/by/4.0/";
+
+const POLLACK_1973 =
+  'J. B. Pollack, O. B. Toon and B. N. Khare, "Optical properties of some terrestrial rocks and glasses", Icarus 19 (1973) 372–389, DOI 10.1016/0019-1035(73)90115-2';
+
+const LI_1976 =
+  'H. H. Li, "Refractive index of alkali halides and its wavelength and temperature derivatives", J. Phys. Chem. Ref. Data 5 (1976) 329–528, DOI 10.1063/1.555536';
+
+/**
+ * How far Ar ice's held n may run high, as its `reduction` states it: a Cauchy line n = A + B ÷ λ²,
+ * fitted by least squares to Sinnock and Smith's nine rows at 80 K (A = 1.265675, B = 0.0015164
+ * µm², residuals under 7 × 10⁻⁵), gives 1.26817 at 780 nm, 0.00113 under the held 1.2693 (computed
+ * once from the source; the source is not committed).
+ */
+const ARGON_HOLD_TEXT =
+  "a Cauchy line fitted by least squares to the source's nine rows (residuals under 7 × 10⁻⁵) gives 1.2682 at 780 nm, so the hold runs at most 0.0011 high";
+
+/** Irwin et al. 2022's two planets' Aerosol-3 "Mean 1" k at two of their rows (their tables). */
+const IRWIN_PLANETS_TEXT =
+  "Uranus 1.50 × 10⁻³ and Neptune 1.01 × 10⁻² at 400 nm, 1.91 × 10⁻⁴ and 5.47 × 10⁻³ at 500 nm";
 
 /** Every material file reduced from a fetched source, in the registry's order (a key's default first). */
 export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
@@ -539,7 +1084,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
     option: "h2so4-75",
     sha256: "ca84ce9a373bf9d0356dbbeeb59d61f771bf9d14667cecb3206f8a3cdac954fe",
     parse: parseAria,
-    resample: { holdNm: 0, unmeasuredK: "shortestMeasured" },
+    resample: { holdNm: 0, unmeasuredK: "shortestMeasured", grid: ACID_GRID_NM },
     header: {
       key: "H2SO4",
       phase: "liquid",
@@ -556,7 +1101,7 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
         "ca84ce9a373bf9d0356dbbeeb59d61f771bf9d14667cecb3206f8a3cdac954fe",
       ),
       licence: NO_TERMS,
-      reduction: `${STANDARD_REDUCTION}. In the visible the source gives n only, at 359.7, 408.2, 449.4, 555.6 and 701.8 nm, with k NaN short of 701.8 nm; there k is held at its shortest measured value, 2.07 × 10⁻⁸ at 701.8 nm. The acid's visible absorption lies below the source's measurement, and at this k a Venus mode-2 droplet's 1 − ω is about 10⁻⁶. n at 555.6 nm, 1.431, lies inside Hansen and Hovenier 1974's 1.44 ± 0.015 at 550 nm (J. Atmos. Sci. 31, 1137)`,
+      reduction: `${standardReductionOnto(ACID_GRID_NM)}: the grid starts at 360 nm, below the other files' 380 nm, so that Venus's ultraviolet fit can read this file at 365 nm (decision-r08-t5d ruling 1), and its 360–375 nm rows come from the same source rows as the rest. In the visible the source gives n only, at 359.7, 408.2, 449.4, 555.6 and 701.8 nm, with k NaN short of 701.8 nm; there k is held at its shortest measured value, 2.07 × 10⁻⁸ at 701.8 nm. The acid's visible absorption lies below the source's measurement, and at this k a Venus mode-2 droplet's 1 − ω is about 10⁻⁶. n at 555.6 nm, 1.431, lies inside Hansen and Hovenier 1974's 1.44 ± 0.015 at 550 nm (J. Atmos. Sci. 31, 1137)`,
       standIn: null,
       fit: null,
     },
@@ -738,6 +1283,594 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
       source: `HITRAN2024's aerosol compilation (I. E. Gordon et al., J. Quant. Spectrosc. Radiat. Transfer 353 (2026) 109807), https://hitran.org/data/Aerosols/Aerosols-2024/hitran_ri.tar, SHA-256 ${HITRAN_TAR_SHA256}, its file hitran_ri/ascii/exoplanets/jager_mg2sio4.dat, SHA-256 2582d4ab3cd9f7c9f8e53ae9988bd71a13c7080ba68f858bdf60133536c2fa32, fetched ${FETCHED}; only this ASCII file was read, and none of the archive's code was run`,
       licence: NO_TERMS,
       reduction: `${STANDARD_REDUCTION}; the source's rows are about 0.1 nm apart, and its k is printed to four decimal places (10⁻⁴), so k here is that coarse. Dorschner et al. 1995 has no Mg-pure olivine glass, so this Mg2SiO4 is Jäger et al.'s, as Kitzmann and Heng 2018's compilation also takes it (MNRAS 475, 94); 295 K stands for the source's room temperature`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  // R08.T5.d's files, after T5.b's (decision-composition; decision-r08-t5d).
+  {
+    file: "chromium.json",
+    option: "chromium",
+    sha256: "756f5c6be6c19c46dc3fb1580db069aafef1bb3b914293e141d7fc4b738ee5e4",
+    parse: parseRefractiveIndexInfo,
+    resample: { holdNm: 0 },
+    header: {
+      key: "Cr",
+      phase: "solid",
+      variant: null,
+      name: "metallic Cr films at room temperature",
+      temperatureK: 295,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper:
+        'P. B. Johnson and R. W. Christy, "Optical constants of transition metals: Ti, V, Cr, Mn, Fe, Co, Ni, and Pd", Phys. Rev. B 9 (1974) 5056–5070, DOI 10.1103/PhysRevB.9.5056',
+      source: fetchedSource(
+        "refractiveindex.info, main/Cr/nk/Johnson.yml",
+        `${RI_URL}/main/Cr/nk/Johnson.yml`,
+        "756f5c6be6c19c46dc3fb1580db069aafef1bb3b914293e141d7fc4b738ee5e4",
+        FETCHED_T5D,
+      ),
+      licence: RI_LICENCE,
+      reduction: `${STANDARD_REDUCTION}; the source's rows here are 368–821 nm, 13–65 nm apart. Johnson and Christy's films, iron's source too, are taken over Rakić et al. 1998's model and Lynch and Hunter's tables in Palik's handbook (Kitzmann and Heng 2018's choice), whose k passes the longwave kernel's 4; 295 K stands for the source's room temperature`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "iron-sulphide.json",
+    option: "iron-sulphide",
+    sha256: "ae2ba0daab33afc92d2d7590b1712cf7c09a35f8465915b19ab501396c4d60ea",
+    parse: parseKitzmannHeng,
+    resample: { holdNm: 0 },
+    header: {
+      key: "FeS",
+      phase: "solid",
+      variant: null,
+      name: "solid FeS",
+      temperatureK: null,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper: `J. B. Pollack, D. Hollenbach, S. Beckwith, D. P. Simonelli, T. Roush and W. Fong, "Composition and radiative properties of grains in molecular clouds and accretion disks", Astrophys. J. 421 (1994) 615, DOI 10.1086/173677, for the visible; Th. Henning and H. Mutschke, Astron. Astrophys. 327 (1997) 743, for the infrared; as compiled by ${KITZMANN_HENG}`,
+      source: compilationSource(
+        "FeS.dat",
+        "ae2ba0daab33afc92d2d7590b1712cf7c09a35f8465915b19ab501396c4d60ea",
+      ),
+      licence: COMPILATION_TERMS,
+      reduction: `${STANDARD_REDUCTION}. The source's rows near the visible are 300, 460, 610 and 1,000 nm, so 380–780 nm is interpolated across them, as coarse as the source; the visible primary, Pollack et al. 1994, was not found in another machine-readable copy (the Jena database's FeS is infrared only). The copy states no temperature`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "calcium-titanate.json",
+    option: "calcium-titanate",
+    sha256: "2d4cb5db2740c70dd3c2122d58062f04fb1e245675dfe8254919b801a1f8f2e1",
+    parse: parseKitzmannHeng,
+    resample: { holdNm: 0 },
+    header: {
+      key: "CaTiO3",
+      phase: "solid",
+      variant: null,
+      name: "crystalline CaTiO3",
+      temperatureK: null,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper: `K. Ueda, H. Yanagi, R. Noshiro, H. Hosono and H. Kawazoe, J. Phys.: Condens. Matter 10 (1998) 3669–3677, DOI 10.1088/0953-8984/10/16/018, for the visible; Th. Posch, F. Kerschbaum, D. Fabian, H. Mutschke, J. Dorschner, A. Tamanai and Th. Henning, "Infrared properties of solid titanium oxides: Exploring potential primary dust condensates", Astrophys. J. Suppl. 149 (2003) 437–445, DOI 10.1086/379167, for the infrared; as compiled by ${KITZMANN_HENG}`,
+      source: compilationSource(
+        "CaTiO3.dat",
+        "2d4cb5db2740c70dd3c2122d58062f04fb1e245675dfe8254919b801a1f8f2e1",
+      ),
+      licence: COMPILATION_TERMS,
+      reduction: `${STANDARD_REDUCTION}; the source's rows are about 3.6–7.7 nm apart here. No open copy of Ueda et al.'s visible values was found. The copy states no temperature`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "zinc-sulphide.json",
+    option: "zinc-sulphide",
+    sha256: "32607bcb78368bfcbb38a6bef88b03b88277b8644a434dc4385f034bd5c04efa",
+    parse: parseKitzmannHeng,
+    resample: { holdNm: 0 },
+    header: {
+      key: "ZnS",
+      phase: "solid",
+      variant: null,
+      name: "cubic ZnS",
+      temperatureK: null,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper: `E. D. Palik and A. Addamiano, "Zinc sulfide (ZnS)", in E. D. Palik (ed.), Handbook of Optical Constants of Solids, Academic Press (1985); as compiled by ${KITZMANN_HENG}`,
+      source: compilationSource(
+        "ZnS.dat",
+        "32607bcb78368bfcbb38a6bef88b03b88277b8644a434dc4385f034bd5c04efa",
+      ),
+      licence: COMPILATION_TERMS,
+      reduction: `${STANDARD_REDUCTION}; the source's rows are 354, 382, 413 and 451 nm, then about 8–25 nm apart, and its k falls from 0.04 at 413 nm to 7.4 × 10⁻⁶ at 451 nm, across which it is interpolated in log k. Palik's handbook is closed, so its values are read through the compilation (decision-r08-t5d ruling 5). Its k of 0.04–0.06 at 382–413 nm lies longward of cubic ZnS's band gap, near 340 nm, where Debenham 1984 measured the crystal's n (Appl. Opt. 23, 2238), so it is suspect, perhaps a seam between two data sets; kept as the compilation gives it and recorded. The copy states no temperature`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "manganese-sulphide.json",
+    option: "manganese-sulphide",
+    sha256: "97d7203885af8950fc567089bcd4e7845c716a347335f404afcc9c5488f8ab91",
+    parse: parseKitzmannHeng,
+    resample: { holdNm: 0 },
+    header: {
+      key: "MnS",
+      phase: "solid",
+      variant: null,
+      name: "crystalline MnS",
+      temperatureK: null,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper: `D. R. Huffman and R. L. Wild, "Optical properties of α-MnS", Phys. Rev. 156 (1967) 989–997, DOI 10.1103/PhysRev.156.989, for the visible; R. Montaner et al., Phys. Status Solidi A 52 (1979) 597, for the infrared; as compiled by ${KITZMANN_HENG}`,
+      source: compilationSource(
+        "MnS.dat",
+        "97d7203885af8950fc567089bcd4e7845c716a347335f404afcc9c5488f8ab91",
+      ),
+      licence: COMPILATION_TERMS,
+      reduction: `${STANDARD_REDUCTION}; the source's rows are about 7–39 nm apart here, then 600, 700 and 800 nm. Huffman and Wild's paper is closed, so its values are read through the compilation (decision-r08-t5d ruling 5). n is 3.51 at 380 nm, past the longwave kernel's 3.2 up to about 427 nm, where its phase table holds n at the kernel's edge (decision-r08-t5d ruling 2). The copy states no temperature`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "sodium-sulphide.json",
+    option: "sodium-sulphide",
+    sha256: "1cc0d352d00273decac51c14bd1dd5cc7ad13c982af35d8a3705358b1e02aa27",
+    parse: parseKitzmannHeng,
+    resample: { holdNm: 0 },
+    header: {
+      key: "Na2S",
+      phase: "solid",
+      variant: null,
+      name: "crystalline Na2S (a computed index)",
+      temperatureK: null,
+      shape: "nonSphericalMineral",
+      provenance: "standIn",
+      paper: `H. Khachai, R. Khenata, A. Bouhemadou, A. Haddou, A. H. Reshak, B. Amrani, D. Rached and B. Soudini, "FP-APW+lo calculations of the electronic and optical properties of alkali metal sulfides under pressure", J. Phys.: Condens. Matter 21 (2009) 095404, DOI 10.1088/0953-8984/21/9/095404, for the visible; R. Montaner et al., Phys. Status Solidi A 52 (1979) 597, for the infrared; as compiled by ${KITZMANN_HENG}`,
+      source: compilationSource(
+        "Na2S.dat",
+        "1cc0d352d00273decac51c14bd1dd5cc7ad13c982af35d8a3705358b1e02aa27",
+      ),
+      licence: COMPILATION_TERMS,
+      reduction: `${STANDARD_REDUCTION}; the source's rows are about 3.5–8 nm apart here. Its visible part is Khachai et al.'s first-principles (FP-APW+lo) calculation, not a measurement, so the file is a stated stand-in. The copy states no temperature`,
+      standIn:
+        "a computed index: Khachai et al. 2009's first-principles calculation of crystalline Na2S, since no measured visible optical constants of Na2S were found",
+      fit: null,
+    },
+  },
+  {
+    file: "titanium-dioxide.json",
+    option: "titanium-dioxide",
+    sha256: "9b03947949e54cd98f58a989bd031a5fddb1a36a9d9f7fd64d5ff2bd68c2885c",
+    parse: parseRefractiveIndexInfo,
+    resample: { holdNm: 0 },
+    header: {
+      key: "TiO2",
+      phase: "solid",
+      variant: null,
+      name: "TiO2 film grown by atomic layer deposition",
+      temperatureK: null,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper:
+        'T. Siefke, S. Kroker, K. Pfeiffer, O. Puffky, K. Dietrich, D. Franta, I. Ohlídal, A. Szeghalmi, E.-B. Kley and A. Tünnermann, "Materials pushing the application limits of wire grid polarizers further into the deep ultraviolet spectral range", Adv. Opt. Mater. 4 (2016) 1780–1786, DOI 10.1002/adom.201600250',
+      source: fetchedSource(
+        "refractiveindex.info, main/TiO2/nk/Siefke.yml (numerical data provided by the first author, as the database states)",
+        `${RI_URL}/main/TiO2/nk/Siefke.yml`,
+        "9b03947949e54cd98f58a989bd031a5fddb1a36a9d9f7fd64d5ff2bd68c2885c",
+        FETCHED_T5D,
+      ),
+      licence: RI_LICENCE,
+      reduction: `${STANDARD_REDUCTION}; the source's rows are about 2–4 nm apart here, from a dispersion model fitted to ellipsometry and spectrophotometry of a 350 nm film, the visible source Kitzmann and Heng 2018 take. Rutile is recorded as the alternative: DeVore 1951's two rays (n only, from 430 nm, so not covering 380–430 nm), averaged for random orientation, give 2.753 at 550 nm against this film's 2.436, a normal-incidence reflectance of 0.218 against 0.175. The source states no temperature`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "argon-ice.json",
+    option: "argon",
+    sha256: "fda451e35283fe0151001cde90cd7ff4738eb2ae268dc3e0a72c396d02ca3fad",
+    parse: parseRefractiveIndexInfoN,
+    resample: { holdNm: 137 },
+    header: {
+      key: "Ar",
+      phase: "solid",
+      variant: null,
+      name: "solid Ar at 80 K",
+      temperatureK: 80,
+      shape: "crystal",
+      provenance: "measured",
+      paper:
+        'A. C. Sinnock and B. L. Smith, "Refractive indices of the condensed inert gases", Phys. Rev. 181 (1969) 1297–1307, DOI 10.1103/PhysRev.181.1297',
+      source: fetchedSource(
+        "refractiveindex.info, main/Ar/nk/Sinnock-solid-80K.yml",
+        `${RI_URL}/main/Ar/nk/Sinnock-solid-80K.yml`,
+        "fda451e35283fe0151001cde90cd7ff4738eb2ae268dc3e0a72c396d02ca3fad",
+        FETCHED_T5D,
+      ),
+      licence: RI_LICENCE,
+      reduction: `${STANDARD_REDUCTION}, with k = 0 stated (the source gives n only). The source's rows are 361.2–643.9 nm, so its 643.9 nm value, n 1.2693, is held over 643.9–780 nm; ${ARGON_HOLD_TEXT}. 80 K, as ruled (decision-r08-t5d ruling 3), lies near Ar's triple point (83.8 K), where Ar saturates in a bar-class atmosphere; the source's table at 83.81 K lies 0.0020 lower at 546.1 nm and its 40 K table about 0.016 higher, and Ar's temperature dependence is not modelled. Grace et al. 2017's Sellmeier fit, which also ends short (660 nm), is not taken`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "jovian-chromophore.json",
+    option: "chromophore",
+    sha256: "96b3dbd706917bd2fd4a75f79c855dd2c9f4060da07ad324938617733390a66c",
+    parse: parseBraudeChromophore,
+    resample: { holdNm: 70, endK: "extrapolate" },
+    header: {
+      key: "chromophore",
+      phase: "solid",
+      variant: null,
+      name: "Jovian chromophore, an effective index retrieved from Jupiter's spectrum",
+      temperatureK: null,
+      shape: "sphere",
+      provenance: "standIn",
+      paper:
+        'A. S. Braude, P. G. J. Irwin, G. S. Orton and L. N. Fletcher, "Colour and tropospheric cloud structure of Jupiter from MUSE/VLT: Retrieving a universal chromophore", Icarus 338 (2020) 113589, DOI 10.1016/j.icarus.2019.113589, its values read from the preprint, arXiv:1912.00918v1',
+      source: `the preprint's source, https://arxiv.org/e-print/1912.00918v1, SHA-256 6fe0e947bda8c0f6074bb938dbe205ae7249429621e116de285b5b7f2776e790, fetched ${FETCHED_T5D}, its file jupiter_muse_paper4.tex, SHA-256 96b3dbd706917bd2fd4a75f79c855dd2c9f4060da07ad324938617733390a66c, the table "Tabulated retrieved imaginary refractive index spectra", its first k column, the adopted universal chromophore (chromophore radius 0.05 µm, cloud radius 1 µm, cloud real index 1.42); read as data`,
+      licence: `Adapted from CC BY 4.0 material (${CC_BY}): A. S. Braude, P. G. J. Irwin, G. S. Orton and L. N. Fletcher, arXiv:1912.00918v1. Changed: the adopted solution's k reduced onto this grid and extrapolated below 450 nm, with n held at the paper's 1.4; this file is offered under CC BY 4.0`,
+      reduction: `${STANDARD_REDUCTION}. The table gives k every 50 nm over 450–950 nm, so below 450 nm k is extrapolated linearly in log k from its 450 and 500 nm rows (0.033 and 0.023), since the chromophore absorbs more towards the blue, and n is held. n is the paper's 1.4, which its retrieval fixes at 700 nm (its §4.1); the paper does not say how n varies elsewhere (a Kramers–Kronig shape, presumably, as in the same group's retrievals), and n is 1.4 throughout`,
+      standIn:
+        "an effective index retrieved from Jupiter's spectrum for an unidentified colouring material (Braude et al. 2020), not a laboratory measurement",
+      fit: null,
+    },
+  },
+  {
+    file: "ice-giant-haze.json",
+    option: "ice-giant-haze",
+    sha256: "7061326a906a8d284d40bd0d2bf0b0991e7f4a1e398de9adf6d4bd3947b8aad9",
+    parse: parseIrwinAerosol3,
+    resample: { holdNm: 0 },
+    header: {
+      key: "ice_giant_haze",
+      phase: "solid",
+      variant: null,
+      name: "ice-giant haze, an effective index retrieved from Uranus's and Neptune's spectra",
+      temperatureK: null,
+      shape: "sphere",
+      provenance: "standIn",
+      paper:
+        'P. G. J. Irwin, N. A. Teanby, L. N. Fletcher, D. Toledo, G. S. Orton, M. H. Wong, M. T. Roman, S. Pérez-Hoyos, A. James and J. Dobinson, "Hazy blue worlds: A holistic aerosol model for Uranus and Neptune, including dark spots", J. Geophys. Res. Planets 127 (2022) e2022JE007189, DOI 10.1029/2022JE007189, its values read from the preprint, arXiv:2201.04516v2',
+      source: `the preprint's source, https://arxiv.org/e-print/2201.04516v2, SHA-256 9aac82980dd91c5dacc34d5552629e113cdb8e3fb7c6d39c3dd8f324fa045259, fetched ${FETCHED_T5D}, its file Neptune_Uranus_Haze.tex, SHA-256 7061326a906a8d284d40bd0d2bf0b0991e7f4a1e398de9adf6d4bd3947b8aad9, the tables "Estimated n_imag spectra for Uranus aerosols" and "… for Neptune aerosols", the Aerosol-3 (extended haze) "Mean 1" columns; read as data`,
+      licence: `Adapted from CC BY 4.0 material (${CC_BY}): P. G. J. Irwin et al., J. Geophys. Res. Planets 127 (2022) e2022JE007189 (arXiv:2201.04516v2). Changed: the geometric mean of the two planets' Aerosol-3 k, reduced onto this grid, with n held at the paper's 1.4; this file is offered under CC BY 4.0`,
+      reduction: `at each of the tables' wavelengths, every 100 nm over 300–1,900 nm, k is the geometric mean of Uranus's and Neptune's Aerosol-3 "Mean 1", since one key serves every ice giant; then ${STANDARD_REDUCTION}. The two planets differ by up to a factor of 29 over 300–800 nm (${IRWIN_PLANETS_TEXT}). n is the paper's 1.4, which its retrieval fixes at 800 nm and carries elsewhere by Kramers–Kronig (its §3.4 and §3.6); that shape is not reproduced, and n is 1.4 throughout`,
+      standIn:
+        "an effective index retrieved from Uranus's and Neptune's spectra for their unidentified photochemical haze (Irwin et al. 2022), not a laboratory measurement",
+      fit: null,
+    },
+  },
+  {
+    file: "sulphuric-acid-uv-absorber.json",
+    option: "h2so4-75",
+    sha256: "ca84ce9a373bf9d0356dbbeeb59d61f771bf9d14667cecb3206f8a3cdac954fe",
+    parse: parseAria,
+    resample: { holdNm: 0, unmeasuredK: "shortestMeasured", grid: ACID_GRID_NM },
+    adjust: addAcidUvAbsorber,
+    header: {
+      key: "acid_uv_absorber",
+      phase: "liquid",
+      variant: null,
+      name: "ultraviolet-absorbing H2SO4: aqueous H2SO4, mass fraction 75 %, at 300 K, with Venus's unidentified absorber added",
+      temperatureK: 300,
+      shape: "sphere",
+      provenance: "standIn",
+      paper:
+        'K. F. Palmer and D. Williams, "Optical constants of sulfuric acid; application to the clouds of Venus?", Appl. Opt. 14 (1975) 208–219, DOI 10.1364/AO.14.000208, for n and the acid\'s own k; for the absorber\'s a-priori decay length, J. Spacek, P. B. Rimmer, J. J. Petkowski and Y. J. Lee, "A model of UV–blue absorbance in bulk liquid of Venusian cloud aerosols is consistent with efficient organic absorbers at high concentrations", Astrobiology 26 (2026) 727–739, DOI 10.1177/15311074261477502, its values read from the preprint, arXiv:2505.00880v3 (CC BY 4.0)',
+      source: fetchedSource(
+        "the Aerosol Refractive Index Archive (ARIA), University of Oxford, H2SO4_75%_300K_R_Palmer_1975.ri, the 75 wt% file's source",
+        "https://eodg.atm.ox.ac.uk/ARIA/data_files/Acids/Sulphuric/70%25_to_79%25/Sulphuric_acid_75%25_300K_(Palmer_and_Williams_1975)/original/H2SO4_75%25_300K_R_Palmer_1975.ri",
+        "ca84ce9a373bf9d0356dbbeeb59d61f771bf9d14667cecb3206f8a3cdac954fe",
+      ),
+      licence: NO_TERMS,
+      reduction: `the 75 wt% file's own reduction (${standardReductionOnto(ACID_GRID_NM)}, k held at 2.07 × 10⁻⁸ short of 701.8 nm), so its n is that file's to the bit, with k = k_H2SO4 + k_UA, rounded to six significant figures: k_UA = k₃₆₅ e^(−(λ − 365 nm) ÷ L) over 360–500 nm, times (550 − λ) ÷ 50 nm over 500–550 nm, and exactly 0 from 550 nm, so that its extinction and single-scattering albedo at 550 nm are the acid's (science-r08-unowned-absorbers; decision-r08-t5d ruling 4). k₃₆₅ = ${ACID_UV_K365} and L = ${ACID_UV_DECAY_NM} nm are the a-priori values (L ≤ 80 nm ÷ ln((1278 × 375) ÷ (54 × 455)), Spacek et al.'s decadic absorption coefficients of 1278 cm⁻¹ at 375 nm and under 54 cm⁻¹ at 455 nm taken to k = ln(10) aλ ÷ 4π, ln 10 cancelling; k₃₆₅ is the ruling's), which R08.T5.e refits to Venus's 365 nm albedo and g′ ÷ r′ colour. The grid starts at 360 nm so that the fit can read 365 nm (decision-r08-t5d ruling 1). Not modelled: the absorber's markings, its decadal and latitude changes, its 283 nm side, and any dependence on a world's chemistry`,
+      standIn:
+        "an empirical absorber: H2SO4 droplets with an unidentified ultraviolet absorber, whose k is fitted to Venus's albedo spectrum (candidates FeCl3, S2O/OSSO, Sx, organics)",
+      fit: null,
+    },
+  },
+  {
+    file: "basalt.json",
+    option: "basalt",
+    sha256: "ad8730a5ce91fb05dc12374cba25ffd16af070ec003ae49cf0cb3ab134f91d2d",
+    parse: parseAria,
+    resample: { holdNm: 0, separateNK: true },
+    header: {
+      key: "basalt",
+      phase: "solid",
+      variant: null,
+      name: "basalt, a terrestrial rock",
+      temperatureK: null,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper: POLLACK_1973,
+      source: fetchedSource(
+        "the Aerosol Refractive Index Archive (ARIA), University of Oxford, basalt_R_Pollack_1973.ri (from the original paper)",
+        "https://eodg.atm.ox.ac.uk/ARIA/data_files/Rocks_and_Conglomerates/Basalt/Basalt_(Pollack_et_al_1973)/original/basalt_R_Pollack_1973.ri",
+        "ad8730a5ce91fb05dc12374cba25ffd16af070ec003ae49cf0cb3ab134f91d2d",
+        FETCHED_T5D,
+      ),
+      licence: NO_TERMS,
+      reduction: `${STANDARD_REDUCTION}, n from the rows that give n (1.52 at 270 and 500 nm, 1.51 at 1,000 nm) and k from the rows that give k (every 20 nm over 320–600 nm, then 700 and 800 nm), since the source gives n at only a few wavelengths. The source states no temperature`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "basaltic-glass.json",
+    option: "basaltic-glass",
+    sha256: "e05d88b2250f8540e7504a7e92673d6e34bfa6d8d0ca2eb2d360023cf53376cf",
+    parse: parseAria,
+    resample: { holdNm: 20, separateNK: true, endK: "extrapolate" },
+    header: {
+      key: "lava_glass",
+      phase: "solid",
+      variant: null,
+      name: "basaltic volcanic glass",
+      temperatureK: null,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper: POLLACK_1973,
+      source: fetchedSource(
+        "the Aerosol Refractive Index Archive (ARIA), University of Oxford, basaltic_glass_R_Pollack_1973.ri (from the original paper)",
+        "https://eodg.atm.ox.ac.uk/ARIA/data_files/Rocks_and_Conglomerates/Basalt/Basaltic_glass_(Pollack_et_al_1973)/original/basaltic_glass_R_Pollack_1973.ri",
+        "e05d88b2250f8540e7504a7e92673d6e34bfa6d8d0ca2eb2d360023cf53376cf",
+        FETCHED_T5D,
+      ),
+      licence: NO_TERMS,
+      reduction: `${STANDARD_REDUCTION}, n from the rows that give n (every 20 nm over 210–500 nm, then 1,000 nm) and k from the rows that give k (every 20 nm from 400 nm). The source gives no k below 400 nm, so over 380–400 nm k is extrapolated linearly in log k from its 400 and 420 nm rows (7.9 × 10⁻⁴ and 6.4 × 10⁻⁴), since the glass absorbs more towards the ultraviolet. The source states no temperature`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "mars-regolith-simulant.json",
+    option: "mgs1",
+    sha256: "a5ed6861dba6eb68aa310936854a29b1c772687fc4b4634ef8321dec3f806cd3",
+    parse: (text) => parseMartikainenK(text, "MGS1"),
+    resample: { holdNm: 0 },
+    header: {
+      key: "basalt_fe",
+      phase: "solid",
+      variant: null,
+      name: "Fe-rich basalt, as MGS-1, a Mars regolith simulant",
+      temperatureK: null,
+      shape: "nonSphericalMineral",
+      provenance: "standIn",
+      paper:
+        'J. Martikainen, O. Muñoz, T. Jardiel, J. C. Gómez Martín, M. Peiteado, Y. Willame, A. Penttilä, K. Muinonen, G. Wurm and T. Becker, "Optical constants of Martian dust analogs at UV–visible–near-infrared wavelengths", Astrophys. J. Suppl. 268 (2023) 47, DOI 10.3847/1538-4365/acf0be',
+      source: `the article's machine-readable Table 6, https://iopscience.iop.org/0067-0049/268/2/47/suppdata/apjsacf0bet6_ascii.txt?doi=10.3847/1538-4365/acf0be, SHA-256 a5ed6861dba6eb68aa310936854a29b1c772687fc4b4634ef8321dec3f806cd3, fetched ${FETCHED_T5D}, its MGS-1 column; read as data`,
+      licence: `Adapted from CC BY 4.0 material (${CC_BY}): J. Martikainen et al., Astrophys. J. Suppl. 268 (2023) 47. Changed: MGS-1's k from Table 6 reduced onto this grid, with n the paper's fixed 1.5; this file is offered under CC BY 4.0`,
+      reduction: `${STANDARD_REDUCTION}. Table 6's k is MGS-1's, retrieved with the paper's second Gaussian-random-sphere shapes and n fixed at 1.5; its 650 nm value, 4.33 × 10⁻⁴, is the index Martikainen et al. 2025's MGS-1 database takes (R08.T5.c's fidelity test), where Table 3's first shapes give 3.15 × 10⁻⁴. The rows are every 25 nm to 400 nm, then every 50 nm; the sample is a laboratory simulant at room temperature, unstated`,
+      standIn:
+        "a Mars regolith simulant stands in for Fe-rich basalt: MGS-1's absorption, retrieved by Martikainen et al. 2023 with its real index fixed at 1.5, since no open visible index of an Fe-rich basalt was found",
+      fit: null,
+    },
+  },
+];
+
+/** One fetched input of a {@link CombinedSpec}. */
+export interface SourceInput {
+  /** The command-line option that names the source's path. */
+  readonly option: string;
+  readonly sha256: string;
+}
+
+/**
+ * A material file made from one or more fetched sources by its own reduction: a dispersion formula
+ * evaluated on the grid, or a uniaxial crystal's two axes averaged.
+ */
+export interface CombinedSpec {
+  readonly file: string;
+  readonly inputs: ReadonlyArray<SourceInput>;
+  /** The index on {@link MATERIAL_GRID_NM} from the sources' texts, in the order of `inputs`. */
+  readonly reduce: (texts: ReadonlyArray<string>) => ReducedIndex;
+  readonly header: MaterialHeader;
+}
+
+function textAt(texts: ReadonlyArray<string>, i: number): string {
+  const text = texts[i];
+  if (text === undefined) {
+    throw new Error(`no source text ${i}`);
+  }
+  return text;
+}
+
+/** A dispersion formula's n on {@link MATERIAL_GRID_NM}, to six significant figures, with k = 0. */
+export function formulaOnGrid(text: string): ReducedIndex {
+  const formula = parseRefractiveIndexInfoFormula(text);
+  return {
+    n: MATERIAL_GRID_NM.map((nm) => rounded(formulaIndex(formula, nm / 1000))),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  };
+}
+
+/**
+ * A transparent uniaxial crystal's two formulas averaged in the dielectric function for randomly
+ * oriented grains, n² = (2n_o² + n_e²) ÷ 3, on {@link MATERIAL_GRID_NM} to six significant figures,
+ * with k = 0.
+ */
+export function uniaxialFormulasOnGrid(ordinary: string, extraordinary: string): ReducedIndex {
+  const o = parseRefractiveIndexInfoFormula(ordinary);
+  const e = parseRefractiveIndexInfoFormula(extraordinary);
+  return {
+    n: MATERIAL_GRID_NM.map((nm) => {
+      const no = formulaIndex(o, nm / 1000);
+      const ne = formulaIndex(e, nm / 1000);
+      return rounded(Math.sqrt((2 * no * no + ne * ne) / 3));
+    }),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  };
+}
+
+const DRAINE_TERMS =
+  "reduced values; the source states no terms and asks only for its citation (decision-r08-licences.md)";
+
+/** The material files made from fetched sources by their own reductions, after {@link FETCHED_MATERIALS}. */
+export const COMBINED_MATERIALS: ReadonlyArray<CombinedSpec> = [
+  {
+    file: "potassium-chloride.json",
+    inputs: [
+      {
+        option: "potassium-chloride",
+        sha256: "f7b927f60e17c0bd2bf63447bdee9a0de24de9f077090b47a9cb02660e0ea166",
+      },
+    ],
+    reduce: (texts) => formulaOnGrid(textAt(texts, 0)),
+    header: {
+      key: "KCl",
+      phase: "solid",
+      variant: null,
+      name: "crystalline KCl at 297 K",
+      temperatureK: 297,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper: LI_1976,
+      source: fetchedSource(
+        "refractiveindex.info, main/KCl/nk/Li.yml, Li's Sellmeier formula from his critical analysis of several sources' measurements",
+        `${RI_URL}/main/KCl/nk/Li.yml`,
+        "f7b927f60e17c0bd2bf63447bdee9a0de24de9f077090b47a9cb02660e0ea166",
+        FETCHED_T5D,
+      ),
+      licence: RI_LICENCE,
+      reduction:
+        "Li's formula (the database's formula 1, stated for 0.18–35 µm) evaluated at each wavelength of 380–780 nm every 5 nm, to six significant figures; k = 0, stated, since the source gives n only and the crystal's visible k is 3 × 10⁻¹⁰ or less (Palik's handbook, as Kitzmann and Heng 2018 compile it), far below anything a grain shows",
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "sodium-chloride.json",
+    inputs: [
+      {
+        option: "sodium-chloride",
+        sha256: "20e0b06e16a1abb3668487635430994c0046cef05cd68ee0878804ac5dceae89",
+      },
+    ],
+    reduce: (texts) => formulaOnGrid(textAt(texts, 0)),
+    header: {
+      key: "NaCl",
+      phase: "solid",
+      variant: null,
+      name: "crystalline NaCl at 297 K",
+      temperatureK: 297,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper: LI_1976,
+      source: fetchedSource(
+        "refractiveindex.info, main/NaCl/nk/Li.yml, Li's Sellmeier formula from his critical analysis of several sources' measurements",
+        `${RI_URL}/main/NaCl/nk/Li.yml`,
+        "20e0b06e16a1abb3668487635430994c0046cef05cd68ee0878804ac5dceae89",
+        FETCHED_T5D,
+      ),
+      licence: RI_LICENCE,
+      reduction:
+        "Li's formula (the database's formula 1, stated for 0.2–30 µm) evaluated at each wavelength of 380–780 nm every 5 nm, to six significant figures; k = 0, stated, since the source gives n only and the crystal's visible k is under 4 × 10⁻¹⁰ (Eldridge and Palik in Palik's handbook, as Kitzmann and Heng 2018 compile it), far below anything a grain shows",
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "silicon-dioxide.json",
+    inputs: [
+      {
+        option: "silicon-dioxide-ordinary",
+        sha256: "c63dabfdfe9921c8c19264ff6126d68cd78abb1552e40f536c2ffaa083773e7d",
+      },
+      {
+        option: "silicon-dioxide-extraordinary",
+        sha256: "a80ec99225ffbcfa2264f7bc34c491dfa8694dbc1f23158882287d2f91720323",
+      },
+    ],
+    reduce: (texts) => uniaxialFormulasOnGrid(textAt(texts, 0), textAt(texts, 1)),
+    header: {
+      key: "SiO2",
+      phase: "solid",
+      variant: null,
+      name: "trigonal crystalline SiO2",
+      temperatureK: 295,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper:
+        'G. Ghosh, "Dispersion-equation coefficients for the refractive index and birefringence of calcite and quartz crystals", Opt. Commun. 163 (1999) 95–102, DOI 10.1016/S0030-4018(99)00091-7',
+      source: `refractiveindex.info, main/SiO2/nk/Ghosh-o.yml and Ghosh-e.yml, Ghosh's dispersion formulas for the ordinary and extraordinary rays, ${RI_URL}/main/SiO2/nk/Ghosh-o.yml, SHA-256 c63dabfdfe9921c8c19264ff6126d68cd78abb1552e40f536c2ffaa083773e7d, and ${RI_URL}/main/SiO2/nk/Ghosh-e.yml, SHA-256 a80ec99225ffbcfa2264f7bc34c491dfa8694dbc1f23158882287d2f91720323, fetched ${FETCHED_T5D}`,
+      licence: RI_LICENCE,
+      reduction:
+        "Ghosh's two formulas (the database's formula 2, stated for 0.198–2.0531 µm) evaluated at each wavelength of 380–780 nm every 5 nm and averaged in the dielectric function for randomly oriented grains, n² = (2n_o² + n_e²) ÷ 3, to six significant figures; k = 0, stated, since the sources give n only. The trigonal crystal is taken over fused silica (I. H. Malitson, J. Opt. Soc. Am. 55 (1965) 1205: n 1.460 at 550 nm, against this file's 1.549), which is recorded as the alternative: which form a condensate takes is not modelled; 295 K stands for the source's room temperature",
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "aluminium-oxide.json",
+    inputs: [
+      {
+        option: "aluminium-oxide-ordinary",
+        sha256: "459f0cb41f105b9a01dc96a7d2eab0a71c5d43f7355fba3c4d3d6969fc76a41b",
+      },
+      {
+        option: "aluminium-oxide-extraordinary",
+        sha256: "d92e8619f7b4fde45947c8a6ca1529e2da4b6b3c36f9b9dbeb366408c2fa7f22",
+      },
+    ],
+    reduce: (texts) => uniaxialFormulasOnGrid(textAt(texts, 0), textAt(texts, 1)),
+    header: {
+      key: "Al2O3",
+      phase: "solid",
+      variant: null,
+      name: "crystalline Al2O3 at 293 K",
+      temperatureK: 293,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper:
+        'I. H. Malitson and M. J. Dodge, "Refractive index and birefringence of synthetic sapphire", J. Opt. Soc. Am. 62 (1972) 1405 (an abstract), with the dispersion formula as M. J. Dodge gives it in "Refractive index", Handbook of Laser Science and Technology, vol. IV, Optical Materials: Part 2, CRC Press (1986), p. 30',
+      source: `refractiveindex.info, main/Al2O3/nk/Malitson-o.yml and Malitson-e.yml, the formulas for the ordinary and extraordinary rays of synthetic sapphire at 20 °C, ${RI_URL}/main/Al2O3/nk/Malitson-o.yml, SHA-256 459f0cb41f105b9a01dc96a7d2eab0a71c5d43f7355fba3c4d3d6969fc76a41b, and ${RI_URL}/main/Al2O3/nk/Malitson-e.yml, SHA-256 d92e8619f7b4fde45947c8a6ca1529e2da4b6b3c36f9b9dbeb366408c2fa7f22, fetched ${FETCHED_T5D}`,
+      licence: RI_LICENCE,
+      reduction:
+        "the two formulas (the database's formula 1, stated for 0.20–5.0 µm) evaluated at each wavelength of 380–780 nm every 5 nm and averaged in the dielectric function for randomly oriented grains, n² = (2n_o² + n_e²) ÷ 3, to six significant figures; k = 0, stated, since the sources give n only. The crystal is taken, as the plan's transparent high-index class does; amorphous Al2O3 (Begemann et al. 1997, Astrophys. J. 476, 199; Koike et al. 1995, Icarus 114, 203; n 1.58 and k 0.04 at 420 nm as Kitzmann and Heng 2018 compile them) is recorded as the alternative",
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "graphite.json",
+    inputs: [
+      {
+        option: "graphite-perpendicular",
+        sha256: "663d2939905710d61706d75f52e28ca819fcc5ecde1be2d2971b23c127a351d9",
+      },
+      {
+        option: "graphite-parallel",
+        sha256: "87c609d3ddda2bc0bc5f2343f9b56bbd517fc5833e0754e6a628c8a5c6235a0b",
+      },
+    ],
+    reduce: (texts) =>
+      resample(
+        averagedUniaxial(
+          parseDraineDielectric(textAt(texts, 0)),
+          parseDraineDielectric(textAt(texts, 1)),
+        ),
+        { holdNm: 0 },
+      ),
+    header: {
+      key: "graphite",
+      phase: "solid",
+      variant: null,
+      name: "randomly oriented graphite at 20 K",
+      temperatureK: 20,
+      shape: "nonSphericalMineral",
+      provenance: "measured",
+      paper:
+        'B. T. Draine, "Scattering by interstellar dust grains. II. X-rays", Astrophys. J. 598 (2003) 1026–1037, DOI 10.1086/379123, its dielectric functions of graphite for E ∥ c and E ⊥ c',
+      source: `B. T. Draine's site, https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpeD03_0.01 (E ⊥ c, 22,804 bytes, SHA-256 663d2939905710d61706d75f52e28ca819fcc5ecde1be2d2971b23c127a351d9) and https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpaD03_0.01 (E ∥ c, 22,981 bytes, SHA-256 87c609d3ddda2bc0bc5f2343f9b56bbd517fc5833e0754e6a628c8a5c6235a0b), fetched ${FETCHED_T5D}: the tables for grains of radius 0.01 µm at 20 K`,
+      licence: DRAINE_TERMS,
+      reduction: `the two dielectric functions averaged for randomly oriented grains at each of the sources' wavelengths, ε = (2ε_⊥ + ε_∥) ÷ 3, as Kitzmann and Heng 2018's C.dat takes them (n 2.567, k 1.189 at 550 nm), and n + ik = √ε; then ${STANDARD_REDUCTION}. The sources' rows here are 365, 381, 400, 434, 440, 486, 550, 656, 700 and 800 nm. The tables' grain radius and temperature are the files'`,
       standIn: null,
       fit: null,
     },
@@ -1126,6 +2259,387 @@ export function nh4shBandSpan(): { readonly above: number; readonly below: numbe
   return { above, below };
 }
 
+/**
+ * A gas's measured refractivity at the state its source states: the tool's own copy of a row of
+ * `view/atmosphere/rayleigh.ts`'s `GAS_DISPERSION`, which `view/atmosphere/materials/materials.test.ts`
+ * holds to the files made from it.
+ */
+export interface GasDispersionCopy {
+  /** n − 1 at the reference state, at a vacuum wavelength, nm. */
+  readonly nMinusOne: (wavelengthNm: number) => number;
+  /** The temperature the formula is stated at, K. */
+  readonly referenceK: number;
+  /** The pressure the formula is stated at, Pa. */
+  readonly referencePa: number;
+  /** The compressibility factor Z of the gas at the reference state. */
+  readonly compressibility: number;
+  readonly source: string;
+}
+
+/** σ² in µm⁻² at a vacuum wavelength, nm. */
+function wavenumberSquaredPerUm2(wavelengthNm: number): number {
+  const perUm = 1_000 / wavelengthNm;
+  return perUm * perUm;
+}
+
+/** σ² in cm⁻² at a vacuum wavelength, nm. */
+function wavenumberSquaredPerCm2(wavelengthNm: number): number {
+  const perCm = 1e7 / wavelengthNm;
+  return perCm * perCm;
+}
+
+/** Where `rayleigh.ts`'s N₂ row passes from Bates 1984's ultraviolet branch to Peck and Khanna's, nm. */
+const N2_BRANCH_NM = 468;
+
+/**
+ * N₂'s refractivity, as `rayleigh.ts` holds it: Peck and Khanna, J. Opt. Soc. Am. 56 (1966) 1059,
+ * 10⁸(n − 1) = 6,497.378 + 3,073,864.9 ÷ (144 − σ²) from 468 nm; below, Bates, Planet. Space Sci. 32
+ * (1984) 785, 10⁸(n − 1) = 5,677.465 + 318.818 74 × 10¹² ÷ (14.4 × 10⁹ − ν²), as Sneep and Ubachs
+ * 2005 (eq. 11) print it; both at 15 °C and 101,325 Pa, Z = 0.999 715.
+ */
+export const N2_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) =>
+    wavelengthNm >= N2_BRANCH_NM
+      ? (6_497.378 + 3_073_864.9 / (144 - wavenumberSquaredPerUm2(wavelengthNm))) * 1e-8
+      : (5_677.465 + 318.818_74e12 / (14.4e9 - wavenumberSquaredPerCm2(wavelengthNm))) * 1e-8,
+  referenceK: 288.15,
+  referencePa: 101_325,
+  compressibility: 0.999_715,
+  source:
+    "Peck and Khanna, J. Opt. Soc. Am. 56 (1966) 1059, from 468 nm; below, Bates, Planet. Space Sci. 32 (1984) 785",
+};
+
+/**
+ * O₂'s refractivity, as `rayleigh.ts` holds it: Křen, Appl. Opt. 50 (2011) 6484, refitting Zhang,
+ * Lu and Wang, Appl. Opt. 47 (2008) 3143, n − 1 = 1.181 494 × 10⁻⁴ + 9.708 931 × 10⁻³ ÷ (75.4 −
+ * σ²), at 20 °C and 101,325 Pa, Z = 0.999 282.
+ */
+export const O2_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) =>
+    1.181_494e-4 + 9.708_931e-3 / (75.4 - wavenumberSquaredPerUm2(wavelengthNm)),
+  referenceK: 293.15,
+  referencePa: 101_325,
+  compressibility: 0.999_282,
+  source:
+    "Křen, Appl. Opt. 50 (2011) 6484, refitting Zhang, Lu and Wang, Appl. Opt. 47 (2008) 3143",
+};
+
+/**
+ * CO's refractivity, as `rayleigh.ts` holds it: C. and M. Cuthbertson, Proc. R. Soc. Lond. A 97
+ * (1920) 152, n − 1 = 0.040 508 ÷ (123.77 − σ²), at 0 °C and 101,325 Pa, Z = 0.999 54.
+ */
+export const CO_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) => 0.040_508 / (123.77 - wavenumberSquaredPerUm2(wavelengthNm)),
+  referenceK: 273.15,
+  referencePa: 101_325,
+  compressibility: 0.999_54,
+  source: "C. and M. Cuthbertson, Proc. R. Soc. Lond. A 97 (1920) 152",
+};
+
+/** H₂S's refractivity, {@link H2S_REFRACTIVITY}, at its 0 °C and 101,325 Pa. */
+export const H2S_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) =>
+    H2S_REFRACTIVITY.aPerUm2 / (H2S_REFRACTIVITY.bPerUm2 - wavenumberSquaredPerUm2(wavelengthNm)),
+  referenceK: 273.15,
+  referencePa: 101_325,
+  compressibility: H2S_REFRACTIVITY.compressibility,
+  source: H2S_REFRACTIVITY.source,
+};
+
+/**
+ * Ar's refractivity, as `rayleigh.ts` holds it, for the method's check: Peck and Fisher, J. Opt. Soc.
+ * Am. 54 (1964) 1362, 10⁷(n − 1) = 643.2135 + 286,060.21 ÷ (144 − σ²), at 15 °C and 101,325 Pa,
+ * Z = 0.999 26.
+ */
+export const AR_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) =>
+    (643.213_5 + 286_060.21 / (144 - wavenumberSquaredPerUm2(wavelengthNm))) * 1e-7,
+  referenceK: 288.15,
+  referencePa: 101_325,
+  compressibility: 0.999_26,
+  source: "Peck and Fisher, J. Opt. Soc. Am. 54 (1964) 1362",
+};
+
+/**
+ * A molecular ice's real index by Lorentz–Lorenz from its gas's refractivity (decision-r08-t5d
+ * ruling 5, the method of NH₄SH's estimate with no increment, since the solid is molecular): the
+ * molar refraction R = (n² − 1) ÷ (n² + 2) × Z × N_A k_B T ÷ p at the gas's reference state, then x =
+ * R ÷ V_m and n = √((1 + 2x) ÷ (1 − x)).
+ *
+ * @throws RangeError if x is not in (0, 1).
+ */
+export function molecularIceIndex(
+  gas: GasDispersionCopy,
+  wavelengthNm: number,
+  molarVolumeCm3PerMol: number,
+): number {
+  const gasMolarVolumeCm3PerMol =
+    ((gas.compressibility * AVOGADRO_PER_MOL * BOLTZMANN_J_PER_K * gas.referenceK) /
+      gas.referencePa) *
+    1e6;
+  const x =
+    (lorentzLorenzFactor(1 + gas.nMinusOne(wavelengthNm)) * gasMolarVolumeCm3PerMol) /
+    molarVolumeCm3PerMol;
+  if (!(x > 0 && x < 1)) {
+    throw new RangeError(`Lorentz–Lorenz: x = ${x} is not in (0, 1)`);
+  }
+  return Math.sqrt((1 + 2 * x) / (1 - x));
+}
+
+/** A hexagonal cell's volume, Å³, from a and c, Å. */
+function hexagonalCellA3(aA: number, cA: number): number {
+  return (Math.sqrt(3) / 2) * aA * aA * cA;
+}
+
+/** A molecular ice's crystal cell, the stand-in's density, as the Crystallography Open Database gives it. */
+export interface IceCell {
+  /** The phase in words, and its space group. */
+  readonly phase: string;
+  readonly cellVolumeA3: number;
+  /** Molecules per cell. */
+  readonly formulaUnits: number;
+  /** The cell's temperature, K, where its paper states one. */
+  readonly temperatureK: number | null;
+  /** The cell's paper, its COD entry, URL, SHA-256 and the date fetched. */
+  readonly source: string;
+  /** The entry's own terms, as its file states them. */
+  readonly terms: string;
+}
+
+/** The terms of a database entry its contributors placed in the public domain. */
+const COD_PUBLIC_DOMAIN = "placed in the public domain by its contributors (the entry's notice)";
+
+/**
+ * The terms of a database entry taken from the American Mineralogist Crystal Structure Database:
+ * use with attribution to the journal article, which the cell's source gives.
+ */
+const AMCSD_TERMS =
+  "from the American Mineralogist Crystal Structure Database, usable with attribution to the journal article, which is given";
+
+function codSource(paper: string, entry: string, sha256: string): string {
+  return `${paper}, as the Crystallography Open Database gives it, entry ${entry}, https://www.crystallography.net/cod/${entry}.cif, SHA-256 ${sha256}, fetched ${FETCHED_T5D}`;
+}
+
+/** β-N₂, hexagonal P6₃/mmc, a = 4.050 Å, c = 6.604 Å, two molecules, at 46 K. */
+export const N2_ICE_CELL: IceCell = {
+  phase: "hexagonal β-N2 (P6₃/mmc)",
+  cellVolumeA3: hexagonalCellA3(4.05, 6.604),
+  formulaUnits: 2,
+  temperatureK: 46,
+  source: codSource(
+    "A. F. Schuch and R. L. Mills, J. Chem. Phys. 52 (1970) 6000, DOI 10.1063/1.1672899",
+    "9012476",
+    "c1bae956ec04070696962f7e2c4ecd1a2328f27b91081b92536ba74a72f1e96c",
+  ),
+  terms: AMCSD_TERMS,
+};
+
+/** γ-O₂, cubic Pm3̄n, a = 6.78 Å, eight molecules, at 46 K (stable over 43.8–54.4 K). */
+export const O2_ICE_CELL: IceCell = {
+  phase: "cubic γ-O2 (Pm3̄n)",
+  cellVolumeA3: 6.78 ** 3,
+  formulaUnits: 8,
+  temperatureK: 46,
+  source: codSource(
+    "D. E. Cox, E. J. Samuelsen and K. H. Beckurts, Phys. Rev. B 7 (1973) 3102, DOI 10.1103/PhysRevB.7.3102",
+    "9011647",
+    "9d555a0f14de639e2302d0d40f2b46616c82818e470e8661366212c4de36631d",
+  ),
+  terms: AMCSD_TERMS,
+};
+
+/**
+ * α-CO, cubic P2₁3, a = 5.63 Å, four molecules, temperature unstated: β-CO's hexagonal cell is not
+ * in the database. Published before 1947, possibly in kX units (1 kX = 1.002 02 Å).
+ */
+export const CO_ICE_CELL: IceCell = {
+  phase: "cubic α-CO (P2₁3)",
+  cellVolumeA3: 5.63 ** 3,
+  formulaUnits: 4,
+  temperatureK: null,
+  source: codSource(
+    "L. Vegard, Z. Phys. 61 (1930) 185, DOI 10.1007/BF01339658",
+    "1010305",
+    "65728fcee2c0f05fe740ef2fa23a698d6e632da7cda433bff1a3d933fb94c196",
+  ),
+  terms: COD_PUBLIC_DOMAIN,
+};
+
+/**
+ * H₂S phase I, cubic Fm3̄m, a = 5.797 Å, four molecules, temperature unstated: the phase nearest the
+ * triple point (187.7 K). Published before 1947, possibly in kX units.
+ */
+export const H2S_ICE_CELL: IceCell = {
+  phase: "cubic H2S phase I (Fm3̄m)",
+  cellVolumeA3: 5.797 ** 3,
+  formulaUnits: 4,
+  temperatureK: null,
+  source: codSource(
+    "L. Vegard and L. Sinding-Oserød, Avh. Nor. Vidensk.-Akad. Oslo, Mat.-Naturvidensk. Kl. 1942, 1",
+    "1539470",
+    "4b8ac2109ea328521f0516ba4c1f22ccdcd93c062024d4a69c8df450aa56dbc2",
+  ),
+  terms: COD_PUBLIC_DOMAIN,
+};
+
+/**
+ * Solid Ar's cell for the method's check: cubic Fm3̄m, a = 5.4 Å, four atoms (E. R. Dobbs, B. F.
+ * Figgins, G. O. Jones, D. C. Piercey and D. P. Riley, Nature 178 (1956) 483, COD 1541541),
+ * temperature unstated.
+ */
+export const AR_ICE_CELL: IceCell = {
+  phase: "cubic solid Ar (Fm3̄m)",
+  cellVolumeA3: 5.4 ** 3,
+  formulaUnits: 4,
+  temperatureK: null,
+  source: codSource(
+    "E. R. Dobbs, B. F. Figgins, G. O. Jones, D. C. Piercey and D. P. Riley, Nature 178 (1956) 483, DOI 10.1038/178483a0",
+    "1541541",
+    "4ac3ecee395a4f006797f4d74469aa7167deaa78a1c68c1b6c4c0bc17122fd23",
+  ),
+  terms: COD_PUBLIC_DOMAIN,
+};
+
+/**
+ * Amorphous H₂S ice's measured index and density, the method's check against a measured film:
+ * Y. Y. Yarnall and R. L. Hudson, Astrophys. J. Lett. 931 (2022) L4, DOI
+ * 10.3847/2041-8213/ac6b32 (CC BY 4.0), Table 1, n 1.407 at 670 nm and 0.944 g cm⁻³ for ice
+ * prepared and studied at 19 K.
+ */
+export const H2S_FILM = { wavelengthNm: 670, index: 1.407, densityGPerCm3: 0.944 } as const;
+
+/** H₂S's molar mass, g mol⁻¹, from CIAAW's conventional atomic weights (H 1.008, S 32.06). */
+export const H2S_MOLAR_MASS_G_PER_MOL = 2 * 1.008 + 32.06;
+
+/** Sinnock and Smith 1969's measured n of solid Ar at 546.1 nm and 80 K, the method's check (their table, as refractiveindex.info gives it). */
+export const AR_ICE_MEASURED_546 = 1.2708;
+
+/** A molecular ice's estimated index at a wavelength, nm, at its cell. */
+export function iceIndex(gas: GasDispersionCopy, cell: IceCell, wavelengthNm: number): number {
+  return molecularIceIndex(
+    gas,
+    wavelengthNm,
+    cellMolarVolumeCm3PerMol(cell.cellVolumeA3, cell.formulaUnits),
+  );
+}
+
+/** The method's checks on measured solids, as each estimate's `source` states them. */
+function iceMethodChecks(): string {
+  const argon = iceIndex(AR_DISPERSION, AR_ICE_CELL, 546.1);
+  const ammonia = lorentzLorenzIndex([NH3_REFRACTIVITY], 550, NH3_ICE_MOLAR_VOLUME_CM3_PER_MOL, 0);
+  return `The method's checks on measured solids: Ar from its gas dispersion (${AR_DISPERSION.source}) at the cell of ${AR_ICE_CELL.source} (a = 5.4 Å, four atoms) gives ${argon.toFixed(4)} against Sinnock and Smith 1969's measured ${AR_ICE_MEASURED_546} at 546.1 nm and 80 K (Phys. Rev. 181, 1297); NH3 ice ${ammonia.toFixed(3)} against Martonchik et al. 1984's 1.436 at 550 nm (Appl. Opt. 23, 541); and H2S ice at the density of an amorphous film at 19 K, ${H2S_FILM.densityGPerCm3} g cm⁻³, ${h2sFilmEstimate().toFixed(3)} against the ${H2S_FILM.index} Yarnall and Hudson 2022 measure there at ${H2S_FILM.wavelengthNm} nm (Astrophys. J. Lett. 931, L4; CC BY 4.0), each above the measurement`;
+}
+
+/** H₂S ice's estimate at {@link H2S_FILM}'s wavelength and density, the method's third check. */
+export function h2sFilmEstimate(): number {
+  return molecularIceIndex(
+    H2S_DISPERSION,
+    H2S_FILM.wavelengthNm,
+    H2S_MOLAR_MASS_G_PER_MOL / H2S_FILM.densityGPerCm3,
+  );
+}
+
+/** What one molecular ice's estimate states. */
+interface IceEstimate {
+  readonly key: string;
+  readonly gas: GasDispersionCopy;
+  readonly cell: IceCell;
+  /** The gas row's measured range, nm, beyond which it is extrapolated. */
+  readonly measuredNm: readonly [number, number];
+  /** Why no measured index is taken. */
+  readonly noMeasurement: string;
+  /** What else the file states it leaves out (O₂'s weak bands). */
+  readonly notDrawn: string | null;
+  /** Why it stands in, as its `standIn` says it, in player text. */
+  readonly standInReason: string;
+}
+
+/** An estimated ice's material file. */
+function iceEstimateFile(estimate: IceEstimate): MaterialFile {
+  const { key, gas, cell } = estimate;
+  const at = (nm: number): number => iceIndex(gas, cell, nm);
+  const molarVolume = cellMolarVolumeCm3PerMol(cell.cellVolumeA3, cell.formulaUnits);
+  const temperature = cell.temperatureK === null ? "" : ` at ${cell.temperatureK} K`;
+  return {
+    key,
+    phase: "solid",
+    variant: null,
+    name: `${key} ice${temperature} (an estimated index)`,
+    temperatureK: cell.temperatureK,
+    shape: "crystal",
+    provenance: "standIn",
+    paper: `the estimate's inputs: ${gas.source}, for ${key}'s gas dispersion; ${cell.source}, for the cell`,
+    source: `a Lorentz–Lorenz estimate, not a measurement (decision-r08-t5d rulings 3 and 5): the molar refraction of ${key} from its gas dispersion as stated at ${gas.referenceK} K and ${gas.referencePa} Pa (view/atmosphere/rayleigh.ts's row, Z = ${gas.compressibility}), with no increment, since the solid is molecular, over the molar volume of ${cell.phase}${temperature} (${molarVolume.toFixed(2)} cm³ mol⁻¹ from ${cell.cellVolumeA3.toFixed(3)} Å³ and ${cell.formulaUnits} molecules). The gas dispersion is measured over ${estimate.measuredNm[0]}–${estimate.measuredNm[1]} nm and extrapolated beyond. ${estimate.noMeasurement} ${iceMethodChecks()}. k = 0${estimate.notDrawn === null ? "" : `; ${estimate.notDrawn}`}.`,
+    licence: `estimated values from cited constants and a crystal cell from the Crystallography Open Database (its entry ${cell.terms}); no data set is copied (decision-r08-t5d ruling 5)`,
+    reduction:
+      "n = √((1 + 2x) ÷ (1 − x)), with x the gas's molar refraction over the solid's molar volume, evaluated on 380–780 nm every 5 nm to six significant figures; k = 0",
+    standIn: `a non-absorbing crystal whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the crystal's density, since ${estimate.standInReason}: ${at(380).toFixed(3)} at 380 nm, ${at(550).toFixed(3)} at 550 nm and ${at(780).toFixed(3)} at 780 nm`,
+    fit: null,
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: MATERIAL_GRID_NM.map((nm) => rounded(at(nm))),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  };
+}
+
+/** The molecular ices R08.T5.d estimates (decision-r08-t5d rulings 3 and 5). */
+export const ICE_ESTIMATES: ReadonlyArray<IceEstimate> = [
+  {
+    key: "H2S",
+    gas: H2S_DISPERSION,
+    cell: H2S_ICE_CELL,
+    measuredNm: [486.1, 656.3],
+    noMeasurement:
+      "The one open measurement found, Yarnall and Hudson 2022's n at 670 nm, is of amorphous ice deposited at 19 K, a film less dense than the crystal, not the crystal's visible dispersion; it is the method's third check below.",
+    notDrawn: null,
+    standInReason:
+      "only one wavelength of an amorphous film's index is measured openly, not the crystal's visible dispersion",
+  },
+  {
+    key: "N2",
+    gas: N2_DISPERSION,
+    cell: N2_ICE_CELL,
+    measuredNm: [254, 2_058.6],
+    noMeasurement:
+      "The measured visible n of N2 ice (Satorre et al. 2008, Planet. Space Sci. 56, 1748; Luna et al. 2012, Icarus 221, 186; at 632.8 nm, of films deposited cold) could not be read: closed.",
+    notDrawn: null,
+    standInReason: "no open visible optical constants of N2 ice were found",
+  },
+  {
+    key: "CO",
+    gas: CO_DISPERSION,
+    cell: CO_ICE_CELL,
+    measuredNm: [480, 670.8],
+    noMeasurement: "No open visible optical constants of CO ice were found.",
+    notDrawn: null,
+    standInReason: "no open visible optical constants of CO ice were found",
+  },
+  {
+    key: "O2",
+    gas: O2_DISPERSION,
+    cell: O2_ICE_CELL,
+    measuredNm: [400, 1_800],
+    noMeasurement:
+      "No open visible optical constants of O2 ice were found (refractiveindex.info's O2 entries are of the gas).",
+    notDrawn: "solid O2's weak visible absorption bands, which make it pale blue, are not drawn",
+    standInReason: "no open visible optical constants of O2 ice were found",
+  },
+];
+
+/**
+ * Crystalline S₈'s principal indices at the sodium D lines (C. Palache, H. Berman and C. Frondel,
+ * Dana's System of Mineralogy, 7th edition, vol. I (1944) 140–144, as the Handbook of Mineralogy's
+ * sulphur sheet gives them): n_α 1.9579, n_β 2.0377, n_γ 2.2452.
+ */
+export const S8_PRINCIPAL_INDICES: readonly [number, number, number] = [1.9579, 2.0377, 2.2452];
+
+/**
+ * S₈'s constant stand-in index (decision-r08-t5d ruling 5): the principal indices averaged in the
+ * dielectric function for randomly oriented grains, √((n_α² + n_β² + n_γ²) ÷ 3).
+ */
+export const S8_STAND_IN_INDEX = Math.sqrt(
+  S8_PRINCIPAL_INDICES.reduce((sum, n) => sum + n * n, 0) / 3,
+);
+
 /** The files made from no fetched table. */
 export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
   {
@@ -1171,6 +2685,28 @@ export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
     n: MATERIAL_GRID_NM.map((nm) => rounded(nh4shIndex(nm))),
     k: MATERIAL_GRID_NM.map(() => 0),
   },
+  // R08.T5.d's stand-ins (decision-r08-t5d rulings 3 and 5).
+  {
+    key: "S8",
+    phase: "solid",
+    variant: null,
+    name: "orthorhombic S8 (a constant index)",
+    temperatureK: null,
+    shape: "nonSphericalMineral",
+    provenance: "standIn",
+    paper:
+      "C. Palache, H. Berman and C. Frondel, Dana's System of Mineralogy, 7th edition, vol. I (1944) 140–144, for the principal indices, as J. W. Anthony, R. A. Bideaux, K. W. Bladh and M. C. Nichols, Handbook of Mineralogy, vol. I (Mineral Data Publishing, 1990) 506, gives them",
+    source: `the Handbook of Mineralogy's sulphur sheet, https://www.handbookofmineralogy.org/pdfs/sulphur.pdf, SHA-256 a443e6a2a44e77f4bd5c9c6a70bbbda1a019c0c9294bc2c9538c045886fe39a3, fetched ${FETCHED_T5D}: the principal indices n_α = ${S8_PRINCIPAL_INDICES[0]}, n_β = ${S8_PRINCIPAL_INDICES[1]} and n_γ = ${S8_PRINCIPAL_INDICES[2]} at the sodium D lines, for the room-temperature crystal. No open visible dispersion of S8 was found: refractiveindex.info, Kitzmann and Heng 2018's compilation and HITRAN's aerosol list hold none, and Sasson et al. 1985 (Icarus 64, 368, DOI 10.1016/0019-1035(85)90061-2) is closed`,
+    licence:
+      "three published principal indices, cited as facts; no data set is copied (decision-r08-t5d ruling 5)",
+    reduction: `a constant index: the principal indices averaged in the dielectric function for randomly oriented grains, n = √((n_α² + n_β² + n_γ²) ÷ 3) = ${S8_STAND_IN_INDEX.toFixed(4)}, at every wavelength of 380–780 nm, with k = 0. Sulphur's dispersion (its indices rise towards the blue) and its blue absorption edge are not drawn, so an S8 haze draws too white in the blue`,
+    standIn: `a constant index: crystalline S8's principal indices at 589 nm averaged for randomly oriented grains, ${S8_STAND_IN_INDEX.toFixed(3)} with no dispersion and k = 0, since no open visible optical constants of S8 were found; its blue absorption edge is not drawn`,
+    fit: null,
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: MATERIAL_GRID_NM.map(() => rounded(S8_STAND_IN_INDEX)),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  },
+  ...ICE_ESTIMATES.map(iceEstimateFile),
 ];
 
 /**
@@ -1179,11 +2715,13 @@ export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
  * @throws Error as its parser and {@link resample} do.
  */
 export function reduceSource(
-  spec: Pick<FetchedSpec, "parse" | "resample" | "header">,
+  spec: Pick<FetchedSpec, "parse" | "resample" | "header" | "adjust">,
   text: string,
 ): MaterialFile {
-  const { n, k } = resample(spec.parse(text), spec.resample);
-  return { ...spec.header, wavelengthsNm: MATERIAL_GRID_NM, n, k };
+  const grid = spec.resample.grid ?? MATERIAL_GRID_NM;
+  const reduced = resample(spec.parse(text), spec.resample);
+  const { n, k } = spec.adjust === undefined ? reduced : spec.adjust(reduced, grid);
+  return { ...spec.header, wavelengthsNm: grid, n, k };
 }
 
 function readChecked(path: string, sha256: string): string {
@@ -1198,17 +2736,32 @@ function readChecked(path: string, sha256: string): string {
 const DERIVED_FILES: Readonly<Record<string, string>> = {
   CO2: "carbon-dioxide-ice.json",
   NH4SH: "ammonium-hydrosulphide.json",
+  S8: "sulphur.json",
+  H2S: "hydrogen-sulphide-ice.json",
+  N2: "nitrogen-ice.json",
+  CO: "carbon-monoxide-ice.json",
+  O2: "oxygen-ice.json",
 };
+
+/** The command-line options of every fetched source, each once, in the lists' order. */
+export function sourceOptions(): ReadonlyArray<SourceInput> {
+  const all = [
+    ...FETCHED_MATERIALS.map((spec) => ({ option: spec.option, sha256: spec.sha256 })),
+    ...COMBINED_MATERIALS.flatMap((spec) => spec.inputs),
+  ];
+  return all.filter((input, i) => all.findIndex((o) => o.option === input.option) === i);
+}
 
 /**
  * The command line: `--out <dir>` and one `--<option> <path>` per fetched source (the options of
- * {@link FETCHED_MATERIALS}). Writes every material file into the directory. Returns the exit code.
+ * {@link sourceOptions}). Writes every material file into the directory. Returns the exit code.
  */
 export function main(args: readonly string[]): number {
   try {
+    const inputs = sourceOptions();
     const options: Record<string, { readonly type: "string" }> = { out: { type: "string" } };
-    for (const spec of FETCHED_MATERIALS) {
-      options[spec.option] = { type: "string" };
+    for (const input of inputs) {
+      options[input.option] = { type: "string" };
     }
     const values: Readonly<Record<string, unknown>> = parseArgs({
       args: [...args],
@@ -1218,16 +2771,24 @@ export function main(args: readonly string[]): number {
     const out = values["out"];
     if (typeof out !== "string") {
       throw new Error(
-        `usage: materials --out <dir> ${FETCHED_MATERIALS.map((s) => `--${s.option} <path>`).join(" ")}`,
+        `usage: materials --out <dir> ${inputs.map((s) => `--${s.option} <path>`).join(" ")}`,
       );
     }
+    const textOf = (input: SourceInput): string => {
+      const path = values[input.option];
+      if (typeof path !== "string") {
+        throw new Error(`missing --${input.option}`);
+      }
+      return readChecked(path, input.sha256);
+    };
     mkdirSync(out, { recursive: true });
     for (const spec of FETCHED_MATERIALS) {
-      const path = values[spec.option];
-      if (typeof path !== "string") {
-        throw new Error(`missing --${spec.option}`);
-      }
-      const file = reduceSource(spec, readChecked(path, spec.sha256));
+      const file = reduceSource(spec, textOf(spec));
+      writeFileSync(join(out, spec.file), `${JSON.stringify(file, null, 2)}\n`);
+    }
+    for (const spec of COMBINED_MATERIALS) {
+      const { n, k } = spec.reduce(spec.inputs.map(textOf));
+      const file: MaterialFile = { ...spec.header, wavelengthsNm: MATERIAL_GRID_NM, n, k };
       writeFileSync(join(out, spec.file), `${JSON.stringify(file, null, 2)}\n`);
     }
     for (const file of DERIVED_MATERIALS) {

@@ -18,7 +18,7 @@ import {
 import { gaussLegendre } from "../lighting/quadrature";
 import { hydrostaticColumn } from "./column";
 import { CHANNEL_WAVELENGTHS_NM, columnLengthM, densityAt, phaseAt } from "./medium";
-import { ICE_ANALOGUE_ASYMMETRY_BIAS, opticsOfParticles } from "./nonSpherical";
+import { ICE_ANALOGUE_ASYMMETRY_BIAS, opticsOfParticles, PHASE_FILES } from "./nonSpherical";
 import { type ModeOptics, PHASE_TABLE_U } from "./sizeDistribution";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "./thick/regime";
 
@@ -257,16 +257,41 @@ function readerIntegral(
   return 4 * Math.PI * Math.PI * sum;
 }
 
+/**
+ * The modes each committed phase file's tables are read at, r_eff in µm (v_eff 0.1): one near the
+ * file's smallest sizes and one near its largest, where the files' angles miss the forward peak,
+ * each within the table's reach at 440 nm and, for a floor's table, where the floor rule keeps the
+ * table in every channel. T5.c's files keep their pairs; the transparent high-index minerals on
+ * the longwave floor, whose larger modes the floor rule sends to the fallback (from about 0.15 µm
+ * for TiO2, ZnS and MnS, 0.2 µm for S8, 0.3 µm for Al2O3 and CaTiO3), take smaller pairs; every
+ * other file takes its kernel's pair.
+ */
+const PHASE_FILE_RADII_UM: Readonly<Record<string, readonly [number, number]>> = {
+  "mars-dust.json": [0.8974, 30],
+  "enstatite-glass.json": [1, 20],
+  "forsterite-amorphous.json": [1, 20],
+  "iron.json": [0.5, 3],
+  "water-ice.json": [1, 60],
+  "aluminium-oxide.json": [0.1, 0.2],
+  "titanium-dioxide.json": [0.05, 0.1],
+  "calcium-titanate.json": [0.1, 0.2],
+  "zinc-sulphide.json": [0.05, 0.1],
+  "manganese-sulphide.json": [0.05, 0.1],
+  "sulphur.json": [0.1, 0.15],
+};
+
+/** The pair a file takes by its first node's kernel, where {@link PHASE_FILE_RADII_UM} names none. */
+const KERNEL_RADII_UM = { shortwave: [1, 4], longwave: [0.5, 1.5] } as const;
+
 describe("every committed phase file's tables, as the tracer reads them", () => {
-  // A mode near each file's smallest sizes and one near its largest, where the files' angles miss
-  // the forward peak; each within the table's reach at 440 nm.
-  const files = [
-    ["mars-dust.json", "mars_dust", 0.8974, 30],
-    ["enstatite-glass.json", "MgSiO3", 1, 20],
-    ["forsterite-amorphous.json", "Mg2SiO4", 1, 20],
-    ["iron.json", "Fe", 0.5, 3],
-    ["water-ice.json", "H2O", 1, 60],
-  ] as const;
+  const files = PHASE_FILES.map((table) => {
+    const [small, large] =
+      PHASE_FILE_RADII_UM[table.material] ?? KERNEL_RADII_UM[table.nodes[0]?.kernel ?? "shortwave"];
+    return [table.material, table.key, small, large] as const;
+  });
+  it("covers R08.T5.d's phase files with T5.c's", () => {
+    expect(files.length).toBeGreaterThan(5);
+  });
   for (const [file, material, small, large] of files) {
     for (const radiusUm of [small, large]) {
       const particles = {

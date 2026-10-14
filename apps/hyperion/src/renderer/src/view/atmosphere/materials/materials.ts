@@ -6,9 +6,12 @@
  * @remarks
  * The files beside this module are written by `apps/hyperion/src/tools/materials.ts` from sources
  * fetched by URL and SHA-256 and never committed (decision-r08-licences.md): every file gives n and
- * k at 380–780 nm every 5 nm, the wavelengths of every bake bin and render channel (Design note 5).
- * They are also galaxy plan 14's inputs (P14.T49.e computes the sim's mass extinction from them),
- * so a changed file moves generated output.
+ * k every 5 nm on its own grid, which ends at 780 nm and starts at or below 380 nm, so that it
+ * covers {@link MATERIAL_WAVELENGTHS_NM}, the wavelengths of every bake bin and render channel
+ * (Design note 5). Two start lower, at 360 nm, for Venus's ultraviolet fit (R08.T5.d,
+ * decision-r08-t5d ruling 1): `acid_uv_absorber` and the 75 wt% sulphuric acid. The files are also
+ * galaxy plan 14's inputs (P14.T49.e computes the sim's mass extinction from them), so a changed
+ * file moves generated output, and a reader finds a wavelength in a file by the file's own grid.
  *
  * A key is the wire's string and is never narrowed: an unknown key (a newer server's) takes the
  * generic stand-in, a non-absorbing sphere of real index 1.5, a stated convention. A material that
@@ -23,21 +26,45 @@ import { substanceName } from "../../../lib/substances";
 import type { AtmosphereLabel } from "../labels";
 import type { ComplexIndex } from "../mie";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "../thick/regime";
+import aluminiumOxide from "./aluminium-oxide.json" with { type: "json" };
 import ammoniaIce from "./ammonia-ice.json" with { type: "json" };
 import ammoniumHydrosulphide from "./ammonium-hydrosulphide.json" with { type: "json" };
+import argonIce from "./argon-ice.json" with { type: "json" };
+import basaltFile from "./basalt.json" with { type: "json" };
+import basalticGlass from "./basaltic-glass.json" with { type: "json" };
+import calciumTitanate from "./calcium-titanate.json" with { type: "json" };
 import carbonDioxideIce from "./carbon-dioxide-ice.json" with { type: "json" };
+import carbonMonoxideIce from "./carbon-monoxide-ice.json" with { type: "json" };
+import chromium from "./chromium.json" with { type: "json" };
 import enstatiteGlass from "./enstatite-glass.json" with { type: "json" };
 import forsteriteAmorphous from "./forsterite-amorphous.json" with { type: "json" };
+import graphiteFile from "./graphite.json" with { type: "json" };
+import hydrogenSulphideIce from "./hydrogen-sulphide-ice.json" with { type: "json" };
+import iceGiantHaze from "./ice-giant-haze.json" with { type: "json" };
+import ironSulphide from "./iron-sulphide.json" with { type: "json" };
 import iron from "./iron.json" with { type: "json" };
+import jovianChromophore from "./jovian-chromophore.json" with { type: "json" };
+import manganeseSulphide from "./manganese-sulphide.json" with { type: "json" };
 import marsDust from "./mars-dust.json" with { type: "json" };
+import marsRegolithSimulant from "./mars-regolith-simulant.json" with { type: "json" };
 import methaneIce from "./methane-ice.json" with { type: "json" };
 import methaneLiquid from "./methane-liquid.json" with { type: "json" };
+import nitrogenIce from "./nitrogen-ice.json" with { type: "json" };
+import oxygenIce from "./oxygen-ice.json" with { type: "json" };
+import potassiumChloride from "./potassium-chloride.json" with { type: "json" };
+import siliconDioxide from "./silicon-dioxide.json" with { type: "json" };
+import sodiumChloride from "./sodium-chloride.json" with { type: "json" };
+import sodiumSulphide from "./sodium-sulphide.json" with { type: "json" };
 import soot from "./soot.json" with { type: "json" };
+import sulphur from "./sulphur.json" with { type: "json" };
 import sulphuricAcid75 from "./sulphuric-acid-75.json" with { type: "json" };
 import sulphuricAcid84 from "./sulphuric-acid-84.json" with { type: "json" };
+import sulphuricAcidUvAbsorber from "./sulphuric-acid-uv-absorber.json" with { type: "json" };
 import tholin from "./tholin.json" with { type: "json" };
+import titaniumDioxide from "./titanium-dioxide.json" with { type: "json" };
 import waterIce from "./water-ice.json" with { type: "json" };
 import water from "./water.json" with { type: "json" };
+import zincSulphide from "./zinc-sulphide.json" with { type: "json" };
 
 /** The phase a material file describes. */
 export type MaterialPhase = "liquid" | "solid";
@@ -70,7 +97,7 @@ export interface CauchyFit {
   readonly fittedToUm: number;
 }
 
-/** One material file: its header and its index on {@link MATERIAL_WAVELENGTHS_NM}. */
+/** One material file: its header and its index on its own grid. */
 export interface MaterialIndexFile {
   /** The sim's substance key (P14.T49.b). */
   readonly key: string;
@@ -94,17 +121,50 @@ export interface MaterialIndexFile {
   readonly standIn: string | undefined;
   /** For a derived file, its parameterisation. */
   readonly fit: CauchyFit | undefined;
-  /** The real index at each of {@link MATERIAL_WAVELENGTHS_NM}. */
+  /**
+   * The file's own grid, nm: λ₀, λ₀ + 5, …, 780, with λ₀ a whole multiple of 5 nm at or below
+   * 380 nm, so that it covers {@link MATERIAL_WAVELENGTHS_NM} (decision-r08-t5d ruling 1).
+   */
+  readonly wavelengthsNm: Float64Array;
+  /** The real index at each of {@link MaterialIndexFile.wavelengthsNm}. */
   readonly n: Float64Array;
-  /** The imaginary index, ≥ 0, at each of {@link MATERIAL_WAVELENGTHS_NM}. */
+  /** The imaginary index, ≥ 0, at each of {@link MaterialIndexFile.wavelengthsNm}. */
   readonly k: Float64Array;
 }
 
-/** The wavelengths every material file gives its index at, nm: 380 to 780 every 5. */
+/**
+ * The span every material file covers, and the wavelengths the renderer draws at, nm: 380 to 780
+ * every 5. The bake bins (380–760 nm) and the channels never go below 380 nm; a file's own grid
+ * ({@link MaterialIndexFile.wavelengthsNm}) may start lower.
+ */
 export const MATERIAL_WAVELENGTHS_NM: Float64Array = Float64Array.from(
   { length: 81 },
   (_, i) => 380 + 5 * i,
 );
+
+/** The step of every material file's grid, nm. */
+const GRID_STEP_NM = 5;
+
+/** The last wavelength of every material file's grid, nm. */
+const GRID_LAST_NM = 780;
+
+/** The latest a file's grid may start, nm: the first of {@link MATERIAL_WAVELENGTHS_NM}. */
+const GRID_FIRST_MAX_NM = 380;
+
+/**
+ * Whether a grid runs every 5 nm, each value exact, from a positive whole multiple of 5 nm at or
+ * below 380 nm to 780 nm.
+ */
+function isFileGrid(grid: Float64Array): boolean {
+  const first = grid[0] ?? Number.NaN;
+  return (
+    first > 0 &&
+    first <= GRID_FIRST_MAX_NM &&
+    Number.isInteger(first / GRID_STEP_NM) &&
+    grid.length === (GRID_LAST_NM - first) / GRID_STEP_NM + 1 &&
+    grid.every((nm, i) => nm === first + GRID_STEP_NM * i)
+  );
+}
 
 /**
  * The generic stand-in's index, for a key with no file (a newer server's material): a
@@ -195,11 +255,10 @@ export function parseMaterialFile(raw: unknown, file: string): MaterialIndexFile
     throw new Error(`${file}: "temperatureK" must be null or a positive number`);
   }
   const grid = numbers(raw, "wavelengthsNm", file);
-  if (
-    grid.length !== MATERIAL_WAVELENGTHS_NM.length ||
-    grid.some((nm, i) => nm !== MATERIAL_WAVELENGTHS_NM[i])
-  ) {
-    throw new Error(`${file}: "wavelengthsNm" must be 380–780 nm every 5 nm`);
+  if (!isFileGrid(grid)) {
+    throw new Error(
+      `${file}: "wavelengthsNm" must run every 5 nm from a multiple of 5 nm at or below 380 nm to 780 nm`,
+    );
   }
   const n = numbers(raw, "n", file);
   const k = numbers(raw, "k", file);
@@ -231,6 +290,7 @@ export function parseMaterialFile(raw: unknown, file: string): MaterialIndexFile
     reduction: text(raw, "reduction", file),
     standIn,
     fit,
+    wavelengthsNm: grid,
     n,
     k,
   };
@@ -240,7 +300,9 @@ export function parseMaterialFile(raw: unknown, file: string): MaterialIndexFile
  * Every material file, in the registry's order: a key's first file is its default, taken when a
  * mode names no phase or variant (liquid water before ice, liquid methane before its ice, 75 wt%
  * sulphuric acid before 84.5 wt%, a choice: both lie inside Hansen and Hovenier 1974's 1.44 ±
- * 0.015 at 550 nm, who name only "a concentrated solution of sulfuric acid").
+ * 0.015 at 550 nm, who name only "a concentrated solution of sulfuric acid"). R08.T5.d's
+ * condensates, hazes, ices and dusts follow T5.b's (decision-r08-t5d); N₂, O₂, CO, H₂S and Ar have
+ * their ices alone, so a liquid of one takes its ice as a named analogue.
  */
 export const MATERIAL_FILES: ReadonlyArray<MaterialIndexFile> = [
   parseMaterialFile(water, "water.json"),
@@ -258,6 +320,30 @@ export const MATERIAL_FILES: ReadonlyArray<MaterialIndexFile> = [
   parseMaterialFile(marsDust, "mars-dust.json"),
   parseMaterialFile(enstatiteGlass, "enstatite-glass.json"),
   parseMaterialFile(forsteriteAmorphous, "forsterite-amorphous.json"),
+  parseMaterialFile(potassiumChloride, "potassium-chloride.json"),
+  parseMaterialFile(sodiumChloride, "sodium-chloride.json"),
+  parseMaterialFile(zincSulphide, "zinc-sulphide.json"),
+  parseMaterialFile(sodiumSulphide, "sodium-sulphide.json"),
+  parseMaterialFile(manganeseSulphide, "manganese-sulphide.json"),
+  parseMaterialFile(chromium, "chromium.json"),
+  parseMaterialFile(ironSulphide, "iron-sulphide.json"),
+  parseMaterialFile(siliconDioxide, "silicon-dioxide.json"),
+  parseMaterialFile(aluminiumOxide, "aluminium-oxide.json"),
+  parseMaterialFile(calciumTitanate, "calcium-titanate.json"),
+  parseMaterialFile(titaniumDioxide, "titanium-dioxide.json"),
+  parseMaterialFile(graphiteFile, "graphite.json"),
+  parseMaterialFile(sulphur, "sulphur.json"),
+  parseMaterialFile(hydrogenSulphideIce, "hydrogen-sulphide-ice.json"),
+  parseMaterialFile(nitrogenIce, "nitrogen-ice.json"),
+  parseMaterialFile(carbonMonoxideIce, "carbon-monoxide-ice.json"),
+  parseMaterialFile(oxygenIce, "oxygen-ice.json"),
+  parseMaterialFile(argonIce, "argon-ice.json"),
+  parseMaterialFile(jovianChromophore, "jovian-chromophore.json"),
+  parseMaterialFile(iceGiantHaze, "ice-giant-haze.json"),
+  parseMaterialFile(sulphuricAcidUvAbsorber, "sulphuric-acid-uv-absorber.json"),
+  parseMaterialFile(basaltFile, "basalt.json"),
+  parseMaterialFile(marsRegolithSimulant, "mars-regolith-simulant.json"),
+  parseMaterialFile(basalticGlass, "basaltic-glass.json"),
 ];
 
 const FILES_BY_KEY: ReadonlyMap<string, ReadonlyArray<MaterialIndexFile>> = (() => {
@@ -352,21 +438,29 @@ export function resolveMaterial(material: string, form?: MaterialForm): Resolved
  * A resolved material's index at a wavelength: n linear and k linear in log k between the file's
  * wavelengths, as the files were reduced.
  *
- * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
- * @throws RangeError for a wavelength outside the files' range.
+ * @remarks
+ * A file is read on its own grid, from its first wavelength λ₀ to 780 nm: i = ⌊(λ − λ₀) ÷ 5⌋, held
+ * at most at the grid's length minus 2, and t = (λ − λ₀ − 5i) ÷ 5, so a file that starts at 380 nm
+ * gives the bits it gave before the grids started per file. The generic stand-in, which has no
+ * file, covers 380–780 nm, a stated convention.
+ *
+ * @param wavelengthNm - The vacuum wavelength, nm, in the file's own range: 380–780 for most files
+ *   and the generic stand-in, 360–780 for the two files that start at 360 nm.
+ * @throws RangeError for a wavelength outside the file's range.
  */
 export function indexAt(resolved: ResolvedMaterial, wavelengthNm: number): ComplexIndex {
-  const first = MATERIAL_WAVELENGTHS_NM[0] ?? Number.NaN;
-  const last = MATERIAL_WAVELENGTHS_NM.at(-1) ?? Number.NaN;
-  if (!(wavelengthNm >= first && wavelengthNm <= last)) {
-    throw new RangeError(`wavelength ${wavelengthNm} nm is outside the files' ${first}–${last} nm`);
-  }
   const { file } = resolved;
+  const first = file?.wavelengthsNm[0] ?? GRID_FIRST_MAX_NM;
+  if (!(wavelengthNm >= first && wavelengthNm <= GRID_LAST_NM)) {
+    throw new RangeError(
+      `wavelength ${wavelengthNm} nm is outside the file's ${first}–${GRID_LAST_NM} nm`,
+    );
+  }
   if (file === undefined) {
     return GENERIC_STAND_IN_INDEX;
   }
-  const step = (last - first) / (MATERIAL_WAVELENGTHS_NM.length - 1);
-  const i = Math.min(Math.floor((wavelengthNm - first) / step), MATERIAL_WAVELENGTHS_NM.length - 2);
+  const step = GRID_STEP_NM;
+  const i = Math.min(Math.floor((wavelengthNm - first) / step), file.wavelengthsNm.length - 2);
   const t = (wavelengthNm - first - i * step) / step;
   const n0 = file.n[i] ?? Number.NaN;
   const n1 = file.n[i + 1] ?? Number.NaN;
@@ -388,9 +482,10 @@ export interface MaterialIndex {
  * A material's refractive index at a wavelength, by its registry key.
  *
  * @param material - The sim's material key; an unknown key takes the generic stand-in.
- * @param wavelengthNm - The vacuum wavelength, nm, in 380–780.
+ * @param wavelengthNm - The vacuum wavelength, nm, in the resolved file's own range
+ *   ({@link indexAt}): 380–780, or 360–780 for a file that starts at 360 nm.
  * @param form - The mode's phase or variant, where the material has several files.
- * @throws RangeError for a wavelength outside the files' range.
+ * @throws RangeError for a wavelength outside the resolved file's range.
  */
 export function refractiveIndex(
   material: string,
