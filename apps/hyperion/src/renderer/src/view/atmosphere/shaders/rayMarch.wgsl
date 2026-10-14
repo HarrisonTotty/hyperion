@@ -43,22 +43,33 @@
 // Changes (plan R08, R08.T7, Design note 7): one march sums every drawn source, each light slot's
 // share carried on its own path (`ViewMarch` in source.wgsl), alpha slot 0's mean transmittance;
 // the bare ground is lit by every source through its own slot's throughput.
+//
+// Changes (plan R08, R08.T6.f, Design note 17, _Per-view marches_): the shells stand through h*: the
+// top and each layer edge e are the quadrics (a + e / s_e, c + e / s_p), as R08.T12.d's tracer takes
+// them, in place of (a + e, c + e). Each sample is read at its height on the datum along the
+// similar spheroid's normal, the root of the exact quadratic from its ground quadric
+// (`oblate.wgsl`'s datumPointOf), in place of its radial height, which departs from it by
+// h (1 / cos psi - 1) (0.5% of h on a Saturn-class figure at 45°), since h* = s h is geodetic; its
+// normal is the datum's at that height's foot. The medium is read at h* = s h, s at the sample's
+// latitude, and the sources through the sliced lookup and the bands (`source.wgsl`); the bare
+// ground is lit through the lookup from its own place. As `tablesCpu.ts`'s oblateRayMarchTwin.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
 @group(0) @binding(2) var densityTables : texture_2d_array<f32>;
 @group(0) @binding(3) var phaseTables : texture_2d_array<f32>;
 @group(0) @binding(4) var<uniform> view : AtmosphereView;
-@group(0) @binding(5) var transmittance : texture_2d<f32>;
+@group(0) @binding(5) var transmittance : texture_2d_array<f32>;
 @group(0) @binding(6) var multiScattering : texture_2d_array<f32>;
 @group(0) @binding(7) var sceneDepth : texture_depth_2d;
 @group(0) @binding(8) var rayMarchOut : texture_storage_2d<rgba16float, write>;
-@group(0) @binding(9) var absorberColumns : texture_2d<f32>;
+@group(0) @binding(9) var absorberColumns : texture_2d_array<f32>;
 @group(0) @binding(10) var absorberCurves : texture_2d<f32>;
 @group(0) @binding(11) var<uniform> layerEdges : LayerEdges;
-@group(0) @binding(12) var absorberPressureColumns : texture_2d<f32>;
-@group(0) @binding(13) var lastAbsorberPressureColumn : texture_2d<f32>;
+@group(0) @binding(12) var absorberPressureColumns : texture_2d_array<f32>;
+@group(0) @binding(13) var lastAbsorberPressureColumn : texture_2d_array<f32>;
 @group(0) @binding(14) var lobeTables : texture_2d_array<f32>;
+@group(0) @binding(15) var oblateBody : texture_2d<f32>;
 
 // A ray's quadric about a shell of equatorial radius `radius`, in space scaled by
 // S = diag(1, 1, k) to a sphere of that radius: Q(t) = |S (P + t d)|^2 - radius^2 = qa t^2 +
@@ -104,42 +115,37 @@ fn quadricHits(q : RayQuadric) -> vec2f {
   return vec2f(min(first, second), max(first, second));
 }
 
-// A point's height above the spheroid along its radius, from its distance from the centre and
-// q = Q / a^2 (the ground's quadric there): |p| - |p| / sqrt(1 + q), the difference taken as
-// |p| q / (sqrt(1 + q)(sqrt(1 + q) + 1)).
-fn radialHeight(r : f32, q : f32) -> f32 {
-  let root = sqrt(max(1.0 + q, 1e-12));
-  return r * q / (root * (root + 1.0));
-}
-
-// The spheroid's outward normal at the ellipsoid through `p` similar to the datum.
-fn normalAt(p : vec3f, a : f32, c : f32) -> vec3f {
-  return normalize(vec3f(p.x / (a * a), p.y / (a * a), p.z / (c * c)));
-}
-
 // A pixel's ray and what its samples' heights are formed from (Design note 18): the camera's
-// position and the ray's direction, the datum's radii, whether the ground's quadric is taken about
-// the closest approach (`far`), that quadric, Q* = -disc / qa there, t_low - t* (the split's lowest
-// point from the quadric's own closest approach), a^2, and the sources' directions with their
-// scattering angles (R08.T7).
+// position and the ray's direction, the datum's radii, 1 / s at the equator and at the pole (the
+// shells' scales through h*, R08.T6.f), whether the ground's quadric is taken about the closest
+// approach (`far`), that quadric, Q* = -disc / qa there, t_low - t* (the split's lowest point from
+// the quadric's own closest approach), and the sources' directions with their scattering angles
+// (R08.T7).
 struct MarchRay {
   origin : vec3f,
   dir : vec3f,
   a : f32,
   c : f32,
+  equatorialShellScale : f32,
+  polarShellScale : f32,
   far : bool,
   groundQ : RayQuadric,
   qStar : f32,
   lowestFromStar : f32,
-  a2 : f32,
   sources : array<vec3f, MAX_SKY_SOURCES>,
   angles : array<ScatteringAngle, MAX_SKY_SOURCES>,
 }
 
-// One step of the march, at its midpoint: its height above the spheroid along the radius from the
-// ground's quadric, about t* beyond h0 = a / 2 and from the camera within it, then the medium
-// there, its sources and their in-scattering.
-fn rayMarchStep(march : ptr<function, ViewMarch>, ray : MarchRay, stepAt : MarchStep) {
+// One step of the march, at its midpoint: its ground quadric, about t* beyond h0 = a / 2 and from
+// the camera within it, its datum point (its height and the datum's normal there) and s at its
+// latitude, then the medium at h* = s h, its sources through the sliced lookup and their
+// in-scattering (R08.T6.f).
+fn rayMarchStep(
+  march : ptr<function, ViewMarch>,
+  ray : MarchRay,
+  body : OblateBody,
+  stepAt : MarchStep,
+) {
   let p = ray.origin + stepAt.tM * ray.dir;
   let groundQ = ray.groundQ;
   var bigQ : f32;
@@ -149,22 +155,26 @@ fn rayMarchStep(march : ptr<function, ViewMarch>, ray : MarchRay, stepAt : March
   } else {
     bigQ = stepAt.tM * (groundQ.qa * stepAt.tM + 2.0 * groundQ.qb) + groundQ.qc;
   }
-  let heightM = radialHeight(length(p), bigQ / ray.a2);
-  let local = sampleMediumAt(heightM);
-  let up = normalAt(p, ray.a, ray.c);
-  let shares = viewSourcesAt(heightM, up, ray.sources, ray.angles, local);
+  let datum = datumPointOf(body, p, bigQ);
+  let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
+  let local = sampleMediumAt(s * datum.heightM);
+  let start = sampleStartOf(body, p, bigQ, datum.heightM, datum.normal, datum.normal, s, local);
+  let shares = viewSourcesAt(
+    body, start, datum.normal, ray.sources, ray.sources, ray.angles, local
+  );
   viewMarchStep(march, local, shares, stepAt.dtM);
 }
 
-// Adds to the walk where the ray crosses the shell of the march edge `edgeM` above the datum (plan
-// R08, R08.T6.i): the quadric (a + e, c + e), as the top's shell (a + H, c + H) stands for the top,
-// in space scaled by S_e = diag(1, 1, k_e), k_e = (a + e) / (c + e), crossed at most twice, each
-// crossing as its signed distance from t_low, the split's lowest point. Within h0 = a / 2 the
-// crossings are the quadric's roots (`quadricHits`), its constant |S_e P|^2 - (a + e)^2 formed
-// from the ground's q_g, which comes formed in f64, as q_g + (k_e - k)(k_e + k) P_z^2 - e (2a + e),
-// with k_e - k = e (c - a) / (c (c + e)): no difference of large values (Design note 18). Beyond it
-// they stand about the quadric's own closest approach t*_e, at -/+ sqrt(disc) / qa with disc from
-// Lagrange's identity, t*_e taken from the ground's t* as t_o - t* is (`nearestFromStar`, with
+// Adds to the walk where the ray crosses the shell of the march edge `edgeM` above the datum in h*
+// (plan R08, R08.T6.i and R08.T6.f): the quadric (a + e_a, c + e_c), e_a = e / s_e and e_c = e / s_p,
+// as the top's shell (a + H / s_e, c + H / s_p) stands for the top, in space scaled by
+// S_e = diag(1, 1, k_e), k_e = (a + e_a) / (c + e_c), crossed at most twice, each crossing as its
+// signed distance from t_low, the split's lowest point. Within h0 = a / 2 the crossings are the
+// quadric's roots (`quadricHits`), its constant |S_e P|^2 - (a + e_a)^2 formed from the ground's
+// q_g, which comes formed in f64, as q_g + (k_e - k)(k_e + k) P_z^2 - e_a (2a + e_a), with
+// k_e - k = (c e_a - a e_c) / (c (c + e_c)): no difference of large values (Design note 18). Beyond
+// it they stand about the quadric's own closest approach t*_e, at -/+ sqrt(disc) / qa with disc
+// from Lagrange's identity, t*_e taken from the ground's t* as t_o - t* is (`nearestFromStar`, with
 // k_e), so that each lies from t_low without a difference of large distances, as the steps do.
 fn marchWalkCrossShell(
   walk : ptr<function, MarchWalk>,
@@ -175,9 +185,11 @@ fn marchWalkCrossShell(
 ) {
   let a = ray.a;
   let c = ray.c;
-  let kE = (a + edgeM) / (c + edgeM);
+  let edgeA = edgeM * ray.equatorialShellScale;
+  let edgeC = edgeM * ray.polarShellScale;
+  let kE = (a + edgeA) / (c + edgeC);
   if (ray.far) {
-    let q = rayQuadric(ray.origin, ray.dir, kE, a + edgeM, 0.0, true);
+    let q = rayQuadric(ray.origin, ray.dir, kE, a + edgeA, 0.0, true);
     if (q.disc < 0.0) {
       return;
     }
@@ -190,10 +202,10 @@ fn marchWalkCrossShell(
     return;
   }
   let k = a / c;
-  let kGap = edgeM * (c - a) / (c * (c + edgeM));
+  let kGap = (c * edgeA - a * edgeC) / (c * (c + edgeC));
   let z2 = ray.origin.z * ray.origin.z;
-  let qc = (view.exact.x + kGap * (kE + k) * z2) - edgeM * (2.0 * a + edgeM);
-  let q = rayQuadric(ray.origin, ray.dir, kE, a + edgeM, qc, false);
+  let qc = (view.exact.x + kGap * (kE + k) * z2) - edgeA * (2.0 * a + edgeA);
+  let q = rayQuadric(ray.origin, ray.dir, kE, a + edgeA, qc, false);
   if (q.disc < 0.0) {
     return;
   }
@@ -215,7 +227,9 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let depthTexel = min(vec2u(uv * vec2f(full)), full - 1u);
   let depth = textureLoad(sceneDepth, depthTexel, 0);
   let topM = medium.topHeightM;
-  let aboveTop = view.camera.w >= topM;
+  let body = oblateBodyOf(oblateBody);
+  // Above the air where the camera's h* is above its top (R08.T6.f).
+  let aboveTop = view.camera.w * view.curvature.z >= topM;
   let reach = view.tables.y;
   var tSurface = 3.4e38;
   if (depth > 0.0) {
@@ -233,7 +247,10 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let k = a / c;
   // Beyond half the equatorial radius, the ground's quadric is taken about the closest approach.
   let far = view.camera.w > 0.5 * a;
-  let shellQ = rayQuadric(origin, dir, (a + topM) / (c + topM), a + topM, view.exact.y, far);
+  // The top's shell through h* = H at the equator and the poles (R08.T6.f).
+  let topA = topM * body.scales.z;
+  let topC = topM * body.scales.w;
+  let shellQ = rayQuadric(origin, dir, (a + topA) / (c + topC), a + topA, view.exact.y, far);
   let groundQ = rayQuadric(origin, dir, k, a, view.exact.x, far);
   let shell = quadricHits(shellQ);
   let ground = quadricHits(groundQ);
@@ -271,14 +288,17 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     sources[k] = view.sources[k].direction.xyz;
   }
   let angles = sourceAngles(dir, sources, count);
-  let ray = MarchRay(origin, dir, a, c, far, groundQ, qStar, lowestFromStar, a * a, sources, angles);
+  let ray = MarchRay(
+    origin, dir, a, c, body.scales.z, body.scales.w, far, groundQ, qStar, lowestFromStar, sources,
+    angles
+  );
   var march = viewMarchStart();
   // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk; the
   // edges are the same for every pixel, so the branch is uniform (R08.T6.i).
   let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);
   if (edgeCount == 0u) {
     for (var i = 0u; i < samples; i++) {
-      rayMarchStep(&march, ray, marchStep(split, i));
+      rayMarchStep(&march, ray, body, marchStep(split, i));
     }
   } else {
     var walk : MarchWalk;
@@ -289,21 +309,26 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     }
     marchWalkReady(&walk);
     for (var i = 0u; i < samples; i++) {
-      rayMarchStep(&march, ray, marchWalkStep(&walk, i));
+      rayMarchStep(&march, ray, body, marchWalkStep(&walk, i));
     }
   }
   var luminance = march.luminance;
   // The bare ground under the atmosphere, seen from above it where nothing is drawn: each source's
-  // light on it, weighted as the sky is, through its own slot's throughput (R08.T7).
+  // light on it through the sliced lookup from its own place (R08.T6.f), weighted as the sky is,
+  // through its own slot's throughput (R08.T7), and the source's cosine against the datum's normal
+  // there.
   if (depth == 0.0 && hitsGround && ground.x <= tEnd) {
     let p = origin + ground.x * dir;
-    let normal = normalAt(p, a, c);
+    let datum = datumPointOf(body, p, 0.0);
+    let s = gravityRatioAt(body, datum.normal.z * datum.normal.z);
+    let local = sampleMediumAt(s * datum.heightM);
+    let start = sampleStartOf(body, p, 0.0, datum.heightM, datum.normal, datum.normal, s, local);
     for (var k = 0u; k < count; k++) {
       let source = view.sources[k];
       let slot = skySlotOf(source);
-      let muSun = dot(source.direction.xyz, normal);
-      let toSun = tableTransmittance(transmittance, view.tables.x, 0.0, muSun, slot);
-      luminance += march.throughput[slot] * source.weight.rgb * toSun * max(muSun, 0.0)
+      let muSun = dot(source.direction.xyz, datum.normal);
+      let light = sourceLightAt(body, start, source.direction.xyz, slot);
+      luminance += march.throughput[slot] * source.weight.rgb * light.toSun * max(muSun, 0.0)
         * medium.groundAlbedo.rgb / PI_VIEW;
     }
   }

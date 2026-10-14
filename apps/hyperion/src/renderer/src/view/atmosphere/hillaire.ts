@@ -66,12 +66,14 @@ import type {
 import type { Rgb } from "../photometry/toneCurve";
 import type { QualitySetting } from "../quality/qualitySetting";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
-import type { AtmosphereMedium } from "./medium";
+import { type AtmosphereMedium, columnLengthM, densityAt, extinction } from "./medium";
+import { type BodyGravity, bodyGravity, gravityRatio, principalRadiiM } from "./oblate";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import aerialPerspectiveWgsl from "./shaders/aerialPerspective.wgsl?raw";
 import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
 import compositeWgsl from "./shaders/composite.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
+import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import rayMarchWgsl from "./shaders/rayMarch.wgsl?raw";
 import skyViewWgsl from "./shaders/skyView.wgsl?raw";
 import sourceWgsl from "./shaders/source.wgsl?raw";
@@ -80,6 +82,7 @@ import {
   absorberCount,
   lineSlotMask,
   type AbsorberCurveSlots,
+  type AtmosphereBody,
   AtmosphereTables,
   KERNEL_ARM_FORMAT,
   MULTI_SCATTERING_SIZE,
@@ -273,14 +276,24 @@ export function drawsDiscOf(sun: SunState): boolean {
   return sun.drawsDisc ?? sun.angularRadiusRad > 0;
 }
 
-/** DN 16's lookup inputs at the camera: R08.T6.f adds the latitude and the gravity scale. */
+/**
+ * DN 16's lookup inputs at the camera, widened by R08.T6.f with its latitude and gravity scale
+ * (plan R08, Design note 17).
+ */
 export interface AtmosphereInputs {
-  /** √(MN) + h, m: the radius the per-frame tables put the camera at. */
+  /** √(MN) + h, m: R05's radius the per-frame tables put the camera at. */
   readonly radiusM: number;
   /** The geodetic height above the datum, m. */
   readonly heightM: number;
   /** The datum's outward normal under the camera, which μ is measured against. */
   readonly normal: Vec3;
+  /** The camera's geodetic latitude, rad. */
+  readonly latitudeRad: number;
+  /**
+   * s = g(φ) ÷ g_ref at the camera (R08.T3.d's `gravityRatio`, `BodyGravity.gravityOffsetMS2`
+   * included): the factor its height is scaled by, h\* = s h; 1 on a body with no spheroid.
+   */
+  readonly gravityRatio: number;
 }
 
 /** A point's geodetic latitude and height on a spheroid, with its Gaussian radius. */
@@ -374,15 +387,46 @@ export function geodeticOf(p: Vec3, figure: SpheroidFigure): Geodetic {
 }
 
 /**
- * DN 16's lookup inputs at the camera: r = √(MN) + h, h the geodetic height, and the spheroid
- * normal μ is measured against. R08.T6.f widens the result with the latitude and gravity scale.
+ * DN 16's lookup inputs at the camera: r = √(MN) + h, h the geodetic height, the spheroid normal μ
+ * is measured against, and, since R08.T6.f, the geodetic latitude and s = g(φ) ÷ g_ref there.
+ *
+ * @param gravity - The body's gravity (R08.T3.d's `bodyGravity`); none for s ≡ 1, as on a body
+ *   with no spheroid.
+ * @throws RangeError as `oblate.ts`'s `gravityRatio`.
  */
 export function atmosphereInputs(
   camera: Pick<AtmosphereCamera, "positionM">,
   figure: SpheroidFigure,
+  gravity: BodyGravity | null = null,
 ): AtmosphereInputs {
   const g = geodeticOf(camera.positionM, figure);
-  return { radiusM: g.gaussianRadiusM + g.heightM, heightM: g.heightM, normal: g.normal };
+  return {
+    radiusM: g.gaussianRadiusM + g.heightM,
+    heightM: g.heightM,
+    normal: g.normal,
+    latitudeRad: g.latitudeRad,
+    gravityRatio: gravity === null ? 1 : gravityRatio(gravity, g.latitudeRad),
+  };
+}
+
+/**
+ * The body an atmosphere's tables take on `figure` with no gravity given (R08.T6.f): the figure
+ * with R08.T3.d's gravity for a body with no rotation section, s ≡ 1, one slice and one band, so
+ * that `oblate.wgsl`'s datum, and the ray march's heights and normals on it, are the figure's own
+ * (R05 Design note 16); `null` on a sphere, whose tables are R05's on R_ref = a.
+ */
+export function bodyOfFigure(figure: SpheroidFigure): AtmosphereBody | null {
+  if (figure.equatorialRadiusM === figure.polarRadiusM) {
+    return null;
+  }
+  return {
+    figure,
+    gravity: bodyGravity(
+      // The bulk gravity is read nowhere with no spheroid: s is 1 whatever it is.
+      { figure, massKg: 1, angularVelocityRadS: null, bulkGravityMS2: 9.806_65, figureLaw: null },
+      tableRadiusM(figure),
+    ),
+  };
 }
 
 /**
@@ -414,17 +458,58 @@ export interface ViewExact {
    * would leave without digits (0.25 m of an Earth radius); formed here it keeps about 10⁻⁹ m.
    */
   readonly groundQuadricM2: number;
-  /** Its top shell's q_t = |S_t P|² − (a + H)², m², S_t = diag(1, 1, (a + H) ÷ (c + H)). */
+  /**
+   * Its top shell's q_t = |S_t P|² − (a + H ÷ s_e)², m², S_t = diag(1, 1, (a + H ÷ s_e) ÷
+   * (c + H ÷ s_p)): the quadric through h\* = H at the equator and the poles (R08.T6.f; Design note
+   * 17), (a + H, c + H) where s ≡ 1.
+   */
   readonly topQuadricM2: number;
   /**
-   * The sky view's β = atan2(R₀, √(h_s(2R₀ + h_s))), rad: the angle from the nadir to the horizon
-   * on the sky view's sphere (sebh's `GroundToHorizonCos` is its cosine), so that the horizon's
-   * zenith angle is π − β and its dip below the horizontal π/2 − β; R₀ is the camera's Gaussian
-   * radius and h_s its
-   * {@link skyViewHeight}. `skyViewUvToParams` and `skyViewParamsToUv` both take it, so that the
-   * table's write and read share it.
+   * The camera's local scale height in h\*, m (R08.T6.f): the medium's vertical optical depth above
+   * the camera's h\* in green over its extinction there, held between 1 m and the room to the top,
+   * as `tablesCpu.ts`'s sliced lookup takes it from a start, here from the medium's own column
+   * ({@link localScaleHeightM}) for the composite's lookup, which reads no medium.
    */
-  readonly horizonAngleRad: number;
+  readonly localScaleHeightM: number;
+}
+
+/**
+ * The least local scale height the fitted lookup takes, m of h\*: 1 km (plan R08, R08.T6.f).
+ *
+ * @remarks
+ * The fit's second point stands one local scale height up the ray, and its deep-dip parabola
+ * √(2 R_α H ÷ s) either side of the lowest point, so that the fit's differences of h\* are about
+ * H. Near the top, or where the stored vertical depth above a point is under the half float's
+ * least step (2⁻²⁴; within a few tens of kilometres of a Saturn-class top), the column gives a
+ * height of metres, whose differences `f32` cannot take from heights of hundreds of kilometres
+ * (0.06 m a step at 800 km): the smoke's kernel arm parted from the twin by 2% there. A kilometre
+ * keeps them to about 10⁻⁴, and lies under the least scale height drawn so far (R05's Earth
+ * aerosol, 1.2 km); a body of one band takes no fit.
+ * `oblate.wgsl`'s `OBLATE_SCALE_FLOOR_M` is the same.
+ */
+export const FIT_SCALE_FLOOR_M = 1_000;
+
+/**
+ * The local scale height in h\* at `scaledHeightM` (plan R08, R08.T6.f): the medium's vertical
+ * optical depth above it in green over its extinction there in green, held to the room left to the
+ * top, all of it where nothing extinguishes, and to at least {@link FIT_SCALE_FLOOR_M}; one scale
+ * height for an exponential, the column's own e-folding for any profile. `tablesCpu.ts`'s
+ * `OblateReader` takes the optical depth from slice 0's stored table, the kernels likewise; this
+ * takes it from each term's column (`medium.ts`'s `columnLengthM`), within the table's 10⁻³.
+ */
+export function localScaleHeightM(medium: AtmosphereMedium, scaledHeightM: number): number {
+  const top = medium.topHeightM;
+  const room = Math.max(top - scaledHeightM, 1);
+  const height = Math.min(Math.max(scaledHeightM, 0), top);
+  let column = 0;
+  let extinctionPerM = 0;
+  for (const term of medium.terms) {
+    const green = extinction(term)[1];
+    column += green * (columnLengthM(term.density, top) - columnLengthM(term.density, height));
+    extinctionPerM += green * densityAt(term.density, height);
+  }
+  const held = extinctionPerM > 0 ? Math.min(column / extinctionPerM, room) : room;
+  return Math.max(held, FIT_SCALE_FLOOR_M);
 }
 
 /**
@@ -432,13 +517,16 @@ export interface ViewExact {
  * source's sin ρ, which the composite's disc test |d × s| ≤ sin ρ takes since `f32` cannot resolve
  * 1 − cos ρ for ρ under 3.5 × 10⁻⁴ rad, is formed beside it ({@link frameSourcesOf}, R08.T7).
  *
- * @param topHeightM - The atmosphere's height above the datum, m.
+ * @param gravity - The body's gravity, whose s at the equator and the pole places the top's shell
+ *   (R08.T6.f); none for s ≡ 1.
+ * @throws RangeError as `oblate.ts`'s `gravityRatio`.
  */
 export function viewExactOf(
   positionM: Vec3,
   figure: SpheroidFigure,
-  topHeightM: number,
+  medium: AtmosphereMedium,
   inputs: AtmosphereInputs,
+  gravity: BodyGravity | null = null,
 ): ViewExact {
   const a = figure.equatorialRadiusM;
   const c = figure.polarRadiusM;
@@ -446,12 +534,41 @@ export function viewExactOf(
     const z = (positionM.z * equatorialM) / polarM;
     return positionM.x ** 2 + positionM.y ** 2 + z * z - equatorialM * equatorialM;
   };
-  const gaussianM = inputs.radiusM - inputs.heightM;
-  const skyHeightM = skyViewHeight(inputs.heightM, topHeightM);
+  const topHeightM = medium.topHeightM;
+  const atEquator = gravity === null ? 1 : gravityRatio(gravity, 0);
+  const atPole = gravity === null ? 1 : gravityRatio(gravity, Math.PI / 2);
   return {
     groundQuadricM2: quadric(a, c),
-    topQuadricM2: quadric(a + topHeightM, c + topHeightM),
-    horizonAngleRad: Math.atan2(gaussianM, Math.sqrt(skyHeightM * (2 * gaussianM + skyHeightM))),
+    topQuadricM2: quadric(a + topHeightM / atEquator, c + topHeightM / atPole),
+    localScaleHeightM: localScaleHeightM(medium, inputs.gravityRatio * inputs.heightM),
+  };
+}
+
+/**
+ * The camera on an oblate body as the per-view kernels take it (plan R08, R08.T6.f; `view.wgsl`'s
+ * `AtmosphereView.curvature`), formed in `f64`: its principal radii M and N, from which each
+ * sky-view column's sphere R_α is taken, s at its latitude, and the sky view's atmosphere, the
+ * medium's top over that s (`tablesCpu.ts`'s `oblateCameraOf`).
+ */
+export interface ViewCurvature {
+  readonly meridionalM: number;
+  readonly primeVerticalM: number;
+  readonly gravityRatio: number;
+  readonly atmosphereM: number;
+}
+
+/** The camera's {@link ViewCurvature} from its {@link atmosphereInputs}. */
+export function viewCurvatureOf(
+  figure: SpheroidFigure,
+  medium: AtmosphereMedium,
+  inputs: AtmosphereInputs,
+): ViewCurvature {
+  const { meridionalM, primeVerticalM } = principalRadiiM(figure, inputs.latitudeRad);
+  return {
+    meridionalM,
+    primeVerticalM,
+    gravityRatio: inputs.gravityRatio,
+    atmosphereM: medium.topHeightM / inputs.gravityRatio,
   };
 }
 
@@ -544,14 +661,14 @@ export function pathSlotsOf(sources: ReadonlyArray<FrameSource>): number {
 
 /**
  * The per-frame kernels: `view/shaders/preciseTrig.wgsl` (R08.T6.g), `common.wgsl`, `medium.wgsl`,
- * `view.wgsl`, `source.wgsl`, then each kernel, which declares the `medium` uniform, the `terms`
- * buffer and the `densityTables` and `phaseTables` that `medium.wgsl` and `source.wgsl` read in
- * place (R08.T6.b).
+ * `view.wgsl`, `oblate.wgsl` (R08.T6.f), `source.wgsl`, then each kernel, which declares the
+ * `medium` uniform, the `terms` buffer and the `densityTables` and `phaseTables` that `medium.wgsl`
+ * and `source.wgsl` read in place (R08.T6.b), and the body's table `oblateBody` (R08.T6.f).
  */
 function kernel(name: string, wgsl: string): KernelPair {
   return {
     name,
-    reference: `${preciseTrigWgsl}\n${commonWgsl}\n${mediumWgsl}\n${viewWgsl}\n${sourceWgsl}\n${wgsl}`,
+    reference: `${preciseTrigWgsl}\n${commonWgsl}\n${mediumWgsl}\n${viewWgsl}\n${oblateWgsl}\n${sourceWgsl}\n${wgsl}`,
     subgroup: null,
     readback: "presentation-only",
   };
@@ -590,14 +707,15 @@ const VIEW_MEMBERS = [
   "figure",
   "output",
   "exact",
+  "curvature",
   ...SOURCE_MEMBERS,
 ] as const;
 
 /**
- * The composite's WGSL: `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `view.wgsl`, the volume's
- * read (`aerialRead.wgsl`, R08.T9.a), then its own.
+ * The composite's WGSL: `view/shaders/preciseTrig.wgsl`, `common.wgsl`, `view.wgsl`, `oblate.wgsl`
+ * (R08.T6.f), the volume's read (`aerialRead.wgsl`, R08.T9.a), then its own.
  */
-const COMPOSITE_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${aerialReadWgsl}\n${compositeWgsl}`;
+const COMPOSITE_WGSL = `${preciseTrigWgsl}\n${commonWgsl}\n${viewWgsl}\n${oblateWgsl}\n${aerialReadWgsl}\n${compositeWgsl}`;
 
 /** The composite: a full-screen draw of pre-exposed luminance over the terrain target. */
 export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
@@ -613,14 +731,17 @@ export const COMPOSITE_MATERIAL: WgslMaterialSpec = {
     { name: "skyView", binding: 2 },
     { name: "aerial", binding: 3, viewDimension: "3d" },
     { name: "rayMarch", binding: 4 },
-    { name: "transmittance", binding: 5 },
+    // The transmittance tables, one layer a κ slice (R08.T6.f).
+    { name: "transmittance", binding: 5, viewDimension: "2d-array" },
     // The absorbers' columns beside the transmittance, and the lights' curves of growth, f32 and
     // read by `textureLoad` (R08.T6.c).
-    { name: "absorberColumns", binding: 7 },
+    { name: "absorberColumns", binding: 7, viewDimension: "2d-array" },
     { name: "absorberCurves", binding: 8, sampleType: "unfilterable-float" },
     // The pressure-weighted columns beside them (R08.T4.d).
-    { name: "absorberPressureColumns", binding: 9 },
-    { name: "lastAbsorberPressureColumn", binding: 10 },
+    { name: "absorberPressureColumns", binding: 9, viewDimension: "2d-array" },
+    { name: "lastAbsorberPressureColumn", binding: 10, viewDimension: "2d-array" },
+    // The body's figure, gravity and slicing, f32 and read by `textureLoad` (R08.T6.f).
+    { name: "oblateBody", binding: 11, sampleType: "unfilterable-float" },
   ],
   cullMode: "none",
   depthWrite: false,
@@ -671,11 +792,15 @@ export interface FrameOutputs {
  * per unit of {@link AerialPerspective.scaleCdPerM2} and its mean transmittance, so that a pass lays
  * `colour × a + rgb × scaleCdPerM2 × exposure` over its own colour as the composite does; beyond the
  * reach the composite's ray march serves the scene's own depth. The transmittance tables are read
- * together, through `common.wgsl`'s `transmittanceUnitAt` and `transmittanceThroughTables` at the
- * light's curve slot (R08.T6.c) with the line slots' pressure columns (R08.T4.d), every lookup at a
- * height above the datum and a cosine against its normal (Design note 18), as the composite's
- * `transmittanceToSpace` reads them. Until R08.T6.f the transmittance table is one κ slice; T6.f
- * widens this type with what `oblate.wgsl`'s slice lookup takes.
+ * together at the light's curve slot (R08.T6.c) with the line slots' pressure columns (R08.T4.d),
+ * every lookup at a height above the datum and a cosine against its normal (Design note 18), as the
+ * composite's `transmittanceToSpace` reads them: since R08.T6.f 2D arrays of one layer a κ slice
+ * (Design note 17), read through `oblate.wgsl`'s sliced lookup, `slicedRayOf` and `slicedStoredOf`,
+ * from a `LookupStart` at the reader's point (its place, ground quadric, height, normal, latitude,
+ * s, h\* and local scale height), with the body's table {@link AerialPerspective.oblateBody}; the
+ * composite forms the camera's (`transmittanceToSpace`). A reader that forms its own needs the
+ * medium's extinction there for the local scale height (`localScaleHeightOf`), or takes the camera's
+ * ({@link ViewExact.localScaleHeightM}) near it: flagged for R11's re-validation.
  *
  * The volume serves a reader within its reach only. A pass drawn after the composite has no march
  * beyond it, so an opaque surface past the reach is drawn into the scene before the composite, or
@@ -701,7 +826,8 @@ export interface AerialPerspective {
   readonly scaleCdPerM2: Rgb;
   /**
    * The per-planet transmittance table (`tables.ts`): the optical depth of every term but the
-   * absorbers in rgb, and absorber slot 0's column u ÷ U in alpha (R08.T6.c).
+   * absorbers in rgb, and absorber slot 0's column u ÷ U in alpha (R08.T6.c); a 2D array of one
+   * layer a κ slice since R08.T6.f, as are the three tables beside it.
    */
   readonly transmittance: TextureHandle;
   /** Absorber slots 1–4's columns u ÷ U, beside the transmittance table. */
@@ -718,17 +844,25 @@ export interface AerialPerspective {
    * sun's.
    */
   readonly absorberCurves: TextureHandle;
-  /** How many of the medium's terms are absorbers: `transmittanceThroughTables`'s `count`. */
+  /** How many of the medium's terms are absorbers: `slicedStoredOf`'s `count`. */
   readonly absorberCount: number;
   /**
    * The medium's line slots, bit k for absorber slot k (`tables.ts`'s `lineSlotMask`):
-   * `transmittanceThroughTables`'s `lines`, from which it takes each slot's pressure channel.
+   * `absorberDepth`'s `lines`, from which it takes each slot's pressure channel.
    */
   readonly lineSlots: number;
-  /** The per-planet tables' ground, R₁ = (2a + c) ÷ 3 ({@link tableRadiusM}), m. */
+  /**
+   * The per-planet tables' ground, R₁ = (2a + c) ÷ 3 ({@link tableRadiusM}), m: R_ref, slice k
+   * standing on κ_k R₁ (R08.T6.f).
+   */
   readonly bottomRadiusM: number;
-  /** The atmosphere's height above the datum, m. */
+  /** The atmosphere's height above the datum, m, in h\* (R08.T6.f). */
   readonly topHeightM: number;
+  /**
+   * The body's table (`tables.ts`'s `packOblateBody`, `rgba32float`, read by `textureLoad`;
+   * R08.T6.f): its figure, gravity ratio and slicing, which `oblate.wgsl`'s lookup reads.
+   */
+  readonly oblateBody: TextureHandle;
 }
 
 /**
@@ -737,13 +871,17 @@ export interface AerialPerspective {
  *
  * @remarks
  * The table holds the sky's radiance per unit of {@link SkyViewTable.scaleCdPerM2}, summed over the
- * frame's drawn sources (Design note 7, R08.T7), by sebh's zenith parameterisation on the camera's
- * own sphere and the local azimuth about {@link SkyViewTable.azimuthOrigin} over the whole circle.
- * A direction d is read at `view.wgsl`'s `skyViewParamsToUv(groundHitFromHeight(bottomRadiusM,
- * heightM, d · zenith), preciseAtan2(|d × zenith|, d · zenith), skyViewAzimuthUnit(d · x, d · y),
- * size, horizonAngleRad)`, x the azimuth origin and y = zenith × x, through Bruneton's texel mapping
- * (Design note 19). R08.T7's check holds the one table within 2% of per-source tables near each
- * source, so the per-sun fallback is not built.
+ * frame's drawn sources (Design note 7, R08.T7), by sebh's zenith parameterisation and the local
+ * azimuth about {@link SkyViewTable.azimuthOrigin} over the whole circle. Since R08.T6.f each
+ * column stands on its own sphere, the osculating sphere R_α of its azimuth at the camera, with its
+ * own horizon split β (Design note 17): on an oblate body both are per azimuth, and on a sphere
+ * (M = N) the one sphere of {@link SkyViewTable.sphere}, as before. A direction d is read at
+ * `view.wgsl`'s `skyViewParamsToUv(groundHitFromHeight(R_α, heightM, d · zenith),
+ * preciseAtan2(|d × zenith|, d · zenith), skyViewAzimuthUnit(d · x, d · y), size, β)`, (R_α, β) =
+ * `oblate.wgsl`'s `skyViewColumnOf(meridionalRadiusM, primeVerticalRadiusM, zenith, x, d, heightM)`
+ * ({@link skyViewColumnOf} here), x the azimuth origin and y = zenith × x, through Bruneton's texel
+ * mapping (Design note 19). R08.T7's check holds the one table within 2% of per-source tables near
+ * each source, so the per-sun fallback is not built.
  */
 export interface SkyViewTable {
   /** The table, `rgba16float`, 2D, rgb the radiance per unit of {@link SkyViewTable.scaleCdPerM2}. */
@@ -762,12 +900,88 @@ export interface SkyViewTable {
    * the view's sky axis, as `view.wgsl`'s `skyFrame` takes it ({@link skyAxisOf}).
    */
   readonly azimuthOrigin: Vec3;
-  /** The sphere the table is built on: the camera's Gaussian radius √(MN), m. */
-  readonly bottomRadiusM: number;
-  /** The camera's height on that sphere, m, kept 1 m inside the shell ({@link skyViewHeight}). */
+  /**
+   * The camera's principal radii of curvature M and N, m: each column's sphere is R_α of them
+   * along its azimuth (Euler's theorem; R08.T6.f).
+   */
+  readonly meridionalRadiusM: number;
+  readonly primeVerticalRadiusM: number;
+  /**
+   * The camera's height on each column's sphere, m, kept 1 m inside its shell
+   * ({@link skyViewHeight}).
+   */
   readonly heightM: number;
-  /** β, the angle from the nadir to the horizon there, rad ({@link ViewExact.horizonAngleRad}). */
+  /** The atmosphere's height on each column's sphere, m: the medium's top over the camera's s. */
+  readonly atmosphereM: number;
+  /**
+   * The scalar reading on a sphere, where M = N: every column's one sphere, its radius and β, the
+   * values R08.T9.a published as `bottomRadiusM` and `horizonAngleRad`; `null` on an oblate body,
+   * whose columns each take their own ({@link skyViewColumnOf}; R08.T6.f).
+   */
+  readonly sphere: SkyViewColumn | null;
+}
+
+/** A sky-view column's sphere (R08.T6.f): its radius R_α, m, and β, rad, the nadir to the horizon. */
+export interface SkyViewColumn {
+  readonly bottomRadiusM: number;
   readonly horizonAngleRad: number;
+}
+
+/**
+ * The sphere the sky view's column at a direction stands on (plan R08, R08.T6.f): `oblate.wgsl`'s
+ * `skyViewColumnOf` in `f64`, R_α of the camera's M and N along the direction's azimuth, the
+ * azimuth origin standing for a vertical direction's, and β = atan2(R_α, √(h (2 R_α + h))).
+ *
+ * @param direction - A unit direction, body-fixed.
+ */
+export function skyViewColumnOf(table: SkyViewTable, direction: Vec3): SkyViewColumn {
+  const n = table.zenith;
+  const mu = dot(direction, n);
+  let flat = sub(direction, scaled(n, mu));
+  if (!(dot(flat, flat) > 1e-24)) {
+    flat = table.azimuthOrigin;
+  }
+  const bottomRadiusM = curvatureRadiusAlongM(
+    table.meridionalRadiusM,
+    table.primeVerticalRadiusM,
+    n,
+    flat,
+  );
+  const h = table.heightM;
+  return {
+    bottomRadiusM,
+    horizonAngleRad: Math.atan2(bottomRadiusM, Math.sqrt(h * (2 * bottomRadiusM + h))),
+  };
+}
+
+/**
+ * The radius of curvature along `d` at a point of principal radii M and N under the unit normal `n`,
+ * m: Euler's theorem, M ÷ (1 − (1 − M ÷ N) sin²α), α the azimuth from north (`tablesCpu.ts`'s
+ * curvatureAlongM); √(MN) for a vertical direction.
+ */
+function curvatureRadiusAlongM(
+  meridionalM: number,
+  primeVerticalM: number,
+  n: Vec3,
+  d: Vec3,
+): number {
+  const cos2 = n.x * n.x + n.y * n.y;
+  let along: number;
+  let across: number;
+  if (cos2 < 1e-24) {
+    along = n.z >= 0 ? -d.x : d.x;
+    across = d.y;
+  } else {
+    const cos = Math.sqrt(cos2);
+    across = (d.y * n.x - d.x * n.y) / cos;
+    along = (d.z * cos2 - n.z * (d.x * n.x + d.y * n.y)) / cos;
+  }
+  const horizontal = along * along + across * across;
+  if (!(horizontal > 1e-24)) {
+    return Math.sqrt(meridionalM * primeVerticalM);
+  }
+  const gap = (primeVerticalM - meridionalM) / primeVerticalM;
+  return meridionalM / (1 - gap * ((across * across) / horizontal));
 }
 
 /**
@@ -929,6 +1143,8 @@ export class HillaireAtmosphere {
   readonly #engine: RenderEngine;
   readonly #sizes: TableSizes;
   readonly #figure: SpheroidFigure;
+  /** The body's gravity (R08.T3.d), or `null` for s ≡ 1 and one slice and one band. */
+  readonly #gravity: BodyGravity | null;
   readonly #tables: AtmosphereTables;
   readonly #offRestored: () => void;
   #frame: FrameResources;
@@ -948,6 +1164,10 @@ export class HillaireAtmosphere {
    * @param tables - The setting's sizes, `SETTINGS[s].atmosphere`.
    * @param curves - Each light's curves of growth for the medium's absorbers, light slot 0 the
    *   drawn sun's (R08.T6.c); none for a medium with no absorber.
+   * @param gravity - The body's gravity (R08.T3.d's `bodyGravity` on `figure`), whose slicing the
+   *   tables are built in and whose s the lookups take (Design note 17; R08.T6.f); none for s ≡ 1,
+   *   one slice and one band. R08.T10.a gives a body's.
+   * @throws RangeError as `AtmosphereTables`, for a slicing the tables cannot hold among the rest.
    */
   constructor(
     engine: RenderEngine,
@@ -955,11 +1175,13 @@ export class HillaireAtmosphere {
     tables: TableSizes,
     figure: SpheroidFigure,
     curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
+    gravity: BodyGravity | null = null,
   ) {
     this.#engine = engine;
     this.#sizes = tables;
     this.#figure = figure;
-    this.#tables = new AtmosphereTables(engine, medium, tableRadiusM(figure), curves);
+    this.#gravity = gravity;
+    this.#tables = new AtmosphereTables(engine, medium, tableRadiusM(figure), curves, this.#body());
     this.#frame = createFrameResources(engine, tables);
     this.#uniforms = Object.fromEntries(
       [...VIEW_MEMBERS, "shell"].map((name) => [name, new Float32Array(4)]),
@@ -1049,7 +1271,13 @@ export class HillaireAtmosphere {
    */
   setMedium(medium: AtmosphereMedium, curves: AbsorberCurveSlots = NO_ABSORBER_CURVES): void {
     this.#drawn = null;
-    this.#tables.setMedium(medium, tableRadiusM(this.#figure), curves);
+    this.#tables.setMedium(medium, tableRadiusM(this.#figure), curves, this.#body());
+  }
+
+  /** The body the tables are sliced for ({@link bodyOfFigure} with no gravity). */
+  #body(): AtmosphereBody | null {
+    const gravity = this.#gravity;
+    return gravity === null ? bodyOfFigure(this.#figure) : { figure: this.#figure, gravity };
   }
 
   /**
@@ -1078,14 +1306,14 @@ export class HillaireAtmosphere {
   ): DrawItem {
     const frame = this.#frame;
     const rayMarch = this.#rayMarchTexture(view.viewport);
-    const { inputs, exact } = this.#dispatchFrame(
+    const { inputs, curvature } = this.#dispatchFrame(
       frame.kernels,
       { skyView: frame.skyView, aerial: frame.aerial, rayMarch },
       view,
       suns,
       scene,
     );
-    this.#drawn = this.#published(view, suns, scene, inputs, exact);
+    this.#drawn = this.#published(view, suns, scene, inputs, curvature);
     return {
       mesh: frame.triangle,
       material: frame.composite,
@@ -1102,6 +1330,7 @@ export class HillaireAtmosphere {
         absorberCurves: this.#tables.absorberCurves,
         absorberPressureColumns: this.#tables.absorberPressureColumns,
         lastAbsorberPressureColumn: this.#tables.lastAbsorberPressureColumn,
+        oblateBody: this.#tables.oblateBody,
       },
     };
   }
@@ -1180,7 +1409,7 @@ export class HillaireAtmosphere {
     suns: ReadonlyArray<SunState>,
     scene: AtmosphereScene,
     inputs: AtmosphereInputs,
-    exact: ViewExact,
+    curvature: ViewCurvature,
   ): DrawnFrame {
     const frame = this.#frame;
     const sizes = this.#sizes;
@@ -1188,6 +1417,8 @@ export class HillaireAtmosphere {
     const medium = tables.medium;
     const unit = 1 / scene.exposureScale;
     const scaleCdPerM2: Rgb = [unit, unit, unit];
+    const heightM = skyViewHeight(inputs.heightM, curvature.atmosphereM);
+    const radiusM = curvature.meridionalM;
     return {
       view,
       aerial: {
@@ -1204,6 +1435,7 @@ export class HillaireAtmosphere {
         lineSlots: lineSlotMask(medium),
         bottomRadiusM: tableRadiusM(this.#figure),
         topHeightM: medium.topHeightM,
+        oblateBody: tables.oblateBody,
       },
       skyView: {
         texture: frame.skyView,
@@ -1211,9 +1443,17 @@ export class HillaireAtmosphere {
         scaleCdPerM2,
         zenith: inputs.normal,
         azimuthOrigin: skyAxisOf(inputs.normal, suns),
-        bottomRadiusM: inputs.radiusM - inputs.heightM,
-        heightM: skyViewHeight(inputs.heightM, medium.topHeightM),
-        horizonAngleRad: exact.horizonAngleRad,
+        meridionalRadiusM: curvature.meridionalM,
+        primeVerticalRadiusM: curvature.primeVerticalM,
+        heightM,
+        atmosphereM: curvature.atmosphereM,
+        sphere:
+          curvature.meridionalM === curvature.primeVerticalM
+            ? {
+                bottomRadiusM: radiusM,
+                horizonAngleRad: Math.atan2(radiusM, Math.sqrt(heightM * (2 * radiusM + heightM))),
+              }
+            : null,
       },
     };
   }
@@ -1221,7 +1461,7 @@ export class HillaireAtmosphere {
   /**
    * Fills the view's uniform for this frame and dispatches the three per-frame kernels.
    *
-   * @returns The camera's lookup inputs, and what was formed for it in `f64`.
+   * @returns The camera's lookup inputs, and its curvature, formed for it in `f64`.
    */
   #dispatchFrame(
     kernels: FrameKernels,
@@ -1229,13 +1469,13 @@ export class HillaireAtmosphere {
     view: AtmosphereCamera,
     suns: ReadonlyArray<SunState>,
     scene: AtmosphereScene,
-  ): { readonly inputs: AtmosphereInputs; readonly exact: ViewExact } {
+  ): { readonly inputs: AtmosphereInputs; readonly curvature: ViewCurvature } {
     const engine = this.#engine;
     const sizes = this.#sizes;
-    const inputs = atmosphereInputs(view, this.#figure);
+    const inputs = atmosphereInputs(view, this.#figure, this.#gravity);
     const tables = this.#tables;
     const medium = tables.medium;
-    const exact = this.#fillView(view, suns, scene, inputs, medium);
+    const curvature = this.#fillView(view, suns, scene, inputs, medium);
     const perFrameMedium = packMediumUniform(medium, inputs.radiusM - inputs.heightM, 1);
     const common = {
       buffers: { terms: tables.terms },
@@ -1249,6 +1489,7 @@ export class HillaireAtmosphere {
         absorberCurves: tables.absorberCurves,
         absorberPressureColumns: tables.absorberPressureColumns,
         lastAbsorberPressureColumn: tables.lastAbsorberPressureColumn,
+        oblateBody: tables.oblateBody,
       },
     };
     const viewUniforms = this.#viewBlock();
@@ -1286,7 +1527,7 @@ export class HillaireAtmosphere {
       ),
       "atmosphere view",
     );
-    return { inputs, exact };
+    return { inputs, curvature };
   }
 
   /**
@@ -1339,7 +1580,7 @@ export class HillaireAtmosphere {
     scene: AtmosphereScene,
     inputs: AtmosphereInputs,
     medium: AtmosphereMedium,
-  ): ViewExact {
+  ): ViewCurvature {
     const set = (name: string, values: readonly [number, number, number, number]): void => {
       this.#uniforms[name]?.set(values);
     };
@@ -1364,7 +1605,8 @@ export class HillaireAtmosphere {
     const up = rotate(view.orientation, { x: 0, y: 1, z: 0 });
     const forward = rotate(view.orientation, { x: 0, y: 0, z: -1 });
     const sizes = this.#sizes;
-    const exact = viewExactOf(p, this.#figure, topHeightM, inputs);
+    const exact = viewExactOf(p, this.#figure, medium, inputs, this.#gravity);
+    const curvature = viewCurvatureOf(this.#figure, medium, inputs);
     set("camera", [p.x, p.y, p.z, inputs.heightM]);
     set("up", [n.x, n.y, n.z, inputs.radiusM - inputs.heightM]);
     set("sky", [sources.length, pathSlotsOf(sources), this.#tables.multiScatteringLayers, 1]);
@@ -1396,11 +1638,17 @@ export class HillaireAtmosphere {
       sizes.rayMarchScale,
       sizes.skyViewSamples,
     ]);
-    set("exact", [exact.groundQuadricM2, exact.topQuadricM2, exact.horizonAngleRad, 0]);
+    set("exact", [exact.groundQuadricM2, exact.topQuadricM2, exact.localScaleHeightM, 0]);
+    set("curvature", [
+      curvature.meridionalM,
+      curvature.primeVerticalM,
+      curvature.gravityRatio,
+      curvature.atmosphereM,
+    ]);
     // The composite's own: the atmosphere's height, formed in f64 (R08.T6.g), how many of the
     // medium's terms are absorbers, whose columns its transmittance to space reads (R08.T6.c), and
     // its line slots, whose pressure channels the read takes (R08.T4.d).
     set("shell", [topHeightM, absorberCount(medium), lineSlotMask(medium), 0]);
-    return exact;
+    return curvature;
   }
 }

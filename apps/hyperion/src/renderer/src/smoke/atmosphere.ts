@@ -47,6 +47,7 @@ import {
 import {
   type AtmosphereCamera,
   atmosphereInputs,
+  bodyOfFigure,
   type FrameOutputs,
   HillaireAtmosphere,
   skyViewHeight,
@@ -63,6 +64,7 @@ import {
   TWILIGHT_TOLERANCE,
 } from "../view/atmosphere/marchSteps";
 import { type AtmosphereMedium, phaseTable, tabulatedDensity } from "../view/atmosphere/medium";
+import type { BodyGravity } from "../view/atmosphere/oblate";
 import {
   maxDistanceM,
   opticalDepthToTop,
@@ -72,6 +74,7 @@ import {
 import {
   absorberCount,
   type AbsorberCurveSlots,
+  type AtmosphereBody,
   AtmosphereTables,
   kernelMedium,
   lastPressureColumnSize,
@@ -79,26 +82,42 @@ import {
   NO_ABSORBER_CURVES,
   PHASE_TABLE_ENTRIES,
   type TableSize,
+  type TablesBand,
+  tablesPlanOf,
+  type TransmittanceTextures,
   TRANSMITTANCE_SIZE,
 } from "../view/atmosphere/tables";
 import {
   frameTwinView,
+  type OblatePlanetTwin,
+  oblateRayMarchRayAlongTwin,
+  oblateRayMarchRayTwin,
+  oblateRayMarchTexelTwin,
+  oblateSkyViewMarchTwin,
+  oblateSkyViewRayTwin,
   type PlanetTwin,
   marchTwin,
   mediumMarchEdgesM,
+  type RayMarchRay,
   piecedSteps,
   rayMarchRayAlongTwin,
   rayMarchRayTwin,
   rayMarchTexelTwin,
   skyViewRayTwin,
   tableSources,
+  type TwinBand,
+  type TwinRay,
   type TwinTable,
   type TwinTransmittance,
   type TwinView,
+  type TwinVolume,
 } from "../view/atmosphere/tablesCpu";
 import {
+  earthBody,
   fourAbsorberMedium,
   lineAbsorberMedium,
+  saturnBody,
+  saturnClassMedium,
   venusClassMedium,
 } from "../test/atmosphereFixtures";
 import {
@@ -229,6 +248,15 @@ const WGS84: SpheroidFigure = {
   equatorialRadiusM: 6_378_137,
   polarRadiusM: 6_378_137 * (1 - 1 / 298.257223563),
 };
+
+/**
+ * Earth on WGS 84 with its normal gravity (R08.T3.d), whose s the kernels take since R08.T6.f
+ * (Design note 17): one slice and one band, s within ±0.27% of 1, every per-view sphere R_α.
+ */
+const EARTH_BODY: AtmosphereBody = earthBody();
+
+/** The gravity the smoke's WGS 84 atmospheres are built with: {@link EARTH_BODY}'s (R08.T6.f). */
+const EARTH_GRAVITY: BodyGravity = EARTH_BODY.gravity;
 
 /** The check frames' size, device pixels. */
 const FRAME_SIZE = { widthPx: 64, heightPx: 32 } as const;
@@ -892,6 +920,11 @@ interface TwinAgreement {
   readonly channels: number;
   /** The channels that passed by the twin's envelope (`decision-r08-f32.md` §10.3), recorded. */
   readonly envelope: readonly string[];
+  /**
+   * The channels that passed by an envelope holding the split the kernel may take at its rounding
+   * ({@link TexelEnvelope.split}), recorded apart and outside §10.3's cap (R08.T6.f).
+   */
+  readonly split: readonly string[];
   /** The worst envelope channel's distance from its envelope's middle, of its half-width. */
   readonly worstInEnvelope: number;
 }
@@ -967,6 +1000,7 @@ function twinAgreement(
   let floorCarried = 0;
   let worstInEnvelope = 0;
   const envelope: string[] = [];
+  const split: string[] = [];
   const where = (i: number): string => {
     const x = i % twin.widthTexels;
     const y = Math.floor(i / twin.widthTexels) % twin.heightTexels;
@@ -1004,7 +1038,7 @@ function twinAgreement(
             worstInEnvelope,
             Math.abs(actual - (low + high) / 2) / (half + tolerance),
           );
-          envelope.push(
+          (texelEnvelope.split ? split : envelope).push(
             `${where(i)} c${c} at ${(texelEnvelope.tangentHeightM / 1_000).toFixed(2)} km, spread ${(((high - low) / Math.max(Math.abs(expected), floor)) * 1e3).toFixed(2)} × 10⁻³`,
           );
           continue;
@@ -1026,6 +1060,7 @@ function twinAgreement(
     floorCarried,
     channels: count * channels.length,
     envelope,
+    split,
     worstInEnvelope,
   };
 }
@@ -1314,6 +1349,37 @@ function storedTransmittance(
   };
 }
 
+/** Layer `layer` of a 2D array's readback of `layers` layers. */
+function layerOf(texels: Float32Array, layers: number, layer: number): Float32Array {
+  const per = texels.length / layers;
+  return texels.subarray(layer * per, (layer + 1) * per);
+}
+
+/**
+ * The GPU's stored transmittance tables of each κ slice as the twins read them (R08.T6.f): layer k
+ * of each 2D array, with the lights' curves.
+ */
+function storedSlices(
+  gpu: PlanetReadback,
+  medium: AtmosphereMedium,
+  curves: AbsorberCurveSlots,
+  slices: number,
+): TwinTransmittance[] {
+  return Array.from({ length: slices }, (_, k) => ({
+    transmittance: asTwinTable(layerOf(gpu.transmittance, slices, k), TRANSMITTANCE_SIZE),
+    absorberColumns: asTwinTable(layerOf(gpu.absorberColumns, slices, k), TRANSMITTANCE_SIZE),
+    absorberPressureColumns: asTwinTable(
+      layerOf(gpu.absorberPressureColumns, slices, k),
+      TRANSMITTANCE_SIZE,
+    ),
+    lastAbsorberPressureColumn: asTwinTable(
+      layerOf(gpu.lastAbsorberPressureColumn, slices, k),
+      lastPressureColumnSize(medium),
+    ),
+    curves,
+  }));
+}
+
 /**
  * The optical depth above which the stored transmittance fell under rgba16float's least normal,
  * 2⁻¹⁴: −ln 2⁻¹⁴ = 9.70, the channels the half float's floor carried while T was stored
@@ -1556,14 +1622,28 @@ interface FrameAgreements {
   readonly compositeWithinRange: boolean;
 }
 
+/**
+ * The twins' planet a frame's checks read, over the GPU's own per-planet tables: a sphere's, with
+ * no body's gravity, whose twins are R08.T6.b's; or an oblate body's slices and bands, whose twins
+ * are R08.T6.e's (R08.T6.f), Earth's among them, its per-view spheres R_α.
+ */
+type SmokePlanet =
+  | { readonly kind: "sphere"; readonly twin: PlanetTwin }
+  | { readonly kind: "oblate"; readonly twin: OblatePlanetTwin };
+
 /** The per-planet tables an atmosphere built, read back, as the twins' planet for `read`. */
 async function planetOf(
   engine: RenderEngine,
   atmosphere: HillaireAtmosphere,
   read: AtmosphereMedium,
   figure: SpheroidFigure,
-): Promise<PlanetTwin> {
+): Promise<SmokePlanet> {
   const tables = await readPlanetTables(engine, atmosphere.tables);
+  // An oblate figure's tables always carry a body, its gravity's or one of s ≡ 1 (`bodyOfFigure`).
+  const body = atmosphere.tables.body ?? bodyOfFigure(figure);
+  if (body !== null) {
+    return { kind: "oblate", twin: oblatePlanetOf(tables, atmosphere.tables, read, body) };
+  }
   // One layer a light slot under an absorber (R08.T7), read back together.
   const bySlot = layersOf(tables.multiScattering, atmosphere.tables.multiScatteringLayers).map(
     (layer) => asTwinTable(layer, MULTI_SCATTERING_SIZE),
@@ -1573,12 +1653,94 @@ async function planetOf(
     throw new Error("the multiple-scattering table has a layer");
   }
   return {
-    medium: read,
-    bottomRadiusM: tableRadiusM(figure),
-    ...storedTransmittance(tables, read, atmosphere.tables.curves),
-    multiScattering: first,
-    ...(bySlot.length > 1 ? { multiScatteringBySlot: bySlot } : {}),
+    kind: "sphere",
+    twin: {
+      medium: read,
+      bottomRadiusM: tableRadiusM(figure),
+      ...storedTransmittance(tables, read, atmosphere.tables.curves),
+      multiScattering: first,
+      ...(bySlot.length > 1 ? { multiScatteringBySlot: bySlot } : {}),
+    },
   };
+}
+
+/**
+ * An oblate body's twins' planet over the GPU's own tables (R08.T6.f): each κ slice's stored
+ * transmittance tables and each band's multiple-scattering layers, as `oblatePlanetTwin` would have
+ * built them; a band's own transmittance, which no per-view twin reads, stands as slice 0's.
+ */
+function oblatePlanetOf(
+  gpu: PlanetReadback,
+  tables: AtmosphereTables,
+  read: AtmosphereMedium,
+  body: AtmosphereBody,
+): OblatePlanetTwin {
+  const plan = tables.plan;
+  const slices = storedSlices(gpu, read, tables.curves, plan.kappa.length);
+  const perBand = tables.layersPerBand;
+  const layers = layersOf(gpu.multiScattering, tables.multiScatteringLayers).map((layer) =>
+    asTwinTable(layer, MULTI_SCATTERING_SIZE),
+  );
+  const [first] = slices;
+  if (first === undefined) {
+    throw new Error("the transmittance tables have a slice");
+  }
+  return {
+    medium: read,
+    body,
+    referenceRadiusM: tableRadiusM(body.figure),
+    curves: tables.curves,
+    kappa: Float64Array.from(plan.kappa),
+    slices,
+    bands: plan.bands.map((band, b) => ({
+      gravityRatio: band.gravityRatio,
+      latitudeRad: band.latitudeRad,
+      bottomRadiusM: band.bottomRadiusM,
+      transmittance: first,
+      multiScatteringBySlot: layers.slice(b * perBand, (b + 1) * perBand),
+    })),
+  };
+}
+
+/** A frame's three per-view twins, begun on the twin workers. */
+interface FrameTwins {
+  readonly skyView: Promise<TwinTable>;
+  readonly aerial: Promise<TwinVolume>;
+  readonly rayMarch: Promise<TwinTable>;
+}
+
+/**
+ * Begins a frame's per-view twins on the twin workers: a sphere's (R08.T6.b) or an oblate body's
+ * (R08.T6.e's, since R08.T6.f), over a scene of one reversed-Z depth.
+ */
+function frameTwinsOf(
+  twins: TwinPool,
+  planet: SmokePlanet,
+  view: TwinView,
+  sizes: TableSizes,
+  depth: number,
+): FrameTwins {
+  const volume = sizes.aerialPerspective;
+  const perSlice = sizes.aerialPerspectiveSamplesPerSlice;
+  const reachM = sizes.aerialPerspectiveReachM;
+  let begun: FrameTwins;
+  switch (planet.kind) {
+    case "sphere":
+      begun = {
+        skyView: twins.skyView(planet.twin, view, sizes.skyView, sizes.skyViewSamples),
+        aerial: twins.aerialPerspective(planet.twin, view, volume, perSlice, reachM),
+        rayMarch: twins.rayMarch(planet.twin, view, sizes, depth),
+      };
+      break;
+    case "oblate":
+      begun = {
+        skyView: twins.oblateSkyView(planet.twin, view, sizes.skyView, sizes.skyViewSamples),
+        aerial: twins.oblateAerialPerspective(planet.twin, view, volume, perSlice, reachM),
+        rayMarch: twins.oblateRayMarch(planet.twin, view, sizes, depth),
+      };
+      break;
+  }
+  return begun;
 }
 
 /** A multiple-scattering readback's layers, each {@link MULTI_SCATTERING_SIZE}'s texels. */
@@ -1599,7 +1761,7 @@ function layersOf(texels: Float32Array, layers: number): Float32Array[] {
 async function frameAgreements(
   engine: RenderEngine,
   atmosphere: HillaireAtmosphere,
-  planet: PlanetTwin,
+  planet: SmokePlanet,
   figure: SpheroidFigure,
   sizes: TableSizes,
   frame: TwinFrame,
@@ -1607,24 +1769,16 @@ async function frameAgreements(
 ): Promise<() => Promise<FrameAgreements>> {
   const camera = equatorCamera(frame.heightM, FRAME_SIZE, figure);
   const view = frameViewOf(atmosphere, camera, frame.suns, figure);
-  const aerialTwin = twins.aerialPerspective(
-    planet,
-    view,
-    sizes.aerialPerspective,
-    sizes.aerialPerspectiveSamplesPerSlice,
-    sizes.aerialPerspectiveReachM,
-  );
-  const skyViewTwin = twins.skyView(planet, view, sizes.skyView, sizes.skyViewSamples);
   const surfaceDepth = frame.surfaceM === null ? 0 : NEAR_M / frame.surfaceM;
-  const rayMarchTwin = twins.rayMarch(planet, view, sizes, surfaceDepth);
+  const frameTwins = frameTwinsOf(twins, planet, view, sizes, surfaceDepth);
   const composite = await compositeFrame(engine, atmosphere, camera, frame.suns, frame.surfaceM);
   const gpu = await readFrameOutputs(engine, atmosphere);
   return async () => {
-    const aerial = await aerialTwin;
+    const aerial = await frameTwins.aerial;
     return {
-      skyView: twinAgreement(gpu.skyView, await skyViewTwin, false),
+      skyView: twinAgreement(gpu.skyView, await frameTwins.skyView, false),
       aerial: twinAgreement(gpu.aerial, aerial, true),
-      rayMarch: twinAgreement(gpu.rayMarch, await rayMarchTwin, true),
+      rayMarch: twinAgreement(gpu.rayMarch, await frameTwins.rayMarch, true),
       compositeWithinRange: withinHalfRange(composite),
     };
   };
@@ -1658,7 +1812,14 @@ async function checkFrameTwins(
   ];
   const medium = entry.medium;
   const sizes = twinSizes(TABLE_SIZES[setting]);
-  const atmosphere = new HillaireAtmosphere(engine, medium, sizes, WGS84, entry.curves);
+  const atmosphere = new HillaireAtmosphere(
+    engine,
+    medium,
+    sizes,
+    WGS84,
+    entry.curves,
+    EARTH_GRAVITY,
+  );
   try {
     const planet = await planetOf(engine, atmosphere, read, WGS84);
     for (const frame of frames) {
@@ -1869,7 +2030,7 @@ async function checkBinaryFrames(
   twins: TwinPool,
 ): Promise<void> {
   const sizes = twinSizes(TABLE_SIZES[setting]);
-  const atmosphere = new HillaireAtmosphere(engine, medium, sizes, WGS84, curves);
+  const atmosphere = new HillaireAtmosphere(engine, medium, sizes, WGS84, curves, EARTH_GRAVITY);
   try {
     const planet = await planetOf(engine, atmosphere, read, WGS84);
     for (const frame of BINARY_FRAMES) {
@@ -2021,45 +2182,59 @@ function sphereFigure(radiusM: number): SpheroidFigure {
   return { equatorialRadiusM: radiusM, polarRadiusM: radiusM };
 }
 
-/** One body of R08.T6.g's checks: its figure, its cameras' heights and its limb cameras. */
+/**
+ * One body of R08.T6.g's and R08.T6.f's checks: its figure, its medium and gravity, its cameras'
+ * heights, its limb cameras and any further view.
+ */
 interface HeightsBody {
-  /** The task whose check it is, which names the check: R08.T6.g's, or R08.T6.i's slab Earth. */
+  /**
+   * The task whose check it is, which names the check: R08.T6.g's, R08.T6.i's slab Earth or
+   * R08.T6.f's.
+   */
   readonly task: string;
   readonly name: string;
   readonly figure: SpheroidFigure;
+  readonly medium: AtmosphereMedium;
+  readonly curves: AbsorberCurveSlots;
+  /** The body's gravity (R08.T3.d), whose slicing the tables take (R08.T6.f); null for s ≡ 1. */
+  readonly gravity: BodyGravity | null;
   /** The heights of the views on high, m: R08.T6.g's 2 m to 2 km, and 1 m on the 2 R⊕ body. */
   readonly heightsM: readonly number[];
-  /** The limb cameras' distances from the centre, m. */
+  /** The limb cameras' distances from the centre, m, each looking along the equatorial limb. */
   readonly limbsM: readonly number[];
+  /** Views on high beyond the heights' and the limbs' (R08.T6.f's Saturn-class figure's). */
+  readonly moreViews: readonly HeightsView[];
 }
 
 /**
- * `decision-r08-f32.md` §6.2's bodies, each with Earth's medium, whose aerosol, 1.2 km in scale
- * height, is the most sensitive profile the kernels hold: Earth (WGS 84), a 2 R⊕ sphere
- * (12,742,017.6 m, the largest solid body the generator makes) and a sphere of Saturn's
- * equatorial radius (60,268,000 m).
+ * `decision-r08-f32.md` §6.2's spheres, each with R05's Earth medium, whose aerosol, 1.2 km in
+ * scale height, is the most sensitive profile the kernels hold: a 2 R⊕ sphere (12,742,017.6 m, the
+ * largest solid body the generator makes) and a sphere of Saturn's equatorial radius
+ * (60,268,000 m). Earth (WGS 84), R08.T6.g's third body, is R08.T6.f's since its tables and views
+ * stand on its slicing and spheres R_α ({@link SLICES_EARTH}); on a sphere they are R08.T6.g's.
  */
 const HEIGHTS_BODIES: readonly HeightsBody[] = [
   {
     task: "R08.T6.g",
-    name: "Earth",
-    figure: WGS84,
-    heightsM: [2, 20, 200, 2_000],
-    limbsM: [WGS84.equatorialRadiusM + 400_000, 4.2e7],
-  },
-  {
-    task: "R08.T6.g",
     name: "the 2 R⊕ sphere",
     figure: sphereFigure(12_742_017.6),
+    medium: R05_EARTH_REFERENCE,
+    curves: NO_ABSORBER_CURVES,
+    gravity: null,
     heightsM: [1, 2, 20, 200, 2_000],
     limbsM: [],
+    moreViews: [],
   },
   {
     task: "R08.T6.g",
     name: "the Saturn-radius sphere",
     figure: sphereFigure(60_268_000),
+    medium: R05_EARTH_REFERENCE,
+    curves: NO_ABSORBER_CURVES,
+    gravity: null,
     heightsM: [2, 20, 200, 2_000],
     limbsM: [60_268_000 + 400_000],
+    moreViews: [],
   },
 ];
 
@@ -2098,6 +2273,40 @@ interface TexelEnvelope {
   readonly low: readonly number[];
   readonly high: readonly number[];
   readonly tangentHeightM: number;
+  /**
+   * Whether the envelope also holds the twin's march at the split the kernel's `f32` may take
+   * instead of the twin's, its share standing at its rounding ({@link SPLIT_RESOLUTION_STEPS};
+   * R08.T6.f's sky view from above the air).
+   */
+  readonly split: boolean;
+}
+
+/**
+ * How near its rounding a march's split share may stand, in steps, for the kernel's `f32` to take
+ * the other side of it (`marchSteps.ts`'s marchSplit, floor(n √b ÷ (√b + √a) + ½)): 2⁻¹⁴. The
+ * kernel forms each side's length, up to 10⁷ m, to about a metre, which leaves the share to about
+ * n × 10⁻⁷ steps; the sky view from above the air holds its camera 1 m inside its shell, so that a
+ * ray that dips and leaves through the top has its sides within metres of each other, and the
+ * share of an odd count within about 10⁻⁵ of its rounding (R08.T6.f).
+ */
+const SPLIT_RESOLUTION_STEPS = 2 ** -14;
+
+/**
+ * Where a ray's split share stands against its rounding (`marchSteps.ts`'s marchSplit): the
+ * argument floor takes, n √b ÷ (√b + √a) + ½, less the nearest integer, in steps.
+ */
+function splitRoundingOf(ray: TwinRay, samples: number): number {
+  const o = ray.originM;
+  const d = ray.direction;
+  const nearestM = -(o.x * d.x + o.y * d.y + o.z * d.z);
+  const lowestM = Math.min(Math.max(nearestM, ray.tStartM), ray.tEndM);
+  const rootBefore = Math.sqrt(lowestM - ray.tStartM);
+  const total = rootBefore + Math.sqrt(ray.tEndM - lowestM);
+  if (!(total > 0)) {
+    return 0.5;
+  }
+  const argument = (samples * rootBefore) / total + 0.5;
+  return argument - Math.round(argument);
 }
 
 /** Each channel's least and greatest over a set of values, RGBA or RGB. */
@@ -2167,25 +2376,31 @@ function memoised<T>(provide: (index: number) => T): (index: number) => T {
  * along them, is clipped and marched again in the twin: eight rays beside the nominal.
  */
 function rayMarchEnvelope(
-  planet: PlanetTwin,
+  planet: SmokePlanet,
   view: TwinView,
   sizes: TableSizes,
   twin: TwinTable,
 ): (index: number) => TexelEnvelope | null {
   const { widthTexels: w, heightTexels: h } = twin;
-  const medium = planet.medium;
   const figure = view.figure;
   const p = view.cameraM;
   const offsetM = ORIGIN_RESOLUTION * Math.hypot(p.x, p.y, p.z);
+  // A texel's ray, clipped and marched as the planet's twin clips and marches it: a sphere's
+  // (R08.T6.b's) or an oblate body's (R08.T6.e's, R08.T6.f).
+  const nominalAt = (u: number, v: number): RayMarchRay | null =>
+    planet.kind === "sphere"
+      ? rayMarchRayTwin(planet.twin.medium, view, u, v, 0, sizes.aerialPerspectiveReachM)
+      : oblateRayMarchRayTwin(planet.twin, view, u, v, 0, sizes.aerialPerspectiveReachM);
+  const along = (origin: Vec3, d: Vec3): RayMarchRay | null =>
+    planet.kind === "sphere"
+      ? rayMarchRayAlongTwin(planet.twin.medium, view, origin, d, Number.POSITIVE_INFINITY)
+      : oblateRayMarchRayAlongTwin(planet.twin, view, origin, d, Number.POSITIVE_INFINITY);
+  const texelOf = (ray: RayMarchRay | null): ArrayLike<number> =>
+    planet.kind === "sphere"
+      ? rayMarchTexelTwin(planet.twin, view, sizes, ray)
+      : oblateRayMarchTexelTwin(planet.twin, view, sizes, ray);
   return memoised((index) => {
-    const nominal = rayMarchRayTwin(
-      medium,
-      view,
-      ((index % w) + 0.5) / w,
-      (Math.floor(index / w) + 0.5) / h,
-      0,
-      sizes.aerialPerspectiveReachM,
-    );
+    const nominal = nominalAt(((index % w) + 0.5) / w, (Math.floor(index / w) + 0.5) / h);
     if (nominal === null) {
       return null;
     }
@@ -2193,27 +2408,13 @@ function rayMarchEnvelope(
     const values: Array<ArrayLike<number>> = [twin.texels.subarray(index * 4, index * 4 + 4)];
     for (const e of across(d)) {
       for (const sign of [1, -1]) {
-        const turnedRay = rayMarchRayAlongTwin(
-          medium,
-          view,
-          p,
-          turned(d, e, sign * RAY_RESOLUTION_RAD),
-          Number.POSITIVE_INFINITY,
-        );
-        values.push(rayMarchTexelTwin(planet, view, sizes, turnedRay));
+        values.push(texelOf(along(p, turned(d, e, sign * RAY_RESOLUTION_RAD))));
         const moved = {
           x: p.x + e.x * sign * offsetM,
           y: p.y + e.y * sign * offsetM,
           z: p.z + e.z * sign * offsetM,
         };
-        values.push(
-          rayMarchTexelTwin(
-            planet,
-            view,
-            sizes,
-            rayMarchRayAlongTwin(medium, view, moved, d, Number.POSITIVE_INFINITY),
-          ),
-        );
+        values.push(texelOf(along(moved, d)));
       }
     }
     // The tangent height: the ray's closest approach to the centre in the space scaled to a sphere
@@ -2227,7 +2428,11 @@ function rayMarchEnvelope(
       z: sp.x * sd.y - sp.y * sd.x,
     };
     const closest = Math.hypot(cross.x, cross.y, cross.z) / Math.hypot(sd.x, sd.y, sd.z);
-    return { ...rangeOf(values, 4), tangentHeightM: closest - figure.equatorialRadiusM };
+    return {
+      ...rangeOf(values, 4),
+      tangentHeightM: closest - figure.equatorialRadiusM,
+      split: false,
+    };
   });
 }
 
@@ -2236,6 +2441,19 @@ function rayMarchEnvelope(
  * azimuth, marched again in the twin on the camera's sphere: four rays beside the nominal.
  */
 function skyViewEnvelope(
+  planet: SmokePlanet,
+  view: TwinView,
+  sizes: TableSizes,
+  twin: TwinTable,
+): (index: number) => TexelEnvelope {
+  if (planet.kind === "oblate") {
+    return oblateSkyViewEnvelope(planet.twin, view, sizes, twin);
+  }
+  return sphereSkyViewEnvelope(planet.twin, view, sizes, twin);
+}
+
+/** {@link skyViewEnvelope} on a sphere's twins (R08.T6.g). */
+function sphereSkyViewEnvelope(
   planet: PlanetTwin,
   view: TwinView,
   sizes: TableSizes,
@@ -2270,7 +2488,61 @@ function skyViewEnvelope(
     }
     // The tangent height on the camera's sphere: r sin(zenith) less its radius.
     const r = ray.originM.z;
-    return { ...rangeOf(values, 3), tangentHeightM: r * Math.hypot(d.x, d.y) - bottomM };
+    return {
+      ...rangeOf(values, 3),
+      tangentHeightM: r * Math.hypot(d.x, d.y) - bottomM,
+      split: false,
+    };
+  });
+}
+
+/**
+ * {@link skyViewEnvelope} on an oblate body's twins (R08.T6.f): each texel's ray on its column's
+ * sphere R_α, turned as on a sphere, marched again by R08.T6.e's oblate march.
+ */
+function oblateSkyViewEnvelope(
+  planet: OblatePlanetTwin,
+  view: TwinView,
+  sizes: TableSizes,
+  twin: TwinTable,
+): (index: number) => TexelEnvelope {
+  const samples = Math.max(Math.floor(sizes.skyViewSamples), 2);
+  const w = twin.widthTexels;
+  return memoised((index) => {
+    const nominal = oblateSkyViewRayTwin(
+      planet,
+      view,
+      index % w,
+      Math.floor(index / w),
+      sizes.skyView,
+    );
+    const { ray, bottomRadiusM, atmosphereM } = nominal;
+    const shell = { bottomRadiusM, topRadiusM: bottomRadiusM + atmosphereM };
+    const d = ray.direction;
+    const values: Array<ArrayLike<number>> = [twin.texels.subarray(index * 4, index * 4 + 3)];
+    for (const e of across(d)) {
+      for (const sign of [1, -1]) {
+        const direction = turned(d, e, sign * SKY_VIEW_RESOLUTION_RAD);
+        const again = {
+          ...nominal,
+          ray: { ...ray, direction, tEndM: maxDistanceM(shell, ray.originM.z, direction.z) },
+        };
+        values.push(oblateSkyViewMarchTwin(planet, view, again, samples));
+      }
+    }
+    // At its rounding the kernel may take the split the twin does not: a step moved to the side
+    // before t* where the twin's share falls just short of it, from it where just over.
+    const rounding = splitRoundingOf(ray, samples);
+    const split = Math.abs(rounding) < SPLIT_RESOLUTION_STEPS;
+    if (split) {
+      values.push(oblateSkyViewMarchTwin(planet, view, nominal, samples, rounding < 0 ? 1 : -1));
+    }
+    const r = ray.originM.z;
+    return {
+      ...rangeOf(values, 3),
+      tangentHeightM: r * Math.hypot(d.x, d.y) - bottomRadiusM,
+      split,
+    };
   });
 }
 
@@ -2321,6 +2593,86 @@ function limbSun(distanceM: number, figure: SpheroidFigure, elevationDeg: number
   };
 }
 
+/**
+ * A camera `distanceM` from the polar axis in the plane y = 0, looking along +x over the north
+ * pole's limb at the tangent height {@link LIMB_CENTRE_M}, its frame spanning
+ * ±{@link LIMB_HALF_SPAN_M} of tangent height (R08.T6.f's Saturn-class limb over the pole).
+ */
+function polarLimbCamera(distanceM: number, figure: SpheroidFigure): AtmosphereCamera {
+  const forward = { x: 1, y: 0, z: 0 };
+  const up = { x: 0, y: 0, z: 1 };
+  const right = { x: 0, y: -1, z: 0 };
+  const tanY = LIMB_HALF_SPAN_M / distanceM;
+  const aspect = FRAME_SIZE.widthPx / FRAME_SIZE.heightPx;
+  return {
+    positionM: { x: -distanceM, y: 0, z: figure.polarRadiusM + LIMB_CENTRE_M },
+    orientation: quaternionFromRows([
+      { x: right.x, y: up.x, z: -forward.x },
+      { x: right.y, y: up.y, z: -forward.y },
+      { x: right.z, y: up.z, z: -forward.z },
+    ]),
+    fovXRad: 2 * Math.atan(aspect * tanY),
+    viewport: FRAME_SIZE,
+  };
+}
+
+/** The sun at an elevation above the horizon of a {@link polarLimbCamera}'s tangent point, ahead. */
+function polarLimbSun(elevationDeg: number): SunState {
+  const e = (elevationDeg * Math.PI) / 180;
+  return {
+    directionBodyFixed: { x: Math.cos(e), y: 0, z: Math.sin(e) },
+    illuminanceLx: SUN_ILLUMINANCE_LX,
+    angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
+  };
+}
+
+/**
+ * A camera `heightM` above the geodetic latitude φ at longitude 0 of `figure`, looking north along
+ * the horizon (R08.T6.f's Saturn-class figure's mid-latitude view).
+ */
+function latitudeCamera(
+  figure: SpheroidFigure,
+  latitudeRad: number,
+  heightM: number,
+): AtmosphereCamera {
+  const a = figure.equatorialRadiusM;
+  const e2 = 1 - (figure.polarRadiusM / a) ** 2;
+  const sin = Math.sin(latitudeRad);
+  const cos = Math.cos(latitudeRad);
+  const n = a / Math.sqrt(1 - e2 * sin * sin);
+  const up = { x: cos, y: 0, z: sin };
+  const north = { x: -sin, y: 0, z: cos };
+  const aspect = FRAME_SIZE.widthPx / FRAME_SIZE.heightPx;
+  // Camera +x to east (+y here), +y to up and −z to north: the rows of that rotation.
+  return {
+    positionM: { x: (n + heightM) * cos, y: 0, z: (n * (1 - e2) + heightM) * sin },
+    orientation: quaternionFromRows([
+      { x: 0, y: up.x, z: -north.x },
+      { x: 1, y: up.y, z: -north.y },
+      { x: 0, y: up.z, z: -north.z },
+    ]),
+    fovXRad: 2 * Math.atan(aspect),
+    viewport: FRAME_SIZE,
+  };
+}
+
+/** The sun at an elevation above the horizon of a {@link latitudeCamera}, towards the north. */
+function northSunAt(latitudeRad: number, elevationDeg: number): SunState {
+  const e = (elevationDeg * Math.PI) / 180;
+  const sin = Math.sin(latitudeRad);
+  const cos = Math.cos(latitudeRad);
+  // Up (cos φ, 0, sin φ) and north (−sin φ, 0, cos φ).
+  return {
+    directionBodyFixed: {
+      x: Math.sin(e) * cos - Math.cos(e) * sin,
+      y: 0,
+      z: Math.sin(e) * sin + Math.cos(e) * cos,
+    },
+    illuminanceLx: SUN_ILLUMINANCE_LX,
+    angularRadiusRad: SUN_ANGULAR_RADIUS_RAD,
+  };
+}
+
 /** One view of R08.T6.g's checks. */
 interface HeightsView {
   readonly name: string;
@@ -2360,6 +2712,7 @@ function heightsViews(body: HeightsBody, setting: QualitySetting): HeightsView[]
         });
       }
     }
+    views.push(...body.moreViews);
   }
   return views;
 }
@@ -2458,10 +2811,14 @@ function recordHeights(
     result.envelope.length === 0
       ? "none by the envelope"
       : `${result.envelope.length} by the envelope (${(share * 100).toFixed(2)}% of ${result.channels}; worst at ${result.worstInEnvelope.toFixed(2)} of its half-width): ${result.envelope.join("; ")}`;
+  const split =
+    result.split.length === 0
+      ? ""
+      : `; ${result.split.length} by the split's rounding (${((result.split.length / result.channels) * 100).toFixed(2)}%): ${result.split.join("; ")}`;
   checks.check(
     `${task} ${name}, the ${arm} arm, agrees with the CPU twin to 10⁻³`,
     result.worst <= 1 && result.above > 0 && share <= ENVELOPE_SHARE_CAP,
-    `worst ${result.at}; largest ${show([result.largest])}${limited}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound, ${result.floorCarried} carried by the floor; ${envelope}`,
+    `worst ${result.at}; largest ${show([result.largest])}${limited}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound, ${result.floorCarried} carried by the floor; ${envelope}${split}`,
   );
 }
 
@@ -2504,7 +2861,7 @@ async function checkPlanetArms(
   read: AtmosphereMedium,
   transmittanceOfMedium: Promise<TwinTable>,
   twins: TwinPool,
-): Promise<PlanetTwin> {
+): Promise<SmokePlanet> {
   const bottomM = tableRadiusM(body.figure);
   const gpu = await readPlanetTables(engine, atmosphere.tables);
   const stored = storedTransmittance(gpu, read, atmosphere.tables.curves);
@@ -2550,11 +2907,169 @@ async function checkPlanetArms(
   // The kernel arm is read back before the frames draw.
   await armReadback;
   return {
-    medium: read,
-    bottomRadiusM: bottomM,
-    ...stored,
-    multiScattering: asTwinTable(gpu.multiScattering, MULTI_SCATTERING_SIZE),
+    kind: "sphere",
+    twin: {
+      medium: read,
+      bottomRadiusM: bottomM,
+      ...stored,
+      multiScattering: asTwinTable(gpu.multiScattering, MULTI_SCATTERING_SIZE),
+    },
   };
+}
+
+/** A latitude band's tables and their twins (R08.T6.f). */
+interface BandTwins {
+  readonly band: TablesBand;
+  /** The band's own transmittance table as the GPU stored it. */
+  readonly stored: Float32Array;
+  /** Its twin of the medium in the band's frame. */
+  readonly ofMedium: Promise<TwinTransmittance>;
+  /** The band's twin over the GPU's own transmittance tables. */
+  readonly overGpu: Promise<TwinBand>;
+}
+
+/**
+ * Latitude band `band`'s own transmittance tables built anew (`AtmosphereTables.bandTransmittance`),
+ * read back and released (R08.T6.f).
+ */
+async function readBandTransmittance(
+  engine: RenderEngine,
+  tables: AtmosphereTables,
+  band: number,
+): Promise<PlanetReadback> {
+  const made: TransmittanceTextures = tables.bandTransmittance(band);
+  const read = async (texture: TextureHandle): Promise<Float32Array> =>
+    halfTexels(await engine.readTexture(texture, 0, undefined, "tolerance"));
+  try {
+    return {
+      transmittance: await read(made.transmittance),
+      absorberColumns: await read(made.absorberColumns),
+      absorberPressureColumns: await read(made.absorberPressureColumns),
+      lastAbsorberPressureColumn: await read(made.lastAbsorberPressureColumn),
+      multiScattering: new Float32Array(0),
+    };
+  } finally {
+    engine.releaseTexture(made.transmittance);
+    engine.releaseTexture(made.absorberColumns);
+    engine.releaseTexture(made.absorberPressureColumns);
+    engine.releaseTexture(made.lastAbsorberPressureColumn);
+  }
+}
+
+/**
+ * The per-planet tables of an oblate body's `atmosphere` against their twins in both arms (R08.T6.f):
+ * each κ slice's transmittance against the twin of the medium on its sphere κ_k R_ref; each latitude
+ * band's own transmittance, built anew as the build builds it (`AtmosphereTables.bandTransmittance`),
+ * against its twin in the band's frame, stored; and each band's multiple-scattering layers against
+ * R08.T6.e's band (`twinBandOf`) over the GPU's band transmittance. The kernel arm reads the same
+ * stored tables.
+ *
+ * @returns The twins' planet over the GPU's stored tables, which the per-view twins read.
+ */
+async function checkOblatePlanetArms(
+  engine: RenderEngine,
+  ordered: OrderedChecks,
+  body: HeightsBody,
+  atmosphereBody: AtmosphereBody,
+  atmosphere: HillaireAtmosphere,
+  read: AtmosphereMedium,
+  slicesOfMedium: ReadonlyArray<Promise<TwinTransmittance>>,
+  twins: TwinPool,
+): Promise<SmokePlanet> {
+  const tables = atmosphere.tables;
+  const plan = tables.plan;
+  const gpu = await readPlanetTables(engine, tables);
+  const planet = oblatePlanetOf(gpu, tables, read, atmosphereBody);
+  const curves = tables.curves;
+  const perBand = tables.layersPerBand;
+  const bands: BandTwins[] = [];
+  for (const [b, band] of plan.bands.entries()) {
+    // Each band's tables are read back before the next band's are built.
+    // oxlint-disable-next-line no-await-in-loop
+    const own = await readBandTransmittance(engine, tables, b);
+    bands.push({
+      band,
+      stored: own.transmittance,
+      ofMedium: twins.transmittanceTables(read, band.bottomRadiusM, curves, band.coefficientFactor),
+      overGpu: twins.oblateBand(
+        read,
+        atmosphereBody,
+        band.gravityRatio,
+        curves,
+        plan.bands.length === 1,
+        storedTransmittance(own, read, curves),
+      ),
+    });
+  }
+  // The kernel arm is drawn and read back while the twins are computed, and its checks read it
+  // after the twins, as they came in sequence.
+  const armReadback = handled(readKernelArmTables(engine, tables));
+  ordered.later(async (checks) => {
+    const arm = await armReadback;
+    const label = `${body.name}: the per-planet`;
+    const slices = plan.kappa.length;
+    for (const [k, ofMedium] of slicesOfMedium.entries()) {
+      // The slices' twins are awaited in order, each after the one before it.
+      // oxlint-disable-next-line no-await-in-loop
+      const twin = (await ofMedium).transmittance;
+      const kappa = plan.kappa[k] ?? Number.NaN;
+      const name = `${label} transmittance slice ${k} of ${slices} (κ ${kappa.toFixed(4)}), as optical depth`;
+      recordHeights(
+        checks,
+        body.task,
+        name,
+        twinAgreement(layerOf(gpu.transmittance, slices, k), twin, false),
+        "stored",
+      );
+      recordHeights(
+        checks,
+        body.task,
+        name,
+        twinAgreement(layerOf(arm.transmittance, slices, k), twin, false, { arm: "kernel" }),
+        "kernel",
+      );
+    }
+    const layers = tables.multiScatteringLayers;
+    for (const [b, { band, stored, ofMedium, overGpu }] of bands.entries()) {
+      const at = `band ${b} of ${plan.bands.length} (s ${band.gravityRatio.toFixed(4)})`;
+      // The bands' twins are awaited in order, each after the one before it.
+      // oxlint-disable-next-line no-await-in-loop
+      const own = await ofMedium;
+      recordHeights(
+        checks,
+        body.task,
+        `${label} ${at}'s own transmittance table, as optical depth`,
+        twinAgreement(stored, own.transmittance, false),
+        "stored",
+      );
+      // The band's multiple scattering over the GPU's tables is awaited after its own table's.
+      // oxlint-disable-next-line no-await-in-loop
+      const twin = await overGpu;
+      for (const [slot, layer] of twin.multiScatteringBySlot.entries()) {
+        const index = b * perBand + slot;
+        const name = `${label} ${at}'s multiple-scattering layer of light slot ${slot}, over the GPU's transmittance`;
+        recordHeights(
+          checks,
+          body.task,
+          name,
+          twinAgreement(layerOf(gpu.multiScattering, layers, index), layer, false),
+          "stored",
+        );
+        recordHeights(
+          checks,
+          body.task,
+          name,
+          twinAgreement(layerOf(arm.multiScattering, layers, index), layer, false, {
+            arm: "kernel",
+          }),
+          "kernel",
+        );
+      }
+    }
+  });
+  // The kernel arm is read back before the frames draw.
+  await armReadback;
+  return { kind: "oblate", twin: planet };
 }
 
 /** One view's three per-frame kernels against their twins, in each arm the frame drew. */
@@ -2562,7 +3077,7 @@ async function checkViewArms(
   engine: RenderEngine,
   ordered: OrderedChecks,
   atmosphere: HillaireAtmosphere,
-  planet: PlanetTwin,
+  planet: SmokePlanet,
   body: HeightsBody,
   sizes: TableSizes,
   setting: QualitySetting,
@@ -2572,15 +3087,7 @@ async function checkViewArms(
   // The view's twins begin on the twin workers, and the frame draws while they run.
   const twin = frameViewOf(atmosphere, view.camera, [view.sun], body.figure);
   const surfaceDepth = view.surfaceM === null ? 0 : NEAR_M / view.surfaceM;
-  const skyViewOfView = twins.skyView(planet, twin, sizes.skyView, sizes.skyViewSamples);
-  const aerialOfView = twins.aerialPerspective(
-    planet,
-    twin,
-    sizes.aerialPerspective,
-    sizes.aerialPerspectiveSamplesPerSlice,
-    sizes.aerialPerspectiveReachM,
-  );
-  const rayMarchOfView = twins.rayMarch(planet, twin, sizes, surfaceDepth);
+  const frameTwins = frameTwinsOf(twins, planet, twin, sizes, surfaceDepth);
   const frame = await drawArms(engine, atmosphere, view, setting === "high");
   ordered.later(async (checks) => {
     const label = `${body.name}, ${setting}, ${view.name}`;
@@ -2589,13 +3096,16 @@ async function checkViewArms(
       withinHalfRange(frame.composite),
       `mean ${show(meanRgb(frame.composite))}`,
     );
-    const skyView = await skyViewOfView;
-    const aerial = await aerialOfView;
-    const rayMarch = await rayMarchOfView;
+    const skyView = await frameTwins.skyView;
+    const aerial = await frameTwins.aerial;
+    const rayMarch = await frameTwins.rayMarch;
     // Only a view from above the atmosphere's top may pass a texel by the twin's envelope
     // (`decision-r08-f32.md` §10.3); from inside it the bound holds outright. The aerial volume has
-    // none: from above the top it holds no air, and it passes outright everywhere.
-    const fromAbove = twin.heightM >= planet.medium.topHeightM;
+    // none: from above the top it holds no air, and it passes outright everywhere. On an oblate body
+    // the camera's h* is held against the top (R08.T6.f).
+    const scaledHeightM =
+      twin.heightM * atmosphereInputs(view.camera, body.figure, body.gravity).gravityRatio;
+    const fromAbove = scaledHeightM >= body.medium.topHeightM;
     const marchEnvelope = fromAbove ? rayMarchEnvelope(planet, twin, sizes, rayMarch) : undefined;
     const skyEnvelope = fromAbove ? skyViewEnvelope(planet, twin, sizes, skyView) : undefined;
     const arms: ReadonlyArray<readonly [TwinOptions["arm"], FrameReadback | null]> = [
@@ -2668,17 +3178,23 @@ export async function checkAtmosphereHeights(
   checks: Checks,
   twins: TwinPool,
 ): Promise<void> {
-  const read = kernelMedium(R05_EARTH_REFERENCE);
-  const bodies = HEIGHTS_BODIES.map((body) => ({
-    body,
-    transmittance: twins.transmittance(read, tableRadiusM(body.figure)),
-  }));
+  const bodies = HEIGHTS_BODIES.map((body) => {
+    const read = kernelMedium(body.medium);
+    return { body, read, transmittance: twins.transmittance(read, tableRadiusM(body.figure)) };
+  });
   await inOrder(checks, async (ordered) => {
-    for (const { body, transmittance } of bodies) {
-      let planet: PlanetTwin | null = null;
+    for (const { body, read, transmittance } of bodies) {
+      let planet: SmokePlanet | null = null;
       for (const setting of ["high", "low"] as const) {
         const sizes = twinSizes(TABLE_SIZES[setting]);
-        const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, sizes, body.figure);
+        const atmosphere = new HillaireAtmosphere(
+          engine,
+          body.medium,
+          sizes,
+          body.figure,
+          body.curves,
+          body.gravity,
+        );
         try {
           // The per-planet tables are the same on both settings: held, and twinned, once.
           // The harness's GPU work runs in order: the tables are read back before the first frame.
@@ -2722,8 +3238,12 @@ const SLAB_EARTH: HeightsBody = {
   task: "R08.T6.i",
   name: "the slab Earth",
   figure: WGS84,
+  medium: EARTH_SLAB_REFERENCE,
+  curves: EARTH_SLAB_REFERENCE_CURVES,
+  gravity: EARTH_GRAVITY,
   heightsM: [2, 2_000],
   limbsM: [WGS84.equatorialRadiusM + 400_000],
+  moreViews: [],
 };
 
 /**
@@ -2777,6 +3297,7 @@ export async function checkAtmosphereLayerEdges(
       sizes,
       SLAB_EARTH.figure,
       EARTH_SLAB_REFERENCE_CURVES,
+      EARTH_GRAVITY,
     );
     try {
       const planet = await planetOf(engine, atmosphere, read, SLAB_EARTH.figure);
@@ -2799,6 +3320,164 @@ export async function checkAtmosphereLayerEdges(
       atmosphere.dispose();
     }
   });
+}
+
+// --- R08.T6.f: slices and bands, the kernels ----------------------------------------------------
+
+/**
+ * R08.T6.f's Earth: WGS 84 with its normal gravity (one slice and one band, s within ±0.27% of 1,
+ * every per-view sphere R_α), R05's Earth medium, on R08.T6.g's heights and limbs, whose views were
+ * R08.T6.g's until R08.T6.f put them on the oblate twins.
+ */
+const SLICES_EARTH: HeightsBody = {
+  task: "R08.T6.f",
+  name: "Earth",
+  figure: WGS84,
+  medium: R05_EARTH_REFERENCE,
+  curves: NO_ABSORBER_CURVES,
+  gravity: EARTH_GRAVITY,
+  heightsM: [2, 20, 200, 2_000],
+  limbsM: [WGS84.equatorialRadiusM + 400_000, 4.2e7],
+  moreViews: [],
+};
+
+/** Saturn's figure and gravity (`atmosphereFixtures.ts`): five slices and four bands. */
+const SATURN_BODY: AtmosphereBody = saturnBody();
+
+/** 45°, the Saturn-class figure's mid-latitude view, where s and R_α vary along every ray. */
+const SATURN_MID_LATITUDE_RAD = Math.PI / 4;
+
+/**
+ * R08.T6.f's Saturn-class figure (Design note 17): Saturn's datum and gravity, five slices and four
+ * bands, under the H₂–He air of R08.T6.e's tests (`saturnClassMedium`, its top 16 scale heights up),
+ * on R08.T6.g's views from 2 m, 20 m, 200 m and 2 km at the equator, the limb from above the air
+ * over the equator and over the pole, and a view from 2 km at 45° with the sun along the meridian.
+ */
+function slicesSaturn(): HeightsBody {
+  const figure = SATURN_BODY.figure;
+  const medium = saturnClassMedium();
+  // A camera whose h* is above the top (795 km): 1,000 km over the equator (h* 868 km), and over
+  // the pole's limb 795 km above the datum at 81.5° (h* about 905 km).
+  const equatorialLimbM = figure.equatorialRadiusM + 1_000_000;
+  const polarLimbM = 10_000_000;
+  return {
+    task: "R08.T6.f",
+    name: "the Saturn-class figure",
+    figure,
+    medium,
+    curves: NO_ABSORBER_CURVES,
+    gravity: SATURN_BODY.gravity,
+    heightsM: [2, 20, 200, 2_000],
+    limbsM: [equatorialLimbM],
+    moreViews: [
+      {
+        name: "the limb over the pole from above the air, the sun 20° at its tangent point",
+        camera: polarLimbCamera(polarLimbM, figure),
+        sun: polarLimbSun(20),
+        surfaceM: null,
+      },
+      {
+        name: "2 km at 45°, the sun 20° up towards the north, a surface 60 km ahead",
+        camera: latitudeCamera(figure, SATURN_MID_LATITUDE_RAD, 2_000),
+        sun: northSunAt(SATURN_MID_LATITUDE_RAD, 20),
+        surfaceM: 60_000,
+      },
+    ],
+  };
+}
+
+/**
+ * R08.T6.f: the kernels with T6.e's slicing (`oblate.wgsl`) against R08.T6.e's oblate twin, in
+ * R08.T6.g's two arms, on Earth (`checkAtmosphereSlicesEarth`) and on a Saturn-class figure
+ * (`checkAtmosphereSlicesSaturn`): each κ slice's transmittance table and each latitude band's
+ * own transmittance and multiple-scattering layers (`checkOblatePlanetArms`), and the per-view
+ * kernels on R08.T6.g's views, from inside the air outright and from above it under
+ * `decision-r08-f32.md` §10's envelope.
+ *
+ * @remarks
+ * The twins run on the page's twin workers beside the GPU's work, the checks recorded in the order
+ * they were in sequence (`ordered.ts`).
+ */
+async function checkSlices(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+  body: HeightsBody,
+): Promise<void> {
+  const gravity = body.gravity;
+  if (gravity === null) {
+    throw new Error(`R08.T6.f's ${body.name} has a body's gravity`);
+  }
+  const atmosphereBody: AtmosphereBody = { figure: body.figure, gravity };
+  const read = kernelMedium(body.medium);
+  const plan = tablesPlanOf(atmosphereBody, tableRadiusM(body.figure));
+  // Each slice's twin of the medium, which reads nothing of the GPU's, begins with the group.
+  const slicesOfMedium = plan.sliceRadiiM.map((radiusM) =>
+    twins.transmittanceTables(read, radiusM, body.curves),
+  );
+  await inOrder(checks, async (ordered) => {
+    let planet: SmokePlanet | null = null;
+    for (const setting of ["high", "low"] as const) {
+      const sizes = twinSizes(TABLE_SIZES[setting]);
+      const atmosphere = new HillaireAtmosphere(
+        engine,
+        body.medium,
+        sizes,
+        body.figure,
+        body.curves,
+        gravity,
+      );
+      try {
+        // The per-planet tables are the same on both settings: held, and twinned, once.
+        // oxlint-disable-next-line no-await-in-loop
+        planet ??= await checkOblatePlanetArms(
+          engine,
+          ordered,
+          body,
+          atmosphereBody,
+          atmosphere,
+          read,
+          slicesOfMedium,
+          twins,
+        );
+        for (const view of heightsViews(body, setting)) {
+          // The harness's GPU work runs in order: each frame is read back before the next draws.
+          // oxlint-disable-next-line no-await-in-loop
+          await checkViewArms(
+            engine,
+            ordered,
+            atmosphere,
+            planet,
+            body,
+            sizes,
+            setting,
+            view,
+            twins,
+          );
+        }
+      } finally {
+        atmosphere.dispose();
+      }
+    }
+  });
+}
+
+/** R08.T6.f on Earth ({@link SLICES_EARTH}; `checkSlices`). */
+export async function checkAtmosphereSlicesEarth(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  await checkSlices(engine, checks, twins, SLICES_EARTH);
+}
+
+/** R08.T6.f on the Saturn-class figure ({@link slicesSaturn}; `checkSlices`). */
+export async function checkAtmosphereSlicesSaturn(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  await checkSlices(engine, checks, twins, slicesSaturn());
 }
 
 // --- R05.T12.c: the comparison captures ----------------------------------------------------------
@@ -2928,7 +3607,116 @@ export async function captureAtmosphere(engine: RenderEngine): Promise<CapturedI
   } finally {
     atmosphere.dispose();
   }
-  return [...images, ...(await captureSunsets(engine)), ...(await captureBinarySky(engine))];
+  return [
+    ...images,
+    ...(await captureSunsets(engine)),
+    ...(await captureBinarySky(engine)),
+    ...(await captureSaturnLimbs(engine)),
+  ];
+}
+
+/** The Saturn-class limb captures' tangent height at the frame's centre and half-span, m. */
+const SATURN_LIMB_CENTRE_M = 300_000;
+const SATURN_LIMB_HALF_SPAN_M = 600_000;
+
+/**
+ * A capture camera at `cameraM` looking along the unit `forward` past a limb's tangent point
+ * `distanceM` ahead, the unit `up` the tangent point's vertical, its frame spanning
+ * {@link SATURN_LIMB_HALF_SPAN_M} of tangent height about its centre.
+ */
+function captureLimbCamera(
+  cameraM: Vec3,
+  forward: Vec3,
+  up: Vec3,
+  distanceM: number,
+): AtmosphereCamera {
+  const right = {
+    x: forward.y * up.z - forward.z * up.y,
+    y: forward.z * up.x - forward.x * up.z,
+    z: forward.x * up.y - forward.y * up.x,
+  };
+  const aspect = CAPTURE_SIZE.widthPx / CAPTURE_SIZE.heightPx;
+  const tanY = SATURN_LIMB_HALF_SPAN_M / distanceM;
+  return {
+    positionM: cameraM,
+    orientation: quaternionFromRows([
+      { x: right.x, y: up.x, z: -forward.x },
+      { x: right.y, y: up.y, z: -forward.y },
+      { x: right.z, y: up.z, z: -forward.z },
+    ]),
+    fovXRad: 2 * Math.atan(aspect * tanY),
+    viewport: CAPTURE_SIZE,
+  };
+}
+
+/**
+ * R08.T6.f's by-hand captures: the Saturn-class figure's limb from orbit, above the air (its tables
+ * in five κ slices and four latitude bands, `saturnClassMedium`), over the equator and over the
+ * pole, each camera 12,000 km along the limb from a tangent point 300 km up (1,477 km above the
+ * equator, 1,366 km above the datum near the pole, so that the composite draws the ray march), the
+ * sun 10° above the tangent point's horizon ahead, for a person to see the air's height follow
+ * 1 ÷ s: about 1.15 times as tall over the equator as H, and 0.87 times over the pole.
+ */
+async function captureSaturnLimbs(engine: RenderEngine): Promise<CapturedImage[]> {
+  const figure = SATURN_BODY.figure;
+  const atmosphere = new HillaireAtmosphere(
+    engine,
+    saturnClassMedium(),
+    TABLE_SIZES.high,
+    figure,
+    NO_ABSORBER_CURVES,
+    SATURN_BODY.gravity,
+  );
+  const distanceM = 12_000_000;
+  const e = (10 * Math.PI) / 180;
+  const equatorTangentM = figure.equatorialRadiusM + SATURN_LIMB_CENTRE_M;
+  const poleTangentM = figure.polarRadiusM + SATURN_LIMB_CENTRE_M;
+  const shots = [
+    {
+      name: "r08-saturn-limb-equator",
+      // Along −y past the tangent point (a + h, 0, 0), up +x.
+      camera: captureLimbCamera(
+        { x: equatorTangentM, y: distanceM, z: 0 },
+        { x: 0, y: -1, z: 0 },
+        { x: 1, y: 0, z: 0 },
+        distanceM,
+      ),
+      sun: { x: Math.sin(e), y: -Math.cos(e), z: 0 },
+    },
+    {
+      name: "r08-saturn-limb-pole",
+      // Along +x past the tangent point (0, 0, c + h), up +z.
+      camera: captureLimbCamera(
+        { x: -distanceM, y: 0, z: poleTangentM },
+        { x: 1, y: 0, z: 0 },
+        { x: 0, y: 0, z: 1 },
+        distanceM,
+      ),
+      sun: { x: Math.cos(e), y: 0, z: Math.sin(e) },
+    },
+  ];
+  const images: CapturedImage[] = [];
+  try {
+    for (const shot of shots) {
+      const sun: SunState = {
+        directionBodyFixed: shot.sun,
+        illuminanceLx: SUN_ILLUMINANCE_LX,
+        angularRadiusRad: 0,
+      };
+      // Each capture reads the GPU back before the next frame draws.
+      // oxlint-disable-next-line no-await-in-loop
+      const texels = await compositeFrame(engine, atmosphere, shot.camera, [sun], null);
+      images.push({
+        name: shot.name,
+        width: CAPTURE_SIZE.widthPx,
+        height: CAPTURE_SIZE.heightPx,
+        rgba: base64Of(toRgba8(texels)),
+      });
+    }
+  } finally {
+    atmosphere.dispose();
+  }
+  return images;
 }
 
 /** A source at an elevation and an azimuth to the right of a {@link horizonCamera}'s view. */

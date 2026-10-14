@@ -2,12 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   amountValue,
+  earthBody,
   fiveLineSlotMedium,
   fourAbsorberMedium,
   lineAbsorberMedium,
+  SATURN_SPHEROID,
+  saturnBody,
+  saturnClassMedium,
+  WGS84_SPHEROID,
 } from "../../test/atmosphereFixtures";
 import { forbiddenIn } from "../../test/atmosphereWgsl";
-import { countingRenderEngine } from "../../test/countingRenderEngine";
+import { countingRenderEngine, type RecordedDispatch } from "../../test/countingRenderEngine";
 import type { AllocationEvent } from "../engine/memory";
 import { EngineUnavailable } from "../engine/resilientEngine";
 import {
@@ -19,6 +24,7 @@ import {
 } from "./absorbers";
 import { hydrostaticColumn } from "./column";
 import { R05_EARTH_REFERENCE, HILLAIRE_REFERENCE } from "./earth";
+import { tableRadiusM } from "./hillaire";
 import {
   ABSORBER_PRESSURE_FLOOR_PA,
   ABSORBER_PRESSURE_REFERENCE_PA,
@@ -33,13 +39,16 @@ import {
   phaseTable,
   tabulatedDensity,
 } from "./medium";
+import { gravityRatio, principalRadiiM } from "./oblate";
 import commonWgsl from "./shaders/common.wgsl?raw";
+import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import transmittanceWgsl from "./shaders/transmittance.wgsl?raw";
 import {
   ABSORBER_CURVE_DEPTH_MAX,
   ABSORBER_CURVE_NODES,
   ABSORBER_SLOTS,
   absorberSlots,
+  type AtmosphereBody,
   AtmosphereTables,
   DENSITY_TABLE_LEVELS,
   densityTableLevelsM,
@@ -49,12 +58,17 @@ import {
   lastPressureColumnSize,
   LAYER_EDGES_FLOATS,
   lineSlotMask,
+  MAX_BANDS,
+  MAX_SLICES,
   MAX_TERMS,
   MULTI_SCATTERING_KERNEL,
   MULTI_SCATTERING_SAMPLES,
+  MULTI_SCATTERING_SIZE,
   multiScatteringLayersOf,
   NO_ABSORBER_CURVES,
+  OBLATE_BODY_TEXELS,
   packAbsorberCurves,
+  packOblateBody,
   PRESSURE_CHANNELS_A_TABLE,
   pressureChannelCount,
   pressureChannelOf,
@@ -68,6 +82,7 @@ import {
   resampledDensity,
   resampledPhase,
   SHARED_TABLE_CURVE_SLOT,
+  tablesPlanOf,
   TERMS_BUFFER_BYTES,
   TRANSMITTANCE_KERNEL,
   TRANSMITTANCE_SAMPLES,
@@ -167,9 +182,9 @@ describe("AtmosphereTables", () => {
     ]);
     // The transmittance, absorber-column, pressure-column and multiple-scattering tables with the
     // fifth pressure channel's one texel (R08.T4.d), the four placeholders of a medium with
-    // nothing tabulated and no absorber (the forward-lobe tables', R08.T7, among them), and the
-    // terms buffer.
-    expect(engine.counts.textures).toBe(9);
+    // nothing tabulated and no absorber (the forward-lobe tables', R08.T7, among them), the body's
+    // table (R08.T6.f), and the terms buffer.
+    expect(engine.counts.textures).toBe(10);
     expect(engine.counts.buffers).toBe(1);
     expect(engine.textureSpecs.every((s) => s.category === "atmosphere-tables")).toBe(true);
   });
@@ -265,10 +280,13 @@ describe("AtmosphereTables", () => {
     const engine = await countingRenderEngine();
     new AtmosphereTables(engine, R05_EARTH_REFERENCE, R).setMedium(TABULATED, R);
     const written = engine.textureWritten.map((w) => [w.texture, w.size]);
+    // The body's table at every build (R08.T6.f), the medium's tables where they hold anything.
     expect(written).toEqual([
+      ["atmosphere oblate body", [OBLATE_BODY_TEXELS, 1, 1]],
       ["atmosphere density tables", [DENSITY_TABLE_LEVELS, 1, 3]],
       ["atmosphere phase tables", [PHASE_TABLE_ENTRIES, 1, 3]],
       ["atmosphere forward-lobe tables", [FORWARD_ORDERS_ENTRIES, FORWARD_LOBE_X_NODES, 3]],
+      ["atmosphere oblate body", [OBLATE_BODY_TEXELS, 1, 1]],
     ]);
   });
 
@@ -324,6 +342,7 @@ describe("AtmosphereTables", () => {
       [DENSITY_TABLE_LEVELS, 1, 3],
       [PHASE_TABLE_ENTRIES, 1, 3],
       [FORWARD_ORDERS_ENTRIES, FORWARD_LOBE_X_NODES, 3],
+      [OBLATE_BODY_TEXELS, 1, 1],
     ]);
   });
 
@@ -378,7 +397,7 @@ describe("AtmosphereTables", () => {
     expect(tables.setMedium(HILLAIRE_REFERENCE, 6_360_000)).toBe(true);
     expect(tables.builds).toBe(3);
     expect(engine.counts.dispatches).toBe(6);
-    expect(engine.counts.textures).toBe(9);
+    expect(engine.counts.textures).toBe(10);
   });
 
   /** The tables on the line-absorber medium, then set to the five-line-slot one, with the events. */
@@ -405,11 +424,12 @@ describe("AtmosphereTables", () => {
     const released = destroyedNames(events).filter(
       (name) => name === "atmosphere last absorber pressure column",
     );
+    // Each a 2D array of one layer a κ slice (R08.T6.f): one here.
     expect([released, made.map((spec) => spec.size)]).toEqual([
       ["atmosphere last absorber pressure column"],
       [
-        [1, 1],
-        [TRANSMITTANCE_SIZE.widthTexels, TRANSMITTANCE_SIZE.heightTexels],
+        [1, 1, 1],
+        [TRANSMITTANCE_SIZE.widthTexels, TRANSMITTANCE_SIZE.heightTexels, 1],
       ],
     ]);
   });
@@ -429,7 +449,7 @@ describe("AtmosphereTables", () => {
     const made = engine.textureSpecs.filter(
       (spec) => spec.name === "atmosphere last absorber pressure column",
     );
-    expect(made.at(-1)?.size).toEqual([1, 1]);
+    expect(made.at(-1)?.size).toEqual([1, 1, 1]);
   });
 
   it("makes the kernel arm's fifth table at the medium's size", async () => {
@@ -438,7 +458,7 @@ describe("AtmosphereTables", () => {
     const arm = engine.textureSpecs.find(
       (spec) => spec.name === "atmosphere last absorber pressure column (kernel arm)",
     );
-    expect(arm?.size).toEqual([TRANSMITTANCE_SIZE.widthTexels, TRANSMITTANCE_SIZE.heightTexels]);
+    expect(arm?.size).toEqual([TRANSMITTANCE_SIZE.widthTexels, TRANSMITTANCE_SIZE.heightTexels, 1]);
   });
 
   it("keeps the old key when a build fails, so the same medium is tried again", async () => {
@@ -465,7 +485,7 @@ describe("AtmosphereTables", () => {
     engine.onAllocation((e) => events.push(e));
     const above: AtmosphereMedium = { ...TABULATED, topHeightM: COLUMN.topHeightM + 1 };
     expect(() => new AtmosphereTables(engine, above, R)).toThrow(RangeError);
-    expect(destroyedNames(events)).toHaveLength(10);
+    expect(destroyedNames(events)).toHaveLength(11);
     engine.restore();
     expect(engine.counts.dispatches).toBe(0);
   });
@@ -474,7 +494,7 @@ describe("AtmosphereTables", () => {
     const engine = await countingRenderEngine();
     const tables = new AtmosphereTables(engine, TABULATED, R);
     engine.restore();
-    expect(engine.counts.textures).toBe(24);
+    expect(engine.counts.textures).toBe(26);
     expect(engine.counts.buffers).toBe(2);
     expect(engine.counts.kernels).toBe(4);
     expect(tables.builds).toBe(2);
@@ -490,11 +510,203 @@ describe("AtmosphereTables", () => {
   });
 });
 
+/** A per-planet dispatch's build (`Medium.build`'s factor and layers; R08.T6.f). */
+function buildOf(d: RecordedDispatch): number[] {
+  return [...(d.bindings.uniforms["medium"]?.subarray(12, 15) ?? [])];
+}
+
+/** A per-planet dispatch's ground, m. */
+function groundOf(d: RecordedDispatch): number | undefined {
+  return d.bindings.uniforms["medium"]?.[0];
+}
+
+/** Whether an allocation is of a band's own transmittance tables (R08.T6.f). */
+function isBandTable(e: AllocationEvent): boolean {
+  return e.name.endsWith(" (band)");
+}
+
+describe("the tables of a sliced body (R08.T6.f)", () => {
+  const SATURN_R = tableRadiusM(SATURN_SPHEROID);
+
+  it("plans the Saturn-class figure's five slices and four bands, each band on its own sphere", () => {
+    const body = saturnBody();
+    const plan = tablesPlanOf(body, SATURN_R);
+    expect([plan.kappa.length, plan.bands.length, plan.shared]).toEqual([5, 4, false]);
+    expect(plan.kappa).toEqual(Array.from(body.gravity.slicing.kappa));
+    expect(plan.sliceRadiiM).toEqual(plan.kappa.map((k) => k * SATURN_R));
+    for (const band of plan.bands) {
+      // s_b at its own latitude, its sphere s_b √(MN) there, every coefficient over s_b.
+      expect(gravityRatio(body.gravity, band.latitudeRad)).toBeCloseTo(band.gravityRatio, 12);
+      const { meridionalM, primeVerticalM } = principalRadiiM(body.figure, band.latitudeRad);
+      expect(band.bottomRadiusM).toBe(band.gravityRatio * Math.sqrt(meridionalM * primeVerticalM));
+      expect(band.coefficientFactor).toBe(1 / band.gravityRatio);
+    }
+  });
+
+  it("shares Earth's one slice with its one band, and a body with none's, as R05's tables", () => {
+    const earth = tablesPlanOf(earthBody(), tableRadiusM(WGS84_SPHEROID));
+    expect([earth.kappa, earth.bands.length, earth.shared]).toEqual([[1], 1, true]);
+    expect(earth.bands[0]?.bottomRadiusM).toBe(tableRadiusM(WGS84_SPHEROID));
+    const none = tablesPlanOf(null, R);
+    expect(none).toEqual({
+      kappa: [1],
+      sliceRadiiM: [R],
+      bands: [{ gravityRatio: 1, latitudeRad: 0, bottomRadiusM: R, coefficientFactor: 1 }],
+      shared: true,
+    });
+  });
+
+  it("refuses more slices or bands than the tables hold", () => {
+    const body = saturnBody();
+    const of = (slices: number, bands: number): AtmosphereBody => ({
+      ...body,
+      gravity: {
+        ...body.gravity,
+        slicing: {
+          kappa: Float64Array.from({ length: slices }, (_, i) => 1 + i / 100),
+          bandGravityRatio: Float64Array.from({ length: bands }, (_, i) => 1 + i / 100),
+        },
+      },
+    });
+    expect(() => tablesPlanOf(of(MAX_SLICES, MAX_BANDS), SATURN_R)).not.toThrow();
+    expect(() => tablesPlanOf(of(MAX_SLICES + 1, 1), SATURN_R)).toThrow(RangeError);
+    expect(() => tablesPlanOf(of(1, MAX_BANDS + 1), SATURN_R)).toThrow(RangeError);
+  });
+
+  it("holds the body's table to oblate.wgsl's layout", () => {
+    expect(oblateWgsl).toContain(`const MAX_SLICES : u32 = ${MAX_SLICES}u;`);
+    expect(oblateWgsl).toContain(`const MAX_BANDS : u32 = ${MAX_BANDS}u;`);
+    expect(oblateWgsl).toContain("const OBLATE_HEADER_TEXELS : u32 = 4u;");
+    expect(OBLATE_BODY_TEXELS).toBe(4 + MAX_SLICES + MAX_BANDS);
+  });
+
+  it("packs the figure, the counts, each slice and band, and a gravity row that gives s", () => {
+    const body = saturnBody();
+    const plan = tablesPlanOf(body, SATURN_R);
+    const top = saturnClassMedium().topHeightM;
+    const packed = packOblateBody(body.figure, body.gravity, plan, SATURN_R, top, 2);
+    expect(packed).toHaveLength(OBLATE_BODY_TEXELS * 4);
+    const a = body.figure.equatorialRadiusM;
+    const c = body.figure.polarRadiusM;
+    expect([...packed.subarray(0, 4)]).toEqual(
+      [a, c, SATURN_R, ((a - c) * (a + c)) / (a * a)].map(Math.fround),
+    );
+    expect([...packed.subarray(8, 12)]).toEqual([5, 4, 2, top].map(Math.fround));
+    const [k, k2, inverseEquator, inversePole] = packed.subarray(12, 16);
+    expect(k).toBeCloseTo(a / c, 6);
+    expect(k2).toBeCloseTo((a / c) ** 2, 6);
+    expect(inverseEquator).toBeCloseTo(1 / gravityRatio(body.gravity, 0), 6);
+    expect(inversePole).toBeCloseTo(1 / gravityRatio(body.gravity, Math.PI / 2), 6);
+    for (const [i, kappa] of plan.kappa.entries()) {
+      const at = (4 + i) * 4;
+      expect([...packed.subarray(at, at + 4)]).toEqual(
+        [kappa * SATURN_R, Math.sqrt(kappa), Math.log(kappa), 0].map(Math.fround),
+      );
+    }
+    for (const [b, band] of plan.bands.entries()) {
+      const at = (4 + MAX_SLICES + b) * 4;
+      expect([...packed.subarray(at, at + 4)]).toEqual(
+        [band.gravityRatio, Math.log(band.gravityRatio), 0, 0].map(Math.fround),
+      );
+    }
+    // oblate.wgsl's gravityRatioAt from the row, against oblate.ts's s, to f32's precision.
+    const [gA, gB, gK, gO] = [...packed.subarray(4, 8)];
+    for (const deg of [0, 20, 45, 70, 90]) {
+      const phi = (deg * Math.PI) / 180;
+      const cos2 = Math.cos(phi) ** 2;
+      const sin2 = Math.sin(phi) ** 2;
+      const s =
+        ((gA ?? 0) * cos2 + (gB ?? 0) * sin2) / Math.sqrt(cos2 + (gK ?? 0) * sin2) + (gO ?? 0);
+      expect(s).toBeCloseTo(gravityRatio(body.gravity, phi), 6);
+    }
+    // No gravity: s ≡ 1 to the bit, A = B = 0, O = 1.
+    const flat = packOblateBody(body.figure, null, tablesPlanOf(null, SATURN_R), SATURN_R, top, 1);
+    expect([...flat.subarray(4, 8)]).toEqual([0, 0, 1, 1]);
+    expect([...flat.subarray(14, 16)]).toEqual([1, 1]);
+  });
+
+  it("builds each slice into its layer and each band's multiple scattering over its own transmittance, released after", async () => {
+    const engine = await countingRenderEngine();
+    const events: AllocationEvent[] = [];
+    engine.onAllocation((e) => events.push(e));
+    const body = saturnBody();
+    const medium = saturnClassMedium();
+    const tables = new AtmosphereTables(engine, medium, SATURN_R, NO_ABSORBER_CURVES, body);
+    const plan = tables.plan;
+    expect(tables.body).toBe(body);
+    expect([tables.layersPerBand, tables.multiScatteringLayers]).toEqual([1, 4]);
+    const sizeOf = (name: string): GPUExtent3D | undefined =>
+      engine.textureSpecs.findLast((spec) => spec.name === name)?.size;
+    expect(sizeOf("atmosphere transmittance")).toEqual([
+      TRANSMITTANCE_SIZE.widthTexels,
+      TRANSMITTANCE_SIZE.heightTexels,
+      5,
+    ]);
+    expect(sizeOf("atmosphere absorber columns")).toEqual([
+      TRANSMITTANCE_SIZE.widthTexels,
+      TRANSMITTANCE_SIZE.heightTexels,
+      5,
+    ]);
+    expect(sizeOf("atmosphere multiple scattering")).toEqual([
+      MULTI_SCATTERING_SIZE.widthTexels,
+      MULTI_SCATTERING_SIZE.heightTexels,
+      4,
+    ]);
+    // The slices in order, then band by band its own table and its multiple scattering.
+    const dispatched = engine.dispatched;
+    expect(dispatched.map((d) => d.kernel)).toEqual([
+      ...plan.kappa.map(() => "atmosphere transmittance"),
+      ...plan.bands.flatMap(() => ["atmosphere transmittance", "atmosphere multiple scattering"]),
+    ]);
+    for (const [k, radiusM] of plan.sliceRadiiM.entries()) {
+      const d = dispatched[k];
+      if (d === undefined) {
+        throw new Error(`no dispatch for slice ${k}`);
+      }
+      expect([groundOf(d), ...buildOf(d)]).toEqual([Math.fround(radiusM), 1, k, 0]);
+      expect(d.bindings.storage["transmittanceOut"]?.texture).toBe(tables.transmittance);
+    }
+    for (const [b, band] of plan.bands.entries()) {
+      const own = dispatched[5 + 2 * b];
+      const multiple = dispatched[6 + 2 * b];
+      if (own === undefined || multiple === undefined) {
+        throw new Error(`no dispatches for band ${b}`);
+      }
+      const factor = Math.fround(band.coefficientFactor);
+      expect([groundOf(own), ...buildOf(own)]).toEqual([
+        Math.fround(band.bottomRadiusM),
+        factor,
+        0,
+        0,
+      ]);
+      expect([groundOf(multiple), ...buildOf(multiple)]).toEqual([
+        Math.fround(band.bottomRadiusM),
+        factor,
+        0,
+        b,
+      ]);
+      const ownTable = own.bindings.storage["transmittanceOut"]?.texture;
+      expect(ownTable?.name).toBe("atmosphere transmittance (band)");
+      expect(multiple.bindings.sampled["transmittance"]).toBe(ownTable);
+    }
+    // The bands' tables made once for the build and released after it.
+    expect(events.filter((e) => isBandTable(e) && e.kind === "created")).toHaveLength(4);
+    expect(events.filter((e) => isBandTable(e) && e.kind === "destroyed")).toHaveLength(4);
+    // The body's table as packed.
+    const written = engine.textureWritten.findLast((w) => w.texture === "atmosphere oblate body");
+    expect(new Float32Array(written?.data.slice().buffer ?? new ArrayBuffer(0))).toEqual(
+      packOblateBody(body.figure, body.gravity, plan, SATURN_R, medium.topHeightM, 1),
+    );
+  });
+});
+
 describe("packMediumUniform", () => {
   it("lays out the ground's radius, the atmosphere's height, the term count, the samples and the albedo", () => {
     const packed = packMediumUniform(R05_EARTH_REFERENCE, 6_371_000, 128);
+    // The build's own last (R08.T6.f): the factor 1, the transmittance tables' layer 0 and the
+    // multiple-scattering layer of the curve slot, 0.
     expect([...packed]).toEqual(
-      [6_371_000, 100_000, 3, 128, 0.1, 0.1, 0.1, 0, 0, 0, 0, 0].map(Math.fround),
+      [6_371_000, 100_000, 3, 128, 0.1, 0.1, 0.1, 0, 0, 0, 0, 0, 1, 0, 0, 0].map(Math.fround),
     );
   });
 
@@ -1051,7 +1263,7 @@ describe("the absorber slots", () => {
   });
 
   it("are counted, with the curve slot, in the Medium uniform's absorbers", () => {
-    expect([...packMediumUniform(medium, R, 64, 2).subarray(8)]).toEqual([4, 2, 0, 0]);
+    expect([...packMediumUniform(medium, R, 64, 2).subarray(8, 12)]).toEqual([4, 2, 0, 0]);
   });
 
   it("take the shared table's curve slot, 0, by default", () => {

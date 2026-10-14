@@ -30,42 +30,77 @@
 // medium has layer edges, each side of the ray's split is cut into pieces where the ray crosses
 // them (`MarchWalk` in common.wgsl), at the same count; a medium with none takes the steps as
 // before. Changes (plan R08, R08.T7, Design note 7): one march sums every drawn source, each
-// light slot's share carried on its own path (`ViewMarch` in source.wgsl).
+// light slot's share carried on its own path (`ViewMarch` in source.wgsl). Changes (plan R08,
+// R08.T6.f, Design note 17, _Per-view marches_): each column's rays are marched on the osculating
+// sphere R_α of the column's azimuth at the camera, its atmosphere the medium's top over the
+// camera's s, its horizon split β its own (`oblate.wgsl`'s skyViewColumnOf), and its layer edges at
+// e over the camera's s; each sample's medium at its h* = s h, s at the latitude of the sample's
+// own place on the datum, and its sources through the sliced lookup and the bands
+// (`source.wgsl`), as `tablesCpu.ts`'s oblateSkyViewTexelsTwin marches them.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
 @group(0) @binding(2) var densityTables : texture_2d_array<f32>;
 @group(0) @binding(3) var phaseTables : texture_2d_array<f32>;
 @group(0) @binding(4) var<uniform> view : AtmosphereView;
-@group(0) @binding(5) var transmittance : texture_2d<f32>;
+@group(0) @binding(5) var transmittance : texture_2d_array<f32>;
 @group(0) @binding(6) var multiScattering : texture_2d_array<f32>;
 @group(0) @binding(7) var skyViewOut : texture_storage_2d<rgba16float, write>;
-@group(0) @binding(8) var absorberColumns : texture_2d<f32>;
+@group(0) @binding(8) var absorberColumns : texture_2d_array<f32>;
 @group(0) @binding(9) var absorberCurves : texture_2d<f32>;
 @group(0) @binding(10) var<uniform> layerEdges : LayerEdges;
-@group(0) @binding(11) var absorberPressureColumns : texture_2d<f32>;
-@group(0) @binding(12) var lastAbsorberPressureColumn : texture_2d<f32>;
+@group(0) @binding(11) var absorberPressureColumns : texture_2d_array<f32>;
+@group(0) @binding(12) var lastAbsorberPressureColumn : texture_2d_array<f32>;
 @group(0) @binding(13) var lobeTables : texture_2d_array<f32>;
+@group(0) @binding(14) var oblateBody : texture_2d<f32>;
 
-// A texel's ray: the camera's height on the sky view's sphere and its point there, the ray's
-// direction and its zenith cosine, and the sources' directions in the sky frame with their
-// scattering angles.
+// A texel's ray: its column's sphere R_α, the camera's height on it and its point there, the ray's
+// direction in the sky frame and body-fixed, with S of the latter, the camera's place on the sphere,
+// body-fixed, with its S and its ground quadric, the ray's zenith cosine, and the sources' directions in the sky frame and body-fixed with their scattering angles.
 struct SkyRay {
+  bottomM : f32,
   heightM : f32,
   zenithCos : f32,
   origin : vec3f,
   dir : vec3f,
+  bodyDir : vec3f,
+  scaledBodyDir : vec3f,
+  cameraPlace : vec3f,
+  cameraScaled : vec3f,
+  cameraQuadric : f32,
   sources : array<vec3f, MAX_SKY_SOURCES>,
+  bodySources : array<vec3f, MAX_SKY_SOURCES>,
   angles : array<ScatteringAngle, MAX_SKY_SOURCES>,
 }
 
-// One step of the march, at its midpoint: the medium there, its sources and their in-scattering.
-fn skyViewStep(march : ptr<function, ViewMarch>, ray : SkyRay, stepAt : MarchStep) {
-  let p = ray.origin + stepAt.tM * ray.dir;
+// One step of the march, at its midpoint: its height on the column's sphere and the normal there,
+// its body-fixed place, the camera's place on the sphere plus t along the ray, whose datum point
+// gives s; the medium at h* = s h, its sources and their in-scattering.
+fn skyViewStep(
+  march : ptr<function, ViewMarch>,
+  ray : SkyRay,
+  body : OblateBody,
+  frame : SkyFrame,
+  stepAt : MarchStep,
+) {
+  let t = stepAt.tM;
+  let p = ray.origin + t * ray.dir;
   let rP = length(p);
-  let sampleHeightM = heightAlong(ray.heightM, ray.zenithCos, stepAt.tM, rP);
-  let local = sampleMediumAt(sampleHeightM);
-  let shares = viewSourcesAt(sampleHeightM, p / rP, ray.sources, ray.angles, local);
+  let sampleHeightM = shellHeightAlong(ray.bottomM, ray.heightM, ray.zenithCos, t, rP);
+  let up = p / rP;
+  let normal = up.x * frame.x + up.y * frame.y + up.z * frame.z;
+  let place = ray.cameraPlace + t * ray.bodyDir;
+  let quadric = quadricAlong(ray.cameraQuadric, ray.cameraScaled, ray.scaledBodyDir, t);
+  // The place's latitude, where the body's lookups or its s take one.
+  var latitudeNormal = normal;
+  var s = body.gravity.w;
+  if (oblateNeedsLatitude(body)) {
+    latitudeNormal = datumPointOf(body, place, quadric).normal;
+    s = gravityRatioAt(body, latitudeNormal.z * latitudeNormal.z);
+  }
+  let local = sampleMediumAt(s * sampleHeightM);
+  let start = sampleStartOf(body, place, quadric, sampleHeightM, normal, latitudeNormal, s, local);
+  let shares = viewSourcesAt(body, start, up, ray.sources, ray.bodySources, ray.angles, local);
   viewMarchStep(march, local, shares, stepAt.dtM);
 }
 
@@ -76,48 +111,76 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
     return;
   }
   let sizeF = vec2f(size);
+  let body = oblateBodyOf(oblateBody);
+  let frame = skyFrame(view);
+  // The column's azimuth, as the zenith's parameterisation takes it, and its sphere: R_α at the
+  // camera along it, the atmosphere the medium's top over the camera's s (`view.curvature`).
+  let uv = (vec2f(id.xy) + 0.5) / sizeF;
+  let azimuth = skyViewAzimuthOf(uv, sizeF);
+  let horizontal = azimuth.x * frame.x + azimuth.y * frame.y;
+  let atmosphereM = view.curvature.w;
   // The sky-view table serves cameras inside the atmosphere; above it the composite ray-marches.
-  let heightM = skyViewHeight(view.camera.w, medium.topHeightM);
-  let r = medium.bottomRadiusM + heightM;
-  let params = skyViewUvToParams((vec2f(id.xy) + 0.5) / sizeF, sizeF, view.exact.z);
+  let heightM = skyViewHeight(view.camera.w, atmosphereM);
+  let column = skyViewColumnOf(
+    view.curvature.x, view.curvature.y, frame.z, frame.x, horizontal, heightM
+  );
+  let bottom = column.x;
+  let r = bottom + heightM;
+  let params = skyViewUvToParams(uv, sizeF, column.y);
   let viewZenithCos = params.x;
   let viewZenithSin = params.y;
   let dir = vec3f(viewZenithSin * params.z, viewZenithSin * params.w, viewZenithCos);
+  let bodyDir = dir.x * frame.x + dir.y * frame.y + dir.z * frame.z;
   // Each source in the sky frame: its components along the sky axis, up x the axis and the normal.
-  let frame = skyFrame(view);
   let count = skySourceCount(view);
   var sources : array<vec3f, MAX_SKY_SOURCES>;
+  var bodySources : array<vec3f, MAX_SKY_SOURCES>;
   for (var k = 0u; k < count; k++) {
     let s = view.sources[k].direction.xyz;
     sources[k] = vec3f(dot(s, frame.x), dot(s, frame.y), dot(s, frame.z));
+    bodySources[k] = s;
   }
   let angles = sourceAngles(dir, sources, count);
 
   let origin = vec3f(0.0, 0.0, r);
-  let tMax = maxDistanceFromHeight(heightM, viewZenithCos);
+  let tMax = shellMaxDistance(bottom, atmosphereM, heightM, viewZenithCos);
   let samples = max(u32(view.output.w), 2u);
   // The ray's closest approach to the sphere's centre is at -o.d = -r cos(view zenith).
   // The camera is inside the atmosphere: the sky view serves no other.
   let split = marchSplit(0.0, tMax, -r * viewZenithCos, samples, true);
-  let ray = SkyRay(heightM, viewZenithCos, origin, dir, sources, angles);
+  // The camera's place where the sphere puts it: moved along its normal from its geodetic height
+  // to its height on the sphere (R08.T6.f), the two the same but where the shell holds it (1 m off
+  // the ground and the top); its quadric from q_g by the same move, which keeps its digits.
+  let lift = heightM - view.camera.w;
+  let cameraPlace = view.camera.xyz + lift * frame.z;
+  let scaledNormal = oblateScaled(body, frame.z);
+  let cameraQuadric = view.exact.x
+    + lift * (2.0 * dot(oblateScaled(body, view.camera.xyz), scaledNormal)
+      + lift * dot(scaledNormal, scaledNormal));
+  let ray = SkyRay(
+    bottom, heightM, viewZenithCos, origin, dir, bodyDir, oblateScaled(body, bodyDir), cameraPlace,
+    oblateScaled(body, cameraPlace), cameraQuadric, sources, bodySources, angles
+  );
   var march = viewMarchStart();
   // A medium with no layer edge takes R05.T12.e's steps as they were, and declares no walk; the
-  // edges are the same for every texel, so the branch is uniform (R08.T6.i).
+  // edges are the same for every texel, so the branch is uniform (R08.T6.i). They stand at e over
+  // the camera's s on the column's sphere (R08.T6.f).
   let edgeCount = min(u32(layerEdges.count.x), MARCH_EDGES_MAX);
   if (edgeCount == 0u) {
     for (var i = 0u; i < samples; i++) {
-      skyViewStep(&march, ray, marchStep(split, i));
+      skyViewStep(&march, ray, body, frame, marchStep(split, i));
     }
   } else {
     var walk : MarchWalk;
     marchWalkStart(&walk, split);
+    let inverseS = 1.0 / view.curvature.z;
     for (var e = 0u; e < edgeCount; e++) {
-      let edgeM = layerEdges.middles[e / 4u][e % 4u];
-      marchWalkCrossSphere(&walk, medium.bottomRadiusM, heightM, viewZenithCos, edgeM);
+      let edgeM = layerEdges.middles[e / 4u][e % 4u] * inverseS;
+      marchWalkCrossSphere(&walk, bottom, heightM, viewZenithCos, edgeM);
     }
     marchWalkReady(&walk);
     for (var i = 0u; i < samples; i++) {
-      skyViewStep(&march, ray, marchWalkStep(&walk, i));
+      skyViewStep(&march, ray, body, frame, marchWalkStep(&walk, i));
     }
   }
   textureStore(skyViewOut, id.xy, vec4f(march.luminance, 1.0));

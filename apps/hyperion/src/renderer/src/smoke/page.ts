@@ -7,10 +7,12 @@
  * Its variant comes in the query string: `default` runs the device as the adapter offers it,
  * `no-subgroups` requests it with subgroups withheld (T9.c). A fixture adds a broken shader to the
  * catalogue or makes external requests, either of which must fail the run. The part does too: the
- * groups are in four parts, each a run of its own under the harness's watchdog (perf-smoke,
- * 2026-10-13), parts 2 to 4 the atmosphere's CPU-twin groups (R08.T6, R08.T7), part 4 with
+ * groups are in five parts, each a run of its own under the harness's watchdog (perf-smoke,
+ * 2026-10-13), parts 2 to 5 the atmosphere's CPU-twin groups (R08.T6, R08.T7), part 4 with
  * R05.T12.e's marches beside them, and part 1 every other; with no part given the page runs them
- * all, in its order. Each part checks its path (T9.c) itself.
+ * all, in its order. Each part checks its path (T9.c) itself. R08.T6.f's
+ * slices and bands run in two groups in part 5: the Saturn-class figure's, and Earth's, which took
+ * R08.T6.g's Earth.
  */
 
 import { WGSL_CATALOGUE } from "../view/engine/catalogue";
@@ -28,6 +30,8 @@ import {
   checkAtmosphereFrames,
   checkAtmosphereHeights,
   checkAtmosphereLayerEdges,
+  checkAtmosphereSlicesEarth,
+  checkAtmosphereSlicesSaturn,
   checkAtmosphereSteps,
   checkAtmosphereTables,
   checkAtmosphereTwins,
@@ -76,12 +80,13 @@ const VARIANTS: Readonly<Record<string, CapabilityOverrides | undefined>> = {
 };
 
 /**
- * A part of the page's groups, each about a quarter of the page's time: 2 to 4 the atmosphere's
+ * A part of the page's groups, each about a fifth of the page's time: 2 to 5 the atmosphere's
  * CPU-twin groups (R08.T6, R08.T7), whose twins outweigh their GPU work (2 R08.T6.b's, 3
- * R08.T6.g's, 4 R08.T6.i's and R08.T7's), and 1 every other group but R05.T12.e's, which part 4
- * runs first, before its twins start, to even the parts out.
+ * R08.T6.g's and R08.T6.i's, 4 R08.T7's, 5 R08.T6.f's Saturn-class figure and Earth), and 1 every
+ * other group but R05.T12.e's, which part 4 runs first, before its twins start, to even the parts
+ * out; part 1 also takes the captures, when asked, under the same watchdog.
  */
-type PagePart = 1 | 2 | 3 | 4;
+type PagePart = 1 | 2 | 3 | 4 | 5;
 
 /** The part a run's query names, `all` for none, or `null` for one that is not a part. */
 function partOf(value: string | null): PagePart | "all" | null {
@@ -97,6 +102,8 @@ function partOf(value: string | null): PagePart | "all" | null {
       return 3;
     case "4":
       return 4;
+    case "5":
+      return 5;
     default:
       return null;
   }
@@ -259,10 +266,16 @@ async function run(
   await group(2, "R08.T6.b the kernels over N terms", () =>
     checkAtmosphereTwins(engine, checks, twins),
   );
+  await group(5, "R08.T6.f slices and bands on a Saturn-class figure", () =>
+    checkAtmosphereSlicesSaturn(engine, checks, twins),
+  );
   await group(3, "R08.T6.g heights and angles in f32", () =>
     checkAtmosphereHeights(engine, checks, twins),
   );
-  await group(4, "R08.T6.i the marches cut at layer edges", () =>
+  await group(5, "R08.T6.f slices and bands on Earth", () =>
+    checkAtmosphereSlicesEarth(engine, checks, twins),
+  );
+  await group(3, "R08.T6.i the marches cut at layer edges", () =>
     checkAtmosphereLayerEdges(engine, checks, twins),
   );
   await group(4, "R08.T7 several suns, and the sky through the air", () =>

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { fourAbsorberMedium, lineAbsorberMedium } from "../../test/atmosphereFixtures";
+import {
+  fourAbsorberMedium,
+  gravityOfSpheroid,
+  lineAbsorberMedium,
+  SATURN_SPHEROID,
+} from "../../test/atmosphereFixtures";
 import { forbiddenIn, wgslCode } from "../../test/atmosphereWgsl";
 import { countingRenderEngine } from "../../test/countingRenderEngine";
 import { quaternion } from "../camera/quaternion";
@@ -13,19 +18,25 @@ import {
   R05_EARTH_REFERENCE,
   referenceSunIlluminanceLx,
 } from "./earth";
+import type { AtmosphereMedium } from "./medium";
+import { gravityRatio, principalRadiiM } from "./oblate";
 import { MAX_SKY_LIGHT_SLOTS, MAX_SKY_SOURCES } from "./settings";
 import {
   AERIAL_PERSPECTIVE_KERNEL,
   atmosphereInputs,
   type AtmosphereCamera,
   type AtmosphereScene,
+  bodyOfFigure,
+  FIT_SCALE_FLOOR_M,
   COMPOSITE_MATERIAL,
   frameSourcesOf,
   geodeticOf,
   HillaireAtmosphere,
   RAY_MARCH_KERNEL,
   SKY_VIEW_KERNEL,
+  localScaleHeightM,
   skyAzimuthOrigin,
+  skyViewColumnOf,
   skyViewHeight,
   type SpheroidFigure,
   skyAxisOf,
@@ -38,8 +49,14 @@ import { densityAt, extinction } from "./medium";
 import { opticalDepth } from "./opticalDepth";
 import aerialReadWgsl from "./shaders/aerialRead.wgsl?raw";
 import compositeWgsl from "./shaders/composite.wgsl?raw";
+import oblateWgsl from "./shaders/oblate.wgsl?raw";
 import viewWgsl from "./shaders/view.wgsl?raw";
-import { KERNEL_ARM_FORMAT, MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "./tables";
+import {
+  KERNEL_ARM_FORMAT,
+  MULTI_SCATTERING_KERNEL,
+  NO_ABSORBER_CURVES,
+  TRANSMITTANCE_KERNEL,
+} from "./tables";
 
 /** WGS 84 (NIMA TR8350.2): a = 6,378,137 m, f = 1 ÷ 298.257223563. */
 const WGS84: SpheroidFigure = {
@@ -295,6 +312,15 @@ const NOON: SunState = {
   angularRadiusRad: 0.004_65,
 };
 const DUSK: SunState = { ...NOON, directionBodyFixed: { x: 0, y: 1, z: 0 } };
+
+/** The body's table a new atmosphere on `figure` uploads, as floats (R08.T6.f). */
+async function oblateBodyTexelsOf(figure: SpheroidFigure): Promise<number[]> {
+  const engine = await countingRenderEngine();
+  const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, figure);
+  atmosphere.dispose();
+  const written = engine.textureWritten.findLast((w) => w.texture === "atmosphere oblate body");
+  return [...new Float32Array(written?.data.slice().buffer ?? new ArrayBuffer(0))];
+}
 
 describe("HillaireAtmosphere", () => {
   it("rebuilds the per-planet tables when the medium changes and not when the sun moves", async () => {
@@ -630,13 +656,112 @@ describe("HillaireAtmosphere's aerial perspective and sky view, published (R08.T
       expect(sky.azimuthOrigin.y).toBeCloseTo(1, 12);
       const inputs = atmosphereInputs(CAMERA, WGS84);
       expect(sky.zenith).toEqual(inputs.normal);
-      expect(sky.bottomRadiusM).toBeCloseTo(GAUSSIAN_RADIUS_M[0], 3);
-      expect(sky.heightM).toBe(skyViewHeight(inputs.heightM, R05_EARTH_REFERENCE.topHeightM));
-      const exact = viewExactOf(CAMERA.positionM, WGS84, R05_EARTH_REFERENCE.topHeightM, inputs);
-      expect(sky.horizonAngleRad).toBe(exact.horizonAngleRad);
-      expect(draw.uniforms["exact"]?.[2]).toBe(Math.fround(sky.horizonAngleRad));
+      // R08.T6.f: each column on its own sphere R_α of the camera's M and N, the atmosphere the
+      // medium's top over the camera's s (1 with no gravity), and no one sphere on WGS 84.
+      const { meridionalM, primeVerticalM } = principalRadiiM(WGS84, inputs.latitudeRad);
+      expect(sky.meridionalRadiusM).toBe(meridionalM);
+      expect(sky.primeVerticalRadiusM).toBe(primeVerticalM);
+      expect(sky.atmosphereM).toBe(R05_EARTH_REFERENCE.topHeightM);
+      expect(sky.heightM).toBe(skyViewHeight(inputs.heightM, sky.atmosphereM));
+      expect(sky.sphere).toBeNull();
+      expect([...(draw.uniforms["curvature"] ?? [])]).toEqual(
+        [meridionalM, primeVerticalM, 1, R05_EARTH_REFERENCE.topHeightM].map(Math.fround),
+      );
+      // Along the meridian the column's sphere is M, along the prime vertical N; β from it.
+      const north = { x: 0, y: 0, z: 1 };
+      const east = { x: 0, y: 1, z: 0 };
+      const alongNorth = skyViewColumnOf(sky, north);
+      expect(alongNorth.bottomRadiusM).toBeCloseTo(meridionalM, 3);
+      expect(skyViewColumnOf(sky, east).bottomRadiusM).toBeCloseTo(primeVerticalM, 3);
+      const rho = Math.sqrt(sky.heightM * (2 * meridionalM + sky.heightM));
+      expect(alongNorth.horizonAngleRad).toBeCloseTo(Math.atan2(meridionalM, rho), 12);
     },
   );
+
+  it("packs the figure itself into the body's table with no gravity given, and a sphere's R_ref (R08.T6.f)", async () => {
+    // WGS 84 with no gravity: the datum the ray march's heights stand on is WGS 84's, s ≡ 1.
+    const a = WGS84.equatorialRadiusM;
+    const c = WGS84.polarRadiusM;
+    const wgs84 = await oblateBodyTexelsOf(WGS84);
+    expect(wgs84.slice(0, 4)).toEqual(
+      [a, c, tableRadiusM(WGS84), ((a - c) * (a + c)) / (a * a)].map(Math.fround),
+    );
+    expect(wgs84.slice(4, 8)).toEqual([0, 0, 1, 1]);
+    expect(wgs84.slice(8, 10)).toEqual([1, 1]);
+    const sphere = { equatorialRadiusM: 6_371_000, polarRadiusM: 6_371_000 };
+    expect((await oblateBodyTexelsOf(sphere)).slice(0, 4)).toEqual([
+      6_371_000, 6_371_000, 6_371_000, 0,
+    ]);
+    expect(bodyOfFigure(sphere)).toBeNull();
+    expect(bodyOfFigure(WGS84)?.gravity.spheroid).toBeNull();
+  });
+
+  it("gives a body's gravity to the frame: s at the camera, the air's height over it, the body's table (R08.T6.f)", async () => {
+    const engine = await countingRenderEngine();
+    const gravity = gravityOfSpheroid(SATURN_SPHEROID);
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      R05_EARTH_REFERENCE,
+      TABLE_SIZES.high,
+      SATURN_SPHEROID,
+      NO_ABSORBER_CURVES,
+      gravity,
+    );
+    const phi = Math.PI / 4;
+    const a = SATURN_SPHEROID.equatorialRadiusM;
+    const e2 = 1 - (SATURN_SPHEROID.polarRadiusM / a) ** 2;
+    const n = a / Math.sqrt(1 - e2 * Math.sin(phi) ** 2);
+    const camera: AtmosphereCamera = {
+      ...CAMERA,
+      positionM: {
+        x: (n + 2_000) * Math.cos(phi),
+        y: 0,
+        z: (n * (1 - e2) + 2_000) * Math.sin(phi),
+      },
+    };
+    const draw = atmosphere.drawFrame(camera, [NOON], SCENE);
+    const inputs = atmosphereInputs(camera, SATURN_SPHEROID, gravity);
+    const s = gravityRatio(gravity, inputs.latitudeRad);
+    expect(inputs.latitudeRad).toBeCloseTo(phi, 12);
+    expect(inputs.gravityRatio).toBe(s);
+    expect(Math.abs(s - 1)).toBeGreaterThan(1e-3);
+    const { meridionalM, primeVerticalM } = principalRadiiM(SATURN_SPHEROID, inputs.latitudeRad);
+    const top = R05_EARTH_REFERENCE.topHeightM;
+    expect([...(draw.uniforms["curvature"] ?? [])]).toEqual(
+      [meridionalM, primeVerticalM, s, top / s].map(Math.fround),
+    );
+    const sky = atmosphere.skyView(camera);
+    expect([sky.atmosphereM, sky.sphere]).toEqual([top / s, null]);
+    // The tables in the body's slices and bands, every reader given the body's table.
+    expect(atmosphere.tables.plan.kappa).toEqual(Array.from(gravity.slicing.kappa));
+    expect(atmosphere.tables.plan.bands).toHaveLength(gravity.slicing.bandGravityRatio.length);
+    expect(draw.textures["oblateBody"]).toBe(atmosphere.tables.oblateBody);
+    expect(atmosphere.aerialPerspective(camera)?.oblateBody).toBe(atmosphere.tables.oblateBody);
+  });
+
+  it("keeps a sphere's one sky-view sphere, its radius and β, as R08.T9.a published them (R08.T6.f)", async () => {
+    const engine = await countingRenderEngine();
+    const sphere = { equatorialRadiusM: 6_371_000, polarRadiusM: 6_371_000 };
+    const atmosphere = new HillaireAtmosphere(
+      engine,
+      R05_EARTH_REFERENCE,
+      TABLE_SIZES.high,
+      sphere,
+    );
+    const camera: AtmosphereCamera = { ...CAMERA, positionM: { x: 6_371_002, y: 0, z: 0 } };
+    atmosphere.drawFrame(camera, [NOON], SCENE);
+    const sky = atmosphere.skyView(camera);
+    const rho = Math.sqrt(sky.heightM * (2 * 6_371_000 + sky.heightM));
+    expect(sky.sphere?.bottomRadiusM).toBe(6_371_000);
+    expect(sky.sphere?.horizonAngleRad).toBeCloseTo(Math.acos(rho / (6_371_000 + sky.heightM)), 12);
+    for (const d of [
+      { x: 0, y: 0, z: 1 },
+      { x: 0, y: Math.SQRT1_2, z: Math.SQRT1_2 },
+      { x: 1, y: 0, z: 0 },
+    ]) {
+      expect(skyViewColumnOf(sky, d)).toEqual(sky.sphere);
+    }
+  });
 
   it("takes another object for the view drawFrame drew", async () => {
     const engine = await countingRenderEngine();
@@ -762,31 +887,48 @@ describe("the atmosphere's WGSL", () => {
 });
 
 describe("the transmittance read as optical depth (R08.T6.c)", () => {
+  it("the multiple-scattering kernel reads its band's table only through transmittanceThroughLayer, exponentiated in f32", () => {
+    const code = MULTI_SCATTERING_KERNEL.reference.replaceAll(/\/\/[^\n]*/gu, "");
+    // The one bilinear read of the stored optical depth is transmittanceThroughLayer's own, which
+    // adds the curves and exponentiates, at the build's layer (R08.T6.f); the forward lobes alone
+    // read the stored depth itself, as their x (R08.T7), in this form and no other.
+    const lobeReads = code.replaceAll(
+      "exp(min(tableAtUnitLayer(transmittance, layer, unit).rgb * share,",
+      "",
+    );
+    expect([
+      /tableAtUnit(Layer)?\(transmittance,/u.test(lobeReads),
+      code.match(/tableAtUnitLayer\(depthTable, layer, unit\)/gu)?.length,
+      /return exp\(-\(stored\.rgb \+ absorberDepth\(/u.test(code),
+      /transmittanceThroughLayer\(\s*transmittance,\s*absorberColumns,\s*absorberPressureColumns,\s*lastAbsorberPressureColumn,\s*absorberCurves,\s*layer,/u.test(
+        code,
+      ),
+    ]).toEqual([false, 1, true, true]);
+  });
+
   it.each([
-    ["the multiple-scattering kernel", MULTI_SCATTERING_KERNEL.reference],
     ["the sky-view kernel", SKY_VIEW_KERNEL.reference],
     ["the aerial-perspective kernel", AERIAL_PERSPECTIVE_KERNEL.reference],
     ["the ray-march kernel", RAY_MARCH_KERNEL.reference],
     ["the composite", COMPOSITE_MATERIAL.fragmentWgsl],
   ])(
-    "%s reads the table only through transmittanceThroughTables, exponentiated in f32",
+    "%s reads the slices only through the sliced lookup, exponentiated in f32 (R08.T6.f)",
     (_n, source) => {
       const code = source.replaceAll(/\/\/[^\n]*/gu, "");
-      // The one bilinear read of the stored optical depth is transmittanceThroughTables's own, which
-      // adds the curves and exponentiates; every read site calls it with the module's two tables.
-      // The forward lobes alone read the stored depth itself, as their x (R08.T7), in these two
-      // forms and no other.
-      const lobeReads = code
-        .replaceAll("lobeOrdersOf(local, angles[k], tableAtUnit(transmittance, unit).rgb)", "")
-        .replaceAll("exp(min(tableAtUnit(transmittance, unit).rgb * share,", "");
+      // The one bilinear read of a slice's stored optical depth is sliceStoredAt's own, called by
+      // slicedStoredOf with the module's four tables; its sum, over s, takes the curves and is
+      // exponentiated; the local scale height alone reads slice 0's vertical depth itself. The
+      // other read of the form is `common.wgsl`'s transmittanceThroughLayer, which none calls.
       expect([
-        /tableAtUnit\(transmittance,/u.test(lobeReads),
-        code.match(/tableAtUnit\(depthTable, unit\)/gu)?.length,
-        /return exp\(-\(stored\.rgb \+ absorberDepth\(/u.test(code),
-        /transmittanceThroughTables\(\s*\w+,\s*absorberColumns,\s*absorberPressureColumns,\s*lastAbsorberPressureColumn,\s*absorberCurves,/u.test(
+        /\btableAtUnit\(\s*(transmittance|depthTable|absorberColumns|columnTable)\b/u.test(code),
+        code.match(/tableAtUnitLayer\(depthTable, layer, unit\)/gu)?.length,
+        code.match(/\btransmittanceThroughLayer\(/gu)?.length,
+        code.match(/tableAtUnitLayer\(depthTable, 0u, unit\)\.g/gu)?.length,
+        /slicedStoredOf\(\s*ray, body, oblateBody, transmittance, absorberColumns, absorberPressureColumns,\s*lastAbsorberPressureColumn, count\s*\)/u.test(
           code,
         ),
-      ]).toEqual([false, 1, true, true]);
+        /exp\(-\(stored\.depth \+ absorbed\)\)/u.test(code),
+      ]).toEqual([false, 2, 1, 1, true, true]);
     },
   );
 
@@ -794,20 +936,20 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     const code = TRANSMITTANCE_KERNEL.reference.replaceAll(/\/\/[^\n]*/gu, "");
     expect([
       /pressureColumns = addColumns\(pressureColumns, local\.pressureColumns, dt\);/u.test(code),
-      /textureStore\(absorberPressureColumnsOut, id\.xy, min\(firstFour, vec4f\(HALF_MAX\)\)\);/u.test(
+      /textureStore\(absorberPressureColumnsOut, id\.xy, layer, min\(firstFour, vec4f\(HALF_MAX\)\)\);/u.test(
         code,
       ),
-      /textureStore\(\s*lastAbsorberPressureColumnOut, id\.xy,/u.test(code),
+      /textureStore\(\s*lastAbsorberPressureColumnOut, id\.xy, layer,/u.test(code),
     ]).toEqual([true, true, true]);
   });
 
   it("writes the optical depth and the absorber columns, never e^(−τ), in the transmittance kernel", () => {
     const code = TRANSMITTANCE_KERNEL.reference.replaceAll(/\/\/[^\n]*/gu, "");
     expect(code).toMatch(
-      /let stored = min\(vec4f\(ray\.depth, ray\.columns\.first\), vec4f\(HALF_MAX\)\);\s*textureStore\(transmittanceOut, id\.xy, stored\);/u,
+      /let stored = min\(vec4f\(ray\.depth, ray\.columns\.first\), vec4f\(HALF_MAX\)\);\s*textureStore\(transmittanceOut, id\.xy, layer, stored\);/u,
     );
     expect(code).toMatch(
-      /textureStore\(absorberColumnsOut, id\.xy, min\(ray\.columns\.more, vec4f\(HALF_MAX\)\)\);/u,
+      /textureStore\(absorberColumnsOut, id\.xy, layer, min\(ray\.columns\.more, vec4f\(HALF_MAX\)\)\);/u,
     );
     expect(code).toMatch(/const HALF_MAX : f32 = 65504\.0;/u);
     expect(code).not.toMatch(/exp\(-opticalDepth/u);
@@ -822,11 +964,12 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
   ])(
     "%s declares the absorber-column table, its pressure tables and the lights' curves",
     (_n, source) => {
+      // The transmittance tables are 2D arrays of one layer a κ slice, or a band's (R08.T6.f).
       expect([
-        /var absorberColumns : texture_2d<f32>;/u.test(source),
+        /var absorberColumns : texture_2d_array<f32>;/u.test(source),
         /var absorberCurves : texture_2d<f32>;/u.test(source),
-        /var absorberPressureColumns : texture_2d<f32>;/u.test(source),
-        /var lastAbsorberPressureColumn : texture_2d<f32>;/u.test(source),
+        /var absorberPressureColumns : texture_2d_array<f32>;/u.test(source),
+        /var lastAbsorberPressureColumn : texture_2d_array<f32>;/u.test(source),
       ]).toEqual([true, true, true, true]);
     },
   );
@@ -860,7 +1003,9 @@ describe("the transmittance read as optical depth (R08.T6.c)", () => {
     engine.dispatched.length = 0;
     atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     expect(
-      engine.dispatched.map(({ bindings }) => [...(bindings.uniforms["medium"] ?? [])].slice(8)),
+      engine.dispatched.map(({ bindings }) =>
+        [...(bindings.uniforms["medium"] ?? [])].slice(8, 12),
+      ),
     ).toEqual([
       [4, 0, 0, 0],
       [4, 0, 0, 0],
@@ -944,7 +1089,7 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
 
   it("gives the view's members in one order to the kernels and the composite, the sources last (R08.T7)", () => {
     const view = vec4Members(viewWgsl, "AtmosphereView");
-    expect(view.at(-1)).toBe("exact");
+    expect(view.slice(-2)).toEqual(["exact", "curvature"]);
     expect(vec4Members(viewWgsl, "SkySource")).toEqual(["direction", "weight", "disc"]);
     expect(viewWgsl).toMatch(/sources : array<SkySource, MAX_SKY_SOURCES>,\s*\}/u);
     const sources = Array.from({ length: MAX_SKY_SOURCES }, (_, i) =>
@@ -963,18 +1108,63 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
     const sphere = { equatorialRadiusM: 6_371_000, polarRadiusM: 6_371_000 };
     const position = { x: 0, y: 0, z: 6_371_002 };
     const inputs = atmosphereInputs({ positionM: position }, sphere);
-    const exact = viewExactOf(position, sphere, 100_000, inputs);
+    const exact = viewExactOf(position, sphere, R05_EARTH_REFERENCE, inputs);
     // q_g = h (2a + h) and q_t = (h − H)(2a + h + H) on a sphere, 2 m up.
     expect(exact.groundQuadricM2 / (2 * (2 * 6_371_000 + 2)) - 1).toBeCloseTo(0, 9);
     expect(exact.topQuadricM2 / ((2 - 100_000) * (2 * 6_371_000 + 100_002)) - 1).toBeCloseTo(0, 12);
-    // β = acos(√(h(2R + h)) ÷ (R + h)), the angle from the nadir to the horizon, from 2 m.
-    const rho = Math.sqrt(2 * (2 * 6_371_000 + 2));
-    expect(exact.horizonAngleRad).toBeCloseTo(Math.acos(rho / 6_371_002), 12);
+    // The camera's local scale height (R08.T6.f): the column above it over its extinction.
+    expect(exact.localScaleHeightM).toBe(localScaleHeightM(R05_EARTH_REFERENCE, inputs.heightM));
+  });
+
+  it("takes the local scale height as one scale height of an exponential, held to the room left", () => {
+    const medium: AtmosphereMedium = {
+      name: "one exponential",
+      topHeightM: 100_000,
+      groundAlbedo: [0, 0, 0],
+      terms: [
+        {
+          name: "gas",
+          density: { kind: "exponential", scaleHeightM: 8_000 },
+          scattering: [1e-5, 2e-5, 3e-5],
+          absorption: [0, 0, 0],
+          phase: { kind: "none" },
+        },
+      ],
+    };
+    // H (1 − e^(−(top − h) ÷ H)) in green: one H to 10⁻⁵ from the ground.
+    expect(localScaleHeightM(medium, 0) / 8_000 - 1).toBeCloseTo(-Math.exp(-12.5), 9);
+    // At the top, the fit's floor (R08.T6.f), oblate.wgsl's too.
+    expect(localScaleHeightM(medium, 99_999.5)).toBe(FIT_SCALE_FLOOR_M);
+    expect(oblateWgsl).toContain(
+      `const OBLATE_SCALE_FLOOR_M : f32 = ${FIT_SCALE_FLOOR_M.toFixed(1)};`,
+    );
+    expect(localScaleHeightM({ ...medium, terms: [] }, 50_000)).toBe(50_000);
+  });
+
+  it("puts the ray march's top through h* = H at the equator and the poles (R08.T6.f)", () => {
+    const gravity = gravityOfSpheroid(SATURN_SPHEROID);
+    const at = { x: SATURN_SPHEROID.equatorialRadiusM + 2_000, y: 0, z: 0 };
+    const inputs = atmosphereInputs({ positionM: at }, SATURN_SPHEROID, gravity);
+    const medium = { ...R05_EARTH_REFERENCE, topHeightM: 800_000 };
+    const exact = viewExactOf(at, SATURN_SPHEROID, medium, inputs, gravity);
+    const a = SATURN_SPHEROID.equatorialRadiusM + 800_000 / gravityRatio(gravity, 0);
+    const c = SATURN_SPHEROID.polarRadiusM + 800_000 / gravityRatio(gravity, Math.PI / 2);
+    expect(exact.topQuadricM2).toBe(at.x ** 2 - a * a);
+    // s rises from about 0.87 at the equator to 1.15 at the pole: the top stands higher over the
+    // equator than H and lower over the pole.
+    expect(a).toBeGreaterThan(SATURN_SPHEROID.equatorialRadiusM + 800_000);
+    expect(c).toBeLessThan(SATURN_SPHEROID.polarRadiusM + 800_000);
+    expect(inputs.gravityRatio).toBe(gravityRatio(gravity, 0));
   });
 
   it("forms the spheroid's constants with its own z scale, the top shell's with (a + H) ÷ (c + H)", () => {
     const at = pointAt(45, 3);
-    const exact = viewExactOf(at, WGS84, 100_000, atmosphereInputs({ positionM: at }, WGS84));
+    const exact = viewExactOf(
+      at,
+      WGS84,
+      R05_EARTH_REFERENCE,
+      atmosphereInputs({ positionM: at }, WGS84),
+    );
     const a = WGS84.equatorialRadiusM;
     const c = WGS84.polarRadiusM;
     const ground = at.x ** 2 + at.y ** 2 + ((at.z * a) / c) ** 2 - a * a;
@@ -992,17 +1182,19 @@ describe("the atmosphere's arithmetic (R08.T6.g)", () => {
     const atmosphere = new HillaireAtmosphere(engine, R05_EARTH_REFERENCE, TABLE_SIZES.high, WGS84);
     const draw = atmosphere.drawFrame(CAMERA, [NOON], SCENE);
     const inputs = atmosphereInputs(CAMERA, WGS84);
-    const exact = viewExactOf(CAMERA.positionM, WGS84, 100_000, inputs);
-    const expected = [exact.groundQuadricM2, exact.topQuadricM2, exact.horizonAngleRad, 0].map(
+    const exact = viewExactOf(CAMERA.positionM, WGS84, R05_EARTH_REFERENCE, inputs);
+    const expected = [exact.groundQuadricM2, exact.topQuadricM2, exact.localScaleHeightM, 0].map(
       Math.fround,
     );
     expect([...(draw.uniforms["exact"] ?? [])]).toEqual(expected);
     expect([...(draw.uniforms["shell"] ?? [])]).toEqual([100_000, 0, 0, 0]);
-    // The kernels' view block: the members in order, `exact` the eleventh, the sources after it.
+    // The kernels' view block: the members in order, `exact` the eleventh, `curvature` the twelfth
+    // (R08.T6.f), the sources after them.
     const block = engine.dispatched.find((d) => d.kernel === "atmosphere sky view")?.bindings
       .uniforms["view"];
     expect(Array.from(block ?? []).slice(40, 44)).toEqual(expected);
-    expect(block).toHaveLength((11 + 3 * 6) * 4);
+    expect(Array.from(block ?? []).slice(44, 48)).toEqual([...(draw.uniforms["curvature"] ?? [])]);
+    expect(block).toHaveLength((12 + 3 * 6) * 4);
   });
 
   it("keeps skyViewHeight to view.wgsl's clamp", () => {

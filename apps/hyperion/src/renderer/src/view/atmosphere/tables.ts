@@ -54,6 +54,7 @@ import {
   lobeIsDrawn,
 } from "./forwardLobe";
 import { forwardPeakEntry } from "./forwardPeak";
+import type { SpheroidFigure } from "./hillaire";
 import { MARCH_EDGES_MAX, marchEdgesM } from "./marchSteps";
 import {
   type AtmosphereMedium,
@@ -70,6 +71,13 @@ import {
   tabulatedDensity,
   type TermAbsorber,
 } from "./medium";
+import {
+  bandLatitudeRad,
+  type BodyGravity,
+  gravityRatio,
+  type OblateSlicing,
+  principalRadiiM,
+} from "./oblate";
 import preciseTrigWgsl from "../shaders/preciseTrig.wgsl?raw";
 import commonWgsl from "./shaders/common.wgsl?raw";
 import mediumWgsl from "./shaders/medium.wgsl?raw";
@@ -93,6 +101,170 @@ export const TRANSMITTANCE_SIZE: TableSize = { widthTexels: 256, heightTexels: 6
 
 /** The multiple-scattering table's size: 32 in the sun's μ by 32 in r (Hillaire 2020). */
 export const MULTI_SCATTERING_SIZE: TableSize = { widthTexels: 32, heightTexels: 32 };
+
+/**
+ * The most κ slices a body's transmittance tables hold, one layer each (plan R08, Design note 17;
+ * R08.T6.f): `oblate.wgsl`'s `MAX_SLICES`.
+ *
+ * @remarks
+ * Plan 14 caps the flattening at 0.2, where Design note 17's ω_fig gives 9–10 slices; Saturn takes
+ * 5, Jupiter 4, the ice giants 2, Earth 1.
+ */
+export const MAX_SLICES = 16;
+
+/**
+ * The most latitude bands a body's multiple-scattering table holds, one layer a band and light
+ * slot (R08.T6.f): `oblate.wgsl`'s `MAX_BANDS`. Plan 14's cap gives 6–7; Saturn takes 4.
+ */
+export const MAX_BANDS = 16;
+
+/**
+ * The texels of a body's table ({@link packOblateBody}): four of its header, then
+ * {@link MAX_SLICES} slices and {@link MAX_BANDS} bands, `oblate.wgsl`'s layout.
+ */
+export const OBLATE_BODY_TEXELS = 4 + MAX_SLICES + MAX_BANDS;
+
+/**
+ * The body a planet's tables are sliced for (plan R08, Design note 17; R08.T6.f): its datum and
+ * R08.T3.d's gravity, whose slicing gives the κ slices and latitude bands. `tablesCpu.ts`'s
+ * `TwinBody` is this shape.
+ */
+export interface AtmosphereBody {
+  /** The datum spheroid: R07's `BodyFigure`. */
+  readonly figure: SpheroidFigure;
+  /** R08.T3.d's `bodyGravity` of the body, its slicing included. */
+  readonly gravity: BodyGravity;
+}
+
+/** One latitude band of a body's tables (Design note 17, _Latitude bands_; R08.T6.e's twinBandOf). */
+export interface TablesBand {
+  /** s_b. */
+  readonly gravityRatio: number;
+  /** The geodetic latitude whose s is s_b, rad (`oblate.ts`'s `bandLatitudeRad`). */
+  readonly latitudeRad: number;
+  /**
+   * The ground of the band's sphere in its gravity-scaled frame, m: s_b √(MN) at its latitude, or
+   * R_ref for a body of one band, built as R05's per-planet tables are.
+   */
+  readonly bottomRadiusM: number;
+  /** The factor every coefficient takes in the band's frame: 1 ÷ s_b. */
+  readonly coefficientFactor: number;
+}
+
+/**
+ * How a planet's tables are sliced (plan R08, Design note 17; R08.T6.f): the ground of each κ
+ * slice, κ_k R_ref, and each latitude band, as R08.T6.e's `oblatePlanetTwin` builds them.
+ */
+export interface TablesPlan {
+  /** κ_k of the slices, ascending. */
+  readonly kappa: ReadonlyArray<number>;
+  /** κ_k R_ref, m. */
+  readonly sliceRadiiM: ReadonlyArray<number>;
+  readonly bands: ReadonlyArray<TablesBand>;
+  /**
+   * Whether the one band reads the one slice's table, a body of one slice at κ = 1 and one band:
+   * Earth's, and every body with no spheroid, whose tables are R05's.
+   */
+  readonly shared: boolean;
+}
+
+/** One slice at κ = 1 and one band at s = 1: R05's per-planet tables on R_ref. */
+const ONE_SLICE_AND_BAND: OblateSlicing = {
+  kappa: Float64Array.of(1),
+  bandGravityRatio: Float64Array.of(1),
+};
+
+/**
+ * The slices and bands of a planet's tables on `referenceRadiusM`, R_ref, for `body`, or one of
+ * each for none (R08.T6.f): each band at its own latitude's s and √(MN), its sphere s_b √(MN) there
+ * (R_ref for a body of one band), every coefficient over s_b, as `tablesCpu.ts`'s `twinBandOf`.
+ *
+ * @throws RangeError for more slices than {@link MAX_SLICES} or bands than {@link MAX_BANDS}, which
+ *   the tables cannot hold (Design note 11's widening is R08.T11's).
+ */
+export function tablesPlanOf(body: AtmosphereBody | null, referenceRadiusM: number): TablesPlan {
+  const slicing = body?.gravity.slicing ?? ONE_SLICE_AND_BAND;
+  const kappa = Array.from(slicing.kappa);
+  if (kappa.length > MAX_SLICES || slicing.bandGravityRatio.length > MAX_BANDS) {
+    throw new RangeError(
+      `a body's tables hold at most ${MAX_SLICES} slices and ${MAX_BANDS} bands, not ${kappa.length} and ${slicing.bandGravityRatio.length}`,
+    );
+  }
+  const oneBand = slicing.bandGravityRatio.length === 1;
+  const bands = Array.from(slicing.bandGravityRatio, (s): TablesBand => {
+    if (body === null || oneBand) {
+      return {
+        gravityRatio: s,
+        latitudeRad: body === null ? 0 : bandLatitudeRad(body.gravity, s),
+        bottomRadiusM: referenceRadiusM,
+        coefficientFactor: 1 / s,
+      };
+    }
+    const latitudeRad = bandLatitudeRad(body.gravity, s);
+    const { meridionalM, primeVerticalM } = principalRadiiM(body.figure, latitudeRad);
+    return {
+      gravityRatio: s,
+      latitudeRad,
+      bottomRadiusM: s * Math.sqrt(meridionalM * primeVerticalM),
+      coefficientFactor: 1 / s,
+    };
+  });
+  return {
+    kappa,
+    sliceRadiiM: kappa.map((k) => k * referenceRadiusM),
+    bands,
+    shared: oneBand && kappa.length === 1 && kappa[0] === 1 && bands[0]?.gravityRatio === 1,
+  };
+}
+
+/**
+ * A body's table as `oblate.wgsl` reads it (`oblateBody`, `rgba32float`, {@link OBLATE_BODY_TEXELS}
+ * texels of one row; R08.T6.f), formed in `f64` and narrowed once: texel 0 (a, c, R_ref, e²);
+ * texel 1 the gravity ratio's coefficients (A, B, K, O), s(φ) = (A cos²φ + B sin²φ) ÷
+ * √(cos²φ + K sin²φ) + O, here from `oblate.ts`'s `gravityRatio` at the equator and the pole, which
+ * give A = s_e − O and B = (s_p − O) c ÷ a, O the added gravity over g_ref, and K = (c ÷ a)², and
+ * A = B = 0, O = 1 for a body with no spheroid; texel 2 (slices, bands, layers a band, the medium's
+ * top); texel 3 (k = a ÷ c, k², 1 ÷ s_e, 1 ÷ s_p); then each slice's (κ_k R_ref, √κ_k, ln κ_k, 0)
+ * and each band's (s_b, ln s_b, 0, 0).
+ *
+ * @param figure - The datum: a body's, or a sphere of R_ref for tables with no body.
+ * @param layersPerBand - The multiple-scattering layers a band takes: its light slots.
+ */
+export function packOblateBody(
+  figure: SpheroidFigure,
+  gravity: BodyGravity | null,
+  plan: TablesPlan,
+  referenceRadiusM: number,
+  topHeightM: number,
+  layersPerBand: number,
+): Float32Array {
+  const a = figure.equatorialRadiusM;
+  const c = figure.polarRadiusM;
+  const texels = new Float32Array(OBLATE_BODY_TEXELS * 4);
+  const ratio = c / a;
+  let coefficients: readonly [number, number, number, number] = [0, 0, 1, 1];
+  let inverseEquator = 1;
+  let inversePole = 1;
+  if (gravity !== null && gravity.spheroid !== null) {
+    const offset = gravity.gravityOffsetMS2 / gravity.referenceGravityMS2;
+    const atEquator = gravityRatio(gravity, 0);
+    const atPole = gravityRatio(gravity, Math.PI / 2);
+    coefficients = [atEquator - offset, (atPole - offset) * ratio, ratio * ratio, offset];
+    inverseEquator = 1 / atEquator;
+    inversePole = 1 / atPole;
+  }
+  texels.set([a, c, referenceRadiusM, ((a - c) * (a + c)) / (a * a)], 0);
+  texels.set(coefficients, 4);
+  texels.set([plan.kappa.length, plan.bands.length, layersPerBand, topHeightM], 8);
+  texels.set([a / c, (a / c) ** 2, inverseEquator, inversePole], 12);
+  for (const [k, kappa] of plan.kappa.entries()) {
+    texels.set([kappa * referenceRadiusM, Math.sqrt(kappa), Math.log(kappa), 0], (4 + k) * 4);
+  }
+  for (const [b, band] of plan.bands.entries()) {
+    texels.set([band.gravityRatio, Math.log(band.gravityRatio), 0, 0], (4 + MAX_SLICES + b) * 4);
+  }
+  return texels;
+}
 
 /**
  * Midpoint steps along each transmittance ray: 256.
@@ -544,17 +716,11 @@ export const KERNEL_ARM_FORMAT = "rgba32float";
 /**
  * A planet's tables' textures: the stored `rgba16float` ones, or the kernel arm's `rgba32float`
  * ones ({@link KERNEL_ARM_FORMAT}). The transmittance kernel writes the transmittance table and the
- * absorber-column table beside it (R08.T6.c), and the pressure-weighted column tables (R08.T4.d);
- * the multiple-scattering kernel one layer of its 2D array a light slot
- * ({@link multiScatteringLayersOf}, R08.T7).
+ * absorber-column table beside it (R08.T6.c), and the pressure-weighted column tables (R08.T4.d),
+ * each a 2D array of one layer a κ slice (R08.T6.f); the multiple-scattering kernel one layer of its
+ * 2D array a latitude band and light slot ({@link multiScatteringLayersOf}, R08.T7, R08.T6.f).
  */
-export interface PlanetTableTextures {
-  readonly transmittance: TextureHandle;
-  readonly absorberColumns: TextureHandle;
-  /** The pressure-weighted columns of pressure channels 0 to 3, in rgba (R08.T4.d). */
-  readonly absorberPressureColumns: TextureHandle;
-  /** The pressure-weighted column of pressure channel 4, in r ({@link lastPressureColumnSize}). */
-  readonly lastAbsorberPressureColumn: TextureHandle;
+export interface PlanetTableTextures extends TransmittanceTextures {
   readonly multiScattering: TextureHandle;
 }
 
@@ -563,8 +729,9 @@ export interface PlanetTableTextures {
  * `decision-r08-t6b-floor.md` §8): under an absorber, one a light slot, each built with that
  * light's curves through the kernel's `curveSlot`, so that each sun's source reads its own; with
  * none, one, since without an absorber the table is the same for every star (the smooth terms
- * stand at the fitted wavelengths and the star's colour multiplies after). With R08.T6.f's bands
- * they become band × slot. A layer is 8 KB.
+ * stand at the fitted wavelengths and the star's colour multiplies after). These are a band's: the
+ * table has one layer a band and light slot since R08.T6.f ({@link AtmosphereTables.multiScattering}).
+ * A layer is 8 KB.
  */
 export function multiScatteringLayersOf(
   medium: AtmosphereMedium,
@@ -609,10 +776,23 @@ export function withKernelArmFormat(pair: KernelPair): KernelPair {
 const TERM_FLOATS = 16;
 
 /**
- * Floats in the `Medium` uniform: its shell, term count and steps, the ground's albedo, and its
- * absorber slots' count in a vec4f of its own (R08.T6.c).
+ * Floats in the `Medium` uniform: its shell, term count and steps, the ground's albedo, its
+ * absorber slots' count in a vec4f of its own (R08.T6.c), and a per-planet build's own (R08.T6.f).
  */
-const MEDIUM_UNIFORM_FLOATS = 12;
+const MEDIUM_UNIFORM_FLOATS = 16;
+
+/**
+ * A per-planet build's own part of the `Medium` uniform (plan R08, R08.T6.f; `common.wgsl`'s
+ * `Medium.build`): what one dispatch of the transmittance or multiple-scattering kernel builds.
+ */
+export interface MediumBuild {
+  /** The factor every coefficient and absorber column per metre takes: 1 ÷ s_b in a band's frame. */
+  readonly coefficientFactor: number;
+  /** The layer of the transmittance tables the transmittance kernel writes or the other reads. */
+  readonly transmittanceLayer: number;
+  /** The layer of the multiple-scattering table the kernel writes: band × light slots + slot. */
+  readonly multiScatteringLayer: number;
+}
 
 /** The bytes of the kernels' `terms` buffer: {@link MAX_TERMS} terms of 64 B, 512 B. */
 export const TERMS_BUFFER_BYTES = MAX_TERMS * TERM_FLOATS * 4;
@@ -731,14 +911,21 @@ export function packMedium(medium: AtmosphereMedium): Float32Array {
  * @param bottomRadiusM - The ground's radius, m.
  * @param samples - The kernel's steps along each ray.
  * @param curveSlot - The light slot whose curves of growth a per-planet table is built with,
- *   `medium.wgsl`'s `curveSlot()`, and the multiple-scattering layer it writes: one dispatch a
- *   slot since R08.T7; {@link SHARED_TABLE_CURVE_SLOT} by default.
+ *   `medium.wgsl`'s `curveSlot()`: one dispatch a slot since R08.T7;
+ *   {@link SHARED_TABLE_CURVE_SLOT} by default.
+ * @param build - The build's factor and layers (R08.T6.f): by default R05's, the factor 1, the
+ *   transmittance tables' layer 0 and the multiple-scattering layer `curveSlot`.
  */
 export function packMediumUniform(
   medium: AtmosphereMedium,
   bottomRadiusM: number,
   samples: number,
   curveSlot = SHARED_TABLE_CURVE_SLOT,
+  build: MediumBuild = {
+    coefficientFactor: 1,
+    transmittanceLayer: 0,
+    multiScatteringLayer: curveSlot,
+  },
 ): Float32Array {
   const packed = new Float32Array(MEDIUM_UNIFORM_FLOATS);
   packed.set([bottomRadiusM, medium.topHeightM, medium.terms.length, samples], 0);
@@ -751,6 +938,10 @@ export function packMediumUniform(
       lineSlotMask(medium),
     ],
     8,
+  );
+  packed.set(
+    [build.coefficientFactor, build.transmittanceLayer, build.multiScatteringLayer, 0],
+    12,
   );
   return packed;
 }
@@ -1215,13 +1406,14 @@ function groupsOf(size: TableSize): readonly [number, number, number] {
   return [Math.ceil(size.widthTexels / 8), Math.ceil(size.heightTexels / 8), 1];
 }
 
-/** What fixes the tables' contents: the medium, the ground's radius and the lights' curves. */
+/** What fixes the tables' contents: the medium, the ground's radius, the lights' curves, the body. */
 function keyOf(
   medium: AtmosphereMedium,
   bottomRadiusM: number,
   curves: AbsorberCurveSlots,
+  body: AtmosphereBody | null,
 ): string {
-  return JSON.stringify({ medium, bottomRadiusM, curves });
+  return JSON.stringify({ medium, bottomRadiusM, curves, body });
 }
 
 /** A 2D array texture the tables made, with the shape it was made at. */
@@ -1239,18 +1431,39 @@ interface UploadedTexture {
 }
 
 /**
- * The GPU objects of one device: the transmittance, absorber-column and multiple-scattering
- * tables, the medium's buffer and tables, the lights' curves, the kernels.
+ * The transmittance kernel's four tables, each a 2D array of one layer a κ slice (R08.T6.f), or a
+ * band's own one-layer tables: the optical depth with slot 0's column, slots 1 to 4's columns, and
+ * the pressure-weighted columns of channels 0 to 3 and of channel 4 (R08.T4.d).
  */
-interface TableResources {
+export interface TransmittanceTextures {
   readonly transmittance: TextureHandle;
   readonly absorberColumns: TextureHandle;
+  /** The pressure-weighted columns of pressure channels 0 to 3, in rgba (R08.T4.d). */
   readonly absorberPressureColumns: TextureHandle;
-  /** The fifth pressure channel's table, resized as the medium's line slots need it. */
-  lastAbsorberPressureColumn: TextureHandle;
-  lastPressureColumnSize: TableSize;
-  /** One layer a light slot under an absorber ({@link multiScatteringLayersOf}). */
+  /** The pressure-weighted column of pressure channel 4, in r ({@link lastPressureColumnSize}). */
+  readonly lastAbsorberPressureColumn: TextureHandle;
+}
+
+/**
+ * The stored transmittance tables of one device, with the layers and the fifth channel's size they
+ * were made at.
+ */
+interface SliceTextures extends TransmittanceTextures {
+  readonly layers: number;
+  readonly lastSize: TableSize;
+}
+
+/**
+ * The GPU objects of one device: the slices' transmittance tables and the bands' multiple
+ * scattering, the body's table, the medium's buffer and tables, the lights' curves, the kernels.
+ */
+interface TableResources {
+  /** One layer a κ slice ({@link TablesPlan}, R08.T6.f). */
+  slices: SliceTextures;
+  /** One layer a latitude band and light slot ({@link multiScatteringLayersOf}, R08.T7, R08.T6.f). */
   multiScattering: LayeredTexture;
+  /** The body's table ({@link packOblateBody}, R08.T6.f). */
+  readonly oblateBody: TextureHandle;
   readonly terms: BufferHandle;
   densityTables: LayeredTexture;
   phaseTables: LayeredTexture;
@@ -1267,6 +1480,8 @@ const DENSITY_FORMAT: GPUTextureFormat = "r32float";
 const PHASE_FORMAT: GPUTextureFormat = "rgba32float";
 /** The forward-lobe tables' texture format: the three channels and an unused alpha (R08.T7). */
 const LOBE_FORMAT: GPUTextureFormat = "rgba32float";
+/** The body's table's format: its figure's and gravity's constants in `f32` (R08.T6.f). */
+const OBLATE_BODY_FORMAT: GPUTextureFormat = "rgba32float";
 
 /** A 2D array texture of 2D layers the tables made and upload, with the shape it was made at. */
 interface PlanesTexture {
@@ -1344,8 +1559,8 @@ function createLayered(
 }
 
 /**
- * Makes the multiple-scattering table's 2D array texture of `layers` layers, one a light slot
- * ({@link multiScatteringLayersOf}), written by its kernel and read by the per-frame kernels.
+ * Makes the multiple-scattering table's 2D array texture of `layers` layers, one a band and light
+ * slot ({@link multiScatteringLayersOf}), written by its kernel and read by the per-frame kernels.
  */
 function createMultiScattering(
   engine: RenderEngine,
@@ -1365,15 +1580,25 @@ function createMultiScattering(
   return { texture, widthTexels: MULTI_SCATTERING_SIZE.widthTexels, layers };
 }
 
+/** Releases the transmittance kernel's four tables. */
+function releaseTransmittance(engine: RenderEngine, tables: TransmittanceTextures): void {
+  for (const texture of [
+    tables.transmittance,
+    tables.absorberColumns,
+    tables.absorberPressureColumns,
+    tables.lastAbsorberPressureColumn,
+  ]) {
+    engine.releaseTexture(texture);
+  }
+}
+
 /** Releases the buffer and textures of `resources`; the kernels have no release. */
 function releaseResources(engine: RenderEngine, resources: TableResources): void {
   engine.releaseBuffer(resources.terms);
+  releaseTransmittance(engine, resources.slices);
   for (const texture of [
-    resources.transmittance,
-    resources.absorberColumns,
-    resources.absorberPressureColumns,
-    resources.lastAbsorberPressureColumn,
     resources.multiScattering.texture,
+    resources.oblateBody,
     resources.densityTables.texture,
     resources.phaseTables.texture,
     resources.lobeTables.texture,
@@ -1383,39 +1608,92 @@ function releaseResources(engine: RenderEngine, resources: TableResources): void
   }
 }
 
-/** A stored table the kernels write and the per-frame kernels read, `rgba16float`. */
-function storedTable(engine: RenderEngine, name: string, size: TableSize): TextureHandle {
+/**
+ * A table the transmittance kernel writes and the others read, a 2D array of `layers` layers at
+ * `format` (`rgba16float` stored, or the kernel arm's).
+ */
+function storedTable(
+  engine: RenderEngine,
+  name: string,
+  size: TableSize,
+  layers: number,
+  format: GPUTextureFormat = "rgba16float",
+): TextureHandle {
   return engine.createTexture({
     name,
-    size: [size.widthTexels, size.heightTexels],
+    size: [size.widthTexels, size.heightTexels, layers],
     dimension: "2d",
-    format: "rgba16float",
+    format,
     mips: 1,
     usage: TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_SRC,
     category: "atmosphere-tables",
   });
 }
 
-/** The name of the fifth pressure channel's table. */
-const LAST_PRESSURE_COLUMN_NAME = "atmosphere last absorber pressure column";
+/** The transmittance tables' names, and the suffix a set of them takes. */
+function transmittanceNames(suffix: string): Readonly<Record<keyof TransmittanceTextures, string>> {
+  return {
+    transmittance: `atmosphere transmittance${suffix}`,
+    absorberColumns: `atmosphere absorber columns${suffix}`,
+    absorberPressureColumns: `atmosphere absorber pressure columns${suffix}`,
+    lastAbsorberPressureColumn: `atmosphere last absorber pressure column${suffix}`,
+  };
+}
+
+/**
+ * The transmittance kernel's four tables of `layers` layers, the fifth channel's at `lastSize`,
+ * at `format`, named with `suffix`.
+ */
+function createTransmittance(
+  engine: RenderEngine,
+  suffix: string,
+  layers: number,
+  lastSize: TableSize,
+  format: GPUTextureFormat = "rgba16float",
+): TransmittanceTextures {
+  const names = transmittanceNames(suffix);
+  return {
+    transmittance: storedTable(engine, names.transmittance, TRANSMITTANCE_SIZE, layers, format),
+    absorberColumns: storedTable(engine, names.absorberColumns, TRANSMITTANCE_SIZE, layers, format),
+    absorberPressureColumns: storedTable(
+      engine,
+      names.absorberPressureColumns,
+      TRANSMITTANCE_SIZE,
+      layers,
+      format,
+    ),
+    lastAbsorberPressureColumn: storedTable(
+      engine,
+      names.lastAbsorberPressureColumn,
+      lastSize,
+      layers,
+      format,
+    ),
+  };
+}
+
+/** The one-texel size of the fifth pressure channel's table where it is not read. */
+const ONE_TEXEL: TableSize = { widthTexels: 1, heightTexels: 1 };
 
 function createResources(engine: RenderEngine): TableResources {
   const one = { widthTexels: 1, layers: 1 };
-  const transmittanceTable = (name: string): TextureHandle =>
-    storedTable(engine, name, TRANSMITTANCE_SIZE);
-  const oneTexel = { widthTexels: 1, heightTexels: 1 };
   return {
-    transmittance: transmittanceTable("atmosphere transmittance"),
-    absorberColumns: transmittanceTable("atmosphere absorber columns"),
-    absorberPressureColumns: transmittanceTable("atmosphere absorber pressure columns"),
-    lastAbsorberPressureColumn: storedTable(engine, LAST_PRESSURE_COLUMN_NAME, oneTexel),
-    lastPressureColumnSize: oneTexel,
+    slices: { ...createTransmittance(engine, "", 1, ONE_TEXEL), layers: 1, lastSize: ONE_TEXEL },
     multiScattering: createMultiScattering(
       engine,
       "atmosphere multiple scattering",
       1,
       "rgba16float",
     ),
+    oblateBody: engine.createTexture({
+      name: "atmosphere oblate body",
+      size: [OBLATE_BODY_TEXELS, 1],
+      dimension: "2d",
+      format: OBLATE_BODY_FORMAT,
+      mips: 1,
+      usage: TEXTURE_USAGE.TEXTURE_BINDING | TEXTURE_USAGE.COPY_DST,
+      category: "atmosphere-tables",
+    }),
     terms: engine.createBuffer({
       name: "atmosphere terms",
       bytes: TERMS_BUFFER_BYTES,
@@ -1448,6 +1726,15 @@ function createResources(engine: RenderEngine): TableResources {
  * so a caller reads {@link AtmosphereTables.transmittance} and the rest afresh each frame rather
  * than keeping the handles. A medium whose tables have another shape than the last's makes them
  * anew and releases the old.
+ *
+ * On an oblate body (plan R08, Design note 17; R08.T6.f) the transmittance tables are 2D arrays of
+ * one layer a κ slice, the reference medium on the sphere κ_k R_ref, and the multiple-scattering
+ * table one layer a latitude band and light slot, each band an ordinary build in its own
+ * gravity-scaled frame at its g(φ) and √(MN) over its own transmittance tables, which are built
+ * into textures made for the build and released after it (a body of one slice at κ = 1 and one
+ * band reads the slice's, as R05's). Earth and every body under `ONE_SLICE_BELOW` and
+ * `ONE_BAND_BELOW` keep one of each, R05's tables (Design note 11). The body's table
+ * ({@link AtmosphereTables.oblateBody}) carries its figure, gravity and slicing to the kernels.
  */
 export class AtmosphereTables {
   readonly #engine: RenderEngine;
@@ -1456,6 +1743,8 @@ export class AtmosphereTables {
   #medium: AtmosphereMedium;
   #bottomRadiusM: number;
   #curves: AbsorberCurveSlots;
+  #body: AtmosphereBody | null;
+  #plan: TablesPlan;
   /** The medium's layer edges, {@link packLayerEdges}'s, packed once a medium. */
   #layerEdges: Float32Array = new Float32Array(LAYER_EDGES_FLOATS);
   #key: string | null = null;
@@ -1466,26 +1755,31 @@ export class AtmosphereTables {
   /**
    * Makes the tables and builds them for `medium`.
    *
-   * @param bottomRadiusM - The ground's radius on the tables' sphere, m.
+   * @param bottomRadiusM - The ground's radius on the tables' sphere, m: R_ref, the slices' scale.
    * @param curves - Each light's curves of growth for the medium's absorbers; none for a medium
    *   with no absorber.
-   * @throws Error or RangeError as {@link packMedium} and {@link packAbsorberCurves}, and
-   *   `EngineUnavailable` while the engine has no device (a loss), having released the buffer and
-   *   textures it made before.
+   * @param body - The body whose slicing the tables are built in (R08.T6.f); none for one slice and
+   *   one band, R05's tables.
+   * @throws Error or RangeError as {@link packMedium}, {@link packAbsorberCurves} and
+   *   {@link tablesPlanOf}, and `EngineUnavailable` while the engine has no device (a loss), having
+   *   released the buffer and textures it made before.
    */
   constructor(
     engine: RenderEngine,
     medium: AtmosphereMedium,
     bottomRadiusM: number,
     curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
+    body: AtmosphereBody | null = null,
   ) {
     this.#engine = engine;
     this.#medium = medium;
     this.#bottomRadiusM = bottomRadiusM;
     this.#curves = curves;
+    this.#body = body;
+    this.#plan = tablesPlanOf(body, bottomRadiusM);
     this.#resources = createResources(engine);
     try {
-      this.setMedium(medium, bottomRadiusM, curves);
+      this.setMedium(medium, bottomRadiusM, curves, body);
     } catch (error: unknown) {
       releaseResources(engine, this.#resources);
       throw error;
@@ -1494,39 +1788,39 @@ export class AtmosphereTables {
       this.#resources = createResources(engine);
       this.#armKernels = null;
       this.#key = null;
-      this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves);
+      this.setMedium(this.#medium, this.#bottomRadiusM, this.#curves, this.#body);
     });
   }
 
   /**
-   * What light loses per (r, μ) to the top, `rgba16float`: the optical depth of every term but the
-   * absorbers in rgb and absorber slot 0's column u ÷ U in alpha (R08.T6.c); a new handle after a
-   * restore.
+   * What light loses per (r, μ) to the top, `rgba16float`, a 2D array of one layer a κ slice
+   * (R08.T6.f): the optical depth of every term but the absorbers in rgb and absorber slot 0's
+   * column u ÷ U in alpha (R08.T6.c); a new handle after a restore.
    */
   get transmittance(): TextureHandle {
-    return this.#resources.transmittance;
+    return this.#resources.slices.transmittance;
   }
 
-  /** Absorber slots 1 to 4's columns u ÷ U per (r, μ) to the top, rgba, `rgba16float`. */
+  /** Absorber slots 1 to 4's columns u ÷ U per (r, μ) to the top, rgba, one layer a slice. */
   get absorberColumns(): TextureHandle {
-    return this.#resources.absorberColumns;
+    return this.#resources.slices.absorberColumns;
   }
 
   /**
    * Pressure channels 0 to 3's pressure-weighted columns per (r, μ) to the top, rgba,
-   * `rgba16float`: one channel a line slot ({@link pressureChannelOf}; R08.T4.d).
+   * `rgba16float`, one layer a slice: one channel a line slot ({@link pressureChannelOf}; R08.T4.d).
    */
   get absorberPressureColumns(): TextureHandle {
-    return this.#resources.absorberPressureColumns;
+    return this.#resources.slices.absorberPressureColumns;
   }
 
   /**
-   * Pressure channel 4's pressure-weighted column per (r, μ) to the top, in r, `rgba16float`:
-   * the transmittance's size for a medium of five line slots, one texel otherwise
+   * Pressure channel 4's pressure-weighted column per (r, μ) to the top, in r, `rgba16float`, one
+   * layer a slice: the transmittance's size for a medium of five line slots, one texel otherwise
    * ({@link lastPressureColumnSize}); a new handle after a medium or a restore that resizes it.
    */
   get lastAbsorberPressureColumn(): TextureHandle {
-    return this.#resources.lastAbsorberPressureColumn;
+    return this.#resources.slices.lastAbsorberPressureColumn;
   }
 
   /** The lights' curves of growth, {@link packAbsorberCurves}'s, `rgba32float`. */
@@ -1541,16 +1835,36 @@ export class AtmosphereTables {
 
   /**
    * Multiple scattering per (r, μ_sun), per unit illuminance, `rgba16float`: a 2D array of one layer
-   * a light slot under an absorber, each built with that light's curves, and one layer otherwise
-   * ({@link multiScatteringLayersOf}, R08.T7).
+   * a latitude band and light slot, band b's slot k at layer b × {@link AtmosphereTables.layersPerBand}
+   * + k (R08.T6.f), each built with that light's curves (R08.T7).
    */
   get multiScattering(): TextureHandle {
     return this.#resources.multiScattering.texture;
   }
 
-  /** The multiple-scattering table's layers ({@link multiScatteringLayersOf}). */
+  /** The multiple-scattering table's layers: bands × light slots. */
   get multiScatteringLayers(): number {
     return this.#resources.multiScattering.layers;
+  }
+
+  /** The multiple-scattering layers a band takes, one a light slot ({@link multiScatteringLayersOf}). */
+  get layersPerBand(): number {
+    return multiScatteringLayersOf(this.#medium, this.#curves);
+  }
+
+  /** The body's table ({@link packOblateBody}), `rgba32float`, which the per-frame kernels read. */
+  get oblateBody(): TextureHandle {
+    return this.#resources.oblateBody;
+  }
+
+  /** The slices and bands the tables are built in ({@link tablesPlanOf}). */
+  get plan(): TablesPlan {
+    return this.#plan;
+  }
+
+  /** The body the tables are sliced for, or `null` for one slice and one band. */
+  get body(): AtmosphereBody | null {
+    return this.#body;
   }
 
   /** The medium's terms, {@link packMedium}'s, for the kernels' `terms` binding. */
@@ -1599,23 +1913,27 @@ export class AtmosphereTables {
   }
 
   /**
-   * Rebuilds the tables if `medium`, `bottomRadiusM` or `curves` differs from what they were built
-   * for.
+   * Rebuilds the tables if `medium`, `bottomRadiusM`, `curves` or `body` differs from what they were
+   * built for.
    *
    * @param curves - Each light's curves of growth for the medium's absorbers; none for a medium
-   *   with no absorber. The multiple-scattering table has one layer a light slot under an absorber,
-   *   each built with that slot's curves ({@link multiScatteringLayersOf}, R08.T7).
+   *   with no absorber. The multiple-scattering table has one layer a band and light slot under an
+   *   absorber, each built with that slot's curves ({@link multiScatteringLayersOf}, R08.T7).
+   * @param body - The body whose slicing the tables are built in (R08.T6.f); none for one slice and
+   *   one band.
    * @returns Whether they were rebuilt.
-   * @throws Error or RangeError as {@link packMedium} and {@link packAbsorberCurves}, and the
-   *   tables keep what they held and follow; or `EngineUnavailable` while the engine has no device
-   *   (a loss), and the tables follow `medium` from then on, so that the engine's restore builds it.
+   * @throws Error or RangeError as {@link packMedium}, {@link packAbsorberCurves} and
+   *   {@link tablesPlanOf}, and the tables keep what they held and follow; or `EngineUnavailable`
+   *   while the engine has no device (a loss), and the tables follow `medium` from then on, so that
+   *   the engine's restore builds it.
    */
   setMedium(
     medium: AtmosphereMedium,
     bottomRadiusM: number,
     curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
+    body: AtmosphereBody | null = null,
   ): boolean {
-    const key = keyOf(medium, bottomRadiusM, curves);
+    const key = keyOf(medium, bottomRadiusM, curves, body);
     if (key === this.#key) {
       return false;
     }
@@ -1628,9 +1946,21 @@ export class AtmosphereTables {
     const lobeTables = packLobeTables(direct);
     const absorberCurves = packAbsorberCurves(medium, curves);
     const layerEdges = packLayerEdges(medium);
+    const plan = tablesPlanOf(body, bottomRadiusM);
+    const layersPerBand = multiScatteringLayersOf(medium, curves);
+    const oblateBody = packOblateBody(
+      body?.figure ?? { equatorialRadiusM: bottomRadiusM, polarRadiusM: bottomRadiusM },
+      body?.gravity ?? null,
+      plan,
+      bottomRadiusM,
+      medium.topHeightM,
+      layersPerBand,
+    );
     this.#medium = medium;
     this.#bottomRadiusM = bottomRadiusM;
     this.#curves = curves;
+    this.#body = body;
+    this.#plan = plan;
     this.#layerEdges = layerEdges;
     this.#key = null;
     const engine = this.#engine;
@@ -1640,16 +1970,21 @@ export class AtmosphereTables {
     r.phaseTables = this.#upload(r.phaseTables, phaseTables, PHASE_FORMAT);
     r.lobeTables = this.#uploadPlanes(r.lobeTables, lobeTables);
     r.absorberCurves = this.#uploadCurves(r.absorberCurves, absorberCurves);
+    engine.writeTexture(r.oblateBody, [0, 0, 0], [OBLATE_BODY_TEXELS, 1, 1], oblateBody);
     const lastSize = lastPressureColumnSize(medium);
-    const held = r.lastPressureColumnSize;
-    if (lastSize.widthTexels !== held.widthTexels || lastSize.heightTexels !== held.heightTexels) {
-      // Made before the old one goes, so that a loss while making it leaves no released handle.
-      const resized = storedTable(engine, LAST_PRESSURE_COLUMN_NAME, lastSize);
-      engine.releaseTexture(r.lastAbsorberPressureColumn);
-      r.lastAbsorberPressureColumn = resized;
-      r.lastPressureColumnSize = lastSize;
+    const sliceCount = plan.kappa.length;
+    const held = r.slices;
+    if (
+      held.layers !== sliceCount ||
+      lastSize.widthTexels !== held.lastSize.widthTexels ||
+      lastSize.heightTexels !== held.lastSize.heightTexels
+    ) {
+      // Made before the old ones go, so that a loss while making them leaves no released handle.
+      const made = createTransmittance(engine, "", sliceCount, lastSize);
+      releaseTransmittance(engine, held);
+      r.slices = { ...made, layers: sliceCount, lastSize };
     }
-    const layers = multiScatteringLayersOf(medium, curves);
+    const layers = plan.bands.length * layersPerBand;
     if (r.multiScattering.layers !== layers) {
       const made = createMultiScattering(
         engine,
@@ -1662,13 +1997,7 @@ export class AtmosphereTables {
     }
     this.#dispatchTables(
       { transmittance: r.transmittanceKernel, multiScattering: r.multiScatteringKernel },
-      {
-        transmittance: r.transmittance,
-        absorberColumns: r.absorberColumns,
-        absorberPressureColumns: r.absorberPressureColumns,
-        lastAbsorberPressureColumn: r.lastAbsorberPressureColumn,
-        multiScattering: r.multiScattering.texture,
-      },
+      { ...r.slices, multiScattering: r.multiScattering.texture },
     );
     this.#key = key;
     this.#builds += 1;
@@ -1679,9 +2008,10 @@ export class AtmosphereTables {
    * The tables built once more by their kernels assembled to write `rgba32float`
    * ({@link withKernelArmFormat}), into five textures made for the call: the smoke's kernel arm
    * (plan R08, R08.T6.g; `decision-r08-t6b-floor.md` §4). The transmittance, absorber-column and
-   * pressure-weighted column tables are built from the medium and the multiple scattering over the
-   * stored `rgba16float` ones, as the stored table's twin takes them, so that each holds its
-   * kernel's own `f32` output.
+   * pressure-weighted column tables are built from the medium, one layer a slice, and the multiple
+   * scattering over the stored `rgba16float` ones, a band's own built anew where it has them
+   * (R08.T6.f), as the stored table's twin takes them, so that each holds its kernel's own `f32`
+   * output.
    *
    * @returns The five textures, which the caller releases.
    * @throws `EngineUnavailable` while the engine has no device (a loss).
@@ -1692,68 +2022,84 @@ export class AtmosphereTables {
       transmittance: engine.createCompute(withKernelArmFormat(TRANSMITTANCE_KERNEL)),
       multiScattering: engine.createCompute(withKernelArmFormat(MULTI_SCATTERING_KERNEL)),
     };
-    const usage = TEXTURE_USAGE.STORAGE_BINDING | TEXTURE_USAGE.COPY_SRC;
-    const output = (name: string, size: TableSize): TextureHandle =>
-      engine.createTexture({
-        name,
-        size: [size.widthTexels, size.heightTexels],
-        dimension: "2d",
-        format: KERNEL_ARM_FORMAT,
-        mips: 1,
-        usage,
-        category: "atmosphere-tables",
-      });
+    const r = this.#resources;
     const tables: PlanetTableTextures = {
-      transmittance: output("atmosphere transmittance (kernel arm)", TRANSMITTANCE_SIZE),
-      absorberColumns: output("atmosphere absorber columns (kernel arm)", TRANSMITTANCE_SIZE),
-      absorberPressureColumns: output(
-        "atmosphere absorber pressure columns (kernel arm)",
-        TRANSMITTANCE_SIZE,
-      ),
-      lastAbsorberPressureColumn: output(
-        "atmosphere last absorber pressure column (kernel arm)",
+      ...createTransmittance(
+        engine,
+        " (kernel arm)",
+        r.slices.layers,
         lastPressureColumnSize(this.#medium),
+        KERNEL_ARM_FORMAT,
       ),
-      multiScattering: engine.createTexture({
-        name: "atmosphere multiple scattering (kernel arm)",
-        size: [
-          MULTI_SCATTERING_SIZE.widthTexels,
-          MULTI_SCATTERING_SIZE.heightTexels,
-          this.#resources.multiScattering.layers,
-        ],
-        dimension: "2d",
-        format: KERNEL_ARM_FORMAT,
-        mips: 1,
-        usage,
-        category: "atmosphere-tables",
-      }),
+      multiScattering: storedTable(
+        engine,
+        "atmosphere multiple scattering (kernel arm)",
+        MULTI_SCATTERING_SIZE,
+        r.multiScattering.layers,
+        KERNEL_ARM_FORMAT,
+      ),
     };
     this.#dispatchTables(this.#armKernels, tables);
     return tables;
   }
 
   /**
-   * Builds the tables for the medium and ground the tables follow: the transmittance kernel into
-   * `outputs.transmittance`, `outputs.absorberColumns`, `outputs.absorberPressureColumns` and
-   * `outputs.lastAbsorberPressureColumn`, then the multiple-scattering kernel, reading the stored
-   * tables and the lights' curves, into `outputs.multiScattering`, once a layer, layer k with
-   * light slot k's curves (R08.T7).
+   * Latitude band `band`'s own transmittance tables, stored, built anew into textures made for the
+   * call, as {@link AtmosphereTables.setMedium} builds them for its multiple scattering and
+   * releases them (R08.T6.f): the smoke's twins hold the band's table over them. A body of one
+   * slice at κ = 1 and one band builds the slice's own.
+   *
+   * @returns The four one-layer tables, which the caller releases.
+   * @throws RangeError for a band the tables do not have; `EngineUnavailable` as above.
    */
-  #dispatchTables(kernels: PlanetTableKernels, outputs: PlanetTableTextures): void {
-    const engine = this.#engine;
+  bandTransmittance(band: number): TransmittanceTextures {
+    const spec = this.#plan.bands[band];
+    if (spec === undefined) {
+      throw new RangeError(`the tables have ${this.#plan.bands.length} bands, not band ${band}`);
+    }
+    const tables = createTransmittance(
+      this.#engine,
+      ` (band ${band})`,
+      1,
+      lastPressureColumnSize(this.#medium),
+    );
+    this.#dispatchTransmittance(
+      this.#resources.transmittanceKernel,
+      tables,
+      spec.bottomRadiusM,
+      spec.coefficientFactor,
+      0,
+    );
+    return tables;
+  }
+
+  /**
+   * One transmittance build: the kernel into layer `layer` of `outputs`, on the ground
+   * `bottomRadiusM` with every coefficient times `coefficientFactor`.
+   */
+  #dispatchTransmittance(
+    kernel: ComputeHandle,
+    outputs: TransmittanceTextures,
+    bottomRadiusM: number,
+    coefficientFactor: number,
+    layer: number,
+  ): void {
     const r = this.#resources;
-    const medium = this.#medium;
-    const bottomRadiusM = this.#bottomRadiusM;
-    const sampled = { densityTables: r.densityTables.texture };
-    engine.dispatch(
-      kernels.transmittance,
+    this.#engine.dispatch(
+      kernel,
       {
         uniforms: {
-          medium: packMediumUniform(medium, bottomRadiusM, TRANSMITTANCE_SAMPLES),
+          medium: packMediumUniform(
+            this.#medium,
+            bottomRadiusM,
+            TRANSMITTANCE_SAMPLES,
+            SHARED_TABLE_CURVE_SLOT,
+            { coefficientFactor, transmittanceLayer: layer, multiScatteringLayer: 0 },
+          ),
           layerEdges: this.#layerEdges,
         },
         buffers: { terms: r.terms },
-        sampled,
+        sampled: { densityTables: r.densityTables.texture },
         storage: {
           transmittanceOut: { texture: outputs.transmittance, level: 0 },
           absorberColumnsOut: { texture: outputs.absorberColumns, level: 0 },
@@ -1764,28 +2110,77 @@ export class AtmosphereTables {
       groupsOf(TRANSMITTANCE_SIZE),
       "atmosphere tables",
     );
-    for (let slot = 0; slot < r.multiScattering.layers; slot += 1) {
-      engine.dispatch(
-        kernels.multiScattering,
-        {
-          uniforms: {
-            medium: packMediumUniform(medium, bottomRadiusM, MULTI_SCATTERING_SAMPLES, slot),
-            layerEdges: this.#layerEdges,
-          },
-          buffers: { terms: r.terms },
-          sampled: {
-            ...sampled,
-            transmittance: r.transmittance,
-            absorberColumns: r.absorberColumns,
-            absorberPressureColumns: r.absorberPressureColumns,
-            lastAbsorberPressureColumn: r.lastAbsorberPressureColumn,
-            absorberCurves: r.absorberCurves.texture,
-          },
-          storage: { multiScatteringOut: { texture: outputs.multiScattering, level: 0 } },
-        },
-        [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels, 1],
-        "atmosphere tables",
-      );
+  }
+
+  /**
+   * Builds the tables for the medium, ground and body the tables follow: the transmittance kernel
+   * into `outputs`' four tables, one layer a κ slice, then, band by band, the multiple-scattering
+   * kernel into `outputs.multiScattering`, layer band × light slots + k with light slot k's curves
+   * (R08.T7), reading the stored tables: the slice's where the one band shares it, and otherwise
+   * the band's own, built first into textures made for the build and released after it (R08.T6.f).
+   */
+  #dispatchTables(kernels: PlanetTableKernels, outputs: PlanetTableTextures): void {
+    const engine = this.#engine;
+    const r = this.#resources;
+    const medium = this.#medium;
+    const plan = this.#plan;
+    for (const [k, radiusM] of plan.sliceRadiiM.entries()) {
+      this.#dispatchTransmittance(kernels.transmittance, outputs, radiusM, 1, k);
+    }
+    const slots = multiScatteringLayersOf(medium, this.#curves);
+    let own: TransmittanceTextures | null = null;
+    try {
+      for (const [b, band] of plan.bands.entries()) {
+        let read: TransmittanceTextures = r.slices;
+        if (!plan.shared) {
+          own ??= createTransmittance(engine, " (band)", 1, lastPressureColumnSize(medium));
+          this.#dispatchTransmittance(
+            r.transmittanceKernel,
+            own,
+            band.bottomRadiusM,
+            band.coefficientFactor,
+            0,
+          );
+          read = own;
+        }
+        for (let slot = 0; slot < slots; slot += 1) {
+          engine.dispatch(
+            kernels.multiScattering,
+            {
+              uniforms: {
+                medium: packMediumUniform(
+                  medium,
+                  band.bottomRadiusM,
+                  MULTI_SCATTERING_SAMPLES,
+                  slot,
+                  {
+                    coefficientFactor: band.coefficientFactor,
+                    transmittanceLayer: 0,
+                    multiScatteringLayer: b * slots + slot,
+                  },
+                ),
+                layerEdges: this.#layerEdges,
+              },
+              buffers: { terms: r.terms },
+              sampled: {
+                densityTables: r.densityTables.texture,
+                transmittance: read.transmittance,
+                absorberColumns: read.absorberColumns,
+                absorberPressureColumns: read.absorberPressureColumns,
+                lastAbsorberPressureColumn: read.lastAbsorberPressureColumn,
+                absorberCurves: r.absorberCurves.texture,
+              },
+              storage: { multiScatteringOut: { texture: outputs.multiScattering, level: 0 } },
+            },
+            [MULTI_SCATTERING_SIZE.widthTexels, MULTI_SCATTERING_SIZE.heightTexels, 1],
+            "atmosphere tables",
+          );
+        }
+      }
+    } finally {
+      if (own !== null) {
+        releaseTransmittance(engine, own);
+      }
     }
   }
 

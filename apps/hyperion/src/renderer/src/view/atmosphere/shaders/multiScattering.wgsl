@@ -14,6 +14,11 @@
 // table is a 2D array of one layer a light slot
 // under a medium with an absorber, each built with that light's curves by its own dispatch, which
 // writes layer `curveSlot()` (`decision-r08-t6b-floor.md` section 8); a medium with none has one.
+// Since R08.T6.f a body of several latitude bands builds one table a band and light slot, each in
+// the band's gravity-scaled frame, an ordinary build at the band's g(φ) and √(MN): its sphere
+// s_b √(MN), every coefficient over s_b (`Medium.build.x`, `medium.wgsl`), over the band's own
+// transmittance tables (layer `Medium.build.y`), written to layer band × light slots + slot
+// (`Medium.build.z`; Design note 17, _Latitude bands_; `tablesCpu.ts`'s twinBandOf).
 //
 // Ported from Bevy 0.19.1's crates/bevy_pbr/src/atmosphere/multiscattering_lut.wgsl (MIT or
 // Apache-2.0; the notice is in common.wgsl) and checked against sebh's NewMultiScattCS and
@@ -58,13 +63,15 @@
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
 @group(0) @binding(2) var densityTables : texture_2d_array<f32>;
-@group(0) @binding(3) var transmittance : texture_2d<f32>;
+// The transmittance tables the build reads, at layer `buildTransmittanceLayer()`: a body's one
+// slice at κ = 1, which its one band shares, or the band's own tables (plan R08, R08.T6.f).
+@group(0) @binding(3) var transmittance : texture_2d_array<f32>;
 @group(0) @binding(4) var multiScatteringOut : texture_storage_2d_array<rgba16float, write>;
-@group(0) @binding(5) var absorberColumns : texture_2d<f32>;
+@group(0) @binding(5) var absorberColumns : texture_2d_array<f32>;
 @group(0) @binding(6) var absorberCurves : texture_2d<f32>;
 @group(0) @binding(7) var<uniform> layerEdges : LayerEdges;
-@group(0) @binding(8) var absorberPressureColumns : texture_2d<f32>;
-@group(0) @binding(9) var lastAbsorberPressureColumn : texture_2d<f32>;
+@group(0) @binding(8) var absorberPressureColumns : texture_2d_array<f32>;
+@group(0) @binding(9) var lastAbsorberPressureColumn : texture_2d_array<f32>;
 
 const PI : f32 = 3.14159265358979;
 const DIRECTIONS : u32 = 64u;
@@ -103,14 +110,15 @@ fn transmittanceToSun(heightM : f32, muSun : f32, local : MediumSample) -> vec3f
   let unit = transmittanceUnitAt(medium.bottomRadiusM, medium.topHeightM, h, muSun);
   let count = absorberCount();
   let slot = curveSlot();
-  let toSun = transmittanceThroughTables(
+  let layer = buildTransmittanceLayer();
+  let toSun = transmittanceThroughLayer(
     transmittance, absorberColumns, absorberPressureColumns, lastAbsorberPressureColumn,
-    absorberCurves, count, slot, lineSlots(), unit
+    absorberCurves, layer, count, slot, lineSlots(), unit
   );
   // The forward-diffuse light the lobes' truncation keeps in the beam (R08.T7): e^(x P), x P the
   // stored optical depth times the lobes' share of the extinction, held under e^80.
   let share = local.lobeScattering / max(local.extinction, vec3f(1e-30));
-  let boost = exp(min(tableAtUnit(transmittance, unit).rgb * share, vec3f(80.0)));
+  let boost = exp(min(tableAtUnitLayer(transmittance, layer, unit).rgb * share, vec3f(80.0)));
   return toSun * select(vec3f(1.0), boost, local.lobeScattering > vec3f(0.0));
 }
 
@@ -265,5 +273,5 @@ fn main(
   let alone = meanEscape <= vec3f(0.0);
   let stored = select(secondOrderLuminance / meanEscape, secondOrderLuminance, alone);
   let aloneCount = dot(select(vec3f(0.0), vec3f(1.0), alone), vec3f(1.0));
-  textureStore(multiScatteringOut, id.xy, curveSlot(), vec4f(stored, aloneCount));
+  textureStore(multiScatteringOut, id.xy, buildMultiScatteringLayer(), vec4f(stored, aloneCount));
 }

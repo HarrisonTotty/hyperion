@@ -93,7 +93,7 @@ function withoutEdges(medium: AtmosphereMedium): AtmosphereMedium {
 }
 
 /**
- * The optical depth per channel at a stored texel as `transmittanceThroughTables` reads it there,
+ * The optical depth per channel at a stored texel as `transmittanceThroughLayer` reads it there,
  * the light slot 0's curves added to the stored optical depth through the stored columns.
  */
 function readDepth(tables: TwinTransmittance, x: number, y: number): [number, number, number] {

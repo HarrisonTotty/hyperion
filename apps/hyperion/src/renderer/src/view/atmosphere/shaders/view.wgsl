@@ -60,11 +60,18 @@ struct AtmosphereView {
   output : vec4f,
   // What f32 cannot form here, formed in f64 by `HillaireAtmosphere` and narrowed once (plan R08,
   // Design note 18): x and y, the ray march's ground and top-shell quadric constants,
-  // q_g = |S P|^2 - a^2 and q_t = |S_t P|^2 - (a + H)^2, P the camera's position, S = diag(1, 1,
-  // a / c) and S_t = diag(1, 1, (a + H) / (c + H)); z, the sky view's beta, the angle from the
-  // nadir to the horizon, atan2(R0, sqrt(h_s (2 R0 + h_s))), R0 the Gaussian radius and h_s
-  // `skyViewHeight`'s; w, unused.
+  // q_g = |S P|^2 - a^2 and q_t = |S_t P|^2 - (a + H / s_e)^2, P the camera's position, S = diag(1,
+  // 1, a / c) and S_t = diag(1, 1, (a + H / s_e) / (c + H / s_p)), the top the quadric through h* = H
+  // at the equator and the poles (R08.T6.f; Design note 17); z, the camera's local scale height in
+  // h*, which the composite's sliced lookup takes from the camera (`oblate.wgsl`'s LookupStart),
+  // from the medium's own column (R08.T6.f); w, unused. The sky view's beta, z before R08.T6.f, is
+  // each column's own since (`oblate.wgsl`'s skyViewColumnOf).
   exact : vec4f,
+  // The camera on an oblate body (plan R08, R08.T6.f; Design note 17), formed in f64: x and y its
+  // principal radii of curvature M and N, from which each sky-view column's sphere R_alpha is
+  // taken; z s = g(phi) / g_ref at its latitude; w the sky view's atmosphere, the medium's top over
+  // that s.
+  curvature : vec4f,
   // The drawn sources, the first `sky.x` of them (R08.T7).
   sources : array<SkySource, MAX_SKY_SOURCES>,
 }
@@ -84,9 +91,9 @@ fn skySlotOf(source : SkySource) -> u32 {
   return min(u32(source.weight.w), MAX_SKY_LIGHT_SLOTS - 1u);
 }
 
-// The camera's height on the sky view's sphere: kept 1 m clear of the ground and the top, where
-// the table's horizon split degenerates. The sky-view kernel and the composite both take it, and
-// `hillaire.ts`'s `skyViewHeight` is its twin.
+// The camera's height on the sky view's spheres: kept 1 m clear of the ground and the top, where
+// the table's horizon split degenerates. The sky-view kernel and the composite both take it, the
+// atmosphere's height `curvature.w` (R08.T6.f), and `hillaire.ts`'s `skyViewHeight` is its twin.
 fn skyViewHeight(heightM : f32, atmosphereM : f32) -> f32 {
   return clamp(heightM, 1.0, atmosphereM - 1.0);
 }
@@ -123,8 +130,9 @@ fn skyFrame(v : AtmosphereView) -> SkyFrame {
 // sebh's sky-view zenith parameterisation (RenderSkyCommon.hlsl, SkyViewLutParamsToUv and its
 // inverse): v splits at the horizon, each half with a square-root compression towards it. beta is
 // the angle from the nadir to the horizon (sebh's GroundToHorizonCos is its cosine), so that the
-// horizon's zenith angle is pi - beta: beta = acos(vHorizon / r) = atan2(bottom, vHorizon), formed
-// in f64 (`AtmosphereView.exact.z`), and the zenith's sine and cosine are taken by
+// horizon's zenith angle is pi - beta: beta = acos(vHorizon / r) = atan2(bottom, vHorizon), each
+// column's own on its sphere R_alpha since R08.T6.f (`oblate.wgsl`'s skyViewColumnOf; formed in f64
+// as `AtmosphereView.exact.z` before), and the zenith's sine and cosine are taken by
 // `preciseSinCos`. The azimuth is local since R08.T7 (Design note 7), in place of sebh's
 // sun-relative u = sin(phi / 2) over [0, pi]: phi = 2 pi u from the sky axis over the whole circle,
 // its sine and cosine by `preciseSinCos` on [0, pi] with the circle's other half by symmetry, so
@@ -134,6 +142,7 @@ fn skyFrame(v : AtmosphereView) -> SkyFrame {
 fn skyViewUvToParams(uv : vec2f, size : vec2f, beta : f32) -> vec4f {
   let unit = clamp(unitFromTexelUv(uv, size), vec2f(0.0), vec2f(1.0));
   let zenithHorizon = PI_VIEW - beta;
+  let azimuthCosSin = skyViewAzimuthOf(uv, size);
   var zenith : f32;
   if (unit.y < 0.5) {
     var c = 1.0 - 2.0 * unit.y;
@@ -144,6 +153,14 @@ fn skyViewUvToParams(uv : vec2f, size : vec2f, beta : f32) -> vec4f {
     zenith = zenithHorizon + beta * c * c;
   }
   let zenithSinCos = preciseSinCos(zenith);
+  return vec4f(zenithSinCos.y, zenithSinCos.x, azimuthCosSin);
+}
+
+// A texel's local azimuth's cosine and sine, `skyViewUvToParams`'s z and w: phi = 2 pi u from the
+// sky axis, by `preciseSinCos` on [0, pi] and the circle's other half by symmetry. The sky view's
+// column sphere is taken at it (R08.T6.f).
+fn skyViewAzimuthOf(uv : vec2f, size : vec2f) -> vec2f {
+  let unit = clamp(unitFromTexelUv(uv, size), vec2f(0.0), vec2f(1.0));
   let phi = 2.0 * PI_VIEW * unit.x;
   var azimuthSinCos : vec2f;
   if (phi <= PI_VIEW) {
@@ -152,7 +169,7 @@ fn skyViewUvToParams(uv : vec2f, size : vec2f, beta : f32) -> vec4f {
     let mirrored = preciseSinCos(2.0 * PI_VIEW - phi);
     azimuthSinCos = vec2f(-mirrored.x, mirrored.y);
   }
-  return vec4f(zenithSinCos.y, zenithSinCos.x, azimuthSinCos.y, azimuthSinCos.x);
+  return vec2f(azimuthSinCos.y, azimuthSinCos.x);
 }
 
 // A direction's local azimuth about the sky frame as the table's unit range, phi / (2 pi) in

@@ -1008,12 +1008,12 @@ describe("starlight and the scene through the air (R08.T7)", () => {
   const code = COMPOSITE_MATERIAL.fragmentWgsl.replaceAll(/\/\/[^\n]*/gu, "");
 
   it("multiplies what the scene holds behind the sky by its transmittance to space, a disc's own light's inside it", () => {
-    expect(code).toMatch(/behind = transmittanceToSpace\(v, dir, slotHere\);/u);
+    expect(code).toMatch(/behind = transmittanceToSpace\(v, body, dir, slotHere\);/u);
     expect(code).toMatch(/var luminance = colour \* behind \+ inscattered \* factor;/u);
     expect(code).toMatch(
       /if \(withinDisc\(dir, v\.sources\[k\]\)\) \{\s*slotHere = skySlotOf\(v\.sources\[k\]\);/u,
     );
-    expect(code).toMatch(/toSpace = transmittanceToSpace\(v, dir, skySlotOf\(source\)\);/u);
+    expect(code).toMatch(/toSpace = transmittanceToSpace\(v, body, dir, skySlotOf\(source\)\);/u);
   });
 
   it("keeps the scene's METER_CLASS in the HDR target's alpha on every path", () => {

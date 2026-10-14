@@ -15,8 +15,11 @@ import type { VolumeSize } from "../view/atmosphere/hillaire";
 import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import type { AbsorberCurveSlots, TableSize } from "../view/atmosphere/tables";
 import type {
+  OblatePlanetTwin,
   PlanetTwin,
   RayMarchSettings,
+  TwinBand,
+  TwinBody,
   TwinTable,
   TwinTransmittance,
   TwinView,
@@ -138,14 +141,20 @@ export class TwinPool {
     );
   }
 
-  /** `transmittanceTablesTwin`: a medium's transmittance and absorber-column tables. */
+  /**
+   * `transmittanceTablesTwin`: a medium's transmittance and absorber-column tables.
+   *
+   * @param coefficientFactor - 1 ÷ s_b for a latitude band's own tables in its frame (R08.T6.f).
+   */
   transmittanceTables(
     medium: AtmosphereMedium,
     bottomRadiusM: number,
     curves: AbsorberCurveSlots,
+    coefficientFactor = 1,
   ): Promise<TwinTransmittance> {
-    return this.#run({ kind: "transmittanceTables", medium, bottomRadiusM, curves }, (answer) =>
-      answer.kind === "transmittanceTables" ? answer.twin : null,
+    return this.#run(
+      { kind: "transmittanceTables", medium, bottomRadiusM, curves, coefficientFactor },
+      (answer) => (answer.kind === "transmittanceTables" ? answer.twin : null),
     );
   }
 
@@ -214,6 +223,67 @@ export class TwinPool {
   ): Promise<TwinTable> {
     return this.#run({ kind: "rayMarch", planet, view, settings, depth }, (answer) =>
       answer.kind === "rayMarch" ? answer.twin : null,
+    );
+  }
+
+  /**
+   * `twinBandOf`: a latitude band's multiple-scattering layers at s = `gravityRatio` over the
+   * band's own transmittance tables (R08.T6.f).
+   */
+  oblateBand(
+    medium: AtmosphereMedium,
+    body: TwinBody,
+    gravityRatio: number,
+    curves: AbsorberCurveSlots,
+    oneBand: boolean,
+    transmittance: TwinTransmittance,
+  ): Promise<TwinBand> {
+    return this.#run(
+      { kind: "oblateBand", medium, body, gravityRatio, curves, oneBand, transmittance },
+      (answer) => (answer.kind === "oblateBand" ? answer.twin : null),
+    );
+  }
+
+  /** `oblateSkyViewTwin` (R08.T6.f). */
+  oblateSkyView(
+    planet: OblatePlanetTwin,
+    view: TwinView,
+    size: TableSize,
+    samples: number,
+  ): Promise<TwinTable> {
+    return this.#run({ kind: "oblateSkyView", planet, view, size, samples }, (answer) =>
+      answer.kind === "oblateSkyView" ? answer.twin : null,
+    );
+  }
+
+  /** `oblateAerialPerspectiveTwin` (R08.T6.f). */
+  oblateAerialPerspective(
+    planet: OblatePlanetTwin,
+    view: TwinView,
+    size: VolumeSize,
+    samplesPerSlice: number,
+    reachM: number,
+  ): Promise<TwinVolume> {
+    return this.#run(
+      { kind: "oblateAerialPerspective", planet, view, size, samplesPerSlice, reachM },
+      (answer) => (answer.kind === "oblateAerialPerspective" ? answer.twin : null),
+    );
+  }
+
+  /**
+   * `oblateRayMarchTwin` over a scene of one depth at every pixel (R08.T6.f).
+   *
+   * @param depth - The scene's reversed-Z depth, `NEAR_M` over the surface's distance, or 0 where
+   *   nothing is drawn.
+   */
+  oblateRayMarch(
+    planet: OblatePlanetTwin,
+    view: TwinView,
+    settings: RayMarchSettings,
+    depth: number,
+  ): Promise<TwinTable> {
+    return this.#run({ kind: "oblateRayMarch", planet, view, settings, depth }, (answer) =>
+      answer.kind === "oblateRayMarch" ? answer.twin : null,
     );
   }
 

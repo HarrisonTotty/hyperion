@@ -317,11 +317,11 @@ describe("the kernels' WGSL", () => {
       expect(wgsl).toMatch(/let edgeCount = min\(u32\(layerEdges\.count\.x\), MARCH_EDGES_MAX\);/);
       // No edge: R05.T12.e's steps, and no walk declared; edges: the walk, made ready first.
       expect(wgsl).toMatch(
-        /if \(edgeCount == 0u\) \{\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, marchStep\(split, i\)\);/,
+        /if \(edgeCount == 0u\) \{\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?marchStep\(split, i\)\);/,
       );
       expect(wgsl).toMatch(/var walk : MarchWalk;\s*marchWalkStart\(&walk, split\);/);
       expect(wgsl).toMatch(
-        /marchWalkReady\(&walk\);\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, marchWalkStep\(&walk, i\)\);/,
+        /marchWalkReady\(&walk\);\s*for \(var i = 0u; i < samples; i\+\+\) \{\s*\w+\(&march, ray, (body, (frame, )?)?marchWalkStep\(&walk, i\)\);/,
       );
     }
     expect(skyViewWgsl).toMatch(/marchWalkCrossSphere\(/);

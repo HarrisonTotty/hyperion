@@ -20,7 +20,15 @@
 import { describe, expect, it } from "vitest";
 
 import type { Vec3 } from "../../geometry/vec3";
-import { type SpheroidFigure, skyViewHeight, TABLE_SIZES, viewExactOf } from "./hillaire";
+import {
+  type AtmosphereInputs,
+  geodeticOf,
+  type SpheroidFigure,
+  skyViewHeight,
+  TABLE_SIZES,
+  viewExactOf,
+} from "./hillaire";
+import type { AtmosphereMedium } from "./medium";
 import { marchPieces, marchPiecesSteps, marchSplit } from "./marchSteps";
 import { MULTI_SCATTERING_SIZE, TRANSMITTANCE_SIZE } from "./tables";
 
@@ -31,6 +39,25 @@ const EPSILON = 2 ** -24;
 
 /** The atmosphere's height above the ground the checks take, m: R05's Earth's. */
 const ATMOSPHERE_M = 100_000;
+
+/** A medium of no term under {@link ATMOSPHERE_M}: what the ray march's quadric constants take. */
+const BARE_MEDIUM: AtmosphereMedium = {
+  name: "bare",
+  topHeightM: ATMOSPHERE_M,
+  groundAlbedo: [0, 0, 0],
+  terms: [],
+};
+
+/** Lookup inputs at the datum on the equator, s ≡ 1: what `viewExactOf` reads of them. */
+function bareInputsOf(figure: SpheroidFigure): AtmosphereInputs {
+  return {
+    radiusM: figure.equatorialRadiusM,
+    heightM: 0,
+    normal: { x: 1, y: 0, z: 0 },
+    latitudeRad: 0,
+    gravityRatio: 1,
+  };
+}
 
 /** The spheres of `decision-r08-f32.md` §6.1: Earth's mean radius, 2 R⊕, Saturn's, 2 R_J, m. */
 const SPHERES_M = [6_371_008.8, 12_742_017.6, 60_268_000, 142_984_000] as const;
@@ -583,9 +610,12 @@ const WGS84: SpheroidFigure = {
 };
 
 /** The figures of `decision-r08-f32.md` §6.1. */
+/** A Saturn-class figure: Saturn's equatorial and polar radii at 1 bar, m. */
+const SATURN_CLASS: SpheroidFigure = { equatorialRadiusM: 60_268_000, polarRadiusM: 54_364_000 };
+
 const FIGURES: ReadonlyArray<readonly [string, SpheroidFigure]> = [
   ["WGS 84", WGS84],
-  ["a Saturn-class figure", { equatorialRadiusM: 60_268_000, polarRadiusM: 54_364_000 }],
+  ["a Saturn-class figure", SATURN_CLASS],
   ["a 2 R⊕ sphere", { equatorialRadiusM: 12_742_017.6, polarRadiusM: 12_742_017.6 }],
   ["a 2 R_J sphere", { equatorialRadiusM: 142_984_000, polarRadiusM: 142_984_000 }],
 ];
@@ -681,6 +711,33 @@ function marchSteps(
   return { lowestM: lowest, steps };
 }
 
+/**
+ * `oblate.wgsl`'s `datumPointOf` height, emulated in f32 operation for operation: the root of the
+ * exact quadratic along the similar spheroid's normal ν, a q ÷ (u + √(u² − κ″ q)), from the point's
+ * ground quadric (R08.T6.f).
+ */
+function datumHeight(p: Vec3, quadricM2: number, a: number, k2: number): number {
+  const g = vec(f(p.x / a), f(p.y / a), f(f(p.z * k2) / a));
+  const u = lengthV(g);
+  const nu = vec(f(g.x / u), f(g.y / u), f(g.z / u));
+  const kappa = f(f(f(nu.x * nu.x) + f(nu.y * nu.y)) + f(k2 * f(nu.z * nu.z)));
+  const q = f(quadricM2 / f(a * a));
+  const root = f(Math.sqrt(Math.max(f(f(u * u) - f(kappa * q)), 0)));
+  return f(f(a * q) / f(u + root));
+}
+
+/** {@link datumHeight} in f64, its quadric formed from the point itself. */
+function datumHeight64(p: Vec3, figure: SpheroidFigure): number {
+  const a = figure.equatorialRadiusM;
+  const k = a / figure.polarRadiusM;
+  const g = { x: p.x / a, y: p.y / a, z: (p.z * k * k) / a };
+  const u = Math.hypot(g.x, g.y, g.z);
+  const kappa = (g.x ** 2 + g.y ** 2 + k * k * g.z ** 2) / (u * u);
+  const z = p.z * k;
+  const q = (p.x * p.x + p.y * p.y + z * z - a * a) / (a * a);
+  return (a * q) / (u + Math.sqrt(Math.max(u * u - kappa * q, 0)));
+}
+
 /** A sample's radial height above the true figure in f64 at P + t d. */
 function radialHeight64(p: Vec3, figure: SpheroidFigure): number {
   const a = figure.equatorialRadiusM;
@@ -709,12 +766,10 @@ function marchHeights(
   readonly fromStar: number;
   /** The sample's height in f64, m. */
   readonly height64: number;
+  /** The emulated datum height's error against its own form in f64, m (R08.T6.f). */
+  readonly datum: number;
 }> {
-  const exact = viewExactOf(camera, figure, ATMOSPHERE_M, {
-    radiusM: figure.equatorialRadiusM,
-    heightM: 0,
-    normal: { x: 1, y: 0, z: 0 },
-  });
+  const exact = viewExactOf(camera, figure, BARE_MEDIUM, bareInputsOf(figure));
   const origin = vec(camera.x, camera.y, camera.z);
   const a = f(figure.equatorialRadiusM);
   const c = f(figure.polarRadiusM);
@@ -750,6 +805,7 @@ function marchHeights(
     lowestFromStar = f(-f(Math.sqrt(Math.max(groundQ.disc, 0))) / groundQ.qa);
   }
   const a2 = f(a * a);
+  const k2 = f(k * k);
   const kTrue = figure.equatorialRadiusM / figure.polarRadiusM;
   const sdx = dir.z * kTrue;
   const tStar =
@@ -773,6 +829,7 @@ function marchHeights(
       r05: r05HeightAbove(p, a, c) - h64,
       fromStar: Math.abs(tM - tStar),
       height64: h64,
+      datum: datumHeight(p, bigQ, a, k2) - datumHeight64(p64, figure),
     };
   });
 }
@@ -821,10 +878,18 @@ function directionOf(
   return vec(d.x / length, d.y / length, d.z / length);
 }
 
-/** The near form's worst heights on a figure, as fractions of the bound, and R05's. */
-function nearReport(figure: SpheroidFigure): { readonly worst: number; readonly r05: number } {
+/**
+ * The near form's worst heights on a figure, as fractions of the bound, R05's, and the datum
+ * heights' (R08.T6.f).
+ */
+function nearReport(figure: SpheroidFigure): {
+  readonly worst: number;
+  readonly r05: number;
+  readonly datum: number;
+} {
   let worst = 0;
   let r05 = 0;
+  let datum = 0;
   const a = figure.equatorialRadiusM;
   for (const latitudeDeg of [0, 35, 70, 89.5]) {
     for (const heightM of [-400, 1, 2, 20, 200, 2_000, 20_000, 400_000]) {
@@ -848,12 +913,13 @@ function nearReport(figure: SpheroidFigure): { readonly worst: number; readonly 
             const bound = 1e-6 * Math.max(sample.t, Math.abs(sample.height64), 1_000);
             worst = Math.max(worst, Math.abs(sample.h) / bound);
             r05 = Math.max(r05, Math.abs(sample.r05) / bound);
+            datum = Math.max(datum, Math.abs(sample.datum) / bound);
           }
         }
       }
     }
   }
-  return { worst, r05 };
+  return { worst, r05, datum };
 }
 
 /**
@@ -862,10 +928,15 @@ function nearReport(figure: SpheroidFigure): { readonly worst: number; readonly 
  * height), whose segment ends at the ground's near root. `far` forces the form; the kernel takes
  * the far form above h₀ = a ÷ 2, so at 1.5a, where h₀ is a ÷ 2 on a sphere, both are held.
  */
-function farReport(figure: SpheroidFigure, distanceM: number, far: boolean): number {
+function farReport(
+  figure: SpheroidFigure,
+  distanceM: number,
+  far: boolean,
+): { readonly worst: number; readonly datum: number } {
   const a = figure.equatorialRadiusM;
   const k = a / figure.polarRadiusM;
   let worst = 0;
+  let datum = 0;
   for (const latitudeDeg of [0, 40]) {
     const phi = (latitudeDeg * Math.PI) / 180;
     const p = { x: distanceM * Math.cos(phi), y: 0, z: distanceM * Math.sin(phi) };
@@ -904,12 +975,13 @@ function farReport(figure: SpheroidFigure, distanceM: number, far: boolean): num
             const bound =
               4 * EPSILON * Math.max(a, distanceM) + 1e-6 * Math.max(sample.fromStar, 1_000);
             worst = Math.max(worst, Math.abs(sample.h) / bound);
+            datum = Math.max(datum, Math.abs(sample.datum) / bound);
           }
         }
       }
     }
   }
-  return worst;
+  return { worst, datum };
 }
 
 describe.each(FIGURES)(
@@ -922,6 +994,10 @@ describe.each(FIGURES)(
       expect(near.worst).toBeLessThanOrEqual(1);
     });
 
+    it("keeps every height on the datum from −400 m to 400 km within 10⁻⁶ · max(t, |h|, 1 km) of its own form (R08.T6.f)", () => {
+      expect(near.datum).toBeLessThanOrEqual(1);
+    });
+
     it("finds R05's heightAbove over that bound", () => {
       expect(near.r05).toBeGreaterThan(1);
     });
@@ -930,12 +1006,15 @@ describe.each(FIGURES)(
       "keeps every height near the limb and across the disc from %d a (0: 10⁹ m) within 4ε max(a, |P|) + 10⁻⁶ max(|t − t*|, 1 km)",
       (multiple) => {
         const distanceM = multiple > 0 ? multiple * figure.equatorialRadiusM : 1e9;
-        expect(farReport(figure, distanceM, true)).toBeLessThanOrEqual(1);
+        const report = farReport(figure, distanceM, true);
+        expect(report.worst).toBeLessThanOrEqual(1);
+        // The datum heights the oblate march reads (R08.T6.f), within the same bound.
+        expect(report.datum).toBeLessThanOrEqual(1);
       },
     );
 
     it("keeps the near form within the same bound at 1.5a, where h₀ = a ÷ 2 takes it", () => {
-      expect(farReport(figure, 1.5 * figure.equatorialRadiusM, false)).toBeLessThanOrEqual(1);
+      expect(farReport(figure, 1.5 * figure.equatorialRadiusM, false).worst).toBeLessThanOrEqual(1);
     });
   },
 );
@@ -1188,11 +1267,7 @@ function shellCrossingHeights(
   far: boolean,
   edgeHeightM: number,
 ): Array<{ readonly t: number; readonly h: number; readonly fromStar: number }> {
-  const exact = viewExactOf(camera, figure, ATMOSPHERE_M, {
-    radiusM: figure.equatorialRadiusM,
-    heightM: 0,
-    normal: { x: 1, y: 0, z: 0 },
-  });
+  const exact = viewExactOf(camera, figure, BARE_MEDIUM, bareInputsOf(figure));
   const origin = vec(camera.x, camera.y, camera.z);
   const a = f(figure.equatorialRadiusM);
   const c = f(figure.polarRadiusM);
@@ -1607,6 +1682,169 @@ function skyViewRead(
     filterPosition(texelUvFromUnit(unitClamp(v), size[1]), size[1]),
   ];
 }
+
+describe("a point's height on the datum from its ground quadric (oblate.wgsl, R08.T6.f)", () => {
+  /** The worst |root − geodetic| over latitudes 0–90° at a geodetic height, m, and of latitude. */
+  function rootReport(figure: SpheroidFigure, heightM: number): readonly [number, number] {
+    let height = 0;
+    let latitude = 0;
+    for (let latitudeDeg = 0; latitudeDeg <= 90; latitudeDeg += 5) {
+      const { p } = localFrame(figure, latitudeDeg, heightM);
+      const geodetic = geodeticOf(p, figure);
+      height = Math.max(height, Math.abs(datumHeight64(p, figure) - geodetic.heightM));
+      // The root's foot's normal, whose z is the sine of the latitude the kernels take.
+      const a = figure.equatorialRadiusM;
+      const k2 = (a / figure.polarRadiusM) ** 2;
+      const g = { x: p.x / a, y: p.y / a, z: (p.z * k2) / a };
+      const u = Math.hypot(g.x, g.y, g.z);
+      const h = datumHeight64(p, figure);
+      const foot = { x: p.x - (h * g.x) / u, y: p.y - (h * g.y) / u, z: p.z - (h * g.z) / u };
+      const n = { x: foot.x, y: foot.y, z: foot.z * k2 };
+      const sin = n.z / Math.hypot(n.x, n.y, n.z);
+      latitude = Math.max(latitude, Math.abs(Math.asin(sin) - geodetic.latitudeRad));
+    }
+    return [height, latitude];
+  }
+
+  it("is within 2 × 10⁻⁶ of the geodetic height to 1,000 km on a Saturn-class figure, 1.7 mm at 100 km", () => {
+    const saturn = SATURN_CLASS;
+    // Measured (f64, against `geodeticOf`'s Vermeille): 1.6 × 10⁻⁶ of h at 1,000 km, 2.6 × 10⁻⁷ at
+    // 400 km, 1.63 mm at 100 km; its foot's latitude within 3.2 × 10⁻⁵ rad at 1,000 km and 3.2 ×
+    // 10⁻⁷ at 100 km, which moves s by under 9 × 10⁻⁶ (8.8 × 10⁻⁶ at 45° from 1,000 km).
+    expect(rootReport(saturn, 1_000_000)[0]).toBeLessThan(2e-6 * 1_000_000);
+    expect(rootReport(saturn, 100_000)[0]).toBeLessThan(1.7e-3);
+    expect(rootReport(saturn, 1_000_000)[1]).toBeLessThan(3.5e-5);
+    expect(rootReport(saturn, 100_000)[1]).toBeLessThan(3.5e-7);
+  });
+
+  it("is the height itself on a sphere and on WGS 84 near the ground", () => {
+    for (const [, figure] of FIGURES) {
+      expect(rootReport(figure, 2_000)[0]).toBeLessThan(1e-6);
+    }
+  });
+});
+
+/**
+ * `oblate.wgsl`'s `skyViewColumnOf`, emulated in f32: R_α of M and N along the direction's
+ * azimuth at the camera's normal `n`, and β = π ÷ 2 − preciseAtan(√(h (2 R_α + h)) ÷ R_α).
+ */
+function skyViewColumn(
+  meridionalM: number,
+  primeVerticalM: number,
+  n: Vec3,
+  d: Vec3,
+  heightM: number,
+): readonly [number, number] {
+  const mu = dotV(d, n);
+  const flat = vec(f(d.x - f(mu * n.x)), f(d.y - f(mu * n.y)), f(d.z - f(mu * n.z)));
+  const cos2 = f(f(n.x * n.x) + f(n.y * n.y));
+  const cos = f(Math.sqrt(cos2));
+  const across = f(f(f(flat.y * n.x) - f(flat.x * n.y)) / cos);
+  const along = f(f(f(flat.z * cos2) - f(n.z * f(f(flat.x * n.x) + f(flat.y * n.y)))) / cos);
+  const horizontal = f(f(along * along) + f(across * across));
+  const gap = f(f(primeVerticalM - meridionalM) / primeVerticalM);
+  const radiusM = f(meridionalM / f(1 - f(gap * f(f(across * across) / horizontal))));
+  const horizon = f(Math.sqrt(Math.max(f(heightM * f(f(2 * radiusM) + heightM)), 0)));
+  const beta = f(TRIG_HALF_PI - preciseAtan(f(horizon / radiusM)));
+  return [radiusM, beta];
+}
+
+describe("the sky view's column spheres (oblate.wgsl, R08.T6.f)", () => {
+  /** A figure's principal radii M and N at latitude φ, m, and its normal there. */
+  function cameraAt(
+    figure: SpheroidFigure,
+    latitudeDeg: number,
+  ): { readonly m: number; readonly n: number; readonly up: Vec3; readonly north: Vec3 } {
+    const a = figure.equatorialRadiusM;
+    const e2 = 1 - (figure.polarRadiusM / a) ** 2;
+    const phi = (latitudeDeg * Math.PI) / 180;
+    const w2 = 1 - e2 * Math.sin(phi) ** 2;
+    return {
+      m: (a * (1 - e2)) / (w2 * Math.sqrt(w2)),
+      n: a / Math.sqrt(w2),
+      up: vec(Math.cos(phi), 0, Math.sin(phi)),
+      north: vec(-Math.sin(phi), 0, Math.cos(phi)),
+    };
+  }
+
+  const cases = [
+    ["WGS 84", WGS84, 45],
+    ["a Saturn-class figure", SATURN_CLASS, 45],
+    ["a Saturn-class figure", SATURN_CLASS, 0],
+  ] as const;
+
+  it.each(cases)(
+    "gives each column's sphere and β on %s at %d° to f32's precision, β within 5 × 10⁻⁷",
+    (_name, figure, latitudeDeg) => {
+      const { m, n, up, north } = cameraAt(figure, latitudeDeg);
+      const east = crossV(up, north);
+      for (const heightM of [1, 2_000, 99_000]) {
+        for (let azimuthDeg = 0; azimuthDeg < 360; azimuthDeg += 15) {
+          const alpha = (azimuthDeg * Math.PI) / 180;
+          const d = vec(
+            Math.cos(alpha) * north.x + Math.sin(alpha) * east.x,
+            Math.cos(alpha) * north.y + Math.sin(alpha) * east.y,
+            Math.cos(alpha) * north.z + Math.sin(alpha) * east.z,
+          );
+          const [radiusM, beta] = skyViewColumn(f(m), f(n), up, d, f(heightM));
+          // Euler's theorem in f64, and β from it.
+          const r64 = (m * n) / (n * Math.cos(alpha) ** 2 + m * Math.sin(alpha) ** 2);
+          const beta64 = Math.atan2(r64, Math.sqrt(heightM * (2 * r64 + heightM)));
+          expect(Math.abs(radiusM / r64 - 1)).toBeLessThan(4 * EPSILON);
+          expect(Math.abs(beta - beta64)).toBeLessThan(5e-7);
+        }
+      }
+    },
+  );
+
+  it.each(cases)(
+    "inverts the sky view's write at every texel centre on %s at %d°, each column on its own sphere, to 10⁻³ of a texel",
+    (_name, figure, latitudeDeg) => {
+      const { m, n, up, north } = cameraAt(figure, latitudeDeg);
+      // The sky frame: x the sky axis, here north, y = up × x, z up, as `skyFrame` takes it.
+      const east = crossV(up, north);
+      const size = [
+        TABLE_SIZES.high.skyView.widthTexels,
+        TABLE_SIZES.high.skyView.heightTexels,
+      ] as const;
+      const [w, h] = size;
+      let worst = 0;
+      for (const heightM of [1, 2_000, 99_000]) {
+        const heightF = Math.min(Math.max(f(heightM), 1), f(f(ATMOSPHERE_M) - 1));
+        for (let j = 1; j < h - 1; j += 1) {
+          for (let i = 0; i < w; i += 1) {
+            // The write: the column's azimuth (any zenith's ray shares it), its sphere and β, then
+            // its ray.
+            const azimuth = skyViewUvToParams([texelCentre(i, w), texelCentre(j, h)], size, 1);
+            const horizontalBody = vec(
+              f(f(azimuth.x * north.x) + f(azimuth.y * east.x)),
+              f(f(azimuth.x * north.y) + f(azimuth.y * east.y)),
+              f(f(azimuth.x * north.z) + f(azimuth.y * east.z)),
+            );
+            const [bottom, beta] = skyViewColumn(f(m), f(n), up, horizontalBody, heightF);
+            const dir = skyViewUvToParams([texelCentre(i, w), texelCentre(j, h)], size, beta);
+            // The read: the ray in body axes, its own column's sphere and β.
+            const body = vec(
+              f(f(f(dir.x * north.x) + f(dir.y * east.x)) + f(dir.z * up.x)),
+              f(f(f(dir.x * north.y) + f(dir.y * east.y)) + f(dir.z * up.y)),
+              f(f(f(dir.x * north.z) + f(dir.y * east.z)) + f(dir.z * up.z)),
+            );
+            const [readBottom, readBeta] = skyViewColumn(f(m), f(n), up, body, heightF);
+            const read = skyViewRead(dir, size, readBeta, readBottom, heightF);
+            if (read === null) {
+              continue;
+            }
+            const [x, y] = read;
+            const column = i === w - 1 && x < 0.5 ? x + (w - 1) : x;
+            worst = Math.max(worst, Math.abs(y - j), Math.abs(column - i));
+            expect(Math.abs(readBottom / bottom - 1)).toBeLessThan(1e-6);
+          }
+        }
+      }
+      expect(worst).toBeLessThan(1e-3);
+    },
+  );
+});
 
 describe("the sky view's read inverts its write (view.wgsl, Design notes 18 and 19)", () => {
   const sizes = [

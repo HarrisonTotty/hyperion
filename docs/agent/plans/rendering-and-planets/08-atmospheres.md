@@ -385,7 +385,11 @@ module R12 reads for this plan's ladder entries.
     vertical amount), with a second table, `absorberColumns`, holding slots 1–4 the same way.
     Each light's curves of growth (`absorberCurves`) are not stored in either table: they are
     added on read, through `common.wgsl`'s `transmittanceThroughTables` at the light's slot
-    (R08.T6.c). Both tables are 2D array textures of one layer a κ slice (Design note 17);
+    (R08.T6.c). Both tables are 2D array textures of one layer a κ slice (Design note 17); as
+    built (R08.T6.f) a reader takes a slice through `oblate.wgsl`'s sliced lookup, `slicedRayOf`
+    and `slicedStoredOf` from a `LookupStart`, with the body's table `oblateBody`, and a band's own
+    table through `common.wgsl`'s `transmittanceThroughLayer`, which replaced
+    `transmittanceThroughTables`;
   - `multiScattering.wgsl`, Hillaire's isotropic 32² table for `thin` worlds, one layer a latitude
     band;
   - `skyView.wgsl`;
@@ -425,7 +429,10 @@ module R12 reads for this plan's ladder entries.
   per-planet `AtmosphereTables` (`tables.ts`; `setMedium(medium, bottomRadiusM): boolean`, built at
   `tableRadiusM(figure)`), and has `setMedium(medium): void`,
   `drawFrame(view: AtmosphereCamera, sun: SunState, scene: AtmosphereScene): DrawItem`,
-  `aerialPerspectiveVolume()`, the smoke page's `frameTables` getter and `dispose()`. `SunState` is
+  `aerialPerspectiveVolume()`, the smoke page's `frameTables` getter and `dispose()`; after the
+  figure it takes `curves: AbsorberCurveSlots = NO_ABSORBER_CURVES` (R08.T6.c) and, since R08.T6.f,
+  `gravity: BodyGravity | null = null`, its tables built on the body's slices and bands
+  (`tablesPlanOf`; "Deviations in T6.f, as built"). `SunState` is
   `{ directionBodyFixed, distanceAu, angularRadiusRad }`, its light R05's `solar.ts`. Widened:
   - `setMedium(medium)` builds the per-planet tables, shared by every view on the device, one
     transmittance layer per κ slice and one multiple-scattering and irradiance layer per band of
@@ -438,14 +445,20 @@ module R12 reads for this plan's ladder entries.
     the transmittance table to R11, the table as its 2D array texture of κ slices, read through
     `oblate.wgsl`'s slice lookup, with `absorberColumns` and `absorberCurves` beside it and,
     since R08.T4.d, `absorberPressureColumns` and `lastAbsorberPressureColumn` and the medium's
-    line-slot bitmask, which `transmittanceThroughTables` reads with it. As built (R08.T9.a) it
-    returns `AerialPerspective | null`, `null` on the `terrain` scope, and the volume is read
-    through `shaders/aerialRead.wgsl`'s `aerialPerspectiveAt`, the composite's own read;
+    line-slot bitmask, which `transmittanceThroughTables` reads with it (until R08.T6.f). As built
+    (R08.T9.a) it returns `AerialPerspective | null`, `null` on the `terrain` scope, and the volume
+    is read through `shaders/aerialRead.wgsl`'s `aerialPerspectiveAt`, the composite's own read;
+    since R08.T6.f it carries `oblateBody`, and the table is read through `slicedRayOf` and
+    `slicedStoredOf` (flagged for R11's re-validation);
   - `skyView(view): SkyViewTable` exposes the view's sky-view table (R05's `frameTables.skyView`),
     the sky's radiance by local azimuth and elevation summed over the drawn suns, for R11's sky
     reflection in the ocean, with what its read takes (R08.T9.a). If R08.T7's check forces the
     per-sun fallback, it returns the per-sun tables with their suns instead, in a field of the same
-    type.
+    type. Since R08.T6.f (ruled by "main" 2026-10-13; flagged for R11's re-validation) each
+    column stands on its own sphere R_α on an oblate body: the table carries the camera's
+    `meridionalRadiusM` and `primeVerticalRadiusM`, `heightM`, `atmosphereM` and
+    `sphere: SkyViewColumn | null` (R08.T9.a's `bottomRadiusM` and `horizonAngleRad`, on a sphere
+    only), and `skyViewColumnOf(table, direction)` gives a direction's.
 - `TABLE_SIZES: Record<QualitySetting, TableSizes>` is R05's, kept. The thick table's size is
   added.
 
@@ -3701,6 +3714,9 @@ photometry from R06's fixture.
   its cost per transmittance read is recorded here and in R08.T11's benchmarks; a body of one band
   may skip the fit, its s varying by under 2%. Acceptance: `pnpm test` and `just test-render` pass;
   by hand, the Saturn-class limb from orbit over the equator and the pole is recorded here.
+  _Built 2026-10-13_ (Risks, "Deviations in T6.f, as built"): the slices in √κ by main's ruling,
+  `SkyViewTable` per azimuth, and the limbs from orbit captured and measured (the air 1.32 times as
+  tall over the equator as over the pole); the owner's look by hand stays open.
 
 - **R08.T6.g Heights and angles in `f32`** (Design note 18; `decision-r08-f32.md`). It follows
   T6.b and precedes T6.c, whatever its letter. R08.T6.b's local fixes stand: the transmittance
@@ -4367,7 +4383,12 @@ the budget ([Performance budget](../../brainstorming/rendering-and-planets.md#pe
   Each pass is timed on an edged medium (the slab Earth) and on Earth. Earth's time is also set
   beside the kernels of R08.T6.h, before T6.i, on both machines, so that the private array's cost
   to occupancy on media with no edge is seen. A cost there beyond the run's noise is raised with
-  "main" (`decision-r08-t6d-findings.md` §11.4).
+  "main" (`decision-r08-t6d-findings.md` §11.4);
+
+- R08.T6.f's cost per transmittance read (`oblate.wgsl`'s sliced lookup; the operation count in
+  "Deviations in T6.f, as built"): each per-frame pass on Earth, on the Saturn-class figure and on
+  a sphere, against the kernels before T6.f, on both machines, so that the fit's cost on a body
+  of several bands, and any cost of its code on a body of one, is seen.
 
 R05's `just descent-spike` runs with the generalised atmosphere, and its percentiles are recorded
 against R05's. Where the low setting misses, `TABLE_SIZES` changes here. Acceptance: the record is
@@ -6853,14 +6874,16 @@ generator, and the reference's sampling needs no domain tag.
       composite's `transmittanceToSpace` does.
 
     The table is one κ slice until R08.T6.f, which widens this type with what `oblate.wgsl`'s
-    slice lookup takes.
+    slice lookup takes. _Done by R08.T6.f_ (`oblateBody`; "Deviations in T6.f, as built").
 
   - _`SkyViewTable`_ carries:
     - the table, its size and `scaleLx`;
     - what sebh's read takes: the zenith (the datum's normal under the camera) and the azimuth's
       origin (`view.wgsl`'s `skyFrame` x, the sun's horizontal direction, with its fallback at
       the zenith; `skyAzimuthOrigin`);
-    - the sphere's √(MN), the camera's `skyViewHeight` on it, and β (`ViewExact.horizonAngleRad`).
+    - the sphere's √(MN), the camera's `skyViewHeight` on it, and β (`ViewExact.horizonAngleRad`);
+      per azimuth on an oblate body since R08.T6.f, its sphere R_α ("Deviations in T6.f, as
+      built", _`SkyViewTable`, as built_).
 
     R08.T7's summed table, indexed by local azimuth, moves the origin; its per-sun fallback widens
     this type.
@@ -7504,6 +7527,321 @@ generator, and the reference's sampling needs no domain tag.
   - _The layer edges at the camera's s._ The sky view's crossings take e ÷ s at the camera, not at
     each crossing's own latitude. A medium with edges on a body of several bands is the case;
     none is built yet.
+
+- **Deviations in T6.f, as built** (2026-10-13). The WGSL (a new `oblate.wgsl`; `common`, `medium`,
+  `transmittance`, `multiScattering`, `view`, `source`, `skyView`, `aerialPerspective`, `rayMarch`
+  and `composite`), `tables.ts`, `hillaire.ts`, `tablesCpu.ts`, `labels.ts`, the smoke
+  (`smoke/atmosphere.ts`, `smoke/page.ts`, `smoke/twinJobs.ts`, `smoke/twinPool.ts`,
+  `src/smoke/main.ts`, `scripts/testRender.sh`) and `test/atmosphereFixtures.ts`; tests in
+  `precision.test.ts`, `hillaire.test.ts`, `tables.test.ts`, `tablesCpuOblate.test.ts`,
+  `marchSteps.test.ts`, `severalSuns.test.ts` and `layerEdges.test.ts`. No version moves.
+  - _Names beyond the text._
+    - `oblate.wgsl`: `OblateBody` and `oblateBodyOf`, `oblateSliceCount`, `oblateBandCount`,
+      `oblateLayersPerBand`, `oblateNeedsLatitude`, `oblateSlice`, `oblateBand`, `gravityRatioAt`,
+      `gravityRatioSlopeAt`, `oblateScaled`, `DatumPoint` and `datumPointOf`, `quadricAlong`,
+      `principalRadiiAt`, `VerticalPlane` and `verticalPlaneOf`, `cameraCurvatureAlong`,
+      `skyViewColumnOf`, `lowestOnSphereM`, `cosineToLowestOf`, `LookupStart`,
+      `localScaleHeightOf`, `scaledHeightAlong`, `SlicedRay`, `slicedRayOf` and `slicedRayOn`,
+      `SlicedStored`, `sliceStoredAt` and `slicedStoredOf`, `bandMultiScatteringAt`, and
+      `OBLATE_SCALE_FLOOR_M`.
+    - `common.wgsl`: `Medium.build` (a build's coefficient factor and layers), and
+      `transmittanceThroughLayer` in place of `transmittanceThroughTables` (the
+      multiple-scattering kernel's read of its band's own table). `medium.wgsl`: `buildFactor`,
+      `buildTransmittanceLayer` and `buildMultiScatteringLayer`. `view.wgsl`:
+      `AtmosphereView.curvature` and `skyViewAzimuthOf`. `source.wgsl`: `SourceLight`,
+      `sourceLightAt` and `sampleStartOf`. Removed: `source.wgsl`'s `tableTransmittance` and
+      `tableMultiScattering`, and `rayMarch.wgsl`'s `radialHeight` and `normalAt`.
+    - `tables.ts`: `MAX_SLICES` and `MAX_BANDS` (16 each), `OBLATE_BODY_TEXELS`, `AtmosphereBody`
+      (T6.e's `TwinBody`'s shape, the tables' own), `TablesBand`, `TablesPlan` and `tablesPlanOf`,
+      `packOblateBody`, `MediumBuild` (`packMediumUniform`'s `build`; the `Medium` uniform is 16
+      floats) and `TransmittanceTextures`; `AtmosphereTables` gains a `body` argument and
+      `oblateBody`, `plan`, `body`, `layersPerBand` and `bandTransmittance`, and its
+      `multiScatteringLayers` counts bands × light slots.
+    - `hillaire.ts`: `HillaireAtmosphere` gains a `gravity` argument; `bodyOfFigure`,
+      `FIT_SCALE_FLOOR_M`, `localScaleHeightM`, `ViewCurvature` and `viewCurvatureOf`,
+      `SkyViewColumn` and `skyViewColumnOf`;
+      `viewExactOf(positionM, figure, medium, inputs, gravity = null)` in place of T6.g's
+      `topHeightM` argument, and `ViewExact.localScaleHeightM` in place of `horizonAngleRad`;
+      `AerialPerspective.oblateBody`.
+    - `tablesCpu.ts`: `oblateSkyViewMarchTwin` (with a `splitShift`, below), and
+      `transmittanceTablesTwin`'s `coefficientFactor`. The smoke: `checkAtmosphereSlicesEarth`,
+      `checkAtmosphereSlicesSaturn`, `checkOblatePlanetArms`, `SmokePlanet`, `frameTwinsOf`,
+      `oblatePlanetOf`, `TexelEnvelope.split` and `TwinAgreement.split`, and the twin pool's
+      `oblateBand`, `oblateSkyView`, `oblateAerialPerspective` and `oblateRayMarch` jobs;
+      `atmosphereFixtures.ts`: `earthBody`, `saturnBody`, `saturnClassMedium` and their figures
+      and gravity.
+  - _Slices linear in √κ, not ln κ_ (ruled by "main" 2026-10-13, after T6.e's record; a departure
+    from Design note 17's "interpolating between slices in ln κ" and from T6.e's text). The twin
+    (`OblateReader`'s `#read`) and `oblate.wgsl`'s `slicedRayOn` both weight the two slices about
+    κ\* by (√κ\* − √κ_k) ÷ (√κ_{k+1} − √κ_k), exact, to first order in H ÷ R, for Chapman's
+    grazing column, which goes as √R, and for a vertical ray. On T6.e's ray set (598 rays that
+    clear the ground): the lookup's sphere and slices integrated exactly, worst 0.782 of
+    max(0.01, 2 × 10⁻³ τ) (0.905 in ln κ), at 30° north from 1 H at μ −0.035; through the slices'
+    256 × 64 tables, worst 1.072 and one ray over (1.244 and 5 in ln κ). `tablesCpuOblate.test.ts`
+    pins both (< 0.85; < 1.1 with that one ray named), and holds the interpolation halfway in ln κ
+    and halfway in √κ against the exact integral.
+  - _The ray left over the bound_ (30° north, h\* 3 H, μ −0.035, a deep dip, τ 0.925, 1.857 and
+    4.747; 1.072 of the bound). No cheap cure was found; it is pinned with its figure. More rows do
+    not take it under in order: 72 rows put it at 1.116 with a second ray over (45° north from 3 H),
+    80 at 0.906, 88 at 1.031, 96 at 0.815 and 128 at 0.876; 512 columns at 1.023. The bilinear
+    read's error goes with the phase of the rows about 3 H, not with their count, so a taller table
+    would pass by luck, and at 96 rows it costs 50% more in every slice's tables, which on a
+    Saturn-class world with the absorber tables is at the 2 MB row already (below). A row mapping
+    by h\* ÷ H is the contract change T6.e named, not made.
+  - _The body's table is a texture_, `oblateBody` (`rgba32float`, one row of 36 texels, under
+    `atmosphere-tables`), in place of a uniform: the composite, a material whose uniforms are its
+    `Draw` members, reads it as the kernels do, and a slice's or band's constants are read by
+    `textureLoad` at its index, with no dynamically indexed uniform array copied into an
+    invocation's memory (R08.T6.b's lesson). Its gravity row is Somigliana's form divided through
+    by a and over g_ref, s = (A cos²φ + B sin²φ) ÷ √(cos²φ + K sin²φ) + O with A = s_e − O,
+    B = (s_p − O) c ÷ a, K = (c ÷ a)² and O the offset's (`BodyGravity.gravityOffsetMS2` ÷ g_ref),
+    taken from `gravityRatio` at the equator and the pole, so that the body's γ_e and γ_p need no
+    export; a body with no spheroid has A = B = 0 and O = 1, s ≡ 1 to the bit (`tables.test.ts`
+    holds the row to `gravityRatio` from the equator to the pole, and the layout to
+    `oblate.wgsl`'s).
+  - _A figure with no gravity_ (found by the plan-conformance review). `HillaireAtmosphere` with
+    no `gravity` still gives its tables a body on an oblate figure, `bodyOfFigure`: the figure
+    with R08.T3.d's gravity for a body with no rotation section (s ≡ 1, one slice and one band),
+    so that `oblate.wgsl`'s datum, and the ray march's heights and normals on it, are the figure's
+    own, as R05's `radialHeight` and `normalAt` were; a sphere takes none, its tables R05's on
+    R_ref = a. The first build packed a sphere of R_ref for a body of none, which put WGS 84's
+    heights 0.67% high at the pole and its normals geocentric (the spike and R05.T12.c's and
+    R05.T12.e's groups; no twin check runs WGS 84 without gravity). `hillaire.test.ts` holds the
+    figure's texel.
+  - _The bands' own transmittance tables_ are built into one set of one-layer tables made for the
+    build, rebuilt for each band in turn and released after the last band's multiple scattering
+    (`#dispatchTables`), so that they cost no per-planet memory: Design note 11 counts the multiple
+    scattering per band, not the bands' transmittance. Each band is the reference medium with
+    every coefficient ÷ s_b on the sphere s_b √(MN) (T6.e's "bands in their own frame"), through
+    `Medium.build`'s coefficient factor. A body of one slice at κ = 1 and one band, Earth's or a
+    sphere's, reads the slice's own (`TablesPlan.shared`), as R05's. The kernel arm builds them
+    anew in the stored format, and the smoke reads them back through `bandTransmittance(b)`, in
+    the stored arm only: it is the slices' kernel, whose kernel arm holds it at the factor 1.
+  - _Design note 18's forms, changed as T6.e's contract asked_ (ruled by "main" 2026-10-13).
+    - The ray march's top and layer edges are the quadrics through h\* = e at the equator and the
+      poles, (a + e ÷ s_e, c + e ÷ s_p), in place of S_t = diag(1, 1, (a + H) ÷ (c + H)): q_t is
+      formed in `f64` from them (`viewExactOf`), and an edge's constant from q_g as
+      q_g + (k_e − k)(k_e + k) P_z² − e_a (2a + e_a), with
+      k_e − k = (c e_a − a e_c) ÷ (c (c + e_c)).
+    - `exact.z` is no longer the sky view's β: each column has its own, on its own sphere R_α, taken
+      in `f32` in the kernel and in every read by one form (`skyViewColumnOf`): R_α from the
+      camera's M and N, formed in `f64` (`view.curvature`), and β = π ÷ 2 − preciseAtan(√(h (2 R_α +
+      h)) ÷ R_α), within 5 × 10⁻⁷ rad of `f64`'s atan2 (`precision.test.ts`). The read inverts the
+      write to 10⁻³ of a texel on WGS 84 and on the Saturn-class figure, every column on its own
+      sphere. `exact.z` now carries the camera's local scale height, for the composite's lookup.
+    - A sample's height on the spheroid, the ray march's, is the root of the exact quadratic along
+      the similar spheroid's normal (`datumPointOf`), from the ground quadric the march forms, in
+      place of R05's radial height (T6.e's twin reads the geodetic height). In `f64` on the
+      Saturn-class figure, over 0–90° in 5° steps, it is within 1.6 × 10⁻⁶ of the geodetic height
+      at 1,000 km, 2.6 × 10⁻⁷ at 400 km and 1.63 mm at 100 km (1.64 mm at worst, at 43.5°): the
+      error goes as h³, so the text's 2 × 10⁻⁶ holds and its 1.2 mm (`decision-r08-f32.md` §8.6,
+      its latitudes unstated; about the 60° value) is not reproduced, and `precision.test.ts` pins
+      1.7 mm. The root is the text's. Its latitude is the datum's normal at the root's foot, within
+      3.2 × 10⁻⁵ rad of the geodetic latitude at 1,000 km and 3.2 × 10⁻⁷ at 100 km, which moves s
+      by under 9 × 10⁻⁶ (8.8 × 10⁻⁶ at 45°); the text named no latitude. Emulated in `f32` it keeps
+      10⁻⁶ · max(t, |h|, 1 km) of its own form from −400 m to 400 km, and the far bound from 1.5a
+      to 10⁹ m, on the four figures (`precision.test.ts`).
+    - The sky view's and the aerial perspective's samples take their latitude from the datum point
+      of their body-fixed place, its quadric by the near form from q_g; a body of one slice and
+      one band with no spheroid takes none (`oblateNeedsLatitude`).
+    - The fit's distances are written in forms chosen not to cancel in `f32`: x₁'s root as
+      rise (2 reach + rise) ÷ (reach μ + √(…)) for a rising ray, the fitted radius's numerator with
+      (h\*₀ − h\*₁)(h\*₀ + h\*₁), and the dip as (r + h) μ² ÷ (1 + √(1 − μ²)). `precision.test.ts`
+      emulates the datum height and the column's β only; the fit's forms are held by the smoke's
+      kernel arm (deferred, below).
+  - _The sky view from above the air_ (found by the smoke, fixed in the twin and the kernel). The
+    sky view holds the camera 1 m inside its column's shell (`skyViewHeight`), but T6.e's twin, and
+    this task's kernel at first, took each sample's body-fixed place, for its latitude and its
+    fit's far points, from the camera's own place: from 1,000 km over the Saturn-class equator
+    84 km above the place the heights were reckoned from. Both now take the place at the held
+    height, the camera's place moved down its vertical (`skyView.wgsl`'s `cameraPlace` and
+    `cameraQuadric`; `tablesCpu.ts`'s `oblateSkyViewMarcher`). The limb's texel that had parted by
+    2.9% (sun −2°, texel (0, 26)) agrees; the twin's sky view there is the same to five figures for
+    a camera 4 m higher or lower, and for a camera its shell holds as it is nothing moves.
+    `tablesCpuOblate.test.ts` holds the twin's sky view from 1,000 km and from 1,500 km over the
+    equator to 10⁻⁹ of each other.
+  - _The split's rounding from above the air_ (found by the smoke; the twin and the kernel as they
+    are, the smoke's envelope widened). From 1 m inside the shell a ray that dips and leaves
+    through the top has its two sides within metres of each other, so for an odd count of steps
+    (75 on high) R05.T12.e's split, floor(n √b ÷ (√b + √a) + ½), stands within about 10⁻⁵ of a
+    step of its rounding, and the kernel's `f32` lengths, each to about a metre, may take the
+    other side of it. On the Saturn-class limb from 1,000 km, the sun 2° below the tangent point's
+    horizon, the twin's share there is 38 − 5.2 × 10⁻⁶ (its sides 10,505,808.6 m and 10,505,814.4 m
+    from texel (1, 26)), and the twin with the other split, a step moved to the side before the
+    lowest point, reproduces the GPU: texel (31, 26) +3.10% in blue against the GPU's +3.2%, texel
+    (1, 26) +0.54% against +0.51%. Those twilight texels move by 1–4% with the split, and by under
+    2 × 10⁻⁵ with the ray or the sun turned by 10⁻⁷ rad. So the
+    smoke's oblate sky-view envelope from above the air also holds the twin's march at the other
+    split (`oblateSkyViewMarchTwin`'s `splitShift`) where the twin's share stands within 2⁻¹⁴ of
+    a step of its rounding, and the channels it carries are counted and recorded apart from
+    `decision-r08-f32.md` §10.3's 1% cap ("by the split's rounding"): on that limb 10 channels of
+    the stored arm and 18 of the kernel arm (0.06% and 0.12%), at texels (0, 26), (1, 26),
+    (31, 26), (64, 26), (94, 26) and (95, 26), whose rays touch 6–7 km above the column's ground;
+    none in any other check. Deferred
+    (below).
+  - _The fit's scale floor_ (found by the smoke; the twin, the kernels and the composite alike).
+    The fit takes its second point one local scale height up the ray, and its deep-dip parabola
+    √(2 R_α H ÷ s) either side of the lowest point, H the stored vertical depth above the start over
+    its extinction, held to the room left to the top. Within a few tens of kilometres of a
+    Saturn-class top that depth is under the half float's least step and rounds to 0, so H fell to
+    T6.e's floor of 1 m, or to the room, metres, near the top, and the fit's differences of h\* to
+    metres of heights of 750–800 km, which `f32` holds to 0.06 m: on the limb from 1,000 km the
+    kernel arm's sky view parted from the twin by up to 2% at texels of 10⁻⁶ of the largest, whose
+    rays graze the top 50 km (texel (9, 19), whose twin moves by under 6 × 10⁻⁴ with the split and
+    under 10⁻⁴ with the ray or the sun turned by 2.4 × 10⁻⁷ rad or the camera 0.25 m higher). The
+    local scale height is now held to at least 1 km
+    (`hillaire.ts`'s `FIT_SCALE_FLOOR_M`, `oblate.wgsl`'s `OBLATE_SCALE_FLOOR_M`), under the
+    least scale height drawn so far (R05's Earth aerosol, 1.2 km), which keeps the differences to
+    about 10⁻⁴; T6.e's ray set starts at most 3 H up and does not reach it. With it the limb's
+    kernel arm holds the bound outright but for the split's channels (worst 0.061 × 10⁻³, at texel
+    (2, 25)), where 80 channels had been over.
+  - _The composite's lookup_ starts at the camera, its latitude its datum normal's and its local
+    scale height formed in `f64` from the medium's own column (`localScaleHeightM`: each term's
+    `columnLengthM` above the camera's h\* over its extinction there), where the kernels take slice
+    0's stored column at each sample, as the twin does; the two part by the table's texels, under
+    10⁻³ of H. The local scale height is taken only on a body of several bands, whose fit alone
+    reads it.
+  - _`SkyViewTable`, as built_ (the contract change ruled by "main" 2026-10-13; flagged for R11's
+    re-validation, since R11 reads it). `bottomRadiusM` and `horizonAngleRad` are gone as top-level
+    scalars: the table carries the camera's principal radii, `meridionalRadiusM` and
+    `primeVerticalRadiusM`, `heightM` on each column's sphere, `atmosphereM` (the medium's top
+    over the camera's s), and `sphere`, the scalar reading where M = N: every column's one sphere,
+    `{ bottomRadiusM, horizonAngleRad }`, the values R08.T9.a published, identical on a sphere;
+    `null` on an oblate body. `skyViewColumnOf(table, d)` (TypeScript, `f64`) and `oblate.wgsl`'s
+    `skyViewColumnOf` give a direction's column sphere and β; the read is otherwise R08.T9.a's.
+    R08's own callers pass the type through (`aerialPerspective`, `skyView`, the smoke); R07's
+    composite reads neither field.
+  - _`AerialPerspective`, as built_ (flagged for R11's re-validation): the transmittance tables are
+    2D arrays of one layer a κ slice, read through `oblate.wgsl`'s `slicedRayOf` and
+    `slicedStoredOf` from a `LookupStart`; it gains `oblateBody`. A reader at a point of its own
+    needs the medium's extinction there for the local scale height on a body of several bands, or
+    the camera's (`ViewExact.localScaleHeightM`) near it. R11's Consumes still reads through
+    `common.wgsl`'s `transmittanceThroughTables`, which this task replaced.
+  - _For T9.b._ `surfaceLighting.wgsl` forms a `LookupStart` from its caller's height, latitude and
+    azimuth; on a body of several bands `slicedRayOf` needs the local scale height there, which
+    `localScaleHeightOf` takes from the medium's extinction, and the lit passes declare no medium.
+  - _`atmosphereInputs(camera, figure, gravity?)`_ gains `latitudeRad` and `gravityRatio`, s ≡ 1
+    with no gravity; R05.T12.c's tests pass unchanged. `HillaireAtmosphere`'s `gravity` defaults to
+    none (`bodyOfFigure`, above) and `AtmosphereTables`'s `body` to none, one slice and one band;
+    the spike passes none, so its Earth keeps s ≡ 1 (each sky-view column still on its own R_α)
+    until R08.T10.a gives a body its gravity.
+  - _Earth on its oblate twin._ The kernels read every body through the slices and spheres R_α,
+    so every smoke check of a WGS 84 frame against a twin takes R08.T6.e's oblate twin and Earth's
+    normal gravity (WGS 84's GM and ω, `earthBody`): R08.T6.b's frames, R08.T6.i's slab Earth and
+    R08.T7's binary. R08.T6.g's Earth moved into R08.T6.f's Earth group; its spheres keep their
+    spherical twins, which a sphere's oblate twin reproduces to 10⁻¹² (T6.e).
+  - _`ATMOSPHERE: APPROXIMATE`_ no longer names a strongly oblate body (`labels.ts`); the UX
+    guide's row still does (deferred, below).
+  - _Memory_ (Design note 11's arithmetic, `rgba16float` 8 B a texel). The Saturn-class figure's
+    five slices: 655 KB of transmittance, and as many again in each of the absorber-column and
+    pressure-column tables, which `AtmosphereTables` makes at every slice whatever the medium's
+    absorbers (T6.c's and T4.d's), so 1.97 MB; with the four bands' multiple scattering (32 KB a
+    light slot) and the body's table (576 B), 1,999,424 B at one light slot: at the 2 MB row, and
+    over it with a second light slot or T9.b's irradiance bands (33 KB each). Deferred to R08.T11
+    (below).
+  - _Cost per transmittance read_, by an operation count (the passes' times wait for R08.T11's
+    quiet run): one slice and one band, Earth's, adds a datum point (two square roots and a
+    normalisation), s (a square root) and the division by s to R05's read; one band adds a vertical
+    plane (three square roots), the √κ weight (one) and the second slice's read; several bands the
+    fit, one datum point per far point (one for a rising ray, three for a deep dip), and a read of
+    slice 0's vertical depth a sample for the local scale height: two or three bilinear reads in
+    all. On SwiftShader R05.T12.e's converged group, Earth with no gravity and so one slice and one
+    band, took 56.8 s against 43 s and R05.T12.c's frames 31.0 s against 25.1 s (provisional, at a
+    load of about 9 to 17), more than the count accounts for (below). R08.T11 gains the item.
+  - _The smoke_ (`just test-render`, both variants): the groups
+    `R08.T6.f slices and bands on a Saturn-class figure` and `R08.T6.f slices and bands on Earth`,
+    each in both arms: every slice's transmittance against its twin of the medium, every band's own
+    transmittance in the stored arm, and every band's multiple-scattering layers against R08.T6.e's
+    band over the GPU's band tables; then R08.T6.g's views. The Saturn-class figure takes the views
+    from 2 m, 20 m, 200 m and 2 km at the equator (the sun 20° up and 2° below the horizon), the
+    limb from 1,000 km over the equator (both suns) and from 10,000 km off the polar axis (the sun
+    20°), and 2 km at 45° (the sun 20° towards the north); Earth the views from 2 m, 20 m, 200 m and
+    2 km and its limbs from 400 km and 4.2 × 10⁷ m, as R08.T6.g's were. Every check passes in both variants. In the
+    kernel arm, the worst relative difference from the twin, on the Saturn-class figure: the five
+    slices' transmittance 7 × 10⁻⁶, the four bands' multiple scattering 1.1 × 10⁻⁵, the sky view
+    6.5 × 10⁻⁴ (the limb from 1,000 km with the sun 20°; 1.8 × 10⁻⁴ from the ground), the aerial
+    perspective 9 × 10⁻⁶ and the ray march 4.8 × 10⁻⁵; on Earth 2 × 10⁻⁵, 1.8 × 10⁻⁵,
+    2.2 × 10⁻⁴, 1.2 × 10⁻⁵ and 9.1 × 10⁻⁴ (the ray march from 3.56 × 10⁷ m, 8 channels by §10's
+    envelope, as R08.T6.g's). The stored arm holds the bound in every check, the half float's floor
+    carrying the dim texels.
+  - _A fifth part of the smoke page._ The four parts could not hold the two groups under about
+    115 s each: at a load of about 7 they took 89, 155, 143 and 124 s, R08.T6.b's frames grown
+    from about 82 to 98 s, R08.T6.g's and Earth's together from about 108 to 143 s and part 4 from
+    about 94 to 124 s, mostly the kernels' added work on SwiftShader. So the page has five parts
+    (`page.ts`'s `PagePart`, `testRender.sh`'s `--part=5`, `main.ts`'s note): 1 every other group,
+    2 R08.T6.b's, 3 R08.T6.g's and R08.T6.i's, 4 R05.T12.e's and R08.T7's, 5 R08.T6.f's two. Part 1
+    also takes the captures when asked, under the same 180 s watchdog: with R08.T6.i's group in it
+    as well (109.7 s alone at a load of about 15) a run with `--captures` met the watchdog, so
+    R08.T6.i's went to part 3. The five parts, default and no-subgroups, at a load of about 9 to
+    17: 91.6 and 86.0 s, 93.1 and 94.8 s, 104.2 and 103.6 s, 100.9 and 103.8 s, and 107.7 and
+    109.0 s (provisional). In one earlier run at a load of about 15, the no-subgroups part 4's GPU
+    process exited unexpectedly in R08.T7's group (`mapAsync` aborted); it did not recur.
+  - _By hand_ (the acceptance's limb). `captureAtmosphere` gains the Saturn-class limb from orbit,
+    above the air, over the equator and over the pole (`r08-saturn-limb-equator`,
+    `r08-saturn-limb-pole`): each camera 12,000 km along the limb from a tangent point 300 km up,
+    1,477 km above the equator and 1,366 km above the datum near the pole, so that the composite
+    draws the ray march, the sun 10° up at the tangent point. Rendered here on SwiftShader, from a
+    scratch build of the page with these two captures alone (part 1 with `--captures` met its
+    180 s watchdog at a load of 15–20; deferred, below), each frame 320 × 180, 6.67 km of tangent
+    height a row: the air's blue stands 1.32 times as tall over the equator as over the pole, where
+    s_p ÷ s_e is 1.326 (blue falls to 100 and to 10 of 255 at 339 and 500 km over the equator, 258
+    and 377 km over the pole), and it fades smoothly, with no step at a band's or a slice's edge.
+    The owner's look stays open.
+  - Reviewed by the TypeScript, plan-conformance and science reviewers. Their must-fixes are in
+    (the figure with no gravity; the by-hand limb inside the air, now from orbit), and their
+    should-fixes: the tables' plan, layout, dispatches and released band tables tested without a
+    GPU, a frame with a body's gravity and the twin's held place tested, the record's figures
+    corrected (the root's 100 km error and its latitude's effect on s, the memory, the operation
+    count, 84 km), the fixture's Saturn notes (s moves by about 10⁻⁵ with the period's rounding;
+    Voyager-era values) and its shared k and m_u, and the smoke's heights check built from each
+    body's own medium.
+
+- **Deferred findings (2026-10-13 rule)** (R08.T6.f). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _A Saturn-class world's per-planet tables reach 2 MB_ (1,999,424 B at one light slot, above).
+    The absorber-column and pressure-column tables take every slice whatever the medium's
+    absorbers, though the kernels read the first only with two absorbers or more and the second
+    with one or more; a medium without them could bind one-texel tables, as the fifth pressure
+    channel's does, saving up to 1.31 MB here, back near Design note 11's 0.72 MB. For R08.T11's
+    budget, which holds Design note 11's row.
+  - _The split's rounding from above the air_ (above): the kernel cannot tell R05.T12.e's split at
+    its rounding, so from above the air the sky view's twilight texels may differ from the twin by
+    a step's worth, 1–4% on the Saturn-class limb. The smoke counts them apart; the cure is the
+    kernels' split taken from a form that does not cancel (the sides' difference from the shell's
+    heights, (top − h)(2R + top + h) over their sum) or the camera held further inside the shell,
+    either a change to R05.T12.e's steps for every march.
+  - _The fit's `f32` forms are not emulated_ in `precision.test.ts` (the datum height and the
+    column's β are): x₁'s root, the dip, the fitted radius, the parabola, the ground decision,
+    `lowestOnSphereM`, `cosineToLowestOf`, `quadricAlong`, the sky view's lifted quadric, the edge
+    constant with e_a ≠ e_c, and `gravityRatioAt` and `gravityRatioSlopeAt`. The smoke's kernel
+    arm holds them against the twin (to 6.5 × 10⁻⁴, above).
+  - _The kernels' cost on SwiftShader._ R05.T12.e's group, one slice and one band, grew from 43 s
+    to 56.8 s, more than its added operations account for. A likely reading, not measured:
+    SwiftShader runs its lanes in step and need not skip a branch none of them takes, so every
+    body would pay for the bands' fit, where a real GPU's branch on the body's uniform counts skips
+    it. R08.T11 times the kernels on both. If the smoke's parts grow again, the cure is kernels
+    specialised by the body's slice and band counts (an `override` constant, which R01's
+    `createCompute` does not yet take).
+  - _The ray left over the bound_ (1.072, above). R08.T13's client-beam check holds the tables in
+    radiance; a row mapping by h\* ÷ H on a giant, if it ever is, is a contract change.
+  - _The composite's sliced read has no twin of its own_: its transmittance to space (the disc's)
+    is checked only finite and in range in the smoke, its lookup the kernels' form from the camera.
+    R08.T13's client-beam check sees it.
+  - _T6.e's lookups that start on R_α_ (T6.e's deferred findings) are the kernels' too, so the
+    readbacks, which agree with the twin, do not see them; R08.T13's limb at 10 H and Saturn's case
+    measure them against the tracer. So do the layer edges at the camera's s in the sky view (no
+    medium with edges on a body of several bands is built).
+  - _The spike's Earth has no gravity_ until R08.T10.a gives each body its `BodyGravity`: its sky
+    keeps s ≡ 1, which moves Earth's air by under 0.3% at the equator (T6.e's figures).
+  - _`--captures` meets part 1's watchdog_ under load: part 1's groups took about 95 s and the
+    captures after them ran past 180 s at a load of 15–20, so no frame was saved. The captures
+    could run in a part of their own, or under a longer watchdog of their own.
+  - _The UX guide's `APPROXIMATE` row_ (`docs/frontend/ux-guidelines.md`) still names the strongly
+    flattened body, which no body is now drawn as; keeping it as conditional wording or dropping it
+    is the sign-off agent's, through "main".
+  - _`SkyViewTable.sphere`_ keeps the sphere's scalar reading nested, not as top-level fields, as
+    ruling 2's "a scalar reading for them if that keeps callers simple" allows; "main" may settle
+    it with R11's re-validation.
 
 - **The per-view tables' range at twilight and by moonlight** (found 2026-10-10,
   `decision-r08-t6b-floor.md` §6; scheduled in T7; built and recorded by R08.T7, "Deviations in T7,

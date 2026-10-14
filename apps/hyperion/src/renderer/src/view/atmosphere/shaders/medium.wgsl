@@ -68,7 +68,8 @@ fn pressureBarAt(h : f32) -> f32 {
 // The medium at a height above the ground: its scattering, extinction and absorption, m^-1, the
 // last the terms' own absorption coefficients summed (R08.T6.d), its absorbers' columns per metre
 // (R08.T6.c), which an absorber adds in place of an extinction, and the same times the pressure
-// ratio there (R08.T4.d).
+// ratio there (R08.T4.d), each times the build's factor (R08.T6.f). The per-planet kernels read
+// it; the per-frame kernels read `source.wgsl`'s `sampleMediumAt`, which takes no factor.
 fn mediumAtHeight(h : f32) -> MediumSample {
   var scattering = vec3f(0.0);
   var extinction = vec3f(0.0);
@@ -89,7 +90,35 @@ fn mediumAtHeight(h : f32) -> MediumSample {
     }
   }
   let pressureColumns = pressureColumnsOf(columns, lineSlots(), pressureBarAt(h));
-  return MediumSample(scattering, extinction, absorption, columns, pressureColumns, lobe);
+  // A latitude band's frame takes every coefficient and absorber column per metre over s_b
+  // (R08.T6.f; `tablesCpu.ts`'s scaledTerms); the pressure ratio, a ratio, and the lobes' shares stay.
+  let k = buildFactor();
+  let none = AbsorberColumns(0.0, vec4f(0.0));
+  return MediumSample(
+    scattering * k,
+    extinction * k,
+    absorption * k,
+    addColumns(none, columns, k),
+    addColumns(none, pressureColumns, k),
+    lobe * k,
+  );
+}
+
+// The factor a per-planet build's coefficients take (`Medium.build.x`): 1 ÷ s_b in a latitude
+// band's frame (plan R08, R08.T6.f), 1 elsewhere.
+fn buildFactor() -> f32 {
+  return medium.build.x;
+}
+
+// The transmittance tables' layer a per-planet build writes or reads (`Medium.build.y`).
+fn buildTransmittanceLayer() -> u32 {
+  return u32(medium.build.y);
+}
+
+// The multiple-scattering table's layer a build writes (`Medium.build.z`): band × light slots +
+// the light slot `curveSlot` (R08.T6.f).
+fn buildMultiScatteringLayer() -> u32 {
+  return u32(medium.build.z);
 }
 
 // The medium's line slots, the bitmask of its absorber slots whose curves have pressure rows

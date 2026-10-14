@@ -1,14 +1,18 @@
 // The atmosphere's scattering source (plan R05, R05.T12.c, Design note 16): the medium at a sample,
 // and the single- and multiple-scattering source there, read from the per-planet tables; the steps
 // of the per-frame marches (R05.T12.e) are `common.wgsl`'s since plan R08's R08.T6.d. Prepended,
-// after `common.wgsl`, `medium.wgsl` and `view.wgsl`, to the sky-view, aerial-perspective and
-// ray-march kernels, each of which also declares the phase tables as
-// `var phaseTables : texture_2d_array<f32>;`, and the absorber-column table and the lights' curves
-// of growth as `var absorberColumns : texture_2d<f32>;` and `var absorberCurves : texture_2d<f32>;`
-// (R08.T6.c), and the pressure-weighted columns as
-// `var absorberPressureColumns : texture_2d<f32>;` and
-// `var lastAbsorberPressureColumn : texture_2d<f32>;` (R08.T4.d), and the forward-lobe tables as
-// `var lobeTables : texture_2d_array<f32>;` (R08.T7), in group 0; like `medium.wgsl`, it reads the
+// after `common.wgsl`, `medium.wgsl`, `view.wgsl` and `oblate.wgsl`, to the sky-view,
+// aerial-perspective and ray-march kernels, each of which also declares the phase tables as
+// `var phaseTables : texture_2d_array<f32>;`, the transmittance table, the absorber-column table
+// and the lights' curves of growth as `var transmittance : texture_2d_array<f32>;`,
+// `var absorberColumns : texture_2d_array<f32>;` and `var absorberCurves : texture_2d<f32>;`
+// (R08.T6.c), the pressure-weighted columns as
+// `var absorberPressureColumns : texture_2d_array<f32>;` and
+// `var lastAbsorberPressureColumn : texture_2d_array<f32>;` (R08.T4.d), each a 2D array of one
+// layer a κ slice (R08.T6.f), the multiple-scattering table as
+// `var multiScattering : texture_2d_array<f32>;`, one layer a band and light slot (R08.T6.f), the
+// forward-lobe tables as `var lobeTables : texture_2d_array<f32>;` (R08.T7) and the body's table as
+// `var oblateBody : texture_2d<f32>;` (R08.T6.f), in group 0; like `medium.wgsl`, it reads the
 // kernel's `medium`, `terms` and tables in place, so the composite does not take it.
 //
 // The source is ported from Bevy 0.19.1's functions.wgsl (`sample_local_inscattering`, MIT; the
@@ -25,7 +29,11 @@
 // sources in one march, each weighted by its illuminance times the frame's scale, each with its
 // own phase, ground shadow, transmittance and multiple-scattering layer; and each light slot's
 // share of the in-scattered light is carried along the view's own path under that slot's absorber
-// curves, a path a slot (`ViewMarch`), slot 0's throughput the views' mean transmittance.
+// curves, a path a slot (`ViewMarch`), slot 0's throughput the views' mean transmittance. Changes
+// (plan R08, R08.T6.f, Design note 17): the medium is read at the sample's gravity-scaled height
+// h* = s h, s at the sample's own latitude; each source's transmittance through the sliced lookup
+// from the sample along the source (`oblate.wgsl`), its stored optical depth over s; the multiple
+// scattering from the latitude bands about the sample's s; the ground's shadow the lookup's.
 
 // The angle a ray scatters the sun's light through towards the eye: its cosine, which the closed
 // forms take; u = sqrt(theta / pi), the phase tables' coordinate (`medium.ts`'s `PhaseTable`); and
@@ -213,27 +221,6 @@ fn lobeOrdersOf(local : SampleMedium, angle : ScatteringAngle, depth : vec3f) ->
   return orders;
 }
 
-// A source's transmittance from a height above the datum along a zenith cosine to the top, read
-// from the table on the tables' own sphere, of ground radius `tableBottomM` and the medium's
-// height: its stored optical depth and absorber columns, with light slot `slot`'s curves of growth,
-// exponentiated in f32 (`transmittanceThroughTables`, R08.T6.c; each source's own slot since
-// R08.T7). Each kernel that takes this declares `absorberColumns`, `absorberCurves`,
-// `absorberPressureColumns` and `lastAbsorberPressureColumn` (R08.T4.d).
-fn tableTransmittance(
-  table : texture_2d<f32>,
-  tableBottomM : f32,
-  heightM : f32,
-  mu : f32,
-  slot : u32,
-) -> vec3f {
-  let h = clamp(heightM, 0.0, medium.topHeightM);
-  let unit = transmittanceUnitAt(tableBottomM, medium.topHeightM, h, mu);
-  return transmittanceThroughTables(
-    table, absorberColumns, absorberPressureColumns, lastAbsorberPressureColumn, absorberCurves,
-    absorberCount(), slot, lineSlots(), unit
-  );
-}
-
 // A march's absorber path one step `dtM` on, through the sample `local` (`absorberStep`): the
 // view's own path under light slot `slot`'s curves, since what it carries is that light's
 // (R08.T6.c; a path a slot since R08.T7), its lines at the path's pressure (R08.T4.d).
@@ -244,36 +231,80 @@ fn viewAbsorberStep(path : AbsorberPath, local : SampleMedium, dtM : f32, slot :
   );
 }
 
-// The multiple-scattering source per unit illuminance at a height, for the source's zenith cosine,
-// from its light slot's layer (R08.T7), or the one layer of a medium with no absorber.
-fn tableMultiScattering(
-  table : texture_2d_array<f32>,
-  heightM : f32,
-  muSun : f32,
-  slot : u32,
-) -> vec3f {
-  let unit = multiScatteringUnitAt(medium.topHeightM, max(heightM, 0.0), muSun);
-  return tableAtUnitLayer(table, slot, unit).rgb;
+// One source's light at a sample through the sliced lookup (plan R08, Design note 17; R08.T6.f):
+// whether the ground leaves it lit, its transmittance to the sample under light slot `slot`'s
+// curves of growth, exponentiated in f32 (R08.T6.c), and the stored optical depth along it, the
+// forward lobes' read (R08.T7), each divided by s.
+struct SourceLight {
+  lit : f32,
+  toSun : vec3f,
+  depth : vec3f,
 }
 
-// One source's scattering source at a point per unit of its illuminance, per unit length: single
-// scattering of its light, shadowed by the ground, plus multiple scattering (Hillaire 2020,
-// equations 3 and 11). `local` is the medium at the point's height (`sampleMediumAt`), `phased`
-// its scattering towards the eye for the source (`phasedScatteringOf`).
-fn sourceAt(
-  transmittance : texture_2d<f32>,
-  multiScattering : texture_2d_array<f32>,
-  tableBottomM : f32,
+// The light of the source along the unit body-fixed `d` at the lookup's start (`oblate.wgsl`'s
+// `slicedRayOf` and `slicedStoredOf` through the kernel's slices; `tablesCpu.ts`'s
+// OblateReader.sunInto). Each kernel that takes this declares `oblateBody`, `transmittance`,
+// `absorberColumns`, `absorberPressureColumns`, `lastAbsorberPressureColumn` (2D arrays, one layer
+// a slice) and `absorberCurves`.
+fn sourceLightAt(body : OblateBody, start : LookupStart, d : vec3f, slot : u32) -> SourceLight {
+  let ray = slicedRayOf(body, oblateBody, start, d);
+  let count = absorberCount();
+  let stored = slicedStoredOf(
+    ray, body, oblateBody, transmittance, absorberColumns, absorberPressureColumns,
+    lastAbsorberPressureColumn, count
+  );
+  let absorbed = absorberDepth(
+    absorberCurves, count, slot, lineSlots(), stored.columns, stored.pressureColumns
+  );
+  return SourceLight(select(1.0, 0.0, ray.shadowed), exp(-(stored.depth + absorbed)), stored.depth);
+}
+
+// The lookup's start at a sample of a per-frame march (`oblate.wgsl`'s LookupStart): the sample's
+// body-fixed place and its ground quadric, the march's own height and unit normal there
+// (body-fixed), the unit geodetic normal of the place's datum point, whose z is the sine of its
+// latitude, s there (`gravityRatio`), h* = s h, and, on a body of several bands, the local scale
+// height at h* from the medium there, `local`.
+fn sampleStartOf(
+  body : OblateBody,
+  place : vec3f,
+  quadricM2 : f32,
   heightM : f32,
+  normal : vec3f,
+  latitudeNormal : vec3f,
+  gravityRatio : f32,
+  local : SampleMedium,
+) -> LookupStart {
+  let z = gravityRatio * heightM;
+  // The local scale height places the fit's second point, which only a body of several bands
+  // takes (`slicedRayOf`): one band reads the start's own sphere, and one slice and band the slice.
+  var scaleM = 0.0;
+  if (oblateBandCount(body) > 1u) {
+    scaleM = localScaleHeightOf(body, oblateBody, transmittance, z, local.extinction.g);
+  }
+  return LookupStart(
+    place, oblateScaled(body, place), quadricM2, heightM, normal, latitudeNormal.z,
+    length(latitudeNormal.xy), gravityRatio, z, scaleM
+  );
+}
+
+// One source's scattering source at a sample per unit of its illuminance, per unit length: single
+// scattering of its light (`light`), shadowed by the ground, plus multiple scattering from the
+// bands about the sample's s at its h* (Hillaire 2020, equations 3 and 11; R08.T6.f). `local` is the
+// medium at the sample's h* (`sampleMediumAt`), `phased` its scattering towards the eye for the
+// source (`phasedScatteringOf`).
+fn sourceAt(
+  body : OblateBody,
+  start : LookupStart,
+  light : SourceLight,
   muSun : f32,
   slot : u32,
   local : SampleMedium,
   phased : vec3f,
 ) -> vec3f {
-  let lit = select(1.0, 0.0, groundHitFromHeight(tableBottomM, max(heightM, 0.0), muSun));
-  let toSun = tableTransmittance(transmittance, tableBottomM, heightM, muSun, slot);
-  let single = lit * toSun * phased;
-  let multiple = tableMultiScattering(multiScattering, heightM, muSun, slot);
+  let single = light.lit * light.toSun * phased;
+  let multiple = bandMultiScatteringAt(
+    body, oblateBody, multiScattering, start.scaledHeightM, start.gravityRatio, muSun, slot
+  );
   return single + multiple * local.scattering;
 }
 
@@ -293,12 +324,15 @@ fn sourceAngles(
 
 // The view's sources at a sample, summed by light slot: each source's `sourceAt` times its weight,
 // added into its slot's share, so that each share is carried along the view's path under its own
-// curves (`viewMarchStep`). `dirs` are the sources' directions and `up` the normal the sample's
-// heights and zenith cosines are taken against, both in one frame.
+// curves (`viewMarchStep`). `dirs` are the sources' directions and `up` the unit normal the
+// sample's zenith cosines are taken against, both in the march's frame; `bodyDirs` the sources'
+// directions body-fixed, which the lookups take from the sample's start (R08.T6.f).
 fn viewSourcesAt(
-  heightM : f32,
+  body : OblateBody,
+  start : LookupStart,
   up : vec3f,
   dirs : array<vec3f, MAX_SKY_SOURCES>,
+  bodyDirs : array<vec3f, MAX_SKY_SOURCES>,
   angles : array<ScatteringAngle, MAX_SKY_SOURCES>,
   local : SampleMedium,
 ) -> array<vec3f, MAX_SKY_LIGHT_SLOTS> {
@@ -309,16 +343,13 @@ fn viewSourcesAt(
     let source = view.sources[k];
     let slot = skySlotOf(source);
     let muSun = dot(dirs[k], up);
+    let light = sourceLightAt(body, start, bodyDirs[k], slot);
     var phased = phasedScatteringOf(local, angles[k]);
     if (lobes) {
       // The forward lobes' higher orders, at the stored optical depth along the source (R08.T7).
-      let h = clamp(heightM, 0.0, medium.topHeightM);
-      let unit = transmittanceUnitAt(view.tables.x, medium.topHeightM, h, muSun);
-      phased += lobeOrdersOf(local, angles[k], tableAtUnit(transmittance, unit).rgb);
+      phased += lobeOrdersOf(local, angles[k], light.depth);
     }
-    let one = sourceAt(
-      transmittance, multiScattering, view.tables.x, heightM, muSun, slot, local, phased
-    );
+    let one = sourceAt(body, start, light, muSun, slot, local, phased);
     shares[slot] += source.weight.rgb * one;
   }
   return shares;

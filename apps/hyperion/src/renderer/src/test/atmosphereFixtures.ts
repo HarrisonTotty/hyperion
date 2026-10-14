@@ -3,9 +3,15 @@
  * (plan R08, Design notes 5 and 8): R05's Earth with its ozone as an absorber reduced to the linear
  * regime, a medium of four absorbers, one a molecule pair, under real curves, and a Venus-class
  * medium whose slant paths a stored transmittance could not hold. The coefficients of the last two
- * are a test's, not a world's.
+ * are a test's, not a world's. Since R08.T6.f also the oblate bodies R08.T6.e's twin tests and the
+ * smoke's Saturn-class figure take: WGS 84's and Saturn's level spheroids, their gravity, and the
+ * Saturn-class medium.
  */
 
+import {
+  ATOMIC_MASS_CONSTANT_KG,
+  GRAVITATIONAL_CONSTANT_M3_PER_KG_S2,
+} from "../lib/system/constants";
 import type { Rgb } from "../view/photometry/toneCurve";
 import {
   type AbsorberAmount,
@@ -28,6 +34,7 @@ import {
   dryAdiabatExponent,
   gasProperties,
   hydrostaticColumn,
+  meanMolarMassGPerMol,
   type AtmosphereColumn,
 } from "../view/atmosphere/column";
 import {
@@ -45,9 +52,11 @@ import {
   type MediumTerm,
   tabulatedDensity,
 } from "../view/atmosphere/medium";
-import { molecularTerm } from "../view/atmosphere/rayleigh";
+import { tableRadiusM } from "../view/atmosphere/hillaire";
+import { bodyGravity, type BodyGravity, type LevelSpheroid } from "../view/atmosphere/oblate";
+import { BOLTZMANN_J_PER_K, molecularTerm } from "../view/atmosphere/rayleigh";
 import { type BakeSpectrum, bakeSpectrumOf } from "../view/atmosphere/spectralColour";
-import type { AbsorberCurveSlots } from "../view/atmosphere/tables";
+import type { AbsorberCurveSlots, AtmosphereBody } from "../view/atmosphere/tables";
 import { toyPart, toySidecar } from "./kDistributionToys";
 
 /** One Dobson unit, molecules m⁻², `earth.ts`'s (WMO/UNEP 2018, _Twenty Questions_, glossary). */
@@ -464,5 +473,128 @@ export function venusClassMedium(): MediumOnRadius {
         },
       ],
     },
+  };
+}
+
+// --- Oblate bodies (plan R08, Design note 17; R08.T6.e and R08.T6.f) -----------------------------
+
+/** WGS 84 (NIMA TR8350.2, Table 3.1): a, 1 ÷ f, GM with the atmosphere, and ω. */
+export const WGS84_SPHEROID: LevelSpheroid = {
+  equatorialRadiusM: 6_378_137,
+  polarRadiusM: 6_378_137 * (1 - 1 / 298.257_223_563),
+  gmM3S2: 3.986_004_418e14,
+  angularVelocityRadS: 7.292_115e-5,
+};
+
+/**
+ * Saturn at 1 bar, as R08.T3.d's tests give it: a and c of Archinal et al. 2018 (Celest. Mech.
+ * Dyn. Astron. 130, 22), GM of Jacobson et al. 2006 (AJ 132, 2520) to five figures, as the NSSDCA
+ * Saturn fact sheet prints it, and the fact sheet's 10.656 h (System III's 810.7939024° d⁻¹ is
+ * 10.656 222 h, Archinal et al. 2018; the difference moves s by about 10⁻⁵, GM's five figures by
+ * about 10⁻⁶). Voyager-era values (System III is not the deep interior's period), fixed for the
+ * tests by the plan.
+ */
+export const SATURN_SPHEROID: LevelSpheroid = {
+  equatorialRadiusM: 60_268e3,
+  polarRadiusM: 54_364e3,
+  gmM3S2: 3.793_1e16,
+  angularVelocityRadS: (2 * Math.PI) / (10.656 * 3_600),
+};
+
+/**
+ * A body's gravity by R08.T3.d's `bodyGravity`, from a level spheroid with no figure law (read as
+ * `rotational`), on R05's `tableRadiusM` of its figure.
+ */
+export function gravityOfSpheroid(body: LevelSpheroid): BodyGravity {
+  return bodyGravity(
+    {
+      figure: body,
+      massKg: body.gmM3S2 / GRAVITATIONAL_CONSTANT_M3_PER_KG_S2,
+      angularVelocityRadS: body.angularVelocityRadS,
+      bulkGravityMS2: body.gmM3S2 / body.equatorialRadiusM ** 2,
+      figureLaw: null,
+    },
+    tableRadiusM(body),
+  );
+}
+
+/** Earth on WGS 84 with its normal gravity: one slice and one band, s within ±0.27% of 1. */
+export function earthBody(): AtmosphereBody {
+  return { figure: WGS84_SPHEROID, gravity: gravityOfSpheroid(WGS84_SPHEROID) };
+}
+
+/** Saturn's figure with its normal gravity: five slices and four bands. */
+export function saturnBody(): AtmosphereBody {
+  return { figure: SATURN_SPHEROID, gravity: gravityOfSpheroid(SATURN_SPHEROID) };
+}
+
+/**
+ * A Saturn-class air by volume, the NSSDCA Saturn fact sheet's 96.3% H₂, 3.25% He and 4,500 ppm
+ * CH₄ (Voyager-era), as `column.test.ts` takes it.
+ */
+export const SATURN_FRACTIONS = [
+  { species: "H2", moleFraction: 0.963 },
+  { species: "He", moleFraction: 0.0325 },
+  { species: "CH4", moleFraction: 0.0045 },
+] as const;
+
+/** 134 K at 1 bar, the NSSDCA fact sheet's. */
+export const SATURN_TEMPERATURE_K = 134;
+
+/**
+ * The Saturn-class air's isothermal scale height at Saturn's g_ref, k T ÷ (μ m_u g_ref), m: 49.7 km
+ * (the SI's exact k and CODATA 2022's m_u, the client's shared constants).
+ */
+export function saturnScaleHeightM(): number {
+  const molarMass = meanMolarMassGPerMol(
+    SATURN_FRACTIONS.map(({ species, moleFraction }) => ({
+      properties: gasProperties(species),
+      moleFraction,
+    })),
+  );
+  const gravity = gravityOfSpheroid(SATURN_SPHEROID);
+  return (
+    (BOLTZMANN_J_PER_K * SATURN_TEMPERATURE_K) /
+    (molarMass * ATOMIC_MASS_CONSTANT_KG * gravity.referenceGravityMS2)
+  );
+}
+
+/**
+ * A Saturn-class medium after `decision-r08-spheroid.md` §2's model, which took μ 2.25 g mol⁻¹ and
+ * the column's form; here the NSSDCA air's own μ and a plain exponential (R08.T6.e's tests, the
+ * smoke's Saturn-class figure since R08.T6.f). It is the H₂–He air's molecular term (R08.T3.c) at
+ * its 1-bar number density, its density e^(−h\* ÷ H) at the isothermal scale height, smooth, so
+ * that a brute-force march converges spectrally, and its top 16 H up, at about 10⁻⁷ of the datum's
+ * density. Vertical optical depth 0.142, 0.285 and 0.728 in the three channels. Methane's
+ * absorption is not drawn: the medium has no absorber term.
+ */
+export function saturnClassMedium(): AtmosphereMedium {
+  const scaleHeightM = saturnScaleHeightM();
+  const gravity = gravityOfSpheroid(SATURN_SPHEROID);
+  const molarMass = meanMolarMassGPerMol(
+    SATURN_FRACTIONS.map(({ species, moleFraction }) => ({
+      properties: gasProperties(species),
+      moleFraction,
+    })),
+  );
+  return {
+    name: "saturn-class",
+    topHeightM: 16 * scaleHeightM,
+    groundAlbedo: [0.3, 0.3, 0.3],
+    terms: [
+      {
+        ...molecularTerm(
+          hydrostaticColumn({
+            surfacePa: 1e5,
+            temperature: { kind: "isothermal", temperatureK: SATURN_TEMPERATURE_K },
+            meanMolarMassGPerMol: molarMass,
+            referenceGravityMS2: gravity.referenceGravityMS2,
+            referenceRadiusM: tableRadiusM(SATURN_SPHEROID),
+          }),
+          SATURN_FRACTIONS,
+        ).term,
+        density: { kind: "exponential", scaleHeightM },
+      },
+    ],
   };
 }

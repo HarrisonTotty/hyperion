@@ -1,10 +1,15 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import type { Vec3 } from "../../geometry/vec3";
-import { GRAVITATIONAL_CONSTANT_M3_PER_KG_S2 } from "../../lib/system/constants";
+import {
+  gravityOfSpheroid,
+  SATURN_SPHEROID,
+  saturnClassMedium,
+  saturnScaleHeightM,
+  WGS84_SPHEROID,
+} from "../../test/atmosphereFixtures";
 import { quaternion, quaternionFromRows } from "../camera/quaternion";
 import type { Rgb } from "../photometry/toneCurve";
-import { gasProperties, hydrostaticColumn, meanMolarMassGPerMol } from "./column";
 import { EARTH_REFERENCE, EARTH_REFERENCE_CURVES, referenceSunIlluminanceLx } from "./earth";
 import {
   type AtmosphereCamera,
@@ -15,15 +20,8 @@ import {
   tableRadiusM,
 } from "./hillaire";
 import type { AtmosphereMedium } from "./medium";
-import {
-  bodyGravity,
-  type BodyGravity,
-  gravityRatio,
-  type LevelSpheroid,
-  oblateSlicing,
-} from "./oblate";
+import { gravityRatio, type LevelSpheroid, oblateSlicing } from "./oblate";
 import { transmittanceUvToRMu, unitFromTexelUv } from "./opticalDepth";
-import { molecularTerm } from "./rayleigh";
 import { type AbsorberCurveSlots, multiScatteringLayersOf, type TableSize } from "./tables";
 import {
   aerialPerspectiveTwin,
@@ -64,98 +62,24 @@ const CHANNELS = [0, 1, 2] as const;
 const DEG = Math.PI / 180;
 
 /** A body's gravity by R08.T3.d's `bodyGravity`, from a level spheroid with no figure law. */
-function gravityOf(body: LevelSpheroid): BodyGravity {
-  return bodyGravity(
-    {
-      figure: body,
-      massKg: body.gmM3S2 / GRAVITATIONAL_CONSTANT_M3_PER_KG_S2,
-      angularVelocityRadS: body.angularVelocityRadS,
-      bulkGravityMS2: body.gmM3S2 / body.equatorialRadiusM ** 2,
-      figureLaw: null,
-    },
-    tableRadiusM(body),
-  );
-}
+const gravityOf = gravityOfSpheroid;
 
 /** WGS 84 (NIMA TR8350.2, Table 3.1): a, 1 ÷ f, GM with the atmosphere, and ω. */
-const WGS84: LevelSpheroid = {
-  equatorialRadiusM: 6_378_137,
-  polarRadiusM: 6_378_137 * (1 - 1 / 298.257_223_563),
-  gmM3S2: 3.986_004_418e14,
-  angularVelocityRadS: 7.292_115e-5,
-};
+const WGS84: LevelSpheroid = WGS84_SPHEROID;
 
-/**
- * Saturn at 1 bar, as R08.T3.d's tests give it: a and c of Archinal et al. 2018 (Celest. Mech.
- * Dyn. Astron. 130, 22), GM of Jacobson et al. 2006 (AJ 132, 2520) to five figures, as the NSSDCA
- * Saturn fact sheet prints it, and the fact sheet's 10.656 h (System III's 810.7939024° d⁻¹ is
- * 10.656 222 h, Archinal et al. 2018; the difference moves s by about 10⁻⁶).
- */
-const SATURN: LevelSpheroid = {
-  equatorialRadiusM: 60_268e3,
-  polarRadiusM: 54_364e3,
-  gmM3S2: 3.793_1e16,
-  angularVelocityRadS: (2 * Math.PI) / (10.656 * 3_600),
-};
+/** Saturn at 1 bar (`atmosphereFixtures.ts`'s, R08.T3.d's tests'). */
+const SATURN: LevelSpheroid = SATURN_SPHEROID;
 const SATURN_BODY: TwinBody = { figure: SATURN, gravity: gravityOf(SATURN) };
 const SATURN_R_REF = tableRadiusM(SATURN);
 
-/**
- * A Saturn-class air by volume, the NSSDCA Saturn fact sheet's 96.3% H₂, 3.25% He and 4,500 ppm
- * CH₄, as `column.test.ts` takes it.
- */
-const SATURN_FRACTIONS = [
-  { species: "H2", moleFraction: 0.963 },
-  { species: "He", moleFraction: 0.0325 },
-  { species: "CH4", moleFraction: 0.0045 },
-] as const;
-
-/** The air's mean molar mass, g mol⁻¹. */
-const SATURN_MOLAR_MASS = meanMolarMassGPerMol(
-  SATURN_FRACTIONS.map(({ species, moleFraction }) => ({
-    properties: gasProperties(species),
-    moleFraction,
-  })),
-);
-
-/** 134 K at 1 bar, the NSSDCA fact sheet's. */
-const SATURN_TEMPERATURE_K = 134;
+/** The Saturn-class air's isothermal scale height at g_ref, m: 49.7 km. */
+const SATURN_H = saturnScaleHeightM();
 
 /**
- * Its isothermal scale height at g_ref, k T ÷ (μ m_u g_ref), m: 49.7 km (CODATA 2018's k and m_u).
+ * The Saturn-class medium (`atmosphereFixtures.ts`'s `saturnClassMedium`): the H₂–He air's
+ * molecular term on e^(−h\* ÷ H), its top 16 H up. Vertical optical depth 0.142, 0.285 and 0.728.
  */
-const SATURN_H =
-  (1.380_649e-23 * SATURN_TEMPERATURE_K) /
-  (SATURN_MOLAR_MASS * 1.660_539_066_6e-27 * SATURN_BODY.gravity.referenceGravityMS2);
-
-/**
- * A Saturn-class medium after `decision-r08-spheroid.md` §2's model, which took μ 2.25 g mol⁻¹ and
- * the column's form; here the NSSDCA air's own μ and a plain exponential. It is the H₂–He air's
- * molecular term (R08.T3.c) at its 1-bar number density, its density e^(−h\* ÷ H) at the isothermal
- * scale height, smooth, so that the brute-force march converges spectrally, and its top 16 H up, at
- * about 10⁻⁷ of the datum's density. Vertical optical depth 0.142, 0.285 and 0.728 in the three
- * channels.
- */
-const SATURN_MEDIUM: AtmosphereMedium = {
-  name: "saturn-class",
-  topHeightM: 16 * SATURN_H,
-  groundAlbedo: [0.3, 0.3, 0.3],
-  terms: [
-    {
-      ...molecularTerm(
-        hydrostaticColumn({
-          surfacePa: 1e5,
-          temperature: { kind: "isothermal", temperatureK: SATURN_TEMPERATURE_K },
-          meanMolarMassGPerMol: SATURN_MOLAR_MASS,
-          referenceGravityMS2: SATURN_BODY.gravity.referenceGravityMS2,
-          referenceRadiusM: SATURN_R_REF,
-        }),
-        SATURN_FRACTIONS,
-      ).term,
-      density: { kind: "exponential", scaleHeightM: SATURN_H },
-    },
-  ],
-};
+const SATURN_MEDIUM: AtmosphereMedium = saturnClassMedium();
 
 /** The body-fixed point at geodetic latitude φ, longitude 0 and height h (TR8350.2 eq. 4-14). */
 function pointAt(figure: SpheroidFigure, latitudeRad: number, heightM: number): Vec3 {
@@ -503,12 +427,12 @@ describe("the sliced lookup on a Saturn-class figure (decision-r08-spheroid)", (
   });
 
   it("holds every ray of the set within max(0.01, 2 × 10⁻³ τ) on the lookup's own sphere and slices, each slice integrated exactly", () => {
-    // 598 rays clear the ground of the set's 700. Recorded: the worst is 0.905 of the bound, a ray
-    // that dips by over half a scale height, fitted at its lowest point.
+    // 598 rays clear the ground of the set's 700. Recorded: the worst is 0.782 of the bound (30°
+    // north from 1 H at μ −0.035), the slices interpolated linearly in √κ (R08.T6.f; 0.905 in ln κ).
     expect(results.length).toBe(598);
     const over = results.filter((r) => !(r.fitted <= 1)).map((r) => r.ray.name);
     expect(over).toEqual([]);
-    expect(Math.max(...results.map((r) => r.fitted))).toBeLessThan(0.95);
+    expect(Math.max(...results.map((r) => r.fitted))).toBeLessThan(0.85);
   });
 
   it("misses the bound at the sample's own s and R_α along the meridian, which the fit takes up", () => {
@@ -524,13 +448,18 @@ describe("the sliced lookup on a Saturn-class figure (decision-r08-spheroid)", (
     expect(Math.max(...parallel.map((r) => r.fitted))).toBeLessThan(1);
   });
 
-  it("pins the twin's own read through the slices' 256 × 64 tables, which misses the bound on 5 rays", () => {
-    // Recorded and deferred (plan R08's Risks, "Deferred findings", R08.T6.e): the tables' bilinear
-    // read adds up to a third of the bound where 64 rows span 16 scale heights, and 5 of the 598
-    // rays pass over it, at most 1.244 times, all dipping deeply from 3 H.
+  it("pins the twin's own read through the slices' 256 × 64 tables, which misses the bound on 1 ray", () => {
+    // Recorded and pinned (plan R08's Risks, "Deviations in T6.f, as built"): the tables' bilinear
+    // read adds up to a third of the bound where 64 rows span 16 scale heights. With the slices
+    // linear in √κ (R08.T6.f; 1.244 and 5 rays in ln κ) one of the 598 rays passes over it, 1.072
+    // times: 30° north from 3 H at μ −0.035, which dips deeply (τ 0.925, 1.857 and 4.747). More rows
+    // do not cure it in order: 72 put it at 1.116 with a second ray over, 80 at 0.906, 88 at 1.031,
+    // 96 at 0.815 and 128 at 0.876; 512 columns at 1.023.
     const worst = Math.max(...results.map((r) => r.throughTables));
-    expect(worst).toBeLessThan(1.3);
-    expect(results.filter((r) => r.throughTables > 1).length).toBeLessThanOrEqual(5);
+    expect(worst).toBeLessThan(1.1);
+    expect(results.filter((r) => r.throughTables > 1).map((r) => r.ray.name)).toEqual([
+      "30° north, h* 3 H, μ -0.035",
+    ]);
   });
 
   it("holds κ* within 0.2 of the slices' range in ln κ, the steep rays along the meridian furthest", () => {
@@ -655,28 +584,37 @@ describe("interpolating between slices and between bands (R08.T6.e)", () => {
     const planet = saturnSlicesPlanet();
     let worst = 0;
     for (let k = 0; k + 1 < planet.kappa.length; k += 1) {
-      // Halfway in ln κ, where linear interpolation is worst.
-      const kappa = Math.sqrt(
-        (planet.kappa[k] ?? Number.NaN) * (planet.kappa[k + 1] ?? Number.NaN),
-      );
-      const radiusM = kappa * planet.referenceRadiusM;
-      for (const scaleHeights of [0, 0.3, 1, 3]) {
-        const heightM = scaleHeights * SATURN_H;
-        const read = slicedStoredOpticalDepth(planet, kappa, heightM, 0);
-        const truth = kernelOpticalDepth(SATURN_MEDIUM, radiusM, radiusM + heightM, 0, 8_192);
-        const neighbours = [k, k + 1].map((j) => {
-          const r = (planet.kappa[j] ?? Number.NaN) * planet.referenceRadiusM;
-          return kernelOpticalDepth(SATURN_MEDIUM, r, r + heightM, 0, 8_192);
-        });
-        for (const c of CHANNELS) {
-          const interpolated =
-            0.5 * ((neighbours[0]?.[c] ?? Number.NaN) + (neighbours[1]?.[c] ?? Number.NaN));
-          worst = Math.max(worst, Math.abs(interpolated / truth[c] - 1));
-          expect(Math.abs(read[c] / interpolated - 1)).toBeLessThan(2e-3);
+      const lower = planet.kappa[k] ?? Number.NaN;
+      const upper = planet.kappa[k + 1] ?? Number.NaN;
+      // Halfway in ln κ and halfway in √κ.
+      for (const kappa of [
+        Math.sqrt(lower * upper),
+        ((Math.sqrt(lower) + Math.sqrt(upper)) / 2) ** 2,
+      ]) {
+        // The slices' weight, linear in √κ (R08.T6.f).
+        const weight =
+          (Math.sqrt(kappa) - Math.sqrt(lower)) / (Math.sqrt(upper) - Math.sqrt(lower));
+        const radiusM = kappa * planet.referenceRadiusM;
+        for (const scaleHeights of [0, 0.3, 1, 3]) {
+          const heightM = scaleHeights * SATURN_H;
+          const read = slicedStoredOpticalDepth(planet, kappa, heightM, 0);
+          const truth = kernelOpticalDepth(SATURN_MEDIUM, radiusM, radiusM + heightM, 0, 8_192);
+          const neighbours = [k, k + 1].map((j) => {
+            const r = (planet.kappa[j] ?? Number.NaN) * planet.referenceRadiusM;
+            return kernelOpticalDepth(SATURN_MEDIUM, r, r + heightM, 0, 8_192);
+          });
+          for (const c of CHANNELS) {
+            const interpolated =
+              (1 - weight) * (neighbours[0]?.[c] ?? Number.NaN) +
+              weight * (neighbours[1]?.[c] ?? Number.NaN);
+            worst = Math.max(worst, Math.abs(interpolated / truth[c] - 1));
+            expect(Math.abs(read[c] / interpolated - 1)).toBeLessThan(2e-3);
+          }
         }
       }
     }
-    // Recorded: 6.84 × 10⁻⁴, the √κ law of Chapman's grazing column read linearly in ln κ.
+    // Recorded: the slices linear in √κ (R08.T6.f), exact for Chapman's grazing √R; 6.84 × 10⁻⁴ in
+    // ln κ (R08.T6.e).
     expect(worst).toBeLessThan(1e-3);
   });
 
@@ -967,6 +905,46 @@ describe("the slices' and bands' texel mapping (Design note 19)", () => {
         (SATURN.equatorialRadiusM ** 2 / SATURN.polarRadiusM) * (1 + 1e-12),
       );
     }
+  });
+
+  it("stands the sky view's samples at the camera's height in its shell from above the air (R08.T6.f)", () => {
+    const p = planet;
+    if (p === undefined) {
+      throw new Error("built before the tests");
+    }
+    // From 1,000 km and from 1,500 km over the equator, both above the air's top (about 916 km
+    // there), the sky view holds the camera 1 m inside its shell on the same vertical: every
+    // sample, and every lookup's start, at the same body-fixed place, so the tables agree.
+    const viewFrom = (heightM: number): ReturnType<typeof twinView> =>
+      twinView(
+        {
+          positionM: pointAt(SATURN, 0, heightM),
+          orientation: quaternion(0, Math.SQRT1_2, Math.SQRT1_2, 0),
+          fovXRad: Math.PI / 2,
+          viewport: { widthPx: 8, heightPx: 4 },
+        },
+        {
+          directionBodyFixed: directionAt(0, 60 * DEG, Math.sin(10 * DEG)),
+          illuminanceLx: referenceSunIlluminanceLx(),
+          angularRadiusRad: 0.000_5,
+        },
+        SATURN,
+        0.1,
+      );
+    const size = { widthTexels: 12, heightTexels: 10 };
+    const low = oblateSkyViewTexelsTwin(p, viewFrom(1_000_000), size, 8);
+    const high = oblateSkyViewTexelsTwin(p, viewFrom(1_500_000), size, 8);
+    let worst = 0;
+    for (let y = 0; y < size.heightTexels; y += 1) {
+      for (let x = 0; x < size.widthTexels; x += 1) {
+        const a = low(x, y);
+        const b = high(x, y);
+        for (const c of CHANNELS) {
+          worst = Math.max(worst, Math.abs(b[c] - a[c]) / Math.max(a[c], 1e-12));
+        }
+      }
+    }
+    expect(worst).toBeLessThan(1e-9);
   });
 
   it("reads the oblate sky view back at each texel's own ray, its horizon on the column's R_α", () => {

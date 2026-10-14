@@ -103,7 +103,11 @@ struct Term {
 // `decision-r08-t6b-floor.md` section 8); z is 1 where `densityTables` holds the column's pressure
 // profile at the layer past the terms' (R08.T4.d; `medium.wgsl`'s `pressureBarAt`), 0 otherwise;
 // w is the medium's line slots, a bitmask of the absorber slots whose curves have pressure rows
-// (bit k for slot k; `pressureChannelOf`).
+// (bit k for slot k; `pressureChannelOf`). `build` is a per-planet build's own (plan R08, R08.T6.f;
+// Design note 17): x the factor every coefficient and absorber column per metre takes, 1 ÷ s_b in a
+// latitude band's frame and 1 elsewhere; y the layer of the transmittance tables the
+// transmittance kernel writes, or the multiple-scattering kernel reads; z the layer of the
+// multiple-scattering table it writes, band × light slots + light slot; w unused.
 struct Medium {
   bottomRadiusM : f32,
   topHeightM : f32,
@@ -111,6 +115,7 @@ struct Medium {
   samples : f32,
   groundAlbedo : vec4f,
   absorbers : vec4f,
+  build : vec4f,
 }
 
 // A path's absorber columns, each slot's u / U, the column crossed over the absorber's own vertical
@@ -553,38 +558,42 @@ fn tableAtUnitLayer(table : texture_2d_array<f32>, layer : u32, unit : vec2f) ->
   return bilinearLayer(table, layer, texelUvFromUnit(clamp(unit, vec2f(0.0), vec2f(1.0)), size));
 }
 
-// The transmittance at the transmittance table's unit range (`transmittanceUnitAt`) for light slot
+// The transmittance at the transmittance tables' unit range (`transmittanceUnitAt`) on one layer of
+// them, each a 2D array of one layer a κ slice, or a band's own (plan R08, R08.T6.f), for light slot
 // `slot` (plan R08, Design notes 5 and 8, R08.T6.c): the stored optical depth (rgb) and slot 0's
 // column (alpha) read bilinearly, the absorber-column table's slots 1 to 4 likewise where the
 // medium has them, and the line slots' pressure-weighted columns beside them by pressure channel
 // (R08.T4.d, `pressureChannelOf` of `lines`: channels 0 to 3 in `pressureColumnTable`'s rgba,
 // channel 4 in `lastPressureColumnTable`'s r), the light's curves of growth added to the optical
-// depth at each slot's p-bar, and the sum exponentiated in f32, so
-// that no light's transmittance is ever stored in rgba16float on its way to a lit point or the
-// disc. The read sites keep R08.T6.g's height forms and its texel mapping.
-fn transmittanceThroughTables(
-  depthTable : texture_2d<f32>,
-  columnTable : texture_2d<f32>,
-  pressureColumnTable : texture_2d<f32>,
-  lastPressureColumnTable : texture_2d<f32>,
+// depth at each slot's p-bar, and the sum exponentiated in f32, so that no light's transmittance is
+// ever stored in rgba16float on its way to a lit point or the disc. The read sites keep R08.T6.g's
+// height forms and its texel mapping. It was `transmittanceThroughTables`, on one table, before
+// R08.T6.f; the per-frame kernels and the composite read the slices through `oblate.wgsl`'s sliced
+// lookup, the multiple-scattering kernel its band's tables here.
+fn transmittanceThroughLayer(
+  depthTable : texture_2d_array<f32>,
+  columnTable : texture_2d_array<f32>,
+  pressureColumnTable : texture_2d_array<f32>,
+  lastPressureColumnTable : texture_2d_array<f32>,
   curves : texture_2d<f32>,
+  layer : u32,
   count : u32,
   slot : u32,
   lines : u32,
   unit : vec2f,
 ) -> vec3f {
-  let stored = tableAtUnit(depthTable, unit);
+  let stored = tableAtUnitLayer(depthTable, layer, unit);
   var columns = AbsorberColumns(stored.a, vec4f(0.0));
   var pressureColumns = AbsorberColumns(0.0, vec4f(0.0));
   if (count > 0u) {
-    let firstFour = tableAtUnit(pressureColumnTable, unit);
+    let firstFour = tableAtUnitLayer(pressureColumnTable, layer, unit);
     pressureColumns = AbsorberColumns(
       firstFour.x,
-      vec4f(firstFour.yzw, tableAtUnit(lastPressureColumnTable, unit).x),
+      vec4f(firstFour.yzw, tableAtUnitLayer(lastPressureColumnTable, layer, unit).x),
     );
   }
   if (count > 1u) {
-    columns.more = tableAtUnit(columnTable, unit);
+    columns.more = tableAtUnitLayer(columnTable, layer, unit);
   }
   return exp(-(stored.rgb + absorberDepth(curves, count, slot, lines, columns, pressureColumns)));
 }

@@ -21,21 +21,26 @@
 // absorbers by the path's column, under the sun's curves of growth (`viewAbsorberStep`), so that
 // the mean transmittance in alpha carries them. Changes (plan R08, R08.T7, Design note 7): one
 // march sums every drawn source, each light slot's share carried on its own path (`ViewMarch` in
-// source.wgsl), and alpha is slot 0's mean transmittance.
+// source.wgsl), and alpha is slot 0's mean transmittance. Changes (plan R08, R08.T6.f, Design note
+// 17, _Per-view marches_): each froxel's ray is marched on its own osculating sphere R_α at the
+// camera, each sample's medium at its h* = s h, s at the latitude of the sample's own place on the
+// datum, and its sources through the sliced lookup and the bands (`source.wgsl`), as
+// `tablesCpu.ts`'s oblateAerialPerspectiveTwin marches them.
 
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
 @group(0) @binding(2) var densityTables : texture_2d_array<f32>;
 @group(0) @binding(3) var phaseTables : texture_2d_array<f32>;
 @group(0) @binding(4) var<uniform> view : AtmosphereView;
-@group(0) @binding(5) var transmittance : texture_2d<f32>;
+@group(0) @binding(5) var transmittance : texture_2d_array<f32>;
 @group(0) @binding(6) var multiScattering : texture_2d_array<f32>;
 @group(0) @binding(7) var aerialOut : texture_storage_3d<rgba16float, write>;
-@group(0) @binding(8) var absorberColumns : texture_2d<f32>;
+@group(0) @binding(8) var absorberColumns : texture_2d_array<f32>;
 @group(0) @binding(9) var absorberCurves : texture_2d<f32>;
-@group(0) @binding(10) var absorberPressureColumns : texture_2d<f32>;
-@group(0) @binding(11) var lastAbsorberPressureColumn : texture_2d<f32>;
+@group(0) @binding(10) var absorberPressureColumns : texture_2d_array<f32>;
+@group(0) @binding(11) var lastAbsorberPressureColumn : texture_2d_array<f32>;
 @group(0) @binding(12) var lobeTables : texture_2d_array<f32>;
+@group(0) @binding(13) var oblateBody : texture_2d<f32>;
 
 @compute @workgroup_size(8, 8, 1)
 fn main(@builtin(global_invocation_id) id : vec3u) {
@@ -43,14 +48,19 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   if (id.x >= size.x || id.y >= size.y) {
     return;
   }
+  let body = oblateBodyOf(oblateBody);
   let sizeXy = vec2f(size.xy);
   let dir = rayThrough(view, unitFromTexelUv((vec2f(id.xy) + 0.5) / sizeXy, sizeXy));
-  let bottom = medium.bottomRadiusM;
-  // The camera on its own sphere, centred so that its datum normal is the sphere's; the origin
-  // carries the samples' directions, and their heights come from the camera's.
+  let n = view.up.xyz;
+  // The froxel's own sphere: R_α at the camera along its ray (R08.T6.f), centred so that its datum
+  // normal is the sphere's; the origin carries the samples' directions, and their heights come
+  // from the camera's.
+  let bottom = cameraCurvatureAlong(view.curvature.x, view.curvature.y, n, dir);
   let cameraHeightM = max(view.camera.w, 0.0);
-  let origin = view.up.xyz * (bottom + cameraHeightM);
-  let mu = dot(dir, view.up.xyz);
+  let origin = n * (bottom + cameraHeightM);
+  let mu = dot(dir, n);
+  let cameraScaled = oblateScaled(body, view.camera.xyz);
+  let scaledDir = oblateScaled(body, dir);
   let slices = size.z;
   let perSlice = max(u32(view.tables.w), 1u);
   let dt = view.tables.y / f32(slices * perSlice);
@@ -66,9 +76,21 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
       let t = (f32(slice * perSlice + step) + 0.5) * dt;
       let p = origin + t * dir;
       let rP = length(p);
-      let heightM = heightAlong(cameraHeightM, mu, t, rP);
-      let local = sampleMediumAt(heightM);
-      let shares = viewSourcesAt(heightM, p / rP, sources, angles, local);
+      let heightM = shellHeightAlong(bottom, cameraHeightM, mu, t, rP);
+      let up = p / rP;
+      // The sample's body-fixed place, the camera's plus t along the ray, and its datum point.
+      let place = view.camera.xyz + t * dir;
+      let quadric = quadricAlong(view.exact.x, cameraScaled, scaledDir, t);
+      // The place's latitude, where the body's lookups or its s take one.
+      var latitudeNormal = up;
+      var s = body.gravity.w;
+      if (oblateNeedsLatitude(body)) {
+        latitudeNormal = datumPointOf(body, place, quadric).normal;
+        s = gravityRatioAt(body, latitudeNormal.z * latitudeNormal.z);
+      }
+      let local = sampleMediumAt(s * heightM);
+      let start = sampleStartOf(body, place, quadric, heightM, up, latitudeNormal, s, local);
+      let shares = viewSourcesAt(body, start, up, sources, sources, angles, local);
       viewMarchStep(&march, local, shares, dt);
     }
     textureStore(aerialOut, vec3u(id.xy, slice), vec4f(march.luminance, viewMeanTransmittance(march)));

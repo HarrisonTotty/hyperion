@@ -3,14 +3,16 @@
 // of the atmosphere, kept as optical depth (plan R08, Design note 8, R08.T6.c): rgb the optical
 // depth per channel of every term but the absorbers, alpha absorber slot 0's column u / U, and the
 // absorber-column table's rgba slots 1 to 4's. Each light's curves of growth turn the columns into
-// optical depth on read (Design note 5; `common.wgsl`'s `transmittanceThroughTables`). Stored as
+// optical depth on read (Design note 5; `common.wgsl`'s `transmittanceThroughLayer`). Stored as
 // T, a slant path through a Venus-class atmosphere fell below rgba16float's least value; stored as
 // tau, the half float's step is at most 2^-10 of tau, and the transmittance's relative error at
 // most 2^-11 tau (4.9e-4 tau), within Design note 8's 1e-3 tau. Each stored value is held to the
 // half float's largest, 65504 (IEEE 754-2008 binary16), so that a deeper path stores a finite
 // value whose e^-tau is 0 in f32, never an infinity whose bilinear read at the table's edge,
 // inf * 0, is NaN. Follows `common.wgsl` and `medium.wgsl`; reads the medium's terms and their
-// density tables (R08.T6.b).
+// density tables (R08.T6.b). Since R08.T6.f each build writes one layer of 2D array tables, a κ
+// slice's on the sphere κ_k R_ref, or a latitude band's own in its gravity-scaled frame, every
+// coefficient over s_b (`Medium.build`; Design note 17).
 //
 // Ported from Bevy 0.19.1's crates/bevy_pbr/src/atmosphere/transmittance_lut.wgsl (MIT or
 // Apache-2.0; the notice is in common.wgsl), checked against sebh's UnrealEngineSkyAtmosphere
@@ -37,14 +39,16 @@
 @group(0) @binding(0) var<uniform> medium : Medium;
 @group(0) @binding(1) var<storage, read> terms : array<Term, MAX_TERMS>;
 @group(0) @binding(2) var densityTables : texture_2d_array<f32>;
-@group(0) @binding(3) var transmittanceOut : texture_storage_2d<rgba16float, write>;
-@group(0) @binding(4) var absorberColumnsOut : texture_storage_2d<rgba16float, write>;
+// Each table is a 2D array of one layer a κ slice (plan R08, R08.T6.f; Design note 17), or a
+// latitude band's own one-layer table, the build writing layer `buildTransmittanceLayer()`.
+@group(0) @binding(3) var transmittanceOut : texture_storage_2d_array<rgba16float, write>;
+@group(0) @binding(4) var absorberColumnsOut : texture_storage_2d_array<rgba16float, write>;
 @group(0) @binding(5) var<uniform> layerEdges : LayerEdges;
 // The line slots' pressure-weighted columns by pressure channel (R08.T4.d; `common.wgsl`'s
 // `pressureChannelOf`): channels 0 to 3 in rgba, channel 4 in the second table's r, each
 // (p / ABSORBER_PRESSURE_REFERENCE_PA) (u / U) summed along the ray.
-@group(0) @binding(6) var absorberPressureColumnsOut : texture_storage_2d<rgba16float, write>;
-@group(0) @binding(7) var lastAbsorberPressureColumnOut : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(6) var absorberPressureColumnsOut : texture_storage_2d_array<rgba16float, write>;
+@group(0) @binding(7) var lastAbsorberPressureColumnOut : texture_storage_2d_array<rgba16float, write>;
 
 // The pressure channels one table holds, in its rgba (`tables.ts`'s PRESSURE_CHANNELS_A_TABLE).
 const PRESSURE_CHANNELS_A_TABLE : u32 = 4u;
@@ -165,15 +169,16 @@ fn main(@builtin(global_invocation_id) id : vec3u) {
   let sizeF = vec2f(size);
   let unit = clamp(unitFromTexelUv((vec2f(id.xy) + 0.5) / sizeF, sizeF), vec2f(0.0), vec2f(1.0));
   let ray = rayToTop(transmittanceTexelOf(unit));
+  let layer = buildTransmittanceLayer();
   let stored = min(vec4f(ray.depth, ray.columns.first), vec4f(HALF_MAX));
-  textureStore(transmittanceOut, id.xy, stored);
-  textureStore(absorberColumnsOut, id.xy, min(ray.columns.more, vec4f(HALF_MAX)));
+  textureStore(transmittanceOut, id.xy, layer, stored);
+  textureStore(absorberColumnsOut, id.xy, layer, min(ray.columns.more, vec4f(HALF_MAX)));
   let firstFour = vec4f(ray.pressureColumns.first, ray.pressureColumns.more.xyz);
-  textureStore(absorberPressureColumnsOut, id.xy, min(firstFour, vec4f(HALF_MAX)));
+  textureStore(absorberPressureColumnsOut, id.xy, layer, min(firstFour, vec4f(HALF_MAX)));
   // A fifth pressure channel, and its table at the transmittance's size, only for five line slots
-  // (`tables.ts`'s lastPressureColumnSize); the table is otherwise one texel, never read.
+  // (`tables.ts`'s lastPressureColumnSize); the table is otherwise one texel a layer, never read.
   if (countOneBits(lineSlots()) > PRESSURE_CHANNELS_A_TABLE) {
     let last = min(ray.pressureColumns.more.w, HALF_MAX);
-    textureStore(lastAbsorberPressureColumnOut, id.xy, vec4f(last, 0.0, 0.0, 0.0));
+    textureStore(lastAbsorberPressureColumnOut, id.xy, layer, vec4f(last, 0.0, 0.0, 0.0));
   }
 }

@@ -78,6 +78,7 @@ import {
   type AtmosphereCamera,
   atmosphereInputs,
   curveSlotOf,
+  FIT_SCALE_FLOOR_M,
   frameSourcesOf,
   type Geodetic,
   geodeticOf,
@@ -846,6 +847,8 @@ export interface TwinTransmittance {
  * @param bottomRadiusM - The tables' ground radius, m.
  * @param curves - Each light's curves of growth for the medium's absorbers; none for a medium with
  *   no absorber.
+ * @param coefficientFactor - The factor every coefficient takes: 1 ÷ s_b for a latitude band's own
+ *   tables in its frame ({@link twinBandOf}, R08.T6.e), 1 otherwise.
  * @throws RangeError as {@link transmittanceTwin}, or as `tables.ts`'s `checkAbsorberCurves`.
  */
 export function transmittanceTablesTwin(
@@ -854,9 +857,13 @@ export function transmittanceTablesTwin(
   curves: AbsorberCurveSlots = NO_ABSORBER_CURVES,
   size: TableSize = TRANSMITTANCE_SIZE,
   samples = TRANSMITTANCE_SAMPLES,
+  coefficientFactor = 1,
 ): TwinTransmittance {
   checkAbsorberCurves(medium, curves);
-  return { ...transmittanceTables(medium, bottomRadiusM, size, samples), curves };
+  return {
+    ...transmittanceTables(medium, bottomRadiusM, size, samples, coefficientFactor),
+    curves,
+  };
 }
 
 /** A medium's absorbers as a reader of the tables turns their columns into optical depth. */
@@ -1114,7 +1121,7 @@ function absorberDepthInto(
 
 /**
  * The sun's transmittance at the transmittance table's unit range (u, v) into `out`:
- * `common.wgsl`'s `transmittanceThroughTables` for the light slot `absorbers` holds, the optical
+ * `common.wgsl`'s `transmittanceThroughLayer` for the light slot `absorbers` holds, the optical
  * depth, the absorber columns and their pressure-weighted columns read bilinearly through
  * Bruneton's texel mapping, the curves added at each slot's p̄ and the sum exponentiated.
  */
@@ -3295,7 +3302,7 @@ export type SlicedFit = "single" | "sample" | "rising" | "deep";
 /** One slice a sliced lookup reads, and how. */
 export interface SliceRead {
   readonly slice: number;
-  /** Its weight in the interpolation in ln κ. */
+  /** Its weight in the interpolation, linear in √κ. */
   readonly weight: number;
   /** The zenith cosine the slice is read at. */
   readonly cosine: number;
@@ -3438,6 +3445,7 @@ class OblateReader {
   readonly #terms: readonly TwinTerm[];
   readonly #shells: readonly Shell[];
   readonly #lnKappa: Float64Array;
+  readonly #rootKappa: Float64Array;
   readonly #lnBands: Float64Array;
   readonly #topM: number;
   readonly #absorbers = new Map<number, TwinAbsorbers>();
@@ -3462,6 +3470,7 @@ class OblateReader {
       return { bottomRadiusM, topRadiusM: bottomRadiusM + this.#topM };
     });
     this.#lnKappa = planet.kappa.map(Math.log);
+    this.#rootKappa = planet.kappa.map(Math.sqrt);
     this.#lnBands = Float64Array.from(planet.bands, (band) => Math.log(band.gravityRatio));
     checkAbsorberCurves(planet.medium, planet.curves);
     this.absorbersAt(0);
@@ -3485,25 +3494,25 @@ class OblateReader {
 
   /**
    * The local scale height in h\* at `scaledHeightM`, m: the stored vertical optical depth above it
-   * in green, slice 0's, over the extinction there, held between 1 m and the room left to the top
-   * (all of it where nothing extinguishes): the height over which the column above lies, so one
-   * scale height for an exponential, by which the fitted lookup places its second point.
+   * in green, slice 0's, over the extinction there, held to the room left to the top (all of it
+   * where nothing extinguishes) and to at least `hillaire.ts`'s {@link FIT_SCALE_FLOOR_M}
+   * (R08.T6.f): the height over which the column above lies, so one scale height for an
+   * exponential, by which the fitted lookup places its second point.
    */
   #localScaleHeightM(scaledHeightM: number): number {
     const room = Math.max(this.#topM - scaledHeightM, 1);
     const shell = this.#shells[0];
     const slice = this.#planet.slices[0];
     if (shell === undefined || slice === undefined) {
-      return room;
+      return Math.max(room, FIT_SCALE_FLOOR_M);
     }
     const height = Math.min(Math.max(scaledHeightM, 0), this.#topM);
     const [u, v] = transmittanceRMuToUv(shell, shell.bottomRadiusM + height, 1);
     tableAtUnitInto(slice.transmittance, u, v, this.#vertical);
     sampleInto(this.#terms, null, null, height, this.#sample);
     const extinctionPerM = this.#sample[4] ?? 0;
-    return extinctionPerM > 0
-      ? Math.min(Math.max(this.#vertical[1] / extinctionPerM, 1), room)
-      : room;
+    const held = extinctionPerM > 0 ? Math.min(this.#vertical[1] / extinctionPerM, room) : room;
+    return Math.max(held, FIT_SCALE_FLOOR_M);
   }
 
   /**
@@ -3530,7 +3539,7 @@ class OblateReader {
    * vertex is the lowest h\* and whose curvature c gives the radius s² ÷ 2c less that height. Every
    * ray that dips is read on each slice at the cosine that keeps its lowest h\* (Design note 17),
    * and the ground hides the source where that height is below the datum. The slices are
-   * interpolated linearly in ln κ\*, a κ\* beyond their range taking the nearer slice, and how far
+   * interpolated linearly in √κ\*, a κ\* beyond their range taking the nearer slice, and how far
    * it lies beyond is kept. H is {@link OblateReader}'s local scale height.
    */
   rayOf(positionM: Vec3, geodetic: Geodetic, direction: Vec3, rule: SliceRule): SlicedRay {
@@ -3628,7 +3637,7 @@ class OblateReader {
   }
 
   /**
-   * A {@link SlicedRay} on the sphere κ\*, μ\*: its slices interpolated in ln κ\*, each read at
+   * A {@link SlicedRay} on the sphere κ\*, μ\*: its slices interpolated linearly in √κ\*, each read at
    * `fittedCosine`, or at the cosine that keeps `readLowestM` where that is given; the ground
    * hiding the source where `lowestM` is below the datum.
    *
@@ -3647,6 +3656,7 @@ class OblateReader {
     lowestM: number | null,
   ): SlicedRay {
     const lnKappa = this.#lnKappa;
+    const rootKappa = this.#rootKappa;
     const last = lnKappa.length - 1;
     const first = lnKappa[0] ?? Number.NaN;
     const top = lnKappa[last] ?? Number.NaN;
@@ -3664,8 +3674,11 @@ class OblateReader {
       while (lower < last - 1 && (lnKappa[lower + 1] ?? Number.NaN) <= lk) {
         lower += 1;
       }
-      const l0 = lnKappa[lower] ?? Number.NaN;
-      weight = (lk - l0) / ((lnKappa[lower + 1] ?? Number.NaN) - l0);
+      // Linear in √κ (ruled 2026-10-13 for R08.T6.f, after R08.T6.e's record): exact, to first
+      // order in H ÷ R, for Chapman's grazing column, which goes as √R, and for a vertical ray,
+      // where Design note 17's "in ln κ" left 6.8 × 10⁻⁴ of the grazing τ halfway between slices.
+      const r0 = rootKappa[lower] ?? Number.NaN;
+      weight = (Math.sqrt(kappaStar) - r0) / ((rootKappa[lower + 1] ?? Number.NaN) - r0);
     }
     const cosineOn = (slice: number): number => {
       if (readLowestM === null) {
@@ -3903,7 +3916,7 @@ export function slicedSunTransmittance(
 }
 
 /**
- * The slices' stored optical depth at κ, interpolated linearly in ln κ between the slices about
+ * The slices' stored optical depth at κ, interpolated linearly in √κ between the slices about
  * it, each read at the same h\* and μ, the nearer slice beyond them: what {@link slicedSunTransmittance}
  * reads at a fixed μ, before the division by s (R08.T6.e's interpolation test).
  *
@@ -4192,6 +4205,70 @@ export function oblateSkyViewTexelsTwin(
   size: TableSize,
   samples: number,
 ): (x: number, y: number) => Rgb {
+  const march = oblateSkyViewMarcher(planet, view, samples);
+  const kept = new Map<number, Rgb>();
+  return (x, y) => {
+    const key = y * size.widthTexels + x;
+    let texel = kept.get(key);
+    if (texel === undefined) {
+      texel = march(oblateSkyViewRayTwin(planet, view, x, y, size));
+      kept.set(key, texel);
+    }
+    return texel;
+  };
+}
+
+/**
+ * The march of an oblate sky-view ray on its sphere (R08.T6.e): {@link oblateSkyViewTexelsTwin}'s,
+ * for a texel's own ray or one the caller has turned (`decision-r08-f32.md` §10's envelope, R08.T6.f's
+ * smoke), its end where it leaves its sphere's shell or meets its ground.
+ *
+ * @param splitShift - Steps moved from the side after the ray's lowest point to the side before it
+ *   (negative: back), each side keeping one: the split the kernel's `f32` may take where the
+ *   twin's share stands at its rounding (R08.T6.f's smoke, {@link marchSplit}); 0 for the twin's own.
+ */
+export function oblateSkyViewMarchTwin(
+  planet: OblatePlanetTwin,
+  view: TwinView,
+  ray: OblateSkyViewRay,
+  samples: number,
+  splitShift = 0,
+): Rgb {
+  return oblateSkyViewMarcher(planet, view, samples, splitShift)(ray);
+}
+
+/**
+ * {@link rayPieces} with `shift` steps moved from the side after t* to the side before it, each side
+ * that has length keeping one (see {@link oblateSkyViewMarchTwin}).
+ */
+function shiftedRayPieces(
+  ray: TwinSegment,
+  samples: number,
+  edgesM: ReadonlyArray<number>,
+  geometry: MarchGeometry,
+  shift: number,
+): MarchPieces {
+  if (shift === 0) {
+    return rayPieces(ray, samples, edgesM, geometry);
+  }
+  const o = ray.originM;
+  const d = ray.direction;
+  const nearestM = -(o.x * d.x + o.y * d.y + o.z * d.z);
+  const split = marchSplit(ray.tStartM, ray.tEndM, nearestM, samples, ray.fromCamera);
+  const least = split.beforeM > 0 ? 1 : 0;
+  const most = samples - (split.afterM > 0 ? 1 : 0);
+  const stepsBefore = Math.min(Math.max(split.stepsBefore + shift, least), most);
+  const moved = { ...split, stepsBefore, stepsAfter: samples - stepsBefore };
+  return marchPieces(moved, crossingsFromLowestM(ray, moved.lowestM, edgesM, geometry));
+}
+
+/** {@link oblateSkyViewMarchTwin} with what every ray of a view shares made once. */
+function oblateSkyViewMarcher(
+  planet: OblatePlanetTwin,
+  view: TwinView,
+  samples: number,
+  splitShift = 0,
+): (ray: OblateSkyViewRay) => Rgb {
   const terms = termsOf(planet.medium);
   const camera = oblateCameraOf(planet, view);
   const edgesM = marchEdgesOf(terms, planet.medium.topHeightM).map(
@@ -4201,37 +4278,35 @@ export function oblateSkyViewTexelsTwin(
   const reader = oblateReaderOf(planet);
   const axes = skyFrameAxes(view);
   const n = Math.max(Math.floor(samples), 2);
-  const kept = new Map<number, Rgb>();
-  return (x, y) => {
-    const key = y * size.widthTexels + x;
-    let texel = kept.get(key);
-    if (texel === undefined) {
-      const { ray, bottomRadiusM } = oblateSkyViewRayTwin(planet, view, x, y, size);
-      const geometry: MarchGeometry = { kind: "sphere", bottomRadiusM };
-      const rM = ray.originM.z;
-      const frame: MarchFrame = {
-        originM: {
-          x: view.cameraM.x - rM * axes.z.x,
-          y: view.cameraM.y - rM * axes.z.y,
-          z: view.cameraM.z - rM * axes.z.z,
-        },
-        ...axes,
-      };
-      const marcher = new Marcher(
-        terms,
-        pressureBarOf,
-        { kind: "oblate", reader, frame, heights: "geometry" },
-        geometry,
-        ray,
-      );
-      for (const { tM, dtM } of piecedSteps(ray, n, edgesM, geometry)) {
-        marcher.step(tM, dtM);
-      }
-      const [r, g, b] = marcher.luminance;
-      texel = [r, g, b];
-      kept.set(key, texel);
+  return ({ ray, bottomRadiusM }) => {
+    const geometry: MarchGeometry = { kind: "sphere", bottomRadiusM };
+    // The sphere's centre in the body-fixed axes: the camera's geodetic height, not its height on
+    // the sphere, below the camera, so that each sample's body-fixed place stands where the
+    // sphere's march puts it, the camera moved along its normal to its height on the sphere, held
+    // 1 m inside the shell (R08.T6.f). From above the air, the place stood the clamp higher, and
+    // each lookup's far points with it: 84 km on a Saturn-class figure from 1,000 km.
+    const reachM = bottomRadiusM + view.heightM;
+    const frame: MarchFrame = {
+      originM: {
+        x: view.cameraM.x - reachM * axes.z.x,
+        y: view.cameraM.y - reachM * axes.z.y,
+        z: view.cameraM.z - reachM * axes.z.z,
+      },
+      ...axes,
+    };
+    const marcher = new Marcher(
+      terms,
+      pressureBarOf,
+      { kind: "oblate", reader, frame, heights: "geometry" },
+      geometry,
+      ray,
+    );
+    const pieces = shiftedRayPieces(ray, n, edgesM, geometry, splitShift);
+    for (const { tM, dtM } of marchPiecesSteps(pieces)) {
+      marcher.step(tM, dtM);
     }
-    return texel;
+    const [r, g, b] = marcher.luminance;
+    return [r, g, b];
   };
 }
 

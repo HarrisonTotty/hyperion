@@ -18,11 +18,19 @@ import {
   aerialPerspectiveTwin,
   MULTI_SCATTERING_KERNEL_OPTIONS,
   multiScatteringTwin,
+  OBLATE_KERNEL_SIZES,
+  oblateAerialPerspectiveTwin,
+  type OblatePlanetTwin,
+  oblateRayMarchTwin,
+  oblateSkyViewTwin,
   type PlanetTwin,
   planetTwin,
   type RayMarchSettings,
   rayMarchTwin,
   skyViewTwin,
+  type TwinBand,
+  type TwinBody,
+  twinBandOf,
   type TwinTable,
   type TwinTransmittance,
   type TwinView,
@@ -41,11 +49,15 @@ export type TwinJob =
       readonly curves: AbsorberCurveSlots;
     }
   | {
-      /** `transmittanceTablesTwin`: the transmittance and absorber-column tables. */
+      /**
+       * `transmittanceTablesTwin`: the transmittance and absorber-column tables, every coefficient
+       * times `coefficientFactor`, 1 ÷ s_b for a latitude band's own (R08.T6.f).
+       */
       readonly kind: "transmittanceTables";
       readonly medium: AtmosphereMedium;
       readonly bottomRadiusM: number;
       readonly curves: AbsorberCurveSlots;
+      readonly coefficientFactor: number;
     }
   | {
       /** `transmittanceTwin`: the transmittance table alone. */
@@ -86,6 +98,44 @@ export type TwinJob =
       readonly view: TwinView;
       readonly settings: RayMarchSettings;
       readonly depth: number;
+    }
+  | {
+      /**
+       * `twinBandOf`: one latitude band's multiple-scattering layers at s = `gravityRatio` over the
+       * band's own transmittance tables given, the GPU's (R08.T6.f).
+       */
+      readonly kind: "oblateBand";
+      readonly medium: AtmosphereMedium;
+      readonly body: TwinBody;
+      readonly gravityRatio: number;
+      readonly curves: AbsorberCurveSlots;
+      readonly oneBand: boolean;
+      readonly transmittance: TwinTransmittance;
+    }
+  | {
+      /** `oblateSkyViewTwin` (R08.T6.f). */
+      readonly kind: "oblateSkyView";
+      readonly planet: OblatePlanetTwin;
+      readonly view: TwinView;
+      readonly size: TableSize;
+      readonly samples: number;
+    }
+  | {
+      /** `oblateAerialPerspectiveTwin` (R08.T6.f). */
+      readonly kind: "oblateAerialPerspective";
+      readonly planet: OblatePlanetTwin;
+      readonly view: TwinView;
+      readonly size: VolumeSize;
+      readonly samplesPerSlice: number;
+      readonly reachM: number;
+    }
+  | {
+      /** `oblateRayMarchTwin` over a scene whose depth is `depth` at every pixel (R08.T6.f). */
+      readonly kind: "oblateRayMarch";
+      readonly planet: OblatePlanetTwin;
+      readonly view: TwinView;
+      readonly settings: RayMarchSettings;
+      readonly depth: number;
     };
 
 /** A job's answer, tagged with the job's kind. */
@@ -96,7 +146,11 @@ export type TwinAnswer =
   | { readonly kind: "multiScattering"; readonly twin: TwinTable }
   | { readonly kind: "skyView"; readonly twin: TwinTable }
   | { readonly kind: "aerialPerspective"; readonly twin: TwinVolume }
-  | { readonly kind: "rayMarch"; readonly twin: TwinTable };
+  | { readonly kind: "rayMarch"; readonly twin: TwinTable }
+  | { readonly kind: "oblateBand"; readonly twin: TwinBand }
+  | { readonly kind: "oblateSkyView"; readonly twin: TwinTable }
+  | { readonly kind: "oblateAerialPerspective"; readonly twin: TwinVolume }
+  | { readonly kind: "oblateRayMarch"; readonly twin: TwinTable };
 
 /** What the page posts to a twin worker: a job and the number its reply is matched by. */
 export interface TwinRequest {
@@ -128,7 +182,14 @@ export function runTwinJob(job: TwinJob): TwinAnswer {
     case "transmittanceTables":
       answer = {
         kind: job.kind,
-        twin: transmittanceTablesTwin(job.medium, job.bottomRadiusM, job.curves),
+        twin: transmittanceTablesTwin(
+          job.medium,
+          job.bottomRadiusM,
+          job.curves,
+          undefined,
+          undefined,
+          job.coefficientFactor,
+        ),
       };
       break;
     case "transmittance":
@@ -167,6 +228,46 @@ export function runTwinJob(job: TwinJob): TwinAnswer {
       answer = {
         kind: job.kind,
         twin: rayMarchTwin(job.planet, job.view, job.settings, () => depth),
+      };
+      break;
+    }
+    case "oblateBand":
+      answer = {
+        kind: job.kind,
+        twin: twinBandOf(
+          job.medium,
+          job.body,
+          job.gravityRatio,
+          job.curves,
+          OBLATE_KERNEL_SIZES,
+          job.oneBand,
+          job.transmittance,
+        ),
+      };
+      break;
+    case "oblateSkyView":
+      answer = {
+        kind: job.kind,
+        twin: oblateSkyViewTwin(job.planet, job.view, job.size, job.samples),
+      };
+      break;
+    case "oblateAerialPerspective":
+      answer = {
+        kind: job.kind,
+        twin: oblateAerialPerspectiveTwin(
+          job.planet,
+          job.view,
+          job.size,
+          job.samplesPerSlice,
+          job.reachM,
+        ),
+      };
+      break;
+    case "oblateRayMarch": {
+      const { depth } = job;
+      answer = {
+        kind: job.kind,
+        twin: oblateRayMarchTwin(job.planet, job.view, job.settings, () => depth),
       };
       break;
     }
