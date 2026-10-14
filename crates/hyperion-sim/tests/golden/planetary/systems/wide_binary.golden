@@ -53,7 +53,7 @@ moons: [0101, 0102, 0103, 0104]
 rings: [0180, 0181]
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks detail_seed = 0xae5a1fea6baa1539
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -68016985055426912, nanos: 0 })
 pole_x = 0xbfe6fc65ae77c1b1  # -0.7183102042745785
 pole_y = 0xbfdc6efc845c91b9  # -0.44427407194077834
@@ -127,7 +127,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x8c774c3db60d507c
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100693419212976, nanos: 0 })
 pole_x = 0xbfc06e1848d61d2a  # -0.12835982853378286
 pole_y = 0xbfeb26f57a0779e5  # -0.8485057242758641
@@ -212,7 +212,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x03db9237b4a76a3b
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100694078985488, nanos: 0 })
 pole_x = 0x3fe0bfb98ee82802  # 0.523403910746538
 pole_y = 0x3fe1723feb3abbfa  # 0.545196494514925
@@ -297,7 +297,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xd4301b4ad051647c
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100693420469120, nanos: 0 })
 pole_x = 0x3fec29f8933ccbe5  # 0.8801234126789238
 pole_y = 0x3fcd37f220bb7413  # 0.22826983068708326
@@ -382,7 +382,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xb9e2b56332762d9b
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100692445330848, nanos: 0 })
 pole_x = 0xbfec3db5433aeb89  # -0.8825327218140596
 pole_y = 0xbfd529df5f4dc53f  # -0.33068069750796164
@@ -508,7 +508,7 @@ moons: [0401]
 rings: []
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xde107ee7f0c0a1b7
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -71652081229977232, nanos: 0 })
 pole_x = 0xbfe07275e7b1d8b7  # -0.5139722371375431
 pole_y = 0x3fe074bab8d685cc  # 0.5142491922489909
@@ -574,7 +574,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
@@ -607,7 +607,7 @@ moons: [0501]
 rings: []
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x5afae0073bb480d2
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -66520927826228280, nanos: 0 })
 pole_x = 0xbfe5fb458acf34c0  # -0.6869228087540691
 pole_y = 0xbfda2ebf58937767  # -0.40910323762897466
@@ -673,7 +673,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
@@ -709,7 +709,7 @@ moons: []
 rings: []
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x575a4fb695fa4302
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -39102592296646272, nanos: 0 })
 pole_x = 0x3f97c085d613c401  # 0.023195353690372403
 pole_y = 0x3fed2ecc4f6347e7  # 0.9119626570266036
@@ -797,7 +797,7 @@ moons: []
 rings: []
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x8b85c28723fa411e
 rotation: Synchronous, locks at None
 pole_x = 0xbfce88039f4077fc  # -0.2385258224102812
 pole_y = 0x3fee0a6c4edbc46a  # 0.9387723484234247
@@ -904,7 +904,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x019936e946daf0f8
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -72748860692545696, nanos: 0 })
 pole_x = 0xbfd91242ddce25b8  # -0.39173957501096934
 pole_y = 0xbfd260be9c93304e  # -0.2871548203518203
@@ -989,7 +989,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xf036a4963ce7a5f1
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfe8675ec326bc25  # -0.762618428378009
 pole_y = 0xbfd1303270b2e1d8  # -0.2685667133878531
@@ -1074,7 +1074,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xdf97085625b6c57d
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -72972767412244960, nanos: 0 })
 pole_x = 0xbfe24d59f7a9d37e  # -0.5719423138785797
 pole_y = 0xbfd06696fff39620  # -0.256261587097784
@@ -1159,7 +1159,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xde36439b9d528da4
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfdd35822709a68f  # -0.45639089405322236
 pole_y = 0xbfe2741ac9e06485  # -0.5766729300404597
@@ -1244,7 +1244,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x41fb2965e1995c01
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -73028238679545904, nanos: 0 })
 pole_x = 0xbfe9ac3fe63a9b56  # -0.8022765633257716
 pole_y = 0xbfcc3661c8cb970f  # -0.22040960602242207
@@ -1329,7 +1329,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x0373d3d883979fb3
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73083932996117712, nanos: 0 })
 pole_x = 0xbfe1d96da0f92407  # -0.5577915328987054
 pole_y = 0xbfe2a1b49a06988d  # -0.582239437896321
@@ -1414,7 +1414,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x7cef9a6a62e1fa29
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -72846626248156080, nanos: 0 })
 pole_x = 0xbfe2837f76b2c4e9  # -0.5785519903494364
 pole_y = 0xbfb68ba951c76ca0  # -0.08806856390531204
@@ -1499,7 +1499,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x5e49ed3fa56e3d1f
 rotation: Synchronous, locks at None
 pole_x = 0x3fb268e16ff05e92  # 0.07191285117039062
 pole_y = 0xbfe140aa1e68dbb5  # -0.539143618959193
@@ -1604,7 +1604,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x8cf910cb9d12f4c5
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -71312760945458560, nanos: 0 })
 pole_x = 0xbfd1133e9fb66b1d  # -0.266799598664578
 pole_y = 0x3fea8e76488b7c67  # 0.8298903862850125
@@ -1689,7 +1689,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xab1ca63464cc453f
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -71868272577790320, nanos: 0 })
 pole_x = 0xbfd7ee8060255edf  # -0.3739319743085456
 pole_y = 0x3fe818bd004a824f  # 0.7530198102650248
@@ -1794,7 +1794,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x5d36bd7c93eacdca
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -67922920262654968, nanos: 0 })
 pole_x = 0xbfb8d1dcdb70a5aa  # -0.09695225102827601
 pole_y = 0x3fea3c04b4109928  # 0.819826461495528
@@ -1879,7 +1879,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x9bbe9f21b875b1ff
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -50082293652902032, nanos: 0 })
 pole_x = 0xbfe02f48523bf4be  # -0.5057717901360304
 pole_y = 0x3feb8a07579d8c52  # 0.8605992041815489
@@ -1984,7 +1984,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x3b3ced25f6251420
 rotation: Synchronous, locks at Some(UniverseTime { seconds: 5864191565962872832, nanos: 0 })
 pole_x = 0xbfd07dd01dfd0b4f  # -0.25767901352462713
 pole_y = 0x3fe9c3cce1f8adbd  # 0.8051514066223074
@@ -2069,7 +2069,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x0e02ea9d2af06c20
 rotation: Synchronous, locks at Some(UniverseTime { seconds: 3600305777295444480, nanos: 0 })
 pole_x = 0xbfbf3061176c639c  # -0.12183195897922733
 pole_y = 0x3fe92b1b71be7811  # 0.7865121099055178
@@ -2154,7 +2154,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x30a4db594d68f26b
 rotation: Synchronous, locks at None
 pole_x = 0xbfc527fee8af3259  # -0.16528307305852044
 pole_y = 0x3fef18959aad1134  # 0.9717510243431549
@@ -2239,7 +2239,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x6fafcbe285284f07
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 6125527843842912, nanos: 0 })
 pole_x = 0x3fc16245ca196a6c  # 0.13581154220703995
 pole_y = 0x3fe299ee8c8d2aac  # 0.5812905068535961
@@ -2324,7 +2324,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x0c27b3673a56feff
 rotation: Synchronous, locks at Some(UniverseTime { seconds: 2184320769073304576, nanos: 0 })
 pole_x = 0xbfe0d5a082a40d03  # -0.5260775138453088
 pole_y = 0x3fe6fd08f0b15c65  # 0.718388052085072
@@ -2409,7 +2409,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x45bd5b7bc4c2cf5d
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -33570109953160520, nanos: 0 })
 pole_x = 0x3fc4ef3139b4765a  # 0.1635495692980154
 pole_y = 0x3fee9204bd969991  # 0.9553245261093243
@@ -2494,7 +2494,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x24dfab89972c2bfa
 rotation: Synchronous, locks at Some(UniverseTime { seconds: 2488090928783137280, nanos: 0 })
 pole_x = 0xbfd2ea911e94e6d0  # -0.29556682573784787
 pole_y = 0x3fe55d1144f727d7  # 0.6676107737523534
@@ -2579,7 +2579,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xa4e690c363846530
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 3848453232521095680, nanos: 0 })
 pole_x = 0xbfca8102de9b3c07  # -0.20706210965587976
 pole_y = 0x3fed620c8f386b64  # 0.9182188794396606
@@ -2686,7 +2686,7 @@ moons: [e581]
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xfda1d313437da6a5
 rotation: ThreeToTwo, locks at None
 pole_x = 0x3fdfe6f0068f09c2  # 0.49847031250478946
 pole_y = 0xbfe20720a87d8452  # -0.563370064814203
@@ -2771,7 +2771,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xab53990b6febf85f
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfe73d877d87ca17  # -0.7262608958974991
 pole_y = 0x3fe009abf2126774  # 0.5011806228605864
@@ -2856,7 +2856,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x1fd9f97e82867fa5
 rotation: Synchronous, locks at None
 pole_x = 0xbfdd343f3cffb924  # -0.4563139053051535
 pole_y = 0x3fe894697e411d1b  # 0.7681167093186646
@@ -2941,7 +2941,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x10aee854bfd8008a
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbf912269a4cfc499  # -0.01673283642225396
 pole_y = 0x3fe71f55410eb2b0  # 0.722574832024824
@@ -3026,7 +3026,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x139c4a0396287595
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfcf951a63906708  # -0.24673776494528732
 pole_y = 0x3fee3b83679f4c5e  # 0.9447648071167227
@@ -3111,7 +3111,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x90c79986ad63814b
 rotation: Synchronous, locks at None
 pole_x = 0xbfb93efb42c0ef59  # -0.09861727123000942
 pole_y = 0x3fec93512fe576ae  # 0.8929830489612038
@@ -3196,7 +3196,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x7c55cf0bb179e506
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfd94084aee597e0  # -0.3945628841378248
 pole_y = 0x3fec9580201622ef  # 0.8932495714844587
@@ -3281,7 +3281,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xca99bb16c7d65066
 rotation: ThreeToTwo, locks at None
 pole_x = 0x3fcd777c3c1e13c2  # 0.2302089017431666
 pole_y = 0x3fe8bff9cdd958c7  # 0.7734345455635542
@@ -3369,7 +3369,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x3bf4066342b43ae6
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -72703261197577472, nanos: 0 })
 pole_x = 0xbfd8ee680466c005  # -0.38955116681881946
 pole_y = 0x3fe71e750ea5df6d  # 0.722467926606425
@@ -3461,7 +3461,7 @@ moons: [0101, 0102, 0103, 0104]
 rings: [0180, 0181]
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks detail_seed = 0xae5a1fea6baa1539
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -68016985055426912, nanos: 0 })
 pole_x = 0xbfe6fc65ae77c1b1  # -0.7183102042745785
 pole_y = 0xbfdc6efc845c91b9  # -0.44427407194077834
@@ -3535,7 +3535,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x8c774c3db60d507c
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100693419212976, nanos: 0 })
 pole_x = 0xbfc06e1848d61d2a  # -0.12835982853378286
 pole_y = 0xbfeb26f57a0779e5  # -0.8485057242758641
@@ -3620,7 +3620,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x03db9237b4a76a3b
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100694078985488, nanos: 0 })
 pole_x = 0x3fe0bfb98ee82802  # 0.523403910746538
 pole_y = 0x3fe1723feb3abbfa  # 0.545196494514925
@@ -3705,7 +3705,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xd4301b4ad051647c
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100693420469120, nanos: 0 })
 pole_x = 0x3fec29f8933ccbe5  # 0.8801234126789238
 pole_y = 0x3fcd37f220bb7413  # 0.22826983068708326
@@ -3790,7 +3790,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xb9e2b56332762d9b
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73100692445330848, nanos: 0 })
 pole_x = 0xbfec3db5433aeb89  # -0.8825327218140596
 pole_y = 0xbfd529df5f4dc53f  # -0.33068069750796164
@@ -3916,7 +3916,7 @@ moons: [0401]
 rings: []
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xde107ee7f0c0a1b7
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -71652081229977232, nanos: 0 })
 pole_x = 0xbfe07275e7b1d8b7  # -0.5139722371375431
 pole_y = 0x3fe074bab8d685cc  # 0.5142491922489909
@@ -3982,7 +3982,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
@@ -4015,7 +4015,7 @@ moons: [0501]
 rings: []
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x5afae0073bb480d2
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -66520927826228280, nanos: 0 })
 pole_x = 0xbfe5fb458acf34c0  # -0.6869228087540691
 pole_y = 0xbfda2ebf58937767  # -0.40910323762897466
@@ -4081,7 +4081,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
@@ -4117,7 +4117,7 @@ moons: []
 rings: []
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x575a4fb695fa4302
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -39102592296646272, nanos: 0 })
 pole_x = 0x3f97c085d613c401  # 0.023195353690372403
 pole_y = 0x3fed2ecc4f6347e7  # 0.9119626570266036
@@ -4205,7 +4205,7 @@ moons: []
 rings: []
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x8b85c28723fa411e
 rotation: Synchronous, locks at None
 pole_x = 0xbfce88039f4077fc  # -0.2385258224102812
 pole_y = 0x3fee0a6c4edbc46a  # 0.9387723484234247
@@ -4312,7 +4312,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x019936e946daf0f8
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -72748860692545696, nanos: 0 })
 pole_x = 0xbfd91242ddce25b8  # -0.39173957501096934
 pole_y = 0xbfd260be9c93304e  # -0.2871548203518203
@@ -4397,7 +4397,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xf036a4963ce7a5f1
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfe8675ec326bc25  # -0.762618428378009
 pole_y = 0xbfd1303270b2e1d8  # -0.2685667133878531
@@ -4482,7 +4482,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xdf97085625b6c57d
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -72972767412244960, nanos: 0 })
 pole_x = 0xbfe24d59f7a9d37e  # -0.5719423138785797
 pole_y = 0xbfd06696fff39620  # -0.256261587097784
@@ -4567,7 +4567,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xde36439b9d528da4
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfdd35822709a68f  # -0.45639089405322236
 pole_y = 0xbfe2741ac9e06485  # -0.5766729300404597
@@ -4652,7 +4652,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x41fb2965e1995c01
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -73028238679545904, nanos: 0 })
 pole_x = 0xbfe9ac3fe63a9b56  # -0.8022765633257716
 pole_y = 0xbfcc3661c8cb970f  # -0.22040960602242207
@@ -4737,7 +4737,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x0373d3d883979fb3
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -73083932996117712, nanos: 0 })
 pole_x = 0xbfe1d96da0f92407  # -0.5577915328987054
 pole_y = 0xbfe2a1b49a06988d  # -0.582239437896321
@@ -4822,7 +4822,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x7cef9a6a62e1fa29
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -72846626248156080, nanos: 0 })
 pole_x = 0xbfe2837f76b2c4e9  # -0.5785519903494364
 pole_y = 0xbfb68ba951c76ca0  # -0.08806856390531204
@@ -4907,7 +4907,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x5e49ed3fa56e3d1f
 rotation: Synchronous, locks at None
 pole_x = 0x3fb268e16ff05e92  # 0.07191285117039062
 pole_y = 0xbfe140aa1e68dbb5  # -0.539143618959193
@@ -5012,7 +5012,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x8cf910cb9d12f4c5
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -71312760945458560, nanos: 0 })
 pole_x = 0xbfd1133e9fb66b1d  # -0.266799598664578
 pole_y = 0x3fea8e76488b7c67  # 0.8298903862850125
@@ -5097,7 +5097,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xab1ca63464cc453f
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -71868272577790320, nanos: 0 })
 pole_x = 0xbfd7ee8060255edf  # -0.3739319743085456
 pole_y = 0x3fe818bd004a824f  # 0.7530198102650248
@@ -5202,7 +5202,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x5d36bd7c93eacdca
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -67922920262654968, nanos: 0 })
 pole_x = 0xbfb8d1dcdb70a5aa  # -0.09695225102827601
 pole_y = 0x3fea3c04b4109928  # 0.819826461495528
@@ -5287,7 +5287,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x9bbe9f21b875b1ff
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -50082293652902032, nanos: 0 })
 pole_x = 0xbfe02f48523bf4be  # -0.5057717901360304
 pole_y = 0x3feb8a07579d8c52  # 0.8605992041815489
@@ -5392,7 +5392,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x3b3ced25f6251420
 rotation: Synchronous, locks at Some(UniverseTime { seconds: 5864191565962872832, nanos: 0 })
 pole_x = 0xbfd07dd01dfd0b4f  # -0.25767901352462713
 pole_y = 0x3fe9c3cce1f8adbd  # 0.8051514066223074
@@ -5477,7 +5477,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x0e02ea9d2af06c20
 rotation: Synchronous, locks at Some(UniverseTime { seconds: 3600305777295444480, nanos: 0 })
 pole_x = 0xbfbf3061176c639c  # -0.12183195897922733
 pole_y = 0x3fe92b1b71be7811  # 0.7865121099055178
@@ -5562,7 +5562,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x30a4db594d68f26b
 rotation: Synchronous, locks at None
 pole_x = 0xbfc527fee8af3259  # -0.16528307305852044
 pole_y = 0x3fef18959aad1134  # 0.9717510243431549
@@ -5647,7 +5647,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x6fafcbe285284f07
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 6125527843842912, nanos: 0 })
 pole_x = 0x3fc16245ca196a6c  # 0.13581154220703995
 pole_y = 0x3fe299ee8c8d2aac  # 0.5812905068535961
@@ -5732,7 +5732,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x0c27b3673a56feff
 rotation: Synchronous, locks at Some(UniverseTime { seconds: 2184320769073304576, nanos: 0 })
 pole_x = 0xbfe0d5a082a40d03  # -0.5260775138453088
 pole_y = 0x3fe6fd08f0b15c65  # 0.718388052085072
@@ -5817,7 +5817,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x45bd5b7bc4c2cf5d
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -33570109953160520, nanos: 0 })
 pole_x = 0x3fc4ef3139b4765a  # 0.1635495692980154
 pole_y = 0x3fee9204bd969991  # 0.9553245261093243
@@ -5902,7 +5902,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x24dfab89972c2bfa
 rotation: Synchronous, locks at Some(UniverseTime { seconds: 2488090928783137280, nanos: 0 })
 pole_x = 0xbfd2ea911e94e6d0  # -0.29556682573784787
 pole_y = 0x3fe55d1144f727d7  # 0.6676107737523534
@@ -5987,7 +5987,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xa4e690c363846530
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 3848453232521095680, nanos: 0 })
 pole_x = 0xbfca8102de9b3c07  # -0.20706210965587976
 pole_y = 0x3fed620c8f386b64  # 0.9182188794396606
@@ -6094,7 +6094,7 @@ moons: [e581]
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xfda1d313437da6a5
 rotation: ThreeToTwo, locks at None
 pole_x = 0x3fdfe6f0068f09c2  # 0.49847031250478946
 pole_y = 0xbfe20720a87d8452  # -0.563370064814203
@@ -6179,7 +6179,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xab53990b6febf85f
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfe73d877d87ca17  # -0.7262608958974991
 pole_y = 0x3fe009abf2126774  # 0.5011806228605864
@@ -6264,7 +6264,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x1fd9f97e82867fa5
 rotation: Synchronous, locks at None
 pole_x = 0xbfdd343f3cffb924  # -0.4563139053051535
 pole_y = 0x3fe894697e411d1b  # 0.7681167093186646
@@ -6349,7 +6349,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x10aee854bfd8008a
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbf912269a4cfc499  # -0.01673283642225396
 pole_y = 0x3fe71f55410eb2b0  # 0.722574832024824
@@ -6434,7 +6434,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x139c4a0396287595
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfcf951a63906708  # -0.24673776494528732
 pole_y = 0x3fee3b83679f4c5e  # 0.9447648071167227
@@ -6519,7 +6519,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x90c79986ad63814b
 rotation: Synchronous, locks at None
 pole_x = 0xbfb93efb42c0ef59  # -0.09861727123000942
 pole_y = 0x3fec93512fe576ae  # 0.8929830489612038
@@ -6604,7 +6604,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x7c55cf0bb179e506
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfd94084aee597e0  # -0.3945628841378248
 pole_y = 0x3fec9580201622ef  # 0.8932495714844587
@@ -6689,7 +6689,7 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0xca99bb16c7d65066
 rotation: ThreeToTwo, locks at None
 pole_x = 0x3fcd777c3c1e13c2  # 0.2302089017431666
 pole_y = 0x3fe8bff9cdd958c7  # 0.7734345455635542
@@ -6777,7 +6777,7 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: Ok
-hooks: NotModelled
+hooks detail_seed = 0x3bf4066342b43ae6
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -72703261197577472, nanos: 0 })
 pole_x = 0xbfd8ee680466c005  # -0.38955116681881946
 pole_y = 0x3fe71e750ea5df6d  # 0.722467926606425

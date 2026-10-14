@@ -74,10 +74,11 @@
 //!   time, with the light of the system's other stars (P14.T12.b).
 //!
 //! What is not computed is said in every record rather than left to be read as "none" (ruling
-//! 34): a record's `hooks` are [`Section::NotModelled`] (P14.T23–T26), a gas-envelope body's
-//! surface [`Section::NotApplicable`] and its `envelope` `NotModelled` (P14.T48.e, until
-//! P14.T24.d), and a dwarf planet's rings `NotModelled`. Events on
-//! bodies (P14.T31) are not built, so there is no `events_between`.
+//! 34): a gas-envelope body's surface is [`Section::NotApplicable`] and its `envelope`
+//! `NotModelled` (P14.T48.e, until P14.T24.d), and a dwarf planet's rings `NotModelled`. Its
+//! `hooks` hold the body's detail seed alone (the rendering plans' R09.T1.b): [`Section::Ok`] for
+//! a planet, moon or dwarf planet present at the time, `NotApplicable` otherwise. Events on bodies
+//! (P14.T31) are not built, so there is no `events_between`.
 //!
 //! # Streams
 //!
@@ -152,7 +153,7 @@ use crate::planetary::placement::{
     Neighbour, OrbitHost, OrbitZone, PlacedPlanet, PlacementHost, ZoneDiscInputs, place,
 };
 use crate::planetary::record::{
-    BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties, HaloRecord,
+    BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties, HaloRecord, Hooks,
     MoonOrigin, Population, Section, Surface, SystemSnapshot,
 };
 use crate::planetary::rings::{Ring, RingParent};
@@ -1697,10 +1698,12 @@ impl PlanetarySystem {
     ///   gas-envelope body, a sub-Neptune or a giant, [`Section::NotApplicable`] with its
     ///   envelope [`Section::NotModelled`]. A ring, a belt and a halo carry their extent as their
     ///   population section instead.
-    /// - For a body not present: no position, and its orbit, bulk, surface, envelope and
+    /// - For a body not present: no position, and its orbit, bulk, surface, envelope, hooks and
     ///   population [`Section::NotApplicable`], since nothing orbits there at `t`.
-    /// - A planet's moons and rings [`Section::Ok`], lists that may be empty; every hooks section
-    ///   [`Section::NotModelled`] (ruling 34), a population's `NotApplicable`.
+    /// - A planet's moons and rings [`Section::Ok`], lists that may be empty. The hooks section of
+    ///   a planet, moon or dwarf planet present at `t` is [`Section::Ok`], holding its detail seed
+    ///   ([`hooks::detail_seed`]; the rendering plans' R09.T1.b), and a population's
+    ///   `NotApplicable`.
     ///
     /// # Errors
     ///
@@ -2431,6 +2434,7 @@ impl PlanetarySystem {
                     .orbit(Section::Ok(section))
                     .position(position)
                     .rotation(body.rotation_section())
+                    .hooks(self.present_hooks(body.index))
             }
             BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
                 builder
@@ -2441,12 +2445,25 @@ impl PlanetarySystem {
                     .photometry(Section::NotApplicable)
                     .figure(Section::NotApplicable)
                     .rotation(Section::NotApplicable)
+                    .hooks(Section::NotApplicable)
             }
         };
         let record = builder
             .build()
             .expect("a generated record withholds no section and has a known kind");
         (record, now)
+    }
+
+    /// The hooks section of the record of body `index`, a planet, moon or dwarf planet present at
+    /// the record's time: its detail seed (the rendering plans' R09.T1.b), word 0 of its
+    /// `body.surface.detail` stream, which depends on nothing but the universe seed and the body's
+    /// ID. The surface seed stays off the record (the [`hooks`] module documentation).
+    #[must_use]
+    fn present_hooks(&self, index: BodyIndex) -> Section<Hooks> {
+        Section::Ok(Hooks::new(hooks::detail_seed(
+            self.seed,
+            index.body_id(self.system),
+        )))
     }
 
     /// The planet or member `body` on its orbit `orbit` at the time, of mass `mass` then, as
@@ -2561,21 +2578,16 @@ impl PlanetarySystem {
                     .envelope(envelope)
                     .population(Section::NotApplicable)
                     .rotation(body.rotation_section())
+                    .hooks(self.present_hooks(body.index))
             }
-            (Part::Ring(_), _, _) => builder
+            // A ring or a moon not present at the time, or whose planet has no position then: its
+            // sections mean nothing then.
+            (Part::Ring(_) | Part::Moon(_), _, _) => builder
                 .population(Section::NotApplicable)
                 .orbit(Section::NotApplicable)
                 .bulk(Section::NotApplicable)
                 .surface(Section::NotApplicable)
                 .hooks(Section::NotApplicable)
-                .photometry(Section::NotApplicable)
-                .figure(Section::NotApplicable)
-                .rotation(Section::NotApplicable),
-            (Part::Moon(_), _, _) => builder
-                .population(Section::NotApplicable)
-                .orbit(Section::NotApplicable)
-                .bulk(Section::NotApplicable)
-                .surface(Section::NotApplicable)
                 .photometry(Section::NotApplicable)
                 .figure(Section::NotApplicable)
                 .rotation(Section::NotApplicable),

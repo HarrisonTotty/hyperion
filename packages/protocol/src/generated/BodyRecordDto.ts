@@ -98,6 +98,8 @@ photometry?: SectionDto<BodyPhotometryDto>,
  */
 surface: SectionDto<BodySurfaceDto>, 
 /**
- * Its hooks (`full`): `not_modelled` for every body in this generator version.
+ * Its hooks (`full`): `ok`, with its detail seed, for a planet, moon or dwarf planet present
+ * at the record's time, and `not_applicable` for a ring, a belt, the halo and a body not
+ * present.
  */
 hooks: SectionDto<BodyHooksDto>, };

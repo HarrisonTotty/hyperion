@@ -525,10 +525,6 @@ fn a_record_tags_what_the_generator_does_not_compute() {
                         record.section_state(RecordSection::Population),
                         SectionState::NotApplicable
                     );
-                    assert_eq!(
-                        record.section_state(RecordSection::Hooks),
-                        SectionState::NotModelled
-                    );
                     if identity.state() == BodyState::Present {
                         present += 1;
                         if !assert_surface_or_envelope(record) {
@@ -660,6 +656,49 @@ fn assert_surface_or_envelope(record: &BodyRecord) -> bool {
         assert_eq!(envelope, SectionState::NotModelled, "{index:?}");
     }
     solid
+}
+
+/// R09.T1.b: a planet, moon or dwarf planet present at the record's time carries its own detail
+/// seed in its hooks section, never its surface seed; a ring, a belt, the halo and a body not
+/// present carry no hooks.
+#[test]
+fn a_present_body_s_hooks_are_its_detail_seed() {
+    let (mut seeded, mut absent, mut rings, mut belts) = (0, 0, 0, 0);
+    for (ctx, system) in whole().iter().take(120) {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let identity = record.identity();
+            let surfaced = matches!(
+                identity.kind(),
+                BodyKind::Planet | BodyKind::Moon(_) | BodyKind::DwarfPlanet
+            );
+            if surfaced && identity.state() == BodyState::Present {
+                let seed = hooks::detail_seed(system.seed, identity.id());
+                assert_eq!(
+                    record.hooks(),
+                    &Section::Ok(Hooks::new(seed)),
+                    "{}",
+                    identity.id()
+                );
+                let surface = system.surface_seed(record.index()).unwrap().unwrap();
+                assert_ne!(seed.get(), surface.get(), "{}", identity.id());
+                seeded += 1;
+            } else {
+                assert_eq!(record.hooks(), &Section::NotApplicable, "{}", identity.id());
+                if surfaced {
+                    absent += 1;
+                } else if identity.kind() == BodyKind::Ring {
+                    rings += 1;
+                } else if matches!(identity.kind(), BodyKind::Belt(_)) {
+                    belts += 1;
+                }
+            }
+        }
+    }
+    eprintln!("{seeded} seeded, {absent} not present, {rings} rings, {belts} belts");
+    assert!(
+        seeded > 100 && absent > 0 && rings > 5 && belts > 0,
+        "{seeded} seeded, {absent} not present, {rings} rings, {belts} belts"
+    );
 }
 
 /// P14.T30.b: a moon's position is its planet's plus its own offset, and a ring's its planet's.

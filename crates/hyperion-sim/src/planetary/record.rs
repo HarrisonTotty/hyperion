@@ -9,7 +9,7 @@
 //! | [`MassAndOrbit`](DetailLevel::MassAndOrbit) | the kind and label, the mass, the orbit, the lists of moons and rings, and a population's extent; on a system, its belts and halo |
 //! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; the rotation, the body-fixed frame (P14.T46.b), the figure, the reference spheroid (P14.T46.d), and the photometry, the template and albedos the disc is drawn with (P14.T47.c); on a system, the belts' members, as bodies and in each belt's list |
 //! | [`Surface`](DetailLevel::Surface) | the surface: its state and material, surface conditions with their climate regime and global figures (P14.T24, T48, [`Surface`]); or a gas-envelope body's envelope ([`Envelope`], P14.T24.d) |
-//! | [`Full`](DetailLevel::Full) | the hooks: surface seed, bulk composition, habitability, resources (P14.T23–T26) |
+//! | [`Full`](DetailLevel::Full) | the hooks: the detail seed (the rendering plans' R09.T1.b), and with P14.T23–T26 the bulk composition, habitability and resources; never the surface seed, which stays on the server |
 //!
 //! Every optional section carries one of four states (ruling 34 of 2026-09-22, item 3):
 //! [`Section::Ok`] with its value, [`Section::NotResolved`] where the granted level withholds it,
@@ -26,8 +26,9 @@
 //! (P14.T34). A present body with a solid surface has its surface section [`Section::Ok`]
 //! (P14.T48.e) and its envelope [`Section::NotApplicable`]; a body in the gas-envelope state, a
 //! sub-Neptune or a giant, the other way round, its envelope [`Section::NotModelled`] until
-//! P14.T24.d (decision-p14-t35e-wire). The hooks section is [`Section::NotModelled`] until its
-//! task defines [`Hooks`].
+//! P14.T24.d (decision-p14-t35e-wire). The hooks section, [`Hooks`], holds the body's detail seed
+//! (R09.T1.b): [`Section::Ok`] for a planet, moon or dwarf planet present at the record's time,
+//! and [`Section::NotApplicable`] for a ring, a belt, the halo and a body not present.
 
 use std::error::Error;
 use std::fmt;
@@ -44,6 +45,7 @@ use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
 use crate::planetary::drift::{DriftingOrbit, OrbitDrift};
 use crate::planetary::fate::BodyState;
 use crate::planetary::frames::BodyFixedFrame;
+use crate::planetary::hooks::DetailSeed;
 use crate::planetary::hooks::figures::GlobalFigures;
 use crate::planetary::hooks::surface::{ClimateRegime, SurfaceConditions};
 use crate::planetary::index::{BodyIndex, BodySub};
@@ -797,13 +799,37 @@ pub enum Biosphere {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Envelope {}
 
-/// The contents of a hooks section: surface seed, bulk composition, habitability and resources
-/// (design note 16), which P14.T23–T26 compute.
+/// The contents of a hooks section, what the generators of surfaces, life and civilisations read of
+/// a body (design note 16): so far its detail seed (the rendering plans' R09.T1.b), joined by the
+/// bulk composition, habitability and resources as P14.T23–T26 put them on the record.
 ///
-/// None of them is built, so the type has no value, and every hooks section is
-/// [`Section::NotModelled`]. The tasks that compute them give it its contents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Hooks {}
+/// It holds nothing server-only: the body's surface seed, which reveals its whole surface at once,
+/// stays in [`BodyHooks`](crate::planetary::hooks::BodyHooks), and the client is given the detail
+/// seed in its place (the [`hooks`](crate::planetary::hooks) module documentation). A record's
+/// hooks section is [`Section::Ok`] for a planet, moon or dwarf planet present at its time, and
+/// [`Section::NotApplicable`] for a ring, a belt, the halo and a body not present.
+///
+/// It is not `Copy`, since the hooks to come (the resources' abundances among them) need not be.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Hooks {
+    detail_seed: DetailSeed,
+}
+
+impl Hooks {
+    /// The hooks of a body of detail seed `detail_seed`
+    /// ([`hooks::detail_seed`](crate::planetary::hooks::detail_seed)).
+    #[must_use]
+    pub const fn new(detail_seed: DetailSeed) -> Self {
+        Self { detail_seed }
+    }
+
+    /// The detail seed, from which a client's local synthesis elaborates the surveyed coarse field
+    /// (R09.T1.b).
+    #[must_use]
+    pub const fn detail_seed(&self) -> DetailSeed {
+        self.detail_seed
+    }
+}
 
 /// What a population body is and where it lies at a record's time: a planet's ring, a belt or
 /// the cometary halo (P14.T20–T21, the record's `population` section).
@@ -1836,6 +1862,9 @@ mod tests {
             .derived(&earth)
             .moons(Section::Ok(vec![moon]))
             .rings(Section::NotApplicable)
+            .hooks(Section::Ok(Hooks::new(DetailSeed::new(
+                0x0919_0001_b000_0001,
+            ))))
             .build()
             .unwrap()
     }
@@ -1913,6 +1942,7 @@ mod tests {
         // P14.T35's wire types, and here the sections that hold those values are withheld.
         let record = mixed_record();
         assert!(record.bulk().ok().is_some());
+        assert!(record.hooks().ok().is_some());
         let degraded = record.degrade(DetailLevel::MassAndOrbit);
         assert_eq!(degraded.bulk(), &Section::NotResolved);
         assert_eq!(degraded.surface(), &Section::NotResolved);

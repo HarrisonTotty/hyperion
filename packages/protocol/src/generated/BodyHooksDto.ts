@@ -3,20 +3,21 @@ import type { DetailSeedHex } from "./DetailSeedHex";
 import type { SectionDto } from "./SectionDto";
 
 /**
- * A body's hooks section, what the generators of surfaces, life and civilisations read (plan
- * 14's `hooks::BodyHooks`): its detail seed, and with P14.T23–T26 its bulk composition,
+ * A body's hooks section, what the generators of surfaces, life and civilisations read (the
+ * simulation's `record::Hooks`): its detail seed, and with P14.T23–T26 its bulk composition,
  * habitability and resources.
  *
- * No hook is on the wire yet, so every hooks section is `not_modelled`. The body's surface seed
- * (P14.T23) is never sent: a client holding it could synthesise a surface the ship has not seen,
- * so the server keeps it, and the client gets the detail seed instead (plan 14 as amended by the
- * rendering plans' R04.T3.a; R04, Design note 17). The detail seed is a section of its own
- * because the hooks section becomes `ok` with the bulk composition while the detail seed waits for
- * R09 to derive it; the other hooks join it as the tasks that compute them land.
+ * The section is `ok` for a planet, moon or dwarf planet present at the record's time, carrying
+ * its detail seed (the rendering plans' R09.T1.b), and `not_applicable` for a ring, a belt, the
+ * cometary halo and a body not present. The body's surface seed (P14.T23) is never sent: a client
+ * holding it could synthesise a surface the ship has not seen, so the server keeps it, and the
+ * client gets the detail seed instead (plan 14 as amended by the rendering plans' R04.T3.a; R04,
+ * Design note 17). The detail seed keeps a section of its own, so that the other hooks join it,
+ * each with its own state, as the tasks that compute them land.
  */
 export type BodyHooksDto = { 
 /**
- * The seed of the client's local terrain synthesis, derived on `body.surface.detail` (R09);
- * `not_modelled` until R09 computes it.
+ * The seed of the client's local terrain synthesis, word 0 of the body's
+ * `body.surface.detail` stream (R09.T1.b); `ok` in every hooks section the server sends.
  */
 detail_seed: SectionDto<DetailSeedHex>, };

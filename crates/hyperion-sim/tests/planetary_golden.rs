@@ -41,7 +41,7 @@ use hyperion_sim::planetary::derive::{
 use hyperion_sim::planetary::disc::{self, Disc, DiscDraws, DiscHost, Truncation};
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
 use hyperion_sim::planetary::frames::BodyFixedFrame;
-use hyperion_sim::planetary::hooks::surface_seed;
+use hyperion_sim::planetary::hooks::{detail_seed, surface_seed};
 use hyperion_sim::planetary::placement::OrbitHost;
 use hyperion_sim::planetary::placement::{
     Neighbour, PlacedPlanet, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis,
@@ -384,11 +384,8 @@ fn write_eccentricity(w: &mut GoldenWriter, name: &str, law: EccentricityLaw) {
     }
 }
 
-/// The surface seeds of a few bodies (P14.T23): a function of the universe seed and the body's ID
-/// alone, which no change to the derivation may move. Pinned when R09.T1.a moved the type into the
-/// base crate, at the values the sim's own type gave.
-#[test]
-fn surface_seeds_are_pinned() {
+/// A seed of each of six bodies, by `seed_of`, in four universes: the seed goldens.
+fn body_seeds(seed_of: impl Fn(Seed, BodyId) -> u64) -> GoldenWriter {
     let mut w = GoldenWriter::new();
     w.header(GENERATOR_VERSION.get());
     let bodies = [
@@ -404,11 +401,29 @@ fn surface_seeds_are_pinned() {
             let body = BodyId::new(SystemId::from_raw(raw).unwrap(), index);
             w.u64_hex(
                 &format!("seed {seed:016x} body {body}"),
-                surface_seed(Seed::new(seed), body).get(),
+                seed_of(Seed::new(seed), body),
             );
         }
     }
+    w
+}
+
+/// The surface seeds of a few bodies (P14.T23): a function of the universe seed and the body's ID
+/// alone, which no change to the derivation may move. Pinned when R09.T1.a moved the type into the
+/// base crate, at the values the sim's own type gave.
+#[test]
+fn surface_seeds_are_pinned() {
+    let w = body_seeds(|seed, body| surface_seed(seed, body).get());
     golden!("planetary/surface_seed", w.as_str());
+}
+
+/// The detail seeds of the same bodies (R09.T1.b): a function of the universe seed and the body's
+/// ID alone, on a tag of its own, which the client is sent in the surface seed's place and whose
+/// synthesis it keys.
+#[test]
+fn detail_seeds_are_pinned() {
+    let w = body_seeds(|seed, body| detail_seed(seed, body).get());
+    golden!("planetary/detail_seed", w.as_str());
 }
 
 #[test]
@@ -1138,7 +1153,11 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
         other => write_section_state(w, "population", other),
     }
     write_section_state(w, "surface", record.surface());
-    write_section_state(w, "hooks", record.hooks());
+    // R09.T1.b: a present body's hooks section holds its detail seed, pinned by value.
+    match record.hooks() {
+        Section::Ok(hooks) => w.u64_hex("hooks detail_seed", hooks.detail_seed().get()),
+        other => write_section_state(w, "hooks", other),
+    }
     // P14.T46.f and T47.d: the frame, the figure and the photometry the wire carries, after every
     // older line, so that the older lines keep their keys.
     match record.rotation() {

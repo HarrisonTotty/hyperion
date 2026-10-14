@@ -1,11 +1,12 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23, T24.a, T24.b, T48.a–d, T48.f):
+//! Built so far (P14.T23, T24.a, T24.b, T48.a–d, T48.f; the rendering plans' R09.T1.b):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
-//!   derivation moves a map.
+//!   derivation moves a map; and its [`DetailSeed`] (R09.T1.b), likewise on `body.surface.detail`,
+//!   which the client is given in the surface seed's place.
 //! - [`BulkComposition`]: the body's mass fractions (P14.T11), the volatile inventory of its
 //!   atmosphere (P14.T13) and its host's \[Fe/H\] and \[α/Fe\], which the resource model and the
 //!   later generators read.
@@ -29,9 +30,9 @@
 //! The seed reveals a body's whole surface at once, and a client holds only what its ship has
 //! seen (the rendering brainstorm's "Knowledge, and the surface seed"; the rendering plans' R04,
 //! "a detail seed on the wire, the surface seed off it"). So [`BodyHooks`] is not part of a
-//! [`BodyRecord`](crate::planetary::record::BodyRecord), whose hooks section stays
-//! [`Section::NotModelled`] until the wire's hooks carry a detail seed in its place, and no wire
-//! type is built from it.
+//! [`BodyRecord`](crate::planetary::record::BodyRecord), and no wire type is built from it. The
+//! record's hooks section ([`record::Hooks`](crate::planetary::record::Hooks)) carries the body's
+//! [`DetailSeed`] in the surface seed's place (R09.T1.b), and nothing server-only.
 
 pub mod figures;
 pub mod seed;
@@ -41,7 +42,7 @@ pub use figures::{
     GlobalFigures, Impactors, MagneticField, OceanFloor, Subsurface, SubsurfaceOcean,
     TectonicRegime, impactors,
 };
-pub use seed::{SurfaceSeed, surface_seed};
+pub use seed::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
 pub use surface::{ClimateRegime, RadiationClass, SurfaceConditions};
 
 use crate::planetary::derive::MassFractions;
