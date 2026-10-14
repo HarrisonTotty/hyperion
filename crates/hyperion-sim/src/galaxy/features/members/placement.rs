@@ -28,10 +28,12 @@
 use crate::coords::{GalacticDisplacement, GalacticPosition, GalacticVelocity};
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::placement::ResolveSystemError;
+use crate::galaxy::query::UNBOUND_PAD_SPEED;
 use crate::galaxy::{Galaxy, PointLy};
 use crate::id::{FeatureMemberId, FeatureRef, MemberSlot, SystemId};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::units::consts::METRES_PER_LIGHT_YEAR;
+use crate::units::{KilometresPerSecond, LightYears};
 
 use super::super::catalogue::{FeatureCatalogue, FeatureRecord, bulk_velocity};
 use super::super::cluster::ClusterModel;
@@ -39,7 +41,7 @@ use super::super::interior::{CellProposal, LocalCell, MemberClassTable};
 use super::super::nested::{NestedCell, NestedGrid};
 use super::level_list::FeatureLevelList;
 use super::source::FeatureInteriorCache;
-use super::{MemberRecord, draw_member};
+use super::{INTERNAL_SPEED_SIGMAS, MemberRecord, draw_member, equipartition_factor};
 
 /// A feature's interior: what placing its members needs, built once per feature and kept by the
 /// caller (P09.T21).
@@ -50,6 +52,7 @@ pub struct FeatureInterior {
     table: MemberClassTable,
     grid: NestedGrid,
     bulk: GalacticVelocity,
+    speed_bound: KilometresPerSecond,
 }
 
 impl FeatureInterior {
@@ -62,6 +65,11 @@ impl FeatureInterior {
     /// ([`bulk_velocity`]) sets the tails' axis and so which candidates are accepted, and a zero
     /// stand-in would give the same ID another member. The tails run along it from the tidal
     /// radius to the feature's [`reach`](FeatureRecord::reach), cut at the grid's.
+    ///
+    /// # Panics
+    ///
+    /// In debug builds, if its [`member_speed_bound`](Self::member_speed_bound) is not below
+    /// [`UNBOUND_PAD_SPEED`], the speed the range query's feature lookup is padded by.
     #[must_use]
     pub fn of(galaxy: &Galaxy, feature: &FeatureRecord) -> Option<Self> {
         let bulk = bulk_velocity(galaxy, feature)?;
@@ -70,12 +78,22 @@ impl FeatureInterior {
             MemberClassTable::new(galaxy, &model, feature.reach(), bulk.metres_per_second());
         let grid = table.grid();
         let table = table.with_tails_to(grid.reach());
+        let speed_bound = member_speed_bound(&model, &table, bulk);
+        debug_assert!(
+            speed_bound.value() < UNBOUND_PAD_SPEED.value(),
+            "the members of {:?} may move at {} km/s, not below the {} km/s the range query's \
+             feature lookup is padded by",
+            feature.id(),
+            speed_bound.value(),
+            UNBOUND_PAD_SPEED.value()
+        );
         Some(Self {
             feature: *feature,
             model,
             table,
             grid,
             bulk,
+            speed_bound,
         })
     }
 
@@ -107,6 +125,26 @@ impl FeatureInterior {
     #[must_use]
     pub const fn bulk_velocity(&self) -> GalacticVelocity {
         self.bulk
+    }
+
+    /// A bound on the speed of every member in its grid, km/s, galactic (P09.T23.b).
+    ///
+    /// It is |bulk| plus the larger of two internal speeds, rounded up by 1 + 10⁻⁹: at least the
+    /// bulk speed, and below [`UNBOUND_PAD_SPEED`], which [`of`](Self::of) asserts in debug builds.
+    /// The range query pads the feature's cells by it where it passes a layer's pad speed.
+    ///
+    /// - A core member's internal velocity is cut at the local escape speed of the cluster's
+    ///   Plummer sphere, greatest at the centre: [`ClusterModel::escape_speed_at`] at 0, `√(2GM ÷
+    ///   a)`, not the fitted [`ClusterModel::escape_speed_central`].
+    /// - A tail member's is uncut, at the tidal radius's σ times its class's equipartition factor:
+    ///   at most 8.58 √2 times the largest over the bands' tails.
+    ///
+    /// It does not cover the classes of the feature-level list ([`MemberSlot::FeatureLevel`],
+    /// registered by P09.T30.b, T36 and T43): a task that registers one with its own velocity law
+    /// extends this bound.
+    #[must_use]
+    pub const fn member_speed_bound(&self) -> KilometresPerSecond {
+        self.speed_bound
     }
 
     /// The feature-level list of its members (P09.T22).
@@ -249,6 +287,35 @@ impl FeatureInterior {
             (0..n).filter_map(|i| self.candidate_under(galaxy, band, cell, i, &proposal, &local)),
         );
     }
+}
+
+/// The relative margin [`FeatureInterior::member_speed_bound`] is rounded up by.
+///
+/// A kept core member's internal speed is below the cut as its draw computes the norm in km/s,
+/// and the cut enters the bound unrounded, while a member's speed is the norm in m/s of its bulk
+/// plus its internal velocity, component by component, which can pass |bulk| plus the cut by a few
+/// units in the last place. 10⁻⁹ is at least 4.5 × 10⁶ of them, and a millimetre per second at
+/// 1,000 km/s.
+const SPEED_BOUND_MARGIN: f64 = 1e-9;
+
+/// [`FeatureInterior::member_speed_bound`] for a cluster of `model`, with the class table `table`
+/// whose tails are cut at its grid's reach and bulk velocity `bulk`.
+#[must_use]
+fn member_speed_bound(
+    model: &ClusterModel,
+    table: &MemberClassTable,
+    bulk: GalacticVelocity,
+) -> KilometresPerSecond {
+    let core = model.escape_speed_at(LightYears::new(0.0)).value();
+    let turn_off = model.turn_off_mass();
+    let factor = MassBand::ALL
+        .iter()
+        .filter_map(|&band| table.tail(band))
+        .map(|tail| equipartition_factor(tail.class().mean_mass, turn_off))
+        .fold(0.0, f64::max);
+    let tail = INTERNAL_SPEED_SIGMAS * model.sigma(model.tidal_radius()).value() * factor;
+    let bulk = KilometresPerSecond::from(bulk.speed()).value();
+    KilometresPerSecond::new((bulk + core.max(tail)) * (1.0 + SPEED_BOUND_MARGIN))
 }
 
 /// The count of a cell whose candidate 0 is `first` and whose mean is `mean`.

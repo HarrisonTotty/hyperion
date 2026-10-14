@@ -148,7 +148,9 @@ FeatureRecord>`, `walk_process(&Galaxy, FeatureProcess) -> impl Iterator<Item = 
   `NestedGrid::new(width, cells_per_axis, levels)`, `cells_touching(sphere)`,
   `owner_of(local_position)`.
 - `features::members::{MemberRecord, resolve_member, FeatureLevelList, FeatureMemberSource}`.
-  `FeatureMemberSource` implements plan 03's `SystemSource`. A `MemberRecord` holds a plan 03
+  `FeatureMemberSource` implements plan 03's `SystemSource`, and pads each feature's cells by its
+  members' own speed bound, `FeatureInterior::member_speed_bound() -> KilometresPerSecond`
+  (P09.T23.b), which R06.T16.a's census relies on. A `MemberRecord` holds a plan 03
   `SystemRecord` (design note 20), the member's class, its `Composition` and its `MemberAbundances`.
   `features::members::sphere_of_influence(galaxy, &FeatureRecord, &ClusterModel, &MemberRecord) ->
 Metres` (as built: the member needs its cluster's model) is the smaller-radius
@@ -1010,6 +1012,8 @@ Tests:
 Files: `galaxy/features/members/source.rs`, `galaxy/features/members/placement.rs`. Acceptance:
 `cargo test -p hyperion-sim features::members`, `just ci`. No GENERATOR_VERSION bump: padding
 chooses cells, not output.
+
+_Done (issue #15, 2026-10-14, at `GENERATOR_VERSION` 22): see Risks, "P09.T23.b as built"._
 
 ### Phase 6: the galactic centre
 
@@ -2563,3 +2567,90 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     they reach 2.9 × 10⁻¹¹ (bins 7–9, the triage's run). The carved share itself is checked by
     `shares.rs`'s `the_field_features_and_carved_classes_add_up_to_the_budget`.
   - It passes by name (`--cargo-profile slow-test --run-ignored only`).
+- **P09.T23.b as built (issue #15, lane `lane/15-p09-t23b-feature-pad`, 2026-10-14, at
+  `GENERATOR_VERSION` 22).** No output moves and there is no bump: the padding chooses which cells
+  are visited, not what they hold. No golden is added, and every golden passes unchanged,
+  `galaxy/features/members` among them. Files: `members/placement.rs`, `members/source.rs`, and
+  one `pub(crate)` constant in `members.rs`.
+  - _The bound._ `FeatureInterior::member_speed_bound() -> KilometresPerSecond` is computed once
+    in `FeatureInterior::of` and kept in a field. It is (|bulk| + max(core, tail)) × (1 + 10⁻⁹).
+    - "The cluster's central escape speed" is read as the value of `member_velocity`'s cut at the
+      centre, `ClusterModel::escape_speed_at(0)` = √(2GM ÷ a) of the cluster's Plummer sphere,
+      the most the cut takes anywhere. It is not `ClusterModel::escape_speed_central`, the fitted
+      `central_escape_speed` that retention reads: on the sample's fastest feature the fit is the
+      larger, 0.334 against 0.268 km/s.
+    - The tail term is 8.58 √2 = 12.134 (`members::INTERNAL_SPEED_SIGMAS`, rounded up from
+      √(212 ln 2) = 12.1222) times σ at the tidal radius times the largest `equipartition_factor`
+      over the bands' tails, in the table cut at the grid's reach. It is 0 without a tail.
+    - Its doc comment states the limit: the feature-level list's classes (P09.T30.b, T36 and T43)
+      are not covered, and a task that registers one with its own velocity law extends the bound.
+  - _Rounding._ Both: the 8.58 factor for the tail term, and a relative margin of 10⁻⁹ on the sum
+    (`placement::SPEED_BOUND_MARGIN`). The margin was applied from the start, not after a test
+    tripped: the core term is the cut's own value, unrounded, while a member's speed in m/s is the
+    norm of a component-wise sum.
+  - _The reach._ `source::band_reach(radius, t, layer, bound)`, a private pure function, is the
+    radius plus `pad_for(t, max(pad_speed(layer), bound))`: today's reach, bit for bit, where the
+    bound is the lower. `interiors_near` is asked with the sphere padded at `UNBOUND_PAD_SPEED`
+    whatever the layers asked (it was the fastest asked layer's pad). The debug assertion that
+    every bound lies below `UNBOUND_PAD_SPEED` sits in `FeatureInterior::of`, so that it checks
+    every interior any caller builds, not only those the source looks up. The census is unchanged.
+  - _Fast tests,_ added to `the_member_source_finds_and_counts_what_a_scan_finds` on its one
+    fixture build. The bound of the tests' open cluster and globular equals |bulk| plus the larger
+    term recomputed from the model's getters (to the margin), is above every member the fast tests
+    enumerate (the open cluster's 1,647; the globular's busiest band-C cell, 7) and is below
+    `UNBOUND_PAD_SPEED`. Open cluster: 236.359 km/s = 230.260 + max(core 1.445, tail 6.099);
+    globular: 170.816 = 165.392 + max(1.773, 5.424). The tail term is the larger in both.
+    The open cluster's query asked for band C alone now equals the scan's band-C hits too, which
+    checks the lookup without layer E, the one whose radius grew.
+    `a_feature_s_reach_is_its_layer_s_unless_its_bound_is_faster` needs no fixture. The scan now
+    runs over a member list enumerated once (`every_member`), so the open cluster's comparison and
+    the slow globular-core test each enumerate their cluster once for both times.
+    `cargo test -p hyperion-sim features::members`: 15 passed, 5 ignored, in 18.1 s.
+  - _The sample_ (`source::tests::sample`, for the slow tests). It takes every feature with an
+    interior within 2,000 ly of the galactic centre, from `FeatureCatalogue::near`, then features
+    from `walk_process` up to 200: a third each from the globulars, the old open clusters (the
+    sub-discs in turn) and the nurseries. The inner set alone is 225 features: 7 globulars, 104
+    old open clusters (89 of the first sub-disc, 10 of the second, 4 of the third, 1 of the fourth)
+    and 114 nurseries. So the sample is the inner set, and the walk adds none.
+  - _"The fixture's features"_ (the count, and "the fixture's feature with the largest bound" among
+    the ±H centres) are read as the sample's, not the whole catalogue's. A feature farther out has
+    its bulk below the local escape speed (the pad-speed ruling of 2026-10-05). That is at most
+    715.9 km/s beyond 2,000 ly, the value in the plane at 2,000 ly, where the flattened potential
+    is deepest. The sample's largest internal term is 69.7 km/s, and the ruling's largest central
+    escape speed over P09.T14's 50 seeds is 164 km/s, so no feature outside the sample is expected
+    near `PAD_SPEED` either.
+  - _The run-time rule_ is issue #15's brief's: time the member test once, alone and capped; at 20
+    minutes or less keep every member; above that keep every member of the inner set, the open
+    clusters, the nurseries and the feature with the largest bound, and take the other globulars'
+    bands A and B whole and bands C–E in every eighth owned cell, recording the cut.
+  - _Slow tests,_ each run once on the slow-test profile, alone under a 6 GB memory cap, on the
+    shared 8-thread laptop at a 1-minute load of 1–4:
+    - `every_member_of_the_sampled_features_moves_below_its_feature_s_bound`: all 2,731,509
+      members of the 225 features, every band and owned cell, move below their feature's bound.
+      The largest ratio of a member's speed to its bound is 0.999089, in FFG F201, an old open
+      cluster of 228 members bound at 314.209 km/s. 1,179 s (19.6 minutes), within the run-time
+      rule's 20, so no member is cut; the cut would have thinned only globulars outside the inner
+      set, and the sample has none, so the test has no thinning. The seven globulars hold
+      2.04 × 10⁶ of the members, FGF F2's 768,514 the most, and most of the time.
+    - `the_sampled_features_bounds_stay_below_the_unbound_pad_and_the_fast_ones_are_counted`: none
+      of the 225 at or above `PAD_SPEED`. The largest bound is 688.505 km/s, of GGF F43, an old
+      open cluster of the first sub-disc with 136 members: bulk 685.996, core 0.268, tail 2.509
+      km/s. 7.0 s.
+    - `queries_at_plus_and_minus_h_find_what_a_scan_finds_in_the_20_fastest_sampled_features`: at
+      t = ±1,000 years the source's hits of each of the sample's 20 fastest features equal the
+      scan's. Their bounds run from 464.6 to 688.5 km/s; they are 18 old open clusters and the
+      globulars GFG F3 and FGF F4. The sphere is the half-mass radius, centred a quarter of it off
+      the feature's centre, not P09.T23's 50 ly: its edge cuts the cluster, so that members cross
+      it over ±H, where the bulk alone carries the fastest some 2.3 ly. It holds 5 to 40,774
+      members a query; the test asks that 18 of the 20 centres find members, and all 20 do. 581 s,
+      nearly all of it the two globulars' 237,000 and 321,000 members. The 20 centres are a slow
+      test of their own; the fast comparison at 0 and −600 years is unchanged.
+    - The existing `a_50_ly_query_in_a_globular_s_core_is_a_brute_force_enumeration` passes in
+      18.8 s, and placement's `no_cell_and_band_of_the_fixture_s_clusters_nears_the_index` in
+      14.1 s with its recorded figures (734 clusters, 2 over the target, the fullest 4,237).
+- **Deferred findings (2026-10-13 rule)**, from P09.T23.b's review:
+  - _No golden pins the member source's hits._ That a padding change moves no hit is held only by
+    the scan comparisons, so a later edit to the padding or the lookup could change which members
+    a query returns without any golden failing. A small golden of the shared open cluster's query
+    hits, all layers and band C alone at −600 years, would pin them: a new label at the version in
+    force, with no bump. This task adds no golden, by its brief.
