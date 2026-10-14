@@ -11988,3 +11988,82 @@ tables::gauss_legendre`.
   - **Open.** Brown-dwarf hosts keep their truncation, 0.09–0.61 of single stars' close planets by
     separation. Moe and Kratter's "no significant suppression" rests on three hot-Jupiter systems;
     revisit if a measured rate appears.
+
+- **Deviations in P14.T35.e, as built (`p14-wire`, 2026-10-14).** The surface section and the gas
+  envelope on the wire, with `PROTOCOL_VERSION` 2 (decision-p14-t35e-wire) and no output moved:
+  `GENERATOR_VERSION` stays 22 and `ProtocolVersion.ts` is unchanged.
+  - _Where the types live._ `BodySurfaceDto`, `BodyEnvelopeDto` and their 34 member types are in
+    `crates/hyperion-protocol/src/planetary/record/surface.rs`, a child module of `record.rs`
+    (given that file's size), re-exported through `record.rs`, `planetary.rs` and `lib.rs`. The
+    section-level tests sit with the types (wire forms, every closed enum's strings, the
+    `Modelled` members' absent, `null` and value forms, an unknown member, every keyed member
+    holding an unknown key, and the units in the names); `record.rs` keeps the record-level tests
+    of decision-p14-t35e-wire §1.5, which replace `a_surface_section_cannot_claim_a_value_yet`.
+  - _The volcanism level is a number_, `volcanism_level`, T48.a's continuous V
+    (`GlobalFigures::volcanism`), not the closed class decision-composition §1.10 and
+    decision-p14-t35e-wire §1.5 item 5 list: the record holds no class. It is frozen once a build
+    sends it. A class, should T51.d or T53.c define one (both name an `Extreme` volcanism), joins
+    as an additive member beside V. Asked of "main" (below); the three passages that still name a
+    closed volcanism class (decision-composition §1.10, decision-p14-t35e-wire §1.5 item 5, and
+    this plan's Risks "Composition" list) are for the docs lane.
+  - _The absorber's profile._ `AbsorberDto` gains `profile`, `null` for a layer of constant mixing
+    ratio or T24.c's ozone nodes `{ pressure_pa, relative_mixing_ratio }`, beyond T35.e's
+    `{ species, column_m2, base_pa, top_pa }`. It is sent absent with `aerosols` until T24.c, which
+    may reshape it.
+  - _No `gas_envelope` state._ `SurfaceStateDto` lists the states a surface section can hold, with
+    T53.b's `steam_envelope` and T53.c's `tenuous` reserved; the record's surface never holds the
+    gas envelope (`Surface::new` refuses it), so `convert/planetary.rs`'s `surface_state` is
+    `unreachable!` there, documented under `# Panics`. T53.b and T53.c add their arms to it.
+  - _What the wire does not carry._ T35.e's list, not every getter of `record::Surface`: the
+    conditions' `climate_range` and the figures' `non_tidal_heat_flow`, `radiogenic_heat_flow`,
+    `interior`, `crater_density` (the contract's N☾ is sent), `impactors`, `from_colder`, `relief`,
+    `surface_water`, `potential_ocean`, `ocean_weight` and `ice_threshold` are left off. Each can
+    join later as an optional member.
+  - _Names and shapes the task left open._ The production is `lunar_equivalent_n_1km_per_km2`;
+    the screening `CraterScreeningDto`, tagged `none`, `atmosphere` (`column_mass_kg_m2`) or
+    `cutoff` (`diameter_m`); the present outgassing `outgassing_earth`, relative to Earth's present
+    rate; the system's age and the wet epoch's times in seconds; the regime's model R09's
+    `ClimateModelDto`. `SubstancePhaseDto`, the sim's four-variant `Phase`, serves the modes and
+    the condensates: the client refuses `vapour` and `supercritical` for a mode, and `vapour` for
+    a condensate. The later members' shapes are the lane's reading of their tasks, which may
+    reshape them before a build sends one: `vertical_structure` holds `alpha`,
+    `skin_temperature_k` and `adiabat`; a mode's `size_distribution` is tagged `gamma`,
+    `log_normal` or `aggregate`
+    (`monomer_count` a number, `fractal_dimension` in [1, 2.5]); `condensates` a list;
+    `modifiers` `{ maturity, organic_cover, resurfacing_m_per_yr }`; the envelope's Guillot
+    parameters `{ thermal_opacity_m2_per_kg, opacity_ratio, redistribution_factor }`.
+  - _The server._ `body_summary` now builds the list entry itself and `body_record` adds the
+    surface, envelope and hooks to it, so that the list converts no surface it would drop. A
+    later member is converted through `later`, whose closure gives `None` for a member computed as
+    none, sent `null`.
+  - _The shared fixture_ gains an 11th message, `body_detail_jupiter`, the slice's Jupiter entry
+    with its surface `not_applicable` and its envelope `ok` (`jupiterDetail()` reads it). The
+    Earth's `full` record carries its surface (illustrative values) and an envelope
+    `not_applicable`; `body_detail_mass_and_orbit` withholds both; `body_detail_contact` keeps the
+    form of a server before this subtask, with no `envelope` key.
+  - _T43.b's amendment_ (decision-p14-t35e-wire F2) did not land with this subtask; it follows it
+    directly. Until it does, the client shows no `SURFACE` row for an `ok` surface, and
+    `SystemView.bodies.test.tsx`'s "NOT YET MODELLED once" test reads
+    `earthDetailOfAnOlderServer()`; the amendment points it back at `earthDetail()`.
+  - _The server's tests._ `convert/planetary.rs` gains a `tests` module over the 15 golden
+    systems at `full`, their IDs copied from `tests/planetary_golden.rs`'s `GOLDEN_SYSTEMS` (a
+    copy that can drift; a re-pin there re-pins it here). `tests/system_bodies.rs` holds every
+    record's surface and envelope to the sim's states, the envelope always sent.
+  - _Files beyond the task's_: in `hyperion-protocol/src/`, `planetary.rs`, `envelope.rs`,
+    `planetary/requests.rs` and `planetary/record/surface.rs`;
+    `hyperion-server/tests/system_bodies.rs`; `packages/protocol/src/index.ts`;
+    `lib/system/wire.ts` (exports `modelled`), `test/planetaryFixture.ts` and
+    `displays/system/SystemView.bodies.test.tsx`.
+  - _Accepted_, besides the task's commands, by
+    `cargo test -p hyperion-server --test system_bodies`,
+    `pnpm --filter @hyperion/protocol exec vitest run` and
+    `pnpm --filter hyperion exec vitest run src/renderer/src/displays/system`.
+  - _For "main"_ (lean given, built to it): whether the closed volcanism class is retired for
+    T48.a's continuous V, each later task stating its own threshold for `Extreme`, or added later
+    as a separate member. Lean: the number now, and any class as an additive member.
+- **Deferred findings (2026-10-13 rule)**, from P14.T35.e:
+  - A surface in a state other than `Airless` can hold no gas: `close_binary`'s dwarf planet
+    `e101`, a `MagmaOcean` at 1,684 K, has zero surface pressure and an empty `gases`, its
+    rock-vapour air not modelled. The wire carries it as it is (no mixture figures).
+  - The client does not hold `surface_age_s` to the crater contract's `system_age_s`: the two
+    come through different unit conversions (years and Gyr to seconds), which can part by an ulp.

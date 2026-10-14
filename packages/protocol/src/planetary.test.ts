@@ -193,7 +193,7 @@ describe("system_bodies", () => {
 });
 
 describe("body_detail", () => {
-  it("decodes a whole record, with the surface and hooks not yet modelled", () => {
+  it("decodes a whole record, with its surface, no envelope and the hooks not yet modelled", () => {
     const detail = response("body_detail_response", "body_detail");
 
     expect(detail.universe).toBe(UNIVERSE);
@@ -206,10 +206,60 @@ describe("body_detail", () => {
       water: 0,
       envelope: 0,
     });
-    expect([detail.record.surface.state, detail.record.hooks.state]).toEqual([
-      "not_modelled",
-      "not_modelled",
+    expect([
+      detail.record.surface.state,
+      detail.record.envelope,
+      detail.record.hooks.state,
+    ]).toEqual(["ok", { state: "not_applicable" }, "not_modelled"]);
+  });
+
+  it("decodes an Earth's surface, every substance a registry key (P14.T35.e)", () => {
+    const surface = okValue(response("body_detail_response", "body_detail").record.surface);
+    const sum = surface.gases.reduce((total, gas) => total + gas.mole_fraction, 0);
+
+    expect(surface.state).toBe("temperate");
+    expect(surface.gases.map((gas) => gas.species)).toEqual(["N2", "H2O", "Ar", "CO2"]);
+    expect(Math.abs(sum - 1)).toBeLessThanOrEqual(1e-9);
+    expect(surface.climate_regime.condensable).toBe("H2O");
+    expect(surface.craters.screening).toEqual({ type: "atmosphere", column_mass_kg_m2: 10_318 });
+    expect(surface.wet_epoch?.liquid).toBe("H2O");
+    // The members of later tasks are absent, which reads not modelled, never null.
+    for (const member of [
+      "subsurface_ocean",
+      "vertical_structure",
+      "aerosols",
+      "condensates",
+      "crust",
+      "modifiers",
+      "biosphere",
+    ]) {
+      expect(member in surface).toBe(false);
+    }
+  });
+
+  it("decodes a Jupiter's envelope, its surface not applicable (P14.T35.e)", () => {
+    const { record } = response("body_detail_jupiter", "body_detail");
+    if (record.envelope === undefined) {
+      throw new Error("the fixture's Jupiter lost its envelope");
+    }
+    const envelope = okValue(record.envelope);
+
+    expect(record.surface).toEqual({ state: "not_applicable" });
+    expect(okValue(record.bulk).class).toBe("gas_giant");
+    expect(envelope.composition.map((gas) => gas.species)).toEqual(["H2", "He", "CH4"]);
+    expect(envelope.decks.map((deck) => [deck.material, deck.phase, deck.deck])).toEqual([
+      ["NH3", "solid", "NH3"],
     ]);
+    expect(envelope.adiabat.map((node) => node.pressure_pa)).toEqual([5e4, 1e5, 1e6, 1e7]);
+  });
+
+  it("keeps a record as a server before P14.T35.e wrote it, with no envelope key", () => {
+    const { record } = response("body_detail_contact", "body_detail");
+
+    expect("envelope" in record).toBe(false);
+    expect(response("body_detail_mass_and_orbit", "body_detail").record.envelope).toEqual({
+      state: "not_resolved",
+    });
   });
 
   it("carries a ring's, a belt's and a halo's extent as their population", () => {

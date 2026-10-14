@@ -39,6 +39,42 @@ import type { FigureDatumDto } from "./generated/FigureDatumDto";
 import type { FigureLawDto } from "./generated/FigureLawDto";
 import type { PhaseTemplateDto } from "./generated/PhaseTemplateDto";
 import type { SpinResonanceDto } from "./generated/SpinResonanceDto";
+// The surface section and the gas envelope (galaxy plan 14, P14.T35.e).
+import type { AbsorberDto } from "./generated/AbsorberDto";
+import type { AerosolInventoryDto } from "./generated/AerosolInventoryDto";
+import type { AerosolModeDto } from "./generated/AerosolModeDto";
+import type { AerosolShapeDto } from "./generated/AerosolShapeDto";
+import type { BiosphereDto } from "./generated/BiosphereDto";
+import type { BiosphereFluxDto } from "./generated/BiosphereFluxDto";
+import type { BodyEnvelopeDto } from "./generated/BodyEnvelopeDto";
+import type { ClimateForcingDto } from "./generated/ClimateForcingDto";
+import type { ClimateRegimeDto } from "./generated/ClimateRegimeDto";
+import type { CondensateDeckDto } from "./generated/CondensateDeckDto";
+import type { CraterContractDto } from "./generated/CraterContractDto";
+import type { CraterScreeningDto } from "./generated/CraterScreeningDto";
+import type { CraterTargetClassDto } from "./generated/CraterTargetClassDto";
+import type { CrustCompositionDto } from "./generated/CrustCompositionDto";
+import type { CrustLidDto } from "./generated/CrustLidDto";
+import type { GasShareDto } from "./generated/GasShareDto";
+import type { GuillotProfileDto } from "./generated/GuillotProfileDto";
+import type { MagneticFieldClassDto } from "./generated/MagneticFieldClassDto";
+import type { MixingRatioNodeDto } from "./generated/MixingRatioNodeDto";
+import type { OceanFloorDto } from "./generated/OceanFloorDto";
+import type { ProfileNodeDto } from "./generated/ProfileNodeDto";
+import type { RadiationClassDto } from "./generated/RadiationClassDto";
+import type { RedoxClassDto } from "./generated/RedoxClassDto";
+import type { SizeDistributionDto } from "./generated/SizeDistributionDto";
+import type { SubstanceAreaDto } from "./generated/SubstanceAreaDto";
+import type { SubstancePhaseDto } from "./generated/SubstancePhaseDto";
+import type { SubsurfaceOceanDto } from "./generated/SubsurfaceOceanDto";
+import type { SurfaceCondensateDto } from "./generated/SurfaceCondensateDto";
+import type { SurfaceMaterialDto } from "./generated/SurfaceMaterialDto";
+import type { SurfaceModifiersDto } from "./generated/SurfaceModifiersDto";
+import type { SurfaceStateDto } from "./generated/SurfaceStateDto";
+import type { TectonicRegimeDto } from "./generated/TectonicRegimeDto";
+import type { ThermalRegimeDto } from "./generated/ThermalRegimeDto";
+import type { VerticalStructureDto } from "./generated/VerticalStructureDto";
+import type { WetEpochDto } from "./generated/WetEpochDto";
 import type { Census } from "./generated/Census";
 import type { ClientMessage } from "./generated/ClientMessage";
 import type { CreateUniverseRequest } from "./generated/CreateUniverseRequest";
@@ -200,6 +236,41 @@ export type {
   FigureLawDto,
   PhaseTemplateDto,
   SpinResonanceDto,
+  AbsorberDto,
+  AerosolInventoryDto,
+  AerosolModeDto,
+  AerosolShapeDto,
+  BiosphereDto,
+  BiosphereFluxDto,
+  BodyEnvelopeDto,
+  ClimateForcingDto,
+  ClimateRegimeDto,
+  CondensateDeckDto,
+  CraterContractDto,
+  CraterScreeningDto,
+  CraterTargetClassDto,
+  CrustCompositionDto,
+  CrustLidDto,
+  GasShareDto,
+  GuillotProfileDto,
+  MagneticFieldClassDto,
+  MixingRatioNodeDto,
+  OceanFloorDto,
+  ProfileNodeDto,
+  RadiationClassDto,
+  RedoxClassDto,
+  SizeDistributionDto,
+  SubstanceAreaDto,
+  SubstancePhaseDto,
+  SubsurfaceOceanDto,
+  SurfaceCondensateDto,
+  SurfaceMaterialDto,
+  SurfaceModifiersDto,
+  SurfaceStateDto,
+  TectonicRegimeDto,
+  ThermalRegimeDto,
+  VerticalStructureDto,
+  WetEpochDto,
   CataclysmicKindDto,
   Census,
   ClientMessage,

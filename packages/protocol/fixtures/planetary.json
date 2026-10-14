@@ -1,5 +1,5 @@
 {
-  "description": "Plan 14's system_bodies, body_detail and body_events messages, pinned from both languages, every number at the full precision of its f64, since the server parses floats exactly (serde_json's float_roundtrip, ruling 64.7): the Rust wire-form tests of hyperion-protocol read this file and require every message to round-trip exactly, and @hyperion/protocol's tests decode it. system_bodies_response is the vertical slice's: one Sun-like star, its zone, and two planets whose label, moons and rings are not_modelled, with the system's belts and halo not_modelled; the Earth carries the rotation, figure and photometry sections (P14.T46.f, T47.d, illustrative values), and the giant keeps the form of a server before them, without the three keys. system_bodies_populated exercises every kind, state and section state a later generator version gives, and is shapes, not a generator's output: which sections a destroyed, unbound or not-yet-formed body keeps is P14.T28's and T30's to say. body_events_response has no events, since BodyEventDto has no variant before P14.T31. The body_detail answers are one Earth at three detail levels.",
+  "description": "Plan 14's system_bodies, body_detail and body_events messages, pinned from both languages, every number at the full precision of its f64, since the server parses floats exactly (serde_json's float_roundtrip, ruling 64.7): the Rust wire-form tests of hyperion-protocol read this file and require every message to round-trip exactly, and @hyperion/protocol's tests decode it. system_bodies_response is the vertical slice's: one Sun-like star, its zone, and two planets whose label, moons and rings are not_modelled, with the system's belts and halo not_modelled; the Earth carries the rotation, figure and photometry sections (P14.T46.f, T47.d, illustrative values), and the giant keeps the form of a server before them, without the three keys. system_bodies_populated exercises every kind, state and section state a later generator version gives, and is shapes, not a generator's output: which sections a destroyed, unbound or not-yet-formed body keeps is P14.T28's and T30's to say. body_events_response has no events, since BodyEventDto has no variant before P14.T31. The body_detail answers are one Earth at three detail levels and the slice's Jupiter: the Earth's full record carries its surface (P14.T35.e, illustrative values) and an envelope not_applicable, its mass_and_orbit record withholds both, and its contact record keeps the form of a server before P14.T35.e, with no envelope key; the Jupiter's record is its list entry with its surface not_applicable and its envelope ok (illustrative values).",
   "system_bodies_request": {
     "type": "request",
     "id": 21,
@@ -1113,7 +1113,243 @@
           }
         },
         "surface": {
+          "state": "ok",
+          "value": {
+            "state": "temperate",
+            "material": "rock",
+            "mean_surface_temperature_k": 287.9,
+            "equator_pole_contrast_k": 41.5,
+            "day_night_contrast_k": 9.8,
+            "surface_pressure_pa": 101325.0,
+            "gases": [
+              {
+                "species": "N2",
+                "mole_fraction": 0.9805
+              },
+              {
+                "species": "H2O",
+                "mole_fraction": 0.0102
+              },
+              {
+                "species": "Ar",
+                "mole_fraction": 0.009
+              },
+              {
+                "species": "CO2",
+                "mole_fraction": 0.0003
+              }
+            ],
+            "mean_molar_mass_g_per_mol": 28.0242327,
+            "heat_capacity_over_r": 3.49635,
+            "stellar_flux_w_m2": 1361.0,
+            "radiation_class": "quiet",
+            "liquid_water": true,
+            "climate_regime": {
+              "thermal": "efficient",
+              "forcing": "seasonal",
+              "condensable": "H2O",
+              "model": "energy_balance"
+            },
+            "ocean_fraction": 0.71,
+            "ice_fraction": 0.03,
+            "cloud_fraction": 0.67,
+            "surface_liquids": [
+              {
+                "substance": "H2O",
+                "area_fraction": 0.71
+              }
+            ],
+            "surface_ices": [
+              {
+                "substance": "H2O",
+                "area_fraction": 0.03
+              }
+            ],
+            "sigma_h_m": 2510.0,
+            "continental_fraction": 0.405,
+            "heat_flow_w_m2": 0.0925,
+            "tectonic_regime": "mobile_lid",
+            "volcanism_level": 0.85,
+            "outgassing_earth": 1.0,
+            "magnetic_field_class": "strong",
+            "surface_age_s": 2025000000000000.0,
+            "craters": {
+              "lunar_equivalent_n_1km_per_km2": 6.4e-5,
+              "screening": {
+                "type": "atmosphere",
+                "column_mass_kg_m2": 10318.0
+              },
+              "projectile_density_kg_m3": 3000.0,
+              "k_target": 1.0,
+              "target_class": "non_porous",
+              "target_density_kg_m3": 2550.0,
+              "system_age_s": 1.442e17,
+              "impact_velocity_m_s": 20100.0
+            },
+            "wet_epoch": {
+              "liquid": "H2O",
+              "start_ago_s": 1.37e17,
+              "end_ago_s": 0.0,
+              "effective_flow_yr": 43000000.0,
+              "runoff_m_per_yr": 0.3,
+              "paleo_inventory_kg_m2": 2700000.0
+            }
+          }
+        },
+        "envelope": {
+          "state": "not_applicable"
+        },
+        "hooks": {
           "state": "not_modelled"
+        }
+      }
+    }
+  },
+  "body_detail_jupiter": {
+    "type": "response",
+    "id": 29,
+    "body": {
+      "kind": "body_detail",
+      "universe": "000000000000002a",
+      "time": {
+        "seconds": 0,
+        "nanos": 0
+      },
+      "granted": "full",
+      "record": {
+        "id": "0200080020000000.0500",
+        "kind": {
+          "type": "planet"
+        },
+        "label": {
+          "state": "not_modelled"
+        },
+        "parent": {
+          "type": "star",
+          "body_index": 0
+        },
+        "state": {
+          "type": "present"
+        },
+        "position_m": [-229947709406.6273, -361488388381.50775, 694387237709.8896],
+        "mass_kg": {
+          "state": "ok",
+          "value": 1.8981245973360505e27
+        },
+        "orbit": {
+          "state": "ok",
+          "value": {
+            "parent": {
+              "type": "star",
+              "body_index": 0
+            },
+            "orbit": {
+              "period_s": 374033065.13490295,
+              "semi_major_axis_m": 777908927640.0,
+              "eccentricity": 0.0489,
+              "inclination_rad": 1.02,
+              "ascending_node_rad": 2.48,
+              "argument_of_periapsis_rad": 4.8,
+              "mean_anomaly_at_epoch_rad": 3.1,
+              "mu_m3_s2": 1.3283912653e20
+            },
+            "valid_until": null
+          }
+        },
+        "moons": {
+          "state": "not_modelled"
+        },
+        "rings": {
+          "state": "not_modelled"
+        },
+        "population": {
+          "state": "not_applicable"
+        },
+        "bulk": {
+          "state": "ok",
+          "value": {
+            "radius_m": 71482620.0,
+            "density_kg_m3": 1240.608412660714,
+            "surface_gravity_m_s2": 24.793024912209912,
+            "class": "gas_giant",
+            "mass_fractions": {
+              "iron": 0.05,
+              "rock": 0.06,
+              "water": 0.072,
+              "envelope": 0.818
+            },
+            "equilibrium_temperature_k": 111.6,
+            "effective_temperature_k": 128.9
+          }
+        },
+        "surface": {
+          "state": "not_applicable"
+        },
+        "envelope": {
+          "state": "ok",
+          "value": {
+            "internal_temperature_k": 99.0,
+            "irradiation_temperature_k": 155.4,
+            "profile": {
+              "thermal_opacity_m2_per_kg": 0.001,
+              "opacity_ratio": 0.4,
+              "redistribution_factor": 0.25
+            },
+            "join_pressure_pa": 50000.0,
+            "adiabat": [
+              {
+                "pressure_pa": 50000.0,
+                "temperature_k": 134.7
+              },
+              {
+                "pressure_pa": 100000.0,
+                "temperature_k": 166.1
+              },
+              {
+                "pressure_pa": 1000000.0,
+                "temperature_k": 336.4
+              },
+              {
+                "pressure_pa": 10000000.0,
+                "temperature_k": 681.3
+              }
+            ],
+            "composition": [
+              {
+                "species": "H2",
+                "mole_fraction": 0.8627
+              },
+              {
+                "species": "He",
+                "mole_fraction": 0.1355
+              },
+              {
+                "species": "CH4",
+                "mole_fraction": 0.0018
+              }
+            ],
+            "mean_molar_mass_g_per_mol": 2.3104871,
+            "heat_capacity_over_r": 3.3654,
+            "decks": [
+              {
+                "material": "NH3",
+                "phase": "solid",
+                "deck": "NH3",
+                "shape": "crystal",
+                "size_distribution": {
+                  "type": "gamma",
+                  "effective_radius_m": 1e-6,
+                  "effective_variance": 0.1
+                },
+                "column_mass_kg_m2": 0.012,
+                "tau_550": 8.0,
+                "base_pa": 70000.0,
+                "top_pa": 45000.0,
+                "f_sed": 2.0
+              }
+            ],
+            "haze_tau_550": 0.5
+          }
         },
         "hooks": {
           "state": "not_modelled"
@@ -1194,6 +1430,9 @@
           "state": "not_resolved"
         },
         "surface": {
+          "state": "not_resolved"
+        },
+        "envelope": {
           "state": "not_resolved"
         },
         "hooks": {

@@ -91,7 +91,14 @@ function propagatable(orbit: KeplerOrbit): boolean {
   );
 }
 
-function modelled<T, U>(value: T | null | undefined, convert: (present: T) => U): Modelled<U> {
+/**
+ * A wire field of the protocol's `Modelled<T>` as the client holds it: absent is not modelled,
+ * `null` is computed and none, and anything else its value, converted by `convert`.
+ */
+export function modelled<T, U>(
+  value: T | null | undefined,
+  convert: (present: T) => U,
+): Modelled<U> {
   if (value === undefined) {
     return { kind: "not_modelled" };
   }

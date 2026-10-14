@@ -1113,9 +1113,9 @@ async fn bodies_in_every_state_are_the_sims_snapshot(server: &TestServer) {
     client.close().await;
 }
 
-/// Every body's `body_detail` record is the sim's `body_at`, with its surface and hooks tagged as
-/// the sim tags them, and agrees with the system's list. A present body's hooks carry its detail
-/// seed, and no answer carries its surface seed (R09.T1.b).
+/// Every body's `body_detail` record is the sim's `body_at`, with its surface, envelope and hooks
+/// tagged as the sim tags them, and agrees with the system's list. A present body's hooks carry
+/// its detail seed, and no answer carries its surface seed (R09.T1.b).
 ///
 /// Run by [`system_bodies_and_body_records_are_the_sims_and_cached`] on its shared server.
 async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
@@ -1165,13 +1165,19 @@ async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
             &record.bulk,
         );
         assert_bulk_level_is_the_sims(&sim, record);
-        // Until P14.T35.e gives the wire its form, an `Ok` surface (P14.T48.e) is sent as
-        // `not_modelled`.
-        if matches!(sim.surface(), Section::Ok(_)) {
-            assert_eq!(record.surface, SectionDto::NotModelled, "{}", record.id);
-        } else {
-            assert_same_state(record.id.as_str(), &record.surface, sim.surface());
-        }
+        // P14.T35.e: the surface and the envelope are sent in the record's states, the envelope
+        // always, so that a body has at most one of them other than `not_applicable`.
+        assert_same_state(record.id.as_str(), &record.surface, sim.surface());
+        let envelope = record
+            .envelope
+            .as_ref()
+            .expect("the server sends the envelope");
+        assert_same_state(record.id.as_str(), envelope, sim.envelope());
+        assert!(
+            record.surface == SectionDto::NotApplicable || *envelope == SectionDto::NotApplicable,
+            "{}",
+            record.id
+        );
         assert_same_state(record.id.as_str(), &record.hooks, sim.hooks());
         // R09.T1.b: a planet, moon or dwarf planet present at the time carries its detail seed,
         // the sim's; a ring, a belt, the halo and a body not present carry no hooks.
@@ -1189,13 +1195,14 @@ async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
             SectionDto::NotApplicable
         };
         assert_eq!(record.hooks, expected, "{}", record.id);
-        // The list's entry is the record, less its surface and hooks.
+        // The list's entry is the record, less its surface, envelope and hooks.
         assert_eq!(
             serde_json::to_value(summary).unwrap(),
             {
                 let mut whole = serde_json::to_value(record).unwrap();
                 let fields = whole.as_object_mut().unwrap();
                 fields.remove("surface");
+                fields.remove("envelope");
                 fields.remove("hooks");
                 whole
             },
@@ -1445,6 +1452,7 @@ async fn mass_and_orbit_gives_no_bulk_section(server: &TestServer) {
         "the bulk level's sections are sent withheld"
     );
     assert_eq!(record.record.surface, SectionDto::NotResolved);
+    assert_eq!(record.record.envelope, Some(SectionDto::NotResolved));
     assert_eq!(record.record.hooks, SectionDto::NotResolved);
 
     let contact = detail(

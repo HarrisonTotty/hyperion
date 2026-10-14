@@ -9,7 +9,6 @@
  * from those answers, and say what they change.
  */
 import {
-  type BodyRecordDto,
   type BodySummaryDto,
   decodeServerMessage,
   type RequestKind,
@@ -24,6 +23,7 @@ type ResponseName =
   | "system_bodies_response"
   | "system_bodies_populated"
   | "body_detail_response"
+  | "body_detail_jupiter"
   | "body_detail_mass_and_orbit"
   | "body_detail_contact";
 
@@ -60,9 +60,22 @@ export function populatedBodies(): ResponseFor<"system_bodies"> {
   return response("system_bodies_populated", "system_bodies");
 }
 
-/** The slice's Earth at the `full` level. */
+/**
+ * The slice's Earth at the `full` level: its surface `ok` (P14.T35.e, illustrative values) and its
+ * envelope not applicable.
+ */
 export function earthDetail(): ResponseFor<"body_detail"> {
   return response("body_detail_response", "body_detail");
+}
+
+/**
+ * The slice's Earth at the `full` level as a server before P14.T35.e sent it: its surface not
+ * modelled, and no `envelope` key.
+ */
+export function earthDetailOfAnOlderServer(): ResponseFor<"body_detail"> {
+  const detail = earthDetail();
+  const { envelope: _envelope, ...older } = detail.record;
+  return { ...detail, record: { ...older, surface: { state: "not_modelled" } } };
 }
 
 /** The slice's Earth at the `mass_and_orbit` level. */
@@ -77,19 +90,11 @@ export function earthContact(): ResponseFor<"body_detail"> {
 
 /**
  * The slice's Jupiter as a whole record at the `full` level: its list entry with a surface that
- * does not apply, as a gas giant's does not, and hooks not modelled, like the Earth's.
+ * does not apply, as a gas giant's does not, its envelope `ok` (P14.T35.e, illustrative values),
+ * and hooks not modelled, like the Earth's.
  */
 export function jupiterDetail(): ResponseFor<"body_detail"> {
-  const jupiter = sliceBodies().bodies.find((body) => body.id === FIXTURE_JUPITER);
-  if (jupiter === undefined) {
-    throw new Error("the slice's answer lists its Jupiter");
-  }
-  const record: BodyRecordDto = {
-    ...jupiter,
-    surface: { state: "not_applicable" },
-    hooks: { state: "not_modelled" },
-  };
-  return { ...earthDetail(), record };
+  return response("body_detail_jupiter", "body_detail");
 }
 
 /** The slice's answer with its bodies changed by `change`, as a later generator might send it. */

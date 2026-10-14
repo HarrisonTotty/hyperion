@@ -1,0 +1,1980 @@
+//! A body's surface section and its gas envelope on the wire (plan 14, P14.T35.e; the
+//! simulation's `record::Surface` and `record::Envelope`, decision-p14-t35e-wire).
+//!
+//! # Exactly one of the two
+//!
+//! A body with a solid surface (a rocky or icy planet, a moon, a dwarf planet) has its surface
+//! section and an envelope `not_applicable`; a body in the gas-envelope state (a gas or ice giant,
+//! a sub-Neptune) has its envelope and a surface `not_applicable`, since within the model it has no
+//! surface: no surface pressure, its heights from the 1-bar level, and its envelope's base at
+//! kilobars. A ring, a belt or the halo has neither.
+//!
+//! # Substances are keys
+//!
+//! Every gas, condensable, liquid, ice, aerosol material, deck and absorber is a key of plan 14's
+//! substance registry, a string (`H2O`, `CO2`, `tholin`), never a closed enum, so that a new
+//! registry row reaches the wire with no change of its shape. The registry's keys are pinned by
+//! `packages/protocol/fixtures/substances.json`, append-only. A reader names a substance it does
+//! not know by the key's own rule and never refuses it (decision-composition §1.1, §1.10).
+//!
+//! # None, not modelled and a value
+//!
+//! A value the generator computes as none is `null`: an airless body's mean molar mass, a world
+//! with no condensable's `condensable`, a world never wet's `wet_epoch`, a body computed to hold no
+//! subsurface ocean's `subsurface_ocean`. A member this generator version does not compute is
+//! absent ([`Modelled::NotModelled`]), and a reader takes it as not modelled, never as none. The
+//! members whose tasks land later (P14.T24.c, T24.e, T51.a, T51.c, T51.d and T53.d) are absent
+//! until they do, and each task may reshape its own member's type while no build has sent a value
+//! of it; once a build has, a change bumps [`PROTOCOL_VERSION`](crate::PROTOCOL_VERSION).
+//!
+//! # Closed classes
+//!
+//! Each closed enum here is a physics class with every variant the plan's drafted tasks name, so
+//! that no later task adds one: a variant no rule produces yet is listed and documented as such
+//! (`steam_envelope`, `tenuous`, `heat_pipe`, `episodic`, `ice_shell`).
+
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::modelled::Modelled;
+use crate::surface::ClimateModelDto;
+
+/// The state of a body's surface (plan 14's `SurfaceState`, P14.T13.c), less the gas envelope,
+/// which has no surface section: its air is the envelope section's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SurfaceStateDto {
+    /// Molten rock at the surface: a young terrestrial planet, or one hotter than the silicate
+    /// solidus.
+    MagmaOcean,
+    /// A surface pressure below the airless limit: bare rock or ice.
+    Airless,
+    /// Inside the runaway-greenhouse limit when water was present: the oceans lost, a thick
+    /// carbon-dioxide air, as on Venus.
+    RunawayGreenhouse,
+    /// Between the runaway and maximum-greenhouse limits, as on Earth and Mars.
+    Temperate,
+    /// Beyond the maximum-greenhouse limit: frozen, as Titan is.
+    Snowball,
+    /// A steam envelope over a magma ocean (P14.T53.b): produced by no rule until that task.
+    SteamEnvelope,
+    /// A thin or transient air held above the airless floor, as Pluto's (P14.T53.c): produced by
+    /// no rule until that task.
+    Tenuous,
+}
+
+/// What a surface is made of, rock or ice, by the body's water fraction (plan 14's
+/// `SurfaceMaterial`, P14.T13.c).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SurfaceMaterialDto {
+    /// Rock and dust.
+    Rock,
+    /// Ice: a body of at least 10% water by mass.
+    Ice,
+}
+
+/// The class of the X-ray and extreme-ultraviolet flux a body's hosts give it, a decade of the
+/// present Earth's each (plan 14's `RadiationClass`, P14.T24.a).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RadiationClassDto {
+    /// No X-ray or ultraviolet light: a body with no luminous host.
+    Dark,
+    /// Below 10 times the present Earth's flux.
+    Quiet,
+    /// 10 to 100 times.
+    Active,
+    /// 100 to 1,000 times.
+    Intense,
+    /// 1,000 times or more.
+    Extreme,
+}
+
+/// How much of a climate's heat its air moves from day to night (plan 14's `ThermalRegime`,
+/// P14.T48.d, after Koll 2022's redistribution factor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ThermalRegimeDto {
+    /// No air, an air collapsed onto its night side, or one too thin to move heat: each point
+    /// near its own radiative equilibrium.
+    AirlessLike,
+    /// Between the two.
+    Transitional,
+    /// Efficient redistribution.
+    Efficient,
+}
+
+/// What drives a climate's cycle (plan 14's `Forcing`, P14.T48.d).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ClimateForcingDto {
+    /// A fast rotator's seasons.
+    Seasonal,
+    /// A fast rotator at an obliquity of 53.9–126.1° that came from a colder state, with an
+    /// equatorial ice belt.
+    IceBelt,
+    /// A slow rotator, its circulation converging on the substellar point.
+    SlowRotator,
+    /// A world locked 1:1 to its seasonal host, in tidally locked coordinates.
+    Locked,
+}
+
+/// A body's tectonic regime, how its lithosphere carries its heat (plan 14's `TectonicRegime`,
+/// P14.T24.b).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TectonicRegimeDto {
+    /// Plates in relative motion, as on Earth.
+    MobileLid,
+    /// One lid, as on Mars, the Moon and Mercury.
+    StagnantLid,
+    /// Heat lost through volcanic conduits, as on Io: reserved, produced by no rule yet.
+    HeatPipe,
+    /// A lid that overturns in episodes: reserved, produced by no rule yet.
+    Episodic,
+    /// An ice shell over an ocean, as on Europa: reserved, produced by no rule yet.
+    IceShell,
+}
+
+/// A body's global intrinsic magnetic field, from a dynamo (plan 14's `MagneticField`, P14.T24.b).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum MagneticFieldClassDto {
+    /// No dynamo: remanent or induced fields only.
+    None,
+    /// A dynamo whose surface dipole is under about 1 μT, as Mercury's.
+    Weak,
+    /// A dipolar dynamo of order 10 μT or more at the surface, as Earth's.
+    Strong,
+}
+
+/// What a subsurface ocean rests on (plan 14's `OceanFloor`, P14.T24.b and P14.T51.g).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum OceanFloorDto {
+    /// The rock core or mantle.
+    Rock,
+    /// Ice III.
+    IceIii,
+    /// Ice V.
+    IceV,
+    /// Ice VI.
+    IceVi,
+    /// Ice VII.
+    IceVii,
+}
+
+/// A crater target's scaling class in the gravity regime (`hyperion-surface`'s `TargetClass`;
+/// Holsapple 1993 as Singer et al. 2019 apply it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CraterTargetClassDto {
+    /// Rock and ice alike: μ 0.55, K₁ 0.095.
+    NonPorous,
+    /// Dry sand or regolith, or 30%-porous ice: μ 0.41, K₁ 0.132.
+    Porous,
+}
+
+/// The phase a substance holds where it is (plan 14's `Phase`, P14.T49.a), as an aerosol mode and
+/// a surface condensate state it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SubstancePhaseDto {
+    /// An ice, a frost or a crystal.
+    Solid,
+    /// A liquid.
+    Liquid,
+    /// A gas: never an aerosol mode's or a condensate's phase.
+    Vapour,
+    /// At or above both the critical temperature and pressure, with no interface, as Venus's
+    /// carbon dioxide: never an aerosol mode's.
+    Supercritical,
+}
+
+/// An aerosol particle's shape class, which with its material and phase fixes its optics (plan
+/// 14, P14.T24.c; rendering plan R08's Design note 6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AerosolShapeDto {
+    /// A sphere: liquid water, sulphuric acid and liquid methane, tholin and soot.
+    Sphere,
+    /// A non-spherical mineral: mineral dust and the silicates.
+    NonSphericalMineral,
+    /// A crystal: the ices.
+    Crystal,
+    /// A fractal aggregate of spherical monomers, as Titan's haze.
+    Aggregate,
+}
+
+/// Which crust lies at a surface (plan 14's `LidCrust`, P14.T51.c).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CrustLidDto {
+    /// The primary crust, unresurfaced since it formed.
+    Primary,
+    /// The secondary crust.
+    Secondary,
+    /// The undifferentiated body's own material.
+    Bulk,
+}
+
+/// A body's redox class, from its mantle's oxygen fugacity (plan 14's `RedoxClass`, P14.T51.c).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RedoxClassDto {
+    /// Reduced, as Mercury and the enstatite chondrites.
+    Reduced,
+    /// Between the two.
+    Intermediate,
+    /// Oxidised.
+    Oxidised,
+}
+
+/// One gas of a mixture and its share by number.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GasShareDto {
+    /// The gas: a key of the substance registry.
+    pub species: String,
+    /// Its mole fraction, in `[0, 1]`.
+    pub mole_fraction: f64,
+}
+
+/// One substance of a surface's cover and the share of the surface it covers.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SubstanceAreaDto {
+    /// The substance: a key of the substance registry.
+    pub substance: String,
+    /// The share of the body's surface it covers, in `[0, 1]`.
+    pub area_fraction: f64,
+}
+
+/// A body's climate regime, the classifier of the rendering brainstorm's open question 9 (plan
+/// 14's `ClimateRegime`, P14.T48.d): its three fields and the coarse model it names.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ClimateRegimeDto {
+    /// How much of the climate's heat the air moves.
+    pub thermal: ThermalRegimeDto,
+    /// What drives the climate's cycle.
+    pub forcing: ClimateForcingDto,
+    /// The climate's condensable, a key of the substance registry: of the condensables whose phase
+    /// changes inside the climate's range, the one with the largest partial pressure in the air.
+    /// `null` for a world with none, as Venus.
+    pub condensable: Option<String>,
+    /// The coarse model the regime names, which rendering plan R09's climate step runs.
+    pub model: ClimateModelDto,
+}
+
+/// An ocean under a body's surface (plan 14's `SubsurfaceOcean`, P14.T24.b and P14.T51.g).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SubsurfaceOceanDto {
+    /// The ice shell over it, m, not negative.
+    pub shell_thickness_m: f64,
+    /// Its liquid's depth, from the shell's base to its floor, m, positive.
+    pub thickness_m: f64,
+    /// What it rests on.
+    pub floor: OceanFloorDto,
+    /// Its liquid: a key of the substance registry (`H2O` for every rule so far).
+    pub liquid: String,
+    /// The mass fraction of solutes in its liquid, in `[0, 1]`.
+    pub solute_mass_fraction: f64,
+    /// Its temperature at the ice shell's base, where the shell meets it, K, positive: the
+    /// liquid's melting point there (273 K for every rule so far).
+    pub base_temperature_k: f64,
+}
+
+/// What screens a body's small impactors before they crater the ground (`hyperion-surface`'s
+/// `Screening`; rendering plan R09's Design note 12). Tagged by `type`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum CraterScreeningDto {
+    /// Nothing: an airless body.
+    None,
+    /// An atmosphere, by its column mass.
+    Atmosphere {
+        /// The surface pressure over the surface gravity, kg m⁻², not negative: about 10,300 on
+        /// Earth.
+        column_mass_kg_m2: f64,
+    },
+    /// A crater cutoff diameter given directly.
+    Cutoff {
+        /// The diameter below which no crater forms, m, positive.
+        diameter_m: f64,
+    },
+}
+
+/// A body's crater contract with rendering plan R09 (plan 14, P14.T48.c with T48.f's impactors;
+/// `hyperion-surface`'s `CraterParams`), from which the shared crater density derives the rest.
+///
+/// The surface gravity the contract reads is the bulk section's `surface_gravity_m_s2`, not
+/// repeated here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CraterContractDto {
+    /// The lunar-equivalent cumulative crater density above 1 km, N☾(>1 km), per km², not
+    /// negative: the Moon's density for the body's projectile flux, the lunar chronology at the
+    /// surface age times the impactors' rate (science-r09-craters.md F1).
+    pub lunar_equivalent_n_1km_per_km2: f64,
+    /// What screens the small impactors.
+    pub screening: CraterScreeningDto,
+    /// The projectiles' bulk density, kg m⁻³, positive: 3,000 from a rocky belt, 500 from an icy
+    /// one or the comets.
+    pub projectile_density_kg_m3: f64,
+    /// The target factor `k_target`, dimensionless and positive: 1 for rock, 0.12 for an ice-rich
+    /// crust; it scales the simple-to-complex transition diameter.
+    pub k_target: f64,
+    /// The target's scaling class.
+    pub target_class: CraterTargetClassDto,
+    /// The target's bulk density, kg m⁻³, positive.
+    pub target_density_kg_m3: f64,
+    /// The age of the body's system, the chronology's clock, s, not negative.
+    pub system_age_s: f64,
+    /// The mean impact velocity, m s⁻¹, positive; `null` where the contract gives none (plan 14's
+    /// impactors always give one).
+    pub impact_velocity_m_s: Option<f64>,
+}
+
+/// The span over which a body's surface held liquid, with what rendering plan R09's erosion reads
+/// of it (plan 14's `WetEpoch`, P14.T48.b), as times before the record's present.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WetEpochDto {
+    /// The liquid that flowed: a key of the substance registry (`H2O` for every rule so far).
+    pub liquid: String,
+    /// When the epoch began, s before the present, at least `end_ago_s`.
+    pub start_ago_s: f64,
+    /// When it ended, s before the present, not negative: zero for a world wet now.
+    pub end_ago_s: f64,
+    /// The time channel-forming flow ran at a typical point of the surface, in Earth-equivalent
+    /// Julian years, not negative: R09's stream-power solver's t.
+    pub effective_flow_yr: f64,
+    /// The epoch's mean annual runoff, m per Julian year, not negative.
+    pub runoff_m_per_yr: f64,
+    /// The liquid inventory then, its mass over the body's whole surface, kg m⁻², not negative.
+    pub paleo_inventory_kg_m2: f64,
+}
+
+/// One node of a temperature profile.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProfileNodeDto {
+    /// The pressure, Pa, positive.
+    pub pressure_pa: f64,
+    /// The temperature there, K, positive.
+    pub temperature_k: f64,
+}
+
+/// The vertical structure of a surface's air (plan 14, P14.T24.e's `RadiativeConvective`): a scaled
+/// adiabat from the surface to an isothermal skin, T(p) = max(`T_ad`(p), `T_skin`), with
+/// dln `T_ad` ÷ dln p = α R ÷ `c_p`(T) (Robinson and Catling 2012, Astrophys. J. 757, 104).
+///
+/// Its surface temperature and pressure are the section's `mean_surface_temperature_k` and
+/// `surface_pressure_pa`, sent once. Absent from the wire until P14.T24.e, which may reshape it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct VerticalStructureDto {
+    /// α, the factor on the dry adiabat's R ÷ `c_p`, dimensionless and positive: 0.6 for water, 0.77
+    /// for methane, the dry 0.88 otherwise (plan 14, P14.T24.e).
+    pub alpha: f64,
+    /// The isothermal skin's temperature, `2^(−1/4) T_eff`, K, positive.
+    pub skin_temperature_k: f64,
+    /// The adiabat's nodes from the surface to the tropopause, evenly in ln p, the pressures
+    /// descending; the temperature between two nodes follows the power law between them.
+    pub adiabat: Vec<ProfileNodeDto>,
+}
+
+/// An aerosol mode's size distribution, by its volume-to-area radius r = 3V ÷ 4A, A the
+/// orientation-averaged projected area (plan 14, P14.T24.c; R08's science-r08-mmf.md §3). Tagged by
+/// `type`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export)]
+pub enum SizeDistributionDto {
+    /// Hansen and Travis 1974's gamma distribution.
+    Gamma {
+        /// The effective radius `r_eff` = (3 ÷ 4)⟨V⟩ ÷ ⟨A⟩, m, positive.
+        effective_radius_m: f64,
+        /// The effective variance `v_eff`, dimensionless and positive.
+        effective_variance: f64,
+    },
+    /// Hansen and Travis 1974's modified log-normal distribution (their Eq. 2.60), by its
+    /// effective radius and variance.
+    LogNormal {
+        /// The effective radius, m, positive.
+        effective_radius_m: f64,
+        /// The effective variance, dimensionless and positive.
+        effective_variance: f64,
+    },
+    /// A fractal aggregate of spherical monomers (Tazaki and Tanaka 2018's model, validated to
+    /// a fractal dimension of 2.5).
+    Aggregate {
+        /// The monomer's radius a₀, m, positive.
+        monomer_radius_m: f64,
+        /// The number of monomers N, at least 1.
+        monomer_count: f64,
+        /// The fractal dimension `D_f`, in `[1, 2.5]`.
+        fractal_dimension: f64,
+        /// The fractal prefactor `k_f`, positive: (5/3)^(`D_f`/2) unless the task states another.
+        fractal_prefactor: f64,
+    },
+}
+
+/// One aerosol mode: a cloud's, a haze's or a dust layer's particles of one material and phase
+/// (plan 14, P14.T24.c).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AerosolModeDto {
+    /// Its material: a key of the substance registry, one row for every phase of its substance.
+    pub material: String,
+    /// Its phase: `solid` or `liquid`, never `vapour` or `supercritical`.
+    pub phase: SubstancePhaseDto,
+    /// The deck it belongs to, by the deck's condensate key, so that a deck of several modes is
+    /// one deck to its readers; `null` for a mode of no deck, as dust or a haze.
+    pub deck: Option<String>,
+    /// Its shape class.
+    pub shape: AerosolShapeDto,
+    /// Its size distribution.
+    pub size_distribution: SizeDistributionDto,
+    /// Its column mass, kg m⁻², not negative.
+    pub column_mass_kg_m2: f64,
+    /// Its column optical depth at 550 nm, dimensionless and not negative.
+    pub tau_550: f64,
+    /// The pressure of its base, Pa, positive and at least `top_pa`.
+    pub base_pa: f64,
+    /// The pressure of its top, Pa, positive.
+    pub top_pa: f64,
+    /// The exponent f of its mixing ratio, which goes as (p ÷ `p_base`)^f between its base and
+    /// top: its deck's `f_sed` (Ackerman and Marley 2001), or 0 for a well-mixed layer; not
+    /// negative.
+    pub f_sed: f64,
+}
+
+/// A condensate deck: the condensate whose modes it holds, and its vapour above it (plan 14,
+/// P14.T24.c).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CondensateDeckDto {
+    /// The condensate: a key of the substance registry, which its modes' `deck` names.
+    pub condensate: String,
+    /// The vapour's mole fraction above the deck, the cold trap's, in `[0, 1]`.
+    pub vapour_mole_fraction_above: f64,
+}
+
+/// One node of an absorber's profile.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MixingRatioNodeDto {
+    /// The pressure, Pa, positive.
+    pub pressure_pa: f64,
+    /// The mixing ratio there relative to the profile's peak, in `[0, 1]`.
+    pub relative_mixing_ratio: f64,
+}
+
+/// An absorbing gas that is not one of the section's well-mixed `gases`, with its column and
+/// layer (plan 14, P14.T24.c): ozone, and sulphur dioxide by P14.T24.g.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AbsorberDto {
+    /// The gas: a key of the substance registry.
+    pub species: String,
+    /// Its column, molecules m⁻² (not an area; plan 14's name), not negative.
+    pub column_m2: f64,
+    /// The pressure of its layer's base, Pa, positive and at least `top_pa`.
+    pub base_pa: f64,
+    /// The pressure of its layer's top, Pa, positive.
+    pub top_pa: f64,
+    /// Its profile of nodes, the pressures descending from `base_pa` to `top_pa`, its mixing ratio
+    /// linear in ln x against ln p between them; `null` for a layer of constant mixing ratio.
+    pub profile: Option<Vec<MixingRatioNodeDto>>,
+}
+
+/// A surface air's aerosol and absorber inventory (plan 14, P14.T24.c with T24.g). Absent from the
+/// wire until P14.T24.c, which may reshape it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AerosolInventoryDto {
+    /// The modes, every cloud's, haze's and dust layer's.
+    pub modes: Vec<AerosolModeDto>,
+    /// The condensate decks, which the modes name.
+    pub decks: Vec<CondensateDeckDto>,
+    /// The absorbers, in registry order.
+    pub absorbers: Vec<AbsorberDto>,
+}
+
+/// One condensate at a surface (plan 14, P14.T51.a's partition). Absent from the wire, in its
+/// list, until P14.T51.a, which may reshape it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SurfaceCondensateDto {
+    /// The substance: a key of the substance registry.
+    pub substance: String,
+    /// Its phase where it lies: `solid`, `liquid` or `supercritical`, never `vapour`.
+    pub phase: SubstancePhaseDto,
+    /// Its condensed reservoir as a global equivalent layer, m, not negative.
+    pub reservoir_gel_m: f64,
+    /// The share of the surface it covers, in `[0, 1]`.
+    pub area_fraction: f64,
+    /// Whether it is seasonal: the warmest zone rises above its frost point.
+    pub seasonal: bool,
+}
+
+/// A body's crust by substance (plan 14, P14.T51.c): its crusts, buried or not, the one at the
+/// surface, its provinces and its redox. Absent from the wire until P14.T51.c, which may reshape
+/// it.
+///
+/// Either `bulk` is present alone, or at least one of `primary` and `secondary` is, and `lid`
+/// names a present member.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CrustCompositionDto {
+    /// The primary crust, a key of the substance registry; `null` for none.
+    pub primary: Option<String>,
+    /// The secondary crust, a key; `null` for none.
+    pub secondary: Option<String>,
+    /// The tertiary crust, a key; `null` for none.
+    pub tertiary: Option<String>,
+    /// An undifferentiated body's own material, a key; `null` for a body with a crust.
+    pub bulk: Option<String>,
+    /// Which of them lies at the surface.
+    pub lid: CrustLidDto,
+    /// The lithology of the lid's volcanic provinces, a key.
+    pub provinces: String,
+    /// The redox class.
+    pub redox: RedoxClassDto,
+    /// The mantle's oxygen fugacity relative to the iron–wüstite buffer, ΔIW, log₁₀ units, finite
+    /// and of either sign: below 0 more reduced than the buffer.
+    pub mantle_redox_iw: f64,
+    /// The share of the surface above the lid's solidus, in `[0, 1]`.
+    pub melt_area_fraction: f64,
+}
+
+/// A surface's modifiers (plan 14, P14.T51.d). Absent from the wire until P14.T51.d, which may
+/// reshape it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SurfaceModifiersDto {
+    /// The space-weathering maturity, dimensionless, from 0 for a fresh surface to 1 for a mature
+    /// one.
+    pub maturity: f64,
+    /// The share of the surface under an irradiated-organics cover, in `[0, 1]`.
+    pub organic_cover: f64,
+    /// The resurfacing rate from volcanism or tidal heat, m per Julian year, not negative.
+    pub resurfacing_m_per_yr: f64,
+}
+
+/// One net surface flux of a biosphere.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BiosphereFluxDto {
+    /// The gas: a key of the substance registry.
+    pub species: String,
+    /// Its net surface flux in units of Earth's present biotic flux of it, finite and of either
+    /// sign: negative for a net sink.
+    pub flux_earth: f64,
+}
+
+/// A biosphere's fluxes (plan 14, P14.T53.d). Absent from the wire until a life plan exists: every
+/// generated body is abiotic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BiosphereDto {
+    /// The net surface fluxes, by species.
+    pub fluxes: Vec<BiosphereFluxDto>,
+}
+
+/// A body's surface section: its surface state and material, its surface conditions and climate
+/// regime, its global figures and the members whose tasks land later (design note 16; plan 14,
+/// P14.T48.e and P14.T35.e).
+///
+/// The section is `ok` for a present body with a solid surface whose spin and derivation this
+/// generator version computes, `not_applicable` for a body in the gas-envelope state, whose air is
+/// its [`BodyEnvelopeDto`], and for a ring, a belt or the halo. Every quantity's name carries its
+/// unit. The module documentation says what `null` and an absent member mean.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BodySurfaceDto {
+    /// The surface state.
+    pub state: SurfaceStateDto,
+    /// The surface material.
+    pub material: SurfaceMaterialDto,
+    /// The mean surface temperature, K, positive (P14.T24.a): the temperature rendering plan R08's
+    /// profile starts from.
+    pub mean_surface_temperature_k: f64,
+    /// The annual-mean equator–pole contrast T(0°) − T(90°), K: negative where the poles are the
+    /// warmer, as at an obliquity of 53.9° to 126.1°.
+    pub equator_pole_contrast_k: f64,
+    /// The day–night contrast, the dayside's less the nightside's temperature, K, not negative:
+    /// about the substellar axis for a world locked 1:1 to its seasonal host.
+    pub day_night_contrast_k: f64,
+    /// The mean surface pressure, Pa, not negative: zero for an airless body.
+    pub surface_pressure_pa: f64,
+    /// The gases at the surface by number, largest first with ties by registry order, their mole
+    /// fractions summing to 1 to 10⁻⁹; empty for an airless body.
+    pub gases: Vec<GasShareDto>,
+    /// The gases' mean molar mass μ = Σ xᵢ μᵢ, g mol⁻¹, positive; `null` for an airless body.
+    pub mean_molar_mass_g_per_mol: Option<f64>,
+    /// The gases' mixed `c_p` ÷ R, Σ xᵢ (`c_p,ᵢ` ÷ R), dimensionless and positive, at the mean
+    /// surface temperature (each registry row's class value until P14.T49.b's function); `null`
+    /// for an airless body.
+    pub heat_capacity_over_r: Option<f64>,
+    /// The flux of the hosts' light at the body, orbit-averaged, W m⁻², not negative.
+    pub stellar_flux_w_m2: f64,
+    /// The class of the hosts' X-ray and ultraviolet flux at the body.
+    pub radiation_class: RadiationClassDto,
+    /// Whether water can be liquid at the surface pressure somewhere in the climate's range of
+    /// temperature: a condition of the surface, whether or not the body holds water.
+    pub liquid_water: bool,
+    /// The climate regime (P14.T48.d).
+    pub climate_regime: ClimateRegimeDto,
+    /// The ocean fraction, the share of the surface under liquid, in `[0, 1]`: the sum of
+    /// `surface_liquids`.
+    pub ocean_fraction: f64,
+    /// The ice fraction, the share of the surface under perennial ice, in `[0, 1]`: the sum of
+    /// `surface_ices`. An ice may lie over an ocean.
+    pub ice_fraction: f64,
+    /// The cloud fraction, in `[0, 1]`.
+    pub cloud_fraction: f64,
+    /// The liquids at the surface by substance.
+    pub surface_liquids: Vec<SubstanceAreaDto>,
+    /// The ices at the surface by substance.
+    pub surface_ices: Vec<SubstanceAreaDto>,
+    /// The hypsometric standard deviation `σ_h`, m, not negative, relative to the reference
+    /// equipotential (P14.T48.a).
+    pub sigma_h_m: f64,
+    /// The continental fraction, in `[0, 1]` (P14.T48.a).
+    pub continental_fraction: f64,
+    /// The heat flow at the surface, W m⁻², not negative: radiogenic, residual and tidal.
+    pub heat_flow_w_m2: f64,
+    /// The tectonic regime.
+    pub tectonic_regime: TectonicRegimeDto,
+    /// The volcanism level V, dimensionless, not negative: the melt the surface's life has erupted
+    /// times its plume vigour, over the Solar System table's Mars's, whose V is 1 (P14.T48.a).
+    pub volcanism_level: f64,
+    /// The present volcanic outgassing, relative to Earth's present rate, not negative (P14.T24.g's
+    /// O, 1 on the generated Earth). It is not the volcanism level, which builds relief over the
+    /// surface's history.
+    pub outgassing_earth: f64,
+    /// The global intrinsic magnetic field's class.
+    pub magnetic_field_class: MagneticFieldClassDto,
+    /// The surface age, the time since the last global resurfacing, s, not negative and at most the
+    /// system's age.
+    pub surface_age_s: f64,
+    /// The ocean under the surface: `null` for a body computed to hold none, and absent for a body
+    /// no rule computes, every body but a regular moon until P14.T51.g.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<SubsurfaceOceanDto>>", optional)]
+    pub subsurface_ocean: Modelled<SubsurfaceOceanDto>,
+    /// The crater contract (P14.T48.c, with T48.f's impactors).
+    pub craters: CraterContractDto,
+    /// The wet epoch (P14.T48.b); `null` for a world never wet.
+    pub wet_epoch: Option<WetEpochDto>,
+    /// The vertical structure (P14.T24.e); absent until that task.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<VerticalStructureDto>>", optional)]
+    pub vertical_structure: Modelled<VerticalStructureDto>,
+    /// The aerosol and absorber inventory (P14.T24.c); absent until that task.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<AerosolInventoryDto>>", optional)]
+    pub aerosols: Modelled<AerosolInventoryDto>,
+    /// The condensates at the surface, at most eight, by reservoir mass with ties by registry order
+    /// (P14.T51.a); absent until that task.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<Vec<SurfaceCondensateDto>>>", optional)]
+    pub condensates: Modelled<Vec<SurfaceCondensateDto>>,
+    /// The crust by substance (P14.T51.c); absent until that task.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<CrustCompositionDto>>", optional)]
+    pub crust: Modelled<CrustCompositionDto>,
+    /// The surface's modifiers (P14.T51.d); absent until that task.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<SurfaceModifiersDto>>", optional)]
+    pub modifiers: Modelled<SurfaceModifiersDto>,
+    /// The biosphere's fluxes (P14.T53.d); absent until a life plan exists.
+    #[serde(default, skip_serializing_if = "Modelled::is_not_modelled")]
+    #[ts(as = "Option<Option<BiosphereDto>>", optional)]
+    pub biosphere: Modelled<BiosphereDto>,
+}
+
+/// The parameters of an envelope's irradiated grey profile above its join to the adiabat: Guillot
+/// 2010's (A&A 520, A27) Eq. 29, with τ = `κ_th` p ÷ g and g the bulk section's surface gravity.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GuillotProfileDto {
+    /// The mean thermal opacity `κ_th`, m² kg⁻¹, positive.
+    pub thermal_opacity_m2_per_kg: f64,
+    /// γ, the visible opacity over the thermal, `κ_v` ÷ `κ_th`, dimensionless and positive.
+    pub opacity_ratio: f64,
+    /// f, the redistribution of the irradiation over the planet, dimensionless and positive: ¼ for
+    /// an average over the whole sphere.
+    pub redistribution_factor: f64,
+}
+
+/// A gas-envelope body's visible atmosphere: its profile, composition and decks (plan 14,
+/// P14.T24.d with T52.d; the simulation's `record::Envelope`).
+///
+/// The section is `not_modelled` for every gas-envelope body until P14.T24.d, which may give these
+/// members their final shape before a build first sends one, and `not_applicable` for every other
+/// body, whose surface section is the applicable one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct BodyEnvelopeDto {
+    /// The internal temperature `T_int`, K, not negative: 0 for a body with no internal heat.
+    pub internal_temperature_k: f64,
+    /// The irradiation temperature `T_irr`, K, not negative.
+    pub irradiation_temperature_k: f64,
+    /// The grey profile's parameters.
+    pub profile: GuillotProfileDto,
+    /// The pressure at which the profile joins the dry adiabat, where its gradient
+    /// dln T ÷ dln p first exceeds R ÷ `c_p`, Pa, positive.
+    pub join_pressure_pa: f64,
+    /// The adiabat's nodes below the join, from `join_pressure_pa` to 100 bar, the pressures
+    /// ascending; deeper, the temperature follows the last segment's exponent.
+    pub adiabat: Vec<ProfileNodeDto>,
+    /// The envelope's gases by number, largest first, their mole fractions summing to 1 to 10⁻⁹.
+    pub composition: Vec<GasShareDto>,
+    /// The gases' mean molar mass, g mol⁻¹, positive.
+    pub mean_molar_mass_g_per_mol: f64,
+    /// The gases' mixed `c_p` ÷ R at the 1-bar level's temperature, dimensionless and positive: for
+    /// display, since no reader derives a lapse rate from it.
+    pub heat_capacity_over_r: f64,
+    /// The condensate decks, as aerosol modes.
+    pub decks: Vec<AerosolModeDto>,
+    /// The haze's optical depth at 550 nm, dimensionless and not negative.
+    pub haze_tau_550: f64,
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use serde_json::{Value, json};
+
+    use super::*;
+    use crate::testing::{assert_wire_form, assert_wire_strings};
+
+    /// An Earth's surface, illustrative and of the generator's Earth's order: 1.01 bar of
+    /// nitrogen with water, argon and carbon dioxide (no oxygen, which is biotic), a temperate
+    /// mobile lid with a strong field, and every member of a later task absent.
+    pub(crate) fn earth_surface() -> BodySurfaceDto {
+        BodySurfaceDto {
+            state: SurfaceStateDto::Temperate,
+            material: SurfaceMaterialDto::Rock,
+            mean_surface_temperature_k: 287.9,
+            equator_pole_contrast_k: 41.5,
+            day_night_contrast_k: 9.8,
+            surface_pressure_pa: 101_325.0,
+            gases: vec![
+                GasShareDto {
+                    species: "N2".to_owned(),
+                    mole_fraction: 0.9805,
+                },
+                GasShareDto {
+                    species: "H2O".to_owned(),
+                    mole_fraction: 0.0102,
+                },
+                GasShareDto {
+                    species: "Ar".to_owned(),
+                    mole_fraction: 0.009,
+                },
+                GasShareDto {
+                    species: "CO2".to_owned(),
+                    mole_fraction: 0.0003,
+                },
+            ],
+            mean_molar_mass_g_per_mol: Some(28.024_232_7),
+            heat_capacity_over_r: Some(3.496_35),
+            stellar_flux_w_m2: 1_361.0,
+            radiation_class: RadiationClassDto::Quiet,
+            liquid_water: true,
+            climate_regime: ClimateRegimeDto {
+                thermal: ThermalRegimeDto::Efficient,
+                forcing: ClimateForcingDto::Seasonal,
+                condensable: Some("H2O".to_owned()),
+                model: ClimateModelDto::EnergyBalance,
+            },
+            ocean_fraction: 0.71,
+            ice_fraction: 0.03,
+            cloud_fraction: 0.67,
+            surface_liquids: vec![SubstanceAreaDto {
+                substance: "H2O".to_owned(),
+                area_fraction: 0.71,
+            }],
+            surface_ices: vec![SubstanceAreaDto {
+                substance: "H2O".to_owned(),
+                area_fraction: 0.03,
+            }],
+            sigma_h_m: 2_510.0,
+            continental_fraction: 0.405,
+            heat_flow_w_m2: 0.0925,
+            tectonic_regime: TectonicRegimeDto::MobileLid,
+            volcanism_level: 0.85,
+            outgassing_earth: 1.0,
+            magnetic_field_class: MagneticFieldClassDto::Strong,
+            surface_age_s: 2.025e15,
+            subsurface_ocean: Modelled::NotModelled,
+            craters: CraterContractDto {
+                lunar_equivalent_n_1km_per_km2: 6.4e-5,
+                screening: CraterScreeningDto::Atmosphere {
+                    column_mass_kg_m2: 10_318.0,
+                },
+                projectile_density_kg_m3: 3_000.0,
+                k_target: 1.0,
+                target_class: CraterTargetClassDto::NonPorous,
+                target_density_kg_m3: 2_550.0,
+                system_age_s: 1.442e17,
+                impact_velocity_m_s: Some(20_100.0),
+            },
+            wet_epoch: Some(WetEpochDto {
+                liquid: "H2O".to_owned(),
+                start_ago_s: 1.37e17,
+                end_ago_s: 0.0,
+                effective_flow_yr: 4.3e7,
+                runoff_m_per_yr: 0.3,
+                paleo_inventory_kg_m2: 2.7e6,
+            }),
+            vertical_structure: Modelled::NotModelled,
+            aerosols: Modelled::NotModelled,
+            condensates: Modelled::NotModelled,
+            crust: Modelled::NotModelled,
+            modifiers: Modelled::NotModelled,
+            biosphere: Modelled::NotModelled,
+        }
+    }
+
+    pub(crate) fn earth_surface_json() -> Value {
+        json!({
+            "state": "temperate",
+            "material": "rock",
+            "mean_surface_temperature_k": 287.9,
+            "equator_pole_contrast_k": 41.5,
+            "day_night_contrast_k": 9.8,
+            "surface_pressure_pa": 101_325.0,
+            "gases": [
+                { "species": "N2", "mole_fraction": 0.9805 },
+                { "species": "H2O", "mole_fraction": 0.0102 },
+                { "species": "Ar", "mole_fraction": 0.009 },
+                { "species": "CO2", "mole_fraction": 0.0003 },
+            ],
+            "mean_molar_mass_g_per_mol": 28.024_232_7,
+            "heat_capacity_over_r": 3.496_35,
+            "stellar_flux_w_m2": 1_361.0,
+            "radiation_class": "quiet",
+            "liquid_water": true,
+            "climate_regime": {
+                "thermal": "efficient",
+                "forcing": "seasonal",
+                "condensable": "H2O",
+                "model": "energy_balance",
+            },
+            "ocean_fraction": 0.71,
+            "ice_fraction": 0.03,
+            "cloud_fraction": 0.67,
+            "surface_liquids": [{ "substance": "H2O", "area_fraction": 0.71 }],
+            "surface_ices": [{ "substance": "H2O", "area_fraction": 0.03 }],
+            "sigma_h_m": 2_510.0,
+            "continental_fraction": 0.405,
+            "heat_flow_w_m2": 0.0925,
+            "tectonic_regime": "mobile_lid",
+            "volcanism_level": 0.85,
+            "outgassing_earth": 1.0,
+            "magnetic_field_class": "strong",
+            "surface_age_s": 2.025e15,
+            "craters": {
+                "lunar_equivalent_n_1km_per_km2": 6.4e-5,
+                "screening": { "type": "atmosphere", "column_mass_kg_m2": 10_318.0 },
+                "projectile_density_kg_m3": 3_000.0,
+                "k_target": 1.0,
+                "target_class": "non_porous",
+                "target_density_kg_m3": 2_550.0,
+                "system_age_s": 1.442e17,
+                "impact_velocity_m_s": 20_100.0,
+            },
+            "wet_epoch": {
+                "liquid": "H2O",
+                "start_ago_s": 1.37e17,
+                "end_ago_s": 0.0,
+                "effective_flow_yr": 4.3e7,
+                "runoff_m_per_yr": 0.3,
+                "paleo_inventory_kg_m2": 2.7e6,
+            },
+        })
+    }
+
+    /// A Venus's surface, illustrative: the generator's 57.8 bar of carbon dioxide with nitrogen,
+    /// no condensable, an isothermal slow rotator under a stagnant lid, never wet.
+    pub(crate) fn venus_surface() -> BodySurfaceDto {
+        BodySurfaceDto {
+            state: SurfaceStateDto::RunawayGreenhouse,
+            mean_surface_temperature_k: 735.0,
+            equator_pole_contrast_k: 1.2,
+            day_night_contrast_k: 0.6,
+            surface_pressure_pa: 5.78e6,
+            gases: vec![
+                GasShareDto {
+                    species: "CO2".to_owned(),
+                    mole_fraction: 0.9835,
+                },
+                GasShareDto {
+                    species: "N2".to_owned(),
+                    mole_fraction: 0.0165,
+                },
+            ],
+            mean_molar_mass_g_per_mol: Some(43.745_082_5),
+            heat_capacity_over_r: Some(4.319_583_333_333_334),
+            stellar_flux_w_m2: 2_601.0,
+            liquid_water: false,
+            climate_regime: ClimateRegimeDto {
+                thermal: ThermalRegimeDto::Efficient,
+                forcing: ClimateForcingDto::SlowRotator,
+                condensable: None,
+                model: ClimateModelDto::Isothermal,
+            },
+            ocean_fraction: 0.0,
+            ice_fraction: 0.0,
+            cloud_fraction: 1.0,
+            surface_liquids: vec![SubstanceAreaDto {
+                substance: "H2O".to_owned(),
+                area_fraction: 0.0,
+            }],
+            surface_ices: vec![SubstanceAreaDto {
+                substance: "H2O".to_owned(),
+                area_fraction: 0.0,
+            }],
+            sigma_h_m: 1_120.0,
+            continental_fraction: 0.0,
+            heat_flow_w_m2: 0.049,
+            tectonic_regime: TectonicRegimeDto::StagnantLid,
+            volcanism_level: 1.2,
+            outgassing_earth: 0.32,
+            magnetic_field_class: MagneticFieldClassDto::None,
+            surface_age_s: 2.4e16,
+            craters: CraterContractDto {
+                lunar_equivalent_n_1km_per_km2: 7.1e-4,
+                screening: CraterScreeningDto::Atmosphere {
+                    column_mass_kg_m2: 650_000.0,
+                },
+                ..earth_surface().craters
+            },
+            wet_epoch: None,
+            ..earth_surface()
+        }
+    }
+
+    pub(crate) fn venus_surface_json() -> Value {
+        let mut wire = earth_surface_json();
+        let fields = wire.as_object_mut().unwrap();
+        for (key, value) in [
+            ("state", json!("runaway_greenhouse")),
+            ("mean_surface_temperature_k", json!(735.0)),
+            ("equator_pole_contrast_k", json!(1.2)),
+            ("day_night_contrast_k", json!(0.6)),
+            ("surface_pressure_pa", json!(5.78e6)),
+            (
+                "gases",
+                json!([
+                    { "species": "CO2", "mole_fraction": 0.9835 },
+                    { "species": "N2", "mole_fraction": 0.0165 },
+                ]),
+            ),
+            ("mean_molar_mass_g_per_mol", json!(43.745_082_5)),
+            ("heat_capacity_over_r", json!(4.319_583_333_333_334)),
+            ("stellar_flux_w_m2", json!(2_601.0)),
+            ("liquid_water", json!(false)),
+            (
+                "climate_regime",
+                json!({
+                    "thermal": "efficient",
+                    "forcing": "slow_rotator",
+                    "condensable": null,
+                    "model": "isothermal",
+                }),
+            ),
+            ("ocean_fraction", json!(0.0)),
+            ("ice_fraction", json!(0.0)),
+            ("cloud_fraction", json!(1.0)),
+            (
+                "surface_liquids",
+                json!([{ "substance": "H2O", "area_fraction": 0.0 }]),
+            ),
+            (
+                "surface_ices",
+                json!([{ "substance": "H2O", "area_fraction": 0.0 }]),
+            ),
+            ("sigma_h_m", json!(1_120.0)),
+            ("continental_fraction", json!(0.0)),
+            ("heat_flow_w_m2", json!(0.049)),
+            ("tectonic_regime", json!("stagnant_lid")),
+            ("volcanism_level", json!(1.2)),
+            ("outgassing_earth", json!(0.32)),
+            ("magnetic_field_class", json!("none")),
+            ("surface_age_s", json!(2.4e16)),
+            ("wet_epoch", Value::Null),
+        ] {
+            fields.insert(key.to_owned(), value);
+        }
+        wire["craters"]["lunar_equivalent_n_1km_per_km2"] = json!(7.1e-4);
+        wire["craters"]["screening"]["column_mass_kg_m2"] = json!(650_000.0);
+        wire
+    }
+
+    /// A Jupiter's envelope, illustrative: Guillot 2010's fiducial opacities, the protosolar
+    /// atmosphere depleted of helium (He/H₂ 0.157 and CH₄/H₂ 2.1 × 10⁻³ by number), the adiabat
+    /// through 166.1 K at 1 bar, and an ammonia-ice deck at 0.45–0.7 bar.
+    pub(crate) fn jupiter_envelope() -> BodyEnvelopeDto {
+        BodyEnvelopeDto {
+            internal_temperature_k: 99.0,
+            irradiation_temperature_k: 155.4,
+            profile: GuillotProfileDto {
+                thermal_opacity_m2_per_kg: 1e-3,
+                opacity_ratio: 0.4,
+                redistribution_factor: 0.25,
+            },
+            join_pressure_pa: 5e4,
+            adiabat: vec![
+                ProfileNodeDto {
+                    pressure_pa: 5e4,
+                    temperature_k: 134.7,
+                },
+                ProfileNodeDto {
+                    pressure_pa: 1e5,
+                    temperature_k: 166.1,
+                },
+                ProfileNodeDto {
+                    pressure_pa: 1e6,
+                    temperature_k: 336.4,
+                },
+                ProfileNodeDto {
+                    pressure_pa: 1e7,
+                    temperature_k: 681.3,
+                },
+            ],
+            composition: vec![
+                GasShareDto {
+                    species: "H2".to_owned(),
+                    mole_fraction: 0.8627,
+                },
+                GasShareDto {
+                    species: "He".to_owned(),
+                    mole_fraction: 0.1355,
+                },
+                GasShareDto {
+                    species: "CH4".to_owned(),
+                    mole_fraction: 0.0018,
+                },
+            ],
+            mean_molar_mass_g_per_mol: 2.310_487_1,
+            heat_capacity_over_r: 3.3654,
+            decks: vec![ammonia_deck()],
+            haze_tau_550: 0.5,
+        }
+    }
+
+    /// The ammonia-ice deck of [`jupiter_envelope`].
+    pub(crate) fn ammonia_deck() -> AerosolModeDto {
+        AerosolModeDto {
+            material: "NH3".to_owned(),
+            phase: SubstancePhaseDto::Solid,
+            deck: Some("NH3".to_owned()),
+            shape: AerosolShapeDto::Crystal,
+            size_distribution: SizeDistributionDto::Gamma {
+                effective_radius_m: 1e-6,
+                effective_variance: 0.1,
+            },
+            column_mass_kg_m2: 0.012,
+            tau_550: 8.0,
+            base_pa: 7e4,
+            top_pa: 4.5e4,
+            f_sed: 2.0,
+        }
+    }
+
+    pub(crate) fn ammonia_deck_json() -> Value {
+        json!({
+            "material": "NH3",
+            "phase": "solid",
+            "deck": "NH3",
+            "shape": "crystal",
+            "size_distribution": {
+                "type": "gamma",
+                "effective_radius_m": 1e-6,
+                "effective_variance": 0.1,
+            },
+            "column_mass_kg_m2": 0.012,
+            "tau_550": 8.0,
+            "base_pa": 7e4,
+            "top_pa": 4.5e4,
+            "f_sed": 2.0,
+        })
+    }
+
+    pub(crate) fn jupiter_envelope_json() -> Value {
+        json!({
+            "internal_temperature_k": 99.0,
+            "irradiation_temperature_k": 155.4,
+            "profile": {
+                "thermal_opacity_m2_per_kg": 1e-3,
+                "opacity_ratio": 0.4,
+                "redistribution_factor": 0.25,
+            },
+            "join_pressure_pa": 5e4,
+            "adiabat": [
+                { "pressure_pa": 5e4, "temperature_k": 134.7 },
+                { "pressure_pa": 1e5, "temperature_k": 166.1 },
+                { "pressure_pa": 1e6, "temperature_k": 336.4 },
+                { "pressure_pa": 1e7, "temperature_k": 681.3 },
+            ],
+            "composition": [
+                { "species": "H2", "mole_fraction": 0.8627 },
+                { "species": "He", "mole_fraction": 0.1355 },
+                { "species": "CH4", "mole_fraction": 0.0018 },
+            ],
+            "mean_molar_mass_g_per_mol": 2.310_487_1,
+            "heat_capacity_over_r": 3.3654,
+            "decks": [ammonia_deck_json()],
+            "haze_tau_550": 0.5,
+        })
+    }
+
+    /// A warm sub-Neptune's envelope, illustrative: no internal heat stated, water and methane
+    /// beside the hydrogen and helium, and no deck.
+    pub(crate) fn sub_neptune_envelope() -> BodyEnvelopeDto {
+        BodyEnvelopeDto {
+            internal_temperature_k: 0.0,
+            irradiation_temperature_k: 640.0,
+            join_pressure_pa: 2e6,
+            adiabat: vec![
+                ProfileNodeDto {
+                    pressure_pa: 2e6,
+                    temperature_k: 1_020.0,
+                },
+                ProfileNodeDto {
+                    pressure_pa: 1e7,
+                    temperature_k: 1_660.0,
+                },
+            ],
+            composition: vec![
+                GasShareDto {
+                    species: "H2".to_owned(),
+                    mole_fraction: 0.8379,
+                },
+                GasShareDto {
+                    species: "He".to_owned(),
+                    mole_fraction: 0.1421,
+                },
+                GasShareDto {
+                    species: "H2O".to_owned(),
+                    mole_fraction: 0.012,
+                },
+                GasShareDto {
+                    species: "CH4".to_owned(),
+                    mole_fraction: 0.008,
+                },
+            ],
+            mean_molar_mass_g_per_mol: 2.602_556_7,
+            heat_capacity_over_r: 3.3679,
+            decks: Vec::new(),
+            haze_tau_550: 0.0,
+            ..jupiter_envelope()
+        }
+    }
+
+    pub(crate) fn sub_neptune_envelope_json() -> Value {
+        let mut wire = jupiter_envelope_json();
+        for (key, value) in [
+            ("internal_temperature_k", json!(0.0)),
+            ("irradiation_temperature_k", json!(640.0)),
+            ("join_pressure_pa", json!(2e6)),
+            (
+                "adiabat",
+                json!([
+                    { "pressure_pa": 2e6, "temperature_k": 1_020.0 },
+                    { "pressure_pa": 1e7, "temperature_k": 1_660.0 },
+                ]),
+            ),
+            (
+                "composition",
+                json!([
+                    { "species": "H2", "mole_fraction": 0.8379 },
+                    { "species": "He", "mole_fraction": 0.1421 },
+                    { "species": "H2O", "mole_fraction": 0.012 },
+                    { "species": "CH4", "mole_fraction": 0.008 },
+                ]),
+            ),
+            ("mean_molar_mass_g_per_mol", json!(2.602_556_7)),
+            ("heat_capacity_over_r", json!(3.3679)),
+            ("decks", json!([])),
+            ("haze_tau_550", json!(0.0)),
+        ] {
+            wire[key] = value;
+        }
+        wire
+    }
+
+    /// A vertical structure, illustrative: Earth's moist α, its skin and three nodes.
+    fn earth_structure() -> VerticalStructureDto {
+        VerticalStructureDto {
+            alpha: 0.6,
+            skin_temperature_k: 214.5,
+            adiabat: vec![
+                ProfileNodeDto {
+                    pressure_pa: 101_325.0,
+                    temperature_k: 287.9,
+                },
+                ProfileNodeDto {
+                    pressure_pa: 40_000.0,
+                    temperature_k: 247.0,
+                },
+                ProfileNodeDto {
+                    pressure_pa: 14_000.0,
+                    temperature_k: 214.5,
+                },
+            ],
+        }
+    }
+
+    fn earth_structure_json() -> Value {
+        json!({
+            "alpha": 0.6,
+            "skin_temperature_k": 214.5,
+            "adiabat": [
+                { "pressure_pa": 101_325.0, "temperature_k": 287.9 },
+                { "pressure_pa": 40_000.0, "temperature_k": 247.0 },
+                { "pressure_pa": 14_000.0, "temperature_k": 214.5 },
+            ],
+        })
+    }
+
+    /// An aerosol inventory, illustrative: a water cloud of droplets and crystals, a Titan-like
+    /// haze of aggregates, and ozone on a profile beside a sulphur-dioxide slab.
+    fn inventory() -> AerosolInventoryDto {
+        AerosolInventoryDto {
+            modes: vec![
+                AerosolModeDto {
+                    material: "H2O".to_owned(),
+                    phase: SubstancePhaseDto::Liquid,
+                    deck: Some("H2O".to_owned()),
+                    shape: AerosolShapeDto::Sphere,
+                    size_distribution: SizeDistributionDto::LogNormal {
+                        effective_radius_m: 1e-5,
+                        effective_variance: 0.1,
+                    },
+                    column_mass_kg_m2: 0.05,
+                    tau_550: 7.5,
+                    base_pa: 85_000.0,
+                    top_pa: 60_000.0,
+                    f_sed: 1.0,
+                },
+                AerosolModeDto {
+                    material: "tholin".to_owned(),
+                    phase: SubstancePhaseDto::Solid,
+                    deck: None,
+                    shape: AerosolShapeDto::Aggregate,
+                    size_distribution: SizeDistributionDto::Aggregate {
+                        monomer_radius_m: 5e-8,
+                        monomer_count: 3_000.0,
+                        fractal_dimension: 2.0,
+                        fractal_prefactor: 1.666_666_666_666_666_7,
+                    },
+                    column_mass_kg_m2: 0.003,
+                    tau_550: 0.4,
+                    base_pa: 20_000.0,
+                    top_pa: 10.0,
+                    f_sed: 0.0,
+                },
+            ],
+            decks: vec![CondensateDeckDto {
+                condensate: "H2O".to_owned(),
+                vapour_mole_fraction_above: 3e-6,
+            }],
+            absorbers: vec![
+                AbsorberDto {
+                    species: "O3".to_owned(),
+                    column_m2: 8.06e22,
+                    base_pa: 30_000.0,
+                    top_pa: 30.0,
+                    profile: Some(vec![
+                        MixingRatioNodeDto {
+                            pressure_pa: 30_000.0,
+                            relative_mixing_ratio: 0.05,
+                        },
+                        MixingRatioNodeDto {
+                            pressure_pa: 1_000.0,
+                            relative_mixing_ratio: 1.0,
+                        },
+                        MixingRatioNodeDto {
+                            pressure_pa: 30.0,
+                            relative_mixing_ratio: 0.2,
+                        },
+                    ]),
+                },
+                AbsorberDto {
+                    species: "SO2".to_owned(),
+                    column_m2: 1e19,
+                    base_pa: 5_000.0,
+                    top_pa: 1_000.0,
+                    profile: None,
+                },
+            ],
+        }
+    }
+
+    fn inventory_json() -> Value {
+        json!({
+            "modes": [
+                {
+                    "material": "H2O",
+                    "phase": "liquid",
+                    "deck": "H2O",
+                    "shape": "sphere",
+                    "size_distribution": {
+                        "type": "log_normal",
+                        "effective_radius_m": 1e-5,
+                        "effective_variance": 0.1,
+                    },
+                    "column_mass_kg_m2": 0.05,
+                    "tau_550": 7.5,
+                    "base_pa": 85_000.0,
+                    "top_pa": 60_000.0,
+                    "f_sed": 1.0,
+                },
+                {
+                    "material": "tholin",
+                    "phase": "solid",
+                    "deck": null,
+                    "shape": "aggregate",
+                    "size_distribution": {
+                        "type": "aggregate",
+                        "monomer_radius_m": 5e-8,
+                        "monomer_count": 3_000.0,
+                        "fractal_dimension": 2.0,
+                        "fractal_prefactor": 1.666_666_666_666_666_7,
+                    },
+                    "column_mass_kg_m2": 0.003,
+                    "tau_550": 0.4,
+                    "base_pa": 20_000.0,
+                    "top_pa": 10.0,
+                    "f_sed": 0.0,
+                },
+            ],
+            "decks": [{ "condensate": "H2O", "vapour_mole_fraction_above": 3e-6 }],
+            "absorbers": [
+                {
+                    "species": "O3",
+                    "column_m2": 8.06e22,
+                    "base_pa": 30_000.0,
+                    "top_pa": 30.0,
+                    "profile": [
+                        { "pressure_pa": 30_000.0, "relative_mixing_ratio": 0.05 },
+                        { "pressure_pa": 1_000.0, "relative_mixing_ratio": 1.0 },
+                        { "pressure_pa": 30.0, "relative_mixing_ratio": 0.2 },
+                    ],
+                },
+                {
+                    "species": "SO2",
+                    "column_m2": 1e19,
+                    "base_pa": 5_000.0,
+                    "top_pa": 1_000.0,
+                    "profile": null,
+                },
+            ],
+        })
+    }
+
+    fn condensates() -> Vec<SurfaceCondensateDto> {
+        vec![SurfaceCondensateDto {
+            substance: "CO2".to_owned(),
+            phase: SubstancePhaseDto::Solid,
+            reservoir_gel_m: 0.2,
+            area_fraction: 0.02,
+            seasonal: true,
+        }]
+    }
+
+    fn condensates_json() -> Value {
+        json!([{
+            "substance": "CO2",
+            "phase": "solid",
+            "reservoir_gel_m": 0.2,
+            "area_fraction": 0.02,
+            "seasonal": true,
+        }])
+    }
+
+    fn crust() -> CrustCompositionDto {
+        CrustCompositionDto {
+            primary: Some("feldspathic".to_owned()),
+            secondary: Some("basalt_fe".to_owned()),
+            tertiary: None,
+            bulk: None,
+            lid: CrustLidDto::Primary,
+            provinces: "basalt_fe".to_owned(),
+            redox: RedoxClassDto::Intermediate,
+            mantle_redox_iw: -1.5,
+            melt_area_fraction: 0.0,
+        }
+    }
+
+    fn crust_json() -> Value {
+        json!({
+            "primary": "feldspathic",
+            "secondary": "basalt_fe",
+            "tertiary": null,
+            "bulk": null,
+            "lid": "primary",
+            "provinces": "basalt_fe",
+            "redox": "intermediate",
+            "mantle_redox_iw": -1.5,
+            "melt_area_fraction": 0.0,
+        })
+    }
+
+    fn modifiers() -> SurfaceModifiersDto {
+        SurfaceModifiersDto {
+            maturity: 0.8,
+            organic_cover: 0.0,
+            resurfacing_m_per_yr: 0.0,
+        }
+    }
+
+    fn modifiers_json() -> Value {
+        json!({ "maturity": 0.8, "organic_cover": 0.0, "resurfacing_m_per_yr": 0.0 })
+    }
+
+    fn biosphere() -> BiosphereDto {
+        BiosphereDto {
+            fluxes: vec![BiosphereFluxDto {
+                species: "O2".to_owned(),
+                flux_earth: 1.0,
+            }],
+        }
+    }
+
+    fn biosphere_json() -> Value {
+        json!({ "fluxes": [{ "species": "O2", "flux_earth": 1.0 }] })
+    }
+
+    fn europa_ocean() -> SubsurfaceOceanDto {
+        SubsurfaceOceanDto {
+            shell_thickness_m: 12_800.0,
+            thickness_m: 124_200.0,
+            floor: OceanFloorDto::Rock,
+            liquid: "H2O".to_owned(),
+            solute_mass_fraction: 0.0,
+            base_temperature_k: 273.15,
+        }
+    }
+
+    fn europa_ocean_json() -> Value {
+        json!({
+            "shell_thickness_m": 12_800.0,
+            "thickness_m": 124_200.0,
+            "floor": "rock",
+            "liquid": "H2O",
+            "solute_mass_fraction": 0.0,
+            "base_temperature_k": 273.15,
+        })
+    }
+
+    #[test]
+    fn an_earth_s_surface_wire_form() {
+        assert_wire_form(&earth_surface(), earth_surface_json());
+    }
+
+    #[test]
+    fn a_venus_s_surface_wire_form() {
+        assert_wire_form(&venus_surface(), venus_surface_json());
+    }
+
+    #[test]
+    fn a_jupiter_s_envelope_wire_form() {
+        assert_wire_form(&jupiter_envelope(), jupiter_envelope_json());
+    }
+
+    #[test]
+    fn a_sub_neptune_s_envelope_wire_form() {
+        assert_wire_form(&sub_neptune_envelope(), sub_neptune_envelope_json());
+    }
+
+    /// Decision-p14-t35e-wire §1.5 item 4: every member a later task fills round-trips absent,
+    /// `null` and a value, and an absent one is written with no key.
+    #[test]
+    fn each_later_member_round_trips_absent_null_and_a_value() {
+        /// The member's `null` where `value` is `false`, and the fixture's value otherwise.
+        fn modelled<T>(value: bool, fixture: impl FnOnce() -> T) -> Modelled<T> {
+            if value {
+                Modelled::Value(fixture())
+            } else {
+                Modelled::Null
+            }
+        }
+        fn with(member: &str, value: bool) -> BodySurfaceDto {
+            let mut surface = earth_surface();
+            match member {
+                "subsurface_ocean" => surface.subsurface_ocean = modelled(value, europa_ocean),
+                "vertical_structure" => {
+                    surface.vertical_structure = modelled(value, earth_structure);
+                }
+                "aerosols" => surface.aerosols = modelled(value, inventory),
+                "condensates" => surface.condensates = modelled(value, condensates),
+                "crust" => surface.crust = modelled(value, crust),
+                "modifiers" => surface.modifiers = modelled(value, modifiers),
+                _ => surface.biosphere = modelled(value, biosphere),
+            }
+            surface
+        }
+        let members = [
+            ("subsurface_ocean", europa_ocean_json()),
+            ("vertical_structure", earth_structure_json()),
+            ("aerosols", inventory_json()),
+            ("condensates", condensates_json()),
+            ("crust", crust_json()),
+            ("modifiers", modifiers_json()),
+            ("biosphere", biosphere_json()),
+        ];
+        // Absent: the Earth's own form has none of the keys.
+        let absent = earth_surface_json();
+        for (member, _) in &members {
+            assert!(absent.get(member).is_none(), "{member}");
+        }
+        assert_wire_form(&earth_surface(), absent);
+        for (member, value) in members {
+            let mut wire = earth_surface_json();
+            wire[member] = Value::Null;
+            assert_wire_form(&with(member, false), wire.clone());
+            wire[member] = value;
+            assert_wire_form(&with(member, true), wire);
+        }
+    }
+
+    /// Decision-p14-t35e-wire §1.5 item 3: an `ok` surface with a member the types lack still
+    /// decodes, so that a later member is additive.
+    #[test]
+    fn a_surface_with_an_unknown_member_decodes() {
+        let mut wire = earth_surface_json();
+        wire["albedo_map"] = json!({ "bands": [0.1, 0.2] });
+        assert_eq!(
+            serde_json::from_value::<BodySurfaceDto>(wire).unwrap(),
+            earth_surface()
+        );
+    }
+
+    /// Decision-composition §1.10: every keyed member holds any string, a key no registry row has
+    /// yet included, so that a new row is additive.
+    #[test]
+    fn every_keyed_member_holds_any_registry_key() {
+        let unknown = "Xe";
+        let mut surface = earth_surface();
+        surface.gases[0].species = unknown.to_owned();
+        surface.climate_regime.condensable = Some(unknown.to_owned());
+        surface.surface_liquids[0].substance = unknown.to_owned();
+        surface.surface_ices[0].substance = unknown.to_owned();
+        let mut wire = earth_surface_json();
+        wire["gases"][0]["species"] = json!(unknown);
+        wire["climate_regime"]["condensable"] = json!(unknown);
+        wire["surface_liquids"][0]["substance"] = json!(unknown);
+        wire["surface_ices"][0]["substance"] = json!(unknown);
+        if let Some(epoch) = surface.wet_epoch.as_mut() {
+            epoch.liquid = unknown.to_owned();
+        }
+        wire["wet_epoch"]["liquid"] = json!(unknown);
+        // And every keyed member of the later tasks' members.
+        let key = || unknown.to_owned();
+        surface.subsurface_ocean = Modelled::Value(SubsurfaceOceanDto {
+            liquid: key(),
+            ..europa_ocean()
+        });
+        let mut ocean = europa_ocean_json();
+        ocean["liquid"] = json!(unknown);
+        wire["subsurface_ocean"] = ocean;
+        let mut aerosols = inventory();
+        for mode in &mut aerosols.modes {
+            mode.material = key();
+            mode.deck = Some(key());
+        }
+        aerosols.decks[0].condensate = key();
+        for absorber in &mut aerosols.absorbers {
+            absorber.species = key();
+        }
+        surface.aerosols = Modelled::Value(aerosols);
+        let mut aerosols = inventory_json();
+        for mode in 0..2 {
+            aerosols["modes"][mode]["material"] = json!(unknown);
+            aerosols["modes"][mode]["deck"] = json!(unknown);
+            aerosols["absorbers"][mode]["species"] = json!(unknown);
+        }
+        aerosols["decks"][0]["condensate"] = json!(unknown);
+        wire["aerosols"] = aerosols;
+        surface.condensates = Modelled::Value(vec![SurfaceCondensateDto {
+            substance: key(),
+            ..condensates()[0].clone()
+        }]);
+        let mut condensed = condensates_json();
+        condensed[0]["substance"] = json!(unknown);
+        wire["condensates"] = condensed;
+        surface.crust = Modelled::Value(CrustCompositionDto {
+            primary: Some(key()),
+            secondary: Some(key()),
+            tertiary: Some(key()),
+            provinces: key(),
+            ..crust()
+        });
+        let mut crusts = crust_json();
+        for member in ["primary", "secondary", "tertiary", "provinces"] {
+            crusts[member] = json!(unknown);
+        }
+        wire["crust"] = crusts;
+        surface.biosphere = Modelled::Value(BiosphereDto {
+            fluxes: vec![BiosphereFluxDto {
+                species: key(),
+                flux_earth: 1.0,
+            }],
+        });
+        wire["biosphere"] = json!({ "fluxes": [{ "species": unknown, "flux_earth": 1.0 }] });
+        assert_wire_form(&surface, wire);
+        let mut envelope = jupiter_envelope();
+        envelope.composition[0].species = unknown.to_owned();
+        envelope.decks[0].material = unknown.to_owned();
+        envelope.decks[0].deck = Some(unknown.to_owned());
+        let mut wire = jupiter_envelope_json();
+        wire["composition"][0]["species"] = json!(unknown);
+        wire["decks"][0]["material"] = json!(unknown);
+        wire["decks"][0]["deck"] = json!(unknown);
+        assert_wire_form(&envelope, wire);
+    }
+
+    /// The four fixtures' mixtures, the Earth's, the Venus's, the Jupiter's and the
+    /// sub-Neptune's, sum to 1 to 10⁻⁹ and descend.
+    #[test]
+    fn the_fixtures_gases_sum_to_one_and_descend() {
+        for gases in [
+            earth_surface().gases,
+            venus_surface().gases,
+            jupiter_envelope().composition,
+            sub_neptune_envelope().composition,
+        ] {
+            let sum = gases.iter().fold(0.0, |sum, gas| sum + gas.mole_fraction);
+            assert!((sum - 1.0).abs() <= 1e-9, "{gases:?}");
+            assert!(
+                gases
+                    .windows(2)
+                    .all(|pair| pair[0].mole_fraction >= pair[1].mole_fraction),
+                "{gases:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn surface_state_strings() {
+        assert_wire_strings(&[
+            (SurfaceStateDto::MagmaOcean, "magma_ocean"),
+            (SurfaceStateDto::Airless, "airless"),
+            (SurfaceStateDto::RunawayGreenhouse, "runaway_greenhouse"),
+            (SurfaceStateDto::Temperate, "temperate"),
+            (SurfaceStateDto::Snowball, "snowball"),
+            (SurfaceStateDto::SteamEnvelope, "steam_envelope"),
+            (SurfaceStateDto::Tenuous, "tenuous"),
+        ]);
+    }
+
+    #[test]
+    fn surface_material_strings() {
+        assert_wire_strings(&[
+            (SurfaceMaterialDto::Rock, "rock"),
+            (SurfaceMaterialDto::Ice, "ice"),
+        ]);
+    }
+
+    #[test]
+    fn radiation_class_strings() {
+        assert_wire_strings(&[
+            (RadiationClassDto::Dark, "dark"),
+            (RadiationClassDto::Quiet, "quiet"),
+            (RadiationClassDto::Active, "active"),
+            (RadiationClassDto::Intense, "intense"),
+            (RadiationClassDto::Extreme, "extreme"),
+        ]);
+    }
+
+    #[test]
+    fn thermal_regime_strings() {
+        assert_wire_strings(&[
+            (ThermalRegimeDto::AirlessLike, "airless_like"),
+            (ThermalRegimeDto::Transitional, "transitional"),
+            (ThermalRegimeDto::Efficient, "efficient"),
+        ]);
+    }
+
+    #[test]
+    fn climate_forcing_strings() {
+        assert_wire_strings(&[
+            (ClimateForcingDto::Seasonal, "seasonal"),
+            (ClimateForcingDto::IceBelt, "ice_belt"),
+            (ClimateForcingDto::SlowRotator, "slow_rotator"),
+            (ClimateForcingDto::Locked, "locked"),
+        ]);
+    }
+
+    /// The climate model is R09's `ClimateModelDto`, pinned there too; the regime names it.
+    #[test]
+    fn climate_model_strings() {
+        assert_wire_strings(&[
+            (ClimateModelDto::EnergyBalance, "energy_balance"),
+            (
+                ClimateModelDto::LockedEnergyBalance,
+                "locked_energy_balance",
+            ),
+            (
+                ClimateModelDto::RadiativeEquilibrium,
+                "radiative_equilibrium",
+            ),
+            (ClimateModelDto::Isothermal, "isothermal"),
+        ]);
+    }
+
+    #[test]
+    fn tectonic_regime_strings() {
+        assert_wire_strings(&[
+            (TectonicRegimeDto::MobileLid, "mobile_lid"),
+            (TectonicRegimeDto::StagnantLid, "stagnant_lid"),
+            (TectonicRegimeDto::HeatPipe, "heat_pipe"),
+            (TectonicRegimeDto::Episodic, "episodic"),
+            (TectonicRegimeDto::IceShell, "ice_shell"),
+        ]);
+    }
+
+    #[test]
+    fn magnetic_field_class_strings() {
+        assert_wire_strings(&[
+            (MagneticFieldClassDto::None, "none"),
+            (MagneticFieldClassDto::Weak, "weak"),
+            (MagneticFieldClassDto::Strong, "strong"),
+        ]);
+    }
+
+    #[test]
+    fn ocean_floor_strings() {
+        assert_wire_strings(&[
+            (OceanFloorDto::Rock, "rock"),
+            (OceanFloorDto::IceIii, "ice_iii"),
+            (OceanFloorDto::IceV, "ice_v"),
+            (OceanFloorDto::IceVi, "ice_vi"),
+            (OceanFloorDto::IceVii, "ice_vii"),
+        ]);
+    }
+
+    #[test]
+    fn crater_target_class_strings() {
+        assert_wire_strings(&[
+            (CraterTargetClassDto::NonPorous, "non_porous"),
+            (CraterTargetClassDto::Porous, "porous"),
+        ]);
+    }
+
+    #[test]
+    fn substance_phase_strings() {
+        assert_wire_strings(&[
+            (SubstancePhaseDto::Solid, "solid"),
+            (SubstancePhaseDto::Liquid, "liquid"),
+            (SubstancePhaseDto::Vapour, "vapour"),
+            (SubstancePhaseDto::Supercritical, "supercritical"),
+        ]);
+    }
+
+    #[test]
+    fn aerosol_shape_strings() {
+        assert_wire_strings(&[
+            (AerosolShapeDto::Sphere, "sphere"),
+            (
+                AerosolShapeDto::NonSphericalMineral,
+                "non_spherical_mineral",
+            ),
+            (AerosolShapeDto::Crystal, "crystal"),
+            (AerosolShapeDto::Aggregate, "aggregate"),
+        ]);
+    }
+
+    #[test]
+    fn crust_lid_strings() {
+        assert_wire_strings(&[
+            (CrustLidDto::Primary, "primary"),
+            (CrustLidDto::Secondary, "secondary"),
+            (CrustLidDto::Bulk, "bulk"),
+        ]);
+    }
+
+    #[test]
+    fn redox_class_strings() {
+        assert_wire_strings(&[
+            (RedoxClassDto::Reduced, "reduced"),
+            (RedoxClassDto::Intermediate, "intermediate"),
+            (RedoxClassDto::Oxidised, "oxidised"),
+        ]);
+    }
+
+    #[test]
+    fn crater_screening_wire_forms() {
+        assert_wire_form(&CraterScreeningDto::None, json!({ "type": "none" }));
+        assert_wire_form(
+            &CraterScreeningDto::Atmosphere {
+                column_mass_kg_m2: 10_318.0,
+            },
+            json!({ "type": "atmosphere", "column_mass_kg_m2": 10_318.0 }),
+        );
+        assert_wire_form(
+            &CraterScreeningDto::Cutoff { diameter_m: 104.0 },
+            json!({ "type": "cutoff", "diameter_m": 104.0 }),
+        );
+    }
+
+    #[test]
+    fn size_distribution_wire_forms() {
+        assert_wire_form(
+            &SizeDistributionDto::Gamma {
+                effective_radius_m: 1e-6,
+                effective_variance: 0.1,
+            },
+            json!({ "type": "gamma", "effective_radius_m": 1e-6, "effective_variance": 0.1 }),
+        );
+        assert_wire_form(
+            &SizeDistributionDto::LogNormal {
+                effective_radius_m: 1e-5,
+                effective_variance: 0.2,
+            },
+            json!({ "type": "log_normal", "effective_radius_m": 1e-5, "effective_variance": 0.2 }),
+        );
+        assert_wire_form(
+            &SizeDistributionDto::Aggregate {
+                monomer_radius_m: 5e-8,
+                monomer_count: 3_000.0,
+                fractal_dimension: 2.0,
+                fractal_prefactor: 1.666_666_666_666_666_7,
+            },
+            json!({
+                "type": "aggregate",
+                "monomer_radius_m": 5e-8,
+                "monomer_count": 3_000.0,
+                "fractal_dimension": 2.0,
+                "fractal_prefactor": 1.666_666_666_666_666_7,
+            }),
+        );
+    }
+
+    #[test]
+    fn a_subsurface_ocean_wire_form() {
+        assert_wire_form(&europa_ocean(), europa_ocean_json());
+    }
+
+    #[test]
+    fn an_aerosol_inventory_wire_form() {
+        assert_wire_form(&inventory(), inventory_json());
+    }
+
+    #[test]
+    fn a_vertical_structure_wire_form() {
+        assert_wire_form(&earth_structure(), earth_structure_json());
+    }
+
+    /// Every quantity's name carries its unit: each numeric key of a whole surface and envelope
+    /// ends in a unit, or is a dimensionless quantity named as one.
+    #[test]
+    fn every_quantity_s_name_carries_its_unit() {
+        const DIMENSIONLESS: [&str; 24] = [
+            "mole_fraction",
+            "area_fraction",
+            "heat_capacity_over_r",
+            "ocean_fraction",
+            "ice_fraction",
+            "cloud_fraction",
+            "continental_fraction",
+            "volcanism_level",
+            "outgassing_earth",
+            "solute_mass_fraction",
+            "k_target",
+            "alpha",
+            "effective_variance",
+            "monomer_count",
+            "fractal_dimension",
+            "fractal_prefactor",
+            "tau_550",
+            "f_sed",
+            "vapour_mole_fraction_above",
+            "relative_mixing_ratio",
+            "opacity_ratio",
+            "redistribution_factor",
+            "haze_tau_550",
+            "flux_earth",
+        ];
+        const MORE: [&str; 4] = [
+            "mantle_redox_iw",
+            "melt_area_fraction",
+            "maturity",
+            "organic_cover",
+        ];
+        const UNITS: [&str; 14] = [
+            "_k",
+            "_pa",
+            "_m",
+            "_s",
+            "_w_m2",
+            "_g_per_mol",
+            "_per_km2",
+            "_kg_m3",
+            "_m_s",
+            "_yr",
+            "_m_per_yr",
+            "_kg_m2",
+            "_m2",
+            "_m2_per_kg",
+        ];
+        fn numbers(value: &Value, out: &mut Vec<String>) {
+            match value {
+                Value::Object(fields) => {
+                    for (key, inner) in fields {
+                        if inner.is_number() {
+                            out.push(key.clone());
+                        }
+                        numbers(inner, out);
+                    }
+                }
+                Value::Array(items) => items.iter().for_each(|item| numbers(item, out)),
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+            }
+        }
+        let mut surface = earth_surface();
+        surface.subsurface_ocean = Modelled::Value(europa_ocean());
+        surface.vertical_structure = Modelled::Value(earth_structure());
+        surface.aerosols = Modelled::Value(inventory());
+        surface.condensates = Modelled::Value(condensates());
+        surface.crust = Modelled::Value(crust());
+        surface.modifiers = Modelled::Value(modifiers());
+        surface.biosphere = Modelled::Value(biosphere());
+        let mut keys = Vec::new();
+        numbers(&serde_json::to_value(&surface).unwrap(), &mut keys);
+        numbers(
+            &serde_json::to_value(jupiter_envelope()).unwrap(),
+            &mut keys,
+        );
+        for key in keys {
+            let named = DIMENSIONLESS.contains(&key.as_str())
+                || MORE.contains(&key.as_str())
+                || UNITS.iter().any(|unit| key.ends_with(unit));
+            assert!(named, "{key} names no unit");
+        }
+    }
+}

@@ -65,15 +65,22 @@ pub use galaxy::{
 pub use modelled::Modelled;
 pub use orbit::{HierarchyDto, HierarchyNodeDto, OrbitDto};
 pub use planetary::{
-    ArchitectureClassDto, BandsDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto,
-    BeltKindDto, BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyEventDto, BodyEventsDto,
-    BodyEventsRequest, BodyFigureDto, BodyHooksDto, BodyKindDto, BodyOrbitDto, BodyPhotometryDto,
-    BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
-    BulkPropertiesDto, CometaryHaloDto, DestructionCauseDto, DetailLevelDto, FigureDatumDto,
-    FigureLawDto, HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto,
-    PhaseTemplateDto, PlanetClassDto, PopulationDto, RingDto, RingGapDto, RingKindDto,
-    RingMaterialDto, SectionDto, SpinResonanceDto, SystemBodiesDto, SystemBodiesRequest,
-    SystemPlaneDto, ZoneDto,
+    AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolShapeDto, ArchitectureClassDto,
+    BandsDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto, BeltKindDto, BeltSiteDto,
+    BiosphereDto, BiosphereFluxDto, BodyDetailDto, BodyDetailRequest, BodyEnvelopeDto,
+    BodyEventDto, BodyEventsDto, BodyEventsRequest, BodyFigureDto, BodyHooksDto, BodyKindDto,
+    BodyOrbitDto, BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
+    BodySurfaceDto, BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto, CometaryHaloDto,
+    CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
+    CrustCompositionDto, CrustLidDto, DestructionCauseDto, DetailLevelDto, FigureDatumDto,
+    FigureLawDto, GasShareDto, GuillotProfileDto, HabitableZoneDto, MagneticFieldClassDto,
+    MassFractionsDto, MixingRatioNodeDto, MoonOriginDto, OceanFloorDto, OrbitDriftDto,
+    OrbitHostDto, PhaseTemplateDto, PlanetClassDto, PopulationDto, ProfileNodeDto,
+    RadiationClassDto, RedoxClassDto, RingDto, RingGapDto, RingKindDto, RingMaterialDto,
+    SectionDto, SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto,
+    SubsurfaceOceanDto, SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto,
+    SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, TectonicRegimeDto,
+    ThermalRegimeDto, VerticalStructureDto, WetEpochDto, ZoneDto,
 };
 pub use primitives::{
     BodyIdHex, DetailSeedHex, GalacticPosition, ParseBodyIdHexError, ParseHex64Error, SeedHex,
@@ -127,6 +134,17 @@ pub use universe::{
 /// them is ever sent unasked; `crates/hyperion-server/tests/websocket.rs`'s
 /// `a_client_that_asks_for_no_push_and_no_bulk_receives_only_known_text_frames` pins it (open
 /// question 21, closed 2026-09-30 by a delegated decision).
+///
+/// Giving a body's surface section its form (galaxy plan 14, P14.T35.e) leaves it at 2 as well:
+/// `BodySurfaceDto` had no value before, so no build sent an `ok` surface, and the first build that
+/// sends one sets its shape, while `not_resolved`, `not_modelled` and `not_applicable` keep their
+/// bytes and meanings; the new `envelope` is an optional field, read absent as `not_modelled`. That
+/// holds because both readers ignore what they do not know: serde an unknown field, since no wire
+/// type is `deny_unknown_fields`, and the client, whose decoder trusts the generated types and
+/// whose adapters read named fields only. A wire type made to refuse unknown fields, or a client
+/// check that refused an unknown key, would end it and so would bump the version; and a wire
+/// type's shape is frozen from the first build that sends a value of it
+/// (`decision-p14-t35e-wire.md`; galaxy plan 04's Design note 15).
 pub const PROTOCOL_VERSION: u32 = 2;
 
 #[cfg(test)]

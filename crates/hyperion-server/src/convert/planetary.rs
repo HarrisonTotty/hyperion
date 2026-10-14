@@ -10,21 +10,25 @@
 
 use hyperion_protocol::{
     ArchitectureClassDto, BandsDto, BeltComponentDto, BeltCompositionDto, BeltDto, BeltGapDto,
-    BeltKindDto, BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyFigureDto, BodyGrantDto,
-    BodyHooksDto, BodyIdHex, BodyKindDto, BodyOrbitDto, BodyPhotometryDto, BodyRecordDto,
-    BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto, BulkPropertiesDto,
-    CometaryHaloDto, DestructionCauseDto, DetailLevelDto, DetailSeedHex, ErrorCode, FigureDatumDto,
-    FigureLawDto, HabitableZoneDto, MassFractionsDto, MoonOriginDto, OrbitDriftDto, OrbitHostDto,
-    PhaseTemplateDto, PlanetClassDto, PopulationDto, RequestError, RingDto, RingGapDto,
-    RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto, SeenPositionDto,
-    SpinResonanceDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto,
-    SystemSummaryRequest, ZoneDto,
+    BeltKindDto, BeltSiteDto, BodyDetailDto, BodyDetailRequest, BodyEnvelopeDto, BodyFigureDto,
+    BodyGrantDto, BodyHooksDto, BodyIdHex, BodyKindDto, BodyOrbitDto, BodyPhotometryDto,
+    BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto, BodySurfaceDto,
+    BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto, CometaryHaloDto, CraterContractDto,
+    CraterScreeningDto, CraterTargetClassDto, DestructionCauseDto, DetailLevelDto, DetailSeedHex,
+    ErrorCode, FigureDatumDto, FigureLawDto, GasShareDto, HabitableZoneDto, MagneticFieldClassDto,
+    MassFractionsDto, Modelled, MoonOriginDto, OceanFloorDto, OrbitDriftDto, OrbitHostDto,
+    PhaseTemplateDto, PlanetClassDto, PopulationDto, RadiationClassDto, RequestError, RingDto,
+    RingGapDto, RingKindDto, RingMaterialDto, SceneBodyDto, SceneSystemDto, SectionDto,
+    SeenPositionDto, SpinResonanceDto, SubstanceAreaDto, SubsurfaceOceanDto, SurfaceMaterialDto,
+    SurfaceStateDto, SystemBodiesDto, SystemBodiesRequest, SystemPlaneDto, SystemSummaryDto,
+    SystemSummaryRequest, TectonicRegimeDto, ThermalRegimeDto, WetEpochDto, ZoneDto,
 };
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::placement::Existence;
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::architecture::{ArchitectureClass, HostMultiplicity};
 use hyperion_sim::planetary::belts::{BeltComposition, BeltSite};
+use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use hyperion_sim::planetary::derive::figure::{BodyFigure, Datum, FigureLaw};
 use hyperion_sim::planetary::derive::photometry::{Bands, BodyPhotometry, PhaseTemplate};
 use hyperion_sim::planetary::derive::rotation::SpinOrbitResonance;
@@ -32,21 +36,30 @@ use hyperion_sim::planetary::derive::{HabitableZone, PlanetClass};
 use hyperion_sim::planetary::disc::snow_line;
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
 use hyperion_sim::planetary::frames::BodyFixedFrame;
+use hyperion_sim::planetary::hooks::figures::WetEpoch;
+use hyperion_sim::planetary::hooks::surface::regime::{Forcing, ThermalRegime};
+use hyperion_sim::planetary::hooks::{
+    ClimateRegime, MagneticField, OceanFloor, RadiationClass, Subsurface, SubsurfaceOcean,
+    TectonicRegime,
+};
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{
-    BeltKind, BodyKind, BodyOrbit, BodyRecord, BulkProperties, DetailLevel, Hooks, MoonOrigin,
-    Population, Section, Surface, SystemSnapshot,
+    BeltKind, BodyKind, BodyOrbit, BodyRecord, BulkProperties, DetailLevel, Envelope, Hooks,
+    Modelled as RecordModelled, MoonOrigin, Population, Section, Surface, SystemSnapshot,
 };
 use hyperion_sim::planetary::rings::{Ring, RingKind, RingMaterial};
 use hyperion_sim::planetary::{
     BodyIndex, BodySub, PlanetarySystem, ResolveBodyError, SystemContext,
 };
+use hyperion_sim::substance::SubstanceId;
 use hyperion_sim::time::{ClockWindow, UniverseTime};
-use hyperion_sim::units::{Kelvin, Kilograms, Metres, Seconds};
+use hyperion_sim::units::{Kelvin, Kilograms, Metres, MetresPerSecond, Seconds};
+use hyperion_surface::craters::{CraterParams, Screening, TargetClass};
 
 use super::query_time;
 use super::stellar::{orbit_dto, unknown_system, wire_time};
+use super::surface::climate_model;
 
 /// A `system_bodies` request, checked: the system it names, decoded, the time inside the clock
 /// window, and the level asked for.
@@ -585,32 +598,37 @@ fn section<T, U>(section: &Section<T>, value: impl FnOnce(&T) -> U) -> SectionDt
     }
 }
 
-/// One body as a system's list carries it.
+/// One body's whole record as the wire carries it: its list entry ([`body_summary`]), with its
+/// surface, envelope and hooks.
 #[must_use]
-fn body_summary(record: &BodyRecord) -> BodySummaryDto {
-    let full = body_record(record);
-    BodySummaryDto {
-        id: full.id,
-        kind: full.kind,
-        label: full.label,
-        parent: full.parent,
-        state: full.state,
-        position_m: full.position_m,
-        mass_kg: full.mass_kg,
-        orbit: full.orbit,
-        moons: full.moons,
-        rings: full.rings,
-        population: full.population,
-        bulk: full.bulk,
-        rotation: full.rotation,
-        figure: full.figure,
-        photometry: full.photometry,
+fn body_record(record: &BodyRecord) -> BodyRecordDto {
+    let summary = body_summary(record);
+    BodyRecordDto {
+        id: summary.id,
+        kind: summary.kind,
+        label: summary.label,
+        parent: summary.parent,
+        state: summary.state,
+        position_m: summary.position_m,
+        mass_kg: summary.mass_kg,
+        orbit: summary.orbit,
+        moons: summary.moons,
+        rings: summary.rings,
+        population: summary.population,
+        bulk: summary.bulk,
+        rotation: summary.rotation,
+        figure: summary.figure,
+        photometry: summary.photometry,
+        surface: section(record.surface(), surface),
+        envelope: Some(section(record.envelope(), |inner| envelope(*inner))),
+        hooks: section(record.hooks(), hooks),
     }
 }
 
-/// One body's whole record as the wire carries it.
+/// One body as a system's list carries it: every section of its record but the surface, the
+/// envelope and the hooks, which the list does not convert.
 #[must_use]
-fn body_record(record: &BodyRecord) -> BodyRecordDto {
+fn body_summary(record: &BodyRecord) -> BodySummaryDto {
     let identity = record.identity();
     let system = identity.system();
     let parent = identity.parent().map(|host| orbit_host(system, host));
@@ -620,7 +638,7 @@ fn body_record(record: &BodyRecord) -> BodyRecordDto {
             .map(|&index| body_id(system, index))
             .collect()
     };
-    BodyRecordDto {
+    BodySummaryDto {
         id: body_id(system, identity.index()),
         kind: body_kind(identity.kind()),
         label: section(identity.label(), |label| label.as_str().to_owned()),
@@ -640,8 +658,6 @@ fn body_record(record: &BodyRecord) -> BodyRecordDto {
         rotation: Some(section(record.rotation(), rotation)),
         figure: Some(section(record.figure(), figure)),
         photometry: Some(section(record.photometry(), photometry)),
-        surface: surface(record.surface()),
-        hooks: section(record.hooks(), hooks),
     }
 }
 
@@ -871,18 +887,239 @@ fn phase_template(template: PhaseTemplate) -> PhaseTemplateDto {
     }
 }
 
-/// A surface section as the wire carries it until P14.T35.e gives `BodySurfaceDto` its form.
-///
-/// An [`Section::Ok`] surface (P14.T48.e) is sent as `not_modelled`, as an older server sent
-/// every surface, and the other states as they are (decision-p14-t35e-wire §2.5, finding F1). The
-/// record's envelope section is not on the wire before T35.e.
+/// A substance as the wire names it: its registry key, never its index (decision-composition
+/// §1.1).
 #[must_use]
-fn surface(surface: &Section<Surface>) -> SectionDto<BodySurfaceDto> {
-    match surface {
-        Section::Ok(_) | Section::NotModelled => SectionDto::NotModelled,
-        Section::NotResolved => SectionDto::NotResolved,
-        Section::NotApplicable => SectionDto::NotApplicable,
+fn key(substance: SubstanceId) -> String {
+    substance.substance().key().as_str().to_owned()
+}
+
+/// A mixture of gases as the wire carries it, in the record's order.
+#[must_use]
+fn gas_shares(gases: &[(SubstanceId, f64)]) -> Vec<GasShareDto> {
+    gases
+        .iter()
+        .map(|&(species, mole_fraction)| GasShareDto {
+            species: key(species),
+            mole_fraction,
+        })
+        .collect()
+}
+
+/// Areas by substance as the wire carries them, in the record's order.
+#[must_use]
+fn substance_areas(areas: &[(SubstanceId, f64)]) -> Vec<SubstanceAreaDto> {
+    areas
+        .iter()
+        .map(|&(substance, area_fraction)| SubstanceAreaDto {
+            substance: key(substance),
+            area_fraction,
+        })
+        .collect()
+}
+
+/// A member of the surface section that a later task fills, as the wire carries it (P14.T35.e):
+/// absent while this generator version does not model it, and once it does, its value converted
+/// by `value`, which is `None` for a member computed as none, sent `null`.
+#[must_use]
+fn later<T, U>(member: RecordModelled<&T>, value: impl FnOnce(&T) -> Option<U>) -> Modelled<U> {
+    match member {
+        RecordModelled::Ok(inner) => value(inner).map_or(Modelled::Null, Modelled::Value),
+        RecordModelled::NotModelled => Modelled::NotModelled,
     }
+}
+
+/// A surface section's value as the wire carries it (P14.T35.e), every member of the record's
+/// [`Surface`] in its unit and every substance by its registry key.
+///
+/// The members of later tasks are absent, as the record holds them not modelled; each task fills
+/// its own here when it lands.
+#[must_use]
+fn surface(surface: &Surface) -> BodySurfaceDto {
+    let conditions = surface.conditions();
+    let figures = surface.figures();
+    let regime = surface.climate_regime();
+    BodySurfaceDto {
+        state: surface_state(surface.state()),
+        material: match surface.material() {
+            SurfaceMaterial::Rock => SurfaceMaterialDto::Rock,
+            SurfaceMaterial::Ice => SurfaceMaterialDto::Ice,
+        },
+        mean_surface_temperature_k: conditions.mean_surface_temperature().value(),
+        equator_pole_contrast_k: conditions.equator_pole_contrast_k(),
+        day_night_contrast_k: conditions.day_night_contrast_k(),
+        surface_pressure_pa: conditions.surface_pressure().value(),
+        gases: gas_shares(conditions.gases()),
+        mean_molar_mass_g_per_mol: conditions.mean_molar_mass_g_per_mol(),
+        heat_capacity_over_r: conditions.heat_capacity_over_r(),
+        stellar_flux_w_m2: conditions.stellar_flux().value(),
+        radiation_class: radiation_class(conditions.radiation()),
+        liquid_water: conditions.liquid_water(),
+        climate_regime: climate_regime(*regime),
+        ocean_fraction: figures.ocean_fraction(),
+        ice_fraction: figures.ice_fraction(),
+        cloud_fraction: figures.cloud_fraction(),
+        surface_liquids: substance_areas(figures.surface_liquids()),
+        surface_ices: substance_areas(figures.surface_ices()),
+        sigma_h_m: figures.sigma_h().value(),
+        continental_fraction: figures.continental_fraction(),
+        heat_flow_w_m2: figures.heat_flow().value(),
+        tectonic_regime: tectonic_regime(figures.tectonic_regime()),
+        volcanism_level: figures.volcanism(),
+        outgassing_earth: figures.outgassing(),
+        magnetic_field_class: match figures.magnetic_field() {
+            MagneticField::None => MagneticFieldClassDto::None,
+            MagneticField::Weak => MagneticFieldClassDto::Weak,
+            MagneticField::Strong => MagneticFieldClassDto::Strong,
+        },
+        surface_age_s: Seconds::from(figures.surface_age()).value(),
+        subsurface_ocean: match figures.subsurface_ocean() {
+            Subsurface::NotComputed => Modelled::NotModelled,
+            Subsurface::NoOcean => Modelled::Null,
+            Subsurface::Ocean(ocean) => Modelled::Value(subsurface_ocean(ocean)),
+        },
+        craters: crater_contract(figures.craters()),
+        wet_epoch: figures.wet_epoch().map(wet_epoch),
+        vertical_structure: later(
+            surface.vertical_structure(),
+            |structure| match *structure {},
+        ),
+        aerosols: later(surface.aerosols(), |aerosols| match *aerosols {}),
+        condensates: later(surface.condensates(), |condensates| match *condensates {}),
+        crust: later(surface.crust(), |crust| match *crust {}),
+        modifiers: later(surface.modifiers(), |modifiers| match *modifiers {}),
+        biosphere: later(surface.biosphere(), |biosphere| match *biosphere {}),
+    }
+}
+
+/// A surface state as the wire names it.
+///
+/// # Panics
+///
+/// For [`SurfaceState::GasEnvelope`], which a record's surface never holds: [`Surface`] refuses it,
+/// since a gas-envelope body's surface section is not applicable (decision-p14-t35e-wire §2).
+#[must_use]
+fn surface_state(state: SurfaceState) -> SurfaceStateDto {
+    match state {
+        SurfaceState::MagmaOcean => SurfaceStateDto::MagmaOcean,
+        SurfaceState::Airless => SurfaceStateDto::Airless,
+        SurfaceState::RunawayGreenhouse => SurfaceStateDto::RunawayGreenhouse,
+        SurfaceState::Temperate => SurfaceStateDto::Temperate,
+        SurfaceState::Snowball => SurfaceStateDto::Snowball,
+        SurfaceState::GasEnvelope => {
+            unreachable!("a record's surface is never in the gas-envelope state")
+        }
+    }
+}
+
+/// A radiation class as the wire names it.
+#[must_use]
+fn radiation_class(class: RadiationClass) -> RadiationClassDto {
+    match class {
+        RadiationClass::Dark => RadiationClassDto::Dark,
+        RadiationClass::Quiet => RadiationClassDto::Quiet,
+        RadiationClass::Active => RadiationClassDto::Active,
+        RadiationClass::Intense => RadiationClassDto::Intense,
+        RadiationClass::Extreme => RadiationClassDto::Extreme,
+    }
+}
+
+/// A climate regime as the wire carries it, its condensable by key.
+#[must_use]
+fn climate_regime(regime: ClimateRegime) -> ClimateRegimeDto {
+    ClimateRegimeDto {
+        thermal: match regime.thermal() {
+            ThermalRegime::AirlessLike => ThermalRegimeDto::AirlessLike,
+            ThermalRegime::Transitional => ThermalRegimeDto::Transitional,
+            ThermalRegime::Efficient => ThermalRegimeDto::Efficient,
+        },
+        forcing: match regime.forcing() {
+            Forcing::Seasonal => ClimateForcingDto::Seasonal,
+            Forcing::IceBelt => ClimateForcingDto::IceBelt,
+            Forcing::SlowRotator => ClimateForcingDto::SlowRotator,
+            Forcing::Locked => ClimateForcingDto::Locked,
+        },
+        condensable: regime.condensable().map(key),
+        model: climate_model(regime.model()),
+    }
+}
+
+/// A tectonic regime as the wire names it.
+#[must_use]
+fn tectonic_regime(regime: TectonicRegime) -> TectonicRegimeDto {
+    match regime {
+        TectonicRegime::MobileLid => TectonicRegimeDto::MobileLid,
+        TectonicRegime::StagnantLid => TectonicRegimeDto::StagnantLid,
+        TectonicRegime::HeatPipe => TectonicRegimeDto::HeatPipe,
+        TectonicRegime::Episodic => TectonicRegimeDto::Episodic,
+        TectonicRegime::IceShell => TectonicRegimeDto::IceShell,
+    }
+}
+
+/// A subsurface ocean as the wire carries it.
+#[must_use]
+fn subsurface_ocean(ocean: &SubsurfaceOcean) -> SubsurfaceOceanDto {
+    SubsurfaceOceanDto {
+        shell_thickness_m: ocean.shell_thickness().value(),
+        thickness_m: ocean.thickness().value(),
+        floor: match ocean.floor() {
+            OceanFloor::Rock => OceanFloorDto::Rock,
+            OceanFloor::IceIii => OceanFloorDto::IceIii,
+            OceanFloor::IceV => OceanFloorDto::IceV,
+            OceanFloor::IceVi => OceanFloorDto::IceVi,
+            OceanFloor::IceVii => OceanFloorDto::IceVii,
+        },
+        liquid: key(ocean.liquid()),
+        solute_mass_fraction: ocean.solute_mass_fraction(),
+        base_temperature_k: ocean.base_temperature().value(),
+    }
+}
+
+/// A crater contract as the wire carries it; its gravity is the bulk section's, not repeated.
+#[must_use]
+fn crater_contract(craters: &CraterParams) -> CraterContractDto {
+    let target = craters.target();
+    CraterContractDto {
+        lunar_equivalent_n_1km_per_km2: craters.n_1km().value(),
+        screening: match craters.screening() {
+            Screening::None => CraterScreeningDto::None,
+            Screening::Atmosphere { column_mass } => CraterScreeningDto::Atmosphere {
+                column_mass_kg_m2: column_mass.value(),
+            },
+            Screening::Cutoff { diameter } => CraterScreeningDto::Cutoff {
+                diameter_m: diameter.value(),
+            },
+        },
+        projectile_density_kg_m3: craters.projectile_density().value(),
+        k_target: craters.k_target(),
+        target_class: match target.class {
+            TargetClass::NonPorous => CraterTargetClassDto::NonPorous,
+            TargetClass::Porous => CraterTargetClassDto::Porous,
+        },
+        target_density_kg_m3: target.density.value(),
+        system_age_s: Seconds::from(craters.system_age()).value(),
+        impact_velocity_m_s: craters.impact_velocity().map(MetresPerSecond::value),
+    }
+}
+
+/// A wet epoch as the wire carries it, its times in seconds before the present.
+#[must_use]
+fn wet_epoch(epoch: &WetEpoch) -> WetEpochDto {
+    WetEpochDto {
+        liquid: key(epoch.liquid()),
+        start_ago_s: Seconds::from(epoch.start()).value(),
+        end_ago_s: Seconds::from(epoch.end()).value(),
+        effective_flow_yr: epoch.effective_flow().value(),
+        runoff_m_per_yr: epoch.runoff_m_per_year(),
+        paleo_inventory_kg_m2: epoch.paleo_inventory().value(),
+    }
+}
+
+/// An envelope section's value as the wire carries it: none yet, since the record's
+/// [`Envelope`] has no value until P14.T24.d, which fills it here.
+#[must_use]
+fn envelope(envelope: Envelope) -> BodyEnvelopeDto {
+    match envelope {}
 }
 
 /// A hooks section's value: the body's detail seed (the rendering plans' R09.T1.b), which the
@@ -990,5 +1227,316 @@ fn habitable_zone(zone: &HabitableZone) -> HabitableZoneDto {
         maximum_greenhouse_m: finite(zone.maximum_greenhouse()),
         early_mars_m: finite(zone.early_mars()),
         extrapolated: zone.extrapolated(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::LazyLock;
+
+    use hyperion_sim::galaxy::Galaxy;
+    use hyperion_sim::galaxy::params::GalaxyParams;
+    use hyperion_sim::substance;
+
+    use super::*;
+
+    /// The seed of plan 14's golden systems (P14.T32), the sim's `planetary_golden.rs`'s.
+    const GOLDEN_SEED: u64 = 0x5eed_0000_0014_0032;
+
+    /// The fifteen golden systems of the sim's `planetary_golden.rs` (`GOLDEN_SYSTEMS`), in its
+    /// order: the resonant chain, the hot Jupiter, the Solar-like star, the eccentric giant, the
+    /// halo star, the close and wide binaries, the hierarchical triple, the subgiant, the red
+    /// giant, the fallback black hole, the three fillers and the T Tauri star.
+    const GOLDEN_SYSTEMS: [u64; 15] = [
+        0x0200_2b2c_a000_0000,
+        0x41fc_ecba_0000_0006,
+        0x4200_6cba_0000_0009,
+        0x4200_acaa_0000_000a,
+        0x0202_5b2b_e000_0001,
+        0x4200_2cb2_0000_0009,
+        0x41ff_ecae_0000_0004,
+        0x4200_2cb2_0000_0003,
+        0x4200_6c9a_0000_0004,
+        0x4200_ecd2_0000_0003,
+        0x8200_b2e0_0000_000a,
+        0x01ff_fb2c_6000_0000,
+        0x2200_1659_8000_0000,
+        0x4200_2cb2_0000_0000,
+        0x41fe_2c96_0000_000c,
+    ];
+
+    /// Every golden system's records at the epoch at the `full` level, each beside its wire form.
+    static GOLDEN_RECORDS: LazyLock<Vec<(BodyRecord, BodyRecordDto)>> = LazyLock::new(|| {
+        let galaxy = Galaxy::from_params(Seed::new(GOLDEN_SEED), GalaxyParams::milky_way_like())
+            .expect("the Milky Way fixture's gas is mostly neutral");
+        GOLDEN_SYSTEMS
+            .iter()
+            .flat_map(|&raw| {
+                let id = SystemId::from_raw(raw).expect("a pinned ID is a system ID");
+                let ctx =
+                    SystemContext::for_system(&galaxy, id).expect("a pinned ID names a system");
+                let planets = hyperion_sim::planetary::generate(galaxy.seed(), &ctx);
+                let snapshot = planets
+                    .snapshot_at(&ctx, UniverseTime::EPOCH)
+                    .degrade(DetailLevel::Full);
+                snapshot
+                    .bodies()
+                    .iter()
+                    .map(|record| (record.clone(), body_record(record)))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    });
+
+    /// The golden records of present planets with a bulk section, with their class.
+    fn present_planets()
+    -> impl Iterator<Item = (PlanetClass, &'static BodyRecord, &'static BodyRecordDto)> {
+        GOLDEN_RECORDS.iter().filter_map(|(sim, wire)| {
+            let Section::Ok(bulk) = sim.bulk() else {
+                return None;
+            };
+            (sim.identity().kind() == BodyKind::Planet
+                && sim.identity().state() == BodyState::Present)
+                .then_some((bulk.class(), sim, wire))
+        })
+    }
+
+    /// The surface sections that are `ok`, the record's and the wire's, with the wire's record.
+    fn ok_surfaces() -> impl Iterator<
+        Item = (
+            &'static Surface,
+            &'static BodySurfaceDto,
+            &'static BodyRecordDto,
+        ),
+    > {
+        GOLDEN_RECORDS
+            .iter()
+            .filter_map(|(sim, wire)| match (sim.surface(), &wire.surface) {
+                (Section::Ok(sim), SectionDto::Ok(dto)) => Some((sim, dto, wire)),
+                _ => None,
+            })
+    }
+
+    /// P14.T35.e: a present planet has exactly one of its surface and its envelope other than
+    /// `not_applicable`; a giant's and a sub-Neptune's surface is not applicable and its envelope
+    /// not modelled until P14.T24.d; and every record carries the envelope.
+    #[test]
+    fn every_present_planet_has_exactly_one_of_a_surface_and_an_envelope() {
+        let (mut solid, mut sub_neptunes, mut giants) = (0, 0, 0);
+        for (class, sim, wire) in present_planets() {
+            let envelope = wire
+                .envelope
+                .as_ref()
+                .expect("the server always sends the envelope");
+            let applies = [
+                wire.surface != SectionDto::NotApplicable,
+                *envelope != SectionDto::NotApplicable,
+            ];
+            assert_eq!(
+                applies.iter().filter(|&&applies| applies).count(),
+                1,
+                "{}",
+                wire.id
+            );
+            if class.has_solid_surface() {
+                assert!(matches!(wire.surface, SectionDto::Ok(_)), "{}", wire.id);
+                solid += 1;
+            } else {
+                assert_eq!(wire.surface, SectionDto::NotApplicable, "{}", wire.id);
+                assert_eq!(*envelope, SectionDto::NotModelled, "{}", wire.id);
+                assert_eq!(sim.envelope(), &Section::NotModelled, "{}", wire.id);
+                match class {
+                    PlanetClass::SubNeptune => sub_neptunes += 1,
+                    PlanetClass::IceGiant | PlanetClass::GasGiant => giants += 1,
+                    PlanetClass::Rocky | PlanetClass::Icy => {
+                        panic!("{}: a solid class without a solid surface", wire.id);
+                    }
+                }
+            }
+        }
+        assert!(
+            GOLDEN_RECORDS
+                .iter()
+                .all(|(_, wire)| wire.envelope.is_some())
+        );
+        assert!(
+            solid > 10 && sub_neptunes > 0 && giants > 10,
+            "{solid} solid, {sub_neptunes} sub-Neptunes, {giants} giants"
+        );
+    }
+
+    /// P14.T35.e: T48.e's stopgap is gone. Every `ok` surface of the record is `ok` on the wire
+    /// with the record's values, and every other state is the record's.
+    #[test]
+    fn every_surface_is_sent_in_the_record_s_state_with_its_values() {
+        for (sim, wire) in GOLDEN_RECORDS.iter() {
+            let same = matches!(
+                (sim.surface(), &wire.surface),
+                (Section::Ok(_), SectionDto::Ok(_))
+                    | (Section::NotResolved, SectionDto::NotResolved)
+                    | (Section::NotModelled, SectionDto::NotModelled)
+                    | (Section::NotApplicable, SectionDto::NotApplicable)
+            );
+            assert!(
+                same,
+                "{}: the wire's surface is not in the record's state",
+                wire.id
+            );
+        }
+        let mut surfaces = 0;
+        for (sim, dto, wire) in ok_surfaces() {
+            let conditions = sim.conditions();
+            let figures = sim.figures();
+            let id = wire.id.as_str();
+            assert_eq!(
+                (
+                    dto.mean_surface_temperature_k.to_bits(),
+                    dto.surface_pressure_pa.to_bits(),
+                    dto.ocean_fraction.to_bits(),
+                    dto.heat_flow_w_m2.to_bits(),
+                    dto.craters.k_target.to_bits(),
+                ),
+                (
+                    conditions.mean_surface_temperature().value().to_bits(),
+                    conditions.surface_pressure().value().to_bits(),
+                    figures.ocean_fraction().to_bits(),
+                    figures.heat_flow().value().to_bits(),
+                    figures.craters().k_target().to_bits(),
+                ),
+                "{id}"
+            );
+            assert_eq!(dto.gases.len(), conditions.gases().len(), "{id}");
+            assert_eq!(
+                dto.wet_epoch.is_some(),
+                figures.wet_epoch().is_some(),
+                "{id}"
+            );
+            surfaces += 1;
+        }
+        assert!(surfaces > 50, "{surfaces} surfaces");
+    }
+
+    /// P14.T35.e: the members of later tasks are absent, as the record holds them, and a
+    /// subsurface ocean is computed for a regular moon alone, an object or `null`, until
+    /// P14.T51.g.
+    #[test]
+    fn the_members_of_later_tasks_are_absent_and_a_moon_s_ocean_is_computed() {
+        let mut moons = 0;
+        for (_, dto, wire) in ok_surfaces() {
+            assert_eq!(
+                [
+                    dto.vertical_structure.is_not_modelled(),
+                    dto.aerosols.is_not_modelled(),
+                    dto.condensates.is_not_modelled(),
+                    dto.crust.is_not_modelled(),
+                    dto.modifiers.is_not_modelled(),
+                    dto.biosphere.is_not_modelled(),
+                ],
+                [true; 6],
+                "{}: the structure, aerosols, condensates, crust, modifiers and biosphere",
+                wire.id
+            );
+            let regular = wire.kind
+                == BodyKindDto::Moon {
+                    origin: MoonOriginDto::Regular,
+                };
+            assert_eq!(
+                !dto.subsurface_ocean.is_not_modelled(),
+                regular,
+                "{}",
+                wire.id
+            );
+            if let Modelled::Value(ocean) = &dto.subsurface_ocean {
+                assert!(
+                    ocean.thickness_m > 0.0 && ocean.shell_thickness_m >= 0.0,
+                    "{}",
+                    wire.id
+                );
+            }
+            moons += usize::from(regular);
+        }
+        assert!(moons > 0, "no regular moon's ocean was checked");
+    }
+
+    /// P14.T35.e: the gases sum to 1 to 10⁻⁹ and descend, an airless body's are empty, a body with
+    /// no gas has no mixture figures (`null`), and every fraction lies in `[0, 1]`, the liquids and
+    /// ices summing to the ocean and ice fractions.
+    ///
+    /// A body of another state may hold no gas either: the close binary's dwarf planet `e101`, a
+    /// magma ocean at 1,684 K with no volatiles, has none.
+    #[test]
+    fn the_surface_s_mixture_and_fractions_are_in_range() {
+        let mut airless = 0;
+        for (_, dto, wire) in ok_surfaces() {
+            let id = wire.id.as_str();
+            let gases = &dto.gases;
+            if dto.state == SurfaceStateDto::Airless {
+                assert!(gases.is_empty(), "{id}");
+                airless += 1;
+            }
+            if gases.is_empty() {
+                assert_eq!(
+                    (dto.mean_molar_mass_g_per_mol, dto.heat_capacity_over_r),
+                    (None, None),
+                    "{id}"
+                );
+            } else {
+                let sum = gases.iter().fold(0.0, |sum, gas| sum + gas.mole_fraction);
+                assert!((sum - 1.0).abs() <= 1e-9, "{id}: {sum}");
+                assert!(
+                    gases
+                        .windows(2)
+                        .all(|pair| pair[0].mole_fraction >= pair[1].mole_fraction),
+                    "{id}: {gases:?}"
+                );
+                assert!(
+                    dto.mean_molar_mass_g_per_mol.is_some_and(|mu| mu > 0.0),
+                    "{id}"
+                );
+            }
+            let fractions = [
+                dto.ocean_fraction,
+                dto.ice_fraction,
+                dto.cloud_fraction,
+                dto.continental_fraction,
+            ];
+            assert!(fractions.iter().all(|f| (0.0..=1.0).contains(f)), "{id}");
+            for (areas, total) in [
+                (&dto.surface_liquids, dto.ocean_fraction),
+                (&dto.surface_ices, dto.ice_fraction),
+            ] {
+                let sum = areas.iter().fold(0.0, |sum, area| sum + area.area_fraction);
+                assert!((sum - total).abs() <= 1e-12, "{id}");
+            }
+        }
+        assert!(airless > 0, "no airless body was checked");
+    }
+
+    /// P14.T35.e: every substance the server sends is a registry key, by construction from the
+    /// record's `SubstanceId`s.
+    #[test]
+    fn every_key_the_server_sends_is_a_registry_key() {
+        let mut keys = Vec::new();
+        for (_, dto, _) in ok_surfaces() {
+            keys.extend(dto.gases.iter().map(|gas| gas.species.clone()));
+            keys.extend(dto.climate_regime.condensable.clone());
+            keys.extend(
+                dto.surface_liquids
+                    .iter()
+                    .map(|area| area.substance.clone()),
+            );
+            keys.extend(dto.surface_ices.iter().map(|area| area.substance.clone()));
+            keys.extend(dto.wet_epoch.as_ref().map(|epoch| epoch.liquid.clone()));
+            if let Modelled::Value(ocean) = &dto.subsurface_ocean {
+                keys.push(ocean.liquid.clone());
+            }
+        }
+        assert!(keys.len() > 100, "{} keys", keys.len());
+        for key in keys {
+            assert!(
+                substance::by_key(&key).is_some(),
+                "{key} is not a registry key"
+            );
+        }
     }
 }

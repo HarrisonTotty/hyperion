@@ -19,10 +19,17 @@ pub use population::{
     PopulationDto, RingDto, RingGapDto, RingKindDto, RingMaterialDto,
 };
 pub use record::{
-    BandsDto, BeltKindDto, BodyDetailDto, BodyFigureDto, BodyHooksDto, BodyKindDto,
-    BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
-    BodySurfaceDto, BulkPropertiesDto, DestructionCauseDto, FigureDatumDto, FigureLawDto,
-    MassFractionsDto, MoonOriginDto, PhaseTemplateDto, PlanetClassDto, SpinResonanceDto,
+    AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolShapeDto, BandsDto, BeltKindDto,
+    BiosphereDto, BiosphereFluxDto, BodyDetailDto, BodyEnvelopeDto, BodyFigureDto, BodyHooksDto,
+    BodyKindDto, BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
+    BodySurfaceDto, BulkPropertiesDto, ClimateForcingDto, ClimateRegimeDto, CondensateDeckDto,
+    CraterContractDto, CraterScreeningDto, CraterTargetClassDto, CrustCompositionDto, CrustLidDto,
+    DestructionCauseDto, FigureDatumDto, FigureLawDto, GasShareDto, GuillotProfileDto,
+    MagneticFieldClassDto, MassFractionsDto, MixingRatioNodeDto, MoonOriginDto, OceanFloorDto,
+    PhaseTemplateDto, PlanetClassDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto,
+    SizeDistributionDto, SpinResonanceDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
+    SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto,
+    TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
 };
 pub use requests::{
     BodyDetailRequest, BodyEventDto, BodyEventsDto, BodyEventsRequest, SystemBodiesDto,

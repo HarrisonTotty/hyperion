@@ -11,6 +11,7 @@ import { FakeResizeObserver } from "../../test/FakeResizeObserver";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   earthDetail,
+  earthDetailOfAnOlderServer,
   earthMassAndOrbit,
   FIXTURE_EARTH,
   FIXTURE_JUPITER,
@@ -362,7 +363,8 @@ describe("SystemView's body readout", () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
-    await answerDetail(socket, earthDetail());
+    // An older server's Earth, whose surface is not modelled (P14.T35.e gives it one).
+    await answerDetail(socket, earthDetailOfAnOlderServer());
 
     for (const section of ["NAME", "MOONS", "RINGS", "SURFACE", "GENERATOR INPUTS"]) {
       expect(terms(section)).toHaveLength(1);

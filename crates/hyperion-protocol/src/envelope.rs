@@ -622,6 +622,7 @@ mod tests {
                 figure: Some(SectionDto::NotResolved),
                 photometry: Some(SectionDto::NotResolved),
                 surface: SectionDto::NotResolved,
+                envelope: Some(SectionDto::NotResolved),
                 hooks: SectionDto::NotResolved,
             },
         }

@@ -8,7 +8,7 @@
 //! | `contact` | none: the ID, the parent, the state and the position only, with the kind `unresolved` |
 //! | `mass_and_orbit` | `label`, `mass_kg`, `orbit`, `moons`, `rings`, and the kind |
 //! | `bulk` | `bulk`: radius, density, surface gravity, class, mass fractions, equilibrium temperature; `rotation`, `figure`, `photometry` |
-//! | `surface` | `surface` |
+//! | `surface` | `surface` and `envelope`, of which a body has at most one other than `not_applicable` |
 //! | `full` | `hooks` |
 //!
 //! A system's list carries each body as a [`BodySummaryDto`], and `body_detail` answers with a
@@ -17,8 +17,21 @@
 //! not compute reads `not_modelled`, never an empty value. Every quantity's field name carries its
 //! SI unit.
 
+mod surface;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+pub use surface::{
+    AbsorberDto, AerosolInventoryDto, AerosolModeDto, AerosolShapeDto, BiosphereDto,
+    BiosphereFluxDto, BodyEnvelopeDto, BodySurfaceDto, ClimateForcingDto, ClimateRegimeDto,
+    CondensateDeckDto, CraterContractDto, CraterScreeningDto, CraterTargetClassDto,
+    CrustCompositionDto, CrustLidDto, GasShareDto, GuillotProfileDto, MagneticFieldClassDto,
+    MixingRatioNodeDto, OceanFloorDto, ProfileNodeDto, RadiationClassDto, RedoxClassDto,
+    SizeDistributionDto, SubstanceAreaDto, SubstancePhaseDto, SubsurfaceOceanDto,
+    SurfaceCondensateDto, SurfaceMaterialDto, SurfaceModifiersDto, SurfaceStateDto,
+    TectonicRegimeDto, ThermalRegimeDto, VerticalStructureDto, WetEpochDto,
+};
 
 use crate::planetary::{BodyOrbitDto, DetailLevelDto, OrbitHostDto, PopulationDto, SectionDto};
 use crate::primitives::{BodyIdHex, DetailSeedHex, UniverseIdHex, UniverseTime};
@@ -202,18 +215,6 @@ pub struct BulkPropertiesDto {
     /// effective temperature is its equilibrium one.
     pub effective_temperature_k: Option<f64>,
 }
-
-/// A body's surface section: atmosphere and surface conditions (design note 16), which P14.T13
-/// and T24 compute; the rotation and the figure are sections of their own at `bulk` (P14.T46.f).
-///
-/// None of them is on the wire yet, so the type has no value, as the simulation's `record::Surface`
-/// has none, and no record can carry a surface section that is `ok`: every surface is
-/// `not_modelled`, or `not_applicable` for a giant. The tasks that compute it give it its fields.
-/// TypeScript sees it as `never`. It derives only what a type of floats and lists can keep once it
-/// has its fields.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
-#[ts(export)]
-pub enum BodySurfaceDto {}
 
 /// A body's hooks section, what the generators of surfaces, life and civilisations read (the
 /// simulation's `record::Hooks`): its detail seed, and with P14.T23–T26 its bulk composition,
@@ -485,10 +486,10 @@ pub struct BodySummaryDto {
     pub photometry: Option<SectionDto<BodyPhotometryDto>>,
 }
 
-/// One body's whole record at one time: every section of a [`BodySummaryDto`], and the surface and
-/// hooks sections (plan 14, P14.T35.b; the simulation's `BodyRecord`).
+/// One body's whole record at one time: every section of a [`BodySummaryDto`], and the surface,
+/// envelope and hooks sections (plan 14, P14.T35.b and T35.e; the simulation's `BodyRecord`).
 ///
-/// Its fields are a [`BodySummaryDto`]'s and two more, so that a client's code for a list entry
+/// Its fields are a [`BodySummaryDto`]'s and three more, so that a client's code for a list entry
 /// also reads a whole record.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -540,9 +541,19 @@ pub struct BodyRecordDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub photometry: Option<SectionDto<BodyPhotometryDto>>,
-    /// Its surface (`surface`): `not_applicable` for a giant, which has none, and `not_modelled`
-    /// for every other body in this generator version.
+    /// Its surface (`surface`, P14.T35.e): `ok` for a present body with a solid surface whose spin
+    /// this generator version computes, `not_modelled` for one whose spin it does not, and
+    /// `not_applicable` for a body in the gas-envelope state (a giant or a sub-Neptune), whose air
+    /// is its `envelope`, for a ring, a belt or the halo, and for a body not present.
     pub surface: SectionDto<BodySurfaceDto>,
+    /// Its gas envelope (`surface`, P14.T35.e): `not_modelled` for a present body in the
+    /// gas-envelope state until P14.T24.d, and `not_applicable` for every other body, so that a
+    /// present body with a bulk section has exactly one of `surface` and `envelope` other than
+    /// `not_applicable`. The server always sends it; it is optional only so that an older server's
+    /// record, which lacks it, still reads, and a client reads it absent as `not_modelled`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub envelope: Option<SectionDto<BodyEnvelopeDto>>,
     /// Its hooks (`full`): `ok`, with its detail seed, for a planet, moon or dwarf planet present
     /// at the record's time, and `not_applicable` for a ring, a belt, the halo and a body not
     /// present.
@@ -572,6 +583,11 @@ pub struct BodyDetailDto {
 pub(crate) mod tests {
     use serde_json::{Value, json};
 
+    pub(crate) use super::surface::tests::jupiter_envelope;
+    use super::surface::tests::{
+        earth_surface, earth_surface_json, jupiter_envelope_json, sub_neptune_envelope,
+        sub_neptune_envelope_json, venus_surface, venus_surface_json,
+    };
     use super::*;
     use crate::orbit::OrbitDto;
     use crate::testing::{assert_wire_form, assert_wire_strings};
@@ -796,7 +812,8 @@ pub(crate) mod tests {
         })
     }
 
-    /// The whole record of the planet of [`planet_summary`], as the slice tags it.
+    /// The whole record of the planet of [`planet_summary`]: its surface an Earth's, its envelope
+    /// not applicable, and its hooks not modelled.
     pub(crate) fn planet_record() -> BodyRecordDto {
         let summary = planet_summary();
         BodyRecordDto {
@@ -815,7 +832,8 @@ pub(crate) mod tests {
             rotation: summary.rotation,
             figure: summary.figure,
             photometry: summary.photometry,
-            surface: SectionDto::NotModelled,
+            surface: SectionDto::Ok(earth_surface()),
+            envelope: Some(SectionDto::NotApplicable),
             hooks: SectionDto::NotModelled,
         }
     }
@@ -823,8 +841,36 @@ pub(crate) mod tests {
     pub(crate) fn planet_record_json() -> Value {
         let mut wire = planet_summary_json();
         let fields = wire.as_object_mut().unwrap();
-        fields.insert("surface".to_owned(), json!({ "state": "not_modelled" }));
+        fields.insert(
+            "surface".to_owned(),
+            json!({ "state": "ok", "value": earth_surface_json() }),
+        );
+        fields.insert("envelope".to_owned(), json!({ "state": "not_applicable" }));
         fields.insert("hooks".to_owned(), json!({ "state": "not_modelled" }));
+        wire
+    }
+
+    /// A Jupiter's record: [`planet_record`]'s with a gas giant's bulk, its surface not applicable
+    /// and its envelope `ok`.
+    pub(crate) fn jupiter_record() -> BodyRecordDto {
+        BodyRecordDto {
+            id: BodyIdHex::from_parts(SYSTEM, 0x0500),
+            bulk: SectionDto::Ok(BulkPropertiesDto {
+                class: PlanetClassDto::GasGiant,
+                ..earth_bulk()
+            }),
+            surface: SectionDto::NotApplicable,
+            envelope: Some(SectionDto::Ok(jupiter_envelope())),
+            ..planet_record()
+        }
+    }
+
+    pub(crate) fn jupiter_record_json() -> Value {
+        let mut wire = planet_record_json();
+        wire["id"] = json!("0200080020000000.0500");
+        wire["bulk"]["value"]["class"] = json!("gas_giant");
+        wire["surface"] = json!({ "state": "not_applicable" });
+        wire["envelope"] = json!({ "state": "ok", "value": jupiter_envelope_json() });
         wire
     }
 
@@ -883,61 +929,174 @@ pub(crate) mod tests {
         }
     }
 
+    /// P14.T35.e: an Earth, its surface `ok` and its envelope not applicable.
     #[test]
-    fn a_gas_giant_s_surface_is_not_applicable() {
-        let saturn = BodyRecordDto {
-            bulk: SectionDto::Ok(BulkPropertiesDto {
-                class: PlanetClassDto::GasGiant,
-                ..earth_bulk()
-            }),
-            surface: SectionDto::NotApplicable,
+    fn an_earth_s_record_carries_its_surface_and_no_envelope() {
+        assert_wire_form(&planet_record(), planet_record_json());
+    }
+
+    /// P14.T35.e: a Venus, its surface `ok` with no condensable and never wet.
+    #[test]
+    fn a_venus_s_record_carries_its_surface() {
+        let venus = BodyRecordDto {
+            surface: SectionDto::Ok(venus_surface()),
             ..planet_record()
         };
-        let wire = serde_json::to_value(&saturn).unwrap();
+        let mut wire = planet_record_json();
+        wire["surface"] = json!({ "state": "ok", "value": venus_surface_json() });
+        assert_eq!(
+            wire["surface"]["value"]["climate_regime"]["condensable"],
+            Value::Null
+        );
+        assert_eq!(wire["surface"]["value"]["wet_epoch"], Value::Null);
+        assert_wire_form(&venus, wire);
+    }
+
+    /// P14.T35.e: a gas giant has no surface, and its air is its envelope.
+    #[test]
+    fn a_jupiter_s_record_carries_its_envelope_and_no_surface() {
+        assert_wire_form(&jupiter_record(), jupiter_record_json());
+    }
+
+    /// P14.T35.e: a sub-Neptune, a gas-envelope body as a giant is, has no surface either.
+    #[test]
+    fn a_sub_neptune_s_record_carries_its_envelope_and_no_surface() {
+        let sub_neptune = BodyRecordDto {
+            bulk: SectionDto::Ok(BulkPropertiesDto {
+                class: PlanetClassDto::SubNeptune,
+                ..earth_bulk()
+            }),
+            envelope: Some(SectionDto::Ok(sub_neptune_envelope())),
+            ..jupiter_record()
+        };
+        let mut wire = jupiter_record_json();
+        wire["bulk"]["value"]["class"] = json!("sub_neptune");
+        wire["envelope"] = json!({ "state": "ok", "value": sub_neptune_envelope_json() });
         assert_eq!(wire["surface"], json!({ "state": "not_applicable" }));
-        assert_eq!(wire["bulk"]["value"]["class"], json!("gas_giant"));
+        assert_wire_form(&sub_neptune, wire);
+    }
+
+    /// P14.T35.e: the surface's three states other than `ok` keep the bytes they had before the
+    /// section had a value, and the envelope's take the same forms; a gas-envelope body's envelope
+    /// is `not_modelled` until P14.T24.d.
+    #[test]
+    fn the_surface_and_envelope_sections_in_every_other_state() {
+        for (state, surface) in [
+            ("not_resolved", SectionDto::NotResolved),
+            ("not_modelled", SectionDto::NotModelled),
+            ("not_applicable", SectionDto::NotApplicable),
+        ] {
+            let record = BodyRecordDto {
+                surface,
+                ..planet_record()
+            };
+            let mut wire = planet_record_json();
+            wire["surface"] = json!({ "state": state });
+            assert_wire_form(&record, wire);
+        }
+        for (state, envelope) in [
+            ("not_resolved", SectionDto::NotResolved),
+            ("not_modelled", SectionDto::NotModelled),
+            ("not_applicable", SectionDto::NotApplicable),
+        ] {
+            let record = BodyRecordDto {
+                envelope: Some(envelope),
+                ..jupiter_record()
+            };
+            let mut wire = jupiter_record_json();
+            wire["envelope"] = json!({ "state": state });
+            assert_wire_form(&record, wire);
+        }
+    }
+
+    /// Decision-p14-t35e-wire §1.5 item 2: an older server's record, with no `envelope` key, reads
+    /// as `None`, and `None` is written with no key.
+    #[test]
+    fn a_record_without_an_envelope_still_deserialises() {
+        let older = BodyRecordDto {
+            surface: SectionDto::NotModelled,
+            envelope: None,
+            ..planet_record()
+        };
+        let mut wire = planet_record_json();
+        wire["surface"] = json!({ "state": "not_modelled" });
+        wire.as_object_mut().unwrap().remove("envelope");
+        assert_wire_form(&older, wire);
+    }
+
+    /// Decision-p14-t35e-wire §1.5 item 3: a record with a key the types lack, and an `ok` surface
+    /// with a member they lack, decode, so that the next member is additive.
+    #[test]
+    fn a_record_with_unknown_keys_decodes() {
+        let mut wire = planet_record_json();
+        wire["albedo_map"] = json!({ "state": "not_modelled" });
+        wire["surface"]["value"]["lightning_rate_per_s"] = json!(44.0);
         assert_eq!(
             serde_json::from_value::<BodyRecordDto>(wire).unwrap(),
-            saturn
+            planet_record()
         );
     }
 
     #[test]
-    fn a_mass_and_orbit_record_holds_no_radius_temperature_or_composition() {
+    fn withheld_levels_carry_no_key_of_the_sections_above_them() {
         // Plan 14's T34 test, whose JSON half moved here: the sections above the level are
-        // withheld, so no key of theirs is on the wire at all.
-        let record = BodyDetailDto {
-            granted: DetailLevelDto::MassAndOrbit,
-            record: BodyRecordDto {
-                bulk: SectionDto::NotResolved,
-                surface: SectionDto::NotResolved,
-                hooks: SectionDto::NotResolved,
-                ..planet_record()
-            },
-            ..planet_detail()
-        };
-        let wire = serde_json::to_value(&record).unwrap();
-        let keys = keys(&wire);
-        for withheld in [
-            "radius_m",
-            "density_kg_m3",
-            "equilibrium_temperature_k",
-            "effective_temperature_k",
-            "mass_fractions",
-            "class",
-            "detail_seed",
+        // withheld, so no key of theirs is on the wire at all. From P14.T35.e a rocky body's
+        // envelope is withheld as its surface is, at the `bulk` level as at `mass_and_orbit`.
+        for (level, bulk) in [
+            (DetailLevelDto::MassAndOrbit, SectionDto::NotResolved),
+            (DetailLevelDto::Bulk, SectionDto::Ok(earth_bulk())),
         ] {
-            assert!(
-                !keys.iter().any(|key| key == withheld),
-                "{withheld} in {wire}"
+            let at_bulk = bulk != SectionDto::NotResolved;
+            let record = BodyDetailDto {
+                granted: level,
+                record: BodyRecordDto {
+                    bulk,
+                    surface: SectionDto::NotResolved,
+                    envelope: Some(SectionDto::NotResolved),
+                    hooks: SectionDto::NotResolved,
+                    ..planet_record()
+                },
+                ..planet_detail()
+            };
+            let wire = serde_json::to_value(&record).unwrap();
+            let keys = keys(&wire);
+            let mut withheld = vec![
+                "mean_surface_temperature_k",
+                "surface_pressure_pa",
+                "gases",
+                "climate_regime",
+                "craters",
+                "composition",
+                "join_pressure_pa",
+                "detail_seed",
+            ];
+            if !at_bulk {
+                withheld.extend([
+                    "radius_m",
+                    "density_kg_m3",
+                    "equilibrium_temperature_k",
+                    "effective_temperature_k",
+                    "mass_fractions",
+                    "class",
+                ]);
+            }
+            for withheld in withheld {
+                assert!(
+                    !keys.iter().any(|key| key == withheld),
+                    "{withheld} in {wire}"
+                );
+            }
+            let tagged = json!({ "state": "not_resolved" });
+            assert_eq!(wire["record"]["surface"], tagged);
+            assert_eq!(wire["record"]["envelope"], tagged);
+            let bulk_state = if at_bulk { "ok" } else { "not_resolved" };
+            assert_eq!(wire["record"]["bulk"]["state"], json!(bulk_state));
+            assert_eq!(wire["record"]["mass_kg"]["state"], json!("ok"));
+            assert_eq!(
+                serde_json::from_value::<BodyDetailDto>(wire).unwrap(),
+                record
             );
         }
-        assert_eq!(wire["record"]["bulk"], json!({ "state": "not_resolved" }));
-        assert_eq!(wire["record"]["mass_kg"]["state"], json!("ok"));
-        assert_eq!(
-            serde_json::from_value::<BodyDetailDto>(wire).unwrap(),
-            record
-        );
     }
 
     #[test]
@@ -1211,24 +1370,6 @@ pub(crate) mod tests {
                 "state": "ok",
                 "value": { "detail_seed": { "state": "ok", "value": "09190001b0000001" } },
             }),
-        );
-    }
-
-    #[test]
-    fn a_surface_section_cannot_claim_a_value_yet() {
-        // The surface has no fields until P14.T13, T14 and T24, so no `ok` surface parses.
-        let error = serde_json::from_value::<SectionDto<BodySurfaceDto>>(json!({
-            "state": "ok",
-            "value": { "atmosphere": [] },
-        }))
-        .unwrap_err();
-        assert!(
-            error.to_string().contains("there are no variants"),
-            "unexpected error: {error}"
-        );
-        assert_wire_form(
-            &SectionDto::<BodySurfaceDto>::NotApplicable,
-            json!({ "state": "not_applicable" }),
         );
     }
 

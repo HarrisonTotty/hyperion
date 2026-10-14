@@ -134,7 +134,7 @@ pub(crate) mod tests {
     use crate::envelope::{ClientMessage, ResponseBody, ServerMessage};
     use crate::orbit::{HierarchyDto, HierarchyNodeDto};
     use crate::planetary::record::tests::{
-        SYSTEM, planet_record, planet_summary, planet_summary_json,
+        SYSTEM, jupiter_envelope, planet_record, planet_summary, planet_summary_json,
     };
     use crate::planetary::zones::tests::{solar_zone, solar_zone_json};
     use crate::planetary::{BodyKindDto, BodyRecordDto, BodyStateDto};
@@ -392,7 +392,7 @@ pub(crate) mod tests {
             .unwrap();
             assert_eq!(&again, wire, "{name}");
         }
-        assert_eq!(messages.len(), 10);
+        assert_eq!(messages.len(), 11);
     }
 
     #[test]
@@ -423,6 +423,74 @@ pub(crate) mod tests {
         assert_eq!(detail.record, planet_record());
     }
 
+    /// P14.T35.e: the shared Jupiter's record is the slice's list entry for it, its surface not
+    /// applicable and its envelope `ok`, so that the client decodes an envelope the server is
+    /// pinned to send.
+    #[test]
+    fn the_shared_jupiter_fixture_holds_its_envelope() {
+        let ServerMessage::Response {
+            body: ResponseBody::SystemBodies(system),
+            ..
+        } = server_message("system_bodies_response")
+        else {
+            panic!("system_bodies_response is not a system_bodies response");
+        };
+        let ServerMessage::Response {
+            body: ResponseBody::BodyDetail(detail),
+            ..
+        } = server_message("body_detail_jupiter")
+        else {
+            panic!("body_detail_jupiter is not a body_detail response");
+        };
+        let listed = system
+            .bodies
+            .get(1)
+            .expect("the slice lists its Jupiter")
+            .clone();
+        assert_eq!(
+            detail.record,
+            BodyRecordDto {
+                id: listed.id,
+                kind: listed.kind,
+                label: listed.label,
+                parent: listed.parent,
+                state: listed.state,
+                position_m: listed.position_m,
+                mass_kg: listed.mass_kg,
+                orbit: listed.orbit,
+                moons: listed.moons,
+                rings: listed.rings,
+                population: listed.population,
+                bulk: listed.bulk,
+                rotation: listed.rotation,
+                figure: listed.figure,
+                photometry: listed.photometry,
+                surface: SectionDto::NotApplicable,
+                envelope: Some(SectionDto::Ok(jupiter_envelope())),
+                hooks: SectionDto::NotModelled,
+            }
+        );
+    }
+
+    /// P14.T35.e: the shared mass-and-orbit record withholds the envelope with the surface.
+    #[test]
+    fn the_shared_mass_and_orbit_fixture_withholds_both_sections() {
+        let ServerMessage::Response {
+            body: ResponseBody::BodyDetail(detail),
+            ..
+        } = server_message("body_detail_mass_and_orbit")
+        else {
+            panic!("body_detail_mass_and_orbit is not a body_detail response");
+        };
+        assert_eq!(detail.granted, DetailLevelDto::MassAndOrbit);
+        assert_eq!(
+            (detail.record.surface, detail.record.envelope),
+            (SectionDto::NotResolved, Some(SectionDto::NotResolved))
+        );
+    }
+
+    /// Decision-p14-t35e-wire §1.5 item 2: the shared contact record keeps the form of a server
+    /// before P14.T35.e, with no `envelope` key.
     #[test]
     fn the_shared_contact_fixture_withholds_every_section() {
         let ServerMessage::Response {
@@ -448,9 +516,15 @@ pub(crate) mod tests {
                 figure: Some(SectionDto::NotResolved),
                 photometry: Some(SectionDto::NotResolved),
                 surface: SectionDto::NotResolved,
+                envelope: None,
                 hooks: SectionDto::NotResolved,
                 ..earth
             }
+        );
+        assert!(
+            fixture()["body_detail_contact"]["body"]["record"]
+                .get("envelope")
+                .is_none()
         );
         assert_eq!(contact.record.state, BodyStateDto::Present);
     }
