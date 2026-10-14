@@ -4385,6 +4385,119 @@ re-blessing this plan's payload and coarse goldens in that commit.
   - _The raised revisions are never dropped._ A universe's channel and its map stay for the
     server's life, a few bytes for each body surveyed since it started. Lean: drop them with
     P12.T8's holder when a universe closes.
+- **Deviations in T19.c, as built** (2026-10-13).
+  - _Files._ The new `crates/hyperion-server/tests/surface_knowledge.rs` and its helpers in
+    `tests/common/surface.rs`. No server code: the test found no server bug.
+  - _The helpers_ (Provides' test helpers):
+    - `field_via_wire(client, request) -> FieldViaWire` reads a `ready` answer as R03's transport
+      sends it: the bulk frames through `TestClient::next_binary()`, each checked for its request,
+      index and count, then the response through `next_text()`, whose manifest must state the frames
+      and the payload's length. `FieldViaWire` holds the header, the revision, the coverage, the
+      answer's text as it arrived, the frames' headers and the payload rejoined. It is for a
+      connection with no subscription, so a notification among the frames fails it.
+    - `decode_all(payload)` is `decode_payload`'s blocks.
+    - Beyond Provides: `partial_field(blocks)`, a `PartialField::new` from block 0's header with
+      every block inserted, and `insert_all(field, blocks)` for a delta.
+  - _Two cases, on the reference worlds through `ServerConfigBuilder::surface_inputs`, of
+    `surface_system()`'s solid body:_
+    - The Ceres-like world (level 5, the quickest) carries every check. The first pass is orbital,
+      at 120 m, over 105 cells: face 0's 8 × 8 corner block, at a cube corner across two face edges,
+      whose margin reaches faces 4 and 5; and 41 cells in index order from the sixth of the 8 × 8
+      block at face 3's centre, a ragged shape. It also takes runs of 41 cells about the field's
+      widest crater and its largest drainage, when the field has them (below). The second pass is
+      close range, at 10 m, over face 0's cells 48–127: a quarter of the corner block again, more
+      finely, and the block beside it, which the first margin reached. The payloads are 25,451 B
+      (600 cells held), a delta of 8,838 B (200 cells) and 31,132 B, each one block in one frame.
+    - So the Mars-like world (level 7) adds one orbital pass over faces 1 and 2 whole. Its payload
+      is 1,386,466 B (36,558 cells held), 2 blocks in 6 frames, checked block by block as the first
+      is, without heights.
+  - _The checks, as built._
+    - _No block carries a cell outside the region and its margin._ Every cell of every block is one
+      of the passes' cells at its code, or a cell of their margin (`Cover::with_margin` of
+      `SYNTHESIS_MARGIN_CELLS`) at 0. The blocks' covers together are exactly that whole, or for the
+      delta exactly T19.b's cells, and the answer's `coverage` names them. Every record is the
+      server's. Each block's climate records are its cells' parents', once each, in order. Each
+      crater reaches a cell of its block and is one of the field's. The answer's header names block
+      0's body and level. A mutation that expects a margin of 4 fails the first check.
+    - _Margin cells are marked._ Over every cell of the level, the client's
+      `PartialField::resolution` is the expected code, or `None` for a cell not held, and
+      `is_surveyed` is true exactly for the passes' cells. A held cell's record, climate and craters
+      reaching are the server's; a cell not held has no record, no climate and no crater.
+    - _The cover's codes match the passes._ The expected cover takes each cell's finest code over
+      the passes. It is checked on the whole answer after each pass and on the delta since revision
+      1, on the client's field merged from the first whole and the delta, and on a field built
+      afresh from the second whole.
+    - _The client's heights are the server's._ `Synthesiser` runs over the server's field and over
+      the client's `PartialField` with one detail seed. Heights and gradients agree to the bit at
+      band levels 0, L, L + 4 and `MAX_LEVEL` (the band limit's set). The points are a 3 × 3 lattice
+      over each surveyed cell (its corners, its edges' midpoints and its centre) and every fourth
+      vertex along each edge a surveyed cell shares with a cell not surveyed, face edges and the
+      cube corner included: 2,033 points (1,088 on the edge) after the first pass. After the second,
+      only its own cells are sampled, 1,196 points (476 on the edge), since a cell surveyed before
+      reads the same records from a field that has only grown. A point in a cell the client does not
+      hold is refused `NotSurveyed`, while the server answers it.
+    - _No `surface_seed`._ Both connections' text frames are parsed as JSON as they arrive, and none
+      may hold a key named `surface_seed` at any depth, or the body's surface seed's value in
+      sixteen hexadecimal digits or in decimal. That covers `welcome`, `create_universe`,
+      `scene_ship`, the scene's state at `full` with the ship in the body's system, `body_detail`
+      and `system_bodies` at `full`, the survey answers, the field answers, and every scene
+      notification, the `surface_revisions` among them, which a task of its own reads. No payload
+      may hold the seed's eight bytes in either order. `body_detail`'s answer is checked to have its
+      `hooks` section, the place a seed would travel. The socket test covers the kinds a session
+      sends; no wire type in the protocol crate or its bindings has a member of that name.
+  - _Deviations._
+    - _The server's heights_ are the synthesis over the test's own `coarse_pass` of the body's
+      surface seed on the same inputs, since an integration test cannot reach the running server's
+      field. `tests/surface_service.rs` shows that field is the served one, bit for bit, and every
+      record the client holds is checked against it.
+    - _The detail seed_ is a stand-in, the same on both sides, since R09.T1.b (in plan 14's 21 → 22
+      batch) has not put the body's on the wire. The check is that the two sides agree from the
+      field and one seed.
+    - _"Every surveyed point"_ is the lattice and the region's edge above, since each point is dear
+      (deferred, below).
+    - _The header's body_ is compared with block 0's, not the body asked for: the reference worlds
+      name `BodyRef(0, 1..4)` (T17's deferred finding, still open).
+    - _The socket's harness_ is R03's `TestServer` and `TestClient`, with the scene's watcher on a
+      second connection read by its own task. The runtime is `multi_thread` with two workers, so
+      the server's tasks and the watcher's run while the test's body checks. The coarse pass and the
+      heights each run on a thread of their own, waited for within the harness's patience, rather
+      than in `spawn_blocking`, whose task a runtime's drop would wait for after the wait had timed
+      out.
+    - _The records are alike today._ All six of the coarse pass's steps are still empty
+      (`steps::*::run`), so every cell of a reference field holds one synthesis record and one
+      climate record, the base elevation is the datum everywhere and the structural octaves'
+      amplitude is zero. The record checks therefore bind which cells are held and at what codes,
+      not which record sits at which cell, and the heights compared vary by the small craters
+      alone, though every cell the synthesis reads must still be held (deferred, below).
+    - _R03.T15's 15 MiB (61-chunk) check_ in the real Electron renderer stays pending, as the task
+      says. It needs a body whose field the server binary serves (P14.T24, P14.T48) and R10's page
+      that asks for it ("The 61-chunk transfer check", above). The largest payload here is 1.39 MB
+      in 6 frames.
+  - _Acceptance._ `cargo test -p hyperion-server --test surface_knowledge`: 2 tests, 13.6 s together
+    at a load near 10 (lock-held settings, 4 test threads, a 400% quota). The orchestrator's
+    `just ci` is the lane's gate, `just smart-ci`, which ran the server's 70 tests that reach the
+    change.
+- **Deferred findings (2026-10-13 rule)** (R09.T19.c). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _The reference fields are uniform until the steps land._ With T11–T15 empty, the records are
+    one record repeated, no crater and no drainage (the deviation above), so T19.c holds the
+    Knowledge bound and the wire's agreement only for which cells travel, their codes and the
+    synthesis's reads, and Verification's "Agreement" item (the server's heights equal a client's
+    from the wire) is met only for the small craters. The test already takes runs about the widest
+    crater and the largest drainage once the field has them; channels need a wet world, the
+    Mars-like or the Earth-like. Lean: re-run T19.c when T11 or T12.a–c first vary the records cell
+    by cell, again with T12.d and T14, and then add the Mars-like world to the heights check, in the
+    slow tier if its cost holds.
+  - _A cold point query is dear_, as T9's deferred finding already has it (the small craters'
+    uncached draw, 0.1–2.8 ms a point on V8; 1,140 µs on the Moon-like world at level 10). Seen
+    natively here in a one-off measurement, not in the test as built: in the test profile
+    (`opt-level = 2` with debug assertions), at a load near 13, the first query at a new point at
+    band level 16 took about 1 ms on the Ceres-like world and about 4 ms on the Mars-like one, and
+    the same point at level 24 then about 70 µs on the Ceres-like world. Only T8's native
+    `craters-uncached` bench is still pending. It is why the test's points are few. Lean: T9's.
+  - _The detail seed's source._ Once R09.T1.b puts the body's detail seed in `body_detail`'s hooks
+    section, the test should read the client's seed from there. Lean: with T1.b, which then also
+    checks that the hooks section carries `detail_seed` and no `surface_seed`.
 - **Deviations in T18, as built** (2026-10-09).
   - _The shared log._ `knowledge/jsonl.rs` (private) holds what `persist.rs` held privately:
     `KnowledgeLog` (now carrying its header's format), `push_line`, `sync_directory`, `save_io`
