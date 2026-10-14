@@ -491,6 +491,20 @@ impl Groove {
         (0..3).all(|k| q[k] >= self.low[k] && q[k] <= self.high[k])
     }
 
+    /// Whether `q` (metres) lies on the groove's floor, its channel's bed: within half the
+    /// channel's bankfull width of the nearest of its chords (R10.T1.b's channel floor).
+    #[must_use]
+    fn floor_holds(&self, q: [f64; 3]) -> bool {
+        self.chords[..self.chord_count].iter().any(|chord| {
+            let Chord { from, to, .. } = *chord;
+            let ab = [0, 1, 2].map(|k| to[k] - from[k]);
+            let aq = [0, 1, 2].map(|k| q[k] - from[k]);
+            let u = num::max(0.0, num::min(dot(aq, ab) / dot(ab, ab), 1.0));
+            let gap = [0, 1, 2].map(|k| q[k] - (from[k] + u * ab[k]));
+            dot(gap, gap) <= self.floor_m * self.floor_m
+        })
+    }
+
     /// Whether the groove's box reaches the ball of `radius` about `centre` (metres).
     #[must_use]
     fn may_reach_ball(&self, centre: [f64; 3], radius: f64) -> bool {
@@ -939,6 +953,28 @@ impl<F: FieldView> Incision<'_, F> {
         Ok(out)
     }
 
+    /// Whether the unit direction `dir` lies on the floor of a groove of any level from the first
+    /// to `through` that [`levels`](Self::levels) evaluates there: on a channel's bed.
+    fn on_floor(&mut self, dir: [f64; 3], through: u8) -> Result<bool, ReadCellError> {
+        let first = self.first();
+        if through < first {
+            return Ok(false);
+        }
+        let finest = deepest_cell(dir);
+        let (_, around) = self.deepest(ancestor(finest, first))?;
+        let q = self.channels.figure.point(dir);
+        for level in first..=through.min(around) {
+            let index = self.grooves(ancestor(finest, level))?;
+            if self.cache.lists[index]
+                .iter()
+                .any(|groove| groove.may_reach(q) && groove.floor_holds(q))
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// The parent cell over which level `level`'s mean at a point of `cell` (of that level) is
     /// taken: its parent, or the coarse cell itself for the first level.
     #[must_use]
@@ -1092,6 +1128,31 @@ impl Channels {
             height_m: num::assert_finite(height),
             gradient: combine(field.header(), dir, of_point, of_direction),
         })
+    }
+
+    /// Whether the unit direction `dir` lies on a channel's bed: within half its bankfull width of
+    /// the axis of a segment whose groove the incision evaluates there, levels
+    /// [`first_level`](Self::first_level) to `through` (R10.T1.b's channel floor, where the
+    /// classifier lays `Sediment`). It reads what [`incision_at`](Self::incision_at) reads of the
+    /// network, and nothing of the means; `cache` is the caller's, and the answer is independent of
+    /// what it holds.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadCellError`] naming the first cell read that `field` does not hold.
+    ///
+    /// # Panics
+    ///
+    /// As [`incision_at`](Self::incision_at).
+    pub(crate) fn on_channel_floor<F: FieldView>(
+        &self,
+        field: &F,
+        dir: [f64; 3],
+        through: u8,
+        cache: &mut SynthCache,
+    ) -> Result<bool, ReadCellError> {
+        self.check_field(field);
+        self.incision(field, cache).on_floor(dir, through)
     }
 
     /// The incision's working state over `field` and `cache`.

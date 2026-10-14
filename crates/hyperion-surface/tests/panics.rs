@@ -1177,3 +1177,28 @@ mod ground {
         let _ = HeightSource::height(&synth, &mut SynthCache::new(), [0.0, 0.0, 1.0], 25);
     }
 }
+
+/// R10.T1.b's classifier.
+mod material {
+    use hyperion_base::rng::DetailSeed;
+    use hyperion_surface::cube::{Face, FaceUv};
+    use hyperion_surface::material::material_at;
+    use hyperion_surface::synth::{SynthCache, Synthesiser};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    use super::level_five_field;
+
+    #[test]
+    #[should_panic(expected = "a direction must be finite and non-zero, got [1.0, NaN, 0.0]")]
+    fn the_material_at_a_point_that_is_not_finite_is_refused() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let at = FaceUv {
+            face: Face::PosX,
+            u: f64::NAN,
+            v: 0.0,
+        };
+        let _ = material_at(&synth, &mut SynthCache::new(), at);
+    }
+}

@@ -18,15 +18,23 @@
 //! Every figure carries its source ([`Citation`]); a figure without one is absent, and a console
 //! shows it missing, never invented (Design note 2).
 //!
-//! Nothing here draws from a stream, so the module opens no domain tag. Today it holds R10.T1.a's
-//! class set and property table; the classifier, `material_at`, is R10.T1.b's.
+//! The classifier ([`material_at`], R10.T1.b) decides the material at a point from the same inputs
+//! as the height: the finest level's slope, the coarse cell's record and climate, and the header's
+//! palette, by an ordered list of rules (Design note 1).
+//!
+//! Nothing here draws from a stream, so the module opens no domain tag.
 
 mod bearing;
 mod class;
+mod classify;
+#[cfg(test)]
+mod golden;
 mod properties;
 
 pub use bearing::{BearingFactors, bearing_capacity, ultimate_bearing_capacity};
 pub use class::{Material, MaterialClass, PhotometricForm};
+pub(crate) use classify::IceCuts;
+pub use classify::{GroundMaterial, MASSIVE_ICE_SHARE, THIN_ATMOSPHERE_PRESSURE, material_at};
 pub use properties::{
     AlbedoSpan, BRIGHT_FROST_LIMB_PARAMETER, BRIGHT_FROST_NORMAL_ALBEDO, Citation, Figure, FormRow,
     FrictionModel, LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO, LUNAR_LIMB_ONSET_NORMAL_ALBEDO,

@@ -1215,7 +1215,7 @@ impl Channels {
 
     /// What a cache's memo is kept for ([`NetworkId`]).
     #[must_use]
-    fn id(&self) -> NetworkId {
+    pub(crate) fn id(&self) -> NetworkId {
         NetworkId {
             seed: self.seed,
             body: self.body,

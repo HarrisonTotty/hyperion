@@ -350,10 +350,13 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 /// ([`PatchKey::to_u64`]): the network's key points and segments, each level's grooves by cell and
 /// each level's mean and its correction by parent cell ([`Channels::incision_at`]), kept for one
 /// body and seed at a time and started afresh for another's; and the small craters drawn in each
-/// octave's cells ([`CraterCache`], R09.T7.b), which starts afresh at 16,384 cells. No height
-/// depends on what it holds, only the time a query takes, so long as it is used with views of one
-/// field whose held cells only grow, as a worker's are: a result it holds answers a later query
-/// that a view lacking one of the cells it read would refuse.
+/// octave's cells ([`CraterCache`], R09.T7.b), which starts afresh at 16,384 cells; and, for
+/// R10's classifier ([`crate::material::material_at`]), each cell's cut of the shadowed ground
+/// its partial ice share lies on, kept as the channels' part is, which starts afresh at 16,384
+/// cells. No height, and no material, depends on what it holds, only the time a query takes, so
+/// long as it is used with views of one field whose held cells only grow, as a worker's are: a
+/// result it holds answers a later query that a view lacking one of the cells it read would
+/// refuse.
 ///
 /// The policy (R09.T8): the lattice cover is set afresh by each bake, and the craters' part is
 /// bounded, but the channels' part grows with every cell a query builds and is never pruned, so a
@@ -365,6 +368,7 @@ pub struct SynthCache {
     lattice: LatticeCache,
     channels: channels::ChannelCache,
     craters: CraterCache,
+    ice_cuts: crate::material::IceCuts,
 }
 
 impl SynthCache {
@@ -375,6 +379,7 @@ impl SynthCache {
             lattice: LatticeCache::new(),
             channels: channels::ChannelCache::new(),
             craters: CraterCache::new(),
+            ice_cuts: crate::material::IceCuts::new(),
         }
     }
 
@@ -388,6 +393,12 @@ impl SynthCache {
     #[must_use]
     pub(crate) fn channels_mut(&mut self) -> &mut channels::ChannelCache {
         &mut self.channels
+    }
+
+    /// R10's classifier's cuts of each cell's shadowed ground.
+    #[must_use]
+    pub(crate) fn ice_cuts_mut(&mut self) -> &mut crate::material::IceCuts {
+        &mut self.ice_cuts
     }
 }
 

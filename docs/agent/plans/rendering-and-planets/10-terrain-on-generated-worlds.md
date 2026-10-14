@@ -165,8 +165,13 @@ pub fn interface_friction(p: &MaterialProperties, temperature: Kelvin) -> Option
 
 /// The authoritative class at a point, from the finest level's slope, altitude, R09's climate and
 /// surface-state classes, the ice field, and the cell's substance byte and the header's palette.
+/// As built by T1.b (Risks, "Deviations in T1.b, as built"): a `GroundMaterial`, the form always
+/// and the entry where the palette names one (signoff-9 §17.5's `MATERIAL REGOLITH · —`).
 pub fn material_at<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
-    at: FaceUv) -> Result<Material, QueryHeightError>;
+    at: FaceUv) -> Result<GroundMaterial, QueryHeightError>;
+pub struct GroundMaterial { /* class: MaterialClass, entry: Option<u8> */ }  // material() -> Option<Material>
+pub const MASSIVE_ICE_SHARE: f64;          // ½: glacier (or airless regolith of ice) or frost (T1.b)
+pub const THIN_ATMOSPHERE_PRESSURE: Pascals;  // 30 kPa, the sim's, for `Dust` (T1.b)
 pub const CLIFF_SLOPE: Radians;            // 40°, Design note 1
 pub const TRANSITION_HALF_WIDTH: Radians;  // 5°, the visual blend band either side
 pub const SNOW_SHED_SLOPE: Radians;        // 60°, Schaerer 1977, p. 286 (T1.a, as built)
@@ -3306,3 +3311,237 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     as built, and Draft 1's row says so. Vesić's ground-inclination factors, and the footing-base
     tilt factors that go with them, go to a later T1 follow-up, which adds the slope argument and
     its test before T12 builds the readout.
+- **Deviations in T1.b, as built** (2026-10-13, lane r10-classify, on R10.T1.a at `eef1fabb` with
+  its limb follow-up `42ae6db3`, landed as `fe12a05e`, and R09.T9 at `070da8ee`).
+  - _Files._ `crates/hyperion-surface/src/material/classify.rs` with `classify/tests.rs`, and
+    `material/golden.rs`; `material/mod.rs`'s exports; `lib.rs`'s summary line. Three of R09's
+    files gain crate-private items, additively: `synth/channels/incision.rs`
+    (`Channels::on_channel_floor`), `synth/channels.rs` (`Channels::id` made `pub(crate)`) and
+    `synth.rs` (`SynthCache` holds the classifier's cuts). `tests/panics.rs` gains a `material`
+    module, and `crates/hyperion-sim/tests/surface_material_worlds.rs` is new.
+  - _The goldens are in the library_ (main, 2026-10-13), as R10.T3's and R09.T9's are: there is no
+    `tests/material_golden.rs` and no `tests/common/worlds.rs`. `ci`'s wasip1 selection builds
+    the crate without `testing`, which the synthetic worlds need. `material::golden` writes seven
+    files at header 21 in `tests/golden/material/`, a subdirectory, since `golden_diff.py` takes
+    the files directly under `tests/golden/` for the test planet's (T1.a's finding):
+    - `<world>.golden`, one a synthetic world, each a thousand points: the cube's corners, up to
+      32 trunks' heads, up to 40 points in cells with ice and 40 in the shallowest cells under
+      water, and random points, each its (face, u, v), its class and its entry or `-`;
+    - `table.golden`, T1.a's deferred table golden, pinned after the limb ruling's follow-up
+      (main's instruction): the constants, each class's code and photometric form, each phase
+      law's code, template and ceiling and the family defaults, `limb_parameter` and each law's
+      L(0) on a grid, L(α) on a grid, a few directional-hemispherical albedos, every (form, family)
+      row with its layers' bearing factors and its friction at and between its knots, and the two
+      lunar capacities.
+
+    The tests use the synthetic worlds through R09.T8's `synth::test_support`, and fields built for
+    each test with R09's `FieldBuilder`.
+
+  - _Acceptance_, as built:
+    - `cargo test -p hyperion-surface --lib material`, the goldens alone through
+      `--lib material::golden`;
+    - `cargo test -p hyperion-surface --features testing --test panics material`;
+    - `cargo test -p hyperion-sim --features testing --test surface_material_worlds`;
+    - the wasm targets under `just test-wasm-fast`.
+  - _The signature._ `material_at` returns `Result<GroundMaterial, QueryHeightError>`.
+    `GroundMaterial` holds the form always, and the entry where the palette names the deciding
+    rule's substance: `class()`, `entry()`, an `Option<u8>`, and `material()`, an
+    `Option<Material>`, T1.a's pair, which `properties` reads. On a body with an empty palette every
+    point is so, the guide's `MATERIAL REGOLITH · —` (signoff-9 §17.5, which replaced T13's draft
+    `MATERIAL NOT YET MODELLED`). No stand-in entry is ever named. T1.a's `Material` is unchanged.
+  - _The order of rules_, as built (`Rule::ALL`; the first whose condition holds decides):
+
+    | Rule             | Holds where                                             | Material                                                      |
+    | ---------------- | ------------------------------------------------------- | ------------------------------------------------------------- |
+    | Sea ice          | below the cell's water surface, in the cell's ice       | `SeaIce` of the ice entry                                     |
+    | Seabed           | below the cell's water surface                          | `Seabed` of the crust's, the `Bulk`'s or a `Deposit`'s entry  |
+    | Land ice         | in the cell's ice                                       | `Frost`, `Glacier`, or airless `Regolith`, of the ice entry   |
+    | Melt             | annual mean above the crust entry's transition          | `Melt` of the crust's entry                                   |
+    | Snow             | frozen all year where it snows, up to `SNOW_SHED_SLOPE` | `Snow` of the snow's entry                                    |
+    | Cliff            | slope above `CLIFF_SLOPE`                               | `Bedrock` of the crust's entry                                |
+    | Evaporite        | an arid closed basin, a salt in the palette             | `Evaporite` of the salt's entry                               |
+    | Sediment         | a closed basin, or a channel's bed                      | `Sediment` of the crust's entry                               |
+    | Regolith         | an airless body                                         | `Regolith` of the crust's, a `Deposit`'s or a `Cover`'s entry |
+    | Organic sediment | an organic `Cover`, not arid                            | `OrganicSediment` of the cover's entry                        |
+    | Dust             | arid and thin-aired                                     | `Dust` of a `Deposit`'s, a `Cover`'s or the crust's entry     |
+    | Volcanic rock    | a province's crust                                      | `VolcanicRock` of the province's entry                        |
+    | Sand             | arid                                                    | `Sand`, as dust's                                             |
+    | Soil             | everywhere else                                         | `Soil` of the crust's entry                                   |
+
+    Three moves from Design note 1's order, each to keep a rule reachable, which
+    `material_the_order_of_rules_is_total` checks on every combination of the conditions:
+    - Sea ice comes before the seabed: the ice of a cell under water lies over its points below
+      the water surface.
+    - Melt and snow come before the cliff. Melt above its transition holds no slope. And
+      `SNOW_SHED_SLOPE` (60°) is steeper than `CLIFF_SLOPE` (40°), so after the cliff snow would end
+      at 40° and its shed slope could never decide.
+    - Organic sediment, dust and volcanic rock come before sand and soil, which between them hold
+      on all ground.
+
+  - _The entry chains._ The seabed's is the crust's, then the body's `Bulk`, then its first
+    `Deposit`. The regolith's is the crust's, then the first `Deposit` not of the salt family, then
+    a `Cover`, then any `Deposit`. Sand's and dust's take such a `Deposit` first (the role's
+    "source of a body's sand and dust"), then a `Cover`, then the crust, then any `Deposit`: a salt
+    deposit is an evaporite's source. The evaporite's is the first salt-family `Deposit`, else one
+    in a crust's or a `Cover`'s role; without a salt an arid basin is sediment.
+  - _What the cell's substance byte gives._ Its ice entry names the forms of ice. Its liquid entry
+    is not read: whether a point is under water comes from the cell's water surface, and snow's
+    entry is the cell's ice entry, else the `Ice` entry of the header's main liquid's substance.
+  - _The Lambert code is a form's._ Main's ruling on T1.a's limb follow-up: an entry whose
+    `phase_row` is 3 gives a particulate form Lambert's law, as built, so a palette source writes
+    only 0 to 2. The classifier builds no palette; the synthetic worlds' test checks that none of
+    their palettes writes 3.
+  - _Melt_ is the folded-in rule alone, the point's annual mean temperature above its crust
+    entry's transition. The field carries no province's age, so "a young volcanic province" has no
+    rule. On an airless body a province is its entry's regolith (the guide's
+    `REGOLITH · Fe-RICH BASALT`); volcanic rock is a province under an atmosphere.
+  - _Glacier or frost_ (T1.a's owed rule; decision-r10-limb.md §2, "What T1.b owes"):
+    - A cell's ice is massive where its share is at least `MASSIVE_ICE_SHARE`, a half, and thin
+      below. That is the ice field's share, since the field carries no thickness, and the half is a
+      choice, not a measured figure.
+    - Thin ice is `Frost`, on any body: a seasonal frost, or a cold trap's exposed ice.
+    - Massive ice is `Glacier` under an atmosphere: Earth's ice sheets, Mars's residual caps,
+      Pluto's nitrogen glacier (signoff-9's `ICE · N2`).
+    - On an airless body, massive ice is `Regolith` of the ice entry: the ruling's lean, gardened
+      ice being particulate, lunar-like and not Lambertian. Main's relay named it `Frost`; both
+      are particulate (T1.a's `PhotometricForm`), and neither is ever `Glacier` there (tested).
+    - A body is airless where its header's surface pressure is zero, as the header's own field
+      defines one. So Pluto's 1 Pa counts as air.
+  - _Where a partial share lies_ (R09's "Cold traps" ruling). The ice lies on the cell's
+    shadowed ground: its hollows and pole-facing slopes.
+    - A point's index is z = t ÷ σ_t + d ÷ σ_d, of the ground finer than the coarse cells. t is the
+      fall towards the nearer rotation pole along the surface, per metre, and d the depth below the
+      coarse interpolant. Each is over its standard deviation on the cell's grid; the equal weights
+      are a choice.
+    - The cell's cut is the 1 − s quantile of z over a 16 × 16 grid of the cell, by Hyndman and
+      Fan's definition 7. A point is ice above it, so the ice covers its share to the grid's
+      sampling. The smallest share, 1 ÷ 255, lies within the grid's 256 points.
+    - The caller's `SynthCache` keeps each cut by its cell, level and ice code, for the field the
+      channels' memo is kept for (`NetworkId`: the body, the seed and the header's marks), emptied
+      at 16,384 cells. A cut is a pure function of those, so no answer depends on it (tested across
+      fields and seeds). A first query of a partial cell costs the grid's 256 heights, several
+      milliseconds natively at the Moon's finest level (provisional: not timed on a quiet machine).
+    - A Gaussian quantile of z, the first build, was rejected: craters and steep walls give z heavy
+      tails, and on a cratered airless pole the ice covered 0.03 of a cell against its 0.2.
+    - A cell where neither term varies is ice where its share is above a half. Sea ice is placed
+      so too, since a sea's ice does not follow its floor.
+  - _Snow_ is perennial snow alone. It lies where the point's warmest month, at its height by the
+    lapse rate, is below the snow entry's transition, and the cell precipitates. The class takes no
+    month, so seasonal snow and frost wait (deferred, below).
+  - _Arid_ is a mean precipitation of zero, or below Köppen–Geiger's arid bound: MAP < 10 ×
+    (2 T, 2 T + 28 or 2 T + 14, as 70% falls in winter, in summer, or neither), T in °C (Peel,
+    Finlayson and McMahon 2007, Table 1), in millimetres of water a Julian year at the point's
+    annual mean. Peel's summer is the warmer of October to March and April to September; a
+    generated calendar has neither, so it is the year's six warmest months. The bound is negative
+    below −7 °C (−14 °C summer-heavy, 0 °C winter-heavy), so colder ground is arid only where
+    nothing falls. Mars-like is arid everywhere.
+  - _A closed basin_ is a dry cell whose flow is `Terminal`, with a drainage area and a neighbour
+    flowing into it. The inflow test keeps out the flat cells the builder's routing leaves
+    terminal. The whole cell is the basin's floor.
+  - _A channel's bed_ is where the point lies within half a segment's bankfull width of one of its
+    chords, at a level the incision evaluates there. `Channels::on_channel_floor` reads what
+    `incision_at` reads of the network. Away from a chord's ends the chord sags below the surface
+    (R09.T6.a's note), which narrows a floor narrower than the sag.
+  - _Dust._ R09's climate record carries winds but no deposition. So every arid, thin-aired loose
+    ground is dust: the Risks' simple rule. Thin-aired is below `THIN_ATMOSPHERE_PRESSURE`, 30 kPa,
+    the sim's photometric threshold, reused with no aeolian source and repeated here because this
+    crate cannot see the sim; the sim's binary checks the two are one.
+  - _An organic cover_ is a palette's `Cover` entry of the organic family.
+  - _The slope_ is R05's `surface_normal` against the datum's normal, at R05's finest level, as
+    `ground_at` reads it. That is the gradient's tangential part (R09's "Deviations in T4, as
+    built"), scaled by ρ ÷ (ρ + h). On the small cliff body of the tests the scale is ⅔ at 1 km,
+    which the test's own measurement of the slope, through surface points, confirms. The slope
+    tests leave out the 0.5° either side of `CLIFF_SLOPE` and `SNOW_SHED_SLOPE`, where that
+    measurement and the classifier's reading may round apart.
+  - _R09's `SurfaceClass` is not read_: until R09.T15 assigns its codes every cell is unclassified.
+  - _The `sample_worlds()` cases_ (a warm pole without an ice cap, a locked world's ice where R09's
+    field puts it) follow R09.T16 as a later commit under T1.b's ID (main's ruling).
+    `surface_material_worlds.rs` meanwhile runs the four reference worlds through `coarse_pass`.
+    Their no-op pass leaves a smooth dry sphere with no ice, where every entry is the palette's and
+    the airless Moon's and Ceres's ground is their crusts' regolith.
+  - _Built fields_ (illustrative values, each noted):
+    - the cliff field, a 2 km airless body with a 1 km step;
+    - a cold snowy cliff, and a warm stepped field with a lapse rate;
+    - a closed basin at 300 K, dry or wet, with a halite deposit or none;
+    - decision-composition's Pluto-like world: a nitrogen glacier in a basin, methane frost on 0.3
+      of the mid-northern cells, a tholin cover and 1 Pa of air, and the same world airless;
+    - its locked lava world: basalt under 2,474 K cos^¼ θ on the day side (CoRoT-7 b's);
+    - a Titan-like world, an organic cover under 1.47 bar, with methane rain or none;
+    - a cratered airless pole with 0.2, 0.6 and 0.8 of water ice;
+    - a frozen sea, and seasonal climates for Köppen–Geiger's offsets.
+
+    So `Frost`, `OrganicSediment` and frost of methane are reached on built fields; no sample world
+    reaches them (Risks, "Classes plan 14 cannot yet reach").
+
+  - _Tests_ (`material::classify::tests`, `material::golden`, `tests/panics.rs`'s `material`, the
+    sim's binary):
+    - the order of rules is total, every rule reachable, every rule's form its own;
+    - a missing entry keeps the form, and airless ice is never `Glacier`;
+    - each rule's entry chain;
+    - the cut's quantile;
+    - on the synthetic worlds every entry is in the palette, and the answers are the same bits
+      from a fresh, a shared and a reversed cache;
+    - order and cache independence (`assert_order_independent`) on partial ice and channels' beds,
+      a cache kept across fields and seeds, and a partial-ice cell answered within its margin;
+    - a cell not held is not surveyed;
+    - `Seabed` exactly below the water surface, of the floor's entry and never the liquid's;
+    - a channel's bed is `Sediment`, and a point beside it is off it;
+    - a `cliff_field` is `Bedrock` above 40° and not below;
+    - snow lies to 60° and is bedrock above it, and lies only above the snow line;
+    - an arid filled basin is `Evaporite`, a wet one or one without a salt `Sediment`;
+    - Köppen–Geiger's bound at 20 °C and its seasonal offsets;
+    - the Pluto-like world's `Glacier · N2` and `Frost · CH4` on about its share, and its airless
+      twin's regolith of nitrogen;
+    - the lava world's `Melt` on the day side and regolith on the night side;
+    - the Titan-like world's `OrganicSediment` where it rains, and sand where it does not;
+    - the cold-trapped share on its share of the cell, on its most shadowed ground, lower and more
+      pole-facing than the bare ground;
+    - sea ice by the majority;
+    - a face-edge point alike from either face;
+    - the goldens, and their header;
+    - one `should_panic`: a (u, v) that is not finite;
+    - the reference worlds, and the thin-air threshold the sim's.
+  - _Generator version._ Not bumped (main, 2026-10-13). R09's first bump rides plan 14's held 21 →
+    22 batch (P14.T48.e), as R09.T9's did, and that batch re-blesses these goldens. The class
+    codes, the rules, their order and thresholds, the per-cell cut and the property table are
+    generator output from then on.
+  - _Closed sets, for the composition audit._ The fourteen rules. The three regimes, airless, thin
+    and thick, cut by two pressures. The entry chains of each rule.
+- **Deferred findings (T1.b, 2026-10-13 rule)** (each leaves the algorithm and the contracts as
+  they are, for "main"'s list).
+  - _No month._ The class is static. Seasonal snow and frost (Mars's CO₂ frost, a winter's snow)
+    wait on a month argument and P14.T55.e's frost by month.
+  - _Köppen–Geiger is water's and Earth's._ It is fitted to Earth's station climates, and says
+    nothing of gravity, insolation or air density. A methane world's aridity has no bound but
+    "nothing falls", so a Titan-like world that precipitates is never arid, and its dunes wait on
+    R09.T15's classes.
+  - _Snow without ablation._ Any snowfall under a summer below freezing gives perennial snow; polar
+    deserts such as the Dry Valleys stay bare by sublimation and wind. An accumulation against
+    ablation test would separate them (the science check; qualitative).
+  - _Sea ice by the majority_ loses area: a 0.4 concentration shows none and 0.6 shows full cover,
+    up to half a cell over a marginal ice zone. A seeded field's quantile, independent of the
+    floor, would keep the share.
+  - _Melt at the solidus._ The transition is a lithology's solidus, just above which the rock is
+    mostly crystal and holds a slope, so "melt holds no slope" is true only well above it.
+  - _A locked world's cold side._ The tilt is towards the rotation pole. On a locked world the
+    cold side is away from the substellar point, which the header does not carry.
+  - _Dust and the wind._ No deposition term, so all arid thin-aired loose ground is dust, and sand
+    never appears on a Mars. A deposition or wind-stress field from R09 would place both.
+  - _Airless is zero pressure._ The sim's `AIRLESS_PRESSURE` is 100 Pa, below which a body keeps
+    its partial pressures, and R11 takes 100 Pa as airless (its line 439), so the two plans place
+    rocks and ice under different rules. R09's `for_body` (P14.T48.e) should write 0 for an
+    `Airless` state, or such a body's ice reads as under air (`Glacier`); 100 Pa here would make
+    Pluto's nitrogen glacier a regolith.
+  - _The massive share's half_ is a choice. A cell under half covered is `Frost`, so a small
+    mountain glacier reads `FROST` where the guide's `ICE` is a glacier's. A thickness, or plan
+    14's caps and frosts apart, would decide it.
+  - _A margin cell's cut_ reads its grid's heights, which may reach cells a view lacks where the
+    point's own height answers, so such a point is refused.
+  - _The coastline follows cells._ A dry cell's ground below the sea level is dry land, and a sea
+    cell's ground above its surface is land.
+  - _A basin's whole cell_ is its floor, so a playa is as wide as its terminal cell.
+  - _Ice on cliffs._ Ice precedes the cliff rule (Design note 1), so a thin frost or an airless
+    ice regolith lies above 40° too.
+  - _The channel floor repeats the groove's geometry._ `Groove::floor_holds` repeats `Groove::at`'s
+    nearest point on a chord, and `on_floor` the incision's level range. A change to either should
+    move both; a shared helper in R09's file would keep them one.

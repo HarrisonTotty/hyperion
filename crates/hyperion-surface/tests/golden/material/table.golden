@@ -1,0 +1,395 @@
+# generator_version = 21
+constants
+cliff_slope_rad = 0x3fe657184ae74487  # 0.6981317007977318
+transition_half_width_rad = 0x3fb657184ae74487  # 0.08726646259971647
+snow_shed_slope_rad = 0x3ff0c152382d7365  # 1.0471975511965976
+massive_ice_share = 0x3fe0000000000000  # 0.5
+thin_atmosphere_pressure_pa = 0x40dd4c0000000000  # 30000.0
+lommel_seeliger_normal_albedo_ratio = 0x3ff3a37a020b8c22  # 1.2274112777602189
+lunar_limb_onset_normal_albedo = 0x3fe3333333333333  # 0.6
+bright_frost_normal_albedo = 0x3ff599999999999a  # 1.35
+bright_frost_limb_parameter = 0x3fd851eb851eb852  # 0.38
+particulate_normal_albedo_ceiling = 0x3ff599999999999a  # 1.35
+classes
+class 0 Bedrock = Particulate
+class 1 Regolith = Particulate
+class 2 Soil = Particulate
+class 3 Sand = Particulate
+class 4 Sediment = Particulate
+class 5 VolcanicRock = Particulate
+class 6 Melt = Particulate
+class 7 Glacier = Consolidated
+class 8 Snow = Consolidated
+class 9 SeaIce = Consolidated
+class 10 Frost = Particulate
+class 11 OrganicSediment = Particulate
+class 12 Seabed = Particulate
+class 13 Evaporite = Consolidated
+class 14 Dust = Particulate
+phase laws
+law 1 Regolith = moon
+ceiling = 0x3ff599999999999a  # 1.35
+law 2 Ice = airless-ice
+ceiling = 0x3ff599999999999a  # 1.35
+law 3 Lambert = lambert
+ceiling = 0x3ff0000000000000  # 1.0
+for_family Silicate = Regolith
+for_family Metal = Regolith
+for_family WaterIce = Ice
+for_family VolatileIce = Ice
+for_family Salt = Regolith
+for_family Organic = Regolith
+limb parameter
+L(0) at 0 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0 = 0x0000000000000000  # 0.0
+L(0) at 0.05 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.05 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.05 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.05 = 0x0000000000000000  # 0.0
+L(0) at 0.1 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.1 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.1 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.1 = 0x0000000000000000  # 0.0
+L(0) at 0.15 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.15 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.15 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.15 = 0x0000000000000000  # 0.0
+L(0) at 0.2 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.2 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.2 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.2 = 0x0000000000000000  # 0.0
+L(0) at 0.25 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.25 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.25 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.25 = 0x0000000000000000  # 0.0
+L(0) at 0.3 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.3 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.3 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.3 = 0x0000000000000000  # 0.0
+L(0) at 0.35 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.35 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.35 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.35 = 0x0000000000000000  # 0.0
+L(0) at 0.4 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.4 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.4 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.4 = 0x0000000000000000  # 0.0
+L(0) at 0.45 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.45 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.45 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.45 = 0x0000000000000000  # 0.0
+L(0) at 0.5 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.5 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.5 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.5 = 0x0000000000000000  # 0.0
+L(0) at 0.55 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.55 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.55 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.55 = 0x0000000000000000  # 0.0
+L(0) at 0.6 = 0x3ff0000000000000  # 1.0
+Regolith L(0) at 0.6 = 0x3ff0000000000000  # 1.0
+Ice L(0) at 0.6 = 0x3ff0000000000000  # 1.0
+Lambert L(0) at 0.6 = 0x0000000000000000  # 0.0
+L(0) at 0.65 = 0x3fed40bf9117c9ce  # 0.9141538461538461
+Regolith L(0) at 0.65 = 0x3fed40bf9117c9ce  # 0.9141538461538461
+Ice L(0) at 0.65 = 0x3fed40bf9117c9ce  # 0.9141538461538461
+Lambert L(0) at 0.65 = 0x0000000000000000  # 0.0
+L(0) at 0.7 = 0x3feae5f60d755237  # 0.8405714285714286
+Regolith L(0) at 0.7 = 0x3feae5f60d755237  # 0.8405714285714286
+Ice L(0) at 0.7 = 0x3feae5f60d755237  # 0.8405714285714286
+Lambert L(0) at 0.7 = 0x0000000000000000  # 0.0
+L(0) at 0.75 = 0x3fe8db8bac710cb2  # 0.7767999999999999
+Regolith L(0) at 0.75 = 0x3fe8db8bac710cb2  # 0.7767999999999999
+Ice L(0) at 0.75 = 0x3fe8db8bac710cb2  # 0.7767999999999999
+Lambert L(0) at 0.75 = 0x0000000000000000  # 0.0
+L(0) at 0.8 = 0x3fe7126e978d4fdf  # 0.721
+Regolith L(0) at 0.8 = 0x3fe7126e978d4fdf  # 0.721
+Ice L(0) at 0.8 = 0x3fe7126e978d4fdf  # 0.721
+Lambert L(0) at 0.8 = 0x0000000000000000  # 0.0
+L(0) at 0.85 = 0x3fe57f18b24be57f  # 0.6717647058823529
+Regolith L(0) at 0.85 = 0x3fe57f18b24be57f  # 0.6717647058823529
+Ice L(0) at 0.85 = 0x3fe57f18b24be57f  # 0.6717647058823529
+Lambert L(0) at 0.85 = 0x0000000000000000  # 0.0
+L(0) at 0.9 = 0x3fe4189374bc6a7e  # 0.6279999999999999
+Regolith L(0) at 0.9 = 0x3fe4189374bc6a7e  # 0.6279999999999999
+Ice L(0) at 0.9 = 0x3fe4189374bc6a7e  # 0.6279999999999999
+Lambert L(0) at 0.9 = 0x0000000000000000  # 0.0
+L(0) at 0.95 = 0x3fe2d7cb66139e22  # 0.588842105263158
+Regolith L(0) at 0.95 = 0x3fe2d7cb66139e22  # 0.588842105263158
+Ice L(0) at 0.95 = 0x3fe2d7cb66139e22  # 0.588842105263158
+Lambert L(0) at 0.95 = 0x0000000000000000  # 0.0
+L(0) at 1 = 0x3fe1b71758e21965  # 0.5536
+Regolith L(0) at 1 = 0x3fe1b71758e21965  # 0.5536
+Ice L(0) at 1 = 0x3fe1b71758e21965  # 0.5536
+Lambert L(0) at 1 = 0x0000000000000000  # 0.0
+L(0) at 1.05 = 0x3fe0b1e2285ff6a3  # 0.5217142857142857
+Regolith L(0) at 1.05 = 0x3fe0b1e2285ff6a3  # 0.5217142857142857
+Ice L(0) at 1.05 = 0x3fe0b1e2285ff6a3  # 0.5217142857142857
+Lambert L(0) at 1.05 = 0x0000000000000000  # 0.0
+L(0) at 1.1 = 0x3fdf88d7f88d7f89  # 0.49272727272727274
+Regolith L(0) at 1.1 = 0x3fdf88d7f88d7f89  # 0.49272727272727274
+Ice L(0) at 1.1 = 0x3fdf88d7f88d7f89  # 0.49272727272727274
+Lambert L(0) at 1.1 = 0x0000000000000000  # 0.0
+L(0) at 1.15 = 0x3fddd737d48bf9f3  # 0.46626086956521745
+Regolith L(0) at 1.15 = 0x3fddd737d48bf9f3  # 0.46626086956521745
+Ice L(0) at 1.15 = 0x3fddd737d48bf9f3  # 0.46626086956521745
+Lambert L(0) at 1.15 = 0x0000000000000000  # 0.0
+L(0) at 1.2 = 0x3fdc49ba5e353f7e  # 0.44200000000000006
+Regolith L(0) at 1.2 = 0x3fdc49ba5e353f7e  # 0.44200000000000006
+Ice L(0) at 1.2 = 0x3fdc49ba5e353f7e  # 0.44200000000000006
+Lambert L(0) at 1.2 = 0x0000000000000000  # 0.0
+L(0) at 1.25 = 0x3fdadc0980b24208  # 0.41968000000000005
+Regolith L(0) at 1.25 = 0x3fdadc0980b24208  # 0.41968000000000005
+Ice L(0) at 1.25 = 0x3fdadc0980b24208  # 0.41968000000000005
+Lambert L(0) at 1.25 = 0x0000000000000000  # 0.0
+L(0) at 1.3 = 0x3fd98a79ef4d094b  # 0.39907692307692305
+Regolith L(0) at 1.3 = 0x3fd98a79ef4d094b  # 0.39907692307692305
+Ice L(0) at 1.3 = 0x3fd98a79ef4d094b  # 0.39907692307692305
+Lambert L(0) at 1.3 = 0x0000000000000000  # 0.0
+L(0) at 1.35 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.35 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.35 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.35 = 0x0000000000000000  # 0.0
+L(0) at 1.4 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.4 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.4 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.4 = 0x0000000000000000  # 0.0
+L(0) at 1.45 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.45 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.45 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.45 = 0x0000000000000000  # 0.0
+L(0) at 1.5 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.5 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.5 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.5 = 0x0000000000000000  # 0.0
+L(0) at 1.55 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.55 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.55 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.55 = 0x0000000000000000  # 0.0
+L(0) at 1.6 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.6 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.6 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.6 = 0x0000000000000000  # 0.0
+L(0) at 1.65 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.65 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.65 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.65 = 0x0000000000000000  # 0.0
+L(0) at 1.7 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.7 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.7 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.7 = 0x0000000000000000  # 0.0
+L(0) at 1.75 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.75 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.75 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.75 = 0x0000000000000000  # 0.0
+L(0) at 1.8 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.8 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.8 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.8 = 0x0000000000000000  # 0.0
+L(0) at 1.85 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.85 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.85 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.85 = 0x0000000000000000  # 0.0
+L(0) at 1.9 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.9 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.9 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.9 = 0x0000000000000000  # 0.0
+L(0) at 1.95 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 1.95 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 1.95 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 1.95 = 0x0000000000000000  # 0.0
+L(0) at 2 = 0x3fd851eb851eb852  # 0.38
+Regolith L(0) at 2 = 0x3fd851eb851eb852  # 0.38
+Ice L(0) at 2 = 0x3fd851eb851eb852  # 0.38
+Lambert L(0) at 2 = 0x0000000000000000  # 0.0
+Regolith L(0°) at L(0) 1 = 0x3ff0000000000000  # 1.0
+Ice L(0°) at L(0) 1 = 0x3ff0000000000000  # 1.0
+Lambert L(0°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(15°) at L(0) 1 = 0x3fe876f7e3d1cc10  # 0.7645225
+Ice L(15°) at L(0) 1 = 0x3fe876f7e3d1cc10  # 0.7645225
+Lambert L(15°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(30°) at L(0) 1 = 0x3fe377d955714b9d  # 0.60838
+Ice L(30°) at L(0) 1 = 0x3fe377d955714b9d  # 0.60838
+Lambert L(30°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(45°) at L(0) 1 = 0x3fe01072085b1854  # 0.5020074999999999
+Ice L(45°) at L(0) 1 = 0x3fe01072085b1854  # 0.5020074999999999
+Lambert L(45°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(60°) at L(0) 1 = 0x3fda9d1f601797ce  # 0.4158400000000001
+Ice L(60°) at L(0) 1 = 0x3fda9d1f601797ce  # 0.4158400000000001
+Lambert L(60°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(75°) at L(0) 1 = 0x3fd4800000000000  # 0.3203125
+Ice L(75°) at L(0) 1 = 0x3fd4800000000000  # 0.3203125
+Lambert L(75°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(90°) at L(0) 1 = 0x3fc7ca42aed13948  # 0.18586000000000014
+Ice L(90°) at L(0) 1 = 0x3fc7ca42aed13948  # 0.18586000000000014
+Lambert L(90°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(105°) at L(0) 1 = 0x0000000000000000  # 0.0
+Ice L(105°) at L(0) 1 = 0x0000000000000000  # 0.0
+Lambert L(105°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(120°) at L(0) 1 = 0x0000000000000000  # 0.0
+Ice L(120°) at L(0) 1 = 0x0000000000000000  # 0.0
+Lambert L(120°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(135°) at L(0) 1 = 0x0000000000000000  # 0.0
+Ice L(135°) at L(0) 1 = 0x0000000000000000  # 0.0
+Lambert L(135°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(150°) at L(0) 1 = 0x0000000000000000  # 0.0
+Ice L(150°) at L(0) 1 = 0x0000000000000000  # 0.0
+Lambert L(150°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(165°) at L(0) 1 = 0x0000000000000000  # 0.0
+Ice L(165°) at L(0) 1 = 0x0000000000000000  # 0.0
+Lambert L(165°) at L(0) 1 = 0x0000000000000000  # 0.0
+Regolith L(180°) at L(0) 1 = 0x0000000000000000  # 0.0
+Ice L(180°) at L(0) 1 = 0x0000000000000000  # 0.0
+Lambert L(180°) at L(0) 1 = 0x0000000000000000  # 0.0
+A_h of A_N 0.12 L 1 at μ₀ 1 = 0x3fc2da60a5cda53f  # 0.14728935333122625
+A_h of A_N 0.5 L 0.5 at μ₀ 0.5 = 0x3fe66c158552fcf6  # 0.7006938556659452
+A_h of A_N 0.9 L 0 at μ₀ 0.2 = 0x3feccccccccccccd  # 0.9
+A_h of A_N 1.2 L 0.38 at μ₀ 0.05 = 0x4002529d8b3e5053  # 2.290339553679624
+rows
+row Bedrock Silicate unmodelled
+row Bedrock Metal unmodelled
+row Bedrock WaterIce unmodelled
+row Bedrock VolatileIce unmodelled
+row Bedrock Salt unmodelled
+row Bedrock Organic unmodelled
+row Regolith Silicate
+shear 0x0000000000000000 0x3fc3333333333333 c 0x4080400000000000 phi 0x3fe7750cb50c6e5b porosity 0x3fe0842108421084 n_q 0x405557e97096b341 n_c 0x40576d35af52e924 n_gamma 0x4063715aad613f2b
+shear 0x0000000000000000 0x3fd3333333333333 c 0x408c200000000000 phi 0x3fe9b0f58956c202 porosity 0x3fdf6171f6171f62 n_q 0x4063d00e08bb3ef7 n_c 0x4063031fd65efb78 n_gamma 0x4074a5674b20d3fc
+shear 0x3fd3333333333333 0x3fe3333333333333 c 0x40a7700000000000 phi 0x3fee28c731eb6950 porosity 0x3fdc13d1c13d1c14 n_q 0x408658972720be9f n_c 0x408036709d4e968e n_gamma 0x409eccba72b0050c
+shear 0x0000000000000000 0x3fe3333333333333 c 0x4099000000000000 phi 0x3feb5de4288e80bf porosity 0x3fddbaa1dbaa1dbc n_q 0x407097f4f403bf0c n_c 0x406cbd9163a32141 n_gamma 0x4083291f0a1dd4f9
+friction = 0x3fc999999999999a  # 0.2
+strength None factor None span Some(("0x3fad2f1a9fbe76c9", "0x3fc78d4fdf3b645a"))
+row Regolith Metal unmodelled
+row Regolith WaterIce unmodelled
+row Regolith VolatileIce unmodelled
+row Regolith Salt unmodelled
+row Regolith Organic unmodelled
+row Soil Silicate
+shear 0x0000000000000000 0x3fcc28f5c28f5c29 c 0x40a6440000000000 phi 0x3fe38c35418a5bf6 porosity 0x3fdd89d89d89d89e n_q 0x4040a5e653741e62 n_c 0x40470fd214f3960c n_gamma 0x404803ae8674619a
+friction = 0x3fc999999999999a  # 0.2
+strength None factor None span None
+row Soil Metal unmodelled
+row Soil WaterIce unmodelled
+row Soil VolatileIce unmodelled
+row Soil Salt unmodelled
+row Soil Organic unmodelled
+row Sand Silicate
+friction = 0x3fd3333333333333  # 0.3
+strength None factor None span None
+row Sand Metal unmodelled
+row Sand WaterIce unmodelled
+row Sand VolatileIce unmodelled
+row Sand Salt unmodelled
+row Sand Organic unmodelled
+row Sediment Silicate
+friction = 0x3fd0000000000000  # 0.25
+strength None factor None span None
+row Sediment Metal unmodelled
+row Sediment WaterIce unmodelled
+row Sediment VolatileIce unmodelled
+row Sediment Salt unmodelled
+row Sediment Organic unmodelled
+row VolcanicRock Silicate unmodelled
+row VolcanicRock Metal unmodelled
+row VolcanicRock WaterIce unmodelled
+row VolcanicRock VolatileIce unmodelled
+row VolcanicRock Salt unmodelled
+row VolcanicRock Organic unmodelled
+row Melt Silicate unmodelled
+row Melt Metal unmodelled
+row Melt WaterIce unmodelled
+row Melt VolatileIce unmodelled
+row Melt Salt unmodelled
+row Melt Organic unmodelled
+row Glacier Silicate unmodelled
+row Glacier Metal unmodelled
+row Glacier WaterIce
+friction at 0x406604cccccccccc = 0x3fe6b851eb851eb8 and at 0x406684cccccccccc = Some("0x3fe428f5c28f5c29")
+friction at 0x406704cccccccccc = 0x3fe199999999999a and at 0x406754cccccccccc = Some("0x3fdeb851eb851eb8")
+friction at 0x4067a4cccccccccc = 0x3fda3d70a3d70a3d and at 0x406854cccccccccc = Some("0x3fd8a3d70a3d70a4")
+friction at 0x406904cccccccccc = 0x3fd70a3d70a3d70a and at 0x406964cccccccccc = Some("0x3fd051eb851eb852")
+friction at 0x4069c4cccccccccc = 0x3fc3333333333333 and at 0x406a54cccccccccc = Some("0x3fc0000000000000")
+friction at 0x406ae4cccccccccc = 0x3fb999999999999a and at 0x406b54cccccccccc = Some("0x3fbced916872b021")
+friction at 0x406bc4cccccccccc = 0x3fc020c49ba5e354 and at 0x406c34cccccccccc = Some("0x3fbc49ba5e353f7d")
+friction at 0x406ca4cccccccccc = 0x3fb851eb851eb852 and at 0x406d04cccccccccc = Some("0x3fb7ae147ae147ae")
+friction at 0x406d64cccccccccc = 0x3fb70a3d70a3d70a and at 0x406de4cccccccccc = Some("0x3fb5c28f5c28f5c2")
+friction at 0x406e64cccccccccc = 0x3fb47ae147ae147b and at 0x406eeccccccccccc = Some("0x3fb51eb851eb851f")
+friction at 0x406f74cccccccccc = 0x3fb5c28f5c28f5c3 and at 0x406fbccccccccccc = Some("0x3fb3d70a3d70a3d7")
+friction at 0x4070026666666666 = 0x3fb1eb851eb851ec and at 0x40704ccccccccccc = Some("0x3fabe76c8b43958f")
+friction at 0x4070973333333333 = 0x3fa3f7ced916872b and at 0x4070cccccccccccc = Some("0x3fbc083126e978aa")
+friction at 0x4071026666666666 = 0x3fc70a3d70a3d70a
+strength None factor Some("0x3fea0fd5c5f02a3b") span Some(("0x3fe6147ae147ae14", "0x3fec7ae147ae147b"))
+row Glacier VolatileIce
+friction none
+strength None factor None span Some(("0x3fe999999999999a", "0x3ff0000000000000"))
+row Glacier Salt unmodelled
+row Glacier Organic unmodelled
+row Snow Silicate unmodelled
+row Snow Metal unmodelled
+row Snow WaterIce
+friction none
+strength None factor Some("0x3fedb0d3224f2cdd") span Some(("0x3fea3d70a3d70a3d", "0x3fef5c28f5c28f5c"))
+row Snow VolatileIce unmodelled
+row Snow Salt unmodelled
+row Snow Organic unmodelled
+row SeaIce Silicate unmodelled
+row SeaIce Metal unmodelled
+row SeaIce WaterIce
+friction at 0x406604cccccccccc = 0x3fe6b851eb851eb8 and at 0x406684cccccccccc = Some("0x3fe428f5c28f5c29")
+friction at 0x406704cccccccccc = 0x3fe199999999999a and at 0x406754cccccccccc = Some("0x3fdeb851eb851eb8")
+friction at 0x4067a4cccccccccc = 0x3fda3d70a3d70a3d and at 0x406854cccccccccc = Some("0x3fd8a3d70a3d70a4")
+friction at 0x406904cccccccccc = 0x3fd70a3d70a3d70a and at 0x406964cccccccccc = Some("0x3fd051eb851eb852")
+friction at 0x4069c4cccccccccc = 0x3fc3333333333333 and at 0x406a54cccccccccc = Some("0x3fc0000000000000")
+friction at 0x406ae4cccccccccc = 0x3fb999999999999a and at 0x406b54cccccccccc = Some("0x3fbced916872b021")
+friction at 0x406bc4cccccccccc = 0x3fc020c49ba5e354 and at 0x406c34cccccccccc = Some("0x3fbc49ba5e353f7d")
+friction at 0x406ca4cccccccccc = 0x3fb851eb851eb852 and at 0x406d04cccccccccc = Some("0x3fb7ae147ae147ae")
+friction at 0x406d64cccccccccc = 0x3fb70a3d70a3d70a and at 0x406de4cccccccccc = Some("0x3fb5c28f5c28f5c2")
+friction at 0x406e64cccccccccc = 0x3fb47ae147ae147b and at 0x406eeccccccccccc = Some("0x3fb51eb851eb851f")
+friction at 0x406f74cccccccccc = 0x3fb5c28f5c28f5c3 and at 0x406fbccccccccccc = Some("0x3fb3d70a3d70a3d7")
+friction at 0x4070026666666666 = 0x3fb1eb851eb851ec and at 0x40704ccccccccccc = Some("0x3fabe76c8b43958f")
+friction at 0x4070973333333333 = 0x3fa3f7ced916872b and at 0x4070cccccccccccc = Some("0x3fbc083126e978aa")
+friction at 0x4071026666666666 = 0x3fc70a3d70a3d70a
+strength None factor Some("0x3feb61a6449e59bb") span Some(("0x3fe6666666666666", "0x3feeb851eb851eb8"))
+row SeaIce VolatileIce unmodelled
+row SeaIce Salt unmodelled
+row SeaIce Organic unmodelled
+row Frost Silicate unmodelled
+row Frost Metal unmodelled
+row Frost WaterIce unmodelled
+row Frost VolatileIce
+friction none
+strength None factor None span Some(("0x3fd999999999999a", "0x3ff0000000000000"))
+row Frost Salt unmodelled
+row Frost Organic unmodelled
+row OrganicSediment Silicate unmodelled
+row OrganicSediment Metal unmodelled
+row OrganicSediment WaterIce unmodelled
+row OrganicSediment VolatileIce unmodelled
+row OrganicSediment Salt unmodelled
+row OrganicSediment Organic unmodelled
+row Seabed Silicate unmodelled
+row Seabed Metal unmodelled
+row Seabed WaterIce unmodelled
+row Seabed VolatileIce unmodelled
+row Seabed Salt unmodelled
+row Seabed Organic unmodelled
+row Evaporite Silicate unmodelled
+row Evaporite Metal unmodelled
+row Evaporite WaterIce unmodelled
+row Evaporite VolatileIce unmodelled
+row Evaporite Salt unmodelled
+row Evaporite Organic unmodelled
+row Dust Silicate
+shear 0x0000000000000000 0x3fcc28f5c28f5c29 c 0x409ce80000000000 phi 0x3fd41b2f769cf0e0 porosity 0x3fe13b13b13b13b1 n_q 0x401507d2380ae4d9 n_c 0x402a35132db79afd n_gamma 0x4010440dfb391ab4
+friction = 0x3fc999999999999a  # 0.2
+strength None factor None span None
+row Dust Metal unmodelled
+row Dust WaterIce unmodelled
+row Dust VolatileIce unmodelled
+row Dust Salt unmodelled
+row Dust Organic unmodelled
+lunar capacities
+1 m footing, Pa = 0x41547ab8b296e57c  # 5368546.790459987
+0–15 cm pair under 1 m, Pa = 0x4109357fb508cbee  # 206511.96339568443
