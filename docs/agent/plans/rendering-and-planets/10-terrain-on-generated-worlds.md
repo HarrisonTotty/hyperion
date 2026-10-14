@@ -3585,3 +3585,174 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   - _The channel floor repeats the groove's geometry._ `Groove::floor_holds` repeats `Groove::at`'s
     nearest point on a chord, and `on_floor` the incision's level range. A change to either should
     move both; a shared helper in R09's file would keep them one.
+- **Deviations in T1.a's slope follow-up, as built** (2026-10-14, lane 12, on R10.T1.b at
+  `ba371487`, with the brief's amendment of 2026-10-14 from the sign-off of T12's drafts). Files:
+  `material/bearing.rs` and `material/mod.rs`. The level figures T1.b's table golden pins are
+  unchanged, so no golden moves and `GENERATOR_VERSION` stays 21.
+  - _The API: new functions beside the level ones._
+    - `bearing_capacity_on_slope(p, gravity, footing_width, slope: Radians)` and
+      `ultimate_bearing_capacity_on_slope(strength, bulk_density, gravity, width, slope) ->
+Option<Pascals>` take the slope.
+    - `bearing_capacity` and `ultimate_bearing_capacity` keep their signatures and their figures.
+      They and the new functions share one private `level_terms`, with T1.a's arithmetic in its
+      order.
+    - The brief allowed either a new function or a changed signature. It was chosen because
+      T1.b's `material/golden.rs`, landed meanwhile, calls the level forms, and that file is
+      outside this lane's scope, so the brief's "the only caller today is the module's own
+      tests" no longer held.
+    - T12 builds its reading on `bearing_capacity_on_slope`.
+    - A slope of 0, of either sign, gives the level figure bit for bit. A test holds both the
+      level functions and the slope ones to the formula as it stood at `89c27081`, by the
+      testkit's `assert_same_bits`.
+    - `ultimate_bearing_capacity_on_slope` also refuses a bulk density, gravity or width that is
+      negative or not finite, so its `Some` is always finite.
+    - New: `SlopeFactors` (`of(strength, slope) -> Option<Self>`, `LEVEL`, `g_c` and `g_gamma`).
+      It is in the `pub use` with both new functions.
+  - _The sources, read._
+    - Vesić 1975 (Foundation Engineering Handbook, ch. 3, §§3.6–3.7, pp. 130–132, Fig. 3.18, Eqs.
+      3.15 and 3.19–3.25, Examples 3.5 and 3.6), in a scanned copy.
+    - Brinch Hansen 1970 (Danish Geotechnical Institute Bulletin 28, §7, pp. 7–8, Figs. 8 and 9,
+      Eqs. 11–16), in the scan GEO publishes.
+    - EM 1110-1-1905 (Tables 4-5 and 4-6, pp. 4-8 and 4-9; §4-5c, pp. 4-27 to 4-29), the Corps'
+      own file as the Internet Archive holds it, since the Corps' site refused the download.
+    - Vesić 1973 (J. Soil Mech. Found. Div. 99, SM1), read by the lane's research agent, has no
+      slope or tilt factors, and refers to Hansen 1970 for them (p. 64).
+  - _The geometry: a level base on the slope_ (asked on the issue, with this lean; see the
+    question below). A pad rests flush on the ground, its base tilted with the slope under the
+    craft's vertical weight, and no source read gives that case its factors:
+    - Hansen resolves the load normal to the base and in it ("V indicates the foundation load
+      normal to the base and H the load in the base", p. 7).
+    - He takes a positive tilt as a base rising toward the side where the ground falls away (Fig.
+      8, as Vesić's Fig. 3.18 draws it).
+    - He gives the factors "only … for positive values of ν and β, the latter being smaller than
+      φ" (p. 8).
+
+    A flush pad is therefore a tilt of −β under a load inclined to its base at β. The capacity
+    takes the case the primaries cover: a level base on the slope under a vertical load, with
+    Vesić's ground-slope factors alone. That is his Example 3.6's case. It leaves out the
+    downslope part of the pad's load.
+
+  - _The reading first built, and dropped._ The lane first built the ground factor at β times the
+    tilt factor (1 − β tan φ)² at δ = +β, with no inclined-load factor. That followed EM's worked
+    example §4-5c (Fig. 4-7), which takes a base tilted the same way as the ground as a positive
+    tilt. Both primaries' figures make that tilt negative, so EM's example runs against their
+    sign. The reading gave 0.39 of the level capacity at 10° on the 54° layer, against 0.68 now.
+  - _The factors._
+    - `g_γ` = (1 − tan β)² is Vesić's Eq. 3.21, `ζ_qg` = `ζ_γg`.
+    - `g_c` = `g_γ` − (1 − `g_γ`) ÷ (`N_c` tan φ) comes from his Eq. 3.15, with `N_c` tan φ =
+      `N_q` − 1. It is held at 0 where it would fall below that: from 41.73° at φ 42°, and from
+      43.91° at φ 54°.
+    - EM's Table 4-6 prints the cohesion row at φ > 0 with ÷ 147.3, a misprint for ÷ (`N_c`
+      tan φ), which Vesić's Example 3.6 uses ((18.05)(0.42)).
+    - Hansen's (1 − 0.5 tan β)⁵ (his Eq. 15, p. 8) is documented as the alternative, not built.
+  - _The range._ The capacity is `None` in these cases, never 0 for a slope out of range, as the
+    amendment asks:
+    - at or above φ (Vesić's Eq. 3.25, and Hansen, p. 8);
+    - at or above 45° (Vesić's Eq. 3.24), tested on the angle, since `math::tan` puts tan 45° a
+      rounding below 1;
+    - for a negative or NaN slope;
+    - on any slope above 0 on a soil of φ at or below 0, since Vesić's frictionless forms are
+      not built.
+  - _The slope's basis, for T12's clause_ (the amendment's first item; `bearing_capacity_on_slope`'s
+    doc comment, "The slope's basis", is the contract).
+    - The slope is the ground's adirectional slope over a fixed 2 m baseline, by Design note 7's
+      central differences, never the slope at the `BASELINE` the operator selects.
+    - Where the point is unresolved it is the RMS slope at 2 m, which is the caller's to compute.
+    - The sources argue for no other fixed scale. They take the slope as uniform over the ground
+      the failure reaches, which is larger than 2 m: about H = B tan(45° + φ/2) deep, 3.1 m under
+      a 1 m pad at φ 54°, and (H + D) tan(45° + φ/2) out from the footing, 9.5 m there (EM
+      1110-1-1905, Eqs. 1-4 and 1-5, p. 1-10; its "about 3B" is the φ 30° case). On rough ground the RMS slope falls with the baseline, so the 2 m slope errs
+      steep, and the capacity low, the safe direction. 2 m is also the finest of the "2-5 m length
+      scale" at which InSight's site selection characterised slopes (Golombek et al. 2014, LPSC
+      45, abstract 1499, p. 1).
+
+    So T12's clause can read: at the ground's slope over a fixed 2 m, `SLOPE`'s default baseline,
+    whatever `BASELINE` shows.
+
+  - _The figures_, from the formula and checked apart from the code in Python's `math`. On lunar
+    regolith at 1.62 m/s² under a 1 m pad:
+    - Level ground gives 5,368.547 kPa, which the earlier records round to 5,368.6 and the test
+      pins as 5,368.55; the top 15 cm's pair gives 206.512 kPa (206.5).
+    - At 10° they are 3,640.56 kPa (68%) and 139.75 kPa, from `g_γ` 0.678437 and `g_c` 0.677987
+      (φ 54°) and 0.674626 (φ 42°).
+    - At 12° the 1 m pad bears 3,326.9 kPa.
+  - _The limit as β → φ._
+    - On the top pair (φ 42°) under 1 m it is 1,124.8 Pa, 0.54% of the level figure, with `g_c`
+      at 0 and `g_γ` 0.009919.
+    - On the 54° layer, 45° comes first: `g_γ` falls to 0 there and the capacity is `None` from
+      45°.
+    - On the test's dust of silicate (φ 18°; bulk density 1,431 kg m⁻³ from the fixture's grain
+      density of 3,100, at 1.62 m/s²) it stops at 33.77% of the level 36.8 kPa: the factors'
+      limit, not the slope's failure.
+  - _Tests._
+    - Level ground, bit for bit.
+    - Never increasing on a 20,000-step grid to just under φ on five layers (42°, 46°, 54°, 18°
+      and 35°).
+    - The hand-worked 10° values, to 1%.
+    - Vesić's Example 3.6 (`g_γ` 0.64 and `g_c` 0.59 at φ 23° on a 5 to 1 slope) and EM's example's
+      ground factor (0.536 at 15°).
+    - The limits, and `None` outside the range.
+
+    No test panics, so `tests/panics.rs` is unchanged.
+- **Question for main (T1.a's slope follow-up)**, posted on the issue with its lean; it touches the
+  algorithm. Which reading should the capacity take? The table gives each as a fraction of the
+  level capacity at 10° under a 1 m pad (lunar soils at 1.62 m/s², the Viking soil at 3.71, the
+  cohesionless soil at 9.81; Python, apart from the code).
+  - The readings:
+    - G, as built: a level base on the slope.
+    - A: the flush pad by the primaries' signs, with the tilt factor extrapolated to −β, Vesić's
+      inclined-load factors at H ÷ V = tan β, and the normal pressure on the base solved for. As
+      the vertical load the ground carries per pad area, that pressure ÷ cos β, A's row reads
+      0.75, 0.62, 0.61 and 0.51, and G's excess on the 42° pair at 20° is a third rather than two
+      fifths (the lane's science check).
+    - B: the dropped first build.
+  - The fractions:
+
+    | Reading | lunar 30–60 cm (φ 54°) | lunar 0–15 cm (φ 42°) | Viking soil (φ 35°) | φ 30°, c 0 |
+    | ------- | ---------------------- | --------------------- | ------------------- | ---------- |
+    | G       | 0.68                   | 0.68                  | 0.67                | 0.68       |
+    | A       | 0.74                   | 0.61                  | 0.60                | 0.51       |
+    | B       | 0.39                   | 0.48                  | 0.51                | 0.55       |
+
+  - Lean: G. It lies inside both primaries' ranges, Vesić gives a worked example of it, and it is
+    within a tenth of A to 20° on the 54° layer that a 1 m pad reaches. Elsewhere it errs high
+    against A: by a tenth at 10° and two fifths at 20° on the 42° pair, and by a third at 10° on a
+    cohesionless 30° soil. (The issue comment's "within 10% on lunar regolith up to 20°" holds on
+    the 54° layer only.)
+  - The alternatives: A, or A checked against pseudo-static seismic bearing-capacity solutions,
+    which are the same problem in the base's frame with k_h = tan β; those were not read.
+- **Deferred findings (2026-10-13 rule) (T1.a's slope follow-up)** (each leaves the algorithm and
+  the contracts as built, for main's list).
+  - _Draft 1's other level-ground text._ Its "quantities, as built" bullet still gives
+    `bearing_capacity(properties, gravity, footing_width)` on level ground, and its wording bullet
+    says "on level ground". Its example readout's `~5.4 MPa` sits under `SLOPE ~12°`, where the
+    capacity is 3.3 MPa. The amendment leaves T12's text to T12's own commit, with the row.
+  - _The capacity's spread across the slope's uncertainty._ Across the example's 12° ± 4° the 1 m
+    pad's capacity runs from 4.0 MPa to 2.7 MPa, while Draft 1 gives the figure a `~` with no
+    `±`.
+  - _A capacity that stops short of 0._ On a soil of small φ the factors' limit at φ is well
+    above 0 (a third of the level figure at φ 18°), and at φ the figure becomes `None`. A cohesive
+    slope may stand past φ, to a depth, which nothing here models.
+  - _Slope stability._ Vesić advises a slope-stability analysis besides for slopes steeper than
+    φ/2 (27° on the 54° layer, 21° on the 42° pair), since his factors leave out the shear
+    stresses already in the ground; none is modelled.
+  - _The pad's shape._ Vesić's slope factors are plane-strain, for long footings with their axis
+    along the slope, and there are no data on how they vary with shape; a square pad takes them
+    as they stand.
+  - _`g_c` at a small φ._ Vesić's `g_γ` does not depend on φ, so `g_c` from his Eq. 3.15 falls
+    fast as φ nears 0: at 10° it is 0.112 at φ 5° and 0 below about 4.3°, where his frictionless
+    form gives 0.932. No table goes below 18°, but a clay's would.
+  - _Design note 7's InSight wording._ It says "lander-stability slopes at 2–5 m … against a 15°
+    limit", but Golombek et al. 2014 set the 15° limit "because the seismometer cannot level
+    itself on steeper slopes" (p. 1), and do not say stability (the lane's science check;
+    `bearing_capacity_on_slope`'s doc quotes the abstract). The design note is the owner's text.
+  - _Goldens._ T1.b's table golden (`tests/golden/material/table.golden`, from `material/golden.rs`)
+    pins `BearingFactors` and the two level lunar capacities. It could take `SlopeFactors` on a
+    grid and the 10° capacities too, since landing will read them (the plan review), but that
+    file is outside this lane. A golden of the slope capacity's bits is owed once T12 first shows
+    it or a payload carries it (the determinism audit).
+  - _signoff-10's two findings for this follow-up's list are still open._ They are "Regolith on
+    small bodies" (the lunar table's cohesion holds a small body's capacity up) and "Loose soils'
+    failure mode" (local or punching shear on a soil like Mars's drift), from R10.T12's drafts'
+    findings above. Both change the formula beyond the slope this brief asked for, so they stay
+    on main's list.

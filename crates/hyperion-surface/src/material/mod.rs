@@ -11,8 +11,9 @@
 //! mechanics family ([`form_row`]) to the entry's values, which the server resolves from plan 14's
 //! registry: the albedo in three bands, the photometric law ([`PhaseLaw`], whose codes this module
 //! assigns, and which a consolidated form overrides with Lambert's: [`PhotometricForm`]), the grain
-//! density, the transition temperature. The bearing capacity is a function of the footing and the
-//! gravity ([`bearing_capacity`]), and the pad friction of the temperature where it depends on it
+//! density, the transition temperature. The bearing capacity is a function of the footing, the
+//! gravity and the ground's slope ([`bearing_capacity`] on level ground,
+//! [`bearing_capacity_on_slope`]), and the pad friction of the temperature where it depends on it
 //! ([`interface_friction`]).
 //!
 //! Every figure carries its source ([`Citation`]); a figure without one is absent, and a console
@@ -31,7 +32,10 @@ mod classify;
 mod golden;
 mod properties;
 
-pub use bearing::{BearingFactors, bearing_capacity, ultimate_bearing_capacity};
+pub use bearing::{
+    BearingFactors, SlopeFactors, bearing_capacity, bearing_capacity_on_slope,
+    ultimate_bearing_capacity, ultimate_bearing_capacity_on_slope,
+};
 pub use class::{Material, MaterialClass, PhotometricForm};
 pub(crate) use classify::IceCuts;
 pub use classify::{GroundMaterial, MASSIVE_ICE_SHARE, THIN_ATMOSPHERE_PRESSURE, material_at};
