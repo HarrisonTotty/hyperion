@@ -4,10 +4,10 @@ use super::*;
 use crate::orbit::{Eccentricity, Orientation};
 use crate::planetary::derive::atmosphere::{
     GREENHOUSE_CARBON_DIOXIDE, GREENHOUSE_NITROGEN, GREENHOUSE_WATER,
-    NITROGEN_REFERENCE_TEMPERATURE, Speciation, VolatileDraws,
+    NITROGEN_REFERENCE_TEMPERATURE, VolatileDraws,
 };
 use crate::planetary::derive::solar::{
-    PLANETS, SMALL_BODIES, SOLAR_AGE, derive_under, orbit, solar_disc, table_under,
+    PLANETS, SMALL_BODIES, SOLAR_AGE, derive_historic, historic_table, orbit, solar_disc,
 };
 use crate::planetary::derive::{DerivedBody, PlacedBody};
 use crate::planetary::frames::FrameSpin;
@@ -109,9 +109,9 @@ fn day_and_night_of(body: &DerivedBody, spin: SeasonalSpin) -> (Kelvin, Kelvin) 
     )
 }
 
-/// Every body of the table under P14.T24.f's rules, the batch's (held), with its own spin.
+/// Every body of the table, under P14.T24.f's rules, with its own spin.
 pub(crate) fn table() -> Vec<(&'static str, DerivedBody, SurfaceConditions)> {
-    table_under(Speciation::CarbonAndOxygen)
+    historic_table()
         .into_iter()
         .map(|(name, body)| {
             let conditions = conditions_of(&body, spin_of(name)).unwrap();
@@ -134,20 +134,6 @@ fn fraction(conditions: &SurfaceConditions, gas: Gas) -> f64 {
         .iter()
         .find(|&&(id, _)| id == gas.substance())
         .map_or(0.0, |&(_, x)| x)
-}
-
-/// P14.T24.a is held until the 21 → 22 batch's bump, so that the batch's goldens move once: until
-/// then `PlanetarySystem::hooks_at` publishes no surface conditions. The bump removes the hold, and
-/// this test with it.
-#[test]
-fn the_surface_conditions_are_held_only_until_the_batch_s_bump() {
-    assert!(
-        GENERATOR_VERSION < SURFACE_CONDITIONS_VERSION,
-        "the 21 → 22 bump publishes P14.T24.a's surface conditions: call `hooks_at` where \
-         `hooks_at_under` is called, and remove it, `ConditionsHold`, \
-         `SURFACE_CONDITIONS_VERSION` and this test (plan 14, P14.T24.a as built)"
-    );
-    assert_eq!(ConditionsHold::in_force(), ConditionsHold::Held);
 }
 
 #[test]
@@ -398,24 +384,12 @@ fn methane_and_oxygen_reach_the_fractions_through_the_speciated_derivation() {
     )
     .unwrap()
     .with_volatiles(wet);
-    let body = derive_under(
-        &runaway,
-        &solar_disc(),
-        SOLAR_AGE,
-        Speciation::CarbonAndOxygen,
-    );
+    let body = derive_historic(&runaway, &solar_disc(), SOLAR_AGE);
     let conditions = conditions_of(&body, spin_of("Venus")).unwrap();
     let oxygen = fraction(&conditions, Gas::Oxygen);
     eprintln!("the wet runaway world: O2 {oxygen:.4} by number");
     assert!(oxygen > 0.5, "{oxygen}");
     assert_eq!(conditions.gases()[0].0, Gas::Oxygen.substance());
-    // Under the held rules neither gas is airborne.
-    let held = table_under(Speciation::Earlier);
-    for (name, body) in &held {
-        let conditions = conditions_of(body, spin_of(name)).unwrap();
-        assert_same_bits(fraction(&conditions, Gas::Methane), 0.0);
-        assert_same_bits(fraction(&conditions, Gas::Oxygen), 0.0);
-    }
 }
 
 /// Earth's measured state as [`EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K`] and
@@ -1618,7 +1592,7 @@ fn every_wet_world_s_water_feeds_back() {
                 UnitUniform::HALF,
             )
             .unwrap();
-            let body = derive_under(&placed, &disc, SOLAR_AGE, Speciation::CarbonAndOxygen);
+            let body = derive_historic(&placed, &disc, SOLAR_AGE);
             if body.atmosphere().state() == SurfaceState::GasEnvelope {
                 continue;
             }
@@ -2018,7 +1992,7 @@ fn the_conditions_are_pinned() {
     use hyperion_testkit::golden::GoldenWriter;
 
     let mut w = GoldenWriter::new();
-    w.header(GENERATOR_VERSION.get());
+    w.header(crate::GENERATOR_VERSION.get());
     let pin = |w: &mut GoldenWriter, name: &str, c: &SurfaceConditions| {
         w.f64(
             &format!("{name}_mean_surface_temperature"),

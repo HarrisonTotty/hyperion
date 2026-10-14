@@ -271,12 +271,13 @@ describe("apparentPosition against the simulation's golden vectors", () => {
     expect(unstated).toEqual([]);
   });
 
-  it("includes close_binary's receding moon .0201, with a drift, among the compared sources", () => {
+  // `.0601` since generator version 22, whose close-binary rule moved AB's slots (it was `.0201`).
+  it("includes close_binary's receding moon .0601, with a drift, among the compared sources", () => {
     const moon = sources.find(
-      ({ id, golden }) => id === "42002cb200000009.0201" && golden.when === "plus_100_years",
+      ({ id, golden }) => id === "42002cb200000009.0601" && golden.when === "plus_100_years",
     );
     const body = goldenSystemBodies("close_binary", "plus_100_years").bodies.find(
-      ({ id }) => id === "42002cb200000009.0201",
+      ({ id }) => id === "42002cb200000009.0601",
     );
 
     expect(moon).toBeDefined();

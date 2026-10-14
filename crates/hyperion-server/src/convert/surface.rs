@@ -307,6 +307,7 @@ pub(crate) fn record_section(section: RecordSection) -> RecordSectionDto {
         RecordSection::Photometry => RecordSectionDto::Photometry,
         RecordSection::Figure => RecordSectionDto::Figure,
         RecordSection::Rotation => RecordSectionDto::Rotation,
+        RecordSection::Envelope => RecordSectionDto::Envelope,
     }
 }
 

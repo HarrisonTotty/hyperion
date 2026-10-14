@@ -27,9 +27,9 @@ use hyperion_sim::planetary::architecture::template::{
 };
 use hyperion_sim::planetary::architecture::template::{EARTH_MASSES_PER_JUPITER_MASS, GroupRole};
 use hyperion_sim::planetary::architecture::{
-    ArchitectureClass, ClassConstraints, ClassDraw, HostMultiplicity, ZoneLimit, class_weights,
-    first_period_share,
+    ArchitectureClass, ClassConstraints, ClassDraw, ZoneLimit, class_weights, first_period_share,
 };
+use hyperion_sim::planetary::derive::atmosphere::SurfaceState;
 use hyperion_sim::planetary::derive::figure::BodyFigure;
 use hyperion_sim::planetary::derive::limits::{TidalPlanet, moon_mass_limit};
 use hyperion_sim::planetary::derive::photometry::{Bands, BodyPhotometry};
@@ -40,14 +40,15 @@ use hyperion_sim::planetary::derive::{
 use hyperion_sim::planetary::disc::{self, Disc, DiscDraws, DiscHost, Truncation};
 use hyperion_sim::planetary::fate::{BodyState, DestructionCause};
 use hyperion_sim::planetary::frames::BodyFixedFrame;
-use hyperion_sim::planetary::hooks::surface_seed;
+use hyperion_sim::planetary::hooks::{detail_seed, surface_seed};
 use hyperion_sim::planetary::placement::OrbitHost;
 use hyperion_sim::planetary::placement::{
     Neighbour, PlacedPlanet, mutual_hill_factor, mutual_hill_radius, next_semi_major_axis,
     satisfies_floor, spacing_floor,
 };
 use hyperion_sim::planetary::record::{
-    BodyKind, BodyRecord, Population as BodyPopulation, Section, SystemSnapshot,
+    BodyKind, BodyRecord, DetailLevel, Population as BodyPopulation, Section, Surface,
+    SystemSnapshot,
 };
 use hyperion_sim::planetary::{self, Body, BodyIndex, PlanetarySystem, SystemContext};
 use hyperion_sim::stellar::Composition;
@@ -218,12 +219,8 @@ fn class_probabilities_draws_and_templates_are_pinned() {
     let constraints = [
         ("none", ClassConstraints::NONE),
         (
-            "zone inside the snow line, close binary",
-            ClassConstraints::new(
-                &disc,
-                ZoneLimit::Outer(au(2.0)),
-                HostMultiplicity::CloseBinary,
-            ),
+            "zone inside the snow line",
+            ClassConstraints::new(&disc, ZoneLimit::Outer(au(2.0))),
         ),
     ];
     for (name, c) in constraints {
@@ -382,11 +379,8 @@ fn write_eccentricity(w: &mut GoldenWriter, name: &str, law: EccentricityLaw) {
     }
 }
 
-/// The surface seeds of a few bodies (P14.T23): a function of the universe seed and the body's ID
-/// alone, which no change to the derivation may move. Pinned when R09.T1.a moved the type into the
-/// base crate, at the values the sim's own type gave.
-#[test]
-fn surface_seeds_are_pinned() {
+/// A seed of each of six bodies, by `seed_of`, in four universes: the seed goldens.
+fn body_seeds(seed_of: impl Fn(Seed, BodyId) -> u64) -> GoldenWriter {
     let mut w = GoldenWriter::new();
     w.header(GENERATOR_VERSION.get());
     let bodies = [
@@ -402,11 +396,29 @@ fn surface_seeds_are_pinned() {
             let body = BodyId::new(SystemId::from_raw(raw).unwrap(), index);
             w.u64_hex(
                 &format!("seed {seed:016x} body {body}"),
-                surface_seed(Seed::new(seed), body).get(),
+                seed_of(Seed::new(seed), body),
             );
         }
     }
+    w
+}
+
+/// The surface seeds of a few bodies (P14.T23): a function of the universe seed and the body's ID
+/// alone, which no change to the derivation may move. Pinned when R09.T1.a moved the type into the
+/// base crate, at the values the sim's own type gave.
+#[test]
+fn surface_seeds_are_pinned() {
+    let w = body_seeds(|seed, body| surface_seed(seed, body).get());
     golden!("planetary/surface_seed", w.as_str());
+}
+
+/// The detail seeds of the same bodies (R09.T1.b): a function of the universe seed and the body's
+/// ID alone, on a tag of its own, which the client is sent in the surface seed's place and whose
+/// synthesis it keys.
+#[test]
+fn detail_seeds_are_pinned() {
+    let w = body_seeds(|seed, body| detail_seed(seed, body).get());
+    golden!("planetary/detail_seed", w.as_str());
 }
 
 #[test]
@@ -1136,7 +1148,11 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
         other => write_section_state(w, "population", other),
     }
     write_section_state(w, "surface", record.surface());
-    write_section_state(w, "hooks", record.hooks());
+    // R09.T1.b: a present body's hooks section holds its detail seed, pinned by value.
+    match record.hooks() {
+        Section::Ok(hooks) => w.u64_hex("hooks detail_seed", hooks.detail_seed().get()),
+        other => write_section_state(w, "hooks", other),
+    }
     // P14.T46.f and T47.d: the frame, the figure and the photometry the wire carries, after every
     // older line, so that the older lines keep their keys.
     match record.rotation() {
@@ -1151,6 +1167,46 @@ fn write_record(w: &mut GoldenWriter, record: &BodyRecord) {
         Section::Ok(photometry) => write_photometry(w, photometry),
         other => write_section_state(w, "photometry", other),
     }
+    // P14.T48.e: the surface section's summary and the envelope's state, after every older line.
+    if let Section::Ok(surface) = record.surface() {
+        write_surface(w, surface);
+    }
+    write_section_state(w, "envelope", record.envelope());
+}
+
+/// A body's surface section, in summary (P14.T48.e): its state, material and climate regime, and
+/// the figures R09's coarse pass reads first. `planetary/surface_conditions_published` pins the
+/// sections whole on a sample.
+fn write_surface(w: &mut GoldenWriter, surface: &Surface) {
+    let regime = surface.climate_regime();
+    w.line(&format!(
+        "surface_state: {:?}, {:?}; climate {:?}, {:?}, {}, {:?}",
+        surface.state(),
+        surface.material(),
+        regime.thermal(),
+        regime.forcing(),
+        regime
+            .condensable()
+            .map_or_else(|| "none".to_owned(), |id| id.substance().key().to_string()),
+        regime.model()
+    ));
+    let (conditions, figures) = (surface.conditions(), surface.figures());
+    w.f64(
+        "mean_surface_temperature_k",
+        conditions.mean_surface_temperature().value(),
+    );
+    w.f64(
+        "equator_pole_contrast_k",
+        conditions.equator_pole_contrast_k(),
+    );
+    w.f64("day_night_contrast_k", conditions.day_night_contrast_k());
+    w.f64("surface_pressure_pa", conditions.surface_pressure().value());
+    w.f64("sigma_h_m", figures.sigma_h().value());
+    w.f64("continental_fraction", figures.continental_fraction());
+    w.f64("heat_flow_w_m2", figures.heat_flow().value());
+    w.f64("surface_age_yr", figures.surface_age().value());
+    w.f64("ocean_fraction", figures.ocean_fraction());
+    w.f64("ice_fraction", figures.ice_fraction());
 }
 
 /// A unit vector's components, labelled `name_x` to `name_z`.
@@ -1301,6 +1357,59 @@ fn golden_systems_are_pinned() {
         }
         golden!(&format!("planetary/systems/{}", golden.name), w.as_str());
     }
+}
+
+/// P14.T48.e's gas-envelope split on the golden systems: a present planet's surface is `Ok`
+/// exactly when its class has a solid surface, and then never in the gas-envelope state; its
+/// envelope is not modelled exactly when it has none, and not applicable otherwise; and degrading
+/// below `Surface` withholds the envelope.
+#[test]
+fn the_golden_systems_split_surfaces_from_envelopes() {
+    let galaxy = fixture();
+    let (mut solid, mut enveloped) = (0, 0);
+    for golden in &GOLDEN_SYSTEMS {
+        let (_, context, system) = pinned(&galaxy, golden.id);
+        let snapshot = system.snapshot_at(&context, UniverseTime::EPOCH);
+        for record in snapshot.bodies() {
+            let present = record.identity().state() == BodyState::Present;
+            let Section::Ok(bulk) = record.bulk() else {
+                continue;
+            };
+            if !present || record.identity().kind() != BodyKind::Planet {
+                continue;
+            }
+            let name = format!("{} {:04x}", golden.name, record.index().get());
+            let has_solid_surface = bulk.class().has_solid_surface();
+            assert_eq!(
+                matches!(record.surface(), Section::Ok(_)),
+                has_solid_surface,
+                "{name}: a {:?}",
+                bulk.class()
+            );
+            if let Section::Ok(surface) = record.surface() {
+                assert_ne!(surface.state(), SurfaceState::GasEnvelope, "{name}");
+                solid += 1;
+            } else {
+                assert_eq!(record.surface(), &Section::NotApplicable, "{name}");
+                enveloped += 1;
+            }
+            let expected = if has_solid_surface {
+                Section::NotApplicable
+            } else {
+                Section::NotModelled
+            };
+            assert_eq!(record.envelope(), &expected, "{name}");
+            assert_eq!(
+                record.degrade(DetailLevel::Bulk).envelope(),
+                &Section::NotResolved,
+                "{name}"
+            );
+        }
+    }
+    assert!(
+        solid > 10 && enveloped > 10,
+        "{solid} solid, {enveloped} enveloped"
+    );
 }
 
 /// P14.T30.c on the Solar-like golden: its five planets are lettered `A b` to `A f` from the inside

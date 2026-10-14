@@ -17,7 +17,8 @@
 //!   no more than [`DisciplineSettings::rise_limit`] (0.3 points).
 //!
 //! The classes' weights, for the weighted mean, are the manifest's speed-bin shares times the
-//! thin disc's share of deaths in each age bin times the class's bound share inside the cube.
+//! thin disc's share of deaths in each age bin times the class's bound share inside the cube, of
+//! its resolved orbits ([`in_cube`]; P15.T6.g).
 
 use std::num::NonZeroUsize;
 
@@ -29,6 +30,7 @@ use super::cells::{
     RzCells, fastest_counts, map_in_order, noise_floor, normalise, shares, total_variation,
 };
 use super::histogram::{ClassHistogram, R_CELLS, Z_CELLS};
+use super::kinematics::in_cube;
 use super::nelder_mead::{Bounded, Stop, minimise};
 use crate::parallel::BuildThreadPoolError;
 
@@ -454,13 +456,9 @@ pub fn fit_disc(
     for (s, row) in weights.iter_mut().enumerate() {
         for (a, w) in row.iter_mut().enumerate() {
             let r = &records[s * AGE_BINS + a];
-            #[expect(clippy::cast_precision_loss, reason = "counts far below 2⁵³")]
-            let in_cube = if r.orbits > 0 {
-                r.in_cube_bound as f64 / r.orbits as f64
-            } else {
-                0.0
-            };
-            *w = speed_weights[s] * age_weights[a] * in_cube;
+            // Of the class's resolved orbits (P15.T6.g), as every share is.
+            let (bound_share, _) = in_cube(r);
+            *w = speed_weights[s] * age_weights[a] * bound_share;
         }
     }
     let total: f64 = weights.iter().flatten().sum();

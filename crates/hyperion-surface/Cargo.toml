@@ -59,5 +59,12 @@ name = "synth"
 harness = false
 required-features = ["testing"]
 
+# The bake on real terrain, `bake/patch_65` (plan R10, T6.a; T8.a adds `bake/horizon`), on the
+# synthetic worlds of the `testing` feature.
+[[bench]]
+name = "bake"
+harness = false
+required-features = ["testing"]
+
 [lints]
 workspace = true

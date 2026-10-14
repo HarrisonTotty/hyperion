@@ -2,7 +2,8 @@
 //! R09.T17): the coarse pass's reference worlds as the service's inputs, and the generated systems
 //! whose bodies the service computes fields for; and, for the Knowledge-bound test (R09.T19.c), a
 //! field asked for over the socket ([`field_via_wire`]) and decoded as a client decodes it
-//! ([`decode_all`], [`partial_field`], [`insert_all`]).
+//! ([`decode_all`], [`partial_field`], [`insert_all`]); and the checks that a frame carries no
+//! surface seed ([`Secret`], [`check_no_seed_key`], [`has_key`]; R09.T1.b).
 //!
 //! Plan 14's surface section is not inhabited yet, so the production source answers every body
 //! `NotModelled`; these tests give the service a reference world's inputs instead, through its
@@ -20,12 +21,14 @@ use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
 use hyperion_sim::id::{BodyId, Layer};
+use hyperion_sim::planetary::hooks::SurfaceSeed;
 use hyperion_sim::planetary::record::{BodyRecord, Section};
 use hyperion_sim::planetary::surface::{CoarseInputs, SurfaceInputsError, reference};
 use hyperion_sim::planetary::{SystemContext, generate};
 use hyperion_sim::time::UniverseTime;
 use hyperion_surface::field::PartialField;
 use hyperion_surface::wire::{DecodedBlock, decode_payload};
+use serde_json::Value;
 
 use super::{BinaryHeader, TestClient};
 
@@ -268,5 +271,76 @@ pub fn insert_all(field: &mut PartialField, blocks: &[DecodedBlock]) {
         field
             .insert(block)
             .unwrap_or_else(|error| panic!("block {} is inserted: {error}", block.index()));
+    }
+}
+
+/// What must never reach a client: a body's surface seed, by its key or by its value (rendering
+/// plan R09.T1.b, after R09.T19.c's own copy in `surface_knowledge.rs`).
+#[derive(Debug, Clone)]
+pub struct Secret {
+    /// The seed as sixteen lowercase hexadecimal digits, as the crate prints 64-bit identifiers.
+    hex: String,
+    /// The seed in decimal.
+    decimal: String,
+}
+
+impl Secret {
+    /// The secret of the surface seed `seed`.
+    pub fn of(seed: SurfaceSeed) -> Self {
+        let value = seed.get();
+        Self {
+            hex: format!("{value:016x}"),
+            decimal: value.to_string(),
+        }
+    }
+
+    /// Checks a text frame as it arrived, and returns its message: no object in its JSON has a
+    /// key named `surface_seed`, and its text does not hold the seed's value.
+    ///
+    /// # Panics
+    ///
+    /// If the frame fails either check, or is not a server message.
+    pub fn check_text(&self, text: &str) -> ServerMessage {
+        let message = check_no_seed_key(text);
+        self.assert_absent(text);
+        message
+    }
+
+    /// Checks that `text` does not hold the seed's value, in hexadecimal or in decimal.
+    ///
+    /// # Panics
+    ///
+    /// If it does.
+    pub fn assert_absent(&self, text: &str) {
+        assert!(
+            !text.contains(&self.hex) && !text.contains(&self.decimal),
+            "a frame holds the surface seed's value: {text}"
+        );
+    }
+}
+
+/// Checks a text frame as it arrived, and returns its message: no object in its JSON has a key
+/// named `surface_seed`.
+///
+/// # Panics
+///
+/// If one has, or the frame is not a server message.
+pub fn check_no_seed_key(text: &str) -> ServerMessage {
+    let json: Value = serde_json::from_str(text).expect("the server sends JSON");
+    assert!(
+        !has_key(&json, "surface_seed"),
+        "a frame carries a key named `surface_seed`: {text}"
+    );
+    serde_json::from_value(json).expect("the server sends valid messages")
+}
+
+/// Whether any object within `value` has a key named `key`.
+pub fn has_key(value: &Value, key: &str) -> bool {
+    match value {
+        Value::Object(members) => members
+            .iter()
+            .any(|(name, member)| name == key || has_key(member, key)),
+        Value::Array(items) => items.iter().any(|item| has_key(item, key)),
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => false,
     }
 }

@@ -2479,7 +2479,12 @@ made by whichever of T9 and T16 lands first, through the orchestrator, which coo
 lane at a time; later tasks that change a committed golden bump again. As built, T9 landed at 21
 with no bump of its own, and that batch's bump is this plan's first: it re-blesses
 `tests/golden/height/` with the rest, since no synthesis output has reached a save or the wire
-(main's ruling, 2026-10-13; Risks, "Deviations in T9, as built"). R05's `FINEST_SPACING_M`,
+(main's ruling, 2026-10-13; Risks, "Deviations in T9, as built"). _As built_ (lane `p14-bump`,
+2026-10-14): that bump, galaxy plan 14's 21 → 22, is this plan's first. It re-blessed every
+golden of this plan's under `crates/hyperion-surface/tests/golden/` and the sim's at 22 (`height/`
+with T7.h's `closed_forms`, `ground/`, `material/`, R10.T2's `weights/` and `wire/`), header only,
+with T1.b's hooks section on the golden systems; neither `SURFACE_PAYLOAD_FORMAT` nor
+`TEST_PLANET_VERSION` moved. R05's `FINEST_SPACING_M`,
 `BAND_LIMIT_M`
 and `finest_level` join the version when T9 reads them, as R05 notes. Nothing upstream moves but
 the hooks section T1.b fills: every draw is on a new tag, plan 14's `body.surface` seed is
@@ -2845,6 +2850,75 @@ re-blessing this plan's payload and coarse goldens in that commit.
     `u16` or checks it. And since the body is in a 64-bit seed rather than the key, bodies whose
     seeds collide (about n² ÷ 2⁶⁵ pairs among n bodies, as for P14.T23's seed already) share their
     noise, though not their coarse inputs.
+- **Deviations in T1.b, as built** (2026-10-14).
+  - _Lane and version (main's ruling, 2026-10-14)._ Built in its own lane, `r09-detail-seed`,
+    rather than by the batch's lane, and held at `GENERATOR_VERSION` 21: the batch's lane
+    (`p14-bump`, then building P14.T48.e) picks this commit before its bump commit, whose bump
+    re-blesses every golden at 22. So, unlike plan 14's bump plan ("the goldens move once, at the
+    bump"), this commit puts the hooks on the record and re-blesses the system goldens it moves at
+    header 21 inside itself; the bump re-blesses them at 22 with the batch's own changes.
+  - _The seed._ `planetary::hooks::detail_seed(seed, body)` is word 0 of the body's
+    `body.surface.detail` stream, beside `surface_seed` in `hooks/seed.rs`; `hooks` re-exports it
+    and `DetailSeed`. Its test, `a_million_detail_seeds_are_distinct_and_none_is_its_surface_seed`,
+    takes P14.T23's 10⁶ bodies.
+  - _`record::Hooks`_ is a struct with a private `detail_seed: DetailSeed`, `Hooks::new` and the
+    getter `detail_seed()`. It derives `Debug`, `Clone`, `PartialEq`, `Eq`, `Hash`, `PartialOrd` and
+    `Ord`, but not `Copy`, since the hooks to come (resources' abundances) need not be; the server's
+    `convert::planetary::hooks` takes `&Hooks`.
+  - _Which bodies._ The section is `Ok` for a planet, moon or dwarf planet present at the record's
+    time (a moon by the record's present arm, which also needs its planet's position), giants
+    included, as the task's "a present body" says and since a giant has a surface seed too. A
+    private `PlanetarySystem::present_hooks` builds it; `BodyRecord::builder` still starts every
+    section `NotModelled`. A ring, a belt and the halo keep
+    `NotApplicable`. A planet, moon or dwarf planet **not present** had `NotModelled` hooks, not
+    `NotApplicable` as the task's "keeps" says: T1.b makes them `NotApplicable`, as their bulk and
+    surface are.
+  - _The goldens, re-blessed at header 21_ (the batch's bump re-blesses them at 22). The system
+    goldens' writer prints an `Ok` hooks section as `hooks detail_seed = 0x…`, pinning the value,
+    and every other state as before. 15 files under `crates/hyperion-sim/tests/golden/planetary/systems/`
+    moved, 800 lines, each a `hooks: NotModelled` line replaced in place (no line added or removed):
+    722 became `hooks detail_seed = 0x…` and 78 `hooks: NotApplicable` (bodies not present). By
+    file (replaced lines, of which `NotApplicable`): `close_binary` 144 (0), `eccentric_giant` 24 (0),
+    `fallback_black_hole` 40 (2), `filler_a` 8 (2), `filler_b` 56 (0), `filler_c` 70 (0),
+    `halo_star` 4 (0), `hierarchical_triple` 108 (4), `hot_jupiter` 18 (0),
+    `m_dwarf_resonant_chain` 12 (0), `red_giant` 42 (4), `solar_like` 42 (0), `subgiant` 90 (0),
+    `t_tauri` 62 (62, every body not yet formed) and `wide_binary` 80 (4). No other line of any
+    golden moved. Added: `planetary/detail_seed.golden` (`detail_seeds_are_pinned`: the six bodies
+    in four universes of `surface_seeds_are_pinned`, through one helper, `body_seeds`, which leaves
+    the surface seed golden unchanged).
+  - _The wire._ `BodyHooksDto` keeps the shape R04.T3.c gave it; only its doc comments and
+    `BodyRecordDto.hooks`'s changed (the bindings regenerated, comments only). The new
+    `an_ok_hooks_section_carries_the_detail_seed_alone` pins an `ok` hooks section as whole JSON,
+    so it holds no other key; it does not name the surface seed's key, which keeps R04.T3.c's
+    acceptance grep empty. `PROTOCOL_VERSION` stays 2: no message, field or string is added,
+    removed or changed, no build sent an `ok` hooks section before (the sim's `Hooks` was
+    uninhabited), so by plan 04's Design note 15 this first send sets its shape, and every client
+    since R04.T3.c parses it (`bodiesWire.ts`'s `toRecord`) and shows its `DETAIL SEED` row.
+  - _Tests._ The sim's new `a_present_body_s_hooks_are_its_detail_seed` holds every record of 120
+    systems at the epoch to the rule above, with the detail seed `detail_seed` gives and unequal to
+    the body's surface seed, and counts the seeded bodies, the bodies not present, the rings and
+    the belts it saw; `a_record_tags_what_the_generator_does_not_compute` loses its planets'
+    `NotModelled` hooks assertion. `record.rs`'s mixed record carries an `Ok` hooks section, so the degrading tests
+    withhold one. `tests/system_bodies.rs` holds each body's `body_detail` hooks to the sim's detail
+    seed or `not_applicable`, and reads that answer and the system's list as their text arrived:
+    neither has a key named `surface_seed` at any depth, nor a body's surface seed in hexadecimal
+    or decimal (the list any body's, a record its own). The checks are `Secret`,
+    `check_no_seed_key` and `has_key` in `tests/common/surface.rs`, taken from T19.c's
+    `surface_knowledge.rs`, whose private copies T1.b leaves for T19.c's follow-up to drop (moving
+    its payload byte check, `check_binary`, into the shared `Secret`).
+  - _For T19.c's follow-up._ `tests/surface_knowledge.rs` still synthesises from its stand-in
+    `DETAIL_SEED`. Reading the client's seed from `body_detail`'s hooks section (`Session::start`
+    already asks for it) means keeping the answer's seed in `Session` and passing it to
+    `check_heights`, more than a one-line switch, so T1.b leaves it; the seed it will read is
+    `detail_seed(Seed::new(SEED), surface_system().solid)`.
+  - _Left as it is._ `packages/protocol/fixtures/planetary.json`, a hand-written fixture, keeps a
+    `full` record whose hooks are `not_modelled`, still a valid wire state.
+  - _Acceptance._ The sim's filter `planetary::hooks` selects only `hooks/seed.rs`'s tests and the
+    hooks doctests, so T1.b also ran
+    `cargo test -p hyperion-sim --lib -- planetary::hooks planetary::record a_present_body_s_hooks a_record_tags_what_the_generator_does_not_compute`
+    and `cargo test -p hyperion-sim --test planetary_golden`, beside
+    `cargo test -p hyperion-sim --doc hooks`, `cargo test -p hyperion-protocol planetary` and
+    `cargo test -p hyperion-server --test system_bodies`; the gate is `just smart-ci`.
 - **Deviations in T2, as built** (2026-10-09; technical choices, revisable until T9's and T16's
   goldens pin them).
   - _Files._ `field.rs` is a module root over `field/{cells,cover,crater,header}.rs`, re-exported
@@ -4534,7 +4608,9 @@ re-blessing this plan's payload and coarse goldens in that commit.
     `craters-uncached` bench is still pending. It is why the test's points are few. Lean: T9's.
   - _The detail seed's source._ Once R09.T1.b puts the body's detail seed in `body_detail`'s hooks
     section, the test should read the client's seed from there. Lean: with T1.b, which then also
-    checks that the hooks section carries `detail_seed` and no `surface_seed`.
+    checks that the hooks section carries `detail_seed` and no `surface_seed`. _T1.b, as built
+    (2026-10-14):_ the wire's checks are in `tests/system_bodies.rs`, and this test's switch is left
+    for its follow-up ("Deviations in T1.b, as built").
 - **Deviations in T18, as built** (2026-10-09).
   - _The shared log._ `knowledge/jsonl.rs` (private) holds what `persist.rs` held privately:
     `KnowledgeLog` (now carrying its header's format), `push_line`, `sync_directory`, `save_io`

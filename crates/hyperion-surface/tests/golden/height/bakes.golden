@@ -1,4 +1,4 @@
-# generator_version = 21
+# generator_version = 22
 world earth_like patch 0:11:2:2
 samples digest = 0x49b59cf1b949451b
 parents digest = 0xce88b6e50471b7bd

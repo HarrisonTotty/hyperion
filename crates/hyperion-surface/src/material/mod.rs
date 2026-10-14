@@ -46,6 +46,7 @@ pub use properties::{
     form_row, interface_friction, limb_parameter, properties,
 };
 pub use weights::{ClassWeights, MAX_CLASSES, SLOPE_LAG, WEIGHT_TOTAL, weights_at};
+pub(crate) use weights::{kept_omitted_rms, weights_with_sample};
 
 use hyperion_base::units::Radians;
 

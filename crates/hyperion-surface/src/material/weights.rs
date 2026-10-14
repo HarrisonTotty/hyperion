@@ -89,6 +89,16 @@ pub struct ClassWeights {
 }
 
 impl ClassWeights {
+    /// The weights of these slots, for the tests of what reads weights (R10.T6.a's palette).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn from_slots(
+        palette: [Option<GroundMaterial>; MAX_CLASSES],
+        weights: [u8; MAX_CLASSES],
+    ) -> Self {
+        Self { palette, weights }
+    }
+
     /// The materials, slot by slot: `None` where a slot is empty.
     #[must_use]
     pub const fn palette(&self) -> [Option<GroundMaterial>; MAX_CLASSES] {
@@ -200,33 +210,51 @@ pub fn weights_at<F: FieldView>(
     level: BandLevel,
 ) -> Result<ClassWeights, QueryHeightError> {
     let dir = unit_dir(face_uv_to_xyz(at));
-    if level >= finest_band(synth.field().header()) {
-        finest_weights(synth, cache, dir)
-    } else {
-        coarse_weights(synth, cache, dir, level)
+    if level > finest_band(synth.field().header()) {
+        // Deeper than the finest level, at which the classifier reads the ground: no height at
+        // the level itself is read.
+        return Ok(finest_weights(&Point::at(synth, cache, dir)?));
     }
+    let sample = synth.height_at(cache, dir, level)?;
+    weights_with_sample(synth, cache, dir, level, &sample)
 }
 
-/// The weights at the finest level at the unit direction `dir`: the class, blended across the slope
-/// thresholds ([`weights_at`]).
+/// [`weights_at`] at the unit direction `dir`, whose height and gradient at `level`, `sample`,
+/// the caller has in hand: [`Synthesiser::height_at`] at `dir` and `level`, bit for bit. R10.T6.a's
+/// bake, which has made each vertex's, asks so, and the answer is [`weights_at`]'s at that
+/// direction.
 ///
 /// # Errors
 ///
-/// [`QueryHeightError::NotSurveyed`] naming the first cell the classifier reads that the view does
-/// not hold.
-fn finest_weights<F: FieldView>(
+/// As [`weights_at`], the height's apart.
+pub(crate) fn weights_with_sample<F: FieldView>(
     synth: &Synthesiser<'_, F>,
     cache: &mut SynthCache,
     dir: [f64; 3],
+    level: BandLevel,
+    sample: &HeightSample,
 ) -> Result<ClassWeights, QueryHeightError> {
-    let point = Point::at(synth, cache, dir)?;
+    let finest = finest_band(synth.field().header());
+    let point = match level.cmp(&finest) {
+        core::cmp::Ordering::Less => return coarse_weights(synth, cache, dir, level, sample),
+        core::cmp::Ordering::Equal => Point::with_sample(synth, cache, dir, sample)?,
+        // Deeper than the finest level, at which the classifier reads the ground: its height there.
+        core::cmp::Ordering::Greater => Point::at(synth, cache, dir)?,
+    };
+    Ok(finest_weights(&point))
+}
+
+/// The weights at the finest level at `point`: the class, blended across the slope thresholds
+/// ([`weights_at`]).
+#[must_use]
+fn finest_weights(point: &Point<'_>) -> ClassWeights {
     let (_, authoritative) = point.facts().decide();
     let slope = math::acos(num::max(-1.0, num::min(point.cos_slope(), 1.0)));
     let mut shares = Shares::default();
     for (steepness, share) in blend(slope) {
         shares.add(point.facts_at(steepness).decide().1, share);
     }
-    Ok(shares.into_weights(First::Authoritative(authoritative)))
+    shares.into_weights(First::Authoritative(authoritative))
 }
 
 /// Each steepness's share of the image at a slope of `slope` radians: linear across
@@ -245,22 +273,23 @@ pub(crate) fn blend(slope: f64) -> [(Steepness, f64); 3] {
     ]
 }
 
-/// The weights at a band level `level` coarser than the finest at the unit direction `dir`
-/// ([`weights_at`]).
+/// The weights at a band level `level` coarser than the finest at the unit direction `dir`, whose
+/// height and gradient at the level are `sample` ([`weights_at`]).
 ///
 /// # Errors
 ///
 /// [`QueryHeightError::NotSurveyed`] naming the first cell read that the view does not hold: the
-/// height's, the cell's site's, then the ice cut's grid and the channels'.
+/// cell's site's, then the ice cut's grid and the channels'.
 fn coarse_weights<F: FieldView>(
     synth: &Synthesiser<'_, F>,
     cache: &mut SynthCache,
     dir: [f64; 3],
     level: BandLevel,
+    sample: &HeightSample,
 ) -> Result<ClassWeights, QueryHeightError> {
     let field = synth.field();
     let header = field.header();
-    let sample = synth.height_at(cache, dir, level)?;
+    let sample = *sample;
     let (key, cell) = synth.cell_at(dir)?;
     let site = Site::of(field, key, cell)?;
     let omitted = Omitted::of(synth, cache, key, level)?;
@@ -334,6 +363,24 @@ impl Omitted {
         })?;
         Ok(Self { height_m2, slope2 })
     }
+}
+
+/// R09's [`Synthesiser::omitted_rms`] in the coarse cell `cell` at band level `level`, bit for
+/// bit, from the closed forms [`weights_at`] keeps in `cache` by cell and level: what R10.T6.a's
+/// bake states as a patch's σ, which then costs nothing more where its weights are baked.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] naming `cell` where the view does not hold it.
+pub(crate) fn kept_omitted_rms<F: FieldView>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    cell: PatchKey,
+    level: BandLevel,
+) -> Result<Metres, QueryHeightError> {
+    Ok(Metres::new(
+        Omitted::of(synth, cache, cell, level)?.height_m2.sqrt(),
+    ))
 }
 
 /// The bands of the finest height a point of mean height `mean_m` and omitted variance

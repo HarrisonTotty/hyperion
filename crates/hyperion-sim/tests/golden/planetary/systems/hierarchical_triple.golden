@@ -1,4 +1,4 @@
-# generator_version = 21
+# generator_version = 22
 hierarchical_triple 0x42002cb200000003: OldThinDisc, 4 stars
 fe_h = 0x3fcf50f6852e97e3  # 0.24465829375293344
 age_at_epoch_yr = 0x41fed21adaa144bc  # 8273374634.079281
@@ -71,9 +71,9 @@ t_eq_k = 0x4089427f4c2664e3  # 808.3121569633043
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087783388730816, nanos: 0 })
+surface: NotApplicable
+hooks detail_seed = 0x909146a717d580ed
+rotation: Synchronous, locks at Some(UniverseTime { seconds: -261047356293675168, nanos: 0 })
 pole_x = 0x3fef9f4537ac68b8  # 0.9881921851513402
 pole_y = 0xbfa8b6e7cf5184b0  # -0.04827045827620091
 pole_z = 0xbfc29d080f7fa792  # -0.14541722065706303
@@ -87,7 +87,7 @@ obliquity_rad = 0x3fcd189ef523617c  # 0.2273138710941217
 initial_rate_rad_s = 0x3f15ddb544d6297f  # 8.341235044021475e-5
 locked_rate_rad_s = 0x3ee5529b84d11c25  # 1.0167448772814274e-5
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x422dc910e437cbe5  # 63963689499.89823
+locking_age_s = 0x42c269c79627a26b  # 40491058745156.836
 clock_period_s = 0x4122dbe55ff21c1d  # 617970.6873940263
 clock_mean_anomaly_at_epoch_rad = 0x4008a12bb0c84365  # 3.078696614371824
 sub_primary_angle_rad = 0xbfd9ec7052c70cb8  # -0.405056076848449
@@ -117,6 +117,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x4021149caa1f7b74  # 8.540257755606696
 a_m = 0x4212bb09cc2d3816  # 20111848203.30477
@@ -147,9 +148,9 @@ t_eq_k = 0x40823bd15e284a70  # 583.4772303722111
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -261081671476931488, nanos: 0 })
+surface: NotApplicable
+hooks detail_seed = 0x14518966009fd828
+rotation: Synchronous, locks at Some(UniverseTime { seconds: -256929760731066496, nanos: 0 })
 pole_x = 0x3fec6498496f27be  # 0.8872796472799036
 pole_y = 0xbfd845fcee141456  # -0.3792717289910049
 pole_z = 0xbfd0cc39415f34c4  # -0.26246482261633397
@@ -163,7 +164,7 @@ obliquity_rad = 0x3fc70717028c34b3  # 0.1799038660468902
 initial_rate_rad_s = 0x3f2b731b29a82116  # 0.0002094240815753232
 locked_rate_rad_s = 0x3ed00a460ed52a2f  # 3.8242653606726395e-6
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x429677bb7570fde6  # 6175875488831.475
+locking_age_s = 0x432d8b83f805aecb  # 4158086621353829.5
 clock_period_s = 0x413911e2614b4e1b  # 1642978.3800553146
 clock_mean_anomaly_at_epoch_rad = 0x3fee5dbd723f7e41  # 0.9489428740889211
 sub_primary_angle_rad = 0x4001176073e2969a  # 2.1364144376301057
@@ -193,6 +194,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 0400 B b: Planet about Some(Star(1)), Present
 mass_mearth = 0x3ff16a0d78ac4bf2  # 1.0883917535581955
 a_m = 0x41eb74e1e0e4c546  # 3685158663.149081
@@ -223,8 +225,8 @@ t_eq_k = 0x4084dfc44d6f89a7  # 667.9708508218654
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x98e47ef335d4e8ca
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087841618645312, nanos: 0 })
 pole_x = 0x3fee81f568750f5b  # 0.9533640899830788
 pole_y = 0xbfd2a7923860a5b7  # -0.2914777327119639
@@ -269,6 +271,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4084dfc44d6f89a7  # 667.9708508218654
+equator_pole_contrast_k = 0x40756b7908ffce69  # 342.7170495979722
+day_night_contrast_k = 0x40899fe312474b1a  # 819.9858747072024
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408d944728594d22  # 946.5347449280418
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb1958987922a6c  # 0.06868800697172056
+surface_age_yr = 0x41a23630dbf3d94b  # 152770669.9762672
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 0500 B c: Planet about Some(Star(1)), Present
 mass_mearth = 0x3fff982d60bf7192  # 1.9746526507579785
 a_m = 0x41f36770740430b6  # 5208737600.261892
@@ -296,8 +310,8 @@ t_eq_k = 0x40818ecbca3d68fe  # 561.8495068357149
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xd9b4ec56a7528bce
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087791002499488, nanos: 0 })
 pole_x = 0x3fee6ec46c90d56e  # 0.9510213966774879
 pole_y = 0xbfd0bf25fb01e652  # -0.261666770100054
@@ -342,6 +356,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40818ecbca3d68fe  # 561.8495068357149
+equator_pole_contrast_k = 0x40701fa713239d4c  # 257.97828973686114
+day_night_contrast_k = 0x40855d2d024c3435  # 683.6469770387108
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408d7558f3f41367  # 942.6684340542241
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb32809632b50d8  # 0.07482966109393219
+surface_age_yr = 0x419c64ff6cd75215  # 119095259.21027406
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 0600 B d: Planet about Some(Star(1)), Present
 mass_mearth = 0x401026bedc105e41  # 4.037837446688685
 a_m = 0x41ff75f00031f537  # 8445165571.122367
@@ -369,8 +395,8 @@ t_eq_k = 0x407ba7bd03459e9c  # 442.48364569850105
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x9271ada91ce459ef
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261086767712765152, nanos: 0 })
 pole_x = 0x3fef3a153c49c7f7  # 0.9758402040008595
 pole_y = 0xbfc892fb27d1d5b0  # -0.19198550648040458
@@ -415,6 +441,18 @@ phase_integral_r = 0x3ff58201a8ba8cc9  # 1.3442398634877455
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fb999999999999a  # 0.1
 bond_ratio = 0x3ff37fa12ad18b15  # 1.2186595604513901
+surface_state: MagmaOcean, Rock; climate Efficient, Locked, none, LockedEnergyBalance
+mean_surface_temperature_k = 0x409b3f52f13e2a1b  # 1743.8309983933639
+equator_pole_contrast_k = 0x4051c717bba74f60  # 71.11082354868768
+day_night_contrast_k = 0x402fa6e7d4a57d80  # 15.825987477494664
+surface_pressure_pa = 0x417ce1d8eaa3b8b2  # 30285198.66497106
+sigma_h_m = 0x408c2002f37a3809  # 900.0014409588194
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb42a4ef6b0c9f8  # 0.07877057574004442
+surface_age_yr = 0x41987540f7855e57  # 102584381.88024269
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 0b00 C b: Planet about Some(Star(2)), Present
 mass_mearth = 0x4004788e01e59855  # 2.5588646076385353
 a_m = 0x41f21e171294bc8b  # 4863389993.296031
@@ -445,8 +483,8 @@ t_eq_k = 0x4088ec1290e24b7d  # 797.5090654067313
 moons: [0b01]
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x8706465be6cd8089
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087829702896096, nanos: 0 })
 pole_x = 0x3fe53b85fc850ce4  # 0.6635160381341874
 pole_y = 0x3fdac0d852646fe6  # 0.4180203251469251
@@ -491,6 +529,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4088ec1290e24b7d  # 797.5090654067313
+equator_pole_contrast_k = 0xc052e614867efda0  # -75.59500276948393
+day_night_contrast_k = 0x408eb37ac7cd1a09  # 982.4349514030047
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c2b1d9f454b86  # 901.3894639409707
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb8fd5ceec521e8  # 0.09761601285311594
+surface_age_yr = 0x418a377db018d733  # 54980534.01212921
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 0b01 C b I: Moon(GiantImpact) about Some(Body(BodyIndex(2816))), Unbound { at: UniverseTime { seconds: -261087847352420320, nanos: 0 } }
 mass_mearth = 0x3fa5cd4b0467c7b0  # 0.04258188656594031
 orbit: NotApplicable
@@ -500,10 +550,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0c00 C c: Planet about Some(Star(2)), Present
 mass_mearth = 0x40087fe703570c6f  # 3.0624523411693683
 a_m = 0x41ff26fa24ca2949  # 8362369612.635079
@@ -534,8 +585,8 @@ t_eq_k = 0x40830f24d729068b  # 609.8929885106203
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x337290bff64d29cd
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087632271129376, nanos: 0 })
 pole_x = 0xbfb5a7f490ececd5  # -0.08459404504985753
 pole_y = 0xbfe49600ddcd601c  # -0.6433109600138809
@@ -580,6 +631,18 @@ phase_integral_r = 0x3ff58201a8ba8cc9  # 1.3442398634877455
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fb999999999999a  # 0.1
 bond_ratio = 0x3ff37fa12ad18b15  # 1.2186595604513901
+surface_state: MagmaOcean, Rock; climate Efficient, Locked, none, Isothermal
+mean_surface_temperature_k = 0x40a67d9baf5e79da  # 2878.8040723346467
+equator_pole_contrast_k = 0x404ce5118b5b1700  # 57.78959791133639
+day_night_contrast_k = 0x402203d1a0dd8500  # 9.00745871261688
+surface_pressure_pa = 0x419e652698578d28  # 127486374.0854994
+sigma_h_m = 0x408c2015db30c598  # 900.0106719789792
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb94ce2a142b175  # 0.09882942616485997
+surface_age_yr = 0x41894aaf425aec2c  # 53040616.294395775
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 0d00 C d: Planet about Some(Star(2)), Present
 mass_mearth = 0x4009e46cf236558f  # 3.236535923274182
 a_m = 0x420a2c5f6ad759cc  # 14051700058.918846
@@ -610,9 +673,9 @@ t_eq_k = 0x407b36acbc4bfe1c  # 435.41717176136603
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -261086083689165696, nanos: 0 })
+surface: NotApplicable
+hooks detail_seed = 0x9c7f62bf120a0392
+rotation: Synchronous, locks at Some(UniverseTime { seconds: -260173891363880960, nanos: 0 })
 pole_x = 0xbfc4271106a65bc2  # -0.1574422152013693
 pole_y = 0xbfe1bf01960f93dd  # -0.5545661860347725
 pole_z = 0x3fea25c348781394  # 0.8171097197924717
@@ -626,7 +689,7 @@ obliquity_rad = 0x3fca7cbdb64b4040  # 0.20693179513046012
 initial_rate_rad_s = 0x3f279d814d6463fc  # 0.00018017009160400932
 locked_rate_rad_s = 0x3ed6fc0fdc62594f  # 5.479959730567078e-6
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x4279aa285945233b  # 1763663254610.202
+locking_age_s = 0x4309f9e7b04c3efd  # 913955988539359.6
 clock_period_s = 0x41317ecf1661b6c4  # 1146575.0874284962
 clock_mean_anomaly_at_epoch_rad = 0x4016df3bf5fa5224  # 5.718002169993756
 sub_primary_angle_rad = 0xbffc7bd0c7e658a8  # -1.780228405817562
@@ -656,6 +719,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 0e00 C e: Planet about Some(Star(2)), Present
 mass_mearth = 0x4022b177c8ed7f0e  # 9.346617011061905
 a_m = 0x4218ea17b9ef22b0  # 26751659643.783875
@@ -683,9 +747,9 @@ t_eq_k = 0x4073b96cfe2d8771  # 315.58910959038536
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -260980700750711424, nanos: 0 })
+surface: NotApplicable
+hooks detail_seed = 0x40ab31ad82eafeb2
+rotation: Synchronous, locks at Some(UniverseTime { seconds: -248502869332023776, nanos: 0 })
 pole_x = 0x3fc7e458db5c5218  # 0.18665610037773273
 pole_y = 0xbfe094871f914c3c  # -0.5181308380655376
 pole_z = 0x3feab5be6dff1080  # 0.834685530506718
@@ -699,7 +763,7 @@ obliquity_rad = 0x3fd1321a3d4b0971  # 0.2686830137792163
 initial_rate_rad_s = 0x3f11cad955e955f6  # 6.787253867320667e-5
 locked_rate_rad_s = 0x3ec18007454f384d  # 2.086175792537779e-6
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x42d85cc0c88f5b65  # 107146601708909.58
+locking_age_s = 0x43465afc4434b700  # 1.2584978020396544e16
 clock_period_s = 0x4146fa75d6fed900  # 3011819.6796523333
 clock_mean_anomaly_at_epoch_rad = 0x3fc76332dbf051bb  # 0.18271480311581265
 sub_primary_angle_rad = 0xc007d0724946dcec  # -2.9767804836989082
@@ -729,6 +793,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 0f00 C f: Planet about Some(Star(2)), Present
 mass_mearth = 0x401aa3c1232e24b5  # 6.659916448298806
 a_m = 0x4229296bece70e4d  # 54034560627.52793
@@ -759,9 +824,9 @@ t_eq_k = 0x406bc8681807d0cb  # 222.26270677114948
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -259337067625536128, nanos: 0 })
+surface: NotApplicable
+hooks detail_seed = 0x29f06d1b666a0507
+rotation: Synchronous, locks at Some(UniverseTime { seconds: 855712838334513792, nanos: 0 })
 pole_x = 0x3fadba4a06a75a0a  # 0.05806189852926387
 pole_y = 0xbfe39570db85795f  # -0.6119922912146584
 pole_z = 0x3fe93d45af43cf93  # 0.7887295172827059
@@ -775,19 +840,19 @@ obliquity_rad = 0x3fae201e8e16b692  # 0.05883880123597608
 initial_rate_rad_s = 0x3f15f0c9f20be2f6  # 8.36966760394789e-5
 locked_rate_rad_s = 0x3ea86278ec965719  # 7.267194287892425e-7
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x4318e14caecdb551  # 1750779726884180.3
+locking_age_s = 0x43aeff589cf69095  # 1.1168006856869341e18
 clock_period_s = 0x41607da8b080ff79  # 8645957.515746819
 clock_mean_anomaly_at_epoch_rad = 0x3feba57b0e30b979  # 0.8639502789645085
 sub_primary_angle_rad = 0x3ff30d6617aa7fab  # 1.190771191068033
 phase_at_epoch_rad = 0x40175400a8e3f380  # 5.832033766663585
-capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x400147c6929ca905  # 2.160046716123477
-w_epoch_rad = 0x40007011cf616e34  # 2.0547214700325416
-w_end_rad = 0x3fff30ba184c66c4  # 1.9493962239416058
-figure: RotationalAndTidal, OneBar
-equatorial_radius_m = 0x41759b2b7cf33639  # 22655671.809377883
-polar_radius_m = 0x41759b25ed3dd8a2  # 22655582.827599175
-flattening = 0x3ed07932ba55fa65  # 3.927571844085548e-6
+capture_phase_rad = 0xbfe23f4dbe616ea0  # -0.570227500760172
+w_start_rad = 0x3fe464450793c300  # 0.6372399471275401
+w_epoch_rad = 0x40175400a8e3f380  # 5.832033766663585
+w_end_rad = 0x4012adba37415a88  # 4.669655669559354
+figure: Rotational, OneBar
+equatorial_radius_m = 0x4175b2512364d1f2  # 22750482.212114282
+polar_radius_m = 0x41756d24a746d05b  # 22467146.454788547
+flattening = 0x3f898182f84bc3ce  # 0.012454055025473833
 figure_pole_x = 0x3fadba4a06a75a0a  # 0.05806189852926387
 figure_pole_y = 0xbfe39570db85795f  # -0.6119922912146584
 figure_pole_z = 0x3fe93d45af43cf93  # 0.7887295172827059
@@ -805,6 +870,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 1000 C g: Planet about Some(Star(2)), Present
 mass_mearth = 0x40283e646b89dd2f  # 12.121859894351102
 a_m = 0x4238b1b1f2ce8c72  # 106060444366.54861
@@ -836,7 +902,7 @@ moons: [1001, 1002, 1003, 1004, 1005]
 rings: [1080]
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks detail_seed = 0xe43048937271bf97
 rotation: Synchronous, locks at None
 pole_x = 0xbfb65ce5cac3633d  # -0.08735500526689761
 pole_y = 0xbfe84075ed026862  # -0.7578687314119288
@@ -851,19 +917,19 @@ obliquity_rad = 0x3fca8c57c0e93c5c  # 0.2074079219769115
 initial_rate_rad_s = 0x3f17c46c4fd90157  # 9.066496928600752e-5
 locked_rate_rad_s = 0x3e91bc24b473ef64  # 2.642711262738043e-7
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x443d7074bb953ff7  # 5.4305888601682104e20
+locking_age_s = 0x440b20e83f002c34  # 6.255416305799283e19
 clock_period_s = 0x4176ac92708d9b38  # 23775527.034571856
 clock_mean_anomaly_at_epoch_rad = 0x4015c873191eb1ff  # 5.445751564501278
 sub_primary_angle_rad = 0x40042b597d9b605a  # 2.5211667836229426
 phase_at_epoch_rad = 0x400b15271c0d3d1c  # 3.3853285018482335
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x4010c0e71b41b168  # 4.188381601223547
+w_start_rad = 0x4006a1f1c8bc9660  # 2.829074447875243
 w_epoch_rad = 0x400b15271c0d3d1c  # 3.3853285018482335
-w_end_rad = 0x4004a82916fc9d30  # 2.582109622558754
+w_end_rad = 0x400f8569e02369a0  # 3.9401433478171413
 figure: Rotational, OneBar
-equatorial_radius_m = 0x416c0dd50c913392  # 14708392.392724786
-polar_radius_m = 0x416bf374bbfe92de  # 14654373.874825891
-flattening = 0x3f6e16117c5c91cc  # 0.003672632362297734
+equatorial_radius_m = 0x416c0dc45fc7f50c  # 14708258.99315884
+polar_radius_m = 0x416bf395f653b6d9  # 14654639.697719024
+flattening = 0x3f6ddd37388b0901  # 0.003645522931351342
 figure_pole_x = 0xbfb65ce5cac3633d  # -0.08735500526689761
 figure_pole_y = 0xbfe84075ed026862  # -0.7578687314119288
 figure_pole_z = 0x3fe4b064a04996ec  # 0.6465323572744786
@@ -881,6 +947,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 1001 C g I: Moon(Regular) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3f0631d8428a744d  # 4.233304236332027e-5
 a_m = 0x419c16cfb5433abe  # 117814253.31565377
@@ -908,8 +975,8 @@ t_eq_k = 0x40655ea87b1c48d5  # 170.95806651615445
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x11af0c562457a533
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087847166535872, nanos: 0 })
 pole_x = 0xbfd2608823e7e47f  # -0.28714183336666815
 pole_y = 0xbfe75dd22bb49174  # -0.7302027562732705
@@ -954,6 +1021,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40655ea87b1c48d5  # 170.95806651615445
+equator_pole_contrast_k = 0x404524c7d03c6098  # 42.28734782169448
+day_night_contrast_k = 0x4055cc29ce0d6806  # 87.19005156811917
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40ae57566160a9b9  # 3883.668711682051
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fab58159479c00c  # 0.053406404852353345
+surface_age_yr = 0x41b2ed75b8b3d247  # 317552056.7024273
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1002 C g III: Moon(Captured) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3ea3a169ae7dc392  # 5.850350506109433e-7
 a_m = 0x41c113cf99fc978f  # 573022003.9733752
@@ -981,8 +1060,8 @@ t_eq_k = 0x40655ea87b1c48d5  # 170.95806651615445
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xe5bc87e8adb65ab4
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -261085216678726528, nanos: 0 })
 pole_x = 0xbfcfdff8259b5ba2  # -0.24902250133774567
 pole_y = 0xbfde5d890c18d8bf  # -0.47445894414284945
@@ -1027,6 +1106,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40655ea87b1c48d5  # 170.95806651615445
+equator_pole_contrast_k = 0xc0265b29e9ebf000  # -11.178054151583638
+day_night_contrast_k = 0x4060bc5417237082  # 133.88526493951582
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409c608a5b58654f  # 1816.1351140796503
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f285ed0859ca1c5  # 0.0001859311622010152
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1003 C g II: Moon(Captured) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3e85e9a0df154dc0  # 1.6326167399470465e-7
 a_m = 0x41b23e3ff4b7c17b  # 306069492.717796
@@ -1054,8 +1145,8 @@ t_eq_k = 0x40655ea87b1c48d5  # 170.95806651615445
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x9a625922b1466623
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -261087781752555104, nanos: 0 })
 pole_x = 0x3fe65c2f9a022d30  # 0.6987531669596247
 pole_y = 0xbfe63ecaa3efc4c0  # -0.6951649858366622
@@ -1100,6 +1191,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40655ea87b1c48d5  # 170.95806651615445
+equator_pole_contrast_k = 0xbffeb8bed698a180  # -1.9201038725533124
+day_night_contrast_k = 0x405f34b6e3a1938c  # 124.82366266993466
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409561c09c19e757  # 1368.4380954787682
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f451f46ec524cae  # 0.0006445976547574583
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1004 C g IV: Moon(Captured) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3e8426cee5d2809c  # 1.5014107904599557e-7
 a_m = 0x41c5a6b063f31930  # 726491335.8992062
@@ -1127,8 +1230,8 @@ t_eq_k = 0x40655ea87b1c48d5  # 170.95806651615445
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xd852a004c68240bb
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -261080420139759072, nanos: 0 })
 pole_x = 0x3fa9a41d702664bc  # 0.05008022302644963
 pole_y = 0xbf9e38c9ca374bc4  # -0.029513504950795313
@@ -1173,6 +1276,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40655ea87b1c48d5  # 170.95806651615445
+equator_pole_contrast_k = 0x402acc9e4240b730  # 13.3996449188231
+day_night_contrast_k = 0x406124058b4ee3e2  # 137.12567677887188
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40950cba753ab108  # 1347.182087819152
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f188cedc35411f8  # 9.36527365703112e-5
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1005 C g V: Moon(Captured) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3e782604165fff9f  # 8.996017228368607e-8
 a_m = 0x41cd15782f10c925  # 975892574.1311384
@@ -1200,8 +1315,8 @@ t_eq_k = 0x40655ea87b1c48d5  # 170.95806651615445
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xd536799d75584cff
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -261054354182101760, nanos: 0 })
 pole_x = 0xbfe1e5d5c97d04b9  # -0.5593060431785012
 pole_y = 0x3fe9e697f3faa0b9  # 0.8093986287322174
@@ -1246,6 +1361,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40655ea87b1c48d5  # 170.95806651615445
+equator_pole_contrast_k = 0x40091f85d4db61c0  # 3.1403919820261024
+day_night_contrast_k = 0x40619d3343dc905c  # 140.91250794485939
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40934a59400aea33  # 1234.5871583657688
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f1430b1cd4eb9ed  # 7.701955048731281e-5
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1080 C g RING 1: Ring about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3cb65dd7e17387ea  # 3.103985863838289e-16
 orbit: NotApplicable
@@ -1264,6 +1391,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 1100 C h: Planet about Some(Star(2)), Present
 mass_mearth = 0x402ff1da985c89a9  # 15.972370873733626
 a_m = 0x424bfd9bb2da2f29  # 240437913012.36844
@@ -1295,7 +1423,7 @@ moons: [1101, 1102, 1103, 1104, 1105, 1106]
 rings: [1180]
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks detail_seed = 0x98e87e3cc5f1dcfd
 rotation: Synchronous, locks at None
 pole_x = 0xbfd7ce40a5ad4f1a  # -0.37196365527528175
 pole_y = 0xbfddbde5c5702303  # -0.46471542626436263
@@ -1310,19 +1438,19 @@ obliquity_rad = 0x3fda42291bf0683a  # 0.41028812149454874
 initial_rate_rad_s = 0x3f2f3e20a4222b5b  # 0.0002383627743863481
 locked_rate_rad_s = 0x3e74c8957c75f130  # 7.742468632015142e-8
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x44a7dee6b24d27db  # 5.6363114862186756e22
+locking_age_s = 0x4490742a85256cb7  # 1.9425187483683746e22
 clock_period_s = 0x4193592376b0ad97  # 81152221.6725372
 clock_mean_anomaly_at_epoch_rad = 0x3fc3fb8689086269  # 0.15611344996502233
 sub_primary_angle_rad = 0xc00017786533b1fa  # -2.0114601045991067
 phase_at_epoch_rad = 0x3ffffbc8216291cd  # 1.9989701561072366
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x400307b70ab97dd0  # 2.3787670934541225
+w_start_rad = 0x401722aa85b2fbf8  # 5.78385361580785
 w_epoch_rad = 0x3ffffbc8216291cd  # 1.9989701561072366
-w_end_rad = 0x3ff9e81dc38d0460  # 1.6191690100388527
+w_end_rad = 0x4011fd31ab713120  # 4.497259787353215
 figure: Rotational, OneBar
-equatorial_radius_m = 0x4177fa56039877a9  # 25142624.22472349
-polar_radius_m = 0x4175ab14dcb65cc9  # 22720845.79452208
-flattening = 0x3fb8a888b6a882db  # 0.0963216253226266
+equatorial_radius_m = 0x4177fa54e9da1d68  # 25142606.6157507
+polar_radius_m = 0x4175ab16d9ec8cab  # 22720877.62025134
+flattening = 0x3fb8a868dbc03a34  # 0.09631972661029736
 figure_pole_x = 0xbfd7ce40a5ad4f1a  # -0.37196365527528175
 figure_pole_y = 0xbfddbde5c5702303  # -0.46471542626436263
 figure_pole_z = 0x3fe9b6a173cb5643  # 0.803543783341134
@@ -1340,6 +1468,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 1101 C h I: Moon(Regular) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ef59eabc7ee1034  # 2.0618256253893306e-5
 a_m = 0x41a4e8feb0818ee0  # 175406936.25304317
@@ -1367,8 +1496,8 @@ t_eq_k = 0x405a3c9f090d008e  # 104.94720674772017
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x392e9d0401b42093
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087846645148928, nanos: 0 })
 pole_x = 0xbfab08efaf88c8a6  # -0.05280255334618404
 pole_y = 0xbfe367eea370630b  # -0.6064370338600339
@@ -1413,6 +1542,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405a3c9f090d008e  # 104.94720674772017
+equator_pole_contrast_k = 0x404bf4ea77ca6e81  # 55.91340539345129
+day_night_contrast_k = 0x40481d91d0307756  # 48.231012366929164
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c9b57f0e7c7ec  # 915.4179399593245
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fbefdca8b43e016  # 0.12106004619624885
+surface_age_yr = 0x41407d74336e07b1  # 2161384.4017953505
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fe5e36d879206a0  # 0.6840121887073174
+envelope: NotApplicable
 body 1102 C h II: Moon(Regular) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3f1dc97b8b4e63e5  # 0.00011362854531994612
 a_m = 0x41b098aedf9a00dd  # 278441695.6015757
@@ -1440,8 +1581,8 @@ t_eq_k = 0x405a3c9f090d008e  # 104.94720674772017
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x168f6f7b4d8e804b
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087822599302368, nanos: 0 })
 pole_x = 0x3fb7cc630ba87e26  # 0.09296244654296312
 pole_y = 0xbfe854b8d96cc738  # -0.7603420492725723
@@ -1486,6 +1627,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405a3c9f090d008e  # 104.94720674772017
+equator_pole_contrast_k = 0x40423f277d890edc  # 36.493392650530694
+day_night_contrast_k = 0x404bab6bad102212  # 55.33922351157902
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x4094a88b6c3dca6d  # 1322.1361550955583
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f9736977588b5d0  # 0.02266918806906465
+surface_age_yr = 0x41b0cf2cac1f2dca  # 282012844.12179244
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fe6b30c2f0bc6c4  # 0.7093563956134052
+envelope: NotApplicable
 body 1103 C h III: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ed08a612ac5145f  # 3.943573272662236e-6
 a_m = 0x41dfcc8938a05a2c  # 2133992674.5055037
@@ -1513,8 +1666,8 @@ t_eq_k = 0x405c6193546205c9  # 113.52461728642005
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xe83a5a8f4d07bd3c
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -257410931206295648, nanos: 0 })
 pole_x = 0xbfd01242835d6784  # -0.25111449078178105
 pole_y = 0xbfea47c2b1e131a5  # -0.8212598299228843
@@ -1559,6 +1712,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405c6193546205c9  # 113.52461728642005
+equator_pole_contrast_k = 0x4037d2aa228094a8  # 23.822908550636072
+day_night_contrast_k = 0x40555d0775d423c2  # 85.45358033863798
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a8518e3bfc33b8  # 3112.7778014004834
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f31d139e97ce02b  # 0.0002718702685231579
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fd18a6b0745ab98  # 0.2740733691231809
+envelope: NotApplicable
 body 1104 C h VI: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ea91b48ecb16c92  # 7.48234435642315e-7
 a_m = 0x41e714f065948ea3  # 3097985836.6424117
@@ -1586,8 +1751,8 @@ t_eq_k = 0x405a3c9f090d008e  # 104.94720674772017
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xae72c15926158fb1
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -236019461640106848, nanos: 0 })
 pole_x = 0xbfd4a52802af8ede  # -0.32258034002573577
 pole_y = 0x3fe5c9475cc84e36  # 0.6808201610715006
@@ -1632,6 +1797,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405a3c9f090d008e  # 104.94720674772017
+equator_pole_contrast_k = 0x40394c57859b0e18  # 25.29821047816776
+day_night_contrast_k = 0x40539e0da884aaf9  # 78.46958363490911
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409e3996d56620f6  # 1934.3972984273546
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f2471616232510a  # 0.00015596688999564733
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fe90362f31d58cc  # 0.7816633938153017
+envelope: NotApplicable
 body 1105 C h IV: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ea7e3761b32e82b  # 7.119334014739833e-7
 a_m = 0x41e3b4eaee56ae53  # 2644989810.70878
@@ -1659,8 +1836,8 @@ t_eq_k = 0x405a3c9f090d008e  # 104.94720674772017
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xecbe4d7dabc2a303
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -253002424042124224, nanos: 0 })
 pole_x = 0x3fe0543883262cb8  # 0.5102808534151313
 pole_y = 0x3fe2ae9e53b1269d  # 0.5838157305344854
@@ -1705,6 +1882,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405a3c9f090d008e  # 104.94720674772017
+equator_pole_contrast_k = 0x402ebbb96778f790  # 15.366648896709904
+day_night_contrast_k = 0x4053459c4f464e24  # 77.0876653849196
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409dd61845cabd46  # 1909.523703735163
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f241b35c69e8724  # 0.00015339881366310218
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1106 C h V: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3e9bab183890025a  # 4.12290369455924e-7
 a_m = 0x41e46010a56d4077  # 2734720299.4141192
@@ -1732,8 +1921,8 @@ t_eq_k = 0x405a3c9f090d008e  # 104.94720674772017
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xac9b6d228c8351e1
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -247541608532360224, nanos: 0 })
 pole_x = 0x3fd8fcdebb5ab5ac  # 0.3904339627868818
 pole_y = 0xbfe330695cfdebaf  # -0.5996596161124809
@@ -1778,6 +1967,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405a3c9f090d008e  # 104.94720674772017
+equator_pole_contrast_k = 0x4035fbe48b443a24  # 21.983956054837236
+day_night_contrast_k = 0x4053a47d0a989135  # 78.57013192080633
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409a0e0415dba1c4  # 1667.5039896314129
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f20c15c6dcde5e8  # 0.00012783292086364297
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3feabe12221ccc5a  # 0.8357020059833176
+envelope: NotApplicable
 body 1180 C h RING 1: Ring about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3c99271819454659  # 8.726599813318648e-17
 orbit: NotApplicable
@@ -1796,6 +1997,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 1200 C i: Planet about Some(Star(2)), Present
 mass_mearth = 0x4028438ebe71233b  # 12.131948424635643
 a_m = 0x4262985c8344977c  # 638924888612.7339
@@ -1824,7 +2026,7 @@ moons: [1201, 1202, 1203, 1204, 1205, 1206, 1207]
 rings: [1280]
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks detail_seed = 0x97d9677eb9cfcd5d
 rotation: Synchronous, locks at None
 pole_x = 0xbfbd95094b0d3eb2  # -0.11555536348645992
 pole_y = 0xbfe8cb68acf386c8  # -0.7748301866488072
@@ -1839,19 +2041,19 @@ obliquity_rad = 0x3fcd389d8fc16046  # 0.22829026717477258
 initial_rate_rad_s = 0x3f16e1328a39b1f5  # 8.727904292422219e-5
 locked_rate_rad_s = 0x3e5330faefec14e9  # 1.7873317932470493e-8
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x4507fce3238904a3  # 3.6249400220384144e24
+locking_age_s = 0x44fa3c408769701d  # 1.982287728001662e24
 clock_period_s = 0x41b4f412eed4e8b4  # 351539950.83167577
 clock_mean_anomaly_at_epoch_rad = 0x40164de1efc9f838  # 5.576057192518469
 sub_primary_angle_rad = 0xbff89e067a5181f4  # -1.538580396467407
 phase_at_epoch_rad = 0x4006cd0904addfce  # 2.850114857250424
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x3ffe2603a3721e20  # 1.8842808136558986
+w_start_rad = 0x4000639c87990f10  # 2.048638400419698
 w_epoch_rad = 0x4006cd0904addfce  # 2.850114857250424
-w_end_rad = 0x400e87103466f0f0  # 3.815948876754298
+w_end_rad = 0x400d36757be6f0f0  # 3.651591270432725
 figure: Rotational, OneBar
-equatorial_radius_m = 0x417ae2e171532331  # 28192279.082797233
-polar_radius_m = 0x417a3de5d8c038e1  # 27516509.546929244
-flattening = 0x3f988b98e9c7c7ad  # 0.023970021504233042
+equatorial_radius_m = 0x417ae2e170df7a87  # 28192279.05456021
+polar_radius_m = 0x417a3de5d9a1fec5  # 27516509.602049608
+flattening = 0x3f988b98b7657730  # 0.023970018571495888
 figure_pole_x = 0xbfbd95094b0d3eb2  # -0.11555536348645992
 figure_pole_y = 0xbfe8cb68acf386c8  # -0.7748301866488072
 figure_pole_z = 0x3fe3e37a9621b91a  # 0.6215184147129407
@@ -1869,6 +2071,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 1201 C i I: Moon(Regular) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3f2264361884d5f4  # 0.0001403156313785483
 a_m = 0x41a76248f7cbbd10  # 196158587.8979268
@@ -1896,8 +2099,8 @@ t_eq_k = 0x4050152797a9b8de  # 64.33054153036525
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xbd7bd12263cbd1ad
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087843026832288, nanos: 0 })
 pole_x = 0xbfc041bbd1669106  # -0.12700603222504742
 pole_y = 0xbfdb2ebb33d8a1a0  # -0.42472724974734355
@@ -1942,6 +2145,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152797a9b8de  # 64.33054153036525
+equator_pole_contrast_k = 0x4032b8e58b6bb83a  # 18.72225257282137
+day_night_contrast_k = 0x3ffed3d1a594bb40  # 1.9267136066443555
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c24d6b81b1c30  # 900.6048433416345
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fd5f8dd5da53395  # 0.3433144964699804
+surface_age_yr = 0x40f979247dd266ac  # 104338.28071823221
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1202 C i II: Moon(Regular) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3f52849d399d1b84  # 0.0011302504921830445
 a_m = 0x41b28f7261c7497a  # 311390817.7784649
@@ -1969,8 +2184,8 @@ t_eq_k = 0x4050152797a9b8de  # 64.33054153036525
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x7381a8d884bc7810
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087774330463040, nanos: 0 })
 pole_x = 0x3fc19275a1758145  # 0.13728208907833497
 pole_y = 0xbfe717bd5079e71c  # -0.7216478893089717
@@ -2015,6 +2230,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152797a9b8de  # 64.33054153036525
+equator_pole_contrast_k = 0x4036e79ead73aa30  # 22.90476497720573
+day_night_contrast_k = 0x40343f5589224e36  # 20.24739892089402
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x4097517a3bd9823f  # 1492.369368933272
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f7a4597955dd788  # 0.0064140244702367635
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1203 C i III: Moon(Regular) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3f4a2f74790239f5  # 0.0007991141046817517
 a_m = 0x41bd669f4bdfb60f  # 493264715.87387174
@@ -2042,8 +2269,8 @@ t_eq_k = 0x4050152797a9b8de  # 64.33054153036525
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x05770043dae75752
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087477939689248, nanos: 0 })
 pole_x = 0xbfc8d8fbb34f2e61  # -0.19412180190407738
 pole_y = 0xbfe5ba05db4a7357  # -0.6789578707717777
@@ -2088,6 +2315,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152797a9b8de  # 64.33054153036525
+equator_pole_contrast_k = 0x4036a69181b2b046  # 22.650657755017413
+day_night_contrast_k = 0x4038011ee549dae4  # 24.004377680331245
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x4098efdcabc678d5  # 1595.9654990206957
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f531f3b5ae964d1  # 0.001167114223468869
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1204 C i V: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3ec9552d7d23e339  # 3.019896191888349e-6
 a_m = 0x41df11dd0f033651  # 2085057596.0501902
@@ -2115,8 +2354,8 @@ t_eq_k = 0x405165a714f36ba2  # 69.58832286616828
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x7832e660fa71f9c9
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -253730549497130688, nanos: 0 })
 pole_x = 0x3fdda0b77c287a34  # 0.4629343712312306
 pole_y = 0xbfd4c99115bdc9cd  # -0.32480265734843955
@@ -2161,6 +2400,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405165a714f36ba2  # 69.58832286616828
+equator_pole_contrast_k = 0x4021ae631d3265c4  # 8.840599930192987
+day_night_contrast_k = 0x404344472d306c77  # 38.53342213501394
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a66dd9142a34af  # 2870.9239819707213
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f304bb8d06f4df1  # 0.00024865400376691745
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1205 C i VII: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e64e5524107d4db  # 3.8921435078286456e-8
 a_m = 0x41f07eb0eb54dca4  # 4427812533.303867
@@ -2188,8 +2439,8 @@ t_eq_k = 0x4050152797a9b8de  # 64.33054153036525
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xe7d9fec3a3491083
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 295608761446848000, nanos: 0 })
 pole_x = 0xbfdcde699800a757  # -0.45107498020171505
 pole_y = 0x3fe4922cc765d1fc  # 0.6428436178671855
@@ -2234,6 +2485,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152797a9b8de  # 64.33054153036525
+equator_pole_contrast_k = 0x402561eaa2158d40  # 10.691243233805494
+day_night_contrast_k = 0x402c2ad5625fe2fc  # 14.083659242825426
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40913f863a005d13  # 1103.881080632859
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f0e8113e941f0f9  # 5.818216337247386e-5
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1206 C i VI: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e5af2a0089532f5  # 2.5097052024514665e-8
 a_m = 0x41e57d6230c0b5ce  # 2884309382.022193
@@ -2261,8 +2524,8 @@ t_eq_k = 0x4050152797a9b8de  # 64.33054153036525
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x7d488a7185d3a65c
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -216114912555714112, nanos: 0 })
 pole_x = 0xbfe010c906c0c639  # -0.5020489818472874
 pole_y = 0x3feb2d863fcb35d6  # 0.8493071790668931
@@ -2307,6 +2570,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152797a9b8de  # 64.33054153036525
+equator_pole_contrast_k = 0x3ffd2bddcc8f0440  # 1.8232095709393121
+day_night_contrast_k = 0x4041bf6bc0c10e92  # 35.4954758589421
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40907f9db1477199  # 1055.9039965785107
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f0a5a4d6bf150d4  # 5.026386997345066e-5
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1207 C i IV: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e4724f8aa2b9baa  # 1.0777460095766189e-8
 a_m = 0x41de019a407cc645  # 2013686017.9496014
@@ -2334,8 +2609,8 @@ t_eq_k = 0x4050152797a9b8de  # 64.33054153036525
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x465dee71d2dc7333
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -257496638056813600, nanos: 0 })
 pole_x = 0x3fd6c09e411141b2  # 0.3555064807342446
 pole_y = 0xbfc419e22cebc110  # -0.15703990167049442
@@ -2380,6 +2655,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152797a9b8de  # 64.33054153036525
+equator_pole_contrast_k = 0x3fe26f6bc1766e80  # 0.5761011866156451
+day_night_contrast_k = 0x404069ecdddd00b6  # 32.82754109660293
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408efdfef1c7306e  # 991.7494845925955
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f03e19415e6e42b  # 3.792031451461288e-5
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1280 C i RING 1: Ring about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3c6c73332a9baf41  # 1.233822050079074e-17
 orbit: NotApplicable
@@ -2398,6 +2685,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 1300 D b: Planet about Some(Star(3)), Present
 mass_mearth = 0x3fba364c18b82754  # 0.10239101031780012
 a_m = 0x41df97cffe38fd89  # 2120171512.8904746
@@ -2428,8 +2716,8 @@ t_eq_k = 0x405473ba7da76913  # 81.80825749729802
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xc916b57ef5377b65
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087832270955488, nanos: 0 })
 pole_x = 0x3fd9d2bdce84f327  # 0.40348763626006917
 pole_y = 0x3fed078496fa2ca0  # 0.9071677159094129
@@ -2474,6 +2762,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405473ba7da76913  # 81.80825749729802
+equator_pole_contrast_k = 0x4042f4c942ffdc1f  # 37.91239202016026
+day_night_contrast_k = 0x405398fba5029e10  # 78.39035916572197
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a72fd0e5e670fe  # 2967.908003999036
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f99251384e0b8ed  # 0.024555497155398
+surface_age_yr = 0x41e6a80a95e8a6a4  # 3040892079.270342
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1400 D c: Planet about Some(Star(3)), Present
 mass_mearth = 0x3fc73c557abebcc7  # 0.1815287446347382
 a_m = 0x41e69cd9f3ef8c8a  # 3035025311.4859056
@@ -2504,8 +2804,8 @@ t_eq_k = 0x4051180ab0490412  # 68.37565238123378
 moons: [1401]
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xdfdd56118a6eb00b
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087694881604864, nanos: 0 })
 pole_x = 0x3fe64f5a483727c8  # 0.6971866045434973
 pole_y = 0xbfa83edaf948b83c  # -0.04735454838770223
@@ -2550,6 +2850,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4051180ab0490412  # 68.37565238123378
+equator_pole_contrast_k = 0xc018850e7ec102d0  # -6.129938107042747
+day_night_contrast_k = 0x404f430f2a896e46  # 62.52390033445822
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c361ed92ac038  # 902.765062650672
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f94452dad6678af  # 0.01979514475680649
+surface_age_yr = 0x41f532a8613e04bb  # 5690263059.876155
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1401 D c I: Moon(GiantImpact) about Some(Body(BodyIndex(5120))), Unbound { at: UniverseTime { seconds: -261087814873894464, nanos: 0 } }
 mass_mearth = 0x3f652462d3317435  # 0.002580826776052559
 orbit: NotApplicable
@@ -2559,10 +2871,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 1500 D d: Planet about Some(Star(3)), Present
 mass_mearth = 0x3fcc980bf212743a  # 0.22339009590078424
 a_m = 0x41f071d998304e52  # 4414347651.019121
@@ -2593,8 +2906,8 @@ t_eq_k = 0x404c5909858fe411  # 56.69560308004305
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x25f9f7f776c6b86f
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261085757230329856, nanos: 0 })
 pole_x = 0x3fd6c8d05f578966  # 0.3560067111085544
 pole_y = 0x3fec9d1961ce496d  # 0.8941771421689687
@@ -2639,6 +2952,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x404c5909858fe411  # 56.69560308004305
+equator_pole_contrast_k = 0x402424d8c18b4360  # 10.07196621727934
+day_night_contrast_k = 0x40459afd46f8d882  # 43.21085440779372
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40b15150e2968f03  # 4433.315957460322
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fa23549e33e4e94  # 0.035562809934302525
+surface_age_yr = 0x41cedf12f51d76b1  # 1035871722.2301847
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1600 D e: Planet about Some(Star(3)), Present
 mass_mearth = 0x3fe47d9cefbb0a6e  # 0.6403336221922709
 a_m = 0x420104a041d3d6ce  # 9136506938.479885
@@ -2669,8 +2994,8 @@ t_eq_k = 0x4043b593ec27ee33  # 39.41857673597078
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xfae0907ff28b7bf9
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261000884197075872, nanos: 0 })
 pole_x = 0x3fc4bfe879090f5d  # 0.1621065703385466
 pole_y = 0x3feebc38368b6b7a  # 0.9604760232281102
@@ -2715,6 +3040,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4043b593ec27ee33  # 39.41857673597078
+equator_pole_contrast_k = 0x4030a1f827b5f82e  # 16.63269279663671
+day_night_contrast_k = 0x4030461a46e73e42  # 16.27383845468126
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a0dcb59685e2e5  # 2158.3546640243026
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fa8f7725a32cf3c  # 0.0487628684144554
+surface_age_yr = 0x41b8a87e17a10bc8  # 413695511.629086
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1700 D f: Planet about Some(Star(3)), Present
 mass_mearth = 0x3fe6be95f08b115a  # 0.7107648561582594
 a_m = 0x420f7e3babde1541  # 16907728251.760378
@@ -2745,8 +3082,8 @@ t_eq_k = 0x403cf831deb93edc  # 28.969510956026042
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x0b461b5f335828a1
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -253281640790153824, nanos: 0 })
 pole_x = 0x3fca109e14307970  # 0.20363212571914913
 pole_y = 0x3fee6b70ce5a3a28  # 0.9506153135606086
@@ -2791,6 +3128,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x403cf831deb93edc  # 28.969510956026042
+equator_pole_contrast_k = 0x4029b5451bf0e09c  # 12.854042885927178
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409d8b0d028990f3  # 1890.7627049917908
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fa6d8997f97b47f  # 0.044621273827808665
+surface_age_yr = 0x41bfeb2d529c9d06  # 535506258.611771
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1800 D g: Planet about Some(Star(3)), Present
 mass_mearth = 0x3ffdd4c91fbe352d  # 1.8644496192894835
 a_m = 0x422309c80b23cb90  # 40884241809.89758
@@ -2818,8 +3167,8 @@ t_eq_k = 0x403139d1dfed4e00  # 17.22585868400165
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xc5b70269bdbf059d
 rotation: Synchronous, locks at Some(UniverseTime { seconds: 1320948128791586560, nanos: 0 })
 pole_x = 0x3fd6a1412e853ae0  # 0.3535922006894179
 pole_y = 0x3fed7f4ba732afdf  # 0.9217890039049016
@@ -2864,6 +3213,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x403139d1dfed4e00  # 17.22585868400165
+equator_pole_contrast_k = 0x401edb60aeb0b92e  # 7.714236001526201
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c20000c5af423  # 900.0000235658412
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3faadf5bff2bc70a  # 0.0524853466976208
+surface_age_yr = 0x41776a8ecc529d9c  # 24553708.77016984
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1900 D h: Planet about Some(Star(3)), Present
 mass_mearth = 0x3ff82674bb8c8dab  # 1.50938866864531
 a_m = 0x4238976076e530a4  # 105618896613.19
@@ -2894,8 +3255,8 @@ t_eq_k = 0x402730561f7768bc  # 11.594407065702732
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x46aa75db9f90bd2c
 rotation: Synchronous, locks at None
 pole_x = 0x3fe15840078b4feb  # 0.5420227191302706
 pole_y = 0x3feac907fc61056e  # 0.8370399407651072
@@ -2940,6 +3301,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x402730561f7768bc  # 11.594407065702732
+equator_pole_contrast_k = 0x400a734b333ff884  # 3.3062957767388657
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x4094f807db6c6c77  # 1342.00767297184
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb0c5fa64fe7d66  # 0.06552090612102787
+surface_age_yr = 0x41a4e41d8850a706  # 175247044.1575243
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1a00 D i: Planet about Some(Star(3)), Present
 mass_mearth = 0x3ff8640e5d7cb170  # 1.524427762206951
 a_m = 0x42500f072d54f0b9  # 275886421331.7613
@@ -2970,8 +3343,8 @@ t_eq_k = 0x401a8881c3bae50c  # 6.633307512552403
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xde07e85cbe3cc627
 rotation: Synchronous, locks at None
 pole_x = 0x3fb0e7a790d505ce  # 0.06603476797047067
 pole_y = 0x3fecb810d8b0c878  # 0.8974689705121497
@@ -3016,6 +3389,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x401a8881c3bae50c  # 6.633307512552403
+equator_pole_contrast_k = 0x3ff97307132b1284  # 1.5905829190025154
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c200029c7818c  # 900.0000796877298
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fa6c54689a883e3  # 0.04447384291075431
+surface_age_yr = 0x4182f3a10e9a1ad4  # 39744545.82524648
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1b00 D j: Planet about Some(Star(3)), Present
 mass_mearth = 0x3ffd1363eaf0ddd6  # 1.8172339608553236
 a_m = 0x426531888dc106a8  # 728202767880.208
@@ -3046,8 +3431,8 @@ t_eq_k = 0x4011ab14d537696e  # 4.41707165861804
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x4b5f796e18f71da8
 rotation: Synchronous, locks at None
 pole_x = 0xbfb37c10cd9664d0  # -0.07611184138513072
 pole_y = 0x3fefc24dbebec26c  # 0.9924687123767177
@@ -3092,6 +3477,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4011ab14d537696e  # 4.41707165861804
+equator_pole_contrast_k = 0x3ff3968b0c9aab6a  # 1.2242537014342028
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409254efeb55dfeb  # 1173.2342961709899
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3faedb2c8e940728  # 0.06026591530281983
+surface_age_yr = 0x41aaa3d55914571b  # 223472300.53972706
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1c00 D k: Planet about Some(Star(3)), Present
 mass_mearth = 0x3ffe899b80ba09a9  # 1.9085955646884065
 a_m = 0x427c18a2eaebff5d  # 1930758631103.9602
@@ -3119,8 +3516,8 @@ t_eq_k = 0x4005c2faa731ceb4  # 2.72020464535475
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x9ba707025054f3c1
 rotation: Synchronous, locks at None
 pole_x = 0x3fe0d0cb553261fa  # 0.5254875816345355
 pole_y = 0x3feb36fb05edced0  # 0.8504614940452146
@@ -3165,6 +3562,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4005c2faa731ceb4  # 2.72020464535475
+equator_pole_contrast_k = 0x3fea4a28a9069010  # 0.8215525914461086
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c200070d45e32  # 900.0002152053114
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3faf3c245fccad66  # 0.06100572270801301
+surface_age_yr = 0x416e3d6941c0a157  # 15854410.054764433
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3df770b27250445c  # 3.4110013625571815e-10
 orbit: NotApplicable
@@ -3186,6 +3595,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e200 BELT 2: Belt(Kuiper) about Some(Star(1)), Present
 mass_mearth = 0x3f6f3052806567d4  # 0.0038072215422006814
 orbit: NotApplicable
@@ -3207,6 +3617,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e201 BELT 2-1: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f61af44d6881050  # 0.0021587700359777875
 a_m = 0x42224b0a4dd2e91d  # 39284188905.4553
@@ -3234,8 +3645,8 @@ t_eq_k = 0x4069d7062465c86c  # 206.71949977759812
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x7a5e0117e090a2b3
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -258626899815268096, nanos: 0 })
 pole_x = 0x3fef8c2a19bfd72f  # 0.985859918872597
 pole_y = 0xbf915e3a3719004c  # -0.01696101151742395
@@ -3280,6 +3691,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4069d7062465c86c  # 206.71949977759812
+equator_pole_contrast_k = 0x40535026d46c4a62  # 77.25236998152971
+day_night_contrast_k = 0x4066c420d6919972  # 182.12900856435186
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40b298b4278d0d3f  # 4760.703728500112
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f75073346cc276b  # 0.005133819865258941
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body e202 BELT 2-2: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f4648005aaf5b24  # 0.000679969952552682
 a_m = 0x42410b661716d4ef  # 146411367981.66354
@@ -3307,8 +3730,8 @@ t_eq_k = 0x4058e56f6a576747  # 99.58492525611392
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xabced736804369f8
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 7415463713773554688, nanos: 0 })
 pole_x = 0x3fe8ee5866b394e5  # 0.7790948873413553
 pole_y = 0xbfb8c16497204387  # -0.09670094194031097
@@ -3353,6 +3776,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4058e56f6a576747  # 99.58492525611392
+equator_pole_contrast_k = 0x4041d352588ce0d0  # 35.65095049742524
+day_night_contrast_k = 0x4041ce9dc9207bf2  # 35.61419023595944
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x4097e9b836e3158d  # 1530.4298968774704
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f5c5140995c3ebe  # 0.001728356442473641
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f36abf4fddd8f50  # 0.0003459427951979415
 a_m = 0x4253a1a675435902  # 337265677581.39075
@@ -3380,8 +3815,8 @@ t_eq_k = 0x40505a3046d94e7c  # 65.40919657918306
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xeb85d322f5761fbf
 rotation: ThreeToTwo, locks at None
 pole_x = 0x3fe42266aee92de9  # 0.6291993538119957
 pole_y = 0xbfe73b312a0df6b9  # -0.725975591790948
@@ -3426,6 +3861,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40505a3046d94e7c  # 65.40919657918306
+equator_pole_contrast_k = 0x4034a9c1ff89c1c0  # 20.663116427547493
+day_night_contrast_k = 0x402d11bc5c4dcf50  # 14.53464020204379
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a14cfce907587b  # 2214.4939653678425
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f47191783643848  # 0.0007048954783230943
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e204 BELT 2-4: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f2c129766c6fe07  # 0.0002141771141292855
 a_m = 0x4207a212981dc13b  # 12687921923.71935
@@ -3453,8 +3900,8 @@ t_eq_k = 0x4076828bcfa111a1  # 360.15913355748677
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x7c9f680681faa16f
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261085745288543584, nanos: 0 })
 pole_x = 0x3fef3acb57cc2f0c  # 0.9759270396038757
 pole_y = 0x3fad7303ba403a2b  # 0.05751811646051793
@@ -3499,6 +3946,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4076828bcfa111a1  # 360.15913355748677
+equator_pole_contrast_k = 0x40635c9e4e5d916b  # 154.8943244769574
+day_night_contrast_k = 0x407bea22e37ee02c  # 446.63351773796853
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40c506c9ae293c4e  # 10765.575627474256
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f5e38e0ec3e8ada  # 0.0018446156036381806
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body e205 BELT 2-5: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f235a92c9a1bac4  # 0.00014765779343713624
 a_m = 0x4235b07aa97810a6  # 93155142008.06503
@@ -3526,8 +3985,8 @@ t_eq_k = 0x405f4dbeddd0194e  # 125.21477456400063
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x8b9976468256bdaa
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 12625521670365888, nanos: 0 })
 pole_x = 0x3fe0e671a298fa8f  # 0.528130357335458
 pole_y = 0xbfd4cd45433dd011  # -0.325028720536694
@@ -3572,6 +4031,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405f4dbeddd0194e  # 125.21477456400063
+equator_pole_contrast_k = 0x40407414922aabca  # 32.90687777598903
+day_night_contrast_k = 0x4055ead8fe2fec8b  # 87.66949419670179
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a7e3a8190c33a0  # 3057.828316098501
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f3e26921c7745ca  # 0.0004600626675400314
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fb8d1a9346e07f8  # 0.09694917230629574
+envelope: NotApplicable
 body e206 BELT 2-6: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f1c9087107ca9cb  # 0.0001089651524323394
 a_m = 0x424e8ceac9938ea7  # 262426432295.11447
@@ -3599,8 +4070,8 @@ t_eq_k = 0x4052760607b20e0d  # 73.84411804569409
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x672897a4047733c6
 rotation: ThreeToTwo, locks at None
 pole_x = 0x3fefcf201090fbc5  # 0.9940338443337785
 pole_y = 0x3f9ce568da21f89f  # 0.028218878091586515
@@ -3645,6 +4116,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4052760607b20e0d  # 73.84411804569409
+equator_pole_contrast_k = 0x403ce0bade83cbba  # 28.877851397682868
+day_night_contrast_k = 0x40291fe6eaf793f8  # 12.562308638307499
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40abdc69687827ea  # 3566.2058751629565
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f35f9cba24ad33a  # 0.00033532353908620786
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e207 BELT 2-7: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f1617bdc51cfcca  # 8.427711261748124e-5
 a_m = 0x4205e3907b3f73ce  # 11751526247.931545
@@ -3672,8 +4155,8 @@ t_eq_k = 0x40776116abeba547  # 374.0680350499064
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xdbf2aacc2b4ea09f
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261086232244257536, nanos: 0 })
 pole_x = 0x3fef6346875d83db  # 0.980868591676081
 pole_y = 0xbfc11f9afca62803  # -0.13377702080134676
@@ -3718,6 +4201,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40776116abeba547  # 374.0680350499064
+equator_pole_contrast_k = 0x4066f90172544619  # 183.78142658672076
+day_night_contrast_k = 0x407d1782ddedafe5  # 465.46944992872733
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40c072a88bcfe6ab  # 8421.316766727095
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f55d2d11567e09e  # 0.0013320009071531645
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body e208 BELT 2-8: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f11af44d6881050  # 6.746156362430586e-5
 a_m = 0x4205a4c4aaa4c8f2  # 11619833172.598118
@@ -3745,8 +4240,8 @@ t_eq_k = 0x40778a1a03fb9513  # 376.63135145449013
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x6e1c9041d73a3dcc
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261084966155303008, nanos: 0 })
 pole_x = 0x3fed71536d944da5  # 0.9200837269040006
 pole_y = 0x3fcc21bc56431497  # 0.21977953159344985
@@ -3791,6 +4286,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40778a1a03fb9513  # 376.63135145449013
+equator_pole_contrast_k = 0x404bd8270b3cd548  # 55.688691525176694
+day_night_contrast_k = 0x407d59121729a22e  # 469.5669166208562
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40baf11d37d3f193  # 6897.114133116224
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f50a1c00bc6cf3b  # 0.0010151267480126974
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body e300 BELT 3: Belt(Kuiper) about Some(Star(2)), Present
 mass_mearth = 0x3f3c617d98af654b  # 0.0004330569869899949
 orbit: NotApplicable
@@ -3812,6 +4319,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e301 BELT 3-1: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f1924939b151bd8  # 9.591246523142584e-5
 a_m = 0x426bd5e3db38eb26  # 956420774343.3484
@@ -3839,8 +4347,8 @@ t_eq_k = 0x404a61e5ee017f54  # 52.76482939789881
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x2e6940a85b46d1ea
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfdb1b8e9665ce56  # -0.4235569447257367
 pole_y = 0xbfe867b6c61b4e03  # -0.7626603955527006
@@ -3885,6 +4393,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x404a61e5ee017f54  # 52.76482939789881
+equator_pole_contrast_k = 0x4022b717db175e98  # 9.35760388050339
+day_night_contrast_k = 0x4015f3e5d499c718  # 5.488181421171042
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a72e09baf23a1b  # 2967.019004411309
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f43d8d10189a203  # 0.0006056805169239457
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e302 BELT 3-2: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3effad940d5c1938  # 3.0210533473095882e-5
 a_m = 0x426d7e8a2a755fc2  # 1013416285098.9924
@@ -3912,8 +4432,8 @@ t_eq_k = 0x40498fc327fd086d  # 51.1231431947243
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x6f763a014e081eef
 rotation: Synchronous, locks at None
 pole_x = 0xbfb0208f387349fa  # -0.06299681785757363
 pole_y = 0xbfe2b19de8543b11  # -0.5841817414928717
@@ -3958,6 +4478,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40498fc327fd086d  # 51.1231431947243
+equator_pole_contrast_k = 0x4036f370ddb270e3  # 22.95094094854802
+day_night_contrast_k = 0x40104f98d3734478  # 4.077731422338836
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40ae5eb2fe1d4adf  # 3887.3495949891944
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f42044b6a4fd735  # 0.0005498283613849299
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e303 BELT 3-3: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3ef01dd82818fa38  # 1.5369967974127578e-5
 a_m = 0x429ddd921607423d  # 8209368973776.56
@@ -3985,8 +4517,8 @@ t_eq_k = 0x40324fee09291787  # 18.312225887806132
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xd20d8e9c755b861b
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfa258d43087a9a0  # -0.035833960460723846
 pole_y = 0xbfe1e74b57516737  # -0.5594841676167793
@@ -4031,6 +4563,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40324fee09291787  # 18.312225887806132
+equator_pole_contrast_k = 0x400e59f1e66bcfc0  # 3.7939184190417734
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a61213b1899da6  # 2825.038463879103
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f352ec1754b49f8  # 0.0003232214269647533
+surface_age_yr = 0x41fed21adaa144bc  # 8273374634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e400 BELT 4: Belt(Kuiper) about Some(Star(3)), Present
 mass_mearth = 0x3eef1c6d576cb85e  # 1.4834901532614373e-5
 orbit: NotApplicable
@@ -4050,6 +4594,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 
 +H: 61 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: [e100, e200, e300, e400]
@@ -4084,9 +4629,9 @@ t_eq_k = 0x4089427f51a885b2  # 808.3121674695778
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087783388730816, nanos: 0 })
+surface: NotApplicable
+hooks detail_seed = 0x909146a717d580ed
+rotation: Synchronous, locks at Some(UniverseTime { seconds: -261047356293675168, nanos: 0 })
 pole_x = 0x3fef9f4537ac68b8  # 0.9881921851513402
 pole_y = 0xbfa8b6e7cf5184b0  # -0.04827045827620091
 pole_z = 0xbfc29d080f7fa792  # -0.14541722065706303
@@ -4100,7 +4645,7 @@ obliquity_rad = 0x3fcd189ef523617c  # 0.2273138710941217
 initial_rate_rad_s = 0x3f15ddb544d6297f  # 8.341235044021475e-5
 locked_rate_rad_s = 0x3ee5529b84d11c25  # 1.0167448772814274e-5
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x422dc910e437cbe5  # 63963689499.89823
+locking_age_s = 0x42c269c79627a26b  # 40491058745156.836
 clock_period_s = 0x4122dbe55ff21c1d  # 617970.6873940263
 clock_mean_anomaly_at_epoch_rad = 0x4008a12bb0c84365  # 3.078696614371824
 sub_primary_angle_rad = 0xbfd9ec7052c70cb8  # -0.405056076848449
@@ -4130,6 +4675,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 0200 A c: Planet about Some(Star(0)), Present
 mass_mearth = 0x4021149caa1e0679  # 8.540257755437084
 a_m = 0x4212bb09cc2cf7f2  # 20111848203.242134
@@ -4160,9 +4706,9 @@ t_eq_k = 0x40823bd162224efa  # 583.4772379570343
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -261081671476931488, nanos: 0 })
+surface: NotApplicable
+hooks detail_seed = 0x14518966009fd828
+rotation: Synchronous, locks at Some(UniverseTime { seconds: -256929760731066496, nanos: 0 })
 pole_x = 0x3fec6498496f27be  # 0.8872796472799036
 pole_y = 0xbfd845fcee141456  # -0.3792717289910049
 pole_z = 0xbfd0cc39415f34c4  # -0.26246482261633397
@@ -4176,7 +4722,7 @@ obliquity_rad = 0x3fc70717028c34b3  # 0.1799038660468902
 initial_rate_rad_s = 0x3f2b731b29a82116  # 0.0002094240815753232
 locked_rate_rad_s = 0x3ed00a460ed52a2f  # 3.8242653606726395e-6
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x429677bb7570fde6  # 6175875488831.475
+locking_age_s = 0x432d8b83f805aecb  # 4158086621353829.5
 clock_period_s = 0x413911e2614b4e1b  # 1642978.3800553146
 clock_mean_anomaly_at_epoch_rad = 0x3fee5dbd723f7e41  # 0.9489428740889211
 sub_primary_angle_rad = 0x4001176073e2969a  # 2.1364144376301057
@@ -4206,6 +4752,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 0400 B b: Planet about Some(Star(1)), Present
 mass_mearth = 0x3ff16a0d78ac4bf2  # 1.0883917535581955
 a_m = 0x41eb74e1e0e4c546  # 3685158663.149081
@@ -4236,8 +4783,8 @@ t_eq_k = 0x4084dfc44d9412d3  # 667.9708510940785
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x98e47ef335d4e8ca
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087841618645312, nanos: 0 })
 pole_x = 0x3fee81f568750f5b  # 0.9533640899830788
 pole_y = 0xbfd2a7923860a5b7  # -0.2914777327119639
@@ -4282,6 +4829,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4084dfc44d9412d3  # 667.9708510940785
+equator_pole_contrast_k = 0x40756b7909254c1b  # 342.71704973763707
+day_night_contrast_k = 0x40899fe312eefd1b  # 819.9858759566299
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408d94472d64ba34  # 946.5347545499158
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb1958967e9b85e  # 0.0686879996007703
+surface_age_yr = 0x41a236313b4a1f64  # 152770717.64477074
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 0500 B c: Planet about Some(Star(1)), Present
 mass_mearth = 0x3fff982d60bf7192  # 1.9746526507579785
 a_m = 0x41f36770740430b6  # 5208737600.261892
@@ -4309,8 +4868,8 @@ t_eq_k = 0x40818ecbca5c2591  # 561.8495070647206
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xd9b4ec56a7528bce
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087791002499488, nanos: 0 })
 pole_x = 0x3fee6ec46c90d56e  # 0.9510213966774879
 pole_y = 0xbfd0bf25fb01e652  # -0.261666770100054
@@ -4355,6 +4914,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40818ecbca5c2591  # 561.8495070647206
+equator_pole_contrast_k = 0x40701fa7133fd726  # 257.9782898420111
+day_night_contrast_k = 0x40855d2d02ef1e1c  # 683.6469782525123
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408d7558f89d200d  # 942.6684429431349
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb3280940ae389e  # 0.0748296530639174
+surface_age_yr = 0x419c6500017c1049  # 119095296.37115587
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 0600 B d: Planet about Some(Star(1)), Present
 mass_mearth = 0x401026bedc105e41  # 4.037837446688685
 a_m = 0x41ff75f00031f537  # 8445165571.122367
@@ -4382,8 +4953,8 @@ t_eq_k = 0x407ba7bd03760f52  # 442.48364587895514
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x9271ada91ce459ef
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261086767712765152, nanos: 0 })
 pole_x = 0x3fef3a153c49c7f7  # 0.9758402040008595
 pole_y = 0xbfc892fb27d1d5b0  # -0.19198550648040458
@@ -4428,6 +4999,18 @@ phase_integral_r = 0x3ff58201a8ba8cc9  # 1.3442398634877455
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fb999999999999a  # 0.1
 bond_ratio = 0x3ff37fa12ad18b15  # 1.2186595604513901
+surface_state: MagmaOcean, Rock; climate Efficient, Locked, none, LockedEnergyBalance
+mean_surface_temperature_k = 0x409b3f52f16de264  # 1743.8309991044453
+equator_pole_contrast_k = 0x4051c717bbd66b00  # 71.11082359256034
+day_night_contrast_k = 0x402fa6e7d54ef600  # 15.82598749722365
+surface_pressure_pa = 0x417ce1d8eaa3cf26  # 30285198.664992474
+sigma_h_m = 0x408c2002f37a477c  # 900.0014409592691
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb42a4ed262b574  # 0.07877056728712778
+surface_age_yr = 0x41987541778ea2b1  # 102584413.8892925
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 0b00 C b: Planet about Some(Star(2)), Present
 mass_mearth = 0x4004788e01e59855  # 2.5588646076385353
 a_m = 0x41f21e171294bc67  # 4863389993.295997
@@ -4458,8 +5041,8 @@ t_eq_k = 0x4088ec1291e8e681  # 797.509067363295
 moons: [0b01]
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x8706465be6cd8089
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087829702896096, nanos: 0 })
 pole_x = 0x3fe53b85fc850ce4  # 0.6635160381341874
 pole_y = 0x3fdac0d852646fe6  # 0.4180203251469251
@@ -4504,6 +5087,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4088ec1291e8e681  # 797.509067363295
+equator_pole_contrast_k = 0xc052e61487462098  # -75.59500295494433
+day_night_contrast_k = 0x408eb37ac9a0ccf6  # 982.4349548876332
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c2b1d9f635f3b  # 901.3894641650617
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb8fd5cc1c77e5a  # 0.0976160023778844
+surface_age_yr = 0x418a377e39571220  # 54980551.16751504
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 0b01 C b I: Moon(GiantImpact) about Some(Body(BodyIndex(2816))), Unbound { at: UniverseTime { seconds: -261087847352420320, nanos: 0 } }
 mass_mearth = 0x3fa5cd4b0467c7b0  # 0.04258188656594031
 orbit: NotApplicable
@@ -4513,10 +5108,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0c00 C c: Planet about Some(Star(2)), Present
 mass_mearth = 0x40087fe703570c6f  # 3.0624523411693683
 a_m = 0x41ff26fa24ca21fd  # 8362369612.633298
@@ -4547,8 +5143,8 @@ t_eq_k = 0x40830f24d7f1dbd9  # 609.8929900069444
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x337290bff64d29cd
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087632271129376, nanos: 0 })
 pole_x = 0xbfb5a7f490ececd5  # -0.08459404504985753
 pole_y = 0xbfe49600ddcd601c  # -0.6433109600138809
@@ -4593,6 +5189,18 @@ phase_integral_r = 0x3ff58201a8ba8cc9  # 1.3442398634877455
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fb999999999999a  # 0.1
 bond_ratio = 0x3ff37fa12ad18b15  # 1.2186595604513901
+surface_state: MagmaOcean, Rock; climate Efficient, Locked, none, Isothermal
+mean_surface_temperature_k = 0x40a67d9bb04b77da  # 2878.8040793975642
+equator_pole_contrast_k = 0x404ce5118cff5400  # 57.789598107025085
+day_night_contrast_k = 0x402203d1a2b13700  # 9.007458767063781
+surface_pressure_pa = 0x419e652698579311  # 127486374.08552195
+sigma_h_m = 0x408c2015db313802  # 900.0106719823091
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb94ce273b5e275  # 0.09882941555941634
+surface_age_yr = 0x41894aafc6c17c86  # 53040632.84447579
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 0d00 C d: Planet about Some(Star(2)), Present
 mass_mearth = 0x4009e46cf230b841  # 3.2365359231107793
 a_m = 0x420a2c5f6ad2d807  # 14051700058.355482
@@ -4623,9 +5231,9 @@ t_eq_k = 0x407b36acbd6c8035  # 435.4171728361428
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -261086083689165696, nanos: 0 })
+surface: NotApplicable
+hooks detail_seed = 0x9c7f62bf120a0392
+rotation: Synchronous, locks at Some(UniverseTime { seconds: -260173891363880960, nanos: 0 })
 pole_x = 0xbfc4271106a65bc2  # -0.1574422152013693
 pole_y = 0xbfe1bf01960f93dd  # -0.5545661860347725
 pole_z = 0x3fea25c348781394  # 0.8171097197924717
@@ -4639,7 +5247,7 @@ obliquity_rad = 0x3fca7cbdb64b4040  # 0.20693179513046012
 initial_rate_rad_s = 0x3f279d814d6463fc  # 0.00018017009160400932
 locked_rate_rad_s = 0x3ed6fc0fdc62594f  # 5.479959730567078e-6
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x4279aa285945233b  # 1763663254610.202
+locking_age_s = 0x4309f9e7b04c3efd  # 913955988539359.6
 clock_period_s = 0x41317ecf1661b6c4  # 1146575.0874284962
 clock_mean_anomaly_at_epoch_rad = 0x4016df3bf5fa5224  # 5.718002169993756
 sub_primary_angle_rad = 0xbffc7bd0c7e658a8  # -1.780228405817562
@@ -4669,6 +5277,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 0e00 C e: Planet about Some(Star(2)), Present
 mass_mearth = 0x4022b177c8ed703c  # 9.346617011055166
 a_m = 0x4218ea17b9ef22b0  # 26751659643.783875
@@ -4696,9 +5305,9 @@ t_eq_k = 0x4073b96cfefd5d67  # 315.589110364634
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -260980700750711424, nanos: 0 })
+surface: NotApplicable
+hooks detail_seed = 0x40ab31ad82eafeb2
+rotation: Synchronous, locks at Some(UniverseTime { seconds: -248502869332023776, nanos: 0 })
 pole_x = 0x3fc7e458db5c5218  # 0.18665610037773273
 pole_y = 0xbfe094871f914c3c  # -0.5181308380655376
 pole_z = 0x3feab5be6dff1080  # 0.834685530506718
@@ -4712,7 +5321,7 @@ obliquity_rad = 0x3fd1321a3d4b0971  # 0.2686830137792163
 initial_rate_rad_s = 0x3f11cad955e955f6  # 6.787253867320667e-5
 locked_rate_rad_s = 0x3ec18007454f384d  # 2.086175792537779e-6
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x42d85cc0c88f5b65  # 107146601708909.58
+locking_age_s = 0x43465afc4434b700  # 1.2584978020396544e16
 clock_period_s = 0x4146fa75d6fed900  # 3011819.6796523333
 clock_mean_anomaly_at_epoch_rad = 0x3fc76332dbf051bb  # 0.18271480311581265
 sub_primary_angle_rad = 0xc007d0724946dcec  # -2.9767804836989082
@@ -4742,6 +5351,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 0f00 C f: Planet about Some(Star(2)), Present
 mass_mearth = 0x401aa3c1232dd71c  # 6.659916448281162
 a_m = 0x4229296bece6d750  # 54034560627.42053
@@ -4772,9 +5382,9 @@ t_eq_k = 0x406bc868192b03be  # 222.26270731354992
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
-rotation: Synchronous, locks at Some(UniverseTime { seconds: -259337067625536128, nanos: 0 })
+surface: NotApplicable
+hooks detail_seed = 0x29f06d1b666a0507
+rotation: Synchronous, locks at Some(UniverseTime { seconds: 855712838334513792, nanos: 0 })
 pole_x = 0x3fadba4a06a75a0a  # 0.05806189852926387
 pole_y = 0xbfe39570db85795f  # -0.6119922912146584
 pole_z = 0x3fe93d45af43cf93  # 0.7887295172827059
@@ -4788,19 +5398,19 @@ obliquity_rad = 0x3fae201e8e16b692  # 0.05883880123597608
 initial_rate_rad_s = 0x3f15f0c9f20be2f6  # 8.36966760394789e-5
 locked_rate_rad_s = 0x3ea86278ec965719  # 7.267194287892425e-7
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x4318e14caecdb551  # 1750779726884180.3
+locking_age_s = 0x43aeff589cf69095  # 1.1168006856869341e18
 clock_period_s = 0x41607da8b080ff79  # 8645957.515746819
 clock_mean_anomaly_at_epoch_rad = 0x3feba57b0e30b979  # 0.8639502789645085
 sub_primary_angle_rad = 0x3ff30d6617aa7fab  # 1.190771191068033
 phase_at_epoch_rad = 0x40175400a8e3f380  # 5.832033766663585
-capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x400147c6929ca905  # 2.160046716123477
-w_epoch_rad = 0x40007011cf616e34  # 2.0547214700325416
-w_end_rad = 0x3fff30ba184c66c4  # 1.9493962239416058
-figure: RotationalAndTidal, OneBar
-equatorial_radius_m = 0x41759b2b7a9759b1  # 22655671.66195077
-polar_radius_m = 0x41759b25eae1fe87  # 22655582.680174377
-flattening = 0x3ed07932b4f2e8ee  # 3.927571767531883e-6
+capture_phase_rad = 0xbfe23f4dbe616ea0  # -0.570227500760172
+w_start_rad = 0x3fe464450793c300  # 0.6372399471275401
+w_epoch_rad = 0x40175400a8e3f380  # 5.832033766663585
+w_end_rad = 0x4012adba37415a88  # 4.669655669559354
+figure: Rotational, OneBar
+equatorial_radius_m = 0x4175b25120e1c254  # 22750482.055116966
+polar_radius_m = 0x41756d24a5386a7c  # 22467146.326273426
+flattening = 0x3f898182d03b9121  # 0.012454053859479121
 figure_pole_x = 0x3fadba4a06a75a0a  # 0.05806189852926387
 figure_pole_y = 0xbfe39570db85795f  # -0.6119922912146584
 figure_pole_z = 0x3fe93d45af43cf93  # 0.7887295172827059
@@ -4818,6 +5428,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 1000 C g: Planet about Some(Star(2)), Present
 mass_mearth = 0x40283e646b89dc7c  # 12.121859894350784
 a_m = 0x4238b1b1f2ce8a64  # 106060444366.54059
@@ -4849,7 +5460,7 @@ moons: [1001, 1002, 1003, 1004, 1005]
 rings: [1080]
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks detail_seed = 0xe43048937271bf97
 rotation: Synchronous, locks at None
 pole_x = 0xbfb65ce5cac3633d  # -0.08735500526689761
 pole_y = 0xbfe84075ed026862  # -0.7578687314119288
@@ -4864,19 +5475,19 @@ obliquity_rad = 0x3fca8c57c0e93c5c  # 0.2074079219769115
 initial_rate_rad_s = 0x3f17c46c4fd90157  # 9.066496928600752e-5
 locked_rate_rad_s = 0x3e91bc24b473ef64  # 2.642711262738043e-7
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x443d7074bb953ff7  # 5.4305888601682104e20
+locking_age_s = 0x440b20e83f002c34  # 6.255416305799283e19
 clock_period_s = 0x4176ac92708d9b38  # 23775527.034571856
 clock_mean_anomaly_at_epoch_rad = 0x4015c873191eb1ff  # 5.445751564501278
 sub_primary_angle_rad = 0x40042b597d9b605a  # 2.5211667836229426
 phase_at_epoch_rad = 0x400b15271c0d3d1c  # 3.3853285018482335
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x4010c0e71b41b168  # 4.188381601223547
+w_start_rad = 0x4006a1f1c8bc9660  # 2.829074447875243
 w_epoch_rad = 0x400b15271c0d3d1c  # 3.3853285018482335
-w_end_rad = 0x4004a82916fc9d30  # 2.582109622558754
+w_end_rad = 0x400f8569e02369a0  # 3.9401433478171413
 figure: Rotational, OneBar
-equatorial_radius_m = 0x416c0dd50b9e5fd9  # 14708392.363082813
-polar_radius_m = 0x416bf374bb0f5d7e  # 14654373.845625635
-flattening = 0x3f6e1611794057a8  # 0.003672632339667598
+equatorial_radius_m = 0x416c0dc45ed501db  # 14708258.963501861
+polar_radius_m = 0x416bf395f564c030  # 14654639.668548673
+flattening = 0x3f6ddd37350193ce  # 0.003645522905616683
 figure_pole_x = 0xbfb65ce5cac3633d  # -0.08735500526689761
 figure_pole_y = 0xbfe84075ed026862  # -0.7578687314119288
 figure_pole_z = 0x3fe4b064a04996ec  # 0.6465323572744786
@@ -4894,6 +5505,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 1001 C g I: Moon(Regular) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3f0631d8428a744d  # 4.233304236332027e-5
 a_m = 0x419c16cfb5433abe  # 117814253.31565377
@@ -4921,8 +5533,8 @@ t_eq_k = 0x40655ea87bfd7684  # 170.958066935582
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x11af0c562457a533
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087847166535872, nanos: 0 })
 pole_x = 0xbfd2608823e7e47f  # -0.28714183336666815
 pole_y = 0xbfe75dd22bb49174  # -0.7302027562732705
@@ -4967,6 +5579,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40655ea87bfd7684  # 170.958066935582
+equator_pole_contrast_k = 0x404524c7d11b2c6c  # 42.28734792544205
+day_night_contrast_k = 0x4055cc29cfcbf4d2  # 87.19005198400126
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40ae5756637041bb  # 3883.6687274055707
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fab58159320243e  # 0.053406404695188744
+surface_age_yr = 0x41b2ed75bb6b6e2b  # 317552059.4196498
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1002 C g III: Moon(Captured) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3ea3a169ae7dc392  # 5.850350506109433e-7
 a_m = 0x41c113cf99fc978f  # 573022003.9733752
@@ -4994,8 +5618,8 @@ t_eq_k = 0x40655ea87bfd7684  # 170.958066935582
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xe5bc87e8adb65ab4
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -261085216678726528, nanos: 0 })
 pole_x = 0xbfcfdff8259b5ba2  # -0.24902250133774567
 pole_y = 0xbfde5d890c18d8bf  # -0.47445894414284945
@@ -5040,6 +5664,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40655ea87bfd7684  # 170.958066935582
+equator_pole_contrast_k = 0xc0265b29ead78270  # -11.17805417900783
+day_night_contrast_k = 0x4060bc54182039aa  # 133.885265410366
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409c608a5b58654f  # 1816.1351140796503
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f285ed063b02a3e  # 0.00018593114677430302
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1003 C g II: Moon(Captured) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3e85e9a0df154dc0  # 1.6326167399470465e-7
 a_m = 0x41b23e3ff4b7c17b  # 306069492.717796
@@ -5067,8 +5703,8 @@ t_eq_k = 0x40655ea87bfd7684  # 170.958066935582
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x9a625922b1466623
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -261087781752555104, nanos: 0 })
 pole_x = 0x3fe65c2f9a022d30  # 0.6987531669596247
 pole_y = 0xbfe63ecaa3efc4c0  # -0.6951649858366622
@@ -5113,6 +5749,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40655ea87bfd7684  # 170.958066935582
+equator_pole_contrast_k = 0xbffeb8bed7dc5a00  # -1.9201038772640686
+day_night_contrast_k = 0x405f34b6e592a157  # 124.82366313285216
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409561c09c19e757  # 1368.4380954787682
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f451f46e6c88e5e  # 0.0006445976446837855
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1004 C g IV: Moon(Captured) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3e8426cee5d2809c  # 1.5014107904599557e-7
 a_m = 0x41c5a6b063f31930  # 726491335.8992062
@@ -5140,8 +5788,8 @@ t_eq_k = 0x40655ea87bfd7684  # 170.958066935582
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xd852a004c68240bb
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -261080420139759072, nanos: 0 })
 pole_x = 0x3fa9a41d702664bc  # 0.05008022302644963
 pole_y = 0xbf9e38c9ca374bc4  # -0.029513504950795313
@@ -5186,6 +5834,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40655ea87bfd7684  # 170.958066935582
+equator_pole_contrast_k = 0x402acc9e435b1b30  # 13.399644951697695
+day_night_contrast_k = 0x406124058c4d12fa  # 137.1256772523264
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40950cba753ab108  # 1347.182087819152
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f188ced983eced0  # 9.365272677435842e-5
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1005 C g V: Moon(Captured) about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3e782604165fff9f  # 8.996017228368607e-8
 a_m = 0x41cd15782f10c925  # 975892574.1311384
@@ -5213,8 +5873,8 @@ t_eq_k = 0x40655ea87bfd7684  # 170.958066935582
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xd536799d75584cff
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -261054354182101760, nanos: 0 })
 pole_x = 0xbfe1e5d5c97d04b9  # -0.5593060431785012
 pole_y = 0x3fe9e697f3faa0b9  # 0.8093986287322174
@@ -5259,6 +5919,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40655ea87bfd7684  # 170.958066935582
+equator_pole_contrast_k = 0x40091f85d5e41c80  # 3.1403919897307446
+day_night_contrast_k = 0x40619d3344dc5d0a  # 140.91250842132314
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40934a59400aea33  # 1234.5871583657688
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f1430b1a8fdf719  # 7.701954223013028e-5
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1080 C g RING 1: Ring about Some(Body(BodyIndex(4096))), Present
 mass_mearth = 0x3cb65dd7e17387ea  # 3.103985863838289e-16
 orbit: NotApplicable
@@ -5277,6 +5949,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 1100 C h: Planet about Some(Star(2)), Present
 mass_mearth = 0x402ff1da985c8918  # 15.972370873733368
 a_m = 0x424bfd9bb2da2530  # 240437913012.29053
@@ -5308,7 +5981,7 @@ moons: [1101, 1102, 1103, 1104, 1105, 1106]
 rings: [1180]
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks detail_seed = 0x98e87e3cc5f1dcfd
 rotation: Synchronous, locks at None
 pole_x = 0xbfd7ce40a5ad4f1a  # -0.37196365527528175
 pole_y = 0xbfddbde5c5702303  # -0.46471542626436263
@@ -5323,19 +5996,19 @@ obliquity_rad = 0x3fda42291bf0683a  # 0.41028812149454874
 initial_rate_rad_s = 0x3f2f3e20a4222b5b  # 0.0002383627743863481
 locked_rate_rad_s = 0x3e74c8957c75f130  # 7.742468632015142e-8
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x44a7dee6b24d27db  # 5.6363114862186756e22
+locking_age_s = 0x4490742a85256cb7  # 1.9425187483683746e22
 clock_period_s = 0x4193592376b0ad97  # 81152221.6725372
 clock_mean_anomaly_at_epoch_rad = 0x3fc3fb8689086269  # 0.15611344996502233
 sub_primary_angle_rad = 0xc00017786533b1fa  # -2.0114601045991067
 phase_at_epoch_rad = 0x3ffffbc8216291cd  # 1.9989701561072366
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x400307b70ab97dd0  # 2.3787670934541225
+w_start_rad = 0x401722aa85b2fbf8  # 5.78385361580785
 w_epoch_rad = 0x3ffffbc8216291cd  # 1.9989701561072366
-w_end_rad = 0x3ff9e81dc38d0460  # 1.6191690100388527
+w_end_rad = 0x4011fd31ab713120  # 4.497259787353215
 figure: Rotational, OneBar
-equatorial_radius_m = 0x4177fa56021b4b55  # 25142624.13166364
-polar_radius_m = 0x4175ab14dbcc0fa4  # 22720845.737319604
-flattening = 0x3fb8a888b2106c5c  # 0.09632162425298091
+equatorial_radius_m = 0x4177fa54e85cef2b  # 25142606.522689026
+polar_radius_m = 0x4175ab16d9024304  # 22720877.563052192
+flattening = 0x3fb8a868d727e9ce  # 0.09631972554044596
 figure_pole_x = 0xbfd7ce40a5ad4f1a  # -0.37196365527528175
 figure_pole_y = 0xbfddbde5c5702303  # -0.46471542626436263
 figure_pole_z = 0x3fe9b6a173cb5643  # 0.803543783341134
@@ -5353,6 +6026,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 1101 C h I: Moon(Regular) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ef59eabc7ee1034  # 2.0618256253893306e-5
 a_m = 0x41a4e8feb0818ee0  # 175406936.25304317
@@ -5380,8 +6054,8 @@ t_eq_k = 0x405a3c9f0a21813d  # 104.94720700523335
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x392e9d0401b42093
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087846645148928, nanos: 0 })
 pole_x = 0xbfab08efaf88c8a6  # -0.05280255334618404
 pole_y = 0xbfe367eea370630b  # -0.6064370338600339
@@ -5426,6 +6100,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405a3c9f0a21813d  # 104.94720700523335
+equator_pole_contrast_k = 0x404bf4ea78f10f57  # 55.91340553064827
+day_night_contrast_k = 0x40481d91d25579be  # 48.23101262258159
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c9b57f0e94f38  # 915.4179399707127
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fbefdca8b21c67f  # 0.12106004616523512
+surface_age_yr = 0x41407d7433a2c99b  # 2161384.403405381
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fe5e36d7854287b  # 0.684012160317493
+envelope: NotApplicable
 body 1102 C h II: Moon(Regular) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3f1dc97b8b4e63e5  # 0.00011362854531994612
 a_m = 0x41b098aedf9a00dd  # 278441695.6015757
@@ -5453,8 +6139,8 @@ t_eq_k = 0x405a3c9f0a21813d  # 104.94720700523335
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x168f6f7b4d8e804b
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087822599302368, nanos: 0 })
 pole_x = 0x3fb7cc630ba87e26  # 0.09296244654296312
 pole_y = 0xbfe854b8d96cc738  # -0.7603420492725723
@@ -5499,6 +6185,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405a3c9f0a21813d  # 104.94720700523335
+equator_pole_contrast_k = 0x40423f277e495ae8  # 36.49339274007599
+day_night_contrast_k = 0x404bab6baf3f7662  # 55.339223772037045
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x4094a88b6cd279bb  # 1322.1361573111342
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f97369774b28f9c  # 0.022669188020372752
+surface_age_yr = 0x41b0cf2cade213b7  # 282012845.8831133
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fe6b30c1e79ad16  # 0.7093563647480632
+envelope: NotApplicable
 body 1103 C h III: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ed08a612ac5145f  # 3.943573272662236e-6
 a_m = 0x41dfcc8938a05a2c  # 2133992674.5055037
@@ -5526,8 +6224,8 @@ t_eq_k = 0x405c6193558d1fc1  # 113.52461756497998
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xe83a5a8f4d07bd3c
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -257410931206295648, nanos: 0 })
 pole_x = 0xbfd01242835d6784  # -0.25111449078178105
 pole_y = 0xbfea47c2b1e131a5  # -0.8212598299228843
@@ -5572,6 +6270,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405c6193558d1fc1  # 113.52461756497998
+equator_pole_contrast_k = 0x4037d2aa237ba4e0  # 23.822908609091314
+day_night_contrast_k = 0x40555d077721839b  # 85.45358064911709
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a8518e3bfc33b8  # 3112.7778014004834
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f31d139c956fa96  # 0.0002718702392846909
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fd18a6afeb4a7c6  # 0.2740733611450391
+envelope: NotApplicable
 body 1104 C h VI: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ea91b48ecb16c92  # 7.48234435642315e-7
 a_m = 0x41e714f065948ea3  # 3097985836.6424117
@@ -5599,8 +6309,8 @@ t_eq_k = 0x405a3c9f0a21813d  # 104.94720700523335
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xae72c15926158fb1
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -236019461640106848, nanos: 0 })
 pole_x = 0xbfd4a52802af8ede  # -0.32258034002573577
 pole_y = 0x3fe5c9475cc84e36  # 0.6808201610715006
@@ -5645,6 +6355,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405a3c9f0a21813d  # 104.94720700523335
+equator_pole_contrast_k = 0x40394c5786a5aa8c  # 25.298210540243005
+day_night_contrast_k = 0x40539e0da9b82b9e  # 78.46958392129315
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409e3996d56620f6  # 1934.3972984273546
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f2471613d5d6881  # 0.00015596687324654151
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fe90362da89b2c4  # 0.7816633480375335
+envelope: NotApplicable
 body 1105 C h IV: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3ea7e3761b32e82b  # 7.119334014739833e-7
 a_m = 0x41e3b4eaee56ae53  # 2644989810.70878
@@ -5672,8 +6394,8 @@ t_eq_k = 0x405a3c9f0a21813d  # 104.94720700523335
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xecbe4d7dabc2a303
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -253002424042124224, nanos: 0 })
 pole_x = 0x3fe0543883262cb8  # 0.5102808534151313
 pole_y = 0x3fe2ae9e53b1269d  # 0.5838157305344854
@@ -5718,6 +6440,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405a3c9f0a21813d  # 104.94720700523335
+equator_pole_contrast_k = 0x402ebbb968bcdb68  # 15.366648934415664
+day_night_contrast_k = 0x4053459c50786f5a  # 77.08766567002513
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409dd61845cabd46  # 1909.523703735163
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f241b35a2651897  # 0.0001533987971901781
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1106 C h V: Moon(Captured) about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3e9bab183890025a  # 4.12290369455924e-7
 a_m = 0x41e46010a56d4077  # 2734720299.4141192
@@ -5745,8 +6479,8 @@ t_eq_k = 0x405a3c9f0a21813d  # 104.94720700523335
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xac9b6d228c8351e1
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -247541608532360224, nanos: 0 })
 pole_x = 0x3fd8fcdebb5ab5ac  # 0.3904339627868818
 pole_y = 0xbfe330695cfdebaf  # -0.5996596161124809
@@ -5791,6 +6525,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405a3c9f0a21813d  # 104.94720700523335
+equator_pole_contrast_k = 0x4035fbe48c2be904  # 21.983956108780163
+day_night_contrast_k = 0x4053a47d0bcc0eda  # 78.57013220717946
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409a0e0415dba1c4  # 1667.5039896314129
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f20c15c4f9fac19  # 0.0001278329071391089
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3feabe1201723f0f  # 0.8357019451377442
+envelope: NotApplicable
 body 1180 C h RING 1: Ring about Some(Body(BodyIndex(4352))), Present
 mass_mearth = 0x3c99271819454659  # 8.726599813318648e-17
 orbit: NotApplicable
@@ -5809,6 +6555,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 1200 C i: Planet about Some(Star(2)), Present
 mass_mearth = 0x4028438ebe712304  # 12.131948424635546
 a_m = 0x4262985c8344977c  # 638924888612.7339
@@ -5837,7 +6584,7 @@ moons: [1201, 1202, 1203, 1204, 1205, 1206, 1207]
 rings: [1280]
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks detail_seed = 0x97d9677eb9cfcd5d
 rotation: Synchronous, locks at None
 pole_x = 0xbfbd95094b0d3eb2  # -0.11555536348645992
 pole_y = 0xbfe8cb68acf386c8  # -0.7748301866488072
@@ -5852,19 +6599,19 @@ obliquity_rad = 0x3fcd389d8fc16046  # 0.22829026717477258
 initial_rate_rad_s = 0x3f16e1328a39b1f5  # 8.727904292422219e-5
 locked_rate_rad_s = 0x3e5330faefec14e9  # 1.7873317932470493e-8
 age_at_epoch_s = 0x438cfc901c64e63f  # 2.6108784735242032e17
-locking_age_s = 0x4507fce3238904a3  # 3.6249400220384144e24
+locking_age_s = 0x44fa3c408769701d  # 1.982287728001662e24
 clock_period_s = 0x41b4f412eed4e8b4  # 351539950.83167577
 clock_mean_anomaly_at_epoch_rad = 0x40164de1efc9f838  # 5.576057192518469
 sub_primary_angle_rad = 0xbff89e067a5181f4  # -1.538580396467407
 phase_at_epoch_rad = 0x4006cd0904addfce  # 2.850114857250424
 capture_phase_rad = 0x0000000000000000  # 0.0
-w_start_rad = 0x3ffe2603a3721e20  # 1.8842808136558986
+w_start_rad = 0x4000639c87990f10  # 2.048638400419698
 w_epoch_rad = 0x4006cd0904addfce  # 2.850114857250424
-w_end_rad = 0x400e87103466f0f0  # 3.815948876754298
+w_end_rad = 0x400d36757be6f0f0  # 3.651591270432725
 figure: Rotational, OneBar
-equatorial_radius_m = 0x417ae2e16ea8cad5  # 28192278.91620906
-polar_radius_m = 0x417a3de5d6574ce5  # 27516509.396313567
-flattening = 0x3f988b98e27af9e3  # 0.02397002107931624
+equatorial_radius_m = 0x417ae2e16e35222a  # 28192278.887972035
+polar_radius_m = 0x417a3de5d73912cb  # 27516509.451433938
+flattening = 0x3f988b98b018a8f0  # 0.023970018146578675
 figure_pole_x = 0xbfbd95094b0d3eb2  # -0.11555536348645992
 figure_pole_y = 0xbfe8cb68acf386c8  # -0.7748301866488072
 figure_pole_z = 0x3fe3e37a9621b91a  # 0.6215184147129407
@@ -5882,6 +6629,7 @@ phase_integral_r = 0x3ff3df41a7b098bf  # 1.242005972898866
 lunar_lambert_share = 0x0000000000000000  # 0.0
 bond_albedo = 0x3fd5c28f5c28f5c3  # 0.34
 bond_ratio = 0x3ff9d56ef398c692  # 1.6146077647685257
+envelope: NotModelled
 body 1201 C i I: Moon(Regular) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3f2264361884d5f4  # 0.0001403156313785483
 a_m = 0x41a76248f7cbbd10  # 196158587.8979268
@@ -5909,8 +6657,8 @@ t_eq_k = 0x4050152798535285  # 64.33054168831775
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xbd7bd12263cbd1ad
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087843026832288, nanos: 0 })
 pole_x = 0xbfc041bbd1669106  # -0.12700603222504742
 pole_y = 0xbfdb2ebb33d8a1a0  # -0.42472724974734355
@@ -5955,6 +6703,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152798535285  # 64.33054168831775
+equator_pole_contrast_k = 0x4032b8e58c3127f0  # 18.722252618790606
+day_night_contrast_k = 0x3ffed3d1e330bc00  # 1.9267138361572052
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c24d6b81b27e4  # 900.6048433419751
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fd5f8dd5d92eaf8  # 0.3433144964034649
+surface_age_yr = 0x40f979247e100915  # 104338.28077701137
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1202 C i II: Moon(Regular) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3f52849d399d1b84  # 0.0011302504921830445
 a_m = 0x41b28f7261c7497a  # 311390817.7784649
@@ -5982,8 +6742,8 @@ t_eq_k = 0x4050152798535285  # 64.33054168831775
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x7381a8d884bc7810
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087774330463040, nanos: 0 })
 pole_x = 0x3fc19275a1758145  # 0.13728208907833497
 pole_y = 0xbfe717bd5079e71c  # -0.7216478893089717
@@ -6028,6 +6788,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152798535285  # 64.33054168831775
+equator_pole_contrast_k = 0x4036e79eae653546  # 22.904765033444413
+day_night_contrast_k = 0x40343f558b5cff4e  # 20.247399053768554
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x4097517a3bd9823f  # 1492.369368933272
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f7a45978ac9934a  # 0.0064140243162896324
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1203 C i III: Moon(Regular) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3f4a2f74790239f5  # 0.0007991141046817517
 a_m = 0x41bd669f4bdfb60f  # 493264715.87387174
@@ -6055,8 +6827,8 @@ t_eq_k = 0x4050152798535285  # 64.33054168831775
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x05770043dae75752
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087477939689248, nanos: 0 })
 pole_x = 0xbfc8d8fbb34f2e61  # -0.19412180190407738
 pole_y = 0xbfe5ba05db4a7357  # -0.6789578707717777
@@ -6101,6 +6873,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152798535285  # 64.33054168831775
+equator_pole_contrast_k = 0x4036a69182a18d5c  # 22.650657810632183
+day_night_contrast_k = 0x4038011ee7acf3d2  # 24.004377822613442
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x4098efdcabc678d5  # 1595.9654990206957
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f531f3b362c1a27  # 0.0011671140898116357
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1204 C i V: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3ec9552d7d23e339  # 3.019896191888349e-6
 a_m = 0x41df11dd0f033651  # 2085057596.0501902
@@ -6128,8 +6912,8 @@ t_eq_k = 0x405165a715aae1d9  # 69.58832303703038
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x7832e660fa71f9c9
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -253730549497130688, nanos: 0 })
 pole_x = 0x3fdda0b77c287a34  # 0.4629343712312306
 pole_y = 0xbfd4c99115bdc9cd  # -0.32480265734843955
@@ -6174,6 +6958,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405165a715aae1d9  # 69.58832303703038
+equator_pole_contrast_k = 0x4021ae631decdb00  # 8.840599951899549
+day_night_contrast_k = 0x404344472ea945bd  # 38.533422310497805
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a66dd9142a34af  # 2870.9239819707213
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f304bb8b30b9530  # 0.00024865397703728847
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1205 C i VII: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e64e5524107d4db  # 3.8921435078286456e-8
 a_m = 0x41f07eb0eb54dca4  # 4427812533.303867
@@ -6201,8 +6997,8 @@ t_eq_k = 0x4050152798535285  # 64.33054168831775
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xe7d9fec3a3491083
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 295608761446848000, nanos: 0 })
 pole_x = 0xbfdcde699800a757  # -0.45107498020171505
 pole_y = 0x3fe4922cc765d1fc  # 0.6428436178671855
@@ -6247,6 +7043,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152798535285  # 64.33054168831775
+equator_pole_contrast_k = 0x402561eaa2f70ab8  # 10.691243260055998
+day_night_contrast_k = 0x402c2ad574847054  # 14.083659783522457
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40913f863a005d13  # 1103.881080632859
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f0e8113b255442d  # 5.8182157128279815e-5
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1206 C i VI: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e5af2a0089532f5  # 2.5097052024514665e-8
 a_m = 0x41e57d6230c0b5ce  # 2884309382.022193
@@ -6274,8 +7082,8 @@ t_eq_k = 0x4050152798535285  # 64.33054168831775
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x7d488a7185d3a65c
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -216114912555714112, nanos: 0 })
 pole_x = 0xbfe010c906c0c639  # -0.5020489818472874
 pole_y = 0x3feb2d863fcb35d6  # 0.8493071790668931
@@ -6320,6 +7128,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152798535285  # 64.33054168831775
+equator_pole_contrast_k = 0x3ffd2bddcdc2a4e0  # 1.8232095754158806
+day_night_contrast_k = 0x4041bf6bc21ab8fc  # 35.495476019905226
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40907f9db1477199  # 1055.9039965785107
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f0a5a4d3c7e8a98  # 5.026386457919924e-5
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1207 C i IV: Moon(Captured) about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3e4724f8aa2b9baa  # 1.0777460095766189e-8
 a_m = 0x41de019a407cc645  # 2013686017.9496014
@@ -6347,8 +7167,8 @@ t_eq_k = 0x4050152798535285  # 64.33054168831775
 moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x465dee71d2dc7333
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -257496638056813600, nanos: 0 })
 pole_x = 0x3fd6c09e411141b2  # 0.3555064807342446
 pole_y = 0xbfc419e22cebc110  # -0.15703990167049442
@@ -6393,6 +7213,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4050152798535285  # 64.33054168831775
+equator_pole_contrast_k = 0x3fe26f6bc238d700  # 0.576101188030151
+day_night_contrast_k = 0x404069ecdf2c9a1e  # 32.827541252878504
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408efdfef1c7306e  # 991.7494845925955
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f03e193f21b5c45  # 3.79203104451877e-5
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1280 C i RING 1: Ring about Some(Body(BodyIndex(4608))), Present
 mass_mearth = 0x3c6c73332a9baf41  # 1.233822050079074e-17
 orbit: NotApplicable
@@ -6411,6 +7243,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 1300 D b: Planet about Some(Star(3)), Present
 mass_mearth = 0x3fba364c18b82754  # 0.10239101031780012
 a_m = 0x41df97cffe38fd89  # 2120171512.8904746
@@ -6441,8 +7274,8 @@ t_eq_k = 0x405473ba702ccbaa  # 81.80825428366248
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xc916b57ef5377b65
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087832270955488, nanos: 0 })
 pole_x = 0x3fd9d2bdce84f327  # 0.40348763626006917
 pole_y = 0x3fed078496fa2ca0  # 0.9071677159094129
@@ -6487,6 +7320,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405473ba702ccbaa  # 81.80825428366248
+equator_pole_contrast_k = 0x4042f4c936819faa  # 37.912390530865494
+day_night_contrast_k = 0x405398fb96b3a300  # 78.39035575430535
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a72fd0d77b6aeb  # 2967.9078939979568
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f992513579b95b9  # 0.024555494520333208
+surface_age_yr = 0x41e6a80b0c838008  # 3040893028.109379
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1400 D c: Planet about Some(Star(3)), Present
 mass_mearth = 0x3fc73c557abebcc7  # 0.1815287446347382
 a_m = 0x41e69cd9f3ef8c8a  # 3035025311.4859056
@@ -6517,8 +7362,8 @@ t_eq_k = 0x4051180aa504fa9b  # 68.37564969526504
 moons: [1401]
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xdfdd56118a6eb00b
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261087694881604864, nanos: 0 })
 pole_x = 0x3fe64f5a483727c8  # 0.6971866045434973
 pole_y = 0xbfa83edaf948b83c  # -0.04735454838770223
@@ -6563,6 +7408,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4051180aa504fa9b  # 68.37564969526504
+equator_pole_contrast_k = 0xc018850e6e981b70  # -6.129937866243253
+day_night_contrast_k = 0x404f430f134378c2  # 62.52389756006734
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c361eda0a25c2  # 902.7650643151067
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f94452d88e803ec  # 0.01979514263257791
+surface_age_yr = 0x41f532a8d0363a60  # 5690264835.389252
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1401 D c I: Moon(GiantImpact) about Some(Body(BodyIndex(5120))), Unbound { at: UniverseTime { seconds: -261087814873894464, nanos: 0 } }
 mass_mearth = 0x3f652462d3317435  # 0.002580826776052559
 orbit: NotApplicable
@@ -6572,10 +7429,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 1500 D d: Planet about Some(Star(3)), Present
 mass_mearth = 0x3fcc980bf212743a  # 0.22339009590078424
 a_m = 0x41f071d998304e52  # 4414347651.019121
@@ -6606,8 +7464,8 @@ t_eq_k = 0x404c590972e12136  # 56.695600852896334
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x25f9f7f776c6b86f
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261085757230329856, nanos: 0 })
 pole_x = 0x3fd6c8d05f578966  # 0.3560067111085544
 pole_y = 0x3fec9d1961ce496d  # 0.8941771421689687
@@ -6652,6 +7510,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x404c590972e12136  # 56.695600852896334
+equator_pole_contrast_k = 0x402424d8b444a2c0  # 10.071965821627032
+day_night_contrast_k = 0x40459afd3571466b  # 43.210852318105786
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40b15150e296df1e  # 4433.315957478973
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fa23549c2763fd4  # 0.035562806118036555
+surface_age_yr = 0x41cedf1396b98e4a  # 1035872045.4496548
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1600 D e: Planet about Some(Star(3)), Present
 mass_mearth = 0x3fe47d9cefbb0a6e  # 0.6403336221922709
 a_m = 0x420104a041c7d381  # 9136506936.978273
@@ -6682,8 +7552,8 @@ t_eq_k = 0x4043b593df31347a  # 39.4185751905688
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xfae0907ff28b7bf9
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261000884197075872, nanos: 0 })
 pole_x = 0x3fc4bfe879090f5d  # 0.1621065703385466
 pole_y = 0x3feebc38368b6b7a  # 0.9604760232281102
@@ -6728,6 +7598,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4043b593df31347a  # 39.4185751905688
+equator_pole_contrast_k = 0x4030a1f81cc54afd  # 16.632692144553392
+day_night_contrast_k = 0x4030461a32cc3e62  # 16.273837256302052
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a0dcb5b009a0cf  # 2158.354858685379
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fa8f7722d3fd27e  # 0.04876286318168342
+surface_age_yr = 0x41b8a87e98b68b71  # 413695640.7130652
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1700 D f: Planet about Some(Star(3)), Present
 mass_mearth = 0x3fe6be95f08b115a  # 0.7107648561582594
 a_m = 0x420f7e3babde1481  # 16907728251.760012
@@ -6758,8 +7640,8 @@ t_eq_k = 0x403cf831cba197e1  # 28.96950981803082
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x0b461b5f335828a1
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -253281640790153824, nanos: 0 })
 pole_x = 0x3fca109e14307970  # 0.20363212571914913
 pole_y = 0x3fee6b70ce5a3a28  # 0.9506153135606086
@@ -6804,6 +7686,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x403cf831cba197e1  # 28.96950981803082
+equator_pole_contrast_k = 0x4029b5450aff7bbe  # 12.854042380988059
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409d8b0d760c744b  # 1890.7631456323604
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fa6d89956760b82  # 0.044621269039473624
+surface_age_yr = 0x41bfeb2df9b4352b  # 535506425.7039363
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1800 D g: Planet about Some(Star(3)), Present
 mass_mearth = 0x3ffdd4c91fbe352d  # 1.8644496192894835
 a_m = 0x422309c80b23cb90  # 40884241809.89758
@@ -6831,8 +7725,8 @@ t_eq_k = 0x403139d1d493076a  # 17.225858007331603
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xc5b70269bdbf059d
 rotation: Synchronous, locks at Some(UniverseTime { seconds: 1320948128791586560, nanos: 0 })
 pole_x = 0x3fd6a1412e853ae0  # 0.3535922006894179
 pole_y = 0x3fed7f4ba732afdf  # 0.9217890039049016
@@ -6877,6 +7771,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x403139d1d493076a  # 17.225858007331603
+equator_pole_contrast_k = 0x401edb609a5aaad0  # 7.714235698493852
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c20000c5af464  # 900.0000235658486
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3faadf5bceca5d8f  # 0.052485341065387485
+surface_age_yr = 0x41776a8f46e7bf03  # 24553716.431578647
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1900 D h: Planet about Some(Star(3)), Present
 mass_mearth = 0x3ff82674bb8c8dab  # 1.50938866864531
 a_m = 0x4238976076e530a4  # 105618896613.19
@@ -6907,8 +7813,8 @@ t_eq_k = 0x40273056102f433c  # 11.59440661026894
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x46aa75db9f90bd2c
 rotation: Synchronous, locks at None
 pole_x = 0x3fe15840078b4feb  # 0.5420227191302706
 pole_y = 0x3feac907fc61056e  # 0.8370399407651072
@@ -6953,6 +7859,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40273056102f433c  # 11.59440661026894
+equator_pole_contrast_k = 0x400a734b21d192bc  # 3.306295646866003
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x4094f807f04c92f7  # 1342.0077526058865
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fb0c5fa46cbba65  # 0.06552089908994103
+surface_age_yr = 0x41a4e41df5adb29b  # 175247098.83925328
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1a00 D i: Planet about Some(Star(3)), Present
 mass_mearth = 0x3ff8640e5d7cb170  # 1.524427762206951
 a_m = 0x42500f072d54f0b9  # 275886421331.7613
@@ -6983,8 +7901,8 @@ t_eq_k = 0x401a8881b23fe21f  # 6.633307252072455
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xde07e85cbe3cc627
 rotation: Synchronous, locks at None
 pole_x = 0x3fb0e7a790d505ce  # 0.06603476797047067
 pole_y = 0x3fecb810d8b0c878  # 0.8974689705121497
@@ -7029,6 +7947,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x401a8881b23fe21f  # 6.633307252072455
+equator_pole_contrast_k = 0x3ff973070266de5c  # 1.5905828565427305
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c200029c78267  # 900.0000796877547
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3fa6c54660a9a546  # 0.04447383813824017
+surface_age_yr = 0x4182f3a171d01378  # 39744558.22659963
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body 1b00 D j: Planet about Some(Star(3)), Present
 mass_mearth = 0x3ffd1363eaf0ddd6  # 1.8172339608553236
 a_m = 0x426531888dc106a8  # 728202767880.208
@@ -7059,8 +7989,8 @@ t_eq_k = 0x4011ab14c999e424  # 4.417071485536358
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x4b5f796e18f71da8
 rotation: Synchronous, locks at None
 pole_x = 0xbfb37c10cd9664d0  # -0.07611184138513072
 pole_y = 0x3fefc24dbebec26c  # 0.9924687123767177
@@ -7105,6 +8035,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4011ab14c999e424  # 4.417071485536358
+equator_pole_contrast_k = 0x3ff3968affba0e92  # 1.2242536534621746
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x409254f01740b772  # 1173.2344637023893
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3faedb2c570691b7  # 0.06026590883564913
+surface_age_yr = 0x41aaa3d5e489bc78  # 223472370.26901603
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body 1c00 D k: Planet about Some(Star(3)), Present
 mass_mearth = 0x3ffe899b80ba09a9  # 1.9085955646884065
 a_m = 0x427c18a2eaebff5d  # 1930758631103.9602
@@ -7132,8 +8074,8 @@ t_eq_k = 0x4005c2fa9919cf41  # 2.7202045403481923
 moons: []
 rings: []
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x9ba707025054f3c1
 rotation: Synchronous, locks at None
 pole_x = 0x3fe0d0cb553261fa  # 0.5254875816345355
 pole_y = 0x3feb36fb05edced0  # 0.8504614940452146
@@ -7178,6 +8120,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4005c2fa9919cf41  # 2.7202045403481923
+equator_pole_contrast_k = 0x3fea4a2897ffd4f4  # 0.8215525597321673
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x408c200070d46081  # 900.0002152053786
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3faf3c242790a3d5  # 0.06100571616145315
+surface_age_yr = 0x416e3d69e00e6d6b  # 15854415.001761159
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e100 BELT 1: Belt(Kuiper) about Some(Star(0)), Present
 mass_mearth = 0x3df770b242c7cb32  # 3.4110009502732695e-10
 orbit: NotApplicable
@@ -7199,6 +8153,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e200 BELT 2: Belt(Kuiper) about Some(Star(1)), Present
 mass_mearth = 0x3f6f3052806567ce  # 0.003807221542200679
 orbit: NotApplicable
@@ -7220,6 +8175,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e201 BELT 2-1: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f61af44d6881050  # 0.0021587700359777875
 a_m = 0x42224b0a4dd2e91d  # 39284188905.4553
@@ -7247,8 +8203,8 @@ t_eq_k = 0x4069d7062493da21  # 206.71949986340863
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x7a5e0117e090a2b3
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: -258626899815268096, nanos: 0 })
 pole_x = 0x3fef8c2a19bfd72f  # 0.985859918872597
 pole_y = 0xbf915e3a3719004c  # -0.01696101151742395
@@ -7293,6 +8249,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4069d7062493da21  # 206.71949986340863
+equator_pole_contrast_k = 0x40535026d48eb924  # 77.25237001359761
+day_night_contrast_k = 0x4066c420d6c975c2  # 182.12900866840033
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40b298b4278d0d0a  # 4760.703728500064
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f75073320f062db  # 0.0051338193143457235
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body e202 BELT 2-2: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f4648005aaf5b24  # 0.000679969952552682
 a_m = 0x42410b661716d4ef  # 146411367981.66354
@@ -7320,8 +8288,8 @@ t_eq_k = 0x4058e56f6a8e11d8  # 99.58492530702586
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xabced736804369f8
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 7415463713773554688, nanos: 0 })
 pole_x = 0x3fe8ee5866b394e5  # 0.7790948873413553
 pole_y = 0xbfb8c16497204387  # -0.09670094194031097
@@ -7366,6 +8334,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4058e56f6a8e11d8  # 99.58492530702586
+equator_pole_contrast_k = 0x4041d35258b404cc  # 35.65095051565149
+day_night_contrast_k = 0x4041ce9dc9ca8ae4  # 35.614190315149045
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x4097e9b836e3158d  # 1530.4298968774704
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f5c51405d8b95ec  # 0.0017283562248676622
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f36abf4fddd8f50  # 0.0003459427951979415
 a_m = 0x4253a1a675435902  # 337265677581.39075
@@ -7393,8 +8373,8 @@ t_eq_k = 0x40505a30471d16cc  # 65.4091966423104
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xeb85d322f5761fbf
 rotation: ThreeToTwo, locks at None
 pole_x = 0x3fe42266aee92de9  # 0.6291993538119957
 pole_y = 0xbfe73b312a0df6b9  # -0.725975591790948
@@ -7439,6 +8419,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40505a30471d16cc  # 65.4091966423104
+equator_pole_contrast_k = 0x4034a9c1ffdf6882  # 20.663116447489763
+day_night_contrast_k = 0x402d11bc5dbdac78  # 14.534640244868783
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a14cfce90feb1d  # 2214.4939656233314
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f471917572690f3  # 0.0007048953978494851
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e204 BELT 2-4: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f2c129766c6fe07  # 0.0002141771141292855
 a_m = 0x4207a212981dc13b  # 12687921923.71935
@@ -7466,8 +8458,8 @@ t_eq_k = 0x4076828bcfc88a9c  # 360.1591337045336
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x7c9f680681faa16f
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261085745288543584, nanos: 0 })
 pole_x = 0x3fef3acb57cc2f0c  # 0.9759270396038757
 pole_y = 0x3fad7303ba403a2b  # 0.05751811646051793
@@ -7512,6 +8504,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4076828bcfc88a9c  # 360.1591337045336
+equator_pole_contrast_k = 0x40635c9e4e7f8528  # 154.8943245401981
+day_night_contrast_k = 0x407bea22e4132ab9  # 446.63351829039635
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40c506c9ae293c4e  # 10765.575627474256
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f5e38e0b5d546a6  # 0.0018446154056913993
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body e205 BELT 2-5: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f235a92c9a1bac4  # 0.00014765779343713624
 a_m = 0x4235b07aa97810a6  # 93155142008.06503
@@ -7539,8 +8543,8 @@ t_eq_k = 0x405f4dbede0c7689  # 125.21477462021916
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x8b9976468256bdaa
 rotation: ThreeToTwo, locks at Some(UniverseTime { seconds: 12625521670365888, nanos: 0 })
 pole_x = 0x3fe0e671a298fa8f  # 0.528130357335458
 pole_y = 0xbfd4cd45433dd011  # -0.325028720536694
@@ -7585,6 +8589,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, SlowRotator, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x405f4dbede0c7689  # 125.21477462021916
+equator_pole_contrast_k = 0x40407414924a6620  # 32.906877790763474
+day_night_contrast_k = 0x4055ead951cae378  # 87.66951412976584
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a7e3a8190c33a0  # 3057.828316098501
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f3e2691e49f0308  # 0.0004600626167495102
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3fb8d1a93253afd0  # 0.0969491718166744
+envelope: NotApplicable
 body e206 BELT 2-6: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f1c9087107ca9cb  # 0.0001089651524323394
 a_m = 0x424e8ceac9938ea7  # 262426432295.11447
@@ -7612,8 +8628,8 @@ t_eq_k = 0x4052760607ed94ba  # 73.84411810113207
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x672897a4047733c6
 rotation: ThreeToTwo, locks at None
 pole_x = 0x3fefcf201090fbc5  # 0.9940338443337785
 pole_y = 0x3f9ce568da21f89f  # 0.028218878091586515
@@ -7658,6 +8674,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x4052760607ed94ba  # 73.84411810113207
+equator_pole_contrast_k = 0x403ce0badee0e8fc  # 28.877851419362727
+day_night_contrast_k = 0x40291fe6ebf4da78  # 12.562308667792635
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40abdc696887a3c1  # 3566.2058756244082
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f35f9cb79eb38b2  # 0.00033532350236676744
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e207 BELT 2-7: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f1617bdc51cfcca  # 8.427711261748124e-5
 a_m = 0x4205e3907b3f73ce  # 11751526247.931545
@@ -7685,8 +8713,8 @@ t_eq_k = 0x40776116ac14a17f  # 374.0680352025883
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xdbf2aacc2b4ea09f
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261086232244257536, nanos: 0 })
 pole_x = 0x3fef6346875d83db  # 0.980868591676081
 pole_y = 0xbfc11f9afca62803  # -0.13377702080134676
@@ -7731,6 +8759,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40776116ac14a17f  # 374.0680352025883
+equator_pole_contrast_k = 0x4066f901727c8bdb  # 183.78142666173412
+day_night_contrast_k = 0x407d1782de7c3814  # 465.4694504597003
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40c072a88bcfe6ab  # 8421.316766727095
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f55d2d0ee1d8629  # 0.0013320007642153664
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body e208 BELT 2-8: DwarfPlanet about Some(Body(BodyIndex(57856))), Present
 mass_mearth = 0x3f11af44d6881050  # 6.746156362430586e-5
 a_m = 0x4205a4c4aaa4c8f2  # 11619833172.598118
@@ -7758,8 +8798,8 @@ t_eq_k = 0x40778a1a0424d8b1  # 376.631351608211
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x6e1c9041d73a3dcc
 rotation: Synchronous, locks at Some(UniverseTime { seconds: -261084966155303008, nanos: 0 })
 pole_x = 0x3fed71536d944da5  # 0.9200837269040006
 pole_y = 0x3fcc21bc56431497  # 0.21977953159344985
@@ -7804,6 +8844,18 @@ phase_integral_r = 0x3fdeb512e312482f  # 0.4798018662924077
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fbc28f5c28f5c29  # 0.11
 bond_ratio = 0x3fe3d1f73ec84f2b  # 0.619380591032017
+surface_state: Airless, Rock; climate AirlessLike, Locked, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40778a1a0424d8b1  # 376.631351608211
+equator_pole_contrast_k = 0x404bd8270b6da4c8  # 55.688691547905876
+day_night_contrast_k = 0x407d591217b28ebc  # 469.566917130938
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40baf11d37d3f193  # 6897.114133116224
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f50a1bfedd54584  # 0.0010151266390788513
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x0000000000000000  # 0.0
+envelope: NotApplicable
 body e300 BELT 3: Belt(Kuiper) about Some(Star(2)), Present
 mass_mearth = 0x3f3c617d9030f62c  # 0.00043305697926485326
 orbit: NotApplicable
@@ -7825,6 +8877,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e301 BELT 3-1: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3f1924939b151bd8  # 9.591246523142584e-5
 a_m = 0x426bd5e3db38eb26  # 956420774343.3484
@@ -7852,8 +8905,8 @@ t_eq_k = 0x404a61e5ef17fc92  # 52.76482952758046
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x2e6940a85b46d1ea
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfdb1b8e9665ce56  # -0.4235569447257367
 pole_y = 0xbfe867b6c61b4e03  # -0.7626603955527006
@@ -7898,6 +8951,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x404a61e5ef17fc92  # 52.76482952758046
+equator_pole_contrast_k = 0x4022b717dbdcecb8  # 9.35760390350184
+day_night_contrast_k = 0x4015f3e5d7eddd50  # 5.488181470769021
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a72e09baf23a1b  # 2967.019004411309
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f43d8d0dd26280d  # 0.0006056804507335048
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e302 BELT 3-2: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3effad940d5c1938  # 3.0210533473095882e-5
 a_m = 0x426d7e8a2a755fc2  # 1013416285098.9924
@@ -7925,8 +8990,8 @@ t_eq_k = 0x40498fc3290aec21  # 51.123143320401375
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0x6f763a014e081eef
 rotation: Synchronous, locks at None
 pole_x = 0xbfb0208f387349fa  # -0.06299681785757363
 pole_y = 0xbfe2b19de8543b11  # -0.5841817414928717
@@ -7971,6 +9036,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40498fc3290aec21  # 51.123143320401375
+equator_pole_contrast_k = 0x4036f370dea4c42e  # 22.95094100496879
+day_night_contrast_k = 0x40104f98d6193288  # 4.0777314617995515
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40ae5eb2fe1d4adf  # 3887.3495949891944
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f42044b4993de54  # 0.0005498283018416463
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e303 BELT 3-3: DwarfPlanet about Some(Body(BodyIndex(58112))), Present
 mass_mearth = 0x3ef01dd82818fa38  # 1.5369967974127578e-5
 a_m = 0x429ddd921607423d  # 8209368973776.56
@@ -7998,8 +9075,8 @@ t_eq_k = 0x40324fee0a01d748  # 18.31222593827195
 moons: []
 rings: NotModelled
 population: NotApplicable
-surface: NotModelled
-hooks: NotModelled
+surface: Ok
+hooks detail_seed = 0xd20d8e9c755b861b
 rotation: ThreeToTwo, locks at None
 pole_x = 0xbfa258d43087a9a0  # -0.035833960460723846
 pole_y = 0xbfe1e74b57516737  # -0.5594841676167793
@@ -8044,6 +9121,18 @@ phase_integral_r = 0x3fe999999999999a  # 0.8
 lunar_lambert_share = 0x3ff0000000000000  # 1.0
 bond_albedo = 0x3fd6666666666666  # 0.35
 bond_ratio = 0x3fef7390d2a6c407  # 0.982857142857143
+surface_state: Airless, Ice; climate AirlessLike, Seasonal, none, RadiativeEquilibrium
+mean_surface_temperature_k = 0x40324fee0a01d748  # 18.31222593827195
+equator_pole_contrast_k = 0x400e59f1e7d30f28  # 3.793918429497257
+day_night_contrast_k = 0x0000000000000000  # 0.0
+surface_pressure_pa = 0x0000000000000000  # 0.0
+sigma_h_m = 0x40a61213b19562e8  # 2825.0384642298923
+continental_fraction = 0x0000000000000000  # 0.0
+heat_flow_w_m2 = 0x3f352ec14ef7fdf4  # 0.0003232213921080245
+surface_age_yr = 0x41fed21b192144bc  # 8273375634.079281
+ocean_fraction = 0x0000000000000000  # 0.0
+ice_fraction = 0x3ff0000000000000  # 1.0
+envelope: NotApplicable
 body e400 BELT 4: Belt(Kuiper) about Some(Star(3)), Present
 mass_mearth = 0x3eef1c6d576bf0c5  # 1.4834901532527812e-5
 orbit: NotApplicable
@@ -8063,3 +9152,4 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable

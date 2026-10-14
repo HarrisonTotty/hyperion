@@ -112,17 +112,17 @@
 //! ApJ 806, 180): no cutoff is applied here, which P14.T48.d's climate regime takes as its thin
 //! end ([`regime`]).
 //!
-//! # Held until the batch's bump
+//! # Where they are published
 //!
-//! T24.a is built in the 21 → 22 batch, whose goldens move once, at its bump in P14.T48.e
-//! (plan 14, "Order and parallelism", the bump plan). Until then
-//! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes every
-//! surface section as [`Section::NotModelled`](crate::planetary::record::Section::NotModelled),
-//! as version 21 did (`SURFACE_CONDITIONS_VERSION`); every function here is in force.
+//! A present body's conditions are its record's surface section's
+//! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), with its global figures,
+//! from the 21 → 22 batch's bump, and [`BodyHooks::surface`](crate::planetary::hooks::BodyHooks::surface)
+//! repeats them for the server.
 
 use core::fmt;
 use std::error::Error;
 
+use crate::math;
 use crate::orbit::KeplerElements;
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::atmosphere::{
@@ -142,7 +142,6 @@ use crate::units::{
     Kelvin, Metres, MetresPerSecondSquared, Pascals, Radians, Seconds, SolarMasses,
     WattsPerSquareMetre,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion, math};
 
 pub mod regime;
 
@@ -150,39 +149,6 @@ pub use regime::{ClimateInputs, ClimateRegime, Forcing, ThermalRegime};
 
 #[cfg(test)]
 pub(crate) mod tests;
-
-/// The generator version from which
-/// [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes a body's
-/// surface conditions: 22, the 21 → 22 batch's bump (plan 14, "Order and parallelism", the bump
-/// plan).
-///
-/// P14.T24.a is built in that batch, whose goldens move once, at its bump in P14.T48.e, which
-/// removes this hold (`the_surface_conditions_are_held_only_until_the_batch_s_bump`).
-pub(crate) const SURFACE_CONDITIONS_VERSION: GeneratorVersion = GeneratorVersion::new(22);
-
-/// Whether [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes
-/// a body's surface conditions (P14.T24.a, held until the 21 → 22 batch's bump,
-/// [`SURFACE_CONDITIONS_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum ConditionsHold {
-    /// Version 21's: every surface section is not modelled.
-    Held,
-    /// P14.T24.a's: a body with a surface has its conditions.
-    Published,
-}
-
-impl ConditionsHold {
-    /// The hold of the generator version in force: [`Self::Published`] from
-    /// [`SURFACE_CONDITIONS_VERSION`], [`Self::Held`] below it.
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        if GENERATOR_VERSION >= SURFACE_CONDITIONS_VERSION {
-            Self::Published
-        } else {
-            Self::Held
-        }
-    }
-}
 
 /// Earth's annual, zonal-mean equator–pole contrast of surface temperature, K: 42, −(3/2) T₂ of
 /// the fit T₀ + T₂ `P₂`(sin φ) with the observed T₂ = −28.0 °C (North, Cahalan and Coakley 1981,

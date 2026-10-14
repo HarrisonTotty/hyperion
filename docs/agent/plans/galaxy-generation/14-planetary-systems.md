@@ -524,13 +524,22 @@ of a host by the same factor), so the property tests hold at all times.
 every level of plan 11's hierarchy: around a single component out to the S-type limit set by its
 nearest companion at that level, and around a pair from the P-type limit outward, itself bounded by
 the next level up. Each zone is an independent orbit host with its own disc share and class draw. A
-disc truncated inside its snow line cannot make giants (D5), and hosts in binaries closer than about
-50 au draw `Barren` with an added probability so that the occurrence is about a third of a single
-star's (Kraus et al. 2016). For a binary that plan 11 has evolved, the zone is the intersection of
-the zones at birth and at the evaluated state. A brown-dwarf companion is one of plan 11's
-components: it bounds zones through the same fits (clamped at μ = 0.1), and its own zone, if wide
-enough, is a host on the `SubstellarCompact` row of D13. Re-check: Holman and Wiegert (1999) for the
-coefficients; Kraus et al. (2016) for the 50 au and the factor of three.
+disc truncated inside its snow line cannot make giants (D5), and a close binary suppresses its
+hosts' planets through those zones alone. The truncated disc and the budgets built from it give the
+deficit Kraus et al. (2016) and Moe and Kratter (2021) observe, which is the observed total,
+truncation included, so no factor is applied on top (decision-p14-d10-bd-companions §2). Hosts in
+binaries closer than about 50 au are flagged, for the orbit map's plane and the statistics: those
+whose companion is a star, or a brown dwarf of at least a tenth of the host's mass (§1). For a
+binary that plan 11 has evolved, the zone is the intersection of the zones at birth and at the
+evaluated state. A brown-dwarf companion is one of plan 11's components: it bounds zones through
+the same fits (clamped at μ = 0.1), and its own zone, if wide enough, is a host on the
+`SubstellarCompact` row of D13. It flags its host only when it is at least a tenth of the host's
+mass, which only a host under 0.8 M☉ can have, while a star always does
+(decision-p14-d10-bd-companions): Kraus et al. fit their factor to stellar companions of q > 0.4,
+and Moe and Kratter (2021) find that close brown dwarfs suppress no planets measurably. Re-check:
+Holman and Wiegert (1999) for the coefficients; Kraus et al. (2016) for the 50 au and the factor of
+three, which the zones must reproduce; Moe and Kratter (2021, §2.2) for its fall with separation and
+for brown dwarfs.
 
 **D11. Evolved stars and remnants: what survives.** The most realistic treatment that stays
 closed-form:
@@ -1152,13 +1161,15 @@ it lands. T30.a adapts T9's zones and T1.d's context to them.
 - **P14.T9.c Host assignment.** The disc of T3 is derived per zone: a circumstellar disc from its
   star, with the star's own disc lifetime (P06.T15.c's law on `StarDraws::disc_lifetime()`), a
   circumbinary one from the pair's total mass and summed luminosity, with a lifetime from a rank
-  drawn on `planet.disc` under the same law at the total mass (ruling 33, D12). Apply D10's
-  suppression for binaries inside 50 au (Kraus et al. 2016; Moe and Kratter 2021) by moving class
-  weight to `Barren`.
+  drawn on `planet.disc` under the same law at the total mass (ruling 33, D12). Flag hosts in
+  binaries inside 50 au whose companion is a star or a brown dwarf of a tenth of the host's mass or
+  more (Kraus et al. 2016; Moe and Kratter 2021). The flag moves no class weight: D10's suppression
+  is the zones' truncation (decision-p14-d10-bd-companions).
   - _Tests:_ (a) for μ = 0.5, e = 0: S-type limit 0.274 and P-type 2.39 binary separations; α
     Centauri AB (23.5 au, e = 0.52) gives about 2.8 au around A. (b) Zones of a hierarchical triple
     never overlap; a single star has exactly one zone; a brown-dwarf companion of plan 11 bounds
-    zones like any other component. (c) No planet of 10⁴ sampled binaries lies outside its zone, and
+    zones like any other component, and flags its host only at a tenth of its mass or more. (c) No
+    planet of 10⁴ sampled binaries lies outside its zone, and
     hosts in binaries inside 50 au have planets a quarter to a half as often as single stars of the
     same mass.
   - _Accept:_ `cargo test -p hyperion-sim planetary::placement::zones`.
@@ -6433,6 +6444,28 @@ it:
   (R06's Risks, "Generator version 21"). They move the sky's luminosity tables, no golden and no
   planetary value.
 
+- **Version 22, the 21 → 22 batch, as built** (lane `p14-bump`, 2026-10-14). It carries T14.d,
+  T49.a, T24.f, T24.a with T48.e's signed contrasts, T24.b with T48.a–c, T48.f and the present
+  outgassing, T48.d and T48.e (the record's surface section, the gas-envelope split and the three
+  holds' fold), rendering plan R09's R09.T1.b (the detail seed in the hooks section), plan 15's
+  P15.T6.g (the integrator and the provisional `displaced_forms` re-emitted on its smoke orbits)
+  and decision-p14-d10-bd-companions §1–2 (the brown-dwarf flag and no close-binary class
+  factor). P11.T4.l and T4.m are not in it: they stay in plan 11's deferred bump batch, after
+  this plan's 23 → 24 ("main", 2026-10-14, after 36b76cc1). No commit of the batch lands alone.
+  - The batch's commits before the bump are checkpoints blessed at header 21: T48.e's (the folds'
+    moves, Risks, "Deviations in P14.T48.e, as built"), R09.T1.b's (the golden systems' hooks)
+    and P15.T6.g's F1 (`galaxy_class_table`'s 70 values). The bump commit raises the version and
+    blesses every golden of the workspace once at 22, under the heavy lock: 162 goldens change
+    their header alone, and `galaxy_parameters` (the server's) its generator-version value, with
+    R09's and R10's goldens among them (`height/` with R09.T7.h's `closed_forms`, `ground/`,
+    `material/`, R10.T2's `weights/` and `wire/`). The test planet's goldens keep
+    `TEST_PLANET_VERSION` 2. In the same commit `displaced_forms` is restamped `since 21` → 22
+    (decision-displaced-since): its body is F1's, and `fit-check` finds no table stale.
+  - D10 §1–2 follows the bump commit, blessed at 22 (Risks, "Close binaries: the brown-dwarf flag
+    and no class factor, as built").
+  - The bump commit adds no draw or domain tag; the batch's new streams are T48.a's
+    `body.continents` and R09.T1.b's reading of `body.surface.detail`, both declared before it.
+
 - Parameters that belong to the generator version and are named constants in one place
   (`planetary/params.rs`): the class weight table, the spacing floors, ring probabilities, the
   pulsar-planet probability, `SATELLITE_STABILITY_FRACTION`, the white dwarf pollution fit.
@@ -7023,6 +7056,14 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
     its host is a member of such a pair at any level above it, and never for its own circumbinary
     zone, since that disc is cleared from inside and not truncated from outside. The weight moved
     to `Barren` is `arch`'s, to give S_bin = 0.34 (+0.14/−0.15).
+  - _T9.c, brown-dwarf companions (decision-p14-d10-bd-companions, 2026-10-12)._ A pair inside
+    the cut flags a member only when its other member `is_close_binary_companion(host, companion)`:
+    a star, `SUBSTELLAR_LIMIT` or more, or at least `CLOSE_BINARY_MIN_MASS_RATIO` = 0.1 of the
+    member's mass, each at its total initial mass. Kraus et al.'s `S_bin` is fitted to 0.4 < q < 1
+    (§5, Fig. 7). Moe and Kratter (2021, §2.1–2.2) apply it down to 0.08 M☉ and find that close
+    brown dwarfs "do not significantly suppress planet formation". The zone limits are unchanged.
+    (As adopted the predicate was `is_suppressing_companion`; §2 renamed it with the class factor's
+    removal.)
   - _T9 tests._ (a) and (b) run on hand-built hierarchies. Overlap is checked at the worst phases on
     3,000 random hierarchies of three to six components. Of (c), "every zone's disc lies inside its
     zone" runs on 10⁴ random binaries and triples. "No planet outside its zone" waits for T8's
@@ -7085,6 +7126,8 @@ SolveCompositionError>`, whose `fractions()` are a `MassFractions` of iron, rock
   - _D10._ A close binary keeps 0.34 of every planet-bearing class (Kraus et al. 2016's
     `S_bin`); the cut-off is theirs, 47 (+59 −23) au, as `CLOSE_BINARY_CUTOFF_AU`, which the
     caller (T9.c) compares, where plan 14 says "about 50 au". Ruled (ruling 48, g): Kraus's 47 au stands.
+    Superseded (decision-p14-d10-bd-companions §2): no class factor. `CLOSE_BINARY_SUPPRESSION`
+    is removed and `ClassConstraints::new` takes the disc and the zone alone.
   - _T5._ `ClassTemplate` (groups inside out, `quiet_inside`, the two `BeltRule`s) of
     `PlanetGroup`s (role, presence, `CountLaw`, `MassRange` with `MassLaw`, `Location`, `Reach`,
     `SpacingFamily`, `EccentricityLaw`, `Origin`, an optional `HotVariant`), `TEMPLATES` and
@@ -11731,6 +11774,138 @@ tables::gauss_legendre`.
     the Yang fluxes in W m⁻² (1,900 and 2,615), and R09's Design note 3 ("Koll's factor … at k =
     2", now the body's own k).
 
+- **Deviations in P14.T48.e, as built (`p14-bump`, 2026-10-14).** The record's surface section,
+  the gas-envelope split and the batch's three holds folded, in T48.e's own commit, ahead of the
+  batch's bump commit.
+  - _The order._ The plan puts the folds in "the batch's bump commit, this subtask's". As built
+    they are T48.e's commit, a checkpoint blessed at header 21, and the bump commit after it bumps
+    and blesses alone ("main"'s batch order of 2026-10-14: T48.e; R09.T1.b; P15.T6.g's F2 and F1;
+    the bump; decision-p14-d10-bd-companions §1–2). No commit of the batch reaches
+    `rendering-and-planets` alone, so (seed, 21) still names one output, version 21's as pushed
+    (decision-displaced-since's rule for checkpoints).
+  - _The folds_, step by step as "A sub-Neptune's tides, as built", "Deviations in P14.T24.f, as
+    built" and "Deviations in P14.T24.a, as built" list them:
+    - `ENVELOPED_TIDES_VERSION`, `tides_in_force` and its tripwire are gone; `of_class` and
+      `tidal_planet` call `tides`. `a_sub_neptune_locks_only_close_in` goes through `of_class`,
+      and `with_its_tides` is gone. The tripwire's place is taken by
+      `every_class_s_spinning_body_takes_its_tides` (`of_class` carries `tides`' pair bit for bit
+      at the mass and radius it rounds through). The named `Tides { love_number, tidal_q }` the
+      rust-reviewer suggested is not built: `tides` keeps its `(f64, f64)`.
+    - `CARBON_SPECIATION_VERSION`, `Speciation`, `atmosphere_under`, `derive_body_under` and the
+      tripwire are gone; `Airborne::kept` and `divide` lose their parameter. The tests' held
+      readings are deleted as listed; `earth_venus_and_mars_keep_their_carbon_as_carbon_dioxide`
+      checks instead that methane's retention follows nitrogen's on the inner bodies. `derive::solar`'s
+      `derive_under` and `table_under` become `derive_historic` and `historic_table`, with no
+      parameter; the atmosphere's tests keep their own `derive` and `table`, which are the same.
+    - `SURFACE_CONDITIONS_VERSION`, `ConditionsHold`, `hooks_at_under` and the tripwire are gone,
+      with the held loop of `methane_and_oxygen_reach_the_fractions_through_the_speciated_derivation`.
+      `planetary/impactors`' rate column is written unconditionally.
+  - _`record::Surface`._ A struct of the surface state (the atmosphere's), the material
+    (`SurfaceMaterial::of` the bulk fractions), the climate regime, the conditions and the global
+    figures, built by the crate-private `Surface::new`, which refuses the gas-envelope state and
+    conditions without a regime, so that `climate_regime()` returns `&ClimateRegime`. T48.a–d's
+    figures are the conditions' and the figures' own getters, every substance a `SubstanceId`.
+    The later members are getters returning `record::Modelled<&T>`, a new two-state enum (`Ok`,
+    `NotModelled`), over uninhabited placeholders `VerticalStructure`, `AerosolInventory`,
+    `Condensates`, `CrustComposition`, `SurfaceModifiers` and `Biosphere`, each named for its
+    task; their tasks give the types their contents and may reshape them (decision-composition
+    §1.10; no build has sent a value). `Surface` loses `Copy`, `Eq`, `Hash` and `Ord`.
+  - _Where it is computed._ `primary_record` and `satellite_record` build it through
+    `PlanetarySystem::surface_section` and `published_surface` (now returning
+    `Section<record::Surface>`), for a present body whose bulk class `has_solid_surface()`.
+    `surface_section` returns `NotModelled` at once for a body with no rotation law, so that
+    `generate`'s own snapshot at `parent_time`, whose bodies have no law yet, computes no surface.
+    `satellite_record` takes its parent's `BodyFate`, which `snapshot_at` keeps beside each
+    parent's `ParentNow`. `hooks_at` reads the record's section (one computation, so the hooks and
+    the record cannot part): `BodyHooks::surface` and `figures` are its conditions and figures in
+    its state (`Surface::into_parts`). A giant of a `generate_planets` system, which has no law,
+    has its hooks' sections `NotApplicable` now, the record's tag, where they were `NotModelled`.
+  - _The split._ `PlanetClass::has_surface` is gone; `is_giant` takes `SpinFamily::of`, and
+    `has_solid_surface` the record's tags and `Datum::of`.
+    `the_class_predicates_split_at_the_sub_neptune` pins both against version 21's predicate and
+    the datum. `BodyRecordBuilder::derived` tags the surface `NotModelled` and the envelope
+    `NotApplicable` for a solid class, and the surface `NotApplicable` and the envelope
+    `NotModelled` otherwise; populations and absent bodies take both `NotApplicable`, every moon
+    its envelope `NotApplicable`.
+  - _The envelope._ `RecordSection::Envelope`, the thirteenth, at `DetailLevel::Surface`, with
+    `BodyRecord::envelope`, the builder's `envelope` and `record::Envelope` uninhabited. The
+    protocol's `RecordSectionDto` gains `Envelope` ("envelope"), so that the server's
+    `record_section` stays total and its test (every section by its wire name) holds; the surface
+    field never names it. That is one additive variant of R09.T19's wire type in this subtask
+    rather than in T35.e, with `PROTOCOL_VERSION` 2.
+  - _The wire's stopgap._ `convert/planetary.rs`'s `surface` sends an `Ok` surface as
+    `not_modelled`; the envelope is not on the wire before T35.e.
+  - _R09's `for_body`._ The tag mapping stands. An `Ok` section answers
+    `NotModelled(RecordSection::Surface)` from its crust, `Modelled::NotModelled` until P14.T54.a,
+    which also gives the reading the record's time and a moon's planet's orbit ("main"'s ruling of
+    2026-10-10). So the coarse pass still runs on builder inputs for every generated world. The
+    test pins a generated rocky planet's `Ok` section and its answer, the regime's
+    `From<&hooks::surface::ClimateRegime>` reading on it (the condensable by key), and
+    `NoSolidSurface` on a generated gas giant and, new, a generated sub-Neptune.
+  - _Pins._ `planetary/systems/*` gain each `Ok` surface's summary (its state, material and
+    regime, the mean temperature, both contrasts, the pressure, σ_h, f_c, the heat flow, the
+    surface age and the ocean and ice fractions) and every record's `envelope` state, after every
+    older line; `planetary/surface_conditions_published` stays the sample's whole pin.
+    `the_golden_systems_split_surfaces_from_envelopes` checks the split on the golden systems.
+  - _Tests kept from T24.a_: the 90°-obliquity world's negative equator–pole contrast, the locked
+    airless body's day–night contrast over 300 K and Venus's under 10 K.
+  - _Tests added or renamed_: `the_class_predicates_split_at_the_sub_neptune` (derive);
+    `a_derivation_tags_the_surface_and_the_envelope_by_the_gas_envelope_split` (record, with
+    `degrade`); `the_hooks_publish_the_record_s_surface_conditions_and_figures` (was
+    `…_only_from_the_batch_s_bump`: the hooks equal the record's section);
+    `a_surface_holds_a_solid_state_and_its_conditions_regime` (`Surface::new`'s refusals);
+    `a_record_tags_what_the_generator_does_not_compute` checks planets, dwarf planets and moons
+    through `assert_surface_or_envelope`; `a_snapshot_is_body_at_body_by_body` also compares the
+    records' `Debug` forms, bit for bit with signed zeros; R09's
+    `a_generated_rocky_body_is_not_modelled_and_a_giant_or_sub_neptune_has_no_solid_surface`;
+    `the_enveloped_love_numbers_are_pinned_bit_for_bit` (was `the_held_…`). The server's
+    `system_bodies` test holds an `Ok` surface to the stopgap's `not_modelled`.
+  - _Accepted_, besides the task's commands, by `cargo test -p hyperion-sim planetary::system`,
+    `cargo test -p hyperion-sim --test planetary_golden` and
+    `cargo test -p hyperion-server --test system_bodies`.
+  - _Files beyond the task's_: `system.rs`, `hooks/{mod, figures, surface}.rs` and their tests,
+    `hooks/figures/wet_epoch/tests.rs`, `hooks/surface/regime/tests.rs`,
+    `tests/planetary_golden.rs`, `hyperion-protocol/src/surface.rs` with the generated
+    `RecordSectionDto.ts`, `convert/surface.rs` and `hyperion-server/tests/system_bodies.rs`.
+  - _The placeholders' future._ Each later task replaces its `record::` placeholder with its own
+    type (Provides' `hooks::VerticalStructure`, T24.c's and T51.c's `hooks/aerosols.rs` and
+    `hooks/crust.rs`), or makes the placeholder its type; T24.d's envelope is the `Envelope`
+    section's content, not a `VerticalStructure` variant of the surface. T35.e maps
+    `record::Modelled` onto the wire's three states: `NotModelled` absent, `Ok` a value or `null`.
+  - _What the checkpoint moves_ (blessed at header 21; `golden_diff.py` against 28e9aad4, whose
+    "not bumped" problem is expected here):
+    - `planetary/derive_body`: 28 values, T14.d's three moon limits (Uranus ×0.431, Neptune
+      ×0.345, `hot_sub_neptune` ×514, as its entry measured) and T24.f's on `icy`, `beyond_dry`,
+      `beyond_watery`, `titan` and `wet_runaway` (methane and oxygen, as its entry measured);
+    - `frame/body_rotations`: 8 values, two bodies' poles and angles (T14.d's);
+    - `planetary/impactors`: the rate column, 26 values added;
+    - `planetary/surface_conditions_published`: 138 values changed and 9 CO₂ mole fractions
+      become CH₄, the cold beyond-limit bodies under T24.f's rules (`02000b2ca0000001.0400`'s
+      crust Silicate → IceRich, its condensable none → H₂O and its pressure 1.05 Mbar → 27 kbar;
+      belt members' column masses by some 5 × 10⁻⁵);
+    - `planetary/systems/*`: T14.d's tides in the five systems its entry names and in no other
+      (`close_binary` 12 values, `filler_c` 406, `hierarchical_triple` 78, `subgiant` 6,
+      `wide_binary` relabelled only), each sub-Neptune's surface `NotModelled` → `NotApplicable`,
+      every other present body's `Ok`, with the summary lines and every record's envelope added.
+  - _R09's `WetEpoch`_ is not mapped from `figures::WetEpoch` here (T48.b as built names T48.e):
+    it is `for_body`'s reading, which P14.T54.a writes ("main", 2026-10-10); R09's struct still
+    lacks `runoff` and `from_colder`.
+- **Deferred findings (2026-10-13 rule)**, from P14.T48.e:
+  - _The section's cost._ `snapshot_at` over the sample's first 60 systems (1,137 records, 877
+    surfaces) went from 31 ms to 207 ms, about 0.2 ms a surface (a test build at the sim's
+    `opt-level = 2`, at loads of 5–17: provisional). T33.a's target, `generate` plus
+    `snapshot_at` under 1 ms a field system, is missed by about three times, and
+    decision-composition §1.3's estimate of 10–25 µs a section is about ten times low. Not
+    profiled; the volatile history's past-sky integration is the likely share. For T33.a's
+    benchmark on a quiet machine.
+  - The server builds whole snapshots for `system_bodies` at every level and for the scene's
+    list of indices (`scene/core.rs`), so it computes surfaces it then withholds or drops; and
+    `body_at` of a moon computes its planet's surface as well. A record built to a level, or a
+    cheaper index list, would save them.
+  - `hooks_at` derives a moon twice, for its record and for its bulk composition.
+  - R09's coarse pass still cannot read a generated world: `for_body` waits on P14.T54.a's crust,
+    condensates and palette, and on the record's time.
+
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might
   expect to exist"; noted by "main"). The drafted surface-section tasks define closed sets that
@@ -11762,3 +11937,54 @@ tables::gauss_legendre`.
   Earth after it. The generated Venus keeps 57.8 bar and reaches about 695 K. A stagnant-lid
   world's exchangeable carbon above Earth's present surface reservoir is P14.T55.a's, with T50.a's
   `Mantle` reservoir.
+
+- **Close binaries: the brown-dwarf flag and no class factor, as built
+  (decision-p14-d10-bd-companions §1–2, 2026-10-12; in the 21 → 22 batch, lane `p14-bump`,
+  2026-10-14).**
+  - **The rule.**
+    - A pair closer than 47 au flags a member only when its other member
+      `is_close_binary_companion`: a star, or at least 0.1 of the member's mass.
+    - The flag moves no class weight. `CLOSE_BINARY_SUPPRESSION` is removed and
+      `ClassConstraints::new(disc, zone)` takes no `HostMultiplicity`.
+    - `S_bin` is the observed deficit, truncation included. With the factor off, the zones'
+      truncation gives close planets by stellar-companion separation inside Wang et al.'s 1σ in
+      every bin from 1 to 320 au (Moe and Kratter 2021, §2.2).
+    - With the factor on, the bins inside 47 au were about 3× low, and close-binary hosts kept
+      0.11 of single stars' planets against 0.34.
+  - **What moves, under `GENERATOR_VERSION` 22:**
+    - the class weights and planets of every host in a stellar close binary, and of none with a
+      light brown dwarf only;
+    - body IDs after a flagged host's reserved slots;
+    - `planetary/architecture`'s close-binary case, renamed "zone inside the snow line";
+    - `planetary/systems/close_binary`;
+    - `planetary/zones`' "star and brown dwarf" `close true` → `false`;
+    - the server's orbit-map plane for a star whose only close companion is a light brown dwarf.
+  - **As blessed at 22** (lane `p14-bump`, 2026-10-14; `golden_diff.py` against the bump commit,
+    whose "not bumped" problem is expected, the change landing in the same push after it): beyond
+    the three goldens the decision named (`planetary/architecture` 18 lines renamed,
+    `planetary/zones` 2, `planetary/systems/close_binary` 5,131 values with 1,279 lines added), every
+    move is `close_binary`'s, whose A now draws `TerrestrialOnly` and places nothing and whose AB's
+    planets move from slots 0100–0700 to 0500–0b00 (82 bodies, from 80), so that their streams and
+    every value derived from them move: `frame/body_rotations` (610 values, 21 lines added),
+    `observe/in_system` (2,970 values, 420 added), `orbit/drifting_states` (8, its receding moons)
+    and the server's `scene_systems` (its two `system_bodies` answers). The receding moon of the RM1
+    fixture, `AB c I`, is `.0601` (it was `.0201`): `tests/planetary_drift.rs` and the client's
+    `apparent.test.ts` name it so. The slow statistics (`the_statistics_of_architecture_meet_their_surveys`,
+    with `no_overlapping_orbits_on_a_million_hosts`) pass by name at the slow-test profile.
+  - **T10.b's figures, version 21 → 22.**
+    - Re-pinned: ruling 87.3's blend 1.0681 → 1.1119, re-pinned 1.07–1.13 → 1.08–1.14, between FGK
+      0.666 and early M 2.132. It was 1.0942 before P11.T2.d.
+    - The close-binary figure 0.1095 → 0.3193 is now a check against 0.25–0.5, beside five checks
+      by separation: 0.040, 0.154, 0.312, 0.600 and 0.728 at 1–3.2, 3.2–10, 10–32, 32–100 and
+      100–320 au.
+    - Pascucci's slope −0.379 → −0.388, pin −0.42 to −0.33, holds.
+    - FGK small planets inside 100 days 0.570 → 0.593.
+    - Every M dwarf inside 200 days 2.036 → 2.132, and at 0.5–10 days 0.499 → 0.529.
+    - Ment and Charbonneau's 0.5–2 R⊕ 0.472 → 0.507.
+    - The 0.4–0.6 M☉ primaries' 0.5–1.5 R⊕ at 0.5–7 days 0.339 → 0.367 (window 0.19–0.39).
+    - Hardegree-Ullman 0.721 → 0.775.
+    - η⊕ 0.169 → 0.173.
+    - Ruling 87.2's singles unchanged, 2.700.
+  - **Open.** Brown-dwarf hosts keep their truncation, 0.09–0.61 of single stars' close planets by
+    separation. Moe and Kratter's "no significant suppression" rests on three hot-Jupiter systems;
+    revisit if a measured rate appears.

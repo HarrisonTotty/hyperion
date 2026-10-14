@@ -16,8 +16,9 @@
 //!    sphere of influence (design note 14). A field system's strip radius lies far beyond its
 //!    discs, where the cut changes no bit of the disc, the class draw or the placement.
 //! 3. **The class** (P14.T4) of each zone, drawn at its host number under the constraints of its
-//!    disc, its reach and design note 10's close-binary flag
-//!    ([`OrbitZone::host_multiplicity`]).
+//!    disc and its reach. A close binary acts through the reach alone: design note 10's flag
+//!    ([`OrbitZone::host_multiplicity`]) moves no class weight (decision-p14-d10-bd-companions
+//!    §2).
 //! 4. **Placement** (P14.T8), with D5's second fallback, in planet slots that continue from the
 //!    host before (design note 3): a host's slots are reserved by its drawn counts, so a planet's
 //!    index never depends on anything placed after it. A circumbinary zone of a pair closer than
@@ -74,9 +75,11 @@
 //!   time, with the light of the system's other stars (P14.T12.b).
 //!
 //! What is not computed is said in every record rather than left to be read as "none" (ruling
-//! 34): a record's `surface` and `hooks` are [`Section::NotModelled`] (P14.T13, T14, T23–T26), a
-//! giant's surface [`Section::NotApplicable`], and a dwarf planet's rings `NotModelled`. Events on
-//! bodies (P14.T31) are not built, so there is no `events_between`.
+//! 34): a gas-envelope body's surface is [`Section::NotApplicable`] and its `envelope`
+//! `NotModelled` (P14.T48.e, until P14.T24.d), and a dwarf planet's rings `NotModelled`. Its
+//! `hooks` hold the body's detail seed alone (the rendering plans' R09.T1.b): [`Section::Ok`] for
+//! a planet, moon or dwarf planet present at the time, `NotApplicable` otherwise. Events on bodies
+//! (P14.T31) are not built, so there is no `events_between`.
 //!
 //! # Streams
 //!
@@ -123,9 +126,7 @@ use crate::planetary::hooks::figures::{
     WindowEntryInputs, past_outgassing, relief, window_entry,
 };
 use crate::planetary::hooks::surface::regime::surface_reservoirs;
-use crate::planetary::hooks::surface::{
-    ClimateInputs, ConditionsHold, SeasonalSpin, SeasonsFrom, SurfaceInputs,
-};
+use crate::planetary::hooks::surface::{ClimateInputs, SeasonalSpin, SeasonsFrom, SurfaceInputs};
 use crate::planetary::hooks::{
     self, BodyHooks, BulkComposition, GlobalFigures, Subsurface, SurfaceConditions, SurfaceSeed,
 };
@@ -153,8 +154,8 @@ use crate::planetary::placement::{
     Neighbour, OrbitHost, OrbitZone, PlacedPlanet, PlacementHost, ZoneDiscInputs, place,
 };
 use crate::planetary::record::{
-    BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties, HaloRecord,
-    MoonOrigin, Population, Section, SystemSnapshot,
+    BeltRecord, BodyIdentity, BodyKind, BodyOrbit, BodyRecord, BulkProperties, HaloRecord, Hooks,
+    MoonOrigin, Population, Section, Surface, SystemSnapshot,
 };
 use crate::planetary::rings::{Ring, RingParent};
 use crate::planetary::satellites::{Satellite, SatelliteMoon, Satellites, satellites_of};
@@ -1029,7 +1030,7 @@ pub fn generate_planets(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
         let reach = limits
             .outer()
             .map_or(ZoneLimit::Unbounded, ZoneLimit::Outer);
-        let constraints = ClassConstraints::new(&disc, reach, zone.host_multiplicity());
+        let constraints = ClassConstraints::new(&disc, reach);
         let weights = class_weights(zone.host_mass(), ctx.fe_h());
         let drawn = draw_class(seed, id, zone.host_number(), &weights, &constraints);
         let plane = plane_of(hierarchy, &under, zone);
@@ -1641,7 +1642,7 @@ impl PlanetarySystem {
             }
         }
         let mut records = Vec::with_capacity(self.bodies.len() + self.belts.len() + 1);
-        let mut parents: Vec<(BodyIndex, ParentNow)> = Vec::new();
+        let mut parents: Vec<(BodyIndex, ParentNow, &BodyFate<'_>)> = Vec::new();
         for (body, fate) in self.bodies.iter().zip(&fates) {
             let label = label_of(body.index);
             match &body.part {
@@ -1651,18 +1652,18 @@ impl PlanetarySystem {
                         .expect("every planet and member orbits one of its system's zones");
                     let (record, now) = self.primary_record(&epoch, body, label, fate);
                     records.push(record);
-                    parents.push((body.index, now));
+                    parents.push((body.index, now, fate));
                 }
                 Part::Moon(_) | Part::Ring(_) => {
                     let OrbitHost::Body(parent) = body.host else {
                         unreachable!("a moon's and a ring's host is a body")
                     };
-                    let now = parents
+                    let (now, fate) = parents
                         .iter()
-                        .find(|(at, _)| *at == parent)
-                        .map(|(_, now)| now)
+                        .find(|(at, ..)| *at == parent)
+                        .map(|(_, now, fate)| (now, *fate))
                         .expect("a satellite's parent comes before it in index order");
-                    records.push(self.satellite_record(&epoch, body, label, now));
+                    records.push(self.satellite_record(&epoch, body, label, now, fate));
                 }
             }
         }
@@ -1693,12 +1694,17 @@ impl PlanetarySystem {
     ///   71); a belt's mass wears down (P14.T21.a); a halo's is not modelled.
     /// - For a body present at `t`: its orbit at `t` with the time it holds until, its position,
     ///   and its bulk from [`derive_body`] about its hosts at `t` (a moon's by P14.T17.b), with
-    ///   the surface [`Section::NotModelled`] ([`Section::NotApplicable`] for a giant). A ring,
-    ///   a belt and a halo carry their extent as their population section instead.
-    /// - For a body not present: no position, and its orbit, bulk, surface and population
-    ///   [`Section::NotApplicable`], since nothing orbits there at `t`.
-    /// - A planet's moons and rings [`Section::Ok`], lists that may be empty; every hooks section
-    ///   [`Section::NotModelled`] (ruling 34), a population's `NotApplicable`.
+    ///   its surface section (P14.T48.e): its surface conditions and global figures for a body
+    ///   with a solid surface, [`Section::NotModelled`] where it has no rotation law, and for a
+    ///   gas-envelope body, a sub-Neptune or a giant, [`Section::NotApplicable`] with its
+    ///   envelope [`Section::NotModelled`]. A ring, a belt and a halo carry their extent as their
+    ///   population section instead.
+    /// - For a body not present: no position, and its orbit, bulk, surface, envelope, hooks and
+    ///   population [`Section::NotApplicable`], since nothing orbits there at `t`.
+    /// - A planet's moons and rings [`Section::Ok`], lists that may be empty. The hooks section of
+    ///   a planet, moon or dwarf planet present at `t` is [`Section::Ok`], holding its detail seed
+    ///   ([`hooks::detail_seed`]; the rendering plans' R09.T1.b), and a population's
+    ///   `NotApplicable`.
     ///
     /// # Errors
     ///
@@ -1733,7 +1739,7 @@ impl PlanetarySystem {
                 let parent_label =
                     label::label(self, parent.index).expect("every body of a system has a label");
                 let (_, now) = self.primary_record(&epoch, parent, parent_label, &fate);
-                Ok(self.satellite_record(&epoch, body, label, &now))
+                Ok(self.satellite_record(&epoch, body, label, &now, &fate))
             }
             OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => {
                 let host = fate_host(ctx, self.zone_of(body));
@@ -1899,13 +1905,10 @@ impl PlanetarySystem {
 
     /// The hooks of body `index` at `t` (P14.T23, T24.a, T24.b): its surface seed, its bulk
     /// composition, the mass fractions its record gives with the volatile inventory of its
-    /// derivation at `t` and the system's \[Fe/H\] and \[α/Fe\], its surface conditions and its
-    /// global figures; `None` for a ring, a belt or the halo. Server-only, and not part of the
-    /// body's record (the [`hooks`] module documentation).
-    ///
-    /// The surface conditions and the global figures are held until the 21 → 22 batch's bump:
-    /// until then every body's are [`Section::NotModelled`], as version 21's were
-    /// ([`hooks::surface`]'s documentation).
+    /// derivation at `t` and the system's \[Fe/H\] and \[α/Fe\], and its surface conditions and
+    /// global figures, its record's surface section's ([`record::Surface`](crate::planetary::record::Surface),
+    /// P14.T48.e, in the same state); `None` for a ring, a belt or the halo. Server-only, and not
+    /// part of the body's record (the [`hooks`] module documentation).
     ///
     /// # Errors
     ///
@@ -1920,46 +1923,6 @@ impl PlanetarySystem {
         index: BodyIndex,
         t: UniverseTime,
     ) -> Result<Option<BodyHooks>, ResolveBodyError> {
-        self.hooks_at_under(ctx, index, t, ConditionsHold::in_force())
-    }
-
-    /// [`hooks_at`](Self::hooks_at) under the surface conditions' hold `hold`, which tests read
-    /// from before the 21 → 22 batch's bump publishes them (P14.T24.a and T24.b, held).
-    ///
-    /// A present body's conditions read its derivation at `t`, its bulk section's gravity, radius
-    /// and surface material (of its mass fractions, [`SurfaceMaterial::of`]), its spin under its
-    /// seasonal orbit at `t` (its own for a planet or a member, its planet's for a moon,
-    /// [`SeasonalSpin::of`]) and its global figures' heat flow. The figures read its mass at `t`,
-    /// its bulk section's radius, gravity, class and fractions, its atmosphere and its volatile
-    /// inventory's water, its sidereal rotation period at `t`, the system's \[Fe/H\] and age at
-    /// `t`, and for a moon the tide its planet raises in it, its derivation's (P14.T17.b), with a
-    /// regular moon's subsurface ocean ([`Subsurface::of_regular_moon`], P14.T17.b's flag), and its
-    /// continental asymptote, word 0 of its `body.continents` stream (P14.T48.a), with whether it
-    /// entered its hosts' water window holding water (P14.T48.b's start condition). The
-    /// conditions read the figures' ocean weight θ. The figures' volatile history (P14.T48.b)
-    /// reads the conditions' liquid-water flag, the hosts' light over the primary's past (each
-    /// star at its state then, along the primary's orbit then for a star of its zone and the
-    /// pair's for a companion), and the body's outgassing then, and their ocean, ice and cloud the
-    /// conditions. The conditions' climate regime (P14.T48.d) reads the body's mass, the
-    /// reservoirs its atmosphere holds, the figures' history and their ice.
-    /// Both are [`Section::NotApplicable`] for a body in the gas-envelope state or not present, and
-    /// [`Section::NotModelled`] for one with no rotation law (every body [`generate_planets`]
-    /// makes) or whose derivation this version does not compute.
-    ///
-    /// # Errors
-    ///
-    /// As [`body_at`](Self::body_at).
-    ///
-    /// # Panics
-    ///
-    /// As [`snapshot_at`](Self::snapshot_at).
-    pub(crate) fn hooks_at_under(
-        &self,
-        ctx: &SystemContext,
-        index: BodyIndex,
-        t: UniverseTime,
-        hold: ConditionsHold,
-    ) -> Result<Option<BodyHooks>, ResolveBodyError> {
         let Some(seed) = self.surface_seed(index)? else {
             return Ok(None);
         };
@@ -1973,95 +1936,145 @@ impl PlanetarySystem {
         };
         let host = fate_host(ctx, self.zone_of(primary));
         let fate = self.fate_of(primary, &host);
-        let label = label::label(self, primary.index).expect("every body of a system has a label");
-        let (_, now) = self.primary_record(&epoch, primary, label, &fate);
+        let primary_label =
+            label::label(self, primary.index).expect("every body of a system has a label");
+        let (primary_record, now) = self.primary_record(&epoch, primary, primary_label, &fate);
+        let (bulk, record) = match &body.part {
+            Part::Planet(_) | Part::Member(_) => {
+                let bulk = match now.derived {
+                    Some(d) => {
+                        let properties =
+                            icy_member_bulk(body, &d).unwrap_or_else(|| BulkProperties::from(&d));
+                        bulk_composition(ctx, properties.fractions(), *d.inventory())
+                    }
+                    None => Section::NotApplicable,
+                };
+                (bulk, primary_record)
+            }
+            Part::Moon(moon) => {
+                let label = label::label(self, index).expect("every body of a system has a label");
+                let record = self.satellite_record(&epoch, body, label, &now, &fate);
+                let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), t);
+                let bulk = if state == BodyState::Present && now.position.is_some() {
+                    let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
+                    match Self::moon_derived(&epoch, moon, &orbit, &now) {
+                        Some(derived) => {
+                            let properties = Self::moon_bulk_of(moon, &derived, &now);
+                            bulk_composition(ctx, properties.fractions(), *derived.inventory())
+                        }
+                        None => Section::NotModelled,
+                    }
+                } else {
+                    Section::NotApplicable
+                };
+                (bulk, record)
+            }
+            Part::Ring(_) => unreachable!("a ring has no surface seed"),
+        };
+        let (surface, figures) = match record.into_surface() {
+            Section::Ok(surface) => {
+                let (conditions, figures) = surface.into_parts();
+                (Section::Ok(conditions), Section::Ok(figures))
+            }
+            Section::NotResolved => (Section::NotResolved, Section::NotResolved),
+            Section::NotModelled => (Section::NotModelled, Section::NotModelled),
+            Section::NotApplicable => (Section::NotApplicable, Section::NotApplicable),
+        };
+        Ok(Some(BodyHooks::new(seed, bulk, surface, figures)))
+    }
+
+    /// The surface section of the planet, member or moon `body` at the epoch's time
+    /// (P14.T24.a–b, T48.a–d, P14.T48.e), whose primary, itself or a moon's planet, goes round its
+    /// hosts as `fate` tells, read as `of` describes it ([`published_surface`]):
+    /// [`Section::NotModelled`] for a body with no rotation law, every body
+    /// [`generate_planets`] makes, before anything else is read.
+    ///
+    /// A present body's surface reads its derivation at the time, its bulk section's gravity,
+    /// radius and surface material (of its mass fractions, [`SurfaceMaterial::of`]), its spin
+    /// under its seasonal orbit then (its own for a planet or a member, its planet's for a moon,
+    /// [`SeasonalSpin::of`]) and its global figures' heat flow. The figures read its mass, its
+    /// bulk section's radius, gravity, class and fractions, its atmosphere and its volatile
+    /// inventory's water, its sidereal rotation period, the system's \[Fe/H\] and age, and for a
+    /// moon the tide its planet raises in it, its derivation's (P14.T17.b), with a regular moon's
+    /// subsurface ocean ([`Subsurface::of_regular_moon`], P14.T17.b's flag); its crater inputs
+    /// with its primary's host's impactor sources (P14.T48.c, T48.f); and its continental
+    /// asymptote, word 0 of its `body.continents` stream (P14.T48.a), with whether it entered its
+    /// hosts' water window holding water (P14.T48.b's start condition). The conditions read the
+    /// figures' ocean weight θ. The figures' volatile history (P14.T48.b) reads the conditions'
+    /// liquid-water flag, the hosts' light over the primary's past (each star at its state then,
+    /// along the primary's orbit then for a star of its zone and the pair's for a companion), and
+    /// the body's outgassing then, and their ocean, ice and cloud the conditions. The conditions'
+    /// climate regime (P14.T48.d) reads the body's mass, the reservoirs its atmosphere holds, the
+    /// figures' history and their ice.
+    #[must_use]
+    fn surface_section(
+        &self,
+        epoch: &Epoch<'_>,
+        body: &Body,
+        fate: &BodyFate<'_>,
+        of: SurfaceOf<'_>,
+    ) -> Section<Surface> {
+        let Some(rotation) = body.rotation.as_ref() else {
+            return Section::NotModelled;
+        };
+        let (ctx, t) = (epoch.ctx, epoch.t);
+        let primary = match body.host {
+            OrbitHost::Body(parent) => self
+                .body(parent)
+                .expect("a satellite's parent is a body of its system"),
+            OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre => body,
+        };
         // The primary's orbit at the time sets the seasons: a planet's or a member's own, and its
         // moons'.
         let seasonal = fate.at(t).orbit().copied();
-        // The impactors' sources about the primary's host (P14.T48.f), as generated, and each
-        // body's crater inputs, built only where the hold lets the figures be read.
-        let publish = hold == ConditionsHold::Published;
-        let sources = publish
-            .then(|| self.impactor_sources(primary.host))
-            .flatten();
-        let past = publish.then(|| PastSky::new(ctx, self.zone_of(primary), &fate, t));
+        // The impactors' sources about the primary's host (P14.T48.f), as generated.
+        let sources = self.impactor_sources(primary.host);
+        let past = PastSky::new(ctx, self.zone_of(primary), fate, t);
         let continental_asymptote =
-            publish.then(|| relief::continental_asymptote(self.seed, index.body_id(self.system)));
+            relief::continental_asymptote(self.seed, body.index.body_id(self.system));
         let time = SurfaceTime {
-            hold,
-            past: past.as_ref(),
-            rotation: body.rotation.as_ref(),
+            past: &past,
+            rotation,
             seasonal: seasonal.as_ref(),
             t,
             fe_h: ctx.fe_h(),
             age: ctx.age_at(t),
         };
-        let (bulk, (surface, figures)) = match &body.part {
-            Part::Planet(_) | Part::Member(_) => match now.derived {
-                Some(d) => {
-                    let properties =
-                        icy_member_bulk(body, &d).unwrap_or_else(|| BulkProperties::from(&d));
-                    let case = SurfaceCase {
-                        sky: SurfaceSky::of_body(&d),
-                        bulk: &properties,
-                        whose: SeasonsFrom::Own,
-                        interior: SurfaceInterior::of_body(&d),
-                        craters: publish.then(|| self.body_craters(body)).flatten(),
-                        sources: sources.as_ref(),
-                        continental_asymptote,
-                    };
-                    (
-                        bulk_composition(ctx, properties.fractions(), *d.inventory()),
-                        published_surface(&time, &case),
-                    )
-                }
-                None => (
-                    Section::NotApplicable,
-                    (Section::NotApplicable, Section::NotApplicable),
-                ),
+        let case = match of {
+            SurfaceOf::Body { derived, bulk } => SurfaceCase {
+                sky: SurfaceSky::of_body(derived),
+                bulk,
+                whose: SeasonsFrom::Own,
+                interior: SurfaceInterior::of_body(derived),
+                craters: self.body_craters(body),
+                sources: sources.as_ref(),
+                continental_asymptote,
             },
-            Part::Moon(moon) => {
-                let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), t);
-                if state == BodyState::Present && now.position.is_some() {
-                    let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(t));
-                    match Self::moon_derived(&epoch, moon, &orbit, &now) {
-                        Some(derived) => {
-                            let properties = Self::moon_bulk_of(moon, &derived, &now);
-                            let case = SurfaceCase {
-                                sky: SurfaceSky::of_moon(&derived),
-                                bulk: &properties,
-                                whose: SeasonsFrom::Planet,
-                                interior: SurfaceInterior::of_moon(moon, &derived),
-                                craters: publish
-                                    .then(|| self.moon_craters(primary, moon, &derived, &orbit))
-                                    .flatten(),
-                                sources: sources.as_ref(),
-                                continental_asymptote,
-                            };
-                            (
-                                bulk_composition(ctx, properties.fractions(), *derived.inventory()),
-                                published_surface(&time, &case),
-                            )
-                        }
-                        None => (
-                            Section::NotModelled,
-                            (Section::NotModelled, Section::NotModelled),
-                        ),
-                    }
-                } else {
-                    (
-                        Section::NotApplicable,
-                        (Section::NotApplicable, Section::NotApplicable),
-                    )
-                }
-            }
-            Part::Ring(_) => unreachable!("a ring has no surface seed"),
+            SurfaceOf::Moon {
+                moon,
+                derived,
+                bulk,
+                orbit,
+            } => SurfaceCase {
+                sky: SurfaceSky::of_moon(derived),
+                bulk,
+                whose: SeasonsFrom::Planet,
+                interior: SurfaceInterior::of_moon(moon, derived),
+                craters: self.moon_craters(primary, moon, derived, orbit),
+                sources: sources.as_ref(),
+                continental_asymptote,
+            },
         };
-        let (surface, figures) = match hold {
-            ConditionsHold::Held => (Section::NotModelled, Section::NotModelled),
-            ConditionsHold::Published => (surface, figures),
-        };
-        Ok(Some(BodyHooks::new(seed, bulk, surface, figures)))
+        let surface = published_surface(&time, &case);
+        // Its callers ask only for a class with a solid surface, which is never in the
+        // gas-envelope state (both read the one envelope fraction), so that exactly one of the
+        // surface and the envelope applies.
+        debug_assert!(
+            !matches!(surface, Section::NotApplicable),
+            "{:?}'s solid surface is not applicable",
+            body.index
+        );
+        surface
     }
 
     /// The rotation of body `index` (P14.T14), as [`generate`] derived and holds it (P14.T46.b):
@@ -2398,29 +2411,60 @@ impl PlanetarySystem {
                 now.nursery = self.nursery(epoch.ctx, body);
                 let bulk = icy_member_bulk(body, &derived)
                     .unwrap_or_else(|| BulkProperties::from(&derived));
+                // P14.T48.e: the surface section of a body with a solid surface, and the envelope
+                // of one without.
+                let (surface, envelope) = if bulk.class().has_solid_surface() {
+                    let of = SurfaceOf::Body {
+                        derived: &derived,
+                        bulk: &bulk,
+                    };
+                    (
+                        self.surface_section(epoch, body, fate, of),
+                        Section::NotApplicable,
+                    )
+                } else {
+                    (Section::NotApplicable, Section::NotModelled)
+                };
                 builder
                     .derived(&derived)
                     .bulk(Section::Ok(bulk))
+                    .surface(surface)
+                    .envelope(envelope)
                     .photometry(Section::Ok(photometry_of(derived.atmosphere(), &bulk)))
                     .figure(body.figure_section(Some(&bulk), derived.mass(), epoch.t))
                     .orbit(Section::Ok(section))
                     .position(position)
                     .rotation(body.rotation_section())
+                    .hooks(self.present_hooks(body.index))
             }
             BodyState::NotYetFormed | BodyState::Destroyed { .. } | BodyState::Unbound { .. } => {
                 builder
                     .orbit(Section::NotApplicable)
                     .bulk(Section::NotApplicable)
                     .surface(Section::NotApplicable)
+                    .envelope(Section::NotApplicable)
                     .photometry(Section::NotApplicable)
                     .figure(Section::NotApplicable)
                     .rotation(Section::NotApplicable)
+                    .hooks(Section::NotApplicable)
             }
         };
         let record = builder
             .build()
             .expect("a generated record withholds no section and has a known kind");
         (record, now)
+    }
+
+    /// The hooks section of the record of body `index`, a planet, moon or dwarf planet present at
+    /// the record's time: its detail seed (the rendering plans' R09.T1.b), word 0 of its
+    /// `body.surface.detail` stream, which depends on nothing but the universe seed and the body's
+    /// ID. The surface seed stays off the record (the [`hooks`] module documentation).
+    #[must_use]
+    fn present_hooks(&self, index: BodyIndex) -> Section<Hooks> {
+        Section::Ok(Hooks::new(hooks::detail_seed(
+            self.seed,
+            index.body_id(self.system),
+        )))
     }
 
     /// The planet or member `body` on its orbit `orbit` at the time, of mass `mass` then, as
@@ -2453,7 +2497,7 @@ impl PlanetarySystem {
     }
 
     /// The record of the moon or ring `body` at the epoch's time, labelled `label`, whose parent
-    /// is as `parent` says then.
+    /// is as `parent` says then and goes round its hosts as `fate` tells.
     #[must_use]
     fn satellite_record(
         &self,
@@ -2461,6 +2505,7 @@ impl PlanetarySystem {
         body: &Body,
         label: BodyLabel,
         parent: &ParentNow,
+        fate: &BodyFate<'_>,
     ) -> BodyRecord {
         let t = epoch.t;
         let ctx = epoch.ctx;
@@ -2475,7 +2520,8 @@ impl PlanetarySystem {
         let builder = BodyRecord::builder(identity)
             .mass(Section::Ok(body.mass()))
             .moons(Section::NotApplicable)
-            .rings(Section::NotApplicable);
+            .rings(Section::NotApplicable)
+            .envelope(Section::NotApplicable);
         let present = state == BodyState::Present;
         let builder = match (&body.part, present, parent.position) {
             (Part::Ring(ring), true, Some(centre)) => builder
@@ -2498,6 +2544,27 @@ impl PlanetarySystem {
                 let photometry = bulk.map_or(Section::NotModelled, |(bulk, derived)| {
                     Section::Ok(photometry_of(derived.atmosphere(), &bulk))
                 });
+                // P14.T48.e: a moon's surface section, and its envelope's tag, as a planet's. A
+                // moon's fractions hold no envelope, so its class always has a solid surface.
+                let (surface, envelope) = bulk.map_or(
+                    (Section::NotModelled, Section::NotApplicable),
+                    |(bulk, derived)| {
+                        if bulk.class().has_solid_surface() {
+                            let of = SurfaceOf::Moon {
+                                moon,
+                                derived,
+                                bulk: &bulk,
+                                orbit: &orbit,
+                            };
+                            (
+                                self.surface_section(epoch, body, fate, of),
+                                Section::NotApplicable,
+                            )
+                        } else {
+                            (Section::NotApplicable, Section::NotModelled)
+                        }
+                    },
+                );
                 let bulk = bulk.map_or(Section::NotModelled, |(bulk, _)| Section::Ok(bulk));
                 builder
                     .orbit(Section::Ok(
@@ -2508,23 +2575,20 @@ impl PlanetarySystem {
                     .figure(body.figure_section(bulk.ok(), body.mass(), t))
                     .photometry(photometry)
                     .bulk(bulk)
+                    .surface(surface)
+                    .envelope(envelope)
                     .population(Section::NotApplicable)
                     .rotation(body.rotation_section())
+                    .hooks(self.present_hooks(body.index))
             }
-            (Part::Ring(_), _, _) => builder
+            // A ring or a moon not present at the time, or whose planet has no position then: its
+            // sections mean nothing then.
+            (Part::Ring(_) | Part::Moon(_), _, _) => builder
                 .population(Section::NotApplicable)
                 .orbit(Section::NotApplicable)
                 .bulk(Section::NotApplicable)
                 .surface(Section::NotApplicable)
                 .hooks(Section::NotApplicable)
-                .photometry(Section::NotApplicable)
-                .figure(Section::NotApplicable)
-                .rotation(Section::NotApplicable),
-            (Part::Moon(_), _, _) => builder
-                .population(Section::NotApplicable)
-                .orbit(Section::NotApplicable)
-                .bulk(Section::NotApplicable)
-                .surface(Section::NotApplicable)
                 .photometry(Section::NotApplicable)
                 .figure(Section::NotApplicable)
                 .rotation(Section::NotApplicable),
@@ -2670,6 +2734,7 @@ impl PlanetarySystem {
             .rings(Section::NotApplicable)
             .bulk(Section::NotApplicable)
             .surface(Section::NotApplicable)
+            .envelope(Section::NotApplicable)
             .hooks(Section::NotApplicable)
             .photometry(Section::NotApplicable)
             .figure(Section::NotApplicable)
@@ -2767,6 +2832,7 @@ impl PlanetarySystem {
             .rings(Section::NotApplicable)
             .bulk(Section::NotApplicable)
             .surface(Section::NotApplicable)
+            .envelope(Section::NotApplicable)
             .hooks(Section::NotApplicable)
             .photometry(Section::NotApplicable)
             .figure(Section::NotApplicable)
@@ -2930,19 +2996,36 @@ impl SurfaceInterior {
 }
 
 /// What a body's surface conditions and global figures read of the time they are asked at
-/// ([`published_surface`]): the hold, the hosts' light over the past up to it as the primary's
-/// orbit sees it, which the volatile history reads (P14.T48.b; `None` where this version does not
-/// compute it, and a moon's its planet's), the body's rotation, its seasonal orbit then, and the
-/// system's \[Fe/H\] and age.
+/// ([`published_surface`]): the hosts' light over the past up to it as the primary's orbit sees
+/// it, which the volatile history reads (P14.T48.b; a moon's its planet's), the body's rotation,
+/// its seasonal orbit then (`None` where this version does not compute it), and the system's
+/// \[Fe/H\] and age.
 #[derive(Debug, Clone, Copy)]
 struct SurfaceTime<'a> {
-    hold: ConditionsHold,
-    past: Option<&'a PastSky<'a>>,
-    rotation: Option<&'a BodyRotation>,
+    past: &'a PastSky<'a>,
+    rotation: &'a BodyRotation,
     seasonal: Option<&'a KeplerElements>,
     t: UniverseTime,
     fe_h: Dex,
     age: Years,
+}
+
+/// What [`PlanetarySystem::surface_section`] reads of a body beyond its record's place: a planet's
+/// or a member's derivation and bulk section, or a moon's, with its orbit about its planet then.
+#[derive(Debug, Clone, Copy)]
+enum SurfaceOf<'a> {
+    /// A planet or a member.
+    Body {
+        derived: &'a DerivedBody,
+        bulk: &'a BulkProperties,
+    },
+    /// A moon.
+    Moon {
+        moon: &'a MoonPart,
+        derived: &'a DerivedMoon,
+        bulk: &'a BulkProperties,
+        orbit: &'a KeplerElements,
+    },
 }
 
 /// What a body's surface conditions and global figures read of the body ([`published_surface`]):
@@ -2957,9 +3040,8 @@ struct SurfaceCase<'a> {
     interior: SurfaceInterior,
     craters: Option<SurfaceCraters>,
     sources: Option<&'a ImpactorSources>,
-    /// Its continental asymptote f∞ (P14.T48.a), word 0 of its `body.continents` stream; `None`
-    /// where the figures are not read.
-    continental_asymptote: Option<f64>,
+    /// Its continental asymptote f∞ (P14.T48.a), word 0 of its `body.continents` stream.
+    continental_asymptote: f64,
 }
 
 /// What a body's water window reads of its hosts over its past (P14.T48.b; science-p14-t24b-laws
@@ -3053,37 +3135,28 @@ struct SurfaceCraters {
     last_giant_impact: Option<Years>,
 }
 
-/// The surface conditions and global figures of the body `case` describes at `time` (P14.T24.a,
-/// T24.b): both [`Section::NotModelled`] under the hold, or with no rotation law, seasonal orbit,
-/// crater inputs, past sky or continental asymptote, or inputs the figures refuse; both
-/// [`Section::NotApplicable`] for a body with no surface; and otherwise both [`Section::Ok`], in
-/// science-p14-t24b-laws §4.6's order: T48.b's start condition from the past sky, the figures'
-/// first stage with the continents it gates, the conditions at the figures' heat flow and ocean
-/// weight θ, and the second stage from the conditions: the volatile history from their
-/// liquid-water flag (P14.T48.b), the ocean, the ice and the cloud, and then the conditions'
-/// climate regime (P14.T48.d), which reads the history and the ice.
+/// The surface section of the body `case` describes at `time` (P14.T24.a, T24.b, T48.a–e): its
+/// surface conditions and global figures.
+///
+/// [`Section::NotModelled`] with no seasonal orbit, crater inputs or impactor sources, or for
+/// inputs the figures refuse; [`Section::NotApplicable`] for a body with no surface; and
+/// otherwise [`Section::Ok`], in science-p14-t24b-laws §4.6's order:
+/// T48.b's start condition from the past sky, the figures' first stage with the continents it
+/// gates, the conditions at the figures' heat flow and ocean weight θ, and the second stage from
+/// the conditions: the volatile history from their liquid-water flag (P14.T48.b), the ocean, the
+/// ice and the cloud, and then the conditions' climate regime (P14.T48.d), which reads the history
+/// and the ice.
 #[must_use]
-fn published_surface(
-    time: &SurfaceTime<'_>,
-    case: &SurfaceCase<'_>,
-) -> (Section<SurfaceConditions>, Section<GlobalFigures>) {
-    match time.hold {
-        ConditionsHold::Held => return (Section::NotModelled, Section::NotModelled),
-        ConditionsHold::Published => {}
-    }
-    let (Some(rotation), Some(seasonal)) = (time.rotation, time.seasonal) else {
-        return (Section::NotModelled, Section::NotModelled);
+fn published_surface(time: &SurfaceTime<'_>, case: &SurfaceCase<'_>) -> Section<Surface> {
+    let Some(seasonal) = time.seasonal else {
+        return Section::NotModelled;
     };
-    let (Some(craters), Some(sources), Some(past), Some(asymptote)) = (
-        case.craters,
-        case.sources,
-        time.past,
-        case.continental_asymptote,
-    ) else {
-        return (Section::NotModelled, Section::NotModelled);
+    let (Some(craters), Some(sources)) = (case.craters, case.sources) else {
+        return Section::NotModelled;
     };
+    let (past, asymptote) = (time.past, case.continental_asymptote);
     let (sky, bulk, interior) = (&case.sky, case.bulk, &case.interior);
-    let spin = SeasonalSpin::of(rotation.frame(), time.t, seasonal, case.whose);
+    let spin = SeasonalSpin::of(time.rotation.frame(), time.t, seasonal, case.whose);
     let window = |age: Years| past.window_at(age);
     // Step 4's start condition (science-p14-t24b-laws §4.6): T48.b's, ahead of the conditions.
     let entry = window_entry(&WindowEntryInputs {
@@ -3126,15 +3199,16 @@ fn published_surface(
     debug_assert!(derived.is_ok(), "{derived:?}");
     let figures = match derived {
         Ok(Some(figures)) => figures,
-        Ok(None) => return (Section::NotApplicable, Section::NotApplicable),
-        Err(_) => return (Section::NotModelled, Section::NotModelled),
+        Ok(None) => return Section::NotApplicable,
+        Err(_) => return Section::NotModelled,
     };
+    let material = SurfaceMaterial::of(&bulk.fractions());
     let inputs = SurfaceInputs {
         atmosphere: sky.atmosphere,
         equilibrium_temperature: sky.equilibrium_temperature,
         surface_gravity: bulk.surface_gravity(),
         radius: Metres::from(bulk.radius()),
-        material: SurfaceMaterial::of(&bulk.fractions()),
+        material,
         stellar_flux: WattsPerSquareMetre::from(sky.flux),
         xuv_flux: sky.xuv_flux,
         spin,
@@ -3142,7 +3216,7 @@ fn published_surface(
         ocean_weight: figures.ocean_weight(),
     };
     let Some(conditions) = SurfaceConditions::derive(&inputs) else {
-        return (Section::NotApplicable, Section::NotApplicable);
+        return Section::NotApplicable;
     };
     // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
     // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
@@ -3169,7 +3243,11 @@ fn published_surface(
         ice_fraction: figures.ice_fraction(),
         ice_threshold: figures.ice_threshold(),
     });
-    (Section::Ok(conditions), Section::Ok(figures))
+    Section::Ok(
+        Surface::new(sky.atmosphere.state(), material, conditions, figures).expect(
+            "conditions exist only off the gas-envelope state, and `with_climate` gives their regime",
+        ),
+    )
 }
 
 /// The state at `t` of the moon `satellite`, in a system aged `age_at_epoch` at the epoch, whose

@@ -12,7 +12,9 @@
 //!
 //! Which histograms are fitted is the manifest's `histograms`: `smoke` (P15.T6.b's smoke run,
 //! seconds), `one_percent` (the production counts over 100) or `production`. Only `production`
-//! makes a table that is not provisional.
+//! makes a table that is not provisional. Histograms other than the smoke run's are refused when a
+//! class holds more unresolved orbits than one in [`UNRESOLVED_LIMIT`] ([`check_unresolved`],
+//! P15.T6.g).
 //!
 //! # Rerunning on the production histograms
 //!
@@ -97,7 +99,7 @@ pub const ITEMS: [&str; 12] = [
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct DisplacedFormsTask;
 
-/// The histograms could not be read.
+/// The histograms could not be read, or were refused.
 #[derive(Debug, thiserror::Error)]
 pub enum ReadOrbitsError {
     /// The file is not an orbit run's histograms.
@@ -116,6 +118,58 @@ pub enum ReadOrbitsError {
     /// The dataset has no histogram file.
     #[error("the dataset holds no `{ORBITS_FILE}`")]
     Missing,
+    /// A class holds more unresolved orbits than [`UNRESOLVED_LIMIT`] allows (P15.T6.g).
+    #[error(
+        "class {class} holds {unresolved} unresolved orbits of {orbits}, over its limit of \
+         {limit} (one in {UNRESOLVED_LIMIT}): rerun the orbits with `max_halvings` six, and take a \
+         class still over it to a decision agent"
+    )]
+    Unresolved {
+        /// The class's name.
+        class: String,
+        /// Its unresolved orbits.
+        unresolved: u64,
+        /// Its orbits.
+        orbits: u64,
+        /// The most it may hold.
+        limit: u64,
+    },
+}
+
+/// One in this many of a class's orbits may be unresolved in histograms the fit accepts, the
+/// smoke run's excepted (P15.T6.g): 10⁻⁴ of the class, so the unresolved could bias a share by at
+/// most 10⁻⁴ of the class, which for a bin holding a tenth of it is 10⁻³ relative, below the 0.7%
+/// Poisson floor of a 2 × 10⁴-orbit bin and the fits' misplaced shares. That is 21 of a production
+/// disc class, 20 of an old one and 10 of a nuclear-disc one; it rounds down, so a class under 10⁴
+/// orbits may have none.
+pub const UNRESOLVED_LIMIT: u64 = 10_000;
+
+/// Refuses histograms in which a class holds more than one unresolved orbit in
+/// [`UNRESOLVED_LIMIT`], unless they are the smoke run's, which records its counts without the
+/// limit (P15.T6.g).
+///
+/// # Errors
+///
+/// [`ReadOrbitsError::Unresolved`] for the first class over the limit.
+pub fn check_unresolved(
+    histograms: Histograms,
+    records: &[ClassHistogram],
+) -> Result<(), ReadOrbitsError> {
+    if histograms == Histograms::Smoke {
+        return Ok(());
+    }
+    for (class, record) in classes().iter().zip(records) {
+        let limit = record.orbits / UNRESOLVED_LIMIT;
+        if record.unresolved > limit {
+            return Err(ReadOrbitsError::Unresolved {
+                class: class.name(),
+                unresolved: record.unresolved,
+                orbits: record.orbits,
+                limit,
+            });
+        }
+    }
+    Ok(())
 }
 
 /// Reads an orbit run's histograms as [`render`](super::render) wrote them: the manifest hash in
@@ -713,6 +767,35 @@ fn notes(fits: &FormFits) -> Vec<String> {
             .collect();
         out.push(format!("- row {s}: {}", cells.join(", ")));
     }
+    out.push(String::new());
+    out.extend(fates(fits));
+    out
+}
+
+/// The notes' lines on each class's orbits captured by the black hole (counted as gone) and
+/// unresolved (in no share), P15.T6.g's; the classes not named have none.
+#[must_use]
+fn fates(fits: &FormFits) -> Vec<String> {
+    let named: Vec<(String, &ClassHistogram)> = classes()
+        .iter()
+        .zip(&fits.records)
+        .filter(|(_, r)| r.captured > 0 || r.unresolved > 0)
+        .map(|(c, r)| (c.name(), r))
+        .collect();
+    if named.is_empty() {
+        return vec!["No class has an orbit captured by the black hole or unresolved.".to_owned()];
+    }
+    let mut out = vec![
+        "Orbits captured by the black hole (gone) and unresolved (in no share), by class; the"
+            .to_owned(),
+        "others have none:".to_owned(),
+    ];
+    for (name, r) in named {
+        out.push(format!(
+            "- `{name}`: {} captured, {} unresolved of {}",
+            r.captured, r.unresolved, r.orbits
+        ));
+    }
     out
 }
 
@@ -760,8 +843,11 @@ pub fn acceptance(fits: &FormFits) -> String {
         }
     };
     let pc = fits.half_height_ly / hyperion_sim::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
+    let captured: u64 = fits.records.iter().map(|r| r.captured).sum();
+    let unresolved: u64 = fits.records.iter().map(|r| r.unresolved).sum();
     format!(
-        "on {} ({} orbits): disc-born weighted mean misplaced share {:.4} (unregularised {:.4}, λ \
+        "on {} ({} orbits, {captured} captured by the black hole and {unresolved} unresolved): \
+         disc-born weighted mean misplaced share {:.4} (unregularised {:.4}, λ \
          {}); {edges} of 56 classes with a parameter on a box edge, {heavy_edges} of them over \
          10⁻⁴ of the weight; {} second-difference sign changes along the rows; worst misplaced \
          share thick disc {:.3}, halo {:.3}, bulge {:.3}, bar {:.3}, nuclear disc {:.3}; own-form \
@@ -804,7 +890,10 @@ pub fn acceptance(fits: &FormFits) -> String {
 
 /// The citations the fit was made against.
 pub const SOURCE: &str = "orbits integrated in the model's own potential with a rotating \
-    Dehnen (2000) quadrupole bar (P15.T6.a–b); the brainstorm's form families and own-form \
+    Dehnen (2000) quadrupole bar (P15.T6.a–b), by Mikkola and Aarseth's (2002, Celest. Mech. Dyn. \
+    Astron. 84, 343) time-transformed leapfrog, with capture by the black hole below 4GM/c \
+    (Bardeen, Press and Teukolsky 1972, ApJ 178, 347; Shapiro and Teukolsky 1983, §12.4; \
+    P15.T6.g); the brainstorm's form families and own-form \
     shares; Maoz and Graur (2017, ApJ 848, 25) for the Type Ia delays; Shen et al. (2018, ApJ \
     865, 15) for the survivors' D6 mechanism and El-Badry et al. (2023, Open Journal of Astrophysics 6, §8.2) for their \
     slow and fast populations (ruling 128.1); Li et al. (2011, MNRAS 412, 1473) \
@@ -913,6 +1002,7 @@ impl FitTask for DisplacedFormsTask {
                 expected,
             }));
         }
+        check_unresolved(params.histograms, &records).map_err(input)?;
         let fits = fit_all(&params, records, threads)?;
         Ok(TaskOutput {
             table: render(&fits),
@@ -934,6 +1024,7 @@ mod tests {
             .map(|c| ClassHistogram::new(c.source.is_barred()))
             .collect();
         records[3].orbits = 7;
+        records[3].outside = 7;
         let mut text =
             String::from("# hyperion-fit displaced_forms orbit histograms (plan 15, P15.T6.b)\n");
         text.push_str("# manifest-sha256 abc\n");
@@ -947,5 +1038,38 @@ mod tests {
             read_orbits(&text[..text.len() / 2]),
             Err(ReadOrbitsError::Malformed(_))
         ));
+    }
+
+    /// P15.T6.g: one unresolved orbit in 10⁴ of a class is accepted, one more is refused, except
+    /// in the smoke run's histograms; 21 of a production disc class's 214,286, 10 of a nuclear-disc
+    /// class's 10⁵.
+    #[test]
+    fn histograms_over_the_unresolved_limit_are_refused() {
+        let mut records: Vec<ClassHistogram> = classes()
+            .iter()
+            .map(|c| ClassHistogram::new(c.source.is_barred()))
+            .collect();
+        let nuclear = classes()
+            .iter()
+            .position(|c| c.source == Source::NuclearDisc && c.speed == Some(0))
+            .unwrap();
+        records[0].orbits = 214_286;
+        records[0].unresolved = 21;
+        records[nuclear].orbits = 100_000;
+        records[nuclear].unresolved = 10;
+        for histograms in [Histograms::Production, Histograms::OnePercent] {
+            assert!(check_unresolved(histograms, &records).is_ok());
+        }
+        records[nuclear].unresolved = 11;
+        let refused = check_unresolved(Histograms::Production, &records);
+        assert!(
+            matches!(
+                &refused,
+                Err(ReadOrbitsError::Unresolved { class, unresolved: 11, orbits: 100_000, limit: 10 })
+                    if class == "nuclear_s0"
+            ),
+            "{refused:?}"
+        );
+        assert!(check_unresolved(Histograms::Smoke, &records).is_ok());
     }
 }

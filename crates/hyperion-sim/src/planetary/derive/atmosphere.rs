@@ -28,9 +28,7 @@
 //!   keeps the oxygen of the water it lost, less what escapes with the hydrogen, what its young
 //!   magma ocean took up and what its surface takes up ([`runaway_oxygen`]; Luger and Barnes 2015;
 //!   Schaefer et al. 2016). No rule makes
-//!   biological oxygen: no plan produces life, so a generated Earth has none. The rules are held
-//!   until the 21 → 22 batch's bump (`CARBON_SPECIATION_VERSION`): below it [`atmosphere`] is
-//!   P14.T13.c's, bit for bit, so that the batch's goldens move once.
+//!   biological oxygen: no plan produces life, so a generated Earth has none.
 //!
 //! The figures the plan names are built as it names them. The ones it leaves to this task are
 //! the lane's, each fixed by the Solar System and marked provisional on its constant: the
@@ -41,6 +39,7 @@
 //! a giant's internal heat enters only its gas envelope's temperature, so that the two can be
 //! told apart (ruling 112.7).
 
+use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
 use crate::planetary::context::XuvHistory;
@@ -58,7 +57,6 @@ use crate::units::{
     EarthMasses, JoulesPerSquareMetre, Kelvin, Kilograms, Metres, Pascals, SolarLuminosities,
     SolarMasses, WattsPerSquareMetre, Years,
 };
-use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
 /// The atomic mass constant, kg (CODATA 2022: 1.660 539 068 92 × 10⁻²⁷ kg), in which molecular
 /// masses are counted.
@@ -68,41 +66,6 @@ pub use crate::substance::MOLAR_GAS_CONSTANT;
 
 /// One bar, Pa, the unit the greenhouse constants are fitted in.
 const PASCALS_PER_BAR: f64 = 1e5;
-
-/// The generator version from which [`atmosphere`] applies P14.T24.f's carbon speciation and
-/// oxygen: 22, the 21 → 22 batch's bump (plan 14, "Order and parallelism", the bump plan).
-///
-/// P14.T24.f is built in that batch, whose goldens move once, at its bump in P14.T48.e. Below it
-/// [`Speciation::in_force`] gives P14.T13.c's rules, bit for bit version 21's, and from it
-/// P14.T24.f's. The bump removes this hold
-/// (`carbon_and_oxygen_are_held_only_until_the_batch_s_bump`).
-pub(crate) const CARBON_SPECIATION_VERSION: GeneratorVersion = GeneratorVersion::new(22);
-
-/// Which rules [`atmosphere`] gives a body's carbon and oxygen (P14.T24.f, held until the
-/// 21 → 22 batch's bump, [`CARBON_SPECIATION_VERSION`]).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum Speciation {
-    /// P14.T13.c's, bit for bit version 21's: carbon is always carbon dioxide, and no body has
-    /// methane or oxygen.
-    Earlier,
-    /// P14.T24.f's: carbon is methane on a body formed beyond the snow line that lies beyond the
-    /// maximum-greenhouse limit, kept where nitrogen is, and a runaway world keeps the oxygen of
-    /// the water it lost, less its sinks.
-    CarbonAndOxygen,
-}
-
-impl Speciation {
-    /// The rules of the generator version in force: [`Self::CarbonAndOxygen`] from
-    /// [`CARBON_SPECIATION_VERSION`], [`Self::Earlier`] below it.
-    #[must_use]
-    pub(crate) fn in_force() -> Self {
-        if GENERATOR_VERSION >= CARBON_SPECIATION_VERSION {
-            Self::CarbonAndOxygen
-        } else {
-            Self::Earlier
-        }
-    }
-}
 
 /// The species whose escape an atmosphere is judged on (P14.T13.b): the typed view of the substance
 /// registry's rows 0–8, which are these nine in [`Gas::ALL`]'s order ([`Gas::substance`],
@@ -1139,8 +1102,7 @@ impl Atmosphere {
     ///
     /// A change of carrier is a recorded state change, as a change of [`Self::state`] or of
     /// [`Self::retention`] is: the carbon's partial pressure moves from one species to the other
-    /// there. Until the 21 → 22 batch's bump it is always carbon dioxide
-    /// (`CARBON_SPECIATION_VERSION`).
+    /// there.
     #[must_use]
     pub const fn carbon_carrier(&self) -> Option<CarbonCarrier> {
         self.carbon_carrier
@@ -1204,15 +1166,15 @@ struct Airborne {
     argon: f64,
     oxygen: f64,
     /// The species the carbon is airborne as (P14.T24.f): set by where the body formed and where
-    /// it lies, and carbon dioxide under P14.T13.c's rules and on a young magma ocean.
+    /// it lies, and carbon dioxide on a young magma ocean.
     carrier: CarbonCarrier,
 }
 
 impl Airborne {
     /// What escape leaves of the inventory of the body `inputs` describe, whose retention is
-    /// `retention`, under the carbon rules `speciation` ([`atmosphere`]'s step 2).
+    /// `retention` ([`atmosphere`]'s step 2).
     #[must_use]
-    fn kept(inputs: &AtmosphereInputs, retention: Retention, speciation: Speciation) -> Self {
+    fn kept(inputs: &AtmosphereInputs, retention: Retention) -> Self {
         let kept = |gas: Gas, mass: Kilograms| {
             if retention.retains(gas) {
                 mass.value()
@@ -1221,19 +1183,10 @@ impl Airborne {
             }
         };
         let inventory = &inputs.inventory;
-        let carrier = match (speciation, inputs.formed, inputs.insolation) {
-            (
-                Speciation::CarbonAndOxygen,
-                SnowLineSide::Beyond,
-                Insolation::BeyondMaximumGreenhouse,
-            ) => CarbonCarrier::Methane,
-            (
-                Speciation::CarbonAndOxygen,
-                SnowLineSide::Beyond,
-                Insolation::InsideRunaway | Insolation::Habitable,
-            )
-            | (Speciation::CarbonAndOxygen, SnowLineSide::Inside, _)
-            | (Speciation::Earlier, _, _) => CarbonCarrier::CarbonDioxide,
+        let carrier = match (inputs.formed, inputs.insolation) {
+            (SnowLineSide::Beyond, Insolation::BeyondMaximumGreenhouse) => CarbonCarrier::Methane,
+            (SnowLineSide::Beyond, Insolation::InsideRunaway | Insolation::Habitable)
+            | (SnowLineSide::Inside, _) => CarbonCarrier::CarbonDioxide,
         };
         // The same carbon, mole for mole, as methane: the hydrogen comes from the body's water.
         let methane = match carrier {
@@ -1255,13 +1208,8 @@ impl Airborne {
     }
 
     /// How the climate of the body `inputs` describe divides what it keeps, with retention
-    /// `retention` under the rules `speciation` ([`atmosphere`]'s step 3); the state it gives.
-    fn divide(
-        &mut self,
-        inputs: &AtmosphereInputs,
-        retention: Retention,
-        speciation: Speciation,
-    ) -> SurfaceState {
+    /// `retention` ([`atmosphere`]'s step 3); the state it gives.
+    fn divide(&mut self, inputs: &AtmosphereInputs, retention: Retention) -> SurfaceState {
         match (inputs.crust, inputs.insolation) {
             // A young magma ocean, whatever its greenhouse's temperature, holds its carbon as
             // carbon dioxide (the reported surface is at least the solidus).
@@ -1275,7 +1223,7 @@ impl Airborne {
             (Crust::Solid, Insolation::InsideRunaway) => {
                 let lost = self.water;
                 self.water = 0.0;
-                if speciation == Speciation::CarbonAndOxygen && retention.retains(Gas::Oxygen) {
+                if retention.retains(Gas::Oxygen) {
                     self.oxygen = runaway_oxygen(
                         Kilograms::new(lost),
                         inputs.mass,
@@ -1414,8 +1362,7 @@ fn greenhouse(
     (t, partials, tau)
 }
 
-/// The atmosphere of the body `inputs` describe (P14.T13.b–c, with P14.T24.f's carbon and oxygen
-/// from the 21 → 22 batch's bump).
+/// The atmosphere of the body `inputs` describe (P14.T13.b–c, with P14.T24.f's carbon and oxygen).
 ///
 /// 1. A body with a hydrogen and helium envelope of at least 0.1% of its mass is a
 ///    [`SurfaceState::GasEnvelope`] radiating at its heated temperature.
@@ -1481,9 +1428,6 @@ fn greenhouse(
 /// the surface temperature, is not modelled. No term is fitted for oxygen (the lane's,
 /// provisional).
 ///
-/// Until the 21 → 22 batch's bump (`CARBON_SPECIATION_VERSION`) the carbon is carbon dioxide on
-/// every body and no body has oxygen, as P14.T13.c gave, bit for bit.
-///
 /// # Examples
 ///
 /// An Earth with its median inventory keeps its air, warms to about 288 K and is temperate. Its
@@ -1530,13 +1474,6 @@ fn greenhouse(
 /// ```
 #[must_use]
 pub fn atmosphere(inputs: &AtmosphereInputs) -> Atmosphere {
-    atmosphere_under(inputs, Speciation::in_force())
-}
-
-/// [`atmosphere`] under the carbon and oxygen rules `speciation`, which tests read from before
-/// the 21 → 22 batch's bump puts them in force (P14.T24.f, held).
-#[must_use]
-pub(crate) fn atmosphere_under(inputs: &AtmosphereInputs, speciation: Speciation) -> Atmosphere {
     let cap = inputs.hottest_host.value();
     let saturate = |t: f64| Kelvin::new(if cap > 0.0 { t.min(cap) } else { t });
     let exobase = exobase_temperature(inputs.worst_equilibrium, inputs.xuv_fluence);
@@ -1546,11 +1483,8 @@ pub(crate) fn atmosphere_under(inputs: &AtmosphereInputs, speciation: Speciation
         Retention::of(inputs.mass, inputs.radius, exobase)
     } else {
         Retention::default()
-    };
-    let retention = match speciation {
-        Speciation::CarbonAndOxygen => retention.with_methane_as_nitrogen(),
-        Speciation::Earlier => retention,
-    };
+    }
+    .with_methane_as_nitrogen();
     let airless = |state: SurfaceState, partials: PartialPressures, t: f64, carrier| Atmosphere {
         state,
         surface_temperature: saturate(t),
@@ -1585,8 +1519,8 @@ pub(crate) fn atmosphere_under(inputs: &AtmosphereInputs, speciation: Speciation
     }
 
     // Steps 2 and 3: what escape leaves, and how the climate divides it.
-    let mut airborne = Airborne::kept(inputs, retention, speciation);
-    let climate = airborne.divide(inputs, retention, speciation);
+    let mut airborne = Airborne::kept(inputs, retention);
+    let climate = airborne.divide(inputs, retention);
 
     // Step 4: the partial pressures and the greenhouse they hold.
     let equilibrium = inputs.equilibrium;

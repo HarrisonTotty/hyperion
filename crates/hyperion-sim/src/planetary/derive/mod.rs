@@ -110,8 +110,8 @@ pub use rotation::tidal_locking_time;
 
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::atmosphere::{
-    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, Speciation, SurfaceMaterial,
-    VolatileDraws, VolatileInventory, atmosphere_under, energy_limited_loss, volatile_inventory,
+    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, SurfaceMaterial, VolatileDraws,
+    VolatileInventory, atmosphere, energy_limited_loss, volatile_inventory,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -120,7 +120,7 @@ use crate::planetary::derive::envelope::radius_with_envelope;
 use crate::planetary::derive::habitable_zone::HabitableLimit;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::limits::TidalPlanet;
-use crate::planetary::derive::rotation::tides_in_force;
+use crate::planetary::derive::rotation::tides;
 use crate::planetary::disc::DiscProfile;
 use crate::planetary::params::{
     GAS_GIANT_ENVELOPE_FRACTION, ICE_GIANT_MASS, ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION,
@@ -420,13 +420,33 @@ impl PlanetClass {
         }
     }
 
-    /// Whether a body of this class has a surface section: every class but the giants, whose
-    /// section is not applicable (ruling 34).
+    /// Whether the class is a giant, an ice or a gas giant: what a body's mechanics read of its
+    /// class, its spin family ([`SpinFamily::of`](rotation::SpinFamily::of)) among them
+    /// (decision-p14-t35e-wire §2.3).
+    ///
+    /// A sub-Neptune is no giant, though it has no solid surface either
+    /// ([`has_solid_surface`](Self::has_solid_surface)): the two questions part there.
     #[must_use]
-    pub const fn has_surface(self) -> bool {
+    pub const fn is_giant(self) -> bool {
         match self {
-            Self::Rocky | Self::Icy | Self::SubNeptune => true,
-            Self::IceGiant | Self::GasGiant => false,
+            Self::IceGiant | Self::GasGiant => true,
+            Self::Rocky | Self::Icy | Self::SubNeptune => false,
+        }
+    }
+
+    /// Whether a body of this class has a solid surface, a rocky or an icy body: exactly the
+    /// classes whose atmosphere is not in the gas-envelope state, since both read the one envelope
+    /// fraction against [`THIN_ENVELOPE_FRACTION`] (decision-p14-t35e-wire §2.3).
+    ///
+    /// The record's surface section is [`Section::Ok`](crate::planetary::record::Section::Ok) for
+    /// a present body of such a class, and [`Section::NotApplicable`](crate::planetary::record::Section::NotApplicable)
+    /// for the others, the sub-Neptunes and the giants, whose air is their `envelope` section's
+    /// (P14.T48.e). Readers decide from the record's tag, not from this predicate.
+    #[must_use]
+    pub const fn has_solid_surface(self) -> bool {
+        match self {
+            Self::Rocky | Self::Icy => true,
+            Self::SubNeptune | Self::IceGiant | Self::GasGiant => false,
         }
     }
 }
@@ -643,9 +663,7 @@ impl DerivedBody {
     }
 
     /// The heaviest moon that, starting at the prograde limit, tides let survive to the time
-    /// (Barnes and O'Brien 2002), with the body's k₂ and Q ([`rotation::tides`], P14.T14.d; until
-    /// the 21 → 22 batch's bump a rocky body's for every class with a surface and a giant's for the
-    /// giants).
+    /// (Barnes and O'Brien 2002), with the body's k₂ and Q ([`rotation::tides`], P14.T14.d).
     #[must_use]
     pub const fn maximum_moon_mass(&self) -> EarthMasses {
         self.maximum_moon_mass
@@ -893,24 +911,6 @@ pub fn derive_body(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedBody, DeriveBodyError> {
-    derive_body_under(placed, hosts, disc, age, t, Speciation::in_force())
-}
-
-/// [`derive_body`] under the atmosphere's carbon and oxygen rules `speciation`, which tests read
-/// from before the 21 → 22 batch's bump puts them in force (P14.T24.f, held; `atmosphere`'s
-/// documentation).
-///
-/// # Errors
-///
-/// As [`derive_body`].
-pub(crate) fn derive_body_under(
-    placed: &PlacedBody,
-    hosts: &BodyHosts<'_>,
-    disc: &DiscProfile,
-    age: Years,
-    t: UniverseTime,
-    speciation: Speciation,
-) -> Result<DerivedBody, DeriveBodyError> {
     let age_now = Years::new(age.value() + t.since_epoch().as_julian_years_f64());
     if age_now.value().is_nan() || age_now.value() <= 0.0 {
         return Err(DeriveBodyError::NotYetFormed { age: age_now });
@@ -972,7 +972,7 @@ pub(crate) fn derive_body_under(
             age: age_now,
             hottest_host: sky.hottest,
         };
-        let air = atmosphere_under(&inputs, speciation);
+        let air = atmosphere(&inputs);
         (irradiated, heated, air)
     };
     let mut albedo = BondAlbedo::BEFORE_ATMOSPHERES;
@@ -1025,8 +1025,7 @@ pub(crate) fn derive_body_under(
 }
 
 /// What P14.T15's moon limit reads of a derived body of class `class`, mass `mass`, radius
-/// `radius` and fractions `fractions`: its tides ([`rotation::tides`], P14.T14.d; held until the
-/// 21 → 22 batch's bump, `rotation`'s documentation).
+/// `radius` and fractions `fractions`: its tides ([`rotation::tides`], P14.T14.d).
 ///
 /// The tides are of the mass and radius rounded through the kilograms and metres that
 /// [`SpinningBody::of_class`](rotation::SpinningBody::of_class) reads for the body's locking time,
@@ -1038,7 +1037,7 @@ fn tidal_planet(
     radius: Metres,
     fractions: &MassFractions,
 ) -> TidalPlanet {
-    let (love_number, tidal_q) = tides_in_force(
+    let (love_number, tidal_q) = tides(
         class,
         EarthMasses::from(mass),
         EarthRadii::from(radius),
@@ -1666,13 +1665,11 @@ pub(crate) mod solar {
         .unwrap()
     }
 
-    /// `placed` derived about the present Sun with its history ([`historic_sun`]) at `age`, under
-    /// the carbon and oxygen rules `speciation` (P14.T24.f, held).
-    pub(crate) fn derive_under(
+    /// `placed` derived about the present Sun with its history ([`historic_sun`]) at `age`.
+    pub(crate) fn derive_historic(
         placed: &PlacedBody,
         disc: &DiscProfile,
         age: Years,
-        speciation: Speciation,
     ) -> DerivedBody {
         let lights = [historic_sun()];
         let hosts = BodyHosts::new(
@@ -1682,7 +1679,7 @@ pub(crate) mod solar {
             &[],
         )
         .unwrap();
-        derive_body_under(placed, &hosts, disc, age, UniverseTime::EPOCH, speciation).unwrap()
+        derive_body(placed, &hosts, disc, age, UniverseTime::EPOCH).unwrap()
     }
 
     /// The table's bodies, the eight planets but the giants and the four small bodies.
@@ -1695,13 +1692,13 @@ pub(crate) mod solar {
     }
 
     /// The table's bodies ([`table_bodies`]), each at the rank that keeps its radius, about the
-    /// present Sun with its history at its age, under the carbon and oxygen rules `speciation`.
-    pub(crate) fn table_under(speciation: Speciation) -> Vec<(&'static str, DerivedBody)> {
+    /// present Sun with its history at its age.
+    pub(crate) fn historic_table() -> Vec<(&'static str, DerivedBody)> {
         let disc = solar_disc();
         table_bodies()
             .map(|&(name, kg, km, a, e)| {
                 let placed = placed_about_the_sun(&disc, (kg, km, a, e));
-                (name, derive_under(&placed, &disc, SOLAR_AGE, speciation))
+                (name, derive_historic(&placed, &disc, SOLAR_AGE))
             })
             .collect()
     }
@@ -1869,11 +1866,11 @@ mod tests {
         assert!(neptune <= 1.5 * 36_000.0 / 0.41, "Neptune: Q′ {neptune}");
     }
 
-    /// P14.T14.d, held: the k₂ the readers take from the 21 → 22 batch's bump, for the generated
-    /// Uranus, Neptune and `hot_sub_neptune`, pinned by its bits while no golden holds it, so that
-    /// a change to the law before the bump shows here.
+    /// P14.T14.d: the k₂ every reader takes from the 21 → 22 batch's bump, for the generated
+    /// Uranus, Neptune and `hot_sub_neptune`, pinned by its bits, so that a change to the law
+    /// shows here as well as in the goldens that read it.
     #[test]
-    fn the_held_enveloped_love_numbers_are_pinned_bit_for_bit() {
+    fn the_enveloped_love_numbers_are_pinned_bit_for_bit() {
         use hyperion_testkit::float::bits;
         let bodies = solar_system();
         let hot = derive(&placed(5.0 * EARTH_MASS_KG, 0.05, 0.01, 0.5), &solar_disc()).unwrap();
@@ -2123,7 +2120,31 @@ mod tests {
         assert_eq!(class(5.0, 0.1, 0.9), PlanetClass::SubNeptune);
         assert_eq!(class(30.0, 5.0, 0.5), PlanetClass::IceGiant);
         assert_eq!(class(90.0, 5.0, 0.5), PlanetClass::GasGiant);
-        assert!(!PlanetClass::GasGiant.has_surface() && PlanetClass::SubNeptune.has_surface());
+    }
+
+    /// P14.T48.e's gas-envelope split (decision-p14-t35e-wire §2.3): `is_giant` is the old
+    /// `!has_surface()` for every class, so that no spin, tide or lock moves, and
+    /// `has_solid_surface` holds exactly where the figure's datum is the solid surface.
+    #[test]
+    fn the_class_predicates_split_at_the_sub_neptune() {
+        for (class, giant, solid) in [
+            (PlanetClass::Rocky, false, true),
+            (PlanetClass::Icy, false, true),
+            (PlanetClass::SubNeptune, false, false),
+            (PlanetClass::IceGiant, true, false),
+            (PlanetClass::GasGiant, true, false),
+        ] {
+            // Version 21's `has_surface`: every class but the giants.
+            let had_surface = !matches!(class, PlanetClass::IceGiant | PlanetClass::GasGiant);
+            assert_eq!(class.is_giant(), giant, "{class:?}");
+            assert_eq!(class.is_giant(), !had_surface, "{class:?}");
+            assert_eq!(class.has_solid_surface(), solid, "{class:?}");
+            assert_eq!(
+                class.has_solid_surface(),
+                figure::Datum::of(class) == figure::Datum::SolidSurface,
+                "{class:?}"
+            );
+        }
     }
 
     #[test]
@@ -2470,7 +2491,8 @@ mod tests {
             pin(&mut w, name, &body);
         }
         // P14.T24.f: a Titan, whose carbon becomes methane, and a runaway world that lost many
-        // oceans, which keeps oxygen; both carbon dioxide and no oxygen until the 21 → 22 bump.
+        // oceans, which keeps oxygen; both were carbon dioxide and no oxygen before the 21 → 22
+        // bump.
         let (kg, km, a_au, eccentricity) = (1.345_2e23, 2_574.7, 9.582_6, 0.056_5);
         let titan = placed(
             kg,

@@ -41,7 +41,7 @@ use crate::num::assert_finite;
 use crate::patch::HeightSource;
 use crate::patch::collision::{MeshTriangle, finest_surface_point};
 use crate::spheroid::Spheroid;
-use crate::synth::{BandLevel, QueryHeightError, SynthCache, Synthesiser};
+use crate::synth::{BandLevel, PatchHeights, QueryHeightError, SynthCache, Synthesiser};
 
 /// A triangle of the finest level's mesh: its patch, at the finest level, its quad and the quad's
 /// half (R05's [`MeshTriangle`]).
@@ -258,6 +258,23 @@ impl<F: FieldView> HeightSource for Synthesiser<'_, F> {
     /// [`Synthesiser::height_range_m`], which carries the same quantile in its crater terms.
     fn height_range_m(&self, key: PatchKey) -> (f64, f64) {
         Synthesiser::height_range_m(self, key)
+    }
+
+    /// Covers the structural octaves' lattice about the patch once, as R09's bake does first
+    /// ([`Synthesiser::bake_patch`]; R10.T6.a, as T3's record asks).
+    fn prepare_cache(&self, cache: &mut SynthCache, key: PatchKey) {
+        crate::synth::bake::cover_patch(self, cache, key);
+    }
+
+    /// R09's bake of the patch's heights, parent-band heights and gradients
+    /// ([`Synthesiser::bake_patch`]) less the cover, which
+    /// [`prepare_cache`](HeightSource::prepare_cache) has made: the same values, bit for bit.
+    fn patch_heights(
+        &self,
+        cache: &mut SynthCache,
+        key: PatchKey,
+    ) -> Result<PatchHeights, QueryHeightError> {
+        crate::synth::bake::heights(self, cache, key)
     }
 }
 

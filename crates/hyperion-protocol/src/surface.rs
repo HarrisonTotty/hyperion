@@ -268,6 +268,11 @@ pub enum RecordSectionDto {
     Figure,
     /// The rotation.
     Rotation,
+    /// The envelope, a gas-envelope body's air (plan 14's P14.T48.e).
+    ///
+    /// No surface field names it: a body with an envelope has no solid surface, which the field
+    /// refuses as a bad request.
+    Envelope,
 }
 
 /// The cells a payload holds, each run with the resolution it was surveyed at. It travels from
@@ -641,6 +646,7 @@ mod tests {
             (RecordSectionDto::Photometry, "photometry"),
             (RecordSectionDto::Figure, "figure"),
             (RecordSectionDto::Rotation, "rotation"),
+            (RecordSectionDto::Envelope, "envelope"),
         ]);
     }
 

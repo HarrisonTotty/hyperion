@@ -11,16 +11,17 @@ disc_orbits_per_class = 2_143
 old_orbits_per_class = 2_000
 nuclear_orbits_per_class = 1_000
 control_orbits = 200
-# 1 ÷ 200 of the circular period at the pericentre, never below 1,000 years.
+# 1 ÷ 200 of the local circular period, P15.T6.g's time-transformed leapfrog, with no step floor.
 step_fraction = 0.005
-# The nuclear disc keeps 1 ÷ 200 (ruling 120.3): at 1 ÷ 100 a reduced run of 1,200 nuclear orbits
-# refined 22.3% of them against 15.2% (47% more; ruling 120.3 allows 10%) and kept twice as many
-# over the drift tolerance (2.0% against 1.1%).
+# The nuclear disc keeps 1 ÷ 200 (ruling 120.3, measured with T6.a's fixed step): at 1 ÷ 100 a
+# reduced run of 1,200 nuclear orbits refined 22.3% of them against 15.2% (47% more; ruling 120.3
+# allows 10%) and kept twice as many over the drift tolerance (2.0% against 1.1%).
 nuclear_step_fraction = 0.005
-min_step_years = 1_000.0
-# An orbit whose Jacobi integral drifts by more than 10⁻³ is integrated again at half the step, up
-# to three times: T6.a's 10⁻⁴ with six halvings, which the test orbits meet, would quadruple the
-# run (the barred inner orbits refine most); the histograms need positions, not energies to 10⁻⁴.
+# An orbit whose Jacobi integral drifts by more than 10⁻³ of max(|J₀|, |Φ(x₀)|) is integrated
+# again at half the step fraction, up to three times (ruling 120.3; the scale is
+# decision-p15-t6g-orbits §2's): the histograms need positions, and 10⁻³ bounds δ ln r by
+# 0.003–0.03 (|Φ₀| ÷ v_c² from 3 at the Sun to 30 at 100 ly) against cells 0.20 wide. One still over it is unresolved, counted and not classified, and
+# the fit refuses a class with more than one in 10⁴ (P15.T6.g).
 drift_tolerance = 1e-3
 max_halvings = 3
 # Dehnen's (2000) quadrupole at a twentieth of v_c² at the bar's half-length.

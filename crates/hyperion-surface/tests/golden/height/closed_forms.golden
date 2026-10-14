@@ -1,4 +1,4 @@
-# generator_version = 21
+# generator_version = 22
 world earth_like cell 0:8:0:0 a cube corner's cell
 variance finer than 10000 m = relief 0x40523c3ab91e7f7e channels 0x40a056dc554c6067 craters 0x402c0d7fe16b3f9c rims 0x0000000000000000 total 0x40a104cbaaf6bfa3
 variance finer than 1000 m = relief 0x400035f28ec783bd channels 0x0000000000000000 craters 0x3fdb54ec600a3edb rims 0x0000000000000000 total 0x4003a0901ac8cb98
