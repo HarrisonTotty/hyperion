@@ -17,8 +17,10 @@
 //! coarse cells, from which the relief derives each level's amplitude and the closed-form variance
 //! below a cell ([`local_variance`]), with the crust classes' shapes and anchors that make a body's
 //! law ([`SpectrumShape`], [`BandSpectrum::anchored`]); and the closed forms of the ground finer
-//! than a wavelength that R10 reads, per cell and per contribution ([`unresolved_variance`],
-//! [`structure_function`], [`unresolved_rms`]).
+//! than a wavelength, per cell and per contribution ([`unresolved_variance`],
+//! [`structure_function`], [`unresolved_rms`]), with the level-keyed ones R10 reads, of what a band
+//! level leaves out of the finest level's ground ([`Synthesiser::omitted_variance`],
+//! [`Synthesiser::omitted_structure_function`], [`Synthesiser::omitted_rms`]).
 
 pub mod bake;
 pub mod channels;
@@ -282,7 +284,9 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     }
 
     /// The variance of `cell`'s ground in wavelengths shorter than `finer_than`, per contribution
-    /// ([`unresolved_variance`], from the small craters' octaves it holds).
+    /// ([`unresolved_variance`], from the small craters' octaves it holds). What a band level
+    /// leaves out is more than this at its `λ_n`: that is
+    /// [`omitted_variance`](Self::omitted_variance).
     ///
     /// # Panics
     ///
@@ -297,7 +301,9 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     }
 
     /// The structure function of `cell`'s ground in wavelengths shorter than `finer_than` at a
-    /// lag of `lag` ([`structure_function`], from the small craters' octaves it holds).
+    /// lag of `lag` ([`structure_function`], from the small craters' octaves it holds). That of
+    /// what a band level leaves out is
+    /// [`omitted_structure_function`](Self::omitted_structure_function).
     ///
     /// # Panics
     ///
@@ -313,7 +319,8 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     }
 
     /// The RMS of `cell`'s ground unresolved at `resolution` ([`unresolved_rms`], from the small
-    /// craters' octaves it holds).
+    /// craters' octaves it holds). That of what a band level leaves out is
+    /// [`omitted_rms`](Self::omitted_rms).
     ///
     /// # Panics
     ///
@@ -321,6 +328,83 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     #[must_use]
     pub fn unresolved_rms(&self, cell: PatchKey, resolution: Metres) -> Option<Metres> {
         self.unresolved_variance(cell, resolution).map(rms_of)
+    }
+
+    /// What band level `level` leaves out of the finest level's ground in `cell`, per
+    /// contribution: the level-keyed closed forms (added by R10.T5;
+    /// `decision-r10-t5-closed-forms.md`), or `None` where the view does not hold the cell.
+    ///
+    /// Each contribution's wavelength-keyed form ([`unresolved_variance`]) is taken from the cut
+    /// at which it counts what the level leaves out, since a level evaluates each contribution by
+    /// its own scale ([`levels`]): the structural octaves from the first degree of the first octave
+    /// the level does not evaluate; the channels below the last evaluated level's mean cell width;
+    /// the small craters below the last evaluated octave's smallest diameter; and the coarse rims
+    /// at the level's `λ_n`, the half of which is its fillet. It is zero from the band limit's
+    /// level, and at a level that evaluates none of them it is the whole variance below the cell.
+    /// The small craters' part does not yet count the sharpening of the octaves the level keeps,
+    /// from its fillet to the band limit's (R09.T7.h).
+    ///
+    /// # Panics
+    ///
+    /// If `cell` is not of the field's level.
+    #[must_use]
+    pub fn omitted_variance(&self, cell: PatchKey, level: BandLevel) -> Option<UnresolvedVariance> {
+        let field = self.field;
+        let cuts = levels::LevelCuts::of(
+            field.header(),
+            self.craters.octaves(),
+            self.level_set(level),
+        );
+        let relief = relief::relief_variance_from(field, cell, cuts.relief_degree)?;
+        let channels = channels::unresolved_channel_variance(field, cell, cuts.channels)?;
+        Some(UnresolvedVariance {
+            relief,
+            channels,
+            craters: self.craters.octaves().unresolved_variance(cuts.craters),
+            rims: craters::rims::unresolved_rims(field, cell, cuts.rims)?,
+        })
+    }
+
+    /// The structure function at a lag of `lag` of what band level `level` leaves out of the
+    /// finest level's ground in `cell`, square metres: the contributions' structure functions at
+    /// [`omitted_variance`](Self::omitted_variance)'s cuts, summed in its order (added by
+    /// R10.T5); `None` where the view does not hold the cell. Each tends to twice its share of
+    /// that variance at lags long against its wavelengths.
+    ///
+    /// # Panics
+    ///
+    /// If `lag` is not finite and non-negative, or `cell` is not of the field's level.
+    #[must_use]
+    pub fn omitted_structure_function(
+        &self,
+        cell: PatchKey,
+        level: BandLevel,
+        lag: Metres,
+    ) -> Option<SquareMetres> {
+        let field = self.field;
+        let cuts = levels::LevelCuts::of(
+            field.header(),
+            self.craters.octaves(),
+            self.level_set(level),
+        );
+        let relief = relief::relief_structure_from(field, cell, cuts.relief_degree, lag)?;
+        let channels = channels::channel_structure_function(field, cell, cuts.channels, lag)?;
+        let craters = self.craters.octaves().structure_function(cuts.craters, lag);
+        let rims = craters::rims::rims_structure_function(field, cell, cuts.rims, lag)?;
+        Some(relief + channels + craters + rims)
+    }
+
+    /// The RMS of what band level `level` leaves out of the finest level's ground in `cell`: the
+    /// square root of [`omitted_variance`](Self::omitted_variance)'s total, which R10's readings
+    /// quote as the uncertainty of a height read at that level (its Design note 6; added by
+    /// R10.T5); `None` where the view does not hold the cell.
+    ///
+    /// # Panics
+    ///
+    /// If `cell` is not of the field's level.
+    #[must_use]
+    pub fn omitted_rms(&self, cell: PatchKey, level: BandLevel) -> Option<Metres> {
+        self.omitted_variance(cell, level).map(rms_of)
     }
 
     /// The cell that contains the unit direction `dir`, and its record, from which the categorical
@@ -409,6 +493,14 @@ impl SynthCache {
 /// alone: the structural octaves' (R09.T5), the channels' (R09.T6.b), the small craters'
 /// (R09.T7.b), and the coarse craters' rims' (R09.T7.c) from the craters the cell's index holds
 /// (R09.T8).
+///
+/// "Wavelengths shorter than λ" means, for each contribution, its own placement: the structural
+/// octaves' spherical-harmonic degrees whose wavelength 2πR ÷ l is shorter than λ; a channel level
+/// counted from its mean cell's width (none) to twice it (all); a small-crater octave from the
+/// smallest diameter it keeps (none) to its upper one (all); and the coarse rims' sharpening finer
+/// than ½ λ, held to the coarse band. A band level evaluates each by its own scale, so what it
+/// leaves out is more than the variance at its `λ_n`, and the level-keyed form,
+/// [`Synthesiser::omitted_variance`], counts it (R10.T5).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct UnresolvedVariance {
     relief: SquareMetres,
@@ -460,6 +552,10 @@ impl UnresolvedVariance {
 /// The variance of `cell`'s ground in wavelengths shorter than `finer_than`, per contribution, or
 /// `None` where `field` does not hold the cell (Design note 18).
 ///
+/// Each contribution reads `finer_than` in its own placement ([`UnresolvedVariance`]), so a band
+/// level leaves out more than this at its `λ_n`: what it leaves out is
+/// [`Synthesiser::omitted_variance`].
+///
 /// It builds the body's small-crater octaves, about 1 to 10 ms; a [`Synthesiser`] holds them
 /// ([`Synthesiser::unresolved_variance`]).
 ///
@@ -508,6 +604,10 @@ fn unresolved_with(
 /// [`unresolved_variance`] at lags long against its wavelengths and to its slopes' variance times
 /// the lag squared at short ones.
 ///
+/// Each contribution reads `finer_than` in its own placement ([`UnresolvedVariance`]). The
+/// structure function of what a band level leaves out is
+/// [`Synthesiser::omitted_structure_function`].
+///
 /// It builds the body's small-crater octaves, about 1 to 10 ms; a [`Synthesiser`] holds them
 /// ([`Synthesiser::structure_function`]).
 ///
@@ -549,12 +649,14 @@ fn structure_with(
 }
 
 /// The RMS of `cell`'s ground in wavelengths shorter than `resolution`: the square root of
-/// [`unresolved_variance`]'s total, one standard deviation of every contribution a survey at that
-/// resolution does not resolve, which R10's readings quote as their uncertainty (its Design note
-/// 6); `None` where `field` does not hold the cell.
+/// [`unresolved_variance`]'s total, one standard deviation of every contribution in wavelengths
+/// shorter than the resolution, each in its own placement ([`UnresolvedVariance`]); `None` where
+/// `field` does not hold the cell.
 ///
 /// It falls as the resolution refines and is zero at the 2 m band limit and below, where the
-/// synthesis has nothing finer.
+/// synthesis has nothing finer. A height read at a band level leaves out more than this at the
+/// level's `λ_n`: R10's readings quote [`Synthesiser::omitted_rms`] as their uncertainty (its
+/// Design note 6).
 ///
 /// It builds the body's small-crater octaves, about 1 to 10 ms; a [`Synthesiser`] holds them
 /// ([`Synthesiser::unresolved_rms`]).

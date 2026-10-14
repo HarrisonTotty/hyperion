@@ -9,9 +9,9 @@
 //! real one), the material classes (R10) and the rocks (R11). Today it holds R05's: the cube
 //! sphere ([`cube`], [`geometry`]), the provisional [`test_planet`] and its noise basis
 //! ([`noise`]), the patch bake and the collision interpolant ([`patch`]), with R10's authoritative
-//! ground over R09's synthesis ([`ground`]), what every height source returns ([`height`]), and
-//! the datum heights are measured from, the reference [`spheroid`] (plan
-//! 14's P14.T46.e); and the first of R09's: the coarse field's types ([`field`]) with the header's
+//! ground over R09's synthesis ([`ground`]) and what a readout may quote of it given the survey
+//! ([`reading`]), what every height source returns ([`height`]), and the datum heights are
+//! measured from, the reference [`spheroid`] (plan 14's P14.T46.e); and the first of R09's: the coarse field's types ([`field`]) with the header's
 //! crater contract ([`craters`]), which R09's later tasks give their behaviour, and the key of plan
 //! 14's substances, which the header's palette carries ([`substance_key`]); the codec of the
 //! field's bulk payload ([`wire`]); the synthesis over a field ([`synth`]): its `Synthesiser`,
@@ -69,6 +69,7 @@ pub mod material;
 pub mod noise;
 pub mod num;
 pub mod patch;
+pub mod reading;
 pub mod spheroid;
 pub mod substance_key;
 pub mod synth;

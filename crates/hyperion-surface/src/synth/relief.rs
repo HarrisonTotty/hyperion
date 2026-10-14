@@ -346,6 +346,12 @@ pub fn local_variance(spectrum: &BandSpectrum, level: CoarseLevel) -> SquareMetr
 /// factor (`decision-r09-t5.md` item 7); `None` where `field` does not hold the cell (Design note
 /// 18).
 ///
+/// Octave m carries the degrees N(m − 1) ≤ l < N(m), N the Nyquist degree, whose wavelengths run
+/// from 8/3 of its lattice spacing down to 4/3. A band level evaluates the octaves of spacing at
+/// least its `λ_n`, so it leaves out more than the wavelengths shorter than `λ_n`: what a level
+/// leaves out is [`relief_variance_from`] the first degree of the first octave it does not
+/// evaluate (R10.T5, `decision-r10-t5-closed-forms.md`).
+///
 /// The synthesis blends the styles of neighbouring cells, so within a cell or so of a change of
 /// style the realised variance lies between the cells'.
 ///
@@ -358,8 +364,28 @@ pub(crate) fn unresolved_relief_variance(
     cell: PatchKey,
     finer_than: Metres,
 ) -> Option<SquareMetres> {
+    relief_variance_from(
+        field,
+        cell,
+        first_shorter_degree(field.header(), finer_than),
+    )
+}
+
+/// The relief's variance at `cell` in the degrees from `first` up, square metres, from the cell's
+/// own style, as [`unresolved_relief_variance`] sums it; `None` where `field` does not hold the
+/// cell. The level-keyed closed forms start it at the first degree a level leaves out.
+///
+/// # Panics
+///
+/// If `cell` is not of the field's level.
+#[must_use]
+pub(crate) fn relief_variance_from(
+    field: &impl FieldView,
+    cell: PatchKey,
+    first: u64,
+) -> Option<SquareMetres> {
     let mut variance = 0.0;
-    each_unresolved_octave(field, cell, finer_than, |octave| {
+    each_octave_from(field, cell, first, |octave| {
         let a = octave.amplitude;
         variance += a * a * octave.band_variance;
     })?;
@@ -391,14 +417,35 @@ pub(crate) fn relief_structure_function(
     finer_than: Metres,
     lag: Metres,
 ) -> Option<SquareMetres> {
+    // The lag first, before the wavelength, as this function has always checked them.
+    assert_lag(lag);
+    relief_structure_from(
+        field,
+        cell,
+        first_shorter_degree(field.header(), finer_than),
+        lag,
+    )
+}
+
+/// The relief's structure function at `cell` in the degrees from `first` up, at a lag of `lag`,
+/// square metres, as [`relief_structure_function`] sums it; `None` where `field` does not hold the
+/// cell. The level-keyed closed forms start it at the first degree a level leaves out.
+///
+/// # Panics
+///
+/// If `lag` is not finite and non-negative, or `cell` is not of the field's level.
+#[must_use]
+pub(crate) fn relief_structure_from(
+    field: &impl FieldView,
+    cell: PatchKey,
+    first: u64,
+    lag: Metres,
+) -> Option<SquareMetres> {
+    assert_lag(lag);
     let lag_m = lag.value();
-    assert!(
-        lag_m.is_finite() && lag_m >= 0.0,
-        "a lag must be finite and non-negative, got {lag_m} m"
-    );
     let radius = field.header().radius();
     let mut d = 0.0;
-    each_unresolved_octave(field, cell, finer_than, |octave| {
+    each_octave_from(field, cell, first, |octave| {
         let (sin, cos) = math::sin_cos(octave.mix);
         let x = lag_m / octave_spacing(radius, octave.index).value();
         let unit = cos * cos * PLAIN_STRUCTURE.at(x) + sin * sin * RIDGED_STRUCTURE.at(x);
@@ -408,7 +455,16 @@ pub(crate) fn relief_structure_function(
     Some(SquareMetres::new(d))
 }
 
-/// One octave's part of the relief's unresolved band at a cell ([`each_unresolved_octave`]).
+/// Asserts `lag` is finite and non-negative.
+fn assert_lag(lag: Metres) {
+    let lag_m = lag.value();
+    assert!(
+        lag_m.is_finite() && lag_m >= 0.0,
+        "a lag must be finite and non-negative, got {lag_m} m"
+    );
+}
+
+/// One octave's part of the relief's unresolved band at a cell ([`each_octave_from`]).
 struct UnresolvedOctave {
     /// The octave's index m.
     index: u8,
@@ -416,44 +472,26 @@ struct UnresolvedOctave {
     amplitude: f64,
     /// The octave's ridged mix `θ_m` = (π ÷ 2) b `ρ_m`, radians.
     mix: f64,
-    /// The reference style's variance of the octave's degrees whose wavelength is shorter than the
-    /// band's, square metres.
+    /// The reference style's variance of the octave's degrees from the first counted, square
+    /// metres.
     band_variance: f64,
 }
 
-/// Each of the relief's octaves with degrees whose wavelength 2πR ÷ l is shorter than
-/// `finer_than` at `cell`, from the coarse level's Nyquist degree to the finest octave's, in octave
-/// order, handed to `emit` with the cell's own style; `None`, with nothing handed, where `field`
-/// does not hold the cell. A body too small for any octave (its finest coarser than its coarse
-/// cells) has none.
+/// The first degree whose wavelength 2πR ÷ l is shorter than `finer_than` on the body of
+/// `header`, ⌊2πR ÷ λ⌋ + 1, or the finest octave's Nyquist degree where that is past it.
 ///
 /// # Panics
 ///
-/// If `finer_than` is not finite and positive, or `cell` is not of the field's level.
-fn each_unresolved_octave(
-    field: &impl FieldView,
-    cell: PatchKey,
-    finer_than: Metres,
-    mut emit: impl FnMut(UnresolvedOctave),
-) -> Option<()> {
+/// If `finer_than` is not finite and positive.
+#[must_use]
+fn first_shorter_degree(header: &FieldHeader, finer_than: Metres) -> u64 {
     let w = finer_than.value();
     assert!(
         w.is_finite() && w > 0.0,
         "a wavelength must be finite and positive, got {w}"
     );
-    let header = field.header();
-    assert_eq!(
-        cell.level(),
-        header.level().get(),
-        "the cell is not of the field's level"
-    );
-    let style = ReliefStyle::of(field.cell(cell)?);
     let radius = header.radius().value();
-    let spectrum = header.spectrum();
-    let first = first_octave(header.level());
-    let finest = finest_octave(header.radius());
-    let end = nyquist_degree(finest);
-    // The first degree whose wavelength 2πR ÷ l is shorter than w.
+    let end = nyquist_degree(finest_octave(header.radius()));
     let shorter = (2.0 * PI * radius / w).floor() + 1.0;
     #[expect(
         clippy::cast_precision_loss,
@@ -461,7 +499,7 @@ fn each_unresolved_octave(
     )]
     let end_degree = end as f64;
     if shorter >= end_degree {
-        return Some(());
+        return end;
     }
     #[expect(
         clippy::cast_possible_truncation,
@@ -469,8 +507,39 @@ fn each_unresolved_octave(
         reason = "a positive integer below the finest Nyquist degree, under 2^42"
     )]
     let shorter = shorter as u64;
-    for m in first..=finest {
-        let from = nyquist_degree(m - 1).max(shorter);
+    shorter
+}
+
+/// Each of the relief's octaves with degrees from `first` up at `cell`, from the coarse level's
+/// Nyquist degree to the finest octave's, in octave order, handed to `emit` with the cell's own
+/// style and the variance of its degrees from `first`; `None`, with nothing handed, where `field`
+/// does not hold the cell. A body too small for any octave (its finest coarser than its coarse
+/// cells) has none.
+///
+/// # Panics
+///
+/// If `cell` is not of the field's level.
+fn each_octave_from(
+    field: &impl FieldView,
+    cell: PatchKey,
+    first: u64,
+    mut emit: impl FnMut(UnresolvedOctave),
+) -> Option<()> {
+    let header = field.header();
+    assert_eq!(
+        cell.level(),
+        header.level().get(),
+        "the cell is not of the field's level"
+    );
+    let style = ReliefStyle::of(field.cell(cell)?);
+    let spectrum = header.spectrum();
+    let lowest = first_octave(header.level());
+    let finest = finest_octave(header.radius());
+    if first >= nyquist_degree(finest) {
+        return Some(());
+    }
+    for m in lowest..=finest {
+        let from = nyquist_degree(m - 1).max(first);
         let to = nyquist_degree(m);
         if from >= to {
             continue;
