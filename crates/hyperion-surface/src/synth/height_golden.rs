@@ -49,7 +49,10 @@
 //! - `closed_forms`: [`Synthesiser::unresolved_variance`] by contribution,
 //!   [`Synthesiser::structure_function`] and [`Synthesiser::unresolved_rms`] at a cube corner's
 //!   cell, a face edge's, and a cell under a coarse rim, a channelled cell and a belt's where the
-//!   world has them.
+//!   world has them; and at the same cells the level-keyed forms at every band level,
+//!   [`Synthesiser::omitted_variance`] by contribution and
+//!   [`Synthesiser::omitted_structure_function`] at lags of 2 m, 5 m and the level's shortest
+//!   wavelength (R10.T5; R09.T7.h).
 //! - `bakes`: one [`Synthesiser::bake_patch`] a world, at L + 3 in a channelled cell, or a rim's,
 //!   or a random one: the digests of its samples and parent heights, and a few of each.
 //!
@@ -1359,9 +1362,47 @@ fn closed_forms() -> String {
                     .expect("a whole field");
                 w.f64(&format!("unresolved rms at {resolution} m"), rms.value());
             }
+            for n in 0..=MAX_LEVEL {
+                write_omitted(&mut w, &synth, cell, band(n));
+            }
         }
     }
     w.finish()
+}
+
+/// What band level `level` leaves out of `cell`'s ground, the level-keyed forms (R10.T5): the
+/// variance by contribution and whole ([`Synthesiser::omitted_variance`]), and the structure
+/// function ([`Synthesiser::omitted_structure_function`]) at lags of 2 m and 5 m, R10.T5's slope
+/// baselines, and of the level's shortest wavelength, which its grazing test reads.
+fn write_omitted(
+    w: &mut GoldenWriter,
+    synth: &Synthesiser<'_, CoarseField>,
+    cell: PatchKey,
+    level: BandLevel,
+) {
+    let n = level.get();
+    let v = synth.omitted_variance(cell, level).expect("a whole field");
+    w.line(&format!(
+        "omitted at L{n} = relief {} channels {} craters {} rims {} total {}",
+        hex(v.relief().value()),
+        hex(v.channels().value()),
+        hex(v.craters().value()),
+        hex(v.rims().value()),
+        hex(v.total().value()),
+    ));
+    let at = |lag: Metres| {
+        hex(synth
+            .omitted_structure_function(cell, level, lag)
+            .expect("a whole field")
+            .value())
+    };
+    let shortest = synth.level_set(level).shortest_wavelength();
+    w.line(&format!(
+        "omitted structure function at L{n} at lags of 2 m, 5 m and the shortest wavelength = {} {} {}",
+        at(Metres::new(2.0)),
+        at(Metres::new(5.0)),
+        at(shortest),
+    ));
 }
 
 /// The structure function of `cell`'s ground finer than `finer_than` metres at a lag of `lag`
