@@ -6,10 +6,10 @@
   "temperatureK": 298,
   "shape": "sphere",
   "provenance": "measured",
-  "paper": "G. M. Hale and M. R. Querry, \"Optical constants of water in the 200-nm to 200-µm wavelength region\", Appl. Opt. 12 (1973) 555–563, DOI 10.1364/AO.12.000555",
-  "source": "refractiveindex.info, main/H2O/nk/Hale.yml, https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/c5c2f188e848453def5970e347399d653df2ffc2/database/data/main/H2O/nk/Hale.yml, SHA-256 df1af6b4352c3378cf81b149ac2280de30d80e2941d147786d5e7cd5044a8847, fetched 2026-10-09",
-  "licence": "CC0 1.0 (the refractiveindex.info database, M. N. Polyanskiy, Sci. Data 11, 94 (2024)); reduced values",
-  "reduction": "n linear and k linear in log k in wavelength between the source's rows, onto 380–780 nm every 5 nm, to six significant figures; the source's rows are every 25 nm",
+  "paper": "R. M. Pope and E. S. Fry, \"Absorption spectrum (380–700 nm) of pure water. II. Integrating cavity measurements\", Appl. Opt. 36 (1997) 8710–8723, DOI 10.1364/AO.36.008710, for k over 380–727.5 nm; G. M. Hale and M. R. Querry, \"Optical constants of water in the 200-nm to 200-µm wavelength region\", Appl. Opt. 12 (1973) 555–563, DOI 10.1364/AO.12.000555, for n and for k from 750 nm",
+  "source": "omlc.org's transcription of Pope and Fry's table (absorption in cm⁻¹ every 2.5 nm over 380–727.5 nm, at 22 °C), https://omlc.org/spectra/water/data/pope97.txt, SHA-256 5c92c6a1e4be125cc9464fab33490ce4eb883fca7e84a21b0ca2b906cb35c8a7, fetched 2026-10-14; refractiveindex.info, main/H2O/nk/Hale.yml (25 °C), https://raw.githubusercontent.com/polyanskiy/refractiveindex.info-database/c5c2f188e848453def5970e347399d653df2ffc2/database/data/main/H2O/nk/Hale.yml, SHA-256 df1af6b4352c3378cf81b149ac2280de30d80e2941d147786d5e7cd5044a8847, fetched 2026-10-09",
+  "licence": "reduced values: omlc.org states no terms for its transcription beyond the site's copyright notice, and the measured values are Pope and Fry's (decision-r08-licences.md); Hale and Querry's from refractiveindex.info (CC0 1.0, M. N. Polyanskiy, Sci. Data 11, 94 (2024)). The cross-check's seven values are Mason, Cone and Fry's, cited as facts; WOPP v3's file states no terms of its own (it is kept in the GPL-3.0 acolite repository), and none of it is committed",
+  "reduction": "n linear between Hale and Querry's rows, every 25 nm, as before; k = aλ ÷ 4π from Pope and Fry's rows over 380–727.5 nm, and Hale and Querry's k from 750 nm, linear in log k between rows (730–745 nm between Pope and Fry's 727.5 nm row and Hale and Querry's 750 nm one); to six significant figures. R08.T5.g's change: until then k was Hale and Querry's throughout, too high in the blue; it falls by a factor of 5.06 at 440 nm, from 1.124 × 10⁻⁹ to 2.223 × 10⁻¹⁰, by 8.81 at 400 nm and by 1.23 at 500 nm, and rises by 1.26 at 550 nm, to 2.473 × 10⁻⁹; n is unchanged. The cross-check below 550 nm: Mason, Cone and Fry 2016 (Appl. Opt. 55, 7163, DOI 10.1364/AO.55.007163; closed), as R. Röttgers's WOPP v3 compilation gives their Table 2 at 20 °C over 300–510 nm (https://raw.githubusercontent.com/acolite/acolite/ca477dd91dfb5f8eb77333824b38cb0bcce5e083/data/Shared/WOPP/purewater_abs_coefficients_v3.txt, SHA-256 bda82058670cee8ca5684edc46a70e1b46c9d1ccca0eb9d72eb8776f65e696d8, fetched 2026-10-14): Pope and Fry's absorption is 7.95 at 380 nm, 2.99 at 400 nm, 1.46 at 420 nm, 1.22 at 440 nm, 1.08 at 460 nm, 1.05 at 480 nm, 0.98 at 500 nm times theirs. Below about 420 nm the two disagree beyond their errors, and the IOCCG absorption protocol (IOCCG Protocol Series vol. 1.0, 2018, §1.1) takes Pope and Fry as the state of the art only over about 420–725 nm, their ultraviolet values possibly contaminated; kept as R08.T5.g asks, its deferred finding. k is Pope and Fry's at 22 °C, n Hale and Querry's at 25 °C. A better open n is recorded and not adopted (R08.T5.g's deferred finding): the International Association for the Properties of Water and Steam, IAPWS R9-97, \"Release on the Refractive Index of Ordinary Water Substance as a Function of Wavelength, Temperature and Pressure\" (Erlangen, 1997), after P. Schiebener, J. Straub, J. M. H. Levelt Sengers and J. S. Gallagher, J. Phys. Chem. Ref. Data 19 (1990) 677–717, DOI 10.1063/1.555859, https://iapws.org/technical-guidance/release/Rindex.download, SHA-256 ef7c8107d200f250b6db1802b3b5ea994526e5b875ac5cb2c72ec78bc9a06ba3, fetched 2026-10-14 (publication allowed with attribution to IAPWS), uncertain by 1.5 × 10⁻⁵ over 400–700 nm (its Table 2), whose eq. 1 at 298.15 K and 997.0476 kg m⁻³ (the NIST Chemistry WebBook's fluid properties for water (SRD 69; IAPWS-95, W. Wagner and A. Pruß, J. Phys. Chem. Ref. Data 31 (2002) 387, density uncertain by 0.0001% at 1 atm), the isobar at 0.101325 MPa, https://webbook.nist.gov/cgi/fluid.cgi?Action=Data&Wide=on&ID=C7732185&Type=IsoBar&Digits=7&P=0.101325&THigh=299.15&TLow=294.15&TInc=1&RefState=DEF&TUnit=K&PUnit=MPa&DUnit=kg%2Fm3&HUnit=kJ%2Fkg&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm, SHA-256 645d38f5e948a988c941e60f7a49d699f91e7a4bb46910589cb8f278e0e01c6c, fetched 2026-10-14) gives 1.34511 at 380 nm, 1.33419 at 550 nm and 1.32848 at 780 nm, against this file's 1.3406, 1.333 and 1.3298; Quan and Fry 1995's pure water (S = 0, 25 °C, relative to air), times dry air's index at 15 °C (Peck and Reeder 1972's standard air), lies above it by 1.7 × 10⁻⁵ to 3.5 × 10⁻⁵ over 400–700 nm, and by 6.8 × 10⁻⁵ at 380 nm and 8.9 × 10⁻⁵ at 780 nm, beyond their range",
   "standIn": null,
   "fit": null,
   "wavelengthsNm": [
@@ -29,16 +29,16 @@
     1.33, 1.33, 1.33, 1.33, 1.3298
   ],
   "k": [
-    3.0843e-9, 2.71798e-9, 2.39516e-9, 2.11069e-9, 1.86e-9, 1.73141e-9, 1.6117e-9, 1.50028e-9,
-    1.39655e-9, 1.3e-9, 1.23844e-9, 1.17979e-9, 1.12393e-9, 1.0707e-9, 1.02e-9, 1.0024e-9,
-    9.8511e-10, 9.68115e-10, 9.51414e-10, 9.35e-10, 9.47653e-10, 9.60477e-10, 9.73475e-10,
-    9.86648e-10, 1e-9, 1.0571e-9, 1.11745e-9, 1.18126e-9, 1.2487e-9, 1.32e-9, 1.4286e-9, 1.54613e-9,
-    1.67334e-9, 1.811e-9, 1.96e-9, 2.21343e-9, 2.49962e-9, 2.82282e-9, 3.18782e-9, 3.6e-9,
-    4.49291e-9, 5.60728e-9, 6.99805e-9, 8.73377e-9, 1.09e-8, 1.14431e-8, 1.20133e-8, 1.26119e-8,
-    1.32403e-8, 1.39e-8, 1.43675e-8, 1.48507e-8, 1.53501e-8, 1.58664e-8, 1.64e-8, 1.74396e-8,
-    1.85451e-8, 1.97206e-8, 2.09707e-8, 2.23e-8, 2.41909e-8, 2.62422e-8, 2.84675e-8, 3.08814e-8,
-    3.35e-8, 4.09562e-8, 5.0072e-8, 6.12168e-8, 7.48421e-8, 9.15e-8, 1.01803e-7, 1.13267e-7,
-    1.26021e-7, 1.40212e-7, 1.56e-7, 1.54366e-7, 1.52749e-7, 1.5115e-7, 1.49566e-7, 1.48e-7,
-    1.43084e-7
+    3.43822e-10, 2.88297e-10, 2.6411e-10, 2.55551e-10, 2.11039e-10, 1.70813e-10, 1.54325e-10,
+    1.46629e-10, 1.51738e-10, 1.61662e-10, 1.69381e-10, 1.83466e-10, 2.22339e-10, 2.65944e-10,
+    3.30167e-10, 3.48319e-10, 3.58369e-10, 3.74106e-10, 3.96455e-10, 4.30912e-10, 4.85104e-10,
+    5.24893e-10, 5.84894e-10, 6.81462e-10, 8.1169e-10, 1.02878e-9, 1.319e-9, 1.6229e-9, 1.69245e-9,
+    1.74215e-9, 1.83044e-9, 1.92434e-9, 2.03686e-9, 2.21619e-9, 2.47287e-9, 2.63226e-9, 2.75847e-9,
+    2.88651e-9, 3.15246e-9, 3.53244e-9, 4.13548e-9, 5.12081e-9, 6.34304e-9, 7.91669e-9, 1.06188e-8,
+    1.24068e-8, 1.28346e-8, 1.31062e-8, 1.35926e-8, 1.40952e-8, 1.4619e-8, 1.52201e-8, 1.58289e-8,
+    1.66814e-8, 1.75866e-8, 1.93377e-8, 2.15337e-8, 2.27023e-8, 2.34061e-8, 2.40642e-8, 2.51624e-8,
+    2.64921e-8, 2.83328e-8, 3.09162e-8, 3.47594e-8, 3.94959e-8, 4.67255e-8, 5.72962e-8, 7.05311e-8,
+    8.59059e-8, 1.02393e-7, 1.13759e-7, 1.26386e-7, 1.40414e-7, 1.56e-7, 1.54366e-7, 1.52749e-7,
+    1.5115e-7, 1.49566e-7, 1.48e-7, 1.43084e-7
   ]
 }

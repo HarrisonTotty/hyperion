@@ -28,6 +28,7 @@ import type { ComplexIndex } from "../mie";
 import { CLOUD_DECK_SPLIT_OPTICAL_DEPTH } from "../thick/regime";
 import aluminiumOxide from "./aluminium-oxide.json" with { type: "json" };
 import ammoniaIce from "./ammonia-ice.json" with { type: "json" };
+import ammoniaLiquid from "./ammonia-liquid.json" with { type: "json" };
 import ammoniumHydrosulphide from "./ammonium-hydrosulphide.json" with { type: "json" };
 import argonIce from "./argon-ice.json" with { type: "json" };
 import basaltFile from "./basalt.json" with { type: "json" };
@@ -37,6 +38,7 @@ import carbonDioxideIce from "./carbon-dioxide-ice.json" with { type: "json" };
 import carbonMonoxideIce from "./carbon-monoxide-ice.json" with { type: "json" };
 import chromium from "./chromium.json" with { type: "json" };
 import enstatiteGlass from "./enstatite-glass.json" with { type: "json" };
+import ethaneLiquid from "./ethane-liquid.json" with { type: "json" };
 import forsteriteAmorphous from "./forsterite-amorphous.json" with { type: "json" };
 import graphiteFile from "./graphite.json" with { type: "json" };
 import hydrogenSulphideIce from "./hydrogen-sulphide-ice.json" with { type: "json" };
@@ -50,12 +52,15 @@ import marsRegolithSimulant from "./mars-regolith-simulant.json" with { type: "j
 import methaneIce from "./methane-ice.json" with { type: "json" };
 import methaneLiquid from "./methane-liquid.json" with { type: "json" };
 import nitrogenIce from "./nitrogen-ice.json" with { type: "json" };
+import nitrogenLiquid from "./nitrogen-liquid.json" with { type: "json" };
 import oxygenIce from "./oxygen-ice.json" with { type: "json" };
 import potassiumChloride from "./potassium-chloride.json" with { type: "json" };
+import seawater from "./seawater.json" with { type: "json" };
 import siliconDioxide from "./silicon-dioxide.json" with { type: "json" };
 import sodiumChloride from "./sodium-chloride.json" with { type: "json" };
 import sodiumSulphide from "./sodium-sulphide.json" with { type: "json" };
 import soot from "./soot.json" with { type: "json" };
+import sulphurLiquid from "./sulphur-liquid.json" with { type: "json" };
 import sulphur from "./sulphur.json" with { type: "json" };
 import sulphuricAcid75 from "./sulphuric-acid-75.json" with { type: "json" };
 import sulphuricAcid84 from "./sulphuric-acid-84.json" with { type: "json" };
@@ -301,8 +306,10 @@ export function parseMaterialFile(raw: unknown, file: string): MaterialIndexFile
  * mode names no phase or variant (liquid water before ice, liquid methane before its ice, 75 wt%
  * sulphuric acid before 84.5 wt%, a choice: both lie inside Hansen and Hovenier 1974's 1.44 ±
  * 0.015 at 550 nm, who name only "a concentrated solution of sulfuric acid"). R08.T5.d's
- * condensates, hazes, ices and dusts follow T5.b's (decision-r08-t5d); N₂, O₂, CO, H₂S and Ar have
- * their ices alone, so a liquid of one takes its ice as a named analogue.
+ * condensates, hazes, ices and dusts follow T5.b's (decision-r08-t5d); O₂, CO, H₂S and Ar have their
+ * ices alone, so a liquid of one takes its ice as a named analogue. R08.T5.g's liquids come last, so
+ * that every key's default is unchanged: seawater as liquid H₂O's `S35` variant, liquid N₂, NH₃ and
+ * S₈ after their solids, and liquid C₂H₆, the key's only file.
  */
 export const MATERIAL_FILES: ReadonlyArray<MaterialIndexFile> = [
   parseMaterialFile(water, "water.json"),
@@ -344,6 +351,11 @@ export const MATERIAL_FILES: ReadonlyArray<MaterialIndexFile> = [
   parseMaterialFile(basaltFile, "basalt.json"),
   parseMaterialFile(marsRegolithSimulant, "mars-regolith-simulant.json"),
   parseMaterialFile(basalticGlass, "basaltic-glass.json"),
+  parseMaterialFile(seawater, "seawater.json"),
+  parseMaterialFile(nitrogenLiquid, "nitrogen-liquid.json"),
+  parseMaterialFile(ammoniaLiquid, "ammonia-liquid.json"),
+  parseMaterialFile(ethaneLiquid, "ethane-liquid.json"),
+  parseMaterialFile(sulphurLiquid, "sulphur-liquid.json"),
 ];
 
 const FILES_BY_KEY: ReadonlyMap<string, ReadonlyArray<MaterialIndexFile>> = (() => {

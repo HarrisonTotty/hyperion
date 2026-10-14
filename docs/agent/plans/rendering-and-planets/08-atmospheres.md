@@ -3268,6 +3268,33 @@ Acceptance for T5.b and T5.c:
       and its k is 0 from 550 nm.
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/materials view/atmosphere/nonSpherical`.
 
+- **R08.T5.g The liquids' optical constants** (briefed 2026-10-14; client data only, no
+  GENERATOR_VERSION bump). After T5.d. The surface payload's palette gains a liquid record for
+  R11's water and lakes: n and absorption at each of the 15 bake bins (380–760 nm), plus
+  scattering. R08's material files stay the one source of liquids' n and k.
+  - _Water._ `water.json`'s k over 380–727.5 nm becomes Pope and Fry 1997's (Appl. Opt. 36, 8710),
+    from its open distribution, with Hale and Querry 1973's kept above 727.5 nm and Mason, Cone and
+    Fry 2016 (Appl. Opt. 55, 7163) recorded as a cross-check below 550 nm. The file's header names
+    the change and the factor by which the blue fell (Hale and Querry's k is about 5 times Pope and
+    Fry's at 440 nm). n stays Hale and Querry's unless a better open n exists over 380–780 nm,
+    which is recorded. Pure water, not seawater: a scattering column, if the file gains one, takes
+    pure water's (Zhang, Hu and He 2009, Opt. Express 17, 5698, at S = 0, or Morel's pure-water
+    column), and any seawater variant is recorded apart.
+  - _New liquid files_, where open measured visible constants exist, each `measured` or `derived`
+    with its basis, by T5.b–T5.d's format and rules (the per-file grid, provenance and stand-in
+    fields, licences and `NOTICE`, the reduction tool):
+    - liquid ethane (Titan's seas): the search recorded if nothing is measured, as `sulphur.json`
+      records its own; a Lorentz–Lorenz n of about 1.40 at 94 K, with absorption absent;
+    - liquid N₂;
+    - liquid NH₃;
+    - seawater, with Quan and Fry 1995's n;
+    - molten sulphur's absorption edge, with Meyer 1976 (Chem. Rev. 76, 367) as the finding aid.
+  - _The fitted table._ `water.json`'s dataset hash changes, so the fit tool marks
+    `condensate_extinction` stale. It is not refitted here; a desktop lane refits it with no bump.
+  - Tests: each new file parses; water's k at 440 nm lies within 10% of Pope and Fry's; the parity
+    check, if one lists material keys, covers the new liquid keys.
+  - Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere/materials`.
+
 - **R08.T5.e Venus's ultraviolet absorber, fitted** (science-r08-unowned-absorbers). After T5.d
   and R08.T12.e, on the reference tracer's Venus deck: R08.T12's `venus-92bar` case, with
   T24.g's four modes, mode 2 `acid_uv_absorber`. It moves no generated output, since k_UA is 0
@@ -9576,6 +9603,162 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     past 0.2 µm leaves the floor rule in some channel, so most cloud modes of them are
     Henyey–Greenstein with no matrix, labelled (T5.c's design; no kernel reaches below k 10⁻³ at
     n above 1.70).
+- **Deviations in T5.g, as built** (2026-10-14; `view/atmosphere/materials/` (`water.json` and
+  five new files, `materials.ts` and its test); `apps/hyperion/src/tools/materials.ts` and its test,
+  `scripts/materials.mjs`; `NOTICE`). The questions below went on the issue with their leans, none
+  blocking.
+  - _The files._ `water.json` grows from 3,038 B to 7,035 B. New: `seawater.json` 5,166 B,
+    `nitrogen-liquid.json` 4,184 B, `ammonia-liquid.json` 4,071 B, `ethane-liquid.json` 6,756 B and
+    `sulphur-liquid.json` 3,866 B. All are on 380–780 nm and are `liquid` spheres. They come last in
+    `MATERIAL_FILES`, so every key's default is unchanged: liquid water, and the solids of N₂, NH₃
+    and S₈. `materials.ts`'s doc no longer lists N₂ among the keys with ices alone.
+  - _Water's k._ k = aλ ÷ 4π from Pope and Fry's rows (omlc.org's transcription, every 2.5 nm, at
+    22 °C), each grid point on a row over 380–725 nm.
+    - Hale and Querry's k is kept from 750 nm, and 730–745 nm lies log-linearly between Pope and
+      Fry's 727.5 nm row and Hale and Querry's 750 nm one. Pope and Fry's k at 727.5 nm,
+      9.71 × 10⁻⁸, lies within 1% of Hale and Querry's there, read log-linearly.
+    - Before and after: 1.124 × 10⁻⁹ to 2.223 × 10⁻¹⁰ at 440 nm, a factor of 5.06 (the brief's
+      "about 5×"); 1.0 × 10⁻⁹ to 8.117 × 10⁻¹⁰ at 500 nm, a factor of 1.23; and 1.96 × 10⁻⁹ to
+      2.473 × 10⁻⁹ at 550 nm, a rise of 1.26. The factor at 400 nm is 8.81.
+    - The header states these figures, and the tool's test holds them to Hale and Querry's rows.
+  - _Water's n stays Hale and Querry's._ A better open n exists; the header records it and does
+    not adopt it.
+    - IAPWS R9-97 is uncertain by 1.5 × 10⁻⁵ over 400–700 nm, and its terms allow publication with
+      attribution. At 25 °C and IAPWS-95's 997.0476 kg m⁻³ it gives 1.34511, 1.33419 and 1.32848 at
+      380, 550 and 780 nm. Hale and Querry's three-decimal table gives 1.3406, 1.333 and 1.3298.
+    - Two checks agree with IAPWS. Daimon and Masumura 2007's 24 °C entry meets it at 24 °C to about
+      5 × 10⁻⁶ (the research agent's comparison). Quan and Fry's pure water, times dry air's index
+      at 15 °C, lies above it by 1.7–3.5 × 10⁻⁵ over 400–700 nm (the tool's test).
+    - Why it is not adopted: it moves `view/atmosphere/sizeDistributionStop.test.ts`'s held
+      water-droplet mode (R08.T5.f's list of T5.b's optics) by 6.2 × 10⁻⁴ against its 10⁻⁴. That
+      file lies outside the brief's scope, and the lane's landing check refuses paths outside it.
+    - The tool keeps `iapwsWaterIndex` and `iapwsWaterN`, and its test reproduces the release's
+      Table 3 at 0 °C. The switch is one line in `waterIndex`, with the held mode then pinned at
+      T5.b's own index (n 1.333, k 1.96 × 10⁻⁹ at 550 nm).
+  - _The cross-check_ covers 380–500 nm, not the brief's "below 550 nm". Mason, Cone and Fry 2016
+    is closed, and its one open copy, their Table 2 at 20 °C in Röttgers's WOPP v3, runs only over
+    300–510 nm.
+    - Mason et al. lie below Pope and Fry in the blue. Pope and Fry run 7.95, 2.99, 1.46, 1.22,
+      1.08 and 1.05 times Mason at 380, 400, 420, 440, 460 and 480 nm, and 0.98 times at 500 nm.
+    - The IOCCG absorption protocol (vol. 1.0, 2018, §1.1) takes Pope and Fry as the state of the
+      art over about 420–725 nm only, and their ultraviolet values as possibly contaminated.
+    - Built as the brief asks. The seven values are cited as facts; WOPP v3 is kept in a GPL-3.0
+      repository and states no terms of its own, and none of it is committed.
+  - _Seawater_ is liquid H₂O's variant `S35`: practical salinity 35, at 25 °C. A name key would need
+    `lib/substances.ts`, which lies outside the scope. Its name follows the guide: "liquid H2O,
+    practical salinity 35, at 298 K", with no common name.
+    - Its n is `water.json`'s plus Quan and Fry's salinity terms, (n₁ + n₂T + n₃T²)S + n₆S ÷ λ:
+      +0.00672, +0.00639 and +0.00618 at 380, 550 and 780 nm. That gives 1.33939 at 550 nm, plan
+      11's 1.339.
+    - Their equation is not taken whole: it is relative to air and fitted to data from 400–700 nm.
+      The increment keeps the two files apart by the salt alone. The Web Book is the source for the
+      fitted range; the paper is closed, so its temperature and salinity ranges were not read.
+    - The coefficients come from the Ocean Optics Web Book (CC BY), and Zhang, Hu and He 2009's
+      Table 1 matches them (the review's science check).
+    - k is `water.json`'s. Röttgers, McKee and Utschig 2014 find the salinity coefficient not
+      significantly different from zero below 500 nm, and −0.18% to +0.04% per g L⁻¹ over
+      400–2,660 nm.
+  - _No scattering column_ (the brief makes it optional). For R11: Zhang, Hu and He 2009 at S = 0
+    give pure water's molecular scattering (their eqs. 1, 2 and 9 and Table 1). The spectral slope
+    runs from −4.286 at S = 0 to −4.306 at S = 40, anchored at 450 nm, and Morel's seawater at
+    S = 38.4 scatters 30% more than pure water. The paper tabulates no b, so no figure is recorded.
+  - _Liquid N₂_, `derived`: a Cauchy fit made here to Augustin 1915's four absolute indices at
+    −195.83 °C (Ann. Phys. 351, 419; Zenodo's CC0 scan), n = 1.19573 + 0.00106457 µm² ÷ λ².
+    - The residuals are at most 2.1 × 10⁻⁴. The largest is at 656.3 nm, which lies about
+      4.4 × 10⁻⁴ off the line the other three and the gas's dispersion give (the science check).
+    - Johns and Wilhelm 1937's 1.1990 at 546.1 nm (closed; their abstract) agrees.
+    - k = 0: no measurement was found, and Liveing and Dewar 1893 call the liquid colourless.
+  - _Liquid NH₃_, `derived`: n = 1.34795 + 0.00482537 µm² ÷ λ².
+    - b is the least-squares Cauchy slope of the Lorentz–Lorenz estimate from Cuthbertson's gas
+      row at the WebBook's 40.02678 mol/l at 239.80 K.
+    - a meets L. Y. Wong and A. Anderson 1972's 1.360 at 632.8 nm (closed; their Table II, read
+      from the journal's abstract page and confirmed by the science check), 0.0057 below the
+      estimate.
+    - The worst departure from the shifted estimate is 4.4 × 10⁻⁴. k = 0 (below).
+    - Its slope is an estimate: the provenance question on the issue covers it with ethane's.
+  - _Liquid C₂H₆_, `standIn`, the brief's "derived" changed by the UX review. The guide's
+    `ATMOSPHERE: APPROXIMATE` stands while a cloud or haze "is drawn with estimated optical data …
+    because no measurement exists", and a `derived` file would not raise it. Ruling 5 files the
+    ices' Lorentz–Lorenz estimates `standIn` alike.
+    - Its n is the Lorentz–Lorenz estimate itself, from `rayleigh.ts`'s Loria row at the WebBook's
+      21.53485 mol/l at 94 K (Bücker and Wagner 2006): 1.4157, 1.4008 and 1.3940 at 380, 550 and
+      780 nm, with k = 0. Its `standIn` is worded as the ices' are.
+    - The estimate runs high on four measured cryogenic liquids (`LIQUID_CHECKS`): Ar at 90 K
+      +0.0023, N₂ at 77.32 K +0.0019, CH₄ at 90.694 K +0.0074 and NH₃ at 239.80 K +0.0057.
+    - The search, recorded in the file, found nothing open. Badoz et al. 1992, Sliwinski 1969 and
+      Lopez-Calvo and Manzanares 2008 are closed.
+    - The densities are molar (mol/l), so no molar mass enters except in Burton's check.
+    - _For R11:_ plan 11's Design note 12 writes "ethane about 1.37", and its `liquids.ts` rows
+      become the registry's test values. The file gives 1.4008 at 550 nm (Burton's function would
+      give 1.406), so that test must take the file's value.
+  - _Molten S₈_, `standIn`. The brief asks for files `measured` or `derived`, but the absorption
+    edge, the brief's object, has no open measurement.
+    - The file holds Becquerel 1877's 1.9290 at the sodium D lines at every wavelength, with k = 0.
+      He read it as the melt began to crystallise at 114 °C (Ann. Chim. Phys. (5) 12, p. 37, Tableau
+      n° 2; public domain).
+    - That stands in better than the solid's named analogue would, at 2.084 (normal reflectance 0.100
+      against 0.123). Either way, a visible mode reads `ATMOSPHERE: APPROXIMATE`.
+    - The measurements are closed: Sasson and Arakawa 1986, Sasson et al. 1985, Hosokawa,
+      Matsuoka and Tamura 1994, Bass 1953, Meyer et al. 1971 and Meyer 1976. The open preprint of
+      Meyer et al. (UCRL-19660) gives only the edge's shift, about 23.6 cm⁻¹ per kelvin.
+    - The file and its `standIn` say "liquid S8" and "the liquid's" (the UX review: one name per
+      phase, and `MELT` is a form word).
+  - _`condensate_extinction`_ does not exist at 3c921671. `crates/hyperion-fit/src/tasks/` has no
+    such task, `hyperion-sim`'s `tables/` has no such table, and no Rust reads `materials/`. Nothing
+    goes stale on this branch. P14.T49.e's fit, when it lands, reads `water.json` as changed here.
+    Plan 14 says a changed index file "so bumps" there; the brief says the refit needs none.
+  - _The parity check._ R08.T19's `parity.test.ts` is not built. `materials.test.ts`'s key lists
+    gain `T5G_KEYS` (C₂H₆) and `T5G_LIQUIDS` (each key, variant and provenance). The fixture's nine
+    rows hold no C₂H₆.
+  - _The acceptance._ The task's command selects `materials/materials.test.ts`. The tool's tests
+    (`src/tools/materials.test.ts`) run under `pnpm test` and the gate.
+  - _Names beyond the sketch._
+    - The tool's new names: `absorptionIndex`, `parseOmlcAbsorption`, `POPE_FRY_ROWS`,
+      `POPE_FRY_LAST_NM`, `POPE_FRY_SHA256`, `waterIndex`, `IAPWS_R9_97`, `iapwsWaterIndex`,
+      `iapwsWaterN`, `WATER_TEMPERATURE_K`, `WATER_DENSITY_KG_PER_M3`, `QUAN_FRY_COEFFICIENTS`,
+      `quanFryIndex`, `quanFrySalinityIncrement`, `SEAWATER`, `seawaterN`,
+      `MASON_2016_ABSORPTION_PER_M`, `POPE_FRY_ABSORPTION_PER_M`, `C2H6_DISPERSION`,
+      `CH4_DISPERSION`, `NH3_DISPERSION`, `IndexPoint`, `fitCauchy`, `cauchyResidual`,
+      `LiquidCheck`, `LIQUID_CHECKS`, `liquidCheckExcess`, `AUGUSTIN_N2`, `N2_LIQUID_FIT`,
+      `N2_LIQUID_MOLAR_DENSITY_MOL_PER_L`, `NH3_LIQUID_MEASURED`,
+      `NH3_LIQUID_MOLAR_DENSITY_MOL_PER_L`, `NH3_LIQUID_FIT`, `ammoniaLiquidLevelled`,
+      `C2H6_LIQUID_MOLAR_DENSITY_MOL_PER_L`, `ethaneLiquidEstimate`,
+      `C2H6_BURTON_LORENTZ_LORENZ_CM3_PER_G`, `ethaneBurtonIndex`, `S8_MOLTEN_INDEX_D` and
+      `FETCHED_T5G`.
+    - `water.json` moves from `FETCHED_MATERIALS` to `COMBINED_MATERIALS`, beside
+      `seawater.json`. Both read the `water` source and the new `pope-fry` one.
+    - `DERIVED_FILES` is keyed by key and phase (`N2/liquid`).
+  - _The setup check._ Through `scripts/materials.mjs`, T5.d's sources (every SHA-256 as the tool
+    records it) regenerate the other 38 files byte for byte after Prettier, both before and after
+    the change.
+- **Deferred findings (2026-10-13 rule)** (R08.T5.g). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _Water's n_ (above): IAPWS R9-97 waits on a lane whose scope includes the held mode's test.
+  - _Pope and Fry below 420 nm_ (above). The lean is Mason et al. 2016 below 420 nm, or IOCCG's
+    Morel et al. 2007 values for 340–415 nm.
+  - _Ethane's gas row may run low._ Burton measured ethane's Lorentz–Lorenz function at 632.8 nm:
+    0.3794 ± 0.0003 cm³ g⁻¹, constant within 0.5% over 1–200 amagat (UBC thesis, CC BY; its
+    abstract through OpenAlex).
+    - Extrapolated to the liquid's density, about 483 amagat, it gives n = 1.4061, 0.0086 above
+      the file.
+    - In molar refraction it lies about 1.9% above `rayleigh.ts`'s Loria row, which would raise
+      ethane's Rayleigh cross-section by about 4%.
+    - For R08.T3, with a research agent.
+  - _Liquid ethane's red overtones_ are not drawn; k = 0. Lopez-Calvo and Manzanares 2008 (closed)
+    recorded the C–H Δv = 6 band at 100 K.
+  - _Liquid NH₃'s absorption is not drawn._ Robertson and Williams 1973 (J. Opt. Soc. Am. 63, 763;
+    closed) tabulate 0.212 cm⁻¹ at 400 nm, 0.139 at 455 nm, 0.054 at 654 nm and 0.034 at 714 nm,
+    with a band of 0.178 at 800 nm. The abstract page states no path or temperature.
+    - That is 1.4–3.2 × 10³ times pure water's at 400–455 nm, and 4–15 times at 654–800 nm (the
+      science check), and would make an NH₃ sea opaque in the blue within a metre.
+  - _One temperature per liquid._ Wong and Anderson's dn/dT for NH₃ (−5.42 × 10⁻⁴ K⁻¹) is not
+    drawn, nor the temperature dependence of water's red bands. Pope and Fry's k is at 22 °C and
+    the file's n at 25 °C.
+  - _Molten S₈'s edge_ waits on access to Sasson and Arakawa 1986 or Hosokawa et al. 1994. Under
+    its label, a sulphur lake draws too white in the blue. Becquerel's index is an 1877 prism
+    reading; the hotter, dark-yellow melt read 0.039 lower.
+  - _Water's junction._ IOCCG notes Kou et al. 1993 (730–1,230 nm) about 0.04–0.07 m⁻¹ above Pope
+    and Fry over their overlap. The file keeps Hale and Querry from 750 nm, as the brief asks.
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the

@@ -4,34 +4,48 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  absorptionIndex,
   ACID_GRID_NM,
   ACID_UV_DECAY_NM,
   ACID_UV_K365,
   acidUvAbsorberK,
+  ammoniaLiquidLevelled,
   AR_DISPERSION,
   AR_ICE_CELL,
   AR_ICE_MEASURED_546,
+  AUGUSTIN_N2,
   averagedUniaxial,
   cauchyIndex,
+  cauchyResidual,
   cellMolarVolumeCm3PerMol,
   CO2_ICE_FIT,
   COMBINED_MATERIALS,
   DERIVED_MATERIALS,
+  ethaneBurtonIndex,
+  ethaneLiquidEstimate,
   FETCHED_MATERIALS,
+  fitCauchy,
   formulaIndex,
   formulaOnGrid,
   H2S_FILM,
   h2sFilmEstimate,
   HCL_REFRACTIVITY,
+  iapwsWaterIndex,
   ICE_ESTIMATES,
   iceIndex,
   IDEAL_MOLAR_VOLUME_STP_CM3_PER_MOL,
   indexOfDielectric,
   ionicIncrement,
+  LIQUID_CHECKS,
+  liquidCheckExcess,
   lorentzLorenzIndex,
+  MASON_2016_ABSORPTION_PER_M,
   MATERIAL_GRID_NM,
   N2_ICE_CELL,
+  N2_LIQUID_FIT,
   NH3_ICE_MOLAR_VOLUME_CM3_PER_MOL,
+  NH3_LIQUID_FIT,
+  NH3_LIQUID_MEASURED,
   NH3_REFRACTIVITY,
   NH4CL_CALIBRATION,
   NH4CL_IONIC_INCREMENT,
@@ -49,15 +63,27 @@ import {
   parseKitzmannHeng,
   parseLnk,
   parseMartikainenK,
+  parseOmlcAbsorption,
   parseRefractiveIndexInfo,
   parseRefractiveIndexInfoFormula,
   parseRefractiveIndexInfoN,
   parseWavelengthTable,
+  POPE_FRY_ABSORPTION_PER_M,
+  POPE_FRY_ROWS,
+  quanFryIndex,
+  QUAN_FRY_COEFFICIENTS,
+  quanFrySalinityIncrement,
   resample,
+  S8_MOLTEN_INDEX_D,
   S8_PRINCIPAL_INDICES,
   S8_STAND_IN_INDEX,
+  SEAWATER,
+  seawaterN,
   sourceOptions,
   uniaxialFormulasOnGrid,
+  waterIndex,
+  WATER_DENSITY_KG_PER_M3,
+  WATER_TEMPERATURE_K,
 } from "./materials";
 
 const MATERIALS = new URL("../renderer/src/view/atmosphere/materials/", import.meta.url);
@@ -111,6 +137,17 @@ function committed(file: string): {
     return v.map(Number);
   };
   return { wavelengthsNm: field("wavelengthsNm"), n: field("n"), k: field("k") };
+}
+
+/** A committed material file's text field. */
+function committedText(file: string, field: string): string {
+  const raw: unknown = JSON.parse(readFileSync(fileURLToPath(new URL(file, MATERIALS)), "utf8"));
+  const value: unknown =
+    typeof raw === "object" && raw !== null && field in raw ? Reflect.get(raw, field) : undefined;
+  if (typeof value !== "string") {
+    throw new TypeError(`${file}: no text ${field}`);
+  }
+  return value;
 }
 
 describe("parsing", () => {
@@ -749,5 +786,232 @@ describe("the formula files", () => {
     const { n, k } = reduce();
     expect(committed(file).n).toEqual([...n]);
     expect(committed(file).k).toEqual([...k]);
+  });
+});
+
+/** An omlc.org table of Pope and Fry's shape: 380–727.5 nm every 2.5 nm, a in cm⁻¹. */
+function omlcTable(perCm: (nm: number) => number, rows = POPE_FRY_ROWS): string {
+  const lines = Array.from({ length: rows }, (_, i) => {
+    const nm = 380 + 2.5 * i;
+    return `${nm}\t${perCm(nm)}`;
+  });
+  return [
+    "R. M. Pope and E. S. Fry, a header line",
+    "",
+    "lambda\t absorption",
+    " (nm) \t   (1/cm)   ",
+    ...lines,
+  ].join("\n");
+}
+
+/** A refractiveindex.info nk table every 25 nm over 375–800 nm, n 1.34 and k 10⁻⁸. */
+function haleTable(): string {
+  const rows = Array.from(
+    { length: 18 },
+    (_, i) => `        ${(0.375 + 0.025 * i).toFixed(3)} 1.34 1.0E-8`,
+  );
+  return ["DATA:", "  - type: tabulated nk", "    data: |", ...rows].join("\n");
+}
+
+/** A value on {@link MATERIAL_GRID_NM} at a wavelength, nm. */
+function gridValue(values: ReadonlyArray<number>, nm: number): number {
+  return values[MATERIAL_GRID_NM.indexOf(nm)] ?? Number.NaN;
+}
+
+/** Dry air's index, Peck and Reeder 1972, as `view/atmosphere/rayleigh.ts`'s `DRY_AIR_DISPERSION` holds it. */
+function dryAirIndex(wavelengthNm: number): number {
+  const s2 = (1_000 / wavelengthNm) ** 2;
+  return 1 + (8_060.51 + 2_480_990 / (132.274 - s2) + 17_455.7 / (39.329_57 - s2)) * 1e-8;
+}
+
+describe("R08.T5.g's water", () => {
+  it("reads omlc.org's absorption as k = aλ ÷ 4π, with n NaN", () => {
+    const rows = parseOmlcAbsorption(
+      omlcTable(() => 6.35e-5),
+      POPE_FRY_ROWS,
+    );
+    expect(rows).toHaveLength(POPE_FRY_ROWS);
+    const at440 = rows.find((row) => row.wavelengthUm === 0.44);
+    expect(at440?.k).toBeCloseTo(absorptionIndex(0.00635, 440), 20);
+    expect(Number.isNaN(at440?.n)).toBe(true);
+    expect(absorptionIndex(0.00635, 440)).toBeCloseTo(2.2234e-10, 14);
+  });
+
+  it("refuses a table of another length or with a wavelength twice", () => {
+    expect(() =>
+      parseOmlcAbsorption(
+        omlcTable(() => 1e-4, 139),
+        POPE_FRY_ROWS,
+      ),
+    ).toThrow(/140 rows/u);
+    const doubled = `${omlcTable(() => 1e-4, 139)}\n380\t1e-4`;
+    expect(() => parseOmlcAbsorption(doubled, POPE_FRY_ROWS)).toThrow(/twice/u);
+  });
+
+  it("takes k from Pope and Fry to 727.5 nm and Hale and Querry's from 750 nm, and n from Hale and Querry", () => {
+    const { n, k } = waterIndex(
+      haleTable(),
+      omlcTable(() => 1e-4),
+    );
+    // The reduction keeps six significant figures.
+    expect(Math.abs(gridValue(k, 725) / absorptionIndex(0.01, 725) - 1)).toBeLessThan(5e-6);
+    expect([gridValue(k, 750), gridValue(k, 780)]).toEqual([1e-8, 1e-8]);
+    // 730 nm lies a ninth of the way from Pope and Fry's 727.5 nm row to Hale and Querry's 750 nm.
+    const last = absorptionIndex(0.01, 727.5);
+    expect(Math.abs(gridValue(k, 730) / (last * (1e-8 / last) ** (2.5 / 22.5)) - 1)).toBeLessThan(
+      5e-6,
+    );
+    expect(new Set(n)).toEqual(new Set([1.34]));
+  });
+
+  it("holds the committed water.json's k to Pope and Fry's rows, to six figures", () => {
+    const file = committed("water.json");
+    for (const [nm, perM] of POPE_FRY_ABSORPTION_PER_M) {
+      const k = file.k[file.wavelengthsNm.indexOf(nm)] ?? Number.NaN;
+      expect(Math.abs(k / absorptionIndex(perM, nm) - 1)).toBeLessThan(5e-6);
+    }
+  });
+
+  it("holds Mason, Cone and Fry 2016's cross-check below Pope and Fry's from 380 to 480 nm", () => {
+    // WOPP v3's Mason values; Pope and Fry run 7.95 times them at 380 nm and 0.98 at 500 nm.
+    const ratios = MASON_2016_ABSORPTION_PER_M.map(([nm, mason]) => {
+      const pope = POPE_FRY_ABSORPTION_PER_M.find(([at]) => at === nm)?.[1] ?? Number.NaN;
+      return pope / mason;
+    });
+    expect(ratios.slice(0, -1).every((r) => r > 1)).toBe(true);
+    expect(ratios[0]).toBeCloseTo(7.95, 2);
+    expect(ratios.at(-1)).toBeCloseTo(0.98, 2);
+  });
+
+  it("reproduces IAPWS R9-97's Table 3 at 0 °C and 0.1 MPa, the recorded n's check", () => {
+    // ρ = 999.8431 kg m⁻³, the NIST Chemistry WebBook's IAPWS-95 at 273.16 K and 0.1 MPa, its nearest
+    // state to 0 °C (ρ moves by under 10⁻⁶ of itself over 0.01 K).
+    expect(iapwsWaterIndex(273.15, 999.8431, 226.5)).toBeCloseTo(1.394_527, 6);
+    expect(iapwsWaterIndex(273.15, 999.8431, 589)).toBeCloseTo(1.334_344, 6);
+    expect(iapwsWaterIndex(273.15, 999.8431, 1_013.98)).toBeCloseTo(1.326_135, 6);
+  });
+
+  it("finds Quan and Fry's pure water, times air's index, above IAPWS R9-97 as the file states", () => {
+    const excess = (nm: number): number =>
+      quanFryIndex(0, 25, nm) * dryAirIndex(nm) -
+      iapwsWaterIndex(WATER_TEMPERATURE_K, WATER_DENSITY_KG_PER_M3, nm);
+    const inRange = MATERIAL_GRID_NM.filter((nm) => nm >= 400 && nm <= 700).map(excess);
+    // The file states each to two figures, ×10⁻⁵.
+    const [low, high, at380, at780] = [
+      Math.min(...inRange),
+      Math.max(...inRange),
+      excess(380),
+      excess(780),
+    ].map((value) => (value * 1e5).toFixed(1));
+    expect(committedText("water.json", "reduction")).toContain(
+      `lies above it by ${low} × 10⁻⁵ to ${high} × 10⁻⁵ over 400–700 nm, and by ${at380} × 10⁻⁵ at 380 nm and ${at780} × 10⁻⁵ at 780 nm`,
+    );
+  });
+
+  it("states the factors by which water's k moved, against Hale and Querry's rows", () => {
+    // Hale and Querry's k (their table every 25 nm, the file's earlier source): 1.86 × 10⁻⁹ at 400
+    // nm, 1.30 × 10⁻⁹ and 1.02 × 10⁻⁹ at 425 and 450 nm (log-linear at 440 nm), 1.00 × 10⁻⁹ at
+    // 500 nm and 1.96 × 10⁻⁹ at 550 nm.
+    const before440 = 1.3e-9 * (1.02e-9 / 1.3e-9) ** (15 / 25);
+    const water = committed("water.json");
+    const text = committedText("water.json", "reduction");
+    const after = (nm: number): number => water.k[water.wavelengthsNm.indexOf(nm)] ?? Number.NaN;
+    expect(text).toContain(`falls by a factor of ${(before440 / after(440)).toFixed(2)} at 440 nm`);
+    expect(text).toContain(
+      `by ${(1.86e-9 / after(400)).toFixed(2)} at 400 nm and by ${(1e-9 / after(500)).toFixed(2)} at 500 nm, and rises by ${(after(550) / 1.96e-9).toFixed(2)} at 550 nm`,
+    );
+  });
+});
+
+describe("R08.T5.g's seawater", () => {
+  it("holds Quan and Fry's ten coefficients as the Ocean Optics Web Book gives them", () => {
+    expect(QUAN_FRY_COEFFICIENTS).toEqual([
+      1.31405, 1.779e-4, -1.05e-6, 1.6e-8, -2.02e-6, 15.868, 0.01155, -0.00423, -4382, 1.1455e6,
+    ]);
+  });
+
+  it("adds the salinity terms alone, (n₁ + n₂T + n₃T²)S + n₆S ÷ λ", () => {
+    const [, n1, n2, n3, , , n6] = QUAN_FRY_COEFFICIENTS;
+    const { salinityPermil: s, temperatureC: t } = SEAWATER;
+    for (const nm of [380, 550, 780]) {
+      expect(quanFrySalinityIncrement(s, t, nm)).toBeCloseTo(
+        (n1 + n2 * t + n3 * t * t) * s + (n6 * s) / nm,
+        12,
+      );
+    }
+    expect(quanFrySalinityIncrement(s, t, 550)).toBeCloseTo(0.006_393, 6);
+  });
+
+  it("holds the committed seawater.json to water.json's n plus the terms, and water.json's k", () => {
+    const water = committed("water.json");
+    const sea = committed("seawater.json");
+    expect(sea.n).toEqual([...seawaterN(water.n)]);
+    expect(sea.k).toEqual(water.k);
+  });
+});
+
+describe("R08.T5.g's derived liquids", () => {
+  it("fits a Cauchy line exactly to points on one, and refuses a single wavelength", () => {
+    const points = [0.4, 0.5, 0.7].map((um) => ({ wavelengthUm: um, n: 1.3 + 0.004 / (um * um) }));
+    expect(fitCauchy(points)).toEqual({ a: 1.3, bUm2: 0.004 });
+    expect(() => fitCauchy([{ wavelengthUm: 0.5, n: 1.3 }])).toThrow(/two distinct/u);
+  });
+
+  it("fit liquid N2 to Augustin 1915 within 2.2 × 10⁻⁴, the 656.3 nm value the largest residual", () => {
+    const residuals = AUGUSTIN_N2.map(
+      (p) => cauchyIndex(N2_LIQUID_FIT, p.wavelengthUm * 1000).n - p.n,
+    );
+    expect(Math.max(...residuals.map(Math.abs))).toBeLessThan(2.2e-4);
+    expect(Math.abs(residuals[0] ?? 0)).toBe(Math.max(...residuals.map(Math.abs)));
+  });
+
+  it("meet Wong and Anderson's 1.360 at 632.8 nm for liquid NH3, within 4.5 × 10⁻⁴ of the shifted estimate", () => {
+    expect(cauchyIndex(NH3_LIQUID_FIT, NH3_LIQUID_MEASURED.wavelengthNm).n).toBeCloseTo(1.36, 5);
+    expect(cauchyResidual(NH3_LIQUID_FIT, ammoniaLiquidLevelled)).toBeLessThan(4.5e-4);
+    expect([NH3_LIQUID_FIT.fittedFromUm, NH3_LIQUID_FIT.fittedToUm]).toEqual([0.6328, 0.6328]);
+  });
+
+  it("estimate liquid C2H6 near 1.40 at 550 nm, a stand-in that states its estimate", () => {
+    expect(ethaneLiquidEstimate(550)).toBeCloseTo(1.4, 2);
+    const ethane = DERIVED_MATERIALS.find((f) => f.key === "C2H6");
+    expect([ethane?.provenance, ethane?.fit]).toEqual(["standIn", null]);
+    expect(ethane?.standIn).toContain(
+      "since no open visible optical constants of liquid C2H6 were found",
+    );
+  });
+
+  it("find Burton's Lorentz–Lorenz function 0.0086 above the estimate at 632.8 nm", () => {
+    expect(ethaneBurtonIndex()).toBeCloseTo(1.4061, 4);
+    expect(ethaneBurtonIndex() - ethaneLiquidEstimate(632.8)).toBeCloseTo(0.0086, 4);
+  });
+
+  it("find the method above every measured liquid, by 0.0019 to 0.0074", () => {
+    const excesses = LIQUID_CHECKS.map(liquidCheckExcess);
+    expect(excesses.every((e) => e > 0)).toBe(true);
+    expect(Math.min(...excesses)).toBeCloseTo(0.0019, 4);
+    expect(Math.max(...excesses)).toBeCloseTo(0.0074, 4);
+  });
+
+  it.each([
+    ["nitrogen-liquid.json", "N2"],
+    ["ammonia-liquid.json", "NH3"],
+    ["ethane-liquid.json", "C2H6"],
+    ["sulphur-liquid.json", "S8"],
+  ])("hold the committed %s to its derivation", (file, key) => {
+    const derived = DERIVED_MATERIALS.find((f) => f.key === key && f.phase === "liquid");
+    expect(committed(file).n).toEqual(derived?.n);
+    expect(committed(file).k).toEqual(derived?.k);
+  });
+
+  it("give molten S8 Becquerel 1877's n_D, 1.929, at every wavelength", () => {
+    expect(S8_MOLTEN_INDEX_D).toBe(1.929);
+    expect(new Set(committed("sulphur-liquid.json").n)).toEqual(new Set([1.929]));
+  });
+
+  it("ask for Pope and Fry's table once, for both water files", () => {
+    expect(sourceOptions().filter((input) => input.option === "pope-fry")).toHaveLength(1);
+    expect(
+      COMBINED_MATERIALS.filter((spec) => spec.inputs.some((i) => i.option === "pope-fry")),
+    ).toHaveLength(2);
   });
 });

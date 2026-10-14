@@ -495,6 +495,42 @@ ruled 2026-10-09 and 2026-10-10).
   Lorentz-Lorenz estimates in hydrogen-sulphide-ice.json, nitrogen-ice.json,
   carbon-monoxide-ice.json and oxygen-ice.json.
 
+- Pure water's absorption coefficient over 380-727.5 nm (plan R08, R08.T5.g): R. M. Pope and
+  E. S. Fry, "Absorption spectrum (380-700 nm) of pure water. II. Integrating cavity
+  measurements", Appl. Opt. 36 (1997) 8710-8723, DOI: 10.1364/AO.36.008710, as S. Prahl's
+  omlc.org transcribes the table (https://omlc.org/spectra/water/). Reduced to the visible as the
+  imaginary index in apps/hyperion/src/renderer/src/view/atmosphere/materials/water.json and
+  seawater.json. Seawater's salinity terms: X. Quan and E. S. Fry, "Empirical equation for the
+  index of refraction of seawater", Appl. Opt. 34 (1995) 3477-3480, DOI: 10.1364/AO.34.003477,
+  their coefficients as the Ocean Optics Web Book gives them (https://www.oceanopticsbook.info/,
+  CC BY), in seawater.json. Recorded in water.json and not applied: IAPWS R9-97, Release on the
+  Refractive Index of Ordinary Water Substance as a Function of Wavelength, Temperature and
+  Pressure (International Association for the Properties of Water and Steam, 1997), with the
+  density from IAPWS-95 (W. Wagner and A. Pruss, J. Phys. Chem. Ref. Data 31 (2002) 387-535) as
+  the NIST Chemistry WebBook gives it; and the cross-check, J. D. Mason, M. T. Cone and E. S. Fry,
+  Appl. Opt. 55 (2016) 7163-7172, DOI: 10.1364/AO.55.007163, as R. Roettgers's WOPP v3
+  compilation gives it.
+
+- Refractive indices of the cryogenic liquids and molten sulphur (plan R08, R08.T5.g): liquid
+  nitrogen's, H. Augustin, Ann. Phys. 351 (1915) 419-445, DOI: 10.1002/andp.19153510307 (the
+  article's scan on Zenodo, record 1514490, CC0), as a Cauchy fit in nitrogen-liquid.json; liquid
+  ammonia's at 632.8 nm, L. Y. Wong and A. Anderson, J. Opt. Soc. Am. 62 (1972) 219-222,
+  DOI: 10.1364/JOSA.62.000219, in ammonia-liquid.json; liquid ethane's, a Lorentz-Lorenz estimate
+  from the gas dispersion view/atmosphere/rayleigh.ts cites, a stated stand-in in
+  ethane-liquid.json, beside which ethane's measured Lorentz-Lorenz function is recorded from
+  Burton, "The Lorentz-Lorenz function of ethane", University of British Columbia thesis,
+  DOI: 10.14288/1.0084897, licensed CC BY as OpenAlex records it (no version stated), one value
+  from its abstract;
+  molten sulphur's at the sodium D lines, H. Becquerel, Ann. Chim. Phys. (5) 12 (1877) 5-87
+  (public domain), a stated stand-in in sulphur-liquid.json. The liquids' densities are the NIST Chemistry
+  WebBook's fluid properties (NIST Standard Reference Database 69), after R. Span et al., J. Phys.
+  Chem. Ref. Data 29 (2000) 1361 (nitrogen), K. Gao et al., J. Phys. Chem. Ref. Data 52 (2023)
+  013102 (ammonia), D. Buecker and W. Wagner, J. Phys. Chem. Ref. Data 35 (2006) 205 (ethane), and,
+  for the estimates' checks on measured liquids, Ch. Tegeler, R. Span and W. Wagner, J. Phys.
+  Chem. Ref. Data 28 (1999) 779 (argon) and U. Setzmann and W. Wagner, J. Phys. Chem. Ref. Data
+  20 (1991) 1061 (methane), with liquid argon's measured index from A. C. Sinnock and B. L. Smith
+  1969 through refractiveindex.info (as above).
+
 - Single-scattering properties of irregular hexahedral particles: M. Saito, TAMUdust2020
   Database, version 1.0.0, Zenodo, DOI 10.5281/zenodo.4711247, licensed under CC BY 4.0
   (https://creativecommons.org/licenses/by/4.0/), described in M. Saito, P. Yang, J. Ding and
