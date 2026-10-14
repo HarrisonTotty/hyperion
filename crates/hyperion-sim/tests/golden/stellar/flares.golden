@@ -1,0 +1,363 @@
+# generator_version = 22
+
+# the template
+profile at -0.5 half widths = 0x3fc8985045fb5e6e  # 0.1921482412060302
+profile at 0.5 half widths = 0x3fe279b38a12dc4e  # 0.5773561188460776
+profile at 1.6 half widths = 0x3fcfceb0a0436283  # 0.24849517655708916
+profile at 10 half widths = 0x3f922baec9bafe71  # 0.01774476152672694
+profile area (half widths) = 0x3ffcf5cb7a7f8e43  # 1.8100085053528268
+
+# a saturated M dwarf, 0.2 M☉ at 300 Myr, over three days
+phase at the epoch: MainSequence
+Rossby number at the epoch = 0x3fa25ce083450c28  # 0.035864845298896164
+log L(X) / L(bol) at the epoch = 0xc0090a3d70a3d70a  # -3.13
+floor (J) = 0x44d95476770d7d30  # 4.7846889952153106e23
+listed rate (per s) = 0x3f185ac8c6ff89e6  # 9.290552566158065e-5
+rate above E0 (per s) = 0x3eca7498461d5540  # 3.1537352222314188e-6
+0200080020000000.0000:0100000000000000 at T+1570.650202604 s
+  energy (J) = 0x44e82f43fc43673d  # 9.136695313995295e23
+  duration +903.860517576 s
+  half width (s) = 0x4045853ebc386efb  # 43.04097702746909
+  peak factor = 0x3ff0162a5fd818a3  # 1.0054115051184815
+  factor 0.5 half widths after the onset = 0x3ff004425230ede2  # 1.0010398111907013
+  factor 1 half widths after the onset = 0x3ff0162a5fd8169d  # 1.0054115051183665
+  factor 3 half widths after the onset = 0x3ff0047cc122d061  # 1.001095537602872
+  factor 15 half widths after the onset = 0x3ff0001c9e98b384  # 1.000027293698822
+0200080020000000.0000:0100000000000001 at T+7954.241713256 s
+  energy (J) = 0x44ea482c4f973f02  # 9.929030965190045e23
+  duration +933.656935800 s
+  half width (s) = 0x40463adc7fa999cb  # 44.45985408574378
+  peak factor = 0x3ff01751a9aaba2f  # 1.0056931140530982
+  factor 0.5 half widths after the onset = 0x3ff0047b0f69458b  # 1.0010939218521766
+  factor 1 half widths after the onset = 0x3ff01751a9aab6ea  # 1.0056931140529124
+  factor 3 half widths after the onset = 0x3ff004b888cdb657  # 1.0011525482072068
+  factor 15 half widths after the onset = 0x3ff0001e1bdd5ee3  # 1.0000287140336972
+0200080020000000.0000:0100000000000005 at T+21603.297326089 s
+  energy (J) = 0x44e51366d09ca70c  # 7.962207429703306e23
+  duration +856.636767129 s
+  half width (s) = 0x40446567b1cd4c43  # 40.79222700619041
+  peak factor = 0x3ff014618e15a96f  # 1.0049758482151352
+  factor 0.5 half widths after the onset = 0x3ff003ea8b44e6b4  # 1.0009561004830347
+  factor 1 half widths after the onset = 0x3ff014618e15a8a3  # 1.00497584821509
+  factor 3 half widths after the onset = 0x3ff0042045ef174d  # 1.0010073406023878
+  factor 15 half widths after the onset = 0x3ff0001a50c38bc5  # 1.0000250964010189
+0200080020000000.0000:0100000000000008 at T+22527.109121612 s
+  energy (J) = 0x451241913e5c9abc  # 5.5175744614943e24
+  duration +1822.533204764 s
+  half width (s) = 0x4055b2630c8492c7  # 86.78729546496025
+  peak factor = 0x3ff042624a2037bc  # 1.0162070174733193
+  factor 0.5 half widths after the onset = 0x3ff00cc16c3fc8d0  # 1.0031141499026042
+  factor 1 half widths after the onset = 0x3ff042624a203195  # 1.0162070174729696
+  factor 3 half widths after the onset = 0x3ff00d706d125ae4  # 1.003281045972181
+  factor 15 half widths after the onset = 0x3ff00055b68f6f26  # 1.0000817424069708
+0200080020000000.0000:0100000000000007 at T+24562.247386662 s
+  energy (J) = 0x44feb23c8f6af196  # 2.319342060085751e24
+  duration +1299.828107287 s
+  half width (s) = 0x404ef2c3051d75ef  # 61.89657653749952
+  peak factor = 0x3ff0272057866ed5  # 1.0095523280096377
+  factor 0.5 half widths after the onset = 0x3ff007849f5abd5c  # 1.0018354630263593
+  factor 1 half widths after the onset = 0x3ff0272057866c30  # 1.0095523280094874
+  factor 3 half widths after the onset = 0x3ff007ebc4b73cc0  # 1.0019338306627077
+  factor 15 half widths after the onset = 0x3ff0003284d365c4  # 1.0000481785303785
+0200080020000000.0000:0100000000000006 at T+25625.534565100 s
+  energy (J) = 0x452a2d7edb87944e  # 1.582345895511903e25
+  duration +2748.661162494 s
+  half width (s) = 0x40605c6fa170bd45  # 130.88862678546334
+  peak factor = 0x3ff07e3b785d4f03  # 1.0308184339273232
+  factor 0.5 half widths after the onset = 0x3ff018415c5a99c6  # 1.0059217078756872
+  factor 1 half widths after the onset = 0x3ff07e3b785d4b45  # 1.0308184339271105
+  factor 3 half widths after the onset = 0x3ff0198e234d642c  # 1.0062390688892817
+  factor 15 half widths after the onset = 0x3ff000a2fcd92637  # 1.000155437172351
+0200080020000000.0000:0100000000000002 at T+27915.259489330 s
+  energy (J) = 0x44de2a1bcf245eee  # 5.69791046390138e23
+  duration +751.835351296 s
+  half width (s) = 0x4041e69d8fbdc130  # 35.80168339505542
+  peak factor = 0x3ff0109e405407dd  # 1.0040571701833791
+  factor 0.5 half widths after the onset = 0x3ff003317268225b  # 1.00077957811495
+  factor 1 half widths after the onset = 0x3ff0109e405407a6  # 1.004057170183367
+  factor 3 half widths after the onset = 0x3ff0035d419551b2  # 1.0008213579031744
+  factor 15 half widths after the onset = 0x3ff0001574f8f608  # 1.0000204629171794
+0200080020000000.0000:0100000000000003 at T+53270.250328169 s
+  energy (J) = 0x44f08ace100d3705  # 1.2498938046494022e24
+  duration +1021.348993809 s
+  half width (s) = 0x4048515d84033174  # 48.635666371878784
+  peak factor = 0x3ff01ad59087f5c9  # 1.0065513272996773
+  factor 0.5 half widths after the onset = 0x3ff00527f9894378  # 1.0012588260180717
+  factor 1 half widths after the onset = 0x3ff01ad59087f1b9  # 1.0065513272994464
+  factor 3 half widths after the onset = 0x3ff0056eb7466167  # 1.0013262900521
+  factor 15 half widths after the onset = 0x3ff00022a5cb12b0  # 1.0000330425547581
+0200080020000000.0000:0100000000000004 at T+71238.848565866 s
+  energy (J) = 0x45204575865c2d90  # 9.835412175936046e24
+  duration +2283.403963902 s
+  half width (s) = 0x405b2ef206a37ad7  # 108.73352209057644
+  peak factor = 0x3ff05e7318c99af8  # 1.0230589836370978
+  factor 0.5 half widths after the onset = 0x3ff01225f88ece68  # 1.0044307431498058
+  factor 1 half widths after the onset = 0x3ff05e7318c996c6  # 1.0230589836368593
+  factor 3 half widths after the onset = 0x3ff0131ef62bb393  # 1.0046681991618456
+  factor 15 half widths after the onset = 0x3ff00079f362e229  # 1.000116301276771
+0200080020000000.0000:0100000000000106 at T+100560.956886451 s
+  energy (J) = 0x44f05ccc71a11758  # 1.2363151346187734e24
+  duration +1017.007212350 s
+  half width (s) = 0x404836e6aebdfdf5  # 48.42891487385706
+  peak factor = 0x3ff01aa7f17fd251  # 1.00650781951585
+  factor 0.5 half widths after the onset = 0x3ff0051f356e46d9  # 1.0012504660739323
+  factor 1 half widths after the onset = 0x3ff01aa7f17fce5d  # 1.0065078195156254
+  factor 3 half widths after the onset = 0x3ff005657ae6cd70  # 1.0013174820749917
+  factor 15 half widths after the onset = 0x3ff000226ae36d7c  # 1.0000328231170377
+0200080020000000.0000:0100000000000105 at T+103629.137262751 s
+  energy (J) = 0x44f2417e81f63790  # 1.3793720143085441e24
+  duration +1061.376335772 s
+  half width (s) = 0x404945576aeaf53e  # 50.5417302748924
+  peak factor = 0x3ff01c7f48fdf2a3  # 1.006957326054512
+  factor 0.5 half widths after the onset = 0x3ff00579c6b56c2d  # 1.00133683796481
+  factor 1 half widths after the onset = 0x3ff01c7f48fdee6c  # 1.0069573260542724
+  factor 3 half widths after the onset = 0x3ff005c4e6be6d0c  # 1.0014084828788468
+  factor 15 half widths after the onset = 0x3ff00024cb78d168  # 1.0000350902674544
+0200080020000000.0000:0100000000000107 at T+129575.106242058 s
+  energy (J) = 0x44e5066dde624072  # 7.943063478234296e23
+  duration +855.832911256 s
+  half width (s) = 0x404460815f8677d1  # 40.75394815507719
+  peak factor = 0x3ff01459e629b1a0  # 1.0049685469376541
+  factor 0.5 half widths after the onset = 0x3ff003e912ac71f1  # 1.0009546975553543
+  factor 1 half widths after the onset = 0x3ff01459e629b14d  # 1.0049685469376357
+  factor 3 half widths after the onset = 0x3ff0041eb927d673  # 1.0010058624879121
+  factor 15 half widths after the onset = 0x3ff0001a46e0f2e3  # 1.000025059575983
+0200080020000000.0000:0100000000000101 at T+131668.153440877 s
+  energy (J) = 0x4513e857a89c9060  # 6.01669915329569e24
+  duration +1885.139033604 s
+  half width (s) = 0x4056712f85333eb5  # 89.76852540974035
+  peak factor = 0x3ff045fc2b7a8fc0  # 1.017086191023722
+  factor 0.5 half widths after the onset = 0x3ff00d728f7e7822  # 1.003283081553953
+  factor 1 half widths after the onset = 0x3ff045fc2b7a8aea  # 1.0170861910234472
+  factor 3 half widths after the onset = 0x3ff00e2b0e9a6d30  # 1.0034590311468712
+  factor 15 half widths after the onset = 0x3ff0005a5cdde783  # 1.0000861766443172
+0200080020000000.0000:0100000000000103 at T+141579.731858815 s
+  energy (J) = 0x44e72869de9e326e  # 8.748794206216677e23
+  duration +888.696456991 s
+  half width (s) = 0x404528d10620d36f  # 42.31887890436962
+  peak factor = 0x3ff015962e08952c  # 1.0052701757607094
+  factor 0.5 half widths after the onset = 0x3ff00425d881efe0  # 1.0010126550032439
+  factor 1 half widths after the onset = 0x3ff015962e089398  # 1.0052701757606197
+  factor 3 half widths after the onset = 0x3ff0045ec0c718d3  # 1.0010669260387217
+  factor 15 half widths after the onset = 0x3ff0001bdf4070fc  # 1.0000265808840245
+0200080020000000.0000:0100000000000102 at T+151599.566518927 s
+  energy (J) = 0x44fd1db324f3c6bc  # 2.199943876669186e24
+  duration +1273.310073731 s
+  half width (s) = 0x404e5120c91834d0  # 60.633813034839136
+  peak factor = 0x3ff025e291d16d94  # 1.0092492767351802
+  factor 0.5 half widths after the onset = 0x3ff007479026bdca  # 1.0017772322570289
+  factor 1 half widths after the onset = 0x3ff025e291d1692f  # 1.0092492767349304
+  factor 3 half widths after the onset = 0x3ff007ab6fcadb76  # 1.0018724791422904
+  factor 15 half widths after the onset = 0x3ff00030ea86e368  # 1.0000466500480005
+0200080020000000.0000:0100000000000100 at T+153888.449763069 s
+  energy (J) = 0x44f5359cfe64a4b5  # 1.6025389786582677e24
+  duration +1125.301777935 s
+  half width (s) = 0x404acafb75c0b228  # 53.585798949327284
+  peak factor = 0x3ff01f3a1aebb9a0  # 1.007623772773151
+  factor 0.5 half widths after the onset = 0x3ff006000da18c8a  # 1.001464894529621
+  factor 1 half widths after the onset = 0x3ff01f3a1aebb807  # 1.0076237727730601
+  factor 3 half widths after the onset = 0x3ff006525fea4a33  # 1.0015434023558896
+  factor 15 half widths after the onset = 0x3ff0002851c4ea03  # 1.0000384515866478
+0200080020000000.0000:0100000000000104 at T+166646.360051650 s
+  energy (J) = 0x44df9acd5f1b8629  # 5.9699583253389545e23
+  duration +765.636196578 s
+  half width (s) = 0x40423abc233966ac  # 36.45886650374209
+  peak factor = 0x3ff0111906983638  # 1.004174257049625
+  factor 0.5 half widths after the onset = 0x3ff0034909ad5a5b  # 1.0008020761503278
+  factor 1 half widths after the onset = 0x3ff011190698334e  # 1.0041742570494594
+  factor 3 half widths after the onset = 0x3ff003761c83e3cb  # 1.0008450616717137
+  factor 15 half widths after the onset = 0x3ff00016137edbbf  # 1.000021053461509
+0200080020000000.0000:0100000000000202 at T+176180.375382003 s
+  energy (J) = 0x452b679268e69e6c  # 1.6565050830434267e25
+  duration +2798.200512512 s
+  half width (s) = 0x4060a7ecb1f67402  # 133.24764345298178
+  peak factor = 0x3ff081cf0f7e32ac  # 1.0316916089242723
+  factor 0.5 half widths after the onset = 0x3ff018f14a326f88  # 1.0060894869156716
+  factor 1 half widths after the onset = 0x3ff081cf0f7e2aa9  # 1.0316916089238168
+  factor 3 half widths after the onset = 0x3ff01a477ed9afd0  # 1.0064158396808018
+  factor 15 half widths after the onset = 0x3ff000a79b088ab6  # 1.0001598411551362
+0200080020000000.0000:0100000000000204 at T+228009.145755383 s
+  energy (J) = 0x44f17a0813da21ed  # 1.3205010405502822e24
+  duration +1043.474311599 s
+  half width (s) = 0x4048d83970aba222  # 49.68925293331655
+  peak factor = 0x3ff01bbfbe3a8bdf  # 1.0067746573265521
+  factor 0.5 half widths after the onset = 0x3ff00554f8c3e0ec  # 1.001301738489981
+  factor 1 half widths after the onset = 0x3ff01bbfbe3a8a64  # 1.006774657326468
+  factor 3 half widths after the onset = 0x3ff0059e1fda110f  # 1.0013715023242786
+  factor 15 half widths after the onset = 0x3ff00023d4287a32  # 1.00003416895164
+0200080020000000.0000:0100000000000205 at T+240084.488540860 s
+  energy (J) = 0x44dbaff19ea559a1  # 5.229979431415737e23
+  duration +727.124273556 s
+  half width (s) = 0x40414ffeddd113d3  # 34.62496540745601
+  peak factor = 0x3ff00fc59591c9a4  # 1.0038505404050762
+  factor 0.5 half widths after the onset = 0x3ff00307d0910e79  # 1.0007398745664473
+  factor 1 half widths after the onset = 0x3ff00fc59591c7e6  # 1.0038505404049771
+  factor 3 half widths after the onset = 0x3ff00331648f37fe  # 1.0007795265296404
+  factor 15 half widths after the onset = 0x3ff000145d37cdea  # 1.000019420750386
+0200080020000000.0000:0100000000000200 at T+240120.564289327 s
+  energy (J) = 0x44e42d76d27e068a  # 7.622879614809438e23
+  duration +842.209399838 s
+  half width (s) = 0x40440d7781636fe3  # 40.105209516099215
+  peak factor = 0x3ff013d8c43a1cfb  # 1.0048453965299007
+  factor 0.5 half widths after the onset = 0x3ff003d042a63ece  # 1.0009310344211602
+  factor 1 half widths after the onset = 0x3ff013d8c43a1c92  # 1.0048453965298774
+  factor 3 half widths after the onset = 0x3ff0040494b5606f  # 1.000980931179608
+  factor 15 half widths after the onset = 0x3ff00019a0257300  # 1.0000244384493158
+0200080020000000.0000:0100000000000206 at T+240202.241609762 s
+  energy (J) = 0x44e3439c14b89acf  # 7.277771347568503e23
+  duration +827.128583172 s
+  half width (s) = 0x4043b18bafb4c9a9  # 39.387075389170896
+  peak factor = 0x3ff0134b305d3284  # 1.0047103776188644
+  factor 0.5 half widths after the onset = 0x3ff003b50e747190  # 1.0009050907748112
+  factor 1 half widths after the onset = 0x3ff0134b305d31d0  # 1.0047103776188244
+  factor 3 half widths after the onset = 0x3ff003e7eb487df3  # 1.0009535971402073
+  factor 15 half widths after the onset = 0x3ff00018e9585e38  # 1.0000237574621575
+0200080020000000.0000:0100000000000201 at T+245385.019914693 s
+  energy (J) = 0x44da6a58403c140d  # 4.989729703006186e23
+  duration +713.910366493 s
+  half width (s) = 0x4040ff742338adcd  # 33.99573173778081
+  peak factor = 0x3ff00f5368b91e2d  # 1.0037416544672724
+  factor 0.5 half widths after the onset = 0x3ff002f1e04b9246  # 1.000718952324989
+  factor 1 half widths after the onset = 0x3ff00f5368b91b3a  # 1.0037416544671047
+  factor 3 half widths after the onset = 0x3ff0031a474bd4a1  # 1.000757483006318
+  factor 15 half widths after the onset = 0x3ff00013c9cc51ef  # 1.0000188715686098
+0200080020000000.0000:0100000000000203 at T+249316.937434486 s
+  energy (J) = 0x44f9256395cf25e0  # 1.89998187954898e24
+  duration +1202.557744152 s
+  half width (s) = 0x404ca1e032b78ec2  # 57.26465448344017
+  peak factor = 0x3ff022a4fb6cf7d3  # 1.0084581204714496
+  factor 0.5 half widths after the onset = 0x3ff006a828c90c1c  # 1.0016252129723915
+  factor 1 half widths after the onset = 0x3ff022a4fb6cf598  # 1.0084581204713228
+  factor 3 half widths after the onset = 0x3ff007037d71d6d9  # 1.0017123127158156
+  factor 15 half widths after the onset = 0x3ff0002cbb62e6ae  # 1.000042659738408
+
+# a Sun-like G dwarf, 1 M☉ at 4.57 Gyr, over three days
+phase at the epoch: MainSequence
+Rossby number at the epoch = 0x400008ee50cf086e  # 2.0043608010465084
+log L(X) / L(bol) at the epoch = 0xc01959cada10159f  # -6.337687880737035
+floor (J) = 0x44d95476770d7d30  # 4.7846889952153106e23
+listed rate (per s) = 0x3e5db5e376d56bf1  # 2.7670061288547116e-8
+rate above E0 (per s) = 0x3e1022fc2bcdb3aa  # 9.392772525163112e-10
+
+# the same G dwarf over a year
+phase at the epoch: MainSequence
+Rossby number at the epoch = 0x400008ee50cf086e  # 2.0043608010465084
+log L(X) / L(bol) at the epoch = 0xc01959cada10159f  # -6.337687880737035
+floor (J) = 0x44d95476770d7d30  # 4.7846889952153106e23
+listed rate (per s) = 0x3e5db5e376d56bf1  # 2.7670061288547116e-8
+rate above E0 (per s) = 0x3e1022fc2bcdb3aa  # 9.392772525163112e-10
+0200080020000000.0001:0100000000010c00 at T+23184084.668796121 s
+  energy (J) = 0x44e34a508e6adb9f  # 7.287666154435119e23
+  duration +827.566979142 s
+  half width (s) = 0x4043b437c04664d2  # 39.40795138776015
+  peak factor = 0x3ff0001d5effb422  # 1.0000280104534416
+  factor 0.5 half widths after the onset = 0x3ff00005a4c32cd8  # 1.0000053821593635
+  factor 1 half widths after the onset = 0x3ff0001d5effb41d  # 1.0000280104534405
+  factor 3 half widths after the onset = 0x3ff00005f230f883  # 1.0000056706044524
+  factor 15 half widths after the onset = 0x3ff0000025ec5330  # 1.0000001412747217
+
+# a pre-main-sequence K star, 0.8 M☉ at 10 Myr, over three days
+phase at the epoch: PreMainSequence
+Rossby number at the epoch = 0x3fcae39636dca1db  # 0.21007039717484485
+log L(X) / L(bol) at the epoch = 0xc00d8aba40b52a3c  # -3.692738061455456
+floor (J) = 0x44d95476770d7d30  # 4.7846889952153106e23
+listed rate (per s) = 0x3eed594fc877c94b  # 1.3994633504464538e-5
+rate above E0 (per s) = 0x3e9fe16855847c81  # 4.750564435318736e-7
+0200080020000000.0002:0100000000000000 at T+18724.096716009 s
+  energy (J) = 0x454dc15a07b7fecd  # 7.194385252635591e25
+  duration +4961.593609750 s
+  half width (s) = 0x406d88860a6002b9  # 236.26636236908033
+  peak factor = 0x3ff005e1b67ffff1  # 1.0014359597116675
+  factor 0.5 half widths after the onset = 0x3ff0012151f10138  # 1.0002759171330364
+  factor 1 half widths after the onset = 0x3ff005e1b67fffed  # 1.0014359597116667
+  factor 3 half widths after the onset = 0x3ff00130d3580d8d  # 1.0002907043097793
+  factor 15 half widths after the onset = 0x3ff0000798229a00  # 1.0000072424678592
+0200080020000000.0002:0100000000000200 at T+177651.629162571 s
+  energy (J) = 0x44daaae9e2af9fc9  # 5.037373130919911e23
+  duration +716.561149176 s
+  half width (s) = 0x40410f9c5e4edebb  # 34.12195948458744
+  peak factor = 0x3ff00048ffe65920  # 1.000069617851814
+  factor 0.5 half widths after the onset = 0x3ff0000e06d8da16  # 1.000013376947782
+  factor 1 half widths after the onset = 0x3ff00048ffe65915  # 1.0000696178518116
+  factor 3 half widths after the onset = 0x3ff0000ec74a6ad2  # 1.0000140938561128
+  factor 15 half widths after the onset = 0x3ff000005e414da9  # 1.000000351127577
+0200080020000000.0002:0100000000000201 at T+194225.295420347 s
+  energy (J) = 0x44f1d17d00768475  # 1.3463137127960844e24
+  duration +1051.382382311 s
+  half width (s) = 0x4049086d0b03e493  # 50.06582772913057
+  peak factor = 0x3ff00084f8717b94  # 1.0001268105331507
+  factor 0.5 half widths after the onset = 0x3ff000198ccfb1e2  # 1.0000243664209099
+  factor 1 half widths after the onset = 0x3ff00084f8717b91  # 1.00012681053315
+  factor 3 half widths after the onset = 0x3ff0001aeb5a10d8  # 1.0000256722860765
+  factor 15 half widths after the onset = 0x3ff00000abb01611  # 1.0000006395870324
+
+# a 0.5 M☉ star that leaves its protostar phase at T-3155803200.000580549 s, over the bin before, its bin and the bin after
+phase at the epoch: PreMainSequence
+Rossby number at the epoch = 0x3fbc469d10931c0c  # 0.1104524770226904
+log L(X) / L(bol) at the epoch = 0xc0090a3d70a3d70a  # -3.13
+floor (J) = 0x44d95476770d7d30  # 4.7846889952153106e23
+listed rate (per s) = 0x3f11d849f80271f4  # 6.8072809883586e-5
+rate above E0 (per s) = 0x3ec362591dad7679  # 2.3107734085498706e-6
+0200080020000000.0005:0100ffffff715204 at T-3155799585.719074288 s
+  energy (J) = 0x44da65943255e69f  # 4.9862131359268355e23
+  duration +713.714101176 s
+  half width (s) = 0x4040fe41e39066a8  # 33.98638577032881
+  peak factor = 0x3ff00012c6452ff7  # 1.000017904751983
+  factor 0.5 half widths after the onset = 0x3ff000039b843156  # 1.0000034403666027
+  factor 1 half widths after the onset = 0x3ff00012c6452ff5  # 1.0000179047519826
+  factor 3 half widths after the onset = 0x3ff00003cd029dfc  # 1.0000036247455446
+  factor 15 half widths after the onset = 0x3ff00000183db969  # 1.0000000903051733
+0200080020000000.0005:0100ffffff715202 at T-3155793280.581094311 s
+  energy (J) = 0x44dd524c5196bef9  # 5.538670414385234e23
+  duration +743.569905439 s
+  half width (s) = 0x4041b43c5134bf9e  # 35.40809073520289
+  peak factor = 0x3ff00014046d6ab4  # 1.0000190899797134
+  factor 0.5 half widths after the onset = 0x3ff00003d8a653a5  # 1.0000036681060263
+  factor 1 half widths after the onset = 0x3ff00014046d6ab3  # 1.0000190899797132
+  factor 3 half widths after the onset = 0x3ff000040d6b7c67  # 1.0000038646901659
+  factor 15 half widths after the onset = 0x3ff0000019d88521  # 1.0000000962830387
+0200080020000000.0005:0100ffffff715205 at T-3155783764.494566740 s
+  energy (J) = 0x45276e370b4ced73  # 1.4162884774731448e25
+  duration +2632.345083639 s
+  half width (s) = 0x405f566290761aa8  # 125.34976588758093
+  peak factor = 0x3ff0009096625254  # 1.0001378893258748
+  factor 0.5 half widths after the onset = 0x3ff0001bc83fb138  # 1.000026495191447
+  factor 1 half widths after the onset = 0x3ff000909662524e  # 1.0001378893258734
+  factor 3 half widths after the onset = 0x3ff0001d456a0c99  # 1.0000279151434255
+  factor 15 half widths after the onset = 0x3ff00000baaff4f8  # 1.0000006954645055
+0200080020000000.0005:0100ffffff715303 at T-3155758825.555087565 s
+  energy (J) = 0x4504f681d38b377c  # 3.1678266775502993e24
+  duration +1467.880161515 s
+  half width (s) = 0x4051798a1f48b6e5  # 69.89905531025904
+  peak factor = 0x3ff00039fec91f09  # 1.00005530858647
+  factor 0.5 half widths after the onset = 0x3ff0000b24c8a399  # 1.0000106274476137
+  factor 1 half widths after the onset = 0x3ff00039fec91f07  # 1.0000553085864696
+  factor 3 half widths after the onset = 0x3ff0000bbdac26cb  # 1.0000111970024814
+  factor 15 half widths after the onset = 0x3ff000004ae1c31d  # 1.000000278956754
+0200080020000000.0005:0100ffffff715302 at T-3155743000.766238192 s
+  energy (J) = 0x44e18900314833ab  # 6.624595841483423e23
+  duration +797.344148790 s
+  half width (s) = 0x4042fc009f4cc8f8  # 37.968768990032856
+  peak factor = 0x3ff0001653c6aa23  # 1.000021292925006
+  factor 0.5 half widths after the onset = 0x3ff000044a46bc62  # 1.00000409139809
+  factor 1 half widths after the onset = 0x3ff0001653c6aa23  # 1.000021292925006
+  factor 3 half widths after the onset = 0x3ff000048522d32b  # 1.000004310667644
+  factor 15 half widths after the onset = 0x3ff000001cd40d9b  # 1.0000001073939078
+0200080020000000.0005:0100ffffff715301 at T-3155728245.557142156 s
+  energy (J) = 0x44eb073b8bb5a288  # 1.0210985037502085e24
+  duration +943.908788909 s
+  half width (s) = 0x404679594b851ec6  # 44.94803756713877
+  peak factor = 0x3ff0001d1229fcc1  # 1.000027724221397
+  factor 0.5 half widths after the onset = 0x3ff0000595ffac7e  # 1.00000532716038
+  factor 1 half widths after the onset = 0x3ff0001d1229fcc0  # 1.0000277242213969
+  factor 3 half widths after the onset = 0x3ff00005e2a2ea4b  # 1.0000056126579178
+  factor 15 half widths after the onset = 0x3ff0000025891e31  # 1.0000001398310696
+0200080020000000.0005:0100ffffff715300 at T-3155698175.733579418 s
+  energy (J) = 0x4501a9927f880bd7  # 2.6690651604120607e24
+  duration +1373.010091234 s
+  half width (s) = 0x40505869659ae051  # 65.38143291592247
+  peak factor = 0x3ff000343d8fb480  # 1.0000498203983454
+  factor 0.5 half widths after the onset = 0x3ff0000a09b4cf85  # 1.0000095729019176
+  factor 1 half widths after the onset = 0x3ff000343d8fb47a  # 1.0000498203983441
+  factor 3 half widths after the onset = 0x3ff0000a936c9168  # 1.0000100859407102
+  factor 15 half widths after the onset = 0x3ff000004373934d  # 1.0000002512762933

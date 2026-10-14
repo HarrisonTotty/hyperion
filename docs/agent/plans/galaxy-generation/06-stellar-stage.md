@@ -1635,6 +1635,11 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   test that evaluates a star at t = +900 years cold and after evaluating 100 earlier times, with
   equal results).
 - **Accept:** tests pass under `just test` and `just test-slow`.
+- **T28.a done (lane `14-p06-t28a-flares`, 2026-10-14; at version 22, no bump: new output on a
+  new kind that moves nothing existing, as "Generator version" says of every task but T30.b and
+  T19.e).** The record is under Risks ("Deviations in T28.a, as built" and "Deferred findings (2026-10-13
+  rule) (P06.T28.a)"). T28.b–g are open; T28.g composes `Flare::luminosity_factor_at` into
+  `summary_at`.
 
 ### Phase G: system assembly and galaxy integration
 
@@ -4297,6 +4302,205 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
   white dwarfs, neutron stars, black holes and no remnant, without a luminosity, or below the
   corrections' last row (1,710 K). Its golden change is the three rows of the server's
   `systems_in_range_briefs.golden` that gained the field.
+- **Deviations in T28.a, as built (lane `14-p06-t28a-flares`, 2026-10-14; at version 22, no
+  bump).** Flares are `stellar::events::flares`; nothing reads them yet (T28.g and plan 12's
+  P12.T5.e will).
+  - _API._ `FlareModel::of(&StarModel) -> Option<FlareModel<'_>>`, a `RateModel` that borrows the
+    star (its rate at t reads the star's phase then), with `star`, `activity` (T25's at the
+    epoch), `quiescent_luminosity`, `index` (β), `floor_joules`, `listed_rate` (ν above the floor),
+    `rate_above(energy_joules)`, `flares_at(t)` and `energy_joules_at(u)`. `Flare` (`Copy`): `id`,
+    `onset`, `end`, `duration` (a `Span`), `energy_joules`, `half_width_seconds`, `peak_factor`,
+    `is_active_at(t)` and `luminosity_factor_at(t)`. `flares_in(star, series, window, out)`,
+    `flares_active_at(star, series, t, out)` and `flare(star, series, id)`, whose series is
+    `EventSeries::new(seed, tags::STAR_FLARE, body.into())`, beside the star as for T26.d's
+    `light_factor_at` (they debug-assert the tag). Also public: `saturated_rate(mass)` (an
+    `EventsPerSecond`) and the constants `BIN_SECONDS`, `LOOK_BACK_BINS`, `MAX_DURATION`, `FLARE_INDEX`,
+    `REFERENCE_ENERGY_JOULES`, `FIXED_FLOOR_JOULES`, `MAX_ENERGY_JOULES`, `TESS_BAND_SHARE`,
+    `SOLAR_TYPE_SATURATED_PER_YEAR`, `SOLAR_TYPE_ANCHOR_JOULES` and `DURATION_INDEX`. Energies are
+    joules (erg in the sources). `system.rs` is unchanged: `StarModel::activity_at` is not added,
+    since the module reads the activity at the epoch only.
+  - _Who flares._ Where T25 gives an `Activity`: pre-main-sequence and main-sequence stars below
+    1.3 M☉. The phase rule copies T25's private `is_cool_dwarf` (phase before the end of the main
+    sequence, mass below the Kraft break); a test checks it against `rotation::activity` over 10
+    masses, 8 ages and the horizon's ends.
+  - _The law._ ν(>E) = ν₀ [(E ÷ E₀)^−β − (E_max ÷ E₀)^−β] for bolometric E from the floor to E_max,
+    with ν₀ = ν_sat(M) × 10^(log L_X ÷ L_bol + 3.13), T25's continuous activity (Wright et al.
+    2011: 1 below Ro = 0.13, Ro^−2.70 above), not `ActivityLevel`'s bands. No one survey gives
+    the index and the normalisation against activity for M and Sun-like dwarfs alike, so the law
+    takes the index and the M dwarfs' end from one survey, the Sun-like end from another and the
+    scaling with activity from a third, and blends the two ends in mass. That departs from design
+    note 22's "the task picks and records one":
+    - _The distribution:_ Medina et al. 2020 (ApJ 905, 107), α = 1.98 ± 0.02 (section 5.2.4, a
+      maximum-likelihood fit with completeness, 38 stars of 0.1–0.3 M☉), so β = 0.98; and their
+      saturated rate, ln R31.5 = −1.30 ± 0.08 a day above 10^31.5 erg in the TESS band for every
+      star below Ro = 0.1 (section 6.1; their "log" is natural, section 5.2.3), held below 0.3 M☉,
+      where they find no dependence on mass. E₀ = 1.51 × 10³² erg, their bolometric equivalent.
+    - _The activity relation:_ Audard et al. 2000 (ApJ 541, 396, sections 5.2.1–5.2.2): the rate of
+      flares above 10³² erg is log N = −26.7 + (0.95 ± 0.10) log L_X, "compatible with
+      proportionality", and normalised to the saturation turn-on it is constant at saturation; so
+      the rate at a fixed energy is taken proportional to L_X ÷ L_bol at a fixed mass. Yang and
+      Liu 2019 (ApJS 241, 29, Fig. 5), fitting flare activity with the turnoff fixed at Wright's
+      Ro = 0.13, find unsaturated slopes of 2.24 ± 1.69 (M) and 2.39 ± 1.74 (K); Maehara et al.
+      2015 (Earth,
+      Planets and Space 67, 59, section "Occurrence frequency distribution") find the solar-type
+      rate above 10³³ erg roughly ∝ P^−3 over 2.5–20 d. Both agree with 2.70 within their errors.
+    - _The Sun-like end:_ ν_sat(1 M☉) above 10³³ erg = 7.50 a year, the geometric mean of Maehara
+      et al.'s Fig. 2 bins (2.21, 0.149 and 0.0279 a star a year at 2.5–5, 5–10 and 10–20 d, read
+      from the figure; 5,300–6,300 K, log g 4.0–4.8) each over the law's decline at the bin's
+      geometric-mean period with Wright's τ(1 M☉) = 14.45 d (12.2, 5.34, 6.49). Their P < 2.5 d
+      bin (0.68) lies below the 2.5–5 d one and is not used. Held from 1.0 to 1.3 M☉. It is an
+      extrapolation to saturation, 3.4 times their highest bin, which no bin observes.
+    - _The blend:_ log ν_sat at E₀ linear in log M between 0.3 M☉ (0.2725 a day) and 1.0 M☉
+      (0.1309 a day): this model's own interpolation between its two sourced anchors,
+      provisional.
+    - Normalised at the fixed E₀, never at the floor, so a higher floor drops only small flares.
+  - _The band._ Bolometric. Medina et al.'s TESS energies over their stated 20.9% (a
+    9,000 K blackbody in 600–1,000 nm; a blackbody integral gives 0.2097); Maehara et al.'s are
+    bolometric already (Shibayama et al. 2013, ApJS 209, 5, section 2.3, a 10,000 K blackbody).
+    At 9,000 K Shibayama et al.'s method gives 66% of its 10,000 K energies, so the two anchors'
+    energy scales may differ by up to that; not corrected.
+  - _Floor and E_max._ The fixed floor is 10³⁰ erg in the TESS band, 4.78 × 10³⁰ erg
+    bolometric: where Medina et al.'s nearest star, Proxima Centauri, is 30% complete (their Fig.
+    5, read; its 50% point is 10^30.16), the threshold above which they fit α (section 5.2.4), so
+    the lowest energy their fit reaches. The 64-a-day floor never binds: a saturated 0.2 M☉ dwarf
+    reaches 64 a day only at 5.75 × 10²⁹ erg, and lists 8.03 a day above the fixed floor. E_max =
+    10³⁶ erg: the top of Maehara et al.'s fitted range (4 × 10³³–10³⁶ erg) and of Yang and Liu's
+    for F and G stars (10^34.5–10³⁶, Fig. 3). Shibayama et al.'s most energetic superflares are
+    1.1–1.3 × 10³⁶ erg, on G dwarfs rotating in 0.8–3.9 d (Fig. 3, table 3), and those on
+    Sun-like stars (P > 10 d) reach 5.2 × 10³⁵ erg (Fig. 4). E_max also keeps every flare under
+    the day's look-back.
+  - _Time._ Bins of 86,400 s looking back one. The activity, ν₀, the floor and the
+    quiescent luminosity are the epoch's; the rate is ν(>floor) wherever `state_at(t)` gives a
+    flaring phase (read at +H beyond the clock window) and 0 elsewhere; `bound` is the constant.
+    _Built: the phase check per candidate, not the interval._ Measured during the build with a
+    timing harness since taken out (the sim's tests read no clocks; opt-level 2, the shared
+    laptop, load about 3): a year of the saturated dwarf, 2,968 flares, 2.56 ms, against 0.64 ms
+    for the same bins at a constant rate, so the check and the marks cost about 0.65 µs a flare.
+    The interval needs two bisections on `state_at` over the star's age (about 180 calls, some
+    110 µs) in every `FlareModel::of`, which every call builds; that is dearer for any listing of
+    fewer than about 170 flares (three weeks of a saturated dwarf, any instant's query, and
+    nearly every sampled star's 30 days). `Track::window_where` would find it cheaply but has
+    only the LBV predicate, and `sse` is outside this lane.
+  - _Marks._ Word 0 of the event's stream: the energy, E = floor × [1 − u (1 − (E_max ÷
+    floor)^−β)]^(−1 ÷ β) from one `uniform()` in [0, 1). Nothing else is drawn; the duration
+    and peak follow from E, and scatter added later takes words 1, 2, … in order.
+  - _Duration and light curve._ Davenport et al. 2014 (ApJ 797, 122): the rise of their
+    equation 1, 1 + 1.941x − 0.175x² − 2.246x³ − 1.125x⁴ on −1 ≤ x ≤ 0, and the decay of
+    equation 4, 0.6890 e^(−1.600x) + 0.3030 e^(−0.2783x), x in t½ from the peak, followed to
+    x = 20, the template's span. The printed pieces miss 0 at the onset by 0.005 and 1 at the
+    peak by 0.008, and the decay never reaches 0, so each is rescaled to its ends, (F − F(−1)) ÷
+    (1 − F(−1)) and (F − F(20)) ÷ (F(0) − F(20)): continuous, area 1.810 t½. t½ is Maehara et
+    al.'s e-folding decay time (equation 7, τ ∝ E^(0.39 ± 0.03)) over 1.00995, where the
+    template falls to 1/e; their normalisation is not printed and is read from Fig. 6's
+    regression line, 11.1 min at 10³⁴ erg (1.9 min at 10³², 160 at 10³⁷). A flare lasts 21 t½,
+    23.2 h at E_max, under the 24 h cap (asserted in debug builds; at the cap t½ would be held and
+    the peak raised to keep the energy). Peak factor 1 + E ÷ (L_bol t½ × 1.810), L_bol the
+    epoch's, so ∫ ΔL dt = E (checked by quadrature to 10⁻⁵). Maehara et al.'s relation is fitted
+    to G dwarfs from about 2 × 10³² to 10³⁶ erg and is carried, unsourced, to K and M dwarfs and
+    down to the floor; see the deferred findings for GJ 1243.
+  - _Sanity check, Sun-like (Maehara et al. 2015)._ The median Sun (P 28.97 d, Ro 2.00, log L_X ÷
+    L_bol −6.34) flares above 10³³ erg once in 215 years, 10³⁴ once in 2,080 and 10³⁵ once in
+    21,900, and 0.87 times a year above its floor. Maehara et al. put stars of the Sun's period
+    (P ≈ 25 d) at once in 500–600 years above 10³³ erg; the law gives once in 144 years at 25 d,
+    3.5–4 times as often (their P^−3 against the law's P^−2.70 is a factor 1.2 of it; their
+    figure scales their Sun-like subsample, 5,800–6,300 K, whose rate at P ≥ 10 d, 10³³ erg once
+    in 70 years, is half the solar-type 10–20 d bin's). Their Fig. 2 bins against the law at the
+    bins' geometric-mean periods: 2.21, 0.149, 0.0279 and under 0.0125 a year (P ≥ 20 d) against
+    1.36, 0.209, 0.0322 and 0.0050.
+  - _Sanity check, saturated M dwarf (Medina et al. 2020)._ A 0.2 M☉ dwarf at 300 Myr (Ro 0.036,
+    0.00566 L☉) flares 0.2725 a day above 1.51 × 10³² erg, e^−1.30 by construction. Their slow
+    rotators (Ro > 0.5) show ln R31.5 < −3.86; the law gives −4.94 at Ro = 0.5 and −6.81 at 1.
+    Against GJ 1243, the M4 dwarf of Davenport 2016 (ApJ 829, 23, Fig. 6, 14 Kepler quarters: log
+    ν = 31.08 − 0.98 log E_Kp a day) with the 42% Kepler share above: 0.82 a day above 1.51 ×
+    10³² erg, 3.0 times the law; GJ 1243 is among the most active of its class (Hawley et al.
+    2014, table 2: 5.1 × 10⁻³ of its light in flares).
+  - _Tests._ `cargo test -p hyperion-sim stellar::events`: 16 tests and one ignored, the
+    template's ends, area and e-fold; the solar-type fit and the blend's ends; the floor's rise to
+    64 a day (`floor_and_rate` at ten times the rate that binds, which no star reaches with these
+    constants); who flares (1.5 M☉, a pre-main-sequence 2 M☉ star, a giant, a white dwarf, a
+    brown dwarf, a protostar and an unformed star have no model); the phase rule against T25; the
+    bound over 6 masses × 4 ages × 3 rotation ranks × 3 metallicities; the two sanity checks (their
+    brackets, a factor of five about once in 550 years and of 2.5 about each Fig. 2 bin, are the
+    lane's); floor, E_max (no rate from it up), duration and a K–S test of a year's energies
+    against the truncated law; the factor's ends, continuity and integral; `flare(id)` over six
+    bins around a protostar's end a century before the epoch (rejected candidates, numbers beyond
+    the count, foreign IDs, a star that does not flare); partitions in any order and on threads
+    (compiled out on wasm32-wasip1); `flares_active_at` against the listing; and the +900-year
+    no-history test, whose cold call is the first on a fresh model. The golden `stellar/flares`
+    (363 lines, header 22) pins the template's profile at four points and its area; the saturated
+    M dwarf, the median-draw Sun (over three days and over a year, which holds one flare) and a
+    0.8 M☉ pre-main-sequence star at 10 Myr (Ro 0.21), each flare's ID, onset, energy, duration,
+    t½, peak factor and factor at 0.5, 1, 3 and 15 t½ after the onset; and the 0.5 M☉ star whose
+    protostar phase ends mid-bin, over that bin and its neighbours, so that its rejected
+    candidates show as gaps in the numbers. The slow test
+    `the_mean_count_over_10_000_stars_matches_the_rate_integral` (`#[ignore]`, 2.3–2.9 s under
+    `slow-test`): 10⁴ stars of T31's sampler at Milky Way parameters, the seven populations in
+    turn, over 30 days from the epoch; expected 246,141.2, counted 246,325, Poisson interval
+    244,510–247,775 at α = 10⁻³. A star with a model flares at the epoch, the window's start, so
+    none can enter a flaring phase in it, and the test asserts none leaves one. Of the 10⁴, 2,051
+    (20.5%) have no activity at the epoch, and none of them is in a flaring phase at either end of
+    the source horizon; of the 7,949 with one, 4 are not flaring at an end, so enter or leave a
+    flaring phase inside the horizon. `flares_in` over all 10⁴ stars' 30 days took 234 ms
+    (measured as above).
+- **Deferred findings (2026-10-13 rule) (P06.T28.a).** Recorded and deferred: each leaves the
+  algorithm and every contract as they are. The leads are unread unless said.
+  - _Stars that do not flare here._ Protostars (lead: X-ray flares of Orion's young stars in the
+    COUP survey, Getman et al. 2008, ApJ 688, 418); pre-main-sequence stars from 1.3 M☉, many
+    still convective early on (the same lead, and T25's pre-main-sequence rotation above the
+    Kraft break); giants (Yang and Liu 2019, section 4.5, read: 76 flaring Kepler stars below
+    log g = 3.5, energies 10^35.5–10³⁷ erg in their Fig. 3; the largest TESS flare of Günther et
+    al. 2020, AJ 159, 60, read, 10^36.9 erg, is on a G giant of 9.3 R☉); remnants (no source
+    read; magnetars are T28.c); and objects below 0.1 M☉, `StarModel`'s
+    cooling branch (lead: K2 superflares on L dwarfs, Paudel et al. 2018, ApJ 858, 55). Each
+    needs an activity that T25 does not give, or a rate of its own.
+  - _The epoch's side._ A star with no activity at the epoch never flares: one that leaves its
+    protostar phase between the epoch and +H, or ended its main sequence between −(H + L) and the
+    epoch, has no flares on the side where it was a flaring star. A star with an activity flares
+    only while its phase allows, so it starts or stops at such a change, at the epoch's rate. The
+    exposure is small: of the slow test's 10⁴ sampled stars, none without an activity at the
+    epoch is in a flaring phase at either end of the horizon, and 4 with one are not. Lean: read
+    the activity at the first flaring instant where the epoch's is `None`, through
+    `StarModel::activity_at`.
+  - _No scatter between stars._ Stars of one mass and activity share one rate, where observed
+    rates at a given Rossby number scatter by over a decade (Medina et al.'s Fig. 7, Yang and
+    Liu's Fig. 5). A per-star rank needs a domain tag of its own (`star.flare_activity`, say),
+    which this task may not add; a later task, with a version bump.
+  - _Saturation's end for M dwarfs._ Medina et al.'s mid-to-late M dwarfs stay saturated to
+    Ro ≈ 0.5 (section 6.1); the law, on Wright's 0.13, gives a tenth of saturation at Ro = 0.3.
+    Lean: a flare law of its own for M dwarfs below Ro ≈ 0.5, from Medina et al.'s Fig. 7, which
+    would leave T25 as it is.
+  - _One index for every mass._ Maehara et al. fit α = 1.5 ± 0.1 to solar-type superflares
+    (4 × 10³³–10³⁶ erg), flatter than β + 1 = 1.98: the law gives Sun-like stars fewer large
+    superflares relative to 10³³ erg (10³⁵ once in 21,900 years for the median Sun). Lean: blend
+    β in mass as ν_sat is blended.
+  - _E_max and the look-back._ Davenport 2016's G dwarf KIC 11551430 flares above 10³⁶ erg. A
+    flare above about 1.09 × 10³⁶ erg would outlast the day's look-back. Lean: keep 10³⁶ erg, or
+    look back two bins for a higher cap.
+  - _Durations of M-dwarf flares._ Maehara et al.'s duration law is fitted to G dwarfs. Hawley et
+    al. (2014, section 4.1) give GJ 1243's flares of E_Kp ≈ 10³¹ erg an amplitude of about 0.005
+    and those of 10^30.5 erg about 0.002, which with its log L_Kp = 30.67 (table 2) and the
+    template's area imply t½ ≈ 240 s and 190 s; the law gives 62 s and 40 s at their bolometric
+    equivalents (a 9,000 K blackbody's 42% in a 420–900 nm Kepler box, the lane's estimate). So
+    the law's M-dwarf flares may be three to five times too short and too peaked at a given
+    energy, though Kepler's one-minute cadence lowers the observed amplitudes, which biases the
+    implied t½ up. Lean: a duration relation for M dwarfs, fitted to Hawley et al.'s Fig. 10 or
+    to Davenport et al.'s 2014 t½ distribution.
+  - _Sources set aside._ Davenport 2016's flare-activity relation ([log L_fl ÷ L_Kp]_sat = −2.99
+    below Ro = 0.036, slope −0.97; Kepler band, stars with at least 100 flare candidates) would
+    give the Sun (Ro ≈ 1.8) L_fl ÷ L_Kp ≈ 10^−4.64; spread at α = 2 over three to five decades of
+    Kepler energies, that is superflares above 10³⁴ erg of order 20–40 a year. Yang and Liu 2019's
+    absolute flare activity (about 10⁻⁷ at saturation in their Fig. 5, 10^−6.75 at most by their
+    equation 1) is 3.7 decades below Davenport's −2.99 and 4.4 below Hawley et al.'s 5.1 × 10⁻³
+    for GJ 1243, both Kepler measurements, so only their slopes are used (their turnoff is
+    Wright's 0.13, fixed). Davenport et al. 2019 (ApJ 871, 241)
+    model the distribution in mass and age, not activity, and over-predict the Sun by their own
+    account (section 5).
+  - _Figures read from plots._ Maehara et al.'s Fig. 2 bins and Fig. 6 normalisation, and Medina
+    et al.'s Fig. 5 floor, are pixel readings, good to a few per cent; a source with tabulated
+    values would replace them.
+  - _The quiescent luminosity is the epoch's._ The peak factor of a pre-main-sequence star
+    divides by its luminosity at the epoch, which drifts by a few per cent over the 2.6 × 10⁵
+    years of the source horizon. Lean: T28.g divides by L(t) when it composes the factor.
 
 ### Asked by rendering plan R06
 
