@@ -453,8 +453,15 @@ it is recorded, and stays here so that the owner can review it.
   seven drafts, one adopted and six amended, and its 15 questions, 14 leans accepted and
   `SITE HEIGHT`'s timing changed: `±` and the Estimated value's rounding, the readout under
   `GROUND AT LINE OF SIGHT`, the survey line, the material reading, the survey edge and the
-  contours. The span form is left to a later sign-off (queue item 18). R11's reading of item 2 is
-  decided (below, "Decided by the brainstorm sign-off").
+  contours. The span form is left to a later sign-off (queue item 18).
+  **Decided** (2026-10-14, signed off under the owner's delegation; `signoff-10.md`): R10.T12's two
+  drafts, both amended. The material's properties are `ULTIMATE BEARING CAPACITY`, with its
+  `· PAD WIDTH 1.0 m`, a reference pad until the hull has pads, and `PAD FRICTION`, with its
+  `· AT` temperature where it depends on one. The line-of-sight mark, the tripod, has its ticks
+  moved out to keep its centre open at a ratio of 1. It gives way to another mark at 0.5 rem, back
+  at 0.75, and the survey edge's ticks yield to it. The capacity's slope clause changes with the
+  code (signoff-10's (h)). R11's reading of item 2 is decided (below, "Decided by the brainstorm
+  sign-off").
 - **Data licences** before data are committed: the Karkoschka and Tomasko methane coefficients
   (Elsevier), Serdyuchenko's ozone data files (terms unstated), and whether raw tables may be
   committed beside the reduced values (R08.T4.b); H₂SO₄ (Palmer and Williams 1975), Mars dust

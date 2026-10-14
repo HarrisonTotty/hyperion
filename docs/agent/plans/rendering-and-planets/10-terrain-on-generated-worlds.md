@@ -679,9 +679,10 @@ land**, and each is marked so below.
    about the resolved slope |g₀|, biased upward when |g₀| is below about 2√v, so the readout quotes
    the RMS slope √(|g₀|² + 2v) with the Rice standard deviation as its uncertainty; quoting |g₀|
    alone would understate slopes from orbit, the unsafe direction. The baseline is shown with the
-   value: 2 m by default, the band limit and a lander pad's scale, with 5 m and 100 m selectable,
-   the ladder InSight's site selection used (lander-stability slopes at 2–5 m from HiRISE DEMs
-   against a 15° limit, and 300 m scale from MOLA: Golombek et al. 2014, LPSC 45, 1499, verified).
+   value: 2 m by default, the band limit, and the scale a lander's tilt is judged over
+   (signoff-10), with 5 m and 100 m selectable, the ladder InSight's site selection used
+   (lander-stability slopes at 2–5 m from HiRISE DEMs against a 15° limit, and 300 m scale from
+   MOLA: Golombek et al. 2014, LPSC 45, 1499, verified).
    The slant range to the ground on the view's line of sight is a march of the ray against the
    surface at the survey's resolution. Linearising the hit of p(t) = o + t d on z = h + δ gives dt ÷
    dδ = cos θ_s ÷ sin γ_s, with θ_s the resolved surface's slope and γ_s the grazing angle to the
@@ -1600,34 +1601,64 @@ their `--surface-0` plates, with `~` and `± …` until resolved, rounded by Des
 `NOT SURVEYED` once in place of the readings over unsurveyed ground, `NO GROUND` where the line of
 sight misses the body's ground, `GRAZING` where it applies, the material as its form and its
 substance (`MATERIAL REGOLITH · Fe-RICH BASALT`; the seabed's substance the floor's; the em dash for
-a substance not computed), and `RESOLUTION`. The material's properties (bearing capacity and pad
-friction, with their footing width and temperature) and a mark at the line of sight, of a shape no
-other mark uses, are drafted in this task's entry for a sign-off before either is built; the rest of
-the task does not wait for them. The DOM list notes the survey edge while it is in view, as
-`SURVEY EDGE` with its nearest range, a note that cannot be selected. The task also renames the
+a substance not computed), and `RESOLUTION`. The material's properties: `ULTIMATE BEARING CAPACITY`
+with its `· PAD WIDTH 1.0 m`, from `bearing_capacity` at the body's surface gravity, with the slope
+argument the later T1 follow-up gives it before this task builds the reading; and `PAD FRICTION`,
+from `interface_friction`, with its `· AT` temperature where the friction depends on it. That
+temperature is the climate field's mean for the month the view's time falls in, carried to the
+point's elevation by the header's lapse rate. Also the line-of-sight mark, the tripod, with its
+give-way and its list note `GROUND AT LINE OF SIGHT`. Both are built to the guide as signed off in
+`signoff-10.md` (this task's drafts, below). The DOM list notes the survey edge while it is in view,
+as `SURVEY EDGE` with its nearest range, a note that cannot be selected. The task also renames the
 descent spike's `SITE HEIGHT` to `SITE ELEVATION`, in `ELEVATION`'s form, and makes the guide's row
 edit in the same commit (signoff-9). Build to the guide's rows as signed off on 2026-10-13
-(`signoff-9.md`). As built, the label block is `viewRun.ts`'s `labelStatements` and
-`ViewLabelBlock.tsx`, and the DOM list `ViewMarkList.tsx` over `viewRun.ts`'s `MarkRow`; the
-material is named by its form and its entry's substance through P14.T49.f's `substanceName`
-(`lib/substances.ts`; the roadmap's Conventions), never by a registry key. Files: `readouts.ts`,
-`SurveyLine.tsx`, `TerrainReadout.tsx` and their tests; `displays/view/viewRun.ts` and
-`ViewMarkList.tsx`; `view/spike/DescentSpike.tsx` and its test. Tests (Vitest and Testing Library):
-the formats of T13's drafts for each state, `~2140 m ± 180 m` among them; the PDG rounding at its
-breakpoints (354, 355, 949, 950), and the round-up to one step where it would go finer than the
-quantity's precision (0.12 m → `± 0.2 m`); no value is shown finer than its uncertainty; the field
-keeps its fixed width, and the value's unit its place, from Estimated to resolved and stale;
-`SITE ELEVATION` in `ELEVATION`'s form; stale on link loss; keyboard reach of the readout's target
-through the DOM list; the console-ux skill's lint, contrast and glyph checks pass, with no `σ`
-anywhere (B612 has none). Acceptance:
+(`signoff-9.md`) and 2026-10-14 (`signoff-10.md`), and make that file's guide edit (h), the
+capacity's slope clause, in the commit that builds the reading. As built, the label block is
+`viewRun.ts`'s `labelStatements` and `ViewLabelBlock.tsx`, and the DOM list `ViewMarkList.tsx` over
+`viewRun.ts`'s `MarkRow`; the material is named by its form and its entry's substance through
+P14.T49.f's `substanceName` (`lib/substances.ts`; the roadmap's Conventions), never by a registry
+key. Files:
+
+- `readouts.ts`, `SurveyLine.tsx`, `TerrainReadout.tsx` and their tests;
+- `displays/view/viewRun.ts` and `ViewMarkList.tsx`;
+- `view/wireframe/symbology.ts` and `view/wireframe/drawList.ts`, where the tripod is built and
+  drawn first of the marks, beneath the reticles, and their tests;
+- the survey edge's ticks (T10.c's `surveyEdges` and T11's edge in the draw list), which yield to
+  the tripod, built by whichever of T10.c, T11 and T12 lands last, with its test;
+- `lib/format.ts` (`formatBearingCapacity`, beside `formatPressure`) and its test;
+- R05's binding, where T6.b's `material` face does not already answer the two properties and the
+  temperature from the body's gravity, the pad width, the slope and the month;
+- `view/spike/DescentSpike.tsx` and its test.
+
+Tests (Vitest and Testing Library): the formats of T13's drafts for each state, `~2140 m ± 180 m`
+among them; the PDG rounding at its breakpoints (354, 355, 949, 950), and the round-up to one step
+where it would go finer than the quantity's precision (0.12 m → `± 0.2 m`); no value is shown finer
+than its uncertainty; the field keeps its fixed width, and the value's unit its place, from
+Estimated to resolved and stale; `SITE ELEVATION` in `ELEVATION`'s form; the two properties' lines
+resolved, Estimated, stale and Missing, with and without `· AT`; `formatBearingCapacity`'s two
+figures and its switch at 1000 kPa with hysteresis; each field's width and its unit's place from
+Estimated to resolved and stale; `PAD FRICTION — · AT 102 K` on glacier ice of H2O at 102 K and
+`PAD FRICTION —` on snow; the tripod's geometry (three ticks at 120°, one from below,
+0.1875–0.4375 rem, moved out by the outline's shift); its leaving within 0.5 rem of a body's symbol,
+a craft's ticks or the flight path marker, and its return only beyond 0.75 rem; the survey edge's
+ticks absent within 0.5 rem of its ticks; no tripod at `NO GROUND` or without a readout; its note
+first in the list, unselectable, with its accessible name; stale on link loss; keyboard reach of the
+readout's target through the DOM list; the console-ux skill's lint, contrast and glyph checks pass,
+with no `σ` anywhere (B612 has none). By hand, recorded: in both styles at a device-pixel ratio of
+1, at the 80% and 100% interface scales, the tripod's open centre, the tripod over the survey edge,
+and the tripod beside the flight path marker at 0.5 rem; and at 1280×720 the label block's longest
+lines, `ULTIMATE BEARING CAPACITY ~0.95 MPa S · PAD WIDTH 1.0 m` and
+`PAD FRICTION ~0.08 S · AT 243 K S`. If the centre closes at either scale, the ticks start 0.25 rem
+out, keeping their length, and the guide's figures change in the same commit (signoff-10).
+Acceptance:
 `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the console-ux checks.
 
 #### The drafts, for the owner
 
-_Drafted for the owner by lane 11 (2026-10-13), for a sign-off before either is built; neither is
-signed off, and the rest of the task does not wait for them._ They are the two drafts the task's
-sentence on the material's properties and the mark owes. Each gives its wording for the guide, where
-it goes, and the guide rows it extends, by section heading and line in
+_Drafted by lane 11 (2026-10-13); signed off 2026-10-14 under the owner's delegation
+(`signoff-10.md`): both drafts amended, and the guide edited as that file directs._ They are the two
+drafts the task's sentence on the material's properties and the mark owes. Each gives its wording
+for the guide, where it goes, and the guide rows it extends, by section heading and line in
 `docs/frontend/ux-guidelines.md` as it stands at `fe12a05e`, with R10.T13's rows in it (signoff-9).
 Each lists its questions with this draft's lean, and ends in its own marker. The guide is not edited
 here: once the owner signs a draft off, it is applied as the owner directs, and the task builds to
@@ -1636,13 +1667,13 @@ Over a Moon-like regolith plain under a 410 m survey, with the default pad, the 
 
 ```text
 GROUND AT LINE OF SIGHT
-ELEVATION        ~2140 m ± 180 m
-SLOPE            ~12° ± 4° · BASELINE 2 m
-SLANT RANGE      ~41.2 km ± 0.3 km
-MATERIAL         REGOLITH · UNLISTED MATERIAL
-BEARING CAPACITY ~5.4 MPa · PAD WIDTH 1.0 m
-PAD FRICTION     ~0.20
-RESOLUTION       410 m
+ELEVATION                 ~2140 m ± 180 m
+SLOPE                     ~12° ± 4° · BASELINE 2 m
+SLANT RANGE               ~41.2 km ± 0.3 km
+MATERIAL                  REGOLITH · UNLISTED MATERIAL
+ULTIMATE BEARING CAPACITY ~5.4 MPa · PAD WIDTH 1.0 m
+PAD FRICTION              ~0.20
+RESOLUTION                410 m
 ```
 
 The substance is `feldspathic`'s, which `substanceName` does not name yet (R10.T13's Draft 5); the
@@ -1815,7 +1846,7 @@ capacity is lunar regolith's at the Moon's 1.62 m/s², and the friction NAVFAC's
       neither was measured under a pad. Lean: one label, its row naming no kind and saying that
       its sources measured steel, since the two kinds cannot be told apart on one line without a
       word the console would have to add for this reading alone.
-  - _Drafted for the owner (lane 11, 2026-10-13): not yet signed off._
+  - _Signed off (signoff-10): amended._
 
 - **Draft 2. The line-of-sight mark.**
   - _The marks it must not resemble._ The guide names the ship-wide symbol set, ten closed
@@ -1942,19 +1973,13 @@ capacity is lunar regolith's at the Moon's 1.62 m/s², and the friction NAVFAC's
       mark's own reticle to this mark.
     - _Its name._ Lean: `TRIPOD`, a shape's word as `TICKS`, `CHEVRONS` and `BRACKET` are, joined
       to the readout's heading so that the point keeps one name.
-  - _Drafted for the owner (lane 11, 2026-10-13): not yet signed off._
+  - _Signed off (signoff-10): amended._
 
-- **If signed off, these follow** (other tasks' text, not changed here):
-  - this task's files gain `view/wireframe/symbology.ts`, where the view's marks are built, and its
-    test, and its tests the two properties' lines in each state, the em dash's parts, and the
-    mark's geometry, place, give-way and note; and its by-hand checks, recorded, which no review of
-    a draft can make: the tripod's legibility at a device-pixel ratio of 1, where its 0.25 rem
-    ticks are about 4 px long round a centre its casings nearly fill; the tripod beside the flight
-    path marker and over the survey edge, in both styles; and the label block's longest lines
-    (`BEARING CAPACITY ~990 kPa S · PAD WIDTH 1.0 m`) at 1280×720;
-  - the `BEARING CAPACITY` row's level-ground clause, once the later T1 follow-up gives
-    `bearing_capacity` its slope argument (Draft 1's question on slope, ruled);
-  - the roadmap README's "Awaiting the owner", which gains these two drafts and then their ruling;
+- **Followed from the sign-off** (`signoff-10.md`):
+  - this task's files, tests and by-hand checks, now in its text above;
+  - the `ULTIMATE BEARING CAPACITY` row's level-ground clause, replaced by signoff-10's (h) in the
+    commit that builds the reading on the T1 follow-up's slope argument;
+  - the roadmap README's "Awaiting the owner" (signoff-10, (p6));
   - and a guide row for the flight path marker, which the client draws and the guide does not name
     (Risks, "Deferred findings (2026-10-13 rule) (R10.T12's drafts)").
 
@@ -3311,6 +3336,16 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     as built, and Draft 1's row says so. Vesić's ground-inclination factors, and the footing-base
     tilt factors that go with them, go to a later T1 follow-up, which adds the slope argument and
     its test before T12 builds the readout.
+  - _Regolith on small bodies_ (signoff-10). Every regolith of silicate takes the lunar table,
+    whose 3.0 kPa cohesion at 30–60 cm is the Moon's soil compacted under lunar gravity. So on a
+    small airless body the capacity stays cohesion-held: 3.71 MPa under 1.0 m at 0.01 m/s²,
+    against 5.37 MPa at the Moon's 1.62. The cohesion of asteroid regolith is thought to be far
+    lower (not read here). For the later T1 follow-up's list; the readout's contract is
+    unchanged.
+  - _Loose soils' failure mode_ (signoff-10). Terzaghi's equation with Vesić's factors is
+    general shear failure. For a loose, compressible soil such as Mars's drift (φ 18°), Vesić
+    gives local or punching shear, which bears less (reduced strength parameters, or the rigidity
+    index). Not read here. For the same list.
 - **Deviations in T1.b, as built** (2026-10-13, lane r10-classify, on R10.T1.a at `eef1fabb` with
   its limb follow-up `42ae6db3`, landed as `fe12a05e`, and R09.T9 at `070da8ee`).
   - _Files._ `crates/hyperion-surface/src/material/classify.rs` with `classify/tests.rs`, and
