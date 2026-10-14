@@ -2590,10 +2590,11 @@ and frame follow-ups are two subtasks (decision-r07-t19-layout).
 - **R07.T19.b `VIEW` at both sizes.** `ViewDisplay.tsx`, `styles.css`, `ViewLabelBlock.tsx`,
   `InstrumentView.tsx`, `ViewMarkList.tsx`, `viewRun.ts` (decision-r07-t19-layout, items 1–3 and
   5). Two layouts, chosen from the `.view` box's size alone and never from what it shows:
-  **full** where the box is at least 98.5rem wide (a 50.5rem stage, two slots' room beside the
-  primary's least label block, then 26rem and 20rem columns and their gaps) and as tall as
-  column A's tallest state with the list at two rows (about 52rem; the measured figure recorded),
-  which 1920×1080 at 100% is; **compact** otherwise, as 1280×720 and 1920×1080 at 125% and 150%
+  **full** where the box is at least 99rem wide (a 51rem stage, two slots' room beside the
+  primary's least label block, then 26rem and 20rem columns and their gaps; raised from 98.5rem by
+  R06.T13.j, 2026-10-13, so that the primary keeps the 14.5rem label block it has at 1280 × 720)
+  and as tall as column A's tallest state with the list at two rows (about 52rem; the measured
+  figure recorded), which 1920×1080 at 100% is; **compact** otherwise, as 1280×720 and 1920×1080 at 125% and 150%
   are. Full: column A, 26rem, holds `Instruments`, `Targets` (flex), `Camera` and `Style`; column
   B, 20rem, `Exposure` and `Exposure meter`; focus runs through A before B. Compact: one 26rem
   column in the same order, its panels at `0.5rem` block padding: `Instruments` folds to its
