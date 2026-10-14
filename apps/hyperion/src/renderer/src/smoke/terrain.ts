@@ -263,7 +263,7 @@ async function drawShot(
   const bakes = await bakeAll(keys, {
     vertexPath: layout.vertexPath,
     normals: TERRAIN_SETTINGS[setting].normals,
-    ridges: "off",
+    source: { kind: "test-planet", ridges: "off" },
   });
   bakes.forEach((bake, slot) => {
     const result = resources.upload({ slot, ...bake });
@@ -464,7 +464,7 @@ async function captureShot(
     engine,
     setting: shot.setting,
     planet,
-    ridges: "off",
+    source: { kind: "test-planet", ridges: "off" },
     createPool: (bake) =>
       new HeightWorkerPool({
         workers: 3,

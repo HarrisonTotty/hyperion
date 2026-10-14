@@ -95,6 +95,7 @@ class FakePool implements TerrainPool {
       boundingRadiusM: 1,
       originHeightM: 0,
       skirtDepthM: 1,
+      layers: null,
     };
     for (const listener of this.#listeners) {
       listener(bake);
@@ -160,7 +161,7 @@ async function passOn(
     engine: counting,
     setting,
     planet: PLANET,
-    ridges: "off",
+    source: { kind: "test-planet", ridges: "off" },
     createPool: (bake) => {
       const pool = new FakePool(bake);
       pools.push(pool);

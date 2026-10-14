@@ -30,7 +30,11 @@ export async function checkHeightWorker(checks: Checks): Promise<void> {
       id: 1,
       key: { face: 2, level: 12, i: 1_000, j: 2_000 },
       generation: 1,
-      settings: { vertexPath: "baked-offsets", normals: "double", ridges: "off" },
+      settings: {
+        vertexPath: "baked-offsets",
+        normals: "double",
+        source: { kind: "test-planet", ridges: "off" },
+      },
     };
     const reply = await new Promise<HeightWorkerReply>((resolve, reject) => {
       const timer = setTimeout(() => {

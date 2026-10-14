@@ -104,13 +104,17 @@ export function syntheticFieldBlocks(): ArrayBuffer[] {
  * Posts the synthetic field to the height workers as the test planet's ({@link SPIKE_PLANET}): its
  * first piece as the body's `field_init`, the rest as its `field_chunk`s, as R10's store posts a
  * real field's blocks, so that each worker holds its 15 MB.
+ *
+ * @remarks
+ * The pieces are posted as a stand-in (R10.T6.b), which the workers hold undecoded: the workers
+ * decode a payload's blocks into the module's field, and these are no payload's.
  */
 export function postSyntheticField(pool: Pick<HeightWorkerPool, "fieldInit" | "fieldChunk">): void {
   const [first, ...rest] = syntheticFieldBlocks();
   if (first === undefined) {
     return;
   }
-  pool.fieldInit(SPIKE_PLANET, first);
+  pool.fieldInit(SPIKE_PLANET, first, "stand-in");
   for (const block of rest) {
     pool.fieldChunk(SPIKE_PLANET, block);
   }

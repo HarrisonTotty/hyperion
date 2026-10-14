@@ -4,7 +4,9 @@ import { keptBody } from "../../scenes/kept";
 import { bakeOf, ScriptedHeightWorker } from "../../../test/scriptedHeightWorker";
 import { type PatchKey, patchKeyString } from "../patchKey";
 import type { PatchRequest } from "../select";
+import type { BakedPatch, HeightSourceSetting, TerrainLayers } from "./messages";
 import {
+  type FieldChange,
   type FieldRefusal,
   HeightWorkerPool,
   MAX_CONSECUTIVE_WORKER_FAILURES,
@@ -15,6 +17,17 @@ import {
 const MOON = keptBody(1);
 const PLANET = keptBody(2);
 
+/** The test planet, the pools' source unless a test names a body. */
+const TEST_PLANET: HeightSourceSetting = { kind: "test-planet", ridges: "off" };
+
+/** The moon as a pool's height source. */
+const MOON_SOURCE: HeightSourceSetting = {
+  kind: "body",
+  body: MOON,
+  detailSeed: "0123456789abcdef",
+  weights: "baked",
+};
+
 function keyAt(i: number): PatchKey {
   return { face: 0, level: 10, i, j: 0 };
 }
@@ -23,7 +36,10 @@ function req(i: number, priority: number, forced = false): PatchRequest {
   return { key: keyAt(i), priority, forced };
 }
 
-function poolOf(workers: number): {
+function poolOf(
+  workers: number,
+  source: HeightSourceSetting = TEST_PLANET,
+): {
   pool: HeightWorkerPool;
   created: ScriptedHeightWorker[];
   baked: string[];
@@ -36,7 +52,7 @@ function poolOf(workers: number): {
       created.push(worker);
       return worker;
     },
-    bake: { vertexPath: "face-differences", normals: "mesh", ridges: "off" },
+    bake: { vertexPath: "face-differences", normals: "mesh", source },
   });
   const baked: string[] = [];
   pool.onBaked((bake) => baked.push(patchKeyString(bake.key)));
@@ -58,6 +74,55 @@ function workerAt(created: readonly ScriptedHeightWorker[], n: number): Scripted
 /** A block of `bytes` bytes, each `fill`. */
 function blockOf(bytes: number, fill: number): ArrayBuffer {
   return new Uint8Array(bytes).fill(fill).buffer;
+}
+
+/** The forms of the `field-init`s a worker received. */
+function forms(w: ScriptedHeightWorker): string[] {
+  return w.fieldMessages.flatMap((m) => (m.kind === "field-init" ? [m.form] : []));
+}
+
+/** The layers of a body's bake, complete or not, with `unsurveyed` cells. */
+function layers(complete: boolean, unsurveyed: readonly number[]): TerrainLayers {
+  return {
+    palette: new Uint8Array(16),
+    weights: new Uint8Array(),
+    surveyMask: new Uint8Array(),
+    boundM: 1,
+    sigmaM: 0,
+    complete,
+    unsurveyedCells: Uint32Array.from(unsurveyed),
+  };
+}
+
+/** Answers a worker's oldest pending bake as one the field cannot make yet. */
+function replyUnsurveyed(w: ScriptedHeightWorker): void {
+  const pending = w.pendingBakes[0];
+  if (pending === undefined) {
+    throw new Error("no bake is pending");
+  }
+  w.reply({ kind: "bake-unsurveyed", id: pending.id, message: "a margin to come" });
+}
+
+/**
+ * Answers a worker's `n`th field message as a payload's block taken, surveying the cells `first`
+ * and `first + 1`, with a level table of `first`s.
+ */
+function answerBlock(w: ScriptedHeightWorker, n: number, first: number): void {
+  const message = w.fieldMessages[n];
+  if (message === undefined) {
+    throw new Error(`no field message ${String(n)}`);
+  }
+  w.reply({
+    kind: "field-held",
+    id: message.id,
+    body: message.body,
+    heldBytes: 8,
+    block: {
+      fieldLevel: 6,
+      newlySurveyed: Uint32Array.from([first, first + 2]),
+      levels: new Float64Array(100).fill(first),
+    },
+  });
 }
 
 /** Each field message a worker received, as its kind, its body and its block's first byte. */
@@ -245,8 +310,8 @@ describe("the height-worker pool", () => {
     expect(created.map((w) => w.pendingBakes.length)).toEqual([1, 1, 1]);
   });
 
-  it("bakes again what was baked before a field was started", () => {
-    const { pool, created, baked } = poolOf(1);
+  it("bakes again what was baked before its body's field was started anew", () => {
+    const { pool, created, baked } = poolOf(1, MOON_SOURCE);
     pool.fieldInit(MOON, blockOf(4, 0));
     pool.reprioritise([req(1, 9)]);
     pool.fieldRelease(MOON);
@@ -259,6 +324,237 @@ describe("the height-worker pool", () => {
       patchKeyString(keyAt(1)),
       patchKeyString(keyAt(1)),
     ]);
+  });
+
+  it("bakes nothing of a body again for another body's field", () => {
+    const { pool, created, baked } = poolOf(1, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9)]);
+    pool.fieldInit(PLANET, blockOf(4, 1));
+    pool.fieldChunk(PLANET, blockOf(4, 2));
+    workerAt(created, 0).bakeOldest();
+    expect(baked).toEqual([patchKeyString(keyAt(1))]);
+  });
+
+  it("bakes nothing of the test planet again for any field, which it never reads", () => {
+    const { pool, created, baked } = poolOf(1);
+    pool.reprioritise([req(2, 9)]);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    workerAt(created, 0).bakeOldest();
+    expect(baked).toEqual([patchKeyString(keyAt(2))]);
+  });
+
+  it("sends no bake of a body before its field is started", () => {
+    const { pool, created } = poolOf(2, MOON_SOURCE);
+    pool.reprioritise([req(1, 9), req(2, 8)]);
+    expect(created.map((w) => w.pendingBakes.length)).toEqual([0, 0]);
+    expect(pool.queuedCount).toBe(2);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    expect(created.map((w) => w.received.map((m) => m.kind))).toEqual([
+      ["field-init", "bake"],
+      ["field-init", "bake"],
+    ]);
+  });
+
+  it("asks again, once the body has a field, a bake made with a field since released", () => {
+    const { pool, created, baked } = poolOf(1, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9)]);
+    pool.fieldRelease(MOON);
+    workerAt(created, 0).bakeOldest();
+    expect(baked).toEqual([]);
+    expect(pool.queuedCount).toBe(1);
+    expect(workerAt(created, 0).pendingBakes).toHaveLength(0);
+  });
+
+  it("holds a bake the field cannot make yet until the body's next block", () => {
+    const { pool, created, baked } = poolOf(1, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9)]);
+    const w = workerAt(created, 0);
+    replyUnsurveyed(w);
+    expect(pool.waitingCount).toBe(1);
+    // Each frame's demand leaves it waiting rather than asking again.
+    pool.reprioritise([req(1, 9)]);
+    expect(w.pendingBakes).toHaveLength(0);
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    expect(pool.waitingCount).toBe(0);
+    expect(w.received.map((m) => m.kind)).toEqual(["field-init", "bake", "field-chunk", "bake"]);
+    w.bakeOldest();
+    expect(baked).toEqual([patchKeyString(keyAt(1))]);
+  });
+
+  it("drops a waiting request that leaves the demand", () => {
+    const { pool, created } = poolOf(1, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9)]);
+    replyUnsurveyed(workerAt(created, 0));
+    pool.reprioritise([]);
+    expect(pool.waitingCount).toBe(0);
+  });
+
+  it("drops a waiting request that a cancellation does not keep", () => {
+    const { pool, created } = poolOf(1, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9), req(2, 8)]);
+    const w = workerAt(created, 0);
+    replyUnsurveyed(w);
+    replyUnsurveyed(w);
+    expect(pool.waitingCount).toBe(2);
+    pool.cancelStale(new Set([patchKeyString(keyAt(2))]));
+    expect(pool.waitingCount).toBe(1);
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    expect(bakedKeys(w).slice(2)).toEqual([patchKeyString(keyAt(2))]);
+  });
+
+  it("re-scores a waiting request asked for again, still waiting", () => {
+    const { pool, created } = poolOf(1, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 1)]);
+    const w = workerAt(created, 0);
+    replyUnsurveyed(w);
+    pool.request(req(1, 9, true));
+    expect(pool.waitingCount).toBe(1);
+    expect(w.pendingBakes).toHaveLength(0);
+  });
+
+  it("forgets what waited for a released field, the next demand held until a field starts", () => {
+    const { pool, created } = poolOf(1, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9)]);
+    const w = workerAt(created, 0);
+    replyUnsurveyed(w);
+    pool.fieldRelease(MOON);
+    expect(pool.waitingCount).toBe(0);
+    pool.reprioritise([req(1, 9)]);
+    expect(pool.queuedCount).toBe(1);
+    pool.fieldInit(MOON, blockOf(4, 1));
+    expect(w.pendingBakes).toHaveLength(1);
+  });
+
+  it("asks again at once a bake refused for a block that came after it was sent", () => {
+    const { pool, created } = poolOf(1, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9)]);
+    const w = workerAt(created, 0);
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    replyUnsurveyed(w);
+    expect(pool.waitingCount).toBe(0);
+    expect(w.pendingBakes).toHaveLength(1);
+  });
+
+  it("asks again, held, a bake refused after its body's field was released", () => {
+    const { pool, created } = poolOf(1, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.reprioritise([req(1, 9)]);
+    const w = workerAt(created, 0);
+    pool.fieldRelease(MOON);
+    replyUnsurveyed(w);
+    expect(pool.waitingCount).toBe(0);
+    expect(pool.queuedCount).toBe(1);
+    expect(w.pendingBakes).toHaveLength(0);
+  });
+
+  it("bakes again a bake in flight while a block came, unless it is complete and surveyed whole", () => {
+    const cases: ReadonlyArray<readonly [TerrainLayers, boolean]> = [
+      [layers(true, []), true],
+      [layers(true, [5]), false],
+      [layers(false, []), false],
+    ];
+    const outcomes = cases.map(([made]) => {
+      const { pool, created, baked } = poolOf(1, MOON_SOURCE);
+      pool.fieldInit(MOON, blockOf(4, 0));
+      pool.reprioritise([req(1, 9)]);
+      pool.fieldChunk(MOON, blockOf(4, 1));
+      const w = workerAt(created, 0);
+      const pending = w.pendingBakes[0];
+      if (pending === undefined) {
+        throw new Error("no bake was sent");
+      }
+      const bake: BakedPatch = { ...bakeOf(pending.key, pending.generation), layers: made };
+      w.reply({ kind: "baked", id: pending.id, bake });
+      return [baked.length === 1, w.pendingBakes.length === 1];
+    });
+    expect(outcomes).toEqual(cases.map(([, kept]) => [kept, !kept]));
+  });
+
+  it("reports each block's change once, from the first worker to answer it", () => {
+    const { pool, created } = poolOf(2, MOON_SOURCE);
+    const changes: FieldChange[] = [];
+    pool.onFieldChange((c) => changes.push(c));
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    answerBlock(workerAt(created, 1), 0, 10);
+    answerBlock(workerAt(created, 0), 0, 10);
+    answerBlock(workerAt(created, 0), 1, 20);
+    answerBlock(workerAt(created, 1), 1, 20);
+    expect(changes.map((c) => [c.body, c.sequence, [...c.newlySurveyed]])).toEqual([
+      [MOON, 0, [10, 12]],
+      [MOON, 1, [20, 22]],
+    ]);
+  });
+
+  it("keeps the level table of the latest block reported, and none once released", () => {
+    const { pool, created } = poolOf(1, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    expect(pool.fieldLevels(MOON)).toBeNull();
+    answerBlock(workerAt(created, 0), 0, 10);
+    answerBlock(workerAt(created, 0), 1, 20);
+    expect(pool.fieldLevels(MOON)?.[0]).toBe(20);
+    pool.fieldRelease(MOON);
+    expect(pool.fieldLevels(MOON)).toBeNull();
+  });
+
+  it("reports no change again from a replacement's answers to the blocks posted again", () => {
+    const { pool, created } = poolOf(1, MOON_SOURCE);
+    const changes: FieldChange[] = [];
+    pool.onFieldChange((c) => changes.push(c));
+    pool.fieldInit(MOON, blockOf(4, 0));
+    answerBlock(workerAt(created, 0), 0, 10);
+    workerAt(created, 0).fail();
+    answerBlock(workerAt(created, 1), 0, 10);
+    expect(changes).toHaveLength(1);
+  });
+
+  it("reports no change of a released start's block, only the new start's", () => {
+    const { pool, created } = poolOf(1, MOON_SOURCE);
+    const changes: FieldChange[] = [];
+    pool.onFieldChange((c) => changes.push(c));
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldRelease(MOON);
+    pool.fieldInit(MOON, blockOf(4, 1));
+    // The worker answers the first start's block 0 after the second start was posted.
+    answerBlock(workerAt(created, 0), 0, 10);
+    expect(changes).toEqual([]);
+    answerBlock(workerAt(created, 0), 2, 30);
+    expect(changes.map((c) => c.sequence)).toEqual([0]);
+  });
+
+  it("counts the blocks the workers have still to answer, and none of a replaced worker", () => {
+    const { pool, created } = poolOf(2, MOON_SOURCE);
+    pool.fieldInit(MOON, blockOf(4, 0));
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    expect(pool.blocksInFlight).toBe(4);
+    workerAt(created, 0).answerFields();
+    expect(pool.blocksInFlight).toBe(2);
+    workerAt(created, 1).fail();
+    // The replacement is posted both blocks afresh; the failed worker's are forgotten.
+    expect(pool.blocksInFlight).toBe(2);
+    workerAt(created, 2).answerFields();
+    expect(pool.blocksInFlight).toBe(0);
+  });
+
+  it("posts a stand-in field's first block as a stand-in, to a replacement too", () => {
+    const { pool, created } = poolOf(1);
+    pool.fieldInit(MOON, blockOf(4, 0), "stand-in");
+    pool.fieldChunk(MOON, blockOf(4, 1));
+    expect(forms(workerAt(created, 0))).toEqual(["stand-in"]);
+    workerAt(created, 0).fail();
+    expect(forms(workerAt(created, 1))).toEqual(["stand-in"]);
+    pool.fieldInit(PLANET, blockOf(4, 2));
+    expect(forms(workerAt(created, 1))).toEqual(["stand-in", "payload"]);
   });
 
   it("reports a worker's refusal of a field once for each start of it", () => {

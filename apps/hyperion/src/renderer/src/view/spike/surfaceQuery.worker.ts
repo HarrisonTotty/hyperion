@@ -38,7 +38,7 @@ async function load(): Promise<Error | null> {
       cause: error,
     });
   }
-  const stale = staleModuleMessage({ bakePatch, testPlanetVersion });
+  const stale = staleModuleMessage({ testPlanetVersion });
   return stale === null ? null : new Error(stale);
 }
 

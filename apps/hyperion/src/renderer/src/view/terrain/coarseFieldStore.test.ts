@@ -157,7 +157,11 @@ function harness(workerCount = 3): Harness {
       workers.push(worker);
       return worker;
     },
-    bake: { vertexPath: "face-differences", normals: "mesh", ridges: "off" },
+    bake: {
+      vertexPath: "face-differences",
+      normals: "mesh",
+      source: { kind: "test-planet", ridges: "off" },
+    },
   });
   const store = new CoarseFieldStore({
     universe: UNIVERSE,

@@ -14,14 +14,31 @@
  * each later one and {@link HeightWorkerPool.fieldRelease} drops it, each to every worker at once.
  * A worker takes its messages in the order sent, so a bake posted after a block is made with it,
  * and the transient copies are one block, at most 1 MiB, a worker, where R05's one field went to
- * one worker at a time. A bake made before a body's field was started is baked again.
+ * one worker at a time.
+ *
+ * The pool's bakes are of one height source, its settings' (R10.T6.b). The test planet reads no
+ * field, so no field ever makes its bakes stale. A body's bakes are held back until its field is
+ * started, and its field alone makes them stale (per-body epochs): a bake in flight when the field
+ * starts again or is released is baked again, and one in flight while blocks arrive is baked again
+ * by R10's rebake rule, conservatively, since the blocks' changes may not be known yet: unless it
+ * is complete with its survey mask whole. A bake the field cannot make yet, a survey whose margin
+ * is still to come, waits for the body's next block. Each block's change of the survey is reported
+ * once ({@link HeightWorkerPool.onFieldChange}), for the bakes already delivered (`rebake.ts`).
  */
 
 import type { BodyIdHex } from "@hyperion/protocol";
 
 import { patchKeyString } from "../patchKey";
 import type { PatchRequest } from "../select";
-import type { BakedPatch, BakeSettings, HeightWorkerReply, HeightWorkerRequest } from "./messages";
+import type {
+  BakedPatch,
+  BakeSettings,
+  FieldBlockAnswer,
+  FieldForm,
+  HeightWorkerReply,
+  HeightWorkerRequest,
+  TerrainLayers,
+} from "./messages";
 
 /** The part of a `Worker` the pool uses, so that tests can stand in for one. */
 export interface WorkerLike {
@@ -58,7 +75,11 @@ export interface HeightWorkerPoolOptions {
    * "module" })` in the app, a fake in tests.
    */
   readonly createWorker: () => WorkerLike;
-  /** The setting's vertex path and normal resolution, sent with every bake. */
+  /**
+   * The setting's vertex path and normal resolution and the height source, sent with every bake.
+   * A body's source holds its bakes back until its field is started, and makes them stale as its
+   * field grows.
+   */
   readonly bake: BakeSettings;
 }
 
@@ -74,14 +95,40 @@ export interface FieldRefusal {
   readonly message: string;
 }
 
+/**
+ * What one block of a body's payload changed in the workers' fields, reported once, from the first
+ * worker to answer it: the cells it surveyed anew, which R10's rebake rule reads
+ * (`rebake.ts`'s `needsRebake`), and the body's level table after it.
+ */
+export interface FieldChange extends FieldBlockAnswer {
+  readonly body: BodyIdHex;
+  /** The block's place among this start of the field's blocks, the first 0. */
+  readonly sequence: number;
+}
+
 /** A body's field as the pool keeps it, for the workers that start later. */
 interface KeptField {
   /** Its blocks in the order posted, its first block first. */
   readonly blocks: ArrayBuffer[];
+  /** A payload's, which the workers decode, or a stand-in's, which they hold undecoded. */
+  readonly form: FieldForm;
   /** The first message ID of this start of the field: a refusal of an older one is not its. */
   readonly sinceId: number;
   /** Whether a refusal of this start has been reported. */
   refused: boolean;
+  /** How many of its blocks, from the first, have had their changes reported. */
+  reported: number;
+  /** The body's level table as a worker last reported it, `null` before any. */
+  levels: Float64Array | null;
+}
+
+/** A block posted to a worker, by the message's ID. */
+interface PostedBlock {
+  readonly body: BodyIdHex;
+  /** The start of the field it is of. */
+  readonly field: KeptField;
+  /** Its place among the field's blocks. */
+  readonly sequence: number;
 }
 
 interface Queued {
@@ -94,8 +141,10 @@ interface InFlight {
   readonly request: PatchRequest;
   readonly keyString: string;
   readonly generation: number;
-  /** How many fields had been started when the request was sent. */
-  readonly fieldEpoch: number;
+  /** The source body's field when the request was sent; `null` for the test planet, or none. */
+  readonly field: KeptField | null;
+  /** How many of that field's blocks had been posted when the request was sent. */
+  readonly blocksAtSend: number;
 }
 
 interface Slot {
@@ -103,6 +152,8 @@ interface Slot {
   readonly onMessage: (event: MessageEvent<HeightWorkerReply>) => void;
   readonly onError: () => void;
   readonly inFlight: Map<number, InFlight>;
+  /** The blocks posted to this worker and not yet answered, by message ID. */
+  readonly posted: Map<number, PostedBlock>;
   /** What the worker last said it holds of every body's field, bytes. */
   fieldBytes: number;
   /** Failures in a row with no answer between. */
@@ -142,8 +193,12 @@ export class HeightWorkerPool {
   private readonly bakedListeners = new Set<(bake: BakedPatch) => void>();
   private readonly failureListeners = new Set<(failure: BakeFailure) => void>();
   private readonly refusalListeners = new Set<(refusal: FieldRefusal) => void>();
+  private readonly changeListeners = new Set<(change: FieldChange) => void>();
   private readonly fields = new Map<BodyIdHex, KeptField>();
-  private fieldEpoch = 0;
+  /** The requests the source body's field could not make yet, until its next block. */
+  private readonly waiting = new Map<string, PatchRequest>();
+  /** The body whose field the bakes read, `null` for the test planet, which reads none. */
+  private readonly sourceBody: BodyIdHex | null;
   private generation = 0;
   private nextId = 1;
   private terminated = false;
@@ -154,6 +209,7 @@ export class HeightWorkerPool {
     }
     this.createWorker = opts.createWorker;
     this.settings = opts.bake;
+    this.sourceBody = opts.bake.source.kind === "body" ? opts.bake.source.body : null;
     for (let n = 0; n < opts.workers; n += 1) {
       const slot: Slot = {
         worker: this.createWorker(),
@@ -164,6 +220,7 @@ export class HeightWorkerPool {
           this.replace(slot);
         },
         inFlight: new Map(),
+        posted: new Map(),
         fieldBytes: 0,
         failures: 0,
         lost: false,
@@ -217,7 +274,40 @@ export class HeightWorkerPool {
     return [...this.fields.keys()];
   }
 
-  /** Queues one request, or re-scores it if queued already; in flight, it is left alone. */
+  /**
+   * How many requests wait for a block of the source body's field, which their surveys' margins
+   * are still to come in: patches waiting on a surveyed region's chunk, which R10's Design note 16
+   * counts toward R05's `TERRAIN: STREAMING` (they are among the patches it finds missing; the
+   * pass's first consumer reads this to tell them).
+   */
+  get waitingCount(): number {
+    return this.waiting.size;
+  }
+
+  /**
+   * The blocks posted to running workers that they have still to answer: what of the fields the
+   * workers have yet to take.
+   */
+  get blocksInFlight(): number {
+    let n = 0;
+    for (const slot of this.slots) {
+      n += slot.posted.size;
+    }
+    return n;
+  }
+
+  /**
+   * `body`'s level table, 25 × 4 as the test planet's `levelTable`, as its field's latest block
+   * reported it (R10.T6.b; T4.b's selection reads it); `null` before any, or with no field kept.
+   */
+  fieldLevels(body: BodyIdHex): Float64Array | null {
+    return this.fields.get(body)?.levels ?? null;
+  }
+
+  /**
+   * Queues one request, or re-scores it if queued already or waiting for a block; one in flight is
+   * left alone.
+   */
   request(r: PatchRequest): void {
     this.assertLive();
     const keyString = patchKeyString(r.key);
@@ -225,7 +315,9 @@ export class HeightWorkerPool {
       return;
     }
     this.wanted.add(keyString);
-    if (!this.isInFlight(keyString)) {
+    if (this.waiting.has(keyString)) {
+      this.waiting.set(keyString, r);
+    } else if (!this.isInFlight(keyString)) {
       this.queue.set(keyString, { request: r, keyString });
     }
     this.pump();
@@ -241,25 +333,38 @@ export class HeightWorkerPool {
     this.generation += 1;
     this.wanted.clear();
     this.queue.clear();
+    const waited = new Map(this.waiting);
+    this.waiting.clear();
     for (const request of demand) {
       const keyString = patchKeyString(request.key);
       if (this.failedKeys.has(keyString)) {
         continue;
       }
       this.wanted.add(keyString);
-      if (!this.isInFlight(keyString)) {
+      if (waited.has(keyString)) {
+        // Still waiting for the field's next block: asking again before it would be refused again.
+        this.waiting.set(keyString, request);
+      } else if (!this.isInFlight(keyString)) {
         this.queue.set(keyString, { request, keyString });
       }
     }
     this.pump();
   }
 
-  /** Drops every queued request, and every result yet to arrive, whose key is not in `keep`. */
+  /**
+   * Drops every queued or waiting request, and every result yet to arrive, whose key is not in
+   * `keep`.
+   */
   cancelStale(keep: ReadonlySet<string>): void {
     this.assertLive();
     for (const keyString of this.queue.keys()) {
       if (!keep.has(keyString)) {
         this.queue.delete(keyString);
+      }
+    }
+    for (const keyString of this.waiting.keys()) {
+      if (!keep.has(keyString)) {
+        this.waiting.delete(keyString);
       }
     }
     for (const keyString of this.wanted) {
@@ -294,31 +399,52 @@ export class HeightWorkerPool {
   }
 
   /**
+   * Listens for each block of a payload the workers have taken, once a block, with what it changed
+   * of the survey; returns the unsubscribe. The bakes delivered before it that R10's rebake rule
+   * makes stale (`rebake.ts`'s `needsRebake`) are the listener's to ask again.
+   */
+  onFieldChange(cb: (change: FieldChange) => void): () => void {
+    this.changeListeners.add(cb);
+    return () => {
+      this.changeListeners.delete(cb);
+    };
+  }
+
+  /**
    * Starts `body`'s field in every worker from its first block, R09's block 0 of the first payload
-   * (Design note 16), cloned to each.
+   * (Design note 16), cloned to each; or, as a `stand-in`, a block of no payload that the workers
+   * hold undecoded (the descent spike's synthetic field, R10.T7).
    *
    * @remarks
    * The pool keeps the body's blocks on the render thread, about 12 MB for an Earth (R09 Design
-   * note 17), so that a worker started later, to replace a failed one, gets them too. Bakes in
-   * flight are baked again once they arrive, as R05's were after a new field.
+   * note 17), so that a worker started later, to replace a failed one, gets them too. Bakes of the
+   * body in flight are baked again once they arrive; requests waiting for its field are sent.
    *
    * @throws Error if `body`'s field is already started: release it first.
    */
-  fieldInit(body: BodyIdHex, block: ArrayBuffer): void {
+  fieldInit(body: BodyIdHex, block: ArrayBuffer, form: FieldForm = "payload"): void {
     this.assertLive();
     if (this.fields.has(body)) {
       throw new Error(`the field of ${body} is already started; release it first`);
     }
-    this.fields.set(body, { blocks: [block], sinceId: this.nextId, refused: false });
-    this.fieldEpoch += 1;
+    const kept: KeptField = {
+      blocks: [block],
+      form,
+      sinceId: this.nextId,
+      refused: false,
+      reported: 0,
+      levels: null,
+    };
+    this.fields.set(body, kept);
     for (const slot of this.slots) {
-      this.postBlock(slot, "field-init", body, block);
+      this.postBlock(slot, body, kept, 0);
     }
+    this.afterBlock(body);
   }
 
   /**
    * Adds one more block to `body`'s field in every worker: any block after the first, a later
-   * payload's block 0 included.
+   * payload's block 0 included. Requests waiting for the body's field are sent again after it.
    *
    * @throws Error if `body`'s field was not started with {@link HeightWorkerPool.fieldInit}.
    */
@@ -329,9 +455,11 @@ export class HeightWorkerPool {
       throw new Error(`a block of ${body} was posted before its field was started`);
     }
     kept.blocks.push(block);
+    const sequence = kept.blocks.length - 1;
     for (const slot of this.slots) {
-      this.postBlock(slot, "field-chunk", body, block);
+      this.postBlock(slot, body, kept, sequence);
     }
+    this.afterBlock(body);
   }
 
   /** Drops `body`'s field from every worker and from the pool; a body not started is no error. */
@@ -339,6 +467,10 @@ export class HeightWorkerPool {
     this.assertLive();
     if (!this.fields.delete(body)) {
       return;
+    }
+    if (body === this.sourceBody) {
+      // Nothing waits for a field that is gone: the next demand asks again, held until it starts.
+      this.waiting.clear();
     }
     for (const slot of this.slots) {
       if (!slot.lost) {
@@ -357,12 +489,15 @@ export class HeightWorkerPool {
       this.detach(slot);
       slot.worker.terminate();
       slot.inFlight.clear();
+      slot.posted.clear();
     }
     this.queue.clear();
+    this.waiting.clear();
     this.wanted.clear();
     this.bakedListeners.clear();
     this.failureListeners.clear();
     this.refusalListeners.clear();
+    this.changeListeners.clear();
     this.fields.clear();
   }
 
@@ -401,6 +536,10 @@ export class HeightWorkerPool {
     if (this.terminated) {
       return;
     }
+    // A body's patches are baked over its field, so none is sent before the field is started.
+    if (this.sourceBody !== null && !this.fields.has(this.sourceBody)) {
+      return;
+    }
     for (let load = 0; load < MAX_IN_FLIGHT_PER_WORKER; load += 1) {
       for (const slot of this.slots) {
         if (slot.inFlight.size !== load || slot.lost) {
@@ -417,12 +556,14 @@ export class HeightWorkerPool {
 
   private send(slot: Slot, next: Queued): void {
     this.queue.delete(next.keyString);
+    const field = this.sourceField();
     const inFlight: InFlight = {
       id: this.takeId(),
       request: next.request,
       keyString: next.keyString,
       generation: this.generation,
-      fieldEpoch: this.fieldEpoch,
+      field,
+      blocksAtSend: field?.blocks.length ?? 0,
     };
     slot.inFlight.set(inFlight.id, inFlight);
     slot.worker.postMessage(
@@ -466,13 +607,32 @@ export class HeightWorkerPool {
         if (inFlight === undefined) {
           break;
         }
-        if (inFlight.fieldEpoch !== this.fieldEpoch) {
+        if (this.madeStale(inFlight, reply.bake.layers)) {
           this.requeue(inFlight);
         } else if (this.wanted.has(inFlight.keyString)) {
           this.wanted.delete(inFlight.keyString);
           for (const listener of this.bakedListeners) {
             listener(reply.bake);
           }
+        }
+        break;
+      }
+      case "bake-unsurveyed": {
+        const inFlight = slot.inFlight.get(reply.id);
+        slot.inFlight.delete(reply.id);
+        if (inFlight === undefined) {
+          break;
+        }
+        const field = this.sourceField();
+        if (
+          field !== inFlight.field ||
+          field === null ||
+          field.blocks.length > inFlight.blocksAtSend
+        ) {
+          // A block came since, which may hold what it lacked, or the field started anew.
+          this.requeue(inFlight);
+        } else if (this.wanted.has(inFlight.keyString)) {
+          this.waiting.set(inFlight.keyString, inFlight.request);
         }
         break;
       }
@@ -489,11 +649,18 @@ export class HeightWorkerPool {
         }
         break;
       }
-      case "field-held":
+      case "field-held": {
         slot.fieldBytes = reply.heldBytes;
+        const posted = slot.posted.get(reply.id);
+        slot.posted.delete(reply.id);
+        if (posted !== undefined && reply.block !== null) {
+          this.report(posted, reply.block);
+        }
         break;
+      }
       case "field-refused": {
         slot.fieldBytes = reply.heldBytes;
+        slot.posted.delete(reply.id);
         const kept = this.fields.get(reply.body);
         if (kept !== undefined && reply.id >= kept.sinceId && !kept.refused) {
           kept.refused = true;
@@ -522,6 +689,8 @@ export class HeightWorkerPool {
       this.requeue(inFlight);
     }
     slot.inFlight.clear();
+    // The failed worker will never answer its blocks; a replacement is posted them afresh.
+    slot.posted.clear();
     slot.fieldBytes = 0;
     slot.failures += 1;
     if (slot.failures >= MAX_CONSECUTIVE_WORKER_FAILURES) {
@@ -530,26 +699,81 @@ export class HeightWorkerPool {
       slot.worker = this.createWorker();
       this.attach(slot);
       for (const [body, kept] of this.fields) {
-        kept.blocks.forEach((block, n) => {
-          this.postBlock(slot, n === 0 ? "field-init" : "field-chunk", body, block);
+        kept.blocks.forEach((_, n) => {
+          this.postBlock(slot, body, kept, n);
         });
       }
     }
     this.pump();
   }
 
-  /** Posts one block of `body`'s field to a running worker. */
-  private postBlock(
-    slot: Slot,
-    kind: "field-init" | "field-chunk",
-    body: BodyIdHex,
-    block: ArrayBuffer,
-  ): void {
-    if (slot.lost) {
+  /** Posts block `sequence` of `body`'s field `kept` to a running worker. */
+  private postBlock(slot: Slot, body: BodyIdHex, kept: KeptField, sequence: number): void {
+    const block = kept.blocks[sequence];
+    if (slot.lost || block === undefined) {
       return;
     }
+    const id = this.takeId();
+    slot.posted.set(id, { body, field: kept, sequence });
     // Cloned, not transferred: the pool keeps the block for the next worker.
-    slot.worker.postMessage({ kind, id: this.takeId(), body, block }, []);
+    slot.worker.postMessage(
+      sequence === 0
+        ? { kind: "field-init", id, body, block, form: kept.form }
+        : { kind: "field-chunk", id, body, block },
+      [],
+    );
+  }
+
+  /** The source body's field as kept now: `null` for the test planet, or none started. */
+  private sourceField(): KeptField | null {
+    return this.sourceBody === null ? null : (this.fields.get(this.sourceBody) ?? null);
+  }
+
+  /**
+   * Whether a bake made after `inFlight` was sent is stale on arrival: its body's field started
+   * anew or was released since, or blocks came since and R10's rebake rule may take it, being
+   * incomplete or with a survey mask a block could change. The blocks' own changes may not have
+   * been answered yet, so the rule is taken conservatively here.
+   */
+  private madeStale(inFlight: InFlight, layers: TerrainLayers | null): boolean {
+    if (this.sourceBody === null) {
+      return false;
+    }
+    const field = this.sourceField();
+    if (field !== inFlight.field) {
+      return true;
+    }
+    if (field === null || field.blocks.length === inFlight.blocksAtSend) {
+      return false;
+    }
+    return layers === null || !layers.complete || layers.unsurveyedCells.length > 0;
+  }
+
+  /** After a block of `body`'s field: the requests waiting for it are asked again. */
+  private afterBlock(body: BodyIdHex): void {
+    if (body === this.sourceBody) {
+      for (const [keyString, request] of this.waiting) {
+        if (!this.queue.has(keyString) && !this.isInFlight(keyString)) {
+          this.queue.set(keyString, { request, keyString });
+        }
+      }
+      this.waiting.clear();
+    }
+    this.pump();
+  }
+
+  /** Reports the change of block `posted`, once, from the first worker to answer it. */
+  private report(posted: PostedBlock, block: FieldBlockAnswer): void {
+    const { body, field, sequence } = posted;
+    if (this.fields.get(body) !== field || sequence < field.reported) {
+      return;
+    }
+    field.reported = sequence + 1;
+    field.levels = block.levels;
+    const change: FieldChange = { ...block, body, sequence };
+    for (const listener of this.changeListeners) {
+      listener(change);
+    }
   }
 
   /** The next message ID, shared by bakes and field messages. */

@@ -406,7 +406,7 @@ export class SpikeRun {
         // The setting's own terrain, or the variant T17's runs ask for (decision-r05-spike-ux.md).
         terrain: terrainSettingsFor(options.setting, options.variant),
         planet: prepared.planet,
-        ridges: options.ridges,
+        source: { kind: "test-planet", ridges: options.ridges },
         createPool: (bake) => listenedPool(options.createPool(bake), listeners),
         measureSelection: true,
         ...(listeners.onSelect === undefined ? {} : { onSelect: listeners.onSelect }),

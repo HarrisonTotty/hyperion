@@ -26,7 +26,8 @@
 //! (`testing`, feature `testing`). Of R10's it holds the material classes and their physical
 //! properties ([`material`]), and the classifier that decides them at every point, and the bake of
 //! a patch on real terrain with its layers ([`bake`]), with the type of the layers R11 adds to it
-//! ([`scatter`]).
+//! ([`scatter`]), and what a client's height worker holds and answers, a client's field a body with
+//! the bake, readings and material over it ([`worker`]), which the client's module exports.
 //!
 //! # The contract of the height function
 //!
@@ -83,6 +84,7 @@ pub mod test_planet;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 pub mod wire;
+pub mod worker;
 
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 mod wasm;

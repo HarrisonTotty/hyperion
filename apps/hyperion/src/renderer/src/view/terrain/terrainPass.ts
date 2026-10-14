@@ -54,7 +54,7 @@ import {
   type ViewSelectionInput,
 } from "./select";
 import { RESELECT_MOVE_FRACTION, selectionTolerancePx } from "./selectionTolerance";
-import type { BakedPatch, BakeSettings, TestPlanetRidges } from "./workers/messages";
+import type { BakedPatch, BakeSettings, HeightSourceSetting } from "./workers/messages";
 
 /**
  * How far through a level's distance band the CDLOD morph to its parent begins (Design note 6): a
@@ -132,7 +132,11 @@ export interface TerrainPassOptions {
   readonly engine: RenderEngine;
   readonly setting: QualitySetting;
   readonly planet: PlanetGeometry;
-  readonly ridges: TestPlanetRidges;
+  /**
+   * What the patches' heights come from: the test planet with its ridges, or a body over the
+   * field its workers hold (R10.T6.b).
+   */
+  readonly source: HeightSourceSetting;
   readonly createPool: TerrainPoolFactory;
   /**
    * The terrain's settings, for the spike's variants (T13.c); defaults to
@@ -267,7 +271,7 @@ export class TerrainPass {
   /** The terrain's settings, resolved once: the setting's own, or the spike's variant. */
   readonly #terrain: TerrainSettings;
   readonly #planet: PlanetGeometry;
-  readonly #ridges: TestPlanetRidges;
+  readonly #source: HeightSourceSetting;
   readonly #createPool: TerrainPoolFactory;
   readonly #measureSelection: boolean;
   readonly #onResident: ((key: PatchKey) => void) | null;
@@ -297,7 +301,7 @@ export class TerrainPass {
     this.#setting = options.setting;
     this.#terrain = options.terrain ?? TERRAIN_SETTINGS[options.setting];
     this.#planet = options.planet;
-    this.#ridges = options.ridges;
+    this.#source = options.source;
     this.#createPool = options.createPool;
     this.#measureSelection = options.measureSelection ?? false;
     this.#onResident = options.onResident ?? null;
@@ -378,7 +382,7 @@ export class TerrainPass {
     const pool = this.#createPool({
       vertexPath: layout.vertexPath,
       normals: this.#terrain.normals,
-      ridges: this.#ridges,
+      source: this.#source,
     });
     const device: Device = {
       resources: made,

@@ -212,12 +212,12 @@ describe("the synthetic field", () => {
     }
   });
 
-  it("reaches the workers as the test planet's field: one field_init, then its chunks", () => {
+  it("reaches the workers as the test planet's stand-in field: one field_init, then its chunks", () => {
     const calls: string[] = [];
     let bytes = 0;
     postSyntheticField({
-      fieldInit: (body, block) => {
-        calls.push(`init ${body}`);
+      fieldInit: (body, block, form) => {
+        calls.push(`init ${body} ${String(form)}`);
         bytes += block.byteLength;
       },
       fieldChunk: (body, block) => {
@@ -225,7 +225,7 @@ describe("the synthetic field", () => {
         bytes += block.byteLength;
       },
     });
-    expect(calls[0]).toBe(`init ${SPIKE_PLANET}`);
+    expect(calls[0]).toBe(`init ${SPIKE_PLANET} stand-in`);
     expect(calls.slice(1).every((c) => c === `chunk ${SPIKE_PLANET}`)).toBe(true);
     expect(calls).toHaveLength(Math.ceil(SYNTHETIC_FIELD_BYTES / MAX_BLOCK_BYTES));
     expect(bytes).toBe(SYNTHETIC_FIELD_BYTES);

@@ -43,6 +43,7 @@ function bakeOf(key: PatchKey, generation = 1): BakedPatch {
     normals: new Float16Array(PATCH_VERTICES_PER_SIDE ** 2 * 2),
     originHeightM: 0,
     skirtDepthM: 1,
+    layers: null,
   };
 }
 

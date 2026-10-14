@@ -362,6 +362,37 @@ impl PartialField {
         Some(self.codes[n])
     }
 
+    /// The bytes the field holds on the heap: its per-cell slots and codes, its climate slots, its
+    /// craters with their reaches, the per-cell index of the craters reaching each cell, and the
+    /// header's palette (R10.T6.b's worker reports it as its copy of the field).
+    ///
+    /// A holder's count of its memory, for a budget, as
+    /// [`CoarseField::heap_bytes`](super::CoarseField::heap_bytes) is, not generated output: it
+    /// depends on how the vectors were built, and nothing that synthesises reads it. The slots for
+    /// every cell of the level dominate it whatever is held, about 13 MB at level 8.
+    #[must_use]
+    pub fn heap_bytes(&self) -> usize {
+        let index = &self.craters;
+        let reaches = index
+            .craters
+            .iter()
+            .map(|crater| crater.reach.heap_bytes())
+            .fold(0, usize::saturating_add);
+        [
+            self.header.palette().heap_bytes(),
+            super::vec_heap_bytes(&self.cells),
+            super::vec_heap_bytes(&self.codes),
+            super::vec_heap_bytes(&self.climate),
+            super::vec_heap_bytes(&index.craters),
+            reaches,
+            super::vec_heap_bytes(&index.centres),
+            super::vec_heap_bytes(&index.reaching_start),
+            super::vec_heap_bytes(&index.reaching),
+        ]
+        .into_iter()
+        .fold(0, usize::saturating_add)
+    }
+
     /// The number of cells held, surveyed and margin.
     #[must_use]
     fn held_count(&self) -> usize {

@@ -1,6 +1,6 @@
 import { vec3 } from "../geometry/vec3";
 import type { PatchKey } from "../view/terrain/patchKey";
-import { HeldFields } from "../view/terrain/workers/heightBake";
+import { StandInFields } from "../view/terrain/workers/heightBake";
 import type {
   BakedPatch,
   HeightWorkerReply,
@@ -27,13 +27,15 @@ export function bakeOf(key: PatchKey, generation: number): BakedPatch {
     boundingRadiusM: 1,
     originHeightM: 0,
     skirtDepthM: 1,
+    layers: null,
   };
 }
 
 /**
  * A height worker driven by the test (plan R05, T10.a; moved here from `pool.test.ts` for R10.T7's
  * store): it records what it is sent and answers when told, its field messages through the real
- * worker's {@link HeldFields}, so that what it reports holding is what a worker would.
+ * worker's {@link StandInFields}, so that what it reports holding is each block's bytes, decoding
+ * none (the real worker's module decodes a payload's: `fieldsWasm.test.ts`).
  */
 export class ScriptedHeightWorker implements WorkerLike {
   private readonly events = new EventTarget();
@@ -43,7 +45,7 @@ export class ScriptedHeightWorker implements WorkerLike {
   readonly listening = { message: 0, error: 0 };
   readonly received: HeightWorkerRequest[] = [];
   /** The fields as the worker would hold them, once {@link ScriptedHeightWorker.answerFields} runs. */
-  readonly fields = new HeldFields();
+  readonly fields = new StandInFields();
   terminated = false;
 
   postMessage(message: HeightWorkerRequest): void {
@@ -139,7 +141,13 @@ export class ScriptedHeightWorker implements WorkerLike {
               message: "refused",
               heldBytes: this.fields.heldBytes,
             }
-          : { kind: "field-held", id: message.id, heldBytes: this.fields.heldBytes },
+          : {
+              kind: "field-held",
+              id: message.id,
+              body: message.body,
+              heldBytes: this.fields.heldBytes,
+              block: null,
+            },
       );
     }
   }
