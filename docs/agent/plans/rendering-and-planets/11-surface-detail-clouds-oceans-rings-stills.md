@@ -302,15 +302,23 @@ ambiguous, the design note that reads it is named.
   through `oblate.wgsl`'s slice lookup at the ray's latitude and azimuth, never as one texture;
   R08 Design note 17), with the absorber-column table `absorberColumns` and the lights' curves of
   growth `absorberCurves` beside it, since the table stores optical depth without the absorbers
-  and a reader reads through `common.wgsl`'s `transmittanceThroughTables` at the light's curve
-  slot (R08.T6.c). Since R08.T4.d such a reader binds five textures, `transmittance`,
+  and a reader adds them on read at the light's curve slot (R08.T6.c). Since R08.T6.f it reads a
+  slice through `oblate.wgsl`'s sliced lookup, `slicedRayOf` and `slicedStoredOf` from a
+  `LookupStart`, with `AerialPerspective.oblateBody`, and a band's own table through
+  `common.wgsl`'s `transmittanceThroughLayer`, which replaced `transmittanceThroughTables`
+  (corrected 2026-10-14).
+  Since R08.T4.d such a reader binds five textures, `transmittance`,
   `absorberColumns`, `absorberCurves`, `absorberPressureColumns` and `lastAbsorberPressureColumn`,
   and takes the medium's line-slot bitmask (`Draw.shell.z` in the composite, `Medium.absorbers.w`
   in the kernels), each line slot reading its own pressure channel (plan 08's Risks, "Deviations in
   T4.d, as built"); and the medium the clouds and the ocean are drawn inside;
   `skyView(view): SkyViewTable` (R08.T9.a), the view's sky radiance by local azimuth and elevation
   summed over the drawn suns, with the per-sun fallback in the same type, for reflecting the sky
-  in the ocean; `surfaceLighting.wgsl`'s
+  in the ocean, of a per-azimuth shape on an oblate body since R08.T6.f: `texture`, `size`,
+  `scaleCdPerM2`, `zenith`, `azimuthOrigin`, `meridionalRadiusM`, `primeVerticalRadiusM`,
+  `heightM`, `atmosphereM` and `sphere`, which is `{ bottomRadiusM, horizonAngleRad }` on a sphere
+  and `null` on an oblate body, with `skyViewColumnOf(table, d)` for each azimuth's R_α and β
+  (corrected 2026-10-14); `surfaceLighting.wgsl`'s
   `atmosphere_sun_transmittance(altitude_m, mu_sun, latitude_rad, sun_azimuth_rad) -> vec3f` and
   `atmosphere_sky_irradiance(altitude_m, mu_sun, latitude_rad) -> vec3f` (R08.T9.b), through
   which lit clouds, oceans and rings take each sun's light and the sky's, each call at the lit
@@ -326,6 +334,8 @@ ambiguous, the design note that reads it is named.
   Every read of R08's tables (the aerial volume, the transmittance slices, the sky table) takes
   R08's texel mapping (R08 Design note 19), through R08's lookups or `texelUvFromUnit` in R08's
   `common.wgsl`, never a coordinate of its own.
+  R11's re-validation must read the new shapes, the sliced lookup and the per-azimuth
+  `SkyViewTable`, as built (plan 08's Risks, "Deviations in T6.f, as built").
 - **R09:** `FieldView`, with `CoarseField` on the server and `PartialField` on the client
   (`is_surveyed`); `FieldHeader` (`sea_level`, `craters: CraterParams`, and `surface_age: Gyr` and
   `surface_pressure: Pascals`, plan 14's figures carried for this plan's `RockSite`);

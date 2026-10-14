@@ -314,9 +314,10 @@ alone and never on the sim, by R04's entry in `.claude/rules/rust-dev.md`):
 
 Names are the owning plans' as they stand on disk; the owner is authoritative, and where a name has
 changed by the time this plan runs only the call sites here change. Re-validated at `c6d77cac`
-against R05, R07, R08 and R09 as built (Risks, "Re-validated at `c6d77cac`"). What R09.T8, T9 and
-T19.b provide is not built yet: those names are R09's Provides, **provisional until R09.T8/T9/T19.b
-land**, and each is marked so below.
+against R05, R07, R08 and R09 as built (Risks, "Re-validated at `c6d77cac`"). What R09.T8 and
+T19.b provide is not built yet: those names are R09's Provides, **provisional until R09.T8/T19.b
+land**, and each is marked so below. R09.T9 has landed (`070da8ee`), and its goldens pin R09's
+heights and closed forms on all three targets at header 21 (below).
 
 - **R01:** the engine adapter, its WGSL-only material path, its adapter feature report
   (`GpuCapabilities` in `view/engine/platform.ts`, with `depthClipControl`, commented as for R10's
@@ -502,8 +503,9 @@ land**, and each is marked so below.
     in its octaves and channels and a 1 − 10⁻⁹ per-point Chernoff quantile in its crater and rim
     terms; the structure function holds within 5% on belt cells only, channelled plains running
     15–37% high; and the bench is provisional at 14 µs a point and 77–82 ms a patch at L + 4.
-  - _Provisional until R09.T9 lands:_ the golden heights in `tests/golden/height/`, which this
-    plan's material and ground goldens follow.
+  - _Landed with R09.T9_ (`070da8ee`; R09's "Deviations in T9, as built"): the golden heights and
+    closed forms in `tests/golden/height/`, pinned on native, `wasm32-wasip1` and
+    `wasm32-unknown-unknown` at header 21, which this plan's material and ground goldens follow.
   - _Provisional until R09.T19.b lands:_ the `surface_field` payload (the handler answers
     `unsupported` until then), its revisions and deltas since `have_revision`, and
     `surface_revisions` on the scene topic.
@@ -1093,9 +1095,11 @@ that own them measure them.
   "Deviations in T4, as built"), reading the cell's substance byte (`SynthesisCell::ice_entry`,
   `liquid_entry`) and the header's palette (`crust_entry`, the `Deposit` and `Cover` roles) as
   Design note 1's folded-in rules have it, with the cold-trapped share on the cell's shadowed
-  ground. Files: `material/classify.rs`, both helper modules
-  of Test helpers, `tests/material_golden.rs` with its `golden/material_*.golden` (a thousand points
-  on each of `synthetic_worlds()`), and `crates/hyperion-sim/tests/surface_material_worlds.rs`.
+  ground. Files: `material/classify.rs`, both helper modules of Test helpers, `material/golden.rs`,
+  a `cfg(test)` module of the crate as `ground/golden.rs` is, writing its goldens under
+  `crates/hyperion-surface/tests/golden/material/` (a thousand points on each of
+  `synthetic_worlds()`; corrected 2026-10-14; R09.T9's pattern), and
+  `crates/hyperion-sim/tests/surface_material_worlds.rs`.
   Tests: a `cliff_field` is `Bedrock` above 40° and not below; on `sample_worlds()`, a warm pole
   has no ice cap and a locked world's ice lies where R09's field puts it (the brainstorm's two
   examples under Materials); `Seabed` exactly below the water surface; an arid filled basin is
@@ -1104,10 +1108,10 @@ that own them measure them.
   `wasm32-wasip1` and `wasm32-unknown-unknown` through R04's checks. The `sample_worlds()` cases
   follow R09.T16 (the order of tasks). Bumps `GENERATOR_VERSION` (see Generator version).
   Acceptance: `cargo test -p hyperion-surface material` and
-  `cargo test -p hyperion-surface --features testing --test material_golden`,
-  `cargo test -p hyperion-sim --features testing --test surface_material_worlds`, and
-  `just test-wasm-fast` runs the goldens on both wasm targets (the orchestrator's `just ci` runs
-  all three).
+  `cargo test -p hyperion-surface --lib material::golden` (the goldens alone; corrected 2026-10-14;
+  R09.T9's pattern), `cargo test -p hyperion-sim --features testing --test surface_material_worlds`,
+  and `just test-wasm-fast` runs the goldens on both wasm targets (the orchestrator's `just ci`
+  runs all three).
 - **R10.T1.c Maturity and cover.** New at the re-validation (decision-composition §1.8 and
   §7.5). Regolith's A_N and colour are modulated by exposure (crater and surface ages, from R09's
   header and cells) and by plan 14's P14.T51.d cover. Files: `material/maturity.rs`. Tests: a
@@ -1158,7 +1162,8 @@ interpolants within 1 µm; `ground_at` is finite at every sampled point of `synt
 of `sample_worlds()` (the latter in `crates/hyperion-sim/tests/surface_ground_worlds.rs`), and
 asserts finiteness before it returns (the brainstorm's NaN hazard). The goldens, on
 `synthetic_worlds()`, are asserted on native and both wasm targets. No bump: the ground reads
-heights that R09's goldens already pin (R09.T9's, provisional until it lands). Acceptance:
+heights that R09's goldens already pin (R09.T9's, landed in `070da8ee`, on all three targets at
+header 21). Acceptance:
 `cargo test -p hyperion-surface ground`,
 `cargo test -p hyperion-surface --features testing --test ground_golden`, and
 `cargo test -p hyperion-sim --features testing --test surface_ground_worlds`.
