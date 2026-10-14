@@ -1617,6 +1617,389 @@ through the DOM list; the console-ux skill's lint, contrast and glyph checks pas
 anywhere (B612 has none). Acceptance:
 `pnpm --filter hyperion exec vitest run src/renderer/src/view/terrain` and the console-ux checks.
 
+#### The drafts, for the owner
+
+_Drafted for the owner by lane 11 (2026-10-13), for a sign-off before either is built; neither is
+signed off, and the rest of the task does not wait for them._ They are the two drafts the task's
+sentence on the material's properties and the mark owes. Each gives its wording for the guide, where
+it goes, and the guide rows it extends, by section heading and line in
+`docs/frontend/ux-guidelines.md` as it stands at `fe12a05e`, with R10.T13's rows in it (signoff-9).
+Each lists its questions with this draft's lean, and ends in its own marker. The guide is not edited
+here: once the owner signs a draft off, it is applied as the owner directs, and the task builds to
+it. Every string proposed passes the console-ux skill's glyph and lint scripts ("Checks", below).
+Over a Moon-like regolith plain under a 410 m survey, with the default pad, the readout would read:
+
+```text
+GROUND AT LINE OF SIGHT
+ELEVATION        ~2140 m ± 180 m
+SLOPE            ~12° ± 4° · BASELINE 2 m
+SLANT RANGE      ~41.2 km ± 0.3 km
+MATERIAL         REGOLITH · UNLISTED MATERIAL
+BEARING CAPACITY ~5.4 MPa · PAD WIDTH 1.0 m
+PAD FRICTION     ~0.20
+RESOLUTION       410 m
+```
+
+The substance is `feldspathic`'s, which `substanceName` does not name yet (R10.T13's Draft 5); the
+capacity is lunar regolith's at the Moon's 1.62 m/s², and the friction NAVFAC's for silt (Draft 1).
+
+- **Draft 1. The material's properties: `BEARING CAPACITY` and `PAD FRICTION`.**
+  - _The quantities, as built_ (R10.T1.a; `crates/hyperion-surface/src/material/`, `bearing.rs` and
+    `properties.rs`).
+    - `bearing_capacity(properties, gravity, footing_width)` is the ultimate bearing capacity, Pa,
+      under a square or circular footing of that width resting on level ground: Terzaghi's equation
+      with Vesić's factors and shape factors, from the layer of the form's shear table at the depth
+      of one footing width, at the body's gravity (Design note 2). Its test pins it on lunar
+      regolith at 1.62 m/s² under a 1 m footing: 5,368.6 kPa from the 30–60 cm layer. The top
+      15 cm's pair gives 206.5 kPa under the same footing, so a narrow pad, whose failure zone stays
+      near the surface, bears far less: about 100 kPa under 0.1 m.
+    - `interface_friction(properties, temperature)` is the friction coefficient tan δ of a metal
+      pad on the ground, with no unit. On a soil it is a constant, NAVFAC DM-7.02 (1986) Table 1's
+      factor for steel: 0.20 on regolith, soil and dust, 0.25 on sediment and 0.30 on sand. On
+      water ice (a glacier, sea ice) it follows the temperature between Liefferink et al. 2021's
+      points, from 176 K to 272 K (−97 °C to −1 °C, read by eye from their Fig. 1, as
+      `properties.rs` records), 0.039 at its least, near 265 K, and 0.71 at 176 K. Outside them it
+      is `None`, as it is on the colder ground of most icy bodies.
+    - Either is `None` where the form's row has no source for it (`form_row`). The capacity is
+      `None` on every form but regolith, dust and soil of silicate, the three with a shear table.
+      The friction is `None` on every form but those three, sand and sediment of silicate, and
+      glacier and sea ice of water ice: so on snow, a frost, bedrock, volcanic rock, melt, an
+      evaporite, a seabed, an organic sediment, a regolith of ice, and every form of a metal, a
+      salt or an organic (`FormRow::UNMODELLED`).
+  - _Wording,_ sub-bullets of the terrain readout's bullet in "Views" (lines 700–708), whose list
+    of readings becomes `ELEVATION`, `SLOPE`, `SLANT RANGE`, `MATERIAL`, `BEARING CAPACITY`,
+    `PAD FRICTION` and `RESOLUTION`: "After `MATERIAL` stand two of the ground's properties, from
+    its material and the body: what it will bear before it fails in shear, and how a landing pad
+    grips it.
+    - `BEARING CAPACITY` is the pressure under which the ground fails beneath a pad: its ultimate
+      bearing capacity, with no factor of safety, at the body's surface gravity, on level ground.
+      It is not a safe load: a pad sinks into the ground at far lower pressures, which are not
+      modelled.
+      It is on the console's pressure ladder, `Pa`, `kPa` and `MPa`, switching at 1000 with
+      hysteresis, to two significant figures, and the pad it is taken under follows a middle dot:
+      `BEARING CAPACITY 5.4 MPa · PAD WIDTH 1.0 m`. The pad is the own ship's; until the ship has
+      pads it is 1.0 m.
+    - `PAD FRICTION` is the coefficient of friction of a metal pad on the ground, a ratio with no
+      unit, to two decimal places: `PAD FRICTION 0.20`. Where it depends on the ground's
+      temperature, as an ice's does, the temperature it is taken at follows a middle dot, in whole
+      kelvin: `PAD FRICTION 0.08 · AT 243 K`. That is the ground's temperature at the point for the
+      month, from the survey's climate field; the day's cycle is not modelled.
+    - Each is Estimated, its `~` without an uncertainty, since none is computed, until the survey
+      resolves the point, as `ELEVATION` is: `BEARING CAPACITY ~5.4 MPa · PAD WIDTH 1.0 m`. On loss
+      of the link each value the server's data gives goes stale with its `S`, the temperature among
+      them, while the pad's width, a constant and not a live value, does not:
+      `PAD FRICTION ~0.08 S · AT 243 K S`. Each value keeps a fixed field, sized for its longest
+      Estimated reading with its `S`: `~990 kPa S`, `~0.71 S` and `272 K S`.
+    - Where no source gives the figure for the ground's form, or the temperature lies outside its
+      source's, the value is Missing, the em dash, since it is not computed: `BEARING CAPACITY —`,
+      `PAD FRICTION —`. A part follows it only where the gap depends on it, as the friction of an
+      ice colder than its source does on the temperature: `PAD FRICTION — · AT 102 K`.
+    - Neither is ever `0` for a gap, and neither stands apart from the readings: `NOT SURVEYED` or
+      `NO GROUND` stands once in place of them all."
+  - _Rows_ (kind `Label`).
+    - `BEARING CAPACITY`: in a view's terrain readout, the pressure under which the ground at the
+      point fails beneath a pad of the stated `PAD WIDTH`: its ultimate bearing capacity, with no
+      factor of safety, at the body's surface gravity, on level ground, since a slope's lowering of
+      it is not modelled. Not a safe load: a pad's sinking, at far lower pressures, is not
+      modelled either. Two significant figures in `Pa`, `kPa` and `MPa`, switching at 1000 with
+      hysteresis (`BEARING CAPACITY 5.4 MPa · PAD WIDTH 1.0 m`); Estimated until the survey
+      resolves the point; the em dash where no source gives it for the ground's form. Spelled out,
+      and never `BEARING` alone, which the guide's prose keeps for a direction.
+    - `PAD WIDTH`: after `BEARING CAPACITY` alone, the width of the pad it is taken under, a square
+      pad's side or a round pad's diameter, to two significant figures: the own ship's pads', or
+      1.0 m until the ship has pads. A constant, never stale.
+    - `AT`: after `PAD FRICTION` alone, the ground's temperature the friction is taken at, the
+      month's at the point from the survey's climate field, in whole kelvin (`· AT 243 K`).
+    - `PAD FRICTION`: in a view's terrain readout, the coefficient of friction of a metal landing
+      pad on the ground at the point (its sources measured steel): the ratio of the force that
+      slides the pad to the load on it, with no unit, to two decimal places (`PAD FRICTION 0.20`).
+      After a middle dot, `AT` and the ground's temperature, where the friction depends on it
+      (`· AT 243 K`). Estimated until the survey resolves the point; the em dash where no source
+      gives it for the ground's form or its temperature. Spelled out, never `μ` or `tan δ`, which
+      neither face holds.
+  - _The lines by state._
+    - Resolved: `BEARING CAPACITY 5.4 MPa · PAD WIDTH 1.0 m`, `PAD FRICTION 0.20` and, on glacier
+      ice of H2O at 243 K, `PAD FRICTION 0.08 · AT 243 K`.
+    - Estimated: `BEARING CAPACITY ~5.4 MPa · PAD WIDTH 1.0 m`, `PAD FRICTION ~0.20`.
+    - Stale: `BEARING CAPACITY ~5.4 MPa S · PAD WIDTH 1.0 m`, `PAD FRICTION ~0.08 S · AT 243 K S`.
+    - Not computed: `BEARING CAPACITY —` on sand or ice; `PAD FRICTION —` on snow;
+      `PAD FRICTION — · AT 102 K` on glacier ice of H2O at 102 K, as on a Europa.
+    - Not surveyed, no ground: neither line, the readout's one status standing for every reading.
+  - _The figures behind the examples_, from the formula, computed apart from the code in Python's
+    `math` (2026-10-13), each checked again by the lane's science check: lunar regolith at
+    1.62 m/s², 5,370 kPa under a 1.0 m pad (`5.4 MPa`) and 104 kPa under 0.1 m (`100 kPa`); Mars's
+    drift at 3.71 m/s², of bulk density 1,200 kg/m³, 39 kPa under 1.0 m, and Viking Lander 2's
+    crusty to cloddy soil, of 1,400 kg/m³, 301 kPa (`300 kPa`), both from the top 0.22 m, the depth
+    Viking sampled, taken deeper, as `shear_layer_at` takes its deepest layer below it; glacier ice
+    of H2O at 243 K, 0.080, between Liefferink et al.'s points at −38 °C and −30 °C.
+  - _Sources for the wording._ "Ultimate" and "with no factor of safety" describe what `bearing.rs`
+    computes: the pressure at which the ground fails in shear, nothing divided out. The Lunar
+    Sourcebook keeps the two apart: the allowable bearing capacity, limited by settlement, "is
+    significantly less than the ultimate bearing capacity" (Carrier, Olhoeft and Mendell 1991,
+    §9.1.9, pp. 517–519, as the lane's science check read it). The 1.0 m pad is the footing the
+    Sourcebook gives its lunar figure for, about 6,000 kPa (p. 517), and about the width of the
+    Apollo 11 lunar module's footpads, nearly 1 m across, under which it reads 3,000–11,000 kPa
+    (p. 518), both as `bearing.rs` gives them. The temperatures are the guide's kelvin (lines
+    234–239): the source's −97 °C and −1 °C, read by eye to about 2 °C, are 176 K and 272 K. A
+    ratio with no unit is shown bare, as `ECC` is (line 938; `BodyRecordReadings.tsx`).
+  - _Goes in_ "Graphs, schematics and spatial displays", "Views": the terrain readout's bullet
+    (lines 700–708) takes the two readings into its list and the wording as its sub-bullets; the
+    rows go after the material form row (line 1050).
+  - _Extends:_
+    - "Views", lines 700–708 (the readout, its order, `NOT SURVEYED`, `NO GROUND` and staleness);
+    - "Voice and nomenclature": lines 822–823 (one name per thing; an abbreviation only from the
+      list), 858–877 (the material reading these follow), 878 (a reading of parts joined by `·`)
+      and 879–880 (real engineering terms: geotechnics' ultimate bearing capacity and interface
+      friction);
+    - "Typography", lines 134–141 (no Greek letter; a quantity named in words, so never `μ` or
+      `tan δ`);
+    - "Numbers, units and time": lines 188–193 (a unit with every value, which a ratio has not, as
+      `ECC`, line 938), 218–219 (one unit and precision for a quantity; the precision the operator
+      can act on), 234–239 (kelvin, a source's degrees Celsius converted), 240–241 (scaled units
+      with hysteresis) and 253 (a fixed field width with its status marks);
+    - "Data states": the Stale, Missing and Estimated rows (lines 359, 360 and 362), lines 366–367
+      (a lost link makes every live value stale) and 414–415 (a single value not computed, inside a
+      section that is shown, is the em dash);
+    - "Principles", item 5 (lines 26–28: never a number the simulation does not have, never a
+      hidden estimate or gap);
+    - the rows `MATERIAL` (line 1049), the material forms (line 1050), `SLOPE` and `BASELINE`
+      (lines 1061–1062: a condition after a middle dot, the console's own setting never stale),
+      `NOT SURVEYED` (line 1066) and `NO GROUND` (line 1067).
+  - _Amends_ the `BASELINE` row (line 1062), which reads "`2 m` by default (the band limit and a
+    pad's scale)": with `PAD WIDTH 1.0 m` in the same readout, "pad" would name two sizes. Its
+    aside becomes "(the band limit, and the scale a lander's tilt is judged over)", after Design
+    note 7's InSight ladder.
+  - _Excepts_ nothing. The Estimated value's rounding (lines 220–233) needs a `±`, and these have
+    none.
+  - _Questions for the sign-off_, each with its lean.
+    - _Estimated under a coarse survey._ The material is quoted at coverage alone (signoff-9),
+      since it is a name; these are numbers, and Design note 6 gates every number by coverage and
+      resolution. Lean: `~` until the point is resolved, then the plain value. Resolved, it is not
+      an estimate of the simulation's quantity but the very figure landing reads (the brainstorm's
+      properties "that landing and the consoles read"), though its table's figures are generic for
+      the form. The alternatives are the material's state, never `~`, and `~` always, which would
+      mark that genericness (the Estimated row's "derived", line 362).
+    - _A figure not computed._ Lean: the em dash, as the guide's lines 414–415 have a single value
+      the generator does not compute, and as signoff-9 set a substance not computed
+      (`MATERIAL REGOLITH · —`). The alternative, `NOT YET MODELLED` in the value's place, is the
+      guide's form for a section, and would stand on most icy ground.
+    - _Precision._ Lean: two significant figures for the capacity, since its source holds it only
+      to within a factor of about two (the Sourcebook's 3,000–11,000 kPa about its 6,000), on the
+      console's one pressure ladder (`lib/format.ts`'s `formatPressure`), whose three figures are
+      a surface pressure's; the friction to two decimal places, as NAVFAC states it.
+    - _"Ultimate" in the label._ Lean: `BEARING CAPACITY`, the row saying it is the ultimate, with
+      no factor of safety. The alternative is `ULTIMATE BEARING CAPACITY`, three words.
+    - _The pad._ The own ship's hull is not defined (`TEST HULL`, line 1034), so it has no pads.
+      Lean: a fixed 1.0 m, stated on the line, with no selector. The alternative is a `PAD WIDTH`
+      selector, as `BASELINE` has one, which would meet the steps of Risks' deferred finding.
+    - _The temperature._ Lean: the climate field's month at the point (R09's `ClimateCell`, taken
+      to the point's elevation), stated only where the friction depends on it. Stated on every
+      friction, it would suggest that a soil's constant varies with it.
+    - _Slope._ The capacity is a level footing's on level ground; on a slope it is lower (Vesić's
+      ground-inclination factors, (1 − tan β)² on the self-weight term for a slope β below φ, in
+      EM 1110-1-1905's Table 4-6, p. 4-9, the table `bearing.rs` takes its shape factors from, as
+      the lane's science check read it; about 0.62 at 12°), which T1.a's function does not take.
+      Lean: say so in the row, and leave T1.a as built. _Ruled 2026-10-14 by main, on the issue:
+      the lean. The row
+      says so as drafted, and T1.a stays as built. Vesić's ground-inclination factors, with the
+      footing-base tilt factors that go with them, are a deferred finding for a later T1
+      follow-up, which adds the slope argument and its test before this task builds the readout
+      (Risks)._
+    - _The friction's kind._ NAVFAC's are unfactored friction factors at the onset of sliding, and
+      Liefferink et al.'s a slow kinetic friction under a model skate's blade (`properties.rs`);
+      neither was measured under a pad. Lean: one label, its row naming no kind and saying that
+      its sources measured steel, since the two kinds cannot be told apart on one line without a
+      word the console would have to add for this reading alone.
+  - _Drafted for the owner (lane 11, 2026-10-13): not yet signed off._
+
+- **Draft 2. The line-of-sight mark.**
+  - _The marks it must not resemble._ The guide names the ship-wide symbol set, ten closed
+    outlines (lines 763–782), among them the feature's Greek cross (lines 784–790); the selection's
+    bracket reticle, four corners of a square in `--accent`, and the destination's four chevrons
+    in `--target`, each pointing at the mark (lines 557–567 and 613–616, rows 1069 and 1155); a
+    craft's four open cardinal ticks outside its mark (`TICKS TARGET`, row 1068); the survey edge's
+    ticked line (lines 715–718); a feature's circle at its true radius (lines 786–787); an apparent
+    position's tick and dashed line (lines 527–528); the off-scale arrowhead (lines 358 and 511);
+    the drawn unit glyphs, `☉` a circle with a dot, `⊕` a circle with a cross, and `⌘` (lines
+    160–167); and on a spatial display the axis triad's three arrows and the range rings (lines
+    568–572). The client draws three more the guide does not name: the view's flight path marker,
+    a circle 0.375 rem in radius with two level wings and an upright fin in `--text`
+    (`view/wireframe/symbology.ts`, R02.T12.c), and on the galaxy map the cursor, an upright cross
+    with a gap at its point in `--accent`, and the chart centre, a small diagonal cross in `--text`
+    (`displays/galaxy/GalaxyMapView.tsx`). The reticles, a craft's ticks and the crosses have
+    four-fold symmetry, every symbol is closed, and the crosses and the flight path marker are what
+    a centre mark would most likely copy.
+  - _Where the point falls._ The view's projection is centred on its line of sight
+    (`view/camera/projection.ts`), so the point is always the picture's centre, where
+    `PREVIOUS TARGET` and `NEXT TARGET` also set an aimed target (line 1089). So the mark shares its
+    place with an aimed target's reticles and, whenever the view looks along the ship's velocity,
+    as on a straight-in descent, with the flight path marker, which stands where the velocity
+    projects.
+  - _Wording,_ a bullet of "Views" after the terrain readout's (line 708): "Where the view's line of
+    sight meets the ground its terrain readout reads, the view marks the point, in both styles,
+    with a tripod: three short straight ticks pointing at the point, one from directly below it and
+    two from above, each 60° from the upward vertical, the point itself left open. No other mark
+    is three open ticks about an open point: the reticles, a craft's ticks and the crosses are
+    four-fold; the triangles and the hexagon, which share its symmetry, are closed outlines; and a
+    spatial display's axis triad meets at its origin, with arrowheads and labels. So the tripod is
+    never read as a reticle, a craft or a body.
+    - _Size and stroke._ Its ticks reach 0.375 rem from the point, the radius of an unresolved
+      contact's symbol, so that it stands inside the selection's bracket about any body as a
+      symbol does, and start 0.125 rem from it, each 0.25 rem long, as a craft's tick is. They are
+      drawn at the `1.5px` outline of a mark sized in `rem`, moved out as a symbol's line is so
+      that the centre stays open (see "Layout"), with their `--surface-0` casing in both styles.
+    - _Colour._ `--text`, as the flight path marker and a craft's ticks are: it marks a reading,
+      and is neither available nor selected (`--accent`), nor commanded (`--target`), nor an alert.
+    - _Place._ It stands where the line of sight falls, at the picture's centre, and is never
+      moved, since a moved mark would mark ground the readout does not read; so it never nears the
+      view's edge. Where the view's chrome covers the centre, a label block's plate or an
+      instrument's slot over the `PRIMARY` view, it is covered with the picture. No mark's label is
+      placed over it: a label that would cover it stands on another side of its mark, or is not
+      shown, as one the chrome would cover.
+    - _Beside other marks._ It is drawn over the ground's own lines, the contours, the graticule
+      and the survey edge, whose line its casing cuts, so that its ticks stay whole and are never
+      read as the edge's, which hang from the line on one side alone. It is drawn beneath the
+      reticles: the selection's bracket and the destination's chevrons about an aimed body stand
+      round it. Where a body's symbol, a craft's ticks or the flight path marker come within
+      0.25 rem of its ticks, it is left out, since that mark then stands where the line of sight
+      is, and the two together would read as one new symbol, a circle or a triangle with spokes.
+    - _When it is drawn._ It is drawn with the readout, over surveyed ground and over ground the
+      ship has not surveyed alike, where the readout reads `NOT SURVEYED` of the point it marks. It
+      is unchanged under `GRAZING`: its place is exact, and what is uncertain is how far along the
+      line of sight the ground lies, which the readout states. At `NO GROUND` it is not drawn, there
+      being no point, nor where the view states no terrain readout. It comes and goes with the
+      readout's own updates, as a cut, so that the mark and the readout never disagree.
+    - _While stale._ Unchanged: it marks the picture's centre, the point the readout reads from the
+      same pose, whatever that pose's age, and staleness is carried by the readings' `S` and
+      `POINTING`'s, never by a mark's colour.
+    - _In the list._ While the readout has a point, drawn or left out for another mark, the
+      view's list notes it as `GROUND AT LINE OF SIGHT`, the first of its notes, before
+      `SURVEY EDGE` and `INTEGRATED STARLIGHT`. Its accessible name gives its place, "Ground at
+      line of sight, at the view's centre". It is a note outside the list's options: not a
+      contact, it cannot be selected, and it carries no range, since the readout's `SLANT RANGE` is
+      the point's."
+  - _Rows._
+    - `TRIPOD GROUND AT LINE OF SIGHT`, kind `Legend`, after `CHEVRONS DESTINATION` (line 1069):
+      "A view's mark where its line of sight meets the ground its terrain readout reads: three open
+      ticks pointing at the point, one from below and two from above, 120° apart. Four ticks mean
+      another craft (`TICKS TARGET`), and corner brackets the selection (`BRACKET SELECTED`)."
+    - `GROUND AT LINE OF SIGHT` (line 1059) gains: "Also the view's list note of the point's mark
+      (`TRIPOD GROUND AT LINE OF SIGHT`), which cannot be selected."
+  - _Contrast._ `contrast.py text surface-0` gives 13.57:1, above the 6:1 a stroke that carries
+    meaning needs, and the view's black ground is darker than `--surface-0`. At the floor of 2
+    device px a view's stroke wholly covers its brightest pixel (lines 75–76), so the pair holds
+    as scored.
+  - _Goes in_ "Graphs, schematics and spatial displays", "Views", after the terrain readout's
+    bullet (line 708) and before the survey edge's (line 709); the rows as above.
+  - _Extends:_
+    - "Colour": the token table (lines 45–59), lines 62–65 (6:1), 66–82 (a stroke as drawn,
+      against its casing over an image), 83 (never by colour alone: the shape and the list's note
+      carry it) and 106–110 (every mark over the image cased);
+    - "Layout", lines 301–309 (widths times the larger of the device-pixel ratio and 2; a mark
+      sized in `rem` at no less than 2 device px; an open mark keeps its hole);
+    - "Graphs, schematics and spatial displays": lines 520–523 (a small fixed symbol set, shape for
+      type), 557–567 (the bracket and the chevrons, told apart by shape) and 576–577 (the canvas
+      paired with a DOM list);
+    - "Views": lines 608–616 (what a view keeps of the symbol set and reticles), 625–626 (its DOM
+      list), 660–674 (both styles; casings; a label never over its mark's reticle, never shown in
+      part; changes as cuts), 676–680 and the `INTEGRATED STARLIGHT` row (line 1079: a list note
+      that is not a contact), 700–708 (the readout's point, moved by the camera, never by a
+      pointer) and 709–725 (the survey edge's mark and its note);
+    - "Motion and sound", lines 800–802 (readouts at about 4 Hz) and 805–812 (a view never stops;
+      cuts);
+    - the rows `GROUND AT LINE OF SIGHT` (line 1059), `SURVEY EDGE` (line 1055), `TICKS TARGET`
+      (line 1068), `CHEVRONS DESTINATION` (line 1069), `PREVIOUS TARGET` and `NEXT TARGET` (line
+      1089), and `BRACKET SELECTED` (line 1155).
+  - _Questions for the sign-off_, each with its lean.
+    - _The tripod's way up._ Lean: one tick below and two above, with no strong reason between the
+      two: either way up its ticks point along one triangle's vertex directions (the planet's
+      here, the neutron star's inverted), both closed outlines, and where the flight path marker or
+      a contact comes close, it gives way either way up. Inverted is the alternative.
+    - _Over unsurveyed ground._ Lean: drawn, since `NOT SURVEYED` is the readout's reading of that
+      point, and the operator steers by the mark onto surveyed ground. Left out, the mark would
+      come to mean "surveyed".
+    - _A contact on the point._ Lean: left out within 0.25 rem of it, its note standing. Drawn
+      beneath, a craft's lower tick would continue the tripod's, and a body's outline would close
+      round it as a new symbol.
+    - _The flight path marker on the point._ Lean: left out within 0.25 rem of it, as for a
+      contact, since the tripod's ticks, reaching 0.375 rem, would end on the inside of the
+      marker's circle, 0.375 rem in radius, and the two would read as a circle with three spokes;
+      the note stands, and on a straight-in approach the marker itself then shows where the line of
+      sight meets the ground. The alternatives are to draw the tripod beneath it, or to set its
+      ticks outside the marker's circle, which would make it the largest point mark on the view.
+    - _The survey edge through the point._ The tripod's ticks are the edge's length and colour
+      (0.25 rem, `--text`). Lean: the tripod over the edge, its casing cutting the edge's line, as
+      drafted. The alternative is ticks of another length, so that the two differ by length too.
+    - _The note's range._ Lean: none, since the readout's `SLANT RANGE` is the point's, from the
+      camera, and a second range, from the own ship as the list's are, would give two figures for
+      one point. The alternative is `SURVEY EDGE`'s, measured as the list's ranges are.
+    - _Labels clear of it._ Lean: as drafted, which extends the label rule (lines 669–674) from a
+      mark's own reticle to this mark.
+    - _Its name._ Lean: `TRIPOD`, a shape's word as `TICKS`, `CHEVRONS` and `BRACKET` are, joined
+      to the readout's heading so that the point keeps one name.
+  - _Drafted for the owner (lane 11, 2026-10-13): not yet signed off._
+
+- **If signed off, these follow** (other tasks' text, not changed here):
+  - this task's files gain `view/wireframe/symbology.ts`, where the view's marks are built, and its
+    test, and its tests the two properties' lines in each state, the em dash's parts, and the
+    mark's geometry, place, give-way and note; and its by-hand checks, recorded, which no review of
+    a draft can make: the tripod's legibility at a device-pixel ratio of 1, where its 0.25 rem
+    ticks are about 4 px long round a centre its casings nearly fill; the tripod beside the flight
+    path marker and over the survey edge, in both styles; and the label block's longest lines
+    (`BEARING CAPACITY ~990 kPa S · PAD WIDTH 1.0 m`) at 1280×720;
+  - the `BEARING CAPACITY` row's level-ground clause, once the later T1 follow-up gives
+    `bearing_capacity` its slope argument (Draft 1's question on slope, ruled);
+  - the roadmap README's "Awaiting the owner", which gains these two drafts and then their ruling;
+  - and a guide row for the flight path marker, which the client draws and the guide does not name
+    (Risks, "Deferred findings (2026-10-13 rule) (R10.T12's drafts)").
+
+- **Checks** (2026-10-13, this worktree).
+  - `glyphs.py "· — ~ ± °" '\u00a0'`: every character outside ASCII the drafts put on screen,
+    with the tilde and the no-break space of the `±` row (exit 0):
+
+    ```text
+    char  code     B612   Mono   name
+    ·     U+00B7   yes    yes    MIDDLE DOT
+    —     U+2014   yes    yes    EM DASH
+    ~     U+007E   yes    yes    TILDE
+    ±     U+00B1   yes    yes    PLUS-MINUS SIGN
+    °     U+00B0   yes    yes    DEGREE SIGN
+          U+00A0   yes    yes    NO-BREAK SPACE
+    ```
+
+  - `glyphs.py "μ δ"`: the friction's symbols, which the drafts name in words instead (exit 1):
+
+    ```text
+    char  code     B612   Mono   name
+    μ     U+03BC   no     no     GREEK SMALL LETTER MU
+    δ     U+03B4   no     no     GREEK SMALL LETTER DELTA
+    ```
+
+  - `ux_lint.py` on a scratch `.ts` file, outside the worktree and not committed, holding every
+    string the drafts propose as a string literal (exit 0), after a control string in a second
+    file there (`"Please wait, loading the PAD FRICTION"`) drew its `[voice]` error, so the file
+    was read:
+
+    ```text
+    0 error(s), 0 check(s) in 1 file(s) scanned. Heuristic: confirm each line against the guide.
+    ```
+
+  - `contrast.py text surface-0` (exit 0):
+
+    ```text
+    text on surface-0: 13.57:1 (minimum 6:1) PASS
+    ```
+
+  - _Reviews._ The `ux-reviewer` agent found nothing must-fix, and five should-fix points and six
+    nits, all applied: the three-fold claim, the flight path marker's give-way, the staleness
+    reason, the `~` question's third alternative, `BASELINE`'s pad, the row's ladder, the pad's
+    staleness, `AT`'s row, the field widths, the survey edge, and two citations. The
+    `science-checker` agent found nothing must-fix, and six should-fix points and five nits, all
+    applied: "what it will bear", the slope factors' table, the forms without figures, Viking's
+    depth, the friction's kinds, the flight path marker's place, and the figures' rounding. It
+    could not reach NAVFAC DM-7.02 or Vesić's primaries, which stand as `properties.rs` and
+    `bearing.rs` cite them.
+
 ### R10.T13 Guide drafts for the owner
 
 Drafts, in one pass, of what this plan adds to R02's nine items: `±` as one standard deviation of an
@@ -2900,3 +3283,26 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     higher. The spans are only checks: P14.T49.c computes A_N from Hapke directly.
   - _L(α) for bright particulate forms._ The Moon's profile scaled by L(0), as built; McEwen
     1991's insensitivity is shown for typical surfaces, not for w → 1.
+- **Deferred findings (2026-10-13 rule) (R10.T12's drafts)** (lane 11; recorded, not ruled, but
+  for the slope, ruled on the issue), each leaving the algorithm and the contracts as they are now.
+  - _The flight path marker has no guide row._ R02.T12.c's marker, a circle 0.375 rem in radius
+    with 0.5 rem wings and a 0.3125 rem fin in `--text` (`view/wireframe/symbology.ts`), is drawn
+    on every view with an own ship whose velocity points into the picture, but no row or bullet of
+    the guide names it, nor a legend entry as `TICKS TARGET` has. T12's Draft 2 counts it among
+    the marks the tripod must not resemble, and gives way to it. Lean: a `Legend` row at the next
+    guide edit, R02's.
+  - _The capacity steps at a layer's edge._ On lunar regolith at 1.62 m/s² the capacity is
+    353 kPa under a 0.29 m pad and 4,202 kPa under 0.30 m, and 109 kPa under 0.14 m and 318 kPa
+    under 0.15 m, since the layer at one width's depth passes there from one of the Sourcebook's
+    intervals to the next (`shear_layer_at`; computed from the formula, and checked again by the
+    lane's science check). A pad near those widths reads one side or the other. Draft 1's fixed
+    1.0 m pad meets neither; a `PAD WIDTH` selector would (its question on the pad).
+  - _A fifteenth friction point._ The lane's science check, reading Liefferink et al. 2021's Fig. 1
+    by eye, saw a fifteenth point, partly hidden, near −2 °C at about 0.15, which `STEEL_ON_ICE`'s
+    fourteen leave out; it would move the interpolation by less than 0.01. Unverified here; for
+    main's list, beside the later T1 follow-up.
+  - _No slope in the capacity._ `bearing_capacity` is a level footing's on level ground, so on a
+    slope it overstates what the ground bears. Ruled 2026-10-14 by main, on the issue: T1.a stays
+    as built, and Draft 1's row says so. Vesić's ground-inclination factors, and the footing-base
+    tilt factors that go with them, go to a later T1 follow-up, which adds the slope argument and
+    its test before T12 builds the readout.
