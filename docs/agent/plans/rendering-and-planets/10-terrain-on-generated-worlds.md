@@ -175,9 +175,15 @@ pub const THIN_ATMOSPHERE_PRESSURE: Pascals;  // 30 kPa, the sim's, for `Dust` (
 pub const CLIFF_SLOPE: Radians;            // 40°, Design note 1
 pub const TRANSITION_HALF_WIDTH: Radians;  // 5°, the visual blend band either side
 pub const SNOW_SHED_SLOPE: Radians;        // 60°, Schaerer 1977, p. 286 (T1.a, as built)
-/// Presentation weights over a per-patch palette of up to eight materials, each a (form, entry)
-/// pair (Design note 3).
-pub struct ClassWeights { /* palette: [Option<Material>; 8], weights: [u8; 8] summing to 255 */ }
+/// Presentation weights at a point over up to eight materials, each a (form, entry) pair (Design
+/// note 3); a patch's palette is T6.a's `TerrainLayers`, gathered from its vertices'. As built by
+/// T2 (Risks, "Deviations in T2, as built"): each slot a `GroundMaterial`, the form always and the
+/// entry where the palette names one, as `material_at` answers; slots in falling weight, ties by
+/// discriminant, the first the largest (at the finest level, strictly, the authoritative class).
+/// A texel of band level n is a cell of quadtree level n + 6.
+pub struct ClassWeights { /* palette: [Option<GroundMaterial>; 8], weights: [u8; 8] summing to 255 */ }
+// palette, weights, iter, weight(material), largest, len, is_empty; MAX_CLASSES 8,
+// WEIGHT_TOTAL 255, SLOPE_LAG 5 cm (the omitted structure function's small-lag slope)
 pub fn weights_at<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
     at: FaceUv, level: BandLevel) -> Result<ClassWeights, QueryHeightError>;
 /// The per-body scale on class albedos that makes the body's geometric albedo p (Design note 8).
@@ -238,9 +244,10 @@ R09's level-keyed closed forms, which T5 added to R09's `Synthesiser` (`omitted_
 ### `bake`
 
 ```rust
-/// What this plan adds to R05's `PatchBake`.
+/// What this plan adds to R05's `PatchBake`. The palette is the union of the patch's vertices'
+/// `ClassWeights` materials, `GroundMaterial`s as T2 built them (R10.T2's record).
 pub struct TerrainLayers {
-    /* palette: [Option<Material>; 8], weights: Vec<[u8; 8]> (65 × 65),
+    /* palette: [Option<GroundMaterial>; 8], weights: Vec<[u8; 8]> (65 × 65),
        survey_mask: Vec<u8> (65 × 65: 255 surveyed, 0 not), horizon: HorizonMap,
        bound: Metres, sigma: Metres, extra: Vec<scatter::ExtraLayer> (R11's, through `BakeHook`) */
 }
@@ -3844,3 +3851,277 @@ Ground(SlantRange), NoGround, NotSurveyed }` in place of `Option`, so that T12 c
     closed per sample of cells, 0.457 against 0.0063 m² on the Mars-like world at 1 km, 0.072
     against 0.86 m² on the Moon-like world at 1 km, and 0.048 against 6.45 m² on the Ceres-like
     world at 1 km.
+- **Deviations in T2, as built** (2026-10-14; lane r10-weights, on R10.T5 at `1a56ee17`, with
+  R10.T1.b at `7e1537eb`, and merged with R09.T7.h at `742aa3e6` before its figures and goldens
+  were taken).
+  - _Files._ `crates/hyperion-surface/src/material/weights.rs` with `weights/tests.rs` and
+    `weights/golden.rs`; `material/mod.rs`'s exports, `TRANSITION_HALF_WIDTH`'s doc and a
+    compile-time check of the slope thresholds; `tests/panics.rs`'s `weights` module; eight goldens
+    in `tests/golden/weights/`. T1.b's `material/classify.rs` is refactored, its answers unchanged
+    (below). No `crates/hyperion-sim/tests/surface_weights_worlds.rs` yet: its `sample_worlds()`
+    cases follow R09.T16 as a later commit under T2's ID (main's ruling), and the synthetic
+    worlds' agreement lives in the library, as T1.b's and T3's goldens do.
+  - _The signature._ `ClassWeights` holds `[Option<GroundMaterial>; 8]`, not Provides'
+    `Option<Material>`: a slot is the form always and the entry where the palette names one, as
+    T1.b's `material_at` answers, so a body whose palette names no substance still has its forms
+    weighted (signoff-9 §17.5's `MATERIAL REGOLITH · —`), and `None` marks an empty slot. Getters:
+    `palette`, `weights`, `iter`, `weight(material)`, `largest`, `len` and `is_empty`. Public
+    constants: `MAX_CLASSES` (8), `WEIGHT_TOTAL` (255) and `SLOPE_LAG` (5 cm).
+  - _A point's palette, not a patch's._ `ClassWeights` is one point's up to eight materials, in
+    falling weight, ties in rising class code and then entry, so the first is the largest weight
+    with ties broken by discriminant, and a material's slot differs between neighbouring vertices.
+    The palette of up to eight a patch keeps, with each vertex's bytes over it, is T6.a's
+    `TerrainLayers`, gathered from its vertices' materials; Provides' `TerrainLayers.palette` is
+    now `[Option<GroundMaterial>; 8]` for the same reason as `ClassWeights`'. A patch needing more
+    than eight is not handled at run time: the test names it. A material whose weight rounds to no
+    byte is not held.
+  - _The finest level_ (`finest_level`, or deeper): `material_at`'s class, blended linearly over
+    `TRANSITION_HALF_WIDTH` either side of both slope thresholds, `CLIFF_SLOPE` and
+    `SNOW_SHED_SLOPE` (their bands, 35–45° and 55–65°, do not meet, which `material/mod.rs` now
+    checks at compile time), for the image only: at a slope θ within a band about θ₀ the steeper
+    ground's material takes (θ − θ₀ + 5°) ÷ 10° of the weight. The rules on the height (the water
+    surface, the snow line, the melt and the arid bound) are not blended: the plan names a width
+    for the slopes alone. Design note 3's "ties broken by discriminant" orders the slots at
+    coarser levels; at the finest level the authoritative class is kept first whatever its share,
+    wins the largest remainder's ties, and then takes bytes from its largest rival until its byte
+    is strictly the largest, so no reader's tie-break can choose another (an even blend at 40°
+    gives it 128 to 127). `TRANSITION_HALF_WIDTH`'s doc names both thresholds; the snow's band is
+    presentation alone (the science check).
+  - _A coarser level n_ (Design note 3, as `weights_at`'s documentation gives it). The finest
+    ground is the level's plus what the level leaves out:
+    - the height, the level's plus a normal deviate of R09's level-keyed `omitted_variance`
+      (R10.T5's, as ruled, with R09.T7.h's sharpening of the craters a level keeps; the two
+      closed forms kept in `SynthCache`'s material part by cell and level, `classify::kept_forms`,
+      since T7.h they cost 50 to 150 µs a call), asked at each band between the heights
+      where a rule's condition
+      changes (`Site::height_breaks`: the cell's water surface, and where the temperature by the
+      lapse rate crosses the crust entry's transition, the snow entry's and Köppen–Geiger's arid
+      bound), at the mean where it lies in the band, so that with no variance it is the level's
+      own height (a test scans 24 km of heights on 30-odd cells a body and finds every change of
+      material at a listed break);
+    - the slope, the level's tangential gradient plus an isotropic normal deviate whose variance
+      along each tangent axis is `omitted_structure_function` at `SLOPE_LAG` over the lag
+      squared, the small-lag slope (tested against half the lag within 1%); the probability that
+      the finest slope's tangent, the gradient scaled by ρ ÷ (ρ + h) as R05's `surface_normal`
+      takes it, exceeds tan 40° and tan 60° is the Rice distribution's tail, Marcum's Q₁ (Rice
+      1945, §3.10, eq. 3.10-11), integrated in closed form along one axis and by panels of
+      eight-point Gauss–Legendre along the other (`exceedance`; tested within 10⁻⁶ against the
+      Rayleigh tail and an independent polar sum, and pinned bit for bit in `kernels.golden`);
+    - a partial ice share's place, the point's shadowed-ground index at level n against the cell's
+      cut at the finest level, plus the index the level leaves out, taken from the cell's own 256
+      grid points, the finest index less the level's at each (`classify::ice_share_at`, kept in
+      `SynthCache`'s cuts beside the cut, by cell, level and ice code). As first built it was a
+      normal deviate of the closed forms' variance through the cut's scales, which put too much of
+      a small share's ice far from the cut, the index being heavy-tailed (T1.b's record): on the
+      cold-trapped pole at 0.2, 0.27 of a level-4 texel's weight against 0.18 counted, and 0.34
+      against 0.20 at level 2. The empirical form is the cell's share where the level resolves
+      nothing below the cells, and the point's own answer where it leaves nothing out;
+    - the three independent, each combination a case of the classifier's rules (`Site::facts`)
+      weighted by its probability, the weights the cases' materials summed. Where the level leaves
+      nothing out (from the band limit's level, which is coarser than the finest on the Ceres-like
+      world) the weights are the class at the point, all of the weight (tested);
+    - the cell's facts are the texel centre's, and a channel's bed is one of the channel levels
+      level n evaluates, at the centre (deferred findings, below).
+  - _At most eight a point._ The likeliest eight are kept and the rest of the weight spread over
+    them in proportion, then made bytes summing to 255 by the largest remainder. No point of the
+    goldens holds more than four materials, and no patch of the tests more than three.
+  - _The texel._ A texel of band level n is one vertex spacing of the level's lattice about a
+    vertex, a cell of quadtree level n + 6, which is what R05's bake reads at a patch's 65 × 65
+    vertices. So R07's class map at quadtree level L (its "N = 2^L" texels a face) takes each
+    texel's weights at band level L − 6, at the cell's centre, as T10.d's "`weights_at` at the
+    cell's centre" has it once the level is so read; the plan's "level 4" for the class map is band
+    level 4, a map at L = 10. Design note 8's "a few hundred kilobytes" is a map at L = 6, band
+    level 0. This is the lane's reading, asked of "main" (below); the agreement at level 4 is over
+    level 4's texels, 1/1,024 of a face.
+  - _The classifier, split._ T1.b's `Facts::at` becomes `Point::at` over a cell's `Site` (the
+    climate's reads, the regime, the basin, the entries and the sea-level temperatures) and
+    `Site::facts(h, steepness, in_ice, channel_floor)`, with `Steepness` (loose, cliff, shed),
+    `IcePlacement`, `finest_band`, `cos_slope`, `on_channel_floor`, `ice_share_at` and `kept_forms`, and
+    `koppen_offset_mm` split out of `is_arid`, all crate-private. Every comparison is the one it
+    was, so `material_at`'s goldens pass unchanged (the reviews traced each). The cell's
+    neighbours are now read before the ice cut's grid and the channels, so in a view lacking
+    several cells the first one named may differ; the error is the same kind.
+  - _The agreement_, as the plan's test measures it: at levels n − 1 to n − 6 from the finest, 64
+    points a texel (an 8 × 8 grid of its steps' centres), and at the class map's level 4, 4,096
+    (64 × 64), against `material_at`; the measure is a texel's total variation, ½ Σ |weight ÷
+    255 − fraction| over the materials of either, the share of the texel given to the wrong
+    material, and every texel's bytes are checked to sum to 255. Half the texels are at random
+    points of the cells the weights find hardest (belts on dry land without ice, partial ice, sea
+    under 300 m deep, the channels' trunks, the coarse craters' rims) and half at random over the
+    sphere. A failure names the level's five worst texels and their cells. The fast tests take 24
+    texels a level and 2 at level 4 a world; the slow ones
+    (`material_weights_agree_with_the_classes_counted_over_a_thousand_texels_*`,
+    `#[ignore = "slow: …"]`, by name) a thousand of each. The slow figures (slow-test profile, 3
+    threads, load 5–12, on R09.T7.h's closed forms), mean total variation over a level's thousand
+    texels, the worst
+    texel's, and the mean over its mixed texels, those with more than one material in the weights
+    or the points, with their count:
+
+    | World      | Level      | Mean   | Worst  | Mixed: mean (count) |
+    | ---------- | ---------- | ------ | ------ | ------------------- |
+    | Earth-like | 18 (n − 1) | 0.0022 | 0.4688 | 0.1875 (12)         |
+    | Earth-like | 17         | 0.0070 | 0.9294 | 0.1617 (43)         |
+    | Earth-like | 16         | 0.0078 | 0.7647 | 0.1214 (64)         |
+    | Earth-like | 15         | 0.0118 | 0.7453 | 0.1293 (91)         |
+    | Earth-like | 14         | 0.0145 | 0.5347 | 0.1284 (113)        |
+    | Earth-like | 13 (n − 6) | 0.0108 | 0.5104 | 0.0907 (119)        |
+    | Earth-like | 4          | 0.0351 | 0.7871 | 0.0700 (501)        |
+    | Moon-like  | 16 (n − 1) | 0.0002 | 0.2188 | 0.2188 (1)          |
+    | Moon-like  | 15         | 0.0014 | 0.8000 | 0.2831 (5)          |
+    | Moon-like  | 14         | 0.0023 | 0.9451 | 0.1757 (13)         |
+    | Moon-like  | 13         | 0.0023 | 0.7969 | 0.2252 (10)         |
+    | Moon-like  | 12         | 0.0016 | 0.3928 | 0.0893 (18)         |
+    | Moon-like  | 11 (n − 6) | 0.0008 | 0.2344 | 0.0363 (23)         |
+    | Moon-like  | 4          | 0.0062 | 0.6914 | 0.0412 (151)        |
+    | Ceres-like | 15 (n − 1) | 0      | 0      | (0)                 |
+    | Ceres-like | 14, 13     | 0      | 0      | (0)                 |
+    | Ceres-like | 12         | 0.0003 | 0.2118 | 0.0865 (3)          |
+    | Ceres-like | 11         | 0.0000 | 0.0039 | 0.0039 (1)          |
+    | Ceres-like | 10 (n − 6) | 0      | 0      | (0)                 |
+    | Ceres-like | 4          | 0.0000 | 0.0100 | 0.0014 (12)         |
+    | Mars-like  | 17 to 12   | 0      | 0      | (0)                 |
+    | Mars-like  | 4          | 0.0034 | 0.0090 | 0.0038 (14)         |
+
+    The Earth-, Moon- and Ceres-like cases passed in about 40 minutes, three at once; before
+    R09.T7.h the Earth-like figures were the same and the Moon- and Ceres-like ones within a few
+    ten-thousandths in the mean. The Mars-like case, in the first run, did not finish in its 3 h
+    timeout: its finest points cost about
+    2 ms or more each away from a cache, of which its class-map level has 4.1 × 10⁶ (not profiled;
+    the screened small craters' draws, about 80 µs a crater by R09's "Deviations in T7.b", are
+    the likely cost). Its row is the dev profile's measure of 200 texels a level and 16 at level
+    4, chosen by the same rule, before R09.T7.h; the thousand-texel run waits on main's ruling on
+    its cost
+    (deferred findings, "The slow cases' cost"), the world being dust but for its trunks' beds.
+
+    The cold-trapped pole (T1.b's field, partial water ice poleward of 85°, the synthetic worlds
+    having none on land), 16 texels a level of 64 points in its polar cells, and 24 of 256 points
+    at level 4, nearly all mixed, held to the plan's ten points in the total variation at
+    n − 1 to n − 6 and, at every level, in the ice's mean weight against its mean counted share
+    (at level 4, where nothing below the cells is resolved, a texel's own count scatters about the
+    cell's share). At a share of 0.2: total variation 0.020, 0.042 and 0.041 at levels 16, 14 and
+    11, and the ice's weight 0.31, 0.21, 0.24 and 0.23 against 0.29, 0.24, 0.23 and 0.25 counted
+    there and at level 4 (whose total variation is 0.11). At 0.6: 0.048, 0.087 and 0.044, and
+    0.69, 0.58, 0.50 and 0.69 against 0.74, 0.57, 0.53 and 0.66 (level 4's 0.13).
+
+  - _Acceptance_, as built:
+    - `cargo test -p hyperion-surface --lib material::weights` (the goldens alone:
+      `--lib material::weights::golden`);
+    - `cargo test -p hyperion-surface --features testing --test panics weights` (1);
+    - the four slow agreement cases by name, `cargo test -p hyperion-surface --features testing
+--profile slow-test --lib material::weights::tests::material_weights_agree_with_the_classes_counted_over_a_thousand_texels
+-- --ignored`;
+    - the wasm targets under `just test-wasm-fast`;
+    - the plan's `just test-slow -E 'binary(surface_weights_worlds)'` waits for the
+      `sample_worlds()` binary. The four slow cases also run in the slow pass's native and
+      wasip1 holds (`--run-ignored only`), at the times above natively.
+  - _Tests_ (`material::weights::tests`, `material::weights::golden`, `tests/panics.rs`'s
+    `weights`):
+    - the exceedance: the Rayleigh tail at a zero mean, an independent polar sum over 70 cases
+      (means 0.05–2, variances 10⁻⁴–1, both thresholds), monotone in the threshold and the mean;
+    - the blend's shares at nine slopes; the authoritative class's largest byte, ties included,
+      and against a larger rival; eight kept of eleven, summing to 255, a share of no byte dropped;
+      the height cases summing to one, each strictly inside a band of its own;
+    - every change of a material with the height at a listed break; the steepness cases summing to
+      one and tending to the level's own steepness;
+    - at the finest level and one deeper, on every synthetic world at 400 points (two in each of up
+      to 50 hard cells, then random), the largest weight is `material_at`'s class, strictly, and
+      the weights sum to 255;
+    - from the band limit's level, the weights are the class;
+    - order and cache independence (`assert_order_independent`, a shared and a fresh cache), and
+      on the cold-trapped pole with `material_at` interleaved, which keeps the same cut;
+    - a cell not held is not surveyed, at three levels;
+    - the slope lag is short enough on every body;
+    - the agreement, fast and slow, on the four bodies and on the cold-trapped pole;
+    - a patch's 65 × 65 vertices need no more than eight materials, at four levels a body;
+    - the goldens and their header; one `should_panic` (a (u, v) that is not finite).
+  - _The goldens_ (main's ruling: header 21, a subdirectory of their own), eight:
+    - `weights/<world>.golden`, one a synthetic world: 250 points (up to 30 each on dry-land
+      belts, in partial ice, in the shallowest sea and under coarse craters' rims, then random),
+      each at the finest level, n − 1, n − 3, n − 6, n − 10 and level 4, each slot its class code,
+      entry and byte;
+    - `weights/cold_trap.golden`: 40 points of the cold-trapped pole at 0.2, at the same levels,
+      the only golden whose weights read the ice's cut;
+    - `weights/kernels.golden`: `exceedance` over 216 cases (the reach's early return and the
+      panels' bound among them), the normal distribution, the height cases and the blend, bit for
+      bit, since the bytes show a float's drift only where it crosses a byte.
+
+    The weights are presentation, but the client's WebAssembly workers bake them, so the goldens
+    hold the targets to one blend. A `native_only` test holds `weights/` to `GENERATOR_VERSION`.
+    A change to the weights alone is a client change (Generator version, above): it re-blesses
+    `weights/` at the version in force with no bump, the commit saying so, an exception
+    `golden_diff.py` does not know (asked of "main", below). Any later change to R09's closed
+    forms or the classifier before P14.T48.e re-blesses `weights/` too; R09.T7.h landed before
+    them, so they are taken with its sharpening.
+
+  - _The cost_ (provisional: the dev profile at `opt-level = 2`, one thread, the Earth-like world,
+    a level's patch's vertices in order from one cache, load about 5, with R09.T7.h and the forms
+    kept by cell and level): `weights_at` 26 µs a vertex at the finest level, 21–22 µs at n − 1
+    to level 12 and 13 µs at level 4, against the level's warm `height_at` 20, 15 to 9 and
+    0.5 µs. A partial-ice cell adds its grid's 512 heights once a level. Most of the
+    rest is the per-cell site, asked afresh at each vertex (deferred findings). Without the kept
+    forms each coarse vertex would pay R09.T7.h's 50–150 µs twice. T6.a's bench states it with
+    and without the weights.
+  - _Generator version._ Untouched (21): the weights are presentation, and the classifier's
+    answers do not move.
+  - _Closed sets, for the composition audit._ None new: the weights read the classifier's rules
+    and the palette's entries as T1.b built them.
+- **Questions for "main" (R10.T2)** (each with the lane's lean, built to it).
+  - _What a class-map texel is._ Lean: as above, a texel of band level n is a cell of quadtree
+    level n + 6, so T10.d calls `weights_at` at a map cell's centre at band level L − 6, and
+    Design note 8's "level 4 or shallower" bounds the map at L = 10. The alternative, a texel at
+    level 4 being the quadtree cell (f, 4, i, j), needs a footprint argument or T10.d averaging a
+    cell's vertices, since one centre sample cannot stand for a 600 km cell.
+  - _The weights goldens and `golden_diff.py`._ Lean: record the exception beside `wire/`'s in
+    the sim-determinism skill (a weights-only change re-blesses `tests/golden/weights/` at the
+    version in force with no bump), and add `weights/` to the re-bless list of any later change to
+    R09's closed forms or the classifier before P14.T48.e.
+- **Deferred findings (2026-10-13 rule)** (R10.T2; recorded, not ruled; each leaves the algorithm
+  and the contracts as they are).
+  - _The synthetic worlds barely mix._ Away from the Earth-like world's belts, snow lines and
+    coasts every texel is one material: the Mars-like world is dust but for its trunks' beds, the
+    Moon- and Ceres-like worlds regolith but for a few bedrock points under coarse rims, and none
+    has a partial ice share on land (the cold-trapped pole stands in for it). So the agreement
+    there is near zero by construction, and `sample_worlds()` (R09.T16), whose coarse pass places
+    ice, frost and provinces, is the real test.
+  - _A mixed texel's own error_ is up to 28% of it in the mean, 7–19% on the Earth-like world
+    (the table's last figures): the weights are the expectation given the level's ground at the
+    texel's centre, while the omitted ground's longer wavelengths, up to about four of the texel's
+    widths, are coherent over it, so a texel's realised fraction scatters about that expectation.
+    The mean over all texels is within the plan's ten points at every level.
+  - _The slow cases' cost._ The Mars-like case ran past its 3 h timeout natively (above), and the
+    slow pass runs the four natively and on wasip1 (`--run-ignored only`), where it would be
+    slower still. Lean, for "main": hold the class-map level's thousand texels on the Earth-,
+    Moon- and Ceres-like worlds and take a hundred on the Mars-like one, or split the case out of
+    the pass's holds; the plan's count stands until main rules.
+  - _The texel's own spread._ The level's ground is taken as its centre's over the whole
+    footprint. Adding |∇h|² s² ÷ 12 (a uniform square of side s) to the height's variance, and a
+    curvature term to the slope's, would carry the footprint's own spread across a threshold, most
+    of a straddling texel's error at n − 1, where the level leaves almost nothing out.
+  - _A ridged octave's local slope._ R09 weights each ridged octave by the ridge of the octave
+    above it, the last the level keeps, so the first omitted octave's local slope variance swings
+    from 0 to about 1.9 times its cell mean with the kept octave at the point; the weights use the
+    cell mean (the science check). Another face of "Coarse weights assume Gaussian slopes".
+  - _The ice index reads the height and the slope_, which the weights take as independent of it:
+    in a partial cell the ice lies in hollows, where the height is low, so the snow line's and the
+    ice's cases are correlated. A joint distribution of the height and the index over the cell's
+    grid would carry it.
+  - _Channel beds of finer channel levels_ are not counted at a coarse level: its texels are wider
+    than those beds, and a texel's centre on one would weigh the whole texel. Their expected share
+    is the levels' Σ ρ_k × 2h_k (groove length a unit area times bankfull width), which R09's
+    channel closed form already computes per level (`incision::level_terms`' density and half
+    width, crate-private in R09's file); an accessor there would let T2 add it as a probability.
+  - _A class-map texel takes its centre's cell._ At level 4 a texel is a quarter of an Earth's
+    coarse cell across, so one straddling a coast, a crust's edge or a climate's step takes one
+    cell's facts. A texel's corners' cells, weighted by area, would carry it.
+  - _The per-cell site is asked at every vertex._ A bake's 4,225 vertices lie in a few cells; the
+    closed forms are kept by cell and level, but the site (the climate's months, the basin's
+    neighbours, the breaks) is built afresh at each, which a memo beside the forms would spare.
+    R09.T7.h's own lever, tabulating the kept octaves' sharpening by band level, would make the
+    forms' first call in a cell cheap too.
+  - _The image changes blend at the band limit's level._ Where a level coarser than the finest
+    leaves nothing out (the Ceres-like world's level 15), its weights are the unblended class,
+    while the finest level blends 35–45° and 55–65°, so those slopes sharpen as the level of
+    detail coarsens by one. For T10's by-hand check.
+  - _Gaussian slopes_ (the plan's Risks, "Coarse weights assume Gaussian slopes"): the agreement
+    holds on the synthetic worlds' belts; ridged and cratered ground on `sample_worlds()` is the
+    remaining check.

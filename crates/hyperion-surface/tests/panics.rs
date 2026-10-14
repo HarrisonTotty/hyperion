@@ -1326,3 +1326,33 @@ mod reading {
         );
     }
 }
+
+/// R10.T2's class weights: a point that is not finite is refused, before the level is read.
+mod weights {
+    use hyperion_base::rng::DetailSeed;
+    use hyperion_surface::cube::{Face, FaceUv};
+    use hyperion_surface::material::weights_at;
+    use hyperion_surface::synth::{BandLevel, SynthCache, Synthesiser};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    use super::level_five_field;
+
+    #[test]
+    #[should_panic(expected = "a direction must be finite and non-zero, got [1.0, NaN, 0.0]")]
+    fn the_weights_at_a_point_that_is_not_finite_are_refused() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let at = FaceUv {
+            face: Face::PosX,
+            u: f64::NAN,
+            v: 0.0,
+        };
+        let _ = weights_at(
+            &synth,
+            &mut SynthCache::new(),
+            at,
+            BandLevel::new(4).unwrap(),
+        );
+    }
+}
