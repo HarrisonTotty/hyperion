@@ -1020,11 +1020,20 @@ fn the_level_keyed_forms_count_what_each_level_leaves_out() {
                     bits(channels.channels().value()),
                     "{at}"
                 );
-                // The small-crater octaves the level does not keep, each whole.
-                let left_out = set.craters_through().map_or(0, |k| usize::from(k) + 1);
-                let craters: f64 = octaves[left_out..]
+                // The small-crater octaves the level keeps, each by its sharpening from the
+                // level's band to the band limit's, and those it does not keep, each whole at the
+                // band limit's fillet (R09.T7.h).
+                let band = crate::synth::craters::band_half_width(&header.figure(), level);
+                let craters: f64 = octaves
                     .iter()
-                    .map(|o| o.variance().value())
+                    .enumerate()
+                    .map(|(k, octave)| {
+                        if set.keeps_crater_octave(octave.index()) {
+                            synth.craters().octaves().sharpening(k, band).variance_m2
+                        } else {
+                            octave.ground_variance().value()
+                        }
+                    })
                     .sum();
                 assert_close(omitted.craters().value(), craters, &at);
                 // The coarse rims at the level's own band.

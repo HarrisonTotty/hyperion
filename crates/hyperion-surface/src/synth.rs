@@ -338,11 +338,11 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     /// at which it counts what the level leaves out, since a level evaluates each contribution by
     /// its own scale ([`levels`]): the structural octaves from the first degree of the first octave
     /// the level does not evaluate; the channels below the last evaluated level's mean cell width;
-    /// the small craters below the last evaluated octave's smallest diameter; and the coarse rims
-    /// at the level's `λ_n`, the half of which is its fillet. It is zero from the band limit's
-    /// level, and at a level that evaluates none of them it is the whole variance below the cell.
-    /// The small craters' part does not yet count the sharpening of the octaves the level keeps,
-    /// from its fillet to the band limit's (R09.T7.h).
+    /// and the coarse rims at the level's `λ_n`, the half of which is its fillet. The small
+    /// craters count each octave the level keeps by its sharpening from the level's fillet to the
+    /// band limit's, and each it leaves out whole at the band limit's fillet (R09.T7.h; the
+    /// [`craters`] module's closed forms). It is zero from the band limit's level, and at a level
+    /// that evaluates none of them it is the whole variance below the cell.
     ///
     /// # Panics
     ///
@@ -350,26 +350,24 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     #[must_use]
     pub fn omitted_variance(&self, cell: PatchKey, level: BandLevel) -> Option<UnresolvedVariance> {
         let field = self.field;
-        let cuts = levels::LevelCuts::of(
-            field.header(),
-            self.craters.octaves(),
-            self.level_set(level),
-        );
+        let set = self.level_set(level);
+        let cuts = levels::LevelCuts::of(field.header(), set);
         let relief = relief::relief_variance_from(field, cell, cuts.relief_degree)?;
         let channels = channels::unresolved_channel_variance(field, cell, cuts.channels)?;
         Some(UnresolvedVariance {
             relief,
             channels,
-            craters: self.craters.octaves().unresolved_variance(cuts.craters),
+            craters: self.craters.octaves().omitted_variance(set),
             rims: craters::rims::unresolved_rims(field, cell, cuts.rims)?,
         })
     }
 
     /// The structure function at a lag of `lag` of what band level `level` leaves out of the
-    /// finest level's ground in `cell`, square metres: the contributions' structure functions at
-    /// [`omitted_variance`](Self::omitted_variance)'s cuts, summed in its order (added by
-    /// R10.T5); `None` where the view does not hold the cell. Each tends to twice its share of
-    /// that variance at lags long against its wavelengths.
+    /// finest level's ground in `cell`, square metres: the contributions' structure functions as
+    /// [`omitted_variance`](Self::omitted_variance) takes them, at its cuts and the small craters'
+    /// octaves kept and left out, summed in its order (added by R10.T5; R09.T7.h); `None` where
+    /// the view does not hold the cell. Each tends to twice its share of that variance at lags long
+    /// against its wavelengths.
     ///
     /// # Panics
     ///
@@ -382,14 +380,11 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
         lag: Metres,
     ) -> Option<SquareMetres> {
         let field = self.field;
-        let cuts = levels::LevelCuts::of(
-            field.header(),
-            self.craters.octaves(),
-            self.level_set(level),
-        );
+        let set = self.level_set(level);
+        let cuts = levels::LevelCuts::of(field.header(), set);
         let relief = relief::relief_structure_from(field, cell, cuts.relief_degree, lag)?;
         let channels = channels::channel_structure_function(field, cell, cuts.channels, lag)?;
-        let craters = self.craters.octaves().structure_function(cuts.craters, lag);
+        let craters = self.craters.octaves().omitted_structure_function(set, lag);
         let rims = craters::rims::rims_structure_function(field, cell, cuts.rims, lag)?;
         Some(relief + channels + craters + rims)
     }
@@ -496,10 +491,11 @@ impl SynthCache {
 ///
 /// "Wavelengths shorter than λ" means, for each contribution, its own placement: the structural
 /// octaves' spherical-harmonic degrees whose wavelength 2πR ÷ l is shorter than λ; a channel level
-/// counted from its mean cell's width (none) to twice it (all); a small-crater octave from the
-/// smallest diameter it keeps (none) to its upper one (all); and the coarse rims' sharpening finer
-/// than ½ λ, held to the coarse band. A band level evaluates each by its own scale, so what it
-/// leaves out is more than the variance at its `λ_n`, and the level-keyed form,
+/// counted from its mean cell's width (none) to twice it (all); a small-crater octave counted
+/// whole at the band limit's fillet from the smallest diameter it keeps (none) to its upper one
+/// (all), and the rest of it by its sharpening finer than ½ λ (R09.T7.h); and the coarse rims'
+/// sharpening finer than ½ λ, held to the coarse band. A band level evaluates each by its own
+/// scale, so what it leaves out is more than the variance at its `λ_n`, and the level-keyed form,
 /// [`Synthesiser::omitted_variance`], counts it (R10.T5).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct UnresolvedVariance {

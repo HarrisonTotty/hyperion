@@ -13,11 +13,14 @@ use hyperion_testkit::stats::{ALPHA, assert_p_value, assert_poisson_count, chi_s
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen_test::wasm_bindgen_test as test;
 
+use hyperion_testkit::lcg::Lcg;
+
 use super::*;
 use crate::craters::{CraterParamsParts, TargetClass};
 use crate::cube::xyz_to_face_uv;
 use crate::field::{CoarseField, PartialField};
 use crate::geometry::finest_level;
+use crate::synth::test_support::{random_cells, random_points_in};
 use crate::testing::{SyntheticWorld, synthetic_field};
 
 /// The detail seed the tests draw from.
@@ -1082,17 +1085,27 @@ fn the_unresolved_variance_falls_with_the_wavelength_to_zero_at_the_band_limit()
         let field = world(kind);
         let header = field.header();
         let octaves = CraterOctaves::new(header);
-        let whole: f64 = octaves.octaves().iter().map(|o| o.variance().value()).sum();
+        // Beyond every octave's diameters, the whole ground at its fillet (R09.T7.h).
+        let whole: f64 = octaves
+            .octaves()
+            .iter()
+            .map(|o| o.ground_variance().value())
+            .sum();
         assert!(whole > 0.0, "{kind:?}");
         let at = |w: f64| octaves.unresolved_variance(Metres::new(w)).value();
         assert!((at(1e9) / whole - 1.0).abs() < 1e-12, "{kind:?}");
+        // Non-increasing as the wavelength shortens, in steps of a fifth: the kept octaves'
+        // sharpening narrows with the band, and an octave's sharpening is no more than its ground.
         let mut previous = f64::INFINITY;
-        for w in [1e9, 1e5, 3e4, 1e4, 1e3, 1e2, 10.0, 5.0, 2.0, 0.5] {
+        let mut w = 1e9;
+        while w > 0.5 {
             let v = at(w);
-            assert!(v <= previous, "{kind:?} at {w} m: {v}");
+            assert!(v <= previous, "{kind:?} at {w} m: {v} after {previous}");
             previous = v;
+            w *= 0.8;
         }
         assert_same_bits(at(2.0), 0.0);
+        assert_same_bits(at(0.5), 0.0);
         // The field's per-contribution variance carries it, in every cell the view holds.
         let level = header.level().get();
         let cell = PatchKey::containing(level, [0.0, 0.6, 0.8]).unwrap();
@@ -1245,7 +1258,14 @@ fn the_closed_form_variance_is_its_dense_quadrature() {
     // The closed form's mean of g² over the ages against a dense sum, to 0.1%; and its octave
     // variance against 64 diameters drawn by the octave's own inversion at the midpoints of its
     // shares, each with that dense mean, to 2% (measured within 1.1%, the last, thinned octaves
-    // the farthest).
+    // the farthest). The same holds for the moments beside it (R09.T7.h): its ground variance, to
+    // 2%; and its sharpening's variance and slopes at bands of a quarter and a half of its smallest
+    // diameter, where the levels that keep it fillet it, to 4%. Every octave's sharpening was
+    // measured within 0.4% but the widest, complex octaves' at half their smallest diameter, where
+    // the fillet's inner end crosses the floor's edge as the diameter varies, a kink between the
+    // eight nodes: 3.4% high on the Mars-like world's octave 0, 2.5% on the Ceres-like world's and
+    // 1.1% low on the Moon-like world's octaves 0 and 1 (plan R09, Risks, "Deferred findings
+    // (2026-10-13 rule)" of T7.h).
     for kind in [
         SyntheticWorld::MoonLike,
         SyntheticWorld::MarsLike,
@@ -1265,7 +1285,10 @@ fn the_closed_form_variance_is_its_dense_quadrature() {
             if octave.density().value() <= 0.0 {
                 continue;
             }
+            let bands = [0.25, 0.5].map(|f| Metres::new(f * octave.smallest().value()));
             let mut mean = 0.0;
+            let mut ground_mean = 0.0;
+            let mut sharpening = [(0.0, 0.0); 2];
             let mut kept = 0.0;
             for k in 0..64 {
                 let midpoint = (f64::from(k) + 0.5) / 64.0;
@@ -1288,15 +1311,406 @@ fn the_closed_form_variance_is_its_dense_quadrature() {
                 let shape = crater_shape(params, d);
                 let fresh = CraterProfile::filleted(shape, Metres::ZERO).square_moment();
                 mean += core::f64::consts::PI * rim * rim * fresh * dense_g2;
+                let ground = CraterProfile::filleted(shape, GROUND_FILLET);
+                ground_mean +=
+                    core::f64::consts::PI * rim * rim * ground.square_moment() * dense_g2;
+                for (sum, band) in sharpening.iter_mut().zip(bands) {
+                    let (heights, slopes) = sharpening_moments(&ground, band);
+                    sum.0 += core::f64::consts::PI * rim * rim * heights * dense_g2;
+                    sum.1 += core::f64::consts::PI * 0.5 * slopes * dense_g2;
+                }
                 kept += 1.0;
             }
-            let dense = octave.density().value() * 1e-6 * mean / kept;
-            let closed = octave.variance().value();
-            assert!(
-                (closed / dense - 1.0).abs() < 0.02,
-                "{kind:?} octave {}: {closed} against {dense}",
-                octave.index()
+            let per_m2 = octave.density().value() * 1e-6 / kept;
+            let at = format!("{kind:?} octave {}", octave.index());
+            for (what, closed, dense) in [
+                ("variance", octave.variance().value(), per_m2 * mean),
+                (
+                    "ground variance",
+                    octave.ground_variance().value(),
+                    per_m2 * ground_mean,
+                ),
+            ] {
+                assert!(
+                    (closed / dense - 1.0).abs() < 0.02,
+                    "{at}'s {what}: {closed} against {dense}"
+                );
+            }
+            let k = usize::from(octave.index());
+            for (band, (heights, slopes)) in bands.into_iter().zip(sharpening) {
+                let closed = octaves.sharpening(k, band);
+                if heights <= 0.0 {
+                    // The last octave's smallest craters keep the ground's fillet at both bands.
+                    assert_same_bits(closed.variance_m2, 0.0);
+                    continue;
+                }
+                for (what, closed, dense) in [
+                    ("sharpening", closed.variance_m2, per_m2 * heights),
+                    ("sharpening's slopes", closed.slope2, per_m2 * slopes),
+                ] {
+                    assert!(
+                        (closed / dense - 1.0).abs() < 0.04,
+                        "{at}'s {what} at a band of {band:?}: {closed} against {dense}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// ∫ f(x) 2x dx over [0, `reach`] by the midpoint rule on `panels` equal panels, blind to where a
+/// profile's pieces meet: the radial brute force.
+fn midpoint_radial(reach: f64, panels: u32, f: impl Fn(f64) -> f64) -> f64 {
+    let h = reach / f64::from(panels);
+    let mut total = 0.0;
+    for k in 0..panels {
+        let x = (f64::from(k) + 0.5) * h;
+        total += f(x) * 2.0 * x;
+    }
+    total * h
+}
+
+/// One crater's sharpening, `ground` less `level`, two fillets of one shape, over the plane: its
+/// ∫∫ h² dA, square metres, and ∫∫ (∂h ÷ ∂x)² dA along one axis, square metres, the slope by
+/// central differences of the two profiles' heights, by the midpoint rule on a `side` × `side`
+/// grid over the square that holds the crater's reach.
+fn planar_moments(ground: &CraterProfile, level: &CraterProfile, side: u32) -> (f64, f64) {
+    let shape = ground.shape();
+    let rim_m = 0.5 * shape.diameter().value();
+    let reach = 1.0 + shape.exterior_width();
+    let h = |x: f64, y: f64| {
+        let r = (x * x + y * y).sqrt();
+        ground.at(r).height_m - level.at(r).height_m
+    };
+    let step = 2.0 * reach / f64::from(side);
+    let eps = 1e-6;
+    let (mut heights, mut slopes) = (0.0, 0.0);
+    for i in 0..side {
+        let x = -reach + (f64::from(i) + 0.5) * step;
+        for j in 0..side {
+            let y = -reach + (f64::from(j) + 0.5) * step;
+            let here = h(x, y);
+            // Metres per rim radius.
+            let along = (h(x + eps, y) - h(x - eps, y)) / (2.0 * eps);
+            heights += here * here;
+            slopes += along * along;
+        }
+    }
+    // A grid cell is step² rim radii², step² R² m²; a slope per metre is along ÷ R.
+    (heights * step * step * rim_m * rim_m, slopes * step * step)
+}
+
+#[test]
+fn one_crater_s_sharpening_is_its_two_profiles_sampled() {
+    // One crater's sharpening moments, the ground's fillet against a level's, against brute force
+    // over the two profiles. Radially, by the midpoint rule on 2 × 10⁵ panels blind to their
+    // pieces: to 10⁻⁶ in the heights, and to 10⁻⁴ in the slopes, whose difference jumps where a
+    // level's fillet passes a floor's or a peak's edge. Over the plane, on a 400 × 400 grid with
+    // the slope along one axis by central differences, so that half the radial slope moment is a
+    // random direction's: to 5 × 10⁻³, the grid's own error on a fillet 16 cells wide (measured
+    // 2.2 × 10⁻³ at worst; R09.T7.h).
+    let params = *world(SyntheticWorld::MoonLike).header().craters();
+    let mut sharpened = 0;
+    // Each diameter and band, and whether the plane is sampled there too.
+    for (d, plane_d) in [(2.5, false), (63.0, true), (1e3, true), (25e3, false)] {
+        let shape = crater_shape(&params, Metres::new(d));
+        let rim_m = 0.5 * d;
+        let reach = 1.0 + shape.exterior_width();
+        let ground = CraterProfile::filleted(shape, GROUND_FILLET);
+        for (band_over_rim, plane_band) in [(0.02, false), (0.1, true), (0.5, true), (3.0, false)] {
+            let band = Metres::new(band_over_rim * rim_m);
+            let level = CraterProfile::filleted(shape, band);
+            let (heights, slopes) = sharpening_moments(&ground, band);
+            let at = format!("{d} m filleted over {band_over_rim} rim radii");
+            if level.fillet <= ground.fillet {
+                assert_same_bits(heights, 0.0);
+                assert_same_bits(slopes, 0.0);
+                continue;
+            }
+            let dh = |x: f64| ground.at(x).height_m - level.at(x).height_m;
+            let ds =
+                |x: f64| ground.at(x).slope_m_per_rim_radius - level.at(x).slope_m_per_rim_radius;
+            let radial_h = midpoint_radial(reach, 200_000, |x| dh(x) * dh(x));
+            let radial_s = midpoint_radial(reach, 200_000, |x| ds(x) * ds(x));
+            eprintln!(
+                "{at}: radial ratios {:.3e} {:.3e}",
+                heights / radial_h - 1.0,
+                slopes / radial_s - 1.0
             );
+            assert!(
+                (heights / radial_h - 1.0).abs() < 1e-6,
+                "{at}: {heights} against {radial_h}"
+            );
+            assert!(
+                (slopes / radial_s - 1.0).abs() < 1e-4,
+                "{at}: {slopes} against {radial_s}"
+            );
+            if plane_d && plane_band {
+                let (area_h, area_s) = planar_moments(&ground, &level, 400);
+                let closed_h = core::f64::consts::PI * rim_m * rim_m * heights;
+                let closed_s = core::f64::consts::PI * 0.5 * slopes;
+                eprintln!(
+                    "{at}: planar ratios {:.3e} {:.3e}",
+                    closed_h / area_h - 1.0,
+                    closed_s / area_s - 1.0
+                );
+                assert!(
+                    (closed_h / area_h - 1.0).abs() < 5e-3,
+                    "{at}: {closed_h} m⁴ against {area_h}"
+                );
+                assert!(
+                    (closed_s / area_s - 1.0).abs() < 5e-3,
+                    "{at}: {closed_s} m² against {area_s}"
+                );
+            }
+            sharpened += 1;
+        }
+    }
+    assert!(sharpened >= 10, "{sharpened} sharpened cases");
+}
+
+#[test]
+fn an_octave_s_sharpening_grows_with_its_band_to_no_more_than_its_ground_variance() {
+    // Zero to the bit at the ground's fillet and finer; then non-decreasing as the band widens, and
+    // never above the octave's ground variance, out past its widest crater's rim radius, where every
+    // fillet is held at min(1, a) rim radii: the condition that keeps the wavelength-keyed variance
+    // non-decreasing in the wavelength (decision-r10-t5-closed-forms.md §2).
+    for kind in WORLDS {
+        let octaves = CraterOctaves::new(world(kind).header());
+        for (k, octave) in octaves.octaves().iter().enumerate() {
+            let ground = octave.ground_variance().value();
+            for band in [0.0, 0.5, 1.0] {
+                let none = octaves.sharpening(k, Metres::new(band));
+                assert_same_bits(none.variance_m2, 0.0);
+                assert_same_bits(none.slope2, 0.0);
+            }
+            let mut previous = 0.0;
+            let mut band = 1.0;
+            while band < octave.diameters().upper().value() {
+                let s = octaves.sharpening(k, Metres::new(band));
+                let at = format!("{kind:?} octave {k} at a band of {band} m");
+                assert!(
+                    s.variance_m2 >= previous,
+                    "{at}: {} after {previous}",
+                    s.variance_m2
+                );
+                assert!(
+                    s.variance_m2 <= ground,
+                    "{at}: {} over {ground}",
+                    s.variance_m2
+                );
+                assert!(
+                    s.slope2 >= 0.0 && s.slope2.is_finite(),
+                    "{at}: {}",
+                    s.slope2
+                );
+                previous = s.variance_m2;
+                band *= 1.25;
+            }
+        }
+    }
+}
+
+/// `kind`'s band limit's level: the shallowest whose shortest wavelength is 2 m.
+fn band_limit_level(kind: SyntheticWorld) -> u8 {
+    let figure = world(kind).header().figure();
+    (0..=MAX_LEVEL)
+        .find(|&n| {
+            crate::synth::levels::shortest_wavelength(&figure, BandLevel::new(n).unwrap()).value()
+                <= BAND_LIMIT_M
+        })
+        .unwrap()
+}
+
+#[test]
+fn both_forms_are_their_octaves_sharpening_and_ground_and_vanish_at_the_band_limit() {
+    // The level-keyed form is Σ Φ_k(w_n) over the octaves the level keeps and Σ G_k over the rest,
+    // zero from the band limit's level; the wavelength-keyed one is Σ [s_k G_k + (1 − s_k)
+    // Φ_k(max(½ λ, 1 m))], zero at 2 m and below; and their structure functions take the rims' form
+    // for what is kept and the J₀ ring for what is left out (R09.T7.h).
+    for kind in WORLDS {
+        let header = world(kind).header();
+        let figure = header.figure();
+        let octaves = CraterOctaves::new(header);
+        let bounds = crate::synth::LevelBounds::of(header, &octaves);
+        let limit = band_limit_level(kind);
+        let all = octaves.octaves();
+        let ring = |o: &CraterOctave, b: f64| {
+            2.0 * o.ground_variance().value()
+                * (1.0 - math::j0(2.0 * core::f64::consts::PI * b / octave_wavelength(o)))
+        };
+        let rims = |s: Sharpening, b: f64| {
+            if s.variance_m2 > 0.0 {
+                2.0 * s.variance_m2 * -math::exp_m1(-s.slope2 * b * b / (2.0 * s.variance_m2))
+            } else {
+                0.0
+            }
+        };
+        for n in 0..=MAX_LEVEL {
+            let level = BandLevel::new(n).unwrap();
+            let set = bounds.set(level);
+            let band = band_half_width(&figure, level);
+            let lags = [0.0, 2.0, 5.0, set.shortest_wavelength().value(), 1e4];
+            let (mut variance, mut structure) = (0.0, [0.0; 5]);
+            for (k, octave) in all.iter().enumerate() {
+                if set.keeps_crater_octave(octave.index()) {
+                    let s = octaves.sharpening(k, band);
+                    variance += s.variance_m2;
+                    for (d, &b) in structure.iter_mut().zip(&lags) {
+                        *d += rims(s, b);
+                    }
+                } else {
+                    variance += octave.ground_variance().value();
+                    for (d, &b) in structure.iter_mut().zip(&lags) {
+                        *d += ring(octave, b);
+                    }
+                }
+            }
+            let at = format!("{kind:?} at level {n}");
+            assert_same_bits(octaves.omitted_variance(set).value(), variance);
+            for (&b, d) in lags.iter().zip(structure) {
+                let got = octaves
+                    .omitted_structure_function(set, Metres::new(b))
+                    .value();
+                assert!(
+                    (got - d).abs() <= 1e-12 * d.abs(),
+                    "{at} at a lag of {b} m: {got} against {d}"
+                );
+            }
+            if n >= limit {
+                assert_same_bits(variance, 0.0);
+                assert_same_bits(
+                    octaves
+                        .omitted_structure_function(set, Metres::new(5.0))
+                        .value(),
+                    0.0,
+                );
+            }
+        }
+        for lambda in [3e4, 1e3, 100.0, 10.0, 3.0, 2.0, 1.0] {
+            let band = Metres::new(num::max(0.5 * lambda, 1.0));
+            let lags = [2.0, 50.0, 1e3];
+            let (mut variance, mut structure) = (0.0, [0.0; 3]);
+            for (k, octave) in all.iter().enumerate() {
+                // An octave whose diameters straddle λ is part kept and part left out.
+                let share = band_share(lambda, octave);
+                let s = octaves.sharpening(k, band);
+                if share > 0.0 {
+                    variance += share * octave.ground_variance().value();
+                }
+                if share < 1.0 {
+                    variance += (1.0 - share) * s.variance_m2;
+                }
+                for (d, &b) in structure.iter_mut().zip(&lags) {
+                    *d += share * ring(octave, b) + (1.0 - share) * rims(s, b);
+                }
+            }
+            let got = octaves.unresolved_variance(Metres::new(lambda)).value();
+            assert_same_bits(got, variance);
+            for (&b, d) in lags.iter().zip(structure) {
+                let got = octaves
+                    .structure_function(Metres::new(lambda), Metres::new(b))
+                    .value();
+                assert!(
+                    (got - d).abs() <= 1e-12 * d.abs(),
+                    "{kind:?} finer than {lambda} m at a lag of {b} m: {got} against {d}"
+                );
+            }
+            if lambda <= BAND_LIMIT_M {
+                assert_same_bits(got, 0.0);
+                for b in [2.0, 100.0] {
+                    let d = octaves.structure_function(Metres::new(lambda), Metres::new(b));
+                    assert_same_bits(d.value(), 0.0);
+                }
+            }
+        }
+    }
+}
+
+/// The realised small craters' part of what a level leaves out of the finest level's ground,
+/// against the closed forms: at the levels of a 100 m and a 1 km survey on each cratered world,
+/// the octaves the level keeps, sharpened from its band to the band limit's, and the octaves it
+/// leaves out, over 400 cells × 25 points (R09.T7.h's recorded measurement; release:
+/// `--release` or `--profile slow-test`, `--ignored --nocapture`).
+#[test]
+#[ignore = "measurement, by hand: cargo test -p hyperion-surface --profile slow-test --lib synth::craters::tests::measure_the_kept_octaves_sharpening_and_the_octaves_left_out -- --ignored --nocapture"]
+fn measure_the_kept_octaves_sharpening_and_the_octaves_left_out() {
+    for kind in WORLDS {
+        let header = world(kind).header();
+        let figure = header.figure();
+        let craters = small(kind);
+        let octaves = craters.octaves();
+        let bounds = crate::synth::LevelBounds::of(header, octaves);
+        let limit = BandLevel::new(band_limit_level(kind)).unwrap();
+        let every = bounds
+            .set(limit)
+            .craters_through()
+            .expect("the band limit keeps every octave");
+        let coarse = header.level().get();
+        for resolution in [100.0, 1e3] {
+            // The deepest level whose shortest wavelength is the resolution or longer.
+            let n = (0..=MAX_LEVEL)
+                .rev()
+                .find(|&n| {
+                    bounds
+                        .set(BandLevel::new(n).unwrap())
+                        .shortest_wavelength()
+                        .value()
+                        >= resolution
+                })
+                .unwrap();
+            let level = BandLevel::new(n).unwrap();
+            let set = bounds.set(level);
+            let band = band_half_width(&figure, level);
+            let kept = set.craters_through();
+            let (mut closed_kept, mut closed_left) = (0.0, 0.0);
+            for (k, octave) in octaves.octaves().iter().enumerate() {
+                if set.keeps_crater_octave(octave.index()) {
+                    closed_kept += octaves.sharpening(k, band).variance_m2;
+                } else {
+                    closed_left += octave.ground_variance().value();
+                }
+            }
+            let mut rng = Lcg::new(0x7368_6172_7000 + u64::from(n));
+            let mut cache = CraterCache::new();
+            // Σ x, Σ x² and Σ x⁴ of the sharpening and of the octaves left out.
+            let mut sums = [[0.0; 3]; 2];
+            let mut points = 0.0;
+            for cell in random_cells(coarse, 400, &mut rng) {
+                for dir in random_points_in(cell, 25, &mut rng) {
+                    let sharp =
+                        kept.map_or(0.0, |k| craters.at(dir, limit, k, &mut cache).height_m);
+                    let blunt =
+                        kept.map_or(0.0, |k| craters.at(dir, level, k, &mut cache).height_m);
+                    let whole = craters.at(dir, limit, every, &mut cache).height_m;
+                    for (sum, x) in sums.iter_mut().zip([sharp - blunt, whole - sharp]) {
+                        sum[0] += x;
+                        sum[1] += x * x;
+                        sum[2] += x * x * x * x;
+                    }
+                    points += 1.0;
+                }
+            }
+            eprintln!(
+                "{kind:?} at {resolution} m: level {n}, λ_n {:.2} m, band {:.2} m, octaves kept \
+                 through {kept:?} of {every}, {points} points",
+                set.shortest_wavelength().value(),
+                band.value()
+            );
+            for (what, sum, closed) in [
+                ("kept octaves' sharpening", sums[0], closed_kept),
+                ("octaves left out", sums[1], closed_left),
+            ] {
+                let mean_square = sum[1] / points;
+                // The standard error of the mean square, from the fourth moment.
+                let error = ((sum[2] / points - mean_square * mean_square) / points).sqrt();
+                eprintln!(
+                    "  {what:25} realised {mean_square:.4} ± {error:.4} m² (mean {:.4} m), \
+                     closed {closed:.4} m², realised ÷ closed {:.3}",
+                    sum[0] / points,
+                    mean_square / closed
+                );
+            }
         }
     }
 }

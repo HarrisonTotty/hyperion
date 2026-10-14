@@ -27,7 +27,9 @@
 //! one. So what band level n leaves out of the finest level's ground is more than R09's
 //! wavelength-keyed forms count at `λ_n` (2.6 to 3.3 times in the relief's variance on the
 //! synthetic worlds). The level-keyed forms count it, each contribution from its own cut
-//! ([`Synthesiser::omitted_variance`](super::Synthesiser::omitted_variance), R10.T5).
+//! ([`Synthesiser::omitted_variance`](super::Synthesiser::omitted_variance), R10.T5), and the
+//! small craters by the octaves the level keeps, sharpened from its band, and those it leaves out
+//! (R09.T7.h).
 //!
 //! # The bound
 //!
@@ -188,6 +190,14 @@ impl LevelSet {
     pub const fn craters_through(&self) -> Option<u8> {
         self.craters
     }
+
+    /// Whether the level evaluates the small-crater octave of index `index`
+    /// ([`CraterOctave::index`](super::craters::CraterOctave::index)): whether it is at most
+    /// [`craters_through`](Self::craters_through).
+    #[must_use]
+    pub(crate) fn keeps_crater_octave(&self, index: u8) -> bool {
+        self.craters.is_some_and(|last| index <= last)
+    }
 }
 
 /// Where each of R09's closed forms starts counting what a band level leaves out of the finest
@@ -195,6 +205,10 @@ impl LevelSet {
 /// ([`Synthesiser::omitted_variance`](super::Synthesiser::omitted_variance)). A level evaluates
 /// each contribution by its own scale, as [`LevelSet`] does, while each closed form places it at
 /// wavelengths of its own, so no one wavelength gives the cut of every contribution.
+///
+/// The small craters' part is no cut: the octaves the level keeps count their sharpening from its
+/// band to the band limit's, and the others their ground whole, so it reads the level's set
+/// itself ([`CraterOctaves::omitted_variance`]; R09.T7.h).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LevelCuts {
     /// The structural octaves': the first degree of the first octave the level does not evaluate.
@@ -205,20 +219,15 @@ pub(crate) struct LevelCuts {
     /// from its width (none) to twice it (all); twice the coarse cell's where the level evaluates
     /// none.
     pub(crate) channels: Metres,
-    /// The small craters': below the last evaluated octave's smallest diameter, since an octave is
-    /// counted from its smallest diameter (none) to its upper (all), the next larger octave's
-    /// smallest; the largest octave's upper where the level evaluates none.
-    pub(crate) craters: Metres,
     /// The coarse rims': the level's `λ_n`, since every level sharpens them over half its
     /// shortest wavelength, and their closed form takes half the wavelength it is given.
     pub(crate) rims: Metres,
 }
 
 impl LevelCuts {
-    /// The cuts of `set`, a level's set on the body of `header`, whose small craters' octaves are
-    /// `octaves`.
+    /// The cuts of `set`, a level's set on the body of `header`.
     #[must_use]
-    pub(crate) fn of(header: &FieldHeader, octaves: &CraterOctaves, set: &LevelSet) -> Self {
+    pub(crate) fn of(header: &FieldHeader, set: &LevelSet) -> Self {
         let radius_m = header.radius().value();
         let coarse = header.level();
         let last_octave = set.relief.unwrap_or_else(|| first_octave(coarse) - 1);
@@ -226,17 +235,9 @@ impl LevelCuts {
             || 2.0 * mean_cell_width(radius_m, coarse.get()),
             |k| mean_cell_width(radius_m, k),
         );
-        let octaves = octaves.octaves();
-        let craters = match set.craters {
-            Some(k) => octaves[usize::from(k)].smallest(),
-            None => octaves
-                .first()
-                .map_or(Metres::new(BAND_LIMIT_M), |o| o.diameters().upper()),
-        };
         Self {
             relief_degree: nyquist_degree(last_octave),
             channels: Metres::new(channels),
-            craters,
             rims: set.shortest,
         }
     }

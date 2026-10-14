@@ -436,14 +436,16 @@ impl CoarseRims {
 /// ∫ (f − s)² 2x dx and ∫ (f′ − s′)² 2x dx over the reach of two profiles of one shape, f
 /// `first` and s `second`, in rim radii (heights in metres, slopes in metres per rim radius):
 /// eight-point Gauss–Legendre on each piece between both profiles' breakpoints, exact to rounding,
-/// each piece being a polynomial of degree at most 4 in both.
+/// each piece being a polynomial of degree at most 4 in both. The small craters' sharpening takes
+/// it too (R09.T7.h).
 #[must_use]
-fn difference_moments(first: &CraterProfile, second: &CraterProfile) -> (f64, f64) {
-    let mut points: Vec<f64> = first
-        .breakpoints()
-        .into_iter()
-        .chain(second.breakpoints())
-        .collect();
+pub(super) fn difference_moments(first: &CraterProfile, second: &CraterProfile) -> (f64, f64) {
+    // On the stack: the small craters' sharpening calls this for every node of every octave a
+    // level keeps, twice a reading (R09.T7.h).
+    let mut points = [0.0; 14];
+    let (head, tail) = points.split_at_mut(7);
+    head.copy_from_slice(&first.breakpoints());
+    tail.copy_from_slice(&second.breakpoints());
     points.sort_by(f64::total_cmp);
     let (mut square, mut slope) = (0.0, 0.0);
     for pair in points.windows(2) {
