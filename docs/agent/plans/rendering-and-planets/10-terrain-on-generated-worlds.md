@@ -175,9 +175,15 @@ pub const THIN_ATMOSPHERE_PRESSURE: Pascals;  // 30 kPa, the sim's, for `Dust` (
 pub const CLIFF_SLOPE: Radians;            // 40°, Design note 1
 pub const TRANSITION_HALF_WIDTH: Radians;  // 5°, the visual blend band either side
 pub const SNOW_SHED_SLOPE: Radians;        // 60°, Schaerer 1977, p. 286 (T1.a, as built)
-/// Presentation weights over a per-patch palette of up to eight materials, each a (form, entry)
-/// pair (Design note 3).
-pub struct ClassWeights { /* palette: [Option<Material>; 8], weights: [u8; 8] summing to 255 */ }
+/// Presentation weights at a point over up to eight materials, each a (form, entry) pair (Design
+/// note 3); a patch's palette is T6.a's `TerrainLayers`, gathered from its vertices'. As built by
+/// T2 (Risks, "Deviations in T2, as built"): each slot a `GroundMaterial`, the form always and the
+/// entry where the palette names one, as `material_at` answers; slots in falling weight, ties by
+/// discriminant, the first the largest (at the finest level, strictly, the authoritative class).
+/// A texel of band level n is a cell of quadtree level n + 6.
+pub struct ClassWeights { /* palette: [Option<GroundMaterial>; 8], weights: [u8; 8] summing to 255 */ }
+// palette, weights, iter, weight(material), largest, len, is_empty; MAX_CLASSES 8,
+// WEIGHT_TOTAL 255, SLOPE_LAG 5 cm (the omitted structure function's small-lag slope)
 pub fn weights_at<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
     at: FaceUv, level: BandLevel) -> Result<ClassWeights, QueryHeightError>;
 /// The per-body scale on class albedos that makes the body's geometric albedo p (Design note 8).
@@ -238,9 +244,10 @@ R09's level-keyed closed forms, which T5 added to R09's `Synthesiser` (`omitted_
 ### `bake`
 
 ```rust
-/// What this plan adds to R05's `PatchBake`.
+/// What this plan adds to R05's `PatchBake`. The palette is the union of the patch's vertices'
+/// `ClassWeights` materials, `GroundMaterial`s as T2 built them (R10.T2's record).
 pub struct TerrainLayers {
-    /* palette: [Option<Material>; 8], weights: Vec<[u8; 8]> (65 × 65),
+    /* palette: [Option<GroundMaterial>; 8], weights: Vec<[u8; 8]> (65 × 65),
        survey_mask: Vec<u8> (65 × 65: 255 surveyed, 0 not), horizon: HorizonMap,
        bound: Metres, sigma: Metres, extra: Vec<scatter::ExtraLayer> (R11's, through `BakeHook`) */
 }
@@ -255,6 +262,15 @@ pub fn decode_horizon(code: i16) -> Radians;
 pub trait BakeHook { fn bake(&self, key: PatchKey, heights: &[f32], out: &mut Vec<ExtraLayer>); }
 /// The face-wide far-field lattice, keyed by position alone (Design note 10).
 pub fn far_field_point(face: Face, level: u8, i: u32, j: u32) -> FaceUv;
+/// As built by T6.a (Risks, "Deviations in T6.a, as built"): the bake over a client's field, R05's
+/// arrays and this plan's layers; `WeightsLayer::{Baked, Skipped}`; `TerrainLayers`' fields
+/// private, with getters and `is_complete()` (no vertex took the reference surface); the mask's
+/// `SURVEYED` (255) and `UNSURVEYED` (0); `HorizonMap` empty until T8.a.
+pub struct TerrainBakeOptions { pub patch: BakeOptions, pub weights: WeightsLayer }
+pub struct TerrainBake { /* patch: PatchBake, layers: TerrainLayers */ } // patch, layers, into_parts
+pub fn bake_terrain<F: SurveyView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
+    key: PatchKey, opts: &TerrainBakeOptions, hooks: &[&dyn BakeHook])
+    -> Result<TerrainBake, QueryHeightError>;
 ```
 
 The worker's WebAssembly entry points, on R05's binding, gain `field_init`, `field_chunk`,
@@ -3726,6 +3742,30 @@ Ground(SlantRange), NoGround, NotSurveyed }` in place of `Option`, so that T12 c
     too high still fails. The bounds are in one place (`CRATER_GAP`, `GAP_RMS`, `GAP_Z`), and a
     commit under T5's ID removes them after R09.T7.h, so that every world is held at the plan's.
 
+  - _After R09.T7.h_ (2026-10-14; lane r09-crater-sharpening; main's ruling of that day). With the
+    kept craters' sharpening in R09's closed forms, the same case gives, by name in 577 s:
+
+    | World      | Survey | RMS ÷ σ | var z  |
+    | ---------- | ------ | ------- | ------ |
+    | Earth-like | 100 m  | 0.9831  | 0.9318 |
+    | Earth-like | 1 km   | 0.9869  | 0.9697 |
+    | Mars-like  | 100 m  | 0.9941  | 0.9620 |
+    | Mars-like  | 1 km   | 1.0244  | 1.0230 |
+    | Moon-like  | 100 m  | 0.9883  | 0.9748 |
+    | Moon-like  | 1 km   | 0.9828  | 0.9653 |
+    | Ceres-like | 100 m  | 0.9942  | 0.9882 |
+    | Ceres-like | 1 km   | 1.0858  | 1.1762 |
+
+    Every case is held at the plan's 10% in RMS ÷ σ, and all but one at its 15% in var z. The
+    exception, as main ruled, is the Ceres-like world at the 1 km survey alone: its var z is held in
+    [0.85, 1.25], 1.176 measured with headroom for a change of seed, at the plan's tolerance from
+    below. `CRATER_GAP` is now that one case (a world and a survey's index) and `GAP_Z` its bound;
+    `GAP_RMS` is gone. The cause is the ruling's heavy-tailed crater sampling: an octave's E[g²] is
+    carried by its youngest few tenths of a per cent of craters, so 200 × 100 points sample a few
+    dozen. The closed form agrees with R09.T7.h's 10⁴-point measurement within sampling there (kept
+    sharpening 15.0 ± 3.5 against 15.4 m², octaves left out 116 ± 26 against 108 m²). Deferred,
+    below.
+
   - _Acceptance_, as built:
     - `cargo test -p hyperion-surface --lib reading` (21 tests, and the `#[ignore]` measurement
       `reading::tests::the_ground_a_level_leaves_out_by_contribution`);
@@ -3809,7 +3849,10 @@ Ground(SlantRange), NoGround, NotSurveyed }` in place of `Option`, so that T12 c
     squares on a few hundred points differ from the closed forms by 3–9 times, and from each other
     by as much: an octave's E[g²] is carried by its youngest few tenths of a per cent of craters,
     of which a 200 × 100 pooled check samples a few dozen. If T7.h's acceptance misses for that
-    reason, main rules on a larger sample or a check weighted by crater count.
+    reason, main rules on a larger sample or a check weighted by crater count. It did, once: the
+    Ceres-like world at 1 km, var z 1.176 (2026-10-14). Main ruled that case alone held in
+    [0.85, 1.25] (`CRATER_GAP`, above). A check weighted by crater count, or a larger cratered
+    sample, would retire it: for R10.T15's verification pass, not before.
   - _The whole octaves' J₀ structure function_ (the ruling's) places each octave at √(D₀ D₁). Its
     small-lag slope, σ² k² b² ÷ 2, is not the craters' slope variance, ρ E[g² ∫ |∇f|² dA], so
     slopes at 2 m from octaves left out may be off. T7.h leaves that form as it is.
@@ -3817,10 +3860,501 @@ Ground(SlantRange), NoGround, NotSurveyed }` in place of `Option`, so that T12 c
     closed per sample of cells, 0.457 against 0.0063 m² on the Mars-like world at 1 km, 0.072
     against 0.86 m² on the Moon-like world at 1 km, and 0.048 against 6.45 m² on the Ceres-like
     world at 1 km.
+- **Deviations in T2, as built** (2026-10-14; lane r10-weights, on R10.T5 at `1a56ee17`, with
+  R10.T1.b at `7e1537eb`, and merged with R09.T7.h at `742aa3e6` before its figures and goldens
+  were taken).
+  - _Files._ `crates/hyperion-surface/src/material/weights.rs` with `weights/tests.rs` and
+    `weights/golden.rs`; `material/mod.rs`'s exports, `TRANSITION_HALF_WIDTH`'s doc and a
+    compile-time check of the slope thresholds; `tests/panics.rs`'s `weights` module; eight goldens
+    in `tests/golden/weights/`. T1.b's `material/classify.rs` is refactored, its answers unchanged
+    (below). No `crates/hyperion-sim/tests/surface_weights_worlds.rs` yet: its `sample_worlds()`
+    cases follow R09.T16 as a later commit under T2's ID (main's ruling), and the synthetic
+    worlds' agreement lives in the library, as T1.b's and T3's goldens do.
+  - _The signature._ `ClassWeights` holds `[Option<GroundMaterial>; 8]`, not Provides'
+    `Option<Material>`: a slot is the form always and the entry where the palette names one, as
+    T1.b's `material_at` answers, so a body whose palette names no substance still has its forms
+    weighted (signoff-9 §17.5's `MATERIAL REGOLITH · —`), and `None` marks an empty slot. Getters:
+    `palette`, `weights`, `iter`, `weight(material)`, `largest`, `len` and `is_empty`. Public
+    constants: `MAX_CLASSES` (8), `WEIGHT_TOTAL` (255) and `SLOPE_LAG` (5 cm).
+  - _A point's palette, not a patch's._ `ClassWeights` is one point's up to eight materials, in
+    falling weight, ties in rising class code and then entry, so the first is the largest weight
+    with ties broken by discriminant, and a material's slot differs between neighbouring vertices.
+    The palette of up to eight a patch keeps, with each vertex's bytes over it, is T6.a's
+    `TerrainLayers`, gathered from its vertices' materials; Provides' `TerrainLayers.palette` is
+    now `[Option<GroundMaterial>; 8]` for the same reason as `ClassWeights`'. A patch needing more
+    than eight is not handled at run time: the test names it. A material whose weight rounds to no
+    byte is not held.
+  - _The finest level_ (`finest_level`, or deeper): `material_at`'s class, blended linearly over
+    `TRANSITION_HALF_WIDTH` either side of both slope thresholds, `CLIFF_SLOPE` and
+    `SNOW_SHED_SLOPE` (their bands, 35–45° and 55–65°, do not meet, which `material/mod.rs` now
+    checks at compile time), for the image only: at a slope θ within a band about θ₀ the steeper
+    ground's material takes (θ − θ₀ + 5°) ÷ 10° of the weight. The rules on the height (the water
+    surface, the snow line, the melt and the arid bound) are not blended: the plan names a width
+    for the slopes alone. Design note 3's "ties broken by discriminant" orders the slots at
+    coarser levels; at the finest level the authoritative class is kept first whatever its share,
+    wins the largest remainder's ties, and then takes bytes from its largest rival until its byte
+    is strictly the largest, so no reader's tie-break can choose another (an even blend at 40°
+    gives it 128 to 127). `TRANSITION_HALF_WIDTH`'s doc names both thresholds; the snow's band is
+    presentation alone (the science check).
+  - _A coarser level n_ (Design note 3, as `weights_at`'s documentation gives it). The finest
+    ground is the level's plus what the level leaves out:
+    - the height, the level's plus a normal deviate of R09's level-keyed `omitted_variance`
+      (R10.T5's, as ruled, with R09.T7.h's sharpening of the craters a level keeps; the two
+      closed forms kept in `SynthCache`'s material part by cell and level, `classify::kept_forms`,
+      since T7.h they cost 50 to 150 µs a call), asked at each band between the heights
+      where a rule's condition
+      changes (`Site::height_breaks`: the cell's water surface, and where the temperature by the
+      lapse rate crosses the crust entry's transition, the snow entry's and Köppen–Geiger's arid
+      bound), at the mean where it lies in the band, so that with no variance it is the level's
+      own height (a test scans 24 km of heights on 30-odd cells a body and finds every change of
+      material at a listed break);
+    - the slope, the level's tangential gradient plus an isotropic normal deviate whose variance
+      along each tangent axis is `omitted_structure_function` at `SLOPE_LAG` over the lag
+      squared, the small-lag slope (tested against half the lag within 1%); the probability that
+      the finest slope's tangent, the gradient scaled by ρ ÷ (ρ + h) as R05's `surface_normal`
+      takes it, exceeds tan 40° and tan 60° is the Rice distribution's tail, Marcum's Q₁ (Rice
+      1945, §3.10, eq. 3.10-11), integrated in closed form along one axis and by panels of
+      eight-point Gauss–Legendre along the other (`exceedance`; tested within 10⁻⁶ against the
+      Rayleigh tail and an independent polar sum, and pinned bit for bit in `kernels.golden`);
+    - a partial ice share's place, the point's shadowed-ground index at level n against the cell's
+      cut at the finest level, plus the index the level leaves out, taken from the cell's own 256
+      grid points, the finest index less the level's at each (`classify::ice_share_at`, kept in
+      `SynthCache`'s cuts beside the cut, by cell, level and ice code). As first built it was a
+      normal deviate of the closed forms' variance through the cut's scales, which put too much of
+      a small share's ice far from the cut, the index being heavy-tailed (T1.b's record): on the
+      cold-trapped pole at 0.2, 0.27 of a level-4 texel's weight against 0.18 counted, and 0.34
+      against 0.20 at level 2. The empirical form is the cell's share where the level resolves
+      nothing below the cells, and the point's own answer where it leaves nothing out;
+    - the three independent, each combination a case of the classifier's rules (`Site::facts`)
+      weighted by its probability, the weights the cases' materials summed. Where the level leaves
+      nothing out (from the band limit's level, which is coarser than the finest on the Ceres-like
+      world) the weights are the class at the point, all of the weight (tested);
+    - the cell's facts are the texel centre's, and a channel's bed is one of the channel levels
+      level n evaluates, at the centre (deferred findings, below).
+  - _At most eight a point._ The likeliest eight are kept and the rest of the weight spread over
+    them in proportion, then made bytes summing to 255 by the largest remainder. No point of the
+    goldens holds more than four materials, and no patch of the tests more than three.
+  - _The texel._ A texel of band level n is one vertex spacing of the level's lattice about a
+    vertex, a cell of quadtree level n + 6, which is what R05's bake reads at a patch's 65 × 65
+    vertices. So R07's class map at quadtree level L (its "N = 2^L" texels a face) takes each
+    texel's weights at band level L − 6, at the cell's centre, as T10.d's "`weights_at` at the
+    cell's centre" has it once the level is so read; the plan's "level 4" for the class map is band
+    level 4, a map at L = 10. Design note 8's "a few hundred kilobytes" is a map at L = 6, band
+    level 0. This is the lane's reading, asked of "main" (below); the agreement at level 4 is over
+    level 4's texels, 1/1,024 of a face.
+  - _The classifier, split._ T1.b's `Facts::at` becomes `Point::at` over a cell's `Site` (the
+    climate's reads, the regime, the basin, the entries and the sea-level temperatures) and
+    `Site::facts(h, steepness, in_ice, channel_floor)`, with `Steepness` (loose, cliff, shed),
+    `IcePlacement`, `finest_band`, `cos_slope`, `on_channel_floor`, `ice_share_at` and `kept_forms`, and
+    `koppen_offset_mm` split out of `is_arid`, all crate-private. Every comparison is the one it
+    was, so `material_at`'s goldens pass unchanged (the reviews traced each). The cell's
+    neighbours are now read before the ice cut's grid and the channels, so in a view lacking
+    several cells the first one named may differ; the error is the same kind.
+  - _The agreement_, as the plan's test measures it: at levels n − 1 to n − 6 from the finest, 64
+    points a texel (an 8 × 8 grid of its steps' centres), and at the class map's level 4, 4,096
+    (64 × 64), against `material_at`; the measure is a texel's total variation, ½ Σ |weight ÷
+    255 − fraction| over the materials of either, the share of the texel given to the wrong
+    material, and every texel's bytes are checked to sum to 255. Half the texels are at random
+    points of the cells the weights find hardest (belts on dry land without ice, partial ice, sea
+    under 300 m deep, the channels' trunks, the coarse craters' rims) and half at random over the
+    sphere. A failure names the level's five worst texels and their cells. The fast tests take 24
+    texels a level and 2 at level 4 a world; the slow ones
+    (`material_weights_agree_with_the_classes_counted_over_a_thousand_texels_*`,
+    `#[ignore = "slow: …"]`, by name) a thousand of each. The slow figures (slow-test profile, 3
+    threads, load 5–12, on R09.T7.h's closed forms), mean total variation over a level's thousand
+    texels, the worst
+    texel's, and the mean over its mixed texels, those with more than one material in the weights
+    or the points, with their count:
+
+    | World      | Level      | Mean   | Worst  | Mixed: mean (count) |
+    | ---------- | ---------- | ------ | ------ | ------------------- |
+    | Earth-like | 18 (n − 1) | 0.0022 | 0.4688 | 0.1875 (12)         |
+    | Earth-like | 17         | 0.0070 | 0.9294 | 0.1617 (43)         |
+    | Earth-like | 16         | 0.0078 | 0.7647 | 0.1214 (64)         |
+    | Earth-like | 15         | 0.0118 | 0.7453 | 0.1293 (91)         |
+    | Earth-like | 14         | 0.0145 | 0.5347 | 0.1284 (113)        |
+    | Earth-like | 13 (n − 6) | 0.0108 | 0.5104 | 0.0907 (119)        |
+    | Earth-like | 4          | 0.0351 | 0.7871 | 0.0700 (501)        |
+    | Moon-like  | 16 (n − 1) | 0.0002 | 0.2188 | 0.2188 (1)          |
+    | Moon-like  | 15         | 0.0014 | 0.8000 | 0.2831 (5)          |
+    | Moon-like  | 14         | 0.0023 | 0.9451 | 0.1757 (13)         |
+    | Moon-like  | 13         | 0.0023 | 0.7969 | 0.2252 (10)         |
+    | Moon-like  | 12         | 0.0016 | 0.3928 | 0.0893 (18)         |
+    | Moon-like  | 11 (n − 6) | 0.0008 | 0.2344 | 0.0363 (23)         |
+    | Moon-like  | 4          | 0.0062 | 0.6914 | 0.0412 (151)        |
+    | Ceres-like | 15 (n − 1) | 0      | 0      | (0)                 |
+    | Ceres-like | 14, 13     | 0      | 0      | (0)                 |
+    | Ceres-like | 12         | 0.0003 | 0.2118 | 0.0865 (3)          |
+    | Ceres-like | 11         | 0.0000 | 0.0039 | 0.0039 (1)          |
+    | Ceres-like | 10 (n − 6) | 0      | 0      | (0)                 |
+    | Ceres-like | 4          | 0.0000 | 0.0100 | 0.0014 (12)         |
+    | Mars-like  | 17 to 12   | 0      | 0      | (0)                 |
+    | Mars-like  | 4          | 0.0034 | 0.0090 | 0.0038 (14)         |
+
+    The Earth-, Moon- and Ceres-like cases passed in about 40 minutes, three at once; before
+    R09.T7.h the Earth-like figures were the same and the Moon- and Ceres-like ones within a few
+    ten-thousandths in the mean. The Mars-like case, in the first run, did not finish in its 3 h
+    timeout: its finest points cost about
+    2 ms or more each away from a cache, of which its class-map level has 4.1 × 10⁶ (not profiled;
+    the screened small craters' draws, about 80 µs a crater by R09's "Deviations in T7.b", are
+    the likely cost). Its row is the dev profile's measure of 200 texels a level and 16 at level
+    4, chosen by the same rule, before R09.T7.h; the thousand-texel run waits on main's ruling on
+    its cost
+    (deferred findings, "The slow cases' cost"), the world being dust but for its trunks' beds.
+
+    The cold-trapped pole (T1.b's field, partial water ice poleward of 85°, the synthetic worlds
+    having none on land), 16 texels a level of 64 points in its polar cells, and 24 of 256 points
+    at level 4, nearly all mixed, held to the plan's ten points in the total variation at
+    n − 1 to n − 6 and, at every level, in the ice's mean weight against its mean counted share
+    (at level 4, where nothing below the cells is resolved, a texel's own count scatters about the
+    cell's share). At a share of 0.2: total variation 0.020, 0.042 and 0.041 at levels 16, 14 and
+    11, and the ice's weight 0.31, 0.21, 0.24 and 0.23 against 0.29, 0.24, 0.23 and 0.25 counted
+    there and at level 4 (whose total variation is 0.11). At 0.6: 0.048, 0.087 and 0.044, and
+    0.69, 0.58, 0.50 and 0.69 against 0.74, 0.57, 0.53 and 0.66 (level 4's 0.13).
+
+  - _Acceptance_, as built:
+    - `cargo test -p hyperion-surface --lib material::weights` (the goldens alone:
+      `--lib material::weights::golden`);
+    - `cargo test -p hyperion-surface --features testing --test panics weights` (1);
+    - the four slow agreement cases by name, `cargo test -p hyperion-surface --features testing
+--profile slow-test --lib material::weights::tests::material_weights_agree_with_the_classes_counted_over_a_thousand_texels
+-- --ignored`;
+    - the wasm targets under `just test-wasm-fast`;
+    - the plan's `just test-slow -E 'binary(surface_weights_worlds)'` waits for the
+      `sample_worlds()` binary. The four slow cases also run in the slow pass's native and
+      wasip1 holds (`--run-ignored only`), at the times above natively.
+  - _Tests_ (`material::weights::tests`, `material::weights::golden`, `tests/panics.rs`'s
+    `weights`):
+    - the exceedance: the Rayleigh tail at a zero mean, an independent polar sum over 70 cases
+      (means 0.05–2, variances 10⁻⁴–1, both thresholds), monotone in the threshold and the mean;
+    - the blend's shares at nine slopes; the authoritative class's largest byte, ties included,
+      and against a larger rival; eight kept of eleven, summing to 255, a share of no byte dropped;
+      the height cases summing to one, each strictly inside a band of its own;
+    - every change of a material with the height at a listed break; the steepness cases summing to
+      one and tending to the level's own steepness;
+    - at the finest level and one deeper, on every synthetic world at 400 points (two in each of up
+      to 50 hard cells, then random), the largest weight is `material_at`'s class, strictly, and
+      the weights sum to 255;
+    - from the band limit's level, the weights are the class;
+    - order and cache independence (`assert_order_independent`, a shared and a fresh cache), and
+      on the cold-trapped pole with `material_at` interleaved, which keeps the same cut;
+    - a cell not held is not surveyed, at three levels;
+    - the slope lag is short enough on every body;
+    - the agreement, fast and slow, on the four bodies and on the cold-trapped pole;
+    - a patch's 65 × 65 vertices need no more than eight materials, at four levels a body;
+    - the goldens and their header; one `should_panic` (a (u, v) that is not finite).
+  - _The goldens_ (main's ruling: header 21, a subdirectory of their own), eight:
+    - `weights/<world>.golden`, one a synthetic world: 250 points (up to 30 each on dry-land
+      belts, in partial ice, in the shallowest sea and under coarse craters' rims, then random),
+      each at the finest level, n − 1, n − 3, n − 6, n − 10 and level 4, each slot its class code,
+      entry and byte;
+    - `weights/cold_trap.golden`: 40 points of the cold-trapped pole at 0.2, at the same levels,
+      the only golden whose weights read the ice's cut;
+    - `weights/kernels.golden`: `exceedance` over 216 cases (the reach's early return and the
+      panels' bound among them), the normal distribution, the height cases and the blend, bit for
+      bit, since the bytes show a float's drift only where it crosses a byte.
+
+    The weights are presentation, but the client's WebAssembly workers bake them, so the goldens
+    hold the targets to one blend. A `native_only` test holds `weights/` to `GENERATOR_VERSION`.
+    A change to the weights alone is a client change (Generator version, above): it re-blesses
+    `weights/` at the version in force with no bump, the commit saying so, an exception
+    `golden_diff.py` does not know (asked of "main", below). Any later change to R09's closed
+    forms or the classifier before P14.T48.e re-blesses `weights/` too; R09.T7.h landed before
+    them, so they are taken with its sharpening.
+
+  - _The cost_ (provisional: the dev profile at `opt-level = 2`, one thread, the Earth-like world,
+    a level's patch's vertices in order from one cache, load about 5, with R09.T7.h and the forms
+    kept by cell and level): `weights_at` 26 µs a vertex at the finest level, 21–22 µs at n − 1
+    to level 12 and 13 µs at level 4, against the level's warm `height_at` 20, 15 to 9 and
+    0.5 µs. A partial-ice cell adds its grid's 512 heights once a level. Most of the
+    rest is the per-cell site, asked afresh at each vertex (deferred findings). Without the kept
+    forms each coarse vertex would pay R09.T7.h's 50–150 µs twice. T6.a's bench states it with
+    and without the weights.
+  - _Generator version._ Untouched (21): the weights are presentation, and the classifier's
+    answers do not move.
+  - _Closed sets, for the composition audit._ None new: the weights read the classifier's rules
+    and the palette's entries as T1.b built them.
+- **Questions for "main" (R10.T2)** (each with the lane's lean, built to it).
+  - _What a class-map texel is._ Lean: as above, a texel of band level n is a cell of quadtree
+    level n + 6, so T10.d calls `weights_at` at a map cell's centre at band level L − 6, and
+    Design note 8's "level 4 or shallower" bounds the map at L = 10. The alternative, a texel at
+    level 4 being the quadtree cell (f, 4, i, j), needs a footprint argument or T10.d averaging a
+    cell's vertices, since one centre sample cannot stand for a 600 km cell.
+  - _The weights goldens and `golden_diff.py`._ Lean: record the exception beside `wire/`'s in
+    the sim-determinism skill (a weights-only change re-blesses `tests/golden/weights/` at the
+    version in force with no bump), and add `weights/` to the re-bless list of any later change to
+    R09's closed forms or the classifier before P14.T48.e.
+- **Deferred findings (2026-10-13 rule)** (R10.T2; recorded, not ruled; each leaves the algorithm
+  and the contracts as they are).
+  - _The synthetic worlds barely mix._ Away from the Earth-like world's belts, snow lines and
+    coasts every texel is one material: the Mars-like world is dust but for its trunks' beds, the
+    Moon- and Ceres-like worlds regolith but for a few bedrock points under coarse rims, and none
+    has a partial ice share on land (the cold-trapped pole stands in for it). So the agreement
+    there is near zero by construction, and `sample_worlds()` (R09.T16), whose coarse pass places
+    ice, frost and provinces, is the real test.
+  - _A mixed texel's own error_ is up to 28% of it in the mean, 7–19% on the Earth-like world
+    (the table's last figures): the weights are the expectation given the level's ground at the
+    texel's centre, while the omitted ground's longer wavelengths, up to about four of the texel's
+    widths, are coherent over it, so a texel's realised fraction scatters about that expectation.
+    The mean over all texels is within the plan's ten points at every level.
+  - _The slow cases' cost._ The Mars-like case ran past its 3 h timeout natively (above), and the
+    slow pass runs the four natively and on wasip1 (`--run-ignored only`), where it would be
+    slower still. Lean, for "main": hold the class-map level's thousand texels on the Earth-,
+    Moon- and Ceres-like worlds and take a hundred on the Mars-like one, or split the case out of
+    the pass's holds; the plan's count stands until main rules.
+  - _The texel's own spread._ The level's ground is taken as its centre's over the whole
+    footprint. Adding |∇h|² s² ÷ 12 (a uniform square of side s) to the height's variance, and a
+    curvature term to the slope's, would carry the footprint's own spread across a threshold, most
+    of a straddling texel's error at n − 1, where the level leaves almost nothing out.
+  - _A ridged octave's local slope._ R09 weights each ridged octave by the ridge of the octave
+    above it, the last the level keeps, so the first omitted octave's local slope variance swings
+    from 0 to about 1.9 times its cell mean with the kept octave at the point; the weights use the
+    cell mean (the science check). Another face of "Coarse weights assume Gaussian slopes".
+  - _The ice index reads the height and the slope_, which the weights take as independent of it:
+    in a partial cell the ice lies in hollows, where the height is low, so the snow line's and the
+    ice's cases are correlated. A joint distribution of the height and the index over the cell's
+    grid would carry it.
+  - _Channel beds of finer channel levels_ are not counted at a coarse level: its texels are wider
+    than those beds, and a texel's centre on one would weigh the whole texel. Their expected share
+    is the levels' Σ ρ_k × 2h_k (groove length a unit area times bankfull width), which R09's
+    channel closed form already computes per level (`incision::level_terms`' density and half
+    width, crate-private in R09's file); an accessor there would let T2 add it as a probability.
+  - _A class-map texel takes its centre's cell._ At level 4 a texel is a quarter of an Earth's
+    coarse cell across, so one straddling a coast, a crust's edge or a climate's step takes one
+    cell's facts. A texel's corners' cells, weighted by area, would carry it.
+  - _The per-cell site is asked at every vertex._ A bake's 4,225 vertices lie in a few cells; the
+    closed forms are kept by cell and level, but the site (the climate's months, the basin's
+    neighbours, the breaks) is built afresh at each, which a memo beside the forms would spare.
+    R09.T7.h's own lever, tabulating the kept octaves' sharpening by band level, would make the
+    forms' first call in a cell cheap too.
+  - _The image changes blend at the band limit's level._ Where a level coarser than the finest
+    leaves nothing out (the Ceres-like world's level 15), its weights are the unblended class,
+    while the finest level blends 35–45° and 55–65°, so those slopes sharpen as the level of
+    detail coarsens by one. For T10's by-hand check.
+  - _Gaussian slopes_ (the plan's Risks, "Coarse weights assume Gaussian slopes"): the agreement
+    holds on the synthetic worlds' belts; ridged and cratered ground on `sample_worlds()` is the
+    remaining check.
+- **Deviations in T6.a, as built** (2026-10-14; lane r10-bake, begun on R10.T2 at `e20efe8e` and
+  fast-forwarded to `0dc9a640`, after P14.T48.e's bump to 22, before its goldens and the gate).
+  - _Files._ `crates/hyperion-surface/src/bake/{mod,layers,tests,golden}.rs` and `src/scatter.rs`,
+    with `lib.rs`'s `pub mod bake`, `pub mod scatter` and summary line; two goldens in
+    `tests/golden/terrain_bake/`; `benches/bake.rs` and its `[[bench]]` in the crate's manifest
+    (`required-features = ["testing"]`); `tests/panics.rs`'s `bake` module. Beside them,
+    additively:
+    - R05's `patch.rs`: `HeightSource::patch_heights` (below), the crate-private
+      `bake_with_heights`, `patch_heights_of` and `vertices_of`, and `bake_vertices` now for the
+      tests alone; and `patch/normals.rs`, whose normals read the vertices' samples.
+    - T3's `ground.rs`: the synthesiser's `prepare_cache` and `patch_heights`.
+    - R09's `synth/bake.rs`: the crate-private `PatchHeights::from_queries`, `VertexQuery`,
+      `heights` and `cover_patch`. `Synthesiser::bake_patch` is their sum, its values and order
+      unchanged (`height_golden`'s `bakes` passes).
+    - T2's `material/weights.rs`: the crate-private `weights_with_sample` and `kept_omitted_rms`,
+      and `ClassWeights::from_slots` for the tests. `material/classify.rs` gains
+      `Point::with_sample`. `weights_at` now makes its height first and hands it on, but deeper
+      than the finest level asks only the finest's, as before; its answers are unchanged (T2's
+      goldens pass).
+  - _The signature._ `bake::bake_terrain(synth, cache, key, opts, hooks)` returns
+    `Result<TerrainBake, QueryHeightError>`, over any `F: SurveyView` (T5's trait, a client's
+    `PartialField`).
+    - `TerrainBake` holds R05's `PatchBake` and `TerrainLayers`, with `patch()`, `layers()` and
+      `into_parts()`.
+    - `TerrainBakeOptions` is R05's `BakeOptions` and `WeightsLayer::{Baked, Skipped}`. `Skipped`
+      leaves the palette empty and makes no weights: it serves T11's depth-only wireframe and the
+      bench's "without".
+    - `hooks: &[&dyn BakeHook]` is a slice, each hook appending to `extra` in turn, since the Rust
+      rules bar a bare `Option` argument. `BakeHook` is Provides' to the letter.
+    - `TerrainLayers` has private fields with getters: `palette`, `weights`, `survey_mask`,
+      `horizon`, `bound`, `sigma`, `extra`, and `is_complete` (below). The mask's values are the
+      public `SURVEYED` (255) and `UNSURVEYED` (0).
+  - _R05's bake through the height source._ R05's `HeightSource` gains
+    `patch_heights(cache, key) -> PatchHeights`, R09's type. Its default asks `height` at each
+    vertex in R09's order, the patch's level first. T3's implementation for `Synthesiser` overrides
+    it with R09's bake less its cover, and `prepare_cache` now covers the lattice, as T3's record
+    asked. R05's `bake_patch` asks for it once after `prepare_cache`, and panics on another
+    patch's heights (a source's bug; the trait being open, an override could hand any).
+    - The normals read the vertices' own samples: all of them for mesh normals, and the even
+      samples of `NormalScale::Double`, which are the vertices bit for bit (`sample_dir`'s
+      contract). A mesh-normal bake asks its source 5,314 times where it asked 9,540.
+    - R05's test planet takes the default, and its `bake.golden`, `collision.golden` and every R05
+      test are unchanged. R05's `bake_patch` over the whole field, through T3's source, equals
+      `bake_terrain` over a client's field surveyed there, byte for byte (tested).
+  - _The survey and the reference surface_ (Design note 12, a choice the plan leaves open).
+    - A vertex's mask is `SURVEYED` exactly where `SurveyView::resolution` of the field's level
+      cell holding it (`PatchKey::containing`, the synthesis's own cell rule) is a surveyed code.
+    - A vertex outside the survey, a margin cell's or a cell the view does not hold, is discarded by
+      the shader. The triangles from it to surveyed vertices are drawn up to the mask's half, so it
+      carries the ground wherever the view can make it: its height, gradient, morph target and
+      weights, the margin's cells being the server's to the bit. A vertex in the survey's first
+      margin ring nearly always can.
+    - Where the view cannot make a query, a vertex outside the survey takes the reference surface:
+      the datum, height 0 with a zero gradient, so the datum's normal, and no weights. The bake is
+      then not `is_complete()`.
+    - Each query takes it on its own. So such a vertex can be partly answered: its own height
+      real and its morph target the datum, or the reverse, or both heights real and the weights
+      refused. Its morph target is then what the parent patch bakes at that vertex, real ground or
+      the datum, so a child at morph one lies on its parent's mesh across the survey's edge too, as
+      R05's morph requires (tested). Making both the datum where either is refused would break
+      that.
+    - The alternative, the reference surface at every unsurveyed vertex, would draw the visible
+      half of each edge quad sloping halfway down to the datum in the terrain's appearance: the
+      "cliff in the ground" Design note 12's skirt is there to avoid. T10.c, which draws that skirt,
+      confirms the choice (lean, below).
+    - A surveyed vertex the view cannot make is a `NotSurveyed` error: its view lacks the margin
+      a survey brings.
+  - _Design note 16, as built._ A block of new cells changes no value at a vertex surveyed before
+    it (its heights, normals and weights), nor at a vertex outside the survey that was real ground,
+    while the patch's palette stays within eight (tested). A patch whose survey mask it leaves as it
+    was, and which was complete, bakes the same bytes. An incomplete patch can change while its mask
+    does not, once a block brings a cell its reference vertices' reads reach. So T6.b rebakes a
+    patch on a block that changes its mask, or on any block while it is incomplete: Design note
+    16's rebake rule, widened (the question below). A worker's cache filled before the block bakes
+    as a fresh one after it (tested), by `SynthCache`'s rule that a cache serves views whose held
+    cells only grow, which `bake_terrain`'s documentation repeats.
+  - _The palette_ is the union of the vertices' materials, in rising class code and then entry
+    (`GroundMaterial`'s order). It includes those of answered vertices outside the survey, whose
+    weights the edge quads' visible halves interpolate.
+    - T2's record left a patch needing more than eight "not handled at run time". It is handled now,
+      deterministically: the eight of largest summed bytes over the patch are kept, ties to the
+      lower material.
+    - A vertex holding a dropped material has the bytes of those kept made whole again in integers,
+      each share floored and the rest given by the largest remainder, ties to the lower slot. A
+      vertex all of whose materials are dropped takes the patch's heaviest material whole, so every
+      vertex with weights sums to 255 and only one without (outside the survey) has none.
+    - No patch of the tests passes eight. T2's test still names any that would. A block that
+      pushes a patch's union past eight re-makes the bytes at its surveyed vertices too.
+  - _The weights from the bake's samples._ Each vertex's weights are `weights_with_sample` at its
+    direction, given the height the bake made there. That is `weights_at`'s answer at the vertex's
+    (face, u, v) bit for bit (tested), without its second height. The finest level hands the sample
+    to `Point::with_sample`.
+  - _The bound and σ._ The bound is R09's `level_bound_m` at the patch's level: the body-wide
+    level bound, the per-patch bound of Design note 5 not being adopted. σ is the largest of R09's
+    `omitted_rms` at the level over the cells of the patch's surveyed vertices, 0 where none is
+    surveyed. It comes from the closed forms T2's weights keep by cell and level, and its root
+    is `omitted_rms` bit for bit (tested). T4.b's body-wide σ is its own.
+  - _The horizon map's slot._ `HorizonMap` is declared in `bake/layers.rs`: near and far words,
+    both empty (`is_empty`, `near_words`, `far_words`), as main ruled. T8.a fills it, and may move
+    it to its `bake/horizon.rs`. `encode_horizon`, `decode_horizon` and `far_field_point` are
+    T8.a's.
+  - _`scatter::ExtraLayer`_ is an empty `#[non_exhaustive]` enum in `src/scatter.rs`. It derives
+    only `Debug`, `Clone` and `PartialEq`, which R11's rock list of `f64` positions can keep.
+  - _The goldens_ (the determinism review's ask; the task names none), two, at header 22, in
+    `tests/golden/terrain_bake/`, a subdirectory of their own, written in the library under
+    `cfg(test)` (`bake::golden`) as T3's and T2's are, and compared on `wasm32-wasip1` and
+    `wasm32-unknown-unknown`:
+    - `moon_like.golden`: the edge patch over the 2 × 2 survey (incomplete), a patch inside it at
+      the high setting, and a patch on a coarse rim surveyed whole;
+    - `earth_like.golden`: patches at L + 3 on a coarse rim and at the finest level, surveyed
+      whole.
+
+    Each pins its arrays' digests (heights, offsets, normals, weights, mask), its scalars' bits and
+    its palette. The heights, gradients and weights under them are R09's and T2's goldens'; these
+    pin what the bake makes of them on every target, the mask's cell-edge vertices and the
+    reference surface among it. The bake is presentation, so a change to it alone re-blesses
+    `terrain_bake/` at the version in force with no bump, as `weights/` is (T2's record), and a
+    change to R09's heights or closed forms or to the classifier re-blesses it with theirs. A
+    `native_only` test holds the directory to `GENERATOR_VERSION`. Generator version untouched
+    (22).
+
+  - _Acceptance_, as built:
+    - `cargo test -p hyperion-surface bake`: 14 tests of `bake::tests` and 2 of `bake::golden`,
+      and R05's and R09's bake tests the filter also selects, 22 in all (6 s natively), and
+      `tests/panics.rs`'s new `bake` module (2);
+    - the wasm targets through smart-ci's wasip1 and browser suites (`just test-wasm-fast` in
+      `ci`);
+    - the bench, `bake/patch_65`, run as
+      `just _locked cargo bench -p hyperion-surface --features testing --bench bake -- bake/patch`
+      after its build outside the lock. `just bench -- bake/patch` measures the same (the
+      workspace's features turn `testing` on), but builds every bench of the workspace first.
+  - _Tests_ (`bake::tests`, `bake::golden`, `tests/panics.rs`'s `bake`):
+    - on every synthetic world, at the coarse level less one, plus two and the finest, a cube
+      corner's cell among them: every vertex surveyed and the bake complete; the bake byte for byte
+      R05's over the whole field through T3's source; each vertex's own and even morph heights R09's
+      `height_at` narrowed to `f32`;
+    - the survey mask, on a level-2 patch over a 2 × 2 survey of the Moon-like world: `SURVEYED`
+      exactly on surveyed cells' vertices, against `is_surveyed` and, off the cells' edges, the
+      lattice's integers. Of its 4,225 vertices 64 are surveyed, 2,240 in the margin (1,232 of them
+      answered, the true ground to the bit) and 1,921 not held (the reference surface, no weights).
+      The bake is incomplete;
+    - a resolution code alone changes no byte: four codings, 2 m, 50 m, 1 km and a mix, on an edge
+      patch with mesh normals and an inside patch with the high setting's;
+    - a block of the 2 × 2 cells beside the survey changes nothing at a vertex surveyed before,
+      nor at an unsurveyed vertex that was real ground; the inside patch, complete, bakes the same
+      bytes; and a cache kept across the block bakes as a fresh one, at both settings;
+    - order and cache independence (`assert_order_independent`, and each against a fresh cache)
+      over a patch on a coarse rim, two neighbours, its parent and two children; and over the
+      survey's edge, among them three incomplete bakes;
+    - a child at morph one lies on its parent across the survey's edge: its morph targets at even
+      vertices are its parent's heights, bit for bit;
+    - each vertex's weights are `weights_at`'s at its (face, u, v), the palette their union in
+      order, and the bytes sum to 255, on the Earth- and Moon-like worlds at three levels;
+    - the bound and σ, with and without the weights, on edge, inside and unheld patches;
+    - the weights skipped leave the rest as baked;
+    - each hook is handed the key and the heights in turn, and hooks change no byte;
+    - a patch wholly outside the survey, on a held and an empty view, is the reference surface
+      with the datum's normals at both resolutions;
+    - the palette's union and order, past eight, its ties, the largest remainder and the heaviest
+      material for a vertex of dropped ones;
+    - the goldens, and their header;
+    - two `should_panic`: a negative skirt margin, refused before any height is asked, and a
+      source whose patch heights are another patch's.
+  - _The bench_ (on the development machine, a Ryzen 7 3700X; provisional, as main ruled, until
+    R09's fused interpolant lands: the release profile, one thread, under the heavy lock with
+    `HEAVY_CPU_QUOTA=1200%`, schedutil; load 3.3, 10.1 and 10.6 at the first run's start, and 9.4,
+    8.1 and 9.4 at the breakdown's), each patch warm from a first bake unless named cold:
+
+    | Patch                     | Weights  | No weights | Cold, weights | High setting | Heights, client | Heights, whole field |
+    | ------------------------- | -------- | ---------- | ------------- | ------------ | --------------- | -------------------- |
+    | Earth-like, L + 4 (12)    | 161.8 ms | 139.2 ms   | 165.7 ms      | 476.4 ms     | 136.0 ms        | 104.1 ms             |
+    | Earth-like, 19            | 168.1 ms | 158.4 ms   |               |              | 157.6 ms        | 125.3 ms             |
+    | Moon-like rim, L + 4 (10) | 60.2 ms  | 40.9 ms    |               |              | 40.0 ms         | 36.6 ms              |
+    - The 40 ms is the UHD 620 laptop's budget, on two of its cores. The desktop's figure is over
+      it on every patch, with the weights and without, so by the 2026-09-30 rule (Risks, "The
+      hardware decisions") the desktop fails it. It stands provisional, as main ruled, until R09's
+      fused interpolant lands. R09's heights are almost all of it: R05's arrays add 1–3 ms.
+    - The weights add 23 ms at L + 4 (5.4 µs a vertex), 10 ms at 19 and 19 ms on the Moon-like
+      rim, against T2's 21–26 µs a vertex from a point query: the bake's sample and the forms kept
+      by cell spare most of it.
+    - The high setting's double normals ask 12,416 more points: 3 times the low setting's bake.
+    - The owner's figures on the i7-8665U stay pending by hand.
+- **Questions for "main" (R10.T6.a)** (built to the lean).
+  - _The height at an unsurveyed vertex._ It touches Design note 16's rebake rule, which T6.b
+    builds, and reads T6.a's block test per vertex. Lean, built: the true ground where the view can
+    make it, else the reference surface with `is_complete()` false (above), so that T10.c's skirt
+    hangs from the drawn ground's own edge. Then Design note 16's "only patches whose survey mask
+    it changes are rebaked" becomes "and every incomplete patch on any block", and "a new chunk
+    never changes a baked height" holds at every vertex surveyed before, or answered before. The
+    alternative is the reference surface at every unsurveyed vertex, whose bake no block changes
+    without changing its mask, but whose edge quads draw a slope of terrain halfway down to the
+    datum. Either way the ground is drawn up to half a quad past the mask's edge: real margin
+    ground under the lean, an invented slope under the alternative, which T10.c may address.
+    Once ruled, Design note 16 takes a pointer here.
+- **Deferred findings (2026-10-13 rule)** (R10.T6.a; recorded, not ruled; each leaves the algorithm
+  and the contracts as they are).
+  - _The bake's budget._ 162 ms with the weights and 139 ms without, on the Earth-like L + 4
+    patch, against the laptop's 40 ms, of which R09's heights are 136 ms. R09's fused interpolant
+    pass (queued) is the lever, before this bench's quiet figure.
+  - _A client's field costs a quarter more a height._ R09's bake of the same patch reads 31% longer
+    over the client's `PartialField` than over the whole `CoarseField` at the Earth-like L + 4, 26%
+    at 19 and 9% on the Moon-like rim: the channels read cells most. Not profiled. The
+    `PartialField`'s slots are `Option<SynthesisCell>`, and each read checks the level and the
+    slot (R09's `field/partial.rs`); a dense array with a held bitmap is a lever.
+  - _The high setting's normals_ triple the bake (476 ms): R09's bake makes the vertices' heights,
+    and the double grid's 12,416 other samples are asked one by one. R09 baking the double grid
+    with the cover, or double normals only near the camera, are levers.
+  - _Coarse patches' closed forms._ A patch below the coarse level less six has each vertex in a
+    coarse cell of its own, so its weights and σ compute the level-keyed forms afresh at every
+    vertex (50–150 µs, R09.T7.h): some 0.2–0.6 s a patch on a cratered world, not measured.
+    R09.T7.h's table by band level is the lever.
+  - _The weights' per-vertex site_ (T2's finding) stands. The bake spares the height and the kept
+    forms, and the site is still built at every vertex.
+  - _Unsurveyed vertices in the palette._ An edge patch's palette holds the materials of its
+    answered unsurveyed vertices, so a material none of its drawn ground shows can take a slot.
 - **Deviations in T1.a's slope follow-up, as built** (2026-10-14, lane 12, on R10.T1.b at
-  `ba371487` and merged with R10.T5 at `1a56ee17`, with the brief's amendments of 2026-10-14: the
-  sign-off of T12's drafts, and the ruling on the geometry). Files: `material/bearing.rs` and `material/mod.rs`. The level figures
-  T1.b's table golden pins are unchanged, so no golden moves and `GENERATOR_VERSION` stays 21.
+  `ba371487`, merged with R10.T5 at `1a56ee17` and with R10.T6.a at `373a0158`, with the brief's
+  amendments of 2026-10-14: the sign-off of T12's drafts, and the ruling on the geometry). Files:
+  `material/bearing.rs` and `material/mod.rs`. The level figures T1.b's table golden pins are
+  unchanged, so no golden moves, and the lane bumps no `GENERATOR_VERSION` (21 when built, 22
+  after the merge with the 21 → 22 batch).
   - _The factors: the flush pad in its base's frame_ (ruled 2026-10-14 on the issue, reading F).
     The brief named Vesić's ground-inclination factors and the base-tilt factors that go with
     them. The capacity instead takes the base frame's inclination and soil-inertia factors.

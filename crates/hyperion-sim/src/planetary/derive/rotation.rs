@@ -26,10 +26,6 @@
 //! core's tide seen from the envelope's top ([`love_number_under_envelope`]), with
 //! Q = 1.03 × 10⁴ ([`ENVELOPED_TIDAL_Q`]).
 //!
-//! P14.T14.d is held until the 21 → 22 batch's bump (plan 14, "Order and parallelism"): below
-//! version 22 the generator gives every class its earlier pair, a rocky body's to every class
-//! with a surface and a giant's to the giants, so that the batch's goldens move once, at its bump.
-//!
 //! The spin rate falls (or rises) linearly with the system's age from ω to the locked rate over τ
 //! and stays there: synchronous, the orbit's mean motion n, or 1.5 n in the 3:2 state for an orbit
 //! more eccentric than [`SPIN_ORBIT_RESONANCE_ECCENTRICITY`] ([`SpinOrbitResonance`]). The
@@ -45,6 +41,7 @@ use core::f64::consts::{PI, TAU};
 use std::error::Error;
 use std::fmt;
 
+use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
 use crate::orbit::KeplerElements;
@@ -65,7 +62,6 @@ use crate::stellar::draws::UnitUniform;
 use crate::time::{Span, UniverseTime};
 use crate::units::consts::GRAVITATIONAL_CONSTANT;
 use crate::units::{EarthMasses, EarthRadii, Kilograms, Metres, Radians, Seconds, Years};
-use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
 /// Words of [`tags::PLANET_SPIN`] a body reads or reserves: words 0–3, [`SpinDraws`], then four
 /// reserved.
@@ -173,21 +169,22 @@ impl SpinDraws {
 /// Which primordial period law a body follows (P14.T14.a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SpinFamily {
-    /// Every class with a surface: log-normal about [`ROCKY_PRIMORDIAL_PERIOD`].
+    /// Every class but the giants, sub-Neptunes included: log-normal about
+    /// [`ROCKY_PRIMORDIAL_PERIOD`].
     Rocky,
     /// The ice and gas giants: log-normal about [`GIANT_PRIMORDIAL_PERIOD`].
     Giant,
 }
 
 impl SpinFamily {
-    /// The family of a body of class `class`: [`Giant`](Self::Giant) for the classes without a
-    /// surface, the ice and gas giants.
+    /// The family of a body of class `class`: [`Giant`](Self::Giant) for the ice and gas giants
+    /// ([`PlanetClass::is_giant`]), [`Rocky`](Self::Rocky) otherwise.
     #[must_use]
     pub const fn of(class: PlanetClass) -> Self {
-        if class.has_surface() {
-            Self::Rocky
-        } else {
+        if class.is_giant() {
             Self::Giant
+        } else {
+            Self::Rocky
         }
     }
 
@@ -322,11 +319,6 @@ impl SpinningBody {
     /// with its moment of inertia ([`moment_of_inertia_factor`]) and its tides ([`tides`],
     /// P14.T14.d).
     ///
-    /// Until the 21 → 22 batch's bump the tides are the class's earlier pair: a rocky body's
-    /// k₂ = 0.3 and Q = 100 for every class with a surface, a giant's 0.4 and 10⁵ otherwise
-    /// (P14.T14.b's pairs, [`ROCKY_LOVE_NUMBER`] and [`ROCKY_TIDAL_Q`], [`GIANT_LOVE_NUMBER`] and
-    /// [`GIANT_TIDAL_Q`]; see the [module](self) documentation).
-    ///
     /// # Errors
     ///
     /// As [`new`](Self::new), for a mass or radius that is not positive and finite.
@@ -336,7 +328,7 @@ impl SpinningBody {
         class: PlanetClass,
         fractions: &MassFractions,
     ) -> Result<Self, BuildSpinningBodyError> {
-        let (love_number, tidal_q) = tides_in_force(
+        let (love_number, tidal_q) = tides(
             class,
             EarthMasses::from(mass),
             EarthRadii::from(radius),
@@ -465,9 +457,6 @@ pub fn moment_of_inertia_factor(class: PlanetClass, fractions: &MassFractions) -
 /// body's modified quality factor Q′ = 3Q ÷ 2k₂ runs from about 2.5 × 10⁴ under a 0.1% envelope to
 /// about 5 × 10⁵, and is 1–4.6 × 10⁵ under 7–25% of envelope. It is 1.6 × 10⁵ for the generated
 /// Uranus and 1.3 × 10⁵ for Neptune.
-///
-/// Held until the 21 → 22 batch's bump: below generator version 22 the generator gives every
-/// class its earlier pair instead (see the [module](self) documentation).
 #[must_use]
 pub fn tides(
     class: PlanetClass,
@@ -482,39 +471,6 @@ pub fn tides(
             ENVELOPED_TIDAL_Q,
         ),
         PlanetClass::GasGiant => (GIANT_LOVE_NUMBER, GIANT_TIDAL_Q),
-    }
-}
-
-/// The generator version from which every reader of a body's tides takes [`tides`]: 22, the
-/// 21 → 22 batch's bump (P14.T14.d; plan 14, "Order and parallelism", the bump plan).
-///
-/// P14.T14.d is built first in that batch, whose goldens move once, at its bump in P14.T48.e.
-/// Below it [`tides_in_force`] gives every class its earlier pair, so that no golden moves before
-/// the batch's wiring, and from it [`tides`]. The bump removes this hold
-/// (`the_envelope_s_tides_are_held_only_until_the_batch_s_bump`).
-pub(crate) const ENVELOPED_TIDES_VERSION: GeneratorVersion = GeneratorVersion::new(22);
-
-/// The k₂ and Q the generator gives a body of class `class`, mass `mass`, radius `radius` and mass
-/// fractions `fractions` (P14.T14.d, held): [`tides`] from [`ENVELOPED_TIDES_VERSION`], and below
-/// it the class's earlier pair, a rocky body's for `Rocky`, `Icy` and `SubNeptune` and a giant's
-/// for `IceGiant` and `GasGiant` (P14.T14.b; P14.T16.a as built), bit for bit what version 21
-/// gives.
-#[must_use]
-pub(crate) fn tides_in_force(
-    class: PlanetClass,
-    mass: EarthMasses,
-    radius: EarthRadii,
-    fractions: &MassFractions,
-) -> (f64, f64) {
-    if GENERATOR_VERSION >= ENVELOPED_TIDES_VERSION {
-        tides(class, mass, radius, fractions)
-    } else {
-        match class {
-            PlanetClass::Rocky | PlanetClass::Icy | PlanetClass::SubNeptune => {
-                (ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q)
-            }
-            PlanetClass::IceGiant | PlanetClass::GasGiant => (GIANT_LOVE_NUMBER, GIANT_TIDAL_Q),
-        }
     }
 }
 
@@ -1748,33 +1704,19 @@ mod tests {
         assert!((0.09..0.13).contains(&sub_neptune.0), "{}", sub_neptune.0);
     }
 
-    /// A body of class `class` with [`tides`] and its one moment of inertia: what
-    /// [`SpinningBody::of_class`] gives from the 21 → 22 batch's bump.
-    fn with_its_tides(
-        mass: f64,
-        radius: f64,
-        class: PlanetClass,
-        fractions: &MassFractions,
-    ) -> SpinningBody {
-        let (mass, radius) = (EarthMasses::new(mass), EarthRadii::new(radius));
-        let (k2, q) = tides(class, mass, radius, fractions);
-        SpinningBody::new(
-            Kilograms::from(mass),
-            Metres::from(radius),
-            moment_of_inertia_factor(class, fractions),
-            k2,
-            q,
-        )
-        .unwrap()
-    }
-
     /// P14.T14.d: from a 15-hour spin, a 5 M⊕ sub-Neptune of 2% envelope at 2.4 R⊕ locks within
     /// 100 Myr at 0.1 au of a Sun and within 1 Gyr at 0.07 au of a 0.2 M☉ star, and does not lock
     /// within 10 Gyr at 0.35 au of a Sun, where a rocky body's tides would lock it within 100 Myr.
     #[test]
     fn a_sub_neptune_locks_only_close_in() {
         let fractions = sub_neptune();
-        let planet = with_its_tides(5.0, 2.4, PlanetClass::SubNeptune, &fractions);
+        let planet = SpinningBody::of_class(
+            Kilograms::from(EarthMasses::new(5.0)),
+            Metres::from(EarthRadii::new(2.4)),
+            PlanetClass::SubNeptune,
+            &fractions,
+        )
+        .unwrap();
         let au = METRES_PER_AU;
         let close = lock(&planet, 0.1 * au, SOLAR_MASS_KG);
         assert!(close < 100.0 * MYR, "{} Myr at 0.1 au", close / MYR);
@@ -1794,38 +1736,26 @@ mod tests {
         assert!(rocky_far < 100.0 * MYR, "{} Myr", rocky_far / MYR);
     }
 
-    /// P14.T14.d is held until the 21 → 22 batch's bump, so that the batch's goldens move once:
-    /// until then [`SpinningBody::of_class`] takes [`tides_in_force`], which gives every class
-    /// version 21's pair. The bump removes the hold, and this test with it.
+    /// Every reader of a body's tides takes [`tides`] (P14.T14.d, in force from the 21 → 22
+    /// batch's bump): [`SpinningBody::of_class`] carries its pair bit for bit, read at the mass
+    /// and radius it rounds through, with the class's one moment of inertia.
     #[test]
-    fn the_envelope_s_tides_are_held_only_until_the_batch_s_bump() {
-        assert!(
-            GENERATOR_VERSION < ENVELOPED_TIDES_VERSION,
-            "the 21 → 22 bump applies `tides` to every reader: call `tides` where \
-             `tides_in_force` is called, and remove it, `ENVELOPED_TIDES_VERSION` and this test \
-             (plan 14, P14.T14.d as built)"
+    fn every_class_s_spinning_body_takes_its_tides() {
+        let (kilograms, metres) = (
+            Kilograms::from(EarthMasses::new(5.0)),
+            Metres::from(EarthRadii::new(2.4)),
         );
-        let (mass, radius) = (EarthMasses::new(5.0), EarthRadii::new(2.4));
+        let (mass, radius) = (EarthMasses::from(kilograms), EarthRadii::from(metres));
         let fractions = sub_neptune();
-        let rocky = (ROCKY_LOVE_NUMBER, ROCKY_TIDAL_Q);
-        let giant = (GIANT_LOVE_NUMBER, GIANT_TIDAL_Q);
-        for (class, (k2, q)) in [
-            (PlanetClass::Rocky, rocky),
-            (PlanetClass::Icy, rocky),
-            (PlanetClass::SubNeptune, rocky),
-            (PlanetClass::IceGiant, giant),
-            (PlanetClass::GasGiant, giant),
+        for class in [
+            PlanetClass::Rocky,
+            PlanetClass::Icy,
+            PlanetClass::SubNeptune,
+            PlanetClass::IceGiant,
+            PlanetClass::GasGiant,
         ] {
-            let (love, quality) = tides_in_force(class, mass, radius, &fractions);
-            assert_same_bits(love, k2);
-            assert_same_bits(quality, q);
-            let held = SpinningBody::of_class(
-                Kilograms::from(mass),
-                Metres::from(radius),
-                class,
-                &fractions,
-            )
-            .unwrap();
+            let (k2, q) = tides(class, mass, radius, &fractions);
+            let held = SpinningBody::of_class(kilograms, metres, class, &fractions).unwrap();
             assert_same_bits(held.love_number(), k2);
             assert_same_bits(held.tidal_q(), q);
             assert_same_bits(

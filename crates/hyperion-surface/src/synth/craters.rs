@@ -86,12 +86,41 @@
 //! The craters are a Poisson field of zero-mean profiles, so octave k's variance is its density
 //! times its craters' mean ∫h² dA (Campbell's theorem), over its diameters and its window's ages,
 //! each at full resolution its fresh profile times its relief factor ([`CraterOctave::variance`]).
-//! Each octave's variance is placed on the wavelengths of its diameters, so that the variance
-//! finer than a wavelength λ takes the share clamp(ln(λ ÷ D₀) ÷ ln(D₁ ÷ D₀), 0, 1) of octave k,
-//! D₀ to D₁ the diameters it keeps (log₂(λ ÷ D) for a whole octave from D), and the structure
-//! function at a lag b adds
-//! 2 σ² (1 − J₀(2π b ÷ `λ_k`)) for each, `λ_k` = √(D₀ D₁) their geometric mean, as R10's bands do
-//! ([`CraterOctaves::unresolved_variance`], [`CraterOctaves::structure_function`]).
+//!
+//! What a level of band w leaves out of the finest level's ground is a Poisson field too
+//! (`decision-r10-t5-closed-forms.md` §2; R09.T7.h). The ground holds every crater filleted at the
+//! band limit's half-width, `w₂` = 1 m, as g F(`w₂`), F(w) its fresh shape filleted over w
+//! ([`CraterProfile::filleted`]) and g its relief factor; the level holds the craters of the
+//! octaves it keeps as g F(w), and none of the others. So the difference is two independent
+//! shot noises, each of zero mean, since every profile integrates to zero at every fillet:
+//!
+//! - an octave the level keeps adds its sharpening, its density times its craters' mean
+//!   g² ∫ (F(`w₂`) − F(w))² dA over its diameters and its window's ages, `Φ_k`(w): the coarse rims'
+//!   form ([`rims`], R09.T7.c) over a Poisson population;
+//! - an octave it leaves out adds its ground variance, the same mean of g² ∫ F(`w₂`)² dA, `G_k`:
+//!   its craters at the ground's fillet, not the fresh profile.
+//!
+//! Both are sums at the octave's own eight nodes in diameter, as its variance is, with the same
+//! mean of g² over the ages, and the radial integrals are Gauss–Legendre on the profiles'
+//! polynomial pieces, exact to rounding.
+//!
+//! The wavelength-keyed forms ([`CraterOctaves::unresolved_variance`],
+//! [`CraterOctaves::structure_function`]) place each octave on the wavelengths of its diameters:
+//! finer than a wavelength λ, the share `s_k` = clamp(ln(λ ÷ D₀) ÷ ln(D₁ ÷ D₀), 0, 1) of octave k,
+//! D₀ to D₁ the diameters it keeps (log₂(λ ÷ D) for a whole octave from D), is left out, at
+//! `G_k`, and the rest is kept and sharpened at half the wavelength, `Φ_k`(max(½ λ, `w₂`)). The
+//! level-keyed forms, R10.T5's
+//! ([`Synthesiser::omitted_variance`](super::Synthesiser::omitted_variance)), take the octaves the
+//! level keeps at its band and the others whole. Both are zero at the band limit and below.
+//!
+//! The structure function at a lag b adds 2 `s_k` `G_k` (1 − J₀(2π b ÷ `λ_k`)) for an octave's
+//! share left out, `λ_k` = √(D₀ D₁) the geometric mean of its diameters, as R10's bands do; and for
+//! its share kept, the rims' 2Φ (1 − exp(−S b² ÷ 2Φ)), with S its sharpening's slopes' mean square
+//! along a random direction, the same sum over ½ ∫ |∇(F(`w₂`) − F(w))|² dA. The sharpening lies
+//! mostly on an annulus about the fillet's width whatever the crater's size, so its spectrum is
+//! near the band, not near D, though the term that restores the fillet's volume spreads part of it
+//! over the whole reach; the form's small-lag limit, S b², and its long-lag one, 2Φ, are both
+//! exact.
 //!
 //! # The coarse craters
 //!
@@ -114,7 +143,7 @@ use hyperion_base::math;
 use hyperion_base::rng::{DetailSeed, ObjectKey, Stream, Threshold};
 use hyperion_base::units::{Gigayears, Metres, PerSquareKilometre, SquareMetres};
 
-use super::BandLevel;
+use super::{BandLevel, LevelSet};
 use crate::craters::chronology::{EXPONENTIAL_COEFFICIENT, EXPONENTIAL_RATE, LINEAR_RATE};
 use crate::craters::density::GAUSS_LEGENDRE_8;
 use crate::craters::{
@@ -133,6 +162,11 @@ use crate::tags::SURFACE_CRATER;
 /// last octave straddles it and keeps the craters it draws from it up; narrower craters are R11's
 /// decoration, 1–2 m craters being typically 0.05–0.1 m deep (Design note 12).
 pub const SMALLEST_DIAMETER: Metres = Metres::new(BAND_LIMIT_M);
+
+/// The fillet half-width of the finest level's ground, `w₂`: ½ [`BAND_LIMIT_M`], 1 m, the
+/// [`band_half_width`] of every level from the band limit's, against which the closed forms count
+/// what a level leaves out (the module documentation).
+const GROUND_FILLET: Metres = Metres::new(0.5 * BAND_LIMIT_M);
 
 /// The widest exterior of any crater shape, in rim radii: 1.543, just above the fresh bowl's
 /// 1.5426 (d ÷ h = 5.42), which bounds every shape's a (R09.T7.a and T7.e hold it from 10⁻⁴ to
@@ -515,6 +549,9 @@ pub struct CraterOctave {
     window: Gigayears,
     window_density: PerSquareKilometre,
     variance: SquareMetres,
+    /// Its variance at the ground's fillet, `G_k`, square metres, by the same nodes as the
+    /// variance (R09.T7.h).
+    ground_variance: SquareMetres,
     /// The mean area its kept craters' reaches cover, π ((1 + a) R)², square metres, by the same
     /// nodes as the variance (R09.T8's level bound).
     reach_area_m2: f64,
@@ -596,6 +633,61 @@ impl CraterOctave {
     pub const fn variance(&self) -> SquareMetres {
         self.variance
     }
+
+    /// Its variance at the ground's fillet, `G_k`, square metres: [`variance`](Self::variance) with
+    /// each crater filleted over [`GROUND_FILLET`], 1 m, in place of its fresh profile; what an
+    /// octave a level leaves out adds to what the level leaves out (the module documentation).
+    #[must_use]
+    pub(crate) const fn ground_variance(&self) -> SquareMetres {
+        self.ground_variance
+    }
+}
+
+/// One of an octave's eight nodes in diameter, at which its closed forms are summed (the module
+/// documentation): the crater of that diameter at the ground's fillet and its weight.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct OctaveNode {
+    /// The node's crater, its fresh shape filleted over [`GROUND_FILLET`].
+    ground: CraterProfile,
+    /// The node's Gauss–Legendre weight in the octave's mean over its diameters, ½ ω, times the
+    /// crater's disc of rim radius R, π R², square metres.
+    disc_m2: f64,
+    /// The mean of g² over the octave's window for the node's rim radius
+    /// ([`mean_square_relief`]).
+    relief2: f64,
+}
+
+/// An octave's sharpening at a level's band (the module documentation): what the octave adds to
+/// what the level leaves out of the ground where the level keeps it.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub(crate) struct Sharpening {
+    /// Its variance, `Φ_k`, square metres.
+    pub(crate) variance_m2: f64,
+    /// Its slopes' mean square along a random direction, `S_k`, square metres per square metre.
+    pub(crate) slope2: f64,
+}
+
+/// One crater's sharpening from a fillet of half-width `band` to the ground's ([`GROUND_FILLET`]),
+/// before its relief factor: ∫ (F(`w₂`) − F(w))² 2x dx, square metres, and
+/// ∫ (F′(`w₂`) − F′(w))² 2x dx, square metres per square rim radius, over its reach in rim radii,
+/// with F(w) its fresh shape filleted over w ([`CraterProfile::filleted`]) and `ground` that shape
+/// filleted over the ground's, F(`w₂`).
+///
+/// Both are zero, to the bit, where the two fillets are one: a band no wider than the ground's,
+/// or both held at min(1, a) rim radii. The integrals are the coarse rims' ([`rims`]), exact to
+/// rounding on the profiles' polynomial pieces.
+///
+/// # Panics
+///
+/// If `band` is not finite and non-negative.
+#[must_use]
+fn sharpening_moments(ground: &CraterProfile, band: Metres) -> (f64, f64) {
+    let level = CraterProfile::filleted(ground.shape, band);
+    // Neither fillet is a NaN, since both bands are finite.
+    if level.fillet <= ground.fillet {
+        return (0.0, 0.0);
+    }
+    rims::difference_moments(ground, &level)
 }
 
 /// What a body's small craters are drawn from, beyond the detail seed: what a cache's craters
@@ -614,6 +706,8 @@ struct Inputs {
 pub struct CraterOctaves {
     inputs: Inputs,
     octaves: Vec<CraterOctave>,
+    /// Each octave's nodes, by index: none for an octave of no density.
+    nodes: Vec<Vec<OctaveNode>>,
 }
 
 impl CraterOctaves {
@@ -667,6 +761,7 @@ impl CraterOctaves {
         let surface_density = lunar_chronology(surface_age, system);
         let smallest_radius_m = num::min(figure.equatorial_radius_m, figure.polar_radius_m);
         let mut octaves: Vec<CraterOctave> = Vec::new();
+        let mut nodes: Vec<Vec<OctaveNode>> = Vec::new();
         let mut lower_m = d_b;
         for index in 0..MAX_OCTAVES {
             lower_m *= 0.5;
@@ -715,12 +810,21 @@ impl CraterOctaves {
                 window,
                 window_density,
                 variance: SquareMetres::ZERO,
+                ground_variance: SquareMetres::ZERO,
                 reach_area_m2: 0.0,
             };
-            (octave.variance, octave.reach_area_m2) = octave_moments(&params, &octave);
+            let moments = octave_moments(&params, &octave);
+            octave.variance = moments.variance;
+            octave.ground_variance = moments.ground_variance;
+            octave.reach_area_m2 = moments.reach_area_m2;
             octaves.push(octave);
+            nodes.push(moments.nodes);
         }
-        Self { inputs, octaves }
+        Self {
+            inputs,
+            octaves,
+            nodes,
+        }
     }
 
     /// The octaves, from the largest.
@@ -729,10 +833,12 @@ impl CraterOctaves {
         &self.octaves
     }
 
-    /// The craters' variance in wavelengths shorter than `finer_than`, square metres: each octave's
-    /// variance times the share of its kept diameters D₀ to D₁ below λ,
-    /// clamp(ln(λ ÷ D₀) ÷ ln(D₁ ÷ D₀), 0, 1) (the module documentation), summed from the largest.
-    /// Zero at the 2 m band limit and below, and non-decreasing in λ.
+    /// The craters' variance in wavelengths shorter than `finer_than`, square metres (the module
+    /// documentation): over the octaves from the largest, Σ [`s_k` `G_k` + (1 − `s_k`) `Φ_k`(w)],
+    /// the share `s_k` = clamp(ln(λ ÷ D₀) ÷ ln(D₁ ÷ D₀), 0, 1) of octave k's kept diameters D₀ to
+    /// D₁ below λ counted at its ground variance `G_k`, and the rest at its sharpening from
+    /// w = max(½ λ, 1 m) to the ground's 1 m fillet. Zero at the 2 m band limit and below, and
+    /// non-decreasing in λ (tested).
     ///
     /// # Panics
     ///
@@ -740,18 +846,15 @@ impl CraterOctaves {
     #[must_use]
     pub fn unresolved_variance(&self, finer_than: Metres) -> SquareMetres {
         let w = wavelength(finer_than);
-        let mut variance = 0.0;
-        for octave in &self.octaves {
-            variance += band_share(w, octave) * octave.variance.value();
-        }
-        SquareMetres::new(variance)
+        self.variance_with(wavelength_band(w), |octave| band_share(w, octave))
     }
 
     /// The craters' structure function at `lag` in wavelengths shorter than `finer_than`, square
-    /// metres: Σ `s_k` 2 `σ_k`² (1 − J₀(2π b ÷ `λ_k`)) over the octaves, `s_k` each one's share of
-    /// [`unresolved_variance`](Self::unresolved_variance) and `λ_k` the geometric mean of the
-    /// diameters it keeps, √2 times its lower for a whole octave (the module documentation). Zero
-    /// at no lag, and twice the unresolved variance far beyond the octaves' diameters.
+    /// metres (the module documentation): over the octaves, Σ [`s_k` 2 `G_k` (1 − J₀(2π b ÷
+    /// `λ_k`)) + (1 − `s_k`) 2 `Φ_k` (1 − exp(−`S_k` b² ÷ 2 `Φ_k`))], with `s_k`, `G_k` and `Φ_k` as in [`unresolved_variance`](Self::unresolved_variance), `λ_k`
+    /// the geometric mean of the diameters octave k keeps, √2 times its lower for a whole octave,
+    /// and `S_k` its sharpening's slopes' mean square along a random direction. Zero at no lag, and
+    /// twice the unresolved variance far beyond the octaves' diameters.
     ///
     /// # Panics
     ///
@@ -759,21 +862,139 @@ impl CraterOctaves {
     #[must_use]
     pub fn structure_function(&self, finer_than: Metres, lag: Metres) -> SquareMetres {
         let w = wavelength(finer_than);
-        let b = lag.value();
-        assert!(
-            b.is_finite() && b >= 0.0,
-            "a lag must be finite and non-negative, got {b} m"
-        );
-        let mut d = 0.0;
-        for octave in &self.octaves {
-            let share = band_share(w, octave);
+        assert_lag(lag);
+        self.structure_with(wavelength_band(w), lag, |octave| band_share(w, octave))
+    }
+
+    /// The craters' part of what band level `set.level()` leaves out of the finest level's ground,
+    /// square metres: R10.T5's level-keyed form (`decision-r10-t5-closed-forms.md` §2; R09.T7.h),
+    /// Σ `Φ_k`(`w_n`) over the octaves the level keeps, through [`LevelSet::craters_through`],
+    /// sharpened from its band `w_n` ([`band_half_width`]) to the ground's, plus Σ `G_k` over the
+    /// octaves it leaves out, whole at the ground's fillet. Zero from the band limit's level.
+    #[must_use]
+    pub(crate) fn omitted_variance(&self, set: &LevelSet) -> SquareMetres {
+        let band = band_half_width(&self.inputs.figure, set.level());
+        self.variance_with(band, |octave| left_out_by(set, octave))
+    }
+
+    /// The structure function at `lag` of [`omitted_variance`](Self::omitted_variance)'s ground,
+    /// square metres: 2 `Φ_k` (1 − exp(−`S_k` b² ÷ 2 `Φ_k`)) for each octave the level keeps and
+    /// 2 `G_k` (1 − J₀(2π b ÷ `λ_k`)) for each it leaves out, summed from the largest.
+    ///
+    /// # Panics
+    ///
+    /// If `lag` is not finite and non-negative.
+    #[must_use]
+    pub(crate) fn omitted_structure_function(&self, set: &LevelSet, lag: Metres) -> SquareMetres {
+        assert_lag(lag);
+        let band = band_half_width(&self.inputs.figure, set.level());
+        self.structure_with(band, lag, |octave| left_out_by(set, octave))
+    }
+
+    /// Octave `k`'s sharpening at a level of band half-width `band` (the module documentation):
+    /// its density per m² times, over its nodes, ½ ω π R² E[g²] times the crater's
+    /// [`sharpening_moments`], the slopes' moment per square metre and halved for a random
+    /// direction. Zero for an octave of no density, and at a band no wider than the ground's.
+    ///
+    /// # Panics
+    ///
+    /// If the body has no octave `k`; or, for an octave of any density, if `band` is not finite and
+    /// non-negative.
+    #[must_use]
+    pub(crate) fn sharpening(&self, k: usize, band: Metres) -> Sharpening {
+        let density_per_m2 = self.octaves[k].density().value() * 1e-6;
+        let (mut square, mut slope) = (0.0, 0.0);
+        for node in &self.nodes[k] {
+            let (heights, slopes) = sharpening_moments(&node.ground, band);
+            let rim_m = 0.5 * node.ground.shape.diameter().value();
+            square += node.disc_m2 * heights * node.relief2;
+            slope += node.disc_m2 * (0.5 * slopes / (rim_m * rim_m)) * node.relief2;
+        }
+        Sharpening {
+            variance_m2: num::assert_finite(density_per_m2 * square),
+            slope2: num::assert_finite(density_per_m2 * slope),
+        }
+    }
+
+    /// The variance of the craters' ground that a band half-width `band` leaves out, with the
+    /// share `left_out(octave)` of each octave left out, at its ground variance, and the rest
+    /// kept, at its sharpening at `band`: the octaves' terms summed from the largest, each share
+    /// left out before the share kept.
+    #[must_use]
+    fn variance_with(&self, band: Metres, left_out: impl Fn(&CraterOctave) -> f64) -> SquareMetres {
+        let mut variance = 0.0;
+        for (k, octave) in self.octaves.iter().enumerate() {
+            let share = left_out(octave);
             if share > 0.0 {
-                let k = 2.0 * core::f64::consts::PI / octave_wavelength(octave);
-                d += share * 2.0 * octave.variance.value() * (1.0 - math::j0(k * b));
+                variance += share * octave.ground_variance().value();
+            }
+            if share < 1.0 {
+                variance += (1.0 - share) * self.sharpening(k, band).variance_m2;
+            }
+        }
+        SquareMetres::new(variance)
+    }
+
+    /// The structure function at `lag` of [`variance_with`](Self::variance_with)'s ground, summed
+    /// in its order: each share left out on its octave's J₀ ring, each share kept by the rims'
+    /// form.
+    #[must_use]
+    fn structure_with(
+        &self,
+        band: Metres,
+        lag: Metres,
+        left_out: impl Fn(&CraterOctave) -> f64,
+    ) -> SquareMetres {
+        let b = lag.value();
+        let mut d = 0.0;
+        for (k, octave) in self.octaves.iter().enumerate() {
+            let share = left_out(octave);
+            if share > 0.0 {
+                let wavenumber = 2.0 * core::f64::consts::PI / octave_wavelength(octave);
+                d += share
+                    * 2.0
+                    * octave.ground_variance().value()
+                    * (1.0 - math::j0(wavenumber * b));
+            }
+            if share < 1.0 {
+                let sharpening = self.sharpening(k, band);
+                if sharpening.variance_m2 > 0.0 {
+                    let saturation = 2.0 * sharpening.variance_m2;
+                    d += (1.0 - share)
+                        * saturation
+                        * -math::exp_m1(-sharpening.slope2 * b * b / saturation);
+                }
             }
         }
         SquareMetres::new(d)
     }
+}
+
+/// The share of `octave` that the level of `set` leaves out: none of an octave it keeps, all of
+/// one it does not ([`LevelSet::keeps_crater_octave`], by the octave's index).
+#[must_use]
+fn left_out_by(set: &LevelSet, octave: &CraterOctave) -> f64 {
+    if set.keeps_crater_octave(octave.index()) {
+        0.0
+    } else {
+        1.0
+    }
+}
+
+/// The fillet the wavelength-keyed forms sharpen the octaves they keep from: half the wavelength
+/// `w_m` metres, never finer than the ground's ([`GROUND_FILLET`]).
+#[must_use]
+fn wavelength_band(w_m: f64) -> Metres {
+    Metres::new(num::max(0.5 * w_m, GROUND_FILLET.value()))
+}
+
+/// Asserts `lag` is finite and non-negative.
+fn assert_lag(lag: Metres) {
+    let b = lag.value();
+    assert!(
+        b.is_finite() && b >= 0.0,
+        "a lag must be finite and non-negative, got {b} m"
+    );
 }
 
 /// `finer_than` in metres, asserted finite and positive ([`assert_wavelength`]).
@@ -815,9 +1036,9 @@ fn octave_wavelength(octave: &CraterOctave) -> f64 {
     (smallest * upper).sqrt()
 }
 
-/// Octave `octave`'s closed-form variance on the body of `params`, square metres (the module
-/// documentation): its kept density per m² times its kept craters' mean ∫h² dA over their
-/// diameters and its window's ages, at full resolution.
+/// Octave `octave`'s moments on the body of `params` (the module documentation), first its
+/// closed-form variance, square metres: its kept density per m² times its kept craters' mean
+/// ∫h² dA over their diameters and its window's ages, at full resolution.
 ///
 /// At full resolution a crater is its fresh profile times its relief factor g, so its ∫h² dA is
 /// the fresh one's, π R² ∫f² 2x dx, times g². The mean over the diameters is eight-point
@@ -828,19 +1049,29 @@ fn octave_wavelength(octave: &CraterOctave) -> f64 {
 /// of magnitude across a window, so a few young craters carry an octave's variance, which nodes in
 /// the age's share would miss (R09.T7.b's build found them 120 times short).
 ///
-/// Beside it, at the same nodes, the mean area its kept craters' reaches cover, π ((1 + a) R)²
-/// with each node's own exterior width a, square metres: what R09.T8's level bound counts the
-/// craters reaching a point by (a marked Poisson field covers a point a Poisson number of times,
-/// of mean the density times that area). Both are zero for an octave of no density.
+/// Beside it, at the same nodes: its ground variance, the same sum with each crater filleted over
+/// [`GROUND_FILLET`] in place of its fresh profile (R09.T7.h); each node's crater at that fillet
+/// and its weight, from which its sharpening at any band is summed; and the mean area its kept
+/// craters' reaches cover, π ((1 + a) R)² with each node's own exterior width a, square metres:
+/// what R09.T8's level bound counts the craters reaching a point by (a marked Poisson field
+/// covers a point a Poisson number of times, of mean the density times that area). All are zero,
+/// and there are no nodes, for an octave of no density.
 #[must_use]
-fn octave_moments(params: &CraterParams, octave: &CraterOctave) -> (SquareMetres, f64) {
+fn octave_moments(params: &CraterParams, octave: &CraterOctave) -> OctaveMoments {
     let density_per_m2 = octave.density().value() * 1e-6;
     if density_per_m2 <= 0.0 {
-        return (SquareMetres::ZERO, 0.0);
+        return OctaveMoments {
+            variance: SquareMetres::ZERO,
+            ground_variance: SquareMetres::ZERO,
+            reach_area_m2: 0.0,
+            nodes: Vec::new(),
+        };
     }
     let dropped = 1.0 - octave.kept;
     let mut mean = 0.0;
+    let mut ground_mean = 0.0;
     let mut reach_area = 0.0;
+    let mut nodes = Vec::with_capacity(GAUSS_LEGENDRE_8.len());
     for (node, weight) in GAUSS_LEGENDRE_8 {
         let node_share = dropped + octave.kept * f64::midpoint(1.0, node);
         let size = UnitUniform::new(node_share).expect("a node's share lies in [0, 1)");
@@ -848,12 +1079,39 @@ fn octave_moments(params: &CraterParams, octave: &CraterOctave) -> (SquareMetres
         let shape = crater_shape(params, diameter);
         let rim_m = 0.5 * diameter.value();
         let fresh = CraterProfile::filleted(shape, Metres::ZERO).square_moment();
+        let ground = CraterProfile::filleted(shape, GROUND_FILLET);
         let relief = mean_square_relief(rim_m, octave, params.system_age());
-        mean += 0.5 * weight * core::f64::consts::PI * rim_m * rim_m * fresh * relief;
+        // ½ ω π R², the leading factors of the variance's term in their order, so that the
+        // variance keeps its bits.
+        let disc_m2 = 0.5 * weight * core::f64::consts::PI * rim_m * rim_m;
+        mean += disc_m2 * fresh * relief;
+        ground_mean += disc_m2 * ground.square_moment() * relief;
         let reach_m = shape.reach().value();
         reach_area += 0.5 * weight * core::f64::consts::PI * reach_m * reach_m;
+        nodes.push(OctaveNode {
+            ground,
+            disc_m2,
+            relief2: relief,
+        });
     }
-    (SquareMetres::new(density_per_m2 * mean), reach_area)
+    OctaveMoments {
+        variance: SquareMetres::new(density_per_m2 * mean),
+        ground_variance: SquareMetres::new(density_per_m2 * ground_mean),
+        reach_area_m2: reach_area,
+        nodes,
+    }
+}
+
+/// An octave's moments at its nodes ([`octave_moments`]).
+struct OctaveMoments {
+    /// Its variance at full resolution, `σ_k`².
+    variance: SquareMetres,
+    /// Its variance at the ground's fillet, `G_k`.
+    ground_variance: SquareMetres,
+    /// The mean area its kept craters' reaches cover, square metres.
+    reach_area_m2: f64,
+    /// Its nodes.
+    nodes: Vec<OctaveNode>,
 }
 
 /// The mean of g² ([`relief_factor`]) over `octave`'s window of ages for craters of rim radius

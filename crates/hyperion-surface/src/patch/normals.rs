@@ -18,8 +18,9 @@
 //! as `f32`; the worker packs it into half floats for the GPU, outside this crate, which never
 //! reads float bits.
 
-use super::{HeightSource, NormalScale};
+use super::{HeightSource, NormalScale, PATCH_VERTICES};
 use crate::cube::PatchKey;
+use crate::height::HeightSample;
 use crate::num::assert_finite;
 use crate::spheroid::Spheroid;
 
@@ -84,23 +85,46 @@ pub fn surface_normal(figure: &Spheroid, dir: [f64; 3], h_m: f64, gradient: [f64
 
 /// The patch's normals at `scale`, row by row, as octahedral pairs narrowed to `f32`.
 ///
+/// `vertices` are the patch's 65 × 65 vertices' heights and gradients at its level, row by row
+/// ([`PatchHeights::samples`](crate::synth::PatchHeights::samples)): a normal at a vertex reads
+/// its sample, since [`NormalScale::Double`]'s even samples are the vertices bit for bit
+/// ([`PatchKey::sample_dir`]), and the source is asked only at the samples between them.
+///
 /// # Errors
 ///
 /// The source's own.
+///
+/// # Panics
+///
+/// If `vertices` is not the patch's 65 × 65.
 pub(crate) fn bake_normals<S: HeightSource>(
     source: &S,
     key: PatchKey,
     scale: NormalScale,
+    vertices: &[HeightSample],
     cache: &mut S::Cache,
 ) -> Result<Vec<f32>, S::Error> {
+    assert_eq!(
+        vertices.len(),
+        PATCH_VERTICES * PATCH_VERTICES,
+        "a patch's normals read its 65 × 65 vertices"
+    );
     let figure = source.figure();
     let per_patch = scale.grid().quads();
     let side = scale.side();
     let mut out = Vec::with_capacity(2 * side * side);
+    let index = |n: u32| usize::try_from(n).expect("a sample index fits a usize");
     for y in 0..=per_patch {
         for x in 0..=per_patch {
             let dir = key.sample_dir(x, y, scale.grid());
-            let sample = source.height(cache, dir, key.level())?;
+            let vertex = match scale {
+                NormalScale::Mesh => Some((x, y)),
+                NormalScale::Double => (x % 2 == 0 && y % 2 == 0).then_some((x / 2, y / 2)),
+            };
+            let sample = match vertex {
+                Some((vx, vy)) => vertices[index(vy) * PATCH_VERTICES + index(vx)],
+                None => source.height(cache, dir, key.level())?,
+            };
             let n = surface_normal(
                 &figure,
                 dir,

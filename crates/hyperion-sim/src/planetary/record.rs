@@ -8,8 +8,8 @@
 //! | [`Contact`](DetailLevel::Contact) | the identity with the kind unknown, and the position (the brainstorm's "unresolved contact") |
 //! | [`MassAndOrbit`](DetailLevel::MassAndOrbit) | the kind and label, the mass, the orbit, the lists of moons and rings, and a population's extent; on a system, its belts and halo |
 //! | [`Bulk`](DetailLevel::Bulk) | radius, density, surface gravity, class, composition and equilibrium temperature; the rotation, the body-fixed frame (P14.T46.b), the figure, the reference spheroid (P14.T46.d), and the photometry, the template and albedos the disc is drawn with (P14.T47.c); on a system, the belts' members, as bodies and in each belt's list |
-//! | [`Surface`](DetailLevel::Surface) | atmosphere, surface conditions and global figures (P14.T13, T24) |
-//! | [`Full`](DetailLevel::Full) | the hooks: surface seed, bulk composition, habitability, resources (P14.T23–T26) |
+//! | [`Surface`](DetailLevel::Surface) | the surface: its state and material, surface conditions with their climate regime and global figures (P14.T24, T48, [`Surface`]); or a gas-envelope body's envelope ([`Envelope`], P14.T24.d) |
+//! | [`Full`](DetailLevel::Full) | the hooks: the detail seed (the rendering plans' R09.T1.b), and with P14.T23–T26 the bulk composition, habitability and resources; never the surface seed, which stays on the server |
 //!
 //! Every optional section carries one of four states (ruling 34 of 2026-09-22, item 3):
 //! [`Section::Ok`] with its value, [`Section::NotResolved`] where the granted level withholds it,
@@ -23,9 +23,12 @@
 //! Phase D's populations are bodies too, and carry what they are as their `population` section
 //! ([`Population`]): a ring's extent, a belt's at a time with its members, and the cometary
 //! halo's. A planet's moons and rings and a system's belts and halo are [`Section::Ok`] lists
-//! (P14.T34). A body's surface and hooks sections are [`Section::NotModelled`] until P14.T13, T14
-//! and T23–T26, and a giant's surface is [`Section::NotApplicable`]. The contents of the surface
-//! and hooks sections, [`Surface`] and [`Hooks`], have no value until their tasks define them.
+//! (P14.T34). A present body with a solid surface has its surface section [`Section::Ok`]
+//! (P14.T48.e) and its envelope [`Section::NotApplicable`]; a body in the gas-envelope state, a
+//! sub-Neptune or a giant, the other way round, its envelope [`Section::NotModelled`] until
+//! P14.T24.d (decision-p14-t35e-wire). The hooks section, [`Hooks`], holds the body's detail seed
+//! (R09.T1.b): [`Section::Ok`] for a planet, moon or dwarf planet present at the record's time,
+//! and [`Section::NotApplicable`] for a ring, a belt, the halo and a body not present.
 
 use std::error::Error;
 use std::fmt;
@@ -35,12 +38,16 @@ use crate::events::EventsPerSecond;
 use crate::id::{BodyId, SystemId};
 use crate::orbit::KeplerElements;
 use crate::planetary::belts::{Belt, BeltComponent, BeltComposition, BeltGap, BeltPart, BeltSite};
+use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::derive::figure::BodyFigure;
 use crate::planetary::derive::photometry::BodyPhotometry;
 use crate::planetary::derive::{DerivedBody, MassFractions, PlanetClass};
 use crate::planetary::drift::{DriftingOrbit, OrbitDrift};
 use crate::planetary::fate::BodyState;
 use crate::planetary::frames::BodyFixedFrame;
+use crate::planetary::hooks::DetailSeed;
+use crate::planetary::hooks::figures::GlobalFigures;
+use crate::planetary::hooks::surface::{ClimateRegime, SurfaceConditions};
 use crate::planetary::index::{BodyIndex, BodySub};
 pub use crate::planetary::label::BodyLabel;
 use crate::planetary::placement::OrbitHost;
@@ -195,11 +202,14 @@ pub enum RecordSection {
     Figure,
     /// The rotation: the body-fixed frame, the same at every record time (P14.T46.b).
     Rotation,
+    /// The envelope: a gas-envelope body's air (P14.T24.d), the section that applies where the
+    /// surface does not (P14.T48.e's gas-envelope split).
+    Envelope,
 }
 
 impl RecordSection {
     /// Every section, in the record's order.
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Label,
         Self::Mass,
         Self::Orbit,
@@ -212,6 +222,7 @@ impl RecordSection {
         Self::Photometry,
         Self::Figure,
         Self::Rotation,
+        Self::Envelope,
     ];
 
     /// The least detail level that holds the section (design note 16).
@@ -225,7 +236,7 @@ impl RecordSection {
             | Self::Rings
             | Self::Population => DetailLevel::MassAndOrbit,
             Self::Bulk | Self::Photometry | Self::Figure | Self::Rotation => DetailLevel::Bulk,
-            Self::Surface => DetailLevel::Surface,
+            Self::Surface | Self::Envelope => DetailLevel::Surface,
             Self::Hooks => DetailLevel::Full,
         }
     }
@@ -246,6 +257,7 @@ impl fmt::Display for RecordSection {
             Self::Photometry => "photometry",
             Self::Figure => "figure",
             Self::Rotation => "rotation",
+            Self::Envelope => "envelope",
         })
     }
 }
@@ -573,22 +585,251 @@ impl BulkProperties {
     }
 }
 
-/// The contents of a surface section: atmosphere, surface conditions, rotation and global figures
-/// (design note 16), which P14.T13, T14 and T24 compute.
+/// The contents of a surface section (design note 16, P14.T48.e): a body's surface state and
+/// material, its surface conditions with their climate regime (P14.T24.a, T48.d) and its global
+/// figures (P14.T24.b, T48.a–c), every substance in them a [`SubstanceId`](crate::substance::SubstanceId),
+/// and the members whose tasks land later, each [`Modelled::NotModelled`] until they do
+/// (decision-composition §1.10).
 ///
-/// None of them is built, so the type has no value, and no record can hold a surface section that
-/// is [`Section::Ok`]: every surface is [`Section::NotModelled`], or [`Section::NotApplicable`] for
-/// a giant. The tasks that compute it give it its contents.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Surface {}
+/// It is the one section rendering plan R09's coarse pass reads
+/// ([`CoarseInputs::for_body`](crate::planetary::surface::CoarseInputs::for_body)). A record's
+/// surface is [`Section::Ok`] for a present body with a solid surface
+/// ([`PlanetClass::has_solid_surface`]) whose spin and derivation this version computes, and
+/// [`Section::NotApplicable`] for a body in the gas-envelope state, a sub-Neptune or a giant,
+/// whose air is its [`Envelope`] section's, so that no surface section is `Ok` with no surface
+/// behind it (decision-p14-t35e-wire §2). It is never in the state
+/// [`SurfaceState::GasEnvelope`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Surface {
+    state: SurfaceState,
+    material: SurfaceMaterial,
+    climate: ClimateRegime,
+    conditions: SurfaceConditions,
+    figures: GlobalFigures,
+    vertical_structure: Modelled<VerticalStructure>,
+    aerosols: Modelled<AerosolInventory>,
+    condensates: Modelled<Condensates>,
+    crust: Modelled<CrustComposition>,
+    modifiers: Modelled<SurfaceModifiers>,
+    biosphere: Modelled<Biosphere>,
+}
 
-/// The contents of a hooks section: surface seed, bulk composition, habitability and resources
-/// (design note 16), which P14.T23–T26 compute.
+impl Surface {
+    /// The surface of a body in the state `state`, of material `material`, with the conditions
+    /// `conditions` and the figures `figures`; `None` for the gas-envelope state, which has no
+    /// surface, and for conditions without their climate regime, which the batch's second stage
+    /// gives ([`SurfaceConditions::with_climate`]).
+    #[must_use]
+    pub(crate) fn new(
+        state: SurfaceState,
+        material: SurfaceMaterial,
+        conditions: SurfaceConditions,
+        figures: GlobalFigures,
+    ) -> Option<Self> {
+        if state == SurfaceState::GasEnvelope {
+            return None;
+        }
+        Some(Self {
+            state,
+            material,
+            climate: conditions.climate_regime()?,
+            conditions,
+            figures,
+            vertical_structure: Modelled::NotModelled,
+            aerosols: Modelled::NotModelled,
+            condensates: Modelled::NotModelled,
+            crust: Modelled::NotModelled,
+            modifiers: Modelled::NotModelled,
+            biosphere: Modelled::NotModelled,
+        })
+    }
+
+    /// The conditions and the figures, as the server's hooks repeat them
+    /// ([`BodyHooks`](crate::planetary::hooks::BodyHooks)).
+    #[must_use]
+    pub(crate) fn into_parts(self) -> (SurfaceConditions, GlobalFigures) {
+        (self.conditions, self.figures)
+    }
+
+    /// The surface state (P14.T13.c), never [`SurfaceState::GasEnvelope`].
+    #[must_use]
+    pub const fn state(&self) -> SurfaceState {
+        self.state
+    }
+
+    /// The surface material, rock or ice, of the body's mass fractions (P14.T13.c,
+    /// [`SurfaceMaterial::of`]).
+    #[must_use]
+    pub const fn material(&self) -> SurfaceMaterial {
+        self.material
+    }
+
+    /// The climate regime (P14.T48.d): its thermal regime, forcing and condensable, and the
+    /// coarse model it names.
+    ///
+    /// It is the conditions' own regime ([`SurfaceConditions::climate_regime`]), which a record's
+    /// conditions always have.
+    #[must_use]
+    pub const fn climate_regime(&self) -> &ClimateRegime {
+        &self.climate
+    }
+
+    /// The surface conditions (P14.T24.a): the mean temperature and signed contrasts, the
+    /// pressure and gases, the light and radiation received, and the climate's range.
+    #[must_use]
+    pub const fn conditions(&self) -> &SurfaceConditions {
+        &self.conditions
+    }
+
+    /// The global figures (P14.T24.b, T48.a–c): the heat flow, tectonics, `σ_h` and continents,
+    /// the surface age and crater contract, the wet epoch, the oceans, ices and cloud.
+    #[must_use]
+    pub const fn figures(&self) -> &GlobalFigures {
+        &self.figures
+    }
+
+    /// The vertical structure above the surface (P14.T24.e), not modelled until it lands.
+    #[must_use]
+    pub const fn vertical_structure(&self) -> Modelled<&VerticalStructure> {
+        self.vertical_structure.as_ref()
+    }
+
+    /// The aerosol and absorber inventory (P14.T24.c), not modelled until it lands.
+    #[must_use]
+    pub const fn aerosols(&self) -> Modelled<&AerosolInventory> {
+        self.aerosols.as_ref()
+    }
+
+    /// The condensates at the surface by substance (P14.T51.a), not modelled until they land.
+    #[must_use]
+    pub const fn condensates(&self) -> Modelled<&Condensates> {
+        self.condensates.as_ref()
+    }
+
+    /// The crust by substance (P14.T51.c), not modelled until it lands.
+    #[must_use]
+    pub const fn crust(&self) -> Modelled<&CrustComposition> {
+        self.crust.as_ref()
+    }
+
+    /// The surface's modifiers, its maturity, organic cover and resurfacing (P14.T51.d), not
+    /// modelled until they land.
+    #[must_use]
+    pub const fn modifiers(&self) -> Modelled<&SurfaceModifiers> {
+        self.modifiers.as_ref()
+    }
+
+    /// The biosphere's fluxes (P14.T53.d), not modelled until they land.
+    #[must_use]
+    pub const fn biosphere(&self) -> Modelled<&Biosphere> {
+        self.biosphere.as_ref()
+    }
+}
+
+/// A member of a section whose task may land after the section's (decision-composition §1.10):
+/// its value, or not modelled by this generator version.
 ///
-/// None of them is built, so the type has no value, and every hooks section is
-/// [`Section::NotModelled`]. The tasks that compute them give it its contents.
+/// The wire's three-state `Modelled` member is absent for [`NotModelled`](Self::NotModelled)
+/// (P14.T35.e), and `null` or a value for [`Ok`](Self::Ok), as the value says. "None" is data, not
+/// a state: a member computed as none is [`Ok`](Self::Ok) of a value that says so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Hooks {}
+pub enum Modelled<T> {
+    /// The member's value.
+    Ok(T),
+    /// This generator version does not compute the member. It must never be read as "none".
+    NotModelled,
+}
+
+impl<T> Modelled<T> {
+    /// The member with its value borrowed.
+    #[must_use]
+    pub const fn as_ref(&self) -> Modelled<&T> {
+        match self {
+            Self::Ok(value) => Modelled::Ok(value),
+            Self::NotModelled => Modelled::NotModelled,
+        }
+    }
+
+    /// The value, if the member is [`Ok`](Self::Ok).
+    #[must_use]
+    pub const fn ok(&self) -> Option<&T> {
+        match self {
+            Self::Ok(value) => Some(value),
+            Self::NotModelled => None,
+        }
+    }
+}
+
+/// The vertical structure of a surface's air (P14.T24.e: the lapse rate α, the skin temperature
+/// and the adiabat's nodes), which no task builds yet, so the type has no value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum VerticalStructure {}
+
+/// A surface air's aerosol and absorber inventory (P14.T24.c: its modes, decks and absorbers),
+/// which no task builds yet, so the type has no value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum AerosolInventory {}
+
+/// The condensates at a surface by substance (P14.T51.a's partition), which no task builds yet,
+/// so the type has no value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Condensates {}
+
+/// A body's crust by substance (P14.T51.c: its primary, secondary and tertiary crusts or bulk
+/// material, its lid, provinces and redox), which no task builds yet, so the type has no value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum CrustComposition {}
+
+/// A surface's modifiers (P14.T51.d: its maturity, organic cover and resurfacing), which no task
+/// builds yet, so the type has no value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum SurfaceModifiers {}
+
+/// A biosphere's fluxes (P14.T53.d), which no task builds yet, so the type has no value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Biosphere {}
+
+/// The contents of an envelope section: a gas-envelope body's air, its profile, composition and
+/// decks (P14.T24.d), the section of the bodies whose surface section is
+/// [`Section::NotApplicable`] (P14.T48.e's gas-envelope split, decision-p14-t35e-wire §2.5).
+///
+/// Not built, so the type has no value: a gas-envelope body's envelope is
+/// [`Section::NotModelled`] until P14.T24.d fills it, and every other body's
+/// [`Section::NotApplicable`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Envelope {}
+
+/// The contents of a hooks section, what the generators of surfaces, life and civilisations read of
+/// a body (design note 16): so far its detail seed (the rendering plans' R09.T1.b), joined by the
+/// bulk composition, habitability and resources as P14.T23–T26 put them on the record.
+///
+/// It holds nothing server-only: the body's surface seed, which reveals its whole surface at once,
+/// stays in [`BodyHooks`](crate::planetary::hooks::BodyHooks), and the client is given the detail
+/// seed in its place (the [`hooks`](crate::planetary::hooks) module documentation). A record's
+/// hooks section is [`Section::Ok`] for a planet, moon or dwarf planet present at its time, and
+/// [`Section::NotApplicable`] for a ring, a belt, the halo and a body not present.
+///
+/// It is not `Copy`, since the hooks to come (the resources' abundances among them) need not be.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct Hooks {
+    detail_seed: DetailSeed,
+}
+
+impl Hooks {
+    /// The hooks of a body of detail seed `detail_seed`
+    /// ([`hooks::detail_seed`](crate::planetary::hooks::detail_seed)).
+    #[must_use]
+    pub const fn new(detail_seed: DetailSeed) -> Self {
+        Self { detail_seed }
+    }
+
+    /// The detail seed, from which a client's local synthesis elaborates the surveyed coarse field
+    /// (R09.T1.b).
+    #[must_use]
+    pub const fn detail_seed(&self) -> DetailSeed {
+        self.detail_seed
+    }
+}
 
 /// What a population body is and where it lies at a record's time: a planet's ring, a belt or
 /// the cometary halo (P14.T20–T21, the record's `population` section).
@@ -876,6 +1117,7 @@ pub struct BodyRecord {
     photometry: Section<BodyPhotometry>,
     figure: Section<BodyFigure>,
     rotation: Section<BodyFixedFrame>,
+    envelope: Section<Envelope>,
 }
 
 impl BodyRecord {
@@ -897,6 +1139,7 @@ impl BodyRecord {
             photometry: Section::NotModelled,
             figure: Section::NotModelled,
             rotation: Section::NotModelled,
+            envelope: Section::NotModelled,
         }
     }
 
@@ -962,10 +1205,33 @@ impl BodyRecord {
         &self.bulk
     }
 
-    /// The surface.
+    /// The surface (P14.T48.e): [`Section::Ok`] for a present body with a solid surface, a planet,
+    /// a dwarf planet or a moon, whose spin and derivation this version computes;
+    /// [`Section::NotApplicable`] for a body in the gas-envelope state (a sub-Neptune or a giant),
+    /// a population and a body not present; and [`Section::NotModelled`] for a body with no
+    /// rotation law (every body of [`generate_planets`](crate::planetary::generate_planets)) or
+    /// whose derivation this version does not compute.
     #[must_use]
     pub const fn surface(&self) -> &Section<Surface> {
         &self.surface
+    }
+
+    /// The surface section, taken from the record, as the server's hooks repeat it
+    /// ([`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at)).
+    #[must_use]
+    pub(crate) fn into_surface(self) -> Section<Surface> {
+        self.surface
+    }
+
+    /// The envelope (P14.T48.e's gas-envelope split): [`Section::NotModelled`] for a present body
+    /// in the gas-envelope state, a sub-Neptune or a giant, until P14.T24.d fills [`Envelope`],
+    /// and [`Section::NotApplicable`] for every other body.
+    ///
+    /// Exactly one of it and the [`surface`](Self::surface) applies to a present body with a bulk
+    /// section.
+    #[must_use]
+    pub const fn envelope(&self) -> &Section<Envelope> {
+        &self.envelope
     }
 
     /// The hooks.
@@ -1016,6 +1282,7 @@ impl BodyRecord {
             RecordSection::Photometry => self.photometry.state(),
             RecordSection::Figure => self.figure.state(),
             RecordSection::Rotation => self.rotation.state(),
+            RecordSection::Envelope => self.envelope.state(),
         }
     }
 
@@ -1068,6 +1335,7 @@ impl BodyRecord {
                 .granted(at(RecordSection::Photometry), granted),
             figure: self.figure.granted(at(RecordSection::Figure), granted),
             rotation: self.rotation.granted(at(RecordSection::Rotation), granted),
+            envelope: self.envelope.granted(at(RecordSection::Envelope), granted),
         }
     }
 }
@@ -1088,6 +1356,7 @@ pub struct BodyRecordBuilder {
     photometry: Section<BodyPhotometry>,
     figure: Section<BodyFigure>,
     rotation: Section<BodyFixedFrame>,
+    envelope: Section<Envelope>,
 }
 
 impl BodyRecordBuilder {
@@ -1166,20 +1435,30 @@ impl BodyRecordBuilder {
         Self { rotation, ..self }
     }
 
-    /// The sections that `derived` fills, as the vertical slice tags them: the mass and bulk
-    /// [`Section::Ok`], and the surface [`Section::NotApplicable`] for a class with none (a giant)
-    /// and [`Section::NotModelled`] otherwise, until P14.T13 computes it.
+    /// The envelope section (P14.T48.e).
+    #[must_use]
+    pub fn envelope(self, envelope: Section<Envelope>) -> Self {
+        Self { envelope, ..self }
+    }
+
+    /// The sections that `derived` fills: the mass and bulk [`Section::Ok`], and the surface and
+    /// envelope tags of its class (P14.T48.e's gas-envelope split, decision-p14-t35e-wire): for a
+    /// class with a solid surface ([`PlanetClass::has_solid_surface`]) the surface
+    /// [`Section::NotModelled`], until the generator sets what it computes, and the envelope
+    /// [`Section::NotApplicable`]; for a sub-Neptune or a giant the surface
+    /// [`Section::NotApplicable`] and the envelope [`Section::NotModelled`], until P14.T24.d.
     #[must_use]
     pub fn derived(self, derived: &DerivedBody) -> Self {
-        let surface = if derived.class().has_surface() {
-            Section::NotModelled
+        let (surface, envelope) = if derived.class().has_solid_surface() {
+            (Section::NotModelled, Section::NotApplicable)
         } else {
-            Section::NotApplicable
+            (Section::NotApplicable, Section::NotModelled)
         };
         Self {
             mass: Section::Ok(derived.mass()),
             bulk: Section::Ok(BulkProperties::from(derived)),
             surface,
+            envelope,
             ..self
         }
     }
@@ -1210,6 +1489,7 @@ impl BodyRecordBuilder {
             photometry: self.photometry,
             figure: self.figure,
             rotation: self.rotation,
+            envelope: self.envelope,
         };
         if record.population.ok().is_some_and(Population::withholds) {
             return Err(BuildBodyRecordError::NotResolved(RecordSection::Population));
@@ -1582,6 +1862,9 @@ mod tests {
             .derived(&earth)
             .moons(Section::Ok(vec![moon]))
             .rings(Section::NotApplicable)
+            .hooks(Section::Ok(Hooks::new(DetailSeed::new(
+                0x0919_0001_b000_0001,
+            ))))
             .build()
             .unwrap()
     }
@@ -1659,6 +1942,7 @@ mod tests {
         // P14.T35's wire types, and here the sections that hold those values are withheld.
         let record = mixed_record();
         assert!(record.bulk().ok().is_some());
+        assert!(record.hooks().ok().is_some());
         let degraded = record.degrade(DetailLevel::MassAndOrbit);
         assert_eq!(degraded.bulk(), &Section::NotResolved);
         assert_eq!(degraded.surface(), &Section::NotResolved);
@@ -1684,7 +1968,10 @@ mod tests {
     }
 
     #[test]
-    fn in_the_slice_a_planet_s_surface_and_hooks_are_not_modelled_and_a_giant_has_no_surface() {
+    fn a_derivation_tags_the_surface_and_the_envelope_by_the_gas_envelope_split() {
+        // The builder's tags (P14.T48.e): a class with a solid surface leaves the surface for the
+        // generator to set and has no envelope; a giant has no surface and its envelope is not
+        // modelled until P14.T24.d.
         let (earth, saturn) = earth_and_saturn();
         let earth = planet_record(3, &earth, 1.0);
         assert_eq!(earth.level(), DetailLevel::Full);
@@ -1697,6 +1984,7 @@ mod tests {
             (RecordSection::Bulk, SectionState::Ok),
             (RecordSection::Surface, SectionState::NotModelled),
             (RecordSection::Hooks, SectionState::NotModelled),
+            (RecordSection::Envelope, SectionState::NotApplicable),
         ] {
             assert_eq!(earth.section_state(section), state, "Earth's {section}");
         }
@@ -1705,7 +1993,21 @@ mod tests {
         assert!((bulk.radius().value() - 1.0).abs() < 1e-9);
         let saturn = planet_record(6, &saturn, 9.58);
         assert_eq!(saturn.surface(), &Section::NotApplicable);
+        assert_eq!(saturn.envelope(), &Section::NotModelled);
         assert_eq!(saturn.bulk().ok().unwrap().class(), PlanetClass::GasGiant);
+        // `degrade` withholds the envelope with the surface, below `Surface`.
+        for level in [
+            DetailLevel::Bulk,
+            DetailLevel::MassAndOrbit,
+            DetailLevel::Contact,
+        ] {
+            assert_eq!(saturn.degrade(level).envelope(), &Section::NotResolved);
+            assert_eq!(saturn.degrade(level).surface(), &Section::NotResolved);
+        }
+        assert_eq!(
+            saturn.degrade(DetailLevel::Surface).envelope(),
+            &Section::NotModelled
+        );
         let snapshot =
             SystemSnapshot::new(system(), UniverseTime::EPOCH, vec![earth, saturn]).unwrap();
         assert_eq!(snapshot.level(), DetailLevel::Full);

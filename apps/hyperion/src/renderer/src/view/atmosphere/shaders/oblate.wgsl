@@ -15,7 +15,10 @@
 // multiple-scattering layers a band (its light slots) and the medium's top in h*; texel 3 k = a ÷ c,
 // k², and 1 ÷ s at the equator and at the pole, by which the ray march's shells stand through h*
 // (Design note 17); texels 4 to 4 + MAX_SLICES − 1 slice k's (κ_k R_ref, √κ_k, ln κ_k, 0); and the next
-// MAX_BANDS band b's (s_b, ln s_b, 0, 0).
+// MAX_BANDS band b's (s_b, ln s_b, 0, 0). Since R08.T9.b, for the lit passes, which declare no
+// medium (`surfaceLighting.wgsl`): texel OBLATE_SURFACE_TEXEL the medium's absorber slots and its
+// line slots' bitmask, then its local scale height in h* (`medium.ts`'s `localScaleHeightM`) at
+// OBLATE_SCALE_HEIGHTS heights h*_i = top i ÷ (OBLATE_SCALE_HEIGHTS − 1), four a texel.
 //
 // Heights follow Design note 18: none is a difference of radii. A point's height comes from its
 // ground quadric Q = |S p|² − a² (S = diag(1, 1, a ÷ c)), which every caller forms without
@@ -33,7 +36,13 @@ const MAX_BANDS : u32 = 16u;
 // The body table's texels before its slices.
 const OBLATE_HEADER_TEXELS : u32 = 4u;
 
-// The least local scale height the fitted lookup takes, m of h* (`hillaire.ts`'s FIT_SCALE_FLOOR_M):
+// The body table's texel of the medium's absorbers, past its slices and bands, and the heights its
+// local scale height is held at after it (`tables.ts`'s OBLATE_SURFACE_TEXEL and
+// OBLATE_SCALE_HEIGHTS; R08.T9.b).
+const OBLATE_SURFACE_TEXEL : u32 = OBLATE_HEADER_TEXELS + MAX_SLICES + MAX_BANDS;
+const OBLATE_SCALE_HEIGHTS : u32 = 64u;
+
+// The least local scale height the fitted lookup takes, m of h* (`medium.ts`'s FIT_SCALE_FLOOR_M):
 // below it the fit's differences of h* are lost in f32's rounding of h*.
 const OBLATE_SCALE_FLOOR_M : f32 = 1000.0;
 
@@ -93,6 +102,27 @@ fn oblateSlice(table : texture_2d<f32>, k : u32) -> vec4f {
 // Band b: x s_b; y ln s_b.
 fn oblateBand(table : texture_2d<f32>, b : u32) -> vec4f {
   return textureLoad(table, vec2u(OBLATE_HEADER_TEXELS + MAX_SLICES + b, 0u), 0);
+}
+
+// The medium's absorber slots, at most ABSORBER_SLOTS, and its line slots' bitmask
+// (`common.wgsl`'s `pressureChannelOf`), for a reader that declares no medium (R08.T9.b).
+fn oblateAbsorbersOf(table : texture_2d<f32>) -> vec2u {
+  let texel = textureLoad(table, vec2u(OBLATE_SURFACE_TEXEL, 0u), 0);
+  return vec2u(min(u32(texel.x), ABSORBER_SLOTS), u32(texel.y));
+}
+
+// The medium's local scale height in h* at h* = `scaledHeightM`, m, for a reader that declares no
+// medium (R08.T9.b): linear between the two of the table's heights about it, held in [0, top]; at
+// least OBLATE_SCALE_FLOOR_M, as each held height is.
+fn oblateScaleHeightAt(body : OblateBody, table : texture_2d<f32>, scaledHeightM : f32) -> f32 {
+  let last = f32(OBLATE_SCALE_HEIGHTS - 1u);
+  let x = clamp(scaledHeightM / body.counts.w, 0.0, 1.0) * last;
+  let i = min(u32(x), OBLATE_SCALE_HEIGHTS - 2u);
+  let f = x - f32(i);
+  let first = OBLATE_SURFACE_TEXEL + 1u;
+  let below = textureLoad(table, vec2u(first + i / 4u, 0u), 0)[i % 4u];
+  let above = textureLoad(table, vec2u(first + (i + 1u) / 4u, 0u), 0)[(i + 1u) % 4u];
+  return max(below + f * (above - below), OBLATE_SCALE_FLOOR_M);
 }
 
 // s = g(φ) ÷ g_ref at the geodetic latitude whose sine squared is `sin2` (`oblate.ts`'s
@@ -504,6 +534,20 @@ fn bandMultiScatteringAt(
   slot : u32,
 ) -> vec3f {
   let unit = multiScatteringUnitAt(body.counts.w, max(scaledHeightM, 0.0), muSun);
+  return bandTableAt(body, bodyTable, table, unit, s, slot);
+}
+
+// A band table's read (the multiple scattering, or the sky's irradiance, R08.T9.b) at its unit
+// range `unit`, s and light slot `slot`: linear in ln s between the two bands about s, the nearer
+// band beyond them, one band's alone.
+fn bandTableAt(
+  body : OblateBody,
+  bodyTable : texture_2d<f32>,
+  table : texture_2d_array<f32>,
+  unit : vec2f,
+  s : f32,
+  slot : u32,
+) -> vec3f {
   let layers = oblateLayersPerBand(body);
   let k = min(slot, layers - 1u);
   let bands = oblateBandCount(body);

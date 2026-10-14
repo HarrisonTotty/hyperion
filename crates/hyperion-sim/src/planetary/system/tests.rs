@@ -483,7 +483,10 @@ fn a_snapshot_is_body_at_body_by_body() {
             assert_eq!(snapshot.time(), t);
             assert_eq!(snapshot.bodies().len(), system.indices().len());
             for (record, index) in snapshot.bodies().iter().zip(system.indices()) {
-                assert_eq!(record, &system.body_at(ctx, index, t).unwrap());
+                let alone = system.body_at(ctx, index, t).unwrap();
+                assert_eq!(record, &alone);
+                // Bit for bit, signed zeros included: the surface section's floats with the rest.
+                assert_eq!(format!("{record:?}"), format!("{alone:?}"));
                 assert_eq!(
                     record.position(),
                     system.position_at(ctx, index, t).unwrap()
@@ -497,7 +500,7 @@ fn a_snapshot_is_body_at_body_by_body() {
 /// is not applicable, and phase D's sections are `Ok` where modelled (P14.T34).
 #[test]
 fn a_record_tags_what_the_generator_does_not_compute() {
-    let (mut present, mut giants, mut moons, mut rings) = (0, 0, 0, 0);
+    let (mut present, mut giants, mut moons, mut rings, mut dwarfs) = (0, 0, 0, 0, 0);
     for (ctx, system) in whole().iter().take(120) {
         let snapshot = system.snapshot_at(ctx, UniverseTime::EPOCH);
         let belts: Vec<BodyIndex> = system.belts().iter().map(Belt::index).collect();
@@ -522,18 +525,9 @@ fn a_record_tags_what_the_generator_does_not_compute() {
                         record.section_state(RecordSection::Population),
                         SectionState::NotApplicable
                     );
-                    assert_eq!(
-                        record.section_state(RecordSection::Hooks),
-                        SectionState::NotModelled
-                    );
                     if identity.state() == BodyState::Present {
                         present += 1;
-                        let bulk = record.bulk().ok().unwrap();
-                        let surface = record.section_state(RecordSection::Surface);
-                        if bulk.class().has_surface() {
-                            assert_eq!(surface, SectionState::NotModelled);
-                        } else {
-                            assert_eq!(surface, SectionState::NotApplicable);
+                        if !assert_surface_or_envelope(record) {
                             giants += 1;
                         }
                         assert!(record.position().is_some());
@@ -546,6 +540,12 @@ fn a_record_tags_what_the_generator_does_not_compute() {
                     if identity.state() == BodyState::Present {
                         assert_eq!(record.section_state(RecordSection::Bulk), SectionState::Ok);
                         assert_eq!(record.section_state(RecordSection::Orbit), SectionState::Ok);
+                        assert!(assert_surface_or_envelope(record), "{:?}", record.index());
+                    } else {
+                        assert_eq!(
+                            record.section_state(RecordSection::Envelope),
+                            SectionState::NotApplicable
+                        );
                     }
                 }
                 BodyKind::Ring => {
@@ -577,14 +577,127 @@ fn a_record_tags_what_the_generator_does_not_compute() {
                         record.section_state(RecordSection::Rings),
                         SectionState::NotModelled
                     );
+                    if identity.state() == BodyState::Present {
+                        dwarfs += 1;
+                        assert!(assert_surface_or_envelope(record), "{:?}", record.index());
+                    }
                 }
                 other => panic!("{other:?} in a snapshot"),
             }
         }
     }
     assert!(
-        present > 100 && giants > 5 && moons > 20 && rings > 5,
-        "{present} present, {giants} giants, {moons} moons, {rings} rings"
+        present > 100 && giants > 5 && moons > 20 && rings > 5 && dwarfs > 5,
+        "{present} present, {giants} giants, {moons} moons, {rings} rings, {dwarfs} dwarf planets"
+    );
+}
+
+/// P14.T48.e: a record's surface is rebuilt from its parts bit for bit, its regime the
+/// conditions' own, and `Surface::new` refuses the gas-envelope state and conditions before
+/// their second stage, which have no regime.
+#[test]
+fn a_surface_holds_a_solid_state_and_its_conditions_regime() {
+    let mut checked = 0;
+    for (ctx, system) in whole().iter().take(10) {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let Section::Ok(surface) = record.surface() else {
+                continue;
+            };
+            let (state, material) = (surface.state(), surface.material());
+            let (conditions, figures) = (surface.conditions().clone(), surface.figures().clone());
+            assert_ne!(state, SurfaceState::GasEnvelope);
+            assert_eq!(
+                surface.conditions().climate_regime().as_ref(),
+                Some(surface.climate_regime())
+            );
+            let rebuilt = Surface::new(state, material, conditions.clone(), figures.clone());
+            assert_eq!(rebuilt.as_ref(), Some(surface));
+            assert_eq!(
+                Surface::new(
+                    SurfaceState::GasEnvelope,
+                    material,
+                    conditions.clone(),
+                    figures.clone()
+                ),
+                None
+            );
+            assert_eq!(
+                Surface::new(state, material, conditions.without_climate(), figures),
+                None
+            );
+            checked += 1;
+        }
+    }
+    assert!(checked > 20, "{checked}");
+}
+
+/// P14.T48.e's gas-envelope split on a present body's record with a bulk section: a body with a
+/// solid surface has its surface section `Ok`, from `DetailLevel::Surface` and not below, and its
+/// envelope not applicable; every other its surface not applicable and its envelope not modelled
+/// until P14.T24.d. Whether the body has a solid surface.
+fn assert_surface_or_envelope(record: &BodyRecord) -> bool {
+    let index = record.index();
+    let bulk = record.bulk().ok().unwrap();
+    let surface = record.section_state(RecordSection::Surface);
+    let envelope = record.section_state(RecordSection::Envelope);
+    let solid = bulk.class().has_solid_surface();
+    if solid {
+        assert_eq!(surface, SectionState::Ok, "{index:?}");
+        assert_eq!(envelope, SectionState::NotApplicable, "{index:?}");
+        let at = |level| record.degrade(level).section_state(RecordSection::Surface);
+        assert_eq!(at(DetailLevel::Surface), SectionState::Ok, "{index:?}");
+        assert_eq!(
+            at(DetailLevel::Bulk),
+            SectionState::NotResolved,
+            "{index:?}"
+        );
+    } else {
+        assert_eq!(surface, SectionState::NotApplicable, "{index:?}");
+        assert_eq!(envelope, SectionState::NotModelled, "{index:?}");
+    }
+    solid
+}
+
+/// R09.T1.b: a planet, moon or dwarf planet present at the record's time carries its own detail
+/// seed in its hooks section, never its surface seed; a ring, a belt, the halo and a body not
+/// present carry no hooks.
+#[test]
+fn a_present_body_s_hooks_are_its_detail_seed() {
+    let (mut seeded, mut absent, mut rings, mut belts) = (0, 0, 0, 0);
+    for (ctx, system) in whole().iter().take(120) {
+        for record in system.snapshot_at(ctx, UniverseTime::EPOCH).bodies() {
+            let identity = record.identity();
+            let surfaced = matches!(
+                identity.kind(),
+                BodyKind::Planet | BodyKind::Moon(_) | BodyKind::DwarfPlanet
+            );
+            if surfaced && identity.state() == BodyState::Present {
+                let seed = hooks::detail_seed(system.seed, identity.id());
+                assert_eq!(
+                    record.hooks(),
+                    &Section::Ok(Hooks::new(seed)),
+                    "{}",
+                    identity.id()
+                );
+                let surface = system.surface_seed(record.index()).unwrap().unwrap();
+                assert_ne!(seed.get(), surface.get(), "{}", identity.id());
+                seeded += 1;
+            } else {
+                assert_eq!(record.hooks(), &Section::NotApplicable, "{}", identity.id());
+                if surfaced {
+                    absent += 1;
+                } else if identity.kind() == BodyKind::Ring {
+                    rings += 1;
+                } else if matches!(identity.kind(), BodyKind::Belt(_)) {
+                    belts += 1;
+                }
+            }
+        }
+    }
+    eprintln!("{seeded} seeded, {absent} not present, {rings} rings, {belts} belts");
+    assert!(
+        seeded > 100 && absent > 0 && rings > 5 && belts > 0,
+        "{seeded} seeded, {absent} not present, {rings} rings, {belts} belts"
     );
 }
 
@@ -1341,8 +1454,8 @@ fn a_query_does_not_depend_on_the_queries_before_it() {
 }
 
 /// Design note 10's close-binary flag is Kraus et al.'s (2016) 47 au cut: a component of a pair
-/// inside it has its planets suppressed and its circumbinary zone takes the pair's plane, and one
-/// of a pair outside it neither.
+/// inside it is flagged and its circumbinary zone takes the pair's plane, and one of a pair outside
+/// it neither.
 #[test]
 fn the_close_binary_flag_and_the_aligned_plane_are_kraus_s_cut() {
     let e = Eccentricity::new(0.3).unwrap();
@@ -1960,14 +2073,13 @@ fn a_regular_moon_has_one_locking_time() {
 }
 
 /// P14.T14.d: every present planet's locking time and the heaviest moon it keeps are those of the
-/// tides its bulk section gives, with its one moment of inertia, bit for bit:
-/// `rotation::tides_in_force`, which is `tides` from the 21 → 22 batch's bump.
+/// tides its bulk section gives, with its one moment of inertia, bit for bit: `rotation::tides`.
 #[test]
 fn a_planet_s_locking_time_and_moon_limit_take_its_tides() {
     use crate::planetary::derive::OrbitSense;
     use crate::planetary::derive::limits::{TidalPlanet, moon_mass_limit};
     use crate::planetary::derive::rotation::{
-        SpinningBody, moment_of_inertia_factor, tidal_locking_time, tides_in_force,
+        SpinningBody, moment_of_inertia_factor, tidal_locking_time, tides,
     };
     use crate::units::{EarthRadii, Seconds};
     let t = UniverseTime::EPOCH;
@@ -1995,7 +2107,7 @@ fn a_planet_s_locking_time_and_moon_limit_take_its_tides() {
             let (class, fractions) = (bulk.class(), bulk.fractions());
             let (kg, r) = (Kilograms::from(*mass), Metres::from(bulk.radius()));
             // Both readers take the tides of these kilograms and metres.
-            let (k2, q) = tides_in_force(
+            let (k2, q) = tides(
                 class,
                 EarthMasses::from(kg),
                 EarthRadii::from(r),
@@ -2186,12 +2298,12 @@ fn the_flattening_is_continuous_in_time() {
     assert!(checked > 1_000, "{checked}");
 }
 
-/// P14.T24.a's surface conditions and P14.T24.b's global figures, held until the 21 → 22 batch's
-/// bump: `hooks_at` publishes neither before it, and under the open hold every present body with a
-/// solid surface has both, a moon's read under its planet's orbit, and every gas-envelope body
-/// neither.
+/// P14.T24.a's surface conditions and P14.T24.b's global figures, published from the 21 → 22
+/// batch's bump: `hooks_at` repeats the record's surface section (P14.T48.e) in the same state,
+/// every present body with a solid surface has both, a moon's read under its planet's orbit, and
+/// every gas-envelope body neither.
 #[test]
-fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
+fn the_hooks_publish_the_record_s_surface_conditions_and_figures() {
     let t = UniverseTime::EPOCH;
     let (mut planets, mut moons, mut envelopes) = (0_u32, 0_u32, 0_u32);
     let mut regimes = std::collections::BTreeMap::new();
@@ -2201,19 +2313,20 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
     let mut cover = CoverTally::default();
     for (ctx, system) in whole().iter().take(60) {
         for index in system.indices() {
-            let Some(held) = system.hooks_at(ctx, index, t).unwrap() else {
+            let Some(open) = system.hooks_at(ctx, index, t).unwrap() else {
                 continue;
             };
-            assert_eq!(held.surface(), &Section::NotModelled, "{index:?}");
-            assert_eq!(held.figures(), &Section::NotModelled, "{index:?}");
-            let open = system
-                .hooks_at_under(ctx, index, t, ConditionsHold::Published)
-                .unwrap()
-                .expect("a body with a surface seed has hooks under either hold");
-            assert_eq!(open.surface_seed(), held.surface_seed());
-            assert_eq!(open.bulk(), held.bulk());
             assert_eq!(open.figures().state(), open.surface().state(), "{index:?}");
             let record = system.body_at(ctx, index, t).unwrap();
+            assert_eq!(
+                open.surface().state(),
+                record.surface().state(),
+                "{index:?}"
+            );
+            if let Section::Ok(surface) = record.surface() {
+                assert_eq!(open.surface(), &Section::Ok(surface.conditions().clone()));
+                assert_eq!(open.figures(), &Section::Ok(surface.figures().clone()));
+            }
             let present = record.identity().state() == BodyState::Present;
             match open.surface() {
                 Section::Ok(conditions) => {
@@ -2648,10 +2761,7 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
             else {
                 continue;
             };
-            let Some(hooks) = system
-                .hooks_at_under(ctx, moon.index(), t, ConditionsHold::Published)
-                .unwrap()
-            else {
+            let Some(hooks) = system.hooks_at(ctx, moon.index(), t).unwrap() else {
                 continue;
             };
             let Section::Ok(published) = hooks.surface() else {
@@ -2697,9 +2807,12 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
             let frame = rotation.frame();
             let under_planet = SeasonalSpin::of(frame, t, &seasonal, SeasonsFrom::Planet);
             let under_own = SeasonalSpin::of(frame, t, &orbit, SeasonsFrom::Own);
+            // The published conditions carry their climate regime (P14.T48.d), which the rebuilt
+            // first stage does not.
+            assert!(published.climate_regime().is_some(), "{:?}", moon.index());
             assert_eq!(
-                SurfaceConditions::derive(&inputs(under_planet)).as_ref(),
-                Some(published),
+                SurfaceConditions::derive(&inputs(under_planet)),
+                Some(published.clone().without_climate()),
                 "{:?}",
                 moon.index()
             );
@@ -2716,11 +2829,10 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
     assert!(checked > 0);
 }
 
-/// The surface conditions and global figures `hooks_at` publishes from the 21 → 22 batch's bump,
-/// pinned over the sample's first systems (P14.T24.a, T24.b): what `SeasonalSpin::of` and the bulk
-/// sections feed the derivation reaches every contrast's bits, and the heat flow the night's floor.
-/// The pin reads the hold open on version 21's derivation, so it moves at the bump with the batch's
-/// held gases and tides, which the bless re-measures.
+/// The surface conditions and global figures `hooks_at` publishes, the records' surface sections,
+/// pinned over the sample's first systems (P14.T24.a, T24.b, T48.e): what `SeasonalSpin::of` and
+/// the bulk sections feed the derivation reaches every contrast's bits, and the heat flow the
+/// night's floor.
 #[test]
 fn the_published_surface_conditions_are_pinned() {
     use hyperion_testkit::golden;
@@ -2732,10 +2844,7 @@ fn the_published_surface_conditions_are_pinned() {
     let mut pinned = 0_u32;
     for (ctx, system) in whole().iter().take(8) {
         for body in system.bodies() {
-            let Some(hooks) = system
-                .hooks_at_under(ctx, body.index(), t, ConditionsHold::Published)
-                .unwrap()
-            else {
+            let Some(hooks) = system.hooks_at(ctx, body.index(), t).unwrap() else {
                 continue;
             };
             let Section::Ok(c) = hooks.surface() else {
@@ -2770,6 +2879,7 @@ fn the_published_surface_conditions_are_pinned() {
             w.f64(&format!("{name}_stellar_flux"), c.stellar_flux().value());
             w.line(&format!("{name}_radiation = {:?}", c.radiation()));
             w.line(&format!("{name}_liquid_water = {}", c.liquid_water()));
+            hooks::surface::regime::tests::pin_regime(&mut w, &name, c.climate_regime());
             let Section::Ok(f) = hooks.figures() else {
                 panic!("{name} has conditions but no figures");
             };
@@ -2821,6 +2931,90 @@ fn the_published_surface_conditions_are_pinned() {
     }
     assert!(pinned > 20, "{pinned}");
     golden!("planetary/surface_conditions_published", w.as_str());
+}
+
+/// P14.T48.d's published climate regime over the sample: every published body has one, read from
+/// its own conditions, history and ice cover. An airless body is airless-like in radiative
+/// equilibrium with no condensable; a world locked to its seasonal host takes the locked forcing
+/// and no seasonal model; an isothermal surface is an efficient air's; an ice belt came from a
+/// colder state with ice that covers some of its sphere, its poles free; and a condensable is a
+/// condensable row the air holds.
+#[test]
+fn the_published_climate_regimes_hold_over_the_sample() {
+    use crate::planetary::hooks::surface::regime::{by_redistribution, effective_redistribution};
+    use crate::planetary::hooks::surface::{Forcing, ThermalRegime};
+    use hyperion_surface::field::ClimateModelKind;
+    use std::collections::BTreeMap;
+
+    let t = UniverseTime::EPOCH;
+    let mut tally: BTreeMap<String, u32> = BTreeMap::new();
+    let mut count = |key: String| *tally.entry(key).or_insert(0) += 1;
+    let (mut published, mut slow, mut moved) = (0_u32, 0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let Some(hooks) = system.hooks_at(ctx, body.index(), t).unwrap() else {
+                continue;
+            };
+            let (Section::Ok(c), Section::Ok(f)) = (hooks.surface(), hooks.figures()) else {
+                continue;
+            };
+            let index = body.index();
+            let regime = c
+                .climate_regime()
+                .unwrap_or_else(|| panic!("{index:?} is published with no regime"));
+            published += 1;
+            count(format!("thermal {:?}", regime.thermal()));
+            count(format!("forcing {:?}", regime.forcing()));
+            count(match regime.condensable() {
+                Some(id) => format!("condensable {}", id.substance().key().as_str()),
+                None => "condensable none".to_owned(),
+            });
+            count(format!("model {:?}", regime.model()));
+            if c.gases().is_empty() {
+                assert_eq!(regime.thermal(), ThermalRegime::AirlessLike, "{index:?}");
+                assert_eq!(
+                    regime.model(),
+                    ClimateModelKind::RadiativeEquilibrium,
+                    "{index:?}"
+                );
+                assert_eq!(regime.condensable(), None, "{index:?}");
+            }
+            if regime.forcing() == Forcing::Locked {
+                assert_ne!(regime.model(), ClimateModelKind::EnergyBalance, "{index:?}");
+            }
+            if regime.model() == ClimateModelKind::Isothermal {
+                assert_eq!(regime.thermal(), ThermalRegime::Efficient, "{index:?}");
+            }
+            if regime.forcing() == Forcing::IceBelt {
+                assert!(f.from_colder(), "{index:?}");
+                assert!(
+                    f.ice_fraction() > 0.0 && f.ice_fraction() < 1.0,
+                    "{index:?}"
+                );
+            }
+            if let Some(id) = regime.condensable() {
+                assert!(id.substance().phase().is_some(), "{index:?}");
+                assert!(
+                    c.gases().iter().any(|&(gas, x)| gas == id && x > 0.0),
+                    "{index:?}"
+                );
+            }
+            // "main"'s ruling of 2026-10-13: a slow rotator's label reads its damped
+            // redistribution, where Koll's literal ε would have read the air's alone.
+            let air = c.air_transport();
+            if !c.gases().is_empty() && air.diurnal_storage.is_some_and(|storage| storage <= 1.0) {
+                slow += 1;
+                if by_redistribution(air.redistribution)
+                    != by_redistribution(effective_redistribution(&air))
+                {
+                    moved += 1;
+                }
+            }
+        }
+    }
+    eprintln!("{published} published regimes: {tally:?}");
+    eprintln!("{slow} rotators with air in Koll's own regime, {moved} labels off his literal ε");
+    assert!(published > 100, "{published}");
 }
 
 /// Pins the crater contract of the published figures `f` under `name`: its source rule, crust,
@@ -2891,11 +3085,7 @@ fn the_published_hooks_are_order_independent() {
     let indices: Vec<BodyIndex> = system.bodies().iter().map(Body::index).collect();
     let later = UniverseTime::from_julian_years(500).expect("in the window");
     for t in [UniverseTime::EPOCH, later] {
-        assert_order_independent(&indices, |&index| {
-            system
-                .hooks_at_under(ctx, index, t, ConditionsHold::Published)
-                .unwrap()
-        });
+        assert_order_independent(&indices, |&index| system.hooks_at(ctx, index, t).unwrap());
     }
 }
 
@@ -2908,10 +3098,7 @@ fn the_published_figures_read_each_body_s_interior() {
     let (mut regular, mut oceans, mut other_moons) = (0_u32, 0_u32, 0_u32);
     for (ctx, system) in whole().iter().take(60) {
         for body in system.bodies() {
-            let Some(hooks) = system
-                .hooks_at_under(ctx, body.index(), t, ConditionsHold::Published)
-                .unwrap()
-            else {
+            let Some(hooks) = system.hooks_at(ctx, body.index(), t).unwrap() else {
                 continue;
             };
             let Section::Ok(figures) = hooks.figures() else {
@@ -3043,9 +3230,7 @@ fn the_published_crater_contract_reads_each_body_s_history() {
     for (ctx, system) in whole().iter().take(60) {
         for body in system.bodies() {
             let published_at = |time: UniverseTime| {
-                let hooks = system
-                    .hooks_at_under(ctx, body.index(), time, ConditionsHold::Published)
-                    .unwrap()?;
+                let hooks = system.hooks_at(ctx, body.index(), time).unwrap()?;
                 let (Section::Ok(conditions), Section::Ok(figures), Section::Ok(bulk)) =
                     (hooks.surface(), hooks.figures(), hooks.bulk())
                 else {
@@ -3228,10 +3413,7 @@ fn the_published_volatile_history_reads_each_body_s_past() {
     let (mut checked, mut moons, mut epochs) = (0_u32, 0_u32, 0_u32);
     for (ctx, system) in whole().iter().take(60) {
         for body in system.bodies() {
-            let Some(hooks) = system
-                .hooks_at_under(ctx, body.index(), t, ConditionsHold::Published)
-                .unwrap()
-            else {
+            let Some(hooks) = system.hooks_at(ctx, body.index(), t).unwrap() else {
                 continue;
             };
             let (Section::Ok(conditions), Section::Ok(figures)) =

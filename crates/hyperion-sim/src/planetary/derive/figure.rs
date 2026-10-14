@@ -120,14 +120,16 @@ pub enum Datum {
 }
 
 impl Datum {
-    /// The datum of a body of class `class`: [`OneBar`](Self::OneBar) for a sub-Neptune, an ice
-    /// giant or a gas giant, whose radius is its envelope's, [`SolidSurface`](Self::SolidSurface)
-    /// otherwise.
+    /// The datum of a body of class `class`: [`SolidSurface`](Self::SolidSurface) for a class
+    /// with a solid surface ([`PlanetClass::has_solid_surface`], P14.T48.e), and
+    /// [`OneBar`](Self::OneBar) for a sub-Neptune, an ice giant or a gas giant, whose radius is
+    /// its envelope's.
     #[must_use]
     pub const fn of(class: PlanetClass) -> Self {
-        match class {
-            PlanetClass::Rocky | PlanetClass::Icy => Self::SolidSurface,
-            PlanetClass::SubNeptune | PlanetClass::IceGiant | PlanetClass::GasGiant => Self::OneBar,
+        if class.has_solid_surface() {
+            Self::SolidSurface
+        } else {
+            Self::OneBar
         }
     }
 }

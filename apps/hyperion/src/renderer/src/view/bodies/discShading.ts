@@ -29,6 +29,11 @@ import type { BodyIdHex } from "@hyperion/protocol";
 
 import { cross, dot, norm, normalise, scale, sub, type Vec3, vec3 } from "../../geometry/vec3";
 import type { ClassMapDiscSurface, UniformDiscSurface } from "../appearance/bodyAppearance";
+import {
+  AIRLESS_LIGHTING,
+  type SurfaceLightingReader,
+  type SurfaceLightingTables,
+} from "../atmosphere/surfaceLighting";
 import { phaseFactorFromTable, type PhaseFactorTable, phaseFactorTableOf } from "../appearance/law";
 import { type ProjectionCamera, toViewAxes, type Viewport } from "../camera/projection";
 import type { AnnulusSet } from "../lighting/annuli";
@@ -146,11 +151,13 @@ const CELL_SUMS_ROW = 51;
 /**
  * Whether a record's pixels can take their sums from the `disc cells` pass (R07.T8.d): every pixel
  * of it takes the same cells, at most {@link FINE_DISC_SAMPLES} per axis, as {@link discSamples}
- * gives every disc under {@link SMALL_DISC_PX}, and its surface is one law.
+ * gives every disc under {@link SMALL_DISC_PX}, its surface is one law, and its body has no
+ * atmosphere.
  *
  * @remarks
  * A class map's disc sums its own cells: the pass binds one class map for all its records, and none
- * is live before R10.
+ * is live before R10. So does a disc with an atmosphere (plan R08, R08.T9.b): the pass binds the
+ * one-texel defaults of a body without one, and no body's atmosphere is drawn before R08.T10.b.
  */
 export function drawnThroughCells(record: DiscRecord): boolean {
   const n = record.interiorSamples;
@@ -159,7 +166,8 @@ export function drawnThroughCells(record: DiscRecord): boolean {
     Number.isInteger(n) &&
     n >= 1 &&
     n <= FINE_DISC_SAMPLES &&
-    record.surface.kind === "uniform"
+    record.surface.kind === "uniform" &&
+    record.atmosphere === undefined
   );
 }
 
@@ -314,6 +322,12 @@ export interface DiscRecord {
   readonly occluders: ReadonlyArray<DiscOccluder>;
   /** Its planetshine sources (`planetshineSources`), the brightest first. */
   readonly secondaries: ReadonlyArray<DiscSecondary>;
+  /**
+   * Its body's atmosphere tables, which its draws bind (plan R08, R08.T9.b); absent for a body
+   * without one, whose draws bind the defaults. The twin reads a body's lighting through a
+   * {@link SurfaceLightingReader} given beside the record, as it reads a class map's texels.
+   */
+  readonly atmosphere?: SurfaceLightingTables;
 }
 
 /** The pole's stretch M x = x + (a ÷ c − 1)(x · p) p. */
@@ -469,12 +483,15 @@ interface ViewBody {
   readonly laws: ReadonlyArray<ScaledLaw>;
   /** `null` for a uniform surface. */
   readonly classMap: ViewClassMap | null;
+  /** Its atmosphere's lookups (R08.T9.b), or a body's without one. */
+  readonly lighting: SurfaceLightingReader;
 }
 
 function viewBodyOf(
   record: DiscRecord,
   camera: ProjectionCamera,
   texels: ClassMapTexels | null,
+  lighting: SurfaceLightingReader,
 ): ViewBody {
   const toView = (v: Vec3): Vec3 => toViewAxes(v, camera.orientation);
   const centre = toView(record.direction);
@@ -499,6 +516,7 @@ function viewBodyOf(
     scaledCentre: stretchAlong(pole, stretch, centre),
     laws,
     classMap,
+    lighting,
     lights: record.lights
       .slice(0, MAX_DISC_LIGHTS)
       .map((light) => ({ place: scale(toView(light.direction), light.distance), light })),
@@ -620,6 +638,38 @@ function surfaceReflectance(
   return reflectance;
 }
 
+/**
+ * A lit point's frame for R08's lookups (plan R08, R08.T9.b; `bodyDisc.wgsl`'s `local_frame`): its
+ * geodetic latitude from its spheroid normal against the pole, and its north and east, in the
+ * view's axes; at a pole any horizontal east.
+ */
+interface LocalFrame {
+  readonly latitudeRad: number;
+  readonly north: Vec3;
+  readonly east: Vec3;
+}
+
+/** Below this cosine of its latitude a point is taken as at a pole (`bodyDisc.wgsl`'s `AT_POLE`). */
+const AT_POLE = 1e-6;
+
+function localFrameOf(normal: Vec3, pole: Vec3): LocalFrame {
+  const sinLatitude = Math.min(Math.max(dot(normal, pole), -1), 1);
+  const towardsEast = cross(pole, normal);
+  const cosLatitude = norm(towardsEast);
+  const east =
+    cosLatitude > AT_POLE
+      ? scale(towardsEast, 1 / cosLatitude)
+      : normalise(cross(Math.abs(normal.x) > 0.9 ? vec3(0, 1, 0) : vec3(1, 0, 0), normal));
+  return { latitudeRad: Math.atan2(sinLatitude, cosLatitude), north: cross(normal, east), east };
+}
+
+/** A unit direction's azimuth from north towards east, rad; 0 at the zenith or the nadir. */
+function localAzimuthOf(frame: LocalFrame, d: Vec3): number {
+  const towardsNorth = dot(d, frame.north);
+  const towardsEast = dot(d, frame.east);
+  return towardsNorth === 0 && towardsEast === 0 ? 0 : Math.atan2(towardsEast, towardsNorth);
+}
+
 function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
   const stretch2 = body.stretch * body.stretch;
   const normal = normalise(stretchAlong(body.pole, stretch2, q));
@@ -630,21 +680,34 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
   const shares = sharesAt(body, q);
   const radiance: [number, number, number] = [0, 0, 0];
   let lit = false;
-  for (const { place, light } of body.lights) {
+  // The surface's mean A, which R08's sky light reflects on the Lambert share's flat term, and the
+  // point's frame for R08's lookups, its geodetic height 0 on the figure (R08.T9.b).
+  const meanA: [number, number, number] = [0, 0, 0];
+  body.laws.forEach((law, m) => {
+    const weight = shares[m] ?? 0;
+    if (weight > 0) {
+      for (const c of CHANNELS) {
+        meanA[c] += weight * law.a[c];
+      }
+    }
+  });
+  const local = localFrameOf(normal, body.pole);
+  const lighting = body.lighting;
+  for (const [j, { place, light }] of body.lights.entries()) {
     const toStar = sub(place, q);
     const distance = norm(toStar);
     const towards = scale(toStar, 1 / distance);
     const mu0 = dot(normal, towards);
+    // R08's sky light at the star's own μ₀ and light slot, before the horizon's `continue`.
+    const sky = lighting.skyIrradiance(0, mu0, local.latitudeRad, j);
     const horizon = sphereIrradianceFactor(
       distance / light.radius,
       Math.acos(Math.min(1, Math.max(-1, mu0))),
     );
-    if (horizon <= 0) {
+    if (horizon <= 0 && !sky.some((value) => value > 0)) {
       continue;
     }
-    const alpha = Math.acos(Math.min(1, Math.max(-1, -dot(towards, ray))));
     const starRadius = Math.asin(Math.min(1, light.radius / distance));
-    const reflectance = surfaceReflectance(body.laws, shares, horizon, mu0, mu, alpha, starRadius);
     let visible: [number, number, number] = [1, 1, 1];
     for (const occluder of body.occluders) {
       const toOccluder = sub(occluder.centre, q);
@@ -669,22 +732,49 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
           );
       }
     }
+    visible = [Math.max(visible[0], 0), Math.max(visible[1], 0), Math.max(visible[2], 0)];
+    // The sky light shares the point's eclipse: the air above the point lies in the shadow with it.
     for (const c of CHANNELS) {
-      const v = Math.max(visible[c], 0);
-      radiance[c] += light.illuminance[c] * record.exposureOverPi * reflectance[c] * v;
+      radiance[c] += light.illuminance[c] * record.exposureOverPi * meanA[c] * sky[c] * visible[c];
+    }
+    if (horizon <= 0) {
+      continue;
+    }
+    const alpha = Math.acos(Math.min(1, Math.max(-1, -dot(towards, ray))));
+    const reflectance = surfaceReflectance(body.laws, shares, horizon, mu0, mu, alpha, starRadius);
+    // R08's transmittance to the star's centre, its light slot's.
+    const transmitted = lighting.sunTransmittance(
+      0,
+      mu0,
+      local.latitudeRad,
+      localAzimuthOf(local, towards),
+      j,
+    );
+    for (const c of CHANNELS) {
+      const v = visible[c];
+      radiance[c] +=
+        light.illuminance[c] * record.exposureOverPi * reflectance[c] * v * transmitted[c];
       lit ||= horizon > LIT_IRRADIANCE && v > LIT_IRRADIANCE;
     }
   }
-  // Planetshine (Design note 7): it lights the night side, which stays unlit for the meter.
+  // Planetshine (Design note 7): it lights the night side, which stays unlit for the meter. Through
+  // the air (R08.T9.b): its sky term at its illuminance at the point and its own μ₀, before the
+  // horizon's `continue`, and its direct term by the three-node rule, both at light slot 0.
   for (const { place, source } of body.secondaries) {
     const toSource = sub(place, q);
+    const distance = norm(toSource);
+    const towards = scale(toSource, 1 / distance);
+    const mu0 = dot(normal, towards);
+    const near = source.distance / distance;
+    const sky = lighting.skyIrradiance(0, mu0, local.latitudeRad, 0);
+    for (const c of CHANNELS) {
+      radiance[c] +=
+        source.illuminance[c] * near * near * record.exposureOverPi * meanA[c] * sky[c];
+    }
     const irradiance = planetshineIrradiance(toSource, source.radius, source.distance, normal);
     if (irradiance <= 0) {
       continue;
     }
-    const distance = norm(toSource);
-    const towards = scale(toSource, 1 / distance);
-    const mu0 = dot(normal, towards);
     const alpha = Math.acos(Math.min(1, Math.max(-1, -dot(towards, ray))));
     const sourceRadius = Math.asin(Math.min(1, source.radius / distance));
     const reflectance = surfaceReflectance(
@@ -696,11 +786,41 @@ function shade(body: ViewBody, record: DiscRecord, q: Vec3, ray: Vec3): Shaded {
       alpha,
       sourceRadius,
     );
+    const transmitted = lighting.sourceTransmittance(
+      0,
+      mu0,
+      local.latitudeRad,
+      localAzimuthOf(local, towards),
+      sourceRadius,
+      0,
+    );
     for (const c of CHANNELS) {
-      radiance[c] += source.illuminance[c] * record.exposureOverPi * reflectance[c];
+      radiance[c] +=
+        source.illuminance[c] * record.exposureOverPi * reflectance[c] * transmitted[c];
     }
   }
   return { radiance, lit };
+}
+
+/**
+ * The light the twin shades one point of a record with, and whether a star lights it directly:
+ * `bodyDisc.wgsl`'s `shade` in `f64` at the point `q`, from the body's centre ÷ a in the view's
+ * axes, seen along the unit view-space `ray` (R08.T9.b's tests of the lighting through the air).
+ *
+ * @param lighting - The body's atmosphere's lookups ({@link AIRLESS_LIGHTING} for a body without
+ *   one, R07's).
+ * @param classMap - The texels of the record's class map; `null` for a uniform surface.
+ * @throws Error as {@link rasteriseDisc}.
+ */
+export function shadeDiscPoint(
+  record: DiscRecord,
+  camera: ProjectionCamera,
+  q: Vec3,
+  ray: Vec3,
+  lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
+  classMap: ClassMapTexels | null = null,
+): { readonly radiance: Rgb; readonly lit: boolean } {
+  return shade(viewBodyOf(record, camera, classMap, lighting), record, q, ray);
 }
 
 /** One pixel of a rasterised disc: its stored colour and alpha as the two draws leave them. */
@@ -810,6 +930,9 @@ interface CellSum {
  *
  * @param classMap - The texels of the record's class map, which its surface holds only as a
  *   texture; `null` for a uniform surface.
+ * @param lighting - The body's atmosphere's lookups (plan R08, R08.T9.b), which its record's
+ *   tables hold only as textures: `tablesCpu.ts`'s `surfaceLightingTwin`, or
+ *   {@link AIRLESS_LIGHTING} for a body without one.
  * @throws Error for a class-map record without its texels, or with another map's class count.
  */
 export function rasteriseDisc(
@@ -817,8 +940,9 @@ export function rasteriseDisc(
   camera: ProjectionCamera,
   viewport: Viewport,
   classMap: ClassMapTexels | null = null,
+  lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
 ): DiscPixel[] {
-  const body = viewBodyOf(record, camera, classMap);
+  const body = viewBodyOf(record, camera, classMap, lighting);
   const pixels: DiscPixel[] = [];
   const { rect } = record;
   const rayAt = viewRays(camera, viewport);
@@ -1039,6 +1163,7 @@ export interface SampledPixel {
  *
  * @param samplesPerAxis - m, a positive integer.
  * @param classMap - The texels of the record's class map; `null` for a uniform surface.
+ * @param lighting - The body's atmosphere's lookups, as {@link rasteriseDisc}'s.
  * @throws Error if `samplesPerAxis` is not a positive integer; for a class-map record without its
  *   texels, or with another map's class count.
  */
@@ -1048,13 +1173,14 @@ export function pointSampleDisc(
   viewport: Viewport,
   samplesPerAxis: number,
   classMap: ClassMapTexels | null = null,
+  lighting: SurfaceLightingReader = AIRLESS_LIGHTING,
 ): SampledPixel[] {
   if (!Number.isInteger(samplesPerAxis) || samplesPerAxis < 1) {
     throw new Error(
       `a pixel takes a positive whole number of samples per axis, got ${samplesPerAxis}`,
     );
   }
-  const body = viewBodyOf(record, camera, classMap);
+  const body = viewBodyOf(record, camera, classMap, lighting);
   const m = samplesPerAxis;
   const share = 1 / (m * m);
   const pixels: SampledPixel[] = [];

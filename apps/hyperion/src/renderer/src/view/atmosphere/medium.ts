@@ -710,3 +710,45 @@ export function termNamed(medium: AtmosphereMedium, name: string): MediumTerm {
   }
   return term;
 }
+
+/**
+ * The least local scale height the fitted lookup takes, m of h\*: 1 km (plan R08, R08.T6.f; moved
+ * here from `hillaire.ts` by R08.T9.b, which re-exports it).
+ *
+ * @remarks
+ * The fit's second point stands one local scale height up the ray, and its deep-dip parabola
+ * √(2 R_α H ÷ s) either side of the lowest point, so that the fit's differences of h\* are about
+ * H. Near the top, or where the stored vertical depth above a point is under the half float's
+ * least step (2⁻²⁴; within a few tens of kilometres of a Saturn-class top), the column gives a
+ * height of metres, whose differences `f32` cannot take from heights of hundreds of kilometres
+ * (0.06 m a step at 800 km): the smoke's kernel arm parted from the twin by 2% there. A kilometre
+ * keeps them to about 10⁻⁴, and lies under the least scale height drawn so far (R05's Earth
+ * aerosol, 1.2 km); a body of one band takes no fit.
+ * `oblate.wgsl`'s `OBLATE_SCALE_FLOOR_M` is the same.
+ */
+export const FIT_SCALE_FLOOR_M = 1_000;
+
+/**
+ * The local scale height in h\* at `scaledHeightM` (plan R08, R08.T6.f; moved here from
+ * `hillaire.ts` by R08.T9.b): the medium's vertical optical depth above it in green over its
+ * extinction there in green, held to the room left to the top, all of it where nothing
+ * extinguishes, and to at least {@link FIT_SCALE_FLOOR_M}; one scale height for an exponential, the
+ * column's own e-folding for any profile. `tablesCpu.ts`'s `OblateReader` takes the optical depth
+ * from slice 0's stored table, the kernels likewise; this takes it from each term's column
+ * ({@link columnLengthM}), within the table's 10⁻³. The composite takes it at the camera, and the
+ * lit passes from the body's table, where `tables.ts`'s `packOblateBody` tabulates it.
+ */
+export function localScaleHeightM(medium: AtmosphereMedium, scaledHeightM: number): number {
+  const top = medium.topHeightM;
+  const room = Math.max(top - scaledHeightM, 1);
+  const height = Math.min(Math.max(scaledHeightM, 0), top);
+  let column = 0;
+  let extinctionPerM = 0;
+  for (const term of medium.terms) {
+    const green = extinction(term)[1];
+    column += green * (columnLengthM(term.density, top) - columnLengthM(term.density, height));
+    extinctionPerM += green * densityAt(term.density, height);
+  }
+  const held = extinctionPerM > 0 ? Math.min(column / extinctionPerM, room) : room;
+  return Math.max(held, FIT_SCALE_FLOOR_M);
+}

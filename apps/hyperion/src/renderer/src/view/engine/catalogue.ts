@@ -16,7 +16,11 @@ import {
 } from "../atmosphere/hillaire";
 import { LIT_BODY_PROBE } from "../appearance/litBodyProbe";
 import { BODY_DISC_CELLS_KERNEL, BODY_DISC_MATERIALS, SMOOTH_MESH_MATERIAL } from "../bodies/draw";
-import { MULTI_SCATTERING_KERNEL, TRANSMITTANCE_KERNEL } from "../atmosphere/tables";
+import {
+  IRRADIANCE_KERNEL,
+  MULTI_SCATTERING_KERNEL,
+  TRANSMITTANCE_KERNEL,
+} from "../atmosphere/tables";
 import type { KernelPair } from "./kernels";
 import { BLOOM_DOWN_MATERIAL, BLOOM_UP_MATERIAL } from "../post/bloomChain";
 import { HISTOGRAM_KERNEL } from "../post/histogram";
@@ -61,10 +65,15 @@ const WIREFRAME_ENTRIES: ReadonlyArray<CatalogueEntry> = Object.values(WIREFRAME
   (spec) => ({ kind: "material", spec }),
 );
 
-/** R05.T12.b's per-planet atmosphere tables: transmittance and multiple scattering. */
+/**
+ * R05.T12.b's per-planet atmosphere tables: transmittance and multiple scattering, and since plan
+ * R08's R08.T9.b the sky's irradiance (`irradiance.wgsl`). R08's `surfaceLighting.wgsl`, a
+ * library, is catalogued inside the lit-body probe and the disc materials, which compose it.
+ */
 const ATMOSPHERE_TABLE_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   TRANSMITTANCE_KERNEL,
   MULTI_SCATTERING_KERNEL,
+  IRRADIANCE_KERNEL,
 ].map((spec) => ({ kind: "compute", spec }));
 
 /** R07's post-processing kernels and passes (plan R07, T12–T15). */
@@ -127,7 +136,8 @@ const SPLAT_ENTRIES: ReadonlyArray<CatalogueEntry> = [
 
 /**
  * R07's lit-body shading library (`shaders/litBody.wgsl`, R07.T4.c and T6.c), compiled and run
- * inside its probe kernel, since a library of functions is no material of its own.
+ * inside its probe kernel, since a library of functions is no material of its own, with R08's
+ * surface lighting (`surfaceLighting.wgsl`, R08.T9.b), which every one of these composes.
  */
 const LIT_BODY_ENTRIES: ReadonlyArray<CatalogueEntry> = [
   { kind: "compute", spec: LIT_BODY_PROBE },

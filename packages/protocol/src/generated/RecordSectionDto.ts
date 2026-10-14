@@ -4,4 +4,4 @@
  * A section of a body's record, as a `not_modelled` answer names it: the record's fields of the
  * same names (`mass` is the record's `mass_kg`).
  */
-export type RecordSectionDto = "label" | "mass" | "orbit" | "moons" | "rings" | "population" | "bulk" | "surface" | "hooks" | "photometry" | "figure" | "rotation";
+export type RecordSectionDto = "label" | "mass" | "orbit" | "moons" | "rings" | "population" | "bulk" | "surface" | "hooks" | "photometry" | "figure" | "rotation" | "envelope";

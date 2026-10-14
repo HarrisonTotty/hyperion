@@ -1,4 +1,4 @@
-# generator_version = 21
+# generator_version = 22
 t_tauri 0x41fe2c960000000c: YoungThinDisc, 1 stars
 fe_h = 0xbfa279dd7c75657a  # -0.036086007540414536
 age_at_epoch_yr = 0x414b4d30ecc44e4c  # 3578465.849740779
@@ -21,10 +21,11 @@ moons: [0101]
 rings: []
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), NotYetFormed
 mass_mearth = 0x3f36e88a39e30963  # 0.00034955382023950913
 orbit: NotApplicable
@@ -34,10 +35,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0200 A c: Planet about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3fc3c78506cf345b  # 0.1545263560532558
 orbit: NotApplicable
@@ -47,10 +49,11 @@ moons: [0201, 0202]
 rings: []
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0201 A c I: Moon(GiantImpact) about Some(Body(BodyIndex(512))), NotYetFormed
 mass_mearth = 0x3f46a7ceb4cf58ad  # 0.0006913909252215432
 orbit: NotApplicable
@@ -60,10 +63,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0202 A c II: Moon(Captured) about Some(Body(BodyIndex(512))), NotYetFormed
 mass_mearth = 0x3dea744d386bbede  # 1.9248038944864232e-10
 orbit: NotApplicable
@@ -73,10 +77,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0300 A d: Planet about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3fbd70c85afe996f  # 0.11500217649026977
 orbit: NotApplicable
@@ -86,10 +91,11 @@ moons: []
 rings: []
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0400 A e: Planet about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3fbb471e44c9dc6a  # 0.10655392817885603
 orbit: NotApplicable
@@ -99,10 +105,11 @@ moons: []
 rings: []
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e100 BELT 1: Belt(Asteroid) about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3f56c5bed0c05d49  # 0.001389919608305439
 orbit: NotApplicable
@@ -116,6 +123,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e101 BELT 1-1: DwarfPlanet about Some(Body(BodyIndex(57600))), NotYetFormed
 mass_mearth = 0x3f22bee6424d4b93  # 0.00014301834849081134
 orbit: NotApplicable
@@ -125,10 +133,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), NotYetFormed
 mass_mearth = 0x3f079e3c03c256e8  # 4.504795694619345e-5
 orbit: NotApplicable
@@ -138,10 +147,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), NotYetFormed
 mass_mearth = 0x3ef8082ff054f585  # 2.2918683517438656e-5
 orbit: NotApplicable
@@ -151,10 +161,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e200 BELT 2: Belt(Asteroid) about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3f473e8733a37040  # 0.0007093582310306948
 orbit: NotApplicable
@@ -168,6 +179,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e201 BELT 2-1: DwarfPlanet about Some(Body(BodyIndex(57856))), NotYetFormed
 mass_mearth = 0x3f193f8d5c2d2f90  # 9.631443303453739e-5
 orbit: NotApplicable
@@ -177,10 +189,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e202 BELT 2-2: DwarfPlanet about Some(Body(BodyIndex(57856))), NotYetFormed
 mass_mearth = 0x3effcf90c1e26e6c  # 3.0337145397225948e-5
 orbit: NotApplicable
@@ -190,10 +203,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), NotYetFormed
 mass_mearth = 0x3ef02f22be69c9d6  # 1.5434383295384806e-5
 orbit: NotApplicable
@@ -203,10 +217,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e300 BELT 3: Belt(Asteroid) about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3f7fd728d9004bce  # 0.007773551522421719
 orbit: NotApplicable
@@ -220,6 +235,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e301 BELT 3-1: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f646c0e9715a1a2  # 0.0024929318394024272
 orbit: NotApplicable
@@ -229,10 +245,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e302 BELT 3-2: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f49baf065eea75b  # 0.0007852243251040657
 orbit: NotApplicable
@@ -242,10 +259,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e303 BELT 3-3: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f3a2e5df82b2feb  # 0.0003994922082426455
 orbit: NotApplicable
@@ -255,10 +273,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e304 BELT 3-4: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f303582f73df158  # 0.0002473301640220269
 orbit: NotApplicable
@@ -268,10 +287,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e305 BELT 3-5: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f2659814daf364c  # 0.00017051413928330578
 orbit: NotApplicable
@@ -281,10 +301,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e306 BELT 3-6: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f207e3a07797180  # 0.00012583216060847377
 orbit: NotApplicable
@@ -294,10 +315,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e307 BELT 3-7: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f1983356a283adb  # 9.732259290038839e-5
 orbit: NotApplicable
@@ -307,10 +329,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e308 BELT 3-8: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f146c0e9715a19f  # 7.790411998132581e-5
 orbit: NotApplicable
@@ -320,10 +343,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e400 BELT 4: Belt(Kuiper) about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3fb2714ac58868ac  # 0.07204119989947583
 orbit: NotApplicable
@@ -337,6 +361,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e401 BELT 4-1: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f6bd96ee3ee5adb  # 0.0033995786502133258
 orbit: NotApplicable
@@ -346,10 +371,11 @@ moons: [e481]
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e402 BELT 4-2: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f60d0809f120efd  # 0.002052546704875867
 orbit: NotApplicable
@@ -359,10 +385,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e403 BELT 4-3: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f5369c9fd74a26a  # 0.001184890037459275
 orbit: NotApplicable
@@ -372,10 +399,11 @@ moons: [e483]
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e404 BELT 4-4: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f4809b4a714a9f5  # 0.0007335788815557286
 orbit: NotApplicable
@@ -385,10 +413,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e405 BELT 4-5: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f40927b739aaa95  # 0.0005057432928955047
 orbit: NotApplicable
@@ -398,10 +427,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e406 BELT 4-6: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f38758ab3b28b90  # 0.0003732169750014164
 orbit: NotApplicable
@@ -411,10 +441,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e407 BELT 4-7: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f32eae01ecf8a5e  # 0.0002886578720887929
 orbit: NotApplicable
@@ -424,10 +455,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e408 BELT 4-8: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f2e492eedac30d3  # 0.00023106286865760012
 orbit: NotApplicable
@@ -437,10 +469,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e481 BELT 4-1 I: Moon(GiantImpact) about Some(Body(BodyIndex(58369))), NotYetFormed
 mass_mearth = 0x3f282ef8573058ac  # 0.000184505286228547
 orbit: NotApplicable
@@ -450,10 +483,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e483 BELT 4-3 I: Moon(GiantImpact) about Some(Body(BodyIndex(58371))), NotYetFormed
 mass_mearth = 0x3f08d8af68b2be77  # 4.739079766957488e-5
 orbit: NotApplicable
@@ -463,10 +497,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 
 +H: 35 bodies at UniverseTime { seconds: 31557600000, nanos: 0 }
 belts: [e100, e200, e300, e400]
@@ -480,10 +515,11 @@ moons: [0101]
 rings: []
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0101 A b I: Moon(GiantImpact) about Some(Body(BodyIndex(256))), NotYetFormed
 mass_mearth = 0x3f36e88a39e30963  # 0.00034955382023950913
 orbit: NotApplicable
@@ -493,10 +529,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0200 A c: Planet about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3fc3c78506cf345b  # 0.1545263560532558
 orbit: NotApplicable
@@ -506,10 +543,11 @@ moons: [0201, 0202]
 rings: []
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0201 A c I: Moon(GiantImpact) about Some(Body(BodyIndex(512))), NotYetFormed
 mass_mearth = 0x3f46a7ceb4cf58ad  # 0.0006913909252215432
 orbit: NotApplicable
@@ -519,10 +557,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0202 A c II: Moon(Captured) about Some(Body(BodyIndex(512))), NotYetFormed
 mass_mearth = 0x3dea744d386bbede  # 1.9248038944864232e-10
 orbit: NotApplicable
@@ -532,10 +571,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0300 A d: Planet about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3fbd70c85afe996f  # 0.11500217649026977
 orbit: NotApplicable
@@ -545,10 +585,11 @@ moons: []
 rings: []
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body 0400 A e: Planet about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3fbb471e44c9dc6a  # 0.10655392817885603
 orbit: NotApplicable
@@ -558,10 +599,11 @@ moons: []
 rings: []
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e100 BELT 1: Belt(Asteroid) about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3f56c5bed0c05d49  # 0.001389919608305439
 orbit: NotApplicable
@@ -575,6 +617,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e101 BELT 1-1: DwarfPlanet about Some(Body(BodyIndex(57600))), NotYetFormed
 mass_mearth = 0x3f22bee6424d4b93  # 0.00014301834849081134
 orbit: NotApplicable
@@ -584,10 +627,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e102 BELT 1-2: DwarfPlanet about Some(Body(BodyIndex(57600))), NotYetFormed
 mass_mearth = 0x3f079e3c03c256e8  # 4.504795694619345e-5
 orbit: NotApplicable
@@ -597,10 +641,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e103 BELT 1-3: DwarfPlanet about Some(Body(BodyIndex(57600))), NotYetFormed
 mass_mearth = 0x3ef8082ff054f585  # 2.2918683517438656e-5
 orbit: NotApplicable
@@ -610,10 +655,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e200 BELT 2: Belt(Asteroid) about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3f473e8733a37040  # 0.0007093582310306948
 orbit: NotApplicable
@@ -627,6 +673,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e201 BELT 2-1: DwarfPlanet about Some(Body(BodyIndex(57856))), NotYetFormed
 mass_mearth = 0x3f193f8d5c2d2f90  # 9.631443303453739e-5
 orbit: NotApplicable
@@ -636,10 +683,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e202 BELT 2-2: DwarfPlanet about Some(Body(BodyIndex(57856))), NotYetFormed
 mass_mearth = 0x3effcf90c1e26e6c  # 3.0337145397225948e-5
 orbit: NotApplicable
@@ -649,10 +697,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e203 BELT 2-3: DwarfPlanet about Some(Body(BodyIndex(57856))), NotYetFormed
 mass_mearth = 0x3ef02f22be69c9d6  # 1.5434383295384806e-5
 orbit: NotApplicable
@@ -662,10 +711,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e300 BELT 3: Belt(Asteroid) about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3f7fd728d9004bce  # 0.007773551522421719
 orbit: NotApplicable
@@ -679,6 +729,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e301 BELT 3-1: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f646c0e9715a1a2  # 0.0024929318394024272
 orbit: NotApplicable
@@ -688,10 +739,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e302 BELT 3-2: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f49baf065eea75b  # 0.0007852243251040657
 orbit: NotApplicable
@@ -701,10 +753,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e303 BELT 3-3: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f3a2e5df82b2feb  # 0.0003994922082426455
 orbit: NotApplicable
@@ -714,10 +767,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e304 BELT 3-4: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f303582f73df158  # 0.0002473301640220269
 orbit: NotApplicable
@@ -727,10 +781,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e305 BELT 3-5: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f2659814daf364c  # 0.00017051413928330578
 orbit: NotApplicable
@@ -740,10 +795,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e306 BELT 3-6: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f207e3a07797180  # 0.00012583216060847377
 orbit: NotApplicable
@@ -753,10 +809,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e307 BELT 3-7: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f1983356a283adb  # 9.732259290038839e-5
 orbit: NotApplicable
@@ -766,10 +823,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e308 BELT 3-8: DwarfPlanet about Some(Body(BodyIndex(58112))), NotYetFormed
 mass_mearth = 0x3f146c0e9715a19f  # 7.790411998132581e-5
 orbit: NotApplicable
@@ -779,10 +837,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e400 BELT 4: Belt(Kuiper) about Some(Star(0)), NotYetFormed
 mass_mearth = 0x3fb2714ac58868ac  # 0.07204119989947583
 orbit: NotApplicable
@@ -796,6 +855,7 @@ hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e401 BELT 4-1: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f6bd96ee3ee5adb  # 0.0033995786502133258
 orbit: NotApplicable
@@ -805,10 +865,11 @@ moons: [e481]
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e402 BELT 4-2: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f60d0809f120efd  # 0.002052546704875867
 orbit: NotApplicable
@@ -818,10 +879,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e403 BELT 4-3: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f5369c9fd74a26a  # 0.001184890037459275
 orbit: NotApplicable
@@ -831,10 +893,11 @@ moons: [e483]
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e404 BELT 4-4: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f4809b4a714a9f5  # 0.0007335788815557286
 orbit: NotApplicable
@@ -844,10 +907,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e405 BELT 4-5: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f40927b739aaa95  # 0.0005057432928955047
 orbit: NotApplicable
@@ -857,10 +921,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e406 BELT 4-6: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f38758ab3b28b90  # 0.0003732169750014164
 orbit: NotApplicable
@@ -870,10 +935,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e407 BELT 4-7: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f32eae01ecf8a5e  # 0.0002886578720887929
 orbit: NotApplicable
@@ -883,10 +949,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e408 BELT 4-8: DwarfPlanet about Some(Body(BodyIndex(58368))), NotYetFormed
 mass_mearth = 0x3f2e492eedac30d3  # 0.00023106286865760012
 orbit: NotApplicable
@@ -896,10 +963,11 @@ moons: []
 rings: NotModelled
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e481 BELT 4-1 I: Moon(GiantImpact) about Some(Body(BodyIndex(58369))), NotYetFormed
 mass_mearth = 0x3f282ef8573058ac  # 0.000184505286228547
 orbit: NotApplicable
@@ -909,10 +977,11 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable
 body e483 BELT 4-3 I: Moon(GiantImpact) about Some(Body(BodyIndex(58371))), NotYetFormed
 mass_mearth = 0x3f08d8af68b2be77  # 4.739079766957488e-5
 orbit: NotApplicable
@@ -922,7 +991,8 @@ moons: NotApplicable
 rings: NotApplicable
 population: NotApplicable
 surface: NotApplicable
-hooks: NotModelled
+hooks: NotApplicable
 rotation: NotApplicable
 figure: NotApplicable
 photometry: NotApplicable
+envelope: NotApplicable

@@ -26,8 +26,10 @@
 //! "each pub for tests" says; the working state's shape is the pass's own, unfrozen until R09.T16's
 //! goldens.
 //!
-//! As built by R09.T10, every step is a no-op, so the pass yields its initial state: a smooth
-//! sphere at the datum ([`Working::initial`]).
+//! As built by R09.T10, every step was a no-op, so the pass yielded its initial state: a smooth
+//! sphere at the datum ([`Working::initial`]). R09.T11 filled [`plates`]: on a mobile lid it writes
+//! each cell's plate, crust and nearest boundary, and each oceanic cell's
+//! [`SeafloorOrigin`]; the other steps are still no-ops.
 
 pub mod classes;
 pub mod climate;
@@ -44,7 +46,7 @@ use hyperion_surface::synth::{BandSpectrum, SpectrumShape};
 use super::grid::CellGraph;
 use super::inputs::CoarseInputs;
 use crate::planetary::hooks::SurfaceSeed;
-use crate::units::{Kelvin, Metres, MetresPerSecond, Radians, SquareMetres};
+use crate::units::{Kelvin, Metres, MetresPerSecond, Radians, Seconds, SquareMetres};
 
 /// What every step reads and never changes: the body's surface seed, its inputs, its level and the
 /// grids of the field and of its climate layer.
@@ -173,12 +175,41 @@ pub struct CellState {
     pub crater_state: u8,
     /// The draped abyssal-hill relief H of the cell's sea floor, positive, or `None` off oceanic
     /// crust: R09.T12.a's, from its own ridge's half-rate and its age (`decision-r09-t5.md`
-    /// item 5); `None` until it runs.
+    /// item 5). R09.T11, which first writes oceanic crust, gives each oceanic cell the reference
+    /// style's [`H_REF`](hyperion_surface::synth::relief::H_REF), so that the field holds hills
+    /// exactly on oceanic crust, until R09.T12.a replaces it.
     pub hill_relief: Option<Metres>,
     /// The thickness of the ponded (turbidite) sediment over the cell, non-negative: R09.T12.a's,
     /// from its plate's passive margins (`decision-r09-t5.md` item 5); zero off oceanic crust and
     /// until it runs.
     pub ponded_sediment: Metres,
+    /// Where the cell's sea floor formed, on oceanic crust: R09.T11's distance to its own plate's
+    /// nearest ridge, the half-rate there and the age, which GDH1 and the sea floor's roughness
+    /// read (R09.T12.a; `decision-r09-t5.md` item 5); `None` off oceanic crust. None of it
+    /// travels: the field carries only what R09.T12.a makes of it.
+    pub seafloor_origin: Option<SeafloorOrigin>,
+}
+
+/// Where an oceanic cell's floor formed (R09.T11; `decision-r09-t5.md` item 5): the ridge of its
+/// own plate that it came from, the spreading rate there and its age.
+///
+/// The pass has no plate history, so the rate at formation is today's rate at the source ridge
+/// (labelled). Plain data with public fields, as [`CellState`] is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SeafloorOrigin {
+    /// `d_r`, the great-circle distance over the plate's own cells to its nearest divergent
+    /// boundary, along the cell graph's shortest path (Design notes 6 and 7): zero on the ridge,
+    /// and `None` where the plate has no divergent boundary its cells reach.
+    pub ridge_distance: Option<Metres>,
+    /// `u_h`, the half-rate of the ridge segment the floor came from, positive: the opening rate
+    /// normal to the ridge at the source cell of the own-ridge distance transform, halved
+    /// (symmetric spreading), which every cell the source reaches inherits; the mean half-rate,
+    /// [`MEAN_HALF_RATE`](plates::MEAN_HALF_RATE), without a ridge.
+    pub half_rate: MetresPerSecond,
+    /// τ, the floor's age, `d_r` ÷ `u_h` capped at [`OLDEST_FLOOR`](plates::OLDEST_FLOOR)
+    /// (200 Myr), where GDH1 is within 10 m of its asymptote (Design note 7); the cap
+    /// without a ridge.
+    pub age: Seconds,
 }
 
 /// A month's 10 m wind: its mean speed and the direction its resultant blows towards, clockwise
@@ -246,6 +277,8 @@ pub struct Working {
     pub realised_sigma_h: Metres,
     /// The reconstructed field's realised greatest relief (R09.T12.e, and again R09.T14.d).
     pub realised_relief: Metres,
+    /// The plates, in plate-index order (R09.T11): none on a world without them.
+    pub plates: Vec<plates::Plate>,
 }
 
 impl Working {
@@ -282,6 +315,7 @@ impl Working {
             crater_state: 0,
             hill_relief: None,
             ponded_sediment: Metres::ZERO,
+            seafloor_origin: None,
         };
         let climate = ClimateState {
             sea_level_temperature: pass.inputs().mean_surface_temperature(),
@@ -311,6 +345,7 @@ impl Working {
             months: pass.inputs().months(),
             realised_sigma_h: Metres::ZERO,
             realised_relief: Metres::ZERO,
+            plates: Vec::new(),
         }
     }
 }

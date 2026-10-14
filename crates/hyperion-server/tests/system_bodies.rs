@@ -10,12 +10,14 @@ mod common;
 
 use std::sync::OnceLock;
 
+use common::surface::{Secret, check_no_seed_key};
 use common::{TestClient, TestServer};
 use hyperion_protocol::{
-    BodyDetailDto, BodyDetailRequest, BodyFigureDto, BodyIdHex, BodyKindDto, BodyPhotometryDto,
-    BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto, DetailLevelDto, ErrorCode,
-    OrbitHostDto, RequestBody, RequestError, ResponseBody, SectionDto, SystemBodiesDto,
-    SystemBodiesRequest, SystemIdHex, SystemSummaryRequest, UniverseIdHex, UniverseTime,
+    BodyDetailDto, BodyDetailRequest, BodyFigureDto, BodyHooksDto, BodyIdHex, BodyKindDto,
+    BodyPhotometryDto, BodyRecordDto, BodyRotationDto, BodyStateDto, BodySummaryDto,
+    DetailLevelDto, DetailSeedHex, ErrorCode, OrbitHostDto, RequestBody, RequestError,
+    ResponseBody, SectionDto, ServerMessage, SystemBodiesDto, SystemBodiesRequest, SystemIdHex,
+    SystemSummaryRequest, UniverseIdHex, UniverseTime,
 };
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, candidate_count};
@@ -26,6 +28,7 @@ use hyperion_sim::planetary::derive::photometry::BodyPhotometry;
 use hyperion_sim::planetary::disc::snow_line;
 use hyperion_sim::planetary::fate::BodyState;
 use hyperion_sim::planetary::frames::BodyFixedFrame;
+use hyperion_sim::planetary::hooks::detail_seed;
 use hyperion_sim::planetary::placement::{OrbitHost, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{BodyKind, BodyRecord, Population, Section};
 use hyperion_sim::planetary::{PlanetaryHost, PlanetarySystem, SystemContext, generate};
@@ -1111,7 +1114,8 @@ async fn bodies_in_every_state_are_the_sims_snapshot(server: &TestServer) {
 }
 
 /// Every body's `body_detail` record is the sim's `body_at`, with its surface and hooks tagged as
-/// the sim tags them, and agrees with the system's list.
+/// the sim tags them, and agrees with the system's list. A present body's hooks carry its detail
+/// seed, and no answer carries its surface seed (R09.T1.b).
 ///
 /// Run by [`system_bodies_and_body_records_are_the_sims_and_cached`] on its shared server.
 async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
@@ -1119,19 +1123,28 @@ async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
     let raw = PINNED[2];
     let (ctx, planets) = sim_system(raw);
     let time = at_years(-250);
-    let list = bodies(
+    // R09.T1.b: the answers are read as they arrived, and none may carry a surface seed.
+    let secret = |index| planets.surface_seed(index).unwrap().map(Secret::of);
+    let secrets: Vec<Secret> = planets.indices().into_iter().filter_map(secret).collect();
+    let ResponseBody::SystemBodies(list) = answer_checked(
         &mut client,
         bodies_request(&universe, raw, time, DetailLevelDto::Full),
+        &secrets,
     )
-    .await;
+    .await
+    else {
+        panic!("expected a system's bodies");
+    };
     let mut states = Vec::new();
+    let mut hooks_seen = 0;
     assert_eq!(planets.indices().len(), list.bodies.len());
     for (index, summary) in planets.indices().into_iter().zip(&list.bodies) {
-        let answer = detail(
-            &mut client,
-            detail_request(&universe, summary.id.clone(), time, DetailLevelDto::Full),
-        )
-        .await;
+        let request = detail_request(&universe, summary.id.clone(), time, DetailLevelDto::Full);
+        let own: Vec<Secret> = secret(index).into_iter().collect();
+        let ResponseBody::BodyDetail(answer) = answer_checked(&mut client, request, &own).await
+        else {
+            panic!("expected a body's record");
+        };
         assert_eq!(
             (answer.universe.clone(), answer.time),
             (universe.clone(), time)
@@ -1152,13 +1165,30 @@ async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
             &record.bulk,
         );
         assert_bulk_level_is_the_sims(&sim, record);
-        assert_same_state(record.id.as_str(), &record.surface, sim.surface());
+        // Until P14.T35.e gives the wire its form, an `Ok` surface (P14.T48.e) is sent as
+        // `not_modelled`.
+        if matches!(sim.surface(), Section::Ok(_)) {
+            assert_eq!(record.surface, SectionDto::NotModelled, "{}", record.id);
+        } else {
+            assert_same_state(record.id.as_str(), &record.surface, sim.surface());
+        }
         assert_same_state(record.id.as_str(), &record.hooks, sim.hooks());
-        // Every hooks section is not modelled; a population's is not applicable.
-        assert!(matches!(
-            record.hooks,
-            SectionDto::NotModelled | SectionDto::NotApplicable
-        ));
+        // R09.T1.b: a planet, moon or dwarf planet present at the time carries its detail seed,
+        // the sim's; a ring, a belt, the halo and a body not present carry no hooks.
+        let surfaced = matches!(
+            record.kind,
+            BodyKindDto::Planet | BodyKindDto::DwarfPlanet | BodyKindDto::Moon { .. }
+        );
+        let expected = if surfaced && record.state == BodyStateDto::Present {
+            let seed = detail_seed(Seed::new(SEED), index.body_id(planets.system()));
+            hooks_seen += 1;
+            SectionDto::Ok(BodyHooksDto {
+                detail_seed: SectionDto::Ok(DetailSeedHex::from_u64(seed.get())),
+            })
+        } else {
+            SectionDto::NotApplicable
+        };
+        assert_eq!(record.hooks, expected, "{}", record.id);
         // The list's entry is the record, less its surface and hooks.
         assert_eq!(
             serde_json::to_value(summary).unwrap(),
@@ -1180,7 +1210,27 @@ async fn each_bodys_record_is_the_sims_and_the_lists(server: &TestServer) {
             .any(|state| matches!(state, BodyStateDto::Destroyed { .. })),
         "the pinned triple's engulfed planet is among them: {states:?}"
     );
+    assert!(hooks_seen > 0, "no present body's detail seed was checked");
     client.close().await;
+}
+
+/// Makes a request and reads its answer's text as it arrived (R09.T1.b): it may hold no key named
+/// `surface_seed`, at any depth, nor the value of any of `secrets`. The answer's body is returned.
+async fn answer_checked(
+    client: &mut TestClient,
+    body: RequestBody,
+    secrets: &[Secret],
+) -> ResponseBody {
+    let id = client.send_request(body).await;
+    let text = client.next_text().await;
+    let message = check_no_seed_key(&text);
+    for secret in secrets {
+        secret.assert_absent(&text);
+    }
+    match message {
+        ServerMessage::Response { id: answered, body } if answered == id => body,
+        other => panic!("expected the answer to request {}, got {other:?}", id.0),
+    }
 }
 
 /// A well-formed body ID whose index is in plan 14's layout but names no body is `unknown_body`:

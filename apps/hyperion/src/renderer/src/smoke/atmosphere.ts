@@ -76,10 +76,12 @@ import {
   type AbsorberCurveSlots,
   type AtmosphereBody,
   AtmosphereTables,
+  IRRADIANCE_SIZE,
   kernelMedium,
   lastPressureColumnSize,
   MULTI_SCATTERING_SIZE,
   NO_ABSORBER_CURVES,
+  packedScaleHeightsM,
   PHASE_TABLE_ENTRIES,
   type TableSize,
   type TablesBand,
@@ -104,6 +106,7 @@ import {
   rayMarchRayTwin,
   rayMarchTexelTwin,
   skyViewRayTwin,
+  surfaceLightingTwin,
   tableSources,
   type TwinBand,
   type TwinRay,
@@ -143,6 +146,13 @@ import {
   texel,
   triangleMesh,
 } from "./harness";
+import {
+  type AtmosphereLookup,
+  expectedLighting,
+  type LightingProbeCase,
+} from "../view/appearance/litBodyProbe";
+import { surfaceLightingTablesOf } from "../view/atmosphere/surfaceLighting";
+import { probeSurfaceLighting } from "./litBody";
 import { attempt, handled, inOrder, type OrderedChecks } from "./ordered";
 import type { TwinPool } from "./twinPool";
 
@@ -2797,6 +2807,8 @@ async function drawArms(
 /**
  * Records one arm's agreement as `task`'s check (R08.T6.g's, or R08.T6.i's on the slab Earth), with
  * its largest value and its floor's count.
+ *
+ * @param label - The arm as the check names it; `the stored arm` or `the kernel arm` by default.
  */
 function recordHeights(
   checks: Checks,
@@ -2804,6 +2816,7 @@ function recordHeights(
   name: string,
   result: TwinAgreement,
   arm: TwinOptions["arm"],
+  label = `the ${arm} arm`,
 ): void {
   const limited = arm === "stored" && result.largest < FORMAT_LIMITED ? ", format-limited" : "";
   const share = result.envelope.length / result.channels;
@@ -2816,7 +2829,7 @@ function recordHeights(
       ? ""
       : `; ${result.split.length} by the split's rounding (${((result.split.length / result.channels) * 100).toFixed(2)}%): ${result.split.join("; ")}`;
   checks.check(
-    `${task} ${name}, the ${arm} arm, agrees with the CPU twin to 10⁻³`,
+    `${task} ${name}, ${label}, agrees with the CPU twin to 10⁻³`,
     result.worst <= 1 && result.above > 0 && share <= ENVELOPE_SHARE_CAP,
     `worst ${result.at}; largest ${show([result.largest])}${limited}; ${result.above} channels above 10⁻⁶ of the largest, ${result.over} over the bound, ${result.floorCarried} carried by the floor; ${envelope}${split}`,
   );
@@ -3478,6 +3491,295 @@ export async function checkAtmosphereSlicesSaturn(
   twins: TwinPool,
 ): Promise<void> {
   await checkSlices(engine, checks, twins, slicesSaturn());
+}
+
+// --- R08.T9.b: surface lighting ------------------------------------------------------------------
+
+/** One body of R08.T9.b's smoke: its figure and gravity, its medium and curves, its lit heights. */
+interface SurfaceBody {
+  readonly name: string;
+  readonly body: AtmosphereBody;
+  readonly medium: AtmosphereMedium;
+  readonly curves: AbsorberCurveSlots;
+  /** The lit points' geodetic heights above the datum, m. */
+  readonly heightsM: ReadonlyArray<number>;
+}
+
+/** Earth on WGS 84 with its normal gravity: one slice and one band, its ozone under the Sun. */
+function surfaceEarth(): SurfaceBody {
+  return {
+    name: "Earth",
+    body: earthBody(),
+    medium: EARTH_REFERENCE,
+    curves: EARTH_REFERENCE_CURVES,
+    heightsM: [0, 2_000, 30_000],
+  };
+}
+
+/** The Saturn-class figure: five slices and four bands, its fitted lookups' scale height read. */
+function surfaceSaturn(): SurfaceBody {
+  return {
+    name: "the Saturn-class figure",
+    body: SATURN_BODY,
+    medium: saturnClassMedium(),
+    curves: NO_ABSORBER_CURVES,
+    heightsM: [0, 50_000, 300_000],
+  };
+}
+
+/** The irradiance table's rows one twin job takes: 4 of its 16, so that its four jobs share the workers. */
+const IRRADIANCE_JOB_ROWS = 4;
+
+/**
+ * One layer of the sky's irradiance twinned over the GPU's own tables (R08.T9.b): the band's
+ * transmittance tables and its multiple-scattering layers as the GPU stored them, light slot `slot`
+ * in the band's frame, its rows in jobs on the twin workers, merged.
+ */
+async function irradianceOverGpu(
+  twins: TwinPool,
+  read: AtmosphereMedium,
+  band: TablesBand,
+  transmittance: TwinTransmittance,
+  multiScatteringBySlot: ReadonlyArray<TwinTable>,
+  slot: number,
+): Promise<TwinTable> {
+  const { widthTexels: w, heightTexels: h } = IRRADIANCE_SIZE;
+  const jobs: Promise<TwinTable>[] = [];
+  for (let row = 0; row < h; row += IRRADIANCE_JOB_ROWS) {
+    const texels: (readonly [number, number])[] = [];
+    for (let y = row; y < Math.min(row + IRRADIANCE_JOB_ROWS, h); y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        texels.push([x, y]);
+      }
+    }
+    jobs.push(
+      twins.irradiance(
+        read,
+        band.bottomRadiusM,
+        transmittance,
+        multiScatteringBySlot,
+        slot,
+        band.coefficientFactor,
+        texels,
+      ),
+    );
+  }
+  const merged = new Float64Array(w * h * 4);
+  // Each job leaves the texels of others' rows 0.
+  for (const part of await Promise.all(jobs)) {
+    part.texels.forEach((value, i) => {
+      merged[i] = (merged[i] ?? 0) + value;
+    });
+  }
+  return { widthTexels: w, heightTexels: h, texels: merged };
+}
+
+/**
+ * R08.T9.b's pinned lookups at a body's heights: the sun's transmittance at four latitudes, six zenith
+ * cosines from the zenith to 2° below the horizon and three azimuths; the sky's irradiance at the
+ * same latitudes and cosines, and at a light slot past the medium's, held to its last; and a wide
+ * source's transmittance at three cosines, two azimuths and three angular radii to 9.8°.
+ */
+function surfaceLightingCases(heightsM: ReadonlyArray<number>): LightingProbeCase[] {
+  const latitudes = [0, 35, 60, 89].map((deg) => deg * DEGREE_RAD);
+  const cosines = [1, 0.6, 0.2, 0.05, 0.01, -0.035];
+  const cases: LightingProbeCase[] = [];
+  for (const altitudeM of heightsM) {
+    for (const latitudeRad of latitudes) {
+      for (const mu of cosines) {
+        for (const azimuthDeg of [0, 90, -150]) {
+          cases.push({
+            kind: "atmosphere",
+            lookup: "sun",
+            altitudeM,
+            mu,
+            latitudeRad,
+            azimuthRad: azimuthDeg * DEGREE_RAD,
+            angularRadiusRad: 0,
+            curve: 0,
+          });
+        }
+        for (const curve of [0, 3]) {
+          cases.push({
+            kind: "atmosphere",
+            lookup: "sky",
+            altitudeM,
+            mu,
+            latitudeRad,
+            azimuthRad: 0,
+            angularRadiusRad: 0,
+            curve,
+          });
+        }
+      }
+      for (const mu of [0.6, 0.1, 0.02]) {
+        for (const azimuthDeg of [0, -150]) {
+          for (const angularRadiusRad of [1e-4, 0.05, 9.8 * DEGREE_RAD]) {
+            cases.push({
+              kind: "atmosphere",
+              lookup: "source",
+              altitudeM,
+              mu,
+              latitudeRad,
+              azimuthRad: azimuthDeg * DEGREE_RAD,
+              angularRadiusRad,
+              curve: 0,
+            });
+          }
+        }
+      }
+    }
+  }
+  return cases;
+}
+
+/**
+ * The probe's results for the cases of one lookup, and their twin's, as two tables of one texel a
+ * case (rgb, alpha 0), for {@link twinAgreement}.
+ */
+function lookupTables(
+  gpu: Float32Array,
+  expected: ReadonlyArray<ReadonlyArray<number>>,
+  cases: ReadonlyArray<LightingProbeCase>,
+  lookup: AtmosphereLookup,
+): { readonly gpu: Float32Array; readonly twin: TwinTable } {
+  const picked = cases.flatMap((probe, i) =>
+    probe.kind === "atmosphere" && probe.lookup === lookup ? [i] : [],
+  );
+  const gpuTexels = new Float32Array(picked.length * 4);
+  const twinTexels = new Float64Array(picked.length * 4);
+  picked.forEach((i, k) => {
+    for (const c of [0, 1, 2]) {
+      gpuTexels[k * 4 + c] = gpu[i * 4 + c] ?? Number.NaN;
+      twinTexels[k * 4 + c] = expected[i]?.[c] ?? Number.NaN;
+    }
+  });
+  return {
+    gpu: gpuTexels,
+    twin: { widthTexels: picked.length, heightTexels: 1, texels: twinTexels },
+  };
+}
+
+/**
+ * R08.T9.b on one body: the sky's irradiance table, every band and light slot's layer, stored in
+ * `rgba32float` (its kernel's own output, so with no floor and no kernel arm), against its twin over
+ * the GPU's own band transmittance tables and multiple-scattering layers
+ * (`tablesCpu.ts`'s `irradianceTwin`, in each band's frame); and `surfaceLighting.wgsl`'s three
+ * lookups, run in the catalogue's lit-body probe with the body's stored tables bound, against
+ * their twin over the GPU's slices and irradiance (`surfaceLightingTwin`, the body's table's
+ * scale heights). Each to 10⁻³ above 10⁻⁶ of the largest value of its kind.
+ */
+async function checkSurfaceLighting(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+  surface: SurfaceBody,
+): Promise<void> {
+  const read = kernelMedium(surface.medium);
+  const tables = new AtmosphereTables(
+    engine,
+    surface.medium,
+    tableRadiusM(surface.body.figure),
+    surface.curves,
+    surface.body,
+  );
+  try {
+    await inOrder(checks, async (ordered) => {
+      const plan = tables.plan;
+      const perBand = tables.layersPerBand;
+      const layers = tables.multiScatteringLayers;
+      const gpu = await readPlanetTables(engine, tables);
+      // Stored in `rgba32float`, its kernel's own output, so it needs no kernel arm.
+      const irradiance = new Float32Array(
+        await engine.readTexture(tables.irradiance(), 0, undefined, "tolerance"),
+      );
+      const multiScattering = layersOf(gpu.multiScattering, layers).map((layer) =>
+        asTwinTable(layer, MULTI_SCATTERING_SIZE),
+      );
+      const twinsOverGpu: Promise<TwinTable>[] = [];
+      for (const [b, band] of plan.bands.entries()) {
+        // A body of one slice at κ = 1 and one band reads the slice's tables, as the build does.
+        let own = storedSlices(gpu, read, tables.curves, plan.kappa.length)[0];
+        if (!plan.shared) {
+          // A band's own tables are built anew and read back before the next band's.
+          // oxlint-disable-next-line no-await-in-loop
+          const built = await readBandTransmittance(engine, tables, b);
+          own = storedTransmittance(built, read, tables.curves);
+        }
+        if (own === undefined) {
+          throw new Error(`${surface.name}'s tables have a slice`);
+        }
+        const bandLayers = multiScattering.slice(b * perBand, (b + 1) * perBand);
+        for (let slot = 0; slot < perBand; slot += 1) {
+          // Marked handled: a failure before the checks read it, or while an earlier one is read,
+          // leaves no unhandled rejection, and the checks that read it still see it.
+          twinsOverGpu.push(handled(irradianceOverGpu(twins, read, band, own, bandLayers, slot)));
+        }
+      }
+      // The lookups through the probe, with the body's stored tables bound.
+      const cases = surfaceLightingCases(surface.heightsM);
+      const lookups = await probeSurfaceLighting(engine, cases, surfaceLightingTablesOf(tables));
+      ordered.later(async (later) => {
+        for (const [index, pending] of twinsOverGpu.entries()) {
+          // The layers' twins are awaited in order, each after the one before it.
+          // oxlint-disable-next-line no-await-in-loop
+          const twin = await pending;
+          const band = Math.floor(index / perBand);
+          const name = `${surface.name}: the sky's irradiance, band ${band} of ${plan.bands.length}'s layer of light slot ${index % perBand}, over the GPU's tables`;
+          recordHeights(
+            later,
+            "R08.T9.b",
+            name,
+            twinAgreement(layerOf(irradiance, layers, index), twin, false, { arm: "kernel" }),
+            "kernel",
+            "stored in rgba32float, the kernel's own output",
+          );
+        }
+        const planet = oblatePlanetOf(gpu, tables, read, surface.body);
+        const irradianceTables = plan.bands.map((_, b) =>
+          Array.from({ length: perBand }, (__, slot) =>
+            asTwinTable(layerOf(irradiance, layers, b * perBand + slot), IRRADIANCE_SIZE),
+          ),
+        );
+        const lighting = surfaceLightingTwin(
+          planet,
+          irradianceTables,
+          packedScaleHeightsM(surface.medium),
+        );
+        const expected = expectedLighting(cases, lighting);
+        for (const lookup of ["sun", "sky", "source"] as const) {
+          const { gpu: probed, twin } = lookupTables(lookups, expected, cases, lookup);
+          recordHeights(
+            later,
+            "R08.T9.b",
+            `${surface.name}: surfaceLighting.wgsl's ${lookup} lookup at ${twin.widthTexels} points, over the GPU's tables`,
+            twinAgreement(probed, twin, false, { arm: "kernel" }),
+            "kernel",
+          );
+        }
+      });
+    });
+  } finally {
+    tables.dispose();
+  }
+}
+
+/** R08.T9.b on Earth ({@link surfaceEarth}; `checkSurfaceLighting`). */
+export async function checkSurfaceLightingEarth(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  await checkSurfaceLighting(engine, checks, twins, surfaceEarth());
+}
+
+/** R08.T9.b on the Saturn-class figure ({@link surfaceSaturn}; `checkSurfaceLighting`). */
+export async function checkSurfaceLightingSaturn(
+  engine: RenderEngine,
+  checks: Checks,
+  twins: TwinPool,
+): Promise<void> {
+  await checkSurfaceLighting(engine, checks, twins, surfaceSaturn());
 }
 
 // --- R05.T12.c: the comparison captures ----------------------------------------------------------

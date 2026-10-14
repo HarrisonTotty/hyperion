@@ -201,6 +201,13 @@ pub struct GroundMaterial {
 }
 
 impl GroundMaterial {
+    /// The form `class` of the entry `entry`, for the tests.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn of(class: MaterialClass, entry: Option<u8>) -> Self {
+        Self { class, entry }
+    }
+
     /// The form.
     #[must_use]
     pub const fn class(self) -> MaterialClass {
@@ -461,81 +468,331 @@ impl Facts {
         cache: &mut SynthCache,
         dir: [f64; 3],
     ) -> Result<Self, QueryHeightError> {
-        let field = synth.field();
+        Ok(Point::at(synth, cache, dir)?.facts())
+    }
+}
+
+/// The band level of R05's finest level on the body of `header`, at which the classifier reads
+/// the ground ([`finest_level`]).
+#[must_use]
+pub(crate) fn finest_band(header: &FieldHeader) -> BandLevel {
+    BandLevel::new(finest_level(header.figure().equatorial_radius_m))
+        .expect("R05's finest level is a band level")
+}
+
+/// How steep the ground is against the classifier's two slope thresholds: what the cliff and snow
+/// rules read of the slope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum Steepness {
+    /// At most [`CLIFF_SLOPE`]: loose material rests on it.
+    Loose,
+    /// Above [`CLIFF_SLOPE`], at most [`SNOW_SHED_SLOPE`]: rock, where snow still lies.
+    Cliff,
+    /// Above [`SNOW_SHED_SLOPE`]: snow sheds from it too.
+    Shed,
+}
+
+impl Steepness {
+    /// The steepness of a ground whose normal makes an angle of cosine `cos_slope` with the datum's
+    /// normal. The snow's threshold is the steeper, so ground above it is above the cliff's too.
+    #[must_use]
+    pub(crate) fn of(cos_slope: f64) -> Self {
+        if cos_slope < math::cos(SNOW_SHED_SLOPE.value()) {
+            Self::Shed
+        } else if cos_slope < math::cos(CLIFF_SLOPE.value()) {
+            Self::Cliff
+        } else {
+            Self::Loose
+        }
+    }
+}
+
+/// How a cell's ice is placed at a point ([`material_at`]'s "Where in a cell its ice lies").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum IcePlacement {
+    /// The point lies in the cell's ice, or does not, whatever its ground: a cell with no ice, a
+    /// whole share, or a sea's ice by the majority.
+    Settled(bool),
+    /// The point lies in the ice where its shadowed-ground index is above the cell's cut
+    /// ([`ice_cut`]).
+    ByCut,
+}
+
+/// What the classifier reads of a point's coarse cell, the same for every point of it: every
+/// rule's input but the point's height, steepness, ice and channel bed, which [`Site::facts`]
+/// takes, so that R10.T2's weights can ask what the rules decide at other heights and slopes.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Site<'a> {
+    header: &'a FieldHeader,
+    cell: &'a SynthesisCell,
+    climate: &'a ClimateCell,
+    entries: Entries,
+    airless: bool,
+    thin_aired: bool,
+    closed_basin: bool,
+    /// The climate's annual mean temperature at sea level, kelvin.
+    annual_sea_k: f64,
+    /// Its warmest month's, kelvin.
+    warmest_sea_k: f64,
+    /// Its mean precipitation, millimetres of water a Julian year.
+    precipitation_mm: f64,
+    /// The snow's entry, before the precipitation and the temperature are asked.
+    snow_entry: Option<u8>,
+}
+
+impl<'a> Site<'a> {
+    /// The site of `cell`, the record of `key` in `field`: its climate's and its neighbours' reads.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] for the cell's climate or a neighbour the view does not
+    /// hold.
+    pub(crate) fn of<F: FieldView>(
+        field: &'a F,
+        key: PatchKey,
+        cell: &'a SynthesisCell,
+    ) -> Result<Self, QueryHeightError> {
         let header = field.header();
-        let figure = header.figure();
-        let level = BandLevel::new(finest_level(figure.equatorial_radius_m))
-            .expect("R05's finest level is a band level");
-        let sample = synth.height_at(cache, dir, level)?;
-        let (key, cell) = synth.cell_at(dir)?;
         let climate = field
             .climate(key)
             .ok_or(QueryHeightError::NotSurveyed(key))?;
-        let h = sample.height_m;
-        let palette = header.palette();
-        let entries = Entries::of(header, cell.crust);
-
-        let normal = surface_normal(&figure, dir, h, sample.gradient);
-        let nu = figure.normal(dir);
-        let cos_slope = dot(normal, nu);
-        let under_water = cell.is_under_water() && h < cell.water_surface().value();
         let pressure = header.surface_pressure();
         let airless = pressure <= Pascals::ZERO;
+        Ok(Self {
+            header,
+            cell,
+            climate,
+            entries: Entries::of(header, cell.crust),
+            airless,
+            thin_aired: !airless && pressure < THIN_ATMOSPHERE_PRESSURE,
+            closed_basin: is_closed_basin(field, key, cell)?,
+            annual_sea_k: header.sea_level_temperature(climate).value(),
+            warmest_sea_k: warmest_month_k(header, climate),
+            precipitation_mm: annual_precipitation_mm(header, climate),
+            snow_entry: snow_entry(header, cell),
+        })
+    }
 
-        let ice = if cell.ice > 0 {
-            let share = cell.ice_fraction();
-            let lies = if cell.ice == u8::MAX {
-                true
-            } else if under_water {
-                share > 0.5
-            } else {
-                let cut = ice_cut(synth, cache, key, cell, level)?;
-                cut.holds(shadow_terms(field, dir, &sample)?, share)
-            };
-            lies.then_some(Ice {
-                entry: cell.ice_entry(),
-                massive: share >= MASSIVE_ICE_SHARE,
-            })
-        } else {
-            None
+    /// Whether ground of height `h_m` metres lies below the cell's water surface.
+    #[must_use]
+    pub(crate) fn under_water(&self, h_m: f64) -> bool {
+        self.cell.is_under_water() && h_m < self.cell.water_surface().value()
+    }
+
+    /// How the cell's ice is placed at a point that lies under water, or does not.
+    #[must_use]
+    pub(crate) fn ice_placement(&self, under_water: bool) -> IcePlacement {
+        match self.cell.ice {
+            0 => IcePlacement::Settled(false),
+            u8::MAX => IcePlacement::Settled(true),
+            _ if under_water => IcePlacement::Settled(self.cell.ice_fraction() > 0.5),
+            _ => IcePlacement::ByCut,
+        }
+    }
+
+    /// The heights, metres, at which a rule's condition on the height may change: the water
+    /// surface, and where the temperature by the lapse rate crosses the crust's transition, the
+    /// snow's and Köppen–Geiger's arid bound, each where the cell has one. Those of the temperature
+    /// are where the rules' own comparisons change to rounding: a caller asks the rules on either
+    /// side of one, not at it.
+    #[must_use]
+    pub(crate) fn height_breaks(&self) -> Vec<f64> {
+        let header = self.header;
+        let palette = header.palette();
+        let lapse = header.lapse_rate_k_per_m();
+        let sea = header.sea_level().value();
+        let mut breaks = Vec::with_capacity(4);
+        if self.cell.is_under_water() {
+            breaks.push(self.cell.water_surface().value());
+        }
+        let mut at_temperature = |sea_k: f64, k: f64| {
+            // sea_k − lapse (h − sea) = k.
+            let h = sea + (sea_k - k) / lapse;
+            if h.is_finite() {
+                breaks.push(h);
+            }
         };
+        if let Some(e) = self.entries.crust.and_then(|e| palette.get(e)) {
+            at_temperature(self.annual_sea_k, e.transition.value());
+        }
+        if self.precipitation_mm > 0.0 {
+            if let Some(e) = self.snow_entry.and_then(|e| palette.get(e)) {
+                at_temperature(self.warmest_sea_k, e.transition.value());
+            }
+            let offset = koppen_offset_mm(header, self.climate, self.precipitation_mm);
+            let arid_k =
+                ZERO_CELSIUS_K + 0.5 * (self.precipitation_mm / KOPPEN_ARID_MULTIPLE - offset);
+            at_temperature(self.annual_sea_k, arid_k);
+        }
+        breaks.sort_by(f64::total_cmp);
+        breaks.dedup_by(|a, b| a.total_cmp(b).is_eq());
+        breaks
+    }
 
-        let lapse_k = header.lapse_rate_k_per_m() * (h - header.sea_level().value());
-        let annual_k = header.sea_level_temperature(climate).value() - lapse_k;
-        let warmest_k = warmest_month_k(header, climate) - lapse_k;
-        let molten = entries
+    /// The rules' conditions at a point of the cell whose ground is `h_m` metres high and of
+    /// steepness `steepness`, lying in the cell's ice or not and on a channel's bed or not.
+    #[must_use]
+    pub(crate) fn facts(
+        &self,
+        h_m: f64,
+        steepness: Steepness,
+        in_ice: bool,
+        channel_floor: bool,
+    ) -> Facts {
+        let header = self.header;
+        let palette = header.palette();
+        let cell = self.cell;
+        let lapse_k = header.lapse_rate_k_per_m() * (h_m - header.sea_level().value());
+        let annual_k = self.annual_sea_k - lapse_k;
+        let warmest_k = self.warmest_sea_k - lapse_k;
+        let molten = self
+            .entries
             .crust
             .and_then(|e| palette.get(e))
             .is_some_and(|e| annual_k > e.transition.value());
-        let precipitation_mm = annual_precipitation_mm(header, climate);
-        let snow = snow_entry(header, cell).filter(|&e| {
+        let precipitation_mm = self.precipitation_mm;
+        let snow = self.snow_entry.filter(|&e| {
             precipitation_mm > 0.0
                 && palette
                     .get(e)
                     .is_some_and(|e| warmest_k < e.transition.value())
         });
-        let channel_floor = match synth.level_set(level).channels_through() {
-            Some(through) if !cell.is_under_water() => synth
-                .channels()
-                .on_channel_floor(field, dir, through, cache)?,
-            _ => false,
-        };
-        Ok(Self {
-            under_water,
+        let ice = (in_ice && cell.ice > 0).then(|| Ice {
+            entry: cell.ice_entry(),
+            massive: cell.ice_fraction() >= MASSIVE_ICE_SHARE,
+        });
+        Facts {
+            under_water: self.under_water(h_m),
             ice,
-            airless,
-            thin_aired: !airless && pressure < THIN_ATMOSPHERE_PRESSURE,
+            airless: self.airless,
+            thin_aired: self.thin_aired,
             molten,
             snow,
-            above_cliff: cos_slope < math::cos(CLIFF_SLOPE.value()),
-            above_snow_shed: cos_slope < math::cos(SNOW_SHED_SLOPE.value()),
-            closed_basin: is_closed_basin(field, key, cell)?,
-            arid: is_arid(header, climate, annual_k, precipitation_mm),
+            above_cliff: steepness != Steepness::Loose,
+            above_snow_shed: steepness == Steepness::Shed,
+            closed_basin: self.closed_basin,
+            arid: is_arid(header, self.climate, annual_k, precipitation_mm),
             channel_floor,
             province: cell.crust == Crust::Province,
-            entries,
+            entries: self.entries,
+        }
+    }
+}
+
+/// What the classifier reads at a point of the finest level: its cell's site, and the point's
+/// height, slope, ice and channel bed.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Point<'a> {
+    site: Site<'a>,
+    height_m: f64,
+    cos_slope: f64,
+    in_ice: bool,
+    channel_floor: bool,
+}
+
+impl<'a> Point<'a> {
+    /// The point at the unit direction `dir`, at the body's finest level.
+    ///
+    /// # Errors
+    ///
+    /// [`QueryHeightError::NotSurveyed`] naming the first cell read that the view does not hold:
+    /// the height's, the cell's site's, then the ice cut's grid and the channels'.
+    pub(crate) fn at<F: FieldView>(
+        synth: &Synthesiser<'a, F>,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+    ) -> Result<Self, QueryHeightError> {
+        let level = finest_band(synth.field().header());
+        let sample = synth.height_at(cache, dir, level)?;
+        Self::with_sample(synth, cache, dir, &sample)
+    }
+
+    /// [`at`](Self::at), whose height and gradient at the finest level, `sample`, the caller has
+    /// in hand: [`Synthesiser::height_at`] at `dir` and [`finest_band`], bit for bit (R10.T6.a's
+    /// bake, which has made it).
+    ///
+    /// # Errors
+    ///
+    /// As [`at`](Self::at), the height's apart.
+    pub(crate) fn with_sample<F: FieldView>(
+        synth: &Synthesiser<'a, F>,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        sample: &HeightSample,
+    ) -> Result<Self, QueryHeightError> {
+        let field = synth.field();
+        let level = finest_band(field.header());
+        let sample = *sample;
+        let (key, cell) = synth.cell_at(dir)?;
+        let site = Site::of(field, key, cell)?;
+        let h = sample.height_m;
+        let in_ice = match site.ice_placement(site.under_water(h)) {
+            IcePlacement::Settled(lies) => lies,
+            IcePlacement::ByCut => {
+                let cut = ice_cut(synth, cache, key, cell, level)?;
+                cut.holds(shadow_terms(field, dir, &sample)?, cell.ice_fraction())
+            }
+        };
+        Ok(Self {
+            site,
+            height_m: h,
+            cos_slope: cos_slope(field.header(), dir, &sample),
+            in_ice,
+            channel_floor: on_channel_floor(synth, cache, dir, cell, level)?,
         })
     }
+
+    /// The cosine of the point's slope, the angle between its ground's normal and the datum's.
+    #[must_use]
+    pub(crate) const fn cos_slope(&self) -> f64 {
+        self.cos_slope
+    }
+
+    /// The rules' conditions at the point, of steepness `steepness`: its own, or another the
+    /// weights ask of.
+    #[must_use]
+    pub(crate) fn facts_at(&self, steepness: Steepness) -> Facts {
+        self.site
+            .facts(self.height_m, steepness, self.in_ice, self.channel_floor)
+    }
+
+    /// The rules' conditions at the point.
+    #[must_use]
+    pub(crate) fn facts(&self) -> Facts {
+        self.facts_at(Steepness::of(self.cos_slope))
+    }
+}
+
+/// The cosine of the slope of the ground whose height and gradient at the unit direction `dir`
+/// are `sample`: R05's [`surface_normal`] against the datum's normal.
+#[must_use]
+pub(crate) fn cos_slope(header: &FieldHeader, dir: [f64; 3], sample: &HeightSample) -> f64 {
+    let figure = header.figure();
+    let normal = surface_normal(&figure, dir, sample.height_m, sample.gradient);
+    dot(normal, figure.normal(dir))
+}
+
+/// Whether the unit direction `dir`, in the coarse cell `cell`, lies on the bed of a channel that
+/// band level `level` evaluates: never under water.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for a cell the channels read that the view does not hold.
+pub(crate) fn on_channel_floor<F: FieldView>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    dir: [f64; 3],
+    cell: &SynthesisCell,
+    level: BandLevel,
+) -> Result<bool, QueryHeightError> {
+    Ok(match synth.level_set(level).channels_through() {
+        Some(through) if !cell.is_under_water() => {
+            synth
+                .channels()
+                .on_channel_floor(synth.field(), dir, through, cache)?
+        }
+        _ => false,
+    })
 }
 
 /// Whether `cell`, the record of `key`, is a closed basin's floor: dry, its water going nowhere
@@ -619,12 +876,20 @@ impl IceCut {
 
 /// The cuts a [`SynthCache`] keeps, for one field at a time: by packed cell key, level and ice
 /// code, the three a cut depends on beside the field's heights.
+///
+/// Beside them, for R10.T2's weights, each cell's omitted index at a coarser band level
+/// ([`ice_share_at`]): by packed cell key, that level and the ice code; and each cell's closed
+/// forms of what a band level leaves out (`weights::Omitted`, R09's level-keyed forms, 50 to 150 µs
+/// a call since R09.T7.h): by packed cell key and level. Each is a pure function of the field's
+/// header and the cell's record, so no answer depends on what is kept.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct IceCuts {
     /// The field the cuts are of, by what tells one coarse pass's field of a body and seed from
     /// another's, as the channels' memo is kept ([`NetworkId`]).
     of: Option<NetworkId>,
     cuts: BTreeMap<(u64, u8, u8), IceCut>,
+    omitted: BTreeMap<(u64, u8, u8), Vec<f64>>,
+    forms: BTreeMap<(u64, u8), [f64; 2]>,
 }
 
 impl IceCuts {
@@ -634,8 +899,48 @@ impl IceCuts {
         Self {
             of: None,
             cuts: BTreeMap::new(),
+            omitted: BTreeMap::new(),
+            forms: BTreeMap::new(),
         }
     }
+
+    /// Keeps the cuts of the field `of` only: starts afresh for another.
+    fn keep(&mut self, of: Option<NetworkId>) {
+        if self.of != of {
+            self.of = of;
+            self.cuts.clear();
+            self.omitted.clear();
+            self.forms.clear();
+        }
+    }
+}
+
+/// The closed forms `compute` gives for the coarse cell `cell` at band level `level` on the field
+/// of `synth`, kept in `cache` (R10.T2's weights: [`IceCuts`]).
+///
+/// # Errors
+///
+/// `compute`'s own.
+pub(crate) fn kept_forms<F: FieldView, E>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    cell: PatchKey,
+    level: BandLevel,
+    compute: impl FnOnce() -> Result<[f64; 2], E>,
+) -> Result<[f64; 2], E> {
+    let key = (cell.to_u64(), level.get());
+    let kept = cache.ice_cuts_mut();
+    kept.keep(Some(synth.channels().id()));
+    if let Some(&forms) = kept.forms.get(&key) {
+        return Ok(forms);
+    }
+    let forms = compute()?;
+    let kept = cache.ice_cuts_mut();
+    if kept.forms.len() >= CUT_CACHE_CELLS {
+        kept.forms.clear();
+    }
+    kept.forms.insert(key, forms);
+    Ok(forms)
 }
 
 /// The terms of the point at the unit direction `dir`, whose height and gradient at the finest
@@ -692,10 +997,7 @@ pub(crate) fn ice_cut<F: FieldView>(
     let share = record.ice_fraction();
     {
         let cuts = cache.ice_cuts_mut();
-        if cuts.of != of {
-            cuts.of = of;
-            cuts.cuts.clear();
-        }
+        cuts.keep(of);
         if let Some(&cut) = cuts.cuts.get(&key) {
             return Ok(cut);
         }
@@ -727,6 +1029,75 @@ pub(crate) fn ice_cut<F: FieldView>(
     }
     cuts.cuts.insert(key, cut);
     Ok(cut)
+}
+
+/// The share of the partial ice of `record`, the record of `cell`, that a point at the unit
+/// direction `dir` of the band level `level` is expected to lie in, where `sample` is the level's
+/// height and gradient there (R10.T2's weights at a level coarser than the finest).
+///
+/// The finest index is the level's plus what the level leaves out of it, and the part left out is
+/// taken from the cell itself: at each of the cut's 256 grid points, the finest index less the
+/// level's, each by the cut's scales ([`ice_cut`] at the finest level). The share is the fraction
+/// of those whose sum with the point's index at the level is above the cut, as [`IceCut::holds`]
+/// compares it. An empirical distribution, not a normal one: the index is heavy-tailed, craters
+/// and steep walls carrying few of its points far out, so a normal deviate of its variance puts
+/// too much of a small share's ice far from the cut (T1.b's record, "Where a partial share lies").
+/// At a level that leaves nothing out each difference is zero and the share is the point's own
+/// answer; at one that resolves nothing below the cells the point's index is zero and the share
+/// is the grid's, the cell's share to its sampling. Where neither term varies, it is the cut's
+/// majority. The differences are kept in `cache` as the cuts are.
+///
+/// # Errors
+///
+/// [`QueryHeightError::NotSurveyed`] for a cell the grid's points or the coarse interpolant read
+/// that the view does not hold.
+pub(crate) fn ice_share_at<F: FieldView>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    (cell, record): (PatchKey, &SynthesisCell),
+    dir: [f64; 3],
+    level: BandLevel,
+    sample: &HeightSample,
+) -> Result<f64, QueryHeightError> {
+    let field = synth.field();
+    let finest = finest_band(field.header());
+    let cut = ice_cut(synth, cache, cell, record, finest)?;
+    let Some(threshold) = cut.cut else {
+        return Ok(f64::from(u8::from(record.ice_fraction() > 0.5)));
+    };
+    let index = cut.index(shadow_terms(field, dir, sample)?);
+    let key = (cell.to_u64(), level.get(), record.ice);
+    let held = {
+        let cuts = cache.ice_cuts_mut();
+        cuts.keep(Some(synth.channels().id()));
+        cuts.omitted.contains_key(&key)
+    };
+    if !held {
+        let mut omitted = Vec::with_capacity(usize::from(CUT_GRID) * usize::from(CUT_GRID));
+        for b in 0..CUT_GRID {
+            for a in 0..CUT_GRID {
+                // The cut's own grid points: vertex 4a + 2 of 64.
+                let at = cell.vertex_dir(4 * a + 2, 4 * b + 2);
+                let fine = synth.height_at(cache, at, finest)?;
+                let coarse = synth.height_at(cache, at, level)?;
+                let fine = cut.index(shadow_terms(field, at, &fine)?);
+                let coarse = cut.index(shadow_terms(field, at, &coarse)?);
+                omitted.push(num::assert_finite(fine - coarse));
+            }
+        }
+        omitted.sort_by(f64::total_cmp);
+        let cuts = cache.ice_cuts_mut();
+        if cuts.omitted.len() >= CUT_CACHE_CELLS {
+            cuts.omitted.clear();
+        }
+        cuts.omitted.insert(key, omitted);
+    }
+    let omitted = &cache.ice_cuts_mut().omitted[&key];
+    // Ascending differences: the sum is above the cut from some point on.
+    let below = omitted.partition_point(|&d| index + d <= threshold);
+    #[expect(clippy::cast_precision_loss, reason = "256 points, exact in f64")]
+    let share = (omitted.len() - below) as f64 / omitted.len() as f64;
+    Ok(share)
 }
 
 /// One over the standard deviation of `values` about their mean, or 0 where it is zero: each sum
@@ -811,12 +1182,21 @@ fn is_arid(
         return true;
     }
     let celsius = annual_k - ZERO_CELSIUS_K;
-    let offset = match summer_share(header, climate, precipitation_mm) {
+    let offset = koppen_offset_mm(header, climate, precipitation_mm);
+    precipitation_mm < KOPPEN_ARID_MULTIPLE * (2.0 * celsius + offset)
+}
+
+/// Köppen–Geiger's seasonal offset of the arid threshold for `climate`, whose mean precipitation is
+/// `precipitation_mm` (positive, a Julian year), millimetres a year: the summer's where 70% falls
+/// in the summer half, none where 70% falls in the winter half, the even offset otherwise and in a
+/// year without seasons (Peel, Finlayson and McMahon 2007, Table 1).
+#[must_use]
+fn koppen_offset_mm(header: &FieldHeader, climate: &ClimateCell, precipitation_mm: f64) -> f64 {
+    match summer_share(header, climate, precipitation_mm) {
         Some(summer) if summer >= KOPPEN_SEASONAL_SHARE => KOPPEN_SUMMER_OFFSET_MM,
         Some(summer) if 1.0 - summer >= KOPPEN_SEASONAL_SHARE => 0.0,
         _ => KOPPEN_EVEN_OFFSET_MM,
-    };
-    precipitation_mm < KOPPEN_ARID_MULTIPLE * (2.0 * celsius + offset)
+    }
 }
 
 /// The share of the year's precipitation that falls in its warmer half, the six warmest months

@@ -136,12 +136,22 @@ import {
   unitFromTexelUv,
 } from "./opticalDepth";
 import {
+  IRRADIANCE_ARC_NODES,
+  IRRADIANCE_RING_NODES,
+  irradianceDirections,
+} from "./irradianceQuadrature";
+import type { SurfaceLightingReader } from "./surfaceLighting";
+import {
   ABSORBER_SLOTS,
   type AbsorberCurveSlots,
   absorberSlots,
   checkAbsorberCurves,
   EDGES_PER_TERM,
+  IRRADIANCE_SAMPLES,
+  IRRADIANCE_SIZE,
   lineSlotMask,
+  OBLATE_SCALE_HEIGHTS,
+  packedScaleHeightsM,
   MULTI_SCATTERING_SAMPLES,
   MULTI_SCATTERING_SIZE,
   multiScatteringLayersOf,
@@ -2432,6 +2442,153 @@ export function marchTwin(
   return { luminance: [...marcher.luminance], transmittance: [...marcher.throughput] };
 }
 
+// --- The sky's irradiance (R08.T9.b) -------------------------------------------------------------
+
+/** How the sky-irradiance twin integrates each texel's hemisphere (`irradianceQuadrature.ts`). */
+export interface IrradianceOptions {
+  readonly size: TableSize;
+  /**
+   * The steps along each direction's ray, at least 2, placed toward the texel's point and cut at
+   * the medium's layer edges, as the multiple-scattering table's are.
+   */
+  readonly samples: number;
+  /** Gauss–Legendre nodes in u = √(γ ÷ π) on each of the two pieces. */
+  readonly ringNodes: number;
+  /** Gauss–Legendre nodes in ψ on each ring's arc above the horizon. */
+  readonly arcNodes: number;
+}
+
+/** The irradiance kernel's own: Bruneton's 64 × 16, its steps and its directions (`irradiance.wgsl`). */
+export const IRRADIANCE_KERNEL_OPTIONS: IrradianceOptions = {
+  size: IRRADIANCE_SIZE,
+  samples: IRRADIANCE_SAMPLES,
+  ringNodes: IRRADIANCE_RING_NODES,
+  arcNodes: IRRADIANCE_ARC_NODES,
+};
+
+/** What a sky-irradiance texel reads: the medium in the build's frame and its tables' reads. */
+interface IrradianceInputs {
+  readonly terms: readonly TwinTerm[];
+  readonly edgesM: ReadonlyArray<number>;
+  readonly pressureBarOf: ((heightM: number) => number) | null;
+  readonly shell: Shell;
+  readonly sources: TwinSources;
+  readonly curveSlot: number;
+  readonly options: IrradianceOptions;
+}
+
+/**
+ * One sky-irradiance texel (`irradiance.wgsl`'s): at its height h = x_r² H and sun zenith cosine
+ * μ_s = 2 x_μ − 1 (Bruneton 2017's `GetRMuSFromIrradianceTextureUv`, in heights, but for the
+ * height's root, which puts the rows near the ground), the sky's
+ * radiance per unit illuminance along each of the hemisphere's directions, a per-frame march's
+ * ({@link Marcher}: single scattering of each term's phase, shadowed by the ground, the forward
+ * lobes' higher orders and the multiple scattering, through the ray's own throughput under the light
+ * slot's curves), weighted by its quadrature weight and μ_v and summed.
+ */
+function irradianceTexelInto(inputs: IrradianceInputs, x: number, y: number, out: TwinRgb): void {
+  const { widthTexels: w, heightTexels: h } = inputs.options.size;
+  const { bottomRadiusM: bottom, topRadiusM: top } = inputs.shell;
+  const root = unitOfTexel(y, h);
+  const heightM = root * root * (top - bottom);
+  const muSun = unitOfTexel(x, w) * 2 - 1;
+  const across = Math.sqrt(Math.max((1 - muSun) * (1 + muSun), 0));
+  const sun = { x: 0, y: across, z: muSun };
+  const originM = { x: 0, y: 0, z: bottom + heightM };
+  const geometry: MarchGeometry = { kind: "sphere", bottomRadiusM: bottom };
+  out.fill(0);
+  const directions = irradianceDirections(muSun, inputs.options.ringNodes, inputs.options.arcNodes);
+  for (const { direction, weight } of directions) {
+    if (!(weight > 0)) {
+      continue;
+    }
+    const segment: TwinSegment = {
+      originM,
+      direction,
+      tStartM: 0,
+      tEndM: maxDistanceM(inputs.shell, bottom + heightM, direction.z),
+      fromCamera: true,
+    };
+    const marcher = new Marcher(
+      inputs.terms,
+      inputs.pressureBarOf,
+      { kind: "sphere", sources: inputs.sources },
+      geometry,
+      { ...segment, sun, sources: [{ direction: sun, weight: [1, 1, 1], slot: inputs.curveSlot }] },
+    );
+    for (const { tM, dtM } of piecedSteps(
+      segment,
+      inputs.options.samples,
+      inputs.edgesM,
+      geometry,
+    )) {
+      marcher.step(tM, dtM);
+    }
+    for (const c of CHANNELS) {
+      out[c] += weight * marcher.luminance[c];
+    }
+  }
+}
+
+/**
+ * The sky-irradiance table's twin (plan R08, R08.T9.b; Design notes 7 and 19): at each texel's
+ * height and sun zenith cosine, Bruneton 2017's layout (64 in μ_s by 16 in height, his texel
+ * mapping; the height's root over the atmosphere's in place of his linear axis), the sky's diffuse irradiance on a horizontal surface per unit of the sun's illuminance,
+ * E = ∫ L μ_v dω over the hemisphere above the horizon (`irradianceQuadrature.ts`), as
+ * `irradiance.wgsl` stores it in rgb, alpha 0. It reads `transmittance` and the multiple-scattering
+ * layers as the per-frame marches read a sphere's tables (`tableSources`), with light slot
+ * `curveSlot`'s curves and multiple-scattering layer.
+ *
+ * @param bottomRadiusM - The tables' ground radius, m: R_ref, or a latitude band's sphere.
+ * @param multiScatteringBySlot - The multiple-scattering table's layers, one a light slot.
+ * @param texels - The texels to compute, each [x, y]; every texel by default. Texels not listed
+ *   are left 0.
+ * @param coefficientFactor - The factor every coefficient takes: 1 ÷ s_b in a latitude band's own
+ *   frame ({@link twinBandOf}), 1 otherwise.
+ * @throws RangeError as {@link multiScatteringTwin}.
+ */
+export function irradianceTwin(
+  medium: AtmosphereMedium,
+  bottomRadiusM: number,
+  transmittance: TwinTransmittance,
+  multiScatteringBySlot: ReadonlyArray<TwinTable>,
+  options: IrradianceOptions = IRRADIANCE_KERNEL_OPTIONS,
+  texels?: ReadonlyArray<readonly [number, number]>,
+  curveSlot = SHARED_TABLE_CURVE_SLOT,
+  coefficientFactor = 1,
+): TwinTable {
+  const first = multiScatteringBySlot[0];
+  if (first === undefined) {
+    throw new RangeError("the sky's irradiance reads at least one multiple-scattering layer");
+  }
+  const terms = scaledTerms(termsOf(medium), coefficientFactor);
+  const inputs: IrradianceInputs = {
+    terms,
+    edgesM: marchEdgesOf(terms, medium.topHeightM),
+    pressureBarOf: pressureBarLookup(medium),
+    shell: { bottomRadiusM, topRadiusM: bottomRadiusM + medium.topHeightM },
+    sources: tableSources({
+      medium,
+      bottomRadiusM,
+      ...transmittance,
+      multiScattering: first,
+      multiScatteringBySlot,
+    }),
+    curveSlot,
+    options,
+  };
+  const { widthTexels: w, heightTexels: h } = options.size;
+  const out = new Float64Array(w * h * 4);
+  const which =
+    texels ?? Array.from({ length: w * h }, (_, i) => [i % w, Math.floor(i / w)] as const);
+  const value: TwinRgb = [0, 0, 0];
+  for (const [x, y] of which) {
+    irradianceTexelInto(inputs, x, y, value);
+    out.set([value[0], value[1], value[2], 0], (y * w + x) * 4);
+  }
+  return { widthTexels: w, heightTexels: h, texels: out };
+}
+
 /**
  * A frame's view as the per-frame kernels take it (`view.wgsl`'s `AtmosphereView`, filled as
  * `HillaireAtmosphere` fills it), in the body-fixed axes, m.
@@ -3540,9 +3697,16 @@ class OblateReader {
    * ray that dips is read on each slice at the cosine that keeps its lowest h\* (Design note 17),
    * and the ground hides the source where that height is below the datum. The slices are
    * interpolated linearly in √κ\*, a κ\* beyond their range taking the nearer slice, and how far
-   * it lies beyond is kept. H is {@link OblateReader}'s local scale height.
+   * it lies beyond is kept. H is {@link OblateReader}'s local scale height, or `scaleHeightM` where
+   * it is given: the lit passes' reading of the body's table (R08.T9.b).
    */
-  rayOf(positionM: Vec3, geodetic: Geodetic, direction: Vec3, rule: SliceRule): SlicedRay {
+  rayOf(
+    positionM: Vec3,
+    geodetic: Geodetic,
+    direction: Vec3,
+    rule: SliceRule,
+    scaleHeightM: number | null = null,
+  ): SlicedRay {
     const planet = this.#planet;
     const referenceM = planet.referenceRadiusM;
     const kappa = planet.kappa;
@@ -3585,7 +3749,7 @@ class OblateReader {
         lowest,
       );
     }
-    const scaleM = this.#localScaleHeightM(z0);
+    const scaleM = scaleHeightM ?? this.#localScaleHeightM(z0);
     const riseM = scaleM / s0;
     const reach = rAlpha + h0;
     const dip = mu < 0 ? h0 - lowestOnSphereM(rAlpha, h0, mu) : 0;
@@ -3948,6 +4112,246 @@ export function bandMultiScattering(
   const out: TwinRgb = [0, 0, 0];
   oblateReaderOf(planet).multiScatteringInto(scaledHeightM, s, muSun, slot, out);
   return [out[0], out[1], out[2]];
+}
+
+// --- Surface lighting (R08.T9.b) -----------------------------------------------------------------
+
+/**
+ * An oblate body's sky-irradiance tables (plan R08, R08.T9.b; Design note 17, _Latitude bands_):
+ * band by band, a layer a light slot, each {@link irradianceTwin} in the band's own frame over its
+ * own transmittance tables and multiple-scattering layer, as `AtmosphereTables` builds them. Earth's
+ * one band at s = 1 reads the one slice's tables.
+ *
+ * @param texels - The texels to compute, each [x, y]; every texel by default.
+ * @throws RangeError as {@link irradianceTwin}.
+ */
+export function oblateIrradianceTwin(
+  planet: OblatePlanetTwin,
+  options: IrradianceOptions = IRRADIANCE_KERNEL_OPTIONS,
+  texels?: ReadonlyArray<readonly [number, number]>,
+): ReadonlyArray<ReadonlyArray<TwinTable>> {
+  return planet.bands.map((band) =>
+    band.multiScatteringBySlot.map((_, slot) =>
+      irradianceTwin(
+        planet.medium,
+        band.bottomRadiusM,
+        band.transmittance,
+        band.multiScatteringBySlot,
+        options,
+        texels,
+        slot,
+        1 / band.gravityRatio,
+      ),
+    ),
+  );
+}
+
+/** The three-node rule's nodes about a wide source's centre, in units of its angular radius. */
+const SOURCE_NODE_OFFSET = Math.SQRT1_2;
+
+/** Their weights, the upper node first (Design note 7). */
+const SOURCE_NODE_WEIGHTS = [0.25, 0.5, 0.25] as const;
+
+/** A lit point at longitude 0 as `surfaceLighting.wgsl`'s `atmosphereSurfacePlace` places it. */
+interface SurfacePlace {
+  readonly positionM: Vec3;
+  readonly geodetic: Geodetic;
+  readonly north: Vec3;
+  readonly east: Vec3;
+}
+
+/** A geodetic latitude held to [−π ÷ 2, π ÷ 2], as `surfaceLighting.wgsl` holds it. */
+function clampLatitude(latitudeRad: number): number {
+  return Math.min(Math.max(latitudeRad, -Math.PI / 2), Math.PI / 2);
+}
+
+/**
+ * The unit direction of zenith cosine `mu` and azimuth `azimuthRad` from north towards east at a
+ * lit point (`surfaceLighting.wgsl`'s `atmosphereDirection`).
+ */
+function directionOf(place: SurfacePlace, mu: number, azimuthRad: number): Vec3 {
+  const m = Math.min(Math.max(mu, -1), 1);
+  const horizontal = Math.sqrt(Math.max((1 - m) * (1 + m), 0));
+  const n = place.geodetic.normal;
+  const along = horizontal * Math.cos(azimuthRad);
+  const across = horizontal * Math.sin(azimuthRad);
+  return {
+    x: m * n.x + along * place.north.x + across * place.east.x,
+    y: m * n.y + along * place.north.y + across * place.east.y,
+    z: m * n.z + along * place.north.z + across * place.east.z,
+  };
+}
+
+/**
+ * The twin of `surfaceLighting.wgsl`'s three lookups for one body (plan R08, R08.T9.b; Design notes
+ * 7 and 17), in `f64` over `planet`'s slices and `irradiance`'s bands ({@link oblateIrradianceTwin}),
+ * operation for operation where `f64` allows:
+ *
+ * - the lit point at longitude 0, its geodetic height above the datum along its normal at its
+ *   geodetic latitude; a source's direction from its zenith cosine against the datum's normal and
+ *   its azimuth from north towards east;
+ * - a source's transmittance by the sliced lookup from there (`OblateReader`'s), the fit's local
+ *   scale height read, as the lit passes read it, from the body's table's tabulation
+ *   (`scaleHeightsM`, `tables.ts`'s `packedScaleHeightsM`), linear between its heights; 0 where the
+ *   ground hides the source;
+ * - the sky's irradiance from the irradiance table at h\* = s h (its root over the top's) and μ_s,
+ *   linear in ln s between the bands about the point's s;
+ * - a wide source's transmittance by the three-node rule (Design note 7).
+ *
+ * The light slot of each lookup is held to the medium's light slots.
+ *
+ * @param irradiance - The irradiance tables, band by band, a layer a light slot.
+ * @param scaleHeightsM - The local scale heights the body's table holds; the medium's own by
+ *   default.
+ */
+export function surfaceLightingTwin(
+  planet: OblatePlanetTwin,
+  irradiance: ReadonlyArray<ReadonlyArray<TwinTable>>,
+  scaleHeightsM: ArrayLike<number> = packedScaleHeightsM(planet.medium),
+): SurfaceLightingReader {
+  const reader = oblateReaderOf(planet);
+  const { figure, gravity } = planet.body;
+  const topM = planet.medium.topHeightM;
+  const slots = multiScatteringLayersOf(planet.medium, planet.curves);
+  const slotOf = (curve: number): number => Math.min(Math.max(curve, 0), slots - 1);
+  const severalBands = planet.bands.length > 1;
+  const lnBands = planet.bands.map((band) => Math.log(band.gravityRatio));
+  const a = figure.equatorialRadiusM;
+  const c = figure.polarRadiusM;
+  const e2 = ((a - c) * (a + c)) / (a * a);
+  const scaleHeightAt = (scaledHeightM: number): number => {
+    const last = OBLATE_SCALE_HEIGHTS - 1;
+    const x = Math.min(Math.max(scaledHeightM / topM, 0), 1) * last;
+    const i = Math.min(Math.floor(x), last - 1);
+    const below = scaleHeightsM[i] ?? Number.NaN;
+    const above = scaleHeightsM[i + 1] ?? Number.NaN;
+    return Math.max(below + (x - i) * (above - below), FIT_SCALE_FLOOR_M);
+  };
+  const placeOf = (altitudeM: number, latitudeRad: number): SurfacePlace => {
+    const latitude = clampLatitude(latitudeRad);
+    const sinL = Math.sin(latitude);
+    const cosL = Math.cos(latitude);
+    const primeVertical = a / Math.sqrt(1 - e2 * sinL * sinL);
+    const { meridionalM, primeVerticalM } = principalRadiiM(figure, latitude);
+    return {
+      positionM: {
+        x: (primeVertical + altitudeM) * cosL,
+        y: 0,
+        z: (primeVertical * (1 - e2) + altitudeM) * sinL,
+      },
+      geodetic: {
+        latitudeRad: latitude,
+        longitudeRad: 0,
+        heightM: altitudeM,
+        normal: { x: cosL, y: 0, z: sinL },
+        gaussianRadiusM: Math.sqrt(meridionalM * primeVerticalM),
+      },
+      north: { x: -sinL, y: 0, z: cosL },
+      east: { x: 0, y: 1, z: 0 },
+    };
+  };
+  const transmittanceAlong = (place: SurfacePlace, d: Vec3, curve: number): Rgb => {
+    const s = gravityRatio(gravity, place.geodetic.latitudeRad);
+    const scaleHeightM = severalBands ? scaleHeightAt(s * place.geodetic.heightM) : null;
+    const ray = reader.rayOf(place.positionM, place.geodetic, d, "fitted", scaleHeightM);
+    if (ray.shadowed) {
+      return [0, 0, 0];
+    }
+    const depth: TwinRgb = [0, 0, 0];
+    const absorbed = reader.opticalDepthInto(ray, slotOf(curve), depth);
+    return [
+      Math.exp(-(depth[0] + absorbed[0])),
+      Math.exp(-(depth[1] + absorbed[1])),
+      Math.exp(-(depth[2] + absorbed[2])),
+    ];
+  };
+  const layerOf = (band: number, curve: number): TwinTable => {
+    const layers = irradiance[band] ?? [];
+    const layer = layers[Math.min(slotOf(curve), layers.length - 1)];
+    if (layer === undefined) {
+      throw new Error(`the sky's irradiance has no layer for band ${band}`);
+    }
+    return layer;
+  };
+  const lower: TwinRgb = [0, 0, 0];
+  const upper: TwinRgb = [0, 0, 0];
+  return {
+    sunTransmittance: (altitudeM, muSun, latitudeRad, sunAzimuthRad, curve) => {
+      const place = placeOf(altitudeM, latitudeRad);
+      return transmittanceAlong(place, directionOf(place, muSun, sunAzimuthRad), curve);
+    },
+    skyIrradiance: (altitudeM, muSun, latitudeRad, curve) => {
+      const s = gravityRatio(gravity, clampLatitude(latitudeRad));
+      const u = muSun * 0.5 + 0.5;
+      const v = Math.sqrt(Math.max(s * altitudeM, 0) / topM);
+      const last = lnBands.length - 1;
+      const ls = Math.log(s);
+      if (last === 0 || !(ls > (lnBands[0] ?? Number.NaN))) {
+        tableAtUnitInto(layerOf(0, curve), u, v, lower);
+        return [lower[0], lower[1], lower[2]];
+      }
+      if (!(ls < (lnBands[last] ?? Number.NaN))) {
+        tableAtUnitInto(layerOf(last, curve), u, v, lower);
+        return [lower[0], lower[1], lower[2]];
+      }
+      let band = 0;
+      while (band < last - 1 && (lnBands[band + 1] ?? Number.NaN) <= ls) {
+        band += 1;
+      }
+      const l0 = lnBands[band] ?? Number.NaN;
+      const w = (ls - l0) / ((lnBands[band + 1] ?? Number.NaN) - l0);
+      tableAtUnitInto(layerOf(band, curve), u, v, lower);
+      tableAtUnitInto(layerOf(band + 1, curve), u, v, upper);
+      return [
+        lower[0] * (1 - w) + upper[0] * w,
+        lower[1] * (1 - w) + upper[1] * w,
+        lower[2] * (1 - w) + upper[2] * w,
+      ];
+    },
+    sourceTransmittance: (
+      altitudeM,
+      muCentre,
+      latitudeRad,
+      azimuthRad,
+      angularRadiusRad,
+      curve,
+    ) => {
+      const place = placeOf(altitudeM, latitudeRad);
+      const centre = directionOf(place, muCentre, azimuthRad);
+      const n = place.geodetic.normal;
+      const cosZenith = centre.x * n.x + centre.y * n.y + centre.z * n.z;
+      const across = {
+        x: n.x - cosZenith * centre.x,
+        y: n.y - cosZenith * centre.y,
+        z: n.z - cosZenith * centre.z,
+      };
+      const sinZenith = Math.hypot(across.x, across.y, across.z);
+      const up = sinZenith > 1e-6 ? scale(across, 1 / sinZenith) : place.north;
+      const delta = Math.min(Math.abs(angularRadiusRad) * SOURCE_NODE_OFFSET, Math.PI);
+      const cosDelta = Math.cos(delta);
+      const sinDelta = Math.sin(delta);
+      const nodes: Vec3[] = [1, 0, -1].map((sign) => ({
+        x: (sign === 0 ? 1 : cosDelta) * centre.x + sign * sinDelta * up.x,
+        y: (sign === 0 ? 1 : cosDelta) * centre.y + sign * sinDelta * up.y,
+        z: (sign === 0 ? 1 : cosDelta) * centre.z + sign * sinDelta * up.z,
+      }));
+      const sum: TwinRgb = [0, 0, 0];
+      let total = 0;
+      nodes.forEach((node, k) => {
+        const mu = node.x * n.x + node.y * n.y + node.z * n.z;
+        if (!(mu > 0)) {
+          return;
+        }
+        const w = (SOURCE_NODE_WEIGHTS[k] ?? Number.NaN) * mu;
+        const t = transmittanceAlong(place, node, curve);
+        for (const ch of CHANNELS) {
+          sum[ch] += w * t[ch];
+        }
+        total += w;
+      });
+      return total > 0 ? [sum[0] / total, sum[1] / total, sum[2] / total] : [0, 0, 0];
+    },
+  };
 }
 
 // --- The true spheroid's beam, by brute force (R08.T6.e) -----------------------------------------

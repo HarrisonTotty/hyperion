@@ -6,9 +6,10 @@
 //! is where they are defined and defended: its documentation and [`ARCHITECTURE_TABLE`] are the
 //! single written definition of the frequencies, [`template::TEMPLATES`] the single definition of
 //! what each class places, and the tests read the same two tables. The disc never decides the
-//! class (design note 5): it only rules out giants that cannot form, and a close binary moves
-//! weight to [`Barren`](ArchitectureClass::Barren) (design note 10). Both enter
-//! [`ClassConstraints`] as plain arguments, since the stable zones of P14.T9 do not exist yet.
+//! class (design note 5): it only rules out giants that cannot form, from its reach inside the
+//! stable zone, which enters [`ClassConstraints`] as a plain argument. A close binary moves no
+//! weight between the classes (design note 10; decision-p14-d10-bd-companions §2): it acts
+//! through the zone's limit.
 //!
 //! # The classes (P14.T4.a)
 //!
@@ -213,7 +214,7 @@
 //! # Constraints (design notes 5 and 10)
 //!
 //! [`ClassWeights::constrained`] applies, from plain arguments ([`ClassConstraints::new`]: the
-//! disc, the stable zone's end as a [`ZoneLimit`], and a [`HostMultiplicity`]):
+//! disc and the stable zone's end as a [`ZoneLimit`]):
 //!
 //! - **No disc**: everything is `Barren`, since nothing can form.
 //! - **No giants** (design note 5), when the snow line is not inside the reach of the disc (the
@@ -225,8 +226,12 @@
 //!   P14.T7.c's core grown in time, which P14.T8's placer applies after the draw
 //!   ([`core_fallback`](crate::planetary::placement::classes::core_fallback); ruling 55.3), to the
 //!   same sibling.
-//! - **A close binary** (design note 10), inside Kraus et al.'s cut-off: every class but `Barren`
-//!   keeps [`CLOSE_BINARY_SUPPRESSION`], 0.34, of its weight and `Barren` takes the rest.
+//!
+//! A close binary moves no weight between the classes (design note 10;
+//! decision-p14-d10-bd-companions §2). Its companion acts through the zone's outer limit, which
+//! cuts the disc's reach and every budget built from it, and the truncated zones alone give the
+//! deficit that Kraus et al. (2016) and Moe and Kratter (2021) observe. Their `S_bin` is that
+//! observed deficit, truncation included, so a factor on top would count the truncation twice.
 //!
 //! Plan 14's class frequencies in tests (P14.T10.b) are measured after these.
 //!
@@ -438,19 +443,58 @@ pub const HOT_JUPITER_WEIGHT: f64 = 0.0127;
 /// from memory, not re-checked).
 pub const GIANT_SOLID_BUDGET: EarthMasses = EarthMasses::new(10.0);
 
-/// The share of its weight that each planet-bearing class keeps around a host in a close binary:
-/// 0.34 (design note 10).
-///
-/// Kraus et al. (2016, AJ 152, 8, abstract): inside a semi-major axis of 47 (+59 −23) au "the
-/// planet occurrence rate in binary systems is only `S_bin` = 0.34 (+0.14 −0.15) times that of
-/// wider binaries or single stars".
-pub const CLOSE_BINARY_SUPPRESSION: f64 = 0.34;
-
 /// The binary semi-major axis inside which a host counts as in a close binary: 47 au, plan 14's
 /// "about 50 au" (Kraus et al. 2016, abstract: `a_cut` = 47 (+59 −23) au).
 ///
-/// The caller compares against it (P14.T9.c); [`ClassConstraints`] takes the answer.
+/// The zones compare against it (P14.T9.c) for [`HostMultiplicity`], which moves no class
+/// weight.
 pub const CLOSE_BINARY_CUTOFF_AU: f64 = 47.0;
+
+/// The least mass ratio, companion to host, at which a companion lighter than a star makes its
+/// host a close binary's member: 0.1 (design note 10; decision-p14-d10-bd-companions).
+///
+/// Kraus et al. (2016, AJ 152, 8, §5 and Fig. 7) fit `S_bin` to companions of 0.4 < q < 1 alone,
+/// where background stars do not swamp the counts, and Moe and Kratter (2021, MNRAS 507, 3593,
+/// §2.1–2.2) apply it to every stellar companion down to 0.08 M☉ but to no brown dwarf: the hot
+/// Jupiters of CoRoT-20, WASP-53 and WASP-81, with brown dwarfs at 2.4–3.7 au, suggest "that
+/// close brown dwarf companions do not significantly suppress planet formation". A companion
+/// perturbs a disc by its mass ratio, not by whether it burns hydrogen, so a brown dwarf counts
+/// once it is as heavy against its host as the lightest companions of the binary statistics that
+/// `S_bin` is measured against, q = 0.1 (Moe and Di Stefano 2017, ApJS 230, 15, whose frequencies
+/// are of
+/// q > 0.1), which is also Kraus et al.'s detection floor (§4.1) and the edge of Holman and
+/// Wiegert's fits (μ = 0.1). Only hosts under 0.8 M☉ have such brown dwarfs. The flag moves no
+/// class weight (decision-p14-d10-bd-companions §2): it names the binary for the orbit map's plane
+/// and for P14.T10.b's statistics.
+pub const CLOSE_BINARY_MIN_MASS_RATIO: f64 = 0.1;
+
+/// Whether a companion of mass `companion` on an orbit closer than [`CLOSE_BINARY_CUTOFF_AU`]
+/// makes a host of mass `host` a close binary's member (design note 10): when the companion is a
+/// star, [`SUBSTELLAR_LIMIT`] or more, or at least [`CLOSE_BINARY_MIN_MASS_RATIO`] of the host's
+/// mass.
+///
+/// Both masses are initial masses, M☉; the host may be a star, a brown dwarf or a pair, taken at
+/// its total mass.
+///
+/// # Examples
+///
+/// ```
+/// use hyperion_sim::planetary::architecture::is_close_binary_companion;
+/// use hyperion_sim::units::SolarMasses;
+///
+/// let m = SolarMasses::new;
+/// // Any star counts, even a light one about an A star.
+/// assert!(is_close_binary_companion(m(2.0), m(0.1)));
+/// // A brown dwarf does about an M dwarf it is a sixth of, and not about a K dwarf.
+/// assert!(is_close_binary_companion(m(0.3), m(0.05)));
+/// assert!(!is_close_binary_companion(m(0.7), m(0.05)));
+/// // So does the star beside a brown dwarf, for the dwarf's own zone.
+/// assert!(is_close_binary_companion(m(0.05), m(0.7)));
+/// ```
+#[must_use]
+pub fn is_close_binary_companion(host: SolarMasses, companion: SolarMasses) -> bool {
+    companion >= SUBSTELLAR_LIMIT || companion.value() >= CLOSE_BINARY_MIN_MASS_RATIO * host.value()
+}
 
 /// Words of the [`tags::PLANET_CLASS`] stream that one orbit host owns.
 ///
@@ -755,11 +799,10 @@ impl ClassWeights {
         ClassProbabilities(self.0.map(|w| w / total))
     }
 
-    /// The weights after a host's constraints (design notes 5 and 10): everything to `Barren`
-    /// without a disc; each giant class to its [giant-free
-    /// sibling](ArchitectureClass::giant_free_sibling) when the disc cannot form giants; and, in a
-    /// close binary, [`CLOSE_BINARY_SUPPRESSION`] of every other class's weight kept and the rest
-    /// given to `Barren`.
+    /// The weights after a host's constraints (design note 5): everything to `Barren` without a
+    /// disc, and each giant class to its [giant-free
+    /// sibling](ArchitectureClass::giant_free_sibling) when the disc cannot form giants. A close
+    /// binary acts through the zone's limit alone (design note 10).
     ///
     /// The total is unchanged but for rounding.
     #[must_use]
@@ -782,18 +825,6 @@ impl ClassWeights {
                     }
                 }
             }
-        }
-        if constraints.multiplicity == HostMultiplicity::CloseBinary {
-            let mut lost = 0.0;
-            for class in ArchitectureClass::ALL {
-                if class != ArchitectureClass::Barren {
-                    let i = class.index();
-                    let kept = weights[i] * CLOSE_BINARY_SUPPRESSION;
-                    lost += weights[i] - kept;
-                    weights[i] = kept;
-                }
-            }
-            weights[barren] += lost;
         }
         Self(weights)
     }
@@ -999,13 +1030,19 @@ pub fn class_weights(mass: SolarMasses, fe_h: Dex) -> ClassWeights {
     ClassWeights(weights)
 }
 
-/// Whether an orbit host is in a close binary, which suppresses its planets (design note 10).
+/// Whether an orbit host is a member of a close binary (design note 10).
+///
+/// It moves no class weight: the companion suppresses the host's planets through the zone's limit
+/// (decision-p14-d10-bd-companions §2). It names the binary for the orbit map's plane and for
+/// P14.T10.b's statistics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum HostMultiplicity {
-    /// A single star, or a component of a binary wider than [`CLOSE_BINARY_CUTOFF_AU`], or a
-    /// circumbinary host.
+    /// A single star, or a component of a binary wider than [`CLOSE_BINARY_CUTOFF_AU`], or one
+    /// whose closer companions are brown dwarfs under [`CLOSE_BINARY_MIN_MASS_RATIO`] of its
+    /// mass, or a circumbinary host.
     SingleOrWide,
-    /// A component of a binary closer than [`CLOSE_BINARY_CUTOFF_AU`].
+    /// A component of a binary closer than [`CLOSE_BINARY_CUTOFF_AU`] whose companion
+    /// [counts](is_close_binary_companion).
     CloseBinary,
 }
 
@@ -1031,23 +1068,23 @@ pub enum DiscCapacity {
     Giants,
 }
 
-/// What a host's disc, zone and binarity allow of its class (design notes 5 and 10): the plain
-/// arguments of [`ClassWeights::constrained`].
+/// What a host's disc and zone allow of its class (design note 5): the plain arguments of
+/// [`ClassWeights::constrained`].
+///
+/// A close binary enters through the zone alone (design note 10; decision-p14-d10-bd-companions
+/// §2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClassConstraints {
     capacity: DiscCapacity,
-    multiplicity: HostMultiplicity,
 }
 
 impl ClassConstraints {
-    /// No constraint: a disc that can form giants, around a single host.
+    /// No constraint: a disc that can form giants.
     pub const NONE: Self = Self {
         capacity: DiscCapacity::Giants,
-        multiplicity: HostMultiplicity::SingleOrWide,
     };
 
-    /// The constraints of a host with disc `disc`, in a stable zone ending at `zone`, and of
-    /// binarity `multiplicity`.
+    /// The constraints of a host with disc `disc`, in a stable zone ending at `zone`.
     ///
     /// Giants are possible when the snow line lies inside the disc's reach, the nearer of its
     /// outer edge and the zone's end, and the solids between them are at least
@@ -1057,7 +1094,7 @@ impl ClassConstraints {
     ///
     /// In debug builds, if the zone's end is not positive.
     #[must_use]
-    pub fn new(disc: &Disc, zone: ZoneLimit, multiplicity: HostMultiplicity) -> Self {
+    pub fn new(disc: &Disc, zone: ZoneLimit) -> Self {
         let capacity = match disc {
             Disc::None => DiscCapacity::None,
             Disc::Present(profile) => {
@@ -1077,22 +1114,13 @@ impl ClassConstraints {
                 }
             }
         };
-        Self {
-            capacity,
-            multiplicity,
-        }
+        Self { capacity }
     }
 
     /// What the host's disc can make.
     #[must_use]
     pub const fn capacity(&self) -> DiscCapacity {
         self.capacity
-    }
-
-    /// The host's binarity.
-    #[must_use]
-    pub const fn multiplicity(&self) -> HostMultiplicity {
-        self.multiplicity
     }
 }
 
@@ -1166,15 +1194,14 @@ impl ClassDraw {
 /// use hyperion_sim::Seed;
 /// use hyperion_sim::id::SystemId;
 /// use hyperion_sim::planetary::architecture::{
-///     ArchitectureClass, ClassConstraints, HostMultiplicity, ZoneLimit, class_weights, draw_class,
+///     ArchitectureClass, ClassConstraints, ZoneLimit, class_weights, draw_class,
 /// };
 /// use hyperion_sim::planetary::disc::Disc;
 /// use hyperion_sim::units::{Dex, SolarMasses};
 ///
 /// let system = SystemId::from_raw(0x0200_0800_2000_0000)?;
 /// let weights = class_weights(SolarMasses::new(1.0), Dex::new(0.0));
-/// let no_disc =
-///     ClassConstraints::new(&Disc::None, ZoneLimit::Unbounded, HostMultiplicity::SingleOrWide);
+/// let no_disc = ClassConstraints::new(&Disc::None, ZoneLimit::Unbounded);
 /// let class = draw_class(Seed::new(3), system, 0, &weights, &no_disc);
 /// assert_eq!(class, ArchitectureClass::Barren);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
@@ -1524,7 +1551,7 @@ mod tests {
     }
 
     fn capacity(disc: &Disc, zone: ZoneLimit) -> DiscCapacity {
-        ClassConstraints::new(disc, zone, HostMultiplicity::SingleOrWide).capacity()
+        ClassConstraints::new(disc, zone).capacity()
     }
 
     /// Design note 5: giants need the snow line inside the disc's reach and 10 M⊕ of solids
@@ -1554,10 +1581,7 @@ mod tests {
         let early_m = disc_of(0.5, 0.0, Truncation::NONE);
         assert_eq!(capacity(&early_m, open), DiscCapacity::Giants);
         assert_eq!(capacity(&Disc::None, inside), DiscCapacity::None);
-        assert_eq!(
-            ClassConstraints::NONE,
-            ClassConstraints::new(&sun, open, HostMultiplicity::SingleOrWide)
-        );
+        assert_eq!(ClassConstraints::NONE, ClassConstraints::new(&sun, open));
     }
 
     /// Ruling 48's solar-disc sample: the discs of 20,000 systems' host 0, a 1 M☉ star of
@@ -1607,8 +1631,7 @@ mod tests {
     fn after_fallback(weights: &ClassWeights, discs: &[Disc]) -> [f64; CLASS_COUNT] {
         let mut sum = [0.0; CLASS_COUNT];
         for disc in discs {
-            let c =
-                ClassConstraints::new(disc, ZoneLimit::Unbounded, HostMultiplicity::SingleOrWide);
+            let c = ClassConstraints::new(disc, ZoneLimit::Unbounded);
             let mut kept = weights.constrained(&c);
             if !giant_core(disc, ZoneLimit::Unbounded).forms() {
                 kept = without_giants(&kept);
@@ -1687,9 +1710,7 @@ mod tests {
         let capable = discs
             .iter()
             .filter(|d| {
-                ClassConstraints::new(d, ZoneLimit::Unbounded, HostMultiplicity::SingleOrWide)
-                    .capacity()
-                    == DiscCapacity::Giants
+                ClassConstraints::new(d, ZoneLimit::Unbounded).capacity() == DiscCapacity::Giants
             })
             .count();
         assert!((16_500..16_900).contains(&capable), "{capable}");
@@ -1720,11 +1741,7 @@ mod tests {
 
     #[test]
     fn without_a_disc_every_host_is_barren() {
-        let none = ClassConstraints::new(
-            &Disc::None,
-            ZoneLimit::Unbounded,
-            HostMultiplicity::CloseBinary,
-        );
+        let none = ClassConstraints::new(&Disc::None, ZoneLimit::Unbounded);
         let w = weights(1.0, 0.0);
         let p = w.constrained(&none).probabilities();
         assert_same_bits(p.get(ArchitectureClass::Barren), 1.0);
@@ -1738,11 +1755,7 @@ mod tests {
     #[test]
     fn giant_classes_fall_back_to_their_giant_free_siblings() {
         let sun = disc_of(1.0, 0.0, Truncation::NONE);
-        let no_giants = ClassConstraints::new(
-            &sun,
-            ZoneLimit::Outer(au(2.0)),
-            HostMultiplicity::SingleOrWide,
-        );
+        let no_giants = ClassConstraints::new(&sun, ZoneLimit::Outer(au(2.0)));
         for (m, x) in [(1.0, 0.0), (0.4, 0.3), (1.9, -0.2)] {
             let w = weights(m, x);
             let fallen = w.constrained(&no_giants);
@@ -1761,26 +1774,6 @@ mod tests {
                 fallen.get(ArchitectureClass::Barren),
                 w.get(ArchitectureClass::Barren),
             );
-        }
-    }
-
-    /// Design note 10: a host in a close binary has planets 0.34 times as often.
-    #[test]
-    fn a_close_binary_moves_two_thirds_of_the_planets_weight_to_barren() {
-        let sun = disc_of(1.0, 0.0, Truncation::NONE);
-        let close =
-            ClassConstraints::new(&sun, ZoneLimit::Unbounded, HostMultiplicity::CloseBinary);
-        for (m, x) in [(1.0, 0.0), (0.3, 0.0), (0.05, -0.3)] {
-            let w = weights(m, x);
-            let single = w.probabilities();
-            let binary = w.constrained(&close).probabilities();
-            let planets = |p: &ClassProbabilities| 1.0 - p.get(ArchitectureClass::Barren);
-            assert!(relative(planets(&binary), 0.34 * planets(&single)) < 1e-12);
-            for class in ArchitectureClass::ALL {
-                if class != ArchitectureClass::Barren && single.get(class) > 0.0 {
-                    assert!(relative(binary.get(class), 0.34 * single.get(class)) < 1e-12);
-                }
-            }
         }
     }
 
@@ -1826,11 +1819,8 @@ mod tests {
             .collect();
         let stream = Stream::open(SEED, tags::SELFTEST_STREAM, ObjectKey::galaxy());
         marks.extend((0..2_000).map(|n| Mark::from_word(stream.word_at(n))));
-        let constrained = weights(1.0, 0.0).constrained(&ClassConstraints::new(
-            &Disc::None,
-            ZoneLimit::Unbounded,
-            HostMultiplicity::SingleOrWide,
-        ));
+        let constrained = weights(1.0, 0.0)
+            .constrained(&ClassConstraints::new(&Disc::None, ZoneLimit::Unbounded));
         for w in [
             weights(1.0, 0.0),
             weights(0.3, 0.4),
@@ -1852,7 +1842,7 @@ mod tests {
     }
 
     /// P14.T4.c: 10⁵ class draws against the probabilities, for a Sun-like star and for an M
-    /// dwarf in a close binary whose disc cannot form giants.
+    /// dwarf whose zone ends inside its disc's snow line, so that it cannot form giants.
     #[test]
     fn class_draws_follow_the_probabilities() {
         let sun = disc_of(1.0, 0.0, Truncation::NONE);
@@ -1860,11 +1850,7 @@ mod tests {
             (weights(1.0, 0.0), ClassConstraints::NONE),
             (
                 weights(0.3, 0.2),
-                ClassConstraints::new(
-                    &sun,
-                    ZoneLimit::Outer(au(2.0)),
-                    HostMultiplicity::CloseBinary,
-                ),
+                ClassConstraints::new(&sun, ZoneLimit::Outer(au(2.0))),
             ),
         ];
         for (index, (w, constraints)) in cases.iter().enumerate() {

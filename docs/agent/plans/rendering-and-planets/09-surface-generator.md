@@ -2479,7 +2479,12 @@ made by whichever of T9 and T16 lands first, through the orchestrator, which coo
 lane at a time; later tasks that change a committed golden bump again. As built, T9 landed at 21
 with no bump of its own, and that batch's bump is this plan's first: it re-blesses
 `tests/golden/height/` with the rest, since no synthesis output has reached a save or the wire
-(main's ruling, 2026-10-13; Risks, "Deviations in T9, as built"). R05's `FINEST_SPACING_M`,
+(main's ruling, 2026-10-13; Risks, "Deviations in T9, as built"). _As built_ (lane `p14-bump`,
+2026-10-14): that bump, galaxy plan 14's 21 → 22, is this plan's first. It re-blessed every
+golden of this plan's under `crates/hyperion-surface/tests/golden/` and the sim's at 22 (`height/`
+with T7.h's `closed_forms`, `ground/`, `material/`, R10.T2's `weights/` and `wire/`), header only,
+with T1.b's hooks section on the golden systems; neither `SURFACE_PAYLOAD_FORMAT` nor
+`TEST_PLANET_VERSION` moved. R05's `FINEST_SPACING_M`,
 `BAND_LIMIT_M`
 and `finest_level` join the version when T9 reads them, as R05 notes. Nothing upstream moves but
 the hooks section T1.b fills: every draw is on a new tag, plan 14's `body.surface` seed is
@@ -2697,6 +2702,15 @@ re-blessing this plan's payload and coarse goldens in that commit.
   Moore neighbour, a 3 × 3 search not 5 × 5, one extended network not stacked instances), and
   Design note 15's crater reach is 1.27 D, not "about twice its radius"; all four are now in the
   roadmap's brainstorm corrections ("Terrain, the surface and Knowledge"), awaiting the revision.
+  R09.T11 adds a fifth, drafted for the owner (its "Deviations in T11, as built"): the brainstorm's
+  "Each coarse cell takes the nearest plate seed, by the largest dot product … in milliseconds"
+  and its Decisions' "rasterises plates as a Voronoi diagram" become a power diagram, x′ · p + w
+  with a weight fitted per plate, since an unweighted diagram of uniform seeds has near-equal
+  cells and cannot follow Design note 6's tail law; the fit costs some 0.2–0.4 s at level 8. The
+  roadmap's row (for "main" to add): The coarse global pass (step 1) | "Each coarse cell takes the
+  nearest plate seed, by the largest dot product … in milliseconds" | The largest dot product
+  plus a weight fitted per plate (a power diagram), so that the plates' areas follow Bird 2003's
+  tail law; some 0.2–0.4 s at level 8 | R09 Design note 6; R09.T11.
 - **Asked by R11, not yet designed here** (the roadmap's asks table carries it). The height datum is
   settled as the rotational spheroid (Design note 17, after R07's Design note 19), with the sea
   level a height above it, so R10's datum ask is met. R11 asks for the terrain-independent zonal
@@ -2836,6 +2850,75 @@ re-blessing this plan's payload and coarse goldens in that commit.
     `u16` or checks it. And since the body is in a 64-bit seed rather than the key, bodies whose
     seeds collide (about n² ÷ 2⁶⁵ pairs among n bodies, as for P14.T23's seed already) share their
     noise, though not their coarse inputs.
+- **Deviations in T1.b, as built** (2026-10-14).
+  - _Lane and version (main's ruling, 2026-10-14)._ Built in its own lane, `r09-detail-seed`,
+    rather than by the batch's lane, and held at `GENERATOR_VERSION` 21: the batch's lane
+    (`p14-bump`, then building P14.T48.e) picks this commit before its bump commit, whose bump
+    re-blesses every golden at 22. So, unlike plan 14's bump plan ("the goldens move once, at the
+    bump"), this commit puts the hooks on the record and re-blesses the system goldens it moves at
+    header 21 inside itself; the bump re-blesses them at 22 with the batch's own changes.
+  - _The seed._ `planetary::hooks::detail_seed(seed, body)` is word 0 of the body's
+    `body.surface.detail` stream, beside `surface_seed` in `hooks/seed.rs`; `hooks` re-exports it
+    and `DetailSeed`. Its test, `a_million_detail_seeds_are_distinct_and_none_is_its_surface_seed`,
+    takes P14.T23's 10⁶ bodies.
+  - _`record::Hooks`_ is a struct with a private `detail_seed: DetailSeed`, `Hooks::new` and the
+    getter `detail_seed()`. It derives `Debug`, `Clone`, `PartialEq`, `Eq`, `Hash`, `PartialOrd` and
+    `Ord`, but not `Copy`, since the hooks to come (resources' abundances) need not be; the server's
+    `convert::planetary::hooks` takes `&Hooks`.
+  - _Which bodies._ The section is `Ok` for a planet, moon or dwarf planet present at the record's
+    time (a moon by the record's present arm, which also needs its planet's position), giants
+    included, as the task's "a present body" says and since a giant has a surface seed too. A
+    private `PlanetarySystem::present_hooks` builds it; `BodyRecord::builder` still starts every
+    section `NotModelled`. A ring, a belt and the halo keep
+    `NotApplicable`. A planet, moon or dwarf planet **not present** had `NotModelled` hooks, not
+    `NotApplicable` as the task's "keeps" says: T1.b makes them `NotApplicable`, as their bulk and
+    surface are.
+  - _The goldens, re-blessed at header 21_ (the batch's bump re-blesses them at 22). The system
+    goldens' writer prints an `Ok` hooks section as `hooks detail_seed = 0x…`, pinning the value,
+    and every other state as before. 15 files under `crates/hyperion-sim/tests/golden/planetary/systems/`
+    moved, 800 lines, each a `hooks: NotModelled` line replaced in place (no line added or removed):
+    722 became `hooks detail_seed = 0x…` and 78 `hooks: NotApplicable` (bodies not present). By
+    file (replaced lines, of which `NotApplicable`): `close_binary` 144 (0), `eccentric_giant` 24 (0),
+    `fallback_black_hole` 40 (2), `filler_a` 8 (2), `filler_b` 56 (0), `filler_c` 70 (0),
+    `halo_star` 4 (0), `hierarchical_triple` 108 (4), `hot_jupiter` 18 (0),
+    `m_dwarf_resonant_chain` 12 (0), `red_giant` 42 (4), `solar_like` 42 (0), `subgiant` 90 (0),
+    `t_tauri` 62 (62, every body not yet formed) and `wide_binary` 80 (4). No other line of any
+    golden moved. Added: `planetary/detail_seed.golden` (`detail_seeds_are_pinned`: the six bodies
+    in four universes of `surface_seeds_are_pinned`, through one helper, `body_seeds`, which leaves
+    the surface seed golden unchanged).
+  - _The wire._ `BodyHooksDto` keeps the shape R04.T3.c gave it; only its doc comments and
+    `BodyRecordDto.hooks`'s changed (the bindings regenerated, comments only). The new
+    `an_ok_hooks_section_carries_the_detail_seed_alone` pins an `ok` hooks section as whole JSON,
+    so it holds no other key; it does not name the surface seed's key, which keeps R04.T3.c's
+    acceptance grep empty. `PROTOCOL_VERSION` stays 2: no message, field or string is added,
+    removed or changed, no build sent an `ok` hooks section before (the sim's `Hooks` was
+    uninhabited), so by plan 04's Design note 15 this first send sets its shape, and every client
+    since R04.T3.c parses it (`bodiesWire.ts`'s `toRecord`) and shows its `DETAIL SEED` row.
+  - _Tests._ The sim's new `a_present_body_s_hooks_are_its_detail_seed` holds every record of 120
+    systems at the epoch to the rule above, with the detail seed `detail_seed` gives and unequal to
+    the body's surface seed, and counts the seeded bodies, the bodies not present, the rings and
+    the belts it saw; `a_record_tags_what_the_generator_does_not_compute` loses its planets'
+    `NotModelled` hooks assertion. `record.rs`'s mixed record carries an `Ok` hooks section, so the degrading tests
+    withhold one. `tests/system_bodies.rs` holds each body's `body_detail` hooks to the sim's detail
+    seed or `not_applicable`, and reads that answer and the system's list as their text arrived:
+    neither has a key named `surface_seed` at any depth, nor a body's surface seed in hexadecimal
+    or decimal (the list any body's, a record its own). The checks are `Secret`,
+    `check_no_seed_key` and `has_key` in `tests/common/surface.rs`, taken from T19.c's
+    `surface_knowledge.rs`, whose private copies T1.b leaves for T19.c's follow-up to drop (moving
+    its payload byte check, `check_binary`, into the shared `Secret`).
+  - _For T19.c's follow-up._ `tests/surface_knowledge.rs` still synthesises from its stand-in
+    `DETAIL_SEED`. Reading the client's seed from `body_detail`'s hooks section (`Session::start`
+    already asks for it) means keeping the answer's seed in `Session` and passing it to
+    `check_heights`, more than a one-line switch, so T1.b leaves it; the seed it will read is
+    `detail_seed(Seed::new(SEED), surface_system().solid)`.
+  - _Left as it is._ `packages/protocol/fixtures/planetary.json`, a hand-written fixture, keeps a
+    `full` record whose hooks are `not_modelled`, still a valid wire state.
+  - _Acceptance._ The sim's filter `planetary::hooks` selects only `hooks/seed.rs`'s tests and the
+    hooks doctests, so T1.b also ran
+    `cargo test -p hyperion-sim --lib -- planetary::hooks planetary::record a_present_body_s_hooks a_record_tags_what_the_generator_does_not_compute`
+    and `cargo test -p hyperion-sim --test planetary_golden`, beside
+    `cargo test -p hyperion-sim --doc hooks`, `cargo test -p hyperion-protocol planetary` and
+    `cargo test -p hyperion-server --test system_bodies`; the gate is `just smart-ci`.
 - **Deviations in T2, as built** (2026-10-09; technical choices, revisable until T9's and T16's
   goldens pin them).
   - _Files._ `field.rs` is a module root over `field/{cells,cover,crater,header}.rs`, re-exported
@@ -4525,7 +4608,9 @@ re-blessing this plan's payload and coarse goldens in that commit.
     `craters-uncached` bench is still pending. It is why the test's points are few. Lean: T9's.
   - _The detail seed's source._ Once R09.T1.b puts the body's detail seed in `body_detail`'s hooks
     section, the test should read the client's seed from there. Lean: with T1.b, which then also
-    checks that the hooks section carries `detail_seed` and no `surface_seed`.
+    checks that the hooks section carries `detail_seed` and no `surface_seed`. _T1.b, as built
+    (2026-10-14):_ the wire's checks are in `tests/system_bodies.rs`, and this test's switch is left
+    for its follow-up ("Deviations in T1.b, as built").
 - **Deviations in T18, as built** (2026-10-09).
   - _The shared log._ `knowledge/jsonl.rs` (private) holds what `persist.rs` held privately:
     `KnowledgeLog` (now carrying its header's format), `push_line`, `sync_directory`, `save_io`
@@ -6187,4 +6272,323 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   contribution from its own cut (crate-private `levels::LevelCuts`; the relief through a
   degree-keyed entry under its wavelength forms, whose bits are unchanged). R10's T2, T4 and T5
   read them. The small craters' part does not yet count the sharpening of the octaves a level
-  keeps: R09.T7.h.
+  keeps: R09.T7.h, which has since added it (below).
+- **Deviations in T7.h, as built** (2026-10-14; lane r09-crater-sharpening, after R10.T5;
+  `decision-r10-t5-closed-forms.md` §2 and its list for this lane; main's ruling of 2026-10-13 on
+  re-blessing at 21).
+  - _Files._ `synth/craters.rs` (the moments and both forms); `synth/levels.rs` (`LevelCuts` loses
+    its craters' cut, and `LevelSet` gains the crate-private `keeps_crater_octave`); `synth.rs` (`omitted_variance` and `omitted_structure_function` call the
+    craters' level-keyed part, and the docs); `synth/craters/rims.rs` (`difference_moments` becomes
+    `pub(super)` and sorts its breakpoints on the stack, the rims' bits unchanged); the tests in `synth/craters/tests.rs` and the crater part of `reading/tests.rs`'s
+    decomposition test; and `tests/golden/height/closed_forms.golden`. No public signature changes,
+    and every new item is crate-private.
+  - _The moments_, at each octave's own eight nodes in diameter. Each node keeps its crater filleted
+    over the ground's half-width `w₂` = 1 m (`GROUND_FILLET`, ½ `BAND_LIMIT_M`), its ½ ω π R² and
+    its E[g²]:
+    - `G_k`, the octave's variance at the ground's fillet, is built with the octave
+      (`CraterOctave::ground_variance`). `variance()` keeps its bits: the factors are taken in their
+      old order, and the parts goldens' octave tables did not move.
+    - `Φ_k`(w) and `S_k`(w) are summed per call (`CraterOctaves::sharpening`) from
+      `rims::difference_moments` of F(`w₂`) and F(w). Both are zero to the bit where the two fillets
+      are one: w ≤ 1 m, or both held at min(1, a) rim radii.
+  - _The forms._ The wavelength-keyed ones count the share `s_k` (`band_share`) of an octave left out
+    at `G_k`, and the rest at `Φ_k`(max(½ λ, 1 m)). Their structure function puts the share left out
+    on T7.b's J₀ ring at `G_k`, and the kept share in the rims' form, 2Φ (1 − exp(−S b² ÷ 2Φ)). The
+    level-keyed ones (`CraterOctaves::omitted_variance(set)` and
+    `omitted_structure_function(set, lag)`) keep the octaves through the set's `craters_through` at
+    its `band_half_width`, and the rest whole. As the ruling foresaw, the craters' part is no
+    longer a cut, so `LevelCuts` has no craters' field and `LevelCuts::of` no octaves.
+  - _Per call, not tabulated._ Construction gains 0.07 ms a body for the ground moments, on 0.9 ms
+    (Moon- and Ceres-like) to 11–13 ms (Mars- and Earth-like, screened). The sharpening costs about
+    12 µs an octave kept, so the level-keyed craters' part takes 51–145 µs a call and the
+    wavelength-keyed one 72–165 µs, at the levels of 1 km to 10 m surveys (slow-test profile, one
+    thread, a shared machine: provisional). A table by band level would put about 3 ms (and some
+    30 times that in debug builds) on every construction, which every free closed form and
+    `LevelBounds::new` pays. R10.T5's pooled case reads it twice a point.
+  - _Tests._ In `synth::craters`:
+    - `one_crater_s_sharpening_is_its_two_profiles_sampled`: radially, by a midpoint rule on 2 × 10⁵
+      panels blind to the pieces, to 10⁻⁶ in the heights (measured 8 × 10⁻⁹ at worst) and 10⁻⁴ in
+      the slopes (4.3 × 10⁻⁶); over the plane, on a 400 × 400 grid with the slope along one axis by
+      central differences, to 5 × 10⁻³ (2.2 × 10⁻³, the grid's own error on a fillet 16 cells
+      wide). Craters of 2.5 m to 25 km, at fillets of 0.02 to 3 rim radii.
+    - `the_closed_form_variance_is_its_dense_quadrature` now also holds `G_k` to 2%, and `Φ_k` and
+      `S_k` at bands of a quarter and a half of the smallest diameter to 4%, against 64 diameters
+      (the figures are under "Deferred findings", below).
+    - `an_octave_s_sharpening_grows_with_its_band_to_no_more_than_its_ground_variance`: zero at the
+      ground's fillet and finer; non-decreasing in steps of a quarter, and never above `G_k`, out
+      past the widest crater's rim radius. It holds on every octave of every world, so the ruling's
+      condition for a monotone V(λ) is met.
+    - `both_forms_are_their_octaves_sharpening_and_ground_and_vanish_at_the_band_limit`: the
+      level-keyed part is Σ `Φ_k` + Σ `G_k` to the bit at every level, and its structure function the
+      rims' form plus the ring, to 10⁻¹²; both are zero from the band limit's level; the
+      wavelength-keyed variance is its octaves' sum to the bit, and zero at 2 m and below.
+    - `the_unresolved_variance_falls_with_the_wavelength_to_zero_at_the_band_limit` now steps by a
+      fifth from 10⁹ m and takes Σ `G_k` as the whole. `unresolved_rms` stays non-increasing as the
+      resolution refines (`synth::tests`), and the level-keyed forms as the level deepens
+      (`reading::tests`); neither needed a change.
+  - _Measured_ (`measure_the_kept_octaves_sharpening_and_the_octaves_left_out`, `#[ignore]`; 400
+    cells × 25 points, 10⁴ a world and level, at the deepest level whose `λ_n` is the survey or
+    longer; slow-test profile, 277 s). Realised mean square ± its standard error, against closed:
+
+    | World      | Survey | Level | Kept sharpening (m²)      | Octaves left out (m²)     |
+    | ---------- | ------ | ----- | ------------------------- | ------------------------- |
+    | Moon-like  | 100 m  | 10    | 1.388 ± 0.123 vs 1.299    | 0.053 ± 0.016 vs 0.072    |
+    | Moon-like  | 1 km   | 7     | 180.6 ± 13.0 vs 188.2     | 782.0 ± 58.7 vs 829.6     |
+    | Mars-like  | 100 m  | 11    | 0.080 ± 0.025 vs 0.084    | 0.208 ± 0.078 vs 0.223    |
+    | Mars-like  | 1 km   | 8     | 10.05 ± 2.41 vs 8.10      | 9.84 ± 2.05 vs 32.83      |
+    | Ceres-like | 100 m  | 9     | 0.111 ± 0.012 vs 0.125    | 0.146 ± 0.025 vs 0.155    |
+    | Ceres-like | 1 km   | 5     | 15.00 ± 3.52 vs 15.45     | 116.2 ± 26.0 vs 107.6     |
+    | Earth-like | 100 m  | 12    | 0.0011 ± 0.0006 vs 0.0044 | 0.0072 ± 0.0037 vs 0.0215 |
+    | Earth-like | 1 km   | 9     | 0.0023 ± 0.0017 vs 0.117  | 0.039 ± 0.014 vs 1.089    |
+
+    On the Moon-, Mars- and Ceres-like worlds the sharpening agrees within its sampling, and so do
+    the octaves left out but for the Mars-like world at 1 km. The Earth-like world's craters are
+    screened and young, so a sample of 10⁴ points misses the few that carry E[g²] (deferred,
+    below). The realised means are small against the RMS, at most 0.58 m against 28 m (the Moon-like
+    world's octaves left out at 1 km), the zero mean the forms assume. The ± takes the points as
+    independent, so it is a lower bound: a cell's 25 points are correlated where the kept craters
+    are kilometres wide, and a sample that misses the rare young craters understates its own spread.
+    On the Earth-like rows it means nothing (the science check).
+
+  - _The golden._ `closed_forms.golden` was extended first, at R10.T5's values, by its level-keyed
+    forms at every band level for each pinned cell: `omitted_variance` by contribution and whole,
+    and `omitted_structure_function` at lags of 2 m, 5 m and `λ_n` (1,000 labels; `golden_diff.py`:
+    extended only). It was then re-blessed at 21 with no bump (main's ruling of 2026-10-13, before
+    P14.T48.e), so `golden_diff.py`'s "not bumped" is that ruling's expected problem. 796 lines moved,
+    on the four cratered worlds alone, and in them only the craters' column, the total or whole,
+    `unresolved rms` and the level-keyed structure functions: 60 wavelength-keyed variances, 180
+    structure functions, 30 RMS, and 263 levels' omitted variances with as many of their structure
+    functions. The relief,
+    channels and rims columns, the flat and one-crater worlds, and every other height golden are
+    unchanged. For example, on the Moon-like world's cube-corner cell the craters' part at level 10
+    went from 0.0717 to 1.371 m² (the total 1.265 to 2.564 m²), at level 7 from 829.6 to 1,017.8 m²,
+    and finer than 100 m from 0.0016 to 0.234 m².
+  - _Generator version._ 21, not bumped (main's ruling): the closed forms reach no height, save or
+    wire.
+  - _R10.T5's pooled case, with the crater sharpening in_, by name in 577 s:
+    `just test-slow -E 'binary(surface_reading_worlds)'`. RMS ÷ σ and var z, against 0.984/0.941
+    to 1.430/2.473 before:
+
+    | World      | At 100 m        | At 1 km         |
+    | ---------- | --------------- | --------------- |
+    | Earth-like | 0.9831 / 0.9318 | 0.9869 / 0.9697 |
+    | Mars-like  | 0.9941 / 0.9620 | 1.0244 / 1.0230 |
+    | Moon-like  | 0.9883 / 0.9748 | 0.9828 / 0.9653 |
+    | Ceres-like | 0.9942 / 0.9882 | 1.0858 / 1.1762 |
+
+    Seven of the eight cases are within the plan's 10% and 15%. The Ceres-like world at 1 km is
+    within 10% in RMS but its z-scores' variance is 1.176, 0.026 over the plan's 15%. There the
+    closed forms leave 37.7 m² of the realised 248 m² unexplained, against craters' closed forms of
+    123 m² that the measurement above finds within its sampling (131 ± 26 m² realised at 10⁴
+    points). Main ruled (2026-10-14) that this is the ruling's heavy-tailed crater sampling, and
+    that the gap's commit under R10.T5 hold every case at the plan's 10% and 15% but this one:
+    `CRATER_GAP` is the Ceres-like world at the 1 km survey alone, its RMS ratio at the plan's 10%
+    and its var z in [0.85, 1.25] (`GAP_Z`), 1.176 measured with headroom for a change of seed. R10's
+    T5 entry records it.
+
+  - _The measurement joins the slow pass._ It is `#[ignore]`, so `just test-slow`
+    (`--run-ignored only`) runs it, 277 s on one thread natively, as R10.T5's and R13.T1's
+    recorded measurements run.
+- **Deferred findings (2026-10-13 rule)** (R09.T7.h; recorded, not ruled; each for "main"'s list).
+  - _The eight nodes miss a kink on the widest octaves._ Against 64 diameters, every octave's
+    sharpening is within 0.4%, but the widest, complex octaves' at a band of half their smallest
+    diameter are not: 3.4% high (Mars-like octave 0, at 22.6 km), 2.5% (Ceres-like octave 0) and 1.1%
+    low (Moon-like octaves 0 and 1). There the fillet's inner end crosses the floor's edge as the
+    diameter varies across the octave. It touches only the coarsest levels, where the relief
+    dominates. A fix is more nodes, or nodes split at that diameter.
+  - _Heavy-tailed realisations_ (the ruling's). The Earth-like world's realised sharpening is 0.02
+    to 0.25 of the closed form, and its octaves left out 0.04 to 0.33, at 10⁴ points; the Mars-like
+    world's octaves left out at 1 km, 0.30. An octave's E[g²] is carried by its youngest craters, which
+    are rarest where the atmosphere screens the production. The explanation is plausible, not shown
+    (the science check): the Mars-like and Moon-like figures at 100 m converge from the 288 points of
+    R10.T5's diagnostic to these 10⁴, but a count of the carrying craters a sample expects to hit,
+    or a larger sample on another seed, would settle it. The Mars-like row at 1 km does not test
+    T7.h's terms, since a 1 m fillet changes those octaves' ∫h² by some 10⁻⁸. R10.T5's pooled case
+    on the Ceres-like world at 1 km (var z 1.176 against the plan's 1 ± 0.15) is the case the ruling
+    foresaw, held by main's ruling in [0.85, 1.25] alone: a check weighted by crater count, or a
+    larger cratered sample, would retire it, in R10.T15's verification pass.
+  - _Per call._ If R10.T2 or T4 read the level-keyed forms per vertex rather than per cell and
+    level, a table of `Φ_k` and `S_k` by band level, built once per body, would replace the 50–150
+    µs a call.
+- **Deviations in T11, as built** (2026-10-14; lane r09-plates, on `a1f1b61a`; the inputs are
+  builder arguments until P14.T48.e and P14.T54.a put them on the record).
+  - _Files and the frame._ `steps/plates.rs`, its tests in the child `steps/plates/tests.rs` (as
+    `synth/relief/tests.rs`). The frame in `steps/mod.rs`, shared by T12–T15, gains
+    `CellState::seafloor_origin: Option<SeafloorOrigin>` and the plain-data `SeafloorOrigin`
+    (`ridge_distance: Option<Metres>`, `half_rate: MetresPerSecond`, `age: Seconds`),
+    `decision-r09-t5.md` item 5's d_r, u_h and τ on oceanic cells, `None` elsewhere; and
+    `Working::plates: Vec<plates::Plate>` (seed, angular velocity in rad s⁻¹, drawn and realised
+    areas, weight). The quantiser is unchanged: age and rate do not travel. Public: `run`,
+    `Plate`, `MEAN_HALF_RATE` and `OLDEST_FLOOR`; the law's constants, the speed scale and the
+    warp's are `pub(crate)`.
+  - _What it reads_ (all from `CoarseInputs`, builder arguments, no record section being
+    inhabited): `tectonics()` (P14.T24.b's `TectonicRegime`), `continental_fraction()`
+    (P14.T48.a's f_c), `heat_flow()` (P14.T24.b's `GlobalFigures::heat_flow`), `radius()` and
+    `crust_palette()`. Plan 14 gives no plate count: the count is the tail law's draw.
+  - _Regimes._ Only `MobileLid` draws plates. `StagnantLid`, `HeatPipe`, `Episodic` and
+    `IceShell` take the stagnant lid's: the step leaves the initial state's one lid, for T12.c's
+    provinces (T10's "T11 decides what each gets"; the morphologies stay in Composition). So does
+    a mobile lid with no secondary crust (no `Oceanic` palette entry), whose plates could form no
+    floor. A world with no tertiary crust has no continental crust, whatever its f_c (finding
+    below).
+  - _The draws._ Plate k on `surface_item(k)`: its seed (two words, z and longitude uniform), its
+    angular velocity (two Box–Muller pairs, three components used), its area (one word: a tail
+    plate's from `PowerLaw` of density A^−1.31 on [A_min, 1 sr); a large plate's an exponential),
+    then its continental nucleus (centre, two words; size u², one). The tail's count is
+    Poisson(7 (A_min^−0.31 − 1)), 41.06 from 0.002 sr, drawn from word 2⁴⁰ of item 0 so that it
+    and plate 0 share no word; A_min is 0.002 sr or the mean cell's solid angle where larger (a
+    level-5 field's 2.05 × 10⁻³ sr). The seven large plates take 1 sr each plus shares of the
+    excess, uniformly Dirichlet (the exponentials normalised). Where the tail would overflow the
+    4π − 7 sr they leave it (11 of 500 seeds), it ends at the plate that would; at most 256
+    plates. The tag table's "crust type per plate" is the continental nucleus.
+  - _The raster is a fitted power diagram._ Design note 6's "largest dot product" gains a weight
+    per plate, score x′ · p + w, ties to the lower index, since an unweighted diagram of uniform
+    seeds has near-equal cells and its areas would fail the tail-law test. The weights are fitted
+    (the semi-discrete transport problem) by damped Newton steps on the Laplacian of the plates'
+    shared boundaries, ℓ_kj ÷ |∇(s_k − s_j)| with ℓ from the edges crossed (π ÷ 4 a cell side
+    each), an empty plate coupled to its seed's host and stepped by its deficit there, halving
+    until Σ (error ÷ tolerance)² falls, at levels 6, 7, … up to the field's, then single-plate
+    sweeps; the tolerance is 1% or two mean cells. `assign` sets aside, per level-4 block, every
+    plate whose chordal upper bound falls short of the best lower bound by 10⁻⁹, so its result
+    is the full scan's bit for bit (a test compares them on the reference Earth). A part of a
+    plate cut off from its largest part joins the neighbouring plate it shares most edges with
+    (`join_parts`), and the field's level is fitted with its parts joined, so every plate is one
+    region and its area its drawn one. This departs from the brainstorm's Voronoi diagram "in
+    milliseconds" as well as from Design note 6, drafted for the owner under "Brainstorm
+    departures for its revision".
+  - _The warp._ A vector of three uniforms in [−1, 1) at each cell of a level-4 lattice on
+    `surface.coarse.warp` (`surface_cell` keys), their Shepard mean under the compact kernel
+    (1 − r² ÷ h²)³ within the chord h = 0.21, C² across face edges; a cell's centre moves by 0.12
+    times it for the plates and 0.25 for the continental nuclei, both illustrations chosen by eye.
+    T4's interpolant was tried first: three interpolations a cell took 1.6 s at level 8, the
+    kernel 0.06 s.
+  - _The crust._ Continental where |x′ − c| ÷ ρ is least over the plates' nuclei, cells taken in
+    (score, index) order while they bring the area nearer f_c × 4π (to half a cell); the rest
+    oceanic. The nuclei are not confined to their plates, so continents straddle boundaries
+    (collisions, continental rifts and transforms), and plates are mixed, with passive margins
+    inside them for T12.a's turbidites (`decision-r09-t5.md` item 5), which the testing world's
+    one-crust plates could not give.
+  - _The motion._ Each component of ω is a standard normal times Ω = Ω⊕ (F ÷ F⊕)², with
+    Ω⊕ = 4√π u_h ÷ (3√3 R⊕) = 1.56 × 10⁻¹⁶ rad s⁻¹ in closed form, so that a ridge's mean
+    half-rate is Bird's 23 mm a⁻¹ (measured: 23.4 mm a⁻¹ over 32 reference Earths), and F⊕ =
+    0.0916 W m⁻²; the square follows the half-space cooling model's q̄ ∝ √(u ÷ L) with L ∝ R
+    (medium-low confidence). A world of no heat flow has plates that do not move, which meet at
+    transforms.
+  - _The boundaries._ A boundary cell takes, of its edge neighbours' plates, the one whose
+    boundary is nearest by the score difference over its gradient; the normal is that gradient's,
+    by least squares over the four edge neighbours (within some 10⁻⁵ rad of the plane's on
+    hand-placed plates). Classes by the relative motion against it, the testing worlds' equal
+    thirds (convergent within 60° of head-on, divergent within 60° of opening); no relative motion
+    at all is a transform of obliquity π ÷ 2. A convergent boundary between continents is a
+    collision; an oceanic side subducts beneath a continent, and of two oceanic plates the one
+    whose floor along their oceanic convergent boundary is older on average, the higher index at
+    a tie. T2's sign lean is kept: the distance is negative on the subducting plate, per nearest
+    boundary. So on a plate that subducts at one boundary and spreads at another the sign flips
+    from −d to +d where the nearest boundary changes, and the test bounds |d| a step, not d (for
+    T12.b, which reads the sign). A plate's ridge whose half-rate rounds to zero (a subnormal
+    opening, from a heat flow below some 10⁻¹⁵⁰ W m⁻²) is a transform.
+  - _The transforms._ Multi-source shortest paths over each plate's own cells, through edge and
+    vertex neighbours with great-circle lengths, settled in (distance, cell, source) order. The
+    nearest-boundary transform starts from every boundary cell (zero there, +0); the ridge
+    transform from the cells whose nearest boundary is divergent, each settled cell inheriting
+    its source's half-rate, so d_r is never taken from a trench; τ = min(d_r ÷ u_h, 200 Myr).
+    Oceanic cells no ridge of their plate reaches take 200 Myr and 23 mm a⁻¹, with no d_r.
+  - _The interim sea floor._ Oceanic cells get `hill_relief = Some(H_REF)`, the reference style's
+    95 m, so that the field keeps its rule (hills exactly on oceanic crust) until T12.a writes its
+    law; `CellState::hill_relief`'s documentation says so.
+  - _Tests and acceptance._ `cargo test -p hyperion-sim planetary::surface::steps::plates`: 18
+    fast tests and one slow one. The fast ones: ties to the lower index, and the pruned scan the
+    full one's; every plate one region; boundaries exactly the adjacencies; signed distances +0 on
+    boundaries, negative only by subduction, stepping by at most a link's length; kinds,
+    obliquities and polarity on hand-placed hemispheres (opening, closing and sliding); the older
+    oceanic side; half-rates |ω × r| ÷ 2 normal to the ridge to 10⁻⁴, inherited bit for bit; d_r
+    zero on ridges and from no trench; τ = d_r ÷ u_h capped; 200 Myr and 23 mm a⁻¹ without a
+    ridge; the drawn areas' tail law (KS D = 0.0033 over 20,409 tail plates of 500 seeds,
+    p = 0.98), the drawn count (mean 47.82, spread 6.29; the plan's 48 ± 7), the Poisson count
+    within 3.29 SE of 41.06, early tails; the areas summing to 4π and each plate within its
+    tolerance; f_c to half a cell (0, 0.2, 0.7, 1 and the reference Earth), a collision and a
+    passive margin; no plates on the stagnant lid, the other three regimes and a mobile Ceres;
+    the same seed twice; levels 5–7 mobile lids at f_c 0.2–1 and heat flows 0–0.3 W m⁻²
+    through the whole pass; the reference Earth's mean half-rate (22.45 mm a⁻¹). The slow one
+    (`#[ignore = "slow: 32 reference Earths' plates at level 8"]`, 46 s under load): the realised
+    tail areas (KS D = 0.024 over 1,379 plates, p = 0.40), the realised count (49.94 ± 7.08) and
+    the mean half-rate (23.43 mm a⁻¹ within 20%). So the acceptance filter runs the drawn areas'
+    KS test, and the task's "over many seeds" on the realised areas runs by name, with
+    `cargo test -p hyperion-sim --features testing --lib planetary::surface::steps::plates -- --ignored`, or in the slow pass; the fast tier holds the
+    realised areas to the drawn ones on the reference Earth. "48 ± 7" is read as a bound on the
+    mean; the spread (6.29 drawn, 7.08 realised) is measured, not asserted.
+  - _Plan text superseded_ (for the docs batch): the tag table's `surface.coarse.plates` draws
+    each plate's continental nucleus (centre and size), not a "crust type", and the count from
+    word 2⁴⁰ of item 0; `surface.coarse.warp` also warps the nuclei; Design note 6's "Euler poles
+    and crust types" are Euler poles and nuclei, the crust per cell, plates mixed; its
+    "(distance, cell index)" order is (distance, cell, source), over each plate's own cells. The
+    surface crate's registry docs (`tags.rs`) say the same, which T11 left alone to keep its
+    files the sim's.
+  - _The working state grew_ by `seafloor_origin`, about 40 B a cell (16 MB at level 8), and the
+    step holds some 70 MB more while it runs (two warped centres, the contacts, two transforms'
+    reaches), beside R09.T17's deferred estimate of about 100 MB a pass ("Concurrent passes").
+  - _Cost_ (provisional, at `opt-level = 2` under shared load): the step takes some 0.6–0.9 s on
+    the reference Earth at level 8: the warp 0.06 s, the fit 0.2–0.4 s, the crust 0.08 s, the
+    layout 0.33 s (two transforms of 0.15 s each). The pass's own tests on the reference Earth
+    carry it.
+  - _Moves._ No golden pins the coarse field (T16's), none moved (`golden_diff.py`), and
+    `GENERATOR_VERSION` stays 21. The reference Earth's unpinned field now has 40–55 plates,
+    mixed crust and boundaries cell by cell, so T19.c's lean (re-run it when T11 first varies the
+    records) is due.
+  - _Review._ The Rust review's findings are applied (the fit passed by value, units in names,
+    `#[must_use]`, `pub(crate)`, sourced constants, the warp taken whole, the pair map's
+    `expect`); the determinism audit found nothing to fix (its three hardening items: the draw
+    golden and the registry's docs are deferred below, and a subnormal opening is no ridge); the
+    science check's documentation corrections are applied (Bird's −1/3 against the design note's
+    0.31, π ÷ 4's derivation, the 9.5 m margin at 200 Myr, NNR-MORVEL56's speeds, Bird's classes
+    and the cooling law's sources), and its figures are deferred below.
+- **Deferred findings (2026-10-13 rule)** (R09.T11; recorded, not ruled; each for "main"'s list).
+  - _The sea floor is old_ (the science check's one large finding; it would change the ruled
+    algorithm, so it is "main"'s to route). On four reference Earths the area-weighted mean age is
+    110–125 Myr and 25–37% of the floor sits at the 200 Myr cap, against Earth's 63.8 Myr
+    (Müller et al. 2008's grid, as Seton et al. 2020, G³ 21, e2020GC009214, §3.1, quote it; the
+    check's own area weighting of that grid gives 64.3 Myr, with 15.2%, 4.7% and 0.22% older than
+    120, 150 and 180 Myr). τ = d_r ÷ u_h ages the far side of every plate from its ridge, where
+    Earth's trenches consumed it; slow openings near Euler poles and on oblique ridges age whole
+    plates; and plates with no ridge take the cap. GDH1 saturates past 100 Myr, so T12.a's ocean
+    mean and mode carry it. Lean: T12.a calibrates against the hypsometry, and a ruling chooses
+    between bounding τ by the plate's own trench and mapping ages by area rank onto Earth's
+    distribution.
+  - _Bird's figures, like for like_ (the science check). The 23 mm a⁻¹ is half Bird's mean
+    relative speed on oceanic ridges (46.6); their mean opening is 44.7 mm a⁻¹, 22.3 halved, so a
+    like-for-like Ω⊕ would be 3% lower. Bird's ridge class spans motion within 70° of opening
+    head-on (¶127's ±20° strike-slip rule), the step's 60°; adopting it would raise Ω⊕ by 7.5%.
+    Continental rifts open at 17.6 mm a⁻¹ in full against the ridges' 46.6 (Table 3), where the
+    step gives them ridge rates. Lean: record; the ruling's 23 and the equal thirds stand.
+  - _Slivers._ A small plate between two large ones rasterises as a thin strip along their
+    bisector, since a power cell is the intersection of caps about (p_k − p_j) ÷ |p_k − p_j|, not
+    about its seed. An additively weighted score, w − θ(x′, p), keeps every cell star-shaped about
+    its seed and connected, at an angle per score. Lean: T12.b's re-validation decides, as it reads
+    the boundaries.
+  - _Small plates are not in orogens._ Seeds are uniform; Bird 2003 places most small plates in
+    the orogens about the large ones' boundaries. Lean: with the slivers.
+  - _No speed–size or slab-pull relation._ Each plate's ω is drawn alone; on Earth small plates
+    turn fastest and plates attached to slabs move fastest. Lean: for a geodynamics pass.
+  - _Transforms are long._ A boundary is classed cell by cell from smooth geometry, so transforms
+    are long arcs, not the short faults offsetting ridge segments (no fracture zones). Lean: T12's
+    re-validation.
+  - _The classes' thresholds_ (60° and 120°) are the testing worlds' convention (labelled):
+    a third of boundaries to each class under random motion, against Earth's 35.2% convergent,
+    36.4% divergent and 28.4% transform by length (Bird 2003, Table 3), where Bird's own ±20°
+    would give some 22% transforms. Lean: keep them.
+  - _Distances run 8-connected._ Shortest paths over edge and vertex links overstate great-circle
+    distance by up to about 8% at some bearings, which T12.b's 190 and 260 km fronts read. Lean:
+    T12.b measures it against its 15 km medians.
+  - _The inputs accept two contradictions,_ for P14.T54.a, which owns `inputs.rs`: a mobile lid
+    with no secondary crust, and f_c above zero with no tertiary crust. The step gives the first
+    no plates and the second no continents. Lean: `build` refuses both.
+  - _The speed law rests on boundary-layer scaling_ (the half-space cooling model's q̄ ∝ u^½;
+    q ∝ t^−½ is Davies and Davies 2010's eq. 1, the plate average Turcotte and Schubert's, not
+    read), which is contested for hotter mantles (Korenaga 2006 and 2008, from memory, argues
+    for slower plates). Lean: a geodynamics pass; the label stays medium-low.
+  - _Rifts age floor._ The ridge transform starts from every divergent boundary cell, continental
+    rifts included, and its paths cross a plate's continental cells, so some floor takes its age
+    and half-rate from a rift that made none. Lean: T12.a's science check.
+  - _The draws are unpinned._ Nothing pins the plates' and the warp's word layout until T16's
+    field golden; a reordered draw would pass every test. Lean: T16, or a draw golden when "main"
+    rules its header (21 or 22).

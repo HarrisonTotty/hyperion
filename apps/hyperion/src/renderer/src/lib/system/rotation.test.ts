@@ -119,8 +119,10 @@ const LAWS = goldenLaws();
 
 describe("rotationAngleAt against the simulation's frame/body_rotations.golden", () => {
   it("reads every law and angle the golden pins", () => {
-    expect(LAWS).toHaveLength(134);
-    expect(LAWS.reduce((n, { angles }) => n + angles.length, 0)).toBe(968);
+    // 136 laws and 982 angles from generator version 22, whose close-binary rule gave
+    // `close_binary` two more bodies (134 and 968 before).
+    expect(LAWS).toHaveLength(136);
+    expect(LAWS.reduce((n, { angles }) => n + angles.length, 0)).toBe(982);
   });
 
   it("covers a law that never locks in the window, one locked, and each side of a lock", () => {

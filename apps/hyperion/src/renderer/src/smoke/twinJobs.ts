@@ -16,6 +16,8 @@ import type { AtmosphereMedium } from "../view/atmosphere/medium";
 import type { AbsorberCurveSlots, TableSize } from "../view/atmosphere/tables";
 import {
   aerialPerspectiveTwin,
+  IRRADIANCE_KERNEL_OPTIONS,
+  irradianceTwin,
   MULTI_SCATTERING_KERNEL_OPTIONS,
   multiScatteringTwin,
   OBLATE_KERNEL_SIZES,
@@ -136,6 +138,21 @@ export type TwinJob =
       readonly view: TwinView;
       readonly settings: RayMarchSettings;
       readonly depth: number;
+    }
+  | {
+      /**
+       * `irradianceTwin` over the transmittance tables and multiple-scattering layers given, the
+       * GPU's, its layer of light slot `curveSlot` in the frame of `coefficientFactor`, at the
+       * texels listed, the others 0 (R08.T9.b).
+       */
+      readonly kind: "irradiance";
+      readonly medium: AtmosphereMedium;
+      readonly bottomRadiusM: number;
+      readonly transmittance: TwinTransmittance;
+      readonly multiScatteringBySlot: ReadonlyArray<TwinTable>;
+      readonly curveSlot: number;
+      readonly coefficientFactor: number;
+      readonly texels: ReadonlyArray<readonly [number, number]>;
     };
 
 /** A job's answer, tagged with the job's kind. */
@@ -150,7 +167,8 @@ export type TwinAnswer =
   | { readonly kind: "oblateBand"; readonly twin: TwinBand }
   | { readonly kind: "oblateSkyView"; readonly twin: TwinTable }
   | { readonly kind: "oblateAerialPerspective"; readonly twin: TwinVolume }
-  | { readonly kind: "oblateRayMarch"; readonly twin: TwinTable };
+  | { readonly kind: "oblateRayMarch"; readonly twin: TwinTable }
+  | { readonly kind: "irradiance"; readonly twin: TwinTable };
 
 /** What the page posts to a twin worker: a job and the number its reply is matched by. */
 export interface TwinRequest {
@@ -271,6 +289,21 @@ export function runTwinJob(job: TwinJob): TwinAnswer {
       };
       break;
     }
+    case "irradiance":
+      answer = {
+        kind: job.kind,
+        twin: irradianceTwin(
+          job.medium,
+          job.bottomRadiusM,
+          job.transmittance,
+          job.multiScatteringBySlot,
+          IRRADIANCE_KERNEL_OPTIONS,
+          job.texels,
+          job.curveSlot,
+          job.coefficientFactor,
+        ),
+      };
+      break;
   }
   return answer;
 }

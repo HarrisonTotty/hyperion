@@ -8,10 +8,9 @@ use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
 use crate::planetary::derive::DerivedBody;
-use crate::planetary::derive::atmosphere::Speciation;
 use crate::planetary::derive::irradiation::luminosity_flux;
 use crate::planetary::derive::solar::{
-    SOLAR_AGE, derive_under, placed_about_the_sun, solar_disc, table_bodies,
+    SOLAR_AGE, derive_historic, placed_about_the_sun, solar_disc, table_bodies,
 };
 use crate::planetary::hooks::figures::past_outgassing;
 use crate::planetary::hooks::figures::tests::{MEDIAN_MAGMA_OCEAN_END, inputs_of};
@@ -275,7 +274,7 @@ fn a_mars_twin_at_1_au_dries_0_8_to_1_2_gyr_after_its_formation() {
     let disc = solar_disc();
     let &(_, kg, km, _, e) = table_bodies().find(|(n, ..)| *n == "Mars").unwrap();
     let placed = placed_about_the_sun(&disc, (kg, km, 1.0, e));
-    let twin = derive_under(&placed, &disc, SOLAR_AGE, Speciation::CarbonAndOxygen);
+    let twin = derive_historic(&placed, &disc, SOLAR_AGE);
     let conditions = conditions_of(&twin, spin_of("Mars")).unwrap();
     eprintln!(
         "generated twin: {:?}, liquid {}, water {:.3e} kg, H2O kept {} at an exobase of {:.0}",

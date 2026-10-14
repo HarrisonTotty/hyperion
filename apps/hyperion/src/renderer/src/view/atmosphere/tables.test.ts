@@ -9,6 +9,7 @@ import {
   SATURN_SPHEROID,
   saturnBody,
   saturnClassMedium,
+  saturnScaleHeightM,
   WGS84_SPHEROID,
 } from "../../test/atmosphereFixtures";
 import { forbiddenIn } from "../../test/atmosphereWgsl";
@@ -32,6 +33,7 @@ import {
   columnLengthM,
   densityAt,
   layerEdgesM,
+  localScaleHeightM,
   type MediumTerm,
   type PhaseFunction,
   phaseAt,
@@ -47,11 +49,14 @@ import {
   ABSORBER_CURVE_DEPTH_MAX,
   ABSORBER_CURVE_NODES,
   ABSORBER_SLOTS,
+  absorberCount,
   absorberSlots,
   type AtmosphereBody,
   AtmosphereTables,
   DENSITY_TABLE_LEVELS,
   densityTableLevelsM,
+  IRRADIANCE_KERNEL,
+  IRRADIANCE_SIZE,
   KERNEL_ARM_FORMAT,
   kernelMedium,
   type LayeredPlanes,
@@ -67,7 +72,10 @@ import {
   multiScatteringLayersOf,
   NO_ABSORBER_CURVES,
   OBLATE_BODY_TEXELS,
+  OBLATE_SCALE_HEIGHTS,
+  OBLATE_SURFACE_TEXEL,
   packAbsorberCurves,
+  packedScaleHeightsM,
   packOblateBody,
   PRESSURE_CHANNELS_A_TABLE,
   pressureChannelCount,
@@ -183,8 +191,8 @@ describe("AtmosphereTables", () => {
     // The transmittance, absorber-column, pressure-column and multiple-scattering tables with the
     // fifth pressure channel's one texel (R08.T4.d), the four placeholders of a medium with
     // nothing tabulated and no absorber (the forward-lobe tables', R08.T7, among them), the body's
-    // table (R08.T6.f), and the terms buffer.
-    expect(engine.counts.textures).toBe(10);
+    // table (R08.T6.f), the sky's irradiance (R08.T9.b), and the terms buffer.
+    expect(engine.counts.textures).toBe(11);
     expect(engine.counts.buffers).toBe(1);
     expect(engine.textureSpecs.every((s) => s.category === "atmosphere-tables")).toBe(true);
   });
@@ -390,6 +398,47 @@ describe("AtmosphereTables", () => {
     expect(engine.counts.dispatches).toBe(2);
   });
 
+  it("builds the sky's irradiance over the tables into its rgba32float layer (R08.T9.b)", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    const irradiance = tables.irradiance();
+    expect(engine.dispatched.map((d) => d.kernel)).toEqual([
+      "atmosphere transmittance",
+      "atmosphere multiple scattering",
+      "atmosphere irradiance",
+    ]);
+    const sky = engine.dispatched[2];
+    expect(sky?.bindings.sampled["transmittance"]).toBe(tables.transmittance);
+    expect(sky?.bindings.sampled["multiScattering"]).toBe(tables.multiScattering);
+    expect(sky?.bindings.storage["irradianceOut"]?.texture).toBe(irradiance);
+    expect(sky?.workgroups).toEqual([IRRADIANCE_SIZE.widthTexels, IRRADIANCE_SIZE.heightTexels, 1]);
+    expect(engine.textureSpecs.find((spec) => spec.name === irradiance.name)?.format).toBe(
+      "rgba32float",
+    );
+  });
+
+  it("builds the sky's irradiance once a build, at its first read after it (R08.T9.b)", async () => {
+    const engine = await countingRenderEngine();
+    const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
+    const irradiance = tables.irradiance();
+    expect(tables.irradiance()).toBe(irradiance);
+    expect(engine.counts.dispatches).toBe(3);
+    // A build leaves it to be built again at the next read; one that changes nothing does not.
+    tables.setMedium(R05_EARTH_REFERENCE, R);
+    tables.irradiance();
+    expect(engine.counts.dispatches).toBe(3);
+    tables.setMedium(HILLAIRE_REFERENCE, R);
+    expect(engine.counts.dispatches).toBe(5);
+    tables.irradiance();
+    expect(engine.dispatched.at(-1)?.kernel).toBe("atmosphere irradiance");
+    expect(engine.counts.dispatches).toBe(6);
+    // A restore makes the kernel and the table anew, and the next read builds it there.
+    engine.restore();
+    expect(engine.dispatched.at(-1)?.kernel).toBe("atmosphere multiple scattering");
+    expect(tables.irradiance()).not.toBe(irradiance);
+    expect(engine.dispatched.at(-1)?.kernel).toBe("atmosphere irradiance");
+  });
+
   it("rebuilds in place when the medium or the radius changes", async () => {
     const engine = await countingRenderEngine();
     const tables = new AtmosphereTables(engine, R05_EARTH_REFERENCE, R);
@@ -397,7 +446,7 @@ describe("AtmosphereTables", () => {
     expect(tables.setMedium(HILLAIRE_REFERENCE, 6_360_000)).toBe(true);
     expect(tables.builds).toBe(3);
     expect(engine.counts.dispatches).toBe(6);
-    expect(engine.counts.textures).toBe(10);
+    expect(engine.counts.textures).toBe(11);
   });
 
   /** The tables on the line-absorber medium, then set to the five-line-slot one, with the events. */
@@ -485,7 +534,7 @@ describe("AtmosphereTables", () => {
     engine.onAllocation((e) => events.push(e));
     const above: AtmosphereMedium = { ...TABULATED, topHeightM: COLUMN.topHeightM + 1 };
     expect(() => new AtmosphereTables(engine, above, R)).toThrow(RangeError);
-    expect(destroyedNames(events)).toHaveLength(11);
+    expect(destroyedNames(events)).toHaveLength(12);
     engine.restore();
     expect(engine.counts.dispatches).toBe(0);
   });
@@ -494,7 +543,7 @@ describe("AtmosphereTables", () => {
     const engine = await countingRenderEngine();
     const tables = new AtmosphereTables(engine, TABULATED, R);
     engine.restore();
-    expect(engine.counts.textures).toBe(26);
+    expect(engine.counts.textures).toBe(28);
     expect(engine.counts.buffers).toBe(2);
     expect(engine.counts.kernels).toBe(4);
     expect(tables.builds).toBe(2);
@@ -577,14 +626,46 @@ describe("the tables of a sliced body (R08.T6.f)", () => {
     expect(oblateWgsl).toContain(`const MAX_SLICES : u32 = ${MAX_SLICES}u;`);
     expect(oblateWgsl).toContain(`const MAX_BANDS : u32 = ${MAX_BANDS}u;`);
     expect(oblateWgsl).toContain("const OBLATE_HEADER_TEXELS : u32 = 4u;");
-    expect(OBLATE_BODY_TEXELS).toBe(4 + MAX_SLICES + MAX_BANDS);
+    // The lit passes' texels past the bands (R08.T9.b).
+    expect(oblateWgsl).toContain(
+      "const OBLATE_SURFACE_TEXEL : u32 = OBLATE_HEADER_TEXELS + MAX_SLICES + MAX_BANDS;",
+    );
+    expect(oblateWgsl).toContain(`const OBLATE_SCALE_HEIGHTS : u32 = ${OBLATE_SCALE_HEIGHTS}u;`);
+    expect(OBLATE_SURFACE_TEXEL).toBe(4 + MAX_SLICES + MAX_BANDS);
+    expect(OBLATE_BODY_TEXELS).toBe(OBLATE_SURFACE_TEXEL + 1 + OBLATE_SCALE_HEIGHTS / 4);
+  });
+
+  it("packs the medium's absorbers and its local scale height for the lit passes (R08.T9.b)", () => {
+    const body = saturnBody();
+    const plan = tablesPlanOf(body, SATURN_R);
+    const medium = saturnClassMedium();
+    const packed = packOblateBody(body.figure, body.gravity, plan, SATURN_R, medium, 1);
+    const at = OBLATE_SURFACE_TEXEL * 4;
+    expect([...packed.subarray(at, at + 4)]).toEqual([0, 0, 0, 0]);
+    const heights = packed.subarray(at + 4, at + 4 + OBLATE_SCALE_HEIGHTS);
+    expect([...heights]).toEqual([...packedScaleHeightsM(medium)]);
+    for (const [i, held] of heights.entries()) {
+      const scaledHeightM = (medium.topHeightM * i) / (OBLATE_SCALE_HEIGHTS - 1);
+      expect(held).toBe(Math.fround(localScaleHeightM(medium, scaledHeightM)));
+    }
+    // An isothermal exponential's local scale height is its scale height low down.
+    expect((heights[0] ?? 0) / saturnScaleHeightM() - 1).toBeCloseTo(0, 5);
+    // A medium's absorber slots and line slots' mask (R08.T6.c, R08.T4.d).
+    const { medium: lines } = lineAbsorberMedium();
+    const withLines = packOblateBody(body.figure, body.gravity, plan, SATURN_R, lines, 1);
+    expect([...withLines.subarray(at, at + 2)]).toEqual([
+      absorberCount(lines),
+      lineSlotMask(lines),
+    ]);
+    expect(absorberCount(lines)).toBeGreaterThan(0);
   });
 
   it("packs the figure, the counts, each slice and band, and a gravity row that gives s", () => {
     const body = saturnBody();
     const plan = tablesPlanOf(body, SATURN_R);
-    const top = saturnClassMedium().topHeightM;
-    const packed = packOblateBody(body.figure, body.gravity, plan, SATURN_R, top, 2);
+    const medium = saturnClassMedium();
+    const top = medium.topHeightM;
+    const packed = packOblateBody(body.figure, body.gravity, plan, SATURN_R, medium, 2);
     expect(packed).toHaveLength(OBLATE_BODY_TEXELS * 4);
     const a = body.figure.equatorialRadiusM;
     const c = body.figure.polarRadiusM;
@@ -620,7 +701,14 @@ describe("the tables of a sliced body (R08.T6.f)", () => {
       expect(s).toBeCloseTo(gravityRatio(body.gravity, phi), 6);
     }
     // No gravity: s ≡ 1 to the bit, A = B = 0, O = 1.
-    const flat = packOblateBody(body.figure, null, tablesPlanOf(null, SATURN_R), SATURN_R, top, 1);
+    const flat = packOblateBody(
+      body.figure,
+      null,
+      tablesPlanOf(null, SATURN_R),
+      SATURN_R,
+      medium,
+      1,
+    );
     expect([...flat.subarray(4, 8)]).toEqual([0, 0, 1, 1]);
     expect([...flat.subarray(14, 16)]).toEqual([1, 1]);
   });
@@ -652,8 +740,14 @@ describe("the tables of a sliced body (R08.T6.f)", () => {
       MULTI_SCATTERING_SIZE.heightTexels,
       4,
     ]);
+    // The sky's irradiance, a layer a band (R08.T9.b).
+    expect(sizeOf("atmosphere irradiance")).toEqual([
+      IRRADIANCE_SIZE.widthTexels,
+      IRRADIANCE_SIZE.heightTexels,
+      4,
+    ]);
     // The slices in order, then band by band its own table and its multiple scattering.
-    const dispatched = engine.dispatched;
+    const dispatched = engine.dispatched.slice();
     expect(dispatched.map((d) => d.kernel)).toEqual([
       ...plan.kappa.map(() => "atmosphere transmittance"),
       ...plan.bands.flatMap(() => ["atmosphere transmittance", "atmosphere multiple scattering"]),
@@ -692,10 +786,44 @@ describe("the tables of a sliced body (R08.T6.f)", () => {
     // The bands' tables made once for the build and released after it.
     expect(events.filter((e) => isBandTable(e) && e.kind === "created")).toHaveLength(4);
     expect(events.filter((e) => isBandTable(e) && e.kind === "destroyed")).toHaveLength(4);
+    // The sky's irradiance at its first read (R08.T9.b): band by band its own table again, then the
+    // irradiance in the band's frame over it and its multiple-scattering layer, into the same layer.
+    const irradiance = tables.irradiance();
+    const lit = engine.dispatched.slice(dispatched.length);
+    expect(lit.map((d) => d.kernel)).toEqual(
+      plan.bands.flatMap(() => ["atmosphere transmittance", "atmosphere irradiance"]),
+    );
+    for (const [b, band] of plan.bands.entries()) {
+      const own = lit[2 * b];
+      const sky = lit[2 * b + 1];
+      if (own === undefined || sky === undefined) {
+        throw new Error(`no irradiance dispatches for band ${b}`);
+      }
+      const factor = Math.fround(band.coefficientFactor);
+      expect([groundOf(own), ...buildOf(own)]).toEqual([
+        Math.fround(band.bottomRadiusM),
+        factor,
+        0,
+        0,
+      ]);
+      expect([groundOf(sky), ...buildOf(sky)]).toEqual([
+        Math.fround(band.bottomRadiusM),
+        factor,
+        0,
+        b,
+      ]);
+      expect(sky.bindings.sampled["transmittance"]).toBe(
+        own.bindings.storage["transmittanceOut"]?.texture,
+      );
+      expect(sky.bindings.sampled["multiScattering"]).toBe(tables.multiScattering);
+      expect(sky.bindings.storage["irradianceOut"]?.texture).toBe(irradiance);
+    }
+    expect(events.filter((e) => isBandTable(e) && e.kind === "created")).toHaveLength(8);
+    expect(events.filter((e) => isBandTable(e) && e.kind === "destroyed")).toHaveLength(8);
     // The body's table as packed.
     const written = engine.textureWritten.findLast((w) => w.texture === "atmosphere oblate body");
     expect(new Float32Array(written?.data.slice().buffer ?? new ArrayBuffer(0))).toEqual(
-      packOblateBody(body.figure, body.gravity, plan, SATURN_R, medium.topHeightM, 1),
+      packOblateBody(body.figure, body.gravity, plan, SATURN_R, medium, 1),
     );
   });
 });
@@ -1061,7 +1189,7 @@ describe("kernelMedium", () => {
 
 describe("the kernels", () => {
   it("prepend the common WGSL and declare MAX_TERMS as the packer does", () => {
-    for (const kernel of [TRANSMITTANCE_KERNEL, MULTI_SCATTERING_KERNEL]) {
+    for (const kernel of [TRANSMITTANCE_KERNEL, MULTI_SCATTERING_KERNEL, IRRADIANCE_KERNEL]) {
       expect(kernel.reference).toContain(`const MAX_TERMS: u32 = ${MAX_TERMS}u;`);
       expect(kernel.readback).toBe("presentation-only");
       expect(kernel.subgroup).toBeNull();
@@ -1069,7 +1197,7 @@ describe("the kernels", () => {
   });
 
   it("read the terms from a storage buffer and their densities from a 2D array texture", () => {
-    for (const kernel of [TRANSMITTANCE_KERNEL, MULTI_SCATTERING_KERNEL]) {
+    for (const kernel of [TRANSMITTANCE_KERNEL, MULTI_SCATTERING_KERNEL, IRRADIANCE_KERNEL]) {
       expect(kernel.reference).toMatch(/var<storage, read> terms : array<Term, MAX_TERMS>;/);
       expect(kernel.reference).toMatch(/var densityTables : texture_2d_array<f32>;/);
       expect(kernel.reference).not.toMatch(/struct Medium \{[^}]*\bterms\b/);
@@ -1081,12 +1209,13 @@ describe("the per-planet kernels' arithmetic (R08.T6.g)", () => {
   it.each([
     ["the transmittance kernel", TRANSMITTANCE_KERNEL.reference],
     ["the multiple-scattering kernel", MULTI_SCATTERING_KERNEL.reference],
+    ["the sky-irradiance kernel (R08.T9.b)", IRRADIANCE_KERNEL.reference],
   ])("%s calls no builtin trigonometry, R05 radius form or sebh remap", (_name, source) => {
     expect(forbiddenIn(source)).toEqual([]);
   });
 
   it("takes view/shaders/preciseTrig.wgsl first", () => {
-    for (const kernel of [TRANSMITTANCE_KERNEL, MULTI_SCATTERING_KERNEL]) {
+    for (const kernel of [TRANSMITTANCE_KERNEL, MULTI_SCATTERING_KERNEL, IRRADIANCE_KERNEL]) {
       expect(kernel.reference.indexOf("fn preciseSinCos")).toBeLessThan(
         kernel.reference.indexOf("const MAX_TERMS"),
       );
@@ -1105,6 +1234,15 @@ describe("the kernel arm (R08.T6.g)", () => {
       );
       expect(arm.readback).toBe(kernel.readback);
     }
+  });
+
+  it("has no arm for the sky's irradiance, whose stored table is its kernel's rgba32float (R08.T9.b)", () => {
+    expect(IRRADIANCE_KERNEL.reference).toContain(
+      "var irradianceOut : texture_storage_2d_array<rgba32float, write>;",
+    );
+    expect(() => withKernelArmFormat(IRRADIANCE_KERNEL)).toThrow(
+      /declares no rgba16float storage texture/,
+    );
   });
 
   it("refuses a kernel with no rgba16float storage texture", () => {
@@ -1448,10 +1586,12 @@ describe("AtmosphereTables with the lights' curves", () => {
     const tables = new AtmosphereTables(engine, medium, R, curves);
     engine.onAllocation((e) => events.push(e));
     tables.setMedium(medium, R, [own, own]);
-    // The multiple-scattering table takes a second layer for the second light (R08.T7).
+    // The multiple-scattering table takes a second layer for the second light (R08.T7), and the
+    // sky's irradiance with it (R08.T9.b).
     expect(destroyedNames(events)).toEqual([
       tables.absorberCurves.name,
       tables.multiScattering.name,
+      tables.irradiance().name,
     ]);
   });
 

@@ -1,4 +1,4 @@
-# generator_version = 21
+# generator_version = 22
 
 probabilities m 0.05 fe_h -2.5
 barren = 0x3fefaef0404e69ea  # 0.9901047950727933
@@ -407,10 +407,10 @@ warm_giant = 0x3f9f9da3c98cf426  # 0.030874785591766728
 hot_jupiter = 0x3f879aded2145b62  # 0.011525860582464357
 substellar_compact = 0x0000000000000000  # 0.0
 
-probabilities m 1 fe_h 0, constrained: zone inside the snow line, close binary
-barren = 0x3fe77eccddfd2c43  # 0.7342285476419267
-terrestrial_only = 0x3fc12b4cb1f22627  # 0.13413389862789524
-compact_multi = 0x3fc0d97fd61928cf  # 0.13163755373017813
+probabilities m 1 fe_h 0, constrained: zone inside the snow line
+barren = 0x3fcbf1e2ac1af9ac  # 0.21831925777037264
+terrestrial_only = 0x3fd93fad05af6548  # 0.39451146655263303
+compact_multi = 0x3fd8c761a4431de4  # 0.38716927567699444
 compact_with_cold_giant = 0x0000000000000000  # 0.0
 solar_like = 0x0000000000000000  # 0.0
 eccentric_giant = 0x0000000000000000  # 0.0

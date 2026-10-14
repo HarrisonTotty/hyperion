@@ -234,8 +234,7 @@ use crate::planetary::architecture::template::{
     GroupRole, MassLaw, MassRange, PlanetGroup, ROCKY_MASS_FLOOR,
 };
 use crate::planetary::architecture::{
-    ClassConstraints, DiscCapacity, HostMultiplicity, SUBSTELLAR_LIMIT, ZoneLimit,
-    early_m_dwarf_share,
+    ClassConstraints, DiscCapacity, SUBSTELLAR_LIMIT, ZoneLimit, early_m_dwarf_share,
 };
 use crate::planetary::derive::m_dwarfs::rocky_host_share;
 use crate::planetary::disc::{Disc, DiscProfile};
@@ -1347,7 +1346,7 @@ impl GiantCore {
 /// ```
 #[must_use]
 pub fn giant_core(disc: &Disc, zone: ZoneLimit) -> GiantCore {
-    let capacity = ClassConstraints::new(disc, zone, HostMultiplicity::SingleOrWide).capacity();
+    let capacity = ClassConstraints::new(disc, zone).capacity();
     let profile = match (capacity, disc) {
         (DiscCapacity::None, _) | (_, Disc::None) => return GiantCore::NoDisc,
         (DiscCapacity::SmallPlanets, _) => return GiantCore::TooFewSolids,
@@ -2190,8 +2189,7 @@ mod tests {
             giant_core(&disc, ZoneLimit::Unbounded),
             GiantCore::TooFewSolids
         );
-        let constraints =
-            ClassConstraints::new(&disc, ZoneLimit::Unbounded, HostMultiplicity::SingleOrWide);
+        let constraints = ClassConstraints::new(&disc, ZoneLimit::Unbounded);
         let weights = class_weights(SolarMasses::new(0.3), Dex::new(0.0));
         assert_same_bits(weights.constrained(&constraints).giant_total(), 0.0);
         // A solar disc cut inside its snow line likewise, and no disc at all.

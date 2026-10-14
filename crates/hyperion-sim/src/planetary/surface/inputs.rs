@@ -11,12 +11,13 @@
 //! its crust and condensates by substance and its palette: the substances its field names, each
 //! with the values the server resolves from plan 14's registry, its deposits among them.
 //!
-//! Plan 14's record does not carry these yet: `record::Surface`, the section they arrive in
-//! (P14.T48.e, with P14.T51.a's condensates, T51.c's crust and the palette's sources from
-//! P14.T54.a), is an uninhabited enum, so [`CoarseInputs::for_body`] answers
-//! [`SurfaceInputsError::NotModelled`] for every body that has a solid surface, and every test,
-//! the reference worlds among them, builds its inputs with [`CoarseInputsBuilder`], each value a
-//! plain argument (Design note 3, "Until an ask lands"). The types here are the pass's own
+//! Plan 14's record does not carry all of these yet: `record::Surface`, the section they arrive
+//! in, carries the conditions and figures from P14.T48.e, but P14.T51.a's condensates, T51.c's
+//! crust and the palette's sources are declared not modelled until P14.T54.a, so
+//! [`CoarseInputs::for_body`] answers [`SurfaceInputsError::NotModelled`] for every body that has
+//! a solid surface, and every test, the reference worlds among them, builds its inputs with
+//! [`CoarseInputsBuilder`], each value a plain argument (Design note 3, "Until an ask lands").
+//! The types here are the pass's own
 //! vocabulary for those values, each named after the plan-14 task that will supply it; the
 //! reading of the record replaces the builder's arguments one for one when the section is
 //! inhabited, and wherever the pass computes a figure plan 14 also states, the result is
@@ -38,7 +39,7 @@ use hyperion_surface::substance_key::SubstanceKey;
 
 use crate::planetary::SystemContext;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
-use crate::planetary::record::{BodyRecord, RecordSection, Section};
+use crate::planetary::record::{BodyRecord, Modelled, RecordSection, Section};
 use crate::units::{
     Gigayears, Kelvin, KilogramsPerSquareMetre, Metres, MetresPerSecondSquared, Pascals, Radians,
     Seconds, WattsPerSquareMetre, Years,
@@ -137,35 +138,12 @@ pub struct WetEpoch {
 }
 
 /// How much of the climate's heat the air moves from day to night, the classifier's thermal
-/// regime (P14.T48.d, after Koll 2022's redistribution factor f = 2/3 − (5/12) X ÷ (k + X) at
-/// k = 2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum ThermalRegime {
-    /// Airless-like: X below 0.087 k, so each point sits near its own radiative equilibrium.
-    AirlessLike,
-    /// Between the two, with a redistribution factor between 2/3 and 1/4.
-    Transitional,
-    /// Efficient redistribution, X above 15.7 k.
-    Efficient,
-}
+/// regime: plan 14's, P14.T48.d's, re-exported here for the pass.
+pub use crate::planetary::hooks::surface::ThermalRegime;
 
-/// What drives the climate's cycle, the classifier's forcing (P14.T48.d): from the locking state,
-/// the solar day and the obliquity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Forcing {
-    /// A fast rotator's seasons, its ice at the poles.
-    Seasonal,
-    /// A fast rotator at an obliquity of 54–126° that reached its state from a colder one, with an
-    /// equatorial ice belt (the 54° of Kilic, Raible and Stocker 2017, ApJ 844, 147, which Kilic
-    /// et al. 2018 reach only from a colder state; with P14.T48.b's history).
-    IceBelt,
-    /// A slow rotator, past the onset that rises with flux, its circulation converging on the
-    /// substellar point: in Yang et al. 2014's Table 1 (sidereal rotation periods, at an orbital
-    /// period of 225 d), between 8 and 16 d at 1.40 S⊕ and between 32 and 48 d at 1.92 S⊕.
-    SlowRotator,
-    /// A world locked to its host, in tidally locked coordinates about the substellar axis.
-    Locked,
-}
+/// What drives the climate's cycle, the classifier's forcing: plan 14's, P14.T48.d's, re-exported
+/// here for the pass.
+pub use crate::planetary::hooks::surface::Forcing;
 
 /// A body's climate regime, the classifier of the rendering brainstorm's open question 9
 /// (P14.T48.d): its three fields and the coarse model it names.
@@ -177,12 +155,25 @@ pub struct ClimateRegime {
     pub thermal: ThermalRegime,
     /// What drives the cycle.
     pub forcing: Forcing,
-    /// The climate's condensable: the most massive condensate whose phase changes inside the
-    /// climate's range, or `None` (P14.T48.d, by registry loop): water on Earth, carbon dioxide on
-    /// Mars, methane on a Titan.
+    /// The climate's condensable: the condensable with the largest partial pressure whose phase
+    /// changes inside the climate's range, or `None` (P14.T48.d, by registry loop; signoff-3.md,
+    /// item 1.12): water on Earth, carbon dioxide on Mars, methane on a Titan.
     pub condensable: Option<SubstanceKey>,
     /// The coarse model the regime names, which the field's header carries (Design note 8).
     pub model: ClimateModelKind,
+}
+
+impl From<&crate::planetary::hooks::surface::ClimateRegime> for ClimateRegime {
+    /// Plan 14's regime in the pass's vocabulary, its condensable by its registry row's key, as
+    /// [`CoarseInputs::for_body`] reads the record from P14.T48.e.
+    fn from(regime: &crate::planetary::hooks::surface::ClimateRegime) -> Self {
+        Self {
+            thermal: regime.thermal(),
+            forcing: regime.forcing(),
+            condensable: regime.condensable().map(|id| id.substance().key()),
+            model: regime.model(),
+        }
+    }
 }
 
 /// Which of a body's crusts, or its bulk material, is at its surface, the lid's (P14.T51.c's `lid`;
@@ -390,22 +381,27 @@ impl CoarseInputs {
     ///
     /// The surface section is decided from its tag alone, never from the body's class: a body
     /// whose surface is [`Section::NotApplicable`] has no solid surface, whatever its class
-    /// (P14.T48.e's gas-envelope split, decision-p14-t35e-wire). Once the section is inhabited,
-    /// the inputs come from it with the record's `bulk` (gravity), `figure` (the spheroid),
-    /// `rotation` (the spin) and `orbit` sections and the hosts of `ctx` (their light over the
-    /// orbit, which P14.T12's `Illumination` gives only as an orbit average), and the palette's
-    /// entries from the registry's rows of the substances the section names (P14.T49.b–c). Until
-    /// then `record::Surface` has no value, so no record gets past its tag. P14.T54.a, which
-    /// inhabits it, settles what this reading lacks: the record's time, on which the hosts' light
-    /// and the spin depend, and, for a moon, its planet's orbit, which sets its seasons (R09's
-    /// Risks).
+    /// (P14.T48.e's gas-envelope split, decision-p14-t35e-wire). An [`Section::Ok`] section
+    /// (P14.T48.e) carries the surface state and material, the conditions with their climate
+    /// regime, which reads into the pass's vocabulary by
+    /// `From<&hooks::surface::ClimateRegime>` (each substance by its registry row's key), and
+    /// the global figures. The inputs come from it with the record's `bulk` (gravity), `figure`
+    /// (the spheroid), `rotation` (the spin) and `orbit` sections and the hosts of `ctx` (their
+    /// light over the orbit, which P14.T12's `Illumination` gives only as an orbit average), and
+    /// the palette's entries from the registry's rows of the substances the section names
+    /// (P14.T49.b–c). The section's crust and condensates (P14.T51.a, T51.c) are declared but not
+    /// modelled until P14.T54.a, which also settles what this reading lacks: the record's time, on
+    /// which the hosts' light and the spin depend, and, for a moon, its planet's orbit, which sets
+    /// its seasons (R09's Risks; main's ruling of 2026-10-10). Until then an `Ok` section answers
+    /// [`SurfaceInputsError::NotModelled`], from its crust.
     ///
     /// # Errors
     ///
     /// - [`SurfaceInputsError::NoSolidSurface`] for a surface section that is
     ///   [`Section::NotApplicable`];
     /// - [`SurfaceInputsError::NotModelled`] naming [`RecordSection::Surface`] for one that is
-    ///   [`Section::NotModelled`], which is every surface section of this generator version;
+    ///   [`Section::NotModelled`], or [`Section::Ok`] with a member the pass reads not modelled,
+    ///   which is every surface section of this generator version;
     /// - [`SurfaceInputsError::NotResolved`] naming [`RecordSection::Surface`] for one a degraded
     ///   record withholds.
     pub fn for_body(record: &BodyRecord, ctx: &SystemContext) -> Result<Self, SurfaceInputsError> {
@@ -419,10 +415,16 @@ impl CoarseInputs {
                 return Err(SurfaceInputsError::NotResolved(RecordSection::Surface));
             }
         };
-        // The hosts are read with the surface section's members, which P14.T48.e and P14.T54.a
-        // define; until then the section is uninhabited and nothing reaches them.
+        let crust = match surface.crust() {
+            Modelled::Ok(crust) => crust,
+            Modelled::NotModelled => {
+                return Err(SurfaceInputsError::NotModelled(RecordSection::Surface));
+            }
+        };
+        // The hosts are read with the crust, the condensates and the palette, which P14.T54.a
+        // defines on the record; until then the crust is uninhabited and nothing reaches them.
         let _ = ctx;
-        match *surface {}
+        match *crust {}
     }
 
     /// The body.
@@ -2442,9 +2444,10 @@ mod tests {
     const SEED: Seed = Seed::new(0x5eed_0009_0010);
 
     /// A Sun-like system's context and a record at the epoch of a rocky planet of it, and the same
-    /// of a gas giant, from the first of Sun-like systems 1, 2, … that hold each.
-    fn rocky_and_giant() -> [(SystemContext, BodyRecord); 2] {
-        let (mut rocky, mut giant) = (None, None);
+    /// of a gas giant and of a sub-Neptune, from the first of Sun-like systems 1, 2, … that hold
+    /// each.
+    fn rocky_giant_and_sub_neptune() -> [(SystemContext, BodyRecord); 3] {
+        let (mut rocky, mut giant, mut sub_neptune) = (None, None, None);
         for index in 1..64 {
             let id = CellKey::new(Layer::C, [0, 812, 0])
                 .unwrap()
@@ -2464,25 +2467,58 @@ mod tests {
                     PlanetClass::GasGiant if giant.is_none() => {
                         giant = Some((ctx.clone(), record.clone()));
                     }
+                    PlanetClass::SubNeptune if sub_neptune.is_none() => {
+                        sub_neptune = Some((ctx.clone(), record.clone()));
+                    }
                     _ => {}
                 }
             }
-            if let (Some(r), Some(g)) = (&rocky, &giant) {
-                return [r.clone(), g.clone()];
+            if let (Some(r), Some(g), Some(s)) = (&rocky, &giant, &sub_neptune) {
+                return [r.clone(), g.clone(), s.clone()];
             }
         }
-        panic!("63 Sun-like systems hold no rocky planet and gas giant");
+        panic!("63 Sun-like systems hold no rocky planet, gas giant and sub-Neptune");
     }
 
     #[test]
-    fn a_generated_rocky_body_is_not_modelled_and_a_giant_has_no_solid_surface() {
-        let [(rocky_ctx, rocky), (giant_ctx, giant)] = rocky_and_giant();
+    fn a_generated_rocky_body_is_not_modelled_and_a_giant_or_sub_neptune_has_no_solid_surface() {
+        let [
+            (rocky_ctx, rocky),
+            (giant_ctx, giant),
+            (sub_ctx, sub_neptune),
+        ] = rocky_giant_and_sub_neptune();
+        // The rocky planet's section carries its conditions and figures (P14.T48.e), but its
+        // crust and condensates are not modelled until P14.T54.a.
+        let Section::Ok(surface) = rocky.surface() else {
+            panic!(
+                "a generated rocky planet's surface is {:?}",
+                rocky.surface()
+            );
+        };
+        assert_eq!(surface.crust(), Modelled::NotModelled);
         assert_eq!(
             CoarseInputs::for_body(&rocky, &rocky_ctx),
             Err(SurfaceInputsError::NotModelled(RecordSection::Surface))
         );
+        // The pass's regime is the record's, its condensable by key.
+        let regime = ClimateRegime::from(surface.climate_regime());
+        assert_eq!(regime.model, surface.climate_regime().model());
+        assert_eq!(
+            regime.condensable,
+            surface
+                .climate_regime()
+                .condensable()
+                .map(|id| id.substance().key())
+        );
+        // A giant and a sub-Neptune have no solid surface, from the tag alone
+        // (decision-p14-t35e-wire §2.4).
         assert_eq!(
             CoarseInputs::for_body(&giant, &giant_ctx),
+            Err(SurfaceInputsError::NoSolidSurface)
+        );
+        assert_eq!(sub_neptune.surface(), &Section::NotApplicable);
+        assert_eq!(
+            CoarseInputs::for_body(&sub_neptune, &sub_ctx),
             Err(SurfaceInputsError::NoSolidSurface)
         );
         // A record degraded below the surface section's level withholds it.

@@ -136,9 +136,7 @@ pub const GAS_GIANT_ENVELOPE_FRACTION: f64 = 0.5;
 
 /// The tidal Love number k₂ of a rocky body: 0.3 (plan 14, P14.T14.b), Earth's and Venus's
 /// measured value, which the `Rocky` and `Icy` classes take
-/// ([`tides`](crate::planetary::derive::rotation::tides), P14.T14.d), and until the 21 → 22
-/// batch's bump `SubNeptune` too (the [`rotation`](crate::planetary::derive::rotation) module's
-/// documentation).
+/// ([`tides`](crate::planetary::derive::rotation::tides), P14.T14.d).
 ///
 /// Earth's and Venus's measured k₂ are 0.30, Mars's 0.17 and Mercury's 0.45 (Lainey 2016,
 /// Celestial Mechanics and Dynamical Astronomy 126, 145, Table 1). Gladman et al. (1996, Icarus
@@ -147,8 +145,7 @@ pub const GAS_GIANT_ENVELOPE_FRACTION: f64 = 0.5;
 pub const ROCKY_LOVE_NUMBER: f64 = 0.3;
 
 /// The tidal quality factor Q of a rocky body: 100 (P14.T14.b), the conventional value, which
-/// the `Rocky` and `Icy` classes take ([`tides`](crate::planetary::derive::rotation::tides)), and
-/// until the 21 → 22 batch's bump `SubNeptune` too.
+/// the `Rocky` and `Icy` classes take ([`tides`](crate::planetary::derive::rotation::tides)).
 ///
 /// Kasting, Whitmire and Reynolds (1993, Icarus 101, 108) take it for an Earth-like planet after
 /// `MacDonald` (1964, Reviews of Geophysics 2, 467), though lunar laser ranging gives Earth's
@@ -157,8 +154,7 @@ pub const ROCKY_LOVE_NUMBER: f64 = 0.3;
 pub const ROCKY_TIDAL_Q: f64 = 100.0;
 
 /// The tidal Love number k₂ of a gas giant: 0.4 (P14.T14.b), which the `GasGiant` class takes
-/// ([`tides`](crate::planetary::derive::rotation::tides), P14.T14.d), and until the 21 → 22
-/// batch's bump `IceGiant` too.
+/// ([`tides`](crate::planetary::derive::rotation::tides), P14.T14.d).
 ///
 /// It is close to Jupiter's 0.379 by Gavrilov and Zharkov (1977, as Zhang and Hamilton 2008,
 /// Icarus 193, 267, Table 4, quote it) and to Saturn's measured 0.390 (Lainey et al. 2017, as
@@ -167,8 +163,7 @@ pub const ROCKY_TIDAL_Q: f64 = 100.0;
 pub const GIANT_LOVE_NUMBER: f64 = 0.4;
 
 /// The tidal quality factor Q of a gas giant: 10⁵ (P14.T14.b), which the `GasGiant` class takes
-/// ([`tides`](crate::planetary::derive::rotation::tides)), and until the 21 → 22 batch's bump
-/// `IceGiant` too.
+/// ([`tides`](crate::planetary::derive::rotation::tides)).
 ///
 /// It is Goldreich and Soter's (1966) lower bound for Jupiter, Q ≥ 10⁵ at their k₂ of 1.5, so
 /// Q ÷ k₂ ≥ 6.7 × 10⁴ (as Zhang and Hamilton 2008, Table 4, quote it). With

@@ -113,13 +113,20 @@
 //! truncated to the zone's limits. The draws are [`DiscDraws::for_host`] of the zone's
 //! [`host_number`](OrbitZone::host_number).
 //!
-//! [`OrbitZone::host_multiplicity`] is design note 10's flag for the class draw (P14.T4.c): a
-//! zone whose host is a member of a pair closer than [`CLOSE_BINARY_SEMI_MAJOR_AXIS`] (47 au) is
-//! [`HostMultiplicity::CloseBinary`], and draws [`Barren`] with added weight, so that its planets
-//! are about a third as common as a single star's (Kraus et al. 2016).
-//! [`OrbitZone::class_constraints`] hands that flag and the zone's outer limit, with the zone's
-//! disc, to `planetary::architecture`'s [`ClassConstraints`], whose weights the class draw of the
-//! zone's [`host_number`](OrbitZone::host_number) reads.
+//! [`OrbitZone::host_multiplicity`] is design note 10's close-binary flag: a zone whose host is a
+//! member of a pair closer than [`CLOSE_BINARY_SEMI_MAJOR_AXIS`] (47 au), whose other member
+//! [counts](is_close_binary_companion), is [`HostMultiplicity::CloseBinary`]. Every star counts,
+//! and a brown dwarf does when it is at least a tenth of the member's mass
+//! ([`CLOSE_BINARY_MIN_MASS_RATIO`](crate::planetary::architecture::CLOSE_BINARY_MIN_MASS_RATIO)),
+//! which only a host under 0.8 M☉ can have: Kraus et al. (2016) measured stellar companions only,
+//! and Moe and Kratter (2021) find that brown dwarfs suppress no planets measurably. The flag moves
+//! no class weight. A companion suppresses its host's planets through the zone's outer limit,
+//! which cuts the disc and every budget built from it, and that alone gives the deficit by
+//! separation that Moe and Kratter observe (decision-p14-d10-bd-companions §2). The flag names the
+//! binary for the orbit map's plane and for P14.T10.b's statistics.
+//! [`OrbitZone::class_constraints`] hands the zone's outer limit, with the zone's disc, to
+//! `planetary::architecture`'s [`ClassConstraints`], whose weights the class draw of the zone's
+//! [`host_number`](OrbitZone::host_number) reads.
 //!
 //! # What this reads of plan 11, and the slice
 //!
@@ -146,7 +153,6 @@
 //! with `BinaryState`.
 //!
 //! [`StarSlot`]: crate::stellar::multiplicity::StarSlot
-//! [`Barren`]: crate::planetary::architecture::ArchitectureClass::Barren
 
 use std::error::Error;
 use std::fmt;
@@ -156,6 +162,7 @@ use crate::math;
 use crate::orbit::Eccentricity;
 use crate::planetary::architecture::{
     CLOSE_BINARY_CUTOFF_AU, ClassConstraints, HostMultiplicity, ZoneLimit,
+    is_close_binary_companion,
 };
 use crate::planetary::disc::{self, BuildDiscHostError, Disc, DiscDraws, DiscHost, Truncation};
 use crate::planetary::index::{BodyIndex, STELLAR_SUB_END};
@@ -376,8 +383,9 @@ impl ZoneNode {
     /// The component with body index `index` (0–15), of initial mass `mass` and kind `kind`,
     /// plan 11's [`StarSlot`](crate::stellar::multiplicity::StarSlot) kind.
     ///
-    /// A brown dwarf bounds zones exactly as a star does (design note 10); its kind is carried so
-    /// that its own zone can draw from the
+    /// A brown dwarf bounds zones and flags close binaries exactly as a star of its mass does
+    /// (design note 10; the flag goes by mass, [`is_close_binary_companion`]); its kind is carried
+    /// so that its own zone can draw from the
     /// [`SubstellarCompact`](crate::planetary::architecture::ArchitectureClass::SubstellarCompact)
     /// row (design note 13). Checked by [`ZoneHierarchy::new`].
     #[must_use]
@@ -782,16 +790,17 @@ impl OrbitZone {
         self.outer.map_or(truncation, |r| truncation.with_outer(r))
     }
 
-    /// Design note 10's flag for the class draw: [`HostMultiplicity::CloseBinary`] when the host
-    /// is a member of a pair closer than [`CLOSE_BINARY_SEMI_MAJOR_AXIS`] (47 au) at any level
-    /// above it, and [`HostMultiplicity::SingleOrWide`] otherwise.
+    /// Design note 10's close-binary flag: [`HostMultiplicity::CloseBinary`] when the host is a
+    /// member of a pair closer than [`CLOSE_BINARY_SEMI_MAJOR_AXIS`] (47 au) at any level above
+    /// it whose other member [counts](is_close_binary_companion), and
+    /// [`HostMultiplicity::SingleOrWide`] otherwise. The test weighs the other member against the
+    /// member that holds the host, each at its total mass.
     ///
     /// A pair's own orbit does not count for its circumbinary zone, whose disc it clears from
     /// inside rather than truncates from outside; the companions that suppress planets in Kraus et
     /// al.'s (2016) sample orbit the planet host. So the [`Barycentre`](OrbitHost::Barycentre)
-    /// zone is never flagged. A flagged zone draws
-    /// [`Barren`](crate::planetary::architecture::ArchitectureClass::Barren) with added weight, so
-    /// that its planets are `S_bin` = 0.34 as common as a single star's (P14.T4.c).
+    /// zone is never flagged. The flag moves no class weight (decision-p14-d10-bd-companions
+    /// §2): the zone's limit does the suppressing.
     #[must_use]
     pub const fn host_multiplicity(&self) -> HostMultiplicity {
         self.multiplicity
@@ -805,8 +814,8 @@ impl OrbitZone {
     }
 
     /// What the zone allows of its host's architecture class, with the zone's disc `disc`
-    /// (design notes 5 and 10): [`ClassConstraints::new`] of the disc, the zone's
-    /// [`zone_limit`](Self::zone_limit) and its [`host_multiplicity`](Self::host_multiplicity).
+    /// (design note 5): [`ClassConstraints::new`] of the disc and the zone's
+    /// [`zone_limit`](Self::zone_limit).
     ///
     /// The class draw of the zone is
     /// [`draw_class`](crate::planetary::architecture::draw_class) at the zone's
@@ -815,11 +824,12 @@ impl OrbitZone {
     ///
     /// # Examples
     ///
-    /// Both stars of a pair 20 au apart are in a close binary, and the zone around both is not:
+    /// Both stars of a pair 20 au apart are in a close binary, and the zone around both is not;
+    /// without a disc, nothing forms in either:
     ///
     /// ```
     /// use hyperion_sim::orbit::Eccentricity;
-    /// use hyperion_sim::planetary::architecture::HostMultiplicity;
+    /// use hyperion_sim::planetary::architecture::{DiscCapacity, HostMultiplicity};
     /// use hyperion_sim::planetary::disc::Disc;
     /// use hyperion_sim::planetary::placement::{ZoneHierarchy, ZoneNode, stable_zones};
     /// use hyperion_sim::stellar::multiplicity::SlotKind;
@@ -829,14 +839,15 @@ impl OrbitZone {
     /// let a = Metres::from(AstronomicalUnits::new(20.0));
     /// let pair = ZoneNode::pair(star(0, 1.0), star(1, 0.5), a, Eccentricity::new(0.3)?);
     /// let zones = stable_zones(&ZoneHierarchy::new(pair)?);
-    /// let constraints = zones[0].class_constraints(&Disc::None);
-    /// assert_eq!(constraints.multiplicity(), HostMultiplicity::CloseBinary);
+    /// assert_eq!(zones[0].host_multiplicity(), HostMultiplicity::CloseBinary);
     /// assert_eq!(zones[2].host_multiplicity(), HostMultiplicity::SingleOrWide);
+    /// let constraints = zones[0].class_constraints(&Disc::None);
+    /// assert_eq!(constraints.capacity(), DiscCapacity::None);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     #[must_use]
     pub fn class_constraints(&self, disc: &Disc) -> ClassConstraints {
-        ClassConstraints::new(disc, self.zone_limit(), self.multiplicity)
+        ClassConstraints::new(disc, self.zone_limit())
     }
 }
 
@@ -890,7 +901,8 @@ struct Bound {
     /// Every pair above the node, outermost first, as a component under it meets the pair's other
     /// member.
     encounters: Vec<Encounter>,
-    /// Whether a pair above the node is closer than the close-binary cut.
+    /// Whether a pair above the node is closer than the close-binary cut with an other member
+    /// that counts as a companion of the node's side.
     multiplicity: HostMultiplicity,
 }
 
@@ -958,16 +970,19 @@ fn visit(node: &ZoneNode, bound: &Bound, zones: &mut Vec<OrbitZone>) {
             let a = semi_major_axis.value();
             let e = eccentricity.value();
             let total = node.mass.value();
-            let multiplicity = if *semi_major_axis < Metres::from(CLOSE_BINARY_SEMI_MAJOR_AXIS) {
-                HostMultiplicity::CloseBinary
-            } else {
-                bound.multiplicity
-            };
+            let close = *semi_major_axis < Metres::from(CLOSE_BINARY_SEMI_MAJOR_AXIS);
             // A member pair's zone about its own centre: the S-type limit its companion sets, and
             // within the pair's own zone less the member's greatest distance from the barycentre.
             // A component under the member meets this pair's other member as a new encounter, and
-            // every encounter above it from the member's greatest distance farther out.
-            let member = |companion: SolarMasses| {
+            // every encounter above it from the member's greatest distance farther out. The member
+            // is in a close binary if a pair above it is, or if this one is close and the other
+            // member counts as its companion (design note 10).
+            let member = |own: SolarMasses, companion: SolarMasses| {
+                let multiplicity = if close && is_close_binary_companion(own, companion) {
+                    HostMultiplicity::CloseBinary
+                } else {
+                    bound.multiplicity
+                };
                 let mu = companion.value() / total;
                 let limit = a * holman_wiegert_s_type(mu, e);
                 let reach = a * (1.0 + e) * mu;
@@ -993,8 +1008,8 @@ fn visit(node: &ZoneNode, bound: &Bound, zones: &mut Vec<OrbitZone>) {
                     multiplicity,
                 }
             };
-            visit(inner, &member(outer.mass), zones);
-            visit(outer, &member(inner.mass), zones);
+            visit(inner, &member(inner.mass, outer.mass), zones);
+            visit(outer, &member(outer.mass, inner.mass), zones);
             let lighter = inner.mass.value().min(outer.mass.value());
             let inner_limit = a * holman_wiegert_p_type(lighter / total, e);
             if bound
@@ -1249,14 +1264,10 @@ impl Error for ResolveZoneDiscError {
 mod tests {
     use hyperion_testkit::float::assert_same_bits;
     use hyperion_testkit::lcg::Lcg;
-    use hyperion_testkit::stats::{ALPHA, assert_p_value, normal_cdf};
 
     use super::*;
     use crate::coords::{CellSize, GenCell, SystemPosition};
     use crate::id::{BodyId, Layer};
-    use crate::planetary::architecture::{
-        ArchitectureClass, CLOSE_BINARY_SUPPRESSION, ClassWeights, class_weights, draw_class,
-    };
     use crate::stellar::Composition;
     use crate::stellar::draws::StarDraws;
     use crate::stellar::multiplicity::hand_built::{self, Node};
@@ -1793,6 +1804,65 @@ mod tests {
         );
     }
 
+    /// Design note 10 as decision-p14-d10-bd-companions rules it: a brown dwarf inside 47 au flags
+    /// its host only when it is at least a tenth of the host's mass, and a star always; the
+    /// dwarf's own zone, with a star that close, is flagged.
+    #[test]
+    fn a_brown_dwarf_flags_its_host_by_mass_ratio_and_a_star_always() {
+        let dwarf =
+            |mass: f64| ZoneNode::component(1, SolarMasses::new(mass), SlotKind::BrownDwarf);
+        let flags = |root: ZoneNode| zones_of(root).iter().map(is_close).collect::<Vec<_>>();
+        // 0.05 M☉ about a Sun and about a 0.7 M☉ K dwarf: the dwarf's zone alone.
+        assert_eq!(
+            flags(pair(star(0, 1.0), dwarf(0.05), 10.0, 0.2)),
+            [false, true, false]
+        );
+        assert_eq!(
+            flags(pair(star(0, 0.7), dwarf(0.05), 10.0, 0.2)),
+            [false, true, false]
+        );
+        // About a 0.3 M☉ M dwarf, a sixth of its mass: both.
+        assert_eq!(
+            flags(pair(star(0, 0.3), dwarf(0.05), 10.0, 0.2)),
+            [true, true, false]
+        );
+        // Just either side of a tenth of the host.
+        assert!(flags(pair(star(0, 0.5), dwarf(0.05), 10.0, 0.2))[0]);
+        assert!(!flags(pair(star(0, 0.5), dwarf(0.049_999), 10.0, 0.2))[0]);
+        // A star of 0.08 M☉ about an A star, a twenty-fifth of its mass, flags it.
+        assert_eq!(
+            flags(pair(star(0, 2.0), star(1, 0.08), 10.0, 0.2)),
+            [true, true, false]
+        );
+        // Beyond the cut nothing is flagged.
+        assert_eq!(
+            flags(pair(star(0, 0.3), dwarf(0.05), 50.0, 0.2)),
+            [false, false, false]
+        );
+        // A close pair with a 0.04 M☉ dwarf 30 au out: the dwarf does not flag the pair's
+        // circumbinary zone, and the pair flags the dwarf's.
+        let triple = pair(
+            pair(star(0, 1.0), star(1, 0.7), 0.5, 0.1),
+            ZoneNode::component(2, SolarMasses::new(0.04), SlotKind::BrownDwarf),
+            30.0,
+            0.3,
+        );
+        let flags: Vec<(OrbitHost, bool)> = zones_of(triple)
+            .iter()
+            .map(|z| (z.host(), is_close(z)))
+            .collect();
+        assert_eq!(
+            flags,
+            [
+                (OrbitHost::Star(0), true),
+                (OrbitHost::Star(1), true),
+                (OrbitHost::Pair(1), false),
+                (OrbitHost::Star(2), true),
+                (OrbitHost::Barycentre, false)
+            ]
+        );
+    }
+
     #[test]
     fn a_zone_narrower_than_a_factor_of_one_and_a_half_is_dropped() {
         // An inner pair at 1 au whose circumbinary zone starts at 2.39 au, and a third star that
@@ -2147,10 +2217,11 @@ mod tests {
         );
     }
 
-    /// Design note 10's flag reaches the class draw: a zone's constraints carry its flag and its
-    /// outer limit, and a flagged zone keeps `S_bin` = 0.34 of every planet-bearing class's weight.
+    /// A zone's class constraints are its disc's and its outer limit's alone: the close-binary
+    /// flag moves no class weight, and a flagged zone's suppression is its truncated disc's
+    /// (decision-p14-d10-bd-companions §2).
     #[test]
-    fn a_close_binary_s_zones_hand_their_flag_to_the_class_constraints() {
+    fn a_close_binary_s_zones_hand_their_limits_to_the_class_constraints() {
         let zones = zones_of(pair(star(0, 1.0), star(1, 0.8), 30.0, 0.2));
         let stars = [zams_star(1.0, 0.4), zams_star(0.8, 0.6)];
         for zone in &zones {
@@ -2160,53 +2231,19 @@ mod tests {
             if is_close(zone) {
                 assert!(disc.profile().is_some(), "{:?} has no disc", zone.host());
             }
-            let constraints = zone.class_constraints(&disc);
-            assert_eq!(constraints.multiplicity(), zone.host_multiplicity());
             assert_eq!(
-                constraints,
-                ClassConstraints::new(&disc, zone.zone_limit(), zone.host_multiplicity())
+                zone.class_constraints(&disc),
+                ClassConstraints::new(&disc, zone.zone_limit())
             );
             match zone.outer() {
                 Some(r) => assert_eq!(zone.zone_limit(), ZoneLimit::Outer(r)),
                 None => assert_eq!(zone.zone_limit(), ZoneLimit::Unbounded),
             }
-            let weights = class_weights(zone.host_mass(), Dex::ZERO);
-            let wide =
-                ClassConstraints::new(&disc, zone.zone_limit(), HostMultiplicity::SingleOrWide);
-            assert_suppressed(&weights, constraints, wide, is_close(zone));
         }
         assert_eq!(
             zones.iter().map(is_close).collect::<Vec<_>>(),
             [true, true, false]
         );
-    }
-
-    /// Asserts that `constraints` keep [`CLOSE_BINARY_SUPPRESSION`] of every planet-bearing
-    /// class's weight under `wide`'s, `Barren` taking the rest, when `close`, and change nothing
-    /// otherwise.
-    fn assert_suppressed(
-        weights: &ClassWeights,
-        constraints: ClassConstraints,
-        wide: ClassConstraints,
-        close: bool,
-    ) {
-        let (kept, unsuppressed) = (
-            weights.constrained(&constraints),
-            weights.constrained(&wide),
-        );
-        if !close {
-            assert_eq!(kept, unsuppressed);
-            return;
-        }
-        for class in ArchitectureClass::ALL {
-            if class != ArchitectureClass::Barren {
-                assert_same_bits(
-                    kept.get(class),
-                    unsuppressed.get(class) * CLOSE_BINARY_SUPPRESSION,
-                );
-            }
-        }
-        assert!((kept.total() / unsuppressed.total() - 1.0).abs() < 1e-12);
     }
 
     /// Ruling 52.4: the root pair's zone is the barycentre's, with the host number the pair had,
@@ -2395,15 +2432,25 @@ mod tests {
         }
     }
 
-    /// Whether a pair of `h` closer than `cut` lies above the zone whose stars are `members`:
-    /// a pair whose stars are a strict superset of them, the hierarchy's nodes being nested.
+    /// Whether a pair of `h` closer than `cut` lies above the zone whose stars are `members` and
+    /// puts them in a close binary: a pair one of whose members holds them all, the hierarchy's
+    /// nodes being nested, and whose other member suppresses planets about that one
+    /// ([`is_close_binary_companion`], each at its total mass).
     fn close_pair_above(h: &SystemHierarchy, members: &[u8], cut: Metres) -> bool {
-        h.pairs().any(|(index, orbit)| {
+        let holds = |index: NodeIndex| {
             let mut under = Vec::new();
             stars_under(h, index, &mut under);
+            members.iter().all(|m| under.contains(m))
+        };
+        h.pairs().any(|(index, orbit)| {
+            let HierarchyNode::Pair { inner, outer, .. } = h.node(index) else {
+                return false;
+            };
+            let suppressed = |own: NodeIndex, other: NodeIndex| {
+                holds(own) && is_close_binary_companion(h.node_mass(own), h.node_mass(other))
+            };
             orbit.semi_major_axis() < cut
-                && under.len() > members.len()
-                && members.iter().all(|m| under.contains(m))
+                && (suppressed(*inner, *outer) || suppressed(*outer, *inner))
         })
     }
 
@@ -2688,20 +2735,17 @@ mod tests {
         h.star_count() - 1
     }
 
-    /// Design note 10's flag feeding `arch`'s class constraints, over 10⁴ multiples drawn by plan
-    /// 11: a zone is in a close binary exactly when a pair above its host is closer than 47 au;
-    /// its constraints carry that flag with its disc, which lies inside the zone; a flagged zone
-    /// keeps 0.34 of every planet-bearing class's weight; and its class draws follow those
-    /// weights at its own host number.
+    /// Design note 10's flag over 10⁴ multiples drawn by plan 11: a zone is in a close binary
+    /// exactly when a pair above its host is closer than 47 au and its other member is a star or a
+    /// brown dwarf of a tenth of the host's side or more (decision-p14-d10-bd-companions); its
+    /// disc lies inside the zone, and its class constraints are its disc's and its limit's.
     #[test]
-    fn drawn_binaries_inside_47_au_flag_their_zones_for_the_class_draw() {
+    fn drawn_binaries_inside_47_au_flag_their_zones() {
         let hierarchies = drawn_multiples(0x0014_0009_000f);
         let seed = SEED;
         let coeffs = ZCoeffs::new(Composition::SOLAR.z_fit());
         let cut = Metres::from(CLOSE_BINARY_SEMI_MAJOR_AXIS);
         let (mut flagged, mut unflagged) = (0_u32, 0_u32);
-        // Planet-bearing classes drawn and expected, for flagged zones.
-        let (mut drawn, mut expected, mut variance) = (0_u32, 0.0, 0.0);
         let mut disc_count = 0_u32;
         for h in &hierarchies {
             let system = h.stars()[0].body().system();
@@ -2727,40 +2771,21 @@ mod tests {
                     assert!(truncation.inner().is_none_or(|r| profile.inner_edge() >= r));
                     assert!(truncation.outer().is_none_or(|r| profile.outer_edge() <= r));
                 }
-                let constraints = zone.class_constraints(&disc);
-                assert_eq!(constraints.multiplicity(), zone.host_multiplicity());
-                let weights = class_weights(zone.host_mass(), Dex::ZERO);
-                let wide =
-                    ClassConstraints::new(&disc, zone.zone_limit(), HostMultiplicity::SingleOrWide);
-                assert_suppressed(&weights, constraints, wide, close);
-                if !close {
+                assert_eq!(
+                    zone.class_constraints(&disc),
+                    ClassConstraints::new(&disc, zone.zone_limit())
+                );
+                if close {
+                    flagged += 1;
+                } else {
                     unflagged += 1;
-                    continue;
-                }
-                flagged += 1;
-                let kept = weights.constrained(&constraints);
-                let p = 1.0 - kept.get(ArchitectureClass::Barren) / kept.total();
-                expected += p;
-                variance += p * (1.0 - p);
-                let class = draw_class(seed, system, zone.host_number(), &weights, &constraints);
-                if class != ArchitectureClass::Barren {
-                    drawn += 1;
                 }
             }
         }
-        println!(
-            "{flagged} zones in close binaries and {unflagged} not, {disc_count} with a disc; \
-             planet-bearing classes drawn in {drawn} flagged zones against {expected:.1} expected"
-        );
+        println!("{flagged} zones in close binaries and {unflagged} not, {disc_count} with a disc");
         assert!(
             flagged > 5_000 && unflagged > 5_000,
             "{flagged} {unflagged}"
-        );
-        let z = (f64::from(drawn) - expected) / variance.sqrt();
-        assert_p_value(
-            "planet-bearing classes drawn in flagged zones",
-            2.0 * (1.0 - normal_cdf(z.abs())),
-            ALPHA,
         );
     }
 }

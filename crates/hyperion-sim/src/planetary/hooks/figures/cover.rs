@@ -446,6 +446,23 @@ pub const fn ice_temperature(state: SurfaceState) -> Kelvin {
     }
 }
 
+/// The temperature below which the climate of a body in the state `state` holds its ice cover
+/// ([`ice_fraction`]): a `Snowball`'s melting point ([`melting_point`]; science-p14-t24b-laws
+/// §4.x.2), and otherwise [`ice_temperature`].
+///
+/// P14.T48.d's climate regime reads it to tell an equatorial belt from caps.
+#[must_use]
+pub fn ice_threshold(state: SurfaceState) -> Kelvin {
+    match state {
+        SurfaceState::Snowball => melting_point(),
+        SurfaceState::GasEnvelope
+        | SurfaceState::MagmaOcean
+        | SurfaceState::Airless
+        | SurfaceState::RunawayGreenhouse
+        | SurfaceState::Temperate => ice_temperature(state),
+    }
+}
+
 /// What [`ice_fraction`] reads of a body, as plain values.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IceInputs<'a> {
@@ -476,21 +493,26 @@ pub struct IceInputs<'a> {
 ///   generated Mars's 20 m of water gives 0.011, against its residual caps' 0.007, and Earth's 2.6
 ///   km does not bind. An ice-rich crust is its own ice, uncapped.
 ///
-/// It reads no climate regime yet: P14.T48.d's, from the 21 → 22 batch's next task, names the
-/// belt its high-obliquity profile already gives.
+/// Each threshold is [`ice_threshold`]'s. The climate regime (P14.T48.d,
+/// [`regime`](crate::planetary::hooks::surface::regime)) reads this cover, and the cover reads no
+/// regime: the regime's condensable is water here, which P14.T51.a widens, and an
+/// [`IceBelt`](crate::planetary::hooks::surface::Forcing::IceBelt)'s band is the profile's own cold
+/// equator, with no extra hysteresis (science-p14-t24b-laws §4.3), so a high-obliquity world's
+/// ice is its profile's cold area whatever its history.
 /// [`GlobalFigures::with_surface`](super::GlobalFigures::with_surface)'s example publishes it on
 /// an Earth. Ice and ocean may overlap (sea ice over an
 /// ocean), as R09's cover convention has it.
 #[must_use]
 pub fn ice_fraction(inputs: &IceInputs<'_>) -> f64 {
-    let cold = match inputs.state {
-        SurfaceState::Snowball => return inputs.conditions.cold_area(melting_point()),
+    let cold = inputs.conditions.cold_area(ice_threshold(inputs.state));
+    match inputs.state {
+        SurfaceState::Snowball => return cold,
         SurfaceState::GasEnvelope
         | SurfaceState::MagmaOcean
         | SurfaceState::Airless
         | SurfaceState::RunawayGreenhouse
-        | SurfaceState::Temperate => inputs.conditions.cold_area(ice_temperature(inputs.state)),
-    };
+        | SurfaceState::Temperate => {}
+    }
     match inputs.crust {
         Crust::IceRich => cold,
         Crust::Silicate => {

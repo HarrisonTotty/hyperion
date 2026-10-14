@@ -21,7 +21,9 @@
 //!
 //! The classifier ([`material_at`], R10.T1.b) decides the material at a point from the same inputs
 //! as the height: the finest level's slope, the coarse cell's record and climate, and the header's
-//! palette, by an ordered list of rules (Design note 1).
+//! palette, by an ordered list of rules (Design note 1). The class weights a patch bakes
+//! ([`weights_at`], R10.T2) are that class at the finest level and, at a coarser one, the expected
+//! share of each finest-level class over a texel's footprint (Design note 3).
 //!
 //! Nothing here draws from a stream, so the module opens no domain tag.
 
@@ -31,6 +33,7 @@ mod classify;
 #[cfg(test)]
 mod golden;
 mod properties;
+mod weights;
 
 pub use bearing::{
     BearingFactors, bearing_capacity, bearing_capacity_on_slope, ultimate_bearing_capacity,
@@ -46,6 +49,8 @@ pub use properties::{
     ResolvePropertiesError, ShearLayer, UNASSIGNED_PHASE_ROW, directional_hemispherical_albedo,
     form_row, interface_friction, limb_parameter, properties,
 };
+pub use weights::{ClassWeights, MAX_CLASSES, SLOPE_LAG, WEIGHT_TOTAL, weights_at};
+pub(crate) use weights::{kept_omitted_rms, weights_with_sample};
 
 use hyperion_base::units::Radians;
 
@@ -63,10 +68,13 @@ use hyperion_base::units::Radians;
 /// (Carrier, Olhoeft and Mendell 1991, ch. 9, §9.1.10, p. 522).
 pub const CLIFF_SLOPE: Radians = Radians::new(40.0_f64.to_radians());
 
-/// The half-width of the visual blend either side of [`CLIFF_SLOPE`]: 5°.
+/// The half-width of the visual blend either side of [`CLIFF_SLOPE`] and of [`SNOW_SHED_SLOPE`]: 5°
+/// ([`weights_at`] at the finest level, R10.T2).
 ///
-/// The band, 35–45°, spans the literature's angles of repose (plan R10, Design note 1; the sources
-/// of [`CLIFF_SLOPE`]). Presentation only: the class itself switches at [`CLIFF_SLOPE`].
+/// The cliff's band, 35–45°, spans the literature's angles of repose (plan R10, Design note 1; the
+/// sources of [`CLIFF_SLOPE`]). The snow's, 55–65°, is presentation alone, loosely Schaerer 1977's
+/// few avalanches above 50° and none as a rule above 60° (p. 286). Presentation only: the class
+/// itself switches at each threshold.
 pub const TRANSITION_HALF_WIDTH: Radians = Radians::new(5.0_f64.to_radians());
 
 /// The slope above which snow does not lie and the ground is exposed rock: 60°.
@@ -77,3 +85,11 @@ pub const TRANSITION_HALF_WIDTH: Radians = Radians::new(5.0_f64.to_radians());
 /// way to `Bedrock` above it (plan R10, Design note 1). It is a terrestrial snow's angle; another
 /// condensate's snow takes it too, unmeasured.
 pub const SNOW_SHED_SLOPE: Radians = Radians::new(60.0_f64.to_radians());
+
+// The classifier's steepness nests the two thresholds (ground above the snow's is above the
+// cliff's), and the weights' two blends do not meet: both hold only while the snow's threshold is
+// at least two half-widths steeper than the cliff's.
+const _: () = assert!(
+    SNOW_SHED_SLOPE.value() - CLIFF_SLOPE.value() >= 2.0 * TRANSITION_HALF_WIDTH.value(),
+    "the slope thresholds' blends meet"
+);
