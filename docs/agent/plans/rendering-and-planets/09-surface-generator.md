@@ -5992,7 +5992,27 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _The bench under the shim._ `benches/synth.rs` gains `surface/point` for the browser target, as
     `wasm-bindgen-test` 0.3.79's `#[wasm_bindgen_bench]` (20 samples a part). It covers the same
     parts and patches through a `shared` module that both targets' benches read; the native IDs are
-    unchanged. It builds, and the runner lists it.
+    unchanged. It ran on Electron 44.4.3's V8 (15.2) through the shim, under the heavy lock (665 s
+    held), at a load of 8 to 12, schedutil, one thread in a 400% quota: provisional. Per point, a
+    patch's time ÷ 4,225, from a warm cache:
+
+    | Part             | Earth-like, 12 | Earth-like, 19 | Moon-like, 10 | Moon-like, 17 |
+    | ---------------- | -------------: | -------------: | ------------: | ------------: |
+    | base             |        2.03 µs |        2.03 µs |       0.27 µs |       0.27 µs |
+    | relief           |       12.81 µs |       14.01 µs |       2.92 µs |       4.19 µs |
+    | channels         |        1.04 µs |        1.04 µs |       0.30 µs |       0.30 µs |
+    | craters          |        3.88 µs |        8.19 µs |       5.08 µs |      10.23 µs |
+    | craters-uncached |          98 µs |         204 µs |      1,140 µs |      2,809 µs |
+    | rims             |        0.08 µs |        0.08 µs |       0.50 µs |       0.50 µs |
+    | height           |       19.98 µs |       25.61 µs |       9.20 µs |      15.76 µs |
+
+    At L + 4 on the Earth-like world that is 1.22 (base), 1.52 (relief), 1.15 (channels), 1.39
+    (craters) and 1.43 (the whole) times T8's provisional native figures, within or near T8's
+    assumed 1.2–1.5. Against Design note 14's WebAssembly targets the channels meet theirs (3.5 µs).
+    The base elevation (0.2 µs), the relief (1.5 µs) and the small craters (2 µs) miss, and the
+    whole misses the brainstorm's 10 µs a point. The height sweep of a patch is 84 ms at L + 4, against
+    40 ms (deferred, below).
+
   - _For R10's re-validation._ R10's goldens of the synthesis can follow `height/`'s pattern:
     - a subdirectory each, since the files directly in `tests/golden/` are held to
       `TEST_PLANET_VERSION`;
@@ -6002,12 +6022,12 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     R10.T1.b's text still names `tests/material_golden.rs` and its `--test material_golden`
     acceptance. R10's Consumes' "provisional until R09.T9 lands" can go.
 - **Deferred findings (2026-10-13 rule)** (R09.T9; recorded, not ruled; each for "main"'s list).
-  - _The bench's timed run is pending._ The heavy lock was held throughout. The command, in
-    `benches/synth.rs`'s documentation, runs with the shim first on `PATH`:
-    `cargo bench --target wasm32-unknown-unknown -p hyperion-surface --features testing --bench synth`.
-    It is to be run with the lock free and recorded as provisional, with its load, against Design
-    note 14's WebAssembly targets and the brainstorm's 10 µs a point. Until then T8's 1.2–1.5 ×
-    native stays an estimate for R10.T6.a's budget, and T20 can take the run if no one does sooner.
+  - _The point and the patch miss in WebAssembly too_ (the bench above): about 2× the 10 µs a point
+    and the 40 ms a patch on the Earth-like world, with the interpolation (base 10×, relief 8.5× of
+    Design note 14's targets) the cost, as T8 found natively. That is T8's fused-interpolant
+    follow-up, now with WebAssembly figures for R10.T6.a's budget. The small craters' uncached
+    draw costs 0.1–2.8 ms a point (each point from an empty crater cache), so a worker must keep
+    its crater cache across a patch, as `SynthCache` does.
   - _Goldens moved before the batch._ A synthesis change landing before P14.T48.e (the T6.c
     channel structure-function follow-up, the fused interpolant pass) moves `height/` at 21. The
     Generator version rule says it bumps, and the sim-determinism skill's re-bless exception covers
