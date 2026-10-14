@@ -10,6 +10,8 @@
 //!   log-normal multiple of Earth's per unit mass ([`volatile_inventory`]), raised beyond the snow
 //!   line where ices condensed, where a body's water is its bulk ice; a body that migrated keeps the
 //!   inventory of the side it formed on. Radiogenic argon grows with age from the decay of ⁴⁰K.
+//!   The same stream's words 3–5 rank its sulphur, chlorine and mantle redox, which the element
+//!   inventory reads ([`chem`](crate::planetary::chem), P14.T50.a); nothing here reads them.
 //! - **Escape** (P14.T13.b). A gas is retained over the system's age when its Jeans parameter λ =
 //!   G M m ÷ (k `T_exo` R) is at least [`JEANS_RETENTION_THRESHOLD`], with the exobase temperature
 //!   a stated multiple of the equilibrium temperature at the host's largest past luminosity,
@@ -381,11 +383,16 @@ pub const ICY_VOLATILE_BOOST: f64 = 100.0;
 pub const VOLATILE_SCATTER_DEX: f64 = 0.5;
 
 /// Words of `planet.volatiles` a planet reads or reserves: words 0–2, the ranks of its water,
-/// carbon and nitrogen, then five reserved.
+/// carbon and nitrogen (P14.T13.a); words 3–5, those of its sulphur, chlorine and redox
+/// (P14.T50.a); then two reserved, for later volatiles (phosphorus, isotopes).
 pub const VOLATILE_WORDS: u64 = 8;
 
+/// The word of `planet.volatiles` that holds a body's sulphur rank (P14.T50.a): 3, read by its
+/// number, so that words 0–2 and every value they set are untouched.
+pub const SULPHUR_WORD: u64 = 3;
+
 /// The ranks of a body's volatile inventory, as drawn from `planet.volatiles` by
-/// [`VolatileDraws::for_body`], or given explicitly by a test or a tool (P14.T13.a).
+/// [`VolatileDraws::for_body`], or given explicitly by a test or a tool (P14.T13.a, P14.T50.a).
 ///
 /// The fields are plain ranks with no invariant between them, so they are public, as the disc's
 /// draws are.
@@ -397,18 +404,34 @@ pub struct VolatileDraws {
     pub carbon: UnitUniform,
     /// The rank of its nitrogen. Word 2.
     pub nitrogen: UnitUniform,
+    /// The rank of its sulphur per unit mass of rock
+    /// ([`element_inventory`](crate::planetary::chem::inventory::element_inventory)). Word 3.
+    pub sulphur: UnitUniform,
+    /// The rank of its chlorine. Word 4.
+    pub chlorine: UnitUniform,
+    /// The rank of its mantle's ΔIW about its mean
+    /// ([`delta_iw`](crate::planetary::chem::redox::delta_iw)). Word 5.
+    pub redox: UnitUniform,
 }
 
 impl VolatileDraws {
-    /// Every rank at its median: Earth's inventory per unit mass.
+    /// Every rank at its median: Earth's inventory per unit mass, the bulk silicate Earth's
+    /// sulphur and chlorine per unit mass of rock, and the mean ΔIW.
     pub const MEDIAN: Self = Self {
         water: UnitUniform::HALF,
         carbon: UnitUniform::HALF,
         nitrogen: UnitUniform::HALF,
+        sulphur: UnitUniform::HALF,
+        chlorine: UnitUniform::HALF,
+        redox: UnitUniform::HALF,
     };
 
-    /// The draws of the body `body` in the universe of `seed`: words 0–2 of its
+    /// The draws of the body `body` in the universe of `seed`: words 0–5 of its
     /// `planet.volatiles` stream.
+    ///
+    /// Words 0–2 are drawn in turn, as P14.T13.a drew them; words 3–5 are read by their numbers
+    /// from [`SULPHUR_WORD`] ([`Stream::seek`], the same words as [`Stream::word_at`] addresses),
+    /// so that adding them moved no earlier value.
     ///
     /// # Examples
     ///
@@ -438,16 +461,32 @@ impl VolatileDraws {
         let water = rank();
         let carbon = rank();
         let nitrogen = rank();
+        stream.seek(SULPHUR_WORD);
+        let mut rank = || {
+            UnitUniform::new(stream.uniform_open())
+                .expect("an open uniform lies strictly between 0 and 1")
+        };
+        let sulphur = rank();
+        let chlorine = rank();
+        let redox = rank();
         Self {
             water,
             carbon,
             nitrogen,
+            sulphur,
+            chlorine,
+            redox,
         }
     }
 }
 
 /// A body's volatile inventory: the masses of water, carbon dioxide, nitrogen and argon it holds
 /// at its surface and in its air, before escape and the climate divide them (P14.T13.a).
+///
+/// Since P14.T50.a these are the stored carriers of the body's
+/// [`ElementInventory`](crate::planetary::chem::inventory::ElementInventory), of which this is the
+/// view its [`volatiles`](crate::planetary::chem::inventory::ElementInventory::volatiles) gives,
+/// with the same values to the bit.
 #[derive(Debug, Clone, Copy, Default, PartialEq, PartialOrd)]
 pub struct VolatileInventory {
     water: Kilograms,

@@ -178,6 +178,7 @@ fn ranks(lcg: &mut Lcg) -> (UnitUniform, VolatileDraws) {
         water: rank(lcg),
         carbon: rank(lcg),
         nitrogen: rank(lcg),
+        ..VolatileDraws::MEDIAN
     };
     (radius, volatiles)
 }

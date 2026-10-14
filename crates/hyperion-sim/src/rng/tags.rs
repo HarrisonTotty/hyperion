@@ -365,7 +365,8 @@ domain_tags! {
     // Scope `System`, opened with `ObjectKey::from(SystemId)`, the orbit host and the planet's
     // slot in the draw number (plan 14, design note 4): `planet.disc`, `planet.plane`,
     // `planet.class`, `planet.count`, `planet.spacing`, `planet.mass`, `planet.secondgen`,
-    // `belt.population`, `cometary.population`.
+    // `belt.population`, `cometary.population`, and, opened with `ObjectKey::from(SystemId)`
+    // alone, `system.abundances` (P14.T50.a).
     //
     // Scope `Body`, opened with `ObjectKey::from(BodyId)`: `planet.orbit`, `planet.radius`,
     // `planet.volatiles`, `planet.spin`, `planet.origin`, `planet.scatter` (ruling 80),
@@ -638,8 +639,9 @@ domain_tags! {
     // reserves. Appended here, after plan 13's entries, because the macro's order fixes `ALL`.
 
     /// A planet's volatile inventory (P14.T13.a): the ranks of its water, carbon and nitrogen as
-    /// log-normal multiples of Earth's per unit mass, words 0–2, one uniform each; words 3–7 are
-    /// reserved (`planetary::derive::atmosphere::VolatileDraws`).
+    /// log-normal multiples of Earth's per unit mass, words 0–2, one uniform each; the ranks of its
+    /// sulphur, chlorine and mantle ΔIW, words 3–5, one uniform each, read by their numbers
+    /// (P14.T50.a); words 6–7 are reserved (`planetary::derive::atmosphere::VolatileDraws`).
     PLANET_VOLATILES: Body = "planet.volatiles";
 
     // Plan 09, phases 2 and 3 (P09.T7–T13), appended after plan 14's atmospheres: a globular's
@@ -793,6 +795,16 @@ domain_tags! {
     /// u, f∞ = 0.2 + 0.5 u; words 1–7 are reserved
     /// (`planetary::hooks::figures::relief::continental_asymptote`).
     BODY_CONTINENTS: Body = "body.continents";
+
+    // Plan 14, phase L: the host's abundances (P14.T50.a; decision-composition §1.11), under the
+    // name and scope the "Plan 14" heading above lists. Appended here, after `body.continents`,
+    // because the macro's order fixes `ALL`.
+
+    /// A system's host abundances (P14.T50.a), keyed by the system, so that every body of it reads
+    /// one value until plan 06 carries them on the star: word 0, the rank of the host's C/O, and
+    /// word 1, that of its Mg/Si, one open uniform each; words 2–7 are reserved
+    /// (`planetary::chem::AbundanceDraws`).
+    SYSTEM_ABUNDANCES: System = "system.abundances";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1012,6 +1024,15 @@ mod tests {
         assert_eq!(PLANET_VOLATILES.name(), "planet.volatiles");
         assert_eq!(PLANET_VOLATILES.scope(), crate::rng::TagScope::Body);
         assert!(ALL.contains(&PLANET_VOLATILES));
+    }
+
+    /// P14.T50.a's one new tag, keyed by the system, last in `ALL` when it was appended.
+    #[test]
+    fn plan_14_registers_the_abundances_tag_with_system_scope() {
+        assert_eq!(SYSTEM_ABUNDANCES.name(), "system.abundances");
+        assert_eq!(SYSTEM_ABUNDANCES.scope(), crate::rng::TagScope::System);
+        let at = |tag| ALL.iter().position(|t| *t == tag);
+        assert!(at(SYSTEM_ABUNDANCES) > at(BODY_CONTINENTS));
     }
 
     #[test]

@@ -186,3 +186,4 @@ body.surface (Body) = 0x0407f6b5493047d8
 system.substellar (System) = 0xd4a850fadf345491
 body.surface.detail (Body) = 0x1319a2ee9fa51c53
 body.continents (Body) = 0x430984f76dff8594
+system.abundances (System) = 0x266a172adc97112a

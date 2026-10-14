@@ -6068,6 +6068,10 @@ feeding back into p_s, T_s, the albedo or the bulk.
     accounts for them by subtask.
   - `AMMONIA_LINE_VERSION` and its tripwire are deleted (T50.c), so that the planets' ammonia line
     takes effect with the batch.
+  - T50.a's `ElementInventory` replaces `VolatileInventory` on `DerivedBody` and
+    `BulkComposition`, built by `element_inventory` beside the atmosphere's carriers, which it
+    keeps to the bit; `VolatileInventory` stays its view ("main", 2026-10-14; Risks, "Deviations
+    in P14.T50.a, as built").
   - The server's conversion fills each member, and the envelope's `match envelope {}` is
     replaced.
   - R09's `for_body` reads `crust`, `condensates` and the palette's sources from the record.
@@ -6087,7 +6091,7 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _Files:_ `planetary/{record, hooks/mod}.rs`, `planetary/hooks/surface.rs`,
     `crates/hyperion-server/src/convert/planetary.rs`,
     `packages/protocol/fixtures/planetary.json`, `planetary/surface/inputs.rs`,
-    `planetary/moons/mod.rs`, `planetary/derive/atmosphere.rs`,
+    `planetary/moons/mod.rs`, `planetary/derive/{mod, atmosphere}.rs`,
     `crates/hyperion-base/src/version.rs`, and the goldens.
   - _Accept:_ `cargo test -p hyperion-sim planetary::record`; `cargo test -p hyperion-server convert`;
     `just gen-protocol-check`; the golden tests.
@@ -12172,3 +12176,177 @@ tables::gauss_legendre`.
     formula of more than eight characters beside an E-notation figure (`Mg(ClO4)2 1.00E-4 %`,
     173 px) would pass the 166 px the column keeps at 1280×720 beside a 15 px scrollbar. The
     registry's gases are three characters at most today (`substances.json`).
+- **Deviations in P14.T50.a, as built (`p14-snapshot`, 2026-10-14).** Elements, reservoirs, redox
+  and the new draws, in the 22 → 23 batch, built to the science agent's ruling of 2026-10-14 on
+  the five open points (accepted: the redox edges, the FMQ–IW offset, the bulk silicate Earth's S
+  and Cl, the noble gases; amended: the host's C/O scale and scatter, and Mg/Si's trend). No
+  output moves: `GENERATOR_VERSION` stays 22, every existing golden holds bit for bit,
+  `rng/tags.golden` gains its `system.abundances` line, and `planetary/chem_draws.golden` (the
+  ranks) and `planetary/chem_values.golden` (the derived values) are new, all at header 22
+  (`golden_diff.py`: one extension, two new goldens, no value moved).
+  - _The holds_ (decision-bump-plan-after-22 §1.2, "Carriers to the bit"): T50.a has none, since
+    it edits nothing on the record path. The lane's later holds are T50.c's
+    `AMMONIA_LINE_VERSION` and one lane hold at 23 for T51.a's, T51.b's and T57.a's record-path
+    edits, which T51.a's builder names (the ruling's example: `SNAPSHOT_VERSION`).
+  - _Files beyond the task's._ `planetary/mod.rs` declares `chem` and maps its two streams;
+    `tests/planetary_properties.rs`'s `VolatileDraws` literal takes `..VolatileDraws::MEDIAN`;
+    the sim's `clippy.toml` admits "McCubbin" and "McCammon" to `doc-valid-idents`. The tests
+    are `chem/tests.rs` (the draws, the host and the values' golden), `chem/inventory/tests.rs`
+    and `chem/redox/tests.rs`.
+  - _Acceptance as built._ The plan's three filters do not select the element registry's tests or
+    the `rng/tags` golden; `cargo test -p hyperion-sim substance::element` and
+    `cargo test -p hyperion-sim --test foundation_golden domain_tags_are_pinned` run them, and
+    `just smart-ci` runs all of them.
+  - _The element registry_ (`substance/element.rs`), one row of three columns per element:
+    - the standard atomic weight, CIAAW's abridged value (Prohaska et al. 2022, Table 2, read in
+      CIAAW's 2024 abridged table, which changed none of the 25); the nine gas rows' molar masses
+      are their elements' weights summed, to their rounding (tested);
+    - the protosolar A(X)₀ of Lodders 2010's Table 6, its log N(H) = 12 column (read): solar C/O
+      10^−0.34 = 0.457, her §3's figure, and Mg/Si 1.023. Its N(Si) = 10⁶ column gives C/O 0.458,
+      the same figures rounded otherwise. Asplund, Amarsi and Grevesse 2021's 0.59 ± 0.08 (§2.3,
+      read) is the recorded alternative;
+    - the 50% condensation temperature of Lodders 2003's Table 8, which was not read (IOP refuses
+      automated access). Fifteen values agree with Lodders, Palme and Gail 2009's Table 1 ("taken
+      from [03L]", read), and Si's 1,310 K with Wang, Lineweaver and Ireland 2019 (read). Mg
+      1,336, Ca 1,517 and V 1,429 are from memory against LPG09's 1,354, 1,659 and 1,452 (see the
+      findings), and P, Cl, Ar, K, Cr and Mn are from memory, unchecked. Each value's status is in
+      `Element::condensation_temperature`'s documentation.
+  - _`ElementInventory`_ (`chem/inventory.rs`), built by `element_inventory(&InventoryInputs)`
+    from the mass, bulk fractions, snow-line side, formation distance, host snow line, draws and
+    age:
+    - its carriers are `volatile_inventory`'s of the same inputs, stored as they are, and
+      `volatiles()` returns them, the view `VolatileInventory` now is; for the table's eight solid
+      bodies, the atmosphere's own inventory to the bit (tested);
+    - `DerivedBody` and `BulkComposition` still hold `VolatileInventory`. T54.a's wiring list
+      did not name the replacement; "main" ruled (2026-10-14) that T54.a makes it, and this
+      subtask adds the line to T54.a's text, so that T51.a, T51.c, T51.f and T51.g read one
+      inventory from the record;
+    - its elements, H, He, C, N, O, Ne, S, Cl, Ar, Kr and Xe (`INVENTORY_ELEMENTS`), by
+      `mass(element, reservoir)` and `total(element)`. The carriers' elements are their shares by
+      the registry's weights, exchangeable; they sum back to the carriers at 10⁻⁹ (tested);
+    - sulphur and chlorine are in the mantle, each per unit mass of the body's rock fraction
+      (`MassFractions::rock`, its silicate, iron apart): the bulk silicate Earth's 235 ± 38 ppm S
+      and 16.2 (+13.9, −14.8) ppm Cl from Wang, Lineweaver and Ireland 2018's concordance
+      (Table 1, read: Lyubetskaya and Korenaga 2007, McDonough and Arevalo 2008, the update of
+      McDonough and Sun 1995, and Palme and O'Neill 2014), and CI chondrites' 698 ± 105 ppm Cl
+      beyond the snow line (Lodders 2010, Table 2, Orgueil, read), each times 10^(0.5 z) at its
+      rank;
+    - the sulphur test's ranges: Earth's median lies in the concordance's 197–273 ppm (it is 235
+      by construction); Mars's bulk silicate 360 ppm (Yoshizaki and McDonough 2020, Table 5,
+      read) lies inside the one-sigma band, and 240–2,000 ppm (with Gaillard et al. 2013 and Ding
+      et al. 2015, as they cite them) inside two sigma; Venus, with no measured bulk sulphur, is
+      bounded: two sigma below its median it holds over a thousand times its air's sulphur
+      (130 ppmv of SO₂, Marcq et al. 2008), and two sigma above none of the three exceeds CI's
+      5.35 wt%;
+    - the primordial noble gases, He, Ne, ³⁶Ar and ³⁸Ar, Kr and Xe, are exchangeable at CI
+      chondrites' concentrations per unit mass of rock (Lodders 2010, Table 2), with no draw. CI's
+      helium counts its radiogenic ⁴He;
+    - held at zero, and named so in the code: the mantle's water, carbon, nitrogen and noble
+      gases, the exchangeable sulphur and chlorine, and a body's own radiogenic ⁴He (P14.T55.a,
+      T24.g, T51.g). So T50.a's reservoirs do not bound the airborne inventory above methane's
+      critical point, as "P14.T50.a's reservoirs and P14.T51.a's supercritical phase bound it"
+      expects: every carrier is exchangeable until T55.a gives the mantle its own, and T51.a's
+      supercritical phase alone bounds it meanwhile;
+    - it holds the mantle's ΔIW, `mantle_delta_iw()`, and its `redox_class()`
+      (decision-composition's ruling 4).
+  - _ΔIW_ (`chem/redox.rs`): `mean_delta_iw(&RedoxInputs)` is a zone term, a water term and a
+    mass term, summed and held at FMQ + 2; `delta_iw` adds 0.5 log units times the normal at the
+    redox rank.
+    - The zone term runs linearly in log₁₀(d_form ÷ d_snow) from −6.5 at the soot line to +1.45
+      at the snow line, held beyond each. The soot line is where Hayashi's profile reaches 500 K
+      (Li et al. 2021, read), (170 ÷ 500)² of the snow line, 0.261 au about the zero-age Sun. Its
+      −6.5 is a solar gas's at 1,300 K and 10⁻⁴ bar (Grossman et al. 2008, as Sossi et al. 2025
+      cite it, read); the +1.45 puts Mars at IW.
+    - The water term is 2.0 at `ICY_WATER_FRACTION` and above, linear below.
+    - The mass term rises linearly in log mass from 0 at 0.107 M⊕ to 5.1 at 1 M⊕ and is held
+      above, the deep magma ocean's Fe³⁺ (Armstrong et al. 2019, abstract read); the 5.1 puts
+      Earth at FMQ.
+    - The table at the median: Mercury IW−5.04 (McCubbin et al. 2012's −6.3 to −2.6 and Zolotov
+      et al. 2013's −7.3 to −4.5, both); the Moon −1.55 (+0.2 to −2.5); Mars +0.01 (held to
+      IW ± 1 for "close to"); Earth FMQ − 0.04 (±2). All four tested.
+    - FMQ − IW is 3.593 at 1,400 K, computed from O'Neill 1987's QFM and O'Neill 1988's Fe–"FeO"
+      equations (both abstracts read), the one temperature inside both measured ranges, at 1 bar.
+      Extrapolated, 3.52 at 1,200 °C and 3.45 at 1,300 °C, so the plan's "about 3.5" holds.
+    - `RedoxClass` (`Reduced`, `Intermediate`, `Oxidised`) is defined here with its edges, so
+      that T51.c reads them and may refine them: `Reduced` below IW−3 (Keil 2010, as Renggli,
+      Steenstra and Saal 2024 cite it: "very reducing conditions below IW-3", read; their FeS to
+      CaS and Na₂S change in melt sulphide falls there too), `Oxidised` from FMQ − 2 = IW + 1.59,
+      the bottom of Frost and McCammon 2008's range. Mercury is `Reduced`, the Moon and Mars
+      `Intermediate`, Earth `Oxidised`.
+  - _The host's C/O and Mg/Si_ (`chem/mod.rs`, `HostAbundances::of(fe_h, &AbundanceDraws)`):
+    - log C/O is Lodders's 0.457 plus log₁₀(Q([Fe/H]) ÷ 0.537) plus 0.035 dex at the rank, with
+      Q Brewer and Fischer 2016's Fig. 2 quadratic (read), 0.460 + 0.154 [Fe/H] − 0.187 [Fe/H]².
+      Its coefficients are not printed; the lane digitised the figure's curve at 300 dpi (a pixel
+      0.0007 in C/O; the points lie within 0.0002 rms of the quadratic, whose coefficients are
+      rounded to 0.001). 0.537 is their Table 1's solar scale, Grevesse et al. 2007's
+      10^(8.39 − 8.66), which the science agent recovered from the table's rows by their eq. 1
+      (their text and Fig. 1 say 0.55). [Fe/H] is held to their sample's −1.0 to +0.6. The
+      0.035 dex is their rms about the fit, 0.057 dex, less their per-star error, 0.044 dex, in
+      quadrature. A host of solar metallicity is 0.067 dex poorer in carbon than the Sun;
+    - log Mg/Si is Lodders's 1.023 plus log₁₀(1.02 ÷ 1.047) (Brewer and Fischer's median, on
+      their scale, whose Sun is Grevesse et al.'s 1.047) minus 0.0873 [Fe/H] (Adibekyan et al.
+      2015, A&A 581, L2, §3, read: [Mg/Si] = 0.0045 − 0.0873 [Fe/H] over 589 HARPS dwarfs), with
+      [Fe/H] held to −0.6 to +0.4, plus 0.032 dex at the rank: the standard deviation of log
+      Mg/Si over Brewer and Fischer's Fig. 3 histogram as the lane digitised it, 0.035 dex, less
+      their 3.3% error. At the median rank Mg/Si is 1.12 at [Fe/H] −0.6 and 0.92 at +0.4.
+  - _The draws._ `VolatileDraws` gains `sulphur`, `chlorine` and `redox`, words 3–5, read from
+    `SULPHUR_WORD` by `Stream::seek` and `uniform_open`, the same words `Stream::word_at`
+    addresses; words 0–2 are drawn as before (tested against a fresh stream). `system.abundances`
+    (System scope, appended after `body.continents`) holds words 0 and 1, drawn in turn, by
+    `AbundanceDraws::for_system(seed, SystemId)`; `ABUNDANCE_WORDS` = 8.
+  - _The derived values' golden_ (`planetary/chem_values`, the determinism review's ask): the
+    FMQ–IW offset, each table body's mean and one-sigma ΔIW and its inventory by element and
+    reservoir, and the host's ratios over six metallicities and three ranks, pinned by their bits
+    at 22, so that a reordered sum in a later subtask of the batch shows.
+  - _Phase L's open points settled here_ (the list above): the redox edges and the FMQ–IW offset,
+    the bulk silicate Earth's S and Cl, and the stellar C/O and Mg/Si trends and scatters, each
+    with its source as above, reviewed by the science agent before the commit.
+  - _Closed sets, for the composition audit:_ `INVENTORY_ELEMENTS` (eleven; phosphorus and
+    isotopes keep words 6–7 of `planet.volatiles`) and `Reservoir` (two), beside `RedoxClass`.
+- **Deferred findings (2026-10-13 rule)**, from P14.T50.a and its science ruling:
+  - Lodders 2003's Table 8 itself is unread. LPG09's Table 1 gives Mg and Si 1,354 K, Ca 1,659 and
+    V 1,452; its block from Ca to V breaks the table's descending order, one row below the values
+    built (Ca 1,517, Yb 1,487, Ce 1,478, Sr 1,464, Be 1,452, V 1,429 from memory). Wang et al. 2019
+    quote Mg 1,330. P, Cl, Ar, K, Cr and Mn are unchecked. No rule reads these yet.
+  - The noble gases at CI chondrites' concentration give a generated Earth some 13 times the bulk
+    silicate Earth's neon, 12 times its krypton, 19 times its primordial argon and 63 times its
+    xenon (Wang et al. 2018's Table 1, from Marty 2012 and Halliday 2013). Accepted by the science
+    agent: the plan permits a chondritic ratio, and calibrating on the BSE would fit Earth alone.
+  - CI concentrations are per unit of CI's whole mass, about a fifth of which is water and
+    carbon (Lodders 2010, Table 2); per unit of its rock, chlorine and the noble gases are about
+    1.27 times higher.
+  - Sulphur beyond the snow line keeps the bulk silicate Earth's 235 ppm, as the plan's text says
+    ("main", 2026-10-14: recorded and deferred). The gap, for P14.T56.d and P14.T55.a: CI
+    chondrites hold 5.35 wt% (Lodders 2010, Table 2), and FeS condenses near 700 K (Lodders 2003's
+    664 K for S), well inside the snow line, so the solids beyond it carry chondritic sulphur
+    unless a core takes it. It matters for Io-like volcanism and sulphur palettes; T56.d or T55.a
+    must rule it before it bites.
+  - On Lodders's scale the hosts' Mg/Si sits near 1 at solar metallicity (0.997 at the median,
+    52% below 1), so the share below 1 rests on the solar scale (Lodders's ±15%) more than on the
+    surveys: Adibekyan's zero point would give 34%.
+  - Thick-disc hosts lie above Adibekyan's Mg/Si trend; an [α/Fe] term would change `of`'s
+    signature and belongs with plan 06's stellar ratios. Part of Brewer and Fischer's Mg/Si width,
+    about 0.017 dex, is the trend itself; removing it would give about 0.027.
+  - C/O below [Fe/H] −0.7 rests on about three of Brewer and Fischer's stars: the quadratic gives
+    0.12 at −1.0 against the one star there at 0.22. Holding the fit at about −0.85 is the
+    science agent's suggestion.
+  - The C/O scatter is a symmetric log-normal, where theirs has a long low tail and a sharp high
+    edge. At the 99.9th percentile on the plateau the generated C/O is 0.54, against their
+    largest, 0.66 on their scale, 0.56 on Lodders's.
+  - For T51.c: thirds of the `Intermediate` band put LL at IW+0.06 to +1.59, but the ordinary
+    chondrites carry Fe–Ni metal and lie below IW; T51.c should cite H, L and LL edges within IW−3
+    to IW.
+  - The FMQ–IW offset is at 1 bar and 1,400 K: extrapolated to 1,673 K it is 3.40, and it grows
+    with pressure (metal saturation near FMQ−5 at about 8 GPa, Frost and McCammon 2008). The
+    `Oxidised` edge would move by 0.2 or less.
+  - The soot line is the passive disc's at the zero-age luminosity, inside Mercury's orbit about
+    the Sun, while Li et al. put Earth's building blocks inside the early, accreting disc's. The
+    zone term uses it only as its reduced end.
+  - The water term (2.0 at 10% water) has no calibrator in the table. The magma-ocean term is
+    held at Earth's above 1 M⊕. A body formed beyond the snow line reaches the ceiling, FMQ + 2,
+    from 0.66 M⊕ dry and from 0.27 M⊕ with 10% water or more.
+  - Chlorine is all in the mantle until outgassing and the oceans' leaching move it, though about
+    40% of Earth's is in its oceans (2.6 × 10¹⁹ kg against the concordance's 6.5 × 10¹⁹). The
+    concordance's chlorine is uncertain by nearly 100%.
+  - The table's Mars holds 235 ppm S at the median against its bulk silicate's 360 ± 33%, and
+    16.2 ppm Cl against 28 ± 10; both inside one sigma.

@@ -44,6 +44,9 @@
 //! - [`rings`], [`belts`] and [`halo`]: a giant's rings (P14.T20), a host's asteroid and
 //!   Kuiper-like belts with their fading debris and largest members (P14.T21.a–c), and the
 //!   cometary halo (P14.T21.d), each from plain arguments until P14.T22.a and T30.a call them.
+//! - [`chem`]: element chemistry on the snapshot path (Phase L, P14.T50.a): a body's element
+//!   inventory by reservoir, its mantle's ΔIW and redox class, and its host's C/O and Mg/Si, all
+//!   pure until P14.T54.a wires them onto the record.
 //! - [`surface`]: rendering plan R09's coarse pass, a body's coarse field from its surface seed
 //!   and plan 14's global figures; so far its frame (R09.T10): the inputs, the cell graph, the
 //!   quantiser and the steps as no-ops.
@@ -95,12 +98,14 @@
 //! | 02, 06 | \[α/Fe\] (P14.T1.a) | no plan draws one: [`context::alpha_fe`](fn@context::alpha_fe), a closed form of [`Composition::fe_h`](crate::stellar::Composition::fe_h) and the record's [`galaxy::Population`](crate::galaxy::Population) ([`SystemRecord::population`](crate::galaxy::placement::SystemRecord::population)), held on [`SystemContext::alpha_fe`] |
 //! | 06 | an X-ray and ultraviolet history (P14.T1.a) | no plan has one: [`context::XuvHistory`], a closed form of a star's initial mass and its zero-age luminosity ([`SystemContext::xuv_history`]); plan 06's [`ActivityLevel`](crate::stellar::rotation::ActivityLevel) is not read, since a history set from the level at the time would not be monotone in time |
 //! | 06 | a star's largest past luminosity (design note 11) | [`StarModel::max_luminosity_until`](crate::stellar::system::StarModel::max_luminosity_until), which each host's [`derive::HostLight::with_history`] carries to the atmosphere (P14.T13) |
-//! | 01 | a planet's volatile inventory (P14.T13.a) | [`rng::tags::PLANET_VOLATILES`](crate::rng::tags::PLANET_VOLATILES) (`Body`), opened with `ObjectKey::from(BodyId)`, words 0–2 ([`derive::atmosphere::VolatileDraws`]) |
+//! | 01 | a planet's volatile inventory (P14.T13.a) | [`rng::tags::PLANET_VOLATILES`](crate::rng::tags::PLANET_VOLATILES) (`Body`), opened with `ObjectKey::from(BodyId)`, words 0–5, 3–5 read by number from [`derive::atmosphere::SULPHUR_WORD`] (P14.T50.a; [`derive::atmosphere::VolatileDraws`]) |
+//! | 01 | a host's C/O and Mg/Si (P14.T50.a) | [`rng::tags::SYSTEM_ABUNDANCES`](crate::rng::tags::SYSTEM_ABUNDANCES) (`System`), opened with `ObjectKey::from(SystemId)`, words 0–1 ([`chem::AbundanceDraws`]) |
 //! | 14 | a young magma ocean (design note 12) | [`hosts::young::Formation::molten_until`], which [`derive::PlacedBody::with_magma_ocean_until`] carries to the atmosphere |
 
 pub mod architecture;
 pub mod belts;
 pub mod body_frame;
+pub mod chem;
 pub mod context;
 pub mod derive;
 pub mod disc;
