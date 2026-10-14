@@ -66,6 +66,18 @@ pub const MAX_ATTEMPTS: u32 = 4_096;
 /// The attempts of the velocity's escape cut, as plan 08's.
 const VELOCITY_ATTEMPTS: u32 = 16;
 
+/// The largest internal speed [`member_velocity`] can draw, in units of its σ, rounded up:
+/// 8.58 √2 = 12.134 (P09.T23.b).
+///
+/// The draw is one Box–Muller pair and the first normal of a second pair, each times σ. A pair's
+/// norm is its radius `√(−2 ln u)`, at most `√(106 ln 2)` = 8.5717 at the smallest uniform, 2⁻⁵³
+/// ([`Stream::standard_normal_pair`]), and the third normal is at most that too, so the norm is at
+/// most `√(212 ln 2)` = 12.1222 σ, which the draw can reach. Rounded up to 8.58 √2 as
+/// `galaxy::params::draws` rounds its cap, which covers the rounding of the logarithm and the norm.
+/// An uncut tail member's internal speed is bounded by it; a core member's is cut at the escape
+/// speed first.
+pub(crate) const INTERNAL_SPEED_SIGMAS: f64 = 8.58 * std::f64::consts::SQRT_2;
+
 /// A member: its record and what a member carries beyond one (Design note 20).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MemberRecord {
