@@ -449,10 +449,11 @@ SectionDto<DetailSeedHex>` and the client's `BodyHooks.detailSeed`. As built, th
   `cube_golden.rs`'s `native_only::every_golden_file_carries_the_test_planet_version` (a flat
   `read_dir` of `tests/golden/`) and by `golden_diff.py`'s `TEST_PLANET_PREFIX`, which matches the
   whole directory; T9 narrows both. The surface crate's one bench is `benches/test_planet.rs`
-  (Criterion, off the browser target). The client's workers, `HeightWorkerPool.postField` and R04's
-  `wasm/` loader are R10's to use, not this plan's; the wasm module's exports serve the test planet
-  only, and the export that copies a field into the module, which R05's T10.b record assigns to this
-  plan, is R10's, with its client (R10 Design note 16).
+  (Criterion, off the browser target). The client's workers, `HeightWorkerPool`'s per-body calls
+  (`fieldInit`, `fieldChunk`, `fieldRelease`; R10.T7) and R04's `wasm/` loader are R10's to use, not
+  this plan's; the wasm module's exports serve the test planet only, and the export that copies a
+  field into the module, which R05's T10.b record assigns to this plan, is R10's, with its client
+  (R10 Design note 16).
 - **R03.** The server's `pub(crate) mod bulk`: `Answer { body: ResponseBody, bulk:
 Option<BulkPayload> }`, `BulkPayload::new(Bytes) -> Result<_, BuildBulkPayloadError>` and
   `manifest()`; `BulkManifestDto { chunks, bytes }`; `MAX_BINARY_FRAME_BYTES` (262,144) and
@@ -3762,7 +3763,7 @@ re-blessing this plan's payload and coarse goldens in that commit.
     its `Bulk` entry.
   - _For the docs lane._ The task's _Tests_ list does not carry §10.1's `FELDSPATHIC` assertion
     against Kiefer et al.'s 2,840–2,910 kg m⁻³, which §10.1 says T10.d's _Tests_ gain; it is
-    built, and the line waits for the docs queue.
+    built, and the line waits for the docs queue. Applied 2026-10-13 (docs-batch-14, `31824f61`).
 - **Drainage semantics (ruled 2026-10-10, science-r09-drainage.md §1).** T6.a found that a k_s
   stored on Hergarten's runoff-weighted area and read with Hack's geometric area makes tributaries
   2.8 times too gentle at 0.1 m a⁻¹, and trunks' Hack lengths 4 times too short.
