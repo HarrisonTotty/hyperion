@@ -353,10 +353,12 @@ alone and never on the sim, by R04's entry in `.claude/rules/rust-dev.md`):
 
 Names are the owning plans' as they stand on disk; the owner is authoritative, and where a name has
 changed by the time this plan runs only the call sites here change. Re-validated at `c6d77cac`
-against R05, R07, R08 and R09 as built (Risks, "Re-validated at `c6d77cac`"). What R09.T8 and
-T19.b provide is not built yet: those names are R09's Provides, **provisional until R09.T8/T19.b
-land**, and each is marked so below. R09.T9 has landed (`070da8ee`), and its goldens pin R09's
-heights and closed forms on all three targets at header 21 (below).
+against R05, R07, R08 and R09 as built (Risks, "Re-validated at `c6d77cac`"). R09.T8 has landed
+(`c280f604`): `height_at`, `bake_patch`, the level bounds and the closed forms are built, under the
+names R09's "Deviations in T8, as built" records. What T19.b provides is not built yet: those
+names are R09's Provides, **provisional until R09.T19.b lands**, and each is marked so below.
+R09.T9 has landed (`070da8ee`), and its goldens pin R09's heights and closed forms on all three
+targets at header 21 (below).
 
 - **R01:** the engine adapter, its WGSL-only material path, its adapter feature report
   (`GpuCapabilities` in `view/engine/platform.ts`, with `depthClipControl`, commented as for R10's
@@ -717,7 +719,8 @@ heights and closed forms on all three targets at header 21 (below).
 7. **Slope and slant range state their basis** (researched 2026-09-29). The slope is the
    adirectional slope, the gradient magnitude from central differences over a baseline b along the
    local east and north axes; a two-point profile slope is smaller by about √2 on isotropic terrain
-   (Kreslavsky and Head 2000), and the adirectional one is what tilts a lander. Each unresolved band
+   (Shepard et al. 2001, as Beyer, McEwen and Kirk 2003, JGR 108, 8085, ¶25, cite it; corrected
+   2026-10-14), and the adirectional one is what tilts a lander. Each unresolved band
    of variance σ_k² at wavenumber k adds per axis v = Σ 2 σ_k² (1 − J₀(k b)) ÷ b², the structure
    function at lag b (Shepard et al. 2001), which tends to 2σ_k² ÷ b² for bands much finer than b
    and to the band's gradient variance for bands much coarser; craters and channels take R09's
@@ -727,9 +730,12 @@ heights and closed forms on all three targets at header 21 (below).
    the RMS slope √(|g₀|² + 2v) with the Rice standard deviation as its uncertainty; quoting |g₀|
    alone would understate slopes from orbit, the unsafe direction. The baseline is shown with the
    value: 2 m by default, the band limit, and the scale a lander's tilt is judged over
-   (signoff-10), with 5 m and 100 m selectable, the ladder InSight's site selection used
-   (lander-stability slopes at 2–5 m from HiRISE DEMs against a 15° limit, and 300 m scale from
-   MOLA: Golombek et al. 2014, LPSC 45, 1499, verified).
+   (signoff-10), with 5 m and 100 m selectable. The first two are the lander-stability baselines of
+   InSight's site selection, slopes at 2–5 m from HiRISE DEMs against a 15° limit (Golombek et al.
+   2014, LPSC 45, 1499, verified), and the third stands near the same limit's 84 m scale for the
+   landing radar (Golombek et al. 2017, Space Sci. Rev. 211, 5, §2.7); the 2014 abstract also reads
+   slopes at about 300 m from MOLA (corrected 2026-10-14 to `SLOPE_BASELINES`' citations in
+   `reading.rs`; "Deviations in T5, as built").
    The slant range to the ground on the view's line of sight is a march of the ray against the
    surface at the survey's resolution. Linearising the hit of p(t) = o + t d on z = h + δ gives dt ÷
    dδ = cos θ_s ÷ sin γ_s, with θ_s the resolved surface's slope and γ_s the grazing angle to the
@@ -1221,8 +1227,8 @@ asserts finiteness before it returns (the brainstorm's NaN hazard). The goldens,
 `synthetic_worlds()`, are asserted on native and both wasm targets. No bump: the ground reads
 heights that R09's goldens already pin (R09.T9's, landed in `070da8ee`, on all three targets at
 header 21). Acceptance:
-`cargo test -p hyperion-surface ground`,
-`cargo test -p hyperion-surface --features testing --test ground_golden`, and
+`cargo test -p hyperion-surface --lib ground`, which runs the goldens too, an in-crate `cfg(test)`
+module (`src/ground/golden.rs`; corrected 2026-10-14; "Deviations in T3, as built"), and
 `cargo test -p hyperion-sim --features testing --test surface_ground_worlds`.
 
 ### R10.T4 The level bound on generated worlds
