@@ -1089,14 +1089,15 @@ const SIDEREAL_DAYS: [(&str, f64); 8] = [
     ("Ceres", 9.074_17 / 24.0),
 ];
 
-fn sidereal_period(name: &str) -> Seconds {
+pub(in crate::planetary::hooks::figures) fn sidereal_period(name: &str) -> Seconds {
     let &(_, days) = SIDEREAL_DAYS.iter().find(|(n, _)| *n == name).unwrap();
     Seconds::new(days * SECONDS_PER_DAY)
 }
 
 /// The table's bodies with their figures about the present Sun, each turning in its own day,
 /// with its crater inputs ([`table_craters`]).
-fn figures_table() -> Vec<(&'static str, DerivedBody, GlobalFigures)> {
+pub(in crate::planetary::hooks::figures) fn figures_table()
+-> Vec<(&'static str, DerivedBody, GlobalFigures)> {
     crate::planetary::derive::solar::table_under(
         crate::planetary::derive::atmosphere::Speciation::CarbonAndOxygen,
     )
@@ -1110,7 +1111,9 @@ fn figures_table() -> Vec<(&'static str, DerivedBody, GlobalFigures)> {
 }
 
 /// The figures `inputs` describe, which are in range.
-fn figures_from(inputs: &FiguresInputs<'_>) -> Option<GlobalFigures> {
+pub(in crate::planetary::hooks::figures) fn figures_from(
+    inputs: &FiguresInputs<'_>,
+) -> Option<GlobalFigures> {
     GlobalFigures::derive(inputs).expect("the inputs are in range")
 }
 
@@ -1159,7 +1162,10 @@ fn table_orbit(name: &str) -> ImpactorOrbit {
 /// The crater inputs of the table's body `name`, derived as `body`: its [`table_orbit`] under the
 /// Solar System's sources, its bulk density, the median magma ocean's end, and for the Moon its
 /// giant impact at the system's birth.
-fn table_craters(name: &str, body: &DerivedBody) -> CraterInputs<'static> {
+pub(in crate::planetary::hooks::figures) fn table_craters(
+    name: &str,
+    body: &DerivedBody,
+) -> CraterInputs<'static> {
     CraterInputs {
         orbit: table_orbit(name),
         density: body.density(),
@@ -1169,21 +1175,22 @@ fn table_craters(name: &str, body: &DerivedBody) -> CraterInputs<'static> {
     }
 }
 
-fn figures_of<'a>(
+pub(in crate::planetary::hooks::figures) fn figures_of<'a>(
     table: &'a [(&'static str, DerivedBody, GlobalFigures)],
     name: &str,
 ) -> &'a GlobalFigures {
     &table.iter().find(|(n, ..)| *n == name).unwrap().2
 }
 
-fn body_of<'a>(
+pub(in crate::planetary::hooks::figures) fn body_of<'a>(
     table: &'a [(&'static str, DerivedBody, GlobalFigures)],
     name: &str,
 ) -> &'a DerivedBody {
     &table.iter().find(|(n, ..)| *n == name).unwrap().1
 }
 
-/// The figures' inputs of the derived body `body` about the present Sun, turning in `name`'s day.
+/// The figures' inputs of the derived body `body` about the present Sun, turning in `name`'s day,
+/// with Earth's measured continental fraction, which only the table's mobile lid, Earth's, reads.
 pub(super) fn inputs_of<'a>(body: &'a DerivedBody, name: &str) -> FiguresInputs<'a> {
     FiguresInputs {
         atmosphere: body.atmosphere(),
@@ -1199,13 +1206,19 @@ pub(super) fn inputs_of<'a>(body: &'a DerivedBody, name: &str) -> FiguresInputs<
         tidal_heat_flow: WattsPerSquareMetre::new(0.0),
         subsurface_ocean: Subsurface::NotComputed,
         craters: table_craters(name, body),
+        continents: TABLE_CONTINENTS,
     }
 }
+
+/// The continents the table's bodies take: Earth's measured fraction, which only a mobile lid
+/// reads, and of the table only Earth's lid moves.
+pub(in crate::planetary::hooks::figures) const TABLE_CONTINENTS: Continents =
+    Continents::Given(relief::EARTH_CONTINENTAL_FRACTION);
 
 /// The Moon as the generator makes it, a giant-impact moon of a rocky planet: its measured mass
 /// and radius (NASA's fact sheet), its bulk rock alone (`moon_bulk_of`), under the table's airless
 /// sky, locked to its planet's orbit of 27.32 d.
-fn the_giant_impact_moon() -> GlobalFigures {
+pub(in crate::planetary::hooks::figures) fn the_giant_impact_moon() -> GlobalFigures {
     let table = figures_table();
     let moon = body_of(&table, "Moon");
     let r = 1.737_4e6;
@@ -1556,7 +1569,7 @@ fn a_gas_envelope_has_no_figures_and_a_strong_field() {
 /// A moon at its measured mass and mean elements about the table's Jupiter, derived as P14.T17's
 /// regular moons are: mass (kg), semi-major axis (km) and eccentricity (JPL's satellite mean
 /// elements and physical parameters, read 2026-10-12 for P14.T48.f).
-fn jovian(kg: f64, a_km: f64, e: f64) -> DerivedMoon {
+pub(in crate::planetary::hooks::figures) fn jovian(kg: f64, a_km: f64, e: f64) -> DerivedMoon {
     use crate::orbit::{Eccentricity, KeplerElements, Orientation};
     use crate::planetary::derive::BodyHosts;
     use crate::planetary::derive::solar::{self, PLANETS};
@@ -1613,13 +1626,17 @@ fn jovian(kg: f64, a_km: f64, e: f64) -> DerivedMoon {
 }
 
 /// Europa at its measured mass and elements: 4.7998 × 10²² kg at 671,034 km, e = 0.0094.
-fn europa() -> DerivedMoon {
+pub(in crate::planetary::hooks::figures) fn europa() -> DerivedMoon {
     jovian(4.7998e22, 671_034.0, 0.0094)
 }
 
 /// The figures of the derived regular moon `moon` of Jupiter at `a_km`, its tide and ocean its
 /// derivation's, locked to its orbit of `days`.
-fn moon_figures(moon: &DerivedMoon, a_km: f64, days: f64) -> GlobalFigures {
+pub(in crate::planetary::hooks::figures) fn moon_figures(
+    moon: &DerivedMoon,
+    a_km: f64,
+    days: f64,
+) -> GlobalFigures {
     let formed = MoonBirth::Regular {
         ice_fraction: moon.ice_fraction(),
     }
@@ -1659,6 +1676,7 @@ fn moon_figures(moon: &DerivedMoon, a_km: f64, days: f64) -> GlobalFigures {
             molten_until: None,
             last_giant_impact: None,
         },
+        continents: TABLE_CONTINENTS,
     })
     .unwrap()
 }
@@ -1686,7 +1704,8 @@ const EUROPA_MEASURED: (f64, f64, f64, f64) = (1.560_8e6, 3_013.0, 0.08, 102.0);
 
 /// Europa's measured bulk with its subsurface ocean under the tide P14.T17.b's rule raises at its
 /// measured elements about the table's Jupiter, at its own radius.
-fn measured_europa() -> (GlobalFigures, Subsurface, WattsPerSquareMetre) {
+pub(in crate::planetary::hooks::figures) fn measured_europa()
+-> (GlobalFigures, Subsurface, WattsPerSquareMetre) {
     let derived = europa();
     let radius = EUROPA_MEASURED.0;
     let tide = WattsPerSquareMetre::new(
@@ -1733,6 +1752,7 @@ fn measured_europa_under(
             molten_until: None,
             last_giant_impact: None,
         },
+        continents: TABLE_CONTINENTS,
     })
     .unwrap();
     (figures, ocean, tide)
@@ -2553,6 +2573,7 @@ fn the_table_s_figures_are_pinned() {
             &format!("{name}_crater_density"),
             figures.crater_density().value(),
         );
+        pin_relief(w, name, figures);
     };
     for (name, _, figures) in &figures_table() {
         pin(&mut w, &name.to_lowercase(), figures);
@@ -2586,5 +2607,68 @@ fn the_table_s_figures_are_pinned() {
             history.from_colder(),
         );
     }
+    // P14.T24.b's second stage: the table's oceans, ices and clouds under its own conditions.
+    for (name, _, figures, _) in &super::cover::tests::table_surfaces() {
+        pin_cover(&mut w, &name.to_lowercase(), figures);
+    }
     golden!("planetary/global_figures", w.as_str());
+}
+
+/// Pins the first stage's relief and water of the figures `figures` under `name` (P14.T48.a,
+/// P14.T24.b): the volcanism level, the continental fraction, `σ_h` and its shares, the surface
+/// water, the potential ocean and its weight θ.
+pub(crate) fn pin_relief(
+    w: &mut hyperion_testkit::golden::GoldenWriter,
+    name: &str,
+    figures: &GlobalFigures,
+) {
+    let relief = figures.relief();
+    w.f64(&format!("{name}_volcanism"), figures.volcanism());
+    w.f64(
+        &format!("{name}_continental_fraction"),
+        figures.continental_fraction(),
+    );
+    w.f64(&format!("{name}_sigma_h"), figures.sigma_h().value());
+    w.f64(
+        &format!("{name}_relief_structural"),
+        relief.structural().value(),
+    );
+    w.f64(&format!("{name}_relief_basin"), relief.basin().value());
+    w.f64(
+        &format!("{name}_relief_constructional"),
+        relief.constructional().value(),
+    );
+    w.f64(
+        &format!("{name}_surface_water"),
+        figures.surface_water().value(),
+    );
+    w.f64(
+        &format!("{name}_potential_ocean"),
+        figures.potential_ocean(),
+    );
+    w.f64(
+        &format!("{name}_ocean_weight"),
+        figures.ocean_weight().get(),
+    );
+}
+
+/// Pins the second stage's cover of the figures `figures` under `name` (P14.T24.b): each surface
+/// liquid and ice by substance, and the cloud.
+pub(crate) fn pin_cover(
+    w: &mut hyperion_testkit::golden::GoldenWriter,
+    name: &str,
+    figures: &GlobalFigures,
+) {
+    for (kind, list) in [
+        ("liquid", figures.surface_liquids()),
+        ("ice", figures.surface_ices()),
+    ] {
+        for &(id, f) in list {
+            w.f64(
+                &format!("{name}_surface_{kind}_{}", id.substance().key().as_str()),
+                f,
+            );
+        }
+    }
+    w.f64(&format!("{name}_cloud_fraction"), figures.cloud_fraction());
 }

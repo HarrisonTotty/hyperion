@@ -8,8 +8,8 @@
 //!   ocean, from its [`interior`] (science-p14-t24b-laws Part 1); and its surface age and crater
 //!   contract (P14.T48.c), from its [`surface_age`] and its impactors (Part 2); and its volatile
 //!   history (P14.T48.b), its wet epoch and whether it came from a colder state, from its
-//!   [`wet_epoch`] law (Part 3). Its relief and continents (P14.T48.a), its oceans, ices and clouds
-//!   and its volcanism level join it with their tasks in the 21 → 22 batch.
+//!   [`wet_epoch`] law (Part 3); and its volcanism level, continents and relief (P14.T48.a), from
+//!   its [`relief`], and its surface water, oceans, ices and cloud, from its [`cover`] (Part 4).
 //! - [`impactors`] (P14.T48.f): what strikes a body and what it strikes, and how often over the
 //!   Moon ([`Impactors::rate`]), which P14.T48.c's crater contract carries beside the crater
 //!   density ([`CraterParams`](hyperion_surface::craters::CraterParams)).
@@ -26,10 +26,18 @@
 //! ([`Subsurface`]); the surface age is [`surface_age`]'s, at that heat flow, and the crater
 //! contract the lunar chronology at it times the impactors' rate.
 //!
-//! The volatile history is a second stage, [`GlobalFigures::with_volatile_history`], since it reads
-//! the surface conditions' liquid-water flag, which reads the first stage's heat flow: it is
-//! [`VolatileHistory::derive`] of the hosts' window over the body's past and of its outgassing
-//! then ([`past_outgassing`]).
+//! The first stage then gives the volcanism level V, by [`relief::volcanism_level`] over the
+//! surface age at the heat flow then; the continental fraction, by the regime and P14.T48.b's
+//! start condition ([`window_entry`]), which the caller reads into [`FiguresInputs::continents`];
+//! `σ_h` and its hypsometry ([`relief::Relief`]); and the surface water and its potential ocean,
+//! with the ocean weight θ the surface conditions read ([`cover`]).
+//!
+//! The second stage, [`GlobalFigures::with_surface`], reads the surface conditions, which read the
+//! first stage's heat flow and θ: the published ocean (the liquid-water flag's, or a `Snowball`'s
+//! under its ice), the volatile history ([`VolatileHistory::derive`] of the hosts' window over the
+//! body's past and of its outgassing then, [`past_outgassing`]), the ice (the zonal profile's cold
+//! area) and the cloud. Each step reads only what is above it, science-p14-t24b-laws §4.6's order,
+//! with no loop.
 //!
 //! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes them with
 //! the surface conditions, under the same hold until the batch's bump, and passes their heat
@@ -122,6 +130,7 @@ use crate::planetary::belts::{
 };
 use crate::planetary::derive::atmosphere::{Atmosphere, Gas, SurfaceState};
 use crate::planetary::derive::{MassFractions, PlanetClass, SnowLineSide};
+use crate::planetary::hooks::surface::{OceanWeight, SurfaceConditions};
 use crate::planetary::moons::CaptureKind;
 use crate::planetary::moons::regular::{ICE_MELTING_POINT, ocean_layers};
 use crate::planetary::record::BeltKind;
@@ -133,7 +142,9 @@ use crate::units::{
     Radians, Seconds, WattsPerSquareMetre, Years,
 };
 
+pub mod cover;
 pub mod interior;
+pub mod relief;
 pub mod surface_age;
 pub mod wet_epoch;
 
@@ -141,10 +152,14 @@ pub use interior::{
     Interior, MagneticField, RadiogenicIsotope, TectonicRegime, conductive_lag,
     convecting_heat_flow, magnetic_field, outgassing, radiogenic_heat_flow, tectonic_regime,
 };
-pub use wet_epoch::{VolatileHistory, VolatileHistoryInputs, WetEpoch, WindowAt};
+pub use relief::{Continents, Hypsometry, Relief};
+pub use wet_epoch::{
+    VolatileHistory, VolatileHistoryInputs, WetEpoch, WindowAt, WindowEntry, WindowEntryInputs,
+    window_entry,
+};
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// The mass from which a planet is one of the impactors' giants, whose scattered comets strike it
 /// and every body at or beyond the innermost one: [`BELT_GIANT_MASS`], 10 M⊕, the giants the
@@ -1734,7 +1749,8 @@ impl Subsurface {
 /// What [`GlobalFigures::derive`] reads of a body at a time, as plain values: its mass, its bulk
 /// section's radius, gravity, class and mass fractions, its atmosphere and its water, its host's
 /// \[Fe/H\], its age, its rotation, the tidal heat raised in it, its subsurface ocean as its rule
-/// computes it, and what its crater contract reads ([`CraterInputs`]).
+/// computes it, what its crater contract reads ([`CraterInputs`]) and what sets its continents
+/// ([`Continents`]).
 ///
 /// The fields are public: [`GlobalFigures::derive`] refuses, for a body with a surface, an age
 /// that is not finite and non-negative, and the radius, gravity, air temperature, water and crater
@@ -1776,6 +1792,10 @@ pub struct FiguresInputs<'a> {
     pub subsurface_ocean: Subsurface,
     /// What its crater contract reads beyond these.
     pub craters: CraterInputs<'a>,
+    /// What sets its continental fraction before its regime gates it (P14.T48.a): its drawn
+    /// asymptote ([`relief::continental_asymptote`]) with whether it entered P14.T48.b's window
+    /// holding water ([`window_entry`]), or a fraction given.
+    pub continents: Continents,
 }
 
 /// What a body's surface age and crater contract read beyond its bulk section, its air and its
@@ -1834,12 +1854,14 @@ impl Error for DeriveFiguresError {
 /// Julian years in a thousand million, the chronology's unit.
 const YEARS_PER_GIGAYEAR: f64 = 1e9;
 
-/// A body's global figures at a time (P14.T24.b so far): its heat flow, its interior, its
-/// tectonic regime, its magnetic field, its present outgassing, its subsurface ocean, its surface
-/// age and its crater contract (P14.T48.c) with its impactors (P14.T48.f), and its volatile
-/// history (P14.T48.b): its wet epoch and whether it came from a colder state.
+/// A body's global figures at a time (P14.T24.b): its heat flow, its interior, its tectonic
+/// regime, its magnetic field, its present outgassing, its subsurface ocean, its surface age and
+/// its crater contract (P14.T48.c) with its impactors (P14.T48.f), its volatile history
+/// (P14.T48.b): its wet epoch and whether it came from a colder state, its volcanism level,
+/// continents and relief (P14.T48.a), and its surface water, oceans, ices and cloud.
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlobalFigures {
+    state: SurfaceState,
     radiogenic_heat_flow: WattsPerSquareMetre,
     non_tidal_heat_flow: WattsPerSquareMetre,
     heat_flow: WattsPerSquareMetre,
@@ -1853,6 +1875,14 @@ pub struct GlobalFigures {
     craters: CraterParams,
     wet_epoch: Option<WetEpoch>,
     from_colder: bool,
+    volcanism: f64,
+    relief: Relief,
+    surface_water: KilogramsPerSquareMetre,
+    potential_ocean: f64,
+    ocean_weight: OceanWeight,
+    surface_liquids: Vec<(SubstanceId, f64)>,
+    surface_ices: Vec<(SubstanceId, f64)>,
+    cloud_fraction: f64,
 }
 
 impl GlobalFigures {
@@ -1894,9 +1924,9 @@ impl GlobalFigures {
     /// use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
     /// use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
     /// use hyperion_sim::planetary::hooks::figures::{
-    ///     CraterInputs, FiguresInputs, GlobalFigures, HostOrbit, HostOrbiter, ImpactorOrbit,
-    ///     ImpactorSources, MagneticField, SOLAR_MAIN_BELT_MASS, SourceAnnulus, SourceBelt,
-    ///     Subsurface, TectonicRegime,
+    ///     Continents, CraterInputs, FiguresInputs, GlobalFigures, HostOrbit, HostOrbiter,
+    ///     ImpactorOrbit, ImpactorSources, MagneticField, SOLAR_MAIN_BELT_MASS, SourceAnnulus,
+    ///     SourceBelt, Subsurface, TectonicRegime, WindowEntry,
     /// };
     /// use hyperion_sim::planetary::record::BeltKind;
     /// use hyperion_sim::stellar::Composition;
@@ -1960,6 +1990,7 @@ impl GlobalFigures {
     ///         molten_until: Some(Years::new(3.2e7)),
     ///         last_giant_impact: Some(Years::ZERO),
     ///     },
+    ///     continents: Continents::Grown { asymptote: 0.416, window: WindowEntry::Entered },
     /// })?
     /// .expect("an Earth has a surface");
     /// assert_eq!(figures.tectonic_regime(), TectonicRegime::MobileLid);
@@ -1968,6 +1999,12 @@ impl GlobalFigures {
     /// assert!((figures.outgassing() - 1.0).abs() < 0.1);
     /// assert!((figures.surface_age().value() / 64.2e6 - 1.0).abs() < 0.05);
     /// assert!(figures.crater_density().value() < 1e-4);
+    /// // Its continents hold 0.405 of its surface, its relief is about Earth2014's 2.51 km, and
+    /// // its water would fill some 73% of it, which weighs fully in its contrasts.
+    /// assert!((figures.continental_fraction() - 0.405).abs() < 0.002);
+    /// assert!((figures.sigma_h().value() / 2_510.0 - 1.0).abs() < 0.05);
+    /// assert!((0.70..0.76).contains(&figures.potential_ocean()));
+    /// assert!((figures.ocean_weight().get() - 1.0).abs() < 1e-12);
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn derive(inputs: &FiguresInputs<'_>) -> Result<Option<Self>, DeriveFiguresError> {
@@ -1996,35 +2033,227 @@ impl GlobalFigures {
         });
         let (surface_age, impactors, craters) =
             crater_contract(inputs, heat.water, heat.heat_flow)?;
+        let outgassing = outgassing(heat.heat_flow);
+        let crust = impactors.crust();
+        let surface_temperature = air.surface_temperature();
+        // Step 3 (science-p14-t24b-laws §4.6): the volcanism level over the surface's life, at the
+        // heat flow then under today's state.
+        let volcanism = relief::volcanism_level(&relief::VolcanismInputs {
+            crust,
+            surface_age,
+            age,
+            surface_temperature,
+            surface_gravity: inputs.surface_gravity,
+            radius: inputs.radius,
+            iron_share: heat.iron_share,
+            heat_flow_at: |t: Years| {
+                heat_at(inputs, (interior, rock_core), t, air.state()).heat_flow
+            },
+        });
+        // Steps 4 and 5: the continents, by the regime and T48.b's start condition, and the relief.
+        let relief = Relief::of(&relief::ReliefInputs {
+            regime: heat.regime,
+            continental_fraction: relief::continental_fraction(inputs.continents, heat.regime, age),
+            crust,
+            surface_gravity: inputs.surface_gravity,
+            radius: inputs.radius,
+            crater_density: craters.n_1km(),
+            volcanism,
+            lithosphere: relief::lithosphere_thickness(crust, surface_temperature, heat.heat_flow),
+        });
+        // Step 6: the surface water, its potential ocean, and the weight θ the conditions read.
+        let surface_water = cover::surface_water(
+            air,
+            inputs.inventory_water,
+            inputs.radius,
+            inputs.surface_gravity,
+            outgassing,
+        );
+        let potential_ocean = cover::potential_ocean(relief.hypsometry(), surface_water);
         Ok(Some(Self {
+            state: air.state(),
             radiogenic_heat_flow: heat.radiogenic,
             non_tidal_heat_flow: heat.non_tidal,
             heat_flow: heat.heat_flow,
             interior,
             tectonic_regime: heat.regime,
             magnetic_field: field,
-            outgassing: outgassing(heat.heat_flow),
+            outgassing,
             subsurface_ocean: inputs.subsurface_ocean,
             surface_age,
             impactors,
             craters,
             wet_epoch: None,
             from_colder: false,
+            volcanism,
+            relief,
+            surface_water,
+            potential_ocean,
+            ocean_weight: OceanWeight::of_potential_ocean(potential_ocean),
+            surface_liquids: Vec::new(),
+            surface_ices: Vec::new(),
+            cloud_fraction: 0.0,
         }))
     }
 
-    /// The figures with their volatile history `history` (P14.T48.b), the second stage, which
-    /// reads the surface conditions' liquid-water flag ([`VolatileHistory::derive`]).
+    /// The figures with what reads the surface conditions `conditions`, P14.T24.a's at this
+    /// stage's heat flow and ocean weight θ, and the volatile history `history` (P14.T48.b) of
+    /// their liquid-water flag ([`VolatileHistory::derive`]): the second stage, steps 8–12 of
+    /// science-p14-t24b-laws §4.6, P14.T48.d's climate regime (step 10) yet to come.
     ///
-    /// [`derive`](Self::derive) alone gives the first stage, with no wet epoch and
-    /// [`from_colder`](Self::from_colder) false: the figures
+    /// - **The published ocean** `f_o` ([`ocean_fraction`](Self::ocean_fraction)): the potential
+    ///   ocean where the body holds liquid now, by the conditions' liquid-water flag or a
+    ///   `Snowball`'s ocean under its ice ([`cover::under_ice_ocean`]), and zero otherwise;
+    ///   [`surface_liquids`](Self::surface_liquids) is `[(H2O, f_o)]`.
+    /// - **The volatile history**: its wet epoch and [`from_colder`](Self::from_colder).
+    /// - **The ice** ([`cover::ice_fraction`]): the conditions' cold area, a `Snowball`'s whole
+    ///   sphere, capped on a silicate crust by the surface water;
+    ///   [`surface_ices`](Self::surface_ices) is `[(H2O, f_ice)]`.
+    /// - **The cloud**: P14.T13.c's state's ([`SurfaceState::cloud_fraction`]).
+    ///
+    /// [`derive`](Self::derive) alone gives the first stage, with no wet epoch, no ocean, ice or
+    /// cloud listed and [`from_colder`](Self::from_colder) false: the figures
     /// [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes always
-    /// carry their history.
+    /// carry the second.
+    ///
+    /// # Examples
+    ///
+    /// The order matters: the conditions read the first stage's heat flow and ocean weight θ, and
+    /// the second stage reads the conditions. Earth, as [`derive`](Self::derive)'s example derives
+    /// it, publishes its ocean where its water is liquid, a little polar ice and its cloud:
+    ///
+    /// ```
+    /// # use hyperion_sim::math;
+    /// # use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+    /// # use hyperion_sim::planetary::belts::BeltComposition;
+    /// # use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
+    /// # use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
+    /// # use hyperion_sim::planetary::hooks::figures::{
+    /// #     Continents, CraterInputs, FiguresInputs, GlobalFigures, HostOrbit, HostOrbiter,
+    /// #     ImpactorOrbit, ImpactorSources, SOLAR_MAIN_BELT_MASS, SourceAnnulus, SourceBelt,
+    /// #     Subsurface, WindowEntry,
+    /// # };
+    /// # use hyperion_sim::planetary::record::BeltKind;
+    /// # use hyperion_sim::stellar::Composition;
+    /// # use hyperion_sim::stellar::draws::UnitUniform;
+    /// # use hyperion_sim::time::UniverseTime;
+    /// # use hyperion_sim::units::consts::{METRES_PER_AU, SOLAR_MASS_KG};
+    /// # use hyperion_sim::units::{
+    /// #     Degrees, Dex, EarthMasses, GravitationalParameter, Kelvin, Kilograms, Megayears,
+    /// #     Metres, Radians, Seconds, SolarLuminosities, SolarMasses, SolarRadii,
+    /// #     WattsPerSquareMetre, Years,
+    /// # };
+    /// # let host = DiscHost::new(SolarMasses::new(1.0), Dex::new(0.0), SolarLuminosities::new(0.7), SolarRadii::new(0.89))?;
+    /// # let disc = disc::derive(&host, Megayears::new(3.0), &DiscDraws::MEDIAN, Truncation::NONE);
+    /// # let disc = disc.profile().expect("a median disc exists");
+    /// # let a = Metres::new(METRES_PER_AU);
+    /// # let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(1.0));
+    /// # let orientation = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)?;
+    /// # let orbit = KeplerElements::from_semi_major_axis(a, mu, Eccentricity::new(0.0167)?, orientation, Radians::ZERO)?;
+    /// # let earth = PlacedBody::new(EarthMasses::new(1.0), orbit, a, UnitUniform::new(0.384).expect("inside (0, 1)"))?;
+    /// # let sun = [HostLight::new(SolarLuminosities::new(1.0), Kelvin::new(5_772.0), SolarRadii::new(1.0))?];
+    /// # let hosts = BodyHosts::new(Kilograms::new(SOLAR_MASS_KG), Composition::SOLAR, &sun, &[])?;
+    /// # let age = Years::new(4.57e9);
+    /// # let derived = derive_body(&earth, &hosts, disc, age, UniverseTime::EPOCH)?;
+    /// # let au = |x: f64| Metres::new(x * METRES_PER_AU);
+    /// # let belt = SourceBelt {
+    /// #     kind: BeltKind::Asteroid,
+    /// #     composition: BeltComposition::Rocky,
+    /// #     main: SourceAnnulus {
+    /// #         inner_edge: au(5.2029 * math::powf(0.25, 2.0 / 3.0)),
+    /// #         outer_edge: au(5.2029 * math::powf(0.5, 2.0 / 3.0)),
+    /// #     },
+    /// #     scattered: None,
+    /// #     main_mass: SOLAR_MAIN_BELT_MASS,
+    /// #     scattered_mass: EarthMasses::ZERO,
+    /// # };
+    /// # let sources = ImpactorSources::new(mu, vec![belt], [(EarthMasses::new(317.8), au(5.2029))])?;
+    /// # let figures = GlobalFigures::derive(&FiguresInputs {
+    /// #     atmosphere: derived.atmosphere(),
+    /// #     mass: derived.mass(),
+    /// #     radius: Metres::from(derived.radius()),
+    /// #     surface_gravity: derived.surface_gravity(),
+    /// #     class: derived.class(),
+    /// #     fractions: derived.fractions(),
+    /// #     inventory_water: derived.inventory().water(),
+    /// #     rotation_period: Seconds::new(86_164.1),
+    /// #     fe_h: Dex::new(0.0),
+    /// #     age,
+    /// #     tidal_heat_flow: WattsPerSquareMetre::new(0.0),
+    /// #     subsurface_ocean: Subsurface::NotComputed,
+    /// #     craters: CraterInputs {
+    /// #         orbit: ImpactorOrbit::Host(HostOrbiter {
+    /// #             orbit: HostOrbit { semi_major_axis: a, eccentricity: 0.0167, inclination: Radians::ZERO },
+    /// #             mass: EarthMasses::new(1.0),
+    /// #             belt: None,
+    /// #         }),
+    /// #         density: derived.density(),
+    /// #         sources: &sources,
+    /// #         molten_until: Some(Years::new(3.2e7)),
+    /// #         last_giant_impact: Some(Years::ZERO),
+    /// #     },
+    /// #     continents: Continents::Grown { asymptote: 0.416, window: WindowEntry::Entered },
+    /// # })?
+    /// # .expect("an Earth has a surface");
+    /// use hyperion_sim::planetary::derive::atmosphere::SurfaceMaterial;
+    /// use hyperion_sim::planetary::hooks::figures::VolatileHistory;
+    /// use hyperion_sim::planetary::hooks::surface::{SeasonalSpin, SurfaceConditions, SurfaceInputs};
+    ///
+    /// // The first stage's heat flow and θ go into the conditions.
+    /// let conditions = SurfaceConditions::derive(&SurfaceInputs {
+    ///     atmosphere: derived.atmosphere(),
+    ///     equilibrium_temperature: derived.equilibrium_temperature(),
+    ///     surface_gravity: derived.surface_gravity(),
+    ///     radius: Metres::from(derived.radius()),
+    ///     material: SurfaceMaterial::of(&derived.fractions()),
+    ///     stellar_flux: WattsPerSquareMetre::from(derived.flux()),
+    ///     xuv_flux: derived.xuv_flux(),
+    ///     spin: SeasonalSpin {
+    ///         obliquity: Radians::from(Degrees::new(23.44)),
+    ///         rotation_period: Seconds::new(86_164.1),
+    ///         solar_day: Some(Seconds::new(86_400.0)),
+    ///     },
+    ///     heat_flow: figures.heat_flow(),
+    ///     ocean_weight: figures.ocean_weight(),
+    /// })
+    /// .expect("an Earth has a surface");
+    /// // The second stage reads them.
+    /// let figures = figures.with_surface(&conditions, VolatileHistory::NONE);
+    /// assert!((0.70..0.76).contains(&figures.ocean_fraction()));
+    /// assert!(figures.ice_fraction() > 0.0 && figures.ice_fraction() < 0.1);
+    /// assert!((figures.cloud_fraction() - 0.67).abs() < 1e-12);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     #[must_use]
-    pub fn with_volatile_history(self, history: VolatileHistory) -> Self {
+    pub fn with_surface(self, conditions: &SurfaceConditions, history: VolatileHistory) -> Self {
+        let water = Gas::Water.substance();
+        // Step 8: the published ocean.
+        let under_ice = cover::under_ice_ocean(
+            self.state,
+            self.surface_water,
+            conditions.mean_surface_temperature(),
+            self.heat_flow,
+        );
+        let ocean = if conditions.liquid_water() || under_ice {
+            self.potential_ocean
+        } else {
+            0.0
+        };
+        // Step 11: the ice, at the conditions' θ.
+        let ice = cover::ice_fraction(&cover::IceInputs {
+            conditions,
+            state: self.state,
+            crust: self.impactors.crust(),
+            surface_water: self.surface_water,
+        });
         Self {
+            // Step 9: the volatile history.
             wet_epoch: history.wet_epoch().copied(),
             from_colder: history.from_colder(),
+            surface_liquids: vec![(water, ocean)],
+            surface_ices: vec![(water, ice)],
+            // Step 12: the cloud.
+            cloud_fraction: self.state.cloud_fraction(),
             ..self
         }
     }
@@ -2119,7 +2348,7 @@ impl GlobalFigures {
 
     /// The wet epoch (P14.T48.b; [`wet_epoch`](mod@wet_epoch)): the span over which the surface
     /// held liquid water, with what R09's erosion reads of it; `None` for a body with none, and
-    /// before the second stage ([`with_volatile_history`](Self::with_volatile_history)).
+    /// before the second stage ([`with_surface`](Self::with_surface)).
     #[must_use]
     pub const fn wet_epoch(&self) -> Option<&WetEpoch> {
         self.wet_epoch.as_ref()
@@ -2131,6 +2360,97 @@ impl GlobalFigures {
     #[must_use]
     pub const fn from_colder(&self) -> bool {
         self.from_colder
+    }
+
+    /// The volcanism level V (P14.T48.a; [`relief::volcanism_level`]), dimensionless, in [0,
+    /// 1.984]: the melt the surface's own life has erupted while its lithosphere held it, times its
+    /// plume vigour, over the table's Mars's, whose V is 1, held to the strength limit of the
+    /// constructional share ([`relief::VOLCANISM_SATURATION`]). Zero on an ice-rich crust.
+    #[must_use]
+    pub const fn volcanism(&self) -> f64 {
+        self.volcanism
+    }
+
+    /// The continental fraction `f_c` (P14.T48.a; [`relief::continental_fraction`]), 0 to 1: zero
+    /// on every lid but a mobile one, before its continents begin to grow, and on a world that
+    /// never entered P14.T48.b's window holding water.
+    #[must_use]
+    pub const fn continental_fraction(&self) -> f64 {
+        self.relief.continental_fraction()
+    }
+
+    /// The hypsometric standard deviation `σ_h`, m (P14.T48.a; [`Relief::sigma_h`]), relative to
+    /// the reference equipotential with degree 1 included. No greatest relief is published.
+    #[must_use]
+    pub fn sigma_h(&self) -> Metres {
+        self.relief.sigma_h()
+    }
+
+    /// The relief (P14.T48.a): `σ_h`'s three shares, the continental fraction and the hypsometry
+    /// the oceans fill.
+    #[must_use]
+    pub const fn relief(&self) -> &Relief {
+        &self.relief
+    }
+
+    /// The surface water `σ_s`, kg m⁻² ([`cover::surface_water`]): P14.T13.a's water over the
+    /// surface while the volcanic greenhouse runs, and 2% of it after.
+    #[must_use]
+    pub const fn surface_water(&self) -> KilogramsPerSquareMetre {
+        self.surface_water
+    }
+
+    /// The potential ocean `f_pot`, 0 to 1 ([`cover::potential_ocean`]): the share of the
+    /// surface the surface water fills of the hypsometry, whether or not it is liquid now.
+    #[must_use]
+    pub const fn potential_ocean(&self) -> f64 {
+        self.potential_ocean
+    }
+
+    /// The ocean's weight θ in P14.T24.a's contrasts, min(1, `f_pot` ÷ 0.708) ([`OceanWeight`]),
+    /// which the surface conditions read.
+    #[must_use]
+    pub const fn ocean_weight(&self) -> OceanWeight {
+        self.ocean_weight
+    }
+
+    /// The ocean fraction `f_o`, 0 to 1: the sum of [`surface_liquids`](Self::surface_liquids),
+    /// zero before the second stage.
+    #[must_use]
+    pub fn ocean_fraction(&self) -> f64 {
+        self.surface_liquids
+            .iter()
+            .fold(0.0, |sum, &(_, f)| sum + f)
+    }
+
+    /// The liquids at the surface as `(SubstanceId, area fraction)` (P14.T24.b): `H2O` alone here,
+    /// at the potential ocean where the body holds liquid now and zero otherwise (T51.a widens
+    /// them); empty before the second stage.
+    #[must_use]
+    pub fn surface_liquids(&self) -> &[(SubstanceId, f64)] {
+        &self.surface_liquids
+    }
+
+    /// The ice fraction, 0 to 1: the sum of [`surface_ices`](Self::surface_ices), zero before the
+    /// second stage.
+    #[must_use]
+    pub fn ice_fraction(&self) -> f64 {
+        self.surface_ices.iter().fold(0.0, |sum, &(_, f)| sum + f)
+    }
+
+    /// The ices at the surface as `(SubstanceId, area fraction)` (P14.T24.b): `H2O` alone here,
+    /// the perennial water ice of [`cover::ice_fraction`] (T51.a widens them); empty before the
+    /// second stage. An ice may lie over an ocean, as R09's cover convention has it.
+    #[must_use]
+    pub fn surface_ices(&self) -> &[(SubstanceId, f64)] {
+        &self.surface_ices
+    }
+
+    /// The cloud fraction, 0 to 1: P14.T13.c's [`SurfaceState::cloud_fraction`], with which its
+    /// Bond albedo was solved; zero before the second stage.
+    #[must_use]
+    pub const fn cloud_fraction(&self) -> f64 {
+        self.cloud_fraction
     }
 }
 
@@ -2260,8 +2580,9 @@ fn heat_at(
 /// # use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
 /// # use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
 /// # use hyperion_sim::planetary::hooks::figures::{
-/// #     CraterInputs, FiguresInputs, GlobalFigures, HostOrbit, HostOrbiter, ImpactorOrbit,
-/// #     ImpactorSources, SOLAR_MAIN_BELT_MASS, SourceAnnulus, SourceBelt, Subsurface,
+/// #     Continents, CraterInputs, FiguresInputs, GlobalFigures, HostOrbit, HostOrbiter,
+/// #     ImpactorOrbit, ImpactorSources, SOLAR_MAIN_BELT_MASS, SourceAnnulus, SourceBelt,
+/// #     Subsurface,
 /// # };
 /// # use hyperion_sim::planetary::record::BeltKind;
 /// # use hyperion_sim::stellar::Composition;
@@ -2323,6 +2644,7 @@ fn heat_at(
 /// #         molten_until: Some(Years::new(3.2e7)),
 /// #         last_giant_impact: Some(Years::ZERO),
 /// #     },
+/// #     continents: Continents::Given(0.405),
 /// # };
 /// let figures = GlobalFigures::derive(&inputs)?.expect("an Earth has a surface");
 /// // Today's, at its own age on its temperate surface.
@@ -2406,7 +2728,8 @@ fn rock_core_radius(kilograms: f64) -> Metres {
 /// turning in Earth's sidereal day, with no tide and no rule for an ocean under it; `None` for a
 /// gas envelope. Its heat flow reads no rotation, and its crater contract is a planet's on a
 /// circular orbit at 1 au under the Solar System's sources, with no magma ocean: tests of the
-/// contract give each body its own.
+/// contract give each body its own. Its continents are Earth's measured fraction, which only the
+/// table's one mobile lid, Earth's, reads.
 #[cfg(test)]
 #[must_use]
 pub(crate) fn table_figures(body: &crate::planetary::derive::DerivedBody) -> Option<GlobalFigures> {
@@ -2439,6 +2762,7 @@ pub(crate) fn table_figures(body: &crate::planetary::derive::DerivedBody) -> Opt
             molten_until: None,
             last_giant_impact: None,
         },
+        continents: Continents::Given(relief::EARTH_CONTINENTAL_FRACTION),
     })
     .expect("the table's bodies are in range")
 }

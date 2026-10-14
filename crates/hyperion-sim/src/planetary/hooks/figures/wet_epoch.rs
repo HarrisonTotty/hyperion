@@ -32,6 +32,12 @@
 //!   maximum-greenhouse limit when the magma ocean ended and lies inside it now, as P14.T48.d's
 //!   high-obliquity ice belt needs: it "is only reached from more glaciated conditions" (Kilic et
 //!   al. 2018, ApJ 864, 106, abstract).
+//! - **The start condition** ([`window_entry`]; science-p14-t24b-laws §4.6): the body entered the
+//!   window after its magma ocean's end, holding water, before any runaway. It is the epoch's
+//!   first half, which needs no liquid-water flag, so P14.T48.a's continental fraction reads it
+//!   ahead of the surface conditions with no loop. Every body with an epoch entered the window;
+//!   one that entered it and has none is frozen or dry now with its volcanic greenhouse still
+//!   running.
 //!
 //! # Computation
 //!
@@ -276,6 +282,114 @@ impl WetEpoch {
     }
 }
 
+/// Whether a body entered its hosts' water window holding water (P14.T48.b's start condition,
+/// [`window_entry`]), which P14.T48.a's continental fraction reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum WindowEntry {
+    /// It lay in the window at some time from its magma ocean's end, holding water, before it was
+    /// ever inside the runaway limit.
+    Entered,
+    /// It never did.
+    Never,
+}
+
+/// What [`window_entry`] reads of a body: its present air and water, its magma ocean's end, its
+/// age, and its window as a pure function of a system age (P14.T48.b's start condition).
+///
+/// Plain data with public fields, as [`VolatileHistoryInputs`]: the window is read at the grid's
+/// system ages from the history's start, in order, until it opens or a runaway comes.
+#[derive(Debug, Clone, Copy)]
+pub struct WindowEntryInputs<'a, W> {
+    /// The body's atmosphere now (P14.T13), as [`VolatileHistoryInputs::atmosphere`].
+    pub atmosphere: &'a Atmosphere,
+    /// Its water, P14.T13.a's inventory, kg, finite and non-negative.
+    pub water: Kilograms,
+    /// Its mean radius, the bulk section's, m, finite and positive.
+    pub radius: Metres,
+    /// The system age at which its young magma ocean ended; `None` for a body with no draw, whose
+    /// history starts at [`UNDRAWN_HISTORY_START`].
+    pub molten_until: Option<Years>,
+    /// Its age now, the system's, yr.
+    pub age: Years,
+    /// Where it lay against its hosts' window at a system age.
+    pub window: W,
+}
+
+/// Whether the body `inputs` describe entered the water window holding water (P14.T48.b's start
+/// condition; science-p14-t24b-laws §4.6): it can hold surface water (a solid surface, an
+/// atmosphere kept, water, H₂O retained), and on the history's grid of [`WINDOW_AGES`] system ages
+/// from its magma ocean's end to the present the window opens before any age inside the runaway
+/// limit.
+///
+/// It is [`VolatileHistory::derive`]'s own condition for an epoch, read with no liquid-water flag:
+/// a body with an epoch entered the window. The window is read from the grid's first age until it
+/// opens or a runaway comes, at most [`WINDOW_AGES`] times.
+///
+/// # Examples
+///
+/// A world under a steady Sun-like star at 1 S⊕, holding Earth's water, entered the window; the
+/// same world at 2 S⊕ lay inside the runaway limit from the start:
+///
+/// ```
+/// use hyperion_sim::planetary::hooks::figures::wet_epoch::{
+///     WindowAt, WindowEntry, WindowEntryInputs, window_entry,
+/// };
+/// use hyperion_sim::units::{EarthFluxes, Kelvin, Kilograms, Metres, Years};
+/// # use hyperion_sim::orbit::{Eccentricity, KeplerElements, Orientation};
+/// # use hyperion_sim::planetary::derive::{BodyHosts, HostLight, PlacedBody, derive_body};
+/// # use hyperion_sim::planetary::disc::{self, DiscDraws, DiscHost, Truncation};
+/// # use hyperion_sim::stellar::Composition;
+/// # use hyperion_sim::stellar::draws::UnitUniform;
+/// # use hyperion_sim::time::UniverseTime;
+/// # use hyperion_sim::units::consts::{METRES_PER_AU, SOLAR_MASS_KG};
+/// # use hyperion_sim::units::{
+/// #     Dex, EarthMasses, GravitationalParameter, Megayears, Radians, SolarLuminosities,
+/// #     SolarMasses, SolarRadii,
+/// # };
+/// # let host = DiscHost::new(SolarMasses::new(1.0), Dex::new(0.0), SolarLuminosities::new(0.7), SolarRadii::new(0.89))?;
+/// # let disc = disc::derive(&host, Megayears::new(3.0), &DiscDraws::MEDIAN, Truncation::NONE);
+/// # let disc = disc.profile().expect("a median disc exists");
+/// # let a = Metres::new(METRES_PER_AU);
+/// # let mu = GravitationalParameter::from_solar_masses(SolarMasses::new(1.0));
+/// # let orientation = Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO)?;
+/// # let orbit = KeplerElements::from_semi_major_axis(a, mu, Eccentricity::new(0.0167)?, orientation, Radians::ZERO)?;
+/// # let earth = PlacedBody::new(EarthMasses::new(1.0), orbit, a, UnitUniform::new(0.384).expect("inside (0, 1)"))?;
+/// # let sun = [HostLight::new(SolarLuminosities::new(1.0), Kelvin::new(5_772.0), SolarRadii::new(1.0))?];
+/// # let hosts = BodyHosts::new(Kilograms::new(SOLAR_MASS_KG), Composition::SOLAR, &sun, &[])?;
+/// # let derived = derive_body(&earth, &hosts, disc, Years::new(4.57e9), UniverseTime::EPOCH)?;
+/// let entry = |flux: f64| {
+///     window_entry(&WindowEntryInputs {
+///         atmosphere: derived.atmosphere(),
+///         water: Kilograms::new(1.4e21),
+///         radius: Metres::new(6.371e6),
+///         molten_until: Some(Years::new(3.2e7)),
+///         age: Years::new(4.57e9),
+///         window: |_: Years| WindowAt::of([(EarthFluxes::new(flux), Kelvin::new(5_772.0))]),
+///     })
+/// };
+/// assert_eq!(entry(1.0), WindowEntry::Entered);
+/// assert_eq!(entry(2.0), WindowEntry::Never);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+#[must_use]
+pub fn window_entry<W>(inputs: &WindowEntryInputs<'_, W>) -> WindowEntry
+where
+    W: Fn(Years) -> WindowAt,
+{
+    let Some(span) = history_span(inputs.molten_until, inputs.age) else {
+        return WindowEntry::Never;
+    };
+    if !holds_water(inputs.atmosphere, inputs.water, inputs.radius) {
+        return WindowEntry::Never;
+    }
+    let windows = (0..WINDOW_AGES).map(|k| (inputs.window)(grid_age(span, k)));
+    if opening(windows).is_some() {
+        WindowEntry::Entered
+    } else {
+        WindowEntry::Never
+    }
+}
+
 /// What [`VolatileHistory::derive`] reads of a body: its present air, water and liquid-water
 /// flag, its magma ocean's end and its age, and two pure functions of a system age, its window
 /// then and its present outgassing then.
@@ -395,15 +509,13 @@ impl VolatileHistory {
         W: Fn(Years) -> WindowAt,
         O: Fn(Years) -> f64,
     {
-        let start = inputs.molten_until.unwrap_or(UNDRAWN_HISTORY_START);
-        let age = inputs.age;
         // A body still molten now, or a history with no length, has neither.
-        if !(start.value().is_finite() && age.value().is_finite() && start < age) {
+        let Some((start, age)) = history_span(inputs.molten_until, inputs.age) else {
             return Self::NONE;
-        }
+        };
         let from_colder = !(inputs.window)(start).inside_maximum_greenhouse()
             && (inputs.window)(age).inside_maximum_greenhouse();
-        let wet_epoch = if holds_water(inputs) {
+        let wet_epoch = if holds_water(inputs.atmosphere, inputs.water, inputs.radius) {
             wet_epoch(inputs, (start, age), threshold)
         } else {
             None
@@ -431,12 +543,21 @@ impl VolatileHistory {
     }
 }
 
-/// Whether the body `inputs` describe can hold surface water at all: a solid surface, an
-/// atmosphere kept, water, and H₂O retained (science-p14-t24b-laws §3.3's first three conditions),
-/// over a radius its paleo-inventory can be spread on.
+/// The history's span of system ages, from its start (the magma ocean's end, or
+/// [`UNDRAWN_HISTORY_START`] with no draw) to the present `age`; `None` for a body still molten
+/// now, or for either not finite.
 #[must_use]
-fn holds_water<W, O>(inputs: &VolatileHistoryInputs<'_, W, O>) -> bool {
-    let air = inputs.atmosphere;
+fn history_span(molten_until: Option<Years>, age: Years) -> Option<(Years, Years)> {
+    let start = molten_until.unwrap_or(UNDRAWN_HISTORY_START);
+    (start.value().is_finite() && age.value().is_finite() && start < age).then_some((start, age))
+}
+
+/// Whether a body of atmosphere `air` holding `water` over a radius `radius` can hold surface
+/// water at all: a solid surface, an atmosphere kept, water, and H₂O retained
+/// (science-p14-t24b-laws §3.3's first three conditions), over a radius its paleo-inventory can be
+/// spread on.
+#[must_use]
+fn holds_water(air: &Atmosphere, water: Kilograms, radius: Metres) -> bool {
     let solid = match air.state() {
         SurfaceState::GasEnvelope | SurfaceState::MagmaOcean => false,
         SurfaceState::Airless
@@ -444,7 +565,7 @@ fn holds_water<W, O>(inputs: &VolatileHistoryInputs<'_, W, O>) -> bool {
         | SurfaceState::Temperate
         | SurfaceState::Snowball => true,
     };
-    let (water, r) = (inputs.water.value(), inputs.radius.value());
+    let (water, r) = (water.value(), radius.value());
     solid
         && air.keeps_atmosphere()
         && water.is_finite()
@@ -464,6 +585,22 @@ fn grid_age((start, age): (Years, Years), k: u32) -> Years {
         let (start, age) = (start.value(), age.value());
         Years::new(start + (age - start) * f64::from(k) / f64::from(WINDOW_AGES - 1))
     }
+}
+
+/// The index of the first of the grid's windows `windows` that lies in the water window, if the
+/// window opens before any lies inside the runaway limit, which loses the water: a window that
+/// opens only after one is no epoch's. The windows are read in order, and no further than that.
+#[must_use]
+fn opening(windows: impl IntoIterator<Item = WindowAt>) -> Option<usize> {
+    for (k, window) in windows.into_iter().enumerate() {
+        if window.in_window() {
+            return Some(k);
+        }
+        if window.inside_runaway() {
+            return None;
+        }
+    }
+    None
 }
 
 /// The first system age, to [`CROSSING_HALVINGS`] halvings, at which `changed` holds between
@@ -511,7 +648,7 @@ where
     let greenhouse = |t: Years| (inputs.outgassing)(t) >= threshold;
     let ages: Vec<Years> = (0..WINDOW_AGES).map(|k| grid_age(span, k)).collect();
     let windows: Vec<WindowAt> = ages.iter().map(|&t| window(t)).collect();
-    let opened = windows.iter().position(WindowAt::in_window)?;
+    let opened = opening(windows.iter().copied())?;
     let runaway = |from: usize| {
         windows
             .iter()
@@ -519,10 +656,6 @@ where
             .skip(from)
             .find_map(|(k, w)| w.inside_runaway().then_some(k))
     };
-    // The runaway loses the water: a window that opens only after one is no epoch's.
-    if runaway(0).is_some_and(|k| k < opened) {
-        return None;
-    }
     let start = if opened == 0 {
         ages[0]
     } else {

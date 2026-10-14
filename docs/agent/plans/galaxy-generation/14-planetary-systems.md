@@ -11372,6 +11372,204 @@ planetary::fate planetary::system planetary::moons planetary::surface`, as for p
     al. 2017, Kilic et al. 2018, Way et al. 2016, Turbet et al. 2021 and Scheller et al. 2021.
     Hoke and Hynek's phrase "within a few hundred million years around 3.7 Ga", which the ruling
     and the plan quote, is not theirs; their abstract has "∼3.6–3.8 billion years ago".
+- **Deviations in P14.T24.b, as built: part 4, the figures (P14.T48.a's V, `σ_h` and `f_c`; the
+  ocean, ice and cloud; θ; `p14-batch`, 2026-10-13).** `GENERATOR_VERSION` stays 21, and nothing
+  on the record moves: the figures are published under T24.a's hold. Built by
+  `science-p14-t24b-laws.md` Part 4 (§4.1–4.9), in §4.6's twelve-step order, with its three
+  rulings of the lane's questions (§4.x, 2026-10-13: V's strength limit, a hot `Snowball`'s ice,
+  the eyeball's slope), as written but where stated. Its plan text (§4.7, and §4.x.3's eyeball
+  bullets) for P14.T24.b, T48.a and R09 is the docs lane's.
+  - _Where it lives._
+    - `hooks/figures/relief.rs` (new): `continental_asymptote` (word 0 of `body.continents`,
+      0.2 + 0.5 u), `Continents::{Grown, Given}`, `continental_fraction`, `lithosphere_thickness`
+      (silicate and ice forms), `plume_vigour_m4_per_s2`, `erupted_melt_w_gyr_per_m2` (64-point
+      Gauss–Legendre), `volcanism_level` (held to [0, `VOLCANISM_SATURATION`] by
+      `bounded_volcanism`, with `TALLEST_EDIFICE_RELIEF`, §4.x.1), `Relief::of` (`σ_h` and its
+      three shares) and `Hypsometry` with its `Population`s, with the ruling's and R09's Design
+      note 3's constants.
+    - `hooks/figures/cover.rs` (new): `surface_water`, `potential_ocean`, `Hypsometry::fill` with
+      `area_below` and `volume_below`, `under_ice_ocean`, `ice_temperature`, `melting_point`,
+      `ice_fraction`, and
+      `DRY_SURFACE_WATER_SHARE`, `PERENNIAL_ICE_TEMPERATURE`, `AIRLESS_ICE_TEMPERATURE`,
+      `ICE_SHEET_THICKNESS`, `UNDER_ICE_MELTING_POINT`, `OCEAN_LEVEL_HALVINGS`.
+    - `hooks/surface.rs`: `OceanWeight` (θ, with `FULL_OCEAN_FRACTION` 0.708) in
+      `SurfaceInputs::ocean_weight`, which replaces the `Moisture` switch; the zonal profile kept
+      in `SurfaceConditions` (`ZonalProfile`), `annual_insolation_at`,
+      `SurfaceConditions::{zonal_temperature, cold_area}`, `ZONAL_AREA_POINTS` and
+      `EYEBALL_SLOPE`. The ends' arithmetic is unchanged bit for bit (`zonal_point` takes the ends'
+      Legendre values).
+    - `hooks/figures/wet_epoch.rs`: T48.b's start condition factored out, `window_entry` with
+      `WindowEntryInputs` and `WindowEntry`, from the epoch's own `history_span`, `holds_water`
+      and `opening`, so the epoch is unchanged bit for bit (no golden value of part 3 moves).
+    - `hooks/figures.rs`: `FiguresInputs::continents`; the getters `GlobalFigures::volcanism`,
+      `continental_fraction`, `sigma_h`, `relief`, `surface_water`, `potential_ocean`,
+      `ocean_weight`, `ocean_fraction`, `surface_liquids`, `ice_fraction`, `surface_ices` and
+      `cloud_fraction`; and `with_surface(conditions, history)`, the second stage, in place of part
+      3's `with_volatile_history`.
+    - `system.rs`: `published_surface` in §4.6's order; `SurfaceCase` carries the body's
+      asymptote, drawn only under the open hold.
+    - `rng/tags.rs`: `BODY_CONTINENTS`, appended after `body.surface.detail` and listed under the
+      "Plan 14" heading (one line added to the `rng/tags` golden). `tables/gauss_legendre.rs`: the
+      64-point rule, by Newton iteration at 80 digits in Python's `decimal` (no `mpmath` on the
+      machine). `crates/hyperion-sim/clippy.toml`: McGovern, McNutt and McGehee as valid idents.
+  - _The order (§4.6) as built._ Steps 1–6 are `GlobalFigures::derive`'s, with step 4's start
+    condition read by the caller first (`window_entry` over the past sky) into
+    `FiguresInputs::continents`; step 7 is `SurfaceConditions::derive` at the figures' heat flow
+    and θ; steps 8, 9, 11 and 12 are `with_surface`'s. Step 10, T48.d's regime, is not built: the
+    ice reads the zonal profile alone, which already gives a high-obliquity world its cold
+    equator.
+  - _Readings of the ruling._
+    - θ replaces T24.a's `Moisture` switch: w = ½ + ½θ and Φ = 1 + (Φ⊕ − 1)θ whatever the phase
+      of the surface water, as climate §1 has P14.T24.b "make it continuous" and §4.4 gives the
+      generated Mars a θ. At θ of 0 or 1 the contrasts are the switch's bit for bit. A frozen world
+      with surface water takes a moist share and a brightening (deferred below).
+    - "T13.a's water" is the water condensed at the surface: none for a body that keeps no
+      atmosphere or no H₂O, a runaway greenhouse (T13.c's oceans lost) or a molten or enveloped
+      one; and where the air is saturated (T13.c's own test, as T24.a's gain takes it) T13.a's
+      water less T13.c's airborne vapour, `p_H₂O` ÷ g, so an unsaturated steam atmosphere holds
+      none, continuously at the edge.
+    - The ocean's level takes its 64 halvings over the populations' span, min(μ − 3σ) to
+      max(μ + 3σ), inside the ruling's ±50 km; a layer at or above the span's volume covers the
+      surface exactly, its level the top plus the excess.
+    - The cold area reads the profile's two ends with the 64 area-uniform points, linear between,
+      so it is continuous; near a pole whose insolation falls to nothing inside the last
+      half-step (Mercury at 0.034°) it is good to 0.002 of the sphere.
+    - V is held to [0, `V_s`], `V_s` = h♂ ÷ (4 `C₀`) = 21.9 km ÷ 11.04 km = 1.984 (§4.x.1): the
+      strength limit of the constructional share, a surface three-quarters covered by conical
+      edifices at `h_max` ∝ 1 ÷ g, whose RMS is `h_max` ÷ 4, written as a bound on V since both
+      sides scale as the support over g. The published `volcanism` is the bounded V; no table body
+      moves (every calibrating body has V ≤ 1).
+    - The eyeball's slope is 3/2 (§4.x.3: Cowan and Agol's `T_d` is μ-weighted;
+      `EYEBALL_SLOPE`): `E` = `E_n` + (3/2)(`E_d` − `E_n`) μ conserves the absorbed flux at every
+      ε, and `μ_c` = (σ`T_ice`⁴ − `E_n`) ÷ ((3/2)(`E_d` − `E_n`)), held to [0, 1], so the sphere is
+      wholly cold only where the substellar point is. "Locked" is a seasonal spin with no positive
+      solar day, as T24.a's day and night take it.
+    - A `Snowball`'s ice is its profile's cold area below the melting point, water's registry
+      triple temperature, 273.16 K (`melting_point`), uncapped by its surface water (§4.x.2): a
+      `Snowball`'s ice lasts until its warmest zone reaches melting, so a correctly labelled one is
+      wholly iced and one T13.c's flux labels a `Snowball` above melting holds none. **For
+      P14.T48.d's builder:** read the cover, `ice_fraction`, not T13.c's `Snowball` label, wherever
+      the regime asks "ice-covered". The silicate cap reads every other cover.
+    - The annual insolation at x = sin φ is McGehee and Lehman 2012's integral (from memory; the
+      year's mean in closed form along the ecliptic, then the rotation angle), on 1,024 trapezoid
+      steps, within 10⁻⁶ of a 20,000-step quadrature at every latitude from 0° to 177° of
+      obliquity and of T24.a's closed forms at the ends.
+    - V's F(t) is the figures' own heat flow at the past age under today's state and tide (as part
+      3's outgassing), and `T_e`(t) the silicate lithosphere under today's `T_s`; the iron share is
+      iron ÷ (iron + rock), §1.2's.
+    - `Continents::Given(0.405)` is the table's ("the Solar System table passes Earth's measured
+      0.405"); every table body takes it, and only Earth's mobile lid reads it.
+    - A `Snowball`'s ocean under its ice reads the surface water at 1,000 kg m⁻³ against 651
+      ln(273.15 K ÷ `T_s`) ÷ F; the cap's ρ_ice is ice Ih's at the mean surface temperature, and
+      `ICE_SHEET_THICKNESS` the ruling's 1.93 km for Bedmap2's 1,937 m (Fretwell et al. 2013,
+      Table 7).
+    - `surface_liquids` and `surface_ices` always hold one `H2O` entry, zero included, and are
+      empty before the second stage; an ocean under ice is published with the ice over it, as
+      R09's cover convention allows.
+  - _Fitted on the table's Mars:_ `MARS_ERUPTED_MELT_W_GYR_PER_M2` 0.034 944 (the ruling's
+    replica 0.0335) over its 3.90 Gyr surface, and `MARS_PLUME_VIGOUR_M4_PER_S2` 2.2240 × 10¹⁹
+    (its 1,814 km mantle over an iron share of 0.216); both `Fitted`, refitted by a test to 10⁻¹².
+  - _Figures_ (the table about the present Sun):
+    - V: Mars 1, Earth 0.963 (the ruling's 1.23), Venus 0.904 (1.05), the table's Moon 0.0009 and
+      the generated giant-impact Moon 0.102 (0.066), Mercury 0.0002, Ceres 0 (ice-rich at 17%
+      water).
+    - `σ_h`: Earth 2.523 km (2.51), Venus 0.910 (0.94, −3.1%), Mars 3.025 (2.90, +4.3%), the Moon
+      2.235 (2.239), Mercury 1.271 (1.048, +21%), Ceres at 17% water 2.1 (2.077), and the dry table
+      Ceres 9.437 km at the 0.02 R cap.
+    - The ocean: Earth's `f_pot` and `f_o` 0.746 (the ruling's 0.731 on the real 2,617 m; measured
+      0.7095) and θ 1; Mars's 20.4 m of surface water fills 0.021, θ 0.030 (0.046 in T24.a's own
+      table fixture, `table_figures`, at 1 au with no magma ocean); none published on Mars, Venus
+      or the Moon.
+    - The ice: Earth 0.0134, Mars 0.0115 (the ruling's 0.011), Ganymede 0.397, Titan 1, Ceres at
+      17% water a high-latitude cap, the generated Europa 0.186 at its 118.6 K. The cloud: Earth
+      and Mars 0.67, Venus 1.
+  - _Over the sample_ (60 systems, 877 published bodies): 7 with continents (greatest 0.572), 3 of
+    them with no epoch (§4.6's frozen mobile lids); 118 with V over 0.01, the greatest at `V_s`
+    (1.984; before the bound 1,610); `σ_h` from 0.900 to 11.8 km (before the bound 1,313 km), the
+    greatest the basin share's 0.02 R cap on small dry bodies; 29 oceans published, 9 under ice and
+    14 ocean worlds, and 14 potential oceans held back (no liquid now); 476 iced, 400 wholly.
+  - _Tests read differently._ Earth's ice is asserted in 0.01–0.07 (the ruling's 0.02–0.07,
+    deferred below); "Europa 1" is checked on the measured 102 K profile, whose warmest point is
+    108.3 K and whose cold area is 1, and the generated Europa is held to its own; the Ceres
+    calibrations read the table's Ceres with McCord and Sotin's 17% water, ice-rich; "Vesta within
+    5%" is read as Vesta's cap, on a hand-built Vesta (262.7 km, 0.25 m s⁻²), whose basin share is
+    0.02 R exactly, since neither the table nor R09 gives Vesta a measured `σ_h`; "no figure
+    published is a greatest relief" holds by construction (no such member); the Moon's V ≤ 0.11
+    holds on both the table's and the generated Moon. Beyond the plan: every body with an epoch
+    entered the window; the start condition reads the window from the first age until it opens;
+    θ moves the contrasts continuously; the insolation at a latitude meets its closed forms.
+  - _Pins_, re-blessed at header 21: `planetary/global_figures` gains 123 lines (the relief, water
+    and θ of every pinned body, and the table's cover); `planetary/surface_conditions` moves
+    Mars's contrast and range (3 lines, θ 0.046 against the old dry switch);
+    `planetary/surface_conditions_published` gains each body's relief, cover and continental
+    asymptote (1,443 lines) and moves the contrast and range of the 7 bodies whose θ is not the old
+    switch's (21 lines: five frozen worlds with surface water, the 136 K `Snowball` ocean world, and
+    the 619 K `Snowball` whose water is all vapour); `rng/tags` gains `body.continents`. The
+    sim-determinism script's "not bumped" verdict on the two surface pins is the hold's, expected.
+  - _Accepted by_ `cargo test -p hyperion-sim --features testing --lib -- planetary::hooks
+planetary::fate planetary::system planetary::moons planetary::surface rng::tags
+tables::gauss_legendre`.
+- **Deferred findings (2026-10-13 rule)**, from part 4 (P14.T48.a's V, `σ_h` and `f_c`; the ocean,
+  ice and cloud; θ). The three questions the lane asked are ruled (`science-p14-t24b-laws.md`
+  §4.x, above); §4.x.5's deferrals come first.
+  - V's vigour factor on super-Earths: (g `D_m`³)^1.5 is extrapolated past Earth's 10.5, to about
+    thirty, against the stagnant-lid literature (O'Rourke and Korenaga 2012; Kite et al. 2009;
+    Noack et al. 2017), which `V_s` keeps physical; a pressure-limited melt law is for an
+    unscheduled P14.T55 item, with part 1's heat flow. Before the bound the sample reached a raw V
+    of 1,610 and a `σ_h` of 1,313 km.
+  - The melt integral's survival: S is ruled from today's F (part 2), so on a world vigorous early
+    and cold now I counts melt a resurfacing would have erased; `V_s` bounds its effect.
+  - The strength law: the bound takes `h_max` ∝ 1 ÷ g, as R09 does; a frictional lithosphere's
+    support scales with its thickness and the magma's buoyant head with its source depth, for
+    R09.T12.c's edifice cap and this bound together.
+  - T13.c's hot `Snowball`s (science-p14-t24f's "No maximum-greenhouse ceiling"): their label and
+    0.50 albedo until P14.T51.a. The pin's 516 K (98 bar) and 562 K (5.8 kbar) Snowballs, liquid
+    by T24.a's flag, now hold no ice and keep their oceans; a third, at 619 K under 1.6 GPa, keeps
+    all its water as vapour, no surface water and so θ 0, where the old switch called it wet.
+  - The eyeball's uniform night turns the whole nightside at once where `T_n` crosses the ice's
+    temperature, a step of ½ (Cowan and Agol's own homogenised night), for R09.T13's body-fixed
+    model; the ice's continuity test names this crossing as its one exception.
+  - A seasonless locked world's ice edge: the −10 °C edge stands for the seasons, which a 1:1
+    world on a near-circular orbit lacks, so its edge would be the melting point; with §4.9's
+    seasonal-edge item, for R09.T13.
+  - Citation checks at build (§4.x): Plescia 2004's 21.9 km, McGovern and Morgan 2009, Weisskopf
+    1975, IAPWS R14-08's triple points, Caldeira and Kasting 1992, Pierrehumbert 2004, Hoffman and
+    Schrag 2002 and Noack et al. 2017.
+  - θ on frozen worlds: by the ruling's literal reading every world with surface water takes the
+    moist share and Φ, frozen or not (a 47 K moon at 0.47, a 136 K `Snowball` at 1); a θ that only
+    weighted a world whose mean surface holds liquid would keep them dry. Both meet "moving the
+    liquid flag does not move θ".
+  - Earth's ice is 0.0134, under the ruling's 0.02–0.07: its 0.033 reads the measured Earth's
+    260.4 K pole, where the generated Earth's lies at 262 K, a kelvin under the edge.
+  - The table's Ceres keeps 78 m of water and is silicate, so its basin share sits at the 0.02 R
+    cap and its `σ_h` is 9.4 km against Dawn's 2.08; and, airless with no surface water, it takes
+    no ice, against §4.3's "a Ceres with high-latitude ice", as do the sample's airless silicate
+    bodies. At 17% water it is ice-rich, 2.1 km, with its high-latitude ice.
+  - The generated Europa's mean surface is 118.6 K (measured about 102), so its ice keeps above
+    54° (0.186) where the ruling's Europa is all ice: its albedo is T13.c's, P14.T51.b's passes.
+    An ice-rich crust is ice at its surface whatever the threshold, which P14.T51.f may take up.
+  - The airless threshold, 110 K, is a peak temperature's (Schorghofer and Williams 2020), read
+    against the annual-mean profile, which overstates the cold area where days and seasons swing.
+  - V off the ruling's replica: Earth 0.96 (1.23), Venus 0.90 (1.05) and the generated Moon 0.10
+    (0.066, its rock-only mantle, under the 0.11 bound by 8%), from the generator's own heat flows
+    and surface ages; `σ_h` stays within 5% on each.
+  - Mars's θ is 0.030 against the ruling's "about 0.1": 20.4 m fills 2.1% of its 3.0 km
+    hypsometry. T24.a's table fixture (`table_figures`, 1 au, no magma ocean) gives it 0.046.
+  - §4.6's recorded difference: a frozen mobile lid that entered the window with its greenhouse
+    still running grows continents with no epoch (counted by the sample's tally).
+  - Rounded or unread constants: the mantle's 3.1 W m⁻¹ K⁻¹ (the plate models' 3.138) and the
+    870 K isotherm (600 °C is 873.15 K), both calibrated with the 70 km support; the ice
+    lithosphere's 170 K (R09's lean, uncited); the under-ice test compares the liquid layer with
+    the ice shell (frozen, ρ_w ÷ ρ_i ≈ 1.09 times thicker); the truncation keeps 0.973 of each
+    population's variance.
+  - An ocean under a `Snowball`'s ice is published as `f_o` 1 beside `f_ice` 1: R09's reader
+    should take it as liquid under the ice, not open water.
+  - Part 3's pre-main-sequence runaways, liquid by T24.a's flag with no epoch, take no continents
+    (no window entry) but publish their ocean.
+  - Sources not read at the build: McGehee and Lehman 2012 (the integral checked numerically),
+    Pierrehumbert 2011, Budyko 1969 and North 1975 for the −10 °C edge, Kiefer 2003, Watts 2001,
+    McGovern and Solomon 1993, Carr and Head 2003, and Höning and Spohn 2023 beyond the science
+    check's reading (its models are Earth-sized, so other masses are an extrapolation).
 
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might

@@ -370,7 +370,7 @@ domain_tags! {
     // Scope `Body`, opened with `ObjectKey::from(BodyId)`: `planet.orbit`, `planet.radius`,
     // `planet.volatiles`, `planet.spin`, `planet.origin`, `planet.scatter` (ruling 80),
     // `moon.count`, `moon.mass`, `moon.orbit`, `moon.impact`, `moon.capture`, `ring.system`,
-    // `belt.member`, `body.surface`, `body.resources`.
+    // `belt.member`, `body.surface`, `body.resources`, `body.continents` (P14.T48.a).
     //
     // Scope `Event`, each behind an event tag of plan 06's block 0x0400–0x04FF: `body.impact`
     // (0x0400), `body.eruption` (0x0401), `body.storm` (0x0402), `body.duststorm` (0x0403),
@@ -784,6 +784,15 @@ domain_tags! {
     /// nothing with the surface seed but the universe seed (the rendering brainstorm's
     /// "Knowledge, and the surface seed"; R09, Design note 2).
     BODY_SURFACE_DETAIL: Body = "body.surface.detail";
+
+    // Plan 14, phase K: the continental fraction (P14.T48.a), under the name and scope the "Plan
+    // 14" heading above lists. Appended here, after R09's entry, because the macro's order fixes
+    // `ALL`.
+
+    /// A body's continental asymptote f∞ (P14.T48.a), keyed by the body: word 0, one open uniform
+    /// u, f∞ = 0.2 + 0.5 u; words 1–7 are reserved
+    /// (`planetary::hooks::figures::relief::continental_asymptote`).
+    BODY_CONTINENTS: Body = "body.continents";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface

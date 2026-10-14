@@ -1,7 +1,7 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23, T24.a, T24.b's interior, T48.f):
+//! Built so far (P14.T23, T24.a, T24.b, T48.a–c, T48.f):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
@@ -14,9 +14,10 @@
 //!   receives and whether water can be liquid on it; held until the 21 → 22 batch's bump.
 //! - [`figures`]: the body's [`GlobalFigures`] (P14.T24.b), so far its heat flow, tectonic
 //!   regime, magnetic field, present outgassing and subsurface ocean, its surface age and crater
-//!   contract (P14.T48.c) with its [`Impactors`] (P14.T48.f), and its volatile history
-//!   (P14.T48.b), its wet epoch and whether it came from a colder state, read from the
-//!   conditions' liquid-water flag; held with the surface conditions.
+//!   contract (P14.T48.c) with its [`Impactors`] (P14.T48.f), its volcanism level, continents and
+//!   relief (P14.T48.a), its surface water and the ocean weight θ the conditions read, and,
+//!   read from the conditions, its volatile history (P14.T48.b), ocean, ice and cloud; held with
+//!   the surface conditions.
 //!
 //! [`BodyHooks`] holds them, from
 //! [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at). The habitability

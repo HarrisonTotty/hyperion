@@ -55,8 +55,9 @@ pub(crate) fn spin_of(name: &str) -> SeasonalSpin {
 }
 
 /// The inputs of the derived body `body` under the spin `spin`, its material of its own mass
-/// fractions and its heat flow its own about the present Sun ([`heat_flow_of`]).
-fn inputs_of(body: &DerivedBody, spin: SeasonalSpin) -> SurfaceInputs<'_> {
+/// fractions and its heat flow and ocean weight its own about the present Sun ([`heat_flow_of`],
+/// [`ocean_weight_of`]).
+pub(crate) fn inputs_of(body: &DerivedBody, spin: SeasonalSpin) -> SurfaceInputs<'_> {
     SurfaceInputs {
         atmosphere: body.atmosphere(),
         equilibrium_temperature: body.equilibrium_temperature(),
@@ -67,6 +68,7 @@ fn inputs_of(body: &DerivedBody, spin: SeasonalSpin) -> SurfaceInputs<'_> {
         xuv_flux: body.xuv_flux(),
         spin,
         heat_flow: heat_flow_of(body),
+        ocean_weight: ocean_weight_of(body),
     }
 }
 
@@ -76,15 +78,23 @@ fn heat_flow_of(body: &DerivedBody) -> WattsPerSquareMetre {
     table_figures(body).map_or(WattsPerSquareMetre::new(0.0), |f| f.heat_flow())
 }
 
+/// The ocean weight θ of the derived body `body` about the present Sun at its age (P14.T24.b), none
+/// for a gas envelope.
+fn ocean_weight_of(body: &DerivedBody) -> OceanWeight {
+    table_figures(body).map_or(OceanWeight::NONE, |f| f.ocean_weight())
+}
+
 /// The conditions of the derived body `body` under the spin `spin`.
 pub(crate) fn conditions_of(body: &DerivedBody, spin: SeasonalSpin) -> Option<SurfaceConditions> {
     SurfaceConditions::derive(&inputs_of(body, spin))
 }
 
-/// The column and moisture the conditions of the derived body `body` read, under the spin `spin`.
-fn column_of(body: &DerivedBody, spin: SeasonalSpin) -> (Column, Moisture) {
-    let surface = Surface::of(&inputs_of(body, spin)).unwrap();
-    (surface.column, surface.moisture)
+/// The column and ocean weight the conditions of the derived body `body` read, under the spin
+/// `spin`.
+fn column_of(body: &DerivedBody, spin: SeasonalSpin) -> (Column, OceanWeight) {
+    let inputs = inputs_of(body, spin);
+    let surface = Surface::of(&inputs).unwrap();
+    (surface.column, inputs.ocean_weight)
 }
 
 /// The dayside's and nightside's temperatures of the derived body `body` under the spin `spin`,
@@ -520,18 +530,18 @@ fn earth_s_measured_state_takes_north_cahalan_and_coakley_s_partition() {
     // Kaspi and Showman's law governs Earth, not Koll's weak gradient.
     eprintln!("W B_P {weak} against 6D {}", 6.0 * conductance);
     assert!(weak < 6.0 * EARTH_MERIDIONAL_CONDUCTANCE_W_PER_M2_K);
-    let contrast = equator_pole_contrast_k(&column, &spin, Moisture::Wet);
+    let contrast = equator_pole_contrast_k(&column, &spin, OceanWeight::FULL);
     assert!(
         (contrast - EARTH_EQUATOR_POLE_CONTRAST_K).abs() < 1e-5,
         "Earth's contrast is {contrast} K"
     );
     // Its ends lie within 1 K of North, Cahalan and Coakley's P₂ fit, 302.1 and 260.1 K.
-    let (equator, pole) = zonal_ends_k(&column, &spin, Moisture::Wet);
+    let (equator, pole) = zonal_ends_k(&column, &spin, OceanWeight::FULL);
     eprintln!("the measured Earth's ends: {equator} and {pole} K");
     assert!((equator - 302.1).abs() < 1.0 && (pole - 260.1).abs() < 1.0);
     // Dry, the same Earth keeps half its transport under a uniform albedo, and a larger contrast:
     // 42.8 K against 42.0.
-    let dry = equator_pole_contrast_k(&column, &spin, Moisture::Dry);
+    let dry = equator_pole_contrast_k(&column, &spin, OceanWeight::NONE);
     eprintln!("dry: {dry} K");
     assert!(dry > contrast, "{dry}");
     // The annual insolation, by quadrature of its definitions at 23.44°: 1.2213 at the equator and
@@ -662,8 +672,9 @@ fn the_transport_follows_kaspi_and_showman_s_sweeps() {
     // Earth's lies within 15% of Fig. 8a's (40 K at Earth's rate; its plateau at Ω⊕ ÷ 4 is the
     // GCM's) and within 10% of Figs. 15c's, 18a's and 20b's.
     let (earth, spin) = earth_column();
-    let contrast =
-        |column: &Column, spin: &SeasonalSpin| equator_pole_contrast_k(column, spin, Moisture::Wet);
+    let contrast = |column: &Column, spin: &SeasonalSpin| {
+        equator_pole_contrast_k(column, spin, OceanWeight::FULL)
+    };
     let base = contrast(&earth, &spin);
     // Fig. 8a, the rotation rate over Earth's.
     for (rate, gcm) in [
@@ -771,8 +782,8 @@ fn the_generated_venus_and_titan_are_near_isothermal() {
     // Venus's slow spin leaves Koll's weak gradient to govern its transport (science-p14-t24a-
     // climate.md §1: 2.8 K).
     let (_, venus, conditions) = found(&table, "Venus");
-    let (column, moisture) = column_of(venus, spin_of("Venus"));
-    assert_eq!(moisture, Moisture::Dry);
+    let (column, weight) = column_of(venus, spin_of("Venus"));
+    assert_eq!(weight, OceanWeight::NONE);
     let spin = spin_of("Venus");
     let weak = weak_gradient_transport(&column, &spin) * column.restoring_w_per_m2_k();
     let diffusive = 6.0 * meridional_conductance_w_per_m2_k(&column, &spin) * DRY_TRANSPORT_SHARE;
@@ -818,7 +829,7 @@ fn a_mars_given_its_measured_state_lies_within_30_to_70_k() {
         radius: Metres::new(3_389.5e3),
     };
     let spin = spin_of("Mars");
-    let contrast = equator_pole_contrast_k(&mars, &spin, Moisture::Dry);
+    let contrast = equator_pole_contrast_k(&mars, &spin, OceanWeight::NONE);
     let six_d_over_b = 6.0 * meridional_conductance_w_per_m2_k(&mars, &spin) * DRY_TRANSPORT_SHARE
         / mars.restoring_w_per_m2_k();
     eprintln!("the measured Mars: {contrast} K, 6D/B {six_d_over_b}");
@@ -873,7 +884,7 @@ fn the_transport_is_continuous_across_its_ends() {
                 rotation_period: Seconds::new(period),
                 ..spin
             },
-            Moisture::Dry,
+            OceanWeight::NONE,
         )
     };
     let mut period = 3_600.0;
@@ -923,14 +934,14 @@ fn the_annual_insolation_is_its_definitions_mean() {
 #[test]
 fn a_ninety_degree_obliquity_world_s_equator_pole_contrast_is_negative() {
     let (column, spin) = earth_column();
-    let tilted = |column: &Column, moisture: Moisture, degrees: f64| {
+    let tilted = |column: &Column, moisture: OceanWeight, degrees: f64| {
         let spin = SeasonalSpin {
             obliquity: Radians::from(Degrees::new(degrees)),
             ..spin
         };
         equator_pole_contrast_k(column, &spin, moisture)
     };
-    let at = |degrees: f64| tilted(&column, Moisture::Wet, degrees);
+    let at = |degrees: f64| tilted(&column, OceanWeight::FULL, degrees);
     assert!(at(90.0) < 0.0);
     // On an airless body (the table's Moon) the contrast is the radiative one. At 90° a pole takes
     // 4 ÷ π of the mean light and the equator 8 ÷ π², so the warm pole's contrast is
@@ -1106,12 +1117,14 @@ fn the_insolation_modes_are_the_annual_insolation_s() {
         let obliquity = Radians::from(Degrees::new(degrees));
         let modes = insolation_modes(obliquity);
         let (q_eq, q_pole) = annual_insolation(obliquity);
-        let sum = |end: ZonalEnd| {
+        let sum = |legendre: &ModeValues| {
             modes
                 .iter()
-                .fold(1.0, |sum, mode| sum + mode.coefficient * end.legendre(mode))
+                .zip(legendre)
+                .fold(1.0, |sum, (mode, &at)| sum + mode.coefficient * at)
         };
-        (q_eq - sum(ZonalEnd::Equator), q_pole - sum(ZonalEnd::Pole))
+        let at_equator = modes.map(|mode| mode.at_equator);
+        (q_eq - sum(&at_equator), q_pole - sum(&[1.0; ZONAL_MODES]))
     };
     let (equator, pole) = tails(23.44);
     assert!(
@@ -1170,13 +1183,13 @@ fn a_moon_s_contrasts_read_its_obliquity_to_its_planet_s_orbit() {
     assert!((day - 15.97).abs() < 0.05, "{day} d");
     assert_eq!(own.solar_day, None);
     let (column, _) = earth_column();
-    let tilted = equator_pole_contrast_k(&column, &seasonal, Moisture::Wet);
-    let untilted = equator_pole_contrast_k(&column, &own, Moisture::Wet);
+    let tilted = equator_pole_contrast_k(&column, &seasonal, OceanWeight::FULL);
+    let untilted = equator_pole_contrast_k(&column, &own, OceanWeight::FULL);
     let at_tilt = SeasonalSpin {
         obliquity: tilt,
         ..own
     };
-    assert!((tilted - equator_pole_contrast_k(&column, &at_tilt, Moisture::Wet)).abs() < 1e-9);
+    assert!((tilted - equator_pole_contrast_k(&column, &at_tilt, OceanWeight::FULL)).abs() < 1e-9);
     assert!(
         untilted - tilted > 1.0,
         "{untilted} K untilted, {tilted} K tilted"
@@ -1590,7 +1603,8 @@ fn a_solar_day_that_is_not_positive_is_none() {
 #[test]
 fn every_wet_world_s_water_feeds_back() {
     // T13.c holds a wet world's water at its saturation pressure at its surface temperature, so
-    // its gain is positive: Earth-like bodies of 0.5 to 4 M⊕ from 0.90 to 1.30 au of the Sun.
+    // its gain is positive: Earth-like bodies of 0.5 to 4 M⊕ from 0.90 to 1.30 au of the Sun, each
+    // of them with an ocean weight (P14.T24.b's θ).
     let disc = solar_disc();
     let mut wet = 0_u32;
     for mass in [0.5, 1.0, 2.0, 4.0] {
@@ -1608,8 +1622,8 @@ fn every_wet_world_s_water_feeds_back() {
             if body.atmosphere().state() == SurfaceState::GasEnvelope {
                 continue;
             }
-            let (column, moisture) = column_of(&body, spin_of("Earth"));
-            if moisture == Moisture::Wet {
+            let (column, weight) = column_of(&body, spin_of("Earth"));
+            if weight.get() > 0.0 {
                 wet += 1;
                 assert!(
                     column.greenhouse_gain > 0.0,
@@ -1630,7 +1644,10 @@ fn no_light_gives_no_contrast() {
         equilibrium_temperature: Kelvin::ZERO,
         ..earth
     };
-    assert_same_bits(equator_pole_contrast_k(&dark, &spin, Moisture::Wet), 0.0);
+    assert_same_bits(
+        equator_pole_contrast_k(&dark, &spin, OceanWeight::FULL),
+        0.0,
+    );
     let (day, night) = day_and_night(
         &dark,
         &spin,
@@ -1815,8 +1832,12 @@ fn the_zonal_ends_are_continuous_in_the_transport() {
     let table = table();
     let (_, mars, _) = found(&table, "Mars");
     let spin = spin_of("Mars");
-    let (column, moisture) = column_of(mars, spin);
-    assert_eq!(moisture, Moisture::Dry);
+    let (column, weight) = column_of(mars, spin);
+    // The generated Mars's 20 m of surface water weighs a few hundredths (0.046; the ruling's
+    // estimate, about a tenth, science-p14-t24b-laws §4.4). The transport's limits are read dry,
+    // under a uniform albedo, where the no-transport ends are the radiative ones.
+    assert!((0.02..0.2).contains(&weight.get()), "{weight:?}");
+    let moisture = OceanWeight::NONE;
     assert!(column.greenhouse_gain > 0.0);
     let t_s = column.surface_temperature.value();
     let scaled = |scale: f64| Column {
@@ -2078,4 +2099,142 @@ fn the_conditions_are_pinned() {
         RadiationClass::of(young)
     ));
     golden!("planetary/surface_conditions", w.as_str());
+}
+
+/// Europa at its measured mean of 102 K, airless at 3.13° (Jupiter's obliquity), lies under 110 K
+/// at every latitude: its radiative profile, whose warmest point is 108.3 K, is wholly cold
+/// (science-p14-t24b-laws §4.3, "Europa all ice").
+#[test]
+fn a_europa_at_102_k_is_cold_everywhere() {
+    let t = Kelvin::new(102.0);
+    let column = Column {
+        surface_temperature: t,
+        equilibrium_temperature: t,
+        surface_pressure: Pascals::ZERO,
+        air_mass_kg_per_m2: 0.0,
+        specific_heat_j_per_kg_k: 0.0,
+        molar_mass_g_per_mol: 0.0,
+        surface_gravity: MetresPerSecondSquared::new(1.315),
+        optical_depth: 0.0,
+        greenhouse_gain: 0.0,
+        radius: Metres::new(1.560_8e6),
+    };
+    let spin = SeasonalSpin {
+        obliquity: Radians::from(Degrees::new(3.13)),
+        rotation_period: Seconds::new(3.551 * SECONDS_PER_DAY),
+        solar_day: Some(Seconds::new(3.554 * SECONDS_PER_DAY)),
+    };
+    let profile = ZonalProfile::of(&column, &spin, OceanWeight::NONE);
+    let points = profile.points();
+    let warmest = points.iter().fold(0.0_f64, |high, &(_, t)| high.max(t));
+    assert!((warmest - 108.3).abs() < 0.1, "{warmest} K");
+    assert_same_bits(area_below(&points, Kelvin::new(110.0)), 1.0);
+}
+
+/// The eyeball's dayside profile, `E_n` + (3/2)(`E_d` − `E_n`) μ, emits what the world absorbs
+/// at every redistribution and its μ-weighted dayside is Cowan and Agol's `T_d`
+/// (science-p14-t24b-laws §4.x.3): with their eqs. 4–5 in `σT_s⁴`'s units, `E_d` = 8/3 − 5ε/3
+/// and `E_n` = ε, the sphere's mean is 1 and the day's μ-weighted mean `E_d`, to 10⁻¹².
+#[test]
+fn the_eyeball_s_profile_conserves_the_absorbed_flux() {
+    use crate::tables::gauss_legendre::{GL8_NODES, GL8_WEIGHTS};
+    // Gauss–Legendre on μ in [0, 1], exact for the profile and its μ-weighted moment.
+    let integral = |f: &dyn Fn(f64) -> f64| {
+        GL8_NODES
+            .iter()
+            .zip(&GL8_WEIGHTS)
+            .fold(0.0, |sum, (&x, &w)| {
+                sum + 0.5 * w * f(f64::midpoint(x, 1.0))
+            })
+    };
+    for step in 0..=20 {
+        let epsilon = f64::from(step) / 20.0;
+        let (day, night) = (8.0 / 3.0 - 5.0 / 3.0 * epsilon, epsilon);
+        let flux = |mu: f64| night + EYEBALL_SLOPE * (day - night) * mu;
+        // Area is uniform in μ over the dayside, half the sphere.
+        let mean = 0.5 * integral(&flux) + 0.5 * night;
+        assert!((mean - 1.0).abs() < 1e-12, "ε {epsilon}: {mean}");
+        let weighted = integral(&|mu| flux(mu) * mu) / integral(&|mu| mu);
+        assert!(
+            (weighted - day).abs() < 1e-12,
+            "ε {epsilon}: {weighted} against {day}"
+        );
+    }
+}
+
+/// The ocean weight θ moves the contrasts continuously (science-p14-t24a-climate.md §1;
+/// science-p14-t24b-laws §4.4): the measured Earth's contrast runs from its dry value at θ = 0 to
+/// its wet one at 1, by under 0.1 K a step of 10⁻³, the moist share's transport and the
+/// brightening growing together.
+#[test]
+fn the_ocean_weight_moves_the_contrasts_continuously() {
+    let (earth, spin) = earth_column();
+    let at = |theta: f64| {
+        equator_pole_contrast_k(
+            &earth,
+            &spin,
+            OceanWeight::of_potential_ocean(theta * FULL_OCEAN_FRACTION),
+        )
+    };
+    let (dry, wet) = (
+        equator_pole_contrast_k(&earth, &spin, OceanWeight::NONE),
+        equator_pole_contrast_k(&earth, &spin, OceanWeight::FULL),
+    );
+    assert_same_bits(at(0.0), dry);
+    assert!((at(1.0) - wet).abs() < 1e-9, "{} against {wet}", at(1.0));
+    let mut last = dry;
+    for step in 1..=1_000 {
+        let theta = f64::from(step) / 1_000.0;
+        let contrast = at(theta);
+        assert!(
+            (contrast - last).abs() < 0.1,
+            "{theta}: {last} to {contrast} K"
+        );
+        last = contrast;
+    }
+    // Its share and brightening are the switch's at either end.
+    assert_same_bits(OceanWeight::NONE.transport_share(), DRY_TRANSPORT_SHARE);
+    assert_same_bits(OceanWeight::FULL.transport_share(), 1.0);
+    assert_same_bits(OceanWeight::NONE.albedo_gradient(), 1.0);
+    assert_same_bits(OceanWeight::FULL.albedo_gradient(), WET_ALBEDO_GRADIENT);
+}
+
+/// The annual insolation at a latitude ([`annual_insolation_at`], McGehee and Lehman's integral)
+/// is the closed forms at the equator and the poles to 10⁻¹² over obliquities from 0° to 177°, and
+/// within 10⁻⁶ of a 20,000-step quadrature of its integral at every latitude, the kink at the polar
+/// circle included; its area-weighted mean over x is 1.
+#[test]
+fn the_annual_insolation_at_a_latitude_meets_the_closed_forms() {
+    for degrees in [0.034, 3.13, 23.44, 25.19, 45.0, 60.0, 89.0, 98.0, 177.36] {
+        let obliquity = Radians::from(Degrees::new(degrees));
+        let (equator, pole) = annual_insolation(obliquity);
+        assert!(
+            (annual_insolation_at(obliquity, 0.0) - equator).abs() < 1e-12,
+            "{degrees}°"
+        );
+        assert!(
+            (annual_insolation_at(obliquity, 1.0) - pole).abs() < 1e-12,
+            "{degrees}°"
+        );
+        let (sin_b, cos_b) = math::sin_cos(obliquity.value());
+        let dense = |x: f64| {
+            let across = (1.0 - x * x).sqrt();
+            let n = 20_000_u32;
+            let step = core::f64::consts::PI / f64::from(n);
+            let f = |j: u32| {
+                let a = across * sin_b * math::cos(step * f64::from(j)) - x * cos_b;
+                (1.0 - a * a).max(0.0).sqrt()
+            };
+            let sum = (1..n).fold(f64::midpoint(f(0), f(n)), |sum, j| sum + f(j));
+            4.0 * step / (core::f64::consts::PI * core::f64::consts::PI) * sum
+        };
+        let mut mean = 0.0;
+        for k in 0..256 {
+            let x = (f64::from(k) + 0.5) / 256.0;
+            let q = annual_insolation_at(obliquity, x);
+            assert!((q - dense(x)).abs() < 1e-6, "{degrees}° at x = {x}: {q}");
+            mean += q / 256.0;
+        }
+        assert!((mean - 1.0).abs() < 1e-4, "{degrees}°: {mean}");
+    }
 }

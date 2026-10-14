@@ -118,9 +118,9 @@ use crate::planetary::halo::{
     ADIABATIC_INDEX_LIMIT, CometaryHalo, HaloBounds, HaloHost, RUNAWAY_INDEX, Scatterer, halo,
 };
 use crate::planetary::hooks::figures::{
-    BeltMembership, CraterInputs, FiguresInputs, HostOrbit, HostOrbiter, ImpactorOrbit,
+    BeltMembership, Continents, CraterInputs, FiguresInputs, HostOrbit, HostOrbiter, ImpactorOrbit,
     ImpactorSources, MoonBirth, SourceBelt, VolatileHistory, VolatileHistoryInputs, WindowAt,
-    past_outgassing,
+    WindowEntryInputs, past_outgassing, relief, window_entry,
 };
 use crate::planetary::hooks::surface::{ConditionsHold, SeasonalSpin, SeasonsFrom, SurfaceInputs};
 use crate::planetary::hooks::{
@@ -1930,11 +1930,15 @@ impl PlanetarySystem {
     /// its bulk section's radius, gravity, class and fractions, its atmosphere and its volatile
     /// inventory's water, its sidereal rotation period at `t`, the system's \[Fe/H\] and age at
     /// `t`, and for a moon the tide its planet raises in it, its derivation's (P14.T17.b), with a
-    /// regular moon's subsurface ocean ([`Subsurface::of_regular_moon`], P14.T17.b's flag). Their
-    /// volatile history (P14.T48.b) reads the conditions' liquid-water flag, the hosts' light over
-    /// the primary's past (each star at its state then, along the primary's orbit then for a star
-    /// of its zone and the pair's for a companion), and the body's outgassing then. Both
-    /// are [`Section::NotApplicable`] for a body in the gas-envelope state or not present, and
+    /// regular moon's subsurface ocean ([`Subsurface::of_regular_moon`], P14.T17.b's flag), and its
+    /// continental asymptote, word 0 of its `body.continents` stream (P14.T48.a), with whether it
+    /// entered its hosts' water window holding water (P14.T48.b's start condition). The
+    /// conditions read the figures' ocean weight θ. The figures' volatile history (P14.T48.b)
+    /// reads the conditions' liquid-water flag, the hosts' light over the primary's past (each
+    /// star at its state then, along the primary's orbit then for a star of its zone and the
+    /// pair's for a companion), and the body's outgassing then, and their ocean, ice and cloud the
+    /// conditions.
+    /// Both are [`Section::NotApplicable`] for a body in the gas-envelope state or not present, and
     /// [`Section::NotModelled`] for one with no rotation law (every body [`generate_planets`]
     /// makes) or whose derivation this version does not compute.
     ///
@@ -1977,6 +1981,8 @@ impl PlanetarySystem {
             .then(|| self.impactor_sources(primary.host))
             .flatten();
         let past = publish.then(|| PastSky::new(ctx, self.zone_of(primary), &fate, t));
+        let continental_asymptote =
+            publish.then(|| relief::continental_asymptote(self.seed, index.body_id(self.system)));
         let time = SurfaceTime {
             hold,
             past: past.as_ref(),
@@ -1998,6 +2004,7 @@ impl PlanetarySystem {
                         interior: SurfaceInterior::of_body(&d),
                         craters: publish.then(|| self.body_craters(body)).flatten(),
                         sources: sources.as_ref(),
+                        continental_asymptote,
                     };
                     (
                         bulk_composition(ctx, properties.fractions(), *d.inventory()),
@@ -2025,6 +2032,7 @@ impl PlanetarySystem {
                                     .then(|| self.moon_craters(primary, moon, &derived, &orbit))
                                     .flatten(),
                                 sources: sources.as_ref(),
+                                continental_asymptote,
                             };
                             (
                                 bulk_composition(ctx, properties.fractions(), *derived.inventory()),
@@ -2945,6 +2953,9 @@ struct SurfaceCase<'a> {
     interior: SurfaceInterior,
     craters: Option<SurfaceCraters>,
     sources: Option<&'a ImpactorSources>,
+    /// Its continental asymptote f∞ (P14.T48.a), word 0 of its `body.continents` stream; `None`
+    /// where the figures are not read.
+    continental_asymptote: Option<f64>,
 }
 
 /// What a body's water window reads of its hosts over its past (P14.T48.b; science-p14-t24b-laws
@@ -3040,10 +3051,12 @@ struct SurfaceCraters {
 
 /// The surface conditions and global figures of the body `case` describes at `time` (P14.T24.a,
 /// T24.b): both [`Section::NotModelled`] under the hold, or with no rotation law, seasonal orbit,
-/// crater inputs or past sky, or inputs the figures refuse; both [`Section::NotApplicable`] for a
-/// body with no surface; and otherwise both [`Section::Ok`], the conditions' night floor raised by
-/// the figures' heat flow, and the figures' volatile history read from the conditions'
-/// liquid-water flag (P14.T48.b).
+/// crater inputs, past sky or continental asymptote, or inputs the figures refuse; both
+/// [`Section::NotApplicable`] for a body with no surface; and otherwise both [`Section::Ok`], in
+/// science-p14-t24b-laws §4.6's order: T48.b's start condition from the past sky, the figures'
+/// first stage with the continents it gates, the conditions at the figures' heat flow and ocean
+/// weight θ, and the second stage from the conditions: the volatile history from their
+/// liquid-water flag (P14.T48.b), the ocean, the ice and the cloud.
 #[must_use]
 fn published_surface(
     time: &SurfaceTime<'_>,
@@ -3056,11 +3069,26 @@ fn published_surface(
     let (Some(rotation), Some(seasonal)) = (time.rotation, time.seasonal) else {
         return (Section::NotModelled, Section::NotModelled);
     };
-    let (Some(craters), Some(sources), Some(past)) = (case.craters, case.sources, time.past) else {
+    let (Some(craters), Some(sources), Some(past), Some(asymptote)) = (
+        case.craters,
+        case.sources,
+        time.past,
+        case.continental_asymptote,
+    ) else {
         return (Section::NotModelled, Section::NotModelled);
     };
     let (sky, bulk, interior) = (&case.sky, case.bulk, &case.interior);
     let spin = SeasonalSpin::of(rotation.frame(), time.t, seasonal, case.whose);
+    let window = |age: Years| past.window_at(age);
+    // Step 4's start condition (science-p14-t24b-laws §4.6): T48.b's, ahead of the conditions.
+    let entry = window_entry(&WindowEntryInputs {
+        atmosphere: sky.atmosphere,
+        water: interior.inventory_water,
+        radius: Metres::from(bulk.radius()),
+        molten_until: craters.molten_until,
+        age: time.age,
+        window: &window,
+    });
     let figure_inputs = FiguresInputs {
         atmosphere: sky.atmosphere,
         mass: interior.mass,
@@ -3080,6 +3108,10 @@ fn published_surface(
             sources,
             molten_until: craters.molten_until,
             last_giant_impact: craters.last_giant_impact,
+        },
+        continents: Continents::Grown {
+            asymptote,
+            window: entry,
         },
     };
     let derived = GlobalFigures::derive(&figure_inputs);
@@ -3102,12 +3134,14 @@ fn published_surface(
         xuv_flux: sky.xuv_flux,
         spin,
         heat_flow: figures.heat_flow(),
+        ocean_weight: figures.ocean_weight(),
     };
     let Some(conditions) = SurfaceConditions::derive(&inputs) else {
         return (Section::NotApplicable, Section::NotApplicable);
     };
     // The second stage: the volatile history reads the conditions' liquid-water flag, the hosts'
-    // light over the body's past and its outgassing then (P14.T48.b).
+    // light over the body's past and its outgassing then (P14.T48.b), and the ocean and the ice
+    // read the conditions (science-p14-t24b-laws §4.6, steps 8–12).
     let history = VolatileHistory::derive(&VolatileHistoryInputs {
         atmosphere: sky.atmosphere,
         water: interior.inventory_water,
@@ -3115,13 +3149,11 @@ fn published_surface(
         liquid_water: conditions.liquid_water(),
         molten_until: craters.molten_until,
         age: time.age,
-        window: |age: Years| past.window_at(age),
+        window,
         outgassing: |age: Years| past_outgassing(&figure_inputs, age),
     });
-    (
-        Section::Ok(conditions),
-        Section::Ok(figures.with_volatile_history(history)),
-    )
+    let figures = figures.with_surface(&conditions, history);
+    (Section::Ok(conditions), Section::Ok(figures))
 }
 
 /// The state at `t` of the moon `satellite`, in a system aged `age_at_epoch` at the epoch, whose

@@ -619,3 +619,95 @@ fn a_body_with_no_draw_starts_at_the_draw_s_median() {
     });
     assert_eq!(undrawn, history);
 }
+
+/// The start condition, P14.T48.a's reading of T48.b ([`window_entry`]; science-p14-t24b-laws
+/// §4.6): every body with an epoch entered the window, on the table and in the law's cases; a
+/// frozen world whose greenhouse still holds entered it with no epoch; and a window that opens
+/// only after a runaway, a dry body, an airless one and one still molten never entered it.
+#[test]
+fn every_body_with_an_epoch_entered_the_window() {
+    let table = table_histories();
+    for (name, body, history) in &table {
+        let (a, e) = table_orbit(name);
+        let entry = window_entry(&WindowEntryInputs {
+            atmosphere: body.atmosphere(),
+            water: body.inventory().water(),
+            radius: Metres::from(body.radius()),
+            molten_until: Some(MEDIAN_MAGMA_OCEAN_END),
+            age: SOLAR_AGE,
+            window: window_about(sun(), a, e),
+        });
+        eprintln!("{name}: {entry:?}, epoch {}", history.wet_epoch().is_some());
+        if history.wet_epoch().is_some() {
+            assert_eq!(entry, WindowEntry::Entered, "{name}");
+        }
+    }
+    let earth = &found(&table, "Earth").1;
+    let (runaway, early_mars) = limits();
+    let entry_of = |flux: &dyn Fn(f64) -> f64, water: Kilograms, atmosphere: &Atmosphere| {
+        window_entry(&WindowEntryInputs {
+            atmosphere,
+            water,
+            radius: Metres::from(earth.radius()),
+            molten_until: Some(Years::new(1e8)),
+            age: Years::new(4.5e9),
+            window: |age: Years| {
+                WindowAt::of([(EarthFluxes::new(flux(age.value())), Kelvin::new(5_772.0))])
+            },
+        })
+    };
+    let water = earth.inventory().water();
+    let steady = |_: f64| f64::midpoint(runaway, early_mars);
+    assert_eq!(
+        entry_of(&steady, water, earth.atmosphere()),
+        WindowEntry::Entered
+    );
+    assert_eq!(synthetic(earth, false, steady, |_| 1.0).wet_epoch(), None);
+    let fading = |t: f64| runaway * if t < 1e9 { 1.5 } else { 0.8 };
+    assert_eq!(
+        entry_of(&fading, water, earth.atmosphere()),
+        WindowEntry::Never
+    );
+    assert_eq!(
+        entry_of(&steady, Kilograms::ZERO, earth.atmosphere()),
+        WindowEntry::Never
+    );
+    let moon = &found(&table, "Moon").1;
+    assert_eq!(
+        entry_of(&steady, water, moon.atmosphere()),
+        WindowEntry::Never
+    );
+    let molten = window_entry(&WindowEntryInputs {
+        atmosphere: earth.atmosphere(),
+        water,
+        radius: Metres::from(earth.radius()),
+        molten_until: Some(Years::new(5e9)),
+        age: Years::new(4.5e9),
+        window: |_: Years| WindowAt::of([(EarthFluxes::new(1.0), Kelvin::new(5_772.0))]),
+    });
+    assert_eq!(molten, WindowEntry::Never);
+}
+
+/// The start condition reads the window at the history's grid ages in order, from the first, and
+/// stops where the window opens or a runaway comes.
+#[test]
+fn the_start_condition_stops_where_the_window_opens() {
+    let table = table_histories();
+    let earth = &found(&table, "Earth").1;
+    let reads = Cell::new(0_u32);
+    let entry = window_entry(&WindowEntryInputs {
+        atmosphere: earth.atmosphere(),
+        water: earth.inventory().water(),
+        radius: Metres::from(earth.radius()),
+        molten_until: Some(Years::new(1e8)),
+        age: Years::new(4.5e9),
+        window: |age: Years| {
+            reads.set(reads.get() + 1);
+            let flux = if age.value() < 1e9 { 0.2 } else { 1.0 };
+            WindowAt::of([(EarthFluxes::new(flux), Kelvin::new(5_772.0))])
+        },
+    });
+    assert_eq!(entry, WindowEntry::Entered);
+    // 1 Gyr is past the grid's 13th age, 0.1 + 12 × 4.4 ÷ 63 = 0.938 Gyr, and before its 14th.
+    assert_eq!(reads.get(), 14);
+}

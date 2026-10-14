@@ -15,7 +15,7 @@ use crate::id::Layer;
 use crate::orbit::Eccentricity;
 use crate::planetary::architecture::HostMultiplicity;
 use crate::planetary::architecture::template::EARTH_MASSES_PER_JUPITER_MASS;
-use crate::planetary::derive::atmosphere::{SurfaceState, optical_depth_terms};
+use crate::planetary::derive::atmosphere::{Gas, SurfaceState, optical_depth_terms};
 use crate::planetary::derive::{PlanetClass, habitable_zone};
 use crate::planetary::fate::DestructionCause;
 use crate::planetary::hooks::figures::{Crust, LEFTOVER_DENSITY, TectonicRegime};
@@ -2198,6 +2198,7 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
     let mut fields = std::collections::BTreeMap::new();
     let mut craters = CraterTally::default();
     let mut histories = HistoryTally::default();
+    let mut cover = CoverTally::default();
     for (ctx, system) in whole().iter().take(60) {
         for index in system.indices() {
             let Some(held) = system.hooks_at(ctx, index, t).unwrap() else {
@@ -2235,6 +2236,7 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
                         panic!("{index:?} has conditions but no figures");
                     };
                     check_published_figures(index, conditions, figures);
+                    check_published_cover(index, conditions, figures, bulk.surface_gravity());
                     assert_same_bits(
                         figures.craters().system_age().value(),
                         ctx.age_at(t).value() / 1e9,
@@ -2243,6 +2245,7 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
                     *fields.entry(figures.magnetic_field()).or_insert(0_u32) += 1;
                     craters.count(figures);
                     histories.count(conditions, figures);
+                    cover.count(conditions, figures);
                     match record.identity().kind() {
                         BodyKind::Moon(_) => moons += 1,
                         BodyKind::Planet | BodyKind::DwarfPlanet => planets += 1,
@@ -2285,7 +2288,186 @@ fn the_hooks_publish_surface_conditions_only_from_the_batch_s_bump() {
     eprintln!("regimes {regimes:?}; fields {fields:?}");
     craters.report();
     histories.report();
+    cover.report();
     assert!(planets > 20 && moons > 5 && envelopes > 20);
+}
+
+/// The published relief and cover of one body follow their rules (P14.T48.a, P14.T24.b;
+/// science-p14-t24b-laws §4.1–4.6 and §4.x): continents only on a mobile lid; V in [0, `V_s`] and
+/// the constructional share under the strength limit, `h♂` (g♂ ÷ g) ÷ 4, at the body's gravity
+/// `gravity`; every fraction in [0, 1] and each list `H2O` alone summing to its fraction; an ocean
+/// only where water is liquid or under a `Snowball`'s ice; no ice where the coldest zone is above
+/// the melting point; θ the potential ocean's; and the cloud in [0, 1].
+fn check_published_cover(
+    index: BodyIndex,
+    conditions: &SurfaceConditions,
+    figures: &GlobalFigures,
+    gravity: crate::units::MetresPerSecondSquared,
+) {
+    use hooks::figures::relief::{
+        CONSTRUCTIONAL_REFERENCE_GRAVITY, TALLEST_EDIFICE_RELIEF, VOLCANISM_SATURATION,
+    };
+    let v = figures.volcanism();
+    assert!(
+        (0.0..=VOLCANISM_SATURATION).contains(&v),
+        "{index:?}: V {v}"
+    );
+    let limit = TALLEST_EDIFICE_RELIEF.value() * CONSTRUCTIONAL_REFERENCE_GRAVITY.value()
+        / gravity.value()
+        / 4.0;
+    let built = figures.relief().constructional().value();
+    assert!(
+        built <= limit * (1.0 + 1e-12),
+        "{index:?}: {built} m over {limit}"
+    );
+    if figures.ice_fraction() > 0.0 {
+        // The coldest zone: the zonal profile's least point, or a locked world's night, which the
+        // climate's range bounds.
+        let coldest = conditions
+            .zonal_points()
+            .iter()
+            .fold(conditions.climate_range().0.value(), |low, &(_, t)| {
+                low.min(t)
+            });
+        assert!(
+            coldest < hooks::figures::cover::melting_point().value(),
+            "{index:?}: ice where no zone is below melting ({coldest} K)"
+        );
+    }
+    let f_c = figures.continental_fraction();
+    assert!((0.0..=0.7).contains(&f_c), "{index:?}: {f_c}");
+    if f_c > 0.0 {
+        assert_eq!(
+            figures.tectonic_regime(),
+            TectonicRegime::MobileLid,
+            "{index:?}"
+        );
+    }
+    assert!(
+        figures.volcanism() >= 0.0 && figures.volcanism().is_finite(),
+        "{index:?}"
+    );
+    assert!(figures.sigma_h().value() > 0.0, "{index:?}");
+    let water = Gas::Water.substance();
+    for (fraction, list) in [
+        (figures.ocean_fraction(), figures.surface_liquids()),
+        (figures.ice_fraction(), figures.surface_ices()),
+    ] {
+        assert_eq!(list.len(), 1, "{index:?}");
+        assert_eq!(list[0].0, water, "{index:?}");
+        assert!((0.0..=1.0).contains(&fraction), "{index:?}: {fraction}");
+        assert_same_bits(list.iter().fold(0.0, |sum, &(_, f)| sum + f), fraction);
+    }
+    assert!(
+        (0.0..=1.0).contains(&figures.potential_ocean()),
+        "{index:?}"
+    );
+    assert_eq!(
+        figures.ocean_weight(),
+        hooks::surface::OceanWeight::of_potential_ocean(figures.potential_ocean()),
+        "{index:?}"
+    );
+    if figures.ocean_fraction() > 0.0 {
+        assert_same_bits(figures.ocean_fraction(), figures.potential_ocean());
+    }
+    if !conditions.liquid_water() && figures.ocean_fraction() > 0.0 {
+        assert!(
+            hooks::figures::cover::under_ice_ocean(
+                SurfaceState::Snowball,
+                figures.surface_water(),
+                conditions.mean_surface_temperature(),
+                figures.heat_flow(),
+            ),
+            "{index:?}: an ocean with no liquid at the surface lies under a Snowball's ice"
+        );
+    }
+    assert!((0.0..=1.0).contains(&figures.cloud_fraction()), "{index:?}");
+}
+
+/// The published relief and cover's spread over a sample, for the record (P14.T48.a, P14.T24.b):
+/// the continents, the volcanism levels, `σ_h`'s range, the oceans published and held back, the
+/// ice and the ocean worlds.
+#[derive(Debug, Default)]
+struct CoverTally {
+    bodies: u32,
+    continents: u32,
+    greatest_continents: f64,
+    volcanic: u32,
+    greatest_volcanism: f64,
+    sigma_h: Option<(f64, f64)>,
+    oceans: u32,
+    ocean_worlds: u32,
+    potential_only: u32,
+    iced: u32,
+    wholly_iced: u32,
+    under_ice: u32,
+    continents_without_epoch: u32,
+    beyond_calibration: u32,
+    over_20_km: u32,
+}
+
+impl CoverTally {
+    /// Counts `figures`' relief and cover, published with `conditions`.
+    fn count(&mut self, conditions: &SurfaceConditions, figures: &GlobalFigures) {
+        self.bodies += 1;
+        let f_c = figures.continental_fraction();
+        if f_c > 0.0 {
+            self.continents += 1;
+            self.greatest_continents = self.greatest_continents.max(f_c);
+            self.continents_without_epoch += u32::from(figures.wet_epoch().is_none());
+        }
+        self.beyond_calibration += u32::from(figures.volcanism() > 2.76);
+        self.over_20_km += u32::from(figures.sigma_h().value() > 20e3);
+        if figures.volcanism() > 0.01 {
+            self.volcanic += 1;
+        }
+        self.greatest_volcanism = self.greatest_volcanism.max(figures.volcanism());
+        let sigma = figures.sigma_h().value();
+        self.sigma_h = Some(self.sigma_h.map_or((sigma, sigma), |(low, high)| {
+            (low.min(sigma), high.max(sigma))
+        }));
+        if figures.ocean_fraction() > 0.0 {
+            self.oceans += 1;
+            self.under_ice += u32::from(!conditions.liquid_water());
+            self.ocean_worlds += u32::from(figures.ocean_fraction() >= 1.0);
+        } else if figures.potential_ocean() > 0.0 {
+            self.potential_only += 1;
+        }
+        if figures.ice_fraction() > 0.0 {
+            self.iced += 1;
+            self.wholly_iced += u32::from(figures.ice_fraction() >= 1.0);
+        }
+    }
+
+    /// Prints the tally, and checks that the strength limit binds somewhere on the sample
+    /// (science-p14-t24b-laws §4.x.1).
+    fn report(&self) {
+        assert_same_bits(
+            self.greatest_volcanism,
+            hooks::figures::relief::VOLCANISM_SATURATION,
+        );
+        eprintln!(
+            "cover over {} bodies: {} with continents (greatest {:.3}, {} with no epoch); {} with \
+             V over 0.01 (greatest {:.3}, {} over 2.76); σ_h {:?} m ({} over 20 km); {} oceans \
+             published ({} under ice, {} ocean worlds), {} potential oceans held back; {} iced \
+             ({} wholly)",
+            self.bodies,
+            self.continents,
+            self.greatest_continents,
+            self.continents_without_epoch,
+            self.volcanic,
+            self.greatest_volcanism,
+            self.beyond_calibration,
+            self.sigma_h,
+            self.over_20_km,
+            self.oceans,
+            self.under_ice,
+            self.ocean_worlds,
+            self.potential_only,
+            self.iced,
+            self.wholly_iced
+        );
+    }
 }
 
 /// The published volatile histories' spread over a sample, for the record (P14.T48.b): the bodies
@@ -2507,6 +2689,10 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
                     Section::Ok(figures) => figures.heat_flow(),
                     other => panic!("{:?} has conditions but figures {other:?}", moon.index()),
                 },
+                ocean_weight: match hooks.figures() {
+                    Section::Ok(figures) => figures.ocean_weight(),
+                    other => panic!("{:?} has conditions but figures {other:?}", moon.index()),
+                },
             };
             let frame = rotation.frame();
             let under_planet = SeasonalSpin::of(frame, t, &seasonal, SeasonsFrom::Planet);
@@ -2620,6 +2806,15 @@ fn the_published_surface_conditions_are_pinned() {
                 &name,
                 f.wet_epoch(),
                 f.from_colder(),
+            );
+            hooks::figures::tests::pin_relief(&mut w, &name, f);
+            hooks::figures::tests::pin_cover(&mut w, &name, f);
+            w.f64(
+                &format!("{name}_continental_asymptote"),
+                hooks::figures::relief::continental_asymptote(
+                    system.seed,
+                    body.index().body_id(ctx.id()),
+                ),
             );
             pinned += 1;
         }
