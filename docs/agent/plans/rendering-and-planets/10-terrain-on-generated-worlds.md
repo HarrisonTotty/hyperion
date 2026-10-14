@@ -107,35 +107,49 @@ at `c6d77cac`).
 ```rust
 /// Authoritative ground classes. Discriminants are wire- and golden-stable `u8`s; a new class
 /// appends, and any change to the set, the table or the classifier is a generator-version change.
-#[repr(u8)]
+/// As built by T1.a (Risks, "Deviations in T1.a, as built"): `WaterIce` is `Glacier` and
+/// `VolatileFrost` is `Frost`, the forms of the cell's ice entry whatever its species; the codes
+/// are unchanged. A `coded_enum!` (`ALL`, `u8::from`, `TryFrom<u8>`).
 pub enum MaterialClass {
     Bedrock = 0, Regolith = 1, Soil = 2, Sand = 3, Sediment = 4, VolcanicRock = 5, Melt = 6,
-    WaterIce = 7, Snow = 8, SeaIce = 9, VolatileFrost = 10, OrganicSediment = 11, Seabed = 12,
+    Glacier = 7, Snow = 8, SeaIce = 9, Frost = 10, OrganicSediment = 11, Seabed = 12,
     Evaporite = 13, Dust = 14,
 }
 /// The form and the substance: `entry` is the index of R09's header palette entry the ground is
 /// made of (`field::MaterialPalette`, R09.T2's follow-up B). `FrostSpecies` is gone: the ice
 /// entry names the species (decision-composition §1.8, folded in at the re-validation).
-pub struct Material { /* class: MaterialClass, entry: u8 */ }
+pub struct Material { /* class: MaterialClass, entry: u8 */ }   // new(class, entry) -> Option
+/// The codes of R09's `PaletteEntry::phase_row`: 0 no law (`UNASSIGNED_PHASE_ROW`), 1 `Regolith`
+/// (R07's `moon` template), 2 `Ice` (`airless-ice`); L(α) = L(0) × McEwen 1996's profile.
+pub enum PhaseLaw { Regolith = 1, Ice = 2 }   // for_family, template, lommel_seeliger_share
 
 pub struct MohrCoulomb { /* cohesion: Pascals, friction_angle: Radians */ }
+pub struct ShearLayer { /* top: Metres, bottom: Metres, strength: MohrCoulomb, porosity: f64 */ }
 pub enum FrictionModel { Constant(f64), ByTemperature(&'static [(Kelvin, f64)]) }  // tan δ, pad
-pub struct MaterialProperties {
-    /* the class's table: shear: &'static [(Metres, MohrCoulomb, porosity)] (by depth, empty
-       where unknown; each layer's bulk density from the entry's grain density),
-       interface_friction: Option<FrictionModel>, compressive_strength: Option<Pascals> (ice),
-       by the entry's mechanics family where the class's rows are per family,
-       sources: &'static [&'static str];
-       the entry's resolved values (R09's `PaletteEntry`, as built): normal_albedo_bvr: [f64; 3]
-       (A_N in B, V and R), phase_row: u8, grain_density_kg_m3: f64, transition: Kelvin,
-       mechanics: MechanicsFamily */
+/// A form's rows for one mechanics family, each figure with its `Citation`.
+pub struct FormRow {
+    /* shear: &'static [ShearLayer] (by depth, empty where unknown), interface_friction:
+       Option<FrictionModel>, compressive_strength: Option<Pascals> (ice), albedo_factor:
+       Option<f64> (on the entry's A_N), normal_albedo_v: Option<AlbedoSpan>,
+       citations: &'static [Citation] */
 }
-pub fn properties(material: Material, palette: &MaterialPalette) -> MaterialProperties;
+pub fn form_row(class: MaterialClass, family: MechanicsFamily) -> &'static FormRow;
+pub struct MaterialProperties {
+    /* the form's `FormRow`, and the entry's resolved values (R09's `PaletteEntry`):
+       normal_albedo_bvr: [f64; 3] (A_N in B, V and R, times the form's factor), phase_law:
+       PhaseLaw with its PhaseLawOrigin (Palette or FamilyDefault), grain_density, transition:
+       Kelvin, mechanics: MechanicsFamily; each layer's bulk density from the grain density */
+}
+pub fn properties(material: Material, palette: &MaterialPalette)
+    -> Result<MaterialProperties, ResolvePropertiesError>;
 /// L(0) of the lunar-Lambert law from the normal albedo (Design note 8).
 pub fn limb_parameter(normal_albedo: f64) -> f64;
+pub fn directional_hemispherical_albedo(normal_albedo: f64, limb: f64, mu0: f64) -> f64;
 /// Ultimate bearing capacity under a footing (Design note 2); `None` where the table has no data.
 pub fn bearing_capacity(p: &MaterialProperties, gravity: MetresPerSecondSquared,
     footing_width: Metres) -> Option<Pascals>;
+pub fn ultimate_bearing_capacity(strength: MohrCoulomb, bulk_density: KilogramsPerCubicMetre,
+    gravity: MetresPerSecondSquared, width: Metres) -> Pascals;
 pub fn interface_friction(p: &MaterialProperties, temperature: Kelvin) -> Option<f64>;
 
 /// The authoritative class at a point, from the finest level's slope, altitude, R09's climate and
@@ -144,7 +158,7 @@ pub fn material_at<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCa
     at: FaceUv) -> Result<Material, QueryHeightError>;
 pub const CLIFF_SLOPE: Radians;            // 40°, Design note 1
 pub const TRANSITION_HALF_WIDTH: Radians;  // 5°, the visual blend band either side
-pub const SNOW_SHED_SLOPE: Radians;        // provisional, T1.a finds a source or removes it
+pub const SNOW_SHED_SLOPE: Radians;        // 60°, Schaerer 1977, p. 286 (T1.a, as built)
 /// Presentation weights over a per-patch palette of up to eight materials, each a (form, entry)
 /// pair (Design note 3).
 pub struct ClassWeights { /* palette: [Option<Material>; 8], weights: [u8; 8] summing to 255 */ }
@@ -732,7 +746,8 @@ land**, and each is marked so below.
    assigns the codes), in place of the per-class figures above, which stay the classes' physical
    spans and T1.a's check on the entries; the ground's thermal emission, `Melt`'s and any cell's
    above R08.T18's visibility cut, is R08.T18's shared function, called by T10.b. How a form
-   changes its entry's A_N (fresh snow and glacier ice of one H₂O entry) is a question in Risks._
+   changes its entry's A_N (fresh snow and glacier ice of one H₂O entry) was a question in Risks,
+   answered by a per-form factor in T1.a's table ("Deviations in T1.a, as built")._
 9. **No textures in this plan.** The Materials section lists triplanar projection of rock and detail
    textures and two-scale repetition hiding. Anything a texture adds below the band limit is detail
    the simulation did not compute, which the brainstorm defines as decoration, and R11 owns it,
@@ -979,7 +994,7 @@ plan, then R09's server and coarse pass):
   methods in place of `postField` and their messages in `workers/messages.ts`), and the height
   worker holds the blocks in JavaScript, as it holds R05's field today, until T6.b's module takes
   them; its live path waits on R09.T19.b. T1.a, whose tables read nothing of the synthesis (R09's
-  palette types are built); its albedo rows wait on the ruling asked in Risks.
+  palette types are built); its albedo rows took main's answer (Risks).
 - **After R09.T8, and R09.T9 for goldens.** T1.b, T2 and T3, then T5 and T6.a; T6.b after T6.a, T5
   and T1.b. Each is built on `synthetic_worlds()` and `FieldBuilder` fields.
 - **After R09.T16.** The coarse pass follows this plan, so until R09.T11–T16 land the reference
@@ -1328,8 +1343,9 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   `coarse_pass`, where the body's record is in hand, its p the photometry's `geometric_albedo()`
   (by band); the tests that compare the served field with `coarse_pass` bit for bit
   (`tests/surface_service.rs` and two in `surface::service`) apply the same `with_albedo_scale`.
-  Per band or one c with its residual per band (decision-composition §1.8) is asked in Risks,
-  since the header holds one `Option<f64>`. Files:
+  Per band or one c with its residual per band (decision-composition §1.8) was asked in Risks,
+  since the header holds one `Option<f64>`; main answered one c, fitted in V, with the B and R
+  residuals stated and recorded. Files:
   `material/albedo.rs`, R09's `hyperion_server::surface` service,
   `crates/hyperion-sim/tests/surface_albedo_worlds.rs`, a server test. Tests: on each of
   `sample_worlds()` the area-weighted p of the scaled classes equals the body's p to 1% where the
@@ -2166,7 +2182,9 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   its diffuse cloud light through `terrain_sky_factor` (R11's proposed names, adopted). R09's closed
   forms, per-cell resolution, header field and spheroid datum (its Design note 17), R05's
   `rg16float` normals and slot layout, and R04's `math::j0` are already carried and are listed under
-  Consumes.
+  Consumes. Of R09's palette sources and P14.T49.c, from T1.a: an `Ice` entry's A_N is its
+  substance's as fresh snow or fine frost (the forms' factors are taken against it), and a
+  `phase_row` is filled by `PhaseLaw::for_family` until a substance's own law is known.
 - **Shadows on the high setting** are taken here by the reading of Design note 11. If the roadmap
   gives them to R07 or R11 instead, T9 moves whole, and T8's horizon map stays here.
 - **`Dust` is placed by a simple rule** (arid, thin-aired, where R09's wind deposits); if the coarse
@@ -2271,6 +2289,10 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   - _The `sample_worlds()` cases as follow-ups._ T1.b, T2, T5 and T10.a land their synthetic-world
     parts first and their reference-world binaries after R09.T16, under the same task IDs, as R09's
     T5 had follow-ups. Lean: so; the alternative is new subtask letters.
+  - _Answered by "main", 2026-10-13._ The first: a per-form factor in T1.a's class table, no wire
+    change (built: "Deviations in T1.a, as built"). The second: one `albedo_scale`, fitted in V,
+    with the B and R residuals stated and recorded (T10.a). The third: the `sample_worlds()` tests
+    land later as commits under the same task IDs, not new subtask letters.
 - **Deferred findings (2026-10-13 rule)** (the re-validation of `c6d77cac`; each leaves this plan's
   algorithm and contracts as they are, for "main"'s list).
   - _The bound's wording._ Main's acceptance for R09.T8 makes `level_bound_m` a 1 − 10⁻⁹ per-point
@@ -2586,3 +2608,161 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     between contacts.
   - _A vertex's reads._ At a vertex `mesh_point` reads three vertices where `mesh_height` reads
     one, so near a survey margin's edge the ground can refuse where the height answers (above).
+- **Deviations in T1.a, as built** (2026-10-13, lane r10-classes). Files:
+  `crates/hyperion-surface/src/material/{mod,class,properties,bearing}.rs`, `lib.rs`'s
+  `pub mod material`, and the crate's `clippy.toml`, which gains `McEwen` among its doc idents.
+  Nothing generated reads the module yet, so no golden moves and `GENERATOR_VERSION` stays 21
+  (T1.b bumps it).
+  - _Names._ `WaterIce` (7) is `Glacier` and `VolatileFrost` (10) is `Frost`: the forms of the
+    cell's ice entry whatever its species (decision-composition §1.8, "frost or glacier of the
+    cell's ice entry"); the codes are the sketch's. `Material::new` returns `Option` (an entry of 15
+    or more is none), and `properties` returns `Result` (`ResolvePropertiesError::EntryNotInPalette`
+    for an entry past the palette). The sketch's `sources` are a `Citation` per figure
+    (`Figure::{Shear, InterfaceFriction, CompressiveStrength, AlbedoFactor, AlbedoSpan}`), so the
+    "names its source" test checks each figure. The class's table is public as
+    `form_row(class, family) -> &'static FormRow`, for T10.a and the consoles. Also public:
+    `ShearLayer` (the sketch's tuple, with a bottom), `AlbedoSpan`, `PhaseLaw`,
+    `UNASSIGNED_PHASE_ROW`, `BearingFactors`, `ultimate_bearing_capacity`,
+    `directional_hemispherical_albedo` and `LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO`.
+  - _The phase-row codes._ `PhaseLaw`, one byte: 0 names no law (`UNASSIGNED_PHASE_ROW`, which
+    every palette writes today), 1 is `Regolith` (f fitted to R07's `moon` template) and 2 is `Ice`
+    (R07's `airless-ice`). Both take L(α) = L(0) × McEwen 1996's lunar profile, held at 0 past
+    103.9°, with L(0) = `limb_parameter(A_N in V)`. An entry of 0, or of a code this build does not
+    know, takes `PhaseLaw::for_family(mechanics)`: `Ice` for water and volatile ices, `Regolith`
+    for the rest. `phase_law_origin()` is then `FamilyDefault`, for the label. The server's palette
+    sources (R09's synthetic and reference worlds, P14.T49.c) still write 0; filling them is theirs,
+    by the same rule.
+  - _`limb_parameter`._ The largest L(0) for which the law, with f ≡ 1, reflects no more than it
+    receives at μ₀ = 1: L(0) is 1 up to A_N = 1 ÷ [4 (1 − ln 2)] = 0.815, then (1 ÷ A_N − 1) ÷
+    0.227, and 0 from an A_N of 1. It is Design note 8's bound as a rule, not a fit: no bright
+    surface's L(0) was read.
+  - _The per-form factor (main's answer to the first question)._ An entry's A_N is its substance's
+    in its reference form: a particulate surface, or for an ice, fresh snow or fine frost (0.97 in
+    the visible, Grenfell, Warren and Mullen 1994). This is a convention for the server's palette
+    sources; the synthetic H₂O entry's 0.965 follows it. A form's factor is its span's midpoint over
+    that reference, the same in B, V and R: for water ice, glacier 0.814, snow 0.928 and sea ice
+    0.856. Every other pair takes the entry's A_N unchanged.
+  - _Bearing._ The formula is Terzaghi's with Vesić's factors and shape factors, q_ult = c N_c s_c +
+    ½ ρ g B N_γ s_γ, read through EM 1110-1-1905 (Eq. 4-1, Table 4-6). Design note 2's "½ ρ g B
+    N_γq ξ_γq" mixes two conventions. The Sourcebook prints its form with no ½, because Durgunoglu
+    and Mitchell's N_γq is ½ N_γ for a surface footing (their 1973 eqs. 4.28a and 4.30, read by the
+    science check). The layer at depth B is the narrowest of the Sourcebook's overlapping intervals
+    that holds B; past the deepest it is the deepest, so a 1 m footing takes 30–60 cm. The
+    porosities are n = 1 − ρ ÷ 3.1, unrounded, from Table 9.4's bulk densities, so an entry of grain
+    density 3,100 kg m⁻³ returns the Sourcebook's ρ exactly. The pins are 5,368.6 and 206.5 kPa.
+  - _The table, source by source_ (each figure's doc comment carries its location). The modelled
+    rows, each a (form, family) pair:
+    - Regolith of silicate: shear from the Sourcebook's Tables 9.12 and 9.4 (pp. 510 and 484);
+      pad friction 0.20 (NAVFAC DM-7.02 Table 1, p. 7.2-63); V span 0.057–0.184 (Dollfus and
+      Bowell 1971, via the Sourcebook, p. 560).
+    - Dust of silicate: φ 18° and c 1.85 kPa, the midpoint of 0.7–3.0, with its porosity from
+      1,200 kg m⁻³ at the assumed 2,600 (USGS PP 1389's abstract, Table 37 on p. 130, and p. 121);
+      friction 0.20. Its span stays `None`: no source read gives Design note 8's 0.18–0.25 as a
+      normal albedo (Mustard and Bell 1994's Fig. 3 gives about 0.15 at 0.55 µm, a reflectance at
+      oblique geometry).
+    - Soil of silicate: Viking Lander 2's crusty to cloddy material, φ 35°, c 2.85 kPa, porosity
+      from 1,400 kg m⁻³; friction 0.20, its grains as fine as the drift's.
+    - Sand of silicate: friction 0.30. Sediment of silicate: friction 0.25.
+    - Glacier and sea ice of water ice: steel on ice by temperature, fourteen points from −97 to
+      −1 °C under a skate's edge (Liefferink et al. 2021, PRX 11, 011025, Fig. 1). Their spans:
+      glacier 0.69–0.89 (Bøggild et al. 2010; Warren et al. 2002), sea ice 0.70–0.96 (Brandt et
+      al. 2005).
+    - Snow of water ice: span 0.82–0.98 (Grenfell and Maykut 1977, via Warren 1982; Grenfell et
+      al. 1994).
+    - Frost of a volatile ice: span 0.4–1.0 (Warren, Wiscombe and Firestone 1990; Buratti et al.
+      2017). Glacier of a volatile ice: span 0.8–1.0 (Buratti et al. 2017).
+
+    Every other pair is `FormRow::UNMODELLED` and is labelled so: bedrock, volcanic rock, melt,
+    seabed, evaporite and organic sediment, and every pair of metal, salt or organic. Ice's
+    strength is `None` (Schulson and Duval 2009 not read), as are snow's (as planned), sand's
+    shear (no source read) and metal on rock (as planned).
+
+  - _Design note 8's spans, corrected in the code._ Glacier ice's 0.5–0.65 is broadband, and its
+    visible is 0.69–0.89. Aged snow reaches 0.82, not 0.85. Bare sea ice is 0.70, not 0.75–0.85.
+    The Moon's regolith is 0.057–0.184 (the Sourcebook's p. 560), not 0.07–0.20. The note's text
+    is left as written.
+  - _Spans not carried._ Design note 8's starting spans with no primary read stay `None`:
+    bedrock (basaltic 0.05–0.15, felsic 0.2–0.35), dry soil and sediment 0.10–0.30, desert sand
+    0.25–0.45, Martian dune sand 0.10–0.15, Martian bright dust 0.18–0.25, organic sediment
+    0.05–0.2 and evaporite 0.5–0.8. T10.a's clamp has no range for them.
+  - _Pad friction on ice, against Design note 2._ Kietzig et al. 2010's Fig. 2 was not read. The
+    points are Liefferink et al. 2021's Fig. 1, a slow kinetic friction of steel: 0.71 at −97 °C,
+    where Design note 2 has 0.3–0.5 at −100 °C, and 0.039 at −7.7 °C rising to 0.18 at −1 °C as
+    the slider ploughs, where it has 0.01–0.05 near 0 °C at speed. Frost of any ice, and snow, have
+    no friction: no source for them was read. Frost of water ice, a cold trap's exposed ice among
+    it, has no row, and takes its entry's albedo unchanged.
+  - _Glacier or frost._ With the species gone from the class, Design note 1's "by the condensable
+    plan 14 names" no longer chooses between `Glacier` and `Frost`. T1.b's classifier owes the rule
+    that does (massive ice against a thin condensate, by the ice field's share or thickness), and
+    reads Design note 1's `WaterIce` and `VolatileFrost` as `Glacier` and `Frost`.
+  - _The bright forms' L(0), for a ruling._ Design note 8 converts the bright classes' measured
+    hemispherical albedos to A_N "since bright classes have L near 0", and T10.b's test blends
+    "snow at L = 0". `limb_parameter` instead gives each form the largest L(0) the bound allows:
+    glacier ice of A_N 0.79 takes L(0) = 1, sea ice 0.83 takes 0.90, snow 0.90 takes 0.49, and
+    evaporite and CO₂ frost take 1. With f ≡ 1, the law's A_h at μ₀ = 1 is then 0.97 for glacier ice
+    against its measured 0.79, and 1.00 for sea ice and snow against 0.83 and 0.90. For snow this
+    is Design note 8's nadir anisotropy, R(0, 0) ÷ A_h of 0.9–1.0. The icy satellites support a
+    high L: Buratti 1984 found them "closely followed a lunar-like photometric function" up to
+    geometric albedos of about 0.55–0.60, Ganymede's Lommel–Seeliger share is 1, and Pluto's and
+    Charon's is 0.70, in Buratti's normalisation, about 0.58 in this crate's (all as Buratti et al.
+    2017, p. 12, quotes them; the primary not read).
+    Options: keep the bound rule, as built; or take L(0) = 0 for the ice forms and evaporites, as
+    Design note 8 assumes; or keep the rule and convert each measured span to A_N through the law,
+    A_N = A_h ÷ [1 + 0.227 L(0)], which leaves the forms' factors unchanged. Lean: as built, which
+    is continuous in A_N, keeps T10.a's solve piecewise linear, matches the icy satellites and
+    snow's anisotropy, and costs glacier and sea ice up to 23% too much total reflection. Asked of
+    "main"; T10.a and T10.b read the answer. The value of L(0) changes no contract, but T10.a's
+    solve and T10.b's shading follow it.
+  - _L(0) on the scaled albedo._ T10.a's scale c multiplies A_N, and L(0) is `limb_parameter` of
+    c A_N. That keeps the bound, and leaves p = c A_N [⅔ + ⅓ L(0)] piecewise linear in c, with
+    breaks where c A_N crosses 0.815 and 1.
+  - _Slopes._ `CLIFF_SLOPE` is 40° and `TRANSITION_HALF_WIDTH` 5°, as planned. Kleinhans et al.
+    2011's 40° is their time-averaged angle (§40), not the static one (§39 and Fig. 9), and the doc
+    comment now says so. `SNOW_SHED_SLOPE` is kept at 60° with a source: "Terrain steeper than 60°
+    is usually avalanche-free … It sloughs off as soon as it is deposited" (Schaerer 1977, Can.
+    Geotech. J. 14, 281, p. 286).
+  - _Citations corrected._ USGS PP 1389's Martian soils are in Table 37 (p. 130); the task text's
+    Table 7 is the report's Earth simulants. Warren, Wiscombe and Firestone 1990 is JGR 95 (B9).
+  - _Closed sets, for the composition audit._
+    - `MaterialClass`: fifteen forms.
+    - `PhaseLaw`: two laws.
+    - The modelled (form, family) rows: ten of ninety.
+    - The rows are keyed by R09's six `MechanicsFamily`s, so substances of one family share a
+      form's figures. A CO₂ frost and an N₂ frost share 0.4–1.0; basalt, granite and
+      phyllosilicate share the silicate rows.
+- **Deferred findings (T1.a, 2026-10-13 rule)** (each leaves the algorithm and the contracts as
+  they are, for "main"'s list).
+  - _Static or time-averaged repose._ Kleinhans et al.'s static angles are 41–55°, above the
+    band's 45° top, while `CLIFF_SLOPE` keeps 40°, the angle loose slopes relax to.
+  - _The spans as a clamp._ Design note 8's spans are Solar System anchors: the lunar regolith's is
+    the nearside's 0.057–0.184. They are too narrow for T10.a's clamp on a generated body, whose
+    silicate regolith may be as bright as a Vesta's (p about 0.4, from memory). The synthetic
+    feldspathic crust's 0.20 already lies above the lunar span. T10.a clamps by its own rule.
+  - _The A_h bound at f ≡ 1._ It is stricter than a backscattering surface's. Buratti et al.
+    2017's Pluto fit implies L(0) of about 0.58 at A_N 0.9–1.0, by the science check's conversion,
+    against `limb_parameter`'s 0–0.49. At grazing incidence the Lommel–Seeliger term's A_h tends to
+    4 A_N L with f ≡ 1. An entry's A_N above 1, which R09's palette allows (an Enceladus), breaks
+    the bound for every L, so P14.T49.c's test of "R10 Design note 8's bound", with its Enceladus
+    anchor, fails on such a row. T10.b's rows, which carry f, could relax the bound.
+  - _Vesić's N_γ at 54°._ The closed form may lie outside the range it was fitted over
+    (unverified), so the 1 m pin checks the formula, not N_γ.
+  - _Ice's strength and friction._ Schulson and Duval 2009, Bowden and Hughes 1939 and Kietzig et
+    al. 2010 were not read. Liefferink et al.'s slow (0.38 mm s⁻¹) kinetic friction stands, and is
+    unknown below −97 °C, where most icy bodies' ground lies.
+  - _Mars dust in V._ No source read gives a normal albedo in V, so the span stays `None`.
+  - _Viking cohesions._ Moore and Jakosky 1989 (Design note 2's 1.6, 1.1 and 5.1 kPa) was not
+    read; the abstract ranges' midpoints stand.
+  - _A grey factor._ Glacier and sea ice absorb more in R than in B, so a per-band factor would
+    follow P14.T49.c's spectra.
+  - _One shed slope._ `SNOW_SHED_SLOPE` is terrestrial snow's.
+  - _A golden of the table, for T1.b._ No golden pins the table's figures bit for bit, and T1.b's
+    planned goldens pin only (class, entry). T1.b adds one through `GoldenWriter` at the version it
+    bumps to: every modelled row, the slopes, the factors, `limb_parameter` and L(α) on a grid,
+    `BearingFactors` at the table's angles, the two lunar capacities, the friction at its knots and
+    `for_family`. It goes in a subdirectory (`tests/golden/material/`), since `golden_diff.py`
+    takes the files directly under `tests/golden/` for the test planet's, under
+    `TEST_PLANET_VERSION`; T1.b's `golden/material_*.golden` move there too.
+  - _`PhaseLaw`'s place is not its code._ `coded_enum!` gives its variants no discriminants, so
+    `PhaseLaw::Regolith as u8` would be 0, the unassigned code. T10.b indexes rows by `u8::from`
+    alone, with a test that row k is code k. R09's `wire/codes.golden`, which lists "every code a
+    payload carries", could add the phase codes (R09's file).
