@@ -5175,7 +5175,11 @@ rows' values.
     - each Solar System anchor within its range: Moon highland and mare, Mercury, Mars's bright
       dust, Europa, Enceladus (its albedo convention stated: NASA's fact sheet 1.08 geometric in
       V), Pluto's N₂ plains, Io, Titan's dunes;
-    - each row's directional-hemispherical albedo ≤ 1 per band (R10 Design note 8's bound);
+    - for each palette row, its own Hapke directional-hemispherical albedo ≤ 1 per band and its
+      normal albedo A_N ≤ 1.35, the particulate ceiling, whose anchor is Enceladus's A_N (1.35 by
+      Verbiscer and Veverka 1994's Hapke parameters, within the measured 0.9–1.4): the bright-forms
+      limb ruling replaced the old f ≡ 1 bound (R10's Design note 8 and "Deviations in T1.a, as
+      built", the limb follow-up; corrected 2026-10-14);
     - every row names its source and basis.
   - _Files:_ `substance/optics.rs`, `tables/substance_albedo.rs`, `tasks/substance_albedos.rs`.
   - _Accept:_ `cargo test -p hyperion-sim substance::optics`; `cargo test -p hyperion-fit substance_albedos`.
@@ -5208,6 +5212,9 @@ rows' values.
       `shape`, `wavelengthsNm`, `n` and `k` only, so that the record's τ(550) and the client's Mie
       use one source of truth and a file's prose (`name`, `paper`, `source`, `licence`,
       `reduction`, `standIn`) moves no output (decision-substance-names);
+    - a file's grid starts at or below 380 nm, and two start at 360 nm (`sulphuric-acid-75.json`
+      and the acid UV absorber's `sulphuric-acid-uv-absorber.json`, from R08.T5.d), so the task
+      finds 550 nm by wavelength in each file's own grid, never by index (added 2026-10-14);
     - a stand-in index carries its stand-in flag;
     - emitted to `tables/condensate_extinction.rs`.
   - _Tests:_

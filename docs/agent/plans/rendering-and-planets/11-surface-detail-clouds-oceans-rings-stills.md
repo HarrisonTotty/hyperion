@@ -313,7 +313,8 @@ ambiguous, the design note that reads it is named.
   in the kernels), each line slot reading its own pressure channel (plan 08's Risks, "Deviations in
   T4.d, as built"); and the medium the clouds and the ocean are drawn inside;
   `skyView(view): SkyViewTable` (R08.T9.a), the view's sky radiance by local azimuth and elevation
-  summed over the drawn suns, with the per-sun fallback in the same type, for reflecting the sky
+  summed over the drawn suns in one table, with no per-sun fallback (R08.T7's check held the table
+  within 2% of per-source tables near each source; corrected 2026-10-14), for reflecting the sky
   in the ocean, of a per-azimuth shape on an oblate body since R08.T6.f: `texture`, `size`,
   `scaleCdPerM2`, `zenith`, `azimuthOrigin`, `meridionalRadiusM`, `primeVerticalRadiusM`,
   `heightM`, `atmosphereM` and `sphere`, which is `{ bottomRadiusM, horizonAngleRad }` on a sphere
