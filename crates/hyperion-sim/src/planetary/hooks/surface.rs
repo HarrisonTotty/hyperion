@@ -14,6 +14,10 @@
 //!   ([`RadiationClass`]), the **climate's range** of temperature, and the **liquid-water flag**
 //!   from water's phase over that range ([`liquid_water`]).
 //!
+//! [`SurfaceConditions::with_climate`] then adds the **climate regime** (P14.T48.d,
+//! [`regime`]): its thermal regime, forcing and condensable, and the coarse model it names, from
+//! what the batch's later steps give.
+//!
 //! The surface gravity, which the column reads, is the bulk section's and is not repeated here
 //! (P14.T35.e).
 //!
@@ -106,7 +110,7 @@
 //! (Koll 2022, §3). It is extrapolated here to rotators and colder worlds, labelled. It does not
 //! hold where the bulk gas condenses on the night side (an N₂ or CO₂ collapse, Wordsworth 2015,
 //! ApJ 806, 180): no cutoff is applied here, which P14.T48.d's climate regime takes as its thin
-//! end.
+//! end ([`regime`]).
 //!
 //! # Held until the batch's bump
 //!
@@ -139,6 +143,10 @@ use crate::units::{
     WattsPerSquareMetre,
 };
 use crate::{GENERATOR_VERSION, GeneratorVersion, math};
+
+pub mod regime;
+
+pub use regime::{ClimateInputs, ClimateRegime, Forcing, ThermalRegime};
 
 #[cfg(test)]
 pub(crate) mod tests;
@@ -739,13 +747,16 @@ pub fn earth_xuv_flux() -> WattsPerSquareMetre {
 }
 
 /// A body's surface conditions at a time (P14.T24.a): its mean temperature, contrasts and range
-/// of temperature, its surface pressure and gases, the light it receives, and whether water can
-/// be liquid on it.
+/// of temperature, its surface pressure and gases, the light it receives, whether water can be
+/// liquid on it, and from the second stage its climate regime (P14.T48.d).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurfaceConditions {
     zonal: ZonalProfile,
     day_and_night: (Kelvin, Kelvin),
     locked: bool,
+    spin: SeasonalSpin,
+    air: AirTransport,
+    climate_regime: Option<ClimateRegime>,
     mean_surface_temperature: Kelvin,
     equator_pole_contrast_k: f64,
     day_night_contrast_k: f64,
@@ -840,13 +851,25 @@ impl SurfaceConditions {
         let zonal = ZonalProfile::of(&column, &inputs.spin, inputs.ocean_weight);
         let ends = zonal.ends;
         let equator_pole = ends.0 - ends.1;
-        let (day, night) = day_and_night(&column, &inputs.spin, inputs.material, floor);
+        let response = diurnal_response(&column, &inputs.spin, inputs.material, floor);
+        let (day, night) = day_and_night_of(&column, response);
         let range = climate_range(column.surface_temperature, ends, day, night, floor);
+        let air = AirTransport {
+            redistribution: heat_redistribution(&column),
+            diurnal_storage: response.and_then(|r| r.storage),
+            meridional_transport: zonal.transport_over_restoring(),
+        };
         Some(Self {
             zonal,
             day_and_night: (day, night),
             // A solar day that is not positive is no solar day, as `day_and_night` takes it.
             locked: !inputs.spin.solar_day.is_some_and(|day| day.value() > 0.0),
+            spin: SeasonalSpin {
+                solar_day: inputs.spin.solar_day.filter(|day| day.value() > 0.0),
+                ..inputs.spin
+            },
+            air,
+            climate_regime: None,
             mean_surface_temperature: column.surface_temperature,
             equator_pole_contrast_k: equator_pole,
             day_night_contrast_k: day.value() - night.value(),
@@ -959,6 +982,47 @@ impl SurfaceConditions {
     #[must_use]
     pub const fn liquid_water(&self) -> bool {
         self.liquid_water
+    }
+
+    /// The conditions with their climate regime (P14.T48.d, [`ClimateRegime::of`]), from what the
+    /// batch's later steps give, `inputs`: step 10 of science-p14-t24b-laws §4.6, after the
+    /// volatile history and the ice cover it reads.
+    ///
+    /// [`derive`](Self::derive) alone gives the first stage, with no regime: the conditions
+    /// [`PlanetarySystem::hooks_at`](crate::planetary::PlanetarySystem::hooks_at) publishes always
+    /// carry it. [`ClimateRegime::of`]'s example classifies an Earth.
+    #[must_use]
+    pub fn with_climate(self, inputs: &ClimateInputs<'_>) -> Self {
+        let regime = ClimateRegime::of(&self, inputs);
+        Self {
+            climate_regime: Some(regime),
+            ..self
+        }
+    }
+
+    /// The climate regime (P14.T48.d): its thermal regime, forcing and condensable, and the coarse
+    /// model it names; `None` before [`with_climate`](Self::with_climate).
+    #[must_use]
+    pub const fn climate_regime(&self) -> Option<ClimateRegime> {
+        self.climate_regime
+    }
+
+    /// How the air carries its heat, as the climate regime reads it.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) const fn air_transport(&self) -> AirTransport {
+        self.air
+    }
+
+    /// The conditions' first stage, with no climate regime, as [`derive`](Self::derive) gives
+    /// them: what a test compares a rebuilt derivation with.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn without_climate(self) -> Self {
+        Self {
+            climate_regime: None,
+            ..self
+        }
     }
 
     /// The annual-mean surface temperature at the latitude whose sine is `sine_latitude`, −1 to 1,
@@ -1256,6 +1320,24 @@ impl Column {
     fn gas_constant_j_per_kg_k(&self) -> f64 {
         MOLAR_GAS_CONSTANT / (self.molar_mass_g_per_mol * 1e-3)
     }
+}
+
+/// How a body's air carries its heat, as P14.T48.d's climate regime reads it ([`regime`]),
+/// computed once with the contrasts.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AirTransport {
+    /// Koll's redistribution of the air alone, ε = X ÷ (k + X) ([`heat_redistribution`]): zero
+    /// with no air.
+    pub(crate) redistribution: f64,
+    /// The column's storage over the solar day against its locked contrast's restoring,
+    /// ω C (1 − ε) ÷ `B_P`, ε the air's, the ground's and the floor's in series (the day–night
+    /// contrast's, [`diurnal_response`]); `None` for a world with no solar day, or where no light is
+    /// absorbed or nothing restores the column.
+    pub(crate) diurnal_storage: Option<f64>,
+    /// The zonal profile's meridional transport over its restoring, max(6D, W `B_P`) ÷ `B_eff`,
+    /// D after the dry world's share ([`ZonalProfile::transport_over_restoring`]): zero for a flat
+    /// profile.
+    pub(crate) meridional_transport: f64,
 }
 
 /// What [`SurfaceConditions::derive`] reads off its inputs before the contrasts: the column and its
@@ -1862,6 +1944,19 @@ impl ZonalProfile {
         }
     }
 
+    /// The `P₂` mode's meridional transport over the radiative restoring, max(6D, W `B_P`) ÷
+    /// `B_eff`, D after the dry world's share.
+    ///
+    /// It is under 1 where the air moves less heat poleward than radiation restores, so that each
+    /// latitude lies nearer its own radiative balance. Zero for a flat profile, and infinite where
+    /// the transport has no restoring to work against.
+    #[must_use]
+    pub(crate) fn transport_over_restoring(&self) -> f64 {
+        self.modal.map_or(0.0, |(transport, _)| {
+            (6.0 * transport.conductance).max(transport.weak) / transport.effective
+        })
+    }
+
     /// The annual-mean surface temperature at x = sin φ, K: the ends at x = 0 and 1, bit for bit,
     /// and between them the modal form at x, each mode at its own damping over the point's own
     /// restoring (science-p14-t24b-laws §4.3). Exact at no transport, `T_s` q(x)^¼ on an airless
@@ -2130,6 +2225,10 @@ fn regolith_redistribution(thermal_parameter: f64) -> f64 {
 /// over a day the column's vapour follows the surface's swing, not the air's. A locked world's are
 /// about its substellar axis, undamped; an airless body's, with no air to store, are undamped too.
 /// Both are `T_s` where no light is absorbed.
+///
+/// [`SurfaceConditions::derive`] takes the same response it keeps for the climate regime
+/// ([`diurnal_response`]), so this form is the tests'.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn day_and_night(
     column: &Column,
@@ -2137,27 +2236,65 @@ pub(crate) fn day_and_night(
     material: SurfaceMaterial,
     floor: Kelvin,
 ) -> (Kelvin, Kelvin) {
+    day_and_night_of(column, diurnal_response(column, spin, material, floor))
+}
+
+/// How the column's day and night respond to its redistribution and its rotation
+/// ([`diurnal_response`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct DiurnalResponse {
+    /// The redistribution ε, the air's, the ground's and the floor's in series, at most 1.
+    pub(crate) redistribution: f64,
+    /// The column's storage over the solar day against its locked contrast's restoring,
+    /// ω C (1 − ε) ÷ `B_P`; `None` for a world with no positive solar day.
+    pub(crate) storage: Option<f64>,
+}
+
+/// The redistribution and the diurnal storage of the column `column` under the spin `spin`, its
+/// ground of the material `material`, over a night floored at `floor` ([`day_and_night`]): `None`
+/// where no light is absorbed, or where nothing restores the column.
+#[must_use]
+pub(crate) fn diurnal_response(
+    column: &Column,
+    spin: &SeasonalSpin,
+    material: SurfaceMaterial,
+    floor: Kelvin,
+) -> Option<DiurnalResponse> {
     let t_s = column.surface_temperature.value();
     let planck = column.restoring_w_per_m2_k();
     if !(planck.is_finite() && planck > 0.0 && t_s > 0.0) {
-        return (column.surface_temperature, column.surface_temperature);
+        return None;
     }
     let through =
         (1.0 - heat_redistribution(column)) * (1.0 - ground_redistribution(column, spin, material));
     let floor_share = math::powi(floor.value() / column.equilibrium_temperature.value(), 4);
     let epsilon = (1.0 - through + floor_share).min(1.0);
     // A solar day that is not positive is no solar day, as `ground_redistribution` takes it.
-    let damping = spin
+    let storage = spin
         .solar_day
         .map(Seconds::value)
         .filter(|&day| day > 0.0)
-        .map_or(1.0, |day| {
-            1.0 / math::hypot(
-                1.0,
-                core::f64::consts::TAU / day * column.heat_capacity_j_per_m2_k() * (1.0 - epsilon)
-                    / planck,
-            )
+        .map(|day| {
+            core::f64::consts::TAU / day * column.heat_capacity_j_per_m2_k() * (1.0 - epsilon)
+                / planck
         });
+    Some(DiurnalResponse {
+        redistribution: epsilon,
+        storage,
+    })
+}
+
+/// [`day_and_night`] of the column `column` from its diurnal response `response`.
+#[must_use]
+fn day_and_night_of(column: &Column, response: Option<DiurnalResponse>) -> (Kelvin, Kelvin) {
+    let Some(response) = response else {
+        return (column.surface_temperature, column.surface_temperature);
+    };
+    let t_s = column.surface_temperature.value();
+    let epsilon = response.redistribution;
+    let damping = response
+        .storage
+        .map_or(1.0, |storage| 1.0 / math::hypot(1.0, storage));
     let day = t_s * math::powf(8.0 / 3.0 - 5.0 / 3.0 * epsilon, 0.25);
     let night = t_s * math::powf(epsilon, 0.25);
     (

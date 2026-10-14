@@ -2063,6 +2063,9 @@ fn the_conditions_are_pinned() {
         let name = name.to_lowercase();
         pin(&mut w, &name, conditions);
         w.f64(&format!("{name}_xuv_flux"), body.xuv_flux().value());
+        // Its climate regime (P14.T48.d), at its own figures' ice and not from a colder state.
+        let regime = regime::tests::regime_of(body, conditions, false);
+        regime::tests::pin_regime(&mut w, &name, Some(regime));
     }
     // Locked 1:1, a world keeps only its air's redistribution, undamped, over the floor.
     for name in ["Earth", "Venus"] {
@@ -2075,7 +2078,10 @@ fn the_conditions_are_pinned() {
             },
         )
         .unwrap();
-        pin(&mut w, &format!("{}_locked", name.to_lowercase()), &locked);
+        let name = format!("{}_locked", name.to_lowercase());
+        pin(&mut w, &name, &locked);
+        let regime = regime::tests::regime_of(body, &locked, false);
+        regime::tests::pin_regime(&mut w, &name, Some(regime));
     }
     let (_, earth, _) = found(&table, "Earth");
     let tilted = conditions_of(
@@ -2087,6 +2093,8 @@ fn the_conditions_are_pinned() {
     )
     .unwrap();
     pin(&mut w, "earth_at_90_degrees", &tilted);
+    let regime = regime::tests::regime_of(earth, &tilted, false);
+    regime::tests::pin_regime(&mut w, "earth_at_90_degrees", Some(regime));
     w.f64("earth_xuv_flux", earth_xuv_flux().value());
     let young = XuvHistory::new(SolarMasses::new(1.0), REFERENCE_SUN_ZAMS_LUMINOSITY).flux(
         Years::new(5e7),

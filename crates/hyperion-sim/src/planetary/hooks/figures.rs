@@ -2098,8 +2098,13 @@ impl GlobalFigures {
 
     /// The figures with what reads the surface conditions `conditions`, P14.T24.a's at this
     /// stage's heat flow and ocean weight θ, and the volatile history `history` (P14.T48.b) of
-    /// their liquid-water flag ([`VolatileHistory::derive`]): the second stage, steps 8–12 of
-    /// science-p14-t24b-laws §4.6, P14.T48.d's climate regime (step 10) yet to come.
+    /// their liquid-water flag ([`VolatileHistory::derive`]): the second stage, steps 8, 9, 11 and
+    /// 12 of science-p14-t24b-laws §4.6.
+    ///
+    /// P14.T48.d's climate regime, step 10, reads this stage's history and ice and is the
+    /// conditions'
+    /// ([`SurfaceConditions::with_climate`](crate::planetary::hooks::surface::SurfaceConditions::with_climate)):
+    /// the ice reads no regime, since an ice belt's band is the profile's own cold equator (§4.3).
     ///
     /// - **The published ocean** `f_o` ([`ocean_fraction`](Self::ocean_fraction)): the potential
     ///   ocean where the body holds liquid now, by the conditions' liquid-water flag or a
@@ -2436,6 +2441,14 @@ impl GlobalFigures {
     #[must_use]
     pub fn ice_fraction(&self) -> f64 {
         self.surface_ices.iter().fold(0.0, |sum, &(_, f)| sum + f)
+    }
+
+    /// The temperature below which the climate holds the ice cover, by the body's own state
+    /// ([`cover::ice_threshold`]): what P14.T48.d's climate regime reads beside
+    /// [`ice_fraction`](Self::ice_fraction) to tell an equatorial belt from caps.
+    #[must_use]
+    pub fn ice_threshold(&self) -> Kelvin {
+        cover::ice_threshold(self.state)
     }
 
     /// The ices at the surface as `(SubstanceId, area fraction)` (P14.T24.b): `H2O` alone here,

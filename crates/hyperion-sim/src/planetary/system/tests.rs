@@ -2697,9 +2697,12 @@ fn a_moon_s_published_conditions_read_its_planet_s_orbit() {
             let frame = rotation.frame();
             let under_planet = SeasonalSpin::of(frame, t, &seasonal, SeasonsFrom::Planet);
             let under_own = SeasonalSpin::of(frame, t, &orbit, SeasonsFrom::Own);
+            // The published conditions carry their climate regime (P14.T48.d), which the rebuilt
+            // first stage does not.
+            assert!(published.climate_regime().is_some(), "{:?}", moon.index());
             assert_eq!(
-                SurfaceConditions::derive(&inputs(under_planet)).as_ref(),
-                Some(published),
+                SurfaceConditions::derive(&inputs(under_planet)),
+                Some(published.clone().without_climate()),
                 "{:?}",
                 moon.index()
             );
@@ -2770,6 +2773,7 @@ fn the_published_surface_conditions_are_pinned() {
             w.f64(&format!("{name}_stellar_flux"), c.stellar_flux().value());
             w.line(&format!("{name}_radiation = {:?}", c.radiation()));
             w.line(&format!("{name}_liquid_water = {}", c.liquid_water()));
+            hooks::surface::regime::tests::pin_regime(&mut w, &name, c.climate_regime());
             let Section::Ok(f) = hooks.figures() else {
                 panic!("{name} has conditions but no figures");
             };
@@ -2821,6 +2825,93 @@ fn the_published_surface_conditions_are_pinned() {
     }
     assert!(pinned > 20, "{pinned}");
     golden!("planetary/surface_conditions_published", w.as_str());
+}
+
+/// P14.T48.d's published climate regime over the sample: every published body has one, read from
+/// its own conditions, history and ice cover. An airless body is airless-like in radiative
+/// equilibrium with no condensable; a world locked to its seasonal host takes the locked forcing
+/// and no seasonal model; an isothermal surface is an efficient air's; an ice belt came from a
+/// colder state with ice that covers some of its sphere, its poles free; and a condensable is a
+/// condensable row the air holds.
+#[test]
+fn the_published_climate_regimes_hold_over_the_sample() {
+    use crate::planetary::hooks::surface::regime::{by_redistribution, effective_redistribution};
+    use crate::planetary::hooks::surface::{Forcing, ThermalRegime};
+    use hyperion_surface::field::ClimateModelKind;
+    use std::collections::BTreeMap;
+
+    let t = UniverseTime::EPOCH;
+    let mut tally: BTreeMap<String, u32> = BTreeMap::new();
+    let mut count = |key: String| *tally.entry(key).or_insert(0) += 1;
+    let (mut published, mut slow, mut moved) = (0_u32, 0_u32, 0_u32);
+    for (ctx, system) in whole().iter().take(60) {
+        for body in system.bodies() {
+            let Some(hooks) = system
+                .hooks_at_under(ctx, body.index(), t, ConditionsHold::Published)
+                .unwrap()
+            else {
+                continue;
+            };
+            let (Section::Ok(c), Section::Ok(f)) = (hooks.surface(), hooks.figures()) else {
+                continue;
+            };
+            let index = body.index();
+            let regime = c
+                .climate_regime()
+                .unwrap_or_else(|| panic!("{index:?} is published with no regime"));
+            published += 1;
+            count(format!("thermal {:?}", regime.thermal()));
+            count(format!("forcing {:?}", regime.forcing()));
+            count(match regime.condensable() {
+                Some(id) => format!("condensable {}", id.substance().key().as_str()),
+                None => "condensable none".to_owned(),
+            });
+            count(format!("model {:?}", regime.model()));
+            if c.gases().is_empty() {
+                assert_eq!(regime.thermal(), ThermalRegime::AirlessLike, "{index:?}");
+                assert_eq!(
+                    regime.model(),
+                    ClimateModelKind::RadiativeEquilibrium,
+                    "{index:?}"
+                );
+                assert_eq!(regime.condensable(), None, "{index:?}");
+            }
+            if regime.forcing() == Forcing::Locked {
+                assert_ne!(regime.model(), ClimateModelKind::EnergyBalance, "{index:?}");
+            }
+            if regime.model() == ClimateModelKind::Isothermal {
+                assert_eq!(regime.thermal(), ThermalRegime::Efficient, "{index:?}");
+            }
+            if regime.forcing() == Forcing::IceBelt {
+                assert!(f.from_colder(), "{index:?}");
+                assert!(
+                    f.ice_fraction() > 0.0 && f.ice_fraction() < 1.0,
+                    "{index:?}"
+                );
+            }
+            if let Some(id) = regime.condensable() {
+                assert!(id.substance().phase().is_some(), "{index:?}");
+                assert!(
+                    c.gases().iter().any(|&(gas, x)| gas == id && x > 0.0),
+                    "{index:?}"
+                );
+            }
+            // "main"'s ruling of 2026-10-13: a slow rotator's label reads its damped
+            // redistribution, where Koll's literal ε would have read the air's alone.
+            let air = c.air_transport();
+            if !c.gases().is_empty() && air.diurnal_storage.is_some_and(|storage| storage <= 1.0) {
+                slow += 1;
+                if by_redistribution(air.redistribution)
+                    != by_redistribution(effective_redistribution(&air))
+                {
+                    moved += 1;
+                }
+            }
+        }
+    }
+    eprintln!("{published} published regimes: {tally:?}");
+    eprintln!("{slow} rotators with air in Koll's own regime, {moved} labels off his literal ε");
+    assert!(published > 100, "{published}");
 }
 
 /// Pins the crater contract of the published figures `f` under `name`: its source rule, crust,

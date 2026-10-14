@@ -1,7 +1,7 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23, T24.a, T24.b, T48.a–c, T48.f):
+//! Built so far (P14.T23, T24.a, T24.b, T48.a–d, T48.f):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
@@ -11,7 +11,8 @@
 //!   later generators read.
 //! - [`surface`]: the body's [`SurfaceConditions`] (P14.T24.a): its mean temperature and signed
 //!   contrasts, its surface pressure and gases as mole fractions, the light and radiation it
-//!   receives and whether water can be liquid on it; held until the 21 → 22 batch's bump.
+//!   receives, whether water can be liquid on it, and its [`ClimateRegime`] (P14.T48.d); held
+//!   until the 21 → 22 batch's bump.
 //! - [`figures`]: the body's [`GlobalFigures`] (P14.T24.b), so far its heat flow, tectonic
 //!   regime, magnetic field, present outgassing and subsurface ocean, its surface age and crater
 //!   contract (P14.T48.c) with its [`Impactors`] (P14.T48.f), its volcanism level, continents and
@@ -41,7 +42,7 @@ pub use figures::{
     TectonicRegime, impactors,
 };
 pub use seed::{SurfaceSeed, surface_seed};
-pub use surface::{RadiationClass, SurfaceConditions};
+pub use surface::{ClimateRegime, RadiationClass, SurfaceConditions};
 
 use crate::planetary::derive::MassFractions;
 use crate::planetary::derive::atmosphere::VolatileInventory;

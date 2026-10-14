@@ -137,35 +137,12 @@ pub struct WetEpoch {
 }
 
 /// How much of the climate's heat the air moves from day to night, the classifier's thermal
-/// regime (P14.T48.d, after Koll 2022's redistribution factor f = 2/3 − (5/12) X ÷ (k + X) at
-/// k = 2).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum ThermalRegime {
-    /// Airless-like: X below 0.087 k, so each point sits near its own radiative equilibrium.
-    AirlessLike,
-    /// Between the two, with a redistribution factor between 2/3 and 1/4.
-    Transitional,
-    /// Efficient redistribution, X above 15.7 k.
-    Efficient,
-}
+/// regime: plan 14's, P14.T48.d's, re-exported here for the pass.
+pub use crate::planetary::hooks::surface::ThermalRegime;
 
-/// What drives the climate's cycle, the classifier's forcing (P14.T48.d): from the locking state,
-/// the solar day and the obliquity.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Forcing {
-    /// A fast rotator's seasons, its ice at the poles.
-    Seasonal,
-    /// A fast rotator at an obliquity of 54–126° that reached its state from a colder one, with an
-    /// equatorial ice belt (the 54° of Kilic, Raible and Stocker 2017, ApJ 844, 147, which Kilic
-    /// et al. 2018 reach only from a colder state; with P14.T48.b's history).
-    IceBelt,
-    /// A slow rotator, past the onset that rises with flux, its circulation converging on the
-    /// substellar point: in Yang et al. 2014's Table 1 (sidereal rotation periods, at an orbital
-    /// period of 225 d), between 8 and 16 d at 1.40 S⊕ and between 32 and 48 d at 1.92 S⊕.
-    SlowRotator,
-    /// A world locked to its host, in tidally locked coordinates about the substellar axis.
-    Locked,
-}
+/// What drives the climate's cycle, the classifier's forcing: plan 14's, P14.T48.d's, re-exported
+/// here for the pass.
+pub use crate::planetary::hooks::surface::Forcing;
 
 /// A body's climate regime, the classifier of the rendering brainstorm's open question 9
 /// (P14.T48.d): its three fields and the coarse model it names.
@@ -177,12 +154,25 @@ pub struct ClimateRegime {
     pub thermal: ThermalRegime,
     /// What drives the cycle.
     pub forcing: Forcing,
-    /// The climate's condensable: the most massive condensate whose phase changes inside the
-    /// climate's range, or `None` (P14.T48.d, by registry loop): water on Earth, carbon dioxide on
-    /// Mars, methane on a Titan.
+    /// The climate's condensable: the condensable with the largest partial pressure whose phase
+    /// changes inside the climate's range, or `None` (P14.T48.d, by registry loop; signoff-3.md,
+    /// item 1.12): water on Earth, carbon dioxide on Mars, methane on a Titan.
     pub condensable: Option<SubstanceKey>,
     /// The coarse model the regime names, which the field's header carries (Design note 8).
     pub model: ClimateModelKind,
+}
+
+impl From<&crate::planetary::hooks::surface::ClimateRegime> for ClimateRegime {
+    /// Plan 14's regime in the pass's vocabulary, its condensable by its registry row's key, as
+    /// [`CoarseInputs::for_body`] reads the record from P14.T48.e.
+    fn from(regime: &crate::planetary::hooks::surface::ClimateRegime) -> Self {
+        Self {
+            thermal: regime.thermal(),
+            forcing: regime.forcing(),
+            condensable: regime.condensable().map(|id| id.substance().key()),
+            model: regime.model(),
+        }
+    }
 }
 
 /// Which of a body's crusts, or its bulk material, is at its surface, the lid's (P14.T51.c's `lid`;

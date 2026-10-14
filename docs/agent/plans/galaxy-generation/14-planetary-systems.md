@@ -11570,6 +11570,166 @@ tables::gauss_legendre`.
     Pierrehumbert 2011, Budyko 1969 and North 1975 for the −10 °C edge, Kiefer 2003, Watts 2001,
     McGovern and Solomon 1993, Carr and Head 2003, and Höning and Spohn 2023 beyond the science
     check's reading (its models are Earth-sized, so other masses are an extrapolation).
+- **Deviations in P14.T48.d, as built (`p14-batch`, 2026-10-13).** `GENERATOR_VERSION` stays 21:
+  the regime is published only behind T24.a's `ConditionsHold` (`SURFACE_CONDITIONS_VERSION` 22),
+  and no v21 record moves. It is batch step 5, §4.6's step 10 (science-p14-t24b-laws).
+  - _Where it lives._ `hooks/surface/regime.rs` (new): `ClimateRegime` (private fields; getters
+    `thermal`, `forcing`, `condensable`, `model`) with `ClimateRegime::of(conditions, inputs)`,
+    `ClimateInputs`, `ThermalRegime` and `Forcing` (moved from R09's `surface/inputs.rs`, which
+    re-exports them as it does `TectonicRegime`), `climate_condensable`, `surface_reservoirs`,
+    `slow_rotator_onset`, `carbon_dioxide_collapse_pressure` and their constants, with the
+    crate-private `effective_redistribution`, `thermal_of`, `collapsed` (over a `NightAir`) and
+    `model_of`.
+    `hooks/surface.rs`: `SurfaceConditions::with_climate` and `climate_regime` (`None` before the
+    second stage), with the spin and the air's transport (`AirTransport`) kept from `derive`;
+    `day_and_night` factored through `diurnal_response`, bit for bit; and
+    `ZonalProfile::transport_over_restoring`. `hooks/figures/cover.rs`: `ice_threshold`, which
+    `ice_fraction` now reads, bit for bit, and `GlobalFigures::ice_threshold`. `system.rs`:
+    `published_surface` classifies after the second stage. R09's `ClimateRegime` gains `From<&hooks::surface::ClimateRegime>`, the
+    condensable by its registry key, for T48.e's `for_body`; its condensable's doc reads
+    signoff-3.md's partial-pressure rule.
+  - _The order._ The regime reads the cover, `ice_fraction`, not T13.c's `Snowball` label (§4.x.2),
+    and the cover reads no regime: an `IceBelt`'s band is the profile's cold equator with no extra
+    hysteresis (§4.3), and the ice is water's whatever the condensable (T51.a widens both). So step
+    10 runs after step 11's cover, with no loop, and no figure of part 4 moves. "T24.b's ice fraction
+    then reads the regime" is met by Part 4's ice as built: the eyeball's nightside, the profile's
+    cold equator at high obliquity, and an ice-rich crust's or a `Snowball`'s own ice.
+  - _Readings of the task._
+    - **The thermal regime.** No air is airless-like. Koll's thresholds are applied in
+      ε = X ÷ (k + X), T24.a's `heat_redistribution` (X ÷ k of 0.087 and 15.7 are f within 5% of
+      2/3 and 10% of ¼, R09's research reading, which the lane and the science check reproduce to
+      three digits). **Ruled by "main" (2026-10-13), the science check's form:** the thresholds read one
+      effective redistribution, 1 − κ(1 − ε_air), κ = 1 ÷ √(1 + (ω C (1 − ε) ÷ `B_P`)²) T24.a's
+      damping of the day–night departures (`effective_redistribution`), on both sides of
+      ω C (1 − ε) ÷ `B_P` = 1. It is Koll's own ε on a locked world (κ = 1) and as the storage
+      vanishes, with no seam; the task's "for locked rotators, and for rotators whose solar day is
+      long" now places the thin end only. A slow rotator's label moves off Koll's literal f where
+      κ < 1 pushes it over a threshold (counted over the sample below). The generated Earth
+      (κ 0.020) is efficient and the measured Mars of 6 mbar (κ 0.27) transitional, as R09's
+      reference worlds take them.
+    - **The thin end**, read in Koll's own regime (a locked world, or ω C (1 − ε) ÷ `B_P` ≤ 1).
+      Wordsworth's eq. 43 (read at source: arXiv:1412.5575, its Table 2's coefficients at 1 and
+      10 M⊕, F in W m⁻², 0.2–3 F₀ with F₀ = 1,366 W m⁻²; 0.142 bar on an Earth at F₀, his
+      abstract's 0.14; the science check confirmed Table 2 on arXiv v1) decides an air of at least
+      95% CO₂ by number (`PURE_CARBON_DIOXIDE_SHARE`, the lane's) on a body of 1–10 M⊕ inside the
+      fit's fluxes, with log₁₀ `p_crit` linear in log₁₀ M between his two masses (the lane's).
+      Elsewhere the thin end is science-p14-t24a-climate §4's "cut where the bulk gas condenses":
+      the bulk gas, the largest by number, condensed at its partial pressure at T24.a's nightside
+      mean temperature, on the registry's diagram (`collapsed`, `NightAir`). **A bulk gas the
+      surface holds a reservoir of does not collapse** (the lane's): it is held at its saturation
+      pressure, so its night's frost is its own cycle, the condensable's, and its pressure is its
+      cold trap's, P14.T51.a's (22 → 23). It decides the pinned locked N₂ airs at 64 and 78 K
+      (`02000b2ca0000001.1000`, `.1100`) and the 516 K steam `Snowball` (`02000b2ca0000000.0400`),
+      which would otherwise collapse a hair under the saturation temperature their reservoir holds.
+    - **The forcing**, in order: locked (no positive solar day, T24.a's own test; the conditions
+      keep the spin with a solar day that is not positive as none); a slow rotator where the
+      sidereal period is at least `slow_rotator_onset` (a period that is not finite and positive
+      is one), the geometric means of Yang et al.'s brackets at their own fluxes (11.31 d at
+      1,900 W m⁻², 1.396 S⊕; 39.19 d at 2,615 W m⁻², 1.921 S⊕; Table 1's third group, read at
+      source by the science check), log-linear between and held beyond (the lane's; both holds
+      extrapolate), so a world slower than 11.3 d is a slow rotator under any fainter light; an
+      ice belt where the equator takes less of the year's light than the poles (53.9–126.1°,
+      `annual_insolation`), the body came from a colder state (T48.b) and its cover is a belt
+      (0 < `f_ice` < 1, the pole's annual mean at or above the cover's threshold,
+      `GlobalFigures::ice_threshold`); seasonal otherwise. The belt test is met by the label: the
+      cover is the profile's cold equator either way (§4.3; Kilic et al.'s hysteresis is §4.9's
+      deferral), so a 90° world started warm publishes the same equatorial ice under `Seasonal`,
+      whose doc says so, and which R09 places coldest first. The flux is T24.a's orbit-averaged
+      stellar flux.
+    - **The condensable** is the task's rule, the saturation temperature at x `p_s` read as
+      `p_sat`(`T_cold`) ≤ x `p_s` ≤ `p_sat`(`T_warm`) on the registry's curve (inclusive), over
+      the rows the air holds (x > 0). "The surface holds a reservoir" (`surface_reservoirs`) is
+      the air holding the row at its cap at the mean surface temperature: T13.c's saturation test
+      for water, nitrogen, carbon dioxide and argon (equal to the bit, as T24.a's gain reads it),
+      and T24.f's humidity cap for methane, met to 10⁻⁹; none over a surface not above 0 K. An
+      airless body takes none: its air holds nothing. A seasonal cap is no reservoir by this test,
+      and the orbit-mean range's cold end lies above a thin CO₂ air's frost point (the measured
+      Mars's 165.5 K against 148 K): the measured Mars takes CO₂ only with its caps given by hand
+      (H₂O and CO₂), and water without them, which the test asserts. The test reads
+      `climate_condensable`, `thermal_of` and `model_of` on the hand-built column, since no
+      `SurfaceConditions` is built from one.
+    - **The coarse model.** Radiative equilibrium for an airless-like world and for a thin air, a
+      transitional one whose `P₂` transport max(6D, W `B_P`) is under `B_eff` (the measured Mars:
+      0.069); an isothermal surface for an efficient air whose climate's range spreads its
+      emission by at most `ISOTHERMAL_FLUX_SPREAD`, 0.0998, Koll's efficient threshold's own
+      tolerance (the lane's; Venus 1.4%, Earth 84%); the body-fixed energy-balance model for a
+      locked world and the seasonal one otherwise. The isothermal test admits, beside the
+      Venus-likes, Titan (its range 93.94–94.02 K) and the pinned cold N₂ airs at 50–136 K.
+  - _Figures_ (the table about the present Sun, at its own spin, not from a colder state; thermal,
+    forcing, condensable, model):
+    - Earth: efficient (κ 0.020), seasonal, H₂O, the seasonal energy-balance model.
+    - Venus: efficient, a slow rotator, none, isothermal (its CO₂ supercritical, its trace water
+      above its critical point).
+    - Mercury and the Moon: airless-like, slow rotators (58.6 and 27.3 d), none, radiative
+      equilibrium. Ganymede and Ceres: airless-like, seasonal, none, radiative equilibrium.
+    - The generated Mars: efficient (0.11 bar of 98.6% N₂, κ 0.038), seasonal, H₂O, the seasonal
+      energy-balance model.
+    - Titan: efficient, a slow rotator (15.9 d), CH₄ by its reservoir, isothermal.
+    - A locked Earth: transitional, locked, H₂O, the body-fixed model; a locked Venus isothermal;
+      Earth at 90°, its equator 281 K, seasonal with no ice.
+    - The measured Mars by hand: transitional (κ 0.27, ε_air 0.050), its transport 0.069, so
+      radiative equilibrium, and CO₂ with its caps (R09's reference Mars).
+    - Yang's onset: 11.31 d at 1.40 S⊕ and 39.19 d at 1.92 S⊕ (as rounded in the plan); the 90°
+      test world, an Earth at 1.1 au, is temperate at 270.8 K, its equator 262.7 K and its poles
+      286.2 K, ice 0.129.
+  - _Over the sample_ (60 systems, 877 published bodies): thermal 762 airless-like, 33
+    transitional, 82 efficient; forcing 601 seasonal, 173 locked, 103 slow rotators, no ice belt;
+    condensable 823 none, 30 H₂O, 15 N₂, 9 CO₂; model 764 radiative equilibrium, 68 isothermal,
+    36 body-fixed, 9 seasonal energy balance. Of the 25 rotators with air in Koll's own regime, the
+    ruled effective redistribution moves no label off his literal ε.
+  - _Tests_ (`hooks/surface/regime/tests.rs`, and the sample's in `system/tests.rs`): each of the
+    task's, the 90° world an Earth moved out to 1.1 au, where its equator's annual mean freezes
+    first (a test of the model's own profile: at 0.83 S⊕ it lies under the 0.93–1.10 at which
+    Kilic et al. found belts); beyond them, the poles' guard, the table's airless bodies, the
+    reservoirs, the condensable's ties and ends, Wordsworth's fit by hand and its bounds, the
+    reservoir's exemption from collapse, Koll's thresholds, the label's continuity across
+    ω C (1 − ε) ÷ `B_P` = 1, the second stage, R09's reference Earth, Moon and Ceres read from
+    the table by key, and over the sample each regime's consistency with its conditions and
+    figures. P14.T24.a's moon test now compares the published conditions without their regime.
+  - _Pins_, re-blessed at header 21, extensions only (`golden_diff.py`: no value moves):
+    `planetary/surface_conditions` gains 44 lines (the table's eight bodies, the locked Earth and
+    Venus and Earth at 90°, four each) and `planetary/surface_conditions_published` 444 (its 111
+    bodies: 88 airless-like, 6 transitional, 17 efficient; 74 seasonal, 25 locked, 12 slow; 6 H₂O,
+    4 N₂, 1 CO₂; 89 radiative equilibrium, 16 isothermal, 5 body-fixed, 1 seasonal). The two
+    refactors (`day_and_night`, `ice_fraction`) move no bit.
+  - _Accepted by_ `cargo test -p hyperion-sim planetary::hooks::surface`, with
+    `planetary::system::tests::the_published` and `…::a_moon_s_published` for the sample test,
+    the published pin and the moon test.
+- **Deferred findings (2026-10-13 rule)**, from P14.T48.d:
+  - The generated Mars takes water, not CO₂ (signoff-3.md F-e expects CO₂ for Mars-likes): its
+    generated air is 0.11 bar of 98.6% N₂ with 350 ppm of CO₂, which never condenses inside its
+    orbit-mean range, and T13.c holds CO₂ at `p_sat`(`T_s`), so no generated body holds a seasonal
+    CO₂ cap until P14.T51.a's cold trap (22 → 23) ("main", 2026-10-13: noted as deferred).
+  - Titan and the cold N₂ airs (50–136 K) take the isothermal model, which the brainstorm keeps for
+    "a Venus": Titan's generated contrasts (0.068 K, 0.009 K) are about 40 times under Cassini's
+    2–4 K (Jennings et al. 2016), T24.a's meridional transport for cold, thick, low-k airs. At the
+    measured contrasts its spread, 9–19%, straddles the threshold.
+  - The isothermal tolerance compares warmest with coldest at Koll's f ÷ ¼ (0.0998); at his
+    efficient ε the Cowan–Agol day–night flux spread is 17%. No table body changes either way.
+  - Yang et al.'s Table 1 brackets the rotation that holds a planet off the runaway, which the plan
+    reads as the slow-rotator onset; the holds below 1,900 W m⁻² and above 2,615 W m⁻² are
+    extrapolations (at Earth's flux their climates change gradually with the rotation, slow
+    rotators at about 100 d and more). Titan, the Moon, Mercury and Venus come out slow rotators.
+  - Wordsworth's fit is for locked planets about AD Leo (albedo 0.2, 250 tiu, pure CO₂); here it
+    reads any host and the slow rotators in Koll's regime. At 0.2 F₀ his GCM collapsed at every
+    pressure to 10 bar, where the fit gives 2.9 bar (1 M⊕) and 8.3 bar (10 M⊕). The other gases'
+    test reads the night's mean, not its minimum (Wordsworth's T_min), so it under-reads collapse;
+    an air of 90% CO₂ falls to it, a step at 95%.
+  - The effective redistribution reads the air's heat capacity whatever its optical depth (T24.a's
+    κ), so a thick but nearly transparent air (the generated Mars, 0.11 bar, 98.6% N₂) is
+    efficient where a clear air's night would fall tens of kelvin.
+  - An airless body takes no condensable though it holds ices (R09's reference Ceres agrees); an
+    ice belt needs a colder past on an airless body too, where Kilic et al.'s hysteresis is a
+    climate's.
+  - A later condensable row takes T13.c's cap test as its reservoir until P14.T51.a names its own;
+    the methane cap's tolerance is 10⁻⁹.
+  - The measured-Mars fixture (T24.a's) reads the Mars fact sheet before its 2025 revision (6.1
+    mbar, 210 K, 3.71 m s⁻², 43.34 g mol⁻¹, against 6.36 mbar, about 214 K, 3.73 and 43.49 now).
+  - Sources not read at the build: Yang et al. 2014 (read by the science check), Kilic et al. 2018
+    beyond its abstract and §1 (the science check), Pierrehumbert 2011.
+  - **Docs lane:** the task's text for the ruled effective redistribution, the reservoir exemption,
+    the Yang fluxes in W m⁻² (1,900 and 2,615), and R09's Design note 3 ("Koll's factor … at k =
+    2", now the body's own k).
 
 - **Closed sets, for the composition audit** (owner, 2026-10-09: the universe must be "complete
   and scientifically authentic", able to "handle any atmosphere/surface composition one might

@@ -122,7 +122,10 @@ use crate::planetary::hooks::figures::{
     ImpactorSources, MoonBirth, SourceBelt, VolatileHistory, VolatileHistoryInputs, WindowAt,
     WindowEntryInputs, past_outgassing, relief, window_entry,
 };
-use crate::planetary::hooks::surface::{ConditionsHold, SeasonalSpin, SeasonsFrom, SurfaceInputs};
+use crate::planetary::hooks::surface::regime::surface_reservoirs;
+use crate::planetary::hooks::surface::{
+    ClimateInputs, ConditionsHold, SeasonalSpin, SeasonsFrom, SurfaceInputs,
+};
 use crate::planetary::hooks::{
     self, BodyHooks, BulkComposition, GlobalFigures, Subsurface, SurfaceConditions, SurfaceSeed,
 };
@@ -1937,7 +1940,8 @@ impl PlanetarySystem {
     /// reads the conditions' liquid-water flag, the hosts' light over the primary's past (each
     /// star at its state then, along the primary's orbit then for a star of its zone and the
     /// pair's for a companion), and the body's outgassing then, and their ocean, ice and cloud the
-    /// conditions.
+    /// conditions. The conditions' climate regime (P14.T48.d) reads the body's mass, the
+    /// reservoirs its atmosphere holds, the figures' history and their ice.
     /// Both are [`Section::NotApplicable`] for a body in the gas-envelope state or not present, and
     /// [`Section::NotModelled`] for one with no rotation law (every body [`generate_planets`]
     /// makes) or whose derivation this version does not compute.
@@ -3056,7 +3060,8 @@ struct SurfaceCraters {
 /// science-p14-t24b-laws §4.6's order: T48.b's start condition from the past sky, the figures'
 /// first stage with the continents it gates, the conditions at the figures' heat flow and ocean
 /// weight θ, and the second stage from the conditions: the volatile history from their
-/// liquid-water flag (P14.T48.b), the ocean, the ice and the cloud.
+/// liquid-water flag (P14.T48.b), the ocean, the ice and the cloud, and then the conditions'
+/// climate regime (P14.T48.d), which reads the history and the ice.
 #[must_use]
 fn published_surface(
     time: &SurfaceTime<'_>,
@@ -3153,6 +3158,17 @@ fn published_surface(
         outgassing: |age: Years| past_outgassing(&figure_inputs, age),
     });
     let figures = figures.with_surface(&conditions, history);
+    // Step 10, the climate regime (P14.T48.d): it reads the cover, which reads no regime (an ice
+    // belt's band is the profile's cold equator, science-p14-t24b-laws §4.3), so it follows the
+    // second stage with no loop.
+    let reservoirs = surface_reservoirs(sky.atmosphere);
+    let conditions = conditions.with_climate(&ClimateInputs {
+        mass: interior.mass,
+        reservoirs: &reservoirs,
+        from_colder: figures.from_colder(),
+        ice_fraction: figures.ice_fraction(),
+        ice_threshold: figures.ice_threshold(),
+    });
     (Section::Ok(conditions), Section::Ok(figures))
 }
 
