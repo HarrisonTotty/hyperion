@@ -66,6 +66,42 @@ const T5D_KEYS = [
   "lava_glass",
 ];
 
+/**
+ * The liquids R08.T5.g adds, each by its key, phase and variant, with its file's provenance: seawater
+ * as liquid water's variant, the cryogenic liquids, and molten sulphur's stand-in.
+ */
+const T5G_LIQUIDS = [
+  ["H2O", "S35", "measured"],
+  ["N2", undefined, "derived"],
+  ["NH3", undefined, "derived"],
+  ["C2H6", undefined, "standIn"],
+  ["S8", undefined, "standIn"],
+] as const;
+
+/** The key R08.T5.g adds to the registry's files: liquid ethane (the others add a phase). */
+const T5G_KEYS = ["C2H6"];
+
+/** A liquid's own file, by key and variant: never a named analogue. */
+function liquidOf(key: string, variant?: string): (typeof MATERIAL_FILES)[number] {
+  const file = MATERIAL_FILES.find(
+    (f) => f.key === key && f.phase === "liquid" && f.variant === variant,
+  );
+  if (file === undefined) {
+    throw new Error(`no liquid file for ${key}`);
+  }
+  return file;
+}
+
+/** A file's value at a wavelength on its grid, nm. */
+function valueAt(values: Float64Array, file: (typeof MATERIAL_FILES)[number], nm: number): number {
+  return values[file.wavelengthsNm.indexOf(nm)] ?? Number.NaN;
+}
+
+/** The imaginary index of an absorption coefficient a, m⁻¹, at a wavelength, nm: k = aλ ÷ 4π. */
+function absorptionK(perM: number, nm: number): number {
+  return (perM * nm * 1e-9) / (4 * Math.PI);
+}
+
 /** A file's grid fields, with n and k of the grid's own length. */
 function onGrid(grid: ReadonlyArray<number>): object {
   return { wavelengthsNm: grid, n: grid.map(() => 1.33), k: grid.map(() => 0) };
@@ -722,5 +758,139 @@ describe("Ar ice, measured (decision-r08-t5d ruling 3)", () => {
     const held = Array.from(file.n.slice(file.wavelengthsNm.indexOf(645)));
     expect(new Set(held)).toEqual(new Set([1.2693]));
     expect(file.k.every((k) => k === 0)).toBe(true);
+  });
+});
+
+describe("the liquids (R08.T5.g)", () => {
+  it.each(T5G_LIQUIDS)(
+    "file liquid %s, variant %s, as a sphere, %s",
+    (key, variant, provenance) => {
+      const file = liquidOf(key, variant);
+      expect([file.shape, file.provenance]).toEqual(["sphere", provenance]);
+      const resolved = resolveMaterial(key, {
+        phase: "liquid",
+        ...(variant === undefined ? {} : { variant }),
+      });
+      expect(resolved.file).toBe(file);
+      expect(resolved.provenance).toBe(provenance);
+    },
+  );
+
+  it("leave every key's default file as it was", () => {
+    expect(resolveMaterial("H2O").file?.name).toBe("liquid H2O at 298 K");
+    expect(resolveMaterial("H2O", { phase: "liquid" }).file?.variant).toBeUndefined();
+    expect(["N2", "NH3", "S8"].map((key) => resolveMaterial(key).file?.phase)).toEqual([
+      "solid",
+      "solid",
+      "solid",
+    ]);
+    expect(resolveMaterial("C2H6").file?.phase).toBe("liquid");
+  });
+
+  it("hold every key of R08.T5.g's list", () => {
+    const keys = new Set(MATERIAL_FILES.map((f) => f.key));
+    expect(T5G_KEYS.filter((key) => !keys.has(key))).toEqual([]);
+  });
+
+  it("give water's k at 440 nm within 10% of Pope and Fry 1997's", () => {
+    // Pope and Fry's a = 0.00635 m⁻¹ at 440 nm (their table, as omlc.org gives it): k = aλ ÷ 4π.
+    const popeFry = (0.00635 * 440e-9) / (4 * Math.PI);
+    expect(Math.abs(refractiveIndex("H2O", 440).index.k / popeFry - 1)).toBeLessThan(0.1);
+  });
+
+  it("take water's k from Pope and Fry to 725 nm and Hale and Querry's from 750 nm", () => {
+    // Pope and Fry's 0.0565 m⁻¹ at 550 nm and 1.489 m⁻¹ at 725 nm; Hale and Querry's 1.56 × 10⁻⁷
+    // and 1.48 × 10⁻⁷ at 750 and 775 nm.
+    const water = liquidOf("H2O");
+    expect(Math.abs(valueAt(water.k, water, 550) / absorptionK(0.0565, 550) - 1)).toBeLessThan(
+      5e-6,
+    );
+    expect(Math.abs(valueAt(water.k, water, 725) / absorptionK(1.489, 725) - 1)).toBeLessThan(5e-6);
+    expect([valueAt(water.k, water, 750), valueAt(water.k, water, 775)]).toEqual([
+      1.56e-7, 1.48e-7,
+    ]);
+  });
+
+  it("keep water's n Hale and Querry's: 1.3406 at 380 nm, 1.333 at 550 nm, 1.3298 at 780 nm", () => {
+    // R08.T5.g changes k alone; IAPWS R9-97's better n is recorded in the file, not adopted.
+    const water = liquidOf("H2O");
+    expect([380, 550, 780].map((nm) => valueAt(water.n, water, nm))).toEqual([
+      1.3406, 1.333, 1.3298,
+    ]);
+    expect(water.n.every((n, i) => i === 0 || n <= (water.n[i - 1] ?? 0))).toBe(true);
+    expect(water.reduction).toContain("A better open n is recorded and not adopted");
+  });
+
+  it("give seawater water's k, and n raised by Quan and Fry's salinity terms at S = 35", () => {
+    const water = liquidOf("H2O");
+    const sea = liquidOf("H2O", "S35");
+    expect(Array.from(sea.k)).toEqual(Array.from(water.k));
+    const rise = Array.from(sea.n, (n, i) => n - (water.n[i] ?? Number.NaN));
+    expect(Math.min(...rise)).toBeGreaterThan(0.0061);
+    expect(Math.max(...rise)).toBeLessThan(0.0068);
+    expect(rise.every((r, i) => i === 0 || r <= (rise[i - 1] ?? 0) + 1e-5)).toBe(true);
+  });
+
+  it("estimate liquid C2H6 from rayleigh.ts's row at the liquid's density, about 1.40 at 550 nm", () => {
+    // The tool holds its own copy of the row; this catches drift. 21.53485 mol/l at 94 K is the
+    // NIST Chemistry WebBook's (Bücker and Wagner 2006); the file holds the estimate to six figures.
+    const gas = GAS_DISPERSION.C2H6;
+    const file = liquidOf("C2H6");
+    const idealMolarVolume =
+      ((6.022_140_76e23 * 1.380_649e-23 * gas.referenceK) / gas.referencePa) * 1e6;
+    for (const [i, nm] of file.wavelengthsNm.entries()) {
+      const x =
+        (lorentz(1 + gas.nMinusOne(nm)) * gas.compressibility * idealMolarVolume) /
+        (1_000 / 21.534_85);
+      const estimate = Math.sqrt((1 + 2 * x) / (1 - x));
+      expect(Math.abs((file.n[i] ?? Number.NaN) - estimate)).toBeLessThan(1e-5);
+    }
+    expect(Math.abs(refractiveIndex("C2H6", 550).index.n - 1.4)).toBeLessThan(0.01);
+    expect(file.temperatureK).toBe(94);
+    expect(
+      materialLabels([{ material: "C2H6", form: { phase: "liquid" }, opticalDepthAbove550: 0 }]),
+    ).toEqual(["atmosphereApproximate"]);
+  });
+
+  it("fit liquid N2 to Augustin 1915's four absolute indices at 77.32 K within 3 × 10⁻⁴", () => {
+    const augustin = [
+      [656.3, 1.19841],
+      [579.0, 1.19873],
+      [546.1, 1.19917],
+      [435.9, 1.20141],
+    ] as const;
+    for (const [nm, measured] of augustin) {
+      const { n } = refractiveIndex("N2", nm, { phase: "liquid" }).index;
+      expect(Math.abs(n - measured)).toBeLessThan(3e-4);
+    }
+  });
+
+  it("meet Wong and Anderson 1972's 1.360 at 632.8 nm for liquid NH3 at 239.8 K", () => {
+    expect(refractiveIndex("NH3", 632.8, { phase: "liquid" }).index.n).toBeCloseTo(1.36, 4);
+  });
+
+  it("give each derived liquid its fit's n on its grid, and no absorption", () => {
+    for (const key of ["N2", "NH3"]) {
+      const file = liquidOf(key);
+      const fit = file.fit;
+      if (fit === undefined) {
+        throw new Error(`liquid ${key} carries no fit`);
+      }
+      for (const [i, nm] of file.wavelengthsNm.entries()) {
+        const fitN = fit.a + fit.bUm2 / (nm / 1000) ** 2;
+        expect(Math.abs((file.n[i] ?? Number.NaN) - fitN)).toBeLessThan(1e-5);
+      }
+      expect([fit.absorptionPerM, file.k.every((k) => k === 0)]).toEqual([0, true]);
+    }
+  });
+
+  it("give molten S8 Becquerel 1877's 1.929, a non-absorbing stand-in that says its edge is missing", () => {
+    const melt = liquidOf("S8");
+    expect(new Set(melt.n)).toEqual(new Set([1.929]));
+    expect(melt.k.every((k) => k === 0)).toBe(true);
+    expect(melt.standIn).toContain("its blue absorption edge is not drawn");
+    expect(
+      materialLabels([{ material: "S8", form: { phase: "liquid" }, opticalDepthAbove550: 0 }]),
+    ).toEqual(["atmosphereApproximate"]);
   });
 });

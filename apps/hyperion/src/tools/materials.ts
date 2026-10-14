@@ -677,6 +677,44 @@ export function parseWavelengthTable(text: string): IndexSample[] {
   return rows;
 }
 
+/**
+ * The imaginary index of an absorption coefficient: k = αλ ÷ 4π.
+ *
+ * @param absorptionPerM - The (Napierian) absorption coefficient α, m⁻¹.
+ * @param wavelengthNm - The vacuum wavelength, nm.
+ */
+export function absorptionIndex(absorptionPerM: number, wavelengthNm: number): number {
+  return (absorptionPerM * wavelengthNm * 1e-9) / (4 * Math.PI);
+}
+
+/**
+ * The rows of an omlc.org absorption table in two columns, λ (nm) and the absorption coefficient a
+ * (cm⁻¹), after header lines that are not two numbers: each row's k = aλ ÷ 4π, with n NaN, since
+ * the table gives none (R08.T5.g).
+ *
+ * @param rowCount - The rows the table must hold, so that a truncated download is refused.
+ * @throws Error if the table holds another number of rows, or a wavelength twice.
+ */
+export function parseOmlcAbsorption(text: string, rowCount: number): IndexSample[] {
+  const rows: IndexSample[] = [];
+  for (const line of text.split(/\r?\n/u)) {
+    const fields = line.trim().split(/\s+/u);
+    if (fields.length !== 2 || !fields.every((f) => NUMBER.test(f))) {
+      continue;
+    }
+    const nm = numeric(fields[0] ?? "");
+    const perCm = numeric(fields[1] ?? "");
+    rows.push({ wavelengthUm: nm / 1000, n: Number.NaN, k: absorptionIndex(100 * perCm, nm) });
+  }
+  if (rows.length !== rowCount) {
+    throw new Error(`omlc: expected ${rowCount} rows, found ${rows.length}`);
+  }
+  if (new Set(rows.map((row) => row.wavelengthUm)).size !== rows.length) {
+    throw new Error("omlc: a wavelength appears twice");
+  }
+  return rows;
+}
+
 /** A material's index on a file's grid: n and k at each wavelength. */
 export interface ReducedIndex {
   readonly n: ReadonlyArray<number>;
@@ -864,6 +902,9 @@ function fetchedSource(what: string, url: string, sha256: string, fetched = FETC
 /** The day R08.T5.d's sources were fetched. */
 export const FETCHED_T5D = "2026-10-14";
 
+/** The day R08.T5.g's sources were fetched. */
+export const FETCHED_T5G = "2026-10-14";
+
 /**
  * The a-priori k of Venus's ultraviolet absorber at 365 nm, k₃₆₅: the ruled value
  * (science-r08-unowned-absorbers, adopted; decision-r08-t5d), not derived here. R08.T5.e refits it
@@ -944,33 +985,6 @@ const IRWIN_PLANETS_TEXT =
 
 /** Every material file reduced from a fetched source, in the registry's order (a key's default first). */
 export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
-  {
-    file: "water.json",
-    option: "water",
-    sha256: "df1af6b4352c3378cf81b149ac2280de30d80e2941d147786d5e7cd5044a8847",
-    parse: parseRefractiveIndexInfo,
-    resample: { holdNm: 0 },
-    header: {
-      key: "H2O",
-      phase: "liquid",
-      variant: null,
-      name: "liquid H2O at 298 K",
-      temperatureK: 298,
-      shape: "sphere",
-      provenance: "measured",
-      paper:
-        'G. M. Hale and M. R. Querry, "Optical constants of water in the 200-nm to 200-µm wavelength region", Appl. Opt. 12 (1973) 555–563, DOI 10.1364/AO.12.000555',
-      source: fetchedSource(
-        "refractiveindex.info, main/H2O/nk/Hale.yml",
-        `${RI_URL}/main/H2O/nk/Hale.yml`,
-        "df1af6b4352c3378cf81b149ac2280de30d80e2941d147786d5e7cd5044a8847",
-      ),
-      licence: RI_LICENCE,
-      reduction: `${STANDARD_REDUCTION}; the source's rows are every 25 nm`,
-      standIn: null,
-      fit: null,
-    },
-  },
   {
     file: "water-ice.json",
     option: "ice",
@@ -1655,6 +1669,171 @@ export const FETCHED_MATERIALS: ReadonlyArray<FetchedSpec> = [
   },
 ];
 
+/** IAPWS R9-97's coefficients a₀–a₇ and its two resonances, λ̄_UV and λ̄_IR (its Table 1). */
+export const IAPWS_R9_97 = {
+  a: [
+    0.244_257_733, 9.746_344_76e-3, -3.732_349_96e-3, 2.686_784_72e-4, 1.589_205_7e-3,
+    2.459_342_59e-3, 0.900_704_92, -1.666_262_19e-2,
+  ],
+  lambdaUv: 0.229_202,
+  lambdaIr: 5.432_937,
+} as const;
+
+/**
+ * Liquid water's real index with respect to vacuum by IAPWS R9-97's eq. 1 (the International
+ * Association for the Properties of Water and Steam, "Release on the Refractive Index of Ordinary
+ * Water Substance as a Function of Wavelength, Temperature and Pressure", Erlangen, 1997; after P.
+ * Schiebener, J. Straub, J. M. H. Levelt Sengers and J. S. Gallagher, J. Phys. Chem. Ref. Data 19
+ * (1990) 677): (n² − 1) ÷ (n² + 2) ÷ ρ̄ = a₀ + a₁ρ̄ + a₂T̄ + a₃λ̄²T̄ + a₄ ÷ λ̄² + a₅ ÷ (λ̄² − λ̄_UV²) +
+ * a₆ ÷ (λ̄² − λ̄_IR²) + a₇ρ̄², with T̄ = T ÷ 273.15 K, ρ̄ = ρ ÷ 1000 kg m⁻³ and λ̄ = λ ÷ 0.589 µm.
+ *
+ * @remarks
+ * The release endorses 0.2–1.1 µm and states an uncertainty of 1.5 × 10⁻⁵ over 0.40–0.70 µm at
+ * 5–60 °C (ambient liquid), 5 × 10⁻⁴ over 0.21–0.40 µm and 10⁻³ over 0.70–1.1 µm (its Table 2). It
+ * names λ only "the wavelength of light"; it is read here as the vacuum wavelength, and the air
+ * wavelength would move n by under 5 × 10⁻⁶ in the visible.
+ *
+ * @param temperatureK - T, K (ITS-90).
+ * @param densityKgPerM3 - ρ, kg m⁻³, from IAPWS-95 at the state.
+ * @param wavelengthNm - λ, nm.
+ */
+export function iapwsWaterIndex(
+  temperatureK: number,
+  densityKgPerM3: number,
+  wavelengthNm: number,
+): number {
+  const [a0, a1, a2, a3, a4, a5, a6, a7] = IAPWS_R9_97.a;
+  const t = temperatureK / 273.15;
+  const rho = densityKgPerM3 / 1000;
+  const l2 = (wavelengthNm / 1000 / 0.589) ** 2;
+  const perDensity =
+    a0 +
+    a1 * rho +
+    a2 * t +
+    a3 * l2 * t +
+    a4 / l2 +
+    a5 / (l2 - IAPWS_R9_97.lambdaUv ** 2) +
+    a6 / (l2 - IAPWS_R9_97.lambdaIr ** 2) +
+    a7 * rho * rho;
+  const x = perDensity * rho;
+  return Math.sqrt((1 + 2 * x) / (1 - x));
+}
+
+/** The water files' temperature, K: Hale and Querry's 25 °C, at which IAPWS R9-97 is recorded. */
+export const WATER_TEMPERATURE_K = 298.15;
+
+/**
+ * Liquid water's density at {@link WATER_TEMPERATURE_K} and 101,325 Pa, kg m⁻³: IAPWS-95 (W. Wagner
+ * and A. Pruß, J. Phys. Chem. Ref. Data 31 (2002) 387) as the NIST Chemistry WebBook's fluid
+ * properties give it (`WATER_DENSITY_SOURCE`).
+ */
+export const WATER_DENSITY_KG_PER_M3 = 997.0476;
+
+/** Where {@link WATER_DENSITY_KG_PER_M3} was read. */
+const WATER_DENSITY_SOURCE = `the NIST Chemistry WebBook's fluid properties for water (SRD 69; IAPWS-95, W. Wagner and A. Pruß, J. Phys. Chem. Ref. Data 31 (2002) 387, density uncertain by 0.0001% at 1 atm), the isobar at 0.101325 MPa, https://webbook.nist.gov/cgi/fluid.cgi?Action=Data&Wide=on&ID=C7732185&Type=IsoBar&Digits=7&P=0.101325&THigh=299.15&TLow=294.15&TInc=1&RefState=DEF&TUnit=K&PUnit=MPa&DUnit=kg%2Fm3&HUnit=kJ%2Fkg&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm, SHA-256 645d38f5e948a988c941e60f7a49d699f91e7a4bb46910589cb8f278e0e01c6c, fetched ${FETCHED_T5G}`;
+
+/** The last row of Pope and Fry 1997's table, nm: Hale and Querry's k is taken above it. */
+export const POPE_FRY_LAST_NM = 727.5;
+
+/** The rows of Pope and Fry 1997's table, 380–727.5 nm every 2.5 nm. */
+export const POPE_FRY_ROWS = 140;
+
+/**
+ * Pure water's index on {@link MATERIAL_GRID_NM} (R08.T5.g): n Hale and Querry's, as before, and k
+ * Pope and Fry's over 380–727.5 nm merged with Hale and Querry's from 750 nm, each linear (k in log
+ * k) between rows.
+ *
+ * @param hale - Hale and Querry's refractiveindex.info file.
+ * @param popeFry - omlc.org's transcription of Pope and Fry's table.
+ */
+export function waterIndex(hale: string, popeFry: string): ReducedIndex {
+  const haleRows = parseRefractiveIndexInfo(hale);
+  const lastUm = POPE_FRY_LAST_NM / 1000;
+  const kRows = [
+    ...parseOmlcAbsorption(popeFry, POPE_FRY_ROWS),
+    ...haleRows.filter((row) => row.wavelengthUm > lastUm),
+  ];
+  return {
+    n: resample(haleRows, { holdNm: 0 }).n,
+    // Pope and Fry give no n; the placeholder 1 is never read, since only k is kept.
+    k: resample(
+      kRows.map((row) => ({ wavelengthUm: row.wavelengthUm, n: 1, k: row.k })),
+      { holdNm: 0 },
+    ).k,
+  };
+}
+
+/**
+ * IAPWS R9-97's n of pure water at 25 °C and 1 atm, to six figures: the better open index R08.T5.g
+ * records, not yet adopted (R08.T5.g's deferred finding).
+ */
+export function iapwsWaterN(wavelengthNm: number): number {
+  return rounded(iapwsWaterIndex(WATER_TEMPERATURE_K, WATER_DENSITY_KG_PER_M3, wavelengthNm));
+}
+
+/**
+ * Quan and Fry 1995's ten coefficients n₀–n₉ for seawater's real index relative to air (X. Quan and
+ * E. S. Fry, "Empirical equation for the index of refraction of seawater", Appl. Opt. 34 (1995)
+ * 3477–3480, DOI 10.1364/AO.34.003477, eq. 3), fitted to Austin and Halikas 1976's data from
+ * 400–700 nm, as the Ocean Optics Web Book's "Water" page gives them (its eq. 1 and Table 1; CC BY),
+ * and Zhang, Hu and He 2009's Table 1 (Opt. Express 17, 5698) too. The paper itself is closed, so its
+ * stated temperature and salinity ranges were not read.
+ */
+export const QUAN_FRY_COEFFICIENTS: readonly [
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+  number,
+] = [1.31405, 1.779e-4, -1.05e-6, 1.6e-8, -2.02e-6, 15.868, 0.01155, -0.00423, -4382, 1.1455e6];
+
+/**
+ * Quan and Fry 1995's index of seawater relative to air: n = n₀ + (n₁ + n₂T + n₃T²)S + n₄T² + (n₅ +
+ * n₆S + n₇T) ÷ λ + n₈ ÷ λ² + n₉ ÷ λ³ ({@link QUAN_FRY_COEFFICIENTS}).
+ *
+ * @param salinityPermil - S, ‰ (practical salinity).
+ * @param temperatureC - T, °C.
+ * @param wavelengthNm - λ, nm, fitted over 400–700.
+ */
+export function quanFryIndex(
+  salinityPermil: number,
+  temperatureC: number,
+  wavelengthNm: number,
+): number {
+  const [n0, n1, n2, n3, n4, n5, n6, n7, n8, n9] = QUAN_FRY_COEFFICIENTS;
+  const t = temperatureC;
+  const l = wavelengthNm;
+  return (
+    n0 +
+    (n1 + n2 * t + n3 * t * t) * salinityPermil +
+    n4 * t * t +
+    (n5 + n6 * salinityPermil + n7 * t) / l +
+    n8 / (l * l) +
+    n9 / (l * l * l)
+  );
+}
+
+/**
+ * Seawater's excess over pure water's index in Quan and Fry's equation, n(S, T, λ) − n(0, T, λ) =
+ * (n₁ + n₂T + n₃T²)S + n₆S ÷ λ: the salinity terms alone, which the seawater file adds to the pure
+ * water file's own n (R08.T5.g).
+ */
+export function quanFrySalinityIncrement(
+  salinityPermil: number,
+  temperatureC: number,
+  wavelengthNm: number,
+): number {
+  return (
+    quanFryIndex(salinityPermil, temperatureC, wavelengthNm) -
+    quanFryIndex(0, temperatureC, wavelengthNm)
+  );
+}
+
 /** One fetched input of a {@link CombinedSpec}. */
 export interface SourceInput {
   /** The command-line option that names the source's path. */
@@ -1711,6 +1890,107 @@ export function uniaxialFormulasOnGrid(ordinary: string, extraordinary: string):
 
 const DRAINE_TERMS =
   "reduced values; the source states no terms and asks only for its citation (decision-r08-licences.md)";
+
+/** The SHA-256 of omlc.org's `pope97.txt` (2,134 bytes), fetched {@link FETCHED_T5G}. */
+export const POPE_FRY_SHA256 = "5c92c6a1e4be125cc9464fab33490ce4eb883fca7e84a21b0ca2b906cb35c8a7";
+
+/** The SHA-256 of Hale and Querry's refractiveindex.info file, `main/H2O/nk/Hale.yml`. */
+const HALE_SHA256 = "df1af6b4352c3378cf81b149ac2280de30d80e2941d147786d5e7cd5044a8847";
+
+/** The two water files' fetched inputs: Hale and Querry's table and Pope and Fry's. */
+const WATER_INPUTS: ReadonlyArray<SourceInput> = [
+  { option: "water", sha256: HALE_SHA256 },
+  { option: "pope-fry", sha256: POPE_FRY_SHA256 },
+];
+
+const POPE_FRY_1997 =
+  'R. M. Pope and E. S. Fry, "Absorption spectrum (380–700 nm) of pure water. II. Integrating cavity measurements", Appl. Opt. 36 (1997) 8710–8723, DOI 10.1364/AO.36.008710';
+
+const HALE_QUERRY_1973 =
+  'G. M. Hale and M. R. Querry, "Optical constants of water in the 200-nm to 200-µm wavelength region", Appl. Opt. 12 (1973) 555–563, DOI 10.1364/AO.12.000555';
+
+const IAPWS_R9_97_PAPER =
+  'the International Association for the Properties of Water and Steam, IAPWS R9-97, "Release on the Refractive Index of Ordinary Water Substance as a Function of Wavelength, Temperature and Pressure" (Erlangen, 1997), after P. Schiebener, J. Straub, J. M. H. Levelt Sengers and J. S. Gallagher, J. Phys. Chem. Ref. Data 19 (1990) 677–717, DOI 10.1063/1.555859';
+
+/** Where the two water files' inputs were read. */
+const WATER_SOURCE = `omlc.org's transcription of Pope and Fry's table (absorption in cm⁻¹ every 2.5 nm over 380–727.5 nm, at 22 °C), https://omlc.org/spectra/water/data/pope97.txt, SHA-256 ${POPE_FRY_SHA256}, fetched ${FETCHED_T5G}; ${fetchedSource("refractiveindex.info, main/H2O/nk/Hale.yml (25 °C)", `${RI_URL}/main/H2O/nk/Hale.yml`, HALE_SHA256)}`;
+
+const WATER_LICENCE =
+  "reduced values: omlc.org states no terms for its transcription beyond the site's copyright notice, and the measured values are Pope and Fry's (decision-r08-licences.md); Hale and Querry's from refractiveindex.info (CC0 1.0, M. N. Polyanskiy, Sci. Data 11, 94 (2024)). The cross-check's seven values are Mason, Cone and Fry's, cited as facts; WOPP v3's file states no terms of its own (it is kept in the GPL-3.0 acolite repository), and none of it is committed";
+
+/**
+ * Mason, Cone and Fry 2016's pure-water absorption below 510 nm, the cross-check R08.T5.g records:
+ * a, m⁻¹, at 380, 400, 420, 440, 460, 480 and 500 nm (J. D. Mason, M. T. Cone and E. S. Fry,
+ * "Ultraviolet (250–550 nm) absorption spectrum of pure water", Appl. Opt. 55 (2016) 7163–7172, DOI
+ * 10.1364/AO.55.007163, Table 2, closed; as R. Röttgers's WOPP v3 compilation gives it at 20 °C,
+ * `purewater_abs_coefficients_v3.txt`, which takes 300–510 nm from that table).
+ */
+export const MASON_2016_ABSORPTION_PER_M: ReadonlyArray<
+  readonly [wavelengthNm: number, absorptionPerM: number]
+> = [
+  [380, 0.00143],
+  [400, 0.00222],
+  [420, 0.00312],
+  [440, 0.00522],
+  [460, 0.00909],
+  [480, 0.01214],
+  [500, 0.02073],
+];
+
+/**
+ * Pope and Fry 1997's absorption at the wavelengths the cross-check compares, m⁻¹ (their table, as
+ * omlc.org gives it): 0.01137, 0.00663, 0.00454, 0.00635, 0.00979, 0.0127 and 0.0204.
+ */
+export const POPE_FRY_ABSORPTION_PER_M: ReadonlyArray<
+  readonly [wavelengthNm: number, absorptionPerM: number]
+> = [
+  [380, 0.01137],
+  [400, 0.00663],
+  [420, 0.00454],
+  [440, 0.00635],
+  [460, 0.00979],
+  [480, 0.0127],
+  [500, 0.0204],
+];
+
+/** The cross-check as the water file states it: Pope and Fry over Mason et al. at each wavelength. */
+function masonCrossCheckText(): string {
+  return MASON_2016_ABSORPTION_PER_M.map(([nm, mason]) => {
+    const pope = POPE_FRY_ABSORPTION_PER_M.find(([at]) => at === nm)?.[1] ?? Number.NaN;
+    return `${(pope / mason).toFixed(2)} at ${nm} nm`;
+  }).join(", ");
+}
+
+/** The salinity and temperature of the seawater file: S = 35‰ at 25 °C. */
+export const SEAWATER = { salinityPermil: 35, temperatureC: 25 } as const;
+
+/**
+ * Seawater's n on {@link MATERIAL_GRID_NM}: pure water's n on the grid plus Quan and Fry's salinity
+ * terms at {@link SEAWATER}, to six figures.
+ */
+export function seawaterN(waterN: ReadonlyArray<number>): ReadonlyArray<number> {
+  return MATERIAL_GRID_NM.map((nm, i) =>
+    rounded(
+      (waterN[i] ?? Number.NaN) +
+        quanFrySalinityIncrement(SEAWATER.salinityPermil, SEAWATER.temperatureC, nm),
+    ),
+  );
+}
+
+/**
+ * How far Quan and Fry's own pure water (S = 0, 25 °C), times dry air's index (Peck and Reeder 1972,
+ * `view/atmosphere/rayleigh.ts`'s `DRY_AIR_DISPERSION`), lies from IAPWS R9-97, as the water file
+ * states it (computed once; the tool's test checks it).
+ */
+const QUAN_FRY_BASE_TEXT =
+  "by 1.7 × 10⁻⁵ to 3.5 × 10⁻⁵ over 400–700 nm, and by 6.8 × 10⁻⁵ at 380 nm and 8.9 × 10⁻⁵ at 780 nm, beyond their range";
+
+/**
+ * The better open n the water file records and does not adopt (R08.T5.g's deferred finding):
+ * IAPWS R9-97 at 25 °C against the file's own n, Hale and Querry's 1.3406, 1.333 and 1.3298 at 380,
+ * 550 and 780 nm, and against Quan and Fry's pure water.
+ */
+const IAPWS_RECORD_TEXT = `A better open n is recorded and not adopted (R08.T5.g's deferred finding): ${IAPWS_R9_97_PAPER}, https://iapws.org/technical-guidance/release/Rindex.download, SHA-256 ef7c8107d200f250b6db1802b3b5ea994526e5b875ac5cb2c72ec78bc9a06ba3, fetched ${FETCHED_T5G} (publication allowed with attribution to IAPWS), uncertain by 1.5 × 10⁻⁵ over 400–700 nm (its Table 2), whose eq. 1 at 298.15 K and ${WATER_DENSITY_KG_PER_M3} kg m⁻³ (${WATER_DENSITY_SOURCE}) gives ${iapwsWaterN(380)} at 380 nm, ${iapwsWaterN(550)} at 550 nm and ${iapwsWaterN(780)} at 780 nm, against this file's 1.3406, 1.333 and 1.3298; Quan and Fry 1995's pure water (S = 0, 25 °C, relative to air), times dry air's index at 15 °C (Peck and Reeder 1972's standard air), lies above it ${QUAN_FRY_BASE_TEXT}`;
 
 /** The material files made from fetched sources by their own reductions, after {@link FETCHED_MATERIALS}. */
 export const COMBINED_MATERIALS: ReadonlyArray<CombinedSpec> = [
@@ -1871,6 +2151,51 @@ export const COMBINED_MATERIALS: ReadonlyArray<CombinedSpec> = [
       source: `B. T. Draine's site, https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpeD03_0.01 (E ⊥ c, 22,804 bytes, SHA-256 663d2939905710d61706d75f52e28ca819fcc5ecde1be2d2971b23c127a351d9) and https://www.astro.princeton.edu/~draine/dust/diel/callindex.out_CpaD03_0.01 (E ∥ c, 22,981 bytes, SHA-256 87c609d3ddda2bc0bc5f2343f9b56bbd517fc5833e0754e6a628c8a5c6235a0b), fetched ${FETCHED_T5D}: the tables for grains of radius 0.01 µm at 20 K`,
       licence: DRAINE_TERMS,
       reduction: `the two dielectric functions averaged for randomly oriented grains at each of the sources' wavelengths, ε = (2ε_⊥ + ε_∥) ÷ 3, as Kitzmann and Heng 2018's C.dat takes them (n 2.567, k 1.189 at 550 nm), and n + ik = √ε; then ${STANDARD_REDUCTION}. The sources' rows here are 365, 381, 400, 434, 440, 486, 550, 656, 700 and 800 nm. The tables' grain radius and temperature are the files'`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  // R08.T5.g: pure water's k from Pope and Fry 1997 (n still Hale and Querry's), and seawater.
+  {
+    file: "water.json",
+    inputs: WATER_INPUTS,
+    reduce: (texts) => waterIndex(textAt(texts, 0), textAt(texts, 1)),
+    header: {
+      key: "H2O",
+      phase: "liquid",
+      variant: null,
+      name: "liquid H2O at 298 K",
+      temperatureK: 298,
+      shape: "sphere",
+      provenance: "measured",
+      paper: `${POPE_FRY_1997}, for k over 380–727.5 nm; ${HALE_QUERRY_1973}, for n and for k from 750 nm`,
+      source: WATER_SOURCE,
+      licence: WATER_LICENCE,
+      reduction: `n linear between Hale and Querry's rows, every 25 nm, as before; k = aλ ÷ 4π from Pope and Fry's rows over 380–727.5 nm, and Hale and Querry's k from 750 nm, linear in log k between rows (730–745 nm between Pope and Fry's 727.5 nm row and Hale and Querry's 750 nm one); to six significant figures. R08.T5.g's change: until then k was Hale and Querry's throughout, too high in the blue; it falls by a factor of 5.06 at 440 nm, from 1.124 × 10⁻⁹ to 2.223 × 10⁻¹⁰, by 8.81 at 400 nm and by 1.23 at 500 nm, and rises by 1.26 at 550 nm, to 2.473 × 10⁻⁹; n is unchanged. The cross-check below 550 nm: Mason, Cone and Fry 2016 (Appl. Opt. 55, 7163, DOI 10.1364/AO.55.007163; closed), as R. Röttgers's WOPP v3 compilation gives their Table 2 at 20 °C over 300–510 nm (https://raw.githubusercontent.com/acolite/acolite/ca477dd91dfb5f8eb77333824b38cb0bcce5e083/data/Shared/WOPP/purewater_abs_coefficients_v3.txt, SHA-256 bda82058670cee8ca5684edc46a70e1b46c9d1ccca0eb9d72eb8776f65e696d8, fetched ${FETCHED_T5G}): Pope and Fry's absorption is ${masonCrossCheckText()} times theirs. Below about 420 nm the two disagree beyond their errors, and the IOCCG absorption protocol (IOCCG Protocol Series vol. 1.0, 2018, §1.1) takes Pope and Fry as the state of the art only over about 420–725 nm, their ultraviolet values possibly contaminated; kept as R08.T5.g asks, its deferred finding. k is Pope and Fry's at 22 °C, n Hale and Querry's at 25 °C. ${IAPWS_RECORD_TEXT}`,
+      standIn: null,
+      fit: null,
+    },
+  },
+  {
+    file: "seawater.json",
+    inputs: WATER_INPUTS,
+    reduce: (texts) => {
+      const water = waterIndex(textAt(texts, 0), textAt(texts, 1));
+      return { n: seawaterN(water.n), k: water.k };
+    },
+    header: {
+      key: "H2O",
+      phase: "liquid",
+      variant: "S35",
+      name: "liquid H2O, practical salinity 35, at 298 K",
+      temperatureK: 298,
+      shape: "sphere",
+      provenance: "measured",
+      paper:
+        'X. Quan and E. S. Fry, "Empirical equation for the index of refraction of seawater", Appl. Opt. 34 (1995) 3477–3480, DOI 10.1364/AO.34.003477, for the salinity terms; water.json\'s papers for pure water',
+      source: `the Ocean Optics Web Book's "Water" page, eq. 1 and Table 1, for Quan and Fry's coefficients (https://www.oceanopticsbook.info/view/optical-constituents-of-the-ocean/water, SHA-256 7191efa9e11f04c9edde4156f2ba70fda81ae06e44e1d2346a9f0f3f54c65a04, fetched ${FETCHED_T5G}; the paper is closed, and Zhang, Hu and He 2009, Opt. Express 17, 5698, Table 1, gives the same); then water.json's: ${WATER_SOURCE}`,
+      licence: `${WATER_LICENCE}; Quan and Fry's coefficients cited as facts, read from the Web Book (CC BY)`,
+      reduction: `n = water.json's n plus Quan and Fry's salinity terms, (n₁ + n₂T + n₃T²)S + n₆S ÷ λ at S = ${SEAWATER.salinityPermil}‰ and T = ${SEAWATER.temperatureC} °C: +${quanFrySalinityIncrement(SEAWATER.salinityPermil, SEAWATER.temperatureC, 380).toFixed(5)} at 380 nm, +${quanFrySalinityIncrement(SEAWATER.salinityPermil, SEAWATER.temperatureC, 550).toFixed(5)} at 550 nm and +${quanFrySalinityIncrement(SEAWATER.salinityPermil, SEAWATER.temperatureC, 780).toFixed(5)} at 780 nm, to six significant figures. Quan and Fry fitted Austin and Halikas 1976's data from 400–700 nm (the Web Book), relative to air, so their salinity terms alone are added to water.json's own n rather than their equation taken whole: the two files differ by Quan and Fry's salinity effect, and this one follows water.json's n should it change. k = water.json's: sea salts leave pure water's visible absorption unchanged within measurement (Röttgers, McKee and Utschig 2014, Opt. Express 22, 25093, DOI 10.1364/OE.22.025093: the salinity coefficient not significantly different from zero below 500 nm, and −0.18% to +0.04% per g L⁻¹ over 400–2,660 nm); their absorption lies in the ultraviolet. Seawater's molecular scattering is not in the file`,
       standIn: null,
       fit: null,
     },
@@ -2361,6 +2686,34 @@ export const AR_DISPERSION: GasDispersionCopy = {
 };
 
 /**
+ * C₂H₆'s refractivity, as `rayleigh.ts` holds it, for liquid ethane's estimate (R08.T5.g): Loria,
+ * Ann. Phys. 334 (1909) 605, Table IX, n − 1 = a(1 + b ÷ λ²) with refractiveindex.info's refit a =
+ * 7.330 × 10⁻⁴ and Loria's b = 9.308 × 10⁻³ µm², at 0 °C and 760 mm, measured over 523–667.7 nm,
+ * Z = 0.998 97.
+ */
+export const C2H6_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) => 7.33e-4 * (1 + 9.308e-3 * wavenumberSquaredPerUm2(wavelengthNm)),
+  referenceK: 273.15,
+  referencePa: 101_325,
+  compressibility: 0.998_97,
+  source: "Loria, Ann. Phys. 334 (1909) 605, Table IX, with refractiveindex.info's refit of a",
+};
+
+/**
+ * CH₄'s refractivity, as `rayleigh.ts` holds it, for the liquid method's check (R08.T5.g): He, Fang,
+ * Shoshanim, Brown and Rudich, Atmos. Chem. Phys. 21 (2021) 14927, eq. 10, 10⁸(n − 1) = 3,603.09 +
+ * 4.403 62 × 10¹⁴ ÷ (1.1741 × 10¹⁰ − ν²), at 15 °C and 101,325 Pa, Z = 1.
+ */
+export const CH4_DISPERSION: GasDispersionCopy = {
+  nMinusOne: (wavelengthNm) =>
+    (3_603.09 + 4.403_62e14 / (1.174_1e10 - wavenumberSquaredPerCm2(wavelengthNm))) * 1e-8,
+  referenceK: 288.15,
+  referencePa: 101_325,
+  compressibility: 1,
+  source: "He, Fang, Shoshanim, Brown and Rudich, Atmos. Chem. Phys. 21 (2021) 14927, eq. 10",
+};
+
+/**
  * A molecular ice's real index by Lorentz–Lorenz from its gas's refractivity (decision-r08-t5d
  * ruling 5, the method of NH₄SH's estimate with no increment, since the solid is molecular): the
  * molar refraction R = (n² − 1) ÷ (n² + 2) × Z × N_A k_B T ÷ p at the gas's reference state, then x =
@@ -2640,6 +2993,282 @@ export const S8_STAND_IN_INDEX = Math.sqrt(
   S8_PRINCIPAL_INDICES.reduce((sum, n) => sum + n * n, 0) / 3,
 );
 
+/** A measured index at a wavelength, the input of a fit. */
+export interface IndexPoint {
+  /** The wavelength, µm (as its source gives it). */
+  readonly wavelengthUm: number;
+  readonly n: number;
+}
+
+/**
+ * The least-squares two-term Cauchy line n = a + b ÷ λ² through points, its a and b rounded to six
+ * significant figures, so that the file's n is the fit it states (R08.T5.g).
+ *
+ * @throws Error for fewer than two distinct wavelengths.
+ */
+export function fitCauchy(points: ReadonlyArray<IndexPoint>): Pick<CauchyFit, "a" | "bUm2"> {
+  const xs = points.map((p) => 1 / (p.wavelengthUm * p.wavelengthUm));
+  const meanX = xs.reduce((sum, x) => sum + x, 0) / xs.length;
+  const meanY = points.reduce((sum, p) => sum + p.n, 0) / points.length;
+  const sxx = xs.reduce((sum, x) => sum + (x - meanX) ** 2, 0);
+  if (!(sxx > 0)) {
+    throw new Error("fitCauchy: needs two distinct wavelengths");
+  }
+  const sxy = points.reduce(
+    (sum, p, i) => sum + ((xs[i] ?? Number.NaN) - meanX) * (p.n - meanY),
+    0,
+  );
+  const b = sxy / sxx;
+  return { a: rounded(meanY - b * meanX), bUm2: rounded(b) };
+}
+
+/**
+ * The method's checks on measured cryogenic liquids, each a Lorentz–Lorenz estimate from its gas's
+ * dispersion at the liquid's density against its measured n (R08.T5.g): what liquid ethane's
+ * estimate is judged by.
+ */
+export interface LiquidCheck {
+  readonly what: string;
+  readonly gas: GasDispersionCopy;
+  /** The liquid's molar volume, cm³ mol⁻¹, from its density. */
+  readonly molarVolumeCm3PerMol: number;
+  readonly wavelengthNm: number;
+  /** The measured n there. */
+  readonly measured: number;
+}
+
+/**
+ * Augustin 1915's absolute indices of liquid N₂ at −195.83 °C (77.32 K), ±5 × 10⁻⁵, at the 656.3,
+ * 579.0, 546.1 and 435.9 nm lines (H. Augustin, "Über die Dichte des flüssigen Wasserstoffs, den
+ * Brechungsexponenten und die Dispersion des flüssigen Wasserstoffs und des flüssigen
+ * Stickstoffs", Ann. Phys. 351 (1915) 419–445, DOI 10.1002/andp.19153510307, p. 443, the
+ * wavelengths from p. 438's table), as Zenodo record 1514490 gives the article (CC0).
+ */
+export const AUGUSTIN_N2: ReadonlyArray<IndexPoint> = [
+  { wavelengthUm: 0.6563, n: 1.19841 },
+  { wavelengthUm: 0.579, n: 1.19873 },
+  { wavelengthUm: 0.5461, n: 1.19917 },
+  { wavelengthUm: 0.4359, n: 1.20141 },
+];
+
+/** Liquid N₂'s derived index: a two-term Cauchy fit to {@link AUGUSTIN_N2}, with k = 0 (R08.T5.g). */
+export const N2_LIQUID_FIT: CauchyFit = {
+  form: "cauchy",
+  ...fitCauchy(AUGUSTIN_N2),
+  absorptionPerM: 0,
+  fittedFromUm: 0.4359,
+  fittedToUm: 0.6563,
+};
+
+/**
+ * The NIST Chemistry WebBook's fluid-properties query (SRD 69) for a fluid's saturated liquid in
+ * mol/l, by its CAS identifier and a temperature range, K: the URL the liquids' sources cite.
+ */
+function nistSaturation(id: string, low: string, high: string, step: string): string {
+  return `https://webbook.nist.gov/cgi/fluid.cgi?Action=Data&Wide=on&ID=${id}&Type=SatP&Digits=7&THigh=${high}&TLow=${low}&TInc=${step}&RefState=DEF&TUnit=K&PUnit=MPa&DUnit=mol%2Fl&HUnit=kJ%2Fmol&WUnit=m%2Fs&VisUnit=uPa*s&STUnit=N%2Fm`;
+}
+
+/**
+ * Saturated liquid N₂'s molar density at Augustin's 77.32 K, mol/l: linear between the WebBook's
+ * 28.83232 at 77 K and 28.77488 at 77.355 K (Span, Lemmon, Jacobsen, Wagner and Yokozeki, J. Phys.
+ * Chem. Ref. Data 29 (2000) 1361, density uncertain by 0.02%).
+ */
+export const N2_LIQUID_MOLAR_DENSITY_MOL_PER_L =
+  28.832_32 + ((77.32 - 77) / 0.355) * (28.774_88 - 28.832_32);
+
+/** Where {@link N2_LIQUID_MOLAR_DENSITY_MOL_PER_L}'s rows were read. */
+const N2_LIQUID_DENSITY_SOURCE = `${nistSaturation("C7727379", "77", "77.355", "0.355")}, SHA-256 5022a4ab7b30bde7942baf2b8c13fbcef6b6b9bf3319ae8f0fa5b001f216dad7, fetched ${FETCHED_T5G}`;
+
+/**
+ * Wong and Anderson 1972's n of saturated liquid NH₃ at 632.8 nm and its normal boiling point,
+ * 239.80 K: 1.360 (L. Y. Wong and A. Anderson, "Refractive-index measurements of some
+ * low-temperature liquids", J. Opt. Soc. Am. 62 (1972) 219–222, DOI 10.1364/JOSA.62.000219, Table II,
+ * read from the journal's abstract page; the article is closed).
+ */
+export const NH3_LIQUID_MEASURED = { wavelengthNm: 632.8, n: 1.36, temperatureK: 239.8 } as const;
+
+/**
+ * Saturated liquid NH₃'s molar density at 239.80 K, mol/l: the WebBook's, after Gao, Wu, Bell,
+ * Harvey and Lemmon, J. Phys. Chem. Ref. Data 52 (2023) 013102 (its 2018 manuscript, as the page
+ * cites it), uncertain by 0.05% in the liquid.
+ */
+export const NH3_LIQUID_MOLAR_DENSITY_MOL_PER_L = 40.026_78;
+
+/** Where {@link NH3_LIQUID_MOLAR_DENSITY_MOL_PER_L} was read. */
+const NH3_LIQUID_DENSITY_SOURCE = `${nistSaturation("C7664417", "239.8", "240", "0.2")}, SHA-256 0a64ea66717939006d109c2f3707e652c4963f336ba1238c5fbb6d656d73a42c, fetched ${FETCHED_T5G}`;
+
+/** A molar density, mol/l, as a molar volume, cm³ mol⁻¹. */
+function molarVolumeOf(molPerL: number): number {
+  return 1_000 / molPerL;
+}
+
+/** A one-term refractivity row as a {@link GasDispersionCopy}, at its 0 °C and 101,325 Pa. */
+function oneTermCopy(row: OneTermRefractivity): GasDispersionCopy {
+  return {
+    nMinusOne: (wavelengthNm) =>
+      row.aPerUm2 / (row.bPerUm2 - wavenumberSquaredPerUm2(wavelengthNm)),
+    referenceK: 273.15,
+    referencePa: 101_325,
+    compressibility: row.compressibility,
+    source: row.source,
+  };
+}
+
+/** NH₃'s refractivity, {@link NH3_REFRACTIVITY}, at its 0 °C and 101,325 Pa. */
+export const NH3_DISPERSION: GasDispersionCopy = oneTermCopy(NH3_REFRACTIVITY);
+
+/**
+ * Liquid NH₃'s derived index (R08.T5.g): a two-term Cauchy line whose slope b is the least-squares
+ * fit to the Lorentz–Lorenz estimate from {@link NH3_DISPERSION} at the liquid's density over
+ * 380–780 nm, and whose a meets {@link NH3_LIQUID_MEASURED}, with k = 0.
+ */
+export const NH3_LIQUID_FIT: CauchyFit = (() => {
+  const molarVolume = molarVolumeOf(NH3_LIQUID_MOLAR_DENSITY_MOL_PER_L);
+  const slope = fitCauchy(
+    MATERIAL_GRID_NM.map((nm) => ({
+      wavelengthUm: nm / 1000,
+      n: molecularIceIndex(NH3_DISPERSION, nm, molarVolume),
+    })),
+  ).bUm2;
+  const um = rounded(NH3_LIQUID_MEASURED.wavelengthNm / 1000);
+  return {
+    form: "cauchy",
+    a: rounded(NH3_LIQUID_MEASURED.n - slope / (um * um)),
+    bUm2: slope,
+    absorptionPerM: 0,
+    fittedFromUm: um,
+    fittedToUm: um,
+  };
+})();
+
+/** Liquid NH₃'s estimate against {@link NH3_LIQUID_MEASURED}: the method's fourth check. */
+const NH3_LIQUID_CHECK: LiquidCheck = {
+  what: "liquid NH3 at 239.80 K against Wong and Anderson 1972 (J. Opt. Soc. Am. 62, 219)",
+  gas: NH3_DISPERSION,
+  molarVolumeCm3PerMol: molarVolumeOf(NH3_LIQUID_MOLAR_DENSITY_MOL_PER_L),
+  wavelengthNm: NH3_LIQUID_MEASURED.wavelengthNm,
+  measured: NH3_LIQUID_MEASURED.n,
+};
+
+/**
+ * Liquid NH₃'s Lorentz–Lorenz estimate at a wavelength, nm, shifted to meet
+ * {@link NH3_LIQUID_MEASURED}: the curve {@link NH3_LIQUID_FIT} stands for.
+ */
+export function ammoniaLiquidLevelled(wavelengthNm: number): number {
+  const molarVolume = molarVolumeOf(NH3_LIQUID_MOLAR_DENSITY_MOL_PER_L);
+  return (
+    molecularIceIndex(NH3_DISPERSION, wavelengthNm, molarVolume) -
+    liquidCheckExcess(NH3_LIQUID_CHECK)
+  );
+}
+
+/**
+ * The method's checks on four measured cryogenic liquids (R08.T5.g), each molar density the NIST
+ * Chemistry WebBook's at saturation: Ar at 90 K, 34.51052 mol/l (Tegeler, Span and Wagner, J. Phys.
+ * Chem. Ref. Data 28 (1999) 779), against Sinnock and Smith 1969's 1.2269 at 546.1 nm
+ * (refractiveindex.info's `main/Ar/nk/Sinnock-liquid-90K.yml`, CC0); N₂ at Augustin's 77.32 K
+ * ({@link N2_LIQUID_MOLAR_DENSITY_MOL_PER_L}) against his 1.19917 at 546.1 nm; CH₄ at its triple point,
+ * 90.694 K, 28.14191 mol/l (Setzmann and Wagner, J. Phys. Chem. Ref. Data 20 (1991) 1061), against
+ * Martonchik and Orton 1994's 1.292 at 583.1 nm and 90 K (`methane-liquid.json`'s source); NH₃ at
+ * 239.80 K against {@link NH3_LIQUID_MEASURED}.
+ */
+export const LIQUID_CHECKS: ReadonlyArray<LiquidCheck> = [
+  {
+    what: "liquid Ar at 90 K against Sinnock and Smith 1969 (Phys. Rev. 181, 1297)",
+    gas: AR_DISPERSION,
+    molarVolumeCm3PerMol: molarVolumeOf(34.510_52),
+    wavelengthNm: 546.1,
+    measured: 1.2269,
+  },
+  {
+    what: "liquid N2 at 77.32 K against Augustin 1915 (Ann. Phys. 351, 419)",
+    gas: N2_DISPERSION,
+    molarVolumeCm3PerMol: molarVolumeOf(N2_LIQUID_MOLAR_DENSITY_MOL_PER_L),
+    wavelengthNm: 546.1,
+    measured: 1.19917,
+  },
+  {
+    what: "liquid CH4 at 90.694 K against Martonchik and Orton 1994's 90 K (Appl. Opt. 33, 8306)",
+    gas: CH4_DISPERSION,
+    molarVolumeCm3PerMol: molarVolumeOf(28.141_91),
+    wavelengthNm: 583.1,
+    measured: 1.292,
+  },
+  NH3_LIQUID_CHECK,
+];
+
+/** Where the liquid checks' molar densities were read, each fetched {@link FETCHED_T5G}. */
+const LIQUID_CHECK_DENSITY_SOURCES = `Ar ${nistSaturation("C7440371", "90", "91", "1")}, SHA-256 99a13ee0ffe92c6576e99fdd90c761427cb85a322e1347ce839fcbb6e9873a73, fetched ${FETCHED_T5G}; CH4 ${nistSaturation("C74828", "90", "91", "1")}, SHA-256 5b8e05aee257ebaf342dfce6836443eb61dc6dbe5968aa0aafd3ae4164525560, fetched ${FETCHED_T5G}; N2 ${N2_LIQUID_DENSITY_SOURCE}; NH3 ${NH3_LIQUID_DENSITY_SOURCE}`;
+
+/** A liquid check's estimate less its measurement. */
+export function liquidCheckExcess(check: LiquidCheck): number {
+  return (
+    molecularIceIndex(check.gas, check.wavelengthNm, check.molarVolumeCm3PerMol) - check.measured
+  );
+}
+
+/** The liquid checks as a file's `source` states them. */
+function liquidChecksText(): string {
+  return LIQUID_CHECKS.map((check) => {
+    const excess = liquidCheckExcess(check);
+    return `${check.what}, +${excess.toFixed(4)} at ${check.wavelengthNm} nm`;
+  }).join("; ");
+}
+
+/**
+ * Saturated liquid C₂H₆'s molar density at 94 K, mol/l, Titan's surface temperature as the brief takes
+ * it: the WebBook's, after D. Bücker and W. Wagner, J. Phys. Chem. Ref. Data 35 (2006) 205, DOI
+ * 10.1063/1.1859286, uncertain by 0.02–0.04% in density from the melting line.
+ */
+export const C2H6_LIQUID_MOLAR_DENSITY_MOL_PER_L = 21.534_85;
+
+/** Where {@link C2H6_LIQUID_MOLAR_DENSITY_MOL_PER_L} was read. */
+const C2H6_LIQUID_DENSITY_SOURCE = `${nistSaturation("C74840", "94", "95", "1")}, SHA-256 32926b1df39c2492c1da071470aefa212e1c80dbb7bcd887991daecc4704bc2c, fetched ${FETCHED_T5G}`;
+
+/** Liquid C₂H₆'s Lorentz–Lorenz estimate at a wavelength, nm, at 94 K (R08.T5.g). */
+export function ethaneLiquidEstimate(wavelengthNm: number): number {
+  return molecularIceIndex(
+    C2H6_DISPERSION,
+    wavelengthNm,
+    molarVolumeOf(C2H6_LIQUID_MOLAR_DENSITY_MOL_PER_L),
+  );
+}
+
+/**
+ * Ethane's measured Lorentz–Lorenz function at 632.8 nm, cm³ g⁻¹: 0.3794 ± 0.0003, constant within
+ * 0.5% over 1–200 amagat (Burton, "The Lorentz-Lorenz function of ethane", University of British
+ * Columbia thesis, DOI 10.14288/1.0084897, CC BY, read from its abstract through OpenAlex): the
+ * alternative R08.T5.g records against Loria's gas row.
+ */
+export const C2H6_BURTON_LORENTZ_LORENZ_CM3_PER_G = 0.3794;
+
+/** C₂H₆'s molar mass, g mol⁻¹, from CIAAW's conventional atomic weights (C 12.011, H 1.008). */
+const C2H6_MOLAR_MASS_G_PER_MOL = 2 * 12.011 + 6 * 1.008;
+
+/** Burton's Lorentz–Lorenz function at liquid ethane's density at 94 K, as an index at 632.8 nm. */
+export function ethaneBurtonIndex(): number {
+  const x =
+    (C2H6_BURTON_LORENTZ_LORENZ_CM3_PER_G *
+      C2H6_LIQUID_MOLAR_DENSITY_MOL_PER_L *
+      C2H6_MOLAR_MASS_G_PER_MOL) /
+    1_000;
+  return Math.sqrt((1 + 2 * x) / (1 - x));
+}
+
+/** The largest departure of a Cauchy fit from the curve it was fitted to, on the grid. */
+export function cauchyResidual(fit: CauchyFit, curve: (wavelengthNm: number) => number): number {
+  return Math.max(...MATERIAL_GRID_NM.map((nm) => Math.abs(cauchyIndex(fit, nm).n - curve(nm))));
+}
+
+/**
+ * Becquerel 1877's n of molten S₈ at the sodium D lines, 1.9290, "Soufre fondu (114 degrés)", taken
+ * as the melt began to crystallise (H. Becquerel, "Recherches expérimentales sur la polarisation
+ * rotatoire magnétique", Ann. Chim. Phys. (5) 12 (1877) 5–87, p. 37, Tableau n° 2, and pp. 25–26,
+ * where the dark-yellow melt read 1.890 a little before), as archive.org gives the volume (public
+ * domain mark). R08.T5.g's molten-sulphur stand-in.
+ */
+export const S8_MOLTEN_INDEX_D = 1.929;
+
 /** The files made from no fetched table. */
 export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
   {
@@ -2707,6 +3336,87 @@ export const DERIVED_MATERIALS: ReadonlyArray<MaterialFile> = [
     k: MATERIAL_GRID_NM.map(() => 0),
   },
   ...ICE_ESTIMATES.map(iceEstimateFile),
+  // R08.T5.g's liquids: N2's and NH3's derived fits, and ethane's and sulphur's stand-ins.
+  {
+    key: "N2",
+    phase: "liquid",
+    variant: null,
+    name: "liquid N2 at 77 K",
+    temperatureK: 77,
+    shape: "sphere",
+    provenance: "derived",
+    paper:
+      'H. Augustin, "Über die Dichte des flüssigen Wasserstoffs, den Brechungsexponenten und die Dispersion des flüssigen Wasserstoffs und des flüssigen Stickstoffs", Ann. Phys. 351 (1915) 419–445, DOI 10.1002/andp.19153510307',
+    source: `n(λ) = ${N2_LIQUID_FIT.a} + ${N2_LIQUID_FIT.bUm2} µm² ÷ λ², a two-term Cauchy fit made here to Augustin's absolute indices of chemically prepared, argon-free liquid N2 at −195.83 °C (77.32 K), ${AUGUSTIN_N2.map((p) => p.n).join(", ")} (±5 × 10⁻⁵) at ${AUGUSTIN_N2.map((p) => (p.wavelengthUm * 1000).toFixed(1)).join(", ")} nm (p. 443, the wavelengths p. 438's), read from the article's scan, Zenodo record 1514490 (CC0), https://zenodo.org/api/records/1514490/files/article.pdf/content, SHA-256 b7c6905a0ae90c3c2bd668cc4c5d738271a24e06e1e1e278a6cdfb4ff29e4bf3, fetched ${FETCHED_T5G}. The fit's residuals are ${AUGUSTIN_N2.map((p) => (cauchyIndex(N2_LIQUID_FIT, p.wavelengthUm * 1000).n - p.n).toExponential(1)).join(", ")}: the 656.3 nm value lies above the line that the other three and N2's gas dispersion give. The other measurements agree: Johns and Wilhelm 1937 (Can. J. Res. 15a, 101, DOI 10.1139/cjr37a-013; closed), whose abstract gives 1.1990 at 546.1 nm at the normal boiling point; Liveing and Dewar 1893's 1.2053 at the D line (Phil. Mag. (5) 36, 328) was of nitrogen with about 5% O2. k = 0: no measurement of liquid N2's visible absorption was found, and Liveing and Dewar call it colourless. The Lorentz–Lorenz method's checks on measured liquids (gas dispersions as view/atmosphere/rayleigh.ts holds them, at each liquid's molar density from the NIST Chemistry WebBook): ${liquidChecksText()}`,
+    licence:
+      "measured values cited as facts, from a public-domain article (Zenodo's copy, CC0), and a fit made here; no data set is copied",
+    reduction:
+      "the fit evaluated on 380–780 nm every 5 nm, to six significant figures, beyond the data's 435.9–656.3 nm by extrapolation; k = 0. Augustin's wavelengths are the lines' in air, read as vacuum wavelengths (under 5 × 10⁻⁶ in n); 77 K stands for his 77.32 K, a little below the normal boiling point, 77.355 K",
+    standIn: null,
+    fit: N2_LIQUID_FIT,
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: MATERIAL_GRID_NM.map((nm) => rounded(cauchyIndex(N2_LIQUID_FIT, nm).n)),
+    k: MATERIAL_GRID_NM.map((nm) => rounded(cauchyIndex(N2_LIQUID_FIT, nm).k)),
+  },
+  {
+    key: "NH3",
+    phase: "liquid",
+    variant: null,
+    name: "liquid NH3 at 240 K",
+    temperatureK: 240,
+    shape: "sphere",
+    provenance: "derived",
+    paper: `L. Y. Wong and A. Anderson, "Refractive-index measurements of some low-temperature liquids", J. Opt. Soc. Am. 62 (1972) 219–222, DOI 10.1364/JOSA.62.000219, for n at 632.8 nm; ${NH3_REFRACTIVITY.source}, DOI 10.1098/rsta.1914.0001, for the dispersion`,
+    source: `n(λ) = ${NH3_LIQUID_FIT.a} + ${NH3_LIQUID_FIT.bUm2} µm² ÷ λ², made here: b is the least-squares Cauchy slope of the Lorentz–Lorenz estimate from NH3's gas dispersion (view/atmosphere/rayleigh.ts's Cuthbertson row) at the saturated liquid's molar density at 239.80 K, ${NH3_LIQUID_MOLAR_DENSITY_MOL_PER_L} mol/l (the NIST Chemistry WebBook, after Gao et al., J. Phys. Chem. Ref. Data 52 (2023) 013102; ${NH3_LIQUID_DENSITY_SOURCE}), over 380–780 nm (worst residual ${cauchyResidual(NH3_LIQUID_FIT, ammoniaLiquidLevelled).toExponential(1)} from the estimate shifted to meet the measurement), and a meets Wong and Anderson's measured ${NH3_LIQUID_MEASURED.n.toFixed(3)} at ${NH3_LIQUID_MEASURED.wavelengthNm} nm and 239.80 K (their Table II, read from the journal's abstract page; the article is closed), ${liquidCheckExcess(NH3_LIQUID_CHECK).toFixed(4)} below the estimate there. Their dn/dT, −5.42 × 10⁻⁴ K⁻¹ to 1.384 at the melting point, 195.45 K, is not drawn. Bleekrode 1884 (Proc. R. Soc. Lond. 37, 339, p. 354; public domain) gives 1.325 at the D line and 16.5 °C under the liquid's own vapour pressure. k = 0: Robertson and Williams 1973 (J. Opt. Soc. Am. 63, 763, DOI 10.1364/JOSA.63.000763; closed) tabulate a Lambert absorption coefficient of 0.212 cm⁻¹ at 400 nm, 0.139 at 455 nm, 0.054 at 654 nm and 0.034 at 714 nm, with a band of 0.178 at 800 nm: 1.4–3.2 × 10³ times pure water's at 400–455 nm and 4–15 times at 654–800 nm, with no temperature or path stated on the abstract page; they are not drawn (R08.T5.g's deferred finding)`,
+    licence:
+      "one measured index cited as a fact and a fit made here, with the gas dispersion and density cited; no data set is copied",
+    reduction:
+      "the fit evaluated on 380–780 nm every 5 nm, to six significant figures; k = 0. 240 K stands for 239.80 K, NH3's boiling point at 0.101 MPa",
+    standIn: null,
+    fit: NH3_LIQUID_FIT,
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: MATERIAL_GRID_NM.map((nm) => rounded(cauchyIndex(NH3_LIQUID_FIT, nm).n)),
+    k: MATERIAL_GRID_NM.map((nm) => rounded(cauchyIndex(NH3_LIQUID_FIT, nm).k)),
+  },
+  {
+    key: "C2H6",
+    phase: "liquid",
+    variant: null,
+    name: "liquid C2H6 at 94 K (an estimated index)",
+    temperatureK: 94,
+    shape: "sphere",
+    provenance: "standIn",
+    paper: `the estimate's inputs: ${C2H6_DISPERSION.source}, for C2H6's gas dispersion; D. Bücker and W. Wagner, J. Phys. Chem. Ref. Data 35 (2006) 205, DOI 10.1063/1.1859286, for the liquid's density`,
+    source: `a Lorentz–Lorenz estimate, not a measurement (decision-r08-t5d ruling 5's method, as for the ices): the molar refraction of C2H6 from its gas dispersion as stated at ${C2H6_DISPERSION.referenceK} K and ${C2H6_DISPERSION.referencePa} Pa (view/atmosphere/rayleigh.ts's row, Z = ${C2H6_DISPERSION.compressibility}), measured over 523–667.7 nm and extrapolated beyond, with no increment, since the liquid is molecular and non-polar, over the saturated liquid's molar volume at 94 K, ${molarVolumeOf(C2H6_LIQUID_MOLAR_DENSITY_MOL_PER_L).toFixed(3)} cm³ mol⁻¹ (${C2H6_LIQUID_MOLAR_DENSITY_MOL_PER_L} mol/l from the NIST Chemistry WebBook, ${C2H6_LIQUID_DENSITY_SOURCE}). It gives ${ethaneLiquidEstimate(380).toFixed(4)} at 380 nm, ${ethaneLiquidEstimate(550).toFixed(4)} at 550 nm and ${ethaneLiquidEstimate(780).toFixed(4)} at 780 nm. No open measurement of liquid ethane's visible optical constants was found (R08.T5.g's search, ${FETCHED_T5G}: refractiveindex.info, which holds Loria's gas only; the NIST Chemistry WebBook; Crossref, OpenAlex, arXiv, NASA's NTRS, Europe PMC and Google Scholar, for its refractive index or visible absorption, pure or in Titan's methane–ethane–nitrogen mixtures). Three measurements are closed: Badoz et al. 1992 (Rev. Sci. Instrum. 63, 2967, DOI 10.1063/1.1142594), a cryogenic refractometer at 670 nm for liquid methane, ethane and nitrogen and their mixtures; Sliwinski 1969 (Z. Phys. Chem. 63, 263, DOI 10.1524/zpch.1969.63.5_6.263), the Lorentz–Lorenz function of liquid ethane; and Lopez-Calvo and Manzanares 2008 (J. Phys. Chem. A 112, 1730, DOI 10.1021/jp076843v), whose abstract reports the C–H overtone Δv = 6 of liquid ethane at 100 K, past 14,000 cm⁻¹, in the red. Burton's thesis (University of British Columbia, DOI 10.14288/1.0084897, CC BY; its abstract, through OpenAlex) gives ethane's measured Lorentz–Lorenz function at 632.8 nm, ${C2H6_BURTON_LORENTZ_LORENZ_CM3_PER_G} ± 0.0003 cm³ g⁻¹, constant within 0.5% over 1–200 amagat: extrapolated to the liquid's density, about 483 amagat, n = ${ethaneBurtonIndex().toFixed(4)}, ${(ethaneBurtonIndex() - ethaneLiquidEstimate(632.8)).toFixed(4)} above this estimate there, since Loria's molar refraction runs lower (R08.T5.g's deferred finding). The method's checks on measured liquids, each above the measurement: ${liquidChecksText()} (their molar densities: ${LIQUID_CHECK_DENSITY_SOURCES}). k = 0: no open measurement of liquid ethane's visible absorption was found, and its weak C–H overtones in the red are not drawn`,
+    licence:
+      "estimated values from cited constants: a gas dispersion and a density from the NIST Chemistry WebBook (NIST Standard Reference Data, cited); no data set is copied",
+    reduction: `n = √((1 + 2x) ÷ (1 − x)), with x the gas's molar refraction over the liquid's molar volume, evaluated on 380–780 nm every 5 nm to six significant figures; k = 0. The method runs ${Math.min(...LIQUID_CHECKS.map(liquidCheckExcess)).toFixed(4)} to ${Math.max(...LIQUID_CHECKS.map(liquidCheckExcess)).toFixed(4)} high on the four measured liquids, so ethane's n is presumably as high, while Burton's function would raise it`,
+    standIn: `a non-absorbing liquid whose real index is a Lorentz–Lorenz estimate from the gas's dispersion at the liquid's density, since no open visible optical constants of liquid C2H6 were found: ${ethaneLiquidEstimate(380).toFixed(3)} at 380 nm, ${ethaneLiquidEstimate(550).toFixed(3)} at 550 nm and ${ethaneLiquidEstimate(780).toFixed(3)} at 780 nm`,
+    fit: null,
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: MATERIAL_GRID_NM.map((nm) => rounded(ethaneLiquidEstimate(nm))),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  },
+  {
+    key: "S8",
+    phase: "liquid",
+    variant: null,
+    name: "liquid S8 at 387 K (a constant index)",
+    temperatureK: 387,
+    shape: "sphere",
+    provenance: "standIn",
+    paper:
+      'H. Becquerel, "Recherches expérimentales sur la polarisation rotatoire magnétique", Ann. Chim. Phys. (5) 12 (1877) 5–87, for the index',
+    source: `the archive.org scan of Ann. Chim. Phys. (5) 12, https://archive.org/details/s696id13665280 (public domain mark): its text, SHA-256 8020c247086bffe4a9a7a58d0d08ddf4815ed2b19c5f8b1421bfbfc85891a458, and its page image n36 (p. 37), SHA-256 60b9e263de0cd6061d8e1b83d5e8687d5159bbe2c0a0d246bdf2380e86c417b1, fetched ${FETCHED_T5G}: n = ${S8_MOLTEN_INDEX_D.toFixed(4)} with the sodium D lines for "Soufre fondu (114 degrés)" (Tableau n° 2), read in an iron prism as the melt began to crystallise; the hotter, dark-yellow melt read 1.890 a little before (pp. 25–26), a rise of 0.039 on cooling that expansion is too small to explain, as Becquerel finds for the magnetic rotation. No open measurement of molten sulphur's visible absorption, or of its dispersion, was found (R08.T5.g's search): Sasson and Arakawa 1986 (Appl. Opt. 25, 2675; n and k over 0.4–2.0 µm at 121–183 °C), Sasson et al. 1985 (Icarus 64, 368), Hosokawa, Matsuoka and Tamura 1994 (J. Phys.: Condens. Matter 6, 5273; the absorption coefficient over 130–450 °C), Bass 1953 (J. Chem. Phys. 21, 80) and Meyer et al. 1971 (J. Am. Chem. Soc. 93, 1034) are closed, as is Meyer 1976 (Chem. Rev. 76, 367), the finding aid; the open preprint of Meyer et al. 1971 (UCRL-19660, 1970) gives the red absorption edge's shift, about 23.6 cm⁻¹ per kelvin, but not its position, and refractiveindex.info, HITRAN's aerosol list and Kitzmann and Heng 2018's compilation hold no liquid sulphur`,
+    licence:
+      "one published index cited as a fact, from a public-domain volume; no data set is copied (decision-r08-t5d ruling 5)",
+    reduction: `a constant index: Becquerel's n at 589 nm, ${S8_MOLTEN_INDEX_D.toFixed(4)}, at every wavelength of 380–780 nm, with k = 0. Molten sulphur's dispersion and its blue absorption edge, which makes the melt yellow at its melting point and dark red at its boiling point (Meyer et al. 1971), are not drawn, so a sulphur lake draws too white in the blue. 387 K stands for Becquerel's 114 °C`,
+    standIn: `a constant index: liquid S8's real index at 589 nm near its melting point, ${S8_MOLTEN_INDEX_D.toFixed(3)} with no dispersion and k = 0, since no open measurement of the liquid's visible absorption was found; its blue absorption edge is not drawn`,
+    fit: null,
+    wavelengthsNm: MATERIAL_GRID_NM,
+    n: MATERIAL_GRID_NM.map(() => rounded(S8_MOLTEN_INDEX_D)),
+    k: MATERIAL_GRID_NM.map(() => 0),
+  },
 ];
 
 /**
@@ -2733,14 +3443,22 @@ function readChecked(path: string, sha256: string): string {
   return bytes.toString("utf8");
 }
 
+/**
+ * Each derived file's name, by its key and phase (`CO2/solid`): since R08.T5.g a key may have a
+ * derived liquid beside a derived solid.
+ */
 const DERIVED_FILES: Readonly<Record<string, string>> = {
-  CO2: "carbon-dioxide-ice.json",
-  NH4SH: "ammonium-hydrosulphide.json",
-  S8: "sulphur.json",
-  H2S: "hydrogen-sulphide-ice.json",
-  N2: "nitrogen-ice.json",
-  CO: "carbon-monoxide-ice.json",
-  O2: "oxygen-ice.json",
+  "CO2/solid": "carbon-dioxide-ice.json",
+  "NH4SH/solid": "ammonium-hydrosulphide.json",
+  "S8/solid": "sulphur.json",
+  "H2S/solid": "hydrogen-sulphide-ice.json",
+  "N2/solid": "nitrogen-ice.json",
+  "CO/solid": "carbon-monoxide-ice.json",
+  "O2/solid": "oxygen-ice.json",
+  "N2/liquid": "nitrogen-liquid.json",
+  "NH3/liquid": "ammonia-liquid.json",
+  "C2H6/liquid": "ethane-liquid.json",
+  "S8/liquid": "sulphur-liquid.json",
 };
 
 /** The command-line options of every fetched source, each once, in the lists' order. */
@@ -2792,9 +3510,9 @@ export function main(args: readonly string[]): number {
       writeFileSync(join(out, spec.file), `${JSON.stringify(file, null, 2)}\n`);
     }
     for (const file of DERIVED_MATERIALS) {
-      const name = DERIVED_FILES[file.key];
+      const name = DERIVED_FILES[`${file.key}/${file.phase}`];
       if (name === undefined) {
-        throw new Error(`no file name for the derived material ${file.key}`);
+        throw new Error(`no file name for the derived material ${file.key}, ${file.phase}`);
       }
       writeFileSync(join(out, name), `${JSON.stringify(file, null, 2)}\n`);
     }

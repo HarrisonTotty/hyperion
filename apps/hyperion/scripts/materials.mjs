@@ -20,10 +20,11 @@
 //     --aluminium-oxide-ordinary <Al2O3/nk/Malitson-o.yml> \
 //     --aluminium-oxide-extraordinary <Al2O3/nk/Malitson-e.yml> \
 //     --graphite-perpendicular <callindex.out_CpeD03_0.01> \
-//     --graphite-parallel <callindex.out_CpaD03_0.01>
+//     --graphite-parallel <callindex.out_CpaD03_0.01> --pope-fry <pope97.txt>
 //   pnpm exec prettier --write src/renderer/src/view/atmosphere/materials/*.json
 // The two .tex files are the e-prints' members, extracted from their archives as data; the .dat
-// files are Kitzmann and Heng 2018's compilation's (R08.T5.d).
+// files are Kitzmann and Heng 2018's compilation's (R08.T5.d). `pope97.txt` is omlc.org's table of
+// Pope and Fry 1997, which the water and seawater files take k from (R08.T5.g).
 import { fileURLToPath } from "node:url";
 
 import { runnerImport } from "vite";
