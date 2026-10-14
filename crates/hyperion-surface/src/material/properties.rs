@@ -20,7 +20,7 @@
 use hyperion_base::math;
 use hyperion_base::units::{Kelvin, KilogramsPerCubicMetre, Metres, Pascals, Radians};
 
-use super::{Material, MaterialClass};
+use super::{Material, MaterialClass, PhotometricForm};
 use crate::field::{MaterialPalette, MechanicsFamily, PaletteEntry, coded_enum};
 
 /// A Mohr–Coulomb pair: the shear strength τ = c + σ tan φ of a granular material under normal
@@ -298,25 +298,47 @@ coded_enum! {
     ///
     /// Every law is McEwen's lunar-Lambert, r = `A_N` f(α) [2 L(α) μ₀ ÷ (μ₀ + μ) + (1 − L(α)) μ₀]
     /// (R07's `body_brdf`). A law's L(α) is L(0) times McEwen's lunar profile
-    /// ([`lommel_seeliger_share`](Self::lommel_seeliger_share)), L(0) following the material's
-    /// normal albedo ([`limb_parameter`]): 1 for the dark and moderate surfaces McEwen 1996
-    /// measured, falling towards 0 (Lambert) for the brightest. R10.T10.b tabulates a law's f(α)
-    /// against its L(α) in the row's colour channels and L(α) in its alpha (decision-r07-t8b).
+    /// ([`lommel_seeliger_share`](Self::lommel_seeliger_share)), and its L(0) is a measured
+    /// property of how the surface is built, never an energy bound's
+    /// ([`limb_parameter`](Self::limb_parameter); decision-r10-limb). R10.T10.b tabulates a law's
+    /// f(α) against its L(α) in the row's colour channels and L(α) in its alpha (decision-r07-t8b).
+    ///
+    /// The set is three laws: two for particulate ground, whose L(0) follows its normal albedo by
+    /// the particulate rule ([`limb_parameter()`]), and Lambert's, which the form chooses for the
+    /// consolidated forms whatever the entry's code ([`PhotometricForm`](super::PhotometricForm),
+    /// [`PhaseLawOrigin::Form`]). Energy is bounded on the normal albedo, by the law's own f
+    /// ([`normal_albedo_ceiling`](Self::normal_albedo_ceiling)), never through L.
     ///
     /// Code 0 is no law: every palette's entries are 0 until the server's palette sources resolve
     /// them (P14.T49.c's phase column), and a reader then takes [`for_family`](Self::for_family)'s
-    /// law and labels it ([`PhaseLawOrigin::FamilyDefault`]). The set is closed, two laws, for the
-    /// composition audit: the brighter laws' L(α) is the Moon's profile scaled, since no bright
-    /// surface's L(α) was read (Buratti 1984, Icarus 59, 392, not read), and a surface whose phase
-    /// curve neither template draws (a forward-scattering frost, a liquid) is a new code.
+    /// law and labels it ([`PhaseLawOrigin::FamilyDefault`]). The set is closed, three laws, for
+    /// the composition audit: the bright particulate laws' L(α) is the Moon's profile scaled, since
+    /// no bright surface's L(α) was read, and a surface whose phase curve no template draws (a
+    /// forward-scattering frost, a liquid) is a new code.
     PhaseLaw {
         /// The Moon's: f(α) fitted to the Moon's V curve (R07's `moon` template, Krisciunas and
-        /// Schaefer 1991, PASP 103, 1033, eq. 9), for silicate, metal, salt and organic surfaces.
+        /// Schaefer 1991, PASP 103, 1033, eq. 9), for particulate silicate, metal, salt and organic
+        /// surfaces.
         Regolith = 1,
         /// An airless ice's: f(α) fitted to R07's `airless-ice` template, the Moon's V curve shape
         /// with Ganymede's phase integral q = 0.80 (Squyres and Veverka 1981, Icarus 46, 137;
-        /// provisional there, labelled), for water and volatile ices.
+        /// provisional there, labelled), for particulate water and volatile ices, frost among them.
         Ice = 2,
+        /// Lambert's: f ≡ 1 and L(α) ≡ 0, R07's `lambert` template, a Lambert sphere of phase
+        /// integral q = 3/2 (provisional there, labelled: no measured curve), for the consolidated
+        /// forms, glacier, snow, sea ice and evaporite of any species or salt. A particulate form
+        /// takes it only where its entry's code names it, which [`for_family`](Self::for_family)
+        /// never does.
+        ///
+        /// As the single-scattering albedo tends to 1, multiple scattering dominates and the
+        /// zero-phase limb profile becomes Chandrasekhar's H(μ)² shape, and a consolidated medium
+        /// has little or no shadow hiding to flatten it: a lunar-Lambert fit to a snow-like
+        /// medium's Hapke profile gives L(0) = 0.04–0.05 (decision-r10-limb §1, computed, for an
+        /// assumed w ≈ 0.9999 and g ≈ 0.89, unsourced there). Under
+        /// this law the directional-hemispherical albedo is `A_N` at every incidence
+        /// ([`directional_hemispherical_albedo`] at L = 0), so a measured hemispherical albedo is
+        /// the normal albedo with no conversion (decision-r10-limb §3).
+        Lambert = 3,
     }
 }
 
@@ -331,14 +353,16 @@ pub const UNASSIGNED_PHASE_ROW: u8 = 0;
 /// McEwen prints the law's Lommel–Seeliger term without the factor 2 (p. 841), as Buratti et al.
 /// 2017 do; this crate's form is ISIS's and R07's, 2 L μ₀ ÷ (μ₀ + μ), so that r = `A_N` at
 /// i = e = α = 0. A share taken from a paper of the other form converts before it is compared:
-/// Buratti's A = 0.70 for Pluto is an L(0) of about 0.58 here.
+/// Buratti's f [A μ₀ ÷ (μ₀ + μ) + (1 − A) μ₀] is this form up to scale for L = A ÷ (2 − A), so
+/// Buratti's A = 0.70 for Pluto and Charon is an L(0) of 0.54 here (decision-r10-limb §1).
 const MCEWEN_LUNAR_L: [f64; 3] = [-0.019, 2.42e-4, -1.46e-6];
 
 impl PhaseLaw {
     /// The law a substance of mechanics family `family` takes when its entry names none.
     ///
-    /// The ices' for water and volatile ices, the Moon's for the rest. The server's palette sources
-    /// may fill the code by the same rule.
+    /// The ices' for water and volatile ices, the Moon's for the rest: a particulate law, never
+    /// Lambert's, which the form chooses ([`properties()`]). The server's palette sources may fill
+    /// the code by the same rule.
     #[must_use]
     pub const fn for_family(family: MechanicsFamily) -> Self {
         match family {
@@ -357,19 +381,60 @@ impl PhaseLaw {
         match self {
             Self::Regolith => "moon",
             Self::Ice => "airless-ice",
+            Self::Lambert => "lambert",
+        }
+    }
+
+    /// L(0) of the law for a material of normal albedo `normal_albedo` in V: 0 for Lambert's,
+    /// whatever the albedo, and the particulate rule ([`limb_parameter()`]) for the Regolith and
+    /// Ice laws, NaN for a NaN albedo there.
+    ///
+    /// It takes the albedo as drawn: R10.T10.a's scale c multiplies `A_N`, and L(0) is then this of
+    /// c `A_N`.
+    #[must_use]
+    pub fn limb_parameter(self, normal_albedo: f64) -> f64 {
+        match self {
+            Self::Regolith | Self::Ice => limb_parameter(normal_albedo),
+            Self::Lambert => 0.0,
+        }
+    }
+
+    /// The highest normal albedo in V the law reflects without breaking energy conservation at any
+    /// incidence: the clamp of R10.T10.a's scale (decision-r10-limb §3).
+    ///
+    /// The bound is on the whole law with its phase factor: for every μ₀ in (0, 1] the
+    /// directional-hemispherical albedo `A_h`(μ₀) = (`A_N` ÷ π) ∫ f(α) [2 L(α) ÷ (μ₀ + μ) + 1 −
+    /// L(α)] μ dΩ is at most 1, so `A_N` ≤ 1 ÷ sup η(μ₀), η = `A_h` ÷ `A_N` being the row's own.
+    /// - Lambert's, 1: with f ≡ 1 and L ≡ 0, `A_h` is `A_N` at every μ₀, exactly.
+    /// - Regolith's and Ice's, [`PARTICULATE_NORMAL_ALBEDO_CEILING`] = 1.35, the Enceladus anchor
+    ///   of the particulate rule, checked against the rows' real f: under the rule, the Ice row's
+    ///   `A_N` × sup η is 1.35 × 0.720 = 0.97 at the ceiling, with sup η at grazing incidence, and
+    ///   the Regolith row's 0.72 (computed with R07's construction f = Φ ÷ `Φ_shape`(α; L(α)), f
+    ///   clamped at 4 and held past 150°; decision-r10-limb §3). 1.4 would give 1.008.
+    ///
+    /// A normal albedo above 1 is physical: Enceladus's is 0.9–1.4 and conserves energy, because
+    /// its radiance falls away from opposition (Verbiscer and Veverka 1994, Icarus 110, 155,
+    /// abstract).
+    #[must_use]
+    pub const fn normal_albedo_ceiling(self) -> f64 {
+        match self {
+            Self::Regolith | Self::Ice => PARTICULATE_NORMAL_ALBEDO_CEILING,
+            Self::Lambert => 1.0,
         }
     }
 
     /// L(α), the law's Lommel–Seeliger share at phase `alpha`, for a material whose L(0) is `l0`.
     ///
-    /// It is `l0` ([`limb_parameter`]) times McEwen's lunar profile, which falls from 1 at 0° to 0
-    /// at 103.9° and is held at 0 beyond, where the fit has no data (McEwen 1996, LPSC XXVII, 841;
-    /// decision-r07-t8b). Both laws take the same profile: no other was read. NaN for a NaN
-    /// phase.
+    /// For the Regolith and Ice laws it is `l0` ([`limb_parameter`](Self::limb_parameter)) times
+    /// McEwen's lunar profile, which falls from 1 at 0° to 0 at 103.9° and is held at 0 beyond,
+    /// where the fit has no data (McEwen 1996, LPSC XXVII, 841; decision-r07-t8b); both take the
+    /// same profile, since no other was read, and give NaN for a NaN phase. Lambert's is 0 at every
+    /// phase and for every `l0`.
     #[must_use]
     pub fn lommel_seeliger_share(self, l0: f64, alpha: Radians) -> f64 {
         match self {
             Self::Regolith | Self::Ice => l0 * mcewen_lunar_profile(alpha),
+            Self::Lambert => 0.0,
         }
     }
 }
@@ -394,36 +459,105 @@ pub enum PhaseLawOrigin {
     ///
     /// The entry's code is [`UNASSIGNED_PHASE_ROW`] or one this build does not know.
     FamilyDefault,
+    /// The form's: a consolidated form takes [`PhaseLaw::Lambert`] whatever its entry's code
+    /// ([`PhotometricForm::Consolidated`](super::PhotometricForm::Consolidated)).
+    Form,
 }
 
 /// The directional-hemispherical albedo of the Lommel–Seeliger term at normal incidence, per unit
-/// normal albedo: 4 (1 − ln 2) ≈ 1.227 (Design note 8; [`directional_hemispherical_albedo`] at
-/// μ₀ = 1).
+/// normal albedo, with f taken as 1: 4 (1 − ln 2) ≈ 1.227 (Design note 8;
+/// [`directional_hemispherical_albedo`] at μ₀ = 1).
+///
+/// It is the f ≡ 1 case of the energy bound, which is exact only for a law whose f is 1, the
+/// Lambert law, where L = 0 and the ratio does not enter. For a row with a phase factor, mostly
+/// below 1 away from opposition, it is not the bound: R10.T10.b computes that with f
+/// ([`PhaseLaw::normal_albedo_ceiling`]; decision-r10-limb §3).
 pub const LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO: f64 = 4.0 * (1.0 - core::f64::consts::LN_2);
 
-/// L(0) of the lunar-Lambert law from the normal albedo in V (Design note 8): the largest
-/// Lommel–Seeliger share that reflects no more than the ground receives at normal incidence.
+/// The normal albedo in V up to which a particulate surface has no limb darkening at zero phase,
+/// L(0) = 1: 0.60.
 ///
-/// The law's directional-hemispherical albedo at μ₀ = 1, with f taken as 1, is
-/// `A_N` [k L + (1 − L)], k = 4 (1 − ln 2) ([`LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO`]), so `A_h` ≤ 1
-/// holds for L ≤ (1 ÷ `A_N` − 1) ÷ (k − 1). L(0) is that bound, clamped to 0–1: 1
-/// (Lommel–Seeliger, the Moon's) for every `A_N` up to 1 ÷ k ≈ 0.815, then falling to 0 (Lambert)
-/// at `A_N` = 1 and beyond.
-/// McEwen 1996 found no difference in limb darkening between the maria, the highlands and bright
-/// craters, so the dark and moderate surfaces keep L(0) = 1 whatever their albedo, and only the
-/// brightest are limb-darkened at zero phase (Buratti 1984, Icarus 59, 392, not read). The fall
-/// above 0.815 is the bound itself, not a fit: no bright surface's L(0) was read. A normal albedo
-/// at or below 0 gives 1; a NaN gives NaN.
+/// The icy moons of Saturn "closely followed a lunar-like photometric function for geometric
+/// albedos of about 0.55–0.60", Buratti et al. 2017 report of Buratti 1984 (Icarus 287, 207, read
+/// as arXiv:1604.06129, p. 12; Buratti 1984, Icarus 59, 392); under L = 1 the geometric albedo is
+/// `A_N` (p. 10). Below it: McEwen 1996 imposes L(0) = 1 "to match the observation of no
+/// limb-darkening at α = 0°" and finds no difference between maria, highlands and bright crater
+/// material (LPSC XXVII, 841); Ganymede, at normal reflectance 0.35–0.44, is "not Lambertian"
+/// (Squyres and Veverka 1981, Icarus 46, 137, abstract) and lunar-like, A = 1 (Buratti et al.
+/// 2017, p. 12); Rhea and Dione "closely follow lunar behavior with almost no limb darkening"
+/// (Buratti 1984, abstract). Decision-r10-limb §1 and §2.
+pub const LUNAR_LIMB_ONSET_NORMAL_ALBEDO: f64 = 0.60;
+
+/// The normal albedo in V of the brightest particulate frost, the particulate rule's upper anchor:
+/// 1.35, Enceladus's.
+///
+/// It is the normal albedo of Verbiscer and Veverka 1994's Hapke solution for Enceladus (Icarus
+/// 110, 155, abstract: w = 0.998 ± 0.001, a Henyey–Greenstein g = −0.399 and B₀ = 0.21 ± 0.07;
+/// their θ̄ = 6° is not used), by Hapke 1981 with Hapke 2002's H at α = 0, P(0) = 3.873: 1.351,
+/// within the measured normal reflectances, 0.9 on the leading hemisphere to 1.4 on the trailing
+/// (the same abstract; Buratti et al. 2017, Table 3), towards their top. Computed by
+/// decision-r10-limb (§1, `hapke.py`); with Hapke 1981's approximate H, of the equation they
+/// fitted (Hapke 1986), the same parameters give 1.406.
+pub const BRIGHT_FROST_NORMAL_ALBEDO: f64 = 1.35;
+
+/// L(0) of the brightest particulate frost, the particulate rule's value from
+/// [`BRIGHT_FROST_NORMAL_ALBEDO`] up: 0.38, a derived figure.
+///
+/// The least-squares lunar-Lambert fit, L + (1 − L) μ weighted by the projected area μ dμ, to the
+/// zero-phase disc profile of Verbiscer and Veverka 1994's Hapke solution for Enceladus (the
+/// parameters of [`BRIGHT_FROST_NORMAL_ALBEDO`]): 0.378 (decision-r10-limb §1, `hapke.py`).
+/// Bright particulate ice is limb-darkened but never Lambert: "Mimas, Tethys, and especially
+/// Enceladus show significant limb darkening … No satellite's surface can be described by
+/// Lambert's law" (Buratti 1984, abstract). B₀ is loosely constrained, and at B₀ = 1 the fit is
+/// 0.515; with Hapke 1981's approximate H it is 0.327.
+pub const BRIGHT_FROST_LIMB_PARAMETER: f64 = 0.38;
+
+/// The highest normal albedo in V of a particulate law (Regolith and Ice): 1.35,
+/// [`BRIGHT_FROST_NORMAL_ALBEDO`], the clamp of R10.T10.a's scale
+/// ([`PhaseLaw::normal_albedo_ceiling`], whose documentation gives the check against the rows' f).
+pub const PARTICULATE_NORMAL_ALBEDO_CEILING: f64 = BRIGHT_FROST_NORMAL_ALBEDO;
+
+/// L(0) of a particulate lunar-Lambert law from its normal albedo in V: the particulate rule
+/// `L_p` (decision-r10-limb §2).
+///
+/// L(0) is a measured property of how a surface is built, not an energy bound's. A porous
+/// particulate regolith shadow-hides, so its disc is flat at zero phase, L(0) = 1, up to
+/// [`LUNAR_LIMB_ONSET_NORMAL_ALBEDO`], 0.60; above it multiple scattering limb-darkens it, and
+/// L(0) falls to [`BRIGHT_FROST_LIMB_PARAMETER`], 0.38, at Enceladus's
+/// [`BRIGHT_FROST_NORMAL_ALBEDO`], 1.35, and stays there. Between the anchors, with x the normal
+/// albedo, A₁ 0.60, `A_E` 1.35 and `L_E` 0.38,
+/// `L_p`(x) = [`L_E` `A_E` (x − A₁) + A₁ (`A_E` − x)] ÷ [x (`A_E` − A₁)] = 0.6696 ÷ x − 0.1160,
+/// so that x `L_p`(x) is linear in x on each piece. The checks against the observations: Europa's
+/// plains at 0.71 give 0.83, lunar-like with a Lambert component (Buratti and Veverka 1983, Icarus
+/// 55, 93, abstract), and Enceladus 0.38, limb-darkened but not Lambert. The outliers, where the
+/// rule gives more L(0) than measured: Pluto, of mean `A_N` about 0.73, where it gives 0.80
+/// against a global fit of 0.54 that undercorrects the brightest regions, at 0.8–1.0, for their
+/// limb darkening (Buratti et al. 2017, pp. 10–11 and 17), so that they need less than 0.54, where
+/// it gives 0.72–0.55; Charon, at 0.4–0.6 with 0.54 measured (p. 12), where it gives 1; and
+/// Europa's mottled terrain, at 0.48–0.60, which "cannot be represented by a lunar-like
+/// photometric law" (Buratti and Veverka 1983, abstract), where it gives 1. The consolidated forms
+/// take the Lambert law instead ([`PhaseLaw::limb_parameter`]).
+///
+/// A normal albedo at or below 0 gives 1; a NaN gives NaN.
 ///
 /// It takes the albedo as drawn: R10.T10.a's scale c multiplies `A_N`, and L(0) is then this of
-/// c `A_N`, which keeps the bound and leaves the geometric albedo c `A_N` [⅔ + ⅓ L(0)] piecewise
-/// linear in c, with breaks where c `A_N` crosses 0.815 and 1.
+/// c `A_N`, which leaves the geometric albedo c `A_N` [⅔ + ⅓ L(0)] piecewise linear in c, with
+/// breaks where c `A_N` crosses 0.60 and 1.35.
 #[must_use]
 pub fn limb_parameter(normal_albedo: f64) -> f64 {
-    if normal_albedo <= 0.0 {
-        return 1.0;
+    const A1: f64 = LUNAR_LIMB_ONSET_NORMAL_ALBEDO;
+    const AE: f64 = BRIGHT_FROST_NORMAL_ALBEDO;
+    const LE: f64 = BRIGHT_FROST_LIMB_PARAMETER;
+    if normal_albedo <= A1 {
+        1.0
+    } else if normal_albedo < AE {
+        (LE * AE * (normal_albedo - A1) + A1 * (AE - normal_albedo)) / (normal_albedo * (AE - A1))
+    } else if normal_albedo >= AE {
+        LE
+    } else {
+        // Only a NaN fails all three comparisons.
+        normal_albedo
     }
-    ((1.0 / normal_albedo - 1.0) / (LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO - 1.0)).clamp(0.0, 1.0)
 }
 
 /// The lunar-Lambert law's directional-hemispherical albedo at incidence cosine `mu0`, with f
@@ -433,6 +567,11 @@ pub fn limb_parameter(normal_albedo: f64) -> f64 {
 /// integral over the hemisphere and the Lambert term's (Design note 8): 1.227 `A_N` at μ₀ = 1 for
 /// L = 1, and towards `A_N` (1 + 3L) at grazing incidence, its Lommel–Seeliger term towards
 /// 4 `A_N` L.
+///
+/// It is the f ≡ 1 case of the energy bound, exact for the Lambert law (L = 0), where it is `A_N`
+/// at every μ₀. For a row with a phase factor it is not the bound: f is mostly below 1 away from
+/// opposition, and in every case computed it overstates such a row's reflection; R10.T10.b
+/// computes the bound with f ([`PhaseLaw::normal_albedo_ceiling`]; decision-r10-limb §3).
 #[must_use]
 pub fn directional_hemispherical_albedo(normal_albedo: f64, limb: f64, mu0: f64) -> f64 {
     let lommel_seeliger = 4.0 * (1.0 - mu0 * math::ln_1p(1.0 / mu0));
@@ -529,10 +668,11 @@ impl MaterialProperties {
         self.normal_albedo_bvr
     }
 
-    /// L(0) of the material's law, from its normal albedo in V ([`limb_parameter`]).
+    /// L(0) of the material's law at its normal albedo in V ([`PhaseLaw::limb_parameter`]): 0 for
+    /// Lambert's, the particulate rule ([`limb_parameter()`]) for the others.
     #[must_use]
     pub fn limb_parameter(&self) -> f64 {
-        limb_parameter(self.normal_albedo_bvr[1])
+        self.phase_law.limb_parameter(self.normal_albedo_bvr[1])
     }
 
     /// The photometric law.
@@ -541,7 +681,7 @@ impl MaterialProperties {
         self.phase_law
     }
 
-    /// Where the law came from: the entry's code, or the family's default.
+    /// Where the law came from: the form, the entry's code, or the family's default.
     #[must_use]
     pub const fn phase_law_origin(&self) -> PhaseLawOrigin {
         self.phase_law_origin
@@ -595,7 +735,13 @@ impl std::error::Error for ResolvePropertiesError {}
 
 /// The properties of `material` on a body of palette `palette`: its form's rows for its entry's
 /// mechanics family ([`form_row`]) with the entry's resolved values, the albedo times the form's
-/// factor, and the law the entry's code names or, where it names none, the family's default.
+/// factor, and its photometric law.
+///
+/// The law is the form's or the entry's (decision-r10-limb §2). A consolidated form
+/// ([`PhotometricForm::Consolidated`](super::PhotometricForm::Consolidated)) takes
+/// [`PhaseLaw::Lambert`], [`PhaseLawOrigin::Form`], whatever the entry's code. A particulate form
+/// takes the law the entry's code names ([`PhaseLawOrigin::Palette`]) or, where it names none or
+/// one this build does not know, the family's default ([`PhaseLawOrigin::FamilyDefault`]).
 ///
 /// # Errors
 ///
@@ -613,12 +759,15 @@ pub fn properties(
             })?;
     let form = form_row(material.class(), entry.mechanics);
     let factor = form.albedo_factor.unwrap_or(1.0);
-    let (phase_law, phase_law_origin) = match PhaseLaw::try_from(entry.phase_row) {
-        Ok(law) => (law, PhaseLawOrigin::Palette),
-        Err(_) => (
-            PhaseLaw::for_family(entry.mechanics),
-            PhaseLawOrigin::FamilyDefault,
-        ),
+    let (phase_law, phase_law_origin) = match material.class().photometric_form() {
+        PhotometricForm::Consolidated => (PhaseLaw::Lambert, PhaseLawOrigin::Form),
+        PhotometricForm::Particulate => match PhaseLaw::try_from(entry.phase_row) {
+            Ok(law) => (law, PhaseLawOrigin::Palette),
+            Err(_) => (
+                PhaseLaw::for_family(entry.mechanics),
+                PhaseLawOrigin::FamilyDefault,
+            ),
+        },
     };
     Ok(MaterialProperties {
         material,
@@ -809,11 +958,14 @@ const STEEL_ON_ICE_SOURCE: &str = "Liefferink, Hsia, Weber and Bonn 2021, Phys. 
 
 /// Fresh snow's normal albedo in the visible, 0.97, the midpoint of "a uniformly high value of
 /// 0.96–0.98 across the UV and visible spectrum" (Grenfell, Warren and Mullen 1994, JGR 99 (D9),
-/// 18,669, abstract), a spectral hemispherical albedo, which for so bright a surface, of L near 0,
-/// is its normal albedo (Design note 8), so long as the nadir anisotropy R(0, 0) ÷ `A_h` is 1,
-/// which Design note 8 puts at about 0.9–1.0 for snow (measured on the Antarctic plateau, under its
-/// high solar zenith): the albedo an ice entry's reference form, fresh snow or fine frost, has,
-/// against which a form's factor is taken.
+/// 18,669, abstract), a spectral hemispherical albedo: the albedo an ice entry's reference form,
+/// fresh snow or fine frost, has, against which a form's factor is taken.
+///
+/// Snow is a consolidated form and takes the Lambert law ([`PhaseLaw::Lambert`]), whose
+/// directional-hemispherical albedo is `A_N` at every incidence, so the hemispherical figure is its
+/// normal albedo exactly (decision-r10-limb §2). The nadir anisotropy R(0, 0) ÷ `A_h` of about
+/// 0.9–1.0 that Design note 8 gives snow (measured on the Antarctic plateau, under its high solar
+/// zenith) is the law's error, not a conversion.
 const FRESH_SNOW_V: f64 = 0.97;
 
 /// Snow's span in the visible, 0.82–0.98: old melting snow, about 0.82 at 0.5–0.55 µm (Grenfell and
@@ -845,10 +997,11 @@ const fn ice_form_factor(span: AlbedoSpan) -> f64 {
 /// caps are about 0.5–0.6 at 0.59 µm and whose modelled hemispherical albedo at 0.5 µm falls from
 /// about 0.97 to 0.41 as its grains grow from 5 µm to 2 mm, computed at a solar zenith of 60°
 /// (Warren, Wiscombe and Firestone 1990, JGR 95 (B9), 14,717, p. 14,718 and Fig. 5a, p. 14,724),
-/// taken as normal albedos as Design note 8 takes snow's, to the N₂- and CH₄-rich plains of a
-/// Pluto, normal reflectances of 0.8–1.0 in LORRI's band, pivot 0.607 µm (Buratti et al. 2017,
-/// Icarus 287, 207, read as arXiv:1604.06129, pp. 11–12 and 17–18; an underestimate of the
-/// brightest regions, the authors say).
+/// taken as normal albedos as Design note 8 takes snow's (for a particulate frost, whose law has a
+/// phase factor, an understatement of its `A_N`: decision-r10-limb's deferred findings), to the
+/// N₂- and CH₄-rich plains of a Pluto, normal reflectances of 0.8–1.0 in LORRI's band, pivot
+/// 0.607 µm (Buratti et al. 2017, Icarus 287, 207, read as arXiv:1604.06129, pp. 11–12 and 17–18;
+/// an underestimate of the brightest regions, the authors say).
 const VOLATILE_FROST_V: AlbedoSpan = AlbedoSpan::new(0.4, 1.0);
 
 /// A volatile glacier's span, 0.8–1.0: Sputnik Planitia's N₂ ice sheet, two units centred on 0.90
@@ -1134,7 +1287,11 @@ mod tests {
     /// them in each palette entry.
     #[test]
     fn material_phase_law_codes_are_stable() {
-        let table: [(PhaseLaw, u8); 2] = [(PhaseLaw::Regolith, 1), (PhaseLaw::Ice, 2)];
+        let table: [(PhaseLaw, u8); 3] = [
+            (PhaseLaw::Regolith, 1),
+            (PhaseLaw::Ice, 2),
+            (PhaseLaw::Lambert, 3),
+        ];
         assert_eq!(PhaseLaw::ALL.len(), table.len());
         for (&law, (want, code)) in PhaseLaw::ALL.iter().zip(table) {
             assert_eq!(law, want, "ALL is in code order");
@@ -1144,8 +1301,11 @@ mod tests {
         assert_eq!(UNASSIGNED_PHASE_ROW, 0);
         let none = PhaseLaw::try_from(UNASSIGNED_PHASE_ROW).unwrap_err();
         assert_eq!((none.kind, none.code), ("PhaseLaw", 0));
+        let unknown = PhaseLaw::try_from(4).unwrap_err();
+        assert_eq!((unknown.kind, unknown.code), ("PhaseLaw", 4));
         assert_eq!(PhaseLaw::Regolith.template(), "moon");
         assert_eq!(PhaseLaw::Ice.template(), "airless-ice");
+        assert_eq!(PhaseLaw::Lambert.template(), "lambert");
         for &family in MechanicsFamily::ALL {
             let want = match family {
                 MechanicsFamily::WaterIce | MechanicsFamily::VolatileIce => PhaseLaw::Ice,
@@ -1161,7 +1321,8 @@ mod tests {
     /// Every figure of the table is finite and in its physical range: cohesion at least 0, the
     /// friction angle between 0 and 90°, porosity in [0, 1), the interval's top above its bottom,
     /// friction coefficients and strengths positive, `ByTemperature`'s points two or more and in
-    /// increasing temperature, the albedo factor positive and at most 1, and a span inside [0, 1].
+    /// increasing temperature, the albedo factor positive and at most 1, and a span from 0 up,
+    /// finite; its top's ceiling is its law's (the bound test below).
     #[test]
     fn material_every_property_is_finite_and_in_its_physical_range() {
         for (class, family, row) in every_row() {
@@ -1204,7 +1365,7 @@ mod tests {
             }
             if let Some(span) = row.normal_albedo_v() {
                 assert!(
-                    0.0 <= span.low() && span.low() <= span.high() && span.high() <= 1.0,
+                    0.0 <= span.low() && span.low() <= span.high() && span.high().is_finite(),
                     "{at}: {span:?}"
                 );
             }
@@ -1243,36 +1404,60 @@ mod tests {
         assert!(modelled > 0, "the table models some rows");
     }
 
-    /// Each form's albedo at the top of its span, with the L(0) [`limb_parameter`] gives it,
-    /// reflects at most what it receives at normal incidence (Design note 8's `A_h` ≤ 1); and so
-    /// does every albedo from 0 to 1, the bound being tight on the falling branch above 1 ÷ k.
+    /// Energy is bounded on the normal albedo by the law (decision-r10-limb §3): every consolidated
+    /// row's span tops out at Lambert's ceiling of 1, where the law's hemispherical albedo is
+    /// `A_N` at every incidence; every particulate row's at the particulate ceiling of 1.35; and
+    /// every L(0) the particulate rule gives lies between Enceladus's 0.38 and the Moon's 1.
     #[test]
-    fn material_albedo_and_limb_parameter_keep_the_hemispherical_albedo_at_most_one() {
+    fn material_each_law_bounds_its_forms_normal_albedo() {
+        assert!((PhaseLaw::Lambert.normal_albedo_ceiling() - 1.0).abs() < 1e-15);
+        for law in [PhaseLaw::Regolith, PhaseLaw::Ice] {
+            let ceiling = law.normal_albedo_ceiling();
+            assert!((ceiling - PARTICULATE_NORMAL_ALBEDO_CEILING).abs() < 1e-15);
+            assert!((ceiling - 1.35).abs() < 1e-15, "{law:?}");
+        }
+        let mut consolidated = 0;
+        let mut particulate = 0;
         for (class, family, row) in every_row() {
-            if let Some(span) = row.normal_albedo_v() {
-                let a = span.high();
-                let a_h = directional_hemispherical_albedo(a, limb_parameter(a), 1.0);
+            let Some(span) = row.normal_albedo_v() else {
+                continue;
+            };
+            let ceiling = match class.photometric_form() {
+                PhotometricForm::Consolidated => {
+                    consolidated += 1;
+                    PhaseLaw::Lambert.normal_albedo_ceiling()
+                }
+                PhotometricForm::Particulate => {
+                    particulate += 1;
+                    PARTICULATE_NORMAL_ALBEDO_CEILING
+                }
+            };
+            assert!(
+                span.high() <= ceiling,
+                "{class:?} of {family:?}: span {span:?} above its law's ceiling {ceiling}"
+            );
+        }
+        assert!(consolidated > 0 && particulate > 0, "both kinds have spans");
+        for i in 1..=1_000 {
+            let mu0 = f64::from(i) / 1_000.0;
+            for a in [0.05, 0.5, 0.79, 1.0] {
+                let a_h = directional_hemispherical_albedo(a, 0.0, mu0);
                 assert!(
-                    a_h <= 1.0 + 1e-12,
-                    "{class:?} of {family:?}: A_h {a_h} at A_N {a}"
+                    (a_h - a).abs() < 1e-15,
+                    "Lambert's A_h {a_h} at A_N {a}, μ₀ {mu0}"
                 );
             }
         }
-        for i in 0..=1_000 {
-            let a = f64::from(i) / 1_000.0;
-            let a_h = directional_hemispherical_albedo(a, limb_parameter(a), 1.0);
-            assert!(a_h <= 1.0 + 1e-12, "A_h {a_h} at A_N {a}");
-            if a > 1.0 / LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO {
-                assert!(
-                    (a_h - 1.0).abs() < 1e-12,
-                    "the bound is tight: {a_h} at {a}"
-                );
-            }
+        for i in 0..=2_000 {
+            let l = limb_parameter(f64::from(i) / 1_000.0);
+            assert!(
+                (BRIGHT_FROST_LIMB_PARAMETER..=1.0).contains(&l),
+                "L(0) {l} at {i}"
+            );
         }
         assert!((LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO - 1.227_411_277_760_219).abs() < 1e-15);
         let ls = directional_hemispherical_albedo(1.0, 1.0, 1.0);
         assert!((ls - LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO).abs() < 1e-15);
-        assert!((directional_hemispherical_albedo(0.5, 0.0, 0.3) - 0.5).abs() < 1e-15);
     }
 
     /// A span holds its ends and nothing outside them, nor a NaN.
@@ -1285,22 +1470,90 @@ mod tests {
         assert!((span.low() - 0.2).abs() < 1e-15 && (span.high() - 0.4).abs() < 1e-15);
     }
 
-    /// L(0) is the Moon's 1 for dark and moderate surfaces, falls to Lambert's 0 at `A_N` = 1, and
-    /// is 1 for a black surface.
+    /// The particulate rule (decision-r10-limb §2): L(0) is the Moon's 1 up to a normal albedo of
+    /// 0.60, and for a black surface; it falls as 0.6696 ÷ x − 0.1160 to Enceladus's 0.38 at 1.35,
+    /// and stays there; a NaN gives NaN.
     #[test]
-    fn material_limb_parameter_falls_only_for_the_brightest_surfaces() {
-        for a in [0.0, -0.0, -1.0, 0.05, 0.2, 0.5, 0.8] {
+    fn material_limb_parameter_is_the_particulate_rule() {
+        for a in [-1.0, -0.0, 0.0, 0.2, 0.6] {
             assert!((limb_parameter(a) - 1.0).abs() < 1e-15, "{a}");
         }
-        assert!(limb_parameter(0.9) < 1.0 && limb_parameter(0.9) > 0.0);
-        assert!(limb_parameter(1.0).abs() < 1e-15);
-        assert!(limb_parameter(1.4).abs() < 1e-15);
+        for (a, want) in [
+            (0.7, 0.840_57),
+            (0.8, 0.721_00),
+            (0.9, 0.628_00),
+            (0.965, 0.577_89),
+            (1.0, 0.553_60),
+            (1.2, 0.442_00),
+        ] {
+            let l = limb_parameter(a);
+            assert!((l - want).abs() < 1e-5, "L(0) {l} at {a}, not {want}");
+            assert!((l - (0.6696 / a - 0.1160)).abs() < 1e-12, "{a}");
+        }
+        for a in [1.35, 1.4, 2.0, f64::INFINITY] {
+            let l = limb_parameter(a);
+            assert!((l - 0.38).abs() < 1e-15, "L(0) {l} at {a}");
+        }
         assert!(limb_parameter(f64::NAN).is_nan());
-        let mut last = 1.0;
-        for i in 815..=1_000 {
+        for (edge, outside) in [
+            (LUNAR_LIMB_ONSET_NORMAL_ALBEDO, 1.0),
+            (BRIGHT_FROST_NORMAL_ALBEDO, BRIGHT_FROST_LIMB_PARAMETER),
+        ] {
+            for x in [edge.next_down(), edge, edge.next_up()] {
+                let l = limb_parameter(x);
+                assert!((l - outside).abs() < 1e-12, "{l} at {x}: a step at {edge}");
+            }
+        }
+        let mut last = limb_parameter(0.0);
+        for i in 0..=2_000 {
             let l = limb_parameter(f64::from(i) / 1_000.0);
-            assert!(l <= last, "L(0) falls with the albedo");
+            assert!(l <= last, "L(0) {l} rises above {last} at {i}");
             last = l;
+        }
+    }
+
+    /// x L(0)(x) is linear in x between the rule's anchors, so that R10.T10.a's solve of the
+    /// geometric albedo c `A_N` [⅔ + ⅓ L(0)] stays piecewise linear in the scale c, with its breaks
+    /// at 0.60 and 1.35 (decision-r10-limb §2).
+    #[test]
+    fn material_limb_parameter_keeps_the_geometric_albedo_linear_between_its_anchors() {
+        let xl = |x: f64| x * limb_parameter(x);
+        let h = 1e-3;
+        // From 0.602 to 1.347, so that every point and its neighbours lie inside (0.60, 1.35).
+        for i in 2..=747 {
+            let x = LUNAR_LIMB_ONSET_NORMAL_ALBEDO + f64::from(i) * h;
+            assert!(
+                x + h < BRIGHT_FROST_NORMAL_ALBEDO,
+                "{x} leaves the middle piece"
+            );
+            let second = xl(x - h) - 2.0 * xl(x) + xl(x + h);
+            assert!(second.abs() < 1e-12, "second difference {second} at {x}");
+        }
+    }
+
+    /// The Lambert law has no Lommel–Seeliger share at any phase or albedo, draws R07's `lambert`
+    /// template, and bounds its normal albedo at 1.
+    #[test]
+    fn material_lambert_law_has_no_lommel_seeliger_share() {
+        let law = PhaseLaw::Lambert;
+        assert_eq!(law.template(), "lambert");
+        for a in [-1.0, 0.0, 0.1, 0.6, 0.9, 1.0, 1.35, 2.0, f64::NAN] {
+            assert!(law.limb_parameter(a).abs() < 1e-15, "L(0) at {a}");
+        }
+        for deg in [0.0, 30.0, 90.0, 103.9, 150.0, 180.0, -30.0, f64::NAN] {
+            for l0 in [0.0, 0.38, 1.0] {
+                let l = law.lommel_seeliger_share(l0, Radians::new(deg.to_radians()));
+                assert!(l.abs() < 1e-15, "L({deg}°) {l} at L(0) {l0}");
+            }
+        }
+        for a in [0.0, 0.3, 0.6, 0.9, 1.2] {
+            for particulate in [PhaseLaw::Regolith, PhaseLaw::Ice] {
+                let l = particulate.limb_parameter(a);
+                assert!(
+                    (l - limb_parameter(a)).abs() < 1e-15,
+                    "{particulate:?} at {a}"
+                );
+            }
         }
     }
 
@@ -1325,8 +1578,9 @@ mod tests {
     }
 
     /// The properties join the form's rows for the entry's family to the entry's values: the
-    /// albedo times the form's factor, the law the entry's code names or, for 0 or a code this
-    /// build does not know, the family's, labelled.
+    /// albedo times the form's factor, and the law: Lambert's for a consolidated form, and for a
+    /// particulate one the law the entry's code names or, for 0 or a code this build does not
+    /// know, the family's, labelled.
     #[test]
     fn material_properties_join_the_form_to_the_palette_entry() {
         let palette = MaterialPalette::new(vec![
@@ -1357,9 +1611,17 @@ mod tests {
             for band in p.normal_albedo_bvr() {
                 assert!((band - 0.965 * factor).abs() < 1e-15, "{class:?}");
             }
-            assert!((p.limb_parameter() - limb_parameter(0.965 * factor)).abs() < 1e-15);
-            assert_eq!(p.phase_law(), PhaseLaw::Ice);
-            assert_eq!(p.phase_law_origin(), PhaseLawOrigin::Palette);
+            let (law, origin, l0) = match class.photometric_form() {
+                PhotometricForm::Consolidated => (PhaseLaw::Lambert, PhaseLawOrigin::Form, 0.0),
+                PhotometricForm::Particulate => (
+                    PhaseLaw::Ice,
+                    PhaseLawOrigin::Palette,
+                    limb_parameter(0.965 * factor),
+                ),
+            };
+            assert_eq!(p.phase_law(), law, "{class:?}");
+            assert_eq!(p.phase_law_origin(), origin, "{class:?}");
+            assert!((p.limb_parameter() - l0).abs() < 1e-15, "{class:?}");
             assert!((p.grain_density().value() - 917.0).abs() < 1e-12);
             assert!((p.transition().value() - 273.15).abs() < 1e-12);
             assert_eq!(p.mechanics(), MechanicsFamily::WaterIce);
@@ -1368,9 +1630,12 @@ mod tests {
         let unassigned = of(MaterialClass::Frost, 0);
         assert_eq!(unassigned.phase_law(), PhaseLaw::Ice);
         assert_eq!(unassigned.phase_law_origin(), PhaseLawOrigin::FamilyDefault);
-        let unknown = of(MaterialClass::Glacier, 2);
+        let unknown = of(MaterialClass::Frost, 2);
         assert_eq!(unknown.phase_law(), PhaseLaw::Ice);
         assert_eq!(unknown.phase_law_origin(), PhaseLawOrigin::FamilyDefault);
+        let glacier = of(MaterialClass::Glacier, 2);
+        assert_eq!(glacier.phase_law(), PhaseLaw::Lambert);
+        assert_eq!(glacier.phase_law_origin(), PhaseLawOrigin::Form);
         assert_eq!(
             properties(Material::new(MaterialClass::Snow, 3).unwrap(), &palette),
             Err(ResolvePropertiesError::EntryNotInPalette { entry: 3, len: 3 })
@@ -1381,6 +1646,128 @@ mod tests {
             refused.unwrap_err().to_string(),
             "palette entry 0 is past a palette of 0 entries"
         );
+    }
+
+    /// The form chooses the law (decision-r10-limb §2): over every family and every code an entry
+    /// can carry (none, each law's, and one this build does not know), a consolidated form takes
+    /// Lambert's with origin `Form`, and a particulate form keeps the entry's code, or the
+    /// family's default; L(0) is always the chosen law's at the material's `A_N` in V.
+    #[test]
+    fn material_the_form_chooses_lambert_for_the_consolidated_forms() {
+        const KEYS: [&str; 6] = ["fam_a", "fam_b", "fam_c", "fam_d", "fam_e", "fam_f"];
+        assert_eq!(MechanicsFamily::ALL.len(), KEYS.len());
+        let codes = [
+            UNASSIGNED_PHASE_ROW,
+            u8::from(PhaseLaw::Regolith),
+            u8::from(PhaseLaw::Ice),
+            u8::from(PhaseLaw::Lambert),
+            200,
+        ];
+        for code in codes {
+            let palette = MaterialPalette::new(
+                MechanicsFamily::ALL
+                    .iter()
+                    .zip(KEYS)
+                    .map(|(&family, key)| entry(key, family, 0.9, code))
+                    .collect(),
+            )
+            .unwrap();
+            for (index, &family) in (0_u8..).zip(MechanicsFamily::ALL) {
+                for &class in MaterialClass::ALL {
+                    let material = Material::new(class, index).unwrap();
+                    let p = properties(material, &palette).unwrap();
+                    let at = format!("{class:?} of {family:?}, code {code}");
+                    assert_eq!(p.mechanics(), family, "{at}");
+                    let (law, origin) = match class.photometric_form() {
+                        PhotometricForm::Consolidated => (PhaseLaw::Lambert, PhaseLawOrigin::Form),
+                        PhotometricForm::Particulate => match PhaseLaw::try_from(code) {
+                            Ok(law) => (law, PhaseLawOrigin::Palette),
+                            Err(_) => (PhaseLaw::for_family(family), PhaseLawOrigin::FamilyDefault),
+                        },
+                    };
+                    assert_eq!((p.phase_law(), p.phase_law_origin()), (law, origin), "{at}");
+                    let want = p.phase_law().limb_parameter(p.normal_albedo_bvr()[1]);
+                    let got = p.limb_parameter();
+                    assert!((got - want).abs() < 1e-15, "{at}: L(0) {got}, not {want}");
+                }
+            }
+        }
+    }
+
+    /// The law and L(0) of five materials, written down: frost keeps its entry's Ice, at the
+    /// rule's 0.628 for `A_N` 0.9, or its entry's Lambert, at 0; glacier and evaporite take
+    /// Lambert's from their form whatever the entry's code; and a silicate regolith of an entry
+    /// naming no law takes its family's, at the Moon's 1.
+    #[test]
+    fn material_law_selection_of_five_materials() {
+        let palette = MaterialPalette::new(vec![
+            entry(
+                "fam_a",
+                MechanicsFamily::VolatileIce,
+                0.9,
+                u8::from(PhaseLaw::Ice),
+            ),
+            entry(
+                "fam_b",
+                MechanicsFamily::VolatileIce,
+                0.9,
+                u8::from(PhaseLaw::Lambert),
+            ),
+            entry(
+                "fam_c",
+                MechanicsFamily::Silicate,
+                0.1,
+                UNASSIGNED_PHASE_ROW,
+            ),
+        ])
+        .unwrap();
+        let of = |class, entry| properties(Material::new(class, entry).unwrap(), &palette).unwrap();
+        for (class, entry, law, origin, l0) in [
+            (
+                MaterialClass::Frost,
+                0,
+                PhaseLaw::Ice,
+                PhaseLawOrigin::Palette,
+                0.628,
+            ),
+            (
+                MaterialClass::Frost,
+                1,
+                PhaseLaw::Lambert,
+                PhaseLawOrigin::Palette,
+                0.0,
+            ),
+            (
+                MaterialClass::Glacier,
+                0,
+                PhaseLaw::Lambert,
+                PhaseLawOrigin::Form,
+                0.0,
+            ),
+            (
+                MaterialClass::Evaporite,
+                2,
+                PhaseLaw::Lambert,
+                PhaseLawOrigin::Form,
+                0.0,
+            ),
+            (
+                MaterialClass::Regolith,
+                2,
+                PhaseLaw::Regolith,
+                PhaseLawOrigin::FamilyDefault,
+                1.0,
+            ),
+        ] {
+            let p = of(class, entry);
+            assert_eq!(
+                (p.phase_law(), p.phase_law_origin()),
+                (law, origin),
+                "{class:?}"
+            );
+            let got = p.limb_parameter();
+            assert!((got - l0).abs() < 1e-12, "{class:?}: L(0) {got}, not {l0}");
+        }
     }
 
     /// A pad's friction on ice interpolates between its measured points and is unknown outside

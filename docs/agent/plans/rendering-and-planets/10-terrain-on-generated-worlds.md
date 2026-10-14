@@ -120,8 +120,15 @@ pub enum MaterialClass {
 /// entry names the species (decision-composition §1.8, folded in at the re-validation).
 pub struct Material { /* class: MaterialClass, entry: u8 */ }   // new(class, entry) -> Option
 /// The codes of R09's `PaletteEntry::phase_row`: 0 no law (`UNASSIGNED_PHASE_ROW`), 1 `Regolith`
-/// (R07's `moon` template), 2 `Ice` (`airless-ice`); L(α) = L(0) × McEwen 1996's profile.
-pub enum PhaseLaw { Regolith = 1, Ice = 2 }   // for_family, template, lommel_seeliger_share
+/// (R07's `moon` template), 2 `Ice` (`airless-ice`), 3 `Lambert` (`lambert`: f ≡ 1, L ≡ 0), which
+/// the form chooses for the consolidated forms (decision-r10-limb); L(α) = L(0) × McEwen 1996's
+/// profile. `limb_parameter(a)` is 0 for Lambert and the particulate rule for the others;
+/// `normal_albedo_ceiling()` is 1 for Lambert and 1.35 for the others, T10.a's clamp.
+pub enum PhaseLaw { Regolith = 1, Ice = 2, Lambert = 3 }
+// for_family, template, lommel_seeliger_share, limb_parameter, normal_albedo_ceiling
+/// How a form's ground scatters: `Glacier`, `Snow`, `SeaIce` and `Evaporite` are consolidated
+/// (the Lambert law), every other form particulate (`MaterialClass::photometric_form`).
+pub enum PhotometricForm { Consolidated, Particulate }
 
 pub struct MohrCoulomb { /* cohesion: Pascals, friction_angle: Radians */ }
 pub struct ShearLayer { /* top: Metres, bottom: Metres, strength: MohrCoulomb, porosity: f64 */ }
@@ -137,13 +144,17 @@ pub fn form_row(class: MaterialClass, family: MechanicsFamily) -> &'static FormR
 pub struct MaterialProperties {
     /* the form's `FormRow`, and the entry's resolved values (R09's `PaletteEntry`):
        normal_albedo_bvr: [f64; 3] (A_N in B, V and R, times the form's factor), phase_law:
-       PhaseLaw with its PhaseLawOrigin (Palette or FamilyDefault), grain_density, transition:
+       PhaseLaw with its PhaseLawOrigin (Palette, FamilyDefault or Form), grain_density, transition:
        Kelvin, mechanics: MechanicsFamily; each layer's bulk density from the grain density */
 }
 pub fn properties(material: Material, palette: &MaterialPalette)
     -> Result<MaterialProperties, ResolvePropertiesError>;
-/// L(0) of the lunar-Lambert law from the normal albedo (Design note 8).
+/// L(0) of a particulate lunar-Lambert law from the normal albedo: the particulate rule L_p, 1 up
+/// to 0.60, 0.6696 ÷ x − 0.1160 to 0.38 at 1.35, 0.38 beyond (Design note 8; decision-r10-limb).
 pub fn limb_parameter(normal_albedo: f64) -> f64;
+// LUNAR_LIMB_ONSET_NORMAL_ALBEDO 0.60, BRIGHT_FROST_NORMAL_ALBEDO 1.35,
+// BRIGHT_FROST_LIMB_PARAMETER 0.38, PARTICULATE_NORMAL_ALBEDO_CEILING 1.35
+/// The f ≡ 1 case of the energy bound, exact for the Lambert law.
 pub fn directional_hemispherical_albedo(normal_albedo: f64, limb: f64, mu0: f64) -> f64;
 /// Ultimate bearing capacity under a footing (Design note 2); `None` where the table has no data.
 pub fn bearing_capacity(p: &MaterialProperties, gravity: MetresPerSecondSquared,
@@ -748,6 +759,23 @@ land**, and each is marked so below.
    above R08.T18's visibility cut, is R08.T18's shared function, called by T10.b. How a form
    changes its entry's A_N (fresh snow and glacier ice of one H₂O entry) was a question in Risks,
    answered by a per-form factor in T1.a's table ("Deviations in T1.a, as built")._
+   _Folded in from decision-r10-limb (2026-10-13; built under T1.a): "bright classes have L near
+   0" becomes two kinds of form, and L(0) is a measured property of how the surface is built, not
+   an energy bound's. The consolidated forms (`Glacier`, `Snow`, `SeaIce` and `Evaporite`, of any
+   species or salt) take the Lambert law, `PhaseLaw::Lambert` (R07's `lambert` template: f ≡ 1,
+   L ≡ 0, q = 3/2), which the form chooses whatever the entry's code; their measured spectral
+   hemispherical albedos are their A_N with no conversion, since the law's A_h is A_N at every
+   incidence, and the nadir anisotropy above is the law's error. The particulate forms (every
+   other form, `Frost` of any species included) keep the entry's lunar-Lambert row, with L(0) =
+   L_p(c A_N): 1 up to A_N 0.60 (Buratti 1984, as Buratti et al. 2017, p. 12, reports it), falling
+   as 0.6696 ÷ x − 0.1160 to 0.38 at Enceladus's 1.35 (Verbiscer and Veverka 1994's Hapke
+   parameters), and 0.38 beyond. The A_h ≤ 1 bound above is the f ≡ 1 case, exact only for the
+   Lambert law. The bound is on the whole law with its phase factor: for every μ₀ in (0, 1],
+   A_h(μ₀) = (A_N ÷ π) ∫ f(α) [2 L(α) ÷ (μ₀ + μ) + 1 − L(α)] μ dΩ ≤ 1. Energy is enforced on A_N,
+   never through L, by each law's ceiling (`PhaseLaw::normal_albedo_ceiling`): 1 for Lambert's,
+   exact, and 1.35 for the particulate rows, against which the Ice row's A_N × sup η is 0.97 under
+   the rule. A normal albedo above 1 is physical (Enceladus's is 0.9–1.4). See "Deviations in
+   T1.a, as built"._
 9. **No textures in this plan.** The Materials section lists triplanar projection of rock and detail
    textures and two-scale repetition hiding. Anything a texture adds below the band limit is detail
    the simulation did not compute, which the brainstorm defines as decoration, and R11 owns it,
@@ -1335,7 +1363,14 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
 
 - **R10.T10.a Class photometry.** `albedo_scale` in `material/albedo.rs` (Design note 8): the exact
   piecewise-linear solve of Σ a_i c A_N,i [L_i + ⅔ (1 − L_i)] = p over the whole field, with the
-  residual; called by R09's `SurfaceService` once the field is built, with plan 14's visual
+  residual. _The limb ruling (decision-r10-limb §2, folded in): the solve uses each class law's
+  L(0) of c A_N, L_i = `PhaseLaw::limb_parameter(c A_N,i)`, so p_i = c A_N,i [⅔ + ⅓ L_i]. For a
+  particulate class it is linear in c between breaks where c A_N,i crosses 0.60 and 1.35
+  (`LUNAR_LIMB_ONSET_NORMAL_ALBEDO`, `BRIGHT_FROST_NORMAL_ALBEDO`), since x L_p(x) is linear
+  there; a consolidated class, under the Lambert law, has p_i = ⅔ c A_N,i. Each c A_N,i is clamped
+  to its form's span, where one exists, and to its law's `normal_albedo_ceiling` (1 for Lambert's,
+  1.35 for the particulate laws). The as-built rule's breaks at 0.815 and 1 are retired._ It is
+  called by R09's `SurfaceService` once the field is built, with plan 14's visual
   geometric albedo p (the photometry section R07.T1 asks of plan 14), so that c ships in
   `FieldHeader.albedo_scale`. Filling the header changes the payload, which R09's Design note 17
   puts under `GENERATOR_VERSION`, so this task bumps it (see Generator version). As built
@@ -1350,7 +1385,8 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   `crates/hyperion-sim/tests/surface_albedo_worlds.rs`, a server test. Tests: on each of
   `sample_worlds()` the area-weighted p of the scaled classes equals the body's p to 1% where the
   ranges allow, and the residual is stated where they do not; the clamped solve equals a bisection
-  reference; the solve depends on the class fractions only; the server's `surface_field` answer
+  reference; no scaled class's c A_N exceeds its law's `normal_albedo_ceiling` (the limb ruling);
+  the solve depends on the class fractions only; the server's `surface_field` answer
   carries `albedo_scale` as `Some(c)` equal to `albedo_scale(field, p)`, and `None` while plan 14's
   p is `not_modelled` (the `surface_field` answer's half provisional until R09.T19.b lands; until
   then the server test reads `SurfaceService::field`'s header; the `sample_worlds()` binary follows
@@ -1378,7 +1414,11 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   Each class of the patch's palette has its own
   `struct LunarLambert { a, l, s, table_row }` (a = A_N × c, l = L(0), the class's s and row),
   passed to R07's `body_brdf(law: LunarLambert, mu0, mu, alpha)`, whose signature R07.T4.c creates
-  and this task uses unchanged. The texel reflects the classes' `body_brdf` radiances summed by its
+  and this task uses unchanged. _The limb ruling (decision-r10-limb, folded in): `LunarLambert.l`
+  is `PhaseLaw::limb_parameter(c A_N)` of the class's law, and the class laws' rows are three:
+  Regolith, Ice, and Lambert (f ≡ 1, alpha 0), from R07's `lambert` template, provisional and
+  labelled as R07 has it; a consolidated class's row is Lambert's whatever its entry's code._ The
+  texel reflects the classes' `body_brdf` radiances summed by its
   weights, skipping zero weights, not one `LunarLambert` built from weighted parameters, which
   differs from the sum by the covariance of A_N and L: 1.7× too bright at μ₀ = 0.5, μ = 0.1 for an
   even blend of regolith and snow (Design note 8). One `phase_factor_table` row per class law (its
@@ -1398,8 +1438,14 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   texel of two classes in weights w and 1 − w reflects w r₁ + (1 − w) r₂ to 10⁻⁶, r₁ and r₂ being
   the classes' own `body_brdf` radiances in R07.T4.c's twin, that for an even blend of regolith
   (A_N 0.12, L 1) and snow (A_N 0.9, L 0) sharing one f(α), at μ₀ = 0.5, μ = 0.1 it is that sum and
-  not the 1.7× brighter law of the mixed parameters, that a zero weight adds nothing, and that the
-  largest weight's class is the one a readout names; a one-class palette's texel equals the per-body
+  not the 1.7× brighter law of the mixed parameters (unchanged by the limb ruling: snow is at L =
+  0, and the shared f is the test's own construction), that a zero weight adds nothing, and that
+  the largest weight's class is the one a readout names; the energy bound with f (the limb
+  ruling, §3), in R07.T4.c's twin: for each row, with L(0) from the rule at A_N on a grid up to
+  its law's `normal_albedo_ceiling`, A_h(μ₀) computed with the row's f and L(α) over μ₀ ∈ {1, 0.5,
+  0.2, 0.1, 0.05, 0.02, 0.01, 0.005} is at most 1; for the Ice row at L(0) 0.38, sup η = 0.720 ±
+  0.01 and η(1) = 0.636 ± 0.01 (η = A_h ÷ A_N); for the Lambert row, η ≡ 1 to 10⁻⁶; a one-class
+  palette's texel equals the per-body
   law of that class in R07.T4.c's twin; the smoke harness renders a generated world's patch set on
   SwiftShader with every texel finite; a law without a curve draws R07's disc and twin unchanged
   (the row's alpha is its L); L(α) is 1 at 0°, 0.6084 at 30° and 0.1859 at 90°, and 0 from 103.9°;
@@ -2623,19 +2669,37 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     `form_row(class, family) -> &'static FormRow`, for T10.a and the consoles. Also public:
     `ShearLayer` (the sketch's tuple, with a bottom), `AlbedoSpan`, `PhaseLaw`,
     `UNASSIGNED_PHASE_ROW`, `BearingFactors`, `ultimate_bearing_capacity`,
-    `directional_hemispherical_albedo` and `LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO`.
+    `directional_hemispherical_albedo` and `LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO`; from the limb
+    ruling's follow-up, `PhotometricForm` with `MaterialClass::photometric_form`,
+    `PhaseLaw::limb_parameter` and `normal_albedo_ceiling`, `PhaseLawOrigin::Form`, and the
+    constants `LUNAR_LIMB_ONSET_NORMAL_ALBEDO`, `BRIGHT_FROST_NORMAL_ALBEDO`,
+    `BRIGHT_FROST_LIMB_PARAMETER` and `PARTICULATE_NORMAL_ALBEDO_CEILING`, public for T1.b's
+    table golden (an integration test, `tests/golden/material/`), T10.a's breaks and the consoles.
   - _The phase-row codes._ `PhaseLaw`, one byte: 0 names no law (`UNASSIGNED_PHASE_ROW`, which
-    every palette writes today), 1 is `Regolith` (f fitted to R07's `moon` template) and 2 is `Ice`
-    (R07's `airless-ice`). Both take L(α) = L(0) × McEwen 1996's lunar profile, held at 0 past
-    103.9°, with L(0) = `limb_parameter(A_N in V)`. An entry of 0, or of a code this build does not
-    know, takes `PhaseLaw::for_family(mechanics)`: `Ice` for water and volatile ices, `Regolith`
-    for the rest. `phase_law_origin()` is then `FamilyDefault`, for the label. The server's palette
-    sources (R09's synthetic and reference worlds, P14.T49.c) still write 0; filling them is theirs,
-    by the same rule.
-  - _`limb_parameter`._ The largest L(0) for which the law, with f ≡ 1, reflects no more than it
-    receives at μ₀ = 1: L(0) is 1 up to A_N = 1 ÷ [4 (1 − ln 2)] = 0.815, then (1 ÷ A_N − 1) ÷
-    0.227, and 0 from an A_N of 1. It is Design note 8's bound as a rule, not a fit: no bright
-    surface's L(0) was read.
+    every palette writes today), 1 is `Regolith` (f fitted to R07's `moon` template), 2 is `Ice`
+    (R07's `airless-ice`) and 3 is `Lambert` (R07's `lambert`, f ≡ 1 and L(α) ≡ 0; appended by the
+    limb ruling's follow-up). `Regolith` and `Ice` take L(α) = L(0) × McEwen 1996's lunar profile,
+    held at 0 past 103.9°, with L(0) = `PhaseLaw::limb_parameter(A_N in V)`, the particulate rule.
+    A consolidated form (`Glacier`, `Snow`, `SeaIce`, `Evaporite`) takes `Lambert` whatever its
+    entry's code, and `phase_law_origin()` is `Form`. A particulate form takes its entry's code; an
+    entry of 0, or of a code this build does not know, takes `PhaseLaw::for_family(mechanics)`:
+    `Ice` for water and volatile ices, `Regolith` for the rest, never `Lambert`, and
+    `phase_law_origin()` is then `FamilyDefault`, for the label. An entry whose code names
+    `Lambert` gives a particulate form Lambert's, with origin `Palette`: this follows the ruling's
+    "a particulate form keeps the entry's code" literally and was not ruled (asked of "main"; its
+    lean: palette sources fill codes by `for_family`'s rule, which never names `Lambert`). The
+    server's palette sources (R09's synthetic and reference worlds, P14.T49.c) still write 0;
+    filling them is theirs, by the same rule.
+  - _`limb_parameter`._ As first built, the largest L(0) for which the law, with f ≡ 1, reflects
+    no more than it receives at μ₀ = 1: 1 up to A_N 0.815, then (1 ÷ A_N − 1) ÷ 0.227, and 0 from
+    an A_N of 1. The limb ruling rejected it (below), and the follow-up commit makes it the
+    particulate rule L_p of decision-r10-limb §2, under the same name: 1 for x ≤ 0.60, [L_E A_E (x −
+    A₁) + A₁ (A_E − x)] ÷ [x (A_E − A₁)] = 0.6696 ÷ x − 0.1160 between, and L_E = 0.38 from A_E =
+    1.35; NaN gives NaN. A₁ = 0.60 is Buratti 1984 as Buratti et al. 2017 (p. 12) quotes it,
+    A_E = 1.35 Enceladus's A_N from Verbiscer and Veverka 1994's Hapke parameters, and L_E = 0.38
+    the zero-phase lunar-Lambert fit to those parameters, a derived figure (decision-r10-limb's
+    `hapke.py`). `PhaseLaw::limb_parameter` is 0 for Lambert's and L_p for the others, and
+    `MaterialProperties::limb_parameter()` is the law's at the material's A_N in V.
   - _The per-form factor (main's answer to the first question)._ An entry's A_N is its substance's
     in its reference form: a particulate surface, or for an ice, fresh snow or fine frost (0.97 in
     the visible, Grenfell, Warren and Mullen 1994). This is a convention for the server's palette
@@ -2694,28 +2758,53 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   - _Glacier or frost._ With the species gone from the class, Design note 1's "by the condensable
     plan 14 names" no longer chooses between `Glacier` and `Frost`. T1.b's classifier owes the rule
     that does (massive ice against a thin condensate, by the ice field's share or thickness), and
-    reads Design note 1's `WaterIce` and `VolatileFrost` as `Glacier` and `Frost`.
-  - _The bright forms' L(0), for a ruling._ Design note 8 converts the bright classes' measured
-    hemispherical albedos to A_N "since bright classes have L near 0", and T10.b's test blends
-    "snow at L = 0". `limb_parameter` instead gives each form the largest L(0) the bound allows:
-    glacier ice of A_N 0.79 takes L(0) = 1, sea ice 0.83 takes 0.90, snow 0.90 takes 0.49, and
-    evaporite and CO₂ frost take 1. With f ≡ 1, the law's A_h at μ₀ = 1 is then 0.97 for glacier ice
-    against its measured 0.79, and 1.00 for sea ice and snow against 0.83 and 0.90. For snow this
-    is Design note 8's nadir anisotropy, R(0, 0) ÷ A_h of 0.9–1.0. The icy satellites support a
-    high L: Buratti 1984 found them "closely followed a lunar-like photometric function" up to
-    geometric albedos of about 0.55–0.60, Ganymede's Lommel–Seeliger share is 1, and Pluto's and
-    Charon's is 0.70, in Buratti's normalisation, about 0.58 in this crate's (all as Buratti et al.
-    2017, p. 12, quotes them; the primary not read).
-    Options: keep the bound rule, as built; or take L(0) = 0 for the ice forms and evaporites, as
-    Design note 8 assumes; or keep the rule and convert each measured span to A_N through the law,
-    A_N = A_h ÷ [1 + 0.227 L(0)], which leaves the forms' factors unchanged. Lean: as built, which
-    is continuous in A_N, keeps T10.a's solve piecewise linear, matches the icy satellites and
-    snow's anisotropy, and costs glacier and sea ice up to 23% too much total reflection. Asked of
-    "main"; T10.a and T10.b read the answer. The value of L(0) changes no contract, but T10.a's
-    solve and T10.b's shading follow it.
-  - _L(0) on the scaled albedo._ T10.a's scale c multiplies A_N, and L(0) is `limb_parameter` of
-    c A_N. That keeps the bound, and leaves p = c A_N [⅔ + ⅓ L(0)] piecewise linear in c, with
-    breaks where c A_N crosses 0.815 and 1.
+    reads Design note 1's `WaterIce` and `VolatileFrost` as `Glacier` and `Frost`. The limb ruling
+    (§2, "What T1.b owes") makes the split photometric too: on an airless world exposed ice is
+    gardened into a particulate regolith (Ganymede, Rhea, Dione: lunar-like, "not Lambertian"), so
+    the rule must not label a gardened airless ice surface `Glacier`. Its lean: on an airless
+    regime, the ice field's land ice is `Frost` where thin and `Regolith` of the ice entry where
+    massive; `Glacier` is for ice under an atmosphere (Earth's ice sheets, Mars's residual cap,
+    Pluto's N₂ glacier). T1.b records the rule it chooses.
+  - _The bright forms' L(0), ruled_ (decision-r10-limb, 2026-10-13; built in the follow-up commit
+    `feat(surface): R10.T1.a The bright forms' Lambert law and the particulate limb rule`). As
+    first built, `limb_parameter` gave each form the largest L(0) the f ≡ 1 bound allowed (glacier
+    ice of A_N 0.79 took 1, sea ice 0.83 took 0.90, snow 0.90 took 0.49), and the lane leaned to
+    keeping it. The ruling rejects it: L(0) is a measured property of how the surface is built,
+    and the rule contradicted the measurements at both ends (Europa, Mimas and Tethys are
+    limb-darkened at A_N 0.7–0.8; Enceladus, at 0.9–1.4, is "not Lambert"; snow's radiative
+    transfer gives L(0) about 0).
+    - The consolidated forms, `Glacier`, `Snow`, `SeaIce` and `Evaporite` of any species or salt,
+      take the new `PhaseLaw::Lambert` (L ≡ 0 and f ≡ 1), chosen by the form
+      (`PhotometricForm::Consolidated`, `PhaseLawOrigin::Form`). Their A_h is A_N at every μ₀, so
+      the measured spans are A_N with no conversion and the per-form factors (glacier 0.814, snow
+      0.928, sea ice 0.856) stand.
+    - The particulate forms, every other form and `Frost` of any species, keep the entry's
+      lunar-Lambert row with L(0) = L_p(c A_N), above. A CO₂ or N₂ frost at 0.7 takes 0.84, and an
+      H₂O frost at the reference 0.965 takes 0.578; Europa's plains at 0.71 give 0.83 and
+      Enceladus 0.38. Pluto, Charon and Europa's mottled terrain are outliers, where the rule gives
+      more L(0) than measured (the science check; deferred, below).
+    - Energy is enforced on A_N by the law's own f, never through L (`normal_albedo_ceiling`): 1
+      for Lambert's, exact; 1.35 for the particulate rows, where the Ice row's A_N × sup η under
+      the rule is 1.35 × 0.720 = 0.97 and the Regolith row's 0.72 (decision-r10-limb §3, computed
+      with R07's construction of f). A_N above 1 is physical (Enceladus).
+    - The "23% too much" does not exist: it was an artefact of f ≡ 1. Under the Ice row's real f,
+      the as-built glacier ice reflected 0.58 at μ₀ = 1 against a measured 0.79. Alternative 2
+      (A_N = A_h ÷ [1 + 0.227 L]) converts through a law no row has, and is rejected.
+    - _Correction:_ Buratti's form, f [A μ₀ ÷ (μ₀ + μ) + (1 − A) μ₀], is this crate's up to scale
+      for L = A ÷ (2 − A), so Pluto's and Charon's A = 0.70 is L(0) = 0.54 here, not "about 0.58"
+      (`MCEWEN_LUNAR_L`'s comment is corrected).
+  - _The bound test, ruled._ T1.a's "every class's A_N and L(0) keep the law's
+    directional-hemispherical albedo at μ₀ = 1 at most 1" was the f ≡ 1 bound. The follow-up
+    replaces it: every consolidated row's span top is at most 1; `directional_hemispherical_albedo`
+    at L = 0 is A_N on a μ₀ grid; every particulate row's span top is at most 1.35; every L(0) the
+    rule gives lies in [0.38, 1]. The physical-range test's span top is now only finite, not at
+    most 1, since A_N above 1 is physical; its ceiling is the bound test's, by the form's law.
+    `directional_hemispherical_albedo` and `LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO` stay, documented
+    as the f ≡ 1 case, exact for Lambert's.
+  - _L(0) on the scaled albedo._ T10.a's scale c multiplies A_N, and L(0) is the class law's
+    `limb_parameter` of c A_N. That leaves p = c A_N [⅔ + ⅓ L(0)] piecewise linear in c, with
+    breaks where c A_N crosses 0.60 and 1.35 for a particulate class (the as-built 0.815 and 1 are
+    retired), and p = ⅔ c A_N for a consolidated one.
   - _Slopes._ `CLIFF_SLOPE` is 40° and `TRANSITION_HALF_WIDTH` 5°, as planned. Kleinhans et al.
     2011's 40° is their time-averaged angle (§40), not the static one (§39 and Fig. 9), and the doc
     comment now says so. `SNOW_SHED_SLOPE` is kept at 60° with a source: "Terrain steeper than 60°
@@ -2725,7 +2814,8 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     Table 7 is the report's Earth simulants. Warren, Wiscombe and Firestone 1990 is JGR 95 (B9).
   - _Closed sets, for the composition audit._
     - `MaterialClass`: fifteen forms.
-    - `PhaseLaw`: two laws.
+    - `PhaseLaw`: three laws (`Lambert` appended by the limb ruling's follow-up), and
+      `PhotometricForm`'s two kinds, which split the fifteen forms.
     - The modelled (form, family) rows: ten of ninety.
     - The rows are keyed by R09's six `MechanicsFamily`s, so substances of one family share a
       form's figures. A CO₂ frost and an N₂ frost share 0.4–1.0; basalt, granite and
@@ -2738,12 +2828,14 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     the nearside's 0.057–0.184. They are too narrow for T10.a's clamp on a generated body, whose
     silicate regolith may be as bright as a Vesta's (p about 0.4, from memory). The synthetic
     feldspathic crust's 0.20 already lies above the lunar span. T10.a clamps by its own rule.
-  - _The A_h bound at f ≡ 1._ It is stricter than a backscattering surface's. Buratti et al.
-    2017's Pluto fit implies L(0) of about 0.58 at A_N 0.9–1.0, by the science check's conversion,
-    against `limb_parameter`'s 0–0.49. At grazing incidence the Lommel–Seeliger term's A_h tends to
-    4 A_N L with f ≡ 1. An entry's A_N above 1, which R09's palette allows (an Enceladus), breaks
-    the bound for every L, so P14.T49.c's test of "R10 Design note 8's bound", with its Enceladus
-    anchor, fails on such a row. T10.b's rows, which carry f, could relax the bound.
+  - _The A_h bound at f ≡ 1_ (ruled by decision-r10-limb §3–§4, and built). It was stricter than
+    a backscattering surface's, and an entry's A_N above 1 (an Enceladus) broke it for every L.
+    The bound is now each law's `normal_albedo_ceiling`, with f: 1 for Lambert's, 1.35 for the
+    particulate rows. P14.T49.c's test of "R10 Design note 8's bound" is replaced, in plan 14 by
+    main: each row's directional-hemispherical albedo from its own Hapke solution at μ₀ ∈ {1, 0.5,
+    0.2, 0.05} is at most 1 per band, and each row's A_N is at most 1.35 per band, so the
+    Enceladus anchor passes, its 1.4 terrain clamped to 1.35 (4%, recorded). Pluto's A = 0.70 is
+    L(0) 0.54, not 0.58 (above).
   - _Vesić's N_γ at 54°._ The closed form may lie outside the range it was fitted over
     (unverified), so the 1 m pin checks the formula, not N_γ.
   - _Ice's strength and friction._ Schulson and Duval 2009, Bowden and Hughes 1939 and Kietzig et
@@ -2759,10 +2851,52 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
     planned goldens pin only (class, entry). T1.b adds one through `GoldenWriter` at the version it
     bumps to: every modelled row, the slopes, the factors, `limb_parameter` and L(α) on a grid,
     `BearingFactors` at the table's angles, the two lunar capacities, the friction at its knots and
-    `for_family`. It goes in a subdirectory (`tests/golden/material/`), since `golden_diff.py`
+    `for_family`, and from the limb ruling each form's `photometric_form` and each law's
+    `limb_parameter` and `normal_albedo_ceiling`. It goes in a subdirectory
+    (`tests/golden/material/`), since `golden_diff.py`
     takes the files directly under `tests/golden/` for the test planet's, under
     `TEST_PLANET_VERSION`; T1.b's `golden/material_*.golden` move there too.
   - _`PhaseLaw`'s place is not its code._ `coded_enum!` gives its variants no discriminants, so
     `PhaseLaw::Regolith as u8` would be 0, the unassigned code. T10.b indexes rows by `u8::from`
     alone, with a test that row k is code k. R09's `wire/codes.golden`, which lists "every code a
     payload carries", could add the phase codes (R09's file).
+- **Deferred findings (the limb ruling, 2026-10-13 rule)** (decision-r10-limb's list; each leaves
+  the ruled algorithm and contracts as they are, for "main"'s list).
+  - _Snow's forward peak._ At a high solar zenith snow's reflectance factor rises well above 1
+    forward (Warren et al. 1998; Hudson et al. 2006, not re-read); no lunar-Lambert law has a
+    forward lobe, so Lambert's is right at small incidence and too dim forward of a low sun.
+  - _Charon, Pluto and Europa's mottled terrain._ Charon's L(0) is 0.54 at A_N 0.4–0.6 (Buratti
+    et al. 2017, p. 12), where L_p gives 1; neither L_p nor the form models compaction or regolith
+    structure (Europa's compact regolith). The science check adds two outliers of the same sign:
+    Pluto, of mean A_N about 0.73, takes 0.80 against its global 0.54, and its brightest regions,
+    at 0.8–1.0, which that fit undercorrects for limb darkening and so need less than 0.54, take
+    0.72–0.55 (pp. 10–11 and 17); Europa's mottled terrain at 0.48–0.60, "not lunar-like"
+    (Buratti and Veverka 1983), takes 1. The ruling's "0.85–1.0 give 0.67–0.55" check is so
+    corrected in the code's documentation.
+  - _Snow's computation inputs._ The ruling's snow-like medium (w ≈ 0.9999, g ≈ 0.89) has no cited
+    source, in the ruling or the code; Wiscombe and Warren 1980 (J. Atmos. Sci. 37, 2712) is the
+    science check's likely source for g, not read.
+  - _A particulate form under an entry naming Lambert_ (asked of "main"). It takes Lambert's
+    (L ≡ 0, ceiling 1), as the ruling's letter has it, against §2's table for particulate forms.
+    Lean: as built, with palette sources never writing code 3; the alternative maps code 3 on a
+    particulate form to `for_family`.
+  - _Dark consolidated ground._ Hapke without shadow hiding gives L(0) 0.3–0.8 below A_N 0.5; the
+    consolidated forms take 0 at every albedo. No row is darker than 0.69 in V, but a dusty-ice
+    entry could be.
+  - _Bright rock._ Bedrock and volcanic rock above A_N 0.6 (marble, anorthosite) take L_p; low
+    confidence.
+  - _Evaporite's Lambert law._ No BRDF primary was read; salt flats' near-Lambertian behaviour as
+    calibration sites is from memory, with §1's physics argument.
+  - _The particulate rows' f._ Both are the Moon's curve shape (q 0.63 for Regolith, 0.80 for
+    Ice), where Europa's q is 1.01 and Enceladus's 0.92 (Verbiscer and Veverka 1994), so bright
+    frost is drawn darker than measured away from opposition: plan 14's per-body s, a later code.
+  - _A_E's sensitivity._ L_E = 0.38 rises to 0.52 at B₀ = 1, within Verbiscer and Veverka's loose
+    constraint, and the ceiling would then fall to about 1.2. Verbiscer and Veverka fitted Hapke
+    1986's equation: with its approximate H (Hapke 1981's) the same parameters give A_N 1.406 and
+    L(0) 0.327, against `hapke.py`'s 1.351 and 0.378 with Hapke 2002's H (the science check);
+    their θ̄ = 6° enters neither.
+  - _Hemispherical figures as A_N for frost._ Warren et al. 1990's CO₂ albedos are hemispherical
+    at a solar zenith of 60°; under a particulate law with f, A_N = A_h ÷ η(0.5) is 1.2–1.5 times
+    higher. The spans are only checks: P14.T49.c computes A_N from Hapke directly.
+  - _L(α) for bright particulate forms._ The Moon's profile scaled by L(0), as built; McEwen
+    1991's insensitivity is shown for typical surfaces, not for w → 1.

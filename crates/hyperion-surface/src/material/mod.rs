@@ -10,9 +10,10 @@
 //! the generator produces. Its properties ([`properties()`]) join the form's rows for the entry's
 //! mechanics family ([`form_row`]) to the entry's values, which the server resolves from plan 14's
 //! registry: the albedo in three bands, the photometric law ([`PhaseLaw`], whose codes this module
-//! assigns), the grain density, the transition temperature. The bearing capacity is a function of
-//! the footing and the gravity ([`bearing_capacity`]), and the pad friction of the temperature
-//! where it depends on it ([`interface_friction`]).
+//! assigns, and which a consolidated form overrides with Lambert's: [`PhotometricForm`]), the grain
+//! density, the transition temperature. The bearing capacity is a function of the footing and the
+//! gravity ([`bearing_capacity`]), and the pad friction of the temperature where it depends on it
+//! ([`interface_friction`]).
 //!
 //! Every figure carries its source ([`Citation`]); a figure without one is absent, and a console
 //! shows it missing, never invented (Design note 2).
@@ -25,12 +26,13 @@ mod class;
 mod properties;
 
 pub use bearing::{BearingFactors, bearing_capacity, ultimate_bearing_capacity};
-pub use class::{Material, MaterialClass};
+pub use class::{Material, MaterialClass, PhotometricForm};
 pub use properties::{
-    AlbedoSpan, Citation, Figure, FormRow, FrictionModel, LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO,
-    MaterialProperties, MohrCoulomb, PhaseLaw, PhaseLawOrigin, ResolvePropertiesError, ShearLayer,
-    UNASSIGNED_PHASE_ROW, directional_hemispherical_albedo, form_row, interface_friction,
-    limb_parameter, properties,
+    AlbedoSpan, BRIGHT_FROST_LIMB_PARAMETER, BRIGHT_FROST_NORMAL_ALBEDO, Citation, Figure, FormRow,
+    FrictionModel, LOMMEL_SEELIGER_NORMAL_ALBEDO_RATIO, LUNAR_LIMB_ONSET_NORMAL_ALBEDO,
+    MaterialProperties, MohrCoulomb, PARTICULATE_NORMAL_ALBEDO_CEILING, PhaseLaw, PhaseLawOrigin,
+    ResolvePropertiesError, ShearLayer, UNASSIGNED_PHASE_ROW, directional_hemispherical_albedo,
+    form_row, interface_friction, limb_parameter, properties,
 };
 
 use hyperion_base::units::Radians;

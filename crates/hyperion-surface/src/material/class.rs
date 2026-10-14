@@ -68,6 +68,54 @@ coded_enum! {
     }
 }
 
+/// How a form's ground scatters light: the kind that chooses its photometric law
+/// ([`PhaseLaw`](super::PhaseLaw); plan R10, Design note 8; decision-r10-limb §2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PhotometricForm {
+    /// A smooth, consolidated or near-conservative medium, in which multiple scattering dominates
+    /// and shadow hiding is small or absent: glacier ice and sea ice, which scatter inside a
+    /// continuous matrix, firn and snow, and a recrystallised salt crust. Its zero-phase limb
+    /// profile is multiple scattering's, which a lunar-Lambert fit puts at L(0) ≈ 0.04–0.05 for
+    /// snow, so it takes the Lambert law ([`PhaseLaw::Lambert`](super::PhaseLaw::Lambert)) whatever
+    /// its entry's code.
+    Consolidated,
+    /// A porous particulate regolith, which shadow-hides: lunar-like, with no limb darkening at
+    /// zero phase up to a normal albedo of about 0.60, and limb-darkened, but never Lambert, above
+    /// it ([`limb_parameter`](super::limb_parameter())). It takes its entry's law, or its family's
+    /// where the entry names none; an entry that names Lambert's gives it Lambert's.
+    Particulate,
+}
+
+impl MaterialClass {
+    /// The form's photometric kind: [`Glacier`](Self::Glacier), [`Snow`](Self::Snow),
+    /// [`SeaIce`](Self::SeaIce) and [`Evaporite`](Self::Evaporite) are consolidated, of whatever
+    /// species or salt, and every other form is particulate, [`Frost`](Self::Frost) of any species
+    /// included (decision-r10-limb §2).
+    ///
+    /// [`Bedrock`](Self::Bedrock), [`VolcanicRock`](Self::VolcanicRock), [`Melt`](Self::Melt) and
+    /// [`Seabed`](Self::Seabed) are particulate by default: no source read gives a bright rock's
+    /// limb profile.
+    #[must_use]
+    pub const fn photometric_form(self) -> PhotometricForm {
+        match self {
+            Self::Glacier | Self::Snow | Self::SeaIce | Self::Evaporite => {
+                PhotometricForm::Consolidated
+            }
+            Self::Bedrock
+            | Self::Regolith
+            | Self::Soil
+            | Self::Sand
+            | Self::Sediment
+            | Self::VolcanicRock
+            | Self::Melt
+            | Self::Frost
+            | Self::OrganicSediment
+            | Self::Seabed
+            | Self::Dust => PhotometricForm::Particulate,
+        }
+    }
+}
+
 /// A material: a form of one substance of the body's palette (decision-composition §1.8).
 ///
 /// `entry` is the index of the [`PaletteEntry`](crate::field::PaletteEntry) in the body's
@@ -139,6 +187,30 @@ mod tests {
         let unknown = MaterialClass::try_from(15).unwrap_err();
         assert_eq!(unknown.code, 15);
         assert_eq!(unknown.kind, "MaterialClass");
+    }
+
+    /// Glacier, snow, sea ice and evaporite are consolidated, and every other form, frost among
+    /// them, is particulate (decision-r10-limb §2).
+    #[test]
+    fn material_photometric_form_is_consolidated_for_the_four_bright_forms() {
+        let consolidated = [
+            MaterialClass::Glacier,
+            MaterialClass::Snow,
+            MaterialClass::SeaIce,
+            MaterialClass::Evaporite,
+        ];
+        for &class in MaterialClass::ALL {
+            let want = if consolidated.contains(&class) {
+                PhotometricForm::Consolidated
+            } else {
+                PhotometricForm::Particulate
+            };
+            assert_eq!(class.photometric_form(), want, "{class:?}");
+        }
+        assert_eq!(
+            MaterialClass::Frost.photometric_form(),
+            PhotometricForm::Particulate
+        );
     }
 
     /// A material names an entry a palette can hold: 0 to 14, never the cell's "none" nibble.
