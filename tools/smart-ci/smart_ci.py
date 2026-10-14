@@ -16,7 +16,9 @@ lock, with `just test-render`'s run of the smoke harness in the same hold when a
 or the harness changed. Suites small by the timings recorded from earlier runs (`weigh`) run
 without the lock instead, capped. A path that no rule knows, and an input of the whole workspace
 (the justfile, the root manifest, the lock files, the toolchain, `.cargo/`), runs the full `just ci`
-instead.
+instead. A plan that runs vitest or tsc first runs the Node floor's preflight
+(`tools/node-floor/check.cjs`), and stops there, in its one line, on a Node older than the root
+package.json's `engines.node`.
 
 `--plan` prints the plan, each step with the paths that caused it, and runs nothing; a run prints
 the plan first. The tests run are those that reach the changed code through the code's graph
@@ -125,6 +127,14 @@ RENDER_PATHS = re.compile(
 )
 # The shader catalogue: the files it imports hold the materials' specs that the harness renders.
 CATALOGUE = "apps/hyperion/src/renderer/src/view/engine/catalogue.ts"
+
+# The Node floor's preflight (`tools/node-floor/check.cjs`), which the packages' `test` and
+# `typecheck` scripts run before vitest and tsc. smart-ci runs it once before a plan that runs either
+# (`NODE_FLOOR_RECIPES`, or the full `ci`), so that a Node older than package.json's `engines.node`
+# stops the gate in one line before anything builds, rather than after the builds, in its tests.
+NODE_FLOOR_DIRECTORY = "tools/node-floor"
+NODE_FLOOR_CHECK = NODE_FLOOR_DIRECTORY + "/check.cjs"
+NODE_FLOOR_RECIPES = {"_typecheck-ts", "_vitest-run"}
 
 # A path passed to a recipe as one word of a list: the shell splits the list, and Prettier and vitest
 # read their arguments as patterns, so any other character sends the step back to its whole scope.
@@ -1158,6 +1168,12 @@ def classify(path: str, deleted: bool, ws: Workspace, needs: Needs) -> None:
         for crate in ws.browser:
             needs.add(needs.tests, crate, path)
         needs.say(path, "the `node` the browser target's suites run on: their crates' tests")
+        return
+    if path.startswith(NODE_FLOOR_DIRECTORY + "/"):
+        needs.ts_full(path)
+        needs.smart_ci_tests.add(path)
+        needs.say(path, "the Node floor's preflight, which the packages' test and typecheck scripts and smart-ci "
+                  "run: the TypeScript side, and smart-ci's own tests")
         return
 
     if "/" not in path:
@@ -2276,6 +2292,24 @@ class Runner:
         return subprocess.Popen([self.just, *args], cwd=str(self.root), stdout=log, stderr=subprocess.STDOUT, text=True)
 
 
+def needs_node_floor(plan: Plan) -> bool:
+    """Whether the plan runs vitest or tsc, which need the Node floor: one of `NODE_FLOOR_RECIPES`, or
+    the full `ci`, which runs both."""
+    return plan.is_full or any(recipe in NODE_FLOOR_RECIPES for recipe in plan.recipes())
+
+
+def node_floor_met(root: Path, run: Callable[..., "subprocess.CompletedProcess[bytes]"] = subprocess.run) -> bool:
+    """Whether the `node` on PATH meets package.json's `engines.node`, by the preflight that the
+    packages' scripts run (`NODE_FLOOR_CHECK`), which prints its own line when it does not. With no
+    `node` at all, this says so."""
+    try:
+        return run(["node", str(root / NODE_FLOOR_CHECK)], cwd=str(root)).returncode == 0
+    except OSError as err:
+        print(f"error: smart-ci: this plan runs vitest or tsc, and no `node` runs ({err}); install the Node that "
+              "package.json's engines.node names", file=sys.stderr)
+        return False
+
+
 def run_build_phases(phases: Mapping[str, Sequence[Sequence[str]]], runner: Runner) -> int:
     """Setup, then the side steps and vitest, each a job of its own with its output held, beside the
     cargo steps, as `just ci` runs them; whichever of them `phases` holds."""
@@ -2736,7 +2770,10 @@ concerned (`--plan` shows each step and the paths that caused it):
 
   Markdown                      Prettier on the changed files alone
   TypeScript                    tsc, oxlint and vitest (beside the builds, outside the heavy-test
-                                lock, at 4 workers); no TypeScript change, no TypeScript check
+                                lock, at 4 workers); no TypeScript change, no TypeScript check. A
+                                plan that runs vitest or tsc first checks the Node floor
+                                (tools/node-floor/, which also runs the TypeScript side and
+                                smart-ci's tests) and stops before any build on an older Node
   a crate's code                rustfmt and Clippy (native, wasm32 for the browser crates, and the
                                 other platforms' where its code differs between them: the server,
                                 and any crate the guard finds such code in) of that crate, with the
@@ -2838,6 +2875,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if args.plan:
             return 0
         print(flush=True)
+        if needs_node_floor(plan) and not node_floor_met(root):
+            return 1
         os.environ.update(timestamps(True, os.environ))
         return execute(plan, root, just, timings=timings)
     try:
@@ -2862,6 +2901,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if args.plan:
         return 0
     print(flush=True)
+    if needs_node_floor(plan) and not node_floor_met(root):
+        return 1
     os.environ.update(timestamps(False, os.environ))
     return execute(plan, root, just, timings=timings)
 

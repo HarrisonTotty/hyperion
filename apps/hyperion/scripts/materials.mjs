@@ -1,7 +1,7 @@
 // Runs `src/tools/materials.ts` through Vite's module runner, as `solarFactors.mjs` runs its tool
-// (the repository's Node floor does not strip types unflagged). The written files are then
-// formatted with the repository's Prettier, the last command below. Usage, every source fetched as
-// the tool's header names it:
+// (chosen while the repository's Node floor, 22.12, stripped no types unflagged). The written files
+// are then formatted with the repository's Prettier, the last command below. Usage, every source
+// fetched as the tool's header names it:
 //   node scripts/materials.mjs --out src/renderer/src/view/atmosphere/materials \
 //     --water <Hale.yml> --ice <Warren-2008.yml> --ammonia <nh3-m-Martonchik1983.lnk> \
 //     --methane-liquid <Martonchik-liquid-90K.yml> --methane-ice <Martonchik-solid-90K.yml> \

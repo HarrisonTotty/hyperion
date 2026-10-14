@@ -126,6 +126,7 @@ FILES: Dict[str, str] = {
     "tools/gpu-replay/Cargo.toml": "",
     "tools/smart-ci/smart_ci.py": "",
     "tools/electron-node/node": "",
+    "tools/node-floor/check.cjs": "",
     "tools/portable/flock": "",
     "crates/hyperion-base/Cargo.toml": "",
     "crates/hyperion-base/clippy.toml": "",
@@ -500,6 +501,12 @@ class TheRules(unittest.TestCase):
             "prepare", "hyperion-base hyperion-surface hyperion-testkit",
             "-p hyperion-base -p hyperion-surface -p hyperion-testkit --features hyperion-surface/testing"])
         self.assertNotIn("_vitest-run", calls(node))
+        # The Node floor's preflight runs before every vitest and tsc, and smart-ci runs it too.
+        floor = plan("tools/node-floor/check.cjs")
+        self.assertFalse(floor.is_full)
+        self.assertEqual(calls(floor), ["gen-surface", "_prettier-check", "_typecheck-ts", "_oxlint", "_smart-ci-test",
+                                        "_vitest-run"])
+        self.assertEqual(args(floor, "_vitest-run"), ["", ""])
 
     def test_configuration_of_the_typescript_side_prettier_oxlint_and_nextest(self) -> None:
         root = plan("package.json")
@@ -1410,6 +1417,82 @@ class SmallSuites(unittest.TestCase):
                                                                     "apps/hyperion/src/renderer/src/view/shaders/sky.wgsl"))["locked"]})
 
 
+class TheNodeFloor(unittest.TestCase):
+    """The Node floor's preflight (`tools/node-floor/check.cjs`), and smart-ci's run of it before a plan
+    that runs vitest or tsc."""
+
+    def test_a_plan_that_runs_vitest_or_tsc_needs_the_floor(self) -> None:
+        self.assertTrue(smart_ci.needs_node_floor(plan("apps/hyperion/src/renderer/src/lib/format.ts")))
+        self.assertTrue(smart_ci.needs_node_floor(plan("packages/protocol/src/hex.ts")))
+        self.assertTrue(smart_ci.needs_node_floor(plan("Cargo.toml")))
+        for path in ("crates/hyperion-server/src/main.rs", "README.md", ".oxlintrc.json"):
+            with self.subTest(path=path):
+                self.assertFalse(smart_ci.needs_node_floor(plan(path)))
+
+    def test_smart_ci_runs_the_preflight_and_says_when_there_is_no_node(self) -> None:
+        seen: List[List[str]] = []
+
+        def older(command: List[str], cwd: str) -> "subprocess.CompletedProcess[bytes]":
+            seen.append(command)
+            self.assertEqual(cwd, str(ROOT))
+            return subprocess.CompletedProcess(command, 1)
+
+        self.assertFalse(smart_ci.node_floor_met(ROOT, older))
+        self.assertEqual(seen, [["node", str(ROOT / "tools" / "node-floor" / "check.cjs")]])
+        self.assertTrue(smart_ci.node_floor_met(ROOT, lambda command, cwd: subprocess.CompletedProcess(command, 0)))
+
+        def missing(command: List[str], cwd: str) -> "subprocess.CompletedProcess[bytes]":
+            raise FileNotFoundError(2, "No such file or directory", "node")
+
+        with contextlib.redirect_stderr(io.StringIO()) as err:
+            self.assertFalse(smart_ci.node_floor_met(ROOT, missing))
+        self.assertIn("no `node` runs", err.getvalue())
+
+    @unittest.skipIf(shutil.which("node") is None, "no `node` on PATH")
+    def test_the_preflight_stops_a_node_below_the_floor_in_one_line(self) -> None:
+        version = subprocess.run(["node", "-p", "process.versions.node"], capture_output=True, text=True,
+                                 check=True).stdout.strip()
+        # A prerelease or nightly Node (26.1.0-pre) is compared by its numbers alone.
+        running = version.split("-")[0]
+        major = int(running.split(".")[0])
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "package.json"
+
+            def check(node_range: str) -> "subprocess.CompletedProcess[str]":
+                manifest.write_text(json.dumps({"engines": {"node": node_range}}), encoding="utf-8")
+                return subprocess.run(["node", str(ROOT / smart_ci.NODE_FLOOR_CHECK), str(manifest)],
+                                      capture_output=True, text=True)
+
+            for node_range in (f">={running}", f">={major}.0.0", ">=0.0.0", f">= {major - 1}.99.99"):
+                with self.subTest(range=node_range):
+                    passed = check(node_range)
+                    self.assertEqual((passed.returncode, passed.stdout, passed.stderr), (0, "", ""))
+            older = check(f">={major + 1}.0.0")
+            self.assertEqual(older.returncode, 1)
+            self.assertEqual(older.stdout, "")
+            self.assertEqual(older.stderr,
+                             f"error: Node {version} is older than HYPERION's floor {major + 1}.0.0 (engines.node in "
+                             f"package.json); install Node {major + 1} or newer\n")
+            unread = check("^26.0.0")
+            self.assertEqual(unread.returncode, 2)
+            self.assertIn('engines.node is "^26.0.0"', unread.stderr)
+            manifest.write_text("{", encoding="utf-8")
+            broken = subprocess.run(["node", str(ROOT / smart_ci.NODE_FLOOR_CHECK), str(manifest)],
+                                    capture_output=True, text=True)
+            self.assertEqual(broken.returncode, 2)
+            self.assertEqual(len(broken.stderr.splitlines()), 1, broken.stderr)
+
+    def test_the_packages_run_it_before_vitest_and_tsc(self) -> None:
+        for manifest in ("apps/hyperion/package.json", "packages/protocol/package.json"):
+            scripts = json.loads((ROOT / manifest).read_text(encoding="utf-8"))["scripts"]
+            for name in ("test", "typecheck"):
+                with self.subTest(manifest=manifest, script=name):
+                    self.assertTrue(scripts[name].startswith(f"node ../../{smart_ci.NODE_FLOOR_CHECK} && "),
+                                    scripts[name])
+        self.assertRegex(json.loads((ROOT / "package.json").read_text(encoding="utf-8"))["engines"]["node"],
+                         r"^>=\d+\.\d+\.\d+$")
+
+
 class Parsing(unittest.TestCase):
     def test_name_status(self) -> None:
         text = "M\0a.rs\0D\0b.md\0A\0c d.md\0"
@@ -1804,7 +1887,7 @@ class RealWorkspace(unittest.TestCase):
                  *(reader for _, reader, _, _ in smart_ci.RUST_READERS)}
         self.assertLessEqual(named, crates)
         self.assertLessEqual(set(self.ws.wasip1) | set(self.ws.browser), crates)
-        for path in (smart_ci.GENERATOR_VERSION_FILE, smart_ci.CATALOGUE):
+        for path in (smart_ci.GENERATOR_VERSION_FILE, smart_ci.CATALOGUE, smart_ci.NODE_FLOOR_CHECK):
             self.assertIn(path, self.ws.files)
         self.assertTrue(any(self.ws.read(f) and smart_ci.EXPORTS.search(self.ws.read(f))
                             for f in self.ws.files if f.startswith(f"crates/{smart_ci.SURFACE_CRATE}/src/")))

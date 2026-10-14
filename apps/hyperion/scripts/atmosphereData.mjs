@@ -1,5 +1,6 @@
 // Runs `src/tools/atmosphereData.ts` through Vite's module runner, as `solarFactors.mjs` runs its
-// tool (the repository's Node floor does not strip types unflagged). From `apps/hyperion`:
+// tool (Node strips the types, but the tool's modules import each other without extensions, which
+// only Vite resolves). From `apps/hyperion`:
 //   node scripts/atmosphereData.mjs matching --cie ../../crates/hyperion-fit/data/cie_cmf/CIE_xyz_1931_2deg.csv
 //   node scripts/atmosphereData.mjs cross-sections --ozone <serdyuchenkogorshelev5digits.dat> --methane <ch4.txt> \
 //     --so2 <298 K file> --so2 <318 K> --so2 <338 K> --so2 <358 K> --o2o2 <O2-O2_2024.cia> \

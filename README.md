@@ -70,7 +70,12 @@ The full design is in
 ## Prerequisites
 
 - Rust (toolchain pinned in `rust-toolchain.toml`; `rustup` installs it automatically)
-- Node.js ≥ 22.12 and pnpm 12
+- Node.js ≥ 26.0 (`engines.node` in `package.json`) and pnpm 12. The client's tests use
+  `Float16Array` (Node 24) and the global `ErrorEvent` (Node 25), and vitest and jsdom accept no
+  Node 25, so the floor is the 26 line. `pnpm test`, `pnpm typecheck` and `just smart-ci` stop at
+  once on an older Node (`tools/node-floor/check.cjs`). Node 25 and later ship no Corepack: install
+  pnpm on its own (`npm install --global pnpm@12`), and it runs the version `packageManager` names.
+  The client itself runs on the Node and Chromium that its Electron bundles.
 - [`just`](https://github.com/casey/just)
 - [`uv`](https://docs.astral.sh/uv/) — runs [pre-commit](https://pre-commit.com) for the git hooks
 - For the WebAssembly checks in `just ci`: the `wasm32-wasip1` and `wasm32-unknown-unknown`
@@ -284,7 +289,8 @@ locks and phases, scoped to the crates, packages and files concerned, and of the
 the tests that reach the changed code. `just smart-ci --plan` prints the plan, each step with the
 paths that caused it, and how many of each crate's tests run and why, and runs nothing; a run
 prints it first. `--explain` lists every chosen test with the chain of items from it to the change.
-Integration keeps the full `just ci`.
+A plan that runs vitest or tsc first checks the Node floor, and on an older Node stops there, in one
+line, before anything builds. Integration keeps the full `just ci`.
 
 Where builds share a machine's build slots (a command that runs its arguments while it holds one),
 set `SMART_CI_SLOT` to that command instead of wrapping smart-ci in it. smart-ci then holds a slot
@@ -315,7 +321,7 @@ harness always take it. The plan says which, and why.
 | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Markdown                                                                                                                     | Prettier on those files                                                                                                                                                                                                                                                             |
 | a package's sources (`src/`)                                                                                                 | tsc, oxlint, and the vitest files that import or read the change (every one of the package if its setup file does)                                                                                                                                                                  |
-| a package's configuration, `package.json`, `tsconfig`                                                                        | tsc, oxlint and every vitest file. No TypeScript change runs no TypeScript check                                                                                                                                                                                                    |
+| a package's configuration, `package.json`, `tsconfig`, the Node floor's preflight (`tools/node-floor/`)                      | tsc, oxlint and every vitest file (and smart-ci's tests, for the preflight). No TypeScript change runs no TypeScript check                                                                                                                                                          |
 | a crate's code                                                                                                               | that crate's rustfmt and Clippy (native, wasm32 for the browser crates, and macOS and Windows for a crate whose code differs between the platforms: the server, or a crate the guard finds such code in), with the features `just ci` gives it, and the tests that reach the change |
 | a crate's `Cargo.toml`                                                                                                       | that crate's checks and every test, and the Clippy and tests of the crates that depend on it                                                                                                                                                                                        |
 | a crate's goldens                                                                                                            | the tests of the crate that read goldens, those that name the file, and the vitest files that read it                                                                                                                                                                               |

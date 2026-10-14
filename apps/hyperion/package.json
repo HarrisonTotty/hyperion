@@ -8,9 +8,9 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.worker.json",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "typecheck": "node ../../tools/node-floor/check.cjs && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.worker.json",
+    "test": "node ../../tools/node-floor/check.cjs && vitest run",
+    "test:watch": "node ../../tools/node-floor/check.cjs && vitest"
   },
   "dependencies": {
     "@hyperion/protocol": "workspace:*",
