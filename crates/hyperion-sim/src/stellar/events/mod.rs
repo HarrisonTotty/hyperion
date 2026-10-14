@@ -5,3 +5,7 @@
 //!
 //! An event may change what a console reads, never what the star's track is (plan 06, design
 //! note 14).
+//!
+//! - [`flares`]: the flares of stars with convective envelopes, Poisson bins of a day (P06.T28.a).
+
+pub mod flares;
