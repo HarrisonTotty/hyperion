@@ -6,9 +6,10 @@
  *
  * @remarks
  * Every row the substance registry flags `absorber` has cross-sections, a committed line table
- * (R08.T4.d's k-distributions, `kDistribution.ts`), an entry of {@link PENDING_ABSORBERS} with its
- * cell means while R08.T4.d–g are unbuilt, or an entry of {@link NO_VISIBLE_ABSORPTION} (R08.T19
- * holds the client to it). A species leaves R08.T4.d's pending list when its table is committed.
+ * (R08.T4.d's and R08.T4.g's k-distributions, `kDistribution.ts`), an entry of
+ * {@link PENDING_ABSORBERS} with its cell means while R08.T4.e and T4.f are unbuilt, or an entry of
+ * {@link NO_VISIBLE_ABSORPTION} (R08.T19 holds the client to it). A species leaves R08.T4.d's and
+ * R08.T4.g's pending lists when its table is committed.
  * - A transparent species takes no column and no label.
  * - A pending one draws nothing and is labelled `ATMOSPHERE: APPROXIMATE` meanwhile, under Design
  *   note 12's τ rule, as any species without cross-sections is, unless R08.T10.a finds it
@@ -293,16 +294,6 @@ interface PendingListing {
  * entry per atom.
  */
 const PENDING: ReadonlyArray<PendingListing> = [
-  {
-    key: "NH3",
-    task: "R08.T4.g",
-    what: "the 552 and 648 nm bands (ExoMol's C2018), split from R08.T4.d",
-  },
-  {
-    key: "N2O",
-    task: "R08.T4.g",
-    what: "ExoMol's TYM lines below 714 nm and its bands HITRAN2024 lacks over 714-760 nm",
-  },
   { key: "Na", task: "R08.T4.e", what: "Na D (589.0 and 589.6 nm), pressure-broadened" },
   { key: "K", task: "R08.T4.e", what: "K I's lines in the range, per atom (404.5 and 404.8 nm)" },
   {
@@ -354,6 +345,11 @@ const PENDING: ReadonlyArray<PendingListing> = [
     what: "the 8-0 to 13-0 bands, which HITRAN2024 lacks and Li2015 holds only to 11-0, dropped, by the overtone ladder below 7-0 (estimated)",
   },
   { key: "N2O", task: "R08.T4.f", what: "hot N2O (TYM)" },
+  {
+    key: "NH3",
+    task: "R08.T4.f",
+    what: "hot NH3 above C2018's 300 K, to which R08.T4.g's table is held (ExoMol's CoYuTe)",
+  },
   {
     key: "CO2",
     task: "R08.T4.f",

@@ -21,13 +21,17 @@ import {
   broadeningRatios,
   CHAIN_COLUMNS_PER_DECADE,
   chainCurve,
+  chainColumnCm2,
   gatedColumnCm2,
   errorColumns,
   intervalTransmittance,
+  lineByLine,
   lineShape,
+  type NodeSpectra,
   REDUCTION_TARGET,
   reduceGridCell,
   type ReductionGrid,
+  type ShapePolicy,
   sortedNode,
   STORED_PRESSURES_PA,
 } from "./kDistributions";
@@ -395,57 +399,81 @@ export function runCellReferences(rest: readonly string[]): void {
     pressuresPa: STORED_PRESSURES_PA,
   };
   const species = readLineSpecies(source, values.lines, values.tips);
-  const nP = grid.pressuresPa.length;
+  const spectra = lineByLine(species, source.policy);
   const entries = values.cells
     .split(",")
     .map(Number)
     .map((cellNm) => {
       const cap = (t: number, p: number): number =>
         gatedColumnCm2(source.saturation, cellNm, t, p, source.molecularMassDa);
-      const cell = reduceGridCell(cellNm, species, grid, source.policy, cap);
-      if (cell === undefined) {
-        throw new Error(`${source.species} has no lines within the cut-off of ${cellNm} nm`);
-      }
-      const g = cell.weights.length;
-      const values64 = Array.from({ length: grid.temperaturesK.length * nP }, (_, n) =>
-        cell.values.subarray(n * g, (n + 1) * g).map((v) => v / M2_PER_CM2),
-      );
-      const states = referenceStates(grid).map((state) => {
-        const shape = lineShape(source.policy, state.temperatureK, [1]);
-        const [low, high] = cellWavenumbersPerCm(cellNm);
-        const indices = linesNear(species.lines, low, high, shape.cutoffPerCm);
-        const lineState = lineStates(species, indices, state.temperatureK, state.pressurePa);
-        const exact = sortedNode(
-          cellSpectrum(
-            cellNm,
-            species,
-            indices,
-            lineState,
-            cellPointCount(cellNm, lineState),
-            shape,
-          ).crossSectionsCm2,
-        );
-        const columns = errorColumns(
-          exact,
-          REDUCTION_TARGET,
-          CHAIN_COLUMNS_PER_DECADE,
-          cap(state.temperatureK, state.pressurePa),
-        );
-        // The reduction's f64 values through the client's chain at the state (exact at a node).
-        const f64 = chainCurve(grid, cell.weights, values64, state.temperatureK, state.pressurePa);
-        return {
-          temperatureK: state.temperatureK,
-          pressurePa: six(state.pressurePa),
-          kind: state.kind,
-          columnsCm2: Array.from(columns, six),
-          lineByLine: Array.from(columns, (u) => six(intervalTransmittance(exact, 0, 1, u))),
-          f64: Array.from(columns, (u) => six(f64(u))),
-        };
-      });
+      // T4.d's sources take helium's Rayleigh column, so their chain cap is the gated column.
+      const chainCap = (t: number, p: number): number =>
+        chainColumnCm2(source.saturation, cellNm, t, p, source.molecularMassDa, undefined);
+      const entry = cellReference(cellNm, spectra, grid, source.policy, cap, chainCap);
       process.stdout.write(`cell-references: ${source.species} ${cellNm} nm\n`);
-      return { nm: cellNm, states };
+      return entry;
     });
   writeFileSync(values.out, `${JSON.stringify({ species: source.species, cells: entries })}\n`);
+}
+
+/** One state of a cell's committed reference: its columns, line by line and the reduction's `f64` curve. */
+export interface CellReferenceState extends ReferenceState {
+  readonly columnsCm2: ReadonlyArray<number>;
+  readonly lineByLine: ReadonlyArray<number>;
+  readonly f64: ReadonlyArray<number>;
+}
+
+/**
+ * A cell's reference: the cell reduced on its grid ({@link reduceGridCell}), and at each of its
+ * {@link referenceStates} its curve of growth from the source's own spectrum (line by line, or the
+ * super-lines', R08.T4.g) beside the reduction's `f64` values through the client's chain, on the
+ * spectrum's columns to the state's cap (a node's the gated column, a midpoint's the chain test's,
+ * which also stops at the species' own Rayleigh column from R08.T4.g on), each to six figures.
+ *
+ * @param cap - The node tier's column cap ({@link gatedColumnCm2}).
+ * @param chainCap - The chain test's, at most `cap` ({@link chainColumnCm2}).
+ * @throws Error for a cell with no lines within the cut-off.
+ */
+export function cellReference(
+  cellNm: number,
+  spectra: NodeSpectra,
+  grid: ReductionGrid,
+  policy: ShapePolicy,
+  cap: (temperatureK: number, pressurePa: number) => number,
+  chainCap: (temperatureK: number, pressurePa: number) => number,
+): { readonly nm: number; readonly states: ReadonlyArray<CellReferenceState> } {
+  const nP = grid.pressuresPa.length;
+  const cell = reduceGridCell(cellNm, spectra, grid, policy, cap, chainCap);
+  if (cell === undefined) {
+    throw new Error(`no lines within the cut-off of ${cellNm} nm`);
+  }
+  const g = cell.weights.length;
+  const values64 = Array.from({ length: grid.temperaturesK.length * nP }, (_, n) =>
+    cell.values.subarray(n * g, (n + 1) * g).map((v) => v / M2_PER_CM2),
+  );
+  const states = referenceStates(grid).map((state): CellReferenceState => {
+    const exact = spectra(cellNm, state.temperatureK, state.pressurePa, [1])?.node;
+    if (exact === undefined) {
+      throw new Error(`no lines within the cut-off of ${cellNm} nm at a reference state`);
+    }
+    const columns = errorColumns(
+      exact,
+      REDUCTION_TARGET,
+      CHAIN_COLUMNS_PER_DECADE,
+      (state.kind === "node" ? cap : chainCap)(state.temperatureK, state.pressurePa),
+    );
+    // The reduction's f64 values through the client's chain at the state (exact at a node).
+    const f64 = chainCurve(grid, cell.weights, values64, state.temperatureK, state.pressurePa);
+    return {
+      temperatureK: state.temperatureK,
+      pressurePa: six(state.pressurePa),
+      kind: state.kind,
+      columnsCm2: Array.from(columns, six),
+      lineByLine: Array.from(columns, (u) => six(intervalTransmittance(exact, 0, 1, u))),
+      f64: Array.from(columns, (u) => six(f64(u))),
+    };
+  });
+  return { nm: cellNm, states };
 }
 
 /**

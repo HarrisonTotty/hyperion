@@ -8,11 +8,15 @@
 //     --h2h2 <final_CIA_LT.dat> --h2h2 <final_CIA_HT.dat> --h2h2 <CIA.H2H2.Yi>
 // (each fetched by URL into a directory of its own, as the tool's header gives them; the SO2 files
 // are extracted from the atlas's snapshot archive).
-// The tool's header names each input's source, version and checksum.
+// The tool's header names each input's source, version and checksum. ExoMol's temperate lines
+// (R08.T4.g) take `exomol-bands` (N2O), `exomol-bins`, `exomol-k-distributions` and
+// `exomol-k-distributions-merge`, as `src/tools/exomolCli.ts` gives them; they stream the lists'
+// `.bz2` files through the system's `bzip2 -dc`, which must be on the PATH.
 import { fileURLToPath } from "node:url";
 
 import { runnerImport } from "vite";
 
 const entry = fileURLToPath(new URL("../src/tools/atmosphereData.ts", import.meta.url));
 const { module } = await runnerImport(entry, { configFile: false, logLevel: "error" });
-process.exitCode = module.main(process.argv.slice(2));
+// `exomol-bins` streams its inputs and returns a promise of its exit code; the others return it.
+process.exitCode = await module.main(process.argv.slice(2));

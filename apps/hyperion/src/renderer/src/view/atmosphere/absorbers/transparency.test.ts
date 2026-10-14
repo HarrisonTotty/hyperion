@@ -83,13 +83,25 @@ describe("the stated transparency", () => {
 });
 
 describe("the pending absorbers", () => {
-  it("leave R08.T4.d's list once a species' line table is committed", () => {
+  it("leave R08.T4.d's and R08.T4.g's lists once a species' line table is committed", () => {
     const tables = committedLineSpecies();
     expect(
-      PENDING_ABSORBERS.filter((p) => p.task === "R08.T4.d" && tables.includes(p.key)).map(
-        (p) => p.key,
-      ),
+      PENDING_ABSORBERS.filter(
+        (p) => (p.task === "R08.T4.d" || p.task === "R08.T4.g") && tables.includes(p.key),
+      ).map((p) => p.key),
     ).toEqual([]);
+  });
+
+  it("hold no R08.T4.g entry now that NH₃'s and N₂O's tables are committed", () => {
+    expect([
+      PENDING_ABSORBERS.filter((p) => p.task === "R08.T4.g").map((p) => p.key),
+      ["NH3", "N2O"].filter((key) => committedLineSpecies().includes(key)),
+    ]).toEqual([[], ["NH3", "N2O"]]);
+  });
+
+  it("hold hot NH₃ above C2018's 300 K for R08.T4.f, at the table's 300 K row, estimated", () => {
+    const hot = PENDING_ABSORBERS.find((p) => p.key === "NH3" && p.task === "R08.T4.f");
+    expect([hot?.bound.basis, hot?.bound.temperaturesK]).toEqual(["estimated", [300]]);
   });
 
   it("each carry cell means for their own key, task and part", () => {

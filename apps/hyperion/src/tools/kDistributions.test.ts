@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ammoniaRayleighCm2,
   broadeningExponentOffsets,
   broadeningRatios,
+  chainColumnCm2,
   CHI_CO2_CO2,
   CHI_CO2_N2,
   chiFactor,
@@ -25,7 +27,10 @@ import {
   columnCapCm2,
   gatedColumnCm2,
   linearCell,
+  nitrousOxideRayleighCm2,
   rayleighCapCm2,
+  type RayleighCrossSection,
+  speciesRayleighCapCm2,
   STORED_PRESSURES_PA,
   saturationPressurePa,
   type ShapePolicy,
@@ -379,6 +384,11 @@ describe("the cold end's column cap", () => {
   });
 });
 
+/** N₂O's own Rayleigh column at a cell, cm⁻² (R08.T4.g's ruling on the between-node test). */
+function n2o(cellNm: number): number {
+  return speciesRayleighCapCm2(nitrousOxideRayleighCm2, cellNm);
+}
+
 describe("the Rayleigh cap and linear cells (decision-r08-t4d-kdist-chain.md §§9, 10 and 12)", () => {
   it("stop the columns at −ln 10⁻⁶ ÷ helium's Rayleigh cross-section: 5.1e28, 2.3e29 and 8.3e29 cm⁻²", () => {
     // The plan's figures (§10, ruling 4; §12, ruling 7), each to half its last digit.
@@ -386,6 +396,53 @@ describe("the Rayleigh cap and linear cells (decision-r08-t4d-kdist-chain.md §�
     expect(Math.abs(rayleighCapCm2(550) / 2.3e29 - 1)).toBeLessThan(0.05 / 2.3);
     expect(Math.abs(rayleighCapCm2(760) / 8.3e29 - 1)).toBeLessThan(0.05 / 8.3);
     expect(gatedColumnCm2(undefined, 550, 300, 1e7, 31.98983)).toBe(rayleighCapCm2(550));
+  });
+
+  it("stop the between-node test at the species' own Rayleigh column too, from R08.T4.g on", () => {
+    // N₂O's own at 668 and 701 nm, 1.96 and 2.38 × 10²⁷ cm⁻² (the ruling's 2.15 and 2.62 were
+    // 10% above the columns from the client's cross-section), against helium's 4.94 and 5.99 ×
+    // 10²⁹, each to half
+    // its last place.
+    expect([
+      Math.abs(n2o(668) / 1.96e27 - 1) < 0.005 / 1.96,
+      Math.abs(n2o(701) / 2.38e27 - 1) < 0.005 / 2.38,
+      Math.abs(rayleighCapCm2(668) / 4.94e29 - 1) < 0.005 / 4.94,
+      Math.abs(rayleighCapCm2(701) / 5.99e29 - 1) < 0.005 / 5.99,
+    ]).toEqual([true, true, true, true]);
+    expect([
+      chainColumnCm2(undefined, 668, 300, 1e7, 44, nitrousOxideRayleighCm2),
+      chainColumnCm2(undefined, 668, 300, 1e7, 44, undefined),
+      chainColumnCm2(undefined, 668, 300, 10, 44, nitrousOxideRayleighCm2),
+    ]).toEqual([n2o(668), rayleighCapCm2(668), gatedColumnCm2(undefined, 668, 300, 10, 44)]);
+  });
+
+  it("take N₂O's and NH₃'s Rayleigh cross-sections as the client's rayleigh.ts does", async () => {
+    // The node project's compiler does not reach the renderer's modules (a project of their own),
+    // so the client's module is loaded at run time and its function narrowed.
+    const url = new URL("../renderer/src/view/atmosphere/rayleigh.ts", import.meta.url).href;
+    const client: unknown = await import(/* @vite-ignore */ url);
+    const crossSection: unknown =
+      typeof client === "object" && client !== null
+        ? Reflect.get(client, "rayleighCrossSectionM2")
+        : undefined;
+    if (typeof crossSection !== "function") {
+      throw new Error("the client's rayleigh.ts exports no rayleighCrossSectionM2");
+    }
+    const clientCm2 = (gas: string, nm: number): number => {
+      const m2: unknown = Reflect.apply(crossSection, undefined, [gas, nm]);
+      if (typeof m2 !== "number") {
+        throw new Error(`the client's cross-section of ${gas} is not a number`);
+      }
+      return m2 * 1e4;
+    };
+    const tool: ReadonlyArray<readonly [string, RayleighCrossSection]> = [
+      ["N2O", nitrousOxideRayleighCm2],
+      ["NH3", ammoniaRayleighCm2],
+    ];
+    const ratios = tool.flatMap(([gas, ours]) =>
+      [380, 500, 668, 701, 760].map((nm) => ours(nm) / clientCm2(gas, nm)),
+    );
+    expect(Math.max(...ratios.map((r) => Math.abs(r - 1)))).toBeLessThan(1e-12);
   });
 
   it("store a cell whose peak takes at most 0.02 at its cap as its mean, exact to 2 × 10⁻⁴", () => {

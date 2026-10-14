@@ -2663,12 +2663,16 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
         extrapolated below 480 nm and checked there against Kurucz 1970's helium after Dalgarno
         1962, to 0.33%). Any straight path holding more
         lies under the curves' 10⁻⁶ floor by Rayleigh scattering alone, since helium scatters
-        least of any bulk gas.
+        least of any bulk gas. From R08.T4.g on, the between-node test's columns also stop at the
+        species' own Rayleigh column, −ln 10⁻⁶ ÷ σ_R,s(λ), with σ_R,s from `rayleigh.ts` for a
+        `measured` gas (helium's otherwise). The node tier, the bisection, G = 1 and the 16-bit
+        test keep the columns above. T4.d's tables were gated on helium's cap alone, recorded.
       - For a condensing species at a temperature where it condenses, they stop at
         400 p_sat(T) ÷ (m g) where that is lower: ten times its saturated column, for
         supersaturation. p_sat is cited per species: Murphy and Koop 2005 for H₂O, Span and
         Wagner 1996 for CO₂, Fray and Schmitt 2009 (PSS 57, 2053) for the other ices, or a
-        derivation from the triple point, recorded.
+        derivation from the triple point, recorded. N₂O, which condenses below 309.52 K, takes
+        it from R08.T4.g on.
       - Errors beyond either cap are recorded, not gated.
       - The reduction tests every cell and records each species' worst node and worst midpoint.
       - Vitest repeats the test for O₂'s 687 and 760 nm cells and H₂O's 500, 592, 650 and
@@ -2871,7 +2875,8 @@ Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/column view/
       10⁻⁹. No band appears from both lists.
   - **The machinery and tests** are T4.d's: the same nodes, refinement, interpolation, storage,
     chain, column caps and read (`decision-r08-t4d-kdist.md`, `decision-r08-t4d-kdist-chain.md`),
-    and T4.d's node and between-node tests, the 16-bit test and the 1 Pa check.
+    and T4.d's node and between-node tests, the 16-bit test and the 1 Pa check. N₂O takes the
+    condensing cap, and the between-node test stops at each species' own Rayleigh column as well.
   - **The pending entries.** NH₃'s and N₂O's `PENDING_ABSORBERS` entries (R08.T4.g) go, and
     their bounds with them, once the tables are committed.
   - Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/absorbers`.
@@ -11737,6 +11742,365 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     brings the two together once R08.T10.a draws it.
   - `.gitattributes` (marking the k-distribution parts binary) deferred until smart-ci has a rule
     for it; git detects them as binary already.
+- **Deviations in T4.g, as built** (2026-10-14). New `src/tools/superLines.ts`, `exomolLines.ts`
+  and `exomolCli.ts`, with `superLines.test.ts`, `exomolLines.test.ts` and `exomolCli.test.ts`;
+  `atmosphereData.ts`'s new subcommands (`exomol-bands`, `exomol-bins`, `exomol-k-distributions`,
+  `exomol-k-distributions-merge`, `exomol-cell-references`); `kDistributions.ts`'s spectrum source,
+  `kDistributionsCli.ts`'s shared cell reduction and table source, and `lineReferences.ts`'s shared
+  cell reference; the data `absorbers/exomol/kDistributions/NH3.json` and `NH3-<n>.bin`,
+  `N2O.json` and `N2O-<n>.bin`, `exomol/lineReferencesNH3.json`, `lineReferencesN2O.json` and
+  `n2oMerge.json`, `exomol/bounds.json` rewritten, `absorbers/kDistributions/N2O.json` and
+  `N2O-1.bin` removed; `absorbers/transparency.ts` and its test, a new
+  `absorbers/exomolLines.test.ts`, `lineReferences.test.ts`; `exomol/README.md`, `NOTICE`,
+  `.prettierignore`. The scope is `decision-r08-t4d-kdist-chain.md` §§9–11 on T4.d's machinery.
+  - _The spectrum source._ `reduceGridCell` and `belowGridError` take a `NodeSpectra`, one node's
+    sorted spectrum for a mix of the policy's variants, in place of a `LineSpecies`: T4.d's is
+    `lineByLine(species, policy)`, T4.g's `superLineSpectra` and N₂O's `mergedSpectra`, so that one
+    reduction and one set of tests reads them all. `cellNodeOf` builds a node's shares from any
+    spectrum. `runKDistributions`' cell work is `reducePartialCell`, and `runCellReferences`' is
+    `cellReference`, shared by the ExoMol commands; `mergePartials` takes a `TableSource` (its
+    inputs' checksums, and a sidecar description where it is not T4.d's), T4.d's made by
+    `lineTableSource(source)`, so that its sidecars are written as before. T4.d's tests take
+    `lineByLine` and `lineTableSource` at their call sites and pass unchanged.
+  - _Super-lines_ (`superLines.ts`). Each line's S(T) is shared linearly between the two nodes of a
+    wavenumber grid about it (Hockney and Eastwood 1981), whose step is a twelfth of the Doppler
+    half-width at 13,100 cm⁻¹ at that temperature, finer than the plan's tenth of the narrowest
+    Voigt half-width. At a node the bins over the cell and 25 cm⁻¹ each side are coarsened by a
+    whole factor while the step stays under a tenth of the node's narrowest Voigt half-width and a
+    600th of the cut-off (0.042 cm⁻¹, within the second ruling's 0.17 cm⁻¹; below), and convolved
+    with the Voigt profile cut off at 25 cm⁻¹ by a radix-2 FFT written in the tool (Cooley and Tukey
+    1965). Four things the plan leaves open are settled so:
+    - the binning's own smoothing (a triangle of one step, about 10⁻³ of a Doppler core's width) is
+      divided out of the bins' transform, as particle-mesh codes divide by their assignment
+      function; without it the 10 Pa curve of growth erred 2.3 × 10⁻⁴ against line by line;
+    - the Doppler width grows 0.1–0.2% across a cell, so the profile is convolved at both edges'
+      widths and blended linearly in ν, both kernels in one complex transform and both outputs in
+      another;
+    - the result is read at the cell's T4.d points (a quarter of the narrowest half-width, at
+      least 512) by 4-point Lagrange interpolation on its own grid, ten or more steps a half-width;
+    - the cut-off falls at 25 cm⁻¹ in the profile's integral whatever the step: the kernel's last
+      sample takes the share of its step within the cut-off. Rounded to a whole step, as first
+      built, the cut-off moved by up to a step, near 0.8 cm⁻¹ at 10 MPa where a line's wing at
+      25 cm⁻¹ is a tenth of its peak, and so jumped from one pressure node to the next: N₂O's first
+      pass failed the chain test at node temperatures 277 times (to 1.85 × 10⁻² at 701 nm, 200 K
+      and 8.66 MPa), which no refinement reaches. With the share, the 701 nm cell's worst fell to
+      4.3 × 10⁻³ and its failures from 86 to 5. Both tables were reduced again with it.
+
+    Against T4.d's own line-by-line spectrum of the same 3,000 toy lines (`superLines.test.ts`),
+    the curves of growth agree within 1.1 × 10⁻⁵ at 10 Pa and 150 K and 1.6–7.6 × 10⁻⁶ at 10 kPa to
+    3 MPa, 1–2 orders under the node tier; the test holds 3 × 10⁻⁵.
+
+  - _Streaming and the cache_ (`exomolLines.ts`). The `.bz2` files stream through the system's
+    `bzip2 -dc` (it must be on the PATH: Linux and macOS ship it; on Windows Git for Windows or MSYS2
+    provides it), three at a time, every line binned at every temperature of the pass. The bins go
+    to a cache outside the repository, one file a temperature and set, with a record of each pass
+    (Q(T), the direct-sum cell means, the `.broad` sums, the band survey's sums); a refinement pass
+    bins only its new nodes and midpoints. Nothing of the lists, the bins or the record is
+    committed. `main` returns a promise for the streaming subcommands, which the script awaits.
+  - _Intensities._ ExoMol's formula, S = g_u A ÷ (8π c ν²) e^(−c₂E″/T)(1 − e^(−c₂ν/T)) ÷ Q(T)
+    (Yurchenko, Al-Refaie and Tennyson 2018, ExoCross's Eq. 1, on the 2016 format paper's files),
+    each times HITRAN's natural abundance of the isotopologue (¹⁴NH₃ 0.995 872, ¹⁴N₂¹⁶O 0.990 333),
+    so that each table is per molecule of the
+    species as T4.d's are; the minor isotopologues, in neither list, are not drawn. Q(T) is summed
+    from each states file: C2018's Q(296) is 1,725.287 (TIPS 1,725.2); TYM's 4,984.898 (its own
+    `.pf` 4,984.8954, TIPS 4,984.9). TYM's transition files hold three columns, so ν is E′ − E″
+    from its states, whose file holds 2,078,676 states (its `def.json` counts 1,759,068); the
+    states are read as the file holds them. Binned over 13,100–20,000 cm⁻¹: C2018's 244,642,280 of
+    the 246,563,337 lines its seven files hold (the plan's 243.7M counted from 13,149 cm⁻¹), TYM's
+    605,489,714 of 623,071,063 (its 1.36 billion span all 21 files).
+  - _Widths._ Every line takes its list's default air width from its `def.json`, in cm⁻¹ bar⁻¹ at
+    296 K as the 2016 format paper and both `def.json`s state it (chain §10.5): C2018's 0.053
+    (0.0537 cm⁻¹ atm⁻¹) and TYM's 0.07 (0.0709 cm⁻¹ atm⁻¹), both with n = 0.5. `exomol-bins` reads
+    them, each `.broad` gas's default and the isotopologue's mass from the checksummed `def.json`
+    (`parseDefinition`) and keeps them in the cache's record for the later commands; none is typed
+    into the tool. The lines' broadening being `estimated`, every node's shape is: `measuredShapeTo`
+    is −1 at every
+    temperature, so a layer of either species is `estimated` by its optics wherever it is drawn
+    (`absorberSpecs`'s rule), as the plan asks for NH₃ and the brief for TYM.
+    - NH₃'s H₂ and He widths come from ExoMol's `.broad` files by code, read from the files
+      themselves (they hold a0, m0 and m1; C2018's `def.json` lists a4, a1 and a0): m1 by |m| and
+      K″, else m0 by |m|, else a0 by J″, else the `def.json`'s default, m = −J″ (P), J″ + 1 (R) and
+      J″ (Q) as the 2024 release paper defines it. Their ratios to the default air width, S-weighted
+      at 296 K over every line, are r_H2 1.473 and r_He 0.555, and their exponents' offsets +0.127
+      and −0.127. NH₃'s self-broadening has no file, so the client takes it as air, `estimated`.
+    - N₂O's ratios and exponents are HITRAN2024's, from its 184 lines alone, as T4.d's; TYM's
+      added bands enter them not at all, since TYM gives no width but its default.
+  - _NH₃'s range._ T_min by the criterion (§3.1: Δ_c < 10⁻³ at k = 100 over a pure vapour's
+    40 p_sat ÷ (m g) at 0.5 m s⁻²), with p_sat from Fray and Schmitt 2009's sublimation fit (Eq. 4,
+    Table 5, NH3-1; 15–195.41 K, its measurements 162–195 K and the colder values a thermodynamic
+    extension) and the cell means read from the table itself through the client's chain: 104.1 K
+    for the Sun, 104.1 K for a 2,500 K and 103.9 K for a 30,000 K Planck sun, red leading. The
+    nodes run down from 300 K in 50 K steps to the first at or below it, 100 K, where the Sun's Δ_c
+    is 2.2 × 10⁻⁴ (`exomolLines.test.ts`). The cap's saturation is a new `SaturationCurve` kind,
+    `sublimationFit`: Fray and Schmitt's fit to their triple point (195.41 K, 6,116 Pa from the fit
+    itself), Clausius–Clapeyron above it at ΔH_vap 25.57 kJ mol⁻¹ (ΔH_sub 31.22 from the fit's
+    slope there, less ΔH_fus 5.653 after Overstreet and Giauque 1937, which NIST's WebBook does not
+    list), which overstates p_sat upward (1.47 against 1.06 MPa at 300 K) and so only widens the
+    cap.
+  - _Cell 499 nm is not reduced._ Both lists end at 20,000 cm⁻¹ (500 nm), and the 499 nm cell holds
+    only the cut-off wings of their last 5 cm⁻¹ of lines, the lines beyond the list's end that would
+    reach it being absent. On NH₃'s first pass it failed the chain test at node temperatures
+    (6.7 × 10⁻³ at 250 K and 8.7 MPa), which no refinement reaches. Its mean at 300 K is
+    4.0 × 10⁻⁴⁰ m² at 10 Pa and 2.2 × 10⁻³⁴ at 1.3 MPa (τ 0.33 at its Rayleigh cap, 1.52 × 10²⁹
+    cm⁻²), three orders and more under the 501 nm cell's 2.7 × 10⁻³¹, and is a wing of lines whose
+    neighbours past the list's end are missing. The tables run 500–760 nm; below 500 nm neither
+    list holds a line, as the pending rows had it.
+  - _N₂O's bands_ (§11). TYM's states label two of HITRAN2024's four upper levels otherwise (no
+    TYM state is 1 0 0 6 or 2 4 0 4) and give one label to two levels (6 0 0 3 at 13,295.8 and
+    14,153.4 cm⁻¹; 2 0 0 5 at 12,891.1 and 12,894.7), so matching by label alone would draw two
+    bands twice. `exomol-bands` therefore surveys TYM's lines first, at 296 K, over each HITRAN
+    band's window (its lines' span ± 2 cm⁻¹) and at or above its weakest line (HITRAN's cut-off
+    there, 1.0–1.06 × 10⁻²⁸ cm), by TYM's own bands. A same-label band within the tolerances
+    (intensity-weighted centres within 2 cm⁻¹, strengths within a factor of 3) is matched; failing
+    that, TYM's dominant band in the window that agrees is taken, `doubtful`; HITRAN2024's is kept
+    either way and TYM's binned apart, filtered by its states' Herzberg quanta before binning. Each
+    window held one TYM band above the cut-off:
+
+    | HITRAN2024 band | Lines | Centre, cm⁻¹ | S(296), cm   | TYM band | Lines | Offset, cm⁻¹ | Ratio | Kept, verdict                |
+    | --------------- | ----- | ------------ | ------------ | -------- | ----- | ------------ | ----- | ---------------------------- |
+    | 1 0 0 6         | 87    | 14,000.29    | 5.19 × 10⁻²⁶ | 7 0 0 3  | 87    | +0.14        | 1.049 | HITRAN2024, doubtful (label) |
+    | 6 0 0 3         | 41    | 13,290.47    | 5.74 × 10⁻²⁷ | 6 0 0 3  | 42    | +0.12        | 1.106 | HITRAN2024, matched          |
+    | 2 0 0 5         | 25    | 13,109.72    | 4.14 × 10⁻²⁷ | 7 0 0 2  | 22    | +0.08        | 0.776 | HITRAN2024, doubtful (label) |
+    | 2 4 0 4         | 31    | 13,364.94    | 3.75 × 10⁻²⁷ | 7 2 0 2  | 28    | +0.89        | 0.919 | HITRAN2024, doubtful (label) |
+
+    All four are from 0 0 0 0 and of ¹⁴N₂¹⁶O; HITRAN2024's 2 0 0 5 lines in its request are the
+    band's tail above 13,100 cm⁻¹. TYM's lines of the four bands under HITRAN's cut-off go with
+    them. From 714 nm each cell takes HITRAN2024's four bands line by line, as T4.d, and TYM's
+    other bands as super-lines, on the finer of the two parts' point counts; below it every TYM
+    band. Over 714–760 nm each cell's mean equals HITRAN2024's plus TYM's added bands' to
+    1.0 × 10⁻¹⁴ (`exomol/n2oMerge.json`: 47 cells at the ten temperature nodes and 1 kPa, 0.1 and
+    1 MPa, 1,410 rows; the test holds 10⁻⁹). Each cell names TYM's added bands whose 296 K strength
+    reaches HITRAN2024's cut-off (its weakest line, 1.0 × 10⁻²⁸ cm), 14–22 a cell, and counts the
+    weaker ones (193,535–301,640 a cell); none names a band from both lists, nor any of the four
+    TYM bands binned apart. Listing every band, as first written, made the record 280 MB.
+
+  - _N₂O's chain gate_ (the issue's ruling, 2026-10-14). On its 25 K pass N₂O's table failed the
+    chain test at node temperatures, between pressure rows, 7 times in two cells, at 6.49 or
+    8.66 MPa and columns within 14% of the helium Rayleigh cap, which no refinement reaches. The
+    ruling took neither recording them (the tier holds at `estimated` nodes) nor more pressure
+    nodes, and found the gate wrong for N₂O on two counts:
+    - N₂O condenses below 309.52 K, so it takes the condensing cap (chain §§4 and 8):
+      `N2O_SATURATION`, a derivation from the triple point as O₂'s. The triple point is 182.33 K
+      and 87.84 kPa and the critical point 309.52 K (Lemmon and Span 2006's equation of state, as
+      REFPROP 10 and NIST's WebBook give it); ΔH_fus 1,563.0 and ΔH_vap 3,958 cal mol⁻¹ (Blue and
+      Giauque 1935, as Hoge 1945 quotes them; 4.1840 J a calorie), so ΔH_sub 23.10 kJ mol⁻¹. p_sat
+      is 0.31 Pa at 100 K, 3.3 kPa at 150 K, 46 kPa at 175 K and 0.70 MPa at 225 K, the caps
+      3.4 × 10²³, 3.6 × 10²⁷, 5.1 × 10²⁸ and 7.6 × 10²⁹ cm⁻². Below the triple point it overstates
+      p_sat (+12% at 150 K, 1.3–2.4 times at 100 K, against REFPROP's sublimation fit after Bell
+      2018 and a heat-capacity estimate); above it, it understates by up to 1.3% to 222 K and
+      overstates beyond (+8.3% at 300 K, against Lemmon and Span's), each but the 1.3% widening the
+      cap.
+    - The between-node test's columns also stop at the species' own Rayleigh column, −ln 10⁻⁶ ÷
+      σ_R,s at the cell's centre (`chainColumnCm2`; `reduceGridCell` takes this chain cap beside
+      its node cap). σ_R,s is the client's `rayleighCrossSectionM2` for a `measured` gas: an
+      ExoMol table names its species' cross-section (`nitrousOxideRayleighCm2`,
+      `ammoniaRayleighCm2`, held to the client's within 10⁻¹² by `kDistributions.test.ts`, which
+      loads the client's module at run time since the node project's compiler does not reach the
+      renderer's). u_R,N₂O is 1.96 × 10²⁷ cm⁻² at 668 nm and 2.38 × 10²⁷ at 701 nm, against
+      helium's 4.94 and 5.99 × 10²⁹: the ruling's 2.15 and 2.62 × 10²⁷ were 10% above the columns
+      the client's cross-section gives, by which N₂O scatters 252 times as much as helium there,
+      not 229. The node tier, the bisection, G = 1, the 16-bit test and the mixing record keep the
+      gated column.
+    - The seven, each beyond the corrected gate, N₂O's own Rayleigh depth τ_R = u σ_R,N₂O:
+
+      | Cell   | T, K | p, MPa | u, cm⁻²     | Error       | u ÷ u_R,N₂O | τ_R   | u ÷ condensing cap |
+      | ------ | ---- | ------ | ----------- | ----------- | ----------- | ----- | ------------------ |
+      | 668 nm | 100  | 8.66   | 4.53 × 10²⁹ | 7.44 × 10⁻³ | 231         | 3,198 | 1.3 × 10⁶          |
+      | 668 nm | 100  | 6.49   | 4.54 × 10²⁹ | 3.35 × 10⁻³ | 232         | 3,205 | 1.3 × 10⁶          |
+      | 668 nm | 150  | 8.66   | 4.28 × 10²⁹ | 2.96 × 10⁻³ | 219         | 3,022 | 119                |
+      | 668 nm | 175  | 8.66   | 4.62 × 10²⁹ | 3.21 × 10⁻³ | 236         | 3,262 | 9.1                |
+      | 668 nm | 225  | 6.49   | 4.65 × 10²⁹ | 2.27 × 10⁻³ | 238         | 3,283 | does not bind      |
+      | 701 nm | 175  | 8.66   | 5.93 × 10²⁹ | 2.66 × 10⁻³ | 249         | 3,438 | 11.7               |
+      | 701 nm | 300  | 8.66   | 5.83 × 10²⁹ | 2.28 × 10⁻³ | 245         | 3,380 | does not bind      |
+
+      On the corrected gate, and with the step bound (below), N₂O ran again from the protocol's
+      50 K nodes: one failure, 2.55 × 10⁻³ at 715 nm, 175 K, 0.133 MPa and
+      2.45 × 10²⁷ cm⁻² (inside u_R,N₂O there, 2.57 × 10²⁷), asked for 175 K, on which every
+      interval passes (worst chain 1.27 × 10⁻³ at 715 nm, 225 K, 0.133 MPa and 2.34 × 10²⁷ cm⁻²);
+      no failure lies at a node's temperature.
+
+    - NH₃'s gate: its table, as first reduced, passed on the wider gate (helium's Rayleigh cap
+      and its saturation), worst chain 9.20 × 10⁻⁴, so the ruling did not ask it to run again; it
+      was reduced again for the step bound (below), on the corrected gate, its table source in the
+      tool naming ammonia's cross-section: u_R,NH₃ is 1.30 × 10²⁷ cm⁻² at 500 nm, 3.72 × 10²⁷ at
+      645 nm and 7.29 × 10²⁷ at 760 nm, so the gate binds for NH₃ wherever its pressure and
+      condensing caps pass those columns, at the warmer nodes and higher pressures.
+    - _The diagnostic_ (ruling item 5, not gated), at 668 nm, 100 K, 8.66 MPa and 4.527 × 10²⁹
+      cm⁻² on the 25 K pass's gate: T there is 0.6454 (τ 0.438, far from the floor); the four
+      rows' node errors at that column are 4.4, 5.0, 4.2 and 7.3 × 10⁻⁵ (5.62, 7.50, 10 and
+      13.3 MPa); the exact curve's own cubic error is 7.45 × 10⁻³, the chain's 7.44 × 10⁻³. So the
+      super-line spectra were not smooth in p. With the coarse step held fixed across the
+      stencil's rows and midpoint (0.68, 0.34 or 0.17 cm⁻¹), the exact curve's cubic misses by
+      5.2–6.3 × 10⁻⁶ there and by at most 2.3 × 10⁻⁵ over 10²⁰–3 × 10³⁰ cm⁻², as the ruling's
+      synthetic cells do. (A twentieth of the half-width, tried before the ruling, still grows
+      with p, and left the failures.)
+  - _The super-lines' step bound_ (the issue's second ruling). The cause: the coarse step was a
+    tenth of each node's narrowest half-width, so it grew with p (1.04 cm⁻¹ at 8.66 MPa and
+    100 K), and each line's wing, which stops at the 25 cm⁻¹ cut-off at 7–29% of its peak at
+    5.6–13.3 MPa (N₂O at 100 K), puts a step into the summed spectrum there that the grid resolved
+    only to its own step, so the spectrum's error moved with the step from row to row. Against a
+    converged step
+    the spectra as first built erred in T at that column by 5.3 × 10⁻³, 3.9 × 10⁻³, 1.1 × 10⁻²
+    and 2.1 × 10⁻² on the four rows at 100 K, by 0.3–4.3 × 10⁻³ at 300 K, where helium's cap
+    gates such columns, and by under 1.5 × 10⁻⁴ at 0.75–1.78 MPa. The step is now bounded in cm⁻¹
+    as well, under a 600th of the cut-off (`SUPER_LINE_STEPS_PER_CUTOFF`, 0.042 cm⁻¹), within the
+    ruling's "at most 0.17 cm⁻¹" and the plan's "finer than a tenth"; it binds above about
+    0.35–0.8 MPa for N₂O (100–500 K) and 0.45–0.8 MPa for NH₃ (100–300 K), and is then the same at
+    every pressure. A 150th, the ruling's figure, failed its own check, the rows within about
+    3 × 10⁻⁵ of a converged step at the worst state:
+
+    | Step, cm⁻¹                                      | 0.33    | 0.17    | 0.083   | 0.042   | 0.021   | 0.010   |
+    | ----------------------------------------------- | ------- | ------- | ------- | ------- | ------- | ------- |
+    | T at 4.53 × 10²⁹ cm⁻² (668 nm, 100 K, 8.66 MPa) | 0.65722 | 0.65869 | 0.65930 | 0.65954 | 0.65951 | 0.65958 |
+
+    A 600th's rows and midpoint lie 2.3–5.8 × 10⁻⁵ from a step four times finer at that column,
+    the exact curve's cubic 5 × 10⁻⁶ there. That meets the check to the spectra's own floor, not
+    under it: the 0.021 and 0.010 cm⁻¹ steps themselves differ by 7 × 10⁻⁵ there, so no step shows
+    3 × 10⁻⁵ against a finer one at that column (posted on the issue). A 150th's rows lay 4.2–8.7 ×
+    10⁻⁴ away there, and within 1 × 10⁻⁴ of a converged step at 300 K and 10–13 MPa, where helium's
+    cap gates such columns. The FFT grows to 2,048 points at the high-pressure nodes, at no cost
+    measured. `superLines.test.ts` pins the bound, and in a toy cell lit by a band's cut-off wings
+    holds
+    super-lines to line by line within 5 × 10⁻⁵ (2.9 and 3.0 × 10⁻⁵ at 8.66 and 13.3 MPa, against
+    1.3 and 1.4 × 10⁻⁴ bounded by the half-width alone; 4.4 × 10⁻⁵ at 0.1 MPa, where the
+    half-width binds). Both tables were reduced again with it from the protocol's start, the
+    50 K nodes. R08.T4.f's hot lists take the same bound.
+
+  - _The committed references._ `exomol/lineReferencesNH3.json` (550 and 645 nm) and
+    `lineReferencesN2O.json` (700 and 716 nm) hold each cell's curves from the spectrum the
+    reduction read, their midpoints' columns stopping at the chain test's cap (`cellReference`
+    takes both caps), in their `lineByLine` field: super-lines, and for N₂O from 714 nm the merged
+    spectrum. No line-by-line
+    pass over 244.6M or 605.5M lines is made; super-lines are held to line by line on
+    `superLines.test.ts`'s 3,000 toy lines.
+  - _Pending entries._ NH₃'s and N₂O's R08.T4.g entries and their rows in `exomol/bounds.json` are
+    gone. Hot NH₃ is R08.T4.f's (CoYuTe, Coles, Yurchenko and Tennyson 2019), a new entry at C2018's
+    300 K row, `estimated`: its direct-sum cell means at 300 K, rounded up to three figures (the
+    largest 2.00 × 10⁻²⁸ m² at 645 nm). N₂O's R08.T4.f entry, hot N₂O from TYM, stays.
+  - _The cross-checks._ NH₃'s direct sums against `exomol/bounds.json`'s rows at 200 and 296 K:
+    0.987–0.996 of them over every cell above 10⁻³ of the peak (251 and 260 cells), as HITRAN's
+    abundance (0.9959) and the rows' rounding up to three figures (up to 1%) give, the zero cells
+    alike; the 552 nm band peaks at 3.167 × 10⁻²⁹ m² at 296 K in the 550 nm cell, the brief's
+    3.18 × 10⁻²⁹ times the abundance. TYM's direct sums at 296 K against `exomol/bounds.json`'s
+    R08.T4.f row (ExoMol's cross-section service, every TYM line):
+    0.879–1.060 of it over 500–712 nm (median 0.988, the 116 cells above 10⁻³ of the peak); over
+    713–760 nm a median of 0.983 and 0.90–1.05 but for the 747 and 748 nm cells (0.153 and 1.391),
+    whose sum agrees to 1.5%: a band's lines at their shared edge, which the service's 1 cm⁻¹ bins
+    give each cell by their centres. The 296 K peak is 1.004 × 10⁻³¹ m² at 714 nm (the row's
+    1.02).
+  - _The setup check._ T4.d's N₂O reduction rerun at its twelve temperatures reproduced
+    `N2O-1.bin` but for 15 codes of its 712 nm cell, σ of 10⁻⁵⁴ to 10⁻⁵¹ m² in its weakest
+    g-points, 17 or more orders under the node's largest (the two-grid sum's cancellation residue,
+    which a different libm moves); the sidecar but for the 16-bit test's record split since and the
+    part's SHA-256.
+  - _Figures_ (node tier 10⁻³, chain tier 2 × 10⁻³; "beyond cap" recorded, not gated):
+
+    | Species | Cells | Worst node (16-bit)       | Worst chain | 1 Pa        | Bytes, parts | G = 1 | Temperatures, K                | Beyond cap  | Estimated |
+    | ------- | ----- | ------------------------- | ----------- | ----------- | ------------ | ----- | ------------------------------ | ----------- | --------- |
+    | NH₃     | 261   | 8.05 × 10⁻⁴ (1.92 × 10⁻⁵) | 1.09 × 10⁻³ | 8.73 × 10⁻⁴ | 1,671,916, 4 | 0     | 100 … 200 by 25, 250, 300      | 4.31 × 10⁻³ | shapes    |
+    | N₂O     | 261   | 8.26 × 10⁻⁴ (3.01 × 10⁻⁵) | 1.27 × 10⁻³ | 0           | 1,696,740, 4 | 0     | 100, 150, 175, 200 … 500 by 50 | 6.18 × 10⁻¹ | shapes    |
+
+    NH₃ ran from the protocol's 50 K nodes: its first pass failed the chain test at 125 K (three
+    failures at 645 nm, 2.02–2.11 × 10⁻³ at 1.15–1.54 MPa and 3 × 10²³ cm⁻²) and at 175 K (20 at
+    667 and 736 nm, worst 2.37 × 10⁻³ at 667 nm, 2.37 MPa and 2.64 × 10²⁶ cm⁻²), and asked for
+    125 and 175 K as nodes, on which every interval passes (worst chain 1.09 × 10⁻³ at 560 nm,
+    275 K, 1 kPa and 1.05 × 10²⁶ cm⁻²), so none is
+    `estimated`. Its passes before the step bound and the cut-off's share had refined to 12.5 K
+    and left 137.5–162.5 K estimated. "Shapes" is every node's line shape, the widths being
+    estimated. N₂O ran from the 50 K nodes too (above). Its 1 Pa check is 0: at 1 Pa no column to
+    40 p ÷ (m g), 1.1 × 10²³ cm⁻², takes a cell's T under 1 − 8 × 10⁻⁴. Its worst beyond the caps,
+    0.618 at 621 nm, a G = 2 cell, lies past N₂O's own Rayleigh column, recorded, not gated.
+
+    The bytes: NH₃'s 1,671,916 and N₂O's 1,696,740 in four parts each (sidecars 10,400 and 12,746
+    bytes), against T4.d's HITRAN-only N₂O's 268,300 (`N2O-1.bin`, removed). T4.d's and T4.g's
+    committed binary together is 18,439,908 bytes (T4.d's 15,071,252 without its N₂O), under the
+    40 MB at which alternate nodes below 1 MPa would be dropped. Beside them `exomol/n2oMerge.json`
+    is 127,114 bytes and the references 17,776 (NH₃) and 7,493 (N₂O).
+
+  - _Acceptance._ The command selects `absorbers/{exomolLines,lineReferences,transparency}.test.ts`
+    beside T4.d's; `src/tools/{superLines,exomolLines,exomolCli,kDistributionsReduce}.test.ts` run
+    under `pnpm test`.
+  - _For R08.T10.a._ N₂O's merged table records `measuredShapeTo` −1 at every temperature, the
+    least over its cells, set by TYM's default widths: N₂O, `measured` to 296 K in T4.d's table, is
+    now `estimated` by its optics wherever it is drawn, its cells from 714 nm included, and takes
+    the label unless Design note 12's τ rule finds it negligible on the body. NH₃ likewise.
+  - _Costs_ (the laptop, 8 threads, two workers, the machine otherwise idle but for this lane's
+    checks):
+    - the streaming passes, three `.bz2` files at a time: C2018's 246,563,337 lines in 366, 328 and
+      316 s (11, 8 and 4 temperatures binned), TYM's 623,071,063 in 969, 902 and 711 s (17, 16 and
+      6), and TYM's band survey in 448 s: 1.1–1.6 µs a transition read, wall, nearly whatever the
+      temperatures binned;
+    - the final reductions, CPU as the cells' own times summed: NH₃ 15 and 18 min wall, 1,817 and
+      2,595 s, on 5 and 7 nodes; N₂O 42.5 and 46.5 min, 5,052 and 5,535 s, on 9 and 10 nodes
+      (each worker 58–59 min of process CPU over the last pass's 46 min); the slowest cells 12.5 s
+      (NH₃) and 26.9 s (N₂O); each merge 1–2 min with N₂O's record;
+    - superseded passes, before the cut-off's share, the rulings and the step bound: NH₃ 2,015,
+      3,676, 4,913 and 4,484 s, N₂O 5,355 and 10,487 s and one stopped after 9 min; N₂O's first
+      record, which searched TYM's 612,365 bands' extents band by band, was stopped after 23 min
+      and its extents indexed;
+    - peak memory per worker 0.55–0.67 GB (N₂O's last pass, systemd's memory peak, page cache
+      included), 0.25–0.47 GB for a two-cell pass or the cell references;
+    - disk, all outside the clone: the downloads 8.3 GB (C2018's 2.80, TYM's 5.49, HITRAN's and
+      TIPS's under 1 MB), kept for T4.f; the bin caches 3.7 GB (1.0 and 2.7); the partials, records
+      and logs 60 MB.
+  - _For R08.T4.f._
+    - N₂O's merged table is `absorbers/exomol/kDistributions/N2O.json` and `N2O-1.bin` …
+      `N2O-4.bin`, on 100, 150, 175, 200 and 250–500 K by 50, `measured` to 296 K. Its cells of
+      500–713 nm take every TYM band as super-lines; those of 714–760 nm take HITRAN2024's four
+      bands line by line and TYM's other bands as super-lines, TYM's 7 0 0 3, 6 0 0 3, 7 0 0 2 and
+      7 2 0 2 (from 0 0 0 0) binned apart and left out; `exomol/n2oMerge.json` gives each of those
+      cells' bands by list and its means.
+    - Hand-over candidates at or above 296 K are the nodes 300, 350, 400, 450 and 500 K: the
+      between-node test passes in every interval about each, as everywhere in the table.
+    - NH₃'s table runs to C2018's 300 K, held and `estimated` above; hot NH₃ is R08.T4.f's pending
+      entry (CoYuTe) at the table's 300 K row in `exomol/bounds.json`, `estimated`.
+    - The tool for other ExoMol lists (TYM's hot range, CoYuTe, POKAZATEL): an `ExoMolSource`
+      (the dataset's files with sizes and SHA-256, its states file's columns, the isotopologue's
+      abundance, the range binned) and an `ExoMolTable` (super-lines alone or merged with a HITRAN
+      source; its first nodes, shape, saturation, Rayleigh cross-section and cells) in
+      `exomolCli.ts`, then `exomol-bins` (one pass bins every temperature asked into a cache
+      outside the clone, `--jobs` files at a time), `exomol-k-distributions` (`--stride`,
+      `--temperatures`), `exomol-k-distributions-merge` and `exomol-cell-references`. A streaming
+      pass costs 1.1–1.6 µs a transition on the laptop, whatever the temperatures binned; a
+      reduction 20–27 s a cell at 9–10 nodes, linear in the nodes.
+    - Hot lists take the same gate and step: the between-node test stops at each species' own
+      Rayleigh column (an `ExoMolTable` names its cross-section, `heliumRayleighCm2` where none is
+      measured) and at its condensing cap, and the super-lines' coarse step stays under a 600th of
+      the cut-off (`SUPER_LINE_STEPS_PER_CUTOFF`, 0.042 cm⁻¹).
+    - For T4.f's 100 MB projection: T4.d's and T4.g's committed binary is 18,439,908 bytes.
+- **Deferred findings (2026-10-13 rule)** (R08.T4.g). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _ExoMol's width unit._ The 2016 format paper and both `def.json`s give the default and `.broad`
+    widths in cm⁻¹ bar⁻¹; the 2024 release paper's §4 (Eq. 6) gives γ₀ in cm⁻¹ atm⁻¹. Per bar is
+    taken (chain §10.5); per atm would move every width 1.3%.
+  - _C2018's `.broad` files beyond their quanta._ Past |m| = 15 and J″ = 14 a line takes the
+    `def.json`'s default (0.0801 cm⁻¹ bar⁻¹ for H₂), 70% above m0's last row (0.0472 at |m| = 15),
+    a jump ExoMol's files make; at 296 K such lines hold under 10⁻⁵ of the S.
+  - _The lists' `def.json`s are stale._ C2018's lists `.broad` codes its files do not hold, and
+    TYM's counts 1,759,068 states where its states file holds 2,078,676; the files are read as they
+    are.
+  - _Stored rounding residue._ T4.d's two-grid sum leaves σ of 10⁻¹⁷ of a node's largest where a
+    line's wing cancels, which the 16-bit codes store, so that a table's bytes depend on the libm
+    (the setup check); flooring σ under 10⁻¹⁵ of the node's largest to 0 would make them
+    reproducible across Node versions.
+  - _T4.d's sources keep helium's chain cap._ The tool holds σ_R,s for N₂O and NH₃, the measured
+    gases it reduces from T4.g on; T4.d's `LINE_SOURCES` (O₂, H₂O, CO₂, CO, N₂O, HCN and H₂) keep
+    helium's, as their tables were gated. A task that reduces one of them again gives its source
+    the species' cross-section first (HCN, unmeasured, keeps helium's), held to the client's by the
+    same test.
+  - _The condensing cap's mass._ The cap is 400 p_sat ÷ (m g) with m the species' own mass
+    (chain §§4 and 8). A species at its saturation pressure in a lighter background holds
+    p_sat ÷ (m̄ g), m̄ the mean molecular mass: in H₂ and He (m̄ ≈ 2.3 Da) a saturated N₂O column is
+    19 times p_sat ÷ (m g) and NH₃'s 7.4 times, so the tenfold supersaturation spares N₂O there by
+    under a factor of 2. None of N₂O's seven failures moves, each lying 219–249 times past its own
+    Rayleigh column. Whether the cap should take m̄'s least plausible value is for the rule's owner.
+  - _Fray and Schmitt for N₂O._ Their 2009 compilation lists N₂O; its fit was not readable here,
+    so N₂O takes the derivation from the triple point, which overstates p_sat below 150 K (up to
+    2.4 times at 100 K) and so only widens the cap.
+  - _TYM's default width against HITRAN's._ HITRAN2024's 184 N₂O lines average γ_air 0.0776
+    cm⁻¹ atm⁻¹ with n 0.737, S-weighted (0.0681–0.0962), against TYM's default 0.0709 with n 0.5:
+    9% narrower at 296 K and about 30% at 100 K. Taking HITRAN's means for TYM's lines, or its
+    J-dependence, would be a change of the estimate, for R08.T4.f's hot N₂O to weigh.
 - **Composition (decision-composition, 2026-10-09).** Every species and material is a plan-14
   registry key. The client's tables are keyed by those strings, with measured, estimated, derived
   or stand-in provenance, and the labelled fallback never drops a species. R08.T19 holds the client

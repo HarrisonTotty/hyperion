@@ -686,6 +686,26 @@ function meanLorentzPerCm(
 }
 
 /**
+ * Where a cell's spectrum at a node comes from (R08.T4.g): one node's sorted spectrum, its
+ * S-weighted γ_L and its shares, for a mix of the policy's variants (one 1 for a variant's own
+ * shape), or `undefined` where no line lies within the cut-off of the cell. T4.d's is line by line
+ * ({@link lineByLine}); ExoMol's lists take super-lines (`superLines.ts`). The reduction and its
+ * tests read every source alike ({@link reduceGridCell}, {@link belowGridError}).
+ */
+export type NodeSpectra = (
+  cellNm: number,
+  temperatureK: number,
+  pressurePa: number,
+  weights: ReadonlyArray<number>,
+) => CellNode | undefined;
+
+/** A species' lines as a {@link NodeSpectra}, line by line under the policy's shape ({@link cellNode}). */
+export function lineByLine(species: LineSpecies, policy: ShapePolicy): NodeSpectra {
+  return (cellNm, temperatureK, pressurePa, weights) =>
+    cellNode(cellNm, species, temperatureK, pressurePa, policy, weights);
+}
+
+/**
  * A cell's sorted line-by-line spectrum at a temperature and broadening pressure, with the policy's
  * shape for a mix of its variants ({@link lineShape}), or `undefined` where no line lies within the
  * cut-off of the cell.
@@ -705,15 +725,36 @@ export function cellNode(
     return undefined;
   }
   const states = lineStates(species, indices, temperatureK, pressurePa);
-  const gamma = meanLorentzPerCm(states);
   const points = cellPointCount(cellNm, states);
+  return cellNodeOf(
+    cellNm,
+    cellSpectrum(cellNm, species, indices, states, points, shape).crossSectionsCm2,
+    meanLorentzPerCm(states),
+    shape,
+    policy,
+  );
+}
+
+/**
+ * A cell's node from its spectrum and its intensity-weighted γ_L (cm⁻¹), under a shape and policy:
+ * the sorted spectrum, whether the shape is `estimated` (γ_L past the policy's half-width, or
+ * `widthsEstimated`, lines whose widths are a stated estimate, R08.T4.g), and its two Lorentz
+ * shares, the far wing's factor at the cut-off taken as the mean of its two sides at the cell's
+ * centre.
+ */
+export function cellNodeOf(
+  cellNm: number,
+  crossSectionsCm2: Float64Array,
+  lorentzPerCm: number,
+  shape: LineShape,
+  policy: ShapePolicy,
+  widthsEstimated = false,
+): CellNode {
+  const gamma = lorentzPerCm;
   return {
-    node: sortedNode(
-      cellSpectrum(cellNm, species, indices, states, points, shape).crossSectionsCm2,
-    ),
-    estimatedShape: gamma > policy.estimatedAboveHalfWidthPerCm,
+    node: sortedNode(crossSectionsCm2),
+    estimatedShape: widthsEstimated || gamma > policy.estimatedAboveHalfWidthPerCm,
     lorentzPerCm: gamma,
-    // The far wing's factor at the cut-off, the mean of its two sides at the cell's centre.
     beyondCutoffShare:
       ((2 * gamma) / (Math.PI * shape.cutoffPerCm)) *
       (shape.farWing === undefined
@@ -1063,7 +1104,26 @@ export type SaturationCurve =
       /** The vapour-pressure equation's terms, [bᵢ, sᵢ]. */
       readonly vapour: ReadonlyArray<readonly [number, number]>;
       readonly source: string;
+    }
+  /**
+   * A sublimation-pressure fit ln(p ÷ 1 bar) = Σ Aᵢ ÷ Tⁱ below the triple point (N. Fray and B.
+   * Schmitt, Planet. Space Sci. 57 (2009) 2053, Eq. 4), and above it Clausius–Clapeyron from the
+   * fit's own pressure at the triple point with a constant enthalpy of vaporisation (R08.T4.g).
+   */
+  | {
+      readonly kind: "sublimationFit";
+      readonly tripleK: number;
+      /** A₀, A₁, … of the fit, p in bar. */
+      readonly coefficients: ReadonlyArray<number>;
+      readonly vaporisationJPerMol: number;
+      readonly criticalK: number;
+      readonly source: string;
     };
+
+/** Σ Aᵢ ÷ Tⁱ, a sublimation fit's ln(p ÷ 1 bar). */
+function sublimationFitLog(coefficients: ReadonlyArray<number>, temperatureK: number): number {
+  return coefficients.reduce((sum, a, i) => sum + a / temperatureK ** i, 0);
+}
 
 /** Σ aᵢ xᵗⁱ over an ancillary equation's terms. */
 function ancillarySeries(terms: ReadonlyArray<readonly [number, number]>, x: number): number {
@@ -1101,9 +1161,25 @@ export function saturationPressurePa(curve: SaturationCurve, temperatureK: numbe
                 ancillarySeries(curve.vapour, 1 - temperatureK / curve.criticalK),
             );
       break;
+    case "sublimationFit": {
+      const below = Math.min(temperatureK, curve.tripleK);
+      const solidPa = 1e5 * Math.exp(sublimationFitLog(curve.coefficients, below));
+      pressurePa =
+        temperatureK <= curve.tripleK
+          ? solidPa
+          : solidPa *
+            Math.exp(
+              (-curve.vaporisationJPerMol / MOLAR_GAS_CONSTANT_J_PER_MOL_K) *
+                (1 / temperatureK - 1 / curve.tripleK),
+            );
+      break;
+    }
   }
   return pressurePa;
 }
+
+/** Boltzmann's constant, J K⁻¹ (exact since the SI's 2019 redefinition). */
+const BOLTZMANN_J_PER_K = 1.380_649e-23;
 
 /**
  * Helium's Rayleigh cross-section, cm², at a vacuum wavelength, nm, as the client's `rayleigh.ts`
@@ -1120,7 +1196,7 @@ export function heliumRayleighCm2(wavelengthNm: number): number {
   const delta = (1_470.091 / (423.98 - perUm * perUm)) * 1e-5;
   const nSquaredMinusOne = delta * (2 + delta);
   const lorentzLorenz = nSquaredMinusOne / (nSquaredMinusOne + 3);
-  const density = 101_325 / (1.000_532 * 1.380_649e-23 * 273.15);
+  const density = 101_325 / (1.000_532 * BOLTZMANN_J_PER_K * 273.15);
   const lambdaM = wavelengthNm * 1e-9;
   return (
     ((24 * Math.PI ** 3) / (lambdaM ** 4 * density * density)) * lorentzLorenz * lorentzLorenz * 1e4
@@ -1135,6 +1211,91 @@ export function heliumRayleighCm2(wavelengthNm: number): number {
  */
 export function rayleighCapCm2(cellNm: number): number {
   return CURVE_DEPTH_MAX / heliumRayleighCm2(cellNm);
+}
+
+/** A species' Rayleigh cross-section at a vacuum wavelength, nm, in cm² a molecule. */
+export type RayleighCrossSection = (wavelengthNm: number) => number;
+
+/**
+ * A Rayleigh cross-section from a refractivity n − 1 at a reference number density and a King
+ * factor, cm²: 24π³ ÷ (λ⁴ N²) ((n² − 1) ÷ (n² + 2))² F_K, as the client's
+ * `crossSectionFromDispersionM2` takes it (n² − 1 as δ(2 + δ), so that no difference of two
+ * numbers near 1 is taken).
+ */
+function dispersionRayleighCm2(
+  nMinusOne: number,
+  densityPerM3: number,
+  kingFactor: number,
+  wavelengthNm: number,
+): number {
+  const nSquaredMinusOne = nMinusOne * (2 + nMinusOne);
+  const lorentzLorenz = nSquaredMinusOne / (nSquaredMinusOne + 3);
+  const lambdaSquaredM2 = (wavelengthNm * 1e-9) ** 2;
+  return (
+    (((24 * Math.PI ** 3) / (lambdaSquaredM2 * lambdaSquaredM2 * densityPerM3 * densityPerM3)) *
+      lorentzLorenz *
+      lorentzLorenz *
+      kingFactor) /
+    M2_PER_CM2
+  );
+}
+
+/** A King factor from a linear depolarisation ratio ρₚ: (3 + 6ρₚ) ÷ (3 − 4ρₚ). */
+function kingFactorOfLinearDepolarisation(rhoP: number): number {
+  return (3 + 6 * rhoP) / (3 - 4 * rhoP);
+}
+
+/**
+ * N₂O's Rayleigh cross-section, cm², at a vacuum wavelength, nm, as the client's `rayleigh.ts`
+ * takes it (its `rayleighCrossSectionM2`, `kDistributions.test.ts` holding the two equal): He,
+ * Fang, Shoshanim, Brown and Rudich 2021's dispersion (Atmos. Chem. Phys. 21, 14927, eq. 9),
+ * (n − 1) × 10⁸ = 22,095 + 1.662 91 × 10¹⁴ ÷ (6.752 26 × 10⁹ − ν²), ν in cm⁻¹, at 15 °C and 1 atm
+ * with Z = 1, and Sneep and Ubachs 2005's King factor (J. Quant. Spectrosc. Radiat. Transfer 92,
+ * 293, eq. 19, after Alms et al. 1975), ρₚ = 0.0577 + 11.8 × 10⁻¹² ν².
+ */
+export function nitrousOxideRayleighCm2(wavelengthNm: number): number {
+  const perCm = 1e7 / wavelengthNm;
+  const nuSquared = perCm * perCm;
+  const nMinusOne = (22_095 + 1.662_91e14 / (6.752_26e9 - nuSquared)) * 1e-8;
+  const density = 101_325 / (BOLTZMANN_J_PER_K * 288.15);
+  const king = kingFactorOfLinearDepolarisation(0.057_7 + 11.8e-12 * nuSquared);
+  return dispersionRayleighCm2(nMinusOne, density, king, wavelengthNm);
+}
+
+/**
+ * NH₃'s Rayleigh cross-section, cm², at a vacuum wavelength, nm, as the client's `rayleigh.ts`
+ * takes it (held equal by `kDistributions.test.ts`): C. and M. Cuthbertson 1914's dispersion
+ * (Phil. Trans. R. Soc. Lond. A 213, 1), n − 1 = 0.032 953 ÷ (90.392 − σ²), σ in µm⁻¹, at 0 °C and
+ * 1 atm with the client's Z = 0.984 798 × 0.7708 ÷ 0.7605, and a King factor from ρₚ = 0.000 91 at
+ * 632.8 nm, vibrational Raman excluded (R. I. Keir, PhD thesis, University of New England 1995).
+ */
+export function ammoniaRayleighCm2(wavelengthNm: number): number {
+  const perUm = 1_000 / wavelengthNm;
+  const nMinusOne = 0.032_953 / (90.392 - perUm * perUm);
+  const density = 101_325 / (((0.984_798 * 0.770_8) / 0.760_5) * BOLTZMANN_J_PER_K * 273.15);
+  return dispersionRayleighCm2(
+    nMinusOne,
+    density,
+    kingFactorOfLinearDepolarisation(0.000_91),
+    wavelengthNm,
+  );
+}
+
+/**
+ * The species' own Rayleigh column at a cell, cm⁻² (R08.T4.g's ruling on the between-node test):
+ * −ln 10⁻⁶ ÷ σ_R,s at the cell's centre for a species whose σ_R is measured, helium's
+ * ({@link rayleighCapCm2}) otherwise. A path holding a column u of the species scatters at least
+ * u σ_R,s from the species alone, whatever else it holds, so any straight path holding more is under
+ * the curves' 10⁻⁶ floor by Rayleigh scattering alone; helium's cap is the same bound with the
+ * species' own scattering left out.
+ *
+ * @param rayleighCm2 - The species' measured cross-section, or `undefined` for helium's.
+ */
+export function speciesRayleighCapCm2(
+  rayleighCm2: RayleighCrossSection | undefined,
+  cellNm: number,
+): number {
+  return rayleighCm2 === undefined ? rayleighCapCm2(cellNm) : CURVE_DEPTH_MAX / rayleighCm2(cellNm);
 }
 
 /**
@@ -1203,6 +1364,27 @@ export function gatedColumnCm2(
   );
 }
 
+/**
+ * A cell's between-node test column at a temperature and broadening pressure, cm⁻²: its gated
+ * column ({@link gatedColumnCm2}) or, where lower, the species' own Rayleigh column
+ * ({@link speciesRayleighCapCm2}; R08.T4.g's ruling). The node tier, the bisection, G = 1 and the
+ * 16-bit test keep the gated column, since the stored nodes also feed R08.T14's layer solves, whose
+ * diffuse paths can pass a straight path's Rayleigh column.
+ */
+export function chainColumnCm2(
+  curve: SaturationCurve | undefined,
+  cellNm: number,
+  temperatureK: number,
+  pressurePa: number,
+  molecularMassDa: number,
+  rayleighCm2: RayleighCrossSection | undefined,
+): number {
+  return Math.min(
+    gatedColumnCm2(curve, cellNm, temperatureK, pressurePa, molecularMassDa),
+    speciesRayleighCapCm2(rayleighCm2, cellNm),
+  );
+}
+
 /** One cell of a species' reduction. */
 export interface ReducedCell {
   readonly cellNm: number;
@@ -1212,11 +1394,11 @@ export interface ReducedCell {
   readonly values: Float64Array;
   /** The error bound the reduction left at its nodes, before storage. */
   readonly worstNodeError: number;
-  /** The chain test's worst midpoint within the column cap, over every variant. */
+  /** The chain test's worst midpoint within its cap ({@link chainColumnCm2}), over every variant. */
   readonly worstChain: ChainError;
-  /** The chain test's worst midpoint beyond the column cap, recorded. */
+  /** The chain test's worst midpoint beyond its cap, recorded. */
   readonly worstBeyondCap: ChainError;
-  /** Every midpoint whose error within the cap passes {@link CHAIN_BOUND}. */
+  /** Every midpoint whose error within the chain test's cap passes {@link CHAIN_BOUND}. */
   readonly failures: ReadonlyArray<ChainError>;
   /**
    * At each temperature node, the highest pressure node whose line shape is measured (no variant's
@@ -1263,17 +1445,22 @@ export const MIXING_PRESSURES_PA = [1e5, 1e6, 9e6] as const;
 /**
  * A cell's reduction on a grid ({@link reduceCell}), every variant's nodes sharing its g-points, and
  * its chain test at every midpoint between rows, between temperature nodes, and at both at once, for
- * every variant, gated within the column cap at each temperature; or `undefined` where the cell has
+ * every variant, gated within the chain test's cap at each state; or `undefined` where the cell has
  * no line within the cut-off.
  *
- * @param capCm2 - The column cap at a temperature and broadening pressure ({@link columnCapCm2}).
+ * @param spectra - The cell's spectrum at each node and test state: line by line
+ *   ({@link lineByLine}) or from super-lines (R08.T4.g), under `policy`'s shape.
+ * @param capCm2 - The column cap at a temperature and broadening pressure ({@link columnCapCm2}):
+ *   the nodes', the bisection's, G = 1's and the mixing record's.
+ * @param chainCapCm2 - The between-node test's, at most `capCm2` ({@link chainColumnCm2}).
  */
 export function reduceGridCell(
   cellNm: number,
-  species: LineSpecies,
+  spectra: NodeSpectra,
   grid: ReductionGrid,
   policy: ShapePolicy,
   capCm2: (temperatureK: number, pressurePa: number) => number,
+  chainCapCm2: (temperatureK: number, pressurePa: number) => number,
 ): ReducedCell | undefined {
   const nT = grid.temperaturesK.length;
   const nP = grid.pressuresPa.length;
@@ -1282,7 +1469,7 @@ export function reduceGridCell(
   for (let v = 0; v < nV; v += 1) {
     for (const t of grid.temperaturesK) {
       for (const p of grid.pressuresPa) {
-        const n = cellNode(cellNm, species, t, p, policy, only(policy, v));
+        const n = spectra(cellNm, t, p, only(policy, v));
         if (n === undefined) {
           return undefined;
         }
@@ -1371,11 +1558,11 @@ export function reduceGridCell(
   for (let v = 0; v < nV; v += 1) {
     const values = r.values.slice(v * nodesPerVariant, (v + 1) * nodesPerVariant);
     for (const [t, p] of states) {
-      const exact = cellNode(cellNm, species, t, p, policy, only(policy, v));
+      const exact = spectra(cellNm, t, p, only(policy, v));
       if (exact === undefined) {
         continue;
       }
-      const e = chainError(grid, r.weights, values, exact.node, t, p, capCm2(t, p));
+      const e = chainError(grid, r.weights, values, exact.node, t, p, chainCapCm2(t, p));
       if (e.within.error > worstChain.error) {
         worstChain = e.within;
       }
@@ -1406,7 +1593,7 @@ export function reduceGridCell(
       for (const t of temperatures) {
         let atT = Infinity;
         for (const p of MIXING_PRESSURES_PA) {
-          const exact = cellNode(cellNm, species, t, p, policy, [w, 1 - w]);
+          const exact = spectra(cellNm, t, p, [w, 1 - w]);
           if (exact === undefined) {
             continue;
           }
@@ -1464,10 +1651,12 @@ const ATOMIC_MASS_KG = 1.660_539_066_6e-27;
  * temperature node and for each variant, the largest |T| difference over columns to 40 p ÷ (m g)
  * at {@link BELOW_GRID_GRAVITY_M_S2}, the most a grazing path above p can hold for a pure gas of
  * molecular mass m (Da).
+ *
+ * @param spectra - The cell's spectrum at each state, as the reduction took it ({@link NodeSpectra}).
  */
 export function belowGridError(
   cellNm: number,
-  species: LineSpecies,
+  spectra: NodeSpectra,
   grid: ReductionGrid,
   policy: ShapePolicy,
   cell: ReducedCell,
@@ -1480,14 +1669,7 @@ export function belowGridError(
   let worst = 0;
   for (let v = 0; v < policy.variants.length; v += 1) {
     for (const [t, temperatureK] of grid.temperaturesK.entries()) {
-      const exact = cellNode(
-        cellNm,
-        species,
-        temperatureK,
-        BELOW_GRID_CHECK_PA,
-        policy,
-        only(policy, v),
-      );
+      const exact = spectra(cellNm, temperatureK, BELOW_GRID_CHECK_PA, only(policy, v));
       if (exact === undefined) {
         continue;
       }
@@ -1652,6 +1834,11 @@ export interface KDistributionMeta {
   readonly worstQuantisationBeyondCapError?: number;
   /** The cells stored as their mean alone (G = 1, §9). */
   readonly linearCells: number;
+  /**
+   * The sidecar's description, where it is not R08.T4.d's: an ExoMol table's names its list and
+   * licence (R08.T4.g).
+   */
+  readonly description?: string;
 }
 
 /** A binary part's file and what it holds, as the sidecar lists it. */
@@ -1733,6 +1920,16 @@ function figures(value: number, digits: number): string {
   return value === 0 ? "0" : String(Number(value.toPrecision(digits)));
 }
 
+/** How a sidecar's description states its parts' layout and its values' axes. */
+export const PART_LAYOUT_TEXT =
+  "The cells are in the binary parts listed, little-endian: " +
+  "HYKD, u16 version, cells, variants, temperatures, pressures and 0; then per cell u16 nm, u16 G, " +
+  "f64 ln sigma (m2 a molecule) of code 1, f64 its step, G f64 weights, and u16 codes over " +
+  "variants x temperaturesK x pressuresPa x g, g fastest, code 0 for sigma 0, else ln sigma = " +
+  "offset + step (code - 1). pressuresPa are air-equivalent broadening pressures; a two-variant " +
+  "table's values are mixed at fixed g by the self share of the Lorentz width. A cell of G = 1 " +
+  "is stored as its mean (decision-r08-t4d-kdist-chain.md section 9).";
+
 /**
  * A k-distribution table's sidecar, as `absorbers/kDistribution.ts` reads it: the grid, the
  * records, and its binary parts in order.
@@ -1743,17 +1940,13 @@ export function kDistributionMetaText(
   parts: ReadonlyArray<KDistributionPart>,
 ): string {
   const description =
+    meta.description ??
     "Line absorbers' k-distributions per 1 nm cell (rendering plan R08, R08.T4.d; " +
-    "decision-r08-t4d-kdist.md; decision-r08-t4d-kdist-chain.md), written by " +
-    "apps/hyperion/scripts/atmosphereData.mjs k-distributions-merge from the fetched lines named " +
-    "here, which are not committed. The cells are in the binary parts listed, little-endian: " +
-    "HYKD, u16 version, cells, variants, temperatures, pressures and 0; then per cell u16 nm, u16 G, " +
-    "f64 ln sigma (m2 a molecule) of code 1, f64 its step, G f64 weights, and u16 codes over " +
-    "variants x temperaturesK x pressuresPa x g, g fastest, code 0 for sigma 0, else ln sigma = " +
-    "offset + step (code - 1). pressuresPa are air-equivalent broadening pressures; a two-variant " +
-    "table's values are mixed at fixed g by the self share of the Lorentz width. A cell of G = 1 " +
-    "is stored as its mean (decision-r08-t4d-kdist-chain.md section 9). Reduced values; the " +
-    "citations are in NOTICE's Data section.";
+      "decision-r08-t4d-kdist.md; decision-r08-t4d-kdist-chain.md), written by " +
+      "apps/hyperion/scripts/atmosphereData.mjs k-distributions-merge from the fetched lines named " +
+      "here, which are not committed. " +
+      PART_LAYOUT_TEXT +
+      " Reduced values; the citations are in NOTICE's Data section.";
   const fields = [
     `  "description": ${JSON.stringify(description)}`,
     `  "species": ${JSON.stringify(meta.species)}`,
