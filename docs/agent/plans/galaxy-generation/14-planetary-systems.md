@@ -3788,6 +3788,61 @@ In plan 05's `spatial/`, all additive, so that the `GALAXY` display's draw lists
     `IRON`, `ROCK`, `WATER` and `ENVELOPE`, the layers of the structure model, which are not
     substances, and a `MASS FRACTION` label over them, or the section's own, names the quantity
     once.
+  - _As built, both (`p14-surface-rows`, 2026-10-14)._ In `displays/system/BodyRecordReadings.tsx`:
+    - **`SURFACE`**, an `ok` section: `SURFACE` with the state in words (`TEMPERATE`, `AIRLESS`,
+      `MAGMA OCEAN`, `RUNAWAY GREENHOUSE`, `SNOWBALL`, and the reserved `SUPERCRITICAL H2O` and
+      `TENUOUS AIR`; `bodyWords.ts`'s `surfaceStateLabel`), so that the section's name keeps its
+      place whether it is shown or stands in; `MEAN SURFACE TEMPERATURE 288 K` (whole kelvin, as
+      `T EQ`); `SURFACE PRESSURE 101 kPa` (`formatPressure`); and
+      `MOLE FRACTION N2 98.1 % · H2O 1.02 % · Ar 0.900 % · CO2 0.0300 %`, the wire's order, largest
+      first, each gas by `substanceName` in a label's case and its fraction to three significant
+      figures, as the guide's example. A figure keeps its `%`, and a one-word name its figure,
+      across a no-break space, so that a narrow column breaks such a reading only after a middle
+      dot; a name of several words (`UNLISTED MATERIAL`) may break, since bound whole it is wider
+      than the column at 1280×720. The temperature and pressure take a line each. An airless body
+      reads
+      `SURFACE PRESSURE NONE` and `MOLE FRACTION NONE`, which are data, and
+      `EXOSPHERE NOT YET MODELLED`, keyed on the `airless` state as R08.T10.a keys the view's note,
+      so that `NONE` is never read as a body known to be clear of gas (the guide's Data states;
+      P14.T55.c computes the exosphere).
+    - **`ATMOSPHERE`**, the record's `envelope` section, after `SURFACE`: its tag as every
+      section's (`ATMOSPHERE NOT YET MODELLED`, as every server sends a giant's until T24.d, and an
+      older server's absent one; `ATMOSPHERE NOT RESOLVED` below `surface`, a rocky body's
+      included), and, `ok`, `ATMOSPHERE GAS ENVELOPE` and its composition as
+      `MOLE FRACTION H2 86.3 % · He 13.6 % · CH4 0.180 %`. It is not `ENVELOPE`, which names the
+      structure model's layer, modelled, in `MASS FRACTION`: a giant would read its envelope as
+      both modelled and not. The view's notes name the same air `ATMOSPHERE`. `GAS ENVELOPE`
+      holds while the section is a gas-envelope body's alone, as the protocol defines it; P14.T53.b,
+      if it gives a supercritical-water world this section, revisits the lead row, which then reads
+      the wire's state, and the drafted `GAS ENVELOPE` row.
+    - **`BULK`**: the four layers are one reading,
+      `MASS FRACTION IRON 32.3 % · ROCK 67.7 % · WATER 0.0 % · ENVELOPE 0.0 %`, from the core out at
+      one decimal as before.
+    - **The readout's label tracks** (`styles.css`, `.body-readout__values`) are
+      `fit-content(11.5rem)`: every label up to `COMETS OVER 1 km` (10.8rem) keeps one line, and
+      `MEAN SURFACE TEMPERATURE` (16.3rem) wraps at its spaces rather than scrolling the readings
+      sideways at 1280×720.
+    - _Drafted for the owner_ (nomenclature rows; the client is built to them):
+
+      | Name                                                                                                        | Kind          | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+      | ----------------------------------------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+      | `SURFACE`                                                                                                   | Section       | A body's surface section, and its first reading: the surface's state in words (`SURFACE TEMPERATE`), so that the name keeps its place whether the section is shown or stands in (`SURFACE NOT YET MODELLED`). A body in the gas-envelope state has none.                                                                                                                                                                                                                                                     |
+      | `MAGMA OCEAN`, `AIRLESS`, `RUNAWAY GREENHOUSE`, `TEMPERATE`, `SNOWBALL`, `SUPERCRITICAL H2O`, `TENUOUS AIR` | Surface state | Molten rock at the surface; a surface pressure below the airless limit; inside the runaway-greenhouse limit when water was present; between the runaway and maximum-greenhouse limits; beyond the maximum-greenhouse limit, frozen; water above its critical point (647.1 K, 22.06 MPa) with no interface between it and the rock (P14.T53.b, the wire's `steam_envelope`, never "steam", a common name for H2O); a thin or transient air, as Pluto's (P14.T53.c). The last two are produced by no rule yet. |
+      | `MEAN SURFACE TEMPERATURE`                                                                                  | Label         | The surface's global annual mean temperature, in whole kelvin. Spelled out, since an abbreviation must be on the list; a `T SURF` beside `T EQ` and `T EFF` would be the owner's to add.                                                                                                                                                                                                                                                                                                                     |
+      | `SURFACE PRESSURE`                                                                                          | Label         | The surface's pressure, to three significant figures in `Pa`, `kPa` and `MPa`, in E notation below 0.01 Pa and from 10,000 MPa; `NONE` for a body with no air.                                                                                                                                                                                                                                                                                                                                               |
+      | `MOLE FRACTION`                                                                                             | Label         | A body's air, its surface's gases or a gas envelope's composition, as one reading, largest first, joined by middle dots (Voice and nomenclature), each to three significant figures; `NONE` for no gas.                                                                                                                                                                                                                                                                                                      |
+      | `MASS FRACTION`                                                                                             | Label         | The `BULK` section's four layers of the structure model as one reading, from the core out: `IRON 32.3 % · ROCK 67.7 % · WATER 0.0 % · ENVELOPE 0.0 %`.                                                                                                                                                                                                                                                                                                                                                       |
+      | `ATMOSPHERE`                                                                                                | Section       | A gas-envelope body's air, a giant's or a sub-Neptune's, in its surface section's place: `ATMOSPHERE GAS ENVELOPE` and its gases; `ATMOSPHERE NOT YET MODELLED` while the generator does not compute it, and `ATMOSPHERE NOT RESOLVED` where the detail level withholds it, a rocky body's included, since the console never infers that it does not apply.                                                                                                                                                  |
+      | `GAS ENVELOPE`                                                                                              | Atmosphere    | The air of a body in the gas-envelope state, whose hydrogen and helium envelope has no solid surface beneath it.                                                                                                                                                                                                                                                                                                                                                                                             |
+      | `EXOSPHERE`                                                                                                 | Label         | In the `SURFACE` section of an `AIRLESS` body: the unbound gas it may still hold, `EXOSPHERE NOT YET MODELLED` while the generator does not compute it, so that `NONE` is never read as "clear of gas".                                                                                                                                                                                                                                                                                                      |
+
+    - _Tests_ (`SystemView.bodies.test.tsx`, `bodyWords.test.ts`): the Earth's four surface rows,
+      its `ATMOSPHERE` left out and no `EXOSPHERE`; "NOT YET MODELLED once" points back at
+      `earthDetail()`, four sections, and an older server's Earth reads `SURFACE` and `ATMOSPHERE`
+      `NOT YET MODELLED`; an airless Earth reads `NONE` twice and its exosphere; an unknown gas key
+      reads `UNLISTED MATERIAL`, its key never shown; a mass-and-orbit Earth withholds its
+      atmosphere; a Jupiter reads `ATMOSPHERE GAS ENVELOPE` and its gases, and a Jupiter whose
+      envelope is not modelled reads `ATMOSPHERE NOT YET MODELLED`; every surface state's words.
 - **P14.T43.c Events.** A list of the body events of the century around the display time, from a
   `body_events` request, each with its time in the chart's time system and a countdown in the
   guide's `T-` form.
@@ -12044,7 +12099,9 @@ tables::gauss_legendre`.
   - _T43.b's amendment_ (decision-p14-t35e-wire F2) did not land with this subtask; it follows it
     directly. Until it does, the client shows no `SURFACE` row for an `ok` surface, and
     `SystemView.bodies.test.tsx`'s "NOT YET MODELLED once" test reads
-    `earthDetailOfAnOlderServer()`; the amendment points it back at `earthDetail()`.
+    `earthDetailOfAnOlderServer()`; the amendment points it back at `earthDetail()`. It landed
+    directly after (`p14-surface-rows`, 2026-10-14; "Deviations in P14.T43.b's amendments, as
+    built").
   - _The server's tests._ `convert/planetary.rs` gains a `tests` module over the 15 golden
     systems at `full`, their IDs copied from `tests/planetary_golden.rs`'s `GOLDEN_SYSTEMS` (a
     copy that can drift; a re-pin there re-pins it here). `tests/system_bodies.rs` holds every
@@ -12067,3 +12124,51 @@ tables::gauss_legendre`.
     rock-vapour air not modelled. The wire carries it as it is (no mixture figures).
   - The client does not hold `surface_age_s` to the crater contract's `system_age_s`: the two
     come through different unit conversions (years and Gyr to seconds), which can part by an ulp.
+- **Deviations in P14.T43.b's amendments, as built (`p14-surface-rows`, 2026-10-14).** The
+  `SURFACE` rows (_Amended for T35.e_, decision-p14-t35e-wire F2) and the `BULK` rows' quantity
+  (signoff-5 item 8), a display change only: no output, wire or protocol moves. The rows and the
+  drafted nomenclature rows are in T43.b's entry. Reviewed by the UX, TypeScript and
+  plan-conformance reviewers, the UX reviewer twice; their must-fix and should-fix findings are
+  applied (the label track, the `ATMOSPHERE` name and lead row, the exosphere's key,
+  `SUPERCRITICAL H2O`, the no-break joins kept off multi-word names, the split tests), but for
+  `e101`'s, which is the wire's (below).
+  - _The envelope's rows too._ The amendment names the surface's rows, but the record's `envelope`
+    section, on the wire since T35.e, had no row either, so a giant's air, `not_modelled` from every
+    server until T24.d, left no trace on the readout. It reads by the same rule, after `SURFACE`,
+    named `ATMOSPHERE`, not `ENVELOPE`, the structure model's modelled layer, with the lead row
+    `ATMOSPHERE GAS ENVELOPE` as `SURFACE` leads with its state.
+  - _`MASS FRACTION` is one reading_, not a label over four rows. The readout is a flat `dl`, in
+    which a heading would be a term with no value, and the guide's form for a reading of several
+    parts names the quantity once, in its label. The layers keep their words and the model's
+    order, not "largest first", since they are not substances.
+  - _The label tracks wrap._ `.body-readout__values` sizes its label tracks `fit-content(11.5rem)`,
+    not `max-content`, so that `MEAN SURFACE TEMPERATURE` wraps instead of widening the column
+    past the values (the UX reviewer measured about 50 px of sideways scroll at 1280×720 with
+    `max-content`). Every other label of both readouts stays on one line.
+  - _The exosphere follows the state._ `EXOSPHERE NOT YET MODELLED` stands for an `AIRLESS`
+    surface, as R08.T10.a's view note does, so that both consoles say it of the same bodies.
+  - _An open gap, not covered here:_ T35.e's deferred finding, `close_binary`'s `e101`, a
+    `MagmaOcean` sent with zero pressure and no gas, its rock-vapour air not modelled, reads
+    `SURFACE PRESSURE NONE` and `MOLE FRACTION NONE`, which an operator reads as known to be
+    without air. The console cannot tell without inferring a state; the fix is the wire's (an air
+    no rule computes sent as not modelled), for "main".
+  - _`%` in a reading of several parts_ is in the value's face and colour, as `HostReadings`' zone
+    spans set their units, since `ReadoutRow` has one unit slot per value.
+  - _Not read yet:_ the surface's material, contrasts, climate regime and global figures, and the
+    envelope's figures beyond its composition. Each is on the wire and can join as a row under a
+    later task's UX review.
+  - _For P14.T53.b:_ `ATMOSPHERE GAS ENVELOPE` is a constant, true while the `envelope` section is
+    a gas-envelope body's alone. If T53.b gives a supercritical-water world that section, with its
+    surface not applicable, the lead row reads the wire's state instead, and the drafted
+    `GAS ENVELOPE` and `SUPERCRITICAL H2O` rows are revisited.
+  - _Pending:_ the visual check at 1920×1080 and 1280×720 (no screenshot was taken), for the
+    label track's wrap, the readings' wrap after their middle dots, a classic scrollbar's width on
+    Linux and Windows, and the position line under a wrapped label.
+- **Deferred findings (2026-10-13 rule)**, from P14.T43.b's amendments:
+  - A gas at 99.95 % or more reads `100 %` at three significant figures, so a nearly pure air's
+    parts can sum past 100 % (`N2 100 % · CH4 0.0400 %`). The survey coverage's `ABOVE 99.9 %`
+    form could serve, if the owner extends it to mole fractions.
+  - A one-word name stays with its figure, and a part runs 9.1 px a character in B612 Mono, so a
+    formula of more than eight characters beside an E-notation figure (`Mg(ClO4)2 1.00E-4 %`,
+    173 px) would pass the 166 px the column keeps at 1280×720 beside a 15 px scrollbar. The
+    registry's gases are three characters at most today (`substances.json`).

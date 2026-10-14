@@ -2,7 +2,7 @@
  * The `SYSTEM` display's planets over a fake socket, against the shared wire fixture (plan 14,
  * P14.T41.b, T42 and T43 for bodies).
  */
-import type { ResponseFor, SectionDto } from "@hyperion/protocol";
+import type { BodyEnvelopeDto, BodySurfaceDto, ResponseFor, SectionDto } from "@hyperion/protocol";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -134,6 +134,47 @@ function earthWithDetailSeed(detailSeed: SectionDto<string>): ResponseFor<"body_
     ...detail,
     record: { ...detail.record, hooks: { state: "ok", value: { detail_seed: detailSeed } } },
   };
+}
+
+/** The fixture's Earth with its `ok` surface changed by `change`. */
+function earthWithSurface(
+  change: (surface: BodySurfaceDto) => BodySurfaceDto,
+): ResponseFor<"body_detail"> {
+  const detail = earthDetail();
+  const { surface } = detail.record;
+  if (surface.state !== "ok") {
+    throw new Error("the fixture's Earth has a surface");
+  }
+  return {
+    ...detail,
+    record: { ...detail.record, surface: { state: "ok", value: change(surface.value) } },
+  };
+}
+
+/** The fixture's Earth made airless, as the server sends such a body: no air, its figures none. */
+function airlessEarth(): ResponseFor<"body_detail"> {
+  return earthWithSurface((surface) => ({
+    ...surface,
+    state: "airless",
+    surface_pressure_pa: 0,
+    gases: [],
+    mean_molar_mass_g_per_mol: null,
+    heat_capacity_over_r: null,
+  }));
+}
+
+/**
+ * A reading of several parts, each named in one word, as the readout sets it: each part's spaces
+ * no-break, so that such a part never breaks across a line, and the parts joined by middle dots.
+ */
+function partsReading(...parts: readonly string[]): string {
+  return parts.map((part) => part.replaceAll(" ", "\u00A0")).join(" · ");
+}
+
+/** The fixture's Jupiter with its envelope section `envelope`. */
+function jupiterWithEnvelope(envelope: SectionDto<BodyEnvelopeDto>): ResponseFor<"body_detail"> {
+  const detail = jupiterDetail();
+  return { ...detail, record: { ...detail.record, envelope } };
 }
 
 beforeEach(() => {
@@ -355,7 +396,10 @@ describe("SystemView's body readout", () => {
     // Ruling 112.7: a body with no luminosity of its own has no effective temperature row.
     expect(terms("T EFF")).toHaveLength(0);
     expect(reading("CLASS")).toBe("ROCKY");
-    expect(reading("IRON")).toBe("32.3 %");
+    // The layers' quantity named once (signoff-5, item 8).
+    expect(reading("MASS FRACTION")).toBe(
+      partsReading("IRON 32.3 %", "ROCK 67.7 %", "WATER 0.0 %", "ENVELOPE 0.0 %"),
+    );
     expect(within(bodiesPanel()).queryByText("PENDING")).not.toBeInTheDocument();
   });
 
@@ -363,14 +407,95 @@ describe("SystemView's body readout", () => {
     const { user, socket } = renderView();
     await answer(socket);
     await selectRow(user, /\/768/);
-    // An older server's Earth, whose surface is not modelled (P14.T35.e gives it one).
-    await answerDetail(socket, earthDetailOfAnOlderServer());
+    await answerDetail(socket, earthDetail());
 
-    for (const section of ["NAME", "MOONS", "RINGS", "SURFACE", "GENERATOR INPUTS"]) {
+    for (const section of ["NAME", "MOONS", "RINGS", "GENERATOR INPUTS"]) {
       expect(terms(section)).toHaveLength(1);
       expect(reading(section)).toBe("NOT YET MODELLED");
     }
-    expect(within(readout()).getAllByText("NOT YET MODELLED")).toHaveLength(5);
+    expect(within(readout()).getAllByText("NOT YET MODELLED")).toHaveLength(4);
+  });
+
+  it("reads an ok surface's state, mean temperature, pressure and gases", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthDetail());
+
+    expect(terms("SURFACE")).toHaveLength(1);
+    expect(reading("SURFACE")).toBe("TEMPERATE");
+    expect(reading("MEAN SURFACE TEMPERATURE")).toBe("288 K");
+    expect(reading("SURFACE PRESSURE")).toBe("101 kPa");
+    // Largest first, each by its formula, the quantity named once in the label.
+    expect(reading("MOLE FRACTION")).toBe(
+      partsReading("N2 98.1 %", "H2O 1.02 %", "Ar 0.900 %", "CO2 0.0300 %"),
+    );
+  });
+
+  it("leaves out a rocky planet's ATMOSPHERE section, whose air is its surface's", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthDetail());
+
+    expect(terms("ATMOSPHERE")).toHaveLength(0);
+  });
+
+  it("shows no EXOSPHERE row for a world with air", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, earthDetail());
+
+    expect(terms("EXOSPHERE")).toHaveLength(0);
+  });
+
+  it("reads an airless world's air as NONE, and its exosphere as NOT YET MODELLED", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(socket, airlessEarth());
+
+    expect(reading("SURFACE")).toBe("AIRLESS");
+    expect(reading("SURFACE PRESSURE")).toBe("NONE");
+    expect(reading("MOLE FRACTION")).toBe("NONE");
+    expect(reading("EXOSPHERE")).toBe("NOT YET MODELLED");
+  });
+
+  it("names a gas the console does not know as UNLISTED MATERIAL, never by its key", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    await answerDetail(
+      socket,
+      earthWithSurface((surface) => ({
+        ...surface,
+        gases: [
+          { species: "N2", mole_fraction: 0.99 },
+          { species: "novel_gas", mole_fraction: 0.01 },
+        ],
+      })),
+    );
+
+    // A name of two words may break before its figure; the figure keeps its `%`.
+    expect(reading("MOLE FRACTION")).toBe(
+      `${partsReading("N2 99.0 %")} · UNLISTED MATERIAL 1.00\u00A0%`,
+    );
+    expect(within(readout()).queryByText(/novel_gas/)).not.toBeInTheDocument();
+  });
+
+  it("reads an older server's surface and atmosphere as NOT YET MODELLED", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/768/);
+    // A server before P14.T35.e: its surface not modelled, and no envelope at all.
+    await answerDetail(socket, earthDetailOfAnOlderServer());
+
+    for (const section of ["SURFACE", "ATMOSPHERE"]) {
+      expect(terms(section)).toHaveLength(1);
+      expect(reading(section)).toBe("NOT YET MODELLED");
+    }
+    expect(terms("MOLE FRACTION")).toHaveLength(0);
   });
 
   it("reads NOT RESOLVED for what a mass-and-orbit record withholds", async () => {
@@ -382,6 +507,8 @@ describe("SystemView's body readout", () => {
     expect(reading("DETAIL")).toBe("MASS AND ORBIT ONLY");
     expect(reading("BULK")).toBe("NOT RESOLVED");
     expect(reading("SURFACE")).toBe("NOT RESOLVED");
+    // A rocky body's envelope is withheld with its surface, never inferred not to apply.
+    expect(reading("ATMOSPHERE")).toBe("NOT RESOLVED");
     expect(reading("GENERATOR INPUTS")).toBe("NOT RESOLVED");
     expect(terms("RADIUS")).toHaveLength(0);
     expect(reading("SMA")).toBe("1.00 AU");
@@ -432,6 +559,28 @@ describe("SystemView's body readout", () => {
     expect(terms("SURFACE")).toHaveLength(0);
     expect(reading("GENERATOR INPUTS")).toBe("NOT YET MODELLED");
     expect(reading("MASS")).toBe("318 M");
+  });
+
+  it("reads a gas giant's atmosphere from its envelope, in its surface's place", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/1280/);
+    await answerDetail(socket, jupiterDetail());
+
+    expect(reading("ATMOSPHERE")).toBe("GAS ENVELOPE");
+    expect(reading("MOLE FRACTION")).toBe(partsReading("H2 86.3 %", "He 13.6 %", "CH4 0.180 %"));
+  });
+
+  it("reads a gas giant's atmosphere as NOT YET MODELLED while the server does not compute it", async () => {
+    const { user, socket } = renderView();
+    await answer(socket);
+    await selectRow(user, /\/1280/);
+    // As every server sends a giant's envelope until P14.T24.d.
+    await answerDetail(socket, jupiterWithEnvelope({ state: "not_modelled" }));
+
+    expect(terms("ATMOSPHERE")).toHaveLength(1);
+    expect(reading("ATMOSPHERE")).toBe("NOT YET MODELLED");
+    expect(terms("MOLE FRACTION")).toHaveLength(0);
   });
 
   it("selects a planet from the map's list by the keyboard, and the map with it", async () => {

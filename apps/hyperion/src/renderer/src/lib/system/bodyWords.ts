@@ -18,6 +18,7 @@ import type {
   PlanetClassDto,
   RingKindDto,
   RingMaterialDto,
+  SurfaceStateDto,
 } from "@hyperion/protocol";
 
 import type { BodyKind, BodyState, Section } from "./model";
@@ -140,6 +141,45 @@ export function planetClassLabel(planetClass: PlanetClassDto): string {
       break;
     case "gas_giant":
       label = "GAS GIANT";
+      break;
+  }
+  return label;
+}
+
+/**
+ * The state of a body's surface (plan 14, P14.T13.c, on the wire by P14.T35.e), in words:
+ * `TEMPERATE`, `MAGMA OCEAN`, `RUNAWAY GREENHOUSE`.
+ *
+ * @remarks
+ * Drafted for the owner with P14.T43.b's `SURFACE` rows. Two are reserved, produced by no rule
+ * yet. `SUPERCRITICAL H2O` is the wire's `steam_envelope` (P14.T53.b): water above its critical
+ * point with no interface, named by its formula, never by "steam", a common name for it (the
+ * guide's Voice and nomenclature). `TENUOUS AIR` is `tenuous` (P14.T53.c), a thin or transient air
+ * as Pluto's, since `TENUOUS` alone would not say what is tenuous.
+ */
+export function surfaceStateLabel(state: SurfaceStateDto): string {
+  let label: string;
+  switch (state) {
+    case "magma_ocean":
+      label = "MAGMA OCEAN";
+      break;
+    case "airless":
+      label = "AIRLESS";
+      break;
+    case "runaway_greenhouse":
+      label = "RUNAWAY GREENHOUSE";
+      break;
+    case "temperate":
+      label = "TEMPERATE";
+      break;
+    case "snowball":
+      label = "SNOWBALL";
+      break;
+    case "steam_envelope":
+      label = "SUPERCRITICAL H2O";
+      break;
+    case "tenuous":
+      label = "TENUOUS AIR";
       break;
   }
   return label;

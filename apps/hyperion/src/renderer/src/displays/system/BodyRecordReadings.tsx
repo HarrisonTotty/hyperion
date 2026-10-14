@@ -10,6 +10,7 @@ import {
   formatMassMearth,
   formatNumber,
   formatPeriod,
+  formatPressure,
   formatRadiusKm,
   formatSci,
   formatSignificant,
@@ -28,15 +29,20 @@ import {
   ringKindLabel,
   ringMaterialLabel,
   sectionStateLabel,
+  surfaceStateLabel,
 } from "../../lib/system/bodyWords";
 import type {
+  BodyEnvelope,
   BodyRecord,
+  BodySurface,
   BulkProperties,
+  GasShare,
   Population,
   Section,
   SystemBody,
 } from "../../lib/system/model";
 import { formatBodyIdHex } from "../../lib/seed";
+import { substanceName } from "../../lib/substances";
 import { BodyIdRow } from "./BodyIdRow";
 import { formatEventTime } from "./displayTime";
 import { MISSING, ReadoutRow, type Shown, shown as value } from "./ReadoutRow";
@@ -112,6 +118,127 @@ function countOf(ids: ReadonlyArray<string>): string {
 /** A mass fraction as a percentage, without its unit: `32.3`. */
 function percent(fraction: number): string {
   return formatNumber(fraction * 100, PERCENT_DECIMALS);
+}
+
+/** What joins the parts of a reading of several, as the guide's Voice joins them. */
+const PART_JOIN = " · ";
+
+/** The no-break space (U+00A0), which both B612 faces hold, inside each part of such a reading. */
+const NO_BREAK_SPACE = "\u00A0";
+
+/** One part of a reading of shares: what it is, in words or by its formula, and its percentage. */
+interface Share {
+  readonly name: string;
+  readonly percentage: string;
+}
+
+/**
+ * Shares as one reading, each its name and its percentage with its `%`, joined by middle dots:
+ * `N2 78.1 % · O2 20.9 % · Ar 0.934 %`. The quantity is named once, in the row's label, never on
+ * the `%` (the guide's Voice and nomenclature; decision-substance-names).
+ *
+ * @remarks
+ * A part's figure keeps its `%` across a no-break space, as the guide's `±` reading keeps its parts
+ * together, and so does a name of one word, a formula's or a layer's, its figure: a narrow column
+ * breaks such a reading only after a middle dot. A name of several words (`UNLISTED MATERIAL`) may
+ * break between its words and before its figure, since bound whole it is wider than the column at
+ * 1280 × 720 and would scroll the readings sideways.
+ */
+function sharesReading(shares: ReadonlyArray<Share>): string {
+  return shares
+    .map(({ name, percentage }) => {
+      const nameJoin = name.includes(" ") ? " " : NO_BREAK_SPACE;
+      return `${name}${nameJoin}${percentage}${NO_BREAK_SPACE}%`;
+    })
+    .join(PART_JOIN);
+}
+
+/**
+ * A mixture's gases as their reading, in the order the wire gives them, largest first: each named
+ * by {@link substanceName} in a label's case, never by its key, with its mole fraction to the
+ * guide's three significant figures (`Ar 0.934 %`), in E notation below 0.001 % (`1.00E-4 %`);
+ * `NONE` for no gas, which is data.
+ */
+function gasesShown(gases: ReadonlyArray<GasShare>): Shown {
+  return gases.length === 0
+    ? value("NONE")
+    : value(
+        sharesReading(
+          gases.map((gas) => ({
+            name: substanceName(gas.species, "upper"),
+            percentage: formatSignificant(gas.moleFraction * 100),
+          })),
+        ),
+      );
+}
+
+/**
+ * A surface pressure with its unit (`101 kPa`, `9.20 MPa`), or `NONE` for an airless body's zero,
+ * which is data: no air, never a reading of `0.00 Pa`.
+ */
+function pressureShown(pressurePa: number): Shown {
+  if (pressurePa === 0) {
+    return value("NONE");
+  }
+  const pressure = formatPressure(pressurePa);
+  return value(pressure.value, pressure.unit);
+}
+
+/**
+ * The rows of a surface section (plan 14, P14.T43.b, _Amended for T35.e_): its state in words under
+ * the section's own name, so that `SURFACE` keeps its place whether the section is shown or stands
+ * in; the mean surface temperature; the surface pressure; and the air's gases by mole fraction.
+ *
+ * @remarks
+ * The temperature and the pressure take a line each, so that their long labels share the label
+ * track that wraps rather than widening the second one.
+ *
+ * An airless body's air is computed, with none in it: its pressure and its gases read `NONE`, and
+ * its exosphere, a quantity of its own that the generator does not yet compute (P14.T55.c), reads
+ * `NOT YET MODELLED`, so that `NONE` is never read as a body known to be clear of gas (the guide's
+ * Data states). The note follows the `airless` state, as the view's `EXOSPHERE: NOT YET MODELLED`
+ * does (rendering plan R08, R08.T10.a). The section's other members (its material, climate regime
+ * and global figures) are on the wire and not yet read here.
+ */
+function surfaceRows(surface: BodySurface): ReactNode {
+  return (
+    <>
+      <ReadoutRow label="SURFACE" shown={value(surfaceStateLabel(surface.state))} wide />
+      <ReadoutRow
+        label="MEAN SURFACE TEMPERATURE"
+        shown={value(formatTemperatureK(surface.meanSurfaceTemperatureK), "K")}
+        wide
+      />
+      <ReadoutRow label="SURFACE PRESSURE" shown={pressureShown(surface.surfacePressurePa)} wide />
+      <ReadoutRow label="MOLE FRACTION" shown={gasesShown(surface.gases)} wide />
+      {surface.state === "airless" ? (
+        <ReadoutRow label="EXOSPHERE" shown={value(sectionStateLabel("not_modelled"))} wide />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The rows of a gas-envelope body's `envelope` section, the air of a giant or a sub-Neptune, whose
+ * surface section does not apply. It reads as `ATMOSPHERE`, as the view's notes name the same air
+ * (`ATMOSPHERE: NOT YET MODELLED`), since the `BULK` section's `ENVELOPE` is the structure model's
+ * layer, which is modelled: `ATMOSPHERE GAS ENVELOPE`, under the section's own name as `SURFACE`'s
+ * state is, then its composition by mole fraction, as a surface's gases read.
+ *
+ * @remarks
+ * Its other figures (the Guillot profile's temperatures and parameters, the adiabat, the decks and
+ * the haze) are on the wire and not yet read here. Every server sends the section `not_modelled`
+ * until P14.T24.d fills it, and {@link sectionRows} reads it so. `GAS ENVELOPE` holds while the
+ * section is a gas-envelope body's alone, as the protocol defines it; should P14.T53.b give a
+ * supercritical-water world this section, the lead row is to read the wire's state instead.
+ */
+function envelopeRows(envelope: BodyEnvelope): ReactNode {
+  return (
+    <>
+      <ReadoutRow label="ATMOSPHERE" shown={value("GAS ENVELOPE")} wide />
+      <ReadoutRow label="MOLE FRACTION" shown={gasesShown(envelope.composition)} wide />
+    </>
+  );
 }
 
 /** Props of {@link SpanRow}. */
@@ -243,9 +370,23 @@ function populationRows(population: Population): ReactNode {
   return rows;
 }
 
-/** The rows of a bulk section. */
+/**
+ * The rows of a bulk section.
+ *
+ * @remarks
+ * The layers of the structure model are one reading under `MASS FRACTION`, which names their
+ * quantity once (signoff-5, item 8): `IRON 32.3 % · ROCK 67.7 % · WATER 0.0 % · ENVELOPE 0.0 %`.
+ * A layer is not a substance and keeps its word, and the layers keep the model's order, from the
+ * core out, so that each stands in the same place for every body.
+ */
 function bulkRows(bulk: BulkProperties): ReactNode {
   const { massFractions: fractions } = bulk;
+  const layers: ReadonlyArray<Share> = [
+    { name: "IRON", percentage: percent(fractions.iron) },
+    { name: "ROCK", percentage: percent(fractions.rock) },
+    { name: "WATER", percentage: percent(fractions.water) },
+    { name: "ENVELOPE", percentage: percent(fractions.envelope) },
+  ];
   return (
     <>
       <ReadoutRow label="CLASS" shown={value(planetClassLabel(bulk.planetClass))} />
@@ -262,10 +403,7 @@ function bulkRows(bulk: BulkProperties): ReactNode {
           shown={value(formatTemperatureK(bulk.effectiveTemperatureK), "K")}
         />
       )}
-      <ReadoutRow label="IRON" shown={value(percent(fractions.iron), "%")} />
-      <ReadoutRow label="ROCK" shown={value(percent(fractions.rock), "%")} />
-      <ReadoutRow label="WATER" shown={value(percent(fractions.water), "%")} />
-      <ReadoutRow label="ENVELOPE" shown={value(percent(fractions.envelope), "%")} />
+      <ReadoutRow label="MASS FRACTION" shown={value(sharesReading(layers))} wide />
     </>
   );
 }
@@ -296,11 +434,16 @@ export interface BodyRecordReadingsProps {
  * destroyed it and since when in universe time; what it orbits; the detail level its record holds.
  * Then each section as its tag says: the mass in `M⊕` (ruling 64.3); the orbit's semi-major axis,
  * period, eccentricity and inclination, and the distance from what it orbits now; the bulk's class,
- * radius in `km`, density, gravity, equilibrium temperature and composition by mass; its moons and
- * rings, counted; for a ring, a belt or the cometary halo, what the population is and where it
- * lies; and, from the whole record only, its surface and its hooks, whose detail seed is the one
- * hook the wire carries, the em dash until the server derives it. A section withheld or not
- * modelled reads so, once, in place of its rows; one that does not apply is left out.
+ * radius in `km`, density, gravity, equilibrium temperature and its layers' mass fractions; its
+ * moons and rings, counted; for a ring, a belt or the cometary halo, what the population is and
+ * where it lies; and, from the whole record only, its surface (its state, mean temperature,
+ * pressure and gases), a gas-envelope body's envelope in the surface's place, read as its
+ * `ATMOSPHERE` (its gases), and its hooks, whose detail seed is the one hook the wire carries, the
+ * em dash until the server derives it. A section withheld or not modelled reads so, once, in place
+ * of its rows; one that does not apply is left out. A server since P14.T35.e sends one of `surface`
+ * and `envelope` as not applicable for every planet it resolves to the `surface` level, so the
+ * planet's air is read from the other; an older server sends no envelope, which reads
+ * `ATMOSPHERE NOT YET MODELLED`.
  *
  * The distance is the one reading the display derives: from the server's elements at the display
  * time, by the solver that agrees with the server's to 10⁻⁹ (P14.T39), since the answer is up to a
@@ -390,7 +533,8 @@ export function BodyRecordReadings({
       {sectionRows("SMALL BODIES", body.population, populationRows)}
       {whole === null ? null : (
         <>
-          {sectionRows("SURFACE", whole.surface, () => null)}
+          {sectionRows("SURFACE", whole.surface, surfaceRows)}
+          {sectionRows("ATMOSPHERE", whole.envelope, envelopeRows)}
           {sectionRows("GENERATOR INPUTS", whole.hooks, (hooks) => detailSeedRow(hooks.detailSeed))}
         </>
       )}
