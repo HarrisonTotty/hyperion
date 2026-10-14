@@ -157,16 +157,21 @@ filter = "package(hyperion-server) & binary(=systems_in_range) & test(=the_range
 threads-required = 2
 
 # The nuclear disc's slow identity test is four, one for each quadrant about its place
-# (`sky_census.rs`), each on three threads of its own: E's census, E's oracle, and D's census then
-# D's oracle. So each takes three slots, not the eight of the census's other tests below, and two
-# fit the group at once: at eight, more than the group's six, a test takes the whole group
-# (future-queue 0.4.0 holds a test's weight to its group's limit), so the four would run one after
-# another. They start after the group's other tests, at a priority below the group's: a test
-# queued behind its full group starts only when another of the group ends, and only if the pool
-# then has room for all its slots (the default profile's overrides), so a three-slot test ending
-# last could leave an eight-slot one queued behind it unrun, while queued behind those, a quadrant
-# follows only a test at least as heavy as itself. Being first, this override's priority wins over
-# the group's next, and its slots over the census's own below; the group is the next one's.
+# (`sky_census.rs`), each holding a cell of D and one of E and running on three threads of its own:
+# E's census, E's oracle, and D's census then D's oracle. So each takes three slots, not the eight
+# of the census's other tests below, and while the slow tier's memory is unmeasured, three holds
+# the group to two of them at once, four of the old test's eight cells. At eight, more than the
+# group's six, a test takes the whole group (future-queue 0.4.0 holds a test's weight to its
+# group's limit), so the four would run one after another. Measured on 2026-10-13 on an 8-thread
+# i7-8665U, two at a time: each process peaked at 123 MiB or less, and the run's scope, with both,
+# at 252 MiB (`memory.peak`). They start after the group's six- and eight-slot tests, at a priority
+# below the group's, against the slow tier's longest-first order until the slow group is
+# revisited: a test queued behind its full group starts only when another of the group ends, and
+# only if the pool then has room for all its slots (the default profile's overrides), so a
+# three-slot test ending last could strand an eight-slot one queued behind it, which nextest then
+# reports as not run. Queued behind those, a quadrant follows only a test at least as heavy as
+# itself. Being first, this override's priority wins over the group's next, and its slots over the
+# census's own below; it sets nothing else, and the group is the next one's.
 [[profile.slow.overrides]]
 filter = "package(hyperion-sim) & binary(=sky_census) & test(/^the_census_is_its_oracle_for_d_and_e_in_the_nuclear_disc_/)"
 threads-required = 3
