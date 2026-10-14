@@ -21,6 +21,14 @@
 //! `λ_n` is the band limit, level 19 on an Earth, every level evaluates the same set with the same
 //! band, so its heights are the finest's to the bit.
 //!
+//! A level resolves each contribution to its own scale, not to `λ_n` alike: the closed forms place
+//! a structural octave of spacing s at wavelengths 4/3 s to 8/3 s, a channel level from its mean
+//! cell's width to twice it, and a crater octave from the smallest diameter it keeps to its upper
+//! one. So what band level n leaves out of the finest level's ground is more than R09's
+//! wavelength-keyed forms count at `λ_n` (2.6 to 3.3 times in the relief's variance on the
+//! synthetic worlds). The level-keyed forms count it, each contribution from its own cut
+//! ([`Synthesiser::omitted_variance`](super::Synthesiser::omitted_variance), R10.T5).
+//!
 //! # The bound
 //!
 //! [`level_bound_m`] bounds |h(n) − h(m)| for every finer level m: the contributions level m
@@ -69,7 +77,7 @@ use super::channels::incision::{
 use super::craters::bound::{coarse_marks, octave_marks, poisson_tail_bound};
 use super::craters::rims::coarse_band_half_width;
 use super::craters::{CraterOctaves, band_half_width};
-use super::relief::{finest_octave, first_octave, octave_bound, octave_spacing};
+use super::relief::{finest_octave, first_octave, nyquist_degree, octave_bound, octave_spacing};
 use super::{BAND_LEVELS, BandLevel};
 use crate::cube::MAX_LEVEL;
 use crate::field::FieldHeader;
@@ -179,6 +187,58 @@ impl LevelSet {
     #[must_use]
     pub const fn craters_through(&self) -> Option<u8> {
         self.craters
+    }
+}
+
+/// Where each of R09's closed forms starts counting what a band level leaves out of the finest
+/// level's ground (R10.T5; `decision-r10-t5-closed-forms.md`): the level-keyed forms'
+/// ([`Synthesiser::omitted_variance`](super::Synthesiser::omitted_variance)). A level evaluates
+/// each contribution by its own scale, as [`LevelSet`] does, while each closed form places it at
+/// wavelengths of its own, so no one wavelength gives the cut of every contribution.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct LevelCuts {
+    /// The structural octaves': the first degree of the first octave the level does not evaluate.
+    /// Octave m carries the degrees N(m − 1) ≤ l < N(m), N the Nyquist degree, so this is
+    /// N(last), or N(L) where the level evaluates none (the first octave is L + 1).
+    pub(crate) relief_degree: u64,
+    /// The channels': below the last evaluated level's mean cell width, since a level k is counted
+    /// from its width (none) to twice it (all); twice the coarse cell's where the level evaluates
+    /// none.
+    pub(crate) channels: Metres,
+    /// The small craters': below the last evaluated octave's smallest diameter, since an octave is
+    /// counted from its smallest diameter (none) to its upper (all), the next larger octave's
+    /// smallest; the largest octave's upper where the level evaluates none.
+    pub(crate) craters: Metres,
+    /// The coarse rims': the level's `λ_n`, since every level sharpens them over half its
+    /// shortest wavelength, and their closed form takes half the wavelength it is given.
+    pub(crate) rims: Metres,
+}
+
+impl LevelCuts {
+    /// The cuts of `set`, a level's set on the body of `header`, whose small craters' octaves are
+    /// `octaves`.
+    #[must_use]
+    pub(crate) fn of(header: &FieldHeader, octaves: &CraterOctaves, set: &LevelSet) -> Self {
+        let radius_m = header.radius().value();
+        let coarse = header.level();
+        let last_octave = set.relief.unwrap_or_else(|| first_octave(coarse) - 1);
+        let channels = set.channels.map_or_else(
+            || 2.0 * mean_cell_width(radius_m, coarse.get()),
+            |k| mean_cell_width(radius_m, k),
+        );
+        let octaves = octaves.octaves();
+        let craters = match set.craters {
+            Some(k) => octaves[usize::from(k)].smallest(),
+            None => octaves
+                .first()
+                .map_or(Metres::new(BAND_LIMIT_M), |o| o.diameters().upper()),
+        };
+        Self {
+            relief_degree: nyquist_degree(last_octave),
+            channels: Metres::new(channels),
+            craters,
+            rims: set.shortest,
+        }
     }
 }
 

@@ -1202,3 +1202,127 @@ mod material {
         let _ = material_at(&synth, &mut SynthCache::new(), at);
     }
 }
+
+mod reading {
+    use hyperion_base::rng::DetailSeed;
+    use hyperion_base::units::Metres;
+    use hyperion_surface::cube::{Face, FaceUv, PatchKey};
+    use hyperion_surface::field::{FieldView, PartialField};
+    use hyperion_surface::reading::{slant_range, surveyed_reading};
+    use hyperion_surface::synth::{BandLevel, SynthCache, Synthesiser};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    use super::level_five_field;
+
+    /// A client's field of the level-5 field holding no cell yet.
+    fn empty_client() -> PartialField {
+        PartialField::new(level_five_field().header().clone())
+    }
+
+    /// A point on face +x.
+    const AT: FaceUv = FaceUv {
+        face: Face::PosX,
+        u: 0.1,
+        v: -0.2,
+    };
+
+    #[test]
+    #[should_panic(expected = "a slope's baseline must be finite and positive, got 0 m")]
+    fn a_slope_over_no_baseline_is_refused() {
+        let field = empty_client();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let _ = surveyed_reading(&synth, &mut SynthCache::new(), AT, Metres::ZERO);
+    }
+
+    #[test]
+    #[should_panic(expected = "a slope's baseline must be finite and positive, got NaN m")]
+    fn a_slope_over_a_baseline_that_is_not_finite_is_refused() {
+        let field = empty_client();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let _ = surveyed_reading(&synth, &mut SynthCache::new(), AT, Metres::new(f64::NAN));
+    }
+
+    #[test]
+    #[should_panic(expected = "a line of sight's origin must be finite, got [NaN, 0.0, 0.0]")]
+    fn a_line_of_sight_from_a_point_that_is_not_finite_is_refused() {
+        let field = empty_client();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let origin = [f64::NAN, 0.0, 0.0];
+        let _ = slant_range(
+            &synth,
+            &mut SynthCache::new(),
+            &origin,
+            &[1.0, 0.0, 0.0],
+            Metres::new(1e3),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a direction must be finite and non-zero, got [0.0, 0.0, 0.0]")]
+    fn a_line_of_sight_with_no_direction_is_refused() {
+        let field = empty_client();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let origin = [1e6, 0.0, 0.0];
+        let _ = slant_range(
+            &synth,
+            &mut SynthCache::new(),
+            &origin,
+            &[0.0, 0.0, 0.0],
+            Metres::new(1e3),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "the cell is not of the field's level")]
+    fn what_a_level_leaves_out_of_a_cell_of_another_level_is_refused() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let level = BandLevel::new(9).unwrap();
+        let _ = synth.omitted_variance(PatchKey::new(Face::PosX, 4, 0, 0).unwrap(), level);
+    }
+
+    #[test]
+    #[should_panic(expected = "the cell is not of the field's level")]
+    fn the_rms_a_level_leaves_out_of_a_cell_of_another_level_is_refused() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let level = BandLevel::new(9).unwrap();
+        let _ = synth.omitted_rms(PatchKey::new(Face::PosX, 6, 0, 0).unwrap(), level);
+    }
+
+    #[test]
+    #[should_panic(expected = "the cell is not of the field's level")]
+    fn the_structure_a_level_leaves_out_of_a_cell_of_another_level_is_refused() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let cell = PatchKey::new(Face::PosX, 4, 0, 0).unwrap();
+        let level = BandLevel::new(9).unwrap();
+        let _ = synth.omitted_structure_function(cell, level, Metres::new(2.0));
+    }
+
+    #[test]
+    #[should_panic(expected = "a lag must be finite and non-negative, got NaN m")]
+    fn the_structure_a_level_leaves_out_at_no_lag_is_refused() {
+        let field = level_five_field();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let cell = PatchKey::new(Face::PosX, 5, 0, 0).unwrap();
+        let level = BandLevel::new(9).unwrap();
+        let _ = synth.omitted_structure_function(cell, level, Metres::new(f64::NAN));
+    }
+
+    #[test]
+    #[should_panic(expected = "a line of sight's reach must be finite and non-negative, got -1 m")]
+    fn a_line_of_sight_of_negative_reach_is_refused() {
+        let field = empty_client();
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let origin = [1e6, 0.0, 0.0];
+        let _ = slant_range(
+            &synth,
+            &mut SynthCache::new(),
+            &origin,
+            &[-1.0, 0.0, 0.0],
+            Metres::new(-1.0),
+        );
+    }
+}

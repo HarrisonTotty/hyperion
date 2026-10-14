@@ -203,21 +203,37 @@ pub struct GroundPoint { /* height: Metres (above R07's reference spheroid, alon
 /// As built, a type alias of R05's `patch::collision::MeshTriangle`, with getters and `vertices()`.
 pub struct FinestTriangle { /* key: PatchKey (finest level), x: u8, y: u8, upper: bool */ }
 
-/// What a readout may quote at a point, given the survey resolution the ship holds there.
+/// A field view that knows each held cell's survey code (as built, T5): a survey's code, `NONE`
+/// for a margin cell, `None` for a cell not held. Implemented for `PartialField`.
+pub trait SurveyView: FieldView { fn resolution(&self, cell: PatchKey) -> Option<ResolutionCode>; }
+/// What a readout may quote at a point, given the survey resolution the ship holds there; private
+/// fields with getters (`is_resolved()` for `resolved`).
 pub struct SurveyedReading {
-    /* elevation: Metres, elevation_sigma: Metres, slope_rms: Radians, slope_sigma: Radians,
-       slope_baseline: Metres, resolved: bool (sigma is zero: the survey reaches the band limit) */
+    /* elevation: Metres, elevation_sigma: Metres (R09's level-keyed `omitted_rms` at the
+       reading's level), slope_rms: Radians, slope_sigma: Radians, slope_baseline: Metres,
+       resolution: Metres (the cell code's, for T12's RESOLUTION, as ruled),
+       resolved: bool (sigma is zero: the survey reaches the band limit) */
 }
-pub fn surveyed_reading<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
-    at: FaceUv, survey: Metres, slope_baseline: Metres)
+pub fn surveyed_reading<F: SurveyView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
+    at: FaceUv, slope_baseline: Metres)
     -> Result<Option<SurveyedReading>, QueryHeightError>;          // None: unsurveyed
+/// Where a line of sight meets the ground, as far as the survey can say: `NO GROUND` and
+/// `NOT SURVEYED` apart (as ruled, `decision-r10-t5-closed-forms.md`).
+pub enum LineOfSight { Ground(SlantRange), NoGround, NotSurveyed }
 pub struct SlantRange { /* range: Metres, sigma: Option<Metres> (None when grazing),
-    grazing: bool, hit: [f64; 3] (body-fixed) */ }
-pub fn slant_range<F: FieldView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
-    origin: &[f64; 3], direction: &[f64; 3], max: Metres)
-    -> Result<Option<SlantRange>, QueryHeightError>;
+    resolved: bool, hit_m: [f64; 3] (body-fixed), at: FaceUv (the hit's foot); getters,
+    `is_grazing()` (sigma is None) and `is_resolved()` */ }
+pub fn slant_range<F: SurveyView>(synth: &Synthesiser<'_, F>, cache: &mut SynthCache,
+    origin_m: &[f64; 3], direction: &[f64; 3], max: Metres)
+    -> Result<LineOfSight, QueryHeightError>;
 pub const SLOPE_BASELINES: [Metres; 3];   // 2 m (default), 5 m, 100 m, Design note 7
+pub const GRAZING_FACTOR: f64;             // 2: grazing where sin γ_s < 2√v, Design note 7
 ```
+
+As built (T5's deviations, ruled in `decision-r10-t5-closed-forms.md`): both read the survey from
+the view through `SurveyView`, so `surveyed_reading` takes no `survey`; the σ and the slope's v are
+R09's level-keyed closed forms, which T5 added to R09's `Synthesiser` (`omitted_variance`,
+`omitted_structure_function`, `omitted_rms`, R09's Provides).
 
 ### `bake`
 
@@ -455,7 +471,8 @@ heights and closed forms on all three targets at header 21 (below).
   `ResolutionCode`; `FieldView::craters_reaching`, an iterator; `synth`'s `Synthesiser`,
   `SynthCache`, `BandLevel` and `level_bound_m`; `unresolved_variance`, `structure_function` and
   `unresolved_rms`, each taking `field: &impl FieldView` and a cell and returning `Option<_>`
-  (`None` for a cell the view does not hold); `height::HeightSample`, with R05's `BAND_LIMIT_M` and
+  (`None` for a cell the view does not hold), and the level-keyed `Synthesiser::omitted_variance`,
+  `omitted_structure_function` and `omitted_rms` (added by R10.T5), what a band level leaves out; `height::HeightSample`, with R05's `BAND_LIMIT_M` and
   `FINEST_SPACING_M`; `FieldHeader.albedo_scale: Option<f64>`, which this plan fills (T10.a);
   `SurfaceClass`; `DetailSeed`; the `surface_field` request with `SurfaceFieldDto` and `CoverDto`,
   whose ranges carry each cell's `ResolutionCode`; `surface_revisions` on the scene topic;
@@ -595,8 +612,10 @@ heights and closed forms on all three targets at header 21 (below).
    and a cliffed range would change colour as the camera closed. So `weights_at` at level n gives
    the expected fraction of each finest-level class over the texel's footprint: for the slope rule,
    the probability that the finest slope exceeds `CLIFF_SLOPE`, from the resolved slope at level n
-   and the variance of the slope in the bands finer than n, from R09's per-cell closed forms
-   (`unresolved_variance` and `structure_function`, per contribution); for the rules on altitude,
+   and the variance of the slope in the bands finer than n, from R09's per-cell level-keyed closed
+   forms (`Synthesiser::omitted_variance` and `omitted_structure_function`, per contribution, what
+   level n leaves out of the finest level's ground; added by R10.T5,
+   `decision-r10-t5-closed-forms.md`); for the rules on altitude,
    the same with the height variance. At the finest level the weights are the class, blended
    linearly across `TRANSITION_HALF_WIDTH` either side of each threshold for the image only, and
    their largest weight is always the authoritative class, ties broken by discriminant. A test holds
@@ -632,7 +651,8 @@ heights and closed forms on all three targets at header 21 (below).
    2 px (verified in `TerrainProvider.js` and `Globe.js`). So the hard bound stays the stated and
    tested bound, which is what a sensor's stated error means. The candidate calibration, for the
    owner's ruling with T4.a's numbers, is that selection takes the smaller of the hard bound and 4σ
-   of the omitted bands, σ from R09's closed forms. Over a patch's 4,225 vertices, taken as
+   of the omitted bands, σ from R09's level-keyed closed forms (`Synthesiser::omitted_rms` at the
+   level, added by R10.T5). Over a patch's 4,225 vertices, taken as
    independent Gaussian deviations, the 1 − 1 ÷ 4,225 quantile of |x| is Φ⁻¹(1 − 1 ÷ 8,450) ≈
    3.68σ and the expected maximum of |x| about 3.81σ (median 3.77σ), so 4σ is a thin margin: one
    patch in four or so has a vertex past it, P(max |x| > 4σ) = 1 − (2Φ(4) − 1)^4,225 ≈ 0.23, and
@@ -654,8 +674,9 @@ heights and closed forms on all three targets at header 21 (below).
    surveyed ground is the ground at whatever detail the camera resolves; the survey's resolution
    never changes a drawn height. What the resolution changes is what a readout may quote.
    `surveyed_reading` evaluates the height at the band level matching the survey resolution of the
-   point's cell and states as its uncertainty R09's `unresolved_rms`, one standard deviation of
-   every contribution finer than that. It is 1σ and not an interval such as LE90 (1.6449σ, a
+   point's cell and states as its uncertainty R09's `omitted_rms` at that level, one standard
+   deviation of every contribution the level leaves out of the finest level's ground, each at the
+   level's own cut, not `unresolved_rms` at `λ_n` (R10.T5, `decision-r10-t5-closed-forms.md`). It is 1σ and not an interval such as LE90 (1.6449σ, a
    Gaussian figure), because the unresolved heights are not Gaussian (craters and channels are
    skewed and heavy-tailed), because 1σ is the only figure the closed forms give, and because
    current practice states RMS: HiRISE's expected vertical precision (Kirk et al. 2008), MOLA and
@@ -677,7 +698,8 @@ heights and closed forms on all three targets at header 21 (below).
    of variance σ_k² at wavenumber k adds per axis v = Σ 2 σ_k² (1 − J₀(k b)) ÷ b², the structure
    function at lag b (Shepard et al. 2001), which tends to 2σ_k² ÷ b² for bands much finer than b
    and to the band's gradient variance for bands much coarser; craters and channels take R09's
-   `structure_function` at lag b, not only a variance. The slope magnitude is then Rician
+   structure function at lag b, not only a variance: the level-keyed one, of what the reading's
+   level leaves out (`Synthesiser::omitted_structure_function`, R10.T5). The slope magnitude is then Rician
    about the resolved slope |g₀|, biased upward when |g₀| is below about 2√v, so the readout quotes
    the RMS slope √(|g₀|² + 2v) with the Rice standard deviation as its uncertainty; quoting |g₀|
    alone would understate slopes from orbit, the unsafe direction. The baseline is shown with the
@@ -1040,6 +1062,8 @@ plan, then R09's server and coarse pass):
   same task IDs, after each task's `synthetic_worlds()` part lands (a follow-up, as R09's T5 had).
   T3's `surface_ground_worlds` asserts finiteness, which the no-op worlds already exercise (as
   built, on the reference worlds through `coarse_pass`, moving onto `sample_worlds()` when it lands).
+  T5's `surface_reading_worlds` holds its pooled case on `synthetic_worlds()`'s four bodies (as
+  built), and its `sample_worlds()` case follows R09.T16.
 - **T4.b** builds `levelBounds.ts` and the selection rule after T6.b, on a fixture from
   `synthetic_worlds()`, and records the owner's counts after T4.a's `level-bounds.json`.
 - **T6.a's bench** waits on R09's follow-up after T8, the fused interpolant pass that main has
@@ -1124,8 +1148,9 @@ that own them measure them.
 ### R10.T2 Class weights for coarser levels
 
 `ClassWeights`, `weights_at` (Design note 3), with the slope-exceedance probability from R09's
-`unresolved_variance` and `structure_function`, and the palette of up to eight classes a patch
-keeps. As built, `unresolved_variance` and the channels' and craters' own structure functions
+level-keyed closed forms at level n, `Synthesiser::omitted_variance` and
+`omitted_structure_function` (what the level leaves out of the finest level's ground; added by
+R10.T5, `decision-r10-t5-closed-forms.md`), and the palette of up to eight classes a patch keeps. As built, `unresolved_variance` and the channels' and craters' own structure functions
 exist, and the whole `structure_function` is R09.T8's (provisional until it lands); the closed
 forms are held once per body, since R09's crater octaves cost about a millisecond to build and the
 per-cell forms rebuild them (R09's "Deviations in T7.b, as built"). Files: `material/weights.rs`,
@@ -1171,8 +1196,8 @@ header 21). Acceptance:
 ### R10.T4 The level bound on generated worlds
 
 - **R10.T4.a The bound measured.** R09's `level_bound_m` on `sample_worlds()`, the real coarse
-  pass's output rather than R09's synthetic fields, with σ per level from R09's closed forms (Design
-  note 5). Files: `crates/hyperion-sim/tests/level_bound_worlds.rs`, which also writes each world's
+  pass's output rather than R09's synthetic fields, with σ per level from R09's level-keyed closed
+  forms, `Synthesiser::omitted_rms` at each level (Design note 5; added by R10.T5). Files: `crates/hyperion-sim/tests/level_bound_worlds.rs`, which also writes each world's
   per-level hard bound and σ as a fixture for T4.b, `fixtures/level-bounds.json` under the client's
   `view/terrain/`. Tests: for ten thousand positions a world and every pair (n, n +
   k), |h_n − h_(n+k)| stays under `level_bound_m(n)` (slow). Recorded per world and level in this
@@ -1185,7 +1210,8 @@ header 21). Acceptance:
   from._ Acceptance: `just test-slow -E 'binary(level_bound_worlds)'` passes, and the
   figures are recorded.
 - **R10.T4.b Selection by the real bound.** The worker answers `field_init` with the body's
-  `LevelBounds` (hard and σ per level); `levelBounds.ts` holds them per body and `selectionBound`
+  `LevelBounds` (hard and σ per level, σ R09's level-keyed `Synthesiser::omitted_rms`, added by
+  R10.T5); `levelBounds.ts` holds them per body and `selectionBound`
   gives R05's `screenSpaceErrorPx` its ε_n under the rule in force (the hard bound until the owner's
   ruling), for each style's τ: 1 px high and 2 px low (the brainstorm's lean; CesiumJS's default
   `maximumScreenSpaceError` is 2 px, though its error is a spacing heuristic), and 4 px wireframe.
@@ -1207,10 +1233,12 @@ header 21). Acceptance:
 ### R10.T5 Surveyed readings
 
 `SurveyedReading`, `surveyed_reading`, `SlantRange`, `slant_range`, `SLOPE_BASELINES` (Design notes
-6 and 7), over R09's `unresolved_rms`, its `structure_function` at lag b and the coverage
-resolution per cell (`PartialField::resolution`), with J₀ through base's `math::j0` (R04.T4.c).
-As built: `unresolved_rms` and the whole `structure_function` are R09.T8's (provisional until it
-lands), held once per body as T2's are; `PartialField::resolution` is `Some(ResolutionCode::NONE)`
+6 and 7), over R09's level-keyed `omitted_rms` at the reading's level, its
+`omitted_structure_function` at lag b (both added by this task, as ruled in
+`decision-r10-t5-closed-forms.md`, since R09's `unresolved_rms` at `λ_n` counts less than a level
+leaves out) and the coverage resolution per cell (`PartialField::resolution`), with J₀ through
+base's `math::j0` (R04.T4.c), inside R09's crater form. As built: the closed forms are held once
+per body by the `Synthesiser`, as T2's are; `PartialField::resolution` is `Some(ResolutionCode::NONE)`
 on a margin cell, so "unsurveyed" is `!is_surveyed(cell)`, and `ResolutionCode::resolution()`
 gives the metres; the resolved slope is the gradient's tangential part (R09's "Deviations in T4,
 as built"). The pooled case on `sample_worlds()` follows R09.T16; it is first held on
@@ -1224,7 +1252,9 @@ much larger than the band's wavelength and to the band's gradient σ for b much 
 7's limits); the RMS slope is never
 below |g₀|; an unsurveyed cell gives `None`; the slant range to a plane is exact and its σ follows
 cos θ_s ÷ sin γ_s; a ray under the `GRAZING` threshold has no σ; a ray that leaves the surveyed
-region before it hits gives `None`. Acceptance: `cargo test -p hyperion-surface reading`, and the
+region before it hits gives `LineOfSight::NotSurveyed`, and one that misses the body's ground
+gives `LineOfSight::NoGround` (as ruled, `decision-r10-t5-closed-forms.md`; the σ is R09's
+level-keyed `omitted_rms`, the slope's v its `omitted_structure_function`). Acceptance: `cargo test -p hyperion-surface reading`, and the
 pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`.
 
 ### R10.T6 The bake on real terrain
@@ -3585,6 +3615,208 @@ and fills R09's `FieldHeader.albedo_scale`, which R09 already reserves.
   - _The channel floor repeats the groove's geometry._ `Groove::floor_holds` repeats `Groove::at`'s
     nearest point on a chord, and `on_floor` the incision's level range. A change to either should
     move both; a shared helper in R09's file would keep them one.
+- **Deviations in T5, as built** (2026-10-13; lane r10-readings, begun on R09.T8 and R10.T3 at
+  `627e9b35` and finished on R09.T9 and R10.T1.a at `4474e781`; the findings and the interface
+  ruled in `decision-r10-t5-closed-forms.md`).
+  - _Files._ `reading.rs` with `reading/tests.rs`; `lib.rs`'s `pub mod reading` and its doc;
+    `tests/panics.rs`'s `reading` module; `crates/hyperion-sim/tests/surface_reading_worlds.rs`;
+    and, as ruled, R09's `synth.rs`, `synth/levels.rs` and `synth/relief.rs` (the level-keyed
+    closed forms, below) with R09's plan text.
+  - _The survey comes from the view._ `surveyed_reading(synth, cache, at, slope_baseline)` takes no
+    `survey: Metres`. It and `slant_range`, which must read the codes along the line of sight
+    anyway, read each cell's code through a new public trait, `reading::SurveyView: FieldView`
+    (`resolution(cell) -> Option<ResolutionCode>`: a survey's code, `NONE` for a margin cell,
+    `None` for a cell not held), implemented for `PartialField`. A `CoarseField` has no survey; a
+    server request (Design note 7's) would wrap the field and the ship's cover in a view.
+  - _The level._ A cell of code c is read at the deepest band level, to the band limit's, whose
+    `λ_n` codes no finer than c, compared in the code's 9% steps, so that a pass at 2 m, which codes
+    "2.15 m or finer", reaches the band limit. The band limit's level, the shallowest whose `λ_n` is
+    2 m, is resolved: the elevation is `ground_at` at the datum point of `at`, bit for bit, and both
+    uncertainties are zero.
+  - _The uncertainty is what the level leaves out_ (Finding A, ruled).
+    - R09's level sets evaluate a contribution by its own scale, while its closed forms place each
+      at wavelengths of their own. A structural octave of spacing s carries the degrees
+      N(m − 1) ≤ l < N(m), wavelengths 8/3 s down to 4/3 s, so the octaves a level evaluates
+      (s ≥ `λ_n`) leave out wavelengths up to 4/3–8/3 `λ_n`.
+    - So R09's `unresolved_rms(cell, λ_n)` understates what the level leaves out, 2.6–3.3 times in
+      the relief's variance on the synthetic worlds; the relief's realised mean square left out
+      matches the closed form at 1.6–2 `λ_n`. Read so, the Moon-like world's pooled RMS was
+      2.57 σ.
+    - So the σ, and the slope's v, are R09's closed forms by contribution, each from its own cut
+      for the level. As ruled, they are R09's public level-keyed forms, added by this task to
+      `Synthesiser`, which T2 and T4 read too: `omitted_variance(cell, level)` (per contribution),
+      `omitted_structure_function(cell, level, lag)` and `omitted_rms(cell, level)`, each `None`
+      where the view does not hold the cell. The cuts are crate-private, `synth::levels::LevelCuts`
+      beside `LevelSet::of`: the relief from the first degree of the first octave the level does
+      not evaluate, N(last) (N(L) where it evaluates none), through a degree-keyed entry
+      (`relief::relief_variance_from`, `relief_structure_from`) under the wavelength-keyed forms,
+      whose bits are unchanged (`height_golden`'s `closed_forms.golden` passes); the channels below
+      the last evaluated level's mean cell width (each level is counted from its width to twice
+      it); the small craters below the last evaluated octave's smallest diameter; and the coarse
+      rims at `λ_n`. Each cut is at least `λ_n`, so σ is at least R09's RMS at `λ_n` (tested).
+    - The lane's first cut for the relief, the wavelength 2πR ÷ (N(last) + ½), dropped degree
+      N(last), the first the level leaves out (about 10⁻⁴ of the next octave); the degree-keyed
+      entry is exact.
+    - R09's wavelength-keyed forms stay as they are; their docs (`unresolved_variance`,
+      `structure_function`, `unresolved_rms`, free and methods, `UnresolvedVariance` and the
+      `levels` module) now say what λ means for each contribution and point at the level-keyed
+      forms.
+  - _The slope_ is the central difference of the level's heights over b along local east and north,
+    between the feet of the points b ÷ 2 either way in the tangent plane at the ground point, not
+    the point gradient: over a baseline long against `λ_n` the point gradient keeps slopes the
+    baseline averages out.
+    - Its short-baseline limit is the gradient's tangential part (R09's "Deviations in T4, as
+      built"), per metre at the ground along each principal direction (tested to 10⁻⁴ at 1 cm).
+    - v = D(b) ÷ b² of what the level leaves out. The reading quotes atan √(|g₀|² + 2v), with the
+      Rice standard deviation of |g₀ + δ| taken through the arctangent's derivative there.
+    - The Rice spread is Kummer's series of `L_½`(−x) below x = 40 and its asymptotic series above
+      (Abramowitz and Stegun 13.1.27 and 13.5.1). It is tested against Rayleigh's exactly, the
+      asymptote, and a sample of 2 × 10⁵ slopes at ν ÷ σ from 0 to 12, within 1%.
+  - _The resolution read._ As ruled, `SurveyedReading::resolution()` is the cell code's
+    resolution the reading was taken at (`ResolutionCode::resolution()`), so that T12's
+    `RESOLUTION` and its ± come from one read (tested).
+  - _The line of sight_ (accepted as ruled). `slant_range` returns `LineOfSight {
+Ground(SlantRange), NoGround, NotSurveyed }` in place of `Option`, so that T12 can tell
+    `NO GROUND` from `NOT SURVEYED`. `SlantRange` has getters, and gains `is_resolved()` and `at()`,
+    the hit's foot as `FaceUv`, for the reading under it (the geocentric direction of the hit is
+    T3's hazard). The hit is `hit_m()` and the origin `origin_m`, their unit in their names;
+    `is_grazing()` is `sigma()` being `None`, so the two cannot disagree.
+    - `NoGround` also stands where the line has gone the reach `max` it was given. signoff-9's
+      `NO GROUND` is the line passing the body alone, so T12 gives a reach past the body's far
+      side.
+    - A `SurveyView` that codes a cell its `FieldView` does not hold has its readings refused as
+      `QueryHeightError::NotSurveyed`, not a panic.
+    - Above a ceiling it takes Newton's step to it, which never overshoots on a convex datum, and
+      stops once the line rises. The ceiling is the highest cell elevation the view holds, plus the
+      header's greatest relief, plus the most any level's contributions add (`LevelBounds`'
+      `contribution_range_m`), plus 1 m. A view holding no cell has no ceiling, so every line of
+      sight is `NotSurveyed`.
+    - Below it, over a cell not held, the line is `NotSurveyed`. Over a margin cell it is
+      `NotSurveyed` where it meets the margin's band-limit ground or that ground cannot be
+      synthesised.
+    - Over surveyed ground it steps by the clearance ÷ 3 (safe for slopes to 70.5°), at least
+      `λ_n` ÷ 4 and at most half a coarse cell, and bisects the first step under the ground to
+      1 µm. From under the ground the range is zero.
+    - σ_R = σ_h cos θ_s ÷ sin γ_s, from R05's `surface_normal` at the hit. On an analytic plane it
+      is tested against the geometry to 10⁻⁹, and against the range's own change with the
+      ground's height to 10⁻⁴. `GRAZING_FACTOR` (2, public) is the threshold sin γ_s < 2√v at
+      b = `λ_n`, never on a resolved range: Design note 7's "survey's cell size" is taken as the
+      reading level's shortest wavelength, within one 9% code step of the survey's resolution.
+  - _Names._ The readout's (`ELEVATION`, `SLOPE … · BASELINE 2 m`, `SLANT RANGE`, `GRAZING`,
+    `NOT SURVEYED`, `NO GROUND`) are T13's as signed off (signoff-9), in the doc comments.
+  - _The pooled case_ is held on `synthetic_worlds()`'s four bodies through a client's
+    `PartialField`: 200 cells × 100 points a world, at the final tree (556 s in the slow-test
+    profile, one thread, load average 3.1, 8.5 and 11.8 at its start; provisional). The run before
+    the relief's one-degree fix gave the same figures to the third decimal.
+
+    | World      | Survey | RMS ÷ σ | var z  |
+    | ---------- | ------ | ------- | ------ |
+    | Earth-like | 100 m  | 0.9835  | 0.9409 |
+    | Earth-like | 1 km   | 0.9870  | 0.9736 |
+    | Mars-like  | 100 m  | 1.0262  | 1.0293 |
+    | Mars-like  | 1 km   | 1.0655  | 1.1071 |
+    | Moon-like  | 100 m  | 1.4300  | 2.4732 |
+    | Moon-like  | 1 km   | 1.0808  | 1.1672 |
+    | Ceres-like | 100 m  | 1.1107  | 1.2334 |
+    | Ceres-like | 1 km   | 1.1280  | 1.2692 |
+
+    The Earth- and Mars-like worlds hold the plan's 10% and 15%. The Moon- and Ceres-like worlds,
+    whose craters dominate, are held to the known gap as ruled (Finding B, below): RMS ÷ σ in
+    [0.90, 1.6] and var z in [0.85, 3.0], at the plan's tolerance from below, so that a σ quoted
+    too high still fails. The bounds are in one place (`CRATER_GAP`, `GAP_RMS`, `GAP_Z`), and a
+    commit under T5's ID removes them after R09.T7.h, so that every world is held at the plan's.
+
+  - _Acceptance_, as built:
+    - `cargo test -p hyperion-surface --lib reading` (21 tests, and the `#[ignore]` measurement
+      `reading::tests::the_ground_a_level_leaves_out_by_contribution`);
+    - `cargo test -p hyperion-surface --test panics reading` (9);
+    - `cargo test -p hyperion-surface --lib height_golden` and `synth`, unchanged by the
+      degree-keyed entry;
+    - the pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`;
+    - the wasm targets through `just test-wasm-fast`.
+  - _Tests_ (`reading::tests`):
+    - the band-limit survey's elevation is `ground_at`'s bit for bit, with no uncertainty, at 2 m
+      and 0.5 m; a coarser survey's level, σ and resolution;
+    - the level-keyed forms by contribution against their decomposition (each relief octave the
+      level does not evaluate, whole, as (a `g_m`^b)² times its band's variance; the channel levels
+      after the last; each crater octave the level does not keep, whole; the rims at `λ_n`), zero
+      from the band limit's level, and the whole variance at level 0, which evaluates none; and
+      non-increasing as the level deepens, the RMS their root, and the structure function
+      saturating at twice the variance;
+    - margin and unheld cells have no reading through a client's field, and a client's field reads
+      as the whole field;
+    - the slope's short-baseline limit; the unresolved slope's long and short limits on every body,
+      and per band on one J₀ band; the RMS slope never below |g₀|;
+    - readings independent of the cache and of their order;
+    - the Rice spread's limits, its two series' agreement and a sample;
+    - the slant range to an analytic plane, exact to 2 µm; its σ's linearisation; the grazing
+      threshold from both sides, and never on a resolved range;
+    - lines of sight that leave the survey, meet margin ground, come down from far above unheld
+      ground, look away, fall short, or start under the ground;
+    - a line of sight on every synthetic world meets the ground where the surface is, and nothing
+      before it;
+    - a small pooled sample on the Mars-like world (24 cells × 24 points, at 25% and 40%);
+    - a line of sight through a client's field ranges as over the whole field, is `NotSurveyed` once
+      it rises out of the survey, and `NotSurveyed` for a client holding no cell; the level-keyed
+      forms answer `None` for a cell the client does not hold;
+    - nine `should_panic` tests in `tests/panics.rs`'s `reading`, four of them the level-keyed
+      forms' (a cell of another level, and a lag that is not finite).
+  - _Generator version._ Untouched (21): the readings are presentation, and no golden pins them.
+- **Ruled for T5** (`decision-r10-t5-closed-forms.md`, 2026-10-13).
+  - _Finding A, R09's level sets against its closed forms_ (above): real. The per-contribution
+    sum is the contract, as R09's level-keyed forms; R09's wavelength-keyed forms stay, their docs
+    corrected. Aligning the level sets with the forms would move every height golden, and stays
+    octave-quantised.
+  - _Finding B, the small craters' sharpening_: real. R09's small craters' `unresolved_variance`
+    and `structure_function` leave out the sharpening of the craters a level keeps, from its band
+    (½ `λ_n`) to the band limit's, which the coarse rims' closed form includes. On the Moon-like
+    world at 100 m it is 0.79 m² of realised mean square, against 0.014 m² for the octaves the
+    level leaves out (`the_ground_a_level_leaves_out_by_contribution`), so the quoted σ is low
+    there, the unsafe side. It goes in R09's closed forms as R09.T7.h (Campbell's theorem on the
+    difference profile), which re-blesses `closed_forms.golden` at 21 with no bump; T5 lands now
+    with the known gap above.
+  - _The interface deviations_: both accepted, with `SurveyedReading::resolution()` added.
+- **Deferred findings (2026-10-13 rule)** (R10.T5; recorded, not ruled).
+  - _R05's normal on a spheroid._ `patch::normals::surface_normal` scales the tangential gradient
+    by the section radius along it, exact only along a principal direction. Off one it is off by
+    up to h ÷ ρ × (N − M) ÷ N, 7.5 × 10⁻⁴ of the slope on the Ceres-like world a few kilometres
+    up. The reading's slope uses central differences and is exact.
+  - _The ceiling's walk._ `slant_range` reads every cell of the field's level once a call (393,216
+    at level 8) for its ceiling. A ceiling held with the body's field (T6.b's worker) would spare
+    it.
+  - _The reading quotes less than the survey resolved_ for the relief: a level whose `λ_n` codes
+    no finer than the survey resolves the octaves only to 4/3–8/3 `λ_n`. It is the safe side; a
+    level chosen by the cutoffs instead would quote about one level deeper.
+  - _The craters' realisations_ are sparse against the per-cell closed forms, an ensemble's mean:
+    on the cratered worlds the z-scores' variance runs above the RMS ratio's square.
+  - _The march's Lipschitz factor_ is a choice: ground steeper than 70.5° and thinner than
+    `λ_n` ÷ 4 can be stepped past at a grazing angle.
+  - _The slope's σ_ is taken through the arctangent's derivative at the RMS slope, a first-order
+    figure where both are steep and wide.
+  - _Design note 7's citations_ (the science check). Its √2 between the adirectional and the
+    profile slope is credited to Kreslavsky and Head 2000, which does not appear to state it; it is
+    Shepard et al. 2001's, as Beyer, McEwen and Kirk 2003 (JGR 108, 8085, ¶25) cite it, and holds
+    for RMS slopes (about 1.75 for medians). Its 100 m baseline is not in Golombek et al. 2014,
+    which gives 2–5 m and about 300 m; Golombek et al. 2017 (Space Sci. Rev. 211, 5, §2.7) gives
+    the landing radar's 84 m. `reading.rs` cites both as read; the design note's text is left as
+    it stands. Shepard et al. 2001 itself was not read.
+  - _The level-keyed forms have no golden yet_ (the determinism review). The ruling gives their
+    labels in `closed_forms.golden` to R09.T7.h, so nothing compares them across targets before
+    it, though they are R09's pinned wavelength-keyed forms at other arguments. Lean: T7.h adds
+    the labels at today's values in a first commit, so that its crater term then shows as changed
+    values it explains.
+  - _The crater terms' pooled checks are heavy-tailed_ (the ruling's). Realised crater mean
+    squares on a few hundred points differ from the closed forms by 3–9 times, and from each other
+    by as much: an octave's E[g²] is carried by its youngest few tenths of a per cent of craters,
+    of which a 200 × 100 pooled check samples a few dozen. If T7.h's acceptance misses for that
+    reason, main rules on a larger sample or a check weighted by crater count.
+  - _The whole octaves' J₀ structure function_ (the ruling's) places each octave at √(D₀ D₁). Its
+    small-lag slope, σ² k² b² ÷ 2, is not the craters' slope variance, ρ E[g² ∫ |∇f|² dA], so
+    slopes at 2 m from octaves left out may be off. T7.h leaves that form as it is.
+  - _The rims' crater-wide share_ (R09.T8's deferred item, the ruling's figures): realised against
+    closed per sample of cells, 0.457 against 0.0063 m² on the Mars-like world at 1 km, 0.072
+    against 0.86 m² on the Moon-like world at 1 km, and 0.048 against 6.45 m² on the Ceres-like
+    world at 1 km.
 - **Deviations in T1.a's slope follow-up, as built** (2026-10-14, lane 12, on R10.T1.b at
   `ba371487`, with the brief's amendment of 2026-10-14 from the sign-off of T12's drafts). Files:
   `material/bearing.rs` and `material/mod.rs`. The level figures T1.b's table golden pins are

@@ -280,6 +280,15 @@ pub mod synth {
         pub fn bake_patch(&self, cache: &mut SynthCache, patch: PatchKey)
             -> Result<PatchHeights, QueryHeightError>;     // heights, parent band, gradients
         pub fn height_range_m(&self, patch: PatchKey) -> (f64, f64);  // for R05's culling
+        // The level-keyed closed forms (added by R10.T5; decision-r10-t5-closed-forms.md):
+        // what band level `level` leaves out of the finest level's ground in `cell`, each
+        // contribution from its own cut, which no one wavelength gives; read by R10's T2, T4
+        // and T5. `None` where the view does not hold the cell.
+        pub fn omitted_variance(&self, cell: PatchKey, level: BandLevel)
+            -> Option<UnresolvedVariance>;                 // per contribution
+        pub fn omitted_structure_function(&self, cell: PatchKey, level: BandLevel,
+            lag: Metres) -> Option<SquareMetres>;
+        pub fn omitted_rms(&self, cell: PatchKey, level: BandLevel) -> Option<Metres>;
     }
     pub struct SynthCache;                                 // caller-owned, u64 keys, with R05's
                                                            // LatticeCache inside
@@ -289,11 +298,11 @@ pub mod synth {
     // Per-cell closed forms: they read the cell's crust, boundary, k_s, drainage and crater
     // state through the view, so `None` where the view does not hold the cell.
     pub fn unresolved_variance(field: &impl FieldView, cell: PatchKey, finer_than: Metres)
-        -> Option<UnresolvedVariance>;                     // per contribution, R10's weights
+        -> Option<UnresolvedVariance>;                     // per contribution, in wavelengths
     pub fn structure_function(field: &impl FieldView, cell: PatchKey, finer_than: Metres,
-        lag: Metres) -> Option<SquareMetres>;              // R10's slope readouts
+        lag: Metres) -> Option<SquareMetres>;              // shorter than λ; R10 reads the
     pub fn unresolved_rms(field: &impl FieldView, cell: PatchKey, resolution: Metres)
-        -> Option<Metres>;
+        -> Option<Metres>;                                 // level-keyed forms above
 }
 pub mod testing {                                          // feature `testing`
     pub enum SyntheticWorld { EarthLike, MarsLike, MoonLike, CeresLike, Flat, OneCrater }
@@ -1892,6 +1901,25 @@ Acceptance: `cargo test -p hyperion-surface synth::channels`.
   - _Tests:_ its instantaneous shadow is within 10% of Smith 1967's at sun elevations up to 4°. It
     reproduces science-r09-drainage.md §8.13's ray-traced bands within their surfaces' spread.
     T7.d's band, Ceres and CO₂ tests hold.
+- **R09.T7.h The kept craters' sharpening in the closed forms** (a T7 follow-up, after R10.T5;
+  decision-r10-t5-closed-forms.md). `synth/craters.rs`: the small craters' closed forms count what
+  a level's fillet leaves out of the ground's. For each octave the level keeps, that is its
+  density times its craters' mean g² ∫ (F(w₂) − F(w))² dA over its diameters and its window's
+  ages, w the level's band and w₂ the band limit's: the coarse rims' form (T7.c), by Campbell's
+  theorem. Each octave the level leaves out is counted at the ground's fillet, g² ∫ F(w₂)² dA,
+  not the fresh profile's. The structure function takes the kept octaves' sharpening as the rims
+  do, 2V (1 − exp(−s Δ² ÷ 2V)), with s its slopes' mean square along a random direction. The
+  octaves left out keep T7.b's J₀ form. The wavelength-keyed forms take an octave's kept share,
+  1 − `band_share`, at ½ λ; the level-keyed forms (R10.T5's) take the level's kept octaves at its
+  band. `CraterOctave::variance` stays the full-resolution moment. Tests: one crater's moments
+  against sampling; zero at the band limit; `unresolved_rms` non-increasing as the resolution
+  refines; the level-keyed crater part the sum of its octaves'; the realised sharpening and the
+  octaves left out recorded on the cratered worlds. `tests/golden/height/closed_forms.golden` is
+  re-blessed at 21 with no bump (main's ruling of 2026-10-13, before P14.T48.e), with the
+  level-keyed forms added. Then, under R10.T5, the pooled reading test's crater gap is removed.
+  Acceptance: `cargo test -p hyperion-surface synth`,
+  `cargo test -p hyperion-surface --lib height_golden`, `just test-wasm-fast`, and
+  `just test-slow -E 'binary(surface_reading_worlds)'`.
 
 Acceptance: `cargo test -p hyperion-surface craters` (T7.a–c and T7.e) and
 `cargo test -p hyperion-surface cold_trap` (T7.d).
@@ -6146,3 +6174,17 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     Generator version rule says it bumps, and the sim-determinism skill's re-bless exception covers
     `wire/` alone. Whether such a change instead re-blesses at 21, with the batch's one bump
     covering it, is main's to rule when the first one lands; the skill then needs its line.
+- **_The level-keyed closed forms_** (R10.T5; `decision-r10-t5-closed-forms.md`). A band level
+  evaluates each contribution by its own scale, while the wavelength-keyed closed forms place each
+  at wavelengths of their own: a structural octave of spacing s carries the degrees
+  N(m − 1) ≤ l < N(m), wavelengths 8/3 s down to 4/3 s; a channel level is counted from its mean
+  cell's width to twice it; a small-crater octave from its smallest kept diameter to its upper one;
+  the coarse rims' sharpening at half the wavelength. So `unresolved_rms(cell, λ_n)` counts too
+  little of what level n leaves out, 2.6 to 3.3 times in the relief's variance on the synthetic
+  worlds, and nearly all of the first crater octave it leaves out. As ruled, the wavelength-keyed
+  forms stay as they are, their docs corrected, and R10.T5 added the level-keyed forms to
+  `Synthesiser` (`omitted_variance`, `omitted_structure_function`, `omitted_rms`), each
+  contribution from its own cut (crate-private `levels::LevelCuts`; the relief through a
+  degree-keyed entry under its wavelength forms, whose bits are unchanged). R10's T2, T4 and T5
+  read them. The small craters' part does not yet count the sharpening of the octaves a level
+  keeps: R09.T7.h.
