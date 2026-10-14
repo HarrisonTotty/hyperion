@@ -1356,3 +1356,98 @@ mod weights {
         );
     }
 }
+
+/// R10.T6.a's bake on real terrain: a skirt margin that is not finite and non-negative is refused,
+/// as R05's bake refuses it, before any height is asked; and R05's bake refuses a source whose
+/// patch heights are another patch's.
+mod bake {
+    use hyperion_base::rng::DetailSeed;
+    use hyperion_surface::bake::{TerrainBakeOptions, WeightsLayer, bake_terrain};
+    use hyperion_surface::cube::{Face, PatchKey};
+    use hyperion_surface::field::{CoarseField, FieldView, PartialField};
+    use hyperion_surface::height::HeightSample;
+    use hyperion_surface::patch::{BakeOptions, HeightSource, NormalScale, VertexPath, bake_patch};
+    use hyperion_surface::spheroid::Spheroid;
+    use hyperion_surface::synth::{PatchHeights, QueryHeightError, SynthCache, Synthesiser};
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    use wasm_bindgen_test::wasm_bindgen_test as test;
+
+    use super::level_five_field;
+
+    /// R09's synthesiser, but answering every bake with the heights of face −z's root patch.
+    struct OtherPatch<'a>(Synthesiser<'a, CoarseField>);
+
+    impl HeightSource for OtherPatch<'_> {
+        type Cache = SynthCache;
+        type Error = QueryHeightError;
+
+        fn figure(&self) -> Spheroid {
+            HeightSource::figure(&self.0)
+        }
+
+        fn height(
+            &self,
+            cache: &mut SynthCache,
+            dir: [f64; 3],
+            level: u8,
+        ) -> Result<HeightSample, QueryHeightError> {
+            HeightSource::height(&self.0, cache, dir, level)
+        }
+
+        fn level_bound_m(&self, level: u8) -> f64 {
+            HeightSource::level_bound_m(&self.0, level)
+        }
+
+        fn height_range_m(&self, key: PatchKey) -> (f64, f64) {
+            HeightSource::height_range_m(&self.0, key)
+        }
+
+        fn patch_heights(
+            &self,
+            cache: &mut SynthCache,
+            _: PatchKey,
+        ) -> Result<PatchHeights, QueryHeightError> {
+            self.0.bake_patch(cache, PatchKey::root(Face::NegZ))
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "a source's patch heights must be the baked patch's")]
+    fn a_source_s_patch_heights_of_another_patch_are_refused() {
+        let field = level_five_field();
+        let source = OtherPatch(Synthesiser::new(&field, DetailSeed::new(1)));
+        let opts = BakeOptions {
+            vertex_path: VertexPath::FaceDifferences,
+            normals: NormalScale::Mesh,
+            skirt_m: 0.0,
+        };
+        let _ = bake_patch(
+            &source,
+            PatchKey::root(Face::PosZ),
+            &opts,
+            &mut SynthCache::new(),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "a skirt margin must be finite and non-negative, got -1")]
+    fn a_terrain_bake_with_a_negative_skirt_margin_is_refused() {
+        let field = PartialField::new(level_five_field().header().clone());
+        let synth = Synthesiser::new(&field, DetailSeed::new(1));
+        let opts = TerrainBakeOptions {
+            patch: BakeOptions {
+                vertex_path: VertexPath::FaceDifferences,
+                normals: NormalScale::Mesh,
+                skirt_m: -1.0,
+            },
+            weights: WeightsLayer::Baked,
+        };
+        let _ = bake_terrain(
+            &synth,
+            &mut SynthCache::new(),
+            PatchKey::root(Face::PosZ),
+            &opts,
+            &[],
+        );
+    }
+}

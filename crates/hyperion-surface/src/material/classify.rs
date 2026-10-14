@@ -702,9 +702,27 @@ impl<'a> Point<'a> {
         cache: &mut SynthCache,
         dir: [f64; 3],
     ) -> Result<Self, QueryHeightError> {
+        let level = finest_band(synth.field().header());
+        let sample = synth.height_at(cache, dir, level)?;
+        Self::with_sample(synth, cache, dir, &sample)
+    }
+
+    /// [`at`](Self::at), whose height and gradient at the finest level, `sample`, the caller has
+    /// in hand: [`Synthesiser::height_at`] at `dir` and [`finest_band`], bit for bit (R10.T6.a's
+    /// bake, which has made it).
+    ///
+    /// # Errors
+    ///
+    /// As [`at`](Self::at), the height's apart.
+    pub(crate) fn with_sample<F: FieldView>(
+        synth: &Synthesiser<'a, F>,
+        cache: &mut SynthCache,
+        dir: [f64; 3],
+        sample: &HeightSample,
+    ) -> Result<Self, QueryHeightError> {
         let field = synth.field();
         let level = finest_band(field.header());
-        let sample = synth.height_at(cache, dir, level)?;
+        let sample = *sample;
         let (key, cell) = synth.cell_at(dir)?;
         let site = Site::of(field, key, cell)?;
         let h = sample.height_m;

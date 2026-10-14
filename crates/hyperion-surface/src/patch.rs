@@ -41,6 +41,7 @@ use crate::cube::{PATCH_QUADS, PatchKey};
 use crate::height::HeightSample;
 use crate::num;
 use crate::spheroid::Spheroid;
+use crate::synth::PatchHeights;
 
 /// Vertices along a patch's side.
 pub const PATCH_VERTICES: usize = 65;
@@ -87,6 +88,28 @@ pub trait HeightSource {
     /// results never depend on it.
     fn prepare_cache(&self, cache: &mut Self::Cache, key: PatchKey) {
         let _ = (cache, key);
+    }
+
+    /// What a bake of `key` reads of the source ([`PatchHeights`]): each of its 65 × 65 vertices'
+    /// height and gradient at its level, and its parent level's height at each even vertex (none
+    /// at level 0), each [`height`](Self::height)'s at [`PatchKey::vertex_dir`], bit for bit.
+    ///
+    /// The default asks [`height`](Self::height) for each, in row order, the patch's own level
+    /// first; a source that makes them together overrides it, as R09's synthesiser does with its
+    /// own bake ([`Synthesiser::bake_patch`](crate::synth::Synthesiser::bake_patch), R10.T6.a).
+    /// [`bake_patch`] calls it after [`prepare_cache`](Self::prepare_cache), and no value may
+    /// depend on which way it is made. They are `key`'s, whose [`PatchHeights::key`] is `key`:
+    /// [`bake_patch`] panics on another patch's.
+    ///
+    /// # Errors
+    ///
+    /// The first error of its queries.
+    fn patch_heights(
+        &self,
+        cache: &mut Self::Cache,
+        key: PatchKey,
+    ) -> Result<PatchHeights, Self::Error> {
+        PatchHeights::from_queries(key, |q| self.height(cache, q.dir, q.level))
     }
 }
 
@@ -175,23 +198,58 @@ pub(crate) struct BakedVertex {
     pub(crate) q1: [f64; 3],
 }
 
-/// The vertices of `key` in `f64`, row by row: the bake's authoritative values before narrowing.
+/// The vertices of `key` in `f64`, row by row: the bake's authoritative values before narrowing,
+/// which the tests read.
+#[cfg(test)]
 pub(crate) fn bake_vertices<S: HeightSource>(
     source: &S,
     key: PatchKey,
     cache: &mut S::Cache,
 ) -> Result<BakedVertices, S::Error> {
-    let figure = source.figure();
+    let heights = patch_heights_of(source, cache, key)?;
+    Ok(vertices_of(&source.figure(), &heights))
+}
+
+/// [`HeightSource::patch_heights`] of `key`, held to be `key`'s.
+///
+/// # Errors
+///
+/// The source's own.
+///
+/// # Panics
+///
+/// If the source answers with another patch's heights (a bug in the source).
+fn patch_heights_of<S: HeightSource>(
+    source: &S,
+    cache: &mut S::Cache,
+    key: PatchKey,
+) -> Result<PatchHeights, S::Error> {
+    let heights = source.patch_heights(cache, key)?;
+    assert_eq!(
+        heights.key(),
+        key,
+        "a source's patch heights must be the baked patch's"
+    );
+    Ok(heights)
+}
+
+/// The vertices of a patch in `f64`, row by row, from its source's `heights`
+/// ([`HeightSource::patch_heights`]).
+///
+/// # Panics
+///
+/// If a height is not finite (a bug in the source).
+fn vertices_of(figure: &Spheroid, heights: &PatchHeights) -> BakedVertices {
+    let key = heights.key();
     let quads = u8::try_from(PATCH_QUADS).expect("64 quads fit a u8");
     let centre = key.vertex_dir(quads / 2, quads / 2);
-    let origin_height = num::assert_finite(source.height(cache, centre, key.level())?.height_m);
+    let origin_height = num::assert_finite(heights.sample(quads / 2, quads / 2).height_m);
     let origin = figure.surface_point(centre, origin_height);
-    let parent_level = key.level().checked_sub(1);
     let mut vertices = Vec::with_capacity(PATCH_VERTICES * PATCH_VERTICES);
     for y in 0..=quads {
         for x in 0..=quads {
             let dir = key.vertex_dir(x, y);
-            let h0 = num::assert_finite(source.height(cache, dir, key.level())?.height_m);
+            let h0 = num::assert_finite(heights.sample(x, y).height_m);
             let p0 = figure.surface_point(dir, h0);
             let q0 = sub(p0, origin);
             vertices.push(BakedVertex {
@@ -203,17 +261,20 @@ pub(crate) fn bake_vertices<S: HeightSource>(
             });
         }
     }
-    if let Some(parent) = parent_level {
+    if key.level() > 0 {
         // The parent level's height and position at the even vertices first.
         let side = PATCH_VERTICES;
         let mut parent_h = vec![0.0; side * side];
         let mut parent_q = vec![[0.0; 3]; side * side];
-        for y in (0..side).step_by(2) {
-            for x in (0..side).step_by(2) {
-                let v = &vertices[y * side + x];
-                let h = num::assert_finite(source.height(cache, v.dir, parent)?.height_m);
-                parent_h[y * side + x] = h;
-                parent_q[y * side + x] = sub(figure.surface_point(v.dir, h), origin);
+        for y in (0..=quads).step_by(2) {
+            for x in (0..=quads).step_by(2) {
+                let n = usize::from(y) * side + usize::from(x);
+                let h = heights
+                    .parent_height_m(x, y)
+                    .expect("a patch above level 0 carries its parent's heights");
+                let h = num::assert_finite(h);
+                parent_h[n] = h;
+                parent_q[n] = sub(figure.surface_point(vertices[n].dir, h), origin);
             }
         }
         for y in 0..side {
@@ -235,11 +296,11 @@ pub(crate) fn bake_vertices<S: HeightSource>(
             }
         }
     }
-    Ok(BakedVertices {
+    BakedVertices {
         origin,
         origin_height,
         vertices,
-    })
+    }
 }
 
 /// A patch's vertices in `f64` with the origin they are relative to.
@@ -305,13 +366,33 @@ fn f32_step(x: f64) -> f64 {
 ///
 /// # Panics
 ///
-/// If a height is not finite (a bug in the source), or `opts.skirt_m` is negative or not finite.
+/// If a height is not finite or the source's [`HeightSource::patch_heights`] are another patch's
+/// (bugs in the source), or `opts.skirt_m` is negative or not finite.
 pub fn bake_patch<S: HeightSource>(
     source: &S,
     key: PatchKey,
     opts: &BakeOptions,
     cache: &mut S::Cache,
 ) -> Result<PatchBake, S::Error> {
+    bake_with_heights(source, key, opts, cache).map(|(bake, _)| bake)
+}
+
+/// [`bake_patch`], with the heights the source gave it in `f64` ([`HeightSource::patch_heights`]),
+/// which R10's layers read beside the bake (R10.T6.a).
+///
+/// # Errors
+///
+/// The first error `source` returns, unchanged.
+///
+/// # Panics
+///
+/// As [`bake_patch`].
+pub(crate) fn bake_with_heights<S: HeightSource>(
+    source: &S,
+    key: PatchKey,
+    opts: &BakeOptions,
+    cache: &mut S::Cache,
+) -> Result<(PatchBake, PatchHeights), S::Error> {
     assert!(
         opts.skirt_m.is_finite() && opts.skirt_m >= 0.0,
         "a skirt margin must be finite and non-negative, got {}",
@@ -319,11 +400,12 @@ pub fn bake_patch<S: HeightSource>(
     );
     source.prepare_cache(cache, key);
     let figure = source.figure();
+    let patch_heights = patch_heights_of(source, cache, key)?;
     let BakedVertices {
         origin,
         origin_height,
         vertices,
-    } = bake_vertices(source, key, cache)?;
+    } = vertices_of(&figure, &patch_heights);
 
     let mut heights = Vec::with_capacity(2 * vertices.len());
     let mut low = f32::INFINITY;
@@ -364,9 +446,9 @@ pub fn bake_patch<S: HeightSource>(
         ),
         VertexPath::FaceDifferences => None,
     };
-    let normals = normals::bake_normals(source, key, opts.normals, cache)?;
+    let normals = normals::bake_normals(source, key, opts.normals, patch_heights.samples(), cache)?;
 
-    Ok(PatchBake {
+    let bake = PatchBake {
         key,
         origin,
         origin_height_m: origin_height,
@@ -376,7 +458,8 @@ pub fn bake_patch<S: HeightSource>(
         height_range_m: (low, high),
         bounding_radius_m: radius,
         skirt_depth_m,
-    })
+    };
+    Ok((bake, patch_heights))
 }
 
 #[cfg(test)]

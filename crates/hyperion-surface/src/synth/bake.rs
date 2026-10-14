@@ -101,37 +101,107 @@ fn vertex_index(x: u8, y: u8, side: usize) -> usize {
     y * side + x
 }
 
-/// [`Synthesiser::bake_patch`].
+/// One query a patch's heights ask of a height source: a vertex, its direction and the level it
+/// is asked at, the patch's own or its parent's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct VertexQuery {
+    /// The vertex's column, 0 to 64.
+    pub(crate) x: u8,
+    /// The vertex's row, 0 to 64.
+    pub(crate) y: u8,
+    /// The vertex's unit direction, [`PatchKey::vertex_dir`].
+    pub(crate) dir: [f64; 3],
+    /// The level asked: the patch's, or its parent's at an even vertex.
+    pub(crate) level: u8,
+}
+
+impl PatchHeights {
+    /// The heights of `key` from `query`, asked at each vertex in row order at the patch's level,
+    /// then at each even vertex in row order at its parent's (none at level 0): the one order every
+    /// source's bake takes, R09's [`Synthesiser::bake_patch`] and R05's default alike
+    /// ([`crate::patch::HeightSource::patch_heights`]).
+    ///
+    /// # Errors
+    ///
+    /// The first error of `query`, in that order.
+    pub(crate) fn from_queries<E>(
+        key: PatchKey,
+        mut query: impl FnMut(VertexQuery) -> Result<HeightSample, E>,
+    ) -> Result<Self, E> {
+        let quads = u8::try_from(PATCH_QUADS).expect("64 quads fit a u8");
+        let mut samples = Vec::with_capacity(PATCH_VERTICES * PATCH_VERTICES);
+        for y in 0..=quads {
+            for x in 0..=quads {
+                samples.push(query(VertexQuery {
+                    x,
+                    y,
+                    dir: key.vertex_dir(x, y),
+                    level: key.level(),
+                })?);
+            }
+        }
+        let mut parent_heights_m = Vec::new();
+        if let Some(parent) = key.level().checked_sub(1) {
+            parent_heights_m.reserve(PARENT_VERTICES * PARENT_VERTICES);
+            for y in (0..=quads).step_by(2) {
+                for x in (0..=quads).step_by(2) {
+                    let sample = query(VertexQuery {
+                        x,
+                        y,
+                        dir: key.vertex_dir(x, y),
+                        level: parent,
+                    })?;
+                    parent_heights_m.push(sample.height_m);
+                }
+            }
+        }
+        Ok(Self {
+            key,
+            samples,
+            parent_heights_m,
+        })
+    }
+}
+
+/// [`Synthesiser::bake_patch`]: the lattice covered ([`cover_patch`]), then [`heights`].
 pub(super) fn bake<F: FieldView>(
     synth: &Synthesiser<'_, F>,
     cache: &mut SynthCache,
     key: PatchKey,
 ) -> Result<PatchHeights, QueryHeightError> {
-    let level = BandLevel::new(key.level()).expect("a patch's level is a band level");
-    cover(synth, cache, key, level);
-    let quads = u8::try_from(PATCH_QUADS).expect("64 quads fit a u8");
-    let mut samples = Vec::with_capacity(PATCH_VERTICES * PATCH_VERTICES);
-    for y in 0..=quads {
-        for x in 0..=quads {
-            samples.push(synth.height_at(cache, key.vertex_dir(x, y), level)?);
-        }
-    }
-    let mut parent_heights_m = Vec::new();
-    if let Some(parent) = key.level().checked_sub(1) {
-        let parent = BandLevel::new(parent).expect("a level below a band level is one");
-        parent_heights_m.reserve(PARENT_VERTICES * PARENT_VERTICES);
-        for y in (0..=quads).step_by(2) {
-            for x in (0..=quads).step_by(2) {
-                let sample = synth.height_at(cache, key.vertex_dir(x, y), parent)?;
-                parent_heights_m.push(sample.height_m);
-            }
-        }
-    }
-    Ok(PatchHeights {
-        key,
-        samples,
-        parent_heights_m,
-    })
+    cover_patch(synth, cache, key);
+    heights(synth, cache, key)
+}
+
+/// `key`'s heights, each [`Synthesiser::height_at`] at its query, without covering the lattice
+/// first: [`bake`] less [`cover_patch`], for a caller that has covered it (R05's bake, through
+/// R10.T3's height source).
+///
+/// # Errors
+///
+/// The first [`QueryHeightError`] of its queries, in row order, own levels first.
+pub(crate) fn heights<F: FieldView>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    key: PatchKey,
+) -> Result<PatchHeights, QueryHeightError> {
+    PatchHeights::from_queries(key, |q| synth.height_at(cache, q.dir, band(q.level)))
+}
+
+/// R05's `u8` level of a patch or its parent as a band level.
+#[must_use]
+fn band(level: u8) -> BandLevel {
+    BandLevel::new(level).expect("a patch's level and its parent's are band levels")
+}
+
+/// Covers the structural octaves' lattice in `cache` for every query of a bake of `key`
+/// ([`cover`] at the patch's level). No value depends on it.
+pub(crate) fn cover_patch<F: FieldView>(
+    synth: &Synthesiser<'_, F>,
+    cache: &mut SynthCache,
+    key: PatchKey,
+) {
+    cover(synth, cache, key, band(key.level()));
 }
 
 /// Covers the structural octaves' lattice in `cache` for every query of a bake of `key` at

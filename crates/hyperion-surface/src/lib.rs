@@ -24,7 +24,9 @@
 //! the cold-trap fraction that plan 14 and R09.T13.f share ([`cold_trap`]), with the fitted table
 //! of a bowl's permanent shadow it reads ([`tables`]); and, for tests, synthetic fields
 //! (`testing`, feature `testing`). Of R10's it holds the material classes and their physical
-//! properties ([`material`]), and the classifier that decides them at every point.
+//! properties ([`material`]), and the classifier that decides them at every point, and the bake of
+//! a patch on real terrain with its layers ([`bake`]), with the type of the layers R11 adds to it
+//! ([`scatter`]).
 //!
 //! # The contract of the height function
 //!
@@ -58,6 +60,7 @@ compile_error!(
      client's terrain would not match the server's bit for bit"
 );
 
+pub mod bake;
 pub mod cold_trap;
 pub mod craters;
 pub mod cube;
@@ -70,6 +73,7 @@ pub mod noise;
 pub mod num;
 pub mod patch;
 pub mod reading;
+pub mod scatter;
 pub mod spheroid;
 pub mod substance_key;
 pub mod synth;
