@@ -9,6 +9,8 @@ import {
   kDistributionAt,
   loadKDistributions,
 } from "./kDistribution";
+import nitrousOxide from "./exomol/lineReferencesN2O.json" with { type: "json" };
+import ammonia from "./exomol/lineReferencesNH3.json" with { type: "json" };
 import oxygen from "./lineReferencesO2.json" with { type: "json" };
 import water from "./lineReferencesH2O.json" with { type: "json" };
 
@@ -87,10 +89,15 @@ function clientCurve(
 
 const OXYGEN: References = oxygen;
 const WATER: References = water;
+// ExoMol's (R08.T4.g): their curves from the super-lines the tables were reduced from.
+const AMMONIA: References = ammonia;
+const NITROUS_OXIDE: References = nitrousOxide;
 
 describe.each([
   ["O₂", OXYGEN],
   ["H₂O", WATER],
+  ["NH₃", AMMONIA],
+  ["N₂O", NITROUS_OXIDE],
 ])("%s's committed cells against their line-by-line curves", (_, references) => {
   let table: KDistributionTable | undefined;
   beforeAll(async () => {

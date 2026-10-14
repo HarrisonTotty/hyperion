@@ -1,22 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   belowGridError,
   CHI_CO2_CO2,
   CHI_CO2_N2,
   chiHeldFlags,
+  CURVE_DEPTH_MAX,
   encodeCell,
+  lineByLine,
   MIX_SHARES,
   quantisationError,
+  type RayleighCrossSection,
   READ_TOP_PA,
   reduceGridCell,
   type ShapePolicy,
 } from "./kDistributions";
 import {
   LINE_SOURCES,
+  lineTableSource,
   mergePartials,
   type PartialCell,
   type PartialFile,
+  reducePartialCell,
   withLineBroadening,
 } from "./kDistributionsCli";
 import { backgroundError, referenceStates } from "./lineReferences";
@@ -75,6 +80,9 @@ const PLAIN: ShapePolicy = {
   estimatedAboveHalfWidthPerCm: 0.25,
 };
 
+/** A Rayleigh cross-section whose column, −ln 10⁻⁶ ÷ σ_R, is 10²¹ cm⁻² at every wavelength. */
+const SCATTERING: RayleighCrossSection = () => CURVE_DEPTH_MAX / 1e21;
+
 /** A small grid: four temperatures and pressures that pass the read's top. */
 const GRID = {
   temperaturesK: [200, 250, 300, 350],
@@ -86,12 +94,26 @@ const CENTRES = [LOW + 4, LOW + 9.5, HIGH - 3];
 
 describe("a cell's reduction on its grid", () => {
   it("stores a cell whose peak is under 0.02 at its gated column as its mean alone (G = 1)", () => {
-    const weak = reduceGridCell(690, toySpecies(CENTRES, 1e-30), GRID, PLAIN, () => 1e25);
+    const weak = reduceGridCell(
+      690,
+      lineByLine(toySpecies(CENTRES, 1e-30), PLAIN),
+      GRID,
+      PLAIN,
+      () => 1e25,
+      () => 1e25,
+    );
     expect([weak?.weights.length, (weak?.worstNodeError ?? 1) <= 2e-4]).toEqual([1, true]);
   });
 
   it("keeps a saturating cell's g-points, its chain test stopping at the read's top", () => {
-    const strong = reduceGridCell(690, toySpecies(CENTRES, 1e-22), GRID, PLAIN, () => 1e25);
+    const strong = reduceGridCell(
+      690,
+      lineByLine(toySpecies(CENTRES, 1e-22), PLAIN),
+      GRID,
+      PLAIN,
+      () => 1e25,
+      () => 1e25,
+    );
     expect(strong?.weights.length).toBeGreaterThan(2);
     const tested = [strong?.worstChain, strong?.worstBeyondCap, ...(strong?.failures ?? [])];
     expect(Math.max(...tested.map((e) => e?.pressurePa ?? 0))).toBeLessThanOrEqual(READ_TOP_PA);
@@ -100,7 +122,14 @@ describe("a cell's reduction on its grid", () => {
   it("records each temperature's last pressure node whose cell's γ_L is under the policy's", () => {
     // γ_L = 0.05 (296 ÷ T)^0.7 p ÷ 1 atm passes 0.25 cm⁻¹ between 0.1 and 1 MPa at every T here
     // (0.44 cm⁻¹ at 1 MPa and 350 K).
-    const cell = reduceGridCell(690, toySpecies(CENTRES, 1e-24), GRID, PLAIN, () => 1e25);
+    const cell = reduceGridCell(
+      690,
+      lineByLine(toySpecies(CENTRES, 1e-24), PLAIN),
+      GRID,
+      PLAIN,
+      () => 1e25,
+      () => 1e25,
+    );
     expect(Array.from(cell?.measuredShapeTo ?? [])).toEqual([0, 0, 0, 0]);
   });
 
@@ -114,8 +143,22 @@ describe("a cell's reduction on its grid", () => {
       pedestal: false,
       estimatedAboveHalfWidthPerCm: 0.25,
     };
-    const mixed = reduceGridCell(690, toySpecies(CENTRES, 1e-23), GRID, chi, () => 1e25);
-    const plain = reduceGridCell(690, toySpecies(CENTRES, 1e-23), GRID, PLAIN, () => 1e25);
+    const mixed = reduceGridCell(
+      690,
+      lineByLine(toySpecies(CENTRES, 1e-23), chi),
+      GRID,
+      chi,
+      () => 1e25,
+      () => 1e25,
+    );
+    const plain = reduceGridCell(
+      690,
+      lineByLine(toySpecies(CENTRES, 1e-23), PLAIN),
+      GRID,
+      PLAIN,
+      () => 1e25,
+      () => 1e25,
+    );
     expect([mixed?.mixing === undefined, plain?.mixing]).toEqual([false, undefined]);
   });
 
@@ -129,7 +172,14 @@ describe("a cell's reduction on its grid", () => {
       pedestal: false,
       estimatedAboveHalfWidthPerCm: 0.25,
     };
-    const mixed = reduceGridCell(690, toySpecies(CENTRES, 1e-23), GRID, chi, () => 1e25);
+    const mixed = reduceGridCell(
+      690,
+      lineByLine(toySpecies(CENTRES, 1e-23), chi),
+      GRID,
+      chi,
+      () => 1e25,
+      () => 1e25,
+    );
     const limits = mixed?.mixing?.limitColumnsCm2 ?? [];
     expect([MIX_SHARES, mixed?.mixing?.worst.length, limits.every((u) => u > 0)]).toEqual([
       [0.05, 0.25, 0.5, 0.75, 0.95],
@@ -168,23 +218,46 @@ describe("a cell's reduction on its grid", () => {
       estimatedAboveHalfWidthPerCm: 0.25,
     };
     const grid = { temperaturesK: [150, 200, 250, 300], pressuresPa: [10, 31.6, 100] };
-    const cell = reduceGridCell(690, toySpecies(CENTRES, 1e-22), grid, chi, () => 1e25);
+    const cell = reduceGridCell(
+      690,
+      lineByLine(toySpecies(CENTRES, 1e-22), chi),
+      grid,
+      chi,
+      () => 1e25,
+      () => 1e25,
+    );
     expect(Array.from(cell?.measuredShapeTo ?? [])).toEqual([2, 2, 2, 2]);
   });
 
   it("holds the 10 Pa node at 1 Pa and its 16-bit values to their f64 ones", () => {
     const species = toySpecies(CENTRES, 1e-23);
     const grid = { temperaturesK: [200, 250, 300, 350], pressuresPa: [10, 100, 1e3, 1e4] };
-    const cell = reduceGridCell(690, species, grid, PLAIN, () => 1e25);
+    const cell = reduceGridCell(
+      690,
+      lineByLine(species, PLAIN),
+      grid,
+      PLAIN,
+      () => 1e25,
+      () => 1e25,
+    );
     if (cell === undefined) {
       throw new Error("the toy cell has no lines");
     }
-    expect(belowGridError(690, species, grid, PLAIN, cell, 31.98983)).toBeLessThan(2e-3);
+    expect(
+      belowGridError(690, lineByLine(species, PLAIN), grid, PLAIN, cell, 31.98983),
+    ).toBeLessThan(2e-3);
     expect(quantisationError(cell, encodeCell(cell), 16, () => 1e25).within).toBeLessThan(2e-4);
   });
 
   it("gates the 16-bit test within each node's cap, and records it beyond", () => {
-    const weak = reduceGridCell(690, toySpecies(CENTRES, 1e-30), GRID, PLAIN, () => 1e25);
+    const weak = reduceGridCell(
+      690,
+      lineByLine(toySpecies(CENTRES, 1e-30), PLAIN),
+      GRID,
+      PLAIN,
+      () => 1e25,
+      () => 1e25,
+    );
     if (weak === undefined) {
       throw new Error("the toy cell has no lines");
     }
@@ -200,9 +273,58 @@ describe("a cell's reduction on its grid", () => {
     expect([error.within <= 2e-4, error.beyond > error.within]).toEqual([true, true]);
   });
 
+  it("stops the between-node test at its own cap, the nodes and their g-points as at the node cap", () => {
+    const species = toySpecies(CENTRES, 1e-22);
+    const wide = reduceGridCell(
+      690,
+      lineByLine(species, PLAIN),
+      GRID,
+      PLAIN,
+      () => 1e25,
+      () => 1e25,
+    );
+    const narrow = reduceGridCell(
+      690,
+      lineByLine(species, PLAIN),
+      GRID,
+      PLAIN,
+      () => 1e25,
+      () => 1e21,
+    );
+    expect([
+      Array.from(narrow?.values ?? []).join() === Array.from(wide?.values ?? []).join(),
+      (wide?.worstChain.columnCm2 ?? 0) > 1e21,
+      (narrow?.worstChain.columnCm2 ?? Infinity) <= 1e21,
+      (narrow?.worstBeyondCap.error ?? 0) >= (wide?.worstBeyondCap.error ?? 0),
+    ]).toEqual([true, true, true, true]);
+  });
+
+  it("stops a partial cell's between-node test at its species' own Rayleigh column", () => {
+    vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const species = toySpecies(CENTRES, 1e-22);
+    const source = { species: "O2", policy: PLAIN, molecularMassDa: 31.98983 };
+    const helium = reducePartialCell(690, lineByLine(species, PLAIN), GRID, source);
+    const own = reducePartialCell(690, lineByLine(species, PLAIN), GRID, {
+      ...source,
+      rayleighCm2: SCATTERING,
+    });
+    expect([
+      (helium?.partial.worstChain.columnCm2 ?? 0) > 1e21,
+      (own?.partial.worstChain.columnCm2 ?? Infinity) <= 1e21,
+      own?.partial.k === helium?.partial.k,
+    ]).toEqual([true, true, true]);
+  });
+
   it("finds no lines in a cell beyond every line's cut-off", () => {
     expect(
-      reduceGridCell(500, toySpecies(CENTRES, 1e-23), GRID, PLAIN, () => 1e25),
+      reduceGridCell(
+        500,
+        lineByLine(toySpecies(CENTRES, 1e-23), PLAIN),
+        GRID,
+        PLAIN,
+        () => 1e25,
+        () => 1e25,
+      ),
     ).toBeUndefined();
   });
 });
@@ -340,10 +462,11 @@ function partial(cells: ReadonlyArray<PartialCell>, temperaturesK = [100, 150]):
 }
 
 describe("a species' merge", () => {
-  const source = LINE_SOURCES["CO"];
-  if (source === undefined) {
+  const line = LINE_SOURCES["CO"];
+  if (line === undefined) {
     throw new Error("the tool lists no CO");
   }
+  const source = lineTableSource(line);
 
   it("asks to refine an interval wider than 12.5 K whose midpoint fails", () => {
     const outcome = mergePartials(
@@ -379,6 +502,34 @@ describe("a species' merge", () => {
     expect(outcome.parts.map((p) => p.file)).toEqual(["CO-1.bin"]);
   });
 
+  it("writes a HITRAN source's lines and TIPS files as the sidecar's inputs, under T4.d's description", () => {
+    const outcome = mergePartials(source, [partial([partialCell(698)])], () => undefined);
+    if (outcome.kind !== "written") {
+      throw new Error(`the merge ${outcome.kind}`);
+    }
+    expect(JSON.parse(outcome.sidecar)).toMatchObject({
+      sha256: `${line.lines.name} ${line.lines.sha256}; q26.txt ${line.tips[0]?.sha256 ?? ""}`,
+      description: expect.stringMatching(
+        /^Line absorbers' k-distributions per 1 nm cell \(rendering plan R08, R08\.T4\.d;/u,
+      ),
+    });
+  });
+
+  it("writes another table source's inputs and description into its sidecar", () => {
+    const outcome = mergePartials(
+      { ...source, inputs: "a.trans 0123", description: "An ExoMol table's own description." },
+      [partial([partialCell(698)])],
+      () => undefined,
+    );
+    if (outcome.kind !== "written") {
+      throw new Error(`the merge ${outcome.kind}`);
+    }
+    expect(JSON.parse(outcome.sidecar)).toMatchObject({
+      sha256: "a.trans 0123",
+      description: "An ExoMol table's own description.",
+    });
+  });
+
   /** A CO₂ cell whose mix errs past the tier at w = 0.25, at the tested temperatures given. */
   function mixedCell(byTemperature: ReadonlyArray<number | null>, temperaturesK: number[]) {
     const worst = MIX_SHARES.map((_, i) => ({
@@ -401,10 +552,11 @@ describe("a species' merge", () => {
 
   /** CO₂'s merge of one partial, its sidecar parsed, or a test failure. */
   function co2Sidecar(cells: ReadonlyArray<PartialCell>, temperaturesK: number[]): unknown {
-    const co2 = LINE_SOURCES["CO2"];
-    if (co2 === undefined) {
+    const co2Line = LINE_SOURCES["CO2"];
+    if (co2Line === undefined) {
       throw new Error("the tool lists no CO2");
     }
+    const co2 = lineTableSource(co2Line);
     const outcome = mergePartials(
       co2,
       [{ ...partial(cells, temperaturesK), species: "CO2" }],
@@ -461,10 +613,11 @@ describe("a species' merge", () => {
   });
 
   it("refuses mix records written before §17, with no temperatures", () => {
-    const co2 = LINE_SOURCES["CO2"];
-    if (co2 === undefined) {
+    const co2Line = LINE_SOURCES["CO2"];
+    if (co2Line === undefined) {
       throw new Error("the tool lists no CO2");
     }
+    const co2 = lineTableSource(co2Line);
     const old: PartialCell = {
       ...partialCell(715, [], 2),
       mixing: { worst: [], limitColumnsCm2: [null, null, null, null, null] },

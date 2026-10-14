@@ -40,3 +40,8 @@ apps/hyperion/src/renderer/src/view/atmosphere/absorbers/earthLinePaths.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/earthLineReference.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesO2.json
 apps/hyperion/src/renderer/src/view/atmosphere/absorbers/lineReferencesH2O.json
+# ExoMol's references and N2O's merge record (`exomol-cell-references`,
+# `exomol-k-distributions-merge`; plan R08, R08.T4.g)
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/lineReferencesNH3.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/lineReferencesN2O.json
+apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/n2oMerge.json

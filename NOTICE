@@ -322,12 +322,15 @@ ruled 2026-10-09 and 2026-10-10).
   R08.T4.d); the tables themselves are not committed.
 
 - Molecular lines' k-distributions, reduced from the HITRAN2024 line lists (I. E. Gordon et al.,
-  as above; https://hitran.org/lbl/, fetched 2026-10-12) of O2, H2O, CO2, CO, N2O, HCN and H2, and
+  as above; https://hitran.org/lbl/, fetched 2026-10-12) of O2, H2O, CO2, CO, HCN and H2, and
   from the anchor bands of the stated overtone-ladder estimates of C2H2, C2H4, C2H6, CH3OH and PH3,
   with HITRAN's partition sums (TIPS; R. R. Gamache et al., J. Quant. Spectrosc. Radiat. Transfer
   271 (2021) 107713, DOI: 10.1016/j.jqsrt.2021.107713), to 16-bit k-distributions per 1 nm cell in
   apps/hyperion/src/renderer/src/view/atmosphere/absorbers/kDistributions/ (plan R08, R08.T4.d);
-  the line lists themselves are not committed. CO2's far wings take the CO2-CO2 and CO2-N2 chi
+  the line lists themselves are not committed. HITRAN2024's four N2O bands (fetched 2026-10-12 and
+  2026-10-13) enter N2O's merged table with ExoMol's TYM list, in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/kDistributions/ (plan R08,
+  R08.T4.g; the ExoMol entry below). CO2's far wings take the CO2-CO2 and CO2-N2 chi
   factors and line shape of SpeCT: G. Chaverot, M. Turbet, H. Tran, J.-M. Hartmann, A. Campargue,
   D. Mondelain and E. Bolmont, Astron. Astrophys. 702 (2025) A137, DOI:
   10.1051/0004-6361/202555762, licensed under CC BY 4.0 (Tables 2 and 3, Eq. 11), as reduced
@@ -344,12 +347,21 @@ ruled 2026-10-09 and 2026-10-10).
   lists (I. E. Gordon et al., as above; https://hitran.org), with the stated overtone-ladder and
   band-model estimates, in apps/hyperion/src/renderer/src/view/atmosphere/absorbers/bounds.json.
 
-- Cross-sections of the pending absorbers derived from the ExoMol database (J. Tennyson et al., the
-  ExoMol database and the line lists each entry names, https://www.exomol.com), licensed under
-  CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). The values in
-  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/bounds.json are reduced from
-  those line lists, a modification; that adapted material is offered under CC BY-SA 4.0 (its
-  README.md beside it).
+- Cross-sections of the pending absorbers, and NH3's and N2O's k-distributions, derived from the
+  ExoMol database (J. Tennyson et al., the ExoMol database and the line lists each file names,
+  https://www.exomol.com; J. Tennyson et al., J. Quant. Spectrosc. Radiat. Transf. 326 (2024)
+  109083, DOI: 10.1016/j.jqsrt.2024.109083), licensed under CC BY-SA 4.0
+  (https://creativecommons.org/licenses/by-sa/4.0/). The values in
+  apps/hyperion/src/renderer/src/view/atmosphere/absorbers/exomol/ are reduced from those line
+  lists, a modification: bounds.json's cell means (plan R08, R08.T4.c); and (plan R08, R08.T4.g)
+  the k-distributions in its kDistributions/ directory, the reference curves
+  lineReferencesNH3.json and lineReferencesN2O.json, and n2oMerge.json, from the C2018 list of
+  14NH3 (P. A. Coles, R. I. Ovsyannikov, O. L. Polyansky, S. N. Yurchenko and J. Tennyson,
+  J. Quant. Spectrosc. Radiat. Transf. 219 (2018) 199-212, DOI: 10.1016/j.jqsrt.2018.07.022), with
+  its H2 and He broadening files, and the TYM list of 14N2-16O (S. N. Yurchenko, T. M. Mellor and
+  J. Tennyson, Mon. Not. R. Astron. Soc. 534 (2024) 1364-1375, DOI: 10.1093/mnras/stae2201), N2O's
+  merged with HITRAN2024's bands (I. E. Gordon et al., as above). That adapted material is offered
+  under CC BY-SA 4.0 (its README.md beside it); the line lists' files are not committed.
 
 - Refractive indices of 75 and 84.5 wt% sulphuric acid at 300 K: K. F. Palmer and D. Williams,
   "Optical constants of sulfuric acid; application to the clouds of Venus?", Appl. Opt. 14

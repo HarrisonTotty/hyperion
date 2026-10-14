@@ -50,6 +50,13 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
+import {
+  runExomolBands,
+  runExomolBins,
+  runExomolCellReferences,
+  runExomolKDistributions,
+  runExomolKDistributionsMerge,
+} from "./exomolCli";
 import { broadeningRatios } from "./kDistributions";
 import { LINE_SOURCES, runKDistributions, runKDistributionsMerge } from "./kDistributionsCli";
 import { runBackgroundError, runCellReferences, runEarthReference } from "./lineReferences";
@@ -1709,7 +1716,18 @@ const USAGE =
   "       atmosphereData cell-references --species <key> --lines <file> --tips <dir> " +
   "--table <sidecar.json> --cells <nm,...> --out <json>\n" +
   "       atmosphereData background-error --species <key> --lines <file> --tips <dir> " +
-  "--cells <nm,...> --gas CO2|H2|He|H2O [--pressures <Pa,...>]";
+  "--cells <nm,...> --gas CO2|H2|He|H2O [--pressures <Pa,...>]\n" +
+  "       atmosphereData exomol-bands --species N2O --data <dir> --hitran-par <file> " +
+  "--cache <dir> [--jobs n]\n" +
+  "       atmosphereData exomol-bins --species NH3|N2O --data <dir> [--broad <dir>] " +
+  "--cache <dir> [--temperatures t,...] [--jobs n]\n" +
+  "       atmosphereData exomol-k-distributions --species NH3|N2O --cache <dir> " +
+  "[--hitran-lines <csv> --tips <dir>] [--cells a-b] [--stride n:k] [--temperatures t,...] " +
+  "--out <partial.json>\n" +
+  "       atmosphereData exomol-k-distributions-merge --species NH3|N2O --cache <dir> " +
+  "--out-dir <dir> [--hitran-par <file> --record <json>] <partial.json>...\n" +
+  "       atmosphereData exomol-cell-references --species NH3|N2O --cache <dir> " +
+  "[--hitran-lines <csv> --tips <dir>] --table <sidecar.json> --cells <nm,...> --out <json>";
 
 /** `matching`: writes `colourMatching.json`. */
 function runMatching(rest: readonly string[]): void {
@@ -1893,11 +1911,31 @@ function readHydrogenPair(
   return [low, high, hot];
 }
 
-/** The command line; writes the reduced file. Returns the exit code. */
-export function main(args: readonly string[]): number {
+/**
+ * The command line; writes the reduced file. Returns the exit code, or a promise of it for the
+ * subcommands that stream their inputs (`exomol-bands`, `exomol-bins`).
+ */
+export function main(args: readonly string[]): number | Promise<number> {
   try {
     const [command, ...rest] = args;
-    if (command === "matching") {
+    if (command === "exomol-bins" || command === "exomol-bands") {
+      // The subcommands that stream their inputs through bzip2, and so run asynchronously.
+      return (command === "exomol-bins" ? runExomolBins(rest) : runExomolBands(rest)).then(
+        () => 0,
+        (error: unknown) => {
+          console.error(
+            `atmosphere-data: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return 1;
+        },
+      );
+    } else if (command === "exomol-k-distributions") {
+      runExomolKDistributions(rest);
+    } else if (command === "exomol-k-distributions-merge") {
+      return runExomolKDistributionsMerge(rest);
+    } else if (command === "exomol-cell-references") {
+      runExomolCellReferences(rest);
+    } else if (command === "matching") {
       runMatching(rest);
     } else if (command === "cross-sections") {
       runCrossSections(rest);

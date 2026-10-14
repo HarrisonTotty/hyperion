@@ -29,6 +29,7 @@ import {
   chiHeldFlags,
   broadeningRatios,
   CHAIN_BOUND,
+  chainColumnCm2,
   type ChainError,
   CHI_CO2_CO2,
   CHI_CO2_N2,
@@ -38,12 +39,16 @@ import {
   type EncodedCell,
   type KDistributionMeta,
   type KDistributionPart,
+  type NodeSpectra,
   kDistributionMetaText,
   kDistributionPart,
+  lineByLine,
   MIX_SHARES,
   NODE_BOUND,
   QUANTISATION_BOUND,
   quantisationError,
+  type RayleighCrossSection,
+  type ReducedCell,
   reduceGridCell,
   type ReductionGrid,
   type SaturationCurve,
@@ -590,6 +595,11 @@ export interface PartialCell {
   /** Its worst beyond them, recorded; absent from partials written before it was split. */
   readonly quantisationBeyondCap?: number;
   readonly belowGrid: number;
+  /**
+   * A merged cell's means (R08.T4.g, N₂O from 714 nm): [T, p, the table's f64 Σ w σ, HITRAN2024's
+   * lines', TYM's added bands'], K, Pa and m² a molecule, at the recorded nodes.
+   */
+  readonly merge?: ReadonlyArray<readonly [number, number, number, number, number]>;
 }
 
 /** A partial file: a range of a species' cells. */
@@ -643,6 +653,97 @@ export function gridOf(source: LineSource, temperaturesK?: ReadonlyArray<number>
   };
 }
 
+/**
+ * What reducing a cell needs of its species besides its spectra: its shape, mass, condensation and
+ * Rayleigh scattering.
+ */
+export interface CellReductionSource {
+  readonly species: string;
+  readonly policy: ShapePolicy;
+  readonly molecularMassDa: number;
+  readonly saturation?: SaturationCurve;
+  /**
+   * The species' measured Rayleigh cross-section, whose column the between-node test also stops at
+   * (R08.T4.g's ruling, {@link chainColumnCm2}); helium's where absent, as T4.d's tables were gated.
+   */
+  readonly rayleighCm2?: RayleighCrossSection;
+}
+
+/**
+ * One cell reduced on its grid and tested ({@link reduceGridCell}, {@link quantisationError},
+ * {@link belowGridError}) as a partial file holds it, with its line logged, beside its `f64`
+ * reduction; or `undefined` where the cell has no line within the cut-off. T4.d's line-by-line
+ * cells and T4.g's super-line cells alike.
+ */
+export function reducePartialCell(
+  cellNm: number,
+  spectra: NodeSpectra,
+  grid: ReductionGrid,
+  source: CellReductionSource,
+): { readonly partial: PartialCell; readonly reduced: ReducedCell } | undefined {
+  const started = performance.now();
+  const nodes = source.policy.variants.length * grid.temperaturesK.length * grid.pressuresPa.length;
+  const cap = (t: number, p: number): number =>
+    gatedColumnCm2(source.saturation, cellNm, t, p, source.molecularMassDa);
+  const chainCap = (t: number, p: number): number =>
+    chainColumnCm2(source.saturation, cellNm, t, p, source.molecularMassDa, source.rayleighCm2);
+  const cell = reduceGridCell(cellNm, spectra, grid, source.policy, cap, chainCap);
+  if (cell === undefined) {
+    return undefined;
+  }
+  const encoded = encodeCell(cell);
+  const nodesPerVariant = grid.temperaturesK.length * grid.pressuresPa.length;
+  const quantisation = quantisationError(cell, encoded, nodes, (n) => {
+    const i = n % nodesPerVariant;
+    const nP = grid.pressuresPa.length;
+    return cap(grid.temperaturesK[Math.floor(i / nP)] ?? 0, grid.pressuresPa[i % nP] ?? 0);
+  });
+  const partial: PartialCell = {
+    nm: cellNm,
+    w: Array.from(cell.weights),
+    o: encoded.lnOffset,
+    s: encoded.lnStep,
+    k: Buffer.from(
+      encoded.codes.buffer,
+      encoded.codes.byteOffset,
+      encoded.codes.byteLength,
+    ).toString("base64"),
+    worstNodeError: cell.worstNodeError,
+    worstChain: cell.worstChain,
+    worstBeyondCap: cell.worstBeyondCap,
+    failures: cell.failures,
+    ...(cell.mixing === undefined
+      ? {}
+      : {
+          mixing: {
+            worst: cell.mixing.worst,
+            limitColumnsCm2: cell.mixing.limitColumnsCm2.map((u) =>
+              Number.isFinite(u) ? u : null,
+            ),
+            temperaturesK: cell.mixing.temperaturesK,
+            byTemperature: cell.mixing.limitColumnsByTemperatureCm2.map((row) =>
+              row.map((u) => (Number.isFinite(u) ? u : null)),
+            ),
+          },
+        }),
+    measuredShapeTo: Array.from(cell.measuredShapeTo),
+    beyondCutoffShare: Array.from(cell.beyondCutoffShare),
+    nearWingShare: Array.from(cell.nearWingShare),
+    quantisation: quantisation.within,
+    quantisationBeyondCap: quantisation.beyond,
+    belowGrid: belowGridError(cellNm, spectra, grid, source.policy, cell, source.molecularMassDa),
+  };
+  const c = cell.worstChain;
+  const mixing =
+    cell.mixing === undefined
+      ? ""
+      : `, mixing ${cell.mixing.worst.map((e) => e.error.toExponential(2)).join("/")} at w ${MIX_SHARES.join("/")}`;
+  process.stdout.write(
+    `${source.species} ${cellNm} nm: G ${cell.weights.length}, node ${cell.worstNodeError.toExponential(2)}, chain ${c.error.toExponential(2)} at ${c.temperatureK} K ${c.pressurePa.toPrecision(3)} Pa ${c.columnCm2.toExponential(2)} cm-2, beyond cap ${cell.worstBeyondCap.error.toExponential(2)}, ${cell.failures.length} failing${mixing}, ${((performance.now() - started) / 1000).toFixed(1)} s\n`,
+  );
+  return { partial, reduced: cell };
+}
+
 /** `k-distributions`: reduces a range of a species' cells to a partial file. */
 export function runKDistributions(rest: readonly string[]): void {
   const { values } = parseArgs({
@@ -670,69 +771,16 @@ export function runKDistributions(rest: readonly string[]): void {
   }
   const [from, to] = (values.cells ?? "380-760").split("-").map(Number);
   const species = readLineSpecies(source, values.lines, values.tips);
+  const spectra = lineByLine(species, source.policy);
   const grid = gridOf(source, values.temperatures?.split(",").map(Number));
-  const nodes = source.policy.variants.length * grid.temperaturesK.length * grid.pressuresPa.length;
   const cells: PartialCell[] = [];
   // Every stride-th cell from the first's offset, so that processes sharing a species balance.
   const [stride, offset] = (values.stride ?? "1:0").split(":").map(Number);
   for (let cellNm = (from ?? 380) + (offset ?? 0); cellNm <= (to ?? 760); cellNm += stride ?? 1) {
-    const started = performance.now();
-    const cap = (t: number, p: number): number =>
-      gatedColumnCm2(source.saturation, cellNm, t, p, source.molecularMassDa);
-    const cell = reduceGridCell(cellNm, species, grid, source.policy, cap);
-    if (cell === undefined) {
-      continue;
+    const cell = reducePartialCell(cellNm, spectra, grid, source);
+    if (cell !== undefined) {
+      cells.push(cell.partial);
     }
-    const encoded = encodeCell(cell);
-    const nodesPerVariant = grid.temperaturesK.length * grid.pressuresPa.length;
-    const quantisation = quantisationError(cell, encoded, nodes, (n) => {
-      const i = n % nodesPerVariant;
-      const nP = grid.pressuresPa.length;
-      return cap(grid.temperaturesK[Math.floor(i / nP)] ?? 0, grid.pressuresPa[i % nP] ?? 0);
-    });
-    cells.push({
-      nm: cellNm,
-      w: Array.from(cell.weights),
-      o: encoded.lnOffset,
-      s: encoded.lnStep,
-      k: Buffer.from(
-        encoded.codes.buffer,
-        encoded.codes.byteOffset,
-        encoded.codes.byteLength,
-      ).toString("base64"),
-      worstNodeError: cell.worstNodeError,
-      worstChain: cell.worstChain,
-      worstBeyondCap: cell.worstBeyondCap,
-      failures: cell.failures,
-      ...(cell.mixing === undefined
-        ? {}
-        : {
-            mixing: {
-              worst: cell.mixing.worst,
-              limitColumnsCm2: cell.mixing.limitColumnsCm2.map((u) =>
-                Number.isFinite(u) ? u : null,
-              ),
-              temperaturesK: cell.mixing.temperaturesK,
-              byTemperature: cell.mixing.limitColumnsByTemperatureCm2.map((row) =>
-                row.map((u) => (Number.isFinite(u) ? u : null)),
-              ),
-            },
-          }),
-      measuredShapeTo: Array.from(cell.measuredShapeTo),
-      beyondCutoffShare: Array.from(cell.beyondCutoffShare),
-      nearWingShare: Array.from(cell.nearWingShare),
-      quantisation: quantisation.within,
-      quantisationBeyondCap: quantisation.beyond,
-      belowGrid: belowGridError(cellNm, species, grid, source.policy, cell, source.molecularMassDa),
-    });
-    const c = cell.worstChain;
-    const mixing =
-      cell.mixing === undefined
-        ? ""
-        : `, mixing ${cell.mixing.worst.map((e) => e.error.toExponential(2)).join("/")} at w ${MIX_SHARES.join("/")}`;
-    process.stdout.write(
-      `${source.species} ${cellNm} nm: G ${cell.weights.length}, node ${cell.worstNodeError.toExponential(2)}, chain ${c.error.toExponential(2)} at ${c.temperatureK} K ${c.pressurePa.toPrecision(3)} Pa ${c.columnCm2.toExponential(2)} cm-2, beyond cap ${cell.worstBeyondCap.error.toExponential(2)}, ${cell.failures.length} failing${mixing}, ${((performance.now() - started) / 1000).toFixed(1)} s\n`,
-    );
   }
   const partial: PartialFile = {
     species: source.species,
@@ -845,6 +893,44 @@ export type MergeOutcome =
     };
 
 /**
+ * What a table's sidecar names of its source besides the cells: a HITRAN {@link LineSource}'s
+ * ({@link lineTableSource}) or one of R08.T4.g's ExoMol lists' (`exomolCli.ts`'s
+ * `tableSourceOf`).
+ */
+export interface TableSource {
+  readonly species: string;
+  readonly citation: string;
+  readonly url: string;
+  /** Every file the table was reduced from with its SHA-256, as the sidecar's `sha256` lists them. */
+  readonly inputs: string;
+  readonly fetched: string;
+  readonly terms: string;
+  readonly basis: "measured" | "estimated";
+  readonly measuredRangeK: readonly [number, number];
+  readonly policy: ShapePolicy;
+  readonly reduction: string;
+  /** The sidecar's description where it is not R08.T4.d's: an ExoMol list's, naming its licence. */
+  readonly description: string | undefined;
+}
+
+/** A HITRAN source as its sidecar names it: its lines file and its TIPS files the inputs. */
+export function lineTableSource(source: LineSource): TableSource {
+  return {
+    species: source.species,
+    citation: source.citation,
+    url: source.url,
+    inputs: `${source.lines.name} ${source.lines.sha256}; ${source.tips.map((t) => `${t.name} ${t.sha256}`).join(", ")}`,
+    fetched: source.fetched,
+    terms: source.terms,
+    basis: source.basis,
+    measuredRangeK: source.measuredRangeK,
+    policy: source.policy,
+    reduction: source.reduction,
+    description: undefined,
+  };
+}
+
+/**
  * A species' partials merged and checked against the rulings' bounds: refine where the chain test
  * fails between nodes it can still split, refuse where it fails otherwise, and the sidecar and
  * binary parts, each under {@link PART_BYTES}, where every cell passes.
@@ -853,7 +939,7 @@ export type MergeOutcome =
  * @throws Error for no partial, or partials on different temperature grids.
  */
 export function mergePartials(
-  source: LineSource,
+  source: TableSource,
   partials: ReadonlyArray<PartialFile>,
   log: (line: string) => void,
 ): MergeOutcome {
@@ -975,7 +1061,7 @@ export function mergePartials(
     species: source.species,
     source: source.citation,
     url: source.url,
-    sha256: `${source.lines.name} ${source.lines.sha256}; ${source.tips.map((t) => `${t.name} ${t.sha256}`).join(", ")}`,
+    sha256: source.inputs,
     fetched: source.fetched,
     terms: source.terms,
     reduction: source.reduction,
@@ -1010,6 +1096,7 @@ export function mergePartials(
       ? { worstQuantisationBeyondCapError: worst((c) => c.quantisationBeyondCap ?? 0) }
       : {}),
     linearCells: encoded.filter((c) => c.weights.length === 1).length,
+    ...(source.description === undefined ? {} : { description: source.description }),
   };
   const grid = { temperaturesK, pressuresPa: first.pressuresPa };
   const variants = source.policy.variants.length;
@@ -1080,7 +1167,7 @@ export function runKDistributionsMerge(rest: readonly string[]): number {
     return parsed;
   });
   const outcome = mergePartials(
-    source,
+    lineTableSource(source),
     lines === undefined ? partials : withLineBroadening(partials, lines),
     (line) => process.stdout.write(line),
   );
