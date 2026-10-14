@@ -301,8 +301,9 @@ built, T0 changes only the call sites here.
   main-process `main/spike.ts`, `main/fdinfo.ts` (summing distinct client IDs) and
   `main/reduceTrace.ts`; its results files
   `docs/measurements/descent-spike/<date>-<machine>-<setting>.json`; the pass criterion of Design
-  note 21 and its pacing; open question 2's rule (Design note 22); `HeightWorkerPool` and
-  `postField`; `PatchCache` and its budget; `terrainAnnunciation`.
+  note 21 and its pacing; open question 2's rule (Design note 22); `HeightWorkerPool` and its
+  per-body calls (`fieldInit`, `fieldChunk`, `fieldRelease`, `fieldResidentBytes`; R10.T7, which
+  replaced R05's `postField`); `PatchCache` and its budget; `terrainAnnunciation`.
 - **R06:** the sky request and its census as arrival work on the server's bulk priority; the star
   cubemap bake and the sprite budget, with their settings.
 - **R07:** `photorealisticPasses(setting)` and its `PassList`, whose labels are the

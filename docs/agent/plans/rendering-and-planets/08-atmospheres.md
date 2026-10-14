@@ -6962,7 +6962,8 @@ generator, and the reference's sampling needs no domain tag.
     `aerialPerspective.wgsl` §5.3 (§5.4), `transmittance.wgsl` §4 (§5.2), and `rayMarch.wgsl` §5.4,
     while his march is the from-space one of §7 and nothing of his marches past the reach. Design
     note 11 says the 32 km comes from "Hillaire's code" and Table 2; his code spans 128 km in
-    squared slices, Table 2 gives no range, and the 32 km is §5.4's. A docs pass corrects them.
+    squared slices, Table 2 gives no range, and the 32 km is §5.4's. Corrected 2026-10-13
+    (docs-batch-14, `31824f61`): Design note 11 and the four kernels' headers.
 
 - **Deviations in T7, as built** (2026-10-13). `sources.ts`, `forwardPeak.ts` and
   `forwardLobe.ts` (new), `settings.ts`, `hillaire.ts`, `tables.ts`, `tablesCpu.ts`, `medium.ts`,

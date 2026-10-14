@@ -2978,13 +2978,15 @@ src/renderer/src/displays/view`, `just smart-ci`.
   `decision-r06-camera-budget.md` §10.2).** While a view's sky is stale (the link down,
   `SkyModel.stale`), the `STARS` line's limit, `EYE` or `CAM`, is stale in the guide's form:
   muted, with its trailing `S`, after its unit and before its kind, in a field of its own sized
-  for its widest reading with the mark (`V 11.0 mag S`). The edge's field and every note are
-  unchanged. Build to sign-off queue item 15's draft of the `EYE`, `CAM` row.
+  for its widest reading with the mark (`V -20.2 mag S`, a camera's limit at `EV100 42` and 120°;
+  corrected 2026-10-13 from `V 11.0 mag S`). The edge's field and every note are unchanged. Build
+  to sign-off queue item 15's draft of the `EYE`, `CAM` row.
   - **Tests:** with the link down, the primary's line and an instrument's line each read the
     limit muted with its `S`, for an eye and for a camera; `STARS: PENDING` takes none; the
     mark clears when the link returns; the line's breaks do not move when it goes stale.
   - **Layout:** the composed line fits at 1280 × 720 and in the instrument slots when stale,
-    with the edge's note beside it (the hidden layout harness R13.T2.b used).
+    with the edge's note beside it and at the full layout's least box (the hidden layout harness
+    R13.T2.b used).
   - **Files:** `apps/hyperion/src/renderer/src/view/sky/label.ts`,
     `displays/view/{useViewSky,viewRun}.ts` and their tests, this plan.
   - **Acceptance:** `pnpm --filter hyperion exec vitest run src/renderer/src/view/sky
