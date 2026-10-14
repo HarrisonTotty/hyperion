@@ -23,10 +23,14 @@
 //! as the height: the finest level's slope, the coarse cell's record and climate, and the header's
 //! palette, by an ordered list of rules (Design note 1). The class weights a patch bakes
 //! ([`weights_at`], R10.T2) are that class at the finest level and, at a coarser one, the expected
-//! share of each finest-level class over a texel's footprint (Design note 3).
+//! share of each finest-level class over a texel's footprint (Design note 3). The class photometry
+//! ([`albedo_scale`], R10.T10.a) is the one scale on a body's class albedos that makes its scaled
+//! classes, over their area fractions ([`class_fractions`]), give its geometric albedo (Design
+//! note 8).
 //!
 //! Nothing here draws from a stream, so the module opens no domain tag.
 
+mod albedo;
 mod bearing;
 mod class;
 mod classify;
@@ -35,6 +39,10 @@ mod golden;
 mod properties;
 mod weights;
 
+pub use albedo::{
+    ALBEDO_SCALE_FLOOR, AlbedoScale, BuildClassFractionsError, ClassFractions,
+    SolveAlbedoScaleError, albedo_scale, class_fractions, scale_range, scaled_normal_albedo,
+};
 pub use bearing::{
     BearingFactors, bearing_capacity, bearing_capacity_on_slope, ultimate_bearing_capacity,
     ultimate_bearing_capacity_on_slope,

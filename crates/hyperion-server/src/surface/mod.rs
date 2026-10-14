@@ -31,6 +31,17 @@
 //! who asked first. P14.T54.a, which settles the time the record's surface section is read at (the
 //! hosts' light and a despinning body's spin change with it), settles this one too (R09's Risks).
 //!
+//! # The albedo scale
+//!
+//! Each field leaves the pass with R10's albedo scale in its header
+//! ([`field_albedo_scale`], R10.T10.a): the one scale on the body's class albedos that makes its
+//! materials, over their area fractions on every cell, give the body's geometric albedo in V from
+//! its record's photometry, so that the terrain's brightness never shifts as the survey grows. It
+//! is `None`, the palette's albedos unscaled, wherever the ground is not what the body's p
+//! measures: where the photometry is not modelled, where the air hides the ground (30 kPa and up),
+//! where the photometry's law is a cloud deck's at any pressure, and where the palette names no
+//! substance.
+//!
 //! # What starts a field
 //!
 //! The first `surface_field` or `survey_pass` for the body (R09.T19, which wires them), and
@@ -60,4 +71,6 @@ mod service;
 pub use cache::{FieldCache, FieldKey};
 pub use inputs::{InputsSource, RecordInputs};
 pub(crate) use service::FieldLevel;
-pub use service::{RECORD_TIME, SurfaceCounters, SurfaceJobError, SurfaceService};
+pub use service::{
+    RECORD_TIME, SurfaceCounters, SurfaceJobError, SurfaceService, field_albedo_scale,
+};

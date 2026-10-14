@@ -1244,7 +1244,14 @@ every timing below is provisional and is re-measured on a quiet machine by the t
     belong to `GENERATOR_VERSION` (open question 4).
 18. **What R10 takes.** The material class function and its weights, over `FieldView` and the
     gradient, and the albedo scale, which R10's `albedo_scale` computes on the server beside the
-    field build and this plan's header carries (`albedo_scale`, `None` until R10 fills it). R10 also
+    field build and this plan's header carries (`albedo_scale`, `None` until R10 fills it). _As
+    built by R10.T10.a (main's rulings, 2026-10-14): the server's `service::compute` sets `Some(c)`
+    for a body whose photometry is modelled, whose surface pressure is below 30 kPa, airless
+    included, and whose photometric law has a ground term; `None` means no scale, the palette's
+    albedos as resolved (c = 1), and is sent where the photometry is not modelled, where the air
+    hides the ground (30 kPa and up, whose p is the cloudy disc's), where the law is a cloud deck's
+    (a Lommel–Seeliger share of 0, Venus's template among them, at any pressure) and where the
+    palette names no substance (R10's Risks, "Deviations in T10.a, as built")._ R10 also
     retires R05's provisional height function when it switches the client. `unresolved_variance`,
     `structure_function` and `unresolved_rms` are this plan's, because only the synthesis knows its
     band amplitudes: per contribution, craters and channels included, for bands finer than a
@@ -2501,7 +2508,11 @@ T2, as built"), the spectrum's break fields, the sea-floor byte's two scales
 `LogPrecipitation`'s in volume: code 0 none, below 0.1 mm a⁻¹, and code c ≥ 1
 0.1 mm a⁻¹ × 2^((c − 1) ÷ 12) (science-r09-drainage.md §1). R10.T10.a fills
 `FieldHeader.albedo_scale` and bumps `GENERATOR_VERSION`,
-re-blessing this plan's payload and coarse goldens in that commit.
+re-blessing this plan's payload and coarse goldens in that commit. _As built (main's ruling for
+R10.T10.a, 2026-10-14): no bump. The first send above has not happened, since no generated body is
+served before P14.T54.a, so the scale is filled at 22 by the rule of 2026-10-09; and it moves none
+of this plan's goldens, the server setting it after `coarse_pass`, whose output and the testing
+worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
 
 ## Risks and open points
 
@@ -4242,7 +4253,10 @@ re-blessing this plan's payload and coarse goldens in that commit.
       `radius_m`, `equatorial_radius_m`, `polar_radius_m`, `boundary_diameter_m`, `sea_level_m`,
       `lapse_rate_k_per_m`, `realised_sigma_h_m`, `realised_relief_m`, `months`,
       `season_eccentricity`, `reference_temperature_k`, `surface_age_gyr`, `surface_pressure_pa`
-      and `albedo_scale` (`null` until R10.T10.a). It also carries the palette as
+      and `albedo_scale` (`null` until R10.T10.a; as built there, `null` means no scale, the
+      palette's albedos unscaled, sent where the photometry is not modelled, where the air hides
+      the ground at 30 kPa and up, where the photometric law is a cloud deck's, and where the
+      palette names no substance). It also carries the palette as
       `PaletteEntryDto { substance, role }`.
     - The closed classes are closed string unions, so that TypeScript's are exhaustive:
       `climate_model` (`ClimateModelDto`), `precipitation` (`PrecipitationSourceDto`) and each

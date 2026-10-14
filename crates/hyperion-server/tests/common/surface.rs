@@ -3,7 +3,8 @@
 //! whose bodies the service computes fields for; and, for the Knowledge-bound test (R09.T19.c), a
 //! field asked for over the socket ([`field_via_wire`]) and decoded as a client decodes it
 //! ([`decode_all`], [`partial_field`], [`insert_all`]); and the checks that a frame carries no
-//! surface seed ([`Secret`], [`check_no_seed_key`], [`has_key`]; R09.T1.b).
+//! surface seed ([`Secret`], [`check_no_seed_key`], [`has_key`]; R09.T1.b); and the field the
+//! service serves from a reference world, with its albedo scale ([`served_field`], R10.T10.a).
 //!
 //! Plan 14's surface section is not inhabited yet, so the production source answers every body
 //! `NotModelled`; these tests give the service a reference world's inputs instead, through its
@@ -16,17 +17,17 @@ use hyperion_protocol::{
     SurfaceHeaderDto,
 };
 use hyperion_server::compute::GeneratedSystem;
-use hyperion_server::surface::InputsSource;
+use hyperion_server::surface::{InputsSource, RECORD_TIME, field_albedo_scale};
 use hyperion_sim::Seed;
 use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
 use hyperion_sim::id::{BodyId, Layer};
-use hyperion_sim::planetary::hooks::SurfaceSeed;
+use hyperion_sim::planetary::hooks::{SurfaceSeed, detail_seed, surface_seed};
 use hyperion_sim::planetary::record::{BodyRecord, Section};
-use hyperion_sim::planetary::surface::{CoarseInputs, SurfaceInputsError, reference};
-use hyperion_sim::planetary::{SystemContext, generate};
+use hyperion_sim::planetary::surface::{CoarseInputs, SurfaceInputsError, coarse_pass, reference};
+use hyperion_sim::planetary::{BodyIndex, SystemContext, generate};
 use hyperion_sim::time::UniverseTime;
-use hyperion_surface::field::PartialField;
+use hyperion_surface::field::{CoarseField, PartialField};
 use hyperion_surface::wire::{DecodedBlock, decode_payload};
 use serde_json::Value;
 
@@ -144,6 +145,30 @@ pub fn surface_system() -> &'static SurfaceSystem {
             })
             .expect("a system of the cell has a solid body and a giant")
     })
+}
+
+/// The field the surface service serves for `body` of [`surface_system`] from `world`'s inputs:
+/// the sim's coarse pass of the body's surface seed in [`SEED`]'s universe, with the albedo scale
+/// the service sets from the body's record at [`RECORD_TIME`] and its detail seed (R10.T10.a).
+///
+/// # Panics
+///
+/// If `body` is not a body of [`surface_system`], or its scale is not one the header holds.
+pub fn served_field(world: ReferenceWorld, body: BodyId) -> CoarseField {
+    let (ctx, planets) = surface_system().system.as_ref();
+    let field = coarse_pass(surface_seed(Seed::new(SEED), body), &world.inputs());
+    let index = BodyIndex::try_from(body.body_index()).expect("a body of the system has an index");
+    let record = planets
+        .body_at(ctx, index, RECORD_TIME)
+        .expect("a body of the system resolves");
+    let scale = field_albedo_scale(
+        &field,
+        record.photometry(),
+        detail_seed(Seed::new(SEED), body),
+    );
+    field
+        .with_albedo_scale(scale)
+        .expect("a solved scale is finite and positive")
 }
 
 /// A body's coarse field as a `surface_field` answered it over the socket (R09.T19.b): what the

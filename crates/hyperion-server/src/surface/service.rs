@@ -11,13 +11,18 @@ use std::time::Instant;
 use hyperion_protocol::SeedHex;
 use hyperion_sim::Seed;
 use hyperion_sim::planetary::derive::figure::BodyFigure;
-use hyperion_sim::planetary::hooks::{SurfaceSeed, surface_seed};
+use hyperion_sim::planetary::derive::photometry::BodyPhotometry;
+use hyperion_sim::planetary::hooks::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
 use hyperion_sim::planetary::record::{BodyRecord, RecordSection, Section};
 use hyperion_sim::planetary::surface::{CoarseInputs, SurfaceInputsError, coarse_pass};
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
 use hyperion_surface::field::{CoarseField, CoarseLevel, FieldView, coarse_level};
+use hyperion_surface::material::{
+    SolveAlbedoScaleError, THIN_ATMOSPHERE_PRESSURE, albedo_scale, class_fractions,
+};
+use hyperion_surface::synth::{SynthCache, Synthesiser};
 use tokio::sync::watch;
 use tokio::task::JoinSet;
 
@@ -498,7 +503,9 @@ fn check_system(key: FieldKey, system: &GeneratedSystem) {
 }
 
 /// The coarse field of `key`'s body in `system`, on the pool: the body's surface seed and its
-/// record at [`RECORD_TIME`], the inputs `source` reads from the record, and the pass.
+/// record at [`RECORD_TIME`], the inputs `source` reads from the record, the pass, and the albedo
+/// scale on its classes ([`field_albedo_scale`], R10.T10.a), from the record's photometry and the
+/// body's detail seed.
 ///
 /// # Errors
 ///
@@ -513,7 +520,87 @@ fn compute(
     let inputs = source
         .inputs(&record, &system.0)
         .map_err(SurfaceJobError::Inputs)?;
-    Ok(coarse_pass(seed, &inputs))
+    let field = coarse_pass(seed, &inputs);
+    // The seed the client synthesises the ground with, from the record's hooks section, which
+    // carries it to the client (R09.T1.b); a body with a surface has one, and where it is not given
+    // it is the same derivation.
+    let detail = match record.hooks() {
+        Section::Ok(hooks) => hooks.detail_seed(),
+        Section::NotModelled | Section::NotResolved | Section::NotApplicable => {
+            detail_seed(Seed::new(key.galaxy().seed()), key.body())
+        }
+    };
+    let scale = field_albedo_scale(&field, record.photometry(), detail);
+    Ok(field
+        .with_albedo_scale(scale)
+        .expect("a solved albedo scale is finite and positive"))
+}
+
+/// The albedo scale `FieldHeader::albedo_scale` carries for `field`, whose body's photometry is
+/// `photometry` and detail seed `detail` (rendering plan R10, T10.a; Design note 8): the one scale
+/// on its class albedos ([`albedo_scale`]) that makes its materials' area fractions over every
+/// cell ([`class_fractions`]) give the body's geometric albedo, fitted in V; or `None`, which
+/// means the palette entries' albedos as resolved, unscaled.
+///
+/// It is `None` (main's rulings, 2026-10-14), never fitting the ground to a cloud deck's p:
+/// - where the photometry is not `Ok` (not modelled, withheld or not applicable): there is no p to
+///   fit;
+/// - where the field's surface pressure is at or above [`THIN_ATMOSPHERE_PRESSURE`], 30 kPa, the
+///   photometry's own threshold below which the gas cannot hide the ground: above it plan 14's p is
+///   the cloudy disc's (Earth's template), whose reflectance R08.T16.b computes from the medium
+///   over the ground, so a scale fitted to it would make the ground stand in for the clouds;
+/// - where the photometry's law has no ground term, its Lommel–Seeliger share
+///   ([`BodyPhotometry::lunar_lambert_share`]) 0, at any pressure: Venus's template, which a
+///   runaway greenhouse takes whatever its pressure, Earth's and the giants', each a cloud deck's
+///   (plan 14's templates, P14.T47.b; R07's Design note 5);
+/// - where the palette names no substance for any of the ground, so nothing has an albedo to
+///   scale.
+///
+/// So the scale is solved for the Mercury, Moon, airless-ice, Mars, thin magma-ocean and snowball
+/// templates below 30 kPa. A photometry whose p is not positive, or a material past the palette, is
+/// a bug, logged at `error`, and gives `None` too.
+///
+/// It reads every cell, about 20 µs each (provisional: R10's Risks, "Deviations in T10.a, as
+/// built"), and runs on the pool with the pass.
+///
+/// # Panics
+///
+/// Never: a coarse field holds every cell its classes read. The synthesis panics on a height that
+/// is not finite, a bug.
+#[must_use]
+pub fn field_albedo_scale(
+    field: &CoarseField,
+    photometry: &Section<BodyPhotometry>,
+    detail: DetailSeed,
+) -> Option<f64> {
+    let Section::Ok(photometry) = photometry else {
+        return None;
+    };
+    let header = field.header();
+    if header.surface_pressure().value() >= THIN_ATMOSPHERE_PRESSURE.value()
+        || photometry.lunar_lambert_share() <= 0.0
+    {
+        return None;
+    }
+    let p = photometry.geometric_albedo();
+    let synth = Synthesiser::new(field, detail);
+    let fractions = class_fractions(&synth, &mut SynthCache::new())
+        .expect("a coarse field holds every cell its classes read");
+    match albedo_scale(&fractions, header.palette(), [p.b, p.v, p.r]) {
+        Ok(scale) => Some(scale.scale()),
+        Err(SolveAlbedoScaleError::NoNamedGround) => None,
+        Err(
+            error @ (SolveAlbedoScaleError::GeometricAlbedo { .. }
+            | SolveAlbedoScaleError::Properties(_)),
+        ) => {
+            tracing::error!(
+                body = ?header.body(),
+                %error,
+                "the albedo scale of a body's coarse field could not be solved"
+            );
+            None
+        }
+    }
 }
 
 /// The level of the field of `key`'s body in `system`, on the pool, as
@@ -644,11 +731,19 @@ mod tests {
     use hyperion_sim::galaxy::Galaxy;
     use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
     use hyperion_sim::id::{BodyId, Layer, SystemId};
+    use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
+    use hyperion_sim::planetary::derive::photometry::{PhaseTemplate, PhotometryInputs};
     use hyperion_sim::planetary::record::BodyRecord;
     use hyperion_sim::planetary::surface::{CoarseInputs, reference};
     use hyperion_sim::planetary::{DecodeBodyIndexError, SystemContext, generate};
+    use hyperion_sim::units::{Kelvin, Pascals};
     use hyperion_sim::{GENERATOR_VERSION, Seed};
-    use hyperion_surface::field::{Cover, CoverRange, ResolutionCode};
+    use hyperion_surface::field::{
+        Cover, CoverRange, MaterialPalette, MechanicsFamily, PaletteEntry, PaletteRole,
+        ResolutionCode,
+    };
+    use hyperion_surface::substance_key::SubstanceKey;
+    use hyperion_surface::testing::FieldBuilder;
     use hyperion_surface::wire::encode_payload;
     use tokio::time::timeout;
 
@@ -694,6 +789,13 @@ mod tests {
 
     fn key(body: BodyId) -> FieldKey {
         FieldKey::new(GalaxyKey::new(SEED, GENERATOR_VERSION), body)
+    }
+
+    /// The record of `body` of [`system`] at [`RECORD_TIME`].
+    fn record_of(body: BodyId) -> BodyRecord {
+        let (ctx, planets) = system().0.as_ref();
+        let index = BodyIndex::try_from(body.body_index()).unwrap();
+        planets.body_at(ctx, index, RECORD_TIME).unwrap()
     }
 
     /// The field of body `n` of [`system`].
@@ -858,7 +960,23 @@ mod tests {
             surface_seed(Seed::new(SEED), key.body()),
             &reference::ceres_like(),
         );
-        assert_same_bits(&one, &own, "the field is the sim's pass of the body's seed");
+        let scale = field_albedo_scale(
+            &own,
+            record_of(key.body()).photometry(),
+            detail_seed(Seed::new(SEED), key.body()),
+        );
+        // Whether this body has a scale is its photometry's (the gate's test, below); the field
+        // served carries the one its record gives.
+        assert_eq!(
+            one.header().albedo_scale().map(f64::to_bits),
+            scale.map(f64::to_bits)
+        );
+        let own = own.with_albedo_scale(scale).unwrap();
+        assert_same_bits(
+            &one,
+            &own,
+            "the field is the sim's pass of the body's seed, with its albedo scale",
+        );
 
         let again = field(&service, key).await.unwrap();
         assert!(Arc::ptr_eq(&one, &again), "held");
@@ -1337,6 +1455,152 @@ mod tests {
                 level,
                 section: RecordSection::Surface,
             })
+        );
+    }
+
+    /// Whether a test field's palette names its ground.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Ground {
+        /// Every crust a silicate of normal albedo 0.1.
+        Named,
+        /// An empty palette, a composition not modelled.
+        Unnamed,
+    }
+
+    /// A small field at surface pressure `pressure`, its ground named or not.
+    fn small_field(pressure: Pascals, ground: Ground) -> CoarseField {
+        let builder = FieldBuilder::new(Metres::new(300e3)).surface_pressure(pressure);
+        if ground == Ground::Unnamed {
+            return builder.build();
+        }
+        let crust = PaletteEntry {
+            substance: SubstanceKey::new("basalt").unwrap(),
+            role: PaletteRole::PrimaryCrust,
+            normal_albedo_bvr: [0.1; 3],
+            phase_row: 0,
+            grain_density_kg_m3: 3_000.0,
+            transition: Kelvin::new(1_250.0),
+            mechanics: MechanicsFamily::Silicate,
+        };
+        builder
+            .palette(MaterialPalette::new(vec![crust]).unwrap())
+            .crust_palette([Some(0); 4])
+            .build()
+    }
+
+    /// The photometry plan 14 derives (P14.T47.b) for a rocky body of the system's first solid
+    /// body's bulk in surface state `state` at surface pressure `pressure`, of its state's Bond
+    /// albedo.
+    fn photometry_in(state: SurfaceState, pressure: Pascals) -> BodyPhotometry {
+        let record = record_of(system().1[0]);
+        let Section::Ok(bulk) = record.bulk() else {
+            panic!("a solid body's bulk is modelled");
+        };
+        let material = SurfaceMaterial::Rock;
+        BodyPhotometry::derive(&PhotometryInputs {
+            state,
+            material,
+            surface_pressure: Some(pressure),
+            cloud_fraction: 0.0,
+            surface_temperature: bulk.equilibrium_temperature(),
+            equilibrium_temperature: bulk.equilibrium_temperature(),
+            surface_gravity: bulk.surface_gravity(),
+            class: bulk.class(),
+            fractions: bulk.fractions(),
+            bond: state.albedo(material),
+        })
+    }
+
+    /// The albedo scale (R10.T10.a; main's rulings of 2026-10-14) is solved only where the ground
+    /// is what the body's p measures: below 30 kPa, and under a template whose law has a ground
+    /// term (an airless rock's, a thin-aired Mars's, a thin snowball's). There it is
+    /// `albedo_scale` of the field's class fractions under the body's detail seed, for the
+    /// photometry's geometric albedo. It is `None` from 30 kPa up (an Earth, and a thick snowball,
+    /// whose template is the ground's: recorded for plan 14), under a cloud deck's template at any
+    /// pressure (a runaway greenhouse at 1 kPa takes Venus's), where the photometry is not
+    /// modelled, withheld or not applicable, and where the palette names no substance.
+    #[test]
+    fn a_field_s_albedo_scale_is_solved_only_where_the_ground_is_what_p_measures() {
+        let detail = detail_seed(Seed::new(SEED), system().1[0]);
+        let thin = THIN_ATMOSPHERE_PRESSURE.value();
+        for (state, pressure, template, scaled) in [
+            (SurfaceState::Airless, 0.0, PhaseTemplate::Mercury, true),
+            (SurfaceState::Temperate, 600.0, PhaseTemplate::Mars, true),
+            (
+                SurfaceState::Temperate,
+                thin - 1.0,
+                PhaseTemplate::Mars,
+                true,
+            ),
+            (
+                SurfaceState::Snowball,
+                1_000.0,
+                PhaseTemplate::Snowball,
+                true,
+            ),
+            (SurfaceState::Temperate, thin, PhaseTemplate::Earth, false),
+            (
+                SurfaceState::Temperate,
+                98_550.0,
+                PhaseTemplate::Earth,
+                false,
+            ),
+            (
+                SurfaceState::Snowball,
+                98_550.0,
+                PhaseTemplate::Snowball,
+                false,
+            ),
+            (
+                SurfaceState::RunawayGreenhouse,
+                1_000.0,
+                PhaseTemplate::Venus,
+                false,
+            ),
+        ] {
+            let at = format!("{state:?} at {pressure} Pa");
+            let photometry = photometry_in(state, Pascals::new(pressure));
+            assert_eq!(photometry.template(), template, "{at}");
+            let field = small_field(Pascals::new(pressure), Ground::Named);
+            let scale = field_albedo_scale(&field, &Section::Ok(photometry), detail);
+            if scaled {
+                let p = photometry.geometric_albedo();
+                let synth = Synthesiser::new(&field, detail);
+                let fractions = class_fractions(&synth, &mut SynthCache::new()).unwrap();
+                let want = albedo_scale(&fractions, field.header().palette(), [p.b, p.v, p.r])
+                    .unwrap()
+                    .scale();
+                assert_eq!(scale.map(f64::to_bits), Some(want.to_bits()), "{at}");
+            } else {
+                assert_eq!(
+                    scale.map(f64::to_bits),
+                    None,
+                    "{at}: the ground is not what p measures"
+                );
+            }
+        }
+        let airless = Section::Ok(photometry_in(SurfaceState::Airless, Pascals::ZERO));
+        let field = small_field(Pascals::ZERO, Ground::Named);
+        for section in [
+            Section::NotModelled,
+            Section::NotResolved,
+            Section::NotApplicable,
+        ] {
+            assert_eq!(
+                field_albedo_scale(&field, &section, detail).map(f64::to_bits),
+                None,
+                "{section:?}"
+            );
+        }
+        assert_eq!(
+            field_albedo_scale(
+                &small_field(Pascals::ZERO, Ground::Unnamed),
+                &airless,
+                detail
+            )
+            .map(f64::to_bits),
+            None,
+            "a palette that names nothing"
         );
     }
 

@@ -20,14 +20,17 @@
 //!   bit for bit, on a lattice over every surveyed cell and along the surveyed region's edge, at
 //!   band levels from 0 to the deepest, and refuses a point where it holds nothing;
 //! - no response or notification, read as it arrived, has a key named `surface_seed`, and no frame,
-//!   text or binary, holds the body's surface seed's value.
+//!   text or binary, holds the body's surface seed's value;
+//! - the answer's header and block 0 carry the server's albedo scale, which an airless or
+//!   thin-aired body's field has (R10.T10.a).
 //!
 //! Those payloads, on the Ceres-like world, are one block in one bulk frame each, so a second case
 //! surveys two whole faces of the Mars-like world, whose payload is several blocks in several
 //! frames, and checks it block by block.
 //!
 //! The server's heights are the synthesis over the coarse pass of the body's surface seed on the
-//! same inputs, which `surface_service.rs` shows is the field the server serves, bit for bit; every
+//! same inputs, with the albedo scale the service sets, which `surface_service.rs` shows is the
+//! field the server serves, bit for bit; every
 //! record the client holds is checked against it as well. The detail seed is a stand-in shared by
 //! both sides: R09.T1.b puts the body's own on the wire.
 //!
@@ -54,7 +57,7 @@ use std::sync::Arc;
 
 use common::surface::{
     FieldViaWire, ReferenceWorld, SEED, decode_all, field_via_wire, insert_all, partial_field,
-    reference_inputs, surface_system,
+    reference_inputs, served_field, surface_system,
 };
 use common::{TestClient, TestServer, patiently};
 use hyperion_protocol::{
@@ -67,7 +70,6 @@ use hyperion_protocol::{
 use hyperion_sim::Seed;
 use hyperion_sim::id::BodyId;
 use hyperion_sim::planetary::hooks::{SurfaceSeed, surface_seed};
-use hyperion_sim::planetary::surface::coarse_pass;
 use hyperion_sim::rng::DetailSeed;
 use hyperion_sim::units::Metres;
 use hyperion_surface::cube::{Edge, Face, MAX_LEVEL, PATCH_QUADS, PatchKey, SampleGrid};
@@ -489,6 +491,23 @@ fn check_blocks(
     );
     assert_eq!(answer.header.level, level.get());
     assert_eq!(header.body(), server.header().body());
+    // The albedo scale R10.T10.a sets on an airless or thin-aired body's field, in the answer and
+    // in block 0, is the server's (the module's documentation).
+    let scale = server.header().albedo_scale().map(f64::to_bits);
+    assert!(
+        scale.is_some(),
+        "a reference world's field has an albedo scale"
+    );
+    assert_eq!(
+        answer.header.albedo_scale.map(f64::to_bits),
+        scale,
+        "the answer's albedo scale"
+    );
+    assert_eq!(
+        header.albedo_scale().map(f64::to_bits),
+        scale,
+        "block 0's albedo scale"
+    );
     let union = Cover::from_ranges(
         blocks
             .iter()
@@ -763,7 +782,7 @@ impl Session {
         let seed = surface_seed(Seed::new(SEED), body);
         let secret = Secret::of(seed);
         let field = on_a_thread("the reference world's field", move || {
-            coarse_pass(seed, &world.inputs())
+            served_field(world, body)
         })
         .await;
         let data_dir = tempfile::tempdir().expect("a temporary directory");

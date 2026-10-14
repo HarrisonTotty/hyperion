@@ -622,7 +622,8 @@ impl CoarseField {
     }
 
     /// The field with its header's albedo scale set to `albedo_scale`, which R10 computes on the
-    /// server once the field is built (Design note 18), its records kept as they are.
+    /// server once the field is built (Design note 18; R10.T10.a's
+    /// [`albedo_scale`](crate::material::albedo_scale)), its records kept as they are.
     ///
     /// # Errors
     ///

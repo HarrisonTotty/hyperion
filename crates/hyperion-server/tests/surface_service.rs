@@ -1,6 +1,7 @@
 //! The surface service through its public API (rendering plan R09, R09.T17): the field it serves
-//! from the reference worlds' inputs is the sim's coarse pass on the same inputs, bit for bit, and
-//! with the production source a generated body answers that its surface is not modelled.
+//! from the reference worlds' inputs is the sim's coarse pass on the same inputs, bit for bit, with
+//! R10.T10.a's albedo scale in its header, and with the production source a generated body answers
+//! that its surface is not modelled.
 
 mod common;
 
@@ -8,18 +9,21 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use common::patience;
-use common::surface::{ReferenceWorld, SEED, reference_inputs, surface_system};
+use common::surface::{ReferenceWorld, SEED, reference_inputs, served_field, surface_system};
 use hyperion_server::compute::{CpuPool, GalaxyKey};
 use hyperion_server::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use hyperion_server::surface::{
-    FieldKey, InputsSource, RecordInputs, SurfaceJobError, SurfaceService,
+    FieldKey, InputsSource, RECORD_TIME, RecordInputs, SurfaceJobError, SurfaceService,
 };
-use hyperion_sim::planetary::hooks::surface_seed;
-use hyperion_sim::planetary::record::RecordSection;
+use hyperion_sim::planetary::BodyIndex;
+use hyperion_sim::planetary::hooks::{detail_seed, surface_seed};
+use hyperion_sim::planetary::record::{RecordSection, Section};
 use hyperion_sim::planetary::surface::{SurfaceInputsError, coarse_pass};
 use hyperion_sim::units::Metres;
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_surface::field::{CoarseField, Cover, CoverRange, FieldView, ResolutionCode};
+use hyperion_surface::material::{albedo_scale, class_fractions};
+use hyperion_surface::synth::{SynthCache, Synthesiser};
 use hyperion_surface::wire::encode_payload;
 use tokio::time::timeout;
 
@@ -54,18 +58,44 @@ fn payload(field: &CoarseField) -> Vec<u8> {
 
 /// The field the service serves for a body, from a reference world's inputs, is the sim's coarse
 /// pass of that body's surface seed in the universe's seed on the same inputs, bit for bit, on the
-/// Ceres-like and Moon-like worlds; one pass each, kept.
+/// Ceres-like and Moon-like worlds, its header carrying the albedo scale that makes the airless
+/// body's materials give its record's geometric albedo (R10.T10.a): `albedo_scale` of its class
+/// fractions under its detail seed; one pass each, kept.
 #[tokio::test]
 async fn the_surface_service_serves_the_coarse_pass_bit_for_bit() {
     let pool = pool();
     let system = surface_system();
+    let (ctx, planets) = system.system.as_ref();
+    let index = BodyIndex::try_from(system.solid.body_index()).expect("a body's index");
+    let record = planets
+        .body_at(ctx, index, RECORD_TIME)
+        .expect("the solid body resolves");
+    let Section::Ok(photometry) = record.photometry() else {
+        panic!("a solid body's photometry is modelled");
+    };
+    let p = photometry.geometric_albedo();
     for world in [ReferenceWorld::Ceres, ReferenceWorld::Moon] {
         let service = service(&pool, reference_inputs(world));
         let served = timeout(patience(), service.field(key(system.solid), &system.system))
             .await
             .expect("timed out computing a field")
             .expect("a reference world has a field");
-        let own = coarse_pass(surface_seed(Seed::new(SEED), system.solid), &world.inputs());
+        let unscaled = coarse_pass(surface_seed(Seed::new(SEED), system.solid), &world.inputs());
+        let synth = Synthesiser::new(&unscaled, detail_seed(Seed::new(SEED), system.solid));
+        let fractions = class_fractions(&synth, &mut SynthCache::new()).expect("every cell held");
+        let solved = albedo_scale(&fractions, unscaled.header().palette(), [p.b, p.v, p.r])
+            .expect("a reference palette names the ground");
+        assert_eq!(
+            served.header().albedo_scale().map(f64::to_bits),
+            Some(solved.scale().to_bits()),
+            "{world:?}: the served field's albedo scale"
+        );
+        let own = served_field(world, system.solid);
+        assert_eq!(
+            own.header().albedo_scale().map(f64::to_bits),
+            Some(solved.scale().to_bits()),
+            "{world:?}"
+        );
         assert_eq!(served.header().level(), own.header().level(), "{world:?}");
         let (served, own) = (payload(&served), payload(&own));
         assert_eq!(served.len(), own.len(), "{world:?}: the payloads' lengths");

@@ -89,7 +89,12 @@ surface_age_gyr: number,
  */
 surface_pressure_pa: number, 
 /**
- * Rendering plan R10's albedo scale, dimensionless and positive, or `null` until R10 fills it.
+ * Rendering plan R10's albedo scale, dimensionless and positive: the one factor on the
+ * palette's class albedos that makes the body's materials give its geometric albedo, each
+ * scaled albedo clamped to its material's range. `null` means no scale, the palette's albedos
+ * unscaled: where the body's photometry is not modelled, where its air hides its ground (a
+ * surface pressure of 30 kPa or more), where its photometric law has no ground term (a cloud
+ * deck's template, at any pressure) and where the palette names no substance for the ground.
  */
 albedo_scale: number | null, 
 /**

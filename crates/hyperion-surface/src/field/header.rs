@@ -153,8 +153,23 @@ pub struct FieldHeaderParts {
     /// The body's mean surface pressure, pascals: plan 14's, carried for R11's atmosphere class
     /// (Design note 18); 0 on an airless body. Finite and non-negative.
     pub surface_pressure: Pascals,
-    /// R10's albedo scale, dimensionless and positive, or `None` until R10 fills it (Design note
-    /// 18).
+    /// R10's albedo scale (Design note 18; R10's Design note 8, T10.a): the one factor c,
+    /// dimensionless, finite and positive, on the palette's class albedos in B, V and R that makes
+    /// the body's materials, over their area fractions on every cell, give its geometric albedo in
+    /// V, each scaled albedo clamped to its material's range
+    /// ([`albedo_scale`](crate::material::albedo_scale)).
+    ///
+    /// `None` means no scale: the palette entries' albedos as resolved, c = 1. The server never fits
+    /// the ground to a cloud deck's geometric albedo, and sends `None` (main's rulings,
+    /// 2026-10-14):
+    /// - where the body's photometry is not modelled;
+    /// - where its air hides its ground: a surface pressure of 30 kPa or more
+    ///   ([`THIN_ATMOSPHERE_PRESSURE`](crate::material::THIN_ATMOSPHERE_PRESSURE)), whose geometric
+    ///   albedo is the cloudy disc's and whose ground R08's medium covers;
+    /// - where its photometric law has no ground term, at any pressure: a Lommel–Seeliger share of
+    ///   0, a cloud deck's template (Venus's, which a runaway greenhouse takes, Earth's and the
+    ///   giants');
+    /// - where the palette names no substance for the ground.
     pub albedo_scale: Option<f64>,
     /// The substances the field names, their values resolved by the server from plan 14's
     /// registry (decision-composition §1.7); empty for a body whose composition is not modelled.
@@ -593,7 +608,8 @@ impl FieldHeader {
         self.parts.surface_pressure
     }
 
-    /// R10's albedo scale, `None` until R10 fills it ([`FieldHeaderParts::albedo_scale`]).
+    /// R10's albedo scale on the class albedos, `None` for none, the palette's albedos unscaled
+    /// ([`FieldHeaderParts::albedo_scale`]).
     #[must_use]
     pub fn albedo_scale(&self) -> Option<f64> {
         self.parts.albedo_scale

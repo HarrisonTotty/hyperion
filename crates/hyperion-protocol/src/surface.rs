@@ -158,7 +158,12 @@ pub struct SurfaceHeaderDto {
     pub surface_age_gyr: f64,
     /// The body's mean surface pressure, Pa, non-negative: plan 14's, 0 on an airless body.
     pub surface_pressure_pa: f64,
-    /// Rendering plan R10's albedo scale, dimensionless and positive, or `null` until R10 fills it.
+    /// Rendering plan R10's albedo scale, dimensionless and positive: the one factor on the
+    /// palette's class albedos that makes the body's materials give its geometric albedo, each
+    /// scaled albedo clamped to its material's range. `null` means no scale, the palette's albedos
+    /// unscaled: where the body's photometry is not modelled, where its air hides its ground (a
+    /// surface pressure of 30 kPa or more), where its photometric law has no ground term (a cloud
+    /// deck's template, at any pressure) and where the palette names no substance for the ground.
     pub albedo_scale: Option<f64>,
     /// The coarse model the climate step ran.
     pub climate_model: ClimateModelDto,
