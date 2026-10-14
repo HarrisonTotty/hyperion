@@ -6,7 +6,7 @@
 //! manifest: crates/hyperion-fit/manifests/displaced_forms.toml
 //! data: `displaced_smoke@7eb81bb3dbee`
 //! sim-fingerprint: 425b654e6d29f655d1134f9eca5a0b10ab5a158919ce962937113f32640d5fb7
-//! since-generator-version: 21
+//! since-generator-version: 22
 //! source: orbits integrated in the model's own potential with a rotating Dehnen (2000)
 //!   quadrupole bar (P15.T6.a–b), by Mikkola and Aarseth's (2002, Celest. Mech. Dyn. Astron. 84,
 //!   343) time-transformed leapfrog, with capture by the black hole below 4GM/c (Bardeen, Press

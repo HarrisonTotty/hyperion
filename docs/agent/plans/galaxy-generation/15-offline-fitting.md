@@ -1239,6 +1239,13 @@ duration_years, fraction, tolerance, refinements) -> Checked` take the step frac
     inside the horizon.
   - The science check could not see Shapiro and Teukolsky's §12.4, so Bardeen, Press and Teukolsky
     (1972, eqs. 2.13 and 2.19) is now cited beside it.
+- **Landed in the 21 → 22 batch** (lane `p14-bump`, 2026-10-14). F1 was emitted at `--since 21`
+  on the lane and restamped to 22 by the 21 → 22 bump commit (decision-displaced-since); the body
+  is F1's. The smoke orbits were made again on the bump tree (`displaced_orbits.txt`'s SHA-256
+  88db652d…, F1's), the table re-emitted by the prebuilt tool at `--since 22` with only the three
+  `since` fields moving (the header, `tables.lock` and the `MANIFEST` row), and `fit-check` finds
+  it "provisional, since generator version 22" with no failure. `PROVENANCE.toml` keeps its
+  "at GENERATOR_VERSION 21", where the data was made.
 
 ### P15.T7 Helium correction
 

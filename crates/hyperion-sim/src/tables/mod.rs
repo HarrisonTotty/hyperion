@@ -136,7 +136,7 @@ pub const MANIFEST: &[TableInfo] = &[
     TableInfo {
         name: "displaced_forms",
         revision: 0,
-        since_generator_version: 21,
+        since_generator_version: 22,
         provisional: true,
     },
     TableInfo {

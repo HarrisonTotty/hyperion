@@ -2479,7 +2479,12 @@ made by whichever of T9 and T16 lands first, through the orchestrator, which coo
 lane at a time; later tasks that change a committed golden bump again. As built, T9 landed at 21
 with no bump of its own, and that batch's bump is this plan's first: it re-blesses
 `tests/golden/height/` with the rest, since no synthesis output has reached a save or the wire
-(main's ruling, 2026-10-13; Risks, "Deviations in T9, as built"). R05's `FINEST_SPACING_M`,
+(main's ruling, 2026-10-13; Risks, "Deviations in T9, as built"). _As built_ (lane `p14-bump`,
+2026-10-14): that bump, galaxy plan 14's 21 → 22, is this plan's first. It re-blessed every
+golden of this plan's under `crates/hyperion-surface/tests/golden/` and the sim's at 22 (`height/`
+with T7.h's `closed_forms`, `ground/`, `material/`, R10.T2's `weights/` and `wire/`), header only,
+with T1.b's hooks section on the golden systems; neither `SURFACE_PAYLOAD_FORMAT` nor
+`TEST_PLANET_VERSION` moved. R05's `FINEST_SPACING_M`,
 `BAND_LIMIT_M`
 and `finest_level` join the version when T9 reads them, as R05 notes. Nothing upstream moves but
 the hooks section T1.b fills: every draw is on a new tag, plan 14's `body.surface` seed is

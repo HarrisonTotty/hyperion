@@ -1,4 +1,4 @@
-# generator_version = 21
+# generator_version = 22
 02000b2c5fff0000.0100_mean_surface_temperature = 0x4082a9789c04fb7e  # 597.1838913335084
 02000b2c5fff0000.0100_equator_pole_contrast_k = 0x406536c412c179a6  # 169.71143472469447
 02000b2c5fff0000.0100_day_night_contrast_k = 0x4086a3735b3a2a6b  # 724.4313263458438

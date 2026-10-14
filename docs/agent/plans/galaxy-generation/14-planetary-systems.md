@@ -6433,6 +6433,28 @@ it:
   (R06's Risks, "Generator version 21"). They move the sky's luminosity tables, no golden and no
   planetary value.
 
+- **Version 22, the 21 → 22 batch, as built** (lane `p14-bump`, 2026-10-14). It carries T14.d,
+  T49.a, T24.f, T24.a with T48.e's signed contrasts, T24.b with T48.a–c, T48.f and the present
+  outgassing, T48.d and T48.e (the record's surface section, the gas-envelope split and the three
+  holds' fold), rendering plan R09's R09.T1.b (the detail seed in the hooks section), plan 15's
+  P15.T6.g (the integrator and the provisional `displaced_forms` re-emitted on its smoke orbits)
+  and decision-p14-d10-bd-companions §1–2 (the brown-dwarf flag and no close-binary class
+  factor). P11.T4.l and T4.m are not in it: they stay in plan 11's deferred bump batch, after
+  this plan's 23 → 24 ("main", 2026-10-14, after 36b76cc1). No commit of the batch lands alone.
+  - The batch's commits before the bump are checkpoints blessed at header 21: T48.e's (the folds'
+    moves, Risks, "Deviations in P14.T48.e, as built"), R09.T1.b's (the golden systems' hooks)
+    and P15.T6.g's F1 (`galaxy_class_table`'s 70 values). The bump commit raises the version and
+    blesses every golden of the workspace once at 22, under the heavy lock: 162 goldens change
+    their header alone, and `galaxy_parameters` (the server's) its generator-version value, with
+    R09's and R10's goldens among them (`height/` with R09.T7.h's `closed_forms`, `ground/`,
+    `material/`, R10.T2's `weights/` and `wire/`). The test planet's goldens keep
+    `TEST_PLANET_VERSION` 2. In the same commit `displaced_forms` is restamped `since 21` → 22
+    (decision-displaced-since): its body is F1's, and `fit-check` finds no table stale.
+  - D10 §1–2 follows the bump commit, blessed at 22 (Risks, "Close binaries: the brown-dwarf flag
+    and no class factor, as built").
+  - The bump commit adds no draw or domain tag; the batch's new streams are T48.a's
+    `body.continents` and R09.T1.b's reading of `body.surface.detail`, both declared before it.
+
 - Parameters that belong to the generator version and are named constants in one place
   (`planetary/params.rs`): the class weight table, the spacing floors, ring probabilities, the
   pulsar-planet probability, `SATELLITE_STABILITY_FRACTION`, the white dwarf pollution fit.

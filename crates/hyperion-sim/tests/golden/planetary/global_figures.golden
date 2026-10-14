@@ -1,4 +1,4 @@
-# generator_version = 21
+# generator_version = 22
 mercury_heat_flow = 0x3f860b479a53bad2  # 0.010763701817692182
 mercury_radiogenic_heat_flow = 0x3f7a047390f13bc2  # 0.006351901464838274
 mercury_interior = Convecting

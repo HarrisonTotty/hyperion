@@ -1,4 +1,4 @@
-# generator_version = 21
+# generator_version = 22
 ground 0xc12972b27525da69 0xc1277595a31d0a7e 0xc1341fced7216dfe height 0xc05487cfc8814655 normal 0xbfe787760e15d0a7 0xbfe4cf5736cccd37 0xbfc87028edae3e06 triangle 5 17 22462 19573 9 9 lower dir 0xbfdea8fcb628c6e7 0xbfdc439a2092bd99 0xbfe84665a0b95154 above 0x40a3f0fe746476a7
 ground 0xc0f01ec23aa5bff0 0x41389927f4c8c0fd 0x4123d6b9737e27a1 height 0x408aae0c76ef7014 normal 0xbfc5a2fe7e7b0dbe 0x3febc84fcc825728 0x3fdddba727747227 triangle 1 17 69445 97453 48 5 lower dir 0xbfa36e83d3536b4c 0x3feda6c669615cce 0x3fd7f162206d4dca above 0x4099f17d2371a916
 ground 0x4132ab464a0133e9 0x40fb6c24cdef2418 0x4132d0bbb3c12162 height 0x409c82e8e5a5715f normal 0x3fe06ee9ea8ac463 0x3fbc2b8d08ac1ca5 0x3feb3b3c92100a66 triangle 2 17 441 57131 16 5 lower dir 0x3fe67a7b7b87d830 0x3fb0824cb9c8db93 0x3fe6ae85e2776d87 above 0x40ac8fd78062c516
