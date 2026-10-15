@@ -12561,3 +12561,146 @@ tables::gauss_legendre`.
     against the paper's body (the check reached its abstract), and the slope leaves out the bins
     with no detection (the two below −0.3), which flattens it a little; a binomial fit over all
     eight bins would not.
+- **Deviations in P14.T49.b, as built: step 1, the rows and the heat capacities (`p14-registry`,
+  2026-10-14).** `GENERATOR_VERSION` stays 22, and no generated value moves.
+  - _Held at 22_ (decision-bump-plan-after-22 §1.2). c_p(T) is in force, and nothing on the record
+    calls it. Rows 0–8 keep every value 22 publishes:
+    - their c_p ÷ R class (`GasColumns::heat_capacity` and `heat_capacity_over_r` are now
+      `Option`, `Some` for rows 0–8 alone), which T24.a's published mixture still reads through
+      the held `heat_capacity_over_r(mixture)`;
+    - their client flags, and `substances.json`'s `heat_capacity_over_r` column (`null` for every
+      appended row).
+
+    `registry.golden` is extended only: rows 9–111's identities and flags, and every gas row's
+    molecular constants with its c_p ÷ R at 30, 100, 200, 298.15, 500, 1,000 and 2,000 K and its
+    H̃ and S̃ at 298.15 K. **P14.T54.a, at the bump:**
+    - point T24.a's published c_p ÷ R at `mixture_heat_capacity_over_r_at` at the mean surface
+      temperature;
+    - retire `HeatCapacityClass`, `heat_capacity_over_r(mixture)`, the two `GasColumns` getters,
+      the class sources and the golden's class lines;
+    - rename the fixture's column `heat_capacity_over_r_298k`, the sum's value at 298.15 K;
+    - turn on `absorber` for `H2`, `He`, `N2` and `CO2`.
+
+  - _Signatures_, as Provides gives them (science-r08-gases-2.md §1.7.6). Each function is also
+    `None` for a temperature that is not above 0 K and finite. Added public items, in
+    `substance::thermo`:
+    - `MolecularConstants` (rotation, vibrations, level sets, and their c_p ÷ R, H̃ and S̃);
+    - `Rotation { None, Linear, NonLinear, InLevels }`, `Vibration`,
+      `LevelSet { Listed, Rovibrational }`, `RovibrationalTerms` and `NuclearSpin`;
+    - `EQUILIBRIUM_HYDROGEN` (re-exported from `substance`), the recorded other bound;
+    - `SECOND_RADIATION_CONSTANT_CM_K`.
+  - _The sum_, as ruled (§1.3), in a fixed order over fixed level counts:
+    - **H₂** is a level set over its X¹Σg⁺ ladder, v ≤ 5 and J ≤ 20 (below the quartic's
+      turnover). Its terms are Huber and Herzberg 1979's eight constants, read through the NIST
+      WebBook's transcription. It is normal hydrogen: ortho and para frozen at 3:1, each from its
+      own lowest level, so H̃(0 K) = 0.
+    - **The torsions** take the ruling's V₃-only Hamiltonian. Their eigenvalues below 25,000 cm⁻¹
+      (65 for C₂H₆, 39 for CH₃OH) come from Sturm bisection in the free-rotor classes, and a test
+      repeats it.
+      - C₂H₆: F = 4 A_R = 10.684 cm⁻¹ and V₃ = 1,012.0 (Moazzen-Ahmadi et al. 1988). The ruling's
+        F = 10.72 [M] was 0.34% high.
+      - CH₃OH: F = 28.182 and V₃ = 373.21 (Chen, Wilhoit and Zwolinski 1977). Its F ≈ 27.6 [M] is
+        in no source read.
+      - Both V₆ terms are left out.
+    - **Atoms and ions** take their levels below 15,000 cm⁻¹ from the compilations NIST's Atomic
+      Spectra Database v5.12 names (Nave et al., Sugar and Corliss, Saloman, Martin and Zalubas,
+      Kramida and others). The ASD takes none of them from Moore's NBS Circular 467, which the
+      ruling named; the Circular agrees for Fe I, Ti I and O I to 0.5 cm⁻¹.
+    - **Diatomics** take ω_e − 2ω_e x_e from Huber and Herzberg 1979. TiO adds Huber and
+      Herzberg's X³Δ_r components (Phillips 1971, their note 18) and their a, d, E, A and b
+      states, McKemmish et al. 2019's term table as the check. VO takes the B⁴Π_r components, the
+      only states Huber and Herzberg tabulate below 15,000 cm⁻¹. Huber and Herzberg have no FeH
+      ground state, so FeH takes Dulick et al. 2003's: ω_e and Table 9a's 29 term values below
+      15,000 cm⁻¹ (X⁴Δ_i, A⁴Π, a⁶Δ, C⁴Φ, b⁶Π, c⁶Σ⁺, B⁴Σ⁻, D⁴Σ⁺, E⁴Π and F⁴Δ_i), their degeneracies
+      assumed (the table prints none). The ground alone, which the ruling allowed, ran 6.5% low at
+      300 K and 18% at 1,000 K (science-checker).
+    - **Fundamentals** are Shimanouchi 1972's (NSRDS-NBS 39) selected gas-phase values, and O₃'s
+      Shimanouchi 1977's (J. Phys. Chem. Ref. Data 6, 993; Volume II, not a US-government work,
+      its values cited as facts).
+  - _Measured against the oracles._
+    - NASA Glenn (`nasa/cea`'s `thermo.inp`): every tolerance holds. The worst are H₂O at
+      −1.75% at 1,500 K in the close group, and CH₄ at −2.6% and O₃ at −2.4% at 1,000 K.
+    - Woolley, Scott and Brickwedde 1948: normal H₂ within 0.03% from 30 to 300 K. They print no
+      equilibrium values, so its row is derived from their para and ortho tables.
+    - C₂H₆ at 100 K is 4.298, against Chao, Wilhoit and Zwolinski 1973's 4.287, read, and
+      Gurvich's 4.294 [M].
+    - CH₃OH is 4.438, Chen et al.'s.
+  - _The rows._ Rows 9–111 are appended in the plan's order. T52.a has listed no further species.
+    Their kinds:
+    - `NH4SH`, the salts, sulphides, oxides, silicates, `SiC` and `graphite` (key `graphite`,
+      stoichiometry C) are minerals; `H2SO4` and `S8` are molecules;
+    - `mars_dust`, the lithologies, `iron_nickel`, the chondrites and `cometary` are lithologies;
+      `acid_uv_absorber` and the brines and mixtures are solutions; the hazes and `carbonaceous`
+      are organic.
+
+    Their molar masses sum IUPAC 2021's abridged weights, an ion's less or more the electron's
+    (CODATA 2018). The gas rows are rows 0–8, `Ne` … `FeH`, `Al` … `Zn`, the thirteen ions, `HCl`
+    and `Cr`, for its vapour. The condensates' vapours (`H2SO4`, `S8`, `KCl`, `NaCl`) carry no gas
+    columns until a rule speciates them: a closed set, for the composition audit.
+
+  - _`ferric`_ (decision-backlog-2 §1, 2026-10-15) is `basalt_fe`'s Fe-rich basalt oxidised at the
+    surface, as Mars's red soils and weathered rock: Hu, Ehlmann and Seager 2012's Fe-oxidised type
+    by name and spectral role. Its row's note says so.
+    - Its grain density is step 2's: 3,310 kg m⁻³ (+120/−240), `basalt_fe`'s constant (§1.2).
+    - Hu et al.'s 50% nanophase hematite, read as a mode, would give 4,063–4,285 kg m⁻³. It is
+      refused (§1.3): it is a spectral weight with no stated basis, and measured Martian soils hold
+      about 1–8 wt% of ferric oxide.
+  - _The flags_, as the plan gives them, with three exceptions:
+    - rows 0–8 keep theirs until T54.a;
+    - the fifteen rows science-r08-unowned-absorbers adds (`Al`, `V`, `Mn`, `Ni`, `Zn`, `HCl` and
+      `Na+`, `Al+`, `Si+`, `K+`, `V+`, `Cr+`, `Mn+`, `Ni+`, `Zn+`) carry `absorber` false. The
+      client's `transparency.test.ts` holds every flagged row to cross-sections, a line table, a
+      pending entry or a stated none, and R08 has answered none of the fifteen. R08.T19's parity
+      extension (with R08.T4.c and T4.e's entries) owes them answers, and the flags turn on at
+      T54.a's bump with rows 0–8's, since a committed row's value changes only then;
+    - `aerosol_material` follows the client's index files (R08.T5.d, c769dc03), whose test holds
+      every flagged row to a file of its own. It is set for:
+      - the condensates aloft, the hazes, `Fe` and `Cr`;
+      - `CO` and `H2S`, whose ices have files;
+      - `C2H6`, whose liquid has a file since R08.T5.g (`ethane-liquid.json`, 48ff891a), merged
+        before this step's commit. Its row was new, so its flag follows the file at once;
+      - `basalt`, `basalt_fe` and `lava_glass`, the dusts R08 drew for T24.c.
+
+      It is not set for:
+      - `SO2`, `HCN` and `C2H2`, whose ices can deck (Io's frost, Titan's stratospheric clouds)
+        but have no file yet; each is flagged at T54.a's bump if R08 has added one;
+      - `Ne`, `Kr`, `Xe`, `N2O`, `O3`, `C2H4`, `PH3` and `CH3OH`, which no rule decks;
+      - the solutions and the other surface materials (a closed set, for the composition audit).
+  - _Names._ `SUBSTANCE_NAMES` holds every name-form row's name, 35 in registry order, 25 of them
+    new beside T49.f's three and R08.T5.d's seven: decision-substance-names §4.3's drafts with
+    `basalt_fe` as `Fe-rich basalt` (signoff-5, item 8). Each was confirmed against the row's
+    identity source.
+  - _Rayleigh._ `rayleigh` is set as decision-composition §1.1 gives it, on every gas row but the
+    electron, H⁻ and the ions. The client's Rayleigh table holds no row yet for `Al`, `V`, `Mn`,
+    `Ni`, `Zn`, `HCl` and `Cr`, whose estimated rows R08.T19's extension owes; no client test reads
+    the fixture's `rayleigh` today.
+  - _Scope moved out_ (decision-r11-palette-liquids.md §4, 2026-10-14): the liquids' R11 optics and
+    transport (refractive index, absorption and scattering by bin, surface tension, viscosity)
+    are a new P14.T49.h, lane `p14-liquids`. It appends them in a golden of its own, after this
+    subtask and before T54.a. T49.b keeps the liquid densities.
+  - _Files beyond the task's_: `crates/hyperion-sim/clippy.toml` (`McBride` in
+    `doc-valid-idents`), and the client's `lib/substances.ts` and `substances.test.ts` (T49.f's
+    rule).
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.b's step 1:
+  - Above 2,000 K the sum's cut-offs lose accuracy:
+    - the 15,000 cm⁻¹ atomic cut misses up to 4.8% at 2,500 K and 14% at 3,000 K (Ca I); 25,000
+      cm⁻¹ holds 0.5% at 3,000 K;
+    - H₂'s Dunham ladder moves by about 5% at 3,000 K with its cut.
+
+    Ultra-hot daysides want the wider cut and measured or ab initio H₂ levels.
+
+  - The harmonic sum runs low where anharmonicity matters: CH₄ by 4.7% at 1,500 K, and H₂O by 3% at
+    2,000 K.
+  - VO with McKemmish et al. 2016's A′⁴Φ, A⁴Π and doublets would be 1.0% below NASA Glenn at
+    1,000 K, against 1.35% with Huber and Herzberg's states, which the plan's rule keeps.
+  - FeH's Table 9a states are partly model or ab initio values: the X components run 20–60 cm⁻¹
+    above the lowest-J terms, and F⁴Δ_i's components sit at its Ω = 7/2 origin, up to 750 cm⁻¹
+    low. NASA Glenn holds no FeH to test it against.
+  - Moazzen-Ahmadi et al.'s V₃ and A_R were read in the abstract only. Gurvich's 4.294 for C₂H₆ at
+    100 K is unread, so the test holds the sum to Chao et al.'s 4.287 alone.
+  - Shimanouchi's selected C₂H₄ ν₆ and ν₈ and CH₃OH ν₁₁ come from the liquid's Raman spectra; the
+    sum weighs methanol's A and E torsional levels alike, as Chen et al. do (nuclear-spin weights
+    would move it by up to 0.5% at 100–300 K).
+  - Woolley, Scott and Brickwedde's Table 4 misprints ortho-H₂'s C_p at 80 K: 5.982 for 4.982.
+  - NASA Glenn's own polynomials wobble for atoms near 1,200 K (Na 2.4974, Ca 2.4841), below their
+    5/2 floor.

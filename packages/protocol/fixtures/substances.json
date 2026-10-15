@@ -90,6 +90,1036 @@
       "rayleigh": true,
       "absorber": false,
       "aerosol_material": true
+    },
+    {
+      "index": 9,
+      "key": "Ne",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 20.18,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 10,
+      "key": "Kr",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 83.798,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 11,
+      "key": "Xe",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 131.29,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 12,
+      "key": "N2O",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 44.013,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 13,
+      "key": "CO",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 28.01,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": true
+    },
+    {
+      "index": 14,
+      "key": "SO2",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 64.058,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 15,
+      "key": "H2S",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 34.076,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": true
+    },
+    {
+      "index": 16,
+      "key": "O3",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 47.997,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 17,
+      "key": "HCN",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 27.026,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 18,
+      "key": "C2H2",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 26.038,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 19,
+      "key": "C2H4",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 28.054,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 20,
+      "key": "C2H6",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 30.07,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": true
+    },
+    {
+      "index": 21,
+      "key": "PH3",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 33.998,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 22,
+      "key": "CH3OH",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 32.042,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 23,
+      "key": "H",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 1.008,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 24,
+      "key": "O",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 15.999,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 25,
+      "key": "e-",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 0.00054857990888,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 26,
+      "key": "H-",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 1.00854857990888,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 27,
+      "key": "Na",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 22.99,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 28,
+      "key": "K",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 39.098,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 29,
+      "key": "Fe",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 55.845,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": true
+    },
+    {
+      "index": 30,
+      "key": "Mg",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 24.305,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 31,
+      "key": "Si",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 28.085,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 32,
+      "key": "Ca",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 40.078,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 33,
+      "key": "Ti",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 47.867,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 34,
+      "key": "SiO",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 44.084,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 35,
+      "key": "TiO",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 63.866,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 36,
+      "key": "VO",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 66.941,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 37,
+      "key": "FeH",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 56.853,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 38,
+      "key": "Al",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 26.982,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 39,
+      "key": "V",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 50.942,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 40,
+      "key": "Mn",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 54.938,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 41,
+      "key": "Ni",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 58.693,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 42,
+      "key": "Zn",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 65.38,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 43,
+      "key": "Na+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 22.98945142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 44,
+      "key": "Mg+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 24.30445142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 45,
+      "key": "Al+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 26.98145142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 46,
+      "key": "Si+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 28.08445142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 47,
+      "key": "K+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 39.09745142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 48,
+      "key": "Ca+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 40.07745142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 49,
+      "key": "Ti+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 47.86645142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 50,
+      "key": "V+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 50.94145142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 51,
+      "key": "Cr+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 51.99545142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 52,
+      "key": "Mn+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 54.93745142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 53,
+      "key": "Fe+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 55.84445142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": true,
+      "aerosol_material": false
+    },
+    {
+      "index": 54,
+      "key": "Ni+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 58.69245142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 55,
+      "key": "Zn+",
+      "kind": "ion",
+      "molar_mass_g_per_mol": 65.37945142009112,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 56,
+      "key": "HCl",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 36.458,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 57,
+      "key": "NH4SH",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 51.107,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 58,
+      "key": "H2SO4",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 98.072,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 59,
+      "key": "S8",
+      "kind": "molecule",
+      "molar_mass_g_per_mol": 256.48,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 60,
+      "key": "KCl",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 74.548,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 61,
+      "key": "NaCl",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 58.44,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 62,
+      "key": "ZnS",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 97.44,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 63,
+      "key": "Na2S",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 78.04,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 64,
+      "key": "MnS",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 86.998,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 65,
+      "key": "Cr",
+      "kind": "atom",
+      "molar_mass_g_per_mol": 51.996,
+      "heat_capacity_over_r": null,
+      "rayleigh": true,
+      "absorber": true,
+      "aerosol_material": true
+    },
+    {
+      "index": 66,
+      "key": "FeS",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 87.905,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 67,
+      "key": "MgSiO3",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 100.387,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 68,
+      "key": "Mg2SiO4",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 140.691,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 69,
+      "key": "SiO2",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 60.083,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 70,
+      "key": "Al2O3",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 101.961,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 71,
+      "key": "CaTiO3",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 135.942,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 72,
+      "key": "TiO2",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 79.865,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 73,
+      "key": "graphite",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 12.011,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 74,
+      "key": "tholin",
+      "kind": "organic",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 75,
+      "key": "soot",
+      "kind": "organic",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 76,
+      "key": "chromophore",
+      "kind": "organic",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 77,
+      "key": "ice_giant_haze",
+      "kind": "organic",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 78,
+      "key": "mars_dust",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 79,
+      "key": "acid_uv_absorber",
+      "kind": "solution",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 80,
+      "key": "brine_nacl",
+      "kind": "solution",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 81,
+      "key": "brine_mgso4",
+      "kind": "solution",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 82,
+      "key": "brine_naclo4",
+      "kind": "solution",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 83,
+      "key": "brine_mgclo4",
+      "kind": "solution",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 84,
+      "key": "nh3_h2o",
+      "kind": "solution",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 85,
+      "key": "ch4_c2h6_n2",
+      "kind": "solution",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 86,
+      "key": "anorthosite",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 87,
+      "key": "feldspathic",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 88,
+      "key": "basalt",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 89,
+      "key": "basalt_fe",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 90,
+      "key": "komatiite",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 91,
+      "key": "basalt_reduced",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 92,
+      "key": "granite",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 93,
+      "key": "ultramafic",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 94,
+      "key": "ferric",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 95,
+      "key": "phyllosilicate",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 96,
+      "key": "lava_glass",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": true
+    },
+    {
+      "index": 97,
+      "key": "ca_al_residue",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 98,
+      "key": "iron_nickel",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 99,
+      "key": "SiC",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 40.096,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 100,
+      "key": "MgSO4",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 120.361,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 101,
+      "key": "Na2CO3",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 105.988,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 102,
+      "key": "CaCO3",
+      "kind": "mineral",
+      "molar_mass_g_per_mol": 100.086,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 103,
+      "key": "carbonaceous",
+      "kind": "organic",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 104,
+      "key": "chondrite_ci",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 105,
+      "key": "chondrite_cm",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 106,
+      "key": "chondrite_cv",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 107,
+      "key": "chondrite_h",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 108,
+      "key": "chondrite_l",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 109,
+      "key": "chondrite_ll",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 110,
+      "key": "chondrite_e",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
+    },
+    {
+      "index": 111,
+      "key": "cometary",
+      "kind": "lithology",
+      "molar_mass_g_per_mol": null,
+      "heat_capacity_over_r": null,
+      "rayleigh": false,
+      "absorber": false,
+      "aerosol_material": false
     }
   ]
 }

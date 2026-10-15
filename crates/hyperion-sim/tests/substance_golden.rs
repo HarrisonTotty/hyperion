@@ -3,12 +3,16 @@
 //!
 //! - `tests/golden/substance/registry.golden` pins every row's values by their bits, at the
 //!   generator version: the elements' order, each row's identity (index, key, kind, charge,
-//!   stoichiometry and molar mass), its client optics, its gas columns and its phase columns. A
-//!   changed value is moved output, which bumps the version.
+//!   stoichiometry and molar mass), its client optics, its gas columns (the held class, the
+//!   molecular constants, and `c_p` ÷ R, H̃ and S̃ at fixed temperatures; P14.T49.b) and its phase
+//!   columns. A changed value is moved output, which bumps the version.
 //! - `packages/protocol/fixtures/substances.json` mirrors the rows for the client (index, key,
 //!   kind, molar mass, `c_p` ÷ R and the three optics flags), which rendering plan R08's parity
 //!   check and P14.T35.e's decode tests read. `just bless` (`HYPERION_BLESS=1`) writes it, and
-//!   otherwise this test holds it to the registry byte for byte.
+//!   otherwise this test holds it to the registry byte for byte. Its `c_p` ÷ R is generator
+//!   version 22's held class, `null` for the rows P14.T49.b appends; P14.T54.a's bump renames it
+//!   `heat_capacity_over_r_298k`, the statistical sum's at 298.15 K, for display and cross-check
+//!   only (science-r08-gases-2.md §1.4; decision-bump-plan-after-22 §1.2).
 //!
 //! Both are append-only in their identities: a row or an element is appended, never renumbered,
 //! renamed or re-kinded. Each test reads the committed file before it compares or blesses, and
@@ -19,9 +23,19 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use hyperion_sim::GENERATOR_VERSION;
-use hyperion_sim::substance::{self, Element, GasColumns, Substance};
+use hyperion_sim::substance::{
+    self, EQUILIBRIUM_HYDROGEN, Element, GasColumns, LevelSet, MolecularConstants, Substance,
+};
+use hyperion_sim::units::Kelvin;
 use hyperion_testkit::golden;
-use hyperion_testkit::golden::{GoldenWriter, Mode};
+use hyperion_testkit::golden::{GoldenWriter, Mode, f64_digest};
+
+/// The temperatures, kelvin, at which the golden pins each gas row's `c_p` ÷ R: Triton's to a
+/// near-runaway world's.
+const PINNED_TEMPERATURES: [f64; 7] = [30.0, 100.0, 200.0, 298.15, 500.0, 1_000.0, 2_000.0];
+
+/// The temperature, kelvin, at which the golden pins each gas row's H̃ and S̃.
+const STANDARD_TEMPERATURE: f64 = 298.15;
 
 /// The repository's root, two levels above this crate.
 fn repository() -> PathBuf {
@@ -74,6 +88,90 @@ fn elements(row: &Substance) -> String {
     text
 }
 
+/// The golden's gas section: each gas row's held class, molecular constants, and its `c_p` ÷ R at
+/// [`PINNED_TEMPERATURES`] and H̃ and S̃ at [`STANDARD_TEMPERATURE`] (P14.T49.b).
+fn gas_section(w: &mut GoldenWriter) {
+    w.line("[gas]");
+    for id in substance::ids() {
+        let row = id.substance();
+        let Some(gas) = row.gas() else {
+            continue;
+        };
+        let label = format!("gas {} {}", id.index(), row.key());
+        // The held class of rows 0–8, generator version 22's published value, keeps T49.a's lines.
+        if let (Some(class), Some(over_r)) = (gas.heat_capacity(), gas.heat_capacity_over_r()) {
+            w.line(&format!("{label}: {class:?}"));
+            w.f64(&format!("{label}: heat_capacity_over_r"), over_r);
+        }
+        let molecular = gas.molecular();
+        w.line(&format!("{label}: rotation {:?}", molecular.rotation()));
+        for (k, vibration) in molecular.vibrations().iter().enumerate() {
+            w.f64(
+                &format!(
+                    "{label}: vibration {k}, degeneracy {}, wavenumber_cm",
+                    vibration.degeneracy()
+                ),
+                vibration.wavenumber_cm(),
+            );
+        }
+        for (k, set) in molecular.levels().iter().enumerate() {
+            let what = match *set {
+                LevelSet::Listed { levels, .. } => {
+                    let values: Vec<f64> = levels
+                        .iter()
+                        .flat_map(|level| [level.energy_cm(), level.degeneracy()])
+                        .collect();
+                    format!(
+                        "{} levels, digest {:016x}",
+                        levels.len(),
+                        f64_digest(&values)
+                    )
+                }
+                LevelSet::Rovibrational { terms, spin, .. } => {
+                    w.f64(
+                        &format!("{label}: level set {k}, term (0, 0) cm"),
+                        terms.term_cm(0, 0),
+                    );
+                    format!("rovibrational {spin:?}")
+                }
+            };
+            w.f64(
+                &format!("{label}: level set {k}, {what}, weight"),
+                set.weight(),
+            );
+        }
+        pin_sums(w, &label, molecular);
+    }
+    // Row 0 is normal hydrogen; the recorded other bound, equilibrium hydrogen, is pinned too.
+    pin_sums(w, "equilibrium hydrogen", &EQUILIBRIUM_HYDROGEN);
+}
+
+/// Pins `molecular`'s `c_p` ÷ R at [`PINNED_TEMPERATURES`] and its H̃ and S̃ at
+/// [`STANDARD_TEMPERATURE`], under `label`.
+fn pin_sums(w: &mut GoldenWriter, label: &str, molecular: &MolecularConstants) {
+    for t in PINNED_TEMPERATURES {
+        let at = Kelvin::new(t);
+        let c = molecular
+            .heat_capacity_over_r(at)
+            .expect("a pinned temperature is positive");
+        w.f64(&format!("{label}: heat_capacity_over_r at {t} K"), c);
+    }
+    let standard = Kelvin::new(STANDARD_TEMPERATURE);
+    w.f64(
+        &format!("{label}: enthalpy_over_r_k at {STANDARD_TEMPERATURE} K"),
+        molecular
+            .enthalpy_over_r(standard)
+            .expect("298.15 K is positive")
+            .value(),
+    );
+    w.f64(
+        &format!("{label}: entropy_over_r at {STANDARD_TEMPERATURE} K"),
+        molecular
+            .entropy_over_r(standard)
+            .expect("298.15 K is positive"),
+    );
+}
+
 /// The golden's text.
 fn registry_golden() -> String {
     let mut w = GoldenWriter::new();
@@ -109,18 +207,7 @@ fn registry_golden() -> String {
             optics.aerosol_material()
         ));
     }
-    w.line("[gas]");
-    for id in substance::ids() {
-        let row = id.substance();
-        if let Some(gas) = row.gas() {
-            let label = format!("gas {} {}", id.index(), row.key());
-            w.line(&format!("{label}: {:?}", gas.heat_capacity()));
-            w.f64(
-                &format!("{label}: heat_capacity_over_r"),
-                gas.heat_capacity_over_r(),
-            );
-        }
-    }
+    gas_section(&mut w);
     w.line("[phase]");
     for id in substance::condensables() {
         let row = id.substance();
@@ -163,7 +250,7 @@ fn identity_lines(text: &str, prefix: &str) -> Vec<String> {
 }
 
 #[test]
-fn the_registry_is_pinned_and_append_only() {
+fn substance_registry_is_pinned_and_append_only() {
     let text = registry_golden();
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/substance/registry.golden");
     if let Some(old) = committed(&path) {
@@ -194,7 +281,7 @@ fn fixture() -> String {
             row.key(),
             row.kind().name(),
             number(row.molar_mass_g_per_mol()),
-            number(row.gas().map(GasColumns::heat_capacity_over_r)),
+            number(row.gas().and_then(GasColumns::heat_capacity_over_r)),
             optics.rayleigh(),
             optics.absorber(),
             optics.aerosol_material(),
@@ -235,7 +322,7 @@ fn fixture_identities(text: &str) -> Vec<String> {
 }
 
 #[test]
-fn the_fixture_mirrors_the_registry() {
+fn substance_fixture_mirrors_the_registry() {
     let text = fixture();
     let path = repository().join("packages/protocol/fixtures/substances.json");
     let old = committed(&path);

@@ -4,7 +4,7 @@
 
 # Author names, journal abbreviations and supernova types that `doc_markdown` would otherwise
 # take for code; ".." keeps Clippy's defaults.
-doc-valid-idents = ["McMillan", "McConnell", "McCord", "McKee", "McKay", "McDonough", "McDonald", "McElroy", "McCray", "McEwen", "McLennan", "McGovern", "McNutt", "McCubbin", "McCammon", "McGehee", "McGetchin", "IJspeert", "JeongAhn", "ApJ", "ApJS", "IIb", "WebBook", ".."]
+doc-valid-idents = ["McMillan", "McConnell", "McCord", "McKee", "McKay", "McDonough", "McDonald", "McElroy", "McCray", "McEwen", "McLennan", "McGovern", "McNutt", "McCubbin", "McCammon", "McBride", "McGehee", "McGetchin", "IJspeert", "JeongAhn", "ApJ", "ApJS", "IIb", "WebBook", ".."]
 
 # Every transcendental function goes through `hyperion_sim::math` (`hyperion_base::math`), which
 # wraps the exactly pinned `libm`. The platform's own versions differ between operating systems and
