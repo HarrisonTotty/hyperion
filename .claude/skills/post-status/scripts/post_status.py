@@ -51,10 +51,7 @@ def cmd_post(ctx: gc.Ctx, role: str, text: str, dry_run: bool) -> int:
     cfg, gh = ctx.cfg, ctx.gh
     if not text.strip():
         raise gc.CollabError("the status post is empty", gc.EXIT_USAGE)
-    tag = str(cfg["coordination"].get("tags", {}).get(role) or f"[{role}]")
-    text = text.strip()
-    if not text.startswith(tag):
-        text = f"{tag} {text}"
+    text = gc.tagged(cfg, role, text)
     data = {"role": role}
     if role == "worker":
         data["worker"] = gc.worker_id(cfg, ctx.git)

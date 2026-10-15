@@ -1285,7 +1285,8 @@ replaced, so the black hole's mass and the potential change, and every star move
 (velocities appear; no position moves); and P08.T12 (placement calls the stellar stage, and layers D
 and E are replaced: their bounds, counts, candidates and marks all change; layers A to C do not
 move). P08.T6, T13, T15 and the padding of Design note 27 change no generated output.
-`tables::displaced_forms` belongs to the version, and P15.T6 lands with P08.T12's bump.
+`tables::displaced_forms` belongs to the version, and P15.T6 lands with P08.T12's bump (version
+26, S2; decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15).
 
 Reserved so that later plans need not move a star: `DisplacedFields::register` and the zero-weight
 hypervelocity class for plans 09 and 11; `recent_death_claims` for plan 09; the split between

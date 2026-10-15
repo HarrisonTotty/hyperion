@@ -1254,8 +1254,9 @@ P11.T4, as built"._
     variant: 0 misses, up to 2.9 × the passes). Re-run the zero-miss gate
     (`the_decay_bound_never_passes_over_an_interaction`) and record the passes.
   - **Acceptance:** as T4.k's, plus the deferred batch's `GENERATOR_VERSION` bump (a later bump
-    batch, after plan 14's 23 → 24) with every golden re-blessed, and P11.T10's agreement test, if
-    it then exists, re-baselined.
+    batch, after plan 14's 23 → 24: version 25, S1, by decision-bump-plan-after-22, 2026-10-14;
+    updated 2026-10-15) with every golden re-blessed, and P11.T10's agreement test, if it then
+    exists, re-baselined.
 
 ### P11.T5 Classes from state
 
@@ -1969,8 +1970,10 @@ output:
   fates (R06's Risks, "Generator version 21").
 
 T4.l moves output in a later bump batch, after plan 14's 23 → 24, with its own bump, and T4.m
-rides it (ruling p11-c2-swell). T1.d moves every star once, because the mean mass per system
-changes the system count (plan 02 lists it among its known future bumps). After that no primary
+rides it (ruling p11-c2-swell): version 25 (S1), the first galaxy train after plan 14's 23 → 24
+(decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). T1.d moves every star once,
+because the mean mass per system changes the system count (plan 02 lists it among its known
+future bumps). After that no primary
 moves: IDs, positions, primary masses, ages, primary draws, death times and kicks are untouched,
 except that T7 redraws about 10⁻⁴ of grid systems (as built it removes none). It reserves: body
 indices 0–15 for the stellar level, which is

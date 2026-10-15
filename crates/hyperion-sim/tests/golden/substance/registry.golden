@@ -44,6 +44,212 @@ identity 7 CO2: molecule, charge 0, elements [C 1 O 2]
 identity 7 CO2: molar_mass_g_per_mol = 0x40460126e978d4fe  # 44.009
 identity 8 Ar: atom, charge 0, elements [Ar 1]
 identity 8 Ar: molar_mass_g_per_mol = 0x4043f9999999999a  # 39.95
+identity 9 Ne: atom, charge 0, elements [Ne 1]
+identity 9 Ne: molar_mass_g_per_mol = 0x40342e147ae147ae  # 20.18
+identity 10 Kr: atom, charge 0, elements [Kr 1]
+identity 10 Kr: molar_mass_g_per_mol = 0x4054f3126e978d50  # 83.798
+identity 11 Xe: atom, charge 0, elements [Xe 1]
+identity 11 Xe: molar_mass_g_per_mol = 0x40606947ae147ae1  # 131.29
+identity 12 N2O: molecule, charge 0, elements [N 2 O 1]
+identity 12 N2O: molar_mass_g_per_mol = 0x404601a9fbe76c8b  # 44.013
+identity 13 CO: molecule, charge 0, elements [C 1 O 1]
+identity 13 CO: molar_mass_g_per_mol = 0x403c028f5c28f5c3  # 28.01
+identity 14 SO2: molecule, charge 0, elements [S 1 O 2]
+identity 14 SO2: molar_mass_g_per_mol = 0x405003b645a1cac1  # 64.058
+identity 15 H2S: molecule, charge 0, elements [H 2 S 1]
+identity 15 H2S: molar_mass_g_per_mol = 0x404109ba5e353f7d  # 34.076
+identity 16 O3: molecule, charge 0, elements [O 3]
+identity 16 O3: molar_mass_g_per_mol = 0x4047ff9db22d0e56  # 47.997
+identity 17 HCN: molecule, charge 0, elements [H 1 C 1 N 1]
+identity 17 HCN: molar_mass_g_per_mol = 0x403b06a7ef9db22d  # 27.026
+identity 18 C2H2: molecule, charge 0, elements [C 2 H 2]
+identity 18 C2H2: molar_mass_g_per_mol = 0x403a09ba5e353f7d  # 26.038
+identity 19 C2H4: molecule, charge 0, elements [C 2 H 4]
+identity 19 C2H4: molar_mass_g_per_mol = 0x403c0dd2f1a9fbe7  # 28.054
+identity 20 C2H6: molecule, charge 0, elements [C 2 H 6]
+identity 20 C2H6: molar_mass_g_per_mol = 0x403e11eb851eb852  # 30.07
+identity 21 PH3: molecule, charge 0, elements [P 1 H 3]
+identity 21 PH3: molar_mass_g_per_mol = 0x4040ffbe76c8b439  # 33.998
+identity 22 CH3OH: molecule, charge 0, elements [C 1 H 4 O 1]
+identity 22 CH3OH: molar_mass_g_per_mol = 0x404005604189374c  # 32.042
+identity 23 H: atom, charge 0, elements [H 1]
+identity 23 H: molar_mass_g_per_mol = 0x3ff020c49ba5e354  # 1.008
+identity 24 O: atom, charge 0, elements [O 1]
+identity 24 O: molar_mass_g_per_mol = 0x402fff7ced916873  # 15.999
+identity 25 e-: ion, charge -1, elements []
+identity 25 e-: molar_mass_g_per_mol = 0x3f41f9d26249f745  # 0.00054857990888
+identity 26 H-: ion, charge -1, elements [H 1]
+identity 26 H-: molar_mass_g_per_mol = 0x3ff02303d5f22c93  # 1.00854857990888
+identity 27 Na: atom, charge 0, elements [Na 1]
+identity 27 Na: molar_mass_g_per_mol = 0x4036fd70a3d70a3d  # 22.99
+identity 28 K: atom, charge 0, elements [K 1]
+identity 28 K: molar_mass_g_per_mol = 0x40438c8b43958106  # 39.098
+identity 29 Fe: atom, charge 0, elements [Fe 1]
+identity 29 Fe: molar_mass_g_per_mol = 0x404bec28f5c28f5c  # 55.845
+identity 30 Mg: atom, charge 0, elements [Mg 1]
+identity 30 Mg: molar_mass_g_per_mol = 0x40384e147ae147ae  # 24.305
+identity 31 Si: atom, charge 0, elements [Si 1]
+identity 31 Si: molar_mass_g_per_mol = 0x403c15c28f5c28f6  # 28.085
+identity 32 Ca: atom, charge 0, elements [Ca 1]
+identity 32 Ca: molar_mass_g_per_mol = 0x404409fbe76c8b44  # 40.078
+identity 33 Ti: atom, charge 0, elements [Ti 1]
+identity 33 Ti: molar_mass_g_per_mol = 0x4047eef9db22d0e5  # 47.867
+identity 34 SiO: molecule, charge 0, elements [Si 1 O 1]
+identity 34 SiO: molar_mass_g_per_mol = 0x40460ac083126e98  # 44.084
+identity 35 TiO: molecule, charge 0, elements [Ti 1 O 1]
+identity 35 TiO: molar_mass_g_per_mol = 0x404feed916872b02  # 63.866
+identity 36 VO: molecule, charge 0, elements [V 1 O 1]
+identity 36 VO: molar_mass_g_per_mol = 0x4050bc395810624e  # 66.941
+identity 37 FeH: molecule, charge 0, elements [Fe 1 H 1]
+identity 37 FeH: molar_mass_g_per_mol = 0x404c6d2f1a9fbe77  # 56.853
+identity 38 Al: atom, charge 0, elements [Al 1]
+identity 38 Al: molar_mass_g_per_mol = 0x403afb645a1cac08  # 26.982
+identity 39 V: atom, charge 0, elements [V 1]
+identity 39 V: molar_mass_g_per_mol = 0x4049789374bc6a7f  # 50.942
+identity 40 Mn: atom, charge 0, elements [Mn 1]
+identity 40 Mn: molar_mass_g_per_mol = 0x404b7810624dd2f2  # 54.938
+identity 41 Ni: atom, charge 0, elements [Ni 1]
+identity 41 Ni: molar_mass_g_per_mol = 0x404d58b439581062  # 58.693
+identity 42 Zn: atom, charge 0, elements [Zn 1]
+identity 42 Zn: molar_mass_g_per_mol = 0x40505851eb851eb8  # 65.38
+identity 43 Na+: ion, charge 1, elements [Na 1]
+identity 43 Na+: molar_mass_g_per_mol = 0x4036fd4cb03245aa  # 22.98945142009112
+identity 44 Mg+: ion, charge 1, elements [Mg 1]
+identity 44 Mg+: molar_mass_g_per_mol = 0x40384df0873c831a  # 24.30445142009112
+identity 45 Al+: ion, charge 1, elements [Al 1]
+identity 45 Al+: molar_mass_g_per_mol = 0x403afb406677e774  # 26.98145142009112
+identity 46 Si+: ion, charge 1, elements [Si 1]
+identity 46 Si+: molar_mass_g_per_mol = 0x403c159e9bb76462  # 28.08445142009112
+identity 47 K+: ion, charge 1, elements [K 1]
+identity 47 K+: molar_mass_g_per_mol = 0x40438c7949c31ebc  # 39.09745142009112
+identity 48 Ca+: ion, charge 1, elements [Ca 1]
+identity 48 Ca+: molar_mass_g_per_mol = 0x404409e9ed9a28fa  # 40.07745142009112
+identity 49 Ti+: ion, charge 1, elements [Ti 1]
+identity 49 Ti+: molar_mass_g_per_mol = 0x4047eee7e1506e9b  # 47.86645142009112
+identity 50 V+: ion, charge 1, elements [V 1]
+identity 50 V+: molar_mass_g_per_mol = 0x404978817aea0835  # 50.94145142009112
+identity 51 Cr+: ion, charge 1, elements [Cr 1]
+identity 51 Cr+: molar_mass_g_per_mol = 0x4049ff6af3bf0629  # 51.99545142009112
+identity 52 Mn+: ion, charge 1, elements [Mn 1]
+identity 52 Mn+: molar_mass_g_per_mol = 0x404b77fe687b70a8  # 54.93745142009112
+identity 53 Fe+: ion, charge 1, elements [Fe 1]
+identity 53 Fe+: molar_mass_g_per_mol = 0x404bec16fbf02d12  # 55.84445142009112
+identity 54 Ni+: ion, charge 1, elements [Ni 1]
+identity 54 Ni+: molar_mass_g_per_mol = 0x404d58a23f85ae18  # 58.69245142009112
+identity 55 Zn+: ion, charge 1, elements [Zn 1]
+identity 55 Zn+: molar_mass_g_per_mol = 0x40505848ee9bed93  # 65.37945142009112
+identity 56 HCl: molecule, charge 0, elements [H 1 Cl 1]
+identity 56 HCl: molar_mass_g_per_mol = 0x40423a9fbe76c8b4  # 36.458
+identity 57 NH4SH: mineral, charge 0, elements [N 1 H 5 S 1]
+identity 57 NH4SH: molar_mass_g_per_mol = 0x40498db22d0e5604  # 51.107
+identity 58 H2SO4: molecule, charge 0, elements [H 2 S 1 O 4]
+identity 58 H2SO4: molar_mass_g_per_mol = 0x4058849ba5e353f8  # 98.072
+identity 59 S8: molecule, charge 0, elements [S 8]
+identity 59 S8: molar_mass_g_per_mol = 0x407007ae147ae148  # 256.48
+identity 60 KCl: mineral, charge 0, elements [K 1 Cl 1]
+identity 60 KCl: molar_mass_g_per_mol = 0x4052a3126e978d50  # 74.548
+identity 61 NaCl: mineral, charge 0, elements [Na 1 Cl 1]
+identity 61 NaCl: molar_mass_g_per_mol = 0x404d3851eb851eb8  # 58.44
+identity 62 ZnS: mineral, charge 0, elements [Zn 1 S 1]
+identity 62 ZnS: molar_mass_g_per_mol = 0x40585c28f5c28f5c  # 97.44
+identity 63 Na2S: mineral, charge 0, elements [Na 2 S 1]
+identity 63 Na2S: molar_mass_g_per_mol = 0x4053828f5c28f5c3  # 78.04
+identity 64 MnS: mineral, charge 0, elements [Mn 1 S 1]
+identity 64 MnS: molar_mass_g_per_mol = 0x4055bfdf3b645a1d  # 86.998
+identity 65 Cr: atom, charge 0, elements [Cr 1]
+identity 65 Cr: molar_mass_g_per_mol = 0x4049ff7ced916873  # 51.996
+identity 66 FeS: mineral, charge 0, elements [Fe 1 S 1]
+identity 66 FeS: molar_mass_g_per_mol = 0x4055f9eb851eb852  # 87.905
+identity 67 MgSiO3: mineral, charge 0, elements [Mg 1 Si 1 O 3]
+identity 67 MgSiO3: molar_mass_g_per_mol = 0x405918c49ba5e354  # 100.387
+identity 68 Mg2SiO4: mineral, charge 0, elements [Mg 2 Si 1 O 4]
+identity 68 Mg2SiO4: molar_mass_g_per_mol = 0x4061961cac083127  # 140.691
+identity 69 SiO2: mineral, charge 0, elements [Si 1 O 2]
+identity 69 SiO2: molar_mass_g_per_mol = 0x404e0a9fbe76c8b4  # 60.083
+identity 70 Al2O3: mineral, charge 0, elements [Al 2 O 3]
+identity 70 Al2O3: molar_mass_g_per_mol = 0x40597d810624dd2f  # 101.961
+identity 71 CaTiO3: mineral, charge 0, elements [Ca 1 Ti 1 O 3]
+identity 71 CaTiO3: molar_mass_g_per_mol = 0x4060fe24dd2f1aa0  # 135.942
+identity 72 TiO2: mineral, charge 0, elements [Ti 1 O 2]
+identity 72 TiO2: molar_mass_g_per_mol = 0x4053f75c28f5c28f  # 79.865
+identity 73 graphite: mineral, charge 0, elements [C 1]
+identity 73 graphite: molar_mass_g_per_mol = 0x402805a1cac08312  # 12.011
+identity 74 tholin: organic, charge 0, elements []
+identity 74 tholin: molar_mass_g_per_mol none
+identity 75 soot: organic, charge 0, elements []
+identity 75 soot: molar_mass_g_per_mol none
+identity 76 chromophore: organic, charge 0, elements []
+identity 76 chromophore: molar_mass_g_per_mol none
+identity 77 ice_giant_haze: organic, charge 0, elements []
+identity 77 ice_giant_haze: molar_mass_g_per_mol none
+identity 78 mars_dust: lithology, charge 0, elements []
+identity 78 mars_dust: molar_mass_g_per_mol none
+identity 79 acid_uv_absorber: solution, charge 0, elements []
+identity 79 acid_uv_absorber: molar_mass_g_per_mol none
+identity 80 brine_nacl: solution, charge 0, elements []
+identity 80 brine_nacl: molar_mass_g_per_mol none
+identity 81 brine_mgso4: solution, charge 0, elements []
+identity 81 brine_mgso4: molar_mass_g_per_mol none
+identity 82 brine_naclo4: solution, charge 0, elements []
+identity 82 brine_naclo4: molar_mass_g_per_mol none
+identity 83 brine_mgclo4: solution, charge 0, elements []
+identity 83 brine_mgclo4: molar_mass_g_per_mol none
+identity 84 nh3_h2o: solution, charge 0, elements []
+identity 84 nh3_h2o: molar_mass_g_per_mol none
+identity 85 ch4_c2h6_n2: solution, charge 0, elements []
+identity 85 ch4_c2h6_n2: molar_mass_g_per_mol none
+identity 86 anorthosite: lithology, charge 0, elements []
+identity 86 anorthosite: molar_mass_g_per_mol none
+identity 87 feldspathic: lithology, charge 0, elements []
+identity 87 feldspathic: molar_mass_g_per_mol none
+identity 88 basalt: lithology, charge 0, elements []
+identity 88 basalt: molar_mass_g_per_mol none
+identity 89 basalt_fe: lithology, charge 0, elements []
+identity 89 basalt_fe: molar_mass_g_per_mol none
+identity 90 komatiite: lithology, charge 0, elements []
+identity 90 komatiite: molar_mass_g_per_mol none
+identity 91 basalt_reduced: lithology, charge 0, elements []
+identity 91 basalt_reduced: molar_mass_g_per_mol none
+identity 92 granite: lithology, charge 0, elements []
+identity 92 granite: molar_mass_g_per_mol none
+identity 93 ultramafic: lithology, charge 0, elements []
+identity 93 ultramafic: molar_mass_g_per_mol none
+identity 94 ferric: lithology, charge 0, elements []
+identity 94 ferric: molar_mass_g_per_mol none
+identity 95 phyllosilicate: lithology, charge 0, elements []
+identity 95 phyllosilicate: molar_mass_g_per_mol none
+identity 96 lava_glass: lithology, charge 0, elements []
+identity 96 lava_glass: molar_mass_g_per_mol none
+identity 97 ca_al_residue: lithology, charge 0, elements []
+identity 97 ca_al_residue: molar_mass_g_per_mol none
+identity 98 iron_nickel: lithology, charge 0, elements []
+identity 98 iron_nickel: molar_mass_g_per_mol none
+identity 99 SiC: mineral, charge 0, elements [Si 1 C 1]
+identity 99 SiC: molar_mass_g_per_mol = 0x40440c49ba5e353f  # 40.096
+identity 100 MgSO4: mineral, charge 0, elements [Mg 1 S 1 O 4]
+identity 100 MgSO4: molar_mass_g_per_mol = 0x405e171a9fbe76c9  # 120.361
+identity 101 Na2CO3: mineral, charge 0, elements [Na 2 C 1 O 3]
+identity 101 Na2CO3: molar_mass_g_per_mol = 0x405a7f3b645a1cac  # 105.988
+identity 102 CaCO3: mineral, charge 0, elements [Ca 1 C 1 O 3]
+identity 102 CaCO3: molar_mass_g_per_mol = 0x405905810624dd2f  # 100.086
+identity 103 carbonaceous: organic, charge 0, elements []
+identity 103 carbonaceous: molar_mass_g_per_mol none
+identity 104 chondrite_ci: lithology, charge 0, elements []
+identity 104 chondrite_ci: molar_mass_g_per_mol none
+identity 105 chondrite_cm: lithology, charge 0, elements []
+identity 105 chondrite_cm: molar_mass_g_per_mol none
+identity 106 chondrite_cv: lithology, charge 0, elements []
+identity 106 chondrite_cv: molar_mass_g_per_mol none
+identity 107 chondrite_h: lithology, charge 0, elements []
+identity 107 chondrite_h: molar_mass_g_per_mol none
+identity 108 chondrite_l: lithology, charge 0, elements []
+identity 108 chondrite_l: molar_mass_g_per_mol none
+identity 109 chondrite_ll: lithology, charge 0, elements []
+identity 109 chondrite_ll: molar_mass_g_per_mol none
+identity 110 chondrite_e: lithology, charge 0, elements []
+identity 110 chondrite_e: molar_mass_g_per_mol none
+identity 111 cometary: lithology, charge 0, elements []
+identity 111 cometary: molar_mass_g_per_mol none
 [optics]
 optics 0 H2: rayleigh true, absorber false, aerosol_material false
 optics 1 He: rayleigh true, absorber false, aerosol_material false
@@ -54,25 +260,824 @@ optics 5 N2: rayleigh true, absorber false, aerosol_material true
 optics 6 O2: rayleigh true, absorber true, aerosol_material true
 optics 7 CO2: rayleigh true, absorber false, aerosol_material true
 optics 8 Ar: rayleigh true, absorber false, aerosol_material true
+optics 9 Ne: rayleigh true, absorber false, aerosol_material false
+optics 10 Kr: rayleigh true, absorber false, aerosol_material false
+optics 11 Xe: rayleigh true, absorber false, aerosol_material false
+optics 12 N2O: rayleigh true, absorber true, aerosol_material false
+optics 13 CO: rayleigh true, absorber true, aerosol_material true
+optics 14 SO2: rayleigh true, absorber true, aerosol_material false
+optics 15 H2S: rayleigh true, absorber true, aerosol_material true
+optics 16 O3: rayleigh true, absorber true, aerosol_material false
+optics 17 HCN: rayleigh true, absorber true, aerosol_material false
+optics 18 C2H2: rayleigh true, absorber true, aerosol_material false
+optics 19 C2H4: rayleigh true, absorber true, aerosol_material false
+optics 20 C2H6: rayleigh true, absorber true, aerosol_material true
+optics 21 PH3: rayleigh true, absorber true, aerosol_material false
+optics 22 CH3OH: rayleigh true, absorber true, aerosol_material false
+optics 23 H: rayleigh true, absorber true, aerosol_material false
+optics 24 O: rayleigh true, absorber true, aerosol_material false
+optics 25 e-: rayleigh false, absorber true, aerosol_material false
+optics 26 H-: rayleigh false, absorber true, aerosol_material false
+optics 27 Na: rayleigh true, absorber true, aerosol_material false
+optics 28 K: rayleigh true, absorber true, aerosol_material false
+optics 29 Fe: rayleigh true, absorber true, aerosol_material true
+optics 30 Mg: rayleigh true, absorber true, aerosol_material false
+optics 31 Si: rayleigh true, absorber true, aerosol_material false
+optics 32 Ca: rayleigh true, absorber true, aerosol_material false
+optics 33 Ti: rayleigh true, absorber true, aerosol_material false
+optics 34 SiO: rayleigh true, absorber true, aerosol_material false
+optics 35 TiO: rayleigh true, absorber true, aerosol_material false
+optics 36 VO: rayleigh true, absorber true, aerosol_material false
+optics 37 FeH: rayleigh true, absorber true, aerosol_material false
+optics 38 Al: rayleigh true, absorber false, aerosol_material false
+optics 39 V: rayleigh true, absorber false, aerosol_material false
+optics 40 Mn: rayleigh true, absorber false, aerosol_material false
+optics 41 Ni: rayleigh true, absorber false, aerosol_material false
+optics 42 Zn: rayleigh true, absorber false, aerosol_material false
+optics 43 Na+: rayleigh false, absorber false, aerosol_material false
+optics 44 Mg+: rayleigh false, absorber true, aerosol_material false
+optics 45 Al+: rayleigh false, absorber false, aerosol_material false
+optics 46 Si+: rayleigh false, absorber false, aerosol_material false
+optics 47 K+: rayleigh false, absorber false, aerosol_material false
+optics 48 Ca+: rayleigh false, absorber true, aerosol_material false
+optics 49 Ti+: rayleigh false, absorber true, aerosol_material false
+optics 50 V+: rayleigh false, absorber false, aerosol_material false
+optics 51 Cr+: rayleigh false, absorber false, aerosol_material false
+optics 52 Mn+: rayleigh false, absorber false, aerosol_material false
+optics 53 Fe+: rayleigh false, absorber true, aerosol_material false
+optics 54 Ni+: rayleigh false, absorber false, aerosol_material false
+optics 55 Zn+: rayleigh false, absorber false, aerosol_material false
+optics 56 HCl: rayleigh true, absorber false, aerosol_material false
+optics 57 NH4SH: rayleigh false, absorber false, aerosol_material true
+optics 58 H2SO4: rayleigh false, absorber false, aerosol_material true
+optics 59 S8: rayleigh false, absorber false, aerosol_material true
+optics 60 KCl: rayleigh false, absorber false, aerosol_material true
+optics 61 NaCl: rayleigh false, absorber false, aerosol_material true
+optics 62 ZnS: rayleigh false, absorber false, aerosol_material true
+optics 63 Na2S: rayleigh false, absorber false, aerosol_material true
+optics 64 MnS: rayleigh false, absorber false, aerosol_material true
+optics 65 Cr: rayleigh true, absorber true, aerosol_material true
+optics 66 FeS: rayleigh false, absorber false, aerosol_material true
+optics 67 MgSiO3: rayleigh false, absorber false, aerosol_material true
+optics 68 Mg2SiO4: rayleigh false, absorber false, aerosol_material true
+optics 69 SiO2: rayleigh false, absorber false, aerosol_material true
+optics 70 Al2O3: rayleigh false, absorber false, aerosol_material true
+optics 71 CaTiO3: rayleigh false, absorber false, aerosol_material true
+optics 72 TiO2: rayleigh false, absorber false, aerosol_material true
+optics 73 graphite: rayleigh false, absorber false, aerosol_material true
+optics 74 tholin: rayleigh false, absorber false, aerosol_material true
+optics 75 soot: rayleigh false, absorber false, aerosol_material true
+optics 76 chromophore: rayleigh false, absorber false, aerosol_material true
+optics 77 ice_giant_haze: rayleigh false, absorber false, aerosol_material true
+optics 78 mars_dust: rayleigh false, absorber false, aerosol_material true
+optics 79 acid_uv_absorber: rayleigh false, absorber false, aerosol_material true
+optics 80 brine_nacl: rayleigh false, absorber false, aerosol_material false
+optics 81 brine_mgso4: rayleigh false, absorber false, aerosol_material false
+optics 82 brine_naclo4: rayleigh false, absorber false, aerosol_material false
+optics 83 brine_mgclo4: rayleigh false, absorber false, aerosol_material false
+optics 84 nh3_h2o: rayleigh false, absorber false, aerosol_material false
+optics 85 ch4_c2h6_n2: rayleigh false, absorber false, aerosol_material false
+optics 86 anorthosite: rayleigh false, absorber false, aerosol_material false
+optics 87 feldspathic: rayleigh false, absorber false, aerosol_material false
+optics 88 basalt: rayleigh false, absorber false, aerosol_material true
+optics 89 basalt_fe: rayleigh false, absorber false, aerosol_material true
+optics 90 komatiite: rayleigh false, absorber false, aerosol_material false
+optics 91 basalt_reduced: rayleigh false, absorber false, aerosol_material false
+optics 92 granite: rayleigh false, absorber false, aerosol_material false
+optics 93 ultramafic: rayleigh false, absorber false, aerosol_material false
+optics 94 ferric: rayleigh false, absorber false, aerosol_material false
+optics 95 phyllosilicate: rayleigh false, absorber false, aerosol_material false
+optics 96 lava_glass: rayleigh false, absorber false, aerosol_material true
+optics 97 ca_al_residue: rayleigh false, absorber false, aerosol_material false
+optics 98 iron_nickel: rayleigh false, absorber false, aerosol_material false
+optics 99 SiC: rayleigh false, absorber false, aerosol_material false
+optics 100 MgSO4: rayleigh false, absorber false, aerosol_material false
+optics 101 Na2CO3: rayleigh false, absorber false, aerosol_material false
+optics 102 CaCO3: rayleigh false, absorber false, aerosol_material false
+optics 103 carbonaceous: rayleigh false, absorber false, aerosol_material false
+optics 104 chondrite_ci: rayleigh false, absorber false, aerosol_material false
+optics 105 chondrite_cm: rayleigh false, absorber false, aerosol_material false
+optics 106 chondrite_cv: rayleigh false, absorber false, aerosol_material false
+optics 107 chondrite_h: rayleigh false, absorber false, aerosol_material false
+optics 108 chondrite_l: rayleigh false, absorber false, aerosol_material false
+optics 109 chondrite_ll: rayleigh false, absorber false, aerosol_material false
+optics 110 chondrite_e: rayleigh false, absorber false, aerosol_material false
+optics 111 cometary: rayleigh false, absorber false, aerosol_material false
 [gas]
 gas 0 H2: Linear
 gas 0 H2: heat_capacity_over_r = 0x400c000000000000  # 3.5
+gas 0 H2: rotation InLevels
+gas 0 H2: level set 0, term (0, 0) cm = 0x40a0f4bf8bac710c  # 2170.3741124999997
+gas 0 H2: level set 0, rovibrational Ortho, weight = 0x3fe8000000000000  # 0.75
+gas 0 H2: level set 1, term (0, 0) cm = 0x40a0f4bf8bac710c  # 2170.3741124999997
+gas 0 H2: level set 1, rovibrational Para, weight = 0x3fd0000000000000  # 0.25
+gas 0 H2: heat_capacity_over_r at 30 K = 0x40040007df95881e  # 2.5000150172718483
+gas 0 H2: heat_capacity_over_r at 100 K = 0x4005b5890415eb77  # 2.7136402434529674
+gas 0 H2: heat_capacity_over_r at 200 K = 0x400a3d1707d5b1a2  # 3.2798290836419293
+gas 0 H2: heat_capacity_over_r at 298.15 K = 0x400bbefa62a37d8d  # 3.4682510095732995
+gas 0 H2: heat_capacity_over_r at 500 K = 0x400c29966f4ebe36  # 3.5203064628510914
+gas 0 H2: heat_capacity_over_r at 1000 K = 0x400d1a4130d4ee28  # 3.6378196539860888
+gas 0 H2: heat_capacity_over_r at 2000 K = 0x40109883e2dac269  # 4.1489406057377005
+gas 0 H2: enthalpy_over_r_k at 298.15 K = 0x408bd47af0bae992  # 890.5600294687777
+gas 0 H2: entropy_over_r at 298.15 K = 0x402fa29df1e53fac  # 15.817611273989165
 gas 1 He: Atom
 gas 1 He: heat_capacity_over_r = 0x4004000000000000  # 2.5
+gas 1 He: rotation None
+gas 1 He: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 1 He: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 1 He: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 1 He: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 1 He: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 1 He: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 1 He: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 1 He: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 1 He: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
 gas 2 H2O: NonLinear
 gas 2 H2O: heat_capacity_over_r = 0x4010000000000000  # 4.0
+gas 2 H2O: rotation NonLinear
+gas 2 H2O: vibration 0, degeneracy 1, wavenumber_cm = 0x40ac920000000000  # 3657.0
+gas 2 H2O: vibration 1, degeneracy 1, wavenumber_cm = 0x4098ec0000000000  # 1595.0
+gas 2 H2O: vibration 2, degeneracy 1, wavenumber_cm = 0x40ad580000000000  # 3756.0
+gas 2 H2O: heat_capacity_over_r at 30 K = 0x4010000000000000  # 4.0
+gas 2 H2O: heat_capacity_over_r at 100 K = 0x4010000003d184c3  # 4.000000056899071
+gas 2 H2O: heat_capacity_over_r at 200 K = 0x40100166c1102e12  # 4.001368538487002
+gas 2 H2O: heat_capacity_over_r at 298.15 K = 0x40101b97425ec48d  # 4.026944195779959
+gas 2 H2O: heat_capacity_over_r at 500 K = 0x4010e50ffdcc3642  # 4.223693814839466
+gas 2 H2O: heat_capacity_over_r at 1000 K = 0x4013bc6b8a37bfb6  # 4.934003982212678
+gas 2 H2O: heat_capacity_over_r at 2000 K = 0x40182784b62ac89d  # 6.038592192040736
+gas 2 H2O: enthalpy_over_r_k at 298.15 K = 0x4092a6926c9e6da8  # 1193.642992473071
+gas 2 H2O: entropy_over_r at 298.15 K = 0x4036cb59d404ff65  # 22.794339419574857
 gas 3 CH4: NonLinear
 gas 3 CH4: heat_capacity_over_r = 0x4010000000000000  # 4.0
+gas 3 CH4: rotation NonLinear
+gas 3 CH4: vibration 0, degeneracy 1, wavenumber_cm = 0x40a6ca0000000000  # 2917.0
+gas 3 CH4: vibration 1, degeneracy 2, wavenumber_cm = 0x4097f80000000000  # 1534.0
+gas 3 CH4: vibration 2, degeneracy 3, wavenumber_cm = 0x40a7960000000000  # 3019.0
+gas 3 CH4: vibration 3, degeneracy 3, wavenumber_cm = 0x4094680000000000  # 1306.0
+gas 3 CH4: heat_capacity_over_r at 30 K = 0x4010000000000000  # 4.0
+gas 3 CH4: heat_capacity_over_r at 100 K = 0x40100001fc1eb7f0  # 4.000007571577939
+gas 3 CH4: heat_capacity_over_r at 200 K = 0x40101a909b4eca24  # 4.025942255672394
+gas 3 CH4: heat_capacity_over_r at 298.15 K = 0x401125541c259d50  # 4.286453666492278
+gas 3 CH4: heat_capacity_over_r at 500 K = 0x40164b77cfdaf179  # 5.573699233759151
+gas 3 CH4: heat_capacity_over_r at 1000 K = 0x402144ffc1c59cb0  # 8.634763770458761
+gas 3 CH4: heat_capacity_over_r at 2000 K = 0x4026b4f83d62fcb2  # 11.35345641930903
+gas 3 CH4: enthalpy_over_r_k at 298.15 K = 0x4092d697ffc6c9f4  # 1205.6484366474879
+gas 3 CH4: entropy_over_r at 298.15 K = 0x4036d7438d34b629  # 22.840874505394968
 gas 4 NH3: NonLinear
 gas 4 NH3: heat_capacity_over_r = 0x4010000000000000  # 4.0
+gas 4 NH3: rotation NonLinear
+gas 4 NH3: vibration 0, degeneracy 1, wavenumber_cm = 0x40aa120000000000  # 3337.0
+gas 4 NH3: vibration 1, degeneracy 1, wavenumber_cm = 0x408db00000000000  # 950.0
+gas 4 NH3: vibration 2, degeneracy 2, wavenumber_cm = 0x40aae80000000000  # 3444.0
+gas 4 NH3: vibration 3, degeneracy 2, wavenumber_cm = 0x40996c0000000000  # 1627.0
+gas 4 NH3: heat_capacity_over_r at 30 K = 0x4010000000000000  # 4.0
+gas 4 NH3: heat_capacity_over_r at 100 K = 0x40100038c1e77901  # 4.000216512444468
+gas 4 NH3: heat_capacity_over_r at 200 K = 0x401035e7e5d36856  # 4.0526424322398125
+gas 4 NH3: heat_capacity_over_r at 298.15 K = 0x401111857a3acb1e  # 4.267110738600222
+gas 4 NH3: heat_capacity_over_r at 500 K = 0x4013f0bdc7d6e0ab  # 4.985098955621804
+gas 4 NH3: heat_capacity_over_r at 1000 K = 0x401ac578275200da  # 6.692841162090383
+gas 4 NH3: heat_capacity_over_r at 2000 K = 0x4021378976ff1729  # 8.608470648421262
+gas 4 NH3: enthalpy_over_r_k at 298.15 K = 0x4092e217cca5781d  # 1208.5232416014253
+gas 4 NH3: entropy_over_r at 298.15 K = 0x4036dad6750c2821  # 22.85483485743328
 gas 5 N2: Linear
 gas 5 N2: heat_capacity_over_r = 0x400c000000000000  # 3.5
+gas 5 N2: rotation Linear
+gas 5 N2: vibration 0, degeneracy 1, wavenumber_cm = 0x40a233d810624dd3  # 2329.922
+gas 5 N2: heat_capacity_over_r at 30 K = 0x400c000000000000  # 3.5
+gas 5 N2: heat_capacity_over_r at 100 K = 0x400c000000001b50  # 3.500000000003105
+gas 5 N2: heat_capacity_over_r at 200 K = 0x400c0007be1bdab7  # 3.5000147678614115
+gas 5 N2: heat_capacity_over_r at 298.15 K = 0x400c0363c6f8cc0f  # 3.5016551537205554
+gas 5 N2: heat_capacity_over_r at 500 K = 0x400c7115f243e509  # 3.5552176405877884
+gas 5 N2: heat_capacity_over_r at 1000 K = 0x400f6126a655cf21  # 3.9224369997917994
+gas 5 N2: heat_capacity_over_r at 2000 K = 0x40112e869422b1ef  # 4.295435251824968
+gas 5 N2: enthalpy_over_r_k at 298.15 K = 0x40904e468b2646f1  # 1043.5688901882934
+gas 5 N2: entropy_over_r at 298.15 K = 0x4033f116732130e7  # 19.941748805621412
 gas 6 O2: Linear
 gas 6 O2: heat_capacity_over_r = 0x400c000000000000  # 3.5
+gas 6 O2: rotation Linear
+gas 6 O2: vibration 0, degeneracy 1, wavenumber_cm = 0x409850ec8b439581  # 1556.231
+gas 6 O2: level set 0, 3 levels, digest 36debfa18bd55379, weight = 0x3ff0000000000000  # 1.0
+gas 6 O2: heat_capacity_over_r at 30 K = 0x400c000000000000  # 3.5
+gas 6 O2: heat_capacity_over_r at 100 K = 0x400c00000cb31adb  # 3.500000094619606
+gas 6 O2: heat_capacity_over_r at 200 K = 0x400c0386c69ecb01  # 3.501721908303239
+gas 6 O2: heat_capacity_over_r at 298.15 K = 0x400c3f53276ad3f1  # 3.5309203223682677
+gas 6 O2: heat_capacity_over_r at 500 K = 0x400ddd1aa39c9b57  # 3.732960966316948
+gas 6 O2: heat_capacity_over_r at 1000 K = 0x4010ae4f30419511  # 4.170223955157113
+gas 6 O2: heat_capacity_over_r at 2000 K = 0x4011e7cd11efa25a  # 4.476368217707739
+gas 6 O2: enthalpy_over_r_k at 298.15 K = 0x40905301f15fd5ee  # 1044.7518973326037
+gas 6 O2: entropy_over_r at 298.15 K = 0x40350b7c2ec126b8  # 21.04486362662894
 gas 7 CO2: LinearTriatomic
 gas 7 CO2: heat_capacity_over_r = 0x4011555555555555  # 4.333333333333333
+gas 7 CO2: rotation Linear
+gas 7 CO2: vibration 0, degeneracy 1, wavenumber_cm = 0x4094d40000000000  # 1333.0
+gas 7 CO2: vibration 1, degeneracy 2, wavenumber_cm = 0x4084d80000000000  # 667.0
+gas 7 CO2: vibration 2, degeneracy 1, wavenumber_cm = 0x40a25a0000000000  # 2349.0
+gas 7 CO2: heat_capacity_over_r at 30 K = 0x400c00000000e68b  # 3.5000000000262097
+gas 7 CO2: heat_capacity_over_r at 100 K = 0x400c19a44df6f0af  # 3.512520417307392
+gas 7 CO2: heat_capacity_over_r at 200 K = 0x400f23506e111718  # 3.8922432517018812
+gas 7 CO2: heat_capacity_over_r at 298.15 K = 0x4011defcfd0750cb  # 4.467761949130543
+gas 7 CO2: heat_capacity_over_r at 500 K = 0x40157a37b1b5f1f0  # 5.3693530814457375
+gas 7 CO2: heat_capacity_over_r at 1000 K = 0x401a0d234c80c417  # 6.512829966887714
+gas 7 CO2: heat_capacity_over_r at 2000 K = 0x401cb9b2cbe30811  # 7.181346116763977
+gas 7 CO2: enthalpy_over_r_k at 298.15 K = 0x40919a8e3ddf6950  # 1126.6389079006221
+gas 7 CO2: entropy_over_r at 298.15 K = 0x40344dbacc2a7db5  # 20.303631554006376
 gas 8 Ar: Atom
 gas 8 Ar: heat_capacity_over_r = 0x4004000000000000  # 2.5
+gas 8 Ar: rotation None
+gas 8 Ar: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 8 Ar: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 8 Ar: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 8 Ar: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 8 Ar: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 8 Ar: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 8 Ar: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 8 Ar: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 8 Ar: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 9 Ne: rotation None
+gas 9 Ne: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 9 Ne: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 9 Ne: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 9 Ne: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 9 Ne: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 9 Ne: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 9 Ne: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 9 Ne: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 9 Ne: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 10 Kr: rotation None
+gas 10 Kr: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 10 Kr: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 10 Kr: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 10 Kr: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 10 Kr: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 10 Kr: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 10 Kr: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 10 Kr: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 10 Kr: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 11 Xe: rotation None
+gas 11 Xe: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 11 Xe: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 11 Xe: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 11 Xe: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 11 Xe: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 11 Xe: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 11 Xe: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 11 Xe: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 11 Xe: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 12 N2O: rotation Linear
+gas 12 N2O: vibration 0, degeneracy 1, wavenumber_cm = 0x40a1600000000000  # 2224.0
+gas 12 N2O: vibration 1, degeneracy 2, wavenumber_cm = 0x4082680000000000  # 589.0
+gas 12 N2O: vibration 2, degeneracy 1, wavenumber_cm = 0x4094140000000000  # 1285.0
+gas 12 N2O: heat_capacity_over_r at 30 K = 0x400c0000001d9670  # 3.500000000861114
+gas 12 N2O: heat_capacity_over_r at 100 K = 0x400c3d6f922795c6  # 3.529997960885086
+gas 12 N2O: heat_capacity_over_r at 200 K = 0x40102b6d5547d7c4  # 4.042409260282458
+gas 12 N2O: heat_capacity_over_r at 298.15 K = 0x4012923f5e8fbd72  # 4.642819860003657
+gas 12 N2O: heat_capacity_over_r at 500 K = 0x401607a003a8e5e5  # 5.507446343597143
+gas 12 N2O: heat_capacity_over_r at 1000 K = 0x401a6266f4972d30  # 6.596095868804056
+gas 12 N2O: heat_capacity_over_r at 2000 K = 0x401cdaa4e9761463  # 7.21351971419526
+gas 12 N2O: enthalpy_over_r_k at 298.15 K = 0x4092010a8bafbb59  # 1152.2602984865282
+gas 12 N2O: entropy_over_r at 298.15 K = 0x40346daf40aadfb3  # 20.428455392567866
+gas 13 CO: rotation Linear
+gas 13 CO: vibration 0, degeneracy 1, wavenumber_cm = 0x40a0be795810624e  # 2143.237
+gas 13 CO: heat_capacity_over_r at 30 K = 0x400c000000000000  # 3.5
+gas 13 CO: heat_capacity_over_r at 100 K = 0x400c00000001531c  # 3.5000000000385523
+gas 13 CO: heat_capacity_over_r at 200 K = 0x400c0019187cf6c3  # 3.500047866166683
+gas 13 CO: heat_capacity_over_r at 298.15 K = 0x400c070fb7da784b  # 3.503447948794052
+gas 13 CO: heat_capacity_over_r at 500 K = 0x400ca407d8558206  # 3.580093088254446
+gas 13 CO: heat_capacity_over_r at 1000 K = 0x400fd3686fb305ff  # 3.978226540232526
+gas 13 CO: heat_capacity_over_r at 2000 K = 0x40114b284d5dedcc  # 4.323395928247418
+gas 13 CO: enthalpy_over_r_k at 298.15 K = 0x40904e7f60b2afba  # 1043.6243923110728
+gas 13 CO: entropy_over_r at 298.15 K = 0x4033f123e763ee88  # 19.941954099557307
+gas 14 SO2: rotation NonLinear
+gas 14 SO2: vibration 0, degeneracy 1, wavenumber_cm = 0x4091fc0000000000  # 1151.0
+gas 14 SO2: vibration 1, degeneracy 1, wavenumber_cm = 0x4080300000000000  # 518.0
+gas 14 SO2: vibration 2, degeneracy 1, wavenumber_cm = 0x4095480000000000  # 1362.0
+gas 14 SO2: heat_capacity_over_r at 30 K = 0x4010000000ac4e11  # 4.000000010029468
+gas 14 SO2: heat_capacity_over_r at 100 K = 0x40102108ca3dbb8b  # 4.032260093705996
+gas 14 SO2: heat_capacity_over_r at 200 K = 0x40117ec26239c466  # 4.373788389945821
+gas 14 SO2: heat_capacity_over_r at 298.15 K = 0x401328d30972c90b  # 4.789867541914883
+gas 14 SO2: heat_capacity_over_r at 500 K = 0x401653bd2684881c  # 5.581776239241687
+gas 14 SO2: heat_capacity_over_r at 1000 K = 0x4019f38f5ddd01ff  # 6.487851587881322
+gas 14 SO2: heat_capacity_over_r at 2000 K = 0x401b6d8b6b03a608  # 6.856977150056544
+gas 14 SO2: enthalpy_over_r_k at 298.15 K = 0x4093d1ca52e5eb60  # 1268.4475818562423
+gas 14 SO2: entropy_over_r at 298.15 K = 0x403722bf8a68d08c  # 23.135735178555976
+gas 15 H2S: rotation NonLinear
+gas 15 H2S: vibration 0, degeneracy 1, wavenumber_cm = 0x40a46e0000000000  # 2615.0
+gas 15 H2S: vibration 1, degeneracy 1, wavenumber_cm = 0x40927c0000000000  # 1183.0
+gas 15 H2S: vibration 2, degeneracy 1, wavenumber_cm = 0x40a4840000000000  # 2626.0
+gas 15 H2S: heat_capacity_over_r at 30 K = 0x4010000000000000  # 4.0
+gas 15 H2S: heat_capacity_over_r at 100 K = 0x40100003145d4893  # 4.000011747544835
+gas 15 H2S: heat_capacity_over_r at 200 K = 0x40100ef1fe2a076a  # 4.014595004382366
+gas 15 H2S: heat_capacity_over_r at 298.15 K = 0x4010707acc2d0523  # 4.1098434355238025
+gas 15 H2S: heat_capacity_over_r at 500 K = 0x4011e3dfcf884c45  # 4.472533457464185
+gas 15 H2S: heat_capacity_over_r at 1000 K = 0x4015e7c9bd7f5eee  # 5.476355515383814
+gas 15 H2S: heat_capacity_over_r at 2000 K = 0x4019c41eed234a12  # 6.4415242245472815
+gas 15 H2S: enthalpy_over_r_k at 298.15 K = 0x4092b9274b3bba0b  # 1198.2883729297926
+gas 15 H2S: entropy_over_r at 298.15 K = 0x4036d0134bb4834b  # 22.81279442936947
+gas 16 O3: rotation NonLinear
+gas 16 O3: vibration 0, degeneracy 1, wavenumber_cm = 0x40913c0000000000  # 1103.0
+gas 16 O3: vibration 1, degeneracy 1, wavenumber_cm = 0x4085e80000000000  # 701.0
+gas 16 O3: vibration 2, degeneracy 1, wavenumber_cm = 0x4090480000000000  # 1042.0
+gas 16 O3: heat_capacity_over_r at 30 K = 0x4010000000000c77  # 4.000000000002834
+gas 16 O3: heat_capacity_over_r at 100 K = 0x40100471cd117adb  # 4.004340366546525
+gas 16 O3: heat_capacity_over_r at 200 K = 0x4010e15f651729fd  # 4.220090465105838
+gas 16 O3: heat_capacity_over_r at 298.15 K = 0x4012e513e4654ec7  # 4.723708695109685
+gas 16 O3: heat_capacity_over_r at 500 K = 0x4016b416d8ab703e  # 5.675868401969693
+gas 16 O3: heat_capacity_over_r at 1000 K = 0x401a431529a9f8fb  # 6.565510416983893
+gas 16 O3: heat_capacity_over_r at 2000 K = 0x401b87dcf7416acc  # 6.882678855293033
+gas 16 O3: enthalpy_over_r_k at 298.15 K = 0x409376d97ff03dcf  # 1245.7124021089292
+gas 16 O3: entropy_over_r at 298.15 K = 0x403703b84fc9c42a  # 23.014531122931807
+gas 17 HCN: rotation Linear
+gas 17 HCN: vibration 0, degeneracy 1, wavenumber_cm = 0x40a9de0000000000  # 3311.0
+gas 17 HCN: vibration 1, degeneracy 2, wavenumber_cm = 0x4086400000000000  # 712.0
+gas 17 HCN: vibration 2, degeneracy 1, wavenumber_cm = 0x40a0620000000000  # 2097.0
+gas 17 HCN: heat_capacity_over_r at 30 K = 0x400c000000001e5a  # 3.5000000000034506
+gas 17 HCN: heat_capacity_over_r at 100 K = 0x400c0f4a0a6f9cd4  # 3.5074654403029886
+gas 17 HCN: heat_capacity_over_r at 200 K = 0x400e88b70a188c97  # 3.816755370020086
+gas 17 HCN: heat_capacity_over_r at 298.15 K = 0x40114357f33cfcd5  # 4.3157651906942265
+gas 17 HCN: heat_capacity_over_r at 500 K = 0x401414a93f4a4af1  # 5.0201768769354524
+gas 17 HCN: heat_capacity_over_r at 1000 K = 0x401818054392a1f7  # 6.023457580399273
+gas 17 HCN: heat_capacity_over_r at 2000 K = 0x401bb15204fbf338  # 6.9231644419458505
+gas 17 HCN: enthalpy_over_r_k at 298.15 K = 0x40915f3a9fff648d  # 1111.8072509675142
+gas 17 HCN: entropy_over_r at 298.15 K = 0x40343c712d543e69  # 20.236101944987613
+gas 18 C2H2: rotation Linear
+gas 18 C2H2: vibration 0, degeneracy 1, wavenumber_cm = 0x40aa5c0000000000  # 3374.0
+gas 18 C2H2: vibration 1, degeneracy 1, wavenumber_cm = 0x409ed80000000000  # 1974.0
+gas 18 C2H2: vibration 2, degeneracy 1, wavenumber_cm = 0x40a9b20000000000  # 3289.0
+gas 18 C2H2: vibration 3, degeneracy 2, wavenumber_cm = 0x4083200000000000  # 612.0
+gas 18 C2H2: vibration 4, degeneracy 2, wavenumber_cm = 0x4086d00000000000  # 730.0
+gas 18 C2H2: heat_capacity_over_r at 30 K = 0x400c0000000aa733  # 3.5000000003100467
+gas 18 C2H2: heat_capacity_over_r at 100 K = 0x400c3c08e920a6e2  # 3.5293138707246365
+gas 18 C2H2: heat_capacity_over_r at 200 K = 0x40111d67bc15e078  # 4.278716029010063
+gas 18 C2H2: heat_capacity_over_r at 298.15 K = 0x4015309c17d40eb0  # 5.297470447843509
+gas 18 C2H2: heat_capacity_over_r at 500 K = 0x401a5215c3828ea8  # 6.580161146968443
+gas 18 C2H2: heat_capacity_over_r at 1000 K = 0x40203d98c3b7bcac  # 8.120306125811418
+gas 18 C2H2: heat_capacity_over_r at 2000 K = 0x4023125be1c6bcd5  # 9.535857253560986
+gas 18 C2H2: enthalpy_over_r_k at 298.15 K = 0x4092d233462d913e  # 1204.550072395315
+gas 18 C2H2: entropy_over_r at 298.15 K = 0x4034a61916aad2ce  # 20.648820320801683
+gas 19 C2H4: rotation NonLinear
+gas 19 C2H4: vibration 0, degeneracy 1, wavenumber_cm = 0x40a7a40000000000  # 3026.0
+gas 19 C2H4: vibration 1, degeneracy 1, wavenumber_cm = 0x40995c0000000000  # 1623.0
+gas 19 C2H4: vibration 2, degeneracy 1, wavenumber_cm = 0x4094f80000000000  # 1342.0
+gas 19 C2H4: vibration 3, degeneracy 1, wavenumber_cm = 0x408ff80000000000  # 1023.0
+gas 19 C2H4: vibration 4, degeneracy 1, wavenumber_cm = 0x40a83e0000000000  # 3103.0
+gas 19 C2H4: vibration 5, degeneracy 1, wavenumber_cm = 0x4093500000000000  # 1236.0
+gas 19 C2H4: vibration 6, degeneracy 1, wavenumber_cm = 0x408da80000000000  # 949.0
+gas 19 C2H4: vibration 7, degeneracy 1, wavenumber_cm = 0x408d780000000000  # 943.0
+gas 19 C2H4: vibration 8, degeneracy 1, wavenumber_cm = 0x40a8440000000000  # 3106.0
+gas 19 C2H4: vibration 9, degeneracy 1, wavenumber_cm = 0x4089d00000000000  # 826.0
+gas 19 C2H4: vibration 10, degeneracy 1, wavenumber_cm = 0x40a75a0000000000  # 2989.0
+gas 19 C2H4: vibration 11, degeneracy 1, wavenumber_cm = 0x4096900000000000  # 1444.0
+gas 19 C2H4: heat_capacity_over_r at 30 K = 0x401000000000000b  # 4.00000000000001
+gas 19 C2H4: heat_capacity_over_r at 100 K = 0x4010018fc3ac3c95  # 4.00152497996091
+gas 19 C2H4: heat_capacity_over_r at 200 K = 0x401101fb36870af0  # 4.2519348640368975
+gas 19 C2H4: heat_capacity_over_r at 298.15 K = 0x40149db54da5e79d  # 5.154011929751417
+gas 19 C2H4: heat_capacity_over_r at 500 K = 0x401e06d6081ecd64  # 7.5066758412170635
+gas 19 C2H4: heat_capacity_over_r at 1000 K = 0x402693ea1aaf535a  # 11.28889544859128
+gas 19 C2H4: heat_capacity_over_r at 2000 K = 0x402c79678da41be3  # 14.23711817386897
+gas 19 C2H4: enthalpy_over_r_k at 298.15 K = 0x4093c3439d8cedd1  # 1264.816030694976
+gas 19 C2H4: entropy_over_r at 298.15 K = 0x403715be4f2096d2  # 23.084935136276563
+gas 20 C2H6: rotation NonLinear
+gas 20 C2H6: vibration 0, degeneracy 1, wavenumber_cm = 0x40a7140000000000  # 2954.0
+gas 20 C2H6: vibration 1, degeneracy 1, wavenumber_cm = 0x4095b00000000000  # 1388.0
+gas 20 C2H6: vibration 2, degeneracy 1, wavenumber_cm = 0x408f180000000000  # 995.0
+gas 20 C2H6: vibration 3, degeneracy 1, wavenumber_cm = 0x40a6a00000000000  # 2896.0
+gas 20 C2H6: vibration 4, degeneracy 1, wavenumber_cm = 0x40958c0000000000  # 1379.0
+gas 20 C2H6: vibration 5, degeneracy 2, wavenumber_cm = 0x40a7320000000000  # 2969.0
+gas 20 C2H6: vibration 6, degeneracy 2, wavenumber_cm = 0x4096f00000000000  # 1468.0
+gas 20 C2H6: vibration 7, degeneracy 2, wavenumber_cm = 0x4092980000000000  # 1190.0
+gas 20 C2H6: vibration 8, degeneracy 2, wavenumber_cm = 0x40a7520000000000  # 2985.0
+gas 20 C2H6: vibration 9, degeneracy 2, wavenumber_cm = 0x4096f40000000000  # 1469.0
+gas 20 C2H6: vibration 10, degeneracy 2, wavenumber_cm = 0x4089b00000000000  # 822.0
+gas 20 C2H6: level set 0, 65 levels, digest 3b310e4374f5e055, weight = 0x3ff0000000000000  # 1.0
+gas 20 C2H6: heat_capacity_over_r at 30 K = 0x401000378fd038b5  # 4.000211951335747
+gas 20 C2H6: heat_capacity_over_r at 100 K = 0x401131098eb86c6f  # 4.297888021475145
+gas 20 C2H6: heat_capacity_over_r at 200 K = 0x40145efba76206e0  # 5.092756858213505
+gas 20 C2H6: heat_capacity_over_r at 298.15 K = 0x401941c48ad25ad4  # 6.314226311768568
+gas 20 C2H6: heat_capacity_over_r at 500 K = 0x4022bdedb3953bb5  # 9.370954143492648
+gas 20 C2H6: heat_capacity_over_r at 1000 K = 0x402d799a04718c0c  # 14.73750318418572
+gas 20 C2H6: heat_capacity_over_r at 2000 K = 0x403300986b3d25bc  # 19.00232572787148
+gas 20 C2H6: enthalpy_over_r_k at 298.15 K = 0x409659127f85a8a8  # 1430.2680645832243
+gas 20 C2H6: entropy_over_r at 298.15 K = 0x40390f444d7806ed  # 25.059635965159874
+gas 21 PH3: rotation NonLinear
+gas 21 PH3: vibration 0, degeneracy 1, wavenumber_cm = 0x40a2260000000000  # 2323.0
+gas 21 PH3: vibration 1, degeneracy 1, wavenumber_cm = 0x408f000000000000  # 992.0
+gas 21 PH3: vibration 2, degeneracy 2, wavenumber_cm = 0x40a2300000000000  # 2328.0
+gas 21 PH3: vibration 3, degeneracy 2, wavenumber_cm = 0x4091780000000000  # 1118.0
+gas 21 PH3: heat_capacity_over_r at 30 K = 0x4010000000000000  # 4.0
+gas 21 PH3: heat_capacity_over_r at 100 K = 0x4010002fd271ccdb  # 4.0001824266393795
+gas 21 PH3: heat_capacity_over_r at 200 K = 0x40105436d0df5596  # 4.08224035609364
+gas 21 PH3: heat_capacity_over_r at 298.15 K = 0x4011dd202fe5680c  # 4.465943096520288
+gas 21 PH3: heat_capacity_over_r at 500 K = 0x4016619630de2601  # 5.595299495276323
+gas 21 PH3: heat_capacity_over_r at 1000 K = 0x401ef19ecda5b948  # 7.735957349052406
+gas 21 PH3: heat_capacity_over_r at 2000 K = 0x40227bfc546bd5a8  # 9.242159498370555
+gas 21 PH3: enthalpy_over_r_k at 298.15 K = 0x40930d9a59aae354  # 1219.4007326794863
+gas 21 PH3: entropy_over_r at 298.15 K = 0x4036e5d55a6c9bbc  # 22.89778676177569
+gas 22 CH3OH: rotation NonLinear
+gas 22 CH3OH: vibration 0, degeneracy 1, wavenumber_cm = 0x40acc20000000000  # 3681.0
+gas 22 CH3OH: vibration 1, degeneracy 1, wavenumber_cm = 0x40a7700000000000  # 3000.0
+gas 22 CH3OH: vibration 2, degeneracy 1, wavenumber_cm = 0x40a6380000000000  # 2844.0
+gas 22 CH3OH: vibration 3, degeneracy 1, wavenumber_cm = 0x4097140000000000  # 1477.0
+gas 22 CH3OH: vibration 4, degeneracy 1, wavenumber_cm = 0x4096bc0000000000  # 1455.0
+gas 22 CH3OH: vibration 5, degeneracy 1, wavenumber_cm = 0x4095040000000000  # 1345.0
+gas 22 CH3OH: vibration 6, degeneracy 1, wavenumber_cm = 0x4090900000000000  # 1060.0
+gas 22 CH3OH: vibration 7, degeneracy 1, wavenumber_cm = 0x4090240000000000  # 1033.0
+gas 22 CH3OH: vibration 8, degeneracy 1, wavenumber_cm = 0x40a7200000000000  # 2960.0
+gas 22 CH3OH: vibration 9, degeneracy 1, wavenumber_cm = 0x4097140000000000  # 1477.0
+gas 22 CH3OH: vibration 10, degeneracy 1, wavenumber_cm = 0x4092340000000000  # 1165.0
+gas 22 CH3OH: level set 0, 39 levels, digest c62c70de3e9ad2bf, weight = 0x3ff0000000000000  # 1.0
+gas 22 CH3OH: heat_capacity_over_r at 30 K = 0x401038b6a9b2c69d  # 4.055384303604709
+gas 22 CH3OH: heat_capacity_over_r at 100 K = 0x4011c0d355da05ce  # 4.438306180412338
+gas 22 CH3OH: heat_capacity_over_r at 200 K = 0x401316d0b89d0fb8  # 4.7722805829870865
+gas 22 CH3OH: heat_capacity_over_r at 298.15 K = 0x40152ff5242609b0  # 5.296833576985975
+gas 22 CH3OH: heat_capacity_over_r at 500 K = 0x401cb775ffdc05d5  # 7.179161069683194
+gas 22 CH3OH: heat_capacity_over_r at 1000 K = 0x402589c6b7013f77  # 10.76909419908746
+gas 22 CH3OH: heat_capacity_over_r at 2000 K = 0x402b622841f5beeb  # 13.691713391540778
+gas 22 CH3OH: enthalpy_over_r_k at 298.15 K = 0x40957d5db6405aa8  # 1375.3415155463535
+gas 22 CH3OH: entropy_over_r at 298.15 K = 0x4038e0496695c074  # 24.87612000614213
+gas 23 H: rotation None
+gas 23 H: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 23 H: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 23 H: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 23 H: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 23 H: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 23 H: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 23 H: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 23 H: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 23 H: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 24 O: rotation None
+gas 24 O: level set 0, 3 levels, digest 7e11258f0ae56244, weight = 0x3ff0000000000000  # 1.0
+gas 24 O: heat_capacity_over_r at 30 K = 0x400424a96780fe50  # 2.517901238082949
+gas 24 O: heat_capacity_over_r at 100 K = 0x4006ce6fa9ef8a48  # 2.8507989193178993
+gas 24 O: heat_capacity_over_r at 200 K = 0x4005dfc0bcb36153  # 2.7342543356173024
+gas 24 O: heat_capacity_over_r at 298.15 K = 0x4005152e8c753062  # 2.6353426907790416
+gas 24 O: heat_capacity_over_r at 500 K = 0x4004740769320195  # 2.5566547602067637
+gas 24 O: heat_capacity_over_r at 1000 K = 0x40041fc8ec29bd38  # 2.515519948028352
+gas 24 O: heat_capacity_over_r at 2000 K = 0x4004083beba39e54  # 2.5040205392177004
+gas 24 O: enthalpy_over_r_k at 298.15 K = 0x408947011640bc0a  # 808.8755307252297
+gas 24 O: entropy_over_r at 298.15 K = 0x40305d26f31b3d91  # 16.363875574255477
+gas 25 e-: rotation None
+gas 25 e-: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 25 e-: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 25 e-: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 25 e-: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 25 e-: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 25 e-: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 25 e-: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 25 e-: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 25 e-: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 26 H-: rotation None
+gas 26 H-: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 26 H-: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 26 H-: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 26 H-: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 26 H-: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 26 H-: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 26 H-: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 26 H-: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 26 H-: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 27 Na: rotation None
+gas 27 Na: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 27 Na: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 27 Na: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 27 Na: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 27 Na: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 27 Na: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 27 Na: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 27 Na: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 27 Na: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 28 K: rotation None
+gas 28 K: level set 0, 3 levels, digest 4650f72aa628434c, weight = 0x3ff0000000000000  # 1.0
+gas 28 K: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 28 K: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 28 K: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 28 K: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 28 K: heat_capacity_over_r at 500 K = 0x40040000000001f8  # 2.500000000000224
+gas 28 K: heat_capacity_over_r at 1000 K = 0x4004000405dca884  # 2.500007673069435
+gas 28 K: heat_capacity_over_r at 2000 K = 0x40042dff69b8a25a  # 2.522459817835892
+gas 28 K: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 28 K: entropy_over_r at 298.15 K = 0x402ddfd0add37891  # 14.937138969482733
+gas 29 Fe: rotation None
+gas 29 Fe: level set 0, 13 levels, digest e027b643cae3a05b, weight = 0x3ff0000000000000  # 1.0
+gas 29 Fe: heat_capacity_over_r at 30 K = 0x400400005a3444eb  # 2.500000672073488
+gas 29 Fe: heat_capacity_over_r at 100 K = 0x4004940da0e59c9c  # 2.5722916193077037
+gas 29 Fe: heat_capacity_over_r at 200 K = 0x400770cb840f7ed8  # 2.9300756757000777
+gas 29 Fe: heat_capacity_over_r at 298.15 K = 0x4008b431fcd2e468  # 3.0879859687670894
+gas 29 Fe: heat_capacity_over_r at 500 K = 0x4007f299cee77b2e  # 2.993457428397412
+gas 29 Fe: heat_capacity_over_r at 1000 K = 0x4005a34df98d7534  # 2.7047385689062597
+gas 29 Fe: heat_capacity_over_r at 2000 K = 0x4006536818e2f799  # 2.790725893427361
+gas 29 Fe: enthalpy_over_r_k at 298.15 K = 0x4089bf3205910422  # 823.8994246796976
+gas 29 Fe: entropy_over_r at 298.15 K = 0x4030d35ce13cb41c  # 16.82563598377247
+gas 30 Mg: rotation None
+gas 30 Mg: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 30 Mg: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 30 Mg: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 30 Mg: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 30 Mg: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 30 Mg: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 30 Mg: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 30 Mg: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 30 Mg: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 31 Si: rotation None
+gas 31 Si: level set 0, 4 levels, digest c39a88ccc027fb43, weight = 0x3ff0000000000000  # 1.0
+gas 31 Si: heat_capacity_over_r at 30 K = 0x400b226805832fd8  # 3.3917999678287565
+gas 31 Si: heat_capacity_over_r at 100 K = 0x400af64b52271591  # 3.370260850732571
+gas 31 Si: heat_capacity_over_r at 200 K = 0x4006e54aa0913fe1  # 2.8619587463690412
+gas 31 Si: heat_capacity_over_r at 298.15 K = 0x400568dcd6055f42  # 2.676202461279815
+gas 31 Si: heat_capacity_over_r at 500 K = 0x4004827e2c7b6a90  # 2.5637172198451665
+gas 31 Si: heat_capacity_over_r at 1000 K = 0x40042cce15e3a974  # 2.521877451906386
+gas 31 Si: heat_capacity_over_r at 2000 K = 0x40050f38a777b27a  # 2.6324322780040434
+gas 31 Si: enthalpy_over_r_k at 298.15 K = 0x408c60ae12bed258  # 908.0849966915075
+gas 31 Si: entropy_over_r at 298.15 K = 0x40305a2fe48e2c21  # 16.352293286047033
+gas 32 Ca: rotation None
+gas 32 Ca: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 32 Ca: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 32 Ca: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 32 Ca: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 32 Ca: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 32 Ca: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 32 Ca: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 32 Ca: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 32 Ca: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 33 Ti: rotation None
+gas 33 Ti: level set 0, 19 levels, digest 0aa7814c91c346fc, weight = 0x3ff0000000000000  # 1.0
+gas 33 Ti: heat_capacity_over_r at 30 K = 0x40043690d55dad8e  # 2.5266434354031793
+gas 33 Ti: heat_capacity_over_r at 100 K = 0x4009f42c44af2be6  # 3.2442250600774853
+gas 33 Ti: heat_capacity_over_r at 200 K = 0x40097c2fac484fac  # 3.1856378039901383
+gas 33 Ti: heat_capacity_over_r at 298.15 K = 0x40078197527fe72a  # 2.9382769055636304
+gas 33 Ti: heat_capacity_over_r at 500 K = 0x400583be55a9c109  # 2.689327878230078
+gas 33 Ti: heat_capacity_over_r at 1000 K = 0x400484334b9e5b67  # 2.5645509631826147
+gas 33 Ti: heat_capacity_over_r at 2000 K = 0x400786770faa53aa  # 2.9406567787031763
+gas 33 Ti: enthalpy_over_r_k at 298.15 K = 0x408c55f6d7d5d19c  # 906.7455288605302
+gas 33 Ti: entropy_over_r at 298.15 K = 0x40310893429a1ff2  # 17.033497011783716
+gas 34 SiO: rotation Linear
+gas 34 SiO: vibration 0, degeneracy 1, wavenumber_cm = 0x4093368000000000  # 1229.625
+gas 34 SiO: heat_capacity_over_r at 30 K = 0x400c000000000000  # 3.5
+gas 34 SiO: heat_capacity_over_r at 100 K = 0x400c000366f437d8  # 3.5000064891128027
+gas 34 SiO: heat_capacity_over_r at 200 K = 0x400c1714b9a34da1  # 3.5112699988328164
+gas 34 SiO: heat_capacity_over_r at 298.15 K = 0x400cbffe99d2057e  # 3.5937473313539945
+gas 34 SiO: heat_capacity_over_r at 500 K = 0x400f1671352e8fc7  # 3.8859581141314012
+gas 34 SiO: heat_capacity_over_r at 1000 K = 0x40111a0957a0a17a  # 4.275426263026356
+gas 34 SiO: heat_capacity_over_r at 2000 K = 0x4011bfc30e231842  # 4.437267514125837
+gas 34 SiO: enthalpy_over_r_k at 298.15 K = 0x409060e453791f97  # 1048.2229746747523
+gas 34 SiO: entropy_over_r at 298.15 K = 0x4033f5c266656aff  # 19.9599975583651
+gas 35 TiO: rotation Linear
+gas 35 TiO: vibration 0, degeneracy 1, wavenumber_cm = 0x408f403126e978d5  # 1000.024
+gas 35 TiO: level set 0, 10 levels, digest 61f37acea5a07130, weight = 0x3ff0000000000000  # 1.0
+gas 35 TiO: heat_capacity_over_r at 30 K = 0x400db36b6ed192ad  # 3.7126072557169523
+gas 35 TiO: heat_capacity_over_r at 100 K = 0x40104bffb76fa249  # 4.074217668713183
+gas 35 TiO: heat_capacity_over_r at 200 K = 0x400e667e6870c543  # 3.8000457915701715
+gas 35 TiO: heat_capacity_over_r at 298.15 K = 0x400e97689e74b513  # 3.823930013596177
+gas 35 TiO: heat_capacity_over_r at 500 K = 0x40104e6933266a70  # 4.076573180408204
+gas 35 TiO: heat_capacity_over_r at 1000 K = 0x4011b16c41bc79bb  # 4.423264529350884
+gas 35 TiO: heat_capacity_over_r at 2000 K = 0x4012c0b72dccd51d  # 4.688198772074682
+gas 35 TiO: enthalpy_over_r_k at 298.15 K = 0x4092034e9d179524  # 1152.8267711338785
+gas 35 TiO: entropy_over_r at 298.15 K = 0x4035b5946a91d469  # 21.709295902827225
+gas 36 VO: rotation Linear
+gas 36 VO: vibration 0, degeneracy 1, wavenumber_cm = 0x408f4ca3d70a3d71  # 1001.58
+gas 36 VO: level set 0, 5 levels, digest 4ae481b65f714e8e, weight = 0x3ff0000000000000  # 1.0
+gas 36 VO: heat_capacity_over_r at 30 K = 0x400c000000000000  # 3.5
+gas 36 VO: heat_capacity_over_r at 100 K = 0x400c003c0d4e7b60  # 3.5001145400596414
+gas 36 VO: heat_capacity_over_r at 200 K = 0x400c4f14c4963fae  # 3.5386138304092674
+gas 36 VO: heat_capacity_over_r at 298.15 K = 0x400d82f97145461c  # 3.6889523362413126
+gas 36 VO: heat_capacity_over_r at 500 K = 0x401016b2fdf992ec  # 4.022167175634177
+gas 36 VO: heat_capacity_over_r at 1000 K = 0x40115fca1a0bb983  # 4.343544394460312
+gas 36 VO: heat_capacity_over_r at 2000 K = 0x4011e7a7b83c0de5  # 4.476225737252638
+gas 36 VO: enthalpy_over_r_k at 298.15 K = 0x40907c5a2659edc9  # 1055.0880369235404
+gas 36 VO: entropy_over_r at 298.15 K = 0x40355fe98db90469  # 21.374657495184156
+gas 37 FeH: rotation Linear
+gas 37 FeH: vibration 0, degeneracy 1, wavenumber_cm = 0x409b8851eb851eb8  # 1762.08
+gas 37 FeH: level set 0, 29 levels, digest 94c883de9ad33fc7, weight = 0x3ff0000000000000  # 1.0
+gas 37 FeH: heat_capacity_over_r at 30 K = 0x400c1210bd9f3d6b  # 3.5088209928723493
+gas 37 FeH: heat_capacity_over_r at 100 K = 0x401003696bf3b036  # 4.003331839321666
+gas 37 FeH: heat_capacity_over_r at 200 K = 0x4010f5d3286308d2  # 4.240063315434059
+gas 37 FeH: heat_capacity_over_r at 298.15 K = 0x40118854e85ed1fb  # 4.383136397158974
+gas 37 FeH: heat_capacity_over_r at 500 K = 0x40129a788575dabf  # 4.650850377386347
+gas 37 FeH: heat_capacity_over_r at 1000 K = 0x401489f6f142ae1b  # 5.134731073088484
+gas 37 FeH: heat_capacity_over_r at 2000 K = 0x40150570f15b8a94  # 5.255313655102004
+gas 37 FeH: enthalpy_over_r_k at 298.15 K = 0x4092d69d3eaa2db9  # 1205.6535593595893
+gas 37 FeH: entropy_over_r at 298.15 K = 0x4035a35db181ea26  # 21.638148397653048
+gas 38 Al: rotation None
+gas 38 Al: level set 0, 2 levels, digest 7fa86b2384810e6f, weight = 0x3ff0000000000000  # 1.0
+gas 38 Al: heat_capacity_over_r at 30 K = 0x40061a33ec4af036  # 2.7627943477982866
+gas 38 Al: heat_capacity_over_r at 100 K = 0x40083d29a9c17858  # 3.029864622322787
+gas 38 Al: heat_capacity_over_r at 200 K = 0x40054bae3ae95756  # 2.6619534113369054
+gas 38 Al: heat_capacity_over_r at 298.15 K = 0x400494dc22849030  # 2.572685498877057
+gas 38 Al: heat_capacity_over_r at 500 K = 0x40043373639b2643  # 2.525122430965696
+gas 38 Al: heat_capacity_over_r at 1000 K = 0x40040c692e65e1fc  # 2.506059992298331
+gas 38 Al: heat_capacity_over_r at 2000 K = 0x40040308a8ed7a0f  # 2.501481361148087
+gas 38 Al: enthalpy_over_r_k at 298.15 K = 0x408a00f6bcb3955d  # 832.1204771070439
+gas 38 Al: entropy_over_r at 298.15 K = 0x40300014f3600325  # 16.000319682064532
+gas 39 V: rotation None
+gas 39 V: level set 0, 24 levels, digest 30ef3500834f392e, weight = 0x3ff0000000000000  # 1.0
+gas 39 V: heat_capacity_over_r at 30 K = 0x4004b6e491023cde  # 2.5893031433875953
+gas 39 V: heat_capacity_over_r at 100 K = 0x400afad996092ad2  # 3.3724853250072124
+gas 39 V: heat_capacity_over_r at 200 K = 0x400ae751c8822482  # 3.3629489578930256
+gas 39 V: heat_capacity_over_r at 298.15 K = 0x4009073b40f1d816  # 3.1285309861950834
+gas 39 V: heat_capacity_over_r at 500 K = 0x400747cf4b4b46f2  # 2.91006335090139
+gas 39 V: heat_capacity_over_r at 1000 K = 0x4008486ee37c9ff8  # 3.035367753258466
+gas 39 V: heat_capacity_over_r at 2000 K = 0x40077674eac40783  # 2.9328401890824707
+gas 39 V: enthalpy_over_r_k at 298.15 K = 0x408db7f993e8ed0b  # 950.9968641469326
+gas 39 V: entropy_over_r at 298.15 K = 0x40312e6c89c413e1  # 17.18134366070797
+gas 40 Mn: rotation None
+gas 40 Mn: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 40 Mn: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 40 Mn: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 40 Mn: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 40 Mn: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 40 Mn: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 40 Mn: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 40 Mn: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 40 Mn: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 41 Ni: rotation None
+gas 41 Ni: level set 0, 9 levels, digest 1dd0a86da6943493, weight = 0x3ff0000000000000  # 1.0
+gas 41 Ni: heat_capacity_over_r at 30 K = 0x40040856bf60b295  # 2.504071707857586
+gas 41 Ni: heat_capacity_over_r at 100 K = 0x40069f04e577b972  # 2.8276460578119265
+gas 41 Ni: heat_capacity_over_r at 200 K = 0x400682ddc2f54d01  # 2.81389953909968
+gas 41 Ni: heat_capacity_over_r at 298.15 K = 0x40067a2303410fbd  # 2.8096370939474284
+gas 41 Ni: heat_capacity_over_r at 500 K = 0x400773c5e2b8caa8  # 2.931529780640023
+gas 41 Ni: heat_capacity_over_r at 1000 K = 0x4007e6cde68358c2  # 2.9876974114259562
+gas 41 Ni: heat_capacity_over_r at 2000 K = 0x40065c90cfab6d94  # 2.795198080462521
+gas 41 Ni: enthalpy_over_r_k at 298.15 K = 0x4089a6d84aa2f4ab  # 820.8556111079137
+gas 41 Ni: entropy_over_r at 298.15 K = 0x4030f4b1ff75bb50  # 16.955841032260025
+gas 42 Zn: rotation None
+gas 42 Zn: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 42 Zn: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 42 Zn: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 42 Zn: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 42 Zn: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 42 Zn: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 42 Zn: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 42 Zn: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 42 Zn: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 43 Na+: rotation None
+gas 43 Na+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 43 Na+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 43 Na+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 43 Na+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 43 Na+: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 43 Na+: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 43 Na+: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 43 Na+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 43 Na+: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 44 Mg+: rotation None
+gas 44 Mg+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 44 Mg+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 44 Mg+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 44 Mg+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 44 Mg+: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 44 Mg+: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 44 Mg+: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 44 Mg+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 44 Mg+: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 45 Al+: rotation None
+gas 45 Al+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 45 Al+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 45 Al+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 45 Al+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 45 Al+: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 45 Al+: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 45 Al+: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 45 Al+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 45 Al+: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 46 Si+: rotation None
+gas 46 Si+: level set 0, 2 levels, digest d01431181c5f26ed, weight = 0x3ff0000000000000  # 1.0
+gas 46 Si+: heat_capacity_over_r at 30 K = 0x400400cf0cb5afbd  # 2.500394915861732
+gas 46 Si+: heat_capacity_over_r at 100 K = 0x40081d60f9f83edb  # 3.0143451241382144
+gas 46 Si+: heat_capacity_over_r at 200 K = 0x4009822274370988  # 3.188542278222659
+gas 46 Si+: heat_capacity_over_r at 298.15 K = 0x40076a7a2e860867  # 2.926990855660779
+gas 46 Si+: heat_capacity_over_r at 500 K = 0x40055c3ce296ef66  # 2.6700380041419747
+gas 46 Si+: heat_capacity_over_r at 1000 K = 0x400455c1ce67019a  # 2.5418735623536124
+gas 46 Si+: heat_capacity_over_r at 2000 K = 0x4004149e19c9cf53  # 2.5100671782219393
+gas 46 Si+: enthalpy_over_r_k at 298.15 K = 0x408b992fba98576b  # 883.1483051206282
+gas 46 Si+: entropy_over_r at 298.15 K = 0x402f9c089d9d70f2  # 15.804753232449432
+gas 47 K+: rotation None
+gas 47 K+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 47 K+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 47 K+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 47 K+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 47 K+: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 47 K+: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 47 K+: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 47 K+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 47 K+: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 48 Ca+: rotation None
+gas 48 Ca+: level set 0, 3 levels, digest 5c7be9e4a613d38e, weight = 0x3ff0000000000000  # 1.0
+gas 48 Ca+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 48 Ca+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 48 Ca+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 48 Ca+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 48 Ca+: heat_capacity_over_r at 500 K = 0x400400000000008a  # 2.5000000000000613
+gas 48 Ca+: heat_capacity_over_r at 1000 K = 0x40040002da682465  # 2.5000054419547717
+gas 48 Ca+: heat_capacity_over_r at 2000 K = 0x4004348d6a5e373e  # 2.52566035366081
+gas 48 Ca+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 48 Ca+: entropy_over_r at 298.15 K = 0x402ddfd0add37891  # 14.937138969482733
+gas 49 Ti+: rotation None
+gas 49 Ti+: level set 0, 26 levels, digest 0e5703ba2d630bf6, weight = 0x3ff0000000000000  # 1.0
+gas 49 Ti+: heat_capacity_over_r at 30 K = 0x4006a118bcac6164  # 2.8286604633432706
+gas 49 Ti+: heat_capacity_over_r at 100 K = 0x400b4ee81fef54da  # 3.413528680316273
+gas 49 Ti+: heat_capacity_over_r at 200 K = 0x4009c4247dcfa782  # 3.220772726916892
+gas 49 Ti+: heat_capacity_over_r at 298.15 K = 0x400931ed77f9352c  # 3.1493787167479663
+gas 49 Ti+: heat_capacity_over_r at 500 K = 0x4008de200cee18b6  # 3.108459568992738
+gas 49 Ti+: heat_capacity_over_r at 1000 K = 0x4006adf838acfe99  # 2.834946100978254
+gas 49 Ti+: heat_capacity_over_r at 2000 K = 0x40065351d5f2f57c  # 2.7906834330339603
+gas 49 Ti+: enthalpy_over_r_k at 298.15 K = 0x408db1069ff68ce5  # 950.128234792876
+gas 49 Ti+: entropy_over_r at 298.15 K = 0x40316e0c2eec6983  # 17.429873402326404
+gas 50 V+: rotation None
+gas 50 V+: level set 0, 28 levels, digest 687d19a278e0da2f, weight = 0x3ff0000000000000  # 1.0
+gas 50 V+: heat_capacity_over_r at 30 K = 0x400c8b5cfa3643c4  # 3.568048434048679
+gas 50 V+: heat_capacity_over_r at 100 K = 0x400bb42373b5ced1  # 3.4629582443102227
+gas 50 V+: heat_capacity_over_r at 200 K = 0x400832e13c13a6c2  # 3.0248436635491496
+gas 50 V+: heat_capacity_over_r at 298.15 K = 0x4006459e647bc376  # 2.7839935159940365
+gas 50 V+: heat_capacity_over_r at 500 K = 0x40052bc348748316  # 2.6463685665661485
+gas 50 V+: heat_capacity_over_r at 1000 K = 0x400779faf6faef46  # 2.93456070855419
+gas 50 V+: heat_capacity_over_r at 2000 K = 0x4008d53d811126e4  # 3.104121216140685
+gas 50 V+: enthalpy_over_r_k at 298.15 K = 0x408daf217df25cc9  # 949.89135350557
+gas 50 V+: entropy_over_r at 298.15 K = 0x40314fa00e089ef4  # 17.31103599272224
+gas 51 Cr+: rotation None
+gas 51 Cr+: level set 0, 6 levels, digest fe10c29e1814064c, weight = 0x3ff0000000000000  # 1.0
+gas 51 Cr+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 51 Cr+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 51 Cr+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 51 Cr+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 51 Cr+: heat_capacity_over_r at 500 K = 0x4004000000001c36  # 2.500000000003207
+gas 51 Cr+: heat_capacity_over_r at 1000 K = 0x40040011e7bb84b8  # 2.5000341514683804
+gas 51 Cr+: heat_capacity_over_r at 2000 K = 0x400474fb2de7ac18  # 2.5571197115255124
+gas 51 Cr+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 51 Cr+: entropy_over_r at 298.15 K = 0x40300926fe948c79  # 16.035751258150842
+gas 52 Mn+: rotation None
+gas 52 Mn+: level set 0, 7 levels, digest ca4ef9c79f8bc52e, weight = 0x3ff0000000000000  # 1.0
+gas 52 Mn+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 52 Mn+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 52 Mn+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 52 Mn+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 52 Mn+: heat_capacity_over_r at 500 K = 0x40040000001a743c  # 2.500000000769914
+gas 52 Mn+: heat_capacity_over_r at 1000 K = 0x4004005472776626  # 2.500161070126313
+gas 52 Mn+: heat_capacity_over_r at 2000 K = 0x400460e58e69c83d  # 2.5473128438980255
+gas 52 Mn+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 52 Mn+: entropy_over_r at 298.15 K = 0x4030309d69d5101e  # 16.1899019379781
+gas 53 Fe+: rotation None
+gas 53 Fe+: level set 0, 16 levels, digest 43fd929d3a8c16b2, weight = 0x3ff0000000000000  # 1.0
+gas 53 Fe+: heat_capacity_over_r at 30 K = 0x4004000161a67932  # 2.500002634899965
+gas 53 Fe+: heat_capacity_over_r at 100 K = 0x4004ccd307b3d789  # 2.600011882949677
+gas 53 Fe+: heat_capacity_over_r at 200 K = 0x4007dfd3d145fe2c  # 2.9842907285199285
+gas 53 Fe+: heat_capacity_over_r at 298.15 K = 0x400914f9e781a298  # 3.135242279666567
+gas 53 Fe+: heat_capacity_over_r at 500 K = 0x4008f35e3e90f74a  # 3.1188321006765465
+gas 53 Fe+: heat_capacity_over_r at 1000 K = 0x4008b0b7494aa174  # 3.086287090864227
+gas 53 Fe+: heat_capacity_over_r at 2000 K = 0x40074e162302b23a  # 2.9131281600187124
+gas 53 Fe+: enthalpy_over_r_k at 298.15 K = 0x408a1163f0d86b30  # 834.1737992198669
+gas 53 Fe+: entropy_over_r at 298.15 K = 0x4030fd804cf29718  # 16.990238961435438
+gas 54 Ni+: rotation None
+gas 54 Ni+: level set 0, 8 levels, digest f5020043b7b95e44, weight = 0x3ff0000000000000  # 1.0
+gas 54 Ni+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 54 Ni+: heat_capacity_over_r at 100 K = 0x4004000010224849  # 2.5000001202070377
+gas 54 Ni+: heat_capacity_over_r at 200 K = 0x40040324771dac73  # 2.5015343957834886
+gas 54 Ni+: heat_capacity_over_r at 298.15 K = 0x4004321cf1a8f0bd  # 2.524469268768455
+gas 54 Ni+: heat_capacity_over_r at 500 K = 0x40054a2497f7a491  # 2.6612026092958065
+gas 54 Ni+: heat_capacity_over_r at 1000 K = 0x40067d4c24be0c95  # 2.8111803884981534
+gas 54 Ni+: heat_capacity_over_r at 2000 K = 0x40071ea48c22b114  # 2.8899622867667265
+gas 54 Ni+: enthalpy_over_r_k at 298.15 K = 0x4087530791e63b2b  # 746.3786962496573
+gas 54 Ni+: entropy_over_r at 298.15 K = 0x40300a21f60fc7d6  # 16.039580706455887
+gas 55 Zn+: rotation None
+gas 55 Zn+: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 55 Zn+: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 55 Zn+: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 55 Zn+: heat_capacity_over_r at 298.15 K = 0x4004000000000000  # 2.5
+gas 55 Zn+: heat_capacity_over_r at 500 K = 0x4004000000000000  # 2.5
+gas 55 Zn+: heat_capacity_over_r at 1000 K = 0x4004000000000000  # 2.5
+gas 55 Zn+: heat_capacity_over_r at 2000 K = 0x4004000000000000  # 2.5
+gas 55 Zn+: enthalpy_over_r_k at 298.15 K = 0x40874b0000000000  # 745.375
+gas 55 Zn+: entropy_over_r at 298.15 K = 0x402c7cec7de3d4f2  # 14.243991788922788
+gas 56 HCl: rotation Linear
+gas 56 HCl: vibration 0, degeneracy 1, wavenumber_cm = 0x40a68a9e353f7cee  # 2885.309
+gas 56 HCl: heat_capacity_over_r at 30 K = 0x400c000000000000  # 3.5
+gas 56 HCl: heat_capacity_over_r at 100 K = 0x400c000000000004  # 3.5000000000000018
+gas 56 HCl: heat_capacity_over_r at 200 K = 0x400c000037ee5e56  # 3.5000004167193692
+gas 56 HCl: heat_capacity_over_r at 298.15 K = 0x400c005b3ae4fd40  # 3.500174007523725
+gas 56 HCl: heat_capacity_over_r at 500 K = 0x400c23028275ccaa  # 3.517094630451159
+gas 56 HCl: heat_capacity_over_r at 1000 K = 0x400e3d93a40295e5  # 3.78006675846949
+gas 56 HCl: heat_capacity_over_r at 2000 K = 0x4010d3cd095c800d  # 4.206836839934124
+gas 56 HCl: enthalpy_over_r_k at 298.15 K = 0x40904e1d6a5e32b9  # 1043.5287260740718
+gas 56 HCl: entropy_over_r at 298.15 K = 0x4033f10cd273a502  # 19.94160189936975
+gas 65 Cr: rotation None
+gas 65 Cr: level set 0, 7 levels, digest 7111a5413b6586df, weight = 0x3ff0000000000000  # 1.0
+gas 65 Cr: heat_capacity_over_r at 30 K = 0x4004000000000000  # 2.5
+gas 65 Cr: heat_capacity_over_r at 100 K = 0x4004000000000000  # 2.5
+gas 65 Cr: heat_capacity_over_r at 200 K = 0x4004000000000000  # 2.5
+gas 65 Cr: heat_capacity_over_r at 298.15 K = 0x40040000000001cc  # 2.5000000000002043
+gas 65 Cr: heat_capacity_over_r at 500 K = 0x4004000025ade384  # 2.5000002807323103
+gas 65 Cr: heat_capacity_over_r at 1000 K = 0x40040c183fd1423d  # 2.505905626843996
+gas 65 Cr: heat_capacity_over_r at 2000 K = 0x4007823445db87a8  # 2.9385762651081286
+gas 65 Cr: enthalpy_over_r_k at 298.15 K = 0x40874b000000000e  # 745.3750000000016
+gas 65 Cr: entropy_over_r at 298.15 K = 0x4030309d69d51020  # 16.189901937978107
+equilibrium hydrogen: heat_capacity_over_r at 30 K = 0x400b73d05d523960  # 3.4315497675626574
+equilibrium hydrogen: heat_capacity_over_r at 100 K = 0x400b16be9808b2f6  # 3.3861057164816613
+equilibrium hydrogen: heat_capacity_over_r at 200 K = 0x400a693162e0e507  # 3.3013637280352017
+equilibrium hydrogen: heat_capacity_over_r at 298.15 K = 0x400bbfa01ac0c96e  # 3.468567093857181
+equilibrium hydrogen: heat_capacity_over_r at 500 K = 0x400c2996734d347b  # 3.520306492608652
+equilibrium hydrogen: heat_capacity_over_r at 1000 K = 0x400d1a4130d4ee29  # 3.637819653986089
+equilibrium hydrogen: heat_capacity_over_r at 2000 K = 0x40109883e3023955  # 4.148940608034839
+equilibrium hydrogen: enthalpy_over_r_k at 298.15 K = 0x408fd34e668216de  # 1018.4132814563015
+equilibrium hydrogen: entropy_over_r at 298.15 K = 0x40313431ba746b9b  # 17.203883794234212
 [phase]
 phase 2 H2O: triple_temperature_k = 0x4071128f5c28f5c3  # 273.16
 phase 2 H2O: triple_pressure_pa = 0x40831d4189374bc7  # 611.657

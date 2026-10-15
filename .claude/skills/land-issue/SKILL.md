@@ -67,6 +67,8 @@ Landing #N:
 6. **Close:** `land_issue.py close N --dry-run` prints the closing comment: each landed commit
    with its lane commit, and the gate line. Add `--note-file <file>` for sign-off notes or
    follow-ups. Then run it without `--dry-run`.
+   - The comment begins with the orchestrator's tag (`coordination.tags`), since the worker may
+     read only the comments that do, and ends with the hidden `landed` marker.
    - It refuses while any lane commit is missing from the pushed integration branch.
    - It closes the issue as completed and moves the board card to landed.
 7. **Status:** post what landed and what is queued next with the `post-status` skill

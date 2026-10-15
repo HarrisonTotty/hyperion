@@ -46,17 +46,43 @@ export const UNLISTED_MATERIAL = "unlisted material";
  * written as a formula key would be.
  */
 export const SUBSTANCE_NAMES: Readonly<Record<string, string>> = {
-  mars_dust: "Mars-type dust",
-  soot: "soot",
-  tholin: "tholin",
-  // R08.T5.d's name keys (decision-substance-names; decision-r08-t5d).
+  // P14.T49.b's name-form rows, in registry order (decision-substance-names §4.3; `basalt_fe` as
+  // signoff-5's item 8 amends it).
   graphite: "graphite",
+  tholin: "tholin",
+  soot: "soot",
   chromophore: "Jovian chromophore",
   ice_giant_haze: "ice-giant haze",
+  mars_dust: "Mars-type dust",
   acid_uv_absorber: "ultraviolet-absorbing H2SO4",
+  brine_nacl: "NaCl brine",
+  brine_mgso4: "MgSO4 brine",
+  brine_naclo4: "NaClO4 brine",
+  brine_mgclo4: "Mg(ClO4)2 brine",
+  nh3_h2o: "NH3–H2O mixture",
+  ch4_c2h6_n2: "CH4–C2H6–N2 mixture",
+  anorthosite: "anorthosite",
+  feldspathic: "feldspathic rock",
   basalt: "basalt",
   basalt_fe: "Fe-rich basalt",
+  komatiite: "komatiite",
+  basalt_reduced: "reduced basalt",
+  granite: "granite",
+  ultramafic: "ultramafic rock",
+  ferric: "ferric rock",
+  phyllosilicate: "phyllosilicate",
   lava_glass: "volcanic glass",
+  ca_al_residue: "refractory Ca–Al residue",
+  iron_nickel: "Fe–Ni metal",
+  carbonaceous: "carbonaceous matter",
+  chondrite_ci: "CI chondrite",
+  chondrite_cm: "CM chondrite",
+  chondrite_cv: "CV chondrite",
+  chondrite_h: "H chondrite",
+  chondrite_l: "L chondrite",
+  chondrite_ll: "LL chondrite",
+  chondrite_e: "E chondrite",
+  cometary: "cometary dust",
 };
 
 /** The case a name is shown in: as written, inside a sentence, or in an upper-case label. */

@@ -1394,10 +1394,12 @@ selector steps, unit switching, formatting under the guide's number rules.
 This plan changes generated output four times, each a bump with regenerated goldens: P09.T2.c (the
 field gives up φ), P09.T28.b (the Kepler regime and the grid's loss cone), P09.T28.d (the secular
 rates, away from the epoch only), P09.T35 (the supernova and luminous-blue-variable carve-outs,
-layer D's ancient share and the hypervelocity class's weight). It reserves, so that later plans move
-nothing: the `ClassId` values 2, 3, 5, 6 and 8 for plan 11 and the rule that feature-level lists
-append classes in the list order of design note 16; event tags 0x0203–0x02FF of this plan's block;
-the `10` sub-kinds `01` and `10` for plan 10 (`11` stays rejected);
+layer D's ancient share and the hypervelocity class's weight). T28.b and T28.d ride version 25
+(S1) and T35 rides 26 (S2), and each boards a later train if not ready
+(decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). It reserves, so that later plans
+move nothing: the `ClassId` values 2, 3, 5, 6 and 8 for plan 11 and the rule that feature-level
+lists append classes in the list order of design note 16; event tags 0x0203–0x02FF of this plan's
+block; the `10` sub-kinds `01` and `10` for plan 10 (`11` stays rejected);
 `FeatureKind::{Stream, DwarfCore}`; `FeatureShares::set_halo_discrete`; the binary classes of the
 class table with scratch fractions; member 1–15 of a catalogue system; domain-tag prefixes
 `feature.`, `member.`, `centre.`, `snr.`, `class.`. Parameters that belong to the generator version

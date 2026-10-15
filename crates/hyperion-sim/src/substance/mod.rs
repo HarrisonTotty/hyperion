@@ -18,17 +18,18 @@
 //!   in `hyperion-surface`, whose field header carries keys; the rows here use it.
 //! - **The registry's public mirror** is `packages/protocol/fixtures/substances.json` (index, key,
 //!   kind, molar mass, `c_p` ÷ R and the client's three optics flags), which the client's tests
-//!   read, and `crates/hyperion-sim/tests/golden/substance/registry.golden` pins the rows' values.
-//!   A test writes both and holds each to its committed rows as a prefix.
+//!   read, and `crates/hyperion-sim/tests/golden/substance/registry.golden`
+//!   pins the rows' values. A test writes both and holds each to its committed rows as a prefix.
 //!
 //! # Columns
 //!
 //! A row carries its identity (key, [`SubstanceKind`], stoichiometry, charge, molar mass) and then
 //! groups of columns, each `None` where the substance has no such data: so far the gas columns
-//! ([`GasColumns`]) and the phase columns ([`PhaseColumns`]). Every value names its sources and
-//! their licence basis ([`Source`], [`Basis`]; decision-composition §5). P14.T49.b–e add the
-//! later rows and the fitted phase data, the condensed optics, the thermochemistry and the
-//! aerosols' extinction.
+//! ([`GasColumns`], with each gas's [`MolecularConstants`], over which [`thermo`] sums its heat
+//! capacity, enthalpy and entropy by temperature) and the phase columns ([`PhaseColumns`]). Every
+//! value names its sources and their licence basis ([`Source`], [`Basis`]; decision-composition
+//! §5). P14.T49.b adds the later rows, the gases' molecular constants and the fitted phase data;
+//! P14.T49.c–e the condensed optics, the thermochemistry and the aerosols' extinction.
 //!
 //! # Rows
 //!
@@ -37,17 +38,30 @@
 //! [`Gas`] stays the typed view of these nine for escape and the greenhouse ([`Gas::substance`],
 //! [`SubstanceId::gas`]). Five carry phase data, in registry order water, methane, nitrogen,
 //! carbon dioxide and argon ([`condensables`]).
+//!
+//! P14.T49.b appends, in its plan's order: the gases R08 measures (`Ne`, `Kr`, `Xe`, `N2O`); the
+//! gases of the chemistry, atoms and their first ions among them (`CO` … `FeH`, `Al` … `Zn`,
+//! `Na+` … `Zn+`, `HCl`); the condensates aloft (`NH4SH` … `graphite`); the hazes and dusts; and
+//! the solutions, lithologies, salts, organics and undifferentiated bodies' materials. A row no
+//! rule yet produces is reachable data, labelled so where a reader meets it.
 
 pub mod element;
 pub mod mix;
 pub mod phase;
 mod rows;
+pub mod thermo;
 
 pub use element::Element;
 pub use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
 pub use mix::{GasColumns, HeatCapacityClass, heat_capacity_over_r, mean_molar_mass_g_per_mol};
 pub use phase::{
     MOLAR_GAS_CONSTANT, Phase, PhaseColumns, ice_ih_density, phase_at, saturation_pressure,
+};
+pub use rows::EQUILIBRIUM_HYDROGEN;
+pub use thermo::{
+    Level, LevelSet, MolecularConstants, NuclearSpin, Rotation, RovibrationalTerms, Vibration,
+    enthalpy_over_r, entropy_over_r, heat_capacity_over_r_at, mixture_enthalpy_over_r,
+    mixture_entropy_over_r, mixture_heat_capacity_over_r_at,
 };
 
 use crate::planetary::derive::atmosphere::Gas;
@@ -428,9 +442,250 @@ mod tests {
             assert_same_bits(gas.molar_mass_g_per_mol(), t13[i]);
             assert_same_bits(id.substance().molar_mass_g_per_mol().unwrap(), t13[i]);
         }
-        assert_eq!(ids().len(), 9);
-        assert_eq!(SubstanceId::from_index(9), None);
+        assert_eq!(ids().len(), 112);
+        assert_eq!(SubstanceId::from_index(112), None);
         assert_eq!(SubstanceId::from_index(9).and_then(SubstanceId::gas), None);
+    }
+
+    /// The keys of P14.T49.b's rows 9–111, in its plan's order: the gases R08 measures, the
+    /// gases of the chemistry, the atoms of T50.b's metals, their first ions and `HCl`, the
+    /// condensates aloft, the hazes and dusts, then the solutions, lithologies, salts, organics
+    /// and undifferentiated bodies' materials, in the order this builder lists them.
+    const APPENDED: [&str; 103] = [
+        "Ne",
+        "Kr",
+        "Xe",
+        "N2O",
+        "CO",
+        "SO2",
+        "H2S",
+        "O3",
+        "HCN",
+        "C2H2",
+        "C2H4",
+        "C2H6",
+        "PH3",
+        "CH3OH",
+        "H",
+        "O",
+        "e-",
+        "H-",
+        "Na",
+        "K",
+        "Fe",
+        "Mg",
+        "Si",
+        "Ca",
+        "Ti",
+        "SiO",
+        "TiO",
+        "VO",
+        "FeH",
+        "Al",
+        "V",
+        "Mn",
+        "Ni",
+        "Zn",
+        "Na+",
+        "Mg+",
+        "Al+",
+        "Si+",
+        "K+",
+        "Ca+",
+        "Ti+",
+        "V+",
+        "Cr+",
+        "Mn+",
+        "Fe+",
+        "Ni+",
+        "Zn+",
+        "HCl",
+        "NH4SH",
+        "H2SO4",
+        "S8",
+        "KCl",
+        "NaCl",
+        "ZnS",
+        "Na2S",
+        "MnS",
+        "Cr",
+        "FeS",
+        "MgSiO3",
+        "Mg2SiO4",
+        "SiO2",
+        "Al2O3",
+        "CaTiO3",
+        "TiO2",
+        "graphite",
+        "tholin",
+        "soot",
+        "chromophore",
+        "ice_giant_haze",
+        "mars_dust",
+        "acid_uv_absorber",
+        "brine_nacl",
+        "brine_mgso4",
+        "brine_naclo4",
+        "brine_mgclo4",
+        "nh3_h2o",
+        "ch4_c2h6_n2",
+        "anorthosite",
+        "feldspathic",
+        "basalt",
+        "basalt_fe",
+        "komatiite",
+        "basalt_reduced",
+        "granite",
+        "ultramafic",
+        "ferric",
+        "phyllosilicate",
+        "lava_glass",
+        "ca_al_residue",
+        "iron_nickel",
+        "SiC",
+        "MgSO4",
+        "Na2CO3",
+        "CaCO3",
+        "carbonaceous",
+        "chondrite_ci",
+        "chondrite_cm",
+        "chondrite_cv",
+        "chondrite_h",
+        "chondrite_l",
+        "chondrite_ll",
+        "chondrite_e",
+        "cometary",
+    ];
+
+    /// P14.T49.b's rows follow rows 0–8 in [`APPENDED`]'s order.
+    #[test]
+    fn substance_rows_9_onward_are_the_plan_s_in_order() {
+        let keys: Vec<SubstanceKey> = ids().skip(9).map(|id| id.substance().key()).collect();
+        let keys: Vec<&str> = keys.iter().map(SubstanceKey::as_str).collect();
+        assert_eq!(keys, APPENDED);
+        // A material of no single formula has neither a stoichiometry nor a molar mass.
+        for id in ids() {
+            let row = id.substance();
+            let named = row.key().form() == SubstanceKeyForm::Name;
+            let formless = row.elements().is_empty() && row.key().as_str() != "e-";
+            assert_eq!(
+                formless,
+                row.molar_mass_g_per_mol().is_none(),
+                "{:?}",
+                row.key()
+            );
+            if formless {
+                assert!(named, "{:?}", row.key());
+            }
+        }
+    }
+
+    /// The client-optics flags of P14.T49.b's rows (decision-r08-t4b-t12c, follow-ups 2 and 4):
+    /// every gas row absorbs but the noble gases and the fifteen rows
+    /// science-r08-unowned-absorbers adds, whose flag waits for R08's answers, and every gas row
+    /// but the electron, H⁻ and the ions scatters; the condensates aloft and the hazes are aerosol materials and nothing else;
+    /// a surface material is none of the three. Rows 0–8 keep generator version 22's flags until
+    /// the bump, which turns on `absorber` for H₂, He, N₂ and CO₂ (P14.T54.a).
+    #[test]
+    fn substance_client_flags_follow_the_ruling() {
+        for id in ids().skip(9) {
+            let row = id.substance();
+            let key = row.key();
+            let key = key.as_str();
+            let optics = row.optics();
+            if row.gas().is_some() {
+                let noble = matches!(key, "Ne" | "Kr" | "Xe");
+                // The rows science-r08-unowned-absorbers adds wait for the client's answers.
+                let awaiting = matches!(
+                    key,
+                    "Al" | "V"
+                        | "Mn"
+                        | "Ni"
+                        | "Zn"
+                        | "HCl"
+                        | "Na+"
+                        | "Al+"
+                        | "Si+"
+                        | "K+"
+                        | "V+"
+                        | "Cr+"
+                        | "Mn+"
+                        | "Ni+"
+                        | "Zn+"
+                );
+                assert_eq!(optics.absorber(), !noble && !awaiting, "{key}");
+                assert_eq!(optics.rayleigh(), row.kind() != SubstanceKind::Ion, "{key}");
+            } else {
+                assert!(!optics.rayleigh() && !optics.absorber(), "{key}");
+            }
+        }
+        for key in [
+            "NH4SH",
+            "H2SO4",
+            "S8",
+            "KCl",
+            "NaCl",
+            "ZnS",
+            "Na2S",
+            "MnS",
+            "Cr",
+            "FeS",
+            "MgSiO3",
+            "Mg2SiO4",
+            "SiO2",
+            "Al2O3",
+            "CaTiO3",
+            "TiO2",
+            "graphite",
+            "tholin",
+            "soot",
+            "chromophore",
+            "ice_giant_haze",
+            "mars_dust",
+            "acid_uv_absorber",
+            "Fe",
+            "CO",
+            "H2S",
+            "C2H6",
+            "basalt",
+            "basalt_fe",
+            "lava_glass",
+        ] {
+            assert!(
+                by_key(key).unwrap().substance().optics().aerosol_material(),
+                "{key}"
+            );
+        }
+        // A gas whose condensate no index file serves yet is no aerosol material until R08 adds
+        // one.
+        for key in ["SO2", "HCN", "C2H2", "N2O", "Ne"] {
+            assert!(
+                !by_key(key).unwrap().substance().optics().aerosol_material(),
+                "{key}"
+            );
+        }
+        for key in [
+            "granite",
+            "brine_nacl",
+            "chondrite_ci",
+            "MgSO4",
+            "SiC",
+            "carbonaceous",
+        ] {
+            assert_eq!(
+                by_key(key).unwrap().substance().optics(),
+                ClientOptics::default(),
+                "{key}"
+            );
+        }
+        for gas in [
+            Gas::Hydrogen,
+            Gas::Helium,
+            Gas::Nitrogen,
+            Gas::CarbonDioxide,
+        ] {
+            assert!(!gas.substance().substance().optics().absorber(), "{gas:?}");
+        }
     }
 
     #[test]
@@ -520,26 +775,24 @@ mod tests {
     }
 
     /// Each molar mass is its formula's sum of IUPAC 2021's abridged standard atomic weights
-    /// (Prohaska et al. 2022, Pure Appl. Chem. 94, 573) to their last place.
+    /// (Prohaska et al. 2022, Pure Appl. Chem. 94, 573, as CIAAW prints them) to their last place,
+    /// an ion's less its charge in electrons.
     #[test]
     fn substance_molar_masses_are_their_formulae_s() {
-        let weight = |element: Element| match element {
-            Element::H => 1.0080,
-            Element::He => 4.0026,
-            Element::C => 12.011,
-            Element::N => 14.007,
-            Element::O => 15.999,
-            Element::Ar => 39.95,
-            other => panic!("{other:?} has no weight here yet (P14.T50.a's)"),
-        };
+        // P14.T50.a's standard atomic weights, CIAAW's abridged values, the element registry's.
+        // The electron's molar mass, g mol⁻¹ (CODATA 2018), which an ion's charge takes away.
+        let electron = 5.485_799_088_8e-4;
         for id in ids() {
             let row = id.substance();
+            let Some(molar_mass) = row.molar_mass_g_per_mol() else {
+                continue;
+            };
             let sum: f64 = row
                 .elements()
                 .iter()
-                .map(|&(e, n)| f64::from(n) * weight(e))
-                .sum();
-            let molar_mass = row.molar_mass_g_per_mol().unwrap();
+                .map(|&(e, n)| f64::from(n) * e.standard_atomic_weight_g_per_mol())
+                .sum::<f64>()
+                - f64::from(row.charge()) * electron;
             assert!(
                 (molar_mass - sum).abs() < 5e-4,
                 "{:?}: {molar_mass} against {sum}",
@@ -607,13 +860,22 @@ mod tests {
         }
     }
 
-    /// Every gas row is one the client may scatter, and its kinds name themselves.
+    /// Every one of P14.T13's gases is a gas row the client may scatter, holding generator
+    /// version 22's class; every later gas row has its molecular constants and no class; and the
+    /// kinds name themselves.
     #[test]
     fn substance_gas_rows_carry_their_gas_columns() {
         for gas in Gas::ALL {
             let row = gas.substance().substance();
             assert!(row.gas().is_some(), "{gas:?}");
             assert!(row.optics().rayleigh(), "{gas:?}");
+            assert!(row.gas().unwrap().heat_capacity().is_some(), "{gas:?}");
+        }
+        for id in ids().skip(9) {
+            if let Some(gas) = id.substance().gas() {
+                assert_eq!(gas.heat_capacity(), None, "{:?}", id.substance().key());
+                assert_eq!(gas.heat_capacity_over_r(), None);
+            }
         }
         assert_eq!(SubstanceKind::Molecule.name(), "molecule");
         assert_eq!(SubstanceKind::Atom.name(), "atom");

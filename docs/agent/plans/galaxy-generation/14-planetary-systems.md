@@ -719,22 +719,39 @@ Order and parallelism:
 
   Nothing in 0–7 reads R09's coarse field, which reads this section. 0–6 and R09.T1.b share T24's
   version bump, 21 → 22; 7 changes the wire, not the output. T24.e, T24.c with T24.g, and T24.d
-  move to the 22 → 23 batch (Phase L), where they build on the registry's data.
+  move to the 23 → 24 batch (Phase L; decision-bump-plan-after-22, 2026-10-14; updated
+  2026-10-15), where they build on the registry's data.
 
-  **Phase L's batches** (decision-composition):
-  - **22 → 23**: T49.b–e; T50.a–c; T51.a–c; T24.e; T52.a–c; T24.c with T24.g; T24.d with T52.d;
-    T56.a, T56.c and T56.d, held behind `MOONS_VERSION`; T57.a (decision-p14-moons);
-    then T54.a, which wires them onto the record and bumps. Compute subtasks are pure modules,
-    called by nothing on the record until T54.a, so each keeps `just ci` green and moves no golden.
-    Lanes: T49.b → T49.c; T49.d; T49.e (after R08.T5.b and T5.d); T50.a → T50.c → T51.a → T51.b
-    (one lane: all four edit `derive/atmosphere.rs`); T51.c after T50.a and T49.c; T24.e (after
-    T49.b's heat-capacity step, science-r08-gases-2.md §1.4) → T50.b → T52.a → T52.b →
-    T52.c → T24.c with T24.g (after T51.a) → T24.d with T52.d; T56.a → T56.c →
-    T56.d (lane `p14-moons`; T56.c after T50.a and T50.c), with T56.b in the client after T56.a;
-    T57.a after T51.b in the T50.a lane; then T54.a.
-  - **23 → 24**: T53.a → T53.b → T53.c; T53.d; T51.d → T51.e → T51.g (one lane: T51.e and T51.g
-    both edit `moons/`; T51.g after T56.d, T50.c and T49.b); T51.f (after R09.T7.d's
-    `cold_trap::fraction`); T48.g (its own lane, after T54.a); then T54.b. T33.c follows.
+  **Phase L's batches** (decision-composition; re-cut by decision-bump-plan-after-22, 2026-10-14;
+  updated 2026-10-15):
+  - **22 → 23**, P14.T54.a's "the surface": the snapshot path and the surface members, everything
+    R09's `for_body` reads. Compute subtasks are pure modules, called by nothing on the record
+    until T54.a, so each keeps `just ci` green and moves no golden. Its membership is closed:
+    T49.b → T49.c; T50.a → T50.c → T51.a → T51.b (lane `p14-snapshot`, one lane: all four edit
+    `derive/atmosphere.rs`) → T57.a (decision-p14-moons), which stays in 23 since only its water
+    refit holds Earth at 288 K once T51.a moves Earth's water column; T51.c after T50.a and T49.c
+    (lane `p14-crust`); T56.a → T56.c → T56.d (lane `p14-moons`; T56.c after T50.a and T50.c),
+    with T56.b in the client after T56.a; then T54.a, which wires them onto the record and bumps.
+    Three holds at 22, each with a tripwire: `MOONS_VERSION` = 23, `AMMONIA_LINE_VERSION` = 23,
+    and one `p14-snapshot` lane hold for T51.a's, T51.b's and T57.a's edits on the record path.
+    Every other member is a module that nothing on the record calls.
+  - **23 → 24**, P14.T54.b's "the air and the rest of the minimum": the Surface path's chemistry
+    and structure, folded into the existing batch, whose wiring starts only after 23 has landed.
+    - Anchors, which gate it: T49.d; T49.e (after T49.b, R08.T5.b and R08.T5.d); and T24.e
+      (after T49.b's c_p(T) commit, science-r08-gases-2.md §1.4) → T50.b → T52.a → T52.b → T52.c
+      → T24.c with T24.g (after T51.a) → T24.d with T52.d.
+    - Riders, which board if they have landed when T54.b's wiring starts and otherwise take the
+      next bump, renumbering their hold: T51.f (after T51.a and R09.T7.d's
+      `cold_trap::fraction`), behind a hold at 24; T51.d → T51.e → T51.g (one lane: T51.e and
+      T51.g both edit `moons/`; T51.e and T51.g after T54.a, T51.g also after T56.d, T50.c and
+      T49.b, behind `OCEAN_VERSION`); T48.g (its own lane), at once, behind a hold at 24 in
+      `belts.rs` and `hooks/figures.rs`; T53.a (after T57.a) → T53.b (after its section ruling)
+      → T53.c (after T24.c); T53.d (after T24.c); and T31.a → T31.b → T31.c, whose goldens T54.b
+      pins.
+    - Then T54.b, after 23 has landed, then T33.c. If T52.c still cannot start when every other
+      member of 24 has landed, T54.b leaves without T52.c, T24.c with T24.g, T24.d with T52.d,
+      T53.c and T53.d, whose members stay `NotModelled`, and those tasks take the next planetary
+      bump (the escape valve).
   - **Later**: T55.
 
   _The bump plan_ (ruled by "main", 2026-10-09). Steps 0–6 (T14.d; T49.a, which moves no output;
@@ -744,8 +761,9 @@ Order and parallelism:
   on its own. A task whose output moves generated records before the batch's last task holds the
   new figures off the record, or behind the batch's wiring, so that the goldens move once, at the
   bump; a task that cannot says so to "main" before bumping. T35.e follows T48.e directly in the
-  same lane. T24.e, T24.c with T24.g and T24.d join the 22 → 23 batch (decision-composition). The
-  deferred P11.T4.l and T4.m batch (plan 11) takes a later bump, after this plan's 23 → 24.
+  same lane. T24.e, T24.c with T24.g and T24.d join the 23 → 24 batch (decision-composition;
+  decision-bump-plan-after-22, 2026-10-14). The deferred P11.T4.l and T4.m batch (plan 11) takes
+  version 25, the first galaxy train after this plan's 23 → 24 (updated 2026-10-15).
 
 - **The vertical slice** (README, "The vertical slice to the `SYSTEM` display", ruling 33 of
   2026-09-22) builds the first working `SYSTEM` display before plans 09, 11 and 13 are complete.
@@ -2185,8 +2203,8 @@ Typed by substance (decision-composition, 2026-10-09): every gas, condensable, l
 aerosol material and absorber here is a row of Phase L's substance registry (`SubstanceId` in
 the sim, its string key on the wire), never a closed enum. T24.a, T24.b and T24.f type their
 members so in the 21 → 22 batch, computing what they compute today. T24.c, T24.d, T24.e and
-T24.g move to the 22 → 23 batch, where T24.c's and T24.d's decks and T24.g's acid become rows of
-T52.c's condensation loop, and T24.d's composition is T52.d's.
+T24.g move to the 23 → 24 batch (updated 2026-10-15), where T24.c's and T24.d's decks and T24.g's
+acid become rows of T52.c's condensation loop, and T24.d's composition is T52.d's.
 
 - **P14.T24.a `SurfaceConditions`.** Mean surface temperature from T13 with day–night and
   equator–pole contrasts from rotation state, the obliquity to the seasonal orbit (the body's own
@@ -2312,7 +2330,8 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     ε_r = 0.95.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::surface planetary::hooks::figures`.
 - **P14.T24.c The aerosol and absorber inventory** (R08.T1's draft, accepted with amendments,
-  signoff-3.md; in the 22 → 23 batch, after T24.e, T52.c and T51.a, decision-composition).
+  signoff-3.md; in the 23 → 24 batch, after T24.e, T52.c and T51.a, decision-composition; updated
+  2026-10-15).
   `hooks/aerosols.rs`: `AerosolInventory { modes, absorbers }`, a member of the record's surface
   section (T48.e), a function of age + t.
   - _A mode_ has a material, a registry row (`SubstanceId`; its key on the wire) whose aerosol
@@ -2429,9 +2448,9 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
   - _Accept:_ `cargo test -p hyperion-sim planetary::hooks::aerosols`.
 - **P14.T24.d The envelope's visible atmosphere** (R08.T1's draft, accepted as re-scoped,
   signoff-3.md; re-scoped to the envelope's
-  structure and built in the 22 → 23 batch with T52.d, which gives its composition and decks,
-  decision-composition; its adiabat after T49.b's heat-capacity step, science-r08-gases-2.md
-  §1.7). `hooks/envelope_atmosphere.rs`:
+  structure and built in the 23 → 24 batch (updated 2026-10-15) with T52.d, which gives its
+  composition and decks, decision-composition; its adiabat after T49.b's heat-capacity step,
+  science-r08-gases-2.md §1.7). `hooks/envelope_atmosphere.rs`:
   `EnvelopeAtmosphere`, for every body in `SurfaceState::GasEnvelope`: the giants, and every
   sub-Neptune, which is one by construction (`PlanetClass::of` and `derive::atmosphere` share
   `THIN_ENVELOPE_FRACTION`). It fills the record's `envelope` section, `RecordSection::Envelope` at
@@ -2484,8 +2503,8 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
     `cargo test -p hyperion-sim planetary::record`.
 
 - **P14.T24.e The vertical structure** (R08.T1's draft, accepted with amendments, signoff-3.md;
-  first of the 22 → 23 batch's atmosphere lane, after T49.b's heat-capacity step,
-  decision-composition and science-r08-gases-2.md §1). `hooks/structure.rs`:
+  first of the 23 → 24 batch's atmosphere lane (updated 2026-10-15), after T49.b's heat-capacity
+  step, decision-composition and science-r08-gases-2.md §1). `hooks/structure.rs`:
   `VerticalStructure::RadiativeConvective`, a member of the record's surface section (T48.e). It
   is R08 Design note 3's scaled adiabat to an isothermal skin, T(p) = max(T_ad(p), T_skin), with
   dln T_ad ÷ dln p = α R ÷ c_p(T) (Robinson and Catling 2012, ApJ 757, 104, and 2014, Nature
@@ -2593,8 +2612,8 @@ T52.c's condensation loop, and T24.d's composition is T52.d's.
 - **P14.T24.g Sulphur: the sulphuric-acid deck and the sulphate layer.** Drafted by a science agent
   on 2026-10-09 (`science-r08-sulphur-co2ice.md`) for this plan's owner; accepted with amendments
   2026-10-10 by the sign-off agent (owner's delegation, `signoff-3.md`). It is built with T24.c,
-  in the 22 → 23 batch, and its deck is a row of T52.c's loop with its own law
-  (decision-composition).
+  in the 23 → 24 batch (updated 2026-10-15), and its deck is a row of T52.c's loop with its own
+  law (decision-composition).
 
   `hooks/sulphur.rs`, called by T24.c's inventory, is a function of age + t. It adds one species,
   SO₂, a registry row (`SO2`, T49.b) outside T13's escape view `Gas`. SO₂ enters no escape,
@@ -5183,7 +5202,7 @@ rows' values.
     - every row names its source and basis.
   - _Files:_ `substance/optics.rs`, `tables/substance_albedo.rs`, `tasks/substance_albedos.rs`.
   - _Accept:_ `cargo test -p hyperion-sim substance::optics`; `cargo test -p hyperion-fit substance_albedos`.
-- **P14.T49.d Gas thermochemistry** (22 → 23).
+- **P14.T49.d Gas thermochemistry** (23 → 24, updated 2026-10-15).
   - A new `hyperion-fit` task, `thermo_equilibrium`: log K_f(T), the equilibrium constant of
     formation from the elements, for every gas row a speciation rule may produce, over 100–6,000 K
     where the data reach.
@@ -5200,7 +5219,8 @@ rows' values.
   - _Files:_ `substance/thermo.rs`, `tables/thermo.rs`, `tasks/thermo_equilibrium.rs`.
   - _Accept:_ `cargo test -p hyperion-sim substance::thermo`;
     `cargo test -p hyperion-fit thermo_equilibrium`.
-- **P14.T49.e Aerosol extinction** (22 → 23; after rendering plan R08's R08.T5.b and R08.T5.d).
+- **P14.T49.e Aerosol extinction** (23 → 24, updated 2026-10-15; after rendering plan R08's
+  R08.T5.b and R08.T5.d).
   - A new `hyperion-fit` task, `condensate_extinction`, gives each aerosol material's mass
     extinction κ_ext and single-scattering albedo at 550 nm against r_eff and v_eff:
     - a compact particle's density is its row's grain density, and an aggregate's porosity its shape
@@ -5335,7 +5355,8 @@ Snapshot path, `planetary/chem/`.
     `cargo test -p hyperion-sim planetary::derive::atmosphere`; `cargo test -p hyperion-sim rng::tags`.
   - _The planets' nitrogen_ is P14.T50.c's (decision-p14-moons, §F1-plan). This subtask keeps
     every carrier to the bit.
-- **P14.T50.b A gas envelope's element abundances** (22 → 23; read by T52.d).
+- **P14.T50.b A gas envelope's element abundances** (23 → 24, updated 2026-10-15; read by
+  T52.d).
   - `chem/envelope_abundances.rs`: for a body in `SurfaceState::GasEnvelope`, its abundances by
     number relative to H, of He, C, N, O, S, P, Na, K, Ti, V, Fe, Mg, Si, Ca, Al, Cl, Cr, Mn, Ni
     and Zn (Cr, Mn and Zn are the limiting elements of T52.c's `Cr`, `MnS` and `ZnS` decks, and
@@ -5879,7 +5900,8 @@ Snapshot path, `planetary/chem/`.
 Surface path, `planetary/chem/`. Built only with a `surface` or `envelope` section, and never
 feeding back into p_s, T_s, the albedo or the bulk.
 
-- **P14.T52.a Equilibrium speciation, hydrogen-dominated** (22 → 23; after T49.d and T50.b).
+- **P14.T52.a Equilibrium speciation, hydrogen-dominated** (23 → 24, updated 2026-10-15; after
+  T49.d and T50.b).
   - `chem/equilibrium.rs`: at the 1-bar level, the quench level and the photosphere of an envelope
     (or a thin H₂ air once T53.a keeps one), Heng and Tsai 2016's analytic C–H–O–N solution
     ("accurate at the ∼1% level for temperatures from 500 to 3000 K", gas phase), on T49.d's K(T),
@@ -5911,7 +5933,7 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - bit-identical natively and under `wasm32-wasip1` (the sim's slow wasip1 suite).
   - _Files:_ `planetary/chem/equilibrium.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem::equilibrium`.
-- **P14.T52.b Quench and photochemical rules** (22 → 23).
+- **P14.T52.b Quench and photochemical rules** (23 → 24, updated 2026-10-15).
   - `chem/{quench, photochem}.rs`:
     - Zahnle and Marley 2014's quench relations for CO, CH₄, NH₃, HCN and CO₂, with a stated
       K_zz law ("If vertical mixing is like Jupiter's, the transition from methane to CO occurs at
@@ -5935,7 +5957,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
   - _Files:_ `planetary/chem/{quench, photochem}.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem::quench`;
     `cargo test -p hyperion-sim planetary::chem::photochem`.
-- **P14.T52.c Condensation aloft over the registry** (22 → 23; after T49.b and T49.e).
+- **P14.T52.c Condensation aloft over the registry** (23 → 24, updated 2026-10-15; after T49.b
+  and T49.e).
   - `chem/condense.rs`: for each row with a law aloft whose limiting element is present and whose
     range meets the profile:
     - its base where the vapour reaches saturation along T24.e's T(p) or the envelope's profile,
@@ -5957,7 +5980,8 @@ feeding back into p_s, T_s, the albedo or the bulk.
     - the limiting element conserved through the traps.
   - _Files:_ `planetary/chem/condense.rs`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::chem::condense`.
-- **P14.T52.d Envelopes across temperature** (22 → 23; with T24.d, last of its lane).
+- **P14.T52.d Envelopes across temperature** (23 → 24, updated 2026-10-15; with T24.d, last of
+  its lane).
   - `hooks/envelope_atmosphere.rs`, T24.d's structure, with:
     - T50.b's abundances, speciated by T52.a and quenched and photolysed by T52.b;
     - decks by T52.c;
@@ -6069,42 +6093,64 @@ feeding back into p_s, T_s, the albedo or the bulk.
 #### P14.T54 The composition batches on the record
 
 - **P14.T54.a The 22 → 23 batch on the record, and its bump.** It is the last of the 22 → 23
-  batch.
-  - `record::Surface` fills `vertical_structure` (T24.e), `aerosols` (T24.c with T24.g),
-    `condensates` (T51.a) and `crust` (T51.c), and `surface_liquids` and `surface_ices` gain T51.a's
-    entries.
+  batch, "the surface": the snapshot path and the surface members, everything R09's `for_body`
+  reads (decision-bump-plan-after-22, 2026-10-14; re-cut, updated 2026-10-15).
+  - `record::Surface` fills `condensates` (T51.a) and `crust` (T51.c), and `surface_liquids` and
+    `surface_ices` gain T51.a's entries. `vertical_structure`, `aerosols` and `record::Envelope`
+    stay `NotModelled` until T54.b.
   - T24.a's `SurfaceInputs` takes the lid's regolith inertia (T51.c) in place of `SurfaceMaterial`.
     That retires `ROCK_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` and
     `ICE_REGOLITH_THERMAL_INERTIA_J_PER_M2_K_SQRT_S` (science-p14-t24a-climate.md §6, item 2). The
     bless note accounts for the airless nights it moves.
-  - `record::Envelope` is filled by T24.d with T52.d.
+  - T13's passes call T51.a and T51.b, and T57.a's constants take effect. T49.b's fitted curves
+    replace the five Clausius–Clapeyron sets, and its c_p(T) replaces `HeatCapacityClass`.
+    `registry.golden`'s gas columns and `substances.json` (`heat_capacity_over_r_298k`; H₂'s and
+    He's `absorber` flags) are re-blessed.
   - `MOONS_VERSION` and its tripwire are deleted (T56.a, T56.c, T56.d), so that the moons' Laplace
     planes, own ranks and tides, and the rings' normals, take effect with the batch. The bless note
     accounts for them by subtask.
   - `AMMONIA_LINE_VERSION` and its tripwire are deleted (T50.c), so that the planets' ammonia line
     takes effect with the batch.
+  - The `p14-snapshot` lane's hold, on T51.a's, T51.b's and T57.a's edits on the record path, is
+    deleted with its tripwire.
   - T50.a's `ElementInventory` replaces `VolatileInventory` on `DerivedBody` and
     `BulkComposition`, built by `element_inventory` beside the atmosphere's carriers, which it
     keeps to the bit; `VolatileInventory` stays its view ("main", 2026-10-14; Risks, "Deviations
     in P14.T50.a, as built").
-  - The server's conversion fills each member, and the envelope's `match envelope {}` is
-    replaced.
-  - R09's `for_body` reads `crust`, `condensates` and the palette's sources from the record.
+  - The server's conversion fills `condensates` and `crust` on the wire. The envelope's
+    `match envelope {}` stays until T54.b.
+  - R09's `for_body` reads `crust`, `condensates` and the palette's sources (T49.b–c's rows, R11's
+    liquid members included) from the record, on R09.T10.e's reading of the other sections. It
+    answers `Ok` for generated solid bodies. It settles the record's time: the lean is R09.T17's
+    `RECORD_TIME`, the epoch, and any other choice goes to "main" before the serve gate opens.
     An airless body's palette carries no cold-trapped `Ice` entry until P14.T51.f, wired by T54.b,
     since no condensate on the record names one. The bless note records it, the census (T33.c)
     lists cold-trapped `H2O` and `CO2` as unreached until then, and where a console row shows an
     airless body's condensates it labels its cold traps NOT YET MODELLED (P14.T43.b's `SURFACE`
     rows; science-composition-crusts.md §6).
-  - The goldens are blessed once through the `sim-determinism` skill, with the bless note
-    accounting for every moved value by subtask. `GENERATOR_VERSION` goes 22 → 23.
-  - _Tests:_
+  - _The serve gate._ At 23 `for_body` is `Ok` in the sim, but the server's `RecordInputs` keeps
+    answering generated bodies `not_modelled` until the gate's version. T54.a adds the gate, a
+    constant with a tripwire in `crates/hyperion-server/src/surface/inputs.rs` (for example
+    `GENERATED_SURFACES_FROM` = 24). It opens at the first bump after R09.T16 has landed and
+    R11's liquid members are in the codec, expected to be 24; otherwise the wiring lane raises the
+    constant to the next bump. "Main" may open it at an earlier bump if an R10 task needs a
+    generated world served sooner. Until it opens, R09 and R10 changes re-bless at the version in
+    force with no bump (Generator version, the serve gate's bullet).
+  - `saturation` and `substance_albedo` are restamped `--since 23` with the fit tool, and
+    `fit-check` must find no stellar table stale.
+  - The goldens are blessed once through the `sim-determinism` skill, under the heavy lock, with
+    the bless note accounting for every moved value by subtask. `GENERATOR_VERSION` goes 22 → 23.
+    It closes P14.T13.c, T17.b and T22.a.
+  - _Tests_ (a Jupiter's envelope `Ok` with an NH₃ deck, and the fixture's hot Jupiter, move to
+    T54.b):
     - every present planet's keyed members hold registry keys only;
     - an Earth's `condensates` holds `H2O`;
-    - a Jupiter's envelope `Ok` with an NH₃ deck;
-    - the protocol fixture gains a Titan with its lakes and a hot Jupiter's envelope;
+    - the test that pinned `NotModelled(Surface)` on a generated rocky body now pins `Ok`;
+    - the protocol fixture gains a Titan with its lakes;
     - `golden_diff.py` accounts for every change.
   - _Files:_ `planetary/{record, hooks/mod}.rs`, `planetary/hooks/surface.rs`,
     `crates/hyperion-server/src/convert/planetary.rs`,
+    `crates/hyperion-server/src/surface/inputs.rs`,
     `packages/protocol/fixtures/planetary.json`, `planetary/surface/inputs.rs`,
     `planetary/moons/mod.rs`, `planetary/derive/{mod, atmosphere}.rs`,
     `crates/hyperion-base/src/version.rs`, and the goldens.
@@ -6117,6 +6163,24 @@ feeding back into p_s, T_s, the albedo or the bulk.
   velocities, and T53.d's member, which stays
   absent.
   `GENERATOR_VERSION` goes 23 → 24.
+  It is "the air and the rest of the minimum", the Surface path's chemistry and structure folded
+  into the batch (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15), and its wiring
+  starts only after 23 has landed.
+  - _Anchors_, which gate it: T49.d; T49.e; and T24.e → T50.b → T52.a → T52.b → T52.c → T24.c
+    with T24.g → T24.d with T52.d, each after what Tasks, "Order and parallelism", names.
+  - _Riders_ board if they have landed when its wiring starts, and otherwise take the next bump,
+    renumbering their hold: T51.f; T51.d → T51.e → T51.g; T48.g; T53.a → T53.b → T53.c; T53.d;
+    and T31.a → T31.b → T31.c. T33.c follows T54.b.
+  - _It adds_ `vertical_structure` (T24.e), `aerosols` (T24.c with T24.g) and `record::Envelope`
+    (T24.d with T52.d, replacing `match envelope {}`). With them come the protocol fixture's
+    hot-Jupiter envelope and a Jupiter whose envelope is `Ok` with an NH₃ deck (both from T54.a),
+    the escape, steam and tenuous wiring into `derive/atmosphere.rs`, and P14.T31's event
+    goldens. It restamps `thermo` and `condensate_extinction` `--since 24`, and it opens the serve
+    gate (T54.a) if R09.T16 has landed. It deletes `OCEAN_VERSION` and every hold at 24, then
+    bumps.
+  - _The escape valve._ If T52.c still cannot start when every other member of 24 has landed,
+    T54.b leaves without T52.c, T24.c with T24.g, T24.d with T52.d, T53.c and T53.d. Their members
+    stay `NotModelled`, and those tasks take the next planetary bump.
 
 #### P14.T55 Later composition (unscheduled)
 
@@ -6392,7 +6456,8 @@ serial lane, `p14-moons` (T56.a → T56.c → T56.d), since all three edit `sate
     - Earth is 288 ± 2 K and Titan 94 ± 3 K;
     - the table's median Venus holds 55–60 bar and reaches 680–710 K;
     - T13.c's "within eight per cent" test takes the measured Venus;
-    - T24.e's Venus test (300–370 K at 1 bar) is re-checked;
+    - the re-check of T24.e's Venus test moves to T24.e, at 24 (decision-bump-plan-after-22,
+      2026-10-14; updated 2026-10-15);
     - every golden that moves is accounted for in T54.a's bless note.
   - _Files:_ `planetary/derive/atmosphere.rs`, `planetary/derive/atmosphere/tests.rs`,
     `planetary/derive/mod.rs` (the table's tests).
@@ -6476,7 +6541,8 @@ it:
   sub-Neptune's surface to `NotApplicable` and adds each planet's `envelope` section (its renaming
   of `has_surface` moves nothing). T24.f, T24.a–b and T48.a–e take one bump, T24's; T24.e, T24.c
   (with T24.g) and T24.d take one each, or one between them if built together (_superseded by
-  the Phase L bullet below:_ they join the 22 → 23 batch, whose one bump is P14.T54.a's); each is
+  the Phase L bullet below:_ they join the 23 → 24 batch, whose one bump is P14.T54.b's; updated
+  2026-10-15); each is
   coordinated through "main". T48.a adds one Body-scope tag, `body.continents`, for f_c's asymptote
   (`signoff-3.md`); no other adds a draw or a domain tag. P14.T35.e changes the
   wire, not the output, and leaves `PROTOCOL_VERSION` at 2 (decision-p14-t35e-wire). T24.g adds no
@@ -6488,21 +6554,49 @@ it:
   every record's crater contract moves once, at 21 → 22.
 - Phase L (decision-composition, 2026-10-09):
   - P14.T49.a moves no output and rides the 21 → 22 batch.
-  - The 22 → 23 batch (T49.b–e, T50, T51.a–c, T52, and T24.c–e and T24.g with it) moves every
-    body's composition, its dominant condensable's pressure and the Bond albedo, and fills members
-    the goldens hold absent. It takes one bump in P14.T54.a.
+  - The 22 → 23 batch, "the surface" (T49.b–c, T50.a, T50.c and T51.a–c, with the moons' below;
+    decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15), moves every body's composition
+    and its dominant condensable's pressure on the snapshot path, the Bond albedo, the crust and
+    the condensates, and fills members the goldens hold absent. It takes one bump in P14.T54.a.
+    The fitted tables `saturation` and `substance_albedo` are stamped since 23.
   - decision-p14-moons's P14.T56.a, T56.c, T56.d and T57.a join the 22 → 23 batch, held until
     T54.a (behind `MOONS_VERSION`, and T57.a in the `p14-snapshot` lane's hold). They move every
     moon's plane, inventory and tides, every ring's plane, and the CO₂ and water greenhouses.
     T56.c reads words 0–5 of `planet.volatiles` on each moon's candidate key, which the moons'
     radius ranks already use, and adds no domain tag. T56.a adds the optional `RingDto.normal`, with
     `PROTOCOL_VERSION` at 2.
-  - The 23 → 24 batch (T51.d–g, T53) takes one bump in P14.T54.b.
+  - The 23 → 24 batch, "the air and the rest of the minimum" (decision-bump-plan-after-22,
+    2026-10-14; updated 2026-10-15), carries the chemistry and structure (T49.d, T49.e, T24.e,
+    T50.b, T52, T24.c with T24.g, and T24.d with T52.d) with T51.d–g, T53, T48.g and T31's event
+    goldens, its riders boarding as Tasks, "Order and parallelism", says. It takes one bump in
+    P14.T54.b. The fitted tables `thermo` and `condensate_extinction` are stamped since 24.
   - Draws: words 3–5 of `planet.volatiles` (no existing value moves), and one new tag,
     `system.abundances` (System scope). No other domain tag.
   - The registry is append-only. A row's index and key are never changed. A changed value is a
     generator-version change. A changed index file in R08's `materials/` moves the sim's τ(550)
-    through `condensate_extinction` and so bumps.
+    through `condensate_extinction` and so bumps, from 24; before 24 the table is refitted with no
+    bump, since nothing on the record reads it (updated 2026-10-15).
+  - The serve gate (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). At 23 R09's
+    `for_body` is `Ok` in the sim, but the server's `RecordInputs` keeps answering generated
+    bodies `not_modelled` until the gate's version, a constant with a tripwire in
+    `crates/hyperion-server/src/surface/inputs.rs` that P14.T54.a adds (for example
+    `GENERATED_SURFACES_FROM` = 24). It opens at the first bump after R09.T16 has landed and R11's
+    liquid members are in the codec, expected to be 24; otherwise the wiring lane raises the
+    constant to the next bump, and "main" may open it at an earlier bump if an R10 task needs a
+    generated world served sooner. Until it opens, R09 and R10 changes re-bless at the version in
+    force with no bump. That bump is the first send: from it, every change to the coarse pass,
+    quantisation, synthesis, material classes or payload layout moves served output and rides a
+    bump, and a layout change also bumps `SURFACE_PAYLOAD_FORMAT`.
+    - Frozen at 23: `for_body`'s signature and the record's time, `BodySurfaceDto`'s `condensates`
+      and `crust`, `substances.json`'s schema and `RingDto.normal`'s values.
+    - Frozen at the gate: `SURFACE_PAYLOAD_FORMAT` 1's layout, `FieldHeader` with `albedo_scale`,
+      `PaletteEntry` with R11's liquid members, the codes table (which only gains rows),
+      `RECORD_TIME`, and the coarse pass and synthesis as versioned output.
+    - Frozen at 24: `BodySurfaceDto`'s `vertical_structure`, `aerosols`, `modifiers`,
+      `subsurface_ocean`, the small-body type, the tenuous gas list and the absent `biosphere`;
+      `BodyRecordDto.envelope`'s members; and the steam envelope's section.
+
+    `PROTOCOL_VERSION` stays 2 at 23 and 24.
 - P14.T47.e (Earth after Robinson 2026) took version 21 in the 20 → 21 bump with P11.T4.h and
   plan 11's protostar and build-age fix (decision-r07-earth-albedo), and with P11.T4.i–k. Its
   goldens were blessed at 20 until that bump, which only flipped the version (Phase J lane,
@@ -12467,3 +12561,146 @@ tables::gauss_legendre`.
     against the paper's body (the check reached its abstract), and the slope leaves out the bins
     with no detection (the two below −0.3), which flattens it a little; a binomial fit over all
     eight bins would not.
+- **Deviations in P14.T49.b, as built: step 1, the rows and the heat capacities (`p14-registry`,
+  2026-10-14).** `GENERATOR_VERSION` stays 22, and no generated value moves.
+  - _Held at 22_ (decision-bump-plan-after-22 §1.2). c_p(T) is in force, and nothing on the record
+    calls it. Rows 0–8 keep every value 22 publishes:
+    - their c_p ÷ R class (`GasColumns::heat_capacity` and `heat_capacity_over_r` are now
+      `Option`, `Some` for rows 0–8 alone), which T24.a's published mixture still reads through
+      the held `heat_capacity_over_r(mixture)`;
+    - their client flags, and `substances.json`'s `heat_capacity_over_r` column (`null` for every
+      appended row).
+
+    `registry.golden` is extended only: rows 9–111's identities and flags, and every gas row's
+    molecular constants with its c_p ÷ R at 30, 100, 200, 298.15, 500, 1,000 and 2,000 K and its
+    H̃ and S̃ at 298.15 K. **P14.T54.a, at the bump:**
+    - point T24.a's published c_p ÷ R at `mixture_heat_capacity_over_r_at` at the mean surface
+      temperature;
+    - retire `HeatCapacityClass`, `heat_capacity_over_r(mixture)`, the two `GasColumns` getters,
+      the class sources and the golden's class lines;
+    - rename the fixture's column `heat_capacity_over_r_298k`, the sum's value at 298.15 K;
+    - turn on `absorber` for `H2`, `He`, `N2` and `CO2`.
+
+  - _Signatures_, as Provides gives them (science-r08-gases-2.md §1.7.6). Each function is also
+    `None` for a temperature that is not above 0 K and finite. Added public items, in
+    `substance::thermo`:
+    - `MolecularConstants` (rotation, vibrations, level sets, and their c_p ÷ R, H̃ and S̃);
+    - `Rotation { None, Linear, NonLinear, InLevels }`, `Vibration`,
+      `LevelSet { Listed, Rovibrational }`, `RovibrationalTerms` and `NuclearSpin`;
+    - `EQUILIBRIUM_HYDROGEN` (re-exported from `substance`), the recorded other bound;
+    - `SECOND_RADIATION_CONSTANT_CM_K`.
+  - _The sum_, as ruled (§1.3), in a fixed order over fixed level counts:
+    - **H₂** is a level set over its X¹Σg⁺ ladder, v ≤ 5 and J ≤ 20 (below the quartic's
+      turnover). Its terms are Huber and Herzberg 1979's eight constants, read through the NIST
+      WebBook's transcription. It is normal hydrogen: ortho and para frozen at 3:1, each from its
+      own lowest level, so H̃(0 K) = 0.
+    - **The torsions** take the ruling's V₃-only Hamiltonian. Their eigenvalues below 25,000 cm⁻¹
+      (65 for C₂H₆, 39 for CH₃OH) come from Sturm bisection in the free-rotor classes, and a test
+      repeats it.
+      - C₂H₆: F = 4 A_R = 10.684 cm⁻¹ and V₃ = 1,012.0 (Moazzen-Ahmadi et al. 1988). The ruling's
+        F = 10.72 [M] was 0.34% high.
+      - CH₃OH: F = 28.182 and V₃ = 373.21 (Chen, Wilhoit and Zwolinski 1977). Its F ≈ 27.6 [M] is
+        in no source read.
+      - Both V₆ terms are left out.
+    - **Atoms and ions** take their levels below 15,000 cm⁻¹ from the compilations NIST's Atomic
+      Spectra Database v5.12 names (Nave et al., Sugar and Corliss, Saloman, Martin and Zalubas,
+      Kramida and others). The ASD takes none of them from Moore's NBS Circular 467, which the
+      ruling named; the Circular agrees for Fe I, Ti I and O I to 0.5 cm⁻¹.
+    - **Diatomics** take ω_e − 2ω_e x_e from Huber and Herzberg 1979. TiO adds Huber and
+      Herzberg's X³Δ_r components (Phillips 1971, their note 18) and their a, d, E, A and b
+      states, McKemmish et al. 2019's term table as the check. VO takes the B⁴Π_r components, the
+      only states Huber and Herzberg tabulate below 15,000 cm⁻¹. Huber and Herzberg have no FeH
+      ground state, so FeH takes Dulick et al. 2003's: ω_e and Table 9a's 29 term values below
+      15,000 cm⁻¹ (X⁴Δ_i, A⁴Π, a⁶Δ, C⁴Φ, b⁶Π, c⁶Σ⁺, B⁴Σ⁻, D⁴Σ⁺, E⁴Π and F⁴Δ_i), their degeneracies
+      assumed (the table prints none). The ground alone, which the ruling allowed, ran 6.5% low at
+      300 K and 18% at 1,000 K (science-checker).
+    - **Fundamentals** are Shimanouchi 1972's (NSRDS-NBS 39) selected gas-phase values, and O₃'s
+      Shimanouchi 1977's (J. Phys. Chem. Ref. Data 6, 993; Volume II, not a US-government work,
+      its values cited as facts).
+  - _Measured against the oracles._
+    - NASA Glenn (`nasa/cea`'s `thermo.inp`): every tolerance holds. The worst are H₂O at
+      −1.75% at 1,500 K in the close group, and CH₄ at −2.6% and O₃ at −2.4% at 1,000 K.
+    - Woolley, Scott and Brickwedde 1948: normal H₂ within 0.03% from 30 to 300 K. They print no
+      equilibrium values, so its row is derived from their para and ortho tables.
+    - C₂H₆ at 100 K is 4.298, against Chao, Wilhoit and Zwolinski 1973's 4.287, read, and
+      Gurvich's 4.294 [M].
+    - CH₃OH is 4.438, Chen et al.'s.
+  - _The rows._ Rows 9–111 are appended in the plan's order. T52.a has listed no further species.
+    Their kinds:
+    - `NH4SH`, the salts, sulphides, oxides, silicates, `SiC` and `graphite` (key `graphite`,
+      stoichiometry C) are minerals; `H2SO4` and `S8` are molecules;
+    - `mars_dust`, the lithologies, `iron_nickel`, the chondrites and `cometary` are lithologies;
+      `acid_uv_absorber` and the brines and mixtures are solutions; the hazes and `carbonaceous`
+      are organic.
+
+    Their molar masses sum IUPAC 2021's abridged weights, an ion's less or more the electron's
+    (CODATA 2018). The gas rows are rows 0–8, `Ne` … `FeH`, `Al` … `Zn`, the thirteen ions, `HCl`
+    and `Cr`, for its vapour. The condensates' vapours (`H2SO4`, `S8`, `KCl`, `NaCl`) carry no gas
+    columns until a rule speciates them: a closed set, for the composition audit.
+
+  - _`ferric`_ (decision-backlog-2 §1, 2026-10-15) is `basalt_fe`'s Fe-rich basalt oxidised at the
+    surface, as Mars's red soils and weathered rock: Hu, Ehlmann and Seager 2012's Fe-oxidised type
+    by name and spectral role. Its row's note says so.
+    - Its grain density is step 2's: 3,310 kg m⁻³ (+120/−240), `basalt_fe`'s constant (§1.2).
+    - Hu et al.'s 50% nanophase hematite, read as a mode, would give 4,063–4,285 kg m⁻³. It is
+      refused (§1.3): it is a spectral weight with no stated basis, and measured Martian soils hold
+      about 1–8 wt% of ferric oxide.
+  - _The flags_, as the plan gives them, with three exceptions:
+    - rows 0–8 keep theirs until T54.a;
+    - the fifteen rows science-r08-unowned-absorbers adds (`Al`, `V`, `Mn`, `Ni`, `Zn`, `HCl` and
+      `Na+`, `Al+`, `Si+`, `K+`, `V+`, `Cr+`, `Mn+`, `Ni+`, `Zn+`) carry `absorber` false. The
+      client's `transparency.test.ts` holds every flagged row to cross-sections, a line table, a
+      pending entry or a stated none, and R08 has answered none of the fifteen. R08.T19's parity
+      extension (with R08.T4.c and T4.e's entries) owes them answers, and the flags turn on at
+      T54.a's bump with rows 0–8's, since a committed row's value changes only then;
+    - `aerosol_material` follows the client's index files (R08.T5.d, c769dc03), whose test holds
+      every flagged row to a file of its own. It is set for:
+      - the condensates aloft, the hazes, `Fe` and `Cr`;
+      - `CO` and `H2S`, whose ices have files;
+      - `C2H6`, whose liquid has a file since R08.T5.g (`ethane-liquid.json`, 48ff891a), merged
+        before this step's commit. Its row was new, so its flag follows the file at once;
+      - `basalt`, `basalt_fe` and `lava_glass`, the dusts R08 drew for T24.c.
+
+      It is not set for:
+      - `SO2`, `HCN` and `C2H2`, whose ices can deck (Io's frost, Titan's stratospheric clouds)
+        but have no file yet; each is flagged at T54.a's bump if R08 has added one;
+      - `Ne`, `Kr`, `Xe`, `N2O`, `O3`, `C2H4`, `PH3` and `CH3OH`, which no rule decks;
+      - the solutions and the other surface materials (a closed set, for the composition audit).
+  - _Names._ `SUBSTANCE_NAMES` holds every name-form row's name, 35 in registry order, 25 of them
+    new beside T49.f's three and R08.T5.d's seven: decision-substance-names §4.3's drafts with
+    `basalt_fe` as `Fe-rich basalt` (signoff-5, item 8). Each was confirmed against the row's
+    identity source.
+  - _Rayleigh._ `rayleigh` is set as decision-composition §1.1 gives it, on every gas row but the
+    electron, H⁻ and the ions. The client's Rayleigh table holds no row yet for `Al`, `V`, `Mn`,
+    `Ni`, `Zn`, `HCl` and `Cr`, whose estimated rows R08.T19's extension owes; no client test reads
+    the fixture's `rayleigh` today.
+  - _Scope moved out_ (decision-r11-palette-liquids.md §4, 2026-10-14): the liquids' R11 optics and
+    transport (refractive index, absorption and scattering by bin, surface tension, viscosity)
+    are a new P14.T49.h, lane `p14-liquids`. It appends them in a golden of its own, after this
+    subtask and before T54.a. T49.b keeps the liquid densities.
+  - _Files beyond the task's_: `crates/hyperion-sim/clippy.toml` (`McBride` in
+    `doc-valid-idents`), and the client's `lib/substances.ts` and `substances.test.ts` (T49.f's
+    rule).
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.b's step 1:
+  - Above 2,000 K the sum's cut-offs lose accuracy:
+    - the 15,000 cm⁻¹ atomic cut misses up to 4.8% at 2,500 K and 14% at 3,000 K (Ca I); 25,000
+      cm⁻¹ holds 0.5% at 3,000 K;
+    - H₂'s Dunham ladder moves by about 5% at 3,000 K with its cut.
+
+    Ultra-hot daysides want the wider cut and measured or ab initio H₂ levels.
+
+  - The harmonic sum runs low where anharmonicity matters: CH₄ by 4.7% at 1,500 K, and H₂O by 3% at
+    2,000 K.
+  - VO with McKemmish et al. 2016's A′⁴Φ, A⁴Π and doublets would be 1.0% below NASA Glenn at
+    1,000 K, against 1.35% with Huber and Herzberg's states, which the plan's rule keeps.
+  - FeH's Table 9a states are partly model or ab initio values: the X components run 20–60 cm⁻¹
+    above the lowest-J terms, and F⁴Δ_i's components sit at its Ω = 7/2 origin, up to 750 cm⁻¹
+    low. NASA Glenn holds no FeH to test it against.
+  - Moazzen-Ahmadi et al.'s V₃ and A_R were read in the abstract only. Gurvich's 4.294 for C₂H₆ at
+    100 K is unread, so the test holds the sum to Chao et al.'s 4.287 alone.
+  - Shimanouchi's selected C₂H₄ ν₆ and ν₈ and CH₃OH ν₁₁ come from the liquid's Raman spectra; the
+    sum weighs methanol's A and E torsional levels alike, as Chen et al. do (nuclear-spin weights
+    would move it by up to 0.5% at 100–300 K).
+  - Woolley, Scott and Brickwedde's Table 4 misprints ortho-H₂'s C_p at 80 K: 5.982 for 4.982.
+  - NASA Glenn's own polynomials wobble for atoms near 1,200 K (Na 2.4974, Ca 2.4841), below their
+    5/2 floor.
