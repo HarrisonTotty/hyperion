@@ -1,7 +1,7 @@
 //! The surface service through its public API (rendering plan R09, R09.T17): the field it serves
 //! from the reference worlds' inputs is the sim's coarse pass on the same inputs, bit for bit, with
 //! R10.T10.a's albedo scale in its header, and with the production source a generated body answers
-//! that its surface is not modelled.
+//! that its surface is not modelled, a moon too once given its planet's record (R09.T10.f).
 
 mod common;
 
@@ -9,7 +9,9 @@ use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use common::patience;
-use common::surface::{ReferenceWorld, SEED, reference_inputs, served_field, surface_system};
+use common::surface::{
+    ReferenceWorld, SEED, moon_system, reference_inputs, served_field, surface_system,
+};
 use hyperion_server::compute::{CpuPool, GalaxyKey};
 use hyperion_server::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
 use hyperion_server::surface::{
@@ -18,7 +20,9 @@ use hyperion_server::surface::{
 use hyperion_sim::planetary::BodyIndex;
 use hyperion_sim::planetary::hooks::{detail_seed, surface_seed};
 use hyperion_sim::planetary::record::{RecordSection, Section};
-use hyperion_sim::planetary::surface::{SurfaceInputsError, coarse_pass};
+use hyperion_sim::planetary::surface::{
+    CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, coarse_pass,
+};
 use hyperion_sim::units::Metres;
 use hyperion_sim::{GENERATOR_VERSION, Seed};
 use hyperion_surface::field::{CoarseField, Cover, CoverRange, FieldView, ResolutionCode};
@@ -116,28 +120,48 @@ async fn the_surface_service_serves_the_coarse_pass_bit_for_bit() {
 
 /// With the production source, the body's record, a generated body with a solid surface answers
 /// that its surface section is not modelled, naming the section, and a giant that it has no solid
-/// surface; neither runs a pass or keeps anything. The reference inputs refuse the giant alike.
+/// surface; neither runs a pass or keeps anything. A generated moon answers as a planet does: the
+/// service fetches its planet's record, the one `CoarseInputs::planet_of` names, which `for_body`
+/// checks before its crust (R09.T10.f). The reference inputs refuse the giant alike.
 #[tokio::test]
 async fn a_generated_surface_is_not_modelled_naming_its_section() {
     let pool = pool();
-    let system = surface_system();
+    let (system, moons) = (surface_system(), moon_system());
     let production = service(&pool, RecordInputs);
-    for (body, refusal) in [
+    let not_modelled = SurfaceInputsError::NotModelled(RecordSection::Surface);
+    for (body, of, refusal) in [
+        (system.solid, &system.system, not_modelled),
         (
-            system.solid,
-            SurfaceInputsError::NotModelled(RecordSection::Surface),
+            system.gaseous,
+            &system.system,
+            SurfaceInputsError::NoSolidSurface,
         ),
-        (system.gaseous, SurfaceInputsError::NoSolidSurface),
+        (moons.moon, &moons.system, not_modelled),
     ] {
-        let answer = timeout(patience(), production.field(key(body), &system.system))
+        let answer = timeout(patience(), production.field(key(body), of))
             .await
             .expect("timed out reading a body's inputs");
         assert_eq!(
             answer.unwrap_err(),
-            SurfaceJobError::Inputs(refusal),
+            SurfaceJobError::Inputs(ReadCoarseInputsError::Section(refusal)),
             "{body}"
         );
     }
+    // The moon's planet is the one `planet_of` names, and without its record the reading refuses
+    // the moon before its crust.
+    let (ctx, planets) = moons.system.as_ref();
+    let index = BodyIndex::try_from(moons.moon.body_index()).expect("a body's index");
+    let moon = planets
+        .body_at(ctx, index, RECORD_TIME)
+        .expect("the moon resolves");
+    assert_eq!(
+        CoarseInputs::planet_of(&moon).map(|planet| planet.body_id(planets.system())),
+        Some(moons.planet)
+    );
+    assert_eq!(
+        RecordInputs.inputs(&moon, None, ctx),
+        Err(ReadCoarseInputsError::PlanetMissing(moons.planet))
+    );
     let counters = production.counters();
     assert_eq!(
         (counters.computed(), counters.cache().entries()),
@@ -153,7 +177,7 @@ async fn a_generated_surface_is_not_modelled_naming_its_section() {
     .expect("timed out reading a body's inputs");
     assert_eq!(
         answer.unwrap_err(),
-        SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface)
+        SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface.into())
     );
     timeout(patience(), pool.shutdown()).await.unwrap().unwrap();
 }

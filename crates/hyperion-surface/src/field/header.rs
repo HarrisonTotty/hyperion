@@ -156,7 +156,9 @@ pub struct FieldHeaderParts {
     /// Exactly 0 where the body's surface state is airless, as R10's classifier takes it, and a
     /// tenuous body's own pressure, positive and below the airless line of 100 Pa
     /// (decision-r11-palette-liquids §2, item 5), so that the pressure gives three classes: 0 is
-    /// airless, below 100 Pa tenuous, and at or above it an atmosphere.
+    /// airless, below 100 Pa tenuous, and at or above it an atmosphere. 0 also on a surface
+    /// holding melt whose volatiles are gone, whose own vapour is not modelled (P14.T55.b;
+    /// decision-backlog-2 §2.5).
     pub surface_pressure: Pascals,
     /// R10's albedo scale (Design note 18; R10's Design note 8, T10.a): the one factor c,
     /// dimensionless, finite and positive, on the palette's class albedos in B, V and R that makes

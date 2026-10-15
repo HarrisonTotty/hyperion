@@ -18,7 +18,7 @@ use hyperion_protocol::{
 };
 use hyperion_sim::id::{BodyId, SystemId};
 use hyperion_sim::planetary::record::RecordSection;
-use hyperion_sim::planetary::surface::SurfaceInputsError;
+use hyperion_sim::planetary::surface::{ReadCoarseInputsError, SurfaceInputsError};
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
@@ -405,41 +405,73 @@ pub(crate) fn survey_source(source: SurveySourceDto) -> SurveySource {
 /// with no solid surface (a giant, a ring, a belt, the halo, or a body not yet formed or gone at
 /// the record's time) is `bad_request` naming `body`, and so is one whose field's level cannot be
 /// had because the record's figure is not modelled either. A section the record withholds is the
-/// server's own bug (`internal`): the service reads full records. A pass that did not run fails as
-/// a pool job does. A caller that answers a body whose inputs are not modelled in its own way, as
-/// `surface_field` answers `not_modelled` (R09.T19.b), takes that case first.
+/// server's own bug (`internal`): the service reads full records. So is every refusal of the
+/// inputs other than a section's state (R09.T10.f; decision-backlog-2 §3.3), each a fault of the
+/// server's own reading of its records: a moon's planet's record not given or not its planet's, a
+/// seasonal orbit that does not hold at the record's time, or inputs the builder refuses; each is
+/// logged. A pass that did not run fails as a pool job does. A caller that answers a body whose
+/// inputs are not modelled in its own way, as `surface_field` answers `not_modelled` (R09.T19.b),
+/// takes that case first.
 #[must_use]
 pub(crate) fn surface_refusal(body: &BodyIdHex, error: SurfaceJobError) -> RequestError {
     let message = match error {
         SurfaceJobError::Body(error) => return body_refusal(body, error),
         SurfaceJobError::Compute(error) => return error.into(),
-        SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface) => format!(
+        SurfaceJobError::Inputs(ReadCoarseInputsError::Section(
+            SurfaceInputsError::NoSolidSurface,
+        )) => format!(
             "body {} has no solid surface: it is a giant, a ring, a belt or the halo, or is not \
              present at the epoch",
             body.as_str()
         ),
-        SurfaceJobError::Inputs(SurfaceInputsError::NotModelled(section)) => format!(
+        SurfaceJobError::Inputs(ReadCoarseInputsError::Section(
+            SurfaceInputsError::NotModelled(section),
+        )) => format!(
             "body {}'s {section} section is not modelled by this generator version, so its \
              surface has no cells yet",
             body.as_str()
         ),
-        SurfaceJobError::Inputs(SurfaceInputsError::NotResolved(section)) => {
+        SurfaceJobError::Inputs(ReadCoarseInputsError::Section(
+            SurfaceInputsError::NotResolved(section),
+        )) => {
             tracing::error!(
                 body = body.as_str(),
                 %section,
                 "a body's full record withheld a section the coarse pass reads"
             );
-            return RequestError {
-                code: ErrorCode::Internal,
-                message: "the server failed while reading the body's record".to_owned(),
-                field: None,
-            };
+            return reading_failed();
+        }
+        SurfaceJobError::Inputs(
+            error @ (ReadCoarseInputsError::PlanetMissing(_)
+            | ReadCoarseInputsError::NotItsPlanet { .. }
+            | ReadCoarseInputsError::NotAtRecordTime
+            | ReadCoarseInputsError::SeasonalOrbit(_)
+            | ReadCoarseInputsError::Build(_)),
+        ) => {
+            tracing::error!(
+                body = body.as_str(),
+                %error,
+                cause = ?error,
+                "the server could not read a body's coarse-pass inputs from its records"
+            );
+            return reading_failed();
         }
     };
     RequestError {
         code: ErrorCode::BadRequest,
         message,
         field: Some("body".to_owned()),
+    }
+}
+
+/// The answer to a body whose records the server failed to read into its coarse-pass inputs, a
+/// fault of its own: `internal`, naming nothing of the server's.
+#[must_use]
+fn reading_failed() -> RequestError {
+    RequestError {
+        code: ErrorCode::Internal,
+        message: "the server failed while reading the body's record".to_owned(),
+        field: None,
     }
 }
 
@@ -500,9 +532,10 @@ mod tests {
 
     use hyperion_protocol::UniverseIdHex;
     use hyperion_sim::Seed;
+    use hyperion_sim::orbit::BuildOrbitError;
     use hyperion_sim::planetary::DecodeBodyIndexError;
     use hyperion_sim::planetary::hooks::surface_seed;
-    use hyperion_sim::planetary::surface::{coarse_pass, reference};
+    use hyperion_sim::planetary::surface::{BuildCoarseInputsError, coarse_pass, reference};
     use hyperion_sim::units::Kelvin;
     use hyperion_surface::field::{FieldView, MaterialPalette, MechanicsFamily};
     use hyperion_surface::substance_key::SubstanceKey;
@@ -526,6 +559,7 @@ mod tests {
     fn a_surface_refusal_names_the_body_where_it_is_at_fault() {
         let body = body();
         let malformed = DecodeBodyIndexError::ReservedSlot { raw: 0xd000 };
+        let planet = BodyId::new(SystemId::from_raw(0x0200_0800_2000_0000).unwrap(), 0x0100);
         let cases = [
             (
                 SurfaceJobError::Body(ResolveBodyError::NoSuchBody),
@@ -536,15 +570,54 @@ mod tests {
                 (ErrorCode::BadRequest, Some("body")),
             ),
             (
-                SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface),
+                SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface.into()),
                 (ErrorCode::BadRequest, Some("body")),
             ),
             (
-                SurfaceJobError::Inputs(SurfaceInputsError::NotModelled(RecordSection::Figure)),
+                SurfaceJobError::Inputs(
+                    SurfaceInputsError::NotModelled(RecordSection::Figure).into(),
+                ),
                 (ErrorCode::BadRequest, Some("body")),
             ),
             (
-                SurfaceJobError::Inputs(SurfaceInputsError::NotResolved(RecordSection::Figure)),
+                SurfaceJobError::Inputs(
+                    SurfaceInputsError::NotResolved(RecordSection::Figure).into(),
+                ),
+                (ErrorCode::Internal, None),
+            ),
+            // R09.T10.f: a fault of the server's reading of its records, whatever it is.
+            (
+                SurfaceJobError::Inputs(ReadCoarseInputsError::PlanetMissing(planet)),
+                (ErrorCode::Internal, None),
+            ),
+            (
+                SurfaceJobError::Inputs(ReadCoarseInputsError::NotItsPlanet {
+                    planet: Some(planet),
+                    given: planet,
+                }),
+                (ErrorCode::Internal, None),
+            ),
+            (
+                SurfaceJobError::Inputs(ReadCoarseInputsError::NotItsPlanet {
+                    planet: None,
+                    given: planet,
+                }),
+                (ErrorCode::Internal, None),
+            ),
+            (
+                SurfaceJobError::Inputs(ReadCoarseInputsError::NotAtRecordTime),
+                (ErrorCode::Internal, None),
+            ),
+            (
+                SurfaceJobError::Inputs(ReadCoarseInputsError::SeasonalOrbit(
+                    BuildOrbitError::EccentricityOutOfRange { value: 1.5 },
+                )),
+                (ErrorCode::Internal, None),
+            ),
+            (
+                SurfaceJobError::Inputs(ReadCoarseInputsError::Build(
+                    BuildCoarseInputsError::Missing("figure"),
+                )),
                 (ErrorCode::Internal, None),
             ),
             (
@@ -562,7 +635,7 @@ mod tests {
         }
         let figure = surface_refusal(
             &body,
-            SurfaceJobError::Inputs(SurfaceInputsError::NotModelled(RecordSection::Figure)),
+            SurfaceJobError::Inputs(SurfaceInputsError::NotModelled(RecordSection::Figure).into()),
         );
         assert!(
             figure.message.contains("figure section is not modelled"),

@@ -14,7 +14,9 @@ use hyperion_sim::planetary::derive::figure::BodyFigure;
 use hyperion_sim::planetary::derive::photometry::BodyPhotometry;
 use hyperion_sim::planetary::hooks::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
 use hyperion_sim::planetary::record::{BodyRecord, RecordSection, Section};
-use hyperion_sim::planetary::surface::{CoarseInputs, SurfaceInputsError, coarse_pass};
+use hyperion_sim::planetary::surface::{
+    CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, coarse_pass,
+};
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
 use hyperion_sim::units::Metres;
 use hyperion_surface::field::{CoarseField, CoarseLevel, FieldView, coarse_level};
@@ -51,9 +53,13 @@ pub use hyperion_sim::planetary::surface::RECORD_TIME;
 pub enum SurfaceJobError {
     /// The key's body index is not in plan 14's layout, or its system holds no body there.
     Body(ResolveBodyError),
-    /// The body's inputs cannot be had: it has no solid surface (a giant, a ring, a belt or the
-    /// halo), or a section of its record that the pass reads is not modelled or is withheld.
-    Inputs(SurfaceInputsError),
+    /// The body's inputs cannot be had: in [`ReadCoarseInputsError::Section`], it has no solid
+    /// surface (a giant, a ring, a belt or the halo), or a section of its record that the pass
+    /// reads is not modelled or is withheld; in every other variant, the server's own reading of
+    /// its records failed (a moon's planet's record not given or not its planet's, a record not
+    /// taken at [`RECORD_TIME`], or inputs the builder refuses), which a request answers
+    /// `internal` (decision-backlog-2 §3.3).
+    Inputs(ReadCoarseInputsError),
     /// The pass's pool job could not be queued, or did not finish: it was cancelled, panicked or
     /// was dropped with the pool, or a worker's floating-point mode flushes subnormals.
     Compute(ComputeError),
@@ -191,10 +197,10 @@ impl SurfaceService {
     /// The coarse field of the body `key` names, whose planetary system is `system`: the one held,
     /// or computed as one bulk job on the pool.
     ///
-    /// The job reads the body's record at [`RECORD_TIME`], takes its inputs from the service's
-    /// source and runs the coarse pass under the body's surface seed. Callers that ask for one
-    /// field at once share the job; if every one of them gives up, a job still queued is skipped
-    /// and nothing is kept.
+    /// The job reads the body's record at [`RECORD_TIME`], and a moon's planet's with it, takes
+    /// its inputs from the service's source and runs the coarse pass under the body's surface
+    /// seed. Callers that ask for one field at once share the job; if every one of them gives up,
+    /// a job still queued is skipped and nothing is kept.
     ///
     /// # Errors
     ///
@@ -203,9 +209,11 @@ impl SurfaceService {
     ///   ([`ResolveBodyError::NoSuchBody`]);
     /// - [`SurfaceJobError::Inputs`] with [`SurfaceInputsError::NoSolidSurface`] for a body with
     ///   no surface seed (a ring, a belt or the halo) or none the source finds, and with the
-    ///   source's [`SurfaceInputsError::NotModelled`] or [`SurfaceInputsError::NotResolved`]. The
-    ///   record is read at full detail, so `NotResolved` is a bug, which a request answers
-    ///   `internal` (the plan's Risks, T10's record);
+    ///   source's [`SurfaceInputsError::NotModelled`] or [`SurfaceInputsError::NotResolved`], each
+    ///   in [`ReadCoarseInputsError::Section`]. The record is read at full detail, so
+    ///   `NotResolved` is a bug, which a request answers `internal` (the plan's Risks, T10's
+    ///   record), as is the source's every other [`ReadCoarseInputsError`] and
+    ///   [`ReadCoarseInputsError::PlanetMissing`] for a moon whose planet's record cannot be had;
     /// - [`SurfaceJobError::Compute`] if the pool is shutting down or faulted, or the job was
     ///   cancelled, panicked, was dropped with the pool or ran on a worker whose floating-point
     ///   mode flushes subnormals, which is logged.
@@ -270,11 +278,29 @@ impl SurfaceService {
         tasks.spawn(async move {
             match flight.await {
                 Ok(_) => {}
-                Err(error @ (SurfaceJobError::Body(_) | SurfaceJobError::Inputs(_))) => {
+                Err(
+                    error @ (SurfaceJobError::Body(_)
+                    | SurfaceJobError::Inputs(ReadCoarseInputsError::Section(_))),
+                ) => {
                     tracing::debug!(
                         body = %key.body(),
                         ?error,
                         "a prefetched body has no coarse field"
+                    );
+                }
+                Err(
+                    error @ SurfaceJobError::Inputs(
+                        ReadCoarseInputsError::PlanetMissing(_)
+                        | ReadCoarseInputsError::NotItsPlanet { .. }
+                        | ReadCoarseInputsError::NotAtRecordTime
+                        | ReadCoarseInputsError::SeasonalOrbit(_)
+                        | ReadCoarseInputsError::Build(_),
+                    ),
+                ) => {
+                    tracing::error!(
+                        body = %key.body(),
+                        ?error,
+                        "a prefetched body's coarse-pass inputs could not be read from its records"
                     );
                 }
                 Err(error @ SurfaceJobError::Compute(_)) => {
@@ -293,10 +319,10 @@ impl SurfaceService {
     /// and whether the field can be computed now, read as one interactive job on the pool.
     ///
     /// The job reads what [`field`](Self::field)'s pass reads before it runs: the body's surface
-    /// seed, its record at [`RECORD_TIME`] and its inputs from the service's source, so that a
-    /// survey pass is checked against the field's own cells and a body with no field is answered
-    /// without a bulk slot. Where the source gives inputs, the level is their radius's; where it
-    /// answers [`SurfaceInputsError::NotModelled`], the record's figure's
+    /// seed, its record at [`RECORD_TIME`] with a moon's planet's, and its inputs from the
+    /// service's source, so that a survey pass is checked against the field's own cells and a body
+    /// with no field is answered without a bulk slot. Where the source gives inputs, the level is
+    /// their radius's; where it answers [`SurfaceInputsError::NotModelled`], the record's figure's
     /// ([`FieldLevel::NotModelled`]).
     ///
     /// # Errors
@@ -503,9 +529,9 @@ fn check_system(key: FieldKey, system: &GeneratedSystem) {
 }
 
 /// The coarse field of `key`'s body in `system`, on the pool: the body's surface seed and its
-/// record at [`RECORD_TIME`], the inputs `source` reads from the record, the pass, and the albedo
-/// scale on its classes ([`field_albedo_scale`], R10.T10.a), from the record's photometry and the
-/// body's detail seed.
+/// record at [`RECORD_TIME`] with a moon's planet's, the inputs `source` reads from them, the
+/// pass, and the albedo scale on its classes ([`field_albedo_scale`], R10.T10.a), from the
+/// record's photometry and the body's detail seed.
 ///
 /// # Errors
 ///
@@ -516,9 +542,9 @@ fn compute(
     key: FieldKey,
     system: &GeneratedSystem,
 ) -> Result<CoarseField, SurfaceJobError> {
-    let (seed, record) = surface_record(key, system)?;
+    let (seed, record, planet) = surface_record(key, system)?;
     let inputs = source
-        .inputs(&record, &system.0)
+        .inputs(&record, planet.as_ref(), &system.0)
         .map_err(SurfaceJobError::Inputs)?;
     let field = coarse_pass(seed, &inputs);
     // The seed the client synthesises the ground with, from the record's hooks section, which
@@ -614,8 +640,11 @@ fn level_of(
     key: FieldKey,
     system: &GeneratedSystem,
 ) -> Result<FieldLevel, SurfaceJobError> {
-    let (_, record) = surface_record(key, system)?;
-    level_from(source.inputs(&record, &system.0), record.figure())
+    let (_, record, planet) = surface_record(key, system)?;
+    level_from(
+        source.inputs(&record, planet.as_ref(), &system.0),
+        record.figure(),
+    )
 }
 
 /// The level of a body's field from what the source answered for it, `inputs`, and its record's
@@ -627,20 +656,30 @@ fn level_of(
 ///
 /// # Errors
 ///
-/// The source's [`SurfaceInputsError::NoSolidSurface`] and [`SurfaceInputsError::NotResolved`];
-/// and where the source answers [`SurfaceInputsError::NotModelled`], by the figure's state:
+/// The source's [`SurfaceInputsError::NoSolidSurface`] and [`SurfaceInputsError::NotResolved`],
+/// and its every other [`ReadCoarseInputsError`] (a fault of the server's reading); and where the
+/// source answers [`SurfaceInputsError::NotModelled`], by the figure's state:
 /// [`SurfaceInputsError::NotModelled`] naming [`RecordSection::Figure`] for a figure not
 /// modelled, [`SurfaceInputsError::NotResolved`] naming it for one withheld, which full records
 /// never are, and [`SurfaceInputsError::NoSolidSurface`] for one not applicable, a body absent at
-/// the record's time.
+/// the record's time; each [`SurfaceInputsError`] in [`ReadCoarseInputsError::Section`].
 fn level_from(
-    inputs: Result<CoarseInputs, SurfaceInputsError>,
+    inputs: Result<CoarseInputs, ReadCoarseInputsError>,
     figure: &Section<BodyFigure>,
 ) -> Result<FieldLevel, SurfaceJobError> {
     let section = match inputs {
         Ok(inputs) => return Ok(FieldLevel::Modelled(coarse_level(inputs.radius()))),
-        Err(SurfaceInputsError::NotModelled(section)) => section,
-        Err(error @ (SurfaceInputsError::NoSolidSurface | SurfaceInputsError::NotResolved(_))) => {
+        Err(ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(section))) => section,
+        Err(
+            error @ (ReadCoarseInputsError::Section(
+                SurfaceInputsError::NoSolidSurface | SurfaceInputsError::NotResolved(_),
+            )
+            | ReadCoarseInputsError::PlanetMissing(_)
+            | ReadCoarseInputsError::NotItsPlanet { .. }
+            | ReadCoarseInputsError::NotAtRecordTime
+            | ReadCoarseInputsError::SeasonalOrbit(_)
+            | ReadCoarseInputsError::Build(_)),
+        ) => {
             return Err(SurfaceJobError::Inputs(error));
         }
     };
@@ -655,32 +694,55 @@ fn level_from(
         Section::NotResolved => SurfaceInputsError::NotResolved(RecordSection::Figure),
         Section::NotApplicable => SurfaceInputsError::NoSolidSurface,
     };
-    Err(SurfaceJobError::Inputs(error))
+    Err(SurfaceJobError::Inputs(error.into()))
 }
 
-/// The surface seed of `key`'s body in `system` and its record at [`RECORD_TIME`]: what the coarse
-/// pass reads before its inputs.
+/// The surface seed of `key`'s body in `system`, its record at [`RECORD_TIME`], and the record of
+/// the planet it orbits if it is a moon, the one [`CoarseInputs::planet_of`] names, at the same
+/// time: what the coarse pass reads before its inputs, the two records from one place at one time
+/// (decision-backlog-2 §3.3).
+///
+/// A moon's record already derives its planet's and drops it, so the second fetch repeats that
+/// part; a fetch of both at once is a deferred efficiency (R09's Risks).
 ///
 /// # Errors
 ///
 /// [`SurfaceJobError::Body`] for an index outside plan 14's layout or one at which the system
-/// holds no body, and [`SurfaceJobError::Inputs`] with [`SurfaceInputsError::NoSolidSurface`] for
-/// a body with no surface seed (a ring, a belt or the halo).
+/// holds no body; [`SurfaceJobError::Inputs`] with [`SurfaceInputsError::NoSolidSurface`] (in
+/// [`ReadCoarseInputsError::Section`]) for a body with no surface seed (a ring, a belt or the
+/// halo), and with [`ReadCoarseInputsError::PlanetMissing`] for a moon whose planet does not
+/// resolve, which a moon's own record rules out, so a fault of the server's, logged.
 fn surface_record(
     key: FieldKey,
     system: &GeneratedSystem,
-) -> Result<(SurfaceSeed, BodyRecord), SurfaceJobError> {
+) -> Result<(SurfaceSeed, BodyRecord, Option<BodyRecord>), SurfaceJobError> {
     let (ctx, planets) = system;
     let index = BodyIndex::try_from(key.body().body_index())
         .map_err(|error| SurfaceJobError::Body(ResolveBodyError::MalformedIndex(error)))?;
     let seed = planets
         .surface_seed(index)
         .map_err(SurfaceJobError::Body)?
-        .ok_or(SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface))?;
+        .ok_or(SurfaceJobError::Inputs(ReadCoarseInputsError::Section(
+            SurfaceInputsError::NoSolidSurface,
+        )))?;
     let record = planets
         .body_at(ctx, index, RECORD_TIME)
         .map_err(SurfaceJobError::Body)?;
-    Ok((seed, record))
+    let planet = CoarseInputs::planet_of(&record)
+        .map(|planet| {
+            planets.body_at(ctx, planet, RECORD_TIME).map_err(|error| {
+                tracing::error!(
+                    body = %key.body(),
+                    %error,
+                    "a moon's planet does not resolve in its own system"
+                );
+                SurfaceJobError::Inputs(ReadCoarseInputsError::PlanetMissing(
+                    planet.body_id(planets.system()),
+                ))
+            })
+        })
+        .transpose()?;
+    Ok((seed, record, planet))
 }
 
 /// Universe `universe`'s raised-revisions channel in `raised`, made empty if it has none yet.
@@ -733,7 +795,8 @@ mod tests {
     use hyperion_sim::id::{BodyId, Layer, SystemId};
     use hyperion_sim::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
     use hyperion_sim::planetary::derive::photometry::{PhaseTemplate, PhotometryInputs};
-    use hyperion_sim::planetary::record::BodyRecord;
+    use hyperion_sim::planetary::placement::OrbitHost;
+    use hyperion_sim::planetary::record::{BodyKind, BodyRecord};
     use hyperion_sim::planetary::surface::{CoarseInputs, reference};
     use hyperion_sim::planetary::{DecodeBodyIndexError, SystemContext, generate};
     use hyperion_sim::time::UniverseTime;
@@ -832,8 +895,9 @@ mod tests {
         fn inputs(
             &self,
             _: &BodyRecord,
+            _: Option<&BodyRecord>,
             _: &SystemContext,
-        ) -> Result<CoarseInputs, SurfaceInputsError> {
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
             self.calls.fetch_add(1, Ordering::SeqCst);
             Ok(reference::ceres_like())
         }
@@ -1096,8 +1160,9 @@ mod tests {
         fn inputs(
             &self,
             _: &BodyRecord,
+            _: Option<&BodyRecord>,
             _: &SystemContext,
-        ) -> Result<CoarseInputs, SurfaceInputsError> {
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
             self.entered.fetch_add(1, Ordering::SeqCst);
             self.gate
                 .lock()
@@ -1320,7 +1385,7 @@ mod tests {
     /// Each error says what failed and keeps its cause.
     #[test]
     fn a_surface_job_error_keeps_its_cause() {
-        let inputs = SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface);
+        let inputs = SurfaceJobError::Inputs(SurfaceInputsError::NoSolidSurface.into());
         assert_eq!(
             inputs.to_string(),
             "the body's coarse-pass inputs cannot be had"
@@ -1404,7 +1469,11 @@ mod tests {
     #[test]
     fn a_field_s_level_comes_from_the_inputs_or_else_the_figure() {
         let ceres = coarse_level(reference::ceres_like().radius());
-        let not_modelled = || Err(SurfaceInputsError::NotModelled(RecordSection::Surface));
+        let not_modelled = || {
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NotModelled(RecordSection::Surface),
+            ))
+        };
         assert_eq!(
             level_from(Ok(reference::ceres_like()), &Section::NotModelled),
             Ok(FieldLevel::Modelled(ceres))
@@ -1422,13 +1491,18 @@ mod tests {
         ] {
             assert_eq!(
                 level_from(not_modelled(), &figure),
-                Err(SurfaceJobError::Inputs(refusal)),
+                Err(SurfaceJobError::Inputs(refusal.into())),
                 "{figure:?}"
             );
         }
+        // A fault of the server's reading is passed on as it is, whatever the figure.
+        let planet = record_of(system().1[0]);
+        let planet_id = planet.index().body_id(planet.identity().system());
         for refusal in [
-            SurfaceInputsError::NoSolidSurface,
-            SurfaceInputsError::NotResolved(RecordSection::Bulk),
+            SurfaceInputsError::NoSolidSurface.into(),
+            SurfaceInputsError::NotResolved(RecordSection::Bulk).into(),
+            ReadCoarseInputsError::PlanetMissing(planet_id),
+            ReadCoarseInputsError::NotAtRecordTime,
         ] {
             assert_eq!(
                 level_from(Err(refusal), &Section::NotModelled),
@@ -1457,6 +1531,122 @@ mod tests {
                 section: RecordSection::Surface,
             })
         );
+    }
+
+    /// The first system of the layer-C cell at the solar circle with a moon, by its record's kind
+    /// and parent, with the moon and the planet it orbits.
+    fn moon_system() -> &'static (Arc<GeneratedSystem>, BodyId, BodyId) {
+        static SYSTEM: OnceLock<(Arc<GeneratedSystem>, BodyId, BodyId)> = OnceLock::new();
+        SYSTEM.get_or_init(|| {
+            let mut cell = Vec::new();
+            generate_cell(
+                galaxy(),
+                CellKey::new(Layer::C, [0, 812, 0]).expect("a cell of the grid"),
+                &mut cell,
+            );
+            cell.iter()
+                .find_map(|record| {
+                    let ctx = SystemContext::for_system(galaxy(), record.id()).ok()?;
+                    let planets = generate(Seed::new(SEED), &ctx);
+                    let (moon, planet) = planets.bodies().iter().find_map(|body| {
+                        let record = planets.body_at(&ctx, body.index(), RECORD_TIME).ok()?;
+                        match (record.identity().kind(), record.identity().parent()) {
+                            (BodyKind::Moon(_), Some(OrbitHost::Body(planet))) => {
+                                Some((body.index(), planet))
+                            }
+                            _ => None,
+                        }
+                    })?;
+                    let id = planets.system();
+                    Some((
+                        Arc::new((ctx, planets)),
+                        moon.body_id(id),
+                        planet.body_id(id),
+                    ))
+                })
+                .expect("a system of the cell has a moon")
+        })
+    }
+
+    /// A source that keeps each body it is asked for, with the planet's record it is given, and
+    /// answers that the surface is not modelled, so that no pass runs.
+    #[derive(Debug, Default)]
+    struct Capturing {
+        asked: Mutex<Vec<(BodyIndex, Option<BodyRecord>)>>,
+    }
+
+    impl InputsSource for Capturing {
+        fn inputs(
+            &self,
+            record: &BodyRecord,
+            planet: Option<&BodyRecord>,
+            _: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            lock(&self.asked).push((record.index(), planet.cloned()));
+            Err(SurfaceInputsError::NotModelled(RecordSection::Surface).into())
+        }
+    }
+
+    /// R09.T10.f: the service gives a moon's source its planet's record at the record's time, the
+    /// planet `CoarseInputs::planet_of` names, and a planet's source none, on the pass's path and
+    /// the level's alike.
+    #[tokio::test]
+    async fn a_moon_s_source_is_given_its_planet_s_record() {
+        let (system, moon, planet) = moon_system();
+        let (ctx, planets) = system.as_ref();
+        let record_at = |body: BodyId| {
+            let index = BodyIndex::try_from(body.body_index()).unwrap();
+            planets.body_at(ctx, index, RECORD_TIME).unwrap()
+        };
+        let (moon_record, planet_record) = (record_at(*moon), record_at(*planet));
+        assert_eq!(
+            CoarseInputs::planet_of(&moon_record),
+            Some(planet_record.index())
+        );
+        assert_eq!(CoarseInputs::planet_of(&planet_record), None);
+        let pool = one_worker();
+        let source = Arc::new(Capturing::default());
+        let service = SurfaceService::new(
+            Arc::clone(&pool),
+            Arc::clone(&source) as Arc<dyn InputsSource>,
+            64 << 20,
+        );
+        let not_modelled =
+            ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(RecordSection::Surface));
+        for body in [*moon, *planet] {
+            let field = timeout(WAIT, service.field(key(body), system))
+                .await
+                .unwrap();
+            assert_eq!(field.unwrap_err(), SurfaceJobError::Inputs(not_modelled));
+            let level = timeout(
+                WAIT,
+                service.field_level(key(body), system, CancelToken::new()),
+            )
+            .await
+            .unwrap();
+            assert!(
+                matches!(
+                    level,
+                    Ok(FieldLevel::NotModelled {
+                        section: RecordSection::Surface,
+                        ..
+                    })
+                ),
+                "{body}: {level:?}"
+            );
+        }
+        let (moon_index, planet_index) = (moon_record.index(), planet_record.index());
+        assert_eq!(
+            *lock(&source.asked),
+            [
+                (moon_index, Some(planet_record.clone())),
+                (moon_index, Some(planet_record)),
+                (planet_index, None),
+                (planet_index, None),
+            ]
+        );
+        assert_eq!(service.counters().computed(), 0);
+        timeout(WAIT, pool.shutdown()).await.unwrap().unwrap();
     }
 
     /// Whether a test field's palette names its ground.

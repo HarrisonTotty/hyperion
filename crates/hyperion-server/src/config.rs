@@ -1148,12 +1148,13 @@ mod tests {
             fn inputs(
                 &self,
                 _: &hyperion_sim::planetary::record::BodyRecord,
+                _: Option<&hyperion_sim::planetary::record::BodyRecord>,
                 _: &hyperion_sim::planetary::SystemContext,
             ) -> Result<
                 hyperion_sim::planetary::surface::CoarseInputs,
-                hyperion_sim::planetary::surface::SurfaceInputsError,
+                hyperion_sim::planetary::surface::ReadCoarseInputsError,
             > {
-                Err(hyperion_sim::planetary::surface::SurfaceInputsError::NoSolidSurface)
+                Err(hyperion_sim::planetary::surface::SurfaceInputsError::NoSolidSurface.into())
             }
         }
         assert_eq!(

@@ -2163,6 +2163,44 @@ vertex neighbours. Acceptance: `cargo test -p hyperion-sim planetary::surface`.
   - _Moves:_ nothing.
   - _Accept:_ `cargo test -p hyperion-sim planetary::surface`.
 
+- **R09.T10.f `for_body`'s planet, and the service's** (new 2026-10-15, decision-backlog-2 §3; S;
+  no bump; after T10.e, before P14.T54.a). `for_body` takes a moon's planet's record, and the
+  server fetches it, so that the signature P14.T54.a connects, frozen at 23, needs no change. As
+  built: Risks, "Deviations in T10.f, as built".
+  - **The signature** (§3.1). `CoarseInputs::for_body(record, planet: Option<&BodyRecord>, ctx)`
+    gives `Result<Self, ReadCoarseInputsError>`, `planet` the record of the planet a moon orbits,
+    taken at `RECORD_TIME` with `record`, `Some` exactly where `planet_of(record)` is; and
+    `CoarseInputs::planet_of(record) -> Option<BodyIndex>`, `Some` for a moon (`BodyKind::Moon`
+    about `OrbitHost::Body`) and `None` for every other body, a belt's member and a ring among
+    them. `ctx` stays, unread. The checks run in this order: the surface section's tag, the
+    planet (`PlanetMissing`, `NotItsPlanet`), then the crust, so that a correctly supplied moon
+    still answers `Section(NotModelled(Surface))` until P14.T54.a.
+  - **The server** (§3.3). `InputsSource::inputs(record, planet, ctx)` takes the same three
+    arguments, and `RecordInputs` delegates to `for_body`. The service's `surface_record` takes
+    the planet's record with `body_at(ctx, p, RECORD_TIME)` beside the body's, where `planet_of`
+    is `Some(p)`, and `compute` and `field_level` pass it on. `SurfaceJobError::Inputs` carries
+    `ReadCoarseInputsError`. The handlers answer its `Section(..)` arm as before (`not_modelled`
+    naming the section, `bad_request` for no solid surface, `internal` for a withheld section),
+    and every other arm `internal`, logged: each is a fault in the server's own reading.
+  - **The docs** (§2.5). The header's `surface_pressure` and `CoarseInputs::surface_pressure`
+    gain "0 also on a surface holding melt whose volatiles are gone, whose own vapour is not
+    modelled (P14.T55.b)".
+  - _Tests:_ in the sim, a generated moon with its planet stops at the crust, without it
+    `PlanetMissing` and with another body `NotItsPlanet`; a planet and a belt's member take
+    `None`; `planet_of` agrees with `from_record`'s rule on every body of the sample systems;
+    `from_record`'s doctest calls `for_body(rocky, None, &ctx)`. In the server, a capturing
+    source sees `Some` of a generated moon's planet's record (at `planet_of`'s index) and `None`
+    for a planet; a source answering `PlanetMissing` is answered `internal`; `RecordInputs`
+    answers `NotModelled` naming the surface for a moon too.
+  - _Files:_ the sim's `planetary/surface/{inputs,mod}.rs`; the server's
+    `surface/{inputs,service,mod}.rs`, `convert/surface.rs`, `requests/surface.rs`, `config.rs`,
+    `tests/common/surface.rs` and `tests/surface_service.rs`; the surface crate's
+    `field/header.rs` (the doc sentence).
+  - _Moves:_ nothing (`golden_diff.py` shows nothing moved at 22).
+  - _Accept:_ `cargo test -p hyperion-sim --lib planetary::surface`,
+    `cargo test -p hyperion-sim --doc planetary::surface` and
+    `cargo test -p hyperion-server surface`.
+
 ### R09.T11 Plates
 
 `steps/plates.rs`, Design note 6. Tests: every cell has one plate and ties go to the lower seed
@@ -7121,3 +7159,69 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
     (the determinism review).
   - _`hyperion-base`'s `math::atan2`_ documents its range as (−π, π]; libm gives −π for
     atan2(−0, x < 0). Documentation only; lean: the next edit to base.
+- **Deviations in T10.f, as built** (2026-10-15; lane r09-inputs, on T10.e's `cd1a09fb`, merged
+  to `9fbc5ea2`; decision-backlog-2.md §3, with §2.5's sentence; no bump).
+  - _The signature is the ruling's._ `for_body(record, planet: Option<&BodyRecord>, ctx)`, not
+    T10.e's `SeasonsFromRecord`, which main asked to weigh: the argument is the planet's whole
+    record, which T13's planetshine and eclipses will also read (§3.2), so a type named for the
+    seasons would misname a signature frozen at 23; `planet_of`'s `Option<BodyIndex>` maps onto it
+    one for one (`Some` exactly where `planet_of` is), so the server's fetch is
+    `planet_of(..).map(fetch)`. So rust-dev's two-variant rule, which T10.e applied to
+    `from_record` in place of a bare `Option<&BodyRecord>`, yields here to the ruling's form (a
+    ruled exception, not one the rule allows); at the one production call the argument is that
+    fetched record. `from_record` keeps `SeasonsFromRecord`, whose variants say whose orbit sets
+    the seasons. One private check, `checked_seasons`, serves both:
+    `for_body` turns its `planet` into the `SeasonsFromRecord` it will pass to `from_record` from
+    P14.T54.a, and `from_record` checks its own through it, as T10.e did.
+  - _`level_from` and `field_albedo_scale` take no planet._ §3.3 lists them among the functions
+    that pass the planet on, but neither reads a record's planet: `level_from` takes the source's
+    answer, which has read it, and `field_albedo_scale` the body's own photometry.
+    `surface_record` returns the planet's record, and `compute` and `level_of` (the job
+    `field_level` runs) pass it to the source.
+  - _A moon's planet that does not resolve_ (the ruling is silent) is answered
+    `Inputs(PlanetMissing(planet))` by `surface_record`, logged at `error` with its
+    `ResolveBodyError`, so `internal`; a moon's own record rules it out. `Body(..)` would have told
+    the client its own body does not resolve. The refusal is then logged again at `error` by the
+    handler or the prefetch, without the cause: two lines for one fault on a path no generated
+    record takes, kept so that the cause is logged where it is known.
+  - _Already in place._ §3.3's one time constant needed no change: T10.e had made the server's
+    `surface::RECORD_TIME` a `pub use` of the sim's.
+  - _A planet's record for a body that is not a moon_ is refused
+    `NotItsPlanet { planet: None, .. }`, as T10.e's `from_record` refuses `Planet(..)` for a
+    planet: §3.1's "`Some` exactly where `planet_of` is", held in both directions.
+  - _The logs._ A prefetched pass refused other than by a section's state is logged at `error`
+    (at `debug` before, with every `Inputs`), as §3.3's "logged". `surface_refusal` logs such a
+    refusal's text and variant, and answers it with the withheld section's `internal` message,
+    "the server failed while reading the body's record" (`reading_failed`).
+  - _Tests._ Sim (`inputs.rs`): `for_body_checks_a_moon_s_planet_before_the_crust` (a generated
+    moon with its planet, without and with another body; a planet with none and with one; the
+    first belt's member with a surface, a dwarf planet whose parent is a belt, with none and with
+    its belt's record; the tag first, for a giant given a planet and a degraded moon given none);
+    the census also checks `planet_of` against the test's own statement of the rule on every body
+    of the 40 sample systems (since `from_record` itself goes through `planet_of`, comparing the
+    two would test nothing), and `for_body` with `planet_of`'s planet on every solid body; T10's
+    and T10.e's tests and `from_record`'s doctest take the new form, and `for_body` gains a
+    doctest, a generated moon with its planet's record from `planet_of` and without it. Server:
+    `a_moon_s_source_is_given_its_planet_s_record` (`surface/service.rs`: `field` and
+    `field_level` give a capturing source the moon's planet's record, equal to `body_at` at
+    `RECORD_TIME`, and the planet `None`);
+    `a_planet_s_record_missing_is_answered_internal` (`requests/surface.rs`: `survey_pass` and
+    `surface_field`, nothing recorded); `surface_refusal`'s table gains the five other variants;
+    `level_from`'s test passes `PlanetMissing` and `NotAtRecordTime` on; and
+    `a_generated_surface_is_not_modelled_naming_its_section` (`tests/surface_service.rs`) adds a
+    generated moon (`common::surface::moon_system`, found by kind and parent), which
+    `RecordInputs` answers `NotModelled(Surface)` through the service and `PlanetMissing` without
+    its planet.
+  - _Files_ as ruled, with the surface crate's `field/header.rs` for §2.5's sentence on the
+    header's `surface_pressure`.
+  - _No output moves:_ no golden, stream, tag, wire or version (`GENERATOR_VERSION` 22).
+- **Deferred findings (2026-10-13 rule)** (R09.T10.f; both already ruled, recorded for the next
+  readers).
+  - _T10.e's deferred "`for_body`'s signature"_ is settled here (decision-backlog-2 §3):
+    `for_body` answers `ReadCoarseInputsError`, so `SurfaceInputsError` gains no arms.
+  - _One fetch for both records_ (§3.3's deferred efficiency, ruled there): a moon's `body_at`
+    derives its planet's record and drops it, and `surface_record` derives it again.
+  - _The plan's older text_ (§4's docs batch, ruled there) still reads the old forms: Provides'
+    `for_body(record, ctx) -> Result<Self, SurfaceInputsError>` and `SurfaceInputsError` as its
+    answer, and `InputsSource`'s `inputs(&self, record, ctx)`, answering `SurfaceInputsError`;
+    T17's as-built `SurfaceJobError::Inputs(SurfaceInputsError)`.

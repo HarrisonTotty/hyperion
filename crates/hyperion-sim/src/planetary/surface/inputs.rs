@@ -14,9 +14,11 @@
 //! Plan 14's record does not carry all of these yet: `record::Surface`, the section they arrive
 //! in, carries the conditions and figures from P14.T48.e, but P14.T51.a's condensates, T51.c's
 //! crust and the palette's sources are declared not modelled until P14.T54.a, so
-//! [`CoarseInputs::for_body`] answers [`SurfaceInputsError::NotModelled`] for every body that has
-//! a solid surface, and every test, the reference worlds among them, builds its inputs with
-//! [`CoarseInputsBuilder`], each value a plain argument (Design note 3, "Until an ask lands").
+//! [`CoarseInputs::for_body`] answers [`SurfaceInputsError::NotModelled`] (in
+//! [`ReadCoarseInputsError::Section`]) for every body that has a solid surface, once it has
+//! checked a moon's planet's record (R09.T10.f), and every test, the reference worlds among them,
+//! builds its inputs with [`CoarseInputsBuilder`], each value a plain argument (Design note 3,
+//! "Until an ask lands").
 //! [`CoarseInputs::from_record`] is the reading of the rest (R09.T10.e): every other value from
 //! the record's sections at [`RECORD_TIME`], a moon's seasons from its planet's record, with the
 //! crust, condensates and palette given as arguments, which P14.T54.a connects to the section's
@@ -47,12 +49,12 @@ use crate::galaxy::consts::YEARS_PER_GIGAYEAR;
 use crate::id::BodyId;
 use crate::math;
 use crate::orbit::{BuildOrbitError, Eccentricity, KeplerElements, Orientation, seconds_between};
-use crate::planetary::SystemContext;
 use crate::planetary::derive::atmosphere::{SurfaceMaterial, SurfaceState};
 use crate::planetary::frames::BodyFixedFrame;
 use crate::planetary::hooks::surface::{SeasonalSpin, SeasonsFrom};
 use crate::planetary::placement::OrbitHost;
 use crate::planetary::record::{BodyKind, BodyOrbit, BodyRecord, Modelled, RecordSection, Section};
+use crate::planetary::{BodyIndex, SystemContext};
 use crate::substance::SubstanceId;
 use crate::time::UniverseTime;
 use crate::units::{
@@ -381,7 +383,9 @@ pub struct CoarseInputs {
     main_liquid: Option<u8>,
 }
 
-/// Why [`CoarseInputs::for_body`] cannot give a body's inputs.
+/// Why a record's sections cannot give a body's inputs: the surface section's tag, or a section
+/// the pass reads not modelled or withheld, which [`CoarseInputs::for_body`] and
+/// [`CoarseInputs::from_record`] answer as [`ReadCoarseInputsError::Section`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SurfaceInputsError {
     /// The body has no solid surface: its record's surface section is
@@ -433,14 +437,17 @@ pub enum SeasonsFromRecord<'a> {
     Planet(&'a BodyRecord),
 }
 
-/// Why [`CoarseInputs::from_record`] cannot give a body's inputs.
+/// Why [`CoarseInputs::for_body`] or [`CoarseInputs::from_record`] cannot give a body's inputs.
+///
+/// A server answers [`Section`](Self::Section) as the body's own state, and every other variant as
+/// a fault of its own reading: a planet's record not given or not the moon's, a record not taken
+/// at [`RECORD_TIME`], or inputs the builder refuses (decision-backlog-2 §3.3).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ReadCoarseInputsError {
-    /// A section the pass reads has no solid surface, is not modelled or is withheld, as
-    /// [`CoarseInputs::for_body`] answers it.
+    /// A section the pass reads has no solid surface, is not modelled or is withheld.
     Section(SurfaceInputsError),
-    /// The body is a moon of this planet, whose orbit sets the moon's seasons, and
-    /// [`SeasonsFromRecord::Own`] was given.
+    /// The body is a moon of this planet, whose orbit sets the moon's seasons, and no planet's
+    /// record was given: `for_body`'s `None`, or [`SeasonsFromRecord::Own`].
     PlanetMissing(BodyId),
     /// The record given as the body's planet is not the planet it orbits: another body, or a
     /// body of another system.
@@ -528,7 +535,16 @@ impl CoarseInputs {
     }
 
     /// The inputs of the body of `record`, in the system of `ctx`, from the record's sections
-    /// (Design note 3).
+    /// (Design note 3), with `planet` the record of the planet a moon orbits
+    /// (decision-backlog-2 §3).
+    ///
+    /// `record` and `planet` are their bodies' records at [`RECORD_TIME`], taken together, and
+    /// `planet` is `Some` exactly where [`planet_of`](Self::planet_of) is: a moon's planet's
+    /// record, whose orbit sets the moon's seasons and whose bulk and photometry its planetshine
+    /// and eclipses will read (R09.T13). Every other body takes `None`. `ctx` is not read, the
+    /// hosts' light coming from the record's conditions; a companion star's own cycle will read
+    /// it (R09.T13), and it is kept so that this signature, frozen from the serve gate's bump
+    /// (decision-bump-plan-after-22 §1.4), need not grow.
     ///
     /// The surface section is decided from its tag alone, never from the body's class: a body
     /// whose surface is [`Section::NotApplicable`] has no solid surface, whatever its class
@@ -537,38 +553,142 @@ impl CoarseInputs {
     /// regime, which reads into the pass's vocabulary by
     /// `From<&hooks::surface::ClimateRegime>` (each substance by its registry row's key), and
     /// the global figures. The inputs come from it with the record's `bulk` (gravity), `figure`
-    /// (the spheroid), `rotation` (the spin) and `orbit` sections and the hosts' light, at
-    /// [`RECORD_TIME`], as [`from_record`](Self::from_record) reads them (R09.T10.e), and the
-    /// palette's entries from the registry's rows of the substances the section names
-    /// (P14.T49.b–c). The section's crust and condensates (P14.T51.a, T51.c) are declared but not
-    /// modelled until P14.T54.a, which connects them and the palette's resolution to that reading,
-    /// with a moon's planet's record, which sets its seasons and which this signature does not yet
-    /// take, and settles the record's time (decision-bump-plan-after-22 §1.2 and §1.5). Until then
-    /// an `Ok` section answers [`SurfaceInputsError::NotModelled`], from its crust.
+    /// (the spheroid), `rotation` (the spin) and `orbit` sections, a moon's planet's `orbit`,
+    /// and the hosts' light, at [`RECORD_TIME`], as [`from_record`](Self::from_record) reads them
+    /// (R09.T10.e), and the palette's entries from the registry's rows of the substances the
+    /// section names (P14.T49.b–c). The section's crust and condensates (P14.T51.a, T51.c) are
+    /// declared but not modelled until P14.T54.a, which connects them and the palette's
+    /// resolution to that reading and settles the record's time (decision-bump-plan-after-22
+    /// §1.2 and §1.5). Until then an `Ok` section answers
+    /// [`SurfaceInputsError::NotModelled`] from its crust, once the planet is checked.
     ///
     /// # Errors
     ///
-    /// - [`SurfaceInputsError::NoSolidSurface`] for a surface section that is
-    ///   [`Section::NotApplicable`];
-    /// - [`SurfaceInputsError::NotModelled`] naming [`RecordSection::Surface`] for one that is
-    ///   [`Section::NotModelled`], or [`Section::Ok`] with a member the pass reads not modelled,
-    ///   which is every surface section of this generator version;
-    /// - [`SurfaceInputsError::NotResolved`] naming [`RecordSection::Surface`] for one a degraded
-    ///   record withholds.
-    pub fn for_body(record: &BodyRecord, ctx: &SystemContext) -> Result<Self, SurfaceInputsError> {
+    /// In this order, so that the planet is checked before the crust (decision-backlog-2 §3.2):
+    ///
+    /// - [`ReadCoarseInputsError::Section`] for the surface section's tag:
+    ///   [`SurfaceInputsError::NoSolidSurface`] for a section that is [`Section::NotApplicable`],
+    ///   [`SurfaceInputsError::NotModelled`] naming [`RecordSection::Surface`] for one that is
+    ///   [`Section::NotModelled`], and [`SurfaceInputsError::NotResolved`] naming it for one a
+    ///   degraded record withholds;
+    /// - [`ReadCoarseInputsError::PlanetMissing`] for a moon given no planet's record, and
+    ///   [`ReadCoarseInputsError::NotItsPlanet`] for a planet's record that is not the moon's
+    ///   planet's (another body's, or a body's of another system), or one given for a body that
+    ///   is not a moon;
+    /// - [`ReadCoarseInputsError::Section`] with [`SurfaceInputsError::NotModelled`] naming
+    ///   [`RecordSection::Surface`] for an [`Section::Ok`] section with a member the pass reads
+    ///   not modelled, which is every surface section of this generator version.
+    ///
+    /// From P14.T54.a, also those of [`from_record`](Self::from_record).
+    ///
+    /// # Examples
+    ///
+    /// A moon's inputs need its planet's record, at the same time as its own: the one
+    /// [`planet_of`](Self::planet_of) names, which the server fetches beside the body's.
+    ///
+    /// ```
+    /// use hyperion_sim::Seed;
+    /// use hyperion_sim::galaxy::placement::CellKey;
+    /// use hyperion_sim::id::Layer;
+    /// use hyperion_sim::planetary::record::{RecordSection, Section};
+    /// use hyperion_sim::planetary::surface::{
+    ///     CoarseInputs, RECORD_TIME, ReadCoarseInputsError, SurfaceInputsError,
+    /// };
+    /// use hyperion_sim::planetary::{SystemContext, generate};
+    /// use hyperion_sim::units::{Dex, SolarMasses, Years};
+    ///
+    /// // The first moon with a surface of Sun-like systems 1, 2, …, at the record's time.
+    /// let cell = CellKey::new(Layer::C, [0, 812, 0])?;
+    /// let mut found = None;
+    /// for index in 1..64 {
+    ///     let ctx = SystemContext::builder()
+    ///         .system(cell.candidate_id(index).ok_or("an index in range")?)
+    ///         .star(SolarMasses::new(1.0))
+    ///         .fe_h(Dex::ZERO)
+    ///         .age_at_epoch(Years::new(4.57e9))
+    ///         .build()?;
+    ///     let system = generate(Seed::new(0x5eed_0009_0010), &ctx);
+    ///     let snapshot = system.snapshot_at(&ctx, RECORD_TIME);
+    ///     let moon = snapshot.bodies().iter().find(|record| {
+    ///         let solid = matches!(record.surface(), Section::Ok(_));
+    ///         solid && CoarseInputs::planet_of(record).is_some()
+    ///     });
+    ///     if let Some(moon) = moon.cloned() {
+    ///         found = Some((ctx, system, moon));
+    ///         break;
+    ///     }
+    /// }
+    /// let (ctx, system, moon) = found.ok_or("a Sun-like system holds a moon with a surface")?;
+    /// // The planet's record, taken at the moon's time.
+    /// let planet = CoarseInputs::planet_of(&moon)
+    ///     .map(|index| system.body_at(&ctx, index, RECORD_TIME))
+    ///     .transpose()?;
+    /// // With it, the reading stops at the crust, which is not modelled until P14.T54.a; without
+    /// // it, the moon's seasons, its planet's orbit's, cannot be read.
+    /// assert_eq!(
+    ///     CoarseInputs::for_body(&moon, planet.as_ref(), &ctx),
+    ///     Err(ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
+    ///         RecordSection::Surface
+    ///     )))
+    /// );
+    /// assert!(matches!(
+    ///     CoarseInputs::for_body(&moon, None, &ctx),
+    ///     Err(ReadCoarseInputsError::PlanetMissing(_))
+    /// ));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn for_body(
+        record: &BodyRecord,
+        planet: Option<&BodyRecord>,
+        ctx: &SystemContext,
+    ) -> Result<Self, ReadCoarseInputsError> {
         let surface = surface_of(record)?;
+        let seasons = checked_seasons(record, planet)?;
         let crust = match surface.crust() {
             Modelled::Ok(crust) => crust,
             Modelled::NotModelled => {
-                return Err(SurfaceInputsError::NotModelled(RecordSection::Surface));
+                return Err(SurfaceInputsError::NotModelled(RecordSection::Surface).into());
             }
         };
         // P14.T54.a turns the record's crust and condensates into the pass's, resolves the
-        // palette, and passes them to `from_record`; until then the crust is uninhabited and
-        // nothing reaches the reading. `from_record` takes the hosts' light from the record's
-        // conditions, so the context is not read.
-        let _ = ctx;
+        // palette, and passes them with `seasons` to `from_record`; until then the crust is
+        // uninhabited and nothing reaches the reading. `from_record` takes the hosts' light from
+        // the record's conditions, so the context is not read.
+        let _ = (seasons, ctx);
         match *crust {}
+    }
+
+    /// The planet whose record [`for_body`](Self::for_body) takes with this body's, in the body's
+    /// system: `Some` for a moon, by its kind ([`BodyKind::Moon`] about [`OrbitHost::Body`]), whose
+    /// seasons are its planet's orbit's (`decision-r09-t2.md` item 1), and `None` for every other
+    /// body, a belt's member and a ring among them.
+    ///
+    /// A belt's member is listed under its belt but orbits the belt's host (P14.T21.c), so a body
+    /// is a moon by its kind, not by its parent's being a body. This is the rule
+    /// [`from_record`](Self::from_record) checks its [`SeasonsFromRecord`] by, public so that the
+    /// server, which fetches the planet's record at [`RECORD_TIME`] beside the body's, never
+    /// restates which bodies are moons (decision-backlog-2 §3.2).
+    #[must_use]
+    pub fn planet_of(record: &BodyRecord) -> Option<BodyIndex> {
+        let identity = record.identity();
+        match (identity.kind(), identity.parent()) {
+            (BodyKind::Moon(_), Some(OrbitHost::Body(planet))) => Some(planet),
+            (
+                BodyKind::Moon(_),
+                Some(OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre) | None,
+            )
+            | (
+                BodyKind::Planet
+                | BodyKind::DwarfPlanet
+                | BodyKind::Ring
+                | BodyKind::Belt(_)
+                | BodyKind::CometaryHalo
+                | BodyKind::ProtoplanetaryDisc
+                | BodyKind::DebrisDisc
+                | BodyKind::Unresolved,
+                _,
+            ) => None,
+        }
     }
 
     /// The inputs of the body of `record`, read from its record's sections, with the crust,
@@ -637,7 +757,8 @@ impl CoarseInputs {
     /// use hyperion_sim::planetary::derive::PlanetClass;
     /// use hyperion_sim::planetary::record::{BodyKind, RecordSection, Section};
     /// use hyperion_sim::planetary::surface::{
-    ///     CoarseInputs, CrustInputs, LidCrust, RECORD_TIME, SeasonsFromRecord, SurfaceInputsError,
+    ///     CoarseInputs, CrustInputs, LidCrust, RECORD_TIME, ReadCoarseInputsError,
+    ///     SeasonsFromRecord, SurfaceInputsError,
     /// };
     /// use hyperion_sim::planetary::{SystemContext, generate};
     /// use hyperion_sim::units::{Dex, Kelvin, SolarMasses, Years};
@@ -704,10 +825,14 @@ impl CoarseInputs {
     /// let bulk = rocky.bulk().ok().ok_or("a rocky planet has a bulk section")?;
     /// assert_eq!(inputs.gravity(), bulk.surface_gravity());
     /// assert!(inputs.seasonal_orbit().is_some());
-    /// // `for_body` still stops at the record's crust, which is not modelled.
+    /// // `for_body` still stops at the record's crust, which is not modelled; a planet takes no
+    /// // planet's record (`CoarseInputs::planet_of` is `None`).
+    /// assert_eq!(CoarseInputs::planet_of(&rocky), None);
     /// assert_eq!(
-    ///     CoarseInputs::for_body(&rocky, &ctx),
-    ///     Err(SurfaceInputsError::NotModelled(RecordSection::Surface))
+    ///     CoarseInputs::for_body(&rocky, None, &ctx),
+    ///     Err(ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(
+    ///         RecordSection::Surface
+    ///     )))
     /// );
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
@@ -895,6 +1020,9 @@ impl CoarseInputs {
     }
 
     /// The mean surface pressure (P14.T24.a), zero on an airless body.
+    ///
+    /// 0 also on a surface holding melt whose volatiles are gone, whose own vapour is not modelled
+    /// (P14.T55.b; decision-backlog-2 §2.5).
     #[must_use]
     pub const fn surface_pressure(&self) -> Pascals {
         self.surface_pressure
@@ -1102,51 +1230,55 @@ fn section<T>(section: &Section<T>, name: RecordSection) -> Result<&T, SurfaceIn
     }
 }
 
+/// Whose orbit sets the seasons of the body of `record`, given `planet`, the record given as its
+/// planet's: [`SeasonsFromRecord::Planet`] with a moon's planet's record, and
+/// [`SeasonsFromRecord::Own`] for every other body, given none ([`CoarseInputs::planet_of`]'s
+/// rule). A planet's record is the moon's planet's if it is the same body of the same system.
+///
+/// # Errors
+///
+/// [`ReadCoarseInputsError::PlanetMissing`] for a moon given no planet's record, and
+/// [`ReadCoarseInputsError::NotItsPlanet`] for a record that is not the moon's planet's, or one
+/// given for a body that is not a moon.
+fn checked_seasons<'a>(
+    record: &BodyRecord,
+    planet: Option<&'a BodyRecord>,
+) -> Result<SeasonsFromRecord<'a>, ReadCoarseInputsError> {
+    let system = record.identity().system();
+    let moon_of = CoarseInputs::planet_of(record).map(|index| index.body_id(system));
+    match (moon_of, planet) {
+        (None, None) => Ok(SeasonsFromRecord::Own),
+        (Some(wanted), Some(planet)) if body_id_of(planet) == wanted => {
+            Ok(SeasonsFromRecord::Planet(planet))
+        }
+        (Some(wanted), None) => Err(ReadCoarseInputsError::PlanetMissing(wanted)),
+        (moon_of, Some(given)) => Err(ReadCoarseInputsError::NotItsPlanet {
+            planet: moon_of,
+            given: body_id_of(given),
+        }),
+    }
+}
+
 /// The orbit that sets the seasons of the body of `record`, and whose it is: a moon's planet's,
 /// from the planet's record in `seasons`, and every other body's own (`decision-r09-t2.md` item
-/// 1). A planet's record is the moon's planet's if it is the same body of the same system.
-///
-/// A belt's member is listed under its belt but orbits the belt's host (P14.T21.c), so a body is
-/// a moon by its kind, not by its parent's being a body.
+/// 1), checked by [`checked_seasons`].
 fn seasonal_orbit_of<'a>(
     record: &'a BodyRecord,
     seasons: SeasonsFromRecord<'a>,
 ) -> Result<(&'a BodyOrbit, SeasonsFrom), ReadCoarseInputsError> {
-    let identity = record.identity();
-    let moon_of = match (identity.kind(), identity.parent()) {
-        (BodyKind::Moon(_), Some(OrbitHost::Body(planet))) => {
-            Some(planet.body_id(identity.system()))
-        }
-        (
-            BodyKind::Moon(_),
-            Some(OrbitHost::Star(_) | OrbitHost::Pair(_) | OrbitHost::Barycentre) | None,
-        )
-        | (
-            BodyKind::Planet
-            | BodyKind::DwarfPlanet
-            | BodyKind::Ring
-            | BodyKind::Belt(_)
-            | BodyKind::CometaryHalo
-            | BodyKind::ProtoplanetaryDisc
-            | BodyKind::DebrisDisc
-            | BodyKind::Unresolved,
-            _,
-        ) => None,
+    let given = match seasons {
+        SeasonsFromRecord::Own => None,
+        SeasonsFromRecord::Planet(planet) => Some(planet),
     };
-    match (moon_of, seasons) {
-        (None, SeasonsFromRecord::Own) => Ok((
+    match checked_seasons(record, given)? {
+        SeasonsFromRecord::Own => Ok((
             section(record.orbit(), RecordSection::Orbit)?,
             SeasonsFrom::Own,
         )),
-        (Some(wanted), SeasonsFromRecord::Planet(planet)) if body_id_of(planet) == wanted => Ok((
+        SeasonsFromRecord::Planet(planet) => Ok((
             section(planet.orbit(), RecordSection::Orbit)?,
             SeasonsFrom::Planet,
         )),
-        (Some(wanted), SeasonsFromRecord::Own) => Err(ReadCoarseInputsError::PlanetMissing(wanted)),
-        (moon_of, SeasonsFromRecord::Planet(given)) => Err(ReadCoarseInputsError::NotItsPlanet {
-            planet: moon_of,
-            given: body_id_of(given),
-        }),
     }
 }
 
@@ -3101,8 +3233,10 @@ mod tests {
         };
         assert_eq!(surface.crust(), Modelled::NotModelled);
         assert_eq!(
-            CoarseInputs::for_body(&rocky, &rocky_ctx),
-            Err(SurfaceInputsError::NotModelled(RecordSection::Surface))
+            CoarseInputs::for_body(&rocky, None, &rocky_ctx),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NotModelled(RecordSection::Surface)
+            ))
         );
         // The pass's regime is the record's, its condensable by key.
         let regime = ClimateRegime::from(surface.climate_regime());
@@ -3117,18 +3251,24 @@ mod tests {
         // A giant and a sub-Neptune have no solid surface, from the tag alone
         // (decision-p14-t35e-wire §2.4).
         assert_eq!(
-            CoarseInputs::for_body(&giant, &giant_ctx),
-            Err(SurfaceInputsError::NoSolidSurface)
+            CoarseInputs::for_body(&giant, None, &giant_ctx),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NoSolidSurface
+            ))
         );
         assert_eq!(sub_neptune.surface(), &Section::NotApplicable);
         assert_eq!(
-            CoarseInputs::for_body(&sub_neptune, &sub_ctx),
-            Err(SurfaceInputsError::NoSolidSurface)
+            CoarseInputs::for_body(&sub_neptune, None, &sub_ctx),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NoSolidSurface
+            ))
         );
         // A record degraded below the surface section's level withholds it.
         assert_eq!(
-            CoarseInputs::for_body(&rocky.degrade(DetailLevel::Bulk), &rocky_ctx),
-            Err(SurfaceInputsError::NotResolved(RecordSection::Surface))
+            CoarseInputs::for_body(&rocky.degrade(DetailLevel::Bulk), None, &rocky_ctx),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NotResolved(RecordSection::Surface)
+            ))
         );
         assert_eq!(
             SurfaceInputsError::NotModelled(RecordSection::Surface).to_string(),
@@ -3496,8 +3636,10 @@ mod tests {
         );
         // `for_body` still stops at the record's crust: nothing generated moves.
         assert_eq!(
-            CoarseInputs::for_body(&rocky, &ctx),
-            Err(SurfaceInputsError::NotModelled(RecordSection::Surface))
+            CoarseInputs::for_body(&rocky, None, &ctx),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NotModelled(RecordSection::Surface)
+            ))
         );
     }
 
@@ -3594,8 +3736,107 @@ mod tests {
             })
         );
         assert_eq!(
-            CoarseInputs::for_body(&moon, &ctx),
-            Err(SurfaceInputsError::NotModelled(RecordSection::Surface))
+            CoarseInputs::for_body(&moon, Some(&planet), &ctx),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NotModelled(RecordSection::Surface)
+            ))
+        );
+    }
+
+    /// The first belt's member with a surface section in the Sun-like systems 1, 2, … of
+    /// [`rocky_giant_and_sub_neptune`] (a dwarf planet, listed under its belt), with its system's
+    /// context, its record and its belt's, at [`RECORD_TIME`].
+    fn generated_belt_member() -> (SystemContext, BodyRecord, BodyRecord) {
+        for (ctx, records) in sun_like_records() {
+            for record in &records {
+                if let (Section::Ok(_), Some(OrbitHost::Body(belt))) =
+                    (record.surface(), record.identity().parent())
+                    && record.identity().kind() == BodyKind::DwarfPlanet
+                {
+                    let belt = records.iter().find(|r| r.index() == belt).unwrap();
+                    return (ctx, record.clone(), belt.clone());
+                }
+            }
+        }
+        panic!("63 Sun-like systems hold no belt's member with a surface");
+    }
+
+    /// R09.T10.f (decision-backlog-2 §3): `for_body` takes a moon's planet's record, the one
+    /// `planet_of` names, and checks it after the surface section's tag and before the crust.
+    #[test]
+    fn for_body_checks_a_moon_s_planet_before_the_crust() {
+        let not_modelled =
+            ReadCoarseInputsError::Section(SurfaceInputsError::NotModelled(RecordSection::Surface));
+        let (ctx, moon, planet) = generated_moon();
+        // A moon given its planet passes the check, and stops at the crust.
+        assert_eq!(CoarseInputs::planet_of(&moon), Some(planet.index()));
+        assert_eq!(
+            CoarseInputs::for_body(&moon, Some(&planet), &ctx),
+            Err(not_modelled)
+        );
+        // Without it, or with another body, the planet is refused before the crust is reached.
+        assert_eq!(
+            CoarseInputs::for_body(&moon, None, &ctx),
+            Err(ReadCoarseInputsError::PlanetMissing(body_id_of(&planet)))
+        );
+        assert_eq!(
+            CoarseInputs::for_body(&moon, Some(&moon), &ctx),
+            Err(ReadCoarseInputsError::NotItsPlanet {
+                planet: Some(body_id_of(&planet)),
+                given: body_id_of(&moon),
+            })
+        );
+        // A planet takes none, and is refused one.
+        let [(rocky_ctx, rocky), (giant_ctx, giant), _] = rocky_giant_and_sub_neptune();
+        assert_eq!(CoarseInputs::planet_of(&rocky), None);
+        assert_eq!(
+            CoarseInputs::for_body(&rocky, None, &rocky_ctx),
+            Err(not_modelled)
+        );
+        assert_eq!(
+            CoarseInputs::for_body(&rocky, Some(&planet), &rocky_ctx),
+            Err(ReadCoarseInputsError::NotItsPlanet {
+                planet: None,
+                given: body_id_of(&planet),
+            })
+        );
+        // A belt's member is listed under its belt, a body, but orbits the belt's host: it takes
+        // none, and its belt's record is not its planet's.
+        let (member_ctx, member, belt) = generated_belt_member();
+        assert!(
+            matches!(belt.identity().kind(), BodyKind::Belt(_)),
+            "{:?}",
+            belt.identity()
+        );
+        assert_eq!(
+            member.identity().parent(),
+            Some(OrbitHost::Body(belt.index()))
+        );
+        assert_eq!(CoarseInputs::planet_of(&member), None);
+        assert_eq!(
+            CoarseInputs::for_body(&member, None, &member_ctx),
+            Err(not_modelled)
+        );
+        assert_eq!(
+            CoarseInputs::for_body(&member, Some(&belt), &member_ctx),
+            Err(ReadCoarseInputsError::NotItsPlanet {
+                planet: None,
+                given: body_id_of(&belt),
+            })
+        );
+        // The surface section's tag comes first: a giant has no solid surface whatever planet it
+        // is given, and a moon's withheld section is named before its missing planet.
+        assert_eq!(
+            CoarseInputs::for_body(&giant, Some(&planet), &giant_ctx),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NoSolidSurface
+            ))
+        );
+        assert_eq!(
+            CoarseInputs::for_body(&moon.degrade(DetailLevel::Bulk), None, &ctx),
+            Err(ReadCoarseInputsError::Section(
+                SurfaceInputsError::NotResolved(RecordSection::Surface)
+            ))
         );
     }
 
@@ -3838,6 +4079,13 @@ mod tests {
         let mut zeroed = 0;
         for (ctx, records) in records_at_record_time(&contexts) {
             for record in &records {
+                // `planet_of` is the reading's rule, on every body: a moon's planet, by its kind.
+                assert_eq!(
+                    CoarseInputs::planet_of(record),
+                    planet_of(record, &records).map(BodyRecord::index),
+                    "{:?}",
+                    record.index()
+                );
                 let Section::Ok(surface) = record.surface() else {
                     continue;
                 };
@@ -3890,10 +4138,24 @@ mod tests {
                         elements.orientation(),
                     );
                 }
-                // `for_body` is unchanged: no generated body's inputs are served.
+                // `for_body` takes the planet `planet_of` names, as the server fetches it, and the
+                // reading accepts the same: no generated body's inputs are served yet.
+                let planet = CoarseInputs::planet_of(record).map(|index| {
+                    records
+                        .iter()
+                        .find(|r| r.index() == index)
+                        .expect("a moon's planet is a body of its system")
+                });
+                let seasonal_planet = match seasons {
+                    SeasonsFromRecord::Own => None,
+                    SeasonsFromRecord::Planet(planet) => Some(planet.index()),
+                };
+                assert_eq!(planet.map(BodyRecord::index), seasonal_planet);
                 assert_eq!(
-                    CoarseInputs::for_body(record, &ctx),
-                    Err(SurfaceInputsError::NotModelled(RecordSection::Surface))
+                    CoarseInputs::for_body(record, planet, &ctx),
+                    Err(ReadCoarseInputsError::Section(
+                        SurfaceInputsError::NotModelled(RecordSection::Surface)
+                    ))
                 );
             }
         }

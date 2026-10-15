@@ -23,8 +23,11 @@ use hyperion_sim::galaxy::Galaxy;
 use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
 use hyperion_sim::id::{BodyId, Layer};
 use hyperion_sim::planetary::hooks::{SurfaceSeed, detail_seed, surface_seed};
-use hyperion_sim::planetary::record::{BodyRecord, Section};
-use hyperion_sim::planetary::surface::{CoarseInputs, SurfaceInputsError, coarse_pass, reference};
+use hyperion_sim::planetary::placement::OrbitHost;
+use hyperion_sim::planetary::record::{BodyKind, BodyRecord, Section};
+use hyperion_sim::planetary::surface::{
+    CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, coarse_pass, reference,
+};
 use hyperion_sim::planetary::{BodyIndex, SystemContext, generate};
 use hyperion_sim::time::UniverseTime;
 use hyperion_surface::field::{CoarseField, PartialField};
@@ -73,10 +76,11 @@ impl InputsSource for ReferenceInputs {
     fn inputs(
         &self,
         record: &BodyRecord,
+        _: Option<&BodyRecord>,
         _: &SystemContext,
-    ) -> Result<CoarseInputs, SurfaceInputsError> {
+    ) -> Result<CoarseInputs, ReadCoarseInputsError> {
         match record.surface() {
-            Section::NotApplicable => Err(SurfaceInputsError::NoSolidSurface),
+            Section::NotApplicable => Err(SurfaceInputsError::NoSolidSurface.into()),
             Section::Ok(_) | Section::NotModelled | Section::NotResolved => Ok(self.world.inputs()),
         }
     }
@@ -144,6 +148,59 @@ pub fn surface_system() -> &'static SurfaceSystem {
                 })
             })
             .expect("a system of the cell has a solid body and a giant")
+    })
+}
+
+/// A generated system with a moon whose surface section applies, as the server generates it
+/// (R09.T10.f).
+#[derive(Debug, Clone)]
+pub struct MoonSystem {
+    /// The system: its context and its bodies as they were born.
+    pub system: Arc<GeneratedSystem>,
+    /// A moon whose record has a surface section, not yet modelled.
+    pub moon: BodyId,
+    /// The planet it orbits, by its record's parent.
+    pub planet: BodyId,
+}
+
+/// The first system of the layer-C cell at the solar circle with a moon (by its record's kind and
+/// parent, not by `CoarseInputs::planet_of`) whose surface section applies, generated once per test
+/// binary.
+///
+/// # Panics
+///
+/// If no system of the cell has one.
+pub fn moon_system() -> &'static MoonSystem {
+    static SYSTEM: OnceLock<MoonSystem> = OnceLock::new();
+    SYSTEM.get_or_init(|| {
+        let mut cell = Vec::new();
+        generate_cell(
+            galaxy(),
+            CellKey::new(Layer::C, [0, 812, 0]).expect("a cell of the grid"),
+            &mut cell,
+        );
+        cell.iter()
+            .find_map(|record| {
+                let ctx = SystemContext::for_system(galaxy(), record.id()).ok()?;
+                let planets = generate(Seed::new(SEED), &ctx);
+                let (moon, planet) = planets.bodies().iter().find_map(|body| {
+                    let record = planets.body_at(&ctx, body.index(), RECORD_TIME).ok()?;
+                    let identity = record.identity();
+                    match (identity.kind(), identity.parent(), record.surface()) {
+                        (BodyKind::Moon(_), Some(OrbitHost::Body(planet)), Section::Ok(_)) => {
+                            Some((body.index(), planet))
+                        }
+                        _ => None,
+                    }
+                })?;
+                let id = planets.system();
+                Some(MoonSystem {
+                    system: Arc::new((ctx, planets)),
+                    moon: moon.body_id(id),
+                    planet: planet.body_id(id),
+                })
+            })
+            .expect("a system of the cell has a moon with a surface")
     })
 }
 

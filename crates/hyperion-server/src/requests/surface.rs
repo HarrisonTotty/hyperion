@@ -33,7 +33,7 @@ use hyperion_protocol::{
 };
 use hyperion_sim::id::SystemId;
 use hyperion_sim::planetary::ResolveBodyError;
-use hyperion_sim::planetary::surface::SurfaceInputsError;
+use hyperion_sim::planetary::surface::{ReadCoarseInputsError, SurfaceInputsError};
 use hyperion_surface::field::{
     CoarseField, CoarseLevel, Cover, CoverRange, FieldView, ResolutionCode, SYNTHESIS_MARGIN_CELLS,
 };
@@ -70,9 +70,10 @@ use crate::surface::{FieldKey, FieldLevel, SurfaceJobError};
 /// at which the system holds no body, as `body_detail` refuses them, and `bad_request` for a body
 /// with no solid surface or with no figure to give its field's level; the galaxy's; `bad_request`
 /// naming `cells` for runs that are none, empty, out of order, overlapping or past the field's last
-/// cell; `queue_full`, `internal` or `cancelled` from the pool's jobs; `unsupported_save_format` or
-/// `internal` if the universe's survey log cannot be opened; and `storage_failed` if the pass
-/// cannot be saved.
+/// cell; `queue_full`, `internal` or `cancelled` from the pool's jobs; `internal` if the server
+/// fails to read the body's records into its inputs (a moon's planet's record missing among them;
+/// R09.T10.f), which only a server fault makes; `unsupported_save_format` or `internal` if the
+/// universe's survey log cannot be opened; and `storage_failed` if the pass cannot be saved.
 pub(crate) async fn survey_pass(
     state: Arc<AppState>,
     request: SurveyPassRequest,
@@ -132,7 +133,8 @@ pub(crate) async fn survey_pass(
 /// galaxy's; `unsupported_save_format` or `internal` if the universe's survey log cannot be opened;
 /// `bad_request` naming `have_revision` for a revision above the body's; `queue_full`, `internal`
 /// or `cancelled` from the pool's jobs; and `internal` if the body's passes index another level
-/// than its field, which only a server fault makes.
+/// than its field, or the server fails to read its records into its inputs (a moon's planet's
+/// record missing among them; R09.T10.f), which only a server fault makes.
 pub(crate) async fn field(
     state: Arc<AppState>,
     request: SurfaceFieldRequest,
@@ -152,7 +154,9 @@ pub(crate) async fn field(
     {
         Ok(FieldLevel::Modelled(_)) => {}
         Ok(FieldLevel::NotModelled { section, .. })
-        | Err(SurfaceJobError::Inputs(SurfaceInputsError::NotModelled(section))) => {
+        | Err(SurfaceJobError::Inputs(ReadCoarseInputsError::Section(
+            SurfaceInputsError::NotModelled(section),
+        ))) => {
             return Ok(Answer::from(ResponseBody::SurfaceField(
                 SurfaceFieldDto::NotModelled {
                     section: record_section(section),
@@ -337,7 +341,9 @@ mod tests {
     use hyperion_sim::galaxy::placement::{CellKey, generate_cell};
     use hyperion_sim::id::{BodyId, Layer, SystemId};
     use hyperion_sim::planetary::record::{BodyRecord, Section};
-    use hyperion_sim::planetary::surface::{CoarseInputs, SurfaceInputsError, reference};
+    use hyperion_sim::planetary::surface::{
+        CoarseInputs, ReadCoarseInputsError, SurfaceInputsError, reference,
+    };
     use hyperion_sim::planetary::{SystemContext, generate};
     use hyperion_sim::units::Metres;
     use hyperion_surface::field::coarse_level;
@@ -367,14 +373,34 @@ mod tests {
         fn inputs(
             &self,
             record: &BodyRecord,
+            _: Option<&BodyRecord>,
             _: &SystemContext,
-        ) -> Result<CoarseInputs, SurfaceInputsError> {
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
             match record.surface() {
-                Section::NotApplicable => Err(SurfaceInputsError::NoSolidSurface),
+                Section::NotApplicable => Err(SurfaceInputsError::NoSolidSurface.into()),
                 Section::Ok(_) | Section::NotModelled | Section::NotResolved => {
                     Ok(reference::ceres_like())
                 }
             }
+        }
+    }
+
+    /// A source that answers every body as a moon whose planet's record was not given, a fault of
+    /// the server's own reading (R09.T10.f).
+    #[derive(Debug)]
+    struct Planetless;
+
+    impl InputsSource for Planetless {
+        fn inputs(
+            &self,
+            record: &BodyRecord,
+            _: Option<&BodyRecord>,
+            _: &SystemContext,
+        ) -> Result<CoarseInputs, ReadCoarseInputsError> {
+            let identity = record.identity();
+            Err(ReadCoarseInputsError::PlanetMissing(
+                identity.index().body_id(identity.system()),
+            ))
         }
     }
 
@@ -1160,6 +1186,26 @@ mod tests {
                 "{request:?}: {error:?}"
             );
         }
+        harness.stop().await;
+    }
+
+    /// R09.T10.f: a source's refusal other than a section's state, here a moon's planet's record
+    /// missing, is the server's own fault: both requests answer `internal`, naming no field, and
+    /// the pass is not recorded.
+    #[tokio::test]
+    async fn a_planet_s_record_missing_is_answered_internal() {
+        let (harness, universe) = started(Planetless).await;
+        let solid = bodies().solid;
+        let internal = (ErrorCode::Internal, None);
+        assert_eq!(
+            refused(survey(&harness, pass(&universe, solid, &[(0, 1)])).await),
+            internal
+        );
+        let error = ask(&harness, field_request(&universe, solid, None))
+            .await
+            .unwrap_err();
+        assert_eq!((error.code, error.field), internal, "{}", error.message);
+        assert_eq!(log(&harness, &universe).await.coverage(solid), None);
         harness.stop().await;
     }
 

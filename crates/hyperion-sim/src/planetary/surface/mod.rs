@@ -38,7 +38,10 @@
 //! (science-composition-crusts.md §1, §2, §5 and §7). R09.T10.e wrote the reading of the record,
 //! [`CoarseInputs::from_record`]: every input but the crust, the condensates and the palette from
 //! the record's sections at [`RECORD_TIME`], a moon's seasons from its planet's record, with those
-//! three given, which P14.T54.a connects to the record. Run on any inputs, the pass so far yields its
+//! three given, which P14.T54.a connects to the record. R09.T10.f gave [`CoarseInputs::for_body`]
+//! a moon's planet's record, the one [`CoarseInputs::planet_of`] names, which the server fetches at
+//! [`RECORD_TIME`] beside the body's, and [`ReadCoarseInputsError`] for its answer: the signature
+//! P14.T54.a connects (decision-backlog-2 §3). Run on any inputs, the pass so far yields its
 //! initial state: a smooth, dry sphere at the datum under a still climate at the body's mean
 //! surface temperature, with the inputs' palette. R09.T11–T15 fill the steps and R09.T16 pins the
 //! reference worlds' fields.
