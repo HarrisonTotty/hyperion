@@ -201,6 +201,37 @@ for its -mmf option: the translation coefficients and the mean-field system, the
 absorption, and Tazaki 2021's geometric cross-section, with its own numerical methods. Release
 1.9.14, commit 21aecb46, fetched 2026-10-10.
 
+--------------------------------------------------------------------------------
+CoolProp (thermophysical property fluid files)
+https://github.com/CoolProp/CoolProp
+
+MIT License
+
+Copyright (c) 2012-2018 Ian H. Bell and other CoolProp developers
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+From the fluid files dev/fluids/{Krypton, Xenon, NitrousOxide, CarbonMonoxide, SulfurDioxide,
+HydrogenSulfide, Ethane}.json (master, fetched 2026-10-14), these values are copied into
+crates/hyperion-sim/src/substance/rows/diagrams.rs: the critical and triple points, the
+coefficients of the ancillary vapour-pressure (pS) and saturated-liquid-density (rhoL) equations,
+the triple-point states' pressures and the enthalpy of vaporisation they give, and ethane's
+melting equation. The equations of state they rest on are Lemmon and Span 2006, Gao et al. 2016 and
+Bücker and Wagner 2006, cited in that file.
+
 ================================================================================
 Data
 

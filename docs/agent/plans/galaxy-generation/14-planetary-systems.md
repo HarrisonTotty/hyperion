@@ -12704,3 +12704,212 @@ tables::gauss_legendre`.
   - Woolley, Scott and Brickwedde's Table 4 misprints ortho-H₂'s C_p at 80 K: 5.982 for 4.982.
   - NASA Glenn's own polynomials wobble for atoms near 1,200 K (Na 2.4974, Ca 2.4841), below their
     5/2 floor.
+- **Deviations in P14.T49.b, as built: step 2, part 1, the phase diagrams (`p14-registry`,
+  2026-10-15).** `GENERATOR_VERSION` stays 22, and no generated value moves. Step 2 was split: this
+  part builds the saturation curves and the phase data (the leaner first part, which gates T24.e,
+  T49.c, T49.e and T51.a); the condensed columns (grain density, transition and mechanics family),
+  the solutions' densities and eutectics, the laws aloft and the test that every key R09's worlds
+  use is a row are part 2, the lane's next agent's.
+  - _Held at 22_ (decision-bump-plan-after-22 §1.2). Rows 0–8's `PhaseColumns`, the functions
+    `substance::{saturation_pressure, phase_at, condensables}` and `ice_ih_density` are unchanged,
+    and the record still calls them. The new data are a new column group, `PhaseDiagram`
+    (`Substance::phase_diagram`), read by new functions with the held ones' names in
+    `substance::diagram`, which nothing on the record calls. **P14.T54.a, at the bump:**
+    - re-export `diagram::{saturation_pressure, phase_at, condensables}` at `substance::` in place
+      of the held ones;
+    - point the readers of `PhaseColumns::triple_liquid_density` (figures/cover.rs, P14.T24.b's
+      ocean volume) at `PhaseDiagram::triple_liquid_density`;
+    - point `hooks/surface.rs`'s `greenhouse_gain`, which reads the held columns' constant
+      enthalpies as the curve's d ln p ÷ dT, at `clausius_clapeyron_enthalpy_j_per_mol` at the
+      surface temperature: the diagram's triple-point enthalpies are the references' latent heats,
+      not the curve's slope (below);
+    - note in the bless note that `diagram::condensables` gives fourteen rows where the held
+      function gave five, so `planetary/regime.rs`'s loops over it gain nine;
+    - retire `PhaseColumns`, its `[phase]` golden lines and `Substance::phase`;
+    - restamp the table `saturation_curves` `--since 23`.
+  - _Added public items_, in `substance::diagram` and re-exported at `substance::`: `PhaseDiagram`;
+    `WagnerEquation`; `SublimationEquation { InversePowers, Reduced, ScaledPowers }` and
+    `SublimationPiece`; `DensityEquation` and `DensityForm { Linear, Logarithmic }`;
+    `MeltingEquation { Simon, SimonGlatzel, Polynomial, IceIh, Logarithmic }`, `MeltingPiece` and
+    `MeltingCurve { Rising, Falling }`; `SolidDensity` (`IceIh`, `Polynomial`, `CellVolume`,
+    `Fixed`, `Measured`) and `SolidPhase`. `PhaseDiagram`'s methods carry `PhaseColumns`' names
+    where they answer the same question (`triple_temperature`, …, `saturation_pressure`,
+    `phase_at`, `triple_liquid_density`), so that T54.a's switch is `phase()` → `phase_diagram()`.
+    Beside them:
+    `ln_saturation_pressure`, `saturation_temperature` (the frost or boiling point at a pressure,
+    by 64 bisections), `liquid_density`, `solid_density`, `solid_phase_at`, `melting_pressure`
+    (the rising branch), `falling_melting_pressure` (water's ice Ih),
+    `clausius_clapeyron_enthalpy_j_per_mol`, and `triple_vaporisation_`, `triple_fusion_` and
+    `triple_sublimation_enthalpy_j_per_mol`, named apart from the held columns' enthalpies, which
+    mean the curve's slope.
+  - _Files beyond the task's_: `substance/diagram.rs` (the column group and its functions);
+    `substance/rows/diagrams.rs` (the fourteen diagrams' data); `substance/mod.rs` (the column
+    group's field and re-exports); `tests/substance_golden.rs` and its golden; `hyperion-fit`'s
+    `src/task.rs` (`REGISTRY` at 35), `manifests/saturation_curves.toml` and `tables.lock`;
+    `NOTICE` (CoolProp's MIT notice); the sim's `clippy.toml` (`CoolProp`) and the fit crate's
+    (`CoolProp` and `WebBook`) among `doc-valid-idents`.
+  - _The fit task, as built_ (against the plan's "ln p … fitted" and the step-1 builder's design of
+    a Chebyshev series in 1/T for each solid branch). The sim evaluates every published equation
+    verbatim, liquid and solid alike. `saturation_curves` (Fast, revision 0, table `saturation.rs`,
+    fourteen items `<KEY>_ANCHORS`, stamped since 22, its MANIFEST and task lines T49.b's) emits only
+    each sublimation piece's anchor: the amount added to its ln p (pressure in pascals) so that it
+    meets the branch above it (science-p14-t24f §6.3). Its fingerprint is the evaluations the
+    anchors are made of. The reason: a Chebyshev series re-expresses the eleven Fray and Schmitt
+    polynomials exactly, but cannot reach the design's own 10⁻⁹ in ln p for Span and Wagner's and
+    Tegeler et al.'s θ^0.9 and θ^1.7 terms (2.4 × 10⁻⁸ and 3.7 × 10⁻⁹ at 48 nodes), where the
+    verbatim forms carry no fit error at all. Below the coldest piece the branch continues as that
+    piece's Clausius–Clapeyron tangent at its lower bound, continuous in value and slope, in place
+    of the design's held quotient (a secant from the triple point).
+  - _The latent heats, as built_ (against the design's "L_vap and L_sub at T_t as the curves' own
+    Clausius–Clapeyron slopes"). `triple_vaporisation_enthalpy_j_per_mol` is the reference's h″ −
+    h′, the measured latent heat, and `triple_sublimation_enthalpy_j_per_mol` is it plus the
+    enthalpy of fusion, only where one was read (water, methane and ammonia). A reader that needs
+    the slope consistent with the curve takes `clausius_clapeyron_enthalpy_j_per_mol(T)`, which
+    exceeds h″ − h′ by 1 ÷ (z″ − z′).
+  - _`saturation_temperature`'s cost_: 64 bisections of four to six `powf` each, some 400 `powf`
+    a call (unmeasured; perhaps 10 µs). T51.a's frost points on the snapshot path should take it
+    once per condensable and body, or ask for a cheaper fixed-count inversion.
+  - _The fourteen diagrams._ They cover `H2O`, `CH4`, `NH3`, `N2`, `O2`, `CO2`, `Ar`, `Kr`, `Xe`,
+    `N2O`, `CO`, `SO2`, `H2S` and `C2H6`, every row whose reference equation of state was read.
+    - **The liquid branches** are the papers' ancillaries: IAPWS SR1-86, Setzmann and Wagner 1991,
+      Span et al. 2000, Span and Wagner 1996, Tegeler et al. 1999, Stewart, Jacobsen and Wagner
+      1991 and Gao et al. 2023.
+      - Oxygen's paper presents Schmidt and Wagner 1985's equation (not reached) on IPTS-68.
+      - Ammonia's is the published version of REFPROP's "to be submitted, 2018".
+      - For `Kr`, `Xe`, `N2O`, `CO`, `SO2`, `H2S` and `C2H6` the papers (Lemmon and Span 2006, Gao
+        et al. 2016, Bücker and Wagner 2006) were not reachable. Their fixed points, ancillaries,
+        triple-point pressures and enthalpies of vaporisation are CoolProp's: Bell's fits to those
+        equations of state, basis `Raw { licence: "MIT" }`. Each was checked against the equation
+        of state solved for phase equilibrium from CoolProp's coefficients.
+    - **The solid branches**, from the triple point down:
+      - water: IAPWS R14-08's ice Ih, from 50 K;
+      - carbon dioxide: Span and Wagner's Eq. (3.12) to 154 K, its fitted range's end, and Fray and
+        Schmitt's polynomial below it, to 40 K;
+      - argon: Tegeler et al.'s Eq. (2.8), from 25 K;
+      - ammonia: Gao et al.'s, from 162 K;
+      - the rest: Fray and Schmitt 2009's polynomials, read through Lisse et al. 2021's reproduction,
+        their ranges and uncertainties unread. Their lower bounds are the builder's, where each
+        polynomial's Clausius–Clapeyron enthalpy still holds steady.
+
+      The joins between solid phases are:
+      - nitrogen's α–β transition at 35.61 K (Brookeman and Scott 1973);
+      - carbon monoxide's at 61.585 K (Morrison et al. 1968; both as Raposa et al. 2024 quote them);
+      - oxygen's at the polynomials' own crossings, 23.14 and 43.78 K (its transitions unread);
+      - hydrogen sulphide's at 173.7 K, where its two polynomials come closest. The five-term one's
+        enthalpy climbs to 47 kJ mol⁻¹ by 60 K, so the two-term one, 22.5 kJ mol⁻¹, takes over
+        below.
+
+    - **The anchors**, as the factor each puts on its piece's pressure, from the triple point down:
+      - H2O +0.00001%, CO2 +0.0023% and +0.36%, Ar +0.0028%, NH3 +0.015%: the published solid
+        branches meet their liquids within their own errors;
+      - CH4 −1.61%, N2 +2.84% and +5.77%, O2 −0.056%, −0.050% and −0.056%, Kr +0.28%, Xe −0.16%,
+        N2O −5.36%, CO −0.11% and −0.47%, SO2 −3.65%, H2S −0.56% and −0.65%, C2H6 −0.16%.
+    - **The melting curves** are the papers' own for seven rows: methane's, nitrogen's, argon's,
+      carbon dioxide's, ammonia's two Simon–Glatzel pieces, ethane's through CoolProp, and water's
+      whole curve. Water's falls through ice Ih (R14-08 Eq. 1) to 251.165 K and 208.566 MPa and
+      rises from there through ices III, V, VI and VII (Eqs. 2–5, added at the science check's
+      should-fix: a water world's deep ocean meets them). Each rising curve but water's is
+      extrapolated beyond its published range. Water's ends at ice VII's 715 K, beyond which
+      Eq. 5 turns over, so above it water reads fluid. The other seven rows melt at the triple
+      temperature.
+    - **The liquid densities** are each paper's ancillary.
+    - **The solid densities**, where a value was read:
+      - ice Ih is `ice_ih_density`, unchanged;
+      - carbon dioxide is Mangan et al. 2017's fit, held below 80 K and extrapolated above 195 K;
+      - nitrogen's α and β and methane's II and I are Maynard-Casely, Hester and Brand 2020's
+        cell-volume fits;
+      - xenon is Sears and Klug 1962's cells, 5–75 K, interpolated, their 30 K cell left out;
+      - krypton (58 K), sulphur dioxide (143.15 K) and γ-oxygen (46 K) are one cell each, at its
+        stated temperature;
+      - ammonia is Kiefte et al. 1985's 822 ± 5 kg m⁻³ at the triple point, as Gao et al. 2023
+        take it (Olovsson and Templeton's cell, 834, is the check; the science check's should-fix);
+      - nitrous oxide, α-oxygen and α-carbon monoxide are one cell each, its temperature unread.
+
+      There is none for argon, hydrogen sulphide, ethane, β-oxygen or β-carbon monoxide, whose only
+      values found were from memory (deferred, below).
+
+    - **The latent heats**: h″ − h′ at the triple point for every row (six from the papers'
+      tables; ammonia's by Clapeyron from Gao et al.'s ancillary and Table 1; the seven CoolProp
+      rows' from its triple-point states). The enthalpy of fusion is given only where a value was
+      read: water's (IAPWS R10-06's ice against IAPWS-95's liquid at the triple point, 6,007.1 J
+      mol⁻¹, with Osborne 1939 as the check), methane's (Vogt and Pitzer 1976, 939.2 J mol⁻¹, as
+      the held columns cite it) and ammonia's (Overstreet and Giauque 1937, through Gao et al.). The curve's own L at any temperature is `clausius_clapeyron_enthalpy_j_per_mol`, R T²
+      d ln p ÷ dT, which exceeds h″ − h′ by 1 ÷ (z″ − z′): 10% at carbon dioxide's triple point
+      (5.2 bar), and without bound toward the critical point.
+  - _Tests_, as the plan lists them:
+    - points exact;
+    - each liquid branch within its ancillary's stated error of its equation of state at three
+      temperatures (the papers' tables, or the equation solved from CoolProp's coefficients).
+      Ammonia's is checked at two, its triple and normal boiling points from Gao et al.'s Table 1,
+      since the paper prints no saturation table and the lane's solver cannot take its associating
+      term;
+    - each solid piece its anchored equation, continuous at every join;
+    - the published solid branches with a stated error within it;
+    - ice and carbon dioxide against their papers' check values, and CO and N₂ at their α–β
+      transitions against Raposa et al.'s Table A3;
+    - methane within 0.1% of the WebBook at 100, 150 and 180 K;
+    - `phase_at`'s regions and the melting curves, water's five equations against IAPWS R14-08's
+      Table 3;
+    - ice Ih's ρ_s within 0.02 kg m⁻³ of IAPWS R10-06 at the triple point, the 1-atm melting point
+      and 20, 100, 160 and 273.15 K;
+    - each row's ρ_l at the triple point against its reference;
+    - each row's first anchor and triple-point liquid density against a second, independent
+      transcription of the same equations (the lane's research). The colder pieces, the melting
+      equations but water's and ammonia's join, and most solid-density coefficients have no
+      second transcription; the science check read every coefficient against its primary;
+    - the surfaces audit §2.5's windows within 2 K.
+
+    The audit's constant-enthalpy entries miss in three places, which these curves correct: water
+    at 92 bar boils at 578.1 K (the audit's 569), ethane at 0.006 bar at 123.9 K (120) and ammonia
+    at 92 bar at 393.7 K (390). The test pins the reference ancillaries' values there, a technical
+    correction of the plan's "within 2 K", since no curve that matches its equation of state can
+    meet a constant-enthalpy estimate.
+
+  - The registry golden gains a `[diagram]` section (each condensable's points, anchors, curve,
+    enthalpies and densities at fixed fractions of its triple and critical temperatures), an
+    extension at 22. Until T54.a, nothing on the record reads it, so a change to a diagram's value
+    (part 2's, or a deferred finding's) refits `saturation_curves` and re-blesses the section at
+    the version in force with no bump, as main's 2026-10-13 ruling treats a module nothing on the
+    record calls (decision-bump-plan-after-22 §6). From 23 it is moved output.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.b's step 2, part 1:
+  - _Fray and Schmitt's solids._ Their ranges and uncertainties are unread, and the anchors move
+    whole pieces: methane's by 1.6%, β-nitrogen's by 2.8% (and α's by 5.8%), sulphur dioxide's by
+    3.7% and nitrous oxide's by 5.4%.
+    - The anchored β-nitrogen's and nitrous oxide's slopes at the triple point imply enthalpies of
+      fusion of about 534 and 7,467 J mol⁻¹ (the science check's Clapeyron). Nitrogen's own read
+      data give about 868 (Span et al.'s Eq. 7 slope, the β cell and ρ′). Grundy et al. 2024's
+      β-N₂ (+0.12% at the triple point) is better there. Methane's slope gives 935 against its
+      measured 939.2.
+    - Quartz-crystal measurements (Grundy et al. 2024; Blakley et al. 2024) put CO, N₂, CH₄, O₂
+      and NH₃ ices 1.5–15 times lower at 25–40 K.
+    - Lisse et al.'s reproduction misprints SO₂'s A₁ and Kr's A₆ (read −3.508 × 10³ and −1.210 ×
+      10⁸), and prints a second N₂O polynomial that is unphysical.
+  - _Hydrogen sulphide._ Below 173.7 K the two-term polynomial's constant 22.5 kJ mol⁻¹ leaves out
+    the III–II–I transitions' enthalpies, and the five-term one would be about four times lower
+    at 84 K. The truth is likely between them.
+  - _Sources not reached_: Schmidt and Wagner 1985 (oxygen, which this record has only on IPTS-68),
+    Lemmon and Span 2006, Gao et al. 2016, Bücker and Wagner 2006 and Fray and Schmitt 2009.
+    - Carbon monoxide's equation gives 3.4982 MPa at its critical density, against the stated
+      3.494.
+    - Setzmann and Wagner's p. 1064 and Eq. (2.3) misprint methane's p_c as 4.5922 MPa.
+  - _Solid densities from memory, not used_: argon's 1,771 kg m⁻³ at 4.25 K (the COD cells of
+    Henshaw 1958 and Wyckoff 1963 are 3.5% denser), β-oxygen's, β-carbon monoxide's, ethane's, and
+    hydrogen sulphide's phase boundaries (its cells are read).
+    - Unread are ammonia's, nitrous oxide's, α-oxygen's and α-carbon monoxide's cell temperatures,
+      and krypton's cell is probably 1% light.
+    - Carbon dioxide's density above 195 K and methane I's above 80 K are extrapolations.
+  - _Melting_: CoolProp's carbon monoxide and krypton lines (from other papers) are not used.
+    Oxygen, sulphur dioxide, hydrogen sulphide, nitrous oxide and xenon melt at the triple
+    temperature. Every other row's own high-pressure solid phases are not modelled.
+  - _Enthalpies of fusion from memory, not used_: the other eleven rows'.
+  - _Held and single-cell solid densities_ (the science check). Xenon is held flat above 75 K;
+    Sears and Klug's 60–75 K slope extrapolates to about 3,430 kg m⁻³ at the triple point, so the
+    held 3,655 may be some 6.5% high. Krypton's 58 K cell and sulphur dioxide's 143 K cell are held
+    the same way. γ-oxygen's two other cells (Keesom and Taconis 1936; Jordan et al. 1964) give
+    1,334 kg m⁻³, 2.2% below Cox et al.'s.
+  - _The tangent below the coldest piece_ holds that piece's enthalpy, while the true one falls
+    toward its 0 K value. So the extrapolated pressure reads about 2–3 times low at half the bound,
+    where it is negligible.
+  - Ethane's melting equation's reference pressure (CoolProp's 1.14 Pa) sits below its triple
+    pressure, 1.1421 Pa, so a point at the triple temperature between them reads solid.
+    Negligible.

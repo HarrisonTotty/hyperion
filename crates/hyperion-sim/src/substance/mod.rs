@@ -26,10 +26,11 @@
 //! A row carries its identity (key, [`SubstanceKind`], stoichiometry, charge, molar mass) and then
 //! groups of columns, each `None` where the substance has no such data: so far the gas columns
 //! ([`GasColumns`], with each gas's [`MolecularConstants`], over which [`thermo`] sums its heat
-//! capacity, enthalpy and entropy by temperature) and the phase columns ([`PhaseColumns`]). Every
-//! value names its sources and their licence basis ([`Source`], [`Basis`]; decision-composition
-//! §5). P14.T49.b adds the later rows, the gases' molecular constants and the fitted phase data;
-//! P14.T49.c–e the condensed optics, the thermochemistry and the aerosols' extinction.
+//! capacity, enthalpy and entropy by temperature), the held phase columns ([`PhaseColumns`]) and
+//! the phase diagrams ([`PhaseDiagram`], whose functions are [`diagram`]'s). Every value names its
+//! sources and their licence basis ([`Source`], [`Basis`]; decision-composition §5). P14.T49.b
+//! adds the later rows, the gases' molecular constants and the phase diagrams; P14.T49.c–e the
+//! condensed optics, the thermochemistry and the aerosols' extinction.
 //!
 //! # Rows
 //!
@@ -45,12 +46,17 @@
 //! the solutions, lithologies, salts, organics and undifferentiated bodies' materials. A row no
 //! rule yet produces is reachable data, labelled so where a reader meets it.
 
+pub mod diagram;
 pub mod element;
 pub mod mix;
 pub mod phase;
 mod rows;
 pub mod thermo;
 
+pub use diagram::{
+    DensityEquation, DensityForm, MeltingCurve, MeltingEquation, MeltingPiece, PhaseDiagram,
+    SolidDensity, SolidPhase, SublimationEquation, SublimationPiece, WagnerEquation,
+};
 pub use element::Element;
 pub use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
 pub use mix::{GasColumns, HeatCapacityClass, heat_capacity_over_r, mean_molar_mass_g_per_mol};
@@ -265,6 +271,7 @@ pub struct Substance {
     molar_mass_g_per_mol: Option<f64>,
     gas: Option<GasColumns>,
     phase: Option<PhaseColumns>,
+    diagram: Option<PhaseDiagram>,
     optics: ClientOptics,
     sources: &'static [Source],
 }
@@ -311,6 +318,13 @@ impl Substance {
     #[must_use]
     pub const fn phase(&self) -> Option<&PhaseColumns> {
         self.phase.as_ref()
+    }
+
+    /// Its phase diagram, for a row whose reference equations of state were read (P14.T49.b):
+    /// what P14.T54.a's callers read in place of [`phase`](Self::phase).
+    #[must_use]
+    pub const fn phase_diagram(&self) -> Option<&PhaseDiagram> {
+        self.diagram.as_ref()
     }
 
     /// Which of the client's optics the sim may ask of it.
