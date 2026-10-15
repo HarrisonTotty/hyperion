@@ -22,9 +22,9 @@
 //!
 //! `0x0002`–`0x00FF` and everything from `0x0500` stay unallocated. Within a block numbers are
 //! explicit, fixed by the owning plan and never reused; a plan may register them out of order
-//! (plan 09 registers `0x0202` before its reserved `0x0200` and `0x0201`). Each tag's events are built by
-//! one of `events`' two constructions only, Poisson bins or a monotone phase, never both, because
-//! the two give the event key's slots different meanings.
+//! (plan 09 registered `0x0202` first, in P09.T19.a, and `0x0200` and `0x0201` after it, in
+//! P09.T30.a). Each tag's events are built by one of `events`' two constructions only, Poisson bins
+//! or a monotone phase, never both, because the two give the event key's slots different meanings.
 
 use super::event::EventTag;
 use crate::rng::{DomainTag, TagScope, tags};
@@ -132,10 +132,17 @@ event_tags! {
     0x0109 => STAR_VARIABILITY_CYCLE = tags::STAR_VAR_CYCLE;
 
     // Plan 09: features, the galactic centre and the catalogue classes, block 0x0200–0x02FF.
-    // 0x0200 (`CENTRE_FLARE`) and 0x0201 (`TIDAL_DISRUPTION`) are reserved for P09.T30.
+    // 0x0202 was registered first (P09.T19.a), and 0x0200 and 0x0201 after it (P09.T30.a), so
+    // that the registry's order holds.
     /// The explosion of a supernova catalogue entry: bin 0, number 0, on the entry's member 0
     /// (P09.T19.a).
     0x0202 => SUPERNOVA = tags::CLASS_EV_SUPERNOVA;
+    /// The central black hole's X-ray flares, in bins of a day on the black hole's own ID
+    /// (Poisson bins; P09.T30.a).
+    0x0200 => CENTRE_FLARE = tags::CENTRE_EV_FLARE;
+    /// The central black hole's tidal disruptions of stars, in bins of 1,024 years on the black
+    /// hole's own ID (Poisson bins; P09.T30.a).
+    0x0201 => TIDAL_DISRUPTION = tags::CENTRE_EV_TIDAL_DISRUPTION;
 }
 
 #[cfg(test)]
@@ -179,6 +186,30 @@ mod tests {
             .filter(|t| (0x0100..=0x01FF).contains(&t.number()))
             .count();
         assert_eq!(in_block, plan_06.len());
+    }
+
+    /// Plan 09's block holds exactly `0x0200`, `0x0201` and `0x0202`, each backed by its domain
+    /// tag, and `0x0203`–`0x02FF` stay reserved.
+    #[test]
+    fn plan_09_holds_0x0200_to_0x0202_with_their_names() {
+        let plan_09 = [
+            (CENTRE_FLARE, 0x0200, "centre.ev.flare"),
+            (TIDAL_DISRUPTION, 0x0201, "centre.ev.tidal_disruption"),
+            (SUPERNOVA, 0x0202, "class.ev.supernova"),
+        ];
+        for (tag, number, name) in plan_09 {
+            assert_eq!(tag.number(), number, "{name}");
+            assert_eq!(tag.name(), name);
+            assert_eq!(EventTag::from_number(number), Some(tag));
+        }
+        assert_eq!(EventTag::from_number(0x0203), None);
+        let mut in_block: Vec<u16> = ALL
+            .iter()
+            .map(|t| t.number())
+            .filter(|n| (0x0200..=0x02FF).contains(n))
+            .collect();
+        in_block.sort_unstable();
+        assert_eq!(in_block, [0x0200, 0x0201, 0x0202]);
     }
 
     #[test]

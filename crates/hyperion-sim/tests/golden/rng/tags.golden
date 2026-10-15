@@ -187,3 +187,5 @@ system.substellar (System) = 0xd4a850fadf345491
 body.surface.detail (Body) = 0x1319a2ee9fa51c53
 body.continents (Body) = 0x430984f76dff8594
 system.abundances (System) = 0x266a172adc97112a
+centre.ev.flare (Event) = 0xe60651f1fe53aed5
+centre.ev.tidal_disruption (Event) = 0xa1782ed5a9226363

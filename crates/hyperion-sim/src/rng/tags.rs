@@ -805,6 +805,19 @@ domain_tags! {
     /// word 1, that of its Mg/Si, one open uniform each; words 2–7 are reserved
     /// (`planetary::chem::AbundanceDraws`).
     SYSTEM_ABUNDANCES: System = "system.abundances";
+
+    // Plan 09, phase 6 (P09.T30.a): the central black hole's own events, behind event tags 0x0200
+    // and 0x0201 in plan 09's block, keyed through the event key with the black hole's ID as the
+    // subject (Design note 23). Appended here, after plan 14's `system.abundances`, because the
+    // macro's order fixes `ALL`.
+
+    /// The central black hole's X-ray flares, behind event tag 0x0200 (P09.T30.a,
+    /// `galaxy::features::centre::events::flares`).
+    CENTRE_EV_FLARE: Event = "centre.ev.flare";
+
+    /// The central black hole's tidal disruptions of stars, behind event tag 0x0201 (P09.T30.a,
+    /// `galaxy::features::centre::events::disruptions`).
+    CENTRE_EV_TIDAL_DISRUPTION: Event = "centre.ev.tidal_disruption";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -1117,6 +1130,15 @@ mod tests {
         ] {
             assert_eq!(tag.scope(), scope, "{}", tag.name());
             assert!(tag.name().starts_with("class."));
+            assert!(ALL.contains(&tag));
+        }
+        for (tag, name) in [
+            (CENTRE_EV_FLARE, "centre.ev.flare"),
+            (CENTRE_EV_TIDAL_DISRUPTION, "centre.ev.tidal_disruption"),
+        ] {
+            assert_eq!(tag.scope(), crate::rng::TagScope::Event, "{name}");
+            assert_eq!(tag.name(), name);
+            assert!(tag.name().starts_with("centre."));
             assert!(ALL.contains(&tag));
         }
     }
