@@ -107,7 +107,10 @@ export interface MaterialIndexFile {
   /** The sim's substance key (P14.T49.b). */
   readonly key: string;
   readonly phase: MaterialPhase;
-  /** A composition variant (an acid's concentration), or undefined for the key's only one. */
+  /**
+   * A composition variant (an acid's concentration, a sea's salinity; {@link MaterialForm.variant}),
+   * or undefined for the key's only one.
+   */
   readonly variant: string | undefined;
   /** What the sample is. */
   readonly name: string;
@@ -371,23 +374,35 @@ const FILES_BY_KEY: ReadonlyMap<string, ReadonlyArray<MaterialIndexFile>> = (() 
 /** The phase or variant a mode is in, where its material has several files. */
 export interface MaterialForm {
   readonly phase?: MaterialPhase;
-  /** A file's `variant`, such as `75wt%`. */
+  /**
+   * A file's `variant`, a composition identifier never shown on screen ({@link variantWords}): a
+   * solute's mass fraction in per cent as `<mass fraction>wt%` (`75wt%`), or a practical salinity
+   * as `S<practical salinity>` (`S35`, `S38.5`), the number as written.
+   */
   readonly variant?: string;
 }
 
 /**
- * A file's composition variant in words, for a note: `75wt%`, the files' form for a solute's mass
- * fraction in per cent, reads `mass fraction 75 %`.
+ * A file's composition variant in words, for a note. The files write two patterns: `75wt%`, a
+ * solute's mass fraction in per cent, reads `mass fraction 75 %`, and `S35`, a practical salinity,
+ * reads `practical salinity 35` (decision-r08-t5g ruling 4).
  *
  * @remarks
  * The quantity is named and the % sign carries nothing (the SI Brochure, 9th edition, §5.4.7:
- * "percentage by mass" shall not be used). Any other variant, or none, reads `another
- * composition`, so that a variant's identifier never reaches the screen.
+ * "percentage by mass" shall not be used). Practical salinity is dimensionless (PSS-78), so it takes
+ * no unit. Any other variant, or none, reads `another composition`, so that a variant's identifier
+ * never reaches the screen.
  */
 export function variantWords(variant: string | undefined): string {
-  const percent =
-    variant === undefined ? undefined : /^([0-9]+(?:\.[0-9]+)?)wt%$/u.exec(variant)?.[1];
-  return percent === undefined ? "another composition" : `mass fraction ${percent} %`;
+  if (variant === undefined) {
+    return "another composition";
+  }
+  const percent = /^([0-9]+(?:\.[0-9]+)?)wt%$/u.exec(variant)?.[1];
+  if (percent !== undefined) {
+    return `mass fraction ${percent} %`;
+  }
+  const salinity = /^S([0-9]+(?:\.[0-9]+)?)$/u.exec(variant)?.[1];
+  return salinity === undefined ? "another composition" : `practical salinity ${salinity}`;
 }
 
 /** A material key resolved to the file it is drawn with, and how far that file is its own. */
