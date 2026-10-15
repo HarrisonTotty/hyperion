@@ -2095,6 +2095,22 @@ vertex neighbours. Acceptance: `cargo test -p hyperion-sim planetary::surface`.
   - _Moves:_ nothing, since no reference golden exists before T16.
   - _Accept:_ `cargo test -p hyperion-sim planetary::surface`.
 
+- **R09.T10.e The record's other sections** (new 2026-10-14, decision-bump-plan-after-22 §1.5; no
+  bump; a T10 follow-up at version 22). `for_body`'s reading of the record's sections other than
+  the surface, in `crates/hyperion-sim/src/planetary/surface/inputs.rs`, so that P14.T54.a then
+  only connects the record's members and the palette's resolution. This amends main's ruling of
+  2026-10-10 only as to who writes the reading: P14.T54.a still owns the file's final form and
+  settles the record's time.
+  - **What it reads.** The record's bulk, figure, rotation and orbit; the hosts' light over the
+    seasonal orbit; a moon's planet's orbit, through `SystemContext` or the planet's record; and
+    T17's `RECORD_TIME`.
+  - **How.** It assembles `CoarseInputs` from what it reads and a crust, condensates and palette
+    passed as arguments. `for_body` itself still stops at the uninhabited crust, answering
+    `NotModelled(RecordSection::Surface)` as T10's test pins.
+  - _Tests:_ the assembly on hand-made crusts.
+  - _Moves:_ nothing.
+  - _Accept:_ `cargo test -p hyperion-sim planetary::surface`.
+
 ### R09.T11 Plates
 
 `steps/plates.rs`, Design note 6. Tests: every cell has one plate and ties go to the lower seed
@@ -2370,7 +2386,9 @@ service, an `AppState` field, and the job goes to the pool at `Priority::Bulk`; 
 Tests: two concurrent requests compute once (a counter); the cache is bounded and evicts; a
 cancelled job leaves nothing cached; the server's field, from `reference_inputs`, equals
 `coarse_pass` on the same inputs bit for bit; with `RecordInputs` a generated body answers
-`NotModelled` naming its section. Acceptance: `cargo test -p hyperion-server surface`.
+`NotModelled` naming its section until the serve gate opens (P14.T54.a's gate constant in
+`crates/hyperion-server/src/surface/inputs.rs`; updated 2026-10-15). Acceptance:
+`cargo test -p hyperion-server surface`.
 
 ### R09.T18 Survey passes and coverage
 
@@ -2476,7 +2494,17 @@ re-blesses `tests/golden/wire/` at the current version with neither version bump
 2026-10-09); from then it bumps both. _The first send (ruling of "main", 2026-10-13):_ the first
 payload the server serves for a generated body, once production inputs inhabit the surface
 section (P14.T24 and P14.T48), or a client's first persisting of a payload (a disk cache, say),
-whichever comes first. T19.b serves payloads to tests and the `testing` worlds alone, so it is not
+whichever comes first. _The serve gate (decision-bump-plan-after-22, 2026-10-14; updated
+2026-10-15):_ the first send is the serve gate's bump, and generated bodies answer `not_modelled`
+until it opens. From galaxy plan 14's 23 (P14.T54.a) `for_body` is `Ok` in the sim for generated
+solid bodies, but the server's `RecordInputs` keeps answering them `not_modelled` until the
+gate's version, a constant with a tripwire in `crates/hyperion-server/src/surface/inputs.rs` that
+P14.T54.a adds. It opens at the first bump after T16 has landed and R11's liquid members are in
+the codec, expected to be 24, or at an earlier bump if "main" opens it for an R10 task. Until it
+opens, this plan's and R10's changes re-bless at the version in force with no bump; from that
+bump every change to the coarse pass, quantisation, synthesis, material classes or payload
+layout rides a bump, and a layout change also bumps `SURFACE_PAYLOAD_FORMAT` (galaxy plan 14's
+Generator version). T19.b serves payloads to tests and the `testing` worlds alone, so it is not
 the first send, and R11's liquid palette member is still a re-bless with no bump. The freeze
 protects consumers that hold payloads across versions, and none exists while every generated body
 answers `not_modelled` and no client asks. T1.b, whose filled hooks section moves plan 14's golden

@@ -355,8 +355,9 @@ Names are the owning plans' as they stand on disk; the owner is authoritative, a
 changed by the time this plan runs only the call sites here change. Re-validated at `c6d77cac`
 against R05, R07, R08 and R09 as built (Risks, "Re-validated at `c6d77cac`"). R09.T8 has landed
 (`c280f604`): `height_at`, `bake_patch`, the level bounds and the closed forms are built, under the
-names R09's "Deviations in T8, as built" records. What T19.b provides is not built yet: those
-names are R09's Provides, **provisional until R09.T19.b lands**, and each is marked so below.
+names R09's "Deviations in T8, as built" records. R09.T19.b has landed (`7392c064`): the
+`surface_field` answer, its deltas since `have_revision`, and `surface_revisions` on the scene
+topic are built, under the names in R09's "Deviations in T19.b, as built" (updated 2026-10-15).
 R09.T9 has landed (`070da8ee`), and its goldens pin R09's heights and closed forms on all three
 targets at header 21 (below).
 
@@ -373,11 +374,12 @@ targets at header 21 (below).
   view as a `ViewPosition` of kind `body_fixed` (`view/coords/position.ts`); the client has no
   `BodyFixedPosition` or `BodyFixedVector`, which are the sim's Rust types.
 - **R03:** the binary frames the chunks ride, their backpressure, and the scene topic carrying R09's
-  `surface_revisions` (provisional until R09.T19.b lands: no `surface_revisions` exists yet). As
-  built, `packages/protocol/src/requests.ts`'s `RequestClient.requestBulk`, taking
-  `(body, manifestOf, options)`, hands over whole answers only, each `partial_response` with its
-  chunks through `options.onPartial` and the last through `outcome`, so forwarding a block as its
-  frames arrive
+  `surface_revisions`: R09.T19.b's optional list of `SurfaceRevisionDto { body, revision }` on the
+  scene notification, one entry per surveyed body with its latest revision, merged by body keeping
+  the larger (updated 2026-10-15). As built, `packages/protocol/src/requests.ts`'s
+  `RequestClient.requestBulk`, taking `(body, manifestOf, options)`, hands over whole answers
+  only, each `partial_response` with its chunks through `options.onPartial` and the last through
+  `outcome`, so forwarding a block as its frames arrive
   (Design note 16) takes a per-chunk option there, which T7 adds; `MAX_BULK_CHUNKS` (257) and
   `MAX_BULK_PAYLOAD_BYTES` (64 MiB) are in `packages/protocol/src/bulk.ts`. The client's scene
   model is `lib/scene/useScene.ts` and `sceneWire.ts`'s `applySceneNotification`; the fake socket
@@ -537,10 +539,17 @@ targets at header 21 (below).
     The server's call site for the albedo scale is `surface/service.rs`'s `compute`, after
     `coarse_pass`, where the body's record (and so its photometry) is in hand (R09's "Deviations in
     T17, as built").
-  - _Provisional until R09.T8 lands_ (`synth/mod.rs` is `synth.rs`): the full `height_at` (until
-    then the base elevation alone, `cache` and `level` unread), `Synthesiser::bake_patch` and
-    `height_range_m`, `level_bound_m`, the whole `structure_function` and `unresolved_rms`, and
-    `QueryHeightError::NonFinite`. `Synthesiser` implements no `HeightSource` until T3. Main has
+  - _Landed with R09.T8_ (`c280f604`; R09's "Deviations in T8, as built"; updated 2026-10-15):
+    Provides' `synth/mod.rs` is `synth.rs`, with two public modules, `synth::levels` (`LevelSet`,
+    `LevelBounds` with `new`, `set`, `bound_m` and `contribution_range_m`, the free
+    `level_bound_m`, `shortest_wavelength` and `CRATER_BOUND_TAIL`) and `synth::bake`
+    (`PatchHeights` and `PARENT_VERTICES`). `Synthesiser` is `Clone`, not `Copy`, and takes 1–10 ms
+    to build. It gains `level_bound_m`, `bake_patch` (which gives `PatchHeights`, the source's
+    view, not R05's `PatchBake`), `height_range_m`, `unresolved_variance`, `structure_function` and
+    `unresolved_rms`, beside the free `structure_function` and `unresolved_rms`. `height_at` sums
+    the base elevation, the octaves, the incision, the small craters and the coarse rims. There is
+    no `QueryHeightError::NonFinite`: every part asserts its heights finite. `Synthesiser`
+    implements R05's `HeightSource` since R10.T3 (Risks, "Deviations in T3, as built"). Main has
     accepted three as-built changes for T8 (Risks, "Re-validated at `c6d77cac`"): the bound is hard
     in its octaves and channels and a 1 − 10⁻⁹ per-point Chernoff quantile in its crater and rim
     terms; the structure function holds within 5% on belt cells only, channelled plains running
@@ -548,9 +557,14 @@ targets at header 21 (below).
   - _Landed with R09.T9_ (`070da8ee`; R09's "Deviations in T9, as built"): the golden heights and
     closed forms in `tests/golden/height/`, pinned on native, `wasm32-wasip1` and
     `wasm32-unknown-unknown` at header 21, which this plan's material and ground goldens follow.
-  - _Provisional until R09.T19.b lands:_ the `surface_field` payload (the handler answers
-    `unsupported` until then), its revisions and deltas since `have_revision`, and
-    `surface_revisions` on the scene topic.
+  - _Landed with R09.T19.b_ (`7392c064`; R09's "Deviations in T19.b, as built"; updated
+    2026-10-15): `surface_field` answers `ready { header, revision, coverage, bulk }` after the
+    payload's binary frames, or `not_modelled { section }` with no bulk. With `have_revision` n,
+    the payload is the delta since revision n; block 0 always carries the header, and `coverage`
+    holds the delta's own cells alone. A `have_revision` above the body's revision is
+    `bad_request` naming `have_revision`. The scene topic carries `surface_revisions`, a list of
+    `SurfaceRevisionDto { body, revision }` merged by body, keeping the larger revision. Under
+    `RecordInputs`, every generated body still answers `not_modelled`.
   - _Not built, and not R09.T8–T9's:_ the coarse pass's steps (R09.T11–T15) and R09.T16's
     `crates/hyperion-sim/tests/common/surface_worlds.rs`; until they land the reference worlds are
     T10's no-op pass, a smooth dry sphere with no fine relief.
@@ -690,10 +704,10 @@ targets at header 21 (below).
    selection uses the hard bound. A per-patch bound, each bake computing its children's bounds from
    the amplitudes over their footprints as chunked level of detail stores δ per chunk, is adopted
    only if T4.a shows body-wide and per-patch bounds differing by more than 1.5 times. _As accepted
-   by main for R09.T8 (provisional until it lands): `level_bound_m` is hard in its octaves and
-   channels, and its crater and rim terms are a 1 − 10⁻⁹ per-point Chernoff quantile, so "the hard
-   bound" here reads as that stated bound; the finding is in Risks ("Re-validated at
-   `c6d77cac`")._
+   by main for R09.T8, and as built (`c280f604`; R09's "Deviations in T8, as built"; updated
+   2026-10-15): `level_bound_m` is hard in its octaves and channels, and its crater and rim terms
+   are a 1 − 10⁻⁹ per-point Chernoff quantile, so "the hard bound" here reads as that stated bound;
+   the finding is in Risks ("Re-validated at `c6d77cac`")._
 6. **Knowledge gates coverage for the image, and coverage and resolution for every number**
    (researched 2026-09-29). The client holds exact cells wherever it holds any, so the image of
    surveyed ground is the ground at whatever detail the camera resolves; the survey's resolution
@@ -1189,9 +1203,10 @@ that own them measure them.
 level-keyed closed forms at level n, `Synthesiser::omitted_variance` and
 `omitted_structure_function` (what the level leaves out of the finest level's ground; added by
 R10.T5, `decision-r10-t5-closed-forms.md`), and the palette of up to eight classes a patch keeps. As built, `unresolved_variance` and the channels' and craters' own structure functions
-exist, and the whole `structure_function` is R09.T8's (provisional until it lands); the closed
-forms are held once per body, since R09's crater octaves cost about a millisecond to build and the
-per-cell forms rebuild them (R09's "Deviations in T7.b, as built"). Files: `material/weights.rs`,
+exist, and the whole `structure_function` is R09.T8's (landed, `c280f604`: the free function and
+`Synthesiser::structure_function`; updated 2026-10-15); the closed forms are held once per body,
+since R09's crater octaves cost about a millisecond to build and the per-cell forms rebuild them
+(R09's "Deviations in T7.b, as built"). Files: `material/weights.rs`,
 `crates/hyperion-sim/tests/surface_weights_worlds.rs`. Tests:
 at the finest level the largest weight is `material_at`'s class at every sampled point, ties
 included; weights sum to 255; on `sample_worlds()` the weights at levels n − 1 to n − 6 from the
@@ -1212,11 +1227,14 @@ R05's `finest_surface_height`, pointed at R09's `Synthesiser` through R05's `Hei
 `SynthCache` as the cache, `QueryHeightError` as the error), and wrapped as `ground_at` with
 `GroundPoint` and `FinestTriangle` (Design note 4), on R05's diagonal and `xyz_to_face_uv`. The
 trait's `level_bound_m` and `height_range_m(key)` forward R09.T8's `level_bound_m(header, level)`
-and `Synthesiser::height_range_m(patch)`, and `figure()` the header's (provisional until R09.T8
-lands). R05's interpolant returns the height alone, so this task adds beside it, in
+and `Synthesiser::height_range_m(patch)`, and `figure()` the header's (R09.T8 has landed,
+`c280f604`, and as built the trait's `level_bound_m` reads the bounds the synthesiser holds, bit
+for bit the free `level_bound_m(header, level)`: Risks, "Deviations in T3, as built"; updated
+2026-10-15). R05's interpolant returns the height alone, so this task adds beside it, in
 `patch::collision`, the query that also gives the triangle, with `finest_surface_height` its
 height. Files:
-`ground.rs`, R05's `patch` module, `tests/ground_golden.rs` with `golden/ground_*.golden`. Tests: at
+`ground.rs`, R05's `patch` module, `src/ground/golden.rs` (an in-crate `cfg(test)` module) with
+`tests/golden/ground/<world>.golden` (corrected 2026-10-15). Tests: at
 a vertex `ground_at` equals R09's `height_at` there bit for bit; on an analytic plane field it is
 exact; points on a shared edge get the same height from either triangle; points either side of a
 cube-face edge and at a cube corner agree to 1 µm; the normal is the triangle's; the chord sagitta
@@ -1319,8 +1337,9 @@ pooled case under `just test-slow -E 'binary(surface_reading_worlds)'`.
   weights on the development machine (a Ryzen 7 3700X) and, by the owner, on the UHD 620 laptop's
   i7-8665U, whose cores the brainstorm's figure budgets. The 40 ms stays the laptop's figure: the
   desktop records its own and fails only if over it (decided 2026-09-30, Risks). _Re-validated at
-  `c6d77cac`: `Synthesiser::bake_patch` is R09.T8's (provisional until it lands), whose own bench
-  is provisional at 77–82 ms a patch and 14 µs a point at L + 4, so this bench's quiet figure
+  `c6d77cac`: `Synthesiser::bake_patch` is R09.T8's (landed, `c280f604`; it gives `PatchHeights`;
+  updated 2026-10-15), whose own bench is provisional at 77–82 ms a patch and 14 µs a point at
+  L + 4, so this bench's quiet figure
   follows R09's fused-interpolant follow-up, which main queued before it; meanwhile the figure is
   recorded provisional. The bench is a `[[bench]]` of its own (`benches/bake.rs`, on the synthetic
   worlds, so `required-features = ["testing"]` as R09's `synth` bench has it)._ Acceptance:
@@ -1368,9 +1387,11 @@ half of the per-body calls: `HeightWorkerPool`'s calls for `field_init`, `field_
 as it keeps R05's field now) and their messages in `messages.ts`, keeping the spike's call working
 (`view/spike/spikeRun.ts`, whose 15 MB `syntheticField()` stands in for a field's memory and is no
 payload; T7 records how); until T6.b the height worker holds the blocks in JavaScript, as it
-holds R05's field today. The payload's bytes, its deltas and
-`surface_revisions` are provisional until R09.T19.b lands (the server answers `surface_field`
-`unsupported` until then): the tests drive them through the fake socket in R09's Provides' shapes.
+holds R05's field today. R09.T19.b has landed (`7392c064`), so the server answers
+`surface_field` with the payload and its deltas, pushes `surface_revisions` as
+`SurfaceRevisionDto`s, and answers generated bodies `not_modelled` under `RecordInputs`; the tests
+drive these through the fake socket in those shapes (Risks, "Deviations in T7, as built", its
+"With R09.T19.b" item; updated 2026-10-15).
 Files: `coarseFieldStore.ts`, `coverage.ts`; R05's `workers/{pool,messages,heightBake}.ts` and
 `view/spike/spikeRun.ts`; R01's `view/engine/memory.ts`; R03's
 `packages/protocol/src/requests.ts`. Tests (Vitest with R03's `FakeWebSocket` and
@@ -1472,8 +1493,9 @@ T14; the per-chunk option sees every chunk in order before the outcome settles. 
   reference; no scaled class's c A_N exceeds its law's `normal_albedo_ceiling` (the limb ruling);
   the solve depends on the class fractions only; the server's `surface_field` answer
   carries `albedo_scale` as `Some(c)` equal to `albedo_scale(field, p)`, and `None` while plan 14's
-  p is `not_modelled` (the `surface_field` answer's half provisional until R09.T19.b lands; until
-  then the server test reads `SurfaceService::field`'s header; the `sample_worlds()` binary follows
+  p is `not_modelled` (R09.T19.b has landed, `7392c064`, so the `surface_field` answer and its
+  block 0 are tested over the socket in `crates/hyperion-server/tests/surface_knowledge.rs`: Risks,
+  "Deviations in T10.a, as built"; updated 2026-10-15; the `sample_worlds()` binary follows
   R09.T16). Acceptance: `cargo test -p hyperion-surface material::albedo`,
   `cargo test -p hyperion-sim --features testing --test surface_albedo_worlds` and
   `cargo test -p hyperion-server surface`.
@@ -3874,8 +3896,9 @@ Ground(SlantRange), NoGround, NotSurveyed }` in place of `Option`, so that T12 c
     Shepard et al. 2001's, as Beyer, McEwen and Kirk 2003 (JGR 108, 8085, ¶25) cite it, and holds
     for RMS slopes (about 1.75 for medians). Its 100 m baseline is not in Golombek et al. 2014,
     which gives 2–5 m and about 300 m; Golombek et al. 2017 (Space Sci. Rev. 211, 5, §2.7) gives
-    the landing radar's 84 m. `reading.rs` cites both as read; the design note's text is left as
-    it stands. Shepard et al. 2001 itself was not read.
+    the landing radar's 84 m. `reading.rs` cites both as read; docs-batch-17 (`2955006e`,
+    2026-10-14) corrected the design note's text to match (updated 2026-10-15). Shepard et al.
+    2001 itself was not read.
   - _The level-keyed forms have no golden yet_ (the determinism review). The ruling gives their
     labels in `closed_forms.golden` to R09.T7.h, so nothing compares them across targets before
     it, though they are R09's pinned wavelength-keyed forms at other arguments. Lean: T7.h adds

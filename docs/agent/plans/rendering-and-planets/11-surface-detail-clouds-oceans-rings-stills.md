@@ -1283,8 +1283,15 @@ ejecta-block population), shape parameter or authoritative dip opens a new tag a
   - `atmosphere_class` reads the surface state, so a `Tenuous` world is not drawn as airless rock
     under an "atmosphere" flag, and `RockSite.atmosphere` follows.
   - R11.T8.a–b take the ocean's index, absorption, density, surface tension and viscosity from
-    the liquid's palette entry. That member is added to R09's `PaletteEntry` at this
-    re-validation, before R09.T19's first send.
+    the liquid's palette entry. The liquid members were ruled ahead of the re-validation
+    (decision-r11-palette-liquids, 2026-10-14; updated 2026-10-15):
+    - `PaletteEntry.liquid: Option<LiquidProperties>` carries, by R08's 15 bake bins
+      (380–760 nm), the index, and the absorption and scattering when modelled; surface tension,
+      dynamic viscosity, density and the resolved temperature; and a `basis` code, measured,
+      derived or stand-in;
+    - every member that is not modelled is absent, never 0;
+    - an R09 follow-up adds it to R09's `PaletteEntry` before the serve gate opens (galaxy plan
+      14's Generator version).
   - `liquids.ts`'s four rows become the registry's test values, and a CH₄–C₂H₆–N₂ liquid's index
     follows its composition (from memory, checked then).
   - R11.T4's rock k_base is by (class, entry).
