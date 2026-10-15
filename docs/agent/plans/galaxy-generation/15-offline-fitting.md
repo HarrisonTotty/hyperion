@@ -530,9 +530,11 @@ pub const MGE_BOXY: [(f64, [BoxyTerm; 16]); 3];            // boxiness c = 3.0, 
   within 1% of a direct integral of the profile; midplane radial force within 2% of a brute-force
   integral at six radii; at Milky Way values the rotation curve changes by under 3% anywhere and
   plan 02's enclosed-mass test from 1 pc to 2 kpc still passes.
-- **P15.T3.c Swap in.** One commit: the table with `--since` the bumped version, plan 02's
-  `MassModel` reading `MGE_BOXY` in place of its moment-matched spheroid, `GENERATOR_VERSION`
-  bumped, goldens regenerated. Every star moves, because the potential sets the sub-disc heights.
+- **P15.T3.c Swap in.** A held checkpoint of version 25 (S1; decision-bump-plan-after-22,
+  2026-10-14; updated 2026-10-15): one commit with the table at `--since 25` and plan 02's
+  `MassModel` reading `MGE_BOXY` in place of its moment-matched spheroid, its goldens blessed at
+  header 24 on its lane branch. It lands only with the S1 train, whose bump commit takes 24 → 25.
+  Every star moves, because the potential sets the sub-disc heights.
   T3.a and T3.b are developed and reviewed with `--out` to a scratch path, so `just ci` stays green
   until this commit.
 
@@ -1444,7 +1446,9 @@ Every table belongs to the generator version. A commit that changes a table whic
 reads bumps `GENERATOR_VERSION` by the rule of Design note 10. Known bumps from this plan: P15.T3.c,
 P15.T4.b, P15.T5.a (through P06.T19.e), any moved default of P15.T5.b, P15.T7.b (only members with a
 helium excess change), P15.T8, P15.T9, P15.T10 and P15.T11.b. Moving a constant into a table at the
-same value is not a bump. P15.T6 lands with plan 08's own bump; P15.T6.g's re-emission lands with
+same value is not a bump. P15.T6 lands with plan 08's own bump at version 26 (S2); T6.b's
+production run runs once, from version 25's landed commit, under the potential freeze
+(decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15). P15.T6.g's re-emission lands with
 the 21 → 22 batch, or as one unit with 22 → 23 if it misses it.
 
 Reserved so that later tables move nothing they need not: table paths and item names are final from
