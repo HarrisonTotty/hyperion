@@ -135,6 +135,7 @@ pub mod testing;
 
 pub use context::{HostKind, SystemContext};
 pub use error::{DecodeBodyIndexError, EncodeBodyIndexError, ResolveBodyError};
+pub use hooks::structure::temperature_at;
 pub use index::{BodyIndex, BodySlot, BodySub};
 pub use label::BodyLabel;
 pub use system::{Body, PlanetaryHost, PlanetarySystem, generate, generate_planets};

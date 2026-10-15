@@ -13200,3 +13200,211 @@ tables::gauss_legendre`.
     fills `Ring.normal`; `view/scene/model.ts`'s `ViewRing` doc, a variant of the dropped sentence;
     `test/planetaryFixture.ts`, the shared builders.
   - _For T54.a._ Nothing in the client changes at 23: the rings take `normal` once it is sent.
+- **Deviations in P14.T24.e, as built (`p14-chem`, 2026-10-15).** `GENERATOR_VERSION` stays 22,
+  and no generated value moves. The structure lands as a pure module that nothing on the record
+  calls (decision-bump-plan-after-22 §1.3 and §6). Its only golden is new, at header 22.
+  - _Held for P14.T54.b._ `record::Surface`'s `vertical_structure` keeps the uninhabited
+    placeholder `record::VerticalStructure` and stays `NotModelled`. The server's conversion
+    (`convert/planetary.rs`, `later(…, |structure| match *structure {})`) is unchanged.
+    `record.rs`, in the task's _Files_, gains only the placeholder's doc naming the type that
+    replaces it. **At the bump, T54.b:**
+    - replaces the placeholder with `hooks::VerticalStructure`;
+    - fills the member in `system.rs`'s surface section, from
+      `RadiativeConvective::derive(&StructureInputs::of_surface(conditions, bulk T_eq, figures.heat_flow())?)`;
+    - states an airless body's member as computed none. `DeriveStructureError::NoAir` maps to the
+      wire's `null`, so the record's member must be able to say none (`Modelled<Option<_>>` or a
+      variant): T54.b's choice;
+    - converts `RadiativeConvective` to `VerticalStructureDto { alpha, skin_temperature_k, adiabat }`.
+      The declared DTO fits as it stands, with `T_s` and `p_s` the section's own fields;
+    - re-checks T24.e's 300–370 K Venus test on T57.a's Venus, held by the tripwire test
+      `the_venus_test_is_rechecked_at_the_23_to_24_bump` (it fails at version 24), and deletes the
+      tripwire. T57.a's text ("moves to T24.e, at 24") and T54.b's should say so (docs batch).
+  - _Public items_ (`planetary::hooks::structure`; re-exported as
+    `hooks::{VerticalStructure, RadiativeConvective, ProfileNode}` and `planetary::temperature_at`):
+    - `VerticalStructure { RadiativeConvective(RadiativeConvective) }`, a tuple variant over a
+      struct whose fields stay private behind getters, not the Provides' struct variant, with
+      `temperature_at`. T24.d adds `Envelope` in the same form. It is not `#[non_exhaustive]`, so
+      the server's match must take up T24.d's variant.
+    - `RadiativeConvective`'s `derive`, `surface_temperature`, `surface_pressure`,
+      `lapse_factor`, `skin_temperature`, `nodes`, `tropopause_pressure` and `temperature_at`, and
+      `ProfileNode` with `pressure` and `temperature`.
+    - `StructureInputs` (plain public fields, as `SurfaceInputs`) with `of_surface`.
+    - `DeriveStructureError`'s variants `NoAir`, `Mixture`, `NoHeatCapacity`,
+      `SurfaceTemperature`, `SkinTemperature` and `TooDeep`.
+    - `lapse_factor`, `latent_heat_departure`, `skin_temperature(T_eff)`,
+      `effective_temperature(T_eq, T_int)` and `internal_temperature(F)`.
+    - Constants: `WATER_LAPSE_FACTOR` 0.6, `METHANE_LAPSE_FACTOR` 0.77, `DRY_LAPSE_FACTOR` 0.88,
+      `LATENT_HEAT_GATE` 0.1, `NODE_SPACING_LN_P` 0.3, `MIN_SEGMENTS` 16 and `NEWTON_STEPS` 6.
+    - Added beyond the plan, to bound what any input can ask: `MAX_SEGMENTS` 2,000 (600 e-folds,
+      short of a pressure's underflow; `TooDeep` beyond), `SHORTEST_SEGMENT_LN_P` 10⁻¹², and
+      `MIXTURE_TOLERANCE` 10⁻⁶ (the fractions must sum to 1, since S̃ and `c_p` both scale with
+      the sum).
+
+    The Provides' α is `lapse_factor`.
+
+  - _The golden's test_ is a unit test, `planetary::hooks::structure::tests::the_structure_is_pinned`,
+    not `tests/planetary_structure_golden.rs`, because the Solar System table is crate-private
+    test data (`derive::solar`, `hooks::surface::tests::table`). `planetary/surface_conditions`
+    does the same.
+    - The golden is `tests/golden/planetary/vertical_structure.golden`, as planned. For the table's
+      Earth, Venus and Titan it pins the inputs, the condensable, α, `T_eq`, `T_int`, `T_skin`,
+      the segment count, every node, and `temperature_at` at stated pressures and at each
+      segment's geometric midpoint.
+    - Every float is `GoldenWriter`'s bits with Rust's shortest round-trip decimal beside it, not
+      `orbit/states.golden`'s bare decimals. R08.T3.a reads either, the bits as
+      `test/inSystemGolden.ts`'s `bitsToFloat` does.
+    - Accept is `cargo test -p hyperion-sim planetary::hooks::structure` for both commands.
+    - The golden moves at T54.a: T51.a's water column and T57.a's refits change the table's
+      Earth and Venus. T54.a's bless note accounts for `planetary/vertical_structure`.
+  - _The adiabat._ Each interior node takes `NEWTON_STEPS` Newton steps in ln T, from the deeper
+    node's temperature carried up its local power law. The tropopause is closed form,
+    ln(`p_s` ÷ `p_trop`) = (S̃(`T_s`) − S̃(`T_skin`)) ÷ α, and its node is (`p_trop`, `T_skin`)
+    exactly.
+    - `temperature_at` takes a node's own pressure into the segment the node starts, so every
+      node, the ground and the tropopause evaluate bit for bit. R08's copy takes the same
+      comparison.
+    - Tested over every gas row of the registry pure (58 rows) and six mixtures (an Earth's, a
+      Venus's, a Titan's, a steam world's, a hydrogen–helium air and a reducing N₂–NH₃–CH₄–H₂S–SO₂–
+      C₂H₆ air), at seven grounds from 40 to 2,000 K and 600 Pa to 100 bar. Every node lies within
+      10⁻¹² of the exact adiabat (worst 2.7 × 10⁻¹⁵), and the power law between nodes within
+      5 × 10⁻⁴ (worst 3.3 × 10⁻⁴, Si⁺ at 288 K), with at most 40 segments.
+  - _The skin is held at most `T_s`_, an addition to the plan's text from the science check. A grey
+    air with no shortwave absorption warms steadily downward, and its ground emits at least
+    σ`T_eff`⁴ (Robinson and Catling 2012, Eqs. 16, 17, 24 and 25, read). So `T_s` ≥ `T_eff` >
+    `T_skin`.
+    - A skin above the ground comes only from an internal flux that T13.c's `T_s`, warmed from
+      `T_eq` alone, does not read. Taken literally, max(`T_ad`, `T_skin`) would put warm air on a
+      colder ground.
+    - Such an air, or one whose skin lies within `SHORTEST_SEGMENT_LN_P` a segment of its ground,
+      is isothermal at `T_s`, with its ground node alone (deferred finding below).
+  - _The dry α_, recomputed on T49.b's sum: (S̃(350.5 K) − S̃(735 K)) ÷ ln(1.066 ÷ 92.5) = 0.88443
+    on the measured state (3.505% N₂ by number from 90.4 and 2.09 bar by weight, which the ruling
+    rounds to 3.51%). The ruling computed 0.8844; stated to two places, it is 0.88.
+    - The measured Venus at α 0.88, under a skin of 2^(−1/4) × 226.6 K (NASA's Venus fact sheet's
+      black-body temperature), against VIRA's low-latitude levels:
+
+      | Level     | 0.88    | VIRA    |
+      | --------- | ------- | ------- |
+      | 92.1 bar  | 734.5 K | 735.3 K |
+      | 47.39 bar | 664.9 K | 658.2 K |
+      | 22.52 bar | 592.7 K | 580.7 K |
+      | 9.581 bar | 516.7 K | 496.9 K |
+      | 3.501 bar | 436.0 K | 417.6 K |
+      | 1.066 bar | 352.0 K | 350.5 K |
+      | 1 bar     | 347.7 K |         |
+
+      The 1.066-bar and 1-bar values are about 1.5 K warmer than the fitted α's 350.5 K and about
+      346 K, which is α's rounding. The 1-bar value meets the plan's 300–370 K on the measured state.
+
+    - The levels are asserted rather than printed: within 1.5 K of the ruling's 665, 592 and
+      435 K, and 0–25 K warm of VIRA.
+    - VIRA was read through Venus-GRAM's `VIRALow.txt` ("mean values … from the VIRA data for
+      latitudes less than 30°", its User Guide, NASA/TM-20210022168 §2.1) and the EPIC model's
+      `VIRA.dat` (from the Planetary Scientist's Companion, p. 119), which agree. Seiff et al.
+      1985 itself was not reachable.
+  - _The latent-heat gate_ (signoff-3.md item 1.5).
+    - **Confirmed:** Robinson and Catling 2012 (Eq. 10, read) attribute α "primarily [to] latent
+      heat release", but state no criterion. The gate's ε L² r ÷ (`c_p` R T²) is the dilute
+      pseudoadiabat's term L² r ÷ (`c_pa` `R_c` T²) (Ding and Pierrehumbert 2016, ApJ 822, 24,
+      Eq. 12, read).
+      - Where `c_p` is the whole air's it is that term exactly, and a test holds the molar form to
+        the per-mass form at 10⁻¹².
+      - Against Ding and Pierrehumbert's, whose `c_pa` is the non-condensable's, it agrees to first
+        order in x: 0.9% apart for Earth, 3.2% for Titan (science check).
+      - At the gate's 0.1, the moist lapse rate is at least 1 ÷ 1.1 of the dry one.
+    - **L** is the registry row's branch enthalpy at the ground: vaporisation at or above the
+      triple point, sublimation below. It is taken as zero at or above the critical temperature,
+      where no liquid forms, which is an addition.
+    - **Computed:** the table's Earth 3.49 (its 3.7% water), Titan 2.18 and Mars 0.047 (dry). By
+      hand: Earth saturated at 288 K 1.56, Titan at 5.65% CH₄ 2.07 and Mars at 210 ppm 0.046,
+      against the sign-off's 1.6, 1.8 and 0.05.
+    - **The plan's "a Mars's water, at about 1 Pa"** is about 0.13 Pa (210 ppm of 6.4 mbar). At
+      1 Pa the gate would give 0.36 and the moist α. The module's doc says 0.13 Pa; the plan's and
+      signoff-3's text want the same (docs batch).
+  - _The table's figures_ (with the plan's in brackets):
+    - Earth: α 0.6; tropopause 0.134 bar at 214.57 K [0.14 bar, 214.5 K]; the skin 0.021 K above
+      the sunlight-only form (`T_int` 35.7 K from 0.0925 W m⁻²).
+    - Titan: α 0.77; tropopause 0.246 bar at 63.63 K [0.24 bar, 63.6 K].
+    - Venus: α 0.88, no condensable; 381.1 K at 1 bar, from 735.07 K and 57.84 bar with 1.65% N₂
+      [378 K, held to 300–380 K "if T24.e lands first"].
+      - That is 1.1 K above the interim band. The band's 378 K was computed on other inputs: the
+        fitted 0.8844 and the measured state's 3.5% N₂ give about 1.2 and 1.5 K less.
+      - The band is not widened. The test holds the table's Venus only to its ordering, warmer at
+        1 bar than the measured Venus, whose column is deeper, and the golden pins the value.
+      - The plan's 300–370 K is held on the measured Venus (347.7 K), and T54.b re-checks it on
+        T57.a's Venus (the tripwire above).
+      - Risks' line "T24.e's Venus test, 300–370 K at 1 bar, holds at either pressure" no longer
+        holds on the table's 58-bar Venus (docs batch).
+  - _Saturn's skin._ The plan's test, "the table's Saturn's `T_skin` within 2 K of 2^(−1/4) × its
+    `T_eff`", holds as an identity: the skin from a giant's record `T_eq` and `T_int` = (`T_eff`⁴ −
+    `T_eq`⁴)^¼ is 2^(−1/4) `T_eff` to 10⁻¹², whatever `T_eff` is.
+    - decision-composition §1.12's form, 2^(−1/4) × 95 K = 79.9 K, is not met. The generated Saturn
+      (0.2994 Jupiter masses, below `radius_giant`'s 0.3, the giant cooling model that gives a
+      giant its internal luminosity) has no effective temperature, so its skin is 68.2 K, 11.7 K
+      under.
+    - The table's Jupiter (`T_eff` 127.84 K) has a skin of 107.50 K, 2.9 K over §1.12's 104.6 K.
+    - The test also holds the skin to §1.12's figures for the measured giants: Saturn's 95.0 K
+      (Hanel et al. 1983, read through Li et al. 2010's Table 3) gives 79.9 K, and Jupiter's
+      124.4 K (Hanel et al. 1981's abstract) gives 104.6 K.
+  - _VIRA's levels, corrected._ The plan's and science-r08-gases-2.md §1.4's "9.85 bar" level is
+    VIRA's 30 km, where VIRA gives 9.581 bar and 496.9 K. At 9.85 bar VIRA interpolates to about
+    499.5 K, and this structure gives 519.1 K, the ruling's 518 (docs batch).
+  - _Sources read at source_:
+    - Robinson and Catling 2012 (arXiv:1209.1833; Eq. 10, §4.1 Venus α 0.8 at γ 1.3, §4.3 Titan
+      0.77, Eqs. 16, 17, 24 and 25) and 2014 (arXiv:1312.6859; Table 1: α and the tropopause
+      pressures);
+    - Ding and Pierrehumbert 2016 (arXiv:1608.03216, Eq. 12);
+    - Fulchignoni et al. 2005 (Nature 438, 785: the tropopause 70.43 ± 0.25 K at about 44 km and
+      115 hPa; the surface 93.65 K and 1,467 hPa);
+    - the U.S. Standard Atmosphere 1976 (NASA-TM-X-74335: 216.65 K at 11 km geopotential and
+      22,632 Pa);
+    - Li et al. 2010 (JGR 115, E11002: 96.67 ± 0.17 K, and Table 3's Voyager 95.00 K);
+    - NASA's Venus fact sheet;
+    - VIRA as above.
+
+    Pierrehumbert's _Principles of Planetary Climate_ was not reachable. Ding and Pierrehumbert
+    cite it (p. 129) for the pseudoadiabat they give.
+- **Deferred findings (2026-10-13 rule)**, from P14.T24.e:
+  - The table's pre-T57.a Venus is 381.1 K at 1 bar, against the plan's interim 300–380 K (above).
+    T54.b re-checks it on T57.a's Venus.
+  - The generated Saturn (0.2994 Jupiter masses) has no internal luminosity, since it lies below
+    `radius_giant`'s 0.3. Its skin is then 68.2 K, against 79.9 K from its measured `T_eff`, and
+    its record carries no effective temperature (P14.T11.d and T12, ruling 112.7; T24.d's
+    envelope reads `T_int`). The table's Jupiter's skin is 2.9 K above §1.12's.
+  - VIRA's 30 km level is 9.581 bar, not the 9.85 bar of the plan's T24.e text and of
+    science-r08-gases-2.md §1.4. The plan's "a Mars's water, at about 1 Pa" is 0.13 Pa. Both are
+    for a docs batch.
+  - T13.c's `T_s` reads no internal heat, but the skin does. A body whose internal flux rivals its
+    starlight (`T_int`⁴ > 2`T_s`⁴ − `T_eq`⁴; an Io-like world under a thick air) has its skin held at
+    `T_s` here, an isothermal air. For T24.b's heat flow and T13.c's greenhouse: σ`T_s`⁴ should
+    carry F (science check; decision-composition §1.12's Io-like case, a 98.8 K skin over a 110 K
+    `T_eq`).
+  - A single α cannot draw a nondilute condensable's air, nor a ground above its condensable's
+    critical point.
+    - A steam world's air, or any whose condensable dominates, follows its saturation curve,
+      T ∝ 1 ÷ ln(p ÷ `p_0`) (Robinson and Catling 2012, beside their Eq. 10, citing Satoh 2004).
+      Ding and Pierrehumbert's nondilute pseudoadiabat is the closed form, and α 0.6 there lies
+      outside what R&C fitted.
+    - The gate reads the ground alone, so a ground above `T_c` takes the dry α even where the upper
+      air condenses.
+    - These are for P14.T53.b's steam envelope.
+  - The gate's latent heat is the row's constant branch enthalpy, which overstates L near `T_c`.
+    - The science check estimates (Watson's scaling, unread here) 4.4× at 600 K and 18× at 640 K
+      for water, where L falls continuously to zero at `T_c`. The departure therefore steps to zero
+      there rather than falling.
+    - Methane's triple-point 8.73 kJ mol⁻¹ puts Titan's departure at 2.07, against about 1.8 at
+      94 K.
+    - No computed case lies near 0.1. P14.T54.a's fitted curves give L(T)
+      (`clausius_clapeyron_enthalpy_j_per_mol`).
+  - The gate is a step. At a departure of 0.1 the moist lapse rate is still 0.93–0.94 of the dry
+    one, yet α jumps from 0.88 to 0.6: for the doc example's Earth that moves the tropopause from
+    0.31 to 0.18 bar across the gate (science check). A continuous α(G) would be more physical. The step is signoff-3's.
+  - The dry α's anchor: fitted from VIRA's own surface (735.3 K and 92.10 bar) instead of the
+    ruling's 735 K and 92.5 bar, α is 0.8853–0.8858, which rounds to 0.89. The effect at 1 bar is
+    under 2 K (science check). The ruling's anchor is kept.
+  - The table's Titan's skin, 63.6 K, lies under HASI's 70.43 K tropopause: the grey skin has no
+    haze heating, a recorded limitation (R&C 2012's shortwave term, after T24.c).
+  - Cost: a structure is 16–100 nodes, each `NEWTON_STEPS` mixture evaluations of S̃ and `c_p`
+    (two passes over the rows' terms). It is unmeasured on a quiet machine, for P14.T33.a's
+    `body_detail` at `surface` case. A crate-private combined S̃-and-`c_p` evaluation in
+    `substance::thermo` would halve it.

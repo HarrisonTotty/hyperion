@@ -1,7 +1,7 @@
 //! Hooks for the layers above (plan 14, phase E; the brainstorm's "Hooks for the layers above"):
 //! what the surface, life and civilisation generators read of a body, and no more.
 //!
-//! Built so far (P14.T23, T24.a, T24.b, T48.a–d, T48.f; the rendering plans' R09.T1.b):
+//! Built so far (P14.T23, T24.a, T24.b, T24.e, T48.a–d, T48.f; the rendering plans' R09.T1.b):
 //!
 //! - [`seed`]: the body's [`SurfaceSeed`], one block output of the universe seed on
 //!   `body.surface` keyed by the body's ID, which depends on nothing else, so that no change to the
@@ -18,6 +18,10 @@
 //!   contract (P14.T48.c) with its [`Impactors`] (P14.T48.f), its volcanism level, continents and
 //!   relief (P14.T48.a), its surface water and the ocean weight θ the conditions read, and,
 //!   read from the conditions, its volatile history (P14.T48.b), ocean, ice and cloud.
+//! - [`structure`]: the [`VerticalStructure`] of a surface's air (P14.T24.e), a scaled adiabat
+//!   over P14.T49.b's `c_p`(T) to an isothermal skin, with [`temperature_at`](structure::temperature_at),
+//!   which the flight model's drag and rendering plan R08 read. It is pure until P14.T54.b, the
+//!   23 → 24 bump, puts it in the record's surface section.
 //!
 //! The conditions and figures are a body's record's surface section
 //! ([`record::Surface`](crate::planetary::record::Surface), P14.T48.e), from the 21 → 22 batch's
@@ -36,6 +40,7 @@
 
 pub mod figures;
 pub mod seed;
+pub mod structure;
 pub mod surface;
 
 pub use figures::{
@@ -43,6 +48,7 @@ pub use figures::{
     TectonicRegime, impactors,
 };
 pub use seed::{DetailSeed, SurfaceSeed, detail_seed, surface_seed};
+pub use structure::{ProfileNode, RadiativeConvective, VerticalStructure};
 pub use surface::{ClimateRegime, RadiationClass, SurfaceConditions};
 
 use crate::planetary::derive::MassFractions;

@@ -761,7 +761,11 @@ impl<T> Modelled<T> {
 }
 
 /// The vertical structure of a surface's air (P14.T24.e: the lapse rate α, the skin temperature
-/// and the adiabat's nodes), which no task builds yet, so the type has no value.
+/// and the adiabat's nodes), held off the record until the 23 → 24 bump, so the type has no value.
+///
+/// P14.T24.e builds it as [`hooks::VerticalStructure`](crate::planetary::hooks::VerticalStructure),
+/// a pure module at generator version 22; P14.T54.b puts that type in this one's place and fills
+/// the member (decision-bump-plan-after-22 §1.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum VerticalStructure {}
 
