@@ -68,13 +68,14 @@ const T5D_KEYS = [
 
 /**
  * The liquids R08.T5.g adds, each by its key, phase and variant, with its file's provenance: seawater
- * as liquid water's variant, the cryogenic liquids, and molten sulphur's stand-in.
+ * as liquid water's variant, the cryogenic liquids (C₂H₆ `derived` since R08.T5.h, levelled to a
+ * measured index), and molten sulphur's stand-in.
  */
 const T5G_LIQUIDS = [
   ["H2O", "S35", "measured"],
   ["N2", undefined, "derived"],
   ["NH3", undefined, "derived"],
-  ["C2H6", undefined, "standIn"],
+  ["C2H6", undefined, "derived"],
   ["S8", undefined, "standIn"],
 ] as const;
 
@@ -404,6 +405,15 @@ describe("refractiveIndex", () => {
     expect(["75wt%", "84.5wt%", "dilute", undefined].map(variantWords)).toEqual([
       "mass fraction 75 %",
       "mass fraction 84.5 %",
+      "another composition",
+      "another composition",
+    ]);
+  });
+
+  it("writes a variant's practical salinity in words, with no unit (decision-r08-t5g ruling 4)", () => {
+    expect(["S35", "S38.5", "S", "S-1"].map(variantWords)).toEqual([
+      "practical salinity 35",
+      "practical salinity 38.5",
       "another composition",
       "another composition",
     ]);
@@ -792,33 +802,50 @@ describe("the liquids (R08.T5.g)", () => {
     expect(T5G_KEYS.filter((key) => !keys.has(key))).toEqual([]);
   });
 
-  it("give water's k at 440 nm within 10% of Pope and Fry 1997's", () => {
-    // Pope and Fry's a = 0.00635 m⁻¹ at 440 nm (their table, as omlc.org gives it): k = aλ ÷ 4π.
-    const popeFry = (0.00635 * 440e-9) / (4 * Math.PI);
-    expect(Math.abs(refractiveIndex("H2O", 440).index.k / popeFry - 1)).toBeLessThan(0.1);
-  });
-
-  it("take water's k from Pope and Fry to 725 nm and Hale and Querry's from 750 nm", () => {
-    // Pope and Fry's 0.0565 m⁻¹ at 550 nm and 1.489 m⁻¹ at 725 nm; Hale and Querry's 1.56 × 10⁻⁷
-    // and 1.48 × 10⁻⁷ at 750 and 775 nm.
+  it.each([
+    [380, 0.00143],
+    [400, 0.00222],
+    [420, 0.00312],
+    [440, 0.00522],
+  ])("give water's k at %d nm as Mason, Cone and Fry 2016's a, %f m⁻¹ (R08.T5.h)", (nm, perM) => {
+    // Their Table 2, as WOPP v3 and the journal give it: k = aλ ÷ 4π, to six figures.
     const water = liquidOf("H2O");
-    expect(Math.abs(valueAt(water.k, water, 550) / absorptionK(0.0565, 550) - 1)).toBeLessThan(
-      5e-6,
-    );
-    expect(Math.abs(valueAt(water.k, water, 725) / absorptionK(1.489, 725) - 1)).toBeLessThan(5e-6);
-    expect([valueAt(water.k, water, 750), valueAt(water.k, water, 775)]).toEqual([
-      1.56e-7, 1.48e-7,
-    ]);
+    expect(Math.abs(valueAt(water.k, water, nm) / absorptionK(perM, nm) - 1)).toBeLessThan(5e-6);
   });
 
-  it("keep water's n Hale and Querry's: 1.3406 at 380 nm, 1.333 at 550 nm, 1.3298 at 780 nm", () => {
-    // R08.T5.g changes k alone; IAPWS R9-97's better n is recorded in the file, not adopted.
+  it.each([
+    [550, 0.0565],
+    [725, 1.489],
+    [740, 2.78],
+    [750, 2.85],
+    [780, 2.69],
+  ])(
+    "give water's k at %d nm as Pope and Fry's to 725 nm and Kou et al.'s from 730 nm, %f m⁻¹ (R08.T5.h)",
+    (nm, perM) => {
+      // Pope and Fry 1997 over 500–725 nm; Kou et al. 1993 over 730–780 nm, as IOCCG 2018's Table 1.1
+      // lists them.
+      const water = liquidOf("H2O");
+      expect(Math.abs(valueAt(water.k, water, nm) / absorptionK(perM, nm) - 1)).toBeLessThan(5e-6);
+    },
+  );
+
+  it("meet Pope and Fry at the seam: water's a at 495 nm within 3% of their 0.0173 m⁻¹", () => {
+    const water = liquidOf("H2O");
+    const perM = (valueAt(water.k, water, 495) * 4 * Math.PI) / 495e-9;
+    expect(Math.abs(perM / 0.0173 - 1)).toBeLessThan(0.03);
+  });
+
+  it("take water's n from IAPWS R9-97 at 25 °C: 1.34511 at 380 nm, 1.33419 at 550 nm, 1.32848 at 780 nm", () => {
+    // decision-r08-t5g ruling 1; the tool's test holds every grid point to the release's eq. 1.
     const water = liquidOf("H2O");
     expect([380, 550, 780].map((nm) => valueAt(water.n, water, nm))).toEqual([
-      1.3406, 1.333, 1.3298,
+      1.34511, 1.33419, 1.32848,
     ]);
     expect(water.n.every((n, i) => i === 0 || n <= (water.n[i - 1] ?? 0))).toBe(true);
-    expect(water.reduction).toContain("A better open n is recorded and not adopted");
+  });
+
+  it("keep pure liquid water measured: R9-97 is a reference correlation fitted to measurements", () => {
+    expect(liquidOf("H2O").provenance).toBe("measured");
   });
 
   it("give seawater water's k, and n raised by Quan and Fry's salinity terms at S = 35", () => {
@@ -831,25 +858,32 @@ describe("the liquids (R08.T5.g)", () => {
     expect(rise.every((r, i) => i === 0 || r <= (rise[i - 1] ?? 0) + 1e-5)).toBe(true);
   });
 
-  it("estimate liquid C2H6 from rayleigh.ts's row at the liquid's density, about 1.40 at 550 nm", () => {
+  it("level liquid C2H6 to Hagermann et al.'s 1.3887 at 670 nm, its slope from rayleigh.ts's row at the liquid's density", () => {
     // The tool holds its own copy of the row; this catches drift. 21.53485 mol/l at 94 K is the
-    // NIST Chemistry WebBook's (Bücker and Wagner 2006); the file holds the estimate to six figures.
+    // NIST Chemistry WebBook's (Bücker and Wagner 2006). R08.T5.h levels the estimate to the measured
+    // 1.3887 (decision-r08-t5g ruling 3), and the file's Cauchy line follows the shifted estimate.
     const gas = GAS_DISPERSION.C2H6;
     const file = liquidOf("C2H6");
     const idealMolarVolume =
       ((6.022_140_76e23 * 1.380_649e-23 * gas.referenceK) / gas.referencePa) * 1e6;
-    for (const [i, nm] of file.wavelengthsNm.entries()) {
+    const estimate = (nm: number): number => {
       const x =
         (lorentz(1 + gas.nMinusOne(nm)) * gas.compressibility * idealMolarVolume) /
         (1_000 / 21.534_85);
-      const estimate = Math.sqrt((1 + 2 * x) / (1 - x));
-      expect(Math.abs((file.n[i] ?? Number.NaN) - estimate)).toBeLessThan(1e-5);
+      return Math.sqrt((1 + 2 * x) / (1 - x));
+    };
+    const shift = estimate(670) - 1.3887;
+    for (const [i, nm] of file.wavelengthsNm.entries()) {
+      expect(Math.abs((file.n[i] ?? Number.NaN) - (estimate(nm) - shift))).toBeLessThan(5e-4);
     }
-    expect(Math.abs(refractiveIndex("C2H6", 550).index.n - 1.4)).toBeLessThan(0.01);
-    expect(file.temperatureK).toBe(94);
+    expect(Math.abs(refractiveIndex("C2H6", 670).index.n - 1.3887)).toBeLessThan(1e-5);
+    expect([file.temperatureK, file.standIn]).toEqual([94, undefined]);
+  });
+
+  it("draw a liquid C2H6 sea with no label, its index levelled to a measurement", () => {
     expect(
       materialLabels([{ material: "C2H6", form: { phase: "liquid" }, opticalDepthAbove550: 0 }]),
-    ).toEqual(["atmosphereApproximate"]);
+    ).toEqual([]);
   });
 
   it("fit liquid N2 to Augustin 1915's four absolute indices at 77.32 K within 3 × 10⁻⁴", () => {
@@ -870,7 +904,7 @@ describe("the liquids (R08.T5.g)", () => {
   });
 
   it("give each derived liquid its fit's n on its grid, and no absorption", () => {
-    for (const key of ["N2", "NH3"]) {
+    for (const key of ["N2", "NH3", "C2H6"]) {
       const file = liquidOf(key);
       const fit = file.fit;
       if (fit === undefined) {

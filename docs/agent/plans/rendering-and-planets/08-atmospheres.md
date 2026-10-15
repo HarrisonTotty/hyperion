@@ -3295,6 +3295,40 @@ Acceptance for T5.b and T5.c:
     check, if one lists material keys, covers the new liquid keys.
   - Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere/materials`.
 
+- **R08.T5.h Water's index and absorption, and liquid ethane's measured level** (briefed
+  2026-10-15, decision-r08-t5g; client data, `variantWords` and tests only, no GENERATOR_VERSION
+  bump, no contract change). After T5.g, and before P14.T49.h, whose palette reads `water.json`'s n
+  with the oracle "IAPWS R9-97 within 5 × 10⁻⁴". It corrects T5.g's liquid files with better
+  sources and takes up three of T5.g's deferred findings: _Water's n_, _Pope and Fry below 420 nm_
+  and _Water's junction_.
+  - _Water's n_ (ruling 1): IAPWS R9-97's eq. 1 at 298.15 K and 997.0476 kg m⁻³, every 5 nm over
+    380–780 nm, to six figures; the file stays `measured`. The header gives the release's
+    uncertainty by range (its Table 2), the check on Daimon and Masumura 2007's 24 °C formula and
+    the change from Hale and Querry. `sizeDistributionStop.test.ts`'s held water mode takes T5.b's
+    own index, n 1.333 and k 1.96 × 10⁻⁹ at 550 nm, so its held numbers stand.
+  - _Water's k_ (ruling 2), k = aλ ÷ 4π: Mason, Cone and Fry 2016's Table 2 over 380–495 nm, read
+    from WOPP v3 (an input checked by SHA-256, as `--pope-fry` is) with two rows from Mason's
+    dissertation, linear in log a onto the grid; Pope and Fry 1997 over 500–725 nm; Kou, Labrie and
+    Chýlek 1993 over 730–780 nm, as IOCCG 2018's Table 1.1 lists them. Hale and Querry leave the
+    file. The header records the factors by which k moved, Pope and Fry's values below 500 nm as
+    the alternative with the reasons, IOCCG's note on Kou's offset at 725 nm, and the sources'
+    temperatures.
+  - _Seawater_ is regenerated on the new water. Its variant stays `S35`, the pattern
+    `S<practical salinity>`, and `variantWords` reads it as "practical salinity 35" (ruling 4).
+  - _Liquid C₂H₆_ becomes `derived` (ruling 3): the least-squares Cauchy slope of
+    `ethaneLiquidEstimate`, with a meeting Hagermann et al. 2005's 1.3887 at 670 nm and 94 K, its
+    Table 2's mixtures recorded as checks.
+  - _Liquid NH₃_ keeps k = 0 with no label (ruling 5); its text states that Robertson and
+    Williams's α is a total attenuation that bounds k.
+  - Tests: water's n within 10⁻⁵ of R9-97 at every grid point; water's k within 1% of each source's
+    a (Mason's at 380–440 nm, Pope and Fry's at 550 nm, Kou's at 740, 750 and 780 nm); a at 495 nm
+    within 3% of Pope and Fry's 0.0173 m⁻¹; seawater within 5 × 10⁻⁵ of Quan and Fry's whole
+    equation times dry air's index over 400–700 nm; ethane's n(670 nm) = 1.3887 to 10⁻⁵, within
+    5 × 10⁻⁴ of the shifted estimate; `variantWords`' salinity cases; the held water mode at T5.b's
+    index; every other material file regenerating byte for byte through the tool.
+  - Acceptance: `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere` and
+    `pnpm --filter hyperion exec vitest run src/tools/materials`.
+
 - **R08.T5.e Venus's ultraviolet absorber, fitted** (science-r08-unowned-absorbers). After T5.d
   and R08.T12.e, on the reference tracer's Venus deck: R08.T12's `venus-92bar` case, with
   T24.g's four modes, mode 2 `acid_uv_absorber`. It moves no generated output, since k_UA is 0
@@ -9736,8 +9770,10 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
 - **Deferred findings (2026-10-13 rule)** (R08.T5.g). Recorded and deferred: each leaves the
   algorithm and every contract as they are.
   - _Water's n_ (above): IAPWS R9-97 waits on a lane whose scope includes the held mode's test.
+    _Taken up by R08.T5.h_ (decision-r08-t5g ruling 1).
   - _Pope and Fry below 420 nm_ (above). The lean is Mason et al. 2016 below 420 nm, or IOCCG's
-    Morel et al. 2007 values for 340–415 nm.
+    Morel et al. 2007 values for 340–415 nm. _Taken up by R08.T5.h_: Mason et al. over 380–495 nm
+    (ruling 2).
   - _Ethane's gas row may run low._ Burton measured ethane's Lorentz–Lorenz function at 632.8 nm:
     0.3794 ± 0.0003 cm³ g⁻¹, constant within 0.5% over 1–200 amagat (UBC thesis, CC BY; its
     abstract through OpenAlex).
@@ -9753,6 +9789,8 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     with a band of 0.178 at 800 nm. The abstract page states no path or temperature.
     - That is 1.4–3.2 × 10³ times pure water's at 400–455 nm, and 4–15 times at 654–800 nm (the
       science check), and would make an NH₃ sea opaque in the blue within a metre.
+    - _Ruled by decision-r08-t5g ruling 5 (R08.T5.h)_: k stays 0 with no label, and the file's
+      text bounds k by α. The comparison with water predates Mason et al.'s k.
   - _One temperature per liquid._ Wong and Anderson's dn/dT for NH₃ (−5.42 × 10⁻⁴ K⁻¹) is not
     drawn, nor the temperature dependence of water's red bands. Pope and Fry's k is at 22 °C and
     the file's n at 25 °C.
@@ -9761,6 +9799,159 @@ on Earth` and `… on a Saturn-class figure`: every band and light slot's irradi
     reading; the hotter, dark-yellow melt read 0.039 lower.
   - _Water's junction._ IOCCG notes Kou et al. 1993 (730–1,230 nm) about 0.04–0.07 m⁻¹ above Pope
     and Fry over their overlap. The file keeps Hale and Querry from 750 nm, as the brief asks.
+    _Taken up by R08.T5.h_: Kou et al. over 730–780 nm (ruling 2).
+- **Deviations in T5.h, as built** (2026-10-15; decision-r08-t5g; `view/atmosphere/materials/`
+  (`water.json`, `seawater.json`, `ethane-liquid.json`, `ammonia-liquid.json`, `materials.ts` and
+  its test), `view/atmosphere/sizeDistributionStop.test.ts`, `apps/hyperion/src/tools/materials.ts`
+  and its test, `scripts/materials.mjs`, `NOTICE`).
+  - _The files._ `water.json` grows from 7,035 B to 11,378 B, `seawater.json` from 5,166 B to
+    7,655 B, `ethane-liquid.json` from 6,756 B to 9,150 B and `ammonia-liquid.json` from 4,071 B to
+    6,046 B. _The setup check:_ by hand, through `scripts/materials.mjs` with every input checked by
+    its SHA-256, then Prettier, the other 40 of the 44 files regenerate byte for byte.
+  - _Water's n_ is R9-97's at every grid point (1.34511, 1.33419 and 1.32848 at 380, 550 and 780
+    nm), +0.00451, +0.00119 and −0.00132 from Hale and Querry's; n(380) − n(780) is 0.01663, where
+    it was 0.0108. Daimon and Masumura's 24 °C formula lies −5.6 × 10⁻⁶, +1.1 × 10⁻⁷ and +2.6 × 10⁻⁶
+    from R9-97 at 24 °C (997.2994 kg m⁻³, the same WebBook isobar) at the three wavelengths; its
+    coefficients are a constant, `DAIMON_24C`, and its file is not an input.
+    - λ is read as the vacuum wavelength. Read as the air wavelength (Peck and Reeder's air), n
+      would fall by at most 1.2 × 10⁻⁵, at 380 nm, 5.7 × 10⁻⁶ at 550 nm and under 5 × 10⁻⁶ from
+      595 nm, inside the release's uncertainty. T5.g's doc and the first draft said "under
+      5 × 10⁻⁶" throughout (the review); the file now states the computed figures, and the tool's
+      test holds them.
+  - _Water's k._ Before and after: 3.438 × 10⁻¹⁰ to 4.324 × 10⁻¹¹ at 380 nm (÷ 7.95), 2.110 × 10⁻¹⁰
+    to 7.066 × 10⁻¹¹ at 400 nm (÷ 2.99), 2.223 × 10⁻¹⁰ to 1.828 × 10⁻¹⁰ at 440 nm (÷ 1.22),
+    2.473 × 10⁻⁹ at 550 nm unchanged, and 1.264, 1.560 and 1.431 × 10⁻⁷ to 1.637, 1.701 and
+    1.670 × 10⁻⁷ at 740, 750 and 780 nm (× 1.30, 1.09 and 1.17). a at 495 nm is 0.017098 m⁻¹, 1.2%
+    under Pope and Fry's 0.0173.
+    - Mason et al.'s rows come from WOPP v3 through `--mason` (`parseWoppMason`, 106 rows over
+      300–510 nm). Of the dissertation's 66 rows over 380–510 nm (Table VI.1, p. 78, read through
+      the Wayback copy of OAKTrust's PDF), WOPP v3 matches 64; the two others are overridden as the
+      brief asks. Only the 445 nm grid point reads one of them (446 nm), and moves by 0.07%.
+    - The journal's abstract page shows Table 2 every 2 nm, not every 10 nm: it agrees with WOPP v3
+      at every row, 422 and 446 nm included, and its σ column with WOPP v3's, which runs a row late
+      against the dissertation's over 426–458 nm. Its 380–500 nm rows are the brief's cross-check,
+      and its 520, 540 and 550 nm rows check Pope and Fry's there: they run 1.04, 1.00 and 1.00
+      times them.
+    - Kou et al.'s eleven values are a constant, `KOU_1993_ABSORPTION_PER_M`, read again from the
+      IOCCG PDF's Table 1.1 as the ruling gives them; the PDF is not an input. The rows are on the
+      table's printed p. 12 (its caption on p. 8).
+    - The dissertation puts the moving average on p. 75 (the ruling's p. 76) and the 23 ± 0.5 °C on
+      p. 80; the sensitivity argument runs over pp. 81–89 (p. 81 the agreement above 440 nm, p. 83
+      the original cavity, p. 89 the conclusion).
+  - _Seawater_: 1.34058 at 550 nm. Its text gives S as practical salinity, dimensionless (PSS-78),
+    where it read "35‰", and the tool's `SEAWATER.salinityPermil` and `quanFryIndex`'s and
+    `quanFrySalinityIncrement`'s `salinityPermil` become `practicalSalinity`.
+  - _Liquid C₂H₆_: n(λ) = 1.37956 + 0.0041033 µm² ÷ λ², a to six figures as `NH3_LIQUID_FIT`'s is
+    (the ruling's 1.379559 is seven), so n(670 nm) is 1.388701, 1.0 × 10⁻⁶ from 1.3887. Before and
+    after: 1.41569 to 1.40798 at 380 nm, 1.40079 to 1.39312 at 550 nm, 1.39638 to 1.3887 at 670 nm
+    and 1.394 to 1.3863 at 780 nm. The worst departure from the shifted estimate is 3.4 × 10⁻⁵.
+    - Hagermann et al. were read from the NASA ADS scan; the publisher's pages refuse an automated
+      fetch, and their tables there are images. Table 3's REF row gives 1.3887 as the maximum over
+      the pure constituents; the table states no conditions and marks no source for it, and the
+      file takes it at Table 2's 670 nm, 94 K and 1.5 bar. Table 2 marks every index as Badoz et
+      al.'s experimental value; Birchley 1992's mark is on methane's thermal conductivity alone, so
+      the file's `paper` names Badoz et al. and not Birchley, whom the brief named with them.
+    - The file's `name` drops "(an estimated index)": "liquid C2H6 at 94 K".
+    - The mixing checks are ideal mixing of Lorentz–Lorenz molar refraction at mole fractions over
+      each row's measured molar volume, ethane's and methane's molar refractions at the WebBook's
+      94 K densities (methane's 27.86634 mol/l fetched for this, with Table 2's 1.2872), nitrogen's
+      from `nitrogen-liquid.json` at Augustin's density (a molar refraction, unchanged by carrying
+      it to 94 K). With ethane at 1.3887 they miss by −0.0018 (96/0/4), −0.0055 (53/47/0, the
+      ruling's −0.0054) and −0.0042 (50/44/6); with the estimate by +0.0056, −0.0010 and 0.0000;
+      the 0/83/17 row by −0.0042; the pure-methane row closes to +0.0002, Table 2's 0.4474 g cm⁻³
+      against the WebBook's 0.44705.
+    - The methane scale check gives 1.2869 against Table 2's 1.2872, from `methane-liquid.json`'s
+      1.29 at 670 nm (held by the tool's test as `CH4_LIQUID_670_NM_N`).
+    - Burton's function would give 1.410 at the 96/0/4 row's 0.6530 g cm⁻³; the row implies
+      0.3587 cm³ g⁻¹, and the pure liquid's 1.3887 at the WebBook's 0.6476 g cm⁻³ implies 0.3650,
+      3.8% under Burton's. The ruling's "about 5%" is the mixture's figure.
+    - The UX consequence: a liquid-ethane mode no longer raises `ATMOSPHERE: APPROXIMATE`, and
+      `materials.test.ts` holds that (ruling 3; the UX review's objection is a deferred finding
+      below).
+  - _For R11._ Plan 11's Design note 12 gives water 1.333, seawater 1.339 and Pope and Fry's
+    0.00635 m⁻¹ at 440 nm; the files now give 1.33419 and 1.34058 at 550 nm and Mason et al.'s
+    0.00522 m⁻¹ at 440 nm, so T5.g's "plan 11's 1.339" no longer holds. Its "ethane about 1.37"
+    lies 0.023 under the file's 1.39312. The sim's reference water
+    (`crates/hyperion-sim/src/planetary/surface/reference.rs` and
+    `crates/hyperion-surface/src/testing/worlds.rs`) still takes Hale and Querry's n at 0.45, 0.55
+    and 0.65 µm; R11 or P14 reconciles it.
+  - _Liquid NH₃_: text only, k = 0 kept. The k sentence drops T5.g's comparison with water's
+    absorption (1.4–3.2 × 10³ times water's at 400–455 nm), which moved with water's k, and gives
+    Table I whole from the journal's page (no abstract), Williams 1974's eqs. 1 and 5 (the ADS
+    scan), Jolly 1952 pp. 3 and 14 (eScholarship's copy through the Wayback Machine) and CAMEO's
+    CHRIS card; its licence cites Robertson and Williams's seven values as facts. k ≤ 6.7 × 10⁻⁷
+    at 400 nm and 2.8 × 10⁻⁷ at 654 nm.
+    - The brief's "the liquid has no absorption between its intense bands below about 240 nm and
+      its weak 0.802 µm band" is narrowed, on the science check: Jolly lists no band shorter than
+      0.802 µm, but the gas's weak N–H overtone bands at 5520 and 6475 Å (Irwin et al. 2019,
+      Icarus 321, 572; its arXiv abstract) presumably have counterparts in the liquid. The text
+      says so, that the 654 nm value may hold one, and that no band explains the smooth rise from
+      714 to 370 nm.
+  - _`variantWords`_ reads `S<number>` as "practical salinity <number>"; `S` and `S-1` read
+    "another composition". `MaterialForm.variant`'s and `MaterialIndexFile.variant`'s docs name both
+    patterns.
+  - _The held test._ `sizeDistributionStop.test.ts`'s "water droplets of 1.5 µm" is now "water
+    droplets of 1.5 µm at T5.b's index", `fixed({ n: 1.333, k: 1.96e-9 })`. No other held test
+    moved; the atmosphere suite passes.
+  - _Tests replaced._ `materials.test.ts`'s "give water's k at 440 nm within 10% of Pope and Fry
+    1997's" goes (§2.2 moves 440 nm to Mason et al.), as do "take water's k from Pope and Fry to
+    725 nm and Hale and Querry's from 750 nm" and "keep water's n Hale and Querry's". T5.g's ethane
+    test held the file to the estimate within 10⁻⁵; it now holds it to the shifted estimate within
+    the brief's 5 × 10⁻⁴, the derived-liquid test holds the file to its fit within 10⁻⁵, and the
+    tool's test holds the fit within 3.5 × 10⁻⁵ of the shifted estimate. The tool's water tests move
+    to the new sources at the same six-figure tolerance.
+  - _Names beyond the sketch._ In the tool: `FETCHED_T5H`, `WATER_K_SPANS_NM`, `MASON_ROWS`,
+    `MASON_DISSERTATION_ROWS`, `AbsorptionRow`, `parseWoppMason`, `logLinearAbsorptionPerM`,
+    `WOPP_V3_SHA256`, `KOU_1993_ABSORPTION_PER_M`, `DAIMON_24C`, `WATER_DENSITY_24C_KG_PER_M3`,
+    `daimonExcess`, `T5G_WATER_N`, `T5G_WATER_K`, `C2H6_LIQUID_MEASURED`, `ethaneLiquidLevelled`,
+    `C2H6_LIQUID_FIT`, `TitanMixtureRow` (its fields `*MoleFraction`), `HAGERMANN_TABLE_2`,
+    `titanRow`, `CH4_LIQUID_94K_MOL_PER_L`, `CH4_LIQUID_670_NM_N`, `methaneLiquidAt94K`,
+    `titanMixtureIndex` and `titanMixtureResidual`. `waterIndex` takes
+    `(popeFry, wopp)`; `POPE_FRY_LAST_NM` and the `--water` input (Hale and Querry's table) go;
+    `MASON_2016_ABSORPTION_PER_M` and `POPE_FRY_ABSORPTION_PER_M` gain rows at 495–550 nm.
+  - _Sources._ New, fetched 2026-10-15 and recorded with their SHA-256s in the files: WOPP v3 (an
+    input), the IAPWS release, the IOCCG protocol, Mason's dissertation, the journal pages of Mason
+    et al. and Robertson and Williams, Daimon and Masumura's entry, Hagermann et al.'s and Williams
+    1974's ADS scans, Jolly 1952, the CAMEO card and the WebBook's methane at 94 K. omlc.org's
+    `pope97.txt` was fetched again, the same SHA-256. The other inputs of the by-hand run are T5.d's
+    and T5.g's downloads, each checked by the tool's SHA-256.
+  - _`NOTICE`._ Hale and Querry leave (no material file takes a value from them; the sim's
+    reference water still does, _For R11_ above); IAPWS R9-97 gains its attribution; Mason et al.,
+    Kou et al. through IOCCG, Daimon and Masumura (a check) and Hagermann et al. with Badoz et al.
+    join.
+  - _`condensate_extinction`_ is still not built; nothing goes stale. For P14.T49.h: `water.json`'s
+    n is R9-97's to six figures, so its 5 × 10⁻⁴ oracle holds, and its bin 15 (735–760 nm) reads
+    Kou et al.'s 2.51–2.88 m⁻¹.
+- **Deferred findings (2026-10-13 rule)** (R08.T5.h). Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _Mason et al.'s two rows._ The journal's Table 2 prints 0.00322 and 0.00691 m⁻¹ at 422 and 446
+    nm, as WOPP v3 does; only the dissertation has 0.00321 and 0.00690. The file follows the ruling
+    (the dissertation). Either choice moves the 445 nm grid point by 0.07%.
+  - _The source of 1.3887._ Hagermann et al.'s Table 3 marks no source and states no conditions
+    for its maximum index, and Badoz et al.'s abstract lists measurements of pure methane and of
+    methane–ethane mixtures, not of pure ethane; the value may be an extrapolation of their
+    mixtures. The table's minimum, 1.1985, lies within 5 × 10⁻⁴ of `nitrogen-liquid.json`'s 1.1981
+    at 77 K, so its rows need not all be at 94 K. The mixtures bound the level to about ±0.004
+    either way.
+  - _Table 2's composition basis._ Its header reads "vol. per cent", where the quantities the
+    paper's §2.2 solves for are mole fractions and Badoz et al. made their mixtures from each gas's
+    volume and pressure (their abstract); the binary row's density (0.5686 g cm⁻³) follows mole
+    fractions (0.5660) rather than volume fractions (0.5533). The checks read mole fractions.
+  - _Ethane's label_ (the UX review). With ethane `derived`, a liquid-ethane mode no longer raises
+    `ATMOSPHERE: APPROXIMATE`, though its slope is the Lorentz–Lorenz estimate's and its k = 0 is
+    unmeasured, with the C–H Δv = 6 overtone near 714 nm not drawn; the guide keeps the label
+    "while any … cloud or haze … is drawn with estimated optical data". Built as ruling 3 and the
+    brief ask, as liquid NH₃'s derived file already is. Lean: keep it; if the label should stand,
+    the guide or ruling 5's definition of `derived` is the owner's to amend, not the code's.
+  - _Liquid NH₃'s 654 nm value._ It may be the liquid's counterpart of the gas's 6475 Å band (the
+    science check, medium confidence on the position). Drawing k there (at most 2.8 × 10⁻⁷) would
+    depart from ruling 5; k = 0 stays.
+  - _Kou et al. against WOPP v3's own red rows._ WOPP v3's 740, 750 and 780 nm rows (2.4773, 2.6125
+    and 2.2706 m⁻¹, of a source its header does not name) lie 11%, 8% and 16% under Kou et al.'s:
+    a spread for P14.T49.h's bin 15 to know of (low confidence).
+  - _Practical salinity in the guide._ The UX guide's composition words name mass and mole
+    fractions only; "practical salinity 35" follows the literature's name, and its unit-free form
+    follows the guide's dimensionless figures. For the owner to add to the guide.
 - **Deviations in T12.a, as built** (2026-10-09; `crates/hyperion-fit/src/atmosphere/`, the
   `atmosphere-reference` command in `cli.rs`, `RunFitError` in `lib.rs`).
   - _Signatures._ `trace_reference` returns `Result<ReferenceRadiances, TraceReferenceError>`: the

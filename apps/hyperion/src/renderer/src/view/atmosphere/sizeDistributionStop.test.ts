@@ -280,9 +280,11 @@ const HELD_MODES: ReadonlyArray<HeldMode> = [
     asymmetry: 0.8073855022032624,
   },
   {
-    name: "water droplets of 1.5 µm",
+    // T5.b's water.json at 550 nm, Hale and Querry's n and k: the held optics are T5.b's, and since
+    // R08.T5.h the file's n is IAPWS R9-97's (decision-r08-t5g ruling 1), so the index is pinned.
+    name: "water droplets of 1.5 µm at T5.b's index",
     sizes: gamma(1.5, 0.3),
-    index: material("H2O"),
+    index: fixed({ n: 1.333, k: 1.96e-9 }),
     wavelengthNm: 550,
     nodes: 5600,
     qExt: 2.4400399227005933,

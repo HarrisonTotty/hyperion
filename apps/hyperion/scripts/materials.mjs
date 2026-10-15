@@ -3,7 +3,7 @@
 // are then formatted with the repository's Prettier, the last command below. Usage, every source
 // fetched as the tool's header names it:
 //   node scripts/materials.mjs --out src/renderer/src/view/atmosphere/materials \
-//     --water <Hale.yml> --ice <Warren-2008.yml> --ammonia <nh3-m-Martonchik1983.lnk> \
+//     --ice <Warren-2008.yml> --ammonia <nh3-m-Martonchik1983.lnk> \
 //     --methane-liquid <Martonchik-liquid-90K.yml> --methane-ice <Martonchik-solid-90K.yml> \
 //     --h2so4-75 <H2SO4_75%_300K_R_Palmer_1975.ri> --h2so4-84 <H2SO4_84.5%_300K_R_Palmer_1975.ri> \
 //     --iron <Johnson.yml> --soot <Dalzell.yml> --tholin <khare_tholins.dat> \
@@ -20,11 +20,14 @@
 //     --aluminium-oxide-ordinary <Al2O3/nk/Malitson-o.yml> \
 //     --aluminium-oxide-extraordinary <Al2O3/nk/Malitson-e.yml> \
 //     --graphite-perpendicular <callindex.out_CpeD03_0.01> \
-//     --graphite-parallel <callindex.out_CpaD03_0.01> --pope-fry <pope97.txt>
+//     --graphite-parallel <callindex.out_CpaD03_0.01> --pope-fry <pope97.txt> \
+//     --mason <purewater_abs_coefficients_v3.txt>
 //   pnpm exec prettier --write src/renderer/src/view/atmosphere/materials/*.json
 // The two .tex files are the e-prints' members, extracted from their archives as data; the .dat
 // files are Kitzmann and Heng 2018's compilation's (R08.T5.d). `pope97.txt` is omlc.org's table of
-// Pope and Fry 1997, which the water and seawater files take k from (R08.T5.g).
+// Pope and Fry 1997 (R08.T5.g), and `purewater_abs_coefficients_v3.txt` WOPP v3's, which holds Mason,
+// Cone and Fry 2016's table (R08.T5.h): the water and seawater files take k from both. Since R08.T5.h
+// no file reads Hale and Querry's table.
 import { fileURLToPath } from "node:url";
 
 import { runnerImport } from "vite";
