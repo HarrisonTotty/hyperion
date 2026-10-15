@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  dustOverlay,
   MAP_RESOLUTIONS_PX,
   MAX_UPSCALE,
   mapResolutionFor,
@@ -168,5 +169,58 @@ describe("paintLevels", () => {
     const rgba = paintLevels(Uint8Array.from([0, 255]), ramp);
 
     expect([...rgba]).toEqual([0x05, 0x08, 0x0d, 255, 0xc8, 0xd6, 0xe5, 255]);
+  });
+});
+
+/** An 8-bit map `widthPx` wide of the given codes. */
+function codesOf(widthPx: number, codes: ReadonlyArray<number>) {
+  return {
+    widthPx,
+    heightPx: codes.length / widthPx,
+    codes: Uint8Array.from(codes),
+    maxCode: 255,
+  };
+}
+
+// Extinction code 1 is 1 mag, code 2 is 10 mag and code 3 is 0.5 mag; code 0 is below 0.01 mag.
+const LOG10_MAG: Readonly<Record<number, number>> = { 1: 0, 2: 1, 3: Math.log10(0.5) };
+function log10Mag(code: number): number | null {
+  return LOG10_MAG[code] ?? null;
+}
+
+// A density map spanning 5 dex: 254 ÷ 5 = 50.8 codes a decade, so 1 mag (0.4 dex) is 20.32 codes.
+const SPAN_DEX = 5;
+
+describe("dustOverlay", () => {
+  it("lowers each code by 0.4 A(V) in dex, on the density map's own scale", () => {
+    const dimmed = dustOverlay(codesOf(2, [255, 200]), SPAN_DEX, codesOf(2, [1, 3]), log10Mag);
+
+    // 1 + round(254 − 20.32) and 1 + round(199 − 10.16).
+    expect([...dimmed.codes]).toEqual([235, 190]);
+  });
+
+  it("leaves a pixel at the ceiling where the dust is below the floor", () => {
+    const dimmed = dustOverlay(codesOf(2, [255, 1]), SPAN_DEX, codesOf(2, [0, 0]), log10Mag);
+
+    expect([...dimmed.codes]).toEqual([255, 1]);
+  });
+
+  it("sends a pixel the dust takes past the floor to the background, and keeps the background", () => {
+    const dimmed = dustOverlay(codesOf(3, [100, 21, 0]), SPAN_DEX, codesOf(3, [2, 1, 1]), log10Mag);
+
+    // 99 − 203.2 and 20 − 20.32 are at or below the floor.
+    expect([...dimmed.codes]).toEqual([0, 0, 0]);
+  });
+
+  it("returns a map with nothing above its floor unchanged", () => {
+    const density = codesOf(2, [0, 0]);
+
+    expect(dustOverlay(density, 0, codesOf(2, [2, 2]), log10Mag)).toBe(density);
+  });
+
+  it("refuses maps of different sizes", () => {
+    expect(() => dustOverlay(codesOf(2, [1, 1]), SPAN_DEX, codesOf(1, [1]), log10Mag)).toThrow(
+      RangeError,
+    );
   });
 });
