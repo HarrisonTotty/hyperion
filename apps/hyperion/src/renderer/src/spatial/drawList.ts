@@ -17,6 +17,7 @@ import {
 } from "./marks";
 import { gridLines, ringPolyline } from "./plane";
 import { SIZE_CLASS_REM, SYMBOL_STROKE_PX } from "./symbols";
+import { type LocalFrame, planeFrame } from "../geometry/frame";
 import { add, dot, norm, scale, sub, type Vec3 } from "../geometry/vec3";
 
 /**
@@ -384,20 +385,36 @@ function pathOp(
   };
 }
 
-/** An annulus's centre moved along the plane's normal onto the plane. */
-function footOnPlane(annulus: AnnulusMark, north: Vec3): Vec3 {
-  const centre = annulus.centre ?? { x: 0, y: 0, z: 0 };
-  return sub(centre, scale(north, dot(centre, north)));
+/** The plane an annulus is drawn in, and its centre on that plane. */
+interface BandPlane {
+  readonly frame: LocalFrame;
+  readonly centre: Vec3;
 }
 
-/** The point on the reference plane at `radius` from `centre` towards `angleDeg` from coreward. */
-function onPlaneAt(scene: SpatialScene, centre: Vec3, radius: number, angleDeg: number): Vec3 {
+/**
+ * The plane an annulus lies in: the reference plane, its centre moved along the plane's normal
+ * onto it; or, with a normal of its own, that plane through its centre, the reference plane's
+ * coreward laid onto it.
+ */
+function bandPlane(annulus: AnnulusMark, reference: LocalFrame): BandPlane {
+  const centre = annulus.centre ?? { x: 0, y: 0, z: 0 };
+  if (annulus.normal !== undefined) {
+    return { frame: planeFrame(annulus.normal, reference.coreward), centre };
+  }
+  return {
+    frame: reference,
+    centre: sub(centre, scale(reference.north, dot(centre, reference.north))),
+  };
+}
+
+/** The point on a plane at `radius` from `centre` towards `angleDeg` from its coreward. */
+function onPlaneAt(frame: LocalFrame, centre: Vec3, radius: number, angleDeg: number): Vec3 {
   const angle = (angleDeg * Math.PI) / 180;
   return add(
     centre,
     add(
-      scale(scene.frame.coreward, radius * Math.cos(angle)),
-      scale(scene.frame.spinward, radius * Math.sin(angle)),
+      scale(frame.coreward, radius * Math.cos(angle)),
+      scale(frame.spinward, radius * Math.sin(angle)),
     ),
   );
 }
@@ -408,8 +425,7 @@ function onPlaneAt(scene: SpatialScene, centre: Vec3, radius: number, angleDeg: 
  * longer than half the band's width on screen.
  */
 function edgeTickSegments(
-  scene: SpatialScene,
-  centre: Vec3,
+  { frame, centre }: BandPlane,
   radii: ReadonlyArray<number>,
   toScreen: (point: Vec3) => ScreenPoint,
   lengthPx: number,
@@ -423,8 +439,8 @@ function edgeTickSegments(
       continue;
     }
     for (let angleDeg = 0; angleDeg < 360; angleDeg += TICK_EVERY_DEG) {
-      const from = toScreen(onPlaneAt(scene, centre, radius, angleDeg));
-      const aim = toScreen(onPlaneAt(scene, centre, towards, angleDeg));
+      const from = toScreen(onPlaneAt(frame, centre, radius, angleDeg));
+      const aim = toScreen(onPlaneAt(frame, centre, towards, angleDeg));
       const dx = aim.xPx - from.xPx;
       const dy = aim.yPx - from.yPx;
       const spanPx = Math.hypot(dx, dy);
@@ -449,7 +465,8 @@ function annulusOps(
   remPx: number,
 ): DrawOp[] {
   const ops: DrawOp[] = [];
-  const centre = footOnPlane(annulus, scene.frame.north);
+  const band = bandPlane(annulus, scene.frame);
+  const { frame, centre } = band;
   const { innerRadius, outerRadius } = annulus;
   // A selected band is drawn as the selected orbit is: brighter and wider, never by colour alone.
   const role: PathRole = annulus.selected === true ? "selected" : "reference";
@@ -459,7 +476,7 @@ function annulusOps(
   for (const radius of radii.filter((edge) => edge > 0)) {
     ops.push({
       kind: "polyline",
-      points: ringPolyline(radius, scene.frame).map((point) => toScreen(add(centre, point))),
+      points: ringPolyline(radius, frame).map((point) => toScreen(add(centre, point))),
       stroke,
       widthPx,
     });
@@ -468,15 +485,15 @@ function annulusOps(
     const segments: Array<{ from: ScreenPoint; to: ScreenPoint }> = [];
     for (let angleDeg = 0; angleDeg < 360; angleDeg += BELT_TICK_EVERY_DEG) {
       segments.push({
-        from: toScreen(onPlaneAt(scene, centre, innerRadius, angleDeg)),
-        to: toScreen(onPlaneAt(scene, centre, outerRadius, angleDeg)),
+        from: toScreen(onPlaneAt(frame, centre, innerRadius, angleDeg)),
+        to: toScreen(onPlaneAt(frame, centre, outerRadius, angleDeg)),
       });
     }
     ops.push({ kind: "ticks", segments, stroke, widthPx, weight: "line" });
   }
   if (annulus.edgeTicks === true) {
     const edges = radii.filter((edge) => edge > 0);
-    const segments = edgeTickSegments(scene, centre, edges, toScreen, TICK_LENGTH_REM * remPx);
+    const segments = edgeTickSegments(band, edges, toScreen, TICK_LENGTH_REM * remPx);
     if (segments.length > 0) {
       ops.push({ kind: "ticks", segments, stroke, widthPx, weight: "line" });
     }
@@ -689,18 +706,17 @@ const RING_LABEL_TURNS_DEG: ReadonlyArray<number> = Array.from(
 ).flatMap((turnDeg) => (turnDeg === 180 ? [180] : [turnDeg, -turnDeg]));
 
 /**
- * The points along a ring of `radius` about `centre` on the reference plane that a label at
- * `fromDeg` (from coreward, towards spinward) also tries, on the screen (R07.T16.j).
+ * The points along a ring of `radius` about `centre` on a plane that a label at `fromDeg` (from
+ * the plane's coreward, towards its spinward) also tries, on the screen (R07.T16.j).
  */
 function ringPointsPx(
-  scene: SpatialScene,
-  centre: Vec3,
+  { frame, centre }: BandPlane,
   radius: number,
   fromDeg: number,
   toScreen: (point: Vec3) => ScreenPoint,
 ): ReadonlyArray<ScreenPoint> {
   return RING_LABEL_TURNS_DEG.map((turnDeg) =>
-    toScreen(onPlaneAt(scene, centre, radius, fromDeg + turnDeg)),
+    toScreen(onPlaneAt(frame, centre, radius, fromDeg + turnDeg)),
   );
 }
 
@@ -712,7 +728,7 @@ function ringLabels(
 ): CurveLabel[] {
   const labels: CurveLabel[] = [];
   const toScreen = (point: Vec3): ScreenPoint => screen(project(point, basis, camera, viewport));
-  const origin = { x: 0, y: 0, z: 0 };
+  const reference: BandPlane = { frame: scene.frame, centre: { x: 0, y: 0, z: 0 } };
   for (const [index, ring] of scene.plane.rings.entries()) {
     if (ring.label.length === 0) {
       continue;
@@ -725,7 +741,7 @@ function ringLabels(
       xPx: at.xPx,
       yPx: at.yPx,
       stack: 0,
-      alongPx: ringPointsPx(scene, origin, ring.radius, 0, toScreen),
+      alongPx: ringPointsPx(reference, ring.radius, 0, toScreen),
     });
   }
   return labels;
@@ -748,9 +764,9 @@ function markCurveLabels(
     if (annulus.label.length === 0) {
       continue;
     }
-    const centre = footOnPlane(annulus, scene.frame.north);
+    const band = bandPlane(annulus, scene.frame);
     const fromDeg = annulus.labelSpinward === true ? 90 : 180;
-    const at = toScreen(onPlaneAt(scene, centre, annulus.outerRadius, fromDeg));
+    const at = toScreen(onPlaneAt(band.frame, band.centre, annulus.outerRadius, fromDeg));
     labels.push({
       key: `annulus:${annulus.id}`,
       text: annulus.label,
@@ -758,7 +774,7 @@ function markCurveLabels(
       xPx: at.xPx,
       yPx: at.yPx,
       stack: 0,
-      alongPx: ringPointsPx(scene, centre, annulus.outerRadius, fromDeg, toScreen),
+      alongPx: ringPointsPx(band, annulus.outerRadius, fromDeg, toScreen),
     });
   }
   for (const path of scene.paths ?? []) {
@@ -797,7 +813,9 @@ function markCurveLabels(
  * 2 px wide in `--text` for the selected one. An annulus is drawn with the plane, after its rings: each edge a
  * `--text-muted` polyline and, for a belt, one `--text-muted` `ticks` op of radial segments between
  * the edges every 10° from coreward; an annulus with edge ticks, the optimistic habitable zone,
- * then one `ticks` op of short ticks from each edge into the band. Neither a path nor an annulus gives an anchor, so neither is
+ * then one `ticks` op of short ticks from each edge into the band. An annulus with a normal of its
+ * own, a ring tilted to its planet's equatorial plane, is drawn so in its own plane, its angles from
+ * the reference plane's coreward laid onto it. Neither a path nor an annulus gives an anchor, so neither is
  * picked, and their labels follow the rings' in the curve labels. `--line` is left to the grid and
  * the plane's rings (the orchestrator's ruling 35).
  *

@@ -170,7 +170,11 @@ export function bodyKindSymbol(kind: ViewBodyKind): BodyMarkSymbol {
   return symbol;
 }
 
-/** A body's rings: an annulus in the body's equatorial plane. */
+/**
+ * A body's ring: an annulus in its own plane, the one its normal gives: its planet's local
+ * Laplace plane, the equatorial plane well inside the planet's Laplace radius (plan 14,
+ * P14.T56.a), or the planet's orbital plane from a server that sends no ring normal.
+ */
 export interface ViewRing {
   /** The ringed body. */
   readonly body: BodyIdHex;

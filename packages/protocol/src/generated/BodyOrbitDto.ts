@@ -18,7 +18,8 @@ export type BodyOrbitDto = {
 parent: OrbitHostDto, 
 /**
  * The orbit about it: in the system frame for a planet, and for a moon or a ring in its
- * planet's body frame, referred to the planet's equator (plan 14, phase D).
+ * planet's body frame, centred on the planet with the galactic axes (plan 14, phase D; the
+ * local Laplace plane is not a reference here).
  */
 orbit: OrbitDto, 
 /**

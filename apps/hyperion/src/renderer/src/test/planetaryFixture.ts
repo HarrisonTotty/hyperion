@@ -9,6 +9,7 @@
  * from those answers, and say what they change.
  */
 import {
+  type BodyRotationDto,
   type BodySummaryDto,
   decodeServerMessage,
   type RequestKind,
@@ -17,6 +18,8 @@ import {
 } from "@hyperion/protocol";
 
 import fixture from "../../../../../../packages/protocol/fixtures/planetary.json" with { type: "json" };
+import { add, cross, scale, vec3, type Vec3 } from "../geometry/vec3";
+import { orbitNormal } from "../lib/system/hierarchy";
 
 /** The name of a response of the fixture. */
 type ResponseName =
@@ -111,4 +114,90 @@ export function populatedBodiesWith(
 ): ResponseFor<"system_bodies"> {
   const populated = populatedBodies();
   return { ...populated, bodies: populated.bodies.map(change) };
+}
+
+/**
+ * A change, for {@link populatedBodiesWith}, that gives the populated answer's ring its plane's
+ * normal, as a server from P14.T56.a's bump sends it (decision-p14-t56a §1); the shared fixture's
+ * ring has none, as every server below generator version 23 sends it.
+ */
+export function withRingNormal(
+  normal: readonly [number, number, number],
+): (body: BodySummaryDto) => BodySummaryDto {
+  return (body) =>
+    body.population.state === "ok" && body.population.value.type === "ring"
+      ? {
+          ...body,
+          population: { state: "ok", value: { ...body.population.value, normal: [...normal] } },
+        }
+      : body;
+}
+
+/** A change, for an answer's builder, that gives the body `id` the rotation law `rotation`. */
+export function withBodyRotation(
+  id: string,
+  rotation: BodyRotationDto,
+): (body: BodySummaryDto) => BodySummaryDto {
+  return (body) =>
+    body.id === id ? { ...body, rotation: { state: "ok", value: rotation } } : body;
+}
+
+/** A vector's components as the wire gives them. */
+function onWire(v: Vec3): [number, number, number] {
+  return [v.x, v.y, v.z];
+}
+
+/** A pole tilted from a body's orbit, with the rotation law that states it. */
+export interface TiltedPole {
+  /** The slice Earth's law, its axes and obliquity replaced. */
+  readonly rotation: BodyRotationDto;
+  /** The body's orbit normal, a unit vector along the galactic axes. */
+  readonly orbitNormal: Vec3;
+  /** The pole, a unit vector along the galactic axes. */
+  readonly pole: Vec3;
+  /**
+   * The unit vector at `fromNormalRad` from the orbit normal, turned towards the pole in the plane
+   * of the two, as P14.T56.a's local Laplace pole lies: the pole at the obliquity.
+   */
+  readonly turned: (fromNormalRad: number) => Vec3;
+}
+
+/**
+ * A rotation law for the body `id` of `answer` whose pole stands `obliquityRad` from its orbit's
+ * normal, turned about the orbit's ascending node N̂ by the right-hand rule, so that the equator's
+ * ascending node on the orbital plane, ĥ × p̂ normalised as the simulation takes it
+ * (`planetary/frames.rs`), is N̂; the rest of the law is the slice Earth's.
+ *
+ * @throws Error when the body is not in the answer or has no orbit.
+ */
+export function tiltedPole(
+  answer: ResponseFor<"system_bodies">,
+  id: string,
+  obliquityRad: number,
+): TiltedPole {
+  const template = sliceBodies().bodies.find((body) => body.id === FIXTURE_EARTH)?.rotation;
+  const body = answer.bodies.find((each) => each.id === id);
+  if (template?.state !== "ok" || body?.orbit.state !== "ok") {
+    throw new Error(`the answer's ${id} has an orbit, and the slice's Earth a rotation law`);
+  }
+  const { inclination_rad: inclination, ascending_node_rad: node } = body.orbit.value.orbit;
+  const normal = orbitNormal({ inclinationRad: inclination, ascendingNodeRad: node });
+  const ascending = vec3(Math.cos(node), Math.sin(node), 0);
+  // ĥ turned by an angle about N̂: cos ĥ + sin (N̂ × ĥ).
+  const towards = cross(ascending, normal);
+  const turned = (fromNormalRad: number): Vec3 =>
+    add(scale(normal, Math.cos(fromNormalRad)), scale(towards, Math.sin(fromNormalRad)));
+  const pole = turned(obliquityRad);
+  return {
+    rotation: {
+      ...template.value,
+      pole: onWire(pole),
+      equator_node: onWire(ascending),
+      equator_quarter: onWire(cross(pole, ascending)),
+      obliquity_rad: obliquityRad,
+    },
+    orbitNormal: normal,
+    pole,
+    turned,
+  };
 }

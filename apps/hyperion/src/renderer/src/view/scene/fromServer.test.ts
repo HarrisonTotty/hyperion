@@ -7,12 +7,14 @@ import { add, dot, norm, scale, sub, vec3, type Vec3 } from "../../geometry/vec3
 import type { SceneFrame } from "../../lib/scene/apparent";
 import { CAMERA_REPORT_INTERVAL_MS, CameraReporter } from "../../lib/scene/cameraReports";
 import { spanSeconds } from "../../lib/scene/lightTime";
-import { layoutHierarchy } from "../../lib/system/hierarchy";
+import { layoutHierarchy, orbitNormal } from "../../lib/system/hierarchy";
 import {
   FIXTURE_EARTH,
   FIXTURE_JUPITER,
   FIXTURE_SYSTEM,
   populatedBodies,
+  populatedBodiesWith,
+  withRingNormal,
 } from "../../test/planetaryFixture";
 import {
   SCENE_CHARTED_PLACE,
@@ -67,9 +69,9 @@ function stateNearEarth(seconds = 3_000): SceneStateDto {
   };
 }
 
-/** The populated answer as a scene's system: every kind, a moon and a ring among them. */
-function statePopulated(): SceneStateDto {
-  const { kind: _kind, ...system } = populatedBodies();
+/** The populated answer, or `bodies`, as a scene's system: every kind, a moon and a ring among them. */
+function statePopulated(bodies = populatedBodies()): SceneStateDto {
+  const { kind: _kind, ...system } = bodies;
   return {
     sequence: 0,
     clock: sceneClock(3_000),
@@ -334,6 +336,26 @@ describe("the server's scene as the view draws it", () => {
       viewBodyOf(scene, moon).kind,
       viewBodyOf(scene, star).kind,
     ]).toEqual([[planet], planet, star, "moon", "star"]);
+  });
+
+  it("draws a ring in the plane its normal gives", () => {
+    const model = sceneModelOf(statePopulated(populatedBodiesWith(withRingNormal([0, -0.6, 0.8]))));
+
+    expect(viewSceneOf(model, shipFrameOf(model)).rings.map((ring) => ring.normal)).toEqual([
+      vec3(0, -0.6, 0.8),
+    ]);
+  });
+
+  it("draws a ring an older server sends without a normal in its planet's orbital plane", () => {
+    const model = sceneModelOf(statePopulated());
+    const planet = recordOf(model, `${FIXTURE_SYSTEM}.0100`);
+    if (planet.orbit.state !== "ok") {
+      throw new Error("the fixture's planet has an orbit");
+    }
+
+    expect(viewSceneOf(model, shipFrameOf(model)).rings.map((ring) => ring.normal)).toEqual([
+      orbitNormal(planet.orbit.value.orbit),
+    ]);
   });
 
   it("gives a dwarf planet of a belt the belt's star as its parent, and leaves the belt out", () => {

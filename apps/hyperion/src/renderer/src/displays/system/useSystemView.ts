@@ -21,6 +21,7 @@ import {
   bodyFrameName,
   bodyPlane,
   bodyScene,
+  equatorNormal,
   focusHeldReason,
   focusTarget,
 } from "./bodyFrame";
@@ -449,23 +450,24 @@ export function useSystemView(target: SystemTarget): SystemViewState {
     let inclinationRad: number | null = null;
     if (orbit !== null) {
       // A satellite's elements are in its planet's body frame, whose axes are the galactic axes,
-      // so its inclination is read to its planet's equator, taken in this generator version to be
-      // the planet's orbital plane; a body about a star, a pair, the barycentre or a belt, to the
-      // plane the map is drawn on.
+      // so its inclination is read to its planet's equator, the plane its `BODY` frame is drawn
+      // on: normal to the planet's pole, or to the planet's orbit normal where its rotation is
+      // not modelled, and to none where its rotation is withheld (plan 14, P14.T56.b); a body
+      // about a star, a pair, the barycentre or a belt, to the plane the map is drawn on.
       const orbitParent = orbit.parent;
       const parentBody =
         orbitParent.kind === "body"
           ? bodyList.find((candidate) => candidate.id === orbitParent.id)
           : undefined;
-      const reference =
+      const referenceNormal =
         parentBody !== undefined && !isPopulation(parentBody.kind)
-          ? parentBody.orbit.state === "ok"
-            ? parentBody.orbit.value.orbit
-            : null
-          : systemPlane;
-      if (reference !== null) {
+          ? equatorNormal(parentBody)
+          : systemPlane === null
+            ? null
+            : orbitNormal(systemPlane);
+      if (referenceNormal !== null) {
         inclinationRad = Math.acos(
-          Math.min(1, Math.max(-1, dot(orbitNormal(orbit.orbit), orbitNormal(reference)))),
+          Math.min(1, Math.max(-1, dot(orbitNormal(orbit.orbit), referenceNormal))),
         );
       } else if (parentBody === undefined) {
         // With no system plane the map is drawn on the galactic plane, to which the wire's own

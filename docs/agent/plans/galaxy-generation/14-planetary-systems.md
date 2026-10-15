@@ -13137,3 +13137,66 @@ tables::gauss_legendre`.
   - _Unread sources._ Murray and Dermott 1999 §4.6 (cited instead: Gao and Stevenson 2013,
     eqs. 2–3; Ragazzo 2020, eq. 2.74, as the science check read them), and Ward 1981's value for
     Iapetus.
+- **Deviations in P14.T56.b, as built (`p14-moons`, 2026-10-15).** The client's ring and
+  equatorial planes, to decision-p14-t56a §1.3 and §5. No bump, and nothing the server sends
+  moves.
+  - _The model._ `Ring.normal` is `Vec3 | null`, not `normal?`: `lib/system/model.ts` states an
+    absent value as `null` throughout (as `Belt.scattered`), so that every builder states it.
+    `lib/system/bodiesWire.ts` reads the wire's optional field, checked to unit length as a pole is
+    (fault `ring normal unusable`, in the existing reason form), and `null` where it is absent. The
+    client branches on the field's presence, never on the generator version, and never turns its
+    sense.
+  - _The scene._ `view/scene/fromServer.ts`'s ring takes `normal`, or its planet's orbit normal
+    without it, or galactic north without an orbit, as before.
+  - _The equator._ `bodyFrame.ts` gains `equatorNormal(body)`: the rotation section's pole; the
+    orbit's normal where the rotation is not modelled; `null` where it is withheld or does not
+    apply, or the orbit is not given. That fallback is plan R02's Design note 14 (the graticule's
+    pole is the orbit normal without a rotation); the plan's and decision-p14-t56a's "R07 Design
+    note 14" is R07's per-view budgets. `bodyPlane` takes it, and where the rotation is withheld
+    stands on the orbital plane under the same `EQUATORIAL PLANE` name, since the map needs a
+    plane. No server withholds it yet (the display asks for every level), so how that plane is
+    labelled is deferred to the knowledge overlay (the UX review's finding; a label is the
+    owner's).
+  - _Each ring in its own plane_ (decision-p14-t56a §5 item 4). `spatial/marks.ts`'s
+    `AnnulusMark` gains `normal?`, the plane through its centre, its sense kept, its angles (ticks,
+    label points) from the reference plane's coreward laid onto it; `spatial/drawList.ts` draws it
+    (`bandPlane`). Without it an annulus lies in the reference plane, as before. `bodyScene` gives
+    every ring its plane, `normal` or its planet's orbital plane, with no threshold. So a version-22
+    ring of an oblique planet is drawn off the `EQUATORIAL PLANE` by the obliquity, as the server
+    places it, and a ring at 23 within its Laplace tilt of it. Cosmetic, recorded: a ring whose
+    normal points away from the reference north (a version-22 ring about a planet spinning
+    retrograde) has its tick angles and a spinward label mirrored, its plane unchanged; and a normal
+    within `PARALLEL_TOLERANCE` of that coreward starts its ticks from `planeFrame`'s fallback axis.
+  - _A moon's `INC`_ (decision-p14-t56a §5 item 5). `useSystemView.ts` reads it to its planet's
+    `equatorNormal`. At 22 it therefore moves, for a moon of a planet with a rotation section, from
+    its drawn inclination to the orbital plane to its angle from the equator (about the
+    obliquity); a moon of a planet whose orbit is withheld but whose rotation is sent now reads
+    one; and a moon of a planet whose rotation is withheld reads `—`, where it read its angle to the
+    orbital plane. The wire carries no moon's plane, so the free inclination is not read
+    (decision-p14-t56a F2).
+  - _The protocol's orbit-frame docs_ (decision-p14-t56a §4 F1, handed to this lane by main, so
+    T54.a's F1 is discharged). `OrbitDto`'s and `BodyOrbitDto.orbit`'s doc comments say a moon's or
+    ring's elements are centred on the planet with the galactic axes, not referred to its equator;
+    `just gen-protocol` regenerated the bindings' comments. No wire form moved.
+  - _The docs._ `model.ts`, `fromServer.ts`, `bodyFrame.ts`, `view/scene/model.ts`'s `ViewRing`,
+    `useSystemView.ts` and `BodyRecordReadings.tsx` drop "which this generator version takes to
+    be its orbital plane" and its variants.
+  - _The tests_, as decision-p14-t56a §1.4 (c) words them: `bodyFrame.test.ts` (the plane under a
+    tilted pole, without one and with the rotation withheld; `equatorNormal`'s four cases; a ring
+    with `normal` under a tilted pole, in its plane at T56.a's Laplace tilt and not the equator's;
+    a retrograde spinner's ring normal kept on the spin's side; a ring without `normal` in the
+    orbital plane, off the plane by the obliquity), `fromServer.test.ts` (the scene's ring with and
+    without `normal`), `bodiesWire.test.ts` (read, absent, refused), `drawList.test.ts` (an
+    annulus's edges, belt ticks, edge ticks and label in its own plane, and about its centre) and
+    `SystemView.bodies.test.tsx` (a moon's `INC` to a tilted pole, with its planet's orbit withheld,
+    and `—` with its rotation withheld). The present case is a variation built on the shared
+    fixture's ring; `packages/protocol/fixtures/planetary.json` is untouched. The builders are
+    shared in `test/planetaryFixture.ts` (`withRingNormal`, `withBodyRotation`, `tiltedPole`, whose
+    equator node is ĥ × p̂ as `planetary/frames.rs` takes it).
+  - _Files beyond the task's._ Allowed by decision-p14-t56a §1.4 (c):
+    `displays/system/useSystemView.ts`, `BodyRecordReadings.tsx`, `spatial/marks.ts` and
+    `spatial/drawList.ts`, with their tests; by §4 F1: the protocol's `orbit.rs` and
+    `planetary.rs` (docs) with the generated bindings. Needed besides: `lib/system/bodiesWire.ts`, the conversion that
+    fills `Ring.normal`; `view/scene/model.ts`'s `ViewRing` doc, a variant of the dropped sentence;
+    `test/planetaryFixture.ts`, the shared builders.
+  - _For T54.a._ Nothing in the client changes at 23: the rings take `normal` once it is sent.

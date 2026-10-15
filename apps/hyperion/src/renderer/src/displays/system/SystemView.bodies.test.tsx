@@ -15,11 +15,14 @@ import {
   earthMassAndOrbit,
   FIXTURE_EARTH,
   FIXTURE_JUPITER,
+  FIXTURE_SYSTEM,
   jupiterDetail,
   populatedBodies,
   populatedBodiesWith,
   sliceBodies,
   sliceBodiesWith,
+  tiltedPole,
+  withBodyRotation,
 } from "../../test/planetaryFixture";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
@@ -32,7 +35,7 @@ import {
   PIN_SYSTEM,
 } from "../../test/systemFixtures";
 import { orbitNormal } from "../../lib/system/hierarchy";
-import { dot } from "../../geometry/vec3";
+import { dot, type Vec3 } from "../../geometry/vec3";
 import { SystemView } from "./SystemView";
 
 const WIDTH_PX = 400;
@@ -108,6 +111,18 @@ function terms(label: string): HTMLElement[] {
 /** The value a readout label reads, as its `dd` holds it. */
 function reading(label: string): string {
   return terms(label)[0]?.nextElementSibling?.textContent ?? "";
+}
+
+/** The populated answer's planet `A b`, whose moon `A b I` is `/257`. */
+const PLANET_ID = `${FIXTURE_SYSTEM}.0100`;
+
+/**
+ * The `INC` the populated answer's moon reads to the plane normal to `pole`: the angle between its
+ * orbit normal (i 0.09, Ω 1.2) and `pole`, in degrees to one decimal.
+ */
+function inclinationTo(pole: Vec3): string {
+  const cosine = dot(orbitNormal({ inclinationRad: 0.09, ascendingNodeRad: 1.2 }), pole);
+  return `${((Math.acos(cosine) * 180) / Math.PI).toFixed(1)}°`;
 }
 
 function rowNames(): Array<string | null> {
@@ -769,7 +784,8 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
     expect(reading("ORIGIN")).toBe("GIANT IMPACT");
     expect(reading("PARENT")).toBe("H7K 4C0RFZ D-7 /256");
     expect(reading("NAME")).toBe("A b I");
-    // The angle between the moon's orbit normal (i 0.09, Ω 1.2) and its planet's (i 1.0, Ω 2.5).
+    // The angle between the moon's orbit normal (i 0.09, Ω 1.2) and its planet's (i 1.0, Ω 2.5),
+    // which stands for the planet's pole, since the answer sends no rotation section.
     const cosine = dot(
       orbitNormal({ inclinationRad: 0.09, ascendingNodeRad: 1.2 }),
       orbitNormal({ inclinationRad: 1, ascendingNodeRad: 2.5 }),
@@ -777,12 +793,52 @@ describe("SystemView with moons, rings, belts and the cometary halo", () => {
     expect(reading("INC")).toBe(`${((Math.acos(cosine) * 180) / Math.PI).toFixed(1)}°`);
   });
 
-  it("reads no inclination for a moon whose planet's orbit is withheld", async () => {
+  it("reads a moon's inclination to the equator its planet's pole gives, where the rotation is sent", async () => {
+    const tilted = tiltedPole(populatedBodies(), PLANET_ID, 0.4);
+    const { user, socket } = renderView();
+    await answer(socket, populatedBodiesWith(withBodyRotation(PLANET_ID, tilted.rotation)));
+
+    await selectRow(user, /\/257,/);
+
+    expect(reading("INC")).toBe(inclinationTo(tilted.pole));
+  });
+
+  it("reads a moon's inclination to its planet's pole where the planet's orbit is withheld", async () => {
+    const tilted = tiltedPole(populatedBodies(), PLANET_ID, 0.4);
+    const rotate = withBodyRotation(PLANET_ID, tilted.rotation);
     const { user, socket } = renderView();
     await answer(
       socket,
       populatedBodiesWith((body) =>
-        body.id.endsWith(".0100") ? { ...body, orbit: { state: "not_resolved" } } : body,
+        body.id === PLANET_ID ? { ...rotate(body), orbit: { state: "not_resolved" } } : body,
+      ),
+    );
+
+    await selectRow(user, /\/257,/);
+
+    expect(reading("INC")).toBe(inclinationTo(tilted.pole));
+  });
+
+  it("reads no inclination for a moon whose planet's orbit is withheld and rotation not modelled", async () => {
+    const { user, socket } = renderView();
+    await answer(
+      socket,
+      populatedBodiesWith((body) =>
+        body.id === PLANET_ID ? { ...body, orbit: { state: "not_resolved" } } : body,
+      ),
+    );
+
+    await selectRow(user, /\/257,/);
+
+    expect(reading("INC")).toBe("—");
+  });
+
+  it("reads no inclination for a moon whose planet's rotation is withheld", async () => {
+    const { user, socket } = renderView();
+    await answer(
+      socket,
+      populatedBodiesWith((body) =>
+        body.id === PLANET_ID ? { ...body, rotation: { state: "not_resolved" } } : body,
       ),
     );
 

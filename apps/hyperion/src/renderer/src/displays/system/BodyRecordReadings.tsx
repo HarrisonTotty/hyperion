@@ -449,9 +449,9 @@ export interface BodyRecordReadingsProps {
  * time, by the solver that agrees with the server's to 10⁻⁹ (P14.T39), since the answer is up to a
  * year old; it keeps its unit with `formatBodyDistance`'s hysteresis as the time moves. The
  * inclination of a planet is to the plane the map is drawn on, the angle between the two normals the
- * server gives; a moon's is to its planet's equator, taken in this generator version to be the
- * planet's orbital plane, since a satellite's elements are in its planet's body frame, whose axes
- * are the galactic axes.
+ * server gives; a moon's is to its planet's equator, the plane normal to the planet's pole, or to
+ * the planet's orbit normal where its rotation is not modelled (P14.T56.b), since a satellite's
+ * elements are in its planet's body frame, whose axes are the galactic axes.
  */
 export function BodyRecordReadings({
   body,
