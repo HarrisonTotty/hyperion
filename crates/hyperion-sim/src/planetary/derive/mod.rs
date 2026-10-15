@@ -110,8 +110,9 @@ pub use rotation::tidal_locking_time;
 
 use crate::orbit::KeplerElements;
 use crate::planetary::derive::atmosphere::{
-    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, SurfaceMaterial, VolatileDraws,
-    VolatileInventory, atmosphere, energy_limited_loss, volatile_inventory,
+    AtmosphereInputs, Crust, ENVELOPE_LOSS_RADIUS_AGE, Insolation, NitrogenLine, SurfaceMaterial,
+    VolatileDraws, VolatileInventory, atmosphere, energy_limited_loss, formation_temperature,
+    volatile_inventory_under,
 };
 use crate::planetary::derive::composition::{
     SolveCompositionError, dry_composition, formed_with_envelope,
@@ -911,6 +912,24 @@ pub fn derive_body(
     age: Years,
     t: UniverseTime,
 ) -> Result<DerivedBody, DeriveBodyError> {
+    derive_body_under(NitrogenLine::in_force(), placed, hosts, disc, age, t)
+}
+
+/// [`derive_body`] with nitrogen's boost beyond the line `line`, for the hold's tests
+/// (P14.T50.c): [`derive_body`] is this under [`NitrogenLine::in_force`]. Only the volatile
+/// inventory reads the line.
+///
+/// # Errors
+///
+/// As [`derive_body`].
+pub(crate) fn derive_body_under(
+    line: NitrogenLine,
+    placed: &PlacedBody,
+    hosts: &BodyHosts<'_>,
+    disc: &DiscProfile,
+    age: Years,
+    t: UniverseTime,
+) -> Result<DerivedBody, DeriveBodyError> {
     let age_now = Years::new(age.value() + t.since_epoch().as_julian_years_f64());
     if age_now.value().is_nan() || age_now.value() <= 0.0 {
         return Err(DeriveBodyError::NotYetFormed { age: age_now });
@@ -942,7 +961,7 @@ pub fn derive_body(
 
     // T12 and T13, three passes (T13.c): the albedo of one pass's surface state sets the
     // equilibrium temperature the next pass reads.
-    let inventory = volatile_inventory(mass, &fractions, formed, &placed.volatiles, age_now);
+    let inventory = inventory_of(line, placed, disc, formed, mass, &fractions, age_now);
     let crust = match placed.molten_until {
         Some(until) if age_now < until => Crust::Molten,
         Some(_) | None => Crust::Solid,
@@ -1221,6 +1240,31 @@ fn envelope_escape(
         initial,
         lost: EarthMasses::from(Kilograms::new(lost)),
     }
+}
+
+/// The volatile inventory of `placed`, of mass `mass` and fractions `fractions` at age `age`,
+/// formed on `formed`'s side of `disc`'s snow line, with nitrogen's boost beyond `nitrogen_line`
+/// (T13.a; P14.T50.c): [`volatile_inventory_under`] at its formation temperature in `disc`
+/// ([`formation_temperature`]) and with its ranks.
+#[must_use]
+fn inventory_of(
+    nitrogen_line: NitrogenLine,
+    placed: &PlacedBody,
+    disc: &DiscProfile,
+    formed: SnowLineSide,
+    mass: EarthMasses,
+    fractions: &MassFractions,
+    age: Years,
+) -> VolatileInventory {
+    volatile_inventory_under(
+        nitrogen_line,
+        mass,
+        fractions,
+        formed,
+        formation_temperature(placed.formation_distance, disc.snow_line()),
+        &placed.volatiles,
+        age,
+    )
 }
 
 /// What [`derive_body`] fixes at formation (T11): the side of the disc's snow line the body formed

@@ -5380,18 +5380,20 @@ Snapshot path, `planetary/chem/`.
 - **P14.T50.c The ammonia line for nitrogen** (22 → 23; lane `p14-snapshot`, after T50.a and
   before T51.a; amends T13.a; decision-p14-moons §2 and §F1-plan).
   - **The defect.** `ICY_VOLATILE_BOOST` (100) raises a body's nitrogen wherever water condenses.
-    But nitrogen's icy carrier, ammonia monohydrate, condenses only at 131 K (Lodders 2003, ApJ
-    591, 1220, Table 8, from memory, checked at build). Titan's nitrogen, by which the boost was
-    calibrated, came as NH₃ (Mousis, Gautier and Bockelée-Morvan 2002; Mandt et al. 2014, both
-    from memory).
-  - **The rule.** `AMMONIA_HYDRATE_CONDENSATION` = 131 K (`derive/atmosphere.rs`), and
+    But nitrogen's icy carrier, ammonia monohydrate, appears only at 131 K and holds half of all
+    nitrogen only by 123 K (Lodders 2003, ApJ 591, 1220, Table 8 and §3.4.3, at 10⁻⁴ bar; read).
+    Titan's nitrogen, by which the boost was calibrated, came as NH₃ (Mousis, Gautier and
+    Bockelée-Morvan 2002, Icarus 156, 162, not read; Mandt et al. 2014, ApJ 788, L24, abstract
+    read).
+  - **The rule.** `AMMONIA_HYDRATE_CONDENSATION` = 123 K, nitrogen's 50% condensation
+    temperature, `Element::N`'s (T50.a) (`derive/atmosphere.rs`), and
     `nitrogen_boosted(formation_temperature) -> bool`, true at or below it. A body's nitrogen takes
-    `ICY_VOLATILE_BOOST` only where its formation temperature is at most 131 K, and Earth's per
+    `ICY_VOLATILE_BOOST` only where its formation temperature is at most 123 K, and Earth's per
     unit mass times its rank otherwise.
     - A planet's, dwarf planet's or belt member's formation temperature is its star disc's under
       the disc's Hayashi profile at its formation distance: T_f = 170 K × √(d_snow ÷ d_form),
-      with d_snow the disc's snow line. So the boost begins at (170 ÷ 131)² = 1.684 d_snow:
-      3.80 au about the zero-age Sun, 4.55 √L au about a host of zero-age luminosity L.
+      with d_snow the disc's snow line. So the boost begins at (170 ÷ 123)² = 1.910 d_snow:
+      4.32 au about the zero-age Sun, 5.16 √L au about a host of zero-age luminosity L.
     - A moon's is P14.T56.c's.
     - A body that migrated keeps its formation distance's value, as its snow-line side does.
     - Water and carbon keep the snow line (170 K), as built. Nitrogen inside the snow line is
@@ -5401,9 +5403,10 @@ Snapshot path, `planetary/chem/`.
     `ENVELOPED_TIDES_VERSION`. Below 23 every inventory is version 22's, bit for bit, and a
     tripwire test fails once the version reaches 23. T54.a deletes both.
   - _Tests:_
-    - `AMMONIA_HYDRATE_CONDENSATION` is 131 K, with its source;
-    - about the zero-age Sun's disc (0.7 L☉), the ammonia line lies at 1.684 times the snow line,
-      3.80 ± 0.01 au;
+    - `AMMONIA_HYDRATE_CONDENSATION` is 123 K, equal to `Element::N.condensation_temperature()`,
+      with its source;
+    - about the zero-age Sun's disc (0.7 L☉), the ammonia line lies at 1.910 times the snow line,
+      4.32 ± 0.01 au;
     - a body formed at 3 au has Earth's nitrogen per unit mass at its rank, and one formed at
       5 au 100 times it; their water and carbon equal version 22's, bit for bit;
     - a body formed inside the snow line is unchanged, bit for bit;
@@ -5417,7 +5420,7 @@ Snapshot path, `planetary/chem/`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`;
     `cargo test -p hyperion-sim planetary::chem`.
   - _Moves at 23 (estimated):_
-    - every solid body formed between 1 and 1.684 snow-line distances (0.23 dex of formation
+    - every solid body formed between 1 and 1.910 snow-line distances (0.28 dex of formation
       distance) keeps 1% of its version-22 nitrogen: planets, dwarf planets, belt members and,
       through T56.c, captured moons of parents formed there;
     - where such a body keeps an N₂-dominated air (a migrated icy or ocean world, or a snowball
@@ -12913,3 +12916,101 @@ tables::gauss_legendre`.
   - Ethane's melting equation's reference pressure (CoolProp's 1.14 Pa) sits below its triple
     pressure, 1.1421 Pa, so a point at the triple temperature between them reads solid.
     Negligible.
+- **Deviations in P14.T50.c, as built (`p14-snapshot`, 2026-10-15).** The ammonia line for
+  nitrogen, in the 22 → 23 batch, behind `AMMONIA_LINE_VERSION` = 23. No output moves:
+  `GENERATOR_VERSION` stays 22, and every golden holds bit for bit (`golden_diff.py`: no golden
+  changed, none new).
+  - _The hold._ `AMMONIA_LINE_VERSION` (`derive/atmosphere.rs`, crate-private) and
+    `NitrogenLine { Snow, Ammonia }`, whose `in_force()` is `Snow` below 23 and `Ammonia` from
+    it. Version 22's rule, `Snow`, is the old code path as it was: the nitrogen's factor is the
+    snow-line side's boost, multiplied in the same order, so every inventory is version 22's to
+    the bit (tested over formation distances 0.4–30 au and five ranks, and on Ceres's
+    derivation). The tripwire, `the_ammonia_line_is_held_only_until_the_batch_s_bump`, fails once
+    `GENERATOR_VERSION` reaches 23. T54.a deletes `AMMONIA_LINE_VERSION`, `NitrogenLine` and its
+    `Snow` arm, calls the rule where the three `*_under` functions are called, removes them, and
+    deletes the tripwire.
+  - _Public items_, in `derive/atmosphere.rs`: `AMMONIA_HYDRATE_CONDENSATION` (defined as
+    `Element::N.condensation_temperature()`, 123 K);
+    `formation_temperature(formation_distance, snow_line) -> Kelvin` (170 K × √(d_snow ÷ d_form),
+    with Hayashi's profile as Ida and Lin 2004, §2.3, quote it; read);
+    `nitrogen_boosted(Kelvin) -> bool` (at or below 123 K); and
+    `ammonia_line(snow_line) -> Metres` (1.910 d_snow). The 170 K is T50.a's
+    `chem::redox::SNOW_LINE_TEMPERATURE`, imported rather than defined again, so that the soot and
+    ammonia lines read one snow-line temperature.
+  - _`volatile_inventory` gains a parameter_, `formation_temperature: Kelvin`, after `formed`. The
+    caller keeps the two consistent, as `InventoryInputs`' distances already are. Under the
+    ammonia line a body formed inside the snow line takes no boost whatever temperature it is
+    given, so "nitrogen inside the snow line is unchanged" holds by construction.
+  - _Test seams, crate-private:_ `volatile_inventory_under`, `element_inventory_under` and
+    `derive_body_under` take the `NitrogenLine`. The public functions are each the seam under
+    `NitrogenLine::in_force()`. So the table's test derives every body under both lines through the
+    whole pipeline; T51.a's lane hold may reuse or extend the seam.
+  - _Enveloped bodies' inventories._ The rule applies wherever `derive_body` builds an inventory,
+    so at 23 the stored nitrogen of a giant or sub-Neptune formed between 1 and 1.910 snow-line
+    distances also keeps 1% (`DerivedBody::inventory`, `BulkComposition`). Their envelopes,
+    partial pressures and wire do not move. T54.a's bless note counts these with the solid bodies.
+  - _For T54.a:_ removing the hold also edits `planetary/chem/inventory.rs`
+    (`element_inventory_under`), which T54.a's _Files_ does not name. When it builds a body's
+    `InventoryInputs`, it takes the distance and snow line `derive_body` used (for a moon, its
+    nursery's snow line and its own distance), so that the element inventory's carriers stay the
+    body's inventory to the bit for bodies between the two lines. The chem test checks this for
+    the table's bodies under both lines.
+  - _Files beyond the task's:_ `planetary/derive/mod.rs` (`derive_body` reads the formation
+    temperature of `placed.formation_distance` in `disc`, through a new private `inventory_of`
+    that keeps `derive_body_under` within Clippy's 100 lines) and `chem/inventory/tests.rs`.
+  - _Moons follow at 23 through `derive_body`._ The rule reads the disc it is given. A moon is
+    derived on its nursery disc at its own distance, so at 23 a regular moon takes the
+    circumplanetary ammonia line, T_f = 170 K × √(d_ice ÷ a). That is T56.c's nitrogen bullet,
+    which this subtask meets for regular moons. A captured moon takes it at its present distance
+    in the nursery until T56.c moves it to its parent's formation distance in the star's disc.
+    Reported to "main" (2026-10-15); lean: keep the rule general. A moon's formation distance is
+    its present orbit, so at 23 its nitrogen steps a hundredfold when tidal recession carries it
+    past 1.910 nursery ice lines, as its snow-line side and ice fraction already do at 22: a pure
+    function of the time, which T56.c's tests should pin.
+  - _Test figures._ The zero-age Sun's figure is tested at 0.7 L☉, 4.32 ± 0.01 au, as the plan
+    states it. It is also tested about the generated zero-age Sun's own disc, whose zero-age
+    luminosity (plan 06's main sequence, Tout et al. 1996) is 0.6977 L☉ and snow line 2.255 au:
+    there the line lies at 4.308 au, so that test reads 4.31 ± 0.01 au. With 131 K both figures fell inside 3.80 ±
+    0.01. The tests are named `nitrogen_s_carrier_holds_half_of_it_by_123_k`,
+    `the_zero_age_sun_s_ammonia_line_lies_at_4_3_au`,
+    `nitrogen_takes_the_icy_boost_only_beyond_the_ammonia_line`,
+    `an_inventory_formed_inside_the_snow_line_does_not_move`,
+    `the_table_under_the_ammonia_line_moves_only_ceres_s_nitrogen`,
+    `the_ammonia_line_is_a_step_in_formation_distance_only`,
+    `the_ammonia_line_is_held_only_until_the_batch_s_bump`, and in `chem/inventory/tests.rs`,
+    `the_nitrogen_carrier_follows_the_ammonia_line`.
+  - _Ruled (decision-ammonia-line, 2026-10-15): the ammonia line is at 123 K._ Lodders (2003, ApJ
+    591, 1220; read) gives nitrogen's carrier two temperatures at 10⁻⁴ bar. Ammonia hydrate appears
+    at 131 K (Table 8 col. 2; Table 10), and "50% of all nitrogen is in this hydrate by 123 K"
+    (Table 8 col. 4; §3.4.3). The boost treats a body's nitrogen as condensed, which is the 50%
+    figure. That is the figure decision-p14-moons §2.2 names and the one `Element::N` holds, so
+    `AMMONIA_HYDRATE_CONDENSATION` is `Element::N.condensation_temperature()`, 123 K, and 131 K is
+    retired. The boost begins at (170 ÷ 123)² = 1.910 d_snow: 4.32 au about the zero-age Sun,
+    5.16 √L au about a host of zero-age luminosity L, and 22.7 R_J about the generated Jupiter.
+    The snow line's 170 K is Hayashi's rule of thumb (Kennedy and Kenyon 2008; Lecar et al. 2006,
+    145–170 K by pressure). For water the appearance and 50% figures lie within about 4 K, so both
+    lines mark where their carrier has condensed. Lodders's figures are at 10⁻⁴ bar, above the
+    disc's pressure at 4–5 au. At one pressure her water and ammonia figures put the line at
+    1.93–2.14 snow-line distances, so 1.910 is its near edge. A pressure-matched 116 K
+    (2.1 d_snow) is a deferred finding.
+- **Deferred findings (2026-10-13 rule)**, from P14.T50.c and decision-ammonia-line:
+  - _Pressure match._ A 50% figure at the snow line's pressure is about 116–117 K, a line at about
+    2.1 d_snow. Open until the snow line's pressure convention is ruled.
+  - _Kinetic end-member._ If N₂ does not convert to NH₃, nitrogen condenses only as N₂ clathrate
+    (58 K appearance, 52 K 50%; Lodders 2003, Table 10, §3.4.3). The boost's Titan calibration
+    rests on NH₃-borne nitrogen, so the equilibrium case stands.
+  - _The element registry_ (`substance/element.rs`). Lodders 2003 is now read: Table 8 col. 4
+    confirms all 23 values other than H and He, including Mg 1,336, Ca 1,517, V 1,429, P 1,229,
+    Cl 948, Ar 47, K 1,006, Cr 1,296 and Mn 1,158. H 182 K and He 3 K are col. 2 appearance
+    figures, and neither element has a 50% value. LPG09's Mg and Si at 1,354 K and Ca at 1,659 K
+    are col. 2 figures too; its Yb to V values are Lodders's col. 4 one row up, the offset
+    T50.a's findings recorded. The registry's documentation still says Lodders 2003 was not read.
+  - _Titan's nitrogen._ Mandt et al. (2014, ApJ 788, L24; abstract read via OpenAlex) conclude that
+    it "must have originated as ammonia ice formed in the PSN under conditions similar to that of
+    cometary formation": the protosolar nebula, not Saturn's subnebula, which bears on T56.c's
+    circumplanetary rule for regular moons. Mousis, Gautier and Bockelée-Morvan (2002, Icarus
+    156, 162) remain unread.
+  - _Ceres_ (2.7675 au, T_f 153.6 K at 0.7 L☉, 153.5 K in the generated disc) loses the boost, though its ammoniated phyllosilicates
+    (De Sanctis et al. 2015, Nature 528, 241; its citation checked, not read) point to an origin
+    beyond the ammonia line or NH₃ carried inward: the rule's known counter-case
+    (decision-p14-moons §F1-plan), not tuned.

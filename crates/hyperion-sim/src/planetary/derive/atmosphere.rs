@@ -9,7 +9,9 @@
 //!   `planet.volatiles` ([`VolatileDraws`]), is the body's water, carbon and nitrogen, each a
 //!   log-normal multiple of Earth's per unit mass ([`volatile_inventory`]), raised beyond the snow
 //!   line where ices condensed, where a body's water is its bulk ice; a body that migrated keeps the
-//!   inventory of the side it formed on. Radiogenic argon grows with age from the decay of ⁴⁰K.
+//!   inventory of the side it formed on. From version 23 nitrogen is raised only beyond the
+//!   ammonia line, where its carrier, ammonia hydrate, condensed (P14.T50.c, held by
+//!   `AMMONIA_LINE_VERSION`). Radiogenic argon grows with age from the decay of ⁴⁰K.
 //!   The same stream's words 3–5 rank its sulphur, chlorine and mantle redox, which the element
 //!   inventory reads ([`chem`](crate::planetary::chem), P14.T50.a); nothing here reads them.
 //! - **Escape** (P14.T13.b). A gas is retained over the system's age when its Jeans parameter λ =
@@ -41,16 +43,16 @@
 //! a giant's internal heat enters only its gas envelope's temperature, so that the two can be
 //! told apart (ruling 112.7).
 
-use crate::Seed;
 use crate::id::BodyId;
 use crate::math;
+use crate::planetary::chem::redox::SNOW_LINE_TEMPERATURE;
 use crate::planetary::context::XuvHistory;
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide};
 use crate::planetary::derive::irradiation::BondAlbedo;
 use crate::planetary::params::{ICY_WATER_FRACTION, THIN_ENVELOPE_FRACTION};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
-use crate::substance::saturation_pressure;
+use crate::substance::{Element, saturation_pressure};
 use crate::units::consts::{
     BOLTZMANN_CONSTANT, EARTH_MASS_KG, EARTH_RADIUS_M, GRAVITATIONAL_CONSTANT, METRES_PER_AU,
     SECONDS_PER_JULIAN_YEAR,
@@ -59,6 +61,7 @@ use crate::units::{
     EarthMasses, JoulesPerSquareMetre, Kelvin, Kilograms, Metres, Pascals, SolarLuminosities,
     SolarMasses, WattsPerSquareMetre, Years,
 };
+use crate::{GENERATOR_VERSION, GeneratorVersion, Seed};
 
 /// The atomic mass constant, kg (CODATA 2022: 1.660 539 068 92 × 10⁻²⁷ kg), in which molecular
 /// masses are counted.
@@ -375,7 +378,113 @@ pub const POTASSIUM_40_HALF_LIFE: Years = Years::new(1.248e9);
 /// unit mass: 100, from Titan's 9 × 10¹⁸ kg of nitrogen over its 1.35 × 10²³ kg, about 105 times
 /// Earth's share (the lane's, provisional). Its ices carried ammonia and carbon that the inner
 /// disc never condensed (the plan's "raised beyond the snow line").
+///
+/// Carbon takes it beyond the snow line. Nitrogen takes it beyond the snow line below generator
+/// version 23 (`AMMONIA_LINE_VERSION`), and from it only where its carrier, ammonia hydrate,
+/// condensed: beyond the ammonia line ([`nitrogen_boosted`], P14.T50.c).
 pub const ICY_VOLATILE_BOOST: f64 = 100.0;
+
+/// The temperature at or below which nitrogen's icy carrier, ammonia monohydrate (NH₃·H₂O), holds
+/// half of a solar-composition gas's nitrogen, K: 123, nitrogen's 50% condensation temperature at
+/// 10⁻⁴ bar, the element registry's ([`Element::N`]'s
+/// [`condensation_temperature`](Element::condensation_temperature)), so that the model holds one
+/// figure (P14.T50.c; decision-ammonia-line, 2026-10-15).
+///
+/// Lodders (2003, ApJ 591, 1220, read), Table 8, column 4, at 10⁻⁴ bar total pressure ("N … 131
+/// NH3·H2O 123 NH3·H2O"), and §3.4.3: "Under equilibrium conditions, ammonia hydrate (NH3·H2O)
+/// condenses at 131 K by the reaction of ammonia gas and water ice, and 50% of all nitrogen is in
+/// this hydrate by 123 K." The boost treats a body's nitrogen as condensed, which is the 50%
+/// figure; 131 K, column 2, is where the hydrate appears and holds about none of it. Lodders,
+/// Palme and Gail (2009, arXiv:0901.1149, Table 1, read) give the same 123 K, "taken from [03L]".
+pub const AMMONIA_HYDRATE_CONDENSATION: Kelvin = Element::N.condensation_temperature();
+
+/// The temperature of the disc a body formed in, at its formation distance `formation_distance`,
+/// where the disc's snow line is `snow_line` (P14.T50.c): the disc's Hayashi profile, T ∝ r^−½
+/// ([`disc`](crate::planetary::disc)), at the snow line's [`SNOW_LINE_TEMPERATURE`], so
+/// `T_f` = 170 K × √(`d_snow` ÷ `d_form`).
+///
+/// The profile is Hayashi's (1981, Prog. Theor. Phys. Suppl. 70, 35, not read), as Ida and Lin
+/// (2004, ApJ 604, 388, arXiv:astro-ph/0312144, §2.3, eqs. 14 and 15, read) quote it: "T = 280
+/// (a/1AU)^−1/2 (L∗/L⊙)^1/4 K", with the ice line where "T ≃ 170K". Normalised to 170 K at the
+/// snow line as built, the ammonia line keeps its ratio to the snow line exactly.
+///
+/// Both distances are positive and finite. A planet's, dwarf planet's or belt member's disc is
+/// its star's, at the host's zero-age luminosity, so `T_f` does not change with time, and a body
+/// that migrated keeps its formation distance's, as its [`SnowLineSide`] does. A moon derived in
+/// its planet's nursery reads the nursery's (P14.T56.c). Outside that range the temperature is
+/// infinite at a formation distance of +0 and not a number for a negative distance, a negative
+/// snow line or a NaN, none of which [`nitrogen_boosted`] boosts; a snow line of zero gives 0 K.
+///
+/// # Examples
+///
+/// The generated zero-age Sun's disc is 170 K at its 2.255 au snow line and 123 K at 4.31 au:
+///
+/// ```
+/// use hyperion_sim::planetary::derive::atmosphere::formation_temperature;
+/// use hyperion_sim::units::Metres;
+/// use hyperion_sim::units::consts::METRES_PER_AU;
+///
+/// let au = |x: f64| Metres::new(x * METRES_PER_AU);
+/// let at = |d: f64| formation_temperature(au(d), au(2.255)).value();
+/// assert!((at(2.255) - 170.0).abs() < 1e-9);
+/// assert!((at(4.31) - 123.0).abs() < 0.2);
+/// ```
+#[must_use]
+pub fn formation_temperature(formation_distance: Metres, snow_line: Metres) -> Kelvin {
+    Kelvin::new(SNOW_LINE_TEMPERATURE.value() * (snow_line / formation_distance).sqrt())
+}
+
+/// Whether a body formed at the temperature `formation_temperature` holds nitrogen's icy carrier
+/// ([`AMMONIA_HYDRATE_CONDENSATION`]): true at or below 123 K (P14.T50.c). From generator version
+/// 23 (`AMMONIA_LINE_VERSION`) a body formed beyond the snow line takes [`ICY_VOLATILE_BOOST`] in
+/// its nitrogen only where this holds; below it, everywhere beyond the snow line. Water and carbon
+/// keep the snow line, at [`SNOW_LINE_TEMPERATURE`].
+#[must_use]
+pub fn nitrogen_boosted(formation_temperature: Kelvin) -> bool {
+    formation_temperature <= AMMONIA_HYDRATE_CONDENSATION
+}
+
+/// The ammonia line of a disc whose snow line is `snow_line`: where its
+/// [`formation_temperature`] falls to [`AMMONIA_HYDRATE_CONDENSATION`], (170 ÷ 123)² = 1.910
+/// times the snow line (P14.T50.c). That is 4.31 au about the generated zero-age Sun, of
+/// 0.6977 L☉ (plan 06's zero-age main sequence, Tout et al. 1996), whose snow line lies at
+/// 2.255 au (4.32 au at 0.7 L☉), and 5.16 √L au about a host of zero-age luminosity L.
+#[must_use]
+pub fn ammonia_line(snow_line: Metres) -> Metres {
+    let ratio = SNOW_LINE_TEMPERATURE.value() / AMMONIA_HYDRATE_CONDENSATION.value();
+    snow_line * (ratio * ratio)
+}
+
+/// The generator version from which a body's nitrogen takes the ammonia line: 23, the 22 → 23
+/// batch's bump (P14.T50.c; plan 14, "Order and parallelism", Phase L).
+///
+/// Below it [`NitrogenLine::in_force`] is the snow line, so that every inventory is version 22's
+/// bit for bit until P14.T54.a's wiring, which removes this hold and its tripwire
+/// (`the_ammonia_line_is_held_only_until_the_batch_s_bump`).
+pub(crate) const AMMONIA_LINE_VERSION: GeneratorVersion = GeneratorVersion::new(23);
+
+/// The line beyond which a body's nitrogen takes [`ICY_VOLATILE_BOOST`] (P14.T50.c, held by
+/// [`AMMONIA_LINE_VERSION`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) enum NitrogenLine {
+    /// The snow line, as water's and carbon's: version 22's rule.
+    Snow,
+    /// The ammonia line ([`nitrogen_boosted`]), beyond the snow line.
+    Ammonia,
+}
+
+impl NitrogenLine {
+    /// The line this generator version gives: the ammonia line from [`AMMONIA_LINE_VERSION`], and
+    /// the snow line below it.
+    #[must_use]
+    pub(crate) fn in_force() -> Self {
+        if GENERATOR_VERSION >= AMMONIA_LINE_VERSION {
+            Self::Ammonia
+        } else {
+            Self::Snow
+        }
+    }
+}
 
 /// The log-normal scatter of each volatile's inventory about its median, dex: 0.5 (the lane's,
 /// provisional). Earth, Venus and Mars differ in nitrogen and carbon per unit mass by factors of a
@@ -548,20 +657,53 @@ impl VolatileInventory {
 }
 
 /// The volatile inventory of a body of mass `mass` and bulk composition `fractions`, formed on
-/// `formed`'s side of the snow line, with ranks `draws`, at age `age` (P14.T13.a).
+/// `formed`'s side of the snow line at the temperature `formation_temperature`, with ranks
+/// `draws`, at age `age` (P14.T13.a; P14.T50.c).
 ///
 /// - Water, carbon and nitrogen are each Earth's per unit mass ([`EARTH_WATER_PER_MASS`],
 ///   [`EARTH_CARBON_DIOXIDE_PER_MASS`], [`EARTH_NITROGEN_PER_MASS`]) times a log-normal multiple
 ///   of median 1 and scatter [`VOLATILE_SCATTER_DEX`], at the body's rank.
-/// - Beyond the snow line carbon and nitrogen are [`ICY_VOLATILE_BOOST`] times richer, and the
-///   water is the larger of that and the body's bulk water, its ice.
+/// - Beyond the snow line carbon is [`ICY_VOLATILE_BOOST`] times richer, and the water is the
+///   larger of that and the body's bulk water, its ice.
+/// - Nitrogen is [`ICY_VOLATILE_BOOST`] times richer beyond the snow line below generator
+///   version 23 (`AMMONIA_LINE_VERSION`). From it, only where the body also formed at or below
+///   ammonia hydrate's [`AMMONIA_HYDRATE_CONDENSATION`] ([`nitrogen_boosted`]); between the two
+///   lines it is Earth's per unit mass at its rank.
 /// - Argon is Earth's per unit of rock, grown as the ⁴⁰K of a body of the Sun's age has
 ///   decayed: Earth's × (1 − e^(−λt)) ÷ (1 − e^(−λ × 4.57 Gyr)).
+///
+/// `formation_temperature` is the disc's at the body's formation distance
+/// ([`formation_temperature`]); the caller keeps it consistent with `formed`.
 #[must_use]
 pub fn volatile_inventory(
     mass: EarthMasses,
     fractions: &MassFractions,
     formed: SnowLineSide,
+    formation_temperature: Kelvin,
+    draws: &VolatileDraws,
+    age: Years,
+) -> VolatileInventory {
+    volatile_inventory_under(
+        NitrogenLine::in_force(),
+        mass,
+        fractions,
+        formed,
+        formation_temperature,
+        draws,
+        age,
+    )
+}
+
+/// [`volatile_inventory`] with nitrogen's boost beyond the line `nitrogen_line`, for the hold's tests
+/// (P14.T50.c): [`volatile_inventory`] is this under [`NitrogenLine::in_force`]. The water, carbon
+/// and argon do not read the line.
+#[must_use]
+pub(crate) fn volatile_inventory_under(
+    nitrogen_line: NitrogenLine,
+    mass: EarthMasses,
+    fractions: &MassFractions,
+    formed: SnowLineSide,
+    formation_temperature: Kelvin,
     draws: &VolatileDraws,
     age: Years,
 ) -> VolatileInventory {
@@ -572,13 +714,24 @@ pub fn volatile_inventory(
         SnowLineSide::Inside => 1.0,
         SnowLineSide::Beyond => ICY_VOLATILE_BOOST,
     };
+    let nitrogen_boost = match (nitrogen_line, formed) {
+        (NitrogenLine::Snow, _) => boost,
+        (NitrogenLine::Ammonia, SnowLineSide::Inside) => 1.0,
+        (NitrogenLine::Ammonia, SnowLineSide::Beyond) => {
+            if nitrogen_boosted(formation_temperature) {
+                ICY_VOLATILE_BOOST
+            } else {
+                1.0
+            }
+        }
+    };
     let drawn_water = EARTH_WATER_PER_MASS * multiple(draws.water) * kg;
     let water = match formed {
         SnowLineSide::Inside => drawn_water,
         SnowLineSide::Beyond => drawn_water.max(fractions.water() * kg),
     };
     let carbon = EARTH_CARBON_DIOXIDE_PER_MASS * boost * multiple(draws.carbon) * kg;
-    let nitrogen = EARTH_NITROGEN_PER_MASS * boost * multiple(draws.nitrogen) * kg;
+    let nitrogen = EARTH_NITROGEN_PER_MASS * nitrogen_boost * multiple(draws.nitrogen) * kg;
     let decay = core::f64::consts::LN_2 / POTASSIUM_40_HALF_LIFE.value();
     let grown = |t: f64| 1.0 - math::exp(-decay * t.max(0.0));
     let argon = EARTH_ARGON_PER_ROCK_MASS * fractions.rock() * kg * grown(age.value())
@@ -1476,18 +1629,20 @@ fn greenhouse(
 /// ```
 /// use hyperion_sim::planetary::derive::atmosphere::{
 ///     AtmosphereInputs, Crust, Insolation, SurfaceMaterial, SurfaceState, VolatileDraws,
-///     atmosphere, earth_xuv_fluence, volatile_inventory,
+///     atmosphere, earth_xuv_fluence, formation_temperature, volatile_inventory,
 /// };
 /// use hyperion_sim::planetary::derive::{SnowLineSide, composition};
 /// use hyperion_sim::units::{
 ///     EarthMasses, EarthFluxes, EarthRadii, Kelvin, Kilograms, Metres, WattsPerSquareMetre, Years,
 /// };
-/// use hyperion_sim::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M};
+/// use hyperion_sim::units::consts::{EARTH_MASS_KG, EARTH_RADIUS_M, METRES_PER_AU};
 ///
 /// let solved = composition(EarthMasses::new(1.0), EarthRadii::new(1.0), SnowLineSide::Inside, EarthFluxes::new(1.0))?;
 /// let fractions = solved.fractions();
+/// // Formed at 1 au, inside the zero-age Sun's 2.26 au snow line.
+/// let formed_at = formation_temperature(Metres::new(METRES_PER_AU), Metres::new(2.26 * METRES_PER_AU));
 /// let inventory = volatile_inventory(
-///     EarthMasses::new(1.0), &fractions, SnowLineSide::Inside, &VolatileDraws::MEDIAN, Years::new(4.57e9),
+///     EarthMasses::new(1.0), &fractions, SnowLineSide::Inside, formed_at, &VolatileDraws::MEDIAN, Years::new(4.57e9),
 /// );
 /// let earth = atmosphere(&AtmosphereInputs {
 ///     mass: Kilograms::new(EARTH_MASS_KG),

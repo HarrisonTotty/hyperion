@@ -6,10 +6,11 @@
 //! [`Reservoir`]s, with the mantle's one redox figure, ΔIW ([`redox`](super::redox)).
 //!
 //! - **The stored carriers.** P14.T13.a's water, carbon dioxide, nitrogen and radiogenic ⁴⁰Ar are
-//!   kept as they are drawn ([`volatile_inventory`]), so that [`ElementInventory::volatiles`], the
-//!   view of them that [`VolatileInventory`] now is, returns today's values to the bit. Their
-//!   elements are their shares of each carrier by the element registry's weights, in the
-//!   exchangeable reservoir.
+//!   kept as they are drawn
+//!   ([`volatile_inventory`](crate::planetary::derive::atmosphere::volatile_inventory)),
+//!   so that [`ElementInventory::volatiles`], the view of them that [`VolatileInventory`] now is,
+//!   returns today's values to the bit. Their elements are their shares of each carrier by the
+//!   element registry's weights, in the exchangeable reservoir.
 //! - **Sulphur and chlorine**, in the mantle, each a log-normal multiple of
 //!   [`VOLATILE_SCATTER_DEX`] about the bulk silicate Earth's per unit mass of the body's rock, at
 //!   the ranks of words 3 and 4 of `planet.volatiles`. A body formed beyond the snow line takes
@@ -31,7 +32,8 @@
 use crate::math;
 use crate::planetary::chem::redox::{self, RedoxClass, RedoxInputs};
 use crate::planetary::derive::atmosphere::{
-    VOLATILE_SCATTER_DEX, VolatileDraws, VolatileInventory, volatile_inventory,
+    NitrogenLine, VOLATILE_SCATTER_DEX, VolatileDraws, VolatileInventory, formation_temperature,
+    volatile_inventory_under,
 };
 use crate::planetary::derive::composition::{MassFractions, SnowLineSide};
 use crate::stellar::draws::UnitUniform;
@@ -113,7 +115,8 @@ pub struct InventoryInputs {
     /// The side of its host's snow line it formed on: the atmosphere's
     /// ([`DerivedBody::formed`](crate::planetary::derive::DerivedBody::formed)), which sets its
     /// carriers and its chlorine. The caller keeps it consistent with the distances, which set its
-    /// ΔIW.
+    /// ΔIW and its formation temperature, and from generator version 23 whether its nitrogen
+    /// takes the icy boost (P14.T50.c).
     pub formed: SnowLineSide,
     /// Where it formed from its host.
     pub formation_distance: Metres,
@@ -142,8 +145,9 @@ pub struct ElementInventory {
 
 impl ElementInventory {
     /// The stored carriers, P14.T13.a's water, carbon dioxide, nitrogen and radiogenic argon: the
-    /// [`VolatileInventory`] that [`volatile_inventory`] draws, to the bit, which the atmosphere
-    /// reads.
+    /// [`VolatileInventory`] that
+    /// [`volatile_inventory`](crate::planetary::derive::atmosphere::volatile_inventory)
+    /// draws, to the bit, which the atmosphere reads.
     #[must_use]
     pub const fn volatiles(&self) -> &VolatileInventory {
         &self.carriers
@@ -257,7 +261,11 @@ impl ElementInventory {
 
 /// The element inventory of the body `inputs` describe (P14.T50.a).
 ///
-/// - Its carriers are [`volatile_inventory`]'s of the same inputs, to the bit.
+/// - Its carriers are
+///   [`volatile_inventory`](crate::planetary::derive::atmosphere::volatile_inventory)'s
+///   of the same inputs, at the formation temperature of its formation distance and its host's
+///   snow line ([`formation_temperature`]), to the bit. From generator version 23 its nitrogen
+///   therefore takes the icy boost only beyond the ammonia line (P14.T50.c).
 /// - Its sulphur is [`BSE_SULPHUR_PER_MASS`] of its rock times 10^(σ z), z the standard normal at
 ///   its sulphur rank and σ [`VOLATILE_SCATTER_DEX`]; its chlorine the same with
 ///   [`BSE_CHLORINE_PER_MASS`], or [`CI_CHLORINE_PER_MASS`] for a body formed beyond the snow line,
@@ -280,7 +288,9 @@ impl ElementInventory {
 /// use hyperion_sim::planetary::chem::inventory::{
 ///     BSE_SULPHUR_PER_MASS, ElementInventory, InventoryInputs, Reservoir, element_inventory,
 /// };
-/// use hyperion_sim::planetary::derive::atmosphere::{VolatileDraws, volatile_inventory};
+/// use hyperion_sim::planetary::derive::atmosphere::{
+///     VolatileDraws, formation_temperature, volatile_inventory,
+/// };
 /// use hyperion_sim::planetary::derive::{SnowLineSide, composition};
 /// use hyperion_sim::substance::Element;
 /// use hyperion_sim::units::consts::{EARTH_MASS_KG, METRES_PER_AU};
@@ -302,16 +312,34 @@ impl ElementInventory {
 /// let rock = fractions.rock() * EARTH_MASS_KG;
 /// let sulphur = earth.mass(Element::S, Reservoir::Mantle).value();
 /// assert!((sulphur / (BSE_SULPHUR_PER_MASS * rock) - 1.0).abs() < 1e-12);
-/// let carriers = volatile_inventory(mass, &fractions, SnowLineSide::Inside, &VolatileDraws::MEDIAN, inputs.age);
+/// let formed_at = formation_temperature(inputs.formation_distance, inputs.snow_line);
+/// let carriers =
+///     volatile_inventory(mass, &fractions, SnowLineSide::Inside, formed_at, &VolatileDraws::MEDIAN, inputs.age);
 /// assert_eq!(*earth.volatiles(), carriers);
 /// # Ok::<(), hyperion_sim::planetary::derive::composition::SolveCompositionError>(())
 /// ```
 #[must_use]
 pub fn element_inventory(inputs: &InventoryInputs) -> ElementInventory {
-    let carriers = volatile_inventory(
+    element_inventory_under(NitrogenLine::in_force(), inputs)
+}
+
+/// [`element_inventory`] with its nitrogen carrier boosted beyond the line `nitrogen_line`, for
+/// the hold's tests (P14.T50.c): [`element_inventory`] is this under [`NitrogenLine::in_force`].
+/// The carriers are
+/// [`volatile_inventory`](crate::planetary::derive::atmosphere::volatile_inventory)'s
+/// under the same line, at the formation temperature of the inputs' distances
+/// ([`formation_temperature`]), so the nitrogen follows them.
+#[must_use]
+pub(crate) fn element_inventory_under(
+    nitrogen_line: NitrogenLine,
+    inputs: &InventoryInputs,
+) -> ElementInventory {
+    let carriers = volatile_inventory_under(
+        nitrogen_line,
         inputs.mass,
         &inputs.fractions,
         inputs.formed,
+        formation_temperature(inputs.formation_distance, inputs.snow_line),
         &inputs.draws,
         inputs.age,
     );
