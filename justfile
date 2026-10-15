@@ -954,9 +954,22 @@ browser_crates := "hyperion-base hyperion-surface hyperion-testkit"
 # features. `_smart-ci-test` holds it to the workspace's.
 browser_native := "-p hyperion-base -p hyperion-surface -p hyperion-testkit --features hyperion-surface/testing"
 
-# How long one test binary may run on the browser target, in seconds: wasm-bindgen-test's Node mode
-# has no timeout of its own. The runner's `timeout` is coreutils', or `tools/portable/timeout`.
+# How long one runner call may run on the browser target, in seconds (a test binary, or a part of one,
+# `browser_split`): wasm-bindgen-test's Node mode has no timeout of its own. The runner's `timeout` is
+# coreutils', or `tools/portable/timeout`.
 browser_timeout := "600"
+
+# The browser target's library test binaries that run in parts, each part a runner call of its own
+# under its own `browser_timeout`: `<crate>=<filter>` entries, a crate's in their order. A crate's
+# library with filters f1 … fn runs n + 1 times: the k-th call the tests whose names contain fk (the
+# runner's filter, a substring, as libtest's) and none of f1 … f(k-1) (its `--skip`, the same
+# match), and the last those that contain none of them, so that every test runs once. `prepare`
+# fails if a filter is in none of its crate's test names. The surface crate's `material::` (its two
+# heaviest goldens, the class, weights and albedo tests) took 229 s of the library's 394 s, and the
+# rest 165 s (2026-10-15, in the heavy-test lock, at a 1-minute load of 8 to 20; each call's time
+# includes the runner's bindings and Electron's start), where in one call it took 406 s (R10.T10.a's
+# gate, 2026-10-14).
+browser_split := "hyperion-surface=material::"
 
 # Run the browser target's suites (`--lib --tests`, at the slow-test profile, since debug wasm is
 # slow) on the V8 that Electron ships, through `tools/electron-node/node` (R04 Design note 13).
@@ -970,10 +983,11 @@ test-wasm-browser: (_browser "prepare")
 # The browser target's suites in two steps: `prepare` proves the shim, builds both targets and
 # compares the test lists, outside the lock; `run` runs the tests, built already, and its caller
 # holds the heavy-test lock. `prepare` records each crate's test binaries as its build reports them
-# (`browser-tests/<crate>` in the target directory: path, crate directory, source), and `run` hands
-# each to the runner as `cargo test` would, from its crate's directory, so that no cargo runs under
-# the lock (perf-wasm W3): CI-93's run waited 10 minutes there for another build's lock on the
-# target directory, with nothing to build. Both lists come from one `cargo test` over the three
+# (`browser-tests/<crate>` in the target directory: path, crate directory, source, and `lib` for the
+# library's, which `browser_split` may run in parts, or `test`), and `run` hands each to the runner
+# as `cargo test` would, from its crate's directory, so that no cargo runs under the lock (perf-wasm
+# W3): CI-93's run waited 10 minutes there for another build's lock on the target directory, with
+# nothing to build. Both lists come from one `cargo test` over the three
 # crates at once, with each test attributed to its crate by the binary it is listed from: a
 # `cargo test -p` of one crate resolves features for that crate alone, and so built every crate a
 # second time for its list (47 s of a cold `ci`, 2026-10-03), and again after every edit. `crates`,
@@ -1007,22 +1021,63 @@ _browser mode crates=browser_crates native=browser_native: (_wasm-preflight "bro
     binaries="${CARGO_TARGET_DIR:-target}/browser-tests"
     case "{{ mode }}" in
         run)
+            # The runner writes each binary's bindings to a new directory in the system's temporary
+            # directory (Rust's `env::temp_dir`: TMPDIR, or on Windows TMP, then TEMP, which Git Bash
+            # hands a native program as Windows paths), and has no option to put them elsewhere; a
+            # runner stopped by its timeout leaves them there. Each call is given a directory of its own
+            # under the target directory instead, removed when the call ends, or when this recipe does.
+            # Listing, as `prepare` does, writes none.
+            scratch="${CARGO_TARGET_DIR:-target}/browser-tmp"
+            mkdir -p "$scratch"
+            scratch="$(CDPATH='' cd -- "$scratch" && pwd -P)"
+            tmp=""
+            trap 'if [[ -n "$tmp" ]]; then rm -rf "$tmp"; fi; rmdir "$scratch" 2>/dev/null || true' EXIT
             for crate in {{ crates }}; do
                 if [[ ! -f "$binaries/$crate" ]]; then
                     echo "error: no list of $crate's browser test binaries ($binaries/$crate): run \`just _browser prepare\` first" >&2
                     exit 1
                 fi
+                # The crate's `browser_split` filters, in their order.
+                filters=()
+                count=0
+                for split in {{ browser_split }}; do
+                    if [[ "${split%%=*}" == "$crate" ]]; then
+                        filters+=("${split#*=}")
+                        count=$((count + 1))
+                    fi
+                done
                 runs=()
                 while IFS= read -r line; do runs+=("$line"); done <"$binaries/$crate"
                 for run in ${runs[@]+"${runs[@]}"}; do
-                    IFS="$(printf '\t')" read -r binary directory source <<<"$run"
-                    echo "     Running $source ($binary)"
-                    status=0
-                    (cd "$directory" && timeout {{ browser_timeout }} wasm-bindgen-test-runner "$binary") || status=$?
-                    if [[ "$status" -ne 0 ]]; then
-                        echo "error: $crate's browser tests failed: $source ($binary), exit $status" >&2
-                        exit "$status"
-                    fi
+                    IFS="$(printf '\t')" read -r binary directory source kind <<<"$run"
+                    # One call, or n + 1 for a library with n filters: the k-th (from 0) the tests whose
+                    # names contain filter k and none before it, the last those that contain none.
+                    parts=0
+                    if [[ "$kind" == lib ]]; then parts="$count"; fi
+                    part=0
+                    while [[ "$part" -le "$parts" ]]; do
+                        args=()
+                        if [[ "$part" -lt "$parts" ]]; then args+=("${filters[$part]}"); fi
+                        skip=0
+                        while [[ "$skip" -lt "$part" ]]; do
+                            args+=(--skip "${filters[$skip]}")
+                            skip=$((skip + 1))
+                        done
+                        label="${args[*]+ ${args[*]}}"
+                        echo "     Running $source$label ($binary)"
+                        tmp="$(mktemp -d "$scratch/run.XXXXXX")"
+                        status=0
+                        (cd "$directory" && TMPDIR="$tmp" TMP="$tmp" TEMP="$tmp" \
+                            timeout {{ browser_timeout }} wasm-bindgen-test-runner "$binary" ${args[@]+"${args[@]}"}) \
+                            || status=$?
+                        rm -rf "$tmp"
+                        tmp=""
+                        if [[ "$status" -ne 0 ]]; then
+                            echo "error: $crate's browser tests failed: $source$label ($binary), exit $status" >&2
+                            exit "$status"
+                        fi
+                        part=$((part + 1))
+                    done
                 done
             done
             exit 0
@@ -1052,15 +1107,16 @@ _browser mode crates=browser_crates native=browser_native: (_wasm-preflight "bro
             continue
         directory = os.path.dirname(message["manifest_path"])
         target = message["target"]
+        kind = "test" if "test" in target["kind"] or "bin" in target["kind"] else "lib"
         found.setdefault(os.path.basename(directory), []).append(
-            (target["kind"] == ["test"], target["name"], message["executable"], directory, target["src_path"]))
+            (target["kind"] == ["test"], target["name"], message["executable"], directory, target["src_path"], kind))
     for crate in crates:
         if not found[crate]:
             sys.exit(f"error: the build reported no browser test binary of {crate}")
         path = os.path.join(out, crate)
         with open(path + ".new", "w", encoding="utf-8", newline="\n") as listing:
-            for _, _, binary, directory, source in sorted(found[crate]):
-                listing.write(f"{binary}\t{directory}\t{os.path.relpath(source, directory)}\n")
+            for _, _, binary, directory, source, kind in sorted(found[crate]):
+                listing.write(f"{binary}\t{directory}\t{os.path.relpath(source, directory)}\t{kind}\n")
         os.replace(path + ".new", path)
     ' "$binaries" {{ crates }}
     cargo test "${host[@]}" --no-run
@@ -1104,6 +1160,14 @@ _browser mode crates=browser_crates native=browser_native: (_wasm-preflight "bro
             exit 1
         fi
         echo "$crate: $(grep -c . <<<"$on_native") tests on the browser target, as natively less native_only"
+        # A `browser_split` filter in none of the crate's test names (its module renamed or gone)
+        # would leave the whole library to the last call, and its time with it.
+        for split in {{ browser_split }}; do
+            if [[ "${split%%=*}" == "$crate" ]] && ! grep -qF -- "${split#*=}" <<<"$on_browser"; then
+                echo "error: browser_split's filter ${split#*=} is in none of $crate's test names on the browser target" >&2
+                exit 1
+            fi
+        done
     done
 
 # Run the Criterion benchmarks, e.g. `just bench -- samplers`.
