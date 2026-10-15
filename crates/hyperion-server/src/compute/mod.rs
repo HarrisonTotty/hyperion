@@ -61,7 +61,7 @@ pub use single_flight::{Flight, SingleFlight};
 pub use sky::{ForceSkyCapsError, SkyCaps, SkyTablesSource};
 pub use sky_cells::SkyCellCounters;
 pub use sky_tables::SkyTablesCounters;
-pub use systems::{SharedBriefCache, SharedSystemCache};
+pub use systems::{SharedBriefCache, SharedSystemCache, SystemStarsHandle};
 
 pub(crate) use pool::panic_message;
 pub(crate) use sky_cells::SharedSkyCellCache;

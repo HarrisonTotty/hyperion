@@ -359,10 +359,10 @@ where a name has changed by the time this plan runs only the call sites here cha
 ## Tasks
 
 T0 comes first. T1–T3 are a chain in the sim. T4 (lensing) needs only T1 and can run beside
-everything. T5 follows T2; its subtasks run in order. T6 (protocol for modes) follows T3. T7
-(Knowledge) is independent of T5 and can start after T0. T8 follows T5 and T7. T9 follows T8. T10
-(guide) can be written at any time and must land before T11 and T12, which follow T6 and T9 and are
-independent of each other. T13 closes.
+everything. T5 follows T2; its subtasks run in order. T6 (protocol for modes) follows T3, and T6.b
+(the summary's mode) follows T6 and lands before T11. T7 (Knowledge) is independent of T5 and can
+start after T0. T8 follows T5 and T7. T9 follows T8. T10 (guide) can be written at any time and must
+land before T11 and T12, which follow T6 and T9 and are independent of each other. T13 closes.
 
 Rust files are under `crates/hyperion-sim/src/` unless a path says otherwise.
 
@@ -513,6 +513,30 @@ Tests: wire forms; an integration test asks the same sphere in both modes and ge
 with `observed` present only in one; an observer outside the cube is `BadRequest` naming the field.
 Acceptance: `just ci`.
 
+- **P12.T6.b The summary's mode** (added 2026-10-15 by `decision-gg-port-d0.md` §6.2, from T6's
+  record below; not built yet). T6 as built is the range query's mode and `resolve_system`; this
+  subtask puts the mode on plan 06's `system_summary`, in the shape the Protocol section above
+  already gives it, so it is additive and `PROTOCOL_VERSION` stays 2. A defaulted
+  `mode: QueryModeDto` on `SystemSummaryRequest` (`#[serde(default)]`, written only when observed,
+  as on `SystemsInRangeRequest`), and an optional `observed: ObservedDto` on `SystemSummaryDto`,
+  written only in observed mode. In observed mode the server reads the system through
+  `observe::summary_observed` over the stars its `SharedSystemCache` already builds for the
+  summary: the stars, existence and age are `summary_at` the emitted time, `time` still echoes the
+  request, and `observed` carries the retardation with its stated error (`curvature_error`), as a
+  range row's does (`convert::observed_dto`). The mode's observer is checked by
+  `convert::observe::query_mode` (`bad_request` naming `mode`), after the summary's own checks; a
+  centre member stays refused as `system_summary` refuses it now. Two consequences to carry:
+  `SystemSummaryRequest` derives `Eq` and `Hash`, which `QueryModeDto` cannot (its position holds
+  `f64`s), so those derives go (nothing hashes the request); and in observed mode the summary's
+  `age_myr` and `existence` are the emitted time's, unlike a range row's, so `SystemSummaryDto`'s
+  docs ("at `time`") change and T11 subtracts no light age from them. Files:
+  `crates/hyperion-protocol/src/stellar.rs`, the server's `system_summary` handler and
+  `convert/stellar.rs`, `packages/protocol/src/generated/*`. Tests: the wire forms in both modes and
+  a summary request of plan 06's form read as `now`; over a socket, one system's summary asked in
+  both modes has the same `system` and `time`, `observed` only in the observed answer, and its
+  stars are `summary_observed`'s; an observer outside the cube is `bad_request` naming `mode`.
+  Acceptance: `just ci`.
+
 ### P12.T7 The Knowledge store
 
 - **P12.T7.a Records and levels.** `ContactRecord`, `Sighting`, `KnowledgeLevel`, `ContactId`
@@ -637,6 +661,15 @@ Files: under `apps/hyperion/src/renderer/src/`: `spatial/{marks,drawList,paint}.
 Tests: Vitest for the helpers and the readout in both modes; keyboard operation; no colour-only
 signal. Acceptance: `pnpm test`, `just ci`, and by eye: a supergiant known dead is shown alive from
 afar with its light age.
+
+_Amended 2026-10-15 (`decision-gg-port-d0.md` §6.1–§6.2, from T6 as built):_ an observed row's
+`age_myr` and `velocity_km_s` are the present's, as its `position` is (Design note 4), so in
+observed mode the readout shows the age then, `age_myr − light_age_yr ÷ 10⁶`, as an Observed value,
+and `NOT YET FORMED` where that is below zero; and `—` for the velocity, which is present state the
+crew cannot know, until a task puts the velocity at emission on the wire. A server built before T6
+ignores `mode` and answers `now`, so the readout never labels a row `AS OBSERVED` unless the row
+carries `observed`, whatever was asked. The one system's stars as observed come from T6.b's
+summary.
 
 ### P12.T12 Client: alert list and chart marks
 
@@ -1037,3 +1070,123 @@ lens_candidates, lenses_among}` and `FindLensesError::NotCoveredByCandidates`. `
   `tests/observe_in_system_golden.rs` pins `solar_like` and `close_binary` in
   `observe/in_system.golden`. This plan's galactic functions are unchanged. The subscription
   envelope that R03.T5.a built to P12.T9's design is recorded under P12.T9 above.
+- **T6 as built (lane `obs12d`, 2026-09-30, at `GENERATOR_VERSION` 16; ported onto
+  `rendering-and-planets` on 2026-10-15 at 22, the last item below).** No generated output moves
+  and no golden changes: the modes are new optional wire fields and a new kind, and a request or row
+  without them is byte for byte the one before. `PROTOCOL_VERSION` stays 2 (plan 04, design note
+  15).
+  - _Protocol._ The new `hyperion_protocol` module `observe.rs` holds `QueryModeDto`
+    (`{"type":"now"}` or `{"type":"observed","observer":…}`), `ObservedDto` (`emitted`,
+    `light_age_yr`, `apparent_position`, `curvature_error_ly`, `curvature_error_arcsec`),
+    `ResolveSystemRequest { universe, system, time, mode }` and
+    `ResolvedSystem { universe, time, record }`, whose `record` is a range row. `mode` is
+    `#[serde(default)]` on `SystemsInRangeRequest` and `ResolveSystemRequest` and written only
+    when observed; `SystemRecord.observed` is written only in observed mode.
+    `ResponseBody::ResolveSystem` holds a `Box<ResolvedSystem>`, as `SystemBodies` is boxed, since
+    a row would otherwise make every message a third larger (`clippy::large_enum_variant`).
+    `resolve_system` joins `REQUEST_KINDS` and the server's exhaustive matches (`kind`,
+    `is_large`: not large). No error code is new, so the client's `settledState` switch is
+    unchanged.
+  - _Deviation: the refusal of an ID._ An ID `resolve` refuses, or whose bits are no system ID, is
+    `unknown_system` naming `system`, not `bad_request` as the task's text says: plan 06 added
+    `ErrorCode::UnknownSystem` after this plan was written, for exactly this case, and
+    `system_summary`, `system_bodies` and `body_detail` answer it so. Accepted
+    (`decision-gg-port-d0.md` §6.2).
+  - _Deviation: the answer's shape._ `resolve_system` answers
+    `ResolvedSystem { universe, time, record }`, `record` a range row, not the bare row Provides
+    describes: it echoes the request's universe and time, as `system_summary` does, and is boxed
+    in `ResponseBody` for `clippy::large_enum_variant`. Accepted (`decision-gg-port-d0.md` §6.2).
+  - _Deviation: the summary's mode is not built._ Provides puts `mode` on `SystemSummaryRequest`
+    and `observed` on the summary; the task's text and files do not, so neither is on the wire yet
+    (`observe::summary_observed` is ready for it). A readout of one system as observed has
+    `resolve_system`'s row, and the brief then from a range query with `include_stellar`, but not
+    the stars as observed. Ruled (`decision-gg-port-d0.md` §6.2): it is the new subtask P12.T6.b,
+    before T11, whose text is under T6 above; T6 as built is the range query's mode and
+    `resolve_system`.
+  - _Server._ `RangeRequest` checks `mode` after `limit`: an observer that is not a canonical
+    position inside the root cube is `bad_request` naming `mode`, as `refused_query` names the
+    sim's `ObserverOutsideRootCube`. Only the query's time is held to ±H; emitted times before −H
+    are reported as they are. The handler runs plan 03's `range_query` unchanged and then reads
+    each row through `observe_hit` over the system cache, lent as the sim's `StarsCache` by
+    `SharedSystemCache::handle(key)` (`compute::SystemStarsHandle`; a miss builds
+    `observe::stars_of` and stores it under the ID, `SharedSystemCache::get_or_build`, so it shares
+    every entry with `system_summary`). A rogue planet, and a centre member, which has no stars
+    generated, are read on their line alone, as `range_query_observed` reads a rogue planet. The
+    rows are built in the query's job up to `BRIEF_CHUNK_ROWS` and in chunks of that many beyond
+    it, as the briefs are; `range_query_observed` is not called because it observes every row in
+    one call, and a 20,000-row answer whose stars are cold (0.26 ms a system, T3's bench) would
+    hold one worker for about 5 s. The rows are `range_query_observed`'s, bit for bit (unit test
+    `observed_rows_do_not_depend_on_chunks_or_the_cache`, whole and chunked, over an empty, a warm
+    and no cache). With `include_stellar` in observed mode a row's `stellar` is its primary's
+    brief at the emitted time (`ObservedSystem::brief_then`, from the full system), absent when it
+    was not yet born then. `resolve_system` is one interactive job: `resolve` (refusals as above);
+    a grid system placed by `position_at` at `epoch_velocity`, bit for bit the range row, and any
+    other on its own `Drift::of_record` line (plan 08's draw, which `position_at` takes, panics for
+    a record without a density component); a hit at distance zero; and in observed mode the same
+    reading as a range row. Its row has no brief, since the request has no `include_stellar`.
+  - _Centre members._ `centre09c` had not landed in this tree. The central black hole is refused
+    in both modes as `unknown_system` naming `system` ("cannot be placed yet", with
+    `TraceMotionError`'s message), as
+    `system_summary` refuses it, never a panic (`now` would otherwise have panicked in plan 08's
+    draw); the server's range query places no centre member, and should a source ever hand it one
+    observed, the answer is `bad_request` naming `mode`. When P09.T28 traces the centre, the
+    member is placed and read on its orbit with no brief, and
+    `the_central_black_hole_is_refused_until_its_orbit_is_built` changes with it.
+  - _Tests._ Wire forms in `hyperion-protocol` (both modes, the observed row, the request and
+    response of `resolve_system`, a plan 04 request read as `now`); `convert::observe` unit tests
+    (the observer's checks and order, the DTO's exactness, the refusal);
+    `compute::systems::the_stars_handle_shares_the_entries_of_the_systems_ids`; and
+    `tests/observed.rs` over a socket: one 12 ly sphere asked in both modes has the same IDs,
+    census and present rows, `observed` only in the observed answer, each the sim's
+    `range_query_observed` row with its brief then, and a repeat builds no star; an observer
+    outside the cube or off the grid is `bad_request` naming `mode` for both kinds; `resolve_system`
+    gives the range row in either mode; an ID naming no system is `unknown_system`; the black hole
+    as above; and, slow, `resolve_system_places_a_feature_member_on_its_own_line` (a band-C member
+    of the first feature within 3,000 ly of the Sun, placed on its line and observed as
+    `observe_hit` reads it with its member record's stars).
+  - _Port (batch B, 2026-10-15, at `GENERATOR_VERSION` 22; `decision-gg-port-d0.md`)._ Ported from
+    galaxy-generation 9d3a4944 by `git cherry-pick -n` onto the integration tip after A1's P07.T10
+    (277b464c), then brought to 9fbc5ea2; the two branches share no history. The content is
+    unchanged except as follows. The conflicts were the integration branch's appended entries in
+    `compute/mod.rs`, `convert.rs` and `requests/mod.rs`, kept both, and plan 12's record, kept
+    after R03's `observe::in_system`; the envelope's walks merged as
+    `… → Extinction → ResolveSystem → None`, with `resolve_system` last in `REQUEST_KINDS`. The
+    bindings were regenerated by `just gen-protocol`: `RequestBody.ts` and `ResponseBody.ts` gain
+    the kind, and `ObservedDto.ts` and `SystemRecord.ts` the ruled doc sentences. By hand: the
+    `resolve_system` arm meets R03.T10.a's `Answer` seam through `answered`;
+    `mode: QueryModeDto::Now` in the range requests added since the squash (`tests/scene.rs`,
+    `tests/sky.rs`, `tests/websocket.rs`); `resolve_system` among the kinds the fake server of
+    `apps/hyperion/src/tools/placeShip.test.ts` leaves unfaked, since its switch is exhaustive;
+    `every_body`'s `resolve_system` names a universe of its own, the shared one being moved into
+    `scene_ship`; `tests/observed.rs`'s brief comparison carries R02.T5's `absolute_v_mag`, which
+    the wire's brief gained after the squash, and checks it against the brief then as
+    `tests/systems_in_range.rs` checks a present one; and
+    `the_central_black_hole_is_refused_until_its_orbit_is_built` pins version 22, at which its
+    refusal was re-checked, in place of 16. `requests_naming` in `tests/universes.rs` gains a
+    `resolve_system` whose observer is outside the cube, so the new kind is refused for its universe
+    before its `mode` is read, as every other kind is. `PROTOCOL_VERSION`'s doc gains the defaulted
+    `mode`'s sentence (§6.1), and `ObservedDto`'s and `SystemRecord`'s docs the ruled present-state
+    sentences (§6.2), `stellar` excepted, which in observed mode is the brief then. From review:
+    `convert::systems_in_range` takes each row's brief and observation from their iterators instead
+    of collecting two row-long vectors on every range answer, and
+    `observed_rows_do_not_depend_on_chunks_or_the_cache` also asks a 3 ly sphere with the substellar
+    layers (a rogue planet read on its line, a brown dwarf through
+    `SharedSystemCache::get_or_build`), and also runs over a tight cache and one filled through
+    `get_or_generate` as `system_summary` fills it. Re-checked at the port: the centre is still not
+    traced (`TraceMotionError::CentreOrbitNotBuilt` stands, P09.T28 unbuilt) and the server's range
+    query still passes no sources, so the refusals above hold. No golden or generated output moves,
+    and nothing is blessed.
+  - _Deferred findings (2026-10-13 rule), from the port's review._ (1) For a feature member
+    `resolve_system` places the system by `Drift::position_at`, while plan 09's
+    `FeatureMemberSource::hit_at` moves a member by `translated(displacement_over(elapsed))`; the
+    sim's `observe_hit` docs put the two a few metres apart. The server's range query passes no
+    sources, so no answer differs today; when feature sources are wired into it, `resolve_system`
+    should take `hit_at`'s arithmetic so that its row stays the range row bit for bit. (2) The
+    chunk test's galaxy has no kinematic tables (`Galaxy::new`), so its exact comparison with the
+    sim covers systems at rest; `tests/observed.rs` covers moving ones, to 1e-15 relative.
+- **P12.T6: an observed row's `age_myr` and `velocity_km_s` are the present's**, as its `position`
+  is (Design note 4 keeps the row). Ruled (`decision-gg-port-d0.md` §6.2): the wire stays as it is,
+  and `ObservedDto`'s and `SystemRecord::observed`'s docs say so; T11's readout in observed mode
+  shows the age then (`age_myr − light_age_yr ÷ 10⁶`, an Observed value, or `NOT YET FORMED` below
+  zero) and `—` for the velocity, until a task puts the velocity at emission on the wire. T11's
+  text carries the amendment.

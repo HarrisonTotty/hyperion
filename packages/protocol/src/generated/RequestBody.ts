@@ -7,6 +7,7 @@ import type { ExtinctionMapRequest } from "./ExtinctionMapRequest";
 import type { ExtinctionRequest } from "./ExtinctionRequest";
 import type { GalaxyParametersRequest } from "./GalaxyParametersRequest";
 import type { OpenUniverseRequest } from "./OpenUniverseRequest";
+import type { ResolveSystemRequest } from "./ResolveSystemRequest";
 import type { SceneCamerasRequest } from "./SceneCamerasRequest";
 import type { SceneShipRequest } from "./SceneShipRequest";
 import type { SkyRequest } from "./SkyRequest";
@@ -21,4 +22,4 @@ import type { UnsubscribeRequest } from "./UnsubscribeRequest";
 /**
  * What a request asks for, discriminated by `kind`.
  */
-export type RequestBody = { "kind": "create_universe" } & CreateUniverseRequest | { "kind": "list_universes" } | { "kind": "open_universe" } & OpenUniverseRequest | { "kind": "galaxy_parameters" } & GalaxyParametersRequest | { "kind": "density_map" } & DensityMapRequest | { "kind": "systems_in_range" } & SystemsInRangeRequest | { "kind": "system_summary" } & SystemSummaryRequest | { "kind": "system_bodies" } & SystemBodiesRequest | { "kind": "body_detail" } & BodyDetailRequest | { "kind": "body_events" } & BodyEventsRequest | { "kind": "subscribe" } & SubscribeRequest | { "kind": "unsubscribe" } & UnsubscribeRequest | { "kind": "scene_ship" } & SceneShipRequest | { "kind": "scene_cameras" } & SceneCamerasRequest | { "kind": "sky" } & SkyRequest | { "kind": "surface_field" } & SurfaceFieldRequest | { "kind": "survey_pass" } & SurveyPassRequest | { "kind": "extinction_map" } & ExtinctionMapRequest | { "kind": "extinction" } & ExtinctionRequest;
+export type RequestBody = { "kind": "create_universe" } & CreateUniverseRequest | { "kind": "list_universes" } | { "kind": "open_universe" } & OpenUniverseRequest | { "kind": "galaxy_parameters" } & GalaxyParametersRequest | { "kind": "density_map" } & DensityMapRequest | { "kind": "systems_in_range" } & SystemsInRangeRequest | { "kind": "system_summary" } & SystemSummaryRequest | { "kind": "system_bodies" } & SystemBodiesRequest | { "kind": "body_detail" } & BodyDetailRequest | { "kind": "body_events" } & BodyEventsRequest | { "kind": "subscribe" } & SubscribeRequest | { "kind": "unsubscribe" } & UnsubscribeRequest | { "kind": "scene_ship" } & SceneShipRequest | { "kind": "scene_cameras" } & SceneCamerasRequest | { "kind": "sky" } & SkyRequest | { "kind": "surface_field" } & SurfaceFieldRequest | { "kind": "survey_pass" } & SurveyPassRequest | { "kind": "extinction_map" } & ExtinctionMapRequest | { "kind": "extinction" } & ExtinctionRequest | { "kind": "resolve_system" } & ResolveSystemRequest;

@@ -162,6 +162,7 @@ class FakeServer {
       case "survey_pass":
       case "extinction_map":
       case "extinction":
+      case "resolve_system":
         break;
     }
     return { code: "unsupported", message: `not faked: ${body.kind}`, field: null };

@@ -215,6 +215,7 @@ fn systems_in_range(records: usize) -> SystemsInRange {
                 ],
                 stellar: None,
                 fe_h_dex: None,
+                observed: None,
             }
         })
         .collect();

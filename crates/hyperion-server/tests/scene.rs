@@ -101,6 +101,7 @@ async fn the_scene_place_agrees_with_the_chart(server: &TestServer) {
             min_layer: MassLayer::A,
             limit: 20_000,
             include_stellar: false,
+            mode: hyperion_protocol::QueryModeDto::Now,
         }))
         .await;
     let Ok(ResponseBody::SystemsInRange(found)) = answer else {

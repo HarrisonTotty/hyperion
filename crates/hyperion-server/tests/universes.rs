@@ -235,6 +235,7 @@ fn requests_naming(universe: &UniverseIdHex) -> Vec<RequestBody> {
             min_layer: MassLayer::A,
             limit: 1_000,
             include_stellar: false,
+            mode: hyperion_protocol::QueryModeDto::Now,
         }),
         // The universe is checked before any other field (design note 24), so a request wrong in
         // every other way too is still refused for the universe.
@@ -252,6 +253,7 @@ fn requests_naming(universe: &UniverseIdHex) -> Vec<RequestBody> {
             min_layer: MassLayer::A,
             limit: 0,
             include_stellar: false,
+            mode: hyperion_protocol::QueryModeDto::Now,
         }),
         RequestBody::DensityMap(DensityMapRequest {
             universe: universe.clone(),
@@ -273,6 +275,19 @@ fn requests_naming(universe: &UniverseIdHex) -> Vec<RequestBody> {
             targets: vec![ExtinctionTarget::Position {
                 position: GalacticPosition::default(),
             }],
+        }),
+        // Plan 12's `resolve_system`, its observer outside the root cube: the universe is still
+        // refused first.
+        RequestBody::ResolveSystem(hyperion_protocol::ResolveSystemRequest {
+            universe: universe.clone(),
+            system: hyperion_protocol::SystemIdHex::from_u64(0x0200_0800_2000_0000),
+            time: UniverseTime::default(),
+            mode: hyperion_protocol::QueryModeDto::Observed {
+                observer: GalacticPosition {
+                    cell_ly: [70_000, 0, 0],
+                    offset_m: [0.0; 3],
+                },
+            },
         }),
     ]
 }
