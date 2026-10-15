@@ -151,6 +151,7 @@ function renderAnswered(summary: SystemSummaryDto): void {
       distanceDecimals={distanceDecimalsFor(chart.radiusLy)}
       stars={answer.model}
       starsStale={false}
+      extinction={null}
     />,
   );
 }

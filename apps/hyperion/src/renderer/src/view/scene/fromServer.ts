@@ -348,7 +348,8 @@ function standInAttitude(velocityMPerS: Vec3): CraftPose["attitude"] {
  * body and its light's emission for every other, and `null` without the section, when its pole
  * stands as its orbit's normal (Design note 14); its figure and photometry are its sections'
  * (`heldAppearanceOf`, made once a record), and its radius its figure's equatorial one. Rings are drawn
- * about their planet, in its orbital plane (plan 14's convention for this generator version);
+ * about their planet, each in the plane its normal gives, its planet's local Laplace plane (plan
+ * 14, P14.T56.a and T56.b), or in the planet's orbital plane where an older server sends no normal;
  * orbits are every placed planet's and moon's about the body or star it orbits, or about the barycentre for the root, and one about a pair below the root is not drawn.
  * The ship stand-in is the own ship, in the system frame at the observer's present position.
  */
@@ -452,7 +453,7 @@ export function viewSceneFromServer(
       body: planet.id,
       innerRadiusM: record.population.value.innerEdgeM,
       outerRadiusM: record.population.value.outerEdgeM,
-      normal: planet.orbitNormal ?? GALACTIC_NORTH,
+      normal: record.population.value.normal ?? planet.orbitNormal ?? GALACTIC_NORTH,
     });
   }
 

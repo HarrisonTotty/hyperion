@@ -17,6 +17,7 @@ pub mod limb_darkening;
 pub mod mge;
 pub mod period_correction;
 pub mod pulsars;
+pub mod saturation_curves;
 pub mod sky_binary_light;
 pub mod sky_envelope;
 pub mod sky_phase_envelope;

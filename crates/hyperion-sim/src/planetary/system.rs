@@ -42,6 +42,11 @@
 //! 8. **The cometary halo** (P14.T21.d) about the zone holding the primary with the most
 //!    members, if a planet over 10 M⊕ beyond its host's snow line scatters one.
 //!
+//! Then every planet's and member's rotation law, and from [`MOONS_VERSION`] its satellites' frame
+//! on its Laplace surface, on which they are found again (P14.T56.a, [`generate_with`]).
+//!
+//! [`MOONS_VERSION`]: crate::planetary::moons::MOONS_VERSION
+//!
 //! Second-generation planets (P14.T28.e) and the free-floating hosts of P14.T27 are not built:
 //! their stages do not exist yet, and their streams (`planet.secondgen`) and slots (`0xC0`–`0xCF`,
 //! the stellar level of a free-floating system) stay reserved for them. Nor is P14.T28.a's
@@ -134,6 +139,7 @@ use crate::planetary::hosts::evolved::{Circularisation, EccentricityFloor};
 use crate::planetary::hosts::young::{Formation, FormationDraws};
 use crate::planetary::index::{BodyIndex, LAST_PLANET_SLOT};
 use crate::planetary::label::{self, BodyLabel};
+use crate::planetary::laplace::{LaplaceFrame, LaplaceFrameParts, SatellitePlanes, hydrostatic_j2};
 use crate::planetary::moons::regular::{
     DerivedMoon, MOON_ICE_DENSITY, MOON_ROCK_DENSITY, MoonNursery, MoonSky, derive_moon,
 };
@@ -158,7 +164,9 @@ use crate::planetary::record::{
     MoonOrigin, Population, Section, Surface, SystemSnapshot,
 };
 use crate::planetary::rings::{Ring, RingParent};
-use crate::planetary::satellites::{Satellite, SatelliteMoon, Satellites, satellites_of};
+use crate::planetary::satellites::{
+    Satellite, SatelliteFrame, SatelliteMoon, Satellites, satellites_of,
+};
 use crate::rng::{ObjectKey, Stream, tags};
 use crate::stellar::draws::UnitUniform;
 use crate::stellar::multiplicity::{HierarchyNode, SystemHierarchy};
@@ -280,6 +288,10 @@ pub struct Body {
     /// The rotation law, derived once by [`generate`] and held (P14.T46.b); `None` for a ring,
     /// for a body not present at [`parent_time`], and for every body [`generate_planets`] makes.
     rotation: Option<BodyRotation>,
+    /// A planet's or member's satellites' frame on the Laplace surface, derived once with its
+    /// rotation and held (P14.T56.a); `None` for a moon or a ring, for a body without a rotation
+    /// law, and below [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION).
+    laplace: Option<LaplaceFrame>,
 }
 
 /// What a [`Body`] is, with the primordial state of its kind.
@@ -377,6 +389,7 @@ impl Body {
                 fate,
             }),
             rotation: None,
+            laplace: None,
         }
     }
 
@@ -403,6 +416,7 @@ impl Body {
                 fate,
             }),
             rotation: None,
+            laplace: None,
         }
     }
 
@@ -418,6 +432,7 @@ impl Body {
                 orbit: satellite.orbit_at(parent, Years::new(0.0)),
             }),
             rotation: None,
+            laplace: None,
         }
     }
 
@@ -429,6 +444,7 @@ impl Body {
             host: OrbitHost::Body(planet),
             part: Part::Ring(ring),
             rotation: None,
+            laplace: None,
         }
     }
 
@@ -569,6 +585,14 @@ impl Body {
             Part::Member(member) => Some(&member.fate),
             Part::Moon(_) | Part::Ring(_) => None,
         }
+    }
+
+    /// The frame its satellites lie in on the Laplace surface (P14.T56.a), held by [`generate`]:
+    /// a planet's or member's with a rotation law, from
+    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION); `None` otherwise.
+    #[must_use]
+    pub const fn laplace(&self) -> Option<&LaplaceFrame> {
+        self.laplace.as_ref()
     }
 
     /// The record's rotation section (P14.T46.b): the held law's frame, or
@@ -885,6 +909,29 @@ struct SystemHalo {
 /// As [`generate_planets`].
 #[must_use]
 pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
+    generate_with(seed, ctx, SatellitePlanes::in_force())
+}
+
+/// [`generate`], with every satellite in the planes `planes` give (P14.T56.a's hold): version 22's
+/// below [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), and from it the Laplace
+/// surface, which the tests reach ahead of the bump.
+///
+/// On the Laplace surface the satellites are found twice. Step 7 finds them in version 22's
+/// planes, which fixes whether a planet or member had a giant impact, all its rotation law reads
+/// of them. The rotation pass then derives every planet's and member's law, and from it and its
+/// record at [`parent_time`] its [`LaplaceFrame`] ([`Body::laplace`]). Each one's satellites are
+/// found again on its frame, which drops the regular moons and rings of the eccentricity band and
+/// moves no giant-impact moon, so its law stands. Last, each moon's law is derived on its plane.
+///
+/// # Panics
+///
+/// As [`generate_planets`].
+#[must_use]
+pub(crate) fn generate_with(
+    seed: Seed,
+    ctx: &SystemContext,
+    planes: SatellitePlanes,
+) -> PlanetarySystem {
     let mut system = generate_planets(seed, ctx);
     let id = ctx.id();
 
@@ -930,6 +977,7 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
 
     // Step 7: satellites of every planet and every member.
     let mut satellites = Vec::new();
+    let mut sites = Vec::new();
     for parent in system.bodies.iter().chain(&members) {
         let zone = system.zone_of(parent);
         let profile = system
@@ -940,42 +988,20 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
             Part::Planet(_) => system.nearest_belt(parent.index()),
             Part::Moon(_) | Part::Ring(_) | Part::Member(_) => None,
         };
-        let found = parent_at_epoch(ctx, zone, profile, parent).map_or_else(
-            || Satellites::none(parent.index()),
-            |(moon_parent, ring_parent)| {
-                satellites_of(
-                    seed,
-                    parent.index(),
-                    &moon_parent,
-                    ring_parent.as_ref(),
-                    belt,
-                    ctx.age_at_epoch(),
-                )
-            },
-        );
-        satellites.push(found);
+        let site = SatelliteSite {
+            index: parent.index(),
+            parent: parent_at_epoch(ctx, zone, profile, parent),
+            belt,
+        };
+        satellites.push(site.find(seed, ctx, SatelliteFrame::OrbitalPlane));
+        sites.push(site);
     }
 
     // Step 8: the cometary halo.
     system.halo = system_halo(seed, ctx, &system, scatterer);
 
     system.bodies.extend(members);
-    for found in &satellites {
-        if let Some(parent) = found.parent() {
-            system.bodies.extend(
-                found
-                    .moons()
-                    .iter()
-                    .map(|&moon| Body::moon(moon, parent, found.parent_index())),
-            );
-        }
-        system.bodies.extend(
-            found
-                .rings()
-                .iter()
-                .map(|ring| Body::ring(ring.clone(), found.parent_index())),
-        );
-    }
+    system.bodies.extend(satellite_bodies(&satellites));
     system.satellites = satellites;
     system.bodies.sort_by_key(Body::index);
 
@@ -986,10 +1012,15 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
     // law, so the order of the pass changes nothing. The records are one snapshot's, which equals
     // `body_at` body by body and derives each parent once (decision-p14-phase-j A3).
     let snapshot = system.snapshot_at(ctx, parent_time(ctx));
+    let laplace = planes == SatellitePlanes::LaplaceSurface;
     let rotations: Vec<Option<BodyRotation>> = system
         .bodies
         .iter()
         .map(|body| {
+            // On the Laplace surface a moon's law waits for its plane, which its parent's sets.
+            if laplace && matches!(body.part, Part::Moon(_)) {
+                return None;
+            }
             let record = snapshot
                 .body(body.index)
                 .expect("a snapshot holds every body of its system");
@@ -999,7 +1030,67 @@ pub fn generate(seed: Seed, ctx: &SystemContext) -> PlanetarySystem {
     for (body, rotation) in system.bodies.iter_mut().zip(rotations) {
         body.rotation = rotation;
     }
+    if laplace {
+        system.place_on_laplace_surfaces(seed, ctx, &snapshot, &sites);
+    }
     system
+}
+
+/// The moons and rings of `found` as bodies, each parent's moons and then its rings.
+#[must_use]
+fn satellite_bodies(found: &[Satellites]) -> Vec<Body> {
+    let mut bodies = Vec::new();
+    for satellites in found {
+        if let Some(parent) = satellites.parent() {
+            bodies.extend(
+                satellites
+                    .moons()
+                    .iter()
+                    .map(|&moon| Body::moon(moon, parent, satellites.parent_index())),
+            );
+        }
+        bodies.extend(
+            satellites
+                .rings()
+                .iter()
+                .map(|ring| Body::ring(ring.clone(), satellites.parent_index())),
+        );
+    }
+    bodies
+}
+
+/// What a planet's or member's satellites are found from in [`generate_with`]'s step 7, kept so
+/// that they can be found again on its Laplace surface (P14.T56.a).
+#[derive(Debug, Clone)]
+struct SatelliteSite {
+    /// The parent's index.
+    index: BodyIndex,
+    /// The parent as the moon generators and its rings read it ([`parent_at_epoch`]), if it can
+    /// be read.
+    parent: Option<(MoonParent, Option<RingParent>)>,
+    /// The belt next to it, which a rocky planet's captures read.
+    belt: Option<NearestBelt>,
+}
+
+impl SatelliteSite {
+    /// The parent's satellites, in the planes `frame` gives ([`satellites_of`]).
+    #[must_use]
+    fn find(&self, seed: Seed, ctx: &SystemContext, frame: SatelliteFrame<'_>) -> Satellites {
+        self.parent.as_ref().map_or_else(
+            || Satellites::none(self.index),
+            |(moon_parent, ring_parent)| {
+                satellites_of(
+                    seed,
+                    self.index,
+                    moon_parent,
+                    ring_parent.as_ref(),
+                    self.belt,
+                    ctx.age_at_epoch(),
+                    frame,
+                )
+            },
+        )
+    }
 }
 
 /// The planets of the system of `ctx` in the universe of `seed`, with no satellites, belts or halo
@@ -2118,6 +2209,55 @@ impl PlanetarySystem {
         body: &Body,
         record: &BodyRecord,
     ) -> Option<BodyRotation> {
+        if matches!(body.part, Part::Ring(_)) {
+            return None;
+        }
+        let (Section::Ok(orbit), Section::Ok(bulk), Section::Ok(mass)) =
+            (record.orbit(), record.bulk(), record.mass())
+        else {
+            return None;
+        };
+        self.rotation_from(ctx, body, orbit.elements(), bulk, *mass)
+    }
+
+    /// The elements of `body` at [`parent_time`] that its rotation law and its satellites' frame
+    /// read, where its record's orbit then is `recorded`: the elements at the time itself, as the
+    /// derivation reads them, and not the record's, which an evolving orbit states at its drift
+    /// cell's start (P14.T45.a).
+    #[must_use]
+    fn elements_at_parent_time(
+        &self,
+        ctx: &SystemContext,
+        body: &Body,
+        recorded: &KeplerElements,
+    ) -> KeplerElements {
+        let t = parent_time(ctx);
+        match &body.part {
+            Part::Moon(moon) => moon.satellite.orbit_at(&moon.parent, ctx.age_at(t)),
+            Part::Planet(_) | Part::Member(_) | Part::Ring(_) => {
+                let host = fate_host(ctx, self.zone_of(body));
+                self.fate_of(body, &host)
+                    .at(t)
+                    .orbit()
+                    .copied()
+                    .unwrap_or(*recorded)
+            }
+        }
+    }
+
+    /// The rotation of the planet, member or moon `body`, present at [`parent_time`] with its
+    /// record's orbit `recorded`, bulk `bulk` and mass `mass` then: [`derive_rotation`]'s law.
+    ///
+    /// [`derive_rotation`]: Self::derive_rotation
+    #[must_use]
+    fn rotation_from(
+        &self,
+        ctx: &SystemContext,
+        body: &Body,
+        recorded: &KeplerElements,
+        bulk: &BulkProperties,
+        mass: EarthMasses,
+    ) -> Option<BodyRotation> {
         let index = body.index;
         let obliquity_law = match body.part {
             Part::Ring(_) => return None,
@@ -2126,26 +2266,8 @@ impl PlanetarySystem {
             }
             Part::Planet(_) | Part::Member(_) | Part::Moon(_) => ObliquityLaw::Rayleigh,
         };
-        let (Section::Ok(orbit), Section::Ok(bulk), Section::Ok(mass)) =
-            (record.orbit(), record.bulk(), record.mass())
-        else {
-            return None;
-        };
-        // The elements at the time itself, as the derivation reads them, and not the record's,
-        // which an evolving orbit states at its drift cell's start (P14.T45.a).
-        let t = parent_time(ctx);
-        let elements = match &body.part {
-            Part::Moon(moon) => moon.satellite.orbit_at(&moon.parent, ctx.age_at(t)),
-            Part::Planet(_) | Part::Member(_) | Part::Ring(_) => {
-                let host = fate_host(ctx, self.zone_of(body));
-                self.fate_of(body, &host)
-                    .at(t)
-                    .orbit()
-                    .copied()
-                    .unwrap_or(*orbit.elements())
-            }
-        };
-        let mass = Kilograms::from(*mass);
+        let elements = self.elements_at_parent_time(ctx, body, recorded);
+        let mass = Kilograms::from(mass);
         let primary =
             elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value();
         let inputs = SpinInputs {
@@ -2163,6 +2285,158 @@ impl PlanetarySystem {
         // positive mass, so the derivation refuses nothing the generator makes; a refusal would
         // be a record without a rotation to give, which `None` says.
         BodyRotation::derive(&inputs).ok()
+    }
+
+    /// Puts every satellite on its parent's Laplace surface (P14.T56.a; [`generate_with`]'s
+    /// last steps), once every planet's and member's rotation law is held: each one's
+    /// [`LaplaceFrame`] from its law and its record in `snapshot`, at [`parent_time`]; its
+    /// satellites found again from `sites` on it; and each moon's law on its plane.
+    fn place_on_laplace_surfaces(
+        &mut self,
+        seed: Seed,
+        ctx: &SystemContext,
+        snapshot: &SystemSnapshot,
+        sites: &[SatelliteSite],
+    ) {
+        let frames: Vec<Option<LaplaceFrame>> = self
+            .bodies
+            .iter()
+            .map(|body| {
+                let record = snapshot
+                    .body(body.index)
+                    .expect("a snapshot holds every body of its system");
+                self.laplace_frame(ctx, body, record)
+            })
+            .collect();
+        for (body, frame) in self.bodies.iter_mut().zip(frames) {
+            body.laplace = frame;
+        }
+        let before = std::mem::take(&mut self.satellites);
+        let found: Vec<Satellites> = before
+            .into_iter()
+            .zip(sites)
+            .map(
+                |(found, site)| match self.body(site.index).and_then(Body::laplace) {
+                    Some(frame) => site.find(seed, ctx, SatelliteFrame::Laplace(frame)),
+                    None => found,
+                },
+            )
+            .collect();
+        self.bodies
+            .retain(|body| !matches!(body.part, Part::Moon(_) | Part::Ring(_)));
+        self.bodies.extend(satellite_bodies(&found));
+        self.satellites = found;
+        self.bodies.sort_by_key(Body::index);
+        let rotations = self.moon_rotations(ctx);
+        for (body, rotation) in self.bodies.iter_mut().zip(rotations) {
+            body.rotation = rotation;
+        }
+    }
+
+    /// The frame of the satellites of `body` on its Laplace surface (P14.T56.a), from its held
+    /// rotation law and its record at [`parent_time`], `record`: its spin pole, the normal of the
+    /// orbit its law was derived on, its hydrostatic J₂ ([`hydrostatic_j2`]) at its spin rate then
+    /// and its figure's equatorial radius and moment of inertia, its orbit, mass and host's mass
+    /// then. `None` for a moon or a ring, and for a body with no law or not present then.
+    #[must_use]
+    fn laplace_frame(
+        &self,
+        ctx: &SystemContext,
+        body: &Body,
+        record: &BodyRecord,
+    ) -> Option<LaplaceFrame> {
+        if matches!(body.part, Part::Moon(_) | Part::Ring(_)) {
+            return None;
+        }
+        let rotation = body.rotation.as_ref()?;
+        let (Section::Ok(orbit), Section::Ok(bulk), Section::Ok(mass)) =
+            (record.orbit(), record.bulk(), record.mass())
+        else {
+            return None;
+        };
+        let t = parent_time(ctx);
+        // The figure its record publishes then, whose radius and moment of inertia J₂ reads.
+        let Section::Ok(figure) = body.figure_section(Some(bulk), *mass, t) else {
+            return None;
+        };
+        let elements = self.elements_at_parent_time(ctx, body, orbit.elements());
+        let mass = Kilograms::from(*mass);
+        let host =
+            elements.gravitational_parameter().value() / GRAVITATIONAL_CONSTANT - mass.value();
+        let spin = rotation.frame();
+        let (rate, state) = (spin.rate().rate_at(t), spin.state_at(t));
+        let equatorial_radius = Metres::new(figure.spheroid().equatorial_radius_m);
+        let built = LaplaceFrame::new(&LaplaceFrameParts {
+            spin_pole: spin.pole(),
+            orbit_normal: elements.orientation().normal(),
+            j2: hydrostatic_j2(figure.moment_factor(), rate, equatorial_radius, mass, state),
+            equatorial_radius,
+            parent_orbit: elements,
+            parent_mass: mass,
+            host_mass: Kilograms::new(host),
+            read_at: ctx.age_at(t),
+        });
+        // A present body's law, figure, mass and orbit are the generator's own, which the frame
+        // never refuses; a refusal is a bug, which the tests' debug builds catch, and leaves the
+        // body's satellites in version 22's planes.
+        debug_assert!(built.is_ok(), "{:?}: {built:?}", body.index);
+        built.ok()
+    }
+
+    /// Each body's rotation law in index order: a moon's derived at [`parent_time`] on its plane
+    /// ([`moon_rotation`](Self::moon_rotation)), its planet derived once, and every other body's
+    /// as it is held.
+    #[must_use]
+    fn moon_rotations(&self, ctx: &SystemContext) -> Vec<Option<BodyRotation>> {
+        let t = parent_time(ctx);
+        let epoch = Epoch::new(self, ctx, t);
+        let mut parents: Vec<(BodyIndex, ParentNow)> = Vec::new();
+        self.bodies
+            .iter()
+            .map(|body| {
+                let Part::Moon(moon) = &body.part else {
+                    return body.rotation;
+                };
+                let OrbitHost::Body(parent) = body.host else {
+                    unreachable!("a moon's host is a body")
+                };
+                let at = parents.iter().position(|(index, _)| *index == parent);
+                let at = at.unwrap_or_else(|| {
+                    let primary = self
+                        .body(parent)
+                        .expect("a satellite's parent is a body of its system");
+                    let host = fate_host(ctx, self.zone_of(primary));
+                    let fate = self.fate_of(primary, &host);
+                    let label =
+                        label::label(self, parent).expect("every body of a system has a label");
+                    parents.push((parent, self.primary_record(&epoch, primary, label, &fate).1));
+                    parents.len() - 1
+                });
+                self.moon_rotation(ctx, &epoch, body, moon, &parents[at].1)
+            })
+            .collect()
+    }
+
+    /// The rotation law of the moon `body`, `moon`, whose parent is as `now` says at the epoch's
+    /// time: as [`derive_rotation`](Self::derive_rotation) gives it from its record then, whose
+    /// orbit is present and whose bulk is its derivation's.
+    #[must_use]
+    fn moon_rotation(
+        &self,
+        ctx: &SystemContext,
+        epoch: &Epoch<'_>,
+        body: &Body,
+        moon: &MoonPart,
+        now: &ParentNow,
+    ) -> Option<BodyRotation> {
+        let state = moon_state(now.state, &moon.satellite, ctx.age_at_epoch(), epoch.t);
+        if state != BodyState::Present || now.position.is_none() {
+            return None;
+        }
+        let orbit = moon.satellite.orbit_at(&moon.parent, ctx.age_at(epoch.t));
+        let derived = Self::moon_derived(epoch, moon, &orbit, now)?;
+        let bulk = Self::moon_bulk_of(moon, &derived, now);
+        self.rotation_from(ctx, body, &orbit, &bulk, body.mass())
     }
 
     /// Whether the planet or dwarf planet `index` has a giant-impact moon (P14.T18).

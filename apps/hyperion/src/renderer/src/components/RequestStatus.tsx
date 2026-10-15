@@ -9,6 +9,12 @@ interface RequestStatusProps {
   readonly id?: string;
   /** Sends the request again; offered as `RETRY` after a rejection or a timeout. */
   readonly onRetry?: () => void;
+  /**
+   * What the request is for, in upper case, before its state and a space (`EXTINCTION PENDING`,
+   * `EXTINCTION REJECTED: <reason>`), where two requests' states stand together and must be told
+   * apart. The link's state takes none: it is the link's, not the request's.
+   */
+  readonly subject?: string | undefined;
 }
 
 /**
@@ -91,16 +97,19 @@ export function annunciation(state: RequestState<RequestKind>): Annunciation | n
  * alerts, limits and failed systems. A timeout, and a rejection because the server failed or is
  * overloaded, report a failed system and are in `--status-caution`. After either kind of failure,
  * when the caller can send the request again, `RETRY` follows. Nothing is rendered for `ok` and
- * `idle`.
+ * `idle`. A `subject` stands before the request's own state with a space, as the guide's
+ * `SCENE PENDING` and `SCENE REJECTED` rows write a request's subject (decision-gg-port-d0 §2.1),
+ * and never before the link's state, which reads as it does without one.
  */
-export function RequestStatus({ state, id, onRetry }: RequestStatusProps) {
+export function RequestStatus({ state, id, onRetry, subject }: RequestStatusProps) {
   const shown = annunciation(state);
   if (shown === null) {
     return null;
   }
+  const named = subject !== undefined && state.kind !== "link_down";
   return (
     <StatusLine
-      text={shown.text}
+      text={named ? `${subject} ${shown.text}` : shown.text}
       standing={shown.standing}
       id={id}
       action={

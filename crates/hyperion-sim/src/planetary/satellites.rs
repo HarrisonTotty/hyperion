@@ -18,9 +18,12 @@
 //!    about a bloated giant lies inside the planet). Irregulars may cross one
 //!    another, as the Himalia group's orbits do; nothing else crosses anything.
 //!    The regular moons are then kept as their longest inner run that keeps design note 7's gap,
-//!    which P14.T17.a's eccentricity halving leaves broken in about one planet in a million.
+//!    which P14.T17.a's eccentricity halving leaves broken in about one planet in a million. On
+//!    the Laplace surface (P14.T56.a), they are then cut at the first that lies in the
+//!    eccentricity band of their parent's Laplace radius ([`laplace`]), dropped with every
+//!    regular moon beyond it, before the captures are cleared of them.
 //! 4. **Rings** (P14.T20, [`generate_rings`]), with the regular moons kept, whose resonances cut
-//!    their gaps.
+//!    their gaps; on the Laplace surface none that reaches into the band.
 //!
 //! # What the parent is
 //!
@@ -44,16 +47,29 @@
 //!
 //! # Frames
 //!
-//! The generators give each moon's elements about its parent, referred to the parent's equator
-//! (regular and giant-impact moons) or its orbital plane (captures). Until P14.T14 gives planets
-//! their poles the equator is taken to be the orbital plane, so [`Satellite::orbit_at`] turns
-//! both into the parent's body frame, a translation of the system frame with the galactic axes
-//! (plan 01's `coords`), where a moon's position is its planet's plus its own offset.
+//! The generators give each moon's elements about its parent against a reference plane they do
+//! not orient: the equator for regular and giant-impact moons, the orbital plane for captures.
+//! [`Satellite::orbit_at`] turns them into the parent's body frame, a translation of the system
+//! frame with the galactic axes (plan 01's `coords`), where a moon's position is its planet's
+//! plus its own offset, by referring them to the moon's [`MoonPlane`]:
+//!
+//! - **On the Laplace surface** (P14.T56.a, from [`MOONS_VERSION`]): every moon, of every origin,
+//!   to its parent's local Laplace plane at its semi-major axis ([`laplace`]), the plane its node
+//!   precesses about, so that its drawn inclination is its free inclination. The plane follows
+//!   from the parent's [`LaplaceFrame`], read once at the parent's time, and the moon's own
+//!   Laplace radius, which counts every moon inside it at that time. Its pole is on the parent's
+//!   spin's side for regular and giant-impact moons, which form prograde about the spin, and on
+//!   the orbit normal's side for captures, whose sense is drawn about the orbit
+//!   ([`PoleSense`]). A giant-impact moon's plane follows its receding axis.
+//! - **Below it**, version 22's: every moon to its parent's orbital plane.
+//!
+//! [`MOONS_VERSION`]: crate::planetary::moons::MOONS_VERSION
 
 use crate::Seed;
 use crate::orbit::KeplerElements;
 use crate::planetary::context::SystemContext;
 use crate::planetary::index::{BodyIndex, BodySlot, BodySub, LAST_MOON_SUB};
+use crate::planetary::laplace::{self, InnerMoon, LaplaceFrame, LocalLaplace, PoleSense};
 use crate::planetary::moons::{
     CaptureKind, CapturedMoon, ImpactMoon, IrregularPopulation, MoonParent, NearestBelt,
     RegularMoon, captures, giant_impact_moon, regular_moons,
@@ -62,11 +78,11 @@ use crate::planetary::params::HILL_STABLE_GAP;
 use crate::planetary::placement::classes::orbits::{SystemPlane, orientation_in_plane};
 use crate::planetary::placement::mutual_hill_radius;
 use crate::planetary::record::MoonOrigin;
-use crate::planetary::rings::{Ring, RingMoon, RingParent, generate_rings};
+use crate::planetary::rings::{Ring, RingMoon, RingParent, RingPlane, generate_rings};
 use crate::planetary::system::{Body, satellite_parent};
 use crate::stellar::draws::UnitUniform;
 use crate::time::CLOCK_WINDOW_H;
-use crate::units::{EarthMasses, Kilograms, SolarMasses, Years};
+use crate::units::{EarthMasses, Kilograms, Metres, SolarMasses, Years};
 
 /// The sub-index offset of a belt member's moon above the member's own (see the
 /// [module](self) documentation).
@@ -83,12 +99,44 @@ pub enum SatelliteMoon {
     Captured(CapturedMoon),
 }
 
-/// One moon of a planet with its index and its own radius rank (P14.T22.a).
+/// The plane a moon's local elements are referred to in its parent's body frame (see the
+/// [module](self) documentation).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MoonPlane {
+    /// Version 22's: the parent's orbital plane, its [`MoonParent::orbit`]'s.
+    OrbitalPlane,
+    /// The parent's local Laplace plane at the moon's semi-major axis (P14.T56.a).
+    Laplace(LocalLaplace),
+}
+
+/// The planes [`satellites_of`] refers a parent's satellites to (P14.T56.a).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum SatelliteFrame<'f> {
+    /// Version 22's: the parent's orbital plane.
+    OrbitalPlane,
+    /// The parent's Laplace surface, of this frame.
+    Laplace(&'f LaplaceFrame),
+}
+
+impl<'f> SatelliteFrame<'f> {
+    /// The Laplace surface of `frame` where a parent holds one, and version 22's planes where it
+    /// does not.
+    #[must_use]
+    pub(crate) const fn of(frame: Option<&'f LaplaceFrame>) -> Self {
+        match frame {
+            Some(frame) => Self::Laplace(frame),
+            None => Self::OrbitalPlane,
+        }
+    }
+}
+
+/// One moon of a planet with its index, its own radius rank and its plane (P14.T22.a, P14.T56.a).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Satellite {
     index: BodyIndex,
     moon: SatelliteMoon,
     radius_rank: UnitUniform,
+    plane: MoonPlane,
 }
 
 impl Satellite {
@@ -132,9 +180,15 @@ impl Satellite {
         self.radius_rank
     }
 
+    /// The plane its elements are referred to (see the [module](self) documentation).
+    #[must_use]
+    pub const fn plane(&self) -> &MoonPlane {
+        &self.plane
+    }
+
     /// Its elements about its parent `parent` when the parent is `age` old, as generated:
-    /// referred to the parent's equator or orbital plane. Only a giant-impact moon's change with
-    /// age, as it recedes (P14.T18).
+    /// referred to its unoriented reference plane (see the [module](self) documentation). Only a
+    /// giant-impact moon's change with age, as it recedes (P14.T18).
     #[must_use]
     pub fn local_orbit_at(&self, parent: &MoonParent, age: Years) -> KeplerElements {
         match &self.moon {
@@ -145,21 +199,29 @@ impl Satellite {
     }
 
     /// Its elements about `parent` when the parent is `age` old, in the parent's body frame,
-    /// with the galactic axes (see the [module](self) documentation).
+    /// with the galactic axes: [`local_orbit_at`](Self::local_orbit_at) referred to its
+    /// [`plane`](Self::plane) at that axis (see the [module](self) documentation).
     #[must_use]
     pub fn orbit_at(&self, parent: &MoonParent, age: Years) -> KeplerElements {
-        in_body_frame(parent, &self.local_orbit_at(parent, age))
+        in_body_frame(parent, &self.plane, &self.local_orbit_at(parent, age))
     }
 }
 
-/// `local`, an orbit about `parent` referred to its orbital plane, in the parent's body frame.
+/// `local`, an orbit about `parent` referred to `plane` at its semi-major axis, in the parent's
+/// body frame.
 ///
 /// # Panics
 ///
-/// Never: the orbit is rebuilt from a valid one's own values.
+/// Never: the orbit is rebuilt from a valid one's own values, about a plane of a finite pole.
 #[must_use]
-pub(crate) fn in_body_frame(parent: &MoonParent, local: &KeplerElements) -> KeplerElements {
-    let plane = SystemPlane::of_orbit(parent.orbit().orientation());
+fn in_body_frame(parent: &MoonParent, plane: &MoonPlane, local: &KeplerElements) -> KeplerElements {
+    let plane = match plane {
+        MoonPlane::OrbitalPlane => SystemPlane::of_orbit(parent.orbit().orientation()),
+        MoonPlane::Laplace(laplace) => {
+            SystemPlane::from_pole(laplace.pole_at(local.semi_major_axis()))
+                .expect("a Laplace plane's pole is a finite direction")
+        }
+    };
     let orientation = orientation_in_plane(
         &plane,
         local.inclination(),
@@ -256,11 +318,13 @@ impl Satellites {
 /// The satellites of the planet `planet` of the system of `ctx`, in the universe of `seed`, next
 /// to the belt `belt` if it has one (P14.T22.a; see the [module](self) documentation).
 ///
-/// It reads nothing but the planet, its host (the context's stars and the zone's disc) and the
+/// It reads nothing but the planet, its host (the context's stars and the zone's disc), the
 /// nearest belt's mass passed in, which
-/// [`PlanetarySystem::nearest_belt`](crate::planetary::PlanetarySystem::nearest_belt) finds. A
-/// planet with no moons and no rings has an empty set, and a body that is not a planet or a belt
-/// member none.
+/// [`PlanetarySystem::nearest_belt`](crate::planetary::PlanetarySystem::nearest_belt) finds, and
+/// the planet's [`Body::laplace`] frame, which [`generate`](crate::planetary::generate) holds on
+/// the Laplace surface (P14.T56.a): with none, its satellites keep version 22's planes. A planet
+/// with no moons and no rings has an empty set, and a body that is not a planet or a belt member
+/// none.
 ///
 /// # Panics
 ///
@@ -280,14 +344,15 @@ pub fn generate_satellites(
             rings.as_ref(),
             belt,
             ctx.age_at_epoch(),
+            SatelliteFrame::of(planet.laplace()),
         ),
         None => Satellites::none(planet.index()),
     }
 }
 
 /// The satellites of `parent`, the body `parent_index`, whose rings (for a giant) read
-/// `ring_parent`, next to `belt`, in a system aged `age_at_epoch` at the epoch: the four steps of
-/// the [module](self) documentation.
+/// `ring_parent`, next to `belt`, in a system aged `age_at_epoch` at the epoch, in the planes
+/// `frame` gives: the four steps of the [module](self) documentation.
 #[must_use]
 pub(crate) fn satellites_of(
     seed: Seed,
@@ -296,7 +361,12 @@ pub(crate) fn satellites_of(
     ring_parent: Option<&RingParent>,
     belt: Option<NearestBelt>,
     age_at_epoch: Years,
+    frame: SatelliteFrame<'_>,
 ) -> Satellites {
+    let frame = match frame {
+        SatelliteFrame::Laplace(frame) => Some(frame),
+        SatelliteFrame::OrbitalPlane => None,
+    };
     let regular = regular_moons(seed, parent);
     let impact = giant_impact_moon(seed, parent);
     let caught = captures(seed, parent, belt);
@@ -321,6 +391,21 @@ pub(crate) fn satellites_of(
     // in, as T17.a drops what does not fit.
     let clear_run = clear_run(parent, regular.moons());
     let regular = regular.retaining(|moon| moon.ordinal() <= clear_run);
+    // P14.T56.a: on the Laplace surface, the regular moons stop short of the eccentricity band,
+    // counting inside each the moons found so far (decision-p14-moons §1.2).
+    let regular = match frame {
+        Some(frame) => {
+            let large = caught.large().filter(|_| large_fits);
+            let others: Vec<SatelliteMoon> = impact
+                .map(SatelliteMoon::GiantImpact)
+                .into_iter()
+                .chain(large.map(|&moon| SatelliteMoon::Captured(moon)))
+                .collect();
+            let stable = stable_run(frame, parent, regular.moons(), &others);
+            regular.retaining(|moon| moon.ordinal() <= stable)
+        }
+        None => regular,
+    };
 
     // Ruling 83.8: captures other than a Triton-like one clear every other moon.
     let end_age = Years::new(age_at_epoch.value() + CLOCK_WINDOW_H.as_julian_years_f64());
@@ -351,28 +436,19 @@ pub(crate) fn satellites_of(
         .chain(impact.map(SatelliteMoon::GiantImpact))
         .chain(kept_captures.map(|&moon| SatelliteMoon::Captured(moon)));
     let system = parent.id().system();
-    let mut moons = Vec::new();
-    for (n, moon) in (1_u8..).zip(generated) {
-        let Some(index) = moon_index(parent_index, n) else {
-            break;
-        };
-        // Ruling 112.5: the moon's own draw is keyed by what it is, not by where the moons kept
-        // before it leave it in the dense numbering, so that pruning one moon moves no other.
-        let key = candidate_key(parent_index, &moon).unwrap_or(index);
-        moons.push(Satellite {
-            index,
-            moon,
-            radius_rank: crate::planetary::system::radius_rank(seed, key.body_id(system)),
-        });
-    }
+    let moons = numbered(seed, parent_index, parent, frame, generated);
 
     let ring_moons: Vec<RingMoon> = regular
         .moons()
         .iter()
         .map(|moon| RingMoon::new(moon.orbit().semi_major_axis(), Kilograms::from(moon.mass())))
         .collect();
+    let plane = frame.map_or_else(
+        || RingPlane::Fixed(parent.orbit().orientation().normal()),
+        |frame| RingPlane::Laplace(*frame),
+    );
     let rings = ring_parent.map_or_else(Vec::new, |ring_parent| {
-        generate_rings(seed, system, ring_parent, &ring_moons)
+        generate_rings(seed, system, ring_parent, &ring_moons, &plane)
     });
     Satellites {
         parent_index,
@@ -382,6 +458,139 @@ pub(crate) fn satellites_of(
         moonlets: regular.moonlets(),
         irregulars: caught.population().copied(),
     }
+}
+
+/// The moons `generated` of `parent`, the body `parent_index`, numbered densely in their order up
+/// to the layout's last sub-index, each with its own radius rank and, on the Laplace surface of
+/// `frame` if one is given, its local plane (see the [module](self) documentation).
+#[must_use]
+fn numbered(
+    seed: Seed,
+    parent_index: BodyIndex,
+    parent: &MoonParent,
+    frame: Option<&LaplaceFrame>,
+    generated: impl Iterator<Item = SatelliteMoon>,
+) -> Vec<Satellite> {
+    let system = parent.id().system();
+    let made: Vec<(BodyIndex, SatelliteMoon)> = (1_u8..)
+        .zip(generated)
+        .map_while(|(n, moon)| moon_index(parent_index, n).map(|index| (index, moon)))
+        .collect();
+    made.iter()
+        .map(|&(index, moon)| {
+            // Ruling 112.5: the moon's own draw is keyed by what it is, not by where the moons
+            // kept before it leave it in the dense numbering, so that pruning one moon moves no
+            // other.
+            let key = candidate_key(parent_index, &moon).unwrap_or(index);
+            let plane = frame.map_or(MoonPlane::OrbitalPlane, |frame| {
+                MoonPlane::Laplace(local_plane(
+                    frame,
+                    parent,
+                    &moon,
+                    made.iter().map(|(_, other)| other),
+                ))
+            });
+            Satellite {
+                index,
+                moon,
+                radius_rank: crate::planetary::system::radius_rank(seed, key.body_id(system)),
+                plane,
+            }
+        })
+        .collect()
+}
+
+/// The semi-major axis of `moon` about `parent` when its system is `age` old, as its plane and the
+/// Laplace radii of the moons beyond it read it.
+#[must_use]
+fn axis_at(moon: &SatelliteMoon, parent: &MoonParent, age: Years) -> Metres {
+    match moon {
+        SatelliteMoon::Regular(moon) => moon.orbit().semi_major_axis(),
+        SatelliteMoon::GiantImpact(moon) => moon.orbit_at(parent, age).semi_major_axis(),
+        SatelliteMoon::Captured(moon) => moon.orbit().semi_major_axis(),
+    }
+}
+
+/// The local Laplace plane of `moon` about `parent` in `frame` (see the [module](self)
+/// documentation): its Laplace radius counts every moon of `all` inside it at the frame's time,
+/// in their order, and its pole is on the spin's side for a regular or giant-impact moon and the
+/// orbit normal's for a capture.
+#[must_use]
+fn local_plane<'m>(
+    frame: &LaplaceFrame,
+    parent: &MoonParent,
+    moon: &SatelliteMoon,
+    all: impl IntoIterator<Item = &'m SatelliteMoon>,
+) -> LocalLaplace {
+    let age = frame.read_at();
+    let a = axis_at(moon, parent, age);
+    let sense = match moon {
+        SatelliteMoon::Regular(_) | SatelliteMoon::GiantImpact(_) => PoleSense::Spin,
+        SatelliteMoon::Captured(_) => PoleSense::Orbit,
+    };
+    frame.local(laplace_radius_inside(frame, parent, a, all), sense)
+}
+
+/// The Laplace radius at `a` about `parent` in `frame`, counting each of `moons` whose axis at
+/// the frame's time lies inside `a`, in their order.
+#[must_use]
+fn laplace_radius_inside<'m>(
+    frame: &LaplaceFrame,
+    parent: &MoonParent,
+    a: Metres,
+    moons: impl IntoIterator<Item = &'m SatelliteMoon>,
+) -> Metres {
+    let age = frame.read_at();
+    let parent_mass = frame.parent_mass().value();
+    let inside = moons.into_iter().filter_map(|other| {
+        let axis = axis_at(other, parent, age);
+        (axis < a).then(|| InnerMoon {
+            mass_ratio: Kilograms::from(satellite_mass(other)).value() / parent_mass,
+            semi_major_axis: axis,
+        })
+    });
+    frame.laplace_radius(inside)
+}
+
+/// The mass of `moon`.
+#[must_use]
+const fn satellite_mass(moon: &SatelliteMoon) -> EarthMasses {
+    match moon {
+        SatelliteMoon::Regular(moon) => moon.mass(),
+        SatelliteMoon::GiantImpact(moon) => moon.mass(),
+        SatelliteMoon::Captured(moon) => moon.mass(),
+    }
+}
+
+/// The ordinal of the last of the regular moons `regular` of `parent` (inside out) before the
+/// first that lies in the eccentricity band of `frame`'s Laplace surface, each counting inside it
+/// the regular moons before it and those of `others` inside it (decision-p14-moons §1.2: "a
+/// regular moon inside the band is dropped, with every regular moon beyond it"); every moon's when
+/// none does, and 0 when the first does.
+#[must_use]
+fn stable_run(
+    frame: &LaplaceFrame,
+    parent: &MoonParent,
+    regular: &[RegularMoon],
+    others: &[SatelliteMoon],
+) -> u8 {
+    // Every moon found so far; each one's radius counts those inside it, which for a regular moon
+    // are the regular moons before it (they run inside out) and any other inside it.
+    let found: Vec<SatelliteMoon> = regular
+        .iter()
+        .map(|&moon| SatelliteMoon::Regular(moon))
+        .chain(others.iter().copied())
+        .collect();
+    let mut last = 0;
+    for moon in regular {
+        let a = moon.orbit().semi_major_axis();
+        let rl = laplace_radius_inside(frame, parent, a, &found);
+        if laplace::eccentricity_unstable(frame.obliquity(), a.value() / rl.value()) {
+            break;
+        }
+        last = moon.ordinal();
+    }
+    last
 }
 
 /// The ordinal of the last moon of the longest inner run of `moons` (inside out) whose adjacent

@@ -44,6 +44,7 @@ pub mod kick_rank;
 pub mod limb_darkening;
 pub mod mge;
 pub mod period_correction;
+pub mod saturation;
 // The three `sky_binary_light` tables are written whole by `hyperion-fit`, so their one lint
 // allowance is on their modules.
 #[allow(
@@ -180,6 +181,12 @@ pub const MANIFEST: &[TableInfo] = &[
         revision: 0,
         since_generator_version: 15,
         provisional: true,
+    },
+    TableInfo {
+        name: "saturation_curves",
+        revision: 0,
+        since_generator_version: 22,
+        provisional: false,
     },
     TableInfo {
         name: "sky_binary_light_c",

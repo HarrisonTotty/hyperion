@@ -190,7 +190,12 @@ export function GalaxyPages({
             focusTab(baseId, "map");
           }}
         >
-          <GalaxyMapPanel cursorLy={cursorLy} onCursor={onCursor} centreLy={centreLy} />
+          <GalaxyMapPanel
+            cursorLy={cursorLy}
+            onCursor={onCursor}
+            centreLy={centreLy}
+            shown={page === "map"}
+          />
         </PageTabFocus>
       </div>
       <div

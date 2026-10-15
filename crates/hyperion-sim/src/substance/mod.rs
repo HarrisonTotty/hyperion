@@ -26,10 +26,13 @@
 //! A row carries its identity (key, [`SubstanceKind`], stoichiometry, charge, molar mass) and then
 //! groups of columns, each `None` where the substance has no such data: so far the gas columns
 //! ([`GasColumns`], with each gas's [`MolecularConstants`], over which [`thermo`] sums its heat
-//! capacity, enthalpy and entropy by temperature) and the phase columns ([`PhaseColumns`]). Every
-//! value names its sources and their licence basis ([`Source`], [`Basis`]; decision-composition
-//! §5). P14.T49.b adds the later rows, the gases' molecular constants and the fitted phase data;
-//! P14.T49.c–e the condensed optics, the thermochemistry and the aerosols' extinction.
+//! capacity, enthalpy and entropy by temperature), the held phase columns ([`PhaseColumns`]), the
+//! phase diagrams ([`PhaseDiagram`], whose functions are [`diagram`]'s) and the condensed columns
+//! ([`CondensedColumns`]: a solid's or a liquid's grain density, its transition and its mechanics
+//! family). Every value names its sources and their licence basis ([`Source`], [`Basis`];
+//! decision-composition §5). P14.T49.b adds the later rows, the gases' molecular constants, the
+//! phase diagrams and the condensed columns; P14.T49.c–e the condensed optics, the
+//! thermochemistry and the aerosols' extinction.
 //!
 //! # Rows
 //!
@@ -45,12 +48,21 @@
 //! the solutions, lithologies, salts, organics and undifferentiated bodies' materials. A row no
 //! rule yet produces is reachable data, labelled so where a reader meets it.
 
+pub mod condensed;
+pub mod diagram;
 pub mod element;
 pub mod mix;
 pub mod phase;
 mod rows;
 pub mod thermo;
 
+pub use condensed::{
+    CondensedColumns, CondensedPhase, DensityAt, GrainDensity, Transition, TransitionKind,
+};
+pub use diagram::{
+    DensityEquation, DensityForm, MeltingCurve, MeltingEquation, MeltingPiece, PhaseDiagram,
+    SolidDensity, SolidPhase, SublimationEquation, SublimationPiece, WagnerEquation,
+};
 pub use element::Element;
 pub use hyperion_surface::substance_key::{SubstanceKey, SubstanceKeyForm};
 pub use mix::{GasColumns, HeatCapacityClass, heat_capacity_over_r, mean_molar_mass_g_per_mol};
@@ -265,6 +277,8 @@ pub struct Substance {
     molar_mass_g_per_mol: Option<f64>,
     gas: Option<GasColumns>,
     phase: Option<PhaseColumns>,
+    diagram: Option<PhaseDiagram>,
+    condensed: Option<CondensedColumns>,
     optics: ClientOptics,
     sources: &'static [Source],
 }
@@ -311,6 +325,13 @@ impl Substance {
     #[must_use]
     pub const fn phase(&self) -> Option<&PhaseColumns> {
         self.phase.as_ref()
+    }
+
+    /// Its phase diagram, for a row whose reference equations of state were read (P14.T49.b):
+    /// what P14.T54.a's callers read in place of [`phase`](Self::phase).
+    #[must_use]
+    pub const fn phase_diagram(&self) -> Option<&PhaseDiagram> {
+        self.diagram.as_ref()
     }
 
     /// Which of the client's optics the sim may ask of it.
@@ -376,6 +397,7 @@ mod tests {
     use hyperion_testkit::float::assert_same_bits;
 
     use super::*;
+    use crate::units::Kelvin;
 
     /// A formula key's elements and their counts, merged by element in the order each first
     /// appears, and its charge: `CH3OH` is C 1, H 4, O 1 and 0; `H-` is H 1 and −1.
@@ -801,8 +823,9 @@ mod tests {
         }
     }
 
-    /// Every value names its sources: the identity, every gas column and every phase column, with
-    /// each phase value covered by name in some source's comma-separated `covers`.
+    /// Every value names its sources: the identity, every gas column, every condensed column and
+    /// every phase column, with each condensed and phase value covered by name in some source's
+    /// comma-separated `covers`.
     #[test]
     fn substance_values_name_their_sources() {
         let named = |sources: &[Source]| {
@@ -816,6 +839,19 @@ mod tests {
             named(row.sources());
             if let Some(gas) = row.gas() {
                 named(gas.sources());
+            }
+            if let Some(condensed) = row.condensed() {
+                named(condensed.sources());
+                for value in ["grain density", "transition", "mechanics"] {
+                    assert!(
+                        condensed
+                            .sources()
+                            .iter()
+                            .any(|s| s.covers().split(", ").any(|covered| covered == value)),
+                        "{:?}'s {value} names a source",
+                        row.key()
+                    );
+                }
             }
             if let Some(phase) = row.phase() {
                 named(phase.sources());
@@ -831,6 +867,138 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Every row that is no gas has condensed columns, as has every row with a phase diagram, whose
+    /// columns are its diagram's; every other row's are a fixed density, finite and positive, of a
+    /// stated phase at a stated temperature, and every transition is finite and positive, a
+    /// eutectic's composition a mass fraction.
+    #[test]
+    fn substance_condensed_columns_cover_the_condensed_rows() {
+        let mut count = 0;
+        for id in ids() {
+            let row = id.substance();
+            let key = row.key();
+            if row.gas().is_none() || row.phase_diagram().is_some() {
+                assert!(row.condensed().is_some(), "{key} has condensed columns");
+            }
+            let Some(condensed) = row.condensed() else {
+                continue;
+            };
+            count += 1;
+            let transition = condensed.transition();
+            let t = transition.temperature().value();
+            assert!(t.is_finite() && t > 0.0, "{key}: transition {t} K");
+            match (condensed.grain_density(), row.phase_diagram()) {
+                (GrainDensity::OfDiagram, Some(diagram)) => {
+                    assert_eq!(transition.kind(), TransitionKind::TriplePoint, "{key}");
+                    assert_same_bits(t, diagram.triple_temperature().value());
+                }
+                (GrainDensity::OfDiagram, None) => panic!("{key} has no diagram to read"),
+                (GrainDensity::Fixed { solid, liquid }, diagram) => {
+                    assert!(
+                        diagram.is_none(),
+                        "{key} has a diagram, whose densities it takes"
+                    );
+                    assert!(solid.is_some() || liquid.is_some(), "{key} gives a phase");
+                    for given in solid.iter().chain(&liquid) {
+                        let rho = given.density().value();
+                        assert!(rho.is_finite() && rho > 0.0, "{key}: {rho} kg m⁻³");
+                        assert!(given.at().value() > 0.0, "{key}: {:?}", given.at());
+                    }
+                    assert_ne!(transition.kind(), TransitionKind::TriplePoint, "{key}");
+                }
+            }
+            if let TransitionKind::Eutectic {
+                solute_mass_fraction,
+            } = transition.kind()
+            {
+                assert!(
+                    solute_mass_fraction > 0.0 && solute_mass_fraction < 1.0,
+                    "{key}: {solute_mass_fraction}"
+                );
+                assert_eq!(row.kind(), SubstanceKind::Solution, "{key}");
+            }
+        }
+        assert_eq!(count, 71);
+    }
+
+    /// A row resolves its grain density as its columns give it: a diagram row through its
+    /// diagram, ice Ih's to the bit; a fixed row its one value for its own phase at any
+    /// temperature, and none for the other; a row with no columns none.
+    #[test]
+    fn substance_grain_density_resolves_each_form() {
+        let water = by_key("H2O").unwrap().substance();
+        let diagram = water.phase_diagram().unwrap();
+        for t in [20.0, 100.0, 250.0] {
+            let at = Kelvin::new(t);
+            assert_same_bits(
+                water
+                    .grain_density(CondensedPhase::Solid, at)
+                    .unwrap()
+                    .value(),
+                ice_ih_density(at).value(),
+            );
+        }
+        let warm = Kelvin::new(300.0);
+        assert_same_bits(
+            water
+                .grain_density(CondensedPhase::Liquid, warm)
+                .unwrap()
+                .value(),
+            diagram.liquid_density(warm).unwrap().value(),
+        );
+        // No ice above the triple point at low pressure, and no saturated liquid below it.
+        assert_eq!(water.grain_density(CondensedPhase::Solid, warm), None);
+        assert_eq!(
+            water.grain_density(CondensedPhase::Liquid, Kelvin::new(250.0)),
+            None
+        );
+        // Argon's solid density was not read: not modelled.
+        let argon = Gas::Argon.substance().substance();
+        assert_eq!(
+            argon.grain_density(CondensedPhase::Solid, Kelvin::new(60.0)),
+            None
+        );
+        let brine = by_key("brine_nacl").unwrap().substance();
+        for t in [252.0, 273.15, 300.0] {
+            let rho = brine.grain_density(CondensedPhase::Liquid, Kelvin::new(t));
+            assert_same_bits(rho.unwrap().value(), 1_184.1);
+        }
+        assert_eq!(
+            brine.grain_density(CondensedPhase::Solid, Kelvin::new(240.0)),
+            None
+        );
+        let helium = Gas::Helium.substance().substance();
+        assert_eq!(helium.condensed(), None);
+        assert_eq!(
+            helium.grain_density(CondensedPhase::Liquid, Kelvin::new(3.0)),
+            None
+        );
+    }
+
+    /// Titan's sea liquid's density is its components' rows' saturated liquids mixed ideally by
+    /// volume at its reference composition, volume fractions CH₄ 0.71, C₂H₆ 0.12 and N₂ 0.17
+    /// (Mastrogiuseppe et al. 2016), and 93.65 K: the pinned figure to its last place.
+    #[test]
+    fn substance_titan_liquid_is_its_components_mixed_ideally() {
+        let at = Kelvin::new(93.65);
+        let mut mixed = 0.0;
+        for (key, phi) in [("CH4", 0.71), ("C2H6", 0.12), ("N2", 0.17)] {
+            let diagram = by_key(key).unwrap().substance().phase_diagram().unwrap();
+            mixed += phi * diagram.liquid_density(at).unwrap().value();
+        }
+        let titan = by_key("ch4_c2h6_n2").unwrap().substance();
+        let GrainDensity::Fixed {
+            solid: None,
+            liquid: Some(given),
+        } = titan.condensed().unwrap().grain_density()
+        else {
+            panic!("Titan's liquid is a liquid's fixed density");
+        };
+        assert_eq!(given.at(), at);
+        let density = given.density().value();
+        assert!((density - mixed).abs() < 0.05, "{density} against {mixed}");
     }
 
     /// The condensables are water, methane, nitrogen, carbon dioxide and argon, in registry

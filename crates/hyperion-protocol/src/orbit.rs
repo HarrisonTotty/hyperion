@@ -16,8 +16,9 @@ use ts_rs::TS;
 /// It is the orbit of a secondary relative to its primary: of a pair's outer member's barycentre
 /// about its inner member's, or of a body about its parent. Angles are in radians in the frame the
 /// server gives the orbit in: for stars and planets the system frame, whose axes are the galactic
-/// axes; for a moon or a ring its planet's body frame, referred to the planet's equator (plan 14,
-/// phase D). The inclination is measured from the frame's +z, the
+/// axes; for a moon or a ring its planet's body frame, centred on the planet with the galactic
+/// axes (plan 14, phase D; the local Laplace plane is not a reference here). The inclination is
+/// measured from the frame's +z, the
 /// ascending node from +x towards +y, and the argument of periapsis from the ascending node in the
 /// direction of motion. The elements hold at the epoch, `UniverseTime` zero: at time t the mean
 /// anomaly is `mean_anomaly_at_epoch_rad` plus 2π times the fraction of a period elapsed since

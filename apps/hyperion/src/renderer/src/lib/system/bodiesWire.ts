@@ -364,6 +364,13 @@ function unit(v: Vec3): boolean {
   );
 }
 
+/** A ring's plane's normal, checked: finite and of unit length, as a pole is. */
+function toRingNormal(components: [number, number, number]): Vec3 {
+  const normal = toVec3(components);
+  check(unit(normal), "ring normal unusable");
+  return normal;
+}
+
 /** Whether two vectors are perpendicular to {@link AXES_ORTHONORMAL_TOLERANCE}. */
 function perpendicular(a: Vec3, b: Vec3): boolean {
   return Math.abs(dot(a, b)) <= AXES_ORTHONORMAL_TOLERANCE;
@@ -543,6 +550,7 @@ function toPopulation(population: PopulationDto): Population {
           check(isBodyId(gap.moon) && positive(gap.radius_m), "ring gap unusable");
           return { moon: gap.moon, resonance: toResonance(gap.resonance), radiusM: gap.radius_m };
         }),
+        normal: population.normal === undefined ? null : toRingNormal(population.normal),
       };
       break;
     case "belt": {

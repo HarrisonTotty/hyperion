@@ -42,6 +42,7 @@ use hyperion_sim::planetary::hooks::{
     ClimateRegime, MagneticField, OceanFloor, RadiationClass, Subsurface, SubsurfaceOcean,
     TectonicRegime,
 };
+use hyperion_sim::planetary::laplace::SatellitePlanes;
 use hyperion_sim::planetary::placement::classes::orbits::SystemPlane;
 use hyperion_sim::planetary::placement::{OrbitHost, OrbitZone, ZoneDiscInputs};
 use hyperion_sim::planetary::record::{
@@ -716,6 +717,11 @@ fn population_dto(system: SystemId, population: &Population) -> PopulationDto {
                     }
                 })
                 .collect(),
+            // P14.T56.a: the plane of a ring on its planet's Laplace surface; below
+            // `MOONS_VERSION` every ring lies in its planet's orbital plane, which an absent
+            // normal says, so that nothing on the wire moves before the batch's bump.
+            normal: (SatellitePlanes::in_force() == SatellitePlanes::LaplaceSurface)
+                .then_some(ring.normal()),
         }),
         Population::Belt(belt) => {
             let component = |(inner, outer): (Metres, Metres)| BeltComponentDto {
@@ -1538,5 +1544,25 @@ mod tests {
                 "{key} is not a registry key"
             );
         }
+    }
+
+    /// P14.T56.a: a ring's normal goes on the wire from `MOONS_VERSION`, and below it no ring
+    /// carries one, so that the golden scenes keep version 22's bytes.
+    #[test]
+    fn a_ring_s_normal_is_sent_from_the_batch_s_bump() {
+        let mut rings = 0;
+        for (sim, wire) in GOLDEN_RECORDS.iter() {
+            let (Section::Ok(Population::Ring(ring)), SectionDto::Ok(PopulationDto::Ring(dto))) =
+                (sim.population(), &wire.population)
+            else {
+                continue;
+            };
+            match SatellitePlanes::in_force() {
+                SatellitePlanes::OrbitalPlane => assert_eq!(dto.normal, None),
+                SatellitePlanes::LaplaceSurface => assert_eq!(dto.normal, Some(ring.normal())),
+            }
+            rings += 1;
+        }
+        assert!(rings > 0, "no golden system has a ring");
     }
 }

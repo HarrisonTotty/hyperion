@@ -41,6 +41,9 @@
 //! - [`body_frame`]: which body's non-rotating frame a camera or craft is in, by the Hill sphere
 //!   (plan R02, R02.T4), the rule the client's camera twins.
 //! - [`label`]: bodies' labels for people, `A b` onwards (design note 22, P14.T30.c).
+//! - [`laplace`]: the classical Laplace surface every moon and ring lies on, its Laplace radius,
+//!   the parent's hydrostatic J₂ and the eccentricity band (P14.T56.a, held behind
+//!   [`moons::MOONS_VERSION`]).
 //! - [`rings`], [`belts`] and [`halo`]: a giant's rings (P14.T20), a host's asteroid and
 //!   Kuiper-like belts with their fading debris and largest members (P14.T21.a–c), and the
 //!   cometary halo (P14.T21.d), each from plain arguments until P14.T22.a and T30.a call them.
@@ -118,6 +121,7 @@ pub mod hooks;
 pub mod hosts;
 pub mod index;
 pub mod label;
+pub mod laplace;
 pub mod moons;
 pub mod params;
 pub mod placement;
@@ -131,6 +135,7 @@ pub mod testing;
 
 pub use context::{HostKind, SystemContext};
 pub use error::{DecodeBodyIndexError, EncodeBodyIndexError, ResolveBodyError};
+pub use hooks::structure::temperature_at;
 pub use index::{BodyIndex, BodySlot, BodySub};
 pub use label::BodyLabel;
 pub use system::{Body, PlanetaryHost, PlanetarySystem, generate, generate_planets};

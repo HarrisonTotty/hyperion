@@ -10,6 +10,7 @@ import type {
   BodySummaryDto,
   BodySurfaceDto,
   OrbitDriftDto,
+  ResponseFor,
   SectionDto,
   SubsurfaceOceanDto,
   UniverseTime,
@@ -29,8 +30,10 @@ import {
   populatedBodiesWith,
   sliceBodies,
   sliceBodiesWith,
+  withRingNormal,
 } from "../../test/planetaryFixture";
 import { GOLDEN_SYSTEMS, GOLDEN_TIMES, goldenSystemBodies } from "../../test/inSystemGolden";
+import { vec3 } from "../../geometry/vec3";
 import {
   EARTH_MASS_KG,
   toBodiesRequest,
@@ -236,6 +239,28 @@ describe("toSystemBodiesModel", () => {
     );
 
     expect(faultOf(reversed)).toBe("ring edges unusable");
+  });
+
+  it("reads a ring's plane's normal, and none where an older server leaves it out", () => {
+    const normal: [number, number, number] = [0, -0.6, 0.8];
+    const ringNormal = (response: ResponseFor<"system_bodies">) => {
+      const ring = bodiesOf(response).bodies.bodies.find((body) => body.bodyIndex === 0x0180);
+      return ring?.population.state === "ok" && ring.population.value.kind === "ring"
+        ? ring.population.value.normal
+        : undefined;
+    };
+
+    expect(ringNormal(populatedBodiesWith(withRingNormal(normal)))).toEqual(vec3(0, -0.6, 0.8));
+    expect(ringNormal(populatedBodies())).toBeNull();
+  });
+
+  it("refuses a ring normal that is not of unit length", () => {
+    expect(faultOf(populatedBodiesWith(withRingNormal([0, -0.6, 0.9])))).toBe(
+      "ring normal unusable",
+    );
+    expect(faultOf(populatedBodiesWith(withRingNormal([0, Number.NaN, 1])))).toBe(
+      "ring normal unusable",
+    );
   });
 
   it("refuses a belt about a star the system does not have", () => {

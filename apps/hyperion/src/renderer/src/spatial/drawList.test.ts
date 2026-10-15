@@ -584,6 +584,21 @@ function tiltedCircle(radius: number, tiltDeg: number, segments = 96): Vec3[] {
   });
 }
 
+/**
+ * The screen point at `radius` from the centre, `angleDeg` from coreward, in the plane turned
+ * `tiltDeg` about coreward that {@link tiltedCircle} draws, seen by `camera`.
+ */
+function onTilted(radius: number, tiltDeg: number, angleDeg: number, camera: Camera) {
+  const tilt = (tiltDeg * Math.PI) / 180;
+  const angle = (angleDeg * Math.PI) / 180;
+  const point = local(
+    radius * Math.cos(angle),
+    radius * Math.sin(angle) * Math.cos(tilt),
+    radius * Math.sin(angle) * Math.sin(tilt),
+  );
+  return project(point, viewBasis(FRAME, camera), camera, VIEWPORT);
+}
+
 /** A scene with no grid or rings, so that every polyline in its draw list is one of its own. */
 function bareScene(overrides: Partial<SpatialScene> = {}): SpatialScene {
   return sceneOf([], { plane: { spacing: 1, extent: 0, rings: [] }, ...overrides });
@@ -953,6 +968,102 @@ describe("buildDrawList annuli", () => {
     for (const point of edge?.points ?? []) {
       expect(point.yPx).toBeCloseTo(CENTRE.yPx, 9);
     }
+  });
+
+  it("draws an annulus with a normal of its own in its plane, turned from the reference plane", () => {
+    const tilt = (30 * Math.PI) / 180;
+    const scene = bareScene({
+      annuli: [annulus("ring", 20, 20, { normal: local(0, -Math.sin(tilt), Math.cos(tilt)) })],
+    });
+    const camera = cameraAt(25, 40);
+    const basis = viewBasis(FRAME, camera);
+
+    const [edge] = polylines(buildDrawList(scene, camera, VIEWPORT, GAP_PX).ops);
+    const expected = tiltedCircle(20, 30).map((point) => project(point, basis, camera, VIEWPORT));
+
+    expect(edge?.points).toHaveLength(expected.length);
+    edge?.points.forEach((point, index) => {
+      expect(point.xPx).toBeCloseTo(expected[index]?.xPx ?? Number.NaN, 9);
+      expect(point.yPx).toBeCloseTo(expected[index]?.yPx ?? Number.NaN, 9);
+    });
+  });
+
+  it("ticks a belt with a normal of its own between its edges in its own plane", () => {
+    const tilt = (30 * Math.PI) / 180;
+    const normal = local(0, -Math.sin(tilt), Math.cos(tilt));
+    const scene = bareScene({ annuli: [annulus("ring", 10, 20, { ticks: true, normal })] });
+    const camera = cameraAt(25, 40);
+
+    const ticks = buildDrawList(scene, camera, VIEWPORT, GAP_PX).ops.find(
+      (op): op is TicksOp => op.kind === "ticks",
+    );
+    const expected = Array.from({ length: 36 }, (_, index) => ({
+      from: onTilted(10, 30, index * 10, camera),
+      to: onTilted(20, 30, index * 10, camera),
+    }));
+
+    expect(ticks?.segments).toHaveLength(expected.length);
+    ticks?.segments.forEach((segment, index) => {
+      for (const end of ["from", "to"] as const) {
+        expect(segment[end].xPx).toBeCloseTo(expected[index]?.[end].xPx ?? Number.NaN, 9);
+        expect(segment[end].yPx).toBeCloseTo(expected[index]?.[end].yPx ?? Number.NaN, 9);
+      }
+    });
+  });
+
+  it("ticks the edges of an annulus with a normal of its own from points in its own plane", () => {
+    const tilt = (30 * Math.PI) / 180;
+    const normal = local(0, -Math.sin(tilt), Math.cos(tilt));
+    const scene = bareScene({ annuli: [annulus("band", 10, 20, { edgeTicks: true, normal })] });
+    const camera = cameraAt(25, 40);
+
+    const ticks = buildDrawList(scene, camera, VIEWPORT, GAP_PX).ops.find(
+      (op): op is TicksOp => op.kind === "ticks",
+    );
+    // 36 on each edge, the inner's first, none seen edge-on from this camera.
+    const expected = [10, 20].flatMap((radius) =>
+      Array.from({ length: 36 }, (_, index) => onTilted(radius, 30, index * 10, camera)),
+    );
+
+    expect(ticks?.segments).toHaveLength(expected.length);
+    ticks?.segments.forEach((segment, index) => {
+      expect(segment.from.xPx).toBeCloseTo(expected[index]?.xPx ?? Number.NaN, 9);
+      expect(segment.from.yPx).toBeCloseTo(expected[index]?.yPx ?? Number.NaN, 9);
+    });
+  });
+
+  it("draws an annulus with a normal of its own about its centre, not its foot on the plane", () => {
+    const scene = bareScene({
+      annuli: [annulus("zone", 5, 5, { centre: local(10, 0, 7), normal: FRAME.north })],
+    });
+
+    const [edge] = polylines(buildDrawList(scene, cameraAt(0, 90), VIEWPORT, GAP_PX).ops);
+
+    // Seen from the front, its plane is a line across the screen at the centre's height.
+    for (const point of edge?.points ?? []) {
+      expect(point.yPx).toBeCloseTo(CENTRE.yPx - 7 * K, 9);
+    }
+  });
+
+  it("labels an annulus with a normal of its own at the rimward point of its own plane", () => {
+    // Turned about spinward, so that its rimward point rises off the reference plane.
+    const tilt = (40 * Math.PI) / 180;
+    const normal = local(Math.sin(tilt), 0, Math.cos(tilt));
+    const scene = bareScene({ annuli: [annulus("ring", 10, 20, { label: "RING", normal })] });
+    const camera = cameraAt(0, 90);
+    const rimward = project(
+      local(-20 * Math.cos(tilt), 0, 20 * Math.sin(tilt)),
+      viewBasis(FRAME, camera),
+      camera,
+      VIEWPORT,
+    );
+
+    const [label] = buildDrawList(scene, camera, VIEWPORT, GAP_PX).curveLabels;
+
+    expect([label?.xPx, label?.yPx]).toEqual([
+      expect.closeTo(rimward.xPx, 9),
+      expect.closeTo(rimward.yPx, 9),
+    ]);
   });
 
   it("labels an annulus at its outer edge's rimward point", () => {

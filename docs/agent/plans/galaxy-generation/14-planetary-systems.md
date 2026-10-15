@@ -5380,18 +5380,20 @@ Snapshot path, `planetary/chem/`.
 - **P14.T50.c The ammonia line for nitrogen** (22 → 23; lane `p14-snapshot`, after T50.a and
   before T51.a; amends T13.a; decision-p14-moons §2 and §F1-plan).
   - **The defect.** `ICY_VOLATILE_BOOST` (100) raises a body's nitrogen wherever water condenses.
-    But nitrogen's icy carrier, ammonia monohydrate, condenses only at 131 K (Lodders 2003, ApJ
-    591, 1220, Table 8, from memory, checked at build). Titan's nitrogen, by which the boost was
-    calibrated, came as NH₃ (Mousis, Gautier and Bockelée-Morvan 2002; Mandt et al. 2014, both
-    from memory).
-  - **The rule.** `AMMONIA_HYDRATE_CONDENSATION` = 131 K (`derive/atmosphere.rs`), and
+    But nitrogen's icy carrier, ammonia monohydrate, appears only at 131 K and holds half of all
+    nitrogen only by 123 K (Lodders 2003, ApJ 591, 1220, Table 8 and §3.4.3, at 10⁻⁴ bar; read).
+    Titan's nitrogen, by which the boost was calibrated, came as NH₃ (Mousis, Gautier and
+    Bockelée-Morvan 2002, Icarus 156, 162, not read; Mandt et al. 2014, ApJ 788, L24, abstract
+    read).
+  - **The rule.** `AMMONIA_HYDRATE_CONDENSATION` = 123 K, nitrogen's 50% condensation
+    temperature, `Element::N`'s (T50.a) (`derive/atmosphere.rs`), and
     `nitrogen_boosted(formation_temperature) -> bool`, true at or below it. A body's nitrogen takes
-    `ICY_VOLATILE_BOOST` only where its formation temperature is at most 131 K, and Earth's per
+    `ICY_VOLATILE_BOOST` only where its formation temperature is at most 123 K, and Earth's per
     unit mass times its rank otherwise.
     - A planet's, dwarf planet's or belt member's formation temperature is its star disc's under
       the disc's Hayashi profile at its formation distance: T_f = 170 K × √(d_snow ÷ d_form),
-      with d_snow the disc's snow line. So the boost begins at (170 ÷ 131)² = 1.684 d_snow:
-      3.80 au about the zero-age Sun, 4.55 √L au about a host of zero-age luminosity L.
+      with d_snow the disc's snow line. So the boost begins at (170 ÷ 123)² = 1.910 d_snow:
+      4.32 au about the zero-age Sun, 5.16 √L au about a host of zero-age luminosity L.
     - A moon's is P14.T56.c's.
     - A body that migrated keeps its formation distance's value, as its snow-line side does.
     - Water and carbon keep the snow line (170 K), as built. Nitrogen inside the snow line is
@@ -5401,9 +5403,10 @@ Snapshot path, `planetary/chem/`.
     `ENVELOPED_TIDES_VERSION`. Below 23 every inventory is version 22's, bit for bit, and a
     tripwire test fails once the version reaches 23. T54.a deletes both.
   - _Tests:_
-    - `AMMONIA_HYDRATE_CONDENSATION` is 131 K, with its source;
-    - about the zero-age Sun's disc (0.7 L☉), the ammonia line lies at 1.684 times the snow line,
-      3.80 ± 0.01 au;
+    - `AMMONIA_HYDRATE_CONDENSATION` is 123 K, equal to `Element::N.condensation_temperature()`,
+      with its source;
+    - about the zero-age Sun's disc (0.7 L☉), the ammonia line lies at 1.910 times the snow line,
+      4.32 ± 0.01 au;
     - a body formed at 3 au has Earth's nitrogen per unit mass at its rank, and one formed at
       5 au 100 times it; their water and carbon equal version 22's, bit for bit;
     - a body formed inside the snow line is unchanged, bit for bit;
@@ -5417,7 +5420,7 @@ Snapshot path, `planetary/chem/`.
   - _Accept:_ `cargo test -p hyperion-sim planetary::derive::atmosphere`;
     `cargo test -p hyperion-sim planetary::chem`.
   - _Moves at 23 (estimated):_
-    - every solid body formed between 1 and 1.684 snow-line distances (0.23 dex of formation
+    - every solid body formed between 1 and 1.910 snow-line distances (0.28 dex of formation
       distance) keeps 1% of its version-22 nitrogen: planets, dwarf planets, belt members and,
       through T56.c, captured moons of parents formed there;
     - where such a body keeps an N₂-dominated air (a migrated icy or ocean world, or a snowball
@@ -12704,3 +12707,924 @@ tables::gauss_legendre`.
   - Woolley, Scott and Brickwedde's Table 4 misprints ortho-H₂'s C_p at 80 K: 5.982 for 4.982.
   - NASA Glenn's own polynomials wobble for atoms near 1,200 K (Na 2.4974, Ca 2.4841), below their
     5/2 floor.
+- **Deviations in P14.T49.b, as built: step 2, part 1, the phase diagrams (`p14-registry`,
+  2026-10-15).** `GENERATOR_VERSION` stays 22, and no generated value moves. Step 2 was split: this
+  part builds the saturation curves and the phase data (the leaner first part, which gates T24.e,
+  T49.c, T49.e and T51.a); the condensed columns (grain density, transition and mechanics family),
+  the solutions' densities and eutectics, the laws aloft and the test that every key R09's worlds
+  use is a row are part 2, the lane's next agent's.
+  - _Held at 22_ (decision-bump-plan-after-22 §1.2). Rows 0–8's `PhaseColumns`, the functions
+    `substance::{saturation_pressure, phase_at, condensables}` and `ice_ih_density` are unchanged,
+    and the record still calls them. The new data are a new column group, `PhaseDiagram`
+    (`Substance::phase_diagram`), read by new functions with the held ones' names in
+    `substance::diagram`, which nothing on the record calls. **P14.T54.a, at the bump:**
+    - re-export `diagram::{saturation_pressure, phase_at, condensables}` at `substance::` in place
+      of the held ones;
+    - point the readers of `PhaseColumns::triple_liquid_density` (figures/cover.rs, P14.T24.b's
+      ocean volume) at `PhaseDiagram::triple_liquid_density`;
+    - point `hooks/surface.rs`'s `greenhouse_gain`, which reads the held columns' constant
+      enthalpies as the curve's d ln p ÷ dT, at `clausius_clapeyron_enthalpy_j_per_mol` at the
+      surface temperature: the diagram's triple-point enthalpies are the references' latent heats,
+      not the curve's slope (below);
+    - note in the bless note that `diagram::condensables` gives fourteen rows where the held
+      function gave five, so `planetary/regime.rs`'s loops over it gain nine;
+    - retire `PhaseColumns`, its `[phase]` golden lines and `Substance::phase`;
+    - restamp the table `saturation_curves` `--since 23`.
+  - _Added public items_, in `substance::diagram` and re-exported at `substance::`: `PhaseDiagram`;
+    `WagnerEquation`; `SublimationEquation { InversePowers, Reduced, ScaledPowers }` and
+    `SublimationPiece`; `DensityEquation` and `DensityForm { Linear, Logarithmic }`;
+    `MeltingEquation { Simon, SimonGlatzel, Polynomial, IceIh, Logarithmic }`, `MeltingPiece` and
+    `MeltingCurve { Rising, Falling }`; `SolidDensity` (`IceIh`, `Polynomial`, `CellVolume`,
+    `Fixed`, `Measured`) and `SolidPhase`. `PhaseDiagram`'s methods carry `PhaseColumns`' names
+    where they answer the same question (`triple_temperature`, …, `saturation_pressure`,
+    `phase_at`, `triple_liquid_density`), so that T54.a's switch is `phase()` → `phase_diagram()`.
+    Beside them:
+    `ln_saturation_pressure`, `saturation_temperature` (the frost or boiling point at a pressure,
+    by 64 bisections), `liquid_density`, `solid_density`, `solid_phase_at`, `melting_pressure`
+    (the rising branch), `falling_melting_pressure` (water's ice Ih),
+    `clausius_clapeyron_enthalpy_j_per_mol`, and `triple_vaporisation_`, `triple_fusion_` and
+    `triple_sublimation_enthalpy_j_per_mol`, named apart from the held columns' enthalpies, which
+    mean the curve's slope.
+  - _Files beyond the task's_: `substance/diagram.rs` (the column group and its functions);
+    `substance/rows/diagrams.rs` (the fourteen diagrams' data); `substance/mod.rs` (the column
+    group's field and re-exports); `tests/substance_golden.rs` and its golden; `hyperion-fit`'s
+    `src/task.rs` (`REGISTRY` at 35), `manifests/saturation_curves.toml` and `tables.lock`;
+    `NOTICE` (CoolProp's MIT notice); the sim's `clippy.toml` (`CoolProp`) and the fit crate's
+    (`CoolProp` and `WebBook`) among `doc-valid-idents`.
+  - _The fit task, as built_ (against the plan's "ln p … fitted" and the step-1 builder's design of
+    a Chebyshev series in 1/T for each solid branch). The sim evaluates every published equation
+    verbatim, liquid and solid alike. `saturation_curves` (Fast, revision 0, table `saturation.rs`,
+    fourteen items `<KEY>_ANCHORS`, stamped since 22, its MANIFEST and task lines T49.b's) emits only
+    each sublimation piece's anchor: the amount added to its ln p (pressure in pascals) so that it
+    meets the branch above it (science-p14-t24f §6.3). Its fingerprint is the evaluations the
+    anchors are made of. The reason: a Chebyshev series re-expresses the eleven Fray and Schmitt
+    polynomials exactly, but cannot reach the design's own 10⁻⁹ in ln p for Span and Wagner's and
+    Tegeler et al.'s θ^0.9 and θ^1.7 terms (2.4 × 10⁻⁸ and 3.7 × 10⁻⁹ at 48 nodes), where the
+    verbatim forms carry no fit error at all. Below the coldest piece the branch continues as that
+    piece's Clausius–Clapeyron tangent at its lower bound, continuous in value and slope, in place
+    of the design's held quotient (a secant from the triple point).
+  - _The latent heats, as built_ (against the design's "L_vap and L_sub at T_t as the curves' own
+    Clausius–Clapeyron slopes"). `triple_vaporisation_enthalpy_j_per_mol` is the reference's h″ −
+    h′, the measured latent heat, and `triple_sublimation_enthalpy_j_per_mol` is it plus the
+    enthalpy of fusion, only where one was read (water, methane and ammonia). A reader that needs
+    the slope consistent with the curve takes `clausius_clapeyron_enthalpy_j_per_mol(T)`, which
+    exceeds h″ − h′ by 1 ÷ (z″ − z′).
+  - _`saturation_temperature`'s cost_: 64 bisections of four to six `powf` each, some 400 `powf`
+    a call (unmeasured; perhaps 10 µs). T51.a's frost points on the snapshot path should take it
+    once per condensable and body, or ask for a cheaper fixed-count inversion.
+  - _The fourteen diagrams._ They cover `H2O`, `CH4`, `NH3`, `N2`, `O2`, `CO2`, `Ar`, `Kr`, `Xe`,
+    `N2O`, `CO`, `SO2`, `H2S` and `C2H6`, every row whose reference equation of state was read.
+    - **The liquid branches** are the papers' ancillaries: IAPWS SR1-86, Setzmann and Wagner 1991,
+      Span et al. 2000, Span and Wagner 1996, Tegeler et al. 1999, Stewart, Jacobsen and Wagner
+      1991 and Gao et al. 2023.
+      - Oxygen's paper presents Schmidt and Wagner 1985's equation (not reached) on IPTS-68.
+      - Ammonia's is the published version of REFPROP's "to be submitted, 2018".
+      - For `Kr`, `Xe`, `N2O`, `CO`, `SO2`, `H2S` and `C2H6` the papers (Lemmon and Span 2006, Gao
+        et al. 2016, Bücker and Wagner 2006) were not reachable. Their fixed points, ancillaries,
+        triple-point pressures and enthalpies of vaporisation are CoolProp's: Bell's fits to those
+        equations of state, basis `Raw { licence: "MIT" }`. Each was checked against the equation
+        of state solved for phase equilibrium from CoolProp's coefficients.
+    - **The solid branches**, from the triple point down:
+      - water: IAPWS R14-08's ice Ih, from 50 K;
+      - carbon dioxide: Span and Wagner's Eq. (3.12) to 154 K, its fitted range's end, and Fray and
+        Schmitt's polynomial below it, to 40 K;
+      - argon: Tegeler et al.'s Eq. (2.8), from 25 K;
+      - ammonia: Gao et al.'s, from 162 K;
+      - the rest: Fray and Schmitt 2009's polynomials, read through Lisse et al. 2021's reproduction,
+        their ranges and uncertainties unread. Their lower bounds are the builder's, where each
+        polynomial's Clausius–Clapeyron enthalpy still holds steady.
+
+      The joins between solid phases are:
+      - nitrogen's α–β transition at 35.61 K (Brookeman and Scott 1973);
+      - carbon monoxide's at 61.585 K (Morrison et al. 1968; both as Raposa et al. 2024 quote them);
+      - oxygen's at the polynomials' own crossings, 23.14 and 43.78 K (its transitions unread);
+      - hydrogen sulphide's at 173.7 K, where its two polynomials come closest. The five-term one's
+        enthalpy climbs to 47 kJ mol⁻¹ by 60 K, so the two-term one, 22.5 kJ mol⁻¹, takes over
+        below.
+
+    - **The anchors**, as the factor each puts on its piece's pressure, from the triple point down:
+      - H2O +0.00001%, CO2 +0.0023% and +0.36%, Ar +0.0028%, NH3 +0.015%: the published solid
+        branches meet their liquids within their own errors;
+      - CH4 −1.61%, N2 +2.84% and +5.77%, O2 −0.056%, −0.050% and −0.056%, Kr +0.28%, Xe −0.16%,
+        N2O −5.36%, CO −0.11% and −0.47%, SO2 −3.65%, H2S −0.56% and −0.65%, C2H6 −0.16%.
+    - **The melting curves** are the papers' own for seven rows: methane's, nitrogen's, argon's,
+      carbon dioxide's, ammonia's two Simon–Glatzel pieces, ethane's through CoolProp, and water's
+      whole curve. Water's falls through ice Ih (R14-08 Eq. 1) to 251.165 K and 208.566 MPa and
+      rises from there through ices III, V, VI and VII (Eqs. 2–5, added at the science check's
+      should-fix: a water world's deep ocean meets them). Each rising curve but water's is
+      extrapolated beyond its published range. Water's ends at ice VII's 715 K, beyond which
+      Eq. 5 turns over, so above it water reads fluid. The other seven rows melt at the triple
+      temperature.
+    - **The liquid densities** are each paper's ancillary.
+    - **The solid densities**, where a value was read:
+      - ice Ih is `ice_ih_density`, unchanged;
+      - carbon dioxide is Mangan et al. 2017's fit, held below 80 K and extrapolated above 195 K;
+      - nitrogen's α and β and methane's II and I are Maynard-Casely, Hester and Brand 2020's
+        cell-volume fits;
+      - xenon is Sears and Klug 1962's cells, 5–75 K, interpolated, their 30 K cell left out;
+      - krypton (58 K), sulphur dioxide (143.15 K) and γ-oxygen (46 K) are one cell each, at its
+        stated temperature;
+      - ammonia is Kiefte et al. 1985's 822 ± 5 kg m⁻³ at the triple point, as Gao et al. 2023
+        take it (Olovsson and Templeton's cell, 834, is the check; the science check's should-fix);
+      - nitrous oxide, α-oxygen and α-carbon monoxide are one cell each, its temperature unread.
+
+      There is none for argon, hydrogen sulphide, ethane, β-oxygen or β-carbon monoxide, whose only
+      values found were from memory (deferred, below).
+
+    - **The latent heats**: h″ − h′ at the triple point for every row (six from the papers'
+      tables; ammonia's by Clapeyron from Gao et al.'s ancillary and Table 1; the seven CoolProp
+      rows' from its triple-point states). The enthalpy of fusion is given only where a value was
+      read: water's (IAPWS R10-06's ice against IAPWS-95's liquid at the triple point, 6,007.1 J
+      mol⁻¹, with Osborne 1939 as the check), methane's (Vogt and Pitzer 1976, 939.2 J mol⁻¹, as
+      the held columns cite it) and ammonia's (Overstreet and Giauque 1937, through Gao et al.). The curve's own L at any temperature is `clausius_clapeyron_enthalpy_j_per_mol`, R T²
+      d ln p ÷ dT, which exceeds h″ − h′ by 1 ÷ (z″ − z′): 10% at carbon dioxide's triple point
+      (5.2 bar), and without bound toward the critical point.
+  - _Tests_, as the plan lists them:
+    - points exact;
+    - each liquid branch within its ancillary's stated error of its equation of state at three
+      temperatures (the papers' tables, or the equation solved from CoolProp's coefficients).
+      Ammonia's is checked at two, its triple and normal boiling points from Gao et al.'s Table 1,
+      since the paper prints no saturation table and the lane's solver cannot take its associating
+      term;
+    - each solid piece its anchored equation, continuous at every join;
+    - the published solid branches with a stated error within it;
+    - ice and carbon dioxide against their papers' check values, and CO and N₂ at their α–β
+      transitions against Raposa et al.'s Table A3;
+    - methane within 0.1% of the WebBook at 100, 150 and 180 K;
+    - `phase_at`'s regions and the melting curves, water's five equations against IAPWS R14-08's
+      Table 3;
+    - ice Ih's ρ_s within 0.02 kg m⁻³ of IAPWS R10-06 at the triple point, the 1-atm melting point
+      and 20, 100, 160 and 273.15 K;
+    - each row's ρ_l at the triple point against its reference;
+    - each row's first anchor and triple-point liquid density against a second, independent
+      transcription of the same equations (the lane's research). The colder pieces, the melting
+      equations but water's and ammonia's join, and most solid-density coefficients have no
+      second transcription; the science check read every coefficient against its primary;
+    - the surfaces audit §2.5's windows within 2 K.
+
+    The audit's constant-enthalpy entries miss in three places, which these curves correct: water
+    at 92 bar boils at 578.1 K (the audit's 569), ethane at 0.006 bar at 123.9 K (120) and ammonia
+    at 92 bar at 393.7 K (390). The test pins the reference ancillaries' values there, a technical
+    correction of the plan's "within 2 K", since no curve that matches its equation of state can
+    meet a constant-enthalpy estimate.
+
+  - The registry golden gains a `[diagram]` section (each condensable's points, anchors, curve,
+    enthalpies and densities at fixed fractions of its triple and critical temperatures), an
+    extension at 22. Until T54.a, nothing on the record reads it, so a change to a diagram's value
+    (part 2's, or a deferred finding's) refits `saturation_curves` and re-blesses the section at
+    the version in force with no bump, as main's 2026-10-13 ruling treats a module nothing on the
+    record calls (decision-bump-plan-after-22 §6). From 23 it is moved output.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.b's step 2, part 1:
+  - _Fray and Schmitt's solids._ Their ranges and uncertainties are unread, and the anchors move
+    whole pieces: methane's by 1.6%, β-nitrogen's by 2.8% (and α's by 5.8%), sulphur dioxide's by
+    3.7% and nitrous oxide's by 5.4%.
+    - The anchored β-nitrogen's and nitrous oxide's slopes at the triple point imply enthalpies of
+      fusion of about 534 and 7,467 J mol⁻¹ (the science check's Clapeyron). Nitrogen's own read
+      data give about 868 (Span et al.'s Eq. 7 slope, the β cell and ρ′). Grundy et al. 2024's
+      β-N₂ (+0.12% at the triple point) is better there. Methane's slope gives 935 against its
+      measured 939.2.
+    - Quartz-crystal measurements (Grundy et al. 2024; Blakley et al. 2024) put CO, N₂, CH₄, O₂
+      and NH₃ ices 1.5–15 times lower at 25–40 K.
+    - Lisse et al.'s reproduction misprints SO₂'s A₁ and Kr's A₆ (read −3.508 × 10³ and −1.210 ×
+      10⁸), and prints a second N₂O polynomial that is unphysical.
+  - _Hydrogen sulphide._ Below 173.7 K the two-term polynomial's constant 22.5 kJ mol⁻¹ leaves out
+    the III–II–I transitions' enthalpies, and the five-term one would be about four times lower
+    at 84 K. The truth is likely between them.
+  - _Sources not reached_: Schmidt and Wagner 1985 (oxygen, which this record has only on IPTS-68),
+    Lemmon and Span 2006, Gao et al. 2016, Bücker and Wagner 2006 and Fray and Schmitt 2009.
+    - Carbon monoxide's equation gives 3.4982 MPa at its critical density, against the stated
+      3.494.
+    - Setzmann and Wagner's p. 1064 and Eq. (2.3) misprint methane's p_c as 4.5922 MPa.
+  - _Solid densities from memory, not used_: argon's 1,771 kg m⁻³ at 4.25 K (the COD cells of
+    Henshaw 1958 and Wyckoff 1963 are 3.5% denser), β-oxygen's, β-carbon monoxide's, ethane's, and
+    hydrogen sulphide's phase boundaries (its cells are read).
+    - Unread are ammonia's, nitrous oxide's, α-oxygen's and α-carbon monoxide's cell temperatures,
+      and krypton's cell is probably 1% light.
+    - Carbon dioxide's density above 195 K and methane I's above 80 K are extrapolations.
+  - _Melting_: CoolProp's carbon monoxide and krypton lines (from other papers) are not used.
+    Oxygen, sulphur dioxide, hydrogen sulphide, nitrous oxide and xenon melt at the triple
+    temperature. Every other row's own high-pressure solid phases are not modelled.
+  - _Enthalpies of fusion from memory, not used_: the other eleven rows'.
+  - _Held and single-cell solid densities_ (the science check). Xenon is held flat above 75 K;
+    Sears and Klug's 60–75 K slope extrapolates to about 3,430 kg m⁻³ at the triple point, so the
+    held 3,655 may be some 6.5% high. Krypton's 58 K cell and sulphur dioxide's 143 K cell are held
+    the same way. γ-oxygen's two other cells (Keesom and Taconis 1936; Jordan et al. 1964) give
+    1,334 kg m⁻³, 2.2% below Cox et al.'s.
+  - _The tangent below the coldest piece_ holds that piece's enthalpy, while the true one falls
+    toward its 0 K value. So the extrapolated pressure reads about 2–3 times low at half the bound,
+    where it is negligible.
+  - Ethane's melting equation's reference pressure (CoolProp's 1.14 Pa) sits below its triple
+    pressure, 1.1421 Pa, so a point at the triple temperature between them reads solid.
+    Negligible.
+- **Deviations in P14.T50.c, as built (`p14-snapshot`, 2026-10-15).** The ammonia line for
+  nitrogen, in the 22 → 23 batch, behind `AMMONIA_LINE_VERSION` = 23. No output moves:
+  `GENERATOR_VERSION` stays 22, and every golden holds bit for bit (`golden_diff.py`: no golden
+  changed, none new).
+  - _The hold._ `AMMONIA_LINE_VERSION` (`derive/atmosphere.rs`, crate-private) and
+    `NitrogenLine { Snow, Ammonia }`, whose `in_force()` is `Snow` below 23 and `Ammonia` from
+    it. Version 22's rule, `Snow`, is the old code path as it was: the nitrogen's factor is the
+    snow-line side's boost, multiplied in the same order, so every inventory is version 22's to
+    the bit (tested over formation distances 0.4–30 au and five ranks, and on Ceres's
+    derivation). The tripwire, `the_ammonia_line_is_held_only_until_the_batch_s_bump`, fails once
+    `GENERATOR_VERSION` reaches 23. T54.a deletes `AMMONIA_LINE_VERSION`, `NitrogenLine` and its
+    `Snow` arm, calls the rule where the three `*_under` functions are called, removes them, and
+    deletes the tripwire.
+  - _Public items_, in `derive/atmosphere.rs`: `AMMONIA_HYDRATE_CONDENSATION` (defined as
+    `Element::N.condensation_temperature()`, 123 K);
+    `formation_temperature(formation_distance, snow_line) -> Kelvin` (170 K × √(d_snow ÷ d_form),
+    with Hayashi's profile as Ida and Lin 2004, §2.3, quote it; read);
+    `nitrogen_boosted(Kelvin) -> bool` (at or below 123 K); and
+    `ammonia_line(snow_line) -> Metres` (1.910 d_snow). The 170 K is T50.a's
+    `chem::redox::SNOW_LINE_TEMPERATURE`, imported rather than defined again, so that the soot and
+    ammonia lines read one snow-line temperature.
+  - _`volatile_inventory` gains a parameter_, `formation_temperature: Kelvin`, after `formed`. The
+    caller keeps the two consistent, as `InventoryInputs`' distances already are. Under the
+    ammonia line a body formed inside the snow line takes no boost whatever temperature it is
+    given, so "nitrogen inside the snow line is unchanged" holds by construction.
+  - _Test seams, crate-private:_ `volatile_inventory_under`, `element_inventory_under` and
+    `derive_body_under` take the `NitrogenLine`. The public functions are each the seam under
+    `NitrogenLine::in_force()`. So the table's test derives every body under both lines through the
+    whole pipeline; T51.a's lane hold may reuse or extend the seam.
+  - _Enveloped bodies' inventories._ The rule applies wherever `derive_body` builds an inventory,
+    so at 23 the stored nitrogen of a giant or sub-Neptune formed between 1 and 1.910 snow-line
+    distances also keeps 1% (`DerivedBody::inventory`, `BulkComposition`). Their envelopes,
+    partial pressures and wire do not move. T54.a's bless note counts these with the solid bodies.
+  - _For T54.a:_ removing the hold also edits `planetary/chem/inventory.rs`
+    (`element_inventory_under`), which T54.a's _Files_ does not name. When it builds a body's
+    `InventoryInputs`, it takes the distance and snow line `derive_body` used (for a moon, its
+    nursery's snow line and its own distance), so that the element inventory's carriers stay the
+    body's inventory to the bit for bodies between the two lines. The chem test checks this for
+    the table's bodies under both lines.
+  - _Files beyond the task's:_ `planetary/derive/mod.rs` (`derive_body` reads the formation
+    temperature of `placed.formation_distance` in `disc`, through a new private `inventory_of`
+    that keeps `derive_body_under` within Clippy's 100 lines) and `chem/inventory/tests.rs`.
+  - _Moons follow at 23 through `derive_body`._ The rule reads the disc it is given. A moon is
+    derived on its nursery disc at its own distance, so at 23 a regular moon takes the
+    circumplanetary ammonia line, T_f = 170 K × √(d_ice ÷ a). That is T56.c's nitrogen bullet,
+    which this subtask meets for regular moons. A captured moon takes it at its present distance
+    in the nursery until T56.c moves it to its parent's formation distance in the star's disc.
+    Reported to "main" (2026-10-15); lean: keep the rule general. A moon's formation distance is
+    its present orbit, so at 23 its nitrogen steps a hundredfold when tidal recession carries it
+    past 1.910 nursery ice lines, as its snow-line side and ice fraction already do at 22: a pure
+    function of the time, which T56.c's tests should pin.
+  - _Test figures._ The zero-age Sun's figure is tested at 0.7 L☉, 4.32 ± 0.01 au, as the plan
+    states it. It is also tested about the generated zero-age Sun's own disc, whose zero-age
+    luminosity (plan 06's main sequence, Tout et al. 1996) is 0.6977 L☉ and snow line 2.255 au:
+    there the line lies at 4.308 au, so that test reads 4.31 ± 0.01 au. With 131 K both figures fell inside 3.80 ±
+    0.01. The tests are named `nitrogen_s_carrier_holds_half_of_it_by_123_k`,
+    `the_zero_age_sun_s_ammonia_line_lies_at_4_3_au`,
+    `nitrogen_takes_the_icy_boost_only_beyond_the_ammonia_line`,
+    `an_inventory_formed_inside_the_snow_line_does_not_move`,
+    `the_table_under_the_ammonia_line_moves_only_ceres_s_nitrogen`,
+    `the_ammonia_line_is_a_step_in_formation_distance_only`,
+    `the_ammonia_line_is_held_only_until_the_batch_s_bump`, and in `chem/inventory/tests.rs`,
+    `the_nitrogen_carrier_follows_the_ammonia_line`.
+  - _Ruled (decision-ammonia-line, 2026-10-15): the ammonia line is at 123 K._ Lodders (2003, ApJ
+    591, 1220; read) gives nitrogen's carrier two temperatures at 10⁻⁴ bar. Ammonia hydrate appears
+    at 131 K (Table 8 col. 2; Table 10), and "50% of all nitrogen is in this hydrate by 123 K"
+    (Table 8 col. 4; §3.4.3). The boost treats a body's nitrogen as condensed, which is the 50%
+    figure. That is the figure decision-p14-moons §2.2 names and the one `Element::N` holds, so
+    `AMMONIA_HYDRATE_CONDENSATION` is `Element::N.condensation_temperature()`, 123 K, and 131 K is
+    retired. The boost begins at (170 ÷ 123)² = 1.910 d_snow: 4.32 au about the zero-age Sun,
+    5.16 √L au about a host of zero-age luminosity L, and 22.7 R_J about the generated Jupiter.
+    The snow line's 170 K is Hayashi's rule of thumb (Kennedy and Kenyon 2008; Lecar et al. 2006,
+    145–170 K by pressure). For water the appearance and 50% figures lie within about 4 K, so both
+    lines mark where their carrier has condensed. Lodders's figures are at 10⁻⁴ bar, above the
+    disc's pressure at 4–5 au. At one pressure her water and ammonia figures put the line at
+    1.93–2.14 snow-line distances, so 1.910 is its near edge. A pressure-matched 116 K
+    (2.1 d_snow) is a deferred finding.
+- **Deferred findings (2026-10-13 rule)**, from P14.T50.c and decision-ammonia-line:
+  - _Pressure match._ A 50% figure at the snow line's pressure is about 116–117 K, a line at about
+    2.1 d_snow. Open until the snow line's pressure convention is ruled.
+  - _Kinetic end-member._ If N₂ does not convert to NH₃, nitrogen condenses only as N₂ clathrate
+    (58 K appearance, 52 K 50%; Lodders 2003, Table 10, §3.4.3). The boost's Titan calibration
+    rests on NH₃-borne nitrogen, so the equilibrium case stands.
+  - _The element registry_ (`substance/element.rs`). Lodders 2003 is now read: Table 8 col. 4
+    confirms all 23 values other than H and He, including Mg 1,336, Ca 1,517, V 1,429, P 1,229,
+    Cl 948, Ar 47, K 1,006, Cr 1,296 and Mn 1,158. H 182 K and He 3 K are col. 2 appearance
+    figures, and neither element has a 50% value. LPG09's Mg and Si at 1,354 K and Ca at 1,659 K
+    are col. 2 figures too; its Yb to V values are Lodders's col. 4 one row up, the offset
+    T50.a's findings recorded. The registry's documentation still says Lodders 2003 was not read.
+  - _Titan's nitrogen._ Mandt et al. (2014, ApJ 788, L24; abstract read via OpenAlex) conclude that
+    it "must have originated as ammonia ice formed in the PSN under conditions similar to that of
+    cometary formation": the protosolar nebula, not Saturn's subnebula, which bears on T56.c's
+    circumplanetary rule for regular moons. Mousis, Gautier and Bockelée-Morvan (2002, Icarus
+    156, 162) remain unread.
+  - _Ceres_ (2.7675 au, T_f 153.6 K at 0.7 L☉, 153.5 K in the generated disc) loses the boost, though its ammoniated phyllosilicates
+    (De Sanctis et al. 2015, Nature 528, 241; its citation checked, not read) point to an origin
+    beyond the ammonia line or NH₃ carried inward: the rule's known counter-case
+    (decision-p14-moons §F1-plan), not tuned.
+- **Deviations in P14.T56.a, as built (`p14-moons`, 2026-10-15).** Moons and rings on the
+  parent's classical Laplace surface, held behind `MOONS_VERSION` = 23 (`planetary/moons/mod.rs`)
+  with its tripwire `the_moons_are_held_only_until_the_batch_s_bump`. Below 23 every value is
+  version 22's: `generate` takes `SatellitePlanes::in_force()`, version 22's `OrbitalPlane`, and
+  the server sends no ring normal. `GENERATOR_VERSION` stays 22 and `golden_diff.py` reports no
+  golden moved.
+  - _The hold's switch._ `laplace::SatellitePlanes` (`OrbitalPlane`, `LaplaceSurface`) with
+    `in_force()`, and `system::generate_with(seed, ctx, planes)` (crate-private), which is
+    `generate` with the planes given, so that the tests reach the Laplace surface ahead of the
+    bump. T54.a makes `generate` take `LaplaceSurface`, drops the `OrbitalPlane` branches
+    (`MoonPlane::OrbitalPlane`, `RingPlane::Fixed`'s use in `satellites_of`, the first pass) if
+    nothing else needs them, sends every ring's normal, and deletes the hold and its tripwire.
+  - _The pass order (the handoff's crux)._ On the Laplace surface `generate_with` finds each
+    parent's satellites twice. Step 7 finds them in version 22's planes, which fixes
+    `had_giant_impact`, all a planet's or member's rotation law reads of its moons (its record at
+    `parent_time` reads none of their orbits). The rotation pass then derives every planet's and
+    member's law, and the moons' wait. `place_on_laplace_surfaces` builds each one's
+    `LaplaceFrame` from its law and its record at `parent_time` (`Body::laplace`), finds its
+    satellites again on it from step 7's inputs (`SatelliteSite`), rebuilds the moon and ring
+    bodies, and derives each moon's law on its plane (`moon_rotations`, each parent's record built
+    once). The band drops no giant-impact moon, so the parent's law stands.
+    `generate_satellites` reads the frame its `&Body` holds, so it still equals `generate`'s
+    (`on_the_laplace_surface_generate_satellites_is_each_parent_s_children_in_generate`, 1,000
+    systems). Cost: one more `satellites_of` per parent and one more primary record per parent
+    with moons, untimed; T54.a's bless note times it with T33.a's bench.
+  - _Names beyond Provides._ In `planetary/laplace.rs`: `LaplaceFrame` (with
+    `LaplaceFrameParts` and `BuildLaplaceFrameError`), one per parent, holding its spin pole,
+    orbit normal and obliquity, J₂ and its radius, the tide's factor a_p³ (1 − e_p²)^{3/2} M_p ÷
+    M_*, its mass and the age it was read at; `LocalLaplace`, one orbit's plane (the parent's
+    axes, its own r_L and its `PoleSense`); `InnerMoon`; `fluid_love_number`, `laplace_angle`
+    (φ), `eccentricity_band` with `BAND_FREE_OBLIQUITY_DEG` (68.8°) and `BAND_SCAN`
+    (0.85–1.30 r_L), and `reaches_band`. Elsewhere: `satellites::MoonPlane` and
+    `Satellite::plane`, `Body::laplace`, `rings::RingPlane` and `Ring::normal`;
+    `rings()` and `generate_rings()` take a `&RingPlane`; `satellites_of` (crate-private) takes a
+    `SatelliteFrame`. `laplace_pole`'s companions that nothing outside the crate needs
+    (`LaplaceFrame::new` and its parts and error, `LaplaceFrame::local`, `eccentricity_band`,
+    `reaches_band` and the band's constants) are crate-private. `Body` gains about 100 bytes and
+    `Satellite` about 80 at version 22 too, which each cached system's byte count
+    (P14.T36.a) carries.
+  - _Signatures._ `hydrostatic_j2` takes the parent's `SpinState`, not a `synchronous` flag (the
+    Rust rules' enum over a bool): × 2.5 only at `Locked(Synchronous)`, as the figure takes it.
+    `Satellite::orbit_at` keeps its signature: each moon carries its `MoonPlane`, its parent's
+    frame with its own Laplace radius read once (every moon of any origin inside it at
+    `parent_time` counted), so no caller changed. `in_body_frame` takes the plane and became
+    private. A giant-impact moon's `orbit_at` follows φ(a(t)) at whatever age it is asked;
+    `moon_trajectory` takes the plane once, at its drift law's anchor, and the law carries it; the
+    two differ by at most the turn measured below.
+  - _A capture's pole on its orbit's side_ (a choice made here; question for "main").
+    `laplace_pole` keeps the spin's sense, as ruled, for regular and giant-impact moons and rings.
+    A capture's plane (`PoleSense::Orbit`) takes the pole on its parent's orbit normal's side,
+    because its drawn sense (retrograde with probability 0.8) is about the orbit, as its
+    stability limit (Domingos et al. 2006) reads it. The two differ only about a parent spinning
+    retrograde, such as an impact-struck rocky planet with small captures. Lean: keep.
+  - _The wire's first send_ (a choice made here; question for "main"). `RingDto.normal` is
+    optional, and the server fills it only from `MOONS_VERSION`
+    (`a_ring_s_normal_is_sent_from_the_batch_s_bump`), so `scene_systems.golden` keeps its bytes
+    at 22. Its shape is therefore first sent, and frozen, at 23, with its values, where
+    decision-bump-plan-after-22 §1.4 had the shape freeze when T56.a landed. The protocol fixture
+    is unchanged. Lean: keep; T54.a sends it always.
+  - _The band._ `eccentricity_unstable` is the ruling's criterion. Its test against Tremaine et
+    al. (2009) uses eq. 34 (eq. 33 with eq. 22 substituted), on a 0.1° × 1,001-point grid: the
+    arXiv text of eq. 33 differs from eq. 34 by the sign of its 6 sin 2φ sin 2(φ − φ⊙) term, and
+    as printed puts the onset at 60°, while eq. 34 and the criterion agree everywhere and put it
+    at 68.8749°. The band's edges are a fixed scan of 0.85–1.30 r_L in 450 steps and 40 halvings;
+    no band lies below 68.8°, and each is one interval inside the scan (tested). The criterion is
+    exactly their condition (the module documentation gives the factored λ², as the science check
+    derived it from their eq. 25). A regular moon is tested at its own a ÷ r_L, with the moons
+    found so far inside it counted, before the captures are cleared of the regular moons, so where
+    the band drops moons a capture whose pericentre fell inside the dropped moons' apocentres is
+    kept, and a parent's moon count can change by more than the moons dropped. A ring is tested
+    over its whole width at the r_L of its geometric mean, which counts only the regular moons
+    inside it (its `RingMoon`s): no capture or giant-impact moon is that close in.
+  - _The rings' 10⁻⁹ rad_ (technical correction). The plan's "every ring's normal lies within
+    10⁻⁹ rad of its parent's pole where its radius is under 0.1 r_L" contradicts the law itself:
+    φ ≈ ¼ sin 2ε′ (r ÷ r_L)⁵, up to 2.5 × 10⁻⁶ rad at 0.1 r_L (Saturn's rings, at 2.27 R_S
+    against r_L = 36.1 R_S from J₂ alone, tilt about 2.0 × 10⁻⁷ rad). A docs batch amends T56.a's
+    _Tests_ text. The test holds every ring's normal to the law bit for bit, under 0.1 r_L
+    within ¼ sin 2ε′ (r_out ÷ r_L)⁵, and within 10⁻⁹ rad wherever that bound is.
+  - _The giant-impact moon's step._ Its plane is held where its drift law anchors its elements
+    ("Read once"). The largest turn of its local Laplace plane across the clock window, which
+    bounds every step between its drift cells, is 5.0 × 10⁻⁴° over the 1,000-system sample's
+    1,024 giant-impact moons, far under the ruling's 0.1°, so the anchored plane stands.
+  - _No band in the sample._ No regular moon or ring of the 400-system sample lies in a band, as
+    the ruling expects (5 × 10⁻¹¹ of giants); `satellites/tests.rs` drives the band's removal and
+    the 98° parent on synthetic Jupiters, and `rings.rs` a ring in the band.
+  - _`SystemPlane::from_pole`_ takes i = atan2(√(x² + y²), z) rather than acos(z), which keeps
+    its precision near the poles; a pole along galactic north takes the node 0.
+  - _The tests' fact-sheet values_ are one consistent set, cited in `laplace/tests.rs`: J₂ from
+    Jacobson 2022 (Saturn), Durante et al. 2020 (Jupiter) and Jacobson 2009 (Neptune), NSSDC's
+    J2000 mean orbits, masses as ratios of JPL's GMs, and NSSDC's satellite axes. The ruling's
+    `laplace.py` set was partly older or uncited; no tilt moves by more than 0.02°.
+  - _Files beyond the task's._ `planetary/mod.rs` declares `laplace`;
+    `tests/planetary_small_bodies_golden.rs` passes `generate_rings` a fixed plane facing galactic
+    north (its golden prints no normal, and the plane moves no other value); the tests are `laplace/tests.rs`, and new cases in `satellites/tests.rs`,
+    `system/tests.rs`, `hyperion-protocol`'s `population.rs` and the server's conversion.
+  - _The acceptance commands._ The _Accept_ line selects only the laplace, satellites and
+    protocol tests. The rest run under `cargo test -p hyperion-sim laplace` (every system test of
+    the surface is named for it), `cargo test -p hyperion-sim planetary::rings`,
+    `cargo test -p hyperion-sim the_moons_are_held` and
+    `cargo test -p hyperion-server a_ring_s_normal`; `just smart-ci` runs them all.
+  - _For T54.a._ Add each ring's normal, and a moon's plane, to the `planetary/systems` goldens'
+    lines; the moons' positions and frames move in `observe`, `frame` and `orbit`. A small golden
+    of the module's own values (J₂, r_L, poles, band edges) would pin them across targets before
+    then (the determinism audit's suggestion, not built: `planetary/systems` pins them at 23).
+  - _For T56.d._ `laplace::fluid_love_number` is built; T56.d calls it, or re-exports it from
+    `moons/tides.rs`, rather than defining a second copy.
+- **Deferred findings (2026-10-13 rule)**, from P14.T56.a's science check:
+  - _Eq. 4 close in._ Tremaine et al.'s J₂′ holds at r ≫ a_i. With a massive moon a third or half
+    as far out it counts it short: the formula gives Callisto 0.53° (JPL's JUP365: 0.4°), Iapetus
+    16.0° (SAT441: 14.8°) and Hyperion 0.41° (0.1°). The Laplace–Lagrange factor
+    b₃/₂⁽¹⁾(α) ÷ 3α on each inner term brings all within 0.1° (the science check's computation;
+    its citation is unverified). The tests keep the plan's bounds (Callisto 0.4–0.6°, Iapetus
+    14–17°).
+  - _Triton._ Its Laplace plane is the Neptune–Triton invariable plane, 0.46° from Neptune's
+    equator (Jacobson 2009), not a test particle's 0.007°: a massive moon's pull on its parent's
+    spin is not modelled.
+  - _J₂'s accuracy._ The first-order Darwin–Radau J₂ is good to about ±6% for the giants
+    (Jupiter at its measured 0.264 comes out 6% high, Saturn 1.5% low); at the gas giant's
+    class factor 0.25 Jupiter's is 0.0135, 8% under Juno's, so r_L is 2% short, and the ruling's
+    "0.0140" is not reproduced there. k_f ≤ 0 for C ÷ M a² ≤ 2 ÷ 15, which no class reaches.
+  - _Unread sources._ Murray and Dermott 1999 §4.6 (cited instead: Gao and Stevenson 2013,
+    eqs. 2–3; Ragazzo 2020, eq. 2.74, as the science check read them), and Ward 1981's value for
+    Iapetus.
+- **Deviations in P14.T56.b, as built (`p14-moons`, 2026-10-15).** The client's ring and
+  equatorial planes, to decision-p14-t56a §1.3 and §5. No bump, and nothing the server sends
+  moves.
+  - _The model._ `Ring.normal` is `Vec3 | null`, not `normal?`: `lib/system/model.ts` states an
+    absent value as `null` throughout (as `Belt.scattered`), so that every builder states it.
+    `lib/system/bodiesWire.ts` reads the wire's optional field, checked to unit length as a pole is
+    (fault `ring normal unusable`, in the existing reason form), and `null` where it is absent. The
+    client branches on the field's presence, never on the generator version, and never turns its
+    sense.
+  - _The scene._ `view/scene/fromServer.ts`'s ring takes `normal`, or its planet's orbit normal
+    without it, or galactic north without an orbit, as before.
+  - _The equator._ `bodyFrame.ts` gains `equatorNormal(body)`: the rotation section's pole; the
+    orbit's normal where the rotation is not modelled; `null` where it is withheld or does not
+    apply, or the orbit is not given. That fallback is plan R02's Design note 14 (the graticule's
+    pole is the orbit normal without a rotation); the plan's and decision-p14-t56a's "R07 Design
+    note 14" is R07's per-view budgets. `bodyPlane` takes it, and where the rotation is withheld
+    stands on the orbital plane under the same `EQUATORIAL PLANE` name, since the map needs a
+    plane. No server withholds it yet (the display asks for every level), so how that plane is
+    labelled is deferred to the knowledge overlay (the UX review's finding; a label is the
+    owner's).
+  - _Each ring in its own plane_ (decision-p14-t56a §5 item 4). `spatial/marks.ts`'s
+    `AnnulusMark` gains `normal?`, the plane through its centre, its sense kept, its angles (ticks,
+    label points) from the reference plane's coreward laid onto it; `spatial/drawList.ts` draws it
+    (`bandPlane`). Without it an annulus lies in the reference plane, as before. `bodyScene` gives
+    every ring its plane, `normal` or its planet's orbital plane, with no threshold. So a version-22
+    ring of an oblique planet is drawn off the `EQUATORIAL PLANE` by the obliquity, as the server
+    places it, and a ring at 23 within its Laplace tilt of it. Cosmetic, recorded: a ring whose
+    normal points away from the reference north (a version-22 ring about a planet spinning
+    retrograde) has its tick angles and a spinward label mirrored, its plane unchanged; and a normal
+    within `PARALLEL_TOLERANCE` of that coreward starts its ticks from `planeFrame`'s fallback axis.
+  - _A moon's `INC`_ (decision-p14-t56a §5 item 5). `useSystemView.ts` reads it to its planet's
+    `equatorNormal`. At 22 it therefore moves, for a moon of a planet with a rotation section, from
+    its drawn inclination to the orbital plane to its angle from the equator (about the
+    obliquity); a moon of a planet whose orbit is withheld but whose rotation is sent now reads
+    one; and a moon of a planet whose rotation is withheld reads `—`, where it read its angle to the
+    orbital plane. The wire carries no moon's plane, so the free inclination is not read
+    (decision-p14-t56a F2).
+  - _The protocol's orbit-frame docs_ (decision-p14-t56a §4 F1, handed to this lane by main, so
+    T54.a's F1 is discharged). `OrbitDto`'s and `BodyOrbitDto.orbit`'s doc comments say a moon's or
+    ring's elements are centred on the planet with the galactic axes, not referred to its equator;
+    `just gen-protocol` regenerated the bindings' comments. No wire form moved.
+  - _The docs._ `model.ts`, `fromServer.ts`, `bodyFrame.ts`, `view/scene/model.ts`'s `ViewRing`,
+    `useSystemView.ts` and `BodyRecordReadings.tsx` drop "which this generator version takes to
+    be its orbital plane" and its variants.
+  - _The tests_, as decision-p14-t56a §1.4 (c) words them: `bodyFrame.test.ts` (the plane under a
+    tilted pole, without one and with the rotation withheld; `equatorNormal`'s four cases; a ring
+    with `normal` under a tilted pole, in its plane at T56.a's Laplace tilt and not the equator's;
+    a retrograde spinner's ring normal kept on the spin's side; a ring without `normal` in the
+    orbital plane, off the plane by the obliquity), `fromServer.test.ts` (the scene's ring with and
+    without `normal`), `bodiesWire.test.ts` (read, absent, refused), `drawList.test.ts` (an
+    annulus's edges, belt ticks, edge ticks and label in its own plane, and about its centre) and
+    `SystemView.bodies.test.tsx` (a moon's `INC` to a tilted pole, with its planet's orbit withheld,
+    and `—` with its rotation withheld). The present case is a variation built on the shared
+    fixture's ring; `packages/protocol/fixtures/planetary.json` is untouched. The builders are
+    shared in `test/planetaryFixture.ts` (`withRingNormal`, `withBodyRotation`, `tiltedPole`, whose
+    equator node is ĥ × p̂ as `planetary/frames.rs` takes it).
+  - _Files beyond the task's._ Allowed by decision-p14-t56a §1.4 (c):
+    `displays/system/useSystemView.ts`, `BodyRecordReadings.tsx`, `spatial/marks.ts` and
+    `spatial/drawList.ts`, with their tests; by §4 F1: the protocol's `orbit.rs` and
+    `planetary.rs` (docs) with the generated bindings. Needed besides: `lib/system/bodiesWire.ts`, the conversion that
+    fills `Ring.normal`; `view/scene/model.ts`'s `ViewRing` doc, a variant of the dropped sentence;
+    `test/planetaryFixture.ts`, the shared builders.
+  - _For T54.a._ Nothing in the client changes at 23: the rings take `normal` once it is sent.
+- **Deviations in P14.T24.e, as built (`p14-chem`, 2026-10-15).** `GENERATOR_VERSION` stays 22,
+  and no generated value moves. The structure lands as a pure module that nothing on the record
+  calls (decision-bump-plan-after-22 §1.3 and §6). Its only golden is new, at header 22.
+  - _Held for P14.T54.b._ `record::Surface`'s `vertical_structure` keeps the uninhabited
+    placeholder `record::VerticalStructure` and stays `NotModelled`. The server's conversion
+    (`convert/planetary.rs`, `later(…, |structure| match *structure {})`) is unchanged.
+    `record.rs`, in the task's _Files_, gains only the placeholder's doc naming the type that
+    replaces it. **At the bump, T54.b:**
+    - replaces the placeholder with `hooks::VerticalStructure`;
+    - fills the member in `system.rs`'s surface section, from
+      `RadiativeConvective::derive(&StructureInputs::of_surface(conditions, bulk T_eq, figures.heat_flow())?)`;
+    - states an airless body's member as computed none. `DeriveStructureError::NoAir` maps to the
+      wire's `null`, so the record's member must be able to say none (`Modelled<Option<_>>` or a
+      variant): T54.b's choice;
+    - converts `RadiativeConvective` to `VerticalStructureDto { alpha, skin_temperature_k, adiabat }`.
+      The declared DTO fits as it stands, with `T_s` and `p_s` the section's own fields;
+    - re-checks T24.e's 300–370 K Venus test on T57.a's Venus, held by the tripwire test
+      `the_venus_test_is_rechecked_at_the_23_to_24_bump` (it fails at version 24), and deletes the
+      tripwire. T57.a's text ("moves to T24.e, at 24") and T54.b's should say so (docs batch).
+  - _Public items_ (`planetary::hooks::structure`; re-exported as
+    `hooks::{VerticalStructure, RadiativeConvective, ProfileNode}` and `planetary::temperature_at`):
+    - `VerticalStructure { RadiativeConvective(RadiativeConvective) }`, a tuple variant over a
+      struct whose fields stay private behind getters, not the Provides' struct variant, with
+      `temperature_at`. T24.d adds `Envelope` in the same form. It is not `#[non_exhaustive]`, so
+      the server's match must take up T24.d's variant.
+    - `RadiativeConvective`'s `derive`, `surface_temperature`, `surface_pressure`,
+      `lapse_factor`, `skin_temperature`, `nodes`, `tropopause_pressure` and `temperature_at`, and
+      `ProfileNode` with `pressure` and `temperature`.
+    - `StructureInputs` (plain public fields, as `SurfaceInputs`) with `of_surface`.
+    - `DeriveStructureError`'s variants `NoAir`, `Mixture`, `NoHeatCapacity`,
+      `SurfaceTemperature`, `SkinTemperature` and `TooDeep`.
+    - `lapse_factor`, `latent_heat_departure`, `skin_temperature(T_eff)`,
+      `effective_temperature(T_eq, T_int)` and `internal_temperature(F)`.
+    - Constants: `WATER_LAPSE_FACTOR` 0.6, `METHANE_LAPSE_FACTOR` 0.77, `DRY_LAPSE_FACTOR` 0.88,
+      `LATENT_HEAT_GATE` 0.1, `NODE_SPACING_LN_P` 0.3, `MIN_SEGMENTS` 16 and `NEWTON_STEPS` 6.
+    - Added beyond the plan, to bound what any input can ask: `MAX_SEGMENTS` 2,000 (600 e-folds,
+      short of a pressure's underflow; `TooDeep` beyond), `SHORTEST_SEGMENT_LN_P` 10⁻¹², and
+      `MIXTURE_TOLERANCE` 10⁻⁶ (the fractions must sum to 1, since S̃ and `c_p` both scale with
+      the sum).
+
+    The Provides' α is `lapse_factor`.
+
+  - _The golden's test_ is a unit test, `planetary::hooks::structure::tests::the_structure_is_pinned`,
+    not `tests/planetary_structure_golden.rs`, because the Solar System table is crate-private
+    test data (`derive::solar`, `hooks::surface::tests::table`). `planetary/surface_conditions`
+    does the same.
+    - The golden is `tests/golden/planetary/vertical_structure.golden`, as planned. For the table's
+      Earth, Venus and Titan it pins the inputs, the condensable, α, `T_eq`, `T_int`, `T_skin`,
+      the segment count, every node, and `temperature_at` at stated pressures and at each
+      segment's geometric midpoint.
+    - Every float is `GoldenWriter`'s bits with Rust's shortest round-trip decimal beside it, not
+      `orbit/states.golden`'s bare decimals. R08.T3.a reads either, the bits as
+      `test/inSystemGolden.ts`'s `bitsToFloat` does.
+    - Accept is `cargo test -p hyperion-sim planetary::hooks::structure` for both commands.
+    - The golden moves at T54.a: T51.a's water column and T57.a's refits change the table's
+      Earth and Venus. T54.a's bless note accounts for `planetary/vertical_structure`.
+  - _The adiabat._ Each interior node takes `NEWTON_STEPS` Newton steps in ln T, from the deeper
+    node's temperature carried up its local power law. The tropopause is closed form,
+    ln(`p_s` ÷ `p_trop`) = (S̃(`T_s`) − S̃(`T_skin`)) ÷ α, and its node is (`p_trop`, `T_skin`)
+    exactly.
+    - `temperature_at` takes a node's own pressure into the segment the node starts, so every
+      node, the ground and the tropopause evaluate bit for bit. R08's copy takes the same
+      comparison.
+    - Tested over every gas row of the registry pure (58 rows) and six mixtures (an Earth's, a
+      Venus's, a Titan's, a steam world's, a hydrogen–helium air and a reducing N₂–NH₃–CH₄–H₂S–SO₂–
+      C₂H₆ air), at seven grounds from 40 to 2,000 K and 600 Pa to 100 bar. Every node lies within
+      10⁻¹² of the exact adiabat (worst 2.7 × 10⁻¹⁵), and the power law between nodes within
+      5 × 10⁻⁴ (worst 3.3 × 10⁻⁴, Si⁺ at 288 K), with at most 40 segments.
+  - _The skin is held at most `T_s`_, an addition to the plan's text from the science check. A grey
+    air with no shortwave absorption warms steadily downward, and its ground emits at least
+    σ`T_eff`⁴ (Robinson and Catling 2012, Eqs. 16, 17, 24 and 25, read). So `T_s` ≥ `T_eff` >
+    `T_skin`.
+    - A skin above the ground comes only from an internal flux that T13.c's `T_s`, warmed from
+      `T_eq` alone, does not read. Taken literally, max(`T_ad`, `T_skin`) would put warm air on a
+      colder ground.
+    - Such an air, or one whose skin lies within `SHORTEST_SEGMENT_LN_P` a segment of its ground,
+      is isothermal at `T_s`, with its ground node alone (deferred finding below).
+  - _The dry α_, recomputed on T49.b's sum: (S̃(350.5 K) − S̃(735 K)) ÷ ln(1.066 ÷ 92.5) = 0.88443
+    on the measured state (3.505% N₂ by number from 90.4 and 2.09 bar by weight, which the ruling
+    rounds to 3.51%). The ruling computed 0.8844; stated to two places, it is 0.88.
+    - The measured Venus at α 0.88, under a skin of 2^(−1/4) × 226.6 K (NASA's Venus fact sheet's
+      black-body temperature), against VIRA's low-latitude levels:
+
+      | Level     | 0.88    | VIRA    |
+      | --------- | ------- | ------- |
+      | 92.1 bar  | 734.5 K | 735.3 K |
+      | 47.39 bar | 664.9 K | 658.2 K |
+      | 22.52 bar | 592.7 K | 580.7 K |
+      | 9.581 bar | 516.7 K | 496.9 K |
+      | 3.501 bar | 436.0 K | 417.6 K |
+      | 1.066 bar | 352.0 K | 350.5 K |
+      | 1 bar     | 347.7 K |         |
+
+      The 1.066-bar and 1-bar values are about 1.5 K warmer than the fitted α's 350.5 K and about
+      346 K, which is α's rounding. The 1-bar value meets the plan's 300–370 K on the measured state.
+
+    - The levels are asserted rather than printed: within 1.5 K of the ruling's 665, 592 and
+      435 K, and 0–25 K warm of VIRA.
+    - VIRA was read through Venus-GRAM's `VIRALow.txt` ("mean values … from the VIRA data for
+      latitudes less than 30°", its User Guide, NASA/TM-20210022168 §2.1) and the EPIC model's
+      `VIRA.dat` (from the Planetary Scientist's Companion, p. 119), which agree. Seiff et al.
+      1985 itself was not reachable.
+  - _The latent-heat gate_ (signoff-3.md item 1.5).
+    - **Confirmed:** Robinson and Catling 2012 (Eq. 10, read) attribute α "primarily [to] latent
+      heat release", but state no criterion. The gate's ε L² r ÷ (`c_p` R T²) is the dilute
+      pseudoadiabat's term L² r ÷ (`c_pa` `R_c` T²) (Ding and Pierrehumbert 2016, ApJ 822, 24,
+      Eq. 12, read).
+      - Where `c_p` is the whole air's it is that term exactly, and a test holds the molar form to
+        the per-mass form at 10⁻¹².
+      - Against Ding and Pierrehumbert's, whose `c_pa` is the non-condensable's, it agrees to first
+        order in x: 0.9% apart for Earth, 3.2% for Titan (science check).
+      - At the gate's 0.1, the moist lapse rate is at least 1 ÷ 1.1 of the dry one.
+    - **L** is the registry row's branch enthalpy at the ground: vaporisation at or above the
+      triple point, sublimation below. It is taken as zero at or above the critical temperature,
+      where no liquid forms, which is an addition.
+    - **Computed:** the table's Earth 3.49 (its 3.7% water), Titan 2.18 and Mars 0.047 (dry). By
+      hand: Earth saturated at 288 K 1.56, Titan at 5.65% CH₄ 2.07 and Mars at 210 ppm 0.046,
+      against the sign-off's 1.6, 1.8 and 0.05.
+    - **The plan's "a Mars's water, at about 1 Pa"** is about 0.13 Pa (210 ppm of 6.4 mbar). At
+      1 Pa the gate would give 0.36 and the moist α. The module's doc says 0.13 Pa; the plan's and
+      signoff-3's text want the same (docs batch).
+  - _The table's figures_ (with the plan's in brackets):
+    - Earth: α 0.6; tropopause 0.134 bar at 214.57 K [0.14 bar, 214.5 K]; the skin 0.021 K above
+      the sunlight-only form (`T_int` 35.7 K from 0.0925 W m⁻²).
+    - Titan: α 0.77; tropopause 0.246 bar at 63.63 K [0.24 bar, 63.6 K].
+    - Venus: α 0.88, no condensable; 381.1 K at 1 bar, from 735.07 K and 57.84 bar with 1.65% N₂
+      [378 K, held to 300–380 K "if T24.e lands first"].
+      - That is 1.1 K above the interim band. The band's 378 K was computed on other inputs: the
+        fitted 0.8844 and the measured state's 3.5% N₂ give about 1.2 and 1.5 K less.
+      - The band is not widened. The test holds the table's Venus only to its ordering, warmer at
+        1 bar than the measured Venus, whose column is deeper, and the golden pins the value.
+      - The plan's 300–370 K is held on the measured Venus (347.7 K), and T54.b re-checks it on
+        T57.a's Venus (the tripwire above).
+      - Risks' line "T24.e's Venus test, 300–370 K at 1 bar, holds at either pressure" no longer
+        holds on the table's 58-bar Venus (docs batch).
+  - _Saturn's skin._ The plan's test, "the table's Saturn's `T_skin` within 2 K of 2^(−1/4) × its
+    `T_eff`", holds as an identity: the skin from a giant's record `T_eq` and `T_int` = (`T_eff`⁴ −
+    `T_eq`⁴)^¼ is 2^(−1/4) `T_eff` to 10⁻¹², whatever `T_eff` is.
+    - decision-composition §1.12's form, 2^(−1/4) × 95 K = 79.9 K, is not met. The generated Saturn
+      (0.2994 Jupiter masses, below `radius_giant`'s 0.3, the giant cooling model that gives a
+      giant its internal luminosity) has no effective temperature, so its skin is 68.2 K, 11.7 K
+      under.
+    - The table's Jupiter (`T_eff` 127.84 K) has a skin of 107.50 K, 2.9 K over §1.12's 104.6 K.
+    - The test also holds the skin to §1.12's figures for the measured giants: Saturn's 95.0 K
+      (Hanel et al. 1983, read through Li et al. 2010's Table 3) gives 79.9 K, and Jupiter's
+      124.4 K (Hanel et al. 1981's abstract) gives 104.6 K.
+  - _VIRA's levels, corrected._ The plan's and science-r08-gases-2.md §1.4's "9.85 bar" level is
+    VIRA's 30 km, where VIRA gives 9.581 bar and 496.9 K. At 9.85 bar VIRA interpolates to about
+    499.5 K, and this structure gives 519.1 K, the ruling's 518 (docs batch).
+  - _Sources read at source_:
+    - Robinson and Catling 2012 (arXiv:1209.1833; Eq. 10, §4.1 Venus α 0.8 at γ 1.3, §4.3 Titan
+      0.77, Eqs. 16, 17, 24 and 25) and 2014 (arXiv:1312.6859; Table 1: α and the tropopause
+      pressures);
+    - Ding and Pierrehumbert 2016 (arXiv:1608.03216, Eq. 12);
+    - Fulchignoni et al. 2005 (Nature 438, 785: the tropopause 70.43 ± 0.25 K at about 44 km and
+      115 hPa; the surface 93.65 K and 1,467 hPa);
+    - the U.S. Standard Atmosphere 1976 (NASA-TM-X-74335: 216.65 K at 11 km geopotential and
+      22,632 Pa);
+    - Li et al. 2010 (JGR 115, E11002: 96.67 ± 0.17 K, and Table 3's Voyager 95.00 K);
+    - NASA's Venus fact sheet;
+    - VIRA as above.
+
+    Pierrehumbert's _Principles of Planetary Climate_ was not reachable. Ding and Pierrehumbert
+    cite it (p. 129) for the pseudoadiabat they give.
+- **Deferred findings (2026-10-13 rule)**, from P14.T24.e:
+  - The table's pre-T57.a Venus is 381.1 K at 1 bar, against the plan's interim 300–380 K (above).
+    T54.b re-checks it on T57.a's Venus.
+  - The generated Saturn (0.2994 Jupiter masses) has no internal luminosity, since it lies below
+    `radius_giant`'s 0.3. Its skin is then 68.2 K, against 79.9 K from its measured `T_eff`, and
+    its record carries no effective temperature (P14.T11.d and T12, ruling 112.7; T24.d's
+    envelope reads `T_int`). The table's Jupiter's skin is 2.9 K above §1.12's.
+  - VIRA's 30 km level is 9.581 bar, not the 9.85 bar of the plan's T24.e text and of
+    science-r08-gases-2.md §1.4. The plan's "a Mars's water, at about 1 Pa" is 0.13 Pa. Both are
+    for a docs batch.
+  - T13.c's `T_s` reads no internal heat, but the skin does. A body whose internal flux rivals its
+    starlight (`T_int`⁴ > 2`T_s`⁴ − `T_eq`⁴; an Io-like world under a thick air) has its skin held at
+    `T_s` here, an isothermal air. For T24.b's heat flow and T13.c's greenhouse: σ`T_s`⁴ should
+    carry F (science check; decision-composition §1.12's Io-like case, a 98.8 K skin over a 110 K
+    `T_eq`).
+  - A single α cannot draw a nondilute condensable's air, nor a ground above its condensable's
+    critical point.
+    - A steam world's air, or any whose condensable dominates, follows its saturation curve,
+      T ∝ 1 ÷ ln(p ÷ `p_0`) (Robinson and Catling 2012, beside their Eq. 10, citing Satoh 2004).
+      Ding and Pierrehumbert's nondilute pseudoadiabat is the closed form, and α 0.6 there lies
+      outside what R&C fitted.
+    - The gate reads the ground alone, so a ground above `T_c` takes the dry α even where the upper
+      air condenses.
+    - These are for P14.T53.b's steam envelope.
+  - The gate's latent heat is the row's constant branch enthalpy, which overstates L near `T_c`.
+    - The science check estimates (Watson's scaling, unread here) 4.4× at 600 K and 18× at 640 K
+      for water, where L falls continuously to zero at `T_c`. The departure therefore steps to zero
+      there rather than falling.
+    - Methane's triple-point 8.73 kJ mol⁻¹ puts Titan's departure at 2.07, against about 1.8 at
+      94 K.
+    - No computed case lies near 0.1. P14.T54.a's fitted curves give L(T)
+      (`clausius_clapeyron_enthalpy_j_per_mol`).
+  - The gate is a step. At a departure of 0.1 the moist lapse rate is still 0.93–0.94 of the dry
+    one, yet α jumps from 0.88 to 0.6: for the doc example's Earth that moves the tropopause from
+    0.31 to 0.18 bar across the gate (science check). A continuous α(G) would be more physical. The step is signoff-3's.
+  - The dry α's anchor: fitted from VIRA's own surface (735.3 K and 92.10 bar) instead of the
+    ruling's 735 K and 92.5 bar, α is 0.8853–0.8858, which rounds to 0.89. The effect at 1 bar is
+    under 2 K (science check). The ruling's anchor is kept.
+  - The table's Titan's skin, 63.6 K, lies under HASI's 70.43 K tropopause: the grey skin has no
+    haze heating, a recorded limitation (R&C 2012's shortwave term, after T24.c).
+  - Cost: a structure is 16–100 nodes, each `NEWTON_STEPS` mixture evaluations of S̃ and `c_p`
+    (two passes over the rows' terms). It is unmeasured on a quiet machine, for P14.T33.a's
+    `body_detail` at `surface` case. A crate-private combined S̃-and-`c_p` evaluation in
+    `substance::thermo` would halve it.
+- **Deviations in P14.T49.b, as built: step 2, part 2, its first piece, the condensed columns
+  (`p14-registry`, 2026-10-15).** `GENERATOR_VERSION` stays 22, and no generated value moves.
+  Part 2 was split again (main's lean): this piece builds the condensed columns, with the
+  solutions' densities at their reference compositions and the eutectics, which T49.c and T49.h
+  need first, and the test that every key R09's worlds use is a row. **The lane's next agent's**,
+  the last of T49.b: the laws aloft (`substance/aloft.rs`), the golden's `[aloft]` section, and
+  molten sulphur's measured liquid density (below).
+  - _Held at 22._ The columns are a new group, `CondensedColumns` (`Substance::condensed`), which
+    nothing on the record reads. P14.T49.c's palette resolution reads them, and P14.T54.a wires
+    the palette at the bump (decision-bump-plan-after-22 §1.2). Until then a change to a value
+    re-blesses the golden's `[condensed]` section at the version in force, with no bump.
+    T49.c's review should check that no caller of `Substance::condensed` or `grain_density` is
+    reachable from `record::Surface` before T54.a (the determinism audit).
+  - _Added public items_, in `substance::condensed` and re-exported at `substance::`:
+    - `CondensedColumns` (`grain_density`, `transition`, `mechanics`, `sources`);
+    - `GrainDensity`: `Fixed { solid, liquid }`, each an `Option<DensityAt>` (`density`, `at`), at
+      least one given, and `OfDiagram`;
+    - `CondensedPhase` (`Solid`, `Liquid`);
+    - `Transition` (`kind`, `temperature`);
+    - `TransitionKind` (`Melting`, `Solidus`, `Liquidus`, `Eutectic { solute_mass_fraction }`,
+      `Decomposition`, `Sublimation`, `TriplePoint`; `name`);
+    - `Substance::condensed`, and `Substance::grain_density(phase, temperature)`, which resolves
+      a phase's density at a temperature.
+
+    Against the step-1 builder's design (`Fixed { kg_m3, at_k }`):
+    - `Fixed` holds one density for each phase that was read. A reader asking for a phase that
+      was not read gets `None`, not modelled, rather than the other phase's figure: a rock's melt
+      is T49.h's (decision-r11-palette-liquids §1.8), and a row with both a measured solid and a
+      measured liquid (molten sulphur) fits;
+    - `Liquidus` is added, for the 75 wt% acid, whose eutectic composition is not its own;
+    - `TriplePoint` holds its diagram's triple temperature, copied in a `const` and held to it to
+      the bit by a test, so a `Transition` is always a kind and a temperature.
+
+  - _Files beyond the task's_: `substance/condensed.rs` (the group), `substance/rows/condensed.rs`
+    (the rows' data), and `planetary/surface/reference.rs` (its tests and its module note).
+  - _The 71 rows._
+    - **The fourteen diagram rows** take `OfDiagram` and `TriplePoint`: water `WaterIce`, the rest
+      `VolatileIce`. Water's triple point, 273.16 K, stands 0.0075 K above ice Ih's melting at one
+      atmosphere, which a palette's 273.15 K rounds.
+    - **Methanol**, with no diagram: its α cell at 122 K, 1,027.94 kg m⁻³ (Kirchner, Das and Boese
+      2008, COD 4503066), and its melting point, 175.37 K (COD 4503067's CIF), `VolatileIce`.
+    - **The 56 rows of the lane's research** (`solids/data.json`): the condensates aloft, the
+      hazes, the solutions, the lithologies, the salts, the organics, the undifferentiated bodies'
+      materials, and the metal clouds `Fe` and `Cr`. Each row's figures, errors and sources are in
+      its doc comment and its `Source`s.
+    - **R09's seven reference rows** (`basalt`, `basalt_fe`, `granite`, `feldspathic`,
+      `phyllosilicate`, `Na2CO3`, `mars_dust`) are `reference.rs`'s to the bit, which
+      `the_reference_rows_are_the_substance_registry_s` holds. The two reference ices take their
+      diagrams, so two of their values differ: water ice's transition is 273.16 K against the
+      row's 273.15 K, and CO₂ frost's density at 150 K is Mangan et al.'s 1,621.4 kg m⁻³ against
+      the row's rounded 1,621. **P14.T54.a's bless note** names both when the palette resolves
+      from the registry.
+  - _Not modelled_ (no condensed columns; closed set, for the composition audit):
+    - `HCN` and `C2H2`: their transitions are from memory only, and so is HCN's cell. C2H2's cells
+      were read, but without their temperatures;
+    - `Ne`, `H2`, `He`, `O3`, `C2H4`, `PH3` and `HCl`: nothing was read;
+    - the chemistry's atoms (`H`, `O`, `Na`, `K`, `Mg`, `Si`, `Ca`, `Ti`, `Al`, `V`, `Mn`, `Ni`,
+      `Zn`), the electron and `H-`, the thirteen ions (`Na+`, `Mg+`, `Al+`, `Si+`, `K+`, `Ca+`,
+      `Ti+`, `V+`, `Cr+`, `Mn+`, `Fe+`, `Ni+`, `Zn+`) and `SiO`, `TiO`, `VO` and `FeH`, whose
+      condensates aloft are their compounds' rows. `Fe` and `Cr` carry their metal clouds;
+    - **molten sulphur's** density (`S8` as a liquid, Io's flows): decision-r11-palette-liquids
+      §1.8 makes it T49.b's, "a measured liquid series (Meyer 1976 as the aid)". The lane's
+      research has none, so it waits for the next agent, and `S8`'s liquid is `None` meanwhile;
+    - methanol's liquid, for which no reference equation of state was read;
+    - within a diagram row, any solid phase whose density was not read resolves to `None`: argon,
+      hydrogen sulphide, ethane, β-oxygen and β-carbon monoxide.
+
+    `substance_condensed_columns_cover_the_condensed_rows` holds every row that is not a gas, and
+    every diagram row, to having condensed columns.
+
+  - _The ferric ruling_ (decision-backlog-2 §1, 2026-10-15):
+    - **Grain density:** `ferric`'s is `basalt_fe`'s 3,310 kg m⁻³, the same constant, recorded
+      +120/−240 (3,070–3,430). Its doc comment carries §1.2's sources: Achilles et al. 2017; Morris
+      et al. 2013 and 2006; the Handbook of Mineralogy's hematite and magnetite; Hiemstra and Van
+      Riemsdijk 2009; Macke, Britt and Consolmagno 2011.
+    - **Transition and mechanics:** `basalt_fe`'s solidus, an assumption, and `Silicate`.
+    - **Refused:** Hu, Ehlmann and Seager 2012's 50% nanophase hematite read as a mode
+      (4,063–4,285 kg m⁻³). It is a single-scattering-albedo weight with no stated basis, and lies
+      630–850 kg m⁻³ above the oxidation's upper bound.
+  - _The solutions, at their reference compositions_ (decision-r11-palette-liquids §4). Each
+    liquid is at atmospheric pressure unless stated:
+    - `brine_nacl`: 1,184.1 kg m⁻³ at 23.3 wt% and 273.15 K; eutectic 251.9 K at 0.233.
+    - `brine_mgso4`: 1,193.3 at 17.30 wt% and 273.15 K; eutectic 269.29 K at 0.173. The
+      research's 1,193.4 omitted the 1901 litre (× 0.999 972), which the acid's reduction applied.
+    - `brine_naclo4`: 1,445 ± 10 at 52 wt% and 291.15 K, extrapolated in composition; eutectic
+      236 K at 0.52.
+    - `brine_mgclo4`: 1,394 ± 15 at 44.0 wt% and 298.15 K, extrapolated; eutectic 206 K at 0.44.
+    - `nh3_h2o`: 946 at its eutectic, 176.15 K, its pressure not stated (Croft et al. 1988, as
+      Hammond et al. 2018 quote it). Its composition, 0.321, is ammonia dihydrate's
+      stoichiometry, an assumption.
+    - `ch4_c2h6_n2`: **518.9 kg m⁻³ at 93.65 K**, Ligeia Mare's best-fit composition by
+      **volume**, "71% CH4, 12% C2H6, and 17% N2" (Mastrogiuseppe et al. 2016, IEEE TGRS 54, 5646,
+      §V.B; read by the science check), by ideal mixing, ρ = Σ φᵢ ρᵢ, of the rows' own
+      saturated-liquid ancillaries, each under its own vapour's pressure; a test re-derives it.
+      decision-r11-palette-liquids §1.8 gives these figures as Le Gall et al. 2016's, from
+      memory, and reads them as mole fractions (525.8 kg m⁻³ so). Le Gall et al. 2016, read in
+      full by the science check, states no such composition. Eutectic 71.15 K at 0.509 ethane,
+      the N₂-free binary's (Engle et al. 2021).
+    - `H2SO4`: **the row is aqueous sulphuric acid at 75.0 wt%**, the client's
+      `sulphuric-acid-75.json`'s acid: 1,662.6 kg m⁻³ at 300 K (International Critical Tables
+      III). Its transition is that acid's liquidus, **242 ± 2 K**, read off Zeleznik 1991's Fig. 1
+      calculated monohydrate curve at x = 0.3553 by the science check (the research read
+      240 ± 4). It is not the research's 98 wt% figure, 271.6 K. The frozen acid first melts lower,
+      at the dihydrate–monohydrate eutectic, which lies between 228 and 233.67 K on the same
+      figure, unresolved. `acid_uv_absorber` shares both constants.
+  - _Contradictions recorded_ (the research's findings against the plan, with the values built):
+    - **Chondrites:**
+      - `chondrite_cv`: 3,540 kg m⁻³ (Macke 2010, Table 22), not the plan's 3,420, which was from
+        memory;
+      - `chondrite_l`: 3,580, not 3,560 (from memory);
+      - `chondrite_e`'s solidus: at most 1,273.15 K (McCoy, Dickinson and Lofgren 1999, abstract,
+        whose lowest run already held melt), not the shared 1,423.15 K, which was taken by
+        analogy;
+      - the plan's sulphide–metal eutectic "near 988 °C" is the Ni-free Fe–FeS one; Ni-bearing
+        metal melts at 950 °C. Recorded, not used.
+    - **Eutectics:**
+      - NaClO₄'s 236 K is Chevrier et al.'s theoretical value. A measured 239.05 K (Hennings et al.
+        2013, quoted) is recorded, and 236 kept;
+      - NaCl's eutectic is the read 251.9 K, not the plan's 251.95 K (Bodnar 1993, from memory).
+    - **Densities:**
+      - `MgSO4` is 3,020, from its cell, not the handbooks' 2,660;
+      - `mars_dust` keeps 2,600, against the 2,500 (Madeleine et al. 2011) of R08's Mars-dust mass
+        check: a 4% gap for T49.e;
+      - `MgSiO3` and `Mg2SiO4` are crystals, while the client's optics are amorphous glass;
+      - `tholin` is 1,350, against the classify test's illustrative, unsourced 1,500;
+      - **for T49.e:** the 75 wt% acid's 1,662.6 kg m⁻³ is +0.44% against the sulphur note's
+        1.67 g cm⁻³, which was from memory, so the note's 417 m² kg⁻¹ passes T49.e's 2% test. At
+        80 and 84.5 wt% it would fail (−2.9% and −5.5%).
+    - **Melting points:** Cr 2,180.15 K (as HSDB and DOE PAC give it) against NIST-JANAF's
+      2,130 K; Fe 1,811.15 K against JANAF's 1,809 K.
+    - **Titan's liquid:** built at Ligeia's composition, not the research's N₂-free binary eutectic
+      (560 ± 30 kg m⁻³ at 71.15 K). That figure rested on WebBook densities, which
+      decision-composition §5 allows only as cross-checks. Besides, the rows' own ethane ancillary
+      turns over below its triple point (649.97 kg m⁻³ at 71.15 K, against 651.42 at 90 K), so no
+      ancillary reaches the eutectic.
+    - **Sources:**
+      - the brines' and the acid's densities are the International Critical Tables', not §1.8's
+        Laliberté and Cooper 2004 and Myhre et al. 1998, neither of which was read;
+      - Daly, Manger and Clark 1966 and Baratoux et al. 2014, which the plan lists as "read here",
+        were not reached.
+  - _Choices:_
+    - `iron_nickel`'s solidus is pure iron's 1,811.15 K as an upper bound, in place of the
+      research's 1,763 K, which was from memory;
+    - `CaTiO3`'s 2,248.15 K is from Wikipedia's uncited infobox, labelled unverified;
+    - `ca_al_residue`'s 2,150 K is Léger et al.'s "fusion of its material at zero pressure",
+      taken as its first melt, though the paper also calls it a liquidus;
+    - its hibonite is a natural (Ce, La, Fe, Mg, Ti)-bearing crystal's cell, standing in for
+      pure CaAl₁₂O₁₉, whose cell was not read;
+    - `chromophore` and `ice_giant_haze` take tholin's 1,350 kg m⁻³ and 423.15 K, the same
+      constants, as stand-ins, since neither has a measured density; `soot` takes graphite's
+      sublimation;
+    - the mechanics families: `brine_nacl` and `brine_mgso4` are `WaterIce` (mostly ice when
+      frozen), `brine_naclo4` and `brine_mgclo4` `Salt` (mostly hydrate); `H2SO4`,
+      `acid_uv_absorber` and `S8` are `Salt`; `ZnS`, `MnS`, `FeS`, `SiC` and graphite are
+      `Silicate`, graphite as a crystalline mineral; `NH4SH`, `nh3_h2o` and `ch4_c2h6_n2` are
+      `VolatileIce`;
+    - NIST-JANAF's single transition values are facts cited with their tables, and its two
+      computed decompositions (MgSO₄, graphite) are reduced values. No table of it is fitted or
+      committed. decision-composition §5's wording, "a cross-check only … at most a few values per
+      species are asserted in tests", is stricter: **asked of main** (below).
+  - _Tests:_
+    - every row that is not a gas, and every diagram row, has condensed columns (71 rows); a
+      diagram row's transition is its triple point to the bit; densities and transitions are
+      finite and positive; a fixed row gives at least one phase; a eutectic's mass fraction lies
+      in (0, 1);
+    - `grain_density` resolves each form: ice Ih to the bit, the liquid ancillary, `None` across
+      the triple point, a fixed row's value at any temperature and `None` for a phase not read;
+    - Titan's liquid re-derived from the rows' diagrams within 0.05 kg m⁻³;
+    - the shared figures are one constant: ferric and `basalt_fe`, the absorber and the acid, the
+      hazes and tholin, soot and graphite, the chondrites' solidus;
+    - every condensed value names a source covering it;
+    - every key the reference worlds use, and every palette key of the synthetic worlds, is a row:
+      `Ar`, `CH4`, `CO`, `CO2`, `H2O`, `He`, `N2`, `Na2CO3`, `Ne`, `O2`, `basalt`, `basalt_fe`,
+      `feldspathic`, `granite`, `mars_dust`, `phyllosilicate`. The plan's `chondrite_h`,
+      `ultramafic`, `komatiite` and `anorthosite` appear only in the coarse inputs' unit tests,
+      and are rows too;
+    - the reference rows are the registry's, to the bit, and the reference ices' mechanics their
+      rows'.
+
+    The acceptance command `cargo test -p hyperion-sim substance` runs them all but the
+    synthetic worlds' test, which needs the crate's `testing` feature:
+    `cargo test -p hyperion-sim --features testing substance`.
+
+  - The registry golden gains `[condensed]` (71 rows), an extension at 22.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.b's step 2, part 2, first piece:
+  - _Unverified figures, each labelled:_
+    - granite's 960 °C (`reference.rs`, from memory), below the Ab–Qz bound of 1,062 °C;
+    - `CaTiO3`'s 2,248.15 K;
+    - `iron_nickel`'s alloy solidus, below pure iron's;
+    - `nh3_h2o`'s eutectic composition;
+    - the acid's 242 ± 2 K, read off a figure;
+    - SiC's 3,103.15 K, and ZnS's and MnS's melting points, quoted through PubChem. SiC's kind,
+      a decomposition, rests on a peritectic from memory; and that ZnS sublimes and dissociates
+      before it melts at one bar is the research's note, unsourced, so its `Melting` may be wrong;
+    - `basalt_reduced`'s 1,200 °C, an upper bound;
+    - komatiite's Fo90–92 olivine and 2.80 glass, and ultramafic's Mg# 90, all assumptions.
+  - _Temperatures:_
+    - the brines are not at their eutectics: NaCl about 1,191 ± 3 kg m⁻³ there and MgSO₄ 1,194.3;
+      the perchlorates are perhaps 1.5–3% denser;
+    - the hot condensates' room-temperature crystals overstate a cloud's density: SiO₂ by up to
+      15%, and the silicates' glasses are lighter;
+    - `NH4SH`'s cell may be in kX units (1,165), and a cloud near 200 K is denser by an amount not
+      measured.
+  - _Mixing:_ ideal mixing for Titan's liquid ignores methane–ethane's negative excess volume, and
+    N₂ is liquid at 93.65 K only in solution. Tan, Kargel and Marion 2013's cross-check is unread.
+  - _Spreads:_
+    - `brine_mgclo4`'s eutectic spans 205–216 K in the literature;
+    - Apollo 60025, a lunar ferroan anorthosite, measures 2,750–2,770, below `anorthosite`'s
+      2,790.
+  - _For main:_
+    - **The transition's convention.** The lithologies and brines take the first melt. `H2SO4`
+      takes its liquidus, a kind outside decision-r11-palette-liquids §1.7's list ("melting
+      point, eutectic or solidus"). Titan's liquid takes a first melt at a composition other than
+      its reference: Ligeia's own liquidus lies well above 71.15 K, so §1.7's clamp would hold a
+      Titan sea liquid down to 71 K. The lean: the first melt everywhere, the acid carrying its
+      liquidus, labelled by its kind, until its eutectic is read.
+    - **NIST-JANAF as a value's source** (above): the lean is that one cited transition per
+      species is a fact within §5, as the plan's own `Na2CO3` already takes it.
+    - **§1.8's Titan composition** names the wrong paper and basis (above).
+    - decision-backlog-2 §1.5: no task yet puts `ferric` on a surface.

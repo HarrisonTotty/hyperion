@@ -23,9 +23,15 @@
 //! kg m⁻³ ([`roche_limit_fluid`]). A ring whose outer edge would not lie beyond its inner one is
 //! not there: about a giant of low density whose Roche limit for rock lies inside 1.1 planetary
 //! radii no rocky ring forms, and inside 1.1 ÷ 0.6 = 1.83 radii only some draws leave a massive
-//! one. A ring lies in its planet's equatorial plane, as every
-//! satellite orbit of phase D is referred to its parent's equator; its radii are distances from
-//! the planet's centre in that plane. A massive ring has a mass of 10⁻⁹–10⁻⁷ of its planet's
+//! one. A ring is one plane through its planet's centre ([`RingPlane`], [`Ring::normal`]), and its
+//! radii are distances from the centre in it: the local Laplace plane at the geometric mean of
+//! its edges, on which its particles' orbits settle (P14.T56.a, [`laplace`]), the planet's
+//! equator well inside its Laplace radius, and none reaches into the eccentricity band about it
+//! (a ring that would is not made); below
+//! [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION), the planet's orbital plane. The
+//! warp of a wide ring's plane across its width is not drawn: for a Jupiter-like giant with a
+//! ring to 2.4 radii it is 0.24% of the obliquity at 0.5 au and 3.7% at 0.2 au
+//! (decision-p14-moons §1.2). A massive ring has a mass of 10⁻⁹–10⁻⁷ of its planet's
 //! ([`MASSIVE_RING_MASS_RATIO`]), gaps at the 2:1 and 3:2 inner resonances of the regular moons
 //! passed in that fall inside it, and an optical depth from its surface density.
 //!
@@ -67,6 +73,7 @@ use crate::id::BodyId;
 use crate::math;
 use crate::planetary::derive::{PlanetClass, roche_limit_fluid};
 use crate::planetary::index::{BodyIndex, BodySub};
+use crate::planetary::laplace::{self, InnerMoon, LaplaceFrame, PoleSense};
 use crate::planetary::params::{MASSIVE_ICY_RING_PROBABILITY, MASSIVE_ROCKY_RING_PROBABILITY};
 use crate::rng::{Mark, ObjectKey, Seed, Stream, Threshold, tags};
 use crate::stellar::draws::UnitUniform;
@@ -441,6 +448,17 @@ impl RingGap {
     }
 }
 
+/// The plane a giant's rings lie in (P14.T56.a).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum RingPlane {
+    /// One plane of this unit normal along the galactic axes for every ring: the planet's
+    /// orbital plane, version 22's, below
+    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION).
+    Fixed([f64; 3]),
+    /// Each ring on the planet's Laplace surface (see the [module](self) documentation).
+    Laplace(LaplaceFrame),
+}
+
 /// One ring of a giant (P14.T20).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ring {
@@ -452,6 +470,7 @@ pub struct Ring {
     mass: Kilograms,
     optical_depth: f64,
     gaps: Vec<RingGap>,
+    normal: [f64; 3],
 }
 
 impl Ring {
@@ -502,6 +521,14 @@ impl Ring {
     #[must_use]
     pub fn gaps(&self) -> &[RingGap] {
         &self.gaps
+    }
+
+    /// The normal of its plane, a unit vector along the galactic axes ([`RingPlane`]): on its
+    /// planet's Laplace surface, the local plane's pole on the spin's side, or below
+    /// [`MOONS_VERSION`](crate::planetary::moons::MOONS_VERSION) the planet's orbit normal.
+    #[must_use]
+    pub const fn normal(&self) -> [f64; 3] {
+        self.normal
     }
 
     /// The bytes the ring owns on the heap, its gaps' (P14.T36.a's byte bound).
@@ -566,9 +593,10 @@ fn log_uniform((lo, hi): (f64, f64), rank: UnitUniform) -> f64 {
     lo * math::powf(hi / lo, rank.value())
 }
 
-/// The rings of `planet`, whose regular moons are `moons`, from the draws `draws` (P14.T20): a
-/// dusty ring for every giant, then a massive ring where one exists, in index order. Nothing for a
-/// planet that is not a giant.
+/// The rings of `planet`, whose regular moons are `moons`, from the draws `draws` (P14.T20), in
+/// the plane `plane` gives (P14.T56.a): a dusty ring for every giant, then a massive ring where
+/// one exists, in index order, but none that reaches into the eccentricity band of `plane`'s
+/// Laplace surface. Nothing for a planet that is not a giant.
 ///
 /// # Panics
 ///
@@ -581,7 +609,7 @@ fn log_uniform((lo, hi): (f64, f64), rank: UnitUniform) -> f64 {
 ///
 /// ```
 /// use hyperion_sim::planetary::derive::PlanetClass;
-/// use hyperion_sim::planetary::rings::{RingDraws, RingKind, RingMaterial, RingMoon, RingParent, rings};
+/// use hyperion_sim::planetary::rings::{RingDraws, RingKind, RingMaterial, RingMoon, RingParent, RingPlane, rings};
 /// use hyperion_sim::planetary::{BodyIndex, BodySlot, BodySub};
 /// use hyperion_sim::rng::Mark;
 /// use hyperion_sim::stellar::draws::UnitUniform;
@@ -604,7 +632,8 @@ fn log_uniform((lo, hi): (f64, f64), rank: UnitUniform) -> f64 {
 ///     dusty_extent: UnitUniform::HALF,
 ///     dusty_depth: UnitUniform::HALF,
 /// };
-/// let rings = rings(&saturn, &[mimas], &draws);
+/// let equator = RingPlane::Fixed([0.0, 0.0, 1.0]);
+/// let rings = rings(&saturn, &[mimas], &draws, &equator);
 /// let massive = rings.iter().find(|r| r.kind() == RingKind::Massive).expect("a massive ring");
 /// assert_eq!(massive.material(), RingMaterial::PorousIce);
 /// assert!(massive.outer_edge() <= saturn.roche_limit(RingMaterial::PorousIce));
@@ -613,7 +642,12 @@ fn log_uniform((lo, hi): (f64, f64), rank: UnitUniform) -> f64 {
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 #[must_use]
-pub fn rings(planet: &RingParent, moons: &[RingMoon], draws: &RingDraws) -> Vec<Ring> {
+pub fn rings(
+    planet: &RingParent,
+    moons: &[RingMoon],
+    draws: &RingDraws,
+    plane: &RingPlane,
+) -> Vec<Ring> {
     if !planet.is_giant() {
         return Vec::new();
     }
@@ -628,7 +662,9 @@ pub fn rings(planet: &RingParent, moons: &[RingMoon], draws: &RingDraws) -> Vec<
     let dusty_outer = inner
         + (planet.roche_limit(dust) - inner)
             * linear(RING_OUTER_EDGE_ROCHE_FRACTION, draws.dusty_extent);
-    if dusty_outer > inner {
+    if dusty_outer > inner
+        && let Some(normal) = ring_normal(plane, moons, inner, dusty_outer)
+    {
         let tau = log_uniform(DUSTY_OPTICAL_DEPTH, draws.dusty_depth);
         // τ = 3Σ ÷ 4ρs for grains of one radius s.
         let sigma = tau * 4.0 * dust.density().value() * DUST_GRAIN_RADIUS.value() / 3.0;
@@ -641,6 +677,7 @@ pub fn rings(planet: &RingParent, moons: &[RingMoon], draws: &RingDraws) -> Vec<
             mass: Kilograms::new(sigma * Ring::area(inner, dusty_outer)),
             optical_depth: tau,
             gaps: Vec::new(),
+            normal,
         });
     }
 
@@ -666,6 +703,9 @@ pub fn rings(planet: &RingParent, moons: &[RingMoon], draws: &RingDraws) -> Vec<
     if outer <= inner {
         return out;
     }
+    let Some(normal) = ring_normal(plane, moons, inner, outer) else {
+        return out;
+    };
     let mass = planet.mass * log_uniform(MASSIVE_RING_MASS_RATIO, draws.massive_mass);
     let mut gaps: Vec<RingGap> = moons
         .iter()
@@ -695,24 +735,58 @@ pub fn rings(planet: &RingParent, moons: &[RingMoon], draws: &RingDraws) -> Vec<
         mass,
         optical_depth: sigma * material.extinction(),
         gaps,
+        normal,
     });
     out
 }
 
-/// The rings of `planet`, whose regular moons are `moons`, in the universe of `seed`: [`rings`]
-/// of the planet's own draws ([`RingDraws::for_planet`]), where `system` is the planet's system.
+/// The normal of a ring from `inner` to `outer` in `plane`, about a planet whose regular moons
+/// are `moons` (see the [module](self) documentation): the fixed plane's, or the local Laplace
+/// plane's at √(`inner` `outer`) on the spin's side, with the moons inside that radius counted in
+/// its Laplace radius; `None` for a ring that reaches into the eccentricity band there, which is
+/// not made.
+#[must_use]
+fn ring_normal(
+    plane: &RingPlane,
+    moons: &[RingMoon],
+    inner: Metres,
+    outer: Metres,
+) -> Option<[f64; 3]> {
+    match plane {
+        RingPlane::Fixed(normal) => Some(*normal),
+        RingPlane::Laplace(frame) => {
+            let middle = Metres::new((inner.value() * outer.value()).sqrt());
+            let inside = moons
+                .iter()
+                .filter(|moon| moon.semi_major_axis < middle)
+                .map(|moon| InnerMoon {
+                    mass_ratio: moon.mass.value() / frame.parent_mass().value(),
+                    semi_major_axis: moon.semi_major_axis,
+                });
+            let rl = frame.laplace_radius(inside);
+            let (from, to) = (inner.value() / rl.value(), outer.value() / rl.value());
+            (!laplace::reaches_band(frame.obliquity(), from, to))
+                .then(|| frame.local(rl, PoleSense::Spin).pole_at(middle))
+        }
+    }
+}
+
+/// The rings of `planet`, whose regular moons are `moons`, in the universe of `seed`, in the plane
+/// `plane` gives: [`rings`] of the planet's own draws ([`RingDraws::for_planet`]), where `system`
+/// is the planet's system.
 #[must_use]
 pub fn generate_rings(
     seed: Seed,
     system: crate::id::SystemId,
     planet: &RingParent,
     moons: &[RingMoon],
+    plane: &RingPlane,
 ) -> Vec<Ring> {
     if !planet.is_giant() {
         return Vec::new();
     }
     let draws = RingDraws::for_planet(seed, planet.index.body_id(system));
-    rings(planet, moons, &draws)
+    rings(planet, moons, &draws, plane)
 }
 
 #[cfg(test)]
@@ -725,6 +799,9 @@ mod tests {
     use crate::units::consts::{EARTH_MASS_KG, JUPITER_MASS_KG};
 
     const SEED: Seed = Seed::new(0x0005_a7e2);
+
+    /// One fixed plane for every ring, as version 22 has them.
+    const FLAT: RingPlane = RingPlane::Fixed([0.0, 0.0, 1.0]);
 
     /// A giant of effective temperature `t` K in a flux of `flux` Earth's.
     fn planet(
@@ -825,8 +902,8 @@ mod tests {
             PlanetClass::SubNeptune,
         ] {
             let body = planet(3, class, 5.97e24, 6_371.0, 255.0, 1.0);
-            assert!(rings(&body, &[], &draws_with(true)).is_empty());
-            assert!(generate_rings(SEED, system(1), &body, &[]).is_empty());
+            assert!(rings(&body, &[], &draws_with(true), &FLAT).is_empty());
+            assert!(generate_rings(SEED, system(1), &body, &[], &FLAT).is_empty());
         }
     }
 
@@ -834,7 +911,7 @@ mod tests {
     #[test]
     fn every_giant_has_a_tenuous_dusty_ring() {
         for (id, parent, moons) in sampled_giants(2_000) {
-            let rings = generate_rings(SEED, id, &parent, &moons);
+            let rings = generate_rings(SEED, id, &parent, &moons, &FLAT);
             let dusty = rings.iter().find(|r| r.kind() == RingKind::Dusty);
             // A dusty ring is missing only where the Roche limit for rock lies inside its edge.
             let reach = parent.roche_limit(RingMaterial::Rock);
@@ -855,7 +932,7 @@ mod tests {
     fn rings_lie_inside_roche_limits() {
         let mut massive = 0;
         for (id, parent, moons) in sampled_giants(4_000) {
-            for ring in generate_rings(SEED, id, &parent, &moons) {
+            for ring in generate_rings(SEED, id, &parent, &moons, &FLAT) {
                 assert!(
                     ring.outer_edge() <= parent.roche_limit(ring.material()),
                     "{ring:?}"
@@ -902,7 +979,7 @@ mod tests {
             let count = (0..n)
                 .filter(|&i| {
                     let giant = planet(5, PlanetClass::GasGiant, 1.898e27, 69_911.0, t, flux);
-                    generate_rings(SEED, system(i), &giant, &[])
+                    generate_rings(SEED, system(i), &giant, &[], &FLAT)
                         .iter()
                         .any(|r| r.kind() == RingKind::Massive && r.material() == material)
                 })
@@ -920,7 +997,7 @@ mod tests {
     fn saturn_s_ring_has_the_cassini_division() {
         let mimas = RingMoon::new(Metres::new(185_539e3), Kilograms::new(3.75e19));
         let enceladus = RingMoon::new(Metres::new(238_042e3), Kilograms::new(1.08e20));
-        let rings = rings(&saturn(), &[mimas, enceladus], &draws_with(true));
+        let rings = rings(&saturn(), &[mimas, enceladus], &draws_with(true), &FLAT);
         let ring = rings
             .iter()
             .find(|r| r.kind() == RingKind::Massive)
@@ -945,8 +1022,8 @@ mod tests {
     fn no_moon_over_ten_kilometres_lies_inside_a_massive_ring() {
         let heavy = RingMoon::new(Metres::new(110_000e3), Kilograms::new(1e17));
         let light = RingMoon::new(Metres::new(110_000e3), Kilograms::new(1e14));
-        let cut = rings(&saturn(), &[heavy], &draws_with(true));
-        let kept = rings(&saturn(), &[light], &draws_with(true));
+        let cut = rings(&saturn(), &[heavy], &draws_with(true), &FLAT);
+        let kept = rings(&saturn(), &[light], &draws_with(true), &FLAT);
         let edge = |rings: &[Ring]| {
             rings
                 .iter()
@@ -973,7 +1050,7 @@ mod tests {
         assert!((cold.particle_temperature().value() - 114.0).abs() < 1e-6);
         assert_eq!(cold.massive_material(), RingMaterial::PorousIce);
         assert_eq!(hot.massive_material(), RingMaterial::Rock);
-        let rocky = rings(&hot, &[], &draws_with(true));
+        let rocky = rings(&hot, &[], &draws_with(true), &FLAT);
         assert_eq!(rocky.last().unwrap().material(), RingMaterial::Rock);
         // The glow alone: a 1,000 K giant far from any light warms its particles to W^¼ of it.
         let glowing = jupiter(1_000.0, 0.0).particle_temperature().value();
@@ -1002,8 +1079,8 @@ mod tests {
         let other = RingDraws::for_planet(SEED, saturn().index().body_id(system(4)));
         assert_ne!(draws, other);
         assert_eq!(
-            generate_rings(SEED, system(3), &saturn(), &[]),
-            generate_rings(SEED, system(3), &saturn(), &[])
+            generate_rings(SEED, system(3), &saturn(), &[], &FLAT),
+            generate_rings(SEED, system(3), &saturn(), &[], &FLAT)
         );
     }
 
@@ -1033,5 +1110,70 @@ mod tests {
             BuildRingParentError::NotPositive.to_string(),
             "a ring parent's mass, radius and temperature must be positive"
         );
+    }
+
+    /// A Laplace frame about [`saturn`] on its side, whose Laplace radius with no moon inside is
+    /// `radii` of Saturn's: `r_L`⁵ = J₂R² T, with the tide's factor T read off a unit quadrupole.
+    fn saturn_on_its_side(radii: f64) -> LaplaceFrame {
+        use crate::orbit::{Eccentricity, KeplerElements, Orientation};
+        use crate::units::consts::{METRES_PER_AU, SOLAR_MASS_KG};
+        use crate::units::{GravitationalParameter, Radians, SolarMasses, Years};
+        let orbit = KeplerElements::from_semi_major_axis(
+            Metres::new(9.54 * METRES_PER_AU),
+            GravitationalParameter::from_solar_masses(SolarMasses::new(1.0)),
+            Eccentricity::new(0.05).unwrap(),
+            Orientation::new(Radians::ZERO, Radians::ZERO, Radians::ZERO).unwrap(),
+            Radians::ZERO,
+        )
+        .unwrap();
+        let (mass, host) = (Kilograms::new(5.683e26), Kilograms::new(SOLAR_MASS_KG));
+        let tide = math::powi(laplace::laplace_radius(1.0, &orbit, mass, host).value(), 5);
+        let radius = saturn().radius;
+        let rl = radius.value() * radii;
+        laplace::LaplaceFrame::new(&laplace::LaplaceFrameParts {
+            spin_pole: [1.0, 0.0, 0.0],
+            orbit_normal: [0.0, 0.0, 1.0],
+            j2: math::powi(rl, 5) / tide / (radius.value() * radius.value()),
+            equatorial_radius: radius,
+            parent_orbit: orbit,
+            parent_mass: mass,
+            host_mass: host,
+            read_at: Years::new(4.5e9),
+        })
+        .unwrap()
+    }
+
+    /// P14.T56.a: a ring that reaches into its planet's eccentricity band is not made, and one
+    /// far inside its Laplace radius lies on the equator, edged as in a fixed plane.
+    #[test]
+    fn a_ring_in_the_band_is_not_made_and_one_close_in_lies_on_the_equator() {
+        let banded = RingPlane::Laplace(saturn_on_its_side(1.5));
+        assert!(rings(&saturn(), &[], &draws_with(true), &banded).is_empty());
+        let far = saturn_on_its_side(40.0);
+        let laid = rings(&saturn(), &[], &draws_with(true), &RingPlane::Laplace(far));
+        let flat = rings(&saturn(), &[], &draws_with(true), &FLAT);
+        assert_eq!(laid.len(), 2);
+        for (ring, fixed) in laid.iter().zip(&flat) {
+            assert_eq!(
+                (
+                    ring.index(),
+                    ring.inner_edge(),
+                    ring.outer_edge(),
+                    ring.mass()
+                ),
+                (
+                    fixed.index(),
+                    fixed.inner_edge(),
+                    fixed.outer_edge(),
+                    fixed.mass()
+                )
+            );
+            // About a parent on its side the classical plane well inside `r_L` is the equator.
+            let [x, y, z] = ring.normal();
+            assert!(
+                (x - 1.0).abs() < 1e-12 && y.abs() < 1e-12 && z.abs() < 1e-6,
+                "{x} {y} {z}"
+            );
+        }
     }
 }

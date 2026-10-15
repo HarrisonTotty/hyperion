@@ -1,5 +1,5 @@
 import { universeTimeFromYears } from "@hyperion/protocol";
-import { useId, useState } from "react";
+import { type ReactNode, useId, useState } from "react";
 
 import { RequestStatus } from "../../components/RequestStatus";
 import { StaleMark } from "../../components/StaleMark";
@@ -10,6 +10,12 @@ import { type SystemTarget, systemTargetFor } from "../system/systemTarget";
 import { SystemList } from "./SystemList";
 import { SystemReadout } from "./SystemReadout";
 import type { LocalChartState } from "./useLocalChart";
+
+/**
+ * The extinction's status for a selection the server resolves to no system: the request's subject
+ * and a refusal with its reason, as `RequestStatus` writes one (decision-gg-port-d0 §2.1).
+ */
+const NO_SUCH_SYSTEM = "EXTINCTION REJECTED: no such system";
 
 interface SystemsPanelProps {
   readonly chart: LocalChartState;
@@ -43,7 +49,13 @@ interface SystemsPanelProps {
  * drops an answer to a superseded one. Where that request stands is said between the readout and
  * `OPEN SYSTEM`, outside the live region, with `RETRY` after a failure; an answer the client cannot
  * read says `SYSTEM DATA INVALID` there. The answer on show while the chart's time has moved on, or
- * after the newer request failed, is read as stale.
+ * after the newer request failed, is read as stale. The selection's extinction from the chart's
+ * centre (plan 07, P07.T11.c) is asked for by the chart ({@link LocalChartState}), and where that
+ * request stands is said after the summary's, its subject `EXTINCTION` before its state
+ * (`EXTINCTION PENDING`), so that two waits are told apart; a selection the server resolves to no
+ * system reads `EXTINCTION REJECTED: no such system`, a refusal with no `RETRY`, and an answer the
+ * client cannot read `EXTINCTION DATA INVALID` with `RETRY`. The link's state is shown once, by the
+ * summary's status where that shows it (decision-gg-port-d0 §2.1).
  */
 export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const titleId = useId();
@@ -78,6 +90,37 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
   const retry = (): void => {
     setGeneration((count) => count + 1);
   };
+  const { state: extinctionState, answer } = chart.extinction;
+  let extinctionStatus: ReactNode;
+  switch (answer.kind) {
+    case "no_such_system":
+      // Answered, but for an ID the server resolves to no system: a refusal, which asking again
+      // would only repeat, so it offers no RETRY; its rows stay the em dash.
+      extinctionStatus = <StatusLine text={NO_SUCH_SYSTEM} standing="refused" />;
+      break;
+    case "invalid":
+      // The server's fault, reported as every answer that fails a display's checks is.
+      extinctionStatus = (
+        <StatusLine
+          text={`EXTINCTION DATA INVALID: ${answer.cause}`}
+          standing="fault"
+          action={{ label: "RETRY", onAction: chart.retryExtinction }}
+        />
+      );
+      break;
+    case "none":
+    case "line":
+      // The link's state is the link's, and the summary's status says it where it shows it.
+      extinctionStatus =
+        extinctionState.kind === "link_down" && summary.state.kind === "link_down" ? null : (
+          <RequestStatus
+            state={extinctionState}
+            subject="EXTINCTION"
+            onRetry={chart.retryExtinction}
+          />
+        );
+      break;
+  }
   return (
     <section
       className={
@@ -113,6 +156,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
         distanceDecimals={chart.distanceDecimals}
         stars={stars}
         starsStale={starsStale}
+        extinction={answer.kind === "line" ? answer.line : null}
       />
       {summary.shown?.kind === "fault" ? (
         <StatusLine
@@ -123,6 +167,7 @@ export function SystemsPanel({ chart, onOpenSystem }: SystemsPanelProps) {
       ) : (
         <RequestStatus state={summary.state} onRetry={retry} />
       )}
+      {extinctionStatus}
       <div className="systems-panel__actions">
         <button
           type="button"

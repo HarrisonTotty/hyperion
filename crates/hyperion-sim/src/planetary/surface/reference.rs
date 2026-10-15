@@ -15,11 +15,12 @@
 //! cover all year, and a reservoir a mass per square metre of the whole surface
 //! ([`Condensate`]).
 //!
-//! The substances are plan 14's registry keys ([`SubstanceKey`], decision-composition §1.1),
-//! checked by their grammar alone until P14.T49.b's rows exist, whose test then checks every key
-//! these worlds use. Each world's palette (decision-composition §1.7) carries the values the server
-//! will resolve from those rows (P14.T49.b–c), which are not built: each substance's figures are
-//! the ones its row below states with their sources. They began as R09.T2's synthetic palettes'
+//! The substances are plan 14's registry keys ([`SubstanceKey`], decision-composition §1.1), and
+//! a test holds every key these worlds and R09's synthetic ones use to a registry row, and each
+//! reference row's figures to its row's condensed columns (P14.T49.b). Each world's palette
+//! (decision-composition §1.7) carries the values the server will resolve from those rows
+//! (P14.T49.c's resolution, not built): each substance's figures are the ones its row below
+//! states with their sources. They began as R09.T2's synthetic palettes'
 //! (`hyperion_surface::testing`) and are kept apart from them, so that a correction to either set
 //! moves only its own output (the wire goldens pin the synthetic fields' palettes, and R09.T16's
 //! coarse goldens will pin these). A science review of 2026-10-10 read their basalt solidus,
@@ -1307,6 +1308,147 @@ mod tests {
             let got = ice(&world);
             assert!((got - rho).abs() < 0.1, "{name}'s ice: {got} kg m⁻³");
         }
+    }
+
+    /// Every key the reference worlds use is a row of plan 14's registry (P14.T49.b): their gases,
+    /// condensates, covers, crusts and palettes.
+    #[test]
+    fn every_key_the_reference_worlds_use_is_a_substance_row() {
+        let mut keys = std::collections::BTreeSet::new();
+        for world in [earth_like(), mars_like(), moon_like(), ceres_like()] {
+            keys.extend(world.gases().iter().map(|gas| gas.substance));
+            keys.extend(world.condensates().iter().map(|c| c.substance));
+            keys.extend(
+                world
+                    .liquids()
+                    .iter()
+                    .chain(world.ices())
+                    .map(|a| a.substance),
+            );
+            keys.extend(world.palette().entries().iter().map(|e| e.substance));
+            let crust = world.crust();
+            keys.extend(
+                [crust.primary, crust.secondary, crust.tertiary, crust.bulk]
+                    .into_iter()
+                    .flatten(),
+            );
+            keys.insert(crust.provinces);
+        }
+        let keys: Vec<&str> = keys.iter().map(SubstanceKey::as_str).collect();
+        for key in &keys {
+            assert!(substance::by_key(key).is_some(), "{key} is a registry row");
+        }
+        assert_eq!(
+            keys,
+            [
+                "Ar",
+                "CH4",
+                "CO",
+                "CO2",
+                "H2O",
+                "He",
+                "N2",
+                "Na2CO3",
+                "Ne",
+                "O2",
+                "basalt",
+                "basalt_fe",
+                "feldspathic",
+                "granite",
+                "mars_dust",
+                "phyllosilicate",
+            ]
+        );
+    }
+
+    /// Every key R09's synthetic worlds' palettes use is a row of plan 14's registry
+    /// (`hyperion_surface::testing`, under the crate's `testing` feature).
+    #[cfg(feature = "testing")]
+    #[test]
+    fn every_key_the_synthetic_worlds_use_is_a_substance_row() {
+        use hyperion_surface::field::FieldView;
+        use hyperion_surface::testing::{SyntheticWorld, synthetic_field};
+        for &world in SyntheticWorld::ALL {
+            let field = synthetic_field(world);
+            for entry in field.header().palette().entries() {
+                let key = entry.substance;
+                assert!(
+                    substance::by_key(key.as_str()).is_some(),
+                    "{world:?}'s {key} is a registry row"
+                );
+            }
+        }
+    }
+
+    /// The reference rows are the registry's (P14.T49.b): each lithology's and salt's grain
+    /// density, transition and mechanics family equal its row's condensed columns to the bit.
+    #[test]
+    fn the_reference_rows_are_the_substance_registry_s() {
+        use crate::substance::CondensedPhase;
+        use hyperion_testkit::float::assert_same_bits;
+        for row in [
+            &BASALT,
+            &BASALT_FE,
+            &GRANITE,
+            &FELDSPATHIC,
+            &PHYLLOSILICATE,
+            &SODIUM_CARBONATE,
+            &MARS_DUST,
+        ] {
+            let registry = substance::by_key(row.key.as_str())
+                .unwrap_or_else(|| panic!("{} is a registry row", row.key))
+                .substance();
+            let condensed = registry.condensed().expect("a reference row is condensed");
+            // A rock keeps its room-temperature grain density at every temperature.
+            for t in [150.0, 293.0] {
+                let rho = registry
+                    .grain_density(CondensedPhase::Solid, Kelvin::new(t))
+                    .expect("a rock has a solid's grain density");
+                assert_same_bits(rho.value(), row.grain_density_kg_m3);
+            }
+            assert_same_bits(
+                condensed.transition().temperature().value(),
+                row.transition_k,
+            );
+            assert_eq!(condensed.mechanics(), row.mechanics, "{}", row.key);
+        }
+        // The ices take their rows' diagrams: water ice Ih's density where it lies, carbon
+        // dioxide's at the 150 K of its row here, and their triple points, within the 0.01 K
+        // between water's and its melting at one atmosphere.
+        let water = substance::by_key("H2O").unwrap().substance();
+        let at = Kelvin::new(COLD_TRAP_H2O_K);
+        assert_same_bits(
+            water
+                .grain_density(CondensedPhase::Solid, at)
+                .unwrap()
+                .value(),
+            WATER_ICE.ice_entry_at(at).grain_density_kg_m3,
+        );
+        let ice = water
+            .condensed()
+            .unwrap()
+            .transition()
+            .temperature()
+            .value();
+        assert!((ice - WATER_ICE.transition_k).abs() < 0.011, "{ice} K");
+        assert_eq!(water.condensed().unwrap().mechanics(), WATER_ICE.mechanics);
+        let co2 = substance::by_key("CO2").unwrap().substance();
+        let frost = co2
+            .grain_density(CondensedPhase::Solid, Kelvin::new(150.0))
+            .unwrap()
+            .value();
+        assert!(
+            (frost - CARBON_DIOXIDE_ICE.grain_density_kg_m3).abs() < 0.5,
+            "{frost}"
+        );
+        assert_same_bits(
+            co2.condensed().unwrap().transition().temperature().value(),
+            CARBON_DIOXIDE_ICE.transition_k,
+        );
+        assert_eq!(
+            co2.condensed().unwrap().mechanics(),
+            CARBON_DIOXIDE_ICE.mechanics
+        );
     }
 
     #[test]

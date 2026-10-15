@@ -1,10 +1,14 @@
 use hyperion_testkit::float::assert_same_bits;
 
 use super::*;
+use crate::planetary::derive::atmosphere::volatile_inventory;
 use crate::planetary::derive::solar::{
-    SOLAR_AGE, derive_historic, placed_about_the_sun, solar_disc, table_bodies,
+    SOLAR_AGE, derive_historic, historic_sun, placed_about_the_sun, solar_disc, table_bodies,
 };
-use crate::units::consts::METRES_PER_AU;
+use crate::planetary::derive::{BodyHosts, DerivedBody, derive_body_under};
+use crate::stellar::Composition;
+use crate::time::UniverseTime;
+use crate::units::consts::{METRES_PER_AU, SOLAR_MASS_KG};
 
 /// The table's body `name`, derived about the zero-age Sun at its own distance with its history,
 /// and the inputs of its element inventory at the ranks `draws`.
@@ -28,6 +32,25 @@ fn table_body(
         age: SOLAR_AGE,
     };
     (body, inputs)
+}
+
+/// The table's body `name` derived as [`table_body`] derives it, with nitrogen's boost beyond the
+/// line `line`.
+fn table_body_under(name: &str, line: NitrogenLine) -> DerivedBody {
+    let disc = solar_disc();
+    let &(_, kg, km, a, e) = table_bodies()
+        .find(|(n, ..)| *n == name)
+        .expect("the body is in the table");
+    let placed = placed_about_the_sun(&disc, (kg, km, a, e));
+    let lights = [historic_sun()];
+    let hosts = BodyHosts::new(
+        Kilograms::new(SOLAR_MASS_KG),
+        Composition::SOLAR,
+        &lights,
+        &[],
+    )
+    .unwrap();
+    derive_body_under(line, &placed, &hosts, &disc, SOLAR_AGE, UniverseTime::EPOCH).unwrap()
 }
 
 /// Ranks to try: the median, both one-sigma ranks and the extremes, in each field.
@@ -81,8 +104,15 @@ fn the_carriers_are_today_s_to_the_bit() {
                     ..at_median
                 };
                 let view = *element_inventory(&inputs).volatiles();
-                let today =
-                    volatile_inventory(inputs.mass, &inputs.fractions, formed, &draws, inputs.age);
+                let formed_at = formation_temperature(inputs.formation_distance, inputs.snow_line);
+                let today = volatile_inventory(
+                    inputs.mass,
+                    &inputs.fractions,
+                    formed,
+                    formed_at,
+                    &draws,
+                    inputs.age,
+                );
                 for (a, b) in [
                     (view.water(), today.water()),
                     (view.carbon_dioxide(), today.carbon_dioxide()),
@@ -325,6 +355,78 @@ fn an_empty_body_holds_nothing() {
         });
         for e in [Element::S, Element::Cl, Element::He, Element::Xe] {
             assert_same_bits(inventory.total(e).value(), 0.0);
+        }
+    }
+}
+
+/// P14.T50.c: the nitrogen carrier follows the atmosphere's. Under the ammonia line the carriers
+/// are `volatile_inventory`'s under the same line at the inputs' formation temperature, to the
+/// bit; Ceres, formed between the zero-age Sun's snow line and its ammonia line, keeps a
+/// hundredth of its nitrogen, as carrier and as element, and Earth and Titan keep theirs. No other
+/// element, reservoir or ΔIW moves, below generator version 23 the inventory in force is the snow
+/// line's, and under either line the derived body holds the same carriers.
+#[test]
+fn the_nitrogen_carrier_follows_the_ammonia_line() {
+    for name in ["Earth", "Titan", "Ceres"] {
+        for draws in draws_to_try() {
+            let (_, inputs) = table_body(name, draws);
+            let then = element_inventory_under(NitrogenLine::Snow, &inputs);
+            let now = element_inventory_under(NitrogenLine::Ammonia, &inputs);
+            assert_eq!(
+                format!("{:?}", element_inventory(&inputs)),
+                format!("{then:?}"),
+                "{name}: the hold"
+            );
+            let carriers = volatile_inventory_under(
+                NitrogenLine::Ammonia,
+                inputs.mass,
+                &inputs.fractions,
+                inputs.formed,
+                formation_temperature(inputs.formation_distance, inputs.snow_line),
+                &inputs.draws,
+                inputs.age,
+            );
+            assert_eq!(
+                format!("{:?}", now.volatiles()),
+                format!("{carriers:?}"),
+                "{name}: the carriers"
+            );
+            let nitrogen = |inventory: &ElementInventory| {
+                inventory.mass(Element::N, Reservoir::Exchangeable).value()
+            };
+            let ratio = nitrogen(&now) / nitrogen(&then);
+            let carried = now.volatiles().nitrogen().value() / then.volatiles().nitrogen().value();
+            let kept = if name == "Ceres" { 0.01 } else { 1.0 };
+            assert!((ratio - kept).abs() < 1e-12, "{name}: N keeps {ratio}");
+            assert!((carried - kept).abs() < 1e-12, "{name}: N₂ keeps {carried}");
+            for element in INVENTORY_ELEMENTS {
+                for reservoir in Reservoir::ALL {
+                    if element == Element::N {
+                        continue;
+                    }
+                    assert_same_bits(
+                        now.mass(element, reservoir).value(),
+                        then.mass(element, reservoir).value(),
+                    );
+                }
+            }
+            assert_same_bits(
+                now.mantle_delta_iw().value(),
+                then.mantle_delta_iw().value(),
+            );
+        }
+        // The body itself, derived under either line at its median ranks, holds the element
+        // inventory's carriers to the bit.
+        let (_, at_median) = table_body(name, VolatileDraws::MEDIAN);
+        for line in [NitrogenLine::Snow, NitrogenLine::Ammonia] {
+            assert_eq!(
+                format!(
+                    "{:?}",
+                    element_inventory_under(line, &at_median).volatiles()
+                ),
+                format!("{:?}", table_body_under(name, line).inventory()),
+                "{name} under {line:?}"
+            );
         }
     }
 }

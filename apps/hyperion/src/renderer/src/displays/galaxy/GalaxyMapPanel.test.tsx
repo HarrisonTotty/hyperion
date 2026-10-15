@@ -1,5 +1,5 @@
 import type { RequestOf, ResponseFor } from "@hyperion/protocol";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,10 +7,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UniverseProvider } from "../../components/UniverseProvider";
 import type { CentreLy } from "../../lib/galaxy/model";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
-import { aDensityMap, anOpenedUniverse, aUniverseList } from "../../test/galaxyFixtures";
+import {
+  aDensityMap,
+  anExtinctionMap,
+  anOpenedUniverse,
+  aUniverseList,
+} from "../../test/galaxyFixtures";
 import { stubCanvas } from "../../test/RecordingContext2D";
 import { ServerLinkHarness } from "../../test/ServerLinkHarness";
-import { GalaxyMapPanel } from "./GalaxyMapPanel";
+import { GalaxyMapPanel, OVERLAY_DENSITY_ONLY, OVERLAY_NO_ROOM } from "./GalaxyMapPanel";
+import { DUST_OVERLAY_LABEL } from "./GalaxyMapView";
 import { UniversePanel } from "./UniversePanel";
 
 /** Plays the server's side, letting the outcomes it settles reach React. */
@@ -39,19 +45,49 @@ function mapFor(body: RequestOf<"density_map">): ResponseFor<"density_map"> {
   });
 }
 
-/** Holds the cursor for the page, as the display does. */
-function MapPage() {
+/** An extinction map for the request, of the density map's size and extents. */
+function extinctionFor(body: RequestOf<"extinction_map">): ResponseFor<"extinction_map"> {
+  const heightPx = body.view === "face_on" ? 8 : 4;
+  return anExtinctionMap({
+    codes: Array.from({ length: 8 * heightPx }, (_, pixel) => pixel),
+    widthPx: 8,
+    heightPx,
+    view: body.view,
+  });
+}
+
+/**
+ * The `GALAXY MAP` page at 1280 × 720 and at 1920 × 1080, as the hidden runs of P07.T11.b measured
+ * it (plan 07's record): compact with no room for the dust overlay, and stacked with room.
+ */
+const PAGE_1280_720 = [798, 520] as const;
+const PAGE_1920_1080 = [1_036, 880] as const;
+
+interface MapPageProps {
+  readonly shown: boolean;
+}
+
+/**
+ * Holds the cursor for the page, as the display does, beside a text field such as the display's
+ * `CURSOR` panel has.
+ */
+function MapPage({ shown }: MapPageProps) {
   const [cursorLy, setCursorLy] = useState<CentreLy>([0, 0, 0]);
   return (
-    <div role="tabpanel" aria-label="GALAXY MAP">
-      <GalaxyMapPanel cursorLy={cursorLy} onCursor={setCursorLy} centreLy={null} />
-    </div>
+    <>
+      <input type="text" aria-label="NOTE" />
+      <div role="tabpanel" aria-label="GALAXY MAP">
+        <GalaxyMapPanel cursorLy={cursorLy} onCursor={setCursorLy} centreLy={null} shown={shown} />
+      </div>
+    </>
   );
 }
 
 /**
- * Lays the page out at `widthPx` by `heightPx`: at 792 × 488 the words take 29.5rem of the width,
- * leaving 320 px, and the pictures together 488 px of the height, face-on 320 and edge-on 160.
+ * Lays the page out at `widthPx` by `heightPx`. 792 × 488 is 30.5 rem tall, so compact: the words
+ * and axes take 32.5 rem of the width, leaving 272 px, and the controls' row and the gap 8 rem of
+ * the height, leaving the rows 360 px; the edge-on row keeps 8.5 rem for its words, so the face-on
+ * picture is 224 px.
  */
 function stubPageSize(widthPx = 792, heightPx = 488): void {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
@@ -60,14 +96,14 @@ function stubPageSize(widthPx = 792, heightPx = 488): void {
 }
 
 /** Renders the page beside the universe panel, which opens universes for it. */
-async function renderPanel() {
+async function renderPanel({ shown = true } = {}) {
   const user = userEvent.setup();
   stubCanvas();
   render(
     <ServerLinkHarness>
       <UniverseProvider>
         <UniversePanel expanded onToggle={() => undefined} />
-        <MapPage />
+        <MapPage shown={shown} />
       </UniverseProvider>
     </ServerLinkHarness>,
   );
@@ -95,6 +131,25 @@ async function answerBothMaps(socket: FakeWebSocket): Promise<void> {
   await server(() => {
     socket.serverAnswers("density_map", mapFor);
     socket.serverAnswers("density_map", mapFor);
+  });
+}
+
+async function answerBothExtinctionMaps(socket: FakeWebSocket): Promise<void> {
+  await server(() => {
+    socket.serverAnswers("extinction_map", extinctionFor);
+    socket.serverAnswers("extinction_map", extinctionFor);
+  });
+}
+
+function overlayToggle(): HTMLElement {
+  return within(panel()).getByRole("button", { name: "D DUST OVERLAY" });
+}
+
+/** Lays the page out afresh at `widthPx` by `heightPx`, as a resize of the window does. */
+function resizePage([widthPx, heightPx]: readonly [number, number]): void {
+  stubPageSize(widthPx, heightPx);
+  act(() => {
+    window.dispatchEvent(new Event("resize"));
   });
 }
 
@@ -148,8 +203,7 @@ describe("GalaxyMapPanel", () => {
 
     await openUniverse(user, socket);
 
-    // Pictures 320 px wide at a device pixel ratio of 1 take the 256-pixel map, drawn 1.25 times
-    // larger.
+    // Pictures 224 px wide at a device pixel ratio of 1 take the 256-pixel map, drawn smaller.
     expect(
       socket
         .requestsOfKind("density_map")
@@ -197,6 +251,178 @@ describe("GalaxyMapPanel", () => {
     ).toBeInTheDocument();
   });
 
+  it("offers the quantity with its key, column density first, and the dust overlay with its own", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+
+    await openUniverse(user, socket);
+
+    const group = within(panel()).getByRole("group", { name: "Q QUANTITY" });
+    expect(group).toHaveAttribute("aria-keyshortcuts", "Q");
+    expect(within(group).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+    expect(within(group).getByRole("radio", { name: "EXTINCTION" })).not.toBeChecked();
+    const overlay = within(panel()).getByRole("button", { name: "D DUST OVERLAY" });
+    expect(overlay).toHaveAttribute("aria-pressed", "false");
+    expect(overlay).toHaveAttribute("aria-keyshortcuts", "D");
+  });
+
+  it("asks for both views' extinction maps under EXTINCTION", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    await user.click(within(panel()).getByRole("radio", { name: "EXTINCTION" }));
+
+    expect(
+      socket.requestsOfKind("extinction_map").map(({ body }) => [body.view, body.resolution]),
+    ).toEqual([
+      ["face_on", 512],
+      ["edge_on", 512],
+    ]);
+  });
+
+  it("holds the overlay back under EXTINCTION, which it does not dim", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.click(within(panel()).getByRole("radio", { name: "EXTINCTION" }));
+
+    expect(overlayToggle()).toHaveAttribute("aria-disabled", "true");
+    expect(overlayToggle()).toHaveAccessibleDescription(OVERLAY_DENSITY_ONLY);
+  });
+
+  it("puts the overlay on with D", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.keyboard("d");
+
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("asks for the extinction maps the overlay dims the density maps by", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    await user.keyboard("d");
+
+    expect(socket.requestsOfKind("extinction_map").map(({ body }) => body.view)).toEqual([
+      "face_on",
+      "edge_on",
+    ]);
+  });
+
+  it("steps the quantity with Q", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.keyboard("q");
+
+    expect(within(panel()).getByRole("radio", { name: "EXTINCTION" })).toBeChecked();
+  });
+
+  it("steps the quantity from the last back to the first", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.keyboard("qq");
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+  });
+
+  it("leaves Q and D to a text field that has the focus", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.click(screen.getByRole("textbox", { name: "NOTE" }));
+    await user.keyboard("qd");
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("leaves Q and D alone with a modifier held", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    await user.keyboard("{Control>}d{/Control}{Shift>}q{/Shift}{Alt>}q{/Alt}");
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("acts once on a key held down, not on its repeats", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+
+    // A held key's repeats, which user-event does not mark as repeats.
+    fireEvent.keyDown(document, { key: "q", repeat: true });
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+  });
+
+  it("holds D and the toggle back while the link is down, where the page has room", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+    act(() => {
+      socket.close();
+    });
+
+    await user.keyboard("d");
+    await user.click(overlayToggle());
+
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+    expect(overlayToggle()).toHaveAccessibleDescription("NO CARRIER");
+  });
+
+  it("leaves Q and D alone while its page is behind its tab", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel({ shown: false });
+    await openUniverse(user, socket);
+
+    await user.keyboard("qd");
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("leaves Q and D alone while no universe is open", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+
+    await user.keyboard("qd");
+    await openUniverse(user, socket);
+
+    expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toBeChecked();
+    expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("holds the quantity back while the link is down", async () => {
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    act(() => {
+      socket.close();
+    });
+    await user.keyboard("q");
+    const extinction = within(panel()).getByRole("radio", { name: "EXTINCTION" });
+    await user.click(extinction);
+
+    expect(extinction).not.toBeChecked();
+    expect(extinction).toHaveAccessibleDescription("NO CARRIER");
+    expect(socket.requestsOfKind("extinction_map")).toHaveLength(0);
+  });
+
   it("gives each view a legend of its own, with its own floor", async () => {
     const { user, socket } = await renderPanel();
     await openUniverse(user, socket);
@@ -223,12 +449,14 @@ describe("GalaxyMapPanel", () => {
 
     expect(within(panel()).getAllByText("FRAME")).toHaveLength(1);
     expect(within(panel()).getByText("FRAME").parentElement).toHaveTextContent("FRAME GALACTIC");
-    // 320 px for 131,072 ly: the longest 1-2-5 bar within a quarter of the width.
+    // 224 px for 131,072 ly: the longest 1-2-5 bar within a quarter of the width.
     expect(within(panel()).getAllByText("20,000 ly")).toHaveLength(1);
     expect(within(panel()).getByRole("img", { name: "Scale bar, 20,000 ly" })).toBeInTheDocument();
   });
 
   it("gives both pictures one width, as large as the page's width allows", async () => {
+    // Stacked, 792 px wide leaves 320 px beside the 24 rem words and the axes.
+    stubPageSize(792, 800);
     const { user, socket } = await renderPanel();
 
     await openUniverse(user, socket);
@@ -237,14 +465,72 @@ describe("GalaxyMapPanel", () => {
   });
 
   it("gives both pictures one width, as large as the page's height allows", async () => {
-    // 1,000 px wide leaves 528 px beside the words, but 500 px of height holds face-on 328 px, a
-    // gap and edge-on 164 px.
-    stubPageSize(1_000, 500);
+    // 1,000 px wide leaves 528 px beside the words, but 720 px of height, less the tabs' 2.5 rem
+    // and the gap, holds face-on 448 px and edge-on 224 px.
+    stubPageSize(1_000, 720);
     const { user, socket } = await renderPanel();
 
     await openUniverse(user, socket);
 
-    expect(pictureWidth()).toBe("328px");
+    expect(pictureWidth()).toBe("448px");
+  });
+
+  it("lays a tall page out stacked and a short one compact, as the local chart is", async () => {
+    stubPageSize(1_036, 880);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    const grid = (): Element | null => panel().querySelector(".galaxy-map__grid");
+
+    expect(grid()).toHaveClass("galaxy-map__grid--stacked");
+
+    resizePage(PAGE_1280_720);
+
+    expect(grid()).toHaveClass("galaxy-map__grid--compact");
+    expect(pictureWidth()).toBe("256px");
+  });
+
+  it.each([
+    ["stacked", ...PAGE_1920_1080],
+    ["compact", ...PAGE_1280_720],
+  ])(
+    "keeps one tab order laid out %s: the choices, the toggle, then face-on and edge-on",
+    async (_layout, widthPx, heightPx) => {
+      stubPageSize(widthPx, heightPx);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+
+      within(panel()).getByRole("radio", { name: "ALL" }).focus();
+      await user.tab();
+      expect(within(panel()).getByRole("radio", { name: "COLUMN DENSITY" })).toHaveFocus();
+      await user.tab();
+      expect(within(panel()).getByRole("button", { name: "D DUST OVERLAY" })).toHaveFocus();
+      await user.tab();
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, face-on" }),
+      ).toHaveFocus();
+      await user.tab();
+      expect(
+        within(panel()).getByRole("application", { name: "Galaxy map, edge-on" }),
+      ).toHaveFocus();
+    },
+  );
+
+  it("names the overlay once for the page while it is on, and not under EXTINCTION", async () => {
+    stubPageSize(...PAGE_1920_1080);
+    const { user, socket } = await renderPanel();
+    await openUniverse(user, socket);
+    await answerBothMaps(socket);
+
+    expect(within(panel()).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
+
+    await user.keyboard("d");
+
+    expect(within(panel()).getAllByText(DUST_OVERLAY_LABEL)).toHaveLength(1);
+
+    await user.keyboard("q");
+
+    expect(within(panel()).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
   });
 
   it("keeps its maps while the page is hidden and not laid out", async () => {
@@ -258,8 +544,107 @@ describe("GalaxyMapPanel", () => {
       window.dispatchEvent(new Event("resize"));
     });
 
-    expect(pictureWidth()).toBe("320px");
+    expect(pictureWidth()).toBe("224px");
     expect(socket.requestsOfKind("density_map")).toHaveLength(2);
     expect(socket.cancelledIds()).toEqual([]);
+  });
+
+  describe("the dust overlay's room (decision-gg-port-d0 §3.2)", () => {
+    it("offers it at 1920 × 1080, with both legends in each view and its name once", async () => {
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+
+      await user.keyboard("d");
+      await answerBothExtinctionMaps(socket);
+
+      expect(overlayToggle()).not.toHaveAttribute("aria-disabled");
+      expect(overlayToggle()).toHaveAttribute("aria-pressed", "true");
+      for (const name of ["FACE-ON FROM NORTH", "EDGE-ON ALONG +Y"]) {
+        const view = within(panel()).getByRole("region", { name });
+        expect(within(view).getByText("COLUMN DENSITY")).toBeInTheDocument();
+        expect(within(view).getByText("EXTINCTION A(V)")).toBeInTheDocument();
+      }
+      expect(within(panel()).getAllByText(DUST_OVERLAY_LABEL)).toHaveLength(1);
+    });
+
+    it("holds it back at 1280 × 720, saying there is no room for it", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+
+      expect(overlayToggle()).toHaveAttribute("aria-disabled", "true");
+      expect(overlayToggle()).toHaveAccessibleDescription(OVERLAY_NO_ROOM);
+      expect(within(panel()).getByText(OVERLAY_NO_ROOM)).toBeInTheDocument();
+    });
+
+    it("does nothing on D or a click at 1280 × 720", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+
+      await user.keyboard("d");
+      await user.click(overlayToggle());
+
+      expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+      expect(socket.requestsOfKind("extinction_map")).toEqual([]);
+      expect(within(panel()).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
+    });
+
+    it("keeps the choice while there is no room, and shows the overlay again when there is", async () => {
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+      await user.keyboard("d");
+
+      resizePage(PAGE_1280_720);
+
+      expect(overlayToggle()).toHaveAttribute("aria-pressed", "false");
+      expect(within(panel()).queryByText(DUST_OVERLAY_LABEL)).not.toBeInTheDocument();
+
+      resizePage(PAGE_1920_1080);
+
+      expect(overlayToggle()).toHaveAttribute("aria-pressed", "true");
+      expect(within(panel()).getAllByText(DUST_OVERLAY_LABEL)).toHaveLength(1);
+    });
+
+    it("gives the room's reason before EXTINCTION's", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+
+      await user.click(within(panel()).getByRole("radio", { name: "EXTINCTION" }));
+
+      expect(overlayToggle()).toHaveAccessibleDescription(OVERLAY_NO_ROOM);
+      expect(within(panel()).queryByText(OVERLAY_DENSITY_ONLY)).not.toBeInTheDocument();
+    });
+
+    it("is described by the link's reason and its own while both hold", async () => {
+      stubPageSize(...PAGE_1280_720);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+
+      act(() => {
+        socket.close();
+      });
+
+      expect(overlayToggle()).toHaveAccessibleDescription(`NO CARRIER ${OVERLAY_NO_ROOM}`);
+    });
+
+    it("lays the page out the same with the overlay on as off", async () => {
+      stubPageSize(...PAGE_1920_1080);
+      const { user, socket } = await renderPanel();
+      await openUniverse(user, socket);
+      await answerBothMaps(socket);
+      const before = pictureWidth();
+
+      await user.keyboard("d");
+
+      expect(pictureWidth()).toBe(before);
+      expect(panel().querySelector(".galaxy-map__grid")).toHaveClass("galaxy-map__grid--stacked");
+    });
   });
 });

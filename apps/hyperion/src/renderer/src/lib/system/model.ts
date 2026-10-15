@@ -393,7 +393,8 @@ export interface RingGap {
 
 /**
  * A giant's ring (the protocol's `RingDto`): its edges are distances from its planet's centre in
- * the planet's equatorial plane, which this generator version takes to be its orbital plane.
+ * its plane, the one {@link Ring.normal} is normal to, or without a normal the planet's orbital
+ * plane.
  */
 export interface Ring {
   readonly ringKind: RingKindDto;
@@ -404,6 +405,13 @@ export interface Ring {
   readonly opticalDepth: number;
   /** Inside out; none in a dusty ring. */
   readonly gaps: ReadonlyArray<RingGap>;
+  /**
+   * The normal of its plane, a unit vector along the galactic axes (plan 14, P14.T56.a): its
+   * planet's local Laplace plane at the geometric mean of its edges, on the spin's side, which is
+   * the planet's equator well inside its Laplace radius. `null` from a server that does not send
+   * it, whose rings lie in their planet's orbital plane.
+   */
+  readonly normal: Vec3 | null;
 }
 
 /** One annulus of a belt, in metres from the belt's host. */

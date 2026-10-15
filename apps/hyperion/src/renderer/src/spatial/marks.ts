@@ -110,10 +110,19 @@ export interface AnnulusMark {
   /** Stable identity, which keys its label. */
   readonly id: string;
   /**
-   * Its centre, relative to the view centre in scene units; the view centre when absent. Only its
-   * foot on the reference plane counts, since the band lies in the plane.
+   * Its centre, relative to the view centre in scene units; the view centre when absent. Without a
+   * {@link AnnulusMark.normal} only its foot on the reference plane counts, since the band lies in
+   * the plane.
    */
   readonly centre?: Vec3 | undefined;
+  /**
+   * The normal of the plane the band lies in, through its centre, for a band off the reference
+   * plane, as a ring tilted to its planet's equatorial plane is (plan 14, P14.T56.b); any length
+   * but zero, its sense kept. Its angles, the ticks' every 10° and its label's points, run from
+   * the reference plane's coreward laid onto its own plane, towards that plane's spinward, which
+   * its sense chooses. The reference plane when absent.
+   */
+  readonly normal?: Vec3 | undefined;
   /** Radius of the inner edge in scene units; an edge of radius 0 is not drawn. */
   readonly innerRadius: number;
   /** Radius of the outer edge in scene units, at least the inner's; equal radii draw one edge. */
