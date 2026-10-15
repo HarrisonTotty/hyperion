@@ -401,14 +401,13 @@ const WATER_ICE: Substance = Substance {
 
 /// Liquid water at 25 °C, its record's temperature ([`liquid_water`]): the Fresnel reflectance at
 /// normal incidence, ((n − 1) ÷ (n + 1))², from its record's n at the bands' 0.44, 0.55 and
-/// 0.64 µm, 0.020 836, 0.020 393 and 0.020 205, to four places (Hale and Querry 1973, Appl. Opt.
-/// 12, 555, through R08's `water.json`; decision-r11-palette-liquids §2, item 7); its record's
-/// density, 997.047 kg m⁻³ at 25 °C (IAPWS-95, Wagner and Pruß 2002, J. Phys. Chem. Ref. Data 31,
-/// 387). R08.T5.h moves the file's n to IAPWS R9-97 (decision-r08-t5g.md §1), and the four places
-/// follow the record when it takes it.
+/// 0.64 µm, 0.021 092, 0.020 500 and 0.020 210, to four places (IAPWS R9-97 through R08's
+/// `water.json` since R08.T5.h, decision-r08-t5g.md §1; decision-r11-palette-liquids §2, item 7);
+/// its record's density, 997.047 kg m⁻³ at 25 °C (IAPWS-95, Wagner and Pruß 2002, J. Phys. Chem.
+/// Ref. Data 31, 387). The four places follow the record when the file moves its index.
 const WATER: Substance = Substance {
     key: SubstanceKey::new_const("H2O"),
-    normal_albedo_bvr: [0.020_8, 0.020_4, 0.020_2],
+    normal_albedo_bvr: [0.021_1, 0.020_5, 0.020_2],
     grain_density_kg_m3: LIQUID_WATER_DENSITY_KG_M3,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,

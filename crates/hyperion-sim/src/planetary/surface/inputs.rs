@@ -2251,7 +2251,8 @@ mod tests {
     /// and sources these are, which this crate's tests cannot reach without its `testing`
     /// feature): Setzmann and Wagner 1991's 447.6 kg m⁻³ at 93.65 K and Huygens's 1,467 hPa, and
     /// Martonchik and Orton 1994's n at 90 K carried to it by Lorentz–Lorenz from 452.4 kg m⁻³,
-    /// the other members not modelled (decision-r11-palette-liquids §1.8).
+    /// the other members not modelled (decision-r11-palette-liquids §1.8). The client's
+    /// `view/atmosphere/materials/paletteLiquids.test.ts` holds its bins to the file's.
     fn methane_sea() -> LiquidProperties {
         LiquidProperties {
             temperature: Kelvin::new(93.65),

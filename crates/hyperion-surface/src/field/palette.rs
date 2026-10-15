@@ -794,8 +794,8 @@ mod tests {
 
     /// A liquid's normal albedo is its Fresnel reflectance at normal incidence from its record's n,
     /// read between the bins' centres at B, V and R (decision-r11-palette-liquids §2, item 7). The
-    /// index here falls linearly across the bins, 1.34 less 0.000 5 a bin, so the test reads no
-    /// material file: R08.T5.h moves `water.json`'s n (decision-r08-t5g.md §1).
+    /// index here falls linearly across the bins, 1.34 less 0.000 5 a bin, so that the test reads
+    /// no material file and a change to `water.json`'s n does not move it.
     #[test]
     fn a_liquid_record_gives_its_fresnel_normal_albedo() {
         let mut liquid = crate::testing::liquid_water();

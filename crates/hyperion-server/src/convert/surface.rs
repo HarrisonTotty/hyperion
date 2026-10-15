@@ -917,7 +917,8 @@ mod tests {
 
     /// The sim's reference Earth carries the surface crate's synthetic water record, through a
     /// copy of its own (the sim's tests cannot reach the surface crate's `testing`), so that the
-    /// two move together when R08.T5.h moves `water.json`.
+    /// two move together when `water.json` moves (the client's
+    /// `view/atmosphere/materials/paletteLiquids.test.ts` holds both to the file).
     #[test]
     fn the_reference_earth_s_sea_is_the_synthetic_water_record() {
         let earth = reference::earth_like();

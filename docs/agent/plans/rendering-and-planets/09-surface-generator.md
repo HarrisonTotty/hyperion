@@ -3449,16 +3449,18 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     computed 997.047 0 there and 997.047 6 at 1 atm, the same within the formulation), IAPWS
     R1-76's surface tension (0.071 97 N m⁻¹) and IAPWS R12-08's viscosity (8.900 × 10⁻⁴ Pa s, at
     0.1 MPa) are read, so that no member is carried to another temperature; Pope and Fry's
-    absorption, at 22 °C, is taken as the file holds it. The reference Earth's `WATER_RECORD` is the same record; §1.7's temperature rule is
-    P14.T54.a's, for generated bodies.
-  - _Water's optics are R08.T5.g's file._ n is Hale and Querry's, unchanged; a, merged from
-    R08.T5.g (`48ff891a`), is Pope and Fry 1997's over 380–727.5 nm and Hale and Querry's from
-    750 nm. Each bin is the uniform mean of the file's 5 nm grid interpolated linearly in n and in
-    a = 4πk ÷ λ, to six figures (recomputed after the merge; the method reproduces the earlier
-    file's bins exactly): 0.007 29 m⁻¹ in the bin about 443 nm (Hale and Querry's k gave 0.031 1)
-    and 0.051 8 in the bin about 545 nm (0.042 3 before). `seawater.json` (variant `S35`) is not
-    used: the Earth's sea is `H2O`, pure water, as the ruling's §5 leaves it until plan 14 models
-    salinity.
+    absorption, at 22 °C, is taken as the file holds it (since R08.T5.h's file, Mason et al.'s at
+    23 °C to 495 nm and Pope and Fry's and Kou et al.'s at 22 °C from 500 nm, below). The
+    reference Earth's `WATER_RECORD` is the same record; §1.7's temperature rule is P14.T54.a's,
+    for generated bodies.
+  - _Water's optics are R08.T5.g's file_ (until R08.T5.h's file, below). n is Hale and Querry's,
+    unchanged; a, merged from R08.T5.g (`48ff891a`), is Pope and Fry 1997's over 380–727.5 nm and
+    Hale and Querry's from 750 nm. Each bin is the uniform mean of the file's 5 nm grid
+    interpolated linearly in n and in a = 4πk ÷ λ, to six figures (recomputed after the merge; the
+    method reproduces the earlier file's bins exactly): 0.007 29 m⁻¹ in the bin about 443 nm (Hale
+    and Querry's k gave 0.031 1) and 0.051 8 in the bin about 545 nm (0.042 3 before).
+    `seawater.json` (variant `S35`) is not used: the Earth's sea is `H2O`, pure water, as the
+    ruling's §5 leaves it until plan 14 models salinity.
   - _R08.T5.h will move the file_ (decision-r08-t5g.md §1, §2 and §7; main's note, 2026-10-15):
     water's n to IAPWS R9-97, by up to 4.5 × 10⁻³ at 380 nm (superseding "Hale and Querry" in
     decision-r11-palette-liquids §1.8's water row), and its k to Mason, Cone and Fry 2016 over
@@ -3466,10 +3468,63 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     entered by hand, as §3 of the ruling has them, since the surface crate and the sim read no
     material file; so each water value carries a note that T5.h moves it, and where taking T5.h's
     re-blesses: `wire/payloads.golden`, with `liquid_water`, the reference `WATER_RECORD`, and the
-    Earth-like `WATER` rows' four-place normal albedo. No test pins today's `water.json`: the
-    Fresnel test reads a linear index of its own, and water's index bounds take R9-97's 1.345 at
-    380 nm. No record holds ethane, whose T5.h level (1.3887 at 670 nm) replaces §1.8's "about
-    1.40".
+    Earth-like `WATER` rows' four-place normal albedo. No test pins today's `water.json` (until
+    the guard, below): the Fresnel test reads a linear index of its own, and water's index bounds
+    take R9-97's 1.345 at 380 nm. No record holds ethane, whose T5.h level (1.3887 at 670 nm)
+    replaces §1.8's "about 1.40".
+  - _R08.T5.h's `water.json`, taken_ (2026-10-15; lane r09-water-refresh, `fix(surface)`). R08.T5.h
+    (`9fbc5ea2`) and T2.e landed on the same day, T2.e's bins from R08.T5.g's file, and no test saw
+    the copies go stale. The water record's fifteen bins are recomputed from the new file
+    by the same method (the method reproduces T2.e's bins from R08.T5.g's file to the last
+    figure): n is IAPWS R9-97's at 25 °C, and a Mason, Cone and Fry 2016's at 23 °C over
+    380–495 nm, Pope and Fry's at 22 °C over 500–725 nm and Kou et al. 1993's at 22 °C over
+    730–780 nm. In the bin about 393 nm (380–405.3 nm) n goes 1.339 609 → 1.343 789 and a
+    0.008 164 55 → 0.001 875 00 m⁻¹; in the bin about 443 nm n 1.337 267 → 1.339 564 and a
+    0.007 288 68 → 0.006 244 14 m⁻¹; in the bin about 747 nm n 1.330 000 → 1.329 086 and a
+    2.380 73 → 2.800 88. a is unchanged over 506.7–709.3 nm (Pope and Fry's rows in both files).
+    Every copy follows: `testing::liquid_water` and the sim's reference `WATER_RECORD`; and both
+    Earths' `WATER` rows take the new record's Fresnel reflectance, 0.021 092, 0.020 500 and
+    0.020 210 at 440, 550 and 640 nm, to four places [0.021 1, 0.020 5, 0.020 2] (was [0.020 8,
+    0.020 4, 0.020 2]). The labels stay as T2.e set them, 298.15 K, 100 kPa and `Measured`: the
+    file's header is at 298 K, its n at 298.15 K and 1 atm (R9-97 is a reference correlation fitted
+    to measurements, inside its range). The methane and basaltic records' files did not move, and
+    their bins reproduce as they stand.
+    - _One bin is a rounding tie._ The bin about 545 nm has an exact mean of 1.334 395 5, which
+      the floating-point mean puts just below the half; the record enters 1.334 396, the exact
+      value rounded (the science check). It moves the reflectance at 550 nm by about 10⁻⁷.
+    - _The records' precision, restated._ `testing/liquids.rs`'s module documentation said "six
+      significant figures, the files' own"; the records hold n to six decimal places and a to six
+      significant figures, as T2.e entered them, and the guard holds them to that.
+    - _The wire-form fixtures keep their stand-in sea._ `hyperion-protocol`'s
+      `palette_liquid_wire_forms` and `coarseFieldStore.test.ts`'s `SEA_HEADER` give an `H2O`
+      liquid entry [0.020 8, 0.020 4, 0.020 2] beside a flat n of 1.333. They pin the DTO's form,
+      not the record, so they stay.
+    - _Re-blessed at 22 with no bump_ (the wire exception of 2026-10-09, and main's ruling of
+      2026-10-13 for changes before the serve gate): `wire/payloads.golden`, 2 lines, the Earth-like
+      world's whole digest (the sea's record and its normal albedo in block 0) and the liquids'
+      whole digest (`liquid_field`'s sea is `liquid_water`); every length is unchanged, since the
+      record's form is. No other golden moves: the surface crate's albedo, material, weights,
+      ground, height, bake, field and worker goldens pass unchanged, since the classifier never
+      names a liquid entry (`material/classify.rs`), so the sea's normal albedo reaches none of
+      them (the determinism audit); and the reference worlds are pinned by no golden yet (T16's).
+    - _The guard_ (new): `apps/hyperion/src/renderer/src/view/atmosphere/materials/paletteLiquids.test.ts`
+      reads the five hand-entered records from their Rust sources (`?raw`, as
+      `coarseFieldStore.test.ts` reads `wire.rs`): `liquid_water`, `liquid_methane_titan` and
+      `basaltic_melt` in `testing/liquids.rs`, the reference `WATER_RECORD` and the sim's
+      `methane_sea` in `inputs.rs`. It holds each by-bin member to its R08 file's bin means at the
+      records' precision (n to six decimal places, a to six significant figures, within half a
+      unit in the last place): water and the basaltic melt to their files' n and a, methane to
+      its file's n carried by Lorentz–Lorenz from 452.4 kg m⁻³ at the file's 90 K (which it
+      checks) to the record's density, with its absorption absent; it checks that no record
+      carries scattering and that the list covers every record those three sources hold (by their
+      `basis` members). Run alone:
+      `pnpm --filter hyperion exec vitest run src/renderer/src/view/atmosphere/materials/paletteLiquids.test.ts`.
+      It is a vitest test rather than a Rust one so that `just smart-ci` reaches it from either
+      side: a change to a material file plans only the
+      TypeScript side's checks, and the TypeScript import graph reaches the test from the JSON
+      file and from each `?raw` Rust source, where an `include_str!` in a Rust test would be
+      reached only from the Rust side. It fails on T2.e's stale water bins (checked). It also
+      holds the methane copy to its original, which nothing did.
   - _The methane record is `Derived`, not §1.8's `Measured`._ `liquid_methane_titan` is at
     93.65 K, Huygens's, with Setzmann and Wagner 1991's density there at Huygens's 1,467 hPa,
     447.6 kg m⁻³ (447.614, the science check's evaluation through the NIST WebBook; the WIP's
@@ -3487,7 +3542,8 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     them. The sim's `inputs.rs` tests hold their own `methane_sea`, since the sim's library tests
     cannot reach `hyperion_surface::testing` without its feature; the server's test
     `the_reference_earth_s_sea_is_the_synthetic_water_record` holds the reference Earth's copy of
-    the water record to the synthetic one, and nothing holds the methane copy to its original.
+    the water record to the synthetic one, and nothing holds the methane copy to its original
+    (until the guard, under "R08.T5.h's `water.json`, taken").
   - _No record carries scattering._ Einstein–Smoluchowski–Cabannes is P14.T49.h's, and R08.T5.g
     added no scattering column.
   - _The Earth-like world's runoff keeps 999.84 kg m⁻³._ Its sea's grain density becomes the
@@ -3527,7 +3583,7 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
     held as the body's failure, as a level out of range is.
   - _The reference and synthetic Earths' `WATER` keep their normal albedo_, [0.020 8, 0.020 4,
     0.020 2]: the record's Fresnel reflectance to four places, which their tests hold within
-    5 × 10⁻⁵.
+    5 × 10⁻⁵. With R08.T5.h's file it is [0.021 1, 0.020 5, 0.020 2] (above).
   - _Tests beyond §4's list._ `liquid_field` in `wire/tests.rs`, a field with every present form
     of the record (a melt on the lid, a sea with every member, scattering a test value) and both
     fractions present, round-trips to the bit (`a_wire_payload_carries_its_liquid_records_and_fractions`)
@@ -3540,7 +3596,8 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
   algorithm and every contract as they are.
   - _The ruling's "about three times"_ (§1.9, finding 3): Hale and Querry's k was 5.06 times Pope
     and Fry's at 440 nm (R08.T5.g's figure); in the bins, the one about 443 nm fell 4.3-fold, and
-    the one about 545 nm rose 1.23-fold.
+    the one about 545 nm rose 1.23-fold. With R08.T5.h's file the bin about 443 nm is
+    0.006 24 m⁻¹, 4.98 times below Hale and Querry's 0.031 1.
   - _The ruling's Morel 1974 oracle_ for water's b (§1.8, about 0.0045 m⁻¹ at 450 nm and 0.0019 at
     550 nm) is seawater's, not pure water's: Morel's seawater, at S = 38.4, scatters about 30% more
     than pure water (R08.T5.g's note on Zhang, Hu and He 2009). For P14.T49.h's test.
@@ -3549,13 +3606,19 @@ worlds' payloads keep `None` (R10's Risks, "Deviations in T10.a, as built")._
   - _Water's shortest bin._ Its absorption, 0.008 16 m⁻¹ over 380–405 nm, lies above the next
     bin's 0.004 72: Pope and Fry's ultraviolet rise, which R08.T5.g records as possibly
     contaminated below 420 nm (its lean: Mason et al. 2016 there). The record carries the file as
-    it stands.
+    it stands. _Closed by R08.T5.h's file_ (lane r09-water-refresh): Mason et al.'s absorption
+    gives the bin 0.001 875 m⁻¹, below the next bin's 0.003 054, so it now rises with wavelength.
   - _One temperature per record._ Pope and Fry measured at 22 °C, the record is at 25 °C
-    (R08.T5.g's deferred "one temperature per liquid").
+    (R08.T5.g's deferred "one temperature per liquid"). Since R08.T5.h's file the absorption is
+    Mason et al.'s at 23 °C to 495 nm and Pope and Fry's and Kou et al.'s at 22 °C from 500 nm;
+    near 740 nm, where water's temperature coefficient is 0.0161 m⁻¹ °C⁻¹ (IOCCG 2018, Table 1.1),
+    25 °C would raise a by about 1.7%, the file's reduction states.
   - _The file's grid._ Averaged from Pope and Fry's own 2.5 nm rows, water's bins about 443 and
-    545 nm would be 0.007 300 and 0.051 89 m⁻¹, about 0.2% above the record's, since `water.json`
-    keeps every other row (the science check); well inside the source's uncertainty, and the ruling
-    takes the file's grid.
+    545 nm would be 0.007 300 (against R08.T5.g's file's 0.007 29) and 0.051 89 m⁻¹, about 0.2%
+    above the record's, since `water.json` keeps every other row (the science check); well inside
+    the source's uncertainty, and the ruling takes the file's grid. Since R08.T5.h the bin about
+    443 nm is Mason et al.'s, interpolated from their rows every 2 nm, so the 0.2% stands for the
+    bin about 545 nm alone, which is still Pope and Fry's.
   - _No scattering in the water records._ §1.8's water row names ES–Cabannes for b, which is
     P14.T49.h's; the hand-entered records leave it absent rather than enter an uncomputed value,
     so R11.T8's tests on the synthetic worlds have no deep-water body term until T49.h (the

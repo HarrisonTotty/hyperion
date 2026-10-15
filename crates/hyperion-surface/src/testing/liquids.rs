@@ -7,7 +7,14 @@
 //! uniform means over R08's fifteen bake bins of R08's committed material files
 //! (`apps/hyperion/src/renderer/src/view/atmosphere/materials/`), each file's 5 nm grid
 //! interpolated linearly in n and in a = 4πk ÷ λ, as decision-r11-palette-liquids §1.8 takes them,
-//! six significant figures, the files' own. A member left out is not modelled here, never 0.
+//! n to six decimal places and a to six significant figures. A member left out is not modelled
+//! here, never 0.
+//!
+//! The client's `view/atmosphere/materials/paletteLiquids.test.ts` reads these records, and the
+//! sim's copies of two of them, from their sources, and holds each bin to its file's bin mean, so
+//! that a change to a material file fails a test rather than leaving a record stale. Taking such a
+//! change re-blesses `wire/payloads.golden` at the version in force (and, for water, the Earth-like
+//! world's sea's normal albedo, `testing/worlds.rs`'s `WATER`, the record's Fresnel reflectance).
 
 use hyperion_base::units::Kelvin;
 
@@ -16,18 +23,17 @@ use crate::field::{LIQUID_BINS, LiquidBasis, LiquidProperties};
 /// Liquid water at 25 °C and 100 kPa, every member measured, so `Measured`
 /// (decision-r11-palette-liquids §1.8's water row).
 ///
-/// - **n:** R08's `water.json`, Hale and Querry 1973 (Appl. Opt. 12, 555) at 25 °C.
-/// - **a:** the same file after R08.T5.g: Pope and Fry 1997 (Appl. Opt. 36, 8710) at 22 °C over
-///   380–727.5 nm, Hale and Querry's from 750 nm, and log-linear between. In the bin about 443 nm
-///   it is 0.007 29 m⁻¹, against Pope and Fry's 0.006 35 at 440 nm (the bin's mean rises to its
-///   red edge), and in the bin about 545 nm 0.051 8, against their 0.056 5 at 550 nm. Hale and
-///   Querry's own k, which the file held before, gave 0.031 1 and 0.042 3 there.
-/// - **R08.T5.h moves both** (decision-r08-t5g.md §1 and §2): n to IAPWS R9-97, by up to
-///   4.5 × 10⁻³ at 380 nm, and k to Mason, Cone and Fry 2016 below 500 nm and Kou, Labrie and
-///   Chýlek 1993 above 725 nm. These bins are the file's at R08.T5.g; taking T5.h's re-blesses
-///   `wire/payloads.golden` at the version in force, with the reference Earth's copy
-///   (`hyperion_sim::planetary::surface::reference`) and the normal albedo of the Earth-like
-///   world's sea (`testing/worlds.rs`'s `WATER`), the record's Fresnel reflectance.
+/// - **n:** R08's `water.json` since R08.T5.h, IAPWS R9-97 (1997) at 25 °C and IAPWS-95's density
+///   at 1 atm: the refit of Schiebener et al. 1990 (J. Phys. Chem. Ref. Data 19, 677) that Harvey,
+///   Gallagher and Levelt Sengers 1998 (J. Phys. Chem. Ref. Data 27, 761) publish. 1.343 789 in
+///   the bin about 393 nm and 1.329 086 in the bin about 747 nm.
+/// - **a:** the same file: Mason, Cone and Fry 2016 (Appl. Opt. 55, 7163) at 23 °C over
+///   380–495 nm, Pope and Fry 1997 (Appl. Opt. 36, 8710) at 22 °C over 500–725 nm, and Kou,
+///   Labrie and Chýlek 1993 (Appl. Opt. 32, 3531) at 22 °C over 730–780 nm. In the bin about
+///   443 nm it is 0.006 24 m⁻¹, against the file's 0.005 22 at 440 nm (the bin's mean rises to its
+///   red edge), and in the bin about 545 nm 0.051 8, against Pope and Fry's 0.056 5 at 550 nm.
+/// - **The reference Earth's copy** (`hyperion_sim::planetary::surface::reference`'s
+///   `WATER_RECORD`) is the same record.
 /// - **Density:** 997.047 kg m⁻³, IAPWS-95's at 298.15 K and 100 kPa (IAPWS R6-95(2018);
 ///   Wagner and Pruß 2002, J. Phys. Chem. Ref. Data 31, 387): 997.047 0, and 997.047 6 at 1 atm,
 ///   the same within the formulation's uncertainty, and the pressure of the viscosity's figure.
@@ -39,9 +45,10 @@ use crate::field::{LIQUID_BINS, LiquidBasis, LiquidProperties};
 ///   generated body's).
 ///
 /// A sea warmer than an Earth's mean, about 18 °C at its surface: the temperature is the file's
-/// and its index's, at which every member but the absorption was measured. Pope and Fry measured
-/// theirs at 22 °C, and the file and this record take it as it stands at 25 °C (R08.T5.g's
-/// deferred "one temperature per liquid").
+/// and its index's, at which every member but the absorption was measured. The absorption was
+/// measured at 23 °C to 495 nm and 22 °C from 500 nm, and the file and this record take it as it
+/// stands at 25 °C (R08.T5.g's deferred "one temperature per liquid"; near 740 nm it would rise
+/// about 1.7%, the file's reduction states).
 #[must_use]
 pub fn liquid_water() -> LiquidProperties {
     LiquidProperties {
@@ -49,15 +56,15 @@ pub fn liquid_water() -> LiquidProperties {
         density_kg_m3: LIQUID_WATER_DENSITY_KG_M3,
         basis: LiquidBasis::Measured,
         refractive_index: [
-            1.339_609, 1.338_280, 1.337_267, 1.336_253, 1.335_240, 1.334_227, 1.333_256, 1.332_954,
-            1.332_237, 1.331_945, 1.331_219, 1.331_000, 1.330_931, 1.330_194, 1.330_000,
+            1.343_789, 1.341_476, 1.339_564, 1.337_962, 1.336_599, 1.335_422, 1.334_396, 1.333_487,
+            1.332_676, 1.331_946, 1.331_283, 1.330_673, 1.330_109, 1.329_581, 1.329_086,
         ],
         absorption_per_m: Some([
-            0.008_164_55,
-            0.004_722_25,
-            0.007_288_68,
-            0.010_766_7,
-            0.017_950_3,
+            0.001_875_00,
+            0.003_054_05,
+            0.006_244_14,
+            0.010_301_2,
+            0.017_715_8,
             0.039_037_0,
             0.051_761_7,
             0.073_031_0,
@@ -66,8 +73,8 @@ pub fn liquid_water() -> LiquidProperties {
             0.334_405,
             0.442_138,
             0.601_402,
-            1.353_06,
-            2.380_73,
+            1.442_47,
+            2.800_88,
         ]),
         scattering_per_m: None,
         surface_tension_n_per_m: Some(0.071_97),
@@ -166,8 +173,8 @@ mod tests {
     }
 
     /// Each record's index falls with wavelength (normal dispersion) and lies where its liquid's
-    /// does: water's about 1.33, methane's about 1.29, a basaltic glass's about 1.57. Water's
-    /// bounds hold IAPWS R9-97's 1.345 at 380 nm too, which R08.T5.h brings to `water.json`.
+    /// does: water's about 1.33 (IAPWS R9-97's, 1.345 at 380 nm), methane's about 1.29, a
+    /// basaltic glass's about 1.57.
     #[test]
     fn the_synthetic_liquids_indices_fall_with_wavelength() {
         for (record, low, high) in [

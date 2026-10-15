@@ -1561,7 +1561,7 @@ mod tests {
 
     /// The Earth-like world's sea carries liquid water's record at 25 °C, measured, its normal
     /// albedo the record's Fresnel reflectance to the row's four places (which follow the record
-    /// when it takes R08.T5.h's index); no other entry of any synthetic world carries one
+    /// when `water.json` moves its index); no other entry of any synthetic world carries one
     /// (decision-r11-palette-liquids §1.3, §2 item 7 and §4).
     #[test]
     fn the_synthetic_sea_carries_its_liquid_record() {

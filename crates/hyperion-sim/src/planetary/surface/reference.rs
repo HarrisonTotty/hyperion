@@ -332,12 +332,12 @@ const WATER_ICE: Substance = Substance {
 
 /// Liquid water at 25 °C, its record's temperature ([`WATER_RECORD`]): the Fresnel reflectance at
 /// normal incidence, ((n − 1) ÷ (n + 1))², from its record's n at the bands' 0.44, 0.55 and
-/// 0.64 µm, 0.020 836, 0.020 393 and 0.020 205, to four places, a specular surface's, never a
+/// 0.64 µm, 0.021 092, 0.020 500 and 0.020 210, to four places, a specular surface's, never a
 /// Lambertian albedo (decision-r11-palette-liquids §2, item 7); its record's density, 997.047 kg
 /// m⁻³ at 25 °C and 100 kPa (IAPWS-95, Wagner and Pruß 2002, J. Phys. Chem. Ref. Data 31, 387).
 const WATER: Substance = Substance {
     key: H2O,
-    normal_albedo_bvr: [0.020_8, 0.020_4, 0.020_2],
+    normal_albedo_bvr: [0.021_1, 0.020_5, 0.020_2],
     grain_density_kg_m3: WATER_RECORD.density_kg_m3,
     transition_k: WATER_MELTING_K,
     mechanics: MechanicsFamily::WaterIce,
@@ -348,12 +348,17 @@ const WATER: Substance = Substance {
 /// figures and sources these are, kept apart as the rows are (decision-r11-palette-liquids §1.8's
 /// water row and §4).
 ///
-/// - **n and a:** the uniform means over R08's fifteen bake bins of R08's `water.json`, its 5 nm
-///   grid interpolated linearly in n and in a = 4πk ÷ λ, to its six figures: n Hale and Querry
-///   1973's (Appl. Opt. 12, 555) at 25 °C, and a, since R08.T5.g, Pope and Fry 1997's (Appl.
-///   Opt. 36, 8710) at 22 °C over 380–727.5 nm and Hale and Querry's from 750 nm. R08.T5.h moves
-///   the file's n to IAPWS R9-97 and its k at the ends (decision-r08-t5g.md §1 and §2); taking it
-///   here, with [`WATER`]'s normal albedo, re-blesses at the version in force.
+/// - **n and a:** the uniform means over R08's fifteen bake bins of R08's `water.json` since
+///   R08.T5.h (decision-r08-t5g.md §1 and §2), its 5 nm grid interpolated linearly in n and in
+///   a = 4πk ÷ λ, n to six decimal places and a to six significant figures: n IAPWS R9-97's
+///   (1997; the refit of Schiebener et al. 1990, J. Phys. Chem. Ref. Data 19, 677, that Harvey,
+///   Gallagher and Levelt Sengers 1998, J. Phys. Chem. Ref. Data 27, 761, publish) at 25 °C, and
+///   a Mason, Cone and Fry 2016's (Appl. Opt. 55, 7163) at 23 °C over 380–495 nm, Pope and Fry
+///   1997's (Appl. Opt. 36, 8710) at 22 °C over 500–725 nm and Kou, Labrie and Chýlek 1993's
+///   (Appl. Opt. 32, 3531) at 22 °C over 730–780 nm. The client's
+///   `view/atmosphere/materials/paletteLiquids.test.ts` holds these bins to the file's means, so
+///   that a change to the file fails it; taking the change here, with [`WATER`]'s normal albedo,
+///   re-blesses at the version in force.
 /// - **Density:** IAPWS-95's 997.047 kg m⁻³ at 298.15 K and 100 kPa (IAPWS R6-95(2018)).
 /// - **Surface tension:** IAPWS R1-76(2014)'s 0.071 97 N m⁻¹ at 298.15 K.
 /// - **Viscosity:** IAPWS R12-08's 8.900 × 10⁻⁴ Pa s at 298.15 K and 100 kPa (Huber et al. 2009,
@@ -362,21 +367,21 @@ const WATER: Substance = Substance {
 ///
 /// The reference Earth's mean surface temperature is 288 K, so the generated world's record would
 /// be resolved colder (§1.7); this one keeps its file's temperature, its index's, at which every
-/// member but the absorption (Pope and Fry's, at 22 °C) was measured.
+/// member but the absorption (at 23 °C to 495 nm and 22 °C from 500 nm) was measured.
 const WATER_RECORD: LiquidProperties = LiquidProperties {
     temperature: Kelvin::new(298.15),
     density_kg_m3: 997.047,
     basis: LiquidBasis::Measured,
     refractive_index: [
-        1.339_609, 1.338_280, 1.337_267, 1.336_253, 1.335_240, 1.334_227, 1.333_256, 1.332_954,
-        1.332_237, 1.331_945, 1.331_219, 1.331_000, 1.330_931, 1.330_194, 1.330_000,
+        1.343_789, 1.341_476, 1.339_564, 1.337_962, 1.336_599, 1.335_422, 1.334_396, 1.333_487,
+        1.332_676, 1.331_946, 1.331_283, 1.330_673, 1.330_109, 1.329_581, 1.329_086,
     ],
     absorption_per_m: Some([
-        0.008_164_55,
-        0.004_722_25,
-        0.007_288_68,
-        0.010_766_7,
-        0.017_950_3,
+        0.001_875_00,
+        0.003_054_05,
+        0.006_244_14,
+        0.010_301_2,
+        0.017_715_8,
         0.039_037_0,
         0.051_761_7,
         0.073_031_0,
@@ -385,8 +390,8 @@ const WATER_RECORD: LiquidProperties = LiquidProperties {
         0.334_405,
         0.442_138,
         0.601_402,
-        1.353_06,
-        2.380_73,
+        1.442_47,
+        2.800_88,
     ]),
     scattering_per_m: None,
     surface_tension_n_per_m: Some(0.071_97),
@@ -1193,8 +1198,8 @@ mod tests {
         assert_eq!((sea.role, sea.substance), (Liquid, H2O));
         assert!((sea.grain_density_kg_m3 - 997.047).abs() < 1e-9);
         // Its record is water's at 25 °C, measured, its normal albedo the record's Fresnel
-        // reflectance to the row's four places (decision-r11-palette-liquids §2, item 7): when the
-        // record takes R08.T5.h's index, the row's four places follow it.
+        // reflectance to the row's four places (decision-r11-palette-liquids §2, item 7), which
+        // follow the record's index when `water.json` moves it.
         let record = sea
             .liquid
             .as_ref()
