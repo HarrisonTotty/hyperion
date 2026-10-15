@@ -1611,7 +1611,11 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
 - **P06.T28.d FU Orionis outbursts.** Poisson bins (Δ = 500 years, look-back 1 bin): one per 5,000
   years while a protostar (age < 0.5 Myr), one per 112,000 years afterwards while the disc of T15.c
   lasts, the rate stepping smoothly over 0.05 Myr so the bound stays tight. Marks: luminosity factor
-  10–100, rise of 1–10 years, decay of 20–200 years.
+  10–100, rise of 1–10 years, decay of 20–200 years. **Done (lane `22-p06-t28d-fuor`, 2026-10-15;
+  at version 22, no bump), to main's ruling of 2026-10-15, which replaces this text's rates and
+  marks and the parent's 240–830 a year:** the record is under Risks ("Deviations in T28.d, as built" and "Deferred findings
+  (2026-10-13 rule) (P06.T28.d)"); T28.g composes `Outburst::luminosity_factor_at` into
+  `summary_at`.
 - **P06.T28.e LBV giant eruptions.** Poisson bins (Δ = 100 years, look-back 1 bin) while inside
   T24.a's LBV window. The rate is a generator default, provisionally one per 30,000 years per star
   in the window, which with some 500 such stars gives a Milky Way galaxy about 30 in ±H (the
@@ -4503,6 +4507,236 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
   - _The quiescent luminosity is the epoch's._ The peak factor of a pre-main-sequence star
     divides by its luminosity at the epoch, which drifts by a few per cent over the 2.6 × 10⁵
     years of the source horizon. Lean: T28.g divides by L(t) when it composes the factor.
+- **Deviations in T28.d, as built (lane `22-p06-t28d-fuor`, 2026-10-15; at version 22, no
+  bump).** FU Orionis outbursts are `stellar::events::fu_orionis`, built to main's ruling of
+  2026-10-15, which supersedes the task text's rates, marks and 240–830 window; nothing reads them
+  yet (T28.g and plan 12 will). `system.rs`, `premain.rs`, `flares.rs` and `events/` are unchanged.
+  - _API._ `FuOrionisRates::new(initial_mass, disc_rank) -> Option<_>`, the rate as a closed form of
+    age with no track or clock (`disc_lifetime`, `has_disc_phase`, `last_age`, `rate_at_age(age)`,
+    `component_rate_at_age(component, age)`), which the galaxy-wide test builds per sampled star
+    without its track. `FuOrionisModel::of(&StarModel) -> Option<FuOrionisModel<'_>>`, `None` below
+    0.1 M☉ and `Some` for every other star (its rate is zero outside its young ages), a `RateModel`
+    that borrows the star, with `star`, `rates`, `disc_lifetime`, the clock times `formation`,
+    `class_0_end`, `protostar_end`, `disc_end` and `last_instant`, `rate_at_age`,
+    `component_rate_at_age` and `component_rate_at(component, t)`. `OutburstClass` with `FuOri` and
+    `V1647Ori` (the ruling's names) and, added, `OutburstComponent` with `ProtostellarFuOri`,
+    `V1647Ori` and `DiscFuOri` (`ALL`, `class`, `peak_factor_range`, `rise_range_years`), the rate's
+    three terms, which word 0 picks and which set the factor's range. `Outburst` (`Copy`): `id`,
+    `component`, `class`, `onset`, `peak`, `end`, `rise`, `decay`, `duration` (`Span`s),
+    `drawn_peak_factor`, `peak_factor` (capped), `fading_magnitudes_per_year` (`Some` ḟ for the FU
+    Ori class), `is_active_at(t)` and `luminosity_factor_at(t)`.
+    `outbursts_in(star, series, window, out)`, `outbursts_active_at(star, series, t, out)` and
+    `outburst(star, series, id)`, the series
+    `EventSeries::new(seed, tags::STAR_FU_ORIONIS, body.into())` beside the star as for flares (tag
+    debug-asserted); `outburst` is `None` for another series' ID, a rejected candidate, a number
+    beyond the count or an object below 0.1 M☉. Public constants with their sources: `BIN_SECONDS`
+    (500 Julian years, 15,778,800,000 s), `LOOK_BACK_BINS` (1), `MAX_DURATION` (one bin),
+    `FU_ORI_PROTOSTELLAR_PER_YEAR`, `CLASS_0_PER_YEAR`, `CLASS_I_PER_YEAR`,
+    `V1647_ORI_CLASS_0_PER_YEAR`, `V1647_ORI_CLASS_I_PER_YEAR`, `FU_ORI_DISC_PER_YEAR`,
+    `CLASS_0_END` (t_c), `STEP_WIDTH` (w), `DISC_PHASE_MASS_LIMIT` (2 M☉) and the seven mark ranges
+    (`FU_ORI_PROTOSTELLAR_PEAK_FACTOR`, `FU_ORI_DISC_PEAK_FACTOR`, `FU_ORI_RISE_YEARS`,
+    `FU_ORI_FADING_MAGNITUDES_PER_YEAR`, `V1647_ORI_PEAK_FACTOR`, `V1647_ORI_RISE_YEARS`,
+    `V1647_ORI_DECAY_YEARS`), as `(lo, hi)` pairs like plan 14's ranges.
+  - _Departures from the task text (the ruling), each with its source._
+    - _Two classes of one kind_ on the one tag 0x0106 and one series, Fischer et al. 2023 (PPVII,
+      arXiv:2203.11257v2, Table 1, "FU Ori event" and "V1647 Ori event"; the V1647 Ori row gives no
+      figures, "intermediate between those of EX Lup bursts and FU Ori outbursts").
+    - _The rates._ Class 0 (0 < age < t_c) 1/5,000 FU Ori + 1/480 V1647 Ori, total 1/438 years;
+      Class I (t_c ≤ age < t_p) 1/5,000 + 1/2,671, total 1/1,741 years: Zakri et al. 2022 (ApJL
+      924, L23, arXiv:2201.04647v1, Table 3, the medians under the logarithmic prior, 95% intervals
+      161–1,884 and 527–12,011; three ≥ 2 mag mid-infrared bursts among 92 Class 0 and two among 227
+      Class I/flat-spectrum protostars, section 4.1, over a 13-year baseline). The V1647 Ori rates
+      are those totals less the FU Ori rate (built as the difference, 1/480.05 and 1/2,671.1),
+      since Zakri et al.'s bursts include V2775 Ori, "one of the lowest amplitude FU Ori outbursts
+      known" (their section 3). The protostellar FU Ori 1/5,000 is the brainstorm's, inside
+      Contreras Peña et al.'s (2019, MNRAS 486, 4590, arXiv:1904.04068v1) Class I estimates of 3.0,
+      6.0 (section 6.1.1) and 13 kyr (section 7.4). The disc's 1/112,000 is their Class II
+      recurrence, 112 (+68, −38) kyr with the 1/τ prior (section 6, equations 8–9; 131 kyr without,
+      equation 7; 100–130 kyr with contamination, section 7.4), for an outburst that "rises by more
+      than four magnitudes" (section 6).
+    - _The t_c step_ at T15's Class 0 end, t_p (1 − 1/√2) = 146,447 years (`protostar_class`).
+    - _The 2 M☉ disc limit_: the disc phase only for stars under 2 M☉, T24.b's T Tauri class; the
+      protostar phase at every mass of 0.1–150 M☉, with the cap.
+    - _The marks_, log-uniform and independent, each from one `uniform()`: the FU Ori class, F
+      5–50 (protostellar) or 5–300 (disc), rise 0.25–25 years, ḟ 0.012–0.13 mag a year and a decay
+      of min(2.5 log₁₀ F ÷ ḟ, 500 years − rise) from the drawn F; the V1647 Ori class, F 3–15, rise
+      0.25–10 years, decay 5–20 years. Sources in each constant's documentation (Fischer et al.
+      2023, Table 1 and section 4.1.2; Audard et al. 2014, PPVI, arXiv:1401.3368v1, sections 2.2,
+      2.3.1 and 2.7 and Table 1; Zakri et al. 2022, sections 3.1–3.2; Szabó et al. 2021, ApJ 917,
+      80, and 2022, ApJ 936, 64; Hartmann and Kenyon 1996, ARA&A 34, 207, abstract only).
+    - _The Eddington cap_ (below), which the task text has not.
+    - _The windows_ in place of 240–830 a year (below).
+  - _The steps._ r(a) = C_p [r_FU + r_V0 C_c + r_VI S_c] + r_d S_p C_d [m < 2 M☉], S the smoothstep
+    3s² − 2s³ of width w = 0.05 Myr **centred** on t_c, t_p and t_d (so each star's expected count
+    is the sharp model's, checked by quadrature to 10⁻⁹), and C = 1 − S computed from the step's
+    far side, so that it stays accurate where it is small; zero at and before the onset of
+    collapse and from `last_age`, max(t_p, t_d) + w/2 (t_p + w/2 from 2 M☉). A disc that ends
+    before t_p gives no disc term, and the protostellar rates hold through t_p whatever the disc
+    (one that ends inside the t_p step gives a partial one). r is non-increasing in age after the
+    onset. The onset of collapse itself is a sharp step, from zero to 1/438 a year at age 0, since
+    the ruling smooths only t_c, t_p and t_d; the bound takes the rate at the bin's first instant
+    after it, so it stays tight there too.
+  - _Time._ Bins of 15,778,800,000 s looking back one; a bin's mean is at most 1.14. The onset of
+    collapse, the three step centres and the last instant are turned into clock times once, the
+    epoch plus (age − age at the epoch) × 31,557,600 s floored to the nanosecond (as `mass_breaks`),
+    and the rate at t is formed from the whole nanoseconds between t and each, so no gigayear age is
+    read at t. `bound` is the rate at the bin's first instant after the onset, padded by 2⁻⁴⁰ of
+    itself against rounding (the sweep checks it at 43 instants of every bin, ends included, for
+    every step, 0.1–150 M☉, discs of 0.3 Myr, the median and 15 Myr, and discs ending inside the t_p
+    step or before it at 1.5 and 3 M☉); zero for a bin that ends by the onset or starts from the
+    last instant. `outbursts_in` lists only the part of the window between the onset and the last
+    instant, which drops nothing and spares an old star's empty bins, and `outbursts_active_at`
+    returns at once outside it.
+  - _Word layout._ Word 0, the component, one integer `Mark` through `pick_weighted` over the three
+    terms at the onset against their own sum, so the last threshold is 2⁵³ and a pick never fails;
+    word 1, F; word 2, the rise; word 3, ḟ (FU Ori) or the decay (V1647 Ori). Later scatter takes
+    words 4, 5, … in order.
+  - _Light curve._ F_eff^x with x = (t − onset) ÷ rise through the rise and (end − t) ÷ decay
+    through the decay, linear in magnitude both ways (Audard et al. 2014, section 2.3.1: FU Ori
+    and BBW 76 fade at constant rates in magnitudes); the rise's shape, linear in magnitude too, is
+    the lane's choice. Exactly 1 at the onset and the end and F_eff at the peak, continuous, with
+    no rescaling.
+  - _The Eddington cap._ F_eff = max(1, min(F, 1 ÷ Γ)), Γ = `wind::eddington_factor(L, M)` × (1 +
+    X), X = 0.76 − 3Z (`classify::peculiar`'s construction), from `state_at(min(onset, +H))`; the
+    quiescent luminosity of a protostar includes T15.a's accretion luminosity. A star with no state
+    by then (one that forms after +H, which no galaxy star does) is not capped. L_Edd ÷ L, the
+    largest factor the cap allows, at the median draws and solar composition (the test prints it at
+    0.02, 0.1, 0.3 and 0.49 Myr): up to 3 M☉ it is 218–34,000 and never binds; at 10 M☉ 53–187,
+    above every protostellar factor, so it never binds either; at 30 M☉ 48, 24, 13 and 9.3, so it
+    trims the largest FU Ori factors from the start, most of them by t_p, and some V1647 Ori ones
+    near t_p (30 of 62 outbursts at 0.49 Myr); at 100 M☉ 11, 17, 6.0 and 2.8, so it holds most FU
+    Ori outbursts throughout and every outburst near t_p (62 of 62 at 0.49 Myr).
+  - _Duty cycles_ from the mean marks (log-uniform means; the FU Ori decay 2.5 E[log₁₀ F] E[1/ḟ],
+    E[1/ḟ] = 31.75 years a magnitude): FU Ori outbursts last 100.5 years on average from a
+    protostar (rise 5.37, decay 95.2) and 131 from a disc (decay 126; the 500-year cut binds about
+    once in 1,800), V1647 Ori outbursts 13.5 years (2.64 and 10.8). The share of time in outburst:
+    Class 0, 2.0% FU Ori and 2.8% V1647 Ori (4.8%); Class I, 2.0% and 0.50% (2.5%); disc, 0.12%.
+  - _Against the plan's 10–100, 1–10 and 20–200 years._ Bolometric ratios in Audard et al.'s
+    Table 1: V2775 Ori 4.9–14 (11 in their section 2.7), HBC 722 10–17 (4.7–20 in section 2.7),
+    OO Ser 5.8–8.0, V1647 Ori 6.1–12.6, V1118 Ori 5.0–17.9, PV Cep 2.4, V2492 Cyg 3.1, EX Lup and
+    Parsamian 21 2.9: only HBC 722 lies wholly inside 10–100, and none reaches 30; the classical
+    FUors list no quiescent luminosity. Zakri et al.'s three are 3.7, 5.4 and 9.7. So the plan's
+    floor of 10 sat above most measured factors, which the ruling's 5 (FU Ori) and 3 (V1647 Ori)
+    meet. Rises: the plan's 1–10 years missed HBC 722's months and V1515 Cyg's two to three
+    decades; the ruling's 0.25–25 years covers all but V1515 Cyg's ~30 years (Szabó et al. 2022,
+    section 3.1). Decays: the plan's 20–200 years had no V1647 Ori-type event (OO Ser and others
+    fade in about 5 years, Fischer et al. 2023, section 4.1.2) and fell short of FU Ori's centuries
+    at 14 mmag a year; the ruling's FU Ori decays run 13–354 years from a protostar and 13–500 from
+    a disc, and the V1647 Ori class's 5–20.
+  - _Tests._ `cargo test -p hyperion-sim stellar::events`: 18 tests and one ignored in `fu_orionis`
+    (beside T28.a's 16 and one): the phases' totals, the components and zero outside them, from 1.99
+    to 150 M☉, and the clock model against the closed form; each step's integral against the sharp
+    step's; the age rules against T15 (`state_at` is `Protostar` exactly below t_p, and
+    `protostar_class` `Class0` exactly below t_c, at 7 masses × 8 ages × 5 clock times; the clock
+    times are their ages to 10⁻³ years); the bound sweep (541,800 instants); the binomial shares of
+    word 0 in Class 0 and Class I, and the disc's single component; `outburst` by ID around an onset
+    of collapse mid-bin, over 60 series (rejected candidates, numbers beyond the count, foreign IDs,
+    a brown dwarf); K–S tests of every mark of the three components and the FU Ori decay rule, with
+    the cut at the corner; the factor's ends, peak, continuity, F^½ at half the rise and the decay,
+    and its shape; the cap over 9 masses × 4 ages; objects of 0.01–0.099 M☉ and a 3 M☉ star past its
+    step; partitions in any order and on threads (compiled out on wasm32-wasip1), and at the active
+    part's edges (the onset of collapse and the last instant, a nanosecond either side); the cut to
+    the active part against the uncut bins, for four stars whose edges lie in the source horizon;
+    the step width's three forms; `outbursts_active_at` against the listing; and the +900-year
+    no-history test. The golden `stellar/fu_orionis` (972 lines, header 22): a Class 0 protostar of
+    0.5 M☉ at 0.1 Myr over 5,000 years; a 1 M☉ star at t_c over 10,000 years of its step; a 0.3 M☉
+    star at 2 Myr with its 3 Myr disc, over the source horizon in four series; a 0.8 M☉ star at 1.05
+    Myr whose disc ends at 1 Myr, over the horizon in six; a 30 M☉ protostar at 0.49 Myr over 20,000
+    years, where the cap binds. Each with its step centres, the bound of the bins holding them and
+    the clock's rate a quarter step either side (what thinning reads), its rate and components at
+    six ages, and each outburst's ID, onset, class, component, drawn and capped factor, rise, decay,
+    ḟ and factor at four instants (70 outbursts). The slow test
+    `the_mean_count_over_10_000_stars_matches_the_rate_integral` (`#[ignore]`, 1.1 s under
+    `slow-test`): 10⁴ stars of the young thin disc's masses, compositions and draws, at ages from a
+    test-local LCG over 0–16 Myr, over the source horizon's 528 whole bins; expected 84,835.4,
+    counted 85,340, interval 83,879–85,795, and the FU Ori class expected 17,809.4, counted 18,159,
+    interval 17,372–18,250 at α = 10⁻³ (694 of the stars are below 0.1 M☉; 161 form, 152 end their
+    protostar phase and 140 their disc inside the window). The FU Ori count's z of 2.6 is that
+    seed's: a check harness since taken out gave z of −0.49 to 0.42 for the FU Ori class and −0.21
+    to 0.58 for all outbursts at four other seeds. Measured with it (opt-level 3 with debug
+    assertions, the shared laptop at a load of 3–4.6): `outbursts_in` over the source horizon for a
+    Class I protostar (1 M☉ at 0.4 Myr, 169 outbursts) 288 µs, about 1.7 µs an outburst with its
+    cap's `state_at`; for an old star 0.45 µs, the cut to the active part sparing its 528 empty
+    bins; for the test's 10⁴ stars 164–204 ms in all.
+  - _Galaxy-wide (P06.T31's sampler; the ruling's windows)._ A slow test in
+    `stellar::testing::tests`, `fu_orionis_onsets_galaxy_wide_at_milky_way_values` (`#[ignore]`,
+    4.2 s under `slow-test`), after `galaxy_counts`: each component's system count × its band share
+    × the mean over 10⁴ primaries a band (`sample_inputs`) of Σ rate × `weight` over the star's age
+    pieces (one a plateau, 500 years in the steps), building no track and drawing no age. It takes
+    every band of the three components whose ages reach below 16 Myr (the young thin disc's and the
+    nuclear disc's two, all from −H) and asserts that the rest weigh nothing below 16 Myr. At Milky
+    Way values: FU Ori protostellar 201.4, V1647 Ori 881.0 and FU Ori disc 38.5 onsets a year, so
+    FU Ori onsets **239.9** (window 140–1,000) and both classes **1,120.9** (650–4,500); protostars
+    1.007 × 10⁶, with **1.0748 × 10⁻³** protostellar onsets a year each (1.075 × 10⁻³ within 5%)
+    and an FU Ori share of **18.61%** (18.6% within 5%). All inside their windows; nothing pinned.
+    The protostars are 4% above T31's 9.7 × 10⁵, since this test samples the nuclear disc's light
+    bands too, which T31's `galaxy_counts` leaves out.
+- **Deferred findings (2026-10-13 rule) (P06.T28.d).** Recorded and deferred: each leaves the
+  algorithm and every contract as they are. The leads are unread unless said.
+  - _Objects below 0.1 M☉._ They follow P06.T13's cooling fits, have no protostar phase or track,
+    and so no `FuOrionisModel`; proto-brown dwarfs are modelled to burst (lead: Parkosidis,
+    Stamatellos and Riaz 2025, A&A 696, A104). A protostar phase below 0.1 M☉ is plan 06's to add.
+  - _T15.c's floor below t_p (for T15)._ The disc lifetime's 0.3 Myr floor lies below t_p = 0.5
+    Myr, so a share 1 − e^(−0.5 Myr ÷ τ) of discs end while the star is still a protostar: about
+    one in six at 0.3–1 M☉ (16% at 0.3 M☉, 18% at 1 M☉) and most from about 3.2 M☉ (58% at 4 M☉).
+    Such a disc gives no disc-phase term here, while T24.b's T Tauri class and plan 14's disc read
+    it from the protostar phase. Lean: a floor at t_p for the circumstellar disc, if T15 agrees.
+  - _The V1647 Ori rates' uncertainty._ Zakri et al.'s intervals span a factor of 12 and 23 (Class
+    0 161–1,884 and Class I/FS 527–12,011 years), from five bursts; their Orion Nebula Cluster
+    Class 0 subsample gives 199 years (60–1,393), and they "cannot rule out that protostars of all
+    classes have the same burst interval" (section 4.1; 879 years in Table 3). They are
+    mid-infrared changes of 2 magnitudes or more, which Fischer et al. (2023, section 4.1.3) call
+    bursts, and their section 5.2 warns that methods "potentially lead to much higher measured
+    rates of outbursts for protostars". The FU Ori rates rest on optical rises of more than four
+    magnitudes (Contreras Peña et al. 2019), so the two classes' rates use different definitions.
+  - _Massive protostars' interval is unmeasured._ The protostellar rates are Orion's low-mass
+    protostars', carried to 150 M☉. Observed bursts: S255IR NIRS3, about 20 M☉, from 2.9 × 10⁴ to
+    1.6 × 10⁵ L☉ (Caratti o Garatti et al. 2017, Nature Physics 13, 276, main text and Methods);
+    NGC 6334I-MM1, 70 ± 20 from the millimetre continuum (Hunter et al. 2017, ApJL 837, L29,
+    abstract), revised to 16.3 ± 4.4 from the SED and lasting more than 6 years (Hunter et al.
+    2021, ApJL 912, L17, abstract); G358.93−0.03-MM1, 4.7 (+2.1, −1.5) over about 2.5 years
+    (Stecklum et al. 2021, A&A 646, A161, section 5.2). Models give factors of 2.5 to more than 40
+    and about 1.7% of the first 60 kyr in eruptive phases for 100 M☉ cores (Meyer et al. 2019,
+    MNRAS 482, 5459, abstract), against this model's 4.8% of Class 0 and 2.5% of Class I in
+    outburst at every mass, two to three times as much. A rate for massive protostars needs a
+    source.
+  - _Herbig Ae/Be disc-phase outbursts_ (from 2 M☉) are not modelled. Z CMa's FUor is its less
+    massive star, and its Herbig Be star's brightening kept a constant bolometric luminosity
+    (Szeifert et al. 2010, A&A 509, L7, abstract; lead: Elbakyan, Nayakshin and Vorobyov 2021, A&A
+    651, L3).
+  - _EXors and Class II V1647 Ori-type events_ are out of scope: EX Lup's 2008 burst (a factor of
+    2.9, under a year) and V1647 Ori's own events (1966, 2003, 2008; 0.4–1.7, 2.5 and more than 4.3
+    years, Audard et al. 2014, Table 1). A kind of its own, with its own tag, would add them.
+  - _Overlapping outbursts._ Poisson bins are memoryless, so an outburst can start while another
+    runs: with the mean durations above (21 years over both classes in Class 0, 44 in Class I),
+    about 5% of Class 0 outbursts start while another runs and about 9% overlap another one way or
+    the other (2 r E[D] = 9.6%); in Class I, 2.5% and 5%. No refractory rule is added. Lean for
+    T28.g: add the excesses, L = L_q [1 + Σ (Fᵢ(t) − 1)], held at the Eddington luminosity.
+  - _The light curve's simplifications._ Linear in magnitude through the rise and the decay, with
+    no plateau, no colour and no change in radius or temperature; the sources' fading rates are
+    optical (FU Ori's 14 mmag a year in V), used as bolometric, while V1515 Cyg's disc fell from 138
+    to about 45 L☉ (Szabó et al. 2022, abstract), 1.2 bolometric magnitudes, and BBW 76 has stayed
+    near its brightness since at least 1900 (Audard et al. 2014, section 2.3.1).
+  - _No joint distribution of the marks was read._ F, the rise and ḟ (or the decay) are drawn
+    independently; whether brighter outbursts rise more slowly or fade more slowly is not sourced.
+  - _The class is not on the wire._ `StarEventKindDto::FuOrionisOutburst` carries no class or
+    component; T28.g, which builds `StarEvent`, decides whether the wire shows it.
+  - _Classical FUors' progenitor luminosities were not read._ FU Ori, V1057 Cyg, V1515 Cyg, Z CMa
+    and BBW 76 list no quiescent luminosity in Audard et al.'s Table 1 (outburst 200–800 L☉), so
+    the disc factors' top of 300 follows optical amplitudes (about 5 magnitudes, Audard et al.
+    2014, section 2.3.1; V1057 Cyg's 6 in V, Szabó et al. 2021, section 1); no source read gives a
+    bolometric ratio above about 20 (HBC 722).
+  - _Ranges against their sources._ Kept as ruled: V1515 Cyg rose for about 30 years (Szabó et al.
+    2022, section 3.1), beyond the FU Ori rise's 25; V1647 Ori's 2003 event lasted 2.5 years in all
+    (Audard et al. 2014, Table 1), under the V1647 Ori decay's 5-year floor, which OO Ser's fade of
+    about 5 years sits at (Audard et al.'s Table 1 lists OO Ser's duration as more than 16 years);
+    and FU Ori's 14 mmag a year sits at ḟ's floor of 12. The V1647 Ori rise of 0.25–10 years has
+    no source read: Fischer et al.'s Table 1 gives the class no figures, and Zakri et al. give the
+    bursts' durations, not their rises. Audard et al.'s section 2.7 and Table 1
+    disagree for HBC 722 (0.6–0.85 to 4–12 against 0.7–0.85 to 8.7–12 L☉) and V2775 Ori (4.5 to
+    51 against 2–4.5 to 22–28 L☉); the documentation quotes both.
+  - _A star that forms after +H_ has no state at or before +H for the cap, and is left uncapped;
+    no galaxy star is one (every age distribution starts at −H).
 
 ### Asked by rendering plan R06
 
