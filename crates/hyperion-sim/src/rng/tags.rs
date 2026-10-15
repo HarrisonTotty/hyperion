@@ -818,6 +818,18 @@ domain_tags! {
     /// The central black hole's tidal disruptions of stars, behind event tag 0x0201 (P09.T30.a,
     /// `galaxy::features::centre::events::disruptions`).
     CENTRE_EV_TIDAL_DISRUPTION: Event = "centre.ev.tidal_disruption";
+
+    // Plan 06, P06.T28.b: the Vela-like glitch class, under the name and scope the "Plan 06"
+    // heading above lists. Appended here, after plan 09's `centre.ev.tidal_disruption`, because the
+    // macro's order fixes `ALL`.
+
+    /// Whether a neutron star glitches as a Vela-like pulsar (P06.T28.b), keyed by the star's body:
+    /// word 0, one mark decided against the Vela-like share
+    /// (`stellar::events::glitches::is_vela_like_marked`), fixed for the star's life; words 1–7
+    /// are reserved, for a per-star size index or characteristic size. Unlike the draw tags under
+    /// the heading, it is not a member of `stellar::draws::StarDraws`, and word 0 is read whatever
+    /// the kick loop's attempt.
+    STAR_NS_GLITCH_CLASS: Body = "star.ns.glitch_class";
 }
 
 /// Fails compilation if a tag's name or hash is in two registries: the foundation's, the surface
@@ -921,6 +933,7 @@ mod tests {
             STAR_NS_PHASE,
             STAR_BH_SPIN,
             STAR_NEBULA,
+            STAR_NS_GLITCH_CLASS,
         ];
         for tag in star {
             assert_eq!(tag.scope(), crate::rng::TagScope::Body, "{}", tag.name());

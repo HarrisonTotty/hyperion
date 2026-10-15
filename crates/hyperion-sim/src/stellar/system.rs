@@ -569,6 +569,22 @@ impl StarModel {
         Some(clock.phase_at(t))
     }
 
+    /// The age of the star's remnant at the epoch, Julian years since the star died: negative for
+    /// a star that dies after the epoch, and `None` for an object below 0.1 M☉ and for a star
+    /// whose track, built to the segment that holds its age at +H, does not reach its death (a
+    /// death after +H within that segment still gives an age).
+    ///
+    /// It is the age [`StarModel::pulsar_phase_at`] hands to the pulse clock
+    /// ([`NeutronStar::pulse_clock`]), in the same arithmetic, so that a reader of the clock's
+    /// reference state, such as the glitches of P06.T28.b, refers to the same instant.
+    #[must_use]
+    pub fn remnant_age_at_epoch(&self) -> Option<Years> {
+        let stage = self.remnant?;
+        Some(Years::new(
+            self.age_at_epoch.value() - stage.death.age().value(),
+        ))
+    }
+
     /// The planetary nebula the star lights at `t` (P06.T16.b), or `None` if it has not formed
     /// then, lights none, or is below 0.1 M☉, which never reaches the asymptotic giant branch.
     #[must_use]
@@ -2737,6 +2753,41 @@ mod tests {
         let living = model(0);
         assert_eq!(living.pulsar_at(t), None);
         assert_eq!(living.pulsar_phase_at(t), None);
+    }
+
+    /// The remnant's age at the epoch (P06.T28.b) is the signed age the pulse clock is referred
+    /// to: negative for a death after the epoch, `None` for a living star and for an object below
+    /// 0.1 M☉, and the pulse phase built from it is `pulsar_phase_at`'s, bit for bit.
+    #[test]
+    fn the_remnant_age_at_the_epoch_is_the_pulse_clock_s() {
+        let build = |mass: f64, age: f64| {
+            StarModel::new(
+                SolarMasses::new(mass),
+                Composition::SOLAR,
+                StarDraws::median(),
+                Years::new(age),
+            )
+            .unwrap()
+        };
+        let life = build(15.0, 1e9).lifetime().unwrap().value();
+        for since_death in [-500.0, 0.0, 1.1e4] {
+            let star = build(15.0, life + since_death);
+            let age = star.remnant_age_at_epoch().unwrap();
+            assert!((age.value() - since_death).abs() < 1e-6, "{age:?}");
+            let clock = star.neutron_star().unwrap().pulse_clock(age).unwrap();
+            let after = |years: i64| {
+                clock
+                    .reference()
+                    .max(UniverseTime::EPOCH)
+                    .checked_add(Span::from_julian_years(years).unwrap())
+                    .unwrap()
+            };
+            for t in [after(1), after(10), after(400)] {
+                assert_same_bits(clock.phase_at(t), star.pulsar_phase_at(t).unwrap());
+            }
+        }
+        assert_eq!(build(15.0, 1e6).remnant_age_at_epoch(), None);
+        assert_eq!(build(0.05, 1e9).remnant_age_at_epoch(), None);
     }
 
     /// A black hole's detail is its spin from `star.bh.spin` (P06.T22), constant in time.

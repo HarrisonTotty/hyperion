@@ -1603,7 +1603,10 @@ and the references Contreras Peña et al. (2019), Melatos et al. (2008) and Fuen
   look-back. Vela-like (characteristic age 10⁴–10⁵ years and one fixed mark): monotone phase with P
   of about three years scaled by |ν̇|, narrow size distribution near Δν ÷ ν = 10⁻⁶. The frequency
   offset is a sawtooth in the phase's fractional part with zero mean, so spin-down stays the closed
-  form of T21.b.
+  form of T21.b. **T28.b done (lane `23-p06-t28b-glitches`, 2026-10-15; at version 22, no bump: new
+  output on the two glitch tags and the new domain tag `star.ns.glitch_class`, moving nothing
+  existing).** The record is under Risks ("Deviations in T28.b, as built" and "Deferred findings
+  (2026-10-13 rule) (P06.T28.b)").
 - **P06.T28.c Magnetar bursts and giant flares.** Poisson bins at two levels: active episodes (Δ =
   30 days, rate falling with the decaying field), and within an episode short bursts (Δ = 1 hour,
   look-back to the episode's bin); giant flares as a separate rare kind (about one per 50–100 years
@@ -2318,7 +2321,9 @@ Reserved so that later plans move no star:
   (provisional meaning, permanent stream: plan 11 conditions on it); `star.remnant.type`;
   `star.remnant.fallback`; `star.remnant.mass`; `star.kick.score`; `star.kick.mode`;
   `star.kick.low`; `star.kick.direction`; `star.wd.atmosphere`; `star.wd.carbon`; `star.wd.metals`;
-  `star.ns.spin`; `star.ns.field`; `star.ns.geometry`; `star.ns.phase`; `star.bh.spin`;
+  `star.ns.spin`; `star.ns.field`; `star.ns.geometry`; `star.ns.phase`; `star.ns.glitch_class`
+  (P06.T28.b, the Vela-like mark; appended at the registry's end, after plan 09's
+  `centre.ev.tidal_disruption`, because the macro's order fixes `ALL`); `star.bh.spin`;
   `star.nebula`.
 - **Event tags** (plan 01's 16-bit registry, where `0x0001` is its self-test tag). Each is a domain
   tag of scope `Event` and an `event_tags!` entry; an event's marks come from
@@ -4737,6 +4742,285 @@ VariabilityInputs, Variability, VariableKind}` and the summary's variability. T2
     51 against 2–4.5 to 22–28 L☉); the documentation quotes both.
   - _A star that forms after +H_ has no state at or before +H for the cap, and is left uncapped;
     no galaxy star is one (every age distribution starts at −H).
+- **Deviations in T28.b, as built (lane `23-p06-t28b-glitches`, 2026-10-15; at version 22, no
+  bump).** Glitches are `stellar::events::glitches`; nothing reads them yet (T28.g and plan 12's
+  local-event alerts will). Every ruling named below is main's ruling of 2026-10-15.
+  - _API._ `GlitchModel::of(&StarModel) -> Option<GlitchModel<'_>>`, a `RateModel` that borrows the
+    star, with `star`, `reference`, `pulsar` (the `PulsarState` there), `frequency_hz`,
+    `spin_down_hz_per_s`, `characteristic_age`, `small_glitch_rate`, `size_index`,
+    `fractional_size_bounds`, `vela_like_period_years`, `glitches_at(t)` and `meets_vela_like_cuts`.
+    `Glitch` (`Copy`): `id`, `onset`, `end`, `fractional_size`, `size_hz`, `recovery_fraction`,
+    `recovery_time_seconds`, `is_active_at(t)` and `frequency_offset_hz_at(t)`.
+    `glitches_in(star, series, window, out)`, `glitches_active_at(star, series, t, out)` and
+    `glitch(star, series, id)` on `EventSeries::new(seed, tags::STAR_GLITCH, body.into())`.
+    `GlitchCycle::of(&StarModel, Seed, BodyId) -> Option<GlitchCycle<'_>>` (`model`, `series`,
+    `clock`, `noise`, `period`, `frequency_offset_hz_at(t)`) opens both the mark and the star's
+    `star.ev.glitch_cycle` series from the seed and the body, so they cannot come from two
+    universes; the lean, `(star, seed, &series)` with a debug assertion, would let a release build
+    mix two. `LargeGlitch` (`Copy`): `id`, `cycle`, `onset`, `size_hz`, `fractional_size`;
+    `large_glitches_in(star, seed, body, window, out)` and `large_glitch(star, seed, body, cycle)`.
+    `is_vela_like_marked(seed, body)`; `frequency_offset_hz_at(star, seed, body, t)`, both kinds
+    summed (the Crab-like glitches in their listing order, then the sawtooth), for T28.g;
+    `small_glitch_rate(|ν̇|)`, `crab_fractional_size_at(u)` and `large_size_hz_at(u)`; and a
+    constant for every figure: `BIN_SECONDS`, `LOOK_BACK_BINS`, `RECOVERY_SPAN`,
+    `MAX_CHARACTERISTIC_AGE`, `SMALL_GLITCH_RATE_PER_YEAR`, `SMALL_GLITCH_RATE_INDEX`,
+    `RATE_REFERENCE_HZ_PER_S`, `RATE_CAP_HZ_PER_S`, `CRAB_SIZE_INDEX`, `MIN_FRACTIONAL_SIZE`,
+    `MAX_FRACTIONAL_SIZE`, `RECOVERY_FRACTION`, `RECOVERY_TIME_DAYS`, `VELA_LIKE_MIN_AGE`,
+    `VELA_LIKE_MAX_AGE`, `VELA_PERIOD_YEARS`, `VELA_FREQUENCY_HZ`, `VELA_SPIN_DOWN_HZ_PER_S`,
+    `PERIOD_SPIN_DOWN_PRODUCT_HZ`, `LARGE_GLITCHES_PER_SPIN_DOWN`, `VELA_LIKE_SHARE`,
+    `LARGE_LOG_SIZE_MEAN`, `LARGE_LOG_SIZE_SIGMA`, `LARGE_SIZE_TRUNCATION`, `LARGE_MEAN_SIZE_HZ`,
+    `NOISE_AMPLITUDE_CYCLES` and `NOISE_LATTICE_CYCLES`. Frequencies are `f64` in Hz with the unit
+    in the name and Δν ÷ ν is dimensionless; no unit newtype. `system.rs` gains one read-only
+    accessor, `StarModel::remnant_age_at_epoch` (the signed age `pulsar_phase_at` hands the pulse
+    clock, in its arithmetic; a test checks the pulse phase built from it against `pulsar_phase_at`
+    bit for bit, before and after a birth after the epoch); no existing function, `neutron_star.rs`,
+    `draws.rs`, `sim/events/`, `flares.rs`, the summary or the wire changes.
+  - _Who glitches (deviations 2 and 7)._ A star whose neutron star exists by +H, not a magnetar and
+    of τ_c below 10⁷ years, both at the reference. The plan's ages are read as τ_c
+    (`PulsarState::characteristic_age`, from the glitched Ṗ), in which the relations are stated
+    (Espinoza et al. 2011, Table 5: glitches in the τ_c bins up to 1.8 × 10⁴ kyr and none from 6.1 ×
+    10⁴ kyr). The plan's "pulsars" are Fuentes et al.'s rotation-powered ones (their §1; Table 1
+    counts 898 of them and no magnetar; Fig. 2's fits leave magnetar glitches out), so magnetars
+    glitch in neither kind; T21's 1% reversal below the |ν̇| limit still covers them (ruling 110.3).
+    Radio visibility is not asked. A star whose track runs past +H can report a death after it; its
+    neutron star is not the window's, and `GlitchModel::of` refuses a reference after +H.
+  - _Time (deviation 7)._ The reference is `NeutronStar::pulse_clock`'s: the epoch for a neutron
+    star that exists then, and its birth for one born after the epoch, so the glitch clock and
+    T21.d's pulse clock agree. Its `PulsarState` gives ν = 1 ÷ P, |ν̇| = Ṗ ÷ P², τ_c and the
+    magnetar flag, read once; a star then glitches wherever `pulsar_at(t)` is `Some` (tested as
+    `remnant_age_at(t)`, the same condition without building the state), at the reference's rate and
+    with its ν, and never crosses a cut inside the horizon.
+  - _The Crab-like rate (deviation 1)._ Poisson bins of 2,592,000 s (30 days). R(|ν̇|) = R₁₂ × (|ν̇|
+    ÷ 10⁻¹² Hz s⁻¹)^b, the Poisson maximum-likelihood fit to N_t − N_ℓ of Fuentes et al.'s Table 1
+    (§4.1) against Σ T_i over all sixteen bins at their central log |ν̇|, refitted by a unit test to
+    10⁻³: R₁₂ = 0.05639 a year (σ of ln R₁₂ 0.058), b = 0.3718 ± 0.0155, deviance 63.7 on 14 degrees
+    of freedom (overdispersed: observed against expected from log |ν̇| = −16.75 to −9.25, 0/0.11,
+    0/0.64, 0/2.80, 3/8.65, 11/14.3, 25/16.2, 35/26.3, 28/33.0, 23/38.9, 34/33.9, 66/34.4, 41/38.3,
+    6/10.9, 4/11.1, 2/6.19, 25/27.3); built as 0.0564 and 0.372. Not the plan's "proportional to
+    |ν̇|", which is Fuentes et al.'s large-glitch law (§4.2, Fig. 6: Ṅ_ℓ ÷ |ν̇| = (4.2 ± 0.5) × 10²
+    Hz⁻¹) that the Vela-like kind carries; Espinoza et al.'s ⟨Ṅ_g⟩ ∝ |ν̇|^0.47(4) (§5.2, Table 4,
+    Fig. 10) counts large glitches too, and Basu et al.'s 76 |ν̇|^0.187 (§4.3) is fitted to pulsars
+    glitching more than 0.05 times a year (Fig. 10's caption). The same law runs on above
+    `GLITCH_NU_DOT_LIMIT` (Fuentes et al. reject the large-glitch trend there, §4.2 and Table 2, and
+    their bins 14–16 are in the fit), held at |ν̇| = 10⁻⁹ Hz s⁻¹, the top of Table 1's last bin:
+    0.737 a year (0.736 at the unrounded fit), 0.0605 a bin, which a debug assertion keeps under 64.
+    `bound` is the constant.
+  - _Sizes, within the plan._ The plan's "a power law" is the Crab's of Melatos et al. (eq. 1–2,
+    Table 3: a = 1.2, 1σ 1.1–1.4; also the median of Table 3's seven aperiodic glitchers and §6's "a
+    ≈ 1.2 for the youngest pulsars") on the Crab's own domain, read from its 26 rows of Table 1 (23
+    with a size, three "n/a"): 1.1 × 10⁻⁹ (MJD 43023 and 52587.84) to 2.1 × 10⁻⁷ (MJD 53067.059).
+    One law in x for every star, so Δν = x ν scales with ν and stays below 10 μHz while ν is below
+    47.6 Hz. ⟨x⟩ = 2.782 × 10⁻⁸, median 7.86 × 10⁻⁹. Inverse transform from word 0 of the event's
+    stream; a K–S test checks a millennium of a young pulsar's sizes.
+  - _Recovery and look-back, within the plan._ A glitch's offset Δt after its onset is Δν × [Q
+    (e^(−Δt ÷ τ_d) − e^(−T ÷ τ_d)) ÷ (1 − e^(−T ÷ τ_d)) + (1 − Q)(1 − Δt ÷ T)] for 0 ≤ Δt < T and
+    exactly 0 from T on (a debug assertion), T = 1,218 bins = 3,157,056,000 s (100.04 years). Q =
+    0.835 and τ_d = 3.1 days are the medians of the six single-exponential recoveries Wong, Backer
+    and Lyne (2001) fitted to the Crab's glitches of Δν ÷ ν = 2.1–31.9 × 10⁻⁹ (Q 0.68–0.9, τ_d
+    2.0–10.3 days), as Yu et al. (2013, MNRAS 429, 688, Table A4) list them; Lyne et al. (2015,
+    MNRAS 446, 857, §3) describe the Crab's steps as "followed by a nearly complete recovery within
+    about 20 days" (the model keeps the lasting 16.5% then) and tabulate no Q. Yu et al. tabulate no
+    Q against τ_c (their Fig. 16c is a scatter), so one pair. The linear take-back of the lasting
+    part is the model's own rule, stated in the doc: it makes each glitch's net spin-up zero, so the
+    kind adds nothing to the mean spin-down, whose glitch activity is T21.b's (the factor 1 − 0.01
+    below the |ν̇| limit, none above it, where nothing is counted twice). The offset's own mean in ν
+    is not zero: R ⟨x⟩ ν [Q τ_d + (1 − Q) T ÷ 2] = R ⟨x⟩ ν × 8.26 years, 1.18 × 10⁻⁷ ν (3.5 μHz) at
+    the Crab's |ν̇|, 1.69 × 10⁻⁷ ν at the cap and 0.40 μHz for a Vela-like star at Vela's; the plan
+    asks a zero mean of the sawtooth alone, and subtracting the constant would leave an offset where
+    no glitch is active. `glitches_active_at` lists 1,219 bins and keeps the glitches whose offset
+    is not yet 0: 68–98 µs a call (measured with a timing harness since taken out, opt-level 2, the
+    shared laptop at load 3–4), far under 1 ms.
+  - _The Vela-like kind (deviations 3, 4 and 5)._ A star of the Crab-like kind with τ_c in [10⁴,
+    10⁵) years and |ν̇| below `GLITCH_NU_DOT_LIMIT` at the reference (the |ν̇| and magnetar
+    conditions are deviation 4), and the plan's "one fixed mark" below `VELA_LIKE_SHARE`: word 0 of
+    the new domain tag `star.ns.glitch_class` (scope `Body`, keyed by the star's body, opened by
+    `Stream::open` and decided by `Threshold::from_probability`; words 1–7 reserved), not a
+    `StarDraws` member, read whatever the kick attempt, appended at the registry's end after plan
+    09's `centre.ev.tidal_disruption` (deviation 5). `VELA_LIKE_SHARE` = 420 Hz⁻¹ × C = 0.6478 (±
+    0.077), recomputed by a unit test to 10⁻³: the share at which the Vela-like stars' large
+    glitches add up to Fuentes et al.'s population rate (§4.2, Fig. 6). One large glitch a cycle,
+    none skipped, on a `LinearClock` from the reference of period P = C ÷ |ν̇| (at least 1.546
+    years), C = P_Vela × |ν̇_Vela| = 1.54247 × 10⁻³ Hz. P_Vela = 3.12 years, within the plan's
+    "about three years": the mean of the twelve intervals between Vela's 13 glitches of Δν ≥ 10 μHz
+    in Melatos et al.'s Table 1, MJD 40280 to 53959.93 (2.497, 4.082, 2.765, 3.272, 0.832, 2.916,
+    3.457, 2.567, 5.235, 3.258, 4.478 and 2.094 years: mean 3.1211, sd 1.150, coefficient of
+    variation 0.368, lag-1 correlation −0.24), refitted by a unit test to 10⁻³. Vela's ν =
+    11.1946499395 Hz and |ν̇| = 1.5666 × 10⁻¹¹ Hz s⁻¹ are the ATNF pulsar catalogue's, version 2.9.0
+    (Manchester et al. 2005). Checks: (1) Melatos et al.'s Δt_c = 2.8 ± 0.1 years (Table 6) is the
+    δ-component of a fit to all of Vela's waiting times, small glitches included; (2) at PSR
+    J0537−6910's |ν̇| (1.9922720 × 10⁻¹⁰, ATNF 2.9.0) the law gives 0.2453 years against Table 6's
+    0.3 ± 0.1; (3) Fuentes et al.'s interval at Vela's |ν̇|, 1 ÷ (420 Hz⁻¹ |ν̇|) = 4.816 years, is P
+    ÷ `VELA_LIKE_SHARE`.
+  - _The noise, a choice left to the build._ `MonotonePhase::new(0.087, 1, J)`, J =
+    `octaves_to_span(1, cycles in the source horizon)` (18 at Vela's period), slope bound 0.8961,
+    noise bound 107 cycles at J = 18. The slope bound caps the intervals' scatter: over 300 years of
+    182 Vela-like series of one star the coefficient of variation is 0.0925 (lag-1 correlation
+    +0.20), against Vela's 0.37 (−0.24). At the same bound a coarser lattice reaches at most 0.11,
+    at lag-1 correlations of 0.54 (ℓ = 2, a = 0.174) to 0.98 (ℓ = 16): a slowly wandering clock, not
+    scattered intervals, so ℓ = 1 is kept (a deferred finding). The phase's fraction at the
+    reference is uniform over 2,600 Vela-like series (K–S at α = 10⁻³), so the stars do not glitch
+    together at the epoch.
+  - _Sizes of the Vela-like kind (deviation 3)._ log₁₀(Δν ÷ μHz) ~ N(1.38, 0.13²) truncated at ±4σ
+    (7.24–79.4 μHz), Fuentes et al.'s Table A.1 (the three-Gaussian model's third component, weight
+    0.17; the 2- and 4-Gaussian models give 1.37–1.38 and 0.13, and Fig. 2's axis is log Δν in μHz),
+    from one uniform at word 0 of the cycle's own stream through `math::normal_quantile`, whatever ν
+    or |ν̇|; its closed-form mean, `LARGE_MEAN_SIZE_HZ`, is 25.086 μHz (pinned to 10⁻¹⁴). The plan's
+    "near Δν ÷ ν = 10⁻⁶" is replaced: the narrow component is narrow in Δν (Fuentes et al. §3 find
+    "two broader peaks" in Δν ÷ ν), and its median reaches 10⁻⁶ in Δν ÷ ν only at ν = 24 Hz (2.14 ×
+    10⁻⁶ at Vela's ν). Checks: Vela's 13 large glitches give log₁₀ Δν = 1.379 ± 0.118; Melatos et
+    al.'s (Δν ÷ ν)_c = 2.5 × 10⁻⁶ (Table 4) is 28.0 μHz at Vela's ν; Espinoza et al.'s peak near 25
+    μHz (§5.3.1, Fig. 13); Basu et al.'s narrow component at 18 μHz (§4.1, Fig. 4).
+  - _The sawtooth (deviation 6)._ In cycle n of Φ at t, at fraction f, Δνₙ (1 − f) − ⟨Δν⟩ ÷ 2, with
+    Δνₙ from cycle n's event stream at word 0 (opened directly, as `CycleEvent::marks` would give
+    it, without the bisection), and 0 where the star is not a neutron star (a star born part-way
+    through a cycle starts at that cycle's sawtooth). Its mean is zero over cycles, not within each:
+    cycle n's is (Δνₙ − ⟨Δν⟩) ÷ 2, which does not accumulate. Its slope is −Δνₙ ÷ Pₙ, on average
+    −⟨Δν⟩ ÷ P = −0.0163 |ν̇|, against T21.b's 0.01 |ν̇| reversal at Vela: a Vela-like star returns
+    more than T21's 1%, and the share brings the population to 1.05%. Tested at the listed time ± 1
+    s over 919 glitches in 3,000 years: the jump is Δνₙ to 10⁻⁶ and the value before it −⟨Δν⟩ ÷ 2;
+    the sizes pass K–S against the truncated law; the mean size is 25.078 μHz and the time average
+    of the offset −0.054 μHz (both within their errors of 25.086 and 0).
+  - _Both kinds on one star._ A Vela-like star also has the Crab-like kind (Melatos et al. §5.2: the
+    quasiperiodic component coexists with the Poisson one).
+  - _Left to T28.g._ Both kinds become `StarEventKind::Glitch`. A Crab-like glitch lasts
+    `RECOVERY_SPAN`; a Vela-like glitch has no end of its own, its sawtooth running to cycle n + 1's
+    onset (`large_glitch(…, n + 1)`, no history needed), so `active_at` and the wire's `duration_s`
+    need a rule for it. `frequency_offset_hz_at` builds the glitch model twice (about 1.6 µs each),
+    which T28.g can fold if it calls it per summary.
+  - _Word layouts._ A Crab-like glitch: word 0 of `event_stream(k, j)`, x by inverse transform. A
+    Vela-like glitch: word 0 of `event_stream(n, 0)`, Δν by inverse transform.
+    `star.ns.glitch_class`: word 0 the mark, words 1–7 reserved. Nothing else is drawn; later
+    scatter takes words 1, 2, … in order.
+  - _Sanity checks._ The Crab-like rate at the Crab's |ν̇| (3.77535 × 10⁻¹⁰, ATNF 2.9.0) is 0.513 a
+    year, against Fuentes et al.'s bin 16 (25 small glitches in 46 years, 0.543), Espinoza et al.'s
+    Table 4 (0.6(1)) and Melatos et al.'s Table 5 (λ = 0.91, 0.57–1.3); bins 14 and 15 expect 11.1
+    and 6.2 small glitches against 4 and 2 observed. The Crab's mean activity, rate × ν × ⟨x⟩, is
+    1.35 × 10⁻¹⁴ Hz s⁻¹ against Fuentes et al.'s 1.1(5) × 10⁻¹⁴ (§5.1). The period at Vela's |ν̇| is
+    3.12 years and at J0537−6910's 0.245, against Melatos et al.'s Table 6 (2.8 ± 0.1, 0.3 ± 0.1)
+    and Fuentes et al.'s 4.82 years. A Vela-like star at Vela's parameters glitches 0.157 (small) +
+    0.3205 (large) = 0.477 times a year, against Vela's 17 in 37.84 years (0.449; Melatos et al.
+    Tables 1 and 2), 4 of them small (0.106 a year); its activity, ⟨Δν⟩ ÷ P, is 1.63% of |ν̇|,
+    against Basu et al.'s 1.8 ± 0.3% for pulsars that glitch (§4.4) and Vela's own 1.78% over
+    Melatos et al.'s span. Per half decade of |ν̇|, over the slow test's stars (both kinds, the
+    Vela-like at the share; the 3,000 young stars, which populate −13.5 to −10.5): the population's
+    activity ÷ |ν̇| is 0.28%, 0.48%, 0.88%, 0.95%, 0.33% and 0.08% from log |ν̇| = −13.5 to −10.5
+    (from −12.5 to −11.5 the steady sample gives 0.70% and 0.76%), against Fuentes et al.'s 1.0 ±
+    0.1% (§4.2) and T21's 1%: within a factor of 1.1 at −12.5 to −11.5, short by 2–12 at both ends,
+    where τ_c leaves 10⁴–10⁵ years (a deferred finding). The total rate a star a year against
+    Espinoza et al.'s ⟨Ṅ_g⟩ (Table 4), steady sample, from log |ν̇| = −15.5 to −11.5: 0.0006,
+    0.0033, 0.0076, 0.0123, 0.0191, 0.0291, 0.0489 and 0.078 against 0.001, 0.003, 0.012, 0.016,
+    0.027, 0.04, 0.08 and 0.29 (factors 0.6, 1.1, 0.63, 0.77, 0.71, 0.73, 0.61, 0.27); the young
+    sample from −11.5 to −9.5, 0.128, 0.179, 0.250 and 0.336 against 0.24, 0.3, 0.2 and 1.6 (the
+    last Espinoza et al.'s J0537−6910 and Crab). The slope of log rate against log |ν̇| is 0.39 over
+    the young sample's half decades and 0.92 over the steady sample's, whose low bins hold many
+    stars of τ_c ≥ 10⁷ years that never glitch, against Espinoza et al.'s 0.47(4) (Fig. 10). The
+    Crab-like kind's mean size and activity at the Table 4 rows up to 10⁻¹³·⁵ Hz s⁻¹ (log ⟨|ν̇|⟩ =
+    −0.22, 0.25, 0.77 and 1.24 in 10⁻¹⁵): mean Δν 0.0092, 0.023, 0.038 and 0.048 μHz against ΣΔν ÷
+    N_g = 0.00045, 0.00043, 0.047 and 0.46 μHz (factors 20, 54, 0.81, 0.10; 1.03 against the 0.046
+    μHz that the printed ν̇_glitch implies at 1.24), and activity 0.00018, 0.0024, 0.0091 and 0.0186
+    × 10⁻¹⁵ Hz s⁻¹ against ν̇_glitch = 0.00001, 0.00005, 0.017 and 0.024 as printed (factors 18, 48,
+    0.54, 0.78; 0.075 against the 0.2465 of ΣΔν ÷ Σ T_i at 1.24). Espinoza et al.'s lowest two rows
+    hold 2 and 7 glitches.
+  - _Tests._ `cargo test -p hyperion-sim stellar::events`: 35 tests and 2 ignored (19 and one
+    ignored of them this task's; and `stellar::system`'s test of `remnant_age_at_epoch`), and the
+    two doctests (`GlitchModel`, and `glitches_in`: a Vela-like pulsar's glitches of both kinds over
+    thirty years, one regenerated from its ID): the refits (R₁₂ and b, P_Vela, the share, C and the
+    checks); the two size laws' domains, means and medians; who glitches (a living star, a white
+    dwarf, a black hole, a magnetar, a pulsar of τ_c ≥ 10⁷ years and a neutron star born after +H
+    have no model; a Crab-like pulsar, one of τ_c 10⁶ years, one above the |ν̇| limit at τ_c 10⁴
+    years, a magnetar and an unmarked body have no cycle); the bound over 7 birth periods × 9 fields
+    × 41 ages of the law and 60 star models' probes (both sides of the limit, the cap, newborns);
+    the recovery's ends, continuity, monotony and lasting part; `glitch(id)` over 600 bins about a
+    newborn's birth (rejected candidates, numbers beyond the count, foreign IDs, a magnetar);
+    `large_glitch` and a newborn Vela-like star's first cycle; partitions in any order for both
+    kinds, and on threads (compiled out on wasm32-wasip1); `glitches_active_at` against the listing;
+    the +900-year no-history test for both stars and the summed offset; the sawtooth; the mark (the
+    share over 2 × 10⁴ bodies by χ², the same mark for two references, the seed's own stream). The
+    golden `stellar/glitches` (337 lines, header 22) pins the marks of 64 bodies, a young Crab-like
+    pulsar above the |ν̇| limit, the marked Vela-like pulsar, a pulsar of τ_c 1.015 × 10⁶ years over
+    300 years, a high-field pulsar (9.9 × 10¹³ G, not a magnetar at the epoch), a magnetar, which
+    has no model, and a Vela-like pulsar born 500 years after the epoch, over its birth: their
+    references, rates, periods, size laws and noise, each glitch's ID, onset, size and offsets, and
+    the summed offset at seven instants. `tags.golden` gains its one line at the end. The slow test,
+    `the_mean_counts_over_10_000_massive_stars_match_the_rate_integrals` (`#[ignore]`, 28 s under
+    `slow-test`, capped at 6 GB): T31's `sample_inputs` of band E (8–150 M☉) of the young thin disc
+    at the solar circle, with their draws and composition, each evolved once to its lifetime and, if
+    it leaves a neutron star, rebuilt at the lifetime plus a uniform age, a steady birth rate;
+    window 30 years from the epoch. 10⁴ stars of neutron-star ages to 10⁷ years: 6,310 neutron
+    stars, 2,012 glitching, 3 magnetars; Crab-like glitches expected 559.9, counted 583, Poisson
+    interval 484–639 at α = 10⁻³; only 25 meet the Vela-like cuts (15 marked, 6 cycles against 6.0).
+    So 3,000 more, of ages to 10⁵ years: 1,943 neutron stars, 1,867 glitching, 61 magnetars;
+    Crab-like expected 2,282.9, counted 2,343, interval 2,127–2,442; 974 meet the cuts and 624 are
+    marked (0.641, χ² against 0.648 passes); their cycles number 299 against Σ W ÷ P = 292.6, within
+    the summed bound of twice the noise's bound per star (25,467, loose by construction), and the
+    mean deviation per star, 0.010 ± 0.41 (standard error 0.016), carries the test. All are born
+    before the epoch, so the share born after it was not measured. Listing times (a harness since
+    taken out, slow-test profile): the 2,012 glitching stars' 30 years took 78 ms, the 15 Vela-like
+    stars' cycles 1.9 ms; `glitches_in` and `large_glitches_in` over 30 years for the Vela-like
+    pulsar of the golden, 258 µs.
+- **Deferred findings (2026-10-13 rule) (P06.T28.b).** Recorded and deferred: each leaves the
+  algorithm and every contract as they are. The leads are unread unless said.
+  - _Millisecond pulsars._ The binary lane's recycled pulsars are plan 11's and glitch in neither
+    kind here; Basu et al. (§4.1, read) cite two millisecond-pulsar glitches, Δν ÷ ν = 8(1) × 10⁻¹²
+    and 2.5(1) × 10⁻¹².
+  - _Magnetar glitches._ Excluded from both kinds (deviation 2). They have large Δν ÷ ν but low to
+    intermediate Δν (Espinoza et al. §5.3.1, read): the Crab-like law would give a 0.1–0.5 Hz
+    magnetar 10⁻⁴–0.1 μHz against the 0.03–6.1 μHz of Espinoza et al.'s Table 1 magnetar rows. Lead:
+    Dib and Kaspi 2014 (ApJ 784, 37; cited by Fuentes et al. §2: 11 glitches in 5 magnetars over
+    about 16 years each), for T28.c's active episodes or a later task.
+  - _The reference's side._ The rate, ν and the cuts are read at the reference, so a neutron star
+    born long before the epoch glitches at its epoch rate throughout the horizon, and a pulsar that
+    crosses τ_c = 10⁴ or 10⁵ years or the |ν̇| limit inside it keeps its class. A newborn's rate is
+    its birth rate for the whole window.
+  - _A per-star reversal._ T21 gives every star 1% (ruling 110.3, kept); a reversal of about 1.6%
+    for Vela-like stars and under 0.4% for the rest would match both Fuentes et al.'s 0.010 for the
+    population and Basu et al.'s 1.8% for pulsars that glitch. It moves T21's output: a later task,
+    with a bump.
+  - _Large glitches outside τ_c 10⁴–10⁵ years._ Fuentes et al. (§5, read) see no reason to reject
+    that every neutron star eventually glitches large; their bins 8–9 hold 4 of the 66 large
+    glitches with −13.5 < log |ν̇| < −10.5. PSR J0537−6910 (τ_c 4.9 kyr, above the |ν̇| limit) has
+    no Vela-like cycle here, though Fuentes et al. find it on the trend (§5.1) and Melatos et al.
+    fit it a quasiperiodic component (Table 6). In the slow test the population's activity is 0.28%
+    of |ν̇| at log |ν̇| = −13.5 to −13 and 0.08% at −11 to −10.5, against Fuentes et al.'s 1.0%
+    throughout −13.5 to −10.5; it reaches 0.88–0.95% only at −12.5 to −11.5.
+  - _Per-pulsar size laws._ One Crab law for every star, where Melatos et al.'s indices run from
+    −0.13 to 2.4 (§6) with each pulsar's own bounds; and one Vela-like size law, where words 1–7 of
+    `star.ns.glitch_class` could carry a per-star index or characteristic size. One law in x makes
+    slow pulsars' small glitches small in Δν: at log |ν̇| = −13.76 the slow test's mean Crab-like Δν
+    is 0.048 μHz, against Fuentes et al.'s bin 7 (35 small glitches of 9.78 μHz in all, 0.28 μHz
+    each) and Espinoza et al.'s 0.46 μHz (ΣΔν ÷ N_g, Table 4).
+  - _The size floor against detection._ For ν below about 9 Hz the Crab law's floor, 1.1 × 10⁻⁹ ν,
+    lies below Fuentes et al.'s detection limit of about 10⁻² μHz (§3), so a survey like theirs
+    would miss up to about half the small glitches of slow pulsars, while the rate is fitted to the
+    glitches they found.
+  - _The Crab-like offset's mean in ν._ Each Crab-like glitch is taken back whole, so its net ν̇ is
+    zero, but its offset in ν is never negative and averages R ⟨x⟩ ν × 8.26 years (1.2 × 10⁻⁷ ν at
+    the Crab), where the sawtooth's mean is zero. Lean: keep it, since ν̇ is unaffected and a
+    subtracted constant would leave an offset where no glitch is active; T28.g decides whether the
+    summary shows ν with it.
+  - _Overdispersion._ One power law fits Table 1's small-glitch counts at a deviance of 63.7 on 14
+    degrees of freedom (bin 11: 66 against 34.4; bin 9: 23 against 38.9).
+  - _Interval scatter._ The slope bound of 0.9 caps the Vela-like intervals' coefficient of
+    variation at 0.093 (0.11 with a coarser, strongly correlated lattice) against Vela's 0.37.
+    Reaching it needs a phase construction other than T27's monotone noise, or a slope bound above
+    0.9, which lets events change order.
+  - _Vela's short recoveries._ The Vela-like steps do not recover: Yu et al.'s Table A4 lists Q of
+    10⁻³–10⁻¹ and τ_d of 0.5–350 days for Vela's glitches, which the sawtooth does not model.
+  - _Per-glitch recovery._ One (Q, τ_d) for every Crab-like glitch, where Yu et al. find Q bimodal
+    (§5.2.1, Fig. 15: a broad peak near 0.01 and another near 1, with no recovery detected in many
+    glitches) and τ_d growing with τ_c (Fig. 16d); a later task could draw them from words 1–2 of
+    each glitch's marks.
+  - _The τ_c cut._ Espinoza et al.'s Table 5 has 3 glitches in the bin of mean τ_c 1.8 × 10⁴ kyr (18
+    Myr), above the cut, and their abstract puts the edge at 20 Myr.
+  - _The sources' misprints._ Basu et al.'s Fig. 14 caption prints 0.0018(3) for the text's 0.018
+    (§4.4). Espinoza et al.'s Table 4 rows at log⟨|ν̇|⟩ = 1.24 and 1.73 print ΣΔν = 13 and 17 μHz
+    with ν̇_glitch = 0.024(1) and 0.051(2) × 10⁻¹⁵ Hz s⁻¹, which disagree tenfold. The misprint is
+    in ν̇_glitch, not ΣΔν: ΣΔν ÷ Σ T_i gives 0.247 and 0.522, as it gives the printed ν̇_glitch on
+    every other row; the arXiv source (1102.1743) keeps the unrounded column in comments, 0.244 ±
+    0.009 and 0.514 ± 0.02, whose errors moved with the values; and Fuentes et al.'s bin 7 at the
+    same |ν̇| (§4.2, read: small glitches of 9.78 μHz in 2,083 years) is 0.149. The arXiv PDF and,
+    by the review's reading, the journal's HTML print the same; the journal's PDF was not readable.
+    The sanity checks above compare the model with both readings.
 
 ### Asked by rendering plan R06
 
