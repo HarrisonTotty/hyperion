@@ -4360,7 +4360,8 @@ By the composition ruling (decision-composition):
 
 By the heat-capacity ruling (`science-r08-gases-2.md` §1, 2026-10-10), the client keeps no
 thermodynamics of its own. P14.T24.e integrates P14.T49.b's c_p(T) and publishes the adiabat as
-nodes, in plan 14's 22 → 23 batch, and nothing R08 has built moves until then:
+nodes, in plan 14's 23 → 24 batch (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15),
+and nothing R08 has built moves until then:
 
 - `TemperatureProfile.radiativeConvective` takes the published nodes, with a T3.a follow-up; the
   existing closed form ∫ T dln p applies per segment.
@@ -5017,8 +5018,9 @@ JSON import, and fails if:
 - `GAS_MOLAR_MASS_G_PER_MOL` differs from the fixture for a shared key by more than 10⁻¹². It has
   no c_p row: `GAS_HEAT_CAPACITY` retires through R08.T10.a, and the fixture's c_p ÷ R becomes
   P14.T49.b's value at 298.15 K, for display and cross-check only (`science-r08-gases-2.md` §1.4);
-- once P14.T54.a ships τ(550), the client's τ(550) for the protocol fixture's modes differs from
-  the record's by more than 1%.
+- once P14.T54.b ships τ(550), with P14.T24.c's aerosols and P14.T49.e's `condensate_extinction`,
+  both wired at 24 (decision-bump-plan-after-22, 2026-10-14; updated 2026-10-15), the client's
+  τ(550) for the protocol fixture's modes differs from the record's by more than 1%.
 
 Acceptance: `pnpm --filter hyperion exec vitest run view/atmosphere/parity`.
 

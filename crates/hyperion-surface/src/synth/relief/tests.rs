@@ -2116,3 +2116,168 @@ fn a_full_belt_s_point_variance_is_its_sampled_variance() {
         "sampled {sampled} m², expected {expected} m²"
     );
 }
+
+// The fused pass (R09.T8's follow-up): the base elevation and the three styles from one walk of the
+// stencils, each value's bits its own interpolation's.
+
+/// The bits of a style's three components, values and gradients.
+fn style_bits(style: &StyleSample) -> Vec<u64> {
+    [style.amplitude, style.belt, style.shear]
+        .into_iter()
+        .flat_map(|s| [s.value, s.gradient[0], s.gradient[1], s.gradient[2]])
+        .map(bits)
+        .collect()
+}
+
+/// The bits of a sample's height and gradient.
+fn height_bits(s: HeightSample) -> [u64; 4] {
+    [
+        bits(s.height_m),
+        bits(s.gradient[0]),
+        bits(s.gradient[1]),
+        bits(s.gradient[2]),
+    ]
+}
+
+/// Points of `field` where the interpolant blends faces and reads ghost cells, and elsewhere: a
+/// 5 × 5 grid (3 × 3 on the browser target, `crate::test_sizes`) over each corner cell of every
+/// face and a cell halfway along each of its edges, its lines on the cells' edges included, and
+/// `random` uniform points.
+fn seam_points(field: &CoarseField, seed: u64, random: usize) -> Vec<[f64; 3]> {
+    let level = field.header().level().get();
+    let last = (1_u32 << level) - 1;
+    let mut points = uniform_points(seed, random);
+    let grid = per_target(&[0.0, 0.25, 0.5, 0.75, 1.0][..], &[0.0, 0.5, 1.0][..]);
+    for face in crate::cube::Face::ALL {
+        for (i, j) in [
+            (0, 0),
+            (last, 0),
+            (0, last),
+            (last, last),
+            (last / 2, 0),
+            (0, last / 2),
+            (last, last / 2),
+            (last / 2, last),
+        ] {
+            let cell = PatchKey::new(face, level, i, j).unwrap();
+            for &x in grid {
+                for &y in grid {
+                    points.push(crate::synth::test_support::point_in(cell, x, y));
+                }
+            }
+        }
+    }
+    points
+}
+
+/// A view of `inner` that counts the cells asked of it, each time.
+struct Counting<'a> {
+    inner: &'a CoarseField,
+    reads: std::cell::Cell<usize>,
+}
+
+impl FieldView for Counting<'_> {
+    fn header(&self) -> &FieldHeader {
+        self.inner.header()
+    }
+
+    fn cell(&self, cell: PatchKey) -> Option<&SynthesisCell> {
+        self.reads.set(self.reads.get() + 1);
+        self.inner.cell(cell)
+    }
+
+    fn climate(&self, cell: PatchKey) -> Option<&ClimateCell> {
+        self.inner.climate(cell)
+    }
+
+    fn craters_reaching(&self, cell: PatchKey) -> impl Iterator<Item = &CoarseCrater> + '_ {
+        self.inner.craters_reaching(cell)
+    }
+}
+
+#[test]
+fn the_fused_pass_gives_each_value_the_bits_of_its_own_interpolation() {
+    for &kind in SyntheticWorld::ALL {
+        let field = world(kind);
+        // One memo across every point, spread over the sphere, so that its slots are replaced as
+        // well as read again.
+        let mut memo = interp::ControlMemo::new();
+        let mut points = 0;
+        let random = per_target(300, 40);
+        for (k, dir) in seam_points(field, 0x6675_7365, random)
+            .into_iter()
+            .enumerate()
+        {
+            let base = height_bits(interp::base_elevation(field, dir).unwrap());
+            let alone = style_bits(&style_at(field, dir));
+            let (fresh_base, fresh_style) = base_and_style(field, dir, &mut Fresh).unwrap();
+            assert_eq!(height_bits(fresh_base), base, "{kind:?} at {dir:?}");
+            assert_eq!(style_bits(&fresh_style), alone, "{kind:?} at {dir:?}");
+            let (kept_base, kept_style) = base_and_style(field, dir, &mut memo).unwrap();
+            assert_eq!(height_bits(kept_base), base, "{kind:?} at {dir:?}, kept");
+            assert_eq!(style_bits(&kept_style), alone, "{kind:?} at {dir:?}, kept");
+            let styled = styles(field, dir).unwrap();
+            assert_eq!(style_bits(&styled), alone, "{kind:?} at {dir:?}, styles");
+            // Asked again, it reads what the memo kept, less any control point another of its own
+            // displaced from a shared slot.
+            let (again, _) = base_and_style(field, dir, &mut memo).unwrap();
+            assert_eq!(height_bits(again), base, "{kind:?} at {dir:?}, again");
+            if k % 10 == 0 {
+                let counting = Counting {
+                    inner: field,
+                    reads: std::cell::Cell::new(0),
+                };
+                let mut own = interp::ControlMemo::new();
+                base_and_style(&counting, dir, &mut own).unwrap();
+                let first = counting.reads.replace(0);
+                base_and_style(&counting, dir, &mut own).unwrap();
+                let second = counting.reads.get();
+                assert!(
+                    second < first,
+                    "{kind:?} at {dir:?}: {second} reads again against {first} at first"
+                );
+            }
+            points += 1;
+        }
+        assert!(points >= random + 6 * 8 * 9, "{kind:?}: {points} points");
+    }
+}
+
+#[test]
+fn the_fused_pass_refuses_the_cell_the_base_elevation_refuses() {
+    // At the seams of the Earth-like world and at random: each point's reads less one, through a
+    // fresh pass and through a memo the view's queries nearby filled first.
+    let field = earth();
+    let points = seam_points(field, 0x7265_6675, 40);
+    for (k, &dir) in points.iter().enumerate().step_by(per_target(7, 14)) {
+        let reading = Reading {
+            inner: field,
+            reads: RefCell::new(BTreeSet::new()),
+        };
+        interp::base_elevation(&reading, dir).unwrap();
+        let mut cells = reading.reads.take();
+        let missing = *cells.iter().nth(k % cells.len()).unwrap();
+        cells.remove(&missing);
+        let partial = Holding {
+            inner: field,
+            held: cells,
+        };
+        // Every other cell it reads is held, so the cell left out is the one refused.
+        let refused = interp::base_elevation(&partial, dir).err().map(|e| e.cell);
+        assert_eq!(refused, Some(missing), "{dir:?}");
+        let mut memo = interp::ControlMemo::new();
+        let seed = 0x6e65_6172 + u64::try_from(k).unwrap();
+        for near in points_near(seed, dir, 1e-3, 8) {
+            // Answered or refused, a query nearby fills the memo with what it read whole.
+            let _filled = base_and_style(&partial, near, &mut memo);
+        }
+        for result in [
+            base_and_style(&partial, dir, &mut Fresh),
+            base_and_style(&partial, dir, &mut memo),
+        ] {
+            assert_eq!(result.err().map(|e| e.cell), refused, "{dir:?}");
+        }
+        let styled = styles(&partial, dir).err().map(|e| e.cell);
+        assert_eq!(styled, refused, "{dir:?}, styles");
+    }
+}

@@ -417,6 +417,116 @@ fn a_baked_patch_is_its_vertices_point_queries_bit_for_bit() {
 }
 
 #[test]
+fn a_bake_s_shared_control_points_change_no_later_query() {
+    // A cache whose bake covered a patch in a cube corner's cell, where the stencils read ghosts,
+    // after a bake of another world's patch, bakes it and answers point queries there, on face
+    // edges and elsewhere, and the other world's, as a fresh cache does (R09.T8's follow-up, the
+    // fused pass's memo).
+    let earth = world(SyntheticWorld::EarthLike);
+    let moon = world(SyntheticWorld::MoonLike);
+    let synth = Synthesiser::new(earth, SEED);
+    let other = Synthesiser::new(moon, SEED);
+    let coarse = earth.header().level().get();
+    let level = BandLevel::new(coarse + 2).unwrap();
+    let moon_coarse = moon.header().level().get();
+    let moon_level = BandLevel::new(moon_coarse + 2).unwrap();
+    let mut rng = Lcg::new(0x6d65_6d6f);
+    let cells = random_cells(coarse, 6, &mut rng);
+    let mut cache = SynthCache::new();
+    let moon_cell = random_cells(moon_coarse, 1, &mut rng)[0];
+    other
+        .bake_patch(&mut cache, patch_in(moon_cell, moon_coarse + 2))
+        .unwrap();
+    let bake = synth
+        .bake_patch(&mut cache, patch_in(cells[0], coarse + 2))
+        .unwrap();
+    let fresh = synth
+        .bake_patch(&mut SynthCache::new(), bake.key())
+        .unwrap();
+    assert_eq!(bake_bits(&bake), bake_bits(&fresh));
+    for cell in cells {
+        for dir in random_points_in(cell, 6, &mut rng) {
+            let kept = synth.height_at(&mut cache, dir, level).unwrap();
+            let afresh = synth.height_at(&mut SynthCache::new(), dir, level).unwrap();
+            assert_eq!(
+                sample_bits(kept),
+                sample_bits(afresh),
+                "{cell:?} at {dir:?}"
+            );
+            let kept = other.height_at(&mut cache, dir, moon_level).unwrap();
+            let afresh = other
+                .height_at(&mut SynthCache::new(), dir, moon_level)
+                .unwrap();
+            assert_eq!(
+                sample_bits(kept),
+                sample_bits(afresh),
+                "the Moon-like at {dir:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn queries_after_a_bake_over_part_of_a_field_do_not_depend_on_their_order() {
+    // A bake over a view of a cell and its margin leaves its control points in the cache; point
+    // queries through it about the cell, answered or refused, give the same results in any order
+    // and the same as a fresh cache's, at the patch's level, its parent's and a level that reads
+    // no style (R09.T8's follow-up, the fused pass's memo).
+    for kind in [SyntheticWorld::EarthLike, SyntheticWorld::MoonLike] {
+        let field = world(kind);
+        let coarse = field.header().level().get();
+        let mut rng = Lcg::new(0x6166_7465_7200);
+        // A cube corner's cell and one on a face edge.
+        for cell in random_cells(coarse, 2, &mut rng) {
+            let held = Held {
+                inner: field,
+                held: king_distances(cell, SYNTHESIS_MARGIN_CELLS)
+                    .into_keys()
+                    .collect(),
+            };
+            let synth = Synthesiser::new(&held, SEED);
+            let patch = patch_in(cell, coarse + 2);
+            let mut baked = SynthCache::new();
+            synth.bake_patch(&mut baked, patch).unwrap();
+            // A point in the cell and in each cell two and four king moves away (every fourth of
+            // those on the browser target, `crate::test_sizes`): the outer ones read beyond the
+            // view.
+            let stride = crate::test_sizes::per_target(1, 4);
+            let rings = king_distances(cell, 4);
+            let at = |d: u8| rings.iter().filter(move |&(_, &e)| e == d).map(|(&c, _)| c);
+            let cells: Vec<PatchKey> = std::iter::once(cell)
+                .chain(at(2).step_by(stride))
+                .chain(at(4).step_by(stride))
+                .collect();
+            let points: Vec<[f64; 3]> = cells
+                .into_iter()
+                .flat_map(|c| random_points_in(c, 1, &mut rng))
+                .collect();
+            for level in [patch.level(), patch.level() - 1, 0] {
+                let band = BandLevel::new(level).unwrap();
+                let query = |cache: &mut SynthCache, dir: [f64; 3]| {
+                    synth.height_at(cache, dir, band).map(sample_bits)
+                };
+                let warm = RefCell::new(baked.clone());
+                assert_order_independent(&points, |&d| query(&mut warm.borrow_mut(), d));
+                let mut refused = 0;
+                for &dir in &points {
+                    let kept = query(&mut baked.clone(), dir);
+                    let afresh = query(&mut SynthCache::new(), dir);
+                    assert_eq!(kept, afresh, "{kind:?} {cell:?} at {dir:?}, level {level}");
+                    refused += usize::from(kept.is_err());
+                }
+                assert!(
+                    0 < refused && refused < points.len(),
+                    "{kind:?} {cell:?}, level {level}: {refused} of {} refused",
+                    points.len()
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn baking_does_not_depend_on_the_order_of_the_patches() {
     for kind in [SyntheticWorld::EarthLike, SyntheticWorld::MoonLike] {
         let field = world(kind);

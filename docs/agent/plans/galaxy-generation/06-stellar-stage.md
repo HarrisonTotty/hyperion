@@ -2297,8 +2297,10 @@ Option<StarState>`, `None` unless the star is on a knot-free main sequence at `a
 
 This plan changes generated output once for certain: T30.b changes the mean mass per system, hence
 the system count and every candidate draw, and bumps `GENERATOR_VERSION` with all goldens. T19.e
-bumps it again when plan 15's rank table replaces the provisional one (only kicks change). Every
-other task adds output on new streams and moves nothing that existed. Any later change to a formula,
+bumps it again when plan 15's rank table replaces the provisional one (only kicks change). T19.e
+rides version 25 (S1), a held swap that lands with the train (decision-bump-plan-after-22,
+2026-10-14; updated 2026-10-15). Every other task adds output on new streams and moves nothing
+that existed. Any later change to a formula,
 coefficient, recipe default, knot count or bridge time of this plan changes stellar output and is a
 version bump.
 

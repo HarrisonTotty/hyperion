@@ -136,11 +136,17 @@ class LandTests(unittest.TestCase):
         new = fakes.git(self.main, "rev-parse", "HEAD")
         self.assertIn(f"- `{new[:8]}` docs(plans): R10.T13 Review fixes (lane `{self.second[:8]}`)", out)
         self.assertIn("Integration gate: `gh-collab gate: exit 0`", out)
+        self.assertIn("\n[desk] Landed on `trunk` and pushed:\n", out)
         self.assertEqual(self.fake.issues[6]["state"], "OPEN")
         self.assertEqual(self.fake.writes(), [])
         self.assertEqual(run(self.ctx, "close", "6")[0], 0)
         self.assertEqual(self.fake.issues[6]["state"], "CLOSED")
         self.assertEqual(self.fake.status_of(6), "Done")
+        # The worker reads only comments that begin with the orchestrator's tag; the marker stays.
+        closing = self.fake.issues[6]["comments"][-1]["body"]
+        self.assertTrue(closing.startswith("[desk] Landed on `trunk` and pushed:"), closing)
+        picked = fakes.git(self.main, "log", "--reverse", "--format=%H", "-2", "trunk").splitlines()
+        self.assertEqual(gc.find_markers(closing), [("landed", {"commits": picked})])
 
     def test_pick_refuses_the_wrong_branch_a_dirty_tree_and_stops_on_a_conflict(self) -> None:
         fakes.git(self.main, "switch", "-q", "-c", "other")

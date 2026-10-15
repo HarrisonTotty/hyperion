@@ -102,6 +102,29 @@ class SurveyTests(unittest.TestCase):
         self.assertEqual(res["comments"], [])
         self.assertEqual(res["log"]["posts"], [])
 
+    def test_closed_since_goes_by_the_closing_time_not_its_day(self) -> None:
+        f = self.fake
+        for number, at in ((11, "2026-01-06T09:00:00Z"), (12, "2026-01-06T15:00:00Z"), (13, "2026-01-05T23:00:00Z")):
+            f.add_issue(number, title=f"Closed {number}", body=brief(f"c{number}"), state="CLOSED")
+            f.issues[number]["closedAt"] = at
+        f.add_issue(14, title="Spoof closed", body=brief("c14"), author="mallory", state="CLOSED")
+        f.issues[14]["closedAt"] = "2026-01-06T16:00:00Z"
+        since = "2026-01-06T12:00:00Z"
+        self.assertIn("CLOSED SINCE: #12\n", self.survey("--since", since)[1])  # not #11, closed that morning
+        res = json.loads(self.survey("--since", since, "--json")[1])
+        self.assertEqual(res["closed"], [{"number": 12, "title": "Closed 12", "at": "2026-01-06T15:00:00Z"}])
+        searches = [args[args.index("--search") + 1] for args, _ in f.calls if "--search" in args]
+        self.assertEqual(searches[-1], "closed:>=2026-01-05")  # a coarse pre-filter, a day early
+        self.assertIn("CLOSED SINCE: #12\n", self.survey("--since", "2026-01-06T15:00:00Z")[1])  # at T counts
+        self.assertNotIn("CLOSED SINCE", self.survey("--since", "2026-01-06T15:00:01Z")[1])
+        self.assertEqual(f.writes(), [])
+
+    def test_a_tag_on_its_own_line_leads_the_comment_shown(self) -> None:
+        answer = gc.tagged(self.cfg, "orchestrator", "## Ruling\nUse A.")
+        self.fake.add_comment(8, answer + "\n\n" + gc.make_marker("answer", {"requeue": False}))
+        out = self.survey("--since", "2026-01-05T00:00:00Z")[1]
+        self.assertIn(" owner [answer] [desk] ## Ruling\n", out)
+
     def test_without_the_project_scope_the_board_is_reported_off(self) -> None:
         self.fake.scopes = "repo"
         out = self.survey("--since", "1d")[1]

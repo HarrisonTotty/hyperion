@@ -73,9 +73,11 @@ Brief for <task>:
 
 - **A blocked brief:** write the answer, with the ruling pasted and any changed instruction. Run
   `brief_issue.py answer N --body-file <file> --requeue [--dry-run]`. It comments the answer
-  (checked like a brief) and removes the state labels, so that a worker claims the issue again and
-  continues from its pushed lane. Without `--requeue` it only comments: an amendment the current
-  worker reads, since comments by allowed authors amend the brief.
+  (checked like a brief) and removes the state labels, so that a worker claims the issue again
+  and continues from its pushed lane. Without `--requeue` it only comments: an amendment the
+  current worker reads, since comments by allowed authors amend the brief.
+- **The tag:** the answer begins with the orchestrator's tag (`coordination.tags`), since the
+  worker may read only the comments that do. The brief's body carries none.
 - **A lane that needs fixes:** answer with what to fix, with `--requeue`.
 - **A stale claim** (the survey marks it): ask on the coordination log first, then requeue.
 

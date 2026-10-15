@@ -475,6 +475,7 @@ class Issue:
     created: datetime
     updated: datetime
     url: str
+    closed: Optional[datetime] = None  # when it was closed; None while open, or if not listed
     editor: Optional[str] = None  # the last account to edit the body; None if never edited
     editor_known: bool = False  # whether the editor was looked up
     edited: bool = False  # whether the body was ever edited (its editor may have been deleted)
@@ -484,7 +485,7 @@ class Issue:
 
 
 ISSUE_FIELDS = "number,title,state,author,labels,body,comments,milestone,createdAt,updatedAt,url"
-LIST_FIELDS = "number,title,state,author,labels,body,milestone,createdAt,updatedAt,url,comments"
+LIST_FIELDS = "number,title,state,author,labels,body,milestone,createdAt,updatedAt,closedAt,url,comments"
 
 
 def _comment_from(raw: Dict[str, Any]) -> Comment:
@@ -514,6 +515,7 @@ def issue_from(raw: Dict[str, Any]) -> Issue:
         created=parse_time(raw.get("createdAt") or "1970-01-01T00:00:00Z"),
         updated=parse_time(raw.get("updatedAt") or "1970-01-01T00:00:00Z"),
         url=raw.get("url") or "",
+        closed=parse_time(raw["closedAt"]) if raw.get("closedAt") else None,
     )
 
 
@@ -1103,6 +1105,32 @@ DISCUSSION_QUERY = (
     " replies(first:50){nodes{id databaseId author{login} body createdAt url}}}}}}}")
 COMMENT_MUTATION = ("mutation($id:ID!,$body:String!){addDiscussionComment(input:{discussionId:$id,body:$body})"
                     "{comment{url}}}")
+
+
+def side_tag(cfg: Dict[str, Any], role: str) -> str:
+    """The tag of a side, `orchestrator` or `worker`. It begins each side's status posts and the
+    orchestrator's comments on issues (answers, closing comments): both sides may post as one
+    account, and the worker may read only the comments that begin with the orchestrator's tag.
+    The worker's own comments carry its markers instead."""
+    return str(((cfg.get("coordination") or {}).get("tags") or {}).get(role) or f"[{role}]")
+
+
+# A Markdown block that must start its line to render: a heading, a quote, a list item, a table
+# row, a code fence or HTML (a marker among them).
+BLOCK_START_RE = re.compile(r"(?:#{1,6}(?:\s|$)|>|[-*+](?:\s|$)|\d{1,9}[.)](?:\s|$)|\||```|~~~|<)")
+
+
+def tagged(cfg: Dict[str, Any], role: str, text: str) -> str:
+    """The text, stripped, beginning with its side's tag: inline before prose, on a line of its own
+    before a Markdown block, so that the block still renders. A text that already begins with the
+    tag is left as it is. Markers anywhere in the text are untouched."""
+    tag = side_tag(cfg, role)
+    text = text.strip()
+    if text.startswith(tag):
+        return text
+    if not text:
+        return tag
+    return f"{tag}\n\n{text}" if BLOCK_START_RE.match(text) else f"{tag} {text}"
 
 
 def discussion_number(cfg: Dict[str, Any]) -> int:

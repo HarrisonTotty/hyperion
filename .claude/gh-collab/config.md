@@ -47,7 +47,7 @@ prints the merged result and its sources.
 | `land.push_args` | none | Flags printed in the suggested push command. The script never pushes. |
 | `survey.stale_claim_hours` | `24` | A claim with no trusted activity for this long is flagged. |
 | `coordination.discussion` | `0` (none) | The coordination log's discussion number or URL. |
-| `coordination.tags.orchestrator`, `.worker` | `[orchestrator]`, `[worker]` | The tag each side's posts begin with. |
+| `coordination.tags.orchestrator`, `.worker` | `[orchestrator]`, `[worker]` | The tag that begins each side's status posts and the orchestrator's comments on issues (answers, closing comments), since both sides may post as one account and the worker may read only the comments that begin with the orchestrator's tag. A brief's body carries none: the task label and its marker identify it. |
 | `project.enabled` | `false` | Keep a Projects (v2) board in step with the labels. |
 | `project.owner`, `.number`, `.title` | the repository's owner; found by title | The board. |
 | `project.status_field` | `Status` | The single-select field that the statuses go in. |
@@ -64,6 +64,9 @@ comments. The kinds are `brief`, `claim`, `start`, `report`, `release`, `answer`
 
 - **Claims:** the earliest claim since the last report, release or requeue wins. A worker that
   loses deletes its own claim.
+- **Tags come first, markers anywhere.** A tag begins the text: inline before prose, on a line of
+  its own before a Markdown block (a heading, list, quote, table or fence). Markers are found
+  anywhere in a body, so a tag never hides one.
 - **Briefs written by hand** need no marker. The lane slug and base commit are read from
   `lane/<…>-<slug>` and `at <sha> or later`, and the task from the title.
 

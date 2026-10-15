@@ -159,6 +159,51 @@ class MarkerAndMetaTests(unittest.TestCase):
         with self.assertRaises(gc.CollabError):
             gc.brief_meta(issue, cfg)
 
+    def test_a_listed_issue_carries_its_closing_time(self) -> None:
+        raw = {"number": 5, "title": "x", "labels": [], "author": {}, "state": "CLOSED", "body": "",
+               "closedAt": "2026-10-13T23:55:00Z"}
+        self.assertEqual(gc.iso(gc.issue_from(raw).closed), "2026-10-13T23:55:00Z")
+        self.assertIsNone(gc.issue_from(dict(raw, state="OPEN", closedAt=None)).closed)
+        self.assertIn("closedAt", gc.LIST_FIELDS.split(","))
+
+
+class TagTests(unittest.TestCase):
+    cfg = fakes.make_config(Path("."))
+
+    def test_each_side_has_its_tag(self) -> None:
+        self.assertEqual(gc.side_tag(self.cfg, "orchestrator"), "[desk]")
+        self.assertEqual(gc.side_tag(self.cfg, "worker"), "[lap]")
+        committed = gc.load_config(paths=[gc.REPO_CONFIG])
+        self.assertEqual(gc.side_tag(committed, "orchestrator"), "[desktop]")
+        self.assertEqual(gc.side_tag(gc.deep_merge(gc.DEFAULTS, {"coordination": {"tags": {"worker": ""}}}),
+                                     "worker"), "[worker]")
+
+    def test_a_text_begins_with_its_tag_once(self) -> None:
+        tag = lambda text: gc.tagged(self.cfg, "orchestrator", text)  # noqa: E731
+        self.assertEqual(tag("  Landed #5.\n"), "[desk] Landed #5.")
+        self.assertEqual(tag("[desk] Landed #5."), "[desk] Landed #5.")  # never twice
+        self.assertEqual(tag(""), "[desk]")
+        for block in ("## Answer\nUse A.", "- one\n- two", "> quoted", "1. first", "| a | b |", "```\nx\n```",
+                      gc.make_marker("note", {})):
+            with self.subTest(block=block):
+                self.assertEqual(tag(block), "[desk]\n\n" + block)  # the block still renders
+        self.assertEqual(tag("**Ruling:** A."), "[desk] **Ruling:** A.")
+        self.assertEqual(tag("-5 K is the floor."), "[desk] -5 K is the floor.")
+
+    def test_a_tagged_comment_keeps_its_markers_for_the_worker(self) -> None:
+        fake = fakes.FakeGitHub()
+        gh = gc.Gh(fakes.REPO, runner=fake)
+        fake.add_issue(1)
+        fake.add_comment(1, gc.make_marker("claim", {"worker": "w-a", "nonce": "1"}))
+        answer = gc.tagged(self.cfg, "orchestrator", "## Ruling\nUse A.") + "\n\n" + gc.make_marker(
+            "answer", {"requeue": True})
+        fake.add_comment(1, answer)
+        issue = gc.fetch_issue(gh, 1)
+        self.assertTrue(issue.comments[-1].body.startswith("[desk]"))
+        self.assertEqual(issue.comments[-1].markers(), [("answer", {"requeue": True})])
+        self.assertIsNone(gc.winning_claim(issue, self.cfg))  # the requeue still counts
+        self.assertEqual(gc.strip_markers(answer), "[desk]\n\n## Ruling\nUse A.")
+
 
 class HygieneTests(unittest.TestCase):
     cfg = fakes.make_config(Path("."))

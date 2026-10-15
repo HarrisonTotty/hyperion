@@ -71,7 +71,7 @@
 use crate::cube::{
     Face, FaceUv, MAX_LEVEL, PatchKey, face_of, face_uv_to_xyz, st_to_uv, uv_on_face, uv_to_st,
 };
-use crate::field::{FieldView, SynthesisCell};
+use crate::field::{FieldHeader, FieldView, SynthesisCell};
 use crate::height::HeightSample;
 use crate::num;
 
@@ -142,39 +142,102 @@ pub fn interpolate<V: CellValues + ?Sized>(
     values: &V,
     dir: [f64; 3],
 ) -> Result<Interpolated, ReadCellError> {
+    let [one] = interpolate_each(&Single(values), dir, &mut Fresh)?;
+    Ok(one)
+}
+
+/// What the fused pass reads: `N` values for each cell of one level, all from one read of the
+/// cell (R09.T8's follow-up): the base elevation with the relief's three style values, or the three
+/// alone.
+pub(crate) trait CellRecords<const N: usize> {
+    /// The level of the cells, 1 to [`MAX_LEVEL`].
+    fn level(&self) -> u8;
+
+    /// The values at `cell`, a cell of [`level`](Self::level), or `None` where it is not held.
+    fn values(&self, cell: PatchKey) -> Option<[f64; N]>;
+}
+
+/// One [`CellValues`] as a fused pass's single value.
+struct Single<'a, V: ?Sized>(&'a V);
+
+impl<V: CellValues + ?Sized> CellRecords<1> for Single<'_, V> {
+    fn level(&self) -> u8 {
+        self.0.level()
+    }
+
+    fn values(&self, cell: PatchKey) -> Option<[f64; 1]> {
+        self.0.value(cell).map(|v| [v])
+    }
+}
+
+/// [`interpolate`] of `N` values at once, each bit for bit what [`interpolate`] gives of that
+/// value alone (R09.T8's follow-up, the fused pass).
+///
+/// The values share everything but their own arithmetic: the query's cell, each face's weight and
+/// spline basis, the stencil's walk and each cell's read, one read for all `N` values. Each value
+/// takes the same operations in the same order as [`interpolate`] takes for it, so its value and
+/// gradient are the same bits, and the error is the same: the first cell, in the one reading
+/// order, that `values` does not hold. `controls` hands out the control points' values, read
+/// afresh ([`Fresh`]) or from a patch bake's memo ([`ControlMemo`]), which changes no bit.
+///
+/// # Errors
+///
+/// [`ReadCellError`] naming the first cell, in a fixed reading order, that `values` does not hold.
+///
+/// # Panics
+///
+/// If `values`' level is 0 or above [`MAX_LEVEL`], or if `dir` is zero or has a component that is
+/// not finite.
+pub(crate) fn interpolate_each<const N: usize, V, C>(
+    values: &V,
+    dir: [f64; 3],
+    controls: &mut C,
+) -> Result<[Interpolated; N], ReadCellError>
+where
+    V: CellRecords<N> + ?Sized,
+    C: Controls<N> + ?Sized,
+{
     let level = values.level();
     assert!(
         (1..=MAX_LEVEL).contains(&level),
         "the interpolant reads levels 1 to {MAX_LEVEL}, not level {level}"
     );
     let home = PatchKey::containing(level, dir).expect("the level is at most MAX_LEVEL");
-    let reference = values.value(home).ok_or(ReadCellError { cell: home })?;
+    let reference = controls.cell(values, home)?;
     let grid = Grid::new(level);
     let mut terms = [None; 6];
     for (slot, face) in terms.iter_mut().zip(Face::ALL) {
-        *slot = face_term(values, &grid, face, dir, reference)?;
+        *slot = face_term(values, controls, &grid, face, dir, &reference)?;
     }
     let mut weight = 0.0;
-    let mut weighted = 0.0;
+    let mut weighted = [0.0; N];
     for term in terms.iter().flatten() {
         weight += term.weight;
-        weighted += term.weight * term.value;
-    }
-    let relative = weighted / weight;
-    let mut gradient = [0.0; 3];
-    for term in terms.iter().flatten() {
-        let lift = term.value - relative;
-        for (g, (dw, df)) in gradient
-            .iter_mut()
-            .zip(term.weight_gradient.iter().zip(&term.value_gradient))
-        {
-            *g += dw * lift + term.weight * df;
+        for (w, value) in weighted.iter_mut().zip(term.value) {
+            *w += term.weight * value;
         }
     }
-    Ok(Interpolated {
-        value: reference + relative,
-        gradient: gradient.map(|g| g / weight),
-    })
+    let relative = weighted.map(|w| w / weight);
+    let mut gradient = [[0.0; 3]; N];
+    for term in terms.iter().flatten() {
+        for ((gradient, (value, relative)), value_gradient) in gradient
+            .iter_mut()
+            .zip(term.value.iter().zip(&relative))
+            .zip(&term.value_gradient)
+        {
+            let lift = value - relative;
+            for (g, (dw, df)) in gradient
+                .iter_mut()
+                .zip(term.weight_gradient.iter().zip(value_gradient))
+            {
+                *g += dw * lift + term.weight * df;
+            }
+        }
+    }
+    Ok(std::array::from_fn(|n| Interpolated {
+        value: reference[n] + relative[n],
+        gradient: gradient[n].map(|g| g / weight),
+    }))
 }
 
 /// A coarse field's base elevation at the unit direction `dir`: its cells' elevations interpolated
@@ -195,8 +258,21 @@ pub fn base_elevation<F: FieldView>(
     field: &F,
     dir: [f64; 3],
 ) -> Result<HeightSample, ReadCellError> {
-    let figure = field.header().figure();
     let mm = interpolate(&Elevations(field), dir)?;
+    Ok(elevation_sample(field.header(), mm))
+}
+
+/// The base elevation of a field of header `header` from its interpolated elevations `mm`, in
+/// millimetres and millimetres per radian: metres above the spheroid, with the gradient in
+/// body-fixed space at the spheroid point, metres per metre ([`base_elevation`]; the fused pass
+/// makes its millimetres with the relief's styles).
+///
+/// # Panics
+///
+/// If the height or a component of its gradient is not finite (a bug).
+#[must_use]
+pub(crate) fn elevation_sample(header: &FieldHeader, mm: Interpolated) -> HeightSample {
+    let figure = header.figure();
     let radii = [
         figure.equatorial_radius_m,
         figure.equatorial_radius_m,
@@ -206,10 +282,10 @@ pub fn base_elevation<F: FieldView>(
     for ((g, mm_per_rad), radius) in gradient.iter_mut().zip(mm.gradient).zip(radii) {
         *g = num::assert_finite(mm_per_rad / MM_PER_M / radius);
     }
-    Ok(HeightSample {
+    HeightSample {
         height_m: num::assert_finite(mm.value / MM_PER_M),
         gradient,
-    })
+    }
 }
 
 /// The cell of `field` that contains the direction `dir`, and its record: where the categorical
@@ -253,7 +329,7 @@ impl<F: FieldView> CellValues for Elevations<'_, F> {
 
 /// A level's grid: its level, cells a face side as an integer and as an `f64`, and the |u| beyond
 /// which a face's weight is zero.
-struct Grid {
+pub(crate) struct Grid {
     level: u8,
     cells: i64,
     side: f64,
@@ -289,14 +365,14 @@ impl Grid {
     }
 }
 
-/// One face's term of the blend: its weight and its spline's value relative to the query's cell,
-/// each with its gradient on the unit sphere.
+/// One face's term of the blend: its weight and its spline's `N` values relative to the query's
+/// cell, each with its gradient on the unit sphere.
 #[derive(Debug, Clone, Copy)]
-struct FaceTerm {
+struct FaceTerm<const N: usize> {
     weight: f64,
     weight_gradient: [f64; 3],
-    value: f64,
-    value_gradient: [f64; 3],
+    value: [f64; N],
+    value_gradient: [[f64; 3]; N],
 }
 
 /// A face's normal and its u and v axes in body-fixed space, by S2's axes ([`face_uv_to_xyz`]:
@@ -320,13 +396,18 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
 }
 
 /// `face`'s term at the direction `dir`, or `None` where its weight is zero.
-fn face_term<V: CellValues + ?Sized>(
+fn face_term<const N: usize, V, C>(
     values: &V,
+    controls: &mut C,
     grid: &Grid,
     face: Face,
     dir: [f64; 3],
-    reference: f64,
-) -> Result<Option<FaceTerm>, ReadCellError> {
+    reference: &[f64; N],
+) -> Result<Option<FaceTerm<N>>, ReadCellError>
+where
+    V: CellRecords<N> + ?Sized,
+    C: Controls<N> + ?Sized,
+{
     let (normal, e_u, e_v) = axes(face);
     let along = dot(dir, normal);
     if along <= 0.0 {
@@ -350,14 +431,16 @@ fn face_term<V: CellValues + ?Sized>(
     let dy_dv = grid.side * warp_slope(v);
     let grad_x = [0, 1, 2].map(|k| dx_du * ((e_u[k] - u * normal[k]) / along));
     let grad_y = [0, 1, 2].map(|k| dy_dv * ((e_v[k] - v * normal[k]) / along));
-    let (value, d_x, d_y) = spline(values, grid, face, x, y, reference)?;
+    let SplineSums { value, d_x, d_y } = spline(values, controls, grid, face, x, y, reference)?;
     let weight_slope = [dwx * wy, wx * dwy];
     Ok(Some(FaceTerm {
         weight,
         weight_gradient: [0, 1, 2]
             .map(|k| weight_slope[0] * grad_x[k] + weight_slope[1] * grad_y[k]),
         value,
-        value_gradient: [0, 1, 2].map(|k| d_x * grad_x[k] + d_y * grad_y[k]),
+        value_gradient: std::array::from_fn(|n| {
+            [0, 1, 2].map(|k| d_x[n] * grad_x[k] + d_y[n] * grad_y[k])
+        }),
     }))
 }
 
@@ -434,78 +517,235 @@ fn knot_span(x: f64) -> (i64, f64) {
     (index - 1, knot - first)
 }
 
-/// Face `face`'s spline at the cell coordinates (`x`, `y`), relative to `reference`, and its
-/// derivatives in x and y; the 4 × 4 control points summed row by row, each row in order of i.
-fn spline<V: CellValues + ?Sized>(
+/// A face's spline at a point, each of its `N` values relative to its reference: the value and
+/// its derivatives in the cell coordinates x and y.
+struct SplineSums<const N: usize> {
+    value: [f64; N],
+    d_x: [f64; N],
+    d_y: [f64; N],
+}
+
+/// Face `face`'s spline at the cell coordinates (`x`, `y`), each value relative to its
+/// `reference`, and their derivatives in x and y; the 4 × 4 control points summed row by row, each
+/// row in order of i.
+fn spline<const N: usize, V, C>(
     values: &V,
+    controls: &mut C,
     grid: &Grid,
     face: Face,
     x: f64,
     y: f64,
-    reference: f64,
-) -> Result<(f64, f64, f64), ReadCellError> {
+    reference: &[f64; N],
+) -> Result<SplineSums<N>, ReadCellError>
+where
+    V: CellRecords<N> + ?Sized,
+    C: Controls<N> + ?Sized,
+{
     let (i0, fx) = knot_span(x);
     let (j0, fy) = knot_span(y);
     let (wx, dx) = basis(fx);
     let (wy, dy) = basis(fy);
-    let mut value = 0.0;
-    let mut d_x = 0.0;
-    let mut d_y = 0.0;
+    let mut value = [0.0; N];
+    let mut d_x = [0.0; N];
+    let mut d_y = [0.0; N];
     for (j, (wj, dj)) in (j0..).zip(wy.iter().zip(&dy)) {
-        let mut row = 0.0;
-        let mut row_dx = 0.0;
+        let mut row = [0.0; N];
+        let mut row_dx = [0.0; N];
         for (i, (wi, di)) in (i0..).zip(wx.iter().zip(&dx)) {
-            let c = control(values, grid, face, i, j, reference)?;
-            row += wi * c;
-            row_dx += di * c;
+            let c = controls.relative(values, grid, face, i, j, reference)?;
+            for ((row, row_dx), c) in row.iter_mut().zip(&mut row_dx).zip(c) {
+                *row += wi * c;
+                *row_dx += di * c;
+            }
         }
-        value += wj * row;
-        d_x += wj * row_dx;
-        d_y += dj * row;
+        for (((value, d_x), d_y), (row, row_dx)) in value
+            .iter_mut()
+            .zip(&mut d_x)
+            .zip(&mut d_y)
+            .zip(row.iter().zip(&row_dx))
+        {
+            *value += wj * row;
+            *d_x += wj * row_dx;
+            *d_y += dj * row;
+        }
     }
-    Ok((value, d_x, d_y))
+    Ok(SplineSums { value, d_x, d_y })
 }
 
-/// Control point (`i`, `j`) of `face`'s spline relative to `reference`: the cell's value on the
-/// face, or a ghost's beyond it.
-fn control<V: CellValues + ?Sized>(
+/// What a control point of a face's spline reads, before it is taken relative to the query's cell:
+/// a cell's `N` values on the face, or a ghost's four cells and its bilinear fractions beyond it.
+///
+/// It is a pure function of the cells' values, the level, the face and the control point's
+/// indices, so a patch bake can keep it for its vertices' queries ([`ControlMemo`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Raw<const N: usize> {
+    /// A cell of the face: its values.
+    Cell([f64; N]),
+    /// A ghost cell beyond the face: the values of the four cells about its centre's direction on
+    /// the face that owns it, (i0, j0), (i0 + 1, j0), (i0, j0 + 1) and (i0 + 1, j0 + 1), with the
+    /// bilinear fractions between them.
+    Ghost {
+        corners: [[f64; N]; 4],
+        fx: f64,
+        fy: f64,
+    },
+}
+
+impl<const N: usize> Raw<N> {
+    /// Control point (`i`, `j`) of `face`'s spline on `grid`, read from `values`: the cell's
+    /// values on the face, or a ghost's four cells beyond it, read in [`ghost_stencil`]'s order.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadCellError`] naming the first cell `values` does not hold.
+    fn read<V: CellRecords<N> + ?Sized>(
+        values: &V,
+        grid: &Grid,
+        face: Face,
+        i: i64,
+        j: i64,
+    ) -> Result<Self, ReadCellError> {
+        if grid.on_face(i, j) {
+            return read(values, grid.cell(face, i, j)).map(Self::Cell);
+        }
+        let ([k00, k10, k01, k11], fx, fy) = ghost_stencil(grid, face, i, j);
+        Ok(Self::Ghost {
+            corners: [
+                read(values, k00)?,
+                read(values, k10)?,
+                read(values, k01)?,
+                read(values, k11)?,
+            ],
+            fx,
+            fy,
+        })
+    }
+
+    /// Each value relative to its `reference`: the cell's value less it, or the ghost's bilinear
+    /// blend of its four cells' values less it, in the one-value interpolant's order.
+    #[must_use]
+    fn relative(&self, reference: &[f64; N]) -> [f64; N] {
+        match *self {
+            Self::Cell(v) => less(v, reference),
+            Self::Ghost {
+                corners: [c00, c10, c01, c11],
+                fx,
+                fy,
+            } => bilinear(
+                [
+                    less(c00, reference),
+                    less(c10, reference),
+                    less(c01, reference),
+                    less(c11, reference),
+                ],
+                fx,
+                fy,
+            ),
+        }
+    }
+}
+
+/// Each of `values` less its `reference`.
+#[must_use]
+fn less<const N: usize>(values: [f64; N], reference: &[f64; N]) -> [f64; N] {
+    std::array::from_fn(|n| values[n] - reference[n])
+}
+
+/// Each value's bilinear blend of a ghost's four cells' (relative) values `c00`, `c10`, `c01`,
+/// `c11` at the fractions `fx` and `fy`.
+#[must_use]
+fn bilinear<const N: usize>([c00, c10, c01, c11]: [[f64; N]; 4], fx: f64, fy: f64) -> [f64; N] {
+    std::array::from_fn(|n| {
+        let low = c00[n] + fx * (c10[n] - c00[n]);
+        let high = c01[n] + fx * (c11[n] - c01[n]);
+        low + fy * (high - low)
+    })
+}
+
+/// Where the fused pass takes its control points' values: read afresh each time ([`Fresh`]), or
+/// kept by a patch bake ([`ControlMemo`]).
+///
+/// Neither changes a bit, since a control point's values are a pure function of the cells it
+/// reads, and each takes the same operations on them: [`less`], then [`bilinear`] for a ghost.
+pub(crate) trait Controls<const N: usize> {
+    /// The values of `cell`, the query's own cell, of `values`' level.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadCellError`] if `values` does not hold `cell`.
+    fn cell<V: CellRecords<N> + ?Sized>(
+        &mut self,
+        values: &V,
+        cell: PatchKey,
+    ) -> Result<[f64; N], ReadCellError>;
+
+    /// Control point (`i`, `j`) of `face`'s spline on `grid`, each value relative to its
+    /// `reference`: the cell's values on the face, or a ghost's beyond it.
+    ///
+    /// # Errors
+    ///
+    /// [`ReadCellError`] naming the first cell, in the reading order, that `values` does not hold.
+    fn relative<V: CellRecords<N> + ?Sized>(
+        &mut self,
+        values: &V,
+        grid: &Grid,
+        face: Face,
+        i: i64,
+        j: i64,
+        reference: &[f64; N],
+    ) -> Result<[f64; N], ReadCellError>;
+}
+
+/// The control points read afresh at every query: the point query's way.
+///
+/// It reads each cell and takes it relative at once, as the one-value interpolant did, and a
+/// ghost's cells as its stencil names them ([`fresh_ghost`]), rather than through a [`Raw`] as the
+/// memo does (the same operations on the same values). Measured on the Earth-like world's patch at
+/// L + 4, which reads ghosts, the one-value base elevation's sweep (2026-10-14 and 15):
+/// - read through a `Raw`, natively 13.37 ms against 11.56 ms before (loads 3.4 and 1.0);
+/// - with the ghost's four cells keyed first ([`ghost_stencil`]), on Electron's V8 14.08 ms
+///   against 8.67 ms before (loads 10 and 14);
+/// - as it is, on V8 8.65 ms (load 7) and 8.84 ms (load 14) against 8.61 ms before (load 9), and
+///   natively 11.79 ms against 11.54 ms before (loads 11 and 1.2): the same, within the loads'
+///   noise.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Fresh;
+
+impl<const N: usize> Controls<N> for Fresh {
+    fn cell<V: CellRecords<N> + ?Sized>(
+        &mut self,
+        values: &V,
+        cell: PatchKey,
+    ) -> Result<[f64; N], ReadCellError> {
+        read(values, cell)
+    }
+
+    fn relative<V: CellRecords<N> + ?Sized>(
+        &mut self,
+        values: &V,
+        grid: &Grid,
+        face: Face,
+        i: i64,
+        j: i64,
+        reference: &[f64; N],
+    ) -> Result<[f64; N], ReadCellError> {
+        if grid.on_face(i, j) {
+            return Ok(less(read(values, grid.cell(face, i, j))?, reference));
+        }
+        fresh_ghost(values, grid, face, i, j, reference)
+    }
+}
+
+/// Ghost cell (`i`, `j`) of `face` read afresh, each value relative to its `reference`: the
+/// one-value interpolant's ghost, each cell read and taken relative as its stencil names it.
+fn fresh_ghost<const N: usize, V: CellRecords<N> + ?Sized>(
     values: &V,
     grid: &Grid,
     face: Face,
     i: i64,
     j: i64,
-    reference: f64,
-) -> Result<f64, ReadCellError> {
-    if grid.on_face(i, j) {
-        read(values, grid.cell(face, i, j), reference)
-    } else {
-        ghost(values, grid, face, i, j, reference)
-    }
-}
-
-/// `cell`'s value relative to `reference`.
-fn read<V: CellValues + ?Sized>(
-    values: &V,
-    cell: PatchKey,
-    reference: f64,
-) -> Result<f64, ReadCellError> {
-    values
-        .value(cell)
-        .map(|v| v - reference)
-        .ok_or(ReadCellError { cell })
-}
-
-/// The value relative to `reference` of ghost cell (`i`, `j`) of `face`, a cell of its grid beyond
-/// its edge: bilinear in the four cells about its centre's direction on the face that owns it, the
-/// stencil clamped to that face's cells.
-fn ghost<V: CellValues + ?Sized>(
-    values: &V,
-    grid: &Grid,
-    face: Face,
-    i: i64,
-    j: i64,
-    reference: f64,
-) -> Result<f64, ReadCellError> {
+    reference: &[f64; N],
+) -> Result<[f64; N], ReadCellError> {
     #[expect(
         clippy::cast_precision_loss,
         reason = "a ghost's index is within three cells of a face of at most 2^24, exact in f64"
@@ -520,13 +760,168 @@ fn ghost<V: CellValues + ?Sized>(
     let (u, v) = uv_on_face(owner, point);
     let (i0, fx) = stencil(uv_to_st(u), grid);
     let (j0, fy) = stencil(uv_to_st(v), grid);
-    let c00 = read(values, grid.cell(owner, i0, j0), reference)?;
-    let c10 = read(values, grid.cell(owner, i0 + 1, j0), reference)?;
-    let c01 = read(values, grid.cell(owner, i0, j0 + 1), reference)?;
-    let c11 = read(values, grid.cell(owner, i0 + 1, j0 + 1), reference)?;
-    let low = c00 + fx * (c10 - c00);
-    let high = c01 + fx * (c11 - c01);
-    Ok(low + fy * (high - low))
+    let c00 = less(read(values, grid.cell(owner, i0, j0))?, reference);
+    let c10 = less(read(values, grid.cell(owner, i0 + 1, j0))?, reference);
+    let c01 = less(read(values, grid.cell(owner, i0, j0 + 1))?, reference);
+    let c11 = less(read(values, grid.cell(owner, i0 + 1, j0 + 1))?, reference);
+    Ok(bilinear([c00, c10, c01, c11], fx, fy))
+}
+
+/// The slots of a [`ControlMemo`]: a power of two, about ten times the control points a patch's
+/// queries read when it lies within one coarse cell (25 a face, at most three faces), so that few
+/// of them share a slot. At the fused pass's four values a slot is about 176 bytes, the memo about
+/// 176 KiB.
+const MEMO_SLOTS: usize = 1 << 10;
+
+/// The control points a patch bake's queries have read, kept by face and indices so that its
+/// vertices share them (R09.T8's follow-up): its 5,314 queries read about the same 25 a face.
+///
+/// It is direct-mapped and bounded, [`MEMO_SLOTS`] slots, a control point replacing the one in
+/// its slot, so a bake whose vertices lie in many coarse cells reads afresh what it no longer
+/// holds. It holds only control points every cell of which was read: a query that reads a cell
+/// not held reads it afresh, and is refused as before. What it holds is for one view of one field
+/// at one level, whose held cells only grow ([`crate::synth::SynthCache`]'s rule), and it serves
+/// that alone.
+///
+/// Measured (2026-10-14, natively, one thread, load 1–4; plan R09's Risks, the fused pass's
+/// record): the fused pass with this memo takes R09's bake of the Earth-like world's patch at
+/// L + 4 from 103.8 ms to 34.2 ms, since each cell's read and style (a sea floor's takes powers
+/// and logarithms) and each ghost's geometry are made once a patch rather than once a vertex.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ControlMemo<const N: usize> {
+    slots: Vec<Option<MemoSlot<N>>>,
+}
+
+/// A [`ControlMemo`]'s slot: a control point's face, indices and values.
+#[derive(Debug, Clone, Copy)]
+struct MemoSlot<const N: usize> {
+    face: Face,
+    i: i64,
+    j: i64,
+    raw: Raw<N>,
+}
+
+impl<const N: usize> ControlMemo<N> {
+    /// An empty memo, which allocates its slots at its first read.
+    #[must_use]
+    pub(crate) const fn new() -> Self {
+        Self { slots: Vec::new() }
+    }
+
+    /// Forgets every control point, keeping the slots' allocation.
+    pub(crate) fn clear(&mut self) {
+        self.slots.fill(None);
+    }
+}
+
+/// The slot of control point (`i`, `j`) of `face`: a multiplicative hash of the three.
+#[must_use]
+fn memo_slot(face: Face, i: i64, j: i64) -> usize {
+    let mixed = (i.cast_unsigned().wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ j.cast_unsigned().wrapping_mul(0xc2b2_ae3d_27d4_eb4f)
+        ^ u64::from(face.index()).wrapping_mul(0x1656_67b1_9e37_79f9))
+    .rotate_left(32);
+    usize::try_from(mixed % u64::try_from(MEMO_SLOTS).expect("the slots fit a u64"))
+        .expect("a slot below MEMO_SLOTS fits a usize")
+}
+
+impl<const N: usize> ControlMemo<N> {
+    /// The slot of control point (`i`, `j`) of `face`, the slots allocated at the first.
+    fn slot(&mut self, face: Face, i: i64, j: i64) -> &mut Option<MemoSlot<N>> {
+        if self.slots.is_empty() {
+            self.slots.resize(MEMO_SLOTS, None);
+        }
+        &mut self.slots[memo_slot(face, i, j)]
+    }
+}
+
+impl<const N: usize> Controls<N> for ControlMemo<N> {
+    fn cell<V: CellRecords<N> + ?Sized>(
+        &mut self,
+        values: &V,
+        cell: PatchKey,
+    ) -> Result<[f64; N], ReadCellError> {
+        let (face, i, j) = (cell.face(), i64::from(cell.i()), i64::from(cell.j()));
+        let slot = self.slot(face, i, j);
+        if let Some(MemoSlot {
+            face: kept_face,
+            i: kept_i,
+            j: kept_j,
+            raw: Raw::Cell(v),
+        }) = *slot
+            && (kept_face, kept_i, kept_j) == (face, i, j)
+        {
+            return Ok(v);
+        }
+        let v = read(values, cell)?;
+        *slot = Some(MemoSlot {
+            face,
+            i,
+            j,
+            raw: Raw::Cell(v),
+        });
+        Ok(v)
+    }
+
+    fn relative<V: CellRecords<N> + ?Sized>(
+        &mut self,
+        values: &V,
+        grid: &Grid,
+        face: Face,
+        i: i64,
+        j: i64,
+        reference: &[f64; N],
+    ) -> Result<[f64; N], ReadCellError> {
+        let slot = self.slot(face, i, j);
+        if let Some(kept) = slot
+            && (kept.face, kept.i, kept.j) == (face, i, j)
+        {
+            return Ok(kept.raw.relative(reference));
+        }
+        let raw = Raw::read(values, grid, face, i, j)?;
+        *slot = Some(MemoSlot { face, i, j, raw });
+        Ok(raw.relative(reference))
+    }
+}
+
+/// `cell`'s values.
+fn read<const N: usize, V: CellRecords<N> + ?Sized>(
+    values: &V,
+    cell: PatchKey,
+) -> Result<[f64; N], ReadCellError> {
+    values.values(cell).ok_or(ReadCellError { cell })
+}
+
+/// Ghost cell (`i`, `j`) of `face`, a cell of its grid beyond its edge: the four cells about its
+/// centre's direction on the face that owns it, in their reading order (i0, j0), (i0 + 1, j0),
+/// (i0, j0 + 1), (i0 + 1, j0 + 1), and its bilinear fractions there, the stencil clamped to that
+/// face's cells.
+#[must_use]
+fn ghost_stencil(grid: &Grid, face: Face, i: i64, j: i64) -> ([PatchKey; 4], f64, f64) {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "a ghost's index is within three cells of a face of at most 2^24, exact in f64"
+    )]
+    let centre = |n: i64| (2 * n + 1) as f64 / (2.0 * grid.side);
+    let point = face_uv_to_xyz(FaceUv {
+        face,
+        u: st_to_uv(centre(i)),
+        v: st_to_uv(centre(j)),
+    });
+    let owner = face_of(point);
+    let (u, v) = uv_on_face(owner, point);
+    let (i0, fx) = stencil(uv_to_st(u), grid);
+    let (j0, fy) = stencil(uv_to_st(v), grid);
+    (
+        [
+            grid.cell(owner, i0, j0),
+            grid.cell(owner, i0 + 1, j0),
+            grid.cell(owner, i0, j0 + 1),
+            grid.cell(owner, i0 + 1, j0 + 1),
+        ],
+        fx,
+        fy,
+    )
 }
 
 /// The bilinear stencil's first cell and fraction at the face coordinate `s`: the cell centres'

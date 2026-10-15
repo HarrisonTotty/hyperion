@@ -486,13 +486,14 @@ the plan's doc comment with the machine they ran on.
 
 ## Generator version
 
-One bump, in P10.T3.d, when the halo's field gives up the derived discrete share. Stream and core
-members are additions and move nothing. Reserved: the `10` sub-kind `11`; the three unused bits of a
-stream member's ID; stream numbers above the list's length; `dwarf.*` and `stream.*` domain tags.
-Parameters that belong to the generator version and are named as such in code: the streams per
-globular (1.5, from `tables::streams`), the orphan mass law, η's constant, the step rule, the tracer
-count and kernel width, the gap noise's amplitude and wavelengths, the cut at four widths, the
-dwarfs' stripping fraction, the shell-widening factor.
+One bump, in P10.T3.d, when the halo's field gives up the derived discrete share. It rides version
+25 (S1), or a later train if not ready (decision-bump-plan-after-22, 2026-10-14; updated
+2026-10-15). Stream and core members are additions and move nothing. Reserved: the `10` sub-kind
+`11`; the three unused bits of a stream member's ID; stream numbers above the list's length;
+`dwarf.*` and `stream.*` domain tags. Parameters that belong to the generator version and are
+named as such in code: the streams per globular (1.5, from `tables::streams`), the orphan mass
+law, η's constant, the step rule, the tracer count and kernel width, the gap noise's amplitude and
+wavelengths, the cut at four widths, the dwarfs' stripping fraction, the shell-widening factor.
 
 ## Risks and open points
 

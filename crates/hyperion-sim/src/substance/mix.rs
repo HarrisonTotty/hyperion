@@ -1,12 +1,19 @@
-//! The gas columns, and a mixture's mean molar mass and heat capacity (decision-composition §1.1;
-//! P14.T49.a).
+//! The gas columns, and a mixture's mean molar mass and held heat capacity (decision-composition
+//! §1.1; P14.T49.a, with P14.T49.b's molecular constants).
 //!
-//! A gas row's `c_p` ÷ R is kinetic theory's for fixed degrees of freedom, as Robinson and Catling
-//! (2012, ApJ 757, 104, §2.3, eqs. 7–9) take it: 1 + N ÷ 2 for N degrees, so that the dry
-//! adiabat's exponent R ÷ `c_p` is 2 ÷ (N + 2). It is held constant, since a temperature-dependent
-//! `c_p` breaks the constant-β profile their α was calibrated with (rendering plan R08, Design note
-//! 3; the client's `GAS_HEAT_CAPACITY` takes the same classes, and R08.T19 holds the two
-//! together).
+//! A gas row's columns are its [`MolecularConstants`], over which [`thermo`](super::thermo) sums
+//! its `c_p`(T), H̃ and S̃ (P14.T49.b), and, for rows 0–8 until the 22 → 23 batch's bump, the
+//! `c_p` ÷ R class 21 → 22 publishes ([`HeatCapacityClass`]).
+//!
+//! The class is kinetic theory's for fixed degrees of freedom, as Robinson and Catling (2012, ApJ
+//! 757, 104, §2.3, eqs. 7–9) take it: 1 + N ÷ 2 for N degrees, so that the dry adiabat's exponent
+//! R ÷ `c_p` is 2 ÷ (N + 2). P14.T24.a's published mixture reads it through [`heat_capacity_over_r`]
+//! at generator version 22. It is held, not in force: science-r08-gases-2.md §1 rules that no
+//! fixed `c_p` serves the galaxy's 30–1,500 K, and the classes are only the statistical sum's
+//! low-temperature limit (CO₂'s 13/3 is not even that: its limit is 7/2). At the batch's bump
+//! (P14.T54.a) the published `c_p` ÷ R becomes the mixture's
+//! [`mixture_heat_capacity_over_r_at`](super::mixture_heat_capacity_over_r_at) at the mean surface
+//! temperature, and the class, this function and their tests retire.
 //!
 //! A mixture is a list of `(SubstanceId, x)` mole fractions, summed in the order given: P14.T24.a
 //! sorts it, largest first with ties by id, so that its sums are output it fixes. Molar heat
@@ -14,6 +21,7 @@
 //! wrong (equal parts of helium and carbon dioxide give R ÷ `c_p` = 0.2927 by `c_p` and 0.3258 by
 //! γ).
 
+use super::thermo::MolecularConstants;
 use super::{Source, SubstanceId};
 
 /// A gas's `c_p` ÷ R class: kinetic theory's degrees of freedom, or a stated value (Robinson and
@@ -55,24 +63,37 @@ impl HeatCapacityClass {
     }
 }
 
-/// A gas row's columns: its heat capacity, each value with its sources.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// A gas row's columns: its molecular constants and, for rows 0–8 until the 22 → 23 bump, its held
+/// heat-capacity class, each value with its sources.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GasColumns {
-    pub(super) heat_capacity: HeatCapacityClass,
+    pub(super) molecular: MolecularConstants,
+    pub(super) held_class: Option<HeatCapacityClass>,
     pub(super) sources: &'static [Source],
 }
 
 impl GasColumns {
-    /// The gas's `c_p` ÷ R class.
+    /// The gas's molecular constants, over which its `c_p`(T), H̃ and S̃ are summed
+    /// ([`thermo`](super::thermo)).
     #[must_use]
-    pub const fn heat_capacity(&self) -> HeatCapacityClass {
-        self.heat_capacity
+    pub const fn molecular(&self) -> &MolecularConstants {
+        &self.molecular
     }
 
-    /// The gas's `c_p` ÷ R ([`HeatCapacityClass::over_r`]).
+    /// The `c_p` ÷ R class generator version 22 publishes, for rows 0–8: held until the 22 → 23
+    /// bump, and `None` for every later row, which never had one.
     #[must_use]
-    pub const fn heat_capacity_over_r(&self) -> f64 {
-        self.heat_capacity.over_r()
+    pub const fn heat_capacity(&self) -> Option<HeatCapacityClass> {
+        self.held_class
+    }
+
+    /// The held class's `c_p` ÷ R ([`HeatCapacityClass::over_r`]), for rows 0–8.
+    #[must_use]
+    pub const fn heat_capacity_over_r(&self) -> Option<f64> {
+        match self.held_class {
+            Some(class) => Some(class.over_r()),
+            None => None,
+        }
     }
 
     /// Where each of these values comes from.
@@ -108,11 +129,14 @@ pub fn mean_molar_mass_g_per_mol(mixture: &[(SubstanceId, f64)]) -> Option<f64> 
     mixed(mixture, |id| id.substance().molar_mass_g_per_mol())
 }
 
-/// The mixture's `c_p` ÷ R, Σ xᵢ (`c_p,ᵢ` ÷ R), mixed by molar heat capacity and summed in its
-/// order; its reciprocal is the dry adiabat's exponent R ÷ `c_p`.
+/// The mixture's held `c_p` ÷ R, Σ xᵢ (`c_p,ᵢ` ÷ R) over each row's class, mixed by molar heat
+/// capacity and summed in its order; its reciprocal is the dry adiabat's exponent R ÷ `c_p`.
 ///
-/// The fractions are the mixture's mole fractions, summing to 1, and are not renormalised. `None`
-/// for an empty mixture, or one with a row that has no gas columns.
+/// It is generator version 22's published value, held until the 22 → 23 bump (the
+/// [module documentation](self)); [`mixture_heat_capacity_over_r_at`](super::mixture_heat_capacity_over_r_at)
+/// is in force. The fractions are the mixture's mole fractions, summing to 1, and are not
+/// renormalised. `None` for an empty mixture, or one with a row that has no held class: every row
+/// after row 8.
 ///
 /// # Examples
 ///
@@ -133,13 +157,15 @@ pub fn mean_molar_mass_g_per_mol(mixture: &[(SubstanceId, f64)]) -> Option<f64> 
 #[must_use]
 pub fn heat_capacity_over_r(mixture: &[(SubstanceId, f64)]) -> Option<f64> {
     mixed(mixture, |id| {
-        id.substance().gas().map(GasColumns::heat_capacity_over_r)
+        id.substance()
+            .gas()
+            .and_then(GasColumns::heat_capacity_over_r)
     })
 }
 
 /// Σ xᵢ vᵢ over `mixture` in its order, with vᵢ = `value(idᵢ)`; `None` if the mixture is empty or a
 /// value is missing.
-fn mixed(
+pub(super) fn mixed(
     mixture: &[(SubstanceId, f64)],
     value: impl Fn(SubstanceId) -> Option<f64>,
 ) -> Option<f64> {
