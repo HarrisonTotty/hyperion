@@ -16,7 +16,6 @@ use hyperion_sim::planetary::hooks::{DetailSeed, SurfaceSeed, detail_seed, surfa
 use hyperion_sim::planetary::record::{BodyRecord, RecordSection, Section};
 use hyperion_sim::planetary::surface::{CoarseInputs, SurfaceInputsError, coarse_pass};
 use hyperion_sim::planetary::{BodyIndex, ResolveBodyError};
-use hyperion_sim::time::UniverseTime;
 use hyperion_sim::units::Metres;
 use hyperion_surface::field::{CoarseField, CoarseLevel, FieldView, coarse_level};
 use hyperion_surface::material::{
@@ -37,12 +36,13 @@ use crate::knowledge::LoadKnowledgeError;
 use crate::knowledge::surveys::{RaisedRevisions, SurveyLog};
 use crate::universe::{UniverseId, UniverseStore};
 
-/// The time at which the service reads a body's record for its inputs: the epoch.
+/// The time at which the service reads a body's record for its inputs: the sim's, at which
+/// `CoarseInputs::from_record` reads the record's spin and seasonal orbit (R09.T10.e), the epoch.
 ///
 /// It is the same whoever asks and whenever, so that the field kept is a function of its key (the
 /// [module](super) documentation). P14.T54.a, which settles the time the record's surface section
-/// is read at, settles this one too.
-pub const RECORD_TIME: UniverseTime = UniverseTime::EPOCH;
+/// is read at, settles this one with it, being one constant.
+pub use hyperion_sim::planetary::surface::RECORD_TIME;
 
 /// Why a body's coarse field could not be had.
 ///
@@ -736,6 +736,7 @@ mod tests {
     use hyperion_sim::planetary::record::BodyRecord;
     use hyperion_sim::planetary::surface::{CoarseInputs, reference};
     use hyperion_sim::planetary::{DecodeBodyIndexError, SystemContext, generate};
+    use hyperion_sim::time::UniverseTime;
     use hyperion_sim::units::{Kelvin, Pascals};
     use hyperion_sim::{GENERATOR_VERSION, Seed};
     use hyperion_surface::field::{
