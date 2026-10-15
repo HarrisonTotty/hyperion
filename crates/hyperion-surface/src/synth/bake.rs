@@ -7,7 +7,9 @@
 //! take the parent's own heights (its other vertices take the parent mesh's chords between them).
 //! Every value is the point query's, [`Synthesiser::height_at`] at the vertex's direction
 //! ([`PatchKey::vertex_dir`]), bit for bit: the bake only orders the queries and fills the caller's
-//! cache for them, first covering the structural octaves' lattice about the patch once.
+//! cache for them, first covering the structural octaves' lattice about the patch once and starting
+//! the control points its vertices share (the base elevation's and the styles' cells about the
+//! patch, read once for all of them).
 //!
 //! [`Synthesiser::height_range_m`] bounds a patch's heights at its level and its parent's for
 //! culling: the base elevation never leaves the range of the cells its points read, and each
@@ -195,12 +197,15 @@ fn band(level: u8) -> BandLevel {
 }
 
 /// Covers the structural octaves' lattice in `cache` for every query of a bake of `key`
-/// ([`cover`] at the patch's level). No value depends on it.
+/// ([`cover`] at the patch's level), and starts the bake's shared control points
+/// ([`SynthCache::start_bake`]), so that its vertices read each cell about the patch once. No value
+/// depends on either.
 pub(crate) fn cover_patch<F: FieldView>(
     synth: &Synthesiser<'_, F>,
     cache: &mut SynthCache,
     key: PatchKey,
 ) {
+    cache.start_bake(synth.channels().id());
     cover(synth, cache, key, band(key.level()));
 }
 

@@ -41,11 +41,12 @@
 //! Each cell has a [`ReliefStyle`] from its crust, its nearest plate boundary and its sea floor
 //! (the brainstorm's "ridged multifractal for a mountain belt, low-amplitude for an abyssal plain,
 //! domain-warped where a boundary is oblique"): an amplitude factor a, a belt weight b and a shear
-//! weight s, each interpolated over the sphere by R09.T4's spline ([`interp::interpolate`]), so
-//! that a style changes smoothly across cells and the relief stays C¹ wherever the noise is. The
-//! amplitudes are absolute ratios to the body class's reference ground, whose law the spectrum
-//! is, so a world with more mountain belts is rougher and one with more abyssal plain smoother
-//! (`decision-r09-t5.md` item 1). Octave m's contribution is a `g_m`^b `σ_m` `t_m`, with
+//! weight s, each interpolated over the sphere by R09.T4's spline ([`interp::interpolate`]; the
+//! three, and the base elevation with them, in one fused pass over the cells that gives each the
+//! same bits), so that a style changes smoothly across cells and the relief stays C¹ wherever the
+//! noise is. The amplitudes are absolute ratios to the body class's reference ground, whose law
+//! the spectrum is, so a world with more mountain belts is rougher and one with more abyssal plain
+//! smoother (`decision-r09-t5.md` item 1). Octave m's contribution is a `g_m`^b `σ_m` `t_m`, with
 //!
 //! > `t_m` = cos `θ_m` · `n̂_m` + sin `θ_m` · `r̃_m`,  `θ_m` = (π ÷ 2) b `ρ_m`,
 //!
@@ -122,7 +123,7 @@ use hyperion_base::math;
 use hyperion_base::rng::DetailSeed;
 use hyperion_base::units::{Metres, SquareMetres};
 
-use super::interp::{self, CellValues, ReadCellError};
+use super::interp::{self, CellRecords, Controls, Fresh, Interpolated, ReadCellError};
 use super::{BandSpectrum, SynthCache};
 use crate::cube::PatchKey;
 use crate::field::{
@@ -1081,7 +1082,9 @@ impl ReliefStyle {
     }
 }
 
-/// Which component of a cell's style a [`StyleValues`] reads.
+/// Which component of a cell's style a [`StyleValues`] reads: the tests' interpolation of one at a
+/// time, against which the fused pass is held bit for bit.
+#[cfg(test)]
 #[derive(Debug, Clone, Copy)]
 enum Component {
     Amplitude,
@@ -1090,12 +1093,14 @@ enum Component {
 }
 
 /// One component of a field's cells' styles, as the interpolant's values.
+#[cfg(test)]
 struct StyleValues<'a, F> {
     field: &'a F,
     component: Component,
 }
 
-impl<F: FieldView> CellValues for StyleValues<'_, F> {
+#[cfg(test)]
+impl<F: FieldView> interp::CellValues for StyleValues<'_, F> {
     fn level(&self) -> u8 {
         self.field.header().level().get()
     }
@@ -1107,6 +1112,47 @@ impl<F: FieldView> CellValues for StyleValues<'_, F> {
             Component::Belt => style.belt,
             Component::Shear => style.shear,
         })
+    }
+}
+
+/// A field's cells' styles as the fused pass's three values, amplitude, belt and shear, from one
+/// read of each cell and one [`ReliefStyle::of`].
+struct Styles<'a, F>(&'a F);
+
+impl<F: FieldView> CellRecords<3> for Styles<'_, F> {
+    fn level(&self) -> u8 {
+        self.0.header().level().get()
+    }
+
+    fn values(&self, cell: PatchKey) -> Option<[f64; 3]> {
+        let style = ReliefStyle::of(self.0.cell(cell)?);
+        Some([style.amplitude, style.belt, style.shear])
+    }
+}
+
+/// The values of each cell the fused pass of the base elevation and the styles reads: its
+/// elevation in millimetres, as [`interp::base_elevation`] reads it, then its style's amplitude,
+/// belt and shear.
+pub(crate) const ELEVATION_AND_STYLE: usize = 4;
+
+/// A field's cells' elevations and styles as the fused pass's [`ELEVATION_AND_STYLE`] values, from
+/// one read of each cell.
+struct ElevationAndStyle<'a, F>(&'a F);
+
+impl<F: FieldView> CellRecords<ELEVATION_AND_STYLE> for ElevationAndStyle<'_, F> {
+    fn level(&self) -> u8 {
+        self.0.header().level().get()
+    }
+
+    fn values(&self, cell: PatchKey) -> Option<[f64; ELEVATION_AND_STYLE]> {
+        let record = self.0.cell(cell)?;
+        let style = ReliefStyle::of(record);
+        Some([
+            f64::from(record.elevation_mm),
+            style.amplitude,
+            style.belt,
+            style.shear,
+        ])
     }
 }
 
@@ -1131,7 +1177,7 @@ impl Smooth {
 
 /// The interpolated style at a point.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct StyleSample {
+pub(crate) struct StyleSample {
     amplitude: Smooth,
     belt: Smooth,
     shear: Smooth,
@@ -1149,16 +1195,24 @@ impl StyleSample {
     }
 }
 
-/// The interpolated component `component` of `field`'s styles at `dir`, its gradient taken from
-/// the unit sphere to body-fixed space at the spheroid point (`g` ÷ (a, a, c), as the base
-/// elevation's is).
+/// The interpolated component `component` of `field`'s styles at `dir`, alone: the tests'
+/// reference for the fused pass ([`styles`]).
+#[cfg(test)]
 fn smooth<F: FieldView>(
     field: &F,
     dir: [f64; 3],
     component: Component,
 ) -> Result<Smooth, ReadCellError> {
-    let figure = field.header().figure();
     let at = interp::interpolate(&StyleValues { field, component }, dir)?;
+    Ok(smooth_of(field.header(), at))
+}
+
+/// An interpolated style component `at` of a field of header `header`, its gradient taken from
+/// the unit sphere to body-fixed space at the spheroid point (`g` ÷ (a, a, c), as the base
+/// elevation's is).
+#[must_use]
+fn smooth_of(header: &FieldHeader, at: Interpolated) -> Smooth {
+    let figure = header.figure();
     let radii = [
         figure.equatorial_radius_m,
         figure.equatorial_radius_m,
@@ -1168,10 +1222,63 @@ fn smooth<F: FieldView>(
     for ((g, per_radian), radius) in gradient.iter_mut().zip(at.gradient).zip(radii) {
         *g = per_radian / radius;
     }
-    Ok(Smooth {
+    Smooth {
         value: at.value,
         gradient,
+    }
+}
+
+/// The interpolated style of `field` at `dir`: its amplitude, belt and shear, each bit for bit the
+/// interpolant's of that component alone, in one fused pass over the cells (R09.T8's follow-up).
+///
+/// # Errors
+///
+/// [`ReadCellError`] naming the first cell read that `field` does not hold: the base elevation's,
+/// since the styles read the same cells in the same order.
+///
+/// # Panics
+///
+/// If `dir` is zero or has a component that is not finite.
+fn styles<F: FieldView>(field: &F, dir: [f64; 3]) -> Result<StyleSample, ReadCellError> {
+    let [amplitude, belt, shear] = interp::interpolate_each(&Styles(field), dir, &mut Fresh)?;
+    let header = field.header();
+    Ok(StyleSample {
+        amplitude: smooth_of(header, amplitude),
+        belt: smooth_of(header, belt),
+        shear: smooth_of(header, shear),
     })
+}
+
+/// The base elevation of `field` at `dir` ([`interp::base_elevation`]) and its interpolated style,
+/// each bit for bit as the interpolant gives it alone, in one fused pass over the cells (R09.T8's
+/// follow-up): one walk of each face's stencil, one read of each cell for all four values, the
+/// control points through `controls`.
+///
+/// # Errors
+///
+/// [`ReadCellError`] naming the first cell read that `field` does not hold: the base elevation's,
+/// since the styles read the same cells in the same order.
+///
+/// # Panics
+///
+/// If `dir` is zero or has a component that is not finite, or the base elevation is not finite (a
+/// bug).
+pub(crate) fn base_and_style<F: FieldView>(
+    field: &F,
+    dir: [f64; 3],
+    controls: &mut impl Controls<ELEVATION_AND_STYLE>,
+) -> Result<(HeightSample, StyleSample), ReadCellError> {
+    let [mm, amplitude, belt, shear] =
+        interp::interpolate_each(&ElevationAndStyle(field), dir, controls)?;
+    let header = field.header();
+    Ok((
+        interp::elevation_sample(header, mm),
+        StyleSample {
+            amplitude: smooth_of(header, amplitude),
+            belt: smooth_of(header, belt),
+            shear: smooth_of(header, shear),
+        },
+    ))
 }
 
 /// Where the octaves' noise is read: the caller's lattice cache, or a test's recording of it.
@@ -1385,48 +1492,77 @@ impl Relief {
         through: u8,
         lattice: &mut LatticeCache,
     ) -> Result<HeightSample, ReadCellError> {
-        if through.min(self.finest) < self.first {
+        if !self.evaluates(through) {
             return Ok(HeightSample {
                 height_m: 0.0,
                 gradient: [0.0; 3],
             });
         }
+        let style = styles(field, dir)?;
+        Ok(self.at_in_style(field.header(), dir, through, &style, lattice))
+    }
+
+    /// Whether [`at`](Self::at) through `through` evaluates an octave, and so reads the styles:
+    /// whether `through` and the finest octave are both at or above the first.
+    #[must_use]
+    pub(crate) fn evaluates(&self, through: u8) -> bool {
+        through.min(self.finest) >= self.first
+    }
+
+    /// [`at`](Self::at) at `dir` in the style `style`, interpolated there from the field of
+    /// `header` ([`base_and_style`]), the noise read through `lattice`: the same bits as `at`'s,
+    /// which interpolates the style itself.
+    ///
+    /// # Panics
+    ///
+    /// If `dir` is not finite, or a height is not finite (a bug); and, in debug builds, if the
+    /// relief does not [evaluate](Self::evaluates) an octave through `through`, or `header` is not
+    /// of the field whose header made it.
+    pub(crate) fn at_in_style(
+        &self,
+        header: &FieldHeader,
+        dir: [f64; 3],
+        through: u8,
+        style: &StyleSample,
+        lattice: &mut LatticeCache,
+    ) -> HeightSample {
+        debug_assert!(self.evaluates(through), "no octave through {through}");
+        debug_assert_eq!(
+            first_octave(header.level()),
+            self.first,
+            "a relief read with a field other than the one whose header made it"
+        );
         let key = NoiseKey::Relief(self.seed);
         let seed = self.seed;
         let table = lattice.take_octaves(key, || octave_table(seed));
-        let sample = self.sum(field, dir, through, &table, lattice);
-        lattice.restore_octaves(key, table);
-        sample
-    }
-
-    /// The sum of the octaves' terms ([`each_term`](Self::each_term)) in octave order, its
-    /// gradient as a function of direction, each asserted finite.
-    fn sum<F: FieldView>(
-        &self,
-        field: &F,
-        dir: [f64; 3],
-        through: u8,
-        table: &[Octave],
-        lattice: &mut impl Lattice,
-    ) -> Result<HeightSample, ReadCellError> {
+        let last = through.min(self.finest);
         let mut height = 0.0;
         let mut gradient = [0.0; 3];
-        self.each_term(field, dir, through, table, lattice, |term| {
-            height += term.height.value;
-            for (g, d) in gradient.iter_mut().zip(term.height.gradient) {
-                *g += d;
-            }
-        })?;
-        let gradient = as_function_of_direction(field.header(), dir, gradient);
-        Ok(HeightSample {
+        self.octave_terms(
+            &table,
+            header.figure().point(dir),
+            style,
+            last,
+            lattice,
+            |term| {
+                height += term.height.value;
+                for (g, d) in gradient.iter_mut().zip(term.height.gradient) {
+                    *g += d;
+                }
+            },
+        );
+        lattice.restore_octaves(key, table);
+        let gradient = as_function_of_direction(header, dir, gradient);
+        HeightSample {
             height_m: num::assert_finite(height),
             gradient: gradient.map(num::assert_finite),
-        })
+        }
     }
 
     /// Each octave's term at `dir`, octaves [`first_octave`] to `through` (never past the finest)
     /// of `table`, handed to `emit` in octave order, the styles interpolated from `field` first;
     /// nothing is read when no octave is asked for.
+    #[cfg(test)]
     fn each_term<F: FieldView>(
         &self,
         field: &F,
@@ -1440,16 +1576,7 @@ impl Relief {
         if last < self.first {
             return Ok(());
         }
-        debug_assert_eq!(
-            first_octave(field.header().level()),
-            self.first,
-            "a relief read with a field other than the one whose header made it"
-        );
-        let style = StyleSample {
-            amplitude: smooth(field, dir, Component::Amplitude)?,
-            belt: smooth(field, dir, Component::Belt)?,
-            shear: smooth(field, dir, Component::Shear)?,
-        };
+        let style = styles(field, dir)?;
         self.octave_terms(
             table,
             field.header().figure().point(dir),

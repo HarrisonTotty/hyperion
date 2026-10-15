@@ -230,10 +230,23 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
     ) -> Result<Contributions, QueryHeightError> {
         let field = self.field;
         let set = self.bounds.set(level);
-        let base = interp::base_elevation(field, dir)?;
-        let relief = match set.relief_through() {
-            Some(through) => self.relief.at(field, dir, through, cache)?,
-            None => NOTHING,
+        // The base elevation and the relief's styles in one fused pass where the relief reads its
+        // styles, each value's bits those of its own interpolation, through a bake's memo of their
+        // control points from its cover on (R09.T8's follow-up; the measurement is at
+        // `interp::ControlMemo`).
+        let (base, relief) = match set.relief_through() {
+            Some(through) if self.relief.evaluates(through) => {
+                let header = field.header();
+                let (base, style) = match cache.controls.memo_for(self.channels.id()) {
+                    Some(memo) => relief::base_and_style(field, dir, memo)?,
+                    None => relief::base_and_style(field, dir, &mut interp::Fresh)?,
+                };
+                let relief =
+                    self.relief
+                        .at_in_style(header, dir, through, &style, cache.lattice_mut());
+                (base, relief)
+            }
+            Some(_) | None => (interp::base_elevation(field, dir)?, NOTHING),
         };
         let channels = match set.channels_through() {
             Some(through) => self.channels.incision_at(field, dir, through, cache)?,
@@ -442,12 +455,47 @@ impl<'a, F: FieldView> Synthesiser<'a, F> {
 /// caller that moves across a body drops the cache when it moves on, as a worker does between
 /// descents; one cache serves a patch and its neighbours and children, which share their coarser
 /// cells.
+///
+/// From a bake's cover on, it also keeps the base elevation's and the styles' control points that
+/// queries read (R09.T8's follow-up, the fused pass): the cells' values about the patch, shared by
+/// its vertices, in a bounded memo that each bake's cover empties, for the field the channels' part
+/// is kept for alone (its body, level, figure and marks). Its queries after the bake read the memo
+/// too, so the base elevation's own refusals rest on the rule above as the channels' do: a cell it
+/// holds answers a later query that a view lacking the cell would refuse.
 #[derive(Debug, Clone, Default)]
 pub struct SynthCache {
     lattice: LatticeCache,
     channels: channels::ChannelCache,
     craters: CraterCache,
     ice_cuts: crate::material::IceCuts,
+    controls: BakeControls,
+}
+
+/// The fused pass's control points a [`SynthCache`] keeps from a bake's cover on, for one field.
+#[derive(Debug, Clone, Default)]
+struct BakeControls {
+    /// The field whose bake last covered the cache, as the channels' part tells one field from
+    /// another ([`channels::NetworkId`]); `None` before any, when queries read their control
+    /// points afresh.
+    field: Option<channels::NetworkId>,
+    memo: interp::ControlMemo<{ relief::ELEVATION_AND_STYLE }>,
+}
+
+impl BakeControls {
+    /// Empties the memo and keeps it for the field of `id`, from a bake's cover on.
+    fn start(&mut self, id: channels::NetworkId) {
+        self.field = Some(id);
+        self.memo.clear();
+    }
+
+    /// The memo, if it is kept for the field of `id`.
+    #[must_use]
+    fn memo_for(
+        &mut self,
+        id: channels::NetworkId,
+    ) -> Option<&mut interp::ControlMemo<{ relief::ELEVATION_AND_STYLE }>> {
+        (self.field == Some(id)).then_some(&mut self.memo)
+    }
 }
 
 impl SynthCache {
@@ -459,7 +507,18 @@ impl SynthCache {
             channels: channels::ChannelCache::new(),
             craters: CraterCache::new(),
             ice_cuts: crate::material::IceCuts::new(),
+            controls: BakeControls {
+                field: None,
+                memo: interp::ControlMemo::new(),
+            },
         }
+    }
+
+    /// Starts a bake of a patch of the field `id` names, as the synthesiser's [`Channels`] name
+    /// it: its queries share their control points from here on ([`BakeControls`]), none kept from
+    /// before.
+    pub(crate) fn start_bake(&mut self, id: channels::NetworkId) {
+        self.controls.start(id);
     }
 
     /// The structural octaves' lattice cache.

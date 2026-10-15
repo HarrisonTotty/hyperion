@@ -6634,3 +6634,180 @@ hyperion-surface --features testing` (193 library tests, 11 slow ignored; 49 pan
   - _The draws are unpinned._ Nothing pins the plates' and the warp's word layout until T16's
     field golden; a reordered draw would pass every test. Lean: T16, or a draw golden when "main"
     rules its header (21 or 22).
+- **Deviations in the fused interpolant pass, as built** (2026-10-14 and 15; lane r09-fused,
+  R09.T8's performance follow-up as "main" logged it (T8's and T9's deferred findings, and
+  R10.T6.a's bake's); begun on `373a0158`, brought to `3c921671`, merged with `2955006e` before
+  the gate).
+  - _What it is._ The base elevation (T4's interpolant over the cells' elevations) and the
+    relief's three style values (T5's amplitude, belt and shear weights) were four interpolations
+    a point, each walking the same stencils over the same cells, and each style read the cell's
+    `ReliefStyle::of` again at every cell it read (an oceanic cell's amplitude takes two powers and
+    a logarithm). They are one pass now:
+    - `interp::interpolate_each` interpolates N values a cell (`CellRecords<N>`), sharing the
+      query's cell, each face's weight and basis, the stencil's walk and one read of each cell for
+      all N, with each value's own arithmetic in the one-value order. `interpolate` is it at N = 1.
+    - `Relief::at` fuses its three styles (`relief::styles`). `Synthesiser::contributions` fuses
+      all four where the level evaluates an octave (`relief::base_and_style`, then the crate-private
+      `Relief::at_in_style`), and keeps `base_elevation` alone where it does not.
+  - _The bake's shared work._ A patch inside one coarse cell reads about 25 control points a face,
+    the same at each of its 5,314 queries. `interp::ControlMemo` keeps each control point's raw
+    values, a cell's four or a ghost's four cells' with its bilinear fractions, by face and indices,
+    direct-mapped in 1,024 slots (about 176 KiB), and each query takes them relative to its own cell
+    as before.
+    - `SynthCache` holds it (`BakeControls`), for the field its channels' part is kept for (the
+      channels' `NetworkId`: body, level, figure and the header's marks).
+    - `bake::cover_patch` empties and starts it. That is each bake's cover: R09's `bake_patch`, and
+      through T3's `prepare_cache` R05's bake and R10's `bake_terrain`, whose double normals read
+      it too. The bake's queries read it, and so do later point queries through the same cache.
+    - A query that reads a cell not held reads it afresh and is refused as before, and the memo
+      keeps only control points read whole. So under `SynthCache`'s rule (views of one field whose
+      held cells only grow) no answer depends on it, refusals included. Its documentation now says
+      the base elevation's refusals rest on that rule, as the channels' did.
+    - The point query's `Fresh` reads each cell and takes it relative at once, as the one-value
+      interpolant did, and a ghost's cells as its stencil names them (`fresh_ghost`). Two earlier
+      versions were slower. Reading every control point through the memo's raw form made the base
+      elevation alone 16% slower natively (13.37 ms against 11.56 ms a patch's sweep, at loads 3.4
+      and 1.0). Reading in place but keying a ghost's four cells first (`ghost_stencil`) made it
+      62% slower on V8 (14.08 against 8.67 ms, at loads 10 and 14). This one is the same as before
+      within the loads' noise: natively 11.79 against 11.54 ms (loads 11 and 1.2), on V8 8.84
+      against 8.61 ms (loads 14 and 9).
+  - _Bits._ Unchanged, by construction and as tested: every value takes the same operations on the
+    same operands in the same order, and the error is the same first cell not held. Every golden
+    passes unchanged, with no re-bless and no bump (22): `tests/golden/height/` (the points
+    through the fused pass, the parts through `Relief::at`, the bakes through the memo, the
+    closed forms, levels and common figures), `ground/`, `material/`, `weights/`,
+    `terrain_bake/`, `wire/` and R05's, natively (33 golden tests of the library) and on
+    `wasm32-wasip1` and `wasm32-unknown-unknown` through the gate's suites.
+  - _No contract moved._ No public signature, payload or golden changed; `SynthCache` keeps its
+    API. The additions are crate-private: `CellRecords`, `interpolate_each`, `Controls`, `Fresh`,
+    `ControlMemo`, `elevation_sample` (the base elevation's conversion, shared), `Grid` made
+    `pub(crate)`, `relief::{ELEVATION_AND_STYLE, base_and_style, StyleSample}`, `Relief::evaluates`
+    and `at_in_style`, and `SynthCache::start_bake`. The style's one-at-a-time interpolation
+    (`smooth`, `Component`, `StyleValues`) is kept for the tests as the reference.
+  - _Tests added._
+    - `relief::tests`: the fused pass's base elevation and styles are each the one-value
+      interpolant's, bit for bit, read afresh and through one memo across every point (its slots
+      replaced as well as read again), at the seams of every synthetic world (a 5 × 5 grid over each
+      face's corner cells and the cells halfway along its edges) and 300 points at random; a second
+      query through a memo reads fewer cells; and with each point's reads less one, the fused pass,
+      afresh and through a memo its neighbours filled, refuses the cell the base elevation does.
+    - `synth::tests`: a cache that baked another world's patch bakes a cube corner's patch as a
+      fresh cache does and answers later point queries, and the other world's, as a fresh one; and
+      after a bake over a view of a cell and its margin, point queries about it (out to four king
+      moves, the outer refused) are order independent and a fresh cache's, answered and refused,
+      at the patch's level, its parent's and level 0, on the Earth- and Moon-like worlds.
+  - _The bench,_ natively (`benches/synth.rs`'s `surface/point` and `surface/patch`, a part's
+    sweep of a patch's 4,225 vertices ÷ 4,225, from the cache a first bake filled; one thread,
+    release, schedutil, a 1,200% quota under the heavy lock; before on 2026-10-14 at a load of 1.2,
+    after on 2026-10-15 at 11–18 in one hold with the bake and the WebAssembly bench below, 1,648 s;
+    provisional):
+
+    | Part, µs a point | Earth-like, 12 | Earth-like, 19 | Moon-like, 10 | Moon-like, 17 |
+    | ---------------- | -------------: | -------------: | ------------: | ------------: |
+    | base             |    2.73 → 2.79 |    2.73 → 2.74 | 0.290 → 0.291 | 0.290 → 0.289 |
+    | relief           |   13.20 → 5.89 |   14.24 → 7.07 |   2.45 → 1.85 |   3.48 → 2.87 |
+    | channels         |    0.82 → 0.84 |    0.84 → 0.84 |   0.24 → 0.24 |   0.24 → 0.24 |
+    | craters          |    2.59 → 2.61 |    5.49 → 5.66 |   3.31 → 3.39 |   6.85 → 7.15 |
+    | rims             |    0.04 → 0.04 |    0.05 → 0.05 |   0.45 → 0.43 |   0.45 → 0.43 |
+    | height           |   19.60 → 6.49 |  23.75 → 10.48 |   6.94 → 5.87 | 11.64 → 10.57 |
+    | patch, warm (ms) |   103.8 → 34.0 |   125.4 → 55.3 |   36.4 → 30.5 |   61.0 → 55.4 |
+    | patch, cold (ms) |   109.4 → 39.7 |   130.1 → 60.1 |   37.7 → 32.0 |   64.9 → 59.1 |
+    - `relief` is the point query's (`Relief::at`, its three styles fused, read afresh): the fused
+      styles alone take it from 13.2 to 5.9 µs on the Earth-like world.
+    - `height` reads the cache a first bake filled, and so the bake's memo: it is a bake's cost a
+      vertex, not a cold point query's (about 9.7 µs at L + 4 on the Earth-like world, from the
+      parts: the four values fused afresh, the octaves, channels, craters and rims).
+    - The Earth-like patch's base elevation costs ten times the Moon-like's, before and after; the
+      memo spares a bake nearly all of it.
+    - The other parts' code is unchanged; they read up to 4% above before, the load's share. The
+      2026-10-14 run of the code before `fresh_ghost` (the point query's ghost path; loads
+      1.2–2.2) read them within 3% of before too, and the base elevation 1.5–5% below before, where
+      this run reads it 0–2% above: the ghost path's change or the load, which these runs cannot
+      tell apart.
+
+    The bake on real terrain (R10's `bake/patch_65`, over the client's `PartialField`; the same
+    conditions, before at a load of 1.1, after at 16):
+
+    | Patch, ms            |      Weights |   No weights |        Double | Weights, cold |      Heights | Heights, whole |
+    | -------------------- | -----------: | -----------: | ------------: | ------------: | -----------: | -------------: |
+    | Earth-like, L + 4    | 160.1 → 60.0 | 137.3 → 36.5 | 476.3 → 145.2 |  163.3 → 65.8 | 134.1 → 35.2 |   104.0 → 35.0 |
+    | Earth-like, 19       | 165.0 → 64.1 | 158.8 → 58.3 |             — |             — | 155.2 → 57.0 |   124.9 → 56.7 |
+    | Moon-like rim, L + 4 |  60.0 → 51.6 |  40.8 → 32.1 |             — |             — |  39.3 → 32.1 |    36.5 → 32.7 |
+
+    The 2026-10-14 run of the code before `fresh_ghost`, at a load of 1.1, read 59.4, 36.5, 143.6,
+    65.3, 35.2 and 34.4 ms on the Earth-like world at L + 4, and 30.8 and 30.7 ms for the Moon-like
+    rim's heights: the load's share here is up to 7%, on the rim's heights.
+
+    In WebAssembly (T9's `surface/point` for the browser target, on Electron 44.4.3's V8 15.2
+    through the shim, 20 samples a part, in the same hold; before at a load of 8.9, after at 13.7;
+    provisional), per point, a patch's time ÷ 4,225, from a warm cache:
+
+    | Part             | Earth-like, 12 | Earth-like, 19 |    Moon-like, 10 |    Moon-like, 17 |
+    | ---------------- | -------------: | -------------: | ---------------: | ---------------: |
+    | base             | 2.04 → 2.09 µs | 2.04 → 2.07 µs | 0.277 → 0.280 µs | 0.278 → 0.283 µs |
+    | relief           |   12.89 → 6.55 |   14.27 → 7.24 |      3.02 → 2.32 |      4.39 → 3.65 |
+    | channels         |    0.98 → 1.59 |    0.98 → 1.07 |      0.26 → 0.31 |      0.26 → 0.31 |
+    | craters          |    3.70 → 4.82 |    7.83 → 9.19 |      4.68 → 4.70 |      9.79 → 9.76 |
+    | craters-uncached |       97 → 100 |      202 → 207 |    1,132 → 1,135 |    2,805 → 2,808 |
+    | rims             |    0.08 → 0.11 |    0.08 → 0.08 |      0.61 → 0.50 |      0.61 → 0.50 |
+    | height           |   19.89 → 9.08 |  25.42 → 14.57 |      8.94 → 7.87 |    15.51 → 14.25 |
+    - The base elevation is back at before's: the 3.32 µs at L + 4 on the Earth-like world (load
+      1.1) of the version before `fresh_ghost` was its ghost path, a ghost's four cells keyed
+      first, which `fresh_ghost` replaced.
+    - The relief halves on the Earth-like world, and `height` (a bake's cost a vertex, as natively)
+      falls from 19.9 to 9.1 µs at L + 4: a patch's height sweep is 38 ms, against T9's 84 ms.
+    - The other parts' code is unchanged. On the Earth-like world at L + 4, the first parts run,
+      the channels, craters and rims read 9–62% above before at the start's load of 13.7; the
+      2026-10-14 run at a load of 1.1 read them within 5% (1.03, 3.77 and 0.09 µs). On the
+      Moon-like world the channels read 18% slower and the rims 18% faster in both after runs,
+      while natively they are unchanged (deferred, below).
+
+  - _Design note 14's hash levers_ are not tried: as T8 found, the cost was the interpolation, and
+    the bake's lattice cover already spares the hash.
+  - _Review._ The determinism audit found no way a bit can change, on any target, in either path;
+    its should-fix (an order-independence test over the memo's state, refusals included) is the
+    second `synth::tests` test above, and its keying of the memo on the channels' `NetworkId`
+    rather than the body and level is taken. Its other item, ending the memo when the bake's
+    queries end, is deferred below. The Rust review's should-fixes are applied (the spline's sums
+    a struct, the documentation's summaries and sections, the measurement cited at the memo, the
+    tests' assertions and messages, the memo's hit path computing from its slot); `Fresh` stays
+    apart from the memo's raw form, for the measured reason above.
+- **Deferred findings (2026-10-13 rule)** (the fused pass; recorded, not ruled; each for "main"'s
+  list).
+  - _Still over the budget at the finest levels and in WebAssembly._ Natively, the Earth-like
+    patch at L + 4 bakes in 34 ms, inside the brainstorm's 40 ms, but at 19 in 55 ms and the
+    Moon-like rim at 17 in 55 ms. In WebAssembly the Earth-like height sweep is 38 ms at L + 4
+    (9.1 µs a point, just inside the 10 µs and the 40 ms, at a load of 14), 62 ms at 19 and 60 ms
+    on the Moon-like rim at 17 (14.6 and 14.2 µs a point). Against Design note 14's WebAssembly
+    targets the relief (6.5 µs at L + 4, against 1.5) and the small craters (3.7–9.8 µs, against 2)
+    still miss, and so does the point query's base elevation (2.1 µs, against 0.2), which the memo
+    spares a bake. What is left is the octaves' noise (about 3 µs a point at L + 4, 4 µs at 19 on
+    the Earth-like world, natively) and the small craters (2.6 µs at L + 4, 5.7 µs at 19; 3.4 and
+    7.1 µs on the Moon-like world, the largest part there). Levers, none tried: the parent level's
+    octave sum is a prefix of the patch level's (same terms, same order, from zero), so a bake
+    could take its 1,089 parent relief heights from its own queries' sums; the small craters'
+    search for a patch's vertices shares its cells, as the interpolant's did.
+  - _The weights are now 39% of R10's bake_ (24 ms of 60 at the Earth-like L + 4, against 23 ms,
+    14%, of 160 before): R10.T2's per-vertex site, R10.T6.a's own finding, is now the larger lever.
+  - _The `PartialField`'s cost was the interpolant's reads._ R10.T6.a's 31% more a height over the
+    client's field than over the whole (29% in this lane's before run: 134.1 against 104.0 ms at
+    the Earth-like L + 4; 24% at 19, 8% on the Moon-like rim) is now under 1% (35.2 against
+    35.0 ms; 0.5% at 19, none on the rim; 2.2% in the 2026-10-14 run at a load of 1.1): the memo
+    reads each cell once a patch. The dense array with a held bitmap is not needed for the bake.
+  - _The memo outlives its bake._ Point queries after a bake read it until the next bake's cover,
+    so the base elevation's refusals there rest on `SynthCache`'s rule, which a caller reusing one
+    cache for a view holding fewer cells would break (no caller does;
+    `a_cell_not_held_is_not_surveyed` reuses one cache across shrinking views and bakes nothing).
+    Ending it with the bake would need an end hook in R05's `HeightSource`, a public trait, since
+    R05's and R10's bakes reach R09's cache only through `prepare_cache`.
+  - _The memo knows its field as the channels' part does._ Two fields with the same body, level,
+    figure and header marks but other cells would share it, as they would the channel networks;
+    a header fingerprint (or the whole `FieldHeader`) would tell them apart.
+  - _The bench's `height` part reads a bake's memo,_ since its cache is the one a first bake
+    filled (T8's choice): it no longer measures a cold point query. A `height-afresh` part, from an
+    empty cache each point, would.
+  - _Unchanged parts move in WebAssembly._ Between the before and after modules, the Moon-like
+    world's channels read 18% slower (0.26 → 0.31 µs) and its rims 18% faster (0.61 → 0.50 µs) in
+    both after runs (loads 1.1 and 13.7), with their code unchanged and natively the same: V8's
+    code generation or the module's layout, 0.2 ms more and 0.5 ms less a patch's sweep. A run
+    that compares two modules cannot tell it from the change. Lean: nothing to do.
