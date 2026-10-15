@@ -1,0 +1,17 @@
+{
+  "description": "A 4 x 2 face-on extinction map at 8 bits, pinned from both languages. log10_mag is the raw map of log10 A(V) in magnitudes, row by row from the top, null for a pixel with no dust; every value is exact as an f32. Quantising it (floor = log10 of 0.01 mag = -2, ceiling = its maximum) gives codes, which map encodes.",
+  "log10_mag": [null, -2.0, -1.5, -1.0, 0.0, 0.5, 1.25, 1.5],
+  "codes": [0, 0, 37, 74, 146, 182, 237, 255],
+  "map": {
+    "universe": "0123456789abcdef",
+    "view": "face_on",
+    "width_px": 4,
+    "height_px": 2,
+    "centre_ly": [0.0, 0.0],
+    "ly_per_px": 32768.0,
+    "bits": 8,
+    "floor_log10_mag": -2.0,
+    "ceiling_log10_mag": 1.5,
+    "data_base64": "AAAlSpK27f8="
+  }
+}

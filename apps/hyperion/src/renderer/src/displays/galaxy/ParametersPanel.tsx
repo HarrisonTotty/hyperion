@@ -104,7 +104,11 @@ function ParameterTable({ group }: ParameterTableProps) {
               <th scope="row" className="parameter-table__label">
                 {reading.label}
               </th>
-              <td className="parameter-table__value">{reading.text}</td>
+              {reading.text === null ? (
+                <td className="parameter-table__value readout__missing">—</td>
+              ) : (
+                <td className="parameter-table__value">{reading.text}</td>
+              )}
               <td className="parameter-table__unit">
                 {reading.unit === null ? null : <UnitLabel unit={reading.unit} />}
               </td>

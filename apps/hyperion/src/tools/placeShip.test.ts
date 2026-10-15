@@ -160,6 +160,8 @@ class FakeServer {
       case "sky":
       case "surface_field":
       case "survey_pass":
+      case "extinction_map":
+      case "extinction":
         break;
     }
     return { code: "unsupported", message: `not faked: ${body.kind}`, field: null };

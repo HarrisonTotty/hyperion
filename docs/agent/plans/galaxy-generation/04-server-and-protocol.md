@@ -354,7 +354,9 @@ Each is a decision the brainstorm leaves open.
     sent only to clients built to receive it. This holds because both readers ignore what they do
     not know: no wire type is `deny_unknown_fields`, and the client's decoder trusts the generated
     types while its adapters read named fields only. Making a wire type refuse unknown fields, or
-    adding a client check that refuses an unknown key, would end it, and so bumps. The client
+    adding a client check that refuses an unknown key, would end it, and so bumps. The enums the
+    reserved list names as growing take a new string without a bump; every other enum carries all
+    its variants from the first build that sends a value of it (decision-gg-port-d0 §1). The client
     compares the welcome's version with its own and shows `incompatible`.
 
 ### Universes
@@ -501,6 +503,7 @@ Later plans add a request by adding a variant to `RequestBody` and `ResponseBody
   as the brainstorm requires of IDs read from the protocol. M1 has no such inbound field.
 - `MassLayer`, `Population`, `LayerStatus`, `Unit` and `ErrorCode` will grow. TypeScript switches
   over them are exhaustive with no `default`, so a new value is a compile error where it matters.
+  The `PARAMETERS` page reads a unit it does not know as Missing (P07.T10.b).
 - Optional request fields `region` (density map) and `include_substellar` (range query).
 
 ## Tasks

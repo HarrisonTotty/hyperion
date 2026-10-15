@@ -6,7 +6,7 @@
 //! from [`FIRST_NODE_LY`] to the root cube's edge on distance nodes spaced geometrically,
 //! [`BandSpec::nodes_per_decade`] a decade (twelve at [`BandSpec::STANDARD`]), with every layer's
 //! complete-to radius inserted as a node of its own. Its extinction at every node comes from one
-//! [`profile`] march ([`NoiseMode::Realised`], [`BAND_PROFILE_QUALITY`], with the modifiers near
+//! [`profile`] march ([`NoiseMode::Realised`], [`SIGHTLINE_QUALITY`], with the modifiers near
 //! the ray). At each node, for each density component and layer, the band takes the component's
 //! density times the layer's share of its systems times their luminosity function
 //! ([`LuminosityTables::get_at`], read at the node's light age through
@@ -122,12 +122,10 @@
 
 use std::ops::Range;
 
-use core::num::NonZeroU32;
-
 use crate::coords::{GalacticDisplacement, GalacticPosition, ROOT_HALF_WIDTH_LY, UnitVector};
 use crate::galaxy::consts::LIGHT_YEARS_PER_PARSEC;
 use crate::galaxy::fields::{ComponentId, MAX_COMPONENTS};
-use crate::galaxy::gas::extinction::{NoiseMode, Quality, profile};
+use crate::galaxy::gas::extinction::{NoiseMode, SIGHTLINE_QUALITY, profile};
 use crate::galaxy::gas::modifiers::GasModifier;
 use crate::galaxy::imf::MassBand;
 use crate::galaxy::{Galaxy, PointLy};
@@ -147,11 +145,6 @@ use super::dgl::Illumination;
 use super::eye::{REFERENCE_SP_RATIO, illuminance_of_magnitude};
 use super::luminosity::LuminosityTables;
 use crate::tables::star_colour::LUMINANCE_RGB;
-
-/// The quality of each ray's extinction profile (Design note 14): `Budget(256)`, the value of plan
-/// 07's `SIGHTLINE_QUALITY` (P07.T10.c), as R06.T9.a fixes it.
-pub const BAND_PROFILE_QUALITY: Quality =
-    Quality::Budget(NonZeroU32::new(256).expect("256 is not zero"));
 
 /// The nearest distance a ray's light is taken from, ly (Design note 14).
 ///
@@ -1555,7 +1548,7 @@ impl Rays {
             direction,
             &self.nodes,
             NoiseMode::Realised,
-            BAND_PROFILE_QUALITY,
+            SIGHTLINE_QUALITY,
             &self.modifiers,
             &mut ctx.noise,
             &mut self.a_v,
@@ -2201,6 +2194,7 @@ fn band_rows_through(
 
 #[cfg(test)]
 mod tests {
+    use core::num::NonZeroU32;
     use std::sync::OnceLock;
 
     use hyperion_testkit::float::{bits, bits_f32};
@@ -2210,7 +2204,7 @@ mod tests {
     use crate::galaxy::features::centre::testing::milky_way_galaxy;
     use crate::galaxy::gas::CENTIMETRES_PER_LIGHT_YEAR;
     use crate::galaxy::gas::ccm::HYDROGEN_COLUMN_PER_MAG;
-    use crate::galaxy::gas::extinction::sightline;
+    use crate::galaxy::gas::extinction::{Quality, sightline};
     use crate::galaxy::gas::modifiers::{GasModifierSource, NoModifiers};
     use crate::galaxy::gas::noise::NoiseCache;
     use crate::sky::caps::{CAP_RAYS, CapLattice};
@@ -4790,7 +4784,7 @@ mod tests {
                     origin,
                     &end,
                     NoiseMode::Realised,
-                    BAND_PROFILE_QUALITY,
+                    SIGHTLINE_QUALITY,
                     modifiers,
                     &mut cache,
                 )

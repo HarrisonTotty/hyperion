@@ -1121,6 +1121,9 @@ variants exist.
   and its test, `packages/protocol/src/index.ts`, `packages/protocol/fixtures/extinction_map_4x2.json`;
   and for T10.b the four client files named there.
 - Acceptance: `just gen-protocol-check` and `just ci` green after each subtask.
+- **Built** (2026-10-14, at version 22): T10.a, T10.b and T10.c, ported from galaxy-generation
+  5b1c3285 (its T10 half) by lane `gg-port-a1` under `decision-gg-port-d0.md`; see Risks,
+  "P07.T10.a–c, ported".
 
 ### P07.T11 Client: map layer and chart readout
 
@@ -1995,3 +1998,144 @@ Quality::Budget(256), &[], cache)` and reads `a_v`, `reddening`, `in_band(Band::
   n̄_w of 0.030 cm⁻³ is twice their 0.014, and the peak sits at 0.9 kpc rather than their 1.4–2
   (§4.5: 0.30 at 1.4 kpc). Not tuned. T12's test text (`tests/gas_statistics.rs`) says so; its
   windows are unchanged.
+- **P07.T10.a–c, as built (lane `ext07`, round 9, 2026-09-30, at version 15; re-gated at 16 by
+  lane `ext07b`) on `galaxy-generation`.** Kept as history; the port below brings it onto
+  `rendering-and-planets` at version 22. No generated value moved: `galaxy_parameters.golden`
+  gained the `gas` group and nothing else, the density map's golden is unchanged, and the one new
+  golden is `crates/hyperion-server/tests/golden/extinction_map_face_on_128.golden`, whose ceiling
+  is 0.322 dex (2.1 mag face-on) and whose centre pixel (code 195) sits below the ring's (206): the
+  hole inside the bar.
+  - _T10.a, shared banding._ `compute/density_map.rs`'s band loop is now
+    `render_bands(pool, galaxy, spec, resolution, view, render_band)`, which both map services call;
+    `to_log10` and `spec_view` are `pub(super)`, `BAND_ROWS` `pub(crate)`. `quantise_map_with_floor`
+    gives a map with nothing above its floor a ceiling equal to the floor and every code 0; a
+    density map, whose floor is set from its ceiling, is bit-identical. The floor is
+    `compute::EXTINCTION_FLOOR_LOG10_MAG` (−2).
+  - _T10.a/c, conversions._ The checks and answer builders of both kinds are in a new
+    `convert/extinction.rs` (`ExtinctionMapQuery`, `ExtinctionQuery`, `LineEnd`, `extinction_map`,
+    `target_extinction`, `extinction_result`), a submodule as `stellar` and `planetary` are.
+  - _T10.c, the sightline cache_ is a new `compute/sightlines.rs`: `SharedSightlineCache`, whose
+    `marcher(key, galaxy)` gives a job's `SightlineMarcher` (it owns the job's `NoiseCache` of
+    4,096), and `SIGHTLINE_QUALITY` = `Budget(256)` (moved into the sim by the port, below). The key
+    is the `GalaxyKey`, the two ends' cell and offset bits in sorted order (design note 15) and the
+    quality; the mode and modifiers are fixed by the marcher, which takes neither.
+  - _T10.a/c, budgets._ `--extinction-map-cache` (`HYPERION_EXTINCTION_MAP_CACHE_MB`, 16 MiB) and
+    `--sightline-cache` (`HYPERION_SIGHTLINE_CACHE_MB`, 4 MiB); the plan named only the first.
+    `ServerStats` gains `extinction_maps()` and `sightlines()`.
+  - _T10.c, refusals._ Zero targets are refused `bad_request` naming `targets`, as 65 are. A system
+    ID whose bits are no `SystemId`, or one `resolve` refuses for any reason (a kind or layer not
+    placed yet included), answers that target `no_such_system`.
+  - _T10.c, tests._ The system target is compared with the sim's own line at the epoch only: the
+    server builds the full potential that `position_at` drifts a system by, which a debug test must
+    not build. The a→b and b→a test asks two servers, so the cache cannot hide an asymmetry. An
+    extra test takes the map over the socket (geometry, a refused resolution, the cache hit).
+    `universes.rs`'s refusals moved into `requests_naming()` for Clippy's line limit.
+  - _T10.b, the count._ `PARAMETERS_ACCOUNTED_FOR` is 99 → 116. The task's "95 … rises by the
+    group's size plus one" is wrong twice: the base was already 99, and moving `gas.scale_height`
+    from the exclusions to the sent keys leaves sent plus excluded unchanged, so the rise is the 17
+    new keys. The group's order is design note 3's, `gas.scale_height` first, with each derived share
+    beside its layer (`PLAN_TABLE` pins it). `Unit::Mag` exists but no parameter sends it yet. The
+    client writes `/cm³` in E notation, `K/cm³` to three figures and `mag` to two decimals.
+  - _Re-gated at version 16 (`ext07b`)._ The two new pins moved with the base and were re-blessed
+    at 16: the extinction map's ceiling from 0.32182 to 0.32188 dex (code sum 1,449,236 →
+    1,449,344), and five of the `gas` entries by at most 1.2 × 10⁻⁴ relative
+    (`gas.warm_fraction` 0.156600 → 0.156583, `gas.molecular_length` 382.362 → 382.381,
+    `gas.molecular_height` 92.932 → 92.936, `gas.molecular_fraction` and `gas.neutral_fraction`),
+    with version 16's base.
+- **P07.T10.a–c, ported (lane `gg-port-a1`, 2026-10-14, at version 22).** Built on
+  `rendering-and-planets`: ported from galaxy-generation 5b1c3285 (its T10 half) by
+  `git cherry-pick -n`, under `decision-gg-port-d0.md` (batch A1). Its T11.b–c paths (the map, the
+  legends, the layout, the readout, `RequestStatus`, `mapPicture` and `styles.css`) were restored to
+  the tip for batch A2; `test/galaxyFixtures.ts` came whole, with `anExtinctionMap` and
+  `anExtinctionResult` for A2. No `GENERATOR_VERSION` bump and no `PROTOCOL_VERSION` bump.
+  - _Figures at 22._ `extinction_map_face_on_128.golden` is its version-16 pin bar the header:
+    ceiling 0.321879 dex (2.10 mag face-on), floor −2 (0.01 mag), code sum 1,449,344, the centre's
+    code 195 below the ring's 206 at (80, 80), and 164–169 a quarter of the map's width from the
+    centre along the axes. `galaxy_parameters.golden` gains the `gas` group of 18 entries
+    (`gas.scale_height` and the 17 new keys) and nothing else: `git diff` removes no line. Seed
+    0x4d2's gas at 22: drawn, a hole scale of 17,609.3 ly, a warm ionised density of 0.03353 cm⁻³
+    and height of 3,122.6 ly, a molecular disc of 2.164 × 10⁶ M☉ and 92.94 ly high, a corona of
+    6.816 × 10⁻⁴ cm⁻³, a pressure floor of 368.7 K cm⁻³, σ_ln 1.018, and lanes 453.9 ly inside the
+    arms, 239.4 ly wide with a share of 0.1624; derived, the molecular scale length 382.38 ly and
+    the shares 0.15658 (warm ionised), 2.386 × 10⁻⁴ (molecular) and 0.84318 (neutral); fixed, the
+    neutral scale height 700 ly, the pressure scale height 1,500 ly and σ_P 5.15 km/s. The five
+    entries `ext07b`'s re-gate moved, the four derived ones and `gas.molecular_height` (drawn as a
+    share of the derived R_c), differ from their version-16 pins by at most 8.3 × 10⁻¹⁴ relative
+    (`gas.molecular_fraction`); the other thirteen are bit-identical.
+    `density_map_face_on_128.golden` is byte-identical through the `render_bands` refactor.
+  - _`golden_diff.py`._ It lists the new `extinction_map_face_on_128.golden`, and
+    `galaxy_parameters.golden` with 167 new labels and "4 changed": those four are JSON closing
+    lines (`}` and `]`) that the tool keys by their text and occurrence, and whose indentation
+    differs once the `gas` group is appended. No value moved, so its "bump required" verdict is a
+    false positive here (a deferred finding, below; the determinism review agrees).
+  - _Conflicts._ Every one was both sides appending to one list: `config.rs` (the options table, the
+    variables, the defaults, the clap fields, the builder and its tests, with the two caches placed
+    after the brief cache and the tests' cache arrays grown from 8 to 10), `requests/mod.rs` (the
+    dispatch, `kind`, `is_large` and its doc, the test imports and `every_body`), `envelope.rs`
+    (the variants, `REQUEST_KINDS` and `request_kinds_are_pinned`, the kinds appended after
+    `survey_pass`), `compute/mod.rs`, `lib.rs`, `stats.rs`, `convert.rs`, `limits.rs` and
+    `packages/protocol/src/index.ts`. By hand: the walks `next_request` and `next_response` are
+    re-threaded `SurveyPass → ExtinctionMap → Extinction → None`; the handlers now return an
+    `Answer`, so both kinds go through `answered` as every JSON-only kind does; `next_request`,
+    `next_response` and `every_body` passed Clippy's 100-line limit, and each takes an
+    `#[expect(clippy::too_many_lines)]` with its reason; `RequestBody.ts` and `ResponseBody.ts`
+    were regenerated by `just gen-protocol`; and `apps/hyperion/src/tools/placeShip.test.ts`'s fake
+    server, exhaustive over the kinds, names the two new ones among those it does not fake.
+    `is_large`: `extinction_map` is large and `extinction` is not, which a test now pins.
+  - _Ruling 1 (`decision-gg-port-d0.md` §1)._ `PROTOCOL_VERSION` stays 2, and its doc and plan 04's
+    Design note 15 and reserved list state the rule for the enums that grow. `Unit`'s wire-strings
+    test holds `per_cm3`, `k_per_cm3` and `mag`. The client reads a unit it does not know as
+    Missing: `parameterReadings.ts`'s precisions and `UnitLabel.tsx`'s symbols are
+    `Readonly<Record<Unit, …>>` tables read through `Object.hasOwn`, so a unit added to the
+    protocol without an entry is still a type error; a `ParameterReading`'s `text` is `null` for a
+    Missing value, with no unit, and `ParametersPanel` draws `—` in `.readout__missing`
+    (`--text-muted`). Tests: `toReading` and `UnitLabel` of a unit this build does not know (and of
+    `toString`, which the prototype must not answer), and the panel's row; the one cast is
+    `test/galaxyFixtures.ts`'s `anUnknownUnit`, documented as the decoder's own trust at the wire.
+  - _Ruling 2 (§2.2)._ The group is `GAS AND DUST`, built to D0 §2.4 (f)'s draft of the guide's
+    groups row, pending the owner's sign-off (the sign-off queue's item for the galaxy map's
+    extinction names); the guide is not edited here. `gas.molecular_mass` reads
+    `MOLECULAR DISC MASS` and `gas.pressure_speed` `VELOCITY DISPERSION`; the other sixteen labels
+    are 5b1c3285's.
+  - _Ruling 5 (§5)._ `SIGHTLINE_QUALITY` (`Budget(256)`) is the sim's,
+    `galaxy::gas::extinction::SIGHTLINE_QUALITY`, its doc naming both readers;
+    `compute::sightlines` imports it and defines none, and `compute` no longer re-exports it;
+    `sky::band::BAND_PROFILE_QUALITY` is deleted and the band's profile and its test read the sim's
+    constant. The value is unchanged, so no output moves: the sim's `gas::extinction` and
+    `sky::band` tests pass (45). R06's text notes the move.
+  - _From review._ The raw and quantised maps carry their unit as a marker type: `RawMap<U>` and
+    `QuantisedMap<U>`, with `RawDensityMap` = `RawMap<PerLy2>` and `RawExtinctionMap` =
+    `RawMap<Mag>`, so that neither map can be quantised by the other's rule or answered as the
+    other (the Rust rules' "Physical quantities always carry their unit in the type or the name").
+    This departs from T10.a's text, which reuses `RawDensityMap` and names
+    `quantise_map_with_floor(&RawDensityMap, …)`: it takes `&RawMap<U>`, and `quantise_map` and
+    `convert::density_map` take the density map's unit, `convert::extinction_map` the extinction
+    map's. The wire is unchanged. Also: the sightline cache's order independence is tested through
+    a warm cache, a fresh one and one that holds a single line (`assert_order_independent`); the
+    tests name the error variants they expect; and the budgets' docs give the measured charges (an
+    extinction map's every view and resolution is 8.0 MiB of `f32`, and a cached line is charged
+    128 bytes, so 4 MiB holds 32,768 lines, not 5b1c3285's "some 20,000").
+  - _Also:_ `E(B−V)` with U+2212 in `TargetExtinction`'s doc and `convert::extinction`'s.
+  - _Time._ `tests/extinction.rs` alone: 5 tests in 8.5 s (debug, 4 test threads,
+    `CPUQuota=400%`, a shared machine: provisional).
+  - _Left for A2 (P07.T11.b–c):_ the dust overlay, `QUANTITY`, the extinction legend, the compact
+    map page and the readout's `FROM CHART CENTRE` rows, with D0's rulings 2 (their names) and 3.
+  - _Deferred findings (2026-10-13 rule)._
+    - `golden_diff.py`'s `by_label` keys an unlabelled line by its stripped text and occurrence but
+      compares it with its indentation, so a group appended to a JSON golden reports its closing
+      lines as changed and asks for a bump. A fix would compare stripped text, or key JSON goldens
+      by path.
+    - The `extinction` answer's values at `SIGHTLINE_QUALITY` are pinned by no golden: the tests
+      compare the server's lines with the sim's own call, `gas_extinction_is_pinned` pins `Full`
+      and `Budget(64)` only, and `sky/band_face_row` pins the band's profile at `Budget(256)` to
+      10⁻¹² rather than bit for bit. A server golden of a few lines would pin them; not added,
+      since D0 §6.4 fixes this batch's goldens (one new, one extended). For main.
+    - The guide has no row for a value the server sent in a unit the console does not know. D0
+      rules it Missing (`—`); the guide's `UNLISTED MATERIAL` row keeps the em dash from a value
+      the server did send. A line for the sign-off queue's drafts, or a reason beside the dash.
+    - The console-ux skill's `ux_lint.py` reports `UnitLabel.tsx`'s table keys `per_ly3` and
+      `per_cm3` as code names on screen, a false positive for the two entries whose text starts
+      with `/`.
+    - D0 counts the gas labels as 17 (§1.1's rows, A1's "the 17 labels", §2.2's "15 kept and 2
+      renamed"); the group sends 18 (15 in units an older client knows, 3 in new ones), all 18
+      labelled as §2.2's table lists them. Nothing it rules depends on the count.

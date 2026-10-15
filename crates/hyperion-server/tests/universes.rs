@@ -9,10 +9,10 @@ use std::path::{Path, PathBuf};
 
 use common::{TestClient, TestServer, test_entropy};
 use hyperion_protocol::{
-    CreateUniverseRequest, DensityMapRequest, ErrorCode, GalacticPosition, GalaxyParametersRequest,
-    MapPopulation, MapView, MassLayer, OpenUniverseRequest, RequestBody, RequestError,
-    ResponseBody, SeedHex, SystemsInRangeRequest, UniverseIdHex, UniverseInfo, UniverseList,
-    UniverseStatus, UniverseTime,
+    CreateUniverseRequest, DensityMapRequest, ErrorCode, ExtinctionMapRequest, ExtinctionRequest,
+    ExtinctionTarget, GalacticPosition, GalaxyParametersRequest, MapPopulation, MapView, MassLayer,
+    OpenUniverseRequest, RequestBody, RequestError, ResponseBody, SeedHex, SystemsInRangeRequest,
+    UniverseIdHex, UniverseInfo, UniverseList, UniverseStatus, UniverseTime,
 };
 use hyperion_server::limits::MAX_UNIVERSE_NAME_CHARS;
 use hyperion_sim::GENERATOR_VERSION;
@@ -210,6 +210,73 @@ async fn universes_survive_a_restart_as_one_file_each() {
     server.stop().await;
 }
 
+/// A request of every kind that names `universe`, each of which a universe this server cannot run
+/// refuses alike.
+fn requests_naming(universe: &UniverseIdHex) -> Vec<RequestBody> {
+    vec![
+        RequestBody::OpenUniverse(OpenUniverseRequest {
+            universe: universe.clone(),
+        }),
+        RequestBody::GalaxyParameters(GalaxyParametersRequest {
+            universe: universe.clone(),
+        }),
+        RequestBody::DensityMap(DensityMapRequest {
+            universe: universe.clone(),
+            view: MapView::FaceOn,
+            population: MapPopulation::All,
+            resolution: 128,
+            bits: 8,
+        }),
+        RequestBody::SystemsInRange(SystemsInRangeRequest {
+            universe: universe.clone(),
+            centre: GalacticPosition::default(),
+            radius_ly: 50.0,
+            time: UniverseTime::default(),
+            min_layer: MassLayer::A,
+            limit: 1_000,
+            include_stellar: false,
+        }),
+        // The universe is checked before any other field (design note 24), so a request wrong in
+        // every other way too is still refused for the universe.
+        RequestBody::SystemsInRange(SystemsInRangeRequest {
+            universe: universe.clone(),
+            centre: GalacticPosition {
+                cell_ly: [65_536, 0, 0],
+                offset_m: [0.0; 3],
+            },
+            radius_ly: 200_000.0,
+            time: UniverseTime {
+                seconds: 0,
+                nanos: 1_000_000_000,
+            },
+            min_layer: MassLayer::A,
+            limit: 0,
+            include_stellar: false,
+        }),
+        RequestBody::DensityMap(DensityMapRequest {
+            universe: universe.clone(),
+            view: MapView::FaceOn,
+            population: MapPopulation::All,
+            resolution: 100,
+            bits: 7,
+        }),
+        RequestBody::ExtinctionMap(ExtinctionMapRequest {
+            universe: universe.clone(),
+            view: MapView::EdgeOn,
+            resolution: 128,
+            bits: 16,
+        }),
+        RequestBody::Extinction(ExtinctionRequest {
+            universe: universe.clone(),
+            origin: GalacticPosition::default(),
+            time: UniverseTime::default(),
+            targets: vec![ExtinctionTarget::Position {
+                position: GalacticPosition::default(),
+            }],
+        }),
+    ]
+}
+
 #[tokio::test]
 async fn a_save_from_another_generator_version_is_listed_as_a_mismatch_and_refused() {
     let server = TestServer::start().await;
@@ -236,54 +303,7 @@ async fn a_save_from_another_generator_version_is_listed_as_a_mismatch_and_refus
         }]
     );
     // Every request that names a universe is refused alike, and none of them generates anything.
-    let refusals = [
-        RequestBody::OpenUniverse(OpenUniverseRequest {
-            universe: talos.id.clone(),
-        }),
-        RequestBody::GalaxyParameters(GalaxyParametersRequest {
-            universe: talos.id.clone(),
-        }),
-        RequestBody::DensityMap(DensityMapRequest {
-            universe: talos.id.clone(),
-            view: MapView::FaceOn,
-            population: MapPopulation::All,
-            resolution: 128,
-            bits: 8,
-        }),
-        RequestBody::SystemsInRange(SystemsInRangeRequest {
-            universe: talos.id.clone(),
-            centre: GalacticPosition::default(),
-            radius_ly: 50.0,
-            time: UniverseTime::default(),
-            min_layer: MassLayer::A,
-            limit: 1_000,
-            include_stellar: false,
-        }),
-        // The universe is checked before any other field (design note 24), so a request wrong in
-        // every other way too is still refused for the universe.
-        RequestBody::SystemsInRange(SystemsInRangeRequest {
-            universe: talos.id.clone(),
-            centre: GalacticPosition {
-                cell_ly: [65_536, 0, 0],
-                offset_m: [0.0; 3],
-            },
-            radius_ly: 200_000.0,
-            time: UniverseTime {
-                seconds: 0,
-                nanos: 1_000_000_000,
-            },
-            min_layer: MassLayer::A,
-            limit: 0,
-            include_stellar: false,
-        }),
-        RequestBody::DensityMap(DensityMapRequest {
-            universe: talos.id.clone(),
-            view: MapView::FaceOn,
-            population: MapPopulation::All,
-            resolution: 100,
-            bits: 7,
-        }),
-    ];
+    let refusals = requests_naming(&talos.id);
     for body in refusals {
         let error = client.request(body).await.unwrap_err();
         assert_eq!(error.code, ErrorCode::GeneratorVersionMismatch);

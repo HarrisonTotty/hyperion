@@ -18,9 +18,12 @@ export type OriginLabel = "DRAWN" | "DERIVED" | "FIXED";
 export interface ParameterReading {
   readonly key: string;
   readonly label: string;
-  /** The value's digits, or its text in upper case. */
-  readonly text: string;
-  /** The unit to set beside a number, or `null` for a text value. */
+  /**
+   * The value's digits, or its text in upper case; `null` when the value is Missing, a number in a
+   * unit this build does not know.
+   */
+  readonly text: string | null;
+  /** The unit to set beside a number, or `null` for a text value or a Missing one. */
   readonly unit: Unit | null;
   readonly origin: OriginLabel;
 }
@@ -63,43 +66,42 @@ function countText(count: number): string {
 }
 
 /**
- * The digits of a number in `unit`, at the precision the operator can use.
+ * How a number in each unit is written, at the precision the operator can use.
  *
  * @remarks
  * Masses and counts from 10⁷ up in E notation (`5.20E10`), whole and grouped from five digits
  * below that, and masses under 10⁴ as elsewhere on the ship; lengths grouped to one decimal;
  * angles and rates to two decimals; speeds to one; times, shares and other dimensionless values to
- * three significant figures; densities in E notation.
+ * three significant figures; densities in E notation; pressures to three significant figures;
+ * magnitudes to two decimals. A unit added to the protocol without an entry here is a type error.
  */
-function numberText(value: number, unit: Unit): string {
-  let text: string;
-  switch (unit) {
-    case "msun":
-      text = massText(value);
-      break;
-    case "count":
-      text = countText(value);
-      break;
-    case "ly":
-      text = formatNumber(value, 1);
-      break;
-    case "deg":
-    case "deg_per_myr":
-      text = formatNumber(value, 2);
-      break;
-    case "km_per_s":
-      text = formatNumber(value, 1);
-      break;
-    case "myr":
-    case "gyr":
-    case "none":
-      text = threeFigures(value);
-      break;
-    case "per_ly3":
-      text = formatSci(value);
-      break;
-  }
-  return text;
+const NUMBER_TEXT: Readonly<Record<Unit, (value: number) => string>> = {
+  msun: massText,
+  count: countText,
+  ly: (value) => formatNumber(value, 1),
+  deg: (value) => formatNumber(value, 2),
+  deg_per_myr: (value) => formatNumber(value, 2),
+  km_per_s: (value) => formatNumber(value, 1),
+  myr: threeFigures,
+  gyr: threeFigures,
+  none: threeFigures,
+  per_ly3: formatSci,
+  per_cm3: formatSci,
+  k_per_cm3: threeFigures,
+  mag: (value) => formatNumber(value, 2),
+};
+
+/**
+ * The digits of a number in `unit`, or `null` when this build does not know the unit.
+ *
+ * @remarks
+ * `Unit` is one of the enums galaxy plan 04 names as growing, which a newer server may send a new
+ * string of without a protocol bump (`decision-gg-port-d0.md` §1). The value then reads Missing,
+ * never as an empty cell or as a number in a unit the operator is not shown.
+ */
+function numberText(value: number, unit: Unit): string | null {
+  // The decoder trusts the generated types, so an unknown string arrives typed as a `Unit`.
+  return Object.hasOwn(NUMBER_TEXT, unit) ? NUMBER_TEXT[unit](value) : null;
 }
 
 function originLabel(origin: ParameterOrigin): OriginLabel {
@@ -118,11 +120,18 @@ function originLabel(origin: ParameterOrigin): OriginLabel {
   return label;
 }
 
-/** Reads a parameter for the table: its label, formatted value, unit and origin in words. */
+/**
+ * Reads a parameter for the table: its label, formatted value, unit and origin in words.
+ *
+ * @remarks
+ * A number in a unit this build does not know reads Missing, with no unit.
+ */
 export function toReading(parameter: Parameter): ParameterReading {
   const { key, origin, value } = parameter;
   const common = { key, label: parameterLabel(key), origin: originLabel(origin) };
-  return value.type === "number"
-    ? { ...common, text: numberText(value.value, value.unit), unit: value.unit }
-    : { ...common, text: value.value.toUpperCase(), unit: null };
+  if (value.type === "text") {
+    return { ...common, text: value.value.toUpperCase(), unit: null };
+  }
+  const text = numberText(value.value, value.unit);
+  return { ...common, text, unit: text === null ? null : value.unit };
 }

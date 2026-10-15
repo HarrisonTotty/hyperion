@@ -541,10 +541,11 @@ CompanionMasses, StellarFates}` (`fates_for` returns `&'static MultiplicityFates
 - **Galaxy plan 07:** `galaxy::gas::extinction::{sightline, horizon, NoiseMode, Quality}`
   (`Quality::Budget(NonZeroU32)`), `NoiseCache`, `ccm::extinction_ratio(wavelength:
 Micrometres)`, `ccm::Band`, `GasModifier`, `GasModifierSource`. P07.T10.a–c (the
-  `extinction_map` and `extinction` kinds, the server's `compute::sightlines::{SIGHTLINE_QUALITY,
-SightlineMarcher, SharedSightlineCache}`) is on `origin/galaxy-generation` only, not on `main`
-  (re-validated 2026-10-02); this plan needs none of it, and T11 reuses `SIGHTLINE_QUALITY` once it
-  merges.
+  `extinction_map` and `extinction` kinds, the server's `compute::sightlines::{SightlineMarcher,
+SharedSightlineCache}`) was on `origin/galaxy-generation` only, not on `main` (re-validated
+  2026-10-02), and is ported since (`decision-gg-port-d0.md`, batch A1); this plan needs none of it,
+  and T11 reads `galaxy::gas::extinction::SIGHTLINE_QUALITY` since P07.T10.c's port, which moved the
+  constant into the sim (`decision-gg-port-d0.md` §5).
 - **Galaxy plan 09:** `FeatureMemberSource` through the server once P09.T40 registers it (R06.T16).
   As built, neither `SystemSource` nor `FeatureMemberSource` is `Sync`, so each census job builds
   its own `SkyContext` and sources over shared caches, as `range_query`'s callers do; P09.T40 is not
@@ -2068,7 +2069,9 @@ systems. The budget is T17's.
   `Budget(256)`. `galaxy::gas::extinction::profile` (Design note 14), under
   plan 07's rules, with `horizon`'s `#[expect(clippy::too_many_arguments, reason = …)]` (nine
   arguments) and the quality `Quality::Budget(NonZeroU32::new(256))`, the value of P07.T10.c's
-  `SIGHTLINE_QUALITY` (on `origin/galaxy-generation` only at re-validation). Tests: its last node equals `sightline` over the same segment to 10⁻¹²
+  `SIGHTLINE_QUALITY` (on `origin/galaxy-generation` only at re-validation; the band reads
+  `galaxy::gas::extinction::SIGHTLINE_QUALITY` since P07.T10.c's port, `decision-gg-port-d0.md` §5).
+  Tests: its last node equals `sightline` over the same segment to 10⁻¹²
   relative; it is monotone in distance; at `Mean` it reads no cache. Files:
   `galaxy/gas/extinction.rs`. Acceptance: `cargo test -p hyperion-sim gas::extinction`.
 - **R06.T9.b The band.** `sky::band::{CubeFace, BandSpec, BandTexel, band_rows}` (Design note 15),
@@ -5547,7 +5550,9 @@ rows, out)` takes `complete_to: &CompleteTo` after the census. `CompleteTo` is n
     atan2 area of `texelSolidAnglesSr`; both texel functions panic off the face. `CubeFace` gains
     `ALL` and `layer()`.
   - **The rays.** `FIRST_NODE_LY` 0.01 ly; `BAND_PROFILE_QUALITY` `Budget(256)` (P07.T10.c's
-    `SIGHTLINE_QUALITY` value), with the modifiers near each ray. The light is the trapezoid
+    `SIGHTLINE_QUALITY` value; deleted since P07.T10.c's port, the band reading
+    `galaxy::gas::extinction::SIGHTLINE_QUALITY`, `decision-gg-port-d0.md` §5), with the modifiers
+    near each ray. The light is the trapezoid
     rule's in distance; twelve nodes a decade agree with 48 to 0.02 mag (_per texel, R06.T9.f
     measured up to 0.012–0.026 mag near the Sun at 8², and 0.005–0.007 over the band; Risks,
     "Deviations in T9.f, as built"_). The light nearer than 0.01 ly, at most some 10⁻⁵ of a ray's,

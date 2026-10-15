@@ -4,22 +4,24 @@
 //! can instead be set by an environment variable; one given on the command line wins. Tests and
 //! embedders build a [`ServerConfig`] with [`ServerConfig::builder`].
 //!
-//! | Option                  | Variable                       | Default                                      |
-//! | ----------------------- | ------------------------------ | -------------------------------------------- |
-//! | `--address`             | `HYPERION_ADDR`                | `127.0.0.1`                                  |
-//! | `--port`                | `HYPERION_PORT`                | `7878`                                       |
-//! | `--data-dir`            | `HYPERION_DATA_DIR`            | `./hyperion-data`                            |
-//! | `--num-workers`         | `HYPERION_WORKERS`             | available parallelism less one, at least one |
-//! | `--cell-cache`          | `HYPERION_CELL_CACHE_MB`       | 256 (MiB)                                    |
-//! | `--map-cache`           | `HYPERION_MAP_CACHE_MB`        | 64 (MiB)                                     |
-//! | `--system-cache`        | `HYPERION_SYSTEM_CACHE_MB`     | 128 (MiB)                                    |
-//! | `--body-cache`          | `HYPERION_BODY_CACHE_MB`       | 128 (MiB)                                    |
-//! | `--brief-cache`         | `HYPERION_BRIEF_CACHE_MB`      | 64 (MiB)                                     |
-//! | `--sky-cache`           | `HYPERION_SKY_CACHE_MB`        | 0 (MiB), off                                 |
-//! | `--sky-tables`          | `HYPERION_SKY_TABLES_MB`       | 160 (MiB)                                    |
-//! | `--surface-cache`       | `HYPERION_SURFACE_CACHE_MB`    | 128 (MiB)                                    |
-//! | `--serve-sky`           | `HYPERION_SERVE_SKY`           | on                                           |
-//! | `--stop-on-stdin-close` | `HYPERION_STOP_ON_STDIN_CLOSE` | off                                          |
+//! | Option                   | Variable                           | Default                                      |
+//! | ------------------------ | ---------------------------------- | -------------------------------------------- |
+//! | `--address`              | `HYPERION_ADDR`                    | `127.0.0.1`                                  |
+//! | `--port`                 | `HYPERION_PORT`                    | `7878`                                       |
+//! | `--data-dir`             | `HYPERION_DATA_DIR`                | `./hyperion-data`                            |
+//! | `--num-workers`          | `HYPERION_WORKERS`                 | available parallelism less one, at least one |
+//! | `--cell-cache`           | `HYPERION_CELL_CACHE_MB`           | 256 (MiB)                                    |
+//! | `--map-cache`            | `HYPERION_MAP_CACHE_MB`            | 64 (MiB)                                     |
+//! | `--system-cache`         | `HYPERION_SYSTEM_CACHE_MB`         | 128 (MiB)                                    |
+//! | `--body-cache`           | `HYPERION_BODY_CACHE_MB`           | 128 (MiB)                                    |
+//! | `--brief-cache`          | `HYPERION_BRIEF_CACHE_MB`          | 64 (MiB)                                     |
+//! | `--extinction-map-cache` | `HYPERION_EXTINCTION_MAP_CACHE_MB` | 16 (MiB)                                     |
+//! | `--sightline-cache`      | `HYPERION_SIGHTLINE_CACHE_MB`      | 4 (MiB)                                      |
+//! | `--sky-cache`            | `HYPERION_SKY_CACHE_MB`            | 0 (MiB), off                                 |
+//! | `--sky-tables`           | `HYPERION_SKY_TABLES_MB`           | 160 (MiB)                                    |
+//! | `--surface-cache`        | `HYPERION_SURFACE_CACHE_MB`        | 128 (MiB)                                    |
+//! | `--serve-sky`            | `HYPERION_SERVE_SKY`               | on                                           |
+//! | `--stop-on-stdin-close`  | `HYPERION_STOP_ON_STDIN_CLOSE`     | off                                          |
 //!
 //! `--serve-sky` and `--stop-on-stdin-close` are switches. Their variables take clap's boolish
 //! values, in any case: `y`, `yes`, `t`, `true`, `on` or `1` for on, and `n`, `no`, `f`, `false`,
@@ -78,6 +80,10 @@ pub const ENV_SYSTEM_CACHE_MB: &str = "HYPERION_SYSTEM_CACHE_MB";
 pub const ENV_BODY_CACHE_MB: &str = "HYPERION_BODY_CACHE_MB";
 /// The variable giving the brief cache's budget in MiB, for `--brief-cache`.
 pub const ENV_BRIEF_CACHE_MB: &str = "HYPERION_BRIEF_CACHE_MB";
+/// The variable giving the extinction map cache's budget in MiB, for `--extinction-map-cache`.
+pub const ENV_EXTINCTION_MAP_CACHE_MB: &str = "HYPERION_EXTINCTION_MAP_CACHE_MB";
+/// The variable giving the sightline cache's budget in MiB, for `--sightline-cache`.
+pub const ENV_SIGHTLINE_CACHE_MB: &str = "HYPERION_SIGHTLINE_CACHE_MB";
 /// The variable giving the sky's cell cache's budget in MiB, for `--sky-cache`.
 pub const ENV_SKY_CACHE_MB: &str = "HYPERION_SKY_CACHE_MB";
 /// The variable giving the sky tables' cache's budget in MiB, for `--sky-tables`.
@@ -103,6 +109,15 @@ pub const DEFAULT_BODY_CACHE_MIB: usize = 128;
 /// 25,000 main-sequence rows at about 2.5 kB each, or 2,000–2,500 dead ones, whose model holds a
 /// full track, at 25–35 kB (P06.T38.e's measurement).
 pub const DEFAULT_BRIEF_CACHE_MIB: usize = 64;
+/// The extinction map cache's budget when `--extinction-map-cache` is not given, in MiB (plan 07,
+/// P07.T10.a): every view at every resolution of one galaxy, 128 to 1,024 pixels across and the
+/// edge-on views half as tall, is 2,088,960 `f32` pixels, 8.0 MiB, so this holds two galaxies'
+/// worth, or one with room to spare.
+pub const DEFAULT_EXTINCTION_MAP_CACHE_MIB: usize = 16;
+/// The sightline cache's budget when `--sightline-cache` is not given, in MiB (plan 07,
+/// P07.T10.c): a line is charged its 32 bytes and the cache's 96 an entry, 128 bytes, so this holds
+/// 32,768, a few hundred charts' selections.
+pub const DEFAULT_SIGHTLINE_CACHE_MIB: usize = 4;
 /// The sky's cell cache's budget when `--sky-cache` is not given, in MiB: 0, which turns the cache
 /// off (rendering plan R06, R06.T8.o and Design note 12; decided 2026-10-10,
 /// `decision-r06-t8n.md`).
@@ -159,6 +174,12 @@ const DEFAULT_BODY_CACHE: CacheBudget = CacheBudget {
 const DEFAULT_BRIEF_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_BRIEF_CACHE_MIB * BYTES_PER_MIB,
 };
+const DEFAULT_EXTINCTION_MAP_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_EXTINCTION_MAP_CACHE_MIB * BYTES_PER_MIB,
+};
+const DEFAULT_SIGHTLINE_CACHE: CacheBudget = CacheBudget {
+    bytes: DEFAULT_SIGHTLINE_CACHE_MIB * BYTES_PER_MIB,
+};
 const DEFAULT_SKY_CACHE: CacheBudget = CacheBudget {
     bytes: DEFAULT_SKY_CACHE_MIB * BYTES_PER_MIB,
 };
@@ -211,6 +232,14 @@ pub struct ServerArgs {
     /// Budget of the cache of range briefs' star models, in MiB; 0 caches nothing
     #[arg(long, value_name = "MIB", env = ENV_BRIEF_CACHE_MB, default_value_t = DEFAULT_BRIEF_CACHE)]
     brief_cache: CacheBudget,
+
+    /// Budget of the cache of galaxy extinction maps, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_EXTINCTION_MAP_CACHE_MB, default_value_t = DEFAULT_EXTINCTION_MAP_CACHE)]
+    extinction_map_cache: CacheBudget,
+
+    /// Budget of the cache of lines of sight through the gas, in MiB; 0 caches nothing
+    #[arg(long, value_name = "MIB", env = ENV_SIGHTLINE_CACHE_MB, default_value_t = DEFAULT_SIGHTLINE_CACHE)]
+    sightline_cache: CacheBudget,
 
     /// Budget of the cache of the sky census's cells, in MiB; 0, the default, keeps no cells, and
     /// 1280 holds a warm sky
@@ -298,6 +327,8 @@ impl From<ServerArgs> for ServerConfig {
             system_cache,
             body_cache,
             brief_cache,
+            extinction_map_cache,
+            sightline_cache,
             sky_cache,
             sky_tables,
             surface_cache,
@@ -313,6 +344,8 @@ impl From<ServerArgs> for ServerConfig {
             .system_cache_bytes(system_cache.bytes)
             .body_cache_bytes(body_cache.bytes)
             .brief_cache_bytes(brief_cache.bytes)
+            .extinction_map_cache_bytes(extinction_map_cache.bytes)
+            .sightline_cache_bytes(sightline_cache.bytes)
             .sky_cache_bytes(sky_cache.bytes)
             .sky_tables_bytes(sky_tables.bytes)
             .surface_cache_bytes(surface_cache.bytes)
@@ -379,6 +412,8 @@ pub struct ServerConfig {
     system_cache_bytes: usize,
     body_cache_bytes: usize,
     brief_cache_bytes: usize,
+    extinction_map_cache_bytes: usize,
+    sightline_cache_bytes: usize,
     sky_cache_bytes: usize,
     sky_tables_bytes: usize,
     surface_cache_bytes: usize,
@@ -444,6 +479,18 @@ impl ServerConfig {
     #[must_use]
     pub fn brief_cache_bytes(&self) -> usize {
         self.brief_cache_bytes
+    }
+
+    /// The extinction map cache's budget, in bytes.
+    #[must_use]
+    pub fn extinction_map_cache_bytes(&self) -> usize {
+        self.extinction_map_cache_bytes
+    }
+
+    /// The sightline cache's budget, in bytes.
+    #[must_use]
+    pub fn sightline_cache_bytes(&self) -> usize {
+        self.sightline_cache_bytes
     }
 
     /// The sky's cell cache's budget, in bytes (rendering plan R06, Design note 12).
@@ -529,6 +576,8 @@ impl Default for ServerConfigBuilder {
                 system_cache_bytes: DEFAULT_SYSTEM_CACHE.bytes,
                 body_cache_bytes: DEFAULT_BODY_CACHE.bytes,
                 brief_cache_bytes: DEFAULT_BRIEF_CACHE.bytes,
+                extinction_map_cache_bytes: DEFAULT_EXTINCTION_MAP_CACHE.bytes,
+                sightline_cache_bytes: DEFAULT_SIGHTLINE_CACHE.bytes,
                 sky_cache_bytes: DEFAULT_SKY_CACHE.bytes,
                 sky_tables_bytes: DEFAULT_SKY_TABLES.bytes,
                 surface_cache_bytes: DEFAULT_SURFACE_CACHE.bytes,
@@ -600,6 +649,20 @@ impl ServerConfigBuilder {
     #[must_use]
     pub fn brief_cache_bytes(mut self, bytes: usize) -> Self {
         self.config.brief_cache_bytes = bytes;
+        self
+    }
+
+    /// The extinction map cache's budget, in bytes. Zero caches nothing.
+    #[must_use]
+    pub fn extinction_map_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.extinction_map_cache_bytes = bytes;
+        self
+    }
+
+    /// The sightline cache's budget, in bytes. Zero caches nothing: every line is marched.
+    #[must_use]
+    pub fn sightline_cache_bytes(mut self, bytes: usize) -> Self {
+        self.config.sightline_cache_bytes = bytes;
         self
     }
 
@@ -739,13 +802,13 @@ mod tests {
     }
 
     /// The address, the data directory, the workers, the caches' budgets (cells, maps, systems,
-    /// bodies, briefs, the sky's cells, the sky tables and the surface), the sky's switch and the
-    /// stop on standard input.
+    /// bodies, briefs, extinction maps, lines of sight, the sky's cells, the sky tables and the
+    /// surface), the sky's switch and the stop on standard input.
     type Fields<'a> = (
         SocketAddr,
         &'a Path,
         usize,
-        [usize; 8],
+        [usize; 10],
         SkyService,
         StdinStop,
     );
@@ -761,6 +824,8 @@ mod tests {
                 config.system_cache_bytes(),
                 config.body_cache_bytes(),
                 config.brief_cache_bytes(),
+                config.extinction_map_cache_bytes(),
+                config.sightline_cache_bytes(),
                 config.sky_cache_bytes(),
                 config.sky_tables_bytes(),
                 config.surface_cache_bytes(),
@@ -792,6 +857,8 @@ mod tests {
                     128 * 1024 * 1024,
                     128 * 1024 * 1024,
                     64 * 1024 * 1024,
+                    16 * 1024 * 1024,
+                    4 * 1024 * 1024,
                     0,
                     160 * 1024 * 1024,
                     128 * 1024 * 1024,
@@ -823,12 +890,16 @@ mod tests {
             "5",
             "--brief-cache",
             "7",
-            "--sky-cache",
+            "--extinction-map-cache",
             "11",
-            "--sky-tables",
+            "--sightline-cache",
             "13",
-            "--surface-cache",
+            "--sky-cache",
             "17",
+            "--sky-tables",
+            "19",
+            "--surface-cache",
+            "23",
             "--serve-sky=false",
             "--stop-on-stdin-close",
         ]);
@@ -846,7 +917,9 @@ mod tests {
                     7 << 20,
                     11 << 20,
                     13 << 20,
-                    17 << 20
+                    17 << 20,
+                    19 << 20,
+                    23 << 20
                 ],
                 SkyService::Unsupported,
                 StdinStop::Watch,
@@ -926,6 +999,11 @@ mod tests {
                 (Some("system-cache"), Some("HYPERION_SYSTEM_CACHE_MB")),
                 (Some("body-cache"), Some("HYPERION_BODY_CACHE_MB")),
                 (Some("brief-cache"), Some("HYPERION_BRIEF_CACHE_MB")),
+                (
+                    Some("extinction-map-cache"),
+                    Some("HYPERION_EXTINCTION_MAP_CACHE_MB")
+                ),
+                (Some("sightline-cache"), Some("HYPERION_SIGHTLINE_CACHE_MB")),
                 (Some("sky-cache"), Some("HYPERION_SKY_CACHE_MB")),
                 (Some("sky-tables"), Some("HYPERION_SKY_TABLES_MB")),
                 (Some("surface-cache"), Some("HYPERION_SURFACE_CACHE_MB")),
@@ -1019,6 +1097,8 @@ mod tests {
         assert_eq!(DEFAULT_SYSTEM_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BODY_CACHE.to_string(), "128");
         assert_eq!(DEFAULT_BRIEF_CACHE.to_string(), "64");
+        assert_eq!(DEFAULT_EXTINCTION_MAP_CACHE.to_string(), "16");
+        assert_eq!(DEFAULT_SIGHTLINE_CACHE.to_string(), "4");
         assert_eq!(DEFAULT_SKY_CACHE.to_string(), "0");
         assert_eq!(DEFAULT_SKY_TABLES.to_string(), "160");
         assert_eq!(DEFAULT_SURFACE_CACHE.to_string(), "128");
@@ -1103,9 +1183,11 @@ mod tests {
             .system_cache_bytes(30)
             .body_cache_bytes(40)
             .brief_cache_bytes(50)
-            .sky_cache_bytes(60)
-            .sky_tables_bytes(70)
-            .surface_cache_bytes(80)
+            .extinction_map_cache_bytes(60)
+            .sightline_cache_bytes(70)
+            .sky_cache_bytes(80)
+            .sky_tables_bytes(90)
+            .surface_cache_bytes(100)
             .sky_service(SkyService::Unsupported)
             .stdin_stop(StdinStop::Watch)
             .build();
@@ -1115,7 +1197,7 @@ mod tests {
                 SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
                 Path::new("/tmp/x"),
                 2,
-                [10, 20, 30, 40, 50, 60, 70, 80],
+                [10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
                 SkyService::Unsupported,
                 StdinStop::Watch,
             )

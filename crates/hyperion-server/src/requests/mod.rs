@@ -195,13 +195,14 @@ fn open_topic(
 /// The server's handlers: every request kind, and the code that answers it.
 ///
 /// Every kind of the first milestone is served (plan 04, P04.T14), plan 06's `system_summary`
-/// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), and rendering plan R06's `sky`
-/// (R06.T11.a–d: the census's JSON, its stars and band in bulk, and the host discs), the one kind
-/// answered in bulk, behind its switch ([`SkyService`](crate::SkyService)): it is on by default
-/// since rendering plan R13's R13.T2, and when the server is started with `--serve-sky=false`,
-/// `sky` is answered `unsupported`, as before R06.T11.a. Rendering plan R09's `survey_pass` is
-/// served (R09.T19.a), and its `surface_field`, answered in bulk (R09.T19.b). A later plan's kind
-/// that this server's [`REQUEST_KINDS`] does not hold is refused before it reaches here, as
+/// (P06.T34), plan 14's `system_bodies` and `body_detail` (P14.T36), plan 07's `extinction_map`
+/// and `extinction` (P07.T10), and rendering plan R06's `sky` (R06.T11.a–d: the census's JSON, its
+/// stars and band in bulk, and the host discs), the one kind answered in bulk, behind its switch
+/// ([`SkyService`](crate::SkyService)): it is on by default since rendering plan R13's R13.T2, and
+/// when the server is started with `--serve-sky=false`, `sky` is answered `unsupported`, as before
+/// R06.T11.a. Rendering plan R09's `survey_pass` is served (R09.T19.a), and its `surface_field`,
+/// answered in bulk (R09.T19.b). A later plan's kind that this server's [`REQUEST_KINDS`] does not
+/// hold is refused before it reaches here, as
 /// `unsupported`. A kind the protocol already defines but whose handler has not landed is answered
 /// `unsupported` here, under its own ID, as an older server would answer it (plan 04, design note
 /// 15): `body_events` until plan 14's P14.T31. Each handler that names a universe starts from
@@ -264,6 +265,12 @@ impl Handler for Handlers {
             RequestBody::SurveyPass(request) => {
                 Box::pin(surface::survey_pass(state, request, token).map(answered))
             }
+            RequestBody::ExtinctionMap(request) => {
+                Box::pin(galaxy::extinction_map(state, request, token).map(answered))
+            }
+            RequestBody::Extinction(request) => {
+                Box::pin(galaxy::extinction(state, request, token).map(answered))
+            }
         }
     }
 
@@ -315,6 +322,8 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
         RequestBody::Sky(_) => "sky",
         RequestBody::SurfaceField(_) => "surface_field",
         RequestBody::SurveyPass(_) => "survey_pass",
+        RequestBody::ExtinctionMap(_) => "extinction_map",
+        RequestBody::Extinction(_) => "extinction",
     }
 }
 
@@ -323,15 +332,18 @@ pub(crate) fn kind(body: &RequestBody) -> &'static str {
 ///
 /// A system's bodies can: its belts' named members (plan 14, P14.T21) run to 255 a belt, each a
 /// record. So can a window of body events, whose comets carry sampled tracks (P14.T31). One body's
-/// record cannot. A subscription's answer is as large as its topic's state: the scene's holds a
-/// whole system's bodies (rendering plan R03, Design note 14). `scene_ship`, `scene_cameras` and
-/// `unsubscribe` are small. The sky's JSON is small but its census and hosts grow with the request,
-/// and rendering plan R06 classes it large (`is_large`; Design note 17's size class). Rendering
-/// plan R09 classes its `surface_field` large as plan 04's row R09 requires, whose payload runs to
-/// some 15 MB, though its JSON is a header and a cover; its `survey_pass` answers one revision.
+/// record cannot. An extinction map can, as a density map can; the extinction to at most 64
+/// targets cannot (plan 07, P07.T10). A subscription's answer is as large as its topic's state:
+/// the scene's holds a whole system's bodies (rendering plan R03, Design note 14). `scene_ship`,
+/// `scene_cameras` and `unsubscribe` are small. The sky's JSON is small but its census and hosts
+/// grow with the request, and rendering plan R06 classes it large (`is_large`; Design note 17's
+/// size class). Rendering plan R09 classes its `surface_field` large as plan 04's row R09
+/// requires, whose payload runs to some 15 MB, though its JSON is a header and a cover; its
+/// `survey_pass` answers one revision.
 pub(crate) fn is_large(body: &ResponseBody) -> bool {
     match body {
         ResponseBody::DensityMap(_)
+        | ResponseBody::ExtinctionMap(_)
         | ResponseBody::SystemsInRange(_)
         | ResponseBody::SystemBodies(_)
         | ResponseBody::BodyEvents(_)
@@ -349,7 +361,8 @@ pub(crate) fn is_large(body: &ResponseBody) -> bool {
         | ResponseBody::Unsubscribe
         | ResponseBody::SceneShip(_)
         | ResponseBody::SceneCameras
-        | ResponseBody::SurveyPass(_) => false,
+        | ResponseBody::SurveyPass(_)
+        | ResponseBody::Extinction(_) => false,
     }
 }
 
@@ -1104,13 +1117,14 @@ mod tests {
 
     use hyperion_protocol::{
         BodyDetailRequest, BodyEventsRequest, BodyIdHex, CreateUniverseRequest, DensityMap,
-        DensityMapRequest, DetailLevelDto, FramePositionDto, GalacticPosition,
+        DensityMapRequest, DetailLevelDto, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,
+        ExtinctionResult, ExtinctionTarget, FramePositionDto, GalacticPosition,
         GalaxyParametersRequest, KinematicsDto, MapPopulation, MapView, MassLayer,
         OpenUniverseRequest, SceneCamerasRequest, SceneClockDto, SceneClockStateDto,
         SceneShipRequest, SceneShipSet, SceneStateDto, SceneSubscribeRequest, SkyRequest,
         SubscribeRequest, Subscribed, SubscriptionTopic, SurfaceFieldRequest, SurveyPassRequest,
         SurveySourceDto, SystemBodiesRequest, SystemIdHex, SystemSummaryRequest,
-        SystemsInRangeRequest, UniverseIdHex, UniverseTime, UnsubscribeRequest,
+        SystemsInRangeRequest, TargetExtinction, UniverseIdHex, UniverseTime, UnsubscribeRequest,
     };
 
     use tokio::time::timeout;
@@ -1121,6 +1135,10 @@ mod tests {
     use crate::ws::ConnectionLimits;
 
     /// A request body of every kind.
+    #[expect(
+        clippy::too_many_lines,
+        reason = "one whole request of each kind, and the list must name them all"
+    )]
     fn every_body() -> Vec<RequestBody> {
         let universe = UniverseIdHex::from_u64(42);
         vec![
@@ -1214,6 +1232,20 @@ mod tests {
                 source: SurveySourceDto::Orbital,
                 resolution_m: 100.0,
                 cells: Vec::new(),
+            }),
+            RequestBody::ExtinctionMap(ExtinctionMapRequest {
+                universe: UniverseIdHex::from_u64(42),
+                view: MapView::FaceOn,
+                resolution: 128,
+                bits: 8,
+            }),
+            RequestBody::Extinction(ExtinctionRequest {
+                universe: UniverseIdHex::from_u64(42),
+                origin: GalacticPosition::default(),
+                time: UniverseTime::default(),
+                targets: vec![ExtinctionTarget::System {
+                    id: SystemIdHex::from_u64(0x0200_0800_2000_0000),
+                }],
             }),
         ]
     }
@@ -1451,6 +1483,32 @@ mod tests {
         ] {
             assert!(!is_large(&small), "{small:?}");
         }
+    }
+
+    #[test]
+    fn an_extinction_map_is_large_and_the_extinction_to_its_targets_is_not() {
+        // Plan 07, P07.T10: a map can run to megabytes as a density map can; at most 64 targets'
+        // figures cannot.
+        let map = ResponseBody::ExtinctionMap(ExtinctionMap {
+            universe: UniverseIdHex::from_u64(42),
+            view: MapView::FaceOn,
+            width_px: 2,
+            height_px: 2,
+            centre_ly: [0.0, 0.0],
+            ly_per_px: 65_536.0,
+            bits: 8,
+            floor_log10_mag: -2.0,
+            ceiling_log10_mag: -2.0,
+            data_base64: "AAAAAA==".to_owned(),
+        });
+        assert!(is_large(&map));
+        let lines = ResponseBody::Extinction(ExtinctionResult {
+            universe: UniverseIdHex::from_u64(42),
+            origin: GalacticPosition::default(),
+            time: UniverseTime::default(),
+            targets: vec![TargetExtinction::NoSuchSystem],
+        });
+        assert!(!is_large(&lines));
     }
 
     #[test]

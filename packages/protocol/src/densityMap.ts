@@ -1,4 +1,5 @@
 import type { DensityMap } from "./generated/DensityMap";
+import type { ExtinctionMap } from "./generated/ExtinctionMap";
 
 /** The standard base64 alphabet, in sextet order. */
 const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -66,7 +67,7 @@ function bytesPerCode(bits: number): 1 | 2 {
   if (bits === 16) {
     return 2;
   }
-  throw new Error(`unsupported density map depth of ${bits} bits`);
+  throw new Error(`unsupported map depth of ${bits} bits`);
 }
 
 /**
@@ -94,6 +95,64 @@ export interface DecodedDensityMap {
   log10PerLy2(code: number): number | null;
 }
 
+/** What both map payloads carry: the raster's size, its depth and its encoded codes. */
+interface QuantisedPayload {
+  readonly width_px: number;
+  readonly height_px: number;
+  readonly bits: number;
+  readonly data_base64: string;
+}
+
+/** A payload's codes, decoded, and the rule from a code back to log₁₀ of the quantity. */
+interface DecodedPayload {
+  readonly widthPx: number;
+  readonly heightPx: number;
+  readonly codes: Uint8Array | Uint16Array;
+  readonly maxCode: number;
+  readonly log10Of: (code: number) => number | null;
+}
+
+/**
+ * Decodes a quantised map's payload: the part `decodeDensityMap` and `decodeExtinctionMap` share.
+ *
+ * @param kind - The map's name, for the error messages.
+ * @param floor - log₁₀ of the quantity code 1 stands for.
+ * @param ceiling - log₁₀ of the quantity the largest code stands for.
+ * @throws Error if the payload is not valid base64, the depth is neither 8 nor 16 bits, or the byte
+ *   count is not `width_px × height_px × bits ÷ 8`.
+ */
+function decodePayload(
+  kind: string,
+  map: QuantisedPayload,
+  floor: number,
+  ceiling: number,
+): DecodedPayload {
+  const codeBytes = bytesPerCode(map.bits);
+  const bytes = decodeBase64(map.data_base64);
+  const pixels = map.width_px * map.height_px;
+  if (bytes.length !== pixels * codeBytes) {
+    throw new Error(
+      `${kind} holds ${bytes.length} bytes where ${map.width_px} × ${map.height_px} ` +
+        `pixels at ${map.bits} bits need ${pixels * codeBytes}`,
+    );
+  }
+  const codes = codeBytes === 1 ? bytes : readLittleEndianU16(bytes, pixels);
+  const maxCode = 2 ** map.bits - 1;
+  const span = ceiling - floor;
+  return {
+    widthPx: map.width_px,
+    heightPx: map.height_px,
+    codes,
+    maxCode,
+    log10Of: (code: number): number | null => {
+      if (!Number.isInteger(code) || code < 0 || code > maxCode) {
+        throw new RangeError(`${code} is not a code of a ${map.bits}-bit map`);
+      }
+      return code === 0 ? null : floor + ((code - 1) * span) / (maxCode - 1);
+    },
+  };
+}
+
 /**
  * Decodes a density map's base64 payload into pixel codes.
  *
@@ -101,29 +160,53 @@ export interface DecodedDensityMap {
  *   count is not `width_px × height_px × bits ÷ 8`.
  */
 export function decodeDensityMap(map: DensityMap): DecodedDensityMap {
-  const codeBytes = bytesPerCode(map.bits);
-  const bytes = decodeBase64(map.data_base64);
-  const pixels = map.width_px * map.height_px;
-  if (bytes.length !== pixels * codeBytes) {
-    throw new Error(
-      `density map holds ${bytes.length} bytes where ${map.width_px} × ${map.height_px} ` +
-        `pixels at ${map.bits} bits need ${pixels * codeBytes}`,
-    );
-  }
-  const codes = codeBytes === 1 ? bytes : readLittleEndianU16(bytes, pixels);
-  const maxCode = 2 ** map.bits - 1;
-  const floor = map.floor_log10_per_ly2;
-  const span = map.ceiling_log10_per_ly2 - floor;
-  return {
-    widthPx: map.width_px,
-    heightPx: map.height_px,
-    codes,
-    maxCode,
-    log10PerLy2: (code: number): number | null => {
-      if (!Number.isInteger(code) || code < 0 || code > maxCode) {
-        throw new RangeError(`${code} is not a code of a ${map.bits}-bit map`);
-      }
-      return code === 0 ? null : floor + ((code - 1) * span) / (maxCode - 1);
-    },
-  };
+  const { log10Of, ...raster } = decodePayload(
+    "density map",
+    map,
+    map.floor_log10_per_ly2,
+    map.ceiling_log10_per_ly2,
+  );
+  return { ...raster, log10PerLy2: log10Of };
+}
+
+/**
+ * An extinction map's pixel codes, decoded, with the rule that turns a code back into a visual
+ * extinction.
+ *
+ * @remarks
+ * The raster is laid out as a density map's is ({@link DecodedDensityMap}); only the quantity
+ * differs, so the accessor has another name and the two are not interchangeable.
+ */
+export interface DecodedExtinctionMap {
+  /** Pixels per row. */
+  readonly widthPx: number;
+  /** Rows. */
+  readonly heightPx: number;
+  /** One code per pixel: `Uint8Array` at 8 bits, `Uint16Array` at 16 bits. */
+  readonly codes: Uint8Array | Uint16Array;
+  /** The largest code, 2^bits − 1, which stands for the map's ceiling. */
+  readonly maxCode: number;
+  /**
+   * The visual extinction A(V) a code stands for, as log₁₀ of magnitudes.
+   *
+   * @returns `null` for code 0, which means at or below the floor of 0.01 mag.
+   * @throws RangeError if `code` is not an integer from 0 to {@link DecodedExtinctionMap.maxCode}.
+   */
+  log10Mag(code: number): number | null;
+}
+
+/**
+ * Decodes an extinction map's base64 payload into pixel codes.
+ *
+ * @throws Error if the payload is not valid base64, the depth is neither 8 nor 16 bits, or the byte
+ *   count is not `width_px × height_px × bits ÷ 8`.
+ */
+export function decodeExtinctionMap(map: ExtinctionMap): DecodedExtinctionMap {
+  const { log10Of, ...raster } = decodePayload(
+    "extinction map",
+    map,
+    map.floor_log10_mag,
+    map.ceiling_log10_mag,
+  );
+  return { ...raster, log10Mag: log10Of };
 }

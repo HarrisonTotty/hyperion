@@ -30,6 +30,8 @@ pub struct ServerStats {
     sky_cells: SkyCellCounters,
     sky_tables: SkyTablesCounters,
     surface: SurfaceCounters,
+    extinction_maps: LruCounters,
+    sightlines: LruCounters,
 }
 
 impl ServerStats {
@@ -50,6 +52,8 @@ impl ServerStats {
             sky_cells: state.sky_cells.counters(),
             sky_tables: state.sky_tables.counters(),
             surface: state.surface.counters(),
+            extinction_maps: state.extinction_maps.counters(),
+            sightlines: state.sightlines.counters(),
         }
     }
 
@@ -141,6 +145,20 @@ impl ServerStats {
     #[must_use]
     pub fn surface(&self) -> SurfaceCounters {
         self.surface
+    }
+
+    /// The extinction map cache's contents and use, including its byte budget: a repeated
+    /// `extinction_map` for one raster is a hit and computes nothing (plan 07, P07.T10.a).
+    #[must_use]
+    pub fn extinction_maps(&self) -> LruCounters {
+        self.extinction_maps
+    }
+
+    /// The sightline cache's contents and use, including its byte budget: a repeated
+    /// `extinction` to one target marches no step (plan 07, P07.T10.c).
+    #[must_use]
+    pub fn sightlines(&self) -> LruCounters {
+        self.sightlines
     }
 }
 

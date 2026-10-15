@@ -39,9 +39,9 @@ use std::{fmt, io};
 use axum::{Router, routing::get};
 
 use crate::compute::{
-    CpuPool, DensityMapService, GalaxyCache, SharedBodyCache, SharedBriefCache, SharedCellCache,
-    SharedSkyCellCache, SharedSystemCache, ShutDownPoolError, SkyCaps, SkyTablesService,
-    StartPoolError,
+    CpuPool, DensityMapService, ExtinctionMapService, GalaxyCache, SharedBodyCache,
+    SharedBriefCache, SharedCellCache, SharedSightlineCache, SharedSkyCellCache, SharedSystemCache,
+    ShutDownPoolError, SkyCaps, SkyTablesService, StartPoolError,
 };
 use crate::connections::Connections;
 use crate::limits::{BULK_QUEUE_CAPACITY, INTERACTIVE_QUEUE_CAPACITY};
@@ -82,10 +82,17 @@ pub(crate) struct AppState {
     /// The galaxies built from the open universes' seeds, at most
     /// [`GALAXY_CACHE_ENTRIES`](limits::GALAXY_CACHE_ENTRIES) of them.
     ///
-    /// Shared with [`AppState::maps`], which takes the galaxy of each map it computes from it.
+    /// Shared with [`AppState::maps`] and [`AppState::extinction_maps`], which take the galaxy of
+    /// each map they compute from it.
     pub(crate) galaxies: Arc<GalaxyCache>,
     /// The density maps computed so far, in the configured byte budget.
     pub(crate) maps: DensityMapService,
+    /// The extinction maps computed so far, in their own configured byte budget (plan 07,
+    /// P07.T10.a).
+    pub(crate) extinction_maps: ExtinctionMapService,
+    /// The lines of sight `extinction` has marched, in the configured byte budget (plan 07,
+    /// P07.T10.c).
+    pub(crate) sightlines: SharedSightlineCache,
     /// The generated cells a range query reads, in the configured byte budget.
     ///
     /// A query takes its own [`CellCacheHandle`](compute::CellCacheHandle) from this on the pool
@@ -178,6 +185,12 @@ impl Server {
             Arc::clone(&galaxies),
             config.map_cache_bytes(),
         );
+        let extinction_maps = ExtinctionMapService::new(
+            Arc::clone(&pool),
+            Arc::clone(&galaxies),
+            config.extinction_map_cache_bytes(),
+        );
+        let sightlines = SharedSightlineCache::new(config.sightline_cache_bytes());
         let cells = SharedCellCache::new(config.cell_cache_bytes());
         let systems = SharedSystemCache::new(config.system_cache_bytes());
         let briefs = SharedBriefCache::new(config.brief_cache_bytes());
@@ -205,6 +218,8 @@ impl Server {
             sky_tables_mib = config.sky_tables_bytes() / (1 << 20),
             surface_cache_mib = config.surface_cache_bytes() / (1 << 20),
             sky_service = ?config.sky_service(),
+            extinction_map_cache_mib = config.extinction_map_cache_bytes() / (1 << 20),
+            sightline_cache_mib = config.sightline_cache_bytes() / (1 << 20),
             "server started"
         );
         Ok(Self {
@@ -213,6 +228,8 @@ impl Server {
                 pool,
                 galaxies,
                 maps,
+                extinction_maps,
+                sightlines,
                 cells,
                 systems,
                 briefs,
@@ -465,6 +482,11 @@ mod tests {
             (fresh.sky_cells().cache(), defaults.sky_cache_bytes()),
             (fresh.sky_tables().cache(), defaults.sky_tables_bytes()),
             (fresh.surface().cache(), defaults.surface_cache_bytes()),
+            (
+                fresh.extinction_maps(),
+                defaults.extinction_map_cache_bytes(),
+            ),
+            (fresh.sightlines(), defaults.sightline_cache_bytes()),
         ] {
             assert_eq!(
                 (

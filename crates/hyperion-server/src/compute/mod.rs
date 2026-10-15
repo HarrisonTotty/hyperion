@@ -12,20 +12,25 @@
 //! generated cells a range query reads, [`SharedSystemCache`] the systems' stars a
 //! `system_summary` reads and [`SharedBodyCache`] the planetary systems `system_bodies` and
 //! `body_detail` read, each keyed by a [`GalaxyKey`]. A density map is computed and cached as a
-//! [`RawDensityMap`] and quantised for each response by [`quantise_map`]. A sky's caps, census,
-//! band and limit map run as bulk jobs, as far as its [`SkyCaps`] reach, each census cell's bright
-//! subset kept in the sky's own cell cache, and each galaxy's sky tables built once on the pool and
-//! kept in a cache of their own (rendering plan R06).
+//! [`RawDensityMap`] and quantised for each response by [`quantise_map`]; an extinction map by
+//! [`ExtinctionMapService`] into the same raw type, quantised by [`quantise_map_with_floor`]
+//! (plan 07, P07.T10.a). [`SharedSightlineCache`] holds the lines of sight the `extinction`
+//! request marches (P07.T10.c). A sky's caps, census, band and limit map run as bulk jobs, as far
+//! as its [`SkyCaps`] reach, each census cell's bright subset kept in the sky's own cell cache, and
+//! each galaxy's sky tables built once on the pool and kept in a cache of their own (rendering plan
+//! R06).
 
 mod bodies;
 mod cancel;
 mod cells;
 mod density_map;
 mod error;
+mod extinction_map;
 mod float_mode;
 mod galaxies;
 mod key;
 mod pool;
+mod sightlines;
 mod single_flight;
 pub(crate) mod sky;
 mod sky_cells;
@@ -37,9 +42,13 @@ pub use cancel::{CancelOnDrop, CancelToken};
 pub use cells::{CachedCell, CellCacheHandle, SharedCellCache};
 pub use density_map::{
     BuildRawMapError, CodeDepth, DensityMapService, MAP_WIDTH_LY, MapKey, MapResolution,
-    ParseCodeDepthError, ParseMapResolutionError, QuantisedMap, RawDensityMap, quantise_map,
+    ParseCodeDepthError, ParseMapResolutionError, PerLy2, QuantisedMap, RawDensityMap, RawMap,
+    quantise_map, quantise_map_with_floor,
 };
 pub use error::ComputeError;
+pub use extinction_map::{
+    EXTINCTION_FLOOR_LOG10_MAG, ExtinctionMapKey, ExtinctionMapService, Mag, RawExtinctionMap,
+};
 pub use float_mode::{FlushProbe, probe_flush_to_zero};
 pub use galaxies::{GalaxyCache, GalaxyCounters};
 pub use key::GalaxyKey;
@@ -47,6 +56,7 @@ pub use pool::{
     CpuPool, JobError, JobReceiver, PoolCounters, Priority, ShutDownPoolError, StartPoolError,
     SubmitJobError,
 };
+pub use sightlines::{SharedSightlineCache, SightlineMarcher};
 pub use single_flight::{Flight, SingleFlight};
 pub use sky::{ForceSkyCapsError, SkyCaps, SkyTablesSource};
 pub use sky_cells::SkyCellCounters;

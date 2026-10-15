@@ -6,6 +6,7 @@ import { UniverseProvider } from "../../components/UniverseProvider";
 import { FakeWebSocket } from "../../test/FakeWebSocket";
 import {
   anOpenedUniverse,
+  anUnknownUnit,
   aUniverse,
   aUniverseList,
   someGalaxyParameters,
@@ -109,6 +110,39 @@ describe("ParametersPanel", () => {
     expect(patternSpeed).toHaveTextContent("2.23°/MyrDERIVED");
     expect(within(panel()).getByRole("heading", { level: 3, name: "BULGE AND BAR" })).toBeVisible();
     expect(within(panel()).queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("shows a number in a unit this build does not know as Missing, with no unit", async () => {
+    const { user, socket } = await renderPanel();
+    await openFromList(user, socket, SURVEY_1);
+    await server(() => {
+      socket.serverAnswers("galaxy_parameters", (body) => {
+        const parameters = someGalaxyParameters(body.universe);
+        return {
+          ...parameters,
+          groups: [
+            ...parameters.groups,
+            {
+              key: "gas",
+              parameters: [
+                {
+                  key: "gas.lane_offset",
+                  origin: "drawn",
+                  value: { type: "number", value: 450, unit: anUnknownUnit() },
+                },
+              ],
+            },
+          ],
+        };
+      });
+    });
+
+    const row = within(panel()).getByRole("row", { name: /DUST LANE OFFSET/ });
+    const [value, unit] = within(row).getAllByRole("cell");
+    expect(value).toHaveTextContent("—");
+    expect(value).toHaveClass("readout__missing");
+    expect(unit).toBeEmptyDOMElement();
+    expect(row).toHaveTextContent("DRAWN");
   });
 
   it("shows the seed and generator version first, and not again in their group", async () => {

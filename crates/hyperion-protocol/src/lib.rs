@@ -58,9 +58,11 @@ pub use envelope::{
     SubscriptionTopic, UnsubscribeRequest,
 };
 pub use galaxy::{
-    Census, DensityMap, DensityMapRequest, GalaxyParameters, GalaxyParametersRequest, LayerCensus,
+    Census, DensityMap, DensityMapRequest, ExtinctionMap, ExtinctionMapRequest, ExtinctionRequest,
+    ExtinctionResult, ExtinctionTarget, GalaxyParameters, GalaxyParametersRequest, LayerCensus,
     LayerStatus, MapPopulation, MapView, MassLayer, Parameter, ParameterGroup, ParameterOrigin,
-    ParameterValue, Population, SystemRecord, SystemsInRange, SystemsInRangeRequest, Unit,
+    ParameterValue, Population, SystemRecord, SystemsInRange, SystemsInRangeRequest,
+    TargetExtinction, Unit,
 };
 pub use modelled::Modelled;
 pub use orbit::{HierarchyDto, HierarchyNodeDto, OrbitDto};
@@ -145,6 +147,15 @@ pub use universe::{
 /// check that refused an unknown key, would end it and so would bump the version; and a wire
 /// type's shape is frozen from the first build that sends a value of it
 /// (`decision-p14-t35e-wire.md`; galaxy plan 04's Design note 15).
+///
+/// An enum that galaxy plan 04's reserved list names as growing (`MassLayer`, `Population`,
+/// `LayerStatus`, `Unit` and `ErrorCode`) takes a new string without a bump, as `MassLayer` took
+/// `brown_dwarf` and `rogue_planet` and `Unit` takes `per_cm3`, `k_per_cm3` and `mag` for the gas
+/// parameters (galaxy plan 07, P07.T10.b): every string a build already sends keeps its bytes and
+/// its meaning, and a client that does not know the new one misreads nothing (one built before
+/// P07.T10.b leaves the value's cells empty, one built since shows it Missing). Every other enum
+/// is closed: it carries all its variants from the first build that sends a value of it, and a
+/// variant added after that bumps (`decision-gg-port-d0.md` §1).
 pub const PROTOCOL_VERSION: u32 = 2;
 
 #[cfg(test)]

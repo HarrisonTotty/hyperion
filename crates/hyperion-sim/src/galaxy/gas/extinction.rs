@@ -109,6 +109,23 @@ pub enum Quality {
     Budget(NonZeroU32),
 }
 
+/// The budget lines of sight are marched at where a line's cost must be bounded whatever its
+/// length: `Budget(256)` (plan 07, P07.T10.c; `decision-gg-port-d0.md` §5).
+///
+/// Two readers share it, so that the value has one owner:
+///
+/// - **the server's `extinction` request**, whose lines to at most 64 targets are then a few
+///   milliseconds of one worker (plan 07's Risks, "Cost on long-range charts");
+/// - **the sky band's ray profiles**, which `sky::band` marches by [`profile`] (rendering plan
+///   R06, R06.T9.a), whose light lies within 3% of the same rays marched at [`Quality::Full`]
+///   (`sky::band`'s test
+///   `above_the_disc_the_band_is_brighter_towards_the_plane_by_the_models_own_integral`).
+///
+/// The sky census's per-star lines take a budget of their own, for another purpose (rendering plan
+/// R06, Design note 10). A reader that wants another budget takes a constant of its own, with its
+/// reason, rather than change this one.
+pub const SIGHTLINE_QUALITY: Quality = Quality::Budget(NonZeroU32::new(256).expect("256 is not 0"));
+
 /// What a line of sight passes through: its visual extinction, its hydrogen columns and the steps
 /// it took.
 #[derive(Debug, Clone, Copy, PartialEq)]
