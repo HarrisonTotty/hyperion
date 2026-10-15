@@ -1499,3 +1499,493 @@ diagram 20 C2H6: melting_pressure_pa at 0.95 T_t none
 diagram 20 C2H6: melting_pressure_pa at 1.05 T_t = 0x41686c2c610efb6b  # 12804451.03307887
 diagram 20 C2H6: falling_melting_pressure_pa at 0.95 T_t none
 diagram 20 C2H6: saturation_temperature_k at 101325 Pa = 0x4067121685e88710  # 184.56524939933342
+[condensed]
+condensed 2 H2O: grain density of its diagram
+condensed 2 H2O: solid grain_density_kg_per_m3 at 0.9 T_t = 0x408cc480dc360192  # 920.5629200190763
+condensed 2 H2O: liquid grain_density_kg_per_m3 at T_t = 0x408f3e5025d3f691  # 999.789134651148
+condensed 2 H2O: transition triple point
+condensed 2 H2O: transition_k = 0x4071128f5c28f5c3  # 273.16
+condensed 2 H2O: mechanics WaterIce
+condensed 3 CH4: grain density of its diagram
+condensed 3 CH4: solid grain_density_kg_per_m3 at 0.9 T_t = 0x407f51f7db1c5c61  # 501.1230116947027
+condensed 3 CH4: liquid grain_density_kg_per_m3 at T_t = 0x407c379841dd406e  # 451.4746721880573
+condensed 3 CH4: transition triple point
+condensed 3 CH4: transition_k = 0x4056ac6c226809d5  # 90.6941
+condensed 3 CH4: mechanics VolatileIce
+condensed 4 NH3: grain density of its diagram
+condensed 4 NH3: solid grain_density_kg_per_m3 at 0.9 T_t = 0x4089b00000000000  # 822.0
+condensed 4 NH3: liquid grain_density_kg_per_m3 at T_t = 0x4086ef248ab0976c  # 733.8928426548205
+condensed 4 NH3: transition triple point
+condensed 4 NH3: transition_k = 0x40686fae147ae148  # 195.49
+condensed 4 NH3: mechanics VolatileIce
+condensed 5 N2: grain density of its diagram
+condensed 5 N2: solid grain_density_kg_per_m3 at 0.9 T_t = 0x408e3bfcc46254f5  # 967.4984214479615
+condensed 5 N2: liquid grain_density_kg_per_m3 at T_t = 0x408b19b1a96116fb  # 867.2117488465441
+condensed 5 N2: transition triple point
+condensed 5 N2: transition_k = 0x404f9353f7ced917  # 63.151
+condensed 5 N2: mechanics VolatileIce
+condensed 6 O2: grain density of its diagram
+condensed 6 O2: solid grain_density_kg_per_m3 at 0.9 T_t = 0x40954f7ae147ae14  # 1363.87
+condensed 6 O2: liquid grain_density_kg_per_m3 at T_t = 0x409470f6fe886243  # 1308.241205340383
+condensed 6 O2: transition triple point
+condensed 6 O2: transition_k = 0x404b2e353f7ced91  # 54.361
+condensed 6 O2: mechanics VolatileIce
+condensed 7 CO2: grain density of its diagram
+condensed 7 CO2: solid grain_density_kg_per_m3 at 0.9 T_t = 0x409876244e7901ed  # 1565.5354555995393
+condensed 7 CO2: liquid grain_density_kg_per_m3 at T_t = 0x40926a19b9a49ec9  # 1178.525122234527
+condensed 7 CO2: transition triple point
+condensed 7 CO2: transition_k = 0x406b12f1a9fbe76d  # 216.592
+condensed 7 CO2: mechanics VolatileIce
+condensed 8 Ar: grain density of its diagram
+condensed 8 Ar: solid grain_density_kg_per_m3 at 0.9 T_t none
+condensed 8 Ar: liquid grain_density_kg_per_m3 at T_t = 0x409622c0cbbdec1e  # 1416.6882772136082
+condensed 8 Ar: transition triple point
+condensed 8 Ar: transition_k = 0x4054f3923a29c77a  # 83.8058
+condensed 8 Ar: mechanics VolatileIce
+condensed 10 Kr: grain density of its diagram
+condensed 10 Kr: solid grain_density_kg_per_m3 at 0.9 T_t = 0x40a7390f5c28f5c3  # 2972.53
+condensed 10 Kr: liquid grain_density_kg_per_m3 at T_t = 0x40a312f3c9e4a993  # 2441.4761496979713
+condensed 10 Kr: transition triple point
+condensed 10 Kr: transition_k = 0x405cf147ae147ae1  # 115.77
+condensed 10 Kr: mechanics VolatileIce
+condensed 11 Xe: grain density of its diagram
+condensed 11 Xe: solid grain_density_kg_per_m3 at 0.9 T_t = 0x40ac8e147ae147ae  # 3655.04
+condensed 11 Xe: liquid grain_density_kg_per_m3 at T_t = 0x40a726cdef7c86a8  # 2963.402217761457
+condensed 11 Xe: transition triple point
+condensed 11 Xe: transition_k = 0x40642ccccccccccd  # 161.4
+condensed 11 Xe: mechanics VolatileIce
+condensed 12 N2O: grain density of its diagram
+condensed 12 N2O: solid grain_density_kg_per_m3 at 0.9 T_t = 0x40986851eb851eb8  # 1562.08
+condensed 12 N2O: liquid grain_density_kg_per_m3 at T_t = 0x409363b46ab04745  # 1240.926188234663
+condensed 12 N2O: transition triple point
+condensed 12 N2O: transition_k = 0x4066ca8f5c28f5c3  # 182.33
+condensed 12 N2O: mechanics VolatileIce
+condensed 13 CO: grain density of its diagram
+condensed 13 CO: solid grain_density_kg_per_m3 at 0.9 T_t = 0x40904a3333333333  # 1042.55
+condensed 13 CO: liquid grain_density_kg_per_m3 at T_t = 0x408a845a40ea35ff  # 848.5440691278199
+condensed 13 CO: transition triple point
+condensed 13 CO: transition_k = 0x40510a3d70a3d70a  # 68.16
+condensed 13 CO: mechanics VolatileIce
+condensed 14 SO2: grain density of its diagram
+condensed 14 SO2: solid grain_density_kg_per_m3 at 0.9 T_t = 0x409e07c28f5c28f6  # 1921.94
+condensed 14 SO2: liquid grain_density_kg_per_m3 at T_t = 0x40996f8b6ff29ec7  # 1627.8861692342196
+condensed 14 SO2: transition triple point
+condensed 14 SO2: transition_k = 0x4068b66666666666  # 197.7
+condensed 14 SO2: mechanics VolatileIce
+condensed 15 H2S: grain density of its diagram
+condensed 15 H2S: solid grain_density_kg_per_m3 at 0.9 T_t none
+condensed 15 H2S: liquid grain_density_kg_per_m3 at T_t = 0x408f00555914e413  # 992.0416738159278
+condensed 15 H2S: transition triple point
+condensed 15 H2S: transition_k = 0x4067766666666666  # 187.7
+condensed 15 H2S: mechanics VolatileIce
+condensed 20 C2H6: grain density of its diagram
+condensed 20 C2H6: solid grain_density_kg_per_m3 at 0.9 T_t none
+condensed 20 C2H6: liquid grain_density_kg_per_m3 at T_t = 0x408458c540fc785f  # 651.0963153576121
+condensed 20 C2H6: transition triple point
+condensed 20 C2H6: transition_k = 0x4056978d4fdf3b64  # 90.368
+condensed 20 C2H6: mechanics VolatileIce
+condensed 22 CH3OH: grain density fixed
+condensed 22 CH3OH: solid grain_density_kg_per_m3 = 0x40900fc28f5c28f6  # 1027.94
+condensed 22 CH3OH: solid grain_density_at_k = 0x405e800000000000  # 122.0
+condensed 22 CH3OH: liquid grain_density_kg_per_m3 none
+condensed 22 CH3OH: transition melting
+condensed 22 CH3OH: transition_k = 0x4065ebd70a3d70a4  # 175.37
+condensed 22 CH3OH: mechanics VolatileIce
+condensed 29 Fe: grain density fixed
+condensed 29 Fe: solid grain_density_kg_per_m3 = 0x40bec20000000000  # 7874.0
+condensed 29 Fe: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 29 Fe: liquid grain_density_kg_per_m3 none
+condensed 29 Fe: transition melting
+condensed 29 Fe: transition_k = 0x409c4c999999999a  # 1811.15
+condensed 29 Fe: mechanics Metal
+condensed 57 NH4SH: grain density fixed
+condensed 57 NH4SH: solid grain_density_kg_per_m3 = 0x40924ecccccccccd  # 1171.7
+condensed 57 NH4SH: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 57 NH4SH: liquid grain_density_kg_per_m3 none
+condensed 57 NH4SH: transition decomposition
+condensed 57 NH4SH: transition_k = 0x407311999999999a  # 305.1
+condensed 57 NH4SH: mechanics VolatileIce
+condensed 58 H2SO4: grain density fixed
+condensed 58 H2SO4: solid grain_density_kg_per_m3 none
+condensed 58 H2SO4: liquid grain_density_kg_per_m3 = 0x4099fa6666666666  # 1662.6
+condensed 58 H2SO4: liquid grain_density_at_k = 0x4072c00000000000  # 300.0
+condensed 58 H2SO4: transition liquidus
+condensed 58 H2SO4: transition_k = 0x406e400000000000  # 242.0
+condensed 58 H2SO4: mechanics Salt
+condensed 59 S8: grain density fixed
+condensed 59 S8: solid grain_density_kg_per_m3 = 0x40a0260000000000  # 2067.0
+condensed 59 S8: solid grain_density_at_k = 0x4072a00000000000  # 298.0
+condensed 59 S8: liquid grain_density_kg_per_m3 none
+condensed 59 S8: transition melting
+condensed 59 S8: transition_k = 0x407845c28f5c28f6  # 388.36
+condensed 59 S8: mechanics Salt
+condensed 60 KCl: grain density fixed
+condensed 60 KCl: solid grain_density_kg_per_m3 = 0x409f0c0000000000  # 1987.0
+condensed 60 KCl: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 60 KCl: liquid grain_density_kg_per_m3 none
+condensed 60 KCl: transition melting
+condensed 60 KCl: transition_k = 0x4090500000000000  # 1044.0
+condensed 60 KCl: mechanics Salt
+condensed 61 NaCl: grain density fixed
+condensed 61 NaCl: solid grain_density_kg_per_m3 = 0x40a0e60000000000  # 2163.0
+condensed 61 NaCl: solid grain_density_at_k = 0x4072a26666666666  # 298.15
+condensed 61 NaCl: liquid grain_density_kg_per_m3 none
+condensed 61 NaCl: transition melting
+condensed 61 NaCl: transition_k = 0x4090c73333333333  # 1073.8
+condensed 61 NaCl: mechanics Salt
+condensed 62 ZnS: grain density fixed
+condensed 62 ZnS: solid grain_density_kg_per_m3 = 0x40aff20000000000  # 4089.0
+condensed 62 ZnS: solid grain_density_at_k = 0x4072a00000000000  # 298.0
+condensed 62 ZnS: liquid grain_density_kg_per_m3 none
+condensed 62 ZnS: transition melting
+condensed 62 ZnS: transition_k = 0x409ed4999999999a  # 1973.15
+condensed 62 ZnS: mechanics Silicate
+condensed 63 Na2S: grain density fixed
+condensed 63 Na2S: solid grain_density_kg_per_m3 = 0x409d000000000000  # 1856.0
+condensed 63 Na2S: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 63 Na2S: liquid grain_density_kg_per_m3 none
+condensed 63 Na2S: transition melting
+condensed 63 Na2S: transition_k = 0x4096940000000000  # 1445.0
+condensed 63 Na2S: mechanics Salt
+condensed 64 MnS: grain density fixed
+condensed 64 MnS: solid grain_density_kg_per_m3 = 0x40afa80000000000  # 4052.0
+condensed 64 MnS: solid grain_density_at_k = 0x4072a00000000000  # 298.0
+condensed 64 MnS: liquid grain_density_kg_per_m3 none
+condensed 64 MnS: transition melting
+condensed 64 MnS: transition_k = 0x409d6c999999999a  # 1883.15
+condensed 64 MnS: mechanics Silicate
+condensed 65 Cr: grain density fixed
+condensed 65 Cr: solid grain_density_kg_per_m3 = 0x40bc200000000000  # 7200.0
+condensed 65 Cr: solid grain_density_at_k = 0x4072a26666666666  # 298.15
+condensed 65 Cr: liquid grain_density_kg_per_m3 none
+condensed 65 Cr: transition melting
+condensed 65 Cr: transition_k = 0x40a1084ccccccccd  # 2180.15
+condensed 65 Cr: mechanics Metal
+condensed 66 FeS: grain density fixed
+condensed 66 FeS: solid grain_density_kg_per_m3 = 0x40b2e80000000000  # 4840.0
+condensed 66 FeS: solid grain_density_at_k = 0x4072600000000000  # 294.0
+condensed 66 FeS: liquid grain_density_kg_per_m3 none
+condensed 66 FeS: transition melting
+condensed 66 FeS: transition_k = 0x4096dc0000000000  # 1463.0
+condensed 66 FeS: mechanics Silicate
+condensed 67 MgSiO3: grain density fixed
+condensed 67 MgSiO3: solid grain_density_kg_per_m3 = 0x40a9040000000000  # 3202.0
+condensed 67 MgSiO3: solid grain_density_at_k = 0x4072a00000000000  # 298.0
+condensed 67 MgSiO3: liquid grain_density_kg_per_m3 none
+condensed 67 MgSiO3: transition melting
+condensed 67 MgSiO3: transition_k = 0x409ce80000000000  # 1850.0
+condensed 67 MgSiO3: mechanics Silicate
+condensed 68 Mg2SiO4: grain density fixed
+condensed 68 Mg2SiO4: solid grain_density_kg_per_m3 = 0x40a9260000000000  # 3219.0
+condensed 68 Mg2SiO4: solid grain_density_at_k = 0x4072a26666666666  # 298.15
+condensed 68 Mg2SiO4: liquid grain_density_kg_per_m3 none
+condensed 68 Mg2SiO4: transition melting
+condensed 68 Mg2SiO4: transition_k = 0x40a0f60000000000  # 2171.0
+condensed 68 Mg2SiO4: mechanics Silicate
+condensed 69 SiO2: grain density fixed
+condensed 69 SiO2: solid grain_density_kg_per_m3 = 0x40a4b20000000000  # 2649.0
+condensed 69 SiO2: solid grain_density_at_k = 0x4072a00000000000  # 298.0
+condensed 69 SiO2: liquid grain_density_kg_per_m3 none
+condensed 69 SiO2: transition melting
+condensed 69 SiO2: transition_k = 0x409f300000000000  # 1996.0
+condensed 69 SiO2: mechanics Silicate
+condensed 70 Al2O3: grain density fixed
+condensed 70 Al2O3: solid grain_density_kg_per_m3 = 0x40af2a0000000000  # 3989.0
+condensed 70 Al2O3: solid grain_density_at_k = 0x4072a00000000000  # 298.0
+condensed 70 Al2O3: liquid grain_density_kg_per_m3 none
+condensed 70 Al2O3: transition melting
+condensed 70 Al2O3: transition_k = 0x40a22e0000000000  # 2327.0
+condensed 70 Al2O3: mechanics Silicate
+condensed 71 CaTiO3: grain density fixed
+condensed 71 CaTiO3: solid grain_density_kg_per_m3 = 0x40af900000000000  # 4040.0
+condensed 71 CaTiO3: solid grain_density_at_k = 0x4072a00000000000  # 298.0
+condensed 71 CaTiO3: liquid grain_density_kg_per_m3 none
+condensed 71 CaTiO3: transition melting
+condensed 71 CaTiO3: transition_k = 0x40a1904ccccccccd  # 2248.15
+condensed 71 CaTiO3: mechanics Silicate
+condensed 72 TiO2: grain density fixed
+condensed 72 TiO2: solid grain_density_kg_per_m3 = 0x40b0980000000000  # 4248.0
+condensed 72 TiO2: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 72 TiO2: liquid grain_density_kg_per_m3 none
+condensed 72 TiO2: transition melting
+condensed 72 TiO2: transition_k = 0x40a0a40000000000  # 2130.0
+condensed 72 TiO2: mechanics Silicate
+condensed 73 graphite: grain density fixed
+condensed 73 graphite: solid grain_density_kg_per_m3 = 0x40a1aa0000000000  # 2261.0
+condensed 73 graphite: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 73 graphite: liquid grain_density_kg_per_m3 none
+condensed 73 graphite: transition sublimation
+condensed 73 graphite: transition_k = 0x40afe00000000000  # 4080.0
+condensed 73 graphite: mechanics Silicate
+condensed 74 tholin: grain density fixed
+condensed 74 tholin: solid grain_density_kg_per_m3 = 0x4095180000000000  # 1350.0
+condensed 74 tholin: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 74 tholin: liquid grain_density_kg_per_m3 none
+condensed 74 tholin: transition decomposition
+condensed 74 tholin: transition_k = 0x407a726666666666  # 423.15
+condensed 74 tholin: mechanics Organic
+condensed 75 soot: grain density fixed
+condensed 75 soot: solid grain_density_kg_per_m3 = 0x409c200000000000  # 1800.0
+condensed 75 soot: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 75 soot: liquid grain_density_kg_per_m3 none
+condensed 75 soot: transition sublimation
+condensed 75 soot: transition_k = 0x40afe00000000000  # 4080.0
+condensed 75 soot: mechanics Organic
+condensed 76 chromophore: grain density fixed
+condensed 76 chromophore: solid grain_density_kg_per_m3 = 0x4095180000000000  # 1350.0
+condensed 76 chromophore: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 76 chromophore: liquid grain_density_kg_per_m3 none
+condensed 76 chromophore: transition decomposition
+condensed 76 chromophore: transition_k = 0x407a726666666666  # 423.15
+condensed 76 chromophore: mechanics Organic
+condensed 77 ice_giant_haze: grain density fixed
+condensed 77 ice_giant_haze: solid grain_density_kg_per_m3 = 0x4095180000000000  # 1350.0
+condensed 77 ice_giant_haze: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 77 ice_giant_haze: liquid grain_density_kg_per_m3 none
+condensed 77 ice_giant_haze: transition decomposition
+condensed 77 ice_giant_haze: transition_k = 0x407a726666666666  # 423.15
+condensed 77 ice_giant_haze: mechanics Organic
+condensed 78 mars_dust: grain density fixed
+condensed 78 mars_dust: solid grain_density_kg_per_m3 = 0x40a4500000000000  # 2600.0
+condensed 78 mars_dust: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 78 mars_dust: liquid grain_density_kg_per_m3 none
+condensed 78 mars_dust: transition solidus
+condensed 78 mars_dust: transition_k = 0x4094ac999999999a  # 1323.15
+condensed 78 mars_dust: mechanics Silicate
+condensed 79 acid_uv_absorber: grain density fixed
+condensed 79 acid_uv_absorber: solid grain_density_kg_per_m3 none
+condensed 79 acid_uv_absorber: liquid grain_density_kg_per_m3 = 0x4099fa6666666666  # 1662.6
+condensed 79 acid_uv_absorber: liquid grain_density_at_k = 0x4072c00000000000  # 300.0
+condensed 79 acid_uv_absorber: transition liquidus
+condensed 79 acid_uv_absorber: transition_k = 0x406e400000000000  # 242.0
+condensed 79 acid_uv_absorber: mechanics Salt
+condensed 80 brine_nacl: grain density fixed
+condensed 80 brine_nacl: solid grain_density_kg_per_m3 none
+condensed 80 brine_nacl: liquid grain_density_kg_per_m3 = 0x4092806666666666  # 1184.1
+condensed 80 brine_nacl: liquid grain_density_at_k = 0x4071126666666666  # 273.15
+condensed 80 brine_nacl: transition eutectic
+condensed 80 brine_nacl: transition_k = 0x406f7ccccccccccd  # 251.9
+condensed 80 brine_nacl: eutectic solute_mass_fraction = 0x3fcdd2f1a9fbe76d  # 0.233
+condensed 80 brine_nacl: mechanics WaterIce
+condensed 81 brine_mgso4: grain density fixed
+condensed 81 brine_mgso4: solid grain_density_kg_per_m3 none
+condensed 81 brine_mgso4: liquid grain_density_kg_per_m3 = 0x4092a53333333333  # 1193.3
+condensed 81 brine_mgso4: liquid grain_density_at_k = 0x4071126666666666  # 273.15
+condensed 81 brine_mgso4: transition eutectic
+condensed 81 brine_mgso4: transition_k = 0x4070d4a3d70a3d71  # 269.29
+condensed 81 brine_mgso4: eutectic solute_mass_fraction = 0x3fc624dd2f1a9fbe  # 0.173
+condensed 81 brine_mgso4: mechanics WaterIce
+condensed 82 brine_naclo4: grain density fixed
+condensed 82 brine_naclo4: solid grain_density_kg_per_m3 none
+condensed 82 brine_naclo4: liquid grain_density_kg_per_m3 = 0x4096940000000000  # 1445.0
+condensed 82 brine_naclo4: liquid grain_density_at_k = 0x4072326666666666  # 291.15
+condensed 82 brine_naclo4: transition eutectic
+condensed 82 brine_naclo4: transition_k = 0x406d800000000000  # 236.0
+condensed 82 brine_naclo4: eutectic solute_mass_fraction = 0x3fe0a3d70a3d70a4  # 0.52
+condensed 82 brine_naclo4: mechanics Salt
+condensed 83 brine_mgclo4: grain density fixed
+condensed 83 brine_mgclo4: solid grain_density_kg_per_m3 none
+condensed 83 brine_mgclo4: liquid grain_density_kg_per_m3 = 0x4095c80000000000  # 1394.0
+condensed 83 brine_mgclo4: liquid grain_density_at_k = 0x4072a26666666666  # 298.15
+condensed 83 brine_mgclo4: transition eutectic
+condensed 83 brine_mgclo4: transition_k = 0x4069c00000000000  # 206.0
+condensed 83 brine_mgclo4: eutectic solute_mass_fraction = 0x3fdc28f5c28f5c29  # 0.44
+condensed 83 brine_mgclo4: mechanics Salt
+condensed 84 nh3_h2o: grain density fixed
+condensed 84 nh3_h2o: solid grain_density_kg_per_m3 none
+condensed 84 nh3_h2o: liquid grain_density_kg_per_m3 = 0x408d900000000000  # 946.0
+condensed 84 nh3_h2o: liquid grain_density_at_k = 0x406604cccccccccd  # 176.15
+condensed 84 nh3_h2o: transition eutectic
+condensed 84 nh3_h2o: transition_k = 0x406604cccccccccd  # 176.15
+condensed 84 nh3_h2o: eutectic solute_mass_fraction = 0x3fd48b4395810625  # 0.321
+condensed 84 nh3_h2o: mechanics VolatileIce
+condensed 85 ch4_c2h6_n2: grain density fixed
+condensed 85 ch4_c2h6_n2: solid grain_density_kg_per_m3 none
+condensed 85 ch4_c2h6_n2: liquid grain_density_kg_per_m3 = 0x4080373333333333  # 518.9
+condensed 85 ch4_c2h6_n2: liquid grain_density_at_k = 0x405769999999999a  # 93.65
+condensed 85 ch4_c2h6_n2: transition eutectic
+condensed 85 ch4_c2h6_n2: transition_k = 0x4051c9999999999a  # 71.15
+condensed 85 ch4_c2h6_n2: eutectic solute_mass_fraction = 0x3fe049ba5e353f7d  # 0.509
+condensed 85 ch4_c2h6_n2: mechanics VolatileIce
+condensed 86 anorthosite: grain density fixed
+condensed 86 anorthosite: solid grain_density_kg_per_m3 = 0x40a5cc0000000000  # 2790.0
+condensed 86 anorthosite: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 86 anorthosite: liquid grain_density_kg_per_m3 none
+condensed 86 anorthosite: transition solidus
+condensed 86 anorthosite: transition_k = 0x4097f4999999999a  # 1533.15
+condensed 86 anorthosite: mechanics Silicate
+condensed 87 feldspathic: grain density fixed
+condensed 87 feldspathic: solid grain_density_kg_per_m3 = 0x40a6a80000000000  # 2900.0
+condensed 87 feldspathic: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 87 feldspathic: liquid grain_density_kg_per_m3 none
+condensed 87 feldspathic: transition solidus
+condensed 87 feldspathic: transition_k = 0x4097f4999999999a  # 1533.15
+condensed 87 feldspathic: mechanics Silicate
+condensed 88 basalt: grain density fixed
+condensed 88 basalt: solid grain_density_kg_per_m3 = 0x40a7840000000000  # 3010.0
+condensed 88 basalt: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 88 basalt: liquid grain_density_kg_per_m3 none
+condensed 88 basalt: transition solidus
+condensed 88 basalt: transition_k = 0x409394999999999a  # 1253.15
+condensed 88 basalt: mechanics Silicate
+condensed 89 basalt_fe: grain density fixed
+condensed 89 basalt_fe: solid grain_density_kg_per_m3 = 0x40a9dc0000000000  # 3310.0
+condensed 89 basalt_fe: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 89 basalt_fe: liquid grain_density_kg_per_m3 none
+condensed 89 basalt_fe: transition solidus
+condensed 89 basalt_fe: transition_k = 0x4094ac999999999a  # 1323.15
+condensed 89 basalt_fe: mechanics Silicate
+condensed 90 komatiite: grain density fixed
+condensed 90 komatiite: solid grain_density_kg_per_m3 = 0x40a9500000000000  # 3240.0
+condensed 90 komatiite: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 90 komatiite: liquid grain_density_kg_per_m3 none
+condensed 90 komatiite: transition solidus
+condensed 90 komatiite: transition_k = 0x409650999999999a  # 1428.15
+condensed 90 komatiite: mechanics Silicate
+condensed 91 basalt_reduced: grain density fixed
+condensed 91 basalt_reduced: solid grain_density_kg_per_m3 = 0x40a7340000000000  # 2970.0
+condensed 91 basalt_reduced: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 91 basalt_reduced: liquid grain_density_kg_per_m3 none
+condensed 91 basalt_reduced: transition solidus
+condensed 91 basalt_reduced: transition_k = 0x409704999999999a  # 1473.15
+condensed 91 basalt_reduced: mechanics Silicate
+condensed 92 granite: grain density fixed
+condensed 92 granite: solid grain_density_kg_per_m3 = 0x40a4b40000000000  # 2650.0
+condensed 92 granite: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 92 granite: liquid grain_density_kg_per_m3 none
+condensed 92 granite: transition solidus
+condensed 92 granite: transition_k = 0x409344999999999a  # 1233.15
+condensed 92 granite: mechanics Silicate
+condensed 93 ultramafic: grain density fixed
+condensed 93 ultramafic: solid grain_density_kg_per_m3 = 0x40a9f00000000000  # 3320.0
+condensed 93 ultramafic: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 93 ultramafic: liquid grain_density_kg_per_m3 none
+condensed 93 ultramafic: transition solidus
+condensed 93 ultramafic: transition_k = 0x4095c73d70a3d70a  # 1393.81
+condensed 93 ultramafic: mechanics Silicate
+condensed 94 ferric: grain density fixed
+condensed 94 ferric: solid grain_density_kg_per_m3 = 0x40a9dc0000000000  # 3310.0
+condensed 94 ferric: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 94 ferric: liquid grain_density_kg_per_m3 none
+condensed 94 ferric: transition solidus
+condensed 94 ferric: transition_k = 0x4094ac999999999a  # 1323.15
+condensed 94 ferric: mechanics Silicate
+condensed 95 phyllosilicate: grain density fixed
+condensed 95 phyllosilicate: solid grain_density_kg_per_m3 = 0x40a3880000000000  # 2500.0
+condensed 95 phyllosilicate: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 95 phyllosilicate: liquid grain_density_kg_per_m3 none
+condensed 95 phyllosilicate: transition solidus
+condensed 95 phyllosilicate: transition_k = 0x40963c999999999a  # 1423.15
+condensed 95 phyllosilicate: mechanics Silicate
+condensed 96 lava_glass: grain density fixed
+condensed 96 lava_glass: solid grain_density_kg_per_m3 = 0x40a5900000000000  # 2760.0
+condensed 96 lava_glass: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 96 lava_glass: liquid grain_density_kg_per_m3 none
+condensed 96 lava_glass: transition solidus
+condensed 96 lava_glass: transition_k = 0x409394999999999a  # 1253.15
+condensed 96 lava_glass: mechanics Silicate
+condensed 97 ca_al_residue: grain density fixed
+condensed 97 ca_al_residue: solid grain_density_kg_per_m3 = 0x40adc40000000000  # 3810.0
+condensed 97 ca_al_residue: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 97 ca_al_residue: liquid grain_density_kg_per_m3 none
+condensed 97 ca_al_residue: transition solidus
+condensed 97 ca_al_residue: transition_k = 0x40a0cc0000000000  # 2150.0
+condensed 97 ca_al_residue: mechanics Silicate
+condensed 98 iron_nickel: grain density fixed
+condensed 98 iron_nickel: solid grain_density_kg_per_m3 = 0x40bedc0000000000  # 7900.0
+condensed 98 iron_nickel: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 98 iron_nickel: liquid grain_density_kg_per_m3 none
+condensed 98 iron_nickel: transition solidus
+condensed 98 iron_nickel: transition_k = 0x409c4c999999999a  # 1811.15
+condensed 98 iron_nickel: mechanics Metal
+condensed 99 SiC: grain density fixed
+condensed 99 SiC: solid grain_density_kg_per_m3 = 0x40a91a0000000000  # 3213.0
+condensed 99 SiC: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 99 SiC: liquid grain_density_kg_per_m3 none
+condensed 99 SiC: transition decomposition
+condensed 99 SiC: transition_k = 0x40a83e4ccccccccd  # 3103.15
+condensed 99 SiC: mechanics Silicate
+condensed 100 MgSO4: grain density fixed
+condensed 100 MgSO4: solid grain_density_kg_per_m3 = 0x40a7980000000000  # 3020.0
+condensed 100 MgSO4: solid grain_density_at_k = 0x4072c00000000000  # 300.0
+condensed 100 MgSO4: liquid grain_density_kg_per_m3 none
+condensed 100 MgSO4: transition decomposition
+condensed 100 MgSO4: transition_k = 0x4093e00000000000  # 1272.0
+condensed 100 MgSO4: mechanics Salt
+condensed 101 Na2CO3: grain density fixed
+condensed 101 Na2CO3: solid grain_density_kg_per_m3 = 0x40a3d80000000000  # 2540.0
+condensed 101 Na2CO3: solid grain_density_at_k = 0x4072700000000000  # 295.0
+condensed 101 Na2CO3: liquid grain_density_kg_per_m3 none
+condensed 101 Na2CO3: transition melting
+condensed 101 Na2CO3: transition_k = 0x40918c999999999a  # 1123.15
+condensed 101 Na2CO3: mechanics Salt
+condensed 102 CaCO3: grain density fixed
+condensed 102 CaCO3: solid grain_density_kg_per_m3 = 0x40a52c0000000000  # 2710.0
+condensed 102 CaCO3: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 102 CaCO3: liquid grain_density_kg_per_m3 none
+condensed 102 CaCO3: transition decomposition
+condensed 102 CaCO3: transition_k = 0x4092240000000000  # 1161.0
+condensed 102 CaCO3: mechanics Salt
+condensed 103 carbonaceous: grain density fixed
+condensed 103 carbonaceous: solid grain_density_kg_per_m3 = 0x4095e00000000000  # 1400.0
+condensed 103 carbonaceous: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 103 carbonaceous: liquid grain_density_kg_per_m3 none
+condensed 103 carbonaceous: transition decomposition
+condensed 103 carbonaceous: transition_k = 0x4085093333333333  # 673.15
+condensed 103 carbonaceous: mechanics Organic
+condensed 104 chondrite_ci: grain density fixed
+condensed 104 chondrite_ci: solid grain_density_kg_per_m3 = 0x40a43c0000000000  # 2590.0
+condensed 104 chondrite_ci: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 104 chondrite_ci: liquid grain_density_kg_per_m3 none
+condensed 104 chondrite_ci: transition solidus
+condensed 104 chondrite_ci: transition_k = 0x40963c999999999a  # 1423.15
+condensed 104 chondrite_ci: mechanics Silicate
+condensed 105 chondrite_cm: grain density fixed
+condensed 105 chondrite_cm: solid grain_density_kg_per_m3 = 0x40a6d00000000000  # 2920.0
+condensed 105 chondrite_cm: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 105 chondrite_cm: liquid grain_density_kg_per_m3 none
+condensed 105 chondrite_cm: transition solidus
+condensed 105 chondrite_cm: transition_k = 0x40963c999999999a  # 1423.15
+condensed 105 chondrite_cm: mechanics Silicate
+condensed 106 chondrite_cv: grain density fixed
+condensed 106 chondrite_cv: solid grain_density_kg_per_m3 = 0x40aba80000000000  # 3540.0
+condensed 106 chondrite_cv: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 106 chondrite_cv: liquid grain_density_kg_per_m3 none
+condensed 106 chondrite_cv: transition solidus
+condensed 106 chondrite_cv: transition_k = 0x40963c999999999a  # 1423.15
+condensed 106 chondrite_cv: mechanics Silicate
+condensed 107 chondrite_h: grain density fixed
+condensed 107 chondrite_h: solid grain_density_kg_per_m3 = 0x40ad100000000000  # 3720.0
+condensed 107 chondrite_h: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 107 chondrite_h: liquid grain_density_kg_per_m3 none
+condensed 107 chondrite_h: transition solidus
+condensed 107 chondrite_h: transition_k = 0x40963c999999999a  # 1423.15
+condensed 107 chondrite_h: mechanics Silicate
+condensed 108 chondrite_l: grain density fixed
+condensed 108 chondrite_l: solid grain_density_kg_per_m3 = 0x40abf80000000000  # 3580.0
+condensed 108 chondrite_l: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 108 chondrite_l: liquid grain_density_kg_per_m3 none
+condensed 108 chondrite_l: transition solidus
+condensed 108 chondrite_l: transition_k = 0x40963c999999999a  # 1423.15
+condensed 108 chondrite_l: mechanics Silicate
+condensed 109 chondrite_ll: grain density fixed
+condensed 109 chondrite_ll: solid grain_density_kg_per_m3 = 0x40aba80000000000  # 3540.0
+condensed 109 chondrite_ll: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 109 chondrite_ll: liquid grain_density_kg_per_m3 none
+condensed 109 chondrite_ll: transition solidus
+condensed 109 chondrite_ll: transition_k = 0x40963c999999999a  # 1423.15
+condensed 109 chondrite_ll: mechanics Silicate
+condensed 110 chondrite_e: grain density fixed
+condensed 110 chondrite_e: solid grain_density_kg_per_m3 = 0x40ac980000000000  # 3660.0
+condensed 110 chondrite_e: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 110 chondrite_e: liquid grain_density_kg_per_m3 none
+condensed 110 chondrite_e: transition solidus
+condensed 110 chondrite_e: transition_k = 0x4093e4999999999a  # 1273.15
+condensed 110 chondrite_e: mechanics Silicate
+condensed 111 cometary: grain density fixed
+condensed 111 cometary: solid grain_density_kg_per_m3 = 0x409f400000000000  # 2000.0
+condensed 111 cometary: solid grain_density_at_k = 0x4072500000000000  # 293.0
+condensed 111 cometary: liquid grain_density_kg_per_m3 none
+condensed 111 cometary: transition solidus
+condensed 111 cometary: transition_k = 0x40963c999999999a  # 1423.15
+condensed 111 cometary: mechanics Organic

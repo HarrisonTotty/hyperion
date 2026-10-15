@@ -5,9 +5,11 @@
 //!   generator version: the elements' order, each row's identity (index, key, kind, charge,
 //!   stoichiometry and molar mass), its client optics, its gas columns (the held class, the
 //!   molecular constants, and `c_p` ÷ R, H̃ and S̃ at fixed temperatures; P14.T49.b), its phase
-//!   columns, and its phase diagram (its points, anchors, curve, densities and enthalpies at fixed
-//!   fractions of its triple and critical temperatures; P14.T49.b). A changed value is moved
-//!   output, which bumps the version.
+//!   columns, its phase diagram (its points, anchors, curve, densities and enthalpies at fixed
+//!   fractions of its triple and critical temperatures; P14.T49.b), and its condensed columns
+//!   (grain density, transition and mechanics family; P14.T49.b). A changed value is moved output,
+//!   which bumps the version; until P14.T54.a nothing on the record reads the diagram and
+//!   condensed sections, which re-bless at the version in force.
 //! - `packages/protocol/fixtures/substances.json` mirrors the rows for the client (index, key,
 //!   kind, molar mass, `c_p` ÷ R and the three optics flags), which rendering plan R08's parity
 //!   check and P14.T35.e's decode tests read. `just bless` (`HYPERION_BLESS=1`) writes it, and
@@ -26,8 +28,8 @@ use std::path::{Path, PathBuf};
 
 use hyperion_sim::GENERATOR_VERSION;
 use hyperion_sim::substance::{
-    self, EQUILIBRIUM_HYDROGEN, Element, GasColumns, LevelSet, MolecularConstants, PhaseDiagram,
-    Substance,
+    self, CondensedPhase, EQUILIBRIUM_HYDROGEN, Element, GasColumns, GrainDensity, LevelSet,
+    MolecularConstants, PhaseDiagram, Substance, TransitionKind,
 };
 use hyperion_sim::units::{Kelvin, KilogramsPerCubicMetre, Pascals};
 use hyperion_testkit::golden;
@@ -285,6 +287,76 @@ fn diagram_section(w: &mut GoldenWriter) {
     }
 }
 
+/// The golden's condensed section: each row's grain density (a fixed row's solid's and liquid's,
+/// each with its temperature or none; a diagram row's solid at 0.9 of its triple temperature and
+/// its saturated liquid at it), its transition with its kind (a eutectic's composition too) and its
+/// mechanics family (P14.T49.b).
+fn condensed_section(w: &mut GoldenWriter) {
+    w.line("[condensed]");
+    for id in substance::ids() {
+        let row = id.substance();
+        let Some(condensed) = row.condensed() else {
+            continue;
+        };
+        let label = format!("condensed {} {}", id.index(), row.key());
+        match condensed.grain_density() {
+            GrainDensity::Fixed { solid, liquid } => {
+                w.line(&format!("{label}: grain density fixed"));
+                for (phase, given) in [("solid", solid), ("liquid", liquid)] {
+                    match given {
+                        Some(given) => {
+                            w.f64(
+                                &format!("{label}: {phase} grain_density_kg_per_m3"),
+                                given.density().value(),
+                            );
+                            w.f64(
+                                &format!("{label}: {phase} grain_density_at_k"),
+                                given.at().value(),
+                            );
+                        }
+                        None => w.line(&format!("{label}: {phase} grain_density_kg_per_m3 none")),
+                    }
+                }
+            }
+            GrainDensity::OfDiagram => {
+                w.line(&format!("{label}: grain density of its diagram"));
+                let t_t = row
+                    .phase_diagram()
+                    .expect("a diagram row has a phase diagram")
+                    .triple_temperature();
+                f64_or_none(
+                    w,
+                    &format!("{label}: solid grain_density_kg_per_m3 at 0.9 T_t"),
+                    row.grain_density(CondensedPhase::Solid, Kelvin::new(0.9 * t_t.value()))
+                        .map(KilogramsPerCubicMetre::value),
+                );
+                f64_or_none(
+                    w,
+                    &format!("{label}: liquid grain_density_kg_per_m3 at T_t"),
+                    row.grain_density(CondensedPhase::Liquid, t_t)
+                        .map(KilogramsPerCubicMetre::value),
+                );
+            }
+        }
+        let transition = condensed.transition();
+        w.line(&format!("{label}: transition {}", transition.kind().name()));
+        w.f64(
+            &format!("{label}: transition_k"),
+            transition.temperature().value(),
+        );
+        if let TransitionKind::Eutectic {
+            solute_mass_fraction,
+        } = transition.kind()
+        {
+            w.f64(
+                &format!("{label}: eutectic solute_mass_fraction"),
+                solute_mass_fraction,
+            );
+        }
+        w.line(&format!("{label}: mechanics {:?}", condensed.mechanics()));
+    }
+}
+
 /// The golden's text.
 fn registry_golden() -> String {
     let mut w = GoldenWriter::new();
@@ -351,6 +423,7 @@ fn registry_golden() -> String {
         }
     }
     diagram_section(&mut w);
+    condensed_section(&mut w);
     w.finish()
 }
 

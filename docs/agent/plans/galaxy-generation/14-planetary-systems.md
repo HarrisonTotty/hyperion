@@ -13408,3 +13408,223 @@ tables::gauss_legendre`.
     (two passes over the rows' terms). It is unmeasured on a quiet machine, for P14.T33.a's
     `body_detail` at `surface` case. A crate-private combined S̃-and-`c_p` evaluation in
     `substance::thermo` would halve it.
+- **Deviations in P14.T49.b, as built: step 2, part 2, its first piece, the condensed columns
+  (`p14-registry`, 2026-10-15).** `GENERATOR_VERSION` stays 22, and no generated value moves.
+  Part 2 was split again (main's lean): this piece builds the condensed columns, with the
+  solutions' densities at their reference compositions and the eutectics, which T49.c and T49.h
+  need first, and the test that every key R09's worlds use is a row. **The lane's next agent's**,
+  the last of T49.b: the laws aloft (`substance/aloft.rs`), the golden's `[aloft]` section, and
+  molten sulphur's measured liquid density (below).
+  - _Held at 22._ The columns are a new group, `CondensedColumns` (`Substance::condensed`), which
+    nothing on the record reads. P14.T49.c's palette resolution reads them, and P14.T54.a wires
+    the palette at the bump (decision-bump-plan-after-22 §1.2). Until then a change to a value
+    re-blesses the golden's `[condensed]` section at the version in force, with no bump.
+    T49.c's review should check that no caller of `Substance::condensed` or `grain_density` is
+    reachable from `record::Surface` before T54.a (the determinism audit).
+  - _Added public items_, in `substance::condensed` and re-exported at `substance::`:
+    - `CondensedColumns` (`grain_density`, `transition`, `mechanics`, `sources`);
+    - `GrainDensity`: `Fixed { solid, liquid }`, each an `Option<DensityAt>` (`density`, `at`), at
+      least one given, and `OfDiagram`;
+    - `CondensedPhase` (`Solid`, `Liquid`);
+    - `Transition` (`kind`, `temperature`);
+    - `TransitionKind` (`Melting`, `Solidus`, `Liquidus`, `Eutectic { solute_mass_fraction }`,
+      `Decomposition`, `Sublimation`, `TriplePoint`; `name`);
+    - `Substance::condensed`, and `Substance::grain_density(phase, temperature)`, which resolves
+      a phase's density at a temperature.
+
+    Against the step-1 builder's design (`Fixed { kg_m3, at_k }`):
+    - `Fixed` holds one density for each phase that was read. A reader asking for a phase that
+      was not read gets `None`, not modelled, rather than the other phase's figure: a rock's melt
+      is T49.h's (decision-r11-palette-liquids §1.8), and a row with both a measured solid and a
+      measured liquid (molten sulphur) fits;
+    - `Liquidus` is added, for the 75 wt% acid, whose eutectic composition is not its own;
+    - `TriplePoint` holds its diagram's triple temperature, copied in a `const` and held to it to
+      the bit by a test, so a `Transition` is always a kind and a temperature.
+
+  - _Files beyond the task's_: `substance/condensed.rs` (the group), `substance/rows/condensed.rs`
+    (the rows' data), and `planetary/surface/reference.rs` (its tests and its module note).
+  - _The 71 rows._
+    - **The fourteen diagram rows** take `OfDiagram` and `TriplePoint`: water `WaterIce`, the rest
+      `VolatileIce`. Water's triple point, 273.16 K, stands 0.0075 K above ice Ih's melting at one
+      atmosphere, which a palette's 273.15 K rounds.
+    - **Methanol**, with no diagram: its α cell at 122 K, 1,027.94 kg m⁻³ (Kirchner, Das and Boese
+      2008, COD 4503066), and its melting point, 175.37 K (COD 4503067's CIF), `VolatileIce`.
+    - **The 56 rows of the lane's research** (`solids/data.json`): the condensates aloft, the
+      hazes, the solutions, the lithologies, the salts, the organics, the undifferentiated bodies'
+      materials, and the metal clouds `Fe` and `Cr`. Each row's figures, errors and sources are in
+      its doc comment and its `Source`s.
+    - **R09's seven reference rows** (`basalt`, `basalt_fe`, `granite`, `feldspathic`,
+      `phyllosilicate`, `Na2CO3`, `mars_dust`) are `reference.rs`'s to the bit, which
+      `the_reference_rows_are_the_substance_registry_s` holds. The two reference ices take their
+      diagrams, so two of their values differ: water ice's transition is 273.16 K against the
+      row's 273.15 K, and CO₂ frost's density at 150 K is Mangan et al.'s 1,621.4 kg m⁻³ against
+      the row's rounded 1,621. **P14.T54.a's bless note** names both when the palette resolves
+      from the registry.
+  - _Not modelled_ (no condensed columns; closed set, for the composition audit):
+    - `HCN` and `C2H2`: their transitions are from memory only, and so is HCN's cell. C2H2's cells
+      were read, but without their temperatures;
+    - `Ne`, `H2`, `He`, `O3`, `C2H4`, `PH3` and `HCl`: nothing was read;
+    - the chemistry's atoms (`H`, `O`, `Na`, `K`, `Mg`, `Si`, `Ca`, `Ti`, `Al`, `V`, `Mn`, `Ni`,
+      `Zn`), the electron and `H-`, the thirteen ions (`Na+`, `Mg+`, `Al+`, `Si+`, `K+`, `Ca+`,
+      `Ti+`, `V+`, `Cr+`, `Mn+`, `Fe+`, `Ni+`, `Zn+`) and `SiO`, `TiO`, `VO` and `FeH`, whose
+      condensates aloft are their compounds' rows. `Fe` and `Cr` carry their metal clouds;
+    - **molten sulphur's** density (`S8` as a liquid, Io's flows): decision-r11-palette-liquids
+      §1.8 makes it T49.b's, "a measured liquid series (Meyer 1976 as the aid)". The lane's
+      research has none, so it waits for the next agent, and `S8`'s liquid is `None` meanwhile;
+    - methanol's liquid, for which no reference equation of state was read;
+    - within a diagram row, any solid phase whose density was not read resolves to `None`: argon,
+      hydrogen sulphide, ethane, β-oxygen and β-carbon monoxide.
+
+    `substance_condensed_columns_cover_the_condensed_rows` holds every row that is not a gas, and
+    every diagram row, to having condensed columns.
+
+  - _The ferric ruling_ (decision-backlog-2 §1, 2026-10-15):
+    - **Grain density:** `ferric`'s is `basalt_fe`'s 3,310 kg m⁻³, the same constant, recorded
+      +120/−240 (3,070–3,430). Its doc comment carries §1.2's sources: Achilles et al. 2017; Morris
+      et al. 2013 and 2006; the Handbook of Mineralogy's hematite and magnetite; Hiemstra and Van
+      Riemsdijk 2009; Macke, Britt and Consolmagno 2011.
+    - **Transition and mechanics:** `basalt_fe`'s solidus, an assumption, and `Silicate`.
+    - **Refused:** Hu, Ehlmann and Seager 2012's 50% nanophase hematite read as a mode
+      (4,063–4,285 kg m⁻³). It is a single-scattering-albedo weight with no stated basis, and lies
+      630–850 kg m⁻³ above the oxidation's upper bound.
+  - _The solutions, at their reference compositions_ (decision-r11-palette-liquids §4). Each
+    liquid is at atmospheric pressure unless stated:
+    - `brine_nacl`: 1,184.1 kg m⁻³ at 23.3 wt% and 273.15 K; eutectic 251.9 K at 0.233.
+    - `brine_mgso4`: 1,193.3 at 17.30 wt% and 273.15 K; eutectic 269.29 K at 0.173. The
+      research's 1,193.4 omitted the 1901 litre (× 0.999 972), which the acid's reduction applied.
+    - `brine_naclo4`: 1,445 ± 10 at 52 wt% and 291.15 K, extrapolated in composition; eutectic
+      236 K at 0.52.
+    - `brine_mgclo4`: 1,394 ± 15 at 44.0 wt% and 298.15 K, extrapolated; eutectic 206 K at 0.44.
+    - `nh3_h2o`: 946 at its eutectic, 176.15 K, its pressure not stated (Croft et al. 1988, as
+      Hammond et al. 2018 quote it). Its composition, 0.321, is ammonia dihydrate's
+      stoichiometry, an assumption.
+    - `ch4_c2h6_n2`: **518.9 kg m⁻³ at 93.65 K**, Ligeia Mare's best-fit composition by
+      **volume**, "71% CH4, 12% C2H6, and 17% N2" (Mastrogiuseppe et al. 2016, IEEE TGRS 54, 5646,
+      §V.B; read by the science check), by ideal mixing, ρ = Σ φᵢ ρᵢ, of the rows' own
+      saturated-liquid ancillaries, each under its own vapour's pressure; a test re-derives it.
+      decision-r11-palette-liquids §1.8 gives these figures as Le Gall et al. 2016's, from
+      memory, and reads them as mole fractions (525.8 kg m⁻³ so). Le Gall et al. 2016, read in
+      full by the science check, states no such composition. Eutectic 71.15 K at 0.509 ethane,
+      the N₂-free binary's (Engle et al. 2021).
+    - `H2SO4`: **the row is aqueous sulphuric acid at 75.0 wt%**, the client's
+      `sulphuric-acid-75.json`'s acid: 1,662.6 kg m⁻³ at 300 K (International Critical Tables
+      III). Its transition is that acid's liquidus, **242 ± 2 K**, read off Zeleznik 1991's Fig. 1
+      calculated monohydrate curve at x = 0.3553 by the science check (the research read
+      240 ± 4). It is not the research's 98 wt% figure, 271.6 K. The frozen acid first melts lower,
+      at the dihydrate–monohydrate eutectic, which lies between 228 and 233.67 K on the same
+      figure, unresolved. `acid_uv_absorber` shares both constants.
+  - _Contradictions recorded_ (the research's findings against the plan, with the values built):
+    - **Chondrites:**
+      - `chondrite_cv`: 3,540 kg m⁻³ (Macke 2010, Table 22), not the plan's 3,420, which was from
+        memory;
+      - `chondrite_l`: 3,580, not 3,560 (from memory);
+      - `chondrite_e`'s solidus: at most 1,273.15 K (McCoy, Dickinson and Lofgren 1999, abstract,
+        whose lowest run already held melt), not the shared 1,423.15 K, which was taken by
+        analogy;
+      - the plan's sulphide–metal eutectic "near 988 °C" is the Ni-free Fe–FeS one; Ni-bearing
+        metal melts at 950 °C. Recorded, not used.
+    - **Eutectics:**
+      - NaClO₄'s 236 K is Chevrier et al.'s theoretical value. A measured 239.05 K (Hennings et al.
+        2013, quoted) is recorded, and 236 kept;
+      - NaCl's eutectic is the read 251.9 K, not the plan's 251.95 K (Bodnar 1993, from memory).
+    - **Densities:**
+      - `MgSO4` is 3,020, from its cell, not the handbooks' 2,660;
+      - `mars_dust` keeps 2,600, against the 2,500 (Madeleine et al. 2011) of R08's Mars-dust mass
+        check: a 4% gap for T49.e;
+      - `MgSiO3` and `Mg2SiO4` are crystals, while the client's optics are amorphous glass;
+      - `tholin` is 1,350, against the classify test's illustrative, unsourced 1,500;
+      - **for T49.e:** the 75 wt% acid's 1,662.6 kg m⁻³ is +0.44% against the sulphur note's
+        1.67 g cm⁻³, which was from memory, so the note's 417 m² kg⁻¹ passes T49.e's 2% test. At
+        80 and 84.5 wt% it would fail (−2.9% and −5.5%).
+    - **Melting points:** Cr 2,180.15 K (as HSDB and DOE PAC give it) against NIST-JANAF's
+      2,130 K; Fe 1,811.15 K against JANAF's 1,809 K.
+    - **Titan's liquid:** built at Ligeia's composition, not the research's N₂-free binary eutectic
+      (560 ± 30 kg m⁻³ at 71.15 K). That figure rested on WebBook densities, which
+      decision-composition §5 allows only as cross-checks. Besides, the rows' own ethane ancillary
+      turns over below its triple point (649.97 kg m⁻³ at 71.15 K, against 651.42 at 90 K), so no
+      ancillary reaches the eutectic.
+    - **Sources:**
+      - the brines' and the acid's densities are the International Critical Tables', not §1.8's
+        Laliberté and Cooper 2004 and Myhre et al. 1998, neither of which was read;
+      - Daly, Manger and Clark 1966 and Baratoux et al. 2014, which the plan lists as "read here",
+        were not reached.
+  - _Choices:_
+    - `iron_nickel`'s solidus is pure iron's 1,811.15 K as an upper bound, in place of the
+      research's 1,763 K, which was from memory;
+    - `CaTiO3`'s 2,248.15 K is from Wikipedia's uncited infobox, labelled unverified;
+    - `ca_al_residue`'s 2,150 K is Léger et al.'s "fusion of its material at zero pressure",
+      taken as its first melt, though the paper also calls it a liquidus;
+    - its hibonite is a natural (Ce, La, Fe, Mg, Ti)-bearing crystal's cell, standing in for
+      pure CaAl₁₂O₁₉, whose cell was not read;
+    - `chromophore` and `ice_giant_haze` take tholin's 1,350 kg m⁻³ and 423.15 K, the same
+      constants, as stand-ins, since neither has a measured density; `soot` takes graphite's
+      sublimation;
+    - the mechanics families: `brine_nacl` and `brine_mgso4` are `WaterIce` (mostly ice when
+      frozen), `brine_naclo4` and `brine_mgclo4` `Salt` (mostly hydrate); `H2SO4`,
+      `acid_uv_absorber` and `S8` are `Salt`; `ZnS`, `MnS`, `FeS`, `SiC` and graphite are
+      `Silicate`, graphite as a crystalline mineral; `NH4SH`, `nh3_h2o` and `ch4_c2h6_n2` are
+      `VolatileIce`;
+    - NIST-JANAF's single transition values are facts cited with their tables, and its two
+      computed decompositions (MgSO₄, graphite) are reduced values. No table of it is fitted or
+      committed. decision-composition §5's wording, "a cross-check only … at most a few values per
+      species are asserted in tests", is stricter: **asked of main** (below).
+  - _Tests:_
+    - every row that is not a gas, and every diagram row, has condensed columns (71 rows); a
+      diagram row's transition is its triple point to the bit; densities and transitions are
+      finite and positive; a fixed row gives at least one phase; a eutectic's mass fraction lies
+      in (0, 1);
+    - `grain_density` resolves each form: ice Ih to the bit, the liquid ancillary, `None` across
+      the triple point, a fixed row's value at any temperature and `None` for a phase not read;
+    - Titan's liquid re-derived from the rows' diagrams within 0.05 kg m⁻³;
+    - the shared figures are one constant: ferric and `basalt_fe`, the absorber and the acid, the
+      hazes and tholin, soot and graphite, the chondrites' solidus;
+    - every condensed value names a source covering it;
+    - every key the reference worlds use, and every palette key of the synthetic worlds, is a row:
+      `Ar`, `CH4`, `CO`, `CO2`, `H2O`, `He`, `N2`, `Na2CO3`, `Ne`, `O2`, `basalt`, `basalt_fe`,
+      `feldspathic`, `granite`, `mars_dust`, `phyllosilicate`. The plan's `chondrite_h`,
+      `ultramafic`, `komatiite` and `anorthosite` appear only in the coarse inputs' unit tests,
+      and are rows too;
+    - the reference rows are the registry's, to the bit, and the reference ices' mechanics their
+      rows'.
+
+    The acceptance command `cargo test -p hyperion-sim substance` runs them all but the
+    synthetic worlds' test, which needs the crate's `testing` feature:
+    `cargo test -p hyperion-sim --features testing substance`.
+
+  - The registry golden gains `[condensed]` (71 rows), an extension at 22.
+- **Deferred findings (2026-10-13 rule)**, from P14.T49.b's step 2, part 2, first piece:
+  - _Unverified figures, each labelled:_
+    - granite's 960 °C (`reference.rs`, from memory), below the Ab–Qz bound of 1,062 °C;
+    - `CaTiO3`'s 2,248.15 K;
+    - `iron_nickel`'s alloy solidus, below pure iron's;
+    - `nh3_h2o`'s eutectic composition;
+    - the acid's 242 ± 2 K, read off a figure;
+    - SiC's 3,103.15 K, and ZnS's and MnS's melting points, quoted through PubChem. SiC's kind,
+      a decomposition, rests on a peritectic from memory; and that ZnS sublimes and dissociates
+      before it melts at one bar is the research's note, unsourced, so its `Melting` may be wrong;
+    - `basalt_reduced`'s 1,200 °C, an upper bound;
+    - komatiite's Fo90–92 olivine and 2.80 glass, and ultramafic's Mg# 90, all assumptions.
+  - _Temperatures:_
+    - the brines are not at their eutectics: NaCl about 1,191 ± 3 kg m⁻³ there and MgSO₄ 1,194.3;
+      the perchlorates are perhaps 1.5–3% denser;
+    - the hot condensates' room-temperature crystals overstate a cloud's density: SiO₂ by up to
+      15%, and the silicates' glasses are lighter;
+    - `NH4SH`'s cell may be in kX units (1,165), and a cloud near 200 K is denser by an amount not
+      measured.
+  - _Mixing:_ ideal mixing for Titan's liquid ignores methane–ethane's negative excess volume, and
+    N₂ is liquid at 93.65 K only in solution. Tan, Kargel and Marion 2013's cross-check is unread.
+  - _Spreads:_
+    - `brine_mgclo4`'s eutectic spans 205–216 K in the literature;
+    - Apollo 60025, a lunar ferroan anorthosite, measures 2,750–2,770, below `anorthosite`'s
+      2,790.
+  - _For main:_
+    - **The transition's convention.** The lithologies and brines take the first melt. `H2SO4`
+      takes its liquidus, a kind outside decision-r11-palette-liquids §1.7's list ("melting
+      point, eutectic or solidus"). Titan's liquid takes a first melt at a composition other than
+      its reference: Ligeia's own liquidus lies well above 71.15 K, so §1.7's clamp would hold a
+      Titan sea liquid down to 71 K. The lean: the first melt everywhere, the acid carrying its
+      liquidus, labelled by its kind, until its eutectic is read.
+    - **NIST-JANAF as a value's source** (above): the lean is that one cited transition per
+      species is a fact within §5, as the plan's own `Na2CO3` already takes it.
+    - **§1.8's Titan composition** names the wrong paper and basis (above).
+    - decision-backlog-2 §1.5: no task yet puts `ferric` on a surface.

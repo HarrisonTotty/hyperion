@@ -32,8 +32,13 @@
 //! P14.T49.b's second step gives the fourteen rows whose reference equations of state were read
 //! their phase diagrams ([`diagram`](super::diagram), the data in `rows/diagrams.rs`): rows 0–8's
 //! five held condensables beside their held phase columns, and ammonia, oxygen, krypton, xenon,
-//! nitrous oxide, carbon monoxide, sulphur dioxide, hydrogen sulphide and ethane.
+//! nitrous oxide, carbon monoxide, sulphur dioxide, hydrogen sulphide and ethane. Its second
+//! part gives 71 rows their condensed columns ([`condensed`](super::condensed), the data in
+//! `rows/condensed.rs`): the diagram rows through their diagrams, and the condensates aloft, the
+//! hazes, the solutions, the lithologies, the salts, the organics and the undifferentiated
+//! bodies' materials with their own figures.
 
+mod condensed;
 mod diagrams;
 
 use super::mix::{GasColumns, HeatCapacityClass};
@@ -376,6 +381,7 @@ const HYDROGEN: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ClientOptics {
         rayleigh: true,
         absorber: false,
@@ -409,6 +415,7 @@ const HELIUM: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ClientOptics {
         rayleigh: true,
         absorber: false,
@@ -495,6 +502,7 @@ const WATER: Substance = Substance {
         ],
     }),
     diagram: Some(diagrams::WATER),
+    condensed: Some(condensed::WATER),
     optics: ClientOptics {
         rayleigh: true,
         absorber: true,
@@ -572,6 +580,7 @@ const METHANE: Substance = Substance {
         ],
     }),
     diagram: Some(diagrams::METHANE),
+    condensed: Some(condensed::METHANE),
     optics: ClientOptics {
         rayleigh: true,
         absorber: true,
@@ -611,6 +620,7 @@ const AMMONIA: Substance = Substance {
     }),
     phase: None,
     diagram: Some(diagrams::AMMONIA),
+    condensed: Some(condensed::AMMONIA),
     optics: ClientOptics {
         rayleigh: true,
         absorber: true,
@@ -684,6 +694,7 @@ const NITROGEN: Substance = Substance {
         ],
     }),
     diagram: Some(diagrams::NITROGEN),
+    condensed: Some(condensed::NITROGEN),
     optics: ClientOptics {
         rayleigh: true,
         absorber: false,
@@ -722,6 +733,7 @@ const OXYGEN: Substance = Substance {
     }),
     phase: None,
     diagram: Some(diagrams::OXYGEN),
+    condensed: Some(condensed::OXYGEN),
     optics: ClientOptics {
         rayleigh: true,
         absorber: true,
@@ -802,6 +814,7 @@ const CARBON_DIOXIDE: Substance = Substance {
         ],
     }),
     diagram: Some(diagrams::CARBON_DIOXIDE),
+    condensed: Some(condensed::CARBON_DIOXIDE),
     optics: ClientOptics {
         rayleigh: true,
         absorber: false,
@@ -871,6 +884,7 @@ const ARGON: Substance = Substance {
         ],
     }),
     diagram: Some(diagrams::ARGON),
+    condensed: Some(condensed::ARGON),
     optics: ClientOptics {
         rayleigh: true,
         absorber: false,
@@ -1355,6 +1369,7 @@ const NEON: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ONLY,
     sources: IDENTITY,
 };
@@ -1381,6 +1396,7 @@ const KRYPTON: Substance = Substance {
     }),
     phase: None,
     diagram: Some(diagrams::KRYPTON),
+    condensed: Some(condensed::KRYPTON),
     optics: RAYLEIGH_ONLY,
     sources: IDENTITY,
 };
@@ -1407,6 +1423,7 @@ const XENON: Substance = Substance {
     }),
     phase: None,
     diagram: Some(diagrams::XENON),
+    condensed: Some(condensed::XENON),
     optics: RAYLEIGH_ONLY,
     sources: IDENTITY,
 };
@@ -1437,6 +1454,7 @@ const NITROUS_OXIDE: Substance = Substance {
     }),
     phase: None,
     diagram: Some(diagrams::NITROUS_OXIDE),
+    condensed: Some(condensed::NITROUS_OXIDE),
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1463,6 +1481,7 @@ const CARBON_MONOXIDE: Substance = Substance {
     }),
     phase: None,
     diagram: Some(diagrams::CARBON_MONOXIDE),
+    condensed: Some(condensed::CARBON_MONOXIDE),
     optics: RAYLEIGH_ABSORBER_AEROSOL,
     sources: IDENTITY,
 };
@@ -1493,6 +1512,7 @@ const SULPHUR_DIOXIDE: Substance = Substance {
     }),
     phase: None,
     diagram: Some(diagrams::SULPHUR_DIOXIDE),
+    condensed: Some(condensed::SULPHUR_DIOXIDE),
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1523,6 +1543,7 @@ const HYDROGEN_SULPHIDE: Substance = Substance {
     }),
     phase: None,
     diagram: Some(diagrams::HYDROGEN_SULPHIDE),
+    condensed: Some(condensed::HYDROGEN_SULPHIDE),
     optics: RAYLEIGH_ABSORBER_AEROSOL,
     sources: IDENTITY,
 };
@@ -1553,6 +1574,7 @@ const OZONE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1583,6 +1605,7 @@ const HYDROGEN_CYANIDE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1615,6 +1638,7 @@ const ACETYLENE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1654,6 +1678,7 @@ const ETHYLENE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1703,6 +1728,7 @@ const ETHANE: Substance = Substance {
     phase: None,
     // A cloud's material since R08.T5.g's `ethane-liquid.json`, the client's index file for it.
     diagram: Some(diagrams::ETHANE),
+    condensed: Some(condensed::ETHANE),
     optics: RAYLEIGH_ABSORBER_AEROSOL,
     sources: IDENTITY,
 };
@@ -1734,6 +1760,7 @@ const PHOSPHINE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1782,6 +1809,7 @@ const METHANOL: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: Some(condensed::METHANOL),
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1808,6 +1836,7 @@ const ATOMIC_HYDROGEN: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1837,6 +1866,7 @@ const ATOMIC_OXYGEN: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1863,6 +1893,7 @@ const ELECTRON: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
@@ -1889,6 +1920,7 @@ const HYDRIDE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
@@ -1915,6 +1947,7 @@ const SODIUM: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1944,6 +1977,7 @@ const POTASSIUM: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -1973,6 +2007,7 @@ const IRON: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: Some(condensed::IRON),
     optics: RAYLEIGH_ABSORBER_AEROSOL,
     sources: IDENTITY,
 };
@@ -1999,6 +2034,7 @@ const MAGNESIUM: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -2028,6 +2064,7 @@ const SILICON: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -2054,6 +2091,7 @@ const CALCIUM: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -2083,6 +2121,7 @@ const TITANIUM: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -2109,6 +2148,7 @@ const SILICON_MONOXIDE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -2138,6 +2178,7 @@ const TITANIUM_MONOXIDE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -2167,6 +2208,7 @@ const VANADIUM_MONOXIDE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -2196,6 +2238,7 @@ const IRON_HYDRIDE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_ABSORBER,
     sources: IDENTITY,
 };
@@ -2225,6 +2268,7 @@ const ALUMINIUM: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2254,6 +2298,7 @@ const VANADIUM: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2280,6 +2325,7 @@ const MANGANESE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2309,6 +2355,7 @@ const NICKEL: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2335,6 +2382,7 @@ const ZINC: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2361,6 +2409,7 @@ const SODIUM_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ION_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2387,6 +2436,7 @@ const MAGNESIUM_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
@@ -2413,6 +2463,7 @@ const ALUMINIUM_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ION_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2442,6 +2493,7 @@ const SILICON_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ION_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2468,6 +2520,7 @@ const POTASSIUM_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ION_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2497,6 +2550,7 @@ const CALCIUM_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
@@ -2526,6 +2580,7 @@ const TITANIUM_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
@@ -2555,6 +2610,7 @@ const VANADIUM_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ION_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2584,6 +2640,7 @@ const CHROMIUM_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ION_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2613,6 +2670,7 @@ const MANGANESE_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ION_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2642,6 +2700,7 @@ const IRON_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ABSORBER_ONLY,
     sources: IDENTITY,
 };
@@ -2671,6 +2730,7 @@ const NICKEL_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ION_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2697,6 +2757,7 @@ const ZINC_ION: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: ION_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2723,6 +2784,7 @@ const HYDROGEN_CHLORIDE: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: None,
     optics: RAYLEIGH_AWAITING_ABSORPTION,
     sources: IDENTITY,
 };
@@ -2737,6 +2799,7 @@ const AMMONIUM_HYDROSULPHIDE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::AMMONIUM_HYDROSULPHIDE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2751,6 +2814,7 @@ const SULPHURIC_ACID: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::SULPHURIC_ACID),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2765,6 +2829,7 @@ const SULPHUR: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::SULPHUR),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2779,6 +2844,7 @@ const POTASSIUM_CHLORIDE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::POTASSIUM_CHLORIDE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2793,6 +2859,7 @@ const SODIUM_CHLORIDE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::SODIUM_CHLORIDE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2807,6 +2874,7 @@ const ZINC_SULPHIDE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::ZINC_SULPHIDE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2821,6 +2889,7 @@ const SODIUM_SULPHIDE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::SODIUM_SULPHIDE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2835,6 +2904,7 @@ const MANGANESE_SULPHIDE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::MANGANESE_SULPHIDE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2864,6 +2934,7 @@ const CHROMIUM: Substance = Substance {
     }),
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CHROMIUM),
     optics: RAYLEIGH_ABSORBER_AEROSOL,
     sources: IDENTITY,
 };
@@ -2878,6 +2949,7 @@ const IRON_SULPHIDE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::IRON_SULPHIDE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2892,6 +2964,7 @@ const ENSTATITE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::ENSTATITE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2906,6 +2979,7 @@ const FORSTERITE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::FORSTERITE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2920,6 +2994,7 @@ const SILICA: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::SILICA),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2934,6 +3009,7 @@ const CORUNDUM: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CORUNDUM),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2948,6 +3024,7 @@ const PEROVSKITE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::PEROVSKITE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2962,6 +3039,7 @@ const RUTILE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::RUTILE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2976,6 +3054,7 @@ const GRAPHITE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::GRAPHITE),
     optics: AEROSOL_ONLY,
     sources: IDENTITY,
 };
@@ -2990,6 +3069,7 @@ const THOLIN: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::THOLIN),
     optics: AEROSOL_ONLY,
     sources: &[THOLIN_IDENTITY],
 };
@@ -3004,6 +3084,7 @@ const SOOT: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::SOOT),
     optics: AEROSOL_ONLY,
     sources: &[SOOT_IDENTITY],
 };
@@ -3018,6 +3099,7 @@ const CHROMOPHORE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CHROMOPHORE),
     optics: AEROSOL_ONLY,
     sources: &[CHROMOPHORE_IDENTITY],
 };
@@ -3032,6 +3114,7 @@ const ICE_GIANT_HAZE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::ICE_GIANT_HAZE),
     optics: AEROSOL_ONLY,
     sources: &[ICE_GIANT_HAZE_IDENTITY],
 };
@@ -3046,6 +3129,7 @@ const MARS_DUST: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::MARS_DUST),
     optics: AEROSOL_ONLY,
     sources: &[MARS_DUST_IDENTITY],
 };
@@ -3060,6 +3144,7 @@ const ACID_UV_ABSORBER: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::ACID_UV_ABSORBER),
     optics: AEROSOL_ONLY,
     sources: &[ACID_UV_ABSORBER_IDENTITY],
 };
@@ -3074,6 +3159,7 @@ const BRINE_NACL: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::BRINE_NACL),
     optics: NO_CLIENT_OPTICS,
     sources: &[BRINE_NACL_IDENTITY],
 };
@@ -3088,6 +3174,7 @@ const BRINE_MGSO4: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::BRINE_MGSO4),
     optics: NO_CLIENT_OPTICS,
     sources: &[BRINE_MGSO4_IDENTITY],
 };
@@ -3102,6 +3189,7 @@ const BRINE_NACLO4: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::BRINE_NACLO4),
     optics: NO_CLIENT_OPTICS,
     sources: &[BRINE_NACLO4_IDENTITY],
 };
@@ -3116,6 +3204,7 @@ const BRINE_MGCLO4: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::BRINE_MGCLO4),
     optics: NO_CLIENT_OPTICS,
     sources: &[BRINE_MGCLO4_IDENTITY],
 };
@@ -3130,6 +3219,7 @@ const AMMONIA_WATER: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::AMMONIA_WATER),
     optics: NO_CLIENT_OPTICS,
     sources: &[AMMONIA_WATER_IDENTITY],
 };
@@ -3144,6 +3234,7 @@ const TITAN_LIQUID: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::TITAN_LIQUID),
     optics: NO_CLIENT_OPTICS,
     sources: &[TITAN_LIQUID_IDENTITY],
 };
@@ -3158,6 +3249,7 @@ const ANORTHOSITE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::ANORTHOSITE),
     optics: NO_CLIENT_OPTICS,
     sources: &[ANORTHOSITE_IDENTITY],
 };
@@ -3172,6 +3264,7 @@ const FELDSPATHIC: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::FELDSPATHIC),
     optics: NO_CLIENT_OPTICS,
     sources: &[FELDSPATHIC_IDENTITY],
 };
@@ -3186,6 +3279,7 @@ const BASALT: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::BASALT),
     optics: AEROSOL_ONLY,
     sources: &[BASALT_IDENTITY],
 };
@@ -3200,6 +3294,7 @@ const BASALT_FE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::BASALT_FE),
     optics: AEROSOL_ONLY,
     sources: &[BASALT_FE_IDENTITY],
 };
@@ -3214,6 +3309,7 @@ const KOMATIITE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::KOMATIITE),
     optics: NO_CLIENT_OPTICS,
     sources: &[KOMATIITE_IDENTITY],
 };
@@ -3228,6 +3324,7 @@ const BASALT_REDUCED: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::BASALT_REDUCED),
     optics: NO_CLIENT_OPTICS,
     sources: &[BASALT_REDUCED_IDENTITY],
 };
@@ -3242,6 +3339,7 @@ const GRANITE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::GRANITE),
     optics: NO_CLIENT_OPTICS,
     sources: &[GRANITE_IDENTITY],
 };
@@ -3256,6 +3354,7 @@ const ULTRAMAFIC: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::ULTRAMAFIC),
     optics: NO_CLIENT_OPTICS,
     sources: &[ULTRAMAFIC_IDENTITY],
 };
@@ -3271,6 +3370,7 @@ const FERRIC: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::FERRIC),
     optics: NO_CLIENT_OPTICS,
     sources: &[FERRIC_IDENTITY],
 };
@@ -3285,6 +3385,7 @@ const PHYLLOSILICATE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::PHYLLOSILICATE),
     optics: NO_CLIENT_OPTICS,
     sources: &[PHYLLOSILICATE_IDENTITY],
 };
@@ -3299,6 +3400,7 @@ const LAVA_GLASS: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::LAVA_GLASS),
     optics: AEROSOL_ONLY,
     sources: &[LAVA_GLASS_IDENTITY],
 };
@@ -3313,6 +3415,7 @@ const CA_AL_RESIDUE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CA_AL_RESIDUE),
     optics: NO_CLIENT_OPTICS,
     sources: &[CA_AL_RESIDUE_IDENTITY],
 };
@@ -3327,6 +3430,7 @@ const IRON_NICKEL: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::IRON_NICKEL),
     optics: NO_CLIENT_OPTICS,
     sources: &[IRON_NICKEL_IDENTITY],
 };
@@ -3341,6 +3445,7 @@ const SILICON_CARBIDE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::SILICON_CARBIDE),
     optics: NO_CLIENT_OPTICS,
     sources: IDENTITY,
 };
@@ -3355,6 +3460,7 @@ const MAGNESIUM_SULPHATE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::MAGNESIUM_SULPHATE),
     optics: NO_CLIENT_OPTICS,
     sources: IDENTITY,
 };
@@ -3369,6 +3475,7 @@ const SODIUM_CARBONATE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::SODIUM_CARBONATE),
     optics: NO_CLIENT_OPTICS,
     sources: IDENTITY,
 };
@@ -3383,6 +3490,7 @@ const CALCITE: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CALCITE),
     optics: NO_CLIENT_OPTICS,
     sources: IDENTITY,
 };
@@ -3397,6 +3505,7 @@ const CARBONACEOUS: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CARBONACEOUS),
     optics: NO_CLIENT_OPTICS,
     sources: &[CARBONACEOUS_IDENTITY],
 };
@@ -3411,6 +3520,7 @@ const CHONDRITE_CI: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CHONDRITE_CI),
     optics: NO_CLIENT_OPTICS,
     sources: &[CHONDRITE_CI_IDENTITY],
 };
@@ -3425,6 +3535,7 @@ const CHONDRITE_CM: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CHONDRITE_CM),
     optics: NO_CLIENT_OPTICS,
     sources: &[CHONDRITE_CM_IDENTITY],
 };
@@ -3439,6 +3550,7 @@ const CHONDRITE_CV: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CHONDRITE_CV),
     optics: NO_CLIENT_OPTICS,
     sources: &[CHONDRITE_CV_IDENTITY],
 };
@@ -3453,6 +3565,7 @@ const CHONDRITE_H: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CHONDRITE_H),
     optics: NO_CLIENT_OPTICS,
     sources: &[CHONDRITE_H_IDENTITY],
 };
@@ -3467,6 +3580,7 @@ const CHONDRITE_L: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CHONDRITE_L),
     optics: NO_CLIENT_OPTICS,
     sources: &[CHONDRITE_L_IDENTITY],
 };
@@ -3481,6 +3595,7 @@ const CHONDRITE_LL: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CHONDRITE_LL),
     optics: NO_CLIENT_OPTICS,
     sources: &[CHONDRITE_LL_IDENTITY],
 };
@@ -3495,6 +3610,7 @@ const CHONDRITE_E: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::CHONDRITE_E),
     optics: NO_CLIENT_OPTICS,
     sources: &[CHONDRITE_E_IDENTITY],
 };
@@ -3509,6 +3625,7 @@ const COMETARY: Substance = Substance {
     gas: None,
     phase: None,
     diagram: None,
+    condensed: Some(condensed::COMETARY),
     optics: NO_CLIENT_OPTICS,
     sources: &[COMETARY_IDENTITY],
 };
