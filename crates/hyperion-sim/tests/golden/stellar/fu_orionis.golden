@@ -1,0 +1,972 @@
+# generator_version = 22
+
+# a Class 0 protostar, 0.5 M☉ at 0.1 Myr, over the 5,000 years before the epoch
+disc lifetime (Myr) = 0x3ffdb743442376b5  # 1.8572418843900043
+disc phase: true
+formation at T-3155760000000.000000000 s
+class 0 end at T+1465743521013.702880859 s
+protostar end at T+12623040000000.000000000 s
+disc end at T+55454336490826.000000000 s
+last instant T+56243276490826.000000000 s
+bound of the formation bin (per s) = 0x3dd3e2fbe05f2579  # 7.234723245218669e-11
+rate a quarter step before the formation (per s) = 0x0000000000000000  # 0.0
+rate a quarter step after the formation (per s) = 0x3dd3e2fbe05f1196  # 7.234723245212089e-11
+bound of the class 0 end bin (per s) = 0x3dc949dc53b65dac  # 4.599954658849972e-11
+rate a quarter step before the class 0 end (per s) = 0x3dd18fa404c4bb82  # 6.388689680763554e-11
+rate a quarter step after the class 0 end (per s) = 0x3dbd5085c6dd0314  # 2.6661419971900022e-11
+bound of the protostar end bin (per s) = 0x3da452c98ddd18b2  # 9.242006841456945e-12
+rate a quarter step before the protostar end (per s) = 0x3db0ef19dafa0e16  # 1.5401372613050258e-11
+rate a quarter step after the protostar end (per s) = 0x3d8b1d7d9717b244  # 3.082641069846819e-12
+bound of the disc end bin (per s) = 0x3d4432c522f0976d  # 1.435176995131848e-13
+rate a quarter step before the disc end (per s) = 0x3d50cc6d4438e672  # 2.3872164368827615e-13
+rate a quarter step after the disc end (per s) = 0x3d28e300b0ec0012  # 4.420771179412522e-14
+bound of the last instant bin (per s) = 0x3c76d4053d23fcc3  # 1.9800311510359202e-17
+rate a quarter step before the last instant (per s) = 0x3d28e300b0ec0012  # 4.420771179412522e-14
+rate a quarter step after the last instant (per s) = 0x0000000000000000  # 0.0
+rate at 50000 yr (per s) = 0x3dd3e2fbe05f1196  # 7.234723245212089e-11
+  ProtostellarFuOri at 50000 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 50000 yr (per s) = 0x3dd2250382111bd2  # 6.60096148893151e-11
+  DiscFuOri at 50000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 146446.6094067262 yr (per s) = 0x3dc8e3c5767bfc46  # 4.5274158389767775e-11
+  ProtostellarFuOri at 146446.6094067262 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 146446.6094067262 yr (per s) = 0x3dc567d4b9e010bf  # 3.893654082696199e-11
+  DiscFuOri at 146446.6094067262 yr (per s) = 0x0000000000000000  # 0.0
+rate at 300000 yr (per s) = 0x3db403265873aac5  # 1.8201084327414677e-11
+  ProtostellarFuOri at 300000 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 300000 yr (per s) = 0x3daa1689be77a76c  # 1.1863466764608886e-11
+  DiscFuOri at 300000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 500000 yr (per s) = 0x3da452c98ddd045f  # 9.24200684144854e-12
+  ProtostellarFuOri at 500000 yr (per s) = 0x3d8bdf85e4df5c3c  # 3.168808781402895e-12
+  V1647Ori at 500000 yr (per s) = 0x3d9a1689be77a76c  # 5.931733382304443e-12
+  DiscFuOri at 500000 yr (per s) = 0x3d43e8cd5a566674  # 1.4146467774120068e-13
+rate at 1000000 yr (per s) = 0x3d53e8cd5a566674  # 2.8292935548240135e-13
+  ProtostellarFuOri at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  V1647Ori at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  DiscFuOri at 1000000 yr (per s) = 0x3d53e8cd5a566674  # 2.8292935548240135e-13
+rate at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  ProtostellarFuOri at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  V1647Ori at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  DiscFuOri at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+0200080020000000.0000:0106fffffffff600 at T-154582687298.383070416 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4015fc070ea19186  # 5.496120670901638
+  peak factor = 0x4015fc070ea19186  # 5.496120670901638
+  rise +94774517.495647370 s
+  decay +478816928.298843383 s
+  factor at half the rise = 0x4002c14aa5856299  # 2.3443806582766453
+  factor at the peak = 0x4015fc070ea19186  # 5.496120670901638
+  factor at half the decay = 0x4002c14aa5856299  # 2.3443806582766453
+  factor at a day before the end = 0x3ff0014278b519e7  # 1.0003075328000877
+0200080020000000.0000:0106fffffffff601 at T-149165076238.733459130 s
+  class FuOri, component ProtostellarFuOri
+  drawn peak factor = 0x40407d57efbf8a4f  # 32.979246109509965
+  peak factor = 0x40407d57efbf8a4f  # 32.979246109509965
+  rise +37677932.457349129 s
+  decay +5112980253.259543418 s
+  fading rate (mag per yr) = 0x3f97fd28fb5b4f38  # 0.023426666585535133
+  factor at half the rise = 0x4016f8950540226b  # 5.7427559681315
+  factor at the peak = 0x40407d57efbf8a4f  # 32.979246109509965
+  factor at half the decay = 0x4016f8950540226b  # 5.7427559681315
+  factor at a day before the end = 0x3ff0003df2024a0e  # 1.0000590756868664
+0200080020000000.0000:0106fffffffff602 at T-144395622600.168123454 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x401f15bd8662491e  # 7.771230792759779
+  peak factor = 0x401f15bd8662491e  # 7.771230792759779
+  rise +58931682.637275852 s
+  decay +300489430.688702642 s
+  factor at half the rise = 0x40064d31d97233d3  # 2.7876927364327257
+  factor at the peak = 0x401f15bd8662491e  # 7.771230792759779
+  factor at half the decay = 0x40064d31d97233d3  # 2.7876927364327257
+  factor at a day before the end = 0x3ff0026a61e55057  # 1.0005897354176534
+0200080020000000.0000:0106fffffffff700 at T-138067575815.320352005 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x402d38a5eb43f52a  # 14.610640861554732
+  peak factor = 0x402d38a5eb43f52a  # 14.610640861554732
+  rise +114905503.549104928 s
+  decay +327744913.228497803 s
+  factor at half the rise = 0x400e943f880e8f34  # 3.8223868016665623
+  factor at the peak = 0x402d38a5eb43f52a  # 14.610640861554732
+  factor at half the decay = 0x400e943f880e8f34  # 3.8223868016665623
+  factor at a day before the end = 0x3ff002e590c55a26  # 1.0007072119821117
+0200080020000000.0000:0106fffffffff701 at T-131532410651.440127886 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x402152e90fff6d28  # 8.661934375696163
+  peak factor = 0x402152e90fff6d28  # 8.661934375696163
+  rise +8962432.058809090 s
+  decay +259420874.472934991 s
+  factor at half the rise = 0x40078b80a1bb5966  # 2.943116439371056
+  factor at the peak = 0x402152e90fff6d28  # 8.661934375696163
+  factor at half the decay = 0x40078b80a1bb5966  # 2.943116439371056
+  factor at a day before the end = 0x3ff002f23b7113c5  # 1.000719291872188
+0200080020000000.0000:0106fffffffff702 at T-127185494092.085911642 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4023725b7b5ef01c  # 9.723354201640227
+  peak factor = 0x4023725b7b5ef01c  # 9.723354201640227
+  rise +93454528.307718619 s
+  decay +379642229.028312861 s
+  factor at half the rise = 0x4008f2223912187e  # 3.118229337563263
+  factor at the peak = 0x4023725b7b5ef01c  # 9.723354201640227
+  factor at half the decay = 0x4008f2223912187e  # 3.118229337563263
+  factor at a day before the end = 0x3ff0021eedebc567  # 1.000517777804214
+0200080020000000.0000:0106fffffffff800 at T-114461354579.678596386 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4012d9a5ca6e5bb8  # 4.712546504007086
+  peak factor = 0x4012d9a5ca6e5bb8  # 4.712546504007086
+  rise +9215870.423525275 s
+  decay +170720870.032666593 s
+  factor at half the rise = 0x40015de162c8f7e1  # 2.170840045698228
+  factor at the peak = 0x4012d9a5ca6e5bb8  # 4.712546504007086
+  factor at half the decay = 0x40015de162c8f7e2  # 2.1708400456982284
+  factor at a day before the end = 0x3ff00336fcbcc8db  # 1.0007848618084185
+0200080020000000.0000:0106fffffffffb00 at T-75388838647.430839676 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4017084bd4df44f6  # 5.758101774337083
+  peak factor = 0x4017084bd4df44f6  # 5.758101774337083
+  rise +191579669.539998441 s
+  decay +408753525.447227239 s
+  factor at half the rise = 0x40033263d896f346  # 2.399604503733289
+  factor at the peak = 0x4017084bd4df44f6  # 5.758101774337083
+  factor at half the decay = 0x40033263d896f346  # 2.399604503733289
+  factor at a day before the end = 0x3ff0018414817d04  # 1.000370102024875
+0200080020000000.0000:0106fffffffffd01 at T-43496968126.984242884 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4016c677dda2a5e4  # 5.6938166265985934
+  peak factor = 0x4016c677dda2a5e4  # 5.6938166265985934
+  rise +81411138.698604509 s
+  decay +461290890.351971685 s
+  factor at half the rise = 0x400316e15332cc06  # 2.3861719608189587
+  factor at the peak = 0x4016c677dda2a5e4  # 5.6938166265985934
+  factor at half the decay = 0x400316e15332cc06  # 2.3861719608189587
+  factor at a day before the end = 0x3ff00155aafc2518  # 1.0003258399104364
+0200080020000000.0000:0106fffffffffd00 at T-32326342591.524925952 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x400c61ad1e590db3  # 3.547693478672693
+  peak factor = 0x400c61ad1e590db3  # 3.547693478672693
+  rise +173818375.649677127 s
+  decay +186842953.614044904 s
+  factor at half the rise = 0x3ffe22f2a406c1af  # 1.8835321814805004
+  factor at the peak = 0x400c61ad1e590db3  # 3.547693478672693
+  factor at half the decay = 0x3ffe22f2a406c1af  # 1.8835321814805004
+  factor at a day before the end = 0x3ff002662f9c5958  # 1.0005857333940948
+0200080020000000.0000:0106fffffffffe00 at T-31451792243.085838886 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x401ba86f5cbcad36  # 6.914487313285738
+  peak factor = 0x401ba86f5cbcad36  # 6.914487313285738
+  rise +265266270.929108887 s
+  decay +429622179.244414865 s
+  factor at half the rise = 0x4005094cef850e82  # 2.629541274307315
+  factor at the peak = 0x401ba86f5cbcad36  # 6.914487313285738
+  factor at half the decay = 0x4005094cef850e82  # 2.629541274307315
+  factor at a day before the end = 0x3ff00197d539b77e  # 1.0003889397735004
+0200080020000000.0000:0106ffffffffff00 at T-11384172738.608271363 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4010d200a7483ecc  # 4.205080617699149
+  peak factor = 0x4010d200a7483ecc  # 4.205080617699149
+  rise +21361847.148209568 s
+  decay +168048227.813445508 s
+  factor at half the rise = 0x400067b0589dd78d  # 2.050629322354274
+  factor at the peak = 0x4010d200a7483ecc  # 4.205080617699149
+  factor at half the decay = 0x400067b0589dd78d  # 2.050629322354274
+  factor at a day before the end = 0x3ff003069c3c7bbc  # 1.0007387259463334
+0200080020000000.0000:0106ffffffffff02 at T-10787462029.435930126 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4025b4cddfed9404  # 10.85313319945454
+  peak factor = 0x4025b4cddfed9404  # 10.85313319945454
+  rise +16808745.054650869 s
+  decay +616841861.022511363 s
+  factor at half the rise = 0x400a5af34ed3d2ce  # 3.294409385527934
+  factor at the peak = 0x4025b4cddfed9404  # 10.85313319945454
+  factor at half the decay = 0x400a5af34ed3d2ce  # 3.294409385527934
+  factor at a day before the end = 0x3ff0015e44c5ac7a  # 1.000334042207014
+0200080020000000.0000:0106ffffffffff01 at T-7690408448.332105725 s
+  class FuOri, component ProtostellarFuOri
+  drawn peak factor = 0x4021a5ba74e7d92a  # 8.823688176442904
+  peak factor = 0x4021a5ba74e7d92a  # 8.823688176442904
+  rise +20262830.579287424 s
+  decay +2413168759.100267887 s
+  fading rate (mag per yr) = 0x3f9fa882431b6c9a  # 0.030916247697729028
+  factor at half the rise = 0x4007c3856fa35f00  # 2.970469352887335
+  factor at the peak = 0x4021a5ba74e7d92a  # 8.823688176442904
+  factor at half the decay = 0x4007c3856fa35f00  # 2.970469352887335
+  factor at a day before the end = 0x3ff00051c0103729  # 1.0000779631113323
+0200080020000000.0000:0106ffffffffff03 at T-4506463986.791109965 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4021c93826df8aad  # 8.89300652960568
+  peak factor = 0x4021c93826df8aad  # 8.89300652960568
+  rise +19990072.626708067 s
+  decay +215239468.016393452 s
+  factor at half the rise = 0x4007db5ed0b0cd6e  # 2.9821144393878773
+  factor at the peak = 0x4021c93826df8aad  # 8.89300652960568
+  factor at half the decay = 0x4007db5ed0b0cd70  # 2.9821144393878782
+  factor at a day before the end = 0x3ff0039835749056  # 1.0008775795077063
+
+# a 1 M☉ star at t_c, its Class 0 step across the 10,000 years before the epoch
+disc lifetime (Myr) = 0x3ffbb9d3beb8c86b  # 1.7328679513998633
+disc phase: true
+formation at T-4621503521013.703125000 s
+class 0 end at T+0.000000000 s
+protostar end at T+11157296478986.296875000 s
+disc end at T+50063650142082.625000000 s
+last instant T+50852590142082.625000000 s
+bound of the formation bin (per s) = 0x3dd3e2fbe05f2579  # 7.234723245218669e-11
+rate a quarter step before the formation (per s) = 0x0000000000000000  # 0.0
+rate a quarter step after the formation (per s) = 0x3dd3e2fbe05f1196  # 7.234723245212089e-11
+bound of the class 0 end bin (per s) = 0x3dc8e3c5767c152a  # 4.527415838980895e-11
+rate a quarter step before the class 0 end (per s) = 0x3dd18fa404c4bb82  # 6.388689680763554e-11
+rate a quarter step after the class 0 end (per s) = 0x3dbd5085c6dd0314  # 2.6661419971900022e-11
+bound of the protostar end bin (per s) = 0x3da462f1a102124f  # 9.270706625554423e-12
+rate a quarter step before the protostar end (per s) = 0x3db0ef19dafa0e16  # 1.5401372613050258e-11
+rate a quarter step after the protostar end (per s) = 0x3d8b1d7d9717b244  # 3.082641069846819e-12
+bound of the disc end bin (per s) = 0x3d4469a3c7c0f9bb  # 1.4504063968610204e-13
+rate a quarter step before the disc end (per s) = 0x3d50cc6d4438e672  # 2.3872164368827615e-13
+rate a quarter step after the disc end (per s) = 0x3d28e300b0ec0012  # 4.420771179412522e-14
+bound of the last instant bin (per s) = 0x3c914670267e1c7b  # 5.993521227485471e-17
+rate a quarter step before the last instant (per s) = 0x3d28e300b0ec0012  # 4.420771179412522e-14
+rate a quarter step after the last instant (per s) = 0x0000000000000000  # 0.0
+rate at 50000 yr (per s) = 0x3dd3e2fbe05f1196  # 7.234723245212089e-11
+  ProtostellarFuOri at 50000 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 50000 yr (per s) = 0x3dd2250382111bd2  # 6.60096148893151e-11
+  DiscFuOri at 50000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 146446.6094067262 yr (per s) = 0x3dc8e3c5767bfc46  # 4.5274158389767775e-11
+  ProtostellarFuOri at 146446.6094067262 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 146446.6094067262 yr (per s) = 0x3dc567d4b9e010bf  # 3.893654082696199e-11
+  DiscFuOri at 146446.6094067262 yr (per s) = 0x0000000000000000  # 0.0
+rate at 300000 yr (per s) = 0x3db403265873aac5  # 1.8201084327414677e-11
+  ProtostellarFuOri at 300000 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 300000 yr (per s) = 0x3daa1689be77a76c  # 1.1863466764608886e-11
+  DiscFuOri at 300000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 500000 yr (per s) = 0x3da452c98ddd045f  # 9.24200684144854e-12
+  ProtostellarFuOri at 500000 yr (per s) = 0x3d8bdf85e4df5c3c  # 3.168808781402895e-12
+  V1647Ori at 500000 yr (per s) = 0x3d9a1689be77a76c  # 5.931733382304443e-12
+  DiscFuOri at 500000 yr (per s) = 0x3d43e8cd5a566674  # 1.4146467774120068e-13
+rate at 1000000 yr (per s) = 0x3d53e8cd5a566674  # 2.8292935548240135e-13
+  ProtostellarFuOri at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  V1647Ori at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  DiscFuOri at 1000000 yr (per s) = 0x3d53e8cd5a566674  # 2.8292935548240135e-13
+rate at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  ProtostellarFuOri at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  V1647Ori at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  DiscFuOri at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+0200080020000000.0001:0106ffffffffec00 at T-308691987873.401281315 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x40275363cea5eb59  # 11.662870843652557
+  peak factor = 0x40275363cea5eb59  # 11.662870843652557
+  rise +149599006.358746737 s
+  decay +457847768.130905151 s
+  factor at half the rise = 0x400b521d188cd394  # 3.415094558522876
+  factor at the peak = 0x40275363cea5eb59  # 11.662870843652557
+  factor at half the decay = 0x400b521d188cd394  # 3.415094558522876
+  factor at a day before the end = 0x3ff001e62d3be3df  # 1.0004636542273528
+0200080020000000.0001:0106ffffffffed02 at T-297092421424.526389378 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x40157045cdcf8c92  # 5.359641280930321
+  peak factor = 0x40157045cdcf8c92  # 5.359641280930321
+  rise +11582345.201835172 s
+  decay +178769927.256648063 s
+  factor at half the rise = 0x4002854ddb886c57  # 2.315089907742315
+  factor at the peak = 0x40157045cdcf8c92  # 5.359641280930321
+  factor at half the decay = 0x4002854ddb886c57  # 2.315089907742315
+  factor at a day before the end = 0x3ff003532d1ac0a1  # 1.0008117448706246
+0200080020000000.0001:0106ffffffffed00 at T-293648833316.420746654 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x402ad36a13619cdb  # 13.412918668428054
+  peak factor = 0x402ad36a13619cdb  # 13.412918668428054
+  rise +10418382.293287709 s
+  decay +491177753.731948435 s
+  factor at half the rise = 0x400d4c861cc5ff98  # 3.662365174095566
+  factor at the peak = 0x402ad36a13619cdb  # 13.412918668428054
+  factor at half the decay = 0x400d4c861cc5ff9b  # 3.662365174095567
+  factor at a day before the end = 0x3ff001defa4e853e  # 1.0004567887884401
+0200080020000000.0001:0106ffffffffed01 at T-290450491393.239923737 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x40247c5d3c37b8c1  # 10.242898828317609
+  peak factor = 0x40247c5d3c37b8c1  # 10.242898828317609
+  rise +10757169.367508830 s
+  decay +222633897.742947459 s
+  factor at half the rise = 0x40099a870e225b62  # 3.2004529098734773
+  factor at the peak = 0x40247c5d3c37b8c1  # 10.242898828317609
+  factor at half the decay = 0x40099a870e225b62  # 3.2004529098734773
+  factor at a day before the end = 0x3ff003b330c09c4f  # 1.0009033111944239
+0200080020000000.0001:0106ffffffffef00 at T-254916669381.879990635 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x40196874f01bb266  # 6.352008582773669
+  peak factor = 0x40196874f01bb266  # 6.352008582773669
+  rise +14406813.779083406 s
+  decay +356516227.749827682 s
+  factor at half the rise = 0x4004299d1536b706  # 2.5203191430399583
+  factor at the peak = 0x40196874f01bb266  # 6.352008582773669
+  factor at half the decay = 0x4004299d1536b706  # 2.5203191430399583
+  factor at a day before the end = 0x3ff001d5e8fcb82d  # 1.0004481411992956
+0200080020000000.0001:0106fffffffff000 at T-249983498439.598525628 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x402d48c50d95c298  # 14.642128395587221
+  peak factor = 0x402d48c50d95c298  # 14.642128395587221
+  rise +86073931.865721911 s
+  decay +278063866.930034041 s
+  factor at half the rise = 0x400e9cadd2bb2980  # 3.826503416382536
+  factor at the peak = 0x402d48c50d95c298  # 14.642128395587221
+  factor at half the decay = 0x400e9cadd2bb2980  # 3.826503416382536
+  factor at a day before the end = 0x3ff0036ad10a00d1  # 1.000834290083777
+0200080020000000.0001:0106fffffffff100 at T-234625206546.962466475 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x402dc8f1e60d795a  # 14.892470540184764
+  peak factor = 0x402dc8f1e60d795a  # 14.892470540184764
+  rise +8320763.359289406 s
+  decay +454335006.268427371 s
+  factor at half the rise = 0x400edf63707c1cc9  # 3.8590763843418228
+  factor at the peak = 0x402dc8f1e60d795a  # 14.892470540184764
+  factor at half the decay = 0x400edf63707c1ccb  # 3.8590763843418237
+  factor at a day before the end = 0x3ff0021ab44800cb  # 1.0005137483822633
+0200080020000000.0001:0106fffffffff101 at T-230481276797.694580391 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x402d6434aab1d28a  # 14.695714315611685
+  peak factor = 0x402d6434aab1d28a  # 14.695714315611685
+  rise +104837924.369173780 s
+  decay +365271681.536853134 s
+  factor at half the rise = 0x400eab018163ae6f  # 3.83349896512464
+  factor at the peak = 0x402d6434aab1d28a  # 14.695714315611685
+  factor at half the decay = 0x400eab018163ae6f  # 3.83349896512464
+  factor at a day before the end = 0x3ff0029acbdd0342  # 1.0006359065448156
+0200080020000000.0001:0106fffffffff102 at T-230206002521.000401639 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x401f3c35c9fba9d8  # 7.808798938737219
+  peak factor = 0x401f3c35c9fba9d8  # 7.808798938737219
+  rise +221000365.597140520 s
+  decay +407045394.288818776 s
+  factor at half the rise = 0x40065afa5af9c120  # 2.7944228274792664
+  factor at the peak = 0x401f3c35c9fba9d8  # 7.808798938737219
+  factor at half the decay = 0x40065afa5af9c120  # 2.7944228274792664
+  factor at a day before the end = 0x3ff001c98a9cbe16  # 1.0004363455335628
+0200080020000000.0001:0106fffffffff301 at T-199694273962.530981601 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x40170f8d0b826081  # 5.765186481316165
+  peak factor = 0x40170f8d0b826081  # 5.765186481316165
+  rise +52388391.029549047 s
+  decay +372644082.593112349 s
+  factor at half the rise = 0x400335699318f091  # 2.4010802738176342
+  factor at the peak = 0x40170f8d0b826081  # 5.765186481316165
+  factor at half the decay = 0x400335699318f091  # 2.4010802738176342
+  factor at a day before the end = 0x3ff001a9fdf40539  # 1.0004062576338824
+0200080020000000.0001:0106fffffffff300 at T-194576606353.487206101 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x40202a1e146434ce  # 8.08226073954793
+  peak factor = 0x40202a1e146434ce  # 8.08226073954793
+  rise +19027274.061857156 s
+  decay +573907706.238530397 s
+  factor at half the rise = 0x4006be52fbba0190  # 2.8429317155971106
+  factor at the peak = 0x40202a1e146434ce  # 8.08226073954793
+  factor at half the decay = 0x4006be52fbba0190  # 2.8429317155971106
+  factor at a day before the end = 0x3ff00149ed54f94e  # 1.0003146429804306
+0200080020000000.0001:0106fffffffff400 at T-188551265446.167667685 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4025da49495b8b74  # 10.926340382027526
+  peak factor = 0x4025da49495b8b74  # 10.926340382027526
+  rise +115501318.659415632 s
+  decay +251288044.665366679 s
+  factor at half the rise = 0x400a71aac99b3176  # 3.305501532600995
+  factor at the peak = 0x4025da49495b8b74  # 10.926340382027526
+  factor at half the decay = 0x400a71aac99b3176  # 3.305501532600995
+  factor at a day before the end = 0x3ff0035e72371b1d  # 1.0008224927457328
+0200080020000000.0001:0106fffffffff700 at T-126556391809.920054964 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x40132c1c124730fa  # 4.793075833888219
+  peak factor = 0x40132c1c124730fa  # 4.793075833888219
+  rise +23441616.015404645 s
+  decay +446340482.019590556 s
+  factor at half the rise = 0x400183b4ab3a036a  # 2.1893094422415986
+  factor at the peak = 0x40132c1c124730fa  # 4.793075833888219
+  factor at half the decay = 0x400183b4ab3a036a  # 2.1893094422415986
+  factor at a day before the end = 0x3ff0013e260a749b  # 1.000303410145796
+0200080020000000.0001:0106fffffffff800 at T-118402371148.886238309 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4027738645f628e3  # 11.725633798884195
+  peak factor = 0x4027738645f628e3  # 11.725633798884195
+  rise +34821664.266437470 s
+  decay +295189383.643964827 s
+  factor at half the rise = 0x400b64e857411c58  # 3.4242712799782957
+  factor at the peak = 0x4027738645f628e3  # 11.725633798884195
+  factor at half the decay = 0x400b64e857411c58  # 3.4242712799782957
+  factor at a day before the end = 0x3ff002f3d1d3a247  # 1.0007208057742376
+0200080020000000.0001:0106fffffffff801 at T-112011160164.958727626 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x40275920b27b52ab  # 11.674077584795063
+  peak factor = 0x40275920b27b52ab  # 11.674077584795063
+  rise +8382528.486404030 s
+  decay +203752117.161713302 s
+  factor at half the rise = 0x400b55791f8a40ea  # 3.4167349304262773
+  factor at the peak = 0x40275920b27b52ab  # 11.674077584795063
+  factor at half the decay = 0x400b55791f8a40ec  # 3.416734930426278
+  factor at a day before the end = 0x3ff0044538edaab4  # 1.001042578102596
+0200080020000000.0001:0106fffffffffa00 at T-87022639520.512046260 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x402608b2f17b1aa6  # 11.01699022891746
+  peak factor = 0x402608b2f17b1aa6  # 11.01699022891746
+  rise +23955007.287300392 s
+  decay +472744414.797368407 s
+  factor at half the rise = 0x400a8db0f50f5b47  # 3.3191851754485557
+  factor at the peak = 0x402608b2f17b1aa6  # 11.01699022891746
+  factor at half the decay = 0x400a8db0f50f5b47  # 3.3191851754485557
+  factor at a day before the end = 0x3ff001cbee2f7b1c  # 1.0004386238212595
+0200080020000000.0001:0106fffffffffb00 at T-78656033772.837953036 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4013412115f02c58  # 4.813602774414072
+  peak factor = 0x4013412115f02c58  # 4.813602774414072
+  rise +11120363.300446111 s
+  decay +411359581.907791972 s
+  factor at half the rise = 0x40018d4be6f1becd  # 2.193992428066713
+  factor at the peak = 0x4013412115f02c58  # 4.813602774414072
+  factor at half the decay = 0x40018d4be6f1bece  # 2.1939924280667134
+  factor at a day before the end = 0x3ff0015a262713cf  # 1.0003301134431586
+0200080020000000.0001:0106fffffffffb01 at T-66100118648.458744744 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x401283e61f5ac6fa  # 4.628807535091022
+  peak factor = 0x401283e61f5ac6fa  # 4.628807535091022
+  rise +26254034.540710765 s
+  decay +164765777.591150403 s
+  factor at half the rise = 0x40013633ffdba462  # 2.1514663685707527
+  factor at the peak = 0x401283e61f5ac6fa  # 4.628807535091022
+  factor at half the decay = 0x40013633ffdba462  # 2.1514663685707527
+  factor at a day before the end = 0x3ff0034ae0c67a17  # 1.0008038311276601
+0200080020000000.0001:0106fffffffffc00 at T-62992043935.566024126 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x401a37b248688d57  # 6.554391032582621
+  peak factor = 0x401a37b248688d57  # 6.554391032582621
+  rise +212827799.544918060 s
+  decay +490741361.478435993 s
+  factor at half the rise = 0x40047b32477fb3eb  # 2.560154493889504
+  factor at the peak = 0x401a37b248688d57  # 6.554391032582621
+  factor at half the decay = 0x40047b32477fb3eb  # 2.560154493889504
+  factor at a day before the end = 0x3ff0015b27612e73  # 1.0003310716882907
+0200080020000000.0001:0106fffffffffc01 at T-47679948836.945972298 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x402316e7e7635afc  # 9.544738036039682
+  peak factor = 0x402316e7e7635afc  # 9.544738036039682
+  rise +81850933.063357576 s
+  decay +170902721.603895187 s
+  factor at half the rise = 0x4008b734adb15993  # 3.089455944990911
+  factor at the peak = 0x402316e7e7635afc  # 9.544738036039682
+  factor at half the decay = 0x4008b734adb15993  # 3.089455944990911
+  factor at a day before the end = 0x3ff004ac99fa2393  # 1.0011411680918385
+0200080020000000.0001:0106fffffffffd00 at T-41180100775.518874137 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x401a1ca9a4b08bde  # 6.527990887904677
+  peak factor = 0x401a1ca9a4b08bde  # 6.527990887904677
+  rise +12312628.373930219 s
+  decay +612808520.674717307 s
+  factor at half the rise = 0x400470a0570f8e03  # 2.5549933244344643
+  factor at the peak = 0x401a1ca9a4b08bde  # 6.527990887904677
+  factor at half the decay = 0x400470a0570f8e04  # 2.5549933244344647
+  factor at a day before the end = 0x3ff0011565b027ca  # 1.0002645466033635
+
+# a 0.3 M☉ star at 2 Myr with its disc of 3 Myr, over the source horizon, four series
+disc lifetime (Myr) = 0x4008000000000000  # 3.0
+disc phase: true
+formation at T-63115200000000.000000000 s
+class 0 end at T-58493696478986.296875000 s
+protostar end at T-47336400000000.000000000 s
+disc end at T+31557600000000.000000000 s
+last instant T+32346540000000.000000000 s
+bound of the formation bin (per s) = 0x3dd3e2fbe05f2579  # 7.234723245218669e-11
+rate a quarter step before the formation (per s) = 0x0000000000000000  # 0.0
+rate a quarter step after the formation (per s) = 0x3dd3e2fbe05f1196  # 7.234723245212089e-11
+bound of the class 0 end bin (per s) = 0x3dc949dc53b65dac  # 4.599954658849972e-11
+rate a quarter step before the class 0 end (per s) = 0x3dd18fa404c4bb82  # 6.388689680763554e-11
+rate a quarter step after the class 0 end (per s) = 0x3dbd5085c6dd0314  # 2.6661419971900022e-11
+bound of the protostar end bin (per s) = 0x3da452c98ddd18b2  # 9.242006841456945e-12
+rate a quarter step before the protostar end (per s) = 0x3db0ef19dafa0e16  # 1.5401372613050258e-11
+rate a quarter step after the protostar end (per s) = 0x3d8b1d7d9717b244  # 3.082641069846819e-12
+bound of the disc end bin (per s) = 0x3d43e8cd5a567a5d  # 1.4146467774132934e-13
+rate a quarter step before the disc end (per s) = 0x3d50cc6d4438e672  # 2.3872164368827615e-13
+rate a quarter step after the disc end (per s) = 0x3d28e300b0ec0012  # 4.420771179412522e-14
+bound of the last instant bin (per s) = 0x0000000000000000  # 0.0
+rate a quarter step before the last instant (per s) = 0x3d28e300b0ec0012  # 4.420771179412522e-14
+rate a quarter step after the last instant (per s) = 0x0000000000000000  # 0.0
+rate at 50000 yr (per s) = 0x3dd3e2fbe05f1196  # 7.234723245212089e-11
+  ProtostellarFuOri at 50000 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 50000 yr (per s) = 0x3dd2250382111bd2  # 6.60096148893151e-11
+  DiscFuOri at 50000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 146446.6094067262 yr (per s) = 0x3dc8e3c5767bfc46  # 4.5274158389767775e-11
+  ProtostellarFuOri at 146446.6094067262 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 146446.6094067262 yr (per s) = 0x3dc567d4b9e010bf  # 3.893654082696199e-11
+  DiscFuOri at 146446.6094067262 yr (per s) = 0x0000000000000000  # 0.0
+rate at 300000 yr (per s) = 0x3db403265873aac5  # 1.8201084327414677e-11
+  ProtostellarFuOri at 300000 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 300000 yr (per s) = 0x3daa1689be77a76c  # 1.1863466764608886e-11
+  DiscFuOri at 300000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 500000 yr (per s) = 0x3da452c98ddd045f  # 9.24200684144854e-12
+  ProtostellarFuOri at 500000 yr (per s) = 0x3d8bdf85e4df5c3c  # 3.168808781402895e-12
+  V1647Ori at 500000 yr (per s) = 0x3d9a1689be77a76c  # 5.931733382304443e-12
+  DiscFuOri at 500000 yr (per s) = 0x3d43e8cd5a566674  # 1.4146467774120068e-13
+rate at 1000000 yr (per s) = 0x3d53e8cd5a566674  # 2.8292935548240135e-13
+  ProtostellarFuOri at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  V1647Ori at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  DiscFuOri at 1000000 yr (per s) = 0x3d53e8cd5a566674  # 2.8292935548240135e-13
+rate at 2000000 yr (per s) = 0x3d53e8cd5a566674  # 2.8292935548240135e-13
+  ProtostellarFuOri at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  V1647Ori at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  DiscFuOri at 2000000 yr (per s) = 0x3d53e8cd5a566674  # 2.8292935548240135e-13
+0200080020000000.0002:0106fffffffe7700 at T-6193607096097.296898066 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x406e69a9467b3257  # 243.3019134908852
+  peak factor = 0x406e69a9467b3257  # 243.3019134908852
+  rise +133098563.922697201 s
+  decay +8764384862.483842849 s
+  fading rate (mag per yr) = 0x3f95fea93a0cfac2  # 0.021479267280706045
+  factor at half the rise = 0x402f323f299b199c  # 15.598138141806707
+  factor at the peak = 0x406e69a9467b3257  # 243.3019134908852
+  factor at half the decay = 0x402f323f299b199c  # 15.598138141806707
+  factor at a day before the end = 0x3ff00038cbbcbaf6  # 1.000054164742037
+0200080020000000.0002:0106fffffffead00 at T-5343179594926.331524380 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x401647b7653e28d0  # 5.570035535735045
+  peak factor = 0x401647b7653e28d0  # 5.570035535735045
+  rise +74281275.470298990 s
+  decay +995939570.977812409 s
+  fading rate (mag per yr) = 0x3fae40356aeac7b2  # 0.05908362321987627
+  factor at half the rise = 0x4002e1780eb6de98  # 2.360092272716269
+  factor at the peak = 0x401647b7653e28d0  # 5.570035535735045
+  factor at half the decay = 0x4002e1780eb6de98  # 2.360092272716269
+  factor at a day before the end = 0x3ff0009c3cc26fa6  # 1.0001489995401953
+0200080020000000.0002:0106ffffffffd900 at T-603974418914.220841946 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x401b5802bed56626  # 6.835947973036616
+  peak factor = 0x401b5802bed56626  # 6.835947973036616
+  rise +163255996.661939263 s
+  decay +2108293660.269864320 s
+  fading rate (mag per yr) = 0x3f9ffd11ec955058  # 0.031238822998901433
+  factor at half the rise = 0x4004eaa0d66877a3  # 2.6145645857458972
+  factor at the peak = 0x401b5802bed56626  # 6.835947973036616
+  factor at half the decay = 0x4004eaa0d66877a3  # 2.6145645857458972
+  factor at a day before the end = 0x3ff000529a6e9d49  # 1.0000787765983026
+0200080020000000.0003:0106ffffffffa200 at T-1471074557937.056151037 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x404e6f59fc6f6859  # 60.8699336570723
+  peak factor = 0x404e6f59fc6f6859  # 60.8699336570723
+  rise +109203636.960173100 s
+  decay +3043980990.731647968 s
+  fading rate (mag per yr) = 0x3fa7add878045400  # 0.046248211527348815
+  factor at half the rise = 0x401f352a2579aed4  # 7.801918588210999
+  factor at the peak = 0x404e6f59fc6f6859  # 60.8699336570723
+  factor at half the decay = 0x401f352a2579aed4  # 7.801918588210999
+  factor at a day before the end = 0x3ff0007a4b4c8bdf  # 1.0001166287772703
+0200080020000000.0003:0106ffffffffac00 at T-1320257965614.959951718 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x40380e23818baf21  # 24.055229279139102
+  peak factor = 0x40380e23818baf21  # 24.055229279139102
+  rise +22515566.042028352 s
+  decay +7180765457.580994606 s
+  fading rate (mag per yr) = 0x3f8f142535a310eb  # 0.015175142955179818
+  factor at half the rise = 0x40139e52e2e3e1cc  # 4.90461306110269
+  factor at the peak = 0x40380e23818baf21  # 24.055229279139102
+  factor at half the decay = 0x40139e52e2e3e1cc  # 4.90461306110269
+  factor at a day before the end = 0x3ff0002820452bce  # 1.000038267188518
+0200080020000000.0003:0106ffffffffcf00 at T-771733463987.014060023 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x406f1186cff0f9d3  # 248.5477065760193
+  peak factor = 0x406f1186cff0f9d3  # 248.5477065760193
+  rise +95980070.763341158 s
+  decay +6168537506.354764938 s
+  fading rate (mag per yr) = 0x3f9f5f3839b626a6  # 0.030636671564514238
+  factor at half the rise = 0x402f87e1f749b934  # 15.7653958585257
+  factor at the peak = 0x406f1186cff0f9d3  # 248.5477065760193
+  factor at half the decay = 0x402f87e1f749b934  # 15.7653958585257
+  factor at a day before the end = 0x3ff0005102cd9f54  # 1.0000772580624089
+0200080020000000.0004:0106fffffffe3b00 at T-7139477615080.059789589 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x406821c5cf6cf1b8  # 193.05539675977866
+  peak factor = 0x406821c5cf6cf1b8  # 193.05539675977866
+  rise +50519513.224050834 s
+  decay +1636112217.771619081 s
+  fading rate (mag per yr) = 0x3fbc372653c0249a  # 0.1102165178746354
+  factor at half the rise = 0x402bc9f3ba47634c  # 13.8944376194137
+  factor at the peak = 0x406821c5cf6cf1b8  # 193.05539675977866
+  factor at half the decay = 0x402bc9f3ba47634c  # 13.8944376194137
+  factor at a day before the end = 0x3ff001237811fcbb  # 1.0002779665226587
+0200080020000000.0004:0106fffffffe7800 at T-6180074777405.605612863 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x406c404f13d9df70  # 226.00965302041323
+  peak factor = 0x406c404f13d9df70  # 226.00965302041323
+  rise +699524732.458248615 s
+  decay +3356989830.471680164 s
+  fading rate (mag per yr) = 0x3fac539944adeb43  # 0.05532530749675015
+  factor at half the rise = 0x402e11364dc1a7bd  # 15.033617429627947
+  factor at the peak = 0x406c404f13d9df70  # 226.00965302041323
+  factor at half the decay = 0x402e11364dc1a7bd  # 15.033617429627947
+  factor at a day before the end = 0x3ff000924c6240c7  # 1.0001395210020279
+0200080020000000.0005:0106fffffffee800 at T-4409121808713.685354313 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x401997fee3e575d6  # 6.398433266525407
+  peak factor = 0x401997fee3e575d6  # 6.398433266525407
+  rise +257809654.690365433 s
+  decay +2727287291.401668071 s
+  fading rate (mag per yr) = 0x3f97e09feb269483  # 0.02331781265970224
+  factor at half the rise = 0x40043c7106d4b730  # 2.5295124562898295
+  factor at the peak = 0x401997fee3e575d6  # 6.398433266525407
+  factor at half the decay = 0x40043c7106d4b730  # 2.5295124562898295
+  factor at a day before the end = 0x3ff0003da8523cab  # 1.0000588011787765
+
+# a 0.8 M☉ star at 1.05 Myr whose disc ends at 1 Myr, over the source horizon, six series
+disc lifetime (Myr) = 0x3ff0000000000000  # 1.0
+disc phase: true
+formation at T-33135480000000.000000000 s
+class 0 end at T-28513976478986.296875000 s
+protostar end at T-17356680000000.000000000 s
+disc end at T-1577880000000.000000000 s
+last instant T-788940000000.000000000 s
+bound of the formation bin (per s) = 0x3dd3e2fbe05f2579  # 7.234723245218669e-11
+rate a quarter step before the formation (per s) = 0x0000000000000000  # 0.0
+rate a quarter step after the formation (per s) = 0x3dd3e2fbe05f1196  # 7.234723245212089e-11
+bound of the class 0 end bin (per s) = 0x3dc949dc53b65dac  # 4.599954658849972e-11
+rate a quarter step before the class 0 end (per s) = 0x3dd18fa404c4bb82  # 6.388689680763554e-11
+rate a quarter step after the class 0 end (per s) = 0x3dbd5085c6dd0314  # 2.6661419971900022e-11
+bound of the protostar end bin (per s) = 0x3da452c98ddd18b2  # 9.242006841456945e-12
+rate a quarter step before the protostar end (per s) = 0x3db0ef19dafa0e16  # 1.5401372613050258e-11
+rate a quarter step after the protostar end (per s) = 0x3d8b1d7d9717b244  # 3.082641069846819e-12
+bound of the disc end bin (per s) = 0x3d43e8cd5a567a5d  # 1.4146467774132934e-13
+rate a quarter step before the disc end (per s) = 0x3d50cc6d4438e672  # 2.3872164368827615e-13
+rate a quarter step after the disc end (per s) = 0x3d28e300b0ec0012  # 4.420771179412522e-14
+bound of the last instant bin (per s) = 0x0000000000000000  # 0.0
+rate a quarter step before the last instant (per s) = 0x3d28e300b0ec0012  # 4.420771179412522e-14
+rate a quarter step after the last instant (per s) = 0x0000000000000000  # 0.0
+rate at 50000 yr (per s) = 0x3dd3e2fbe05f1196  # 7.234723245212089e-11
+  ProtostellarFuOri at 50000 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 50000 yr (per s) = 0x3dd2250382111bd2  # 6.60096148893151e-11
+  DiscFuOri at 50000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 146446.6094067262 yr (per s) = 0x3dc8e3c5767bfc46  # 4.5274158389767775e-11
+  ProtostellarFuOri at 146446.6094067262 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 146446.6094067262 yr (per s) = 0x3dc567d4b9e010bf  # 3.893654082696199e-11
+  DiscFuOri at 146446.6094067262 yr (per s) = 0x0000000000000000  # 0.0
+rate at 300000 yr (per s) = 0x3db403265873aac5  # 1.8201084327414677e-11
+  ProtostellarFuOri at 300000 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 300000 yr (per s) = 0x3daa1689be77a76c  # 1.1863466764608886e-11
+  DiscFuOri at 300000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 500000 yr (per s) = 0x3da452c98ddd045f  # 9.24200684144854e-12
+  ProtostellarFuOri at 500000 yr (per s) = 0x3d8bdf85e4df5c3c  # 3.168808781402895e-12
+  V1647Ori at 500000 yr (per s) = 0x3d9a1689be77a76c  # 5.931733382304443e-12
+  DiscFuOri at 500000 yr (per s) = 0x3d43e8cd5a566674  # 1.4146467774120068e-13
+rate at 1000000 yr (per s) = 0x3d43e8cd5a566674  # 1.4146467774120068e-13
+  ProtostellarFuOri at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  V1647Ori at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  DiscFuOri at 1000000 yr (per s) = 0x3d43e8cd5a566674  # 1.4146467774120068e-13
+rate at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  ProtostellarFuOri at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  V1647Ori at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  DiscFuOri at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+0200080020000000.0006:0106fffffffed300 at T-4745860711915.705932933 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x405747f49beac0e3  # 93.12430475163596
+  peak factor = 0x405747f49beac0e3  # 93.12430475163596
+  rise +263431986.625511884 s
+  decay +10268140628.466075897 s
+  fading rate (mag per yr) = 0x3f8efbfb5443ff88  # 0.01512905455501802
+  factor at half the rise = 0x40234cd90e79891a  # 9.650093509994395
+  factor at the peak = 0x405747f49beac0e3  # 93.12430475163596
+  factor at half the decay = 0x40234cd90e79891a  # 9.650093509994395
+  factor at a day before the end = 0x3ff0002801125ba2  # 1.0000381509650897
+0200080020000000.0006:0106ffffffff0500 at T-3946470039958.655442580 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x4040a10e2ea6a4dc  # 33.25824530732072
+  peak factor = 0x4040a10e2ea6a4dc  # 33.25824530732072
+  rise +756378240.769781708 s
+  decay +2073431797.842704057 s
+  fading rate (mag per yr) = 0x3fada6252051a52a  # 0.05790821094053407
+  factor at half the rise = 0x401711677477f379  # 5.766996211835129
+  factor at the peak = 0x4040a10e2ea6a4dc  # 33.25824530732072
+  factor at half the decay = 0x401711677477f379  # 5.766996211835129
+  factor at a day before the end = 0x3ff0009921010ad9  # 1.0001460351201585
+0200080020000000.0006:0106ffffffff5200 at T-2739401016120.766389934 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x4036879a0f5c0264  # 22.52969451900789
+  peak factor = 0x4036879a0f5c0264  # 22.52969451900789
+  rise +90800914.840169027 s
+  decay +1074391448.633526325 s
+  fading rate (mag per yr) = 0x3fb96dfe8aa7fc6c  # 0.09933462987099667
+  factor at half the rise = 0x4012fc766eccf407  # 4.746545535334923
+  factor at the peak = 0x4036879a0f5c0264  # 22.52969451900789
+  factor at half the decay = 0x4012fc766eccf407  # 4.746545535334923
+  factor at a day before the end = 0x3ff00106b028f372  # 1.0002505189179058
+0200080020000000.0007:0106fffffffe9c00 at T-5610541739207.762600157 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x4042cdd4418301ac  # 37.60804003617099
+  peak factor = 0x4042cdd4418301ac  # 37.60804003617099
+  rise +68897700.372670814 s
+  decay +1772562891.016486406 s
+  fading rate (mag per yr) = 0x3fb1f2f19e0d1d16  # 0.07011327847168433
+  factor at half the rise = 0x401887b86b8b2e1e  # 6.132539444322473
+  factor at the peak = 0x4042cdd4418301ac  # 37.60804003617099
+  factor at half the decay = 0x401887b86b8b2e1e  # 6.132539444322473
+  factor at a day before the end = 0x3ff000b967f6a963  # 1.0001768170428356
+0200080020000000.0009:0106fffffffeae00 at T-5332627425391.839396659 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x402f71ac0644e72e  # 15.72201556769468
+  peak factor = 0x402f71ac0644e72e  # 15.72201556769468
+  rise +58597561.506002858 s
+  decay +1212719757.956983804 s
+  fading rate (mag per yr) = 0x3fb3ed479d94111f  # 0.07783935162666865
+  factor at half the rise = 0x400fb8862ff501e5  # 3.9650996920247388
+  factor at the peak = 0x402f71ac0644e72e  # 15.72201556769468
+  factor at half the decay = 0x400fb8862ff501e5  # 3.9650996920247388
+  factor at a day before the end = 0x3ff000cdd6ba5d28  # 1.0001963031589387
+0200080020000000.000a:0106fffffffedb00 at T-4611862959122.056033273 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x4034af552010f151  # 20.68489265836371
+  peak factor = 0x4034af552010f151  # 20.68489265836371
+  rise +12377763.347898574 s
+  decay +891511002.596337080 s
+  fading rate (mag per yr) = 0x3fbdce3f777676c6  # 0.11642834345408479
+  factor at half the rise = 0x40123137e0786902  # 4.548064715718512
+  factor at the peak = 0x4034af552010f151  # 20.68489265836371
+  factor at half the decay = 0x40123137e0786902  # 4.548064715718512
+  factor at a day before the end = 0x3ff00133e6108e20  # 1.0002936350728149
+0200080020000000.000a:0106ffffffff4c00 at T-2824931418744.603966140 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x402f8481d3b48f8f  # 15.758803001204596
+  peak factor = 0x402f8481d3b48f8f  # 15.758803001204596
+  rise +21999228.717172458 s
+  decay +1164869835.558616876 s
+  fading rate (mag per yr) = 0x3fb4c3552b41c6d1  # 0.08110554033353458
+  factor at half the rise = 0x400fc204e35257c0  # 3.969735885572817
+  factor at the peak = 0x402f8481d3b48f8f  # 15.758803001204596
+  factor at half the decay = 0x400fc204e35257c0  # 3.969735885572817
+  factor at a day before the end = 0x3ff000d67a0ef394  # 1.0002045410067
+0200080020000000.000b:0106fffffffe8200 at T-6020416021649.421319355 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x401836286ca6680e  # 6.052888581902165
+  peak factor = 0x401836286ca6680e  # 6.052888581902165
+  rise +27177283.307238537 s
+  decay +669052762.499257922 s
+  fading rate (mag per yr) = 0x3fb79af5351508b0  # 0.09220821901274934
+  factor at half the rise = 0x4003ae9dc98e862f  # 2.4602618929500504
+  factor at the peak = 0x401836286ca6680e  # 6.052888581902165
+  factor at half the decay = 0x4003ae9dc98e862f  # 2.4602618929500504
+  factor at a day before the end = 0x3ff000f3d71e4446  # 1.0002325442367392
+0200080020000000.000b:0106fffffffec400 at T-4986004695240.872254100 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x406a91b02526d318  # 212.55275209029128
+  peak factor = 0x406a91b02526d318  # 212.55275209029128
+  rise +360242224.067734777 s
+  decay +1550938958.165282249 s
+  fading rate (mag per yr) = 0x3fbe4f1fb3c2f52b  # 0.11839483393392373
+  factor at half the rise = 0x402d288b762322e3  # 14.579189006604286
+  factor at the peak = 0x406a91b02526d318  # 212.55275209029128
+  factor at half the decay = 0x402d288b762322e3  # 14.579189006604286
+  factor at a day before the end = 0x3ff001391994291e  # 1.0002985953493133
+0200080020000000.000b:0106ffffffff0000 at T-4035210006660.586393318 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x4018ed55f7daf517  # 6.23177325509939
+  peak factor = 0x4018ed55f7daf517  # 6.23177325509939
+  rise +53998067.736477635 s
+  decay +613586481.734806656 s
+  fading rate (mag per yr) = 0x3fba27cf1185278e  # 0.10216993501413027
+  factor at half the rise = 0x4003f887644f0862  # 2.496351989423645
+  factor at the peak = 0x4018ed55f7daf517  # 6.23177325509939
+  factor at half the decay = 0x4003f887644f0862  # 2.496351989423645
+  factor at a day before the end = 0x3ff0010e2fde8aab  # 1.0002576703924813
+0200080020000000.000b:0106ffffffff6200 at T-2487426956892.858964608 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x40465cd2af65d4cc  # 44.72517960045079
+  peak factor = 0x40465cd2af65d4cc  # 44.72517960045079
+  rise +163445671.330005049 s
+  decay +1894518356.399580001 s
+  fading rate (mag per yr) = 0x3fb19894889c695f  # 0.06873443923214982
+  factor at half the rise = 0x401ac03174b1e1f3  # 6.687688659054845
+  factor at the peak = 0x40465cd2af65d4cc  # 44.72517960045079
+  factor at half the decay = 0x401ac03174b1e1f3  # 6.687688659054845
+  factor at a day before the end = 0x3ff000b5c2764a53  # 1.0001733394789383
+0200080020000000.000b:0106ffffffff8c00 at T-1822956133649.011397999 s
+  class FuOri, component DiscFuOri
+  drawn peak factor = 0x40464a9b2f9e8c7d  # 44.582860901276014
+  peak factor = 0x40464a9b2f9e8c7d  # 44.582860901276014
+  rise +152846808.339308500 s
+  decay +1611691971.642693042 s
+  fading rate (mag per yr) = 0x3fb4aa9f451c2ac0  # 0.08072848737007643
+  factor at half the rise = 0x401ab549edec7468  # 6.677039830739069
+  factor at the peak = 0x40464a9b2f9e8c7d  # 44.582860901276014
+  factor at half the decay = 0x401ab549edec7468  # 6.677039830739069
+  factor at a day before the end = 0x3ff000d57ac7581d  # 1.0002035900156507
+
+# a 30 M☉ protostar at 0.49 Myr, near t_p, over the 20,000 years before the epoch
+disc lifetime (Myr) = 0x3fd3333333333333  # 0.3
+disc phase: false
+formation at T-15463224000000.000000000 s
+class 0 end at T-10841720478986.296875000 s
+protostar end at T+315576000000.000000000 s
+disc end at T-5995944000000.000000000 s
+last instant T+1104516000000.000000000 s
+bound of the formation bin (per s) = 0x3dd3e2fbe05f2579  # 7.234723245218669e-11
+rate a quarter step before the formation (per s) = 0x0000000000000000  # 0.0
+rate a quarter step after the formation (per s) = 0x3dd3e2fbe05f1196  # 7.234723245212089e-11
+bound of the class 0 end bin (per s) = 0x3dc949dc53b65dac  # 4.599954658849972e-11
+rate a quarter step before the class 0 end (per s) = 0x3dd18fa404c4bb82  # 6.388689680763554e-11
+rate a quarter step after the class 0 end (per s) = 0x3dbd5085c6dd0314  # 2.6661419971900022e-11
+bound of the protostar end bin (per s) = 0x3da403265873bec8  # 9.100542163715615e-12
+rate a quarter step before the protostar end (per s) = 0x3db0e2a85aa19816  # 1.5357164901256133e-11
+rate a quarter step after the protostar end (per s) = 0x3d8903efee909576  # 2.843919426158543e-12
+bound of the disc end bin (per s) = 0x3db403265873bec8  # 1.820108432743123e-11
+rate a quarter step before the disc end (per s) = 0x3db403265873aac5  # 1.8201084327414677e-11
+rate a quarter step after the disc end (per s) = 0x3db403265873aac5  # 1.8201084327414677e-11
+bound of the last instant bin (per s) = 0x0000000000000000  # 0.0
+rate a quarter step before the last instant (per s) = 0x3d8903efee909576  # 2.843919426158543e-12
+rate a quarter step after the last instant (per s) = 0x0000000000000000  # 0.0
+rate at 50000 yr (per s) = 0x3dd3e2fbe05f1196  # 7.234723245212089e-11
+  ProtostellarFuOri at 50000 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 50000 yr (per s) = 0x3dd2250382111bd2  # 6.60096148893151e-11
+  DiscFuOri at 50000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 146446.6094067262 yr (per s) = 0x3dc8e3c5767bfc46  # 4.5274158389767775e-11
+  ProtostellarFuOri at 146446.6094067262 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 146446.6094067262 yr (per s) = 0x3dc567d4b9e010bf  # 3.893654082696199e-11
+  DiscFuOri at 146446.6094067262 yr (per s) = 0x0000000000000000  # 0.0
+rate at 300000 yr (per s) = 0x3db403265873aac5  # 1.8201084327414677e-11
+  ProtostellarFuOri at 300000 yr (per s) = 0x3d9bdf85e4df5c3c  # 6.33761756280579e-12
+  V1647Ori at 300000 yr (per s) = 0x3daa1689be77a76c  # 1.1863466764608886e-11
+  DiscFuOri at 300000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 500000 yr (per s) = 0x3da403265873aac5  # 9.100542163707338e-12
+  ProtostellarFuOri at 500000 yr (per s) = 0x3d8bdf85e4df5c3c  # 3.168808781402895e-12
+  V1647Ori at 500000 yr (per s) = 0x3d9a1689be77a76c  # 5.931733382304443e-12
+  DiscFuOri at 500000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  ProtostellarFuOri at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  V1647Ori at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+  DiscFuOri at 1000000 yr (per s) = 0x0000000000000000  # 0.0
+rate at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  ProtostellarFuOri at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  V1647Ori at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+  DiscFuOri at 2000000 yr (per s) = 0x0000000000000000  # 0.0
+0200080020000000.000c:0106ffffffffd800 at T-620510914868.044374252 s
+  class FuOri, component ProtostellarFuOri
+  drawn peak factor = 0x403651c31e7ad58e  # 22.319383530606096
+  peak factor = 0x40229b5769034a8d  # 9.303401261951217
+  rise +306196432.593805491 s
+  decay +8239599150.918145179 s
+  fading rate (mag per yr) = 0x3f8a7272cb229f8d  # 0.012913605522342464
+  factor at half the rise = 0x400866b3dc4d4a2f  # 3.0501477442824334
+  factor at the peak = 0x40229b5769034a8d  # 9.303401261951217
+  factor at half the decay = 0x400866b3dc4d4a2f  # 3.0501477442824334
+  factor at a day before the end = 0x3ff000188625aa55  # 1.0000233879205969
+0200080020000000.000c:0106ffffffffd900 at T-608390731626.056821031 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4027401ed1553fb9  # 11.625235120445597
+  peak factor = 0x40229a8b596ce06f  # 9.301844400921452
+  rise +180367913.254816532 s
+  decay +586477150.191505789 s
+  factor at half the rise = 0x4008662e0d0f8fc6  # 3.0498925228475597
+  factor at the peak = 0x40229a8b596ce06f  # 9.301844400921452
+  factor at half the decay = 0x4008662e0d0f8fc6  # 3.0498925228475597
+  factor at a day before the end = 0x3ff001589279686e  # 1.0003286096239452
+0200080020000000.000c:0106ffffffffe301 at T-443118820293.681378568 s
+  class FuOri, component ProtostellarFuOri
+  drawn peak factor = 0x402a4fb9e168cc76  # 13.15571503071099
+  peak factor = 0x4022913c0ea8bc18  # 9.283661325547698
+  rise +23065968.499993711 s
+  decay +1103356711.908156156 s
+  fading rate (mag per yr) = 0x3fb47c3d2b9027fd  # 0.08002073586990828
+  factor at half the rise = 0x400860126abe729f  # 3.0469101275796926
+  factor at the peak = 0x4022913c0ea8bc18  # 9.283661325547698
+  factor at half the decay = 0x400860126abe729f  # 3.0469101275796926
+  factor at a day before the end = 0x3ff000b6fa904e30  # 1.0001745021480808
+0200080020000000.000c:0106ffffffffe300 at T-442795327752.099804079 s
+  class FuOri, component ProtostellarFuOri
+  drawn peak factor = 0x401c964dbc633a3c  # 7.146780913883557
+  peak factor = 0x401c964dbc633a3c  # 7.146780913883557
+  rise +89566819.518304035 s
+  decay +1680613715.245897531 s
+  fading rate (mag per yr) = 0x3fa48754a3d7b641  # 0.0400949907305912
+  factor at half the rise = 0x400563036e722e0b  # 2.6733463886828353
+  factor at the peak = 0x401c964dbc633a3c  # 7.146780913883557
+  factor at half the decay = 0x400563036e722e0b  # 2.6733463886828353
+  factor at a day before the end = 0x3ff0006a05b8f7e4  # 1.000101110795634
+0200080020000000.000c:0106ffffffffe400 at T-439088010839.453051181 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x401d20136a1bf67a  # 7.2813240603987825
+  peak factor = 0x401d20136a1bf67a  # 7.2813240603987825
+  rise +146258573.028845906 s
+  decay +163746515.569530665 s
+  factor at half the rise = 0x4005964effc0f66c  # 2.698392866207362
+  factor at the peak = 0x401d20136a1bf67a  # 7.2813240603987825
+  factor at half the decay = 0x4005964effc0f66c  # 2.698392866207362
+  factor at a day before the end = 0x3ff0044b0033bd21  # 1.0010480888266289
+0200080020000000.000c:0106ffffffffe700 at T-386157398414.423404354 s
+  class FuOri, component ProtostellarFuOri
+  drawn peak factor = 0x402a1ab2127466f4  # 13.05213983221936
+  peak factor = 0x40228eb3140f7644  # 9.278710009467552
+  rise +251867474.696776270 s
+  decay +758427337.326729893 s
+  fading rate (mag per yr) = 0x3fbdb5e4c15c9285  # 0.11605672569982957
+  factor at half the rise = 0x40085e685e606642  # 3.0460975049179817
+  factor at the peak = 0x40228eb3140f7644  # 9.278710009467552
+  factor at half the decay = 0x40085e685e606642  # 3.0460975049179817
+  factor at a day before the end = 0x3ff0010a24bd326d  # 1.0002538142317932
+0200080020000000.000c:0106ffffffffe800 at T-364515685783.300644732 s
+  class FuOri, component ProtostellarFuOri
+  drawn peak factor = 0x404398621e02dcb4  # 39.190494300267716
+  peak factor = 0x40228dd3b04ee626  # 9.277005681639888
+  rise +104830522.190231576 s
+  decay +1336145353.667082309 s
+  fading rate (mag per yr) = 0x3fb81507e0808125  # 0.09407090407376424
+  factor at half the rise = 0x40085dd5b07190e5  # 3.0458177361161796
+  factor at the peak = 0x40228dd3b04ee626  # 9.277005681639888
+  factor at half the decay = 0x40085dd5b07190e5  # 3.0458177361161796
+  factor at a day before the end = 0x3ff000970c6ca9cd  # 1.0001440511065198
+0200080020000000.000c:0106fffffffff000 at T-251793956479.984462357 s
+  class FuOri, component ProtostellarFuOri
+  drawn peak factor = 0x4018db1986345241  # 6.213964554732741
+  peak factor = 0x4018db1986345241  # 6.213964554732741
+  rise +8490726.741202143 s
+  decay +2930766745.900322914 s
+  fading rate (mag per yr) = 0x3f95de94014d6fa6  # 0.021356880740640037
+  factor at half the rise = 0x4003f137f28960d1  # 2.4927824924635407
+  factor at the peak = 0x4018db1986345241  # 6.213964554732741
+  factor at half the decay = 0x4003f137f28960d1  # 2.4927824924635407
+  factor at a day before the end = 0x3ff0003878e39f34  # 1.000053856108889
+0200080020000000.000c:0106fffffffff100 at T-227179596968.949985108 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x401aec5ae29cd134  # 6.7308154495442984
+  peak factor = 0x401aec5ae29cd134  # 6.7308154495442984
+  rise +166907667.657766371 s
+  decay +181701370.775248080 s
+  factor at half the rise = 0x4004c14b189dcb02  # 2.594381515803776
+  factor at the peak = 0x401aec5ae29cd134  # 6.7308154495442984
+  factor at half the decay = 0x4004c14b189dcb02  # 2.594381515803776
+  factor at a day before the end = 0x3ff003b71de897af  # 1.0009070556929875
+0200080020000000.000c:0106fffffffff600 at T-152478867395.041310073 s
+  class FuOri, component ProtostellarFuOri
+  drawn peak factor = 0x40461963d5c85c98  # 44.198359225113734
+  peak factor = 0x402287eaf2ce74ab  # 9.265464389516941
+  rise +432736569.054520547 s
+  decay +1110591318.751480579 s
+  fading rate (mag per yr) = 0x3fbdec3f1d7a43ea  # 0.11688608617465915
+  factor at half the rise = 0x400859f40ea514b2  # 3.0439225334290194
+  factor at the peak = 0x402287eaf2ce74ab  # 9.265464389516941
+  factor at half the decay = 0x400859f40ea514b2  # 3.0439225334290194
+  factor at a day before the end = 0x3ff000b5a06a3d5c  # 1.0001732126437082
+0200080020000000.000c:0106fffffffff900 at T-106104474704.094070145 s
+  class FuOri, component ProtostellarFuOri
+  drawn peak factor = 0x4022bb53bf83aa4f  # 9.365873322317524
+  peak factor = 0x40228743d366b180  # 9.264189344678698
+  rise +26186148.473476570 s
+  decay +1984073196.148353338 s
+  fading rate (mag per yr) = 0x3fa3c79d34804e16  # 0.03863230958827672
+  factor at half the rise = 0x400859863ef8d10e  # 3.0437130851443106
+  factor at the peak = 0x40228743d366b180  # 9.264189344678698
+  factor at half the decay = 0x400859863ef8d10e  # 3.0437130851443106
+  factor at a day before the end = 0x3ff00065a7ea77da  # 1.0000969466413978
+0200080020000000.000c:0106fffffffff901 at T-96185415491.605469959 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x40171aa84d2020c7  # 5.776032643400135
+  peak factor = 0x40171aa84d2020c7  # 5.776032643400135
+  rise +112080797.756872326 s
+  decay +461695142.458843827 s
+  factor at half the rise = 0x40033a092ce0a231  # 2.4033378130009386
+  factor at the peak = 0x40171aa84d2020c7  # 5.776032643400135
+  factor at half the decay = 0x40033a092ce0a231  # 2.4033378130009386
+  factor at a day before the end = 0x3ff001582ecadcbb  # 1.0003282382802314
+0200080020000000.000c:0106fffffffffc00 at T-58559813061.184059875 s
+  class V1647Ori, component V1647Ori
+  drawn peak factor = 0x4022531d8a2aa408  # 9.162334745125932
+  peak factor = 0x4022531d8a2aa408  # 9.162334745125932
+  rise +187390546.943089514 s
+  decay +572778248.521604418 s
+  factor at half the rise = 0x40083729a1e54e7d  # 3.0269348762611217
+  factor at the peak = 0x4022531d8a2aa408  # 9.162334745125932
+  factor at half the decay = 0x40083729a1e54e7d  # 3.0269348762611217
+  factor at a day before the end = 0x3ff0015e6c6b319b  # 1.000334189901969

@@ -7,5 +7,8 @@
 //! note 14).
 //!
 //! - [`flares`]: the flares of stars with convective envelopes, Poisson bins of a day (P06.T28.a).
+//! - [`fu_orionis`]: the FU Orionis outbursts of young stars, Poisson bins of 500 years
+//!   (P06.T28.d).
 
 pub mod flares;
+pub mod fu_orionis;

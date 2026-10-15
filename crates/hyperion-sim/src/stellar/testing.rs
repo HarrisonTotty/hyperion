@@ -1067,4 +1067,147 @@ mod tests {
         }
         checks.finish();
     }
+
+    /// The ages under which a star can burst: past 16 Myr no disc lasts, the longest's step ending
+    /// at 15.025 Myr (P06.T28.d).
+    const FU_ORIONIS_YOUNG_YEARS: f64 = 1.6e7;
+
+    /// What the galaxy-wide FU Orionis count reads of one star of `inputs`, of a component whose
+    /// ages are `ages` (P06.T28.d): each component's onsets a year at the epoch, the sum over age
+    /// pieces of its rate at the piece's middle times the piece's weight under `ages`, and the
+    /// protostars, the weight of the ages below `t_p`. The rate is a closed form of the age, the
+    /// mass and the disc rank, so no track is built and no age drawn: one piece on each plateau,
+    /// where the rate is constant, and pieces of 500 years inside the steps.
+    fn observe_fu_orionis_onsets(inputs: &SampleInputs, ages: &AgeDistribution, t: &mut Tally) {
+        use crate::stellar::events::fu_orionis::{
+            CLASS_0_END, FuOrionisRates, OutburstComponent, STEP_WIDTH,
+        };
+        use crate::units::consts::SECONDS_PER_JULIAN_YEAR;
+        let Some(rates) = FuOrionisRates::new(inputs.initial_mass, inputs.draws.disc_lifetime())
+        else {
+            return;
+        };
+        t.add("protostars", weight(ages, 0.0, PROTOSTAR_YEARS));
+        let half = STEP_WIDTH.value() / 2.0;
+        let last = rates.last_age().value();
+        let centres = [
+            CLASS_0_END.value(),
+            PROTOSTAR_YEARS,
+            rates.disc_lifetime().value() * 1e6,
+        ];
+        let mut cuts = vec![0.0, last];
+        for c in centres {
+            cuts.extend([c - half, c + half]);
+        }
+        cuts.retain(|&a| (0.0..=last).contains(&a));
+        cuts.sort_by(f64::total_cmp);
+        cuts.dedup();
+        let labels = [
+            (OutburstComponent::ProtostellarFuOri, "FU Ori protostellar"),
+            (OutburstComponent::V1647Ori, "V1647 Ori"),
+            (OutburstComponent::DiscFuOri, "FU Ori disc"),
+        ];
+        for pair in cuts.windows(2) {
+            let (a, b) = (pair[0], pair[1]);
+            let middle = f64::midpoint(a, b);
+            let pieces: u32 = if centres
+                .iter()
+                .any(|&c| (c - half..c + half).contains(&middle))
+            {
+                100
+            } else {
+                1
+            };
+            for k in 0..pieces {
+                let lo = a + (b - a) * f64::from(k) / f64::from(pieces);
+                let hi = a + (b - a) * f64::from(k + 1) / f64::from(pieces);
+                let w = weight(ages, lo, hi);
+                if w <= 0.0 {
+                    continue;
+                }
+                let age = Years::new(f64::midpoint(lo, hi));
+                for (component, label) in labels {
+                    let per_year = rates.component_rate_at_age(component, age).value()
+                        * SECONDS_PER_JULIAN_YEAR;
+                    t.add(label, per_year * w);
+                }
+            }
+        }
+    }
+
+    /// The galaxy-wide FU Orionis onsets a year at Milky Way values (P06.T28.d, the parent's
+    /// galaxy-wide test, with plan 06's ruling of 2026-10-15 in place of its 240–830 a year), from
+    /// each component's system count × its population's band share × the band's mean onsets a
+    /// year ([`observe_fu_orionis_onsets`]), 10⁴ primaries a band, every band of every component
+    /// whose ages reach below 16 Myr: FU Ori onsets (protostellar and disc) 140–1,000 a year;
+    /// onsets of both classes 650–4,500; and protostellar onsets per protostar, from the same
+    /// weights, (`t_c` ÷ `t_p`) ÷ 438 + (1 − `t_c` ÷ `t_p`) ÷ 1,741 = 1.075 × 10⁻³ a year within
+    /// 5%, with the FU Ori share of them 18.6% within 5% of itself.
+    #[test]
+    #[ignore = "slow: 1.5 × 10⁵ young primaries (4.2 s under slow-test)"]
+    fn fu_orionis_onsets_galaxy_wide_at_milky_way_values() {
+        const N: u64 = 10_000;
+        let mut checks = Checks::default();
+        let galaxy = milky_way();
+        let mut total = Tally::default();
+        let mut included = 0;
+        for (i, component) in galaxy.fields().components().iter().enumerate() {
+            let ages = component.ages();
+            let population = component.population();
+            if ages.min().value() >= FU_ORIONIS_YOUNG_YEARS {
+                // None of its stars is young enough to burst: it contributes nothing.
+                assert!(
+                    weight(ages, 0.0, FU_ORIONIS_YOUNG_YEARS) <= 0.0,
+                    "{population:?} component {i}"
+                );
+                continue;
+            }
+            included += 1;
+            for band in MassBand::ALL {
+                let sampling = banded(&galaxy, i, band);
+                let t = tally(
+                    N,
+                    |k| sample_inputs(&galaxy, &sampling, SEED, k),
+                    |inputs, t| observe_fu_orionis_onsets(inputs, ages, t),
+                );
+                #[expect(clippy::cast_precision_loss, reason = "a sample size")]
+                let per_star =
+                    component.count() * galaxy.shares().share(band, population) / N as f64;
+                total.merge(&t.scaled(per_star));
+            }
+            eprintln!(
+                "included {population:?} component {i}, ages from {} yr",
+                ages.min().value()
+            );
+        }
+        assert!(included > 0);
+        let (proto, v1647, disc) = (
+            total.get("FU Ori protostellar"),
+            total.get("V1647 Ori"),
+            total.get("FU Ori disc"),
+        );
+        let protostars = total.get("protostars");
+        eprintln!(
+            "FU Ori protostellar {proto:.1}, V1647 Ori {v1647:.1}, FU Ori disc {disc:.1} onsets a \
+             year; {protostars:.4e} protostars"
+        );
+        checks.within("FU Ori onsets a year", proto + disc, (140.0, 1_000.0));
+        checks.within(
+            "onsets of both classes a year",
+            proto + v1647 + disc,
+            (650.0, 4_500.0),
+        );
+        let per_protostar = 1.075e-3;
+        checks.within(
+            "protostellar onsets a year per protostar",
+            (proto + v1647) / protostars,
+            (0.95 * per_protostar, 1.05 * per_protostar),
+        );
+        checks.within(
+            "the FU Ori share of protostellar onsets",
+            proto / (proto + v1647),
+            (0.95 * 0.186, 1.05 * 0.186),
+        );
+        checks.finish();
+    }
 }
