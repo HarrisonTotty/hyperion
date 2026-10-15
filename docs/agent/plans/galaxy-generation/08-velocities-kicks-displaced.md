@@ -163,7 +163,14 @@ pub mod kick_bins { pub fn speed_bin_shares(law: &StandardKickLaw, m: SolarMasse
                     comp: &Composition, scales: &GalaxyScales, source: BirthSource)
                     -> KickBinShares; }   // by remnant kind and mode (as built, P08.T8.b)
 pub fn explosion_site(galaxy: &Galaxy, record: &SystemRecord) -> Option<ExplosionSite>;
+pub fn death_in_interval(m0: SolarMasses, composition: &Composition, eta: StandardNormal,
+                         age_at_epoch: Years, draws: impl FnOnce() -> StarDraws)
+                         -> Option<UniverseTime>;   // the interval predicate (as built, P08.T13)
 pub struct ExplosionSite { /* position: GalacticPosition, death: UniverseTime */ }
+impl ExplosionSite { pub const fn new(position: GalacticPosition, death: UniverseTime) -> Self;
+                     pub const fn position(&self) -> &GalacticPosition;
+                     pub const fn death(&self) -> UniverseTime; }
+// site.rs, crate-private: recent_death_claims(galaxy, &site, &record) -> bool, false until P09.T35
 ```
 
 ### `hyperion_sim::galaxy::placement` (extended)
@@ -1158,7 +1165,8 @@ form_bound}` bound one class's normalised form over a cell: the layer's radial e
   test build shows no `lifetime` call from layers A to C, at most two per accepted layer-E record,
   and calls for under a tenth of layer-D records at `sunlike_point`; layer E's living share and its
   mass histogram at `sunlike_point` match the class table by chi-square at the 1% level (the check
-  on Design note 19's rescaling).
+  on Design note 19's rescaling). (P08.T13 as built: pass the lifetime to `death_in_interval`'s
+  exact step; the call count includes it.)
 - **P08.T12.d Class velocities and the unbound.** `draw_velocity` for displaced records per Design
   notes 22 and 23. Tests: per class, sampled mean rotation and dispersions match the table × v_c;
   the slowest class co-rotates (above 0.95 v_c) and the fastest has a negative mean; in ballistic
@@ -1171,7 +1179,8 @@ form_bound}` bound one class's normalised form over a cell: the layer's radial e
   `no_velocity_reaches_its_padding_speed` keeps `PAD_SPEED` for every record of a non-exempt class.
   `every_exempt_class_is_padded` (fast, from the class table alone) checks that every class exempt
   from the escape cut with weight in a band belongs to a layer where `escape_cut_holds` is false.
-  P08.T17's debug assertion holds every draw in the task's tests.
+  P08.T17's debug assertion holds every draw in the task's tests. (P08.T13 as built: the ballistic
+  test of `explosion_site`, moved here.)
 
 **Files.** `galaxy/displaced/mod.rs`, `galaxy/shares.rs`, `galaxy/fields/mod.rs`, `galaxy/map.rs`,
 `galaxy/placement.rs`, `galaxy/query.rs`, `galaxy/kinematics/draw.rs`, `stellar/system.rs`,
@@ -1190,20 +1199,31 @@ last). The switch waits for plan 15's production `tables::displaced_forms`; see
 
 ### P08.T13 The explosion-site hook
 
+**Built** (2026-10-15, before P08.T12 and for field records; no output moves): see "P08.T13 as
+built" under [Risks](#risks-and-open-points).
+
 **Build.** `displaced::explosion_site(galaxy, record)`: `None` unless the primary's death time T
-lies in (−(W_cap + L + H), +H], with W_cap the constant plan 09 will own (4 Myr here, as
-`SHELL_WINDOW_CAP`); otherwise the site x + v T by straight line and T. Plan 03's
-`catalogue_claims(galaxy, &record)` is changed to compute the site for every layer-E record, field
-or displaced, and pass it to a function `recent_death_claims(galaxy, &site, &record) -> bool` that
-returns `false`. Plan 09 replaces that body with its `claims`. No output changes.
+lies in (−(W_cap + L + H), +H], with W_cap plan 09's `galaxy::snr::SHELL_WINDOW_CAP` (4 Myr,
+P09.T15.b), which plan 08 imports and does not define; otherwise the site x + v T by straight line
+and T. T is `SystemStars::death_time()`'s T, which P09.T17's `DeathMarks::of` also reads, and it is
+found by the interval predicate `displaced::death_in_interval` on the primary's own marks, in three
+tiers: the mass bracket, the fate table, the exact lifetime (Design note 28's 5 µs `lifetime` does
+not hold as built). Plan 03's `catalogue_claims(galaxy, &record)`, which is asked for stellar
+records only (P13.T3.c), is changed to compute the site for every layer-E record, field or
+displaced, and for no other layer, and pass it to a function
+`recent_death_claims(galaxy, &site, &record) -> bool` that returns `false`. Plan 09 replaces that
+body with its `claims`. No output changes.
 
-**Files.** `galaxy/displaced/site.rs`, `galaxy/placement.rs`.
+**Files.** `galaxy/displaced/site.rs`, `galaxy/displaced/mod.rs`, `galaxy/placement/candidate.rs`
+(the hook), `galaxy/placement/resolve.rs` (the resolve seam), `stellar/system.rs` (the death's
+clock conversion and the track mass).
 
-**Tests.** For a ballistic displaced record the site is in the midplane and within the young disc's
-radial range; for a field record dying at T = +500 yr the site is x + v T; for a record dead 10 Myr
+**Tests.** For a field record dying at T = +500 yr the site is x + v T; for a record dead 10 Myr
 the site is `None`; the hook is called exactly once per accepted layer-E candidate (counted in a
 test build); with a test-only `claims` that says yes, `resolve` returns `NoSuchSystem` for the
-record on both sides of T.
+record. `resolve` and `evaluate_candidate` take no time, so that holds on both sides of T by
+construction. The ballistic displaced record's test (its site in the midplane and within the young
+disc's radial range) is P08.T12.d's, since no displaced record exists before P08.T12.
 
 **Acceptance.** Tests pass; goldens unchanged.
 
@@ -1555,3 +1575,202 @@ CODE_Q`), and 0 above, the binary engine's own ratios (`stellar::binary::{GAP_Q,
     10⁻¹⁶ a record. It was left so: the check is on the velocity that moves the record.
   - `no_velocity_reaches_its_padding_speed` also passes every record through `epoch_velocity`, so
     the debug assertion runs over its 10⁶ records. The slow-test profile keeps debug assertions.
+- **P08.T13 as built (2026-10-15, issue #19, at `GENERATOR_VERSION` 22; no output moves).**
+  - **Deviation: built before P08.T12** (main's ruling, 2026-10-15; no output moves).
+    The order line puts T13 after T12. T12 waits on P15.T6's production `displaced_forms` and the
+    version-26 batch. T13 waits on nothing and gates plan 09's catalogue chain, so it was built
+    first, for field records, which is every layer-E record at `GENERATOR_VERSION` 22. It reads the
+    record only through the seams T12 changes (`primary_initial_mass`, `age_at_epoch`,
+    `draw_metallicity`, `primary_eta`, `primary_draws`, `epoch_velocity`). So T12's records reach
+    it unchanged, and x + v T with T = −s backs a displaced remnant out to its birth site (Design
+    note 22). T12 inherits five things:
+    1. The ballistic test, moved to P08.T12.d: in the ballistic classes `explosion_site`'s position
+       lies within 1 ly of the midplane and inside the young disc's radial range.
+    2. After the switch, re-running T13's tests, with displaced and living layer-E records in the
+       agreement test's sample.
+    3. T12.c's count of `lifetime` calls, at most two per accepted layer-E record, includes the
+       interval predicate's exact step. T12.c passes the predicate the lifetime it already computes
+       rather than calling it again.
+    4. T12.b's restructured `evaluate_candidate` still calls the hook once per accepted layer-E
+       candidate, after the marks. T13's count test checks it.
+    5. If T12 changes how a layer-E record's death is found (Design note 28's stored time since
+       death, say), every side still decides the interval through the one predicate,
+       `death_in_interval`. It changes in the same commit as all its callers.
+  - **Deviation: `explosion_site` reads the record's marks lazily.** It calls the predicate's
+    private core, `site::decide`, which `death_in_interval` also is, with the record's
+    `draw_metallicity`, `primary_eta` and `primary_draws` each made on its first read (`Marks`,
+    of `std::cell::LazyCell`s), rather than calling `death_in_interval` with the metallicity and η
+    drawn first. A grid
+    record's metallicity draw gives no helium excess, so the mass bracket asks it nothing (a debug
+    assertion checks the draw wherever it is read), and a record the bracket decides opens no
+    stream. The tiers, their inputs and their order are the same, so every side still decides by one
+    function. Measured in a release build over the 39 records of `cell_by_layer`'s layer-E cell, at
+    load 3–9 against `math::exp`'s 7.2–7.7 ns: drawn first, the metallicity and η cost 177 ns a
+    record, three quarters of the hook's 235 ns, about a tenth of the cell; drawn lazily the hook
+    costs 67 ns a record, about 3% of the cell, nearly all of it the bracket's two clock
+    conversions.
+  - **Deviation: placement reads more of the stellar stage, and before P08.T12.c.** For every
+    accepted layer-E record plan 03's hook reads `LifetimeBracket::shared()`; where the bracket
+    leaves the answer open it also calls `draw_metallicity`, `primary_eta`,
+    `FittedFates::fate_fitted`, `stripped_mark_matters` with `primary_draws` (inside
+    `STRIPPED_WINDOW`) and `stellar::lifetime`. That goes beyond Design note 19's "nothing else of
+    the stellar stage but `draw_metallicity`" and the Risks' "for `lifetime` and
+    `draw_metallicity` only", and it comes before T12.c and without its bump, since no output
+    moves. The reason is the interval predicate (main's ruling, 2026-10-15). Layers A to D call
+    none of it, and at the benches' centre the bracket decides every record.
+  - **The API.** `galaxy::displaced::{ExplosionSite, explosion_site, death_in_interval}`, all in
+    `galaxy/displaced/site.rs`, as the Provides block gives them. `ExplosionSite` derives
+    `Debug, Clone, Copy, PartialEq`, since `GalacticPosition` derives no more. `death_in_interval`
+    calls `draws` at most once and debug-asserts its η. The stub `recent_death_claims` is
+    `pub(crate)` in `site.rs` and answers `false`. `stellar::system` gains two crate-private
+    helpers: `clock_time_of_death(age_at_epoch, death_age) -> Option<UniverseTime>`, the
+    conversion `clock_death` now calls (no change in behaviour), and `track_mass_of(m0)`, which
+    `StarModel::track_mass` now calls. The interval
+    opens at −134,534,593,094,400 s (`SHELL_WINDOW_CAP` + L + H, 4,263,144 Julian years, as
+    `type_ia::before_interval` has it), exclusive, and closes at `ClockWindow::END`, inclusive.
+  - **The interval predicate.** Three tiers, cheapest first; each brackets the exact death age, and
+    the first whose bracket lies wholly outside the interval answers `None`. (1) The mass bracket,
+    `marks::LifetimeBracket::shared().bracket(m0)`, which reads no draw; `None` outside 2.5–150 M☉,
+    and skipped for a composition with a helium excess. (2) The fate table,
+    `FittedFates::generator().fate_fitted(m0, composition, eta)`, where it answers and
+    `stripped_mark_matters` is false (the draws are read for that only inside
+    `fates::STRIPPED_WINDOW`): the bracket is [d ÷ (1 + m), d ÷ (1 − m)] with m =
+    max(`STATED_FACTOR` × the death age's bound, `DEAD_MARGIN_FLOOR`) = max(3 b, 3 × 10⁻³), since
+    the table's bound is relative to the exact value (`hyperion-fit`'s `stellar_fates::error`,
+    column 0). (3) `stellar::lifetime` at `track_mass_of(m0)`, the composition and the full draws,
+    and T its conversion, `death_time()`'s bit for bit. Every comparison is in `UniverseTime`, each
+    bracket end converted by `clock_time_of_death`, which is non-decreasing in the death age; an
+    end the clock cannot hold lies beyond the interval on its own side. Below 0.1 M☉ the answer is
+    `None` with no tier. **Standing** (main's ruling, 2026-10-15): the bounds are validated, not
+    proved (plan 06's record for the table, P08.T9.d's 10⁵-star test for the bracket), so the
+    carve-out's correctness rests not on them but on every side deciding by this one function on
+    the same marks; a failed bound costs a shell, never a double count.
+  - **Tiers' shares of the verdicts.** The soundness test, 300 primaries at 11 ages each: mass
+    bracket 600 (18.2%), fate table 482 (14.6%), exact 2,218 (67.2%, 900 inside); its slow form,
+    10⁴ primaries: bracket 20,000 (18.2%), table 16,216 (14.7%), exact 73,784 (67.1%, 30,000
+    inside). The agreement test: its 200 real records all the bracket's, none with a
+    site; its 132 re-aged records, bracket 24 (18.2%), table 20 (15.2%), exact 88 (66.7%, 36
+    inside, each `death_time()`'s T bit for bit). At the benches' centre every verdict is the
+    bracket's: the 39 records of `cell_by_layer`'s layer-E cell and the 283 layer-E records of
+    `range_50ly_cold`'s 1,732 cells
+    (`the_hook_gives_one_verdict_per_layer_e_record_at_the_benches_centre`). So no record there
+    reads the table, its draws or `lifetime`.
+  - **Soundness.** 300 primaries (m₀ log-uniform on 8–150 M☉, every third on 8–11; \[Fe/H\] over
+    Z 10⁻⁴–0.03 with one in thirty below and one in thirty above; synthetic IDs' draws, one in fifty
+    at η ±2.4, ±3 or ±4) at 11 ages each: the interval's ends and a second inside them, its middle,
+    and outside by ½ m d, 2 m d and twice the bracket's width on each side. No death in the interval
+    is dropped; the slow test's 10⁴ primaries drop none either, which bounds the rate below 3 ×
+    10⁻⁴ per death in the interval at 95%.
+  - **The seam the tests use.** `placement/candidate.rs`: `catalogue_claims` is
+    `claims_with(galaxy, record, explosion_site, recent_death_claims)`, and `claims_with` takes the
+    site and the claim as closures and asks neither outside layer E; `catalogue_claims`,
+    `claims_with` and `evaluate_with_hook` are `pub(super)`. `placement/resolve.rs`:
+    `resolve_candidate` is `resolve_candidate_with(galaxy, key, index, catalogue_claims)`. The
+    tiers' counts are a thread-local `Verdicts` under `cfg(test)` (`site::take_verdicts`). No
+    hidden state otherwise.
+  - **Tests** (nextest, one at a time, the test profile, load 4–7, beside another lane's gate):
+    `site.rs`: `the_interval_is_open_below_and_closed_above` (0.01 s),
+    `a_bracket_decides_only_from_one_side` (0.01 s), `death_in_interval_keeps_every_death_inside_the_interval` (1.2 s),
+    `a_helium_excess_skips_the_mass_bracket` (0.01 s: with a helium excess the bracket and the
+    table both decline and the exact tier decides, from one read of the draws),
+    `the_draws_are_made_once_and_only_where_needed` (1.3 s, most of it the bracket's first read),
+    `explosion_sites_are_where_the_records_move_and_agree_with_the_stellar_stage` (12.3 s, on the
+    fixture with its kinematic tables: the +500 yr site, x + v T to 4 m and `query::position_at`'s
+    position at T bit for bit; the record dead 10 Myr; the agreement test, whose sampled records
+    all draw a zero helium excess, the premise of the bracket's not reading it; the agreement
+    test's real and re-aged records through `assert_order_independent`; and a site that is the
+    same through `resolve`, `generate_cell` and a direct call, a 8.37 M☉ record of cell
+    (160, 203, 0) that died 3,183,180 yr ago some 2,140 ly from its epoch position), and
+    `the_hook_gives_one_verdict_per_layer_e_record_at_the_benches_centre` (3.0 s); slow,
+    `death_in_interval_keeps_every_death_inside_the_interval_over_ten_thousand_primaries`
+    (11.8 s alone, the slow-test profile, capped, load 5–7). `candidate.rs`:
+    `hook_asks_for_a_site_once_per_accepted_layer_e_candidate` (2.0 s; 160 layer-E cells and two
+    of each other layer). `resolve.rs`: `resolve_refuses_a_record_whose_recent_death_is_claimed`
+    (2.6 s; a 46.7 M☉ record of layer-E cell (200, 203, 0), candidate 5, dying 2,491,488.5 yr
+    before the epoch, in a fixture without kinematic tables, so its site is its epoch position,
+    and the same site from a second galaxy of the seed). "On both sides of T" is read as the
+    outcome's independence of time: neither `resolve` nor the candidate's evaluation takes one.
+  - **Costs** (i7-8665U, 4 cores and 8 threads, shared with other lanes; Criterion's defaults; the
+    base's bench binaries built before the change and the branch's after, alternated, capped).
+    `cell_by_layer (E, Sun-like point)`: base 44.4–49.8 µs in five rounds at load 2–6 (median
+    44.7) and 75.6 µs in one at load 7, branch 45.4–50.5 µs in six (median 46.0), so +1–4%, the
+    quietest pair 44.4 against 45.4 µs. `range_50ly_cold`: base 4.90–4.99 ms in three rounds at
+    load 2–6, branch 4.93–5.01 ms (+0.5–1%), and one branch round at 7.35 ms under a spike of
+    load. Both bench galaxies have no kinematic tables, and every verdict at their centre is the
+    bracket's, so the benches see tier 1 alone; no layer-E record there takes the exact route.
+    Before the marks were made lazy the hook cost about a tenth of the cell (the measurement in the
+    deviation above), which that version's A/B rounds, at load 3–7, were too noisy to show; its
+    query rounds were 8.87 and 5.63 ms against the base's 9.16 and 5.68.
+    `LifetimeBracket::shared()`'s first read: 0.70 s in a release build, timed once in a process
+    of its own. The fast suite, `cargo nextest run -p hyperion-sim` at 4 threads, capped, one run
+    after the other at load 3.5–4.6: base 1,512 s for 3,116 tests, branch 1,690 s for 3,125
+    (+11.7%). The tests' summed time rose 9.6%, 4,821 to 5,284 s, plus 18 s for the new tests:
+    the census-heavy `sky` tests by up to two thirds
+    (`a_census_by_ray_lists_every_star_within_its_radii_and_none_beyond_its_cells` 51.6 to
+    84.8 s), and the rest, about 170 s over 2,798 tests, most likely through the bracket's first
+    read, which every test process that places a layer-E record now pays.
+  - **The ballistic test** (a ballistic displaced record's site in the midplane and within the
+    young disc's radial range) is P08.T12.d's, since no displaced record exists before P08.T12.
+  - **Requirement on plan 09.**
+
+    > **From P08.T13: the interval predicate is part of the one shared test** (main's ruling,
+    > 2026-10-15).
+    >
+    > Plan 08's `displaced::death_in_interval(m0, &composition, eta, age_at_epoch, draws)` decides
+    > whether a primary's death falls in (−(`SHELL_WINDOW_CAP` + L + H), +H]. It decides in three
+    > tiers: plan 08's `LifetimeBracket`, then the fate table at the range brief's margin, then the
+    > exact `lifetime`. Its `None`s rest on validated bounds, not proved ones. So:
+    >
+    > 1. **Every side calls it.** That means:
+    >    - the grid's `catalogue_claims`, through `explosion_site`;
+    >    - P09.T33.a's field candidates;
+    >    - T33.b's runaways and walkaways;
+    >    - T36.a–b's members and the centre's.
+    >
+    >    Each calls `death_in_interval` on its own candidate's primary marks. It keeps an entry only if
+    >    that is `Some` and `claims` is true. No side tests T against the interval by any other route.
+    >    A catalogue candidate whose T was drawn inside the interval, but which the tiers put outside,
+    >    is dropped, because the grid keeps that system.
+    >
+    > 2. **The inputs belong to the version.** From T35's bump on, the predicate's inputs are
+    >    generator-version items: the fate tables, `LifetimeBracket` and its widening, and
+    >    `STATED_FACTOR` and `DEAD_MARGIN_FLOOR`. A change to any of them is a bump, and re-runs
+    >    P08.T13's soundness tests.
+    > 3. **A failed bound costs a shell, never a double count:** the system stays on the grid without a
+    >    shell. P08.T13's slow test bounds the rate below 3 × 10⁻⁴ per death in the interval: at 95%,
+    >    about two of the Milky Way's roughly 7,000 shells. P09.T38 records the measured figure beside
+    >    the shell counts.
+    > 4. **P09.T38 tests the reject path.** Its complementarity test includes the predicate's reject
+    >    path, forced through a test-only margin, and checks that both sides agree there.
+    > 5. **The same rule binds P09.T43.** Its prefilter on the record alone binds its catalogue side in
+    >    the same way.
+
+    (It binds P09.T33.a, P09.T33.b, P09.T35, P09.T36.a, P09.T36.b, P09.T38 and P09.T43; main
+    carries it into plan 09.)
+
+- **Deferred findings (2026-10-13 rule) (P08.T13).**
+  - Design note 28's 5 µs `lifetime` does not hold: plan 06 measures 0.49–0.95 ms for a layer-E
+    star (P06.T32), and only the fate table meets 5 µs. T13's tiers keep `lifetime` off the cold
+    query; the note's own lever and P08.T16's bench are where it is to be settled.
+  - P08.T12.c should share T13's death time rather than call `lifetime` a third time per layer-E
+    record (note 28's "at most two"): pass the lifetime it computes to `site::decide`'s exact step.
+  - `FittedFates::lifetime_bracket` and the range brief's dead test widen the fitted age as d (1 ±
+    m). A bound relative to the exact value implies [d ÷ (1 + m), d ÷ (1 − m)]. The difference is
+    second order in m and covered by `STATED_FACTOR`. For plan 06.
+  - `LifetimeBracket::shared()`'s first read, 0.70 s in a release build, now falls on the first
+    layer-E cell of every process, the server's first query included. For the server (warm it at
+    start) or for a baked table.
+  - The exact tier runs for every layer-E record whose death falls in the interval or whose
+    brackets leave it open. Counted over the Milky Way fixture's layer-E cells (seed
+    `0x0311_0000_0000_0000`): 5 of 65,491 records in 2,048 cells around the Sun (2 inside), 3,206
+    of 9.7 × 10⁶ in 128 cells at the centre (1,897 inside), but 17 of 3,365 in 64 cells on the
+    young arm ridge at (−17,000, −19,700) ly (11 inside), one record in 200. At 0.5–1 ms a
+    lifetime that is 2.5–5 µs a record on average on the ridge, several times a record's own
+    placement, and it is what slows the census-heavy `sky` tests. Until P09.T35 the stub discards
+    the site, so there it is pure cost; from then on P09.T35's `SystemStars` for each such record
+    costs more. A bit-exact T cannot be had without it. For P09.T35, and for P08.T16 to bench a
+    query on an arm ridge as well as at `sunlike_point`, where no record takes the exact route.
+  - The site is x + v T along a straight line in the galactic frame, so a field record's site
+    leaves its circular orbit by about R θ² ÷ 2, θ = v T ÷ R: some 90 ly at the solar circle for a
+    death 3 Myr ago, 5 ly for one 0.75 Myr ago. Design note 22 asks for the straight line; whether
+    plan 09's shell test wants the orbit is for plan 09.
