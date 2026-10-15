@@ -15,8 +15,9 @@ Usage (from the integration branch's checkout):
                                     check it shows a pass on HEAD's tree. Push in a separate step.
     land_issue.py close N [--note-file F] [--dry-run]
                                     Once every lane commit is on the pushed integration branch:
-                                    comment what landed, close the issue and move its card to
-                                    landed. --dry-run prints the closing comment.
+                                    comment what landed (begun with the orchestrator's tag), close
+                                    the issue and move its card to landed. --dry-run prints the
+                                    closing comment.
 
 Exit codes: 0 done; 1 a check failed or a step stopped; 2 usage; 3 untrusted.
 Standard library only; Python 3.9+, run as `python3 -I`. Tests: test_land_issue.py beside this.
@@ -224,7 +225,9 @@ def cmd_close(ctx: gc.Ctx, number: int, note: str, dry_run: bool, given_lane: st
     if note.strip():
         lines.append("\n" + note.strip())
     lines.append(f"\nClosing. `{lane}` may be deleted.")
-    body = "\n".join(lines) + "\n\n" + gc.make_marker("landed", {"commits": [new for _, new, _ in landed if new]})
+    # The worker reads only the comments that begin with the orchestrator's tag.
+    body = (gc.tagged(cfg, "orchestrator", "\n".join(lines)) + "\n\n"
+            + gc.make_marker("landed", {"commits": [new for _, new, _ in landed if new]}))
     bad = gc.errors(gc.hygiene(body, cfg))
     if bad:
         for finding in bad:

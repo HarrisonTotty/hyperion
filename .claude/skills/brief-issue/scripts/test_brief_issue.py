@@ -141,6 +141,7 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(self.fake.label_names(1), ["agent-task", "plan:R10", "area:sky"])
         self.assertEqual(issue["milestone"], {"title": "RM5 Generated worlds (R09, R10)"})
         self.assertEqual(gc.brief_meta(gc.issue_from(issue), self.cfg)["slug"], "r10-t13")
+        self.assertTrue(issue["body"].startswith("## Task: R10.T13 Guide drafts\n"))  # a body carries no tag
         self.assertEqual(self.fake.status_of(1), "Todo")
         self.assertIn("posted: https://github.com/owner/repo/issues/1", out)
 
@@ -156,7 +157,9 @@ class BriefTests(unittest.TestCase):
         self.fake.add_comment(4, gc.make_marker("claim", {"worker": "w-a", "nonce": "1"}))
         answer = self.box.dir / "answer.md"
         answer.write_text("Ruling: use the first table.\n", encoding="utf-8")
-        self.assertEqual(run(self.ctx, "answer", "4", "--body-file", str(answer), "--requeue", "--dry-run")[0], 0)
+        code, out, _ = run(self.ctx, "answer", "4", "--body-file", str(answer), "--requeue", "--dry-run")
+        self.assertEqual(code, 0)
+        self.assertIn("\n[desk] Ruling: use the first table.\n", out)
         self.assertEqual(self.fake.writes(), [])
         code, _, err = run(self.ctx, "answer", "4", "--body-file", str(answer), "--requeue")
         self.assertEqual(code, 0, err)
@@ -164,6 +167,15 @@ class BriefTests(unittest.TestCase):
         self.assertEqual(issue.labels, ["agent-task"])
         self.assertIsNone(gc.winning_claim(issue, self.cfg))
         self.assertEqual(self.fake.status_of(4), "Todo")
+        # The worker reads only comments that begin with the orchestrator's tag; the marker stays.
+        posted = issue.comments[-1].body
+        self.assertTrue(posted.startswith("[desk] Ruling: use the first table."), posted)
+        self.assertEqual(issue.comments[-1].markers(), [("answer", {"requeue": True})])
+        answer.write_text("## Ruling\n\nUse the first table.\n", encoding="utf-8")
+        self.assertEqual(run(self.ctx, "answer", "4", "--body-file", str(answer))[0], 0)
+        posted = gc.fetch_issue(self.ctx.gh, 4).comments[-1].body
+        self.assertTrue(posted.startswith("[desk]\n\n## Ruling\n"), posted)  # the heading still renders
+        self.assertEqual(gc.find_markers(posted), [("answer", {"requeue": False})])
         self.fake.add_issue(5, author="mallory")
         self.assertEqual(run(self.ctx, "answer", "5", "--body-file", str(answer))[0], gc.EXIT_UNTRUSTED)
         answer.write_text("See .git/rm45-orchestration/decision.md for the ruling.\n", encoding="utf-8")

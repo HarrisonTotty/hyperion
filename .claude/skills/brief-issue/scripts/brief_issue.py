@@ -17,7 +17,9 @@ Usage (from the repository root):
                                     Check, then open the issue with the task label and put it on
                                     the board as queued. --dry-run prints it and posts nothing.
     brief_issue.py answer N --body-file F [--requeue] [--dry-run]
-                                    Comment an answer or amendment on a brief; --requeue also
+                                    Comment an answer or amendment on a brief, begun with the
+                                    orchestrator's tag (the posted brief's body carries none, as
+                                    the task label and its marker identify it); --requeue also
                                     removes its state labels (claimed, done, blocked) so that a
                                     worker takes it again, continuing from the pushed lane.
     brief_issue.py setup-labels [--dry-run]
@@ -274,10 +276,11 @@ def answer(ctx: gc.Ctx, number: int, text: str, requeue: bool, dry_run: bool) ->
     cfg, gh = ctx.cfg, ctx.gh
     issue = gc.fetch_issue(gh, number)
     gc.require_trusted(issue, cfg)
-    bad = gc.errors(gc.hygiene(text, cfg, kind="brief"))  # an answer amends the brief
+    # The worker reads only the comments that begin with the orchestrator's tag.
+    body = gc.tagged(cfg, "orchestrator", text) + "\n\n" + gc.make_marker("answer", {"requeue": requeue})
+    bad = gc.errors(gc.hygiene(body, cfg, kind="brief"))  # an answer amends the brief
     if bad:
         return print_findings(bad)
-    body = text.rstrip() + "\n\n" + gc.make_marker("answer", {"requeue": requeue})
     remove = [lab for lab in gc.state_labels(cfg) if issue.has(lab)]
     if dry_run:
         print(f"DRY RUN: nothing posted. Would comment on #{number}"

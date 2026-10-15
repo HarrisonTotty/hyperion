@@ -5,10 +5,10 @@ Usage (from the repository's clone):
     survey_issues.py [--since T|last] [--mark] [--json]
 
 It lists the open briefs by state (queued, claimed, done and awaiting landing, blocked), with
-each claim's worker and age and the claims that look stale; the briefs closed since T; the new
-comments since T (those of other accounts by count only, as untrusted); the coordination log's
-status posts since T; and anomalies: briefs by accounts that are not allowed, conflicting state
-labels, done briefs whose lane branch is missing.
+each claim's worker and age and the claims that look stale; the briefs closed at or after T (by
+their closing time, not its day); the new comments since T (those of other accounts by count
+only, as untrusted); the coordination log's status posts since T; and anomalies: briefs by
+accounts that are not allowed, conflicting state labels, done briefs whose lane branch is missing.
 
 T is a time (`2026-10-13T20:00:00Z`, `2026-10-13`), a span back from now (`90m`, `6h`, `2d`), or
 `last` (the default): the time saved by the last `--mark`, else 24 hours ago. --mark saves the
@@ -57,12 +57,19 @@ def lane_heads(ctx: gc.Ctx) -> Dict[str, str]:
     return heads
 
 
-def first_line(text: str, width: int = 100) -> str:
+def first_line(text: str, width: int = 100, tags: Sequence[str] = ()) -> str:
+    """The first line of text, with a side's tag on a line of its own joined to the next line."""
+    lead = ""
     for line in gc.strip_markers(text).splitlines():
-        if line.strip():
-            line = line.strip()
-            return line if len(line) <= width else line[:width - 1] + "…"
-    return ""
+        line = line.strip()
+        if not line:
+            continue
+        if not lead and line in tags:
+            lead = line + " "
+            continue
+        line = lead + line
+        return line if len(line) <= width else line[:width - 1] + "…"
+    return lead.strip()
 
 
 def survey(ctx: gc.Ctx, since: datetime) -> Dict[str, Any]:
@@ -71,6 +78,7 @@ def survey(ctx: gc.Ctx, since: datetime) -> Dict[str, Any]:
     labels = cfg["labels"]
     allowed = set(cfg["allowed_authors"])
     stale_after = timedelta(hours=float(cfg["survey"].get("stale_claim_hours", 24)))
+    tags = [gc.side_tag(cfg, role) for role in ("orchestrator", "worker")]
     heads = lane_heads(ctx)
     groups: Dict[str, List[Dict[str, Any]]] = {"queued": [], "claimed": [], "done": [], "blocked": []}
     comments: List[Dict[str, Any]] = []
@@ -101,7 +109,7 @@ def survey(ctx: gc.Ctx, since: datetime) -> Dict[str, Any]:
         entry["board"] = gc.board_key(issue, cfg)
         if "blocked" in held:
             report = gc.last_report(issue, cfg)
-            entry["question"] = first_line(report[0].body if report else "")
+            entry["question"] = first_line(report[0].body if report else "", tags=tags)
             state = "blocked"
         elif "done" in held:
             if not entry["lane_head"]:
@@ -132,11 +140,16 @@ def survey(ctx: gc.Ctx, since: datetime) -> Dict[str, Any]:
             if item["trusted"]:
                 kinds = [k for k, _ in comment.markers()]
                 item["kind"] = kinds[0] if kinds else "comment"
-                item["text"] = first_line(comment.body)
+                item["text"] = first_line(comment.body, tags=tags)
             comments.append(item)
-    closed = [{"number": i.number, "title": i.title}
-              for i in gc.list_task_issues(gh, cfg, state="closed", search=f"closed:>={gc.iso(since)[:10]}")
-              if not gc.trust_check(i, cfg, require_open=False)]
+    # The search's date is only a coarse pre-filter, a day early whatever zone the search reads it
+    # in; each issue's own closing time decides, so that one closed earlier the same day stays out.
+    after = gc.iso(since - timedelta(days=1))[:10]
+    closed: List[Dict[str, Any]] = []
+    for i in gc.list_task_issues(gh, cfg, state="closed", search=f"closed:>={after}"):
+        at = i.closed or i.updated  # a closed issue was last updated no earlier than it closed
+        if at >= since and not gc.trust_check(i, cfg, require_open=False):
+            closed.append({"number": i.number, "title": i.title, "at": gc.iso(at)})
     log: Dict[str, Any] = {}
     if gc.discussion_number(cfg):
         try:
