@@ -7,5 +7,8 @@
 //! note 14).
 //!
 //! - [`flares`]: the flares of stars with convective envelopes, Poisson bins of a day (P06.T28.a).
+//! - [`glitches`]: pulsar glitches, Crab-like on Poisson bins of 30 days and Vela-like on a
+//!   monotone phase (P06.T28.b).
 
 pub mod flares;
+pub mod glitches;
