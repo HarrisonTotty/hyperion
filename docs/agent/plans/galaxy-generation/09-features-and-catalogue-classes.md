@@ -1142,6 +1142,9 @@ target about 10 ms.
   bins. Both tags are registered in `event_tags!` here, inside plan 06's block for this plan. Tests:
   the same events in any order of asking; 0.06–0.2 disruptions expected in ±H and about 26 in the
   horizon at Milky Way values; about 365 flares a year.
+
+  _Done (issue #20, 2026-10-15, at `GENERATOR_VERSION` 22): see Risks, "P09.T30.a as built"._
+
 - **P09.T30.b Victims and luminosity.** Each disruption inside the source horizon has a victim, a
   feature-level member of class `TIDAL_DISRUPTION_VICTIM`, first in the centre's list order, on a
   near-parabolic orbit whose pericentre passage is the event time; its mass is drawn from the
@@ -2656,3 +2659,227 @@ resolve_centre_member, resolve_centre_member_with}` and `CENTRE_GRID_{WIDTH,CELL
     a query returns without any golden failing. A small golden of the shared open cluster's query
     hits, all layers and band C alone at −600 years, would pin them: a new label at the version in
     force, with no bump. This task adds no golden, by its brief.
+- **P09.T30.a as built (issue #20, lane `lane/20-p09-t30a-bh-events`, 2026-10-15, at
+  `GENERATOR_VERSION` 22).** No output moves and there is no bump (the bump plan after 22, ruled
+  2026-10-14: "P09.T30.a | No (new event tags) | No bump"): the task adds two event tags and the
+  kinds on them and changes nothing that existed. `rng/tags` gains exactly two lines at its end, and
+  `galaxy/features/centre_events` is a new golden at header 22. Files:
+  `galaxy/features/centre/events/{mod,flares,disruptions}.rs`, `centre/mod.rs` (the module
+  declaration and one line of its doc), `rng/tags.rs`, `id/event_tags.rs`. Nothing reads the events
+  yet; P09.T30.b and plan 12 will.
+  - _API._ `features::centre::events::subject() -> EventSubject`, the black hole's own ID (Design
+    note 23).
+    - Flares: `CentreFlareModel::{new(seed), of(&Galaxy), series(), listed_rate()}`, a `RateModel`
+      whose bound and rate are both 1.1 a day; `CentreFlare` (`Copy`) with `id`, `onset`, `end`,
+      `duration` (a `Span`), `duration_seconds`, `mean_luminosity_watts`, `energy_joules`,
+      `peak_luminosity_watts`, `is_active_at(t)` and `luminosity_watts_at(t)`;
+      `flares(&model, window, out)`, `flares_active_at(&model, t, out)` (the look-back's onsets
+      filtered by duration) and `flare(&model, id) -> Option<CentreFlare>`;
+      `flares::peak_over_mean()`; and the constants of `flares`: `BIN_SECONDS`, `LOOK_BACK_BINS`,
+      `RATE_PER_DAY`, `MIN_MEAN_LUMINOSITY_WATTS`, `MAX_MEAN_LUMINOSITY_WATTS`,
+      `LUMINOSITY_SLOPE`, `MIN_DURATION_SECONDS`, `MAX_DURATION_SECONDS`, `DURATION_SLOPE`,
+      `MAX_DURATION` and `MAX_PEAK_LUMINOSITY_WATTS`.
+    - Disruptions: `TidalDisruptionModel`, a `RateModel`, with `new(seed, black_hole_mass)`,
+      `of(&Galaxy)`, `series()`, `black_hole_mass()`, `listed_rate()` and
+      `expected_count(window)` (the rate times the span, in 128-bit nanoseconds). Its `new`
+      returns `BuildTidalDisruptionModelError::InvalidMass` for a mass that is not finite and
+      positive, and `BuildTidalDisruptionModelError::RateAboveBinLimit` for a mass below about
+      0.56 M☉, where a bin's mean would exceed `PoissonBins::MAX_MEAN_PER_BIN` (see the disruption
+      law below); `TidalDisruption` (`Copy`, `Eq`, `Ord`, `Hash`) with `id` and `time`;
+      `tidal_disruptions(&model, window, out)` and `tidal_disruption(&model, id)`;
+      `disruption_rate(mass) -> EventsPerSecond`, equation 27; the constants
+      `disruptions::{BIN_SECONDS, LOOK_BACK_BINS, RATE_AT_PIVOT_PER_YEAR, PIVOT_MASS, MASS_INDEX}`.
+    - The plan's `flares` and `tidal_disruptions` keep their names; `luminosity_at` is T30.b's.
+      Each model is built from its parts (the seed; the seed and the mass), with `of(&Galaxy)`
+      beside it, so that the tests sweep seeds and masses without solving a galaxy's black hole
+      (the brief's lean). `of` reads `galaxy.params().black_hole().mass()`, as `black_hole_of`
+      does. Luminosities are watts and energies joules, the unit in the getter's name; no unit
+      newtype is added.
+    - For plan 12's registry rows (P12.T5.a): the flares' `BIN_SECONDS`, `LOOK_BACK_BINS`,
+      `MAX_DURATION` and `MAX_PEAK_LUMINOSITY_WATTS`, and `CentreFlare::luminosity_watts_at`; the
+      disruptions' bound, duration and light curve are T30.b's.
+  - _The tags_ (the brief's ruling of 2026-10-15, item 4).
+    `CENTRE_EV_FLARE: Event = "centre.ev.flare"` (hash `0xe60651f1fe53aed5`) and
+    `CENTRE_EV_TIDAL_DISRUPTION: Event = "centre.ev.tidal_disruption"` (`0xa1782ed5a9226363`),
+    appended after `SYSTEM_ABUNDANCES` under a "Plan 09, phase 6 (P09.T30.a)" heading; `0x0200 => CENTRE_FLARE` and
+    `0x0201 => TIDAL_DISRUPTION` after `0x0202 => SUPERNOVA` in plan 09's block, so that the
+    registry's order holds. The module doc's parenthetical now reads "(plan 09 registered `0x0202`
+    first, in P09.T19.a, and `0x0200` and `0x0201` after it, in P09.T30.a)". A test pins the block
+    to exactly `0x0200`–`0x0202` with their names, and
+    `plan_09_registers_its_tags_with_their_scopes` covers the two new tags. No `System` tag: a
+    kind's marks come from `BinEvent::marks()`.
+  - _The flare rate_ (ruling item 2). A constant 1.1 a day above a mean unabsorbed 2–10 keV
+    luminosity of 10³⁴ erg/s (Neilsen et al. 2013, ApJ 774, 42, §5: "1.1 (+0.2 −0.1) flares per day
+    above a luminosity of 10³⁴ erg s⁻¹"), 401.775 a Julian year, the same at every time and for
+    every black hole. The threshold is the luminosity law's floor. The plan's "about 365 flares a
+    year" is read as the brainstorm's "about one a day", at the bottom of Neilsen's interval
+    (1.0–1.3 a day): the test asserts 1.1 × 365.25 = 401.775 to 10⁻¹² relative. Bins of 86,400 s,
+    looking back one; a bin's mean is 1.1 and nothing is thinned.
+  - _The flare marks_ (ruling item 3; a deviation from the plan's "power-law energy
+    distribution"). Word 0 is the mean luminosity, dN/dL ∝ L^−1.9 on [10³⁴, 1.925 × 10³⁵] erg/s
+    (Table 2: Γ = −1.9 +0.3 −0.4), and word 1 the duration, dN/dT ∝ T^−0.9 on [400, 8,175] s
+    (Table 2: −0.9 ± 0.2), each by inverse transform of its truncated law, independently. The
+    energy is their product, E = L̄ × T, since the mean luminosity is the fluence over the duration
+    (§3), so the energy distribution is a product of two power laws. The reasons, as ruled: §5's
+    "independence of the flare intensity on duration"; §4.2's correlation coefficients (the fluence
+    with the peak rate ρ ∼ 0.89 and with the duration ∼ 0.54, the peak rate with the duration
+    ∼ 0.27), which independent L̄ and T reproduce; and a rate stated above a luminosity, which an
+    energy-first law cannot hold. The energy-first law is not built. The tops of the two ranges are
+    where §4.3's test of the fits' extrapolation starts, "at our highest bins" (the paper does not
+    call them bin edges), just above the brightest flare's 1.92 × 10³⁵ erg/s (Table 1) and the
+    longest's about 7,800 s (§3); 400 s is a selection limit, "our shortest allowed time" (§3).
+    Scatter added later takes words 2, 3, … in a fixed order.
+    - _Checks of the built law_ against the ruling's figures.
+      `flares::tests::the_law_reproduces_neilsen_et_al_s_figures` computes them from the built
+      constants and asserts the share above 10³⁵ erg/s and its interval, the duty cycle, the energy
+      range, the share above 10³⁸ erg, the peak ratio and the bound; it prints the mean duration
+      and the daily rate above 10³⁸ erg. The Poisson interval and the dN/dE index are the
+      science-checker's, recomputed by hand for this record.
+      - above 10³⁵ erg/s, a share of 0.0603, one flare in 15.08 days, against Neilsen's "every
+        ∼11.5 days" (§5), three flares in 34.7 days, whose 90% Poisson interval is one in 4.5–42.5
+        days;
+      - a mean duration of 2,750.0 s and a duty cycle of 3.501%, against §4's 3.5% (the ruling's
+        2,752 s is the same law, rounded differently);
+      - energies from 4.0 × 10³⁶ to 1.574 × 10³⁹ erg, which hold Table 1's L × T, from
+        1.15 × 10³⁷ (ObsID 13853) to 1.05 × 10³⁹ erg (ObsID 14392);
+      - above 10³⁸ erg, a share of 0.2530, 0.278 a day (the ruling's 0.254 and 0.279), against
+        Ponti et al.'s (2015, MNRAS 454, 1525) bright-or-very-bright 0.26 ± 0.05 a day in 2012
+        (Table 3) and 0.27 ± 0.01 over 1999–2014 (§5.4);
+      - a least-squares index of dN/dE over 10³⁷–10³⁹ erg of −1.53 on a log-uniform grid (the
+        ruling's −1.52; Table 2's fluence fit: −1.5 ± 0.2).
+
+      The science-checker's closed forms reproduce every figure independently; the small
+      differences from the ruling's are rounding and fitting method, not the law.
+
+  - _The light curve_ (lean, the brief's §2.2 item 2). Neilsen §3's flare shape, a Gaussian in
+    time whose start and stop are its 2σ limits. It is centred at the onset plus T ÷ 2 with
+    σ = T ÷ 4; its value at ±2σ, e^−2 of its amplitude A, is subtracted, so that it is continuous
+    and 0 outside the flare; and it is scaled so that ∫ ΔL dt = E. Its integral is 1.851235 σA and
+    its peak A (1 − e^−2), so the peak is 1.868298 times the mean luminosity (`peak_over_mean`) and
+    the bound is 3.596474 × 10²⁸ W, which `MAX_PEAK_LUMINOSITY_WATTS` holds rounded up at the fifth
+    figure, 3.5965 × 10²⁸ W (3.5965 × 10³⁵ erg/s). It is ΔL in the 2–10 keV band, in watts, not a
+    factor: the black hole has no quiescent luminosity until T30.b.
+  - _The duration's cap._ `MAX_DURATION` is the law's top, 8,175 s. A `const` assertion holds it
+    under the day's look-back, and `flare_of` asserts each flare's duration under it in debug
+    builds, so `flares_active_at` finds every flare still running.
+  - _The disruption law_ (ruling item 1; a technical correction). Stone and Metzger's (2016, MNRAS
+    455, 859, §4.1) equation 27 as printed, Ṅ = 2.9 × 10⁻⁵ (M• ÷ 10⁸ M☉)^−0.404 per Julian year,
+    the whole sample's fit ("our fiducial model uses a power law fit to the entire galaxy sample (B
+    = −0.404)"), at the black hole's mass, constant in time, for any finite positive mass and with
+    no clamp. The plan's 10⁻⁴ × (M ÷ 4.3 × 10⁶ M☉)^−0.4 is this equation rounded at the Milky Way's
+    mass, and is withdrawn.
+    - _Technical correction._ The ±H window of the plan's test moves from 0.06–0.2 to 0.06–0.21,
+      since its top was the rounding; its bottom, 0.06, is Yao et al.'s observed rate over 2,000
+      years and stays. The horizon's "about 26" becomes "about 27 (27.31)".
+    - At the fixture's 4.300220 × 10⁶ M☉ the equation gives 1.033874 × 10⁻⁴ a year: 0.20677 in ±H,
+      27.309 in the source horizon's 264,144 years and 0.10587 a bin. Per bin it is 0.427 at 1.5
+      dex below the Milky Way's mass, 0.484 at 10⁵ M☉ and 0.0187 at 10^8.5 M☉, under 64
+      throughout. The 1.5 dex either side is the ±4σ of the M–σ relation's 0.38 dex scatter that
+      the draws reach in practice, as `centre`'s `no_drawn_centre_fails_its_inversion` takes it;
+      the builder itself validates the scatter to ±9σ, and a draw reaches 8.58σ at most, about
+      4 × 10³ M☉ at the Milky Way's dispersion, 1.8 a bin.
+    - _Masses below 0.56 M☉ are refused_ (a decision of this build, from the review). There a
+      bin's mean would exceed `PoissonBins::MAX_MEAN_PER_BIN`, which the bins cannot list, so
+      `TidalDisruptionModel::new` returns `RateAboveBinLimit` rather than clamp the rate. No galaxy
+      the builder allows has such a black hole, and the rate at every mass accepted is equation 27
+      unclamped, as ruled.
+    - The module doc states that an event is the disruption of a star that entered the loss cone,
+      at the equation's rate of loss-cone entries (in a steady state the two rates are equal), its
+      time the disruption, which T30.b makes the victim's pericentre passage; that the equation is
+      extrapolated below SM16's sample, about 10⁶ M☉ (§6), and has no support below Yao et al.'s
+      10^5.3 M☉; and that above about 10^7.5 M☉ some would be swallowed whole, which T30.b decides
+      per victim (SM16's rule near equation 33, §4.2; the brief's ruling item 1).
+    - _Sanity checks._ Van Velzen (2018, ApJ 852, 72) finds ≈ 1 × 10⁻⁴ per galaxy per year
+      (abstract; §3), the equation's value at the fixture's mass, and slopes from +0.3 to −0.5
+      "broadly consistent" (§4.3), a range that holds −0.404. Yao et al. (2023, arXiv:2303.06523v2)
+      find 3.2 (+0.8 −0.6) × 10⁻⁵ at a host of 10¹⁰ M☉ (abstract; §6.5), where their equation 5
+      gives a black hole of 2.66 × 10⁶ M☉ and equation 27 gives 1.26 × 10⁻⁴, 3.9 times more: the
+      tension of SM16 §5.1 and Yao et al. §6.6, a deferred finding.
+  - _The disruption bins and look-back_ (lean, the brief's §2.2 item 5). Bins of 1,024 Julian
+    years, 32,314,982,400 s, so that the source horizon is bins −257 to 0, 258 bins; a look-back of
+    0, since a disruption is an instant. T30.b sets its own look-back for the tails, which moves no
+    event.
+  - _The word layout._ Flares: word 0 the mean luminosity, word 1 the duration. Disruptions: no
+    word is drawn; the words of a disruption's event stream from word 0 are T30.b's, for its
+    victim, so that T30.b moves no time and no ID.
+  - _Sources_, each read in full text for this task: Neilsen et al. 2013 (ApJ 774, 42; §3, §4,
+    §4.2, §4.3, §5, Tables 1 and 2); Stone and Metzger 2016 (MNRAS 455, 859; §2.2, §4.1 and
+    equation 27, §4.2 near equation 33, §5.1, §6); van Velzen 2018 (ApJ 852, 72; abstract, §3,
+    §4.3 and equation 10, §5.4); Yao et al. 2023 (arXiv:2303.06523v2; abstract, equation 5, §6.4,
+    §6.5, §6.6); Ponti et al. 2015 (MNRAS 454, 1525; §1, §2.4, Table 3, §5.4); GRAVITY
+    Collaboration 2020 (A&A 638, A2; §4, Table 2); Witzel et al. 2018 (ApJ 863, 15; abstract);
+    Witzel et al. 2021 (ApJ 917, 73; abstract).
+  - _Tests_, 26 in the module, none marked slow.
+    - Flares (`flares::tests`, 12): the year's 401.775 to 10⁻¹² relative; the bound across the
+      source horizon; the law's figures above; the marks' ranges, the cap and the two
+      Kolmogorov–Smirnov tests over a year; the light curve (0 outside, continuous to 10⁻⁶ of the
+      peak over a microsecond, peak at the middle, the trapezoid integral the energy to 10⁻⁵);
+      partitions in any order and on threads (compiled out on wasm32-wasip1); regeneration and
+      `None` for the other tag, another subject and numbers beyond the counts; `flares_active_at`
+      against the listing at 20,000 instants; no history at +900 years; the same seed twice.
+    - Disruptions (`disruptions::tests`, 11): 258 bins; the fixture's 0.20677 and 27.309, each
+      equation 27 times the span to 10⁻¹² relative, and 0.06 ≤ 0.20677 ≤ 0.21; the bound over 71
+      masses from 10⁵ to 10^8.5 M☉; the two refusals; partitions in any order and on threads;
+      regeneration and `None` for foreign IDs; no history at +900 years; the same seed twice.
+    - `events::tests` (3): the subject, `of(&Galaxy)`, and the golden.
+    - _The rate integrals._ Flares over one Julian year from the epoch, summed over 10³ seeds
+      (family `0x0930_a000_0000_0000`): expected 401,775.000, counted 402,103, interval
+      (399,691, 403,862) at α = 10⁻³. Disruptions over the source horizon, summed over 10⁴ seeds
+      each: at the fixture's mass expected 273,091.72, counted 273,537, interval (271,374, 274,813);
+      at 10⁵ M☉ expected 1,248,069.44, counted 1,247,877, interval (1,244,395, 1,251,747); at
+      10^8.5 M☉ expected 48,110.38, counted 48,058, interval (47,390, 48,834). They take 0.27 s and
+      1.09 s on the slow-test profile and 1.4 s together in a debug build, so neither is marked
+      slow: about 0.27 ms for a year of flares at one seed and 36 µs for a source horizon of
+      disruptions at one seed.
+    - `cargo test -p hyperion-sim features::centre::events`: 26 passed, in 2.2 s of tests (67 s
+      with the build); its five doctests pass under `--doc`. The registry run,
+      `cargo test -p hyperion-sim -- events event_tags domain_tags_are_pinned`: 93 passed and 3
+      ignored (other tasks' slow tests), 1 passed, and 15 doctests passed. Measured on the shared 8-thread laptop at a 1-minute load of
+      3–8, with another lane's tests running beside them at times.
+- **Deferred findings (2026-10-13 rule) (P09.T30.a).** Recorded and deferred: each leaves the
+  algorithm and every contract as they are.
+  - _One flare law for every black hole._ Neilsen et al. measured Sgr A* alone; the rate, the laws
+    and the template are the same at every black-hole mass. A dependence on the mass or the
+    accretion rate needs a source that this task did not read.
+  - _The near-infrared and submillimetre counterparts._ Every X-ray flare has a near-infrared one,
+    and near-infrared flares are about four times as frequent (Ponti et al. 2015, §1; GRAVITY
+    Collaboration 2020, §4: "X-ray flares and NIR flares are coupled. The converse is not true").
+    The near infrared is a flux distribution: a log-normal with a power-law tail above about 2 mJy
+    (GRAVITY 2020, §§4–5; median 1.1 ± 0.3 mJy), the log-normal flux densities of a red-noise
+    process with τ_b = 243 (+82 −57) minutes (Witzel et al. 2018). The X-ray process is the
+    low-pass-filtered near-infrared one, and the submillimetre lags the near infrared by about 30
+    minutes (Witzel et al. 2021). Not modelled.
+  - _The bright-flare rate's changes._ Ponti et al.'s (2015, §5.4) bright-flare rate rises from
+    0.27 ± 0.01 a day to 2.52 ± 0.98 after 2014 August 31, and GRAVITY (2020, §4) report six bright
+    near-infrared flares in 2019. The rate here is constant in time.
+  - _The efficiency-corrected integral._ Neilsen's Table 2 fit to the efficiency-corrected
+    luminosity distribution (N = 50 ± 20, Γ = −1.9) integrates to about 1.5 a day on
+    [10³⁴, 1.925 × 10³⁵] erg/s over the campaign's 34.5 days (104.4 ks of flaring at a 3.5% duty
+    cycle, §4), against the 1.1 built (ruling item 2); without the top it is 1.6. Its errors
+    involve "extrapolating outside the domain of the data" (Table 2's note), and Ponti et al.'s
+    bright-flare rate matches 1.1 a day under this law (0.278) and not 1.5 (0.379).
+  - _Flare substructure._ The brightest flare peaked near 5 × 10³⁵ erg/s with four subflares
+    (Neilsen §5, Table 1), above the single template's bound of 3.5965 × 10³⁵ erg/s. Neilsen fit
+    each subflare with σ of 100–1,600 s; a flare here longer than 6,400 s has σ up to 2,044 s and
+    stands for several subflares in one Gaussian.
+  - _Faint and short flares._ Flares below 10³⁴ erg/s and shorter than the 400 s selection limit
+    (Neilsen §3, §5) are not modelled.
+  - _Equation 27 below 10⁶ M☉_ is an extrapolation (SM16 §6), in the direction that Yao et al.'s
+    TDE mass function, ∝ M_BH^−0.25 down to 10^5.3 M☉ (§6.4), supports; below 10^5.3 M☉, which a
+    draw reaches only beyond about 4σ of the M–σ scatter, nothing supports it.
+  - _The Hills-mass cut._ SM16 (near equation 33, §4.2: "Eq. 27 if M• < M_Hills(M★), but is 0
+    otherwise"), van Velzen 2018 (§3) and Yao et al. 2023 (§6.4) cut the rate where stars are
+    swallowed whole, from about 10^7.5 M☉. A 1 M☉, 1 R☉ star's Hills mass is 1.14 × 10⁸ M☉ by SM16
+    §2.2's definition, below 1.36 × 10⁸ M☉, 1.5 dex (±4σ) above the Milky Way's black hole, and
+    the builder allows more. Every star entering the loss cone is an event here; T30.b gives each victim its outcome, disrupted or swallowed whole, so that no
+    T30.a ID or time moves.
+  - _SM16's tension with observed rates._ Their few × 10⁻⁴ per galaxy per year exceeds the
+    observed rates "by at least an order of magnitude" (§5.1); Yao et al.'s optical rate at the
+    Milky Way's mass is 3.9 times below equation 27 (§6.6).
+  - _A rate of this centre's own._ The rate could come from this centre's loss cone and
+    distribution function (P09.T24.b's `DistributionFunction`, P09.T25's `LossCone`) instead of
+    SM16's fit to other galaxies' Nuker profiles, which ignore nuclear-cluster light (SM16 §6).
+    This centre's inner slope sits at their boundary between core and intermediate galaxies.
+  - _A shared power-law sampler._ `flares::power_law_quantile` is this module's own, beside
+    P06.T28.a's private inverse transform; one helper in `crate::events` would change T28.a's file.
+    Lean: share it when a third kind needs one.

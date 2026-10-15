@@ -15,9 +15,13 @@
 //! [`members`] places the members on the twelve-level grid under the centre's member IDs
 //! (P09.T27), and plan 03's `resolve` dispatches a centre ID there; nothing else reads the centre
 //! until the Kepler regime (P09.T28.b) and its range query (P09.T29).
+//!
+//! [`events`] holds the black hole's own events, its X-ray flares and its tidal disruptions, on
+//! its own ID as their subject (P09.T30.a).
 
 pub mod classes;
 pub mod df;
+pub mod events;
 pub mod marks;
 pub mod members;
 pub mod profile;
